@@ -1358,7 +1358,12 @@ dropped.
 | time in requests over 2 ms (sum per run) | 4.79-4.80 s | 4.28 s |
 
 All runs matched the fingerprint. Each quiet run started below 20-25 % busy; runs taken while other lanes built (other CPU 42-87 %)
-are not in the table. The coordinator's quiet-window run decides the exit (every quiet run under 16.7 ms).
+are not in the table.
+
+**Exit run (coordinator's quiet window, 2026-11-14, dev `2690ab92`).** No other build or test was running, and the machine averaged
+about 5 % busy. Tick p99 in ms, with other CPU % in brackets: 14.98 (6), 15.07 (6), 14.81 (3), 14.71 (2), 14.95 (5), 14.75 (3).
+Every run is under 16.7 ms and every fingerprint matches; sp2 is closed. The worst tick is still the 182-196 ms plan load, which
+belongs to opt3f t01 and not to this exit.
 
 ## Services graph on the 4x land stress scene (SIMP sp5, 2026-11-14)
 
