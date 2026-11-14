@@ -35,6 +35,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--top", type=int, default=25)
     ap.add_argument("--json")
+    ap.add_argument("--why", help="header path suffix: for each TU reaching it, count the first-hop include that leads there")
     a = ap.parse_args()
     srcs, hdrs, inc_dirs = collect()
     by_rel = {}
@@ -106,6 +107,23 @@ def main():
     print(f"\nTop {a.top} largest .cpp files:")
     for b, n, sz, s in sorted(tu, key=lambda t: -t[2])[: a.top]:
         print(f"  {sz/1024:6.0f} KB  {rel(s)}")
+    if a.why:
+        tgt = next(h for h in hdrs if h.replace(chr(92), "/").endswith(a.why))
+        hops = defaultdict(int)
+        direct_cpp = 0
+        for s_ in srcs:
+            ph, _ = closure(s_)
+            if tgt not in ph:
+                continue
+            first = [r for k, n in direct(s_) for r in [resolve(s_, k, n)] if r and (r == tgt or tgt in closure(r)[0])]
+            if tgt in first:
+                direct_cpp += 1
+            else:
+                for r in first:
+                    hops[r] += 1
+        print(f"TUs reaching {a.why}: {direct_cpp} include it directly; first hops of the rest:")
+        for h, n in sorted(hops.items(), key=lambda x: -x[1])[:25]:
+            print(f"  {n:4d}  {rel(h)}")
     if a.json:
         json.dump({"tus": len(srcs), "headers": {rel(h): n for h, n in hcount.items()},
                    "std": dict(scount), "total_header_bytes": tot_bytes,
