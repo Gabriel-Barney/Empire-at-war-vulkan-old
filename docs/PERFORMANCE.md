@@ -1342,6 +1342,24 @@ All six matched the fingerprint. The median p99 is 16.5 ms; 3 of 6 runs are unde
 The spread does not follow the load, so it comes from the run itself (which ticks carry the multi-try path requests). The p99 fell
 from 24-28 ms (sp1) to 15.9-18.0 ms. The worst tick is still the 187-207 ms plan load.
 
+**Cheaper multi-try requests (sp2 t04, 2026-11-14).** Gabriel kept sp2 open to cut the spikes. A trace of one run (requests over
+2 ms) found 723 slow requests: 50 succeed at try 2, 102 at try 3, 301 at try 4, 133 at try 5, 1 at try 6, and 136 fail all six
+and take the fallback route. The fallback requests are the costliest: their tries 4-6 have budgets of 17k / 29k / 50k expansions.
+The search's cost multiplier (`motion_factor`: an occupancy segment query, or the final arc's step loop) is now evaluated only for a
+successor that can still be pushed. The budget test and a closed state with a non-re-expanding op drop a successor whatever its
+cost, so those skip the query. The decisions and their order are unchanged, so every path and golden is too. A second idea (query
+only the track pieces whose time span overlaps the query) made no difference here, because the tracks have few pieces, and was
+dropped.
+
+| `nebula_battle`, MSVC Release, default workers | before (sp2) | after (sp2 t04) |
+|---|---|---|
+| tick p99 ms, quiet runs (other CPU 1-6 %) | 15.8 / 15.9 | 14.4 / 14.6 / 14.4 / 14.6 / 14.5 / 14.4 / 14.6 |
+| `tac.movement` mean ms (profiled runs) | 2.65-2.66 | 2.41 |
+| time in requests over 2 ms (sum per run) | 4.79-4.80 s | 4.28 s |
+
+All runs matched the fingerprint. Each quiet run started below 20-25 % busy; runs taken while other lanes built (other CPU 42-87 %)
+are not in the table. The coordinator's quiet-window run decides the exit (every quiet run under 16.7 ms).
+
 ## Services graph on the 4x land stress scene (SIMP sp5, 2026-11-14)
 
 Step P5 of [`SIM_PARALLEL_DESIGN.md`](SIM_PARALLEL_DESIGN.md) (section 12). Scene `foc-land-army4` (~700 live units, no tactical AI;
