@@ -176,10 +176,11 @@ MovementSystem::DeployResult MovementSystem::deploy(ObjectId id, bool on, uint32
         deploy_begin_clip(u, kAnimDeploy, frame);
         return DeployResult::Deploying;
     }
-    // Deploy(false): 0x18 / 0x19 / the walking-deployed flag -> 0x1A ([port] the slot +0x35b blocker 0x42e3b0 / 0x42e3d0 is
-    // not modelled). The Undeploy clip starts in the per-frame pass (turret wait). s78n t26.1 (MOVEMENT §3.2.1 item 3): only
+    // Deploy(false): 0x18 / 0x19 / the walking-deployed flag -> 0x1A; first the pad blocker 0x42e3b0 / 0x42e3d0 (b0173: an
+    // occupied build pad, e.g. a Mobile Defense Unit with a turret, does not undeploy). The Undeploy clip starts in the per-frame pass (turret wait). s78n t26.1 (MOVEMENT §3.2.1 item 3): only
     // the state is written - no stop, no speed or path change; a unit walking deployed freezes where it is (the walk does
     // not run in 0x1A) with its speed kept.
+    if (undeploy_block_ && undeploy_block_(id)) return DeployResult::Ignored;
     if (u.deploy != LocoState::WalkDeploying && u.deploy != LocoState::WalkDeployed && !u.walk_deployed) return DeployResult::Ignored;
     deploy_set(u, LocoState::WalkUndeploying, false);
     return DeployResult::Undeploying;

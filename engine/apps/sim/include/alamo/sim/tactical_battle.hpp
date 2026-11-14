@@ -2182,7 +2182,8 @@ private:
     // Is_Active / kUnitDeploying / kUnitDeployTransition (AbilitySystem::set_deploy_state), and each change with `finished`
     // (a deploy / undeploy clip end, a blocked reverse) is "unit ability finished" (signal 0x29) in ability_finished_.
     // Called after the movement tick (clip ends, before the combat flags are read) and after oi_events (requests).
-    void oi_deploy_sync();
+    void oi_deploy_sync(TacticalMode& mode);
+    void oi_deployed_behaviors(TacticalMode& mode, objects::ObjectId id, bool deployed);  // b0173: DeployedBehavior add / remove
     objects::ObjectId oi_spawn_unit(TacticalMode& mode, int32_t type, Vec3 pos, Vec3 facing, int32_t owner);
     // q6 t12: script-spawned types (and, for a company, its members and TEAM types) join the battle tables mid-battle:
     // appended to types_used_ and built onto the live tables (tables_extend on the kept setup build), then the ability /

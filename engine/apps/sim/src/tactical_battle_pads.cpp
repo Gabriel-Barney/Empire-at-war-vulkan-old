@@ -206,6 +206,13 @@ void TacticalBattle::pads_tick(TacticalMode& mode) {
         PadState& s = pads_[i];
         const objects::ObjectHandle ph = st.find(s.pad);
         const bool pad_alive = st.alive(ph);
+        // b0173 (B0173_DEPLOYED_BEHAVIOR_RE Q3b, Die 0x39bdb0): the pad's finished object, else its UC object, dies with
+        // the pad (a Mobile Defense Unit killed with a turret on it).
+        if (!pad_alive && combat_) {
+            const objects::ObjectId child = s.built != objects::kNoObjectId ? s.built : s.uc;
+            if (child != objects::kNoObjectId && combat_->has_unit(child) && combat_->alive(child))
+                combat_->kill_unit(child, tactical::combat::kNoObject, tactical::combat::kKindNormal, frame_);
+        }
         auto child_gone = [&](bool was_built, objects::TypeIndex child_type) {  // 0x42e6d0
             if (was_built) s.locked = false;
             const objects::TypeIndex pt = pad_alive ? st.type(ph) : objects::kNone;

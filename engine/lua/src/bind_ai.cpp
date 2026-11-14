@@ -799,6 +799,18 @@ void set_nil_global(LuaVm& vm, std::string_view name) {
     set_global(L, name);
 }
 
+// b0173 (docs/re/B0173_RE_ANSWERS.md Q1, 0x5f7090 -> 0x5751d0): one wrapper per VM (key 0 of the game-object row of the
+// wrapper cache, which push_object does not use). Handle 0 / id -1: object_alive is false for it on every store.
+void set_objectless_global(LuaVm& vm, std::string_view name) {
+    lua_State* L = vm.state();
+    detail::Ud ud;
+    ud.cls = detail::cls_game_object();
+    ud.value = 0;
+    ud.id = -1;
+    detail::push_cached_userdata(L, ud, 0.0);
+    set_global(L, name);
+}
+
 bool dispatch_task_force_event(LuaVm& vm, int32_t tf, AiTaskForceKind kind, std::string_view tf_name,
                                std::string_view event, const std::vector<AiEventArg>& args, bool queued,
                                std::string* err) {

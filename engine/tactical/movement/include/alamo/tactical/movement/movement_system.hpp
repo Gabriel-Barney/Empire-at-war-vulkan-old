@@ -585,6 +585,11 @@ public:
     // Clip data for the deploy clips (frame count and fps of anim 0x19 / 0x1A on the unit's model); const, deterministic.
     using DeployClipFn = std::function<bool(ObjectId id, int32_t anim, uint32_t& frame_count, float& fps)>;
     void set_deploy_clip_fn(DeployClipFn fn) { deploy_clip_ = std::move(fn); }
+    // b0173 (B0173_DEPLOYED_BEHAVIOR_RE Q3a, Walk Deploy(false) 0x61d300): true = the unit is a build pad holding an
+    // under-construction or finished object (0x42e3d0 / 0x42e3b0), so Deploy(false) returns with nothing changed, by every
+    // route (DEPLOY off, the cap test 0x3ac100, a new path). Const, deterministic; unset = never blocked.
+    using UndeployBlockFn = std::function<bool(ObjectId id)>;
+    void set_undeploy_block_fn(UndeployBlockFn fn) { undeploy_block_ = std::move(fn); }
     // ---- S8 t24 (MOVEMENT §3.2 "Turret recentre around deploy"): the TURRET of a Deploys unit (UnitDesc::turret) ----
     // Per frame after the deploy pass (serial, ascending id; TURRET service 0x632270 + motion 0x631210): while aiming the
     // target angles are the aim point's; while not aiming and off the rest angle R the first frame holds (target :=
@@ -1813,6 +1818,7 @@ private:
     FlyingHooks fly_hooks_;  // FIGHTER_FLYING §6
     // S8 t11
     DeployClipFn deploy_clip_;
+    UndeployBlockFn undeploy_block_;
     TurretRestFn turret_rest_;
     TurretAimFn turret_aim_;
     std::vector<DeployEvent> devents_;  // since the last take_deploy_events()

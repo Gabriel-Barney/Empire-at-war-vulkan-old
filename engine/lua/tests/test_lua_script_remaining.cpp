@@ -914,6 +914,13 @@ static void test_tactical_perception(const Db& db) {
           last_message_has(vm, "Parameter 1 is not a valid destination for TaskForce"));
     const size_t said = vm.messages().size();
     CHECK(run(vm, "m3 = TF.Move_To(P)") == "" && gnil(vm, "m3") && vm.messages().size() == said + 1);
+    // b0173 (B0173_RE_ANSWERS Q1 / Q2 row 6): the `Target` of a region goal is a GameObjectWrapper without an object: a
+    // userdata (truthy), and Move_To answers nil with no message (BuildMDUItem's Move_To(Target, threat)).
+    set_objectless_global(vm, "Target");
+    const size_t quiet = vm.messages().size();
+    CHECK(run(vm, "m4 = TF.Move_To(Target, 5); t4 = type(Target); same4 = Target == Target") == "" && gnil(vm, "m4") &&
+          vm.messages().size() == quiet);
+    CHECK(run(vm, "ok4 = (t4 == 'userdata') and same4") == "" && run(vm, "assert(ok4)") == "");
     // S7 t21 (§7.3.1): Prepare_Ambush argument checks (land: 4 or 5 arguments), then the host's status / error codes.
     CHECK(run(vm, "a1 = TF.Prepare_Ambush(AITarget, 'Left', 100)") == "" && gnil(vm, "a1") &&
           last_message_has(vm, "Invalid number of parameters"));

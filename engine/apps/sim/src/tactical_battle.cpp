@@ -480,6 +480,8 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
         if (!c || !c->clip || c->clip->fps <= 0.0f) return 0u;
         return static_cast<uint32_t>(std::ceil(static_cast<double>(c->clip->frame_count) * 30.0 / static_cast<double>(c->clip->fps)));
     });
+    // b0173: a deployed build pad (Mobile Defense Unit) with something on it does not undeploy.
+    movement_->set_undeploy_block_fn([this](objects::ObjectId id) { return pad_occupied(id); });
     // S8 t11 (MOVEMENT §3.2): the Walk deploy clips (anim 0x19 / 0x1A, variant 0 [port]: retail draws a synced variant).
     movement_->set_deploy_clip_fn([this](objects::ObjectId id, int32_t type, uint32_t& frames, float& fps) {
         const anim::AnimWorld* w = hooks_ ? hooks_->world() : nullptr;

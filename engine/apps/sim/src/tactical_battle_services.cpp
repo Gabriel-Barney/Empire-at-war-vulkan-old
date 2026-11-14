@@ -197,7 +197,7 @@ void TacticalBattle::build_service_graph() {
     g.add("turn_clips", kAll, kAll, [this] { play_turn_clip_events(*tick_.rng, tick_.global_frame); });
     g.add("s4_exit_arrivals", kAll, kAll, [this] { s4_exit_arrivals(); });  // s78n t26.1: garrison hosts' +0xf8 hook
     // S8 t11: deploy clip ends (Is_Active, deploy flags, signal 0x29) before the combat tick
-    g.add("deploy_sync", kAll, kAll, [this] { oi_deploy_sync(); });
+    g.add("deploy_sync", kAll, kAll, [this] { oi_deploy_sync(*tick_.mode); });
     lap("tac.movement");
 
     // ---- motion post ------------------------------------------------------------------------------------------------

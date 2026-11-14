@@ -6,10 +6,14 @@
 // consuming an object id [port: the original creates them inside the object update].
 #include <algorithm>
 #include <cmath>
+#include <span>
+#include <string_view>
 #include <vector>
 
 #include "alamo/core/dmath.hpp"
 #include "alamo/core/sim_crc.hpp"
+#include "alamo/data/values.hpp"
+#include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/sim/tactical_battle.hpp"
 #include "alamo/tactical/movement/special_locomotors.hpp"
@@ -785,9 +789,41 @@ void TacticalBattle::oi_respawn_due(TacticalMode& mode) {
     oi_respawns_.resize(w);
 }
 
-void TacticalBattle::oi_deploy_sync() {
+// b0173 (B0173_DEPLOYED_BEHAVIOR_RE Q1 / Q2): the type's DeployedBehavior names, in list order. Deployed (0x39fec0, the
+// frame the Deploy clip ends, with signal 0x29): each one the object does not have yet is added. Undeploying (0x3a0580):
+// each one that is not in the type's generic <Behavior> list is removed. [port] retail removes in the frame the Undeploy
+// clip starts (after the turret wait); the port removes when state 0x1A is entered.
+void TacticalBattle::oi_deployed_behaviors(TacticalMode& mode, objects::ObjectId id, bool deployed) {
+    objects::ObjectStore& st = mode.primary();
+    const objects::ObjectHandle h = st.find(id);
+    if (!st.alive(h)) return;
+    const objects::GameObjectTypes& types = catalog_->types();
+    const objects::TypeIndex t = st.type(h);
+    if (t >= types.size()) return;
+    for (const std::string_view raw : types.get_list(t, "DeployedBehavior")) {
+        const objects::BehaviorTypeId b = objects::behavior_type_id(data::trim(raw));
+        if (b == objects::kNoBehavior) continue;
+        if (deployed) {
+            (void)st.add_behavior(h, b);  // false when already present: skipped
+            continue;
+        }
+        bool generic = false;
+        for (const std::string_view g : types.get_list(t, "Behavior")) generic = generic || objects::behavior_type_id(data::trim(g)) == b;
+        if (generic) continue;
+        const std::span<const objects::BehaviorTypeId> list = st.behaviors(h);
+        for (size_t k = list.size(); k-- > 0;)
+            if (list[k] == b) {
+                (void)st.remove_behavior(h, static_cast<uint32_t>(k));
+                break;
+            }
+    }
+}
+
+void TacticalBattle::oi_deploy_sync(TacticalMode& mode) {
     if (!movement_) return;
     for (const mv::MovementSystem::DeployEvent& e : movement_->take_deploy_events()) {
+        if (e.to == mv::LocoState::WalkDeployed) oi_deployed_behaviors(mode, e.id, true);
+        else if (e.to == mv::LocoState::WalkUndeploying) oi_deployed_behaviors(mode, e.id, false);
         if (abilities_) abilities_->set_deploy_state(e.id, static_cast<uint8_t>(e.to));
         // AI_TACTICAL Â§7.3.3 item 3: Walk vf6 0x61e930 raises 0x29 at the end of the Deploy / Undeploy clip, Deploy(true)
         // 0x61d300 at once on a blocked reverse. This is the deploy's "unit ability finished".

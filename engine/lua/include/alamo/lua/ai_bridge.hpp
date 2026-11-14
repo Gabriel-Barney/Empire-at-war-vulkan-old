@@ -213,6 +213,10 @@ void set_player_global(LuaVm& vm, std::string_view name, int32_t player);   // "
 void set_number_global(LuaVm& vm, std::string_view name, double value);
 void set_bool_global(LuaVm& vm, std::string_view name, bool value);
 void set_nil_global(LuaVm& vm, std::string_view name);
+// A GameObjectWrapper that holds no object (a userdata, not nil; TestValid false; a task force Move_To to it answers nil
+// with no message): the plan global `Target` of a goal whose AI target has no live game object, or of a goal without a
+// target (docs/re/B0173_RE_ANSWERS.md Q1).
+void set_objectless_global(LuaVm& vm, std::string_view name);
 
 // Task-force event dispatch (AI_GALACTIC.md §1.9.4 "Events"): the handler <tf_name>_<event>, else
 // Default_<event>; arguments [task force, args...]. queued: appended to the VM's GetEvent queue (run by

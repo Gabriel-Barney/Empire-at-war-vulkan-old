@@ -684,7 +684,7 @@ void TacticalBattle::consume_events(TacticalMode& mode, SimRng& rng) {
         // (S8 t11), not the AbilitySystem Deployed event, which fires at the request.
     }
     oi_events(mode);  // OI abilities: ability moves / stops / owner changes, ability spawns, death survivors
-    oi_deploy_sync();  // S8 t11 / t12: this pass's deploy requests and jetpack swaps
+    oi_deploy_sync(mode);  // S8 t11 / t12: this pass's deploy requests and jetpack swaps
     abilities_->clear_events();
 }
 

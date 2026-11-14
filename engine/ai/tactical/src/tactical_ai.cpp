@@ -2214,10 +2214,13 @@ int32_t TacticalAiWorld::Impl::instantiate(PlayerAi& p, Goal& g) {
             obj = store.find(s->t.object_id);
             if (const PerceptionObject* o = object(s->t.object_id)) pi.target_owner = o->owner;
         }
-        vm->set_object_global("Target", store.alive(obj) ? obj : ObjectHandle{});
+        // b0173 (B0173_RE_ANSWERS Q1 [H]): `Target` is always a GameObjectWrapper, without an object for a region target
+        // (Tactical_Location goals, e.g. BuildMDUItem's Move_To(Target, ...): nil, no script error) or a dead unit.
+        if (store.alive(obj)) vm->set_object_global("Target", obj);
+        else lua::set_objectless_global(*vm, "Target");
     } else {
         lua::set_nil_global(*vm, "AITarget");
-        lua::set_nil_global(*vm, "Target");
+        lua::set_objectless_global(*vm, "Target");
     }
     lua::set_budget_global(*vm, pi.id);
     lua::set_player_global(*vm, "PlayerObject", p.player);
