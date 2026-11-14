@@ -476,9 +476,19 @@ struct Search {
         return (arc_len + dg * k.special_aligned_operator_bonus) / tp.speed;
     }
 
-    void push(const SpaceScratch::Node& parent, int32_t parent_index, V2 pos, float heading, float dt, float dist, float mult,
+    // sp2 t04: `mult_of()` gives the cost multiplier (<= 0: rejected); it is called only after the budget and closed-state
+    // tests, because a successor those reject is dropped whatever its cost (motion_factor is a pure occupancy query, so
+    // skipping it changes nothing but time).
+    template <class M>
+    void push(const SpaceScratch::Node& parent, int32_t parent_index, V2 pos, float heading, float dt, float dist, M&& mult_of,
               uint8_t op, float node_speed, const SpaceScratch::Node* arc = nullptr) {
-        if (mult <= 0.0f || pushes >= tp.budget) return;
+        if (pushes >= tp.budget) return;
+        const float wh = wrap_deg(heading);
+        const uint64_t key = vkey(cell(pos.x, req.start.x), cell(pos.y, req.start.y), bucket(wh));
+        SpaceScratch::Visit* it = sc.visited.find(key);
+        if (it && it->closed && !reexpand_op(op)) return;
+        const float mult = mult_of();
+        if (mult <= 0.0f) return;
         SpaceScratch::Node n;
         if (arc) {
             n.arc_c = arc->arc_c;
@@ -486,17 +496,16 @@ struct Search {
             n.arc_sweep = arc->arc_sweep;
         }
         n.pos = pos;
-        n.heading = wrap_deg(heading);
+        n.heading = wh;
         n.time = parent.time + dt;
         n.g = parent.g + dt * mult;
         n.travelled = parent.travelled + dist;
         n.parent = parent_index;
         n.op = op;
         n.speed = node_speed;
-        const uint64_t key = vkey(cell(pos.x, req.start.x), cell(pos.y, req.start.y), bucket(n.heading));
-        if (SpaceScratch::Visit* it = sc.visited.find(key)) {
+        if (it) {
             if (it->closed) {
-                if (!reexpand_op(op) || n.g > it->g) return;
+                if (n.g > it->g) return;  // (a non-re-expanding op returned above)
                 it->closed = false;
                 it->g = n.g;
             } else {
@@ -534,7 +543,7 @@ struct Search {
         const float dist = std::fabs(v1 * v1 - v0 * v0) / (2.0f * a);
         const float dt = std::fabs(v1 - v0) / a;
         const V2 np = n.pos + dir_from_deg(n.heading) * dist;
-        push(n, ni, np, n.heading, dt, dist, motion_factor(n.pos, np, n.time, n.time + dt, op), op, v1);
+        push(n, ni, np, n.heading, dt, dist, [&] { return motion_factor(n.pos, np, n.time, n.time + dt, op); }, op, v1);
     }
 
     // Tangent point from p onto goal circle `side` such that p -> T joins the circle in its direction of travel.
@@ -569,7 +578,8 @@ struct Search {
         const float hd = heading_deg(t - n.pos);
         if (std::fabs(wrap_deg(hd - n.heading)) > step_deg) return;  // must already head along it [port]
         const float dt = L / v;
-        push(n, ni, t, hd, dt, L, k.special_aligned_operator_bonus * motion_factor(n.pos, t, n.time, n.time + dt, op), op, v);
+        push(n, ni, t, hd, dt, L, [&] { return k.special_aligned_operator_bonus * motion_factor(n.pos, t, n.time, n.time + dt, op); },
+             op, v);
     }
 
     // Ops 17 / 21 / 22: final arc along goal circle `side` from n.pos onto the goal pose, at the wait speed.
@@ -582,22 +592,25 @@ struct Search {
         const float L = rs * sweep * kDegToRad;
         const float dt = L / wait_speed;
         const uint32_t steps = std::max<uint32_t>(1u, static_cast<uint32_t>(std::ceil(sweep / step_deg)));
-        float f = 0.0f;
-        V2 prev = n.pos;
-        for (uint32_t j = 1; j <= steps; ++j) {
-            const V2 pj = j == steps ? req.goal : cc + dir_from_deg(a0 + o * sweep * static_cast<float>(j) / static_cast<float>(steps)) * rs;
-            const float t0 = n.time + dt * static_cast<float>(j - 1) / static_cast<float>(steps);
-            const float t1 = n.time + dt * static_cast<float>(j) / static_cast<float>(steps);
-            const float m = motion_factor_r(prev, pj, t0, t1, op, sagitta_s);
-            if (m <= 0.0f) return;
-            f = std::max(f, m);
-            prev = pj;
-        }
+        const auto mult = [&] {  // sp2 t04: evaluated by push() only when the state can take it
+            float f = 0.0f;
+            V2 prev = n.pos;
+            for (uint32_t j = 1; j <= steps; ++j) {
+                const V2 pj = j == steps ? req.goal : cc + dir_from_deg(a0 + o * sweep * static_cast<float>(j) / static_cast<float>(steps)) * rs;
+                const float t0 = n.time + dt * static_cast<float>(j - 1) / static_cast<float>(steps);
+                const float t1 = n.time + dt * static_cast<float>(j) / static_cast<float>(steps);
+                const float m = motion_factor_r(prev, pj, t0, t1, op, sagitta_s);
+                if (m <= 0.0f) return -1.0f;  // a blocked step: no push
+                f = std::max(f, m);
+                prev = pj;
+            }
+            return k.wait_operator_speed_coefficient * f;
+        };
         SpaceScratch::Node arc;
         arc.arc_c = cc;
         arc.arc_r = rs;
         arc.arc_sweep = o * sweep;
-        push(n, ni, req.goal, goal_facing, dt, L, k.wait_operator_speed_coefficient * f, op, wait_speed, &arc);
+        push(n, ni, req.goal, goal_facing, dt, L, mult, op, wait_speed, &arc);
     }
 
     bool on_circle(const SpaceScratch::Node& n, int side) const {
@@ -616,7 +629,7 @@ struct Search {
         {  // op 10: full step D
             const V2 np = n.pos + fwd * D;
             const float dt = D / speed;
-            push(n, ni, np, n.heading, dt, D, motion_factor(n.pos, np, n.time, n.time + dt, 10), 10, speed);
+            push(n, ni, np, n.heading, dt, D, [&] { return motion_factor(n.pos, np, n.time, n.time + dt, 10); }, 10, speed);
         }
         for (int side = 0; side < 2; ++side) tangent_op(n, ni, side, static_cast<uint8_t>(11 + side), speed);  // ops 11 / 12
         for (int side = 0; side < 2; ++side) {  // ops 13 / 14: arcs left / right one turn step
@@ -627,7 +640,7 @@ struct Search {
             const float dt = L / speed;
             const float m = 1.0f + 0.5f / std::max(1.0f, dg / 400.0f);
             const auto op = static_cast<uint8_t>(13 + side);
-            push(n, ni, np, nh, dt, L, m * motion_factor(n.pos, np, n.time, n.time + dt, op), op, speed);
+            push(n, ni, np, nh, dt, L, [&] { return m * motion_factor(n.pos, np, n.time, n.time + dt, op); }, op, speed);
         }
         if (wait_speed > 0.0f && n.speed <= wait_speed)  // ops 15 / 16: tangents at the wait speed
             for (int side = 0; side < 2; ++side) tangent_op(n, ni, side, static_cast<uint8_t>(15 + side), wait_speed);
@@ -641,8 +654,8 @@ struct Search {
             const float dt = k.wait_operator_base_frame_time;
             const float L = std::min(wait_speed * dt, dg);
             const V2 np = n.pos + fwd * L;
-            push(n, ni, np, n.heading, dt, L, k.wait_operator_cost_coefficient * motion_factor(n.pos, np, n.time, n.time + dt, 18),
-                 18, wait_speed);
+            push(n, ni, np, n.heading, dt, L,
+                 [&] { return k.wait_operator_cost_coefficient * motion_factor(n.pos, np, n.time, n.time + dt, 18); }, 18, wait_speed);
         }
         if (n.speed < speed) speed_change(n, ni, speed, 19);                                  // op 19
         if (n.speed > wait_speed && wait_speed > 0.0f) speed_change(n, ni, wait_speed, 20);  // op 20
@@ -653,7 +666,7 @@ struct Search {
                 if (!have_escape[side]) continue;
                 const float ang = std::fabs(wrap_deg(escape[side] - n.heading));
                 const float dt = req.turn_rate > 0.0f ? ang / req.turn_rate : 0.0f;
-                push(n, ni, n.pos, escape[side], dt, 0.0f, 1.0f, static_cast<uint8_t>(23 + side), 0.0f);
+                push(n, ni, n.pos, escape[side], dt, 0.0f, [] { return 1.0f; }, static_cast<uint8_t>(23 + side), 0.0f);
             }
         }
     }
@@ -668,9 +681,10 @@ struct Search {
             const float L = length(step);
             const float dt = L / tp.speed;
             const auto op = static_cast<uint8_t>(25 + c);
-            const float m = motion_factor(n.pos, np, n.time, n.time + dt, op);
-            if (m <= 0.0f) continue;
-            push(n, ni, np, n.heading, dt, L, tcost.factor(np) * m, op, tp.speed);
+            push(n, ni, np, n.heading, dt, L, [&] {
+                const float m = motion_factor(n.pos, np, n.time, n.time + dt, op);
+                return m <= 0.0f ? -1.0f : tcost.factor(np) * m;  // a rejected move is not pushed
+            }, op, tp.speed);
         }
     }
 
@@ -782,7 +796,7 @@ struct Search {
                 const float L = std::min(dg, D);
                 const V2 np = n.pos + fwd * L;
                 const float dt = L / speed;
-                push(n, ni, np, n.heading, dt, L, motion_factor(n.pos, np, n.time, n.time + dt, 0), 0, speed);
+                push(n, ni, np, n.heading, dt, L, [&] { return motion_factor(n.pos, np, n.time, n.time + dt, 0); }, 0, speed);
             }
             // op 1: arc toward the goal
             if (std::fabs(herr) > 0.01f && std::fabs(herr) <= step_deg) {
@@ -791,7 +805,7 @@ struct Search {
                 arc(n.pos, n.heading, herr, np, nh);
                 const float L = R * std::fabs(herr) * kDegToRad;
                 const float dt = L / speed;
-                push(n, ni, np, nh, dt, L, 0.99f * motion_factor(n.pos, np, n.time, n.time + dt, 1), 1, speed);
+                push(n, ni, np, nh, dt, L, [&] { return 0.99f * motion_factor(n.pos, np, n.time, n.time + dt, 1); }, 1, speed);
             }
             // ops 2 / 3: arcs left / right one turn step
             for (int side = 0; side < 2; ++side) {
@@ -801,14 +815,15 @@ struct Search {
                 const float L = R * step_deg * kDegToRad;
                 const float dt = L / speed;
                 const float m = 1.0f + 0.5f / std::max(1.0f, dg / 400.0f);
-                push(n, ni, np, nh, dt, L, m * motion_factor(n.pos, np, n.time, n.time + dt, static_cast<uint8_t>(2 + side)),
+                push(n, ni, np, nh, dt, L,
+                     [&] { return m * motion_factor(n.pos, np, n.time, n.time + dt, static_cast<uint8_t>(2 + side)); },
                      static_cast<uint8_t>(2 + side), speed);
             }
             // op 4: straight to the goal, after op 1
             if (n.op == 1 || (ni == 0 && std::fabs(herr) <= 0.01f)) {
                 const float dt = dg / speed;
                 push(n, ni, req.goal, heading_deg(req.goal - n.pos), dt, dg,
-                     0.98f * motion_factor(n.pos, req.goal, n.time, n.time + dt, 4), 4, speed);
+                     [&] { return 0.98f * motion_factor(n.pos, req.goal, n.time, n.time + dt, 4); }, 4, speed);
             }
             // OI tactical: ops 5 / 6 - speed up to max (after a wait / slow-down), slow down to the wait speed.
             if (n.speed < speed) speed_change(n, ni, speed, 5);
@@ -819,7 +834,7 @@ struct Search {
                 const float L = std::min(wait_speed * dt, dg);
                 const V2 np = n.pos + fwd * L;
                 push(n, ni, np, n.heading, dt, L,
-                     k.wait_operator_cost_coefficient * motion_factor(n.pos, np, n.time, n.time + dt, 7), 7, wait_speed);
+                     [&] { return k.wait_operator_cost_coefficient * motion_factor(n.pos, np, n.time, n.time + dt, 7); }, 7, wait_speed);
             }
             // ops 8 / 9: turn in place to the escape headings (first expansion only)
             if (first) {
@@ -827,7 +842,7 @@ struct Search {
                     if (!have_escape[side]) continue;
                     const float ang = std::fabs(wrap_deg(escape[side] - n.heading));
                     const float dt = req.turn_rate > 0.0f ? ang / req.turn_rate : 0.0f;
-                    push(n, ni, n.pos, escape[side], dt, 0.0f, 1.0f, static_cast<uint8_t>(8 + side), 0.0f);
+                    push(n, ni, n.pos, escape[side], dt, 0.0f, [] { return 1.0f; }, static_cast<uint8_t>(8 + side), 0.0f);
                 }
             }
             first = false;
