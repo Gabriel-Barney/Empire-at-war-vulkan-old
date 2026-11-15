@@ -124,7 +124,7 @@ service that touches a component outside its declared sets is a data race once i
 ## Fuzzing (2026-11-15)
 
 `build_fuzz.cmd [seconds per target] [run_fuzz.py args]` builds the libFuzzer targets in `tools/fuzz/targets/` (`fuzz_xml`,
-`fuzz_meg`, `fuzz_alo`, `fuzz_ala`, `fuzz_texture`: the readers that take mod-supplied bytes) in `build-fuzz\` with clang 20 +
+`fuzz_meg`, `fuzz_alo`, `fuzz_ala`, `fuzz_texture`, `fuzz_fx2`: the readers that take mod-supplied bytes) in `build-fuzz\` with clang 20 +
 ASan, then runs each for the budget (default 60 s; `0` builds only) through `tools/fuzz/run_fuzz.py`. The seed corpus comes from
 the retail MEGs (`ALAMO_FOC_DATA`), grows in `build-fuzz\fuzz\corpus\`, and crash / leak / timeout / oom inputs land in
 `build-fuzz\fuzz\artifacts\<target>\`. Reproduce one with `build-fuzz\bin\<target>.exe <file>` (the ASan runtime DLL in
@@ -147,7 +147,11 @@ the findings also show in the editor. Not part of the gate: findings are informa
 - The checks are real-bug checks only (`bugprone-*`, `clang-analyzer-core` / `cplusplus`, `concurrency-mt-unsafe`, a few
   `performance-*` / `misc-*`); style and what `/W4` or `-Wconversion -Wshadow` already report are off. Each disabled check
   is listed in `.clang-tidy`; turn one off there when it is noise, rather than adding `NOLINT` to sim code.
-- Known false positives: `misc-redundant-expression` on `x - x` in `engine/core/src/dmath.cpp`, which is deliberate (NaN for a non-finite input).
+- First pass (2026-11-15, b0425): 73 findings in the 196 sim-module files, all deliberate idioms or analyzer false positives; the
+  checks that only produced such hits are off (reasons in `.clang-tidy`). Since then the sim set gives 4 known false positives:
+  `all_pairs.cpp:222` (`pop` is only called on a non-empty heap), `hero_clash.cpp:224` (inside `std::erase_if`),
+  `auto_resolve.cpp:221` (an `int8_t` vector element) and `job_system.cpp:52` (`getenv` at job-system start-up). Anything else
+  is new and worth a look.
 
 ## Test thread pools under a loaded machine (2026-11-03)
 

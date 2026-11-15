@@ -64,7 +64,7 @@ public:
             uint32_t nann = r_.u32(p + 12);
             p += 16;
             par.annotations = annotations(p, nann);
-            p += 8 * nann;
+            p += size_t{8} * nann;
             size_t tp = toff;
             par.type = typedefAt(tp);
             size_t vp = voff;
@@ -77,14 +77,14 @@ public:
             uint32_t nann = r_.u32(p + 4), npass = r_.u32(p + 8);
             p += 12;
             t.annotations = annotations(p, nann);
-            p += 8 * nann;
+            p += size_t{8} * nann;
             for (uint32_t k = 0; k < npass; ++k) {
                 Pass ps;
                 ps.name = r_.name(base_ + r_.u32(p));
                 uint32_t pann = r_.u32(p + 4), nst = r_.u32(p + 8);
                 p += 12;
                 ps.annotations = annotations(p, pann);
-                p += 8 * pann;
+                p += size_t{8} * pann;
                 for (uint32_t s = 0; s < nst; ++s, p += 16) ps.states.push_back(stateAt(p - base_));
                 t.passes.push_back(std::move(ps));
             }
@@ -257,7 +257,7 @@ private:
         std::vector<Annotation> out;
         for (uint32_t i = 0; i < n; ++i) {
             Annotation a;
-            size_t tp = r_.u32(p + 8 * i), vp = r_.u32(p + 8 * i + 4);
+            size_t tp = r_.u32(p + size_t{8} * i), vp = r_.u32(p + size_t{8} * i + 4);
             a.type = typedefAt(tp);
             a.value = valueAt(a.type, vp, false);
             out.push_back(std::move(a));
