@@ -17,12 +17,27 @@ import tempfile
 from pathlib import Path
 
 
+_session_lock = None  # kept open for the life of the process
+
+
 def main() -> None:
     if len(sys.argv) < 2:
         raise SystemExit("usage: reva_persistent.py <project folder> [mcp-reva arguments]")
     project_dir = Path(sys.argv[1]).resolve()
     project_dir.mkdir(parents=True, exist_ok=True)
     del sys.argv[1]
+    # One session at a time: Ghidra locks the project, and when that lock fails ReVa neither exits nor closes its
+    # output, so the MCP client hangs. Take our own lock first and exit at once when another session holds it.
+    import msvcrt
+    global _session_lock
+    _session_lock = open(project_dir.parent / (project_dir.name + ".session.lock"), "a+b")
+    try:
+        _session_lock.seek(0)
+        msvcrt.locking(_session_lock.fileno(), msvcrt.LK_NBLCK, 1)
+    except OSError:
+        print(f"ReVa project {project_dir} is in use by another session (one at a time); try again later.",
+              file=sys.stderr)
+        raise SystemExit(3)
     os.chdir(project_dir)  # the project name is the current folder's name
 
     real_mkdtemp = tempfile.mkdtemp

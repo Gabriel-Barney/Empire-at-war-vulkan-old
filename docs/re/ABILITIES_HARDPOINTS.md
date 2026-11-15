@@ -823,8 +823,9 @@ through **globals** 0x140b2c380–0x140b2c394. The port must pass that context e
 root-finder method is not identified; any deterministic method with the same bracket and stop rule is
 acceptable for our own clients.
 
-### 4.12 `Destroy_When_Stunned_Over_Water` (type +0xe6) — port guess, no RE pass, confirmed by probe 2026-11-04
-Not traced (Gabriel 2026-10-30, `docs/DECISIONS.md` "Roadmap trim": a documented guess instead of an RE pass). The
+### 4.12 `Destroy_When_Stunned_Over_Water` (type +0xe6) — port guess (probe 2026-11-04), RE reading 2026-11-15: port rule differs
+Port guess first, then the probe, then the binary reading, which replaces the guess where they differ.
+Not traced when the rule was written (Gabriel 2026-10-30, `docs/DECISIONS.md` "Roadmap trim": a documented guess instead of an RE pass). The
 only vanilla user is `MAL_Rocket_Vehicle` (`UNITS_LAND_UNDERWORLD_MAL.XML`): a `Hover` movement-class vehicle with
 `STUNNABLE` in its land behaviours, so it is the one STUNNABLE unit that can stand on water cells (`Hover`
 passability includes `Water`). The port's reading of the name: a stunned hover vehicle loses its lift and sinks.
@@ -847,6 +848,50 @@ lifetime), with no stun-end delay. MALs stunned on low shore ground (terrain 2.9
 shallow kill); the port's rule has no depth threshold, and a kill at 3.8 already rules one out above that depth.
 Probe notes: `Spawn_Unit` moves a land unit off water cells (the MALs landed 80–90 units away on the shore);
 `Create_Generic_Object` places it exactly.
+**RE reading (2026-11-15, Ghidra through ReVa, retail FoC Steam x64; functions 0x4d01c0, 0x4cbbb0, 0x712190,
+0x647290, 0x135140, 0x136660, 0x199c20):** the water kill is part of the projectile detonation, not of the stun.
+- **Field [H].** Both readers take the object's type (obj +0x298) and test the byte at type +0xe6 ≠ 0. The parse
+  row (`xml_field_tables.md`, `GameObjectType` segment: code 0x0 bool, +0xe6) comes from the descriptor table read
+  by `tools/re/field_tables.py`; the parse function itself was not read in this pass (Ghidra has no reference to
+  the tag string 0x8825f0) [open, not needed for the rule].
+- **Readers [H for the two found; M for "only two"].** Two searches of the whole decompilation for a type +0xe6
+  byte test found only the land stun detonation 0x4d01c0 and the ion stun detonation 0x4cbbb0 (TACTICAL_GAPS
+  §2.3.7). Other +0xe6 hits are other structs. A reader that goes through an accessor would not have matched.
+- **When [H].** Once, inside the detonation's victim loop. Both functions need the projectile type's stun radius
+  (+0x1e90) > 0 and duration (+0x1e8c) ≠ 0, then walk every object within the radius (3D, from the projectile's
+  position) of each enemy player of the projectile's owner (0x294910, 0x2a8fb0). The terrain scene is fetched only
+  when the game mode is 1 (land); otherwise the test is skipped. Nothing tests it per frame or at the stun end.
+- **Which objects [H].** In 0x4d01c0 the test is made for every object of the query that has the type flag. It
+  is a separate statement after the stun call, so it does not need STUNNABLE (behaviour 0x38) and does not need
+  the object to pass the stun's victim filter (0x39f300). In 0x4cbbb0 it sits in the same per-object block as the
+  ion stun (behaviour 0x45 → 0x62b920); that block is skipped for an object whose slot byte +0x333 ≠ −1 and whose
+  locomotor (behaviour 1) answers true to vfunc +0x2b0 [open: what that vfunc reports].
+- **Stuns that do not reach it [H].** `Stun_Ability` (0x712190) calls the same stun apply 0x647290 for each
+  STUNNABLE victim and has no water test; 0x647290 itself has none (its only callers are 0x4d01c0 and 0x712190).
+  Confuse, Earthquake and other immobilisations were not looked at; none of them is among the readers found.
+- **Over water [H for the comparison, M for the helper meanings].** Needs the scene's water type (+0x204,
+  TERRAIN_WATER_POST: 0 none) ≠ 0 and **terrain height < water height − 0.5** (literal 0.5). Terrain height =
+  0x135140 at the object's X, Y: bilinear interpolation of the height grid (inferred from the grid indexing and
+  the four-sample blend). Water height = 0x136660 at the object's position: the scene's water plane height
+  (+0x200) by default; if the position lies inside a scene entry of kind 2 (entry +0x1a8 = 2, vertical ray test
+  0x155d90) it is instead terrain height + that entry's +0x100 [M: read, but what a kind-2 entry is was not
+  identified; inferred to be a local water patch]. The object's own Z is not used.
+- **How it dies [H for the call, inferred for the outcome].** `Take_Damage` 0x3a9e30(victim, kind 1, amount
+  999999.0, source null, no hardpoint name, 9th argument 1 (the raw flag of TACTICAL_COMBAT §3.6), 10th argument
+  the projectile object's +0x58 (the value used for the enemy-player query, read as the owner's player id)). It
+  is not a direct `Die` or removal: the unit dies through the normal damage path, so `Take_Damage`'s own gates
+  (`Immune_To_Damage`, garrisoned, invulnerability) can stop it and death clone / death projectile follow as for
+  any lethal hit (inferred from §4.9 and TACTICAL_COMBAT §3.6; not re-read here). The stun is applied first, in
+  the same call; the 2-frame gap of the probe is death processing, not a delay in this code (inferred).
+- **Match with the port rule: partly.** Same: land only, a water plane must exist, the terrain under the unit's
+  X, Y is compared with the water height, one test at the detonation, death by damage kind 1 with no source
+  object. Different: (1) retail needs the terrain more than **0.5** below the water height, the port has no
+  threshold (the probe's 3.8 kill and +2.9 / +5.0 survivals fit both); (2) retail does **not** kill on a
+  `Stun_Ability` wave, the port does; (3) retail **does** test on an ion stun detonation (0x4cbbb0), the port
+  excludes it; (4) retail tests every flagged enemy object in the radius, stunned or not, the port only a unit
+  that receives a STUNNABLE stun; (5) retail deals 999999 damage through `Take_Damage`, the port calls `Die`
+  directly. Vanilla data reach (1) and (2) with `MAL_Rocket_Vehicle`; whether any vanilla ion stun projectile is
+  fired in land battles, and whether (4) and (5) can show with vanilla units, was not checked.
 
 ### 4.13 Animation-driven ability timings on sim frames [port]
 Several special-ability classes time their effects from the owner's animation (TACTICAL_GAPS §2.3: "at animation
