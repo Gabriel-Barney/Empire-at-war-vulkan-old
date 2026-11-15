@@ -20,7 +20,7 @@ files already there, and add or update the row in `docs/PROBES.md` or the spec t
 Tools (installed by `toolchain\14_re_tools.cmd`; where each one lives: `docs/PROBES.md`, "RE and
 retail-tracing tools"):
 - `mcp__reva__*`: Ghidra 12.1.4 through ReVa. The project already holds `/StarWarsG.exe`, imported and
-  analysed (FoC Steam x64); pass that as `programPath`. Do not re-import or force a full re-analysis.
+  analysed (FoC Steam x64); pass that as `programPath`. Ignore `/StarWarsG.exe.0` (unanalysed duplicate). Do not re-import or force a full re-analysis.
   Renames, comments and types you set are saved in the shared project (`toolchain\re\reva-work\foc`),
   so keep them accurate. Ghidra locks an open project: if ReVa fails to open it, another session is
   using it; report that instead of retrying.
