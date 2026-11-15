@@ -3580,7 +3580,8 @@ bool TacticalAiWorld::Impl::most_defended_position(int32_t, const lua::AiArg& so
 
 void TacticalAiWorld::Impl::tf_set_flag(int32_t tf, lua::AiTfFlag flag, bool value) {
     TfRec* t = tf_rec(tf);
-    const auto pit = t ? plans.find(t->plan) : plans.end();
+    if (!t) return;
+    const auto pit = plans.find(t->plan);
     if (pit == plans.end()) return;
     switch (flag) {
         case lua::AiTfFlag::PlanResult: pit->second.result = value; break;

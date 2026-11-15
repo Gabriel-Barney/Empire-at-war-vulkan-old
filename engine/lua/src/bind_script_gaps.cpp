@@ -164,7 +164,7 @@ int m_fire_special_weapon(Call& c) {
         if (r < 1.0f) return c.script_warning("%s -- special weapon not ready", kName);
         if (!upgrade_gate(c, player->id))
             return c.script_warning("%s -- special weapons not available. Purchase a special weapon upgrade", kName);
-        if (!target || !(hk->station_fire && hk->station_fire(self, target, player->id)))
+        if (!target || !(hk && hk->station_fire && hk->station_fire(self, target, player->id)))
             return c.script_warning("%s -- unable to fire at target", kName);
     } else if (lob && !sw) {
         // §1.1 step 3: the lobbing superweapon fires at the target's position (no range / ally / fog check).
