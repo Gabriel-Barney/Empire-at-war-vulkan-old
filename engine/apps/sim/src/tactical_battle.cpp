@@ -391,6 +391,9 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
     bt_add_pad_types(map_);    // battle host: the map's pad UC / constructed types join the tables (before combat exists)
     oi_add_ability_types();    // OI abilities: ability-spawned / survivor types join the tables (before combat exists)
     hg_add_types();            // hangars: launched squadrons / ships and the station chain join the tables
+    // b0417: hg_add_types adds the skirmish production lists, so the ability / survivor types of those units join now
+    // (Pirate_Skiff_U's Destruction_Survivors pilot was created as a prop: no combat, no movement, never used by the AI).
+    oi_add_ability_types();
 #ifdef ALAMO_SIM_HAVE_ASSETS
     // OPT3 t05 / t09: the model files of the map's placements (after the prepass: a land skirmish's team markers are its pads
     // now) and the participants load in parallel here instead of one type at a time inside the spawns and stamps below

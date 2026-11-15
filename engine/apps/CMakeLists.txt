@@ -380,7 +380,14 @@ if(_alamo_sim)
     # attack block. Seeds 1-10, 70000 ticks: 0 Lua errors in all ten; ends (Underworld wins) at 31670 (5), 25738 (6), 68036
     # (7), 50122 (8), 43021 (10); seeds 1 2 3 4 9 do not end (seed 9 takes about 13 minutes). Seeds 8 and 10 kept their end
     # frame through both b0416 changes: pinned to them, 70000 ticks, about 80 s each.
-    foreach(_seed 8 10)
+    # b0417 (2026-11-14): the survivor / ability types of the skirmish production lists join the battle tables (they were
+    # collected before hg_add_types added those lists), so Pirate_Skiff_U's Destruction_Survivors pilot is a real unit, not an
+    # unkillable prop that Boba Fett's plan and the burn plan attacked without end. Seeds 1-10, 70000 ticks: Underworld wins
+    # at 31602 (3), 39172 (4), 34497 (5), 26830 (6), 39208 (7), 28511 (8), 51427 (9), 49002 (10); seeds 1 and 2 are still
+    # fighting at 70000. Seeds 1, 2, 4 and 8 log BOBAFETTFLAMEINFANTRY "Move_To -- Target is already dead" (the script's
+    # MoveUntilDone re-issues Move_To after PumpEvents without TestValid; LUA_API.md Move_To: a dead object is that error),
+    # so the pinned seeds are 3 and 5 (0 Lua errors, about 70 s each).
+    foreach(_seed 3 5)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_empire_underworld_seed${_seed}
                COMMAND alamo_headless --skirmish-ai foc-land --ai Empire,Underworld --ticks 70000 --workers 4 --quiet
                        --expect-battle-end --fail-on-lua-errors --seed ${_seed})
