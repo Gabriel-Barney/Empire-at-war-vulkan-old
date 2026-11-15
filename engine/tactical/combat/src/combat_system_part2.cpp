@@ -115,7 +115,7 @@ bool CombatSystem::fire_hardpoint(Unit& u, Hardpoint& h, uint32_t frame, SimRng&
     h.cooldown = r.frames;
     h.pulses = r.pulses;
     ++stats_.shots;
-    shot_events_.push_back({u.id, t.id, t.owner});  // OI fog: REVEAL vf26 flash
+    shot_events_.push_back({u.id, t.id, t.owner, static_cast<int32_t>(h.desc), next_serial_ - 1u});  // OI fog: REVEAL vf26 flash; aud1 t04
     if (hooks_) hooks_->fire_done(u.id, &hd, frame);  // OI abilities: Blast charged-shot count
     if (hooks_) hooks_->shot_fired(u.id, t.id, thp, proj, frame);
     return true;
@@ -281,7 +281,7 @@ void CombatSystem::fire_unit_weapon(Unit& u, uint32_t frame, SimRng& rng) {
     }
     ++stats_.shots;
     // OI fog: REVEAL vf26 flash on the target owner's grid [port: a ground-point shot has no target owner, no flash].
-    if (tp) shot_events_.push_back({u.id, tp->id, tp->owner});
+    if (tp) shot_events_.push_back({u.id, tp->id, tp->owner, -1, next_serial_ - 1u});
     if (hooks_) hooks_->fire_done(u.id, nullptr, frame);
     if (hooks_) hooks_->shot_fired(u.id, tid, thp, proj, frame);
 }

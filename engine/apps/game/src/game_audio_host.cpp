@@ -66,6 +66,11 @@ std::string_view GameAudioHost::clash_win_speech(const tactical::combat::HeroCla
     return first_won ? data->entries[entry].first_speech : data->entries[entry].second_speech;
 }
 
+std::string_view GameAudioHost::weather_name(uint8_t type) {
+    static constexpr const char* kNames[] = {"CLEAR", "RAIN", "SNOW", "SANDSTORM", "ASH"};  // LandModeClass::tLandWeather order
+    return type < std::size(kNames) ? std::string_view(kNames[type]) : std::string_view("CLEAR");
+}
+
 Vec3 GameAudioHost::position_of(uint64_t id) const {
     const auto it = positions_.find(id);
     return it == positions_.end() ? Vec3{} : it->second;
@@ -426,6 +431,13 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
     last_serial_ = max_serial;
     have_serial_ = true;
     tsw_audio(tsw_cues(battle.special_weapon_events(), store), types);  // refix t06
+    // aud1 t02 (L1_S4_REMAINING §3.2): the land weather's type and intensity after the tick -> the weather audio manager
+    // and the faction's SFXEvent_Weather_Begin / _End lines (GameAudio::set_weather; unchanged values do nothing). Weather
+    // off (no scenario, space) = CLEAR at 1.0, as retail's 0x323110(0, 1.0).
+    {
+        const std::string_view w = weather_name(battle.weather().active() ? static_cast<uint8_t>(battle.weather().type()) : 0);
+        game_->set_weather(w, battle.weather().active() ? battle.weather().intensity() : 1.0f);
+    }
     if (combat) {
         audio::CombatEvent ce;
         ce.local_player_involved = true;

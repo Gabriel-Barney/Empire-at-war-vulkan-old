@@ -1002,6 +1002,10 @@ struct ShotEvent {
     ObjectId shooter = kNoObject;
     ObjectId target = kNoObject;
     int32_t target_owner = -1;  // at fire time
+    // aud1 t04 (presentation): the CombatData::hardpoints index of the firing weapon hardpoint (-1 = the unit's own
+    // WeaponBehavior weapon) and the serial of the projectile the shot spawned (the host's Fire_SFXEvent lookup).
+    int32_t hardpoint = -1;
+    uint32_t serial = 0;
 };
 
 // Damaged_Smoke_Asset_Name attachment (0x3ab890): hull crossed 75 % or 50 % downward in one hit.

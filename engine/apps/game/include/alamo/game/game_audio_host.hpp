@@ -149,6 +149,9 @@ public:
     // HERO_CLASH §3.8 (b0300): the clash winner's speech event, First_Hero_Win_Speech when hero 1 (First_Hero_Type) won,
     // else Second_Hero_Win_Speech; "" for an unknown entry. (Attack_SFXEvent belongs to Clash_Actions, i.e. the
     // action-driven clash that shipped data never reaches, HERO_CLASH §4.)
+    // aud1 t02: the weather audio name of a tactical::combat::WeatherType value (CLEAR, RAIN, SNOW, SANDSTORM, ASH; out of
+    // range -> CLEAR), the names WeatherAudio.xml and the Faction SFXEvent_Weather_Begin / _End pairs use.
+    static std::string_view weather_name(uint8_t type);
     static std::string_view clash_win_speech(const tactical::combat::HeroClashData* data, uint32_t entry, bool first_won);
     // AUDIO.md §2.3 (b0286): this tick's "any player has its faction super weapon on the map". The first report after
     // battle_reset re-picks the mode's music (the start forces are known one tick after the Battle scene began); later
