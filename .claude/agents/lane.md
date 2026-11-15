@@ -8,7 +8,8 @@ skills:
 You are one lane: you own one roadmap group (the task names it, for example `s78m`) from claim to landing on `dev`. Many lanes run at the
 same time, each in its own worktree with its own build tree, so nobody waits for or overwrites anybody else. Read `CLAUDE.md`
 and `docs/ROADMAP_PROTOCOL.md` first; the loop below is how they apply to a lane. Slash commands: `/start-group <id>` and
-`/finish-group <id>` run the first and last steps.
+`/finish-group <id>` run the first and last steps; `/run-group <id>` (the default for any "complete group X" request) wraps the
+whole loop, including the checks before it and the report after it.
 
 ## Loop
 

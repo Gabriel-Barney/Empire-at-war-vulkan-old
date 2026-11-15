@@ -84,11 +84,16 @@ headless multithreaded simulation core first, then a Vulkan 1.3 renderer. Any Cl
 
 ## Parallel work
 
+**Default workflow for task requests (Gabriel, 2026-11-15): any request to complete roadmap work ("complete all tasks under
+AUD1", "do aud3", "work the AUDIO box", "next ready group") goes through the `run-group` skill.** It resolves the group, box or
+stage, checks `after`, claims and the tier focus, and runs the lane loop below: one group in the current session (which keeps the
+`Agent` tool), several groups in at most three parallel sessions with sequential queues.
+
 Real work is done per roadmap group by a `lane` agent (`.claude/agents/lane.md`; `/start-group <id>`, `/finish-group <id>`) in its
 own worktree. Lanes own a group, not a folder: two lanes must not edit the same files, and a landing commit names any golden that changed.
 A change to `engine/core` public headers or the top-level CMake goes through the integrating agent. Single-module
 `engine-module` agents remain for narrow side tasks. Definitions live in `.claude/agents/`.
-Project skills (`.claude/skills/`; triggers in each description): `start-group` / `finish-group` / `build` / `phase-status`
+Project skills (`.claude/skills/`; triggers in each description): `run-group` (the entry point above) / `start-group` / `finish-group` / `build` / `phase-status`
 (the loop), `green-fast-tier` (build, summary, fix iteration after a large edit; speed habits below), `determinism-check` and `regen-goldens` (sim and goldens), `diagnosing-bugs` (an unexplained failure: loop first),
 `research` (cited report in its `docs/` home), `re-question` (ask the binary through `re-analyst`), `probe-kit` (retail checks), `writing-for-agents` (editing any file agents read),
 `codebase-design` / `improve-codebase-architecture` (deep-module vocabulary; architecture review that files tier-3 proposals), `triage` (file findings, clean the backlog), `tdd` (test-first, red then green), `to-tickets` (split work into tasks / groups), `prototype` (throwaway logic demo or UI variants), `grill-with-docs` (interview Gabriel on a plan, record decisions), `spec-review` (standards + spec axes, in `finish-group` next to `/code-review`;
