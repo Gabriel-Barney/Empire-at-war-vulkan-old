@@ -54,7 +54,7 @@ since been answered (a new `docs/re/` spec or probe result). Counts plus one lin
 3. **Verify the claim** before anything else is written about it. A port bug: reproduce it (`diagnosing-bugs` phase 1 loop). A
    retail-behaviour claim: check `docs/re/`, then `re-question`. Report confirmed (with the code path), not reproduced, or not enough
    detail (needs info).
-4. **Sharpen if needed.** Unclear entries get one round of specific questions at a time (to Gabriel, or to the `docs/re/` spec via
+4. **Sharpen if needed.** Unclear entries get one round of specific questions at a time (`grill-with-docs` for a bigger one) (to Gabriel, or to the `docs/re/` spec via
    `re-question`); vague "please clarify" questions don't count.
 5. **Apply the outcome** with the matching `roadmap_store.py backlog` command. Promoting into a group: the task text is an agent
    brief ([AGENT-BRIEF.md](AGENT-BRIEF.md)); a new group gets an `exit` test that the brief's acceptance criteria add up to.

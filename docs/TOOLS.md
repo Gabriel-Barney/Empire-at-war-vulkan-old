@@ -94,8 +94,10 @@ pinned setup step in `toolchain\2_setup.cmd` (rule 5), then a row here.
 | Filing findings, cleaning the backlog or inbox | `triage` |
 | Writing code or a regression test test-first | `tdd` |
 | Splitting a plan, spec or finding into tasks or a new group | `to-tickets` |
+| Feeling out a rule / state model, or comparing UI variants, before real code | `prototype` |
+| Stress-testing a plan with Gabriel; recording terms and decisions | `grill-with-docs` |
 
-`codebase-design`, `improve-codebase-architecture`, `triage`, `tdd`, `to-tickets` and `spec-review` (and parts of `diagnosing-bugs`) are adapted from
+`codebase-design`, `improve-codebase-architecture`, `triage`, `tdd`, `to-tickets`, `prototype`, `grill-with-docs` and `spec-review` (and parts of `diagnosing-bugs`) are adapted from
 `mattpocock/skills` (MIT; `.claude/skills/LICENSE-mattpocock-skills.txt`).
 
 ## Agents (`.claude/agents/`)

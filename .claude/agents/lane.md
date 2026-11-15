@@ -59,6 +59,8 @@ and `docs/ROADMAP_PROTOCOL.md` first; the loop below is how they apply to a lane
    - **Filing findings** (review, probe, test run) or cleaning up the backlog: `triage`.
    - **Writing code test-first** (a feature, a bug's regression test): `tdd`. **Splitting work into tasks or a new group:**
      `to-tickets` (vertical slices, exit test, writes only what was approved).
+   - **A rule or screen to feel out before real code:** `prototype` (throwaway, kept off `dev`). **A plan to stress-test with
+     Gabriel:** `grill-with-docs` (rounds of questions; records terms and decisions; needs him to answer).
    - **Before landing:** `finish-group` runs `/code-review` and `spec-review` (standards + the group's spec).
 6. **Build in your own tree** (one tree per worktree; never share `build-msvc` or another lane's tree). From PowerShell:
    `& .\build_agent.cmd --% msvc wt "core;<modules and their dependencies>"` gives `build-wt-msvc` (`wt` is the default tree and may be left out) and runs the fast tier

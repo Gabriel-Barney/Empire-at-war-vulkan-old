@@ -51,7 +51,10 @@ section 4.
   upstream `code-review`, renamed so the built-in `/code-review` keeps its name; `finish-group` runs both). The upstream
   `diagnosing-bugs` was merged into the project's own skill of that name, not installed beside it. Added the same day: `tdd`
   (C++ `CHECK` examples, independent expected values from `docs/re/` / retail, project test rules) and `to-tickets` (tickets are
-  roadmap tasks, blocking edges are task order and group `after`, each group gets an exit test; it writes only what was approved).
+  roadmap tasks, blocking edges are task order and group `after`, each group gets an exit test; it writes only what was approved). Then `prototype` (logic demo as one HTML file; UI variants in
+  the real in-game screen or launcher behind a dev-only switch; prototypes stay on a local `claude/prototype-<name>` branch, never
+  `dev`) and `grill-with-docs` (upstream's `grilling` and `domain-modeling` folded in; decisions go to `DECISIONS.md` /
+  `PHASE4.md`, terms to a `docs/GLOSSARY.md` created on the first term).
 - Wiring: index `docs/TOOLS.md`; toolchain programs by name through `tools\tc.cmd`; a `SessionStart` hook adds the worktree
   junctions (`worktree_tool.py link`); build scripts and read-only commands are pre-approved in `.claude/settings.json`.
 

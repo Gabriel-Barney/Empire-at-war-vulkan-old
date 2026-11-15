@@ -64,7 +64,7 @@ ask), stop here: file the candidates (step 3) and report.
 
 ## 3. Work through the chosen candidate
 
-Walk the decision tree with the user, one round of questions at a time (`AskUserQuestion` when available): constraints,
+Walk the decision tree with the user in rounds (the `grill-with-docs` skill): constraints,
 dependencies and their category (`codebase-design` DEEPENING.md), the shape of the deepened module, what sits behind the seam,
 which tests survive, which goldens must stay put. To explore alternative interfaces, use `codebase-design` DESIGN-IT-TWICE.md.
 

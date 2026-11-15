@@ -90,7 +90,7 @@ A change to `engine/core` public headers or the top-level CMake goes through the
 Project skills (`.claude/skills/`; triggers in each description): `start-group` / `finish-group` / `build` / `phase-status`
 (the loop), `green-fast-tier` (build, summary, fix iteration after a large edit; speed habits below), `determinism-check` and `regen-goldens` (sim and goldens), `diagnosing-bugs` (an unexplained failure: loop first),
 `research` (cited report in its `docs/` home), `re-question` (ask the binary through `re-analyst`), `probe-kit` (retail checks), `writing-for-agents` (editing any file agents read),
-`codebase-design` / `improve-codebase-architecture` (deep-module vocabulary; architecture review that files tier-3 proposals), `triage` (file findings, clean the backlog), `tdd` (test-first, red then green), `to-tickets` (split work into tasks / groups), `spec-review` (standards + spec axes, in `finish-group` next to `/code-review`;
+`codebase-design` / `improve-codebase-architecture` (deep-module vocabulary; architecture review that files tier-3 proposals), `triage` (file findings, clean the backlog), `tdd` (test-first, red then green), `to-tickets` (split work into tasks / groups), `prototype` (throwaway logic demo or UI variants), `grill-with-docs` (interview Gabriel on a plan, record decisions), `spec-review` (standards + spec axes, in `finish-group` next to `/code-review`;
 adapted from `mattpocock/skills`, MIT, 2026-11-15),
 `retro` (Gabriel-invoked review of how sessions went; lanes end with a one-line friction note for it).
 **Default tool access (Gabriel, 2026-11-15): every worker (main session, agent, subagent) may use every project script,

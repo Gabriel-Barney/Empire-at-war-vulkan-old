@@ -1,5 +1,6 @@
 Skills adapted from https://github.com/mattpocock/skills (commit 5863806, fetched 2026-11-15):
-codebase-design, improve-codebase-architecture, triage, tdd, to-tickets, spec-review (from code-review), and parts of diagnosing-bugs.
+codebase-design, improve-codebase-architecture, triage, tdd, to-tickets, prototype, grill-with-docs (with grilling and domain-modeling folded in),
+spec-review (from code-review), and parts of diagnosing-bugs.
 Each was adapted to this project; the original licence follows.
 
 MIT License
