@@ -25,8 +25,8 @@ from the kit's run script (`docs/PROBES.md`, "RE and retail-tracing tools"):
 - **Frida** (`toolchain\re\venv\Scripts\frida.exe`, Python module `frida`): hook a function by RVA and log arguments and return
   values; good for counts and distributions over many seeds.
 - **TTD** (`tools\re\ttd_record.cmd`): record the session to a `.run` trace and query it afterwards (`re-analyst`'s `windbg`
-  server, or `cdb.exe -z`). It raises a Windows administrator prompt, and Microsoft's licence must have been accepted once by
-  Gabriel: if TTD stops on the licence, report it, do not pass `-accepteula`.
+  server, or `cdb.exe -z`). It raises a Windows administrator prompt (UAC) that a person must approve, so plan a TTD run for
+  when Gabriel is at the machine; the licence is already accepted on this machine (2026-11-15).
 
 ## 2. Kit layout (`tools/probe_mod/<kit>/`)
 
