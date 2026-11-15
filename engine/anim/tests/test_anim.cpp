@@ -996,17 +996,18 @@ void test_events_and_locomotor() {
                                   &diag);
     CHECK(rows == 3 && diag.size() == 1 && map.clips() == 2);
     const auto* ev = map.find("DATA\\ART\\MODELS\\EI_TROOPER_MOVE_00.ALA");
-    CHECK(ev && ev->size() == 2 && (*ev)[0].bone == "B_Foot_R" && (*ev)[1].time_ms == 1032);
+    CHECK(ev && ev->size() == 2 && (*ev)[0].bone == "B_Foot_R" && (*ev)[1].time == 1032);
     CHECK(map.find("ei_trooper_die_00") && map.find("ei_trooper_die_00")->front().kind == AnimEventDef::Kind::Sound);
     std::vector<uint32_t> hit;
-    if (ev) {
-        crossed_events(*ev, 30.0f, 62, 0.0f, 1.0f, false, hit);  // [0, 33.3 ms): the 0 ms plant
-        CHECK(hit.size() == 1 && hit[0] == 0);
-        hit.clear();
-        crossed_events(*ev, 30.0f, 62, 30.0f, 31.0f, false, hit);  // [1000, 1033.3): 1032
+    if (ev) {  // AUDIO.md §9.4: time / 100 = frames (the plants at frames 0 and 10.32), half-open (before, after]
+        crossed_events(*ev, 30.0f, 62, 0.0f, 1.0f, false, hit);  // (0, 1]: the 0 plant does not fire on the first play
+        CHECK(hit.empty());
+        crossed_events(*ev, 30.0f, 62, 10.0f, 11.0f, false, hit);  // (10, 11]: 10.32
         CHECK(hit.size() == 1 && hit[0] == 1);
         hit.clear();
-        crossed_events(*ev, 30.0f, 62, 60.5f, 0.5f, true, hit);  // wrap at 61 frames: tail empty, then 0 ms
+        crossed_events(*ev, 30.0f, 62, 10.32f, 11.0f, false, hit);  // (10.32, 11]: not again
+        CHECK(hit.empty());
+        crossed_events(*ev, 30.0f, 62, 20.5f, 0.5f, true, hit);  // a wrap: t > 20.5 (none) or t <= 0.5 (the 0 plant)
         CHECK(hit.size() == 1 && hit[0] == 0);
         hit.clear();
         crossed_events(*ev, 30.0f, 62, 10.0f, 10.0f, false, hit);

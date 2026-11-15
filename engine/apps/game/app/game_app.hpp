@@ -810,6 +810,7 @@ public:
     std::string type_icon(size_t t) const { return t < ui_.hud_types.size() ? ui_.hud_types[t].icon_name : std::string(); }
     void add_loss_rows(ui::BattleEndInfo& info, const game::BattleLosses& lost, int32_t me) const;
     std::string local_faction() const;
+    std::string_view battle_terrain() const;  // aud1 t01: the running battle's music / ambience key ("" without a battle)
     bool crc_check();
     void make_script();
     // Script helpers.

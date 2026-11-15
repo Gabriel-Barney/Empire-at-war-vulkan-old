@@ -159,16 +159,16 @@ public:
 
     // ---------------- per frame
     void set_camera(const CameraState& camera);
-    // Current weather from the sim (tactical): CLEAR/RAIN/SNOW/SANDSTORM/ASH and 0..1 intensity. Also plays
-    // the faction's SFXEvent_Weather_Begin/End announcement when weather (type != CLEAR and intensity > 0)
-    // starts / stops [inferred].
-    void set_weather(std::string_view weather, float intensity);
+    // Current weather from the sim (tactical): CLEAR/RAIN/SNOW/SANDSTORM/ASH and 0..1 intensity. Also plays the local
+    // faction's SFXEvent_Weather_Begin / _End line for the current type when the intensity rises from 0 / falls to 0
+    // (AUDIO.md §9.3; not for CLEAR, not on a type change, not when `local_affected` is false = Weatherproof).
+    void set_weather(std::string_view weather, float intensity, bool local_affected = true);
     void sim_tick();                  // once per sim tick (music peace counter, announcement delays)
     void update(double wall_dt_seconds);
 
     // ---------------- battle events (sim -> audio, forwarded after the tick in a stable order)
-    // Weapon / hard point fire: attached to the shooter (3D-attached when the event Is_3D). Suppressed by
-    // Audio.xml Test_Disable_Weapon_Fire_SFX (§6.2). Returns the instance id (0 = refused).
+    // Weapon / hard point fire: 3D at `position` = the new projectile's position (§9.5; not attached, fog gate 9
+    // applies). Suppressed by Audio.xml Test_Disable_Weapon_Fire_SFX. Returns the instance id (0 = refused).
     uint32_t weapon_fire(uint64_t shooter, std::string_view event, const Vec3& position);
     // Projectile detonation / impact and explosions: 3D at a world position (fog gate 9 applies).
     uint32_t impact(std::string_view event, const Vec3& position);
@@ -304,7 +304,7 @@ private:
     std::string faction_;
     bool tactical_ = false, land_ = true, super_weapon_ = false, battle_over_ = false;
     std::string environment_;
-    bool weather_active_ = false;
+    float weather_intensity_ = 0.0f;  // the last set_weather intensity (§9.3 crossing test)
     std::string weather_type_ = "CLEAR";
     uint64_t sim_ticks_ = 0, last_base_announcement_ = 0;
     bool base_announced_ = false;

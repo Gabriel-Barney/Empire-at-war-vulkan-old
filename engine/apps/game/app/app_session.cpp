@@ -417,6 +417,11 @@ void App::shutdown() {
     sc_.shutdown();
 }
 
+std::string_view App::battle_terrain() const {
+    const sim::TacticalBattle* b = session_ ? session_->battle() : nullptr;
+    return b ? GameAudioHost::terrain_name(b->terrain_type()) : std::string_view();
+}
+
 std::string App::local_faction() const {
     const galactic::GalacticSim* g = galaxy();
     if (!g) return {};
@@ -583,7 +588,7 @@ void App::begin_battle() {
     } else {
         start_battle_view();
         screen_ = Screen::Battle;
-        audio_.music(MusicScene::Battle, local_faction(), space);
+        audio_.music(MusicScene::Battle, local_faction(), space, battle_terrain());
     }
     std::printf("battle %" PRIu64 ": %s map %s at tick %" PRIu64 "\n", battles_seen_, space ? "space" : "land",
                 b ? b->request().map.c_str() : "-", session_->host().frame());
@@ -599,13 +604,20 @@ void App::start_battle_view() {
         if (ui_.load.is_open()) ui_.load.close();  // its progress would never fill
         if (screen_ == Screen::BattleLoad) {
             screen_ = Screen::Battle;
-            audio_.music(MusicScene::Battle, local_faction(), bview_.space());
+            audio_.music(MusicScene::Battle, local_faction(), bview_.space(), battle_terrain());
         }
     }
     gpu_.renderer.reset_taa_history();  // a new map: nothing to reproject from
     bview_.camera().set_fov_override(tactical_fov_set_ ? camera_.tactical_fov_deg : 0.0f);  // options: tactical FOV (0 = the data's)
     bview_.camera().set_tuning(option_tuning(bview_.camera().tuning()));  // P1_CAMERA_INPUT.md §3.1 options
     bview_.capture(*session_);
+    {  // aud1 t05: the battle players' faction names (hyperspace arrival / exit lines)
+        std::vector<std::string> factions;
+        if (const galactic::GalacticSim* g = galaxy())
+            for (const auto& pl : g->players())
+                factions.push_back(pl.faction < g->rules().factions.size() ? g->rules().factions[pl.faction].name : std::string());
+        audio_.set_player_factions(std::move(factions));
+    }
     audio_.battle_reset();
     cinematic_reset();  // refixf t05
     radar_fog_uploads_ = ~uint64_t{0};

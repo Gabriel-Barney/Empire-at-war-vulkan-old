@@ -1,5 +1,8 @@
 // alamo_game App: special systems, sim stepping, command routing, HUD / galactic / battle / menu input (split from game_main.cpp).
 #include "game_app.hpp"
+#ifdef ALAMO_SIM_HAVE_ANIM
+#include "alamo/sim/sim_anim.hpp"  // aud1 t03
+#endif
 
 namespace alamo_game_app {
 
@@ -175,8 +178,64 @@ void App::post_tick() {
         if (const sim::TacticalBattle* b = session_->battle()) {
             const objects::ObjectStore& st = session_->host().modes().top_tactical()->primary();
             const game::GameSession* gs = session_.get();
+#ifdef ALAMO_SIM_HAVE_ANIM
+            // aud1 t03 (AUDIO.md §9.4): the AnimationSFXMaps SOUND rows the battle's animation crossed, attached to their object.
+            if (const sim::SimAnimation* an = session_->animation())
+                if (const sim::GameMode* top = session_->host().modes().top()) {
+                    std::vector<GameAudioHost::AnimSound> snd;
+                    for (const sim::SimAnimation::FrameEvent& e : an->events(*top))
+                        if (e.def && e.def->kind == anim::AnimEventDef::Kind::Sound)
+                            snd.push_back({static_cast<uint64_t>(e.id), e.def->name, e.position});
+                    audio_.animation_sounds(snd);
+                }
+#endif
             audio_.battle_tick(*b, st, data_.types, local_player(),
                                [gs](objects::ObjectId id) { return gs->script_hidden(id); });  // q6 t19 §10.3
+            {  // aud1 t07 (AUDIO.md §9.7): the tactical intro speech, campaign battles only, not story-linked ones.
+                // [port] The port hosts a skirmish as a galactic hop, so "no galactic parent" is the skirmish / attract
+                // session kind; benchmark runs stay silent so their speech-done notifications do not change.
+                const galactic::GalacticSim* g = galaxy();
+                const galactic::BattleRequest& rq = b->request();
+                const bool eligible = g != nullptr && !rq.linked && session_->spec().kind == game::SessionKind::Campaign &&
+                                      !demo_session() && !bench_active();
+                const int32_t me = local_player();
+                const PlanetIndex pi = rq.info.planet;
+                const auto facts = [&](game::GameAudioHost::IntroSpeechFacts& f) {
+                    if (me < 0 || (me != rq.info.attacker && me != rq.info.defender)) return false;
+                    f.land = rq.info.kind == galactic::ConflictKind::Land;
+                    f.attacker = me == rq.info.attacker;
+                    int32_t owned = 0;  // 0x4b2080: planets the local player owns
+                    for (const galactic::PlanetState& p : g->planets())
+                        if (p.is_planet && p.owner == me) ++owned;
+                    f.last_location = owned < 2;
+                    f.raid = b->land_raid();  // [M] the land force split's raid test stands for conflict record +0x50
+                    f.defender_playable = false;
+                    if (rq.info.defender >= 0 && static_cast<size_t>(rq.info.defender) < g->players().size()) {
+                        const uint32_t df = g->players()[static_cast<size_t>(rq.info.defender)].faction;
+                        f.defender_playable = df < g->rules().factions.size() && g->rules().factions[df].is_playable;
+                    }
+                    return true;
+                };
+                // 0x35d930 / 0x35d800: an object of the type at the battle's planet (orbit fleets and their contents,
+                // then the surface), any owner. [M] walked through GalacticSim::contents_of, three levels deep.
+                const auto present = [&](std::string_view name) {
+                    const objects::TypeIndex t = data_.types.resolve_name(name);
+                    if (t == objects::kNone || pi == kInvalidPlanet || static_cast<size_t>(pi) >= g->planets().size()) return false;
+                    const objects::ObjectStore& gst = g->store();
+                    std::vector<objects::ObjectHandle> level = g->contents_of(g->planets()[pi].object);
+                    for (int depth = 0; depth < 3 && !level.empty(); ++depth) {
+                        std::vector<objects::ObjectHandle> next;
+                        for (const objects::ObjectHandle h : level) {
+                            if (!gst.alive(h)) continue;
+                            if (gst.type(h) == t) return true;
+                            for (const objects::ObjectHandle c : g->contents_of(h)) next.push_back(c);
+                        }
+                        level = std::move(next);
+                    }
+                    return false;
+                };
+                audio_.intro_speech_tick(b->frame(), eligible, presentation_cinematic() || cine_.shot.active(), facts, present);
+            }
             for (const TswCue& c : tsw_cues(b->special_weapon_events(), st)) {  // refixf t05: TSW_PLANET_DESTROY.md §11
                 if (c.kind == TswCue::Kind::Firing) tsw_shot_begin(c, *b, st);              // 0x2ccf30: the firing shot
                 else if (c.kind == TswCue::Kind::PlanetDestroyed) tsw_shake(c, *b);        // 0x2cdbb0 at the dummy

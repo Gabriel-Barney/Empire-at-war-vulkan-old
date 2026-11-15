@@ -511,7 +511,7 @@ void App::frame() {
         for (const ui::LoadScreenEvent& e : lev)
             if (e.kind == ui::LoadScreenEvent::Kind::Begin && screen_ == Screen::BattleLoad) {
                 screen_ = Screen::Battle;
-                audio_.music(MusicScene::Battle, local_faction(), bview_.space());
+                audio_.music(MusicScene::Battle, local_faction(), bview_.space(), battle_terrain());
             }
     }
     input_.update(routed_.world);

@@ -47,6 +47,7 @@ class TacticalBattle;
 }
 namespace alamo::tactical::combat {
 struct HeroClashData;
+class CombatSystem;
 }
 namespace alamo::lua {
 struct PresentationEvent;
@@ -70,6 +71,7 @@ struct GameAudioStats {
     uint64_t lob_chargeups = 0, lob_charged = 0;                         // S8 t31: lobbing charge-up / charged cues
     uint64_t control_point_lines = 0;                                    // ccpgu t01: control point countdown lines
     uint64_t garrison_lines = 0, clash_win_speech = 0;                   // aud4: SFXEvent_Bunker_Garrisoned / clash win speech
+    uint64_t anim_sounds = 0;                                           // aud1 t03: AnimationSFXMaps SOUND rows started
 };
 
 class GameAudioHost {
@@ -136,11 +138,102 @@ public:
     // aud1 (battle_tick's calls, public for the scripted battle tests): the tactical weather (type name, 0..1 intensity:
     // GameAudio::set_weather, weather loops + the faction SFXEvent_Weather_Begin / _End) and one combat notification
     // (AUDIO.md §2.3 slot 76: battle music when the local player is involved, the base-under-attack announcement).
-    void weather(std::string_view type, float intensity);
+    // aud1 t03 (AUDIO.md §9.4): AnimationSFXMaps SOUND rows the sim's animation crossed this tick (SimAnimation::events,
+    // kind Sound), in its order: each starts attached to the animating object (3D-attached when Is_3D, else 2D-attached),
+    // no fog / owner test at start (fogged objects are muted). Returns the number started.
+    struct AnimSound {
+        uint64_t object = 0;
+        std::string_view event;
+        Vec3 position{};
+    };
+    uint32_t animation_sounds(std::span<const AnimSound> sounds);
+    // aud1 t04 (AUDIO.md §9.5): one shot's fire sound (fire_event(hardpoint_fire, shooter_fire)), 3D at the projectile's
+    // spawn position. Returns the instance id (0 = none / refused).
+    uint32_t weapon_fired(uint64_t shooter, std::string_view hardpoint_fire, std::string_view shooter_fire, const Vec3& position);
+    // aud1 t05: each battle player's Faction name (index = player), read by battle_tick's object_events; set at battle start.
+    void set_player_factions(std::vector<std::string> factions) { player_factions_ = std::move(factions); }
+    void weather(std::string_view type, float intensity, bool local_affected = true);  // local_affected: no Weatherproof
     void combat(bool local_involved, bool local_base_attacked);
     // --- aud1 t05 (object SFX: abilities, shields, hyperspace; src/game_audio_host_objects.cpp) ---
+    // AUDIO.md §9.6, after every battle tick (battle_tick calls it; presentation only, const reads):
+    //   ability   AbilitySystem EffectOn (the activation presentation 0x48e4d0): the special ability's SFXEvent_Activate
+    //             attached to the user, SFXEvent_Target_Affected attached to the target when there is one.
+    //   hyperspace TacticalBattle::hyperspace_sfx(): Arrive -> the owner faction's SFXEvent_Arrive_From_Hyperspace attached
+    //             to the object; Depart -> the type's SFXEvent_Retreat_Engines_Jump, else the owner faction's
+    //             SFXEvent_Exit_Into_Hyperspace, 3D at the object's position (not attached).
+    //   shields   the type's SFXEvent_Shields_Go_Down when the shield falls to 0, SFXEvent_Shields_Go_Back_Up when it
+    //             regenerates above 0 (transitions only; vanilla sets neither tag).
+    // `player_factions[p]` = player p's Faction name ("" / out of range: no faction sounds for its objects).
+    void object_events(const sim::TacticalBattle& battle, const objects::ObjectStore& store, const objects::GameObjectTypes& types,
+                       std::span<const std::string> player_factions);
+    void object_events_reset();  // battle_reset: forget the hyperspace log cursor and the shield states
+    struct AbilitySfx {
+        std::string activate, target_affected;  // "" = none
+    };
+    // The special ability that a unit-ability `ability_type` (tactical::abilities::AbilityType; the EffectOn event's
+    // `type`) of object type `t` applies: the type's Unit_Ability of that Type names it (GUI_Activated_Ability_Name), the
+    // <Abilities> entry of that Name gives the tags. [port] No Unit_Ability of that Type (auto-style specials): the type's
+    // only <Abilities> entry, if it has exactly one. Data-free tests drive it through objects::GameObjectTypes.
+    static AbilitySfx ability_sfx(const objects::GameObjectTypes& types, objects::TypeIndex t, uint8_t ability_type);
+    // Departure tag pick: the type's SFXEvent_Retreat_Engines_Jump when set, else the faction's SFXEvent_Exit_Into_Hyperspace.
+    static std::string_view departure_sfx(std::string_view type_retreat_jump, std::string_view faction_exit);
+    // Shield transition: 1 = went down (up -> 0 points), 2 = back up (down -> > 0), 0 = none. `was_up` < 0 = first sight.
+    static int shield_transition(int was_up, float fraction);
+    // One ability presentation (public for the scripted tests): plays the tags of ability_sfx(types, t, ability_type).
+    void ability_effect(const objects::GameObjectTypes& types, objects::TypeIndex t, uint8_t ability_type, uint64_t user,
+                        const Vec3& user_position, uint64_t target, const Vec3& target_position);
+    // One hyperspace arrival (public for the scripted tests): the owner faction's SFXEvent_Arrive_From_Hyperspace attached
+    // to the arriving object. Returns the instance id (0 = none / refused).
+    uint32_t hyperspace_arrival(uint64_t object, std::string_view owner_faction, const Vec3& position);
+    uint64_t ability_sfx_played() const { return ability_sfx_played_; }
+    uint64_t hyperspace_sfx_played() const { return hyperspace_sfx_played_; }
+    uint64_t shield_sfx_played() const { return shield_sfx_played_; }
+
+private:
+    std::map<std::pair<objects::TypeIndex, uint8_t>, AbilitySfx> ability_sfx_cache_;  // lookup only
+    std::map<objects::TypeIndex, std::pair<std::string, std::string>> shield_tags_;   // type -> (down, back up)
+    std::map<objects::ObjectId, int> shield_up_;                                      // ascending id
+    size_t hyperspace_seen_ = 0;  // TacticalBattle::hyperspace_sfx() entries already played
+    uint64_t ability_sfx_played_ = 0, hyperspace_sfx_played_ = 0, shield_sfx_played_ = 0;
+
+public:
     // --- end aud1 t05 ---
     // --- aud1 t07 (tactical intro speech; src/game_audio_host_intro.cpp) ---
+    // AUDIO.md §9.7 (0x364b20): once per battle the local player's faction speaks one SpeechEvent_Tactical_Intro_* line
+    // (Faction fields), only to the local player and only for its side. Both builds.
+    struct IntroSpeechFacts {
+        bool land = false;               // land battle (else space)
+        bool attacker = false;           // the local player is the battle's attacker (else its defender)
+        bool last_location = false;      // land, galactic parent: the local player owns fewer than 2 planets (0x4b2080)
+        bool raid = false;               // land: the conflict is a raid (record +0x50)
+        bool defender_playable = true;   // the defender's faction Is_Playable (+0x20a8; gates the land attacker default)
+    };
+    // The faction's raw fields (audio::FactionAudio::fields: tag as written, trimmed text, document order).
+    using FactionFieldList = std::span<const std::pair<std::string, std::string>>;
+    // Step 4 of §9.7: the speech event for `f`, or "" for none. Order: the side's _Conditional_Or entries, then its
+    // _Conditional_And entries ("A, B, C, Event"; Or = A or B present and C absent, And = A and B present and C absent;
+    // "None" / empty names are never present; `present(type name)` = an object of that type is at the battle's planet,
+    // any owner); land only: _Land_<side>_Last_Location, then _Land_Raid_<side>; then the side's default
+    // (_Land_Attacker only when the defender's faction is playable, else nothing). An empty field is skipped.
+    static std::string intro_speech_pick(FactionFieldList fields, const IntroSpeechFacts& f,
+                                         const std::function<bool(std::string_view)>& present);
+    // Steps 1-2 of §9.7: Stop = never in this battle (skirmish / multiplayer / story-linked battle: `eligible` false);
+    // Wait = retry next tick (a cinematic camera, the battle frame below 10 s x 30 fps, or speech queued / playing);
+    // Speak = decide now (step 3 onwards).
+    enum class IntroGate : uint8_t { Wait, Speak, Stop };
+    static IntroGate intro_speech_gate(bool eligible, uint32_t battle_frame, bool cinematic, bool speech_busy);
+    // After every battle tick: the gate, then once `facts` (false = the local player is neither attacker nor defender:
+    // nothing) and intro_speech_pick for the local faction (GameAudio::local_faction), queued like speech(). Decided once
+    // per battle; a battle frame lower than the last one seen starts a new battle. Returns the queued event ("" = none).
+    std::string intro_speech_tick(uint32_t battle_frame, bool eligible, bool cinematic,
+                                  const std::function<bool(IntroSpeechFacts&)>& facts,
+                                  const std::function<bool(std::string_view)>& present);
+
+private:
+    bool intro_decided_ = false;  // t07: this battle's intro was decided (played or not)
+    uint32_t intro_frame_ = 0;    // t07: the battle frame of the last intro_speech_tick
+
+public:
     // --- end aud1 t07 ---
     // ccpgu t01 (SKIRMISH_SETUP 4.2 announcer 0x3611f0, presentation only): the local faction's Faction tag for the control
     // point domination countdown after a battle tick, or "" for none. Retail plays it when the timer (mode +0x2b4) equals
@@ -161,6 +254,18 @@ public:
     // aud1 t02: the weather audio name of a tactical::combat::WeatherType value (CLEAR, RAIN, SNOW, SANDSTORM, ASH; out of
     // range -> CLEAR), the names WeatherAudio.xml and the Faction SFXEvent_Weather_Begin / _End pairs use.
     static std::string_view weather_name(uint8_t type);
+    // aud1 t01 (AUDIO.md §9.1): the Music_Event_List_* / Ambient_Map_Sounds key of a map terrain type
+    // (TacticalBattle::terrain_type(): 0 Temperate .. 6 Urban, 7 Space); 8 or more -> "" (retail plays no list music).
+    static std::string_view terrain_name(uint32_t type);
+    // aud1 t04 (AUDIO.md §9.5): the fire sound of a shot - the hardpoint type's Fire_SFXEvent when it has one, else the
+    // shooter's SFXEvent_Fire (only one plays; both empty = none). Unit weapon shots pass hardpoint_fire = "".
+    // aud1 t08 (AUDIO.md §9.8): a hit on `victim_owner`'s object counts as "the local base attacked" when the victim is a
+    // base object (land DUMMY_GROUND_STRUCTURE / DUMMY_LAND_BASE_LEVEL_COMPONENT, space DUMMY_STAR_BASE /
+    // DUMMY_ORBITAL_STRUCTURE), the attacker is hostile to the victim's owner, and the owner is the local player or an ally
+    // of it whose victim type has Is_Community_Property. The rate limit is GameAudio::combat's.
+    static bool base_attacked(bool victim_is_base, bool attacker_hostile, int32_t victim_owner, int32_t local_player,
+                              bool owner_is_ally, bool community_property);
+    static std::string_view fire_event(std::string_view hardpoint_fire, std::string_view shooter_fire);
     static std::string_view clash_win_speech(const tactical::combat::HeroClashData* data, uint32_t entry, bool first_won);
     // AUDIO.md §2.3 (b0286): this tick's "any player has its faction super weapon on the map". The first report after
     // battle_reset re-picks the mode's music (the start forces are known one tick after the Battle scene began); later
@@ -195,6 +300,8 @@ public:
 private:
     const audio::UnitSounds& sounds(const objects::GameObjectTypes& types, objects::TypeIndex t);
     Vec3 position_of(uint64_t id) const;
+    // aud1 t04: Fire_SFXEvent of a CombatData::hardpoints entry (resolved by its HardPoint type name, cached; "" none).
+    const std::string& hardpoint_fire_sfx(const objects::GameObjectTypes& types, const tactical::combat::CombatSystem& cs, int32_t hardpoint);
 
     std::unique_ptr<audio::AudioDatabase> db_;
     std::unique_ptr<audio::GameAudioData> game_data_;
@@ -205,6 +312,9 @@ private:
     SimRng rng_;  // FREE: presentation only
     std::vector<std::string> speech_done_;  // ended speech events not taken yet
     std::map<objects::TypeIndex, std::unique_ptr<audio::UnitSounds>> sounds_;  // lookup only
+    uint8_t base_behaviors_[4] = {0, 0, 0, 0};  // aud1 t08: behaviour ids (land 2, space 2), resolved at init
+    std::vector<std::string> player_factions_;  // aud1 t05: set_player_factions
+    std::map<int32_t, std::string> hardpoint_fire_;  // aud1 t04: hardpoint desc index -> Fire_SFXEvent (lookup only)
     std::unordered_map<uint64_t, Vec3> positions_;                             // lookup only (never iterated)
     std::set<objects::ObjectId> spawned_;                                      // battle units already announced
     std::map<objects::ObjectId, bool> moving_;                                 // ascending id

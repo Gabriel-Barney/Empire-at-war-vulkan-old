@@ -769,7 +769,7 @@ void test_hooks() {
     CHECK(count_op(a, LogOp::SfxStart, "Engine_Move") == 1);
 
     // Battle events.
-    CHECK(g.weapon_fire(60, "Gun_Fire", p) != 0 && last_op(a, LogOp::SfxStart)->owner == 60);
+    CHECK(g.weapon_fire(60, "Gun_Fire", p) != 0 && last_op(a, LogOp::SfxStart)->owner == 0);  // aud1 t04: positional (§9.5)
     CHECK(g.weapon_fire(60, "", p) == 0);
     CHECK(g.explosion("Impact_Boom", p) != 0 && rig.positions.back().x == 5.0f);
     CHECK(g.object_sfx(61, "Ambient_Hum", p, 0.5f) != 0);
@@ -810,6 +810,15 @@ void test_hooks() {
     g.set_weather("CLEAR", 0.0f);
     settle();
     g.set_weather("RAIN", 0.2f);
+    CHECK(count_op(a, LogOp::SfxStart, "HUD_Rain_Begin") == 2);
+    // aud1 t02 (AUDIO.md §9.3): a type change at intensity > 0 announces nothing; a Weatherproof local player hears nothing.
+    const int starts_before = count_op(a, LogOp::SfxStart, "");
+    g.set_weather("SNOW", 0.4f);
+    g.set_weather("RAIN", 0.4f);
+    CHECK(count_op(a, LogOp::SfxStart, "") == starts_before);
+    g.set_weather("RAIN", 0.0f);
+    settle();
+    g.set_weather("RAIN", 0.6f, false);
     CHECK(count_op(a, LogOp::SfxStart, "HUD_Rain_Begin") == 2);
 
     // Enemy spotted: per-type line, else the generic one; Lua flag off -> nothing.

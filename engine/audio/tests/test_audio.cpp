@@ -819,6 +819,11 @@ void test_music() {
         return "Galactic";
     });
     a.set_mode(AudioMode::Land);
+    // aud1 t06 (AUDIO.md §9.2): combat refuses in Lua mode 12 (the play_music default the music above used) ...
+    a.notify_combat(true);
+    CHECK(a.current_music() == "Galactic" && a.music_mode() == music_mode::kLua);
+    // ... so the battle starts from tactical ambient (mode 6), as enter_tactical leaves it.
+    CHECK(a.play_music("Galactic", music_mode::kTacticalAmbient, false, true));
     a.notify_combat(false);
     CHECK(a.current_music() == "Galactic");
     a.notify_combat(true);

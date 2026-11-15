@@ -906,6 +906,8 @@ void TacticalBattle::deploy(TacticalMode& mode, uint32_t pi, SimRng& rng, uint32
         ++P.alive;
         ++stats_.spawned;
         if (P.reserve) story_reinforced_.push_back(u.id);  // L1/S4 wave 2b story hook (STORY_REINFORCE)
+        // aud1 t05 [port] (AUDIO.md §9.6): a space reinforcement's arrival sound at its deploy (presentation log).
+        if (P.reserve && space_) hyperspace_sfx_.push_back({HyperspaceSfx::Kind::Arrive, u.id, u.type, P.owner, pos});
     }
     // 2. REMAINING_GAPS §3.4 team helper 0x2a5a60 (start placement 0x2a00b0): it runs when the first spawned member's type
     //    has Create_Team, or always in space. Members in list order in chunks of min(k, remaining), k = the company's

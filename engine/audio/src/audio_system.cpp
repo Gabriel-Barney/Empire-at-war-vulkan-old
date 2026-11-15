@@ -1111,7 +1111,12 @@ void AudioSystem::resume_mode_based_music(bool force) {
 void AudioSystem::notify_combat(bool involves_local_player) {
     if (!involves_local_player) return;
     peace_ticks_ = 0;
-    if (music_mode_ == music_mode::kTacticalBattle || !music_resolver_) return;
+    // aud1 t06 (AUDIO.md §9.2, 0x28f020): the unforced battle switch refuses in modes 7, 8 (TSW), 11 (splash), 12 (Lua
+    // Play_Music), 13 (front end) and during the attract demo; mode 16 (battle end) is not excluded. The peace counter is
+    // reset either way.
+    if (music_mode_ == music_mode::kTacticalBattle || music_mode_ == music_mode::kSuperWeapon || music_mode_ == music_mode::kSplash ||
+        music_mode_ == music_mode::kLua || music_mode_ == music_mode::kFrontEnd || attract_ || !music_resolver_)
+        return;
     const std::string name = music_resolver_(music_mode::kTacticalBattle, *rng_);
     if (!name.empty()) play_music(name, music_mode::kTacticalBattle);
 }

@@ -184,7 +184,7 @@ void GameAudio::enter_tactical(const TacticalSetup& setup) {
     land_ = setup.land;
     environment_ = setup.environment;
     super_weapon_ = setup.super_weapon_present;
-    weather_active_ = false;
+    weather_intensity_ = 0.0f;
     weather_type_ = "CLEAR";
     base_announced_ = false;
     audio_->set_mode(land_ ? AudioMode::Land : AudioMode::Space);
@@ -246,23 +246,19 @@ void GameAudio::set_camera(const CameraState& camera) {
         listener_from_camera(camera.position, camera.look_at, camera.forward, camera.up, pullback, camera.cinematic));
 }
 
-void GameAudio::set_weather(std::string_view weather, float intensity) {
+void GameAudio::set_weather(std::string_view weather, float intensity, bool local_affected) {
     ambience_.set_weather(weather, intensity);
-    if (!tactical_) return;
-    const bool active = !iequals(weather, "CLEAR") && intensity > 0.0f;
-    const bool changed_type = active && weather_active_ && !iequals(weather, weather_type_);
-    if (active == weather_active_ && !changed_type) return;
-    const FactionAudio* f = data_->find_faction(faction_);
-    if (weather_active_ && f) {
-        const std::vector<std::string> v = f->pair_values("SFXEvent_Weather_End", weather_type_);
+    // aud1 t02 (AUDIO.md §9.3, 0x323340): the faction line plays when the intensity goes from exactly 0 to above 0 (Begin)
+    // or from above 0 to exactly 0 (End), keyed by the current type, never on a type change alone; nothing for CLEAR or
+    // while the local player is not weather-affected (Weatherproof). 2D, unforced.
+    const bool was_on = weather_intensity_ > 0.0f, on = intensity > 0.0f;
+    weather_intensity_ = intensity;
+    weather_type_ = std::string(weather);
+    if (!tactical_ || was_on == on || iequals(weather, "CLEAR") || !local_affected) return;
+    if (const FactionAudio* f = data_->find_faction(faction_)) {
+        const std::vector<std::string> v = f->pair_values(on ? "SFXEvent_Weather_Begin" : "SFXEvent_Weather_End", weather);
         if (!v.empty()) play_2d(v.front());
     }
-    if (active && f) {
-        const std::vector<std::string> v = f->pair_values("SFXEvent_Weather_Begin", weather);
-        if (!v.empty()) play_2d(v.front());
-    }
-    weather_active_ = active;
-    weather_type_ = active ? std::string(weather) : std::string("CLEAR");
 }
 
 void GameAudio::sim_tick() {
@@ -287,9 +283,10 @@ void GameAudio::update(double wall_dt_seconds) {
 
 // ---------------------------------------------------------------- battle events
 
-uint32_t GameAudio::weapon_fire(uint64_t shooter, std::string_view event, const Vec3& position) {
+uint32_t GameAudio::weapon_fire(uint64_t /*shooter*/, std::string_view event, const Vec3& position) {
+    // AUDIO.md §9.5: 3D at the fixed muzzle / projectile position (0x2d5240), not attached; the fog test applies.
     if (event.empty() || audio_->database().constants().test_disable_weapon_fire_sfx) return 0;
-    return object_sfx(shooter, event, position);
+    return impact(event, position);
 }
 
 uint32_t GameAudio::impact(std::string_view event, const Vec3& position) {

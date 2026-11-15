@@ -1,4 +1,190 @@
-// aud1 t05: ability, shield and hyperspace object SFX (GameAudioHost; rules: docs/re/AUDIO.md §9).
+// aud1 t05: ability, shield and hyperspace object SFX (GameAudioHost; rules: docs/re/AUDIO.md §9.6).
 #include "alamo/game/game_audio_host.hpp"
 
-namespace alamo::game {}  // namespace alamo::game
+#include "alamo/core/ascii.hpp"
+#include "alamo/sim/tactical_battle.hpp"
+#include "alamo/tactical/abilities/ability_types.hpp"
+#ifdef ALAMO_GAME_HAVE_AUDIO
+#include "alamo/audio/game_audio.hpp"
+#include "alamo/audio/game_audio_data.hpp"
+#endif
+
+namespace alamo::game {
+
+namespace {
+
+// The trimmed text of the last direct child `tag` of sub-object field `f` ("" if none).
+std::string_view child_text(const objects::ObjectTypeDatabase& db, objects::FieldIndex f, std::string_view tag) {
+    const objects::FieldColumns& fc = db.fields();
+    if (f >= fc.size()) return {};
+    const objects::FieldIndex end = db.types().field_end[fc.type[f]];
+    std::string_view out;
+    for (objects::FieldIndex g = f + 1; g < end && fc.depth[g] > fc.depth[f]; ++g)
+        if (fc.parent[g] == f && ascii_iequals(db.tag_name(g), tag)) out = fc.text[g];
+    return out;
+}
+
+std::string_view name_attr(const objects::ObjectTypeDatabase& db, objects::FieldIndex f) {
+    const objects::FieldColumns& fc = db.fields();
+    if (f >= fc.size()) return {};
+    for (uint32_t a = 0; a < fc.attr_count[f]; ++a) {
+        const objects::XmlAttr& at = db.attributes()[fc.attr_begin[f] + a];
+        if (ascii_iequals(at.name, "Name")) return ascii_trim(at.value);
+    }
+    return {};
+}
+
+}  // namespace
+
+GameAudioHost::AbilitySfx GameAudioHost::ability_sfx(const objects::GameObjectTypes& types, objects::TypeIndex t,
+                                                     uint8_t ability_type) {
+    AbilitySfx out;
+    if (t >= types.size()) return out;
+    const objects::ObjectTypeDatabase& db = types.raw();
+    // The Unit_Ability of this Type forwards to the special by GUI_Activated_Ability_Name (ABILITIES_HARDPOINTS 2.5).
+    bool have_record = false;
+    std::string_view special;
+    if (ability_type != 0)
+        for (const objects::FieldIndex f : types.get_sub_objects(t, "Unit_Abilities_Data")) {
+            if (tactical::abilities::ability_type_from_name(ascii_trim(child_text(db, f, "Type"))) != ability_type) continue;
+            have_record = true;
+            special = ascii_trim(child_text(db, f, "GUI_Activated_Ability_Name"));
+            break;
+        }
+    const std::span<const objects::FieldIndex> entries = types.get_sub_objects(t, "Abilities");
+    objects::FieldIndex pick = objects::kNone;
+    if (!special.empty()) {
+        for (const objects::FieldIndex f : entries)
+            if (ascii_iequals(name_attr(db, f), special)) {
+                pick = f;
+                break;
+            }
+    } else if (!have_record && entries.size() == 1) {
+        pick = entries[0];  // [port] an auto-style special without a forwarding Unit_Ability: the type's only entry
+    }
+    if (pick == objects::kNone) return out;
+    out.activate = std::string(ascii_trim(child_text(db, pick, "SFXEvent_Activate")));
+    out.target_affected = std::string(ascii_trim(child_text(db, pick, "SFXEvent_Target_Affected")));
+    return out;
+}
+
+std::string_view GameAudioHost::departure_sfx(std::string_view type_retreat_jump, std::string_view faction_exit) {
+    return !type_retreat_jump.empty() ? type_retreat_jump : faction_exit;
+}
+
+int GameAudioHost::shield_transition(int was_up, float fraction) {
+    const bool up = fraction > 0.0f;
+    if (was_up < 0) return 0;  // first sight: no transition
+    if (was_up != 0 && !up) return 1;
+    if (was_up == 0 && up) return 2;
+    return 0;
+}
+
+void GameAudioHost::object_events_reset() {
+    hyperspace_seen_ = 0;
+    shield_up_.clear();
+}
+
+#ifdef ALAMO_GAME_HAVE_AUDIO
+
+void GameAudioHost::ability_effect(const objects::GameObjectTypes& types, objects::TypeIndex t, uint8_t ability_type, uint64_t user,
+                                   const Vec3& user_position, uint64_t target, const Vec3& target_position) {
+    if (!game_) return;
+    const auto key = std::make_pair(t, ability_type);
+    auto it = ability_sfx_cache_.find(key);
+    if (it == ability_sfx_cache_.end()) it = ability_sfx_cache_.emplace(key, ability_sfx(types, t, ability_type)).first;
+    // [port] An Is_2D event plays 2D attached to the object (GameAudio::object_sfx) where retail plays it 2D unattached
+    // (0x2d5290): the same sound, only stopped with the object.
+    if (!it->second.activate.empty() && game_->object_sfx(user, it->second.activate, user_position) != 0) ++ability_sfx_played_;
+    if (target != 0 && !it->second.target_affected.empty() &&
+        game_->object_sfx(target, it->second.target_affected, target_position) != 0)
+        ++ability_sfx_played_;
+}
+
+uint32_t GameAudioHost::hyperspace_arrival(uint64_t object, std::string_view owner_faction, const Vec3& position) {
+    if (!game_ || owner_faction.empty()) return 0;
+    const audio::FactionAudio* f = game_data_->find_faction(owner_faction);
+    const std::string_view ev = f ? f->get("SFXEvent_Arrive_From_Hyperspace") : std::string_view{};
+    const uint32_t id = ev.empty() ? 0u : game_->object_sfx(object, ev, position);
+    if (id != 0) ++hyperspace_sfx_played_;
+    return id;
+}
+
+void GameAudioHost::object_events(const sim::TacticalBattle& battle, const objects::ObjectStore& store,
+                                  const objects::GameObjectTypes& types, std::span<const std::string> player_factions) {
+    if (!game_) return;
+    auto faction_tag = [&](int32_t owner, std::string_view tag) -> std::string_view {
+        if (owner < 0 || static_cast<size_t>(owner) >= player_factions.size() || player_factions[static_cast<size_t>(owner)].empty())
+            return {};
+        const audio::FactionAudio* f = game_data_->find_faction(player_factions[static_cast<size_t>(owner)]);
+        return f ? f->get(tag) : std::string_view{};
+    };
+    // Abilities: EffectOn = the activation presentation (light, particle, sound), event order.
+    for (const tactical::abilities::AbilityEvent& e : battle.abilities().events()) {
+        if (e.kind != tactical::abilities::AbilityEventKind::EffectOn) continue;
+        const objects::ObjectHandle h = store.find(static_cast<objects::ObjectId>(e.id));
+        if (!store.alive(h)) continue;
+        uint64_t target = 0;
+        Vec3 tp{};
+        if (e.target != tactical::abilities::kNoObject) {
+            const objects::ObjectHandle th = store.find(static_cast<objects::ObjectId>(e.target));
+            if (store.alive(th)) {
+                target = static_cast<uint64_t>(e.target);
+                tp = store.position(th);
+            }
+        }
+        ability_effect(types, store.type(h), e.type, static_cast<uint64_t>(e.id), store.position(h), target, tp);
+    }
+    // Hyperspace: the battle's append-only log from our cursor (a shorter log = a new battle or a load).
+    const std::span<const sim::TacticalBattle::HyperspaceSfx> log = battle.hyperspace_sfx();
+    if (log.size() < hyperspace_seen_) hyperspace_seen_ = 0;
+    for (; hyperspace_seen_ < log.size(); ++hyperspace_seen_) {
+        const sim::TacticalBattle::HyperspaceSfx& r = log[hyperspace_seen_];
+        if (r.kind == sim::TacticalBattle::HyperspaceSfx::Kind::Arrive) {
+            const std::string_view fac = r.owner >= 0 && static_cast<size_t>(r.owner) < player_factions.size()
+                                             ? std::string_view(player_factions[static_cast<size_t>(r.owner)]) : std::string_view();
+            hyperspace_arrival(static_cast<uint64_t>(r.id), fac, r.position);
+        } else {
+            const std::string_view type_ev =
+                r.type < types.size() ? ascii_trim(types.get_string(r.type, "SFXEvent_Retreat_Engines_Jump")) : std::string_view{};
+            const std::string_view ev = departure_sfx(type_ev, type_ev.empty() ? faction_tag(r.owner, "SFXEvent_Exit_Into_Hyperspace")
+                                                                                : std::string_view{});
+            if (!ev.empty() && game_->world_sfx(ev, r.position) != 0) ++hyperspace_sfx_played_;
+        }
+    }
+    // Shields (0x549810): down on the fall to 0 points, back up on the first regen above 0; only types with a tag.
+    const tactical::combat::CombatSystem& cs = battle.combat();
+    for (size_t i = 0; i < cs.unit_count(); ++i) {
+        const tactical::combat::ObjectId cid = cs.unit_id_at(i);
+        const objects::ObjectHandle h = store.find(static_cast<objects::ObjectId>(cid));
+        if (!store.alive(h)) continue;
+        const objects::TypeIndex t = store.type(h);
+        auto st = shield_tags_.find(t);
+        if (st == shield_tags_.end())
+            st = shield_tags_
+                     .emplace(t, std::make_pair(std::string(ascii_trim(types.get_string(t, "SFXEvent_Shields_Go_Down"))),
+                                                std::string(ascii_trim(types.get_string(t, "SFXEvent_Shields_Go_Back_Up")))))
+                     .first;
+        if (st->second.first.empty() && st->second.second.empty()) continue;
+        const float fraction = cs.shield_fraction(cid);
+        const objects::ObjectId id = static_cast<objects::ObjectId>(cid);
+        auto su = shield_up_.find(id);
+        const int was = su == shield_up_.end() ? -1 : su->second;
+        const int tr = shield_transition(was, fraction);
+        shield_up_[id] = fraction > 0.0f ? 1 : 0;
+        const std::string& ev = tr == 1 ? st->second.first : tr == 2 ? st->second.second : std::string();
+        if (!ev.empty() && game_->object_sfx(static_cast<uint64_t>(id), ev, store.position(h)) != 0) ++shield_sfx_played_;
+    }
+}
+
+#else  // no engine/audio: inactive host
+
+void GameAudioHost::ability_effect(const objects::GameObjectTypes&, objects::TypeIndex, uint8_t, uint64_t, const Vec3&, uint64_t,
+                                   const Vec3&) {}
+void GameAudioHost::object_events(const sim::TacticalBattle&, const objects::ObjectStore&, const objects::GameObjectTypes&,
+                                  std::span<const std::string>) {}
+uint32_t GameAudioHost::hyperspace_arrival(uint64_t, std::string_view, const Vec3&) { return 0; }
+
+#endif
+
+}  // namespace alamo::game

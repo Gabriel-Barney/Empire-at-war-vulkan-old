@@ -1558,6 +1558,9 @@ void TacticalBattle::arrival_service(TacticalMode& mode, SimRng& rng) {
             }
             continue;
         }
+        // aud1 t05 (AUDIO.md §9.6): the arrival sound at state 4's timer 35 (presentation log, no sim reader).
+        if (r.timer == 35 && !held)
+            hyperspace_sfx_.push_back({HyperspaceSfx::Kind::Arrive, u->id, u->type, st.owner(u->h), st.position(u->h)});
         keep.push_back(r);
     }
     arrivals_.swap(keep);

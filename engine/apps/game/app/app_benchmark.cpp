@@ -188,7 +188,7 @@ void App::bench_autopilot() {
     if (screen_ == Screen::BattleLoad && ui_.load.is_open() && ui_.load.ready() && !battle_view_pending_ && load_intro_frames_ == 0) {
         ui_.load.close();  // as the Begin button (frame(): LoadScreenEvent::Begin)
         screen_ = Screen::Battle;
-        audio_.music(MusicScene::Battle, local_faction(), bview_.space());
+        audio_.music(MusicScene::Battle, local_faction(), bview_.space(), battle_terrain());
         note("load screen: Begin");
     }
     if (choice_open_) {

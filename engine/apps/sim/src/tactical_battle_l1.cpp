@@ -571,6 +571,10 @@ void TacticalBattle::l1_motion(TacticalMode& mode, SimRng& rng) {
         mode.trees().update(static_cast<tactical::EntityHandle>(u.id), mode.bounds_of(u.h));
     }
     for (const mv::HyperspaceEvent& e : l1_jumps_.events()) {
+        if (e.kind == mv::HyperspaceEvent::Kind::Jumped) {  // aud1 t05 (AUDIO.md §9.6): the jump sound (presentation log)
+            if (const Unit* j = unit_by_id(e.id); j && j->alive && !j->retreated && st.alive(j->h))
+                hyperspace_sfx_.push_back({HyperspaceSfx::Kind::Depart, j->id, j->type, st.owner(j->h), st.position(j->h)});
+        }
         if (e.kind != mv::HyperspaceEvent::Kind::Killed) continue;  // Jumped: presentation (SFX, model stretch)
         Unit* u = unit_by_id(e.id);
         if (!u || !u->alive || u->retreated) continue;

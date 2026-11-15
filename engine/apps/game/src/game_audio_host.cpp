@@ -4,6 +4,8 @@
 #include <cmath>
 #include <optional>
 
+#include "alamo/objects/behaviors.hpp"
+#include "alamo/objects/game_object_types.hpp"
 #include "alamo/sim/tactical_battle.hpp"
 #ifdef ALAMO_GAME_HAVE_AUDIO
 #include "alamo/audio/audio_db.hpp"
@@ -69,6 +71,21 @@ std::string_view GameAudioHost::clash_win_speech(const tactical::combat::HeroCla
 std::string_view GameAudioHost::weather_name(uint8_t type) {
     static constexpr const char* kNames[] = {"CLEAR", "RAIN", "SNOW", "SANDSTORM", "ASH"};  // LandModeClass::tLandWeather order
     return type < std::size(kNames) ? std::string_view(kNames[type]) : std::string_view("CLEAR");
+}
+
+bool GameAudioHost::base_attacked(bool victim_is_base, bool attacker_hostile, int32_t victim_owner, int32_t local_player,
+                                  bool owner_is_ally, bool community_property) {
+    if (!victim_is_base || !attacker_hostile || local_player < 0 || victim_owner < 0) return false;
+    return victim_owner == local_player || (owner_is_ally && community_property);
+}
+
+std::string_view GameAudioHost::fire_event(std::string_view hardpoint_fire, std::string_view shooter_fire) {
+    return hardpoint_fire.empty() ? shooter_fire : hardpoint_fire;
+}
+
+std::string_view GameAudioHost::terrain_name(uint32_t type) {
+    static constexpr const char* kNames[] = {"Temperate", "Arctic", "Desert", "Forest", "Swamp", "Volcanic", "Urban", "Space"};  // 0x5e8770
+    return type < std::size(kNames) ? std::string_view(kNames[type]) : std::string_view();
 }
 
 Vec3 GameAudioHost::position_of(uint64_t id) const {
@@ -416,31 +433,84 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
         }
         combat = combat || e.owner == local_player || (e.victim != tactical::combat::kNoObject && owner_of(e.victim) == local_player);
     }
+    // aud1 t04 (AUDIO.md §9.5): a new projectile's fire sound, 3D at the projectile's spawn position (fog test applies):
+    // a hardpoint shot plays the hardpoint type's Fire_SFXEvent, else the parent's SFXEvent_Fire; a unit weapon shot the
+    // shooter's SFXEvent_Fire. [port] Projectile_Appearance_Delay_Frames is not modelled (the projectile appears at once),
+    // so the sound plays with the shot. The hardpoint comes from this tick's ShotEvents by projectile serial.
     uint32_t max_serial = last_serial_;
+    const auto shots = cs.shot_events();
     for (size_t i = 0; i < cs.projectile_count(); ++i) {
         const tactical::combat::ProjectileView v = cs.projectile(i);
         if (have_serial_ && v.serial <= last_serial_) continue;
         max_serial = std::max(max_serial, v.serial);
         const objects::ObjectHandle sh = handle_of(v.shooter);
         if (store.exists(sh)) {
-            const std::string& ev = sounds(types, store.type(sh)).fire;
-            if (!ev.empty() && game_->weapon_fire(static_cast<uint64_t>(v.shooter), ev, store.position(sh))) ++stats_.fires;
+            int32_t hp = -1;
+            for (const tactical::combat::ShotEvent& e : shots)
+                if (e.serial == v.serial && e.shooter == v.shooter) {
+                    hp = e.hardpoint;
+                    break;
+                }
+            weapon_fired(static_cast<uint64_t>(v.shooter), hardpoint_fire_sfx(types, cs, hp), sounds(types, store.type(sh)).fire, v3(v.pos));
         }
         combat = combat || v.owner == local_player;
     }
     last_serial_ = max_serial;
     have_serial_ = true;
     tsw_audio(tsw_cues(battle.special_weapon_events(), store), types);  // refix t06
+    object_events(battle, store, types, player_factions_);  // aud1 t05: abilities, hyperspace, shields (AUDIO.md §9.6)
     // aud1 t02 (L1_S4_REMAINING §3.2): the land weather's type and intensity after the tick -> the weather audio manager
     // and the faction's SFXEvent_Weather_Begin / _End lines (GameAudio::set_weather; unchanged values do nothing). Weather
     // off (no scenario, space) = CLEAR at 1.0, as retail's 0x323110(0, 1.0).
     weather(weather_name(battle.weather().active() ? static_cast<uint8_t>(battle.weather().type()) : 0),
-            battle.weather().active() ? battle.weather().intensity() : 1.0f);
-    if (combat) this->combat(true, false);
+            battle.weather().active() ? battle.weather().intensity() : 1.0f, local_player < 0 || ab.weather_affected(local_player));
+    // aud1 t08 (AUDIO.md §9.8): this tick's hits on the local player's (or a community-property ally's) base objects.
+    bool base_hit = false;
+    if (local_player >= 0) {
+        using namespace objects;
+        if (base_behaviors_[0] == 0) {
+            base_behaviors_[0] = behavior_type_id("DUMMY_GROUND_STRUCTURE");
+            base_behaviors_[1] = behavior_type_id("DUMMY_LAND_BASE_LEVEL_COMPONENT");
+            base_behaviors_[2] = behavior_type_id("DUMMY_STAR_BASE");
+            base_behaviors_[3] = behavior_type_id("DUMMY_ORBITAL_STRUCTURE");
+        }
+        const bool space = battle.is_space_battle();
+        const BehaviorSet set = space ? BehaviorSet::Space : BehaviorSet::Land;
+        for (const tactical::combat::DamageEvent& d : cs.damage_events()) {
+            if (base_hit) break;
+            const ObjectHandle vh = handle_of(d.victim);
+            if (!store.exists(vh) || d.source_owner < 0) continue;
+            const TypeIndex vt = store.type(vh);
+            const int32_t vo = store.owner(vh);
+            const BehaviorTypeId a = base_behaviors_[space ? 2 : 0], b = base_behaviors_[space ? 3 : 1];
+            const bool is_base = (a != kNoBehavior && types.has_behavior(vt, set, a)) || (b != kNoBehavior && types.has_behavior(vt, set, b));
+            const bool ally = vo >= 0 && vo != local_player && !cs.is_enemy(local_player, vo);
+            base_hit = base_attacked(is_base, cs.is_enemy(d.source_owner, vo), vo, local_player, ally,
+                                     ally && types.get_bool(vt, "Is_Community_Property"));
+        }
+    }
+    if (combat || base_hit) this->combat(combat, base_hit);
 }
 
-void GameAudioHost::weather(std::string_view type, float intensity) {
-    if (game_) game_->set_weather(type, intensity);
+uint32_t GameAudioHost::weapon_fired(uint64_t shooter, std::string_view hardpoint_fire, std::string_view shooter_fire, const Vec3& position) {
+    if (!game_) return 0;
+    const std::string_view ev = fire_event(hardpoint_fire, shooter_fire);
+    const uint32_t id = ev.empty() ? 0u : game_->weapon_fire(shooter, ev, position);
+    if (id != 0) ++stats_.fires;
+    return id;
+}
+
+uint32_t GameAudioHost::animation_sounds(std::span<const AnimSound> list) {
+    if (!game_) return 0;
+    uint32_t n = 0;
+    for (const AnimSound& a : list)
+        if (!a.event.empty() && game_->object_sfx(a.object, a.event, a.position) != 0) ++n;
+    stats_.anim_sounds += n;
+    return n;
+}
+
+void GameAudioHost::weather(std::string_view type, float intensity, bool local_affected) {
+    if (game_) game_->set_weather(type, intensity, local_affected);
 }
 
 void GameAudioHost::combat(bool local_involved, bool local_base_attacked) {
@@ -450,6 +520,18 @@ void GameAudioHost::combat(bool local_involved, bool local_base_attacked) {
     ce.local_base_attacked = local_base_attacked;
     game_->combat(ce);
     ++stats_.combat_notes;
+}
+
+const std::string& GameAudioHost::hardpoint_fire_sfx(const objects::GameObjectTypes& types, const tactical::combat::CombatSystem& cs,
+                                                     int32_t hardpoint) {
+    static const std::string kNone;
+    if (hardpoint < 0 || static_cast<size_t>(hardpoint) >= cs.data().hardpoints.size()) return kNone;
+    auto it = hardpoint_fire_.find(hardpoint);
+    if (it == hardpoint_fire_.end()) {
+        const objects::TypeIndex t = types.resolve_name(cs.data().hardpoints[static_cast<size_t>(hardpoint)].name);
+        it = hardpoint_fire_.emplace(hardpoint, t != objects::kNone ? std::string(types.get_string(t, "Fire_SFXEvent")) : std::string()).first;
+    }
+    return it->second;
 }
 
 void GameAudioHost::super_weapon_report(bool present) {
@@ -618,7 +700,9 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle&, const objects::Objec
 void GameAudioHost::battle_end(bool, std::string_view) {}
 void GameAudioHost::tsw_audio(std::span<const TswCue>, const objects::GameObjectTypes&) {}
 void GameAudioHost::sim_tick() {}
-void GameAudioHost::weather(std::string_view, float) {}
+uint32_t GameAudioHost::animation_sounds(std::span<const AnimSound>) { return 0; }
+uint32_t GameAudioHost::weapon_fired(uint64_t, std::string_view, std::string_view, const Vec3&) { return 0; }
+void GameAudioHost::weather(std::string_view, float, bool) {}
 void GameAudioHost::combat(bool, bool) {}
 void GameAudioHost::super_weapon_report(bool) { battle_reported_ = true; }
 void GameAudioHost::music(MusicScene scene, std::string_view, bool, std::string_view) {
@@ -645,6 +729,10 @@ void GameAudioHost::apply_presentation(const std::vector<lua::PresentationEvent>
 // Shared by both builds (cu9 t09): the same bookkeeping with and without engine/audio (nothing reads it without).
 void GameAudioHost::battle_reset() {
     last_serial_ = 0;
+    hardpoint_fire_.clear();  // aud1 t04: hardpoint indices are per battle
+    intro_decided_ = false;   // aud1 t07: a new battle decides its intro again
+    object_events_reset();    // aud1 t05
+    intro_frame_ = 0;
     have_serial_ = false;
     spawned_.clear();
     moving_.clear();

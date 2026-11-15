@@ -891,6 +891,11 @@ public:
     // (render::MapScene; the skydomes stay). Not hashed: its only game-logic effect is the land weather restart, which
     // the weather state and the RNG show on the next land tick.
     uint32_t environment_index() const { return env_index_; }
+    // aud1 t01 (AUDIO.md §9.1, Load_Map 0x56480 -> mode +0x08 via 0x364f00): the map's terrain / environment type, map-info
+    // mini 06 (0 Temperate .. 6 Urban, 7 Space; a missing mini reads 0), forced to 7 on space maps. Presentation only (music /
+    // map ambience key); not hashed.
+    uint32_t terrain_type() const { return space_ ? 7u : map_.info.counts[4]; }
+    bool is_space_battle() const { return space_; }  // aud1 t08
     bool set_environment(int32_t index);
     // Mode vf27 (0x2770e0, "random environment of a weather type"; no caller found in retail or the port): type <= 4 ->
     // the environments whose mini 13 (Environment::field_13) equals type, in index order; m = 1 -> that one, m >= 2 ->
@@ -1132,6 +1137,20 @@ public:
     // HARDPOINT_DISABLED.md §9.1 (presentation): units whose engines came back online this tick (EnginesOnline: an ENGINE
     // hardpoint repaired to max) - the host restarts their SFXEvent_Engine_Idle_Loop. Not hashed.
     const std::vector<objects::ObjectId>& engines_restarted() const { return engines_restarted_; }
+    // aud1 t05 (AUDIO.md §9.6; presentation only: never hashed, never saved, no sim reader): the hyperspace sound moments
+    // of this battle, an append-only log (the audio host reads it from its own cursor, so it works whatever runs between
+    // ticks; a save / load starts it empty). Arrive: a start-fleet arrival record's timer reaching 35 (state 4) and,
+    // [port], a space reserve deployment (the stand-in reinforcement has no arrival state, so its sound comes at the
+    // deploy). Depart: a Hyperspace_Away departure's jump (timer 90) and a completed space retreat's units.
+    struct HyperspaceSfx {
+        enum class Kind : uint8_t { Arrive, Depart };
+        Kind kind = Kind::Arrive;
+        objects::ObjectId id = objects::kNoObjectId;
+        uint32_t type = 0;  // TypeIndex
+        int32_t owner = -1;
+        Vec3 position;
+    };
+    std::span<const HyperspaceSfx> hyperspace_sfx() const { return hyperspace_sfx_; }
     // --- hangars / station upgrade / engine loops (STATION_HANGARS_SOUND.md; tactical_battle_hangar.cpp) ---
     // Engine-loop requests of the last tick (EngineLoops: Set_Engine_Idle_Loop / Set_Engine_Moving_Loop in call order;
     // start = fade-in, stop = fade-out) for the audio host. Not hashed (presentation).
@@ -1784,6 +1803,7 @@ private:
     galactic::BattleRequest req_;
     BattleConfig cfg_;
     std::vector<objects::ObjectId> engines_restarted_;  // engines_restarted() (presentation)
+    std::vector<HyperspaceSfx> hyperspace_sfx_;         // aud1 t05: hyperspace_sfx() (presentation, not saved / hashed)
     bool space_ = true;
     terrain::MapData map_;
     uint32_t desc_of(uint32_t type) const;
