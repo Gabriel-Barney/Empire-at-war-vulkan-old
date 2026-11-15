@@ -43,7 +43,10 @@ and `docs/ROADMAP_PROTOCOL.md` first; the loop below is how they apply to a lane
      hang, slow tick): `diagnosing-bugs` before a second fix attempt: build the red/green loop first, then ranked hypotheses.
      Sim code: `determinism-check` for the rules and the divergence workflow.
    - **A question about a technique, API, format or original-game behaviour that the task needs answered:** `research` (writes a
-     cited report in its `docs/` home; a retail-only question becomes a `probe-kit`, which Gabriel runs).
+     cited report in its `docs/` home).
+   - **Original-game behaviour that `docs/re/` does not settle:** `re-question` before guessing (the `re-analyst` agent reads
+     the binary and writes the answer into `docs/re/`; you never read decompiled code). Only what the running game alone shows
+     (timings, random outcomes) becomes a `probe-kit`, which you run yourself.
    - **Editing `.claude/skills`, `.claude/agents` or any file an agent reads:** the `writing-for-agents` checklist.
 6. **Build in your own tree** (one tree per worktree; never share `build-msvc` or another lane's tree). From PowerShell:
    `& .\build_agent.cmd --% msvc wt "core;<modules and their dependencies>"` gives `build-wt-msvc` (`wt` is the default tree and may be left out) and runs the fast tier

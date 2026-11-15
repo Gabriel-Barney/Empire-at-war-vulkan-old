@@ -1,0 +1,9 @@
+{
+  "name": "alamo-re-rea",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pins rea-agents for toolchain/15_rea.cmd (npm ci into toolchain/re/rea). Not part of the engine.",
+  "dependencies": {
+    "rea-agents": "6.8.0"
+  }
+}

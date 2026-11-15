@@ -19,6 +19,15 @@ Write down, before any code: the exact question, the port's current guess and wh
 what result confirms or refutes it. A kit that answers "what happens?" without a prediction is hard to read afterwards. Prefer
 one launch that answers several sub-questions over several launches.
 
+If reading the binary can answer it, use the `re-question` skill instead: no game run. A kit records with a Lua probe by
+default. When Lua cannot see the value (an internal counter, a random draw, a function's arguments), record with one of these
+from the kit's run script (`docs/PROBES.md`, "RE and retail-tracing tools"):
+- **Frida** (`toolchain\re\venv\Scripts\frida.exe`, Python module `frida`): hook a function by RVA and log arguments and return
+  values; good for counts and distributions over many seeds.
+- **TTD** (`tools\re\ttd_record.cmd`): record the session to a `.run` trace and query it afterwards (`re-analyst`'s `windbg`
+  server, or `cdb.exe -z`). It raises a Windows administrator prompt, and Microsoft's licence must have been accepted once by
+  Gabriel: if TTD stops on the licence, report it, do not pass `-accepteula`.
+
 ## 2. Kit layout (`tools/probe_mod/<kit>/`)
 
 | File | Role |
