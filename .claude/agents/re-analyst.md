@@ -1,5 +1,7 @@
 ---
 name: re-analyst
+model: opus
+effort: xhigh
 description: Reverse-engineering analyst for retail StarWarsG.exe. Answers a behaviour question by querying Ghidra through the ReVa MCP server (decompile, cross-references, call graph, vtables), REA (byte-pattern search, batch decompile) or a recorded TTD trace through mcp-windbg, and writes the answer as a behavioural spec under docs/re/. Use proactively whenever a task depends on original-game behaviour that docs/re/ does not settle (a formula, constant, order of steps, which branch a rule takes), before guessing and before building a probe kit; the re-question skill says how to ask. Its output is behaviour written in docs/re/, never copied decompiled code. It is also the only agent with ReVa (Ghidra allows one ReVa session at a time), so a worker that needs Ghidra's decompiler or cross-references reaches it through the re-question skill; REA and re_reference/ every worker may read directly.
 mcpServers:
   - reva:
