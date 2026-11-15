@@ -154,6 +154,17 @@ the findings also show in the editor. Not part of the gate: findings are informa
   `auto_resolve.cpp:221` (an `int8_t` vector element) and `job_system.cpp:52` (`getenv` at job-system start-up). Anything else
   is new and worth a look.
 
+## Code coverage (2026-11-15)
+
+`build_coverage.cmd ["module list"] [fast|all]` builds `build-cov\` with clang 20 source-based coverage
+(`-fprofile-instr-generate -fcoverage-mapping`), runs ctest (default: the sim set, fast tier) with one raw profile per test
+process, then `tools/coverage/coverage_report.py` merges them (`llvm-profdata`) and reports through `llvm-cov`:
+`build-cov\coverage\summary.txt` (line / function / region coverage per module, lowest first), `summary.json` (per file too) and
+`html\index.html` (annotated source). `coverage_report.py --files --min-lines 50` lists the files with the least line coverage.
+Only `engine/` and `tools/` sources count; tests, `test_support`, `toolchain`, `third_party` and build trees are left out.
+Use it to find retail rules no test reaches before a playtest does. Not a gate build and not recorded on the roadmap. The
+counters change no result, but instrumented tests run slower: a failure seen only here is a timing or fixture issue first.
+
 ## Test thread pools under a loaded machine (2026-11-03)
 
 `alamo_ai_tactical_tests` (2 s) ran past ctest's 600 s timeout at 100% CPU. Not a deadlock: it finished once the load went.
