@@ -58,5 +58,5 @@ own Java or Python: Ghidra runs on Temurin JDK 21.0.13+9 (`toolchain\re\jdk-21.0
 
 Claude Code: the `re-analyst` agent (`.claude/agents/re-analyst.md`) is the only place the two MCP servers are registered, as
 servers of that agent alone, so lanes that write engine code never get decompiler tools and no session starts a Ghidra JVM it
-does not use. Checked 2026-11-15: both servers start and list their tools, the import ran (analysis: see `toolchaineeva-workimport.log`), `frida --version`,
+does not use. Checked 2026-11-15: both servers start and list their tools, the import and Ghidra auto-analysis ran (203 s, 21,744 functions, 19,488 strings) and a new session reopened the saved result, `frida --version`,
 `cdb -version`. Not checked: a TTD recording (needs the licence step), a trace replay, and the agent started from a session.
