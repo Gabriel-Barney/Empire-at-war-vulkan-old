@@ -5,7 +5,8 @@ Default workflow (Gabriel, 2026-11-15; `DECISIONS.md`, "Default tool access"): t
 one, without asking first. Limits come from the rules (CLAUDE.md, clean-room, determinism, landing), not from tool lists. The
 only per-agent limit left is `reviewer`, which never edits files.
 
-**Exception: the retail RE and tracing tools** (ReVa / Ghidra, REA, mcp-windbg, TTD, WinDbg / cdb, Frida; `PROBES.md`, "RE and
+**Exception: the retail RE and tracing tools** (ReVa / Ghidra, REA, mcp-windbg, TTD, WinDbg / cdb, Frida, and any disassembler or debugger pointed at
+retail `StarWarsG.exe`, `llvm-objdump` and `lldb` included; `PROBES.md`, "RE and
 retail-tracing tools") are not for every worker. Clean-room rule: a worker that writes engine code never runs them and never
 reads what they print. Only the `re-analyst` agent uses ReVa, mcp-windbg and REA (the two MCP servers are registered on it
 alone); a probe or RE / doc task may use TTD, cdb and Frida. Everyone else asks through the `re-question` skill, which starts
@@ -57,11 +58,17 @@ From PowerShell use `& .\tools\tc.cmd <program> <args>`, or `--%` on a line of i
 |---|---|
 | `cl`, `link`, `lib`, `dumpbin`, `fxc`, `rc` | `toolchain\msvc` (MSVC 14.51, Windows SDK) |
 | `python`, `cmake`, `ninja` | `toolchain\venv\Scripts` |
-| `clang`, `clang-cl`, `clangd`, `clang-tidy`, `clang-format`, `lld` | `toolchain\llvm\bin` |
+| LLVM 20.1.8, all of it: `clang`, `clang-cl`, `clangd`, `clang-tidy`, `clang-format`, `clang-query`, `clang-include-cleaner`, `lld` / `lld-link`, `lldb` (debugger; does not start yet: exits 0xC0000135, a DLL it needs, probably Python's, is missing), `llvm-symbolizer`, `llvm-pdbutil`, `llvm-objdump`, `llvm-nm`, `llvm-readobj`, `llvm-cov` / `llvm-profdata` (coverage), `llvm-mca` (instruction throughput), `scan-build` (static analyzer) | `toolchain\llvm\bin` (`toolchain\5_portability_compilers.cmd`) |
 | `dxc` | `toolchain\dxc\bin\x64` |
 | `sccache` | `toolchain\sccache` |
 | `cargo`, `rustc`, `rust-analyzer` | `toolchain\rust\cargo\bin` |
 | `git` (MinGit) | `toolchain\mingit\cmd` |
+| apitrace 14.0: `apitrace` (`trace`, `dump`, `diff`, `replay`), `d3dretrace`, `qapitrace` (viewer) | `toolchain\capture\apitrace-14.0\bin` (`toolchain\6_capture_tools.cmd`; last on PATH) |
+
+apitrace records the graphics API calls a program makes, not its code, so every worker may use it, including on a capture of
+retail (the G1 capture; RenderDoc is out of scope, `DECISIONS.md`). Running retail to make a new capture is a probe run
+(`probe-kit`; findings go to `docs/re/`). LLVM tools are for the port's own binaries: disassembling or debugging retail
+`StarWarsG.exe` with `llvm-objdump`, `lldb` or any other tool is RE work and falls under the exception above.
 
 Builds still go through the build scripts, never a hand-run cmake configure (`BUILD.md`). A program that is missing gets a
 pinned setup step in `toolchain\2_setup.cmd` (rule 5), then a row here.
