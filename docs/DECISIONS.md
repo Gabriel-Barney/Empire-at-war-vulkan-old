@@ -80,6 +80,11 @@ section 4.
 - An agent started with the `Agent` tool takes these from its definition; don't pass `model` or `effort` in the call (an override
   wins over the frontmatter). Not covered: the main session / `run-group` coordinator (the app's model choice) and lanes started
   as sessions with `start_session`, which don't read agent files.
+- **Exception for lanes: the group's roadmap preset picks the model, effort capped at the lane's `high`** (Gabriel, 2026-11-15,
+  choosing between the presets and the pinned lane effort). `xhigh` / `high` / `fable` / no preset: the lane default, Opus / high,
+  nothing passed; `sonnet`: Sonnet / high; `tools`: Sonnet / medium; `gab`: Opus / medium; `re2ui`: RE share Opus / high, UI share
+  a Sonnet / high lane. The `run-group` coordinator passes these as `model` / `effort` on the `Agent` call (table in
+  `.claude/skills/run-group/SKILL.md` step 4), and applies the same mapping to lanes run as sessions.
 
 ## Command Center launcher (Gabriel, 2026-11-13)
 - **The Command Center launcher (Rust, egui) is part of this repository as `launcher/`**, imported from the stand-alone `E:\Projects\Command Center` folder (no git history there). It starts `alamo_game.exe` with profiles, mods, Workshop items, saves, graphics options and diagnostics.

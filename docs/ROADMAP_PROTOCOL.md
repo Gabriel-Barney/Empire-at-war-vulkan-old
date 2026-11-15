@@ -79,7 +79,9 @@ A preset is the recommended model and effort level for a group: `fable` Fable 5.
 `fable` (Gabriel, 2026-11-12) was for open-ended parity diagnosis (skai, q4, bkg3). Gabriel, 2026-11-13: Opus 5.5 does that
 work better, so skai and q4 moved to `xhigh` and no group uses `fable`; give new groups an Opus preset (`xhigh` for open-ended
 diagnosis across modules and seeds, `high` for fixes already pinned by an RE answer). The `fable` preset stays defined only so
-old records still render.
+old records still render. How a preset is applied (Gabriel, 2026-11-15): the `run-group` coordinator starts each group's lane with
+the preset's model and effort, effort capped at the lane agent's `high`, so `xhigh` groups run as Opus / high
+(`docs/DECISIONS.md`, "Agent model and effort"; table in `.claude/skills/run-group/SKILL.md` step 4).
 
 ## Common edits
 

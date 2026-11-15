@@ -85,7 +85,7 @@ pinned setup step in `toolchain\2_setup.cmd` (rule 5), then a row here.
 
 | When | Skill |
 |---|---|
-| **Any request to complete roadmap work** ("complete all tasks under AUD1", a box, "next ready group") | `run-group` (the default workflow: this session coordinates, up to three parallel `lane` agents do the work) |
+| **Any request to complete roadmap work** ("complete all tasks under AUD1", a box, "next ready group") | `run-group` (the default workflow: this session coordinates, up to three parallel `lane` agents do the work, each on its group's preset model, effort capped at high) |
 | Starting / finishing a roadmap group | `start-group`, `finish-group` |
 | Full build; drive a build to green | `build`, `green-fast-tier` |
 | Ticking the roadmap outside `finish-group` | `phase-status` |

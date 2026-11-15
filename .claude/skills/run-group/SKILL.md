@@ -57,8 +57,21 @@ For each lane:
 3. **Spawn** a `lane` agent in the background (`Agent`, `subagent_type: "lane"`, `run_in_background: true`) with a brief that
    names: the worktree's absolute path (it works only there, with absolute paths, every shell command starting with a `cd` into
    it), the group and the task ids of its share, the exit test, the modules it owns and the ones it must not touch, the lane
-   queue after it, and "follow `.claude/agents/lane.md` including its Coordinator protocol". A lane's model and effort come from
-   its definition; the group's `preset` is a hint for the coordinator, not a setting to pass.
+   queue after it, and "follow `.claude/agents/lane.md` including its Coordinator protocol".
+4. **Model and effort from the group's `preset`** (Gabriel, 2026-11-15): the preset picks the model, and effort follows the preset
+   but never above the lane's own `high` (`lane.md` frontmatter: Opus / high; `xhigh` costs too much on long lane runs). So:
+
+   | Preset | Lane runs on | `Agent` call |
+   |---|---|---|
+   | `xhigh`, `high`, `fable`, none | Opus, high | nothing extra (the lane default) |
+   | `sonnet` | Sonnet, high | `model: "sonnet"` |
+   | `tools` | Sonnet, medium | `model: "sonnet"`, `effort: "medium"` |
+   | `gab` | Opus, medium; Gabriel's parts come back as `REQUEST gabriel` | `effort: "medium"` |
+   | `re2ui` | RE share on Opus, high; UI share as its own lane on Sonnet, high (one Opus lane when it cannot be split) | UI lane: `model: "sonnet"` |
+
+   This skill is the explicit instruction the `Agent` tool needs before `model` / `effort` are passed (an exception, for lanes, to
+   `DECISIONS.md` "Agent model and effort"). A lane agent keeps one model for its life, so a queued group whose preset maps to a
+   different row gets a fresh lane agent (same worktree is fine) once the group before it has landed.
 
 Then wait for lanes to report; don't poll. Up to three lanes run at once; when one finishes its queue and work remains, start the
 next lane.
@@ -94,4 +107,5 @@ must do, and the lanes' friction lines for `retro`.
 For one small group (a couple of tasks in one module), or when Gabriel asks for it to be done here, the coordinator may run the
 lane loop itself in this session (it keeps the `Agent` tool, so no requests are needed). When Gabriel asks for **sessions**
 instead of agents, start one session per lane with `start_session` (each is a full session with the `Agent` tool, prompt
-`/run-group <ids>` for its queue, worktree of its own) and coordinate them from here.
+`/run-group <ids>` for its queue, worktree of its own) and coordinate them from here. Sessions don't read agent files, so apply
+the step-4 table yourself: the session's `model` when starting it, and its effort with `set_session_effort`.
