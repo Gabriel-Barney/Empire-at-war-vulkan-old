@@ -31,8 +31,11 @@ and `docs/ROADMAP_PROTOCOL.md` first; the loop below is how they apply to a lane
    `docs/re/`, not code. No third-party dependency without asking Gabriel. Follow the determinism rules (CLAUDE.md rule 3).
    Windows x64 only; no multiplayer, original-game saves or RenderDoc. Stay inside the group's task list and aim at its
    `exit` test. A finding on the way is triaged when you find it: it blocks the exit test, or is a crash / hang / save corruption /
-   tier-1 difference, so it becomes a task; otherwise `python roadmap-store\roadmap_store.py backlog add "<text>" --by <session>
-   --from <group> [--sev S1|S2|S3] [--tier 1|2|3]` (a rule files it into a category; tier 3 means drop it unless a tier-2 metric fails) or drop it. Current focus (Gabriel, 2026-11-10): do only tier 1 and tier 2
+   tier-1 difference, so it becomes a task; otherwise an S1 / S2 finding becomes a task of the open group that owns that work
+   (`python roadmap-store\roadmap_store.py backlog add "<text>" --by <session> --sev S1|S2 --to <group> [--tier 1|2]`; none fits: a
+   new group with an exit test via `write`), and only an S3 finding goes to the backlog (`backlog add "<text>" --by <session> --from
+   <group> [--tier 1|2|3]`; a rule files it into a category; tier 3 means drop it unless a tier-2 metric fails) or is dropped.
+   The backlog holds only S3 (Gabriel, 2026-11-15; `docs/ROADMAP_PROTOCOL.md`, "S1 and S2 are group tasks"). Current focus (Gabriel, 2026-11-10): do only tier 1 and tier 2
    tasks; a tier-3 task of your group is skipped, not started (`docs/DECISIONS.md`, "Current focus"). Never grow the group past its cap (8 tasks).
    **Stage 6 · Parity and mods (boxes MODC, Q4, Q5, Q6) keeps its follow-ups** (Gabriel, 2026-11-12): the same `backlog add ... --from
    <group>` adds the finding as a new task of your group instead of a backlog entry (tier 3 still goes to the backlog), and these
@@ -76,9 +79,9 @@ and `docs/ROADMAP_PROTOCOL.md` first; the loop below is how they apply to a lane
    "updated":"<date>","by":"<session>"}`), then **re-read the group**: if it has no `todo` task left, set the group
    `{"status":"done","preset":{"__delete__":true}}` in the same write, and if it was the last open group in its flowchart box,
    set `nodes/<ID>` `{"status":"done"}` too. When the group's `exit` test passes with tasks still open, close it with
-   `python roadmap-store\roadmap_store.py close-group <group> --by <session> --passed "<evidence>"`: the open tasks go to the backlog
-   (rules file them into categories; `--drop tNN --why "..."` for ones not worth keeping), the group and, when last, its box are set
-   done, one log line is written. No follow-up group: leftovers are backlog entries until Gabriel promotes them. A Stage 6 group
+   `python roadmap-store\roadmap_store.py close-group <group> --by <session> --passed "<evidence>" [--to <group>]`: open S3 tasks go to
+   the backlog and open S1 / S2 tasks to the `--to` group (rules file backlog entries into categories; `--drop tNN --why "..."` for ones not worth keeping), the group and, when last, its box are set
+   done, one log line is written. No follow-up group: S3 leftovers are backlog entries until Gabriel promotes them. A Stage 6 group
    is the exception: it keeps its follow-ups, so close it only when no task is open (finish each, or `--drop tNN --why "..."`;
    `close-group` refuses otherwise), and leave it open with its tasks when they are still wanted. Add one `log` line
    for anything else you write. Record results where `docs/README.md` says (decisions, measurements, build rules, `docs/re/`); status is tracked only on the roadmap.

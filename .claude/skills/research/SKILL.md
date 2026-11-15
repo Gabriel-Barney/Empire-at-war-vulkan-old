@@ -48,5 +48,5 @@ Adapted from `mattpocock/skills` (MIT). Two kinds of question, with different so
    opened once, and the file is under the right home. Add a row to `docs/README.md` or `docs/PROBES.md` only when the report
    created a new kind of document; a probe result goes in its `docs/re/` spec.
 6. **Report back** with the file link, the three-line answer and the open questions. A decision the answer calls for goes to
-   Gabriel as a `docs/DECISIONS.md` proposal; a follow-up goes on the roadmap (`roadmap_store.py backlog add ... --from <group>`),
+   Gabriel as a `docs/DECISIONS.md` proposal; a follow-up goes on the roadmap (S1 / S2: `roadmap_store.py backlog add ... --sev S1|S2 --to <group>`; S3: `backlog add ... --from <group>`),
    not into the report as a to-do list.

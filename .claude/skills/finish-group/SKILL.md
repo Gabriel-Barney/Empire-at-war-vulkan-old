@@ -15,17 +15,19 @@ Finish roadmap group `$ARGUMENTS` in this worktree. Work through the checklist a
    - Sim code changed (everything in `engine/` except render, audio, video, UI): also spawn the `reviewer` agent with the changed
      files and the `docs/re/` specs they cite, for the determinism and thread-safety read (`determinism-check` skill lists the rules).
    - Fix each confirmed correctness finding on the branch and rerun the step-1 builds for the modules it touched. A finding that does
-     not block the exit test goes to the backlog (`roadmap_store.py backlog add ... --from <id>`, Stage 6 groups: a new task), and a
+     not block the exit test is an S1 / S2 task of the group that owns it (`roadmap_store.py backlog add ... --sev S1|S2 --to <group>`)
+     or, when S3, a backlog entry (`backlog add ... --from <id>`; Stage 6 groups: a new task either way), and a
      finding you judge wrong is reported as such, not silently dropped. Report the review as done with the count fixed / filed / rejected.
 3. **Roadmap.** Sync first (`python roadmap-store\roadmap_store.py sync`), re-read `roadmap-store\data\items\<id>.json`, then
    `write` one file: every finished task `s: done`, plus `updated` and `by`. Re-read the group: **no `todo` task left means
    `{"status":"done","preset":{"__delete__":true}}` in that same write**. If it was the last open group of its flowchart box
    (check the other `items` with the same `node`), also `update` `nodes/<ID>` `{"status":"done"}`. If the group's `exit` test passed
    but tasks are still open, do not keep it open and do not make a follow-up group: run
-   `python roadmap-store\roadmap_store.py close-group <id> --by <session> --passed "<evidence>"` (open tasks go to the backlog and
-   are filed into categories; `--drop tNN --why "..."` for ones not worth keeping; it sets the group and, when last, its box done).
+   `python roadmap-store\roadmap_store.py close-group <id> --by <session> --passed "<evidence>" [--to <group>]` (open S3 tasks go to
+   the backlog and are filed into categories, open S1 / S2 tasks go to the `--to` group, which it requires when there are any; `--drop tNN --why "..."` for ones not worth keeping; it sets the group and, when last, its box done).
    If the exit test has not passed, say so and leave the group open. Findings from this work that are not in the group go in with
-   `roadmap_store.py backlog add "<text>" --by <session> --from <id>`. **Stage 6 · Parity and mods (boxes MODC, Q4, Q5, Q6) keeps
+   `roadmap_store.py backlog add "<text>" --by <session> --sev S1|S2 --to <group>` (a task of the group that owns the work) or, for
+   S3 only, `backlog add "<text>" --by <session> --from <id>` (the backlog holds only S3 since 2026-11-15). **Stage 6 · Parity and mods (boxes MODC, Q4, Q5, Q6) keeps
    its follow-ups** (Gabriel, 2026-11-12): there that command adds each finding as a new task of the group (tier 3 still goes to the
    backlog), and the group is closed only when no task is open: finish or `--drop` each (`close-group` refuses otherwise); if some
    are still wanted, leave the group open with them. Then `roadmap_store.py lint`. One `log` line.

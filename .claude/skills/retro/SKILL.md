@@ -50,4 +50,4 @@ so judgment-call standards belong where `code-review` and the `reviewer` agent r
 Done when the report lists, ordered by severity (wasted hours or broken landings first, tidy-ups last), for each candidate:
 the evidence, the proposed change with the exact file and wording or script, and the size of the fix. End with the three you
 would do first. Do not edit files, memory or settings; do not land anything. Gabriel picks, and the picked items become a task
-or backlog entry (`roadmap_store.py backlog add ... --from <group>`), following `docs/ROADMAP_PROTOCOL.md`.
+or, when S3, a backlog entry (`roadmap_store.py backlog add ... --from <group>`; S1 / S2 go `--to <group>`), following `docs/ROADMAP_PROTOCOL.md`.

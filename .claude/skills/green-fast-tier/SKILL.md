@@ -20,7 +20,8 @@ Each iteration:
    changed environment, and say so when you use it. A flaky sim test while other lanes build: rerun with `ctest -j 2` first.
 4. **Stop conditions:** green (0 warnings, 0 real failures); the iteration cap; the same test failing three iterations in a row with
    different fixes (the cause is not understood: stop and report what you tried); a failure outside this group's files (record it
-   with `roadmap_store.py backlog add ... --from <group>` unless it is a crash, hang, save corruption or tier-1 difference).
+   as a task of the group that owns it, `roadmap_store.py backlog add ... --sev S1|S2 --to <group>`, or as an S3 backlog entry,
+   `backlog add ... --from <group>`; a crash, hang, save corruption or tier-1 difference in this group is fixed here).
 
 When green on the changed tier: run the whole fast tier once (`& .\build_agent.cmd --% msvc wt "<modules>"` with no 4th argument),
 and clang too when sim code changed. Report: iterations used, what each fix was, final summary line, `skips:`, and anything left.
