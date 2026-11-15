@@ -97,3 +97,33 @@ the target. Retail `GameObjectWrapper.Is_Valid` tests only that the wrapper's ob
 null (`LUA_API.md`, Move_To / Attack_Move / Guard_Target). Both read the same field, so a target that dies during the yield
 raises the error in retail too. The port tests both with the same predicate (`object_alive`). The error is the shipped
 script's own behaviour, and how often it happens follows from the battle, not from a separate rule.
+
+## 7. b0421: the opening pad captures (fixed 2026-11-14)
+
+Cause: the goal system's Commit (0x6c8710, one routine for every mode) resolves the categories in descending normalised
+budget weight, equal weights in category order (AI_GALACTIC §1.6 step 3, BKG3_RE_ANSWERS Q6 [H]). The port's tactical AI
+resolved them in category index order. `Test_Land` weighs Map_Control `Medium_High` (35) against Tactical_Targeted
+`GenericSpaceTargetedOffensiveBudgetAllocation` (`Game.ForceVisibility`, at most 1): normalised 0.174 and 0.005 at the first
+commit. In index order Tactical_Targeted (enum 5) came first, so two Land_Scout_Area plans took two of the Empire's four
+squads, the outpost pad's Secure_Contestable took the other two (main force and escort), and the mineral pad's
+Secure_Contestable found no unit. The Rebels start with six teams, so they had enough for both categories and their opening
+was right either way (SKAI_T06_LAND_RUNS §7).
+
+Fix: `category_order` of the tactical AI sorts by the budget weight, as the galactic AI already did. Port against an idle
+human (dev + fix, MSVC, 4 workers, 36000 ticks, seeds 1-3):
+
+| | Retail | Port before (§3) | Port after |
+|---|---|---|---|
+| Empire AI first commit | two Secure_Contestable (outpost pad, mineral pad), main + escort each, no scout | one Secure_Contestable, two Land_Scout_Area | two Secure_Contestable (outpost 757, mineral 756), main + escort each, no scout |
+| Empire AI Build_Econ_Structure on the mineral pad | starts 1815 (60.5 s) | 11615 in 1 of 3, never in 2 | 2215 in all three |
+| Empire AI end | not within 36000 | wins 24879-27604 | wins 20069 / 21523 / 24474 |
+| Underworld AI first commit | two Secure_Contestable, two Destroy_Structure, Build_Infantry_Emergency | (as after) | two Secure_Contestable, Build_Infantry_Emergency, one Land_Scout_Area |
+| Underworld AI end | not within 36000 | wins 26887 and 35199, 1 still fighting | wins 25156, 2 still fighting |
+
+The opening matches. Both AIs still finish an idle base sooner than retail (b0422); the Empire now does so earlier,
+because it has its refinery.
+
+AI against AI after the fix (test seeds re-pinned in `engine/apps/CMakeLists.txt`): Rebel vs Empire, 30000 ticks, Rebel
+wins seeds 1 / 5 / 6 (28354 / 25577 / 29480) and seeds 2-4 are still fighting; Empire vs Underworld, 70000 ticks,
+Underworld wins seeds 1 / 3 / 8 / 9 / 10 (37408-53654) and five seeds are still fighting, 0 Lua errors; space station seeds
+1-7 end (Rebel, 9402-13446), seed 8 reaches the cap.

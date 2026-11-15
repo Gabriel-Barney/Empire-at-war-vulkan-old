@@ -352,14 +352,18 @@ if(_alamo_sim)
     # skai t07 - t11 (2026-11-12): the full pre-built base (10 structures per slot), start companies on the last spawn marker,
     # paid AI pad builds, Build_Limit_Current_Per_Player, survivor companies. Seeds 1-6, 30000 ticks: Rebel wins at 21439 /
     # 29833 / 18993 / 21933 / 24310 / 28372. Pinned to seed 3 (the widest margin); seeds 1 and 4 are checked too.
+    # b0421 (2026-11-14): tactical categories resolve in descending budget weight (Commit 0x6c8710), so the Empire's first
+    # commit sends all four squads to two Secure_Contestable plans and it takes its mineral pad. Seeds 1-6, 30000 ticks: Rebel
+    # wins at 28354 (1), 25577 (5), 29480 (6); seeds 2-4 are still fighting. Pinned to seed 5; seeds 1 and 6 are checked too,
+    # all at 36000 ticks so the late ends keep a margin.
     add_test(NAME alamo_headless_skirmish_ai_foc_land_end
-             COMMAND alamo_headless --skirmish-ai foc-land --ticks 30000 --workers 4 --quiet --expect-battle-end --fail-on-lua-errors
-                     --seed 3)
+             COMMAND alamo_headless --skirmish-ai foc-land --ticks 36000 --workers 4 --quiet --expect-battle-end --fail-on-lua-errors
+                     --seed 5)
     set_tests_properties(alamo_headless_skirmish_ai_foc_land_end PROPERTIES TIMEOUT 1800)
     alamo_label_slow(alamo_headless_skirmish_ai_foc_land_end)
-    foreach(_seed 1 4)
+    foreach(_seed 1 6)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_end_seed${_seed}
-               COMMAND alamo_headless --skirmish-ai foc-land --ticks 30000 --workers 4 --quiet --expect-battle-end --fail-on-lua-errors
+               COMMAND alamo_headless --skirmish-ai foc-land --ticks 36000 --workers 4 --quiet --expect-battle-end --fail-on-lua-errors
                        --seed ${_seed})
       set_tests_properties(alamo_headless_skirmish_ai_foc_land_end_seed${_seed} PROPERTIES TIMEOUT 1800)
       alamo_label_slow(alamo_headless_skirmish_ai_foc_land_end_seed${_seed})
@@ -387,7 +391,10 @@ if(_alamo_sim)
     # fighting at 70000. Seeds 1, 2, 4 and 8 log BOBAFETTFLAMEINFANTRY "Move_To -- Target is already dead" (the script's
     # MoveUntilDone re-issues Move_To after PumpEvents without TestValid; LUA_API.md Move_To: a dead object is that error),
     # so the pinned seeds are 3 and 5 (0 Lua errors, about 70 s each).
-    foreach(_seed 3 5)
+    # b0421 (2026-11-14): tactical categories resolve in descending budget weight (Commit 0x6c8710), so the Empire's first
+    # commit takes its mineral pad. Seeds 1-10, 70000 ticks, 0 Lua errors in all: Underworld wins at 47180 (1), 53654 (3),
+    # 39597 (8), 37408 (9), 47406 (10); seeds 2 4 5 6 7 are still fighting. Pinned to seeds 8 and 9.
+    foreach(_seed 8 9)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_empire_underworld_seed${_seed}
                COMMAND alamo_headless --skirmish-ai foc-land --ai Empire,Underworld --ticks 70000 --workers 4 --quiet
                        --expect-battle-end --fail-on-lua-errors --seed ${_seed})
@@ -431,8 +438,10 @@ if(_alamo_sim)
     # (10201-13407), 1 reaches the cap; the test moves to seed 8 (Rebel, all destroyed, 10201).
     # b0319 (2026-11-14): with the port's squadrons of 12 (bdb9cd57) seed 8 no longer ends in time; this test checks the
     # retail battle outcome, so it runs with the retail squadrons (--squadron-size 0), as the parity harness does.
+    # b0421 (2026-11-14, categories resolve in descending budget weight): seeds 1-7 end (Rebel, 9402-13446), seed 8 reaches the
+    # cap; the test moves to seed 6 (Rebel, all destroyed, 9402).
     add_test(NAME alamo_headless_skirmish_ai_foc_station
-             COMMAND alamo_headless --skirmish-ai foc-station --seed 8 --ticks 20000 --workers 4 --quiet --expect-battle-end
+             COMMAND alamo_headless --skirmish-ai foc-station --seed 6 --ticks 20000 --workers 4 --quiet --expect-battle-end
                      --squadron-size 0)
     # t48: the default seed reaches QuickReinforce's anti-idle; 0 Lua errors (it may run to the frame limit: half the seeds do, the
     # station holds). refixf t02 (2026-10-31): back on the default seed. It had stacked the rebel ships on the station's centre

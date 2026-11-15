@@ -1292,9 +1292,17 @@ struct PlayerAi final : GoalModeHooks, ContextModeServices {
         }
         ctx.budget.weigh(raw, member);
     }
+    // b0421: Commit 0x6c8710 is the goal system's own, in every mode (AI_GALACTIC §1.6 step 3, BKG3_RE_ANSWERS Q6 [H]):
+    // categories in descending normalised budget weight (budget_weights above, rewritten every pass before Commit), equal
+    // weights in category order. Test_Land's Map_Control (Medium_High, 35) therefore resolves before Tactical_Targeted
+    // (Game.ForceVisibility, at most 1): retail's Empire AI on Utapau gives its four starting squads to two
+    // Secure_Contestable plans at the first commit and scouts later (B0418_UTAPAU_AI_RUNS §5); index order sent two to
+    // Land_Scout_Area first and left the mineral pad without a squad.
     std::vector<int32_t> category_order() override {
         std::vector<int32_t> order;
         for (size_t c = 0; c < w->defs.categories.size(); ++c) order.push_back(static_cast<int32_t>(c));
+        std::stable_sort(order.begin(), order.end(),
+                         [this](int32_t a, int32_t b) { return ctx.budget.weight(a) > ctx.budget.weight(b); });
         return order;
     }
     void queue_production(Goal&) override {}
