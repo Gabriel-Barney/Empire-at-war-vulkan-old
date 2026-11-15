@@ -434,16 +434,22 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
     // aud1 t02 (L1_S4_REMAINING §3.2): the land weather's type and intensity after the tick -> the weather audio manager
     // and the faction's SFXEvent_Weather_Begin / _End lines (GameAudio::set_weather; unchanged values do nothing). Weather
     // off (no scenario, space) = CLEAR at 1.0, as retail's 0x323110(0, 1.0).
-    {
-        const std::string_view w = weather_name(battle.weather().active() ? static_cast<uint8_t>(battle.weather().type()) : 0);
-        game_->set_weather(w, battle.weather().active() ? battle.weather().intensity() : 1.0f);
-    }
-    if (combat) {
-        audio::CombatEvent ce;
-        ce.local_player_involved = true;
-        game_->combat(ce);
-        ++stats_.combat_notes;
-    }
+    weather(weather_name(battle.weather().active() ? static_cast<uint8_t>(battle.weather().type()) : 0),
+            battle.weather().active() ? battle.weather().intensity() : 1.0f);
+    if (combat) this->combat(true, false);
+}
+
+void GameAudioHost::weather(std::string_view type, float intensity) {
+    if (game_) game_->set_weather(type, intensity);
+}
+
+void GameAudioHost::combat(bool local_involved, bool local_base_attacked) {
+    if (!game_ || (!local_involved && !local_base_attacked)) return;
+    audio::CombatEvent ce;
+    ce.local_player_involved = local_involved;
+    ce.local_base_attacked = local_base_attacked;
+    game_->combat(ce);
+    ++stats_.combat_notes;
 }
 
 void GameAudioHost::super_weapon_report(bool present) {
@@ -612,6 +618,8 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle&, const objects::Objec
 void GameAudioHost::battle_end(bool, std::string_view) {}
 void GameAudioHost::tsw_audio(std::span<const TswCue>, const objects::GameObjectTypes&) {}
 void GameAudioHost::sim_tick() {}
+void GameAudioHost::weather(std::string_view, float) {}
+void GameAudioHost::combat(bool, bool) {}
 void GameAudioHost::super_weapon_report(bool) { battle_reported_ = true; }
 void GameAudioHost::music(MusicScene scene, std::string_view, bool, std::string_view) {
     if (scene != scene_) pending_played_ = false;

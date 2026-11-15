@@ -133,6 +133,15 @@ public:
     // Lobbing_Superweapon_SFXEvent_Fire, both attached to the unit (every owner's). battle_tick calls it.
     void tsw_audio(std::span<const TswCue> cues, const objects::GameObjectTypes& types);
     void sim_tick();  // once per sim tick
+    // aud1 (battle_tick's calls, public for the scripted battle tests): the tactical weather (type name, 0..1 intensity:
+    // GameAudio::set_weather, weather loops + the faction SFXEvent_Weather_Begin / _End) and one combat notification
+    // (AUDIO.md §2.3 slot 76: battle music when the local player is involved, the base-under-attack announcement).
+    void weather(std::string_view type, float intensity);
+    void combat(bool local_involved, bool local_base_attacked);
+    // --- aud1 t05 (object SFX: abilities, shields, hyperspace; src/game_audio_host_objects.cpp) ---
+    // --- end aud1 t05 ---
+    // --- aud1 t07 (tactical intro speech; src/game_audio_host_intro.cpp) ---
+    // --- end aud1 t07 ---
     // ccpgu t01 (SKIRMISH_SETUP 4.2 announcer 0x3611f0, presentation only): the local faction's Faction tag for the control
     // point domination countdown after a battle tick, or "" for none. Retail plays it when the timer (mode +0x2b4) equals
     // 60 / 30 / 15 / 5 s x 30 frames: _Owned_ when the local player leads, _Ally_Owned_ for an ally (relation 0),

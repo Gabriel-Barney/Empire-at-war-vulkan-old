@@ -14,6 +14,8 @@ add_library(alamo_game_core STATIC
   src/game_session.cpp
   src/battle_orders.cpp
   src/game_audio_host.cpp
+  src/game_audio_host_objects.cpp
+  src/game_audio_host_intro.cpp
   src/battle_fx.cpp
   src/story_script.cpp
   src/game_controls.cpp

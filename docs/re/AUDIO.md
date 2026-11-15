@@ -18,7 +18,7 @@ Global objects:
 | 0x140b27e60 | SFXEventManager (active-event list at +0x68/+0x70/+0x78, permission flags +0x80..+0x83, 3D scale +0x98) |
 | 0x140b27dc0 | MusicEventManager (current music mode at +0xc = 0x140b27dcc, playlist queue +0x68) |
 | 0x140b2b300 | SpeechEventManager (FIFO queue +0x60..+0x68, done-callbacks +0x80) |
-| 0x140b2b3b0 | intermittent-ambient manager (updated in the main loop) [M] |
+| 0x140b2b3b0 | WeatherAudioManager (weather loops, weather intermittent sounds and the per-environment `Ambient_Map_Sounds`; update 0x325190 in the main loop; §9.3) [H] |
 | 0x140b30160 | AudioConstants (Audio.xml); field offsets of `xml_field_tables.md` §Audio apply to this base [H] |
 
 ---
@@ -271,8 +271,8 @@ forced). On success it replaces the queue and records the mode.
 |---|---|---|
 | 1 galactic | entering/resuming the galactic mode (0x28ed40, via 0x28e800) | local faction `Strategic_Map_Music_Event` |
 | 5 battle pending | tactical battle pending/loading (0x291330) | faction `Music_Event_Tactical_Land/Space_Battle_Pending`, plus the matching `SFX_Event_..._Battle_Pending` |
-| 6 tactical ambient | tactical start/resume and the peace timeout (0x28ee00) | random free-RNG pick from the faction's `Music_Event_List_Ambient` entries for the map environment (space maps use slot 7 "Space"); `Music_Event_<Land/Space>_Ambient_Super_Weapon` instead when any player has its faction super weapon on the map |
-| 7 tactical battle | combat involving the local player (0x28f020) | same, from `Music_Event_List_Battle` / `..._Battle_Super_Weapon` |
+| 6 tactical ambient | tactical start/resume and the peace timeout (0x28ee00) | random free-RNG pick from the local faction's `Music_Event_List_Ambient` entries for the map environment type (TED map-info mini `06`; space maps always use slot 7 "Space"; §9.1); `Music_Event_<Land/Space>_Ambient_Super_Weapon` instead when any player has its faction super weapon on the map |
+| 7 tactical battle | combat involving the local player (0x28f020) | same, from `Music_Event_List_Battle` / `..._Battle_Super_Weapon`. Refusal rules: §9.2 |
 | 9 / 10 | 0x28f250 (two callers, 0x343b90, 0x88fe0) | per-type music for the local player's own (9) or an enemy (10) object [L] |
 | 12 | Lua `Play_Music(name)` (forced, no resume) | named event |
 | 8, 11, 13, 14 | 8 TSW activation, 11 splash screen, 13 front-end menus, 14 movie music; plus 0 debug list, 4 build complete, 15 load screen, 16 battle end, 17 movie cues — STRATEGIC_GAPS §7.4 | H |
@@ -281,14 +281,17 @@ Automatic mode music (`Resume_Mode_Based_Music`, 0x28e800) does nothing while in
 the attract demo, unless forced (Lua `Resume_Mode_Based_Music` forces).
 
 **Combat intensity switch** [H] (Land/Space vtable slot 76 = 0x3ba180 / 0x4d8ae0; tick 0x3bb440 /
-0x4d95a0): the slot-76 notification receives two objects (attacker/victim [M]). If either belongs to the
-local player, or is an enemy the local player can see [M], the battle mode starts (if not already 7) and the
-mode's peace counter is reset to 0. The counter increments once per **sim tick**; while in mode 7, when it
+0x4d95a0): the slot-76 notification receives two objects (attacker, victim). If either is owned by the
+local player, or is a friendly (own or allied, 0x39a2c0) object whose type has `Is_Community_Property`
+(type +0x27), the battle mode is requested (only if the current mode is not 7; 0x28f020 may still refuse,
+§9.2) and the mode's peace counter is reset to 0. (Corrected 2026-11-15: earlier text said "an enemy the
+local player can see".) The counter increments once per **sim tick**; while in mode 7, when it
 reaches 30 × `Music_Land_Battle_To_Ambient_Peace_Seconds` (space: `Music_Space_...`; vanilla 15 s) the
 ambient mode starts. Other resets of the counter: objective/AI "under attack" checks in the tick [M]. So
 peace time is sim time and scales with game speed. The same notification starts the base-under-attack
-announcement (faction SFX at +0x6e0 plus a radar ping), rate-limited by
-`Delay_Between_Land/Space_Base_Attack_Announcement_Seconds` × 30 ticks. [H]
+announcement (local faction `SFXEvent_Land_Base_Under_Attack_Announcement` +0x6e0 on land,
+`SFXEvent_Space_Base_Under_Attack_Announcement` +0x6d0 in space, plus a radar ping), rate-limited by
+`Delay_Between_Land/Space_Base_Attack_Announcement_Seconds` × 30 ticks; who counts as a base: §9.8. [H]
 
 Other triggers: main menu `Main_Menu_Music_Event`, splash `Splash_E3_Music_Event`, credits
 `Game_Credits_Music_Event`, battle load screen `Music_Event_Battle_Load_Screen`, win/lose
@@ -392,7 +395,7 @@ option `Subtitles` and the dialog option `IDC_USE_MOVIE_SUBTITLES` gate movie su
   the port needs a PCM WAV reader and an MP3 decoder (both in miniaudio). EaW fallback archives are used
   for EaW-only names (MAIN_LOOP §5.1, SUBSYSTEMS mount order).
 - `AnimationSFXMaps.txt` maps animation name + frame time to `SOUND <event>` (play SFX) or `SURFACE <fx>
-  <bone>` (surface-dependent footstep effect); loaded by AnimSFXMapper (0x4770a0) [H for format, M for timing].
+  <bone>` (surface-dependent footstep effect); loaded by AnimSFXMapper (0x4770a0); timing and play rules §9.4 [H].
 - Replicate: event selection and state machine, pools/stealing, buses and ducking, music playlist and
   crossfade, speech queue, listener rules, archive lookup and localization suffixes.
   Ignore: Miles provider selection (`MSS_3D_Provider_Name`, EAX), fragment-count preferences,
@@ -409,7 +412,7 @@ Step 2 asks the mode for the listener; step 14, only when the application is act
 audio system update (listener to Miles, voice-pool updates, bus ramps, stream fades, `AIL_serve`), SFX
 event manager update (sort, poll/fade, state machine, remove finished), music manager update, speech
 manager update, two further managers via indirect calls (0x140b2b3a8, 0x140b2b2f0: SFX/speech conversation
-managers [L]), intermittent ambient manager (0x325190). All receive wall ms; the SFX update also gets the
+managers [L]), WeatherAudioManager update (0x325190, the weather / map-ambient intermittent sounds). All receive wall ms; the SFX update also gets the
 global frame number. Sim-side audio requests (below) are made **during the tick** (inside GOM service,
 behaviours, story) and only queue an instance; nothing is heard until the next step 14.
 
@@ -421,15 +424,16 @@ thread, so the free-RNG consumption order stays stable (not required for sync, o
 
 | source | examples |
 |---|---|
-| object behaviours, in the tick (object-attached 3D/2D) | weapon fire (`Fire_SFXEvent`, projectile 0x4ce6a0, turret 0x3a8080), `Projectile_SFXEvent_Detonate`, death (`Death_SFXEvent_Start_Die`, DeathBehavior 0x58cf90, also kills the object's other sounds), engines (idle/moving loops started and stopped with `Loop_Fade_In/Out_Seconds`, 0x3a7cf0/0x3a7e30), hyperspace, shields, abilities (`SFXEvent_Activate`, `SFXEvent_Target_Affected`, SpecialAbility 0x48cca0…), production/building, garrison, asteroid damage, ambient behaviour (`AmbientSFXBehaviorClass`), self-destruct, mines, telekinesis |
-| animation events | AnimationSFXMaps `SOUND` entries |
+| object behaviours, in the tick (object-attached 3D/2D, or 3D at a position) | weapon fire (hard point `Fire_SFXEvent` else the parent's `SFXEvent_Fire`, 3D **at the muzzle position**, §9.5; WeaponBehavior 0x54d090), `Projectile_SFXEvent_Detonate`, death (`Death_SFXEvent_Start_Die`, DeathBehavior 0x58cf90, also kills the object's other sounds), engines (idle/moving loops started and stopped with `Loop_Fade_In/Out_Seconds`, 0x3a7cf0/0x3a7e30), hyperspace, shields, abilities (`SFXEvent_Activate`, `SFXEvent_Target_Affected`; tags and moments §9.6), production/building, garrison, asteroid damage, ambient behaviour (`AmbientSFXBehaviorClass`), self-destruct, mines, telekinesis |
+| animation events | AnimationSFXMaps `SOUND` entries (§9.4) |
 | UI (2D, by name) | every GUI gadget class (`Click_SFX`, `Mouse_Over_SFX`, `Right_Click_SFX`), command bar (`GUI_Cancel_SFX`, `SFXEvent_Command_Bar_*`), dialogs, options test (`GUI_Audio_Options_SFX_Test`, `Test_Speech_ENG.MP3`) |
 | local-player feedback | unit responses (§3.3), `SFXEvent_GUI_Negative_Feedback`, Audio.xml `SFXEvent_*` constants, faction HUD VO (`SFXEvent_HUD_*`, base under attack, reinforcements, bombing run, victory near 0x364920) |
-| tactical mode | battle pending, weather (WeatherAudioManager: intensity-selected loops with fade in/out and intermittent events with min/max seconds; Lua `Weather_Audio_Pause`), ambient map beds (`Ambient_Map_Sounds` per environment) |
-| intermittent ambient (0x325190) | when its countdown expires, plays its event 50 units from the listener at a free-RNG angle `float(0, 2π)`, then re-arms with `float(min, max)` seconds × 30 counted down **per update** |
+| tactical mode | battle pending, weather (WeatherAudioManager 0x140b2b3b0: intensity-selected loops with fade in/out and intermittent events with min/max seconds; Lua `Weather_Audio_Pause`), ambient map sounds (`Ambient_Map_Sounds` per map environment type, used as the intermittent event while the weather is CLEAR or at intensity 0), faction weather announcements (§9.3), tactical intro speech (§9.7) |
+| weather / map-ambient intermittent (WeatherAudioManager update 0x325190) | when its countdown expires (and the manager is not paused), plays its current intermittent event 3D 50 units from the listener at a free-RNG angle `float(0, 2π)`, then re-arms with a free-RNG float × 30 counted down **per update** |
 | Lua | `GameObject.Play_SFX_Event` / `Stop_SFX_Event`, `SFXManager.Allow_*`, `Allow_Localized_SFX`, `Play_Music`, `Stop_All_Music`, `Resume_Mode_Based_Music`, `Stop_All_Speech`, `Master_Volume_Restore`, `Weather_Audio_Pause`; story speech |
 
-`Test_Disable_Weapon_Fire_SFX` (Audio.xml) suppresses weapon and hard-point fire SFX [L].
+`Test_Disable_Weapon_Fire_SFX` (Audio.xml, AudioConstants +0x1d8) suppresses weapon and hard-point fire SFX
+[H] (0x3825b0, 0x54d090).
 
 ---
 
@@ -460,3 +464,205 @@ them to wall time with the same nominal duration at 30 updates/s.
 - Miles' exact rolloff law for this MSS version (needs a capture or the MSS docs); the inverse-distance
   model in §1.7 is the documented DS3D-compatible default.
 - Whether `Subtitles` gates speech text or only movie text.
+
+---
+
+## 9. Tactical hookups (AUD1)
+
+Written 2026-11-15 for roadmap group AUD1 (battle audio hookups). Same rules as above: behaviour in words,
+RVAs, **[H]** read in the code, **[M]** read but role inferred, **[L]** inferred. "Local player" = 0x294a40 on
+the player list 0x140a16fd0; "GMM" = GameModeManager 0x140b153e0; FPS = the int at 0x140b0a340 (30).
+
+### 9.1 Map environment type: source, music key, ambient key [H unless tagged]
+
+- **Source: the TED map file.** `Load_Map` (0x56480) reads top-level chunk `0` (map info) as mini chunks;
+  mini `01` is the map type (1 land, 2 space) and mini `06` is the **map environment type** (u32). When the
+  world chunk `1` starts the mode, 0x364f00(mode, type, 1) stores it at **mode +0x08** and, when the type is
+  not 7, sets the weather audio to CLEAR at intensity 0 for that environment (0x323110(0, 0.0, type)). It is
+  not read from the planet type's `Terrain`, nor from skirmish setup. Shipped FoC maps: land 0 ×26, 1 ×7,
+  2 ×23, 3 ×15, 4 ×9, 5 ×6, 6 ×20; space 7 ×105 and one space map with 2 (`_SPACE_PLANET_DATHOMIR_01`).
+- **Enum** `MapEnvironmentType` (0x5e8770): 0 Temperate, 1 Arctic, 2 Desert, 3 Forest, 4 Swamp,
+  5 Volcanic, 6 Urban, 7 Space. These are the keys of the `Music_Event_List_Ambient` /
+  `Music_Event_List_Battle` pairs in Factions.xml (`Temperate, Temperate_Land_Rebel_Ambient_Music_Event`)
+  and of `Ambient_Map_Sounds` in Audio.xml (`Temperate, Ambient_Map_Sounds_Temperate`). The faction keeps
+  one event list per environment index (ambient at faction +0x2b58 + 0x18 × env, battle at +0x2c18 +
+  0x18 × env); several pairs with the same key append to that list [M for the append; the pick below
+  reads a counted list].
+- **Music pick** (0x28ee00 ambient, 0x28f020 battle): log `Tactical Mode %s: map environment type = %d`;
+  if the type is **≥ 8 nothing plays** (no fallback, no error). If GMM +0x1c is 2 (the started map type is
+  space [M]) the index is forced to 7, so the Dathomir space map still uses "Space". Then: if any player's
+  faction `Faction_Super_Weapon` (faction +0x2ae8) has at least one object in the mode, the local faction's
+  `Music_Event_Space_*_Super_Weapon` / `Music_Event_Land_*_Super_Weapon` is played instead (mode type 2 =
+  space, 1 = land; if that field is empty the search continues and falls back to the list). Otherwise, if
+  the local faction's list for that index is non-empty, one free-RNG `int(0, n − 1)` picks the entry; **an
+  empty list plays nothing** (the current music continues).
+- **No / unknown terrain type:** a map without mini `06` keeps the loader's default 0, i.e. **Temperate**
+  music and Temperate map ambience. A value above 7 silences tactical music changes and the weather audio
+  (0x323110 refuses types ≥ 8).
+- **Ambient_Map_Sounds uses the same index.** The WeatherAudioManager keeps one intermittent event per
+  environment (manager +0x198 + 0x10 × env, with its delay values next to it). In 0x323110, when the
+  weather type is CLEAR or the intensity is exactly 0, the intermittent event is the map-ambient event of
+  the current environment; otherwise the weather's own intermittent event (0x323880). Space (7) is never
+  set (0x364f00 skips it; Audio.xml has no Space entry).
+
+### 9.2 Refusal rules of the tactical music modes [H]
+
+All three functions take (GMM, force) and first require a current mode that is tactical (mode vf +0xf0
+true), not galactic (vf +0xf8 false); the two tactical pickers also need the mode's scene (mode +0x18).
+With force = 0 they refuse in:
+
+| function | refuses while the music mode is | also refuses |
+|---|---|---|
+| 0x28f020 → mode 7 battle | 7, 8, 11, 12, 13 | attract demo (GMM +0x1e4) |
+| 0x28ee00 → mode 6 ambient | 6, 8, 11, 12 | attract demo |
+| 0x28e800 `Resume_Mode_Based_Music` (→ 0x28ed40 galactic / 0x28ee00 tactical) | 8, 11, 12 | attract demo |
+
+- The combat notification (slot 76, 0x3ba180 land / 0x4d8ae0 space) calls 0x28f020 with **force = 0**
+  and only when the music mode is not 7; it resets the peace counter whether or not the music changed.
+  0x28f020 does not go through 0x28e800, but its own list covers 8 (TSW activation), 12 (Lua `Play_Music`),
+  11 and 13. **Mode 16 (battle end) is not in the list**: a combat notification during mode 16 switches
+  to battle music. Modes 5 (battle pending), 6 and 9/10 are not refused either.
+- The peace timeout (land tick 0x3bb440, space 0x4d95a0) calls 0x28ee00 with force = 0 **only while the
+  music mode is 7**, so mode 8 or 12 never time out to ambient; 0x28ee00 would refuse them anyway.
+- Calls through 0x28e800 pass their force flag to 0x28ee00, so the tactical-start resume (common tick
+  0x3639d0 when mode +0x9a is set and GMM +0x1e1 is clear [M: start flag]) is refused in 6, 8, 11, 12 and
+  during the attract demo. Lua `Resume_Mode_Based_Music` forces and bypasses both lists.
+- The play itself (0x2d21f0) is called with resume = 0, force = 0: the same event as the current one is
+  not restarted (§2.3).
+
+### 9.3 Weather audio and the faction weather announcement [H]
+
+- 0x323110(type, intensity, env) (callers: weather init 0x468a50, advance 0x4690c0, environment change
+  0x360970, map load 0x364f00) refuses type ≥ 5, intensity outside 0..1 or env ≥ 8. Same type as the
+  current one: only an intensity change, handled by 0x323340. New type: the old loop is faded out
+  (0x323800), the loop for (type, intensity) is started 2D-unattached with a 3 s fade-in (0x2d5290, value
+  3.0), the intermittent event is chosen (the weather's, or the map ambient of env when the type is CLEAR
+  or the intensity is 0), and the intermittent countdown is armed with a free-RNG float × FPS. **No
+  faction announcement on a type change.**
+- Loop choice (0x323940): the first loop entry of the type whose intensity threshold is ≤ the intensity
+  and whose event has samples.
+- 0x323340(intensity) (weather service 0x46a0c0 while a phase blends, and 0x323110): ignores values
+  outside 0..1, an unchanged value, or a current type > 4. When the current type is not CLEAR and the
+  **local** player is weather-affected (0x282290: false while its `Weatherproof_Ability` timed flag is
+  active), it plays one tag of the **local player's faction**, 2D, not forced (0x2d5290):
+  - intensity goes from exactly 0 to > 0: the `SFXEvent_Weather_Begin` entry for the current weather type
+    (faction +0x1ae0 + 0x10 × type);
+  - intensity goes from > 0 to exactly 0: the `SFXEvent_Weather_End` entry (faction +0x1b30 + 0x10 × type).
+  The pair lists are keyed by weather type (CLEAR 0, RAIN 1, SNOW 2, SANDSTORM 3, ASH 4; vanilla Begin
+  entries are unit chatter such as `Unit_Rain_Rebel_Soldier`, End entries are empty). Then the loop is
+  re-chosen for the new intensity (kept if it is the same event), the intermittent event re-chosen and
+  re-armed.
+- Consequence [M]: the announcement needs the blended intensity to touch exactly 0 within one weather
+  type, i.e. a scenario phase whose `Emitter_Intensity` is 0 next to one above 0; a type change (phase of
+  another weather type) is silent. There is no test beyond "local player, weather-affected".
+
+### 9.4 AnimationSFXMaps.txt rows [H]
+
+- Load (0x4770a0): tab / space separated. `SOUND <anim> <time> <event>`: anim and event names are
+  upper-cased and CRC'd; time = integer ÷ 100 (so `1032` = 10.32 animation time units [M: frames]); rows
+  whose SFX event does not exist or whose time is negative are dropped. `SURFACE <anim> <time> <fx> <bone>`
+  rows go to 0x476e10. Rows are stored per animation (CRC map, in file order).
+- Trigger (0x4775d0), from the object service 0x3a6b80 once per sim tick for objects with a model and not
+  frozen (obj +0x3a7 = 0): the model's animation is advanced to the sim time (frame ÷ FPS); prev = time
+  before, cur = time after. Nothing when either is negative or they are equal. If cur > prev, every row
+  with prev < t ≤ cur fires; if cur < prev (the clip looped), every row with t > prev or t ≤ cur fires.
+  So a row at exactly 0 fires only on a wrap, not on the first play.
+- Also from `Set_Animation` (0x3a92f0) when it starts a clip at a start frame > 0 with its "fire skipped
+  events" argument set: rows in (0, start] fire at once.
+- SOUND rows start the event **attached to the animating object** (0x2d5320: 3D-attached if the event is
+  `Is_3D`, else 2D-attached; the position-only path 0x2d5240 is used only when no object is passed, which
+  these two callers never do). So the normal §1.2 gates apply (`Max_Instances`, `Overlap_Test`,
+  `Probability`), there is **no fog or owner test at start** (object-attached), and fogged or hidden
+  objects are muted by the §1.6 visibility factor. No per-object limit beyond the event's `Max_Instances`.
+- SURFACE rows spawn the surface effect at the named bone (bone index resolved once and cached; surface
+  FX manager 0x470700).
+
+### 9.5 Hard point and weapon fire sounds [H]
+
+- Hard point fire (`HP_Fire_At` 0x3825b0), right after the projectile is spawned, unless
+  `Test_Disable_Weapon_Fire_SFX`: if the hard point type has a resolved `Fire_SFXEvent` (hard point type
+  +0x240 [M: the resolved slot of the +0x140 name]) it is played; **otherwise** the parent object's type
+  `SFXEvent_Fire` (+0x1240). Only one of the two plays; with neither, nothing. Either is skipped here when
+  the hard point's `Projectile_Appearance_Delay_Frames` (+0x4a4) is > 0 (delayed shot; the sound then
+  follows the delayed appearance, TACTICAL_COMBAT §2 step 11 [M]).
+- It is **3D at a fixed position**: the new projectile's position (the fire bone / muzzle), through
+  0x2d5240 with the parent object passed along — not attached to the ship or the hard point. So the §1.2
+  fog test applies (a fogged muzzle position = not started).
+- Unit weapons (WeaponBehavior 0x54d090): the shooter type's `SFXEvent_Fire` (a variant's `SFXEvent_Fire`
+  when type +0xc48 > 1, via 0x373670 [M: variant lookup]), same Test flag, also 3D at the projectile
+  position.
+
+### 9.6 Ability, hyperspace and shield SFX [H unless tagged]
+
+| tag | lives on | when | how |
+|---|---|---|---|
+| `SFXEvent_Activate` | the ability entry inside the unit's `<Abilities>` block (e.g. `Redirect_Blaster_Ability`, `Stealth_Ability`, `Drain_Life_Ability`; ability data +0x148) | activation presentation 0x48e4d0 (light, particle, sound), called from the ability apply paths (73 references, e.g. after `Begin_Effect` 0x48cca0) | event has `Is_2D` (+0x2a): 2D, not attached (0x2d5290); else attached to the **user** (0x2d5320: 3D-attached when `Is_3D`) |
+| `SFXEvent_Target_Affected` | same ability entry (+0x158; mostly `Force_Healing_Ability`) | same call, when there is a target | same rule, attached to the **target** |
+| `SFXEvent_Deactivate` | **does not exist** (no parser field, no data) | — | — |
+| `SFXEvent_GUI_Unit_Ability_Activated` / `_Deactivated`, `SFXEvent_Target_Ability`, `SFXEvent_Special_Ability_Loop` | the unit type's `<Unit_Abilities_Data><Unit_Ability>` (+0x180, +0x190, +0x170, +0x1a0) | GUI toggle feedback (0x307190 plays `_Deactivated` 2D) and targeting; the loop is started attached to the object by an ability class (0x7003d0) [M] | not traced further |
+| `SFXEvent_Arrive_From_Hyperspace` | **faction** of the arriving object's owner (+0x6b0) | arrival timer 35 (reinforcement arrival 0x626c80, state 4) or 45 (`Cinematic_Hyperspace_In`, state 0x2c, 0x6269f0); also 0x5cbc10 / 0x5cc970 | attached to the arriving object (0x2d5320) |
+| `SFXEvent_Retreat_Engines_Jump` (unit type +0x1270), else `SFXEvent_Exit_Into_Hyperspace` (owner faction +0x6c0) | type, then faction | departure state 0x28 at timer 90 (0x5cd680; `Hyperspace_Away`, cinematic retreat); battle retreat jump-out 0x533ac0 per unit, skipped for objects with obj +0x3a0 bit 0x40 or 0x80 | **3D at the object's position** (0x2d5240), not attached |
+| `SFXEvent_Shields_Go_Down` (type +0x1290) | unit type | shield state change to down (2) in 0x549810, on the transition only | attached to the object (0x2d5320) |
+| `SFXEvent_Shields_Go_Back_Up` (type +0x12a0) | unit type | shield 2 → 1 (first regen tick above 0) in 0x549810 | attached to the object |
+
+There are no `SFXEvent_Shield_*` or `SFXEvent_Hyperspace_*` tags. The vanilla data sets neither shield
+tag (no samples in the field table), so shields are silent in vanilla. HARDPOINT_DISABLED.md calls them
+`SFXEvent_Shield_Off` / `_On` [M]; the parser names are the ones above.
+
+### 9.7 Tactical intro speech (0x364b20, from the common tactical tick 0x3639d0) [H unless tagged]
+
+The tags are **Faction** fields (Factions.xml), not planet fields. Every tick of a tactical mode until a
+one-shot flag (mode +0x2d0) is set:
+
+1. Stop for good (flag set, nothing played) when GMM +0x1e3 is 0 or the mode has no galactic parent
+   (0x28aa00): **no intro in skirmish / multiplayer**, and none in a story linked battle (GMM +0x1e3 is 1
+   from the GMM constructor 0x16fa0, cleared by the linked-battle setup 0x28f590 and set back to 1 when a
+   state-9 linked battle ends, 0x2a7580).
+2. Wait (retry next tick) while a cinematic camera is active, while the mode frame (mode +0x10) is below
+   10 × FPS (**10 s of sim time after the battle starts**, i.e. after the load screen), or while the speech
+   queue is not empty.
+3. Set the flag. Need a local player with a faction that is the battle's attacker (0x28adf0) or defender
+   (0x28aec0), the conflict record (0x28a7a0; +4 attacker id, +8 defender id) and both factions; else
+   nothing.
+4. Pick the first that exists, for the **local player's faction and side** (only the local player hears
+   it):
+   1. Conditional lists (0x35db50): land `..._Land_Attacker/Defender_Conditional_Or` then `_And`, space
+      the `_Space_` ones. Each entry has three object types A, B, C and a speech event. **Or**: A or B
+      present and C absent; **And**: A and B present and C absent. "Present" = an object of that type is
+      at the battle's galactic planet (0x35d930: fleets in orbit and their contents; 0x35d800: that, then
+      the ground forces) [M for the orbit / ground split], any owner. First matching entry wins, Or list
+      before And list.
+   2. Land only, the parent mode is galactic and the local player owns fewer than 2 planets (0x4b2080):
+      `SpeechEvent_Tactical_Intro_Land_Attacker_Last_Location` / `_Defender_Last_Location`.
+   3. Land only, the conflict record is a raid (record +0x50): `..._Land_Raid_Attacker` / `_Defender`.
+   4. Default: land attacker `..._Land_Attacker` (**only when the defender's faction `Is_Playable`**,
+      faction +0x20a8; otherwise nothing at all), land defender `..._Land_Defender`, space
+      `..._Space_Attacker` / `_Space_Defender`.
+5. Queue it (0x321170, FIFO). If the faction's `Tactical_Intro_Command_Bar_Movie_Name` (+0x2f90) is set and
+   the HUD accepts the movie (0x2fc7a0), mode +0x2d4 := a value from the speech event (+0x20) [M].
+
+**Corruption mission commencing** is not part of this: it plays at the **galactic** moment the corruption
+battle is initiated (space conflict 0x2af7c0, land invasion 0x2b0520), when the initiating player is local
+and is the pending corruption-mission player (0x140b155d4). The speech is the initiating unit type's
+`Corruption_N_Mission_Commencing_Speech_Event` whose `Corruption_N_Type` equals the pending corruption type
+(0x140b155d8; 0x371450 checks N = 1, 2, 3); before queuing it the SFX and speech conversations stop and all
+speech is stopped. If the type has none, the local faction's `SFXEvent_Tactical_Corruption_Mission_Commencing`
+(+0x650) plays 2D instead (on land it replaces `SFXEvent_Land_Invasion_Commencing`, +0x640).
+
+### 9.8 Base-under-attack announcement (slot 76, 0x3ba180 land / 0x4d8ae0 space) [H]
+
+Second half of the combat notification, (attacker, victim):
+
+- Only when the countdown (land mode +0x414, space +0x3c4) is 0, both objects exist, and the attacker is
+  **hostile** to the victim's owner (0x39a4e0).
+- The victim must be a base object: land: it has the `DUMMY_GROUND_STRUCTURE` behaviour (obj +0x391) or
+  `DUMMY_LAND_BASE_LEVEL_COMPONENT` (+0x394); space: `DUMMY_STAR_BASE` (+0x38e) or
+  `DUMMY_ORBITAL_STRUCTURE` (+0x392). Units, and turrets without those behaviours, do not count.
+- Owner: the local player, **or** an ally of the local player (0x2823e0) when the victim's type has
+  `Is_Community_Property`.
+- Then: countdown := FPS × `Delay_Between_Land_Base_Attack_Announcement_Seconds` (space: `..._Space_...`;
+  vanilla 60 → 1800 ticks), set **before** the tag test. If the local faction has
+  `SFXEvent_Land_Base_Under_Attack_Announcement` (+0x6e0; space `SFXEvent_Space_...` +0x6d0) it plays 2D,
+  not forced (0x2d5290), and a radar ping (0x2de700, size 4.0) is placed at the victim's position.
+- The countdown drops by 1 per mode tick (0x3bb440 / 0x4d95a0), so the delay counts from the last
+  announcement in sim ticks and scales with game speed. Hits during the countdown are dropped, not queued.
