@@ -63,3 +63,10 @@ add_subdirectory(engine)
 # Q4 behavioural parity harness (tools/parity, roadmap q4h): its selftest, and the reference-run comparisons when
 # alamo_headless is built.
 add_subdirectory(tools/parity)
+
+# libFuzzer targets for the mod-file readers (tools/fuzz, docs/BUILD.md "Fuzzing"). Only build_fuzz.cmd turns this on: it
+# configures a clang tree with ASan + fuzzer instrumentation; normal trees never see these targets.
+option(ALAMO_FUZZ "Configure the libFuzzer targets in tools/fuzz (clang only, build_fuzz.cmd)" OFF)
+if(ALAMO_FUZZ)
+  add_subdirectory(tools/fuzz)
+endif()

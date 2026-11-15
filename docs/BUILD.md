@@ -121,6 +121,34 @@ service that touches a component outside its declared sets is a data race once i
   destructor then wrote to the freed system (test fixture order, `World::make`); `luaG_checkcode` indexed `luaP_opmodes` with an opcode
   from a corrupt save (patch in `engine/lua/CMakeLists.txt`, the save is now rejected).
 
+## Fuzzing (2026-11-15)
+
+`build_fuzz.cmd [seconds per target] [run_fuzz.py args]` builds the libFuzzer targets in `tools/fuzz/targets/` (`fuzz_xml`,
+`fuzz_meg`, `fuzz_alo`, `fuzz_ala`, `fuzz_texture`: the readers that take mod-supplied bytes) in `build-fuzz\` with clang 20 +
+ASan, then runs each for the budget (default 60 s; `0` builds only) through `tools/fuzz/run_fuzz.py`. The seed corpus comes from
+the retail MEGs (`ALAMO_FOC_DATA`), grows in `build-fuzz\fuzz\corpus\`, and crash / leak / timeout / oom inputs land in
+`build-fuzz\fuzz\artifacts\<target>\`. Reproduce one with `build-fuzz\bin\<target>.exe <file>` (the ASan runtime DLL in
+`toolchain\llvm\lib\clang\20\lib\windows` must be on PATH). Not a ctest entry and not part of the gate. Limits on this toolchain:
+- `-fsanitize=fuzzer-no-link` is replaced by `-fsanitize-coverage=inline-8bit-counters,pc-table`: its `trace-cmp` part crashes
+  every C++ catch handler (minimal throw / catch program, 2026-11-15), and the ALO / ALA readers report errors by exception. So
+  there is no comparison-guided mutation; the real-file seeds make up for most of it.
+- `run_fuzz.py` sets `ASAN_OPTIONS=detect_container_overflow=0`: with the MSVC STL, ASan reported container-overflow inside plain
+  `std::string` concatenation (even on an empty input), a false positive. Heap overflows are still reported.
+- First finding: `alamo::meg::Archive::read` allocated an entry's size (up to 4 GB from a corrupt table) before the bounds check;
+  fixed in `tools/meg/src/meg.cpp`.
+
+## clang-tidy (2026-11-15)
+
+`python -I tools/lint/run_tidy.py [--tree build-wt-clang] [--only REGEX] [--tests] [-j N] [--strict]` runs
+`toolchain\llvm\bin\clang-tidy.exe` with the root `.clang-tidy` over the `engine/` and `tools/` sources in a clang tree's
+`compile_commands.json` (configure one with `build_agent.cmd clang ...`; only the configured modules are checked). It prints each
+distinct finding and a count per check; the full output goes to `logs\tidy_<tree>.txt`. clangd reads the same `.clang-tidy`, so
+the findings also show in the editor. Not part of the gate: findings are information, not failures (`--strict` exits 1 on any).
+- The checks are real-bug checks only (`bugprone-*`, `clang-analyzer-core` / `cplusplus`, `concurrency-mt-unsafe`, a few
+  `performance-*` / `misc-*`); style and what `/W4` or `-Wconversion -Wshadow` already report are off. Each disabled check
+  is listed in `.clang-tidy`; turn one off there when it is noise, rather than adding `NOLINT` to sim code.
+- Known false positives: `misc-redundant-expression` on `x - x` in `engine/core/src/dmath.cpp`, which is deliberate (NaN for a non-finite input).
+
 ## Test thread pools under a loaded machine (2026-11-03)
 
 `alamo_ai_tactical_tests` (2 s) ran past ctest's 600 s timeout at 100% CPU. Not a deadlock: it finished once the load went.

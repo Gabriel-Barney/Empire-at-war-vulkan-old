@@ -1,0 +1,28 @@
+# clang-tidy checks for engine/ and tools/ (docs/BUILD.md, "clang-tidy"). Real-bug checks only: style is not checked, and
+# what the compilers already warn about at /W4 / -Wconversion -Wshadow is left out. clangd shows these in the editor too.
+# Runner: python -I tools/lint/run_tidy.py (needs a clang tree's compile_commands.json, e.g. build-wt-clang).
+Checks: >
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-narrowing-conversions,
+  -bugprone-branch-clone,
+  -bugprone-switch-missing-default-case,
+  -bugprone-macro-parentheses,
+  -bugprone-reserved-identifier,
+  -bugprone-exception-escape,
+  -bugprone-incorrect-roundings,
+  -bugprone-assignment-in-if-condition,
+  clang-analyzer-core.*,
+  clang-analyzer-cplusplus.*,
+  clang-analyzer-deadcode.DeadStores,
+  concurrency-mt-unsafe,
+  performance-move-const-arg,
+  performance-unnecessary-copy-initialization,
+  performance-for-range-copy,
+  misc-redundant-expression,
+  misc-misplaced-const
+WarningsAsErrors: ''
+HeaderFilterRegex: '.*[/\](engine|tools)[/\].*'
+CheckOptions:
+  concurrency-mt-unsafe.FunctionSet: any
