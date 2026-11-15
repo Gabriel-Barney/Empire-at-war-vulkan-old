@@ -43,16 +43,20 @@ Other kit-like tooling: `tools/probe_mod/common/` (helpers every kit runner shar
 
 Installed project-locally and pinned by `toolchain\14_re_tools.cmd` (called by `2_setup.cmd`; log `toolchain\re_tools.log`, ends with
 `RE_TOOLS_DONE`). For RE, doc and probe tasks only, never while writing engine code (clean-room rule in `CLAUDE.md`); findings go in
-`docs/re/` as for any probe. Retail `StarWarsG.exe` is 64-bit, so every tool here is the x64 build. Smoke-tested 2026-11-15: ReVa
-starts and lists its tools, `frida --version`, `cdb -version`; nothing has been run against retail yet.
+`docs/re/` as for any probe. Retail `StarWarsG.exe` is 64-bit, so every tool here is the x64 build. Nothing here uses the machine's
+own Java or Python: Ghidra runs on Temurin JDK 21.0.13+9 (`toolchain\re\jdk-21.0.13+9`), the Python tools on python.org Python
+3.14.10 (`toolchain\re\python-3.14.10`; ReVa's Java bridge has no build for Python 3.15).
 
 | Tool | Where | Use |
 |---|---|---|
-| Ghidra 12.1.4 + ReVa 7.3.2 (MCP server for Ghidra, 86 tools) | `toolchain\re\ghidra_12.1.4_PUBLIC`; start headless with `tools\re\reva_mcp.cmd` (stdio) | Lets an agent query Ghidra (decompile, cross-references, call graph, vtables). Headless ReVa keeps its own projects in `.reva\projects` under the folder it is started from, so the binary is imported and analysed there once. It is not registered as an MCP server in any Claude Code settings file. Runs on the machine's JDK 27 (`JAVA_HOME` overrides) |
+| Ghidra 12.1.4 + ReVa 7.3.2 (MCP server for Ghidra, 86 tools) | `tools\re\reva_mcp.cmd` (stdio); Ghidra in `toolchain\re\ghidra_12.1.4_PUBLIC` | Lets an agent query Ghidra (decompile, cross-references, call graph, vtables). The project is kept in `toolchain\re\reva-work\foc` (`tools\re\reva_persistent.py`; stock `mcp-reva` deletes its project on exit) and holds `/StarWarsG.exe`, imported and analysed once by `tools\re\reva_import.py`. Ghidra locks an open project: one ReVa session at a time |
+| mcp-windbg 1.6.0 (MCP server around `cdb.exe`) | `tools\re\windbg_mcp.cmd` (stdio) | `open_cdb_dump` on a TTD trace (`.run`), then `run_cdb_command`. Stands in for `ttd-mcp`, which does not exist on GitHub |
+| Microsoft TTD 1.11.611.0 (recorder) | `tools\re\ttd_record.cmd [process or pid] [-accepteula]`; `toolchain\re\ttd-1.11.611.0\TTD.exe` | Records a running process (default `StarWarsG.exe`) to `toolchain\re\ttd-traces`. TTD needs administrator rights: the script raises one Windows prompt. TTD shows Microsoft's licence until it is accepted; `-accepteula` accepts it and is Gabriel's to pass, an agent does not |
+| Microsoft WinDbg 1.2611.4001.0 | `toolchain\re\windbg-1.2611.4001.0\amd64\cdb.exe` (command line), `DbgX.Shell.exe` (GUI) | Replays a `.run` trace forwards and backwards: `cdb.exe -z <trace>.run -c "<commands>; q"` |
 | Frida 17.26.3, frida-tools 14.13.1 | `toolchain\re\venv\Scripts\frida.exe`, `frida-trace.exe`; Python module `frida` in that venv | Hook retail functions at run time and log arguments / return values (tier-2 distributions over many seeds) |
-| Microsoft TTD 1.11.611.0 (recorder) | `toolchain\re\ttd-1.11.611.0\TTD.exe` | Record one retail session to a `.run` trace. Needs an elevated prompt. `TTD.exe` shows Microsoft's licence on first use and waits: Gabriel accepts it, an agent does not |
-| Microsoft WinDbg 1.2611.4001.0 | `toolchain\re\windbg-1.2611.4001.0\amd64\cdb.exe` (command line), `DbgX.Shell.exe` (GUI) | Replay a `.run` trace forwards and backwards: `cdb.exe -z <trace>.run -c "<commands>; q"`. The package also holds Microsoft's own WinDbg MCP service (GUI only, Claude Code is not a supported client) |
 | apitrace 14.0 (Direct3D 9 capture) | `toolchain\capture\apitrace-14.0` (step 6, `g1_capture/` kit) | Already in use for G1 |
 
-`ttd-mcp` (named in the 2026-11-15 research) does not exist on GitHub; TTD traces are queried through `cdb.exe` instead. Python
-3.14.10 (`toolchain\re\python-3.14.10`) is there only because ReVa's Java bridge has no build for the machine's Python 3.15.
+Claude Code: the `re-analyst` agent (`.claude/agents/re-analyst.md`) is the only place the two MCP servers are registered, as
+servers of that agent alone, so lanes that write engine code never get decompiler tools and no session starts a Ghidra JVM it
+does not use. Checked 2026-11-15: both servers start and list their tools, the import ran (analysis: see `toolchaineeva-workimport.log`), `frida --version`,
+`cdb -version`. Not checked: a TTD recording (needs the licence step), a trace replay, and the agent started from a session.
