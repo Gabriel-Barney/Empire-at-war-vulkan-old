@@ -1875,6 +1875,9 @@ void TacticalAiWorld::Impl::pp_input(PlayerAi& p, uint32_t plan, const Goal& g, 
         if (!o || !o->alive) continue;
         // s78n t06 (A1_READINGS §28, HERO_CLASH §5.2): Setup A 0x7287a0 skips a unit in a hero clash (+0x3b4).
         if (const TacticalAiObject* f = fact(id); f && f->hero_clash) continue;
+        // b0416 (B0416_MDU_REUSE_RE §1.1 test 11): Setup A skips a TACTICAL_BUILD_OBJECTS unit whose pad holds a finished or
+        // under-construction object (a deployed Mobile Defense Unit with a turret); a deployed one with an empty pad stays.
+        if (const TacticalAiObject* f = fact(id); f && f->pad_occupied) continue;
         PpFreeUnit u;
         u.id = id;
         u.type = o->type;
@@ -4194,8 +4197,9 @@ namespace {
 
 namespace io = save_io;
 
-constexpr uint32_t kTacticalAiLaneSaveVersion = 13;  // sp3: version 12 plus the AI-lane block (k_ai, the AI-owned GameRandom)
-constexpr uint32_t kTacticalAiSaveVersion = 12;  // 2: six space free-store facts; 3: re-projection stamp; 4: flood sets;
+constexpr uint32_t kTacticalAiSaveVersionNoPad = 12, kTacticalAiLaneSaveVersionNoPad = 13;  // still loaded (b0416)
+constexpr uint32_t kTacticalAiLaneSaveVersion = 15;  // sp3: kTacticalAiSaveVersion plus the AI-lane block (13 before b0416) (k_ai, the AI-owned GameRandom)
+constexpr uint32_t kTacticalAiSaveVersion = 14;  // 14: b0416 pad_occupied fact (12 before); 2: six space free-store facts; 3: re-projection stamp; 4: flood sets;
                                                  // 5: refixf t06 space reinforcement status fields; 6: a1g t01 PP+0x100,
                                                  // entry +0x30 moved into the free store; 7: S7 t20/t21/t15 A1 (no had_units /
                                                  // no_units_sent; ambush / ability status fields); 8: a1j t01 land
@@ -4334,9 +4338,10 @@ void put_fact(ByteWriter& w, const objects::ObjectStore& st, const TacticalAiObj
     w.boolean(f.damage_tracking);
     w.i32(f.reprojection_stamp);
     w.boolean(f.valid_target).boolean(f.hero_clash);  // q6 t19
+    w.boolean(f.pad_occupied);  // b0416
 }
 
-bool get_fact(ByteReader& r, const objects::ObjectStore& st, TacticalAiObject& f) {
+bool get_fact(ByteReader& r, const objects::ObjectStore& st, TacticalAiObject& f, bool has_pad_fact) {
     f.handle = get_handle(r, st);
     f.target.id = r.i32();
     f.target.dead_or_removing = r.boolean();
@@ -4361,6 +4366,7 @@ bool get_fact(ByteReader& r, const objects::ObjectStore& st, TacticalAiObject& f
     f.reprojection_stamp = r.i32();
     f.valid_target = r.boolean();  // q6 t19
     f.hero_clash = r.boolean();
+    f.pad_occupied = has_pad_fact && r.boolean();  // b0416 (absent before version 14 / 15: false)
     return r.ok();
 }
 
@@ -4440,7 +4446,7 @@ void rebind_vm(TacticalAiWorld::Impl& m, lua::LuaVm& vm, int32_t script_id) {
 void TacticalAiWorld::write(ByteWriter& w) const {
     const Impl& m = *impl_;
     const objects::ObjectStore& st = m.store;
-    // sp3: an AI-lane world writes version 13 with its lane block; with the lane off the bytes are version 12's.
+    // sp3: an AI-lane world writes version 15 with its lane block; with the lane off the bytes are version 14's.
     w.u32(m.cfg.ai_lane ? kTacticalAiLaneSaveVersion : kTacticalAiSaveVersion);
     if (m.cfg.ai_lane) {
         w.u32(m.cfg.k_ai);
@@ -4659,14 +4665,18 @@ bool TacticalAiWorld::read(ByteReader& r) {
     const size_t lib = m.library.plans.size();
     const size_t goal_types = m.defs.goals.size();
     const auto mi = static_cast<size_t>(ai_mode_of(m.cfg.mode));
-    // sp3: version 13 = an AI-lane world (its lane block follows) and loads only into one; version 12 (lane off) also
+    // sp3: version 15 = an AI-lane world (its lane block follows) and loads only into one; version 14 (lane off) also
     // loads into an AI-lane world, which then keeps its configured k_ai and its stream from the start seeds (the bench
     // and harness saves).
     const uint32_t version = r.u32();
-    if (!r.ok() || !(version == kTacticalAiSaveVersion || (m.cfg.ai_lane && version == kTacticalAiLaneSaveVersion))) return io::bad(r);
+    // b0416: versions 12 / 13 (the same layout without the pad_occupied fact) still load: stored benchmark scenarios hold them.
+    const bool lane_image = version == kTacticalAiLaneSaveVersion || version == kTacticalAiLaneSaveVersionNoPad;
+    const bool has_pad_fact = version == kTacticalAiSaveVersion || version == kTacticalAiLaneSaveVersion;
+    if (!r.ok() || !(version == kTacticalAiSaveVersion || version == kTacticalAiSaveVersionNoPad || (m.cfg.ai_lane && lane_image)))
+        return io::bad(r);
     uint32_t saved_k_ai = m.cfg.k_ai;
     GameRandom saved_lane_rng = m.own_rng;
-    if (version == kTacticalAiLaneSaveVersion) {
+    if (lane_image) {
         saved_k_ai = r.u32();
         if (!r.ok() || saved_k_ai == 0 || !saved_lane_rng.read(r)) return io::bad(r);
     }
@@ -4695,7 +4705,7 @@ bool TacticalAiWorld::read(ByteReader& r) {
     if (!m.w.types.empty() && (type_count != m.w.types.size() || types_digest != m.w.types_digest())) return io::bad(r);
     std::vector<TacticalAiObject> new_facts(io::count(r, kFactBytes));
     for (TacticalAiObject& f : new_facts)
-        if (!get_fact(r, st, f)) return false;
+        if (!get_fact(r, st, f, has_pad_fact)) return false;
     if (!r.ok() || new_facts.size() != new_w.objects.size()) return io::bad(r);  // facts[i] belongs to objects[i]
     std::vector<std::pair<int32_t, int32_t>> new_prev(io::count(r, 8));
     for (size_t i = 0; i < new_prev.size(); ++i) {

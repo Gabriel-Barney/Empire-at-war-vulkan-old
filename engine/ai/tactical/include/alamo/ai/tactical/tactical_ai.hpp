@@ -129,6 +129,9 @@ struct TacticalAiObject {
     // transport, not in a hero clash (+0x3b4, `hero_clash`), and no SPECIAL_WEAPON unless it is a DUMMY_STAR_BASE.
     bool valid_target = true;
     bool hero_clash = false;  // obj +0x3b4 (s78n t06: the combat flag kUnitHeroClash; skipped by free store Setup A)
+    // b0416: has TACTICAL_BUILD_OBJECTS and its pad holds a finished (0x42e3b0) or UC (0x42e3d0) object; skipped by free
+    // store Setup A (0x7287a0 test 11).
+    bool pad_occupied = false;
     // UnitAI data-pack re-projection stamp (+0x20, A1_READINGS §14): UnitAiStamps::reprojection_check drawn by the host
     // when the UNIT_AI object was created (draw_unit_ai_stamps). Every host draws it; the default 0 (a stamp at or
     // before the first service) makes the first check run at the object's first service, as a drawn stamp does.

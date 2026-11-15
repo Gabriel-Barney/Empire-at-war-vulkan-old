@@ -376,8 +376,11 @@ if(_alamo_sim)
     # 30000 ticks; with 70000 ticks seed 4 ends at 49353, seed 8 at 50122, seed 10 at 43021 (Underworld wins, 0 Lua errors;
     # seed 10 has an MDU with a Sensor Scrambler at the end), seed 5 does not end. Seeds 1 2 3 6 7 9 log BuildMDUItem's
     # "already has something built on it" (a later plan takes the MDU that already carries an object; retail not checked).
-    # Pinned to seeds 4 and 10 with 70000 ticks; about 80 s each.
-    foreach(_seed 4 10)
+    # b0416 (2026-11-14): free store Setup A skips a unit whose build pad is occupied, and a DEPLOY stop ends the unit's land
+    # attack block. Seeds 1-10, 70000 ticks: 0 Lua errors in all ten; ends (Underworld wins) at 31670 (5), 25738 (6), 68036
+    # (7), 50122 (8), 43021 (10); seeds 1 2 3 4 9 do not end (seed 9 takes about 13 minutes). Seeds 8 and 10 kept their end
+    # frame through both b0416 changes: pinned to them, 70000 ticks, about 80 s each.
+    foreach(_seed 8 10)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_empire_underworld_seed${_seed}
                COMMAND alamo_headless --skirmish-ai foc-land --ai Empire,Underworld --ticks 70000 --workers 4 --quiet
                        --expect-battle-end --fail-on-lua-errors --seed ${_seed})

@@ -1670,6 +1670,7 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
         // garrison holder stands in]; no hero clash (+0x3b4, s78n t06: kUnitHeroClash); SPECIAL_WEAPON only on a
         // DUMMY_STAR_BASE.
         a.hero_clash = c.has_unit(id) && (c.flags(id) & tc::kUnitHeroClash) != 0;
+        a.pad_occupied = b_->pad_occupied(id);  // b0416 (Setup A test 11)
         a.valid_target = (fs.is_team || tf.valid_target) &&
                          b_->garrison_holder_of(id) == objects::kNoObjectId && !b_->landing_hidden(id) && !fs.dead_or_removing &&
                          !a.hero_clash && (!fs.has_special_weapon || o.dummy_star_base);

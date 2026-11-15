@@ -2396,9 +2396,9 @@ uint32_t first_u32(const std::vector<uint8_t>& b) {
                                    (static_cast<uint32_t>(b[3]) << 24);
 }
 
-// sp3 (TacticalAiConfig::ai_lane): an AI-lane world draws from its own stream, not the session's, and saves it (version 13)
-// so a load continues identically; a lane-off save (version 12) loads into a lane-on world; a lane-on save does not load
-// into a lane-off world; the lane-off bytes keep version 12.
+// sp3 (TacticalAiConfig::ai_lane): an AI-lane world draws from its own stream, not the session's, and saves it (version 15)
+// so a load continues identically; a lane-off save (version 14) loads into a lane-on world; a lane-on save does not load
+// into a lane-off world; the lane-off bytes keep version 14.
 void test_ai_lane_save() {
     const int32_t save_at = 30 * 35;
     g_ai_lane = false;
@@ -2410,13 +2410,13 @@ void test_ai_lane_save() {
         off_image = a.ai_bytes();
         off_session_draws = a.rng.synced().draws();
     }
-    CHECK(first_u32(off_image) == 12u);
+    CHECK(first_u32(off_image) == 14u);
     g_ai_lane = true;
     test_save_load(1, 30 * 30, 30 * 60);  // round trip and continuation with the lane on (variant 0's corruption offsets are v12's)
     SaveSession a(0);
     for (int32_t f = 1; f <= save_at; ++f) a.step(f);
     const std::vector<uint8_t> on_image = a.ai_bytes();
-    CHECK(first_u32(on_image) == 13u);
+    CHECK(first_u32(on_image) == 15u);
     // The AI's own draws left the session stream (what remains are the host's).
     CHECK(a.rng.synced().draws() < off_session_draws);
     {
@@ -2425,7 +2425,7 @@ void test_ai_lane_save() {
         SaveSession from(0);
         for (int32_t f = 1; f <= save_at; ++f) from.step(f);
         CHECK(b.restore_host(from) && b.load_ai(off_image));
-        CHECK(first_u32(b.ai_bytes()) == 13u);
+        CHECK(first_u32(b.ai_bytes()) == 15u);
     }
     {
         g_ai_lane = false;
