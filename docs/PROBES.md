@@ -42,7 +42,8 @@ Other kit-like tooling: `tools/probe_mod/common/` (helpers every kit runner shar
 ## RE and retail-tracing tools (`toolchain\re`, 2026-11-15)
 
 Installed project-locally and pinned by `toolchain\14_re_tools.cmd` (called by `2_setup.cmd`; log `toolchain\re_tools.log`, ends with
-`RE_TOOLS_DONE`). For RE, doc and probe tasks only, never while writing engine code (clean-room rule in `CLAUDE.md`); findings go in
+`RE_TOOLS_DONE`). Any worker may use them, also while writing engine code (Gabriel, 2026-11-15, `DECISIONS.md`, "Retail RE access for every
+worker"), but decompiled code is never copied into the repo; findings go in
 `docs/re/` as for any probe. Retail `StarWarsG.exe` is 64-bit, so every tool here is the x64 build. Nothing here uses the machine's
 own Java or Python: Ghidra runs on Temurin JDK 21.0.13+9 (`toolchain\re\jdk-21.0.13+9`), the Python tools on python.org Python
 3.14.10 (`toolchain\re\python-3.14.10`; ReVa's Java bridge has no build for Python 3.15).
@@ -58,8 +59,8 @@ own Java or Python: Ghidra runs on Temurin JDK 21.0.13+9 (`toolchain\re\jdk-21.0
 | apitrace 14.0 (Direct3D 9 capture) | `toolchain\capture\apitrace-14.0` (step 6, `g1_capture/` kit) | Already in use for G1 |
 
 Claude Code: the `re-analyst` agent (`.claude/agents/re-analyst.md`) is the only place the two MCP servers are registered, as
-servers of that agent alone, so lanes that write engine code never get decompiler tools and no session starts a Ghidra JVM it
-does not use. Checked 2026-11-15: both servers start and list their tools, the import and Ghidra auto-analysis ran (203 s, 21,744 functions, 19,488 strings) and a new session reopened the saved result, `frida --version`,
+servers of that agent alone, because Ghidra allows one ReVa session at a time and no session should start a Ghidra JVM it does
+not use (other workers reach ReVa through `re-question`, or use REA directly). Checked 2026-11-15: both servers start and list their tools, the import and Ghidra auto-analysis ran (203 s, 21,744 functions, 19,488 strings) and a new session reopened the saved result, `frida --version`,
 `cdb -version`. The `re-analyst` agent started from a session on 2026-11-15 with both servers working (ReVa 86 tools, mcp-windbg 12). Not checked: a TTD recording and its replay (a non-elevated `TTD.exe -launch` stops with "Administrative privileges are required", 0x80070005; the licence itself is accepted).
 REA, checked 2026-11-15: `15_rea.cmd` from an empty state, `rea_session.py --selftest`, a `search_bytes` on the shared Ghidra
 and project-local JDK that returned the same 21 matches as the trial run, then caller, pseudo-code, batch-decompile and

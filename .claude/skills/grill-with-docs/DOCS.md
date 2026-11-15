@@ -8,7 +8,7 @@ Adapted from `mattpocock/skills` `domain-modeling` (GLOSSARY-FORMAT.md, ADR-FORM
 |---|---|---|
 | Binding decision (scope, platform, parity, dependencies, controls, graphics, process) | `docs/DECISIONS.md` | A dated section or table row with Gabriel's name; record why, and the rejected options when the rejection is not obvious |
 | Port choice where the spec was silent | the step's entry in `docs/PHASE4.md` | Moves to `docs/PHASE4_HISTORY.md` when the step is finished |
-| What retail does | the matching `docs/re/` spec | Never from decompiled output (clean-room) |
+| What retail does | the matching `docs/re/` spec | In words and tables; decompiled code is never copied in |
 | Mod-loading rule | `docs/MODS.md` | |
 | A project term | `docs/GLOSSARY.md` | Created on the first term; add its row to `docs/README.md` in the same change |
 | Work that follows | the roadmap, via `to-tickets` or `triage` | Status lives only there |

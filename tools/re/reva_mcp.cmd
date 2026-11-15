@@ -4,7 +4,7 @@ rem toolchain\14_re_tools.cmd) on stdio. Arguments are passed to mcp-reva (e.g. 
 rem The Ghidra project is kept in toolchain\re\reva-work\foc (tools\re\reva_persistent.py), shared by every
 rem worktree through the toolchain junction; StarWarsG.exe is imported and analysed there once.
 rem Ghidra locks an open project: one ReVa session at a time.
-rem RE / doc tasks only: never while writing engine code (CLAUDE.md).
+rem Registered only on the re-analyst agent (one ReVa session at a time); never copy decompiled code into the repo (CLAUDE.md).
 setlocal
 set "RE_ROOT=%~dp0..\..\toolchain\re"
 if not exist "%RE_ROOT%\venv\Scripts\mcp-reva.exe" (echo toolchain\re missing: run toolchain\14_re_tools.cmd 1>&2& exit /b 1)

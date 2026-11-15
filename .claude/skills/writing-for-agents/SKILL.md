@@ -33,10 +33,10 @@ A mechanical rule written as a sentence is a no-op waiting to happen: make it a 
 3. **Every step has a checkable finish condition**, high enough to need real work ("0 warnings on both compilers, `skips:` read",
    not "run the tests"). Vague conditions end early. Sharpen the condition before splitting a sequence; split only at a real
    context boundary such as a hand-off or subagent dispatch.
-4. **State the wanted behaviour.** "Use `Edit`" beats "do not use sed". Keep prohibitions for hard guardrails (clean-room,
-   determinism, no system-wide installs), and put the reason beside them.
+4. **State the wanted behaviour.** "Use `Edit`" beats "do not use sed". Keep prohibitions for hard guardrails (no copied
+   decompiled code, determinism, no system-wide installs), and put the reason beside them.
 5. **Leading words over explanations.** Use the project's established terms (tier 1/2/3, lane, group, golden, checkpoint, `[port]`
-   entry, clean-room) and define a coined term once, where it is introduced.
+   entry, no-copy guard) and define a coined term once, where it is introduced.
 6. **One home per meaning.** Do not restate what a config file, script `--help` or a lookup already shows (command flags, test
    names, directory listings). Document what an agent cannot discover: unwritten conventions and the reasons behind choices.
 7. **Prune.** Delete a line that describes default model behaviour, that no longer matters, or that nothing in the last sessions

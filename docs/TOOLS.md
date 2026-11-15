@@ -2,17 +2,18 @@
 
 Default workflow (Gabriel, 2026-11-15; `DECISIONS.md`, "Default tool access"): the main session, every agent in
 `.claude/agents/` and every subagent spawned with the `Agent` tool may use **every** tool listed here whenever its task needs
-one, without asking first. Limits come from the rules (CLAUDE.md, clean-room, determinism, landing), not from tool lists. The
+one, without asking first. Limits come from the rules (CLAUDE.md, the no-copy guard on decompiled code, determinism, landing), not from tool lists. The
 only per-agent limit left is `reviewer`, which never edits files.
 
-**Exception: the retail RE and tracing tools** (ReVa / Ghidra, REA, mcp-windbg, TTD, WinDbg / cdb, Frida, and any disassembler or debugger pointed at
-retail `StarWarsG.exe`, `llvm-objdump` and `lldb` included; `PROBES.md`, "RE and
-retail-tracing tools") are not for every worker. Clean-room rule: a worker that writes engine code never runs them and never
-reads what they print. Only the `re-analyst` agent uses ReVa, mcp-windbg and REA (the two MCP servers are registered on it
-alone); a probe or RE / doc task may use TTD, cdb and Frida. Everyone else asks through the `re-question` skill, which starts
-`re-analyst` and gets back behaviour written in `docs/re/`. A TTD recording also needs a person to approve its Windows admin
-prompt (UAC), so it never runs unattended. `tools\tc.cmd` runs WinDbg, TTD, Frida and REA by name for the tasks allowed to use
-them; being on its PATH does not lift this exception.
+**Retail RE tools are for every worker too** (Gabriel, 2026-11-15; `DECISIONS.md`, "Retail RE access for every worker"): REA,
+WinDbg / cdb, Frida, TTD replays, any disassembler or debugger pointed at retail `StarWarsG.exe`, and the decompiled output in
+`re_reference/` may be used directly, also while writing engine code (`PROBES.md`, "RE and retail-tracing tools", says where each
+lives). **One guard:** never copy decompiled or disassembled code into `engine/`, `tools/` or `docs/` (no pasted pseudo-code, no
+line-by-line transliteration); write engine code in the port's own words and structure, and put the behaviour you learned into
+the `docs/re/` spec in words and tables. Limits that are technical, not rules: ReVa (Ghidra MCP) is registered only on the
+`re-analyst` agent because Ghidra allows one ReVa session at a time: a main session starts `re-analyst`, a subagent hands it a
+questions file (`re-question`), and everyone can use REA, which reads the same analysis from many sessions at once. A TTD recording needs a person to approve its
+Windows admin prompt (UAC).
 
 How it is wired:
 - Agent frontmatter has no `tools:` allowlist, so an agent inherits every tool of the session (PowerShell, LSP, web search /
@@ -65,12 +66,17 @@ From PowerShell use `& .\tools\tc.cmd <program> <args>`, or `--%` on a line of i
 | `cargo`, `rustc`, `rust-analyzer` | `toolchain\rust\cargo\bin` |
 | `git` (MinGit) | `toolchain\mingit\cmd` |
 | apitrace 14.0: `apitrace` (`trace`, `dump`, `diff`, `replay`), `d3dretrace`, `qapitrace` (viewer) | `toolchain\capture\apitrace-14.0\bin` (`toolchain\6_capture_tools.cmd`) |
-| RE tools, **the exception above applies**: WinDbg `cdb`, `kd`, `DbgX.Shell` (GUI); TTD `TTD` (recording needs administrator rights, which `tc.cmd` does not raise: record with `tools\re\ttd_record.cmd`, one UAC prompt; replay with `cdb -z <trace>.run`); Frida `frida`, `frida-trace`, `frida-ps`, ...; REA as `rea` (`rea call`, `rea tools`, `rea status`) | `toolchain\re\windbg-1.2611.4001.0`, `toolchain\re\ttd-1.11.611.0`, `toolchain\re\venv\Scripts`, `tools\re\rea.cmd` (`toolchain\14_re_tools.cmd`, `15_rea.cmd`); last on PATH, so their DLLs and Python 3.14 shadow nothing |
+| Retail RE tools (every worker; the no-copy guard above applies): WinDbg `cdb`, `kd`, `DbgX.Shell` (GUI); TTD `TTD` (recording needs administrator rights, which `tc.cmd` does not raise: record with `tools\re\ttd_record.cmd`, one UAC prompt; replay with `cdb -z <trace>.run`); Frida `frida`, `frida-trace`, `frida-ps`, ...; REA as `rea` (`rea call`, `rea tools`, `rea status`) | `toolchain\re\windbg-1.2611.4001.0`, `toolchain\re\ttd-1.11.611.0`, `toolchain\re\venv\Scripts`, `tools\re\rea.cmd` (`toolchain\14_re_tools.cmd`, `15_rea.cmd`); last on PATH, so their DLLs and Python 3.14 shadow nothing |
 
 apitrace records the graphics API calls a program makes, not its code, so every worker may use it, including on a capture of
 retail (the G1 capture; RenderDoc is out of scope, `DECISIONS.md`). Running retail to make a new capture is a probe run
-(`probe-kit`; findings go to `docs/re/`). LLVM tools are for the port's own binaries: disassembling or debugging retail
-`StarWarsG.exe` with `llvm-objdump`, `lldb` or any other tool is RE work and falls under the exception above.
+(`probe-kit`; findings go to `docs/re/`). LLVM tools work on the port's binaries and on retail `StarWarsG.exe` alike; on retail
+the no-copy guard above applies.
+
+Pre-approved in `.claude/settings.json`, so they run without a prompt in the default permission mode too: `tc.cmd` with
+`apitrace`, `d3dretrace`, `qapitrace`, `clang-tidy`, `clang-format`, `clang-query`, `clang-include-cleaner`, `clangd`, `llvm-*`,
+`lldb`, `dxc`, `dumpbin`, `rea`, `cdb`, plus `--where` and `<program> --version`. Not pre-approved: `frida*` and `TTD` (they attach
+to or record processes), `cargo`, `cmake` and `ninja` beyond `--version` (builds go through the build scripts).
 
 Builds still go through the build scripts, never a hand-run cmake configure (`BUILD.md`). A program that is missing gets a
 pinned setup step in `toolchain\2_setup.cmd` (rule 5), then a row here.
@@ -109,5 +115,5 @@ pinned setup step in `toolchain\2_setup.cmd` (rule 5), then a row here.
 ## Session tools
 
 LSP (clangd, `eaw-clangd` plugin), web search / fetch, the built-in browser, computer use (retail probe runs only; never the
-port's `alamo_game.exe`), ReVa and windbg MCP (`re-analyst` only, see the exception above), scheduled tasks and `/loop`. Approval rules for outward or
+port's `alamo_game.exe`), ReVa and windbg MCP (registered on `re-analyst`; main sessions start it, subagents use `re-question`), scheduled tasks and `/loop`. Approval rules for outward or
 irreversible actions (pushing anywhere but `dev` via `land_on_dev.cmd`, merging PRs, deleting) are unchanged.

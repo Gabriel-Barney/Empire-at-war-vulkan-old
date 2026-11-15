@@ -9,8 +9,8 @@ A fast, trustworthy red/green signal does most of the work. Build it before theo
 without one is the failure mode this skill prevents. Adapted from `mattpocock/skills` (MIT) to this repo's tools.
 
 Ground rules, all phases:
-- Clean-room (`CLAUDE.md`): never read `re_reference/`. Questions about what retail does are answered from `docs/re/`, then a
-  probe kit that you run on retail yourself (rule 7; never the port's `alamo_game.exe`). A diagnosis that needs a retail fact it does not have stops and says so.
+- Retail behaviour: `docs/re/` first, then look yourself (REA, `re_reference/`, cdb on a TTD trace; never copy decompiled code
+  into the repo) or ask through `re-question`, then a probe kit that you run on retail yourself (rule 7; never the port's `alamo_game.exe`). A diagnosis that needs a retail fact it does not have stops and says so.
 - Build and test only through the scripts (`build_agent.cmd`, `build_module.cmd`); never hand-configure a build tree.
   A failing rerun that is identical is refused (exit 3): change something, or read the first failure again, before `ALAMO_RERUN=1`.
 - A hung test exe of yours: `python -I tools/worktree/stop_tree_procs.py`.

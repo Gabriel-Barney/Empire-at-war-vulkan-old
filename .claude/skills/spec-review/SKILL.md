@@ -34,7 +34,7 @@ In this order:
 
 Always: `CLAUDE.md` (rules 1-7), `docs/BUILD.md` (test rules: parallel-safe fixtures, `slow` label, worker-count entries, LF
 endings), `docs/DECISIONS.md` (scope, parity tiers, approved dependencies), the `determinism-check` checklist for sim code (everything
-in `engine/` except render, audio, video, UI), clean-room (no decompiled code in `engine/`), and `docs/MODS.md` (no mod-specific
+in `engine/` except render, audio, video, UI), no copied decompiled code anywhere in the diff (pasted pseudo-code, line-by-line transliteration), and `docs/MODS.md` (no mod-specific
 names in engine code). Skip what tooling already enforces: warnings (`/W4`, clang flags), `.clang-tidy`, the mod-name and
 string-literal lints.
 

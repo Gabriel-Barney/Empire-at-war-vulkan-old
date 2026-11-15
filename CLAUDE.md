@@ -1,6 +1,7 @@
 # EaW:FoC engine rewrite — guide for Claude agents
 
-Clean-room C++20 rewrite of the Star Wars: Empire at War: Forces of Corruption (Alamo) engine:
+C++20 rewrite of the Star Wars: Empire at War: Forces of Corruption (Alamo) engine, written in its own words (decompiled
+retail code may be read, never copied):
 headless multithreaded simulation core first, then a Vulkan 1.3 renderer. Any Claude agent
 (Claude Code CLI, desktop, cloud session or subagent) working in this folder follows this file.
 
@@ -19,7 +20,7 @@ headless multithreaded simulation core first, then a Vulkan 1.3 renderer. Any Cl
 | `docs/re/` | Behavioural specs recovered from the binary (GALACTIC, HOTSPOTS, STRUCTS, SUBSYSTEMS, LUA_API, xml tags) |
 | `docs/assets/`, `docs/formats/`, `docs/shaders/` | Asset catalog and format specs |
 | `extracted/` | Game text (XML/Lua) zipped: `foc_data_text.zip`, `eaw_data_text.zip` |
-| `re_reference/` | Decompiled output. **Never read it while writing engine code** (clean-room). Only RE/doc tasks use it, and they write behaviour into `docs/re/`, never code |
+| `re_reference/` | Decompiled output. Any worker may read it, also while writing engine code (Gabriel, 2026-11-15). **Never copy decompiled code into `engine/`, `tools/` or `docs/`**: write engine code in the port's own words, behaviour into `docs/re/` in words |
 | `toolchain/` | Project-local MSVC 14.51, Windows SDK, CMake, Ninja. Nothing is installed system-wide |
 | `logs/` | Build/test logs written by the build scripts |
 
@@ -94,8 +95,9 @@ Project skills (`.claude/skills/`; triggers in each description): `start-group` 
 adapted from `mattpocock/skills`, MIT, 2026-11-15),
 `retro` (Gabriel-invoked review of how sessions went; lanes end with a one-line friction note for it).
 **Default tool access (Gabriel, 2026-11-15): every worker (main session, agent, subagent) may use every project script,
-toolchain program and skill whenever its task needs one, without asking; index `docs/TOOLS.md`. Exception: the retail RE and
-tracing tools (ReVa, REA, mcp-windbg, TTD, cdb, Frida) stay with `re-analyst` and probe / RE tasks (clean-room); others use `re-question`.** Agents in `.claude/agents/`
+toolchain program and skill whenever its task needs one, without asking; index `docs/TOOLS.md`. That includes the retail RE
+tools (REA, cdb, Frida, TTD replays, `re_reference/`), also while writing engine code; decompiled code is never copied into the
+repo. ReVa is registered on `re-analyst` only (one Ghidra session at a time): reach it through that agent (`re-question`), or use REA.** Agents in `.claude/agents/`
 have no `tools:` allowlist (they inherit every session tool; only `reviewer` has `disallowedTools` for edits); toolchain
 programs run by name through `tools\tc.cmd <program>`; a `SessionStart` hook links the worktree junctions. A subagent does not
 inherit the main session's skills, so each agent preloads

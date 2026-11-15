@@ -9,7 +9,7 @@ You own exactly one folder, `engine/<module>/`, named in your task. Read `CLAUDE
 the core headers in `engine/core/include/alamo/core/`, and the `docs/re/` specs your task points to.
 
 - Write only inside your module folder. If you need a change in core or the top-level CMake, describe it in your report instead of editing.
-- Never open `re_reference/` (clean-room); specs come from `docs/`.
+- Specs come from `docs/`; you may also read decompiled retail output (`re_reference/`, REA, cdb) but never copy decompiled code into the repo.
 - Build just your module with the project scripts, never a hand-run `cmake`: `build_agent.cmd msvc "<module>"` (or `build_module.cmd <module>`), plus `build_clang.cmd` for sim code; see `docs/BUILD.md`. Warning-free; tests registered with `add_test`.
 - Follow the determinism rules in CLAUDE.md.
 - Report: files, public API, test results, decisions, open items (short).

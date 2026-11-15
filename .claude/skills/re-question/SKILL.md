@@ -9,8 +9,10 @@ Order of sources for "what does retail do": `docs/re/` and `extracted/` (the `re
 minutes), then a probe kit (`probe-kit`, a game run) for what only the running game shows: timings, random outcomes, what is on
 screen.
 
-Clean-room: the worker that writes engine code never sees decompiled code. `re-analyst` reads the binary and writes behaviour;
-you implement from the `docs/re/` text it wrote. Do not ask it for code and do not open its Ghidra output.
+Since 2026-11-15 (Gabriel) any worker may read decompiled output itself: REA (`tools\tc.cmd rea call ...`), `re_reference/`,
+cdb on a TTD trace. Use this skill when you want a written, checked spec, or need ReVa (Ghidra's decompiler and cross-references),
+which only `re-analyst` has. Either way, decompiled code is never copied into the repo: the engine is written in the port's own
+words from the behaviour, and the behaviour goes into `docs/re/` in words.
 
 ## Steps
 
@@ -24,7 +26,8 @@ you implement from the `docs/re/` text it wrote. Do not ask it for code and do n
      `re-analyst` at a time; a second question waits or joins the first request.
    - You have no `Agent` tool (a lane or module agent started as a subagent): save the question as
      `docs/re/<TASK>_RE_QUESTIONS.md`, carry on with the tasks that do not depend on it, and name the file in your report so the
-     coordinating session runs `re-analyst` on it. Do not guess the answer in code.
+     coordinating session runs `re-analyst` on it. Meanwhile you may answer it yourself with REA or `re_reference/` and write
+     the behaviour into the spec. Do not guess the answer in code.
 4. **Read the answer in `docs/re/`**, not in the agent's reply. Done when the spec names the RVAs it rests on and separates what
    was read from what was inferred. An "inferred" line that your task depends on is still open: ask again with a narrower
    question, or settle it with a probe kit.

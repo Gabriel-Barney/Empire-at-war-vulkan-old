@@ -11,8 +11,8 @@ rem CARGO_HOME set), MinGit, then apitrace 14.0 (apitrace, d3dretrace, qapitrace
 rem kd, DbgX.Shell), TTD (TTD.exe; recording needs administrator rights, which tc.cmd does not raise: use
 rem tools\re\ttd_record.cmd to record, it asks for them with one UAC prompt), Frida (frida, frida-trace, ... from
 rem toolchain\re\venv) and REA (tools\re\rea.cmd, run as `rea`). These come
-rem last, so their DLLs and their Python 3.14 shadow nothing. RE tools: clean-room rule, re-analyst / probe / RE tasks only
-rem (docs/TOOLS.md, "Exception"). lldb and lldb-dap also get Python 3.10.11 (step 16) on PATH and as PYTHONHOME.
+rem last, so their DLLs and their Python 3.14 shadow nothing. RE tools: every worker may use them; never copy
+rem decompiled code into the repo (docs/TOOLS.md). lldb and lldb-dap also get Python 3.10.11 (step 16) on PATH and as PYTHONHOME.
 rem Builds still go through the build scripts (build_agent.cmd etc.), never a hand-run cmake configure (docs/BUILD.md).
 rem The worktree has no toolchain folder: python -I tools\worktree\worktree_tool.py link (the SessionStart hook does it).
 setlocal

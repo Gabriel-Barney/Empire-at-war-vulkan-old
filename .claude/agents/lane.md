@@ -26,8 +26,9 @@ and `docs/ROADMAP_PROTOCOL.md` first; the loop below is how they apply to a lane
 4. **Branch.** Branch from `origin/dev` (CLAUDE.md "Branches": `dev` is the development branch, `main` is released from it by
    Gabriel). Branch name `claude/<name>`. Commit often on that branch; never commit or push to `main`. Need another lane's work:
    wait until it is on `dev`, or merge its branch in and land after it.
-5. **Implement.** Clean-room: **never open `re_reference/`** unless the task is an RE/doc task, and then write behaviour into
-   `docs/re/`, not code. No third-party dependency without asking Gabriel. Follow the determinism rules (CLAUDE.md rule 3).
+5. **Implement.** You may read decompiled retail output (`re_reference/`, REA, cdb, Frida, TTD replays) while you work, but
+   **never copy decompiled code into the repo**: write the engine in the port's own words and structure, and put behaviour you
+   learned into the `docs/re/` spec in words. No third-party dependency without asking Gabriel. Follow the determinism rules (CLAUDE.md rule 3).
    Windows x64 only; no multiplayer, original-game saves or RenderDoc. Stay inside the group's task list and aim at its
    `exit` test. A finding on the way is triaged when you find it: it blocks the exit test, or is a crash / hang / save corruption /
    tier-1 difference, so it becomes a task; otherwise an S1 / S2 finding becomes a task of the open group that owns that work
@@ -41,8 +42,8 @@ and `docs/ROADMAP_PROTOCOL.md` first; the loop below is how they apply to a lane
    groups have no cap (`docs/ROADMAP_PROTOCOL.md`, "Follow-ups stay in Stage 6 groups").
    You have every tool the session has (default workflow, Gabriel 2026-11-15): PowerShell, LSP, web search / fetch, the browser,
    computer use for probe runs, MCP servers. Toolchain programs run through `tools\tc.cmd <program>`; the index of scripts, tools
-   and skills is `docs/TOOLS.md`. Reach for one whenever it fits, without asking. Exception (clean-room): never run the retail RE
-   and tracing tools (ReVa, REA, mcp-windbg, TTD, cdb, Frida) yourself; ask through `re-question`.
+   and skills is `docs/TOOLS.md`. Reach for one whenever it fits, without asking, the retail RE tools
+   included (`tools\tc.cmd rea ...`, `cdb`, `frida`; ReVa only through `re-question`, one Ghidra session at a time).
    Project skills (`determinism-check` and `diagnosing-bugs` are preloaded in your context; invoke any other with the `Skill` tool,
    or read its `.claude/skills/<name>/SKILL.md` if the tool is missing):
    - **A failure you cannot explain** (test, golden or CRC drift, worker-count or MSVC-vs-clang difference, parity mismatch, crash,
@@ -51,7 +52,8 @@ and `docs/ROADMAP_PROTOCOL.md` first; the loop below is how they apply to a lane
    - **A question about a technique, API, format or original-game behaviour that the task needs answered:** `research` (writes a
      cited report in its `docs/` home).
    - **Original-game behaviour that `docs/re/` does not settle:** `re-question` before guessing (the `re-analyst` agent reads
-     the binary and writes the answer into `docs/re/`; you never read decompiled code). Only what the running game alone shows
+     the binary and writes the answer into `docs/re/`), or look yourself with REA / `re_reference/` and write what you find into
+     `docs/re/` in words. Only what the running game alone shows
      (timings, random outcomes) becomes a `probe-kit`, which you run yourself.
    - **Editing `.claude/skills`, `.claude/agents` or any file an agent reads:** the `writing-for-agents` checklist.
    - **Designing or changing a module's interface, or no seam for a regression test:** `codebase-design` (vocabulary, deepening,

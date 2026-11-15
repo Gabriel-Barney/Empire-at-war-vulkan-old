@@ -38,11 +38,16 @@ section 4.
   the main session, every agent in `.claude/agents/` and every subagent spawned with the `Agent` tool. Limits come from the
   rules (CLAUDE.md, clean-room, determinism, landing, approval of outward or irreversible actions), not from per-agent tool
   lists. Agents carry no `tools:` allowlist (they inherit every session tool); only `reviewer` is limited, to no file edits.
-- **Exception, the retail RE and tracing tools** (ReVa / Ghidra, REA, mcp-windbg, TTD, cdb, Frida; Gabriel, 2026-11-15): clean-room
-  rule, so a worker that writes engine code never runs them or reads their output. ReVa, mcp-windbg and REA belong to the
-  `re-analyst` agent (the MCP servers are registered on it alone); TTD, cdb and Frida are for probe and RE / doc tasks; everyone
-  else asks through the `re-question` skill. TTD recording needs a person to approve the UAC prompt.
-- `tools\tc.cmd` also runs apitrace, the full LLVM set, WinDbg, Frida and REA by name (RE tools under the exception). lldb gets
+- **Retail RE access for every worker** (Gabriel, 2026-11-15, later the same day; replaces the earlier exception that kept the RE
+  tools from engine-writing workers): every worker may use REA, WinDbg / cdb, Frida, TTD replays and the decompiled output in
+  `re_reference/` directly, also while writing engine code. **Guard kept:** decompiled or disassembled code is never copied into
+  `engine/`, `tools/` or `docs/` (no pasted pseudo-code, no line-by-line transliteration); engine code is written in the port's own
+  words and structure, and behaviour learned this way goes into the `docs/re/` spec in words and tables. ReVa stays registered on
+  `re-analyst` only, because Ghidra locks its project (one ReVa session at a time); a main session starts `re-analyst`, a subagent
+  lane hands it a questions file (`re-question`), and REA reads the same analysis from any session at once. `re-question` stays the way to get a written spec. TTD recording needs a person to
+  approve the UAC prompt; Frida and TTD are not pre-approved in `.claude/settings.json` (they attach to or record processes).
+- `tools\tc.cmd` also runs apitrace, the full LLVM set, WinDbg, TTD, Frida and REA by name; the inspection and read-only ones
+  (apitrace, clang tools, `llvm-*`, lldb, dxc, dumpbin, REA, cdb) are pre-approved so they run in the default permission mode too. lldb gets
   python.org Python 3.10.11 (Gabriel approved the download, 2026-11-15; `toolchain\16_lldb_python.cmd`, pinned SHA-256),
   used only by lldb: the LLVM 20.1.8 release links `liblldb.dll` against `python310.dll`.
 - Skills from `mattpocock/skills` (MIT, commit 5863806; Gabriel, 2026-11-15), adapted to the project and model-invocable:

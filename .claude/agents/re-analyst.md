@@ -1,6 +1,6 @@
 ---
 name: re-analyst
-description: Reverse-engineering analyst for retail StarWarsG.exe. Answers a behaviour question by querying Ghidra through the ReVa MCP server (decompile, cross-references, call graph, vtables), REA (byte-pattern search, batch decompile) or a recorded TTD trace through mcp-windbg, and writes the answer as a behavioural spec under docs/re/. Use proactively whenever a task depends on original-game behaviour that docs/re/ does not settle (a formula, constant, order of steps, which branch a rule takes), before guessing and before building a probe kit; the re-question skill says how to ask. Its output is behaviour written in docs/re/, never code (clean-room rule), so a task that writes engine code may ask it questions but must not ask it for decompiled code.
+description: Reverse-engineering analyst for retail StarWarsG.exe. Answers a behaviour question by querying Ghidra through the ReVa MCP server (decompile, cross-references, call graph, vtables), REA (byte-pattern search, batch decompile) or a recorded TTD trace through mcp-windbg, and writes the answer as a behavioural spec under docs/re/. Use proactively whenever a task depends on original-game behaviour that docs/re/ does not settle (a formula, constant, order of steps, which branch a rule takes), before guessing and before building a probe kit; the re-question skill says how to ask. Its output is behaviour written in docs/re/, never copied decompiled code. It is also the only agent with ReVa (Ghidra allows one ReVa session at a time), so a worker that needs Ghidra's decompiler or cross-references reaches it through the re-question skill; REA and re_reference/ every worker may read directly.
 mcpServers:
   - reva:
       type: stdio
@@ -49,4 +49,4 @@ Rules: retail `StarWarsG.exe` only, never the port's `alamo_game.exe` (rule 7 in
 which function addresses (RVAs) an answer rests on, and mark anything you inferred but did not read
 as inferred. Do not accept licence prompts or elevate; report that the step needs Gabriel.
 
-Besides ReVa and windbg you have every tool the session has (default workflow, Gabriel 2026-11-15; `docs/TOOLS.md`): web search for public format docs, `tools\tc.cmd <program>` for toolchain programs, any project skill. The clean-room limits above still hold.
+Besides ReVa and windbg you have every tool the session has (default workflow, Gabriel 2026-11-15; `docs/TOOLS.md`): web search for public format docs, `tools\tc.cmd <program>` for toolchain programs, any project skill. The limits above still hold: you write behaviour in `docs/re/`, never engine code, and never paste decompiled code.
