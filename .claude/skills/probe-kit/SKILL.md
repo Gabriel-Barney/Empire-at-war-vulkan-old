@@ -6,9 +6,9 @@ argument-hint: <kit name, e.g. s78n_t08> <question>
 # In-game probe kits
 
 Some questions about the original game can only be answered by running it: timings, ranges, which branch a rule takes. A probe
-kit asks one such question in a way that is cheap for Gabriel to run and leaves his install exactly as it was. Rule 7 in
-`CLAUDE.md`: probes need Gabriel to launch the game, so the kit must be ready to run end to end, and you ask before driving the
-game yourself. Never drive the port's own `alamo_game.exe` with computer use (Gabriel declined that, 2026-11-09).
+kit asks one such question in a way that runs end to end and leaves Gabriel's install exactly as it was. Rule 7 in `CLAUDE.md`
+(Gabriel, 2026-11-14): you run every probe kit yourself, driving retail `StarWarsG.exe` with computer use; you do not hand
+the run to Gabriel or ask first. Never drive the port's own `alamo_game.exe` with computer use (Gabriel declined that, 2026-11-09).
 
 Look at a recent kit before writing a new one and copy its shape; `tools/probe_mod/s78n_t08/` and `tools/probe_mod/s78n_t14_squads/`
 are good models. Index of every kit: `docs/PROBES.md`.
@@ -46,7 +46,9 @@ Payload folders and `out/` are not committed (the landing check refuses generate
 ## 4. Before handing it over
 
 Run the selftest and `--dry-run`. Add a row to `docs/PROBES.md` (kit, question, where findings will go). Put the run command and
-expected duration on the roadmap task, then ask Gabriel to run it (or ask whether you may drive retail FoC with computer use).
+expected duration on the roadmap task, then run it yourself: load the `computer-use` skill, start the kit detached, launch the
+game (`tools/probe_mod/common/launch_foc.py`), click through the menus, keep the game in front while it records, and check the
+cleanup afterwards.
 
 ## 5. After the run
 

@@ -23,6 +23,16 @@ The one record of the project's binding decisions (Gabriel's calls on scope, pla
 - Cleaning up the existing merged `claude/*` branches is a separate step; deleting remote branches needs Gabriel's go-ahead.
 - Rules for agents: `CLAUDE.md`, "Rules" / "Branches"; remotes: `docs/BUILD.md`.
 
+## Claude runs the probe kits (Gabriel, 2026-11-14)
+
+Gabriel, 2026-11-14: "I want you to run the probes ... I want you to run all probe kit runs." Claude runs every in-game
+probe kit itself, driving the original game (retail `StarWarsG.exe`) with computer use, instead of handing the run to
+Gabriel or asking first. This replaces "probes need Gabriel to launch the game" (`CLAUDE.md` rule 7 before this date) and
+the 2026-11-12 rule that a separate Opus 5.5 medium session does the runs. It covers launching and closing the game,
+installing and removing a kit's probe mod, and restarting Steam when its registry pid is stale. It does not cover the
+port's own `alamo_game.exe` (Gabriel declined computer use on it, 2026-11-09). How: `.claude/skills/probe-kit/SKILL.md`
+section 4.
+
 ## Command Center launcher (Gabriel, 2026-11-13)
 - **The Command Center launcher (Rust, egui) is part of this repository as `launcher/`**, imported from the stand-alone `E:\Projects\Command Center` folder (no git history there). It starts `alamo_game.exe` with profiles, mods, Workshop items, saves, graphics options and diagnostics.
 - It lives beside `engine/`, not in it: rule 2 (no third-party dependencies in `engine/` without asking) covers the engine only, and the launcher is a separate program that never links engine code. Its crates are pinned by `launcher/Cargo.lock` (direct: eframe / egui / egui-wgpu / wgpu, image, serde / serde_json, encoding_rs, sha2, trash, rfd, winreg, chrono, similar, dirs, ureq with native-tls, windows, raw-window-handle). A new direct crate needs Gabriel's OK, like an engine dependency.

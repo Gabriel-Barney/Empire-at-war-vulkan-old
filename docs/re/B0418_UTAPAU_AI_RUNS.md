@@ -61,9 +61,32 @@ types) give the AI's purchases and plans. Compare against section 3:
 - what the Empire's first Build_Infantry_Emergency buys, if it runs, and whether Flame_Infantry then holds Fett;
 - the winner and the end frame within 36000 ticks.
 
-## 5. Retail results
+## 5. Retail results (2026-11-14, driven by Claude)
 
-Not run yet.
+Two runs of the q2 land kit, FoC 1.121, Utapau Heights (`_MP_LAND_UTAPAU`), Advanced Default, 36000 ticks each, both ended by
+the kit at the tick limit (exit 0, mod removed, profile restored): `out\20261114-210208-skirmish-vanilla-lua` (Empire AI, human
+Underworld idle) and `out\20261114-212910-skirmish-vanilla-lua` (Underworld AI, human Empire idle). Frames are `lframe` × 30
+from the `TBUILT` / `TKILL` records.
+
+| | Retail Empire AI | Port Empire AI (§3) | Retail Underworld AI | Port Underworld AI (§3) |
+|---|---|---|---|---|
+| Battle end | **not within 36000**; the AI killed the idle Underworld vehicle factory 23255, droid works 25154, barracks 26153, then no more base kills | Empire wins at 24879-27604 (3 of 3) | **not within 36000**; first base kill 24447 (comm array), then factories, shield, power, barracks, research 30835-33870 | Underworld wins at 26887 and 35199; 1 of 3 still fighting at 36000 |
+| First mineral processor | built 2565 (4 more by 13305, plus a mining facility 12792) | ordered 11615 in 1 of 3, never in 2 of 3 | built 2451 (4 more by 10417) | ordered 1454 |
+| Tech 2 / tech 3 | 7674 / 17617 | ordered at about 4805 | 3510 / 20242 | ordered 1820 |
+| Hero | Boba Fett team 2875 (Flame_Infantry from 121 s, one start; Mara Jade in Land_Heroes) | Boba Fett with the units at about 7045 in seed 1 | Bossk team 597 (again 14550); Hutt palace 4878 | Bossk team ordered 365 |
+
+Retail opening of the Empire AI (plan records): at 12 s it starts **two** Secure_Contestable plans, one per starting
+Stormtrooper team, one on the `SKIRMISH_OUTPOST_PAD` and one on a `SKIRMISH_MINERAL_PROCESSOR_PAD` (that one exits at 85.8 s,
+when the processor is done), and a third on a Reinforcement_Point at 72.8 s; Land_Scout_Area starts only at 96 s, and the
+first Build_Econ_Structure at 60 s. The port's Empire AI at frame 371 (12.4 s) starts **one** Secure_Contestable (the outpost
+pad, object 757) and two Land_Scout_Area plans, which take the other starting squads; its next Secure_Contestable is at
+18115. So the port's late or missing refinery is a tier-2 difference in the opening plan choice (Secure_Contestable vs
+Land_Scout_Area for the second team), not the Boba Fett trap of §2: retail buys Fett too (2875), but by then it already has
+its refinery.
+
+The emergency infantry build (`Tactical_Multiplayer_Build_Infantry_Emergency`) did not run in either retail run; Boba Fett came
+from another purchase path. Retail's AI does not finish an idle base within 36000 ticks with either faction, while the port's
+does in 5 of 6 runs.
 
 ## 6. b0419: `Move_To -- Target is already dead` in BobaFettFlameInfantry (no port difference)
 

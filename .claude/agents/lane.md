@@ -105,8 +105,9 @@ and `docs/ROADMAP_PROTOCOL.md` first; the loop below is how they apply to a lane
 
 ## Hard stops
 
-- In-game probes need Gabriel to launch or approve the game: prepare the kit under `tools/probe_mod/`, ask before driving the
-  game yourself, run long kits detached (not in a terminal tab), and stay inside your turn while you wait.
+- In-game probes: prepare the kit under `tools/probe_mod/` and run it yourself, driving retail `StarWarsG.exe` with computer use
+  (Gabriel, 2026-11-14; never the port's `alamo_game.exe`); run long kits detached (not in a terminal tab), and stay inside
+  your turn while you wait.
 - Do not edit another lane's files, `CLAUDE.md`, `roadmap-store/` data by hand, or generated pages' data block by hand.
 - Never use bare `git stash`; the stash stack is shared by every worktree. Use a WIP commit.
 - Out of scope work found on the way is recorded in the roadmap (new task or group), not done silently.

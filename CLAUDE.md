@@ -71,7 +71,9 @@ headless multithreaded simulation core first, then a Vulkan 1.3 renderer. Any Cl
    **Current focus (Gabriel, 2026-11-10, until he lifts it): parity tier 1 and tier 2 work only.** Tasks and backlog entries carry a `tier`; tier-3
    work (internals, draw order, performance, save format) is paused: do not start it, drop it or file it as S3 (`backlog add ... --tier 3`).
    Crashes, hangs and save corruption are still fixed. Record: `docs/DECISIONS.md` ("Current focus"), `docs/ROADMAP_PROTOCOL.md` ("Parity tier").
-7. In-game probes need Gabriel to launch the game; prepare them under `tools/probe_mod/` with run and cleanup scripts.
+7. In-game probes: prepare them under `tools/probe_mod/` with run and cleanup scripts, then run them yourself, driving retail
+   `StarWarsG.exe` with computer use (Gabriel, 2026-11-14: Claude runs all probe kit runs; `docs/DECISIONS.md`). Never drive
+   the port's `alamo_game.exe`.
 
 ## Parallel work
 
