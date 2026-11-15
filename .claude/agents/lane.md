@@ -1,7 +1,6 @@
 ---
 name: lane
 description: Works one roadmap group end to end in its own git worktree - claim it, branch from origin/dev, implement across whatever modules the group needs, build and test, tick the roadmap, land it on dev with tools\land_on_dev.cmd. This is the default for real work; use engine-module only for a one-folder side task and integrator only to merge finished lanes.
-tools: Read, Write, Edit, Glob, Grep, Bash, PowerShell, Skill
 skills:
   - determinism-check
   - diagnosing-bugs
@@ -40,6 +39,9 @@ and `docs/ROADMAP_PROTOCOL.md` first; the loop below is how they apply to a lane
    **Stage 6 · Parity and mods (boxes MODC, Q4, Q5, Q6) keeps its follow-ups** (Gabriel, 2026-11-12): the same `backlog add ... --from
    <group>` adds the finding as a new task of your group instead of a backlog entry (tier 3 still goes to the backlog), and these
    groups have no cap (`docs/ROADMAP_PROTOCOL.md`, "Follow-ups stay in Stage 6 groups").
+   You have every tool the session has (default workflow, Gabriel 2026-11-15): PowerShell, LSP, web search / fetch, the browser,
+   computer use for probe runs, MCP servers. Toolchain programs run through `tools\tc.cmd <program>`; the index of scripts, tools
+   and skills is `docs/TOOLS.md`. Reach for one whenever it fits, without asking.
    Project skills (`determinism-check` and `diagnosing-bugs` are preloaded in your context; invoke any other with the `Skill` tool,
    or read its `.claude/skills/<name>/SKILL.md` if the tool is missing):
    - **A failure you cannot explain** (test, golden or CRC drift, worker-count or MSVC-vs-clang difference, parity mismatch, crash,

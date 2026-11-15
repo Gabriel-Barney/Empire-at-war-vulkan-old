@@ -33,6 +33,14 @@ installing and removing a kit's probe mod, and restarting Steam when its registr
 port's own `alamo_game.exe` (Gabriel declined computer use on it, 2026-11-09). How: `.claude/skills/probe-kit/SKILL.md`
 section 4.
 
+## Default tool access (Gabriel, 2026-11-15)
+- **Every worker may use every project tool, toolchain program and skill whenever its task needs one, without asking first:**
+  the main session, every agent in `.claude/agents/` and every subagent spawned with the `Agent` tool. Limits come from the
+  rules (CLAUDE.md, clean-room, determinism, landing, approval of outward or irreversible actions), not from per-agent tool
+  lists. Agents carry no `tools:` allowlist (they inherit every session tool); only `reviewer` is limited, to no file edits.
+- Wiring: index `docs/TOOLS.md`; toolchain programs by name through `tools\tc.cmd`; a `SessionStart` hook adds the worktree
+  junctions (`worktree_tool.py link`); build scripts and read-only commands are pre-approved in `.claude/settings.json`.
+
 ## Command Center launcher (Gabriel, 2026-11-13)
 - **The Command Center launcher (Rust, egui) is part of this repository as `launcher/`**, imported from the stand-alone `E:\Projects\Command Center` folder (no git history there). It starts `alamo_game.exe` with profiles, mods, Workshop items, saves, graphics options and diagnostics.
 - It lives beside `engine/`, not in it: rule 2 (no third-party dependencies in `engine/` without asking) covers the engine only, and the launcher is a separate program that never links engine code. Its crates are pinned by `launcher/Cargo.lock` (direct: eframe / egui / egui-wgpu / wgpu, image, serde / serde_json, encoding_rs, sha2, trash, rfd, winreg, chrono, similar, dirs, ureq with native-tls, windows, raw-window-handle). A new direct crate needs Gabriel's OK, like an engine dependency.

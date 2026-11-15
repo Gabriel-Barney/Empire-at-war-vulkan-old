@@ -91,8 +91,11 @@ Project skills (`.claude/skills/`; triggers in each description): `start-group` 
 (the loop), `green-fast-tier` (build, summary, fix iteration after a large edit; speed habits below), `determinism-check` and `regen-goldens` (sim and goldens), `diagnosing-bugs` (an unexplained failure: loop first),
 `research` (cited report in its `docs/` home), `re-question` (ask the binary through `re-analyst`), `probe-kit` (retail checks), `writing-for-agents` (editing any file agents read),
 `retro` (Gabriel-invoked review of how sessions went; lanes end with a one-line friction note for it).
-Skills reach every worker (Gabriel, 2026-11-13): a subagent does not inherit the main session's skills, so each agent in
-`.claude/agents/` lists `Skill` in `tools` (it can invoke any project skill whose description matches its task) and preloads
+**Default tool access (Gabriel, 2026-11-15): every worker (main session, agent, subagent) may use every project script,
+toolchain program and skill whenever its task needs one, without asking; index `docs/TOOLS.md`.** Agents in `.claude/agents/`
+have no `tools:` allowlist (they inherit every session tool; only `reviewer` has `disallowedTools` for edits); toolchain
+programs run by name through `tools\tc.cmd <program>`; a `SessionStart` hook links the worktree junctions. A subagent does not
+inherit the main session's skills, so each agent preloads
 the ones it always needs in `skills:` (`lane`: determinism-check, diagnosing-bugs; `reviewer`: determinism-check; `engine-module`:
 determinism-check, diagnosing-bugs; `integrator`: build, phase-status, regen-goldens, diagnosing-bugs). A new agent gets `Skill` plus
 its preloads; a new skill's `description` must say when to use it, and only `retro` sets `disable-model-invocation` (Gabriel runs
