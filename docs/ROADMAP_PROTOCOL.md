@@ -67,6 +67,11 @@ give every new group an `eta` (a group without one is counted as "without estima
 
 Status keys (groups and boxes): `next` Do next, `partly` Partly done, `big` Not started, `spec` Spec-blocked,
 `open` Guesses to confirm, `probe` Probe only, `gab` Needs Gabriel, `done` Done, `out` Out of scope, `parked` Parked (`park`).
+Group status follows its tasks (Gabriel, 2026-11-15): every task `done` or `oos` -> `done` (preset and claim dropped, and the box
+set done when it was the box's last open group); some tasks closed and some `todo` -> `partly`, also for a `done` group that gets an
+open task again. A group with no task closed stays `big` / `next`. The hand-set labels `gab`, `spec`, `open`, `probe`, `out` and
+`parked` are left alone. `roadmap_store.py write` and every editing command apply this to the groups they touch;
+`roadmap_store.py group-status [--apply]` applies it to all groups.
 Presets: `fable`, `xhigh`, `high`, `re2ui`, `sonnet`, `tools`, `gab` (defined in the page, `PRESETS` in `roadmap-store/page_shell.html`).
 A preset is the recommended model and effort level for a group: `fable` Fable 5.2 · high, `xhigh` Opus 5.5 · xhigh,
 `high` Opus 5.5 · high, `re2ui` Opus 5.5 · high then Sonnet 5.5 · high, `sonnet` Sonnet 5.5 · high,
@@ -88,7 +93,7 @@ old records still render.
   (open S3 tasks go to the backlog, open S1 / S2 tasks to another group with `--to`; "Backlog and group exit tests" below); do not
   keep it open for the tasks that are left.
 - Group finished (Gabriel, 2026-10-30, required project-wide): whichever session closes a group's last `todo` task marks
-  the group done in the same write: `update` `{"status":"done"}` (drop `preset`: `{"preset":{"__delete__":true}}`). Never
+  the group done in the same write (`write` now does this itself, see "Group status follows its tasks" above): `update` `{"status":"done"}` (drop `preset`: `{"preset":{"__delete__":true}}`). Never
   leave a group open with no `todo` task. Before you end a task, re-read every group you touched (`roadmap-store/data/items/<id>.json`):
   if all its tasks are `done` or `oos`, it must already be `done`; if it is not, fix it now. A flowchart box's status is separate and
   the page never derives it: when every group in a box is `done`, set the box done in the same write (`update` `nodes/<ID>`
