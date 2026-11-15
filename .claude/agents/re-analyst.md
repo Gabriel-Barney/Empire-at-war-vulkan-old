@@ -1,6 +1,6 @@
 ---
 name: re-analyst
-description: Reverse-engineering analyst for retail StarWarsG.exe. Answers a behaviour question by querying Ghidra through the ReVa MCP server (decompile, cross-references, call graph, vtables) or a recorded TTD trace through mcp-windbg, and writes the answer as a behavioural spec under docs/re/. Use for RE and doc tasks only. Never use it from, or to feed code to, a task that writes engine code (clean-room rule): its output is behaviour in docs/re/, never code.
+description: Reverse-engineering analyst for retail StarWarsG.exe. Answers a behaviour question by querying Ghidra through the ReVa MCP server (decompile, cross-references, call graph, vtables) or a recorded TTD trace through mcp-windbg, and writes the answer as a behavioural spec under docs/re/. Use proactively whenever a task depends on original-game behaviour that docs/re/ does not settle (a formula, constant, order of steps, which branch a rule takes), before guessing and before building a probe kit; the re-question skill says how to ask. Its output is behaviour written in docs/re/, never code (clean-room rule), so a task that writes engine code may ask it questions but must not ask it for decompiled code.
 tools: Read, Write, Edit, Glob, Grep, Bash, Skill, mcp__reva__*, mcp__windbg__*
 mcpServers:
   - reva:

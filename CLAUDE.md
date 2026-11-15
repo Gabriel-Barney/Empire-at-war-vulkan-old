@@ -73,7 +73,8 @@ headless multithreaded simulation core first, then a Vulkan 1.3 renderer. Any Cl
    Crashes, hangs and save corruption are still fixed. Record: `docs/DECISIONS.md` ("Current focus"), `docs/ROADMAP_PROTOCOL.md` ("Parity tier").
 7. In-game probes: prepare them under `tools/probe_mod/` with run and cleanup scripts, then run them yourself, driving retail
    `StarWarsG.exe` with computer use (Gabriel, 2026-11-14: Claude runs all probe kit runs; `docs/DECISIONS.md`). Never drive
-   the port's `alamo_game.exe`.
+   the port's `alamo_game.exe`. Unknown retail behaviour that the binary can answer: the `re-question` skill first (the
+   `re-analyst` agent reads the binary and writes `docs/re/`); a probe kit only for what the running game alone shows.
 
 ## Parallel work
 
@@ -83,7 +84,7 @@ A change to `engine/core` public headers or the top-level CMake goes through the
 `engine-module` agents remain for narrow side tasks. Definitions live in `.claude/agents/`.
 Project skills (`.claude/skills/`; triggers in each description): `start-group` / `finish-group` / `build` / `phase-status`
 (the loop), `green-fast-tier` (build, summary, fix iteration after a large edit; speed habits below), `determinism-check` and `regen-goldens` (sim and goldens), `diagnosing-bugs` (an unexplained failure: loop first),
-`research` (cited report in its `docs/` home), `probe-kit` (retail checks), `writing-for-agents` (editing any file agents read),
+`research` (cited report in its `docs/` home), `re-question` (ask the binary through `re-analyst`), `probe-kit` (retail checks), `writing-for-agents` (editing any file agents read),
 `retro` (Gabriel-invoked review of how sessions went; lanes end with a one-line friction note for it).
 Skills reach every worker (Gabriel, 2026-11-13): a subagent does not inherit the main session's skills, so each agent in
 `.claude/agents/` lists `Skill` in `tools` (it can invoke any project skill whose description matches its task) and preloads
