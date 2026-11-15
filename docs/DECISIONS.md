@@ -45,6 +45,11 @@ section 4.
 - `tools\tc.cmd` also runs apitrace, the full LLVM set, WinDbg, Frida and REA by name (RE tools under the exception). lldb gets
   python.org Python 3.10.11 (Gabriel approved the download, 2026-11-15; `toolchain\16_lldb_python.cmd`, pinned SHA-256),
   used only by lldb: the LLVM 20.1.8 release links `liblldb.dll` against `python310.dll`.
+- Skills from `mattpocock/skills` (MIT, commit 5863806; Gabriel, 2026-11-15), adapted to the project and model-invocable:
+  `codebase-design`, `improve-codebase-architecture` (proposes and files tier-3 backlog entries while the tier-1/2 focus holds),
+  `triage` (the roadmap backlog instead of GitHub issues; promoting S3 entries and most drops stay Gabriel's), `spec-review` (the
+  upstream `code-review`, renamed so the built-in `/code-review` keeps its name; `finish-group` runs both). The upstream
+  `diagnosing-bugs` was merged into the project's own skill of that name, not installed beside it.
 - Wiring: index `docs/TOOLS.md`; toolchain programs by name through `tools\tc.cmd`; a `SessionStart` hook adds the worktree
   junctions (`worktree_tool.py link`); build scripts and read-only commands are pre-approved in `.claude/settings.json`.
 

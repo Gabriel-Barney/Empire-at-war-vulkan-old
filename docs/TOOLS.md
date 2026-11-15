@@ -88,7 +88,13 @@ pinned setup step in `toolchain\2_setup.cmd` (rule 5), then a row here.
 | Original-game behaviour not in `docs/re/` | `re-question` (binary), then `probe-kit` (running game) |
 | Question about a technique, API or format | `research` |
 | Editing CLAUDE.md, a skill, an agent or memory | `writing-for-agents` |
-| Review of a diff | `/code-review`, `reviewer` agent |
+| Review of a diff | `/code-review` (correctness bugs), `spec-review` (standards + the group's spec), `reviewer` agent |
+| Designing a module's interface; no seam for a regression test | `codebase-design` |
+| Architecture review, refactoring opportunities | `improve-codebase-architecture` (proposes and files; refactors are tier 3) |
+| Filing findings, cleaning the backlog or inbox | `triage` |
+
+`codebase-design`, `improve-codebase-architecture`, `triage` and `spec-review` (and parts of `diagnosing-bugs`) are adapted from
+`mattpocock/skills` (MIT; `.claude/skills/LICENSE-mattpocock-skills.txt`).
 
 ## Agents (`.claude/agents/`)
 

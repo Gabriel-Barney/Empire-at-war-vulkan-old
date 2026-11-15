@@ -10,7 +10,7 @@ without one is the failure mode this skill prevents. Adapted from `mattpocock/sk
 
 Ground rules, all phases:
 - Clean-room (`CLAUDE.md`): never read `re_reference/`. Questions about what retail does are answered from `docs/re/`, then a
-  probe (rule 7: Gabriel launches the game). A diagnosis that needs a retail fact it does not have stops and says so.
+  probe kit that you run on retail yourself (rule 7; never the port's `alamo_game.exe`). A diagnosis that needs a retail fact it does not have stops and says so.
 - Build and test only through the scripts (`build_agent.cmd`, `build_module.cmd`); never hand-configure a build tree.
   A failing rerun that is identical is refused (exit 3): change something, or read the first failure again, before `ALAMO_RERUN=1`.
 - A hung test exe of yours: `python -I tools/worktree/stop_tree_procs.py`.
@@ -31,7 +31,9 @@ Pick the cheapest that fits, roughly in this order:
 | Behaviour regressed between commits | `git bisect run` with the loop above as the script |
 | Flaky | Rerun the one test in a loop with `ctest --repeat until-fail:N`; two parallel entries sharing a `%TEMP%` fixture or output path are the first suspect (`CLAUDE.md`, parallel ctest) |
 | Crash or hang in `alamo_game` | A headless scenario that reaches the same system; the game itself is Gabriel's to launch |
-| Slow tick | `alamo_headless ... --profile` (wall-clock only, sim code never reads it); baseline in `docs/PERFORMANCE.md` |
+| Slow tick | `alamo_headless ... --profile` (wall-clock only, sim code never reads it); baseline in `docs/PERFORMANCE.md`. Measure first, then bisect; logs are usually the wrong tool for a slowdown |
+| Same input, two configs or versions | Differential loop: run both and diff the outputs (CRC logs with `--compare`, load reports, `apitrace dump` of two captures) |
+| Only a person can trigger or see it (the port's `alamo_game.exe`) | Last resort: `scripts/hitl-loop.template.sh`, copied and edited, run by Gabriel; you read its `KEY=VALUE` output |
 
 Then tighten it: faster, a sharper assertion, deterministic. For a nondeterministic bug raise the reproduction rate (repeat,
 vary worker counts, add load) instead of chasing a clean repro.
@@ -64,8 +66,10 @@ hypotheses, never "log everything and grep". Tag every debug line with a unique 
 Write the test before the fix, at a seam that exercises the real bug pattern at its call site (a shallow test that cannot fail
 for the real reason does not count). In this repo that means a test in the module's test exe registered with `add_test`; a long
 scenario gets one ctest entry per worker count (`alamo_add_worker_count_check`), `slow` label over about 5 s, and no fixed
-`%TEMP%` path. Confirm it fails, apply the fix, confirm it passes, rerun the phase 1 loop.
-No fitting seam is a finding: record it (backlog, or the task for a Stage 6 group) because the architecture is blocking a lock-down.
+`%TEMP%` path. Confirm it fails, apply the fix, confirm it passes, rerun the phase 1 loop. If you forced the red by mutating
+code or a fixture, diff against a pristine copy to prove the mutation landed before trusting the result.
+No fitting seam is a finding: record it (backlog, or the task for a Stage 6 group) because the architecture is blocking a lock-down;
+the `codebase-design` skill has the vocabulary for describing the seam that is missing.
 Never edit goldens to get green; a golden that moved on purpose goes through `regen-goldens`.
 
 ## 6. Cleanup

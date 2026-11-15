@@ -12,6 +12,8 @@ Finish roadmap group `$ARGUMENTS` in this worktree. Work through the checklist a
 2. **Review.** Commit the work first (a WIP commit is fine), then review this branch's diff against `origin/dev` before
    anything lands:
    - Invoke the `code-review` skill at `high` on the branch (e.g. `/code-review high`). `max` and `ultra` only when Gabriel asks.
+   - Invoke the `spec-review` skill for the group: Standards (repo rules) and Spec (the group's tasks, exit test and cited
+     `docs/re/` spec: anything missing, unasked for or implemented wrong).
    - Sim code changed (everything in `engine/` except render, audio, video, UI): also spawn the `reviewer` agent with the changed
      files and the `docs/re/` specs they cite, for the determinism and thread-safety read (`determinism-check` skill lists the rules).
    - Fix each confirmed correctness finding on the branch and rerun the step-1 builds for the modules it touched. A finding that does

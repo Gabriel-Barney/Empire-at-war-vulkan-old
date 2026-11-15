@@ -54,6 +54,10 @@ and `docs/ROADMAP_PROTOCOL.md` first; the loop below is how they apply to a lane
      the binary and writes the answer into `docs/re/`; you never read decompiled code). Only what the running game alone shows
      (timings, random outcomes) becomes a `probe-kit`, which you run yourself.
    - **Editing `.claude/skills`, `.claude/agents` or any file an agent reads:** the `writing-for-agents` checklist.
+   - **Designing or changing a module's interface, or no seam for a regression test:** `codebase-design` (vocabulary, deepening,
+     design-it-twice); a wider structural review is `improve-codebase-architecture` (proposes and files; refactors are tier 3).
+   - **Filing findings** (review, probe, test run) or cleaning up the backlog: `triage`.
+   - **Before landing:** `finish-group` runs `/code-review` and `spec-review` (standards + the group's spec).
 6. **Build in your own tree** (one tree per worktree; never share `build-msvc` or another lane's tree). From PowerShell:
    `& .\build_agent.cmd --% msvc wt "core;<modules and their dependencies>"` gives `build-wt-msvc` (`wt` is the default tree and may be left out) and runs the fast tier
    (`ctest -LE slow`); pass a regex as 4th argument for specific tests (slow ones included) or `all`. Never put `>` after `--%`,
