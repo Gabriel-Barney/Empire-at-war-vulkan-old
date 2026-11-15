@@ -42,6 +42,9 @@ section 4.
   rule, so a worker that writes engine code never runs them or reads their output. ReVa, mcp-windbg and REA belong to the
   `re-analyst` agent (the MCP servers are registered on it alone); TTD, cdb and Frida are for probe and RE / doc tasks; everyone
   else asks through the `re-question` skill. TTD recording needs a person to approve the UAC prompt.
+- `tools\tc.cmd` also runs apitrace, the full LLVM set, WinDbg, Frida and REA by name (RE tools under the exception). lldb gets
+  python.org Python 3.10.11 (Gabriel approved the download, 2026-11-15; `toolchain\16_lldb_python.cmd`, pinned SHA-256),
+  used only by lldb: the LLVM 20.1.8 release links `liblldb.dll` against `python310.dll`.
 - Wiring: index `docs/TOOLS.md`; toolchain programs by name through `tools\tc.cmd`; a `SessionStart` hook adds the worktree
   junctions (`worktree_tool.py link`); build scripts and read-only commands are pre-approved in `.claude/settings.json`.
 

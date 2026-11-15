@@ -11,7 +11,8 @@ retail-tracing tools") are not for every worker. Clean-room rule: a worker that 
 reads what they print. Only the `re-analyst` agent uses ReVa, mcp-windbg and REA (the two MCP servers are registered on it
 alone); a probe or RE / doc task may use TTD, cdb and Frida. Everyone else asks through the `re-question` skill, which starts
 `re-analyst` and gets back behaviour written in `docs/re/`. A TTD recording also needs a person to approve its Windows admin
-prompt (UAC), so it never runs unattended. `tools\tc.cmd` does not put `toolchain\re` on PATH.
+prompt (UAC), so it never runs unattended. `tools\tc.cmd` runs WinDbg, Frida and REA by name for the tasks allowed to use
+them; being on its PATH does not lift this exception.
 
 How it is wired:
 - Agent frontmatter has no `tools:` allowlist, so an agent inherits every tool of the session (PowerShell, LSP, web search /
@@ -58,12 +59,13 @@ From PowerShell use `& .\tools\tc.cmd <program> <args>`, or `--%` on a line of i
 |---|---|
 | `cl`, `link`, `lib`, `dumpbin`, `fxc`, `rc` | `toolchain\msvc` (MSVC 14.51, Windows SDK) |
 | `python`, `cmake`, `ninja` | `toolchain\venv\Scripts` |
-| LLVM 20.1.8, all of it: `clang`, `clang-cl`, `clangd`, `clang-tidy`, `clang-format`, `clang-query`, `clang-include-cleaner`, `lld` / `lld-link`, `lldb` (debugger; does not start yet: exits 0xC0000135, a DLL it needs, probably Python's, is missing), `llvm-symbolizer`, `llvm-pdbutil`, `llvm-objdump`, `llvm-nm`, `llvm-readobj`, `llvm-cov` / `llvm-profdata` (coverage), `llvm-mca` (instruction throughput), `scan-build` (static analyzer) | `toolchain\llvm\bin` (`toolchain\5_portability_compilers.cmd`) |
+| LLVM 20.1.8, all of it: `clang`, `clang-cl`, `clangd`, `clang-tidy`, `clang-format`, `clang-query`, `clang-include-cleaner`, `lld` / `lld-link`, `lldb` / `lldb-dap` (debugger; `tc.cmd` gives it the Python 3.10.11 its `liblldb.dll` needs, from `toolchain\16_lldb_python.cmd`), `llvm-symbolizer`, `llvm-pdbutil`, `llvm-objdump`, `llvm-nm`, `llvm-readobj`, `llvm-cov` / `llvm-profdata` (coverage), `llvm-mca` (instruction throughput), `scan-build` (static analyzer) | `toolchain\llvm\bin` (`toolchain\5_portability_compilers.cmd`) |
 | `dxc` | `toolchain\dxc\bin\x64` |
 | `sccache` | `toolchain\sccache` |
 | `cargo`, `rustc`, `rust-analyzer` | `toolchain\rust\cargo\bin` |
 | `git` (MinGit) | `toolchain\mingit\cmd` |
-| apitrace 14.0: `apitrace` (`trace`, `dump`, `diff`, `replay`), `d3dretrace`, `qapitrace` (viewer) | `toolchain\capture\apitrace-14.0\bin` (`toolchain\6_capture_tools.cmd`; last on PATH) |
+| apitrace 14.0: `apitrace` (`trace`, `dump`, `diff`, `replay`), `d3dretrace`, `qapitrace` (viewer) | `toolchain\capture\apitrace-14.0\bin` (`toolchain\6_capture_tools.cmd`) |
+| RE tools, **the exception above applies**: WinDbg `cdb`, `kd`, `DbgX.Shell` (GUI); Frida `frida`, `frida-trace`, `frida-ps`, ...; REA as `rea` (`rea call`, `rea tools`, `rea status`) | `toolchain\re\windbg-1.2611.4001.0`, `toolchain\re\venv\Scripts`, `tools\re\rea.cmd` (`toolchain\14_re_tools.cmd`, `15_rea.cmd`); last on PATH, so their DLLs and Python 3.14 shadow nothing |
 
 apitrace records the graphics API calls a program makes, not its code, so every worker may use it, including on a capture of
 retail (the G1 capture; RenderDoc is out of scope, `DECISIONS.md`). Running retail to make a new capture is a probe run
