@@ -273,7 +273,8 @@ const Entry* Archive::find(std::string_view name) const {
 }
 
 bool Archive::read(const Entry& e, std::vector<uint8_t>& out) const {
-    if (e.encrypted()) return false;
+    // Bounds first: a corrupt table can claim a 4 GB entry, which must fail here instead of allocating (found by fuzz_meg).
+    if (e.encrypted() || uint64_t(e.offset) + e.size > src_->size()) return false;
     out.resize(e.size);
     return src_->read(e.offset, out.data(), e.size);
 }
