@@ -4,6 +4,7 @@
   python tools/worktree/worktree_tool.py new <name> [--base origin/dev] [--fetch] [--no-sync] [--modules "core;x"]
   python tools/worktree/worktree_tool.py clean [--apply] [--days N] [--keep a,b] [--only a,b]
                                                [--pushed] [--trees] [--main] [--no-size] [--fetch]
+  python tools/worktree/worktree_tool.py link [--quiet]
   python tools/worktree/worktree_tool.py --selftest
 
 Wrappers: tools\\new_worktree.cmd and tools\\clean_worktrees.cmd.
@@ -342,6 +343,36 @@ def print_table(infos: list, out=print):
 
 # ---------------------------------------------------------------- new
 
+def ensure_links(ctx: Ctx, target: Path, out=print, quiet: bool = False) -> list:
+    """Junction each LINKED folder of the main checkout into `target` when it is missing there. Never replaces or
+    deletes anything already present. Returns the names it linked. No-op for the main checkout itself."""
+    made: list = []
+    if norm(target) == norm(ctx.main):
+        return made
+    for d in LINKED:
+        src = ctx.main / d
+        dst = target / d
+        if not src.exists():
+            if not quiet:
+                out(f"  skip {d}: {src} does not exist")
+        elif os.path.lexists(dst):
+            if not quiet:
+                out(f"  skip {d}: already present")
+        else:
+            make_junction(dst, src)
+            made.append(d)
+            out(f"  junction {d} -> {src}")
+    return made
+
+
+def cmd_link(ctx: Ctx, target: Path, quiet: bool = False, out=print) -> list:
+    """`link`: add the missing junctions to an existing worktree (app-made worktrees have none; SessionStart hook)."""
+    made = ensure_links(ctx, target, out, quiet)
+    if not quiet and not made:
+        out("links: nothing to add")
+    return made
+
+
 def cmd_new(ctx: Ctx, name: str, base: str | None = None, fetch: bool = False, sync: bool = True,
             modules: str = "<modules>", out=print) -> Path:
     if not NAME_RE.match(name):
@@ -365,16 +396,7 @@ def cmd_new(ctx: Ctx, name: str, base: str | None = None, fetch: bool = False, s
     out(f"git worktree add --no-track {target} -b {branch} {base}")
     git(ctx.main, "worktree", "add", "--no-track", str(target), "-b", branch, base)
 
-    for d in LINKED:
-        src = ctx.main / d
-        dst = target / d
-        if not src.exists():
-            out(f"  skip {d}: {src} does not exist")
-        elif os.path.lexists(dst):
-            out(f"  skip {d}: already present in the new worktree")
-        else:
-            make_junction(dst, src)
-            out(f"  junction {d} -> {src}")
+    ensure_links(ctx, target, out)
 
     store = target / "roadmap-store" / "roadmap_store.py"
     if sync and store.is_file():
@@ -591,6 +613,17 @@ def selftest() -> int:
 
         res = cmd_clean(ctx, apply=True, days=0, only=["st-dirty"], out=log.append)
         check(not res["removed"], "dirty worktree removed")
+
+        # link: an app-made worktree (plain `git worktree add`, no junctions) gets them; reruns change nothing
+        raw = main / ".claude" / "worktrees" / "st-raw"
+        g(main, "worktree", "add", "-q", "--no-track", str(raw), "-b", "claude/st-raw", "origin/main")
+        (raw / "toolchain").mkdir()                                  # something real already there: left alone
+        made = cmd_link(ctx, raw, out=log.append)
+        check(sorted(made) == ["Data", "extracted", "roadmap-store"], f"link made {made}")
+        check(not is_link_dir(raw / "toolchain"), "link replaced an existing folder")
+        check((raw / "Data" / "keep.txt").read_text() == "real\n", "linked Data content")
+        check(cmd_link(ctx, raw, quiet=True, out=log.append) == [], "second link run changed something")
+        check(cmd_link(ctx, main, out=log.append) == [], "link touched the main checkout")
         print("\n".join(log[-14:]))
         print(f"selftest OK ({checks['n']} checks)")
         return 0
@@ -630,6 +663,8 @@ def main(argv=None) -> int:
     n.add_argument("--fetch", action="store_true", help="git fetch origin first")
     n.add_argument("--no-sync", action="store_true", help="skip roadmap_store.py sync")
     n.add_argument("--modules", default="<modules>", help="module list shown in the next-step commands")
+    lk = sub.add_parser("link", help="add missing junctions to the worktree this runs in (idempotent)")
+    lk.add_argument("--quiet", action="store_true", help="print only what was linked; never fail (SessionStart hook)")
     c = sub.add_parser("clean", help="list / remove merged worktrees (dry run unless --apply)")
     c.add_argument("--apply", action="store_true")
     c.add_argument("--days", type=float, default=2.0,
@@ -643,6 +678,16 @@ def main(argv=None) -> int:
     c.add_argument("--no-size", action="store_true", help="skip the build-tree size column")
     c.add_argument("--fetch", action="store_true", help="git fetch origin first")
     a = ap.parse_args(argv)
+    if a.cmd == "link":
+        try:
+            ctx = Ctx.discover()
+            top = git(Path(os.getcwd()), "rev-parse", "--show-toplevel").stdout.strip()
+            cmd_link(ctx, Path(top), a.quiet)
+        except (ToolError, OSError) as ex:
+            if not a.quiet:
+                print(f"error: {ex}", file=sys.stderr)
+                return 1
+        return 0
     try:
         ctx = Ctx.discover()
         if a.cmd == "new":
