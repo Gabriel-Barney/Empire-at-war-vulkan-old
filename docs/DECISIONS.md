@@ -39,8 +39,12 @@ section 4.
   rules (CLAUDE.md, clean-room, determinism, landing, approval of outward or irreversible actions), not from per-agent tool
   lists. Agents carry no `tools:` allowlist (they inherit every session tool); only `reviewer` is limited, to no file edits.
 - **`run-group` is the default workflow for task requests** (Gabriel, 2026-11-15): "complete all tasks under AUD1", a box, a stage
-  or "next ready group" goes through `.claude/skills/run-group`: resolve and check the groups, then the lane loop; one group in the
-  current session, several in at most three parallel sessions with sequential queues.
+  or "next ready group" goes through `.claude/skills/run-group`. The main session is the **coordinator** (Gabriel, same day): it
+  plans up to three parallel lanes (one per group, or independent shares of one group's tasks), creates their worktrees, claims,
+  and starts a background `lane` agent per lane; lanes follow the lane loop with every skill and tool. Subagents cannot start
+  agents, so lanes stop with a `REQUEST` for `re-analyst`, the reviews and questions for Gabriel, and the coordinator serves it
+  and resumes them (`lane.md`, "Coordinator protocol"). For a small group, or on request, the coordinator works it itself; on
+  request, lanes can be full sessions instead of agents.
 - **Retail RE access for every worker** (Gabriel, 2026-11-15, later the same day; replaces the earlier exception that kept the RE
   tools from engine-writing workers): every worker may use REA, WinDbg / cdb, Frida, TTD replays and the decompiled output in
   `re_reference/` directly, also while writing engine code. **Guard kept:** decompiled or disassembled code is never copied into

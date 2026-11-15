@@ -25,8 +25,8 @@ words from the behaviour, and the behaviour goes into `docs/re/` in words.
    - You have the `Agent` tool (a main session): start `re-analyst` with the question. Ghidra locks its project, so run one
      `re-analyst` at a time; a second question waits or joins the first request.
    - You have no `Agent` tool (a lane or module agent started as a subagent): save the question as
-     `docs/re/<TASK>_RE_QUESTIONS.md`, carry on with the tasks that do not depend on it, and name the file in your report so the
-     coordinating session runs `re-analyst` on it. Meanwhile you may answer it yourself with REA or `re_reference/` and write
+     `docs/re/<TASK>_RE_QUESTIONS.md`, commit, and send `REQUEST re-analyst` (`lane.md`, Coordinator protocol) so the coordinator
+     runs `re-analyst` on it and writes the answer into your worktree; carry on with the tasks that do not depend on it. Meanwhile you may answer it yourself with REA or `re_reference/` and write
      the behaviour into the spec. Do not guess the answer in code.
 4. **Read the answer in `docs/re/`**, not in the agent's reply. Done when the spec names the RVAs it rests on and separates what
    was read from what was inferred. An "inferred" line that your task depends on is still open: ask again with a narrower

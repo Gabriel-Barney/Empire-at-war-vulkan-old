@@ -10,7 +10,8 @@ Finish roadmap group `$ARGUMENTS` in this worktree. Work through the checklist a
    Read `skips:`. Broad changes: `tools\pr_check.cmd --compiler both`. Do not edit goldens to get green; if a golden moved on
    purpose, `tools\regen_goldens.cmd`, review the diff, and name it in the commit message.
 2. **Review.** Commit the work first (a WIP commit is fine), then review this branch's diff against `origin/dev` before
-   anything lands:
+   anything lands. A lane started by a coordinator (no `Agent` tool) sends a `REQUEST review` instead (`lane.md`, Coordinator
+   protocol) and handles the findings it gets back as below:
    - Invoke the `code-review` skill at `high` on the branch (e.g. `/code-review high`). `max` and `ultra` only when Gabriel asks.
    - Invoke the `spec-review` skill for the group: Standards (repo rules) and Spec (the group's tasks, exit test and cited
      `docs/re/` spec: anything missing, unasked for or implemented wrong).
