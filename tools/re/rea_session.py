@@ -14,8 +14,8 @@ Usage (through tools\\re\\rea.cmd, which checks the install):
     rea.cmd --selftest                          offline check against a fake server
 
 `key=text` passes a string, `key:=json` any JSON value (limit:=200, addresses:='["0x1","0x2"]').
-`call` prints one status line (tool, seconds, ok / ERROR, file with the full answer) and then the
-answer's payload, cut at --max characters. The first analysis query of a session waits for Ghidra's
+`call` prints one status line (tool, seconds, ok / ERROR, and the path of `<tag>.payload.json`, which
+holds the whole result without REA's envelope) and then that result, cut at --max characters. The first analysis query of a session waits for Ghidra's
 auto-analysis; later ones answer in well under a second.
 
 The server opens a private copy of retail StarWarsG.exe (toolchain\\re\\rea-work\\target), taken from
@@ -358,12 +358,16 @@ def cmd_call(a) -> int:
     tag = a.tag or "%s_%d_%s" % (time.strftime("%H%M%S"), os.getpid(), a.tool)
     reply, answer = roundtrip({"name": a.tool, "arguments": args}, tag, a.timeout)
     bad = is_error(reply)
-    print("%s %.1fs %s  full answer: %s" % (a.tool, reply.get("_seconds", 0.0), "ERROR" if bad else "ok", answer),
-          flush=True)
     body = payload(reply)
     text = body if isinstance(body, str) else json.dumps(body, ensure_ascii=False)
-    if len(text) > a.max:
-        text = text[:a.max] + "\n... cut %d characters; read the full answer file" % (len(text) - a.max)
+    # The answer file is the raw JSON-RPC reply; save the payload alone beside it so it can be read or parsed directly.
+    full = answer.with_name(answer.stem + ".payload.json")
+    full.write_text(body if isinstance(body, str) else json.dumps(body, indent=1, ensure_ascii=False), encoding="utf-8")
+    cut = len(text) > a.max
+    print("%s %.1fs %s  %s: %s" % (a.tool, reply.get("_seconds", 0.0), "ERROR" if bad else "ok",
+                                   "answer cut, full payload" if cut else "full payload", full), flush=True)
+    if cut:
+        text = text[:a.max] + "\n... cut %d characters; read the full payload file" % (len(text) - a.max)
     sys.stdout.buffer.write((text + "\n").encode("utf-8", "replace"))
     return 1 if bad else 0
 
@@ -432,7 +436,10 @@ def selftest() -> int:
         rc, out = run("call", "fail")
         expect(rc == 1 and "ERROR" in out, "tool error gives exit 1: %r" % out)
         rc, out = run("call", "echo", "text=" + "x" * 500, "--max", "100")
-        expect("cut " in out, "long answers are cut: %r" % out[-80:])
+        expect("cut " in out and "answer cut, full payload" in out, "long answers are cut: %r" % out[-80:])
+        pay = out.splitlines()[0].split("full payload: ", 1)[-1].strip()
+        expect(json.loads(Path(pay).read_text(encoding="utf-8")) == {"echo": {"text": "x" * 500}},
+               "payload file holds the result alone: %s" % pay)
         rc, out = run("tools")
         expect("echo(text*, n)" in out and "1 of 1 tools" in out, "tools lists argument names: %r" % out)
         log_text = (Path(work) / "serve.log").read_text(encoding="utf-8")

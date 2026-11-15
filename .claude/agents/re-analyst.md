@@ -26,16 +26,19 @@ retail-tracing tools"):
   using it; report that instead of retrying.
 - REA (`rea-agents`, a second route into the same Ghidra; a script here, not an MCP server), from Bash:
   `toolchain/re/venv/Scripts/python.exe -I tools/re/rea_session.py call <tool> key=text key:=json`.
-  Use it for what ReVa has no tool for: `search_bytes pattern=<hex> mask=<hex>` over the whole image
-  (every instruction that touches a struct offset: search the encoded displacement and mask the
-  register bits), `batch_decompile addresses:='["0x...","0x..."]'` for many functions in one call,
-  and as the way in when another session holds the ReVa project. Also `procedure_pseudo_code
-  procedure=<address>`, `procedure_callers`, `procedure_callees`, `xrefs address=`,
+  Use it for what ReVa has no tool for: `search_bytes pattern=<hex> mask=<hex> limit:=200` over the
+  whole image (every instruction that touches a struct offset: search the encoded displacement and
+  mask the register bits), `batch_decompile 'addresses:=["0x...","0x..."]'` (single quotes around the
+  whole argument) for many functions in one call, and as the way in when another session holds the
+  ReVa project; ReVa and REA can be open at the same time. Also `procedure_pseudo_code procedure=<address>`,
+  `procedure_callers procedure=`, `procedure_callees procedure=`, `xrefs address=`,
   `resolve_containing_procedure address=`, `read_bytes address= length:=`, `search_strings pattern=`;
-  `tools <substring>` lists the rest with argument names. Addresses are the ones ReVa uses (image base
-  0x140000000). The first analysis call of a session waits about 200 s for Ghidra's auto-analysis:
-  start it in the background and carry on in ReVa; later calls answer at once. A call prints a cut
-  answer and the path of the full one: `Read` that file instead of raising `--max`. REA's project is
+  `tools <substring>` lists the rest with argument names (`*` = required). Addresses are the ones ReVa
+  uses (image base 0x140000000). The first analysis call of a session waits 200 to 260 s for Ghidra's
+  auto-analysis and prints nothing until it answers: start it in the background and carry on in ReVa;
+  later calls answer at once. A call prints the result (cut at `--max`) and the path of
+  `<tag>.payload.json`, which holds the whole result without REA's envelope: `Read` or parse that file
+  instead of raising `--max`. REA's project is
   temporary, so renames and comments go into ReVa. Run `stop` when you finish (the session holds about
   1.8 GB and otherwise ends after 60 idle minutes).
 - `mcp__windbg__*`: `open_cdb_dump` takes a TTD trace (`.run`, recorded with `tools\re\ttd_record.cmd`

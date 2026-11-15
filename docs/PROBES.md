@@ -63,5 +63,7 @@ does not use. Checked 2026-11-15: both servers start and list their tools, the i
 `cdb -version`. Not checked: a TTD recording (needs the licence step), a trace replay, and the agent started from a session.
 REA, checked 2026-11-15: `15_rea.cmd` from an empty state, `rea_session.py --selftest`, a `search_bytes` on the shared Ghidra
 and project-local JDK that returned the same 21 matches as the trial run, then caller, pseudo-code, batch-decompile and
-containing-procedure calls at 0.0 s each, and `stop`. Not checked: REA and ReVa open at the same time, and `re-analyst` using
-REA from a session.
+containing-procedure calls at 0.0 s each, and `stop`. Then `re-analyst`, spawned from a session, followed its notes: first
+`search_bytes` 256 s (same 21 matches in 16 functions), ReVa decompiled a function while that call was running (no lock
+conflict, same output as REA), callers and batch decompile 0.3 s, `stop` left no session. Agents load from the main checkout in
+a desktop worktree session, so a new agent file is usable only once the main checkout has it.
