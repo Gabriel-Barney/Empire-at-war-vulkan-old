@@ -38,3 +38,25 @@ roadmap (`roadmap-store/`). Probes need the original game; Claude runs every kit
 
 Other kit-like tooling: `tools/probe_mod/common/` (helpers every kit runner shares: `probe_run.py`, `launch_foc.py`, `probe_cleanup.py`, Lua 5.0 compiler `lua50.py`), `tools/shaders/` (shader tools, see its README), `tools/re/` (field tables, locality, Ghidra helpers;
 `docs/re/ghidra/README.md`), `tools/visual/` (screenshot diffs, see [`BUILD.md`](BUILD.md)).
+
+## RE and retail-tracing tools (`toolchain\re`, 2026-11-15)
+
+Installed project-locally and pinned by `toolchain\14_re_tools.cmd` (called by `2_setup.cmd`; log `toolchain\re_tools.log`, ends with
+`RE_TOOLS_DONE`). For RE, doc and probe tasks only, never while writing engine code (clean-room rule in `CLAUDE.md`); findings go in
+`docs/re/` as for any probe. Retail `StarWarsG.exe` is 64-bit, so every tool here is the x64 build. Nothing here uses the machine's
+own Java or Python: Ghidra runs on Temurin JDK 21.0.13+9 (`toolchain\re\jdk-21.0.13+9`), the Python tools on python.org Python
+3.14.10 (`toolchain\re\python-3.14.10`; ReVa's Java bridge has no build for Python 3.15).
+
+| Tool | Where | Use |
+|---|---|---|
+| Ghidra 12.1.4 + ReVa 7.3.2 (MCP server for Ghidra, 86 tools) | `tools\re\reva_mcp.cmd` (stdio); Ghidra in `toolchain\re\ghidra_12.1.4_PUBLIC` | Lets an agent query Ghidra (decompile, cross-references, call graph, vtables). The project is kept in `toolchain\re\reva-work\foc` (`tools\re\reva_persistent.py`; stock `mcp-reva` deletes its project on exit) and holds `/StarWarsG.exe`, imported and analysed once by `tools\re\reva_import.py`. The import also left an unanalysed duplicate, `/StarWarsG.exe.0`: ignore it. Ghidra locks an open project: one ReVa session at a time |
+| mcp-windbg 1.6.0 (MCP server around `cdb.exe`) | `tools\re\windbg_mcp.cmd` (stdio) | `open_cdb_dump` on a TTD trace (`.run`), then `run_cdb_command`. Stands in for `ttd-mcp`, which does not exist on GitHub |
+| Microsoft TTD 1.11.611.0 (recorder) | `tools\re\ttd_record.cmd [process or pid] [-accepteula]`; `toolchain\re\ttd-1.11.611.0\TTD.exe` | Records a running process (default `StarWarsG.exe`) to `toolchain\re\ttd-traces`. TTD needs administrator rights: the script raises one Windows prompt. TTD shows Microsoft's licence until it is accepted; `-accepteula` accepts it and is Gabriel's to pass, an agent does not |
+| Microsoft WinDbg 1.2611.4001.0 | `toolchain\re\windbg-1.2611.4001.0\amd64\cdb.exe` (command line), `DbgX.Shell.exe` (GUI) | Replays a `.run` trace forwards and backwards: `cdb.exe -z <trace>.run -c "<commands>; q"` |
+| Frida 17.26.3, frida-tools 14.13.1 | `toolchain\re\venv\Scripts\frida.exe`, `frida-trace.exe`; Python module `frida` in that venv | Hook retail functions at run time and log arguments / return values (tier-2 distributions over many seeds) |
+| apitrace 14.0 (Direct3D 9 capture) | `toolchain\capture\apitrace-14.0` (step 6, `g1_capture/` kit) | Already in use for G1 |
+
+Claude Code: the `re-analyst` agent (`.claude/agents/re-analyst.md`) is the only place the two MCP servers are registered, as
+servers of that agent alone, so lanes that write engine code never get decompiler tools and no session starts a Ghidra JVM it
+does not use. Checked 2026-11-15: both servers start and list their tools, the import and Ghidra auto-analysis ran (203 s, 21,744 functions, 19,488 strings) and a new session reopened the saved result, `frida --version`,
+`cdb -version`. Not checked: a TTD recording (needs the licence step), a trace replay, and the agent started from a session.
