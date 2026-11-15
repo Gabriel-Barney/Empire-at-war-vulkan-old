@@ -15,7 +15,13 @@ Usage (from the project root; tools/testbuild/package_testbuild.cmd wraps it):
   --smoke         before zipping, run the Thrawn's Revenge mod check and skirmish smoke through the staged Play_Mod.cmd
                   (needs Forces of Corruption, Thrawn's Revenge and a GPU); a failure stops the packaging
   --allow-dirty   package even when engine/ or launcher/ has uncommitted edits (the zip's BUILD_INFO.txt says so)
+  --no-pdb        package without the symbols zip (by default the build tree must have PDBs, see below)
   --notices-only  write THIRD_PARTY_NOTICES.txt to OUT (default: stdout) and stop; no build tree needed
+
+Symbols (Gabriel, 2026-11-15: test builds carry PDBs, other trees do not): the build tree must be configured with
+ALAMO_RELEASE_PDB=1 (`set ALAMO_RELEASE_PDB=1` then build_msvc.cmd), so alamo_game.pdb and alamo_mod_check.pdb sit next to
+their exes and are as new as them. They go into dist/<name>_symbols.zip, which stays on this machine: a crash dump from the
+test build (%LOCALAPPDATA%/alamo/crashes, docs/BUILD.md "Crash dumps") is read with them; the player's zip does not grow.
 
 Writes dist/<name>.zip (dist/ is git-ignored). CHANGES.txt's @BUILD@ becomes "<branch> <commit>, MSVC <build type>".
 Edit tools/testbuild/CHANGES.txt for each build: what changed, what to check, known gaps.
@@ -43,6 +49,18 @@ LAUNCHER = ROOT / "launcher"
 LAUNCHER_BIN = LAUNCHER / "target" / "release"
 # Command Center (docs/DECISIONS.md, 2026-11-13). No Valve DLL: the launcher uses Steam's web API and its records on disk.
 LAUNCHER_FILES = ["command-center.exe"]
+SYMBOLS = ["alamo_game.pdb", "alamo_mod_check.pdb"]  # the PDBs of the packed engine exes (ALAMO_RELEASE_PDB=1 builds)
+
+
+def symbols_problem(bin_dir):
+    """Why bin_dir has no usable PDBs for the packed exes, or '' when each PDB exists and is at least as new as its exe."""
+    for pdb in SYMBOLS:
+        exe, sym = bin_dir / pdb.replace(".pdb", ".exe"), bin_dir / pdb
+        if not sym.exists():
+            return "no %s in %s" % (pdb, bin_dir)
+        if exe.exists() and sym.stat().st_mtime + 2 < exe.stat().st_mtime:
+            return "%s is older than %s (built without ALAMO_RELEASE_PDB since)" % (pdb, exe.name)
+    return ""
 LAUNCHER_TARGET = "x86_64-pc-windows-msvc"
 
 
@@ -257,6 +275,7 @@ def main():
     ap.add_argument("--name", default="")
     ap.add_argument("--smoke", action="store_true")
     ap.add_argument("--allow-dirty", action="store_true")
+    ap.add_argument("--no-pdb", action="store_true")
     ap.add_argument("--notices-only", nargs="?", const="-", default=None, metavar="OUT")
     a = ap.parse_args()
 
@@ -276,6 +295,10 @@ def main():
     missing = [f for f in BINARIES if not (bin_dir / f).exists()]
     if missing:
         sys.exit("missing in %s: %s" % (bin_dir, ", ".join(missing)))
+    sym_problem = "" if a.no_pdb else symbols_problem(bin_dir)
+    if sym_problem:
+        sys.exit("%s: test builds carry PDBs for crash dumps. Rebuild with symbols: set ALAMO_RELEASE_PDB=1 then build_msvc.cmd "
+                 "(or pass --no-pdb)" % sym_problem)
     stale = launcher_stale()
     if stale:
         sys.exit(stale)
@@ -310,6 +333,7 @@ def main():
             "command-center.exe built: " + datetime.datetime.fromtimestamp(
                 (LAUNCHER_BIN / LAUNCHER_FILES[0]).stat().st_mtime).strftime("%Y-%m-%d %H:%M"),
             "uncommitted engine / launcher edits: " + ("yes" if dirty else "no"),
+            "symbols: " + ("none (--no-pdb)" if a.no_pdb else name + "_symbols.zip (kept by the developer)"),
             "packed: " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M")]
     (stage / "BUILD_INFO.txt").write_bytes(crlf(("\n".join(info) + "\n").encode("utf-8")))
     (stage / "THIRD_PARTY_NOTICES.txt").write_bytes(crlf(third_party_notices().encode("utf-8")))
@@ -324,6 +348,13 @@ def main():
         for f in files:  # only the packed files: the smoke run's logs, caches and saves stay out
             z.write(stage / f, f)
     print("%s: %d files, %.1f MB (%s)" % (zip_path, len(files), zip_path.stat().st_size / 1e6, build))
+    if not a.no_pdb:
+        sym_zip = dist / (name + "_symbols.zip")
+        with zipfile.ZipFile(sym_zip, "w", zipfile.ZIP_DEFLATED) as z:
+            for f in SYMBOLS + ["alamo_game.exe", "alamo_mod_check.exe"]:  # exes too: the debugger matches PDB to image
+                z.write(bin_dir / f, f)
+            z.writestr("BUILD_INFO.txt", crlf(("\n".join(info) + "\n").encode("utf-8")))
+        print("%s: %.1f MB (unzip and point the debugger at it: cdb -z <dump> -y <folder>)" % (sym_zip, sym_zip.stat().st_size / 1e6))
 
 
 if __name__ == "__main__":

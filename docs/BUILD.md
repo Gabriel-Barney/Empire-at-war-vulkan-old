@@ -177,7 +177,8 @@ stack, throw, abort, terminate, purecall) crashes at start-up to check a build. 
   (or open it in WinDbg). `.ecxr` switches to the crashing thread's exception context.
 - **Symbols:** a normal Release build has no PDBs, so stacks show `exe+offset` only. Configure with `ALAMO_RELEASE_PDB=1` in the
   environment (or `-DALAMO_RELEASE_PDB=ON`): MSVC `/Z7` + `/DEBUG /OPT:REF /OPT:ICF`, a PDB next to each exe. A dump needs the PDB of
-  the exact build that crashed, so keep the PDBs with a test build.
+  the exact build that crashed. Test builds carry them, other trees do not (`docs/DECISIONS.md`, "Release symbols"):
+  `package_testbuild.py` refuses a tree without fresh PDBs and writes `dist/<name>_symbols.zip` beside the player's zip.
 - In-process by design: the dump thread is created at start-up and uses fixed buffers, but `MiniDumpWriteDump` itself allocates,
   so a crash that corrupted the heap can still lose its dump (the `.txt` note says `FAILED`). A dump from the Command Center as
   a separate process would avoid that; not done.
