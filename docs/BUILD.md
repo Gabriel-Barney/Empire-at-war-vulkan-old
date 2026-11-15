@@ -165,6 +165,23 @@ Only `engine/` and `tools/` sources count; tests, `test_support`, `toolchain`, `
 Use it to find retail rules no test reaches before a playtest does. Not a gate build and not recorded on the roadmap. The
 counters change no result, but instrumented tests run slower: a failure seen only here is a timing or fixture issue first.
 
+## Crash dumps (2026-11-15)
+
+`alamo_game` and `alamo_headless` call `alamo::crash::install()` first thing (`engine/apps/crash`, `[port]`). A crash (access
+violation, stack overflow, uncaught exception, `abort`, `std::terminate`, CRT invalid parameter, pure virtual call) writes
+`%LOCALAPPDATA%\alamo\crashes\<exe>_<date>-<time>_<pid>.dmp` plus a `.txt` note (reason, exception code, faulting module +
+offset) and one `crash: ...` line on stderr; the process exits with the exception code (3 for abort / terminate).
+`ALAMO_CRASHDUMP=0` turns it off, `ALAMO_CRASHDUMP_DIR` picks another folder, `ALAMO_CRASH_TEST=<kind>` (access, thread,
+stack, throw, abort, terminate, purecall) crashes at start-up to check a build. `alamo_crash_tests` runs every kind in a child.
+- **Reading a dump:** `toolchain\re\windbg-1.2611.4001.0\amd64\cdb.exe -z <file.dmp> -y <folder with the exe's .pdb> -c ".ecxr;kn 20;q"`
+  (or open it in WinDbg). `.ecxr` switches to the crashing thread's exception context.
+- **Symbols:** a normal Release build has no PDBs, so stacks show `exe+offset` only. Configure with `ALAMO_RELEASE_PDB=1` in the
+  environment (or `-DALAMO_RELEASE_PDB=ON`): MSVC `/Z7` + `/DEBUG /OPT:REF /OPT:ICF`, a PDB next to each exe. A dump needs the PDB of
+  the exact build that crashed, so keep the PDBs with a test build.
+- In-process by design: the dump thread is created at start-up and uses fixed buffers, but `MiniDumpWriteDump` itself allocates,
+  so a crash that corrupted the heap can still lose its dump (the `.txt` note says `FAILED`). A dump from the Command Center as
+  a separate process would avoid that; not done.
+
 ## Test thread pools under a loaded machine (2026-11-03)
 
 `alamo_ai_tactical_tests` (2 s) ran past ctest's 600 s timeout at 100% CPU. Not a deadlock: it finished once the load went.

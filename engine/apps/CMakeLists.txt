@@ -178,11 +178,13 @@ endif()
 # Headless host: load game data through the VFS, build a campaign's galaxy, and run the
 # deterministic tick with per-AI all-pairs recomputes on the job system. Also the Phase 2 smoke test.
 # With alamo_sim: --map NAME --ticks N runs a tactical map through the G0 host.
+add_subdirectory(crash)  # [port] crash minidumps (alamo_crash), linked by alamo_headless and alamo_game
 add_executable(alamo_headless headless/main.cpp)
 # alamo_core first: tools/formats defines its own alamo::ByteReader (inline members) that clashes with
 # core's out-of-line one when MSVC pulls formats' COMDATs first (LNK2005, an ODR issue outside apps).
 target_link_libraries(alamo_headless PRIVATE alamo_core alamo_vfs alamo_data alamo_jobs alamo_galactic alamo_commands
                                              alamo_ai alamo_objects)
+target_link_libraries(alamo_headless PRIVATE alamo_crash)
 if(_alamo_sim)
   target_sources(alamo_headless PRIVATE headless/map_run.cpp headless/battle_run.cpp)
   target_link_libraries(alamo_headless PRIVATE alamo_sim)

@@ -19,6 +19,7 @@
 //                   tools (save_export.hpp): no window, Vulkan or audio; exit 0, or 1 + a message on stderr.
 // Game data: --game DIR or ALAMO_FOC_DATA (the FoC "corruption" folder).
 #include "game_app.hpp"
+#include "alamo/crash/crash_handler.hpp"
 #include "alamo/vfs/steam_workshop.hpp"
 #include "alamo/jobs/topology.hpp"  // sp1: OS hints
 
@@ -566,6 +567,12 @@ static int bench_regen_prepare(const Options& opt, const std::vector<std::string
 }
 
 int main(int argc, char** argv) {
+    {  // [port] crash minidumps (%LOCALAPPDATA%\alamo\crashes; ALAMO_CRASHDUMP=0 turns them off, ALAMO_CRASH_TEST=<kind> checks them)
+        alamo::crash::Options crash_opt;
+        crash_opt.app_name = "alamo_game";
+        alamo::crash::install(crash_opt);
+        alamo::crash::crash_if_requested();
+    }
     alamo::vfs::install_steam_workshop_lookup();  // modc t10: STEAMMOD= from the Steam library folders
     enable_dpi_awareness();  // before any window: sizes and the video modes in physical pixels
     Options opt;

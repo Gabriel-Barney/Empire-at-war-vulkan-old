@@ -50,6 +50,17 @@ if(MSVC)
   add_compile_options(/utf-8 /permissive- /Zc:__cplusplus /EHsc)
 endif()
 
+# Symbols for crash dumps (engine/apps/crash, docs/BUILD.md "Crash dumps"): -DALAMO_RELEASE_PDB=ON or the environment variable
+# ALAMO_RELEASE_PDB=1 at configure time makes MSVC Release builds write a PDB next to each exe. /Z7 keeps the debug info in the
+# objects (works with sccache) and changes no generated code; /DEBUG would switch the linker to /OPT:NOREF,NOICF, so REF and ICF
+# are named again to keep the shipped binary's layout. Off by default: it costs compile and link time in every tree.
+option(ALAMO_RELEASE_PDB "MSVC Release: write PDBs (/Z7 + /DEBUG) so crash dumps show function names" OFF)
+if(MSVC AND (ALAMO_RELEASE_PDB OR "$ENV{ALAMO_RELEASE_PDB}" STREQUAL "1"))
+  message(STATUS "Release PDBs: on")
+  add_compile_options($<$<CONFIG:Release>:/Z7>)
+  add_link_options($<$<CONFIG:Release>:/DEBUG> $<$<CONFIG:Release>:/OPT:REF> $<$<CONFIG:Release>:/OPT:ICF> $<$<CONFIG:Release>:/INCREMENTAL:NO>)
+endif()
+
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 enable_testing()

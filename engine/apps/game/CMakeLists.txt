@@ -196,7 +196,7 @@ function(alamo_game_add_exe)
                            ${_dir}/app/game_info.cpp ${_dir}/app/game_display.cpp ${_dir}/app/app_mods.cpp ${_dir}/app/app_options.cpp)
   # alamo_core first: tools/formats' inline ByteReader vs core's (LNK2005, see alamo_render_app).
   target_link_libraries(alamo_game PRIVATE alamo_core alamo_game_core alamo_render_galactic alamo_render_sim alamo_ui_draw alamo_ui_hud
-                                           alamo_ui_rhi alamo_engine_flags)
+                                           alamo_ui_rhi alamo_engine_flags alamo_crash)
   target_compile_definitions(alamo_game PRIVATE "ALAMO_RENDER_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\"")
   if(TARGET alamo_render_particles_sim)
     target_link_libraries(alamo_game PRIVATE alamo_render_particles_sim)

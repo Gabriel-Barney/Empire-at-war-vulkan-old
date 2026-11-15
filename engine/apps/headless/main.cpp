@@ -115,6 +115,8 @@
 // staggered by slot) and
 // issues fleet A* requests every frame. The run prints a checksum over everything the AIs read;
 // it must be identical for any worker count.
+#include "alamo/crash/crash_handler.hpp"
+
 #include <algorithm>
 #include <chrono>
 #include <cinttypes>
@@ -1290,6 +1292,13 @@ static int headless_main(int argc, char** argv) {
 // and prints p50 / p99 / max tick time, per-zone shares and the 20 worst ticks after it. Wall-clock data only: the run's
 // results and CRCs are unchanged. Runs that tick several hosts in turn (--selfcheck, --check-workers) report them together.
 int main(int argc, char** argv) {
+    {  // [port] crash minidumps (%LOCALAPPDATA%\alamo\crashes; ALAMO_CRASHDUMP=0 turns them off). Before the Q5 terminate handler,
+       // which then still prints the exception and aborts into the dump.
+        alamo::crash::Options crash_opt;
+        crash_opt.app_name = "alamo_headless";
+        alamo::crash::install(crash_opt);
+        alamo::crash::crash_if_requested();
+    }
     alamo::vfs::install_steam_workshop_lookup();  // modc t10: STEAMMOD= from the Steam library folders
     (void)alamo::jobs::disable_power_throttling();  // SIMP sp1: wall clock only (the sim thread's priority: bench_run)
     // Q5: an uncaught exception (e.g. mod data past a fixed limit) names itself instead of a silent 0xC0000409 exit.
