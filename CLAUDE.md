@@ -92,7 +92,8 @@ Project skills (`.claude/skills/`; triggers in each description): `start-group` 
 `research` (cited report in its `docs/` home), `re-question` (ask the binary through `re-analyst`), `probe-kit` (retail checks), `writing-for-agents` (editing any file agents read),
 `retro` (Gabriel-invoked review of how sessions went; lanes end with a one-line friction note for it).
 **Default tool access (Gabriel, 2026-11-15): every worker (main session, agent, subagent) may use every project script,
-toolchain program and skill whenever its task needs one, without asking; index `docs/TOOLS.md`.** Agents in `.claude/agents/`
+toolchain program and skill whenever its task needs one, without asking; index `docs/TOOLS.md`. Exception: the retail RE and
+tracing tools (ReVa, REA, mcp-windbg, TTD, cdb, Frida) stay with `re-analyst` and probe / RE tasks (clean-room); others use `re-question`.** Agents in `.claude/agents/`
 have no `tools:` allowlist (they inherit every session tool; only `reviewer` has `disallowedTools` for edits); toolchain
 programs run by name through `tools\tc.cmd <program>`; a `SessionStart` hook links the worktree junctions. A subagent does not
 inherit the main session's skills, so each agent preloads

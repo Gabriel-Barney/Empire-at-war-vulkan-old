@@ -5,6 +5,13 @@ Default workflow (Gabriel, 2026-11-15; `DECISIONS.md`, "Default tool access"): t
 one, without asking first. Limits come from the rules (CLAUDE.md, clean-room, determinism, landing), not from tool lists. The
 only per-agent limit left is `reviewer`, which never edits files.
 
+**Exception: the retail RE and tracing tools** (ReVa / Ghidra, REA, mcp-windbg, TTD, WinDbg / cdb, Frida; `PROBES.md`, "RE and
+retail-tracing tools") are not for every worker. Clean-room rule: a worker that writes engine code never runs them and never
+reads what they print. Only the `re-analyst` agent uses ReVa, mcp-windbg and REA (the two MCP servers are registered on it
+alone); a probe or RE / doc task may use TTD, cdb and Frida. Everyone else asks through the `re-question` skill, which starts
+`re-analyst` and gets back behaviour written in `docs/re/`. A TTD recording also needs a person to approve its Windows admin
+prompt (UAC), so it never runs unattended. `tools\tc.cmd` does not put `toolchain\re` on PATH.
+
 How it is wired:
 - Agent frontmatter has no `tools:` allowlist, so an agent inherits every tool of the session (PowerShell, LSP, web search /
   fetch, built-in browser, computer use, MCP servers, `Skill`). `reviewer` uses `disallowedTools: Write, Edit, NotebookEdit`.
@@ -83,5 +90,5 @@ pinned setup step in `toolchain\2_setup.cmd` (rule 5), then a row here.
 ## Session tools
 
 LSP (clangd, `eaw-clangd` plugin), web search / fetch, the built-in browser, computer use (retail probe runs only; never the
-port's `alamo_game.exe`), ReVa and windbg MCP (through `re-analyst`), scheduled tasks and `/loop`. Approval rules for outward or
+port's `alamo_game.exe`), ReVa and windbg MCP (`re-analyst` only, see the exception above), scheduled tasks and `/loop`. Approval rules for outward or
 irreversible actions (pushing anywhere but `dev` via `land_on_dev.cmd`, merging PRs, deleting) are unchanged.

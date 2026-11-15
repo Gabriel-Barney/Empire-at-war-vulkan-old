@@ -41,7 +41,8 @@ and `docs/ROADMAP_PROTOCOL.md` first; the loop below is how they apply to a lane
    groups have no cap (`docs/ROADMAP_PROTOCOL.md`, "Follow-ups stay in Stage 6 groups").
    You have every tool the session has (default workflow, Gabriel 2026-11-15): PowerShell, LSP, web search / fetch, the browser,
    computer use for probe runs, MCP servers. Toolchain programs run through `tools\tc.cmd <program>`; the index of scripts, tools
-   and skills is `docs/TOOLS.md`. Reach for one whenever it fits, without asking.
+   and skills is `docs/TOOLS.md`. Reach for one whenever it fits, without asking. Exception (clean-room): never run the retail RE
+   and tracing tools (ReVa, REA, mcp-windbg, TTD, cdb, Frida) yourself; ask through `re-question`.
    Project skills (`determinism-check` and `diagnosing-bugs` are preloaded in your context; invoke any other with the `Skill` tool,
    or read its `.claude/skills/<name>/SKILL.md` if the tool is missing):
    - **A failure you cannot explain** (test, golden or CRC drift, worker-count or MSVC-vs-clang difference, parity mismatch, crash,
