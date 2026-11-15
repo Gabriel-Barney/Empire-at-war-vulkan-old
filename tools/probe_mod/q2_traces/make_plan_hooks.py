@@ -61,6 +61,11 @@ PLANS = [
     ('LandMode/Droids', 'Droids', ['MainForce']),
     ('LandMode/SecureBuildPad', 'Secure_Contestable', ['MainForce', 'EscortForce']),
     ('LandMode/LandScout', 'Land_Scout_Area', ['MainForce']),
+    # b0418 (2026-11-14, docs/re/B0418_UTAPAU_AI_RUNS.md): Empire and Underworld AI against an idle human. In the port the
+    # Empire's emergency infantry build buys Boba Fett, whose Flame_Infantry plan then holds him for most of the battle
+    # while no pad is captured; the Underworld builds MDU items.
+    ('LandMode/BobaFettFlameInfantry', 'Flame_Infantry', ['MainForce']),
+    ('LandMode/AI_Plan_ExpansionGeneric_BuildMDUItem', 'Build_MDU_Item', ['MainForce']),
 ]
 LAND_PREFIX = 'LandMode/'
 # Plans whose Find_Nearest calls are recorded (FNEAR).

@@ -139,6 +139,11 @@ galaxy is running.
    time) with the Lua probe. It shows whether and when the Rebel AI attacks the idle Empire base: its army size over time
    (is 9 the real 2-player cap), the first tick its units reach the base and which base objects die. Read it with
    `analysis\land_attack.py out\<run>`.
+   **b0418 runs (Empire / Underworld AI), about 22 min each:** `run_skirmish_land_empire_ai.cmd` (you = Underworld,
+   slot 2 = Empire Medium AI) and `run_skirmish_land_underworld_ai.cmd` (you = Empire, slot 2 = Underworld Medium AI),
+   otherwise the same clicks and the same reader. Retail has no AI-vs-AI skirmish, so these compare each AI alone against
+   the port's `--human` runs: first Mineral Processor, what the emergency infantry build buys, winner and end frame.
+   Questions, port predictions and findings: `docs\re\B0418_UTAPAU_AI_RUNS.md`.
    **Story mission (story t04), about 15 min:** `run_story.cmd`, see **Story mission run** below.
 7. **Send back:** zip `out\` and send it. Leave out `out\selftest`. Each run has its own folder:
    - `trace.q2t`;
