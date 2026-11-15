@@ -137,6 +137,18 @@ the retail MEGs (`ALAMO_FOC_DATA`), grows in `build-fuzz\fuzz\corpus\`, and cras
 - First finding: `alamo::meg::Archive::read` allocated an entry's size (up to 4 GB from a corrupt table) before the bounds check;
   fixed in `tools/meg/src/meg.cpp`.
 
+## clang-tidy (2026-11-15)
+
+`python -I tools/lint/run_tidy.py [--tree build-wt-clang] [--only REGEX] [--tests] [-j N] [--strict]` runs
+`toolchain\llvm\bin\clang-tidy.exe` with the root `.clang-tidy` over the `engine/` and `tools/` sources in a clang tree's
+`compile_commands.json` (configure one with `build_agent.cmd clang ...`; only the configured modules are checked). It prints each
+distinct finding and a count per check; the full output goes to `logs\tidy_<tree>.txt`. clangd reads the same `.clang-tidy`, so
+the findings also show in the editor. Not part of the gate: findings are information, not failures (`--strict` exits 1 on any).
+- The checks are real-bug checks only (`bugprone-*`, `clang-analyzer-core` / `cplusplus`, `concurrency-mt-unsafe`, a few
+  `performance-*` / `misc-*`); style and what `/W4` or `-Wconversion -Wshadow` already report are off. Each disabled check
+  is listed in `.clang-tidy`; turn one off there when it is noise, rather than adding `NOLINT` to sim code.
+- Known false positives: `misc-redundant-expression` on `x - x` in `engine/core/src/dmath.cpp`, which is deliberate (NaN for a non-finite input).
+
 ## Test thread pools under a loaded machine (2026-11-03)
 
 `alamo_ai_tactical_tests` (2 s) ran past ctest's 600 s timeout at 100% CPU. Not a deadlock: it finished once the load went.
