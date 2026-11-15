@@ -92,8 +92,10 @@ pinned setup step in `toolchain\2_setup.cmd` (rule 5), then a row here.
 | Designing a module's interface; no seam for a regression test | `codebase-design` |
 | Architecture review, refactoring opportunities | `improve-codebase-architecture` (proposes and files; refactors are tier 3) |
 | Filing findings, cleaning the backlog or inbox | `triage` |
+| Writing code or a regression test test-first | `tdd` |
+| Splitting a plan, spec or finding into tasks or a new group | `to-tickets` |
 
-`codebase-design`, `improve-codebase-architecture`, `triage` and `spec-review` (and parts of `diagnosing-bugs`) are adapted from
+`codebase-design`, `improve-codebase-architecture`, `triage`, `tdd`, `to-tickets` and `spec-review` (and parts of `diagnosing-bugs`) are adapted from
 `mattpocock/skills` (MIT; `.claude/skills/LICENSE-mattpocock-skills.txt`).
 
 ## Agents (`.claude/agents/`)

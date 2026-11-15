@@ -49,7 +49,9 @@ section 4.
   `codebase-design`, `improve-codebase-architecture` (proposes and files tier-3 backlog entries while the tier-1/2 focus holds),
   `triage` (the roadmap backlog instead of GitHub issues; promoting S3 entries and most drops stay Gabriel's), `spec-review` (the
   upstream `code-review`, renamed so the built-in `/code-review` keeps its name; `finish-group` runs both). The upstream
-  `diagnosing-bugs` was merged into the project's own skill of that name, not installed beside it.
+  `diagnosing-bugs` was merged into the project's own skill of that name, not installed beside it. Added the same day: `tdd`
+  (C++ `CHECK` examples, independent expected values from `docs/re/` / retail, project test rules) and `to-tickets` (tickets are
+  roadmap tasks, blocking edges are task order and group `after`, each group gets an exit test; it writes only what was approved).
 - Wiring: index `docs/TOOLS.md`; toolchain programs by name through `tools\tc.cmd`; a `SessionStart` hook adds the worktree
   junctions (`worktree_tool.py link`); build scripts and read-only commands are pre-approved in `.claude/settings.json`.
 

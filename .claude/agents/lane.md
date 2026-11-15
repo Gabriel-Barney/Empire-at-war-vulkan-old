@@ -57,6 +57,8 @@ and `docs/ROADMAP_PROTOCOL.md` first; the loop below is how they apply to a lane
    - **Designing or changing a module's interface, or no seam for a regression test:** `codebase-design` (vocabulary, deepening,
      design-it-twice); a wider structural review is `improve-codebase-architecture` (proposes and files; refactors are tier 3).
    - **Filing findings** (review, probe, test run) or cleaning up the backlog: `triage`.
+   - **Writing code test-first** (a feature, a bug's regression test): `tdd`. **Splitting work into tasks or a new group:**
+     `to-tickets` (vertical slices, exit test, writes only what was approved).
    - **Before landing:** `finish-group` runs `/code-review` and `spec-review` (standards + the group's spec).
 6. **Build in your own tree** (one tree per worktree; never share `build-msvc` or another lane's tree). From PowerShell:
    `& .\build_agent.cmd --% msvc wt "core;<modules and their dependencies>"` gives `build-wt-msvc` (`wt` is the default tree and may be left out) and runs the fast tier
