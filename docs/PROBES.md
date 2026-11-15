@@ -38,3 +38,21 @@ roadmap (`roadmap-store/`). Probes need the original game; Claude runs every kit
 
 Other kit-like tooling: `tools/probe_mod/common/` (helpers every kit runner shares: `probe_run.py`, `launch_foc.py`, `probe_cleanup.py`, Lua 5.0 compiler `lua50.py`), `tools/shaders/` (shader tools, see its README), `tools/re/` (field tables, locality, Ghidra helpers;
 `docs/re/ghidra/README.md`), `tools/visual/` (screenshot diffs, see [`BUILD.md`](BUILD.md)).
+
+## RE and retail-tracing tools (`toolchain\re`, 2026-11-15)
+
+Installed project-locally and pinned by `toolchain\14_re_tools.cmd` (called by `2_setup.cmd`; log `toolchain\re_tools.log`, ends with
+`RE_TOOLS_DONE`). For RE, doc and probe tasks only, never while writing engine code (clean-room rule in `CLAUDE.md`); findings go in
+`docs/re/` as for any probe. Retail `StarWarsG.exe` is 64-bit, so every tool here is the x64 build. Smoke-tested 2026-11-15: ReVa
+starts and lists its tools, `frida --version`, `cdb -version`; nothing has been run against retail yet.
+
+| Tool | Where | Use |
+|---|---|---|
+| Ghidra 12.1.4 + ReVa 7.3.2 (MCP server for Ghidra, 86 tools) | `toolchain\re\ghidra_12.1.4_PUBLIC`; start headless with `tools\re\reva_mcp.cmd` (stdio) | Lets an agent query Ghidra (decompile, cross-references, call graph, vtables). Headless ReVa keeps its own projects in `.reva\projects` under the folder it is started from, so the binary is imported and analysed there once. It is not registered as an MCP server in any Claude Code settings file. Runs on the machine's JDK 27 (`JAVA_HOME` overrides) |
+| Frida 17.26.3, frida-tools 14.13.1 | `toolchain\re\venv\Scripts\frida.exe`, `frida-trace.exe`; Python module `frida` in that venv | Hook retail functions at run time and log arguments / return values (tier-2 distributions over many seeds) |
+| Microsoft TTD 1.11.611.0 (recorder) | `toolchain\re\ttd-1.11.611.0\TTD.exe` | Record one retail session to a `.run` trace. Needs an elevated prompt. `TTD.exe` shows Microsoft's licence on first use and waits: Gabriel accepts it, an agent does not |
+| Microsoft WinDbg 1.2611.4001.0 | `toolchain\re\windbg-1.2611.4001.0\amd64\cdb.exe` (command line), `DbgX.Shell.exe` (GUI) | Replay a `.run` trace forwards and backwards: `cdb.exe -z <trace>.run -c "<commands>; q"`. The package also holds Microsoft's own WinDbg MCP service (GUI only, Claude Code is not a supported client) |
+| apitrace 14.0 (Direct3D 9 capture) | `toolchain\capture\apitrace-14.0` (step 6, `g1_capture/` kit) | Already in use for G1 |
+
+`ttd-mcp` (named in the 2026-11-15 research) does not exist on GitHub; TTD traces are queried through `cdb.exe` instead. Python
+3.14.10 (`toolchain\re\python-3.14.10`) is there only because ReVa's Java bridge has no build for the machine's Python 3.15.
