@@ -36,13 +36,20 @@ The claude.ai page https://claude.ai/artifact/56dGptBoT3JcDH4rHZ6BjT is retired:
 | `builds` | `yyyymmddhhmmss-<machine>-<tree>-<compiler>` | `at`, `by`, `machine`, `compiler`, `tree`, `status` (`pass`/`fail`), `exits`, `warnings`, `tests`, `tests_failed`, `test_seconds`, `excerpt` (first error or warning lines), `group` (optional roadmap group id) |
 
 Order of work: the plan sorts by stage (`lanes.order`), then box (`nodes.order`), then group (`items.order`). A group shows
-as Ready, and in the "Start here" panel, while it is open and every group in its `after` is finished; otherwise it shows
+as Ready while it is open and every group in its `after` is finished; otherwise it shows
 "After …". So when a group really has to wait for another, say so in `after`, not only in `eta.note`. Put only hard
-prerequisites there: a group that merely benefits from another stays Ready. The "Needs Gabriel" panel lists open groups
-with preset or status `gab`, plus groups with an open task that needs Gabriel: its text starts with "Gabriel" or
-contains "ask Gabriel", or it has `"g": true`. Inside a group's task list each such open task carries a pink
-"Needs Gabriel" tag (Gabriel, 2026-11-08), so put `"g": true` on any task only Gabriel can do (launching the game,
-a playtest, a release merge) whose text does not start with "Gabriel:".
+prerequisites there: a group that merely benefits from another stays Ready.
+
+The left-side "Most important" panel (Gabriel, 2026-11-15, replacing the "Start here" and "Needs Gabriel" panels) ranks every
+open group with open tasks, recomputed from the data each time the page draws, so it follows every write. Score: each open task
+weighs S1 10, S2 4, S3 0.5, no `sev` 1, times tier 1 1.5, tier 2 1, tier 3 0 (paused); a task whose text names a crash, hang,
+time-out or save corruption weighs 20. Weights are summed largest first with a 0.8 decay. Add 12 plus half the task score of
+every open group that waits on it through `after` (followed through), and 6 when a task is closed (started); times 0.4 while
+the group itself waits on an open group. So the levers are a task's `sev`, `tier` and the group's `after`; keep them accurate.
+A group needs Gabriel when its preset or status is `gab` or an open task needs him: its text starts with "Gabriel" or contains
+"ask Gabriel", or it has `"g": true`. Such groups and tasks carry a pink "Gabriel" / "Needs Gabriel" tag (Gabriel, 2026-11-08),
+and the "Needs Gabriel" filter chip lists them, so put `"g": true` on any task only Gabriel can do (launching the game, a
+playtest, a release merge) whose text does not start with "Gabriel:".
 
 `tasks` is a map: `{ "t03": { "t": "text", "s": "todo|done|oos", "o": 3, "g": true } }`. `s` is `todo`, `done` (drawn struck
 through) or `oos` (out of scope). `o` is the display order. `g` (optional) marks a task that needs Gabriel. Keys never
@@ -140,7 +147,7 @@ leave the group.
   | Backlog | S3: polish or a documented guess | `backlog add ... --from <group>` (S3 is the default): one entry, a category |
   | Drop | tier 3, inside tolerance, a guess nobody relies on | not recorded, or `backlog drop --why` |
 
-- **Backlog.** Its own collection (`backlog`), so it never shows as an open group or in "Start here". Severity: `S1` crash, hang,
+- **Backlog.** Its own collection (`backlog`), so it never shows as an open group or in "Most important". Severity: `S1` crash, hang,
   save corruption or a tier-1 difference a player or modder sees; `S2` a tier-2 metric fails or a rule differs without a visible
   effect yet; `S3` polish or a documented guess. Kind: `fix`, `port`, `re`, `probe`, `test`, `decision`, `doc`. Since 2026-11-15 the
   backlog holds only S3 (next point).
@@ -229,7 +236,7 @@ leave the group.
 - **Promoting.** S3 entries come back only by choice: `backlog promote <ids> --to <group>` (refused above the cap) or
   `--new <id> --title ... --node ... --exit ... [--preset ...] [--eta ...]`. An S1 / S2 entry found in the backlog (filed before
   2026-11-15 or by an old tool) is promoted at once.
-- **Parking.** `park <group> --by S --why "..."` sets an unstarted group to status `parked`: it leaves the open lists, "Start here" and
+- **Parking.** `park <group> --by S --why "..."` sets an unstarted group to status `parked`: it leaves the open lists, "Most important" and
   the limit, keeps its tasks and shows as "Parked" (a milestone made only of parked groups shows "Parked", not "Done");
   `unpark <group> --by S` restores its old status. Use it for side goals that are not on the path to the current goal.
 - **Limits and lint.** `meta/backlog` `wip` (default 8) is the number of *started* groups (one with a closed task or a live claim, not
@@ -290,7 +297,7 @@ python roadmap-store/roadmap_store.py release <group> [--by <session>] [--force]
   A group with no `mod` and no `touches` never conflicts. `--by <session>` stops that session's own claims from blocking it.
 - Coordinator flow: `batch N`, then each agent runs `claim <group> --by <its name>` before it edits anything; a refused claim means
   take the next group from a fresh `batch`.
-- The page shows a "claimed by X" badge on groups with a live claim and keeps them out of the "Start here" suggestions (it reads
+- The page shows a "claimed by X" badge on groups with a live claim and names the claim in the "Most important" list (it reads
   the two fields only; a claim older than 24 hours is ignored). The shell is edited in `roadmap-store/page_shell.html` (what the
   generator reads), outside the data markers.
 - `python roadmap-store/roadmap_store.py selftest` runs the tests for all of this on a temporary store with a local bare remote

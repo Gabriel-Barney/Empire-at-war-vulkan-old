@@ -6,7 +6,7 @@
 
 Seed corpus: on the first run (or with --reseed) small files are taken from the retail MEGs under ALAMO_FOC_DATA /
 ALAMO_EAW_DATA (tools\\test_env.cmd sets them): XML from config.meg, ALO / ALA from models.meg, DDS / TGA from
-textures.meg, and a few tiny v1 archives written from those XML files for fuzz_meg. Without game data the fuzzers start
+textures.meg, FXO from shaders.meg, and a few tiny v1 archives written from those XML files for fuzz_meg. Without game data the fuzzers start
 from an empty corpus (they still work, just slower). The corpus lives in <tree>/fuzz/corpus/<target>/ and grows across
 runs; crashes, leaks, timeouts and out-of-memory inputs land in <tree>/fuzz/artifacts/<target>/ (crash-*, leak-*,
 timeout-*, oom-*). Reproduce one with: <tree>\\bin\\<target>.exe <artifact file>.
@@ -21,7 +21,7 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-TARGETS = ["fuzz_xml", "fuzz_meg", "fuzz_alo", "fuzz_ala", "fuzz_texture"]
+TARGETS = ["fuzz_xml", "fuzz_meg", "fuzz_alo", "fuzz_ala", "fuzz_texture", "fuzz_fx2"]
 
 # target -> (meg file name, globs, max seed bytes, max seed count)
 SEEDS = {
@@ -29,6 +29,7 @@ SEEDS = {
     "fuzz_alo": ("models.meg", ["*.ALO"], 256 * 1024, 200),
     "fuzz_ala": ("models.meg", ["*.ALA"], 128 * 1024, 200),
     "fuzz_texture": ("textures.meg", ["*.DDS", "*.TGA", "*.BMP"], 64 * 1024, 150),
+    "fuzz_fx2": ("shaders.meg", ["*.FXO"], 128 * 1024, 150),
 }
 
 
