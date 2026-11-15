@@ -38,6 +38,10 @@ section 4.
   the main session, every agent in `.claude/agents/` and every subagent spawned with the `Agent` tool. Limits come from the
   rules (CLAUDE.md, clean-room, determinism, landing, approval of outward or irreversible actions), not from per-agent tool
   lists. Agents carry no `tools:` allowlist (they inherit every session tool); only `reviewer` is limited, to no file edits.
+- **Exception, the retail RE and tracing tools** (ReVa / Ghidra, REA, mcp-windbg, TTD, cdb, Frida; Gabriel, 2026-11-15): clean-room
+  rule, so a worker that writes engine code never runs them or reads their output. ReVa, mcp-windbg and REA belong to the
+  `re-analyst` agent (the MCP servers are registered on it alone); TTD, cdb and Frida are for probe and RE / doc tasks; everyone
+  else asks through the `re-question` skill. TTD recording needs a person to approve the UAC prompt.
 - Wiring: index `docs/TOOLS.md`; toolchain programs by name through `tools\tc.cmd`; a `SessionStart` hook adds the worktree
   junctions (`worktree_tool.py link`); build scripts and read-only commands are pre-approved in `.claude/settings.json`.
 

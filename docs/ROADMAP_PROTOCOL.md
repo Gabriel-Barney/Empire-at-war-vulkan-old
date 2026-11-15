@@ -68,8 +68,8 @@ give every new group an `eta` (a group without one is counted as "without estima
 Status keys (groups and boxes): `next` Do next, `partly` Partly done, `big` Not started, `spec` Spec-blocked,
 `open` Guesses to confirm, `probe` Probe only, `gab` Needs Gabriel, `done` Done, `out` Out of scope, `parked` Parked (`park`).
 Group status follows its tasks (Gabriel, 2026-11-15): every task `done` or `oos` -> `done` (preset and claim dropped, and the box
-set done when it was the box's last open group); some tasks closed and some `todo` -> `partly`, also for a `done` group that gets an
-open task again. A group with no task closed stays `big` / `next`. The hand-set labels `gab`, `spec`, `open`, `probe`, `out` and
+set done when it was the box's last open group); any `todo` task -> `partly`, also when no task is closed yet and for a `done` group
+that gets an open task again (so `big` / `next` only remain on groups with no tasks). The hand-set labels `gab`, `spec`, `open`, `probe`, `out` and
 `parked` are left alone. `roadmap_store.py write` and every editing command apply this to the groups they touch;
 `roadmap_store.py group-status [--apply]` applies it to all groups.
 Presets: `fable`, `xhigh`, `high`, `re2ui`, `sonnet`, `tools`, `gab` (defined in the page, `PRESETS` in `roadmap-store/page_shell.html`).
