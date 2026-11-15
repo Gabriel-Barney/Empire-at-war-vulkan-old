@@ -282,7 +282,7 @@ if(_alamo_sim)
     set_tests_properties(alamo_headless_skirmish_ai_foc_land alamo_headless_skirmish_ai_foc_land_campaign PROPERTIES TIMEOUT 1200)
     # S10 land outcome, t50: the land skirmish played on (0/1/4/16/N workers identical); skipped (exit 0) without ALAMO_FOC_DATA. What it asserts
     # is structure, not a seed's luck (--expect-skirmish-base): both sides start with their pre-built base (skai t08: the 10 base
-    # structures of each slot), the shipped skirmish AI issues orders, shots are fired, 0 Lua errors. Whether the game ends is checked by the _end test below.
+    # structures of each slot), the shipped skirmish AI issues orders, shots are fired, 0 Lua errors. The long runs are the _full tests below.
     # OPT3 t08: the worker-count check (alamo_add_worker_count_check, docs/BUILD.md "Worker-count check"): the 0-worker entry writes
     # the CRC log and checks the base (--expect-skirmish-base), _w1 / _w4 / _w16 / _w<N> compare against it.
     alamo_add_worker_count_check(alamo_headless_skirmish_ai_foc_land_outcome
@@ -356,17 +356,20 @@ if(_alamo_sim)
     # commit sends all four squads to two Secure_Contestable plans and it takes its mineral pad. Seeds 1-6, 30000 ticks: Rebel
     # wins at 28354 (1), 25577 (5), 29480 (6); seeds 2-4 are still fighting. Pinned to seed 5; seeds 1 and 6 are checked too,
     # all at 36000 ticks so the late ends keep a margin.
-    add_test(NAME alamo_headless_skirmish_ai_foc_land_end
-             COMMAND alamo_headless --skirmish-ai foc-land --ticks 36000 --workers 4 --quiet --expect-battle-end --fail-on-lua-errors
-                     --seed 5)
-    set_tests_properties(alamo_headless_skirmish_ai_foc_land_end PROPERTIES TIMEOUT 1800)
-    alamo_label_slow(alamo_headless_skirmish_ai_foc_land_end)
+    # b0422 (2026-11-15, Gabriel: land the rule, drop the battle-end requirement): the pre-placed base structures
+    # (DUMMY_GROUND_STRUCTURE) are out of the player force sums and Find_Nearest (skai t12 rule, three retail traces,
+    # B0418_UTAPAU_AI_RUNS s8). Retail's AI does not finish a passive base in 36000 frames, and AI against AI has no retail
+    # counterpart; with the rule seeds 1-6 are all still fighting at 36000 (0 Lua errors). So these runs no longer need an
+    # end: they play the whole 36000 ticks with 0 Lua errors. Renamed from alamo_headless_skirmish_ai_foc_land_end[_seedN].
+    add_test(NAME alamo_headless_skirmish_ai_foc_land_full
+             COMMAND alamo_headless --skirmish-ai foc-land --ticks 36000 --workers 4 --quiet --fail-on-lua-errors --seed 5)
+    set_tests_properties(alamo_headless_skirmish_ai_foc_land_full PROPERTIES TIMEOUT 1800)
+    alamo_label_slow(alamo_headless_skirmish_ai_foc_land_full)
     foreach(_seed 1 6)
-      add_test(NAME alamo_headless_skirmish_ai_foc_land_end_seed${_seed}
-               COMMAND alamo_headless --skirmish-ai foc-land --ticks 36000 --workers 4 --quiet --expect-battle-end --fail-on-lua-errors
-                       --seed ${_seed})
-      set_tests_properties(alamo_headless_skirmish_ai_foc_land_end_seed${_seed} PROPERTIES TIMEOUT 1800)
-      alamo_label_slow(alamo_headless_skirmish_ai_foc_land_end_seed${_seed})
+      add_test(NAME alamo_headless_skirmish_ai_foc_land_full_seed${_seed}
+               COMMAND alamo_headless --skirmish-ai foc-land --ticks 36000 --workers 4 --quiet --fail-on-lua-errors --seed ${_seed})
+      set_tests_properties(alamo_headless_skirmish_ai_foc_land_full_seed${_seed} PROPERTIES TIMEOUT 1800)
+      alamo_label_slow(alamo_headless_skirmish_ai_foc_land_full_seed${_seed})
     endforeach()
     # bkm2 t05 (b0047): FoC land skirmish Empire against Underworld (both AI), so the land movement runs with Empire walkers
     # and Underworld droids. Measured 2026-11-12 (MSVC, 4 workers, 30000 ticks, map _MP_LAND_UTAPAU), seeds 1-9: seed 2 ends
@@ -394,10 +397,13 @@ if(_alamo_sim)
     # b0421 (2026-11-14): tactical categories resolve in descending budget weight (Commit 0x6c8710), so the Empire's first
     # commit takes its mineral pad. Seeds 1-10, 70000 ticks, 0 Lua errors in all: Underworld wins at 47180 (1), 53654 (3),
     # 39597 (8), 37408 (9), 47406 (10); seeds 2 4 5 6 7 are still fighting. Pinned to seeds 8 and 9.
+    # b0422 (2026-11-15): with the base structures out of the force sums (see alamo_headless_skirmish_ai_foc_land_full above)
+    # seeds 1 / 3 / 8 / 9 are all still fighting at 70000 (0 Lua errors, about 165 s each). No end required any more: the
+    # whole 70000 ticks with 0 Lua errors.
     foreach(_seed 8 9)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_empire_underworld_seed${_seed}
                COMMAND alamo_headless --skirmish-ai foc-land --ai Empire,Underworld --ticks 70000 --workers 4 --quiet
-                       --expect-battle-end --fail-on-lua-errors --seed ${_seed})
+                       --fail-on-lua-errors --seed ${_seed})
       set_tests_properties(alamo_headless_skirmish_ai_foc_land_empire_underworld_seed${_seed} PROPERTIES TIMEOUT 1800)
       alamo_label_slow(alamo_headless_skirmish_ai_foc_land_empire_underworld_seed${_seed})
     endforeach()

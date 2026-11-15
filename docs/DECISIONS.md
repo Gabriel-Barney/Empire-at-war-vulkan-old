@@ -156,3 +156,15 @@ game's threads win over normal-priority processes, which halved the loaded frame
 count"). Scheduling only: nothing reads it, results and CRCs are unchanged. `alamo_headless` and the test exes stay at normal priority.
 The job system's own scheduling changes of the same day (parallel_for waits on chunks, not helpers; background-job cap) are documented in
 `engine/jobs/include/alamo/jobs/job_system.hpp`.
+
+## AI-vs-AI land skirmish tests do not need a battle end (Gabriel, 2026-11-15)
+
+Gabriel, 2026-11-15, on b0422: "Yes, land the rule". The skai t12 rule leaves the pre-placed base structures
+(DUMMY_GROUND_STRUCTURE) out of the player force sums and `Find_Nearest`. Three retail traces show it (SKAI_T06_LAND_RUNS
+§7, B0418_UTAPAU_AI_RUNS §8), and with it the land skirmish AI techs at retail's pace. It is on `dev` and the land AI-vs-AI
+tests no longer require a winner. Why: retail's AI does not finish an idle base within 36000 frames; a FoC skirmish has no
+AI-vs-AI mode, so no retail reference says such a game ends; and with the rule no Rebel-vs-Empire (seeds 1-6, 36000) or
+Empire-vs-Underworld (seeds 1 / 3 / 8 / 9, 70000) game ends. `alamo_headless_skirmish_ai_foc_land_full[_seedN]` (renamed
+from `..._end`) and `..._empire_underworld_seedN` now play their whole run with 0 Lua errors. This replaces the part of
+skai's exit test that asked for foc-land seeds 2 and 4 to end within 30000 ticks. Tests that are checked against retail
+outcomes (the space station, the campaign-rules land invasion) keep `--expect-battle-end`.

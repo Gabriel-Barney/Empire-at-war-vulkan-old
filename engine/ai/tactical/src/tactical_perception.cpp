@@ -457,6 +457,13 @@ struct Eval {
             for (const int32_t id : p.grid().player_objects(q)) {
                 const PerceptionObject* o = w.object(id);
                 if (!o) continue;
+                // skai t12 / b0422 [H, three retail traces: SKAI_T06_LAND_RUNS s7, B0418_UTAPAU_AI_RUNS s8]: the
+                // pre-placed base structures (DUMMY_GROUND_STRUCTURE: Command Center / palace, Barracks, factories,
+                // turbolaser towers) are not in the per-player list this sum walks, although their types list UNIT_AI.
+                // Rebel AI: FriendlyForceUnnormalized > 400 false with 290 of units beside 2100 of base structures,
+                // > 3000 false with 1010 of units beside 2950. Empire AI: Skirmish_Upgrade_Tech 0 with a refinery and 252
+                // of units beside 2200 of base, 1 once a refinery and a turret were built on pads (pad-built ones count).
+                if (o->dummy_ground_structure) continue;
                 const PerceptionType* t = w.type_of(*o);
                 if (!t || (t->category & cat) == 0) continue;
                 sum += o->combat_power * (1.0f - (1.0f - o->health) * a);

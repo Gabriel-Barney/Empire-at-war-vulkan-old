@@ -127,3 +127,48 @@ AI against AI after the fix (test seeds re-pinned in `engine/apps/CMakeLists.txt
 wins seeds 1 / 5 / 6 (28354 / 25577 / 29480) and seeds 2-4 are still fighting; Empire vs Underworld, 70000 ticks,
 Underworld wins seeds 1 / 3 / 8 / 9 / 10 (37408-53654) and five seeds are still fighting, 0 Lua errors; space station seeds
 1-7 end (Rebel, 9402-13446), seed 8 reaches the cap.
+
+## 8. b0422: why the port finishes an idle base sooner (2026-11-15; the force-sum rule landed, the plan length is open)
+
+Retail runs of §5, port at dev 052cb39a, Empire AI against an idle Underworld, seed 1 unless stated.
+
+**Tech climbs twice as fast in the port.** `Skirmish_Upgrade_Tech` (the Tech_Upgrade_Emergency desire) needs
+`Variable_Self.FriendlyForceUnnormalized > 400` for tech 2 and `> 3000` for tech 3. The port's sum is 2452 at the start:
+252 of units and 2200 of pre-placed base structures. So tech 2 is ordered at 2588, when the first refinery stands, and tech 3
+at 8678; Phase III dark troopers, Lancets, an AT-AT and Mara Jade are all ordered at 11846. Retail's PSTART records carry the
+equation values (`nsf` = Non_Structure_Force_Unnormalized, `ut` = Skirmish_Upgrade_Tech): `ut` = 0 at 1815 and 2184 with
+a refinery and `nsf` 252, and turns 1 at 2904, after a refinery (2565) and a turret (2875) were built on pads. Tech 2 is ordered
+at 5874 and tech 3 at 15066; the same unit types come at 18097-27838. This is the skai t12 "narrow rule" (SKAI_T06_LAND_RUNS
+§7): objects with DUMMY_GROUND_STRUCTURE (the pre-placed base) are not in the per-player list the force sums walk. It now
+rests on three retail traces, two Rebel AI and this Empire AI. Commit 0d1e12c0 had it and 96bea816 reverted it.
+
+**The rule is on dev again (2026-11-15, Gabriel: "land the rule"; DECISIONS.md "AI-vs-AI land skirmish tests do not need a
+battle end")**, idle-human Utapau, 36000 ticks, seeds 1-3:
+
+| | Retail | Port dev | Port + rule |
+|---|---|---|---|
+| Empire AI tech 2 / tech 3 ordered | 5874 / 15066 | 2588 / 8678 | 6791-6797 / 12311-13214 |
+| Empire AI end | none | wins 20069-24474 | wins 18429-19629 |
+| Underworld AI end | none | wins 1 of 3 | none in 3 of 3 |
+| Rebel AI end | none | wins (SKAI_T06) | wins 1 of 3 (33956) |
+
+AI against AI with the rule: Rebel vs Empire seeds 1-6 and Empire vs Underworld seeds 1 / 3 / 8 / 9 all still fighting at the
+limit (36000 / 70000), with 0 Lua errors. That is why skai held the rule back: those tests needed an end. They now play
+the whole run with 0 Lua errors (`alamo_headless_skirmish_ai_foc_land_full*`, renamed from `..._end*`, and
+`..._empire_underworld_seed*`).
+
+**Still different with the rule: how long a Destroy_Structure plan holds its units.**
+- Retail starts a Destroy_Structure plan at almost every commit after 19000. Most end by ScriptExit about 400 frames after
+  they start, and its AT-STs never stay on one structure. The vehicle factory took until 23255 to die with 50 Empire objects
+  within 1500 of the Underworld base.
+- In the port with the rule, plan 14 (4847-9896) keeps its AT-STs on the vehicle factory for 5000 frames, at 400-700
+  damage per 600 frames.
+- Not causes: drop placement (retail and port both drop pool units at 2305,4465 and nearby) and the Attack_Move threat
+  argument (unused without useZonePath, B0173_RE_ANSWERS Q2).
+- Open: what ends retail's land object Attack_Move block that soon (AI_TACTICAL §7.7.3 lists the ways).
+- Without the rule the port's Destroy_Structure solves mostly fail Contrast or Plan after 14597 (236 of 245), and
+  Burn_Units_Land's whole-army Attack_Move kills the base.
+
+**Not a difference:** after a structure dies, the port's trace lists a full-health object of the same type at the same
+place. It is the death clone (S9 t04: the dying type itself), not a rebuilt structure, and the AI does not target it.
+Retail's reader does not list death clones.

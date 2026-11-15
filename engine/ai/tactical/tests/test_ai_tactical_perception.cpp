@@ -491,18 +491,19 @@ static void test_tokens() {
     // ---- Game ----
     CHECK(f.val("Game.Age") == static_cast<double>(30.0f * (1.0f / 30.0f)));
     CHECK(f.val("Game.IsCampaignGame") == 0.0);
-    // Game.ForceUnnormalized: every player's grid objects, health-scaled: 100+10+0+300+100+10+50 = 570
-    CHECK(f.val("Game.ForceUnnormalized") == 570.0);
+    // Game.ForceUnnormalized: every player's grid objects, health-scaled: 100+10+0+300+100+10 = 520 (b0422 / skai t12: the
+    // DUMMY_GROUND_STRUCTURE barracks 17 (50) is not in the per-player grid lists)
+    CHECK(f.val("Game.ForceUnnormalized") == 520.0);
     CHECK(f.val("Game.ForceUnnormalized {Parameter_Category = GameObjectCategoryType[Vehicle]}") == 200.0);
     // ---- Player (omniscient grid lists) ----
-    // Empire friendly = Empire (100+0+300+50) + Underworld ally (100) = 550; enemy = Rebel 10 + neutral-relation player 3 (10)
-    CHECK(f.val("Variable_Self.FriendlyForceUnnormalized") == 550.0);
+    // Empire friendly = Empire (100+0+300, the barracks left out) + Underworld ally (100) = 500; enemy = Rebel 10 + neutral-relation player 3 (10)
+    CHECK(f.val("Variable_Self.FriendlyForceUnnormalized") == 500.0);
     CHECK(f.val("Variable_Self.EnemyForceUnnormalized") == 20.0);
-    CHECK(f.val("Variable_Self.ForceUnnormalized") == 550.0);
-    CHECK(f.val("Variable_Self.LandedForceUnnormalized") == 550.0);
+    CHECK(f.val("Variable_Self.ForceUnnormalized") == 500.0);
+    CHECK(f.val("Variable_Self.LandedForceUnnormalized") == 500.0);
     CHECK(f.val("Variable_Enemy.FriendlyForceUnnormalized") == 10.0);
     CHECK(f.val("Variable_Self.FriendlyForceUnnormalized {Parameter_Category = GameObjectCategoryType[Vehicle | LandHero]}") == 500.0);
-    CHECK(near_eq(f.val("Variable_Self.FriendlyForce"), 550.0 / 570.0, 1e-12));
+    CHECK(near_eq(f.val("Variable_Self.FriendlyForce"), 500.0 / 520.0, 1e-12));
     CHECK(f.val("Variable_Self.ForceNBTD") == 1.0);  // same sum twice (vanilla quirk)
     CHECK(f.val("Variable_Self.ForceUnnormalized", 3) == 0.0);  // neutral faction: nothing
     CHECK(f.val("Variable_Self.IsFaction {Parameter_Faction = \"EMPIRE\"}") == 1.0);
@@ -555,9 +556,9 @@ static void test_tokens() {
     // ---- unit targets ----
     CHECK(f.val("Variable_Target.Health", 0, f.h_tank) == 1.0);
     CHECK(f.val("Variable_Target.ForceUnnormalized", 0, f.h_tank) == 100.0);
-    CHECK(near_eq(f.val("Variable_Target.Force", 0, f.h_tank), 100.0 / 570.0, 1e-12));
+    CHECK(near_eq(f.val("Variable_Target.Force", 0, f.h_tank), 100.0 / 520.0, 1e-12));
     CHECK(f.val("Variable_Target.Force {Parameter_Category = GameObjectCategoryType[Infantry]}", 0, f.h_tank) == 0.0);
-    CHECK(near_eq(f.val("Variable_Target.ForceNBTP", 0, f.h_tank), 100.0 / 550.0, 1e-12));
+    CHECK(near_eq(f.val("Variable_Target.ForceNBTP", 0, f.h_tank), 100.0 / 500.0, 1e-12));
     CHECK(near_eq(f.val("Variable_Target.ForceNBTD", 1, f.h_trooper), 1.0, 1e-12));  // 10 / rebel friendly 10
     CHECK(f.val("Variable_Target.IsBuildPad", 0, f.h_pad) == 1.0);
     CHECK(f.val("Variable_Target.HasBuiltObject", 0, f.h_pad) == 1.0);
@@ -594,7 +595,7 @@ static void test_tokens() {
     const double enemy_zone = f.val("Variable_Target.EnemyForceUnnormalized", 0, f.h_zone2);
     CHECK(enemy_zone > 0.0);
     CHECK(f.val("Variable_Target.EnemyForceUnnormalized", 0, f.h_outside) == 0.0);
-    CHECK(near_eq(f.val("Variable_Target.EnemyForce", 0, f.h_zone2), enemy_zone <= 570.0 ? enemy_zone / 570.0 : 1.0, 1e-9));
+    CHECK(near_eq(f.val("Variable_Target.EnemyForce", 0, f.h_zone2), enemy_zone <= 520.0 ? enemy_zone / 520.0 : 1.0, 1e-9));
     const double tank_loc_enemy = f.val("Variable_Target.Location.EnemyForceUnnormalized", 0, f.h_tank);
     CHECK(tank_loc_enemy == enemy_zone);  // unit location = its current zone
     CHECK(f.val("Variable_Target.Location.EnemyForceUnnormalized", 0, f.h_hero) == 0.0);  // outside every zone
@@ -1319,16 +1320,16 @@ static void test_a1g_readings() {
             return f.val("Variable_Self.FriendlyForceUnnormalized");
         };
         f.w.skirmish_or_mp = true;  // (a) skirmish: the landing object itself, its type's power (Empire_Tank 100)
-        CHECK(friendly() == 650.0);
+        CHECK(friendly() == 600.0);
         f.w.skirmish_or_mp = false;  // (b) campaign, parent found: the parent's type (Star_Destroyer 2000)
-        CHECK(friendly() == 2550.0);
+        CHECK(friendly() == 2500.0);
         f.w.objects.back().parent_object = 501;  // (c) campaign, parent not found: skipped
-        CHECK(friendly() == 550.0);
+        CHECK(friendly() == 500.0);
         f.w.objects.back().parent_object = -1;  // no parent id: the object itself
-        CHECK(friendly() == 650.0);
+        CHECK(friendly() == 600.0);
         f.w.objects.back().parent_object = 500;
         f.w.parent_rep_type = nullptr;  // no resolver: never found
-        CHECK(friendly() == 550.0);
+        CHECK(friendly() == 500.0);
         f.p.cache().clear();
         CHECK(f.val("Variable_Self.FriendlyForceUnnormalized {Parameter_Category = GameObjectCategoryType[Infantry]}") == 0.0);
         // (d) a1h t08 (§32.2): a reinforcement's landing object carries its company type (transport +0x48, the host's
@@ -1336,12 +1337,12 @@ static void test_a1g_readings() {
         f.w.parent_rep_type = [](int32_t id) { return id == 500 ? int32_t{kStarDestroyer} : -1; };
         f.w.objects.back().rep_type = kStarDestroyer;
         f.w.objects.back().parent_object = -1;
-        CHECK(friendly() == 2550.0);  // campaign, no parent id: the carried type (Star_Destroyer 2000)
+        CHECK(friendly() == 2500.0);  // campaign, no parent id: the carried type (Star_Destroyer 2000)
         f.w.skirmish_or_mp = true;
         f.w.objects.back().parent_object = 500;
-        CHECK(friendly() == 2550.0);  // skirmish: the landing object's own carried type, the parent is not read
+        CHECK(friendly() == 2500.0);  // skirmish: the landing object's own carried type, the parent is not read
         f.w.objects.back().rep_type = -1;  // a cinematic transport (none carried): its own type
-        CHECK(friendly() == 650.0);
+        CHECK(friendly() == 600.0);
     }
     {  // §30.4: IsValidBombingTarget fails inside any active base shield (host callback, 3-D); IsInside*Shield stay 0
         Fixture f;

@@ -147,6 +147,11 @@ struct Db {
                    "<Team Name=\"Team_Box\"><Behavior>TEAM, UNIT_AI</Behavior></Team>\n"
                    "<GroundCompany Name=\"Squad_Co\"><CategoryMask>Air</CategoryMask>"
                    "</GroundCompany>\n"
+                   // b0422 (test_find_nearest_base): a pre-placed base structure and a pad-built one.
+                   "<SpecialStructure Name=\"Base_Factory\"><CategoryMask>Structure</CategoryMask><Property_Flags>InBase</Property_Flags>"
+                   "<Behavior>DUMMY_GROUND_STRUCTURE, UNIT_AI</Behavior></SpecialStructure>\n"
+                   "<GroundStructure Name=\"Pad_Turret\"><CategoryMask>Structure</CategoryMask><Property_Flags>InBase</Property_Flags>"
+                   "<Behavior>UNIT_AI</Behavior></GroundStructure>\n"
                    "</R>");
         dp = std::make_unique<DirectoryProvider>(root.string());
         ok = raw.load(*dp) && types.build(raw);
@@ -421,6 +426,22 @@ static std::string ids_of(LuaVm& vm, const std::string& args) {
     const std::string err = run(vm, code);
     return err.empty() ? gstr(vm, "ids") : "error: " + err;
 }
+// b0422 / skai t12 (B0418_UTAPAU_AI_RUNS s8, SKAI_T06_LAND_RUNS s7): Find_Nearest skips DUMMY_GROUND_STRUCTURE objects (the
+// pre-placed base is not in the perception grid list it walks), so BurnUnitsLand's Find_Nearest(tf, "InBase", ...) finds a
+// pad-built structure but never the base, and the plain enemy search passes over the base to the next unit.
+static void test_find_nearest_base(const Db& db) {
+    Scene s(db);
+    LuaVm& vm = *s.vm;
+    make(s.store, db.t("Base_Factory"), 2, {1, 0, 0});
+    CHECK(run(vm, "b1 = Find_Nearest(t1, p1, false).Get_Object_ID() "     // the tank @5, not the base @1
+                  "b2 = tostring(Find_Nearest(t1, 'InBase', p1, false)) "  // only the base is InBase: nothing
+                  "b3 = tostring(Find_Nearest(t1, 'Structure'))") == "");
+    CHECK(gnum(vm, "b1") == 3.0 && gstr(vm, "b2") == "nil" && gstr(vm, "b3") == "nil");
+    const objects::ObjectHandle turret = make(s.store, db.t("Pad_Turret"), 2, {8, 0, 0});
+    CHECK(run(vm, "b4 = Find_Nearest(t1, 'InBase', p1, false).Get_Object_ID()") == "");
+    CHECK(gnum(vm, "b4") == static_cast<double>(s.store.id(turret)));
+}
+
 static void test_find_filters(const Db& db) {
     objects::IdCounter ids;
     objects::ObjectStore st(objects::ModeKind::Land, objects::StoreKind::Primary, db.types, &ids);
@@ -1232,6 +1253,7 @@ int main() {
     if (!db.ok) return 1;
     test_registry_rows();
     test_find(db);
+    test_find_nearest_base(db);
     test_find_filters(db);
     test_queries(db);
     test_stage3(db);

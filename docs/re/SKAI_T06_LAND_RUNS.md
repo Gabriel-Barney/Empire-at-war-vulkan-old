@@ -259,7 +259,10 @@ the factions swapped (you = Rebel idle, slot 2 = Empire Medium AI), read for whe
 the first commit (frame ~390).
 
 The rule is held back because it turns the AI-against-AI end tests red (`alamo_headless_skirmish_ai_foc_land_end*`),
-which the skai exit test names. The two halves of that exit test pull apart: retail's AI does not finish a passive
+which the skai exit test names. **Landed 2026-11-15 (b0422, Gabriel: "land the rule"):** a third retail trace (Empire AI,
+B0418_UTAPAU_AI_RUNS §8) agrees, and the AI-against-AI tests no longer need an end (DECISIONS.md, "AI-vs-AI land
+skirmish tests do not need a battle end"). The Empire AI's first commit at frame 371 is two Secure_Contestable plans
+with the rule too (after b0421), as in retail. The two halves of that exit test pull apart: retail's AI does not finish a passive
 base in 36000 frames, and the port's AI-against-AI games ended only because Burn_Units_Land found base structures.
 
 **Kit for a run 3:** `make_plan_hooks.py` adds to every land plan's PSTART record the values of six shipped equations
