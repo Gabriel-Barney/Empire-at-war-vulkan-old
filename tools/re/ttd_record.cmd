@@ -6,8 +6,9 @@ rem Default process: StarWarsG.exe (start retail first, then run this). Traces (
 rem toolchain\re\ttd-traces. TTD needs administrator rights: this script asks for them with one Windows
 rem prompt (UAC) and opens a second console where TTD runs; stop the recording with Ctrl+C there or by
 rem closing the game. Replay: tools\re\windbg_mcp.cmd, or cdb.exe -z <trace>.run.
-rem Licence: TTD shows Microsoft's licence terms until they are accepted. Passing -accepteula accepts them;
-rem that is Gabriel's decision, so no script or agent passes it by itself.
+rem Licence: accepted for this Windows user on 2026-11-15 at Gabriel's request (TTD.exe -accepteula; stored as
+rem HKCU\Software\Microsoft\TTD EULASigned=1). On a new machine or user TTD shows the terms again; -accepteula
+rem accepts them, and that stays Gabriel's call.
 setlocal EnableDelayedExpansion
 set "RE_ROOT=%~dp0..\..\toolchain\re"
 set "TTD=%RE_ROOT%\ttd-1.11.611.0\TTD.exe"
