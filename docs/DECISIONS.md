@@ -70,6 +70,17 @@ section 4.
 - Wiring: index `docs/TOOLS.md`; toolchain programs by name through `tools\tc.cmd`; a `SessionStart` hook adds the worktree
   junctions (`worktree_tool.py link`); build scripts and read-only commands are pre-approved in `.claude/settings.json`.
 
+## Agent model and effort (Gabriel, 2026-11-15)
+- **Each agent in `.claude/agents/` pins `model:` and `effort:` in its frontmatter**, matched to what a mistake by it costs:
+  `lane` opus / high (whole groups under the determinism rules; `xhigh` is too costly for long runs), `re-analyst` opus / xhigh
+  (its `docs/re/` specs drive tier-1 parity; short output), `reviewer` opus / high (determinism and threading bugs are subtle;
+  short reviews), `integrator` sonnet / high (mostly builds, wiring and roadmap writes; move to opus if its merge or golden calls
+  go wrong), `engine-module` sonnet / medium (narrow one-folder side tasks). This writes the 2026-11-13 preference for Opus over
+  Fable for lanes into the agent files.
+- An agent started with the `Agent` tool takes these from its definition; don't pass `model` or `effort` in the call (an override
+  wins over the frontmatter). Not covered: the main session / `run-group` coordinator (the app's model choice) and lanes started
+  as sessions with `start_session`, which don't read agent files.
+
 ## Command Center launcher (Gabriel, 2026-11-13)
 - **The Command Center launcher (Rust, egui) is part of this repository as `launcher/`**, imported from the stand-alone `E:\Projects\Command Center` folder (no git history there). It starts `alamo_game.exe` with profiles, mods, Workshop items, saves, graphics options and diagnostics.
 - It lives beside `engine/`, not in it: rule 2 (no third-party dependencies in `engine/` without asking) covers the engine only, and the launcher is a separate program that never links engine code. Its crates are pinned by `launcher/Cargo.lock` (direct: eframe / egui / egui-wgpu / wgpu, image, serde / serde_json, encoding_rs, sha2, trash, rfd, winreg, chrono, similar, dirs, ureq with native-tls, windows, raw-window-handle). A new direct crate needs Gabriel's OK, like an engine dependency.
