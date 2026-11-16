@@ -104,7 +104,8 @@ end-screen byte `0x140a61e08` and the GUI hint / pop-up / movie fields every ~4 
 | E_NOMSG (no `Game_Message`) | 30 | 114 | the control-changed text only: 48 -> 4.89 s |
 | E_NOFLEET (no fleet anywhere) | 30 | 276 (13.6 s; the frame rate fell to ~8 fps in its last 2 s) | the same two texts, the movie not restarted between them |
 | E_SDBYSS (Star Destroyer at Byss) | 30 | 357 | as E_BASE |
-| E_CURPLANET (meant: cursor on Tatooine) | 30 | 357 | as E_BASE; **not a valid cursor test**: Tatooine was off screen, the cursor stayed on empty space |
+| E_CURPLANET, first run (meant: cursor on Tatooine) | 30 | 357 | as E_BASE; **not a valid cursor test**: Tatooine was off screen, the cursor stayed on empty space |
+| E_CURPLANET, valid rerun `20261116-031753` (cursor resting on Tatooine, pop-up open from gf 377 to 2518, then moved to empty space) | 30 | 1838 | none while the pop-up was open; after it closed: the 81-char `Game_Message` 8.18 s, "Tatooine: Control changed from Neutral to Empire. Credit bonus: 900" (67, queued at the gift 63 s earlier) 6.78 s, "... from Empire to Neutral" 4.88 s; end screen 4.9 s after the last one began |
 | D_BASE (58-char `Game_Message`) | 30 | 309 | Game_Message 58 -> 5.88 s; "Abregado-Rae: Control changed from Neutral to Rebellion" (55, as read from the time) -> 5.58 s |
 | D_LONGMSG (150-char `Game_Message`) | 30 | 581 | Game_Message 150 -> 15.08 s; control-changed text -> 5.57 s |
 
@@ -133,8 +134,18 @@ Why q6 t25's D looked unheld: its 1 s heartbeats stopped within 32 frames of the
 reporting heartbeats until the end screen (D_BASE: the last heartbeat 315 frames after the give), so the t25 D timing
 was a heartbeat artefact and is superseded by these readings.
 
-Open: whether a resting encyclopedia pop-up holds the end screen the same way (static read section 3, [M]); E_CURPLANET
-is to be rerun with the camera centred on Tatooine by the script.
+7. **A resting encyclopedia pop-up holds it too, and holds the hint queue back** (E_CURPLANET rerun, cursor on the
+   Tatooine sphere): while the pop-up flag (`+0x26b3`) was set, `Light_Loop` stayed open (Bink handle non-zero) with no
+   hint text up, for 69 s; no queued text started in that time, because a text is shown only when no Bink is open
+   (static read section 3). When the cursor left the planet the pop-up closed and the queued texts ran one after
+   another, then the end screen came. So the end screen waits for (pop-up closed) + (the queued texts' times).
+8. **Queue order:** the script's `Game_Message`, queued last, was shown first, before two older "control changed" texts
+   (one queued 63 s earlier): `Game_Message` inserts at the front, the game's own texts at the back (static read section
+   3, now seen).
+
+The kit's script cannot place the camera itself: `Point_Camera_At(FindPlanet("Tatooine"))` in the galactic story
+thread, even inside `pcall`, stopped that thread in retail (run `20261116-031206`: no record after it). The valid rerun
+panned by hand (Down arrow 1 s).
 
 ## Not settled (before the probe; kept for the record, items 1 to 4 are answered above)
 
@@ -172,8 +183,9 @@ Heartbeats every 0.25 s instead of 1 s would make each of these readings exact t
 - E's extra ~4 s is presentation (a gate held by a GUI movie or a message box), not simulation
   state: it should not be added as a rule constant.
 - Since the probe (section "Probe answer") the rule to model is: the galactic HUD shows queued advisor hint texts
-  (`Game_Message`, the "planet changed hands" text, hints) one after another, each for (characters ×
-  `Advisor_Hint_Duration`) seconds of real time, and keeps the `Light_Loop` movie open while a text is up; the campaign
+  (`Game_Message` at the front, the "planet changed hands" text and hints at the back) one after another, each for
+  (characters × `Advisor_Hint_Duration`) seconds of real time, only while no movie is open, and keeps the `Light_Loop`
+  movie open while a text or an encyclopedia pop-up is up; the campaign
   end screen waits until no text is up, no movie is open and no message box is up. The port has no advisor hint text
   queue yet (`Game_Message` is only recorded in the presentation log), so its end screen comes 30 frames after the
   declare in every case: q6 t34 plus the hint queue task filed from t33.
