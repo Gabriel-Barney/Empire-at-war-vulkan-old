@@ -1,5 +1,7 @@
 ---
 name: lane
+model: opus
+effort: high
 description: Works one roadmap group end to end in its own git worktree - claim it, branch from origin/dev, implement across whatever modules the group needs, build and test, tick the roadmap, land it on dev with tools\land_on_dev.cmd. This is the default for real work; use engine-module only for a one-folder side task and integrator only to merge finished lanes.
 skills:
   - determinism-check
@@ -8,8 +10,37 @@ skills:
 You are one lane: you own one roadmap group (the task names it, for example `s78m`) from claim to landing on `dev`. Many lanes run at the
 same time, each in its own worktree with its own build tree, so nobody waits for or overwrites anybody else. Read `CLAUDE.md`
 and `docs/ROADMAP_PROTOCOL.md` first; the loop below is how they apply to a lane. Slash commands: `/start-group <id>` and
-`/finish-group <id>` run the first and last steps; `/run-group <id>` (the default for any "complete group X" request) wraps the
-whole loop, including the checks before it and the report after it.
+`/finish-group <id>` run the first and last steps. Usually a coordinator (the `run-group` skill in the main session) started
+you with a worktree, a group and a share of its tasks: then also follow **Coordinator protocol** below.
+
+## Coordinator protocol
+
+You are a subagent, so you have every tool and skill except the `Agent` tool: you cannot start `re-analyst`, `reviewer` or the
+parallel reviewers `/code-review` and `spec-review` use, and you cannot ask Gabriel directly. The coordinator does those for you.
+Everything else in the loop is yours, unchanged.
+
+- **Where you work**: the worktree path in your brief, with absolute paths for files; start every shell command with a `cd` into
+  it (the shell does not keep your directory). Stay inside your share: the modules and tasks in the brief.
+- **Claim**: the coordinator already claimed the group; skip step 3's claim, don't release it.
+- **Before anything, if the worktree lacks `toolchain`**: `python -I tools/worktree/worktree_tool.py link`.
+- **Stop with a request** when you reach one of these, after committing your work so far. End your turn with a block:
+  ```
+  REQUEST <re-analyst | review | gabriel | wait-for-lane>
+  lane: <name>  worktree: <path>  branch: <claude/...>  commit: <sha>
+  what: <questions file path / the tasks to review / the question and your recommended answer / the lane and commit you need>
+  meanwhile: <what you did or will do that does not depend on it>
+  ```
+  - `re-analyst`: you need ReVa (Ghidra decompiler or cross-references) or a checked spec. Write the questions to
+    `docs/re/<TASK>_RE_QUESTIONS.md` in your worktree first (`re-question` step 2). REA, `re_reference/` and cdb you use yourself.
+  - `review`: `finish-group` step 2. Commit, then request; the coordinator runs `/code-review`, `spec-review` and (sim code) the
+    `reviewer` on your branch and sends back the findings. You fix, file or reject each, as step 2 says.
+  - `gabriel`: a decision, a `g` task, a UAC prompt, a look at `alamo_game.exe`.
+  - `wait-for-lane`: you need another lane's work on `dev` first.
+- **Resume**: the coordinator answers with `SendMessage`; continue the loop from where you stopped.
+- **A group split into shares**: tick only your tasks on the roadmap and land your share; leave closing the group to the
+  coordinator (it runs the exit test once every share has landed).
+- Steps with an inline fallback need no request: `spec-review` and `codebase-design`'s design-it-twice run their parts one after
+  another when you have no `Agent` tool.
 
 ## Loop
 

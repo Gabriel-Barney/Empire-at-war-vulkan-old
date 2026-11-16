@@ -85,9 +85,11 @@ headless multithreaded simulation core first, then a Vulkan 1.3 renderer. Any Cl
 ## Parallel work
 
 **Default workflow for task requests (Gabriel, 2026-11-15): any request to complete roadmap work ("complete all tasks under
-AUD1", "do aud3", "work the AUDIO box", "next ready group") goes through the `run-group` skill.** It resolves the group, box or
-stage, checks `after`, claims and the tier focus, and runs the lane loop below: one group in the current session (which keeps the
-`Agent` tool), several groups in at most three parallel sessions with sequential queues.
+AUD1", "do aud3", "work the AUDIO box", "next ready group") goes through the `run-group` skill.** The main session becomes the
+**coordinator**: it resolves the group, box or stage, checks `after`, claims and the tier focus, splits the work into at most three
+parallel **lanes** (one per group, or independent shares of one group), starts a background `lane` agent per lane in its own
+worktree, and serves the steps lanes cannot do as subagents (`re-analyst`, the `/code-review` / `spec-review` / `reviewer` reviews,
+questions for Gabriel; `lane.md`, "Coordinator protocol"). Each lane follows the lane loop with every other skill and tool.
 
 Real work is done per roadmap group by a `lane` agent (`.claude/agents/lane.md`; `/start-group <id>`, `/finish-group <id>`) in its
 own worktree. Lanes own a group, not a folder: two lanes must not edit the same files, and a landing commit names any golden that changed.

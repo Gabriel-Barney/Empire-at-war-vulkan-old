@@ -1,5 +1,7 @@
 ---
 name: engine-module
+model: sonnet
+effort: medium
 description: Narrow one-folder helper - implements or extends one engine/<module> library (core excluded) when the task is confined to that module and needs no roadmap or PR work. For real roadmap work use the lane agent (own worktree, whole group, PR); this is the older module-split model.
 skills:
   - determinism-check

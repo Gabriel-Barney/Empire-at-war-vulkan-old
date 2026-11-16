@@ -39,8 +39,12 @@ section 4.
   rules (CLAUDE.md, clean-room, determinism, landing, approval of outward or irreversible actions), not from per-agent tool
   lists. Agents carry no `tools:` allowlist (they inherit every session tool); only `reviewer` is limited, to no file edits.
 - **`run-group` is the default workflow for task requests** (Gabriel, 2026-11-15): "complete all tasks under AUD1", a box, a stage
-  or "next ready group" goes through `.claude/skills/run-group`: resolve and check the groups, then the lane loop; one group in the
-  current session, several in at most three parallel sessions with sequential queues.
+  or "next ready group" goes through `.claude/skills/run-group`. The main session is the **coordinator** (Gabriel, same day): it
+  plans up to three parallel lanes (one per group, or independent shares of one group's tasks), creates their worktrees, claims,
+  and starts a background `lane` agent per lane; lanes follow the lane loop with every skill and tool. Subagents cannot start
+  agents, so lanes stop with a `REQUEST` for `re-analyst`, the reviews and questions for Gabriel, and the coordinator serves it
+  and resumes them (`lane.md`, "Coordinator protocol"). For a small group, or on request, the coordinator works it itself; on
+  request, lanes can be full sessions instead of agents.
 - **Retail RE access for every worker** (Gabriel, 2026-11-15, later the same day; replaces the earlier exception that kept the RE
   tools from engine-writing workers): every worker may use REA, WinDbg / cdb, Frida, TTD replays and the decompiled output in
   `re_reference/` directly, also while writing engine code. **Guard kept:** decompiled or disassembled code is never copied into
@@ -65,6 +69,22 @@ section 4.
   `PHASE4.md`, terms to a `docs/GLOSSARY.md` created on the first term).
 - Wiring: index `docs/TOOLS.md`; toolchain programs by name through `tools\tc.cmd`; a `SessionStart` hook adds the worktree
   junctions (`worktree_tool.py link`); build scripts and read-only commands are pre-approved in `.claude/settings.json`.
+
+## Agent model and effort (Gabriel, 2026-11-15)
+- **Each agent in `.claude/agents/` pins `model:` and `effort:` in its frontmatter**, matched to what a mistake by it costs:
+  `lane` opus / high (whole groups under the determinism rules; `xhigh` is too costly for long runs), `re-analyst` opus / xhigh
+  (its `docs/re/` specs drive tier-1 parity; short output), `reviewer` opus / high (determinism and threading bugs are subtle;
+  short reviews), `integrator` sonnet / high (mostly builds, wiring and roadmap writes; move to opus if its merge or golden calls
+  go wrong), `engine-module` sonnet / medium (narrow one-folder side tasks). This writes the 2026-11-13 preference for Opus over
+  Fable for lanes into the agent files.
+- An agent started with the `Agent` tool takes these from its definition; don't pass `model` or `effort` in the call (an override
+  wins over the frontmatter). Not covered: the main session / `run-group` coordinator (the app's model choice) and lanes started
+  as sessions with `start_session`, which don't read agent files.
+- **Exception for lanes: the group's roadmap preset picks the model, effort capped at the lane's `high`** (Gabriel, 2026-11-15,
+  choosing between the presets and the pinned lane effort). `xhigh` / `high` / `fable` / no preset: the lane default, Opus / high,
+  nothing passed; `sonnet`: Sonnet / high; `tools`: Sonnet / medium; `gab`: Opus / medium; `re2ui`: RE share Opus / high, UI share
+  a Sonnet / high lane. The `run-group` coordinator passes these as `model` / `effort` on the `Agent` call (table in
+  `.claude/skills/run-group/SKILL.md` step 4), and applies the same mapping to lanes run as sessions.
 
 ## Command Center launcher (Gabriel, 2026-11-13)
 - **The Command Center launcher (Rust, egui) is part of this repository as `launcher/`**, imported from the stand-alone `E:\Projects\Command Center` folder (no git history there). It starts `alamo_game.exe` with profiles, mods, Workshop items, saves, graphics options and diagnostics.

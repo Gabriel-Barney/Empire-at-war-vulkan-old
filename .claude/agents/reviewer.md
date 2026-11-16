@@ -1,5 +1,7 @@
 ---
 name: reviewer
+model: opus
+effort: high
 description: Independent read-only review of engine code for correctness, determinism (lockstep safety), thread safety and MSVC /W4 portability. Use before marking a roadmap item done; a lane agent can call it on its own diff before the PR (it never edits, so the lane stays the owner).
 disallowedTools: Write, Edit, NotebookEdit
 skills:
