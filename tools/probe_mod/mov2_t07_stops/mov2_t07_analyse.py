@@ -137,7 +137,10 @@ def stop_stats(rows, g0, g_end, F, goal, start):
         return None
     vmax = max(r['v'] or 0 for r in w)
     rest = rest_frame(w, g0)
-    i_peak = max(i for i, r in enumerate(w) if (r['v'] or 0) >= vmax - 1e-5 and (rest is None or r['gf'] < rest))
+    peaks = [i for i, r in enumerate(w) if (r['v'] or 0) >= vmax - 1e-5 and (rest is None or r['gf'] < rest)]
+    if vmax <= 1e-4 or not peaks:
+        return None   # no motion in the tracked frames (the tracker found the ids after the unit had stopped)
+    i_peak = max(peaks)
     brake = w[i_peak]['gf']
     br = window(w, brake, rest if rest is not None else g_end)
     end = br[-1]
@@ -244,10 +247,17 @@ def report(run_dir, out=None):
                 if g0 is None or not mover or start is None:
                     lines.append('  %s: no NOW frame or no track' % mv)
                     continue
+                lag = mover[0]['gf'] - g0
+                if lag > 0 and mover[0]['gf'] <= g_end:
+                    lines.append('  %s: the track starts %d frames after the order (tracker found the ids late)' % (mv, lag))
+                elif mover[0]['gf'] > g_end:
+                    lines.append('  %s: not tracked (the track starts %d frames after the order, after this move)' % (
+                        mv, lag))
+                    continue
                 if mv == 'stop':
                     s = stop_stats(mover, g0, g_end, F, goal, start)
                     if s is None:
-                        lines.append('  stop: too few track lines')
+                        lines.append('  stop: too few track lines, or no motion in them (tracked too late)')
                         continue
                     mem = ''
                     if members and s['rest_gf']:
@@ -290,6 +300,10 @@ def report(run_dir, out=None):
             g0 = o['g']
             spec = next((t for t in cfg['sq']['trials'] if t['name'] == name), None)
             rows = {key[1]: v for key, v in objs.items()}
+            lag = min((v[0]['gf'] for v in rows.values() if v), default=g0) - g0
+            if lag > 0:
+                lines.append('  the track starts %d frames after the order (tracker found the ids late; holds before '
+                             'that are not seen)' % lag)
             for role in ('a', 'b'):
                 r = rows.get(role)
                 if not r or spec is None:
