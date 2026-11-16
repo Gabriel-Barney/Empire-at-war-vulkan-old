@@ -557,7 +557,9 @@ void GoalSystem::resolve(int32_t category, int64_t now) {
         }
     std::vector<uint8_t> taken(pool.size(), 0);
     auto is_kept_or_active = [&](const Goal& g) {
-        if (g.state != GoalState::Proposed && !cfg_.reaccept_old_candidates) return true;
+        // An old candidate whose plan already ended (plan_ended: running -1) is not taken again: retail's plan end releases
+        // the goal (BKG3_RE_ANSWERS Q5.1), so it only waits here for its release at Finalize.
+        if (g.state != GoalState::Proposed && (!cfg_.reaccept_old_candidates || g.running < 0)) return true;
         if (cfg_.like_sets) {
             // bkg3 (BKG3_RE_ANSWERS Q4) [H]: 0x721a50 on this Resolve's kept set, then on the active set (this category's
             // goals were moved out of it above, so that reads the other categories).

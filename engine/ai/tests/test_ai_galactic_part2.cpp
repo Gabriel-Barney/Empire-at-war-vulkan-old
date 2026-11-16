@@ -2094,3 +2094,109 @@ void test_prefer_ground_auto_land() {
         CHECK(landed == expect && logged == expect && detach_first == expect);
     }
 }
+
+// ================================================================ skai t17: Resolve re-accepts an old candidate
+//
+// AI_GALACTIC §1.6 steps 3-6 / BKG3_RE_ANSWERS Q4 [H]: an incumbent whose effective desire falls below the best new
+// proposal and that is replaceable becomes an old candidate; it is neither in this Resolve's kept set nor active, so
+// the greedy phase may accept it again (GoalSystemConfig::reaccept_old_candidates, set by the tactical space AI) and its
+// plan keeps running. Off: it is released (its plan ended by the goal system). An old candidate whose plan already ended
+// (plan_ended) is never taken again: it is released at Finalize.
+namespace {
+const char* kOldCandidateGoals = R"(<Goals>
+  <Old_Goal><AIGoalApplicationFlags>Friendly</AIGoalApplicationFlags><GameMode>Galactic</GameMode>
+    <Category>Offensive</Category><Reachability>Any</Reachability><Time_Limit>0</Time_Limit></Old_Goal>
+  <New_Goal><AIGoalApplicationFlags>Friendly</AIGoalApplicationFlags><GameMode>Galactic</GameMode>
+    <Category>Offensive</Category><Reachability>Any</Reachability><Time_Limit>0</Time_Limit></New_Goal>
+</Goals>)";
+
+struct OldCandidateHooks final : GoalModeHooks {
+    double old_desire = 10.0, new_desire = 0.0;
+    int32_t next_plan = 1, ended_by_goal_system = 0;
+    uint32_t target_count() override { return 1; }
+    bool applies(int32_t, uint32_t) override { return true; }
+    bool blocked(uint32_t, int32_t) override { return false; }
+    bool evaluate(const std::string& f, int32_t, double& out) override {
+        out = f == "FOld" ? old_desire : new_desire;
+        return true;
+    }
+    bool accept(Goal& g) override {
+        g.plan = 0;
+        g.pp_valid = true;
+        return true;
+    }
+    bool plan_activatable(Goal& g) override { return g.state == GoalState::Proposed || g.running >= 0; }
+    bool plan_invalid(const Goal& g) override { return g.running < 0; }
+    bool replaceable(const Goal&) override { return true; }
+    void refresh_plan(Goal&) override {}
+    bool uses_budget() override { return false; }
+    bool can_fund(const Goal&) override { return true; }
+    float category_credits(int32_t) override { return 1.0f; }
+    void budget_add(Goal&) override {}
+    void budget_release(Goal&) override {}
+    void budget_weights() override {}
+    std::vector<int32_t> category_order() override { return {}; }
+    void queue_production(Goal&) override {}
+    void instantiate(Goal& g) override { g.running = next_plan++; }
+    void end_plan(Goal&, bool by_goal_system) override { ended_by_goal_system += by_goal_system ? 1 : 0; }
+    void drop_potential_plan(Goal&) override {}
+    void suspend_reservations(Goal&) override {}
+    float elapsed_eta(const Goal& g) override { return g.eta; }
+    int32_t quota_players() override { return 1; }
+};
+
+struct OldCandidateOutcome {
+    bool old_active = false, new_active = false;
+    int32_t old_running = -1, ended_by_goal_system = 0;
+};
+
+OldCandidateOutcome old_candidate_run(bool reaccept, bool plan_already_ended) {
+    AiDefinitions defs;
+    defs.add_goals(kOldCandidateGoals, "g.xml");
+    defs.link();
+    const uint32_t old_type = defs.find_goal("Old_Goal"), new_type = defs.find_goal("New_Goal");
+    CHECK(old_type != kAiNone && new_type != kAiNone);
+    OldCandidateHooks hooks;
+    LearningSystem learning;
+    SimRng rng(1);
+    GoalSystem gs;
+    GoalSystemConfig cfg;
+    cfg.extra_goals_per_category = 2;
+    cfg.reaccept_old_candidates = reaccept;
+    gs.init(defs, {{old_type, "FOld"}, {new_type, "FNew"}}, &hooks, &learning, nullptr, &rng, cfg);
+    int64_t t = 1;
+    for (; gs.commits() < 1 && t < 200; ++t) gs.service(t);  // commit 1: only Old_Goal has desire
+    int32_t first_plan = -1;
+    for (const auto& cat : gs.active())
+        for (const Goal& g : cat)
+            if (g.type == old_type) first_plan = g.running;
+    CHECK(first_plan >= 0);
+    if (plan_already_ended) gs.plan_ended(first_plan);
+    hooks.new_desire = 50.0;  // commit 2: New_Goal outranks it
+    for (; gs.commits() < 2 && t < 400; ++t) gs.service(t);
+    CHECK(gs.commits() == 2);
+    OldCandidateOutcome o;
+    for (const auto& cat : gs.active())
+        for (const Goal& g : cat) {
+            if (g.type == old_type) {
+                o.old_active = true;
+                o.old_running = g.running;
+            }
+            if (g.type == new_type) o.new_active = true;
+        }
+    o.ended_by_goal_system = hooks.ended_by_goal_system;
+    return o;
+}
+}  // namespace
+
+void test_goal_old_candidate_reaccept() {
+    const OldCandidateOutcome off = old_candidate_run(false, false);
+    const OldCandidateOutcome on = old_candidate_run(true, false);
+    const OldCandidateOutcome ended = old_candidate_run(true, true);
+    std::printf("old candidate: off -> %s (%d plan ends), on -> %s plan %d (%d plan ends), plan ended -> %s\n",
+                off.old_active ? "kept" : "released", off.ended_by_goal_system, on.old_active ? "kept" : "released", on.old_running,
+                on.ended_by_goal_system, ended.old_active ? "kept" : "released");
+    CHECK(!off.old_active && off.new_active && off.ended_by_goal_system == 1);
+    CHECK(on.old_active && on.new_active && on.old_running == 1 && on.ended_by_goal_system == 0);
+    CHECK(!ended.old_active && ended.new_active);
+}

@@ -1268,7 +1268,8 @@ struct PlayerAi final : GoalModeHooks, ContextModeServices {
     bool plan_activatable(Goal& g) override {
         // skai t17 (BKG3_RE_ANSWERS Q4.3: 0x6c4a50 with PP +0x100 set): an old candidate taken from the pool (its plan is
         // running) gets the validity test 0x6c45e0 only, no re-solve. Reached only with reaccept_old_candidates.
-        if (g.running >= 0) {
+        if (g.state != GoalState::Proposed) {
+            if (g.running < 0) return false;  // its plan ended: never re-accepted (GoalSystem's kept-or-active test too)
             const auto it = w->plans.find(g.running);
             return it != w->plans.end() && !it->second.ended && !w->pp_stolen(g.pp_handle);
         }
