@@ -1,7 +1,8 @@
 # skai t22: skirmish start stations missing from the threat grid, and what ends a Space_Scout goal (RE, 2026-11-16) [H unless tagged]
 
 Answers `SKAI_T22_RE_QUESTIONS.md` Q1.1-Q1.4 and Q2.1-Q2.3; Part 3 (second pass, same day) corrects Q1.1 on the live
-lists; Part 4 answers `SKAI_T22_TIE_RE_QUESTIONS.md` (which cell wins the Space_Scout desire tie). Read with ReVa
+lists; Part 4 answers `SKAI_T22_TIE_RE_QUESTIONS.md` (which cell wins the Space_Scout desire tie); Part 5 answers
+`SKAI_T22_HANDOVER_RE_QUESTIONS.md` (a tactical free-store unit stays on the store after its hand-over). Read with ReVa
 (Ghidra, `/StarWarsG.exe`, FoC Steam x64, image base 0x140000000) and REA, plus the shipped XML / Lua (`extracted/foc_data_text.zip`). Addresses are RVAs. [H] = read in the
 binary or the shipped data; [M] = one inferred link; [L] = not checked. No decompiled code is reproduced.
 
@@ -445,3 +446,186 @@ of `SKAI_T22_GEONOSIS_SCOUT.md` is this, not a random tie-break.
 - A port that computes the desire in exact or double arithmetic never sees the one-float-step differences of 4.2 [M]; they
   did not matter at the first two commits.
 - Tactical_Untargeted has A = 0 in a space skirmish, so its goals come from the weighted random phase only (4.4).
+
+---
+
+## Part 5. How long a reserved unit stays on the tactical free store (SKAI_T22_HANDOVER_RE_QUESTIONS, 2026-11-16) [H unless tagged]
+
+Read with ReVa and the `re_reference` decompile: free-store vtables (Space 0x8b6a38, Land 0x8b6b68, Galactic 0x8b63f8),
+store constructors 0x4d22b0 (base), 0x690420 (Space), 0x690980 (Land), 0x68eaf0 (Galactic), hand-over test 0x6908f0
+(tactical) and 0x690240 (galactic), free-store service 0x4d5a70, Execution service 0x526590, task hand-over 0x647df0,
+AIBuildTask FSM 0x64aec0 (states 2, 3, 6, 0xb, 0xf, 8), PRODUCTION_END body 0x647ee0, WAIT_FOR_ALL test 0x64c110,
+BUILD_TASK_LIST 0x648980, claim 0x4d2bd0, Add_Force (Space TF vf20 0x6e4e30, Land TF vf20 0x6e9240, base 0x5f9a90),
+Space admission 0x6904b0, Space removal 0x6907d0, Space initial fill 0x6905c0, every caller of the store's removal slot
+(vf+0xa0), plan instantiation 0x6bad60 (from Resolve 0x6c8970), FreeStore Setup A 0x7287a0, validity 0x6c45e0, lock test
+0x39ad40, the context service 0x5f5ab0; shipped `SPACESCOUT.LUA`, `MOVETOLOCATIONRUSH.LUA` (the `Secure_Build_Pad_Space`
+plan) and `PGBASE.LUA` (`BlockOnCommand`, `PumpEvents`).
+
+### Summary
+- **In tactical (land and space) a unit never leaves the free store when a build task receives it.** The store
+  constructor's flag +0x48 is 1 only for the galactic store; Land and Space pass 0. On a hand-over, the service 0x4d5a70
+  gives the unit to the task, lapses the other claims on that entry and empties its claim list, and erases the entry only
+  when +0x48 is set. So in a battle the entry stays, with its reservation (+0x30 = the PotentialPlan), while the unit
+  becomes a task-force member three frames later. Nothing in Add_Force removes it. The unit stays on the store for as long
+  as its plan holds it.
+- **So a running tactical plan's units can be stolen at every commit**, not only in a hand-over window. Commit step 4
+  (0x6c0be0) clears every active plan's reservations. A goal accepted before the victim's goal is re-asserted (an earlier
+  category in budget-weight order, or the same category while the victim is an old candidate) re-solves through Setup A,
+  which sees the victim's task-force member as a free entry and may select it. The accept reserves it for the thief, the
+  victim's re-test then fails in 0x6c45e0, and the victim is released. This is retail runs 1 and 3 at mf 134. No step
+  holds a unit on the store for 60+ frames, because no step ever takes it off.
+- **Question 1.** Land and Space share vf22 (+0xb0) = 0x6908f0. It answers "wait" only for a unit with a special weapon
+  or lobbing superweapon whose recharge timer has not run out. It answers "give" when the entry's reservation is the
+  task's PotentialPlan, otherwise "lapse". It has no movement, order, lock, hyperspace, idle or position test (the
+  galactic 0x690240's "at a planet and not in transit" has no tactical counterpart).
+- **Question 2.** With the Planning and Execution services on the same frames, the task gets the unit 0-2 frames after
+  the commit (the first Planning frame), the unit joins the task force 3 frames later, the task ends 6 frames after the
+  hand-over, and the plan's Lua thread passes `BlockOnCommand(Produce_Force())` 12 frames after its first run.
+- **Question 3.** Nothing is special about the skirmish start squadrons: the store holds the squadron container (TEAM),
+  never its fighters, and it is handed over at the first service like any reserved unit.
+
+### 5.1 The tactical hand-over test, vf22 0x6908f0 (question 1) [H]
+SpaceFreeStoreClass (vtable 0x8b6a38) and LandFreeStoreClass (0x8b6b68) both hold 0x6908f0 in slot 22 (+0xb0); the
+galactic store holds 0x690240. The service calls it with the store, the unit, the claiming task and the entry's value
+part (node +0x18, so the reservation is node +0x30). In order:
+1. If the unit has the SPECIAL_WEAPON behaviour (obj +0x361 ≠ −1) or LOBBING_SUPERWEAPON (obj +0x369 ≠ −1):
+   - no timer record at obj +0x158 → **2** (the claim lapses);
+   - the timer's progress (0x4914e0: frames elapsed since its start, +8, over its span to its end, +0xc, clamped to
+     0..1) below 1.0 → **1** (keep waiting; retried at the next service).
+
+   The same weapon-ready test is Setup A's clause B, and `Fire_Special_Weapon` (0x6eb7f0) reads the same timer [H code;
+   M: "recharge timer" as the meaning of obj +0x158].
+2. The entry's reservation is not the task's PotentialPlan (task +0xa0 task force → +0xf0 plan → +0x88 goal → +0x68) →
+   **2**. An unreserved entry (+0x30 = 0) lapses too.
+3. Otherwise **0** (give).
+
+So for an ordinary ship or squadron reserved by the task's own plan, the answer is "give" at the first service after the
+claim. Moving, holding orders, `Lock_Current_Orders`, a hyperspace arrival, being idle or not: none of these is read here.
+
+### 5.2 What a tactical hand-over does to the free-store entry [H]
+- The base constructor 0x4d22b0 stores its third argument at store +0x48. The galactic constructor 0x68eaf0 passes 1;
+  Space 0x690420 and Land 0x690980 pass 0.
+- The service 0x4d5a70 walks the entries in list order and each entry's claimants in claim order, skipping a claimant
+  that has ended (task +0xa8), already holds a unit (+0x68) or has issued production (0x6492e0). On "give" it calls
+  0x647df0 (task unit = this unit, listen to its death signal 0x10, refund a charge if any, next state FREESTORE_ALLOC (3)
+  in tactical), lapses (0x649070) every other claimant of the entry, and then:
+  - **+0x48 set (galactic):** unsubscribes the store from the unit's signals 0x10 / 0x1a, unlinks and frees the node
+    (A2L_T01 Q7.4);
+  - **+0x48 clear (land, space):** only releases and empties the claim list and stops walking this entry's claimants.
+    The node, its object and its reservation +0x30 stay.
+- After the hand-over the task runs FREESTORE_ALLOC → PRODUCTION_END → `Add_Force` (§5.3). The space task force's
+  Add_Force 0x6e4e30 (and the land one, 0x6e9240) subscribes the task force to the unit's signals and calls the base
+  0x5f9a90, which appends the unit to the task-force member list (TF +0x78). None of them calls the store's removal slot.
+- The store's removal slot (vf20: 0x4d5000 for land and galactic, 0x6907d0 for space = 0x4d5000 plus an unsubscribe of
+  signal 0x16) is called only by: the store's own signal handler (unit destroyed 0x10, owner changed 0x1a), the
+  production-complete handler 0x6498f0 (a produced unit for a task with a destination), the land Reinforce status
+  0x6a1440, the spawn statuses 0x722e80 / 0x723ac0 and the galactic spawn 0x6a2520. The Produce_Force hand-over is not
+  among them.
+- The PotentialPlan's unit list (PP +0x108) keeps the unit (0x6c27d0 is not on the tactical path: A2M_T03 Q3, SKAI_T15
+  §3.1 item 4). So at every later commit the unit is a store entry that its plan reserves, exactly like a unit that has
+  not been handed over yet.
+
+Consequences of these rules [H rules; M where tagged]:
+- `On_Unit_Service` skips task-force members because their entry is reserved (+0x30 ≠ 0), not because they are off the
+  store.
+- `Is_Object_On_Free_Store` is true for them and `Get_Object_Count` counts them (map membership, A1_READINGS §28.5). No
+  shipped script calls either.
+- When a task force releases a unit (`Release_Unit`, `Release_Forces`, plan end), 0x6c27d0 finds it still on the store:
+  it clears +0x30 only if this plan holds it, and drops the unit from the plan's list. There is no re-admission and no
+  `On_Unit_Added` (BusyTacticalFreeStore's is empty anyway).
+
+### 5.3 Timeline from the accept to the task force (question 2) [H unless tagged]
+Frame order inside the tactical context (0x5f5ab0): Perception, Goal, Planning, Execution, Learning, each when due.
+Planning and Execution have a 0.1 s interval (3 frames). Both start due at the context's first service, so they run on
+the same frames [M: their initial next-service value was not read; the port's 2-frame accept-to-produce fits]. Let N be
+the commit frame and R the first Planning frame at or after N (R − N = 0, 1 or 2).
+
+| Frame | Step |
+|---|---|
+| N (Goal) | Resolve accepts the goal; 0x6c2d60 reserves its units (+0x30 = PP). At the end of that category's Resolve, 0x6bad60 instantiates the plan at once: pooled script, task forces with one wanted type per selection and no members, coroutines created, plan added to the Planning list. No per-goal delay. |
+| R (Planning) | First resume of `MainForce_Thread`. `Produce_Force()` (0x5fe240) makes one build task per wanted entry and runs each task's FSM at once: WAIT_FOR_CREDITS → BUILD_TASK_LIST (0x648980). Tactical with `AllowFreeStoreUnits`: 0x4d2bd0 makes the task a claimant of every entry of its type (no reservation test) → PRODUCTION_QUEUED (2), uncharged; no entry of the type → PRODUCTION_FAILED (7). `BlockOnCommand` then yields in its first `PumpEvents`. |
+| R (Execution, same frame) | Free-store service: the entry reserved by this task's PP answers 0 (§5.1), so the task gets the unit (state 3 pending); its claims on entries reserved by other plans, or unreserved, lapse. The entry stays (§5.2). Then the task list: PRODUCTION_QUEUED's update does nothing in tactical; FREESTORE_ALLOC's enter moves straight on to PRODUCTION_END (6), whose work runs only on update. |
+| R+3 (Execution) | PRODUCTION_END update (0x647ee0): `Add_Force`, so the unit is a task-force member (and still a store entry). Then PATHING_DEST (0xb) enter: tactical with no destination → WAIT_FOR_ALL (0xf). |
+| R+6 (Execution) | WAIT_FOR_ALL update: every task of this task force still in the Execution list is in 0xf (0x64c110) → PRODUCTION_FINISHED (8) → 0x64ad00: task ended, no re-admission (Add_Force happened). |
+| R+3, R+6 (Planning) | The thread resumes and yields again (`BlockOnCommand` checks `IsFinished` only after a `PumpEvents`, and at R+6 Planning runs before the task ends). |
+| R+9 (Planning) | `IsFinished` is true (every task ended, 0x6c6720); the closing `PumpEvents` yields. |
+| R+12 (Planning) | `BlockOnCommand` returns. `SpaceScout.lua` then sets itself not removable, runs `QuickReinforce` and `Move_To`. |
+
+- **Shortest:** unit given to the task in the commit frame, task-force member 3 frames after the commit, Lua past
+  Produce_Force 12 frames after it. **Usual:** add 0-2 frames for the commit's phase. The port's "produce at 71 for an
+  accept at 69" matches the hand-over time.
+- **What can hold a task for 60+ frames:** only vf22's weapon-timer wait (a special-weapon or lobbing-superweapon unit).
+  A late thread start is not possible (instantiation is synchronous and Planning runs every 3 frames), and movement is
+  never waited for in tactical. None of this changes how long the unit stays on the store: in tactical that is always
+  the plan's whole life.
+
+### 5.4 The steal at the next commit (runs 1 and 3 at mf 134) [H rules; M application]
+Rules (A1_READINGS §28.6, A2M_T03 Q4, SKAI_T15 §2.2; Setup A re-read here):
+1. Commit step 4 (0x6c0be0) clears the reservations of every active goal's units, task-force members included.
+2. Categories resolve in budget-weight order: Map_Control (`Secure_Build_Pad_Space`) before Tactical_Targeted
+   (`Space_Scout`) (Part 4.4). Inside a category, a kept goal is re-asserted (0x6c2d60) when it is classified; a new
+   accept re-solves (0x6c4a50 → 0x6c3da0, solve counter ≥ 1).
+3. Setup A 0x7287a0 in that re-solve takes any store entry with +0x30 = 0 that passes: health ≥
+   `Health_Low_Percent_Threshold`; clause A (for a plan without `AllowEngagedUnits`, such as `MoveToLocationRush.lua`: a
+   TEAM whose locomotor pack obj +0xa8 has a dogfight cell, +0x1c4 ≠ −1, is skipped); clause B (the weapon timer of §5.1);
+   not garrisoned (obj +0x210), not in limbo (+0x3a7), not in a hero clash (+0x3b4), not movement-locked (0x39ad40: lock
+   count, or a Divert / unload-exit path flag; a plain `Move_To` does not lock); type not INDIGENOUS; no occupied build
+   pad. Task-force membership is not tested.
+4. The accept reserves the chosen units for the thief. When the victim's goal is re-tested later in the same commit,
+   0x6c45e0 finds a unit of its list on the store with +0x30 ≠ 0 and ≠ its own PP: invalid, so it is released (budget
+   release, plan end with `Release_Forces(1.0)`, goal release; SKAI_T15 §2.2, §4), unless its plan definition has the
+   keep-despite-invalid flag (+0xa8). `Set_As_Goal_System_Removable(false)` does not protect against this; it only keeps
+   a goal out of the old-candidate path.
+5. The victim's `Release_Forces` takes the unit out of its task force, and 0x6c27d0 leaves the thief's reservation alone.
+   The thief's plan was instantiated at the end of Map_Control's Resolve, so its `Produce_Force` runs at the next
+   Planning frame and its claim is honoured at that frame's Execution (§5.3).
+
+Applied to the runs [M]: at mf 67 the first pad (Map_Control, accepted first) reserved one start squadron and the scout
+the other. At mf 134 step 4 cleared both. Map_Control re-asserted the kept first pad, then accepted a second pad (obj:98)
+whose re-solve found the scout's squadron with +0x30 = 0 (the scout's category had not run yet) and took it.
+Tactical_Targeted's re-test of the scout then failed in 0x6c45e0 (`retest_leave` 0; with `IgnoreTarget` the validity part
+alone decides). In run 2 no second pad was accepted at 134, so nothing took the squadron and the scout lived to 934. The
+same can happen at any later commit while the scout runs, which fits retail's shorter scout lives (median 464 frames
+against the port's 909).
+
+### 5.5 The start squadrons (question 3) [H unless tagged]
+- Space admission 0x6904b0 admits an object of the store's player that is not a squadron member (type +0x29) or a company
+  member (type +0x2a), and either has SPECIAL_WEAPON, or has a non-dummy type, behaviour 0x13 or TEAM (0x16) and a
+  locomotor; its type must not be DUMMY_ORBITAL_STRUCTURE (0x60) or DUMMY_STAR_BASE (0x5c), it must not have behaviour
+  0x2c (+0x35e), and its parent (if any) must have nothing at +0xf8. So the store holds the X-wing **squadron
+  container**, never its fighters, and build tasks match the squadron type.
+- Objects that exist when the store starts are admitted by the Space initial fill 0x6905c0 (every object of the player,
+  through the same admission) [H code; M: its caller was not read]; objects created later come through the GOM add hook
+  (AI_TACTICAL §5.1). The start forces (0x2a4fc0) are on the store before the first commit (Part 4.5).
+- The tactical hand-over has no transit or position test (§5.1), and no tactical "just placed" state delays it. A start
+  squadron reserved by a plan is handed over at the first service after its task's claim and, like every tactical unit,
+  stays on the store afterwards.
+
+### 5.6 Corrections to earlier docs
+- SKAI_T15_PLAN_RETEST §3.1 item 3 ("the store node is erased") and §5 row 1 ("Another PP's solve taking task-force
+  units: Out") hold for the galactic store only. In land and space the node stays, so task-force members are Setup A
+  candidates whenever their reservation is suspended, and a steal is also a way for a land plan to end at a commit.
+- A1_READINGS §28.1: 0x6907d0 is the **Space** removal override (base 0x4d5000 plus an unsubscribe of signal 0x16); land
+  and galactic use 0x4d5000. §28.6 "the task force takes it off the store (Produce_Force / Collect)" holds only for the
+  galactic store.
+- AI_TACTICAL §5.2 ("or taken by a task force: erase from the map"): a Produce_Force hand-over does not erase the entry.
+- A2L_T01 Q7.4 and A2M_T03 Q3 already tie the erase to the galactic +0x48 = 1; they stand.
+
+### 5.7 For the port
+For "a scout accepted with a pad at commit N loses its unit to a pad accepted at commit N+1" as in retail runs 1 and 3,
+and not when no second pad is accepted:
+1. **A tactical hand-over keeps the unit on the free store.** When a build task receives a reserved free-store unit
+   (Produce_Force, land and space), keep its store entry with its reservation and clear only the entry's claims. The
+   unit joins the task force one Execution service later while staying a store entry. Remove a tactical entry only on
+   death, owner change, and the spawn / reinforcement / produced-with-destination paths of §5.2.
+2. **Keep the reservation life cycle on those entries:** every commit suspends all active plans' reservations first and
+   re-asserts each kept goal's when its category classifies it. The accept re-solve's Setup A sees task-force members
+   whose reservation is suspended as free units, with the exclusions of §5.4 item 3 and no task-force-membership test.
+3. **The stolen check** (0x6c45e0) covers task-force members: a listed unit that is on the store and reserved by another
+   plan makes the plan invalid; release it as in SKAI_T15 §2.2.
+4. **The free-store service skips reserved entries** (task-force members) for `On_Unit_Service`, and hands an entry only
+   to a task of the plan that reserves it (vf22 answers "lapse" otherwise).
+5. **Releasing a unit** (`Release_Unit`, `Release_Forces`, plan end) in tactical only clears this plan's reservation and
+   drops the unit from this plan's list; the entry already exists.
+6. **Timing:** hand-over at the first Execution frame at or after the first thread resume (0-2 frames after the commit),
+   task-force membership 3 frames later. The port's numbers already match; only the removal from the store is wrong.

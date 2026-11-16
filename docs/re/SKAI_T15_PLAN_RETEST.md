@@ -185,7 +185,8 @@ Maintenance order:
    exactly the units its own PP selected.
 3. The hand-over itself, in order:
    - 0x647df0 (task unit = that unit);
-   - the store node is erased;
+   - the store node is erased (**galactic only**; corrected by SKAI_T22_SPACE_AI_RE Part 5.2: land and space keep the
+     node and its reservation, so the unit is a task-force member and a store entry at once);
    - next state FREESTORE_ALLOC (3) in tactical, WAIT_FOR_FREESTORE_ALLOC (0x16) only in galactic.
 4. 0x6c27d0 (erase the selection entry) is called only from TF vf49 0x5ff610 (a unit leaves the task force) and from the
    galactic state 0x16. So after `Produce_Force` the PP still lists every selected unit, with its live pointer.
@@ -279,7 +280,7 @@ record [M: the exact cases the note was written from].
 
 | Candidate | Verdict |
 |---|---|
-| Another PP's solve taking task-force units | **Out.** Free-store candidates come from the free-store map (FreeStore Setup A 0x7287a0), and task-force members are not on it after the hand-over (§3.1). Only units still on the store can be stolen (0x6c45e0). |
+| Another PP's solve taking task-force units | ~~**Out.**~~ **In (corrected by SKAI_T22_SPACE_AI_RE Part 5.4).** Free-store candidates come from the free-store map (FreeStore Setup A 0x7287a0), and in land and space task-force members stay on it after the hand-over. A goal accepted before this goal's reservation is re-asserted in a commit can take one; 0x6c45e0 then fails. |
 | `Collect_All_Free_Units` (BurnUnitsLand, 0x6bfb40) | **Out** for members: it takes only store entries with an object and +0x30 == 0. |
 | MagicPlan / `MagicPlanStealing` | **Out.** HIJACK_UNIT (0x648370) runs only for MagicPlan build tasks, and only galactic magic plans set it (§2.3). |
 | Free-store re-admission | **A consequence, not a cause.** It happens only when a unit leaves a task force (0x5ff610 → 0x6c27d0). |

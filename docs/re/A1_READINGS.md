@@ -577,7 +577,9 @@ For each threat cell (zone: the evaluator's threat-cell set in list order; rect:
 
 - Admission (0x4d2c90) builds every new entry with +0x30 = 0.
 - Removal (0x4d5000, vf+0xa0; galactic override 0x6907d0) erases the whole node. A unit that leaves the store and
-  comes back gets a fresh entry with +0x30 = 0.
+  comes back gets a fresh entry with +0x30 = 0. **Corrected (SKAI_T22_SPACE_AI_RE Part 5.2):** 0x6907d0 is the Space
+  override; land and galactic use 0x4d5000. In land and space a Produce_Force hand-over does not call it: the entry
+  stays (store +0x48 = 0).
 - The debug owner string 0x5259d0 confirms the meaning: +0x30 = 0 prints "Freestore", otherwise "<goal>(<plan>)",
   read through PP+0x20 (the goal).
 
@@ -649,7 +651,9 @@ Lua `Get_Object_Count` (0x4d4690) and `Is_Object_On_Free_Store` (0x4d48c0) do **
 
 Consequences:
 - A unit is reserved from the accept of its goal until one of: the task force takes it off the store
-  (Produce_Force / Collect), it leaves the PP (0x6c27d0), or the goal is released.
+  (Produce_Force / Collect), it leaves the PP (0x6c27d0), or the goal is released. **Galactic only (SKAI_T22_SPACE_AI_RE
+  Part 5):** in land and space Produce_Force leaves the unit on the store, so a task-force member stays reserved, and
+  stealable at each commit, for its plan's whole life.
 - Step 2 suspends every reservation first. So a goal kept in a later category can lose a unit to a goal accepted in
   an earlier category. Its validity check (0x6c45e0) then fails.
 

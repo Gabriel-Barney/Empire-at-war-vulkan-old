@@ -3238,13 +3238,16 @@ void test_attack_move_result() {
 
 // skai t15 (SKAI_T15_PLAN_RETEST §1): TacticalAiConfig::plan_retest runs the running-plan contrast re-test at every commit
 // and on the old-candidate path. A re-test that passes changes nothing: in this world no plan's target gains enemies its
-// selection does not cover within 60 s, so the run with the switch on is the run with it off, frame for frame. The failing
+// selection does not cover within 30 s, so the run with the switch on is the run with it off, frame for frame. The failing
 // case (a plan ended at the next commit) is alamo_headless_skirmish_plan_retest (the headless synthetic skirmish, frame 302).
+// skai t22: 30 s (was 60 s). Since space task-force members stay reserved free-store entries (SKAI_T22_SPACE_AI_RE Part 5),
+// this space world's plans lose units to other accepts (the stolen test, frames 678 / 700, in both runs alike), and a
+// SYNDESTROY re-test fails at frame 943.
 void test_plan_retest() {
     g_plan_retest = true;
-    const RunResult on = run(30 * 60, 1);
+    const RunResult on = run(30 * 30, 1);
     g_plan_retest = false;
-    const RunResult off = run(30 * 60, 1);
+    const RunResult off = run(30 * 30, 1);
     uint32_t failed = 0;
     for (const auto& [k, v] : on.stats)
         if (k.find("running-plan contrast re-test failed") != std::string::npos) failed += v;

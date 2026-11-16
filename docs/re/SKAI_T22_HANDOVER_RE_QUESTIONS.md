@@ -3,6 +3,12 @@
 Asked 2026-11-16 by lane skai-b. Answers go into `docs/re/SKAI_T22_SPACE_AI_RE.md` as Part 5 (behaviour in words, never
 decompiled code).
 
+**Answered 2026-11-16 (re-analyst, `SKAI_T22_SPACE_AI_RE.md` Part 5):** in land and space the hand-over never removes
+the unit from the free store (store +0x48 = 0; only the galactic store erases the entry), so a task-force member stays a
+reserved store entry for its plan's whole life and can be taken at any commit by a goal accepted before its own goal is
+re-asserted. vf22 0x6908f0 (land and space) waits only for an uncharged special weapon; the task gets the unit 0-2 frames
+after the commit and joins the task force 3 frames later; the start squadrons (TEAM containers) are not special.
+
 ## What the unhooked retail runs show
 Three Geonosis runs without the Lua probe (`run_skai_t22_space.cmd`, read-only Frida, 2026-11-16: `20261116-173353`,
 `-173917`, `-174437`; `analysis/space_goals.py`):

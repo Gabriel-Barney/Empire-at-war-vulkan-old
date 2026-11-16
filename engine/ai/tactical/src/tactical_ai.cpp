@@ -344,7 +344,7 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
     bool pp_stolen(int32_t handle);                       // 0x6c45e0
     bool pp_retest_failed(PlayerAi& p, const Goal& g);     // 0x6c47c0 step 2 (skai t15), sticky
     void pp_unit_left(int32_t handle, int32_t unit);      // 0x6c27d0 (the unit's re-admission is the caller's)
-    void release_pp(int32_t handle, int32_t tf_def = -1);
+    void release_pp(int32_t handle, int32_t tf_def = -1, bool free_store = true);
     TacticalFreeStore* pp_store(int32_t handle);
     void reinforce_joined(const TfRec& t, int32_t unit, int32_t type);  // 0x6bf3d0 for a land TF.Reinforce delivery
     // q6 t19: `exclude` = an object left out (the escort list of a unit target, AI_TACTICAL §7.7.1), -1 none.
@@ -1758,7 +1758,21 @@ void TacticalAiWorld::Impl::claim_force(TfRec& t) {
                         ++missing;
                         break;
                     }
-                    p->fs.remove(k.ref);
+                    if (cfg.mode == TacticalMode::Space) {
+                        // skai t22 (SKAI_T22_SPACE_AI_RE Part 5 [H]): a tactical hand-over (free-store service 0x4d5a70,
+                        // vf22 0x6908f0) gives the unit only to the task of the PP that reserved it (else the claim
+                        // lapses), and the space store (+0x48 = 0) keeps the entry and its reservation: the member stays
+                        // a reserved free-store entry for the plan's life, suspended at each Commit start (0x6c0be0) and
+                        // re-asserted when its goal is kept, so a goal accepted earlier in a Commit can take it and
+                        // the plan then fails the stolen test 0x6c45e0. [port] space only: land does the same
+                        // (Part 5), lane skai-a.
+                        if (p->fs.reservation(k.ref) != pit->second.pp) {
+                            ++missing;
+                            break;
+                        }
+                    } else {
+                        p->fs.remove(k.ref);
+                    }
                     t.units.push_back(h);
                     break;
                 }
@@ -1835,7 +1849,8 @@ void TacticalAiWorld::Impl::claim_force(TfRec& t) {
                 }
             }
         }
-        release_pp(pit->second.pp, static_cast<int32_t>(t.def));
+        // skai t22: a space task force's members keep their free-store reservation (Part 5, above).
+        release_pp(pit->second.pp, static_cast<int32_t>(t.def), cfg.mode != TacticalMode::Space);
     }
     decide(t.player, "tf " + t.name + " produce: " + std::to_string(t.units.size()) + " units, " + std::to_string(t.pending.size()) +
                          " pending reinforcements, " + std::to_string(t.reservations.size()) + " pads" +
@@ -2222,14 +2237,14 @@ void TacticalAiWorld::Impl::pp_unit_left(int32_t handle, int32_t unit) {
 
 // Releases the reservations of a PP (all: 0x6c2320 from the destructor; or only those of one task force once its
 // Produce_Force has gathered them).
-void TacticalAiWorld::Impl::release_pp(int32_t handle, int32_t tf_def) {
+void TacticalAiWorld::Impl::release_pp(int32_t handle, int32_t tf_def, bool free_store) {
     const auto it = pps.find(handle);
     if (it == pps.end()) return;
     TacticalFreeStore* fs = pp_store(handle);
     for (const TacticalPpPick& k : it->second.picks) {
         if (tf_def >= 0 && k.tf != tf_def) continue;
         if (k.source == PpSource::FreeStore) {
-            if (fs) fs->unreserve(k.ref, handle);
+            if (fs && free_store) fs->unreserve(k.ref, handle);
             continue;
         }
         std::map<int32_t, int32_t>* m = k.source == PpSource::Reinforcement ? &pool_reserved

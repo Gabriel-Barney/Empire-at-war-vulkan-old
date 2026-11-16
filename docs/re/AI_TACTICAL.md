@@ -184,7 +184,7 @@ Side tables kept by the same admission path [H code, M purpose]:
 - 0x4d3070: visible objects without a build pad that this faction can use (0x372c10) — candidate garrisons [L].
 
 ### 5.2 Removal [H]
-Object destroyed or owner changed (signals), or taken by a task force: erase from the map, decrement the per-type counter, unsubscribe (0x4d5000). Plan end and `Release_Unit` / `Release_Forces` re-admit units (AI_GALACTIC §1.9.4).
+Object destroyed or owner changed (signals), or taken by a task force: erase from the map, decrement the per-type counter, unsubscribe (0x4d5000). Plan end and `Release_Unit` / `Release_Forces` re-admit units (AI_GALACTIC §1.9.4). **Corrected (SKAI_T22_SPACE_AI_RE Part 5.2):** a `Produce_Force` hand-over does not erase the entry in land or space (store +0x48 = 0): the task-force member stays on the store, reserved by its plan, so release only clears the reservation.
 
 ### 5.3 Service cadence and order (0x4d5a70, every Execution service = 3 frames) [H]
 - `now = (float)F × (1/30)` seconds of mode time; `FreeStoreService()` (the script's `main` loop: one call per resume) runs when `now − LastService > ServiceRate`; `On_Unit_Service(unit)` runs for each free-store entry **in the map's list order** whose entry field +0x30 is 0 (+0x30 = the owning PotentialPlan, not the `Lock_Current_Orders` lock; the loop has no lock test: A1_READINGS §28), when `now − LastUnitService > UnitServiceRate`. Both stamps start at 0, so both fire on the first service with now > rate.
