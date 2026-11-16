@@ -1,5 +1,5 @@
 {
- "commit": "89814af5",
+ "commit": "e078e190",
  "scenarios": {
   "geonosis_skirmish": {
    "references": [
@@ -10,7 +10,10 @@
     "20261115-235429-skirmish-vanilla-lua",
     "20261116-002920-skirmish-vanilla-lua",
     "20261116-003415-skirmish-vanilla-lua",
-    "20261116-003910-skirmish-vanilla-lua"
+    "20261116-003910-skirmish-vanilla-lua",
+    "20261116-173353-skirmish-vanilla",
+    "20261116-173917-skirmish-vanilla",
+    "20261116-174437-skirmish-vanilla"
    ],
    "status": {
     "ai.build_count[Empire]": "PASS",
@@ -18,9 +21,9 @@
     "ai.build_mix[Empire]": "PASS",
     "ai.build_mix[Rebel]": "PASS",
     "ai.first_build_frame[Rebel]": "PASS",
-    "combat.damage_taken[Empire]": "FAIL",
-    "combat.damage_taken[Rebel]": "PASS",
-    "combat.first_shot_frame": "FAIL",
+    "combat.damage_taken[Empire]": "PASS",
+    "combat.damage_taken[Rebel]": "FAIL",
+    "combat.first_shot_frame": "PASS",
     "econ.credits_at_1800[Empire]": "PASS",
     "econ.credits_at_1800[Rebel]": "PASS",
     "econ.credits_at_3600[Empire]": "PASS",
@@ -41,8 +44,8 @@
      "PASS": 5
     },
     "damage": {
-     "FAIL": 2,
-     "PASS": 1
+     "FAIL": 1,
+     "PASS": 2
     },
     "income": {
      "PASS": 6
