@@ -238,6 +238,23 @@ from `..._end`) and `..._empire_underworld_seedN` now play their whole run with 
 skai's exit test that asked for foc-land seeds 2 and 4 to end within 30000 ticks. Tests that are checked against retail
 outcomes (the space station, the campaign-rules land invasion) keep `--expect-battle-end`.
 
+## Running-plan re-test on by default (skai t18, Gabriel, 2026-11-16)
+
+Gabriel, 2026-11-16, up-front round of the coordinator run, option (c): turn the running-plan contrast re-test 0x6c47c0 on by
+default (`TacticalAiConfig::plan_retest`, `BattleAiSetup::plan_retest`; retail runs it at every commit, SKAI_T15_PLAN_RETEST)
+and find why foc-land-campaign seeds 1 and 3 stop retreating before keeping outcome seed 1. `alamo_headless --no-plan-retest`
+gives the pre-t18 port; `--plan-retest` is still accepted. Goldens moved with it (named in the landing commit).
+
+Diagnosis (skai-lane2): no port defect found. In both seeds the re-test ends a few early plans (seed 3: a Rebel
+Destroy_Land_Unit at 1301 whose escort list became uncovered), fewer Rebel units die, and by frame ~3600 the Empire's last unit
+is one AT-AT. From then on it is a standoff under the shipped rules: the Rebels (260-290 of non-structure force) are not
+outnumbered 2:1 by the AT-AT (600, health-attenuated), so `Want_To_Retreat_From_Land` stays 0; they never get a contrast that
+covers an AT-AT; and the AT-AT spends 8500+ frames on one Clear_Infantry plan, walking (Max_Speed 0.5) about 4500 units to
+the zone where Rebel scouts were seen. The battle reaches the 14400-frame cap. No retail run of an AI-vs-AI campaign land
+battle exists to compare with, so the fallback (b) applies: the re-test stays on, outcome seed 1 is left out and seed 2 (ends at
+5155) is checked with seed 6 (`alamo_headless_skirmish_ai_foc_land_campaign_outcome_seed{6,2}`). Seeds 2 and 4-12 end with the
+Rebel retreat at 2755-11566 (12 seeds, 20000 ticks).
+
 ## fxc ships in test builds; Claude may drive alamo_game for one run (Gabriel, 2026-11-16)
 
 Gabriel, 2026-11-16, in the up-front round of the "needs Gabriel and probe runs" coordinator run:

@@ -1,7 +1,8 @@
 # ctest driver of alamo_headless_skirmish_plan_retest (skai t15, TacticalAiConfig::plan_retest). -D EXE, LOG.
 # The synthetic skirmish (no game data) with --plan-retest and --check-workers: the running-plan contrast re-test
 # (docs/re/SKAI_T15_PLAN_RETEST.md) ends at least one plan (the decision line and the stat), and worker counts agree.
-# The default run (no --plan-retest) is alamo_headless_skirmish_ai_synthetic against its golden.
+# Since skai t18 the re-test is on by default (--plan-retest changes nothing, --no-plan-retest turns it off), so
+# alamo_headless_skirmish_ai_synthetic checks the same run against its golden; this test keeps the explicit flag.
 file(REMOVE "${LOG}")
 get_filename_component(_dir "${LOG}" DIRECTORY)
 file(MAKE_DIRECTORY "${_dir}")

@@ -36,7 +36,7 @@ struct MapRunOptions {
     // the original) and --pp-latency F (frames from a slice to the apply of its solves, default
     // ai::tactical::kDefaultPpLatency). Not recorded in saves.
     bool pp_streams = true;
-    bool plan_retest = false;  // skai t15: --plan-retest (TacticalAiConfig::plan_retest)
+    bool plan_retest = true;  // skai t15 / t18: --no-plan-retest (TacticalAiConfig::plan_retest)
     int64_t pp_latency = -1;  // < 0: the default
     // q6 t06 (--story, --galactic-ai): --scoring runs the GameConstants Game_Scoring_Script_Name script at the session start
     // (SimHost::set_scoring_script) as the game does. Off by default: its GlobalValue writes enter the frame CRC.

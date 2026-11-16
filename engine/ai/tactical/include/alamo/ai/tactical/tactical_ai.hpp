@@ -382,9 +382,9 @@ struct TacticalAiConfig {
     bool ai_lane = false;
     uint32_t k_ai = kDefaultAiLaneLatency;
     // skai t15 (SKAI_T15_PLAN_RETEST): the running-plan contrast re-test 0x6c47c0 step 2 at every commit (plan_invalid) and
-    // on Resolve_Category's old-candidate path. Retail runs it (the hook runs of 2026-11-16 saw it end 4 of 14 land
-    // Destroy_Structure plans). Off until Gabriel decides: on, foc-land-campaign seeds 1 and 3 no longer end within 20000.
-    bool plan_retest = false;
+    // on Resolve_Category's old-candidate path. Retail runs it (the hook runs of 2026-11-16 saw it end 11 of 73 land
+    // Destroy_Structure plans). On by default since skai t18 (Gabriel, 2026-11-16, DECISIONS.md); off = the pre-t18 port.
+    bool plan_retest = true;
 };
 // sp3: the AI-owned stream's (synced, free) seeds of an AI-lane world (splitmix64 of the session seed and a lane salt).
 std::pair<uint32_t, uint32_t> ai_lane_seeds(uint32_t game_seed);
