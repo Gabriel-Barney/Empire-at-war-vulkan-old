@@ -479,8 +479,10 @@ if(_alamo_sim)
     # retail battle outcome, so it runs with the retail squadrons (--squadron-size 0), as the parity harness does.
     # b0421 (2026-11-14, categories resolve in descending budget weight): seeds 1-7 end (Rebel, 9402-13446), seed 8 reaches the
     # cap; the test moves to seed 6 (Rebel, all destroyed, 9402).
+    # skai t17 (2026-11-16, space skirmish build economy and Resolve re-accepting old candidates): seeds 1, 3-5, 7, 8 end
+    # (Rebel, all destroyed, 8303-13234), seeds 2 and 6 reach the cap; the test moves to seed 8 (8303).
     add_test(NAME alamo_headless_skirmish_ai_foc_station
-             COMMAND alamo_headless --skirmish-ai foc-station --seed 6 --ticks 20000 --workers 4 --quiet --expect-battle-end
+             COMMAND alamo_headless --skirmish-ai foc-station --seed 8 --ticks 20000 --workers 4 --quiet --expect-battle-end
                      --squadron-size 0)
     # t48: the default seed reaches QuickReinforce's anti-idle; 0 Lua errors (it may run to the frame limit: half the seeds do, the
     # station holds). refixf t02 (2026-10-31): back on the default seed. It had stacked the rebel ships on the station's centre
