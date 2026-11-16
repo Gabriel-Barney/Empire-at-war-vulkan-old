@@ -19,6 +19,7 @@ roadmap (`roadmap-store/`). Probes need the original game; Claude runs every kit
 | `fow_regrow/` | fowf t06: fog regrow window and top-edge circle shift | `re/FOG_OF_WAR.md` §9 item 8 |
 | `g1_capture/` | G1 in-game render capture (DXVK, apitrace; RenderDoc is out of scope) | `re/RENDER.md` §7.2 / §7.3 |
 | `g1_hops/` | STRATEGIC_GAPS probe G1: ticks per galactic hop, fleet speed multiplier | `re/STRATEGIC_GAPS.md` §2.1 |
+| `gai3_goalpass/` | gai3 t06 (BKG1 B.8): per-candidate galactic goal evaluations and per-pass E / quota of each AI player in Heart of the Maw (human Empire, up to galactic mode frame 700), traced by a debugger with hardware execute breakpoints at the targeted / global evaluation and the pass Commit (`goalpass_dbg.py`, `run_goalpass.cmd`; vanilla, no mod); not run yet | `re/BKG1_RE_ANSWERS.md` §B |
 | `modc_t09/` | modc t09: play the second workshop mods in `alamo_game` and report what the headless checks cannot see (no mod files) | [`MODS.md`](MODS.md) §9 "Second mod" |
 | `modc_loader/` | modc t13 / t14: Lua script with a UTF-8 BOM, XML element names starting with a digit, campaign without planets (run 2026-11-06) | `re/MODC_LOADER.md` |
 | `oi_abilities/` | OI abilities: `Destroy_When_Stunned_Over_Water` and clip timings | `re/ABILITIES_HARDPOINTS.md` §4.12 / §4.13 |
