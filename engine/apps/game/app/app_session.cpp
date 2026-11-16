@@ -378,6 +378,8 @@ void App::story_ui_step() {
     }
     // STY1 t03: retail raises "click" first thing on every left or right press in the HUD handler (there is no "right_click")
     if (input_.button(ui::Button::Left).pressed || input_.button(ui::Button::Right).pressed) story_ui_.generic("click");
+    // STY1 t03: 0x3a310 raises drag_select after a box selection that caught at least one object
+    if (screen_ == Screen::Battle && input_.button(ui::Button::Left).drag_ended && !orders_.selection().empty()) story_ui_.generic("drag_select");
     if (screen_ == Screen::Battle && story_ui_.battle()) story_ui_.observe_battle(orders_.selection());  // battle-store ids
     if (screen_ == Screen::Galactic) {
         StoryUiView v;

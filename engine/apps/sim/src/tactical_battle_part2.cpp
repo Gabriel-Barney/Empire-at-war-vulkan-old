@@ -308,6 +308,7 @@ cmd::RejectReason TacticalBattle::reinforce_block(int32_t player, objects::Objec
     using R = cmd::RejectReason;
     for (const Participant& p : parts_) {
         if (p.galactic_id != galactic_id || p.owner != player || !p.reserve || p.deployed) continue;
+        if (reinforcements_off(player)) return R::NotAllowed;  // STY1 t06: DISABLE_REINFORCEMENTS
         if (finished_ || !movement_ || retreat_side_ == static_cast<int32_t>(p.side) || arrival_held()) return R::NotAllowed;
         if (space_) {
             const uint32_t f = galaxy_->players()[static_cast<size_t>(player)].faction;
@@ -344,6 +345,7 @@ cmd::RejectReason TacticalBattle::order_reinforce(TacticalMode& mode, uint8_t pl
     for (uint32_t i = 0; i < parts_.size(); ++i) {
         Participant& p = parts_[i];
         if (p.galactic_id != galactic_id || p.owner != static_cast<int32_t>(player) || !p.reserve || p.deployed) continue;
+        if (reinforcements_off(static_cast<int32_t>(player))) return R::NotAllowed;  // STY1 t06: DISABLE_REINFORCEMENTS
         if (retreat_side_ == static_cast<int32_t>(p.side)) return R::NotAllowed;
         if (arrival_held()) return R::NotAllowed;  // story t12: the hyperspace hold (space only)
         if (space_) {  // the unit cap rule (BattleAi::execute_order Reinforce); land: no tactical cap in the S10 battle

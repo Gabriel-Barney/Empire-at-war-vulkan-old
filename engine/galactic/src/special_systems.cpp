@@ -247,7 +247,7 @@ bool GalacticSim::ground_activated_trigger(ObjectHandle unit, PlanetIndex planet
     for (const uint32_t ai : list) {
         if (!store_->alive(unit)) break;  // [inferred] a departed hero tries nothing more
         const SpecialAbilityDef& a = special().abilities[ai];
-        if (a.style != ActivationStyle::GroundActivated || !a.initially_enabled) continue;  // style + "ready" (0x37be10)
+        if (a.style != ActivationStyle::GroundActivated || !ability_ready(a, owner, type)) continue;  // style + "ready" (0x37be10)
         if (!special_accepts(a, unit, owner, planet)) continue;
         if (!bm_allows_special_ability(owner, a.name_crc, a.must_be_bought)) continue;  // 0x39b0b0
         if (accepted) *accepted = true;
@@ -502,6 +502,7 @@ void GalacticSim::set_sabotage_tutorial(int32_t player, bool on) {
 std::vector<uint8_t> GalacticSim::sabotage_options_of(const SpecialAbilityDef& a, PlanetIndex planet, int32_t player) const {
     std::vector<uint8_t> out;
     if (!valid_planet(planet)) return out;
+    if (story_gates_.has(planet, StoryGates::kNoSabotage)) return out;  // RESTRICT_SABOTAGE (STY1)
     const PlanetState& p = planets_[planet];
     bool has_structure = false;
     for (ObjectHandle s : p.structures) has_structure = has_structure || store_->alive(s);
@@ -669,6 +670,7 @@ RejectReason GalacticSim::sabotage_execute_structure(int32_t player, PlanetIndex
     // 0x5b21a0(structure, cost, R, saboteur, planet, story = 0) [H].
     if (!valid_player(player)) return RejectReason::InvalidPlayer;
     if (!valid_planet(planet)) return RejectReason::InvalidTarget;
+    if (story_gates_.has(planet, StoryGates::kNoSabotage)) return RejectReason::NotAllowed;  // RESTRICT_SABOTAGE (STY1)
     if (!store_->alive(saboteur) || store_->owner(saboteur) != player) return RejectReason::InvalidUnit;
     const float c = commands::requantize(kQuantAmount, cost);
     const float r = commands::requantize(kQuantDuration, respawn_seconds);
@@ -1080,6 +1082,7 @@ float GalacticSim::economy_income_for_tag(int32_t player, uint32_t tag) const {
 
 std::span<const CorruptionChoiceDef> GalacticSim::corruption_choices(PlanetIndex planet) const {
     if (!valid_planet(planet)) return {};
+    if (story_gates_.has(planet, StoryGates::kNoCorruption)) return {};  // RESTRICT_CORRUPTION (STY1)
     return special().type(planets_[planet].type).corruption;
 }
 
@@ -1278,7 +1281,7 @@ RejectReason GalacticSim::special_command(int32_t player, const commands::EventD
                 if (!store_->alive(m)) continue;
                 for (uint32_t ai : special_type(m).abilities) {
                     const SpecialAbilityDef& a = special().abilities[ai];
-                    if (a.style == ActivationStyle::GroundActivated && a.initially_enabled && special_accepts(a, m, player, planet)) {
+                    if (a.style == ActivationStyle::GroundActivated && ability_ready(a, player, static_cast<uint32_t>(store_->type(m))) && special_accepts(a, m, player, planet)) {
                         users.push_back(m);
                         break;
                     }

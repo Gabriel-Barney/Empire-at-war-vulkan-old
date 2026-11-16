@@ -1173,6 +1173,7 @@ void TacticalBattle::reinforce(TacticalMode& mode, SimRng& rng, bool force_empty
         for (uint32_t i = 0; i < parts_.size(); ++i) {
             Participant& p = parts_[i];
             if (p.side != side || !p.reserve || p.deployed) continue;
+            if (reinforcements_off(p.owner)) continue;  // STY1 t06: DISABLE_REINFORCEMENTS
             if (!empty && commanded_by_player(p.owner)) continue;  // P host: a human player's reserves deploy by Reinforce commands
             const bool fits = !space_ || live_pop + p.pop <= cap;
             if (!fits && !(empty && first)) continue;  // [port] an empty side always gets its next pool unit

@@ -37,7 +37,7 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
   # S4 story & campaign events: engine/lua's StoryModel + one LuaVm per plot script (lua.h for
   # ServiceRate / LastService). Without engine/lua the session never starts (story_session_none.cpp).
   if(TARGET alamo_lua AND TARGET alamo_lua_vm)
-    target_sources(alamo_sim_base PRIVATE sim/src/story_session.cpp)
+    target_sources(alamo_sim_base PRIVATE sim/src/story_session.cpp sim/src/story_rewards.cpp sim/src/story_rewards_apply.cpp)
     target_link_libraries(alamo_sim_base PUBLIC alamo_lua)
     target_compile_definitions(alamo_sim_config INTERFACE ALAMO_SIM_HAVE_STORY=1)
   else()
@@ -69,6 +69,7 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
       sim/src/tactical_battle_bt.cpp         # battle host: BT setup / transition rules, pad units
       sim/src/tactical_battle_skirmish.cpp   # skai: skirmish map battles (income)
       sim/src/tactical_battle_victory.cpp    # story t06: the tactical victory monitor (BT §3.1a)
+      sim/src/tactical_battle_story_rewards.cpp  # STY1 t06: DISABLE_REINFORCEMENTS / CHANGE_OWNER / DESTROY_OBJECT / BOMBARD_DELAY
       sim/src/tactical_battle_oi_abilities.cpp  # OI abilities: ability host side (owner: abilities agent)
       sim/src/tactical_battle_save.cpp       # N1 stage 2 (owner: n2-host): battle save / load
       sim/src/tactical_battle_clash.cpp      # s78n t06: land hero clashes (HERO_CLASH.md)
@@ -163,6 +164,11 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
   target_compile_definitions(alamo_sim_tests PRIVATE "ALAMO_SIM_TESTDATA=\"${CMAKE_CURRENT_SOURCE_DIR}/sim/testdata\"")
   add_test(NAME alamo_sim_tests COMMAND alamo_sim_tests)
   set_tests_properties(alamo_sim_tests PROPERTIES TIMEOUT 600)
+  # STY1 lane B: story rewards (galactic / tutorial / Underworld / tactical) and the shipped-XML coverage table.
+  add_executable(alamo_sim_story_rewards_tests sim/tests/test_story_rewards.cpp)
+  target_link_libraries(alamo_sim_story_rewards_tests PRIVATE alamo_sim alamo_vfs alamo_test_support)
+  add_test(NAME alamo_sim_story_rewards_tests COMMAND alamo_sim_story_rewards_tests)
+  set_tests_properties(alamo_sim_story_rewards_tests PROPERTIES TIMEOUT 600)
   # BM1: the benchmark scenario manifest, tick statistics, comparison rule and result JSON (no game data).
   add_executable(alamo_sim_bench_tests sim/tests/test_bench.cpp)
   target_link_libraries(alamo_sim_bench_tests PRIVATE alamo_sim alamo_test_support)
