@@ -27,7 +27,7 @@ the `Agent` tool included: you run `re-analyst` (after the coordinator's Ghidra 
 - **End your turn with a request** when you need one of these, after committing your work so far. The coordinator sees only the
   start of your last message, so the block comes **first**:
   ```
-  REQUEST <ghidra | gabriel | wait-for-lane>
+  REQUEST <ghidra | probe | gabriel | wait-for-lane>
   lane: <name>  branch: <claude/...>  commit: <sha>
   what: <the questions file / the question and your recommended answer / the lane and commit you need>
   meanwhile: <what you did that does not depend on it>
@@ -35,7 +35,13 @@ the `Agent` tool included: you run `re-analyst` (after the coordinator's Ghidra 
   - `ghidra`: you need ReVa (Ghidra decompiler or cross-references) through `re-analyst`; one ReVa session runs at a time across
     lanes, so wait for "go", run `re-question`, then tell the coordinator `ghidra done` in your next message (block first). REA,
     `re_reference/` and cdb need no turn.
-  - `gabriel`: a decision, a `g` task, a UAC prompt, a look at `alamo_game.exe`.
+  - `probe`: a probe kit is ready and committed (`tools/probe_mod/<kit>/`, run and cleanup scripts, analyser). The coordinator
+    runs it with the computer-use grant it got up front and sends back the result paths; you analyse them. Don't ask for your
+    own grant: Gabriel may have walked away and the card would wait for him.
+  - `gabriel`: only what the brief's up-front answers and the rules do not settle (a `g` task, a UAC prompt, a look at
+    `alamo_game.exe`, a decision with no default). A choice the rules or docs settle, or a reversible default, you take
+    yourself and list as `default taken:` in your report. Then go on with the tasks that do not depend on the answer; a task
+    that does stays `todo`.
   - `wait-for-lane`: you need another lane's work on `dev` first.
 - **Resume**: the coordinator answers with a message; continue the loop from where you stopped.
 - **A group split into shares**: tick only your tasks on the roadmap and land your share; leave closing the group to the
@@ -158,12 +164,16 @@ findings) join the list above; `spec-review` and `codebase-design`'s design-it-t
   (keep the group id, claim, exit test, open items and the last build summary; drop logs and diffs). Read build summaries, not logs.
 - **Side questions** go to `/btw` so they stay out of the lane's context; fixed commands (`roadmap_store.py claims`,
   `test_slot.py --status`) run in shell mode (`!`) with no model round trip.
+- **Unattended.** Gabriel is usually away while a lane runs, so a permission card stalls the lane until he is back. Write
+  commands in the spellings the allowlist covers and use the project wrappers instead of destructive commands (list and
+  replacements: `docs/WORKFLOW_TIPS.md`, "Unattended runs"): one command per call, paths relative to the worktree, no leading `cd`.
+  A prompt you hit anyway goes into your friction line with its exact command.
 
 ## Hard stops
 
 - In-game probes: prepare the kit under `tools/probe_mod/` and run it yourself, driving retail `StarWarsG.exe` with computer use
   (Gabriel, 2026-11-14; never the port's `alamo_game.exe`); run long kits detached (not in a terminal tab), and stay inside
-  your turn while you wait.
+  your turn while you wait. Started by a coordinator: `REQUEST probe` instead (Coordinator protocol); it holds the grant.
 - Do not edit another lane's files, `CLAUDE.md`, `roadmap-store/` data by hand, or generated pages' data block by hand.
 - Never use bare `git stash`; the stash stack is shared by every worktree. Use a WIP commit.
 - Out of scope work found on the way is recorded in the roadmap (new task or group), not done silently.

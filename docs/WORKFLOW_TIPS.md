@@ -13,6 +13,43 @@ short version in `.claude/agents/lane.md` ("Speed habits"); this page is the ref
 | Shell mode (`!`) | Fixed commands with no model round trip: `! python roadmap-store/roadmap_store.py claims`, `! python -I tools/lint/test_slot.py --status`, `! git status`. | this page |
 | `/teleport`, Remote Control | Watch or steer a running lane from a phone or another machine while a long build or gate runs; at most 3 lane sessions run at once (2026-11-13). `/teleport` pulls a cloud session into the local checkout. Remote Control is a per-session setting in the app. | this page |
 
+## Unattended runs: fewer approvals (Gabriel, 2026-11-15)
+
+Goal: a `run-group` run goes from claim to landing with Gabriel answering only real decisions. Three layers decide whether a
+tool call asks; each has its own fix.
+
+| Layer | What it does | Setting |
+|---|---|---|
+| Permission mode | `default` asks for every command no rule covers; `auto` lets a classifier approve routine work and asks only for risky actions | New sessions start in `default` unless `permissions.defaultMode` says otherwise. One-time setup: `"defaultMode": "auto"` under `permissions` in `~/.claude/settings.json` (every project) or this repo's `.claude/settings.json`, or pick Auto in the app's mode menu per session. Sessions started with `start_session` inherit the starter's mode, so a coordinator in `auto` gives its lanes `auto` |
+| Allow / ask / deny rules | `allow` runs without a prompt or a classifier check in every mode; `ask` always prompts; `deny` never runs | `.claude/settings.json`. A rule matches only the spelling written there (shell, slashes, `&`, `cmd /c` vs `cmd //c`), so agents use the spellings below. Edits to this file are Gabriel's (the auto-mode classifier blocks agents from widening their own permissions) |
+| App actions | Archiving sessions, raising a session's permission mode, computer-use app access, UAC prompts | Not settable. They come as a card or OS prompt every time; agents batch them (one archive ask at the end of a run, computer-use access once per session) |
+
+Spellings the allowlist covers (Bash tool / PowerShell tool):
+- Build: `cmd //c build_agent.cmd ...` / `& .\build_agent.cmd --% msvc wt "<modules>"` (same for `build_module`, `build_msvc`,
+  `build_clang`, `build_asan`, `build_gate`, `build_launcher`).
+- Project tools: `python -I tools/<dir>/<script>.py ...` / the same with `tools\`; `.cmd` helpers as `cmd //c tools\<name>.cmd ...`
+  / `& .\tools\<name>.cmd ...` (`land_on_dev`, `regen_goldens`, `pr_check`, `clean_worktrees`, `tc`, probe-kit scripts).
+- Roadmap: `python roadmap-store/roadmap_store.py <subcommand> ...` (every subcommand).
+- Git and GitHub, read and local steps: `status`, `log`, `diff`, `show`, `fetch`, `add`, `commit`, `merge origin/dev`, `rev-parse`,
+  `ls-files`, `blame`, `checkout -b`; `gh pr view|list|checks|diff`, `gh run list|view`. Pushing goes through `land_on_dev.cmd`.
+- Test executables in the checkout's own `build-*` trees (`./build-wt-msvc/...` / `& .\build-wt-msvc\...`).
+
+Shapes that miss every rule, and what to use instead:
+- A leading `cd <dir>;` or `cd <dir> &&`: the session already runs in its worktree; give paths relative to it.
+- A pipe or chain whose every part is not allowed (`... | Select-Object`, `a && b` with an unlisted `b`): one command per call,
+  or let the project script do the filtering (`build_summary.py` instead of grepping a log).
+- `taskkill`, `Stop-Process`, `rm -rf`, `git push --delete`, `git branch -D|-f`, bare `git stash`: `stop_tree_procs.py`,
+  `clean_worktrees.cmd --apply --only <name>`, `delete_merged_branch.py`, a WIP commit (`docs/BUILD.md`, "Pre-approved commands").
+- Inline `python - <<EOF` scripts and writes outside the worktree and scratchpad: a project script, or a script file in the
+  scratchpad; these still go to the classifier in `auto` mode and ask in `default` mode.
+
+Still asks on purpose (`ask` / `deny` in `.claude/settings.json`): `tc.cmd frida*` / `TTD*` and `tools\re\ttd_record.cmd`
+(attach to or record processes; UAC), pushes to `main` and `gh pr merge` (`main` is Gabriel's release), force pushes and bare
+`git stash` (never allowed).
+
+A prompt that keeps coming back: name it in the lane's friction line; `/retro` (or the built-in `fewer-permission-prompts` skill,
+which mines transcripts for read-only commands) turns it into a rule for Gabriel to approve.
+
 ## Rules for the loop skill
 
 - It never regenerates goldens. A run that fails only on golden drift stops and asks (`regen-goldens` skill is the way to change them).

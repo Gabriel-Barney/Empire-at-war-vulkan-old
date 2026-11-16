@@ -92,6 +92,10 @@ the coordinator's session, with its own app-made worktree** (`start_session`, `u
 background subagent: a subagent is bound to the coordinator's worktree and hits the worktree write block when it edits another.
 Lane sessions run `re-analyst` and the reviews themselves; the coordinator serves the Ghidra turn (one ReVa session at a time),
 questions for Gabriel and waits between lanes (`lane.md`, "Coordinator protocol"). Each lane follows the lane loop with every skill and tool.
+**Unattended runs (Gabriel, 2026-11-15): Gabriel answers once, then walks away.** The coordinator asks every approval and open
+decision before the first lane starts (`run-group` step 3a) and starts lanes in auto mode; after that, workers take the
+documented default instead of asking and park only what truly needs him. Command spellings that run without a prompt, and the
+wrappers that replace destructive commands: `docs/WORKFLOW_TIPS.md`, "Unattended runs".
 
 Real work is done per roadmap group by a `lane` agent (`.claude/agents/lane.md`; `/start-group <id>`, `/finish-group <id>`) in its
 own worktree. Lanes own a group, not a folder: two lanes must not edit the same files, and a landing commit names any golden that changed.
