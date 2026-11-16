@@ -237,3 +237,14 @@ Empire-vs-Underworld (seeds 1 / 3 / 8 / 9, 70000) game ends. `alamo_headless_ski
 from `..._end`) and `..._empire_underworld_seedN` now play their whole run with 0 Lua errors. This replaces the part of
 skai's exit test that asked for foc-land seeds 2 and 4 to end within 30000 ticks. Tests that are checked against retail
 outcomes (the space station, the campaign-rules land invasion) keep `--expect-battle-end`.
+
+## fxc ships in test builds; Claude may drive alamo_game for one run (Gabriel, 2026-11-16)
+
+Gabriel, 2026-11-16, in the up-front round of the "needs Gabriel and probe runs" coordinator run:
+- **modc t36: `fxc.exe` and `d3dcompiler_47.dll` (Windows SDK) may ship in test builds.** Test builds stay private to Gabriel.
+  With them, `alamo_game` and `alamo_mod_check` run the .fx prebuild by themselves when a mod is mounted. Without them, the
+  t11 fallback still works and the report says the source is not compiled. A public release needs this asked again.
+- **Rule 7 exception for that run only: Claude drives the port's `alamo_game.exe` with computer use** for the look checks
+  aamode t04, names t03, pathl t03, modc t09 and gchk (backlog b0251 / b0258). Each check is done with screenshots and
+  closed when what Claude sees matches; taste calls are noted for Gabriel. The audio check aud1 t09 stays Gabriel's
+  (Claude can't hear). Outside that run, rule 7 is unchanged.
