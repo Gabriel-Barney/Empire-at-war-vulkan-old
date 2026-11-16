@@ -1,5 +1,5 @@
 {
- "commit": "586c70c7",
+ "commit": "4ecf85ba",
  "mode": "distribution",
  "scenarios": {
   "geonosis_skirmish": {
@@ -27,7 +27,7 @@
    ],
    "status": {
     "ai.build_count[Empire]": "PASS",
-    "ai.build_count[Rebel]": "FAIL",
+    "ai.build_count[Rebel]": "PASS",
     "ai.build_mix[Empire]": "PASS",
     "ai.build_mix[Rebel]": "PASS",
     "ai.first_build_frame[Rebel]": "PASS",
@@ -42,18 +42,16 @@
     "econ.credits_at_5400[Rebel]": "PASS",
     "outcome.battle_ended": "PASS",
     "outcome.units_final[Empire]": "PASS",
-    "outcome.units_final[Rebel]": "FAIL",
+    "outcome.units_final[Rebel]": "PASS",
     "outcome.units_lost[Empire]": "PASS",
     "outcome.units_lost[Rebel]": "PASS"
    },
    "summary": {
     "AI choices": {
-     "FAIL": 1,
-     "PASS": 4
+     "PASS": 5
     },
     "battle outcomes": {
-     "FAIL": 1,
-     "PASS": 4
+     "PASS": 5
     },
     "damage": {
      "FAIL": 1,
