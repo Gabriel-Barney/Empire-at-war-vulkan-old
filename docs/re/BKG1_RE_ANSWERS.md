@@ -587,8 +587,8 @@ debugger):
 **Target order.** Targeted sources visit their planets in the perception target list order, the reverse of the
 campaign's `<Locations>`. For the Rebel's Enemy goals that is The_Maw, Tatooine, Shola, Nal Hutta, Kashyyyk, Kuat,
 Felucia, Corellia; for its Friendly goals Yavin, MonCalimari, Kamino, Naboo. FindTarget uses the same order
-(`A2M_T08_T10_T14_RE.md` t14.7). The port walked the rows forward; gai3 changed the galactic walk to this order
-(`GoalModeHooks::target_at`).
+(`A2M_T08_T10_T14_RE.md` t14.7). The port walks the rows forward. gai3 changed FindTarget to retail's order; the goal
+walk follows in gai3 t08, together with the Commit sort's tie rule (§B.10).
 
 **Per-goal target sets.** These are the slot-9 skips (B.5) and the Applies filter (B.4). Rebel pass 3:
 - **Conquer_Opponent, Conquer_Pirate, Death_Star_Use, Raid, Unrestricted_Grab_Space / _Land:** only The_Maw,
@@ -613,8 +613,18 @@ compared with B.9.
 - **Target list.** The port's list held every planet row in forward order, including the scenery row
   `Galaxy_Core_Art_Model`. Init therefore seeded E with S × 13 (Rebel 828, Underworld 704) instead of retail's S × 12
   (777, 662).
-- The list now holds planets only, in reverse row order (`Impl::target_list_at`; FindTarget uses the same list).
-- After the fix the seeded first pass gives E 777 / 662, as retail. Later passes, port vs retail:
+- The list now holds planets only (`Impl::target_list_size` / `target_list_at`). FindTarget walks it in retail's
+  reverse order.
+- The goal walk keeps forward row order [port] (gai3 t08).
+  - With the reverse walk, 8 hotm_galactic 10-seed metrics regressed against dev 4385f8a0, among them
+    `econ.income_cycle1[Underworld]` (2315 on every seed vs retail 2150) and two Rebel hops; 3 improved.
+  - With the forward walk (planets only): 2 regressions (both NABOO↔TATOOINE Underworld hops) and 1 improvement.
+  - Cause [M]: desire ties in the Commit sort. The port sorts stably, so ties keep evaluation order. Retail's
+    std::sort 0x720eb0 is unstable above 32 entries (AI_GALACTIC.md, Commit step 2), so its tie order is not the
+    walk order.
+  - The walk order and the sort tie rule must be ported together (gai3 t08).
+- After the fix the seeded first pass gives E 777 / 662, as retail. The per-pass numbers below are from the reverse-walk
+  build; the planets-only seed is what moved E. Later passes, port vs retail:
 
 | Player | Port E | Retail E | Port Commits | Retail Commits |
 |---|---|---|---|---|

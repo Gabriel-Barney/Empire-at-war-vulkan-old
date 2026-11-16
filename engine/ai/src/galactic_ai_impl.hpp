@@ -447,16 +447,19 @@ struct GalacticAiWorld::Impl final : lua::AiScriptHost, lua::ScriptMarkupHost, A
     uint32_t next_starbase_type(PlanetIndex p) const;  // 0x3f8fd0 (A2M_R3_RE_A §1.2)
     bool applies(int32_t self, int32_t target, uint32_t flags) const;
     // The galactic perception target list (AI_GALACTIC.md "Galactic perception target list"): one entry per planet, no
-    // scenery rows (Galaxy_Core_Art_Model), in GOM category-3 order = the planet rows in reverse (gai3 t05 / t06,
-    // BKG1_RE_ANSWERS.md B.9) [H]. Computed on each call (no shared cache: player AIs may run on worker threads).
+    // scenery rows (Galaxy_Core_Art_Model) (gai3 t06, BKG1_RE_ANSWERS.md B.9 / B.10: Init seeds E with S x 12 in HotM) [H].
+    // Retail's order is GOM category-3 order = the planet rows in reverse; FindTarget walks it so (find_target). The goal
+    // walk keeps the rows in forward order [port] (gai3 t08): with retail's walk order the port's stable Commit sort
+    // breaks desire ties differently from retail's std::sort 0x720eb0 (unstable above 32 entries, AI_GALACTIC.md
+    // "Commit" step 2), and the hotm_galactic parity metrics got worse (B.10). Computed on each call (no shared cache).
     uint32_t target_list_size() const {
         uint32_t n = 0;
         for (const gal::PlanetState& p : sim.planets()) n += p.is_planet ? 1u : 0u;
         return n;
     }
-    // Entry i of the list (i < target_list_size()).
+    // Entry i of the goal walk (i < target_list_size()): the planet rows in forward order.
     PlanetIndex target_list_at(uint32_t i) const {
-        for (size_t k = sim.planets().size(); k-- > 0;)
+        for (size_t k = 0; k < sim.planets().size(); ++k)
             if (sim.planets()[k].is_planet && i-- == 0) return static_cast<PlanetIndex>(k);
         return kInvalidPlanet;
     }
@@ -660,8 +663,8 @@ struct PlayerAi final : GoalModeHooks, ContextModeServices {
     PlayerAi(GalacticAiWorld::Impl* world, int32_t p, const AiPlayerTypeDef* t, int32_t d);
 
     // ---- GoalModeHooks ----
-    // The perception target list (Impl::target_list_at): planets only, the rows in reverse. Retail goal passes visit The_Maw,
-    // Tatooine, Shola, ..., Corellia in HotM, and Init seeds E with S x 12, not 13 (gai3 t06, BKG1_RE_ANSWERS.md B.9) [H].
+    // The goal walk's target list (Impl::target_list_at): planets only, so Init seeds E with S x 12 in HotM as retail
+    // (gai3 t06, BKG1_RE_ANSWERS.md B.10) [H]; forward row order [port] (gai3 t08, see Impl::target_list_size).
     uint32_t target_count() override { return w->target_list_size(); }
     int32_t target_at(uint32_t i) override { return static_cast<int32_t>(w->target_list_at(i)); }
     bool applies(int32_t target, uint32_t flags) override { return w->applies(player, target, flags); }

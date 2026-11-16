@@ -154,8 +154,9 @@ void test_goal_pass_cadence() {
                 static_cast<long long>(retail.size() > 1 ? retail[1].first : 0), static_cast<long long>(retail.size() > 2 ? retail[2].first : 0));
 }
 
-// gai3 t06 (goalpass trace, A2M_T08_T10_T14_RE.md t14.7): a pass evaluates a targeted source's targets in the order of
-// GoalModeHooks::target_at (galactic: the planet rows in reverse), skipping targets the application rejects.
+// gai3 t06 (BKG1_RE_ANSWERS.md B.9 / B.10): a pass evaluates a targeted source's targets in the order of
+// GoalModeHooks::target_at, skipping targets the application rejects (galactic: planets only; retail's reverse order is
+// gai3 t08).
 void test_goal_target_walk_order() {
     struct OrderHooks final : GoalModeHooks {
         std::vector<int32_t> seen;
