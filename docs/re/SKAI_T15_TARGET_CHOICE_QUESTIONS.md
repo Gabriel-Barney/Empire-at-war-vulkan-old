@@ -2,6 +2,8 @@
 
 Lane skai-a, 2026-11-16. Answers go to `docs/re/SKAI_T15_TARGET_CHOICE.md`.
 
+**Answered 2026-11-16** (Q1a, Q1, Q5, Q3, Q2, Q4) in `SKAI_T15_TARGET_CHOICE.md`.
+
 ## What is measured
 
 - Utapau `_MP_LAND_UTAPAU`, Empire Medium AI against an idle Underworld human, 36000 ticks.
