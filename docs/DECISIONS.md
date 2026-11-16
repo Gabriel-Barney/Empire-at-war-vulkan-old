@@ -255,6 +255,23 @@ battle exists to compare with, so the fallback (b) applies: the re-test stays on
 5155) is checked with seed 6 (`alamo_headless_skirmish_ai_foc_land_campaign_outcome_seed{6,2}`). Seeds 2 and 4-12 end with the
 Rebel retreat at 2755-11566 (12 seeds, 20000 ticks).
 
+## skai exit test as a tier-2 distribution (Gabriel, 2026-11-16)
+
+Gabriel, 2026-11-16 (coordinator run, skai t15): after more retail runs, judge skai's exit as a tier-2 distribution (end
+rate and end frames) instead of "the idle-human Utapau run does not end within 36000 frames". Retail does end some of these
+games: Rebel AI vs idle Empire 1 of 4 (27265), Empire AI vs idle Underworld 3 of 5 (23746, 25707, 26522), Underworld AI vs
+idle Empire 0 of 1 (runs listed in `tools/probe_mod/q2_traces/analysis/skai_exit.py`; SKAI_T06_LAND_RUNS §9,
+SKAI_T15_PLAN_RETEST, B0418_UTAPAU_AI_RUNS).
+
+The check (`skai_exit.py`, seeds 1-10 per AI, 36000 ticks; thresholds chosen by skai-lane2 as the documented default,
+[port]): per AI, (1) **rate**: a two-sided Fisher exact test on port ends / 10 against retail ends / runs passes while
+p >= 0.05; (2) **frames**, only when both sides have ended games: the median end frame of the port's ended games is at least
+retail's earliest end - 3000 frames. The frame test is one-sided because the 36000 cap cuts the late side and a port that ends
+too late ends too rarely, which the rate test sees; what t15 is about is the AI finishing the base too fast. The AI-against-AI
+part of the exit is unchanged (whole run, 0 Lua errors, no end needed). Port on dev dc790516 (re-test on): Rebel 1 of 10
+(33956) pass; Underworld 5 of 10 pass (retail has one run, so this proves little); **Empire 10 of 10, median 18747 < 20746:
+fails**, the open part of skai t15. More retail runs tighten the check: add them to `RETAIL` in the script.
+
 ## fxc ships in test builds; Claude may drive alamo_game for one run (Gabriel, 2026-11-16)
 
 Gabriel, 2026-11-16, in the up-front round of the "needs Gabriel and probe runs" coordinator run:
