@@ -292,6 +292,34 @@ scouts per cell, plan starts per run and the unit types the build plan returned.
 are not retail's. Readings taken at `PSTART` (desire, starbase distances, cell) stand. Find why the space plan threads
 stall before reusing the hooks (`docs/re/SKAI_T22_GEONOSIS_SCOUT.md`).
 
+### Space goal timeline without Lua hooks (skai t22, 2026-11-16)
+
+Question (`docs/re/SKAI_T22_GEONOSIS_SCOUT.md`, "What is left"): on Geonosis, when does the Rebel AI accept its scouts
+and pad goals, which cells do the scouts take, and how long does a scout goal live, in a run whose Lua plan threads are
+not hooked? The 2026-11-16 Lua-hooked runs cannot say: the hooks killed every space plan at its first block and freed its
+fighters. **Port prediction** (dev 684d5af1, 10 seeds): the first commit (frame 69) accepts 2 / 1 / 0
+`Secure_Build_Pad_Space` goals (5 / 4 / 1 seeds); the first scout is CELL_0_0 in 9/10 seeds; scout goals live a median
+909 frames (373..1751). Retail matching that confirms the port's goal timeline and puts the damage gap after it; retail
+scouts that end within a few hundred frames, or a first scout away from CELL_0_0 when a fighter is free, refute it.
+
+`run_skai_t22_space.cmd` runs a plain Q2 skirmish trace (**no** `-LuaProbe`, no mod) with `frida\frida_logger.py`
+attached through `frida\skai_t22_space_hooks.js`: skai t15's read-only hooks (Resolve_Category candidates and accepts,
+activation records, plan ends, goal releases), extended to the space goal system (vtable 0x8be378). A space cell target
+is logged as `cell:<x>,<y>` (its centre). Needs `toolchain\re\venv` (frida 17).
+
+**Run** (about 6 min each, three runs): `run_skai_t22_space.cmd -NonInteractive` (the menu driver clicks), or without it
+click: Skirmish, Space, (2) Battle Over Geonosis, you = Empire in slot 1 (idle), slot 2 Rebellion Medium AI,
+Advanced -> Default (6000 credits), Start, Begin. It stops after 5400 ticks; `out\<run>\frida_t22.jsonl` lies beside the
+trace. These runs are unhooked, so they also count as `geonosis_skirmish` parity references (`parity_harness.py
+add-refs --scenario geonosis_skirmish <run>`).
+
+**Read it:** `toolchain\venv\Scripts\python.exe -I tools\probe_mod\q2_traces\analysis\space_goals.py out\<run1>
+out\<run2> out\<run3> --port <parity seeds>\seed_*\port_ai.txt` prints, per run, the first commits (accepted goals,
+failed accepts), every Space_Scout accept with its cell, desire and release frame, and a retail / port summary (first
+scout cell, accepts per goal type, scout goal lifetimes, failed scout accepts). Offline checks:
+`toolchain\re\venv\Scripts\python.exe -I tools\probe_mod\q2_traces\frida\selftest_space_hooks.py` and
+`space_goals.py --selftest`.
+
 ### Lua probe run (q2f t06): steps for Gabriel
 
 Goal: the AI's galactic perception values (`EnemyForce.*`, `TargetPlayerID`) read through the game's own
