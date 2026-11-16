@@ -216,7 +216,7 @@ first needs more seeds, or the probe of §5.
 
 ---
 
-## 5. Retail probe for the open parts (Gabriel launches it; not run)
+## 5. Retail probe for the open parts (run 2026-11-16, gai3 t04 / t07: results in §7)
 
 Kit: a variant of `tools/probe_mod/a2f_budget` with a **human Empire** (today the kit is fixed to a human Rebel), HotM,
 run to frame 12000. Channels, written to `lua_records.txt` every fiscal cycle and on every event:
@@ -235,3 +235,98 @@ re-checked in 0x72b940 and needs no change. [H]
 
 The commit's greedy-phase "already active" check (0x6c8970) runs after the active set has been cleared for the new
 commit. A goal that was active in the last commit is not skipped as "already active". [M]
+
+## 7. Probe result: human Empire to frame 12000 (gai3 t04 / t07, 2026-11-16)
+
+Run `tools/probe_mod/a2f_budget/out/20261116-020754`:
+- Kit: `run_a2f_uw.cmd`, which runs `a2f_run.py --human-empire --saboteur --uw-infra`.
+- Setup: HotM, Medium, hands off, no battle prompts. Records reach frame 12001.
+- Output: report section 10, `plans.tsv` (goal and target columns), `uw_infra.tsv`, `samples.tsv`.
+
+**Probe effect [M].** Channel U evaluates perceptions every 30 frames, and EvaluatePerception shares the AI's leaf cache
+(README of the kit). The Underworld's early plan sequence here differs from the hotm_galactic q2 reference runs:
+- here: the first Build_Ground_Forces at 1582, a Destroyer company;
+- the references: a Build_Ground_Forces at about 1501, MDU at Shola about 1537 and Merc at Felucia about 1552.
+
+So use the frame numbers below for mechanisms, not as a trajectory to match.
+
+### 7.1 The first Underworld ground company (t04, b0157)
+
+| Frame | Event |
+|---|---|
+| 1351 | Cycle-1 income. Credits are 2150. |
+| 1380–1486 | Underworld pools: Offensive A 303, Infrastructure A 297, rate 0. |
+| 1487 | The budget is recomputed: Offensive A 1082 + 16.15/s, Infrastructure A 1068 + 31.63/s. This is 136 frames after the payment. |
+| 1582 | `BuildGroundForcesPlan` starts. It has no target (`tgt=ERR`) and is a global Build_Ground_Forces goal. Its selection's net cost (unallocated) is **1200**: one Destroyer_Droid_Company. Credits are 2150, Offensive A is 1082 + 16.15/s. |
+| 1635 | QB: Destroyer_Droid_Company at **Nal Hutta**, cost 1200, built from U_Ground_Droid_Works. |
+| 1635 + 362 | Retail's build time for this company in the parity references: 15 s Build_Time_Seconds × 24.1 frames per second. |
+
+Findings:
+- **The selection admits a Destroyer company with A < cost [H for this run].** At 1582, Offensive A (1082) is below
+  the company's 1200, but A + horizon × R covers it. So the §2 premise (a Destroyer company would not fit the
+  Offensive money) holds for that human-Rebel trace, not in general. The port picking a Destroyer company first is
+  not a parity failure by itself.
+- **Pay-as-you-go runs at cost / build frames, without a stall [M].** Underworld credits fall 2150 → 1956.7 by 1693,
+  about 3.3 per frame. That matches 1200 / 362 frames (the saboteur at Shola paid in the same window adds a little).
+  Credits never reach 0, so the build takes exactly its build time.
+- **Where the port's DESTROYER_DROID_COMPANY@NALHUTTA build.ticks (658–670 vs 362) comes from.** It is not the
+  selection. The port's build stalls when the pay-as-you-go installments run out of credits between income payments.
+  That is gai3 t03's stall, and the port's Underworld credit level (credits_at_13500: 570 vs retail 6620) feeds it.
+  Fixing t03 / the Underworld spending fixes this metric; there is no separate t04 port change.
+
+Later Build_Ground_Forces selections (unallocated = net cost):
+
+| Frame | Net cost | Selection, from QB |
+|---|---|---|
+| 2806 | 1770 | Disruptor Merc at Felucia 2854 (450), MDU at Nal Hutta 2875 (1000), Merc at Felucia 3102 (320) |
+| 5497 | 1400 | MAL at Shola 5536 |
+| 10942 | 1970 | Disruptor Merc 450, Merc 320 and Destroyer 1200, all at Nal Hutta |
+
+Build_Space_Forces ran at 52 (2400: Interceptor4 at The_Maw) and later at 6841, 8269 and 9541 (1400 each: Crusader at
+Felucia).
+
+Build plans with goal and target:
+- **Palaces:** both start at 52, at Shola and Felucia. QB at Felucia 64 and Shola 80.
+- **UpgradeStarbasePlan:** at 4183 for Shola (QB Underworld_Star_Base_2 at 4200), and at 10942 for Nal Hutta
+  (QB 10966).
+- **BuildUnderworldVehicleFactory:** at 9541 for Shola (QB 9566).
+- No Barracks or Droid Works plan ran.
+
+So the Shola starbase upgrade comes at 4183 here, against 11059 in the human-Rebel trace of §1.5.
+
+`samples.tsv` decodes Offensive A as −19678 + 1178.64/s at 9625. That is a decode artifact of the budget block in that
+frame (Infrastructure decodes negative too); it is not a game value.
+
+### 7.2 Underworld infrastructure equations (t07, b0135)
+
+Each equation was evaluated every 30 frames up to 12000 on every Underworld planet. `uw_infra.tsv` has one row per
+sample; the report lists a row whenever a value changes.
+
+| Frame | Felucia | Nal Hutta | Shola | The_Maw |
+|---|---|---|---|---|
+| 0 | SBB 34.92, NGU 0.88, SBS 17 | SSD 1, NGU 0.914, SBS 34 | SBB 24.89, NGU 0.766, SBS 17 | SBB 18, NGU 0, SBS 27 |
+| 690 (palaces done) | SBB 0, SSD 2 | | SBB 0, SSD 2, SBS 34 | |
+| 720 | SSD 1 | | SSD 1 | |
+| 780–960 | SSC 1 | SSC 1 | SSC 1 | SSC 1 |
+| 990–1770 | SSD 1, SBS 17 | SSD 1, SBS 34 | SSD 1, SBS 34 | SBB 18, SBS 27 |
+| 1800–2970 | SSC 1 | SSC 1 | SSC 1 | SSC 1 |
+| 3000 onward | SSD 1, SBS 17 | SSD 1, SBS 34 | SSD 1, SBS 34 | SBB 18, SBS 27 |
+| 5700 | | | SBS 17 | |
+| 10800 | | | SBS 0 | |
+| 11700 onward | SSC 1 | SSC 1 | | SSC 1 |
+
+Key: SBB Should_Build_Underworld_Barracks, SSD Should_Underworld_Save_For_Desirable_Structures, SSC
+Should_Save_For_Corruption, NGU Needs_Groundbase_Upgrade, SBS Should_Underworld_Build_Starbase.
+
+Notes on the table:
+- **Corrupted planets.** All four are Underworld-owned and report `cor=true`. The equations' planet is the
+  Underworld's own.
+- **SSC = 1 zeroes the others.** While Should_Save_For_Corruption is 1, SBB, SSD and SBS read 0 on every planet. The
+  windows are 780–960, 1800–2970 and from 11700.
+- **SBB.** After the palaces, Should_Build_Underworld_Barracks is 0 everywhere except The_Maw (18). No Barracks plan
+  ran, because The_Maw has no ground slot use for it.
+- **NGU.** Needs_Groundbase_Upgrade is constant per planet in this run.
+- **SBS.** It follows the starbase level: Shola drops 34 → 17 after its upgrade at 4200, and to 0 at 10800.
+
+Port check: evaluate the same five equations on the port's seed-0 HotM state at the same frames. Agreement here
+removes the infrastructure ranking as a cause of the gai3 t03 spending difference.
