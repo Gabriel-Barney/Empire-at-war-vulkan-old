@@ -2288,7 +2288,7 @@ const char* kGravTypes = R"(
 
 struct GravRun {
     bool fought = false, powered = false, slowed = false;
-    uint32_t slowed_frame = 0, start_frame = 0;
+    uint32_t slowed_frame = 0, seen_frame = 0;  // seen: the first frame the affected unit is on the field
     float slowed_factor = -1.0f, plain_factor = -1.0f;
 };
 
@@ -2340,7 +2340,6 @@ GravRun run_gravity(const Data& d) {
             if (out.fought) break;
             continue;
         }
-        if (!out.fought) out.start_frame = b->frame();
         out.fought = true;
         const objects::ObjectStore& st = tm->primary();
         objects::ObjectId g = objects::kNoObjectId, slow = objects::kNoObjectId, plain = objects::kNoObjectId;
@@ -2353,6 +2352,7 @@ GravRun run_gravity(const Data& d) {
             if (ty == tr && plain == objects::kNoObjectId) plain = st.id(h);
         }
         if (g == objects::kNoObjectId || slow == objects::kNoObjectId || plain == objects::kNoObjectId) continue;
+        if (out.seen_frame == 0) out.seen_frame = b->frame();
         out.powered = out.powered || b->combat().has_base_power(0);
         const tactical::abilities::AbilitySystem& ab = static_cast<const TacticalBattle*>(b)->abilities();
         if (ab.in_gravity_field(slow)) {
@@ -2373,11 +2373,11 @@ GravRun run_gravity(const Data& d) {
 void test_gravity_field() {
     const auto d = make_data("alamo_sim_l1_grav", kGravTypes);
     const GravRun r = run_gravity(*d);
-    std::printf("  TRU1 t03 gravity field: fought %d powered %d slowed %d at %u (battle start %u), factor slowed %.3f plain %.3f\n",
-                r.fought, r.powered, r.slowed, r.slowed_frame, r.start_frame, static_cast<double>(r.slowed_factor),
+    std::printf("  TRU1 t03 gravity field: fought %d powered %d slowed %d at %u (unit seen %u), factor slowed %.3f plain %.3f\n",
+                r.fought, r.powered, r.slowed, r.slowed_frame, r.seen_frame, static_cast<double>(r.slowed_factor),
                 static_cast<double>(r.plain_factor));
     CHECK(r.fought && r.powered && r.slowed);
-    CHECK(r.slowed_frame >= r.start_frame && r.slowed_frame - r.start_frame <= 120);  // first service within the interval
+    CHECK(r.slowed_frame >= r.seen_frame && r.slowed_frame - r.seen_frame <= 60);  // the next service (interval 60)
     CHECK(std::fabs(r.slowed_factor - 0.1f) < 1e-4f && r.plain_factor == 1.0f);
 }
 
