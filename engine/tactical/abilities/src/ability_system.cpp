@@ -151,6 +151,9 @@ bool AbilitySystem::add_unit(const combat::UnitSpawn& s, uint32_t ability_desc, 
     // OI abilities: SAP init (first-due stagger draws, after the hardpoint draws [M]), automatic / event-driven
     // classes (auras give to the new unit), Active_By_Default (0x3a82a0, first two entries, §1.2 [H]).
     sap_init(n, frame, &rng);
+    // TRU1 t03: GRAVITY_CONTROL_FIELD first service, one synced Get_Int(0, interval - 1) as every behaviour with an interval
+    // >= 2 draws at attach (TACTICAL_GAPS §6.4) [port: drawn here, after the SAP draws].
+    if (d.gravity_field) n.gravity_due = frame + static_cast<uint32_t>(rng.range_int(0, 59));
     update_emitter(n);
     const ObjectId nid = n.id;
     if (Obj* p = obj(nid)) auras_unit_added(*p, frame);
@@ -208,6 +211,7 @@ void AbilitySystem::remove(ObjectId id) {
     Obj& o = objs_[static_cast<size_t>(i)];
     for (SpecialState& sp : o.specials)
         if (sp.applied) remove_special(o, sp, 0);
+    gravity_unit_dying(o, 0);  // TRU1 t03: a removed generator releases its units, a removed victim leaves the list
     const bool unit = o.combat_unit != 0;
     objs_.erase(objs_.begin() + i);
     for (Obj& c : objs_) {
@@ -342,8 +346,12 @@ bool AbilitySystem::can(const Obj& o, uint32_t t, bool check_recharge, bool chec
         case kSuperLaser:
             if (o.weapons_disabled) return false;
             break;
-        case kFireLobbingSuperweapon:
-            return false;  // player super-weapon state not modelled [port]
+        case kFireLobbingSuperweapon:  // TRU1 t01 (0x39b480 case 0x2f): the owner's tactical player, and base power when the
+            // type has Requires_Base_Power (type +0x8b); no readiness, range or SpecialWeaponsAllowed test here
+            if (o.owner < 0) return false;
+            if (o.combat_unit && combat_->data().units[combat_->desc_index(id)].requires_base_power && !combat_->has_base_power(o.owner))
+                return false;
+            break;
         case kForceSight:  // case 0x34 (§4.14; the §2.4 row read "SABER_THROW"): no ability of the owner busy (0x39a350)
             if (anim_busy(o, frame)) return false;
             break;
@@ -2161,6 +2169,7 @@ void AbilitySystem::unit_dying(ObjectId id, uint32_t frame) {
     if (o->interdicting) interdict(*o, false, frame);
     o->stealthed = 0;
     if (o->lure_on || o->lure_effect != kNoObject) lure_deactivate(*o, frame);  // cu8f t06 [port]: the effect goes with it
+    gravity_unit_dying(*o, frame);  // TRU1 t03
     o->dead = 1;
 }
 
@@ -2177,6 +2186,9 @@ void AbilitySystem::units_removed() {
         ++w;
     }
     objs_.erase(objs_.begin() + static_cast<std::ptrdiff_t>(w), objs_.end());
+    for (Obj& g : objs_)  // TRU1 t03: removed units leave the gravity field lists
+        g.gravity_list.erase(std::remove_if(g.gravity_list.begin(), g.gravity_list.end(), [this](ObjectId m) { return find(m) < 0; }),
+                             g.gravity_list.end());
     for (Obj& c : objs_) {
         if (!c.is_container) continue;
         c.members.erase(std::remove_if(c.members.begin(), c.members.end(), [this](ObjectId m) { return find(m) < 0; }),
@@ -2281,6 +2293,15 @@ void AbilitySystem::hash(StateHasher& h) const {
             // cu8f t06: the squad numbers (CU8F_T04_T06_RE §3.2)
             h.i32(o.squads_formed);
             for (const int32_t q : o.trooper_squads) h.i32(q);
+        }
+        // TRU1 t03: gravity control field state, only for generators and slowed units (keeps the other digests)
+        if (desc(o).gravity_field || o.in_gravity_field != 0 || !o.gravity_list.empty()) {
+            h.u32(0x56415247u);  // "GRAV"
+            h.u32(o.gravity_due);
+            h.u8(o.gravity_on);
+            h.u8(o.in_gravity_field);
+            h.u32(static_cast<uint32_t>(o.gravity_list.size()));
+            for (const ObjectId g : o.gravity_list) h.i32(g);
         }
         // cu8f t06: the LURE data pack, only once used (keeps lure-less digests)
         if (o.lure_on != 0 || o.lure_pulses != 0 || o.lure_effect != kNoObject) {

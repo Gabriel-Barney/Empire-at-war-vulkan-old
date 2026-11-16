@@ -311,6 +311,27 @@ void test_targeting() {
         in.update(mouse_frame(400, 300, L, L, 0, 4.0));
         CHECK(!tc.update(in, keys, ctx, out));
     }
+    // TRU1 t01: FIRE_LOBBING_SUPERWEAPON (47) picks a ground point and sends command 25 at position, one per user, never
+    // queued (even from a queued HUD click).
+    {
+        CHECK(ability_target_kind(47) == TargetKind::Point);
+        TargetingController tc;
+        InputState in;
+        HudAction a;
+        a.kind = HudAction::Kind::BeginAbilityTargeting;
+        a.ability_type = 47;
+        a.ids = {11, 12};
+        a.queued = true;
+        CHECK(tc.begin(a) && tc.target_kind() == TargetKind::Point);
+        std::vector<UiOrder> out;
+        CHECK(click(tc, in, 400, 300, L, 1.0, out));
+        CHECK(out.size() == 2 && !tc.active() && tc.issued() == 1);
+        for (size_t i = 0; i < out.size(); ++i) {
+            const commands::EventData& e = out[i].event;
+            CHECK(!out[i].queued && e.type() == commands::EventType::SpecialWeaponFire && e.u("weapon") == 11u + i &&
+                  e.u("at_position") == 1 && e.u("player") == 0 && std::fabs(e.f("x")) < 1.0f && std::fabs(e.f("y")) < 1.0f);
+        }
+    }
     // Reinforcement drop: Reinforce at the ground point.
     {
         TargetingController tc;

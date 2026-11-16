@@ -2057,6 +2057,9 @@ using ::alamo::test::env_or_empty;
 //   (d) the WeaponBehavior charges up (LobChargeup, then LobCharged after the charge-up frames, both at the point) and
 //       fires one lob shot, which clears the order; ready again, at_position 0 with a live target: the order's point is
 //       the target's position.
+// TRU1 t01 (docs/re/TRU1_GRAVITY_FIELD.md §2): the human's FIRE_LOBBING_SUPERWEAPON (47) button is enabled for the weapon
+// (no base power needed) and not for the Requires_Base_Power variant without power; the accepted order (c) starts 47's
+// recharge (Recharge_Seconds 1 = 30 frames) on the ability countdown.
 const char* kSwFireTypes = R"(
  <Projectile Name="L1_Lob_Proj"><Max_Speed>20.0</Max_Speed><Projectile_Grenade_Gravity>1.0</Projectile_Grenade_Gravity>
   <Projectile_Grenade_Gravity_Lob_Mod>1.0</Projectile_Grenade_Gravity_Lob_Mod><Projectile_Category>GRENADE</Projectile_Category>
@@ -2064,7 +2067,8 @@ const char* kSwFireTypes = R"(
   <Projectile_Blast_Area_Range>30</Projectile_Blast_Area_Range><Projectile_Max_Lifetime>30.0</Projectile_Max_Lifetime></Projectile>
  <GroundVehicle Name="L1_Lobber"><Victory_Relevant>Yes</Victory_Relevant><Tactical_Health>5000</Tactical_Health>
   <CategoryMask>Vehicle</CategoryMask><Population_Value>1</Population_Value><Targeting_Max_Attack_Distance>400</Targeting_Max_Attack_Distance>
-  <Behavior>SELECTABLE</Behavior><LandBehavior>LOBBING_SUPERWEAPON, TURRET, WEAPON</LandBehavior><Collidable_By_Projectile_Living>Yes</Collidable_By_Projectile_Living>
+  <Behavior>SELECTABLE</Behavior><LandBehavior>LOBBING_SUPERWEAPON, TURRET, WEAPON, ABILITY_COUNTDOWN</LandBehavior><Collidable_By_Projectile_Living>Yes</Collidable_By_Projectile_Living>
+  <Unit_Abilities_Data SubObjectList="Yes"><Unit_Ability><Type>FIRE_LOBBING_SUPERWEAPON</Type><Recharge_Seconds>1</Recharge_Seconds></Unit_Ability></Unit_Abilities_Data>
   <Projectile_Types>L1_Lob_Proj</Projectile_Types><Projectile_Fire_Recharge_Seconds>1.0</Projectile_Fire_Recharge_Seconds>
   <Lobbing_Superweapon_Chargeup_Frames>10</Lobbing_Superweapon_Chargeup_Frames><Custom_Soft_Footprint_Radius>10</Custom_Soft_Footprint_Radius>
  </GroundVehicle>
@@ -2077,6 +2081,7 @@ struct SwFireRun {
     bool fired = false, own_markers_gone = false, other_marker_kept = false, silent = false, pending_at_point = false;
     bool restarted = false, chargeup = false, charged = false, shot = false, order_cleared = false;
     bool target_fired = false, target_point = false;
+    bool button_enabled = false, button_unpowered_off = false, recharge_started = false;  // TRU1 t01
     uint32_t fire_frame = 0, chargeup_frame = 0, charged_frame = 0, shot_frame = 0;
 };
 
@@ -2191,7 +2196,14 @@ SwFireRun run_sw_fire(const Data& d) {
                                     b->combat().fire_at_position_state(powered, nullptr) == 0;
             const commands::EventData ev = fire_event(weapon, true, point, objects::kNoObjectId);
             point = Vec3{ev.f("x"), ev.f("y"), ev.f("z")};  // the quantized command position
+            const tactical::abilities::AbilitySystem& ab = static_cast<const TacticalBattle*>(b)->abilities();
+            constexpr uint8_t k47 = tactical::abilities::kFireLobbingSuperweapon;
+            out.button_enabled = ab.has_ability(weapon, k47) && ab.can_activate(weapon, k47, false, true, f) &&
+                                 ab.countdown_counter(weapon, k47) == 0;
+            out.button_unpowered_off = ab.has_ability(powered, k47) && !ab.can_activate(powered, k47, false, true, f);
             out.fired = b->handle_command(*tm, 0, ev, host.random().synced()) == R::None;
+            out.recharge_started = ab.countdown_phase(weapon, k47) == 0 && ab.countdown_counter(weapon, k47) == 30 &&
+                                   !ab.can_activate(weapon, k47, true, true, f);
             out.fire_frame = f;
             out.own_markers_gone = !alive(markers[0]) && !alive(markers[1]);
             out.other_marker_kept = alive(markers[2]);
@@ -2255,6 +2267,121 @@ void test_sw_fire() {
     CHECK(r.fired && r.own_markers_gone && r.other_marker_kept && r.silent && r.pending_at_point && r.restarted);
     CHECK(r.chargeup && r.charged && r.charged_frame == r.chargeup_frame + 10 && r.shot && r.shot_frame >= r.charged_frame && r.order_cleared);
     CHECK(r.target_fired && r.target_point);
+    std::printf("  TRU1 t01: 47 button enabled %d, unpowered variant off %d, recharge started %d\n", r.button_enabled,
+                r.button_unpowered_off, r.recharge_started);
+    CHECK(r.button_enabled && r.button_unpowered_off && r.recharge_started);
+}
+
+// TRU1 t03 (docs/re/TRU1_GRAVITY_FIELD.md §1.2-1.3, §1.8): in a land battle a powered GRAVITY_CONTROL_FIELD generator
+// (its own Base_Power_Ability, Ground_Automatic) slows the enemy units whose type sets Is_Affected_By_Gravity_Control_Field
+// within one service interval: their movement speed factor becomes 1 - 0.9 = 0.1; an enemy without the flag keeps 1.
+const char* kGravTypes = R"(
+ <GroundVehicle Name="L1_Grav_Gen"><Victory_Relevant>Yes</Victory_Relevant><Tactical_Health>5000</Tactical_Health>
+  <CategoryMask>Structure</CategoryMask><Population_Value>1</Population_Value><Behavior>SELECTABLE</Behavior>
+  <LandBehavior>GRAVITY_CONTROL_FIELD</LandBehavior><Gravity_Control_Field_Range>100000</Gravity_Control_Field_Range>
+  <Gravity_Control_Field_Slow_Fraction>0.9</Gravity_Control_Field_Slow_Fraction><Custom_Soft_Footprint_Radius>10</Custom_Soft_Footprint_Radius>
+  <Abilities SubObjectList="Yes"><Base_Power_Ability Name="L1_Grav_Gen_Power"><Activation_Style>Ground_Automatic</Activation_Style>
+  </Base_Power_Ability></Abilities>
+ </GroundVehicle>
+ <GroundInfantry Name="L1_Grav_Trooper"><Variant_Of_Existing_Type>S10_Trooper</Variant_Of_Existing_Type>
+  <Is_Affected_By_Gravity_Control_Field>Yes</Is_Affected_By_Gravity_Control_Field></GroundInfantry>
+ <GroundCompany Name="L1_Grav_Squad"><Company_Units>L1_Grav_Trooper, L1_Grav_Trooper</Company_Units>
+  <Hyperspace>Yes</Hyperspace><Hyperspace_Speed>1.5</Hyperspace_Speed><Population_Value>1</Population_Value></GroundCompany>
+)";
+
+struct GravRun {
+    bool fought = false, powered = false, slowed = false;
+    uint32_t slowed_frame = 0, seen_frame = 0;  // seen: the first frame the affected unit is on the field
+    float slowed_factor = -1.0f, plain_factor = -1.0f;
+};
+
+GravRun run_gravity(const Data& d) {
+    using R = commands::RejectReason;
+    GravRun out;
+    jobs::JobSystem js(jobs::JobSystemConfig{0});
+    SimConfig cfg;
+    cfg.seed = 26;
+    cfg.players = 4;
+    SimHost host(d.types, js, cfg);
+    galactic::GalacticSetup s = make_setup(d);
+    const uint32_t sq = type_of(d, "S10_Squad"), fr = type_of(d, "S10_Frigate"), gen = type_of(d, "L1_Grav_Gen");
+    const uint32_t gsq = type_of(d, "L1_Grav_Squad"), gtr = type_of(d, "L1_Grav_Trooper"), tr = type_of(d, "S10_Trooper");
+    s.forces = {{0, 1, gen}, {1, 2, fr}, {1, 2, gsq}, {1, 2, sq}};
+    galactic::GalacticSim* gs = host.start_galactic(d.rules, std::move(s));
+    CHECK(gs != nullptr);
+    if (!gs) return out;
+    CampaignBattleOptions opt;
+    opt.conflict.human_choice = galactic::BattleChoice::Fight;
+    opt.battle.max_frames = 3000;
+    opt.battle.order_interval = 0;
+    opt.battle.fog = false;
+    CampaignBattles battles(host, d.crules, *d.catalog,
+                            [](const std::string& name, terrain::MapData& m) {
+                                if (name != "L1_Land_B") return false;
+                                m = land_map();
+                                return true;
+                            },
+                            opt);
+    CHECK(battles.attach());
+    std::vector<objects::ObjectHandle> up;
+    for (objects::ObjectHandle h : gs->planets()[2].surface)
+        if (gs->store().owner(h) == 1) up.push_back(h);
+    CHECK(gs->launch_units(1, 2, up) == R::None);
+    const std::vector<uint32_t> uf = gs->fleets_at(2, 1);
+    CHECK(!uf.empty());
+    if (!uf.empty()) CHECK(gs->move_fleet(1, uf[0], 1) == R::None);
+    bool invaded = false;
+    for (uint64_t t = 0; t < 4000 && !out.slowed; ++t) {
+        host.tick_once();
+        if (!invaded && host.modes().depth() == 1) {
+            const std::vector<uint32_t> f = gs->fleets_at(1, 1);
+            if (!f.empty() && !gs->fleets()[f[0]].moving) invaded = gs->invade(1, 1, {}) == R::None;
+        }
+        TacticalBattle* b = battles.battle();
+        TacticalMode* tm = host.tactical();
+        if (!b || !tm) {
+            if (out.fought) break;
+            continue;
+        }
+        out.fought = true;
+        const objects::ObjectStore& st = tm->primary();
+        objects::ObjectId g = objects::kNoObjectId, slow = objects::kNoObjectId, plain = objects::kNoObjectId;
+        for (const objects::ObjectHandle h : st.owned_by(0))
+            if (st.alive(h) && static_cast<uint32_t>(st.type(h)) == gen) g = st.id(h);
+        for (const objects::ObjectHandle h : st.owned_by(1)) {
+            if (!st.alive(h) || !b->movement().has_unit(st.id(h))) continue;
+            const auto ty = static_cast<uint32_t>(st.type(h));
+            if (ty == gtr && slow == objects::kNoObjectId) slow = st.id(h);
+            if (ty == tr && plain == objects::kNoObjectId) plain = st.id(h);
+        }
+        if (g == objects::kNoObjectId || slow == objects::kNoObjectId || plain == objects::kNoObjectId) continue;
+        if (out.seen_frame == 0) out.seen_frame = b->frame();
+        out.powered = out.powered || b->combat().has_base_power(0);
+        const tactical::abilities::AbilitySystem& ab = static_cast<const TacticalBattle*>(b)->abilities();
+        if (ab.in_gravity_field(slow)) {
+            out.slowed = true;
+            out.slowed_frame = b->frame();
+            // the speed factors are written before the next movement tick
+            host.tick_once();
+            if (battles.battle() == b) {
+                out.slowed_factor = b->movement().speed_factor(slow);
+                out.plain_factor = b->movement().speed_factor(plain);
+            }
+            CHECK(!ab.in_gravity_field(plain) && ab.gravity_field_on(g));
+        }
+    }
+    return out;
+}
+
+void test_gravity_field() {
+    const auto d = make_data("alamo_sim_l1_grav", kGravTypes);
+    const GravRun r = run_gravity(*d);
+    std::printf("  TRU1 t03 gravity field: fought %d powered %d slowed %d at %u (unit seen %u), factor slowed %.3f plain %.3f\n",
+                r.fought, r.powered, r.slowed, r.slowed_frame, r.seen_frame, static_cast<double>(r.slowed_factor),
+                static_cast<double>(r.plain_factor));
+    CHECK(r.fought && r.powered && r.slowed);
+    CHECK(r.slowed_frame >= r.seen_frame && r.slowed_frame - r.seen_frame <= 60);  // the next service (interval 60)
+    CHECK(std::fabs(r.slowed_factor - 0.1f) < 1e-4f && r.plain_factor == 1.0f);
 }
 
 // s78n t26 closing review (MOVEMENT §3.4 "Units with Walk_Transition" [H]): the shipped AT_ST_Walker sets Walk_Transition
@@ -2431,6 +2558,44 @@ void test_foc() {
     const BattleCatalog catalog(types, files.get(), &db.constants(), &diag);
     test_foc_destroyer_droid(types, catalog);  // s78n t26.1
     test_foc_walk_transition(types);  // s78n t26 closing review
+    // TRU1 t03 / t01 (docs/re/TRU1_GRAVITY_FIELD.md §1.7, §2): the shipped generators, an affected type, the Magnepulse's 47
+    // record. The Empire generator has no Gravity_Control_Field_Slow_Fraction (0: it slows nothing).
+    {
+        const char* names[] = {"U_Ground_Gravity_Generator", "Skirmish_Ground_Gravity_Generator_U", "Ground_Gravity_Generator",
+                               "T2B_Tank", "Ground_Magnepulse_Cannon"};
+        std::vector<uint32_t> want;
+        for (const char* n : names) {
+            const objects::TypeIndex x = types.resolve_name(n);
+            CHECK(x != objects::kNone);
+            if (x != objects::kNone) want.push_back(static_cast<uint32_t>(x));
+        }
+        if (want.size() == 5) {
+            std::vector<uint32_t> idx;
+            const BattleTables bt = catalog.build_battle(want, idx, false);
+            CHECK(idx.size() == 5);
+            if (idx.size() == 5) {
+                const auto& u = bt.abilities.objects[idx[0]];
+                const auto& s = bt.abilities.objects[idx[1]];
+                const auto& e = bt.abilities.objects[idx[2]];
+                const auto& tank = bt.abilities.objects[idx[3]];
+                const auto& mag = bt.abilities.objects[idx[4]];
+                std::printf("foc gravity: U range %.0f slow %.2f effect %s; skirmish %d %.0f %.2f; E range %.0f slow %.2f; T2B %d; "
+                            "Magnepulse 47 records %zu, Requires_Base_Power %d\n",
+                            static_cast<double>(u.gravity_field_range), static_cast<double>(u.gravity_field_slow_fraction),
+                            u.gravity_field_effect.c_str(), s.gravity_field ? 1 : 0, static_cast<double>(s.gravity_field_range),
+                            static_cast<double>(s.gravity_field_slow_fraction), static_cast<double>(e.gravity_field_range),
+                            static_cast<double>(e.gravity_field_slow_fraction), tank.affected_by_gravity_field ? 1 : 0,
+                            mag.unit_abilities.size(), bt.combat.units[idx[4]].requires_base_power ? 1 : 0);
+                CHECK(u.gravity_field && u.gravity_field_range == 3000.0f && u.gravity_field_slow_fraction == 0.9f &&
+                      u.gravity_field_effect == "Repulsor_Jammer_Effect" && !u.affected_by_gravity_field);
+                CHECK(s.gravity_field && s.gravity_field_range == 3000.0f && s.gravity_field_slow_fraction == 0.9f);
+                CHECK(e.gravity_field && e.gravity_field_range == 100000.0f && e.gravity_field_slow_fraction == 0.0f);
+                CHECK(tank.affected_by_gravity_field && !tank.gravity_field);
+                CHECK(mag.unit_abilities.size() == 1 && mag.unit_abilities[0].type == tactical::abilities::kFireLobbingSuperweapon &&
+                      mag.countdown && bt.combat.units[idx[4]].requires_base_power);
+            }
+        }
+    }
 }
 
 }  // namespace
@@ -2452,6 +2617,7 @@ int main(int argc, char** argv) {
     test_script_spawn(*d);  // q6 t12
     test_script_control(*d);  // STY1 t01
     test_sw_fire();   // s78f t05: command 25
+    test_gravity_field();  // TRU1 t03
     test_foc();
     if (g_fail) {
         std::printf("alamo_sim_l1_tests: %d failure(s)\n", g_fail);

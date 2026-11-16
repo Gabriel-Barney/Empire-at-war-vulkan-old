@@ -313,6 +313,11 @@ void test_manual_deployers() {
     CHECK(sys.add_unit(walker(4, b, false)));  // a second AT-AT
     SimRng rng(2603);
     sys.tick(1, rng);
+    // TRU1 t03: a unit in a gravity control field (the host's deploy_block hook) ignores Deploy(true); state unchanged
+    sys.set_deploy_block_fn([](ObjectId id) { return id == 3; });
+    const LocoState before = sys.deploy_state(3);
+    CHECK(sys.deploy(3, true, 2) == MovementSystem::DeployResult::Ignored && sys.deploy_state(3) == before);
+    sys.set_deploy_block_fn({});
     CHECK(sys.deploy(1, true, 2) == MovementSystem::DeployResult::Deploying);
     CHECK(sys.deploy(3, true, 2) == MovementSystem::DeployResult::Deploying);
     uint32_t f = settle_deployed(sys, rng, 1, 2, 80);

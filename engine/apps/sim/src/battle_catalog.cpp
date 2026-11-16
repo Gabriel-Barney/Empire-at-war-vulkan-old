@@ -757,6 +757,12 @@ ta::AbilityObjectDesc BattleCatalog::ability_desc(uint32_t t, BuildState& s) con
     d.unique_space_type = type_or_none(ty.get_string(t, "Unique_Space_Unit"));
     // s78n t04 (TACTICAL_COMBAT §5.4.4 item 3b): a Combat_Bonus source buffs itself only with this type flag
     d.apply_self_on_creation = ty.get_bool(t, "Apply_Special_Ability_To_Self_On_Creation");
+    // TRU1 t03 (docs/re/TRU1_GRAVITY_FIELD.md): GRAVITY_CONTROL_FIELD generator values (missing tags read 0) and the flag
+    d.gravity_field = ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("GRAVITY_CONTROL_FIELD"));
+    d.gravity_field_range = ty.get_float(t, "Gravity_Control_Field_Range");
+    d.gravity_field_slow_fraction = ty.get_float(t, "Gravity_Control_Field_Slow_Fraction");
+    d.gravity_field_effect = std::string(ascii_trim(ty.get_string(t, "Gravity_Control_Field_Effect")));
+    d.affected_by_gravity_field = ty.get_bool(t, "Is_Affected_By_Gravity_Control_Field");
     // 0x3979d0 [port: the mode's FOW reveal range column; land for land battles is not distinguished here]
     if (ty.get_bool(t, "Target_Stealth_Units")) d.stealth_detection_range = ty.columns().space_fow_reveal_range[t];
     ta::AbilityResolvers r;

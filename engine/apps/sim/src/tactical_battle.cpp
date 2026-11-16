@@ -486,6 +486,8 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
     });
     // b0173: a deployed build pad (Mobile Defense Unit) with something on it does not undeploy.
     movement_->set_undeploy_block_fn([this](objects::ObjectId id) { return pad_occupied(id); });
+    // TRU1 t03: a unit in a gravity control field does not start a deploy (Walk Deploy(true), every route).
+    movement_->set_deploy_block_fn([this](objects::ObjectId id) { return abilities_ && abilities_->in_gravity_field(id); });
     // S8 t11 (MOVEMENT §3.2): the Walk deploy clips (anim 0x19 / 0x1A, variant 0 [port]: retail draws a synced variant).
     movement_->set_deploy_clip_fn([this](objects::ObjectId id, int32_t type, uint32_t& frames, float& fps) {
         const anim::AnimWorld* w = hooks_ ? hooks_->world() : nullptr;
