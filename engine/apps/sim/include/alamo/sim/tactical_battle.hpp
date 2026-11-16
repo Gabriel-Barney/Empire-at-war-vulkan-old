@@ -1246,7 +1246,8 @@ public:
         return retreat_side_ >= 0 && !retreat_complete_ ? side_player(static_cast<uint8_t>(retreat_side_)) : -1;
     }
     // TRU1 t06 (presentation / tests): the space retreat coordinator's flight state (0 none, 2 jump-out, 4 waiting for
-    // the cinematic), its cinematic counter, the retreat list in flight order and the release cursor.
+    // the cinematic), its cinematic counter, the retreat list in flight order and the release cursor (units at or below it
+    // fly at Space_Retreat_Flight_Move_Increment from the next update on; -1 before counter 30).
     uint8_t retreat_flight_state() const { return rt_.state; }
     int32_t retreat_flight_counter() const { return rt_.counter; }
     std::span<const objects::ObjectId> retreat_flight_list() const { return rt_.list; }
@@ -1520,7 +1521,7 @@ private:
     struct RetreatFlight {
         uint8_t state = 0;            // 0 none (or done), 2 jump-out, 4 waiting
         int32_t counter = 0;          // cinematic frame counter (+0x154)
-        int32_t release = 0;          // release cursor (+0x60): list index of the last released unit
+        int32_t release = 0;          // release cursor (+0x60): units at or below it fly at the flight increment
         int32_t sound = 0;            // sound cursor (+0x6c)
         int32_t wait = 0;             // frames until the next release (+0x68)
         Vec3 dir{-1.0f, 0.0f, 0.0f};  // flight direction: opposite the ATTACKER ENTRY POSITION marker's facing

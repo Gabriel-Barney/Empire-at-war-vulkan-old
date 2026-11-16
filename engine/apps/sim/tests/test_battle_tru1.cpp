@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "alamo/core/bytes.hpp"
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/hash.hpp"
 #include "alamo/core/host_fs.hpp"
@@ -41,6 +42,19 @@ using ::alamo::test::g_fail;
 namespace {
 
 using ::alamo::test::write_file;
+
+// Battle state save / load (state version 14: retreat flight, spawners, debris) in place: the state hash must survive.
+bool state_round_trip(TacticalBattle& b) {
+    StateHasher h0;
+    b.hash(h0);
+    ByteWriter w;
+    b.write_part(TacticalBattle::SavePart::State, w);
+    ByteReader r(w.bytes());
+    if (!b.read_part(TacticalBattle::SavePart::State, r)) return false;
+    StateHasher h1;
+    b.hash(h1);
+    return h0.digest() == h1.digest();
+}
 
 const char* kTypes = R"(<T>
  <Planet Name="S10_A"><Behavior>PLANET</Behavior><Terrain>Temperate</Terrain><Planet_Credit_Value>10</Planet_Credit_Value></Planet>
@@ -226,7 +240,7 @@ struct SpaceRun {
     std::vector<int32_t> release_counter;  // cinematic counter at which list[i] first moved 500
     // debris
     bool debris_tracked = false, debris_moved = true, debris_turned = false, debris_expired = false, particle_followed = true;
-    bool particle_gone = false, boom_seen = false;
+    bool particle_gone = false, boom_seen = false, saved = false;
     uint32_t debris_spawn_frame = 0, debris_gone_frame = 0;
     int64_t debris_life = -1;
 };
@@ -320,6 +334,8 @@ SpaceRun run_space(const Data& d, int32_t workers) {
             }
         }
         if (!out.requested && b->retreat_block(0) == 0) out.requested = b->request_retreat(0);
+        // mid-flight save / load (units released and creeping, the debris piece alive)
+        if (b->retreat_flight_state() == 2 && b->retreat_flight_counter() == 32) out.saved = state_round_trip(*b);
         if (b->retreat_flight_state() != 0) {
             const std::span<const objects::ObjectId> list = b->retreat_flight_list();
             const int32_t c = b->retreat_flight_counter();
@@ -373,6 +389,7 @@ void test_space(const Data& d) {
     CHECK(a.lined_up && a.dir_ok && a.creep_ok && a.release_ok && a.cruiser_on_marker);
     CHECK(a.release_counter.size() == 3 && a.release_counter[0] == 30 && a.release_counter[1] == 31 && a.release_counter[2] == 34);
     CHECK(a.completed && a.complete_frame_ok);
+    CHECK(a.saved);
     std::printf("  debris: tracked %d (life %lld frames), moved %d, turned %d, particle followed %d, expired %d at %u (spawned %u), "
                 "particle gone %d, explosion %d\n",
                 a.debris_tracked, static_cast<long long>(a.debris_life), a.debris_moved, a.debris_turned, a.particle_followed,
@@ -393,7 +410,7 @@ struct LandRun {
     int32_t active = 0, decided = 0;
     size_t single_count = 0, pack_count = 0;
     bool kept_three = true, refilled = false, refill_delay_ok = false, pack_once = true, pack_refilled = false;
-    bool near_hut = true, adopted = false;
+    bool near_hut = true, adopted = false, saved = false;
     uint32_t kill_frame = 0, refill_frame = 0;
 };
 
@@ -495,6 +512,7 @@ LandRun run_land(const Data& d, int32_t workers) {
         }
         out.active = active;
         out.decided = decided;
+        if (f == 1000) out.saved = state_round_trip(*b);  // live spawners with spawned units: save / load
         if (f > 1600) break;
     }
     out.crc = host.crc_log();
@@ -511,6 +529,7 @@ void test_land(const Data& d) {
     CHECK(a.single_count == 3 && a.kept_three && a.near_hut && a.adopted);
     CHECK(a.kill_frame > 0 && a.refilled && a.refill_delay_ok);
     CHECK(a.pack_count == 3 && a.pack_once && a.pack_refilled);
+    CHECK(a.saved);
     const LandRun w = run_land(d, 4);
     const auto dv = first_divergence(a.crc, w.crc);
     std::printf("  workers 4: %s\n", dv.message.c_str());

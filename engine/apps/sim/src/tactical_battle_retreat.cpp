@@ -10,7 +10,6 @@ using namespace bo3split;
 namespace {
 
 constexpr float kCreepStep = 8.125f;      // per-frame step of every unit not yet released (0x533ac0)
-constexpr int32_t kFxFrame = 19;          // counter > 19: the stretch effect starts (presentation, not modelled)
 constexpr int32_t kReleaseFrame = 30;     // counter >= 30: units are released
 constexpr int32_t kFlightEndFrame = 89;   // counter > 89: the jump-out step is done
 constexpr int32_t kBaseKillFrame = 180;   // counter > 180: the player's star bases die (state 4, 0x533e30)
@@ -117,7 +116,7 @@ bool TacticalBattle::rt_begin_flight(TacticalMode& mode, uint8_t side) {
 }
 
 bool TacticalBattle::rt_flight_tick(TacticalMode& mode) {
-    ++rt_.counter;  // [port] the cinematic camera's counter: one step per frame
+    ++rt_.counter;  // [port] the cinematic camera's counter: one step per frame (counter > 19: the stretch effect, not modelled)
     const int32_t c = rt_.counter;
     const int32_t n = static_cast<int32_t>(rt_.list.size());
     if (rt_.state == 2) {
@@ -125,7 +124,6 @@ bool TacticalBattle::rt_flight_tick(TacticalMode& mode) {
             rt_.state = 4;  // the cinematic is still running
         } else if (c < kReleaseFrame) {
             for (const objects::ObjectId id : rt_.list) rt_move(mode, id, kCreepStep);
-            (void)kFxFrame;
             return false;
         } else {
             objects::ObjectStore& st = mode.primary();

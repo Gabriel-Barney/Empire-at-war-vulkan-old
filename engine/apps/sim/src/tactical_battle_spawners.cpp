@@ -350,8 +350,9 @@ int32_t TacticalBattle::sp_place(TacticalMode& mode, objects::ObjectHandle h, Ve
                     if (std::abs(ox) != r && std::abs(oy) != r) continue;  // the ring only
                     if (grid.passable_cell(cx + ox, cy + oy, mask)) {
                         found = true;
-                        p.x = static_cast<float>(cx + ox) * mv::kCellSize;
-                        p.y = static_cast<float>(cy + oy) * mv::kCellSize;
+                        const mv::V2 cc = mv::cell_center(cx + ox, cy + oy);
+                        p.x = cc.x;
+                        p.y = cc.y;
                     }
                 }
         if (!found) return 2;

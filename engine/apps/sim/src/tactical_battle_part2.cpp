@@ -1550,7 +1550,7 @@ void TacticalBattle::complete_retreat(TacticalMode& mode, uint8_t side) {
         if (cfg_.end_hold_frames > 0) mode.destroy(u.h);
     }
     retreat_complete_ = true;
-    rt_.state = 0;                           // TRU1 t06: coordinator state 3 (the list stays for rt_listed until reset)
+    rt_.state = 0;                           // TRU1 t06: coordinator state 3 (rt_listed is false from here on)
     vm_retreat_complete(side_player(side));  // story t06: 0x340750 (holds released, 0xc tested)
 }
 
