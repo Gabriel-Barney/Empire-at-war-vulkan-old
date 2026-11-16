@@ -273,8 +273,13 @@ Medium AI, Advanced -> Default (6000 credits), Start, Begin. It stops after 5400
 **Read it:** `toolchain\venv\Scripts\python.exe -I tools\probe_mod\q2_traces\analysis\space_scout.py
 out\<run1> out\<run2> out\<run3> --port <parity seeds>\seed_*\port_ai.txt` prints each scout's frame, cell
 (fitted from the three distances, `fit=` the rms error), `d=` / `dfs=` / `des=`, the first-scout tally, the share of
-scouts per cell, plan starts per run and the unit types the build plan returned. The runs also count as
-`geonosis_skirmish` parity references (the hooks only read).
+scouts per cell, plan starts per run and the unit types the build plan returned.
+
+**Warning (first runs, 2026-11-16):** these hooks change the Rebel AI's space play. No space plan came back from its first
+`BlockOnCommand` (no `PBLOCK` at all), and the runs differ from unprobed Geonosis runs (Empire damage 196-302 against
+0-124, pad 40 never reached), so they are **not** `geonosis_skirmish` parity references and the plan lifetimes they show
+are not retail's. Readings taken at `PSTART` (desire, starbase distances, cell) stand. Find why the space plan threads
+stall before reusing the hooks (`docs/re/SKAI_T22_GEONOSIS_SCOUT.md`).
 
 ### Lua probe run (q2f t06): steps for Gabriel
 

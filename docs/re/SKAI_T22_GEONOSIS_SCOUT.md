@@ -1,6 +1,7 @@
 # skai t22: early Rebel approach on Geonosis (space skirmish) — trace evidence
 
-Status: open (2026-11-16, lane skai-b, port at dev dc3afe62). Needs retail plan-level evidence (below).
+Status: open (2026-11-16, lane skai-b; start-station rule landed, residual in the last section). Retail plan records taken 2026-11-16 (section "Retail plan records"; the hooks changed the AI's space play, so only their engine readings count); RE questions in
+`docs/re/SKAI_T22_RE_QUESTIONS.md`.
 
 ## Symptom
 `geonosis_skirmish` over 10 seeds: `combat.damage_taken[Empire]` port 138 vs retail 31 (allowed 99),
@@ -49,3 +50,59 @@ Kit (prepared 2026-11-16, not run yet): the q2_traces space plan hooks (`tools/p
 skirmish plan hooks"; `run_skirmish.cmd -LuaProbe`, three runs; `analysis/space_scout.py`). Each retail Space_Scout start
 records its cell (fitted from three reference distances), its `Space_Area_Needs_Scouting` desire and the two starbase
 distance terms; the pad, refinery and unit-build plans are recorded too, for the build count.
+
+## Retail plan records (2026-11-16, kit dev ecd8cdbf) [H, probe]
+Runs `20261116-132329`, `-132904`, `-133417` (q2_traces `run_skirmish.cmd -LuaProbe -NonInteractive`, Geonosis, idle
+Empire, Rebellion Medium AI, 5400 ticks, all `ticks_reached`). Records of the Rebel AI's Geonosis plans (own station
+`SKIRMISH_REBEL_STAR_BASE_*`; the main-menu attract battle's records are left out). `tostring(AITarget)` names the cell.
+
+| | run 1 | run 2 | run 3 | port (10 seeds, dc3afe62) |
+|---|---|---|---|---|
+| Space_Scout plan starts | 75 | 76 | 82 | 10.8 per run |
+| first scout | CELL_0_2 at 4.5 s | CELL_0_0 at 2.3 s | CELL_0_1 at 2.3 s | CELL_3_3 5, CELL_0_2 3, CELL_0_0 1, CELL_4_3 1 |
+| scouts at CELL_0_0 / 0_1 / 0_2 | 1 / 0 / 5 | 8 / 2 / 9 | 13 / 5 / 4 | 0.9 / 0.1 / 0.9 per run |
+| Secure_Build_Pad_Space starts (all players, 3 runs: 29 / 32 / 26) | | | | 5.2 per run |
+| Tactical_Multiplayer_Build_Space_Units_Generic starts | 5 | 5 | 5 | 2.9 per run |
+| Build_Refinery_Space starts | 0 | 0 | 0 | 4.0 per run |
+
+- **The hooks changed the Rebel AI's space play, so these runs are not parity references.** Against the 8 unprobed
+  runs above: Empire `damage_taken` 196 / 302 / 215 (unprobed 0-124), Rebel `damage_taken` 1064 / 840 / 955 (75-550),
+  Rebel fighters reach CELL_0_0 at frame 2062 / 2087 / 2188 and never pad 40 (CELL_1_0, reached in all 8 unprobed runs),
+  13 X-wings lost from 58 s. No space plan ever came back from its first `BlockOnCommand` (no `PBLOCK` in about 130 plan
+  starts per run, while the same wrapper records `PBLOCK` in land plans, e.g. the menu battle's `Secure_Contestable`), so
+  the hooked space plan threads most likely stall or die in their first block (cause not found). Readings taken before
+  that block stand (the desire, `dfs` / `des`, the cell): they are engine perception values, read in the plan's first
+  instructions. The plan lifetimes below do not: they are probably the probe's effect.
+- **Scout plans are short-lived (probe-affected, see above).** One plan instance starts a new Space_Scout every 3.4-6.7 s (about 100-200 frames;
+  the six pooled instances together every ~2 s), each with a new cell, and every start reports `prev=none` (the run before
+  left no end record). Port scout plans run about 1000 frames (seed 2: plan 6 from frame 1071 to 2156). The desire is
+  10 for nearly every pick (`d=10.0` / `9.99`; a few 7.5, 9.4, 5.4): the same tie the port sees. So retail scouts the
+  western cells too (CELL_0_0 up to 13 times a run), but no scout lives long enough to fly there.
+- **The pre-placed start stations are not found by `Distance_To_Nearest_*_Starbase`.** `dfs` = 1e18 on all 112
+  records while the AI's station is the start `SKIRMISH_REBEL_STAR_BASE_1`, and a real distance on all 121 records once
+  the upgrade made `SKIRMISH_REBEL_STAR_BASE_2` (a new object, from 85.2 s in all three runs). `des` (the idle Empire's
+  start station, never replaced) is 1e18 throughout. The port finds both (its term 1 gives desire 15 to the Rebel home
+  cells at frame 69; retail never shows 15 on Geonosis).
+- **Limit of the records:** no space plan recorded a `PBLOCK`, `PEXIT` or `PDONE` (not even the unit-build plan, whose
+  units are built), so the probe's BlockOnCommand / ScriptExit wraps do not take effect in the space scripts, and how
+  each plan ended is not recorded; `prev=none` only says no end record came before the next start.
+
+## Port rule from the RE answer, and what is left (2026-11-16)
+`SKAI_T22_SPACE_AI_RE.md` Q1.1 [H]: retail creates each space skirmish start station into the threat grid that the
+skirmish start then deletes, so the station is out of every grid query all battle (the upgraded station is not). The
+port now leaves the team-marker start station out of the grid in space skirmishes (`PHASE4.md`, skai t22 line). This
+matches the probe's `dfs` / `des` = 1e18 for the start stations, a reading the hooks cannot have changed.
+
+`geonosis_skirmish`, 10 seeds, against the 8 unprobed retail runs: FAIL 3 / PASS 16 before, FAIL 1 / PASS 18 after.
+`ai.build_count[Rebel]` 29.4 -> 27.2 (retail 19.5) and `outcome.units_final[Rebel]` 38.3 -> 34.7 (29) now pass;
+`combat.damage_taken[Empire]` 138 -> 183 (retail 31) still fails, `combat.first_shot_frame` 1286 (retail 2187).
+
+Residual: with the Rebel home cells no longer at desire 15 (`dfs` is 1e18 now, as in retail), the first Space_Scout at
+frame 69 takes CELL_0_0 in 9/10 seeds, the first of the cells tied at 10 in proposal order. Retail's first scout (a
+`PSTART` reading, taken before any block, so not hook-affected) is CELL_0_2, CELL_0_0 and CELL_0_1 in the three probed
+runs: the same tie, but not always the first cell. The retail desires differ between picks only by float noise that
+follows the pick time (`d` = 10.000000298 at 4.5 s in two runs on different cells), so the tie is real in retail too;
+which rule picks among the tied cells (proposal order per pass, the weighted random phase of Resolve, or a
+`TimeLastSeen` difference of the cells the start squadrons already see) is not settled. A scout at CELL_0_0 sees the
+Empire station and TIEs, and the free store's `Find_Nearest` attack-moves follow (port `fs order` to (-3155,-2530) from
+frame 1442-1946 in 7/10 seeds).
