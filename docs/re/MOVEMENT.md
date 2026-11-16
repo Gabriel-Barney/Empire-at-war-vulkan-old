@@ -1246,7 +1246,7 @@ Values 9–0xB are unused. SimpleSpace reuses 0x13 (following a path) and 0x16 (
 
   Every other locomotor answers false (`0x13b7d0`). The JetPack's +0x118 is `0x1fa90`.
 - **Deploy(true).** It acts when the state is not 0x18 / 0x19, the pending flag (pack +0x2b3) is clear and
-  obj +0x3a1 & 0x40 is clear:
+  obj +0x3a1 & 0x40 is clear (0x40 = in a gravity control field, TRU1_GRAVITY_FIELD §1.6):
   - stop (vf +0x140(0)), state := 0x18;
   - play animation 0x19 (Deploy) with blend 1/30 at `Deployment_Anim_Rate` (type +0x1668, default 1.0, ctor
     `0x3684a8`);

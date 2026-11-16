@@ -2045,6 +2045,9 @@ using ::alamo::test::env_or_empty;
 //   (d) the WeaponBehavior charges up (LobChargeup, then LobCharged after the charge-up frames, both at the point) and
 //       fires one lob shot, which clears the order; ready again, at_position 0 with a live target: the order's point is
 //       the target's position.
+// TRU1 t01 (docs/re/TRU1_GRAVITY_FIELD.md §2): the human's FIRE_LOBBING_SUPERWEAPON (47) button is enabled for the weapon
+// (no base power needed) and not for the Requires_Base_Power variant without power; the accepted order (c) starts 47's
+// recharge (Recharge_Seconds 1 = 30 frames) on the ability countdown.
 const char* kSwFireTypes = R"(
  <Projectile Name="L1_Lob_Proj"><Max_Speed>20.0</Max_Speed><Projectile_Grenade_Gravity>1.0</Projectile_Grenade_Gravity>
   <Projectile_Grenade_Gravity_Lob_Mod>1.0</Projectile_Grenade_Gravity_Lob_Mod><Projectile_Category>GRENADE</Projectile_Category>
@@ -2052,7 +2055,8 @@ const char* kSwFireTypes = R"(
   <Projectile_Blast_Area_Range>30</Projectile_Blast_Area_Range><Projectile_Max_Lifetime>30.0</Projectile_Max_Lifetime></Projectile>
  <GroundVehicle Name="L1_Lobber"><Victory_Relevant>Yes</Victory_Relevant><Tactical_Health>5000</Tactical_Health>
   <CategoryMask>Vehicle</CategoryMask><Population_Value>1</Population_Value><Targeting_Max_Attack_Distance>400</Targeting_Max_Attack_Distance>
-  <Behavior>SELECTABLE</Behavior><LandBehavior>LOBBING_SUPERWEAPON, TURRET, WEAPON</LandBehavior><Collidable_By_Projectile_Living>Yes</Collidable_By_Projectile_Living>
+  <Behavior>SELECTABLE</Behavior><LandBehavior>LOBBING_SUPERWEAPON, TURRET, WEAPON, ABILITY_COUNTDOWN</LandBehavior><Collidable_By_Projectile_Living>Yes</Collidable_By_Projectile_Living>
+  <Unit_Abilities_Data SubObjectList="Yes"><Unit_Ability><Type>FIRE_LOBBING_SUPERWEAPON</Type><Recharge_Seconds>1</Recharge_Seconds></Unit_Ability></Unit_Abilities_Data>
   <Projectile_Types>L1_Lob_Proj</Projectile_Types><Projectile_Fire_Recharge_Seconds>1.0</Projectile_Fire_Recharge_Seconds>
   <Lobbing_Superweapon_Chargeup_Frames>10</Lobbing_Superweapon_Chargeup_Frames><Custom_Soft_Footprint_Radius>10</Custom_Soft_Footprint_Radius>
  </GroundVehicle>
@@ -2065,6 +2069,7 @@ struct SwFireRun {
     bool fired = false, own_markers_gone = false, other_marker_kept = false, silent = false, pending_at_point = false;
     bool restarted = false, chargeup = false, charged = false, shot = false, order_cleared = false;
     bool target_fired = false, target_point = false;
+    bool button_enabled = false, button_unpowered_off = false, recharge_started = false;  // TRU1 t01
     uint32_t fire_frame = 0, chargeup_frame = 0, charged_frame = 0, shot_frame = 0;
 };
 
@@ -2179,7 +2184,14 @@ SwFireRun run_sw_fire(const Data& d) {
                                     b->combat().fire_at_position_state(powered, nullptr) == 0;
             const commands::EventData ev = fire_event(weapon, true, point, objects::kNoObjectId);
             point = Vec3{ev.f("x"), ev.f("y"), ev.f("z")};  // the quantized command position
+            const tactical::abilities::AbilitySystem& ab = static_cast<const TacticalBattle*>(b)->abilities();
+            constexpr uint8_t k47 = tactical::abilities::kFireLobbingSuperweapon;
+            out.button_enabled = ab.has_ability(weapon, k47) && ab.can_activate(weapon, k47, false, true, f) &&
+                                 ab.countdown_counter(weapon, k47) == 0;
+            out.button_unpowered_off = ab.has_ability(powered, k47) && !ab.can_activate(powered, k47, false, true, f);
             out.fired = b->handle_command(*tm, 0, ev, host.random().synced()) == R::None;
+            out.recharge_started = ab.countdown_phase(weapon, k47) == 0 && ab.countdown_counter(weapon, k47) == 30 &&
+                                   !ab.can_activate(weapon, k47, true, true, f);
             out.fire_frame = f;
             out.own_markers_gone = !alive(markers[0]) && !alive(markers[1]);
             out.other_marker_kept = alive(markers[2]);
@@ -2243,6 +2255,9 @@ void test_sw_fire() {
     CHECK(r.fired && r.own_markers_gone && r.other_marker_kept && r.silent && r.pending_at_point && r.restarted);
     CHECK(r.chargeup && r.charged && r.charged_frame == r.chargeup_frame + 10 && r.shot && r.shot_frame >= r.charged_frame && r.order_cleared);
     CHECK(r.target_fired && r.target_point);
+    std::printf("  TRU1 t01: 47 button enabled %d, unpowered variant off %d, recharge started %d\n", r.button_enabled,
+                r.button_unpowered_off, r.recharge_started);
+    CHECK(r.button_enabled && r.button_unpowered_off && r.recharge_started);
 }
 
 // s78n t26 closing review (MOVEMENT §3.4 "Units with Walk_Transition" [H]): the shipped AT_ST_Walker sets Walk_Transition

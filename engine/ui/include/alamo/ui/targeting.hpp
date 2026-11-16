@@ -4,7 +4,8 @@
 //   RadarCameraJump       -> apply_radar_jump (the tactical camera looks at the clicked radar point)
 // Presentation only: the picked target leaves as a command (COMMANDS.md §2: 40 TacticalSpecialAbility on an object,
 // 57 TacticalSpecialAbilityWithDummyTarget on a ground point - the host / sim spawns the dummy target -, 43
-// SetUnitAbilityMode with the point for the position-via-43 types, 12 Reinforce at the drop point).
+// SetUnitAbilityMode with the point for the position-via-43 types, 12 Reinforce at the drop point; 47
+// FIRE_LOBBING_SUPERWEAPON's ground point leaves as 25 SpecialWeaponFire at position, TRU1 t01).
 //
 // Ability families (ABILITIES_HARDPOINTS.md §2.9 table [H for the lists]): ability_target_kind(). [port] HUNT / LURE /
 // AVOID_DANGER (optional target) and TARGETED_INVULNERABILITY take an object; JET_PACK a ground point (57).
@@ -49,6 +50,11 @@ commands::EventData ability_point_event(std::span<const uint32_t> users, uint8_t
                                         uint32_t target = commands::kNoObject);
 // Command 43 turning `ability` on for `users` with a target point (position-via-43 types).
 commands::EventData ability_mode_point_event(std::span<const uint32_t> users, uint8_t ability, Vec3 point);
+// TRU1 t01 (TACTICAL_COMBAT §3.1.1 "Fire-at-position order"): the FIRE_LOBBING_SUPERWEAPON (47) button's ground pick.
+// One command 25 SpecialWeaponFire per user (list7 cap): weapon = the user, at_position 1, the point. [port: retail's
+// targeting cursor is not traced; the sim refuses a user that is not a ready lobbing superweapon of the player.]
+inline constexpr uint8_t kFireLobbingSuperweaponAbility = 47;
+void special_weapon_point_events(std::span<const uint32_t> users, Vec3 point, int32_t player, std::vector<commands::EventData>& out);
 
 class TargetingController {
 public:

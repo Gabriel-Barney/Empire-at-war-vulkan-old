@@ -306,7 +306,10 @@ bool TacticalBattle::sw_fire_at_object(const TacticalMode& mode, objects::Object
 
 bool TacticalBattle::sw_fire_lobbing_at(const TacticalMode& mode, objects::ObjectId weapon, Vec3 point) {
     if (finished_) return false;
-    return l1_sw_.fire_lobbing_at(weapon, to_t(point), frame_, l1_world(mode));
+    if (!l1_sw_.fire_lobbing_at(weapon, to_t(point), frame_, l1_world(mode))) return false;
+    // TRU1 t01 (0x4ea3f0 -> 0x42fb70): an accepted order starts FIRE_LOBBING_SUPERWEAPON's recharge on the ability countdown
+    if (abilities_) abilities_->force_recharge(weapon, tactical::abilities::kFireLobbingSuperweapon);
+    return true;
 }
 
 bool TacticalBattle::special_weapons_allowed(int32_t player) const {

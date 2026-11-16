@@ -854,6 +854,8 @@ void test_save_load_mines();
 void walk(const data::XmlNode& n, const std::function<void(const data::XmlNode&)>& fn);
 void test_foc_data();
 void test_hero_clash_accepts();
+void test_tru1_lobbing_gate();  // TRU1 t01 (test_tru1.cpp)
+void test_tru1_gravity_field();  // TRU1 t03
 
 }  // namespace
 using namespace bo3split;

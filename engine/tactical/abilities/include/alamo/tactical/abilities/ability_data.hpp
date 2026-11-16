@@ -243,6 +243,12 @@ struct AbilityObjectDesc {
     // s78n t04 (TACTICAL_COMBAT §5.4.4 item 3b): Apply_Special_Ability_To_Self_On_Creation (type +0xe8): a Combat_Bonus
     // source of this type also offers its aura to itself at its creation. No shipped type sets it.
     bool apply_self_on_creation = false;
+    // TRU1 t03 (docs/re/TRU1_GRAVITY_FIELD.md): GRAVITY_CONTROL_FIELD (0x3a) generator values and the victim flag.
+    bool gravity_field = false;                 // has the GRAVITY_CONTROL_FIELD behaviour
+    float gravity_field_range = 0.0f;           // Gravity_Control_Field_Range (type +0x1f98)
+    float gravity_field_slow_fraction = 0.0f;   // Gravity_Control_Field_Slow_Fraction (+0x1f9c); 0 = the field does nothing
+    std::string gravity_field_effect;           // Gravity_Control_Field_Effect (presentation, per slowed unit)
+    bool affected_by_gravity_field = false;     // Is_Affected_By_Gravity_Control_Field
 };
 
 struct AbilityData {

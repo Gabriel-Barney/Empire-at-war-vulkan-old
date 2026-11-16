@@ -121,6 +121,12 @@ enum class AbilityEventKind : uint8_t {
     // issued) and joins a new movement coordinator moving (type 3) toward it: the host runs an attack-move to `point` (the
     // owner's position) with `target` as the goal object, keeping the attack order.
     Lured,
+    // TRU1 t03 (docs/re/TRU1_GRAVITY_FIELD.md), presentation only: generator `id` came under base power (`value` 1: the
+    // local player's SFXEvent_HUD_Gravity_Control_Generator_On, story event Interdict_Activated) or lost it (`value` 0:
+    // ..._Off); unit `target` entered (`value` 1: attach the generator type's Gravity_Control_Field_Effect) or left (`value`
+    // 0: remove it) generator `id`'s field.
+    GravityFieldPower,
+    GravitySlow,
 };
 
 // StopOrder `value` (cu8j t02, MOVEMENT §4.7.2 / §4.7.5): a plain stop; the stop-and-hold 0x3a9880 (leave every
@@ -405,6 +411,11 @@ public:
     bool is_stealthed(ObjectId id, uint32_t frame) const;  // Is_Stealthed (0x39b140)
     bool tractored(ObjectId id) const;                     // CD +0x132
     bool interdicting(ObjectId id) const;
+    // TRU1 t03 (docs/re/TRU1_GRAVITY_FIELD.md): `id` is slowed by a gravity control field (obj +0x3a1 bit 0x40; also
+    // refuses DEPLOY on); the generator's powered state and the units it slows (add order).
+    bool in_gravity_field(ObjectId id) const;
+    bool gravity_field_on(ObjectId generator) const;
+    std::span<const ObjectId> gravity_field_units(ObjectId generator) const;
     bool interdicted(int32_t player) const;  // some enemy interdict entry targets this player [L]
     int32_t immobilize_count(ObjectId id) const;
     // OI follow-up t01 (§4.14 [port]): the owner's primary-slot animation type as the sim records it after the advance of
@@ -691,6 +702,11 @@ private:
         uint8_t anim_loop = 0;
         uint8_t anim_then = 0;    // after a one-shot finishes: kAnimStay / kAnimIdle / kAnimHoldLoop
         uint8_t lock_flags = 0;   // OI follow-up t04: which 0x3a8e50 pairs hold a lock (kLock*)
+        // ---- TRU1 t03: GRAVITY_CONTROL_FIELD (docs/re/TRU1_GRAVITY_FIELD.md) ----
+        uint32_t gravity_due = 0;            // generator: next service frame (interval 60)
+        uint8_t gravity_on = 0;              // generator: powered state of the last service (pack +0x48)
+        uint8_t in_gravity_field = 0;        // victim: obj +0x3a1 bit 0x40 (slowed by some generator)
+        std::vector<ObjectId> gravity_list;  // generator: the units it slows, in the order they were added (pack +0x30)
     };
     static constexpr uint8_t kAnimStay = 0;      // parks at its end (Super_Laser)
     static constexpr uint8_t kAnimIdle = 1;      // the owner returns to idle: the record ends
@@ -758,6 +774,12 @@ private:
     void start_recharge(Obj& o, uint32_t t);
     void deactivate_early(Obj& o, uint32_t t, uint32_t frame);
     void update_countdown(Obj& o, uint32_t frame);
+    // TRU1 t03 (gravity_field.cpp): GRAVITY_CONTROL_FIELD service (vf6 0x61c700), apply (0x61bec0), release.
+    void gravity_service(Obj& g, uint32_t frame);
+    void gravity_apply(Obj& g, uint32_t frame);
+    void gravity_release(Obj& g, Obj& victim, uint32_t frame);
+    void gravity_release_all(Obj& g, uint32_t frame);
+    void gravity_unit_dying(Obj& o, uint32_t frame);
     void expire(Obj& o, uint32_t t, uint32_t frame);
     Vec3 position(const Obj& o) const;
     bool alive_unit(ObjectId id) const;
