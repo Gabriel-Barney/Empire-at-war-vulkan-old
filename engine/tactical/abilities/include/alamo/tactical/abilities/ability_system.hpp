@@ -314,6 +314,9 @@ struct AbilityHost {
     // or the battle's defender (0x28a910) when the owner is the neutral player (0x294aa0); -1 = no entry. Unset: [port]
     // the owner.
     std::function<int32_t(int32_t owner)> defense_player;
+    // TRU1 t03 (docs/re/TRU1_GRAVITY_FIELD.md §1.3): player `p`'s faction is Is_Neutral (faction +0x108); the gravity
+    // control field skips such a player in both branches. Unset: no neutral players.
+    std::function<bool(int32_t p)> neutral_player;
 };
 
 // OI abilities: the per-player tactical lists Battlefield_Modifier writes (§2.3.11) besides the reveal range.

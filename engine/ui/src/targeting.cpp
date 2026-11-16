@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "alamo/tactical/abilities/ability_types.hpp"
+
 namespace alamo::ui {
 
 TargetKind ability_target_kind(uint8_t t) {
@@ -135,7 +137,7 @@ bool TargetingController::update(const InputState& in, const Bindings& keys, con
         case TargetKind::Point:
         case TargetKind::PointMode: {
             if (!ground_point(ctx, in.mouse_x(), in.mouse_y(), p)) return true;
-            if (ability_ == kFireLobbingSuperweaponAbility) {  // TRU1 t01: command 25 per user, never queued
+            if (ability_ == tactical::abilities::kFireLobbingSuperweapon) {  // TRU1 t01: command 25 per user, never queued
                 std::vector<commands::EventData> fire;
                 special_weapon_point_events(users_, p, ctx.local_player, fire);
                 for (commands::EventData& e : fire) out.push_back({std::move(e), false});

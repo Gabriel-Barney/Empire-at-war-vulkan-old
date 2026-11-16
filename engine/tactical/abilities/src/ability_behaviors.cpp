@@ -618,7 +618,8 @@ void AbilitySystem::h_deploy(Obj& o, bool on, uint32_t frame) {
     if (on && !ok) return;
     stop_order(o.id, frame, kStopAdopt);  // cu8j t02: 0x3a1ce0 adopts (return 0x3a1f81, MOVEMENT §4.7.2)
     // TRU1 t03 (MOVEMENT §3.2 "Deploy(true)", docs/re/TRU1_GRAVITY_FIELD.md): the Walk locomotor refuses to start a deploy
-    // while the unit is in a gravity control field (obj +0x3a1 bit 0x40); the stop above still happened.
+    // while the unit is in a gravity control field (obj +0x3a1 bit 0x40); the stop above still happened. With a movement
+    // host the locomotor refuses it too (MovementSystem deploy_block, every route); this copy covers the host-less path.
     if (on && o.in_gravity_field) return;
     if (host_.deploy) {
         // S8 t11 (MOVEMENT §3.2, AI_TACTICAL §7.3.3 item 3): 0x391260 calls the Walk locomotor's Deploy(on). The locomotor

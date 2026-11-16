@@ -58,9 +58,11 @@ void AbilitySystem::gravity_service(Obj& g, uint32_t frame) {
 }
 
 void AbilitySystem::gravity_apply(Obj& g, uint32_t frame) {
-    // Players in index order. An enemy of the owner: each of its units in range that is affected and not yet in any field
-    // gets the slow and joins the list. Any other player (the owner included): each of its units in range that carries
-    // this generator's slow loses it. A unit that leaves the range keeps the slow (only power loss or death ends it).
+    // Players in index order, Is_Neutral players skipped. An enemy of the owner: each of its units in range that is
+    // affected and not yet in any field gets the slow and joins the list. Any other player (the owner included): each of
+    // its units in range that carries this generator's slow loses it. A unit that leaves the range keeps the slow (only
+    // power loss or death ends it). [port] Within a player the units go in ascending id (retail: its unsorted object-tree
+    // walk), which orders only the list and the events.
     const AbilityObjectDesc& gd = desc(g);
     const float slow = -gd.gravity_field_slow_fraction;
     if (slow == 0.0f) return;
@@ -75,6 +77,7 @@ void AbilitySystem::gravity_apply(Obj& g, uint32_t frame) {
     const uint32_t players = combat_->player_count();
     for (uint32_t pu = 0; pu < players; ++pu) {
         const auto p = static_cast<int32_t>(pu);
+        if (host_.neutral_player && host_.neutral_player(p)) continue;  // Is_Neutral: neither branch
         const bool hostile = p != g.owner && enemy(p, g.owner);
         for (Obj& v : objs_) {
             if (v.owner != p || v.dead || !v.combat_unit || v.id == g.id) continue;

@@ -97,8 +97,10 @@ within R, else one whose bounding box overlaps the circle. Stops at the result c
   category 0; `TacticalBattle` already multiplies land speed by 1 + list 5.
 - [port] The query uses the unit centre only (the bounding-box overlap is not modelled); garrison-style objects
   (`AbilityObjectDesc::garrison_style`) are skipped.
-- [port] `Is_Neutral` players are not tested by name: the relation table already makes them non-enemies, so they take the
-  release branch, which only affects units carrying this generator's entry.
+- `Is_Neutral` players are skipped in both branches (the host's `neutral_player` hook: an owner whose faction
+  Is_Neutral), so a slowed unit handed to a neutral player keeps the slow.
+- [port] Within one player the units are visited in ascending id (retail: the unsorted object-tree walk of §1.5); this
+  orders only the list and the events.
 - [port] The generator's death releases its units (unit_dying), a removed generator likewise; which retail vfunc runs at
   death is [M].
 - [port] A change of the generator's owner releases nothing by itself; the next service re-sorts the units in range
