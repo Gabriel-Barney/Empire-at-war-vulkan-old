@@ -1192,6 +1192,11 @@ void test_hero_clash_end_and_save();
 void test_hero_clash_pairing();
 void test_hero_clash_fire_refused();
 void test_hero_clash_foc_data();
+void test_area_immune_faction();  // tru1 t04 (test_combat_tru1.cpp)
+void test_base_shield_state();    // tru1 t02
+void test_base_shield_straddle();
+void test_base_shield_dome();
+void test_ground_detonation_particle();  // tru1 t08
 
 }  // namespace
 using namespace bo3split;

@@ -952,8 +952,8 @@ public:
     objects::TypeIndex current_projectile(objects::ObjectId id) const;
     // Are_On_Opposite_Sides_Of_Shield (§1.2): an active BASE_SHIELD with Base_Shield_Radius > 0 that holds exactly one
     // of the points strictly inside (3-D); with `player` >= 0 only shields whose friendliness to it equals `friendly`.
-    // [port] a live BASE_SHIELD object counts as active (no base-power model); the projectile gate (a shot that does no
-    // shield damage) is applied by the caller passing `shield_damage` false: then no shield counts (pack +0xc unknown).
+    // tru1 t02: "active" = combat's BASE_SHIELD state is on; a caller passing `shield_damage` false (a shot that does no
+    // shield damage) counts only shields that are on and upgraded (pack +0xc, TRU1_A_RE_ANSWERS A5).
     bool opposite_sides_of_shield(Vec3 a, Vec3 b, int32_t player, bool friendly, bool shield_damage = true) const;
     // ---- land strikes: orbital bombardment (§3.8) and bombing runs (§3.7) - tactical_battle_l1_strikes.cpp ----
     // Faction data (load_l1_factions: Bombardment_* fields; by galactic faction index).

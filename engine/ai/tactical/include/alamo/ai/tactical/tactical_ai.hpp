@@ -180,6 +180,16 @@ struct AttackStateSignal {
     int32_t target = -1;
 };
 
+// skai t15 - signal 0x18 (SKAI_T15_UNIT_DAMAGED §1): one applied damage instance, raised by Take_Damage 0x3a9e30 through
+// the UNIT_AI behaviour 0x4f59d0. `unit` = the UNIT_AI holder (the victim, else its container: a squad's TEAM container),
+// `attacker` = the shooter (a TEAM member replaced by its container), `deliberate` = the attacker's current attack
+// target (formation target first) was `unit`. Object ids, in the battle's damage order.
+struct UnitDamagedSignal {
+    int32_t unit = -1;
+    int32_t attacker = -1;
+    bool deliberate = false;
+};
+
 // a1j t01 - signal 0x19 "reinforcements unloaded" (ReinforcementsUnloadedDataClass, A1_READINGS §32.1 / §36): a land
 // landing object finished its unload (0x6438a0) or was removed while unloading (detach vf15 0x6442d0). `key` = the
 // Reinforce event's unit field (the pool entry); `units` = the unloaded object ids in spawn order.
@@ -239,6 +249,10 @@ public:
     // (TaskForceClass::Add_Force 0x5f9a90 subscribes every unit it takes; handler 0x5fe5d0 case 0x1E) raises plan event 12
     // Target_In_Range (unit, target) when the target is live. Default: none.
     virtual std::vector<AttackStateSignal> attack_state_signals() { return {}; }
+    // skai t15: the signal 0x18 raises since the last AI frame, in damage order. A land / space task force holding the
+    // unit (Add_Force 0x6e9240 / 0x6e4e30 subscribe) queues plan event 14 Unit_Damaged (unit, attacker, deliberate), at
+    // most one waiting per task force (0x5fd250). Free-store units never get it. Default: none.
+    virtual std::vector<UnitDamagedSignal> unit_damaged_signals() { return {}; }
     // MagicPlan HIJACK_UNIT, tactical with a parent galactic mode (AI_GALACTIC_3 §4.3 steps 1-5): spawn `type`
     // (PerceptionWorld type index) for `player` at the battle planet in the galactic store (steal = MagicPlanStealing or a
     // named hero: the player's first galactic object of the type elsewhere is killed silently; pending respawns of the

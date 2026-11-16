@@ -402,3 +402,33 @@ Consequences of switching it on (why it is not on yet):
 last AT-AT on a cross-map Clear_Infantry walk), so outcome seed 1 was replaced by seed 2. Idle-human Utapau with the re-test
 on (dev + skai-lane2, MSVC, 1 worker, 36000 ticks, seeds 1-10): Rebel AI ends 1 of 10 (33956), Empire AI 10 of 10
 (17525-19883), Underworld AI 5 of 10 (23561-35241). Retail: Rebel 1 of 4 (27265, SKAI_T06_LAND_RUNS §9), Empire 3 of 5 (about 25707; 2026-11-16 runs B1 `20261116-065045` no end, B2 `20261116-071736` 23746, B3 `20261116-074211` 26522, each a defeat screen for the idle Underworld after the palace, Droid Works, Mercenary Barracks and Zann Consortium Factory fell), Underworld 0 of 1. Judged as a tier-2 distribution since 2026-11-16 (DECISIONS.md, "skai exit test as a tier-2 distribution"; `analysis/skai_exit.py`): Rebel and Underworld pass, the Empire AI fails on end frames (port median 18747, floor 20746).
+
+## Why the port's plan 14 holds (skai-a, 2026-11-16) [H: measured unless tagged]
+
+Empire AI vs idle Underworld, Utapau, port seed 1 (dev bc3391f0 + skai-a) against retail B2 `20261116-071736` and run 1
+`20261116-005957`.
+
+- **The base falls about 5000 frames early, structure by structure.** Port: vehicle factory 9888, Droid Works 11699,
+  barracks 13999, palace 18219. Retail: 14368-21111, 17366-21471, 20326-25499, 22746-26314. Up to 9000 both armies are
+  the same (4 stormtrooper teams, 4 AT-ST, 6 Dark Troopers, Boba Fett). The port's plan 14 (4847-9896) keeps 4 AT-ST + 6
+  Dark Troopers on the vehicle factory for 5000 frames (535-785 hull per 1500 frames); retail has one AT-ST there and
+  takes 145-434 per 1500 frames.
+- **Not the cadence.** The port's proposal pass also ends about every 390 frames, like retail (run 1 resolve_enter gaps:
+  median 391). The port's commit gaps of 1100-2350 frames in its Tactical_Targeted log are passes where every proposal
+  failed slot 10.
+- **Not the slot-10 rule.** Land slot 10 0x6b8850 is a tail jump into `Find_Plan_For_Goal` 0x6bae50, which returns the
+  PotentialPlan Init's result; `Propose_Goals_Incremental` 0x6cb120 inserts nothing on false. So retail also rejects a
+  proposal whose first solve fails, as the port does. Between 4800 and 9900 every port Tactical_Targeted proposal
+  (Clear_Infantry, Destroy_Structure, Airstrike, Land_Scout_Area) fails slot 10 on Plan (no free unit): the free store is
+  empty, as retail's is at 7400 (run 1: four Secure_Contestable plans, Flame_Infantry and an 8-unit Destroy_Structure
+  hold all 15 units).
+- **Retail drops its plan without a free unit.** Run 1's vehicle-factory plan (6639) ends at the 7421 commit by
+  displacement (`plan_ends.py`: old candidate not picked again) and no plan starts at that commit. With no free units,
+  the likely way is that the incumbent's re-evaluated desire (Commit step 1) fell below a waiting proposal [M].
+- **The port's incumbent desire never falls.** `Should_Destroy_Structure` for the vehicle factory stays 15.001 (target
+  EnemyForce 0) from 601 to 10201, while plan 14's units fight the six idle merc teams about 300 from it; the palace and
+  barracks read EnemyForce 0.63. With hysteresis the incumbent sits at 16.0 and no proposal reaches it.
+- **Open:** retail's `Should_Destroy_Structure` per target over time. The kit's GameScoring probe now records it
+  (`TDESIRE`, every 10th tactical sample; `analysis/desire_trace.py --retail <run> --port <ai log>`).
+- **Ported on the way (rules, not the cause here):** plan event 14 `Unit_Damaged` (SKAI_T15_UNIT_DAMAGED, land task
+  forces for now) - in seed 1 it reaches the Destroy_Structure plans 26 times and moves the end from 18429 to 19375.

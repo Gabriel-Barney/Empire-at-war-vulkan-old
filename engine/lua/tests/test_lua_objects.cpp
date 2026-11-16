@@ -362,6 +362,27 @@ static void test_stage3(const Db& db) {
     vm.post_event("Named");
     CHECK(run(vm, "named = 0 function Named() named = named + 1 end ev = GetEvent() pn = tostring(GetEvent.Params()) ev()") == "");
     CHECK(gnum(vm, "named") == 1.0 && gstr(vm, "pn") == "nil");
+    // skai t15 (SKAI_T15_UNIT_DAMAGED §2.2): a coalesced task-force event is dropped while one of the same name for the
+    // same task force waits; another task force's, or one after the drain, is queued.
+    CHECK(run(vm, "dmg = '' function Default_Unit_Damaged(tf, u, a, d) dmg = dmg .. (d and 'd' or 'n') end") == "");
+    const auto dmg_args = [](bool deliberate) {
+        std::vector<AiEventArg> v(3);
+        v[0].kind = v[1].kind = AiEventArg::Number;
+        v[0].number = 1.0;
+        v[1].number = 2.0;
+        v[2].kind = AiEventArg::Boolean;
+        v[2].boolean = deliberate;
+        return v;
+    };
+    const std::vector<AiEventArg> d1 = dmg_args(true), d0 = dmg_args(false);
+    CHECK(dispatch_task_force_event(vm, 7, AiTaskForceKind::Land, "MainForce", "Unit_Damaged", d1, true, nullptr, true));
+    CHECK(dispatch_task_force_event(vm, 7, AiTaskForceKind::Land, "MainForce", "Unit_Damaged", d0, true, nullptr, true));
+    CHECK(dispatch_task_force_event(vm, 8, AiTaskForceKind::Land, "MainForce", "Unit_Damaged", d0, true, nullptr, true));
+    CHECK(run(vm, "ev = GetEvent() while ev do ev(unpack(GetEvent.Params())) ev = GetEvent() end") == "");
+    CHECK(gstr(vm, "dmg") == "dn");  // tf 7's second event dropped; tf 8's kept
+    CHECK(dispatch_task_force_event(vm, 7, AiTaskForceKind::Land, "MainForce", "Unit_Damaged", d0, true, nullptr, true));
+    CHECK(run(vm, "ev = GetEvent() while ev do ev(unpack(GetEvent.Params())) ev = GetEvent() end") == "");
+    CHECK(gstr(vm, "dmg") == "dnn");  // after the drain tf 7 gets the next one
     // Argument errors are the script error (+0x121: logged, the script's exit flag; no unwind).
     CHECK(run(vm, "t1.Event_Object_In_Range(5, 1)") == "" &&
           last_message_has(vm, "Event_Object_In_Range -- Expected function object as parameter 1.") && vm.exit_requested());

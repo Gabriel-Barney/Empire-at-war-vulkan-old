@@ -269,6 +269,7 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
     struct LaneInputs {
         std::vector<OpportunityTargetEvent> opportunity;
         std::vector<AttackStateSignal> attack_states;
+        std::vector<UnitDamagedSignal> damaged;  // skai t15: signal 0x18
         std::vector<int32_t> ability_finished;
         std::vector<ReinforcementsUnloaded> unloaded;
         std::vector<TacticalAiHost::ProductionCompleted> produced;
@@ -614,7 +615,8 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
     void end_plan(int32_t id, bool by_goal_system);
     void service_plans(int32_t player);
     void drain_world_requests(int32_t player, int32_t plan);
-    void tf_event(const TfRec& tf, std::string_view event, const std::vector<lua::AiEventArg>& args, bool always_queue = false);
+    void tf_event(const TfRec& tf, std::string_view event, const std::vector<lua::AiEventArg>& args, bool always_queue = false,
+                  bool coalesce = false);
     // S7 t20 (AI_TACTICAL §7.3.2): a member left the task force (died / removed / owner changed / released) or a production
     // entry failed. When nothing is left (no unit, no pending reinforcement, no build in progress [M: the TF +0x60 entry
     // vector's type-flag test]) plan event 7 No_Units_Remaining is queued to the plan (dispatched by its next PumpEvents).
@@ -633,6 +635,7 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
     void ambush_plan(StatusRec& s, bool first);
     void opportunity_events(const std::vector<OpportunityTargetEvent>& events);  // STRATEGIC_GAPS §5.3
     void target_in_range_events(const std::vector<AttackStateSignal>& events);   // s78f t08: signal 0x1E
+    void unit_damaged_events(const std::vector<UnitDamagedSignal>& events);      // skai t15: signal 0x18
     void service_statuses(int32_t player);
     bool step_status(StatusRec& s);
     bool step_object_block(StatusRec& s, const TfRec& t);
@@ -2375,12 +2378,13 @@ void TacticalAiWorld::Impl::end_plan(int32_t id, bool by_goal_system) {
 }
 
 void TacticalAiWorld::Impl::tf_event(const TfRec& tf, std::string_view event, const std::vector<lua::AiEventArg>& args,
-                                    bool always_queue) {
+                                    bool always_queue, bool coalesce) {
     const auto it = plans.find(tf.plan);
     if (it == plans.end() || !it->second.vm) return;
     std::string err;
     const bool queued = always_queue || current_plan == tf.plan;
-    if (!lua::dispatch_task_force_event(*it->second.vm, tf.id, tf.kind, tf.name, event, args, queued, &err) && !err.empty())
+    if (!lua::dispatch_task_force_event(*it->second.vm, tf.id, tf.kind, tf.name, event, args, queued, &err, coalesce) &&
+        !err.empty())
         errors.push_back(library.plans[it->second.plan].name + " " + std::string(event) + ": " + err);
 }
 
@@ -2438,6 +2442,36 @@ void TacticalAiWorld::Impl::target_in_range_events(const std::vector<AttackState
         decide(t->player, "event Target_In_Range (tf " + t->name + ")");
         const TfRec copy = *t;
         tf_event(copy, "Target_In_Range", {a, b});
+    }
+}
+
+// skai t15 (SKAI_T15_UNIT_DAMAGED §1.3-§2.2, §4 [H]): the land / space task-force handler (0x6ed230 / 0x6e8370, signal
+// 0x18) queues plan event 14 Unit_Damaged (unit, attacker, deliberate) for the task force that holds the unit (Add_Force
+// subscribed it; a released unit is no longer held). The post is queued (0x6006b0 with queued = 1) and dropped while a
+// Unit_Damaged of that task force is still waiting (0x5fd250 -> 0x25a250): the first hit since the last drain wins.
+void TacticalAiWorld::Impl::unit_damaged_events(const std::vector<UnitDamagedSignal>& events) {
+    for (const UnitDamagedSignal& e : events) {
+        const ObjectHandle unit = store.find(e.unit);
+        const ObjectHandle attacker = store.find(e.attacker);
+        if (!store.alive(unit) || !store.alive(attacker)) continue;
+        int32_t hit = -1;
+        for (const auto& [id, t] : tfs) {  // ascending TF id; a unit is held by at most one TF
+            for (const ObjectHandle u : t.units)
+                if (u == unit) hit = id;
+            if (hit >= 0) break;
+        }
+        const TfRec* t = hit >= 0 ? tf_rec(hit) : nullptr;
+        if (!t) continue;
+        lua::AiEventArg a, b, c;
+        a.kind = b.kind = lua::AiEventArg::Object;
+        a.object = unit;
+        b.object = attacker;
+        c.kind = lua::AiEventArg::Boolean;
+        c.boolean = e.deliberate;
+        const TfRec copy = *t;
+        if (const auto pit = plans.find(copy.plan); pit != plans.end() && pit->second.plan < library.plans.size())
+            ++stats["event Unit_Damaged (" + library.plans[pit->second.plan].name + ")"];  // raised (a queued one may drop it)
+        tf_event(copy, "Unit_Damaged", {a, b, c}, true, true);
     }
 }
 
@@ -3977,6 +4011,7 @@ void TacticalAiWorld::publish(int64_t now, uint32_t mode_frame) {
         w.host.fill(w.w, w.facts);
         w.lane_in.opportunity = w.host.opportunity_targets();
         w.lane_in.attack_states = w.host.attack_state_signals();
+        w.lane_in.damaged = w.host.unit_damaged_signals();
         w.lane_in.ability_finished = w.host.ability_finished();
         w.lane_in.unloaded = w.host.reinforcements_unloaded();
         w.lane_in.produced = w.host.production_completed();
@@ -4008,6 +4043,7 @@ void run_update(TacticalAiWorld::Impl& w, bool lane) {
         // sp3 t02: with the lane on, the lists publish() captured (same calls, same order)
         w.opportunity_events(lane ? w.lane_in.opportunity : w.host.opportunity_targets());  // STRATEGIC_GAPS §5.3
         w.target_in_range_events(lane ? w.lane_in.attack_states : w.host.attack_state_signals());  // s78f t08: signal 0x1E
+        w.unit_damaged_events(lane ? w.lane_in.damaged : w.host.unit_damaged_signals());          // skai t15: signal 0x18
         w.ability_signals(lane ? w.lane_in.ability_finished : w.host.ability_finished());       // S7 t15 A1: signal 0x29
         w.reinforcements_unloaded(lane ? w.lane_in.unloaded : w.host.reinforcements_unloaded());  // a1j t01: signal 0x19
         w.production_completed(lane ? w.lane_in.produced : w.host.production_completed());        // q6 t19: signal 0x22

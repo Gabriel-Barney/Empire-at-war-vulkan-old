@@ -171,6 +171,7 @@ public:
     std::vector<ai::tactical::OpportunityTargetEvent> opportunity_targets() override;
     // s78f t08: CombatSystem::attack_state_events of the tick just run (the AI updates after the battle tick).
     std::vector<ai::tactical::AttackStateSignal> attack_state_signals() override;
+    std::vector<ai::tactical::UnitDamagedSignal> unit_damaged_signals() override;  // skai t15: signal 0x18
     // S7 t15 A1: TacticalBattle::ability_finished_events of the tick just run (signal 0x29, in order).
     std::vector<int32_t> ability_finished() override;
     // S7 t21: TacticalBattle::movement_locked (0x39ad40) for the ambush member list.

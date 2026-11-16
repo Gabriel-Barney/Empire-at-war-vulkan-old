@@ -2869,6 +2869,50 @@ std::vector<at::AttackStateSignal> BattleAi::attack_state_signals() {
     return out;
 }
 
+// skai t15 (SKAI_T15_UNIT_DAMAGED §1.1-§1.5, §3 [H]): Take_Damage's tail hands each applied damage instance to the UNIT_AI
+// behaviour of the victim, else of its container (0x3ab23b), which raises signal 0x18 {attacker, deliberate}. Gates: a
+// resolvable live attacker; health and the pre-shield amount > 0 (a hit the shield takes whole still counts); a killing
+// blow on the UNIT_AI holder raises nothing. No owner, structure, amount or cooldown filter. attacker = the shooter, a
+// TEAM member replaced by its container (0x39b1a0); deliberate = its current attack target, formation target first
+// (0x397a40), is the unit. [port] a target that names the hit member of the holder's team counts as the holder.
+// [port] land only for now (skai t15, 2026-11-16): the space task forces get it with lane skai-b's space work.
+std::vector<at::UnitDamagedSignal> BattleAi::unit_damaged_signals() {
+    std::vector<at::UnitDamagedSignal> out;
+    if (b_->space_ || !b_->combat_) return out;
+    const objects::ObjectStore& st = mode_->primary();
+    const tc::CombatSystem& c = *b_->combat_;
+    for (const tc::DamageEvent& e : c.damage_events()) {
+        if (e.source == tc::kNoObject || !(e.after_multipliers > 0.0f)) continue;
+        const objects::ObjectHandle sh = st.find(static_cast<objects::ObjectId>(e.source));
+        const objects::ObjectHandle vh = st.find(static_cast<objects::ObjectId>(e.victim));
+        if (!st.alive(sh) || !st.alive(vh)) continue;
+        // the UNIT_AI holder: the victim, else its container
+        objects::ObjectId holder = objects::kNoObjectId;
+        if (st.has_behavior(vh, kUnitAi)) {
+            if (e.killed) continue;  // the killing blow on the holder
+            holder = static_cast<objects::ObjectId>(e.victim);
+        } else if (const TacticalBattle::Unit* vu = b_->unit_by_id(static_cast<objects::ObjectId>(e.victim));
+                   vu && vu->container != 0xFFFFFFFFu) {
+            const objects::ObjectId cid = b_->containers_[vu->container].id;
+            const objects::ObjectHandle ch = st.find(cid);
+            if (st.alive(ch) && st.has_behavior(ch, kUnitAi)) holder = cid;
+        }
+        if (holder == objects::kNoObjectId) continue;
+        auto attacker = static_cast<objects::ObjectId>(e.source);
+        if (const TacticalBattle::Unit* su = b_->unit_by_id(attacker); su && su->container != 0xFFFFFFFFu &&
+                                                                       b_->containers_[su->container].team)
+            attacker = b_->containers_[su->container].id;
+        tc::ObjectId aim = tc::kNoObject;
+        if (c.has_unit(e.source)) {
+            aim = c.attack_goal(e.source);
+            if (aim == tc::kNoObject) aim = c.current_target(e.source);
+        }
+        const bool deliberate = aim != tc::kNoObject && (static_cast<objects::ObjectId>(aim) == holder || aim == e.victim);
+        out.push_back({static_cast<int32_t>(holder), static_cast<int32_t>(attacker), deliberate});
+    }
+    return out;
+}
+
 at::TacticalReinforcement BattleAi::hijack_unit(int32_t player, int32_t type, bool steal) {
     at::TacticalReinforcement fail;
     GalacticMode* gm = host_->galactic_mode();

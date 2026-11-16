@@ -80,6 +80,8 @@ void apply_game_constants(CombatConfig& c, const data::GameConstants& gc) {
     // cu8 t03: the remaining data-backed knobs (FoC: only Base_Shield_Vulnerability_Modifier 2.0f differs from the
     // defaults; AITestGameConstants changes the shield / energy ones).
     c.base_shield_vulnerability = gc.get_float("Base_Shield_Vulnerability_Modifier", c.base_shield_vulnerability);
+    c.base_shield_delay_time = gc.get_float("Base_Shield_Delay_Time", c.base_shield_delay_time);  // tru1 t02
+    c.base_shield_speed = gc.get_float("Base_Shield_Speed_Modifier", c.base_shield_speed);
     c.hull_vs_hardpoints_constraint = gc.get_float("Hull_Vs_Hard_Points_Health_Constraint", c.hull_vs_hardpoints_constraint);
     c.under_construction_damage_multiplier = gc.get_float("Under_Construction_Damage_Multiplier", c.under_construction_damage_multiplier);
     c.depleted_shield_regen_cap = gc.get_float("Depleted_Shield_Regen_Cap", c.depleted_shield_regen_cap);
@@ -235,6 +237,11 @@ bool CombatSystem::add_unit(const UnitSpawn& s, uint32_t frame, SimRng& rng) {
         // stand-in [L]). [M] The pulse count before the first shot: Projectile_Fire_Pulse_Count (the step-7 reset value).
         nu.weapon_cooldown = hp_first_cooldown(ud.weapon_recharge, cfg_.fps, rng);
         nu.weapon_pulses = ud.weapon_pulse_count;
+    }
+    if (ud.base_shield) {
+        // tru1 t02: BASE_SHIELD initialise vf9 0x56aca0 -> 0x4c2f90, interval 15 > 1: one synced Get_Int(0, 14) for the
+        // service phase (TACTICAL_GAPS §6.4). The first evaluation runs at the unit's first tick (base_shield.cpp).
+        nu.bshield_next = frame + static_cast<uint32_t>(rng.range_int(0, 14));
     }
     if (nu.team != 0) {  // s78n review: a team unit added between ticks is in the member lists at once (as after a load)
         const std::pair<uint32_t, ObjectId> e{nu.team, nu.id};
@@ -999,7 +1006,8 @@ bool CombatSystem::targeting_idle(const Unit& u, uint32_t frame) const {
     // power (0x632270). S7 t14: the jetpack suspends TARGETING; S8 t25: targeting suspended.
     const bool idle = u.stun_end > frame || (desc_of(u).requires_base_power && !has_base_power(u.owner));
     // s78n t06 (HERO_CLASH §3.1): a hero in a clash has TARGETING suspended (slot 9) while +0x3b4 is set.
-    return idle || (u.flags & (kUnitWeaponsSuspended | kUnitTargetingSuspended | kUnitHeroClash | kUnitScriptNoFire));
+    return idle || (u.flags & (kUnitWeaponsSuspended | kUnitTargetingSuspended | kUnitHeroClash | kUnitScriptNoFire |
+                               kUnitInBaseShield));  // tru1 t02
 }
 
 float CombatSystem::team_mod_multiplier(uint32_t team, ModKind kind) const {

@@ -130,7 +130,8 @@ enum class AbilityEventKind : uint8_t {
 };
 
 // StopOrder `value` (cu8j t02, MOVEMENT §4.7.2 / §4.7.5): a plain stop; the stop-and-hold 0x3a9880 (leave every
-// coordinator, then the adopt 0x39bcb0: one FormationClass ctor draw); a stop followed by the adopt (DEPLOY 0x3a1ce0).
+// coordinator, then the adopt 0x39bcb0: one FormationClass ctor draw; DEPLOY 0x3a1ce0 since skai t19); a stop followed
+// by the adopt only when no coordinator is left (no sender since skai t19).
 inline constexpr int32_t kStopPlain = 0;
 inline constexpr int32_t kStopHold = 1;
 inline constexpr int32_t kStopAdopt = 2;

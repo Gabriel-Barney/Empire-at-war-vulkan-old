@@ -1215,6 +1215,45 @@ function Q2T_TypeName(t)
 	return Q2L_Str(function() return t.Get_Name() end)
 end
 
+-- skai t15 (2026-11-16): every 10th sample, TDESIRE lframe=<f> ai=<id> obj=<TYPE>#<object id> d=<value> per base
+-- structure of the other factions: d = EvaluatePerception("Should_Destroy_Structure", <ai player>, <structure>), the
+-- shipped Destroy_Structure goal equation (BASICLANDEQUATIONS). For these types it is 0.001 + 15 * (1 - the target
+-- location's EnemyForce) while the faction-owner term is 1, so the port's per-target value can be compared over time.
+-- d=? when the call fails (a player without an AI). Silent (no ERR) so a missing binding does not stop the sampler.
+Q2T_DESIRE_TYPES = {
+	U_GROUND_VEHICLE_FACTORY = true, U_GROUND_DROID_WORKS = true, U_GROUND_BARRACKS = true, U_GROUND_PALACE = true,
+	E_GROUND_BARRACKS = true, E_GROUND_LIGHT_VEHICLE_FACTORY = true, E_GROUND_HEAVY_VEHICLE_FACTORY = true,
+	E_GROUND_RESEARCH_FACILITY = true, IMPERIAL_COMMAND_CENTER = true, SECONDARY_MERCENARY_OUTFITTER = true,
+}
+Q2T_DesireN = 0
+
+function Q2T_Desires()
+	for _, aname in ipairs(Q2T_FACTIONS) do
+		local ai = Find_Player(aname)
+		if ai then
+			for _, ename in ipairs(Q2T_FACTIONS) do
+				local e = nil
+				if ename ~= aname then
+					e = Find_Player(ename)
+				end
+				if e then
+					local ok, objs = pcall(Find_All_Objects_Of_Type, e)
+					if ok and objs then
+						for _, o in pairs(objs) do
+							local tn = Q2L_Str(function() return o.Get_Type().Get_Name() end)
+							if Q2T_DESIRE_TYPES[tn] then
+								Q2L_Say("TDESIRE", "lframe=" .. Q2T_Frame() .. " ai=" .. Q2T_PlayerId(ai) .. " obj=" .. tn .. "#" ..
+									Q2L_Str(function() return o.Get_Object_ID() end) .. " d=" ..
+									Q2L_Str(function() return EvaluatePerception("Should_Destroy_Structure", ai, o) end))
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+end
+
 function Q2T_Sample(why)
 	Q2L_Say("TSAMPLE", "why=" .. why .. " lframe=" .. Q2T_Frame() .. " time=" .. Q2L_Str(GetCurrentTime))
 	for _, name in ipairs(Q2T_FACTIONS) do
@@ -1224,6 +1263,14 @@ function Q2T_Sample(why)
 			Q2L_Say("TPLAYER", "faction=" .. name .. " id=" .. Q2T_PlayerId(p) ..
 				" credits=" .. Q2L_Str(function() return p.Get_Credits() end) ..
 				" tech=" .. Q2L_Str(function() return p.Get_Tech_Level() end) .. " objects=" .. n)
+		end
+	end
+	Q2T_DesireN = Q2T_DesireN + 1
+	if Q2T_DesireN >= 10 then
+		Q2T_DesireN = 0
+		local ok, err = pcall(Q2T_Desires)
+		if not ok then
+			Q2L_Error("Q2T_Desires", err)
 		end
 	end
 end

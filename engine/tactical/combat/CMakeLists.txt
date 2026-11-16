@@ -17,6 +17,7 @@ add_library(alamo_tactical_combat STATIC
   src/combat_save.cpp  # N1 stage 2: CombatSystem / ModifierSet / WeatherSystem write + read
   src/rocket.cpp  # refixf t01: ROCKET / MPTL_ROCKET spline flight
   src/hero_clash.cpp  # s78n t06: HEROCLASH.XML + the land hero-clash manager
+  src/base_shield.cpp  # tru1 t02: BASE_SHIELD / AFFECTED_BY_SHIELD, the dome, Take_Damage step 15a
 )
 add_library(alamo::tactical_combat ALIAS alamo_tactical_combat)
 target_include_directories(alamo_tactical_combat PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -26,7 +27,8 @@ target_link_libraries(alamo_tactical_combat PUBLIC alamo_tactical alamo_core ala
 # (CRC log identical for 1/4/N threads; golden file shared by MSVC and clang), per-tick
 # allocation count, modifier-aggregation micro-benchmark (printed). Data checks use ALAMO_FOC_DATA.
 # Regenerate the golden: alamo_tactical_combat_tests --write-golden <file>.
-add_executable(alamo_tactical_combat_tests tests/test_combat.cpp tests/test_combat_part1.cpp tests/test_combat_part2.cpp tests/test_combat_part3.cpp)
+add_executable(alamo_tactical_combat_tests tests/test_combat.cpp tests/test_combat_part1.cpp tests/test_combat_part2.cpp tests/test_combat_part3.cpp
+  tests/test_combat_tru1.cpp)  # tru1 lane A
 target_link_libraries(alamo_tactical_combat_tests PRIVATE alamo_tactical_combat alamo_data alamo_objects alamo_test_support)
 # FoC data through the VFS (Data\XML lives in Config.meg in the shipped game).
 if(TARGET alamo_vfs)
