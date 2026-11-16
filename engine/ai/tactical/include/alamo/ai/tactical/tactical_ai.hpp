@@ -407,10 +407,10 @@ struct TacticalAiConfig {
     // store as an entry reserved by its PotentialPlan (retail's tactical stores, +0x48 = 0: land and space alike). On, a
     // task-force member's reservation is suspended at each Commit start and re-asserted when its goal is kept, so a goal
     // accepted earlier in the Commit can take it and the member's plan fails the stolen test 0x6c45e0. Off = the port
-    // before skai t22 (the unit leaves the store, its reservation is released). Space on; land off until lane skai-a
-    // turns it on with its land goldens.
+    // before skai t22 (the unit leaves the store, its reservation is released). On in both modes (land since skai t15,
+    // 2026-11-16, with its land goldens).
     bool keep_members_on_free_store_space = true;
-    bool keep_members_on_free_store_land = false;
+    bool keep_members_on_free_store_land = true;
     bool keep_members_on_free_store(TacticalMode m) const {
         return m == TacticalMode::Land ? keep_members_on_free_store_land : keep_members_on_free_store_space;
     }
