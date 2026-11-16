@@ -1,5 +1,5 @@
 {
- "commit": "4ecf85ba",
+ "commit": "d6206d38",
  "mode": "distribution",
  "scenarios": {
   "geonosis_skirmish": {
@@ -32,7 +32,7 @@
     "ai.build_mix[Rebel]": "PASS",
     "ai.first_build_frame[Rebel]": "PASS",
     "combat.damage_taken[Empire]": "FAIL",
-    "combat.damage_taken[Rebel]": "PASS",
+    "combat.damage_taken[Rebel]": "FAIL",
     "combat.first_shot_frame": "PASS",
     "econ.credits_at_1800[Empire]": "PASS",
     "econ.credits_at_1800[Rebel]": "PASS",
@@ -54,8 +54,8 @@
      "PASS": 5
     },
     "damage": {
-     "FAIL": 1,
-     "PASS": 2
+     "FAIL": 2,
+     "PASS": 1
     },
     "income": {
      "PASS": 6
