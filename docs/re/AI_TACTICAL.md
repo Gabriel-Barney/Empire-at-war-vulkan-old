@@ -34,6 +34,8 @@ Runs on the AI player's first T7 slot after the mode starts, not at mode creatio
 | Execution slot 6 (0x526120) | creates `LandExecutionPathFinderClass` (zone graph) and runs Recompute_All_Pairs once; next recompute staggered per player (PHASE2_ANSWERS §11). Then starts the free store (slot 0xa8 → script start, §4). [H] | no path finder (only modes 0 and 1 create one); free store start. [H] |
 | Template init | picks the mode's template list from AIPlayerType `Templates/Land` or `/Space` (shipped: `Test_Land`, `Test_Space`). [H] | same |
 
+Space skirmish (skai t22, 2026-11-16): the start stations are missing from the threat grid for the whole battle, so `DistanceToNearest*` starbase tokens answer 1e18 until an upgrade; the commit cadence, goal re-evaluation and hysteresis, and what a dying plan thread does to its goal: SKAI_T22_SPACE_AI_RE.md.
+
 **Tactical credit transfer (land only)** [H code; M field names]
 - At land slot 6 (0x6b87e0): if the mode under the land mode in the GMM stack is **galactic** (campaign battle) and the AI player is not human, `0x612b00` runs on the **galactic** context's budget: for each budget category, `take = min(allowance(+0x5c) × available(+0x44), available)` when both are positive; subtract `take` from the category's available and pool; `Σtake` becomes the player's credits, and `credits − Σtake` is saved at budget +0x88 (flag +0x84).
 - At land slot 7 (battle end, 0x6b8860 → 0x614a70): player credits = saved; then `Add_Credits(leftover − released(+0x8c), aiGain=true)` — so tactical leftovers go back through `Add_Credits`, which multiplies positive AI gains by `Credit_Multiplier` (0x27f370) [H; the multiplication of returned leftovers is a quirk to keep].

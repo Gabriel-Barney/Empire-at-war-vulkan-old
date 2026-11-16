@@ -4,6 +4,8 @@ Asked 2026-11-16 by lane skai-b. Evidence: `docs/re/SKAI_T22_GEONOSIS_SCOUT.md`,
 runs with read-only plan hooks). Answers go into a new `docs/re/SKAI_T22_SPACE_AI_RE.md` (behaviour in words, never
 decompiled code), with pointers from `AI_TACTICAL_PERCEPTION.md` §4.3 and `AI_TACTICAL.md`.
 
+Answered 2026-11-16 in `docs/re/SKAI_T22_SPACE_AI_RE.md` (Q2 marked "evidence suspect: probe hooks").
+
 ## Q1. Which objects are in the perception grid's owner lists in space, and when?
 Retail `EvaluatePerception("Distance_To_Nearest_Friendly_Starbase", <Rebel AI>, <cell>)` (the equation in
 OFFENSIVESPACEEQUATIONS.XML: `Variable_Target.DistanceToNearestFriendly{Parameter_Type = ... "Skirmish_Rebel_Star_Base_1",
