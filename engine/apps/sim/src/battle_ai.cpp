@@ -1432,10 +1432,12 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
     // Set every fill (a load restores it too); the callbacks below are installed whenever missing, so a world read
     // from a save (which keeps only the callbacks its owner copies) gets them back at the next fill.
     w.skirmish_or_mp = b_->cfg_.skirmish;
-    // ccpgu t03: Game.IsLandControlGame (AI_GALACTIC_TOKENS 0x6e2060) = GameModeManager +0x20 == 4, the Capture Control Points
-    // game type. [port] the port has no game-type field; the battle's control-point win condition (SKIRMISH_SETUP 4.2,
-    // BattleConfig::control_point_domination) is that type. It gates Secure_Victory_Control_Point (LandGoals.xml).
-    w.land_control = b_->cfg_.skirmish && b_->cfg_.control_point_domination && !b_->space_;
+    // Game.IsLandControlGame (AI_GALACTIC_TOKENS 0x6e2060) = GameModeManager +0x20 == 4. skai t15 [H, measured]: true in
+    // a plain (conquest) land skirmish too. Retail run 20261116-171531 (Utapau, Advanced Default, won by destroying the
+    // base) holds two active Hold_Position goals at desire 20.000, and Should_Hold_Position reaches 20 only through
+    // 20 * Game.IsLandControlGame (SKAI_T15_PLAN_RETEST "Hold_Position"). ccpgu t03 had tied it to the control-point
+    // win condition [port]. It gates Hold_Position, Secure_Victory_Control_Point and May_Lose_Land_Control_Game.
+    w.land_control = b_->cfg_.skirmish && !b_->space_;
     if (!w.parent_rep_type) {
         // The parent-mode (galactic) object by id (0x28aa50), not found -> -1; its type [M: 0x3973b0 on the galactic
         // object; the port's galactic units / companies are their own representative type, no TRANSPORT carried type].

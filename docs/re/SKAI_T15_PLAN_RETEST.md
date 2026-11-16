@@ -519,3 +519,37 @@ It waits for Gabriel (the run cap for 2026-11-16 is used).
 - skai-b's space plan hooks (0276b68b) are in the payload but are not run in a land game.
 
 **Resolve candidates (added 2026-11-16, commit 50c84d00):** the hooks now log every land Resolve_Category's active goals and proposals (type, target, desire, effective desire, state, plan), the survivors and the accepted proposals, and the phase of each activation. For each displaced plan end, `analysis/plan_ends.py out\<run>` prints that commit's candidates, which names the proposal that displaced the plan. Layout: `SKAI_T15_RESOLVE_HOOK_RE.md`. The old `resolve_enter` category bug (args[1]) is fixed. Offline check: `frida/selftest_hooks.py`.
+
+## Hold_Position: what displaced the plan (skai-a, 2026-11-16) [H: measured]
+
+Retail hook run `20261116-171531` (kit dev 1302b4ab, Resolve candidate hook) is an Empire AI against an idle Underworld player on Utapau, Advanced Default. The Underworld palace falls at 22544. `analysis/plan_ends.py` finds 17 Destroy_Structure plan ends: purge 6, script 4, displaced 4, re-test 2, other 1. The candidates in category 5 (Tactical_Targeted) at the displaced commits:
+
+- **7445 and 11395:** the incumbent is a Destroy_Structure on object 93306. Its desire is 1.5, which is the 0.1 non-faction factor, so the target is a neutral structure. A Destroy_Structure proposal on object 161267 (15.001) replaces it.
+- **10190:** the Destroy_Structure on 161267 (desire 15.001, effective 16.001) is dropped. A **Hold_Position** proposal on a friendly reinforcement point (desire 20.000) is accepted.
+- At every displaced commit, two Hold_Position goals stay active with desire 20.000 (effective 20.8). So the Tactical_Targeted slots are shared with Hold_Position goals, and Hold_Position outranks Destroy_Structure.
+
+**Why the port differed.** The port proposed no Hold_Position at all; its stats had no Hold_Position line.
+- `Should_Hold_Position` is `20 × Game.IsLandControlGame + 5 × IsCampaignGame × … + 10 × (not campaign) × (AdditionalPopulationCapacity > UnitSpaceAvailable) × init × (Num_Refineries > 1)`.
+- Active goals carry the bare function value (Commit step 1), so 20.000 is reached only when IsLandControlGame = 1.
+- So in retail, `Game.IsLandControlGame` (GameModeManager +0x20 == 4) is 1 in a plain land skirmish that ends by destroying the base, not only in Capture Control Points.
+
+**Port fix:** `BattleAi::fill` sets `land_control` in every land skirmish. ccpgu t03 had tied it to `control_point_domination` as a [port] guess. With the fix, port seed 1 starts Hold_Position plans from frame 371 (12000 ticks: 6 accepted).
+
+**Exit test after the Hold_Position fix** (RETAIL now has Empire 5/7 with 22544):
+
+| AI | Port ends | Result |
+|---|---|---|
+| Rebel | 0/10 | pass (p 0.286) |
+| Empire | 0/10 | FAIL on rate (p 0.003) |
+| Underworld | 1/10 (35885) | pass |
+
+The Empire AI has swung from finishing too early to never finishing.
+
+Port seed 1, 36000 ticks:
+- 26 Destroy_Structure proposals get a plan solve, but none becomes active.
+- 376 Destroy_Structure proposals fail the solve: 205 on Plan, 171 on Contrast.
+- Meanwhile 30 Hold_Position plans and 61 SecureBuildPad plans run.
+
+Retail does activate a Destroy_Structure (15.001) at 7445 next to two Hold_Positions at 20, with 3 active goals in category 5.
+
+**Next lead:** why the port's Resolve never gets a solved Destroy_Structure proposal into category 5. Check the greedy break on the first unfundable or unactivatable candidate, the weighted phase, and the category's budget credits. Then check why the port's solve fails on Plan (free store held by the Hold_Position / SecureBuildPad plans) where retail's succeeds. The run's `resolve_goals` events give retail's full candidate lists to compare with.
