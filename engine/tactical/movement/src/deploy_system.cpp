@@ -151,9 +151,10 @@ MovementSystem::DeployResult MovementSystem::deploy(ObjectId id, bool on, uint32
     Unit& u = units_[static_cast<size_t>(i)];
     if (u.d.locomotor != LocomotorKind::Default) return DeployResult::NoWalk;  // JetPack / Bike / ...: 0x1fa90
     if (on) {
-        // Deploy(true) 0x61d300: nothing in 0x18 / 0x19 or with the walking-deployed flag +0x2b3 set (s78n t26.1; [port]
-        // obj +0x3a1 & 0x40 not modelled).
+        // Deploy(true) 0x61d300: nothing in 0x18 / 0x19, with the walking-deployed flag +0x2b3 set (s78n t26.1) or inside a
+        // gravity control field (obj +0x3a1 & 0x40, TRU1 t03: the host's deploy_block hook).
         if (u.deploy == LocoState::WalkDeploying || u.deploy == LocoState::WalkDeployed || u.walk_deployed) return DeployResult::Ignored;
+        if (deploy_block_ && deploy_block_(id)) return DeployResult::Ignored;
         if (u.deploy == LocoState::WalkUndeploying && !turret_at_rest(u)) {
             // Out of 0x1A with the turret off rest: straight to 0x19, the turret reset, signal 0x29 at once. [inferred]
             // the reset is the forced recentre 0x6319d0 (toward the deployed rest now).

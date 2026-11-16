@@ -43,8 +43,9 @@ using save_io::put_vec3;
 namespace {
 
 // 2: OI follow-up animation record + lock pairs; 3: cu8 t02 stealth bonus gone; 4: cu8f t01 special restore target,
-// cu8f t06 trooper squads, LURE pack, spawn-request squad. Only the current version is read (cu6).
-constexpr uint32_t kAbilitySaveVersion = 4;
+// cu8f t06 trooper squads, LURE pack, spawn-request squad; 5: TRU1 t03 gravity control field state. Only the current
+// version is read (cu6).
+constexpr uint32_t kAbilitySaveVersion = 5;
 constexpr uint32_t kSpecialWeaponSaveVersion = 1;
 constexpr uint32_t kSpaceFieldSaveVersion = 1;
 
@@ -111,6 +112,8 @@ void AbilitySystem::write(ByteWriter& w) const {
         w.u32(static_cast<uint32_t>(o.trooper_squads.size()));  // v4 (cu8f t06)
         for (const int32_t q : o.trooper_squads) w.i32(q);
         w.i32(o.squads_formed).u8(o.lure_on).i32(o.lure_pulses).u32(o.lure_next).i32(o.lure_effect);
+        w.u32(o.gravity_due).u8(o.gravity_on).u8(o.in_gravity_field);  // v5 (TRU1 t03)
+        put_ids(w, o.gravity_list);
     }
 
     w.u32(static_cast<uint32_t>(spawns_.size()));
@@ -278,6 +281,10 @@ bool AbilitySystem::read(ByteReader& r) {
         o.lure_next = r.u32();
         o.lure_effect = r.i32();
         if (!r.ok() || o.trooper_squads.size() != o.troopers.size()) return false;
+        o.gravity_due = r.u32();  // TRU1 t03
+        o.gravity_on = r.u8();
+        o.in_gravity_field = r.u8();
+        if (!r.ok() || !get_ids(r, o.gravity_list)) return false;
     }
 
     if (!r.count(n, 55u)) return false;
@@ -345,7 +352,7 @@ bool AbilitySystem::read(ByteReader& r) {
         e.frame = r.u32();
         e.point = get_vec3<Vec3>(r);
         e.value = r.i32();
-        if (!r.ok() || kind > static_cast<uint8_t>(AbilityEventKind::Lured)) return false;
+        if (!r.ok() || kind > static_cast<uint8_t>(AbilityEventKind::GravitySlow)) return false;
         e.kind = static_cast<AbilityEventKind>(kind);
     }
     if (!r.count(n, 9)) return false;

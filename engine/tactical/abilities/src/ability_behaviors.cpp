@@ -620,6 +620,10 @@ void AbilitySystem::h_deploy(Obj& o, bool on, uint32_t frame) {
     const bool ok = team_gates(o, kDeploy, frame);
     if (on && !ok) return;
     stop_order(o.id, frame, kStopAdopt);  // cu8j t02: 0x3a1ce0 adopts (return 0x3a1f81, MOVEMENT §4.7.2)
+    // TRU1 t03 (MOVEMENT §3.2 "Deploy(true)", docs/re/TRU1_GRAVITY_FIELD.md): the Walk locomotor refuses to start a deploy
+    // while the unit is in a gravity control field (obj +0x3a1 bit 0x40); the stop above still happened. With a movement
+    // host the locomotor refuses it too (MovementSystem deploy_block, every route); this copy covers the host-less path.
+    if (on && o.in_gravity_field) return;
     if (host_.deploy) {
         // S8 t11 (MOVEMENT §3.2, AI_TACTICAL §7.3.3 item 3): 0x391260 calls the Walk locomotor's Deploy(on). The locomotor
         // owns the state (0x18 Deploying, clip, 0x19 Deployed; 0x1A Undeploying, clip, 0); the host reports each change
@@ -1118,6 +1122,7 @@ void AbilitySystem::behaviors_service(Obj& o, uint32_t frame) {
     }
     lure_service(o, frame);  // cu8f t06: LURE (0x23), interval 1
     if (o.dead) return;
+    gravity_service(o, frame);  // TRU1 t03: GRAVITY_CONTROL_FIELD (0x3a), interval 60
     // HUNT (0x21): interval 30, or 1 while burning (0x621840).
     if (o.behavior[kHunt] && frame >= o.hunt_due) {
         const bool burning = o.combat_unit && combat_->burning(o.id);

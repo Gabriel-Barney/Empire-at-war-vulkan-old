@@ -276,7 +276,10 @@ void test_gates() {
     CHECK(!a.can_activate(5, kSprint, true, true, f));
     a.set_corrupted(3, false);
     // Force gate: type 13 with F = 1 on a unit without the record still runs the gate order
-    CHECK(!a.can_activate(1, kFireLobbingSuperweapon, true, true, f));  // [port] super weapon not modelled
+    // TRU1 t01: 47 passes for an owned unit whose type does not require base power (test_tru1_lobbing_gate), once the
+    // nebula lockout set above (gate 2) is over
+    CHECK(!a.can_activate(1, kFireLobbingSuperweapon, true, true, f));
+    CHECK(a.can_activate(1, kFireLobbingSuperweapon, true, true, f + 200));
 }
 }  // namespace bo3split
 

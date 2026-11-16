@@ -1714,7 +1714,8 @@ the ordered ground point, +0x3c = "order pending", +0x3d = "charged, fire now". 
     the command's position when its "at position" bit is set or there is no target object, else the target object's
     bare position (obj +0x78, no `Ranged_Target_Z_Adjust`). `SpecialWeaponsAllowed` is not checked for a
     lobbing-only object. Afterwards the destroy-after sweep (behaviour 0x67) for the weapon's owner. The human UI path
-    that queues command 25 (ability button `FIRE_LOBBING_SUPERWEAPON` 47 → targeting cursor) was not traced [M];
+    that queues command 25 (ability button `FIRE_LOBBING_SUPERWEAPON` 47 → targeting cursor) was not traced [M]; the
+    button's accept gate and the 47 recharge started by 0x4ea3f0: TRU1_GRAVITY_FIELD §2;
   - Lua `GameObject.Fire_Special_Weapon(target, player)` 0x576220: readiness ≥ 1.0 (SCRIPT_GAPS §1.1);
   - Lua `LandTaskForce.Fire_Special_Weapon(type_name, target)` 0x6eb7f0: the first task-force unit whose
     representative type (0x3973b0) **is** the named type and is ready (≥ 1.0); point = the target object's bare

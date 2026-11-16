@@ -260,6 +260,8 @@ void TacticalBattle::oi_install(TacticalMode& mode, SimRng& rng) {
     // s78n t04 (§5.4.4 item 3c, 0x6fa920 step 1): an Enhance_Defense source owned by the neutral player stands for the
     // battle's defender. [port] "the neutral player" = an owner whose faction Is_Neutral (retail: the first such player).
     h.defense_player = [this](int32_t owner) { return bt_owner_neutral(owner) ? req_.info.defender : owner; };
+    // TRU1 t03 (TRU1_GRAVITY_FIELD §1.3): the gravity control field skips Is_Neutral players.
+    h.neutral_player = [this](int32_t p) { return bt_owner_neutral(p); };
     hg_ability_host(h);  // hangars: DEPLOY_SQUAD gate / handler (HangarSystem::deploy_ready / deploy_squad)
     abilities_->set_host(std::move(h));
 }

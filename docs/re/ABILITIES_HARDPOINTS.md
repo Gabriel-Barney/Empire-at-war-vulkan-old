@@ -296,7 +296,7 @@ All gates, in order; any failure returns false:
 | 30 TRACTOR_BEAM | ≥ 1 live TRACTOR_BEAM (4) hardpoint, then as 31 |
 | 31, 34, 55 (ENERGY_WEAPON, LUCKY_SHOT, SUPER_LASER) | weapons not disabled (obj +0x3a0 bit 0x10 clear) |
 | 38 DEPLOY_TROOPERS | DEPLOY_TROOPERS behaviour present and idle |
-| 47 FIRE_LOBBING_SUPERWEAPON | player's super-weapon state allows (needs base power when the type requires it) |
+| 47 FIRE_LOBBING_SUPERWEAPON | the owner has a tactical player; with `Requires_Base_Power` (type +0x8b) also that player's base power (TRU1_GRAVITY_FIELD §2) |
 | 52 FORCE_SIGHT | no ability of the object is busy (0x37c520, §4.14; this row read "SABER_THROW" before 2026-11-01) |
 | 58 LEECH_SHIELDS, 70 BLAST | ≥ 1 live WEAPON_SPECIAL (10) hardpoint |
 | 64 PLACE_REMOTE_BOMB | player's remote-bomb count < `Max_Remote_Bombs_Per_Player` (20) |

@@ -16,6 +16,7 @@ add_library(alamo_tactical_abilities STATIC
   src/ability_classes.cpp    # OI abilities: special-ability class bodies (TACTICAL_GAPS §2.3)
   src/special_weapons.cpp  # L1 systems
   src/space_fields.cpp     # L1 systems
+  src/gravity_field.cpp    # TRU1 t03: GRAVITY_CONTROL_FIELD
   src/ability_save.cpp     # N1 stage 2: AbilitySystem / SpecialWeaponSystem / SpaceFieldIndex write + read
 )
 add_library(alamo::tactical_abilities ALIAS alamo_tactical_abilities)
@@ -29,7 +30,8 @@ target_link_libraries(alamo_tactical_abilities PUBLIC alamo_tactical_combat alam
 # laser defense, opportunity fire), a scripted space battle with abilities and hardpoint kills whose
 # CRC log is identical for 1/4/N threads and matches the golden on every compiler, a per-tick
 # allocation count, FoC data checks (ALAMO_FOC_DATA). Regenerate: --write-golden <file>.
-add_executable(alamo_tactical_abilities_tests tests/test_abilities.cpp tests/test_abilities_part1.cpp tests/test_abilities_part2.cpp)
+add_executable(alamo_tactical_abilities_tests tests/test_abilities.cpp tests/test_abilities_part1.cpp tests/test_abilities_part2.cpp
+               tests/test_tru1.cpp)
 target_link_libraries(alamo_tactical_abilities_tests PRIVATE alamo_tactical_abilities alamo_data alamo_test_support)
 # FoC data through the VFS (Data\XML lives in Config.meg in the shipped game).
 if(TARGET alamo_vfs)

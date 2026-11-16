@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "alamo/tactical/abilities/ability_types.hpp"
+
 namespace alamo::ui {
 
 TargetKind ability_target_kind(uint8_t t) {
@@ -16,6 +18,8 @@ TargetKind ability_target_kind(uint8_t t) {
         // target position (command 57, Dummy_Barrage_Target); 17 JET_PACK (position) [port: 57]
         case 14: case 23: case 24: case 25: case 35: case 36: case 38: case 44: case 46: case 49: case 57: case 61:
         case 72: case 17:
+        // 47 FIRE_LOBBING_SUPERWEAPON: a ground point sent as command 25 (special_weapon_point_events) [TRU1 t01]
+        case 47:
             return TargetKind::Point;
         // position via command 43
         case 5: case 26: case 28: case 42:
@@ -60,6 +64,15 @@ commands::EventData ability_point_event(std::span<const uint32_t> users, uint8_t
     e.set_ids("users", capped_users(users)).set("ability", ability).set("target", target);
     e.set_f("x", p.x).set_f("y", p.y).set_f("z", p.z).set("player", static_cast<uint32_t>(std::max(player, 0)));
     return e;
+}
+
+void special_weapon_point_events(std::span<const uint32_t> users, Vec3 p, int32_t player, std::vector<commands::EventData>& out) {
+    for (const uint32_t w : capped_users(users)) {
+        commands::EventData e(commands::EventType::SpecialWeaponFire);
+        e.set("weapon", w).set("player", static_cast<uint32_t>(std::max(player, 0))).set("at_position", 1u);
+        e.set_f("x", p.x).set_f("y", p.y).set_f("z", p.z);
+        out.push_back(std::move(e));
+    }
 }
 
 commands::EventData ability_mode_point_event(std::span<const uint32_t> users, uint8_t ability, Vec3 p) {
@@ -124,7 +137,11 @@ bool TargetingController::update(const InputState& in, const Bindings& keys, con
         case TargetKind::Point:
         case TargetKind::PointMode: {
             if (!ground_point(ctx, in.mouse_x(), in.mouse_y(), p)) return true;
-            if (kind_ == TargetKind::Point) out.push_back({ability_point_event(users_, ability_, p, ctx.local_player), queued});
+            if (ability_ == tactical::abilities::kFireLobbingSuperweapon) {  // TRU1 t01: command 25 per user, never queued
+                std::vector<commands::EventData> fire;
+                special_weapon_point_events(users_, p, ctx.local_player, fire);
+                for (commands::EventData& e : fire) out.push_back({std::move(e), false});
+            } else if (kind_ == TargetKind::Point) out.push_back({ability_point_event(users_, ability_, p, ctx.local_player), queued});
             else out.push_back({ability_mode_point_event(users_, ability_, p), queued});
             break;
         }
