@@ -111,15 +111,41 @@ def intervals(gates, lo, hi, key):
 
 
 def held_by(gates, lo, hi):
-    """Gates closed at every sample of lo..hi-1 (the ready -> end-screen stretch)."""
+    """Gates closed at every gframe of lo..hi-1 (the ready -> end-screen stretch). A gate counts as closed at a gframe when
+    any sample of that gframe has it closed: the advisor hologram restarts its Light_Loop movie between two queued
+    messages, and the poller can catch the handle at 0 for a few ms inside one gframe (the main loop did not see it)."""
     if hi <= lo:
         return []
     names = []
     for key, test in (('bink', lambda g: g.get('bink') == 1), ('msgbox', lambda g: g.get('msgbox') == 1),
                       ('hold', lambda g: (g.get('hold') or 0) > 0)):
-        if all(test(gates[i]) for i in range(lo, hi)):
+        closed = {}
+        for i in range(lo, hi):
+            gf = gates[i]['gf']
+            closed[gf] = closed.get(gf, False) or test(gates[i])
+        if closed and all(closed.values()):
             names.append(key)
     return names
+
+
+def starts(gates, lo, hi, key):
+    """How often field `key` (re)starts over samples lo..hi-1: a 0 -> on change, counted once per gframe."""
+    n, prev_on, last_gf = 0, None, None
+    for i in range(lo, hi):
+        on = gates[i].get(key) not in (0, None, '-')
+        if on and prev_on is False and gates[i]['gf'] != last_gf:
+            n += 1
+            last_gf = gates[i]['gf']
+        elif on and prev_on is None:
+            n += 1
+            last_gf = gates[i]['gf']
+        prev_on = on
+    return n
+
+
+def live(g):
+    """The galactic mode is still up in this sample (the monitor reads; gframe running)."""
+    return g.get('mt') == 0 and g.get('mon') == 1 and g.get('gf')
 
 
 def any_on(gates, lo, hi, key):
@@ -133,20 +159,34 @@ def analyse_decl(gates, di, back_frames=90):
     while lo > 0 and gates[lo - 1]['gf'] is not None and gf0 - gates[lo - 1]['gf'] <= back_frames:
         lo -= 1
     ri = first(gates, di, lambda g: g.get('decl') == 1 and (g.get('cd') or 0) < 1 and (g.get('hold') or 0) < 1)
-    ei = first(gates, di, lambda g: g.get('ends') == 1)
+    # The end: the end-screen byte, or the galactic mode going away, whichever comes first. Retail sets the byte only
+    # after the mode is torn down (and the end credits Bink started), when the gframe reads 0 again, so the end gframe
+    # is the last gframe of the live mode and the time is the poller's wall clock.
+    ei = first(gates, di, lambda g: g.get('ends') == 1 or not live(g))
+    li = None if ei is None else (ei if live(gates[ei]) else ei - 1)
+    while li is not None and li > di and not live(gates[li]):
+        li -= 1
     stop = ei if ei is not None else min(len(gates), di + 20000)
     hi = min(len(gates), (ei + 1) if ei is not None else stop)
     a = {'decl_gf': gf0, 'decl_mf': g0.get('mf'), 'decl_cd': g0.get('cd'), 'decl_hold': g0.get('hold'),
          'ready_gf': gates[ri]['gf'] if ri is not None else None,
-         'end_gf': gates[ei]['gf'] if ei is not None else None,
+         'end_gf': gates[li]['gf'] if li is not None else None,
+         'end_how': None if ei is None else ('end-screen byte' if gates[ei].get('ends') == 1 else 'galactic mode left'),
+         'ends_w': next((g['w'] for g in gates[di:] if g.get('ends') == 1), None),
+         'decl_w': g0.get('w'), 'ready_w': gates[ri].get('w') if ri is not None else None,
+         'end_w': gates[ei].get('w') if ei is not None else None,
          'cursor': (g0.get('cx'), g0.get('cy'))}
     a['decl_to_ready'] = (a['ready_gf'] - gf0) if a['ready_gf'] is not None else None
     a['ready_to_end'] = (a['end_gf'] - a['ready_gf']) if a['end_gf'] is not None and a['ready_gf'] is not None else None
     a['decl_to_end'] = (a['end_gf'] - gf0) if a['end_gf'] is not None else None
+    a['ready_to_end_s'] = (a['end_w'] - a['ready_w']) if a['end_w'] is not None and a['ready_w'] is not None else None
+    a['advisor_msgs'] = starts(gates, di, ei if ei is not None else hi, 'hint')
     a['iv'] = {k: intervals(gates, lo, hi, k) for k in WATCH}
     a['iv']['hold'] = intervals(gates, lo, hi, 'hold')
     if ri is not None and ei is not None:
-        a['held'] = held_by(gates, ri, ei)
+        # up to (not including) the end gframe: at that gframe every gate opened and the main loop moved on
+        ej = first(gates, ri, lambda g: g['gf'] == a['end_gf'], li + 1)
+        a['held'] = held_by(gates, ri, ej if ej is not None else li + 1)
         a['hint_in_wait'] = any_on(gates, ri, ei, 'hint')
         a['pop_in_wait'] = any_on(gates, ri, ei, 'pop')
         movies = sorted({gates[i].get('movie') for i in range(ri, ei)} - {'-', None})
@@ -173,8 +213,8 @@ def verdict(a):
             src.append('advisor hint text shown')
         if a.get('pop_in_wait'):
             src.append('encyclopedia pop-up shown')
-        cause.append('Bink open (GUI movie %s; %s)' % ('/'.join(a.get('movies_in_wait') or ['?']),
-                                                       ', '.join(src) or 'no hint / pop-up flag'))
+        cause.append('Bink open (GUI movie %s; %s; %s advisor message(s) from declare to end)' % (
+            '/'.join(a.get('movies_in_wait') or ['?']), ', '.join(src) or 'no hint / pop-up flag', a.get('advisor_msgs')))
     if 'msgbox' in held:
         cause.append('message box up')
     if 'hold' in held:
@@ -248,6 +288,10 @@ def report_run(run_dir):
                      '(+%s after ready, +%s after declare)' % (
                          a['decl_gf'], a['decl_mf'], a['decl_cd'], a['decl_hold'], a['ready_gf'], a['decl_to_ready'],
                          a['end_gf'], a['ready_to_end'], a['decl_to_end']))
+        lines.append('  end by %s; ready -> end %s s wall clock; end-screen byte set at w=%s (declare w=%s); '
+                     'advisor messages (hint starts) from declare to end: %s' % (
+                         a['end_how'], None if a['ready_to_end_s'] is None else round(a['ready_to_end_s'], 2),
+                         a['ends_w'], a['decl_w'], a['advisor_msgs']))
         lines.append('  cursor at declare: %s' % (a['cursor'],))
         for k in ('bink', 'msgbox', 'hold', 'mov', 'movie', 'hint', 'pop', 'binkp', 'skip', 'chg', 'b79', 'g26a4',
                   'g2908', 'g2a34'):
