@@ -808,7 +808,13 @@ void CombatSystem::area_damage(const Projectile& p, Vec3 center, ObjectId direct
     int32_t victims = 0;
     const auto np = static_cast<int32_t>(std::min<uint32_t>(player_count(), trees_ ? trees_->player_count() : 0u));
     for (int32_t q = 0; q < np; ++q) {
-        if (!is_enemy(p.owner, q)) continue;  // Immune_Faction case not modelled
+        // 2. tru1 t04: an Immune_Faction blast visits every player (the owner, allies, neutrals) but members of that
+        //    faction; otherwise enemies only.
+        if (pd.blast_immune_faction != 0) {
+            if (player(q).faction == pd.blast_immune_faction) continue;
+        } else if (!is_enemy(p.owner, q)) {
+            continue;
+        }
         const auto ids = trees_->player(static_cast<uint32_t>(q)).query_circle_xy(CircleXY{center, R}, kSkipDead, serial_ctx_);
         for (EntityHandle id : ids) {
             Unit* v = unit(static_cast<ObjectId>(id));

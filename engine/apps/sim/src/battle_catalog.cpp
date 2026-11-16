@@ -238,6 +238,8 @@ int32_t BattleCatalog::projectile(uint32_t t, BuildState& s) const {
     p.max_lifetime = ty.get_float(t, "Projectile_Max_Lifetime");
     p.blast_area_damage = ty.get_float(t, "Projectile_Blast_Area_Damage");
     p.blast_area_range = ty.get_float(t, "Projectile_Blast_Area_Range");
+    if (const std::string_view f = ascii_trim(ty.get_string(t, "Projectile_Blast_Area_Immune_Faction")); !f.empty())
+        p.blast_immune_faction = name_crc(f);  // tru1 t04
     p.damages_random_hardpoints = ty.get_bool(t, "Projectile_Damages_Random_Hard_Points");
     if (!(p.max_speed > 0.0f)) p.max_speed = 20.0f;  // [port] a projectile type without Max_Speed still flies
     if (s.full) {

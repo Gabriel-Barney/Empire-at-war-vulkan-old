@@ -179,6 +179,10 @@ struct ProjectileDesc {
     float blast_area_damage = 0.0f;        // Projectile_Blast_Area_Damage
     float blast_area_range = 0.0f;         // Projectile_Blast_Area_Range
     int32_t blast_max_victims = 0;         // Projectile_Blast_Area_Max_Victims (0 = no cap)
+    // tru1 t04 (TACTICAL_COMBAT §3.5 area damage step 2, TACTICAL_GAPS §6.5 field 0x43): Projectile_Blast_Area_Immune_Faction
+    // as name_crc of the trimmed faction name, 0 = unset. Set: the blast visits every player (own, allied, neutral)
+    // except those whose faction it names; unset: enemies only.
+    uint32_t blast_immune_faction = 0;
     bool blast_dropoff = false;            // Dropoff
     int32_t blast_dropoff_tiers = 0;
     float damage_delay_secs = 0.0f;        // Projectile_Damage_Delay_Secs
@@ -533,6 +537,8 @@ struct PlayerInfo {
     // cu8 t03 (TACTICAL_COMBAT §3.6 step 9): the player's faction Space_ / Land_Retreat_Units_Damaged_Mod_Factor
     // (faction +0x20b8 / +0x2198) for the battle's mode; damage to its retreating units is multiplied by it.
     float retreat_damage_mod = 1.0f;
+    // tru1 t04: name_crc of the player's faction name (0 = none), matched against ProjectileDesc::blast_immune_faction.
+    uint32_t faction = 0;
     // OI abilities: base power is no longer a player flag - see CombatSystem::add_base_power (TACTICAL_GAPS §7.3: a
     // per-player list of Base_Power_Ability entries; an empty list = no base power).
 };
