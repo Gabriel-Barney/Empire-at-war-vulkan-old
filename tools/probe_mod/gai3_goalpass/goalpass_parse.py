@@ -13,6 +13,8 @@ owner player id (and faction when the PLAYER line found one). A pass ends at a C
   evals.tsv   every evaluation in order: owner, gs, pass, seq, hit n, gf, mf, kind (T targeted / G global), source and
               target cursors, E before the increment, goal type name (or gt:<ptr>), function, planet name (or
               idx:<n> / po:<ptr>), planet index byte.
+  picks.tsv   every Weighted_Random_Pick call (PICK lines, Dr3; gai3 t05): mode frame, caller RVA, entry count, total
+              weight, entries (planet names in list order; FindTarget moves its best to the end) and their weights.
 Names come from the GTYPE / PLANET / FUNC lines (std::string at goal type +0x00, planet type +0xF8; else the first
 `cands` entry; else the pointer). For a fallback by source order, report.txt lists every (owner, source cursor) ->
 goal type pointer seen: the source list is 0x60f6c0's (goal type, function) order (B.3).
@@ -67,7 +69,7 @@ def pick_name(d):
 
 def read_log(path):
     L = dict(head={}, attach={}, exe={}, sites=[], arms=[], stop={}, exit={}, detach={}, hits=[], gsys=OrderedDict(),
-             players=OrderedDict(), gtypes=OrderedDict(), funcs=OrderedDict(), planets=OrderedDict(), late=0,
+             players=OrderedDict(), gtypes=OrderedDict(), funcs=OrderedDict(), planets=OrderedDict(), late=0, picks=[],
              other=defaultdict(int))
     for line in open(path, encoding='ascii', errors='replace'):
         line = line.rstrip('\n')
@@ -85,6 +87,8 @@ def read_log(path):
             L['arms'].append((tag, d))
         elif tag == 'HIT':
             L['hits'].append(d)
+        elif tag == 'PICK':
+            L['picks'].append(d)
         elif tag == 'GSYS':
             L['gsys'][d['gs']] = d
         elif tag == 'PLAYER':
@@ -163,7 +167,7 @@ def analyse(L, all_modes=False):
             r['pass_'] = '%d(open)' % p
             evals.append(r)
     return dict(passes=passes, evals=evals, open=open_passes, ignored=ignored, gt_name=gt_name, po_name=po_name,
-                fn_name=fn_name, src_map=src_map)
+                fn_name=fn_name, src_map=src_map, picks=pick_rows(L, po_name))
 
 
 def eval_row(x, own, fac, gs, p, seq, gt_name, fn_name, po_name):
@@ -175,6 +179,30 @@ def eval_row(x, own, fac, gs, p, seq, gt_name, fn_name, po_name):
                        kind=x['k'], src=x.get('src'), tgt=x.get('tgt') if x['k'] == 'T' else '', e_before=x.get('e'),
                        goal_type=gt_name.get(gt, 'gt:' + gt), gt_ptr=gt, function=fn_name.get(fn, 'fn:' + fn),
                        planet=planet, planet_index=x.get('pi', '') if x['k'] == 'T' else '', planet_ptr=po)
+
+
+def pick_rows(L, po_name):
+    """One row per Weighted_Random_Pick call (Dr3): entries named through the PLANET lines, weights = cum steps."""
+    rows = []
+    for d in L['picks']:
+        names, weights, prev = [], [], 0.0
+        for e in (d.get('ents') or '-').split(','):
+            if e in ('', '-'):
+                continue
+            parts = e.split('/')
+            if len(parts) != 3:
+                continue
+            po, cum = parts[1], float(parts[2])
+            names.append(po_name.get(po) or 'po:' + po)
+            weights.append('%.4g' % (cum - prev))
+            prev = cum
+        rows.append(OrderedDict(n=d.get('n'), gf=d.get('gf'), mt=d.get('mt'), mf=d.get('mf'), ret=d.get('ret'),
+                                cnt=d.get('cnt'), total='%.6g' % prev, entries=' '.join(names),
+                                weights=' '.join(weights)))
+    return rows
+
+
+PICK_COLS = ['n', 'gf', 'mt', 'mf', 'ret', 'cnt', 'total', 'entries', 'weights']
 
 
 def write_tsv(path, rows, cols):
@@ -207,7 +235,8 @@ def report_lines(L, A, log_path):
     kinds = defaultdict(int)
     for x in L['hits']:
         kinds[x['k']] += 1
-    w('hits: %d (T %d, G %d, C %d)' % (len(L['hits']), kinds['T'], kinds['G'], kinds['C']))
+    w('hits: %d (T %d, G %d, C %d); Weighted_Random_Pick calls (PICK, Dr3): %d' % (
+        len(L['hits']), kinds['T'], kinds['G'], kinds['C'], len(L['picks'])))
     if A['ignored']:
         w('ignored (not galactic mode, use --all-modes): ' +
           ', '.join('mt=%s %s:%d' % (mt, k, n) for (mt, k), n in sorted(A['ignored'].items(), key=str)))
@@ -263,6 +292,14 @@ def report_lines(L, A, log_path):
     w('source order (owner, source cursor +0x17C -> goal type; the fallback when names are missing):')
     for (own, src), gts in sorted(A['src_map'].items(), key=lambda kv: (str(kv[0][0]), kv[0][1] or -1)):
         w('  own=%s src=%s -> %s' % (own, src, ', '.join('%s (%s)' % (g, A['gt_name'].get(g, '?')) for g in sorted(gts))))
+    w('')
+    w('Weighted_Random_Pick calls (gai3 t05 / a2m t14.4: FindTarget candidates in list order, best moved to the end; '
+      'a Rebel slice pick at mode frame ~97 lists the Rebel Enemy planets):')
+    for r in A['picks']:
+        w('  n=%s mt=%s mf=%s ret=%s cnt=%s total=%s | %s | w %s' % (r['n'], r['mt'], r['mf'], r['ret'], r['cnt'],
+                                                                     r['total'], r['entries'], r['weights']))
+    if not A['picks']:
+        w('  none')
     if L['other']:
         w('')
         w('other lines: ' + ', '.join('%s:%d' % kv for kv in sorted(L['other'].items())))
@@ -275,6 +312,7 @@ def parse_to(log_path, out_dir, all_modes=False):
     os.makedirs(out_dir, exist_ok=True)
     write_tsv(os.path.join(out_dir, 'passes.tsv'), A['passes'], PASS_COLS)
     write_tsv(os.path.join(out_dir, 'evals.tsv'), A['evals'], EVAL_COLS)
+    write_tsv(os.path.join(out_dir, 'picks.tsv'), A['picks'], PICK_COLS)
     with open(os.path.join(out_dir, 'report.txt'), 'w', newline='\n') as f:
         f.write('\n'.join(report_lines(L, A, log_path)) + '\n')
     return 0

@@ -50,11 +50,12 @@ class Checker:
 # ---- 1. encodings ------------------------------------------------------------------------------------------------------
 
 def check_encodings(ck):
-    ck(G.DR7_EXEC == 0x15, 'DR7 exec for slots 0-2 = 0x15, got %x' % G.DR7_EXEC)
+    ck(G.DR7_EXEC == 0x55, 'DR7 exec for slots 0-3 = 0x55, got %x' % G.DR7_EXEC)
+    ck(G.DR6_HITS == 0xF, 'DR6 hit bits B0-B3')
     ck(G.dr7_bits([0], rw=1, length=3) == G.D.DR7_WATCH, 'dr7_bits(write, 4 bytes) != cu8h DR7_WATCH')
-    ck(G.DR7_SLOT_MASK == 0xFFF003F, 'DR7 slot mask %x' % G.DR7_SLOT_MASK)
-    merged = (0xFFFFFFFF & ~G.DR7_SLOT_MASK) | G.DR7_EXEC      # slots 0-2 replaced, slot 3 (bits 6-7, 28-31) kept
-    ck(merged == 0xF000FFD5, 'DR7 merge keeps slot 3, got %x' % merged)
+    ck(G.DR7_SLOT_MASK == 0xFFFF00FF, 'DR7 slot mask %x' % G.DR7_SLOT_MASK)
+    merged = (0xFFFFFFFF & ~G.DR7_SLOT_MASK) | G.DR7_EXEC      # slots 0-3 replaced, bits 8-15 (LE/GE/GD) kept
+    ck(merged == 0x0000FF55, 'DR7 merge keeps bits 8-15, got %x' % merged)
     ck(G.with_rf(0x246) == 0x10246 and G.with_rf(0x10246) == 0x10246, 'RF bit 16')
     ck(G.OFF_EFLAGS == 0x44 and G.OFF_DR == (0x48, 0x50, 0x58, 0x60) and G.D.OFF_DR6 == 0x68 and G.D.OFF_DR7 == 0x70,
        'CONTEXT offsets (EFlags / Dr0-3 / Dr6 / Dr7)')
@@ -116,6 +117,7 @@ def synthetic_log(path):
         hit('T', 'g1', 3, 12 + i, gt='1000', fn='f00', tl='1', po='3100', pi=9, e=i, tgt=i)
     hit('C', 'g1', 3, 16, e=4, q=3)
     hit('G', 'g1', 3, 17, gt='2000', fn='f00', src=1, e=0)                           # pass 3 open at the stop
+    L.append('PICK n=99 tid=1 gf=1097 mt=0 mf=97 ret=697c11 vec=55 cnt=3 ents=a1/3100/1,a2/3000/2,a3/3100/2.22222')
     L.append('STOP why=galactic_frame_700 hits=%d T=6 G=2 C=3 late=0' % n[0])
     L.append('DETACH ok=1 err=0')
     with open(path, 'w', newline='\n') as f:
@@ -156,6 +158,12 @@ def check_parser(ck, tmp):
     ck('mt=1 T:1' in rep, 'report counts the ignored menu hit')
     ck('open pass: owner 3 UNDERWORLD gs=g1 pass 3: 1 evals' in rep, 'report open pass')
     ck('own=3 src=1 -> 2000 (Build_Tech_Global)' in rep, 'report source order')
+    pk = [ln.split('	') for ln in open(os.path.join(out, 'picks.tsv')).read().splitlines()]
+    pr = [dict(zip(pk[0], r)) for r in pk[1:]]
+    ck(len(pr) == 1 and pr[0]['cnt'] == '3' and pr[0]['entries'] == 'idx:9 Naboo idx:9' and
+       pr[0]['weights'] == '1 1 0.2222' and pr[0]['total'] == '2.22222' and pr[0]['mf'] == '97',
+       'picks.tsv row %r' % pr)
+    ck('n=99 mt=0 mf=97 ret=697c11 cnt=3 total=2.22222 | idx:9 Naboo idx:9 | w 1 1 0.2222' in rep, 'report pick line')
 
 
 # ---- 3. live: fake image with the retail instruction bytes at the retail RVAs -----------------------------------------
@@ -187,6 +195,8 @@ Gl = fn(0x6cb290, 0x6cb2ae, INC)
 put(0x6c8710, b'\xc3')
 rel = 0x6c8710 - (0x6cad26 + 5)
 C = fn(0x6cad00, 0x6cad26, b'\xe8' + struct.pack('<i', rel), bytes.fromhex('c78788010000 00000000'))
+put(0x698de0, bytes.fromhex('40534883ec30' '4883c430' '5b' 'c3'))   # push rbx; sub rsp,30; add rsp,30; pop rbx; ret
+W = ctypes.CFUNCTYPE(None, ctypes.c_void_p)(base + 0x698de0)
 k32.FlushInstructionCache(k32.GetCurrentProcess(), ctypes.c_void_p(base), SIZE)
 # data: GMM (mode type 0 galactic, current mode), global frame, objects in a data area
 GMM, FS, MODE = 0xB153E0, 0xB0A320, 0xC00000
@@ -223,6 +233,10 @@ GS = [goal_system(player(3, 2, 'UNDERWORLD'), 100, 3), goal_system(player(0, 0, 
 GT = [goal_type('Galactic_Conquer_Opponent', 2), goal_type('Build_Tech', 0x10)]
 FN = [func('Conquer_Function'), func('Tech_Function')]
 PL = [planet('Naboo', 7), planet('Kessel', 12)]
+PV = alloc(0x40); PE = alloc(0x40)                    # a 3-entry pick vector: Kessel 1, Naboo 1, Kessel (best) 2/9
+for j, (tl, cum) in enumerate(((PL[1], 1.0), (PL[0], 2.0), (PL[1], 2.0 + 2.0 / 9))):
+    q(PE + 16 * j, base + tl); put(PE + 16 * j + 8, struct.pack('<f', cum))
+q(PV, base + PE); q(PV + 8, base + PE + 48)
 open(sys.argv[1], 'w').write('%x\n' % base)
 while not os.path.exists(sys.argv[2]):
     time.sleep(0.01)
@@ -230,6 +244,9 @@ frames = int(sys.argv[3])
 events = []
 for mf in range(1, frames + 1):
     i(MODE + 0x10, mf); i(FS, 5000 + mf)
+    if mf % 5 == 0:
+        events.append(['W', None, None, None, mf, None])
+        W(base + PV)
     for g, gs in enumerate(GS):
         if (mf + g) % 4 == 0:
             events.append(['C', g, None, None, mf, geti(gs + 0x188)])
@@ -286,12 +303,13 @@ def run_live(ck, tmp, label, frames, stop_frame, linger):
     lines = open(log).read().splitlines()
     events = json.load(open(go_f + '.events')) if os.path.exists(go_f + '.events') else []
     hits = [P.parse_kv(ln.partition(' ')[2]) for ln in lines if ln.startswith('HIT ')]
+    picks = [P.parse_kv(ln.partition(' ')[2]) for ln in lines if ln.startswith('PICK ')]
     ck(drc == 0, '%s: debugger exit code %s' % (label, drc))
     ck(rc == 7, '%s: fake exit code %s (want 7: the target must survive the debugger)' % (label, rc))
     ck(not any(ln.startswith(('LATE_HIT', 'RF_FAIL', 'CTX_FAIL', 'EMERGENCY')) for ln in lines),
        '%s: no LATE_HIT / RF_FAIL / CTX_FAIL lines' % label)
     ck(all(('ok=1' in ln) for ln in lines if ln.startswith('SITE ')) and
-       sum(ln.startswith('SITE ') for ln in lines) == 3, '%s: three site byte checks ok' % label)
+       sum(ln.startswith('SITE ') for ln in lines) == 4, '%s: four site byte checks ok' % label)
     if stop_frame:
         want = []
         for e in events:
@@ -300,6 +318,14 @@ def run_live(ck, tmp, label, frames, stop_frame, linger):
                 break
     else:
         want = events
+    want_w = [e for e in want if e[0] == 'W']
+    want = [e for e in want if e[0] != 'W']
+    if stop_frame and want_w and want_w[-1][4] >= stop_frame and len(picks) == len(want_w) - 1:
+        want_w = want_w[:-1]
+    ck(len(picks) == len(want_w) and [int(x['mf']) for x in picks] == [e[4] for e in want_w],
+       '%s: %d PICK lines for %d pick calls, mode frames in order' % (label, len(picks), len(want_w)))
+    ck(all(x.get('cnt') == '3' and len(x.get('ents', '').split(',')) == 3 and x['ents'].endswith('/2.22222')
+           for x in picks), '%s: PICK cnt=3 and the cumulative weights %r' % (label, picks[:1]))
     gs_of = {}
     for h in hits:
         gs_of.setdefault(h['own'], h['gs'])
@@ -337,6 +363,9 @@ def run_live(ck, tmp, label, frames, stop_frame, linger):
     out = os.path.join(tmp, label + '_out')
     ck(P.parse_to(log, out) == 0, '%s: parse' % label)
     rep = open(os.path.join(out, 'report.txt')).read()
+    pk = open(os.path.join(out, 'picks.tsv')).read().splitlines()[1:]
+    ck(len(pk) == len(picks) and all(r.split('	')[7] == 'Kessel Naboo Kessel' for r in pk),
+       '%s: picks.tsv names in list order %r' % (label, pk[:1]))
     ck('E check (E logged by Commit == evaluations seen, every pass after the first): OK' in rep and
        'MISMATCH' not in open(os.path.join(out, 'passes.tsv')).read(), '%s: parser E check OK' % label)
     rows = open(os.path.join(out, 'passes.tsv')).read().splitlines()

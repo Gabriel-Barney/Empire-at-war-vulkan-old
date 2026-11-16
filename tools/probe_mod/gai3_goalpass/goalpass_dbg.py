@@ -8,11 +8,13 @@
   goalpass_dbg.py --cleanup --out-dir DIR           # stop a leftover debugger of this kit (stop file), nothing else
 
 A variant of ../cu8h_probes/cu8h_dbg.py (same attach, arm-file and stop handling; its Win32 pieces are imported from
-there). Instead of the LCG write watchpoint it sets three hardware EXECUTE breakpoints (DR7 R/W = 00, LEN = 00) in
-every thread, new threads too, at (RVAs relative to the real image base; docs/re/BKG1_RE_ANSWERS.md B.3 / B.8):
+there). Instead of the LCG write watchpoint it sets four hardware EXECUTE breakpoints (DR7 R/W = 00, LEN = 00) in
+every thread, new threads too (four: all of Dr0-Dr3), at (RVAs relative to the real image base; docs/re/BKG1_RE_ANSWERS.md B.3 / B.8):
   Dr0  0x6cb511  targeted evaluation  `inc [rdi+0x188]`  rdi goal system, r15 goal type, r12 function, rsi target
   Dr1  0x6cb2ae  global evaluation    `inc [rdi+0x188]`  rdi, r15, r12
   Dr2  0x6cad26  Commit (pass end)    `call 0x6c8710`    rdi; [rdi+0x188] = E of the pass, [rdi+0x178] = its quota
+  Dr3  0x698de0  Weighted_Random_Pick entry (FindTarget's pick, a2m t14.3 / gai3 t05)  rcx = the candidate vector
+       (begin, end) of 16-byte entries {target pointer, float cumulative weight}; [rsp] = the caller's return address
 The registers were re-read with dumpbin /disasm of the retail exe (2026-11-15): r14 = the (goal type, function) pair,
 r15 = [r14], r12 = [r14+8], rsi = target list [rdi+0x180] entry. The bytes at each site are checked before arming.
 An execute breakpoint fires before the instruction runs, so E on an evaluation hit is the value before its increment.
@@ -20,7 +22,9 @@ On every hit the Resume Flag (EFLAGS bit 16) is set in the thread's context, so 
 breakpoint does not refire. The game's memory is never written; only debug registers and RF are set.
 
 Log lines (key=value, strings %-escaped): GOALPASS 1, ATTACH, EXE, SITE, ARM / DISARM, GSYS, PLAYER, GTYPE, FUNC,
-PLANET, HIT, LATE_HIT, STOP, DETACH, EXIT. HIT fields: n k(T targeted / G global / C commit) tid gf (global frame
+PLANET, HIT, PICK, LATE_HIT, STOP, DETACH, EXIT. PICK fields (Dr3): n tid gf mt mf ret (caller RVA) vec cnt and
+ents = `target/planet/cum` per entry in list order (planet = [target+0x28], named through a PLANET line); the
+FindTarget list order is the candidates in target-list order with the best moved to the end (t14.3). HIT fields: n k(T targeted / G global / C commit) tid gf (global frame
 0x140b0a320) mt (GMM mode type, 0 galactic) mode mf (current mode's frame) gs (rdi) own (player id
 [[[rdi+0x28]+0x28]+0x28]+0x4C [M]) pl (the three chain pointers) q src tgt e (+0x178 / +0x17C / +0x180 / +0x188),
 and for T / G gt (r15) fn (r12), for T tl (rsi) po (planet object [rsi+0x28]) pi (index byte po+0x335 [M]).
@@ -54,7 +58,9 @@ import a1mem  # noqa: E402  (find_pids, exe identity, FACTIONS)
 RVA_TARGETED, RVA_GLOBAL, RVA_COMMIT = 0x6CB511, 0x6CB2AE, 0x6CAD26
 SITES = (('T', RVA_TARGETED, bytes.fromhex('ff8788010000')),     # inc dword [rdi+0x188]
          ('G', RVA_GLOBAL, bytes.fromhex('ff8788010000')),
-         ('C', RVA_COMMIT, bytes.fromhex('e8e5d9ffff')))         # call 0x6c8710
+         ('C', RVA_COMMIT, bytes.fromhex('e8e5d9ffff')),         # call 0x6c8710
+         ('W', 0x698DE0, bytes.fromhex('40534883ec30')))         # push rbx; sub rsp, 0x30 (Weighted_Random_Pick)
+PICK_MAX = 64
 GS_QUOTA, GS_E = 0x178, 0x188
 GS_OWNER_CHAIN = (0x28, 0x28, 0x28)
 P_INDEX, P_ID, P_HUMAN, P_FACTION = 0x48, 0x4C, 0x62, 0x68
@@ -67,8 +73,9 @@ EFLAGS_RF = 1 << 16
 OFF_EFLAGS = 0x44
 OFF_DR = (0x48, 0x50, 0x58, 0x60)
 OFF_RSI, OFF_RDI, OFF_R12, OFF_R14, OFF_R15 = 0xA8, 0xB0, 0xD8, 0xE8, 0xF0
+OFF_RCX, OFF_RSP = 0x80, 0x98
 CONTEXT_CONTROL = 0x100001
-DR6_HITS = 0x7
+DR6_HITS = 0xF                  # B0-B3: one bit per slot
 D.k32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
 D.k32.WaitForSingleObject.restype = ctypes.c_uint32
 
@@ -82,7 +89,7 @@ def dr7_bits(slots, rw=0, length=0):
     return v
 
 
-DR7_EXEC = dr7_bits(range(len(SITES)))          # 0x15
+DR7_EXEC = dr7_bits(range(len(SITES)))          # 0x55
 DR7_SLOT_MASK = 0
 for _i in range(len(SITES)):
     DR7_SLOT_MASK |= (0x3 << (2 * _i)) | (0xF << (16 + 4 * _i))
@@ -157,7 +164,7 @@ class GoalTracer(D.Tracer):
         self.site_addr = {}            # kind -> absolute address
         self.addr_kind = {}
         self.seen_gs, self.seen_pl, self.seen_gt, self.seen_fn, self.seen_po = set(), set(), set(), set(), set()
-        self.hits_kind = {'T': 0, 'G': 0, 'C': 0}
+        self.hits_kind = {'T': 0, 'G': 0, 'C': 0, 'W': 0}
         self.late = 0
         self.last_mode_poll = 0.0
         self.refused = None
@@ -317,6 +324,35 @@ class GoalTracer(D.Tracer):
         name = std_string_from(tb, TYPE_NAME, self.read) if tb else None
         self.note_object('PLANET', po, dict(index=pi, type='%x' % (ty or 0)), name)
 
+    # a Weighted_Random_Pick entry (Dr3)
+    def on_pick_hit(self, tid, h):
+        c = self.ctx
+        self.hits += 1
+        self.hits_kind['W'] += 1
+        mt, _sk, _cur, mf, gf = self.mode()
+        vec = c.q(OFF_RCX)
+        ret = self.u64(c.q(OFF_RSP))
+        hdr = self.rd(vec, 16)
+        cnt, ents = None, []
+        if hdr:
+            b0, b1 = struct.unpack_from('<QQ', hdr, 0)
+            if b1 >= b0 and (b1 - b0) % 16 == 0:
+                cnt = (b1 - b0) // 16
+                raw = self.rd(b0, 16 * min(cnt, PICK_MAX)) if cnt else b''
+                for j in range(len(raw or b'') // 16):
+                    tp, cum = struct.unpack_from('<Qf', raw, 16 * j)
+                    po = self.u64(tp + TL_PLANET) if tp else None
+                    if po:
+                        self.note_po(po, self.u8(po + PLANET_INDEX))
+                    ents.append('%x/%x/%.6g' % (tp, po or 0, cum))
+        r = (ret - self.base) if ret and self.base and self.base <= ret < self.image_end else None
+        self.log('PICK ' + D.kv(n=self.hits, tid=tid, gf=gf, mt=mt, mf=mf, ret='%x' % r if r is not None else
+                                '%x' % (ret or 0), vec='%x' % vec, cnt=cnt, ents=','.join(ents) or '-'))
+        self.resume_past(h)
+        if self.a.max_hits and self.hits >= self.a.max_hits:
+            self.stop_why = self.stop_why or 'max_hits'
+        self.check_stop_frame(mt, mf)
+
     # a hit
     def on_goal_hit(self, tid, h, kind):
         c = self.ctx
@@ -428,7 +464,8 @@ class GoalTracer(D.Tracer):
                     if self.armed:
                         self.apply(False, 'stop')
                     self.log('STOP ' + D.kv(why=self.stop_why, hits=self.hits, T=self.hits_kind['T'],
-                                            G=self.hits_kind['G'], C=self.hits_kind['C'], late=self.late))
+                                            G=self.hits_kind['G'], C=self.hits_kind['C'], W=self.hits_kind['W'],
+                                            late=self.late))
                     D.k32.ContinueDebugEvent(pid, tid, cont)
                     if self.drain(0.5):
                         exited = True
@@ -455,7 +492,9 @@ class GoalTracer(D.Tracer):
         kind = self.addr_kind.get(c.q(D.OFF_RIP))
         if not (c.q(D.OFF_DR6) & DR6_HITS) or kind is None:
             return D.DBG_EXCEPTION_NOT_HANDLED       # not ours (the game's own single step)
-        if self.armed:
+        if self.armed and kind == 'W':
+            self.on_pick_hit(tid, h)
+        elif self.armed:
             self.on_goal_hit(tid, h, kind)
         else:
             # a hit taken in the same moment as a disarm: never hand it to the game
@@ -611,8 +650,7 @@ def main():
         print('stop file: %s (create it to stop early); stops by itself at galactic mode frame %d' %
               (a.stop_file, a.stop_galactic_frame), flush=True)
     log = D.Log(a.out)
-    log('GOALPASS 1 ' + D.kv(t=time.strftime('%Y-%m-%dT%H:%M:%S'), sites='%x,%x,%x' % (RVA_TARGETED, RVA_GLOBAL,
-                                                                                     RVA_COMMIT),
+    log('GOALPASS 1 ' + D.kv(t=time.strftime('%Y-%m-%dT%H:%M:%S'), sites=','.join('%x' % r for _k, r, _b in SITES),
                              stop_galactic_frame=a.stop_galactic_frame, arm='file' if a.arm_file else 'now'))
     rc = 0
     try:
@@ -633,8 +671,9 @@ def main():
                 print('attach failed:', e, flush=True)
                 rc = 4
             else:
-                print('goalpass_dbg: %d hits (T %d, G %d, C %d), stop: %s' % (
-                    hits, tr.hits_kind['T'], tr.hits_kind['G'], tr.hits_kind['C'], tr.stop_why or 'game exit'),
+                print('goalpass_dbg: %d hits (T %d, G %d, C %d, W %d), stop: %s' % (
+                    hits, tr.hits_kind['T'], tr.hits_kind['G'], tr.hits_kind['C'], tr.hits_kind['W'],
+                    tr.stop_why or 'game exit'),
                     flush=True)
                 if tr.refused:
                     rc = 3
