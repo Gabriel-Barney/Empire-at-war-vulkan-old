@@ -246,6 +246,36 @@ spendable Infrastructure money, and how the saboteur plans whose production ends
 it. Run: step 2 above (`run_galactic.cmd`, human Empire, Medium, hands off; it ends after 10 galactic days, frame 13500).
 `lua_summary.json` → `plans` lists them per player and plan; the raw records are in `lua_records.txt`.
 
+### Space skirmish plan hooks (skai t22, 2026-11-16)
+
+Question (`docs/re/SKAI_T22_GEONOSIS_SCOUT.md`): on Geonosis, which cell does the Rebel AI's first `Space_Scout` take,
+and with what desire? The port takes CELL_0_0, next to the Empire station (-3155,-2530), the first of nine cells tied at
+desire 10, and its squadrons then meet the TIEs early (Empire damage 138 against retail 31). Retail's squadrons reach
+CELL_0_2 (-3600,400) first in three of eight runs and CELL_0_0 only late. **Prediction:** retail's first scout is not
+CELL_0_0 in most runs; its `d=` for the cell it takes is 10 (the same tie). If retail's first scout is CELL_0_0 too, the
+gap is elsewhere (free-store orders).
+
+`make_plan_hooks.py` hooks four space plans with the usual records: `SpaceMode/SpaceScout` (Space_Scout, `MainForce`),
+`SpaceMode/MoveToLocationRush` (Secure_Build_Pad_Space, `MainForce` + `EscortForce`), `SpaceMode/BuildRefinerySpace`
+(Build_Refinery_Space) and `SpaceMode/TacticalMultiplayerBuildSpaceUnitsGeneric` (`ReserveForce`: what the build plan
+buys, for the build count, retail 19.5 per run, port 29.4). Every space `PSTART` adds `burn=` / `def=`
+(Should_Burn_Units_Space / Allowed_As_Defender_Space on the plan's own AI player). A Space_Scout `PSTART` also adds
+`d=` (Space_Area_Needs_Scouting of its target cell), `dfs=` / `des=` (Distance_To_Nearest_Friendly / Enemy_Starbase)
+and the target's distance to three still objects, `own=` (the AI's station), `emp=` (Skirmish_Empire_Star_Base_1) and
+`pad=` (the first Mineral_Extractor_Pad), each `<type>#<object id>:<distance>`. Only reads, and EvaluatePerception
+only on `PlayerObject` (the plan's AI: never the idle human, whose binding error ends the script, 84c874a1), with the
+cell target as the shipped TurboAttackLocation passes it.
+
+**Run** (about 6 min each, three runs): `run_skirmish.cmd -LuaProbe` (add `-NonInteractive` to let the menu driver
+click). Menus: Skirmish, Space, (2) Battle Over Geonosis, you = Empire in slot 1 (idle: no input), slot 2 Rebellion
+Medium AI, Advanced -> Default (6000 credits), Start, Begin. It stops after 5400 ticks; cleanup runs by itself.
+
+**Read it:** `toolchain\venv\Scripts\python.exe -I tools\probe_mod\q2_traces\analysis\space_scout.py
+out\<run1> out\<run2> out\<run3> --port <parity seeds>\seed_*\port_ai.txt` prints each scout's frame, cell
+(fitted from the three distances, `fit=` the rms error), `d=` / `dfs=` / `des=`, the first-scout tally, the share of
+scouts per cell, plan starts per run and the unit types the build plan returned. The runs also count as
+`geonosis_skirmish` parity references (the hooks only read).
+
 ### Lua probe run (q2f t06): steps for Gabriel
 
 Goal: the AI's galactic perception values (`EnemyForce.*`, `TargetPlayerID`) read through the game's own
