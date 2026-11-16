@@ -163,6 +163,7 @@ public:
     ai::tactical::PadCheck build_pad_check(int32_t player, int32_t pad, int32_t type) override;
     bool can_build_now(int32_t player, int32_t type) override;
     std::vector<int32_t> tactical_builders(int32_t player, int32_t type) override;  // skirmish station production
+    int32_t replaced_builder(int32_t id) override;  // skai t17: the station that replaced `id` (upgrade chain)
     // --- end A2 tactical ---
     // --- battle host follow-up ---
     // Hard points whose opportunity target changed to a new live target since the previous call (ascending unit id, then

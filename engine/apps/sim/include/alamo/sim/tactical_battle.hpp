@@ -1056,7 +1056,9 @@ public:
     bool skirmish_land() const { return cfg_.skirmish && !space_; }
     // skai: a skirmish map battle with the skirmish setup (BattleConfig::skirmish_map), land or space.
     bool skirmish_map() const { return cfg_.skirmish && cfg_.map_battle && cfg_.skirmish_map; }
-    const char* pad_list_tag() const { return skirmish_land() ? "Tactical_Buildable_Objects_Multiplayer" : "Tactical_Buildable_Objects_Campaign"; }
+    // skai t17 (L1_S4_REMAINING §3.6, SKIRMISH_SETUP 0x372c10: "skirmish (0x28afb0)"): every skirmish, land or space, lists
+    // pad builds from _Multiplayer (a space skirmish read _Campaign, which the Mineral_Extractor_Pad does not have).
+    const char* pad_list_tag() const { return cfg_.skirmish ? "Tactical_Buildable_Objects_Multiplayer" : "Tactical_Buildable_Objects_Campaign"; }
     // t50: the skirmish slot -> player map [M: slot N = the N-th battle participant by ascending player id]; -1 = none.
     int32_t skirmish_slot_player(int32_t slot) const;
     // t50: Land_Skirmish_Unit_Cap_By_Player_Count of the player's faction at the battle's player count [M: linear

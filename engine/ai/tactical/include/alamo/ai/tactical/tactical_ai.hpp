@@ -227,6 +227,10 @@ public:
     // A skirmish build plan's Produce_Force issues Production {type_index, location = builder} to each in turn until the
     // host accepts one. Default: none (no tactical production in the host).
     virtual std::vector<int32_t> tactical_builders(int32_t /*player*/, int32_t /*type*/) { return {}; }
+    // skai t17 (STATION_HANGARS_SOUND §1.2 steps 7-8, 0x497460): a station upgrade retargets the build queue entries of the
+    // old station S to its successor S', so a build the AI started at S goes on at S'. The live object that replaced
+    // builder `id` (following repeated upgrades), -1 when none. Default: none.
+    virtual int32_t replaced_builder(int32_t /*id*/) { return -1; }
     // Opportunity-fire acquisitions since the last AI frame, in the order they happened (STRATEGIC_GAPS §5.3). A task
     // force holding the owner (or its team container) raises plan event 17 Hardpoint_Opportunity_Target_Acquired
     // (unit, target) when it subscribed that HardPointType. Default: none (the combat side does not report them).

@@ -216,6 +216,12 @@ struct GoalSystemConfig {
     // and needs the same target. Retail uses the same lookup in land and space; [port] off there until the tactical lanes
     // re-record their goldens (exact (type, target) test, lastOld stop before the accept).
     bool like_sets = false;
+    // skai t17 (AI_GALACTIC §1.6 steps 3-6, BKG3_RE_ANSWERS Q4: 0x6c8970 / 0x721a50) [H]: an old candidate (a replaceable
+    // incumbent with eff < best) is neither in this Resolve's kept set nor active, so the greedy and weighted phases may
+    // accept it again (its plan keeps running; the accept test is the validity test only). Off: an old candidate is
+    // treated as kept or active and always released. [port] Only the tactical space AI sets it so far (lane skai-b: land
+    // and galactic goldens are other lanes'; follow-ups on the roadmap).
+    bool reaccept_old_candidates = false;
 };
 
 class GoalSystem {

@@ -557,7 +557,7 @@ void GoalSystem::resolve(int32_t category, int64_t now) {
         }
     std::vector<uint8_t> taken(pool.size(), 0);
     auto is_kept_or_active = [&](const Goal& g) {
-        if (g.state != GoalState::Proposed) return true;
+        if (g.state != GoalState::Proposed && !cfg_.reaccept_old_candidates) return true;
         if (cfg_.like_sets) {
             // bkg3 (BKG3_RE_ANSWERS Q4) [H]: 0x721a50 on this Resolve's kept set, then on the active set (this category's
             // goals were moved out of it above, so that reads the other categories).

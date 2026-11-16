@@ -9,6 +9,7 @@
 #include <bit>
 #include <climits>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <iterator>
 #include <map>
@@ -656,6 +657,10 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
         }
     }
     void claim_force(TfRec& t);
+    // skai t17 [port]: the retail task-force rules of SKAI_T17_SPACE_BUILD_RE (a TF only with a selection, its pad picks
+    // from plan start, the wanted list in team order) run in space only so far; land keeps the older port rules until
+    // the land owner re-records its goldens (roadmap follow-up). Retail uses the same plan start in every mode.
+    bool space_tf_rules() const { return cfg.mode == TacticalMode::Space; }
     // skai: the TF's pad picks (PpSource::Build) of its plan's PotentialPlan as reservations, for a Build / Build_All
     // that runs without a Produce_Force first (BuildEconStructure.lua) [M: retail's TF holds the reservations from plan
     // start]. Only when the TF has none yet.
@@ -831,7 +836,11 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
     int32_t tf_build(int32_t tf, std::string_view type_name, const lua::AiArg& pad) override;
     std::vector<ObjectHandle> tf_reserved_pads(int32_t tf) override {
         std::vector<ObjectHandle> out;
-        if (TfRec* t = tf_rec(tf))
+        TfRec* t = tf_rec(tf);
+        // skai t17 (SKAI_T17_SPACE_BUILD_RE §1.1, 0x66fb30: the TF gets its PP pairs at creation): the pad picks are the
+        // TF's from plan start, so BuildRefinerySpace.lua's Get_Reserved_Build_Pads before its Build sees them.
+        if (t && t->reservations.empty() && space_tf_rules()) claim_pads(*t);
+        if (t)
             for (const auto& [pad, type] : t->reservations) {
                 const ObjectHandle h = store.find(pad);
                 if (store.alive(h)) out.push_back(h);
@@ -1254,6 +1263,12 @@ struct PlayerAi final : GoalModeHooks, ContextModeServices {
         pp_out_ready = false;
     }
     bool plan_activatable(Goal& g) override {
+        // skai t17 (BKG3_RE_ANSWERS Q4.3: 0x6c4a50 with PP +0x100 set): an old candidate taken from the pool (its plan is
+        // running) gets the validity test 0x6c45e0 only, no re-solve. Reached only with reaccept_old_candidates.
+        if (g.running >= 0) {
+            const auto it = w->plans.find(g.running);
+            return it != w->plans.end() && !it->second.ended && !w->pp_stolen(g.pp_handle);
+        }
         if (!(g.pp_valid && g.plan != kAiNone && ctx.templates.plan_value(g.plan) > 0 && w->resolve_pp(*this, g))) return false;
         // A2g t06 [M, as galactic]: the re-solve rewrites the PP's selection, which AllowedTime (0x692860 -> 0x6c0450) reads
         // live. Later pick edits (0x6c27d0 unit left, 0x6bf3d0 joined) change the unit list PP+0x108, not the selection, so
@@ -1723,8 +1738,20 @@ void TacticalAiWorld::Impl::claim_force(TfRec& t) {
     std::vector<lua::AiEventArg> failed;  // HIJACK failures (Production_Failed type names)
     if (ppit != pps.end()) {
         const std::vector<TacticalReinforcement> pool = host.reinforcement_pool(t.player);
-        for (const TacticalPpPick& k : ppit->second.picks) {
-            if (k.tf != static_cast<int32_t>(t.def)) continue;
+        // skai t17 (SKAI_T17_SPACE_BUILD_RE §2.1 / §2.4, 0x6c0100 -> 0x5fe240 [H]): the TF's wanted list, and so its build
+        // tasks and Production orders, go team by team in the TaskForce definition's order, commit order within a team
+        // (the picks are in commit order). Unplaced picks (team -1) last.
+        std::vector<const TacticalPpPick*> mine;
+        for (const TacticalPpPick& k : ppit->second.picks)
+            if (k.tf == static_cast<int32_t>(t.def)) mine.push_back(&k);
+        if (space_tf_rules())
+            std::stable_sort(mine.begin(), mine.end(), [](const TacticalPpPick* a, const TacticalPpPick* b) {
+                const uint32_t ta = a->team < 0 ? UINT32_MAX : static_cast<uint32_t>(a->team);
+                const uint32_t tb = b->team < 0 ? UINT32_MAX : static_cast<uint32_t>(b->team);
+                return ta < tb;
+            });
+        for (const TacticalPpPick* kp : mine) {
+            const TacticalPpPick& k = *kp;
             switch (k.source) {
                 case PpSource::FreeStore: {
                     const ObjectHandle h = store.find(k.ref);
@@ -2282,8 +2309,19 @@ int32_t TacticalAiWorld::Impl::instantiate(PlayerAi& p, Goal& g) {
     lua::set_budget_global(*vm, pi.id);
     lua::set_player_global(*vm, "PlayerObject", p.player);
     const lua::AiTaskForceKind kind = cfg.mode == TacticalMode::Land ? lua::AiTaskForceKind::Land : lua::AiTaskForceKind::Space;
+    // skai t17 (SKAI_T17_SPACE_BUILD_RE §1.1 / §1.5, 0x5f7090 -> 0x66fb30 [H]): a task force exists only when the solve gave
+    // it a selection (free-store unit, pool entry, pad or to-be-produced pick) or its definition says TaskForceRequired;
+    // otherwise no task force, no Lua global (it reads nil) and no <name>_Thread. A plan without a PotentialPlan creates
+    // every task force as before.
+    const auto ppit = pi.pp >= 0 && space_tf_rules() ? pps.find(pi.pp) : pps.end();
     std::string names;
     for (size_t i = 0; i < def.task_forces.size(); ++i) {
+        if (ppit != pps.end() && !def.task_forces[i].required &&
+            std::none_of(ppit->second.picks.begin(), ppit->second.picks.end(),
+                         [i](const TacticalPpPick& k) { return k.tf == static_cast<int32_t>(i); })) {
+            lua::set_nil_global(*vm, def.task_forces[i].name);  // a pooled script keeps no earlier instance's TF
+            continue;
+        }
         TfRec tf;
         tf.id = next_tf++;
         tf.plan = pi.id;
@@ -2499,6 +2537,11 @@ bool TacticalAiWorld::Impl::step_status(StatusRec& s) {
             // AI_GALACTIC_3 §1.11: a started tactical build registers the unit with the plan and waits for it. An entry
             // whose builder is gone is dropped [port: the build signals 0x22 / 3 are not modelled].
             if (const size_t before = t->producing.size(); before > 0) {
+                // skai t17: a builder replaced by a station upgrade keeps the entry, at the new station (the host
+                // retargets the queue, STATION_HANGARS_SOUND §1.2 steps 7-8).
+                for (auto& e : t->producing)
+                    if (!store.alive(store.find(e.second)))
+                        if (const int32_t r = host.replaced_builder(e.second); r >= 0) e.second = r;
                 t->producing.erase(std::remove_if(t->producing.begin(), t->producing.end(),
                                                   [this](const std::pair<int32_t, int32_t>& e) { return !store.alive(store.find(e.second)); }),
                                    t->producing.end());
@@ -3877,6 +3920,9 @@ bool TacticalAiWorld::start(std::vector<std::string>* diagnostics) {
         // (default 2) in every mode: retail's first land skirmish commit starts two scouts and two Secure_Contestable
         // plans (SKAI_T06_LAND_RUNS §7); the config default 1 started one of each.
         gcfg.extra_goals_per_category = type->goal_set_extension_size;
+        // skai t17: Resolve may accept an old candidate again (GoalSystemConfig::reaccept_old_candidates) [H]; space only
+        // for now [port] (retail Geonosis keeps its first build plan when a Build_Refinery_Space goal outranks it).
+        gcfg.reaccept_old_candidates = w.cfg.mode == TacticalMode::Space;
         p.ctx.goals.init(w.defs, std::move(sources), &p, &p.ctx.learning, &p.ctx.templates, &w.rng.synced(), gcfg);
         p.ctx.attach(&p, [&w, &p](const std::string& eq, double& out) { return w.evaluate(p.player, eq, -1, out); });
         if (w.cfg.stagger) {  // OPT2 t01: a fixed planning phase from the player's AI ordinal (players in index order)
