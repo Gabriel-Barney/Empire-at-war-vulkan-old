@@ -482,6 +482,7 @@ FxSourceState EffectLibrary::source_state(const std::string& src, std::vector<ui
                     first = line;
                     break;
                 }
+                if (line.find("X4717") != std::string::npos) continue;  // "Effects deprecated", printed by every compile
                 if (first.empty()) first = line;
             }
             *detail = "fxc failed: " + (first.empty() ? std::string("no output") : first);
