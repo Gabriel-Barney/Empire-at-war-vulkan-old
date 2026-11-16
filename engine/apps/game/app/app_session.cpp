@@ -587,8 +587,7 @@ void App::begin_battle() {
     if (session_ && !saves_dir_.empty() && !demo_session() && session_->check_save().empty()) {
         std::string err;
         if (!save_game(*session_, saves_dir_, kAutoSaveName, session_title(), unix_now(), nullptr, &err))
-            std::fprintf(stderr, "autosave: %s
-", err.c_str());
+            std::fprintf(stderr, "autosave: %s\n", err.c_str());
         else ui_.front.refresh_saves();
     }
     // QA t11: the dialog first, the blocking BattleView::start only after it has been presented (a Fight answer or a
