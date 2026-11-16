@@ -328,9 +328,11 @@ def fleet_hops(trace_path, fac, max_tick=None):
             [(d, name(o), a, b, r) for d, o, a, b, r in sorted(legs)])
 
 
-def galactic_metrics(trace_path, queue_path=None, ai_log=None, sample_ticks=(4500, 9000, 13500), max_tick=None):
+def galactic_metrics(trace_path, queue_path=None, ai_log=None, sample_ticks=(4500, 9000, 13500), max_tick=None,
+                     hop_max_tick=None):
     """Metric values of one galactic run (retail trace or port state trace), {metric id: value}, plus notes. max_tick: only
-    the mode frames up to this one (a reference run that went on longer than the scenario, q4hf t03)."""
+    the mode frames up to this one (a reference run that went on longer than the scenario, q4hf t03). hop_max_tick: the
+    cut for travel.hop_ticks alone (default max_tick); a reference run's later legs still measure fleet speeds (gai3 t01)."""
     m = q2.trace_metrics(trace_path, max_tick=max_tick)
     fac = m["factions"]
     out, notes = {}, []
@@ -338,6 +340,8 @@ def galactic_metrics(trace_path, queue_path=None, ai_log=None, sample_ticks=(450
     # planet centre splits the trip; same rule both sides, q4hf t04). Keyed by faction: the hop speed is the fleet's (its
     # units' Hyperspace_Speed, the Underworld corruption bonus).
     trips, legs = fleet_hops(trace_path, fac, max_tick)
+    if hop_max_tick is not None and hop_max_tick != max_tick:
+        legs = fleet_hops(trace_path, fac, hop_max_tick)[1]
     routes = collections.defaultdict(list)
     for dep, f, a, b, arr in legs:
         routes["%s:%s->%s" % (f, a, b)].append(arr - dep)
@@ -933,7 +937,8 @@ def resolve_refs(scen, refs_dir, fallback=()):
 def retail_metrics(scen, run_dir):
     trace = os.path.join(run_dir, "trace.q2t")
     if scen["kind"] == "galactic":
-        return galactic_metrics(trace, os.path.join(run_dir, "production.q2q"), max_tick=scen.get("max_tick"))
+        return galactic_metrics(trace, os.path.join(run_dir, "production.q2q"), max_tick=scen.get("max_tick"),
+                                hop_max_tick=scen.get("hop_max_tick", scen.get("max_tick")))
     return skirmish_retail_metrics(trace, set(scen["frames"]))
 
 
@@ -1503,6 +1508,13 @@ def selftest():
         check(rm.get("build.ticks[REBEL_X-WING_SQUADRON@CORELLIA]") == 20, "fixture build: start 20, created 40 -> 20 ticks (%s)" % rm.get("build.ticks[REBEL_X-WING_SQUADRON@CORELLIA]"))
         check(rm.get("outcome.planets_final[Empire]") == 2 and rm.get("outcome.captures[Empire]") == 1, "fixture capture")
         check(rm.get("ai.fleet_departures[Empire]") == 1, "fixture one Empire departure")
+        # gai3 t01: hop_max_tick reads legs past max_tick (the hop arrives at 36); the other metrics keep the max_tick cut.
+        cm = galactic_metrics(ret, sample_ticks=(29,), max_tick=30)[0]
+        hm = galactic_metrics(ret, sample_ticks=(29,), max_tick=30, hop_max_tick=59)[0]
+        check("travel.hop_ticks[Empire:KUAT->CORELLIA]" not in cm, "max_tick 30 cuts the hop arriving at 36")
+        check(hm.get("travel.hop_ticks[Empire:KUAT->CORELLIA]") == (26,) and not hm.get("outcome.captures[Empire]")
+              and hm.get("ai.fleet_departures[Empire]", 0) == cm.get("ai.fleet_departures[Empire]", 0),
+              "hop_max_tick 59 keeps the hop, the rest stays cut at 30 (%s)" % hm.get("travel.hop_ticks[Empire:KUAT->CORELLIA]"))
         check(rinfo["factions"].get(0) == "Rebel" and rinfo["factions"].get(1) == "Empire", "fixture factions")
         port = os.path.join(tmp, "port.q2t")
         _galactic_fixture(port, hop_len=31, income=600.0, capture_at=50)
