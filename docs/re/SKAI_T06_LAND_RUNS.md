@@ -280,3 +280,11 @@ turbolaser towers 11318 / 17212, base shield 21663, light vehicle factory 22069,
 25479, barracks 29004, power generator 29665; the **Command Center survives** this time. Opening: refinery 2659, Katarn team
 2746, tech 2 9781, Han Solo 12817, tech 3 16987. The plan ends (54 Destroy_Structure ends: 26 Burn_Units_Land purges, 10 own
 exits, 7 failed re-tests, 7 displacements, 4 random-phase re-checks) are in SKAI_T15_PLAN_RETEST.md, "Retail hook runs".
+
+**Why that run had no FNEAR records (skai-lane2, 2026-11-16).** It did run the FNEAR hook: `BurnUnitsLand.lua` in that kit
+carried the wrapper, Burn_Units_Land ran 11 times and its `near=` field shows Find_Nearest results, yet no FNEAR and no ERR
+record appeared. The wrapper was installed only while the plan script's chunk ran, guarded by "not wrapped yet"; so retail sets
+the `Find_Nearest` global again after the chunk runs [M: the binding is registered after the script body, or per thread], and
+the shipped call reached the binding directly. Fixed in `make_plan_hooks.py`: `Q2P_FNInstall` runs at the chunk run and again
+at every thread start (`Q2P_Begin`), and an `FNHOOK fn_kind=` record marks each install; `selftest_lua.py` covers a binding
+set back after the chunk (burn_nil case, FNHOOK 2). The FNEAR run is requested again with this kit.
