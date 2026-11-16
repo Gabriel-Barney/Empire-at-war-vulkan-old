@@ -63,3 +63,16 @@ Which waiting proposal outranked the vehicle-factory plan at the 7421 commit, gi
 Does a running tactical plan's goal end or lose desire when Time_Limit (30 s = 900 frames) passes?
 - Port: `gcfg.nominal_allowed_time = true`.
 - Retail's Destroy_Structure plans end about 400 frames after they start; the port's plan 14 runs 5000 frames.
+
+### Q5. Land skirmish start structures and the threat grid (from skai-b t22)
+
+`docs/re/SKAI_T22_SPACE_AI_RE.md` (branch `claude/skai-b-80f49f`) finds a rule for space skirmish:
+- each player's START station, made by the team-marker swap 0x295cf0, is registered into a threat grid;
+- the skirmish start then deletes and rebuilds that grid, and UNIT_AI registers only once;
+- so the start station is missing from the owner and live lists for the whole battle.
+
+For land:
+- Does the same swap and grid rebuild happen in a land skirmish?
+- Which objects does it cover: only the start marker's replacement (the command center / palace), or every pre-placed base structure (barracks, factories, turbolaser towers, power generator, shield, and the default units)?
+- Which lists miss them: the owner and live lists for DistanceToNearest, Game.Force / ForceUnnormalized, unit concentration, Location.EnemyForce and zone danger 0x653e90?
+- The port's current rule (skai t12 / b0422, dev 96257374): pre-placed base structures are out of the player force sums and Find_Nearest. Does that match?
