@@ -110,6 +110,9 @@ class GoalModeHooks {
 public:
     virtual ~GoalModeHooks() = default;
     virtual uint32_t target_count() = 0;
+    // The target id at position i (0 <= i < target_count()) of the mode's perception target list, the order the
+    // proposal walk visits targets in. Default: the identity.
+    virtual int32_t target_at(uint32_t i) { return static_cast<int32_t>(i); }
     virtual bool applies(int32_t target, uint32_t application_flags) = 0;  // target slot 4
     virtual bool blocked(uint32_t goal_type, int32_t target) = 0;          // slot 9 reachability lookup
     // Perception for (self, opponent, human, target); `function` names an equation.

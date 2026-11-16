@@ -563,6 +563,80 @@ project-local debugger `tools/probe_mod/cu8h_probes/cu8h_dbg.py`: the same attac
 
 ---
 
+#### B.9 Probe result (gai3 t06, 2026-11-16) [H]
+
+Run `tools/probe_mod/gai3_goalpass/out/20261116-021711-goalpass` (kit `tools/probe_mod/gai3_goalpass`, the B.8
+debugger):
+- Setup: vanilla HotM, human Empire, Medium, Advanced Default, hands off.
+- Coverage: up to mode frame 700, 5142 hits.
+- The **E check** holds on all 711 passes after each goal system's first: E logged by Commit equals the T + G hits
+  seen since the previous Commit, so B.3 counts exactly the evaluations.
+- Output files:
+  - `passes.tsv`: per pass the commit frame, E, quota and evaluation frames;
+  - `evals.tsv`: every evaluation in order, as (goal type, planet);
+  - `picks.tsv`: FindTarget's weighted picks.
+
+| Player (id) | Pass 1 (seeded) | Later passes |
+|---|---|---|
+| Rebel (0) | E 777 (165 seen), quota 3, Commit at 54 | E 128 at quota 3 (55–97). Then quota 1 and E 97–113, one Commit about every 100 frames (195, 307, 405, 519, 618) |
+| Underworld (6) | E 662 (158 seen), quota 3, Commit at 51 | E 147 at quota 3 (52–100). Then quota 1 and E 146, Commits at 248, 395, 542, 689 |
+
+- A goal system with owner 2 commits empty passes every frame (E 0, quota 1).
+- With quota 1, a pass evaluates **one candidate per frame**: pass length = E frames + 1.
+
+**Target order.** Targeted sources visit their planets in the perception target list order, the reverse of the
+campaign's `<Locations>`. For the Rebel's Enemy goals that is The_Maw, Tatooine, Shola, Nal Hutta, Kashyyyk, Kuat,
+Felucia, Corellia; for its Friendly goals Yavin, MonCalimari, Kamino, Naboo. FindTarget uses the same order
+(`A2M_T08_T10_T14_RE.md` t14.7). The port walked the rows forward; gai3 changed the galactic walk to this order
+(`GoalModeHooks::target_at`).
+
+**Per-goal target sets.** These are the slot-9 skips (B.5) and the Applies filter (B.4). Rebel pass 3:
+- **Conquer_Opponent, Conquer_Pirate, Death_Star_Use, Raid, Unrestricted_Grab_Space / _Land:** only The_Maw,
+  Tatooine, Shola.
+- **Conquer_To_Reconnect, Weaken_Planet, Scout_Planet:** all 8 enemy planets.
+- **Generate_Magic_*_Space_Defense*:** MonCalimari, Kamino, Naboo (not Yavin).
+
+Underworld pass 3:
+- **Conquer_Opponent / Conquer_Pirate / Raid / Death_Star_Use / Unrestricted_Grab_*:** Yavin, MonCalimari, Kashyyyk,
+  Naboo.
+- **Corrupt_Planet:** Yavin, Tatooine, Kashyyyk, Kuat, Kamino, Naboo.
+- **Build_Underworld_Barracks / Palace / Vehicle_Factory / Droid_Works:** The_Maw and Nal Hutta.
+
+The diff against the port's pass lists is in §B.10.
+
+#### B.10 Port vs retail, per pass (gai3 t06, 2026-11-16)
+
+The port ran HotM seed 0, human Empire, to tick 700, with a temporary print in `GoalSystem` (not committed). It was
+compared with B.9.
+
+**Fixed in gai3.**
+- **Target list.** The port's list held every planet row in forward order, including the scenery row
+  `Galaxy_Core_Art_Model`. Init therefore seeded E with S × 13 (Rebel 828, Underworld 704) instead of retail's S × 12
+  (777, 662).
+- The list now holds planets only, in reverse row order (`Impl::target_list_at`; FindTarget uses the same list).
+- After the fix the seeded first pass gives E 777 / 662, as retail. Later passes, port vs retail:
+
+| Player | Port E | Retail E | Port Commits | Retail Commits |
+|---|---|---|---|---|
+| Rebel | 128, 97, 111, 98, 113, 98 | 128, 97, 111, 97, 113, 98 | 56, 99, 197, 309, 408, 522, 621 | 54, 97, 195, 307, 405, 519, 618 |
+| Underworld | 147, 146, 145, 146, 149 | 147, 146, 146, 146, 146 | 53, 103, 250, 396, 543, 693 | 51, 101, 248, 395, 542, 689 |
+
+- The constant +2 frames from the first Commit on is a frame-numbering offset [M]: the retail column is the mode
+  frame read at the Commit hit.
+
+**Same in both.** Within a pass, each goal type is evaluated on the same planets in the same order. One state
+difference remains: Underworld Corrupt_Planet skips Corellia in retail and Naboo in the port, because each side's
+active goal is on a different planet.
+
+**Open [L]: source order.**
+- Retail walks the (goal type, function) sources in an order that is neither the function-set file order (the port's
+  order) nor alphabetical. Rebel offensive set, retail: Flush_MajorItem_Budget, Build_Ground_Forces,
+  Build_Space_Forces, Conquer_Opponent, Conquer_Pirate, Reclaim_Excess_MajorItem_Budget, Conquer_To_Reconnect, ...
+  The file order is Flush, Build_Space, Build_Ground, Reclaim, Conquer_Pirate, ...
+- It looks like hash-container order in 0x60f6c0. The set of sources is identical (Rebel 45, Underworld 38).
+- Within a pass this changes only the frame each source is evaluated on, not which candidates are evaluated. A
+  re-question on 0x60f6c0 settles it.
+
 ## Sections 5-6. b0122 (AIPlanetBuildQueue slots) and b0138 (AI pad-build payment)
 Source: Ghidra decompilation of retail StarWarsG.exe (Global.c), call graph `docs/re/ghidra/callgraph.csv`. Names:
 PP = PotentialPlanClass, Q = AIPlanetBuildQueueClass, BT = AIBuildTask, TF = task force. Tags: [H] read directly,

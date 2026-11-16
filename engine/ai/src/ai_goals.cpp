@@ -235,7 +235,7 @@ bool GoalSystem::proposal_slice(int64_t now) {
         }
         const uint32_t n = hooks_->target_count();
         while (cursor_target_ < n) {
-            const auto t = static_cast<int32_t>(cursor_target_);
+            const int32_t t = hooks_->target_at(cursor_target_);
             if (!hooks_->applies(t, def.application) || skip(s.goal_type, t)) {
                 ++cursor_target_;
                 continue;

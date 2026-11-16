@@ -446,6 +446,20 @@ struct GalacticAiWorld::Impl final : lua::AiScriptHost, lua::ScriptMarkupHost, A
     int32_t ground_slots_used(PlanetIndex p) const { return galactic_ai_ground_slots_used(sim, p); }
     uint32_t next_starbase_type(PlanetIndex p) const;  // 0x3f8fd0 (A2M_R3_RE_A §1.2)
     bool applies(int32_t self, int32_t target, uint32_t flags) const;
+    // The galactic perception target list (AI_GALACTIC.md "Galactic perception target list"): one entry per planet, no
+    // scenery rows (Galaxy_Core_Art_Model), in GOM category-3 order = the planet rows in reverse (gai3 t05 / t06,
+    // BKG1_RE_ANSWERS.md B.9) [H]. Computed on each call (no shared cache: player AIs may run on worker threads).
+    uint32_t target_list_size() const {
+        uint32_t n = 0;
+        for (const gal::PlanetState& p : sim.planets()) n += p.is_planet ? 1u : 0u;
+        return n;
+    }
+    // Entry i of the list (i < target_list_size()).
+    PlanetIndex target_list_at(uint32_t i) const {
+        for (size_t k = sim.planets().size(); k-- > 0;)
+            if (sim.planets()[k].is_planet && i-- == 0) return static_cast<PlanetIndex>(k);
+        return kInvalidPlanet;
+    }
     int32_t script_player(int32_t script) const;
     PlanInstance* plan_of_script(int32_t script) {
         const auto it = plans.find(script);
@@ -646,7 +660,10 @@ struct PlayerAi final : GoalModeHooks, ContextModeServices {
     PlayerAi(GalacticAiWorld::Impl* world, int32_t p, const AiPlayerTypeDef* t, int32_t d);
 
     // ---- GoalModeHooks ----
-    uint32_t target_count() override { return static_cast<uint32_t>(w->sim.planets().size()); }
+    // The perception target list (Impl::target_list_at): planets only, the rows in reverse. Retail goal passes visit The_Maw,
+    // Tatooine, Shola, ..., Corellia in HotM, and Init seeds E with S x 12, not 13 (gai3 t06, BKG1_RE_ANSWERS.md B.9) [H].
+    uint32_t target_count() override { return w->target_list_size(); }
+    int32_t target_at(uint32_t i) override { return static_cast<int32_t>(w->target_list_at(i)); }
     bool applies(int32_t target, uint32_t flags) override { return w->applies(player, target, flags); }
     // Galactic goal-system slot 9 (0x6b84f0, A2L_T03_RE_ANSWERS Q2) [H]: blocked when the target's slot 6 at the goal's
     // level is null (stage_of: level 4 never, level > 5 always, else an empty per-target list, cached 10 s).
