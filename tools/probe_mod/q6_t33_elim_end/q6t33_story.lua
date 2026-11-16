@@ -136,6 +136,11 @@ function Q6T_Run()
 	Q6T_Rec("START", "mode=" .. Q6T_MODE .. "|msg=" .. Q6T_MSG .. "|human=" .. human .. "|" .. Q6T_Owners(empire) .. "|" ..
 		Q6T_Where())
 	Q6T_Say("TEXT_Q6T33_RUNNING_" .. Q6T_MODE)
+	if Q6T_VARIANT == "E_CURPLANET" then
+		-- the cursor variant needs Tatooine on screen without player input: centre the camera on it
+		local ok, err = pcall(function() Point_Camera_At(FindPlanet("Tatooine")) end)
+		Q6T_Rec("CAMERA", "ok=" .. tostring(ok) .. "|err=" .. Q6T_Str(err))
+	end
 	local t0 = Q6T_Time() or 0
 	local ev_t = Q6T_E_T
 	if Q6T_MODE == "D" then
