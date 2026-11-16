@@ -1,5 +1,5 @@
 {
- "commit": "86714f47",
+ "commit": "0cb4dd0c",
  "scenarios": {
   "geonosis_skirmish": {
    "references": [
@@ -14,22 +14,22 @@
    ],
    "status": {
     "ai.build_count[Empire]": "PASS",
-    "ai.build_count[Rebel]": "PASS",
+    "ai.build_count[Rebel]": "FAIL",
     "ai.build_mix[Empire]": "PASS",
     "ai.build_mix[Rebel]": "PASS",
-    "ai.first_build_frame[Rebel]": "FAIL",
+    "ai.first_build_frame[Rebel]": "PASS",
     "combat.damage_taken[Empire]": "PASS",
     "combat.damage_taken[Rebel]": "PASS",
     "combat.first_shot_frame": "PASS",
     "econ.credits_at_1800[Empire]": "PASS",
-    "econ.credits_at_1800[Rebel]": "FAIL",
+    "econ.credits_at_1800[Rebel]": "PASS",
     "econ.credits_at_3600[Empire]": "PASS",
     "econ.credits_at_3600[Rebel]": "PASS",
     "econ.credits_at_5400[Empire]": "PASS",
     "econ.credits_at_5400[Rebel]": "PASS",
     "outcome.battle_ended": "PASS",
     "outcome.units_final[Empire]": "PASS",
-    "outcome.units_final[Rebel]": "PASS",
+    "outcome.units_final[Rebel]": "FAIL",
     "outcome.units_lost[Empire]": "PASS",
     "outcome.units_lost[Rebel]": "PASS"
    },
@@ -39,14 +39,14 @@
      "PASS": 4
     },
     "battle outcomes": {
-     "PASS": 5
+     "FAIL": 1,
+     "PASS": 4
     },
     "damage": {
      "PASS": 3
     },
     "income": {
-     "FAIL": 1,
-     "PASS": 5
+     "PASS": 6
     }
    }
   },
