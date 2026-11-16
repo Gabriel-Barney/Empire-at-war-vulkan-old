@@ -473,3 +473,21 @@ Ported on claude/skai-a-2c5f0f (dd2aada9, 5035fb7e):
 
 The Empire AI still takes the vehicle factory before the merc teams. The open lead is Q2: the port reads the factory's `Location` force as 0, so the Destroy_Structure escort contrast list (`Target.Location.EnemyForceUnnormalized`) is empty. The plan needs no cover for the mercs, and its re-test never fails on them. `SKAI_T15_TARGET_LOCATION_FORCE` "Port consequence" 1 lists the four checks (the merc team grid radius 240, footprint columns 70-78, the factory zone 85, a grid entry for the team container).
 - **Escort-list lead closed (skai-a, 2026-11-16):** the merc team radius is 178.6 (grenade lob range, `SKAI_T15_TARGET_LOCATION_FORCE` "Correction"). So the factory's `Location` force is 0 in retail too, and the escort list is empty there as well. Retail's mercs-first order still has no binary explanation. The next evidence has to come from retail proposal records around the 6639-7421 displacement: which `Tactical_Targeted` proposal outranked the factory plan. That needs a retail run with the plan hooks (`run_skai_t15_hooks.ps1`), which Gabriel's run cap blocks today.
+
+## Underworld AI after the t15 rules (skai-a, 2026-11-16) [H: measured]
+
+dev ca5637e2 plus temporary environment switches (not landed), Utapau, Underworld AI vs idle Empire, 36000 ticks.
+
+Seed 3, the only one of seeds 1-10 that ends, with each rule switched off:
+
+| Start-structure flag | Desire kept on failed evaluation | Seed 3 |
+|---|---|---|
+| on | on (as landed) | ends 24070 |
+| on | off | ends 24070 |
+| off (old DUMMY_GROUND_STRUCTURE skip) | on | no end |
+| off | off | no end |
+
+- **Cause:** the start-structure rule changes seed 3's course. The desire-keep rule does not.
+- **Seeds 11-30, as landed:** no end in any of the 20, all with 0 Lua errors. With seeds 1-10 that is 1 of 30 against retail's 1 of 3 (28391).
+- The rule is retail's [H], so this is no port defect.
+- skai_exit's Underworld frames check fails on that single port end: one game cannot give a stable median. The rate check passes.
