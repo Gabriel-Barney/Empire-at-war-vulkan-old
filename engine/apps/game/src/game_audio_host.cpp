@@ -425,7 +425,11 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
     for (const tactical::combat::HitEvent& e : cs.hit_events()) {
         if (e.projectile_desc < cs.data().projectiles.size()) {
             const objects::TypeIndex pt = types.resolve_name(cs.data().projectiles[e.projectile_desc].name);
-            if (pt != objects::kNone) {
+            // tru1 t08 (TRU1_A_RE_ANSWERS B1): the expiry / commanded paths play the detonation sound only when their
+            // lifetime particle exists; a ground hit always plays it.
+            const bool silent = e.victim == tactical::combat::kNoObject && !e.ground && pt != objects::kNone &&
+                                types.get_string(pt, "Projectile_Lifetime_Detonation_Particle").empty();
+            if (pt != objects::kNone && !silent) {
                 std::string_view ev = e.armor_reduced ? types.get_string(pt, "Projectile_SFXEvent_Detonate_Reduced_By_Armor") : std::string_view();
                 if (ev.empty()) ev = sounds(types, pt).projectile_detonate;
                 if (!ev.empty() && game_->impact(ev, v3(e.position))) ++stats_.hits;

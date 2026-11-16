@@ -472,6 +472,7 @@ bool CombatSystem::detonate_projectile(size_t index, uint32_t frame) {
     he.owner = pc.owner;
     he.projectile_desc = pc.desc;
     he.position = pc.pos;
+    he.commanded = true;
     hit_events_.push_back(he);
     if (pd.blast_area_damage > 0.0f && pd.blast_area_range > 0.0f) area_damage(pc, pc.pos, kNoObject, frame);
     detonation_effects(pc, pc.pos, kNoObject, frame, DetonationPath::Expiry);

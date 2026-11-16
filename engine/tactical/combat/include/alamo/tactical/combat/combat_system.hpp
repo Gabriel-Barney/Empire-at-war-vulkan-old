@@ -1022,6 +1022,9 @@ struct HitEvent {
     // Projectile_Ground_Detonation_Particle at `position`; false with no victim = an expiry or a commanded
     // detonation (Projectile_Lifetime_Detonation_Particle). No fallback between the two particles.
     bool ground = false;
+    // tru1 t08: no victim, a commanded detonation 0x4caea0 (detonate_projectile: the laser-defense zap 0x716230, the
+    // remote bomb) - the lifetime particle; the renderer's zap detection does not count it as a hit.
+    bool commanded = false;
 };
 
 // OI fog: one shot that reached the post-shot hook (On_Shot_Fired 0x3a06a0, from HP_Fire_At and WeaponBehavior

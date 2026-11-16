@@ -371,11 +371,12 @@ void test_ground_detonation_particle() {
     shot.ion_stun = true;
     shot.ion_stun_radius = 100.0f;
     shot.ion_stun_duration = 5.0f;
-    {  // land: the ramp at x 140..160 stops it -> ground; ion stun yes, weaken no
+    {  // land: the ramp at x 140..160 stops it at x 144 -> ground; ion stun yes, weaken no
         DetonationWorld d(GameMode::Land, shot, Vec3{142, 30, 0});
         bool found = false;
         const HitEvent e = d.run(found);
-        CHECK(found && e.victim == kNoObject && e.ground && e.position.x > 140.0f && e.position.x < 144.0f);
+        // z 1 meets the ramp (z = (x - 140) / 4) at x 144
+        CHECK(found && e.victim == kNoObject && e.ground && std::fabs(e.position.x - 144.0f) < 0.01f);
         CHECK(d.w.sys->ion_stunned(2, d.w.frame));
         CHECK_F(d.w.sys->modifier(2, ModList::Defense), 0.0f);
     }
