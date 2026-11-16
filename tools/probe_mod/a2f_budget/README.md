@@ -278,7 +278,7 @@ leaves the watcher (the flag and the raw budget block) unchanged.
 
 ## 7. Offline self-test
 
-`toolchain\venv\Scripts\python.exe -I selftest_a2f.py [--lua PATH] [--out DIR]`. 211 checks since a2m t12 (202 after the a2k t05 pool-release fix, 197 at a2k t05, 140 in a2j, 101 in a2i, 83 in a2h, 55 until a2g).
+`toolchain\venv\Scripts\python.exe -I selftest_a2f.py [--lua PATH] [--out DIR]`. 239 checks since gai3 t04 / t07 (section 12; 211 since a2m t12, 202 after the a2k t05 pool-release fix, 197 at a2k t05, 140 in a2j, 101 in a2i, 83 in a2h, 55 until a2g).
 a2m t12 adds: the stage as an AI target with only `Get_Game_Object` and a `__tostring` (as `Get_Stage()` returns it in
 retail: `stagek=obj`), and as a game object (`stagek=type`); the short config (desire to 1400) and the `--sab-long`
 config, its build and story Lua, and `--sab-long` without `--saboteur` refused; the SAB_DONE text per build; channel U
@@ -554,3 +554,36 @@ Offensive budget in the same window. The other modes of the kit are unchanged.
 **Run 2026-11-13** (`out\20261113-053156`, last frame 9469, exit 0): results in `docs/re/BKG3_RE_ANSWERS.md` Q7. The
 Rebel's third mine goal is accepted at 97 and released twice before the mine starts at 807; the Underworld's
 `SCO` for Tatooine is 24.07 from frame 6900 with an Offensive pool of 1488 at the Commit of 6841.
+
+## 12. gai3 t04 / t07: the human-Empire Underworld run (`run_a2f_uw.cmd`)
+
+For roadmap group gai3: t04 (backlog b0157: where the Underworld's first ground company is chosen and with what
+Offensive budget; `docs/re/A2M_R3_RE_A.md` sections 2 and 5) and t07 (backlog b0135: the Underworld infrastructure
+functions). The run folder `out\20261113-053156` of section 11 is no longer on disk and its notes (BKG3 Q7) do not
+cover the Underworld's ground companies, so this is a new run. One run answers both.
+
+Mode: `a2f_run.py --human-empire --saboteur --uw-infra` (`build_a2f_mod.set_uw_infra()`). Against `--saboteur`:
+- channel U runs to frame 12000 (every 30 frames to 1400, then every 300) and adds, per sample frame, a `UB` record per
+  Underworld-owned planet: `SBB` Should_Build_Underworld_Barracks, `SSD` Should_Underworld_Save_For_Desirable_Structures,
+  `SSC` Should_Save_For_Corruption, `NGU` Needs_Groundbase_Upgrade, `SBS` Should_Underworld_Build_Starbase
+  (EvaluatePerception with the Underworld and the planet), and `UBN n=` the number of such planets. They are the desire
+  functions of the Friendly goals Build_Underworld_Barracks and Upgrade_Starbase and three of their sub-functions, so
+  only (goal, target) pairs the goal system scores itself; no function of the closure reads Variable_Human or uses `#`
+  (selftest `uw spec`). The UD desire records also run to 12000. Like every probe read they can shift the AI's leaf-cache
+  refreshes (section 9, "Probe effect").
+- six more hooked plans: BuildGroundForcesPlan, BuildSpaceForcesPlan, AI_Plan_Underworld_BuildUnderworld{Barracks,
+  VehicleFactory, DroidWorks, Palace}. These and UpgradeStarbasePlan carry `goal=` (the task force's
+  Get_Goal_Type_Name) and `tgt=` / `tgtk=` (the plan's Target, named through its game object) on PSTART and the end
+  records (`a2fb_goal_plan.lua`). PSTART `unalloc=` is the net cost of the selection (A2M_R3_RE_A section 2); the PS
+  sample after it gives the Offensive / Infrastructure pools at that start.
+- the story shows "A2FB PROBE: saboteur run recorded (frame 12000)" at frame 12010: quit then.
+
+Run: `tools\probe_mod\a2f_budget\run_a2f_uw.cmd --windowed --non-interactive` (own console window). Heart of the Maw,
+**EMPIRE**, Medium, defaults, Start; close the story box; hands off (auto-resolve any battle prompt); at the 12000
+message Esc > Quit to the main menu > Quit, do not save. Cleanup after an interrupted run: `cleanup_a2f.cmd`.
+
+Reading it: report section 10 (`report.txt`) lists the Underworld's build-plan starts (goal, target, unalloc, OFF / INFRA
+pools, ends), its production begins (QB) to 12000 and the UB values per planet when they change; `uw_infra.tsv` has
+every UB record and `plans.tsv` gained `goal` / `target` columns. t04: the first Underworld `Build_Ground_Forces` start,
+its unalloc and OFF pool, and the QB that follows it (which company, which planet). The Empire sections of the report
+are empty in this mode (section 11).
