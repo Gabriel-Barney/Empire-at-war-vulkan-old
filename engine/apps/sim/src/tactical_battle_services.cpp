@@ -139,6 +139,7 @@ void TacticalBattle::build_service_graph() {
         }
     });
     g.add("clear", 0, bit(cSignals), [this] {
+        story_generics_.clear();
         story_reinforced_.clear();  // L1/S4 wave 2b story hook: this tick's reserve deployments
         ability_finished_.clear();  // S7 t15 A1: this tick's signal 0x29
         landings_unloaded_.clear();  // a1i t04: signal 0x19 records of the last tick

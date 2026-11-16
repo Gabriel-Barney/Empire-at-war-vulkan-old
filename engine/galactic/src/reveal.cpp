@@ -198,6 +198,12 @@ bool GalacticSim::begin_corruption_gain(PlanetIndex planet, int8_t type, int32_t
     if (!valid_planet(planet) || !planets_[planet].is_planet) return false;
     if (!begin_gain_raw(planet, seconds, type, corrupting_player)) return false;
     rebuild_corruption_pairs(planet);
+    GalacticEvent ev;  // wrapper 0x3f6810 raises the notification at the start of the transition
+    ev.kind = GalacticEventKind::CorruptionStarted;
+    ev.planet = planet;
+    ev.player = corrupting_player;
+    ev.value = 1;
+    emit(ev);
     return true;
 }
 
@@ -205,6 +211,11 @@ bool GalacticSim::begin_corruption_removal(PlanetIndex planet, float seconds) {
     if (!valid_planet(planet) || !planets_[planet].is_planet) return false;
     if (!begin_removal_raw(planet, seconds)) return false;
     rebuild_corruption_pairs(planet);
+    GalacticEvent ev;  // wrapper 0x3f6770
+    ev.kind = GalacticEventKind::CorruptionStarted;
+    ev.planet = planet;
+    ev.value = 0;
+    emit(ev);
     return true;
 }
 

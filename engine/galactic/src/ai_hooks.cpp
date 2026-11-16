@@ -400,6 +400,9 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         return RejectReason::None;
     }
     case kFleetMerge: {  // the source fleet (or one of its units) into the target fleet
+        // ENABLE_FLEET_COMBINE 0 (STY1; the human's drop-onto-own-fleet merge, STORY_REWARDS_GALACTIC §3.4).
+        if (!story_gates_.fleet_combine && valid_player(player) && players_[static_cast<size_t>(player)].human)
+            return RejectReason::NotAllowed;
         const uint32_t dst = fleet_of(find(ev.u("target")));
         if (!own_idle(src)) return RejectReason::InvalidUnit;
         if (!own_idle(dst) || dst == src || fleets_[dst].planet != fleets_[src].planet) return RejectReason::InvalidTarget;

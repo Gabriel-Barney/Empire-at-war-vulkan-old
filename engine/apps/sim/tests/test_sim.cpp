@@ -2107,6 +2107,8 @@ static void test_story_rewards_oi(const World& w) {
                "<Reward_Param1>C</Reward_Param1><Prereq>Begin</Prereq></Event>\n"
                " <Event Name=\"Clean_Bad\"><Event_Type>STORY_TRIGGER</Event_Type><Reward_Type>REMOVE_CORRUPTION</Reward_Type>"
                "<Reward_Param1>Nowhere</Reward_Param1><Prereq>Begin</Prereq></Event>\n"
+               // STY1 t08: the timed removal's start raises STORY_GENERIC "decrease_corruption" (wrapper 0x3f6770)
+               " <Event Name=\"Relock_Seen\"><Event_Type>STORY_GENERIC</Event_Type><Event_Param1>decrease_corruption</Event_Param1></Event>\n"
                " <Event Name=\"Lock_F\"><Event_Type>STORY_TRIGGER</Event_Type><Reward_Type>LOCK_UNIT</Reward_Type>"
                "<Reward_Param1>Fighters</Reward_Param1><Prereq>Begin</Prereq></Event>\n"
                " <Event Name=\"Unlock_F\"><Event_Type>STORY_TRIGGER</Event_Type><Reward_Type>BUILDABLE_UNIT</Reward_Type>"
@@ -2253,6 +2255,7 @@ static void test_story_rewards_oi(const World& w) {
         const std::string log = host.story()->log_text("oi rewards");
         if (first_log.empty()) first_log = log;
         CHECK(log == first_log && log.find("reward=LOCK_UNIT[Corvette]") != std::string::npos);
+        CHECK(log.find(" Relock_Seen ") != std::string::npos);  // STY1 t08
     }
     remove_all_long(root, ec);
 }
@@ -2953,6 +2956,7 @@ static const char* kTactical =
     " <Event Name=\"Tac_Select_Hero_Never\"><Event_Type>STORY_SELECT_UNIT</Event_Type><Event_Param1>Hero_Ship</Event_Param1></Event>\n"
     " <Event Name=\"Tac_Click\"><Event_Type>STORY_CLICK_GUI</Event_Type><Event_Param1>b_reinforcement</Event_Param1></Event>\n"
     " <Event Name=\"Tac_Click_Never\"><Event_Type>STORY_CLICK_GUI</Event_Type><Event_Param1>b_special_weapon</Event_Param1></Event>\n"
+    " <Event Name=\"Tac_Generic\"><Event_Type>STORY_GENERIC</Event_Type><Event_Param1>start_hyperspace</Event_Param1></Event>\n"
     " <Event Name=\"Tac_Speech\"><Event_Type>STORY_SPEECH_DONE</Event_Type><Event_Param1>TAC_SPEECH_01</Event_Param1></Event>\n"
     "</Story>\n";
 // The tactical script sees the tactical store (the Empire corvette, its hull) and reports once.
@@ -3088,6 +3092,7 @@ static Result run(const objects::GameObjectTypes& types, const FileProvider& fil
             story.notify_ui({StoryUiEvent::ClickGui, pEmpire, 0, "b_reinforcement", true});
             story.notify_ui({StoryUiEvent::ClickGui, pUnder, 0, "b_special_weapon", true});  // not the tactical plot owner
             story.notify_ui({StoryUiEvent::SpeechDone, pEmpire, 0, "TAC_SPEECH_01", true});
+            story.notify_ui({StoryUiEvent::Generic, pEmpire, 0, "start_hyperspace", true});  // STY1 t03: the battle plot hears it
         }
         host.tick_once();
     }
@@ -3148,7 +3153,7 @@ static void test_story_wave2a() {
           std::count(a.fow_rewards.begin(), a.fow_rewards.end(), std::make_pair(true, int32_t{0})) == 1);
     for (const char* ev : {"Go_Space", "Won_Space", "Bounced_D", "Victory_Empire", "Enemy_Gone", "Near_Zone", "Gun_Down", "Moved",
                            "Corvette_Killed", "Hero_Dies", "Tac_Elapsed", "Script_Saw", "Corrupt_C", "Guarded", "Zone_Seen", "Point_Seen",
-                           "Tac_Select", "Tac_Click", "Tac_Speech", "Gal_Speech"})
+                           "Tac_Select", "Tac_Click", "Tac_Speech", "Tac_Generic", "Gal_Speech"})
         if (a.log.find(std::string(" ") + ev + " ") == std::string::npos) {
             std::printf("FAIL wave2a story event %s did not fire\n", ev);
             ++g_fail;

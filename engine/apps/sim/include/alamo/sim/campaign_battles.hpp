@@ -419,6 +419,11 @@ private:
     // No battle running: nothing.
     void story_victory_enable(bool has_param, int32_t value);
     void story_victory(const std::string& faction, bool short_silent);
+    // STY1 t06: the tactical plot set's CHANGE_OWNER / DESTROY_OBJECT / BOMBARD_DELAY rewards (StorySession::
+    // set_tactical_reward_hook, installed with the hooks above) on the running battle; story_sync_switches copies the story's
+    // DISABLE_REINFORCEMENTS switches into the battle every hook. No battle running: nothing.
+    void story_tactical_reward(const std::string& type, const std::vector<std::string>& params);
+    void story_sync_switches(const StorySession& s);
 #ifdef ALAMO_LUA_HAVE_FOG
     lua::FogScriptHooks story_fog_;
 #endif

@@ -74,6 +74,9 @@ enum class GalacticEventKind : uint8_t {
     Slice,                   // player = slicer owner, planet, object = slicer, type = the entry's type (kNoIndex: no
                              // candidate), value = outcome (0 success, 1 captured, 2 lost effort, 3 cheated, 4 vigilance),
                              // other_player = planet owner
+    // STY1 t08 (retail wrappers 0x3f6810 / 0x3f6770 -> 0x32edd0, GRC 4.3): a timed corruption transition begins:
+    CorruptionStarted,       // planet, player = corrupting player (gain), value = 1 gain / 0 removal; story STORY_GENERIC
+                             // "increase_corruption" / "decrease_corruption"
     Count
 };
 

@@ -80,6 +80,8 @@ struct StoryUiView {
     bool zoomed = false;              // the galactic camera is zoomed onto a planet (GalacticCamera::zoomed)
     uint32_t zoom_planet = 0;         // the planet the camera zoomed onto (0 = unknown: `planet`)
     uint32_t corruption_planet = 0;   // the open corruption panel's planet (0 = closed)
+    uint32_t special_kind = 0;        // STY1 t03: the open special dialog's SpecialAbility kind (0 = none)
+    uint8_t drag = 0;                 // STY1 t03: galactic HUD drag in progress: 1 fleet / unit, 2 land force, 0 none
 };
 
 class StoryUiFeed {

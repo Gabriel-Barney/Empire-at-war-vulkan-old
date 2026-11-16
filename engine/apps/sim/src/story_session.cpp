@@ -1,4 +1,5 @@
 #include "alamo/sim/story_session.hpp"
+#include "alamo/sim/story_rewards.hpp"
 
 #include <algorithm>
 #include <cstdio>
@@ -330,6 +331,7 @@ void StorySession::notify_ui(const StoryUiNotification& n) {
         if (n.kind == StoryUiEvent::SelectUnit) k = TacticalStoryEvent::SelectUnit;
         else if (n.kind == StoryUiEvent::ClickGui) k = TacticalStoryEvent::ClickGui;
         else if (n.kind == StoryUiEvent::SpeechDone) k = TacticalStoryEvent::SpeechDone;
+        else if (n.kind == StoryUiEvent::Generic) k = TacticalStoryEvent::Generic;  // STY1 t03: the battle plot set hears it too
         const bool attached = tactical_ && tactical_->set && (n.player < 0 || n.player == tactical_->set->player);
         if (attached && k != TacticalStoryEvent::Count) {
             TacticalStoryNotification tn;
@@ -824,6 +826,12 @@ std::vector<std::pair<std::string, lua::StoryNotification>> StorySession::notifi
             n.value = e.value;  // wave 2b: the corruption type (§4.7 vf3 compares it with the Param2 keyword)
             out.emplace_back("STORY_CORRUPTION_CHANGED", n);
             break;
+        // STY1 t08: the timed corruption transition began -> STORY_GENERIC "increase_corruption" / "decrease_corruption"
+        // (retail wrappers 0x3f6810 / 0x3f6770, GRC 4.3); routed like StoryUiEvent::Generic (String family, every plot set).
+        case K::CorruptionStarted:
+            n.name = e.value != 0 ? "increase_corruption" : "decrease_corruption";
+            out.emplace_back("STORY_GENERIC", n);
+            break;
         // S10 battle results (BattleWon / BattleLost / BattleRetreat, posted by the conflict manager); routed
         // player-scoped (route()): the winner's / loser's / retreating player's plot sets only [inferred].
         // WIN/LOSE_BATTLES (STORY.md 5): counter + Param4 planet list; Param2 location enum and the Param3
@@ -862,6 +870,7 @@ std::vector<std::pair<std::string, lua::StoryNotification>> StorySession::notifi
             break;
         }
         case K::BattleRetreat:
+            out.emplace_back("STORY_GENERIC", [&] { lua::StoryNotification g = n; g.name = "retreat_complete"; return g; }());  // STY1 t03
             n.name = n.planet;
             n.params.push_back(lua::StoryParam::of_text(n.planet));
             out.emplace_back("STORY_RETREAT", n);
@@ -949,10 +958,14 @@ void StorySession::invade_planet_reward(int32_t plot_player, PlanetIndex planet,
             commands::EventData ev(commands::EventType::Invade);
             ev.set("planet", static_cast<uint32_t>(store.id(ps.object)));
             ev.set_ids("units", {static_cast<uint32_t>(store.id(u))});
+            gates_.script_invade = true;  // STY1: the story's own invasion is not refused by its invasion locks
+            sync_gates();
             if (lua_->bridge.pipeline)
                 lua_->bridge.pipeline->execute_direct(frame_, static_cast<uint8_t>(issuer), commands::CommandSource::Script, ev);
             else
                 sim_->execute(static_cast<uint8_t>(issuer), ev);
+            gates_.script_invade = false;
+            sync_gates();
             return;
         }
     }
@@ -1219,6 +1232,31 @@ void StorySession::apply_reward(Set& s, const std::string& type, const std::vect
         }
     }
     // --- end OI galactic ---
+    else if (type == "TRIGGER_AI") {
+        // STY1 §5.x: P1 flag, P2 faction (both required, silent otherwise), P3 optional planet type. Sets the AI flag that
+        // Check_Story_Flag reads (the port keeps AI flags on the plot models: raised on every set's model [port]).
+        const std::string flag = params.size() > 0 ? std::string(ascii_trim(params[0])) : std::string();
+        const std::string faction = params.size() > 1 ? std::string(ascii_trim(params[1])) : std::string();
+        if (!flag.empty() && !faction.empty()) {
+            const int32_t player = sim_->player_of_faction(faction);
+            if (player < 0) {
+                note("TRIGGER_AI failed: unknown faction " + faction);
+            } else {
+                int32_t loc = 0;
+                if (params.size() > 2 && !ascii_trim(params[2]).empty()) {
+                    const PlanetIndex row = reward_planet(std::string(ascii_trim(params[2])));
+                    if (row == kInvalidPlanet) note("TRIGGER_AI: Unable to find planet " + std::string(ascii_trim(params[2])));
+                    else loc = static_cast<int32_t>(sim_->store().id(sim_->planets()[row].object));
+                }
+                for (auto& set : sets_) set->model.raise_ai_flag(player, flag, loc);
+            }
+        }
+    }
+    else if (apply_sty1_reward(s.player, tactical_ && tactical_->set.get() == &s, type, params)) {
+    }  // STY1 lane B (src/story_rewards_apply.cpp)
+    else if (const StoryRewardRow* row = find_story_reward(type); row && row->owner == StoryRewardOwner::Session) {
+        note("reward " + type + " has no handler");  // the coverage table says the session owns it: a table / handler mismatch
+    }
 }
 
 // --- OI galactic (owner: galactic agent): story lock 0x4472a0 ---
@@ -1468,6 +1506,7 @@ void StorySession::hash(StateHasher& h) const {
         h.str(tactical_map_[0]);
         h.str(tactical_map_[1]);
     }
+    hash_sty1(h);  // STY1 lane B: only once a rule reward changed something
 }
 
 // ============================================================================================ wave 2a
@@ -1476,7 +1515,7 @@ std::string_view tactical_story_event_name(TacticalStoryEvent e) {
     static constexpr std::string_view kNames[] = {"Destroyed",     "HardpointDestroyed", "Reinforced",   "UnitArrived",
                                                   "FullStop",      "Garrisoned",         "HeroCaptured", "StructureCaptured",
                                                   "UnitCommanded", "UnitGuarding",       "BaseDestroyed", "LoadTacticalMap",
-                                                  "SelectUnit",    "ClickGui",           "SpeechDone"};
+                                                  "SelectUnit",    "ClickGui",           "SpeechDone",   "Generic"};
     const auto i = static_cast<size_t>(e);
     return i < std::size(kNames) ? kNames[i] : std::string_view("?");
 }
@@ -1485,7 +1524,7 @@ std::string_view tactical_story_event_type(TacticalStoryEvent e) {
         "STORY_TACTICAL_DESTROY", "STORY_ATTACK_HARDPOINT", "STORY_REINFORCE",     "STORY_UNIT_ARRIVED",
         "STORY_FULL_STOP",        "STORY_GARRISON_UNIT",    "STORY_CAPTURE_HERO",  "STORY_CAPTURE_STRUCTURE",
         "STORY_COMMAND_UNIT",     "STORY_GUARD_UNIT",       "STORY_DESTROY_BASE",  "STORY_LOAD_TACTICAL_MAP",
-        "STORY_SELECT_UNIT",      "STORY_CLICK_GUI",        "STORY_SPEECH_DONE"};
+        "STORY_SELECT_UNIT",      "STORY_CLICK_GUI",        "STORY_SPEECH_DONE",  "STORY_GENERIC"};
     const auto i = static_cast<size_t>(e);
     return i < std::size(kTypes) ? kTypes[i] : std::string_view();
 }
@@ -2085,8 +2124,8 @@ void StorySession::poll_tactical() {
 namespace {
 
 // 2 (stage 2): + the attached tactical story; 3 (q6 t14): + the holocron list (GALACTIC_DIALOGS §2.8). 1 and 2 still load
-// (with an empty holocron).
-constexpr uint32_t kStorySaveVersion = 3;
+// (with an empty holocron); 3 loads with default STY1 state.
+constexpr uint32_t kStorySaveVersion = 4;  // 4 (STY1 lane B): + the story rule gates / tutorial state / reinforcement switches
 // "story.lua" (write_scripts): 1 galactic sets, 2 + the tactical set, 3 = 2 (it followed kStorySaveVersion), 4 (q6 t19):
 // each script's Lua state is a script block (alamo/lua/script_save.hpp, LUA_SAVE.md §2) instead of a bare LuaVm image.
 constexpr uint32_t kStoryScriptsVersion = 4;
@@ -2234,6 +2273,7 @@ void StorySession::write(ByteWriter& w) const {
                 return -1;
             });
         });
+    write_sty1(w);  // v4: the story rule gates / tutorial state / reinforcement switches (STY1 lane B)
     // v2: the attached tactical story.
     w.boolean(tactical_ != nullptr);
     if (!tactical_) return;
@@ -2347,6 +2387,8 @@ bool StorySession::read(ByteReader& r) {
         if (has_holocron) holocron_bytes = r.raw(r.u32());
         if (!r.ok()) return false;
     }
+    Sty1Save sty1;
+    if (version >= 4 && !read_sty1(r, sty1)) return false;
     // v2: the attached tactical story (stage 2; see the header for the two load passes).
     bool has_tac = false, has_set = false, has_own = false;
     uint64_t tac_start = 0;
@@ -2467,6 +2509,11 @@ bool StorySession::read(ByteReader& r) {
     tactical_map_[1] = std::move(tactical_map1);
     autoresolve_disabled_ = autoresolve_disabled;
     autoresolve_planets_ = std::move(autoresolve_planets);
+    gates_ = std::move(sty1.gates);  // STY1 lane B (defaults for a version-3 save)
+    tutorial_ = std::move(sty1.tutorial);
+    reinforce_off_ = std::move(sty1.reinforce_off);
+    load_campaign_.reset();
+    sync_gates();
     tactical_headers_ = std::move(tactical_headers);
     log_ = std::move(log);
     lines_ = std::move(lines);

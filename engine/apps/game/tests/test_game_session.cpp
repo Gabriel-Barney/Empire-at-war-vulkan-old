@@ -2088,7 +2088,8 @@ static void story_ui_test() {
     v.zoomed = true;  // zoom planet unknown -> the selected planet
     f.observe(v);
     out = f.take();
-    CHECK(kinds(out) == std::vector<E>{E::ZoomIntoPlanet} && out[0].object == 100);
+    // STY1 t03: the zoom state change also raises GENERIC zoomed_in / zoomed_out
+    CHECK(kinds(out) == (std::vector<E>{E::ZoomIntoPlanet, E::Generic}) && out[0].object == 100 && out[1].name == "zoomed_in");
     f.observe(v);
     CHECK(f.take().empty());
     v.zoom_planet = 101;  // re-targeted while zoomed: out of the old one, into the new one
@@ -2098,7 +2099,7 @@ static void story_ui_test() {
     v.zoomed = false;
     f.observe(v);
     out = f.take();
-    CHECK(kinds(out) == std::vector<E>{E::ZoomOutPlanet} && out[0].object == 101);
+    CHECK(kinds(out) == (std::vector<E>{E::ZoomOutPlanet, E::Generic}) && out[0].object == 101 && out[1].name == "zoomed_out");
     v.corruption_planet = 100;
     f.observe(v);
     out = f.take();
@@ -2109,6 +2110,22 @@ static void story_ui_test() {
     v.corruption_planet = 0;
     f.observe(v);
     CHECK(f.take().empty());  // deselect / close raise nothing
+    // STY1 t03: special dialogs and HUD drags raise their STORY_GENERIC names once per opening / drag
+    v.special_kind = galactic::kSpecialBlackMarket;
+    v.drag = 1;
+    f.observe(v);
+    out = f.take();
+    CHECK(out.size() == 2 && out[0].name == "open_black_market_menu" && out[1].name == "start_fleet_drag");
+    f.observe(v);
+    CHECK(f.take().empty());
+    v.special_kind = 0;
+    v.drag = 2;
+    f.observe(v);
+    out = f.take();
+    CHECK(out.size() == 1 && out[0].name == "start_land_drag");
+    v.drag = 0;
+    f.observe(v);
+    CHECK(f.take().empty());
     f.click_gui("b_Create_00");
     f.click_gui("");
     f.speech_done("UW_ACT01_G01_01");
@@ -2118,7 +2135,7 @@ static void story_ui_test() {
     out = f.take();
     CHECK(kinds(out) == (std::vector<E>{E::ClickGui, E::SpeechDone, E::MovieDone, E::Generic, E::MissionLost}));
     CHECK(out.size() == 5 && out[0].name == "b_Create_00" && out[4].name == "Story_Plots_Empire_ActI_M02_LAND.xml");
-    CHECK(f.raised(E::SelectUnit) == 3 && f.raised(E::ZoomOutPlanet) == 2 && f.raised_total() == 14);
+    CHECK(f.raised(E::SelectUnit) == 3 && f.raised(E::ZoomOutPlanet) == 2 && f.raised_total() == 19);
     f.reset();
     v = {};
     v.selection = {12};
