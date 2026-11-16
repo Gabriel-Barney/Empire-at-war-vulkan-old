@@ -871,12 +871,35 @@ bool retest_tactical_pp(const TacticalPpInput& in, const std::vector<PpRetestPic
     pp.recompute_remaining();  // 0x6c4b20 over the stored selection
     bool ok = true;
     contrast.finalize(ok);  // 0x72af80
-    if (!ok && why) {
-        char buf[160];
-        std::snprintf(buf, sizeof buf, "contrast re-test failed: ground remaining %.1f of %.1f, tolerance %.3f",
-                      pp.remaining.size() > 1 ? pp.remaining[1] : 0.0, pp.entries.size() > 1 ? pp.entries[1].target : 0.0,
-                      static_cast<double>(pp.tolerance));
-        *why = buf;
+    if (!ok && why) {  // name each failing list / layer: its untyped total and its typed rows (the two checks of 0x72af80)
+        std::string s = "contrast re-test failed:";
+        for (const bool escort : {false, true}) {
+            if (escort && !pp.has_escort_list) continue;
+            const size_t base = escort ? pp.esc_base : 0;
+            for (const bool space : {true, false}) {
+                if (!(space ? pp.layer_active_space : pp.layer_active_ground)) continue;
+                const size_t e = base + (space ? 0 : 1);
+                double total = 0.0, residual = 0.0;
+                for (size_t r = 0; r < pp.entries.size(); ++r) {
+                    if (pp.entries[r].row < 0 || pp.entries[r].space != space || pp.entries[r].escort != escort) continue;
+                    total += pp.entries[r].target;
+                    residual += std::max(pp.remaining[r], 0.0);
+                }
+                char buf[200];
+                std::snprintf(buf, sizeof buf, " %s %s: total %.1f of %.1f left, rows %.1f of %.1f left;", escort ? "escort" : "main",
+                              space ? "space" : "ground", pp.remaining[e], pp.entries[e].target, residual, total);
+                s += buf;
+            }
+        }
+        int32_t typed = 0;
+        for (size_t i = 0; i < pp.sel_rec.size(); ++i) {
+            const int32_t e = pp.sel_entry[i];
+            if (e >= 0 && static_cast<size_t>(e) < pp.entries.size() && pp.entries[static_cast<size_t>(e)].row >= 0) ++typed;
+        }
+        char tol[96];
+        std::snprintf(tol, sizeof tol, " tolerance %.3f; %zu selected, %d on a typed row", static_cast<double>(pp.tolerance),
+                      pp.sel_rec.size(), typed);
+        *why = s + tol;
     }
     return ok;
 }

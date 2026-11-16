@@ -346,3 +346,53 @@ For `engine/ai/tactical/src/tactical_ai.cpp` `plan_invalid` (~l.1257) and the co
   Retail starts a new Destroy_Structure at almost every commit after about 19000 frames. So if the hook run shows Resolve_Category
   displacement (§3.4), the work is the port's lack of free units at proposal time (Land_Scout_Area accepted 299 times,
   Secure_Contestable 261), not the plan end.
+
+## Retail hook runs (2026-11-16) [H: measured]
+
+Kit of §3.5, FoC 1.121 Steam, Utapau Heights, Advanced Default, Medium AI, hands off, driven by the coordinator session.
+Read with `analysis/plan_ends.py <run>`: it finds the Destroy_Structure plan definition from the `PEXIT tf=?` records and
+classifies **every** plan end of it by where the end came from (`mf` = mode frame = battle time × 30, offset 0 here).
+
+| | Run 1: Empire AI, human Underworld idle | Run 2: Rebel AI, human Empire idle |
+|---|---|---|
+| Folder (this worktree, `tools\probe_mod\q2_traces\out\`) | `20261116-005957-skirmish-vanilla-lua` | `20261116-012157-skirmish-vanilla-lua` |
+| Battle end | **ended** at about 25707 (defeat screen; kit exit `mode_changed`) | none within 36000 (`ticks_reached`) |
+| Base kills (`land_attack.py`) | vehicle factory 14368, droid works 17366, palace 24378, barracks 25499 | towers 11318 / 17212, shield 21663, light factory 22069, research 24793, comm array 25479, barracks 29004, power 29665; the CC survives |
+| Refinery / tech 2 / tech 3 built | 2569 / 7678 / 19390 (as on 2026-11-14) | 2659 / 9781 / 16987 |
+| Destroy_Structure plan ends | 19 | 54 |
+| Purge_Goals (Burn_Units_Land, plan end from 0x69c8cc) | 6 | 26 |
+| The plan's own exit (0x725bf0) | 5 | 10 |
+| Re-test 0x6c47c0 false, then released (Resolve_Category 0x6c8c9a or maintenance 0x722c2d) | 4 (1 maintenance) | 7 |
+| Old candidate not picked again (§3.4, release 0x6c95b0) | 4 | 7 |
+| Random-phase re-check failure (release 0x6c9996, AI_GALACTIC §1.6 step 6) [M: site] | 0 | 4 |
+| Re-test false results, all plan types | 31 (27 PPs) | 19 (18 PPs) |
+
+Run 1 Destroy_Structure lives: 13.7 s (one commit interval, 414 frames) in 11 of 18, 26 s in 4, longer in 3.
+
+**Answer to t15.** Retail's land Destroy_Structure plans end at a commit by every goal-system rule, not by one: the contrast
+re-test does fail (11 of 73 ends over both runs), the old-candidate displacement of §3.4 is as frequent (11), and once
+Burn_Units_Land runs (from about 516 s / 600 s) its `Purge_Goals` ends the most (32). The re-test alone does not make the port's
+plans short; the port needs all three (it has displacement and Purge_Goals already).
+
+**Retail spread.** The Empire AI destroyed the idle Underworld base this time (about 25707); on 2026-11-14 it had not ended
+by 36000. So "retail's Empire AI does not finish an idle base within 36000" (B0418 §5, skai's exit test) holds for one of
+two runs. The Rebel AI has not ended an idle Empire base in any of three runs (SKAI_T06 §1, §6, run 2 here).
+
+### Port status (q4d-skai, 2026-11-16)
+
+The re-test of "Port consequence" items 1-4 is in the port behind `TacticalAiConfig::plan_retest` (headless
+`--plan-retest`), **off by default**. With it off, every golden and outcome test is unchanged (the re-test is not called, and
+the CRC adds the sticky failure byte only when a re-test failed).
+
+With it on, the re-test fails in the port the way retail's does (§3.2, the failure line names the list, layer and coverage):
+- headless synthetic skirmish, frame 302: a SkirmishSweep area gained enemies (main space total 600 of 2000 left, tolerance
+  0.267);
+- foc-land-campaign seed 1, frame 961: a ClearInfantry zone now held enemy types the selection does not cover (untyped total
+  met, typed rows 2520 of 2520 left, tolerance 0.933); frame 1303: a DestroyLandUnit escort list fully uncovered.
+
+Consequences of switching it on (why it is not on yet):
+- goldens move: the synthetic, foc and foc-land-campaign skirmishes, the game smoke recordings;
+- foc-land-campaign seeds 1-12 (20000 ticks): 4-8 re-test failures per seed; 10 of 12 still end with the Rebels retreating
+  (2755-11566, was 2239-3550 for all 12), seeds 1 and 3 run to the 14400-frame cap. `alamo_headless_skirmish_ai_foc_land_campaign_outcome_seed1`
+  keeps `--expect-battle-end` (DECISIONS.md "AI-vs-AI land skirmish tests do not need a battle end": the campaign-rules land
+  invasion keeps it), so that test fails with the switch on. Turning it on is Gabriel's decision.

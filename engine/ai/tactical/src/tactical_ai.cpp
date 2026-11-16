@@ -1264,10 +1264,11 @@ struct PlayerAi final : GoalModeHooks, ContextModeServices {
     bool plan_invalid(const Goal& g) override {
         if (g.running < 0) return true;
         const auto it = w->plans.find(g.running);
-        return it == w->plans.end() || it->second.ended || w->pp_stolen(g.pp_handle) || w->pp_retest_failed(*this, g);
+        return it == w->plans.end() || it->second.ended || w->pp_stolen(g.pp_handle) ||
+               (w->cfg.plan_retest && w->pp_retest_failed(*this, g));
     }
     // skai t15 (SKAI_T15_PLAN_RETEST §2.1) [H]: Resolve_Category re-tests an old candidate's running plan too.
-    bool retest_old_candidates() override { return true; }
+    bool retest_old_candidates() override { return w->cfg.plan_retest; }
     bool replaceable(const Goal& g) override {
         if (g.running < 0) return true;
         const auto it = w->plans.find(g.running);

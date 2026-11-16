@@ -1,17 +1,19 @@
 """skai t15: which goal-system rule ended each retail plan, from a run of run_skai_t15_*.cmd.
 
 Reads <run>/lua_records.txt (the Lua probe's plan records: PSTART / PBLOCK / PEXIT, make_plan_hooks.py) and
-<run>/frida_t15.jsonl (frida/skai_t15_hooks.js events), and prints for every plan end that came from outside the script
-(PEXIT with tf=?, the signature of a goal-system drop, docs/re/SKAI_T15_PLAN_RETEST.md §4) the rule that ended it:
+<run>/frida_t15.jsonl (frida/skai_t15_hooks.js events). The plan's definition pointer is found by matching its PEXIT
+records with tf=? (a plan end from outside the script, docs/re/SKAI_T15_PLAN_RETEST.md §4) to the plan_end hook events
+(mf = t * 30 + a constant, calibrated as the median gap). Then every plan_end event of that definition is classified by
+where the end came from (docs/re/SKAI_T15_PLAN_RETEST.md, "Retail hook runs"):
 
-  retest      the running-plan re-test 0x6c47c0 returned false for a PP of that plan definition in the same commit
-  purge       Purge_Goals 0x69c750 ran just before
-  release     the goal was released (0x693750) without a failed re-test: Resolve_Category's old-candidate release
-              (or maintenance's desire <= 0 rule)
-  ?           no plan_end event near it (the hooks missed it)
-
-The Lua records carry game time t in seconds; the hooks carry the mode frame mf. t * 30 and mf differ by a constant
-(load frames): it is calibrated as the median gap between each tf=? PEXIT and the nearest plan_end.
+  purge         plan end called from Purge_Goals (0x69c8cc; Burn_Units_Land's Purge_Goals(PlayerObject))
+  script        plan end from the plan's own exit (0x725bf0)
+  otherwise the goal destructor ended it; the goal's budget release (0x614880) says which rule dropped the goal:
+  retest        released right after a re-test 0x6c47c0 returned false: Resolve_Category (0x6c8c9a) or maintenance (0x722c2d)
+  displaced     an old candidate not picked again at the end of Resolve_Category (0x6c95b0)
+  recheck       released in Resolve_Category's weighted random phase re-check (0x6c9996) [M]
+  maint         another maintenance rule (0x722bda / 0x722d01: not fundable, desire <= 0)
+  other         none of these
 
     toolchain\\venv\\Scripts\\python.exe -I tools\\probe_mod\\q2_traces\\analysis\\plan_ends.py <run dir> [--plan Destroy_Structure]
     ... plan_ends.py --selftest
@@ -27,6 +29,8 @@ import sys
 FPS = 30.0
 REC = re.compile(r"^P \S+ \d+ (\w+) (.*)$")
 KV = re.compile(r"(\w+)=(\S*)")
+RELEASE = {"0x6c8c9a": "retest", "0x722c2d": "retest", "0x6c95b0": "displaced", "0x6c9996": "recheck",
+           "0x722bda": "maint", "0x722d01": "maint"}
 
 
 def read_records(path):
@@ -59,85 +63,84 @@ def read_events(path):
     return ev
 
 
-def analyse(records, events, plan, window=45):
+def find_plandef(records, events, plan, window=45):
+    """(plan definition pointer, mf offset, PEXIT tf=? count) of `plan`, or (None, None, n)."""
     exits = [r for r in records if r["kind"] == "PEXIT" and r.get("plan") == plan and r.get("tf") == "?"]
     ends = [e for e in events if e.get("k") == "plan_end" and isinstance(e.get("mf"), int) and e["mf"] >= 0]
     if not exits or not ends:
-        return {"exits": len(exits), "plan_ends": len(ends), "rows": [], "offset": None, "plandef": None, "counts": {}}
-    # Calibrate mf = t * 30 + offset.
-    gaps = []
-    for r in exits:
-        x = r["t"] * FPS
-        gaps.append(min((e["mf"] - x for e in ends), key=abs))
-    offset = statistics.median(gaps)
-    # The plan definition of this plan: the one most often at a matching plan_end.
+        return None, None, len(exits)
+    offset = statistics.median(min((e["mf"] - r["t"] * FPS for e in ends), key=abs) for r in exits)
     near = collections.Counter()
     for r in exits:
         x = r["t"] * FPS + offset
         for e in ends:
             if abs(e["mf"] - x) <= window:
                 near[e.get("plandef")] += 1
-    plandef = near.most_common(1)[0][0] if near else None
-    pp_def = {}
-    for e in events:
-        if e.get("k") == "retest_enter":
-            pp_def[e.get("pp")] = e.get("plandef")
+    return (near.most_common(1)[0][0] if near else None), offset, len(exits)
+
+
+def classify(events, plandef):
+    """[(mf, rule)] for every plan_end of `plandef`, in event order."""
     rows = []
-    counts = collections.Counter()
-    for r in exits:
-        x = r["t"] * FPS + offset
-        cand = [e for e in ends if e.get("plandef") == plandef and abs(e["mf"] - x) <= window]
-        if not cand:
-            rows.append((r["t"], r.get("target", "?"), "?", "", ""))
-            counts["?"] += 1
+    for i, e in enumerate(events):
+        if e.get("k") != "plan_end" or e.get("plandef") != plandef:
             continue
-        end = min(cand, key=lambda e: abs(e["mf"] - x))
-        mf = end["mf"]
-        same = [e for e in events if isinstance(e.get("mf"), int) and mf - 3 <= e["mf"] <= mf]
-        failed = [e for e in same if e.get("k") == "retest_leave" and e.get("ret") == 0 and pp_def.get(e.get("pp")) == plandef]
-        purged = [e for e in same if e.get("k") == "purge"]
-        released = [e for e in same if e.get("k") == "goal_release" and e.get("goal") == end.get("goal")]
-        if failed:
-            rule = "retest"
-        elif purged:
-            rule = "purge"
-        elif released:
-            rule = "release"
-        else:
-            rule = "other"
-        counts[rule] += 1
-        detail = "ra %s bt %s" % (end.get("ra"), ",".join(end.get("bt", [])[:3]))
-        if released:
-            detail += "; release ra %s" % released[0].get("ra")
-        rows.append((r["t"], r.get("target", "?"), rule, str(mf), detail))
-    return {"exits": len(exits), "plan_ends": len(ends), "rows": rows, "offset": offset, "plandef": plandef, "counts": dict(counts)}
+        ra = e.get("ra")
+        if ra == "0x69c8cc":
+            rows.append((e.get("mf"), "purge"))
+            continue
+        if ra == "0x725bf0":
+            rows.append((e.get("mf"), "script"))
+            continue
+        rule = "other"
+        j = i - 1
+        while j >= 0 and isinstance(events[j].get("mf"), int) and events[j]["mf"] >= e.get("mf", 0) - 2:
+            x = events[j]
+            if x.get("k") == "budget_release" and x.get("goal") == e.get("goal"):
+                rule = RELEASE.get(x.get("ra"), "other")
+                if rule == "retest":  # only when the event just before the release is a false re-test
+                    k = j - 1
+                    while k >= 0 and events[k].get("k") == "goal_dtor":
+                        k -= 1
+                    if not (events[k].get("k") == "retest_leave" and events[k].get("ret") == 0):
+                        rule = "other"
+                break
+            j -= 1
+        rows.append((e.get("mf"), rule))
+    return rows
 
 
-def report(res, plan):
-    print("%s: %d PEXIT tf=? records, %d plan_end events, mf = t*30 %+.0f, plan definition %s" %
-          (plan, res["exits"], res["plan_ends"], res["offset"] or 0, res["plandef"]))
-    for t, target, rule, mf, detail in res["rows"]:
-        print("  t %8.2f  mf %6s  %-8s %-32s %s" % (t, mf, rule, target, detail))
-    print("rules: " + ", ".join("%s %d" % kv for kv in sorted(res["counts"].items())))
+def report(rows, plan, plandef, offset, exits):
+    print("%s: plan definition %s, %d PEXIT tf=? records, mf = t*30 %+.0f, %d plan ends" %
+          (plan, plandef, exits, offset or 0, len(rows)))
+    by = collections.defaultdict(list)
+    for mf, rule in rows:
+        by[rule].append(mf)
+    for rule, mfs in sorted(by.items(), key=lambda kv: -len(kv[1])):
+        print("  %-10s %3d  mf %s%s" % (rule, len(mfs), " ".join(str(m) for m in mfs[:14]), " ..." if len(mfs) > 14 else ""))
 
 
 def selftest():
     recs = [{"kind": "PEXIT", "plan": "Destroy_Structure", "tf": "?", "t": 100.0, "target": "A"},
-            {"kind": "PEXIT", "plan": "Destroy_Structure", "tf": "?", "t": 200.0, "target": "B"},
-            {"kind": "PEXIT", "plan": "Destroy_Structure", "tf": "MainForce", "t": 250.0, "target": "C"}]
+            {"kind": "PEXIT", "plan": "Destroy_Structure", "tf": "?", "t": 200.0, "target": "B"}]
     off = 120
     ev = [{"k": "retest_enter", "pp": "p1", "plandef": "D", "mf": 3000 + off},
           {"k": "retest_leave", "pp": "p1", "ret": 0, "mf": 3000 + off},
-          {"k": "plan_end", "plan": "x", "plandef": "D", "goal": "g1", "mf": 3000 + off, "ra": "0x691900", "bt": []},
-          {"k": "goal_release", "goal": "g2", "mf": 6001 + off, "ra": "0x6c9000"},
-          {"k": "plan_end", "plan": "y", "plandef": "D", "goal": "g2", "mf": 6001 + off, "ra": "0x691900", "bt": []},
-          {"k": "plan_end", "plan": "z", "plandef": "E", "goal": "g3", "mf": 6001 + off, "ra": "0x691900", "bt": []}]
-    res = analyse(recs, ev, "Destroy_Structure")
-    ok = (res["exits"] == 2 and res["plandef"] == "D" and abs(res["offset"] - off) <= 1 and
-          [r[2] for r in res["rows"]] == ["retest", "release"])
+          {"k": "budget_release", "goal": "g1", "ra": "0x6c8c9a", "mf": 3000 + off},
+          {"k": "goal_dtor", "goal": "g1", "mf": 3000 + off},
+          {"k": "plan_end", "plan": "x", "plandef": "D", "goal": "g1", "mf": 3000 + off, "ra": "0x691887"},
+          {"k": "budget_release", "goal": "g2", "ra": "0x6c95b0", "mf": 6001 + off},
+          {"k": "plan_end", "plan": "y", "plandef": "D", "goal": "g2", "mf": 6001 + off, "ra": "0x691887"},
+          {"k": "plan_end", "plan": "z", "plandef": "E", "goal": "g3", "mf": 6001 + off, "ra": "0x691887"},
+          {"k": "plan_end", "plan": "w", "plandef": "D", "goal": "g4", "mf": 7000 + off, "ra": "0x69c8cc"},
+          {"k": "plan_end", "plan": "v", "plandef": "D", "goal": "g5", "mf": 7100 + off, "ra": "0x725bf0"}]
+    plandef, offset, n = find_plandef(recs, ev, "Destroy_Structure")
+    rows = classify(ev, plandef)
+    ok = (plandef == "D" and abs(offset - off) <= 1 and n == 2 and
+          [r for _, r in rows] == ["retest", "displaced", "purge", "script"])
     rec = read_records_from_text("P 0000 2 PEXIT t=697.5 frame=697.5 plan=Destroy_Structure player=EMPIRE target=X tf=? n=?\n")
     ok = ok and len(rec) == 1 and rec[0]["tf"] == "?" and rec[0]["t"] == 697.5
-    print("plan_ends selftest: " + ("OK" if ok else "FAILED %r" % res))
+    print("plan_ends selftest: " + ("OK" if ok else "FAILED %r %r" % (plandef, rows)))
     return 0 if ok else 1
 
 
@@ -168,7 +171,11 @@ def main():
     print("frida events: " + ", ".join("%s %d" % kv for kv in sorted(kinds.items())))
     fails = collections.Counter(e.get("pp") for e in events if e.get("k") == "retest_leave" and e.get("ret") == 0)
     print("re-test false results: %d (distinct PPs %d)" % (sum(fails.values()), len(fails)))
-    report(analyse(records, events, a.plan), a.plan)
+    plandef, offset, n = find_plandef(records, events, a.plan)
+    if plandef is None:
+        print("%s: no plan definition found (%d PEXIT tf=? records)" % (a.plan, n))
+        return 1
+    report(classify(events, plandef), a.plan, plandef, offset, n)
     return 0
 
 
