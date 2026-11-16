@@ -107,6 +107,11 @@ have changed.
 | `combat.damage_taken[Rebel]` | | 596 | 569 FAIL (by 3) | 250 |
 | `combat.first_shot_frame` | | 1286 | 1286 | 2187 |
 
+After merging skai t15 (dev 9ab052ee), the station uses t15's store flag `kFlagNoAiOwnerList`, so Lua `Find_Nearest`
+(the free store's `closest_enemy`) also skips it, as Part 3 says retail's does: FAIL 2 / PASS 17, `ai.build_count[Rebel]`
+26.6, `outcome.units_final[Rebel]` 34.5, `combat.damage_taken[Empire]` 210 FAIL, `combat.damage_taken[Rebel]` 622 FAIL,
+`combat.first_shot_frame` 1286.
+
 **The desire tie is settled** (`SKAI_T22_SPACE_AI_RE.md` Part 4 [H]): retail proposes the cells x outer, y inner, draws
 nothing before Resolve, and Tactical_Targeted's greedy phase takes the first-inserted of the tied cells, as the port does.
 What varies is how many of the two start X-wing squadrons Map_Control's `Secure_Build_Pad_Space` reserves first: 2 / 1 / 0
