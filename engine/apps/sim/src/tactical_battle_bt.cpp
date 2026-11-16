@@ -1326,7 +1326,14 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng, const Para
         for (uint32_t i = 0; i < parts_.size(); ++i)
             if (!parts_[i].reserve && !parts_[i].starbase && !parts_[i].structure && !parts_[i].built && parts_[i].side == side) {
                 const size_t u0 = units_.size(), c0 = containers_.size();
-                if (skirmish_land() && !space_ && (spawn_marked & (1u << side)) != 0 && parts_[i].spots.empty()) {
+                // skai t21 (retail Geonosis trace, frame 1 [H, trace]): a space skirmish places its start squadrons the same
+                // way - both Empire TIE squadrons in rings around their spawn marker (one at the marker, 6 at r ~40, the rest
+                // at r ~80), the Rebel X-Wings likewise (r ~71 / ~143) - not in the campaign rows of 6 behind the anchor.
+                // [port] the space side keys on the marker being found (stats_.skirmish_marked): bt_skirmish_anchors reports
+                // land sides only, since its bit also picks the marker facing and the deploy-record fallback.
+                const bool marker_rings = skirmish_land() ? (spawn_marked & (1u << side)) != 0
+                                                          : space_ && skirmish_map() && stats_.skirmish_marked[side];
+                if (marker_rings && parts_[i].spots.empty()) {
                     // skai t07 (SKAI_T06_LAND_RUNS 2 [H, trace]): every start company stands on its slot's spawn marker (retail
                     // Utapau frame 0: the four STORMTROOPER_TEAMs within 12 of marker 93302, all 36 squads within 41), not in rows
                     // behind it. [port] The members take the free placement ring search around the marker that a script company

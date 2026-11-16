@@ -78,6 +78,10 @@ Land_ / Space_Skirmish_Unit_Buy_Credits (+0x28c4 / +0x28c8, 50000 / 100000) have
 - 0x29e960: land uses the type's Company_Units (+0x958/+0x960), space Squadron_Units (+0x978/+0x980);
   each member is created by 0x2b3be0, then grouped (0x2a5a60) and signal 0x1d is sent. With the
   registration flag the objects join the GOM per-player garrison list (GOM+0x550, stride 0x48). [H]
+- Space (skai t21, 2026-11-16, retail Geonosis trace 20261116-003910 frame 1 [H, trace]): the start squadrons stand in
+  rings around their spawn marker (Empire TIE Interceptors: one at the marker, 6 at r ~40, the rest at r ~80; Rebel
+  X-Wings likewise), not in rows. The port places them with the same free ring search as land (`script_member_spots`
+  at the marker) in a space skirmish map battle.
 
 ### 2.3 Space special weapons 0x293d60 (space mode only) [H]
 For each player with a playable faction, Standalone_Space_Maps_Special_Weapon_A (+0x2b08) and _B
