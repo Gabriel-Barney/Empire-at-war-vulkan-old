@@ -193,7 +193,9 @@ void App::handle_screen_actions(const std::vector<ui::ScreenAction>& acts) {
                     answer_battle_prompt(a.button == 1);
                 } else if (a.tag == "retry") {  // Lua Activate_Retry_Dialog: Retry restarts the session, Quit leaves it
                     if (a.button == 0 && session_) {
+                        // STY1 t07: Retry loads [AutoSave] (0x55b60); without one (no battle began yet) it restarts the session
                         const SessionSpec spec = session_->spec();
+                        if (!saves_dir_.empty() && save_exists(saves_dir_, kAutoSaveName) && load_saved_game(kAutoSaveName)) break;
                         if (!start_session(spec)) open_main_menu();
                     } else {
                         end_session();
@@ -443,6 +445,7 @@ void App::save_message(std::u32string caption, const std::string& detail) {
 }
 
 void App::save_game_as(const std::string& typed) {
+    if (typed == kAutoSaveName) return;  // STY1 t07: retail rejects the reserved name (the box is cleared, nothing saved)
     if (!session_ || demo_session()) return save_message(U"The game cannot be saved now", "no game is running");
     if (saves_dir_.empty()) return save_message(txt("TEXT_SAVE_FAILED", U"Failed to save game."), "no saved games folder");
     std::string path, err;

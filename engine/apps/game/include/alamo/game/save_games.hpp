@@ -75,6 +75,9 @@ struct SaveEntry {
     std::string error;      // !readable: why
 };
 std::vector<SaveEntry> list_saves(const std::string& dir);
+// STY1 t07 (STY1_GENERIC_AUTOSAVE.md §2): retail's autosave is a save named "[AutoSave]", overwritten when a battle load
+// begins; Retry (TEXT_LOAD_AUTOSAVE) and the story-mission lost dialog load it. Users cannot save under this name.
+inline constexpr const char* kAutoSaveName = "[AutoSave]";
 
 std::string sanitize_save_name(std::string_view typed);
 std::string save_path(const std::string& dir, std::string_view name);  // dir \ sanitize(name) + ".alsv" ("" for an empty name)

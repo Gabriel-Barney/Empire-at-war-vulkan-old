@@ -244,7 +244,7 @@ void App::lua_presentation() {
         } else if (e.op == lua::PresentationOp::StopBinkMovie) {
             stop_movies();
         } else if (e.op == lua::PresentationOp::ActivateRetryDialog) {  // mission lost: IDD_RETRY_DIALOG (ui1 t05)
-            // [port] its Retry ("Load autosave") restarts the mission: the port keeps no mission-start autosave.
+            // STY1 t07: Retry ("Load autosave") loads [AutoSave], written when the battle began (handle_screen_actions).
             if (screens_.show_retry()) ++retry_boxes_;
         }
         if (session_->battle()) {  // story t13: the battle's letterbox overlay and the P11 hand-over (story_ui.hpp)
@@ -581,6 +581,15 @@ void App::begin_battle() {
         if (linked)
             std::printf("battle %" PRIu64 ": story link, letterbox %s, input block %s\n", battles_seen_, lp.letterbox ? "on" : "off",
                         lp.presentation_b ? "on" : "off");
+    }
+    // STY1 t07: retail writes [AutoSave] at the start of every new load that is not a save load, before the mode starts
+    // (campaign and skirmish; not multiplayer): here the battle that was just begun, so Retry restarts the mission.
+    if (session_ && !saves_dir_.empty() && !demo_session() && session_->check_save().empty()) {
+        std::string err;
+        if (!save_game(*session_, saves_dir_, kAutoSaveName, session_title(), unix_now(), nullptr, &err))
+            std::fprintf(stderr, "autosave: %s
+", err.c_str());
+        else ui_.front.refresh_saves();
     }
     // QA t11: the dialog first, the blocking BattleView::start only after it has been presented (a Fight answer or a
     // skirmish start opened it even earlier, before the tactical push's own load).
