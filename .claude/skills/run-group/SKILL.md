@@ -1,20 +1,22 @@
 ---
 name: run-group
-description: The default workflow for a request to complete roadmap work - "complete all tasks under AUD1", "do sty1", "finish skai", "work the AUDIO box", "clear stage 6", "pick up the next ready groups". This session becomes the coordinator - it resolves the groups, checks prerequisites, claims and the tier focus, splits the work into up to three parallel lanes, starts a lane agent per lane in its own worktree, runs the steps lanes cannot (re-analyst, reviews, questions for Gabriel), and reports; each lane follows the full lane loop with every skill and tool.
+description: The default workflow for a request to complete roadmap work - "complete all tasks under AUD1", "do sty1", "finish skai", "work the AUDIO box", "clear stage 6", "pick up the next ready groups". This session becomes the coordinator - it resolves the groups, checks prerequisites, claims and the tier focus, splits the work into up to three parallel lanes, starts each lane as its own session nested under this one with its own worktree, serves what lanes cannot do alone (the Ghidra turn, questions for Gabriel, waits between lanes), and reports; each lane follows the full lane loop with every skill and tool.
 argument-hint: <group id | box id | stage | "next"> [more ids]
 ---
 
 # Run a group: coordinator and lanes (the default workflow)
 
 A request to complete roadmap work goes through this skill, whatever its wording. **This session is the coordinator**: it plans,
-starts lanes, serves them and reports; it does not implement tasks itself. **Each lane is a `lane` agent** working one group (or
-one share of a group's tasks) in its own worktree, following `.claude/agents/lane.md` step by step with every skill and tool
-(`docs/TOOLS.md`). Lanes run in the background and in parallel.
+starts lanes, serves them and reports; it does not implement tasks itself. **Each lane is its own session** (Gabriel,
+2026-11-15), started by the coordinator with `start_session`, so it shows nested under the coordinator's session, and **with its
+own worktree** made by the app (`use_worktree: true`). It works one group (or one share of a group's tasks) following
+`.claude/agents/lane.md` step by step with every skill and tool (`docs/TOOLS.md`). Lanes run in parallel.
 
-One limit shapes the split of work: a lane is a subagent, and **subagents cannot start agents**. So the steps that need the
-`Agent` tool are done by the coordinator on a lane's request: ReVa through `re-analyst`, the `/code-review` and `spec-review`
-reviews, the `reviewer` read, and questions for Gabriel. Everything else (building, testing, every other skill, REA, cdb, Frida,
-`re_reference/`, probes, roadmap writes, landing) the lane does itself. ("Coordinator protocol" in `lane.md` is the lane side.)
+Why sessions and not background `lane` agents: a subagent runs inside the coordinator's session, which is bound to the
+coordinator's worktree, so its writes into another worktree hit the worktree write block; and a subagent cannot start agents.
+A lane session is bound to its own worktree and has the `Agent` tool, so it runs `re-analyst`, `/code-review`, `spec-review` and
+`reviewer` itself. What stays with the coordinator: the Ghidra turn (one ReVa session at a time across lanes), questions for
+Gabriel, and holding a lane that waits for another. ("Coordinator protocol" in `lane.md` is the lane side.)
 
 ## 1. Resolve what was asked
 
@@ -51,41 +53,40 @@ Show the plan (lanes, queues, shares, what waits on what) in a few lines, then s
 ## 4. Start the lanes
 
 For each lane:
-1. **Worktree**: `tools\new_worktree.cmd <lane-name>` (branch `claude/<lane-name>` from `origin/dev`, junctions to `toolchain`,
-   `Data`, `extracted`, `roadmap-store`, roadmap synced). Lane name: the group id, plus `-a`, `-b` for shares (`sty1-a`).
+1. **Name**: the group id, plus `-a`, `-b` for shares (`sty1-a`).
 2. **Claim**: `roadmap_store.py claim <group> --by <lane-name>` (shares of one group: claim once, by the coordinator's name).
-3. **Spawn** a `lane` agent in the background (`Agent`, `subagent_type: "lane"`, `run_in_background: true`) with a brief that
-   names: the worktree's absolute path (it works only there, with absolute paths, every shell command starting with a `cd` into
-   it), the group and the task ids of its share, the exit test, the modules it owns and the ones it must not touch, the lane
-   queue after it, and "follow `.claude/agents/lane.md` including its Coordinator protocol".
+3. **Start the lane session** (`start_session`): `initiation: "user_asked"` (the request for the group work is the ask),
+   `context: "fresh"`, `use_worktree: true`, `name` and `branch_name` the lane name, `wake_when_done: true`. Do not create the
+   worktree with `tools\new_worktree.cmd` first: the app makes it, and the session is then bound to it. The `prompt` names: "you
+   are lane <name>, started by the run-group coordinator; read and follow `.claude/agents/lane.md` including its Coordinator
+   protocol" (sessions do not load agent files), the group and the task ids of its share, the exit test, the modules it owns and
+   the ones it must not touch, the lane queue after it. `background`: the run's plan in a few lines (the other lanes and what they
+   own). Right before the call, a bold title line and one sentence; several lanes at once: `mark_chapter` first.
 4. **Model and effort from the group's `preset`** (Gabriel, 2026-11-15): the preset picks the model, and effort follows the preset
    but never above the lane's own `high` (`lane.md` frontmatter: Opus / high; `xhigh` costs too much on long lane runs). So:
 
-   | Preset | Lane runs on | `Agent` call |
+   | Preset | Lane runs on | `start_session` fields |
    |---|---|---|
-   | `xhigh`, `high`, `fable`, none | Opus, high | nothing extra (the lane default) |
-   | `sonnet` | Sonnet, high | `model: "sonnet"` |
-   | `tools` | Sonnet, medium | `model: "sonnet"`, `effort: "medium"` |
+   | `xhigh`, `high`, `fable`, none | Opus, high | `effort: "high"` (model inherited) |
+   | `sonnet` | Sonnet, high | `model: "claude-sonnet-5-5"`, `effort: "high"` |
+   | `tools` | Sonnet, medium | `model: "claude-sonnet-5-5"`, `effort: "medium"` |
    | `gab` | Opus, medium; Gabriel's parts come back as `REQUEST gabriel` | `effort: "medium"` |
-   | `re2ui` | RE share on Opus, high; UI share as its own lane on Sonnet, high (one Opus lane when it cannot be split) | UI lane: `model: "sonnet"` |
+   | `re2ui` | RE share on Opus, high; UI share as its own lane on Sonnet, high (one Opus lane when it cannot be split) | UI lane: `model: "claude-sonnet-5-5"`, `effort: "high"` |
 
-   This skill is the explicit instruction the `Agent` tool needs before `model` / `effort` are passed (an exception, for lanes, to
-   `DECISIONS.md` "Agent model and effort"). A lane agent keeps one model for its life, so a queued group whose preset maps to a
-   different row gets a fresh lane agent (same worktree is fine) once the group before it has landed.
+   A session's model and effort can only be the coordinator's or lower, so the coordinator runs on Opus at `high` or above. A
+   queued group whose preset maps to a different row gets a fresh lane session once the group before it has landed (or
+   `set_session_model` / `set_session_effort` on the idle lane).
 
-Then wait for lanes to report; don't poll. Up to three lanes run at once; when one finishes its queue and work remains, start the
-next lane.
+Then wait for lanes to report; don't poll: when a lane ends a turn the app continues the coordinator with a note quoting the start
+of the lane's last message. Up to three lanes run at once; when one finishes its queue and work remains, start the next lane.
 
 ## 5. Serve the lanes
 
-A lane stops with a **request** (format in `lane.md`) when it reaches a step that needs the `Agent` tool or Gabriel. Serve it, then
-resume that lane with `SendMessage` (to its agent id) carrying the result:
-- **`re-analyst`**: start it with the lane's questions file (`<lane worktree>\docs\re\<TASK>_RE_QUESTIONS.md`) and tell it to
-  write its answer into the spec files **in that worktree** (absolute paths), so the lane reads it and lands it with its work.
-  One at a time (Ghidra lock): queue questions from several lanes and run them in turn.
-- **Review** (the lane has committed its work): in the lane's worktree run `/code-review high` on its branch against
-  `origin/dev`, `spec-review` with the group and its share of tasks, and for sim code the `reviewer` agent with the changed files.
-  Send back the findings ranked; the lane fixes, files or rejects each (`finish-group` step 2).
+A lane ends a turn with a **request** (format in `lane.md`; the block comes first in its message, since the note shows only its
+start) when it needs something only the coordinator can give. Serve it, then resume that lane with `SendMessage` to its
+`local_…` session id carrying the result:
+- **`ghidra`**: the lane wants to start `re-analyst` (ReVa). One at a time across lanes (Ghidra lock): answer "go" to one lane,
+  queue the others, and give the next lane its "go" once the previous one reports `ghidra done`. REA needs no turn.
 - **A question for Gabriel** (a decision, a `g` task, a UAC prompt, a look at `alamo_game.exe`): ask him, send the answer back; if
   he is away, tell the lane to continue with what does not depend on it.
 - **A blocker between lanes** (one lane needs another's work on `dev` first): hold the waiting lane until the other has landed,
@@ -97,7 +98,9 @@ Keep each lane's results in your own context short: the request, the answer, the
 
 When a lane reports it landed: check its `dev` commit exists (`git log origin/dev`), that its tasks are `done` on the roadmap and the
 claim released. For a group split into shares, once every share has landed: run the exit test once more on `dev` and close the
-group (`finish-group` step 3: group and box done, or `close-group`). Clean up merged worktrees (`tools\clean_worktrees.cmd`).
+group (`finish-group` step 3: group and box done, or `close-group`). Remove each landed lane's worktree from the coordinator's
+checkout once the lane is idle (`tools\clean_worktrees.cmd --apply --only <worktree name>`, which unlinks the junctions first),
+then offer Gabriel to archive the lane sessions (archive only on his yes).
 
 Report per group: tasks closed and open (why), the exit test result, the `dev` commits, goldens changed, skips, anything Gabriel
 must do, and the lanes' friction lines for `retro`.
@@ -105,7 +108,6 @@ must do, and the lanes' friction lines for `retro`.
 ## Running without lanes
 
 For one small group (a couple of tasks in one module), or when Gabriel asks for it to be done here, the coordinator may run the
-lane loop itself in this session (it keeps the `Agent` tool, so no requests are needed). When Gabriel asks for **sessions**
-instead of agents, start one session per lane with `start_session` (each is a full session with the `Agent` tool, prompt
-`/run-group <ids>` for its queue, worktree of its own) and coordinate them from here. Sessions don't read agent files, so apply
-the step-4 table yourself: the session's `model` when starting it, and its effort with `set_session_effort`.
+lane loop itself in this session (it keeps the `Agent` tool, so no requests are needed). Background `lane` agents (`Agent`,
+`subagent_type: "lane"`) are used only when Gabriel asks for agents instead of sessions; they hit the worktree write block when
+they edit a worktree other than the coordinator's, and need the coordinator to run `re-analyst` and the reviews for them.
