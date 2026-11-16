@@ -60,6 +60,7 @@ struct BattleTables {
     std::vector<UnitVisuals> units;
     struct ProjectileVisuals {
         int32_t detonation = -1, armor_reduced = -1, absorbed = -1, lifetime = -1;  // Projectile_*_Particle types
+        int32_t ground = -1;  // tru1 t08: Projectile_Ground_Detonation_Particle (land ground / water hits)
     };
     std::vector<ProjectileVisuals> projectiles;
     std::vector<std::array<std::string, 2>> fire_bones;  // per hardpoint: Fire_Bone_A / Fire_Bone_B ("" none)

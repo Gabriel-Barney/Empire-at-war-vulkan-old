@@ -267,7 +267,9 @@ bool TacticalBattle::l1_base_shield_covers(Vec3 p) const {
     const objects::ObjectStore& st = l1_mode_->primary();
     for (const objects::ObjectHandle h : st.all_objects()) {
         if (!st.active(h) || kBaseShield == objects::kNoBehavior || !st.has_behavior(h, kBaseShield)) continue;
-        const float r = catalog_->types().get_float(st.type(h), "Base_Shield_Radius");  // [port] a live shield is active
+        // tru1 t02: the shield must be on (combat's BASE_SHIELD state machine; TRU1_A_RE_ANSWERS A1)
+        if (combat_->has_unit(st.id(h)) && !combat_->base_shield_active(st.id(h))) continue;
+        const float r = catalog_->types().get_float(st.type(h), "Base_Shield_Radius");
         const Vec3 c = st.position(h);
         const float dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
         if (r > 0.0f && dx * dx + dy * dy + dz * dz < r * r) return true;

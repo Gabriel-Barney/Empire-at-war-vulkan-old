@@ -560,6 +560,8 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
         }
         const galactic::ConflictFactionInfo& fi = rules_->faction(galaxy_->players()[p].faction);
         infos[p].retreat_damage_mod = space_ ? fi.space_retreat_damage_mod : fi.land_retreat_damage_mod;
+        if (const uint32_t f = galaxy_->players()[p].faction; f < galaxy_->rules().factions.size())
+            infos[p].faction = name_crc(galaxy_->rules().factions[f].name);  // tru1 t04: Projectile_Blast_Area_Immune_Faction
         // TACTICAL_COMBAT §2.2: the target scan skips players whose faction is Is_Neutral (player +0x68 -> faction +0x108).
         infos[p].active = !bt_owner_neutral(static_cast<int32_t>(p));
     }

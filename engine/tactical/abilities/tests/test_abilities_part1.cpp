@@ -1673,6 +1673,23 @@ void test_oi_auras() {
     CHECK(p.sys->stats().shots > 0);
     p.sys->kill_unit(3, kNoObject, kKindNormal, p.frame);
     CHECK(!p.sys->has_base_power(0));
+    // tru1 t02 (TRU1_A_RE_ANSWERS A1 step 6): Battlefield_Modifier Base_Shield_Upgrade fills the base-shield upgrade list
+    // of every affected player (owner, allies with Apply_To_All_Allies) keyed by the source; the source's death removes it.
+    OiWorld q;
+    SpecialAbilityDesc up = oi_special("Shield_Up", SpecialClass::BattlefieldModifier, ActivationStyle::GroundAutomatic);
+    up.base_shield_upgrade = true;
+    up.apply_to_all_allies = true;
+    AbilityObjectDesc ua;
+    ua.specials = {add_special(q.ad, up)};
+    const uint32_t upd = push(q.cd, q.ad, oi_unit("Upgrade", 100.0f), ua);
+    q.make(GameMode::Land);
+    q.sys->set_enemy(0, 2, false);
+    q.sys->set_enemy(2, 0, false);
+    CHECK(!q.sys->base_shield_upgraded(0));
+    q.add(1, upd, 0, {0, 0, 0});
+    CHECK(q.sys->base_shield_upgraded(0) && q.sys->base_shield_upgraded(2) && !q.sys->base_shield_upgraded(1));
+    q.sys->kill_unit(1, kNoObject, kKindNormal, q.frame);
+    CHECK(!q.sys->base_shield_upgraded(0) && !q.sys->base_shield_upgraded(2));
 }
 }  // namespace bo3split
 

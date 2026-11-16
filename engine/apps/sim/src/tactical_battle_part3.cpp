@@ -588,8 +588,8 @@ void TacticalBattle::consume_events(TacticalMode& mode, SimRng& rng) {
         if (e.projectile_desc >= tables_->projectiles.size()) continue;
         const BattleTables::ProjectileVisuals& pv = tables_->projectiles[e.projectile_desc];
         const Vec3 at = sv(e.position);
-        if (e.victim == tc::kNoObject) {
-            spawn_particle(mode, pv.lifetime, at, e.owner);
+        if (e.victim == tc::kNoObject) {  // tru1 t08 (TRU1_A_RE_ANSWERS B1 / B2): ground hit or expiry, no fallback
+            spawn_particle(mode, e.ground ? pv.ground : pv.lifetime, at, e.owner);
             continue;
         }
         const int32_t det = e.absorbed ? pv.absorbed : (e.armor_reduced && pv.armor_reduced >= 0 ? pv.armor_reduced : pv.detonation);

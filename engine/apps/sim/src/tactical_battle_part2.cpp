@@ -1709,6 +1709,7 @@ void TacticalBattle::apply_speed_factors() {
             const Unit& u = units_[i];
             if (!u.alive || u.retreated || !u.movable) continue;
             float f = combat_->mod_multiplier(u.id, tc::ModKind::Speed);
+            f = f * combat_->base_shield_speed_factor(u.id);  // tru1 t02 (TRU1_A A2): straddling a hostile shield wall
             if (u.engines_offline || l1_engines_off(u.id)) f = f * engines;  // L1 systems: + timed engine disables
             f = f * (1.0f + combat_->modifier(u.id, tc::ModList::MaxSpeed));
             // OI follow-up t03 (A1_READINGS §28.9): the movement lock does not slow the unit (no speed-0 freeze); its users

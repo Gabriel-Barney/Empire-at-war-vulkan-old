@@ -48,7 +48,7 @@ using save_io::put_vec3;
 
 namespace {
 
-constexpr uint32_t kCombatSaveVersion = 15;  // 2: refix t02 INFECTION state, refix t03 death clone key; 3: refixf t01 rockets;
+constexpr uint32_t kCombatSaveVersion = 16;  // 2: refix t02 INFECTION state, refix t03 death clone key; 3: refixf t01 rockets;
                                              // 4: refixf t06 attack goal / weapon aim / order lock; 5: refixf t06 scan
                                              // target hardpoint (auto_hp); 6: a1g t03 damage event hull_lost; 7: S8 t04
                                              // grenade flight / sticky state; 8: S8 t06 stuck_offset in the parent's frame
@@ -61,7 +61,9 @@ constexpr uint32_t kCombatSaveVersion = 15;  // 2: refix t02 INFECTION state, re
                                              // sabers (projectile rocket 2, rocket state thrower); 15: s78n t12
                                              // delayed-damage projectile target, s78n t11 kUnitDeployingIn (flag
                                              // word), s78n t13 last-hit stamp written only by a diminishing hit
-                                             // (same layout). Only the current version is read (cu6).
+                                             // (same layout); 16: tru1 t02 base-shield unit state + the
+                                             // Base_Shield_Upgrade list, tru1 t08 hit event ground /
+                                             // commanded flags. Only the current version is read (cu6).
 constexpr uint32_t kWeatherSaveVersion = 1;
 constexpr uint32_t kNoIndex = 0xFFFFFFFFu;
 
@@ -143,6 +145,7 @@ void CombatSystem::write(ByteWriter& w) const {
         // refix t02: INFECTION behaviour
         w.u8(u.infect_attached).u32(u.infect_suspend).i32(u.infect_desc).i32(u.infect_player).i32(u.infect_source);
         w.i32(u.infect_left).u32(u.infect_seen).i32(u.infect_count);  // v13 (cu8f t06)
+        w.u8(u.bshield_state).u8(u.bshield_upgraded).u32(u.bshield_off_stamp).u32(u.bshield_next).i32(u.bshield_in);  // v16
         u.mods.write(w);
         // caches
         for (const float v : u.mod_r) w.f32(v);
@@ -195,6 +198,8 @@ void CombatSystem::write(ByteWriter& w) const {
 
     w.u32(static_cast<uint32_t>(base_power_.size()));
     for (const auto& [pl, src] : base_power_) w.i32(pl).i32(src);
+    w.u32(static_cast<uint32_t>(shield_upgrade_.size()));  // tru1 t02 (v16)
+    for (const auto& [pl, src] : shield_upgrade_) w.i32(pl).i32(src);
     w.u32(static_cast<uint32_t>(repairs_.size()));
     for (const Repairer& rp : repairs_) w.i32(rp.unit).u32(rp.hp).i32(rp.player);
     w.u32(static_cast<uint32_t>(team_heads_.size()));
@@ -222,6 +227,7 @@ void CombatSystem::write(ByteWriter& w) const {
         w.i32(e.victim).i32(e.shooter).i32(e.owner).u32(e.projectile_desc);
         put_vec3(w, e.position);
         w.boolean(e.absorbed).boolean(e.armor_reduced).boolean(e.delayed).i32(e.pick);
+        w.boolean(e.ground).boolean(e.commanded);  // tru1 t08 (v16)
     }
     w.u32(static_cast<uint32_t>(shot_events_.size()));
     for (const ShotEvent& e : shot_events_) w.i32(e.shooter).i32(e.target).i32(e.target_owner);
@@ -343,6 +349,12 @@ bool CombatSystem::read(ByteReader& r) {
         u.infect_left = r.i32();  // cu8f t06
         u.infect_seen = r.u32();
         u.infect_count = r.i32();
+        u.bshield_state = r.u8();  // tru1 t02 (v16)
+        u.bshield_upgraded = r.u8();
+        u.bshield_off_stamp = r.u32();
+        u.bshield_next = r.u32();
+        u.bshield_in = r.i32();
+        if (u.bshield_state > 2 || u.bshield_upgraded > 1) return false;
         if (!r.ok() || u.infect_attached > 1 || u.infect_desc < -1 ||
             (u.infect_desc >= 0 && static_cast<uint32_t>(u.infect_desc) >= unit_descs))
             return false;
@@ -481,6 +493,12 @@ bool CombatSystem::read(ByteReader& r) {
         pl = r.i32();
         src = r.i32();
     }
+    if (!r.count(n, 8)) return false;  // tru1 t02 (v16)
+    std::vector<std::pair<int32_t, ObjectId>> shield_upgrade(n);
+    for (auto& [pl, src] : shield_upgrade) {
+        pl = r.i32();
+        src = r.i32();
+    }
     if (!r.count(n, 12)) return false;
     std::vector<Repairer> repairs(n);
     for (Repairer& rp : repairs) {
@@ -550,7 +568,7 @@ bool CombatSystem::read(ByteReader& r) {
         e.frame = r.u32();
         if (!r.ok() || !proj_ok(e.projectile_desc)) return false;
     }
-    if (!r.count(n, 35)) return false;
+    if (!r.count(n, 37)) return false;
     std::vector<HitEvent> hit_events(n);
     for (HitEvent& e : hit_events) {
         e.victim = r.i32();
@@ -562,6 +580,8 @@ bool CombatSystem::read(ByteReader& r) {
         e.armor_reduced = r.boolean();
         e.delayed = r.boolean();
         e.pick = r.i32();
+        e.ground = r.boolean();  // tru1 t08 (v16)
+        e.commanded = r.boolean();
         if (!r.ok() || e.projectile_desc >= proj_descs) return false;
     }
     if (!r.count(n, 12)) return false;
@@ -604,6 +624,7 @@ bool CombatSystem::read(ByteReader& r) {
     rockets_ = std::move(rockets);
     delayed_ = std::move(delayed);
     base_power_ = std::move(base_power);
+    shield_upgrade_ = std::move(shield_upgrade);
     repairs_ = std::move(repairs);
     team_heads_ = std::move(team_heads);
     deaths_ = std::move(deaths);

@@ -238,6 +238,8 @@ int32_t BattleCatalog::projectile(uint32_t t, BuildState& s) const {
     p.max_lifetime = ty.get_float(t, "Projectile_Max_Lifetime");
     p.blast_area_damage = ty.get_float(t, "Projectile_Blast_Area_Damage");
     p.blast_area_range = ty.get_float(t, "Projectile_Blast_Area_Range");
+    if (const std::string_view f = ascii_trim(ty.get_string(t, "Projectile_Blast_Area_Immune_Faction")); !f.empty())
+        p.blast_immune_faction = name_crc(f);  // tru1 t04
     p.damages_random_hardpoints = ty.get_bool(t, "Projectile_Damages_Random_Hard_Points");
     if (!(p.max_speed > 0.0f)) p.max_speed = 20.0f;  // [port] a projectile type without Max_Speed still flies
     if (s.full) {
@@ -312,6 +314,7 @@ int32_t BattleCatalog::projectile(uint32_t t, BuildState& s) const {
         v.armor_reduced = type_or_none(ty.get_string(t, "Projectile_Object_Armor_Reduced_Detonation_Particle"));
         v.absorbed = type_or_none(ty.get_string(t, "Projectile_Absorbed_By_Shields_Particle"));
         v.lifetime = type_or_none(ty.get_string(t, "Projectile_Lifetime_Detonation_Particle"));
+        v.ground = type_or_none(ty.get_string(t, "Projectile_Ground_Detonation_Particle"));  // tru1 t08
         s.full->projectiles.push_back(v);
     }
     const int32_t idx = static_cast<int32_t>(s.d->projectiles.size());
@@ -685,6 +688,16 @@ void BattleCatalog::s9_unit_fields(uint32_t t, tc::UnitDesc& u, BuildState& s) c
     u.tactical_respawn_secs = ty.get_float(t, "Tactical_Respawn_Time_In_Secs");
     u.stunnable = ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("STUNNABLE"));
     u.shield_requires_base_power = ty.get_bool(t, "Shield_Requires_Base_Power");
+    {  // tru1 t02 (docs/re/TRU1_A_RE_ANSWERS.md A1 / A2): base shields; Shield_Requires_Base_Power defaults to true here
+        static const objects::BehaviorTypeId kBaseShield = objects::behavior_type_id("BASE_SHIELD");
+        static const objects::BehaviorTypeId kAffected = objects::behavior_type_id("AFFECTED_BY_SHIELD");
+        u.base_shield_radius = ty.get_float(t, "Base_Shield_Radius");
+        u.base_shield = ty.has_behavior(t, objects::BehaviorSet::Union, kBaseShield) && u.base_shield_radius > 0.0f;
+        u.base_shield_always_off = ty.get_bool(t, "Base_Shield_Always_Off");
+        if (!ascii_trim(ty.get_string(t, "Shield_Requires_Base_Power")).empty())
+            u.base_shield_requires_power = ty.get_bool(t, "Shield_Requires_Base_Power");
+        u.affected_by_shield = ty.has_behavior(t, objects::BehaviorSet::Union, kAffected);
+    }
     // HUD_GAPS §1.4: behaviour DUMMY_STAR_BASE = can repair hard points (the HUD repair cursor; can_repair_hardpoints).
     u.repairs_hardpoints = ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("DUMMY_STAR_BASE"));
     // --- end OI abilities ---

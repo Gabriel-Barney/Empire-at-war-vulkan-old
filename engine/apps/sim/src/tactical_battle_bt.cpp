@@ -1854,9 +1854,11 @@ void TacticalBattle::bt_shield_stamps(const TacticalMode& mode) {
     const objects::ObjectStore& st = mode.primary();
     const objects::GameObjectTypes& types = catalog_->types();
     mv::PassabilityGrid& grid = movement_->grid();
-    // Gone: unstamp (ascending id).
+    // tru1 t02 (TRU1_A_RE_ANSWERS A1, Set_State 0x56b540): the disc is stamped while the shield is on.
+    auto on = [&](objects::ObjectId id) { return !combat_ || !combat_->has_unit(id) || combat_->base_shield_active(id); };
+    // Gone or off: unstamp (ascending id).
     std::erase_if(bt_shields_, [&](objects::ObjectId id) {
-        if (st.alive(st.find(id))) return false;
+        if (st.alive(st.find(id)) && on(id)) return false;
         grid.unstamp_secondary(id);
         return true;
     });
@@ -1869,6 +1871,7 @@ void TacticalBattle::bt_shield_stamps(const TacticalMode& mode) {
         const auto bits = static_cast<uint32_t>(types.get_mask(st.type(h), "SecondaryOccupationPassability"));
         if (!(r > 0.0f) || bits == 0) continue;
         const objects::ObjectId id = st.id(h);
+        if (!on(id)) continue;
         const auto it = std::lower_bound(bt_shields_.begin(), bt_shields_.end(), id);
         if (it != bt_shields_.end() && *it == id) continue;
         const Vec3 c = st.position(h);

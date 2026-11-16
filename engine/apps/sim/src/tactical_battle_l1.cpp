@@ -924,7 +924,7 @@ objects::TypeIndex TacticalBattle::current_projectile(objects::ObjectId id) cons
 }
 
 bool TacticalBattle::opposite_sides_of_shield(Vec3 a, Vec3 b, int32_t player, bool friendly, bool shield_damage) const {
-    if (space_ || !l1_mode_ || !shield_damage) return false;
+    if (space_ || !l1_mode_) return false;
     static const objects::BehaviorTypeId kBaseShield = objects::behavior_type_id("BASE_SHIELD");
     const objects::ObjectStore& st = l1_mode_->primary();
     const objects::GameObjectTypes& types = catalog_->types();
@@ -932,6 +932,11 @@ bool TacticalBattle::opposite_sides_of_shield(Vec3 a, Vec3 b, int32_t player, bo
         if (!st.alive(h) || kBaseShield == objects::kNoBehavior || !st.has_behavior(h, kBaseShield)) continue;
         const float r = types.get_float(st.type(h), "Base_Shield_Radius");
         if (!(r > 0.0f)) continue;
+        // tru1 t02 (TRU1_A_RE_ANSWERS A5 / L1_S4 §1.2): only a shield that is on; a shot without shield damage counts
+        // only upgraded ones (pack +0xc)
+        if (combat_->has_unit(st.id(h)) && !(shield_damage ? combat_->base_shield_active(st.id(h))
+                                                           : combat_->base_shield_active_upgraded(st.id(h))))
+            continue;
         if (player >= 0 && (!combat_->is_enemy(player, st.owner(h))) != friendly) continue;  // 0x39a2c0 [M]
         const Vec3 c = st.position(h);
         auto inside = [&](Vec3 p) {

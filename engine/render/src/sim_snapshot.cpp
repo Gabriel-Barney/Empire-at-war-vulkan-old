@@ -825,7 +825,8 @@ void apply_beam_zaps(const tactical::abilities::AbilitySystem& ab, const tactica
             const float reach = 2.0f * p->speed + 2.0f;
             bool hit = false;
             for (const tactical::combat::HitEvent& e : combat.hit_events()) {
-                if (e.shooter != p->shooter || e.projectile_desc != p->desc) continue;
+                // tru1 t08: a commanded detonation's event is the zap itself (its lifetime particle), not a hit
+                if (e.commanded || e.shooter != p->shooter || e.projectile_desc != p->desc) continue;
                 const float ex = e.position.x - at.x, ey = e.position.y - at.y, ez = e.position.z - at.z;
                 if (ex * ex + ey * ey + ez * ez <= reach * reach) {
                     hit = true;
