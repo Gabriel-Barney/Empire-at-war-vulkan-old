@@ -247,7 +247,7 @@ void TacticalPerceptionGrid::remove_entry(uint32_t ei) {
     e.projected = false;
 }
 
-bool TacticalPerceptionGrid::register_object(const PerceptionWorld& w, int32_t id, int32_t check_stamp) {
+bool TacticalPerceptionGrid::register_object(const PerceptionWorld& w, int32_t id, int32_t check_stamp, bool owner_list) {
     if (!valid() || objects_.count(id)) return false;
     const PerceptionObject* o = w.object(id);
     if (!o || !o->has_unit_ai) return false;
@@ -263,7 +263,7 @@ bool TacticalPerceptionGrid::register_object(const PerceptionWorld& w, int32_t i
     for (size_t i = 0; i < hps.size(); ++i)
         if (is_grid_hard_point(hps[i])) hp_index.push_back(static_cast<int32_t>(i));
     if (hp_index.empty()) hp_index.push_back(-1);
-    if (const PerceptionType* t = w.type_of(*o)) category_union_ |= t->category;
+    if (const PerceptionType* t = w.type_of(*o); t && owner_list) category_union_ |= t->category;
     auto& rec = objects_.emplace(id, std::move(g)).first->second;
     for (const int32_t hi : hp_index) {
         const uint32_t ei = alloc_entry();
@@ -275,7 +275,7 @@ bool TacticalPerceptionGrid::register_object(const PerceptionWorld& w, int32_t i
         refresh_entry(w, *o, e, hps);
         add_entry(w, *o, ei, hps);
     }
-    if (rec.owner != kNoPlayerIndex) player_objects_[static_cast<size_t>(rec.owner)].push_back(id);
+    if (rec.owner != kNoPlayerIndex && owner_list) player_objects_[static_cast<size_t>(rec.owner)].push_back(id);
     registration_order_.push_back(id);
     return true;
 }

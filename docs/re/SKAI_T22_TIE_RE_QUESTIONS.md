@@ -1,5 +1,12 @@
 # skai t22: RE questions, part 2 (which Space_Scout cell wins a desire tie)
 
+**Answered 2026-11-16 (re-analyst): `SKAI_T22_SPACE_AI_RE.md` Part 4.** First-inserted wins through the greedy phase
+(cells x outer, y inner; no RNG before Resolve; Tactical_Targeted's budget credits are above 0, so the greedy phase runs).
+The runs differ in how many start X-wings Map_Control's `Secure_Build_Pad_Space` reserved before Tactical_Targeted
+resolved (2 / 1 / 0), and failed scout accepts put −15 on their cell for 20 s, so the 4.5 s commit took CELL_0_2 in all
+three runs. Part 3 of the same file also corrects Q1.1: the start station is in the cells and threat layer, only out of
+the owner lists.
+
 Asked 2026-11-16 by lane skai-b. Evidence: `docs/re/SKAI_T22_GEONOSIS_SCOUT.md` (sections "Retail plan records" and
 "Port rule from the RE answer"). Answers go into `docs/re/SKAI_T22_SPACE_AI_RE.md` as a new part (behaviour in words,
 never decompiled code).

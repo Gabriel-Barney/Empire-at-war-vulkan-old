@@ -405,6 +405,13 @@ static void test_grid_projection() {
     CHECK(h.on_owner_changed(w, 2));
     CHECK(h.player_objects(0).empty() && h.player_objects(1).size() == 1);
     CHECK(h.threat(1, tcell) == 0.0f && h.threat(0, tcell) > 0.0f);
+    // skai t22 (SKAI_T22_SPACE_AI_RE Part 3): registered without its owner-list entry (a skirmish start station), the
+    // object is projected into the cells and the threat layer as usual but is in no owner list.
+    TacticalPerceptionGrid k;
+    k.init(TacticalMode::Land, w.map, 4, threat_grid_config(TacticalMode::Land, c));
+    CHECK(k.register_object(w, 2, 0, false));
+    CHECK(k.is_registered(2) && k.player_objects(0).empty() && k.player_objects(1).empty());
+    CHECK(!k.live_entries(tcell).empty() && k.threat(0, tcell) == h.threat(0, tcell));
 }
 
 // ---------------------------------------------------------------------------------- tokens

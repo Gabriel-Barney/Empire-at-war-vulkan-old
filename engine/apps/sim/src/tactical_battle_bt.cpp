@@ -490,7 +490,7 @@ void TacticalBattle::bt_battle_end() {
 
 // ---- battle host follow-up: TEAM containers (REMAINING_GAPS §3.4), landing reinforcement points (§3.3) --------------
 
-bool TacticalBattle::outside_threat_grid(objects::ObjectId id) const {
+bool TacticalBattle::outside_owner_lists(objects::ObjectId id) const {
     return std::binary_search(bt_grid_stale_.begin(), bt_grid_stale_.end(), id);
 }
 
@@ -1019,9 +1019,10 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
         if (it == map_hints_.end() || it->first != id) map_hints_.insert(it, {id, p.hint});
     };
     const bool skirmish = skirmish_land() || skirmish_map();
-    // skai t22 (SKAI_T22_SPACE_AI_RE Q1.1 [H]): in a space skirmish the team-marker swap (0x295cf0) creates the start
-    // station before the skirmish start (0xeed80) deletes and rebuilds the threat grid, so it never enters the new one.
-    // [port] space only: whether the land start does the same is not read (land mode's grid reset is not traced).
+    // skai t22 (SKAI_T22_SPACE_AI_RE Q1.1, Part 3 [H]): in a space skirmish the team-marker swap (0x295cf0) creates the
+    // start station before the skirmish start (0xeed80) deletes and rebuilds the threat grid, so it never joins the new
+    // grid's owner lists (its cells and threat come back at the first re-projection). [port] space only: the land start
+    // does the same (SKAI_T15_TARGET_CHOICE), which lane skai-a ports.
     bt_grid_stale_.clear();
     auto note_stale = [&](const terrain::ObjectPlacement& p, objects::ObjectHandle h) {
         const size_t pi = static_cast<size_t>(&p - map_.objects.data());
