@@ -886,6 +886,7 @@ struct ResolveOutcome {
 };
 ResolveOutcome resolve_once(float nominal, float resolved, bool budget, bool galactic = true);
 void test_goal_resolve_time_ok();
+void test_goal_old_candidate_reaccept();  // skai t17
 void test_active_goals_category();
 void test_maintenance_tokens();
 void test_force_maintenance_tokens();

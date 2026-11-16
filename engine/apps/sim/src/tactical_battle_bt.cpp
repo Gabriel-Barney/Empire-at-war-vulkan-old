@@ -278,7 +278,8 @@ float TacticalBattle::build_cost(objects::TypeIndex uc_type) const {
     if (uc_type >= types.size()) return 0.0f;
     // Both are int fields (the float view of an int field is 0).
     // t50 0x3744e0: a skirmish pad is priced from Tactical_Build_Cost_Multiplayer alone (no campaign fallback).
-    if (skirmish_land()) return static_cast<float>(std::max(0, types.get_int(uc_type, "Tactical_Build_Cost_Multiplayer")));
+    // skai t17: any skirmish, land or space (0x28afb0).
+    if (cfg_.skirmish) return static_cast<float>(std::max(0, types.get_int(uc_type, "Tactical_Build_Cost_Multiplayer")));
     int32_t c = types.get_int(uc_type, "Tactical_Build_Cost_Campaign");
     if (c <= 0) c = types.get_int(uc_type, "Tactical_Build_Cost_Multiplayer");
     return static_cast<float>(std::max(0, c));
@@ -306,7 +307,8 @@ cmd::RejectReason TacticalBattle::tactical_build(TacticalMode& mode, uint8_t pla
     // appears, like a human (retail Utapau: Mineral Processor -800, Ground Mining Facility -1300, AV turret + Mineral Processor
     // -1650 in one frame). SKIRMISH_SETUP 3's "the AI is never charged" reading of 0x289050 does not hold for pad builds there.
     // [port] Campaign land battles keep the free AI pad builds (L1_S4 3.6): no retail trace of an AI pad build there yet.
-    if (!ai || skirmish_land()) {
+    // skai t17: a space skirmish AI pays too (retail Geonosis: the Rebel balance drops by the extractors it starts).
+    if (!ai || cfg_.skirmish) {
         const float cost = build_cost(type);
         const float have = credits_get_ ? credits_get_(static_cast<int32_t>(player)) : 0.0f;
         if (cost > have) return R::CannotAfford;

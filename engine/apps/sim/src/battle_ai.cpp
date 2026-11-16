@@ -2541,6 +2541,21 @@ float BattleAi::type_population(int32_t type) const {  // pop(T, mode) 0x373500
 
 // Skirmish station production: the player's live objects whose builder list (their faction row of
 // Tactical_Buildable_Objects_Multiplayer) holds `type`, ascending id; {} in campaign / land battles (§1.11).
+// skai t17 (STATION_HANGARS_SOUND §1.2 steps 7-8): the build queue of an upgraded station goes on at its successor; follow
+// the battle's upgrade records (battle order) from `id` to the last station, -1 when `id` was never upgraded or the last
+// one is gone.
+int32_t BattleAi::replaced_builder(int32_t id) {
+    int32_t cur = id;
+    bool moved = false;
+    for (const TacticalBattle::StationUpgrade& u : b_->station_upgrades())
+        if (static_cast<int32_t>(u.old_station) == cur) {
+            cur = static_cast<int32_t>(u.new_station);
+            moved = true;
+        }
+    if (!moved) return -1;
+    return mode_->primary().alive(mode_->primary().find(static_cast<objects::ObjectId>(cur))) ? cur : -1;
+}
+
 std::vector<int32_t> BattleAi::tactical_builders(int32_t player, int32_t type) {
     std::vector<int32_t> out;
     if (!b_->production_enabled() || type < 0) return out;

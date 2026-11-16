@@ -596,7 +596,7 @@ builds a Ground Mining Facility (frame 3575), then buys tech 2 and 3, upgrades, 
 Mineral Processors, vehicles and heroes; the Empire stays at its pre-built base with Boba Fett and infantry, builds one
 Mineral Processor, and its Destroy_Structure plans fail. Geonosis (space, idle human Empire): the Rebel's credits at frame
 600 are 2500.0, as in the retail trace; later the Rebel takes fewer extractor pads than retail (2 vs 5 by 5400): its
-Secure_Build_Pad_Space plans (MOVETOLOCATIONRUSH) end in failure 15 frames after they start [open].
+Secure_Build_Pad_Space plans (MOVETOLOCATIONRUSH) end in failure 15 frames after they start [fixed by skai t17, 2026-11-16: the empty EscortForce is not created, SKAI_T17_SPACE_BUILD_RE §1].
 
 skai t02 (the AI takes the enemy base) [open, retail probe]: in the port the Rebel never starts a Destroy_Structure plan.
 Its free store is empty at every solve: its whole army (5 infantry teams and the droids) is at the 2-player land cap of 9

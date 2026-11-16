@@ -742,6 +742,10 @@ from retail:
   - Lua side: `QuickReinforce` (PGTaskForce.lua) in space calls `BlockOnCommand(tf.Reinforce(tf), 3, Anti_Idle_Taskforce)` (then the escort TF, then fall-backs), so each attempt has 3 s of polls: rings 0, 500, 1000, … around the target until a ring point is visible to the AI, outside enemy prevention radii and free of reservations.
   - **Why a port rejects many AI space drops:** issuing the drop exactly at T (the land model) fails whenever T is fogged for the AI, inside an enemy station's or other non-allied object's `Reinforcement_Prevention_Radius`, outside the playable box, or on reserved space. Vanilla never issues an invalid drop: it tries the ring points in order and only spawns at a point that passes vf80. Space has no reinforcement points (`Use_Reinforcement_Points` is the land rule).
 - `QuickReinforce` (Lua) is the only AI caller pattern; there is no separate engine "AI reinforce" logic.
+- Optional task forces and queue order (skai t17, `SKAI_T17_SPACE_BUILD_RE.md`). A plan task force that the solve gave no
+  selection, and that lacks `TaskForceRequired`, is not created: no Lua global, no `<TF>_Thread`. So a
+  `Secure_Build_Pad_Space` EscortForce with no unit never reaches QuickReinforce's `ScriptExit`. `Produce_Force` queues in
+  team order of the TaskForce definition, not pick order.
 
 ### 7.5 Building structures (land) [H]
 - Build plans name under-construction types (`UC_*`) in their task force; the PotentialPlan's TacticalBuild marshaller reserves (pad, type) pairs (AI_GALACTIC §1.9.3).

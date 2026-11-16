@@ -52,6 +52,7 @@ int main(int argc, char** argv) {
     test_btime_none_speed_factor();    // a2g t03
     test_goal_nominal_time_resolve();  // a2g t05 (a)
     test_goal_resolve_time_ok();       // a2g t05 (b)
+    test_goal_old_candidate_reaccept();  // skai t17
     test_active_goals_category();      // a2g F1, a2h t04
     test_maintenance_tokens();         // a2h t03
     test_force_maintenance_tokens();   // a2i t04
