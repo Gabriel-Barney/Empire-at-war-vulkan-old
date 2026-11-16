@@ -417,7 +417,9 @@ bool TacticalBattle::start_bombardment(TacticalMode& mode, int32_t player, Vec3 
         r.shot = r.salvo = 0;
         r.target = target;
         const uint32_t init = static_cast<uint32_t>(30.0f * f.initial_delay);
-        const uint32_t d = init;  // the BOMBARD_DELAY story override (mgr +0x50) is not modelled [port]
+        // BOMBARD_DELAY (STY1 t06, §4.3): a story override above 0 replaces the faction's initial delay. [port] the extra time
+        // over the faction value is not applied to the first particle.
+        const uint32_t d = bombard_delay_override_ > 0.0f ? static_cast<uint32_t>(30.0f * bombard_delay_override_) : init;
         r.next_shot = frame_ + static_cast<uint32_t>(30.0f * f.shot_delay) + d;
         const int32_t count = static_cast<int32_t>(l1_k_.bombardment_distribution.size());
         r.cursor = static_cast<uint32_t>(rng.range_int(0, std::max(0, count - 1)));  // drawn even without scatter [H]

@@ -134,12 +134,14 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 #include "alamo/core/parallel.hpp"
+#include "alamo/galactic/campaign.hpp"  // StoryGates (STY1)
 #include "alamo/galactic/galactic_events.hpp"
 
 namespace alamo {
@@ -346,6 +348,40 @@ struct StorySwitchControl {
     std::string ai_type;      // Reward_Param2, trimmed
 };
 
+// STY1 lane B (docs/re/STORY_REWARDS_GALACTIC.md §2): the tutorial rewards' state. GUI event kinds of ENABLE_EVENT /
+// DISABLE_EVENT (Reward_Param1): TUTORIAL_CLICK_GUI 1, TUTORIAL_CLICK_PLANET 2, TUTORIAL_DRAG_FLEET 3, TUTORIAL_ZOOM 4,
+// TUTORIAL_ALL 5. The gate (0x446220) has two modes: mode "all allowed" blocks the listed records; mode "only listed" allows
+// the listed records. The GUI handlers ask gui_event_allowed() before they raise a tutorial notification.
+struct StoryGuiRecord {
+    int32_t kind = 0;
+    std::string name1, name2;
+    friend bool operator==(const StoryGuiRecord&, const StoryGuiRecord&) = default;
+};
+struct StoryTutorialState {
+    bool all_allowed = true;                // gate mode 1 (default)
+    std::vector<StoryGuiRecord> allowed;    // used in mode 0
+    std::vector<StoryGuiRecord> blocked;    // used in mode 1
+    std::vector<int32_t> marked_players;    // TUTORIAL_PLAYER: players whose "tutorial" byte is set (player +0x3c0), mark order
+    std::vector<std::string> finished;      // FINISHED_TUTORIAL names (upper-case text as written), first-seen order; the host
+                                            // persists them with the profile (retail: options key TutorialsPlayed)
+    bool skirmish_rules = false;            // SKIRMISH_RULES 1 (retail only lifts the credit cap in non-skirmish modes [L])
+    uint32_t filter_resets = 0;             // RESET_GALACTIC_FILTERS count (the galaxy GUI resets its four filters)
+    uint32_t sandbox_requests = 0;          // SET_SANDBOX_OBJECTIVES count (retail body not decoded [L])
+    bool is_default() const {
+        return all_allowed && allowed.empty() && blocked.empty() && marked_players.empty() && finished.empty() &&
+               !skirmish_rules && filter_resets == 0 && sandbox_requests == 0;
+    }
+};
+
+// LOAD_CAMPAIGN (§2.1): retail stores a pending campaign record and lets the end-of-game flow start it. The port queues the
+// request here; the game host takes it (StorySession::take_load_campaign) when the current game ends.
+struct StoryLoadCampaign {
+    uint64_t frame = 0;
+    std::string name;       // Reward_Param1, as written
+    int32_t side = 0;       // Reward_Param2 (0 rebel, non-zero empire; the Underworld uses 6)
+    std::string upper_name; // the name upper-cased (the campaign table key)
+};
+
 class StorySession {
 public:
     static constexpr int kMaxRounds = 8;
@@ -476,6 +512,25 @@ public:
     // CampaignBattles' conflict decision through SimHost::story() (a locked human-involved conflict is fought).
     // No source is specified for the story-sequence-active flag (0x140b154d0), so none is offered. Not hashed. ---
     bool autoresolve_locked(PlanetIndex planet) const;
+    // --- STY1 lane B: story rewards that change campaign rules (docs/re/STORY_REWARDS_GALACTIC.md) ---
+    // The rules the galactic rewards switch (planet restrictions, invasion / sabotage / corruption locks, fleet combining,
+    // bounty collection, victory movie, power table, reinforcement switches). The session owns, saves and hashes them and
+    // hands every change to the sim (GalacticSim::set_story_gates).
+    const galactic::StoryGates& gates() const { return gates_; }
+    // True when the story did not disable `player`'s reinforcements (DISABLE_REINFORCEMENTS; default enabled).
+    bool reinforcements_enabled(int32_t player) const;
+    const StoryTutorialState& tutorial() const { return tutorial_; }
+    // The tutorial's GUI event gate (0x446220): the GUI handlers drop a tutorial event that is not allowed.
+    bool gui_event_allowed(int32_t kind, std::string_view name1 = {}, std::string_view name2 = {}) const;
+    // LOAD_CAMPAIGN: the queued request (one at a time, newest wins), cleared by taking it.
+    const std::optional<StoryLoadCampaign>& pending_load_campaign() const { return load_campaign_; }
+    std::optional<StoryLoadCampaign> take_load_campaign();
+    // Tactical rewards of the tactical plot set the battle host applies to its battle (STY1 t06): CHANGE_OWNER,
+    // DESTROY_OBJECT, BOMBARD_DELAY, with Reward_Param1..N as text. Unset: the reward does nothing.
+    void set_tactical_reward_hook(std::function<void(const std::string& type, const std::vector<std::string>& params)> fn) {
+        tactical_reward_ = std::move(fn);
+    }
+    // --- end STY1 lane B ---
     // --- end OI galactic ---
 
     // ---- attached Lua families (nullptr in builds without engine/lua / the players family) ----
@@ -609,6 +664,26 @@ private:
     std::function<void(int, const std::vector<galactic::GalacticEvent>&)> drain_tap_;  // OI host
     std::function<void(const std::vector<galactic::GalacticEvent>&)> scoring_tap_;    // q6 t09
     std::function<void(const StorySwitchControl&)> switch_control_;               // q6: SWITCH_CONTROL reward hook
+    // STY1 lane B
+    galactic::StoryGates gates_;
+    StoryTutorialState tutorial_;
+    std::vector<uint8_t> reinforce_off_;  // per player: DISABLE_REINFORCEMENTS (1 = disabled); sized on first write
+    std::optional<StoryLoadCampaign> load_campaign_;
+    std::function<void(const std::string&, const std::vector<std::string>&)> tactical_reward_;
+    void sync_gates() { sim_->set_story_gates(gates_); }
+    PlanetIndex reward_planet(const std::string& type_name) const;  // first row whose planet type is named so, else invalid
+    // One reward of the STY1 families (galactic, tutorial, Underworld rules, tactical); false = not one of them. `tactical`:
+    // the reward comes from the tactical plot set. src/story_rewards_apply.cpp.
+    bool apply_sty1_reward(int32_t plot_player, bool tactical, const std::string& type, const std::vector<std::string>& params);
+    struct Sty1Save {
+        galactic::StoryGates gates;
+        StoryTutorialState tutorial;
+        std::vector<uint8_t> reinforce_off;
+    };
+    void write_sty1(ByteWriter& w) const;
+    static bool read_sty1(ByteReader& r, Sty1Save& out);
+    void hash_sty1(StateHasher& h) const;
+    void note(const std::string& text) { lua_messages_.push_back(std::to_string(frame_) + " story: " + text); }
     bool autoresolve_disabled_ = false;              // OI galactic: story lock global flag (+0x41)
     std::vector<PlanetIndex> autoresolve_planets_;   // OI galactic: story lock planet list (+0x308), insertion order
     void route_corruption_mission(int32_t winner, uint64_t frame);

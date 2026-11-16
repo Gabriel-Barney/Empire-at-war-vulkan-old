@@ -1333,6 +1333,7 @@ RejectReason GalacticSim::move_fleet(int32_t player, uint32_t fleet, PlanetIndex
     if (f.owner != player) return RejectReason::NotOwner;
     if (f.moving || f.planet == kInvalidPlanet) return RejectReason::NotAllowed;  // GE 3.1 step 1 [H]
     if (!valid_planet(destination)) return RejectReason::InvalidTarget;
+    if (story_gates_.has(destination, StoryGates::kRestricted)) return RejectReason::NotAllowed;  // SET_PLANET_RESTRICTED (STY1)
     // Player orders path with every request flag set (move mode 5) [M]: the event carries no mode.
     PathRequest req;
     req.source = f.planet;
@@ -1351,6 +1352,8 @@ RejectReason GalacticSim::move_fleet_path(int32_t player, uint32_t fleet, std::s
     if (f.moving || f.planet == kInvalidPlanet) return RejectReason::NotAllowed;
     std::vector<PlanetIndex> p(path.begin(), path.end());
     if (p.empty() || p.front() != f.planet) p.insert(p.begin(), f.planet);
+    for (size_t i = 1; i < p.size(); ++i)
+        if (story_gates_.has(p[i], StoryGates::kRestricted)) return RejectReason::NotAllowed;  // SET_PLANET_RESTRICTED (STY1)
     for (size_t i = 0; i + 1 < p.size(); ++i) {
         if (!valid_planet(p[i + 1])) return RejectReason::InvalidTarget;
         bool adjacent = false;
@@ -1755,6 +1758,10 @@ RejectReason GalacticSim::execute(uint8_t player_id, const commands::EventData& 
         // directly. Then only the issuer's own units land. A list whose units are all dropped lands nothing (an empty
         // list given to invade() would mean "all of the player's units").
         if (paused()) return RejectReason::NotAllowed;
+        // STY1 (STORY_REWARDS_GALACTIC §1.7 / §3.1): the story's invasion locks refuse the command path; the story's own
+        // INVADE_PLANET reward is exempt. DISABLE_DIRECT_INVASION's reader was not found in retail [L]: refused here.
+        if (!story_gates_.script_invade && (story_gates_.direct_invasion_disabled || story_gates_.has(p, StoryGates::kNoInvasion)))
+            return RejectReason::NotAllowed;
         const std::vector<uint32_t>& ids = ev.ids("units");
         std::vector<ObjectHandle> units;
         for (uint32_t id : ids) {

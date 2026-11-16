@@ -204,3 +204,81 @@ uint32_t GalacticSim::assemble_fleet(std::span<const ObjectHandle> units) {
 }
 
 }  // namespace alamo::galactic
+
+// ---- STY1 lane B story rewards (docs/re/STORY_REWARDS_GALACTIC.md) --------------------------------------------------
+
+namespace alamo::galactic {
+
+uint32_t GalacticSim::force_hero_respawn(uint32_t type) {
+    uint32_t n = 0;
+    for (PlanetState& p : planets_)
+        for (RespawnEntry& e : p.respawns)
+            if (e.type == type) {
+                e.due = frame_;  // the respawn service sees it due on its next pass (§1.3)
+                ++n;
+            }
+    return n;
+}
+
+uint32_t GalacticSim::story_remove_units(uint32_t type, bool all) {
+    uint32_t n = 0;
+    if (type >= rules_->types.size()) return 0;
+    const std::vector<ObjectHandle> found = store_->find_all_of_type(static_cast<objects::TypeIndex>(type));
+    const bool events = emit_events_;
+    emit_events_ = false;  // plain removal 0x391310: no death event, no bounty
+    for (const ObjectHandle h : found) {
+        if (!store_->alive(h)) continue;
+        if (destroy_object(h)) ++n;
+        if (!all) break;
+    }
+    emit_events_ = events;
+    if (n != 0 && !all) return n;
+    // Pass 2 (§1.4): queued hero respawns of this type, or of a team whose first member is this type.
+    for (PlanetState& p : planets_)
+        for (size_t i = 0; i < p.respawns.size();) {
+            const uint32_t t = p.respawns[i].type;
+            const bool match = t == type || (t < rules_->types.size() && !rules_->types[t].company_units.empty() &&
+                                             rules_->types[t].company_units.front() == type);
+            if (!match) {
+                ++i;
+                continue;
+            }
+            p.respawns.erase(p.respawns.begin() + static_cast<std::ptrdiff_t>(i));
+            ++n;
+            if (!all) return n;
+        }
+    return n;
+}
+
+uint32_t GalacticSim::story_move_fleets(int32_t plot_player, PlanetIndex from, PlanetIndex to, uint32_t filter) {
+    if ((filter != 1 && filter != 3) || !valid_planet(from) || !valid_planet(to) || !valid_player(plot_player)) return 0;
+    std::vector<uint32_t> chosen;
+    for (const uint32_t f : planets_[from].orbit) {
+        const FleetState& fl = fleets_[f];
+        if (!fl.alive || fl.moving || fl.planet != from) continue;
+        const bool friendly = allied(fl.owner, plot_player);
+        if ((filter == 1) == friendly) chosen.push_back(f);
+    }
+    // Merge per owner into the first fleet of that owner (a fleet-management merge, §1.6; other owners are never mixed [port]).
+    std::vector<uint32_t> leaders;
+    for (const uint32_t f : chosen) {
+        uint32_t lead = kNoFleet;
+        for (const uint32_t l : leaders)
+            if (fleets_[l].owner == fleets_[f].owner) lead = l;
+        if (lead == kNoFleet) leaders.push_back(f);
+        else merge_fleet(f, lead);
+    }
+    uint32_t moved = 0;
+    for (const uint32_t l : leaders)
+        if (fleets_[l].alive && move_fleet(fleets_[l].owner, l, to) == RejectReason::None) ++moved;
+    return moved;
+}
+
+bool GalacticSim::ability_ready(const SpecialAbilityDef& a, int32_t owner, uint32_t type) const {
+    bool ready = a.initially_enabled;
+    for (const StoryGates::Power& p : story_gates_.powers)
+        if (p.player == owner && p.type == type && p.name_crc == a.name_crc) ready = !p.revoked;
+    return ready;
+}
+
+}  // namespace alamo::galactic

@@ -191,6 +191,46 @@ struct VictoryClaim {
     int32_t countdown = 0;  // frames
 };
 
+// STY1 lane B: the campaign rules the story rewards switch (docs/re/STORY_REWARDS_GALACTIC.md). Plain data owned,
+// saved and hashed by the story session (sim::StorySession), handed to the sim with GalacticSim::set_story_gates; every
+// default leaves the game as it was without a story. `planet` holds one bit set per planet row (sized on first write).
+struct StoryGates {
+    static constexpr uint8_t kRestricted = 1;    // SET_PLANET_RESTRICTED
+    static constexpr uint8_t kNoInvasion = 2;    // ENABLE_INVASION planet 0
+    static constexpr uint8_t kNoSabotage = 4;    // RESTRICT_SABOTAGE planet 1
+    static constexpr uint8_t kNoCorruption = 8;  // RESTRICT_CORRUPTION planet 1
+    std::vector<uint8_t> planet;
+    bool direct_invasion_disabled = false;  // DISABLE_DIRECT_INVASION
+    bool fleet_combine = true;              // ENABLE_FLEET_COMBINE
+    bool bounty_collection = true;          // ENABLE / DISABLE_BOUNTY_COLLECTION
+    bool campaign_victory_movie = false;    // ENABLE_CAMPAIGN_VICTORY_MOVIE
+    // NEW_POWER_FOR_ALL / REMOVE_POWER_FROM_ALL: the plot player's (type, ability name CRC) table, newest value wins.
+    struct Power {
+        int32_t player = -1;
+        uint32_t type = 0;
+        uint32_t name_crc = 0;  // special_name_crc(ability name)
+        bool revoked = false;
+        friend bool operator==(const Power&, const Power&) = default;
+    };
+    std::vector<Power> powers;
+    // The story's own INVADE_PLANET reward is issued through the Invade command: not refused by the invasion gates. Transient.
+    bool script_invade = false;
+    uint8_t bits(PlanetIndex row) const { return row < planet.size() ? planet[row] : uint8_t{0}; }
+    bool has(PlanetIndex row, uint8_t bit) const { return (bits(row) & bit) != 0; }
+    void set(PlanetIndex row, uint8_t bit, bool on) {
+        if (row >= planet.size()) {
+            if (!on) return;
+            planet.resize(static_cast<size_t>(row) + 1, uint8_t{0});
+        }
+        planet[row] = on ? static_cast<uint8_t>(planet[row] | bit) : static_cast<uint8_t>(planet[row] & ~bit);
+    }
+    bool is_default() const {
+        for (const uint8_t b : planet)
+            if (b != 0) return false;
+        return !direct_invasion_disabled && fleet_combine && bounty_collection && !campaign_victory_movie && powers.empty();
+    }
+};
+
 // Player relation (player +0x370 table; L1_S4_REMAINING "Relations": 0 = allied incl. self, 1 = enemy). The values
 // match lua::PlayerRelation so the Lua bridge can cast. Defaults [inferred, = the former stand-in]: Self on the
 // diagonal, Neutral when either faction Is_Neutral, else Enemy.
@@ -777,6 +817,21 @@ public:
     // Change_Owner (Lua GameObjectWrapper.Change_Owner and story; GE 4.2 "Forced transfers" for planets). False
     // when nothing changed: dead object, invalid player, same owner, or a member of a moving fleet [port].
     bool change_owner(ObjectHandle object, int32_t player);
+    // STY1 lane B story rewards (src/story_ops.cpp; docs/re/STORY_REWARDS_GALACTIC.md).
+    // FORCE_RESPAWN §1.3: every queued respawn record of hero type `type`, on every planet, becomes due now. Returns the count.
+    uint32_t force_hero_respawn(uint32_t type);
+    // REMOVE_UNIT §1.4: silent removal (no death event, no bounty) of the live objects of `type`, any owner, newest first
+    // as ObjectStore::find_all_of_type lists them [port]; `all` false removes only the first. Then, when `all` or nothing
+    // was removed, the queued respawn records of `type` (or of a team type whose first Company_Units member is `type`)
+    // are deleted (one record when !all). Returns objects removed + records deleted.
+    uint32_t story_remove_units(uint32_t type, bool all);
+    // MOVE_FLEET §1.6: the stationary fleets orbiting `from` whose owner passes the filter (1 = friend of `plot_player`, 3 =
+    // not a friend; any other value selects nothing) are merged per owner into the first of that owner and sent along a
+    // found route to `to` as that owner. Returns the number of fleets that began to move.
+    uint32_t story_move_fleets(int32_t plot_player, PlanetIndex from, PlanetIndex to, uint32_t filter);
+    // NEW_POWER_FOR_ALL / REMOVE_POWER_FROM_ALL: ability-ready test of a ground-activated ability of `owner`'s unit of
+    // type `type`: Initially_Enabled, overridden by the story's power table.
+    bool ability_ready(const SpecialAbilityDef& a, int32_t owner, uint32_t type) const;
     // Assemble_Fleet(units): the units (members of stationary fleets orbiting one planet, or units landed
     // on that planet's surface, owned by the first valid unit's owner; others skipped) gathered into one fleet. A
     // fleet that holds exactly those units is returned as is; otherwise a new fleet takes them (list order; a landed
@@ -1030,6 +1085,10 @@ public:
     void victory_hold_release();
     bool story_victory(int32_t player, bool short_silent);  // false: invalid player (nothing changes)
     int32_t victory_hold() const { return victory_hold_; }
+    // STY1 lane B: the story's campaign rules (StoryGates). Owned and saved by the story session, which hands every change
+    // to the sim; not part of the sim's own save or hash. Default-constructed = nothing refused.
+    void set_story_gates(const StoryGates& gates) { story_gates_ = gates; }
+    const StoryGates& story_gates() const { return story_gates_; }
 
     // ---- q6 t21 / t22: the galactic victory monitor's records and event-driven tests (victory.cpp) ----------------
     // Records (setup 0x289a90, per player): none for an Is_Neutral faction; the Human_ list for the
@@ -1233,6 +1292,7 @@ private:
     std::vector<int32_t> ground_shy_;     // cu8f t04b: ObjectIds with Prefer_Ground_Over_Space false, ascending
     std::vector<VictoryClaim> claims_;    // declaration order
     int32_t victory_hold_ = 0;            // story t11: galactic monitor hold (+0x5c)
+    StoryGates story_gates_;              // STY1 lane B: set by the story session, never saved here
     std::vector<std::pair<int32_t, uint8_t>> victory_deferred_;  // q6 t21: {player, type}, monitor +0x60
     std::vector<std::pair<int32_t, std::string>> names_;  // [port] fleet / ship names {ObjectId, name}, id-ascending (v7)
     void prune_names();                                     // drops names of objects that are no longer alive

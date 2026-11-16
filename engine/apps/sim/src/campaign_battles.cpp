@@ -6,6 +6,7 @@
 
 #include "alamo/core/ascii.hpp"
 #include "alamo/galactic/campaign.hpp"
+#include "alamo/objects/game_object_types.hpp"
 #ifdef ALAMO_SIM_HAVE_STORY
 #include "alamo/sim/sim_anim.hpp"  // L1/S4 wave 2a story hookup (SimAnimation::world)
 #endif
@@ -97,6 +98,7 @@ CampaignBattles::~CampaignBattles() {
     if (story_fog_session_ && story_fog_session_ == host_->story()) {
         story_fog_session_->set_enable_fow_hook({});  // fog follow-up
         story_fog_session_->set_victory_hooks({}, {});  // story t09
+        story_fog_session_->set_tactical_reward_hook({});  // STY1 t06
     }
 #endif
 }
@@ -876,7 +878,11 @@ void CampaignBattles::hook(SimHost& host) {
         s->set_enable_fow_hook([this](bool has_param, int32_t value) { story_fog_reward(has_param, value); });
         s->set_victory_hooks([this](bool has_param, int32_t value) { story_victory_enable(has_param, value); },  // story t09
                              [this](const std::string& faction, bool short_silent) { story_victory(faction, short_silent); });
+        s->set_tactical_reward_hook([this](const std::string& type, const std::vector<std::string>& params) { story_tactical_reward(type, params); });
         story_fog_session_ = s;
+    }
+    if (battle_) {
+        if (StorySession* st = host.story()) story_sync_switches(*st);  // STY1 t06
     }
 #endif
     if (pending_) {
@@ -1742,6 +1748,39 @@ void CampaignBattles::story_victory(const std::string& faction, bool short_silen
     battle_->reward_victory(player, short_silent);
 }
 // --- end story t09 ---
+
+// --- STY1 t06: tactical story rewards on the running battle (docs/re/STORY_REWARDS_GALACTIC.md §4) ---
+void CampaignBattles::story_sync_switches(const StorySession& s) {
+    GalacticMode* g = host_->galactic_mode();
+    if (!battle_ || !g || !g->sim()) return;
+    for (size_t p = 0; p < g->sim()->players().size(); ++p)
+        battle_->set_reinforcements_off(static_cast<int32_t>(p), !s.reinforcements_enabled(static_cast<int32_t>(p)));
+}
+
+void CampaignBattles::story_tactical_reward(const std::string& type, const std::vector<std::string>& params) {
+    TacticalMode* tm = host_->tactical();
+    GalacticMode* g = host_->galactic_mode();
+    if (!battle_ || !tm || !g || !g->sim()) return;
+    const auto text = [&params](size_t i) { return i < params.size() ? std::string(ascii_trim(params[i])) : std::string(); };
+    if (type == "BOMBARD_DELAY") {
+        const std::string p1 = text(0);
+        if (p1.empty()) log_.push_back("BOMBARD_DELAY takes one parameter.");
+        else battle_->reward_bombard_delay(static_cast<float>(std::atof(p1.c_str())));
+        return;
+    }
+    const std::string p1 = text(0), p2 = text(1), p3 = text(2);
+    if (p1.empty()) return;
+    const objects::TypeIndex t = catalog_->types().resolve_name(p1);
+    if (t == objects::kNone) return;
+    if (type == "DESTROY_OBJECT") {
+        if (!battle_->reward_destroy_object(*tm, t)) log_.push_back("Unable to find object " + p1 + " to destroy");
+    } else if (type == "CHANGE_OWNER") {
+        const int32_t player = p2.empty() ? -1 : g->sim()->player_of_faction(p2);
+        if (player < 0) return;
+        battle_->reward_change_owner(*tm, t, player, p3.empty() ? 1 : std::atoi(p3.c_str()));
+    }
+}
+// --- end STY1 t06 ---
 
 // --- L1/S4 wave 2b: story-forced battles. Each new StorySession::linked_tactical() entry (a LINK_TACTICAL reward) is
 // parsed (parse_link_tactical, BT §2.9.1), written as the linked-battle record (queue_linked, 0x28bd70: refused while a
