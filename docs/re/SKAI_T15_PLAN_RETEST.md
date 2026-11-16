@@ -520,4 +520,4 @@ It waits for Gabriel (the run cap for 2026-11-16 is used).
 
 **Limit:** the kit does not log proposal desires.
 - Run 1 already showed "old candidate not picked" with no plan started at that commit, so this run alone may not name the proposal that displaced the vehicle-factory plan.
-- To name it directly, add a Resolve_Category candidate hook first: goal type, target and desire of each candidate. That needs the goal struct's desire / type / target offsets and Resolve's candidate list (a re-question; not documented in docs/re yet).
+- To name it directly, add a Resolve_Category candidate hook first: goal type, target and desire of each candidate. The offsets (Resolve's arguments, the goal sets, goal desire / type / target, target ids, the player filter) and the kit's `resolve_enter` category bug (it logs `args[1]`, the category is `args[2]`) are in `SKAI_T15_RESOLVE_HOOK_RE.md`.

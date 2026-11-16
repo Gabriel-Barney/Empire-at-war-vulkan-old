@@ -152,6 +152,17 @@ galaxy is running.
    `out\<run>\frida_t15.jsonl`. `analysis\plan_ends.py out\<run>` (`--selftest`) names, for every Destroy_Structure plan
    ended from outside its script, the rule that ended it. Question and RVAs: `docs\re\SKAI_T15_PLAN_RETEST.md` §3.5. Needs
    `toolchain\re\venv` (frida 17).
+   **Resolve candidates (skai t15, 2026-11-16):** at each land Resolve_Category the hooks also log `resolve_goals` and
+   `resolve_result`:
+   - `resolve_goals` gives every active goal and proposal of the category, with type, target, desire, effective desire,
+     state and plan;
+   - `resolve_result` gives the survivors and the accepted proposals;
+   - an `activation` event's return address says which Resolve phase accepted a goal or which test rejected it.
+   For each displaced plan end, `plan_ends.py` prints that commit's candidates, which names the displacing proposal.
+   Layout: `docs\re\SKAI_T15_RESOLVE_HOOK_RE.md`. `resolve_enter` now logs the right category (args[2]; it logged
+   args[1] before). Offline check:
+   `toolchain\re\venv\Scripts\python.exe -I tools\probe_mod\q2_traces\frida\selftest_hooks.py` compiles the script and
+   runs its readers on fake goal sets in a throwaway local process.
    **FNEAR fix (2026-11-16):** the 20261116-012157 Rebel run recorded no FNEAR at all; the BurnUnitsLand `Find_Nearest`
    wrapper is now installed again at every thread start, and each install writes an `FNHOOK fn_kind=` record
    (`docs\re\SKAI_T06_LAND_RUNS.md` §8). A run without FNHOOK records did not hook Find_Nearest.

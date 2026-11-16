@@ -15,6 +15,10 @@ where the end came from (docs/re/SKAI_T15_PLAN_RETEST.md, "Retail hook runs"):
   maint         another maintenance rule (0x722bda / 0x722d01: not fundable, desire <= 0)
   other         none of these
 
+Then, for every displaced end, the Resolve_Category of that commit from the resolve_goals / resolve_result events
+(kit since skai t15 2026-11-16, docs/re/SKAI_T15_RESOLVE_HOOK_RE.md): each active goal and proposal of the category with
+type, target, desire, effective desire (hysteresis), state and plan, marked kept / accepted / dropped.
+
     toolchain\\venv\\Scripts\\python.exe -I tools\\probe_mod\\q2_traces\\analysis\\plan_ends.py <run dir> [--plan Destroy_Structure]
     ... plan_ends.py --selftest
 """
@@ -110,6 +114,41 @@ def classify(events, plandef):
     return rows
 
 
+def resolve_at(events, mf, window=2):
+    """[(resolve_goals event, resolve_result event or None)] of the land Resolve_Category calls at commit `mf`."""
+    out = []
+    for i, e in enumerate(events):
+        if e.get("k") != "resolve_goals" or not isinstance(e.get("mf"), int) or abs(e["mf"] - mf) > window:
+            continue
+        res = None
+        for x in events[i + 1:]:
+            if x.get("k") == "resolve_result" and x.get("cat") == e.get("cat"):
+                res = x
+                break
+            if x.get("k") == "resolve_goals":
+                break
+        out.append((e, res))
+    return out
+
+
+def resolve_lines(goals_ev, result_ev):
+    kept = set(result_ev.get("survivors", [])) if result_ev else set()
+    accepted = set(result_ev.get("accepted", [])) if result_ev else set()
+    lines = ["  commit mf %s, player %s, category %s" % (goals_ev.get("mf"), goals_ev.get("player"), goals_ev.get("cat"))]
+    for role, key in (("active", "active"), ("proposal", "proposed")):
+        for g in goals_ev.get(key, []):
+            if result_ev is None:
+                mark = "?"
+            elif role == "active":
+                mark = "kept" if g.get("g") in kept else "dropped"
+            else:
+                mark = "accepted" if g.get("g") in accepted else "rejected"
+            lines.append("    %-8s %-8s %-24s %-28s d %7.3f eff %7.3f st %s %s" %
+                         (role, mark, g.get("type"), g.get("tgt"), g.get("d", float("nan")),
+                          g.get("eff", float("nan")), g.get("st"), g.get("plan", "")))
+    return lines
+
+
 def report(rows, plan, plandef, offset, exits):
     print("%s: plan definition %s, %d PEXIT tf=? records, mf = t*30 %+.0f, %d plan ends" %
           (plan, plandef, exits, offset or 0, len(rows)))
@@ -140,6 +179,17 @@ def selftest():
           [r for _, r in rows] == ["retest", "displaced", "purge", "script"])
     rec = read_records_from_text("P 0000 2 PEXIT t=697.5 frame=697.5 plan=Destroy_Structure player=EMPIRE target=X tf=? n=?\n")
     ok = ok and len(rec) == 1 and rec[0]["tf"] == "?" and rec[0]["t"] == 697.5
+    # Resolve candidate dump (skai t15): the displacing proposal is named at the commit of a displaced end.
+    rev = [{"k": "resolve_goals", "mf": 6001 + off, "player": 1, "cat": 4,
+            "active": [{"g": "g2", "type": "Destroy_Structure", "tgt": "obj:792", "d": 15.0, "eff": 16.0, "st": 2,
+                        "plan": "DestroyStructure"}],
+            "proposed": [{"g": "p1", "type": "Clear_Infantry", "tgt": "zone:Z", "d": 17.0, "eff": 17.0, "st": 0,
+                          "plan": "ClearInfantry"}]},
+           {"k": "resolve_result", "mf": 6001 + off, "player": 1, "cat": 4, "survivors": ["p1"], "accepted": ["p1"]}]
+    found = resolve_at(rev, 6001 + off)
+    text = "\n".join(resolve_lines(*found[0])) if found else ""
+    ok = ok and len(found) == 1 and "active   dropped  Destroy_Structure" in text and \
+        "proposal accepted Clear_Infantry" in text and resolve_at(rev, 9000) == []
     print("plan_ends selftest: " + ("OK" if ok else "FAILED %r %r" % (plandef, rows)))
     return 0 if ok else 1
 
@@ -175,7 +225,20 @@ def main():
     if plandef is None:
         print("%s: no plan definition found (%d PEXIT tf=? records)" % (a.plan, n))
         return 1
-    report(classify(events, plandef), a.plan, plandef, offset, n)
+    rows = classify(events, plandef)
+    report(rows, a.plan, plandef, offset, n)
+    if any(e.get("k") == "resolve_goals" for e in events):
+        for mf, rule in rows:
+            if rule != "displaced":
+                continue
+            print("displaced at mf %s:" % mf)
+            found = resolve_at(events, mf)
+            if not found:
+                print("  no resolve_goals event at that commit")
+            for ge, re_ in found:
+                print("\n".join(resolve_lines(ge, re_)))
+    else:
+        print("(no resolve_goals events: a kit before the skai t15 Resolve hook)")
     return 0
 
 
