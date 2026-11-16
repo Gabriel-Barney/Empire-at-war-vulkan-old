@@ -857,6 +857,7 @@ static const char* kPlot =
     " <Event Name=\"Landed_C\"><Event_Type>STORY_LAND_ON</Event_Type><Event_Param1>PlanetC</Event_Param1></Event>\n"
     " <Event Name=\"C_Corrupted\"><Event_Type>STORY_CORRUPTION_CHANGED</Event_Type><Event_Param1>PlanetC</Event_Param1>"
     "<Event_Param2>RACKETEERING</Event_Param2></Event>\n"
+    " <Event Name=\"C_Corrupt_Start\"><Event_Type>STORY_GENERIC</Event_Type><Event_Param1>increase_corruption</Event_Param1></Event>\n"
     " <Event Name=\"Two_Fighters\"><Event_Type>STORY_CONSTRUCT</Event_Type><Event_Param1>Fighters</Event_Param1>"
     "<Event_Param2>2</Event_Param2><Event_Param3>FILTER_FRIENDLY_ONLY</Event_Param3></Event>\n"
     " <Event Name=\"Bonus\"><Event_Type>STORY_TRIGGER</Event_Type><Reward_Type>CREDITS</Reward_Type>"
@@ -2067,7 +2068,7 @@ static void test_story_synthetic(const World& w) {
     // Every mapped trigger fired once, in a documented order (golden), the host applied SET_TECH_LEVEL and CREDITS.
     auto fired = [&a](const char* ev) { return a.log.find(std::string(" ") + ev + " ") != std::string::npos; };
     for (const char* ev : {"Begin", "Raise_Tech", "Tech_Seen", "Script_Ack", "Ack_Flag", "Enemy_Takes_C", "Corvette_At_C",
-                           "Landed_C", "C_Corrupted", "Two_Fighters", "Bonus", "Two_Seconds"})
+                           "Landed_C", "C_Corrupted", "C_Corrupt_Start", "Two_Fighters", "Bonus", "Two_Seconds"})
         if (!fired(ev)) {
             std::printf("FAIL story event %s did not fire\n", ev);
             ++g_fail;

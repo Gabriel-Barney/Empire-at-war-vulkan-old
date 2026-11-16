@@ -824,6 +824,12 @@ std::vector<std::pair<std::string, lua::StoryNotification>> StorySession::notifi
             n.value = e.value;  // wave 2b: the corruption type (§4.7 vf3 compares it with the Param2 keyword)
             out.emplace_back("STORY_CORRUPTION_CHANGED", n);
             break;
+        // STY1 t08: the timed corruption transition began -> STORY_GENERIC "increase_corruption" / "decrease_corruption"
+        // (retail wrappers 0x3f6810 / 0x3f6770, GRC 4.3); routed like StoryUiEvent::Generic (String family, every plot set).
+        case K::CorruptionStarted:
+            n.name = e.value != 0 ? "increase_corruption" : "decrease_corruption";
+            out.emplace_back("STORY_GENERIC", n);
+            break;
         // S10 battle results (BattleWon / BattleLost / BattleRetreat, posted by the conflict manager); routed
         // player-scoped (route()): the winner's / loser's / retreating player's plot sets only [inferred].
         // WIN/LOSE_BATTLES (STORY.md 5): counter + Param4 planet list; Param2 location enum and the Param3
