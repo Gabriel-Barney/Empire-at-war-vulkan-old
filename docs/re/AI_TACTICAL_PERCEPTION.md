@@ -77,7 +77,7 @@ A tactical location evaluator has: rect `(x, y, w, h)` at +0x98..+0xa4, attached
 - **Space cell:** fixed rect = the cell clipped to the map (AI_TACTICAL §3.2).
 - **Space unit location:** before every force/concentration/bitfield/time evaluation the rect is rebuilt as a square of side `2 × R` centred on the unit, `R` = the unit's max attack range (0x3749d0 on its representative type) [M: "max attack range"].
 - **Land region:** the hint zone; queries use the zone's threat-cell list.
-- **Land unit location:** every evaluation first looks up the unit's current hint zone (land mode slot +0x180 at the unit position). If it changed, the evaluator re-links (slot 13 0x6d65d0: new zone and cell list via 0x654210). **If the unit is in no zone, every force / concentration / time token returns 0** (success) [H].
+- **Land unit location:** every evaluation first looks up the unit's current hint zone (land mode slot +0x180 at the unit position). If the lookup is non-null and differs, the evaluator re-links (slot 13 0x6d65d0: new zone; the zone's threat cells, via 0x654210, are **added** to the evaluator's set +0xb0, which is never cleared, and the set is copied into the zone's +0x90). A null lookup keeps the old zone; **only an evaluator that never had a zone returns 0** for every force / concentration / time token (success) [H, corrected 2026-11-16: SKAI_T15_TARGET_LOCATION_FORCE §1].
 - Centre for distances: unit position if attached, else zone centre, else rect centre.
 
 ---
