@@ -464,8 +464,17 @@ bool CombatSystem::detonate_projectile(size_t index, uint32_t frame) {
     // S8 t06: a host call between ticks (DETONATE_REMOTE_BOMB) queries the last tick's trees for the area damage.
     const TreeSet* const saved = trees_;
     if (!trees_) trees_ = last_trees_;
+    // tru1 t08 (TRU1_A_RE_ANSWERS B1, 0x4caea0): the commanded detonation spawns the lifetime particle and runs the
+    // expiry effect list (no ion stun). [port] like the damage events, an event from a host call between ticks is
+    // cleared by the next tick before the battle host reads it (only the in-tick ability path spawns the particle).
+    HitEvent he;
+    he.shooter = pc.shooter;
+    he.owner = pc.owner;
+    he.projectile_desc = pc.desc;
+    he.position = pc.pos;
+    hit_events_.push_back(he);
     if (pd.blast_area_damage > 0.0f && pd.blast_area_range > 0.0f) area_damage(pc, pc.pos, kNoObject, frame);
-    detonation_effects(pc, pc.pos, kNoObject, frame);
+    detonation_effects(pc, pc.pos, kNoObject, frame, DetonationPath::Expiry);
     trees_ = saved;
     return true;
 }

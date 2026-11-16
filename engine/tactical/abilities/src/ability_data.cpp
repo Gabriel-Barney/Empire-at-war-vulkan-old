@@ -136,6 +136,7 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
     s.stealth_duration_multiplier = f_or(e, "Stealth_Duration_Multiplier", 1.0f);
     s.capture_time_multiplier = f_or(e, "Capture_Point_Time_Multiplier", 1.0f);
     s.reinforcement_deploy_multiplier = f_or(e, "Reinforcement_Deploy_Time_Multiplier", 1.0f);
+    s.base_shield_upgrade = b_or(e, "Base_Shield_Upgrade", false);  // tru1 t02
     s.enable_bombing_runs = b_or(e, "Enable_Bombing_Runs", false);
     s.enable_bombardment = b_or(e, "Enable_Planetary_Bombardment", false);
     s.enable_special_weapons = b_or(e, "Enable_Special_Weapons", false);

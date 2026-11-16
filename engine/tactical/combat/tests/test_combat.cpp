@@ -118,6 +118,7 @@ int main(int argc, char** argv) {
     test_base_shield_state();    // tru1 t02
     test_base_shield_straddle();
     test_base_shield_dome();
+    test_ground_detonation_particle();  // tru1 t08
     if (bench) bench_modifiers();
     if (g_fail) {
         std::printf("%d check(s) FAILED\n", g_fail);

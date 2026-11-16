@@ -130,6 +130,10 @@ struct SpecialAbilityDesc {
     // Battlefield_Modifier (§2.3.11)
     float fow_reveal_multiplier = 1.0f, reinforcement_time_multiplier = 1.0f, stealth_duration_multiplier = 1.0f,
           capture_time_multiplier = 1.0f, reinforcement_deploy_multiplier = 1.0f;
+    // tru1 t02 (TRU1_A_RE_ANSWERS A1 step 6): Base_Shield_Upgrade (+0x190) - apply 0x6f02c0 adds an entry keyed by the
+    // source to each affected player's base-shield upgrade list (CombatSystem::add_base_shield_upgrade), remove 0x6f13b0
+    // deletes it (EL_ / RL_Enhanced_Base_Shield_Upgrade).
+    bool base_shield_upgrade = false;
     // Enable_Bombing_Runs (+0x191) / Enable_Special_Weapons (+0x192) / Enable_Planetary_Bombardment (+0x193) (cu8f t06,
     // CU8F_T04_T06_RE §3.3 [H]): the apply pushes a `true` entry (keyed by this source) onto each affected player's bool
     // list (AbilitySystem::player_gate), the remove deletes them; Reverse_Application_Logic swaps the two.

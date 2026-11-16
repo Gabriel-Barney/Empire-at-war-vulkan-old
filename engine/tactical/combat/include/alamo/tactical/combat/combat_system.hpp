@@ -1009,7 +1009,7 @@ struct DamageEvent {
 // S10-int (R4 hookup): one projectile detonation, for the host's PARTICLE objects (TACTICAL_COMBAT 3.3 expiry,
 // 3.5 step 4 visuals). Filled in the serial commit phase (projectile serial order); cleared each tick.
 struct HitEvent {
-    ObjectId victim = kNoObject;   // kNoObject: lifetime / distance expiry (no victim)
+    ObjectId victim = kNoObject;   // kNoObject: lifetime / distance expiry or a ground hit (no victim)
     ObjectId shooter = kNoObject;
     int32_t owner = -1;
     uint32_t projectile_desc = 0;
@@ -1018,6 +1018,10 @@ struct HitEvent {
     bool armor_reduced = false;    // hull armor factor <= 0.75 (armor-reduced detonation particle)
     bool delayed = false;          // Projectile_Damage_Delay_Secs: damage queued, absorption unknown [port]
     int32_t pick = -1;             // the synced pick from the victim's (shield-)hit-particle list, -1 none
+    // tru1 t08 (TRU1_A_RE_ANSWERS B1): no victim, land ground / water hit (0x4cb070) - the host spawns
+    // Projectile_Ground_Detonation_Particle at `position`; false with no victim = an expiry or a commanded
+    // detonation (Projectile_Lifetime_Detonation_Particle). No fallback between the two particles.
+    bool ground = false;
 };
 
 // OI fog: one shot that reached the post-shot hook (On_Shot_Fired 0x3a06a0, from HP_Fire_At and WeaponBehavior
@@ -1404,6 +1408,7 @@ public:
     // projectile, not only Projectile_Does_Shield_Damage ones (A5).
     void add_base_shield_upgrade(int32_t player, ObjectId source);
     void remove_base_shield_upgrade(int32_t player, ObjectId source);
+    bool base_shield_upgraded(int32_t player) const;  // the player's list is non-empty
     // A base-shield generator whose shield is on (state 1). False for other objects.
     bool base_shield_active(ObjectId id) const;
     // The shield an AFFECTED_BY_SHIELD unit straddles (kNoObject none) and its speed factor: Base_Shield_Speed_Modifier
@@ -2005,9 +2010,14 @@ private:
     void process_hit(Projectile& p, Unit& victim, float t, uint32_t frame, SimRng& rng, const Vec3* segment = nullptr,
                      int32_t mesh_hp = kMeshUnknown);
     int32_t hardpoint_by_mesh(const Unit& v, const std::string& mesh) const;  // §2.9 Q1 step 4 (0x394d40)
-    void expire_projectile(uint32_t i, uint32_t frame);  // 3.3 expiry: detonation at the projectile's position
+    // 3.3 expiry: detonation at the projectile's position; ground = the land ground / water hit 0x4cb070 (tru1 t08)
+    void expire_projectile(uint32_t i, uint32_t frame, bool ground = false);
     void area_damage(const Projectile& p, Vec3 center, ObjectId direct, uint32_t frame);
-    void detonation_effects(const Projectile& p, Vec3 center, ObjectId direct, uint32_t frame);
+    // tru1 t08 (TRU1_A_RE_ANSWERS B1): which detonation path runs the effects. Ground hits skip the weaken effect,
+    // expiries (lifetime, distance, path end, commanded) skip the ion-stun effect; object hits run the full list.
+    enum class DetonationPath : uint8_t { Object, Ground, Expiry };
+    void detonation_effects(const Projectile& p, Vec3 center, ObjectId direct, uint32_t frame,
+                            DetonationPath path = DetonationPath::Object);
     bool ion_stun_unit(Unit& v, uint32_t pdesc, uint32_t frame);
     void apply_or_queue(const DamageRequest& r, float delay_secs, uint32_t frame);
     DamageResult take_damage_inner(const DamageRequest& r, uint32_t frame, int depth);

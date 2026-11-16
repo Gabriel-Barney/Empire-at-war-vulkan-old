@@ -681,7 +681,8 @@ void CombatSystem::effect_victims(int32_t owner, bool enemies, Vec3 center, floa
     }
 }
 
-void CombatSystem::detonation_effects(const Projectile& p, Vec3 center, ObjectId direct, uint32_t frame) {
+void CombatSystem::detonation_effects(const Projectile& p, Vec3 center, ObjectId direct, uint32_t frame,
+                                      DetonationPath path) {
     // 0x4cb070 order (TACTICAL_GAPS §1.10 [H dispatch, M effects]): stun -> distract -> heal -> convert ->
     // invulnerability -> ion stun -> combat mod; weaken from the detonate paths (0x4d0800) last [M].
     const ProjectileDesc& pd = data_->projectiles[p.desc];
@@ -748,8 +749,9 @@ void CombatSystem::detonation_effects(const Projectile& p, Vec3 center, ObjectId
         for (Unit* v : vs)
             if (v->id != p.target && effect_match(*v, pd.invulnerability_mask, nullptr)) give(v);
     }
-    // Ion stun (0x4cbbb0): direct victim, or victims in radius (enemy trees, XY circle, id order).
-    if (pd.ion_stun) {
+    // Ion stun (0x4cbbb0): direct victim, or victims in radius (enemy trees, XY circle, id order). tru1 t08 (B1): the
+    // expiry paths (0x4c7050, 0x4caea0) do not run it.
+    if (pd.ion_stun && path != DetonationPath::Expiry) {
         if (!(pd.ion_stun_radius > 0.0f)) {
             Unit* v = unit(direct);
             if (live(v)) ion_stun_unit(*v, p.desc, frame);
@@ -769,7 +771,8 @@ void CombatSystem::detonation_effects(const Projectile& p, Vec3 center, ObjectId
     }
     // Weaken (0x4d0800): two replace-by-source inserts of -Take_Damage_Increase and -Cause_Damage_Reduction for the
     // duration [L: which two lists - taken as defense (list 0, used as 1 - r) and damage dealt (list 1)].
-    if (pd.weaken && pd.weaken_radius > 0.0f) {
+    // tru1 t08 (B1): the ground hit 0x4cb070 does not run it.
+    if (pd.weaken && pd.weaken_radius > 0.0f && path != DetonationPath::Ground) {
         const uint32_t crc = name_crc(pd.name);
         const uint32_t expiry = expiry_frame(frame, pd.weaken_seconds, cfg_.fps);
         effect_victims(p.owner, true, center, pd.weaken_radius, vs);
@@ -1629,20 +1632,21 @@ bool CombatSystem::rocket(size_t i, RocketView& out) const {
     return true;
 }
 
-void CombatSystem::expire_projectile(uint32_t i, uint32_t frame) {
+void CombatSystem::expire_projectile(uint32_t i, uint32_t frame, bool ground) {
     Projectile& p = projectiles_[i];
     const ProjectileDesc& pd = data_->projectiles[p.desc];
     ++stats_.expired;
     p.alive = 0;
     const Projectile pc = p;  // copy: the detonation may spawn projectiles
-    HitEvent he;  // S10-int (R4): lifetime detonation particle
+    HitEvent he;  // S10-int (R4): lifetime detonation particle; tru1 t08: the ground particle on a ground hit
     he.shooter = pc.shooter;
     he.owner = pc.owner;
     he.projectile_desc = pc.desc;
     he.position = pc.pos;
+    he.ground = ground;
     hit_events_.push_back(he);
     if (pd.blast_area_damage > 0.0f && pd.blast_area_range > 0.0f) area_damage(pc, pc.pos, kNoObject, frame);
-    detonation_effects(pc, pc.pos, kNoObject, frame);
+    detonation_effects(pc, pc.pos, kNoObject, frame, ground ? DetonationPath::Ground : DetonationPath::Expiry);
 }
 
 void CombatSystem::rocket_step(uint32_t i, uint32_t frame, SimRng& rng) {
@@ -1980,7 +1984,7 @@ void CombatSystem::lob_step(uint32_t i, uint32_t frame, SimRng& rng) {
     }
     if (ground) {  // 4. On_Detonate 0x4cb070 at the ground hit point: no direct damage, area damage + effects there
         p.pos = gh.point;
-        expire_projectile(i, frame);
+        expire_projectile(i, frame, true);  // tru1 t08: ground particle
         return;
     }
     // Move_And_Expire 0x4c7050 (§6.5): DistanceTravelled += s; the lifetime rule replaces the travel budget when the
@@ -2266,7 +2270,7 @@ void CombatSystem::tick(uint32_t frame, const TreeSet& trees, SimRng& rng, const
         }
         if (hit.ground) {
             projectiles_[i].pos = hit.gh.point;
-            expire_projectile(i, frame);
+            expire_projectile(i, frame, true);  // tru1 t08: On_Detonate 0x4cb070, ground particle
             continue;
         }
         Projectile& p = projectiles_[i];

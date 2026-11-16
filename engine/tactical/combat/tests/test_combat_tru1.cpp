@@ -311,4 +311,109 @@ void test_base_shield_dome() {
     }
 }
 
+
+namespace {
+// tru1 t08: a straight no-target shot of player 0 from (0, 0, 1) toward (300, 0, 1) over a plateau at z 5 (x >= 160,
+// TACTICAL_COMBAT §3.4 ground test) in land; space has no ground test, so the shot runs out its 200 flight distance.
+// Unit 2 (player 1, enemy) sits 30 to the side of the ground hit / expiry area, inside the effect radius 100.
+struct DetonationWorld {
+    World w;
+    explicit DetonationWorld(GameMode mode, ProjectileDesc shot, Vec3 unit_at) {
+        w.data.projectiles = {shot};
+        UnitDesc t;
+        t.tactical_health = 1000.0f;
+        t.radius = 5.0f;
+        const uint32_t td = push_unit(w.data, t);
+        CombatConfig cfg;
+        cfg.mode = mode;
+        w.make(cfg);
+        GroundGrid g = flat_grid(20, 4, 0);
+        for (uint32_t y = 0; y < g.height; ++y)
+            for (uint32_t x = 8; x < g.width; ++x) g.heights[y * g.width + x] = 80;
+        RocketTerrain rt;
+        rt.grid = g;
+        w.sys->set_rocket_terrain(std::move(rt));
+        w.add(2, td, 1, unit_at);
+        ProjectileLaunch l;
+        l.owner = 0;
+        l.from = Vec3{0, 0, 1};
+        l.point = Vec3{300, 0, 1};
+        CHECK(w.sys->launch_projectile(l, w.frame));
+    }
+    // ticks until the detonation; its event (victim none), `found` false when none came
+    HitEvent run(bool& found) {
+        found = false;
+        HitEvent out;
+        for (int i = 0; i < 100 && !found; ++i) {
+            w.tick();
+            for (const HitEvent& e : w.sys->hit_events()) {
+                found = true;
+                out = e;
+            }
+        }
+        return out;
+    }
+};
+}  // namespace
+
+void test_ground_detonation_particle() {
+    // tru1 t08 (TRU1_A_RE_ANSWERS B1): a land ground / water hit (0x4cb070) reports `ground` - the host spawns
+    // Projectile_Ground_Detonation_Particle; every expiry (distance, lifetime, path end, commanded) does not - the
+    // lifetime particle. The ground path runs ion stun but not weaken; the expiry paths run weaken but not ion stun.
+    ProjectileDesc shot;
+    shot.max_speed = 10.0f;
+    shot.damage = 10.0f;
+    shot.max_flight_distance = 200.0f;
+    shot.weaken = true;
+    shot.weaken_radius = 100.0f;
+    shot.weaken_take_increase = 0.5f;
+    shot.weaken_seconds = 10.0f;
+    shot.ion_stun = true;
+    shot.ion_stun_radius = 100.0f;
+    shot.ion_stun_duration = 5.0f;
+    {  // land: the ramp at x 140..160 stops it -> ground; ion stun yes, weaken no
+        DetonationWorld d(GameMode::Land, shot, Vec3{142, 30, 0});
+        bool found = false;
+        const HitEvent e = d.run(found);
+        CHECK(found && e.victim == kNoObject && e.ground && e.position.x > 140.0f && e.position.x < 144.0f);
+        CHECK(d.w.sys->ion_stunned(2, d.w.frame));
+        CHECK_F(d.w.sys->modifier(2, ModList::Defense), 0.0f);
+    }
+    {  // space: no ground test, the 200 flight distance runs out -> expiry; weaken yes, ion stun no
+        DetonationWorld d(GameMode::Space, shot, Vec3{200, 30, 1});
+        bool found = false;
+        const HitEvent e = d.run(found);
+        CHECK(found && e.victim == kNoObject && !e.ground && e.position.x >= 199.0f);
+        CHECK(!d.w.sys->ion_stunned(2, d.w.frame));
+        CHECK(d.w.sys->modifier(2, ModList::Defense) < 0.0f);
+    }
+    {  // grenade (0x4ceea0): its ground hit is the same ground path
+        GroundGrid g = flat_grid(16, 4, 0);
+        LobLaunch ll(GameMode::Land, spmat_grenade(), Vec3{200, 0, 0}, &g);
+        bool found = false, ground = false;
+        for (int i = 0; i < 100 && !found; ++i) {
+            ll.tick();
+            for (const HitEvent& e : ll.sys->hit_events()) {
+                found = true;
+                ground = e.ground && e.victim == kNoObject;
+            }
+        }
+        CHECK(found && ground);
+    }
+    {  // grenade in space: lifetime expiry, not ground
+        ProjectileDesc g = spmat_grenade();
+        g.max_lifetime = 2.0f;
+        LobLaunch ll(GameMode::Space, g, Vec3{200, 0, 0});
+        bool found = false, ground = true;
+        for (int i = 0; i < 200 && !found; ++i) {
+            ll.tick();
+            for (const HitEvent& e : ll.sys->hit_events()) {
+                found = true;
+                ground = e.ground;
+            }
+        }
+        CHECK(found && !ground);
+    }
+}
+
 }  // namespace bo3split

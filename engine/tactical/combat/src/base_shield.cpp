@@ -39,6 +39,12 @@ void CombatSystem::remove_base_shield_upgrade(int32_t player, ObjectId source) {
                           shield_upgrade_.end());
 }
 
+bool CombatSystem::base_shield_upgraded(int32_t player) const {
+    for (const auto& e : shield_upgrade_)
+        if (e.first == player) return true;
+    return false;
+}
+
 bool CombatSystem::base_shield_active(ObjectId id) const {
     const Unit* s = unit(id);
     return live(s) && desc_of(*s).base_shield && s->bshield_state == 1;
@@ -60,9 +66,7 @@ void CombatSystem::evaluate_base_shield(Unit& s, uint32_t frame) {
     bool on = !sd.base_shield_requires_power || has_base_power(s.owner);
     if ((s.flags & kUnitDead) || !(s.health > 0.0f)) on = false;
     if (!player(s.owner).active || sd.base_shield_always_off) on = false;  // PlayerInfo::active = faction not Is_Neutral
-    bool upgraded = false;
-    for (const auto& e : shield_upgrade_)
-        if (e.first == s.owner) upgraded = true;
+    const bool upgraded = base_shield_upgraded(s.owner);
     if (!on) s.bshield_off_stamp = frame;  // every service that finds it off
     // Set_State 0x56b540 [H]: nothing changes -> nothing; off -> on waits FPS x Base_Shield_Delay_Time after the last off
     // service (strict float compare); from state 0 there is no wait.

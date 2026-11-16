@@ -314,6 +314,7 @@ int32_t BattleCatalog::projectile(uint32_t t, BuildState& s) const {
         v.armor_reduced = type_or_none(ty.get_string(t, "Projectile_Object_Armor_Reduced_Detonation_Particle"));
         v.absorbed = type_or_none(ty.get_string(t, "Projectile_Absorbed_By_Shields_Particle"));
         v.lifetime = type_or_none(ty.get_string(t, "Projectile_Lifetime_Detonation_Particle"));
+        v.ground = type_or_none(ty.get_string(t, "Projectile_Ground_Detonation_Particle"));  // tru1 t08
         s.full->projectiles.push_back(v);
     }
     const int32_t idx = static_cast<int32_t>(s.d->projectiles.size());
