@@ -451,3 +451,24 @@ base structure falls (`analysis/land_attack.py`).
   falls about 10700 frames after the port's. Next for t15: why retail's Empire AI does not commit Destroy_Structure on
   the vehicle factory while merc teams stand near it (retail run 1 dropped its 6639 vehicle-factory plan at 7421 by
   displacement); the TDESIRE kit that would show the desire per target ended retail runs early (three runs) and is off.
+
+## Target-choice RE ported (skai-a, 2026-11-16) [H rules, measured results]
+
+`SKAI_T15_TARGET_CHOICE.md` answers:
+- Land slot 9 never tests object targets, so the mercs-first order is not a reachability skip.
+- Commit step 1 keeps the old desire when the re-evaluation fails.
+- The pre-built start structures stay out of the AI owner lists only.
+
+Ported on claude/skai-a-2c5f0f (dd2aada9, 5035fb7e):
+- `objects::kFlagNoAiOwnerList`: set by `bt_skirmish_base`, read by the threat grid's owner list and by Find_Nearest. It replaces the DUMMY_GROUND_STRUCTURE skip.
+- `GoalSystemConfig::keep_desire_on_failed_eval`: land only.
+
+`skai_exit.py` after the change:
+
+| AI | Port ends | Retail ends | Result |
+|---|---|---|---|
+| Rebel | 5/10 (median 29889) | 1/4 (27265) | pass |
+| Empire | 9/10, 16986-28784 (median 19579) | 4/6 | FAIL: median < 20746 |
+| Underworld | 1/10 (24070) | 1/3 (28391) | FAIL: 24070 < 25391; one port end, so the check sits at its noise floor |
+
+The Empire AI still takes the vehicle factory before the merc teams. The open lead is Q2: the port reads the factory's `Location` force as 0, so the Destroy_Structure escort contrast list (`Target.Location.EnemyForceUnnormalized`) is empty. The plan needs no cover for the mercs, and its re-test never fails on them. `SKAI_T15_TARGET_LOCATION_FORCE` "Port consequence" 1 lists the four checks (the merc team grid radius 240, footprint columns 70-78, the factory zone 85, a grid entry for the team container).
