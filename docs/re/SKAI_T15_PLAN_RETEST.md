@@ -396,3 +396,9 @@ Consequences of switching it on (why it is not on yet):
   (2755-11566, was 2239-3550 for all 12), seeds 1 and 3 run to the 14400-frame cap. `alamo_headless_skirmish_ai_foc_land_campaign_outcome_seed1`
   keeps `--expect-battle-end` (DECISIONS.md "AI-vs-AI land skirmish tests do not need a battle end": the campaign-rules land
   invasion keeps it), so that test fails with the switch on. Turning it on is Gabriel's decision.
+
+**On by default since skai t18 (2026-11-16, Gabriel option (c); DECISIONS.md "Running-plan re-test on by default").**
+`--no-plan-retest` turns it off. Seeds 1 and 3 stall in a rule-following standoff (no 2:1 retreat for the Rebels, the Empire's
+last AT-AT on a cross-map Clear_Infantry walk), so outcome seed 1 was replaced by seed 2. Idle-human Utapau with the re-test
+on (dev + skai-lane2, MSVC, 1 worker, 36000 ticks, seeds 1-10): Rebel AI ends 1 of 10 (33956), Empire AI 10 of 10
+(17525-19883), Underworld AI 5 of 10 (23561-35241). Retail so far: Rebel 0 of 3, Empire 1 of 2 (about 25707), Underworld 0 of 1.
