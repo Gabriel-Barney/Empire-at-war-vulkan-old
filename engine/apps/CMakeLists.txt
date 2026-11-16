@@ -504,10 +504,10 @@ if(_alamo_sim)
     # skai t12 (2026-11-12, retail goal cadence in tactical: quota cap from the whole PlayerList, GoalSetExtensionSize 2):
     # 15 of 16 end; seed 3 is left out: it reaches the 14400-frame limit (winner by the limit, not by the AI). Not traced
     # (backlog, from skai). Put it back when it ends again.
+    # skai t16 (2026-11-16): on dev bc3391f0 seeds 1-16 all end (Empire, all destroyed, 5209-8161 frames; seed 3 at 7418,
+    # 7149 with --no-plan-retest, so not the t18 re-test alone): a later dev change (b0421 / b0422 goal and force-sum rules or
+    # the gai3 / sty1 batch, not bisected) removed the stall, so seed 3 is back.
     foreach(_seed RANGE 1 16)
-      if(_seed EQUAL 3)
-        continue()
-      endif()
       add_test(NAME alamo_headless_skirmish_ai_foc_outcome_s${_seed}
                COMMAND alamo_headless --skirmish-ai foc --seed ${_seed} --ticks 16000 --workers 0 --quiet --expect-battle-end)
       set_tests_properties(alamo_headless_skirmish_ai_foc_outcome_s${_seed} PROPERTIES TIMEOUT 1200)
