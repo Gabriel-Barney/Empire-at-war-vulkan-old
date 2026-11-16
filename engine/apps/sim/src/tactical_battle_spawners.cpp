@@ -14,7 +14,6 @@ constexpr objects::BehaviorTypeId kDebrisBehavior = 0x28;      // DEBRIS
 constexpr int32_t kPlacementTries = 10;                        // 0x140a436a0
 constexpr float kPackRadius = 50.0f;                           // pack members around the first member
 constexpr int32_t kSnapRings = 16;                             // [port] nearest passable cell search (cells)
-constexpr float kDebrisKillDamage = 1.0e6f;                    // 0x62ad30: lethal damage at the expiry
 
 objects::TypeIndex first_type_of_list(const objects::GameObjectTypes& types, objects::TypeIndex t, std::string_view tag) {
     for (const std::string_view s : types.get_list(t, tag)) {
@@ -179,7 +178,7 @@ void TacticalBattle::sp_debris_expire(TacticalMode& mode, SimRng& rng, const Deb
         if (st.alive(ph)) st.destroy(ph);
     }
     const objects::ObjectHandle h = st.find(d.id);
-    if (!st.alive(h)) return;  // kDebrisKillDamage always kills: the piece dies
+    if (!st.alive(h)) return;  // the 1e6 damage always kills: the piece dies
     const objects::TypeIndex t = st.type(h);
     const Vec3 at = st.position(h), face = st.facing(h);
     const int32_t owner = st.owner(h);

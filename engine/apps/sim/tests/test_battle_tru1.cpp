@@ -221,7 +221,7 @@ struct SpaceRun {
     CrcLog crc;
     bool fought = false, requested = false, flight = false, completed = false;
     size_t listed = 0;
-    bool lined_up = true, creep_ok = true, release_ok = true, dir_ok = true, complete_frame_ok = false;
+    bool lined_up = true, creep_ok = true, release_ok = true, dir_ok = true, complete_frame_ok = false, cruiser_on_marker = false;
     uint32_t flight_start = 0, complete_at = 0;
     std::vector<int32_t> release_counter;  // cinematic counter at which list[i] first moved 500
     // debris
@@ -334,6 +334,9 @@ SpaceRun run_space(const Data& d, int32_t workers) {
                     if (std::sqrt(dx * dx + dy * dy) > 2500.0f) out.lined_up = false;
                     const Vec3 fc = st.facing(st.find(id));
                     if (std::fabs(fc.x) > 1e-4f || std::fabs(fc.y - 1.0f) > 1e-4f) out.dir_ok = false;
+                    // the cruiser (largest Tactical_Health) is placed first: on the marker's own spot
+                    if (static_cast<uint32_t>(st.type(st.find(id))) == type_of(d, "T_Cruiser"))
+                        out.cruiser_on_marker = p.x == kMarkerX && p.y == kMarkerY;
                 }
             } else {
                 for (size_t i = 0; i < list.size(); ++i) {
@@ -361,13 +364,13 @@ SpaceRun run_space(const Data& d, int32_t workers) {
 
 void test_space(const Data& d) {
     const SpaceRun a = run_space(d, 0);
-    std::printf("  retreat: requested %d, flight %d (start %u, %zu listed, lined up %d, dir %d), creep %d, release %d, completed %d at %u "
+    std::printf("  retreat: requested %d, flight %d (start %u, %zu listed, lined up %d, cruiser on the marker %d, dir %d), creep %d, release %d, completed %d at %u "
                 "(181 frames: %d)\n",
-                a.requested, a.flight, a.flight_start, a.listed, a.lined_up, a.dir_ok, a.creep_ok, a.release_ok, a.completed, a.complete_at,
+                a.requested, a.flight, a.flight_start, a.listed, a.lined_up, a.cruiser_on_marker, a.dir_ok, a.creep_ok, a.release_ok, a.completed, a.complete_at,
                 a.complete_frame_ok);
     for (size_t i = 0; i < a.release_counter.size(); ++i) std::printf("    list[%zu] released at counter %d\n", i, a.release_counter[i]);
     CHECK(a.fought && a.requested && a.flight && a.listed == 3);
-    CHECK(a.lined_up && a.dir_ok && a.creep_ok && a.release_ok);
+    CHECK(a.lined_up && a.dir_ok && a.creep_ok && a.release_ok && a.cruiser_on_marker);
     CHECK(a.release_counter.size() == 3 && a.release_counter[0] == 30 && a.release_counter[1] == 31 && a.release_counter[2] == 34);
     CHECK(a.completed && a.complete_frame_ok);
     std::printf("  debris: tracked %d (life %lld frames), moved %d, turned %d, particle followed %d, expired %d at %u (spawned %u), "
@@ -430,7 +433,6 @@ LandRun run_land(const Data& d, int32_t workers) {
     if (!uf.empty()) CHECK(gs->move_fleet(1, uf[0], 1) == commands::RejectReason::None);
     bool invaded = false;
     const uint32_t hut = type_of(d, "T_Hut"), pack_hut = type_of(d, "T_Pack_Hut");
-    size_t pack_spawns = 0;
     std::vector<objects::ObjectId> pack_members;
     bool pack_killed = false;
     for (uint64_t t = 0; t < 4000; ++t) {
@@ -478,10 +480,7 @@ LandRun run_land(const Data& d, int32_t workers) {
                 }
             }
             if (ty == pack_hut) {
-                if (sp.size() == 3 && pack_members.empty()) {
-                    pack_members.assign(sp.begin(), sp.end());
-                    ++pack_spawns;
-                }
+                if (sp.size() == 3 && pack_members.empty()) pack_members.assign(sp.begin(), sp.end());
                 out.pack_count = std::max(out.pack_count, sp.size());
                 if (f == 1200 && !pack_killed && sp.size() == 3) {
                     // two of three die: no refill while one lives

@@ -64,10 +64,10 @@ bool TacticalBattle::rt_begin_flight(TacticalMode& mode, uint8_t side) {
     const Vec3 face = rt_.dir;
     // Formation (0x534110): largest Tactical_Health first (stable), each stopped and teleported to a free spot around the
     // marker (radius 2500), oriented away from the marker; then nearest first to the point 10000 out along that way.
-    std::vector<std::pair<float, objects::ObjectId>> by_health;
+    std::vector<std::pair<int32_t, objects::ObjectId>> by_health;  // Tactical_Health is an int field
     for (const objects::ObjectId id : list) {
         const Unit* u = unit_by_id(id);
-        by_health.emplace_back(types.get_float(u->type, "Tactical_Health"), id);
+        by_health.emplace_back(types.get_int(u->type, "Tactical_Health"), id);
     }
     std::stable_sort(by_health.begin(), by_health.end(), [](const auto& a, const auto& b) { return a.first > b.first; });
     constexpr uint64_t kLayer20 = 0x20;  // Space_Layer 0x20: never a blocker (space_member_spots)
