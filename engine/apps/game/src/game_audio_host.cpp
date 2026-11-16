@@ -468,7 +468,8 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
     bool base_hit = false;
     if (local_player >= 0) {
         using namespace objects;
-        if (base_behaviors_[0] == 0) {
+        if (!base_behaviors_ready_) {
+            base_behaviors_ready_ = true;
             base_behaviors_[0] = behavior_type_id("DUMMY_GROUND_STRUCTURE");
             base_behaviors_[1] = behavior_type_id("DUMMY_LAND_BASE_LEVEL_COMPONENT");
             base_behaviors_[2] = behavior_type_id("DUMMY_STAR_BASE");
@@ -483,7 +484,12 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
             const TypeIndex vt = store.type(vh);
             const int32_t vo = store.owner(vh);
             const BehaviorTypeId a = base_behaviors_[space ? 2 : 0], b = base_behaviors_[space ? 3 : 1];
-            const bool is_base = (a != kNoBehavior && types.has_behavior(vt, set, a)) || (b != kNoBehavior && types.has_behavior(vt, set, b));
+            // The object's behaviours in this mode = the generic <Behavior> list plus the mode's own list (shipped bases
+            // name DUMMY_GROUND_STRUCTURE / DUMMY_STAR_BASE in the generic one).
+            const auto has = [&](BehaviorTypeId id) {
+                return id != kNoBehavior && (types.has_behavior(vt, set, id) || types.has_behavior(vt, BehaviorSet::Generic, id));
+            };
+            const bool is_base = has(a) || has(b);
             const bool ally = vo >= 0 && vo != local_player && !cs.is_enemy(local_player, vo);
             base_hit = base_attacked(is_base, cs.is_enemy(d.source_owner, vo), vo, local_player, ally,
                                      ally && types.get_bool(vt, "Is_Community_Property"));

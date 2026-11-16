@@ -469,7 +469,7 @@ void test_save_load() {
 
     // Both continue (the loaded one on 4 threads): identical state every tick.
     const ParallelFor pf4 = alamo::test::make_thread_parallel_for(4);
-    uint32_t diverged = 0, shots = 0, deaths = 0;
+    uint32_t diverged = 0, shots = 0, deaths = 0, shot_links = 0;
     for (uint32_t i = 0; i < kAfter; ++i) {
         const uint32_t f = a.w.frame;
         a.script(f);
@@ -478,6 +478,16 @@ void test_save_load() {
         b.w.tick(pf4);
         shots += static_cast<uint32_t>(a.w.sys->shot_events().size());
         deaths += static_cast<uint32_t>(a.w.sys->deaths().size());
+        // aud1 t04: a shot's serial names the projectile it spawned (same shooter) while that projectile still flies, and
+        // a hardpoint shot names a valid CombatData::hardpoints entry.
+        for (const ShotEvent& e : a.w.sys->shot_events()) {
+            CHECK(e.hardpoint < 0 || static_cast<size_t>(e.hardpoint) < a.w.sys->data().hardpoints.size());
+            for (size_t pi = 0; pi < a.w.sys->projectile_count(); ++pi)
+                if (a.w.sys->projectile(pi).serial == e.serial) {
+                    CHECK(a.w.sys->projectile(pi).shooter == e.shooter);
+                    ++shot_links;
+                }
+        }
         if (combat_digest(*a.w.sys, a.w.rng) != combat_digest(*b.w.sys, b.w.rng) ||
             a.w.sys->deaths().size() != b.w.sys->deaths().size() ||
             a.w.sys->damage_events().size() != b.w.sys->damage_events().size()) {
@@ -487,6 +497,7 @@ void test_save_load() {
     }
     CHECK(diverged == 0);
     CHECK(shots > 0 && deaths > 0);  // the continuation really fought
+    CHECK(shot_links > 0);           // aud1 t04: shots were linked to their projectiles
     CHECK(combat_bytes(*a.w.sys) == combat_bytes(*b.w.sys));
     std::printf("combat save: %zu bytes at frame %u, %u ticks continued identically (%u shots, %u deaths)\n", saved.size(),
                 kBefore, kAfter, shots, deaths);

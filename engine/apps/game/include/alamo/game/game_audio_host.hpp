@@ -312,7 +312,8 @@ private:
     SimRng rng_;  // FREE: presentation only
     std::vector<std::string> speech_done_;  // ended speech events not taken yet
     std::map<objects::TypeIndex, std::unique_ptr<audio::UnitSounds>> sounds_;  // lookup only
-    uint8_t base_behaviors_[4] = {0, 0, 0, 0};  // aud1 t08: behaviour ids (land 2, space 2), resolved at init
+    uint8_t base_behaviors_[4] = {0, 0, 0, 0};  // aud1 t08: behaviour ids (land 2, space 2), resolved on first use
+    bool base_behaviors_ready_ = false;
     std::vector<std::string> player_factions_;  // aud1 t05: set_player_factions
     std::map<int32_t, std::string> hardpoint_fire_;  // aud1 t04: hardpoint desc index -> Fire_SFXEvent (lookup only)
     std::unordered_map<uint64_t, Vec3> positions_;                             // lookup only (never iterated)

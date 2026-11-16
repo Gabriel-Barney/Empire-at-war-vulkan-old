@@ -185,7 +185,6 @@ void GameAudio::enter_tactical(const TacticalSetup& setup) {
     environment_ = setup.environment;
     super_weapon_ = setup.super_weapon_present;
     weather_intensity_ = 0.0f;
-    weather_type_ = "CLEAR";
     base_announced_ = false;
     audio_->set_mode(land_ ? AudioMode::Land : AudioMode::Space);
     audio_->set_3d_scale(1.0f);
@@ -253,7 +252,6 @@ void GameAudio::set_weather(std::string_view weather, float intensity, bool loca
     // while the local player is not weather-affected (Weatherproof). 2D, unforced.
     const bool was_on = weather_intensity_ > 0.0f, on = intensity > 0.0f;
     weather_intensity_ = intensity;
-    weather_type_ = std::string(weather);
     if (!tactical_ || was_on == on || iequals(weather, "CLEAR") || !local_affected) return;
     if (const FactionAudio* f = data_->find_faction(faction_)) {
         const std::vector<std::string> v = f->pair_values(on ? "SFXEvent_Weather_Begin" : "SFXEvent_Weather_End", weather);
@@ -328,7 +326,9 @@ void GameAudio::stop_object_sfx(uint64_t object, std::string_view event, float f
 
 void GameAudio::combat(const CombatEvent& e) {
     if (!tactical_) return;
-    if (e.local_player_involved && !battle_over_) audio_->notify_combat(true);
+    // AUDIO.md §9.2: mode 16 (battle end) is not excluded from the battle switch, so combat after battle_end still
+    // switches to battle music (notify_combat applies the retail exclusion list).
+    if (e.local_player_involved) audio_->notify_combat(true);
     if (!e.local_base_attacked) return;
     const AudioConstants& c = audio_->database().constants();
     const int32_t delay_s = land_ ? c.delay_between_land_base_attack_announcement_seconds

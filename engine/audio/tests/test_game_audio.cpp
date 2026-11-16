@@ -571,11 +571,12 @@ void test_music_modes() {
     CHECK(a.music_mode() == music_mode::kTacticalBattle);
     g.sim_tick();
     CHECK(a.music_mode() == music_mode::kTacticalAmbient);
-    // Victory against the Empire: the _Vs_Faction row; combat no longer changes the music.
+    // Victory against the Empire: the _Vs_Faction row. aud1 (AUDIO.md §9.2): mode 16 is not excluded from the battle
+    // switch, so combat afterwards switches to battle music.
     g.battle_end({true, "Empire", false});
     CHECK(a.current_music() == "Win_Vs_Empire" && a.music_mode() == music_mode::kBattleEnd && a.music_mode() == 16);
     g.combat({true, false});
-    CHECK(a.current_music() == "Win_Vs_Empire");
+    CHECK(a.music_mode() == music_mode::kTacticalBattle);
     g.battle_end({false, "Hutts", false});
     CHECK(a.current_music() == "Lose");
     g.battle_summary_screen(true);

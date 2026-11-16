@@ -1530,7 +1530,9 @@ void TacticalBattle::complete_retreat(TacticalMode& mode, uint8_t side) {
         // battle host: retreat attrition victims stay to be killed at this tick's combat phase D (§4.9)
         if (std::find(bt_attrition_ids_.begin(), bt_attrition_ids_.end(), u.id) != bt_attrition_ids_.end()) continue;
         u.retreated = true;
-        if (space_ && mode.primary().alive(u.h))  // aud1 t05 (AUDIO.md §9.6, retreat jump-out 0x533ac0): presentation log
+        // aud1 t05 (AUDIO.md §9.6, retreat jump-out 0x533ac0): presentation log. A unit already in its Hyperspace_Away
+        // jump played its Depart at timer 90: no second one. [port] retail's obj +0x3a0 bit 0x40 / 0x80 skip is not modelled.
+        if (space_ && mode.primary().alive(u.h) && !l1_jumps_.departing(u.id))
             hyperspace_sfx_.push_back(
                 {HyperspaceSfx::Kind::Depart, u.id, u.type, mode.primary().owner(u.h), mode.primary().position(u.h)});
         hg_unit_removed(u.id);     // hangars / engine loops: the object leaves the battle

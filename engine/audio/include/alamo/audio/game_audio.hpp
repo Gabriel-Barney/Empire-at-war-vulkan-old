@@ -148,7 +148,8 @@ public:
     // otherwise the flag is read at the next mode switch, as retail reads it when it picks the event.
     void set_super_weapon_present(bool present, bool restart_music = false);
     bool super_weapon_present() const { return super_weapon_; }
-    // Battle / campaign end music (mode 16, forced); combat notifications stop changing music afterwards.
+    // Battle / campaign end music (mode 16, forced). Combat afterwards still switches to battle music (§9.2: 16 is not
+    // excluded); battle_over_ only stops the super-weapon restart.
     void battle_end(const BattleResult& result);
     // Battle-end summary dialog: Audio.xml Music_Event_Battle_End_Summary_Screen_<Win/Lose> (mode 16).
     void battle_summary_screen(bool won);
@@ -305,7 +306,6 @@ private:
     bool tactical_ = false, land_ = true, super_weapon_ = false, battle_over_ = false;
     std::string environment_;
     float weather_intensity_ = 0.0f;  // the last set_weather intensity (§9.3 crossing test)
-    std::string weather_type_ = "CLEAR";
     uint64_t sim_ticks_ = 0, last_base_announcement_ = 0;
     bool base_announced_ = false;
     bool enemy_sighted_vo_ = true;
