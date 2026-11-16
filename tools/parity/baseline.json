@@ -1,11 +1,16 @@
 {
- "commit": "75aeedf8",
+ "commit": "4385f8a0",
  "scenarios": {
   "geonosis_skirmish": {
    "references": [
     "20261030-062751-skirmish-vanilla-lua",
     "20261108-204213-skirmish-vanilla-lua",
-    "20261108-203639-skirmish-vanilla"
+    "20261108-203639-skirmish-vanilla",
+    "20261115-225742-skirmish-vanilla-lua",
+    "20261115-235429-skirmish-vanilla-lua",
+    "20261116-002920-skirmish-vanilla-lua",
+    "20261116-003415-skirmish-vanilla-lua",
+    "20261116-003910-skirmish-vanilla-lua"
    ],
    "status": {
     "ai.build_count[Empire]": "PASS",
@@ -13,7 +18,7 @@
     "ai.build_mix[Empire]": "PASS",
     "ai.build_mix[Rebel]": "PASS",
     "ai.first_build_frame[Rebel]": "FAIL",
-    "combat.damage_taken[Empire]": "FAIL",
+    "combat.damage_taken[Empire]": "PASS",
     "combat.damage_taken[Rebel]": "PASS",
     "combat.first_shot_frame": "PASS",
     "econ.credits_at_1800[Empire]": "PASS",
@@ -21,7 +26,7 @@
     "econ.credits_at_3600[Empire]": "PASS",
     "econ.credits_at_3600[Rebel]": "PASS",
     "econ.credits_at_5400[Empire]": "PASS",
-    "econ.credits_at_5400[Rebel]": "FAIL",
+    "econ.credits_at_5400[Rebel]": "PASS",
     "outcome.battle_ended": "PASS",
     "outcome.units_final[Empire]": "PASS",
     "outcome.units_final[Rebel]": "PASS",
@@ -37,12 +42,11 @@
      "PASS": 5
     },
     "damage": {
-     "FAIL": 1,
-     "PASS": 2
+     "PASS": 3
     },
     "income": {
-     "FAIL": 2,
-     "PASS": 4
+     "FAIL": 1,
+     "PASS": 5
     }
    }
   },
@@ -51,7 +55,12 @@
     "20261108-170824-galactic-vanilla-lua",
     "20261030-061228-galactic-vanilla-lua",
     "20261027-101057-galactic-vanilla",
-    "20261108-204711-galactic-vanilla-lua"
+    "20261108-204711-galactic-vanilla-lua",
+    "20261115-220422-galactic-vanilla-lua",
+    "20261115-221357-galactic-vanilla-lua",
+    "20261115-222352-galactic-vanilla-lua",
+    "20261115-223325-galactic-vanilla-lua",
+    "20261115-224259-galactic-vanilla-lua"
    ],
    "status": {
     "ai.build_count[Empire]": "PASS",
