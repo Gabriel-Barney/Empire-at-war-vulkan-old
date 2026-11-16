@@ -1,6 +1,6 @@
 # skai t22: early Rebel approach on Geonosis (space skirmish) — trace evidence
 
-Status: open (2026-11-16, lane skai-b). Retail plan records taken 2026-11-16 (section "Retail plan records"); RE questions in
+Status: open (2026-11-16, lane skai-b). Retail plan records taken 2026-11-16 (section "Retail plan records"; the hooks changed the AI's space play, so only their engine readings count); RE questions in
 `docs/re/SKAI_T22_RE_QUESTIONS.md`.
 
 ## Symptom
@@ -65,7 +65,15 @@ Empire, Rebellion Medium AI, 5400 ticks, all `ticks_reached`). Records of the Re
 | Tactical_Multiplayer_Build_Space_Units_Generic starts | 5 | 5 | 5 | 2.9 per run |
 | Build_Refinery_Space starts | 0 | 0 | 0 | 4.0 per run |
 
-- **Scout plans are short-lived.** One plan instance starts a new Space_Scout every 3.4-6.7 s (about 100-200 frames;
+- **The hooks changed the Rebel AI's space play, so these runs are not parity references.** Against the 8 unprobed
+  runs above: Empire `damage_taken` 196 / 302 / 215 (unprobed 0-124), Rebel `damage_taken` 1064 / 840 / 955 (75-550),
+  Rebel fighters reach CELL_0_0 at frame 2062 / 2087 / 2188 and never pad 40 (CELL_1_0, reached in all 8 unprobed runs),
+  13 X-wings lost from 58 s. No space plan ever came back from its first `BlockOnCommand` (no `PBLOCK` in about 130 plan
+  starts per run, while the same wrapper records `PBLOCK` in land plans, e.g. the menu battle's `Secure_Contestable`), so
+  the hooked space plan threads most likely stall or die in their first block (cause not found). Readings taken before
+  that block stand (the desire, `dfs` / `des`, the cell): they are engine perception values, read in the plan's first
+  instructions. The plan lifetimes below do not: they are probably the probe's effect.
+- **Scout plans are short-lived (probe-affected, see above).** One plan instance starts a new Space_Scout every 3.4-6.7 s (about 100-200 frames;
   the six pooled instances together every ~2 s), each with a new cell, and every start reports `prev=none` (the run before
   left no end record). Port scout plans run about 1000 frames (seed 2: plan 6 from frame 1071 to 2156). The desire is
   10 for nearly every pick (`d=10.0` / `9.99`; a few 7.5, 9.4, 5.4): the same tie the port sees. So retail scouts the
