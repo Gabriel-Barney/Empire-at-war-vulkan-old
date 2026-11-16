@@ -1227,10 +1227,21 @@ Q2T_DESIRE_TYPES = {
 }
 Q2T_DesireN = 0
 
+-- Only AI players: EvaluatePerception on a player without an AI (the idle human, Pirates) raises a binding error
+-- (LUA_API "EvaluatePerception ... nil versus 0"); the 2026-11-16 retail runs with that call ended early (one exit at
+-- frame 2545, no error recorded), so the human and Pirates are never evaluated.
+function Q2T_IsAiPlayer(p)
+	local ok, human = pcall(function() return p.Is_Human() end)
+	return ok and human == false
+end
+
 function Q2T_Desires()
 	for _, aname in ipairs(Q2T_FACTIONS) do
-		local ai = Find_Player(aname)
-		if ai then
+		local ai = nil
+		if aname ~= "Pirates" then
+			ai = Find_Player(aname)
+		end
+		if ai and Q2T_IsAiPlayer(ai) then
 			for _, ename in ipairs(Q2T_FACTIONS) do
 				local e = nil
 				if ename ~= aname then
