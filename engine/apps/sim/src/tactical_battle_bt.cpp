@@ -1793,6 +1793,11 @@ void TacticalBattle::bt_skirmish_base(TacticalMode& mode) {
         hg_spawn_off_ = skirmish_land() || skirmish_map();  // bkg3 b0028: copied from the pad
         bt_adopt_built(mode, bh, owner, 1.0f, bt_rng_);
         hg_spawn_off_ = false;
+        // skai t15 (SKAI_T15_TARGET_CHOICE Q5 [H]): the pad pre-builds its structure (0x42df80 -> 0x4f5950) before the
+        // skirmish start deletes and rebuilds the threat grid (0xeed80: 0x365540 / 0x3b86f0), and UNIT_AI registers once,
+        // so the structure stays out of every AI owner list (force sums, DistanceToNearest, Find_Nearest) all battle; its
+        // cells are projected again at its first service [M]. Structures built later register normally.
+        if (st.alive(bh)) st.set_flag(bh, objects::kFlagNoAiOwnerList);
         PadState* s = pad_state(st.id(ph), true);
         pads_mode_ = &mode;
         s->built = st.id(bh);

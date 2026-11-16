@@ -29,7 +29,7 @@ namespace {
 
 // 2: skirmish_or_mp, PerceptionObject::parent_object (A1_READINGS §30.3); 3 (cu12 t10): PerceptionObject::valid_bombing_target
 // removed (never read: IsValidBombingTarget is computed, A1_READINGS §21).
-constexpr uint32_t kPerceptionWorldVersion = 3;
+constexpr uint32_t kPerceptionWorldVersion = 4;  // 4: no_owner_list (skai t15)
 constexpr uint32_t kGridVersion = 1;
 constexpr uint32_t kCacheVersion = 1;
 constexpr uint32_t kPerceptionVersion = 1;
@@ -147,6 +147,7 @@ void put_object(ByteWriter& w, const PerceptionObject& o) {
     io::put_vec(w, o.contained_types);
     w.boolean(o.engines_online);
     w.boolean(o.dummy_ground_structure);
+    w.boolean(o.no_owner_list);
     w.boolean(o.dummy_star_base);
     w.i32(o.starbase_level);
     w.boolean(o.built_structure);
@@ -190,6 +191,7 @@ bool get_object(ByteReader& r, PerceptionObject& o) {
     if (!r.ok() || !io::get_vec(r, o.contained_types)) return false;
     o.engines_online = r.boolean();
     o.dummy_ground_structure = r.boolean();
+    o.no_owner_list = r.boolean();
     o.dummy_star_base = r.boolean();
     o.starbase_level = r.i32();
     o.built_structure = r.boolean();

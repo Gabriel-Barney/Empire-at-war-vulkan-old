@@ -98,6 +98,9 @@ struct SpawnParams {
 enum ObjectFlag : uint8_t {
     kFlagDead = 0x02,                // destroyed; unlinked at the next flush
     kFlagMarkedByChildMode = 0x04,   // a tactical counterpart died (parent-mode death marking)
+    // skai t15 (SKAI_T15_TARGET_CHOICE Q5 [H]): pre-built at the skirmish start (team pads, before the start deletes and
+    // rebuilds the threat grid); UNIT_AI never registers it again, so it is missing from every AI owner list all battle.
+    kFlagNoAiOwnerList = 0x08,
     // refix t01 (S9_DEATH_CLONE_SHIELDS.md §1.6 [H], AI_TACTICAL.md §2, L1_S4_REMAINING.md): +0x3a0 bit 0x40 = dying /
     // dead state (Die sets it; death clones are created with it), bit 0x80 = removing. A death clone gets both (0xc0).
     // Such an object still exists and is alive() (it is drawn and runs its death sequence), but gameplay searches skip

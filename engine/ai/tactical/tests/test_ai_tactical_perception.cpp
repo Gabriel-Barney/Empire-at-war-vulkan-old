@@ -437,6 +437,7 @@ struct Fixture {
         PerceptionObject barracks = make_obj(17, 0, kBarracks, O - 100.0f, O + 20.0f, 50.0f, 0.0f);
         barracks.built_structure = true;
         barracks.dummy_ground_structure = true;
+        barracks.no_owner_list = true;  // skai t15: pre-built at the start (out of the grid owner list)
         w.objects.push_back(barracks);
         w.objects[0].zone = 2;
         w.objects[1].zone = 2;

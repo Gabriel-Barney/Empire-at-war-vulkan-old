@@ -1611,6 +1611,7 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
         }
         // t48: Variable_Self.BaseLevel in land skirmish: the count of P's alive objects with this behaviour.
         o.dummy_ground_structure = kDummyGroundStructure != objects::kNoBehavior && st.has_behavior(h, kDummyGroundStructure);
+        o.no_owner_list = (st.flags(h) & objects::kFlagNoAiOwnerList) != 0;  // skai t15 (SKAI_T15_TARGET_CHOICE Q5)
         // skai: TacticalBuiltStructureCount's free-store table of built structures (0x4d3630) [M]: the finished structures on
         // build pads (pre-built skirmish base included). Unset, Num_Refineries stayed 0 and the land skirmish AI never bought units.
         o.built_structure = std::binary_search(pad_built.begin(), pad_built.end(), id);

@@ -222,6 +222,10 @@ struct GoalSystemConfig {
     // treated as kept or active and always released. [port] Only the tactical space AI sets it so far (lane skai-b: land
     // and galactic goldens are other lanes'; follow-ups on the roadmap).
     bool reaccept_old_candidates = false;
+    // skai t15 (SKAI_T15_TARGET_CHOICE Q3, 0x7222c0 [H]): Commit step 1 writes the re-evaluated desire only when the
+    // evaluation succeeds; a failed one keeps the incumbent's old desire. Off: a failed evaluation sets it to 0. [port] Only
+    // the tactical land AI sets it so far (the same function serves space and galactic: their lanes' goldens, follow-ups).
+    bool keep_desire_on_failed_eval = false;
 };
 
 class GoalSystem {

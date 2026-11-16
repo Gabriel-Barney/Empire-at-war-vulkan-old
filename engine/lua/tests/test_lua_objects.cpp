@@ -447,13 +447,14 @@ static std::string ids_of(LuaVm& vm, const std::string& args) {
     const std::string err = run(vm, code);
     return err.empty() ? gstr(vm, "ids") : "error: " + err;
 }
-// b0422 / skai t12 (B0418_UTAPAU_AI_RUNS s8, SKAI_T06_LAND_RUNS s7): Find_Nearest skips DUMMY_GROUND_STRUCTURE objects (the
-// pre-placed base is not in the perception grid list it walks), so BurnUnitsLand's Find_Nearest(tf, "InBase", ...) finds a
-// pad-built structure but never the base, and the plain enemy search passes over the base to the next unit.
+// b0422 / skai t12 (B0418_UTAPAU_AI_RUNS s8, SKAI_T06_LAND_RUNS s7), skai t15 (SKAI_T15_TARGET_CHOICE Q5): Find_Nearest skips
+// the structures pre-built at the skirmish start (kFlagNoAiOwnerList: not in the perception grid owner list it walks), so
+// BurnUnitsLand's Find_Nearest(tf, "InBase", ...) finds a pad-built structure but never the start base, and the plain enemy
+// search passes over the base to the next unit. The same base type built later is found.
 static void test_find_nearest_base(const Db& db) {
     Scene s(db);
     LuaVm& vm = *s.vm;
-    make(s.store, db.t("Base_Factory"), 2, {1, 0, 0});
+    s.store.set_flag(make(s.store, db.t("Base_Factory"), 2, {1, 0, 0}), objects::kFlagNoAiOwnerList);
     CHECK(run(vm, "b1 = Find_Nearest(t1, p1, false).Get_Object_ID() "     // the tank @5, not the base @1
                   "b2 = tostring(Find_Nearest(t1, 'InBase', p1, false)) "  // only the base is InBase: nothing
                   "b3 = tostring(Find_Nearest(t1, 'Structure'))") == "");
@@ -461,6 +462,9 @@ static void test_find_nearest_base(const Db& db) {
     const objects::ObjectHandle turret = make(s.store, db.t("Pad_Turret"), 2, {8, 0, 0});
     CHECK(run(vm, "b4 = Find_Nearest(t1, 'InBase', p1, false).Get_Object_ID()") == "");
     CHECK(gnum(vm, "b4") == static_cast<double>(s.store.id(turret)));
+    const objects::ObjectHandle rebuilt = make(s.store, db.t("Base_Factory"), 2, {6, 0, 0});  // built in battle: listed
+    CHECK(run(vm, "b5 = Find_Nearest(t1, 'InBase', p1, false).Get_Object_ID()") == "");
+    CHECK(gnum(vm, "b5") == static_cast<double>(s.store.id(rebuilt)));
 }
 
 static void test_find_filters(const Db& db) {

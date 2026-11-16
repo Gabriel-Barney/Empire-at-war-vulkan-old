@@ -114,6 +114,7 @@ struct PerceptionObject {
     bool engines_online = true;            // [L]
     // player-token inputs
     bool dummy_ground_structure = false;   // behaviour 0x5F (BaseLevel, land skirmish)
+    bool no_owner_list = false;            // skai t15: pre-built at the skirmish start, never in the grid owner lists
     bool dummy_star_base = false;          // behaviour 0x5C (BaseLevel, space)
     int32_t starbase_level = 0;            // 0x397540
     bool built_structure = false;          // counted by TacticalBuiltStructureCount (free-store table) [M]
