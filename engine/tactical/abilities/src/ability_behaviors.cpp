@@ -616,7 +616,12 @@ void AbilitySystem::h_deploy(Obj& o, bool on, uint32_t frame) {
     // 0x3a1ce0 [H flow, M names]: the unit stops; on -> deploy (DeployedBehavior, host), off -> undeploy. No countdown.
     const bool ok = team_gates(o, kDeploy, frame);
     if (on && !ok) return;
-    stop_order(o.id, frame, kStopAdopt);  // cu8j t02: 0x3a1ce0 adopts (return 0x3a1f81, MOVEMENT §4.7.2)
+    // skai t19 (SKAI_T19_MDU_DEPLOY_BLOCK §1 [H]): 0x3a1ce0 first leaves every coordinator (0x426d50 -> vf4 0x4f7d30: the
+    // unit's formation membership and its land attack block stay with the old formation), then adopts (0x39bcb0, one
+    // ctor draw; return 0x3a1f81, MOVEMENT §4.7.2), both directions, before Walk Deploy. That is the stop-and-hold; the
+    // earlier stop + adopt (kStopAdopt, cu8j t02) left a formation member in its formation, whose re-plan then undeployed
+    // a Mobile Defense Unit before its Build.
+    stop_order(o.id, frame, kStopHold);
     // TRU1 t03 (MOVEMENT §3.2 "Deploy(true)", docs/re/TRU1_GRAVITY_FIELD.md): the Walk locomotor refuses to start a deploy
     // while the unit is in a gravity control field (obj +0x3a1 bit 0x40); the stop above still happened. With a movement
     // host the locomotor refuses it too (MovementSystem deploy_block, every route); this copy covers the host-less path.

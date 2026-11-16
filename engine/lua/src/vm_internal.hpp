@@ -273,6 +273,10 @@ int32_t to_int(double d);
 // function, or a global function NAME resolved when GetEvent pops it) with the table at
 // `params_index` as its GetEvent.Params() (0 = no parameters). bind_engine.cpp.
 void queue_event(lua_State* L, int fn_index, int params_index);
+// skai t15 (SKAI_T15_UNIT_DAMAGED §2.2): the same with a tag kept on the entry (field 3), and whether an entry with that
+// tag is still waiting (not yet popped by GetEvent).
+void queue_event_tagged(lua_State* L, int fn_index, int params_index, const std::string& tag);
+bool queue_has_tag(lua_State* L, const std::string& tag);
 
 // BlockingStatus kinds (Ud::reserved of a BlockingStatus userdata; BlockOnCommand polls IsFinished):
 // 0 order / 1 reinforcement / 2 forever are answered by bind_objects.cpp; the galactic waits by the

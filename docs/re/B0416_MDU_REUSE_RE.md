@@ -179,7 +179,10 @@ frame `Build` succeeds, and the hand-over gate keeps an unreserved unit away fro
 - Whether `Release_Forces` at plan end calls the land admission 0x690a10 directly or another insert path [M].
 - Whether the two MDUs of one dropped company both join the dropping task force before it exits [M]; either way both
   end on the free store.
-- What stops a free, empty MDU that the free store is marching toward the enemy when a plan takes it: the DEPLOY gate
+- (skai t19, `SKAI_T19_MDU_DEPLOY_BLOCK.md` Q1 [H]: 0x3a1ce0 does **not** refuse a moving locomotor; vf +0x2b0 is the
+  hyperspace-state test, and DEPLOY leaves the march's coordinator, adopts and stops the MDU. The rest of this bullet
+  rests on the old reading.)
+  What stops a free, empty MDU that the free store is marching toward the enemy when a plan takes it: the DEPLOY gate
   refuses a moving locomotor (0x3a1ce0) and the block then waits for 0xb / 0x29 / 0x10; a `Build` after an unrelated
   0xb would be the "not a valid build location" error of B0173_DEPLOYED_BEHAVIOR_RE Q5, a different message. Not
   traced here.

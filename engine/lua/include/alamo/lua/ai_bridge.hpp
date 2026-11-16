@@ -232,9 +232,11 @@ struct AiEventArg {
     AiTaskForceKind tf_kind = AiTaskForceKind::Galactic;
     uint32_t type = 0xFFFFFFFFu;  // Type: GameObjectTypeWrapper of this type index (out of range -> nil; q6 t09)
 };
+// `coalesce` (skai t15, SKAI_T15_UNIT_DAMAGED §2.2, queued only): the event is dropped, returning true, while one of the
+// same name for the same task force is still waiting in the queue.
 bool dispatch_task_force_event(LuaVm& vm, int32_t tf, AiTaskForceKind kind, std::string_view tf_name,
                                std::string_view event, const std::vector<AiEventArg>& args, bool queued,
-                               std::string* err = nullptr);
+                               std::string* err = nullptr, bool coalesce = false);
 // Calls the global function `name` with args (protected, not as a thread). False when missing / on error.
 bool call_global_function(LuaVm& vm, std::string_view name, const std::vector<AiEventArg>& args,
                           std::string* err = nullptr);

@@ -523,6 +523,34 @@ void detail::queue_event(lua_State* L, int fn_index, int params_index) {
     lua_pop(L, 1);
 }
 
+void detail::queue_event_tagged(lua_State* L, int fn_index, int params_index, const std::string& tag) {
+    queue_event(L, fn_index, params_index);
+    push_event_queue(L);
+    const int q = lua_gettop(L);
+    lua_rawgeti(L, q, static_cast<int>(queue_field(L, q, "t")));  // the entry just appended
+    lua_pushlstring(L, tag.data(), tag.size());
+    lua_rawseti(L, -2, 3);
+    lua_pop(L, 2);
+}
+
+bool detail::queue_has_tag(lua_State* L, const std::string& tag) {
+    push_event_queue(L);
+    const int q = lua_gettop(L);
+    const double h = queue_field(L, q, "h"), t = queue_field(L, q, "t");
+    bool found = false;
+    for (double i = h; i <= t && !found; i += 1.0) {
+        lua_rawgeti(L, q, static_cast<int>(i));
+        if (lua_type(L, -1) == LUA_TTABLE) {
+            lua_rawgeti(L, -1, 3);
+            found = lua_type(L, -1) == LUA_TSTRING && tag == std::string(lua_tostring(L, -1), lua_strlen(L, -1));
+            lua_pop(L, 1);
+        }
+        lua_pop(L, 1);
+    }
+    lua_pop(L, 1);
+    return found;
+}
+
 void detail::reset_event_queue(lua_State* L) {
     for (const char* key : {kEventQueueKey, kEventParamsKey}) {
         lua_pushstring(L, key);

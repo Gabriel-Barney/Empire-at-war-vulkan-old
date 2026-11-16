@@ -813,11 +813,13 @@ void set_objectless_global(LuaVm& vm, std::string_view name) {
 
 bool dispatch_task_force_event(LuaVm& vm, int32_t tf, AiTaskForceKind kind, std::string_view tf_name,
                                std::string_view event, const std::vector<AiEventArg>& args, bool queued,
-                               std::string* err) {
+                               std::string* err, bool coalesce) {
     lua_State* L = vm.state();
     LuaVm::Impl* impl = impl_of(L);
     if (!impl || impl->exit_requested) return false;
     const int top = lua_gettop(L);
+    const std::string tag = coalesce ? std::to_string(tf) + ":" + std::string(event) : std::string();
+    if (coalesce && queued && detail::queue_has_tag(L, tag)) return true;
     std::string handler = std::string(tf_name) + "_" + std::string(event);
     if (!push_global_function(L, handler)) {
         handler = "Default_" + std::string(event);
@@ -833,7 +835,8 @@ bool dispatch_task_force_event(LuaVm& vm, int32_t tf, AiTaskForceKind kind, std:
             push_arg(L, *impl, a);
             lua_rawseti(L, -2, ++n);
         }
-        detail::queue_event(L, fn, lua_gettop(L));
+        if (coalesce) detail::queue_event_tagged(L, fn, lua_gettop(L), tag);
+        else detail::queue_event(L, fn, lua_gettop(L));
         lua_settop(L, top);
         return true;
     }

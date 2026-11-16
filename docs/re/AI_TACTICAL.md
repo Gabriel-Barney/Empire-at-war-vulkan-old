@@ -571,6 +571,8 @@ a block regardless) **stays pending until the unit gets a new order (0xb), any a
 dies (0x10)**. An object-target block whose pending ability never fires (target died before the unit got in range)
 likewise waits for one of the three [M: the pending-ability clear path on target death was not traced].
 
+**skai t19 (2026-11-16), see `docs/re/SKAI_T19_MDU_DEPLOY_BLOCK.md` Q1**: the TARGETING stop below is on the **off** path only; on = leave every coordinator, adopt (arrived position-block formation, no plan), then `Deploy(true)`. Locomotor vf +0x2b0 is the hyperspace-state test (Walk 0x42c640), not "moving". [H]
+
 **3. DEPLOY and 0x29** [H]. Only the Walk locomotor implements deploy (locomotor vf +0x118 = 0x61d300 in
 `WalkLocomotorBehaviorClass`; every other locomotor class has the empty 0x1fa90). FoC deployers (the three Mobile
 Defense Units, `Deploys` yes, `WALK_LOCOMOTOR`) therefore:
