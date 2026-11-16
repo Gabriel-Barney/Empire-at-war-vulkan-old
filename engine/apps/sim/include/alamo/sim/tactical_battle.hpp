@@ -1223,6 +1223,23 @@ public:
     int32_t retreating_player() const {
         return retreat_side_ >= 0 && !retreat_complete_ ? side_player(static_cast<uint8_t>(retreat_side_)) : -1;
     }
+    // TRU1 t06 (presentation / tests): the space retreat coordinator's flight state (0 none, 2 jump-out, 4 waiting for
+    // the cinematic), its cinematic counter, the retreat list in flight order and the release cursor.
+    uint8_t retreat_flight_state() const { return rt_.state; }
+    int32_t retreat_flight_counter() const { return rt_.counter; }
+    std::span<const objects::ObjectId> retreat_flight_list() const { return rt_.list; }
+    int32_t retreat_flight_released() const { return rt_.state == 2 && rt_.counter >= 30 ? rt_.release : -1; }
+    // TRU1 t05 / t07 (tests, presentation): the indigenous spawners (global list order) with their activation state and
+    // live spawned objects; a debris piece's expiry frame (0 = never, -1 = not a tracked debris piece).
+    size_t indigenous_spawner_count() const { return sp_spawners_.size(); }
+    objects::ObjectId indigenous_spawner_id(size_t i) const { return sp_spawners_[i].id; }
+    int32_t indigenous_spawner_state(size_t i) const { return sp_spawners_[i].state; }
+    std::span<const objects::ObjectId> indigenous_spawned(size_t i) const { return sp_spawners_[i].spawned; }
+    int64_t debris_expiry(objects::ObjectId id) const {
+        for (const DebrisPiece& d : sp_debris_)
+            if (d.id == id) return d.expiry;
+        return -1;
+    }
     // --- end OI host ---
     // --- P4 sim (owner: galactic agent): the retreat dialog's Autoresolve (BT §4.5, P4_SIM_SYSTEMS §9.3): gated like a
     // retreat request of `player` (a side, retreat allowed, none running, not finished); finishes the battle with
@@ -1474,6 +1491,49 @@ private:
     void issue_orders(TacticalMode& mode, SimRng& rng);
     void retreat_policy();
     void complete_retreat(TacticalMode& mode, uint8_t side);
+    // --- TRU1 t06: space retreat jump-out flight (TRU1_C_RE §2; tactical_battle_retreat.cpp) ---
+    // Coordinator states 2 (jump-out) and 4 (waiting for the retreat cinematic) between the countdown end and
+    // complete_retreat (state 3). The cinematic camera's frame counter times the flight; [port] it runs one step per
+    // tactical frame from the countdown end, active whenever the battle is space and In_Game_Cinematics is set.
+    struct RetreatFlight {
+        uint8_t state = 0;            // 0 none (or done), 2 jump-out, 4 waiting
+        int32_t counter = 0;          // cinematic frame counter (+0x154)
+        int32_t release = 0;          // release cursor (+0x60): list index of the last released unit
+        int32_t sound = 0;            // sound cursor (+0x6c)
+        int32_t wait = 0;             // frames until the next release (+0x68)
+        Vec3 dir{-1.0f, 0.0f, 0.0f};  // flight direction: opposite the ATTACKER ENTRY POSITION marker's facing
+        std::vector<objects::ObjectId> list;  // retreat list in flight order (dead units keep their slot)
+    };
+    RetreatFlight rt_;
+    bool rt_begin_flight(TacticalMode& mode, uint8_t side);  // countdown end: false = no flight (complete at once)
+    bool rt_flight_tick(TacticalMode& mode);                 // one coordinator update in state 2 / 4: true = done
+    void rt_move(TacticalMode& mode, objects::ObjectId id, float step);
+    bool rt_listed(objects::ObjectId id) const;
+    bool bt_attacker_entry(Vec3& pos, Vec3& facing) const;  // first Attacker Entry Position marker (map order)
+    // --- TRU1 t05 / t07: SPAWN_INDIGENOUS_UNITS and DEBRIS (TRU1_C_RE §1 / §3; tactical_battle_spawners.cpp) ---
+    struct IndigenousSpawner {
+        objects::ObjectId id = objects::kNoObjectId;
+        int8_t state = -1;     // chance activation: -1 undecided, 0 off, 1 on
+        uint32_t next = 0;     // next spawn frame (mode frame)
+        std::vector<objects::ObjectId> spawned;  // its live spawned objects, spawn order
+    };
+    struct DebrisPiece {
+        objects::ObjectId id = objects::kNoObjectId;
+        objects::ObjectId particle = objects::kNoObjectId;  // the Debris_Attached_Particle object (kNoObjectId: none)
+        uint32_t expiry = 0;   // mode frame of the expiry, 0 = never
+        float roll = 0.0f, pitch = 0.0f, yaw = 0.0f;  // orientation angles (degrees), obj +0x84 / +0x88 / +0x8c
+    };
+    std::vector<IndigenousSpawner> sp_spawners_;  // the global spawner list, attach order ([port] ascending id)
+    std::vector<DebrisPiece> sp_debris_;          // ascending id
+    objects::ObjectId sp_scanned_ = 0;            // highest object id already looked at for the two behaviours
+    bool sp_used_ = false;
+    void sp_add_types();                          // setup: the spawned types of the map's spawners join the tables
+    void sp_tick(TacticalMode& mode, SimRng& rng);  // per tick: register new objects, debris services, spawner services
+    void sp_activate(const TacticalMode& mode, SimRng& rng, size_t index);
+    void sp_service(TacticalMode& mode, SimRng& rng, size_t index);
+    objects::ObjectHandle sp_spawn_one(TacticalMode& mode, SimRng& rng, objects::ObjectHandle spawner, const Vec3* centre);
+    int32_t sp_place(TacticalMode& mode, objects::ObjectHandle h, Vec3 p);  // 0 placed, 1 blocked, 2 no place
+    void sp_debris_expire(TacticalMode& mode, SimRng& rng, const DebrisPiece& d);
     // --- story t06: victory monitor (tactical_battle_victory.cpp) ---
     struct VmRecord {
         uint8_t type = 0;

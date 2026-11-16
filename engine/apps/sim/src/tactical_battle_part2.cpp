@@ -1518,7 +1518,7 @@ void TacticalBattle::complete_retreat(TacticalMode& mode, uint8_t side) {
     // [port] land keeps its old rule (structures stay); units with destroyed engines still count as retreatable.
     if (space_) {
         for (const Unit& u : units_) {
-            if (u.side != side || !u.alive || u.retreated || u.movable) continue;
+            if (u.side != side || !u.alive || u.retreated || u.movable || rt_listed(u.id)) continue;  // TRU1 t06: flown out
             if (std::find(bt_attrition_ids_.begin(), bt_attrition_ids_.end(), u.id) == bt_attrition_ids_.end()) {
                 bt_attrition_ids_.push_back(u.id);
                 bt_used_ = true;
@@ -1530,11 +1530,8 @@ void TacticalBattle::complete_retreat(TacticalMode& mode, uint8_t side) {
         // battle host: retreat attrition victims stay to be killed at this tick's combat phase D (§4.9)
         if (std::find(bt_attrition_ids_.begin(), bt_attrition_ids_.end(), u.id) != bt_attrition_ids_.end()) continue;
         u.retreated = true;
-        // aud1 t05 (AUDIO.md §9.6, retreat jump-out 0x533ac0): presentation log. A unit already in its Hyperspace_Away
-        // jump played its Depart at timer 90: no second one. [port] retail's obj +0x3a0 bit 0x40 / 0x80 skip is not modelled.
-        if (space_ && mode.primary().alive(u.h) && !l1_jumps_.departing(u.id))
-            hyperspace_sfx_.push_back(
-                {HyperspaceSfx::Kind::Depart, u.id, u.type, mode.primary().owner(u.h), mode.primary().position(u.h)});
+        // aud1 t05 / TRU1 t06 (AUDIO.md §9.6, TRU1_C_RE §2.3): the jump sound plays when the flight releases the unit
+        // (rt_flight_tick), not here; without the retreat cinematic nothing flies and no jump sound plays.
         hg_unit_removed(u.id);     // hangars / engine loops: the object leaves the battle
         abilities_->remove(u.id);  // combat unit removed too
         if (u.movable) movement_->remove_unit(u.id);
@@ -1546,10 +1543,12 @@ void TacticalBattle::complete_retreat(TacticalMode& mode, uint8_t side) {
         if (u.tracked) damage_tracking_.disable(u.id);
 #endif
         unit_gone(mode, u);
-        // [port] with an end hold the map stays on screen: the ship is gone (no jump-out flight yet), not left frozen there.
+        // [port] with an end hold the map stays on screen: the ship is gone (it flew out during the jump-out flight, or
+        // there was none), not left frozen there.
         if (cfg_.end_hold_frames > 0) mode.destroy(u.h);
     }
     retreat_complete_ = true;
+    rt_.state = 0;                           // TRU1 t06: coordinator state 3 (the list stays for rt_listed until reset)
     vm_retreat_complete(side_player(side));  // story t06: 0x340750 (holds released, 0xc tested)
 }
 

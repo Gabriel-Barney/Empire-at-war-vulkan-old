@@ -72,6 +72,8 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
       sim/src/tactical_battle_oi_abilities.cpp  # OI abilities: ability host side (owner: abilities agent)
       sim/src/tactical_battle_save.cpp       # N1 stage 2 (owner: n2-host): battle save / load
       sim/src/tactical_battle_clash.cpp      # s78n t06: land hero clashes (HERO_CLASH.md)
+      sim/src/tactical_battle_retreat.cpp    # TRU1 t06: space retreat jump-out flight (TRU1_C_RE §2)
+      sim/src/tactical_battle_spawners.cpp   # TRU1 t05 / t07: indigenous spawners, debris (TRU1_C_RE §1 / §3)
       sim/src/fleet_groups.cpp               # [port] fleet groups, phase 1 (docs/DECISIONS.md)
       # Hangars / station upgrade / engine-loop requests (docs/re/STATION_HANGARS_SOUND.md): engine/tactical/hangar.
       sim/src/tactical_battle_hangar.cpp
@@ -152,6 +154,11 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
     target_compile_definitions(alamo_sim_l1_tests PRIVATE "ALAMO_SIM_TESTDATA=\"${CMAKE_CURRENT_SOURCE_DIR}/sim/testdata\"")
     add_test(NAME alamo_sim_l1_tests COMMAND alamo_sim_l1_tests)
     set_tests_properties(alamo_sim_l1_tests PROPERTIES TIMEOUT 600)
+    # TRU1 t05 / t06 / t07: indigenous spawners, space retreat jump-out flight, breakoff debris (TRU1_C_RE).
+    add_executable(alamo_sim_tru1_tests sim/tests/test_battle_tru1.cpp)
+    target_link_libraries(alamo_sim_tru1_tests PRIVATE alamo_sim alamo_vfs alamo_test_support)
+    add_test(NAME alamo_sim_tru1_tests COMMAND alamo_sim_tru1_tests)
+    set_tests_properties(alamo_sim_tru1_tests PROPERTIES TIMEOUT 600)
     # --- end L1 systems ---
   endif()
 
