@@ -282,8 +282,8 @@ void TacticalBattle::build_service_graph() {
     lap("tac.events");
 
     // ---- services ---------------------------------------------------------------------------------------------------
-    g.add("hangars", kAll, kAll, [this] { hg_tick(*tick_.mode, *tick_.rng); });
-    g.add("spawners", kAll, kAll, [this] { sp_tick(*tick_.mode, *tick_.rng); });  // TRU1 t05 / t07: indigenous spawners, debris  // hangars: SPAWN_SQUADRON services, launches
+    g.add("hangars", kAll, kAll, [this] { hg_tick(*tick_.mode, *tick_.rng); });  // hangars: SPAWN_SQUADRON services, launches
+    g.add("spawners", kAll, kAll, [this] { sp_tick(*tick_.mode, *tick_.rng); });  // TRU1 t05 / t07: indigenous spawners, debris
     // cu8k t01: Saber_Throw throws / SWORD_CONTROL / SWORD_CATCH (after the saber's step)
     g.add("saber_throw", kAll, kAll, [this] { saber_throw_service(*tick_.mode); });
     // cu8g t01: HOLSTER_WEAPON (engine-loop suppression, draw / holster SFX requests)
