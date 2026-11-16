@@ -354,12 +354,16 @@ end
 function SweepForce_Thread()
   SweepForce.Add_Opportunity_Fire_Event_Subscription("HARD_POINT_WEAPON_LASER")
   BlockOnCommand(SweepForce.Produce_Force())
-  while (OppHits or 0) < 2 do Sleep(1) end
+  while (OppHits or 0) < 2 or (DmgHits or 0) < 1 do Sleep(1) end
   SweepForce.Set_Plan_Result(true)
   ScriptExit()
 end
 function SweepForce_Hardpoint_Opportunity_Target_Acquired(tf, unit, target)
   if TestValid(unit) and TestValid(target) then OppHits = (OppHits or 0) + 1 end
+end
+-- skai t15: plan event 14 Unit_Damaged(tf, unit, attacker, deliberate)
+function SweepForce_Unit_Damaged(tf, unit, attacker, deliberate)
+  if TestValid(unit) and TestValid(attacker) and deliberate == true then DmgHits = (DmgHits or 0) + 1 end
 end
 )";
 // Variants 5-7 (the S7 plans): no escort plan. Since a1g t01 (free-store reservations at accept) the escort's Lead /
@@ -1006,6 +1010,22 @@ public:
         }
         return out;
     }
+    // skai t15 variant: every 30 frames each Empire corvette reports two deliberate hits from the nearest Rebel unit (the
+    // second one is dropped while the first is still queued for its task force).
+    std::vector<UnitDamagedSignal> unit_damaged_signals() override {
+        std::vector<UnitDamagedSignal> out;
+        if (!emit_opportunity || ++dmg_frame % 30 != 0) return out;
+        for (const MockUnit& u : units_) {
+            if (u.owner != 0 || u.type != tCorvette) continue;
+            const MockUnit* best = nullptr;
+            for (const MockUnit& e : units_)
+                if (e.owner == 1 && e.type != tPad && (!best || dist(u, e) < dist(u, *best))) best = &e;
+            if (!best) continue;
+            out.push_back({u.id, best->id, true});
+            out.push_back({u.id, best->id, true});
+        }
+        return out;
+    }
     // AI_GALACTIC_3 §4.3 tactical HIJACK: the "parent galactic mode" spawns into the pool (keys from 5001).
     TacticalReinforcement hijack_unit(int32_t player, int32_t type, bool steal) override {
         hijacks.push_back("p" + std::to_string(player) + " type " + std::to_string(type) + (steal ? " steal" : ""));
@@ -1093,6 +1113,7 @@ public:
         locked = o.locked;
         built = o.built;
         opp_frame = o.opp_frame;
+        dmg_frame = o.dmg_frame;
         hijacks = o.hijacks;
         released = o.released;
         calls = o.calls;
@@ -1112,6 +1133,7 @@ public:
     uint32_t drop_tests = 0;
     uint32_t built = 0;
     uint32_t opp_frame = 0;
+    uint32_t dmg_frame = 0;  // skai t15
     std::vector<std::string> hijacks;
     std::vector<std::tuple<int32_t, int32_t, int32_t>> released;  // (player, object id, UnitRelease)
     std::vector<std::tuple<uint32_t, int32_t, int32_t>> calls;     // a1k t01: (frame, object id, 0 left task force | 1 + UnitRelease)
@@ -1464,6 +1486,14 @@ void test_opportunity_and_hijack() {
     for (size_t i = 0; i < r.errors.size() && i < 5; ++i) std::printf("  lua error: %s\n", r.errors[i].c_str());
     CHECK(r.errors.empty());
     CHECK(opp > 0);       // laser acquisitions of TF members raise plan event 17 (torpedo ones are not subscribed)
+    // skai t15 (SKAI_T15_UNIT_DAMAGED): a TF member's damage queues plan event 14, at most one waiting per task force
+    size_t raised = 0;
+    for (const auto& [k, v] : r.stats)
+        if (k.rfind("event Unit_Damaged", 0) == 0) raised += v;
+    const size_t swept = count("SYNSWEEP ended success");
+    std::printf("unit damaged: %zu raised, %zu sweep plans ended after a handled one\n", raised, swept);
+    CHECK(raised > 0);
+    CHECK(swept > 0);  // the sweep plan waits for a handled Unit_Damaged before it ends with success
     CHECK(hijacked > 0);  // the MagicPlan's Corvette came through the host's HIJACK hook
     bool reinforced = false;
     for (const std::string& e : r.executed) reinforced = reinforced || (e.find("p0 Reinforce key 50") != std::string::npos);
