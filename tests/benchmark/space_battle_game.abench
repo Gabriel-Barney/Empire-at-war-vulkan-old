@@ -1,16 +1,16 @@
 ALAMO_BENCH 2
 name space_battle_game
-version 42
+version 43
 description One large game-made space battle for rendered runs: _MP_SPACE_KUAT, an idle Empire fleet against the Rebel AI, both with six times the default fleets (the AI side attacks and keeps reinforcing), saved with the fleets about to meet, then 1 min of battle under a camera that circles the fight
 make --bench-map _MP_SPACE_KUAT --bench-human Empire --bench-ai Rebel --bench-scale 6 --bench-save-after 1000 --bench-seed 1
 save space_battle_game.alsv 305891 c4d49edc7ad84d51
 orders space_battle_game.acmd 72 b8cf96f66bd36b2f
-fingerprint space_battle_game.crc 31247 ebcb793a714b1381
+fingerprint space_battle_game.crc 31247 ff14e04cd9e096af
 fingerprint_every 16
 start_tick 1022
 ticks 1800
 workers auto
-final_crc 3706ef3ee21ba8a6
+final_crc 9ca07038f43bedbb
 host game
 mode fixed
 preset bm-high
