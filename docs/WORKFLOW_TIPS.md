@@ -44,7 +44,7 @@ Shapes that miss every rule, and what to use instead:
   scratchpad; these still go to the classifier in `auto` mode and ask in `default` mode.
 
 Still asks on purpose (`ask` / `deny` in `.claude/settings.json`): `tc.cmd frida*` / `TTD*` and `tools\re\ttd_record.cmd`
-(attach to or record processes; UAC), pushes to `main` and `gh pr merge` (`main` is Gabriel's release), force pushes and bare
+(attach to or record processes; UAC), `tc.cmd cmake*` / `ninja*` / `cargo*` (builds go through the build scripts), pushes to `main` and `gh pr merge` (`main` is Gabriel's release), force pushes and bare
 `git stash` (never allowed).
 
 A prompt that keeps coming back: name it in the lane's friction line; `/retro` (or the built-in `fewer-permission-prompts` skill,
