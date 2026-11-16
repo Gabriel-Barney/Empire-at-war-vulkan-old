@@ -377,6 +377,12 @@ void App::route_commands(std::vector<commands::EventData>& cmds, std::span<const
             ++hidden_moves_dropped_;
             continue;
         }
+        // STY1 t03 (STY1_GENERIC_AUTOSAVE.md §1.2): the local player's HUD retreat press / fleet merge / land-to-space drop
+        if (e.type() == commands::EventType::Retreat && screen_ == Screen::Battle) story_ui_.generic("retreat_clicked");
+        if (screen_ == Screen::Galactic && e.type() == commands::EventType::FleetManagement) {
+            if (e.u("op") == commands::kFleetMerge) story_ui_.generic("merge_fleets");
+            else if (e.u("op") == commands::kFleetLaunch) story_ui_.generic("land_to_space");
+        }
         if (e.type() == commands::EventType::Retreat && screen_ == Screen::Battle && !ui_.gui.find(ui::dlg::kRetreat)) {
             screens_.show_retreat_confirm();
             continue;
@@ -602,6 +608,7 @@ void App::handle_hud_actions(const std::vector<ui::HudAction>& acts) {
                 if (session_ && !panel_preview_) session_->buy_black_market(a.unit);
                 break;
             case ui::HudAction::Kind::SliceSelect:
+                story_ui_.generic("slice");  // STY1 t03 (0xf5d10 / 0x3e4450): the option was picked
                 if (session_ && !panel_preview_) session_->slice_tech(a.unit);
                 break;
             case ui::HudAction::Kind::SabotageTarget:

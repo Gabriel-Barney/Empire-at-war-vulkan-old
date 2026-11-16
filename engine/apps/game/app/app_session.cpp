@@ -376,6 +376,8 @@ void App::story_ui_step() {
         (void)story_ui_.take();
         return;
     }
+    // STY1 t03: retail raises "click" first thing on every left or right press in the HUD handler (there is no "right_click")
+    if (input_.button(ui::Button::Left).pressed || input_.button(ui::Button::Right).pressed) story_ui_.generic("click");
     if (screen_ == Screen::Battle && story_ui_.battle()) story_ui_.observe_battle(orders_.selection());  // battle-store ids
     if (screen_ == Screen::Galactic) {
         StoryUiView v;

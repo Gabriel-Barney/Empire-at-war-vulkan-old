@@ -161,6 +161,10 @@ void App::handle_screen_actions(const std::vector<ui::ScreenAction>& acts) {
                 break;
             }
             case K::BuyUnitsBack: open_main_menu(); break;
+            case K::StoryClosed:  // STY1 t03: the story / tutorial dialog's Continue / close (0x1243f0, 0x105190)
+                story_ui_.generic("Continue_Tutorial");
+                story_ui_.generic("close_story_dialog");
+                break;
             case K::StorySummaryClosed:
                 story_summary_open_ = false;
                 break;

@@ -868,6 +868,7 @@ std::vector<std::pair<std::string, lua::StoryNotification>> StorySession::notifi
             break;
         }
         case K::BattleRetreat:
+            out.emplace_back("STORY_GENERIC", [&] { lua::StoryNotification g = n; g.name = "retreat_complete"; return g; }());  // STY1 t03
             n.name = n.planet;
             n.params.push_back(lua::StoryParam::of_text(n.planet));
             out.emplace_back("STORY_RETREAT", n);
