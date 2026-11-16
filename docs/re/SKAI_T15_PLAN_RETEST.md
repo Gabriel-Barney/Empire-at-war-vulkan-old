@@ -401,4 +401,4 @@ Consequences of switching it on (why it is not on yet):
 `--no-plan-retest` turns it off. Seeds 1 and 3 stall in a rule-following standoff (no 2:1 retreat for the Rebels, the Empire's
 last AT-AT on a cross-map Clear_Infantry walk), so outcome seed 1 was replaced by seed 2. Idle-human Utapau with the re-test
 on (dev + skai-lane2, MSVC, 1 worker, 36000 ticks, seeds 1-10): Rebel AI ends 1 of 10 (33956), Empire AI 10 of 10
-(17525-19883), Underworld AI 5 of 10 (23561-35241). Retail so far: Rebel 0 of 3, Empire 1 of 2 (about 25707), Underworld 0 of 1.
+(17525-19883), Underworld AI 5 of 10 (23561-35241). Retail so far: Rebel 1 of 4 (27265, SKAI_T06_LAND_RUNS §9), Empire 1 of 2 (about 25707), Underworld 0 of 1.
