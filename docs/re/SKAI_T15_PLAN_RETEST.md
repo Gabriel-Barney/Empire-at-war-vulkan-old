@@ -326,3 +326,23 @@ For `engine/ai/tactical/src/tactical_ai.cpp` `plan_invalid` (~l.1257) and the co
    items 1-3 close the gap. If they show the old-candidate release or `Purge_Goals`, the port's difference is in
    Resolve_Category or Burn_Units_Land timing, and items 1-3 are still required for parity but will not by themselves
    shorten plan 14.
+
+## Port check (q4d-skai, 2026-11-16, not yet against the hook run)
+
+- Ported the re-test as the "Port consequence" items 1-4 say: `retest_tactical_pp` (`engine/ai/tactical/src/tactical_pp.cpp`)
+  rebuilds the lists from the current perception and recent failures. It commits the stored selection: a live unit at its
+  health; a dead, captured or not yet arrived one at full power; an appended reinforcement is skipped. The finalize then runs
+  under the solve's layer flags. The result is sticky (`TacPpRec::contrast_failed`). `plan_invalid` calls it, and so does the
+  Resolve_Category old-candidate path. That path sits behind `GoalHooks::retest_old_candidates()`, which is tactical only:
+  galactic keeps the earlier rule.
+- `--skirmish-ai foc-land --human Underworld --ai Empire --seed 1 --ticks 36000`: **no re-test failed**. The run is unchanged:
+  the Empire wins at 18429, and plan 14 (4847, Destroy_Structure on object 792) still holds. This matches §3.2-3.3: the re-test
+  does not make the plan end.
+- The port's difference is upstream. Over that run, 162 Destroy_Structure proposals reached slot 10:
+  - 9 were accepted;
+  - 61 failed at the first solve on Contrast, and 92 on Plan (no free unit fills the team minimum);
+  - 6 more failed the accept re-solve.
+
+  Retail starts a new Destroy_Structure at almost every commit after about 19000 frames. So if the hook run shows Resolve_Category
+  displacement (§3.4), the work is the port's lack of free units at proposal time (Land_Scout_Area accepted 299 times,
+  Secure_Contestable 261), not the plan end.

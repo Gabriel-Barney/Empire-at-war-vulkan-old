@@ -217,6 +217,10 @@ struct TacPpRec {
     uint32_t plan = kAiNone;
     std::vector<TacticalPpPick> picks;  // FreeStore picks = PP+0x108 (0x6c27d0 removes a unit that left the plan)
     bool reserved = false;              // PP+0x100: the first 0x6c2d60 ran (pool / pad slots reserved then)
+    // skai t15 (SKAI_T15_PLAN_RETEST §1): the solve's contrast layer flags (PP +0x1a0 / +0x1a1) and the sticky validity
+    // byte PP +0x4c as the running-plan re-test leaves it (false once the contrast re-test failed).
+    bool layer_space = false, layer_ground = false;
+    bool contrast_failed = false;
 };
 // --- end A2 tactical ---
 
@@ -336,6 +340,7 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
     void reserve_pp(int32_t handle);                      // 0x6c2d60 (+ 0x6c2b20)
     void suspend_pp(int32_t handle);                      // 0x6c0be0's +0x30 part (Commit step 4)
     bool pp_stolen(int32_t handle);                       // 0x6c45e0
+    bool pp_retest_failed(PlayerAi& p, const Goal& g);     // 0x6c47c0 step 2 (skai t15), sticky
     void pp_unit_left(int32_t handle, int32_t unit);      // 0x6c27d0 (the unit's re-admission is the caller's)
     void release_pp(int32_t handle, int32_t tf_def = -1);
     TacticalFreeStore* pp_store(int32_t handle);
@@ -1155,6 +1160,8 @@ struct PlayerAi final : GoalModeHooks, ContextModeServices {
         rec.player = player;
         rec.plan = plan;
         rec.picks = std::move(pp.picks);
+        rec.layer_space = pp.layer_space;
+        rec.layer_ground = pp.layer_ground;
         g.nominal_time = w->pp_nominal_time(*this, rec.picks);  // A2g t06: AllowedTime base 0x6c0450(PP)
         w->pps.emplace(h, std::move(rec));
         g.pp_handle = h;
@@ -1257,8 +1264,10 @@ struct PlayerAi final : GoalModeHooks, ContextModeServices {
     bool plan_invalid(const Goal& g) override {
         if (g.running < 0) return true;
         const auto it = w->plans.find(g.running);
-        return it == w->plans.end() || it->second.ended || w->pp_stolen(g.pp_handle);
+        return it == w->plans.end() || it->second.ended || w->pp_stolen(g.pp_handle) || w->pp_retest_failed(*this, g);
     }
+    // skai t15 (SKAI_T15_PLAN_RETEST §2.1) [H]: Resolve_Category re-tests an old candidate's running plan too.
+    bool retest_old_candidates() override { return true; }
     bool replaceable(const Goal& g) override {
         if (g.running < 0) return true;
         const auto it = w->plans.find(g.running);
@@ -2085,6 +2094,42 @@ bool TacticalAiWorld::Impl::resolve_pp(PlayerAi& p, const Goal& g) {
         return false;
     }
     it->second.picks = std::move(out.picks);
+    it->second.layer_space = out.layer_space;
+    it->second.layer_ground = out.layer_ground;
+    return true;
+}
+
+// skai t15 - the running-plan contrast re-test, 0x6c47c0 step 2 (SKAI_T15_PLAN_RETEST §1, §2.3) [H]: for a running PP
+// (PP +0x100) of a plan that is not IgnoreTarget, the contrast lists are rebuilt from the current perception and recent
+// failures, the stored selection is committed (a live selected unit at its health, a dead / captured / not yet arrived one at
+// full type power; a unit that left the task force is no longer in the selection, pp_unit_left), and the contrast Finalize
+// decides. The result is sticky. No land or space plan clears Test_Target_Contrast (galactic-only), so it always runs here.
+bool TacticalAiWorld::Impl::pp_retest_failed(PlayerAi& p, const Goal& g) {
+    const auto it = pps.find(g.pp_handle);
+    if (it == pps.end()) return false;
+    TacPpRec& rec = it->second;
+    if (rec.contrast_failed) return true;
+    if (!rec.reserved || rec.plan == kAiNone || rec.plan >= library.plans.size() || library.plans[rec.plan].ignore_target) return false;
+    TacticalPpInput in;
+    pp_input(p, rec.plan, g, false, false, in);
+    std::vector<PpRetestPick> sel;
+    sel.reserve(rec.picks.size());
+    for (const TacticalPpPick& k : rec.picks) {
+        if (k.contrast_entry == kPickNotSelected) continue;  // a reinforcement that joined without a selection entry [M]
+        PpRetestPick r;
+        r.type = k.type;
+        r.tf = k.tf;
+        r.team = k.team;
+        r.contrast_entry = k.contrast_entry;
+        if (k.source == PpSource::FreeStore && unit_ok(store.find(k.ref), rec.player))
+            if (const PerceptionObject* o = object(k.ref); o && o->alive) r.health = o->health;
+        sel.push_back(r);
+    }
+    std::string why;
+    if (retest_tactical_pp(in, sel, rec.layer_space, rec.layer_ground, &why)) return false;
+    rec.contrast_failed = true;
+    ++stats[library.plans[rec.plan].name + " running-plan contrast re-test failed"];
+    decide(rec.player, "pp " + std::to_string(g.pp_handle) + " " + library.plans[rec.plan].name + ": " + why + ", plan invalid");
     return true;
 }
 
@@ -3322,6 +3367,7 @@ bool reinforce_join_pp(std::vector<TacticalPpPick>& picks, int32_t unit, int32_t
     k.source = PpSource::FreeStore;
     k.ref = unit;
     k.tf = tf;
+    k.contrast_entry = kPickNotSelected;  // appended to PP +0x108 with no selection entry: the re-test skips it [M]
     picks.push_back(k);
     return false;
 }
@@ -4159,6 +4205,9 @@ void TacticalAiWorld::hash(StateHasher& h) const {
         h.i32(pp.player);
         h.u32(pp.plan);
         h.boolean(pp.reserved);
+        // skai t15 sticky re-test result (the entries / layer flags follow from the solve). Hashed only when set, so a run
+        // whose re-tests all pass keeps its CRC stream.
+        if (pp.contrast_failed) h.u8(0xC7);
         h.u32(static_cast<uint32_t>(pp.picks.size()));
         for (const TacticalPpPick& k : pp.picks) {
             h.i32(k.type);
@@ -4207,8 +4256,10 @@ namespace {
 namespace io = save_io;
 
 constexpr uint32_t kTacticalAiSaveVersionNoPad = 12, kTacticalAiLaneSaveVersionNoPad = 13;  // still loaded (b0416)
-constexpr uint32_t kTacticalAiLaneSaveVersion = 15;  // sp3: kTacticalAiSaveVersion plus the AI-lane block (13 before b0416) (k_ai, the AI-owned GameRandom)
-constexpr uint32_t kTacticalAiSaveVersion = 14;  // 14: b0416 pad_occupied fact (12 before); 2: six space free-store facts; 3: re-projection stamp; 4: flood sets;
+// skai t15: 16 / 17 add the PP contrast entries, layer flags and re-test byte; 14 / 15 still load (re-test state empty).
+constexpr uint32_t kTacticalAiSaveVersionNoRetest = 14, kTacticalAiLaneSaveVersionNoRetest = 15;
+constexpr uint32_t kTacticalAiLaneSaveVersion = 17;  // sp3: kTacticalAiSaveVersion plus the AI-lane block (13 before b0416) (k_ai, the AI-owned GameRandom)
+constexpr uint32_t kTacticalAiSaveVersion = 16;  // 16: skai t15 PP re-test state; 14: b0416 pad_occupied fact (12 before); 2: six space free-store facts; 3: re-projection stamp; 4: flood sets;
                                                  // 5: refixf t06 space reinforcement status fields; 6: a1g t01 PP+0x100,
                                                  // entry +0x30 moved into the free store; 7: S7 t20/t21/t15 A1 (no had_units /
                                                  // no_units_sent; ambush / ability status fields); 8: a1j t01 land
@@ -4557,6 +4608,8 @@ void TacticalAiWorld::write(ByteWriter& w) const {
                 w.str(o.last_veto);
                 io::put_count(w, o.picks.size());
                 for (const TacticalPpPick& k : o.picks) io::put_pick(w, k);
+                w.boolean(o.layer_space);
+                w.boolean(o.layer_ground);
             }
         }
     }
@@ -4627,6 +4680,9 @@ void TacticalAiWorld::write(ByteWriter& w) const {
         w.boolean(pp.reserved);
         io::put_count(w, pp.picks.size());
         for (const TacticalPpPick& k : pp.picks) io::put_pick(w, k);
+        w.boolean(pp.layer_space);
+        w.boolean(pp.layer_ground);
+        w.boolean(pp.contrast_failed);
     }
     put_int_map(w, m.pool_reserved);
     put_int_map(w, m.pad_reserved);
@@ -4679,9 +4735,12 @@ bool TacticalAiWorld::read(ByteReader& r) {
     // and harness saves).
     const uint32_t version = r.u32();
     // b0416: versions 12 / 13 (the same layout without the pad_occupied fact) still load: stored benchmark scenarios hold them.
-    const bool lane_image = version == kTacticalAiLaneSaveVersion || version == kTacticalAiLaneSaveVersionNoPad;
-    const bool has_pad_fact = version == kTacticalAiSaveVersion || version == kTacticalAiLaneSaveVersion;
-    if (!r.ok() || !(version == kTacticalAiSaveVersion || version == kTacticalAiSaveVersionNoPad || (m.cfg.ai_lane && lane_image)))
+    const bool lane_image = version == kTacticalAiLaneSaveVersion || version == kTacticalAiLaneSaveVersionNoPad ||
+                            version == kTacticalAiLaneSaveVersionNoRetest;
+    const bool has_retest = version == kTacticalAiSaveVersion || version == kTacticalAiLaneSaveVersion;
+    const bool has_pad_fact = has_retest || version == kTacticalAiSaveVersionNoRetest || version == kTacticalAiLaneSaveVersionNoRetest;
+    if (!r.ok() || !(version == kTacticalAiSaveVersion || version == kTacticalAiSaveVersionNoPad || version == kTacticalAiSaveVersionNoRetest ||
+                     (m.cfg.ai_lane && lane_image)))
         return io::bad(r);
     uint32_t saved_k_ai = m.cfg.k_ai;
     GameRandom saved_lane_rng = m.own_rng;
@@ -4848,7 +4907,11 @@ bool TacticalAiWorld::read(ByteReader& r) {
                 o.candidates = r.u32();
                 o.last_veto = r.str();
                 o.picks.resize(io::count(r, io::kPickBytes));
-                for (TacticalPpPick& k : o.picks) io::get_pick(r, k);
+                for (TacticalPpPick& k : o.picks) io::get_pick(r, k, has_retest);
+                if (has_retest) {
+                    o.layer_space = r.boolean();
+                    o.layer_ground = r.boolean();
+                }
             }
             for (const uint32_t pl : sp.pp_plans)
                 if (pl >= m.library.plans.size()) return io::bad(r);
@@ -4970,7 +5033,12 @@ bool TacticalAiWorld::read(ByteReader& r) {
             pp.plan = r.u32();
             pp.reserved = r.boolean();
             pp.picks.resize(io::count(r, io::kPickBytes));
-            for (TacticalPpPick& k : pp.picks) io::get_pick(r, k);
+            for (TacticalPpPick& k : pp.picks) io::get_pick(r, k, has_retest);
+            if (has_retest) {
+                pp.layer_space = r.boolean();
+                pp.layer_ground = r.boolean();
+                pp.contrast_failed = r.boolean();
+            }
             if (!r.ok() || !valid_ai(pp.player) || (pp.plan != kAiNone && pp.plan >= lib) || id < 0 || id >= next[3] ||
                 (!new_pps.empty() && new_pps.rbegin()->first >= id))
                 return io::bad(r);
