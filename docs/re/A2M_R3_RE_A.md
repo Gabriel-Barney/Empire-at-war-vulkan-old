@@ -323,8 +323,7 @@ Notes on the table:
   Underworld's own.
 - **SSC = 1 zeroes the others.** While Should_Save_For_Corruption is 1, SBB, SSD and SBS read 0 on every planet. The
   windows are 780–960, 1800–2970 and from 11700.
-- **SBB.** After the palaces, Should_Build_Underworld_Barracks is 0 everywhere except The_Maw (18). No Barracks plan
-  ran, because The_Maw has no ground slot use for it.
+- **SBB.** After the palaces, Should_Build_Underworld_Barracks is 0 everywhere except The_Maw (18). No Barracks plan ran; a likely reason is that The_Maw has no land map [M, not checked].
 - **NGU.** Needs_Groundbase_Upgrade is constant per planet in this run.
 - **SBS.** It follows the starbase level: Shola drops 34 → 17 after its upgrade at 4200, and to 0 at 10800.
 
