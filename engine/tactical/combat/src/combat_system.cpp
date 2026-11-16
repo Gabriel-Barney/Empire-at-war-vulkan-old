@@ -2414,6 +2414,10 @@ bool CombatSystem::opportunity_fire(Unit& u, Hardpoint& h, uint32_t frame, SimRn
             for (EntityHandle eh : trees_->player(static_cast<uint32_t>(p)).query_aabb(box, kSkipDead, serial_ctx_)) {
                 const Unit* t = unit(static_cast<ObjectId>(eh));
                 if (!live(t) || !opportunity_valid(u, h, *t)) continue;
+                // skai t23 (TACTICAL_COMBAT §2.6): the scan skips a candidate fully fogged for the owner's player
+                // (0x35f470, force 1), for every hard point kind; keeping the current opportunity target does not
+                // re-test it.
+                if (target_hidden(u.owner, t->id, true)) continue;
                 const float s = score(u, *t);  // owner's priority set (slot 35) [M]
                 if (s == -1.0f) continue;
                 // HP_Choose_Aim_Point: synced pick among the live targetable hardpoints.
