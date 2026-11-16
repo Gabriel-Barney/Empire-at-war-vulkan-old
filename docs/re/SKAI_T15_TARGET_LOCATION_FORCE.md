@@ -211,3 +211,20 @@ Same as retail for a structure:
 - **Answered (D4), SKAI_T15_TARGET_CHOICE §Q5:** the pre-built base structures are created by the skirmish setup's
   pad pre-build before the threat grid is deleted and rebuilt, so they are never in the battle grid's owner lists; they
   do reach its cell lists and threat layer at their first UNIT_AI service [M].
+
+## Correction: the merc team radius is 178.6, not 240 (skai-a, 2026-11-16) [H]
+
+0x3749d0 (REA read; LOB_SOLVER §4) checks the projectile before `Targeting_Max_Attack_Distance` (+0x500):
+- It takes the type's `Projectile_Types` entry at the object's current weapon index (obj +0x324). The GameObject ctor 0x348a50 sets that index to 0 (TACTICAL_COMBAT §3).
+- If that projectile is `Projectile_Category` 3, it returns Max_Speed² / (Lob_Mod × Gravity).
+
+For a merc team, the call is 0x3749d0(`Underworld_Merc`, the team container):
+- The container's +0x324 is 0, so the projectile is `Proj_Merc_Concussion_Grenade`, a grenade.
+- So r = its lob range, 178.6, the value the port registers (`CombatSystem::attack_range`, measured on Utapau seed 1).
+- The 240 in §2 / §4 and "Port consequence" 1 came from the XML alone.
+
+Consequence:
+- A team touches the factory's zone 85 only when its centre is at x < 4865.8 + 178.6 = 5044.4.
+- Port seed 1 at 3056: the six teams stand at x 5080-5176, so the factory's `Location` force is 0. Measured: zone 85, 12 cells, EnemyForceUnnormalized 0.
+- Retail reads 0 as well, unless its teams stand further west.
+- So the port's 15.001 and its empty Destroy_Structure escort list (SKAI_T15_TARGET_CHOICE Q2) are not port errors.
