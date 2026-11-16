@@ -2434,6 +2434,44 @@ void test_foc() {
     const BattleCatalog catalog(types, files.get(), &db.constants(), &diag);
     test_foc_destroyer_droid(types, catalog);  // s78n t26.1
     test_foc_walk_transition(types);  // s78n t26 closing review
+    // TRU1 t03 / t01 (docs/re/TRU1_GRAVITY_FIELD.md §1.7, §2): the shipped generators, an affected type, the Magnepulse's 47
+    // record. The Empire generator has no Gravity_Control_Field_Slow_Fraction (0: it slows nothing).
+    {
+        const char* names[] = {"U_Ground_Gravity_Generator", "Skirmish_Ground_Gravity_Generator_U", "Ground_Gravity_Generator",
+                               "T2B_Tank", "Ground_Magnepulse_Cannon"};
+        std::vector<uint32_t> want;
+        for (const char* n : names) {
+            const objects::TypeIndex x = types.resolve_name(n);
+            CHECK(x != objects::kNone);
+            if (x != objects::kNone) want.push_back(static_cast<uint32_t>(x));
+        }
+        if (want.size() == 5) {
+            std::vector<uint32_t> idx;
+            const BattleTables bt = catalog.build_battle(want, idx, false);
+            CHECK(idx.size() == 5);
+            if (idx.size() == 5) {
+                const auto& u = bt.abilities.objects[idx[0]];
+                const auto& s = bt.abilities.objects[idx[1]];
+                const auto& e = bt.abilities.objects[idx[2]];
+                const auto& tank = bt.abilities.objects[idx[3]];
+                const auto& mag = bt.abilities.objects[idx[4]];
+                std::printf("foc gravity: U range %.0f slow %.2f effect %s; skirmish %d %.0f %.2f; E range %.0f slow %.2f; T2B %d; "
+                            "Magnepulse 47 records %zu, Requires_Base_Power %d\n",
+                            static_cast<double>(u.gravity_field_range), static_cast<double>(u.gravity_field_slow_fraction),
+                            u.gravity_field_effect.c_str(), s.gravity_field ? 1 : 0, static_cast<double>(s.gravity_field_range),
+                            static_cast<double>(s.gravity_field_slow_fraction), static_cast<double>(e.gravity_field_range),
+                            static_cast<double>(e.gravity_field_slow_fraction), tank.affected_by_gravity_field ? 1 : 0,
+                            mag.unit_abilities.size(), bt.combat.units[idx[4]].requires_base_power ? 1 : 0);
+                CHECK(u.gravity_field && u.gravity_field_range == 3000.0f && u.gravity_field_slow_fraction == 0.9f &&
+                      u.gravity_field_effect == "Repulsor_Jammer_Effect" && !u.affected_by_gravity_field);
+                CHECK(s.gravity_field && s.gravity_field_range == 3000.0f && s.gravity_field_slow_fraction == 0.9f);
+                CHECK(e.gravity_field && e.gravity_field_range == 100000.0f && e.gravity_field_slow_fraction == 0.0f);
+                CHECK(tank.affected_by_gravity_field && !tank.gravity_field);
+                CHECK(mag.unit_abilities.size() == 1 && mag.unit_abilities[0].type == tactical::abilities::kFireLobbingSuperweapon &&
+                      mag.countdown && bt.combat.units[idx[4]].requires_base_power);
+            }
+        }
+    }
 }
 
 }  // namespace
