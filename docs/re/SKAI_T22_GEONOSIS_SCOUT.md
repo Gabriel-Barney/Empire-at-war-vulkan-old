@@ -1,6 +1,6 @@
 # skai t22: early Rebel approach on Geonosis (space skirmish) — trace evidence
 
-Status: open (2026-11-16, lane skai-b; start-station rule landed, tie settled, residual in the last section). Retail plan records taken 2026-11-16 (section "Retail plan records"; the hooks changed the AI's space play, so only their engine readings count); RE questions in
+Status: done (2026-11-16, lane skai-b; dev 104cae8a: start-station rule, tie settled, free-store hand-over rule; see the last section). Retail plan records taken 2026-11-16 (section "Retail plan records"; the hooks changed the AI's space play, so only their engine readings count); RE questions in
 `docs/re/SKAI_T22_RE_QUESTIONS.md`.
 
 ## Symptom
@@ -126,3 +126,13 @@ start squadrons stay with the pad plans, are probe-affected. The port's first sc
 Empire corner (`fs order` attack-moves to (-3600,-3600) / (-3600,-1600) and the station from frame 623-1946). Settling it
 needs an unhooked retail record of the Rebel AI's plans (for example a Frida log of goal accepts and plan ends, which does
 not touch the Lua threads), which this session could not run.
+
+## Settled by the unhooked retail runs (2026-11-16, dev 104cae8a)
+Three Geonosis runs without the Lua probe (`run_skai_t22_space.cmd`, read-only Frida; `20261116-173353`, `-173917`,
+`-174437`, now `geonosis_skirmish` references) show the first scout at CELL_0_0 in all three, accepted at mf 67 with one
+pad. In runs 1 and 3 a second pad accepted at mf 134 (Map_Control resolves before Tactical_Targeted) takes the scout's
+X-wing, the scout fails the stolen test 0x6c45e0 and is released; in run 2 no second pad is accepted and it lives to mf
+934. `SKAI_T22_SPACE_AI_RE.md` Part 5 [H]: a tactical hand-over keeps the unit on the free store as a reserved entry,
+so this can happen at any commit. Ported for space (`PHASE4.md`). `geonosis_skirmish` against 11 references: FAIL 1 /
+PASS 18; Empire damage 64 (retail 22), Rebel build count 24.7 (20.3), Rebel final units 33.3 (30) pass.
+`combat.damage_taken[Rebel]` 598 against 200 is skai t23. Port scouts still live longer (median 667 against 464 frames).
