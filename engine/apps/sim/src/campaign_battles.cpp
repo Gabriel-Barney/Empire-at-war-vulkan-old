@@ -1540,6 +1540,20 @@ void CampaignBattles::story_begin(SimHost& host, GameMode& mode) {
             TacticalMode* tm = h->tactical();
             if (battle_ && tm && tm->primary().alive(u)) battle_->script_invulnerable(tm->primary().id(u), on);
         };
+        // STY1 t01: Prevent_All_Fire / Suspend_Locomotor / Set_Cannot_Be_Killed / Override_Max_Speed -> the battle's tick
+        if (battle_) {
+            const lua::ObjectBridge* sb = &b;
+            battle_->set_script_unit_control(sb, [sb](objects::ObjectId id) {
+                TacticalBattle::ScriptUnitControl c;
+                if (const lua::ScriptObjectState* s = sb->find_state(id)) {
+                    c.no_fire = s->prevent_all_fire;
+                    c.loco_suspended = s->locomotor_suspended;
+                    c.cannot_die = s->cannot_be_killed;
+                    c.max_speed = s->max_speed_override;
+                }
+                return c;
+            });
+        }
 #ifdef ALAMO_SIM_HAVE_TACTICAL_AI
         b.prevent_ai_usage = [this, h](objects::ObjectHandle u, bool on) {
             TacticalMode* tm = h->tactical();

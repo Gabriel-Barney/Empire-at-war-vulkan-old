@@ -192,6 +192,20 @@ BattleAi::BattleAi(TacticalBattle& battle, TacticalMode& mode, SimHost& host, co
         if (world_->ai_lane()) return lua::script_movement_locked(std::span<const lua::ScriptLockFact>(lane_locks_), id, goal);
         return lua::script_movement_locked(br, id, goal);
     });
+    // STY1 t01: Prevent_All_Fire / Suspend_Locomotor / Set_Cannot_Be_Killed / Override_Max_Speed of the AI VMs' objects.
+    // [port] With the AI lane on the bridge belongs to the lane thread and its facts are not published for these (the lock
+    // facts are saved state; a new fact would change the lane save format): the setters are then stored only.
+    bt->set_script_unit_control(this, [this, &br](objects::ObjectId id) {
+        TacticalBattle::ScriptUnitControl c;
+        if (world_->ai_lane()) return c;
+        if (const lua::ScriptObjectState* s = br.find_state(id)) {
+            c.no_fire = s->prevent_all_fire;
+            c.loco_suspended = s->locomotor_suspended;
+            c.cannot_die = s->cannot_be_killed;
+            c.max_speed = s->max_speed_override;
+        }
+        return c;
+    });
     // OI host (L1/S4 wave 1 integrator ask 2): Change_Owner of the AI VMs goes through the battle (store + TreeSet::set_owner
     // + the battle systems), as the story VMs' bridge (CampaignBattles::change_owner); before, the binding set the store only.
     TacticalMode* owner_mode = &mode;
@@ -752,6 +766,7 @@ BattleAi::~BattleAi() {
     b_->remove_order_replaced_listener(order_listener_);
     if (b_->movement_) b_->movement_->set_threat_fn({});  // the battle outlives its AI
     b_->set_script_movement_lock(this, {});
+    b_->set_script_unit_control(this, {});
     b_->set_fog_refog({});  // fog: the battle outlives its AI (CampaignBattles resets ai_ first)
 }
 

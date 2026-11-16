@@ -569,6 +569,15 @@ public:
     // Registered per bridge owner `key` (an empty fn removes it; the battle outlives its AI / story bridges).
     void set_script_movement_lock(const void* key, std::function<bool(objects::ObjectId)> fn);
     bool script_movement_locked(objects::ObjectId id) const;  // the bridges' shares only
+    // STY1 t01: the Lua object-state setters that change the sim (Prevent_All_Fire, Suspend_Locomotor, Set_Cannot_Be_Killed,
+    // Override_Max_Speed). A bridge answers per object id (the unit and its team container are both asked; a flag of either
+    // applies, the lowest non-negative max_speed wins). Registered per bridge owner `key`, like the movement lock.
+    struct ScriptUnitControl {
+        bool no_fire = false, loco_suspended = false, cannot_die = false;
+        float max_speed = -1.0f;  // < 0 = none
+    };
+    void set_script_unit_control(const void* key, std::function<ScriptUnitControl(objects::ObjectId)> fn);
+    ScriptUnitControl script_unit_control(objects::ObjectId id) const;
     // s78n t06 review: the hero clash's share of the lock (+0x3b4, HERO_CLASH §3.2) while it is held. release_hero_clash_lock
     // = a Lua Unlock_Current_Orders through the hero's land TEAM object (A1_READINGS §28.9 item 4: retail's decrement of
     // the member's counter): the hero's movement orders are free again while +0x3b4 stays set (until the clash release
@@ -1587,6 +1596,11 @@ private:
     void drop_locked(std::vector<objects::ObjectId>& ids) const;  // OI follow-up t03: group moves skip locked units
     // OI follow-up t03: per bridge owner, registration order (not saved: the bridges' own state)
     std::vector<std::pair<const void*, std::function<bool(objects::ObjectId)>>> script_locks_;
+    // STY1 t01: per bridge owner; script_ctl_ = the per-unit result of the current tick (index = units_), filled serially
+    // by refresh_script_control() before the parallel readers (combat_sync, the speed service). Not saved.
+    std::vector<std::pair<const void*, std::function<ScriptUnitControl(objects::ObjectId)>>> script_ctls_;
+    std::vector<ScriptUnitControl> script_ctl_;
+    void refresh_script_control();
     void feed_attack_targets(const objects::ObjectStore& store);
     // S7 fighters (FIGHTER_FLYING.md; tactical_battle.cpp "fighter host"): squadrons / params into the MovementSystem,
     // the combat target as the formation attack target, the locomotor's Provoke / Retarget orders back into combat.
