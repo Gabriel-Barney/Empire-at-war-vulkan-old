@@ -687,6 +687,16 @@ void BattleCatalog::s9_unit_fields(uint32_t t, tc::UnitDesc& u, BuildState& s) c
     u.tactical_respawn_secs = ty.get_float(t, "Tactical_Respawn_Time_In_Secs");
     u.stunnable = ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("STUNNABLE"));
     u.shield_requires_base_power = ty.get_bool(t, "Shield_Requires_Base_Power");
+    {  // tru1 t02 (docs/re/TRU1_A_RE_ANSWERS.md A1 / A2): base shields; Shield_Requires_Base_Power defaults to true here
+        static const objects::BehaviorTypeId kBaseShield = objects::behavior_type_id("BASE_SHIELD");
+        static const objects::BehaviorTypeId kAffected = objects::behavior_type_id("AFFECTED_BY_SHIELD");
+        u.base_shield_radius = ty.get_float(t, "Base_Shield_Radius");
+        u.base_shield = ty.has_behavior(t, objects::BehaviorSet::Union, kBaseShield) && u.base_shield_radius > 0.0f;
+        u.base_shield_always_off = ty.get_bool(t, "Base_Shield_Always_Off");
+        if (!ascii_trim(ty.get_string(t, "Shield_Requires_Base_Power")).empty())
+            u.base_shield_requires_power = ty.get_bool(t, "Shield_Requires_Base_Power");
+        u.affected_by_shield = ty.has_behavior(t, objects::BehaviorSet::Union, kAffected);
+    }
     // HUD_GAPS §1.4: behaviour DUMMY_STAR_BASE = can repair hard points (the HUD repair cursor; can_repair_hardpoints).
     u.repairs_hardpoints = ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("DUMMY_STAR_BASE"));
     // --- end OI abilities ---

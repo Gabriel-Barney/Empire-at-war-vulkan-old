@@ -468,6 +468,16 @@ struct UnitDesc {
     float tactical_respawn_secs = 0.0f;           // Tactical_Respawn_Time_In_Secs (+0x21d0)
     bool stunnable = false;                       // has STUNNABLE (0x38)
     bool shield_requires_base_power = false;      // Shield_Requires_Base_Power (+0x8c)
+    // ---- tru1 t02 (docs/re/TRU1_A_RE_ANSWERS.md A1 - A5): base shields ----
+    // BASE_SHIELD (0x39) with Base_Shield_Radius (+0x21f4) > 0: a shield generator; its state machine runs every 15
+    // frames (CombatSystem::service_base_shields). Always_Off types never join the shield list. requires_power is
+    // Shield_Requires_Base_Power read for this behaviour, which defaults to TRUE (type ctor 0x367100; only the mobile
+    // shield generator sets it to no) - unlike shield_requires_base_power above, which keeps the SHIELDED reading.
+    bool base_shield = false;
+    float base_shield_radius = 0.0f;
+    bool base_shield_always_off = false;  // Base_Shield_Always_Off (+0xe1)
+    bool base_shield_requires_power = true;
+    bool affected_by_shield = false;      // AFFECTED_BY_SHIELD (0x47): straddling a hostile wall (A2)
     // ---- S8 t10 / t11 (TACTICAL_COMBAT §3.1.1 "Gate details", §3.4, LOB_SOLVER §5.1) ----
     bool can_fighter_fire_when_idle = false;  // Can_Fighter_Fire_When_Idle (type +0x8a): own-weapon gate step 6
     bool lobbing_superweapon = false;         // LOBBING_SUPERWEAPON (slot byte +0x369): step 7, own weapon only by order
@@ -567,6 +577,8 @@ struct CombatConfig {
     float shield_recharge_interval_secs = 3.0f;    // ShieldRechargeIntervalInSecs
     float under_construction_damage_multiplier = 2.0f;  // Under_Construction_Damage_Multiplier
     float base_shield_vulnerability = 1.0f;        // Base_Shield_Vulnerability_Modifier (FoC 2.0)
+    float base_shield_delay_time = 10.0f;          // tru1 t02: Base_Shield_Delay_Time (GC +0x1189c): off -> on wait
+    float base_shield_speed = 0.5f;                // tru1 t02: Base_Shield_Speed_Modifier (GC +0x11840): straddling speed
     float max_secs_for_ae_delayed_damage = 0.0f;   // Max_Secs_For_AE_Delayed_Damage
     // refixf t06 (TACTICAL_COMBAT §2.9 Q1 step 1, port difference 1) [port]: a space hit on a non-target keeps the render
     // mesh it struck; the port has no collision meshes, so the hit goes to the closest live hardpoint whose bone lies
@@ -777,6 +789,9 @@ enum UnitFlag : uint32_t {
     kUnitStealthed = 1u << 3,          // 0x39b140
     kUnitUnderConstruction = 1u << 4,
     kUnitRetreating = 1u << 5,
+    // tru1 t02 (TRU1_A_RE_ANSWERS A2 / A3): an AFFECTED_BY_SHIELD unit straddles the wall of an active hostile base
+    // shield (pack +0x18 set). Written only by service_base_shields; Take_Damage step 6 multiplies by
+    // Base_Shield_Vulnerability_Modifier, and TARGETING / WEAPON / TURRET are suspended (the unit is idle).
     kUnitInBaseShield = 1u << 6,
     // [port] the untargetable marker of the port's dummy targets (never a scan candidate, skipped by the port-only
     // victim filters). s78n t12: no longer the +0x3a1 & 0x10 stand-in - Blast sets kUnitIncognito, and Take_Damage's
@@ -887,6 +902,10 @@ struct UnitSpawn {
     float health_fraction = 1.0f;
     uint32_t flags = 0;
 };
+
+// tru1 t02 (TRU1_A_RE_ANSWERS A4): DamageRequest::hardpoint of a projectile that struck a base shield's dome mesh
+// `shield` (the name Take_Damage step 15a tests). The victim is the generator; step 15a absorbs everything.
+inline constexpr int32_t kHardpointBaseShieldDome = -3;
 
 struct DamageRequest {
     ObjectId victim = kNoObject;
@@ -1373,6 +1392,18 @@ public:
     void add_base_power(int32_t player, ObjectId source);
     void remove_base_power(int32_t player, ObjectId source);  // every entry of `source` for the player
     bool has_base_power(int32_t player) const;
+    // ---- tru1 t02: base shields (docs/re/TRU1_A_RE_ANSWERS.md) ----
+    // Base_Shield_Upgrade (A1 step 6): per player a list of entries keyed by the source (Battlefield_Modifier_Ability
+    // with Base_Shield_Upgrade); "upgraded" = the list is non-empty. An upgraded active shield stops every hostile
+    // projectile, not only Projectile_Does_Shield_Damage ones (A5).
+    void add_base_shield_upgrade(int32_t player, ObjectId source);
+    void remove_base_shield_upgrade(int32_t player, ObjectId source);
+    // A base-shield generator whose shield is on (state 1). False for other objects.
+    bool base_shield_active(ObjectId id) const;
+    // The shield an AFFECTED_BY_SHIELD unit straddles (kNoObject none) and its speed factor: Base_Shield_Speed_Modifier
+    // while it straddles one, else 1 (A2 "Speed": a plain factor after the SPEED multiplier, not a modifier entry).
+    ObjectId base_shield_straddled(ObjectId id) const;
+    float base_shield_speed_factor(ObjectId id) const;
     // Hardpoint repair (command 45, RepairHardpointEvent 0x4308b0 -> 0x387d40; TACTICAL_GAPS §1.12): adds `player`
     // to the hardpoint's repairer list (no duplicates, no cancel, no ownership / credit check here). Serviced per
     // frame in the unit's phase-D update before its weapons: each repairer in list order pays Repair_Cost_Per_Frame
@@ -1686,6 +1717,12 @@ private:
         // refixf t06 (TACTICAL_COMBAT §2.9 Q3): TD +0x10 for the scan target, fixed when the scan sets a new target
         // (Choose_Target_Hardpoint) and re-chosen only by the space formation step; -1 none.
         int32_t auto_hp = -1;
+        // ---- tru1 t02 (TRU1_A_RE_ANSWERS A1 / A2; saved, not hashed) ----
+        uint8_t bshield_state = 0;        // BASE_SHIELD pack +8: 0 never evaluated, 1 on, 2 off
+        uint8_t bshield_upgraded = 0;     // pack +0xc
+        uint32_t bshield_off_stamp = 0;   // pack +0x10: frame of the last service that found the shield off
+        uint32_t bshield_next = 0;        // next service frame (15-frame cadence, attach phase draw)
+        ObjectId bshield_in = kNoObject;  // AFFECTED_BY_SHIELD pack +0x18: the straddled shield
         ModifierSet mods;
         // ---- caches (never hashed) ----
         std::array<float, kModListCount> mod_r{};
@@ -1777,6 +1814,7 @@ private:
         float t;
         int32_t mesh_hp = kMeshUnknown;
         bool ground = false;  // A1j t03: a straight shot's land ground test (0x4d0630) hit the terrain / water at gh
+        bool dome = false;    // tru1 t02: `id` is a base shield whose dome the segment crossed at t (TRU1_A A5)
         GroundHit gh = {};
     };
 
@@ -2028,6 +2066,8 @@ private:
     // ---- OI abilities ----
     std::vector<SurvivorEvent> survivor_events_;
     std::vector<std::pair<int32_t, ObjectId>> base_power_;  // (player, source), insertion order
+    std::vector<std::pair<int32_t, ObjectId>> shield_upgrade_;  // tru1 t02: (player, source), insertion order
+    std::vector<uint32_t> bshields_;  // tru1 t02: the shield list (live, not Always_Off), unit order; rebuilt each tick
     std::vector<Repairer> repairs_;
     ObstacleCellFn obstacle_cell_;                              // OI tactical / S8 t01: LAND_OBSTACLE aim walk
     ShieldSidesFn shield_sides_;                                // s78n t20: line of fire 0x3b5ad0 (not saved: host query)
@@ -2037,6 +2077,12 @@ private:
     std::function<float(int32_t)> credits_get_;
     std::function<void(int32_t, float)> credits_add_;
     void service_repairs(Unit& u, uint32_t frame);
+    // ---- tru1 t02: base shields (base_shield.cpp) ----
+    void service_base_shields(uint32_t frame);
+    void evaluate_base_shield(Unit& s, uint32_t frame);
+    bool straddles_base_shield(const Unit& u, const Unit& s) const;
+    bool dome_segment(const Unit& s, Vec3 a, Vec3 b, float& t) const;
+    void dome_sweep(const Projectile& p, const ProjectileDesc& pd, Vec3 delta, SweepHit& best) const;
     void death_spawns(Unit& v, uint32_t frame);  // Die step 7 (respawn, Destruction_Survivors)
     bool effect_match(const Unit& v, uint64_t mask, const std::vector<int32_t>* types) const;
     // s78n t05: the convert projectile's victim test 0x395c10 (TACTICAL_COMBAT §3.5 step 2, HERO_CLASH §7.3), in order.

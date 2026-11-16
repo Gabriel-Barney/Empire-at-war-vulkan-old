@@ -477,6 +477,7 @@ CombatSystem::SweepHit CombatSystem::sweep_segment(const Projectile& p, Vec3 del
     };
     for (int32_t q = 0; q < np; ++q)
         if (is_enemy(p.owner, q)) scan(q, best);
+    dome_sweep(p, pd, delta, best);  // tru1 t02: hostile base-shield domes (TRU1_A A5)
     // §3.4 step 3 (S8 t06): nothing hit and Friendly_Damage_Amount > 0 or Causes_Infection -> the own-player variant
     // 0x2acb90. S8 t10 ("Own-player variant 0x2acb90" [H]): the query over the projectile owner's tree skips only the
     // projectile itself (never in a port tree), NOT the shooter, and yields its first passing candidate (the port's order:
@@ -578,7 +579,9 @@ void CombatSystem::process_hit(Projectile& p, Unit& v, float t, uint32_t frame, 
         }
     }
     int32_t hp = -1;
-    if (v.id == p.target && p.target_hp >= 0) {
+    if (mesh_hp == kHardpointBaseShieldDome) {
+        hp = kHardpointBaseShieldDome;  // tru1 t02 (TRU1_A A4): the dome mesh name goes to Take_Damage as passed
+    } else if (v.id == p.target && p.target_hp >= 0) {
         hp = p.target_hp;  // Take_Damage name override: the targeted hardpoint wins (the random draw is still made)
     } else if (cfg_.mode == GameMode::Land) {
         hp = closest_hardpoint(v, impact, true);  // land: closest live targetable to the projectile [M: impact point]
@@ -1270,6 +1273,12 @@ DamageResult CombatSystem::take_damage_inner(const DamageRequest& r, uint32_t fr
                                    ? &data_->projectiles[static_cast<size_t>(r.projectile_desc)]
                                    : nullptr;
     const float sx = x * sf;
+    // 15a tru1 t02 (TRU1_A A4, 0x56ba20): a hit on a base shield's dome mesh absorbs everything; the generator loses
+    // nothing and no state is tested. [M] nothing else runs for it (no damage record: x is 0 from here on in retail).
+    if (k != kKindBypassShield && r.hardpoint == kHardpointBaseShieldDome && vd.base_shield && sx > 0.0f) {
+        out.absorbed = sx;
+        return out;
+    }
     float absorbed = 0.0f;
     // s78n t26.1 (MOVEMENT §3.2.1 item 6): Shielded_Only_When_Deployed gates the absorb on D (0x39a390)
     if (k != kKindBypassShield && (!vd.shielded_only_when_deployed || deployed_or_deploying(v))) {
@@ -2022,6 +2031,7 @@ void CombatSystem::tick(uint32_t frame, const TreeSet& trees, SimRng& rng, const
     const auto n = static_cast<uint32_t>(units_.size());
     profile::Steps steps;  // SP5: the phases' times (cmb.*), timing only
 
+    service_base_shields(frame);  // tru1 t02: BASE_SHIELD state, AFFECTED_BY_SHIELD straddles (serial)
     // A. modifiers
     for (ModifierSet& ps : player_mods_) ps.purge_expired(frame);  // player-level purge [M: cadence]
     {
@@ -2179,8 +2189,9 @@ void CombatSystem::tick(uint32_t frame, const TreeSet& trees, SimRng& rng, const
             u.stun_end = 0;
             if (hooks_) hooks_->unit_effect(u.id, UnitEffect::StunEnded, u.owner, u.pos, frame);
         }
+        // tru1 t02 (TRU1_A A2): straddling a hostile shield suspends TARGETING, WEAPON and TURRET.
         const bool idle = u.stun_end > frame || (desc_of(u).requires_base_power && !has_base_power(u.owner)) ||
-                          (u.flags & kUnitScriptNoFire) != 0;  // STY1 t01: Prevent_All_Fire
+                          (u.flags & (kUnitScriptNoFire | kUnitInBaseShield)) != 0;  // STY1 t01: Prevent_All_Fire
         // S7 t14: on the jetpack (MOVEMENT §3.1.1) TARGETING and WEAPON are suspended; S8 t12 (MOVEMENT §3.2): the
         // hardpoints are not (update_weapons' `suspended`).
         const bool suspended = (u.flags & kUnitWeaponsSuspended) != 0;
