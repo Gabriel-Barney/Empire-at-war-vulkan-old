@@ -506,7 +506,13 @@ function Q2S_RunPlan()
 	error("plan did not end")
 end
 Q2S_Attach()
+Q2S_FN_STUB = Find_Nearest
 dofile(Q2S_SCRIPT)
+-- Q2S_LATE_BIND: the Find_Nearest binding is set again after the chunk ran (retail run 20261116-012157 recorded no FNEAR
+-- with the chunk-run install alone); the probe must install its wrapper again at the thread start.
+if Q2S_LATE_BIND then
+	Find_Nearest = Q2S_FN_STUB
+end
 Definitions()
 if Q2S_NORUN then
 	print("RESULT loaded category=" .. tostring(Category))
@@ -522,10 +528,10 @@ Q2S_Dump()
 # the run-2 land plans load and record LOAD under Lua 5.0.2; their threads need more stubs than this harness has).
 PRODUCE = {'LOAD': 1, 'PSTART': 1, 'PBLOCK': 1, 'PEXIT': 1}
 PLANS3 = [('LandMode/BurnUnitsLand.lua', 'Burn_Units_Land', ['MainForce'], False,
-           {'LOAD': 1, 'PSTART': 1, 'PBLOCK': 2, 'PDONE': 1, 'FNEAR': 1},
+           {'LOAD': 1, 'PSTART': 1, 'PBLOCK': 2, 'PDONE': 1, 'FNEAR': 1, 'FNHOOK': 1},
            'RESULT exits=0 attacks=2 category=Burn_Units_Land', 'burn'),
           ('LandMode/BurnUnitsLand.lua', 'Burn_Units_Land', ['MainForce'], False,
-           {'LOAD': 1, 'PSTART': 1, 'PDONE': 1, 'FNEAR': 2},
+           {'LOAD': 1, 'PSTART': 1, 'PDONE': 1, 'FNEAR': 2, 'FNHOOK': 2},
            'RESULT exits=0 attacks=0 category=Burn_Units_Land', 'burn_nil'),
           ('LandMode/DestroyStructure.lua', 'Destroy_Structure', ['MainForce', 'GuardForce'], True,
            {'LOAD': 1, 'PSTART': 2, 'PBLOCK': 3, 'PEXIT': 1}, 'RESULT exits=1 attacks=1 category=Destroy_Structure',
@@ -771,7 +777,8 @@ def main():
         body = ('Q2S_TFS = { %s }\nQ2S_HAS_TARGET = %s\nQ2S_UNIT = { %s }\nQ2S_NEAR_NIL = %s\nQ2S_NORUN = %s\n' % (
             ', '.join(lua_str(t) for t in tfs), 'true' if has_target else 'false',
             ', '.join('%s = %s' % (t, lua_str('REBEL_INFANTRY_SQUAD')) for t in tfs),
-            'true' if mode == 'burn_nil' else 'false', 'true' if mode == 'load' else 'false') + PLAN3)
+            'true' if mode == 'burn_nil' else 'false', 'true' if mode == 'load' else 'false') +
+            'Q2S_LATE_BIND = %s\n' % ('true' if mode == 'burn_nil' else 'false') + PLAN3)
         if mode in ('burn_nil', 'load', 'produce'):
             plan = plan + '_' + mode
         lines, found = run_harness(lua, 'plan_' + plan, os.path.join(MOD, 'AI', *fname.split('/')), body)

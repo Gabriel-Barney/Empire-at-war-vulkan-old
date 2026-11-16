@@ -1256,7 +1256,7 @@ void test_script_spawn(const Data& d) {
 // Set_Cannot_Be_Killed (the combat death gate) reach the battle through TacticalBattle::set_script_unit_control. The test
 // hooks every unit of player 1 (what a bridge's ScriptObjectState answers), orders them a march on the enemy, counts the
 // projectiles they fire, measures how far they moved by frame 120 and kills them by script damage at frame 280.
-enum class CtlMode { Baseline, NoFire, Suspend, SlowCap, CannotDie };
+enum class CtlMode { Baseline, NoFire, Suspend, SlowCap, CannotDie, Limbo, OppFire };
 struct CtlRun {
     bool fought = false;
     uint32_t units = 0, shots = 0, survivors = 0;
@@ -1333,9 +1333,12 @@ CtlRun run_script_control(const Data& d, int32_t workers, CtlMode mode) {
                     c.no_fire = mode == CtlMode::NoFire;
                     c.loco_suspended = mode == CtlMode::Suspend;
                     c.cannot_die = mode == CtlMode::CannotDie;
+                    c.limbo = mode == CtlMode::Limbo;
                     c.max_speed = mode == CtlMode::SlowCap ? 0.05f : -1.0f;
                     return c;
                 });
+            if (mode == CtlMode::OppFire)  // Prevent_Opportunity_Fire (the incognito bit): no auto-acquire, not acquired
+                for (const objects::ObjectId id : mine) b->script_opportunity_fire(id, true);
             Vec3 enemy{};  // march on the first enemy unit, so the unhooked units get in range and fire
             for (const objects::ObjectHandle h : st.owned_by(0))
                 if (st.alive(h) && b->combat().has_unit(st.id(h))) {
@@ -1379,6 +1382,8 @@ void test_script_control(const Data& d) {
     const CtlRun sus = run_script_control(d, 0, CtlMode::Suspend);
     const CtlRun slow = run_script_control(d, 0, CtlMode::SlowCap);
     const CtlRun cnd = run_script_control(d, 0, CtlMode::CannotDie);
+    const CtlRun lim = run_script_control(d, 0, CtlMode::Limbo);
+    const CtlRun opp = run_script_control(d, 0, CtlMode::OppFire);
     std::printf("  script control: units %u; shots base %u nofire %u; moved base %.1f suspend %.2f slowcap %.2f; "
                 "survivors base %u cannot-die %u\n",
                 base.units, base.shots, nof.shots, static_cast<double>(base.moved), static_cast<double>(sus.moved),
@@ -1388,9 +1393,13 @@ void test_script_control(const Data& d) {
     CHECK(base.moved > 5.0f && sus.moved < 0.01f);        // Suspend_Locomotor: no displacement
     CHECK(slow.moved < base.moved * 0.5f);                // Override_Max_Speed: the cap slows the move
     CHECK(base.survivors == 0 && cnd.survivors == cnd.units);  // Set_Cannot_Be_Killed: script damage (combat gate) cannot kill
+    std::printf("  script control: limbo shots %u survivors %u; opportunity-fire shots %u survivors %u\n", lim.shots, lim.survivors, opp.shots, opp.survivors);
+    CHECK(lim.shots == 0 && lim.survivors == lim.units);  // Set_In_Limbo: no auto-acquire, takes no damage
+    CHECK(opp.shots == 0);                                // Prevent_Opportunity_Fire: the flagged units open no fire
     for (const int32_t w : {1, 4}) {  // worker counts: the hooked runs match the single-thread CRC log
         CHECK(!first_divergence(nof.crc, run_script_control(d, w, CtlMode::NoFire).crc).diverged);
         CHECK(!first_divergence(slow.crc, run_script_control(d, w, CtlMode::SlowCap).crc).diverged);
+        CHECK(!first_divergence(lim.crc, run_script_control(d, w, CtlMode::Limbo).crc).diverged);
     }
 }
 

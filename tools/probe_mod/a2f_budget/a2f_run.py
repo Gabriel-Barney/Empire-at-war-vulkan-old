@@ -102,6 +102,19 @@ STEPS_EMPIRE = r'''
     main menu > Quit. Do not save. The run finishes by itself (A2F_RUN_DONE exit=<n>); this window stays open.
 '''
 
+STEPS_UW = r'''
+ GAI3 T04 / T07 PROBE, HUMAN EMPIRE (--human-empire --saboteur --uw-infra; frame 12000 = 6 min 40 s of galactic time).
+ Nothing is clicked for you; then leave the game alone.
+ 1) Main menu > Single Player > Galactic Conquest > campaign "Heart of the Maw". Faction EMPIRE (the Rebel and the
+    Underworld are the AI players), difficulty Medium, Start (accept the defaults).
+ 2) Close the "Active Story Objectives" box. Then hands off: no orders, no pause, normal speed, keep the window in front
+    (FoC pauses when it loses focus). "A2FB PROBE: story script running" shows at the start. If a battle prompt appears,
+    choose auto-resolve (the prompt pauses galactic time).
+ 3) "5-minute dense phase done" (frame 9000) means keep going. At frame 12000 "A2FB PROBE: saboteur run recorded
+    (frame 12000)" shows: then Esc > Quit to the main menu > Quit. Do not save. The run finishes by itself
+    (A2F_RUN_DONE exit=<n>); this window stays open.
+'''
+
 
 def canary_status(mod, percept=True, saboteur=False):
     """{'Story': 'deleted' | 'present' | 'no mod folder'} - _CustomScriptMessage deleted the file when the script ran."""
@@ -131,6 +144,8 @@ def main():
     ap.add_argument('--sab-long', action='store_true', help='with --saboteur: the 30-minute saboteur run (a2m t12)')
     ap.add_argument('--human-empire', action='store_true',
                     help='bkg3 t03: the same kit played as EMPIRE (Rebel / Underworld budgets), 5 minutes; steps text only')
+    ap.add_argument('--uw-infra', action='store_true',
+                    help='gai3 t04 / t07 (run_a2f_uw.cmd): with --saboteur, UB records, Underworld build plans, to 12000')
     ap.add_argument('--wait-start-sec', type=float, default=900)
     ap.add_argument('--scan-sec', type=float, default=5.0)
     ap.add_argument('--report-only')
@@ -140,6 +155,9 @@ def main():
         build_a2f_mod.a2fb_spec.set_human_empire()  # bkg3: Underworld -> Tatooine, Conquer_Opponent desire
     if a.sab_long and not a.saboteur:
         ap.error('--sab-long needs --saboteur (run_a2f_sab.cmd --sab-long)')
+    if a.uw_infra and (not a.saboteur or a.sab_long):
+        ap.error('--uw-infra needs --saboteur and no --sab-long (run_a2f_uw.cmd)')
+    build_a2f_mod.set_uw_infra(a.uw_infra)
     if a.report_only:
         d = a.report_only
         res, text = a2f_report.run(os.path.join(d, 'records.txt'), os.path.join(d, 'budget_watch.jsonl'),
@@ -169,7 +187,8 @@ def main():
     watch_path = os.path.join(run_dir, 'budget_watch.jsonl')
     info = {'game': a.game, 'mod': mod, 'started': time.time(), 'scans': 0, 'mod_equations': not a.no_mod_equations,
             'percept': not a.no_percept and not a.saboteur, 'saboteur': a.saboteur,
-            'sab_desire': a.saboteur and not a.no_sab_desire, 'sab_long': a.sab_long}
+            'sab_desire': a.saboteur and not a.no_sab_desire, 'sab_long': a.sab_long,
+            'uw_infra': a.uw_infra, 'human_empire': a.human_empire}
     code = 0
     proc = None
     watcher_thread = None
@@ -191,7 +210,7 @@ def main():
             with open(qt, 'rb') as src, open(os.path.join(run_dir, 'A2FB_QUEUE_TYPES.json'), 'wb') as dst:
                 dst.write(src.read())
         say('\n' + '=' * 110 + '\n Mod installed (Mods\\%s). Full notes: tools\\probe_mod\\a2f_budget\\README.md'
-            % build_a2f_mod.MOD_NAME + (STEPS_SAB_LONG if a.sab_long else STEPS_SAB if a.saboteur else STEPS_EMPIRE if a.human_empire else STEPS) + '=' * 110)
+            % build_a2f_mod.MOD_NAME + (STEPS_SAB_LONG if a.sab_long else STEPS_UW if a.uw_infra else STEPS_SAB if a.saboteur else STEPS_EMPIRE if a.human_empire else STEPS) + '=' * 110)
         t0 = time.time()
         if not a.no_launch:
             subprocess.Popen([exe] + (WINDOWED if a.windowed else []) + [MODPATH], cwd=corr)

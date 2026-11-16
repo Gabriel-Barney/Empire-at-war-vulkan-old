@@ -957,6 +957,7 @@ void TacticalBattle::combat_sync(const objects::ObjectStore& store) {
                 // Prevent_All_Fire (derived flag, also for structures) and Set_Cannot_Be_Killed (the combat death gate)
                 combat_->set_flag(u.id, tc::kUnitScriptNoFire, script_ctl_[i].no_fire);
                 combat_->set_flag(u.id, tc::kUnitCannotDie, script_ctl_[i].cannot_die);
+                combat_->set_flag(u.id, tc::kUnitInLimbo, script_ctl_[i].limbo);  // Set_In_Limbo (+0x3a7 alone)
             }
             if (!u.alive || u.retreated || !u.movable) continue;
             combat_->set_position(u.id, tv(store.position(u.h)));

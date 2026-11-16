@@ -110,6 +110,9 @@ class GoalModeHooks {
 public:
     virtual ~GoalModeHooks() = default;
     virtual uint32_t target_count() = 0;
+    // The target id at position i (0 <= i < target_count()) of the mode's perception target list, the order the
+    // proposal walk visits targets in. Default: the identity.
+    virtual int32_t target_at(uint32_t i) { return static_cast<int32_t>(i); }
     virtual bool applies(int32_t target, uint32_t application_flags) = 0;  // target slot 4
     virtual bool blocked(uint32_t goal_type, int32_t target) = 0;          // slot 9 reachability lookup
     // Perception for (self, opponent, human, target); `function` names an equation.
@@ -132,6 +135,9 @@ public:
     // galactic mode refreshes g.nominal_time from the re-solved selection (AllowedTime reads the PP live, A2f t09).
     virtual bool plan_activatable(Goal& g) = 0;
     virtual bool plan_invalid(const Goal& g) = 0;      // 0x6c47c0 (-> 0x6c45e0: a unit taken by another PP)
+    // skai t15 (SKAI_T15_PLAN_RETEST §2.1): Resolve_Category also re-validates an old candidate's running plan (no
+    // MagicPlan exception) and drops it when invalid. Tactical only so far [port: galactic keeps the earlier rule].
+    virtual bool retest_old_candidates() { return false; }
     virtual bool replaceable(const Goal& g) = 0;       // 0x692740
     virtual void refresh_plan(Goal& g) = 0;            // 0x6c2d60: reserve / re-assert (+0x30 = PP)
     // 0x6c0be0's reservation part, Commit step 4, every active goal with a PotentialPlan, every Commit: its free-store

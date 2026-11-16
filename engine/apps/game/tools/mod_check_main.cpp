@@ -4,11 +4,13 @@
 //
 //   alamo_mod_check [--game DIR] [MODPATH=..] [STEAMMOD=..] [FALLBACKPATH=..] [--out FILE] [--json FILE|-] [--verbose]
 //                   [--no-campaigns] [--no-lua] [--no-lua-run] [--no-files] [--no-xml-tags] [--no-submod]
-//                   [--no-shaders] [--no-dxc]
+//                   [--no-shaders] [--no-dxc] [--no-fx-prebuild]
 //   --game defaults to ALAMO_FOC_DATA. --json - writes the JSON to stdout instead of the text report.
 //   STEAMMOD=<id> is found in the Steam library folders (alamo/vfs/steam_workshop.hpp); the workshop items of the same
 //   folders and <game>\Mods\* are the parents the submod check considers (modc t16).
 //   --no-shaders skips the effect audit (modc t21); --no-dxc keeps it to translation (no runtime DXC compile).
+//   With a mod mounted the audit first compiles the mod's .fx sources with fxc into the FxCache (modc t36);
+//   --no-fx-prebuild skips that (the audit then sees only what an earlier prebuild left in the cache).
 //   Exit 0: no errors (warnings allowed), 1: errors, 2: usage.
 //   Example (a Steam workshop mod):
 //     alamo_mod_check --game "...\corruption" STEAMMOD=1125571106 --json report.json
@@ -26,7 +28,7 @@ int usage() {
     std::fprintf(stderr,
                  "usage: alamo_mod_check [--game DIR] [MODPATH=..] [STEAMMOD=..] [FALLBACKPATH=..] [--out FILE] [--json FILE|-]\n"
                  "                       [--verbose] [--no-campaigns] [--no-lua] [--no-lua-run] [--no-files] [--no-xml-tags]\n"
-                 "                       [--no-submod] [--no-shaders] [--no-dxc]\n");
+                 "                       [--no-submod] [--no-shaders] [--no-dxc] [--no-fx-prebuild]\n");
     return 2;
 }
 
@@ -63,6 +65,7 @@ int main(int argc, char** argv) {
         else if (a == "--no-submod") opt.submod = false;
         else if (a == "--no-shaders") opt.shaders = false;
         else if (a == "--no-dxc") opt.shader_compile = false;
+        else if (a == "--no-fx-prebuild") opt.fx_prebuild = false;
         else if (a.find('=') != std::string::npos) args.push_back(a);  // MODPATH= etc.
         else return usage();
     }

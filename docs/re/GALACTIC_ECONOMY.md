@@ -521,6 +521,15 @@ arrival-point geometry.
 **Hero modifiers.** None appear in the speed formula; heroes contribute only through their own
 `Hyperspace_Speed` like any member. [H] for this function.
 
+**Retail check, slow hero fleet (gai3 t01, 2026-11-16).** A hero company travels with its `Company_Transport_Unit`
+(OI galactic SG 1.7): Tyber_Zann_Team flies in The_Peacebringer, a `Variant_Of_Existing_Type` of
+Krayt_Class_Destroyer with `Hyperspace_Speed` 1.0, the saboteur and Urai Fen / Silri teams in Underworld_Hero_Shuttle
+(1.5). In the Q2 reference run `20261108-204711-galactic-vanilla-lua` (HotM, hands-off to 21093) retail's
+Black_Market_Purchase sends Urai Fen (14969), Tyber Zann (15374) and Silri (17705) Felucia -> Kashyyyk -> Kuat ->
+Corellia -> Tatooine after Tatooine's Black_Market corruption at 14570. Leg ticks: shuttle 68 / 30 / 26 / 26, Peacebringer
+105 / 45 / 42 / 40, the 1 : 1.5 ratio of the two speeds on every routed leg. The port flies the same Peacebringer legs
+in 103 / 43 / 40 / 40 (HotM seed 10), within the 3-tick hop tolerance. Measured in the trace (no code read).
+
 ### 3.3 Arrival at a hop planet
 
 The path is a vector of planet ids at locomotor +0xb8, with index +0x80. It comes from the A* of GALACTIC.md §3.

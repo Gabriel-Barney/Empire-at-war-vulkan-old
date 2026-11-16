@@ -1658,6 +1658,207 @@ def sab_report_test(out, plan_recs, u_path, fs_path):
     check('report sab: saboteur.tsv one row per timeline record', len(st) > 50 and st[0].startswith('id\tsrc\tf'), str(len(st)))
 
 
+
+# ---- gai3 t04 / t07: the --uw-infra run (UB records, Underworld build plans with goal / target, to frame 12000) ------
+
+def uw_spec_checks(z, names):
+    """What makes the UB reads and the goal / target keys safe in retail, from the shipped data."""
+    galactic = '\n'.join(re.sub(r'<!--.*?-->', '', z.read(i).decode('latin-1'), flags=re.S) for n, i in names.items()
+                         if n.startswith('DATA/XML/AI/PERCEPTUALEQUATIONS/') and 'LAND' not in n and 'SPACE' not in n)
+    eqs = [n for n, _k in build_a2f_mod.UW_INFRA_EQS]
+    missing = [n for n in eqs if eq_body(galactic, n) is None]
+    check('uw spec: the five UB equations exist in the galactic files', not missing, str(missing))
+    closure = eq_closure(galactic, 'Should_Build_Underworld_Barracks') | eq_closure(galactic,
+                                                                                   'Should_Underworld_Build_Starbase')
+    check('uw spec: every UB equation is Should_Build_Underworld_Barracks / Should_Underworld_Build_Starbase or one of '
+          'their sub-functions', set(eqs) <= closure, str(set(eqs) - closure))
+    bad = [n for n in sorted(closure) if eq_body(galactic, n) is None or 'Variable_Human' in eq_body(galactic, n) or
+           '#' in eq_body(galactic, n) or retail_eval_fails(eq_body(galactic, n))]
+    check('uw spec: the UB closure exists, reads no Variable_Human and uses no #', not bad, str(bad))
+    gs = zread(z, names, 'DATA/XML/AI/GOALFUNCTIONS/AI_GOALSET_UNDERWORLD_GALACTIC.XML')
+    ok = all(re.search(r'<%s>\s*<Goal>%s</Goal>\s*<Function>%s</Function>' % (el, g, fn), gs) is not None
+             for el, g, fn in (('Build_Underworld_Barracks', 'Build_Underworld_Barracks', 'Should_Build_Underworld_Barracks'),
+                               ('Build_Underworld_Starbase', 'Upgrade_Starbase', 'Should_Underworld_Build_Starbase')))
+    goals = '\n'.join(z.read(i).decode('latin-1') for n, i in names.items() if n.startswith('DATA/XML/AI/GOALS/'))
+    for g in ('Build_Underworld_Barracks', 'Upgrade_Starbase'):
+        m = re.search(r'<%s>(.*?)</%s>' % (g, g), goals, re.S)
+        ok = ok and m is not None and re.search(r'<AIGoalApplicationFlags>\s*Friendly\s*</AIGoalApplicationFlags>',
+                                                m.group(1)) is not None
+    check('uw spec: the Underworld goal set scores Build_Underworld_Barracks / Upgrade_Starbase with those two '
+          'functions, both on Friendly targets (so UB reads only pairs the goal system scores itself)', ok)
+    for name, thread in build_a2f_mod.UW_PLANS:
+        t = zread(z, names, 'DATA/SCRIPTS/AI/%s.LUA' % name.upper())
+        check('uw spec: %s defines %s' % (name, thread), re.search(r'function\s+%s\s*\(' % thread, t) is not None)
+
+
+def uw_build_checks(out, zip_path):
+    build_a2f_mod.set_uw_infra(True)
+    try:
+        mod = os.path.join(out, 'mod_uw')
+        build_a2f_mod.build(None, mod, zip_path, saboteur=True)
+        ai = os.path.join(mod, 'Data', 'Scripts', 'AI')
+        files = sorted(os.listdir(ai))
+        check('build --uw-infra: %d plan scripts (PLANS + UW_PLANS)' % (len(build_a2f_mod.PLANS) +
+                                                                       len(build_a2f_mod.UW_PLANS)),
+              len(files) == len(build_a2f_mod.PLANS) + len(build_a2f_mod.UW_PLANS), str(files))
+        gp = open(os.path.join(ai, 'BuildGroundForcesPlan.lua'), 'rb').read()
+        us = open(os.path.join(ai, 'UpgradeStarbasePlan.lua'), 'rb').read()
+        cp = open(os.path.join(ai, 'ConquerPiratePlan.lua'), 'rb').read()
+        check('build --uw-infra: goal extension in the UW plans and UpgradeStarbasePlan (force substituted), not in '
+              'the others', b'ReserveForce.Get_Goal_Type_Name()' in gp and b'A2FB_Thread_Orig = ReserveForce_Thread' in gp
+              and b'BaseForce.Get_Goal_Type_Name()' in us and b'A2FB_GoalKeys' not in cp and b'@@' not in gp + us)
+        u = open(os.path.join(mod, 'Data', 'Scripts', 'Story', build_a2f_mod.SAB_SCRIPT + '.lua'), 'rb').read()
+        check('build --uw-infra: channel U config to 12000 (every 30 to 1400, then 300), UD to 12000, uw = true and '
+              'the five UB equations', b'step = 30, stop = 1400, step2 = 300, stop2 = 12000, des_stop = 12000' in u and
+              b'uw = true, infra = { { "SBB", "Should_Build_Underworld_Barracks" }' in u, u[:300])
+        check('build --uw-infra: TEXT_A2FB_SAB_DONE names frame 12000',
+              '(frame 12000)' in dict(build_a2f_mod.screen_texts(False))['TEXT_A2FB_SAB_DONE'])
+        refused = []
+        for kw in ({}, {'saboteur': True, 'sab_long': True}):
+            try:
+                build_a2f_mod.build(None, os.path.join(out, 'mod_uw_bad'), zip_path, **kw)
+                refused.append(False)
+            except SystemExit:
+                refused.append(True)
+        check('build --uw-infra without --saboteur, or with --sab-long, is refused', all(refused), str(refused))
+    finally:
+        build_a2f_mod.set_uw_infra(False)
+    n = open(os.path.join(out, 'mod_saboteur', 'Data', 'Scripts', 'Story', build_a2f_mod.SAB_SCRIPT + '.lua'),
+             'rb').read()
+    check('build --saboteur (no --uw-infra): uw = false, no UW plans', b'uw = false, infra = {  }' in n and
+          len(os.listdir(os.path.join(out, 'mod_saboteur', 'Data', 'Scripts', 'AI'))) == len(build_a2f_mod.PLANS))
+    return mod
+
+
+UW_PLAN_DRIVER = r'''
+Base_Definitions()
+PlayerObject = A2_PLAYERS["Underworld"]
+Budget = { Get_Spendable_Resources = function() return 0 end, Get_Unallocated_Resources = function() return 1320 end }
+function A2_FR() return tonumber(string.format("%d", A2_T * 30 + 0.5)) end
+A2_LOG = {}
+local function log(s) table.insert(A2_LOG, s .. " @" .. A2_FR()) end
+local function block(done, result)
+	return { IsFinished = function() return A2_FR() >= done end, Result = function() return result end }
+end
+Target = A2_TARGET
+ReserveForce = {
+	Set_As_Goal_System_Removable = function(b) log("Removable " .. tostring(b)) end,
+	Produce_Force = function(st) log("Produce_Force " .. tostring(st)) return block(1600, true) end,
+	Get_Goal_Type_Name = function() return "Build_Ground_Forces" end,
+	Set_Plan_Result = function(r) log("Set_Plan_Result " .. tostring(r)) end,
+}
+_ScriptExit = function() log("ScriptExit") A2_EXIT = true end
+GetThreadID = function() return 0 end
+local co = coroutine.create(ReserveForce_Thread)
+local resumes = 0
+for frame = 1501, 1501 + 400 do
+	A2_T = frame / 30
+	A2_CUR = co
+	local ok, v = coroutine.resume(co)
+	resumes = resumes + 1
+	if not ok then A2_OUT:write("THREAD_ERROR " .. tostring(v) .. "\n") break end
+	if coroutine.status(co) == "dead" then break end
+end
+A2_OUT:write("RESUMES " .. resumes .. "\n")
+for i = 1, table.getn(A2_LOG) do A2_OUT:write("LOG " .. A2_LOG[i] .. "\n") end
+if A2FB_Seq ~= nil then for i = 1, A2FB_Seq do A2_OUT:write(A2FB_Get(i) .. "\n") end end
+A2_OUT:close()
+'''
+
+
+def uw_plan_run(lua, lib, out, types, z, name, target, hooked=True):
+    names = {i.filename.upper(): i for i in z.infolist()}
+    orig = zread(z, names, 'DATA/SCRIPTS/AI/BUILDGROUNDFORCESPLAN.LUA')
+    build_a2f_mod.set_uw_infra(True)
+    try:
+        body = build_a2f_mod.plan_lua(orig, 'BuildGroundForcesPlan', 'ReserveForce_Thread') if hooked else orig
+    finally:
+        build_a2f_mod.set_uw_infra(False)
+    env = dict(os.environ, LUA_PATH=os.path.join(lib, '?.lua'))
+    outfile = os.path.join(out, 'uwplan_%s.txt' % name)
+    script = os.path.join(out, 'uwplan_%s.lua' % name)
+    with open(script, 'w', encoding='latin-1') as f:
+        f.write(prelude(outfile, types, no_debug=False))
+        f.write(body + '\n')
+        f.write('A2_TARGET = %s\n' % target)
+        f.write(UW_PLAN_DRIVER)
+    rc, text = lua_run(lua, script, env)
+    o = open(outfile).read() if os.path.exists(outfile) else ''
+    return rc, text, o
+
+
+def uw_plan_tests(lua, lib, out, types, z):
+    """The goal extension on the real BuildGroundForcesPlan thread: same orders as the shipped script; goal / target
+    keys on PSTART and PRET (a target named through its game object, and none)."""
+    recs = []
+    for name, target in (('tgt', '{ Get_Game_Object = function() return { Get_Type = function() return '
+                                  '{ Get_Name = function() return "Shola" end } end } end }'), ('notgt', 'nil')):
+        rc, text, o = uw_plan_run(lua, lib, out, types, z, name, target)
+        rc0, text0, o0 = uw_plan_run(lua, lib, out, types, z, name + '_shipped', target, hooked=False)
+        log = [ln for ln in o.splitlines() if ln.startswith('LOG ')]
+        log0 = [ln for ln in o0.splitlines() if ln.startswith('LOG ')]
+        check('uw plan %s: BuildGroundForcesPlan thread runs hooked and unhooked, same orders at the same frames' % name,
+              rc == 0 and rc0 == 0 and 'THREAD_ERROR' not in o + o0 and 'SCRIPT_FAILED' not in o and bool(log0) and
+              log == log0, (text + o)[:700] + str(log0))
+        tgt = 'tgt=SHOLA tgtk=obj' if name == 'tgt' else 'tgt=nil tgtk=nil'
+        check('uw plan %s: PSTART and PRET carry goal=Build_Ground_Forces %s, PSTART unalloc=1320' % (name, tgt),
+              re.search(r'\|PSTART\|plan=BuildGroundForcesPlan t=50.0333 f=1501 fac=UNDERWORLD budget=table spend=0 '
+                        r'unalloc=1320 cr=\S+ n=1 prev=first goal=Build_Ground_Forces %s\|' % tgt, o) is not None and
+              re.search(r'\|PRET\|plan=BuildGroundForcesPlan .* goal=Build_Ground_Forces %s\|' % tgt, o) is not None,
+              o[:1200])
+        recs += [ln for ln in o.splitlines() if ln.startswith('A2FB1|')]
+    return recs
+
+
+def uw_u_tests(lua, lib, out, types):
+    build_a2f_mod.set_uw_infra(True)
+    try:
+        rc, text, o, recs, path = sab_u_run(lua, lib, out, types, 'uw_u', frames=12100)
+    finally:
+        build_a2f_mod.set_uw_infra(False)
+    ub = [r for r in recs if r['kind'] == 'UB']
+    ubn = [r for r in recs if r['kind'] == 'UBN']
+    want = list(range(0, build_a2f_mod.SAB_STOP + 1, build_a2f_mod.SAB_STEP)) + \
+        list(range(1500, build_a2f_mod.UW_INFRA_STOP + 1, build_a2f_mod.SAB_LONG_STEP))
+    end = [int(r['f']['f']) for r in recs if r['kind'] == 'UEND']
+    check('uw U: no failed flag; UBN every 30 frames to 1400, then every 300 to 12000; UEND once after 12000',
+          rc == 0 and 'SCRIPT_FAILED' not in o and 'MAIN_ERROR' not in o and
+          [int(r['f']['f']) for r in ubn] == want and len(end) == 1 and 12000 < end[0] <= 12005,
+          (text + o)[:400] + str([r['f']['f'] for r in ubn][:5]))
+    own = {'FELUCIA', 'NALHUTTA', 'SHOLA', 'THE_MAW'}
+    check('uw U: UB only for the Underworld\'s planets (4 per frame, UBN n=4), all five keys',
+          all(r['f']['n'] == '4' for r in ubn) and len(ub) == 4 * len(want) and {r['f']['tgt'] for r in ub} == own and
+          all(all(k in r['f'] for k in ('SBB', 'SSD', 'SSC', 'NGU', 'SBS', 'cor')) for r in ub), str(ub[:1]))
+    check('uw U: UB values nil before the AI Init, numbers after',
+          ub[0]['f']['SBB'] == 'nil' and ub[-1]['f']['SBB'] == '0' and ub[-1]['f']['SBS'] == '0', str([ub[0], ub[-1]]))
+    check('uw U: the run fits in the channel cap and records stay <= 400 bytes',
+          bool(recs) and recs[-1]['kind'] == 'UEND' and len(recs) < 6000 and
+          all(len(r['text']) + 60 <= 400 for r in recs), str(len(recs)))
+    return path
+
+
+def uw_report_test(out, plan_recs, u_path):
+    rd = os.path.join(out, 'uwrep')
+    os.makedirs(rd, exist_ok=True)
+    recs = os.path.join(rd, 'records.txt')
+    with open(recs, 'w') as f:
+        f.write('\n'.join(plan_recs) + '\n')
+        f.write(open(u_path).read())
+        f.write('A2FB1|Q|0x9|1|QB|t=50 f=1530 fac=UNDERWORLD pl=SHOLA type=UNDERWORLD_MDU_COMPANY cost=1000 cr=2200|END\n')
+    res, txt = a2f_report.run(recs, None, None, rd, port_perception=None)
+    sec = txt[txt.find('== 10.'):]
+    check('report uw: section 10 with the Build_Ground_Forces start (goal, target, unalloc), the QB and UB rows',
+          '== 10. Underworld infrastructure' in txt and
+          re.search(r'f=1501\s+BuildGroundForcesPlan\s+goal=Build_Ground_Forces\s+tgt=SHOLA\s+unalloc=1320', sec)
+          is not None and re.search(r'f=1530\s+SHOLA\s+UNDERWORLD_MDU_COMPANY\s+cost=1000\s+cr=2200', sec) is not None and
+          re.search(r'f=0\s+FELUCIA\s+cor=\S+\s+SBB=nil', sec) is not None, sec[:1500])
+    t = open(os.path.join(rd, 'uw_infra.tsv')).read().splitlines()
+    p = open(os.path.join(rd, 'plans.tsv')).read().splitlines()
+    check('report uw: uw_infra.tsv one row per UB record; plans.tsv has goal / target columns',
+          len(t) == 1 + 4 * 83 and t[0].startswith('frame\tplanet') and p[0].endswith('\tgoal\ttarget') and
+          any(x.endswith('\tBuild_Ground_Forces\tSHOLA') for x in p[1:]), str(t[:2] + p[:3]))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--lua')
@@ -1676,6 +1877,8 @@ def main():
     MODEL_EQ = model_equations(z)
     types = spec_checks(z)
     mod, types = build_test(out, ZIP)
+    uw_spec_checks(z, {i.filename.upper(): i for i in z.infolist()})
+    mod_uw = uw_build_checks(out, ZIP)
     watcher_test(out)
     cleanup_test(out)
     if lua:
@@ -1698,6 +1901,11 @@ def main():
         fs_path = sab_fs_tests(lua, lib, out, types)
         sab_story_test(lua, lib, out, types)
         sab_report_test(out, plan_recs, u_path, fs_path)
+        # gai3 t04 / t07: the --uw-infra run
+        lua_syntax(lua, mod_uw, out)
+        uw_recs = uw_plan_tests(lua, lib, out, types, z)
+        uw_u_path = uw_u_tests(lua, lib, out, types)
+        uw_report_test(out, uw_recs, uw_u_path)
     else:
         print('SKIPPED the Lua checks: no lua50.exe (tools\\probe_mod\\common\\build_lua50.cmd builds one)')
     bad = [n for n, ok in RESULTS if not ok]

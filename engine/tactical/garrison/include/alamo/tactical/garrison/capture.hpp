@@ -63,6 +63,9 @@ public:
     // q6 t19 rule (a) (AI_GALACTIC_TOKENS §9.11, AI_TACTICAL §7.5.1 item 1): a build pad whose pad data holds an
     // under-construction object or a child keeps its current owner, whoever stands on it. Unset: no pads.
     void set_pad_occupied(std::function<bool(ObjectId point)> fn) { pad_occupied_ = std::move(fn); }
+    // STY1 t01 (Lua Disable_Capture): a point whose CAPTURE_POINT behaviour is suspended is not serviced - no controller scan,
+    // no progress or owner change, no event; progress and pending stay as they were. Not saved (the host's state). Unset: none.
+    void set_suspended(std::function<bool(ObjectId point)> fn) { suspended_ = std::move(fn); }
 
     bool add_point(ObjectId id, int32_t owner, Vec3 position, const CapturePointDesc& d, uint32_t first_frame = 0);
     void remove(ObjectId id);
@@ -107,6 +110,7 @@ private:
     int32_t neutral_;
     uint32_t interval_;
     uint32_t allowed_frame_;
+    std::function<bool(ObjectId)> suspended_;
     std::function<bool(int32_t, int32_t)> allied_;
     std::function<int32_t(ObjectId)> occupant_owner_;
     std::function<bool(int32_t)> neutral_owner_;

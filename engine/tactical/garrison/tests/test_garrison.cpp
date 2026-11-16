@@ -289,6 +289,29 @@ void test_owner_change() {
     CHECK(g.events().empty() && g.holder_of(1) == 10);
 }
 
+// STY1 t01: Lua Disable_Capture suspends the point's service - progress, pending and owner stay frozen, and capture
+// resumes from where it stopped when the suspension ends.
+void test_capture_suspended() {
+    constexpr int32_t kNeutral = 9;
+    CapturePointSystem c(kNeutral, 4, 0);
+    CapturePointDesc d;
+    d.radius = 100.0f;
+    d.transition_seconds = 0.4f;  // step 1/3
+    CHECK(c.add_point(5, kNeutral, {0, 0, 0}, d));
+    bool off = false;
+    c.set_suspended([&off](ObjectId id) { return id == 5 && off; });
+    const std::vector<Influencer> inf = {{1, 0, {50, 0, 0}}};
+    c.service(0, inf);
+    const float p0 = c.progress(5);
+    CHECK(p0 > 0.33f && p0 < 0.34f && c.pending(5) == 0);
+    off = true;
+    for (uint32_t f = 4; f <= 80; f += 4) c.service(f, inf);
+    CHECK(c.progress(5) == p0 && c.pending(5) == 0 && c.owner(5) == kNeutral && c.events().empty());
+    off = false;
+    for (uint32_t f = 84; f <= 120; f += 4) c.service(f, inf);
+    CHECK(c.owner(5) == 0 && !c.events().empty());
+}
+
 void test_capture() {
     constexpr int32_t kNeutral = 9;
     CapturePointSystem c(kNeutral, 4, 8);
@@ -1105,6 +1128,7 @@ int main() {
     const uint64_t h1 = scripted_hash(), h2 = scripted_hash();
     CHECK(h1 == h2);
     test_capture();
+    test_capture_suspended();  // STY1 t01
     test_owner_change();  // A1 t08
     test_types();
     test_garrison_save();  // N1 stage 2

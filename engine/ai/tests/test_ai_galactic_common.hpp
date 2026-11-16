@@ -67,6 +67,7 @@ using ::alamo::test::g_fail;
 inline bool g_write_golden = false;
 void test_cadence();
 void test_goal_pass_cadence();
+void test_goal_target_walk_order();
 void test_desire_and_hysteresis();
 void test_goal_reservations();
 void test_goal_batched_accept();

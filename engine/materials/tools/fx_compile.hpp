@@ -13,10 +13,12 @@
 
 namespace alamo::materials {
 
-// $ALAMO_FXC if set, else the fxc.exe CMake found under toolchain\msvc\Windows Kits\10\bin\<ver>\x64
-// (empty path when neither exists).
+// $ALAMO_FXC if set, else fxc\fxc.exe beside the running exe (test builds ship it there with d3dcompiler_47.dll,
+// modc t36), else the fxc.exe CMake found under toolchain\msvc\Windows Kits\10\bin\<ver>\x64 (empty path when none
+// exists).
 std::filesystem::path default_fxc_path();
-// "fxc <SDK version folder> <size of fxc.exe>/<size of the d3dcompiler_47.dll beside it>"; "" if missing.
+// "fxc <SDK version> <size of fxc.exe>/<size of the d3dcompiler_47.dll beside it>"; "" if missing. The version is the
+// first line of SDK_VERSION.txt beside fxc.exe when there is one (test builds), else the SDK's bin\<ver> folder name.
 std::string fxc_identity(const std::filesystem::path& fxc);
 
 // Writes `src` (the .fx and its includes, at their game paths) to a fresh temporary folder, runs
@@ -46,5 +48,18 @@ struct FxPrebuildItem {
 bool prebuild_fx_sources(const FileProvider& files, std::span<const std::string> fx_paths, const FxCache& cache,
                          const std::filesystem::path& fxc, bool force, std::vector<FxPrebuildItem>& items,
                          std::string* err = nullptr);
+
+// modc t36: the whole prebuild of one data set, as alamo_game and alamo_mod_check run it when a mod is mounted:
+// every `.fx` the loader would take for `shader_files` (shader_files_from_vfs(vfs, true)) through
+// prebuild_fx_sources without force. With fxc missing the cached entries still count and the others say so.
+struct FxPrebuildRun {
+    std::string fxc;                   // fxc_identity(), "" when fxc.exe was not found
+    std::vector<FxPrebuildItem> items;  // by path
+    bool complete = false;             // prebuild_fx_sources returned true (fxc found, every store written)
+    std::string error;                 // its first error otherwise
+    double ms = 0;
+};
+FxPrebuildRun prebuild_effect_sources(const FileProvider& files, std::span<const ShaderFileEntry> shader_files,
+                                      const FxCache& cache, const std::filesystem::path& fxc);
 
 }  // namespace alamo::materials

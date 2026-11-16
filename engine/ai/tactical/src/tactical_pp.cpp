@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <map>
 
 #include "alamo/core/sim_rng.hpp"
@@ -76,6 +77,7 @@ struct TacPp {
 
     std::vector<uint32_t> sel_rec;
     std::vector<int32_t> sel_unit, sel_pool, sel_pad, sel_slot, sel_entry;
+    std::vector<float> sel_health;  // skai t15 re-test: per selection, the live unit's health (< 0 none: full power)
     uint64_t selected_mask = 0;
     bool any_hero_attach = false, any_special = false, any_escort = false;
     bool main_met = false, escort_met = false;
@@ -177,8 +179,10 @@ struct TacPp {
     // Selection i subtracts from one list (0x6bf840): its contrast entry's row (weight x P) and the layer total (P).
     void subtract(size_t i, bool escort) {
         const PpRec& r = recs[sel_rec[i]];
-        const double P = static_cast<double>(power_of(r.type)) *
-                         (sel_unit[i] >= 0 ? static_cast<double>(in.free_units[static_cast<size_t>(units[static_cast<size_t>(sel_unit[i])].index)].health) : 1.0);
+        double h = 1.0;
+        if (sel_unit[i] >= 0) h = static_cast<double>(in.free_units[static_cast<size_t>(units[static_cast<size_t>(sel_unit[i])].index)].health);
+        else if (i < sel_health.size() && sel_health[i] >= 0.0f) h = static_cast<double>(sel_health[i]);
+        const double P = static_cast<double>(power_of(r.type)) * h;
         const int32_t e = entry_in(sel_entry[i], escort);
         if (e >= 0 && entries[static_cast<size_t>(e)].row >= 0)
             remaining[static_cast<size_t>(e)] -= static_cast<double>(weight(r.type, entries[static_cast<size_t>(e)].row)) * P;
@@ -831,9 +835,73 @@ bool solve_tactical_pp(const TacticalPpInput& in, TacticalPpResult& out) {
             k.tf = static_cast<int32_t>(pp.slots[static_cast<size_t>(slot)].tf);
             k.team = static_cast<int32_t>(pp.slots[static_cast<size_t>(slot)].team);
         }
+        k.contrast_entry = pp.sel_entry[i];
         out.picks.push_back(k);
     }
+    out.layer_space = pp.layer_active_space;
+    out.layer_ground = pp.layer_active_ground;
     return out.ok;
+}
+
+bool retest_tactical_pp(const TacticalPpInput& in, const std::vector<PpRetestPick>& picks, bool layer_space, bool layer_ground,
+                        std::string* why) {
+    if (!in.def || !in.types) return true;
+    TacPp pp(in);
+    PlanM planm(pp);
+    planm.setup_a();  // the team slots and the EscortForce flag (0x140b3a525)
+    ContrastM contrast(pp);
+    contrast.setup_a();  // the lists, step for step as at a solve (0x6c5de0), with the current f
+    if (pp.entries.empty()) return true;
+    pp.layer_active_space = layer_space;  // not rewritten by the re-test (§1.2)
+    pp.layer_active_ground = layer_ground;
+    for (const PpRetestPick& k : picks) {
+        const auto i = static_cast<uint32_t>(pp.sel_rec.size());
+        pp.sel_rec.push_back(pp.ensure_rec(k.type));
+        pp.sel_unit.push_back(-1);
+        pp.sel_pool.push_back(-1);
+        pp.sel_pad.push_back(-1);
+        pp.sel_entry.push_back(k.contrast_entry);
+        pp.sel_health.push_back(k.health);
+        int32_t slot = -1;
+        for (size_t s = 0; s < pp.slots.size(); ++s)
+            if (static_cast<int32_t>(pp.slots[s].tf) == k.tf && static_cast<int32_t>(pp.slots[s].team) == k.team) slot = static_cast<int32_t>(s);
+        pp.sel_slot.push_back(slot);
+        if (slot >= 0) pp.slots[static_cast<size_t>(slot)].assigned.push_back(i);
+    }
+    pp.recompute_remaining();  // 0x6c4b20 over the stored selection
+    bool ok = true;
+    contrast.finalize(ok);  // 0x72af80
+    if (!ok && why) {  // name each failing list / layer: its untyped total and its typed rows (the two checks of 0x72af80)
+        std::string s = "contrast re-test failed:";
+        for (const bool escort : {false, true}) {
+            if (escort && !pp.has_escort_list) continue;
+            const size_t base = escort ? pp.esc_base : 0;
+            for (const bool space : {true, false}) {
+                if (!(space ? pp.layer_active_space : pp.layer_active_ground)) continue;
+                const size_t e = base + (space ? 0 : 1);
+                double total = 0.0, residual = 0.0;
+                for (size_t r = 0; r < pp.entries.size(); ++r) {
+                    if (pp.entries[r].row < 0 || pp.entries[r].space != space || pp.entries[r].escort != escort) continue;
+                    total += pp.entries[r].target;
+                    residual += std::max(pp.remaining[r], 0.0);
+                }
+                char buf[200];
+                std::snprintf(buf, sizeof buf, " %s %s: total %.1f of %.1f left, rows %.1f of %.1f left;", escort ? "escort" : "main",
+                              space ? "space" : "ground", pp.remaining[e], pp.entries[e].target, residual, total);
+                s += buf;
+            }
+        }
+        int32_t typed = 0;
+        for (size_t i = 0; i < pp.sel_rec.size(); ++i) {
+            const int32_t e = pp.sel_entry[i];
+            if (e >= 0 && static_cast<size_t>(e) < pp.entries.size() && pp.entries[static_cast<size_t>(e)].row >= 0) ++typed;
+        }
+        char tol[96];
+        std::snprintf(tol, sizeof tol, " tolerance %.3f; %zu selected, %d on a typed row", static_cast<double>(pp.tolerance),
+                      pp.sel_rec.size(), typed);
+        *why = s + tol;
+    }
+    return ok;
 }
 
 }  // namespace alamo::ai::tactical

@@ -592,10 +592,14 @@ public:
     // applies, the lowest non-negative max_speed wins). Registered per bridge owner `key`, like the movement lock.
     struct ScriptUnitControl {
         bool no_fire = false, loco_suspended = false, cannot_die = false;
+        bool limbo = false, capture_disabled = false;  // Set_In_Limbo; Disable_Capture (read through the capture service)
         float max_speed = -1.0f;  // < 0 = none
     };
     void set_script_unit_control(const void* key, std::function<ScriptUnitControl(objects::ObjectId)> fn);
     ScriptUnitControl script_unit_control(objects::ObjectId id) const;
+    // Lua Prevent_Opportunity_Fire (docs/re/STY1_OBJECT_SETTERS_RE_ANSWERS.md §1): the incognito bit on the object and, first,
+    // on every member of its TEAM container. An edge (damage clears it), so the bridge calls it when the setter runs.
+    void script_opportunity_fire(objects::ObjectId id, bool on);
     // s78n t06 review: the hero clash's share of the lock (+0x3b4, HERO_CLASH §3.2) while it is held. release_hero_clash_lock
     // = a Lua Unlock_Current_Orders through the hero's land TEAM object (A1_READINGS §28.9 item 4: retail's decrement of
     // the member's counter): the hero's movement orders are free again while +0x3b4 stays set (until the clash release

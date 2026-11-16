@@ -87,9 +87,27 @@ mode; `outcome.planets_final` Rebel 4.6 vs 5 and Underworld 3.4 vs 3: the port l
 which seed 0 alone does not show); geonosis_skirmish FAIL 9 / PASS 10 (`outcome.units_lost[Empire]` 1.7 +- 3.1 vs 0
 PASSES: seed noise, not the regression the single mode reported).
 
+Second recording (2026-11-16, q4d t04, dev 4385f8a0, 10 seeds, 9 + 8 retail runs): hotm_galactic FAIL 15 / PASS 109,
+geonosis_skirmish FAIL 6 / PASS 13. The 5 + 2 metrics that passed in the first recording and fail now moved with the
+references (retail means and spreads from more runs), not with the port. hotm_galactic does not grade spreads (its own
+`distribution` in `scenarios.json`): every retail run starts from seed 0 on the menu path, so its sd is timing noise
+only (0 on most metrics) while the port side varies its seed. What still fails across seeds: five Underworld hop routes
+(Kashyyyk <-> The Maw 108 vs 162, Nal Hutta <-> Shola 79 / 88 vs 106, The Maw -> Shola) in 3..7 of 10 seeds;
+Rebel infantry / tank buster build times at Kamino and Naboo about twice retail's (retail 116..173 in 7 of 8 runs);
+`outcome.planets_final` (the port gives the Underworld a Rebel planet in 5 of 10 seeds, retail in none of 9 hands-off
+runs); in the skirmish the Rebel AI's first build (frame 600 vs 1800..3000) and its credits.
+
+Third recording, hotm_galactic only (2026-11-16, gai3 t01, dev 86714f47, 10 seeds): FAIL 16 / PASS 109. Underworld
+Naboo <-> Tatooine moved PASS -> FAIL with gai3 t05 / t06 (planets-only target list, bb6e2f60 / f5a45f09), which re-recorded
+the goldens but not these baselines: a saboteur gets the corruption bonus (75 ticks, retail 113) once the port has
+corrupted Tatooine before tick 13501, and in seed 1 a Kedalbe fleet flies it (171). With `hop_max_tick` the Tyber Zann
+rows (Kuat -> Corellia, Corellia -> Tatooine, Kashyyyk -> Kuat, Felucia -> Kashyyyk) pass. The single-run baseline was
+re-recorded from the same dev commit (seed 0: 6 rows moved with gai3 t05 / t06).
+
 **More retail runs.** The means are only as good as the retail sample, and spreads are not graded below 5 runs a side
-(today: hotm_galactic 4, geonosis_skirmish 3). `tools\probe_mod\parity_refs\` (Gabriel runs it: several hands-off Q2
-runs per scenario in one sitting) records more and writes an `add_refs.cmd`; `add-refs` appends runs to a scenario's
+(since q4d t04: hotm_galactic 9, geonosis_skirmish 8; one paused galactic run is in `excluded_references`).
+`tools\probe_mod\parity_refs\` (several hands-off Q2 runs per scenario in one sitting; the skirmish runs of q4d t03
+were made with `run_trace.ps1 -Scenario skirmish -NoDrive -LuaProbe` and the menus set by hand) records more and writes an `add_refs.cmd`; `add-refs` appends runs to a scenario's
 `references` in `scenarios.json` (each run's `trace.q2t` must exist under the reference folder unless `--no-check`; a run
 already listed or in `excluded_references` is skipped; the file keeps its layout). Check new runs with `retail`
 (leave-one-out) and re-record both baselines.
@@ -101,7 +119,10 @@ The reference runs are the Q2 traces of the original game (Steam FoC 1.121), mad
 empty, so the harness reads the main checkout's copy (found with `git rev-parse --git-common-dir`); a run missing from a
 worktree's own `out\` (a worktree whose kit recorded new runs) is looked up in the main checkout's next. `--refs DIR` or
 `ALAMO_Q2_TRACES` points elsewhere (that folder only). A scenario's `max_tick` cuts every galactic reference run at that
-tick, so a run that went on longer (or with human input later) still grades the same window. Travel timings come from these traces as well: the G1 hop probe
+tick, so a run that went on longer (or with human input later) still grades the same window. `travel.hop_ticks` alone
+reads the reference runs up to `hop_max_tick` (gai3 t01, 2026-11-16; hotm_galactic: 21093, the long run's last tick before
+input): a leg's duration is its fleet's speed on that route, not a matter of when it flies, so later hands-off legs add
+retail speeds (retail's Tyber Zann on Kuat -> Corellia, 42 ticks at 15524). Travel timings come from these traces as well: the G1 hop probe
 (`tools\probe_mod\g1_hops\`) measured the retail hops from the same galactic trace.
 
 | scenario | reference runs | kit that makes one |

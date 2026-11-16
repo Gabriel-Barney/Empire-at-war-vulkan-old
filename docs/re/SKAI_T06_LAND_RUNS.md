@@ -215,7 +215,7 @@ AI against AI, foc-land, 30000 ticks, seeds 1-6 (frame of the end; Rebel wins ea
 21942 / 24479 / 21427 / 22930 / 21313 / 21549. The space outcome seeds (`--skirmish-ai foc`, 16000 ticks): 15 of 16
 end, seed 3 runs into the 14400-frame limit and is left out of the tests.
 
-**Still different: what the force sums and Find_Nearest see [M, trace; waits for run 2's FNEAR records].** Three
+**Still different: what the force sums and Find_Nearest see [M, trace; the Find_Nearest part is [H] since §9].** Three
 observations point at one rule, "an object with DUMMY_GROUND_STRUCTURE (the base structures: Command Center, Barracks,
 factories, Research Facility, turbolaser towers...) is not in the perception grid's per-player object list", although
 those types list UNIT_AI:
@@ -270,3 +270,57 @@ read with `EvaluatePerception(name, PlayerObject)` (the land goal system evaluat
 pass; none has a target or a `#` draw): `nsf` Non_Structure_Force_Unnormalized, `ut` Skirmish_Upgrade_Tech, `init`
 Is_Initial_Skirmish_State_Established, `nr` Num_Refineries, `sav` Is_Saving_For_Refineries_Land, `burn`
 Should_Burn_Units_Land. `ut` flipping while `nsf` passes 400 settles the first observation.
+
+## 8. Third retail Rebel AI run (skai t14 run 2, 2026-11-16)
+
+The t14 "run 2" lobby (Utapau Heights, idle human Empire, Rebel Medium AI, Advanced Default) ran on 2026-11-16 with the skai t15
+hook kit instead of the FNEAR kit (`out\20261116-012157-skirmish-vanilla-lua` in the q4d-skai worktree; no `FNEAR` records, so
+the Find_Nearest question of §6 is still open). 36000 frames, no battle end (`ticks_reached`), as in §1 and §6. Base losses:
+turbolaser towers 11318 / 17212, base shield 21663, light vehicle factory 22069, research facility 24793, communications array
+25479, barracks 29004, power generator 29665; the **Command Center survives** this time. Opening: refinery 2659, Katarn team
+2746, tech 2 9781, Han Solo 12817, tech 3 16987. The plan ends (54 Destroy_Structure ends: 26 Burn_Units_Land purges, 10 own
+exits, 7 failed re-tests, 7 displacements, 4 random-phase re-checks) are in SKAI_T15_PLAN_RETEST.md, "Retail hook runs".
+
+**Why that run had no FNEAR records (skai-lane2, 2026-11-16).** It did run the FNEAR hook: `BurnUnitsLand.lua` in that kit
+carried the wrapper, Burn_Units_Land ran 11 times and its `near=` field shows Find_Nearest results, yet no FNEAR and no ERR
+record appeared. The wrapper was installed only while the plan script's chunk ran, guarded by "not wrapped yet"; so retail sets
+the `Find_Nearest` global again after the chunk runs [M: the binding is registered after the script body, or per thread], and
+the shipped call reached the binding directly. Fixed in `make_plan_hooks.py`: `Q2P_FNInstall` runs at the chunk run and again
+at every thread start (`Q2P_Begin`), and an `FNHOOK fn_kind=` record marks each install; `selftest_lua.py` covers a binding
+set back after the chunk (burn_nil case, FNHOOK 2). The FNEAR run with this kit is §9.
+
+## 9. FNEAR run (skai t14 Run A, 2026-11-16): the nil Find_Nearest settled
+
+Run `out\20261116-062402-skirmish-vanilla-lua` (this worktree's kit, the fixed FNEAR hook): Utapau Heights, idle human
+Empire, Rebel Medium AI, Advanced Default. One `FNHOOK` record (fn_kind=userdata, at Burn_Units_Land's first thread start,
+508.8 s) and 14 `FNEAR` records: Burn_Units_Land ran 7 times (508.8-893.8 s of game time, about frames 15260-26800), each
+run made the shipped call `Find_Nearest(MainForce, "InBase", PlayerObject, false)` and its fallback
+`Find_Nearest(MainForce, PlayerObject, false)` once, then slept and ended (PDONE about 37 s after PSTART, as in §6).
+
+| Call | Result in 7 of 7 runs | Extra reads (fn_any: no player, no fog test; fn_foe: the Empire player with true, its own objects) |
+|---|---|---|
+| `"InBase"`, Rebel player, false | nil | fn_any nil 7/7, fn_foe nil 7/7 |
+| no filter, Rebel player, false | nil 6/7; a STORMTROOPER_TEAM (id 164769, a late Empire team) at 570.3 s | fn_any: the Rebels' own REBEL_MINERAL_PROCESSOR 4/6 or own trooper team 2/6; fn_foe nil 6/6 |
+
+`fn_count` was 24-34 at every call, and the ownerless read found the Rebels' own objects, so the task force has units and a
+position: the empty-task-force explanation of §6 is ruled out. The fog explanation is ruled out too: the read without a
+player (no fog test) and the Empire's read of its own objects both found no InBase object, while the Empire's Command
+Center, barracks, both vehicle factories, research facility, communications array, power generator and shield all stood (losses
+below). The `"InBase"` call found nothing **of any owner**, not even the Rebel AI's own base. Every UNIT_AI type with
+`InBase` in its Property_Flags (the Command Centers, barracks, factories, research facilities, communications arrays,
+shields, turbolaser towers, secondary heavy factories, the Underworld palace and its structures) also has
+DUMMY_GROUND_STRUCTURE (the InBase build pads have no UNIT_AI), so the run confirms the rule of §7 for Find_Nearest:
+**an object with DUMMY_GROUND_STRUCTURE is not in the per-player list Find_Nearest walks, for any player and with or
+without a player argument** [H: run 1 and Run A]. A pad-built Mineral Processor (UNIT_AI, no DUMMY_GROUND_STRUCTURE) is
+found. The port has had this rule since skai t15 part 1 (dev 96257374, `g_find_nearest` in
+`engine/lua/src/bind_objects.cpp` skips DUMMY_GROUND_STRUCTURE before the player test), so an `"InBase"` Find_Nearest is
+nil in the port too: no port change.
+
+Not explained, not needed: the fallback's fn_foe was nil at 508.8 s although a STORMTROOPER_TEAM was found at 570.3 s; the
+idle human's start infantry was dead by frame 13368 (below), so the team found at 570.3 s is a later Empire unit.
+
+**The battle ended** (fourth retail Rebel AI run on this lobby, the first with an end): human losses turbolaser towers
+11690 / 13896, heavy vehicle factory 16861, base shield 17476, research facility 18898, communications array 18989,
+barracks 19638, power generator 22312, light vehicle factory 22944, **Command Center 27057**; results screen at mode
+frame 27265 ("You have lost the battle"). Start infantry lost 12474-13368. Analysis: `analysis/land_attack.py`. Retail
+Rebel AI against the idle Empire on Utapau now ends 1 of 4 (27265; §1, §6 and §8 did not end in 36000).

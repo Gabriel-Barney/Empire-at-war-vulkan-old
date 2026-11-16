@@ -9,11 +9,20 @@
     {"run": "20261108-170824-galactic-vanilla-lua", "note": "reader 2: credits, production queues, Lua plan records (fixed kit, q2f t10)"},
     {"run": "20261030-061228-galactic-vanilla-lua", "note": "reader 2: credits, production queues"},
     {"run": "20261027-101057-galactic-vanilla", "note": "reader 1: no credits, no production queues (travel, fleets and outcomes only); 577 missed ticks"},
-    {"run": "20261108-204711-galactic-vanilla-lua", "note": "q4hf t03: reader 2, fixed kit; 40 cycles, hands-off until the two Tatooine battles on day 16 (tick 21094, answered with Auto-resolve: autoresolve_refs.json), graded up to max_tick only"}
+    {"run": "20261108-204711-galactic-vanilla-lua", "note": "q4hf t03: reader 2, fixed kit; 40 cycles, hands-off until the two Tatooine battles on day 16 (tick 21094, answered with Auto-resolve: autoresolve_refs.json), graded up to max_tick only"},
+    {"run": "20261115-220422-galactic-vanilla-lua", "note": "q4d t03 (2026-11-15): run_capture.cmd, reader 2, fixed kit, hands-off, cycles_reached"},
+    {"run": "20261115-221357-galactic-vanilla-lua", "note": "q4d t03 (2026-11-15): run_capture.cmd, reader 2, fixed kit, hands-off, cycles_reached"},
+    {"run": "20261115-222352-galactic-vanilla-lua", "note": "q4d t03 (2026-11-15): run_capture.cmd, reader 2, fixed kit, hands-off, cycles_reached"},
+    {"run": "20261115-223325-galactic-vanilla-lua", "note": "q4d t03 (2026-11-15): run_capture.cmd, reader 2, fixed kit, hands-off, cycles_reached"},
+    {"run": "20261115-224259-galactic-vanilla-lua", "note": "q4d t03 (2026-11-15): run_capture.cmd, reader 2, fixed kit, hands-off, cycles_reached"}
    ],
    "max_tick": 13501,
+   "hop_max_tick": 21093,
+   "hop_max_tick_why": "gai3 t01 (2026-11-16, backlog b0171): travel.hop_ticks reads the reference runs up to this tick, every other metric up to max_tick. A leg's duration is the fleet's speed on that route (Hyperspace_Speed of its slowest member, route factor, corruption bonus), not a matter of when it flies, so a reference run that went on hands-off measures more retail speeds. Only 20261108-204711 goes past max_tick; 21093 is its last tick before the Tatooine battles answered by hand. It holds retail's Tyber Zann trip to Tatooine (The Peacebringer, Hyperspace_Speed 1.0, Black_Market_Purchase): Kuat -> Corellia 42, Corellia -> Tatooine 40, Kashyyyk -> Kuat 45 ticks, which the port flies when its Black_Market_Purchase starts before tick 13501 (seed 10: 40 / 40 / 43)",
+   "distribution": {"spread_min_runs": 1000000, "why": "q4d t04 (2026-11-16): spread not graded here. Every retail run of this scenario starts from seed 0 (the menu path), so the retail sd is run-to-run timing noise only (0 on most metrics across 9 runs), while the port side varies its seed 0..9: an sd ratio between them says nothing about tier 2. Means are still graded (port mean over seeds against the retail runs, the port sd in se). geonosis_skirmish keeps the spread test: retail seeds each skirmish itself"},
    "excluded_references": {
-    "20261103-152619-galactic-vanilla-lua": "q2f t08 (2026-11-08): its Lua plan hooks killed retail's own plan threads (records table lost to PGBase Flush_G, docs/re/LUA_SCRIPT_OUTPUT.md section 4), so its AI production and fleet moves are not retail behaviour (Rebel fleet departures 19 vs 71). Replace it with a run of the fixed kit"
+    "20261103-152619-galactic-vanilla-lua": "q2f t08 (2026-11-08): its Lua plan hooks killed retail's own plan threads (records table lost to PGBase Flush_G, docs/re/LUA_SCRIPT_OUTPUT.md section 4), so its AI production and fleet moves are not retail behaviour (Rebel fleet departures 19 vs 71). Replace it with a run of the fixed kit",
+    "20261115-212542-galactic-vanilla-lua": "q4d t04 (2026-11-16): the game window lost focus and FoC sat paused for about 5 min at mode frame 2514 (run_trace.log; wall 865 s vs 490 s for the other q4d runs), so it was not hands-off: objects_max 732 vs 1106 in every other run, Rebel fleet departures 10 vs 51..63, Underworld ends with 4 planets (retail 3 in the other 9). Leave-one-out graded it FAIL 16 against the other runs. Note: its outcome (Underworld takes a Rebel planet, 4 / 4) is the port seed 0 outcome too; a later hands-off capture would show whether retail takes that branch without a pause"
    },
    "kit": "tools/probe_mod/q2_traces/run_lua_probe.cmd (or run_galactic.cmd; -NonInteractive drives the menus), README in that folder",
    "workers": 4
@@ -24,7 +33,12 @@
    "references": [
     {"run": "20261030-062751-skirmish-vanilla-lua", "note": "seeded 0x41ccdfe4 (the port host uses its own seed); every tick sampled"},
     {"run": "20261108-204213-skirmish-vanilla-lua", "note": "q4hf t03 second Lua-probe run (run-to-run spread); every tick sampled"},
-    {"run": "20261108-203639-skirmish-vanilla", "note": "q4hf t03 third sample, same scenario without the Lua probe; every tick sampled"}
+    {"run": "20261108-203639-skirmish-vanilla", "note": "q4hf t03 third sample, same scenario without the Lua probe; every tick sampled"},
+    {"run": "20261115-225742-skirmish-vanilla-lua", "note": "q4d t03 (2026-11-15/16): run_trace.ps1 -NoDrive -LuaProbe, menus set by hand to the q2_scenes.json setup, ticks_reached"},
+    {"run": "20261115-235429-skirmish-vanilla-lua", "note": "q4d t03 (2026-11-15/16): run_trace.ps1 -NoDrive -LuaProbe, menus set by hand to the q2_scenes.json setup, ticks_reached"},
+    {"run": "20261116-002920-skirmish-vanilla-lua", "note": "q4d t03 (2026-11-15/16): run_trace.ps1 -NoDrive -LuaProbe, menus set by hand to the q2_scenes.json setup, ticks_reached"},
+    {"run": "20261116-003415-skirmish-vanilla-lua", "note": "q4d t03 (2026-11-15/16): run_trace.ps1 -NoDrive -LuaProbe, menus set by hand to the q2_scenes.json setup, ticks_reached"},
+    {"run": "20261116-003910-skirmish-vanilla-lua", "note": "q4d t03 (2026-11-15/16): run_trace.ps1 -NoDrive -LuaProbe, menus set by hand to the q2_scenes.json setup, ticks_reached"}
    ],
    "kit": "tools/probe_mod/q2_traces/run_skirmish.cmd -LuaProbe (-NonInteractive drives the menus), README in that folder",
    "map": "_MP_SPACE_GEONOSIS",
