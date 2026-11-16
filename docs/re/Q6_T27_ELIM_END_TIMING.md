@@ -17,7 +17,7 @@ read only; no game run, no trace. Earlier readings this builds on are cited, not
 | When is it evaluated | In the frame of the owner change, inside `0x1403fb040`. No timer, no period, no later re-test [H]. |
 | Delay between a passed test and "monitor ready" | The record's countdown: 30 logic frames, for D and E alike [H]. |
 | Delay between "monitor ready" and the end screen | None by itself, but the main loop shows the end screen only while **no message box is up and no Bink movie is open** [H]. |
-| What adds E's ~4 s | **Not settled.** It is not in the victory monitor. It is one of the two main-loop gates (or the monitor's hold counter) being closed for 99 to 131 frames. The candidate found is the looping `Light_Loop` Bink that the GUI opens while an advisor hint text or an encyclopedia pop-up is shown [M that this gate exists and works this way; L that it is E's cause]. It does not explain by itself why D was not delayed too. |
+| What adds E's ~4 s | **Settled by probe (q6 t33, 2026-11-16, section "Probe answer"):** the advisor hint texts. While a hint text is up the GUI keeps the looping `Light_Loop` Bink open, so the end screen waits until the hint queue is empty. Each text stays (characters × `Advisor_Hint_Duration` = 0.1 s) of real time; the next queued text follows at once. In E the queue holds the script's `Game_Message` and the game's own "<planet>: Control changed from <old> to <new>" text; D is held the same way [H for the gate and the timing, measured in 7 runs]. |
 
 Frame arithmetic from the probe records (`tools/probe_mod/q6_t15_probes/out/`): D's owner change
 and last heartbeat are at f = 659, the next heartbeat (due about f = 691) never came, so D ended
@@ -90,7 +90,53 @@ else.
 - A looping `Light_Loop` therefore keeps `0x140b30690` non-zero for the whole time a hint text or
   an encyclopedia pop-up is visible, which closes the main-loop gate of section 2.
 
-## Not settled
+## Probe answer (q6 t33, 2026-11-16) [H]
+
+Kit `tools/probe_mod/q6_t33_elim_end/` (README there), run by Claude on retail FoC 1.121 (Steam x64), windowed
+1920 x 1080, cursor parked over empty space. A read-only poller read the victory monitor, the two main-loop gates, the
+end-screen byte `0x140a61e08` and the GUI hint / pop-up / movie fields every ~4 ms; a screen copy every 0.5 s. Output:
+`tools/probe_mod/q6_t33_elim_end/out/20261116-*` (folders kept locally, not committed); summary from
+`run_q6t33.cmd --report-only <folders>`.
+
+| Variant (what changes) | Declare -> ready | Ready -> end screen | Hint texts shown after the declare (length -> time shown) |
+|---|---|---|---|
+| E_BASE (Star Destroyer at Tatooine, 81-char `Game_Message`) | 30 | 357 frames | Game_Message 81 -> 8.18 s; "Tatooine: Control changed from Empire to Neutral" 48 -> 4.88 s |
+| E_NOMSG (no `Game_Message`) | 30 | 114 | the control-changed text only: 48 -> 4.89 s |
+| E_NOFLEET (no fleet anywhere) | 30 | 276 (13.6 s; the frame rate fell to ~8 fps in its last 2 s) | the same two texts, the movie not restarted between them |
+| E_SDBYSS (Star Destroyer at Byss) | 30 | 357 | as E_BASE |
+| E_CURPLANET (meant: cursor on Tatooine) | 30 | 357 | as E_BASE; **not a valid cursor test**: Tatooine was off screen, the cursor stayed on empty space |
+| D_BASE (58-char `Game_Message`) | 30 | 309 | Game_Message 58 -> 5.88 s; "Abregado-Rae: Control changed from Neutral to Rebellion" (55, as read from the time) -> 5.58 s |
+| D_LONGMSG (150-char `Game_Message`) | 30 | 581 | Game_Message 150 -> 15.08 s; control-changed text -> 5.57 s |
+
+What the runs show:
+
+1. **The victory path is the same in D and E**: declared in the frame after the owner change, ready 30 frames later,
+   hold counter 0 throughout, no message box in any run.
+2. **The only gate closed between ready and the end screen is the Bink handle**, held by `Light_Loop` with the GUI
+   hint flag (`+0x26b2`) set, from the declare to the last frame before the galactic mode is torn down. The encyclopedia
+   pop-up flag (`+0x26b3`) was never set (cursor on empty space). When the last hint text ends, the movie closes and in
+   the same or next frame the galactic mode goes down; the end-screen byte is set ~0.1 s later, after the teardown, and
+   the end credits movie starts before the Defeat results screen.
+3. **Display time = characters × 0.1 s (`Advisor_Hint_Duration`) + about 0.08 s**, the same for every text seen: 48 ->
+   4.88, 58 -> 5.88, 61 -> 6.18 ("The more planets you control, the more credits you will earn."), 67 -> 6.78
+   ("Tatooine: Control changed from Neutral to Empire. Credit bonus: 900"), 70 -> 7.07, 77 -> 7.78, 81 -> 8.18, 150 ->
+   15.08 s. Consecutive texts follow without a gap (the movie restarts in the same frame); the fade-out is not waited for.
+4. **The timer is real time, not logic frames**: E_NOFLEET's frame rate dropped near the end, and its end screen came
+   after the same wall-clock time as E_BASE (13.6 s against 13.1 s) but 81 frames earlier.
+5. The "control changed" text is queued in E (to Neutral) and in D (to an AI); with no `Game_Message` it alone holds E
+   for 114 frames, which is the q6 t25 measurement (99 to 131 frames) within its 1 s heartbeat resolution.
+6. The Star Destroyer's position and the fleet do not change the hold (E_SDBYSS = E_BASE; E_NOFLEET differs only by its
+   frame rate): the local-player retreat of section 1 plays no part. This answers q6 t35 (backlog b0141): (a) without and
+   (b) with the Star Destroyer at Tatooine both hold 357 frames; `Get_Game_Mode` stayed "Galactic" and no dialog opened.
+
+Why q6 t25's D looked unheld: its 1 s heartbeats stopped within 32 frames of the owner change, but the t33 D runs keep
+reporting heartbeats until the end screen (D_BASE: the last heartbeat 315 frames after the give), so the t25 D timing
+was a heartbeat artefact and is superseded by these readings.
+
+Open: whether a resting encyclopedia pop-up holds the end screen the same way (static read section 3, [M]); E_CURPLANET
+is to be rerun with the camera centred on Tatooine by the script.
+
+## Not settled (before the probe; kept for the record, items 1 to 4 are answered above)
 
 1. **Why D was not delayed [L].** D's script also calls `Game_Message` right after the owner
    change (57 characters, 5.7 s by the rule above), and the "planet changed hands" text may be
@@ -124,8 +170,13 @@ Heartbeats every 0.25 s instead of 1 s would make each of these readings exact t
 - Retail rule to model [H]: the end screen is shown in the first frame in which the monitor is
   ready and no message box is up and no movie is open. The port's 30-frame VictoryClaim matches D.
 - E's extra ~4 s is presentation (a gate held by a GUI movie or a message box), not simulation
-  state: it should not be added as a rule constant. Until item 1 is settled by a probe, any
-  number for it would be a guess.
+  state: it should not be added as a rule constant.
+- Since the probe (section "Probe answer") the rule to model is: the galactic HUD shows queued advisor hint texts
+  (`Game_Message`, the "planet changed hands" text, hints) one after another, each for (characters ×
+  `Advisor_Hint_Duration`) seconds of real time, and keeps the `Light_Loop` movie open while a text is up; the campaign
+  end screen waits until no text is up, no movie is open and no message box is up. The port has no advisor hint text
+  queue yet (`Game_Message` is only recorded in the presentation log), so its end screen comes 30 frames after the
+  declare in every case: q6 t34 plus the hint queue task filed from t33.
 
 ## How this was read
 

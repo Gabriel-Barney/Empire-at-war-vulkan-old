@@ -2024,6 +2024,21 @@ exact only for z = 0 paths and otherwise an approximation that is short on slope
   Generic can-start `0x42ccb0`: a top path and (not started, or state ∈ {0x16, 0x19, 0x25}); Walk `0x61e380`: 0x18
   → false, 0x19 with the flag clear and M > 0 → generic, other 0x19 → false. The plain start `0x42ced0` acts only when
   vf +0x150 reports idle (`0x42c890`: 0, 0x16, 0x1c, 0x1e, 0x1f, 0x25–0x27, and 0x19 when M > 0).
+- **Retail measurement (mov2 t07, 2026-11-16) [H for what was seen].** Kit `tools/probe_mod/mov2_t07_stops/`, run
+  `out/20261116-022245` (Geonosis land skirmish; every frame read from memory: position, facing, locomotor state, speed).
+  A new Move_To given while marching at cruise speed, straight on (past the old goal), 90° to the side and 180° back:
+  - **Squads (Stormtrooper Rows, Rebel Dartboard; containers), 12 re-orders:** the container **stays in 0x13 at full
+    speed** and turns on the move toward the new path (180°: the facing swings from 345° to 178° in ~12 frames,
+    speed 1.248 throughout); no End Move, no coast, no stop. End Move appears only at the new goal's brake.
+  - **T4B (single unit), 6 re-orders:** the same in 5 of 6 (180° too: speed 1.092 throughout the U-turn). Once (rep 1,
+    straight-on re-order) it went to 0x14 at once, braked at its deceleration to 0 (13 frames), stood 1 frame in 0x16
+    and restarted.
+  - So the "not aligned" branch above (coast at T = a to 0x15, start from 0x16) did not happen for 90° / 180° re-orders
+    of these units. Consistent with the bullet on `0x410170` if their obj +0x348 (formation slot) is not −1 when the
+    new path is set, which makes the start "aligned" whatever the angle [M: +0x348 not read in the run]; the one T4B
+    brake fits a top path that was not started for one move step [L].
+  - The port's t26.5 container rule (a new order while moving is not started at the path set: coast in End Move to
+    0x15, then start from 0x16 with the 0x10 turn) stops and turns in place where retail turns at speed (roadmap mov2).
 
 So with f_min = 0 (most units) each corner is slowed separately to v and never forced to 0 (a fraction of 0 comes
 only from failed probes); with f_min > 0 sharp corners on short legs are merged, and a corner slower than f_min ×
@@ -3074,6 +3089,16 @@ Pair classes:
 | MovingVsStopped | `0x8b52e8` | `0x6843b0` → `0x685480` |
 | StoppedVsStopped | `0x8b5450` | `0x686de0` |
 | TerrainCollisionClass | `0x8b5568` | `0x687db0`, from the failed-step report `0x509090` (§5.4.7) |
+
+**Retail measurement of MovingVsMoving head-on pairs (mov2 t07, 2026-11-16) [H for what was seen].** Kit
+`tools/probe_mod/mov2_t07_stops/`, run `out/20261116-022245`, every frame read from memory. Two units of the human
+player ordered at once toward each other's start, 600 apart on a flat strip: T4B / T4B on one line (twice), T4B / T4B
+12 to the side, AT-ST / T4B. In all four **neither unit ever stood at speed 0 before its goal, and neither left 0x13**:
+one unit swerved aside (up to ~40 units off the line) at full speed, the other slowed for 27 to 66 frames to a lowest
+speed of 0.11 to 0.22 (below 0.5 for 13 to 40 frames) and then ran on at full speed; closest approach 31 to 40 units
+(centre to centre). (Each "a" unit came to rest ~50 short of its goal at the strip's far end in all four trials, also
+after the pair had passed: a goal-point effect of that spot, not a hold.) The port's s78n t25.4 seeds held a T4B at
+speed 0 for 166 / 232 frames (58 at most after the close-range fix) (roadmap mov2).
 
 **There is no rigid-body physics.** Collision means detecting a future conflict along the planned paths and resolving it by behaviour.
 

@@ -1909,6 +1909,13 @@ toward it. Confirmed by the s78n t14 run (`S78N_T14_RUN.md`).
    directions; the container's own acceleration fields are not read** (FoC containers carry `Override_Acceleration`,
    a tag the parser does not know anyway). FoC: Stormtrooper squads 0.05 × 1.56 = **0.078**, Rebel squads 0.07 ×
    1.56 = **0.109** per frame; the run measured 0.078 and 0.109 on start ramps and braking.
+   **Stops measured frame by frame (mov2 t07, 2026-11-16, `tools/probe_mod/mov2_t07_stops/out/20261116-022245`)
+   [H]:** a squad ordered 500 ahead cruises at the team speed (Rows 1.248, Dartboard 1.56), enters End Move (0x14)
+   at the remaining-length test, steps the speed down by a each frame (1.248 → 1.170 → … → 0.078, then 0.078 once
+   more), and is in 0x16 the next frame: **Rows 17 End Move frames / 9.44 units, Dartboard 15 / 10.45**, at rest
+   +0.50 / +0.58 past the goal, every member at rest in the same frame as the container; the same in both repeats. A
+   T4B (single unit, 1.092): 14 to 16 frames, 7.1 to 8.2 units, +0.1 / +0.2 past the goal. No coast beyond the brake
+   at a; for re-orders while moving see MOVEMENT §3.5.2 G "Retail measurement".
 2. **Straggler cap 0x5ab640(K)** (called twice; T := min(T, its value)): vmax = 0x370f00(K type, K) (the team
    speed); f = K's facing (cos yaw, sin yaw) (0x41c000 on obj +0x84); HX = the joint box 0x404450 output +0x18 =
    (max − min) / 2 of the members' slot x ± their half-extents (box seeded with 0) + K's type `MaxJiggleDistance`
