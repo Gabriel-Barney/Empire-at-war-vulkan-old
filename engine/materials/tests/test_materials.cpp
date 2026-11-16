@@ -1174,6 +1174,9 @@ void test_fx_sources() {
     CHECK(!cache.load(key, r));
     CHECK(fx_log_summary("w\n\nfoo.fx(3,1): error X3004: undeclared identifier 'k'\n") ==
           "foo.fx(3,1): error X3004: undeclared identifier 'k'");
+    // modc t36: the X4717 deprecation warning every fx_2_0 compile prints is not the summary of an error-free failure.
+    CHECK(fx_log_summary("warning X4717: Effects deprecated for D3DCompiler_47\nID3DXEffectCompiler: There were no techniques\n") ==
+          "ID3DXEffectCompiler: There were no techniques");
 
     // 3. The loader: a compiled source wins over the .fxo (RENDER.md 6); a failed or missing entry keeps the
     //    .fxo (t11 fallback); use_fx_sources = false is the t11 behaviour.

@@ -24,7 +24,8 @@
 //              that fails on a require of a script no layer has fails in retail too (stock Lua 5.0.2 require raises
 //              "could not load package"; docs/re/MODC_LOADER.md section 6): a warning when the data loads the script, an
 //              unused-script lead (lua_unused_scripts, info) when it is a mod's own script that nothing names (modc t24)
-//   shaders    materials::audit_effects over every effect the shader directories reach (mod or base): each
+//   shaders    with a mod mounted, first the .fx prebuild (prebuild_mod_effects, modc t36: per source compiled or why
+//              not); then materials::audit_effects over every effect the shader directories reach (mod or base): each
 //              materials::ShaderIssue (docs/MODS.md section 4.1) with, for a Data\Art\Shaders\ effect, how many of the
 //              object types' models name it in a material, so the report says whether anything draws it (modc t21)
 //   submod     a mod whose own data names files no layer has, while an installed mod (Steam workshop item or
@@ -55,6 +56,8 @@ struct ModCheckOptions {
     bool submod = true;     // look for the parent of a mod whose own data names missing files
     bool shaders = true;    // audit every effect (materials::audit_effects; needs the materials module)
     bool shader_compile = true;  // with shaders: also compile each translated pass with the runtime DXC when it loads
+    bool fx_prebuild = true;     // with shaders and a mod mounted: prebuild_mod_effects first (modc t36)
+    std::string fx_cache_dir;    // the FxCache the prebuild and the audit use; empty = the default (tests set their own)
     // Steam library folders searched for installed workshop items (submod parents), e.g.
     // vfs::find_steam_libraries(game, vfs::default_steam_roots()). Empty: no workshop item is considered (tests).
     // <game>\Mods\* is always searched.
@@ -147,8 +150,30 @@ struct ShaderIssueEntry {
     uint32_t models = 0;   // drawn_by "models": object-type models whose materials name the effect
     std::string first_model;  // the first of them (model path order)
 };
+// modc t36: the .fx prebuild that runs when a mod is mounted (prebuild_mod_effects; docs/MODS.md §4.1 "Effect sources").
+struct FxPrebuildSource {
+    std::string path;      // game path of the .fx the loader takes
+    bool ok = false;       // compiled now or found compiled in the FxCache: the loader takes it in place of the .fxo
+    bool cached = false;   // the cache already had the result (nothing ran)
+    std::string error;     // !ok: the first fxc error line, or why nothing was compiled (fxc.exe not found, unreadable source)
+};
+struct FxPrebuild {
+    bool ran = false;      // a mod is mounted and the build has the materials module (else nothing below is filled)
+    std::string fxc;       // materials::fxc_identity of the fxc.exe used, "" when none was found (the t11 fallback stays)
+    std::string cache;     // the FxCache folder
+    std::vector<FxPrebuildSource> sources;  // by path
+    double ms = 0;
+};
+// Compiles every .fx the loader would take for `d` into the FxCache (fx_cache_dir, empty = $ALAMO_FX_CACHE else
+// %LOCALAPPDATA%\alamo\fx) with fxc.exe ($ALAMO_FXC, a test build's fxc\fxc.exe, else the toolchain's), when d has a
+// VFS with at least one mod folder; an unchanged source is not compiled again. Without fxc the cached results still
+// count and the other sources say they are not compiled (the loader keeps the t11 fallback for them). alamo_game runs
+// it before the renderer loads effects, check_mod_data before the shader audit.
+FxPrebuild prebuild_mod_effects(const GameData& d, const std::string& fx_cache_dir = {});
+
 struct ShaderCheck {
     bool checked = false;  // the audit ran (built with the materials module and ModCheckOptions::shaders)
+    FxPrebuild fx_prebuild;  // modc t36: run before the audit (ModCheckOptions::fx_prebuild)
     size_t effects = 0, mod_effects = 0, loaded = 0, translated_passes = 0, translated_ok = 0;  // materials::EffectAudit
     bool compiled = false;    // the runtime DXC compiled the translated passes
     size_t fx_sources = 0, fx_sources_compiled = 0;  // EffectAudit::sources / sources_compiled (modc t23 FxCache)
