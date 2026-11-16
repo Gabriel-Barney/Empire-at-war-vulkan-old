@@ -1018,6 +1018,18 @@ void CombatSystem::hash_extended(StateHasher& h) const {
             h.u32(u.infect_seen);
             h.i32(u.infect_count);
         }
+        // tru1 t02: BASE_SHIELD state (generators only: add_unit sets the service frame) and the straddled shield
+        if (u.bshield_state != 0 || u.bshield_next != 0 || u.bshield_off_stamp != 0) {
+            h.u8(0x56);
+            h.u8(u.bshield_state);
+            h.u8(u.bshield_upgraded);
+            h.u32(u.bshield_off_stamp);
+            h.u32(u.bshield_next);
+        }
+        if (u.bshield_in != kNoObject) {
+            h.u8(0x57);
+            h.i32(u.bshield_in);
+        }
         for (uint32_t i = 0; i < u.hp_count; ++i) {
             const Hardpoint& hp = hps_[u.hp_begin + i];
             h.i32(hp.opp_target);
@@ -1079,6 +1091,14 @@ void CombatSystem::hash_extended(StateHasher& h) const {
     for (const auto& [pl, src] : base_power_) {
         h.i32(pl);
         h.i32(src);
+    }
+    if (!shield_upgrade_.empty()) {  // tru1 t02: Base_Shield_Upgrade entries (format unchanged without one)
+        h.u8(0x5A);
+        h.u32(static_cast<uint32_t>(shield_upgrade_.size()));
+        for (const auto& [pl, src] : shield_upgrade_) {
+            h.i32(pl);
+            h.i32(src);
+        }
     }
     h.u32(static_cast<uint32_t>(repairs_.size()));
     for (const Repairer& r : repairs_) {

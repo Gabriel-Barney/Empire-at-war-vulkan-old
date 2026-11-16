@@ -62,7 +62,8 @@ constexpr uint32_t kCombatSaveVersion = 16;  // 2: refix t02 INFECTION state, re
                                              // delayed-damage projectile target, s78n t11 kUnitDeployingIn (flag
                                              // word), s78n t13 last-hit stamp written only by a diminishing hit
                                              // (same layout); 16: tru1 t02 base-shield unit state + the
-                                             // Base_Shield_Upgrade list. Only the current version is read (cu6).
+                                             // Base_Shield_Upgrade list, tru1 t08 hit event ground /
+                                             // commanded flags. Only the current version is read (cu6).
 constexpr uint32_t kWeatherSaveVersion = 1;
 constexpr uint32_t kNoIndex = 0xFFFFFFFFu;
 
@@ -226,6 +227,7 @@ void CombatSystem::write(ByteWriter& w) const {
         w.i32(e.victim).i32(e.shooter).i32(e.owner).u32(e.projectile_desc);
         put_vec3(w, e.position);
         w.boolean(e.absorbed).boolean(e.armor_reduced).boolean(e.delayed).i32(e.pick);
+        w.boolean(e.ground).boolean(e.commanded);  // tru1 t08 (v16)
     }
     w.u32(static_cast<uint32_t>(shot_events_.size()));
     for (const ShotEvent& e : shot_events_) w.i32(e.shooter).i32(e.target).i32(e.target_owner);
@@ -566,7 +568,7 @@ bool CombatSystem::read(ByteReader& r) {
         e.frame = r.u32();
         if (!r.ok() || !proj_ok(e.projectile_desc)) return false;
     }
-    if (!r.count(n, 35)) return false;
+    if (!r.count(n, 37)) return false;
     std::vector<HitEvent> hit_events(n);
     for (HitEvent& e : hit_events) {
         e.victim = r.i32();
@@ -578,6 +580,8 @@ bool CombatSystem::read(ByteReader& r) {
         e.armor_reduced = r.boolean();
         e.delayed = r.boolean();
         e.pick = r.i32();
+        e.ground = r.boolean();  // tru1 t08 (v16)
+        e.commanded = r.boolean();
         if (!r.ok() || e.projectile_desc >= proj_descs) return false;
     }
     if (!r.count(n, 12)) return false;

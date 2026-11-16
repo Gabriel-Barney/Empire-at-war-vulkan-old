@@ -309,6 +309,39 @@ void test_base_shield_dome() {
         CHECK(combat_bytes(*b.w.sys) == saved);
         CHECK(b.w.sys->base_shield_active(1) && b.w.sys->base_shield_straddled(2) == 1);
     }
+    {  // a load in the middle of a run continues exactly like the unbroken run (the rebuilt shield list included); the
+       // shield state is in the CRC: power off -> the off stamp moves the hash
+        auto build = [](ShieldWorld& x) {
+            x.w.add(2, x.walker, 1, Vec3{500, 0, 0});
+            x.w.add(3, x.body, 1, Vec3{1200, 0, 0});
+        };
+        ShieldWorld a;
+        build(a);
+        a.ticks(5);
+        a.fire(a.blaster, Vec3{1200, 0, 10}, 1);
+        a.ticks(3);
+        const std::vector<uint8_t> saved = combat_bytes(*a.w.sys);
+        ShieldWorld b;
+        build(b);
+        ByteReader rd(saved);
+        CHECK(b.w.sys->read(rd));
+        b.w.frame = a.w.frame;
+        b.w.rng = a.w.rng;
+        a.w.sys->remove_base_power(0, 99);
+        b.w.sys->remove_base_power(0, 99);
+        StateHasher h0;
+        a.w.sys->hash_extended(h0);
+        for (int i = 0; i < 40; ++i) {
+            a.w.tick();
+            b.w.tick();
+        }
+        CHECK(!a.on() && !b.on());
+        StateHasher ha, hb;
+        a.w.sys->hash_extended(ha);
+        b.w.sys->hash_extended(hb);
+        CHECK(ha.digest() == hb.digest() && combat_bytes(*a.w.sys) == combat_bytes(*b.w.sys));
+        CHECK(ha.digest() != h0.digest());
+    }
 }
 
 
@@ -414,6 +447,14 @@ void test_ground_detonation_particle() {
             }
         }
         CHECK(found && !ground);
+    }
+    {  // a commanded detonation (0x4caea0: laser-defense zap, remote bomb): lifetime particle, flagged, no ion stun
+        DetonationWorld d(GameMode::Space, shot, Vec3{20, 30, 1});
+        d.w.tick();
+        CHECK(d.w.sys->projectile_count() == 1u && d.w.sys->detonate_projectile(0, d.w.frame));
+        const auto ev = d.w.sys->hit_events();
+        CHECK(!ev.empty() && ev.back().victim == kNoObject && ev.back().commanded && !ev.back().ground);
+        CHECK(!d.w.sys->ion_stunned(2, d.w.frame) && d.w.sys->modifier(2, ModList::Defense) < 0.0f);
     }
 }
 

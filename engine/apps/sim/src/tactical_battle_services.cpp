@@ -290,7 +290,7 @@ void TacticalBattle::build_service_graph() {
     // skai: skirmish map battles: the Income_Stream credit trickle (credits through the host's callback)
     g.add("income", bit(cStore) | bit(cState), bit(cHost), [this] { sk_income(*tick_.mode); });
     // battle host: base-shield secondary occupants follow the live shields (land): the passability grid, bt_shields_
-    g.add("shield_stamps", bit(cStore), bit(cMovement) | bit(cState), [this] { bt_shield_stamps(*tick_.mode); });
+    g.add("shield_stamps", bit(cStore) | bit(cCombat), bit(cMovement) | bit(cState), [this] { bt_shield_stamps(*tick_.mode); });
     // DAMAGE_TRACKING service step: the store's decay and each unit's next service frame
     g.add("damage_tracking", bit(cState), bit(cDamage) | bit(cState), [this] { service_damage_tracking(); });
     lap("tac.cleanup");

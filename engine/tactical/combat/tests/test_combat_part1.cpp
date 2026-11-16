@@ -1438,6 +1438,7 @@ void test_gaps_constants() {
               "<Diminishing_Firepower>0, 0.6, 0.3, 0.7, 0.9, 0.9, 1, 1, 2, 1</Diminishing_Firepower>"
               // cu8 t03: the remaining data-backed knobs (FoC writes the vulnerability as "2.0f")
               "<Base_Shield_Vulnerability_Modifier>2.0f</Base_Shield_Vulnerability_Modifier>"
+              "<Base_Shield_Delay_Time>7.5</Base_Shield_Delay_Time><Base_Shield_Speed_Modifier>0.4</Base_Shield_Speed_Modifier>"
               "<Hull_Vs_Hard_Points_Health_Constraint>0.3</Hull_Vs_Hard_Points_Health_Constraint>"
               "<Under_Construction_Damage_Multiplier>2.5</Under_Construction_Damage_Multiplier>"
               "<Depleted_Shield_Regen_Cap>0.5</Depleted_Shield_Regen_Cap><Depleted_Shield_Disable_Time>4.0</Depleted_Shield_Disable_Time>"
@@ -1456,6 +1457,8 @@ void test_gaps_constants() {
     CHECK_F(cfg.turn_multiplier_land, 1.56f);
     CHECK(cfg.diminishing_firepower.size() == 5);
     CHECK_F(cfg.base_shield_vulnerability, 2.0f);  // cu8 t03
+    CHECK_F(cfg.base_shield_delay_time, 7.5f);     // tru1 t02
+    CHECK_F(cfg.base_shield_speed, 0.4f);
     CHECK_F(cfg.hull_vs_hardpoints_constraint, 0.3f);
     CHECK_F(cfg.under_construction_damage_multiplier, 2.5f);
     CHECK_F(cfg.depleted_shield_regen_cap, 0.5f);

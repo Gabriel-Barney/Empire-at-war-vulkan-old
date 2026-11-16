@@ -1414,6 +1414,7 @@ public:
     bool base_shield_upgraded(int32_t player) const;  // the player's list is non-empty
     // A base-shield generator whose shield is on (state 1). False for other objects.
     bool base_shield_active(ObjectId id) const;
+    bool base_shield_active_upgraded(ObjectId id) const;  // active, and the pack's upgraded byte is set (A1 step 6)
     // The shield an AFFECTED_BY_SHIELD unit straddles (kNoObject none) and its speed factor: Base_Shield_Speed_Modifier
     // while it straddles one, else 1 (A2 "Speed": a plain factor after the SPEED multiplier, not a modifier entry).
     ObjectId base_shield_straddled(ObjectId id) const;
@@ -1731,7 +1732,7 @@ private:
         // refixf t06 (TACTICAL_COMBAT §2.9 Q3): TD +0x10 for the scan target, fixed when the scan sets a new target
         // (Choose_Target_Hardpoint) and re-chosen only by the space formation step; -1 none.
         int32_t auto_hp = -1;
-        // ---- tru1 t02 (TRU1_A_RE_ANSWERS A1 / A2; saved, not hashed) ----
+        // ---- tru1 t02 (TRU1_A_RE_ANSWERS A1 / A2; saved and hashed, tags 0x56 / 0x57) ----
         uint8_t bshield_state = 0;        // BASE_SHIELD pack +8: 0 never evaluated, 1 on, 2 off
         uint8_t bshield_upgraded = 0;     // pack +0xc
         uint32_t bshield_off_stamp = 0;   // pack +0x10: frame of the last service that found the shield off
@@ -1828,7 +1829,6 @@ private:
         float t;
         int32_t mesh_hp = kMeshUnknown;
         bool ground = false;  // A1j t03: a straight shot's land ground test (0x4d0630) hit the terrain / water at gh
-        bool dome = false;    // tru1 t02: `id` is a base shield whose dome the segment crossed at t (TRU1_A A5)
         GroundHit gh = {};
     };
 

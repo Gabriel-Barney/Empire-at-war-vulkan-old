@@ -2193,12 +2193,12 @@ void CombatSystem::tick(uint32_t frame, const TreeSet& trees, SimRng& rng, const
             u.stun_end = 0;
             if (hooks_) hooks_->unit_effect(u.id, UnitEffect::StunEnded, u.owner, u.pos, frame);
         }
-        // tru1 t02 (TRU1_A A2): straddling a hostile shield suspends TARGETING, WEAPON and TURRET.
         const bool idle = u.stun_end > frame || (desc_of(u).requires_base_power && !has_base_power(u.owner)) ||
-                          (u.flags & (kUnitScriptNoFire | kUnitInBaseShield)) != 0;  // STY1 t01: Prevent_All_Fire
+                          (u.flags & kUnitScriptNoFire) != 0;  // STY1 t01: Prevent_All_Fire
         // S7 t14: on the jetpack (MOVEMENT §3.1.1) TARGETING and WEAPON are suspended; S8 t12 (MOVEMENT §3.2): the
-        // hardpoints are not (update_weapons' `suspended`).
-        const bool suspended = (u.flags & kUnitWeaponsSuspended) != 0;
+        // hardpoints are not (update_weapons' `suspended`). tru1 t02 (TRU1_A A2): straddling a hostile shield wall
+        // suspends the unit's TARGETING, WEAPON and TURRET the same way; its hardpoints (own objects) keep firing [port].
+        const bool suspended = (u.flags & (kUnitWeaponsSuspended | kUnitInBaseShield)) != 0;
         // S7 t15 A2: an idle unit's weapons are not serviced; the WeaponBehavior recharge still elapses (fire_unit_weapon
         // subtracts the frames since its last service when it runs again).
         // s78h t06: a land team head's TARGETING (TeamTargeting) ran at its team's container slot above (its acquired flag

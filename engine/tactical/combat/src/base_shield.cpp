@@ -50,6 +50,11 @@ bool CombatSystem::base_shield_active(ObjectId id) const {
     return live(s) && desc_of(*s).base_shield && s->bshield_state == 1;
 }
 
+bool CombatSystem::base_shield_active_upgraded(ObjectId id) const {
+    const Unit* s = unit(id);
+    return base_shield_active(id) && s->bshield_upgraded != 0;
+}
+
 ObjectId CombatSystem::base_shield_straddled(ObjectId id) const {
     const Unit* u = unit(id);
     return u ? u->bshield_in : kNoObject;
@@ -199,7 +204,6 @@ void CombatSystem::dome_sweep(const Projectile& p, const ProjectileDesc& pd, Vec
         if (best.id == kNoObject || t < best.t || (t == best.t && s.id < best.id)) {
             best = SweepHit{s.id, t};
             best.mesh_hp = kHardpointBaseShieldDome;
-            best.dome = true;
         }
     }
 }
