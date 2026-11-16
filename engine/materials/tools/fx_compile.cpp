@@ -80,8 +80,26 @@ std::string strip_prefix(std::string s, const std::string& prefix) {
 std::filesystem::path default_fxc_path() {
     const std::string over = getenv_str("ALAMO_FXC");
     if (!over.empty()) return alamo::path_from_utf8(over);
-#ifdef ALAMO_FXC_PATH
     std::error_code ec;
+    // A test build's copy (tools/testbuild/package_testbuild.py, modc t36): <exe dir>\fxc\fxc.exe.
+    std::wstring exe(MAX_PATH, L'\0');
+    for (;;) {
+        const DWORD n = GetModuleFileNameW(nullptr, exe.data(), static_cast<DWORD>(exe.size()));
+        if (n == 0) {
+            exe.clear();
+            break;
+        }
+        if (n < exe.size()) {
+            exe.resize(n);
+            break;
+        }
+        exe.resize(exe.size() * 2);
+    }
+    if (!exe.empty()) {
+        const std::filesystem::path beside = std::filesystem::path(exe).parent_path() / L"fxc" / L"fxc.exe";
+        if (std::filesystem::is_regular_file(beside, ec)) return beside;
+    }
+#ifdef ALAMO_FXC_PATH
     const std::filesystem::path p = alamo::path_from_utf8(ALAMO_FXC_PATH);
     if (std::filesystem::is_regular_file(p, ec)) return p;
 #endif
@@ -93,12 +111,18 @@ std::string fxc_identity(const std::filesystem::path& fxc) {
     if (fxc.empty() || !std::filesystem::is_regular_file(fxc, ec)) return {};
     const auto size = std::filesystem::file_size(fxc, ec);
     const auto dll = std::filesystem::file_size(fxc.parent_path() / "d3dcompiler_47.dll", ec);
-    const std::string ver = alamo::path_to_utf8(fxc.parent_path().parent_path().filename());  // bin\<ver>\x64
+    std::string ver = alamo::path_to_utf8(fxc.parent_path().parent_path().filename());  // bin\<ver>\x64
+    std::vector<uint8_t> note;
+    if (alamo::read_host_file(fxc.parent_path() / "SDK_VERSION.txt", note)) {  // a test build's fxc folder
+        std::string line(note.begin(), note.end());
+        line = line.substr(0, line.find_first_of("\r\n"));
+        if (!line.empty()) ver = line;
+    }
     return "fxc " + ver + " " + std::to_string(size) + "/" + (ec ? std::string("-") : std::to_string(dll));
 }
 
 std::string fx_log_summary(const std::string& log) {
-    std::string first;
+    std::string first, warning;
     size_t i = 0;
     while (i < log.size()) {
         const size_t e = std::min(log.find('\n', i), log.size());
@@ -107,9 +131,15 @@ std::string fx_log_summary(const std::string& log) {
         i = e + 1;
         if (line.empty()) continue;
         if (line.find("error") != std::string::npos) return line;
+        // Every fx_2_0 compile warns X4717 ("Effects deprecated"): a failure without an "error" line ("There were no
+        // techniques") is summarised by its first other line.
+        if (line.find("X4717") != std::string::npos) {
+            if (warning.empty()) warning = line;
+            continue;
+        }
         if (first.empty()) first = line;
     }
-    return first;
+    return first.empty() ? warning : first;
 }
 
 bool compile_fx_source(const FxSource& src, const std::filesystem::path& fxc, FxCacheEntry& out, std::string* err) {
@@ -218,6 +248,18 @@ bool prebuild_fx_sources(const FileProvider& files, std::span<const std::string>
         items.push_back(std::move(it));
     }
     return all;
+}
+
+FxPrebuildRun prebuild_effect_sources(const FileProvider& files, std::span<const ShaderFileEntry> shader_files,
+                                      const FxCache& cache, const std::filesystem::path& fxc) {
+    const auto t0 = std::chrono::steady_clock::now();
+    FxPrebuildRun run;
+    run.fxc = fxc_identity(fxc);
+    const EffectLibrary lib(files);
+    const std::vector<std::string> paths = fx_source_paths(lib, shader_files);
+    run.complete = prebuild_fx_sources(files, paths, cache, fxc, false, run.items, &run.error);
+    run.ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
+    return run;
 }
 
 }  // namespace alamo::materials

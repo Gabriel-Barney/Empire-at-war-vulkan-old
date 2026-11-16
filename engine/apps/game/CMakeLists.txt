@@ -55,6 +55,9 @@ endif()
 if(TARGET alamo_materials AND TARGET alamo_assets)  # modc t21 mod check: effect audit + model materials (mod_check.cpp)
   target_link_libraries(alamo_game_core PRIVATE alamo_materials alamo_assets)
   target_compile_definitions(alamo_game_core PRIVATE ALAMO_GAME_HAVE_MATERIALS=1)
+  # modc t36: the .fx prebuild when a mod is mounted (prebuild_mod_effects: alamo_game before the renderer loads effects,
+  # alamo_mod_check before the audit); runs fxc.exe ($ALAMO_FXC, a test build's fxcxc.exe, else the toolchain SDK's).
+  target_link_libraries(alamo_game_core PRIVATE alamo_fxbuild)
 endif()
 if(TARGET alamo_audio)
   target_link_libraries(alamo_game_core PUBLIC alamo_audio)

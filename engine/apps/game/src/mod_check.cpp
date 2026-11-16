@@ -15,6 +15,7 @@
 #include <utility>
 
 #include "alamo/core/hash.hpp"
+#include "alamo/core/host_fs.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/data/xml_list.hpp"
 #include "alamo/objects/coverage.hpp"
@@ -27,6 +28,7 @@
 #include "alamo/materials/effect_audit.hpp"
 #include "alamo/materials/effect_loader.hpp"
 #include "alamo/shaderxlat/dxc.hpp"
+#include "fx_compile.hpp"  // materials/tools: the .fx prebuild (alamo_fxbuild, modc t36)
 #endif
 #ifdef ALAMO_GAME_HAVE_LUA_VM
 #include <lua.h>  // Lua 5.0 is built as C++ (engine/lua/CMakeLists.txt): no extern "C"
@@ -391,7 +393,7 @@ std::vector<std::string> object_type_models(const GameData& d) {
 }
 #endif
 
-void check_shaders(const GameData& d, ModCheckReport& r, bool compile) {
+void check_shaders(const GameData& d, ModCheckReport& r, bool compile, const std::string& fx_cache_dir) {
 #ifdef ALAMO_GAME_HAVE_MATERIALS
     if (!d.vfs) return;
     ShaderCheck& sc = r.shaders;
@@ -399,7 +401,9 @@ void check_shaders(const GameData& d, ModCheckReport& r, bool compile) {
     const bool have_dxc = compile && dxc.load();
     // As alamo_effect_audit (materials/tools/effect_audit_tool.cpp): the library gets the D.1 preload list, the audit
     // every effect of the shader directories including Shaders\Engine.
-    materials::EffectLibrary lib(*d.files);
+    materials::LoadOptions lo;
+    if (!fx_cache_dir.empty()) lo.fx_cache_dir = path_from_utf8(fx_cache_dir);
+    materials::EffectLibrary lib(*d.files, lo);
     lib.set_shader_files(materials::shader_files_from_vfs(*d.vfs));
     const std::vector<materials::ShaderFileEntry> files = materials::shader_files_from_vfs(*d.vfs, true);
     const materials::EffectAudit a = materials::audit_effects(lib, files, have_dxc ? &dxc : nullptr, nullptr);
@@ -456,6 +460,7 @@ void check_shaders(const GameData& d, ModCheckReport& r, bool compile) {
     (void)d;
     (void)r;
     (void)compile;
+    (void)fx_cache_dir;
 #endif
 }
 
@@ -922,6 +927,32 @@ size_t ModCheckReport::warning_count() const {
            unknown_xml_tags.size() + lua_errors.size() + lua_run_errors.size() + unbound_lua_calls.size() + shaders.issues.size();
 }
 
+FxPrebuild prebuild_mod_effects(const GameData& d, const std::string& fx_cache_dir) {
+    FxPrebuild out;
+#ifdef ALAMO_GAME_HAVE_MATERIALS
+    if (!d.vfs || !d.files || d.vfs->mod_dirs().empty()) return out;
+    const materials::FxCache cache(fx_cache_dir.empty() ? materials::FxCache::default_directory() : path_from_utf8(fx_cache_dir));
+    const std::vector<materials::ShaderFileEntry> files = materials::shader_files_from_vfs(*d.vfs, true);
+    const materials::FxPrebuildRun run = materials::prebuild_effect_sources(*d.files, files, cache, materials::default_fxc_path());
+    out.ran = true;
+    out.fxc = run.fxc;
+    out.cache = path_to_utf8(cache.directory());
+    out.ms = run.ms;
+    for (const materials::FxPrebuildItem& it : run.items) {
+        FxPrebuildSource src;
+        src.path = it.path;
+        src.ok = it.ok;
+        src.cached = it.cached;
+        if (!it.ok) src.error = it.detail.empty() ? std::string("not compiled") : it.detail;
+        out.sources.push_back(std::move(src));
+    }
+#else
+    (void)d;
+    (void)fx_cache_dir;
+#endif
+    return out;
+}
+
 ModCheckReport check_mod_data(const std::string& root, const std::vector<std::string>& args, const ModCheckOptions& options) {
     ModCheckReport r;
     r.game = root;
@@ -958,7 +989,9 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
     if (options.files) guarded("files", [&] { check_files(d, r); });
     if (options.xml_tags) guarded("xml tags", [&] { check_xml_tags(d, r); });
     if (options.lua) guarded("lua", [&] { check_lua(d, r, options.lua_run); });
-    if (options.shaders) guarded("shaders", [&] { check_shaders(d, r, options.shader_compile); });
+    if (options.shaders && options.fx_prebuild)
+        guarded("fx prebuild", [&] { r.shaders.fx_prebuild = prebuild_mod_effects(d, options.fx_cache_dir); });
+    if (options.shaders) guarded("shaders", [&] { check_shaders(d, r, options.shader_compile, options.fx_cache_dir); });
     if (options.files && options.submod) guarded("submod", [&] { check_submod(r, options, r.submod); });
     return r;
 }
@@ -1087,6 +1120,14 @@ std::string format_mod_report(const ModCheckReport& r, bool verbose) {
             lines.push_back(std::move(line));
         }
         append_list(s, lines, 0, lines.size(), verbose);
+        if (sc.fx_prebuild.ran) {
+            const FxPrebuild& fp = sc.fx_prebuild;
+            append(s, "    .fx prebuild: %zu sources, fxc %s, cache %s, %.0f ms\n", fp.sources.size(),
+                   fp.fxc.empty() ? "not found (only cached results load)" : fp.fxc.c_str(), fp.cache.c_str(), fp.ms);
+            for (const FxPrebuildSource& f : fp.sources)
+                append(s, "      %-14s %s%s%s\n", f.ok ? (f.cached ? "ok (cached)" : "ok (compiled)") : "not compiled", f.path.c_str(),
+                       f.error.empty() ? "" : "  ", f.error.c_str());
+        }
         if (sc.fx_sources) append(s, "    .fx sources %zu, %zu loaded compiled (alamo_fx_prebuild cache)\n", sc.fx_sources, sc.fx_sources_compiled);
         if (sc.models_read) append(s, "    (%zu object type models read for the cross-reference)\n", sc.models_read);
     }
@@ -1367,6 +1408,28 @@ std::string format_mod_report_json(const ModCheckReport& r) {
     j.boolean(sc.compiled);
     count(j, "fx_sources", sc.fx_sources);
     count(j, "fx_sources_compiled", sc.fx_sources_compiled);
+    j.key("fx_prebuild");  // modc t36 (additive)
+    j.open('{');
+    j.key("ran");
+    j.boolean(sc.fx_prebuild.ran);
+    j.key("fxc");
+    j.str(sc.fx_prebuild.fxc);
+    j.key("sources");
+    j.open('[');
+    for (const FxPrebuildSource& f : sc.fx_prebuild.sources) {
+        j.open('{');
+        j.key("path");
+        j.str(f.path);
+        j.key("ok");
+        j.boolean(f.ok);
+        j.key("cached");
+        j.boolean(f.cached);
+        j.key("error");
+        j.str(f.error);
+        j.close('}');
+    }
+    j.close(']');
+    j.close('}');
     count(j, "models_read", sc.models_read);
     j.key("issues");
     j.open('[');
