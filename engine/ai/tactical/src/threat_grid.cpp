@@ -247,7 +247,7 @@ void TacticalPerceptionGrid::remove_entry(uint32_t ei) {
     e.projected = false;
 }
 
-bool TacticalPerceptionGrid::register_object(const PerceptionWorld& w, int32_t id, int32_t check_stamp, bool owner_list) {
+bool TacticalPerceptionGrid::register_object(const PerceptionWorld& w, int32_t id, int32_t check_stamp) {
     if (!valid() || objects_.count(id)) return false;
     const PerceptionObject* o = w.object(id);
     if (!o || !o->has_unit_ai) return false;
@@ -263,7 +263,7 @@ bool TacticalPerceptionGrid::register_object(const PerceptionWorld& w, int32_t i
     for (size_t i = 0; i < hps.size(); ++i)
         if (is_grid_hard_point(hps[i])) hp_index.push_back(static_cast<int32_t>(i));
     if (hp_index.empty()) hp_index.push_back(-1);
-    if (const PerceptionType* t = w.type_of(*o); t && owner_list) category_union_ |= t->category;
+    if (const PerceptionType* t = w.type_of(*o)) category_union_ |= t->category;
     auto& rec = objects_.emplace(id, std::move(g)).first->second;
     for (const int32_t hi : hp_index) {
         const uint32_t ei = alloc_entry();
@@ -275,7 +275,9 @@ bool TacticalPerceptionGrid::register_object(const PerceptionWorld& w, int32_t i
         refresh_entry(w, *o, e, hps);
         add_entry(w, *o, ei, hps);
     }
-    if (rec.owner != kNoPlayerIndex && owner_list) player_objects_[static_cast<size_t>(rec.owner)].push_back(id);
+    // skai t15 (SKAI_T15_TARGET_CHOICE Q5 [H]): a structure pre-built at the skirmish start was registered in the grid
+    // the start deleted; its cells come back at its first service [M], its owner-list entry never does.
+    if (rec.owner != kNoPlayerIndex && !o->no_owner_list) player_objects_[static_cast<size_t>(rec.owner)].push_back(id);
     registration_order_.push_back(id);
     return true;
 }
@@ -369,7 +371,7 @@ bool TacticalPerceptionGrid::on_owner_changed(const PerceptionWorld& w, int32_t 
         v.erase(std::remove(v.begin(), v.end(), id), v.end());
     }
     g.owner = owner;
-    if (owner != kNoPlayerIndex) player_objects_[static_cast<size_t>(owner)].push_back(id);
+    if (owner != kNoPlayerIndex && !o->no_owner_list) player_objects_[static_cast<size_t>(owner)].push_back(id);
     std::vector<PerceptionHardPoint> hps;
     w.object_hard_points(*o, hps);
     for (const uint32_t ei : g.entries) add_entry(w, *o, ei, hps);

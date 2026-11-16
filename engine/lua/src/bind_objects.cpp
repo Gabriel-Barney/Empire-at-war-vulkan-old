@@ -997,10 +997,11 @@ int g_find_nearest(Call& c) {
     const LuaPlayerWorld* world = c.vm->owner ? player_world(*c.vm->owner) : nullptr;
 #endif
     static const objects::BehaviorTypeId unit_ai = objects::behavior_type_id("UNIT_AI");
-    // skai t12 / b0422 [M, traces: SKAI_T06_LAND_RUNS s7, B0418_UTAPAU_AI_RUNS s8]: DUMMY_GROUND_STRUCTURE objects are not
-    // in the perception grid list this walks (retail's BurnUnitsLand finds no "InBase" object while the enemy Command
-    // Center stands and attacks a unit instead; against the Underworld it killed the merc teams, not the palace).
-    static const objects::BehaviorTypeId dummy_ground = objects::behavior_type_id("DUMMY_GROUND_STRUCTURE");
+    // skai t12 / b0422 [M, traces: SKAI_T06_LAND_RUNS s7, B0418_UTAPAU_AI_RUNS s8]: the structures pre-built at the skirmish
+    // start are not in the perception grid owner list this walks (retail's BurnUnitsLand finds no "InBase" object while the
+    // enemy Command Center stands and attacks a unit instead; against the Underworld it killed the merc teams, not the
+    // palace). Why (skai t15, SKAI_T15_TARGET_CHOICE Q5 [H]): they registered in the grid the skirmish start deleted
+    // (objects::kFlagNoAiOwnerList); structures built later are in the list.
     const uint64_t cat = f.have_cat ? f.cat : ~uint64_t{0};
     const ObjectHandle self = src ? detail::object_handle(*src) : ai_src;
     const Vec3 from = st->position(self);
@@ -1011,7 +1012,7 @@ int g_find_nearest(Call& c) {
         if (h == self || !st->active(h)) continue;
         const int32_t q = st->owner(h);
         if (q < 0 || !st->has_behavior(h, unit_ai)) continue;
-        if (dummy_ground != objects::kNoBehavior && st->has_behavior(h, dummy_ground)) continue;
+        if ((st->flags(h) & objects::kFlagNoAiOwnerList) != 0) continue;
 #if ALAMO_LUA_PLAYERS
         if (world && world->is_neutral(q)) continue;
 #endif

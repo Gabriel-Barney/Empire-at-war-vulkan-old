@@ -154,10 +154,8 @@ public:
     // First UNIT_AI service / GOM add hook: creates the entries and projects them. `check_stamp` is the
     // object's data-pack re-projection stamp (UnitAiStamps::reprojection_check, A1_READINGS 14 [H]): the next
     // service at F >= stamp runs the check. False if the object is unknown to the world, has no UNIT_AI, or is
-    // registered already. `owner_list` false (skai t22, SKAI_T22_SPACE_AI_RE Part 3 [H]: a skirmish start station whose
-    // UNIT_AI pack still holds the deleted grid's entries): the entries are projected as usual, but the object joins
-    // neither its owner's list nor the category mask.
-    bool register_object(const PerceptionWorld& w, int32_t id, int32_t check_stamp, bool owner_list = true);
+    // registered already.
+    bool register_object(const PerceptionWorld& w, int32_t id, int32_t check_stamp);
     // UNIT_AI service: fog bytes (every call), then the re-projection gate (stamp <= frame: check, stamp += 300).
     // Returns true when the object was re-projected.
     bool service_object(const PerceptionWorld& w, int32_t id, uint32_t frame);

@@ -464,7 +464,7 @@ void GoalSystem::commit(int64_t now) {
             if (g.source < sources_.size() &&
                 hooks_->evaluate_resolved(sources_[g.source].equation, sources_[g.source].function, g.target, v))
                 g.desire = g.priority = clamp_desire(v);
-            else
+            else if (!cfg_.keep_desire_on_failed_eval)
                 g.desire = g.priority = 0.0f;
         }
     // 2. Sort incumbents.

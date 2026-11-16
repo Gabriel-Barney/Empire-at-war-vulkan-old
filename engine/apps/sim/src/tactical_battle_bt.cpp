@@ -490,10 +490,6 @@ void TacticalBattle::bt_battle_end() {
 
 // ---- battle host follow-up: TEAM containers (REMAINING_GAPS §3.4), landing reinforcement points (§3.3) --------------
 
-bool TacticalBattle::outside_owner_lists(objects::ObjectId id) const {
-    return std::binary_search(bt_grid_stale_.begin(), bt_grid_stale_.end(), id);
-}
-
 std::string_view TacticalBattle::map_hint(objects::ObjectId id) const {
     const auto it = std::lower_bound(map_hints_.begin(), map_hints_.end(), id,
                                      [](const std::pair<objects::ObjectId, std::string>& e, objects::ObjectId v) { return e.first < v; });
@@ -1021,16 +1017,13 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
     const bool skirmish = skirmish_land() || skirmish_map();
     // skai t22 (SKAI_T22_SPACE_AI_RE Q1.1, Part 3 [H]): in a space skirmish the team-marker swap (0x295cf0) creates the
     // start station before the skirmish start (0xeed80) deletes and rebuilds the threat grid, so it never joins the new
-    // grid's owner lists (its cells and threat come back at the first re-projection). [port] space only: the land start
-    // does the same (SKAI_T15_TARGET_CHOICE), which lane skai-a ports.
-    bt_grid_stale_.clear();
+    // grid's owner lists (its cells and threat come back at the first re-projection): the same store flag as skai t15's
+    // pre-built land structures (objects::kFlagNoAiOwnerList, set there in bt_skirmish_base).
     auto note_stale = [&](const terrain::ObjectPlacement& p, objects::ObjectHandle h) {
         const size_t pi = static_cast<size_t>(&p - map_.objects.data());
-        if (!space_ || !skirmish_map() || pi >= bt_team_swap_.size() || bt_team_swap_[pi] == 0 || !mode.primary().exists(h))
+        if (!space_ || !skirmish_map() || pi >= bt_team_swap_.size() || bt_team_swap_[pi] == 0 || !mode.primary().alive(h))
             return;
-        const objects::ObjectId id = mode.primary().id(h);
-        const auto it = std::lower_bound(bt_grid_stale_.begin(), bt_grid_stale_.end(), id);
-        if (it == bt_grid_stale_.end() || *it != id) bt_grid_stale_.insert(it, id);
+        mode.primary().set_flag(h, objects::kFlagNoAiOwnerList);
     };
     for (const terrain::ObjectPlacement& pl : map_.objects) {
         // bkg3 b0028: a skirmish's team-marker structures and its map placements with byte 0 spawn nothing from their
@@ -1813,6 +1806,11 @@ void TacticalBattle::bt_skirmish_base(TacticalMode& mode) {
         hg_spawn_off_ = skirmish_land() || skirmish_map();  // bkg3 b0028: copied from the pad
         bt_adopt_built(mode, bh, owner, 1.0f, bt_rng_);
         hg_spawn_off_ = false;
+        // skai t15 (SKAI_T15_TARGET_CHOICE Q5 [H]): the pad pre-builds its structure (0x42df80 -> 0x4f5950) before the
+        // skirmish start deletes and rebuilds the threat grid (0xeed80: 0x365540 / 0x3b86f0), and UNIT_AI registers once,
+        // so the structure stays out of every AI owner list (force sums, DistanceToNearest, Find_Nearest) all battle; its
+        // cells are projected again at its first service [M]. Structures built later register normally.
+        if (st.alive(bh)) st.set_flag(bh, objects::kFlagNoAiOwnerList);
         PadState* s = pad_state(st.id(ph), true);
         pads_mode_ = &mode;
         s->built = st.id(bh);

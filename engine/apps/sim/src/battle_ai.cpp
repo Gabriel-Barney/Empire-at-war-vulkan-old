@@ -1550,7 +1550,6 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
         if (u && u->container != 0xFFFFFFFFu) o.rep_type = static_cast<int32_t>(st.type(b_->containers_[u->container].h));
         if (const objects::TypeIndex ct = st.carried_type(h); ct != objects::kNone) o.rep_type = static_cast<int32_t>(ct);  // a1i t04: §35.3
         o.has_unit_ai = st.has_behavior(h, kUnitAi) && c.has_unit(id);
-        o.outside_owner_lists = b_->outside_owner_lists(id);  // skai t22
         o.team_or_hide_when_fogged = st.has_behavior(h, kTeam) || st.has_behavior(h, kHideWhenFogged);
         o.mobile = u && u->movable;
         if (!u && st.has_behavior(h, kTeam))  // battle host: a TEAM container moves with its live members
@@ -1612,6 +1611,7 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
         }
         // t48: Variable_Self.BaseLevel in land skirmish: the count of P's alive objects with this behaviour.
         o.dummy_ground_structure = kDummyGroundStructure != objects::kNoBehavior && st.has_behavior(h, kDummyGroundStructure);
+        o.no_owner_list = (st.flags(h) & objects::kFlagNoAiOwnerList) != 0;  // skai t15 (SKAI_T15_TARGET_CHOICE Q5)
         // skai: TacticalBuiltStructureCount's free-store table of built structures (0x4d3630) [M]: the finished structures on
         // build pads (pre-built skirmish base included). Unset, Num_Refineries stayed 0 and the land skirmish AI never bought units.
         o.built_structure = std::binary_search(pad_built.begin(), pad_built.end(), id);

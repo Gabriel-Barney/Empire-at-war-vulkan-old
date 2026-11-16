@@ -1560,7 +1560,7 @@ void TacticalAiWorld::Impl::refresh(bool fill) {
         const auto* old = in(prev, o.id);
         if (!old) {
             if (o.has_unit_ai)  // first check at the stamp the host drew at creation (A1_READINGS §14)
-                perc.grid().register_object(w, o.id, facts[i].reprojection_stamp, !o.outside_owner_lists);  // skai t22
+                perc.grid().register_object(w, o.id, facts[i].reprojection_stamp);
             const bool produced = claim_produced(o, facts[i].handle);
             bool unadmit = false;
             if (!unadmit_pending.empty()) {
@@ -3954,6 +3954,8 @@ bool TacticalAiWorld::start(std::vector<std::string>* diagnostics) {
         // both tactical modes (retail Geonosis keeps its first build plan when a Build_Refinery_Space goal outranks it;
         // the land and space goal systems share Resolve).
         gcfg.reaccept_old_candidates = true;
+        // skai t15 (SKAI_T15_TARGET_CHOICE Q3 [H]): a failed re-evaluation keeps the incumbent's desire; land only for now [port].
+        gcfg.keep_desire_on_failed_eval = w.cfg.mode == TacticalMode::Land;
         p.ctx.goals.init(w.defs, std::move(sources), &p, &p.ctx.learning, &p.ctx.templates, &w.rng.synced(), gcfg);
         p.ctx.attach(&p, [&w, &p](const std::string& eq, double& out) { return w.evaluate(p.player, eq, -1, out); });
         if (w.cfg.stagger) {  // OPT2 t01: a fixed planning phase from the player's AI ordinal (players in index order)

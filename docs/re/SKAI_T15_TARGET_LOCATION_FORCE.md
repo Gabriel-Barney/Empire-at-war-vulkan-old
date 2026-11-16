@@ -208,3 +208,6 @@ Same as retail for a structure:
   0x6537d0 inserts into the owner list and creates the entries in one call, and projects them at the first service
   whose transform differs from the stored copy. So a structure registered normally would be in both. The owner-change
   path 0x38e5a0 unregisters (0x4f4ba0 → 0x658930) only when called without a player-list argument. Not traced further.
+- **Answered (D4), SKAI_T15_TARGET_CHOICE §Q5:** the pre-built base structures are created by the skirmish setup's
+  pad pre-build before the threat grid is deleted and rebuilt, so they are never in the battle grid's owner lists; they
+  do reach its cell lists and threat layer at their first UNIT_AI service [M].

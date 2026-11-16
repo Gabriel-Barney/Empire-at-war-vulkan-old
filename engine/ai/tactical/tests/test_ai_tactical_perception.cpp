@@ -409,7 +409,9 @@ static void test_grid_projection() {
     // object is projected into the cells and the threat layer as usual but is in no owner list.
     TacticalPerceptionGrid k;
     k.init(TacticalMode::Land, w.map, 4, threat_grid_config(TacticalMode::Land, c));
-    CHECK(k.register_object(w, 2, 0, false));
+    w.objects[1].no_owner_list = true;
+    CHECK(k.register_object(w, 2, 0));
+    w.objects[1].no_owner_list = false;
     CHECK(k.is_registered(2) && k.player_objects(0).empty() && k.player_objects(1).empty());
     CHECK(!k.live_entries(tcell).empty() && k.threat(0, tcell) == h.threat(0, tcell));
 }
@@ -444,6 +446,7 @@ struct Fixture {
         PerceptionObject barracks = make_obj(17, 0, kBarracks, O - 100.0f, O + 20.0f, 50.0f, 0.0f);
         barracks.built_structure = true;
         barracks.dummy_ground_structure = true;
+        barracks.no_owner_list = true;  // skai t15: pre-built at the start (out of the grid owner list)
         w.objects.push_back(barracks);
         w.objects[0].zone = 2;
         w.objects[1].zone = 2;
