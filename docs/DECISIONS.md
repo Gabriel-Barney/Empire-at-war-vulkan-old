@@ -265,3 +265,5 @@ Gabriel, 2026-11-16, in the up-front round of the "needs Gabriel and probe runs"
   aamode t04, names t03, pathl t03, modc t09 and gchk (backlog b0251 / b0258). Each check is done with screenshots and
   closed when what Claude sees matches; taste calls are noted for Gabriel. The audio check aud1 t09 stays Gabriel's
   (Claude can't hear). Outside that run, rule 7 is unchanged.
+- Renewed for the second 2026-11-16 coordinator run (Trace parity gaps / UI art and fonts): Claude drove alamo_game for
+  aamode t04, names t03, pathl t03 and gchk t01/t02 (done; findings in backlog b0442-b0448). Rule 7 unchanged otherwise.
