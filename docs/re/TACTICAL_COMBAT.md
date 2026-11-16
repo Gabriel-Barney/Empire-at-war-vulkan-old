@@ -2045,6 +2045,9 @@ order, not nearest along the segment. The port should sort by segment fraction, 
      (3D distance), each with its own delay.
 8. Stop when the victim count reaches `Projectile_Blast_Area_Max_Victims`.
 
+> Base-shield dome hits (which shots stop at the dome, absorbed particle, blast still reaching units inside) and the
+> ground vs lifetime detonation particle per path: `TRU1_A_RE_ANSWERS.md` A5, B1–B3 (2026-11-15).
+
 ### 3.6 `Take_Damage` (0x3a9e30), order of operations
 Arguments: victim, damage kind, amount, source, hardpoint name, out-absorbed, out-armor, no-team flag, raw
 flag, out-invulnerable.
@@ -2063,7 +2066,8 @@ flag, out-invulnerable.
 4. × the victim's `TAKE_DAMAGE` unit-ability multiplier (kind 7).
 5. × the attacker's `CAUSE_DAMAGE` multiplier (kind 8). For a projectile, the shooter's value always applies.
    For any other source, it applies only when that source's obj +0x3a1 bit 0x10 is set.
-6. × `Base_Shield_Vulnerability_Modifier` when the victim is inside a base shield.
+6. × `Base_Shield_Vulnerability_Modifier` when the victim is inside a base shield. ("Inside" = an AFFECTED_BY_SHIELD
+   unit straddling the wall of an active hostile shield; `TRU1_A_RE_ANSWERS.md` A2–A3.)
 7. **Diminishing firepower:** for kind 1, when the attacker's `ALLOW_TARGET_DIMINISHING_FIREPOWER` flag is set
    (it defaults to true), × the `Diminishing_Firepower` curve evaluated at the seconds since the victim was
    last hit (999999 on the first hit).
@@ -2084,7 +2088,8 @@ flag, out-invulnerable.
 **Shields, armor and hull [H]**
 14. x = amount × shield-armor factor (`Damage_To_Armor_Mod[kind][Shield_Armor_Type]`).
 15. **Absorption,** skipped for kind 22. In this order:
-    - A base-shield "SHIELD" hardpoint absorbs everything.
+    - A base-shield "SHIELD" hardpoint absorbs everything. (Victim = the generator, hit name = its dome mesh
+      `shield`; no state test, the generator loses nothing; `TRU1_A_RE_ANSWERS.md` A4.)
     - `ShieldBehavior::Absorb` (0x549ac0) applies only to projectiles with `Projectile_Does_Shield_Damage`
       (type +0x45), or to non-projectile sources. It absorbs min(shield, x), and nothing during an ion-storm or
       depleted lockout.
