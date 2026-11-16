@@ -365,8 +365,16 @@ static void test_stage3(const Db& db) {
     // skai t15 (SKAI_T15_UNIT_DAMAGED §2.2): a coalesced task-force event is dropped while one of the same name for the
     // same task force waits; another task force's, or one after the drain, is queued.
     CHECK(run(vm, "dmg = '' function Default_Unit_Damaged(tf, u, a, d) dmg = dmg .. (d and 'd' or 'n') end") == "");
-    const std::vector<AiEventArg> d1{{AiEventArg::Number, 1.0}, {AiEventArg::Number, 2.0}, {AiEventArg::Boolean, 0.0, true}};
-    const std::vector<AiEventArg> d0{{AiEventArg::Number, 1.0}, {AiEventArg::Number, 2.0}, {AiEventArg::Boolean, 0.0, false}};
+    const auto dmg_args = [](bool deliberate) {
+        std::vector<AiEventArg> v(3);
+        v[0].kind = v[1].kind = AiEventArg::Number;
+        v[0].number = 1.0;
+        v[1].number = 2.0;
+        v[2].kind = AiEventArg::Boolean;
+        v[2].boolean = deliberate;
+        return v;
+    };
+    const std::vector<AiEventArg> d1 = dmg_args(true), d0 = dmg_args(false);
     CHECK(dispatch_task_force_event(vm, 7, AiTaskForceKind::Land, "MainForce", "Unit_Damaged", d1, true, nullptr, true));
     CHECK(dispatch_task_force_event(vm, 7, AiTaskForceKind::Land, "MainForce", "Unit_Damaged", d0, true, nullptr, true));
     CHECK(dispatch_task_force_event(vm, 8, AiTaskForceKind::Land, "MainForce", "Unit_Damaged", d0, true, nullptr, true));
