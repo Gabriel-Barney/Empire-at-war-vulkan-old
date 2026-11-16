@@ -93,6 +93,8 @@ BLOCK = r'''-- Q2 reference traces (tools/probe_mod/q2_traces): AI plan probe (q
 --           without the player (no fog test, any owner: nil means the task force has no position), fn_foe = with the
 --           other faction's own player and true (its own objects, under its own fog: set while fn_ret is nil means the
 --           plan player's fog or relation test dropped them)
+--   FNHOOK  the FNEAR wrapper was put in place of Find_Nearest (BurnUnitsLand only; at the chunk run and again at a
+--           thread start when the global was set back); fn_kind = the type of the value it wraps
 --   ERR     a probe error (each distinct one once); the shipped code still runs
 -- Every record carries time, frame, plan, faction, target (Target.Get_Type().Get_Name(): Target is the goal's planet as
 -- a game object wrapper; none = the goal has no target), tf (the task force), n, the goal's budget
@@ -270,6 +272,9 @@ function Q2P_EndAll(kind)
 @ENDALL_BODY@end
 
 function Q2P_Begin(tf)
+	if Q2P_FNInstall ~= nil then
+		Q2P_FNInstall()
+	end
 	local prev = Q2P_Get(tf .. " end", "first")
 	Q2P_Set(tf .. " n", Q2P_Get(tf .. " n", 0) + 1)
 	Q2P_Set(tf .. " k", 0)
@@ -445,14 +450,24 @@ function Q2P_Near(a, r)
 	Q2P_Safe("FNEAR", Q2P_CurTF(), s)
 end
 
-if Q2P_FN == nil and Find_Nearest ~= nil then
-	Q2P_FN = Find_Nearest
-	function Find_Nearest(...)
-		local r = Q2P_FN(unpack(arg))
-		Q2P_Try("FNEAR", Q2P_Near, arg, r)
-		return r
+function Q2P_FNWrap(...)
+	local r = Q2P_FN(unpack(arg))
+	Q2P_Try("FNEAR", Q2P_Near, arg, r)
+	return r
+end
+
+-- Puts the wrapper in place of the current Find_Nearest unless it is there already. Called at the chunk run and again at
+-- each thread start (Q2P_Begin): in the retail run 20261116-012157 the chunk-run install alone recorded no FNEAR at all
+-- (11 BurnUnitsLand runs, near= set), so retail's Find_Nearest global is (re)set after the chunk runs. FNHOOK records
+-- each install with the type of the value it wrapped.
+function Q2P_FNInstall()
+	if Find_Nearest ~= nil and not rawequal(Find_Nearest, Q2P_FNWrap) then
+		Q2P_FN = Find_Nearest
+		Find_Nearest = Q2P_FNWrap
+		Q2P_Safe("FNHOOK", "?", " fn_kind=" .. type(Q2P_FN))
 	end
 end
+Q2P_FNInstall()
 '''
 
 TARGET_GALACTIC = r'''function Q2P_Target()

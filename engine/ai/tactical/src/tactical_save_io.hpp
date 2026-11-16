@@ -93,7 +93,7 @@ inline bool get_target(ByteReader& r, TacticalTarget& t) {
 }
 
 // TacticalPpPick (PotentialPlan picks): i32 type, u8 source, i32 ref, i32 task force, i32 team.
-inline constexpr size_t kPickBytes = 4 + 1 + 4 + 4 + 4;
+inline constexpr size_t kPickBytes = 4 + 1 + 4 + 4 + 4;  // lower bound (skai t15 adds the contrast entry, 4)
 
 inline void put_pick(ByteWriter& w, const TacticalPpPick& k) {
     w.i32(k.type);
@@ -101,9 +101,10 @@ inline void put_pick(ByteWriter& w, const TacticalPpPick& k) {
     w.i32(k.ref);
     w.i32(k.tf);
     w.i32(k.team);
+    w.i32(k.contrast_entry);  // skai t15 (tactical AI save version 16 / 17)
 }
 
-inline bool get_pick(ByteReader& r, TacticalPpPick& k) {
+inline bool get_pick(ByteReader& r, TacticalPpPick& k, bool with_entry) {
     k.type = r.i32();
     const uint8_t source = r.u8();
     if (source > static_cast<uint8_t>(PpSource::Produce)) r.fail();
@@ -111,6 +112,7 @@ inline bool get_pick(ByteReader& r, TacticalPpPick& k) {
     k.ref = r.i32();
     k.tf = r.i32();
     k.team = r.i32();
+    k.contrast_entry = with_entry ? r.i32() : -1;
     return r.ok();
 }
 
