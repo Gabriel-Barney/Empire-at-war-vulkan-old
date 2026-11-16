@@ -432,3 +432,22 @@ Empire AI vs idle Underworld, Utapau, port seed 1 (dev bc3391f0 + skai-a) agains
   (`TDESIRE`, every 10th tactical sample; `analysis/desire_trace.py --retail <run> --port <ai log>`).
 - **Ported on the way (rules, not the cause here):** plan event 14 `Unit_Damaged` (SKAI_T15_UNIT_DAMAGED, land task
   forces for now) - in seed 1 it reaches the Destroy_Structure plans 26 times and moves the end from 18429 to 19375.
+
+## Retail runs of 2026-11-16 afternoon and the exit test after skai t20 (skai-a) [H: measured]
+
+Kit dev fb443bf6 (TDESIRE off), Utapau, Medium AI, Advanced Default, 36000 ticks. End frame = tick the idle side's last
+base structure falls (`analysis/land_attack.py`).
+
+- `20261116-133939`, Empire AI vs idle Underworld: ends 28196 (palace; trace end 28404). Order: all six merc teams
+  13538-19174 (first AI unit near the base 8681), then vehicle factory 20818, Droid Works 22990, barracks 25227, palace
+  28196.
+- `20261116-140323`, Underworld AI vs idle Empire: ends 28391 (command center; trace end ~28599).
+- `20261116-142451`, Underworld AI vs idle Empire: no end in 36000.
+- `skai_exit.py` (RETAIL now Rebel 1/4, Empire 4/6, Underworld 1/3) on dev 91654afb (t19, Unit_Damaged, t20): Rebel pass
+  (4/10, median 25147.5), Underworld pass (0/10 vs 1/3, Fisher p 0.231), Empire FAIL (9/10, median 18899 < 23746 -
+  3000). The rate passes (p 0.518); the end frames do not.
+- **Port seed 1 goes structure-first.** Vehicle factory 10085, then most merc teams 10201-11401, Droid Works 11831,
+  barracks 13337, palace 18692. Retail clears the merc teams before it hits any structure, and its first structure
+  falls about 10700 frames after the port's. Next for t15: why retail's Empire AI does not commit Destroy_Structure on
+  the vehicle factory while merc teams stand near it (retail run 1 dropped its 6639 vehicle-factory plan at 7421 by
+  displacement); the TDESIRE kit that would show the desire per target ended retail runs early (three runs) and is off.
