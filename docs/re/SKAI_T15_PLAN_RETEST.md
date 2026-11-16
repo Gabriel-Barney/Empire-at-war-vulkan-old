@@ -518,6 +518,4 @@ It waits for Gabriel (the run cap for 2026-11-16 is used).
 - The same kit ran three full land games on 2026-11-16 (133939, 140323, 142451). The same hooks ran twice on 2026-11-16 ("Retail hook runs").
 - skai-b's space plan hooks (0276b68b) are in the payload but are not run in a land game.
 
-**Limit:** the kit does not log proposal desires.
-- Run 1 already showed "old candidate not picked" with no plan started at that commit, so this run alone may not name the proposal that displaced the vehicle-factory plan.
-- To name it directly, add a Resolve_Category candidate hook first: goal type, target and desire of each candidate. The offsets (Resolve's arguments, the goal sets, goal desire / type / target, target ids, the player filter) and the kit's `resolve_enter` category bug (it logs `args[1]`, the category is `args[2]`) are in `SKAI_T15_RESOLVE_HOOK_RE.md`.
+**Resolve candidates (added 2026-11-16, commit 50c84d00):** the hooks now log every land Resolve_Category's active goals and proposals (type, target, desire, effective desire, state, plan), the survivors and the accepted proposals, and the phase of each activation. For each displaced plan end, `analysis/plan_ends.py out\<run>` prints that commit's candidates, which names the proposal that displaced the plan. Layout: `SKAI_T15_RESOLVE_HOOK_RE.md`. The old `resolve_enter` category bug (args[1]) is fixed. Offline check: `frida/selftest_hooks.py`.
