@@ -426,7 +426,10 @@ if(_alamo_sim)
     # seeds 1 and 8 then log AI_PLAN_EXPANSIONGENERIC_BUILDMDUITEM "Underworld_Mobile_Defense_Unit is not a valid build
     # location" (the MDU deploys while it still holds a land attack block, whose 30-frame re-plan gives it a new path and
     # undeploys it before the plan's Build; skai t19). Seeds 3 and 9: 0 Lua errors. Pinned to 3 and 9.
-    foreach(_seed 3 9)
+    # skai t19 (2026-11-16): DEPLOY now leaves every coordinator before it adopts (SKAI_T19_MDU_DEPLOY_BLOCK §1), so a
+    # deployed MDU is no longer re-planned by its old formation; seeds 1 and 8 run 70000 ticks with 0 Lua errors. Seed 8
+    # is back as the regression check (about 160 s with 4 workers).
+    foreach(_seed 3 8 9)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_empire_underworld_seed${_seed}
                COMMAND alamo_headless --skirmish-ai foc-land --ai Empire,Underworld --ticks 70000 --workers 4 --quiet
                        --fail-on-lua-errors --seed ${_seed})
