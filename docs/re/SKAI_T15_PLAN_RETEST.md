@@ -491,3 +491,33 @@ Seed 3, the only one of seeds 1-10 that ends, with each rule switched off:
 - **Seeds 11-30, as landed:** no end in any of the 20, all with 0 Lua errors. With seeds 1-10 that is 1 of 30 against retail's 1 of 3 (28391).
 - The rule is retail's [H], so this is no port defect.
 - skai_exit's Underworld frames check fails on that single port end: one game cannot give a stable median. The rate check passes.
+
+## Next retail run for t15: the plan-hook run, ready (skai-a, 2026-11-16)
+
+It waits for Gabriel (the run cap for 2026-11-16 is used).
+
+**Command:** run this from a checkout at dev ca5637e2 or later; the kit's GameScoring has no TDESIRE.
+
+    tools\probe_mod\q2_traces\run_skai_t15_empire_ai.cmd
+
+**Setup:**
+- `toolchain\re` venv with frida (`toolchain\14_re_tools.cmd`).
+- Steam running.
+- Clicks: Single Player, Skirmish Battles, Land, Utapau. You = Underworld (slot 1); slot 2 = Empire, Medium AI; Advanced, Default; Start Game.
+- Hands off for about 22 min, then run `cleanup.cmd`.
+
+**What it records:**
+- The Lua probe's plan records (PSTART / PBLOCK / PEXIT) and the GameScoring samples.
+- `frida_t15.jsonl` from the read-only hooks of `frida/skai_t15_hooks.js`: plan ends with backtrace, goal releases, the running-plan re-test, Resolve_Category and maintenance brackets, Purge_Goals.
+- Read it with `analysis/plan_ends.py out\<run>` and `analysis/land_attack.py out\<run>`.
+
+**Safe for retail:**
+- GameScoring calls no EvaluatePerception. TDESIRE is removed; it ended three runs.
+- The plan hooks call EvaluatePerception only with `PlayerObject`, which is the AI player inside a plan script.
+- The frida hooks only read memory.
+- The same kit ran three full land games on 2026-11-16 (133939, 140323, 142451). The same hooks ran twice on 2026-11-16 ("Retail hook runs").
+- skai-b's space plan hooks (0276b68b) are in the payload but are not run in a land game.
+
+**Limit:** the kit does not log proposal desires.
+- Run 1 already showed "old candidate not picked" with no plan started at that commit, so this run alone may not name the proposal that displaced the vehicle-factory plan.
+- To name it directly, add a Resolve_Category candidate hook first: goal type, target and desire of each candidate. That needs the goal struct's desire / type / target offsets and Resolve's candidate list (a re-question; not documented in docs/re yet).
