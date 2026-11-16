@@ -61,8 +61,9 @@ def steps(variants):
     for i, v in enumerate(variants):
         mode, _, _, cur, what = build_q6t33_mod.VARIANTS[v]
         ev = 'at 40 s (Tatooine made neutral)' if mode == 'E' else 'at 20 s (Abregado Rae given to the Rebel)'
-        park = ('on the TATOOINE planet sphere: the script centres the camera on Tatooine in the first second, so it is '
-                'the planet in the middle of the screen (the encyclopedia pop-up must open)' if cur == 'planet' else
+        park = ('on the TATOOINE planet sphere: first pan the camera with the Down arrow for about 1 s (camera only, it '
+                'sits under Byss behind the command bar), then rest the mouse on it (the encyclopedia pop-up must open)'
+                if cur == 'planet' else
                 'over EMPTY black space, at least 250 px from every planet, route and HUD element')
         lines += [' %d) Main menu > Single Player > Galactic Conquest > "Q6T33: %s" > EMPIRE > Start.' % (i + 1, v),
                   '    (%s)' % what,
