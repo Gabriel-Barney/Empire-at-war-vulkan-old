@@ -857,10 +857,14 @@ enum UnitFlag : uint32_t {
     // neither acquires it (candidate filters), keeps it (current-target validation) nor is given it (Order_Attack C step
     // 1). Mirrored by the host from MovementSystem::hover_state before every tick; derived state, not hashed.
     kUnitHoverRaised = 1u << 27,
+    // STY1 t01 (docs/re s78j [H]): Lua Prevent_All_Fire - TARGETING and every weapon (own weapon and hardpoints) are not
+    // serviced, as for a stunned unit; orders and targets are kept, the recharge still elapses. Mirrored by the host from
+    // the script bridge before every tick; derived state, not hashed.
+    kUnitScriptNoFire = 1u << 28,
 };
 // Mirrors the host rewrites before every tick (left out of hash_units).
 inline constexpr uint32_t kUnitHostMirrorFlags = kUnitFighterIdle | kUnitHoverRest | kUnitRocketAttack | kUnitScanQuery |
-                                                 kUnitMoving | kUnitAttackClip | kUnitHoverRaised;
+                                                 kUnitMoving | kUnitAttackClip | kUnitHoverRaised | kUnitScriptNoFire;
 
 struct UnitSpawn {
     ObjectId id = kNoObject;

@@ -87,9 +87,11 @@ headless multithreaded simulation core first, then a Vulkan 1.3 renderer. Any Cl
 **Default workflow for task requests (Gabriel, 2026-11-15): any request to complete roadmap work ("complete all tasks under
 AUD1", "do aud3", "work the AUDIO box", "next ready group") goes through the `run-group` skill.** The main session becomes the
 **coordinator**: it resolves the group, box or stage, checks `after`, claims and the tier focus, splits the work into at most three
-parallel **lanes** (one per group, or independent shares of one group), starts a background `lane` agent per lane in its own
-worktree, and serves the steps lanes cannot do as subagents (`re-analyst`, the `/code-review` / `spec-review` / `reviewer` reviews,
-questions for Gabriel; `lane.md`, "Coordinator protocol"). Each lane follows the lane loop with every other skill and tool.
+parallel **lanes** (one per group, or independent shares of one group), and **starts each lane as its own session nested under
+the coordinator's session, with its own app-made worktree** (`start_session`, `use_worktree: true`; Gabriel, 2026-11-15), not as a
+background subagent: a subagent is bound to the coordinator's worktree and hits the worktree write block when it edits another.
+Lane sessions run `re-analyst` and the reviews themselves; the coordinator serves the Ghidra turn (one ReVa session at a time),
+questions for Gabriel and waits between lanes (`lane.md`, "Coordinator protocol"). Each lane follows the lane loop with every skill and tool.
 
 Real work is done per roadmap group by a `lane` agent (`.claude/agents/lane.md`; `/start-group <id>`, `/finish-group <id>`) in its
 own worktree. Lanes own a group, not a folder: two lanes must not edit the same files, and a landing commit names any golden that changed.

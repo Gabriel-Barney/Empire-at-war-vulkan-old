@@ -1701,6 +1701,8 @@ void TacticalBattle::apply_speed_factors() {
     // else a member's - members read their head's target), ascending container id.
     const auto n = static_cast<uint32_t>(units_.size());
     std::vector<uint8_t> targets(n, 0);
+    refresh_script_control();  // STY1 t01: serial; the parallel fill only reads script_ctl_
+    const bool scripted = !script_ctls_.empty() && script_ctl_.size() == n;
     const auto unit_fill = [&](uint32_t b, uint32_t e) {
         for (uint32_t i = b; i < e; ++i) {
             const Unit& u = units_[i];
@@ -1712,7 +1714,15 @@ void TacticalBattle::apply_speed_factors() {
             // stop it first and new move orders skip it (movement_locked).
             if (combat_->stunned(u.id, frame_)) f = 0.0f;  // OI abilities: land stun suspends the locomotor (0x647290)
             movement_->set_speed_factor(u.id, f);
-            movement_->set_speed_override(u.id, abilities_->speed_override(u.id));  // OI host: Berserker_Speed (-1 = none)
+            // OI host: Berserker_Speed (-1 = none); STY1 t01: Override_Max_Speed (the lower of the two caps)
+            float ov = abilities_->speed_override(u.id);
+            if (scripted) {
+                const ScriptUnitControl& sc = script_ctl_[i];
+                if (sc.loco_suspended) f = 0.0f;  // Suspend_Locomotor: the locomotor does not run
+                if (sc.max_speed >= 0.0f && (ov < 0.0f || sc.max_speed < ov)) ov = sc.max_speed;
+                movement_->set_speed_factor(u.id, f);
+            }
+            movement_->set_speed_override(u.id, ov);
             const bool in_team = in_team_of(u);
             const auto team = in_team ? static_cast<uint32_t>(containers_[u.container].id) : 0u;
             // s78l t01 (MOVEMENT §3.4 "Team cap, exact"): the container type's raw Max_Speed is in the team minimum (-1: no
