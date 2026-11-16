@@ -328,6 +328,9 @@ Run run(const Data& d, int32_t workers, int follow = 0, bool via_command = false
     opt.battle.order_interval = 0;  // no stand-in orders: the sides stay at their anchors (12000 apart)
     opt.retreat_increment_frames = load_retreat_increments(d.rules);
     opt.retreat_flight_increments = load_retreat_flight_increments(d.rules);
+    // TRU1 t06 (TRU1_C_RE §2.2): without the retreat cinematic the retreat completes at the countdown end, inside the TSW
+    // hold (follow 1's case); with it the units fly out for 181 more frames.
+    if (follow == 1) opt.l1_constants.in_game_cinematics = false;
     CampaignBattles battles(host, crules, *d.catalog,
                             [](const std::string& name, terrain::MapData& m) {
                                 if (name != "L1_Space_B") return false;

@@ -1436,6 +1436,35 @@ void TacticalBattle::hash(StateHasher& h) const {
     h.i32(retreat_side_);
     h.u32(retreat_done_frame_);
     h.boolean(retreat_complete_);
+    if (sp_used_) {  // TRU1 t05 / t07: indigenous spawners and debris pieces (absent until one exists)
+        h.u32(static_cast<uint32_t>(sp_scanned_));
+        h.u32(static_cast<uint32_t>(sp_spawners_.size()));
+        for (const IndigenousSpawner& s : sp_spawners_) {
+            h.i32(s.id);
+            h.i32(s.state);
+            h.u32(s.next);
+            h.u32(static_cast<uint32_t>(s.spawned.size()));
+            for (const objects::ObjectId id : s.spawned) h.i32(id);
+        }
+        h.u32(static_cast<uint32_t>(sp_debris_.size()));
+        for (const DebrisPiece& d : sp_debris_) {
+            h.i32(d.id);
+            h.i32(d.particle);
+            h.u32(d.expiry);
+            h.f32(d.roll);
+            h.f32(d.pitch);
+            h.f32(d.yaw);
+        }
+    }
+    if (rt_.state != 0) {  // TRU1 t06: the retreat jump-out flight (absent while none runs)
+        h.u8(rt_.state);
+        h.i32(rt_.counter);
+        h.i32(rt_.release);
+        h.i32(rt_.sound);
+        h.i32(rt_.wait);
+        h.u32(static_cast<uint32_t>(rt_.list.size()));
+        for (const objects::ObjectId id : rt_.list) h.i32(static_cast<int32_t>(id));
+    }
     if (vm_cp_armed_) {  // ccpgt t02: the domination timer (absent while not armed)
         h.i32(vm_cp_timer_);
         h.i32(vm_cp_player_);

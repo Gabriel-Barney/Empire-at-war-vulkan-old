@@ -788,8 +788,10 @@ it sets the auto-resolve retreat instead) and AI task forces (0x5fdd50).
   units list is built by vf8 (`Adding %s to retreatable units list`). Cancel: vf15.
 - **States** (+0x18): 1 countdown (units that died or lost their locomotor drop out of the list), 2
   jump-out flight (`Space_Retreat_Flight_Move_Increment` +0x20bc, one unit every
-  `Space_Retreat_Unit_Increment_Wait_Frames` +0x20c0 toward `Space_Retreat_Off_Map_Dest_Pos`), 4
-  waiting for the retreat cinematic, 3 done.
+  `Space_Retreat_Unit_Increment_Wait_Frames` +0x20c0), 4 waiting for the retreat cinematic, 3 done.
+  Corrected 2026-11-15 (TRU1_C_RE.md §2): the flight runs only with the retreat cinematic (In_Game_Cinematics,
+  space), lines the units up at the `ATTACKER ENTRY POSITION` marker and flies them **opposite the marker's
+  facing**; `Space_Retreat_Off_Map_Dest_Pos` is copied into the coordinator and never read.
 - **Post-retreat** (vf11): retreated objects and objects inside a retreated flagship are preserved;
   every other object of the retreating player is destroyed; land preserves transports. The victory
   monitor then sees type 0xc (all capable enemy units retreated).

@@ -785,6 +785,16 @@ std::vector<std::pair<bool, Vec3>> TacticalBattle::bt_start_markers() const {
     return out;
 }
 
+bool TacticalBattle::bt_attacker_entry(Vec3& pos, Vec3& facing) const {
+    for (const MapMarker& m : bt_markers_)
+        if (m.kind == kMkAttack) {
+            pos = m.pos;
+            facing = m.facing;
+            return true;
+        }
+    return false;
+}
+
 bool TacticalBattle::bt_owner_valid(int32_t owner) const {
     return owner >= 0 && static_cast<size_t>(owner) < galaxy_->players().size() && static_cast<uint32_t>(owner) < bt_players_;
 }

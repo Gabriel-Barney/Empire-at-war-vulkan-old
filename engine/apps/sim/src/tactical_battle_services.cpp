@@ -166,10 +166,17 @@ void TacticalBattle::build_service_graph() {
     });
     g.add("retreat", kAll, kAll, [this] { retreat_policy(); });
     g.add("retreat_end", kAll, kAll, [this] {
-        if (retreat_side_ >= 0 && !retreat_complete_ && frame_ >= retreat_done_frame_) {
-            bt_retreat_attrition(static_cast<uint8_t>(retreat_side_), *tick_.rng);  // battle host: vf12 at the countdown end (§4.9)
-            complete_retreat(*tick_.mode, static_cast<uint8_t>(retreat_side_));
+        if (retreat_side_ < 0 || retreat_complete_) return;
+        const auto side = static_cast<uint8_t>(retreat_side_);
+        if (rt_.state == 0) {
+            if (frame_ < retreat_done_frame_) return;
+            bt_retreat_attrition(side, *tick_.rng);  // battle host: vf12 at the countdown end (§4.9)
+            // TRU1 t06 (TRU1_C_RE §2.2): space with the retreat cinematic flies the units out first (states 2 / 4)
+            if (rt_begin_flight(*tick_.mode, side)) return;
+        } else if (!rt_flight_tick(*tick_.mode)) {
+            return;
         }
+        complete_retreat(*tick_.mode, side);
     });
     lap("tac.orders");
 
@@ -276,6 +283,7 @@ void TacticalBattle::build_service_graph() {
 
     // ---- services ---------------------------------------------------------------------------------------------------
     g.add("hangars", kAll, kAll, [this] { hg_tick(*tick_.mode, *tick_.rng); });  // hangars: SPAWN_SQUADRON services, launches
+    g.add("spawners", kAll, kAll, [this] { sp_tick(*tick_.mode, *tick_.rng); });  // TRU1 t05 / t07: indigenous spawners, debris
     // cu8k t01: Saber_Throw throws / SWORD_CONTROL / SWORD_CATCH (after the saber's step)
     g.add("saber_throw", kAll, kAll, [this] { saber_throw_service(*tick_.mode); });
     // cu8g t01: HOLSTER_WEAPON (engine-loop suppression, draw / holster SFX requests)
