@@ -22,8 +22,9 @@ How it is wired:
 - A `SessionStart` hook (`.claude/settings.json`) runs `tools\worktree\worktree_tool.py link --quiet`: a worktree made by the
   app gets the `Data`, `extracted`, `toolchain` and `roadmap-store` junctions automatically (it never replaces a folder already
   there and does nothing in the main checkout).
-- `.claude/settings.json` pre-approves the build scripts, read-only git, the build summary and the roadmap read commands, so
-  background agents do not stall on a prompt. Destructive actions keep their pre-approved wrappers (`docs/BUILD.md`).
+- `.claude/settings.json` pre-approves the build scripts, every project script under `tools\`, the roadmap tool and git's read
+  and local steps, so lanes run unattended (`docs/WORKFLOW_TIPS.md`, "Unattended runs"). Destructive actions keep their
+  pre-approved wrappers (`docs/BUILD.md`).
 
 ## Project scripts (root and `tools\`)
 
@@ -73,10 +74,9 @@ retail (the G1 capture; RenderDoc is out of scope, `DECISIONS.md`). Running reta
 (`probe-kit`; findings go to `docs/re/`). LLVM tools work on the port's binaries and on retail `StarWarsG.exe` alike; on retail
 the no-copy guard above applies.
 
-Pre-approved in `.claude/settings.json`, so they run without a prompt in the default permission mode too: `tc.cmd` with
-`apitrace`, `d3dretrace`, `qapitrace`, `clang-tidy`, `clang-format`, `clang-query`, `clang-include-cleaner`, `clangd`, `llvm-*`,
-`lldb`, `dxc`, `dumpbin`, `rea`, `cdb`, plus `--where` and `<program> --version`. Not pre-approved: `frida*` and `TTD` (they attach
-to or record processes), `cargo`, `cmake` and `ninja` beyond `--version` (builds go through the build scripts).
+Pre-approved in `.claude/settings.json` (2026-11-15), so they run without a prompt in the default permission mode too: `tc.cmd`
+with any program, except the `ask` rules, which always prompt: `frida*` and `TTD` (they attach to or record processes), `cargo`,
+`cmake` and `ninja` (builds go through the build scripts).
 
 Builds still go through the build scripts, never a hand-run cmake configure (`BUILD.md`). A program that is missing gets a
 pinned setup step in `toolchain\2_setup.cmd` (rule 5), then a row here.
