@@ -266,6 +266,13 @@ if(_alamo_sim)
     # Both synthetic runs write their data to the one %TEMP%\alamo_a1_skirmish_ai folder: never at the same time (ctest -j).
     set_tests_properties(alamo_headless_skirmish_trace PROPERTIES TIMEOUT 1200)
     set_tests_properties(alamo_headless_skirmish_trace alamo_headless_skirmish_ai_synthetic PROPERTIES RESOURCE_LOCK alamo_a1_skirmish_ai)
+    # skai t15: --plan-retest (TacticalAiConfig::plan_retest, off by default) ends a running plan in the synthetic skirmish
+    # (headless/check_plan_retest.cmake). Same %TEMP% data folder as the two runs above.
+    add_test(NAME alamo_headless_skirmish_plan_retest
+             COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:alamo_headless>
+                     -DLOG=${CMAKE_CURRENT_BINARY_DIR}/skai_t15_plan_retest/ai.log
+                     -P ${CMAKE_CURRENT_SOURCE_DIR}/headless/check_plan_retest.cmake)
+    set_tests_properties(alamo_headless_skirmish_plan_retest PROPERTIES TIMEOUT 1200 RESOURCE_LOCK alamo_a1_skirmish_ai)
     # q6 t02: the skirmish host's slots from the data (--ai FACTION[,FACTION]): Underworld (AI_Player_Underworld, its Space_ /
     # Land_Skirmish_AI_Default_Forces) in slot 0 of a space skirmish, and as the AI beside an idle human Empire on land; no Lua errors.
     # Skipped (exit 0) without ALAMO_FOC_DATA.

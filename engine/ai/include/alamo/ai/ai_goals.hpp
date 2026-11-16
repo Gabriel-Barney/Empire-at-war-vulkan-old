@@ -135,6 +135,9 @@ public:
     // galactic mode refreshes g.nominal_time from the re-solved selection (AllowedTime reads the PP live, A2f t09).
     virtual bool plan_activatable(Goal& g) = 0;
     virtual bool plan_invalid(const Goal& g) = 0;      // 0x6c47c0 (-> 0x6c45e0: a unit taken by another PP)
+    // skai t15 (SKAI_T15_PLAN_RETEST §2.1): Resolve_Category also re-validates an old candidate's running plan (no
+    // MagicPlan exception) and drops it when invalid. Tactical only so far [port: galactic keeps the earlier rule].
+    virtual bool retest_old_candidates() { return false; }
     virtual bool replaceable(const Goal& g) = 0;       // 0x692740
     virtual void refresh_plan(Goal& g) = 0;            // 0x6c2d60: reserve / re-assert (+0x30 = PP)
     // 0x6c0be0's reservation part, Commit step 4, every active goal with a PotentialPlan, every Commit: its free-store
