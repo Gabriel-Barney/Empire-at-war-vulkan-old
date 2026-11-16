@@ -87,9 +87,20 @@ mode; `outcome.planets_final` Rebel 4.6 vs 5 and Underworld 3.4 vs 3: the port l
 which seed 0 alone does not show); geonosis_skirmish FAIL 9 / PASS 10 (`outcome.units_lost[Empire]` 1.7 +- 3.1 vs 0
 PASSES: seed noise, not the regression the single mode reported).
 
+Second recording (2026-11-16, q4d t04, dev 4385f8a0, 10 seeds, 9 + 8 retail runs): hotm_galactic FAIL 15 / PASS 109,
+geonosis_skirmish FAIL 6 / PASS 13. The 5 + 2 metrics that passed in the first recording and fail now moved with the
+references (retail means and spreads from more runs), not with the port. hotm_galactic does not grade spreads (its own
+`distribution` in `scenarios.json`): every retail run starts from seed 0 on the menu path, so its sd is timing noise
+only (0 on most metrics) while the port side varies its seed. What still fails across seeds: five Underworld hop routes
+(Kashyyyk <-> The Maw 108 vs 162, Nal Hutta <-> Shola 79 / 88 vs 106, The Maw -> Shola) in 3..7 of 10 seeds;
+Rebel infantry / tank buster build times at Kamino and Naboo about twice retail's (retail 116..173 in 7 of 8 runs);
+`outcome.planets_final` (the port gives the Underworld a Rebel planet in 5 of 10 seeds, retail in none of 9 hands-off
+runs); in the skirmish the Rebel AI's first build (frame 600 vs 1800..3000) and its credits.
+
 **More retail runs.** The means are only as good as the retail sample, and spreads are not graded below 5 runs a side
-(today: hotm_galactic 4, geonosis_skirmish 3). `tools\probe_mod\parity_refs\` (Gabriel runs it: several hands-off Q2
-runs per scenario in one sitting) records more and writes an `add_refs.cmd`; `add-refs` appends runs to a scenario's
+(since q4d t04: hotm_galactic 9, geonosis_skirmish 8; one paused galactic run is in `excluded_references`).
+`tools\probe_mod\parity_refs\` (several hands-off Q2 runs per scenario in one sitting; the skirmish runs of q4d t03
+were made with `run_trace.ps1 -Scenario skirmish -NoDrive -LuaProbe` and the menus set by hand) records more and writes an `add_refs.cmd`; `add-refs` appends runs to a scenario's
 `references` in `scenarios.json` (each run's `trace.q2t` must exist under the reference folder unless `--no-check`; a run
 already listed or in `excluded_references` is skipped; the file keeps its layout). Check new runs with `retail`
 (leave-one-out) and re-record both baselines.

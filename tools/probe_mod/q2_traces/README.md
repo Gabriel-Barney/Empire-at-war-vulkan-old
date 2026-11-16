@@ -144,6 +144,14 @@ galaxy is running.
    otherwise the same clicks and the same reader. Retail has no AI-vs-AI skirmish, so these compare each AI alone against
    the port's `--human` runs: first Mineral Processor, what the emergency infantry build buys, winner and end frame.
    Questions, port predictions and findings: `docs\re\B0418_UTAPAU_AI_RUNS.md`.
+   **skai t15 hook runs (2026-11-16), about 22 min each:** `run_skai_t15_empire_ai.cmd` (the b0418 Empire AI clicks) and
+   `run_skai_t15_rebel_ai.cmd` (the skai t02 Rebel AI clicks, also skai t14 run 2: FNEAR records). The same Q2 run, plus
+   `frida\frida_logger.py` attached to StarWarsG.exe with the read-only hooks of `frida\skai_t15_hooks.js` (function-entry
+   hooks and memory reads only; the script refuses another exe build). They log the running-plan re-test 0x6c47c0, plan end,
+   goal release / destructor, Purge_Goals, Resolve_Category and maintenance with the mode frame, into
+   `out\<run>\frida_t15.jsonl`. `analysis\plan_ends.py out\<run>` (`--selftest`) names, for every Destroy_Structure plan
+   ended from outside its script, the rule that ended it. Question and RVAs: `docs\re\SKAI_T15_PLAN_RETEST.md` §3.5. Needs
+   `toolchain\re\venv` (frida 17).
    **Story mission (story t04), about 15 min:** `run_story.cmd`, see **Story mission run** below.
 7. **Send back:** zip `out\` and send it. Leave out `out\selftest`. Each run has its own folder:
    - `trace.q2t`;

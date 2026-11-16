@@ -92,6 +92,7 @@ BattleAi::BattleAi(TacticalBattle& battle, TacticalMode& mode, SimHost& host, co
     cfg.stagger = setup.stagger;  // OPT2 t01
     cfg.pf = host.parallel_for();  // OPT2 t03: goal candidates' perception values; OPT2 t10: slot-10 solves
     cfg.pp_streams = setup.pp_streams;  // OPT2 t10
+    cfg.plan_retest = setup.plan_retest;  // skai t15
     cfg.pp_latency = setup.pp_latency;
     cfg.ai_lane = setup.ai_lane;  // sp3
     cfg.k_ai = setup.k_ai == 0 ? 1 : setup.k_ai;

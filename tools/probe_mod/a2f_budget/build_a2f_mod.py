@@ -27,6 +27,11 @@ a2fb_saboteur.lua), the free store gets its saboteur records (FSAB / FADD / FSVC
 TEXT_A2FB_SAB_DONE after frame SAB_STOP. --no-sab-desire leaves out channel U's desire evaluations (UD records).
 --sab-long (a2m t12) with --saboteur: the same run for 30 minutes of galactic time (channel U every SAB_LONG_STEP
 frames after SAB_STOP up to SAB_LONG_STOP, then TEXT_A2FB_SAB_DONE).
+--uw-infra (gai3 t04 / t07, run_a2f_uw.cmd) with --saboteur: channel U also evaluates the five Underworld
+infrastructure functions of UW_INFRA_EQS on every Underworld-owned planet (UB records) and runs to UW_INFRA_STOP
+(every SAB_STEP frames to SAB_STOP, then every SAB_LONG_STEP); six more plans are hooked (UW_PLANS: Build_Ground_Forces,
+Build_Space_Forces and the Underworld structure plans) and those plans and UpgradeStarbasePlan get goal= / tgt= keys
+(a2fb_goal_plan.lua). Meant to be played with a human Empire (a2f_run.py --human-empire).
 --no-mod-equations builds the Lua without the A2FB_* equation calls (and leaves the equation file alone): use it
 if a run showed that the game does not load the mod's equation file (the report says so).
 """
@@ -92,6 +97,41 @@ SAB_LONG_STEP = 300    # --sab-long: frames between channel U samples after SAB_
 SAB_LONG_STOP = 54000  # --sab-long: last sample frame = 30 minutes of galactic time (the story's MIN30 at 1800 s)
 SAB_PLANETS = ['Corellia', 'Felucia', 'Kamino', 'Kashyyyk', 'Kuat', 'MonCalimari', 'Naboo', 'NalHutta', 'Shola',
                'Tatooine', 'The_Maw', 'Yavin']       # the Locations of Sandbox_Heart_Of_The_Maw_Rebel
+# gai3 t04 / t07 (--uw-infra, docs/re/A2M_R3_RE_A.md section 5, backlog b0135 / b0157): channel U adds the Underworld
+# infrastructure functions on its own planets, the run lasts to UW_INFRA_STOP, and the Underworld build plans are hooked
+# with goal / target keys. Equations (name, key): the desire functions of Build_Underworld_Barracks
+# (Should_Build_Underworld_Barracks) and Upgrade_Starbase (Should_Underworld_Build_Starbase), both Friendly goals of
+# the Underworld galactic goal set, and three of their sub-functions; the goal system evaluates them on these very
+# targets each proposal pass, and no function of the closure reads Variable_Human or uses '#' (selftest).
+UW_INFRA_EQS = [('Should_Build_Underworld_Barracks', 'SBB'),
+                ('Should_Underworld_Save_For_Desirable_Structures', 'SSD'),
+                ('Should_Save_For_Corruption', 'SSC'), ('Needs_Groundbase_Upgrade', 'NGU'),
+                ('Should_Underworld_Build_Starbase', 'SBS')]
+UW_INFRA_STOP = 12000  # A2M_R3_RE_A section 5: the human-Empire budget run to frame 12000 (past retail's MDU @Shola 4265)
+UW_PLANS = [
+    ('BuildGroundForcesPlan', 'ReserveForce_Thread'),
+    ('BuildSpaceForcesPlan', 'ReserveForce_Thread'),
+    ('AI_Plan_Underworld_BuildUnderworldBarracks', 'BaseForce_Thread'),
+    ('AI_Plan_Underworld_BuildUnderworldVehicleFactory', 'BaseForce_Thread'),
+    ('AI_Plan_Underworld_BuildUnderworldDroidWorks', 'BaseForce_Thread'),
+    ('AI_Plan_Underworld_BuildUnderworldPalace', 'BaseForce_Thread'),
+]
+UW_GOAL_PLANS = {n for n, _t in UW_PLANS} | {'UpgradeStarbasePlan'}
+UW_GOAL_EXTRA = 'a2fb_goal_plan.lua'
+UW_INFRA = False       # set_uw_infra(); a2f_run.py --uw-infra
+
+
+def set_uw_infra(on=True):
+    """Switch the build to the gai3 t04 / t07 run (--uw-infra; needs --saboteur). Call before building."""
+    global UW_INFRA
+    UW_INFRA = bool(on)
+
+
+def plans():
+    """The hooked plans of this build: PLANS, plus UW_PLANS with --uw-infra."""
+    return PLANS + (UW_PLANS if UW_INFRA else [])
+
+
 SAB_PLOT = 'Story_Plots_Underworld_AI_Heroes.xml'
 SAB_SCRIPT = 'A2fb_SabU'
 
@@ -171,8 +211,9 @@ def screen_texts(sab_long=False):
 
 
 def sab_end(long=False):
-    """a2m t12: the last channel U sample frame of a saboteur run (SAB_STOP, or SAB_LONG_STOP with --sab-long)."""
-    return SAB_LONG_STOP if long else SAB_STOP
+    """a2m t12: the last channel U sample frame of a saboteur run (SAB_STOP, SAB_LONG_STOP with --sab-long, gai3:
+    UW_INFRA_STOP with --uw-infra)."""
+    return SAB_LONG_STOP if long else UW_INFRA_STOP if UW_INFRA else SAB_STOP
 
 
 def sab_head(desire=True, long=False):
@@ -180,10 +221,12 @@ def sab_head(desire=True, long=False):
     step frames in 0 .. stop, then (a2m t12, --sab-long) every step2 frames up to stop2 (stop2 = stop: no second
     phase); UD desire samples in 0 .. des_stop (-1 = none)."""
     end = sab_end(long)
+    infra = ', '.join('{ "%s", "%s" }' % (k, n) for n, k in UW_INFRA_EQS) if UW_INFRA else ''
     return ('A2FB_SAB = true\nA2FB_SABCFG = { type = "%s", step = %d, stop = %d, step2 = %d, stop2 = %d, des_stop = %d, '
-            'planets = { %s } }\n'
-            % (SAB_TYPE, SAB_STEP, SAB_STOP, SAB_LONG_STEP, end, (end if long else SAB_DES_STOP) if desire else -1,
-               ', '.join('"%s"' % p for p in SAB_PLANETS)))
+            'planets = { %s }, uw = %s, infra = { %s } }\n'
+            % (SAB_TYPE, SAB_STEP, SAB_STOP, SAB_LONG_STEP, end,
+               (end if long or UW_INFRA else SAB_DES_STOP) if desire else -1,
+               ', '.join('"%s"' % p for p in SAB_PLANETS), 'true' if UW_INFRA else 'false', infra))
 
 
 def assemble(orig, channel, hook, use_mod_eq, subs=None, extra=None, head_extra=''):
@@ -222,6 +265,8 @@ def sab_lua(use_mod_eq=True, desire=True, long=False):
 def plan_lua(orig, name, thread, use_mod_eq=True):
     """A shipped plan script + header + core + a2fb_plan_hook.lua (+ its PLAN_EXTRA file)."""
     extra = [PLAN_EXTRA[name]] if name in PLAN_EXTRA else []
+    if UW_INFRA and name in UW_GOAL_PLANS:
+        extra.append(UW_GOAL_EXTRA)
     return assemble(orig, 'P', 'a2fb_plan_hook.lua', use_mod_eq, plan_subs(name, thread), extra)
 
 
@@ -273,6 +318,8 @@ def build(game, out, zip_path=None, use_mod_eq=True, percept=True, saboteur=Fals
     SABDONE message to SAB_LONG_STOP (30 minutes) instead of SAB_STOP."""
     if sab_long and not saboteur:
         raise SystemExit('--sab-long needs --saboteur')
+    if UW_INFRA and (not saboteur or sab_long):
+        raise SystemExit('--uw-infra needs --saboteur and no --sab-long')
     if saboteur:
         percept = False
     src = Source(game, zip_path)
@@ -311,8 +358,10 @@ def build(game, out, zip_path=None, use_mod_eq=True, percept=True, saboteur=Fals
         data, where = src.need('DATA\\XML\\' + SAB_PLOT.upper())
         write(os.path.join(out, 'Data', 'XML', SAB_PLOT), ai_plot(data.decode('latin-1'), SAB_SCRIPT).encode('latin-1'))
         write(os.path.join(out, 'Data', 'Scripts', 'Story', '%s.lua' % SAB_SCRIPT), crlf(sab_lua(use_mod_eq, sab_desire, sab_long)))
-        notes.append('saboteur run: channel U%s%s' % ('' if sab_desire else ' without desire reads (--no-sab-desire)',
-                                                    ' to frame %d (--sab-long)' % SAB_LONG_STOP if sab_long else ''))
+        notes.append('saboteur run: channel U%s%s%s' % ('' if sab_desire else ' without desire reads (--no-sab-desire)',
+                                                      ' to frame %d (--sab-long)' % SAB_LONG_STOP if sab_long else '',
+                                                      ' with UB infrastructure reads to frame %d (--uw-infra)'
+                                                      % UW_INFRA_STOP if UW_INFRA else ''))
 
     # a2j t02 (D3): GameScoring production events (channel Q)
     data, where = src.need(SCORING)
@@ -328,13 +377,13 @@ def build(game, out, zip_path=None, use_mod_eq=True, percept=True, saboteur=Fals
     notes.append('free store from ' + where)
 
     # plans
-    for name, thread in PLANS:
+    for name, thread in plans():
         data, where = src.need('DATA\\SCRIPTS\\AI\\%s.LUA' % name.upper())
         orig = data.decode('latin-1')
         if not re.search(r'function\s+%s\s*\(' % re.escape(thread), orig):
             raise SystemExit('%s: thread function %s not found: the hook cannot wrap it' % (name, thread))
         write(os.path.join(out, 'Data', 'Scripts', 'AI', '%s.lua' % name), crlf(plan_lua(orig, name, thread, use_mod_eq)))
-    notes.append('%d plan scripts' % len(PLANS))
+    notes.append('%d plan scripts' % len(plans()))
 
     # probe type data
     texts = []
@@ -385,7 +434,10 @@ def main():
     ap.add_argument('--saboteur', action='store_true', help='a2k t05 saboteur run: channel U instead of D, FSAB records')
     ap.add_argument('--no-sab-desire', action='store_true', help='with --saboteur: no desire evaluations in channel U')
     ap.add_argument('--sab-long', action='store_true', help='with --saboteur: the 30-minute saboteur run (a2m t12)')
+    ap.add_argument('--uw-infra', action='store_true', help='with --saboteur: gai3 t04 / t07 (UB records, UW plans, '
+                    'run to frame %d)' % UW_INFRA_STOP)
     a = ap.parse_args()
+    set_uw_infra(a.uw_infra)
     build(a.game, a.out or os.path.join(a.game, 'corruption', 'Mods', MOD_NAME), a.source_zip,
           not a.no_mod_equations, not a.no_percept, a.saboteur, not a.no_sab_desire, a.sab_long)
 

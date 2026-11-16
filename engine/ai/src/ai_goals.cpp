@@ -235,7 +235,7 @@ bool GoalSystem::proposal_slice(int64_t now) {
         }
         const uint32_t n = hooks_->target_count();
         while (cursor_target_ < n) {
-            const auto t = static_cast<int32_t>(cursor_target_);
+            const int32_t t = hooks_->target_at(cursor_target_);
             if (!hooks_->applies(t, def.application) || skip(s.goal_type, t)) {
                 ++cursor_target_;
                 continue;
@@ -536,6 +536,8 @@ void GoalSystem::resolve(int32_t category, int64_t now) {
                 hooks_->refresh_plan(g);  // 0x6c2d60: re-assert its reservations (A1_READINGS §28.6 step 3)
                 keep.push_back(std::move(g));
             }
+        } else if (hooks_->retest_old_candidates() && g.running >= 0 && hooks_->plan_invalid(g)) {
+            release(g, true);  // 0x6c8970 old-candidate path: the re-test runs, a failure joins neither kept nor pool
         } else {
             old.push_back(std::move(g));
         }

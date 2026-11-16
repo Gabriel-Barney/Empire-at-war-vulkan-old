@@ -270,3 +270,13 @@ read with `EvaluatePerception(name, PlayerObject)` (the land goal system evaluat
 pass; none has a target or a `#` draw): `nsf` Non_Structure_Force_Unnormalized, `ut` Skirmish_Upgrade_Tech, `init`
 Is_Initial_Skirmish_State_Established, `nr` Num_Refineries, `sav` Is_Saving_For_Refineries_Land, `burn`
 Should_Burn_Units_Land. `ut` flipping while `nsf` passes 400 settles the first observation.
+
+## 8. Third retail Rebel AI run (skai t14 run 2, 2026-11-16)
+
+The t14 "run 2" lobby (Utapau Heights, idle human Empire, Rebel Medium AI, Advanced Default) ran on 2026-11-16 with the skai t15
+hook kit instead of the FNEAR kit (`out\20261116-012157-skirmish-vanilla-lua` in the q4d-skai worktree; no `FNEAR` records, so
+the Find_Nearest question of §6 is still open). 36000 frames, no battle end (`ticks_reached`), as in §1 and §6. Base losses:
+turbolaser towers 11318 / 17212, base shield 21663, light vehicle factory 22069, research facility 24793, communications array
+25479, barracks 29004, power generator 29665; the **Command Center survives** this time. Opening: refinery 2659, Katarn team
+2746, tech 2 9781, Han Solo 12817, tech 3 16987. The plan ends (54 Destroy_Structure ends: 26 Burn_Units_Land purges, 10 own
+exits, 7 failed re-tests, 7 displacements, 4 random-phase re-checks) are in SKAI_T15_PLAN_RETEST.md, "Retail hook runs".
