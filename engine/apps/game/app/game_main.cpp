@@ -265,6 +265,12 @@ bool App::init() {
                 v.push_back(std::move(i));
                 continue;
             }
+            if (e.name == kAutoSaveName) {  // STY1 t07: retail shows [AutoSave] as TEXT_GUI_AUTO_SAVE, first, outside any tree
+                i.label = ui_.gui.text_db() && ui_.gui.text_db()->find("TEXT_GUI_AUTO_SAVE") ? ui_.gui.caption_text("TEXT_GUI_AUTO_SAVE")
+                                                                                              : std::u32string(U"Auto Save");
+                v.insert(v.begin(), std::move(i));
+                continue;
+            }
             // [port: Gabriel 2026-11-13] the tree (save_games.hpp TREE): campaign / skirmish map > faction > playthrough.
             const SaveMeta& m = e.meta;
             const bool skirmish = m.kind == "skirmish";

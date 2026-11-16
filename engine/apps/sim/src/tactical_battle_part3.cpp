@@ -639,7 +639,10 @@ void TacticalBattle::consume_events(TacticalMode& mode, SimRng& rng) {
     engines_restarted_.clear();
     for (const ta::AbilityEvent& e : abilities_->events()) {
         ++stats_.ability_events;
-        if (e.kind == ta::AbilityEventKind::Activated) ++stats_.activations;
+        if (e.kind == ta::AbilityEventKind::Activated) {
+            ++stats_.activations;
+            story_generics_.push_back({"activate_deployed_ability", -1});  // STY1 t03 (0x4b4d70 case 1) [port: every activation]
+        }
         if (e.kind == ta::AbilityEventKind::EnginesOffline)
             if (Unit* u = unit_by_id(e.id)) {
                 engine_loops_.engines_offline(e.id, frame_);  // §3.3: both engine loops off
@@ -945,9 +948,16 @@ void TacticalBattle::expire_objects(TacticalMode& mode) {
 void TacticalBattle::combat_sync(const objects::ObjectStore& store) {
     const auto n = static_cast<uint32_t>(units_.size());
     std::vector<uint8_t> swapped_back(n, 0);
+    refresh_script_control();  // STY1 t01: serial; the parallel body only reads script_ctl_
+    const bool scripted = !script_ctls_.empty() && script_ctl_.size() == n;
     const auto body = [&](uint32_t b, uint32_t e) {
         for (uint32_t i = b; i < e; ++i) {
             const Unit& u = units_[i];
+            if (scripted && u.alive && !u.retreated && combat_->has_unit(u.id)) {
+                // Prevent_All_Fire (derived flag, also for structures) and Set_Cannot_Be_Killed (the combat death gate)
+                combat_->set_flag(u.id, tc::kUnitScriptNoFire, script_ctl_[i].no_fire);
+                combat_->set_flag(u.id, tc::kUnitCannotDie, script_ctl_[i].cannot_die);
+            }
             if (!u.alive || u.retreated || !u.movable) continue;
             combat_->set_position(u.id, tv(store.position(u.h)));
             const mv::UnitView mvv = movement_->view(u.id);

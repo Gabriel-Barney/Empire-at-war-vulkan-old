@@ -428,6 +428,7 @@ bool TacticalBattle::start_bombardment(TacticalMode& mode, int32_t player, Vec3 
             if (pt != objects::kNone) spawn_particle(*l1_mode_, static_cast<int32_t>(pt), target, player);
         }
         r.deferred = -1;
+        story_generics_.push_back({"start_bombard", player});  // STY1 t03 (0x528140): raised last, every player
         return true;
     }
     return false;

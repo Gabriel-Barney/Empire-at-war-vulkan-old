@@ -1251,6 +1251,149 @@ void test_script_spawn(const Data& d) {
     CHECK(!first_divergence(a.crc, w.crc).diverged);
 }
 
+// ---- STY1 t01: the Lua object-state setters change the sim ----
+// Prevent_All_Fire (no targeting / weapons), Suspend_Locomotor (speed factor 0), Override_Max_Speed (the speed cap) and
+// Set_Cannot_Be_Killed (the combat death gate) reach the battle through TacticalBattle::set_script_unit_control. The test
+// hooks every unit of player 1 (what a bridge's ScriptObjectState answers), orders them a march on the enemy, counts the
+// projectiles they fire, measures how far they moved by frame 120 and kills them by script damage at frame 280.
+enum class CtlMode { Baseline, NoFire, Suspend, SlowCap, CannotDie };
+struct CtlRun {
+    bool fought = false;
+    uint32_t units = 0, shots = 0, survivors = 0;
+    float moved = 0.0f;  // summed displacement of the player 1 units at frame 120
+    CrcLog crc;
+};
+
+CtlRun run_script_control(const Data& d, int32_t workers, CtlMode mode) {
+    CtlRun out;
+    jobs::JobSystem js(jobs::JobSystemConfig{workers});
+    SimConfig cfg;
+    cfg.seed = 12;
+    cfg.players = 4;
+    SimHost host(d.types, js, cfg);
+    galactic::GalacticSetup s = make_setup(d);
+    const uint32_t sq = type_of(d, "L1_Jet_Squad"), fr = type_of(d, "S10_Frigate"), esq = type_of(d, "S10_Squad");
+    s.forces = {{0, 1, esq}, {1, 2, fr}, {1, 2, sq}};
+    galactic::GalacticSim* gs = host.start_galactic(d.rules, std::move(s));
+    CHECK(gs != nullptr);
+    if (!gs) return out;
+    CampaignBattleOptions opt;
+    opt.conflict.human_choice = galactic::BattleChoice::Fight;
+    opt.battle.max_frames = 3000;
+    opt.battle.order_interval = 0;
+    opt.battle.fog = false;
+    CampaignBattles battles(host, d.crules, *d.catalog,
+                            [](const std::string& name, terrain::MapData& m) {
+                                if (name != "L1_Land_B") return false;
+                                m = land_map();
+                                return true;
+                            },
+                            opt);
+    CHECK(battles.attach());
+    std::vector<objects::ObjectHandle> up;
+    for (objects::ObjectHandle h : gs->planets()[2].surface)
+        if (gs->store().owner(h) == 1) up.push_back(h);
+    CHECK(gs->launch_units(1, 2, up) == commands::RejectReason::None);
+    const std::vector<uint32_t> uf = gs->fleets_at(2, 1);
+    CHECK(!uf.empty());
+    if (!uf.empty()) CHECK(gs->move_fleet(1, uf[0], 1) == commands::RejectReason::None);
+    bool invaded = false;
+    std::vector<objects::ObjectId> mine;
+    std::vector<tactical::movement::V2> from;
+    std::vector<uint32_t> seen;
+    int key = 0;
+    for (uint64_t t = 0; t < 6000; ++t) {
+        host.tick_once();
+        if (!invaded && host.modes().depth() == 1) {
+            const std::vector<uint32_t> f = gs->fleets_at(1, 1);
+            if (!f.empty() && !gs->fleets()[f[0]].moving) invaded = gs->invade(1, 1, {}) == commands::RejectReason::None;
+        }
+        TacticalBattle* b = battles.battle();
+        TacticalMode* tm = host.tactical();
+        if (!b || !tm) {
+            if (out.fought) break;
+            continue;
+        }
+        out.fought = true;
+        objects::ObjectStore& st = tm->primary();
+        const uint32_t f = b->frame();
+        if (f == 1) {
+            for (const objects::ObjectHandle h : st.owned_by(1))
+                if (st.alive(h) && b->combat().has_unit(st.id(h)) && b->movement().has_unit(st.id(h))) mine.push_back(st.id(h));
+            out.units = static_cast<uint32_t>(mine.size());
+            CHECK(!mine.empty());
+            if (mine.empty()) break;
+            std::sort(mine.begin(), mine.end());
+            for (const objects::ObjectId id : mine) from.push_back(b->movement().view(id).pos);
+            const std::vector<objects::ObjectId> set = mine;
+            if (mode != CtlMode::Baseline)
+                b->set_script_unit_control(&key, [set, mode](objects::ObjectId id) {
+                    TacticalBattle::ScriptUnitControl c;
+                    if (!std::binary_search(set.begin(), set.end(), id)) return c;
+                    c.no_fire = mode == CtlMode::NoFire;
+                    c.loco_suspended = mode == CtlMode::Suspend;
+                    c.cannot_die = mode == CtlMode::CannotDie;
+                    c.max_speed = mode == CtlMode::SlowCap ? 0.05f : -1.0f;
+                    return c;
+                });
+            Vec3 enemy{};  // march on the first enemy unit, so the unhooked units get in range and fire
+            for (const objects::ObjectHandle h : st.owned_by(0))
+                if (st.alive(h) && b->combat().has_unit(st.id(h))) {
+                    enemy = st.position(h);
+                    break;
+                }
+            CHECK(b->order_move(*tm, 1, mine, enemy.x, enemy.y, host.random().synced()) == commands::RejectReason::None);
+            continue;
+        }
+        if (mine.empty()) continue;
+        for (size_t i = 0; i < b->combat().projectile_count(); ++i) {
+            const tactical::combat::ProjectileView p = b->combat().projectile(i);
+            if (!std::binary_search(mine.begin(), mine.end(), p.shooter) || std::find(seen.begin(), seen.end(), p.serial) != seen.end()) continue;
+            seen.push_back(p.serial);
+            ++out.shots;
+        }
+        if (f == 280) {  // after the measurements; a kill through combat (kind 0, not "cannot die" by itself): the hooked units hold at the floor
+            for (const objects::ObjectId id : mine)
+                if (b->combat().has_unit(id)) (void)b->script_damage(*tm, id, 1.0e7f, false);
+        }
+        if (f == 120) {
+            for (size_t i = 0; i < mine.size(); ++i) {
+                if (!b->movement().has_unit(mine[i])) continue;
+                const tactical::movement::V2 p = b->movement().view(mine[i]).pos;
+                out.moved += std::hypot(p.x - from[i].x, p.y - from[i].y);
+            }
+        }
+        if (f >= 300) {
+            for (const objects::ObjectId id : mine)
+                if (b->combat().has_unit(id) && b->combat().alive(id)) ++out.survivors;
+            break;
+        }
+    }
+    out.crc = host.crc_log();
+    return out;
+}
+
+void test_script_control(const Data& d) {
+    const CtlRun base = run_script_control(d, 0, CtlMode::Baseline);
+    const CtlRun nof = run_script_control(d, 0, CtlMode::NoFire);
+    const CtlRun sus = run_script_control(d, 0, CtlMode::Suspend);
+    const CtlRun slow = run_script_control(d, 0, CtlMode::SlowCap);
+    const CtlRun cnd = run_script_control(d, 0, CtlMode::CannotDie);
+    std::printf("  script control: units %u; shots base %u nofire %u; moved base %.1f suspend %.2f slowcap %.2f; "
+                "survivors base %u cannot-die %u\n",
+                base.units, base.shots, nof.shots, static_cast<double>(base.moved), static_cast<double>(sus.moved),
+                static_cast<double>(slow.moved), base.survivors, cnd.survivors);
+    CHECK(base.fought && base.units > 0);
+    CHECK(base.shots > 0 && nof.shots == 0);              // Prevent_All_Fire: no projectile leaves a hooked unit
+    CHECK(base.moved > 5.0f && sus.moved < 0.01f);        // Suspend_Locomotor: no displacement
+    CHECK(slow.moved < base.moved * 0.5f);                // Override_Max_Speed: the cap slows the move
+    CHECK(base.survivors == 0 && cnd.survivors == cnd.units);  // Set_Cannot_Be_Killed: script damage (combat gate) cannot kill
+    for (const int32_t w : {1, 4}) {  // worker counts: the hooked runs match the single-thread CRC log
+        CHECK(!first_divergence(nof.crc, run_script_control(d, w, CtlMode::NoFire).crc).diverged);
+        CHECK(!first_divergence(slow.crc, run_script_control(d, w, CtlMode::SlowCap).crc).diverged);
+    }
+}
+
 void test_jet(const Data& d) {
     const JetRun a = run_jet(d, 0);
     std::printf("  jetpack: fought %d ordered %d flew %d landed %d mirror %d suspended %u frames, shots in flight %u, after %u\n",
@@ -2295,6 +2438,7 @@ int main(int argc, char** argv) {
     test_deploy(*d);  // S7 t26
     test_deploy_extents(*d);  // s78n t10 review
     test_script_spawn(*d);  // q6 t12
+    test_script_control(*d);  // STY1 t01
     test_sw_fire();   // s78f t05: command 25
     test_foc();
     if (g_fail) {

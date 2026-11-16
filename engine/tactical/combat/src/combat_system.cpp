@@ -999,7 +999,7 @@ bool CombatSystem::targeting_idle(const Unit& u, uint32_t frame) const {
     // power (0x632270). S7 t14: the jetpack suspends TARGETING; S8 t25: targeting suspended.
     const bool idle = u.stun_end > frame || (desc_of(u).requires_base_power && !has_base_power(u.owner));
     // s78n t06 (HERO_CLASH §3.1): a hero in a clash has TARGETING suspended (slot 9) while +0x3b4 is set.
-    return idle || (u.flags & (kUnitWeaponsSuspended | kUnitTargetingSuspended | kUnitHeroClash));
+    return idle || (u.flags & (kUnitWeaponsSuspended | kUnitTargetingSuspended | kUnitHeroClash | kUnitScriptNoFire));
 }
 
 float CombatSystem::team_mod_multiplier(uint32_t team, ModKind kind) const {

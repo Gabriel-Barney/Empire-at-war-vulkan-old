@@ -331,6 +331,7 @@ void StorySession::notify_ui(const StoryUiNotification& n) {
         if (n.kind == StoryUiEvent::SelectUnit) k = TacticalStoryEvent::SelectUnit;
         else if (n.kind == StoryUiEvent::ClickGui) k = TacticalStoryEvent::ClickGui;
         else if (n.kind == StoryUiEvent::SpeechDone) k = TacticalStoryEvent::SpeechDone;
+        else if (n.kind == StoryUiEvent::Generic) k = TacticalStoryEvent::Generic;  // STY1 t03: the battle plot set hears it too
         const bool attached = tactical_ && tactical_->set && (n.player < 0 || n.player == tactical_->set->player);
         if (attached && k != TacticalStoryEvent::Count) {
             TacticalStoryNotification tn;
@@ -825,6 +826,12 @@ std::vector<std::pair<std::string, lua::StoryNotification>> StorySession::notifi
             n.value = e.value;  // wave 2b: the corruption type (§4.7 vf3 compares it with the Param2 keyword)
             out.emplace_back("STORY_CORRUPTION_CHANGED", n);
             break;
+        // STY1 t08: the timed corruption transition began -> STORY_GENERIC "increase_corruption" / "decrease_corruption"
+        // (retail wrappers 0x3f6810 / 0x3f6770, GRC 4.3); routed like StoryUiEvent::Generic (String family, every plot set).
+        case K::CorruptionStarted:
+            n.name = e.value != 0 ? "increase_corruption" : "decrease_corruption";
+            out.emplace_back("STORY_GENERIC", n);
+            break;
         // S10 battle results (BattleWon / BattleLost / BattleRetreat, posted by the conflict manager); routed
         // player-scoped (route()): the winner's / loser's / retreating player's plot sets only [inferred].
         // WIN/LOSE_BATTLES (STORY.md 5): counter + Param4 planet list; Param2 location enum and the Param3
@@ -863,6 +870,7 @@ std::vector<std::pair<std::string, lua::StoryNotification>> StorySession::notifi
             break;
         }
         case K::BattleRetreat:
+            out.emplace_back("STORY_GENERIC", [&] { lua::StoryNotification g = n; g.name = "retreat_complete"; return g; }());  // STY1 t03
             n.name = n.planet;
             n.params.push_back(lua::StoryParam::of_text(n.planet));
             out.emplace_back("STORY_RETREAT", n);
@@ -1507,7 +1515,7 @@ std::string_view tactical_story_event_name(TacticalStoryEvent e) {
     static constexpr std::string_view kNames[] = {"Destroyed",     "HardpointDestroyed", "Reinforced",   "UnitArrived",
                                                   "FullStop",      "Garrisoned",         "HeroCaptured", "StructureCaptured",
                                                   "UnitCommanded", "UnitGuarding",       "BaseDestroyed", "LoadTacticalMap",
-                                                  "SelectUnit",    "ClickGui",           "SpeechDone"};
+                                                  "SelectUnit",    "ClickGui",           "SpeechDone",   "Generic"};
     const auto i = static_cast<size_t>(e);
     return i < std::size(kNames) ? kNames[i] : std::string_view("?");
 }
@@ -1516,7 +1524,7 @@ std::string_view tactical_story_event_type(TacticalStoryEvent e) {
         "STORY_TACTICAL_DESTROY", "STORY_ATTACK_HARDPOINT", "STORY_REINFORCE",     "STORY_UNIT_ARRIVED",
         "STORY_FULL_STOP",        "STORY_GARRISON_UNIT",    "STORY_CAPTURE_HERO",  "STORY_CAPTURE_STRUCTURE",
         "STORY_COMMAND_UNIT",     "STORY_GUARD_UNIT",       "STORY_DESTROY_BASE",  "STORY_LOAD_TACTICAL_MAP",
-        "STORY_SELECT_UNIT",      "STORY_CLICK_GUI",        "STORY_SPEECH_DONE"};
+        "STORY_SELECT_UNIT",      "STORY_CLICK_GUI",        "STORY_SPEECH_DONE",  "STORY_GENERIC"};
     const auto i = static_cast<size_t>(e);
     return i < std::size(kTypes) ? kTypes[i] : std::string_view();
 }

@@ -1985,6 +1985,7 @@ std::string_view galactic_event_name(GalacticEventKind kind) {
     case GalacticEventKind::HeroRespawned: return "HeroRespawned";
     case GalacticEventKind::TypeUnlocked: return "TypeUnlocked";
     case GalacticEventKind::Slice: return "Slice";
+    case GalacticEventKind::CorruptionStarted: return "CorruptionStarted";
     case GalacticEventKind::Count: break;
     }
     return "?";
