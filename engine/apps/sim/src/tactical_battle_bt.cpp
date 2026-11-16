@@ -490,10 +490,6 @@ void TacticalBattle::bt_battle_end() {
 
 // ---- battle host follow-up: TEAM containers (REMAINING_GAPS §3.4), landing reinforcement points (§3.3) --------------
 
-bool TacticalBattle::outside_threat_grid(objects::ObjectId id) const {
-    return std::binary_search(bt_grid_stale_.begin(), bt_grid_stale_.end(), id);
-}
-
 std::string_view TacticalBattle::map_hint(objects::ObjectId id) const {
     const auto it = std::lower_bound(map_hints_.begin(), map_hints_.end(), id,
                                      [](const std::pair<objects::ObjectId, std::string>& e, objects::ObjectId v) { return e.first < v; });
@@ -1019,17 +1015,15 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
         if (it == map_hints_.end() || it->first != id) map_hints_.insert(it, {id, p.hint});
     };
     const bool skirmish = skirmish_land() || skirmish_map();
-    // skai t22 (SKAI_T22_SPACE_AI_RE Q1.1 [H]): in a space skirmish the team-marker swap (0x295cf0) creates the start
-    // station before the skirmish start (0xeed80) deletes and rebuilds the threat grid, so it never enters the new one.
-    // [port] space only: whether the land start does the same is not read (land mode's grid reset is not traced).
-    bt_grid_stale_.clear();
+    // skai t22 (SKAI_T22_SPACE_AI_RE Q1.1, Part 3 [H]): in a space skirmish the team-marker swap (0x295cf0) creates the
+    // start station before the skirmish start (0xeed80) deletes and rebuilds the threat grid, so it never joins the new
+    // grid's owner lists (its cells and threat come back at the first re-projection): the same store flag as skai t15's
+    // pre-built land structures (objects::kFlagNoAiOwnerList, set there in bt_skirmish_base).
     auto note_stale = [&](const terrain::ObjectPlacement& p, objects::ObjectHandle h) {
         const size_t pi = static_cast<size_t>(&p - map_.objects.data());
-        if (!space_ || !skirmish_map() || pi >= bt_team_swap_.size() || bt_team_swap_[pi] == 0 || !mode.primary().exists(h))
+        if (!space_ || !skirmish_map() || pi >= bt_team_swap_.size() || bt_team_swap_[pi] == 0 || !mode.primary().alive(h))
             return;
-        const objects::ObjectId id = mode.primary().id(h);
-        const auto it = std::lower_bound(bt_grid_stale_.begin(), bt_grid_stale_.end(), id);
-        if (it == bt_grid_stale_.end() || *it != id) bt_grid_stale_.insert(it, id);
+        mode.primary().set_flag(h, objects::kFlagNoAiOwnerList);
     };
     for (const terrain::ObjectPlacement& pl : map_.objects) {
         // bkg3 b0028: a skirmish's team-marker structures and its map placements with byte 0 spawn nothing from their

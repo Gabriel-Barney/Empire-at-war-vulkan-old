@@ -657,7 +657,7 @@ struct MockUnit {
 
 // S7 t33: run the same plans as a land battle (Land store and mode; the SpaceMode plans copied to LandMode; the objects
 // have the land evaluator) and, variant 6, a Move_To(Target, 5000) before the ambushes (test_prepare_ambush_land).
-bool g_station_outside_grid = false;  // skai t22: the stations carry PerceptionObject::outside_threat_grid
+bool g_station_outside_grid = false;  // skai t22: the stations carry PerceptionObject::no_owner_list
 bool g_land = false;
 // a1j t01: land landings in the mock (g_land runs): 0 off (Reinforce spawns at once), 1 a Reinforce unloads its unit
 // kLandingDelay frames later with a signal 0x19 record, 2 the landing dies before its unit is out (a record without units).
@@ -845,7 +845,7 @@ public:
             o.owner = u.owner;
             o.type = u.type;
             o.has_unit_ai = u.type != tPad;
-            o.outside_threat_grid = g_station_outside_grid && u.type == tStation;  // skai t22
+            o.no_owner_list = g_station_outside_grid && u.type == tStation;  // skai t22
             o.mobile = u.type <= tCorvette;
             o.speed = u.has_goal ? speed_of(u.type) * 30.0f : 0.0f;
             o.position = u.pos;
@@ -3253,23 +3253,21 @@ void test_plan_retest() {
     CHECK(on.decisions == off.decisions);
 }
 
-// skai t22 (SKAI_T22_SPACE_AI_RE Q1.1): an object the host marks outside_threat_grid (a space skirmish's team-marker start
-// station) is never registered with the threat grid, so it adds no threat at its position; the other objects still do.
-void test_outside_threat_grid() {
-    float in_grid = -1.0f, outside = -1.0f, near_frigate = -1.0f;
+// skai t22 (SKAI_T22_SPACE_AI_RE Q1.1, Part 3): an object the host marks no_owner_list (a space skirmish's
+// team-marker start station) still projects its threat: the Rebel's danger at the Empire station is the same with the
+// flag on and off, and the run is otherwise the same. (The owner-list side: test_ai_tactical_perception, grid projection.)
+void test_outside_owner_lists() {
+    float in_lists = -1.0f, outside = -1.0f;
     for (const bool out : {false, true}) {
         g_station_outside_grid = out;
         run(60, 1, 0, nullptr, false, [&](int32_t frame, MockHost&, TacticalAiWorld& world) {
-            if (frame != 60) return;
-            (out ? outside : in_grid) = world.point_danger(1, -3500.0f, 0.0f);  // the Empire station, seen by the Rebel
-            if (out) near_frigate = world.point_danger(1, -3000.0f, -200.0f);
+            if (frame == 60) (out ? outside : in_lists) = world.point_danger(1, -3500.0f, 0.0f);
         });
     }
     g_station_outside_grid = false;
-    std::printf("outside_threat_grid: Rebel danger at the Empire station %.3f in the grid, %.3f outside; at its frigate %.3f\n",
-                static_cast<double>(in_grid), static_cast<double>(outside), static_cast<double>(near_frigate));
-    CHECK(in_grid > outside && outside >= 0.0f);
-    CHECK(near_frigate > 0.0f);
+    std::printf("outside_owner_lists: Rebel danger at the Empire station %.3f listed, %.3f not listed\n",
+                static_cast<double>(in_lists), static_cast<double>(outside));
+    CHECK(in_lists > 0.0f && outside == in_lists);
 }
 
 int main(int argc, char** argv) {
@@ -3309,7 +3307,7 @@ int main(int argc, char** argv) {
     test_landing_save();
     test_replan_and_priority_lifetime();  // a1k t01
     test_plan_retest();  // skai t15
-    test_outside_threat_grid();  // skai t22
+    test_outside_owner_lists();  // skai t22
     test_attack_move_result();            // q6 t19
     std::printf(g_fail ? "alamo_ai_tactical_world_tests: %d FAILED\n" : "alamo_ai_tactical_world_tests: OK\n", g_fail);
     return g_fail ? 1 : 0;

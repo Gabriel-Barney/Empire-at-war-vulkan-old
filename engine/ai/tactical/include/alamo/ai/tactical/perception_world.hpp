@@ -86,11 +86,6 @@ struct PerceptionObject {
                                      // carried type when set (ObjectStore::carried_type, A1_READINGS §32.2), else own
     bool alive = true;               // obj +0x3a0 bit 0x40 clear
     bool has_unit_ai = false;        // UNIT_AI behaviour 0x12: the object is in the threat grid
-    // skai t22 (SKAI_T22_SPACE_AI_RE Q1.1 [H]): a space skirmish's team-marker start station. Retail registers it into
-    // the threat grid that the skirmish start then deletes and rebuilds; its UNIT_AI pack keeps the stale entries, so
-    // the first-service registration never runs again and the object stays out of the grid (owner and live lists,
-    // projection) all battle. The tactical AI does not register an object with this set.
-    bool outside_threat_grid = false;
     bool team_or_hide_when_fogged = false;  // TEAM 0x16 or HIDE_WHEN_FOGGED 0x19
     bool mobile = false;             // has a locomotor (look-ahead radius)
     float speed = 0.0f;              // current speed (units per second for the look-ahead) [M]
@@ -119,7 +114,8 @@ struct PerceptionObject {
     bool engines_online = true;            // [L]
     // player-token inputs
     bool dummy_ground_structure = false;   // behaviour 0x5F (BaseLevel, land skirmish)
-    // skai t15: pre-built at the skirmish start, never in the grid owner lists. Not saved: the host fills it from the
+    // skai t15: pre-built at the skirmish start, never in the grid owner lists (skai t22: also a space skirmish's
+    // team-marker start station, SKAI_T22_SPACE_AI_RE Part 3). Not saved: the host fills it from the
     // store flag (objects::kFlagNoAiOwnerList, saved with the store) every AI frame; the grid's owner lists are saved.
     bool no_owner_list = false;
     bool dummy_star_base = false;          // behaviour 0x5C (BaseLevel, space)

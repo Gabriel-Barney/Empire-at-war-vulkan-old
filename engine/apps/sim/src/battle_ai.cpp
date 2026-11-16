@@ -1550,7 +1550,6 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
         if (u && u->container != 0xFFFFFFFFu) o.rep_type = static_cast<int32_t>(st.type(b_->containers_[u->container].h));
         if (const objects::TypeIndex ct = st.carried_type(h); ct != objects::kNone) o.rep_type = static_cast<int32_t>(ct);  // a1i t04: §35.3
         o.has_unit_ai = st.has_behavior(h, kUnitAi) && c.has_unit(id);
-        o.outside_threat_grid = b_->outside_threat_grid(id);  // skai t22
         o.team_or_hide_when_fogged = st.has_behavior(h, kTeam) || st.has_behavior(h, kHideWhenFogged);
         o.mobile = u && u->movable;
         if (!u && st.has_behavior(h, kTeam))  // battle host: a TEAM container moves with its live members

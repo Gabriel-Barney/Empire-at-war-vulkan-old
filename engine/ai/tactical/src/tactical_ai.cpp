@@ -1559,7 +1559,7 @@ void TacticalAiWorld::Impl::refresh(bool fill) {
         if (!o.alive) continue;
         const auto* old = in(prev, o.id);
         if (!old) {
-            if (o.has_unit_ai && !o.outside_threat_grid)  // first check at the stamp the host drew at creation (A1_READINGS §14)
+            if (o.has_unit_ai)  // first check at the stamp the host drew at creation (A1_READINGS §14)
                 perc.grid().register_object(w, o.id, facts[i].reprojection_stamp);
             const bool produced = claim_produced(o, facts[i].handle);
             bool unadmit = false;
