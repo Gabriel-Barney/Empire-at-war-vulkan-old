@@ -590,6 +590,11 @@ public:
     // route (DEPLOY off, the cap test 0x3ac100, a new path). Const, deterministic; unset = never blocked.
     using UndeployBlockFn = std::function<bool(ObjectId id)>;
     void set_undeploy_block_fn(UndeployBlockFn fn) { undeploy_block_ = std::move(fn); }
+    // TRU1 t03 (docs/re/TRU1_GRAVITY_FIELD.md §1.6, Walk Deploy(true) 0x61d300): true = the unit is in a gravity control
+    // field (obj +0x3a1 bit 0x40), so Deploy(true) returns with nothing changed, by every route (DEPLOY on, auto-deploy,
+    // damage deploy, hover lowering). Const, deterministic; unset = never blocked.
+    using DeployBlockFn = std::function<bool(ObjectId id)>;
+    void set_deploy_block_fn(DeployBlockFn fn) { deploy_block_ = std::move(fn); }
     // ---- S8 t24 (MOVEMENT §3.2 "Turret recentre around deploy"): the TURRET of a Deploys unit (UnitDesc::turret) ----
     // Per frame after the deploy pass (serial, ascending id; TURRET service 0x632270 + motion 0x631210): while aiming the
     // target angles are the aim point's; while not aiming and off the rest angle R the first frame holds (target :=
@@ -1819,6 +1824,7 @@ private:
     // S8 t11
     DeployClipFn deploy_clip_;
     UndeployBlockFn undeploy_block_;
+    DeployBlockFn deploy_block_;  // TRU1 t03
     TurretRestFn turret_rest_;
     TurretAimFn turret_aim_;
     std::vector<DeployEvent> devents_;  // since the last take_deploy_events()

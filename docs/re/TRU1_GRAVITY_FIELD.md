@@ -101,6 +101,12 @@ within R, else one whose bounding box overlaps the circle. Stops at the result c
   release branch, which only affects units carrying this generator's entry.
 - [port] The generator's death releases its units (unit_dying), a removed generator likewise; which retail vfunc runs at
   death is [M].
+- [port] A change of the generator's owner releases nothing by itself; the next service re-sorts the units in range
+  (retail's vf15 may run on an owner change [M]).
+- [port] The §1.6 deploy refusal is the movement layer's `deploy_block` hook (`MovementSystem::set_deploy_block_fn`, wired
+  by `TacticalBattle` to `AbilitySystem::in_gravity_field`), so every Deploy(true) route is refused: DEPLOY on,
+  auto-deploy, damage deploy, hover lowering.
+- [port] Only in land modes (`AbilityConfig::mode`).
 - [port] Presentation leaves as events: `GravityFieldPower` (HUD SFX on / off, `Interdict_Activated`) and `GravitySlow`
   (effect on / off per unit); nothing consumes them yet (backlog).
 

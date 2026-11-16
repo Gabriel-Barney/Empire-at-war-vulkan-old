@@ -38,7 +38,7 @@ void AbilitySystem::gravity_service(Obj& g, uint32_t frame) {
     // every slowed unit is released. A change of the powered state raises the HUD / story event.
     if (g.dead || !desc(g).gravity_field || frame < g.gravity_due) return;
     g.gravity_due = frame + kGravityInterval;
-    if (g.owner < 0) return;
+    if (cfg_.mode != GameMode::Land || g.owner < 0) return;  // land modes only (mode type 1)
     const bool powered = combat_->has_base_power(g.owner);
     if (powered) {
         gravity_apply(g, frame);
@@ -138,7 +138,10 @@ void AbilitySystem::gravity_release_all(Obj& g, uint32_t frame) {
 
 void AbilitySystem::gravity_unit_dying(Obj& o, uint32_t frame) {
     // A dying generator releases its units [M: which behaviour vfunc runs at the generator's death]; a dying victim
-    // leaves its generator's list (vf16: "Removing destroyed ... from the gravity control field list").
+    // leaves its generator's list (vf16: "Removing destroyed ... from the gravity control field list"). [port] A change
+    // of the generator's owner releases nothing by itself: the next service re-sorts the units in range (now-friendly ones
+    // are released, out-of-range ones keep the slow until power loss or death). From remove() (no frame) the release
+    // events carry frame 0.
     if (!o.gravity_list.empty()) gravity_release_all(o, frame);
     if (o.in_gravity_field == 0) return;
     o.in_gravity_field = 0;

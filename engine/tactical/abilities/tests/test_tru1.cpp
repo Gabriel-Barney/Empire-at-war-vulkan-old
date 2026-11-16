@@ -78,7 +78,7 @@ void test_tru1_gravity_field() {
     CHECK(!a.gravity_field_on(1) && a.gravity_field_units(1).empty() && !a.in_gravity_field(2));
     CHECK(w.count(AbilityEventKind::GravityFieldPower) == 0);
     // base power: within one interval (60 frames) the in-range affected enemies get list-5 -0.9 (speed x 0.1)
-    w.sys->add_base_power(0, 1);
+    w.sys->add_base_power(0, 900);
     w.sys->add_base_power(2, 7);
     uint32_t on_frame = 0;
     for (int i = 0; i < 61 && on_frame == 0; ++i) {
@@ -92,7 +92,7 @@ void test_tru1_gravity_field() {
     CHECK_EQ(max_speed_mod(w, 3), 0.0f);
     CHECK_EQ(max_speed_mod(w, 5), 0.0f);
     CHECK(a.gravity_field_units(1).size() == 2 && a.gravity_field_units(1)[0] == 2 && a.gravity_field_units(1)[1] == 6);
-    CHECK(!a.gravity_field_on(7) || a.gravity_field_units(7).empty());  // slow fraction 0: on, but nobody slowed
+    CHECK(a.gravity_field_on(7) && a.gravity_field_units(7).empty() && !a.in_gravity_field(8));  // fraction 0: on, nobody slowed
     if (const AbilityEvent* e = w.last(AbilityEventKind::GravityFieldPower, 1)) CHECK(e->value == 1);
     else CHECK(false);
     CHECK(w.count(AbilityEventKind::GravitySlow, 1) == 2);
@@ -115,23 +115,25 @@ void test_tru1_gravity_field() {
     for (int i = 0; i < 60; ++i) w.tick();
     CHECK(!a.in_gravity_field(6) && slow_entries(w, 6) == 0);
     // power lost: every listed unit is released at the next service (out of range ones too)
-    w.sys->remove_base_power(0, 1);
+    w.sys->remove_base_power(0, 900);
     for (int i = 0; i < 60; ++i) w.tick();
     CHECK(!a.gravity_field_on(1) && a.gravity_field_units(1).empty());
     CHECK(!a.in_gravity_field(2) && !a.in_gravity_field(3) && slow_entries(w, 2) == 0 && slow_entries(w, 3) == 0);
     if (const AbilityEvent* e = w.last(AbilityEventKind::GravityFieldPower, 1)) CHECK(e->value == 0);
     else CHECK(false);
     // power back, then the generator dies: its units are released at once
-    w.sys->add_base_power(0, 1);
+    w.sys->add_base_power(0, 900);
     for (int i = 0; i < 60; ++i) w.tick();
-    CHECK(a.in_gravity_field(3) || a.gravity_field_units(9).size() == 1);
+    CHECK(a.in_gravity_field(3));  // re-slowed by generator 1 or 9, whichever served first
     const ObjectId holder = a.gravity_field_units(1).empty() ? 9 : 1;
-    CHECK(!a.gravity_field_units(holder).empty());
+    CHECK(a.gravity_field_units(holder).size() == 1 && a.gravity_field_units(holder)[0] == 3);
     w.sys->kill_unit(holder, kNoObject, combat::kKindNormal, w.frame);
     w.tick();
     CHECK(!a.in_gravity_field(3) && slow_entries(w, 3) == 0);
-    // save / load keeps the state (hash identical)
+    // save / load keeps the state (hash identical), with a non-empty list (the other generator picks unit 3 up)
     for (int i = 0; i < 60; ++i) w.tick();
+    const ObjectId other = holder == 1 ? 9 : 1;
+    CHECK(a.in_gravity_field(3) && a.gravity_field_units(other).size() == 1);
     StateHasher h1;
     a.hash(h1);
     ByteWriter wa;
@@ -140,7 +142,10 @@ void test_tru1_gravity_field() {
     CHECK(a.read(ra));
     StateHasher h2;
     a.hash(h2);
-    CHECK(h1.digest() == h2.digest());
+    CHECK(h1.digest() == h2.digest() && a.in_gravity_field(3) && a.gravity_field_units(other).size() == 1);
+    // host removal of the generator releases its unit at once (modifier entry and flag)
+    a.remove(other);
+    CHECK(!a.in_gravity_field(3) && slow_entries(w, 3) == 0);
 }
 
 }  // namespace bo3split
