@@ -1758,14 +1758,14 @@ void TacticalAiWorld::Impl::claim_force(TfRec& t) {
                         ++missing;
                         break;
                     }
-                    if (cfg.mode == TacticalMode::Space) {
+                    if (cfg.keep_members_on_free_store(cfg.mode)) {
                         // skai t22 (SKAI_T22_SPACE_AI_RE Part 5 [H]): a tactical hand-over (free-store service 0x4d5a70,
                         // vf22 0x6908f0) gives the unit only to the task of the PP that reserved it (else the claim
-                        // lapses), and the space store (+0x48 = 0) keeps the entry and its reservation: the member stays
+                        // lapses), and the tactical store (+0x48 = 0) keeps the entry and its reservation: the member stays
                         // a reserved free-store entry for the plan's life, suspended at each Commit start (0x6c0be0) and
                         // re-asserted when its goal is kept, so a goal accepted earlier in a Commit can take it and
-                        // the plan then fails the stolen test 0x6c45e0. [port] space only: land does the same
-                        // (Part 5), lane skai-a.
+                        // the plan then fails the stolen test 0x6c45e0. TacticalAiConfig::keep_members_on_free_store_*
+                        // (space on; land off until lane skai-a turns it on).
                         if (p->fs.reservation(k.ref) != pit->second.pp) {
                             ++missing;
                             break;
@@ -1849,8 +1849,8 @@ void TacticalAiWorld::Impl::claim_force(TfRec& t) {
                 }
             }
         }
-        // skai t22: a space task force's members keep their free-store reservation (Part 5, above).
-        release_pp(pit->second.pp, static_cast<int32_t>(t.def), cfg.mode != TacticalMode::Space);
+        // skai t22: with keep_members_on_free_store, a task force's members keep their free-store reservation (above).
+        release_pp(pit->second.pp, static_cast<int32_t>(t.def), !cfg.keep_members_on_free_store(cfg.mode));
     }
     decide(t.player, "tf " + t.name + " produce: " + std::to_string(t.units.size()) + " units, " + std::to_string(t.pending.size()) +
                          " pending reinforcements, " + std::to_string(t.reservations.size()) + " pads" +

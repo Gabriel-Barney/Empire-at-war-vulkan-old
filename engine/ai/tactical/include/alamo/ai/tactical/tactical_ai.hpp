@@ -403,6 +403,17 @@ struct TacticalAiConfig {
     // on Resolve_Category's old-candidate path. Retail runs it (the hook runs of 2026-11-16 saw it end 11 of 73 land
     // Destroy_Structure plans). On by default since skai t18 (Gabriel, 2026-11-16, DECISIONS.md); off = the pre-t18 port.
     bool plan_retest = true;
+    // skai t22 (SKAI_T22_SPACE_AI_RE Part 5 [H]): per mode, whether a Produce_Force hand-over keeps the unit on the free
+    // store as an entry reserved by its PotentialPlan (retail's tactical stores, +0x48 = 0: land and space alike). On, a
+    // task-force member's reservation is suspended at each Commit start and re-asserted when its goal is kept, so a goal
+    // accepted earlier in the Commit can take it and the member's plan fails the stolen test 0x6c45e0. Off = the port
+    // before skai t22 (the unit leaves the store, its reservation is released). Space on; land off until lane skai-a
+    // turns it on with its land goldens.
+    bool keep_members_on_free_store_space = true;
+    bool keep_members_on_free_store_land = false;
+    bool keep_members_on_free_store(TacticalMode m) const {
+        return m == TacticalMode::Land ? keep_members_on_free_store_land : keep_members_on_free_store_space;
+    }
 };
 // sp3: the AI-owned stream's (synced, free) seeds of an AI-lane world (splitmix64 of the session seed and a lane salt).
 std::pair<uint32_t, uint32_t> ai_lane_seeds(uint32_t game_seed);
