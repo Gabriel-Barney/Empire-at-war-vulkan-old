@@ -40,6 +40,7 @@ A2FB_Rec("LOAD", function()
 	return "saboteur plot script type=" .. A2FB_SABCFG.type .. " step=" .. A2FB_SABCFG.step .. " stop=" ..
 		A2FB_SABCFG.stop .. " step2=" .. A2FB_SABCFG.step2 .. " stop2=" .. A2FB_SABCFG.stop2 .. " des_stop=" ..
 		A2FB_SABCFG.des_stop .. " planets=" .. table.getn(A2FB_SABCFG.planets) ..
+		" uw=" .. tostring(A2FB_SABCFG.uw) .. " infra=" .. table.getn(A2FB_SABCFG.infra) ..
 		" modeq=" .. tostring(A2FB_MODEQ)
 end)
 A2FB_Canary(A2FB_CANARY)
@@ -157,6 +158,39 @@ function A2FB_U_Desire(t, f)
 	end
 end
 
+-- gai3 t04 / t07 (--uw-infra builds: A2FB_SABCFG.uw): at every sample frame, per planet the Underworld owns,
+--   UB  tgt=, cor=, then one key per A2FB_SABCFG.infra entry { key, equation }: EvaluatePerception(equation,
+--       Underworld, planet) (Should_Build_Underworld_Barracks SBB, Should_Underworld_Save_For_Desirable_Structures SSD,
+--       Should_Save_For_Corruption SSC, Needs_Groundbase_Upgrade NGU, Should_Underworld_Build_Starbase SBS: the desire
+--       functions of the Friendly goals Build_Underworld_Barracks / Upgrade_Starbase and their sub-functions, so only
+--       (goal, target) pairs the goal system scores itself; no Variable_Human, no '#', selftest)
+--   UBN n= the number of Underworld planets of that frame (0 UB records with n=0 = none owned, not a failure)
+function A2FB_U_Infra(t, f)
+	local okp, uw = pcall(Find_Player, "Underworld")
+	if not okp or uw == nil then
+		A2FB_Error("Player", "Underworld")
+		return
+	end
+	local n = 0
+	for i = 1, table.getn(A2FB_SABCFG.planets) do
+		local name = A2FB_SABCFG.planets[i]
+		local pl = A2FB_U_Planet(name)
+		if pl ~= nil and A2FB_U_Owner(pl) == "UNDERWORLD" then
+			n = n + 1
+			A2FB_Rec("UB", function()
+				local s = "t=" .. A2FB_Num(t) .. " f=" .. f .. " tgt=" .. string.upper(name) ..
+					" cor=" .. A2FB_Str(function() return pl.Is_Corrupted() end)
+				for k = 1, table.getn(A2FB_SABCFG.infra) do
+					local e = A2FB_SABCFG.infra[k]
+					s = s .. " " .. e[1] .. "=" .. A2FB_Eval3(e[2], uw, pl)
+				end
+				return s
+			end)
+		end
+	end
+	A2FB_Rec("UBN", function() return "t=" .. A2FB_Num(t) .. " f=" .. f .. " n=" .. n end)
+end
+
 function A2FB_Eval3(name, p, target)
 	local ok, v = pcall(EvaluatePerception, name, p, target)
 	if not ok then
@@ -204,6 +238,12 @@ function A2FB_U_Update()
 			local ok2, err2 = pcall(A2FB_U_Desire, t, f)
 			if not ok2 then
 				A2FB_Error("Desire", err2)
+			end
+		end
+		if A2FB_SABCFG.uw then
+			local ok3, err3 = pcall(A2FB_U_Infra, t, f)
+			if not ok3 then
+				A2FB_Error("Infra", err3)
 			end
 		end
 		A2FB_U_NEXT = A2FB_U_After(f)

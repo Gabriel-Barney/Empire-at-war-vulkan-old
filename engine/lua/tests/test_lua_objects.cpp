@@ -752,14 +752,14 @@ static void test_spawn_and_state(const Db& db) {
     CHECK(run(vm, "t1.Hide(true) t1.Set_Selectable(false) t1.Prevent_AI_Usage(true) t1.Prevent_All_Fire(true) "
                   "t1.Prevent_Opportunity_Fire(true) t1.Lock_Current_Orders() t1.Suspend_Locomotor(true) t1.Highlight(true, 25) t1.Highlight_Small(true) "
                   "t1.Set_In_Limbo(true) t1.Override_Max_Speed(0.5) t1.Set_Importance(3) t1.Set_Targeting_Priorities('Infantry_Attack_Move') "
-                  "t1.Disable_Capture(true) t1.Set_Garrison_Spawn(true) t1.Set_Check_Contested_Space(true) "
+                  "t1.Disable_Capture(true) t1.Set_Garrison_Spawn(true) t1.Set_Check_Contested_Space(false) "
                   "b = t1.Play_Animation('Cinematic', false, 2) pf = b.IsFinished() and 1 or 0 "
                   "sel = t1.Is_Selectable() and 1 or 0 mv = t1.Can_Move() and 1 or 0 Hide_Object(t2, 1)") == "");
     const ScriptObjectState& st = s.bridge.state(1);
     CHECK(st.hidden && st.selectable == 0 && st.prevent_ai_usage && st.prevent_all_fire && st.prevent_opportunity_fire);
     CHECK(st.locomotor_suspended && st.highlighted && st.highlight_offset == 25.0f && st.highlighted_small && st.in_limbo);
     CHECK(st.max_speed_override == 0.5f && st.importance == 3 && st.targeting_priorities == "Infantry_Attack_Move" && st.orders_locked);
-    CHECK(st.capture_disabled && st.garrison_spawn && st.check_contested_space && st.animation == "Cinematic" &&
+    CHECK(st.capture_disabled && st.garrison_spawn && st.contested_check_off && st.animation == "Cinematic" &&
           !st.animation_loop && st.animation_index == 2);
     CHECK(s.bridge.state(2).hidden && gnum(vm, "pf") == 1.0 && gnum(vm, "sel") == 0.0 && gnum(vm, "mv") == 0.0);
     CHECK(run(vm, "t1.Override_Max_Speed(false) t1.Unlock_Current_Orders()") == "" && s.bridge.state(1).max_speed_override < 0.0f &&

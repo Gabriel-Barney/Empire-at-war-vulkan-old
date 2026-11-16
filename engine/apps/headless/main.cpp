@@ -66,6 +66,9 @@
 //       [--no-pp-streams] [--pp-latency F] (--skirmish-ai): OPT2 t10 parity knobs - slot-10 plan picks and PotentialPlan
 //       solves on the synced stream in proposal order (the original), and the frames from a goal slice to the apply of
 //       its solves (default 1; 0 = in the slice, on the job system).
+//       [--no-plan-retest] (--skirmish-ai): skai t18 - turn off the running-plan contrast re-test 0x6c47c0
+//       (TacticalAiConfig::plan_retest, on by default since skai t18; --plan-retest is accepted and changes nothing;
+//       docs/re/SKAI_T15_PLAN_RETEST.md).
 //       [--ai-lane] [--ai-lane-k K] (any run with a tactical AI, --bench included): sp3 AI lane (docs/SIM_PARALLEL_DESIGN.md
 //       5.1), off by default; K = ticks from an AI update to the apply of its command batch (default 2).
 //   alamo_headless --skirmish-ai synthetic|foc|foc-land|foc-land-campaign|foc-station|skirmish [--map NAME] [--ticks N] [--crc-out F] [--golden F] [--check-workers]
@@ -229,6 +232,7 @@ struct Options {
     int64_t ai_latency = -1;                // OPT2 t02: --ai-latency F (galactic / tactical AI path recomputes)
     int8_t ai_stagger = -1;                 // OPT2 t01: --no-ai-stagger 0, --ai-stagger 1, -1 = the mode's default
     bool pp_streams = true;                 // OPT2 t10: --no-pp-streams
+    bool plan_retest = true;                // skai t15 / t18: --no-plan-retest
     int64_t pp_latency = -1;                // OPT2 t10: --pp-latency F
     // A1 stage 2 tactical AI (skirmish_run.hpp): --skirmish-ai synthetic|foc
     std::string skirmish_ai;
@@ -944,6 +948,8 @@ static int headless_main(int argc, char** argv) {
         else if (a == "--no-ai-stagger") opt.ai_stagger = 0;                                       // OPT2 t01
         else if (a == "--ai-stagger") opt.ai_stagger = 1;                                          // a2m r4
         else if (a == "--no-pp-streams") opt.pp_streams = false;                                   // OPT2 t10
+        else if (a == "--plan-retest") opt.plan_retest = true;                                     // skai t15
+        else if (a == "--no-plan-retest") opt.plan_retest = false;                                 // skai t18
 #ifdef ALAMO_SIM_HAVE_TACTICAL_AI
         else if (a == "--ai-lane") alamo::sim::ai_lane_defaults().on = true;  // sp3
         else if (a == "--ai-lane-k") alamo::sim::ai_lane_defaults().k_ai = static_cast<uint32_t>(std::strtoul(next().c_str(), nullptr, 10));
@@ -1114,6 +1120,7 @@ static int headless_main(int argc, char** argv) {
         m.ai_latency = opt.ai_latency;  // OPT2 t01 / t02 parity knobs
         m.ai_stagger = opt.ai_stagger;
         m.pp_streams = opt.pp_streams;  // OPT2 t10 parity knobs
+        m.plan_retest = opt.plan_retest;  // skai t15
         m.pp_latency = opt.pp_latency;
         m.scoring = opt.scoring;  // q6 t06
         m.object_scripts = opt.object_scripts;  // q6

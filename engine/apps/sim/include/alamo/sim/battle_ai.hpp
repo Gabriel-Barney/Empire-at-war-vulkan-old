@@ -86,6 +86,7 @@ struct TacticalAiSetup {
     // frames after their slice; pp_streams false = the original synced draws in proposal order.
     bool pp_streams = true;
     uint32_t pp_latency = ai::tactical::kDefaultPpLatency;
+    bool plan_retest = true;  // skai t15 / t18 (TacticalAiConfig::plan_retest)
     // sp3 (TacticalAiConfig::ai_lane / k_ai, docs/SIM_PARALLEL_DESIGN.md 5.1): the AI lane, off by default; the process
     // default (ai_lane_defaults) is what a setup starts with, so every host that builds one follows the command line.
     bool ai_lane = ai_lane_defaults().on;

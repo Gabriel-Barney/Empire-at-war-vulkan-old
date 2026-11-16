@@ -381,7 +381,10 @@ void App::route_commands(std::vector<commands::EventData>& cmds, std::span<const
         if (e.type() == commands::EventType::Retreat && screen_ == Screen::Battle) story_ui_.generic("retreat_clicked");
         if (screen_ == Screen::Galactic && e.type() == commands::EventType::FleetManagement) {
             if (e.u("op") == commands::kFleetMerge) story_ui_.generic("merge_fleets");
-            else if (e.u("op") == commands::kFleetLaunch) story_ui_.generic("land_to_space");
+            else if (e.u("op") == commands::kFleetLaunch) {
+                story_ui_.generic("land_to_space");
+                story_ui_.generic("drag_land_to_space");  // the drop of a land stack on a fleet pane (0x3cf7d0)
+            }
         }
         if (e.type() == commands::EventType::Retreat && screen_ == Screen::Battle && !ui_.gui.find(ui::dlg::kRetreat)) {
             screens_.show_retreat_confirm();
@@ -608,7 +611,8 @@ void App::handle_hud_actions(const std::vector<ui::HudAction>& acts) {
                 if (session_ && !panel_preview_) session_->buy_black_market(a.unit);
                 break;
             case ui::HudAction::Kind::SliceSelect:
-                story_ui_.generic("slice");  // STY1 t03 (0xf5d10 / 0x3e4450): the option was picked
+                story_ui_.generic("slice");
+                story_ui_.generic("slice_slot");  // 0x3e4450: the slot-bar form of the pick [M]  // STY1 t03 (0xf5d10 / 0x3e4450): the option was picked
                 if (session_ && !panel_preview_) session_->slice_tech(a.unit);
                 break;
             case ui::HudAction::Kind::SabotageTarget:

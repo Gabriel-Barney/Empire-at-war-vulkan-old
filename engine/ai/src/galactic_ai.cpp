@@ -2251,7 +2251,12 @@ int32_t GalacticAiWorld::Impl::find_target(int32_t script, const lua::AiFindTarg
     std::vector<int32_t> cand;
     std::vector<double> value;
     const uint32_t eq = equation(r.perception);  // sp4a (S7): once, not per planet
-    for (uint32_t t = 0; t < sim.planets().size(); ++t) {  // the target list order (planet order)
+    // The perception target list order: planet rows in reverse (A2M_T08_T10_T14_RE.md t14.7: the retail Rebel slice pick
+    // lists Tatooine, Shola, Nal Hutta, Kashyyyk, Kuat, Felucia, Corellia, then the best, The_Maw) [H]. The first
+    // highest score is the best, so the order decides which planet gets probability p.
+    for (size_t k = sim.planets().size(); k-- > 0;) {  // target_list_at order: planet rows in reverse
+        if (!sim.planets()[k].is_planet) continue;
+        const auto t = static_cast<uint32_t>(k);
         if (!applies(player, static_cast<int32_t>(t), flags)) continue;
         if (have_source && slot7(static_cast<PlanetIndex>(t)) >= kReachNone) continue;
         double v = 0.0;

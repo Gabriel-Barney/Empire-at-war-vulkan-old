@@ -37,7 +37,7 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
   # S4 story & campaign events: engine/lua's StoryModel + one LuaVm per plot script (lua.h for
   # ServiceRate / LastService). Without engine/lua the session never starts (story_session_none.cpp).
   if(TARGET alamo_lua AND TARGET alamo_lua_vm)
-    target_sources(alamo_sim_base PRIVATE sim/src/story_session.cpp)
+    target_sources(alamo_sim_base PRIVATE sim/src/story_session.cpp sim/src/story_rewards.cpp sim/src/story_rewards_apply.cpp)
     target_link_libraries(alamo_sim_base PUBLIC alamo_lua)
     target_compile_definitions(alamo_sim_config INTERFACE ALAMO_SIM_HAVE_STORY=1)
   else()
@@ -69,6 +69,7 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
       sim/src/tactical_battle_bt.cpp         # battle host: BT setup / transition rules, pad units
       sim/src/tactical_battle_skirmish.cpp   # skai: skirmish map battles (income)
       sim/src/tactical_battle_victory.cpp    # story t06: the tactical victory monitor (BT §3.1a)
+      sim/src/tactical_battle_story_rewards.cpp  # STY1 t06: DISABLE_REINFORCEMENTS / CHANGE_OWNER / DESTROY_OBJECT / BOMBARD_DELAY
       sim/src/tactical_battle_oi_abilities.cpp  # OI abilities: ability host side (owner: abilities agent)
       sim/src/tactical_battle_save.cpp       # N1 stage 2 (owner: n2-host): battle save / load
       sim/src/tactical_battle_clash.cpp      # s78n t06: land hero clashes (HERO_CLASH.md)
@@ -163,6 +164,11 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
   target_compile_definitions(alamo_sim_tests PRIVATE "ALAMO_SIM_TESTDATA=\"${CMAKE_CURRENT_SOURCE_DIR}/sim/testdata\"")
   add_test(NAME alamo_sim_tests COMMAND alamo_sim_tests)
   set_tests_properties(alamo_sim_tests PROPERTIES TIMEOUT 600)
+  # STY1 lane B: story rewards (galactic / tutorial / Underworld / tactical) and the shipped-XML coverage table.
+  add_executable(alamo_sim_story_rewards_tests sim/tests/test_story_rewards.cpp)
+  target_link_libraries(alamo_sim_story_rewards_tests PRIVATE alamo_sim alamo_vfs alamo_test_support)
+  add_test(NAME alamo_sim_story_rewards_tests COMMAND alamo_sim_story_rewards_tests)
+  set_tests_properties(alamo_sim_story_rewards_tests PROPERTIES TIMEOUT 600)
   # BM1: the benchmark scenario manifest, tick statistics, comparison rule and result JSON (no game data).
   add_executable(alamo_sim_bench_tests sim/tests/test_bench.cpp)
   target_link_libraries(alamo_sim_bench_tests PRIVATE alamo_sim alamo_test_support)
@@ -260,6 +266,13 @@ if(_alamo_sim)
     # Both synthetic runs write their data to the one %TEMP%\alamo_a1_skirmish_ai folder: never at the same time (ctest -j).
     set_tests_properties(alamo_headless_skirmish_trace PROPERTIES TIMEOUT 1200)
     set_tests_properties(alamo_headless_skirmish_trace alamo_headless_skirmish_ai_synthetic PROPERTIES RESOURCE_LOCK alamo_a1_skirmish_ai)
+    # skai t15: the running-plan re-test (TacticalAiConfig::plan_retest, on by default since skai t18) ends a running plan in the synthetic skirmish
+    # (headless/check_plan_retest.cmake). Same %TEMP% data folder as the two runs above.
+    add_test(NAME alamo_headless_skirmish_plan_retest
+             COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:alamo_headless>
+                     -DLOG=${CMAKE_CURRENT_BINARY_DIR}/skai_t15_plan_retest/ai.log
+                     -P ${CMAKE_CURRENT_SOURCE_DIR}/headless/check_plan_retest.cmake)
+    set_tests_properties(alamo_headless_skirmish_plan_retest PROPERTIES TIMEOUT 1200 RESOURCE_LOCK alamo_a1_skirmish_ai)
     # q6 t02: the skirmish host's slots from the data (--ai FACTION[,FACTION]): Underworld (AI_Player_Underworld, its Space_ /
     # Land_Skirmish_AI_Default_Forces) in slot 0 of a space skirmish, and as the AI beside an idle human Empire on land; no Lua errors.
     # Skipped (exit 0) without ALAMO_FOC_DATA.
@@ -421,7 +434,11 @@ if(_alamo_sim)
     # a1j t07: 0 Lua errors too (--fail-on-lua-errors; the galactic-context budget call works in the battle, A1_READINGS §38).
     # One entry per seed, so a change that stalls only some seeds is caught. The worker-count identity of this path is the
     # foc_land_campaign golden run.
-    foreach(_seed 6 1)
+    # skai t18 (2026-11-16, Gabriel: the running-plan re-test on by default): seeds 2 and 4-12 still end (2755-11566); seeds 1
+    # and 3 run to the 14400-frame cap, a standoff under the shipped rules (the Rebels are not outnumbered 2:1, so
+    # Want_To_Retreat_From_Land stays 0, while the Empire's last unit, an AT-AT, walks a cross-map Clear_Infantry plan).
+    # Seed 1 left out, seed 2 checked instead (DECISIONS.md, "Running-plan re-test on by default").
+    foreach(_seed 6 2)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_campaign_outcome_seed${_seed}
                COMMAND alamo_headless --skirmish-ai foc-land-campaign --seed ${_seed} --ticks 20000 --workers 0 --quiet --expect-battle-end
                        --fail-on-lua-errors)

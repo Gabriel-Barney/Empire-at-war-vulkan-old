@@ -2003,7 +2003,9 @@ void test_free_store_world() {
     CHECK(r2.size() == 3 && std::find(r2.begin(), r2.end(), PlanetIndex{2}) != r2.end());  // P2 reached (flag 4), not crossed
     CHECK(r5.size() == 8);
     const uint64_t d0 = pw.rng->synced().draws();
-    CHECK(world.reachable_target(0, "One", "Friendly", "Friendly_Only", 1.0) == 0);  // ties keep the first, no draw
+    // gai3 t05 (A2M_T08_T10_T14_RE.md t14.7): candidates are walked in target-list order, the planet rows in reverse, and a
+    // tie keeps the first, so the highest tied row is the best.
+    CHECK(world.reachable_target(0, "One", "Friendly", "Friendly_Only", 1.0) == 1);  // ties keep the first (P1), no draw
     CHECK(pw.rng->synced().draws() == d0);
     const int32_t pick = world.reachable_target(0, "One", "Friendly", "Friendly_Only", 0.1);
     CHECK((pick == 0 || pick == 1) && pw.rng->synced().draws() == d0 + 1);  // two candidates, p < 1: one draw
@@ -2011,8 +2013,8 @@ void test_free_store_world() {
     // not read), so an unowned planet is a Friendly_Only candidate; with a source the candidate's slot 7 from the
     // source's planet decides: P3 (the neutral frigate's node cost) and P7 (the starbase) fail the zero-cost path test
     // from P0 at Friendly_Only, and pass at Any (threshold 1e18).
-    CHECK(world.reachable_target(0, "One", "Neutral", "Friendly_Only", 1.0) == 2);
-    CHECK(world.reachable_target(0, "One", "Enemy", "Friendly_Only", 1.0) == 6);
+    CHECK(world.reachable_target(0, "One", "Neutral", "Friendly_Only", 1.0) == 5);
+    CHECK(world.reachable_target(0, "One", "Enemy", "Friendly_Only", 1.0) == 7);
     auto slot7 = [&](PlanetIndex from, PlanetIndex to, int level) {
         if (from == to) return 0.0;
         std::vector<PlanetIndex> path;
@@ -2026,12 +2028,12 @@ void test_free_store_world() {
             if (slot7(from, c, level) < kReachNone) return static_cast<int32_t>(c);
         return -1;
     };
-    CHECK(world.reachable_target(0, "One", "Neutral", "Friendly_Only", 1.0, 0) == first_pass({2, 3, 4, 5}, 0, 0));
+    CHECK(world.reachable_target(0, "One", "Neutral", "Friendly_Only", 1.0, 0) == first_pass({5, 4, 3, 2}, 0, 0));
     CHECK(world.reachable_target(0, "One", "Neutral", "Friendly_Only", 1.0, 0) != 3);
-    CHECK(world.reachable_target(0, "One", "Enemy", "Friendly_Only", 1.0, 0) == first_pass({6, 7}, 0, 0));
+    CHECK(world.reachable_target(0, "One", "Enemy", "Friendly_Only", 1.0, 0) == first_pass({7, 6}, 0, 0));
     CHECK(world.reachable_target(0, "One", "Enemy", "Friendly_Only", 1.0, 0) != 7);
-    CHECK(world.reachable_target(0, "One", "Enemy", "Any", 1.0, 0) == 6);
-    CHECK(world.reachable_target(0, "One", "Friendly", "Friendly_Only", 1.0, 1) == 0);  // P1 -> P0 is free; P1 itself is 0
+    CHECK(world.reachable_target(0, "One", "Enemy", "Any", 1.0, 0) == 7);
+    CHECK(world.reachable_target(0, "One", "Friendly", "Friendly_Only", 1.0, 1) == 1);  // P1 -> P0 is free; P1 itself is 0
     CHECK(world.reachable_target(0, "One", "Friendly", "Friendly_Only", 1.0, 99) == -1);  // no source planet: 1e18 for all
     // Argument 7: the 3-D distance from the source planet, after Evaluate.
     CHECK(world.reachable_target(0, "One", "Friendly", "Any", 1.0, 1, 1.0) == 1);

@@ -461,7 +461,7 @@ CombatSystem::SweepHit CombatSystem::sweep_segment(const Projectile& p, Vec3 del
             if (precise_hit_) {
                 pq.victim = v->id;
                 pq.shield_up = v->shield > 0.0f;
-                pq.collide = (v->flags & kUnitGarrisoned) == 0;
+                pq.collide = (v->flags & kUnitContained) == 0;
                 PreciseResult r;
                 const PreciseOutcome o = precise_hit_(pq, r);
                 if (o == PreciseOutcome::Miss) continue;
@@ -1124,7 +1124,7 @@ bool CombatSystem::damage_gates(Unit& v, const DamageRequest& r, uint32_t frame)
     if ((v.flags & kUnitInvulnerable) && k != kKindDebug && k != kKindVehicleThief) return false;
     if (v.invuln_end > frame && k != kKindDebug && k != kKindVehicleThief) return false;
     if (desc_of(v).immune_to_damage) return false;
-    if (v.flags & kUnitGarrisoned) return false;
+    if (v.flags & kUnitContained) return false;
     // 8. 0x3aa20e the victim's incognito bit (+0x3a1 & 0x10) goes when a source is given and that source is not a
     // projectile, or is a projectile whose target is this victim (a splash or stray hit keeps it; the projectile's own
     // target loses it even when the shooter is gone). No weapon / targeting test on the source.
@@ -1504,7 +1504,7 @@ void CombatSystem::infection_service(Unit& u, uint32_t frame, SimRng& rng) {
     // (no Duration_Of_Infection written; the pack ctor's value [L] taken as 0), so its first service makes the frame % 60
     // draw like any other and then suspends it (expiry) before any damage or spread.
     if (!u.infect_attached || u.infect_suspend != 0 || (u.flags & kUnitDead)) return;
-    if (u.flags & kUnitGarrisoned) return;  // nothing while garrisoned (+0x3a7)
+    if (u.flags & kUnitContained) return;  // nothing while garrisoned (+0x3a7)
     // Coughing SFX: on frames with frame % 60 == 0 one synced Get_Int(0, 4), the sound on 0 (presentation).
     if (frame % 60u == 0u) (void)rng.range_int(0, 4);
     // Frames left -= 1; at <= 0 the behaviour suspends itself (the cure: expiry) and its particle goes.
@@ -1532,7 +1532,7 @@ void CombatSystem::infection_service(Unit& u, uint32_t frame, SimRng& rng) {
     for (int32_t p = 0; p < np; ++p) {
         for (Unit& c : units_) {
             if (c.owner != p || &c == &u || c.infect_seen == frame) continue;
-            if (c.flags & (kUnitDead | kUnitGarrisoned)) continue;
+            if (c.flags & (kUnitDead | kUnitContained)) continue;
             const UnitDesc& cd = desc_of(c);
             if (!cd.has_locomotor || !cd.has_model || (cd.category_mask & in.category_mask) == 0) continue;
             if (distance2_xy(u.pos, c.pos) > r2) continue;

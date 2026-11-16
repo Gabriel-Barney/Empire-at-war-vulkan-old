@@ -919,6 +919,10 @@ GuardForce loops `Escort(GuardForce, MainForce)` forever. The plan ends, and eve
    higher-effective-desire Tactical_Targeted proposals take the category's slots. `Time_Limit` (30 s) does **not** end
    a running tactical plan: it is only an activation test (`0 < AllowedTime < ETA`), and the AllowedTime < ETA
    maintenance drop is galactic-only.
+   The re-test in full is in SKAI_T15_PLAN_RETEST (skai t15). It runs at every commit, on the kept, old-candidate and
+   maintenance paths. It counts the PP's stored selection: `Produce_Force` leaves that selection as it is, and a dead unit
+   still counts at full power. The `tf=?` count-0 PEXIT that a drop leaves comes from `Release_Forces(1.0)` raising
+   `No_Units_Remaining` synchronously.
 4. **Plan events.** `Default_No_Units_Remaining` and `Default_Original_Target_Owner_Changed` call `ScriptExit()`;
    `Default_Original_Target_Destroyed` does not (the block's signal ends the thread).
 5. **Other plans.** `Purge_Goals` from `BurnUnitsLand` (and the tech plans) ends every other running plan.

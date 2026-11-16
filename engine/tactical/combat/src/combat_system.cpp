@@ -427,7 +427,7 @@ bool CombatSystem::order_attack_issue(ObjectId attacker, ObjectId target, int32_
     if (!is_enemy(u->owner, t->owner)) return false;
     if ((t->flags & kUnitHeroClash) || !clash_allows(u->id, t->id)) return false;  // s78n t06: Set_Target / pairing
     if ((t->flags & kUnitStealthed) && !desc_of(*u).target_stealth_units && u->owner != t->owner) return false;
-    if (t->flags & kUnitGarrisoned) return false;
+    if (t->flags & kUnitContained) return false;
     if (hover_refused(*u, *t)) return false;  // s78n t20 batch 2: the can-attack test 0x38d730 (MOVEMENT §5.3)
     // Members without TEAM / TARGETING get no Order_Attack (0x739200 step 3): a unit with no weapon at all [port].
     bool armed = desc_of(*u).weapon_projectile >= 0;
@@ -1303,7 +1303,7 @@ bool CombatSystem::candidate_ok(const Unit& a, const Unit& t, float range) const
     // Filters of section 2.3 (all must pass, so their order does not change the result; fog [4] is tested last
     // because it is the most expensive).
     // 1 (s78n t05: kUnitIncognito is +0x3a1 & 0x10 too), 3 (s78n t06: +0x3b4 is kUnitHeroClash)
-    if (t.flags & (kUnitSkipTargeting | kUnitIncognito | kUnitDead | kUnitGarrisoned | kUnitHeroClash)) return false;
+    if (t.flags & (kUnitSkipTargeting | kUnitIncognito | kUnitDead | kUnitContained | kUnitHeroClash)) return false;
     if (hover_refused(a, t)) return false;  // s78n t20 batch 2: a raised hover unit and a melee attacker (Scan_Player)
     const UnitDesc& ad = desc_of(a);
     const UnitDesc& td = desc_of(t);
@@ -1379,7 +1379,7 @@ void CombatSystem::gather(uint32_t index, QueryContext& ctx) {
     if (!unit_can_attack(u)) return;  // no TargetingBehavior work without a weapon
     // s78n t05 (HERO_CLASH §8.2, targeting services 0x634810 / 0x633ae0): an incognito unit (+0x3a1 & 0x10) does not
     // auto-acquire. [port] no scan is due, so the scan draws are not made either; an ordered target is kept (above).
-    if (u.flags & kUnitIncognito) return;
+    if (u.flags & (kUnitIncognito | kUnitInLimbo)) return;  // STY1 t01: a limbo unit does not auto-acquire either
     u.scan_due = 1;
     const float range = fire_range(base_attack_range(u), mod_r(u, ModList::FireRange));
     // Current target kept when still valid and sticky or scored exactly 1.0 (section 2.1).
@@ -1437,7 +1437,7 @@ bool CombatSystem::clash_allows(ObjectId u, ObjectId x) const {
 bool CombatSystem::lock_holds(const Unit& u, const Unit& t) const {
     // §2.8 B "while locked" [H]: dropped when the target is garrisoned, +0x3b4 (s78n t06), stealthed for an attacker
     // without Target_Stealth_Units, or hidden by fog for the attacker's player (0x35f470, force 1). Dying / dead: live().
-    if (t.flags & (kUnitGarrisoned | kUnitHeroClash)) return false;
+    if (t.flags & (kUnitContained | kUnitHeroClash)) return false;
     if ((t.flags & kUnitStealthed) && !desc_of(u).target_stealth_units) return false;
     return !target_hidden(u.owner, t.id, true);
 }
@@ -1456,7 +1456,7 @@ bool CombatSystem::promote_goal(Unit& u) {
     // SPECIAL_WEAPON only on a DUMMY_STAR_BASE) from the desc; not garrisoned / hidden (+0x3a7), not dead (+0x3a0 0x40);
     // [port] no transports in battles; +0x3b4 is kUnitHeroClash (s78n t06). kUnitSkipTargeting (the port's untargetable
     // marker) kept.
-    if (t->flags & (kUnitSkipTargeting | kUnitDead | kUnitGarrisoned | kUnitHeroClash)) return false;
+    if (t->flags & (kUnitSkipTargeting | kUnitDead | kUnitContained | kUnitHeroClash)) return false;
     if (!desc_of(*t).target_test_type) return false;
     float d = 0.0f, E = 0.0f;
     const Vec3 up = scan_pos(u);  // s78n t03: a land team head's pre-check runs from its container
@@ -2373,7 +2373,7 @@ bool CombatSystem::opportunity_valid(const Unit& u, const Hardpoint& h, const Un
     // "can still be fired at" [M]: live enemy, candidate flags, stealth, Fire_Category_Restrictions,
     // fire range (XY + target radius from the hardpoint) and the fire cone.
     // s78n t05: the hardpoint pick 0x385190 skips an incognito target (+0x3a1 & 0x10, HERO_CLASH §8.2)
-    if (!live(&t) || (t.flags & (kUnitSkipTargeting | kUnitIncognito | kUnitGarrisoned))) return false;
+    if (!live(&t) || (t.flags & (kUnitSkipTargeting | kUnitIncognito | kUnitContained))) return false;
     if (!clash_allows(u.id, t.id)) return false;  // s78n t06: the hardpoint pick's pairing rule (HERO_CLASH §5.2)
     if (!is_enemy(u.owner, t.owner)) return false;
     const HardpointDesc& hd = data_->hardpoints[h.desc];
@@ -2396,7 +2396,7 @@ bool CombatSystem::opportunity_fire(Unit& u, Hardpoint& h, uint32_t frame, SimRn
         if (frame < h.opp_next_scan || !trees_) return false;
         // s78n t05 (HERO_CLASH §8.2, hardpoint auto-scan 0x387400): an owner with the incognito flag does not scan.
         // [port] the scan time is not advanced, so the first service after the flag clears scans.
-        if (u.flags & kUnitIncognito) return false;
+        if (u.flags & (kUnitIncognito | kUnitInLimbo)) return false;
         h.opp_next_scan = frame + cfg_.fps / 2u;  // rescan at most every FPS x 0.5 frames
         const HardpointDesc& hd = data_->hardpoints[h.desc];
         const float range = fire_range(hd.fire_range, mod_r(u, ModList::FireRange)) * 1.1f;

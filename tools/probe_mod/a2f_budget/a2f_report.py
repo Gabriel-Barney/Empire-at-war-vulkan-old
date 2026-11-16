@@ -199,7 +199,7 @@ def analyse(recs, types, events):
         rows = []
         for s in lst:
             pools = decode_pools(s['v'], fkey, types)
-            row = {'ch': s['ch'], 'tag': s['tag'], 't': s['t'], 'f': s['f'], 'cr': num(s['v'].get('cr')),
+            row = {'ch': s['ch'], 'sid': s['sid'], 'tag': s['tag'], 't': s['t'], 'f': s['f'], 'cr': num(s['v'].get('cr')),
                    'CU': num(s['v'].get('CU')), 'NET': num(s['v'].get('NET')), 'pools': pools}
             rows.append(row)
         res['factions'][fkey] = {'samples': rows}
@@ -273,6 +273,7 @@ def analyse(recs, types, events):
     res['perception'] = perception_series(recs)
     res['production'] = production_events(recs)
     res['saboteur'] = saboteur_data(recs)
+    res['uw_infra'] = uw_infra_data(recs, res)
     res['last_frame'] = max((num(r['f'].get('f')) or 0 for r in recs), default=None)
     return res
 
@@ -555,7 +556,8 @@ def plan_runs(recs):
         f = r['f']
         run = {'plan': f.get('plan'), 'fac': f.get('fac'), 'f': num(f.get('f')), 't': num(f.get('t')),
                'sid': r['sid'], 'n': f.get('n'), 'prev': f.get('prev'), 'spend': f.get('spend'),
-               'unalloc': f.get('unalloc'), 'cr': f.get('cr'), 'ends': []}
+               'unalloc': f.get('unalloc'), 'cr': f.get('cr'), 'goal': f.get('goal'), 'tgt': f.get('tgt'),
+               'ends': []}
         runs.append(run)
         if run['n'] is not None:
             by_key[(r['sid'], run['n'])] = run
@@ -805,6 +807,7 @@ def render(res, extra=None):
     if (extra or {}).get('port_trace'):
         L += render_cycles(res, extra['port_trace'])
     L += render_saboteur(res)
+    L += render_uw_infra(res)
     return '\n'.join(L) + '\n'
 
 
@@ -1018,6 +1021,96 @@ def render_saboteur(res):
     return L
 
 
+# ---- gai3 t04 / t07 (--uw-infra): Underworld infrastructure desires and build-plan starts -----------------------------
+
+UW_KEYS = ['SBB', 'SSD', 'SSC', 'NGU', 'SBS']
+UW_BUILD_PLANS = ('BuildGroundForcesPlan', 'BuildSpaceForcesPlan', 'UpgradeStarbasePlan',
+                  'AI_Plan_Underworld_BuildUnderworldBarracks', 'AI_Plan_Underworld_BuildUnderworldVehicleFactory',
+                  'AI_Plan_Underworld_BuildUnderworldDroidWorks', 'AI_Plan_Underworld_BuildUnderworldPalace',
+                  'AI_Plan_Underworld_DeploySaboteur')
+
+
+def uw_infra_data(recs, res):
+    """{'ub': [{f, tgt, cor, v}], 'ubn': {frame: n}, 'starts': [plan runs of UW_BUILD_PLANS by the Underworld with the
+    OFF / INFRA pools of the plan's PS sample], 'prod': [the Underworld's QB events]}. Empty without UB / UBN records."""
+    ub = []
+    ubn = {}
+    for r in recs:
+        if r['ch'] == 'U' and r['kind'] == 'UB':
+            f = r['f']
+            ub.append({'f': num(f.get('f')), 'tgt': f.get('tgt'), 'cor': f.get('cor'),
+                       'v': {k: f.get(k) for k in UW_KEYS}})
+        elif r['ch'] == 'U' and r['kind'] == 'UBN':
+            ubn[num(r['f'].get('f'))] = r['f'].get('n')
+    ub.sort(key=lambda x: (x['f'] if x['f'] is not None else -1, x['tgt'] or ''))
+    if not ub and not ubn:
+        return {}
+    ps = {}
+    for row in ((res.get('factions') or {}).get('UNDERWORLD') or {}).get('samples', []):
+        if row.get('ch') == 'P':
+            ps[(row.get('sid'), row.get('f'))] = row.get('pools') or {}
+    starts = []
+    for run in (res.get('plans') or {}).get('runs', []):
+        if run['fac'] != 'UNDERWORLD' or run['plan'] not in UW_BUILD_PLANS:
+            continue
+        pools = ps.get((run['sid'], run['f']), {})
+        starts.append(dict(run, off=pools.get('OFF', {}), infra=pools.get('INFRA', {})))
+    starts.sort(key=lambda x: x['f'] if x['f'] is not None else -1)
+    prod = [e for e in res.get('production', []) if e['fac'] == 'UNDERWORLD' and e['kind'] == 'QB']
+    return {'ub': ub, 'ubn': ubn, 'starts': starts, 'prod': prod}
+
+
+def pool_txt(p):
+    if not p:
+        return '-'
+    if p.get('state') == 'ok':
+        return '%.0f+%.2f/s' % (p['avail'], p['rate'])
+    return p.get('state', '-')
+
+
+def render_uw_infra(res):
+    d = res.get('uw_infra') or {}
+    if not d:
+        return []
+    L = ['', '== 10. Underworld infrastructure and build plans (gai3 t04 / t07; A2M_R3_RE_A.md sections 2 and 5) ==']
+    L.append('   Underworld build-plan starts (unalloc = net cost of the selection; OFF / INFRA = pools at the start, '
+             'avail+rate):')
+    for r in d['starts']:
+        L.append('     f=%-6s %-48s goal=%-32s tgt=%-12s unalloc=%-7s cr=%-7s OFF=%-16s INFRA=%-16s ends=%s' % (
+            fi(r['f']), r['plan'], r.get('goal') or '-', r.get('tgt') or '-', r['unalloc'], r['cr'],
+            pool_txt(r['off']), pool_txt(r['infra']),
+            ', '.join('%s@%s' % (e['kind'], fi(e['f'])) for e in r['ends']) or '-'))
+    if not d['starts']:
+        L.append('     none')
+    L.append('   Underworld production begins (QB) to frame 12000:')
+    for e in d['prod']:
+        if e['f'] is not None and e['f'] > 12000:
+            break
+        L.append('     f=%-6s %-12s %-40s cost=%-6s cr=%s' % (fi(e['f']), e['pl'], e['type'], e['cost'], e['cr']))
+    L.append('   UB (per Underworld planet; a row when any value changes): ' + ' '.join(
+        '%s=%s' % (k, n) for n, k in (('Should_Build_Underworld_Barracks', 'SBB'),
+                                      ('Should_Underworld_Save_For_Desirable_Structures', 'SSD'),
+                                      ('Should_Save_For_Corruption', 'SSC'), ('Needs_Groundbase_Upgrade', 'NGU'),
+                                      ('Should_Underworld_Build_Starbase', 'SBS'))))
+    last = {}
+    for x in d['ub']:
+        sig = (x['cor'],) + tuple(x['v'].get(k) for k in UW_KEYS)
+        if last.get(x['tgt']) != sig:
+            last[x['tgt']] = sig
+            L.append('     f=%-6s %-12s cor=%-5s %s' % (fi(x['f']), x['tgt'], x['cor'],
+                                                       ' '.join('%s=%s' % (k, x['v'].get(k)) for k in UW_KEYS)))
+    return L
+
+
+def write_uw_infra_tsv(res, path):
+    d = res.get('uw_infra') or {}
+    with open(path, 'w') as f:
+        f.write('frame\tplanet\tcorrupted\t' + '\t'.join(UW_KEYS) + '\n')
+        for x in d.get('ub', []):
+            f.write('\t'.join([str(fi(x['f'])), str(x['tgt']), str(x['cor'])] + [str(x['v'].get(k)) for k in UW_KEYS])
+                    + '\n')
+
+
 def write_saboteur_tsv(res, path):
     sab = res.get('saboteur') or {}
     cols = SAB_COLS
@@ -1059,13 +1152,14 @@ def write_major_tsv(res, path):
 def write_plans_tsv(res, path):
     """a2h t02: one row per plan run (PSTART) with its end records."""
     with open(path, 'w') as f:
-        f.write('plan\tfaction\tframe\tsid\tn\tprev\tspend\tunalloc\tcredits\tends\n')
+        f.write('plan\tfaction\tframe\tsid\tn\tprev\tspend\tunalloc\tcredits\tends\tgoal\ttarget\n')
         for r in res['plans']['runs']:
             ends = ';'.join('%s@%s age=%s%s' % (e['kind'], e['f'], e['age'],
                                                 (' by=%s line=%s' % (e['by'], e['line'])) if e.get('by') else '')
                             for e in r['ends'])
             f.write('\t'.join(str(x) for x in (r['plan'], r['fac'], r['f'], r['sid'], r['n'], r['prev'], r['spend'],
-                                                r['unalloc'], r['cr'], ends)) + '\n')
+                                                r['unalloc'], r['cr'], ends, r.get('goal') or '',
+                                                r.get('tgt') or '')) + '\n')
 
 
 def write_perception_tsv(res, path, port_ref):
@@ -1120,6 +1214,8 @@ def run(records, watch, types_path, out_dir, port_trace=None, port_perception=DE
     write_major_tsv(res, os.path.join(out_dir, 'major.tsv'))
     write_plans_tsv(res, os.path.join(out_dir, 'plans.tsv'))
     write_saboteur_tsv(res, os.path.join(out_dir, 'saboteur.tsv'))
+    if res.get('uw_infra'):
+        write_uw_infra_tsv(res, os.path.join(out_dir, 'uw_infra.tsv'))
     return res, text
 
 

@@ -92,6 +92,7 @@ int32_t CapturePointSystem::controller(const Point& p, std::span<const Influence
 
 void CapturePointSystem::service(uint32_t frame, std::span<const Influencer> influencers) {
     for (Point& p : points_) {
+        if (suspended_ && suspended_(p.id)) continue;  // STY1 t01: Disable_Capture
         if (frame < p.next) continue;
         p.next = frame + interval_;
         if (frame < allowed_frame_ && p.owner >= 0 && p.owner != neutral_ && !(neutral_owner_ && neutral_owner_(p.owner)))

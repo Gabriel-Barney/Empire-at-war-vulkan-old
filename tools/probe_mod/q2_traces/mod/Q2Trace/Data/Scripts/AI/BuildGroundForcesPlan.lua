@@ -91,6 +91,8 @@ end
 --           without the player (no fog test, any owner: nil means the task force has no position), fn_foe = with the
 --           other faction's own player and true (its own objects, under its own fog: set while fn_ret is nil means the
 --           plan player's fog or relation test dropped them)
+--   FNHOOK  the FNEAR wrapper was put in place of Find_Nearest (BurnUnitsLand only; at the chunk run and again at a
+--           thread start when the global was set back); fn_kind = the type of the value it wraps
 --   ERR     a probe error (each distinct one once); the shipped code still runs
 -- Every record carries time, frame, plan, faction, target (Target.Get_Type().Get_Name(): Target is the goal's planet as
 -- a game object wrapper; none = the goal has no target), tf (the task force), n, the goal's budget
@@ -294,6 +296,9 @@ function Q2P_EndAll(kind)
 end
 
 function Q2P_Begin(tf)
+	if Q2P_FNInstall ~= nil then
+		Q2P_FNInstall()
+	end
 	local prev = Q2P_Get(tf .. " end", "first")
 	Q2P_Set(tf .. " n", Q2P_Get(tf .. " n", 0) + 1)
 	Q2P_Set(tf .. " k", 0)

@@ -154,6 +154,61 @@ void test_goal_pass_cadence() {
                 static_cast<long long>(retail.size() > 1 ? retail[1].first : 0), static_cast<long long>(retail.size() > 2 ? retail[2].first : 0));
 }
 
+// gai3 t06 (BKG1_RE_ANSWERS.md B.9 / B.10): a pass evaluates a targeted source's targets in the order of
+// GoalModeHooks::target_at, skipping targets the application rejects (galactic: planets only; retail's reverse order is
+// gai3 t08).
+void test_goal_target_walk_order() {
+    struct OrderHooks final : GoalModeHooks {
+        std::vector<int32_t> seen;
+        uint32_t target_count() override { return 5; }
+        int32_t target_at(uint32_t i) override { return 4 - static_cast<int32_t>(i); }
+        bool applies(int32_t t, uint32_t) override { return t != 2; }
+        bool blocked(uint32_t, int32_t) override { return false; }
+        bool evaluate(const std::string&, int32_t t, double& out) override {
+            seen.push_back(t);
+            out = 0.0;
+            return true;
+        }
+        bool accept(Goal&) override { return false; }
+        bool plan_activatable(Goal&) override { return false; }
+        bool plan_invalid(const Goal&) override { return true; }
+        bool replaceable(const Goal&) override { return true; }
+        void refresh_plan(Goal&) override {}
+        void suspend_reservations(Goal&) override {}
+        bool uses_budget() override { return false; }
+        bool can_fund(const Goal&) override { return true; }
+        float category_credits(int32_t) override { return 1.0f; }
+        void budget_add(Goal&) override {}
+        void budget_release(Goal&) override {}
+        void budget_weights() override {}
+        std::vector<int32_t> category_order() override { return {}; }
+        void queue_production(Goal&) override {}
+        void instantiate(Goal&) override {}
+        void end_plan(Goal&, bool) override {}
+        void drop_potential_plan(Goal&) override {}
+        float elapsed_eta(const Goal&) override { return 0.0f; }
+        int32_t quota_players() override { return 1; }
+    };
+    AiDefinitions defs;
+    GoalTypeDef d;
+    d.name = "Goal_A";
+    d.application = app::Enemy;
+    d.category = 0;
+    defs.goals.push_back(d);
+    const std::vector<GoalSource> sources{{0, "A"}};
+    OrderHooks hooks;
+    LearningSystem learning;
+    SimRng rng(5);
+    GoalSystem gs;
+    GoalSystemConfig cfg;
+    cfg.retail_cadence = true;
+    gs.init(defs, sources, &hooks, &learning, nullptr, &rng, cfg);
+    for (int64_t f = 1; f <= 60 && gs.passes() == 0; ++f) gs.service(f);
+    CHECK(gs.passes() >= 1);
+    CHECK(hooks.seen.size() >= 4);
+    if (hooks.seen.size() >= 4) CHECK((std::vector<int32_t>(hooks.seen.begin(), hooks.seen.begin() + 4) == std::vector<int32_t>{4, 3, 1, 0}));
+}
+
 void test_desire_and_hysteresis() {
     Goal g;
     g.desire = 10.0f;

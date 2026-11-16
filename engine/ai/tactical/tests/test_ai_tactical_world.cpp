@@ -1279,6 +1279,7 @@ const std::vector<TacticalAiDifficulty>* g_difficulties = nullptr;
 bool g_hero_frigate = false;  // S7 t26: Syn_Frigate is Is_Named_Hero (test_no_units_remaining_heroes)
 bool g_ai_lane = false;  // sp3: TacticalAiConfig::ai_lane of the SaveSession worlds (test_ai_lane_save)
 bool g_original_timing = false;  // a1k t01: TacticalAiConfig::stagger / pp_streams off (the original's planning timing)
+bool g_plan_retest = false;  // skai t15: TacticalAiConfig::plan_retest (test_plan_retest)
 bool syn_object_types(MemoryFiles& tf, objects::ObjectTypeDatabase& raw, objects::GameObjectTypes& types, bool abilities) {
     const char* names[] = {"Syn_Frigate", "Syn_Corvette", "Syn_Station", "Syn_Pad", "UC_Syn_Turret"};
     std::string xml = "<SpaceUnits>";
@@ -1367,6 +1368,7 @@ RunResult run(int32_t frames, int32_t difficulty0, int variant = 0, std::vector<
     cfg.attacker = 1;
     cfg.defender = 0;
     cfg.map = {-4000.0f, -4000.0f, 4000.0f, 4000.0f};
+    cfg.plan_retest = g_plan_retest;  // skai t15
     if (g_original_timing) {  // a1k t01: the OPT2 t01 / t10 timing knobs off (test_replan_and_priority_lifetime)
         cfg.stagger = false;
         cfg.pp_streams = false;
@@ -2396,9 +2398,9 @@ uint32_t first_u32(const std::vector<uint8_t>& b) {
                                    (static_cast<uint32_t>(b[3]) << 24);
 }
 
-// sp3 (TacticalAiConfig::ai_lane): an AI-lane world draws from its own stream, not the session's, and saves it (version 15)
-// so a load continues identically; a lane-off save (version 14) loads into a lane-on world; a lane-on save does not load
-// into a lane-off world; the lane-off bytes keep version 14.
+// sp3 (TacticalAiConfig::ai_lane): an AI-lane world draws from its own stream, not the session's, and saves it (version 17
+// since skai t15) so a load continues identically; a lane-off save (version 16) loads into a lane-on world; a lane-on save
+// does not load into a lane-off world; the lane-off bytes keep version 16.
 void test_ai_lane_save() {
     const int32_t save_at = 30 * 35;
     g_ai_lane = false;
@@ -2410,13 +2412,13 @@ void test_ai_lane_save() {
         off_image = a.ai_bytes();
         off_session_draws = a.rng.synced().draws();
     }
-    CHECK(first_u32(off_image) == 14u);
+    CHECK(first_u32(off_image) == 16u);
     g_ai_lane = true;
     test_save_load(1, 30 * 30, 30 * 60);  // round trip and continuation with the lane on (variant 0's corruption offsets are v12's)
     SaveSession a(0);
     for (int32_t f = 1; f <= save_at; ++f) a.step(f);
     const std::vector<uint8_t> on_image = a.ai_bytes();
-    CHECK(first_u32(on_image) == 15u);
+    CHECK(first_u32(on_image) == 17u);
     // The AI's own draws left the session stream (what remains are the host's).
     CHECK(a.rng.synced().draws() < off_session_draws);
     {
@@ -2425,7 +2427,7 @@ void test_ai_lane_save() {
         SaveSession from(0);
         for (int32_t f = 1; f <= save_at; ++f) from.step(f);
         CHECK(b.restore_host(from) && b.load_ai(off_image));
-        CHECK(first_u32(b.ai_bytes()) == 15u);
+        CHECK(first_u32(b.ai_bytes()) == 17u);
     }
     {
         g_ai_lane = false;
@@ -3202,6 +3204,23 @@ void test_attack_move_result() {
     CHECK(rep_line.find("res=nil") != std::string::npos && rep_line.find("valid=false") != std::string::npos);
 }
 
+// skai t15 (SKAI_T15_PLAN_RETEST §1): TacticalAiConfig::plan_retest runs the running-plan contrast re-test at every commit
+// and on the old-candidate path. A re-test that passes changes nothing: in this world no plan's target gains enemies its
+// selection does not cover within 60 s, so the run with the switch on is the run with it off, frame for frame. The failing
+// case (a plan ended at the next commit) is alamo_headless_skirmish_plan_retest (the headless synthetic skirmish, frame 302).
+void test_plan_retest() {
+    g_plan_retest = true;
+    const RunResult on = run(30 * 60, 1);
+    g_plan_retest = false;
+    const RunResult off = run(30 * 60, 1);
+    uint32_t failed = 0;
+    for (const auto& [k, v] : on.stats)
+        if (k.find("running-plan contrast re-test failed") != std::string::npos) failed += v;
+    CHECK(failed == 0);
+    CHECK(!on.crc.empty() && on.crc == off.crc);
+    CHECK(on.decisions == off.decisions);
+}
+
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i)
         if (std::strcmp(argv[i], "--write-golden") == 0) g_write_golden = true;
@@ -3238,6 +3257,7 @@ int main(int argc, char** argv) {
     test_landing_wait(true);
     test_landing_save();
     test_replan_and_priority_lifetime();  // a1k t01
+    test_plan_retest();  // skai t15
     test_attack_move_result();            // q6 t19
     std::printf(g_fail ? "alamo_ai_tactical_world_tests: %d FAILED\n" : "alamo_ai_tactical_world_tests: OK\n", g_fail);
     return g_fail ? 1 : 0;

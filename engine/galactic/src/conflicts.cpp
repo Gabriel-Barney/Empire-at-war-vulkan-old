@@ -833,6 +833,7 @@ void ConflictManager::pay_auto_resolve_bounty(const ConflictInfo& head) {
     const GalacticRules& gr = sim_->rules();
     const auto& players = sim_->players();
     if (head.attacker == head.defender) return;
+    if (!sim_->story_gates().bounty_collection) return;  // DISABLE_BOUNTY_COLLECTION (STY1, STORY_REWARDS_GALACTIC §3.5)
     const auto valid = [&](int32_t p) { return p >= 0 && static_cast<size_t>(p) < players.size(); };
     const auto benefits = [&](int32_t p) {
         if (!valid(p)) return false;

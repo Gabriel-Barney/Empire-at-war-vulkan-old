@@ -48,6 +48,14 @@ section 4.
   and runs `re-analyst` and the reviews itself; it ends a turn with a `REQUEST` only for the Ghidra turn (one ReVa session at a
   time), questions for Gabriel and waits on another lane (`lane.md`, "Coordinator protocol"). For a small group, or on request,
   the coordinator works it itself; background `lane` agents only when Gabriel asks for agents.
+- **Unattended runs** (Gabriel, 2026-11-15: "point it at tasks, have it ask for permissions and then walk away"): the
+  coordinator asks everything that would stop a lane before the first lane starts (`run-group` step 3a: switch itself to auto
+  mode, computer-use access for retail probes, open decisions in one question round, UAC needs) and starts lanes with
+  `permission_mode: "auto"`. Afterwards nothing waits on Gabriel that the rules settle: lanes take the documented default and
+  report it as `default taken:`; a task that needs him stays `todo` on a held list while its lane goes on. Retail probe runs
+  move from the lane to the coordinator (`REQUEST probe`), because the computer-use grant belongs to one session. The
+  allowlist, the `ask` rules (Frida, TTD, pushes to `main`, `gh pr merge`) and the `deny` rules (force push, bare
+  `git stash`) are Gabriel's to change; agents use the spellings in `docs/WORKFLOW_TIPS.md`, "Unattended runs".
 - **Retail RE access for every worker** (Gabriel, 2026-11-15, later the same day; replaces the earlier exception that kept the RE
   tools from engine-writing workers): every worker may use REA, WinDbg / cdb, Frida, TTD replays and the decompiled output in
   `re_reference/` directly, also while writing engine code. **Guard kept:** decompiled or disassembled code is never copied into
@@ -229,3 +237,50 @@ Empire-vs-Underworld (seeds 1 / 3 / 8 / 9, 70000) game ends. `alamo_headless_ski
 from `..._end`) and `..._empire_underworld_seedN` now play their whole run with 0 Lua errors. This replaces the part of
 skai's exit test that asked for foc-land seeds 2 and 4 to end within 30000 ticks. Tests that are checked against retail
 outcomes (the space station, the campaign-rules land invasion) keep `--expect-battle-end`.
+
+## Running-plan re-test on by default (skai t18, Gabriel, 2026-11-16)
+
+Gabriel, 2026-11-16, up-front round of the coordinator run, option (c): turn the running-plan contrast re-test 0x6c47c0 on by
+default (`TacticalAiConfig::plan_retest`, `BattleAiSetup::plan_retest`; retail runs it at every commit, SKAI_T15_PLAN_RETEST)
+and find why foc-land-campaign seeds 1 and 3 stop retreating before keeping outcome seed 1. `alamo_headless --no-plan-retest`
+gives the pre-t18 port; `--plan-retest` is still accepted. Goldens moved with it (named in the landing commit).
+
+Diagnosis (skai-lane2): no port defect found. In both seeds the re-test ends a few early plans (seed 3: a Rebel
+Destroy_Land_Unit at 1301 whose escort list became uncovered), fewer Rebel units die, and by frame ~3600 the Empire's last unit
+is one AT-AT. From then on it is a standoff under the shipped rules: the Rebels (260-290 of non-structure force) are not
+outnumbered 2:1 by the AT-AT (600, health-attenuated), so `Want_To_Retreat_From_Land` stays 0; they never get a contrast that
+covers an AT-AT; and the AT-AT spends 8500+ frames on one Clear_Infantry plan, walking (Max_Speed 0.5) about 4500 units to
+the zone where Rebel scouts were seen. The battle reaches the 14400-frame cap. No retail run of an AI-vs-AI campaign land
+battle exists to compare with, so the fallback (b) applies: the re-test stays on, outcome seed 1 is left out and seed 2 (ends at
+5155) is checked with seed 6 (`alamo_headless_skirmish_ai_foc_land_campaign_outcome_seed{6,2}`). Seeds 2 and 4-12 end with the
+Rebel retreat at 2755-11566 (12 seeds, 20000 ticks).
+
+## skai exit test as a tier-2 distribution (Gabriel, 2026-11-16)
+
+Gabriel, 2026-11-16 (coordinator run, skai t15): after more retail runs, judge skai's exit as a tier-2 distribution (end
+rate and end frames) instead of "the idle-human Utapau run does not end within 36000 frames". Retail does end some of these
+games: Rebel AI vs idle Empire 1 of 4 (27265), Empire AI vs idle Underworld 3 of 5 (23746, 25707, 26522), Underworld AI vs
+idle Empire 0 of 1 (runs listed in `tools/probe_mod/q2_traces/analysis/skai_exit.py`; SKAI_T06_LAND_RUNS §9,
+SKAI_T15_PLAN_RETEST, B0418_UTAPAU_AI_RUNS).
+
+The check (`skai_exit.py`, seeds 1-10 per AI, 36000 ticks; thresholds chosen by skai-lane2 as the documented default,
+[port]): per AI, (1) **rate**: a two-sided Fisher exact test on port ends / 10 against retail ends / runs passes while
+p >= 0.05; (2) **frames**, only when both sides have ended games: the median end frame of the port's ended games is at least
+retail's earliest end - 3000 frames. The frame test is one-sided because the 36000 cap cuts the late side and a port that ends
+too late ends too rarely, which the rate test sees; what t15 is about is the AI finishing the base too fast. The AI-against-AI
+part of the exit is unchanged (whole run, 0 Lua errors, no end needed). Port on dev dc790516 (re-test on): Rebel 1 of 10
+(33956) pass; Underworld 5 of 10 pass (retail has one run, so this proves little); **Empire 10 of 10, median 18747 < 20746:
+fails**, the open part of skai t15. More retail runs tighten the check: add them to `RETAIL` in the script.
+
+## fxc ships in test builds; Claude may drive alamo_game for one run (Gabriel, 2026-11-16)
+
+Gabriel, 2026-11-16, in the up-front round of the "needs Gabriel and probe runs" coordinator run:
+- **modc t36: `fxc.exe` and `d3dcompiler_47.dll` (Windows SDK) may ship in test builds.** Test builds stay private to Gabriel.
+  With them, `alamo_game` and `alamo_mod_check` run the .fx prebuild by themselves when a mod is mounted. Without them, the
+  t11 fallback still works and the report says the source is not compiled. A public release needs this asked again.
+- **Rule 7 exception for that run only: Claude drives the port's `alamo_game.exe` with computer use** for the look checks
+  aamode t04, names t03, pathl t03, modc t09 and gchk (backlog b0251 / b0258). Each check is done with screenshots and
+  closed when what Claude sees matches; taste calls are noted for Gabriel. The audio check aud1 t09 stays Gabriel's
+  (Claude can't hear). Outside that run, rule 7 is unchanged.
+- Renewed for the second 2026-11-16 coordinator run (Trace parity gaps / UI art and fonts): Claude drove alamo_game for
+  aamode t04, names t03, pathl t03 and gchk t01/t02 (done; findings in backlog b0442-b0448). Rule 7 unchanged otherwise.

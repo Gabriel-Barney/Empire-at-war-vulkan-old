@@ -88,6 +88,12 @@ The emergency infantry build (`Tactical_Multiplayer_Build_Infantry_Emergency`) d
 from another purchase path. Retail's AI does not finish an idle base within 36000 ticks with either faction, while the port's
 does in 5 of 6 runs.
 
+**Second Empire AI run (2026-11-16, skai t15 hook kit, `out\20261116-005957-skirmish-vanilla-lua`):** same lobby, same
+opening (refinery 2569, Fett 2875, tech 2 7678, tech 3 19390), but the Empire AI **did** destroy the idle Underworld base: vehicle
+factory 14368, droid works 17366, palace 24378, barracks 25499, defeat screen at about 25707. So retail's Empire AI ends an
+idle Underworld base in one of two runs; the port's (with the force-sum rule) ends at 18429-19629 in 3 of 3. Plan ends of both
+runs: SKAI_T15_PLAN_RETEST.md, "Retail hook runs".
+
 ## 6. b0419: `Move_To -- Target is already dead` in BobaFettFlameInfantry (no port difference)
 
 `MoveUntilDone` tests `TestValid(target)` in its loop condition, calls `PumpEvents()` (which yields to the engine:
