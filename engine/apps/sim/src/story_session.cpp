@@ -330,6 +330,7 @@ void StorySession::notify_ui(const StoryUiNotification& n) {
         if (n.kind == StoryUiEvent::SelectUnit) k = TacticalStoryEvent::SelectUnit;
         else if (n.kind == StoryUiEvent::ClickGui) k = TacticalStoryEvent::ClickGui;
         else if (n.kind == StoryUiEvent::SpeechDone) k = TacticalStoryEvent::SpeechDone;
+        else if (n.kind == StoryUiEvent::Generic) k = TacticalStoryEvent::Generic;  // STY1 t03: the battle plot set hears it too
         const bool attached = tactical_ && tactical_->set && (n.player < 0 || n.player == tactical_->set->player);
         if (attached && k != TacticalStoryEvent::Count) {
             TacticalStoryNotification tn;
@@ -1483,7 +1484,7 @@ std::string_view tactical_story_event_name(TacticalStoryEvent e) {
     static constexpr std::string_view kNames[] = {"Destroyed",     "HardpointDestroyed", "Reinforced",   "UnitArrived",
                                                   "FullStop",      "Garrisoned",         "HeroCaptured", "StructureCaptured",
                                                   "UnitCommanded", "UnitGuarding",       "BaseDestroyed", "LoadTacticalMap",
-                                                  "SelectUnit",    "ClickGui",           "SpeechDone"};
+                                                  "SelectUnit",    "ClickGui",           "SpeechDone",   "Generic"};
     const auto i = static_cast<size_t>(e);
     return i < std::size(kNames) ? kNames[i] : std::string_view("?");
 }
@@ -1492,7 +1493,7 @@ std::string_view tactical_story_event_type(TacticalStoryEvent e) {
         "STORY_TACTICAL_DESTROY", "STORY_ATTACK_HARDPOINT", "STORY_REINFORCE",     "STORY_UNIT_ARRIVED",
         "STORY_FULL_STOP",        "STORY_GARRISON_UNIT",    "STORY_CAPTURE_HERO",  "STORY_CAPTURE_STRUCTURE",
         "STORY_COMMAND_UNIT",     "STORY_GUARD_UNIT",       "STORY_DESTROY_BASE",  "STORY_LOAD_TACTICAL_MAP",
-        "STORY_SELECT_UNIT",      "STORY_CLICK_GUI",        "STORY_SPEECH_DONE"};
+        "STORY_SELECT_UNIT",      "STORY_CLICK_GUI",        "STORY_SPEECH_DONE",  "STORY_GENERIC"};
     const auto i = static_cast<size_t>(e);
     return i < std::size(kTypes) ? kTypes[i] : std::string_view();
 }

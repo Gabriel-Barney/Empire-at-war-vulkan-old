@@ -639,7 +639,10 @@ void TacticalBattle::consume_events(TacticalMode& mode, SimRng& rng) {
     engines_restarted_.clear();
     for (const ta::AbilityEvent& e : abilities_->events()) {
         ++stats_.ability_events;
-        if (e.kind == ta::AbilityEventKind::Activated) ++stats_.activations;
+        if (e.kind == ta::AbilityEventKind::Activated) {
+            ++stats_.activations;
+            story_generics_.push_back({"activate_deployed_ability", -1});  // STY1 t03 (0x4b4d70 case 1) [port: every activation]
+        }
         if (e.kind == ta::AbilityEventKind::EnginesOffline)
             if (Unit* u = unit_by_id(e.id)) {
                 engine_loops_.engines_offline(e.id, frame_);  // §3.3: both engine loops off

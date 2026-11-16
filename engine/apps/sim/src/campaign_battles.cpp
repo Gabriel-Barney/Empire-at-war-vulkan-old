@@ -1604,6 +1604,11 @@ void CampaignBattles::story_feed(SimHost& host) {
         n.other = d.killer == tactical::combat::kNoObject ? 0 : d.killer;
         s->notify_tactical(n);
     }
+    // STY1 t03: STORY_GENERIC names raised by the battle (hyperspace / bombard / ability) and the super laser's shot.
+    for (const TacticalBattle::StoryGeneric& g : battle_->story_generics()) s->notify_ui({StoryUiEvent::Generic, g.player, 0, g.name, true});
+    for (const tactical::abilities::SpecialWeaponEvent& e : battle_->special_weapon_events())
+        if (e.kind == tactical::abilities::SwEventKind::Fired && battle_->is_space_battle())
+            s->notify_ui({StoryUiEvent::Generic, -1, 0, "super_laser_fired", true});  // [port] any space special weapon fire
     // --- L1/S4 wave 2b feeds ---
     TacticalMode* tm = host.tactical();
     if (!tm) return;

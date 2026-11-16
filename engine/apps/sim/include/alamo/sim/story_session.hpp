@@ -282,7 +282,7 @@ struct StoryBattleStart {
 //   SpeechDone         STORY_SPEECH_DONE} acting player
 enum class TacticalStoryEvent : uint8_t {
     Destroyed = 0, HardpointDestroyed, Reinforced, UnitArrived, FullStop, Garrisoned, HeroCaptured, StructureCaptured,
-    UnitCommanded, UnitGuarding, BaseDestroyed, LoadTacticalMap, SelectUnit, ClickGui, SpeechDone, Count
+    UnitCommanded, UnitGuarding, BaseDestroyed, LoadTacticalMap, SelectUnit, ClickGui, SpeechDone, Generic, Count
 };
 std::string_view tactical_story_event_name(TacticalStoryEvent e);  // "Destroyed", ...
 std::string_view tactical_story_event_type(TacticalStoryEvent e);  // "STORY_TACTICAL_DESTROY", ...

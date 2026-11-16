@@ -391,6 +391,13 @@ public:
     // --- L1/S4 wave 2b story hooks (owner: L1/S4 agent; keep other hooks separate) ---
     // Reserve units deployed during the last tick() (StorySession STORY_REINFORCE), deploy order.
     std::span<const objects::ObjectId> story_reinforced() const { return story_reinforced_; }
+    // STY1 t03: STORY_GENERIC names the battle raised this tick (start_hyperspace, start_bombard, activate_deployed_ability),
+    // each with the acting player (-1 = every plot set).
+    struct StoryGeneric {
+        const char* name;
+        int32_t player;
+    };
+    std::span<const StoryGeneric> story_generics() const { return story_generics_; }
     // S7 t15 A1 - "unit ability finished" (object signal 0x29) raised during the last tick(), in order: ability ends
     // (AbilitySystem Ended: countdown expiry, special removals, the Remote_Bomb toss at its Toss_Anim end) and the jetpack's swap
     // back to the primary locomotor (MOVEMENT §3.1.1 step 6, seen as the end of the weapons suspension before the combat
@@ -1860,6 +1867,7 @@ private:
     void register_clone_obstacle(TacticalMode& mode, objects::ObjectHandle clone, int32_t clone_type);
     void kill_pushed_clones(TacticalMode& mode);
     std::vector<AttachedEffect> effects_;
+    std::vector<StoryGeneric> story_generics_;  // STY1 t03: this tick's generic story names
     std::vector<objects::ObjectId> story_reinforced_;  // L1/S4 wave 2b: reserve units deployed this tick
     std::vector<objects::ObjectId> ability_finished_;  // S7 t15 A1: signal 0x29 this tick (not saved: read the same tick)
     std::vector<std::pair<uint32_t, OrderReplacedListener>> order_replaced_listeners_;  // S7 t31: token order

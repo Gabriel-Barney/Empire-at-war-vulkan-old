@@ -135,7 +135,7 @@ void StoryUiFeed::movie_done(std::string_view movie) {
     if (!movie.empty()) raise(sim::StoryUiEvent::MovieDone, 0, movie);
 }
 void StoryUiFeed::generic(std::string_view name) {
-    if (!name.empty()) raise(sim::StoryUiEvent::Generic, 0, name);
+    if (!name.empty()) raise(sim::StoryUiEvent::Generic, 0, name, battle_);
 }
 void StoryUiFeed::mission_lost(std::string_view name) {
     if (!name.empty()) raise(sim::StoryUiEvent::MissionLost, 0, name);
