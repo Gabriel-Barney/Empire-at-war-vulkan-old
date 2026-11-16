@@ -43,9 +43,12 @@ RETAIL = {
         ("20261116-065045 (B1)", None),
         ("20261116-071736 (B2)", 23746),
         ("20261116-074211 (B3)", 26522),
+        ("20261116-133939 (skai-a; palace falls 28196, trace ends 28404)", 28196),
     ]),
     "Underworld": ("Empire", [
         ("20261114-212910 (B0418_UTAPAU_AI_RUNS)", None),
+        ("20261116-140323 (skai-a; command center falls 28391, trace ends ~28599)", 28391),
+        ("20261116-142451 (skai-a)", None),
     ]),
 }
 
