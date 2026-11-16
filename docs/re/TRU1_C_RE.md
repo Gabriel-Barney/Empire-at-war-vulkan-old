@@ -105,7 +105,8 @@ Done (returns true) when the cinematic is not active or its counter c > 89. Othe
   0x80, and the sound cursor advances. Every listed unit i then moves d · s, s = the faction's
   `Space_Retreat_Flight_Move_Increment` when i ≤ R (released), else 8.125. The wait (+0x68) drops by n; when it is
   < 1, R := min(R + 1, count − 1) and wait := `Space_Retreat_Unit_Increment_Wait_Frames`. (Both cursors and the wait
-  start at 0, so unit 0 is released on the first c ≥ 30 update, then one more unit every Wait frames.)
+  start at 0, so unit 0 is released on the first c ≥ 30 update, unit 1 on the next one (the first wait is 0), then one
+  more unit every Wait frames: with Wait 3, releases at c = 30, 31, 34, 37, ….)
 Units are **not** removed by the step; they fly off while the camera watches.
 
 ### 2.4 Finish [H]
