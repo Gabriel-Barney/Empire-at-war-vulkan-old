@@ -660,10 +660,6 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
         }
     }
     void claim_force(TfRec& t);
-    // skai t17 [port]: the retail task-force rules of SKAI_T17_SPACE_BUILD_RE (a TF only with a selection, its pad picks
-    // from plan start, the wanted list in team order) run in space only so far; land keeps the older port rules until
-    // the land owner re-records its goldens (roadmap follow-up). Retail uses the same plan start in every mode.
-    bool space_tf_rules() const { return cfg.mode == TacticalMode::Space; }
     // skai: the TF's pad picks (PpSource::Build) of its plan's PotentialPlan as reservations, for a Build / Build_All
     // that runs without a Produce_Force first (BuildEconStructure.lua) [M: retail's TF holds the reservations from plan
     // start]. Only when the TF has none yet.
@@ -842,7 +838,7 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
         TfRec* t = tf_rec(tf);
         // skai t17 (SKAI_T17_SPACE_BUILD_RE §1.1, 0x66fb30: the TF gets its PP pairs at creation): the pad picks are the
         // TF's from plan start, so BuildRefinerySpace.lua's Get_Reserved_Build_Pads before its Build sees them.
-        if (t && t->reservations.empty() && space_tf_rules()) claim_pads(*t);
+        if (t && t->reservations.empty()) claim_pads(*t);
         if (t)
             for (const auto& [pad, type] : t->reservations) {
                 const ObjectHandle h = store.find(pad);
@@ -1748,12 +1744,11 @@ void TacticalAiWorld::Impl::claim_force(TfRec& t) {
         std::vector<const TacticalPpPick*> mine;
         for (const TacticalPpPick& k : ppit->second.picks)
             if (k.tf == static_cast<int32_t>(t.def)) mine.push_back(&k);
-        if (space_tf_rules())
-            std::stable_sort(mine.begin(), mine.end(), [](const TacticalPpPick* a, const TacticalPpPick* b) {
-                const uint32_t ta = a->team < 0 ? UINT32_MAX : static_cast<uint32_t>(a->team);
-                const uint32_t tb = b->team < 0 ? UINT32_MAX : static_cast<uint32_t>(b->team);
-                return ta < tb;
-            });
+        std::stable_sort(mine.begin(), mine.end(), [](const TacticalPpPick* a, const TacticalPpPick* b) {
+            const uint32_t ta = a->team < 0 ? UINT32_MAX : static_cast<uint32_t>(a->team);
+            const uint32_t tb = b->team < 0 ? UINT32_MAX : static_cast<uint32_t>(b->team);
+            return ta < tb;
+        });
         for (const TacticalPpPick* kp : mine) {
             const TacticalPpPick& k = *kp;
             switch (k.source) {
@@ -2317,7 +2312,7 @@ int32_t TacticalAiWorld::Impl::instantiate(PlayerAi& p, Goal& g) {
     // it a selection (free-store unit, pool entry, pad or to-be-produced pick) or its definition says TaskForceRequired;
     // otherwise no task force, no Lua global (it reads nil) and no <name>_Thread. A plan without a PotentialPlan creates
     // every task force as before.
-    const auto ppit = pi.pp >= 0 && space_tf_rules() ? pps.find(pi.pp) : pps.end();
+    const auto ppit = pi.pp >= 0 ? pps.find(pi.pp) : pps.end();
     std::string names;
     for (size_t i = 0; i < def.task_forces.size(); ++i) {
         if (ppit != pps.end() && !def.task_forces[i].required &&
@@ -3955,9 +3950,10 @@ bool TacticalAiWorld::start(std::vector<std::string>* diagnostics) {
         // (default 2) in every mode: retail's first land skirmish commit starts two scouts and two Secure_Contestable
         // plans (SKAI_T06_LAND_RUNS §7); the config default 1 started one of each.
         gcfg.extra_goals_per_category = type->goal_set_extension_size;
-        // skai t17: Resolve may accept an old candidate again (GoalSystemConfig::reaccept_old_candidates) [H]; space only
-        // for now [port] (retail Geonosis keeps its first build plan when a Build_Refinery_Space goal outranks it).
-        gcfg.reaccept_old_candidates = w.cfg.mode == TacticalMode::Space;
+        // skai t17 / t20: Resolve may accept an old candidate again (GoalSystemConfig::reaccept_old_candidates) [H] in
+        // both tactical modes (retail Geonosis keeps its first build plan when a Build_Refinery_Space goal outranks it;
+        // the land and space goal systems share Resolve).
+        gcfg.reaccept_old_candidates = true;
         p.ctx.goals.init(w.defs, std::move(sources), &p, &p.ctx.learning, &p.ctx.templates, &w.rng.synced(), gcfg);
         p.ctx.attach(&p, [&w, &p](const std::string& eq, double& out) { return w.evaluate(p.player, eq, -1, out); });
         if (w.cfg.stagger) {  // OPT2 t01: a fixed planning phase from the player's AI ordinal (players in index order)
