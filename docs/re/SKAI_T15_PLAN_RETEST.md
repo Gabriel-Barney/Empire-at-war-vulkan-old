@@ -554,3 +554,21 @@ Port seed 1, 36000 ticks:
 Retail does activate a Destroy_Structure (15.001) at 7445 next to two Hold_Positions at 20, with 3 active goals in category 5.
 
 **Next lead:** why the port's Resolve never gets a solved Destroy_Structure proposal into category 5. Check the greedy break on the first unfundable or unactivatable candidate, the weighted phase, and the category's budget credits. Then check why the port's solve fails on Plan (free store held by the Hold_Position / SecureBuildPad plans) where retail's succeeds. The run's `resolve_goals` events give retail's full candidate lists to compare with.
+
+## Free-store members on land (skai-a, 2026-11-16) [H rule, measured results]
+
+skai-b's rule (SKAI_T22_SPACE_AI_RE Part 5): a unit handed to a task force stays a reserved free-store entry, so it can be taken at a commit. It is now on in land too: `keep_members_on_free_store_land`, dev 5a96948f + fe785f1f.
+
+**Exit test:**
+
+| AI | Port ends | Retail | Result |
+|---|---|---|---|
+| Rebel | 3/10 (median 30360) | 1/4 | pass |
+| Empire | 1/10 (34064) | 5/7 | FAIL on rate (p 0.035) |
+| Underworld | 0/10 | 1/3 | pass |
+
+**Port seed 1:**
+- Destroy_Structure now becomes active next to the Hold_Positions. The first plan starts at 17637 (retail run 171531: 7445).
+- Solve failures on Plan dropped from 205 to 4. Contrast failures now dominate: 261 for proposals, 51 at re-solve.
+
+**Next lead:** the Destroy_Structure contrast solve. The run's `resolve_goals` events show retail's 7445 proposal and its plan; compare the port's contrast lists at the same point.
