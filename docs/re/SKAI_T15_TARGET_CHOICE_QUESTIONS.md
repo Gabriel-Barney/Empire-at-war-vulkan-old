@@ -26,6 +26,14 @@ Lane skai-a, 2026-11-16. Answers go to `docs/re/SKAI_T15_TARGET_CHOICE.md`.
 
 ### Q1. Land slot 9 reachability skip for the vehicle factory
 
+**Port measurement (skai-a, 2026-11-16, temporary debug in `blocked()`):** in the port, the slot-9 test never runs for a Destroy_Structure target. Every structure target (784, 790-793) has `zone = -1` and no reachability object (`target_list.hpp` `has_reachability()`: only Region targets have one), so `blocked()` returns false at once.
+
+**Q1a, asked first:**
+- Does a land game-object target (an enemy structure, from the Enemy_Structure target list) return a reachability object from target vf+0x38 in land slot 9 (0x6b8710)? A1_READINGS §25.3 says a target without one is not skipped.
+- If it does, which zone does it use? The hint zone at the object's position, as for its Location (`SKAI_T15_TARGET_LOCATION_FORCE` §1: zone 85 for the factory), or something else?
+- Is that object cached or re-resolved? Does it differ for structures and mobile units?
+
+
 The port implements A1_READINGS §25.3: the goal is skipped when the target zone's flood set at the goal's Reachability is empty. Each zone must have zone danger 0x653e90 == 0 or ≤ the Low_Threat tolerance (GC +0x157c, shipped 1000).
 
 With six idle merc teams standing about 300 east of the factory (centres near x 5100, y 1260; the factory at (4819,1334) is in zone 85, "New Zone 86"):
