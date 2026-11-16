@@ -186,7 +186,9 @@ struct ScriptObjectState {
     bool highlighted = false, highlighted_small = false;
     bool in_limbo = false;
     bool garrison_spawn = false;
-    bool check_contested_space = false;
+    // Set_Check_Contested_Space(b) stores !b: every object starts with the bit SET (obj +0x3a2 & 0x40, initial byte 0x60;
+    // STY1 t01), so the default state reads "checking" and a saved default stays all-zero.
+    bool contested_check_off = false;
     bool capture_disabled = false;
     bool orders_locked = false;
     bool has_orders = false;          // set by an issued order, cleared by Stop
@@ -299,6 +301,10 @@ public:
     // INVULNERABLE behaviour (a tactical battle: the combat gate that drops every damage kind but 0 and 13; a TEAM
     // container passes it to its members). Unset: only the flag is stored.
     std::function<void(objects::ObjectHandle, bool on)> invulnerable_changed;
+    // STY1 t01 (docs/re/STY1_OBJECT_SETTERS_RE_ANSWERS.md §1): Prevent_Opportunity_Fire(on), after the flag is stored: the host
+    // writes the "incognito" bit (obj +0x3a1 & 0x10) on the object and its TEAM members. An edge, not a level (retail's
+    // Take_Damage clears the bit on the first hit). Unset: only the flag is stored.
+    std::function<void(objects::ObjectHandle, bool on)> opportunity_fire_changed;
     // q6 (OBJECT_SCRIPTS §10.1): Prevent_AI_Usage(on) on the owner's AI free store of the current mode (true: removed,
     // false: admitted by the normal rules); no object flag. Returns the outcome; unset: only the flag is stored.
     std::function<PreventAiResult(objects::ObjectHandle, bool on)> prevent_ai_usage;

@@ -1258,15 +1258,20 @@ void TacticalBattle::set_script_unit_control(const void* key, std::function<Scri
     script_ctl_.clear();
 }
 
+namespace {
+void merge_control(TacticalBattle::ScriptUnitControl& r, const TacticalBattle::ScriptUnitControl& c) {
+    r.no_fire = r.no_fire || c.no_fire;
+    r.loco_suspended = r.loco_suspended || c.loco_suspended;
+    r.cannot_die = r.cannot_die || c.cannot_die;
+    r.limbo = r.limbo || c.limbo;
+    r.capture_disabled = r.capture_disabled || c.capture_disabled;
+    if (c.max_speed >= 0.0f && (r.max_speed < 0.0f || c.max_speed < r.max_speed)) r.max_speed = c.max_speed;
+}
+}  // namespace
+
 TacticalBattle::ScriptUnitControl TacticalBattle::script_unit_control(objects::ObjectId id) const {
     ScriptUnitControl r;
-    for (const auto& [key, f] : script_ctls_) {
-        const ScriptUnitControl c = f(id);
-        r.no_fire = r.no_fire || c.no_fire;
-        r.loco_suspended = r.loco_suspended || c.loco_suspended;
-        r.cannot_die = r.cannot_die || c.cannot_die;
-        if (c.max_speed >= 0.0f && (r.max_speed < 0.0f || c.max_speed < r.max_speed)) r.max_speed = c.max_speed;
-    }
+    for (const auto& [key, f] : script_ctls_) merge_control(r, f(id));
     return r;
 }
 
@@ -1281,15 +1286,20 @@ void TacticalBattle::refresh_script_control() {
         const Unit& u = units_[i];
         if (!u.alive || u.retreated) continue;
         ScriptUnitControl c = script_unit_control(u.id);
-        if (u.container < containers_.size() && containers_[u.container].id != u.id) {
-            const ScriptUnitControl t = script_unit_control(containers_[u.container].id);  // the squad's Lua object
-            c.no_fire = c.no_fire || t.no_fire;
-            c.loco_suspended = c.loco_suspended || t.loco_suspended;
-            c.cannot_die = c.cannot_die || t.cannot_die;
-            if (t.max_speed >= 0.0f && (c.max_speed < 0.0f || t.max_speed < c.max_speed)) c.max_speed = t.max_speed;
-        }
+        if (u.container < containers_.size() && containers_[u.container].id != u.id)
+            merge_control(c, script_unit_control(containers_[u.container].id));  // the squad's Lua object
         script_ctl_[i] = c;
     }
+}
+
+void TacticalBattle::script_opportunity_fire(objects::ObjectId id, bool on) {
+    if (!combat_) return;
+    // Members first, then the container itself (retail 0x57f050); a container with no combat entry has no members to write.
+    for (const Unit& u : units_) {
+        if (u.container >= containers_.size() || containers_[u.container].id != id || u.id == id) continue;
+        if (u.alive && combat_->has_unit(u.id)) combat_->set_flag(u.id, tc::kUnitIncognito, on);
+    }
+    if (combat_->has_unit(id)) combat_->set_flag(id, tc::kUnitIncognito, on);
 }
 
 bool TacticalBattle::movement_locked(objects::ObjectId id) const {

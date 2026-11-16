@@ -2220,12 +2220,28 @@ int set_bool(Call& c, BoolField field, const char* count_msg, const char* type_m
 ALAMO_BOOL_SETTER(m_make_invulnerable_flag, invulnerable, "Make_Invulnerable", "boolean")
 ALAMO_BOOL_SETTER(m_set_cannot_be_killed, cannot_be_killed, "Set_Cannot_Be_Killed", "boolean")
 ALAMO_BOOL_SETTER(m_prevent_all_fire, prevent_all_fire, "Prevent_All_Fire", "boolean")
-ALAMO_BOOL_SETTER(m_prevent_opportunity_fire, prevent_opportunity_fire, "Prevent_Opportunity_Fire", "boolean")
+ALAMO_BOOL_SETTER(m_prevent_opportunity_fire_flag, prevent_opportunity_fire, "Prevent_Opportunity_Fire", "boolean")
 ALAMO_BOOL_SETTER(m_suspend_locomotor, locomotor_suspended, "Suspend_Locomotor", "bool")
 ALAMO_BOOL_SETTER(m_set_in_limbo, in_limbo, "Set_In_Limbo", "boolean")
-ALAMO_BOOL_SETTER(m_set_check_contested_space, check_contested_space, "Set_Check_Contested_Space", "boolean")
+ALAMO_BOOL_SETTER(m_set_check_contested_space_flag, contested_check_off, "Set_Check_Contested_Space", "boolean")
 ALAMO_BOOL_SETTER(m_disable_capture, capture_disabled, "Disable_Capture", "boolean")
 #undef ALAMO_BOOL_SETTER
+
+// STY1 t01: the stored flag, then the host's incognito write (ObjectBridge::opportunity_fire_changed).
+int m_prevent_opportunity_fire(Call& c) {
+    const int r = m_prevent_opportunity_fire_flag(c);
+    if (r != 0 || c.nargs != 1 || !is_bool(c, 1)) return r;
+    if (const ObjectBridge* b = bridge(c); b && b->opportunity_fire_changed) b->opportunity_fire_changed(self_object(c), to_bool(c, 1));
+    return r;
+}
+
+// Set_Check_Contested_Space(b): the bit is stored inverted (ScriptObjectState::contested_check_off).
+int m_set_check_contested_space(Call& c) {
+    const int r = m_set_check_contested_space_flag(c);
+    if (r != 0 || c.nargs != 1 || !is_bool(c, 1)) return r;
+    if (ScriptObjectState* s = edit_self(c)) s->contested_check_off = !to_bool(c, 1);
+    return r;
+}
 
 // q6 (OBJECT_SCRIPTS §10.2): the stored flag, then the host's INVULNERABLE behaviour (ObjectBridge::invulnerable_changed).
 int m_make_invulnerable(Call& c) {
@@ -3479,7 +3495,7 @@ void ObjectBridge::hash(StateHasher& h) const {
         h.str(s.hint);
         for (const bool b : {s.hidden, s.prevent_ai_usage, s.prevent_all_fire, s.prevent_opportunity_fire, s.invulnerable,
                              s.cannot_be_killed, s.locomotor_suspended, s.highlighted, s.highlighted_small, s.in_limbo,
-                             s.garrison_spawn, s.check_contested_space, s.capture_disabled, s.orders_locked, s.has_orders,
+                             s.garrison_spawn, s.contested_check_off, s.capture_disabled, s.orders_locked, s.has_orders,
                              s.animation_loop})
             h.boolean(b);
         h.u8(static_cast<uint8_t>(s.selectable));
@@ -3548,7 +3564,7 @@ template <class S>
 auto bridge_flags(S& s) {
     return std::array{&s.hidden,           &s.prevent_ai_usage,    &s.prevent_all_fire, &s.prevent_opportunity_fire,
                       &s.invulnerable,     &s.cannot_be_killed,    &s.locomotor_suspended, &s.highlighted,
-                      &s.highlighted_small, &s.in_limbo,           &s.garrison_spawn,   &s.check_contested_space,
+                      &s.highlighted_small, &s.in_limbo,           &s.garrison_spawn,   &s.contested_check_off,
                       &s.capture_disabled, &s.orders_locked,       &s.has_orders,       &s.animation_loop};
 }
 }  // namespace

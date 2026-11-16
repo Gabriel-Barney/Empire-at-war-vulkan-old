@@ -2018,6 +2018,13 @@ void test_oi_victory() {
     w6.sim.set_destroyed(rE, true);
     CHECK(!w6.sim.resolve_battle_super_weapon(rC, pEmpire));
     CHECK(w6.sim.victory_claims().size() == 1 && w6.sim.victory_claims()[0].type == 6 && w6.sim.victory_claims()[0].player == pEmpire);
+    {  // STY1 t01 (Set_Check_Contested_Space): a non-friendly visible fleet in orbit refuses the shot unless the check is off
+        OiWorld wc({{pEmpire, rA, tSB1}, {pEmpire, rC, tDeathStar}, {pUnder, rE, tSB1}});
+        CHECK(!wc.sim.contested_space(rC, pEmpire));  // only its own fleet in orbit
+        OiWorld wd({{pEmpire, rA, tSB1}, {pEmpire, rC, tDeathStar}, {pUnder, rC, tDeathStar}});
+        CHECK(wd.sim.contested_space(rC, pEmpire));
+        CHECK(!wd.sim.super_weapon_destroy_planet(rC, pEmpire) && !wd.sim.planets()[rC].destroyed);
+    }
     // 7: planet destruction with the victim faction's leader on it; 8: no enemy leader on any planet.
     // TSW_PLANET_DESTROY §6: victim = the planet's owner; the leader must be a team MEMBER (Company_Units) of a surface
     // object - here Faction_Leader = the infantry unit inside the Company team.
@@ -2093,7 +2100,10 @@ void test_tsw_planet_destroy() {
         CHECK(owner == pUnder && w.store.alive(sb) && !s.planets()[rC].surface.empty() && fleets_ok(s, rC));
         bool hit = true;
         if (pass == 0) CHECK(s.tsw_destroy_planet(rC, pEmpire, &hit) && !hit);
-        if (pass == 1) CHECK(s.super_weapon_destroy_planet(rC, pEmpire));
+        if (pass == 1) {  // an enemy frigate is in orbit: refused with the default check, fires once the script cleared it
+            CHECK(!s.super_weapon_destroy_planet(rC, pEmpire) && !s.planets()[rC].destroyed);
+            CHECK(s.super_weapon_destroy_planet(rC, pEmpire, false));
+        }
         if (pass == 2) CHECK(s.planet_destroy(rC, pEmpire));
         CHECK(s.planets()[rC].destroyed && s.planets()[rC].surface.empty());
         std::vector<GalacticEvent> ev;
@@ -2106,7 +2116,7 @@ void test_tsw_planet_destroy() {
             CHECK(fleets_ok(s, rC) && store_alive_type(s, tDeathStar));
             CHECK(w.store.alive(sb) && s.planets()[rC].starbase == sb && s.planets()[rC].owner == owner);
             CHECK(s.victory_claims().empty());
-            CHECK(!s.tsw_destroy_planet(rC, pEmpire) && !s.super_weapon_destroy_planet(rC, pEmpire));  // once
+            CHECK(!s.tsw_destroy_planet(rC, pEmpire) && !s.super_weapon_destroy_planet(rC, pEmpire, false));  // once
         } else {
             CHECK(s.fleets_at(rC, pEmpire).empty() && s.fleets_at(rC, pUnder).empty() && !store_alive_type(s, tDeathStar));
             CHECK(!w.store.alive(sb) && s.planets()[rC].owner == s.neutral_player());

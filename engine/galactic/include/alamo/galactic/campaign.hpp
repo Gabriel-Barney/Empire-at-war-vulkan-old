@@ -1068,7 +1068,11 @@ public:
     // Planet_Destruction_Ability (0x707670): claim 7 (countdown 30) when super_weapon_leader_hit(), then
     // planet_destroy_core() - the Death Star's own fleet, the starbase and the owner stay (TSW_PLANET_DESTROY §5).
     // False when nothing was destroyed.
-    bool super_weapon_destroy_planet(PlanetIndex planet, int32_t attacker);
+    // STY1 t01 (docs/re/STY1_OBJECT_SETTERS_RE_ANSWERS.md §3): `check_contested_space` is the shooter's obj +0x3a2 & 0x40 (Lua
+    // Set_Check_Contested_Space; set by default): while set, the shot is refused (false, nothing destroyed) when any live,
+    // non-hidden fleet in the planet's orbit is neither the attacker's nor an ally's.
+    bool super_weapon_destroy_planet(PlanetIndex planet, int32_t attacker, bool check_contested_space = true);
+    bool contested_space(PlanetIndex planet, int32_t attacker) const;
     std::span<const VictoryClaim> victory_claims() const { return claims_; }
     void claim_victory(int32_t player, uint8_t type, int32_t countdown);
     // story t11: the galactic plot sets' ENABLE_VICTORY / VICTORY rewards on the galactic monitor (BT §3.1a item 3, the

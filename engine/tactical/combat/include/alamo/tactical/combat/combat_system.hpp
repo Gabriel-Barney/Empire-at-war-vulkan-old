@@ -861,7 +861,13 @@ enum UnitFlag : uint32_t {
     // serviced, as for a stunned unit; orders and targets are kept, the recharge still elapses. Mirrored by the host from
     // the script bridge before every tick; derived state, not hashed.
     kUnitScriptNoFire = 1u << 28,
+    // STY1 t01 (docs/re/STY1_OBJECT_SETTERS_RE_ANSWERS.md §4): Lua Set_In_Limbo - obj +0x3a7 written alone (no model hide, no
+    // weapon suspend, no list removal). Wherever retail reads +0x3a7 as "contained / hidden" the port reads kUnitContained
+    // (garrisoned or limbo): no damage, not a candidate / valid target / attack order target, no collision, no infection. Set
+    // by the host from the script bridge before every tick; saved and hashed with the other flags.
+    kUnitInLimbo = 1u << 29,
 };
+inline constexpr uint32_t kUnitContained = kUnitGarrisoned | kUnitInLimbo;
 // Mirrors the host rewrites before every tick (left out of hash_units).
 inline constexpr uint32_t kUnitHostMirrorFlags = kUnitFighterIdle | kUnitHoverRest | kUnitRocketAttack | kUnitScanQuery |
                                                  kUnitMoving | kUnitAttackClip | kUnitHoverRaised | kUnitScriptNoFire;

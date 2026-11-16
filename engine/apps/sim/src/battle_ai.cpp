@@ -203,15 +203,21 @@ BattleAi::BattleAi(TacticalBattle& battle, TacticalMode& mode, SimHost& host, co
             c.loco_suspended = s->locomotor_suspended;
             c.cannot_die = s->cannot_be_killed;
             c.max_speed = s->max_speed_override;
+            c.limbo = s->in_limbo;
+            c.capture_disabled = s->capture_disabled;
         }
         return c;
     });
+
     // OI host (L1/S4 wave 1 integrator ask 2): Change_Owner of the AI VMs goes through the battle (store + TreeSet::set_owner
     // + the battle systems), as the story VMs' bridge (CampaignBattles::change_owner); before, the binding set the store only.
     TacticalMode* owner_mode = &mode;
     br.change_owner = [bt, owner_mode](objects::ObjectHandle o, int32_t owner) { return bt->script_change_owner(*owner_mode, o, owner); };
     br.garrison_spawn_changed = [bt, owner_mode](objects::ObjectHandle o, bool on) {  // Lua Set_Garrison_Spawn
         if (owner_mode->primary().alive(o)) bt->set_garrison_spawn(owner_mode->primary().id(o), on);
+    };
+    br.opportunity_fire_changed = [bt, owner_mode](objects::ObjectHandle o, bool on) {  // Lua Prevent_Opportunity_Fire
+        if (owner_mode->primary().alive(o)) bt->script_opportunity_fire(owner_mode->primary().id(o), on);
     };
     // REMAINING_GAPS §4.2: movement threat mode reads the AI threat grid (point danger 0x653ff0) for the order's owner.
     const at::TacticalAiWorld* threat_world = world_.get();

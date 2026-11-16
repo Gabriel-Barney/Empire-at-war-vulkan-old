@@ -509,9 +509,20 @@ bool GalacticSim::super_weapon_leader_hit(PlanetIndex planet) const {
     return false;
 }
 
-bool GalacticSim::super_weapon_destroy_planet(PlanetIndex planet, int32_t attacker) {
+bool GalacticSim::contested_space(PlanetIndex planet, int32_t attacker) const {
+    if (!valid_planet(planet)) return false;
+    for (uint32_t f : planets_[planet].orbit) {
+        if (!fleets_[f].alive || hidden(fleets_[f].object)) continue;
+        const int32_t o = fleets_[f].owner;
+        if (o != attacker && relation(o, attacker) != Relation::Ally) return true;  // one non-friendly visible fleet is enough
+    }
+    return false;
+}
+
+bool GalacticSim::super_weapon_destroy_planet(PlanetIndex planet, int32_t attacker, bool check_contested_space) {
     // 0x707670: leader test (no name list) -> claim 7, then the shared routine only (+ the visual refresh, presentation).
     if (!valid_planet(planet) || planets_[planet].destroyed) return false;
+    if (check_contested_space && contested_space(planet, attacker)) return false;  // STY1 t01: refused, nothing destroyed
     if (valid_player(attacker) && super_weapon_leader_hit(planet)) claim_victory(attacker, 7, 30);
     return planet_destroy_core(planet, attacker);
 }
