@@ -4569,7 +4569,7 @@ the same for every Path Around (kinds 3, 4, 7); kind 3 only gives D = r_u + 40 a
    - u's rectangle at Q: the **hard** half extents (`0x396850`, no + 1), axis along Q − E (u's facing when zero).
      Queried against the tracker argument: **null for the first goal** → the game's layer-0x10 object grid (vf
      +0x238 → `0x5387f0` → `0x5d7ee0`) [M: the layer]; for goals 2…11 the tracker of the previous goal's window
-     (`0x677340`, the grown obstacle shapes of §1.5.1 item 4a) is passed [H for the argument, M for the effect].
+     (`0x677340`, the grown obstacle shapes of §1.5.1 item 4a) is passed [H]: the goal loop keeps the tracker of the goal it last tried, and with a tracker the query goes to its grown shapes only (`0x6b4cb0`), not to the layer; a candidate rejected there is not an accepted goal and does not count toward the 11 (mov2 t05, `MOV2_T05_TERRAIN_STOPS.md`, 2026-11-16).
    - Each object met is judged by `0x67d580`(request, object, **1**): rejected when it returns 0 (obstacle).
      With argument 1 the relation mask is the goal-spot mask +0x3c = **0x10**, so: never an obstacle: u, anything
      u can crush, `0x509370` false, a pair the class table `0x505020` exempts; always an obstacle: the forced id
