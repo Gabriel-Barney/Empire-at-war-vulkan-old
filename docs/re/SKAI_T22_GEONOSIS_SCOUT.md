@@ -45,6 +45,7 @@ because the fogged Empire starbase gives `Distance_To_Nearest_Enemy_Starbase` = 
 
 ## Open question (needs a retail probe)
 Which cell does retail's first `Space_Scout` take on Geonosis, and with what desire for CELL_0_0 / 0_1 / 0_2?
-The q2_traces Lua kit records no tactical plan starts: a probe that logs the SpaceScout plan's `AITarget` (name and
-frame) and `EvaluatePerception("Space_Area_Needs_Scouting", PlayerObject, <cell>)` for the five western cells on the
-first proposals would settle whether retail's candidate order, the desire or the Resolve pick differs.
+Kit (prepared 2026-11-16, not run yet): the q2_traces space plan hooks (`tools/probe_mod/q2_traces/README.md`, "Space
+skirmish plan hooks"; `run_skirmish.cmd -LuaProbe`, three runs; `analysis/space_scout.py`). Each retail Space_Scout start
+records its cell (fitted from three reference distances), its `Space_Area_Needs_Scouting` desire and the two starbase
+distance terms; the pad, refinery and unit-build plans are recorded too, for the build count.

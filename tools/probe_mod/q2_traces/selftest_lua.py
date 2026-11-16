@@ -466,13 +466,37 @@ function Q2S_MakeForce(utype)
 	f.Release_Forces = function() end
 	f.Get_Unit_Table = function() return units end
 	f.Get_Force_Count = function() return table.getn(units) end
+	f.Move_To = function() return Q2S_Block(2, true) end
+	f.Explore_Area = function() return Q2S_Block(2, true) end
 	return f
+end
+-- skai t22 scout mode: AITarget is a space cell (no game object) whose Get_Distance(o) is 1000 + o's id; the probe's
+-- reference objects come from Get_Space_Station / Find_First_Object; Space_Area_Needs_Scouting evaluates to 10.
+function Try_Ability() end
+function DebugMessage() end
+function Q2S_ScoutEval(eq, player, target)
+	if eq == "Space_Area_Needs_Scouting" and target ~= nil then return 10 end
+	if eq == "Distance_To_Nearest_Enemy_Starbase" then return 9.9999998e17 end
+	return 0
+end
+function Q2S_First(name)
+	if name == "Skirmish_Empire_Star_Base_1" then return Q2S_Obj("SKIRMISH_EMPIRE_STAR_BASE_1", 902, function() return true end) end
+	if name == "Mineral_Extractor_Pad" then return Q2S_Obj("MINERAL_EXTRACTOR_PAD", 903, function() return true end) end
+	return nil
 end
 function Q2S_Attach()
 	for _, tf in ipairs(Q2S_TFS) do getfenv(0)[tf] = Q2S_MakeForce(Q2S_UNIT[tf]) end
 	PlayerObject = Q2S_Players.Rebel
 	Target = nil
-	if Q2S_HAS_TARGET then
+	if Q2S_SCOUT then
+		EvaluatePerception = Q2S_ScoutEval
+		Find_First_Object = Q2S_First
+		local own = Q2S_Obj("SKIRMISH_REBEL_STAR_BASE_2", 901, function() return true end)
+		PlayerObject.Get_Space_Station = function() return own end
+		AITarget = setmetatable({ Get_Game_Object = function() return nil end, Is_Valid = function() return true end,
+			Get_Distance = function(o) return 1000 + o.Get_Object_ID() end },
+			{ __tostring = function() return "CELL_0_2" end })
+	elseif Q2S_HAS_TARGET then
 		local bar = Q2S_Obj("E_GROUND_BARRACKS", 1502, function() return true end)
 		AITarget = setmetatable({ Get_Game_Object = function() return bar end },
 			{ __tostring = function() return "E Ground Barracks" end })
@@ -539,7 +563,16 @@ PLANS3 = [('LandMode/BurnUnitsLand.lua', 'Burn_Units_Land', ['MainForce'], False
           ('LandMode/BuildEconStructure.lua', 'Build_Econ_Structure', ['MainForce'], False, PRODUCE,
            'RESULT exits=1 attacks=0 category=Build_Econ_Structure', 'produce'),
           ('LandMode/TechUpgradeEmergency.lua', 'Tech_Upgrade_Emergency', ['ReserveForce'], False, PRODUCE,
-           'RESULT exits=1 attacks=0 category=Tech_Upgrade_Emergency', 'produce')]
+           'RESULT exits=1 attacks=0 category=Tech_Upgrade_Emergency', 'produce'),
+          # skai t22: Space_Scout through its thread (Produce_Force, Move_To, Explore_Area, ScriptExit); the other space
+          # hooks load
+          ('SpaceMode/SpaceScout.lua', 'Space_Scout', ['MainForce'], False,
+           {'LOAD': 1, 'PSTART': 1, 'PBLOCK': 3, 'PEXIT': 1}, 'RESULT exits=1 attacks=0 category=Space_Scout', 'scout')]
+for _f, _p, _t in [('MoveToLocationRush', 'Secure_Build_Pad_Space', ['MainForce', 'EscortForce']),
+                   ('BuildRefinerySpace', 'Build_Refinery_Space', ['MainForce']),
+                   ('TacticalMultiplayerBuildSpaceUnitsGeneric', 'Tactical_Multiplayer_Build_Space_Units_Generic',
+                    ['ReserveForce'])]:
+    PLANS3.append(('SpaceMode/%s.lua' % _f, _p, _t, False, {'LOAD': 1}, 'RESULT loaded category=' + _p, 'load'))
 for _f, _p, _t in [('TacticalMultiplayerBuildLandUnitsGeneric', 'Tactical_Multiplayer_Build_Land_Units_Generic',
                     ['ReserveForce']),
                    ('BuildInfantryEmergency', 'Tactical_Multiplayer_Build_Infantry_Emergency', ['ReserveForce']),
@@ -778,7 +811,8 @@ def main():
             ', '.join(lua_str(t) for t in tfs), 'true' if has_target else 'false',
             ', '.join('%s = %s' % (t, lua_str('REBEL_INFANTRY_SQUAD')) for t in tfs),
             'true' if mode == 'burn_nil' else 'false', 'true' if mode == 'load' else 'false') +
-            'Q2S_LATE_BIND = %s\n' % ('true' if mode == 'burn_nil' else 'false') + PLAN3)
+            'Q2S_LATE_BIND = %s\n' % ('true' if mode == 'burn_nil' else 'false') +
+            'Q2S_SCOUT = %s\n' % ('true' if mode == 'scout' else 'false') + PLAN3)
         if mode in ('burn_nil', 'load', 'produce'):
             plan = plan + '_' + mode
         lines, found = run_harness(lua, 'plan_' + plan, os.path.join(MOD, 'AI', *fname.split('/')), body)
@@ -804,7 +838,14 @@ def main():
                    for x in fnear] == [('InBase', 'nil', cc, cc, '4'), (None, 'nil', cc, cc, '3')] and
                   all(x.get('fn_count') == '1' for x in fnear),
                   '%s: FNEAR nil twice, the probe reads find the CC %s' % (plan, fnear))
-        if mode in ('load', 'produce', 'burn_nil'):
+        if mode == 'scout':
+            st = [x for k, x in d if k == 'PSTART']
+            check(len(st) == 1 and st[0].get('target') == 'CELL_0_2' and st[0].get('d') == '10' and
+                  st[0].get('des') == '9.9999998e+17' and st[0].get('own') == 'SKIRMISH_REBEL_STAR_BASE_2#901:1901' and
+                  st[0].get('emp') == 'SKIRMISH_EMPIRE_STAR_BASE_1#902:1902' and
+                  st[0].get('pad') == 'MINERAL_EXTRACTOR_PAD#903:1903' and 'tgt' not in st[0],
+                  '%s: PSTART names the cell, its desire and three reference distances %s' % (plan, st))
+        elif mode in ('load', 'produce', 'burn_nil'):
             pass
         elif has_target:
             check(all(x.get('target') == 'E_Ground_Barracks' and x.get('tgt') == 'E_GROUND_BARRACKS#1502'

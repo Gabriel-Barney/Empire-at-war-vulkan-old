@@ -66,8 +66,18 @@ PLANS = [
     # while no pad is captured; the Underworld builds MDU items.
     ('LandMode/BobaFettFlameInfantry', 'Flame_Infantry', ['MainForce']),
     ('LandMode/AI_Plan_ExpansionGeneric_BuildMDUItem', 'Build_MDU_Item', ['MainForce']),
+    # skai t22 (2026-11-16, docs/re/SKAI_T22_GEONOSIS_SCOUT.md): the space skirmish plans on Geonosis. Which cell the
+    # Rebel AI's first Space_Scout takes (the port takes CELL_0_0 next to the Empire station, retail's squadrons go to
+    # CELL_0_2 first) and with what desire; the pad, refinery and unit-build plans for the build count (retail 19.5
+    # builds per run, port 29.4).
+    ('SpaceMode/SpaceScout', 'Space_Scout', ['MainForce']),
+    ('SpaceMode/MoveToLocationRush', 'Secure_Build_Pad_Space', ['MainForce', 'EscortForce']),
+    ('SpaceMode/BuildRefinerySpace', 'Build_Refinery_Space', ['MainForce']),
+    ('SpaceMode/TacticalMultiplayerBuildSpaceUnitsGeneric', 'Tactical_Multiplayer_Build_Space_Units_Generic',
+     ['ReserveForce']),
 ]
 LAND_PREFIX = 'LandMode/'
+SPACE_PREFIX = 'SpaceMode/'
 # Plans whose Find_Nearest calls are recorded (FNEAR).
 FNEAR_PLANS = ('LandMode/BurnUnitsLand',)
 
@@ -553,6 +563,57 @@ function Q2P_Perc()
 end
 '''
 
+# Space plans (skai t22): the land target functions, with the land perception read replaced by a space one.
+PERC_SPACE = r'''-- skai t22: perception values at each plan start (PSTART only), only equations the space goal system reads and only
+-- on PlayerObject (the plan's own AI player, never the idle human: EvaluatePerception on a player without an AI is a
+-- binding error that ends the script, 84c874a1): burn = Should_Burn_Units_Space, def = Allowed_As_Defender_Space.
+-- A Space_Scout start adds its target cell, read as the shipped TurboAttackLocation reads its Tactical_Location target
+-- (EvaluatePerception(name, PlayerObject, AITarget)): d = Space_Area_Needs_Scouting (the goal's own function, no
+-- learning terms), dfs / des = Distance_To_Nearest_Friendly / Enemy_Starbase (1e18 = none seen). The cell itself is
+-- named by its distance to three objects that stand still, each as <label>=<type>#<object id>:<distance> (the
+-- analyser places them from the run's trace.q2t, whose object ids are the same):
+-- own = PlayerObject.Get_Space_Station(), emp = Find_First_Object("Skirmish_Empire_Star_Base_1") (the idle human's
+-- station, never upgraded), pad = Find_First_Object("Mineral_Extractor_Pad"). Get_Distance is called only on an
+-- object that passed TestValid. ? = the call returned nothing.
+function Q2P_RefDist(label, o)
+	if o == nil then
+		return " " .. label .. "=nil"
+	end
+	local okv, valid = pcall(TestValid, o)
+	if not okv or not valid then
+		return " " .. label .. "=dead"
+	end
+	return " " .. label .. "=" .. Q2P_ObjId(o) .. ":" .. Q2P_Str(function() return AITarget.Get_Distance(o) end)
+end
+
+function Q2P_Perc()
+	local s = " burn=" .. Q2P_Str(function() return EvaluatePerception("Should_Burn_Units_Space", PlayerObject) end) ..
+		" def=" .. Q2P_Str(function() return EvaluatePerception("Allowed_As_Defender_Space", PlayerObject) end)
+	if Q2P_PLAN == "Space_Scout" and AITarget ~= nil then
+		s = s .. " d=" .. Q2P_Str(function() return EvaluatePerception("Space_Area_Needs_Scouting", PlayerObject, AITarget) end) ..
+			" dfs=" .. Q2P_Str(function() return EvaluatePerception("Distance_To_Nearest_Friendly_Starbase", PlayerObject, AITarget) end) ..
+			" des=" .. Q2P_Str(function() return EvaluatePerception("Distance_To_Nearest_Enemy_Starbase", PlayerObject, AITarget) end)
+		local ok, own = pcall(function() return PlayerObject.Get_Space_Station() end)
+		if not ok then
+			own = nil
+		end
+		s = s .. Q2P_RefDist("own", own)
+		ok, own = pcall(Find_First_Object, "Skirmish_Empire_Star_Base_1")
+		if not ok then
+			own = nil
+		end
+		s = s .. Q2P_RefDist("emp", own)
+		ok, own = pcall(Find_First_Object, "Mineral_Extractor_Pad")
+		if not ok then
+			own = nil
+		end
+		s = s .. Q2P_RefDist("pad", own)
+	end
+	return s
+end
+'''
+TARGET_SPACE = TARGET_LAND[:TARGET_LAND.index('-- skai t12 run 3')] + PERC_SPACE
+
 THREAD = r'''Q2P_Thread_@TF@ = @TF@_Thread
 function @TF@_Thread(...)
 	Q2P_Try("PSTART", Q2P_Begin, "@TF@")
@@ -596,7 +657,8 @@ def block(name, plan, tfs, text):
             ('@THREADS@', each(THREAD)),
             ('@FAILS@', ''.join(FAIL.replace('@TF@', tf) for tf in tfs
                                 if re.search(r'(?m)^function %s_Production_Failed\(' % tf, text))),
-            ('@TARGET_BODY@', TARGET_LAND if name.startswith(LAND_PREFIX) else TARGET_GALACTIC),
+            ('@TARGET_BODY@', TARGET_LAND if name.startswith(LAND_PREFIX) else
+             TARGET_SPACE if name.startswith(SPACE_PREFIX) else TARGET_GALACTIC),
             ('@FNEAR@', FNEAR if name in FNEAR_PLANS else ''),
             ('@UPPER@', name.upper().replace('/', chr(92))), ('@PLAN@', plan), ('@TFS@', ','.join(tfs)),
             ('@ONE@', tfs[0] if len(tfs) == 1 else '')):
