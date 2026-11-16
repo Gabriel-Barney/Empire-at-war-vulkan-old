@@ -1,6 +1,7 @@
 # skai t22: early Rebel approach on Geonosis (space skirmish) — trace evidence
 
-Status: open (2026-11-16, lane skai-b, port at dev dc3afe62). Needs retail plan-level evidence (below).
+Status: open (2026-11-16, lane skai-b). Retail plan records taken 2026-11-16 (section "Retail plan records"); RE questions in
+`docs/re/SKAI_T22_RE_QUESTIONS.md`.
 
 ## Symptom
 `geonosis_skirmish` over 10 seeds: `combat.damage_taken[Empire]` port 138 vs retail 31 (allowed 99),
@@ -49,3 +50,31 @@ Kit (prepared 2026-11-16, not run yet): the q2_traces space plan hooks (`tools/p
 skirmish plan hooks"; `run_skirmish.cmd -LuaProbe`, three runs; `analysis/space_scout.py`). Each retail Space_Scout start
 records its cell (fitted from three reference distances), its `Space_Area_Needs_Scouting` desire and the two starbase
 distance terms; the pad, refinery and unit-build plans are recorded too, for the build count.
+
+## Retail plan records (2026-11-16, kit dev ecd8cdbf) [H, probe]
+Runs `20261116-132329`, `-132904`, `-133417` (q2_traces `run_skirmish.cmd -LuaProbe -NonInteractive`, Geonosis, idle
+Empire, Rebellion Medium AI, 5400 ticks, all `ticks_reached`). Records of the Rebel AI's Geonosis plans (own station
+`SKIRMISH_REBEL_STAR_BASE_*`; the main-menu attract battle's records are left out). `tostring(AITarget)` names the cell.
+
+| | run 1 | run 2 | run 3 | port (10 seeds, dc3afe62) |
+|---|---|---|---|---|
+| Space_Scout plan starts | 75 | 76 | 82 | 10.8 per run |
+| first scout | CELL_0_2 at 4.5 s | CELL_0_0 at 2.3 s | CELL_0_1 at 2.3 s | CELL_3_3 5, CELL_0_2 3, CELL_0_0 1, CELL_4_3 1 |
+| scouts at CELL_0_0 / 0_1 / 0_2 | 1 / 0 / 5 | 8 / 2 / 9 | 13 / 5 / 4 | 0.9 / 0.1 / 0.9 per run |
+| Secure_Build_Pad_Space starts (all players, 3 runs: 29 / 32 / 26) | | | | 5.2 per run |
+| Tactical_Multiplayer_Build_Space_Units_Generic starts | 5 | 5 | 5 | 2.9 per run |
+| Build_Refinery_Space starts | 0 | 0 | 0 | 4.0 per run |
+
+- **Scout plans are short-lived.** One plan instance starts a new Space_Scout every 3.4-6.7 s (about 100-200 frames;
+  the six pooled instances together every ~2 s), each with a new cell, and every start reports `prev=none` (the run before
+  left no end record). Port scout plans run about 1000 frames (seed 2: plan 6 from frame 1071 to 2156). The desire is
+  10 for nearly every pick (`d=10.0` / `9.99`; a few 7.5, 9.4, 5.4): the same tie the port sees. So retail scouts the
+  western cells too (CELL_0_0 up to 13 times a run), but no scout lives long enough to fly there.
+- **The pre-placed start stations are not found by `Distance_To_Nearest_*_Starbase`.** `dfs` = 1e18 on all 112
+  records while the AI's station is the start `SKIRMISH_REBEL_STAR_BASE_1`, and a real distance on all 121 records once
+  the upgrade made `SKIRMISH_REBEL_STAR_BASE_2` (a new object, from 85.2 s in all three runs). `des` (the idle Empire's
+  start station, never replaced) is 1e18 throughout. The port finds both (its term 1 gives desire 15 to the Rebel home
+  cells at frame 69; retail never shows 15 on Geonosis).
+- **Limit of the records:** no space plan recorded a `PBLOCK`, `PEXIT` or `PDONE` (not even the unit-build plan, whose
+  units are built), so the probe's BlockOnCommand / ScriptExit wraps do not take effect in the space scripts, and how
+  each plan ended is not recorded; `prev=none` only says no end record came before the next start.
