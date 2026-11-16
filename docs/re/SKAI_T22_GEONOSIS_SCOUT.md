@@ -1,6 +1,6 @@
 # skai t22: early Rebel approach on Geonosis (space skirmish) — trace evidence
 
-Status: open (2026-11-16, lane skai-b). Retail plan records taken 2026-11-16 (section "Retail plan records"; the hooks changed the AI's space play, so only their engine readings count); RE questions in
+Status: open (2026-11-16, lane skai-b; start-station rule landed, residual in the last section). Retail plan records taken 2026-11-16 (section "Retail plan records"; the hooks changed the AI's space play, so only their engine readings count); RE questions in
 `docs/re/SKAI_T22_RE_QUESTIONS.md`.
 
 ## Symptom
@@ -86,3 +86,23 @@ Empire, Rebellion Medium AI, 5400 ticks, all `ticks_reached`). Records of the Re
 - **Limit of the records:** no space plan recorded a `PBLOCK`, `PEXIT` or `PDONE` (not even the unit-build plan, whose
   units are built), so the probe's BlockOnCommand / ScriptExit wraps do not take effect in the space scripts, and how
   each plan ended is not recorded; `prev=none` only says no end record came before the next start.
+
+## Port rule from the RE answer, and what is left (2026-11-16)
+`SKAI_T22_SPACE_AI_RE.md` Q1.1 [H]: retail creates each space skirmish start station into the threat grid that the
+skirmish start then deletes, so the station is out of every grid query all battle (the upgraded station is not). The
+port now leaves the team-marker start station out of the grid in space skirmishes (`PHASE4.md`, skai t22 line). This
+matches the probe's `dfs` / `des` = 1e18 for the start stations, a reading the hooks cannot have changed.
+
+`geonosis_skirmish`, 10 seeds, against the 8 unprobed retail runs: FAIL 3 / PASS 16 before, FAIL 1 / PASS 18 after.
+`ai.build_count[Rebel]` 29.4 -> 27.2 (retail 19.5) and `outcome.units_final[Rebel]` 38.3 -> 34.7 (29) now pass;
+`combat.damage_taken[Empire]` 138 -> 183 (retail 31) still fails, `combat.first_shot_frame` 1286 (retail 2187).
+
+Residual: with the Rebel home cells no longer at desire 15 (`dfs` is 1e18 now, as in retail), the first Space_Scout at
+frame 69 takes CELL_0_0 in 9/10 seeds, the first of the cells tied at 10 in proposal order. Retail's first scout (a
+`PSTART` reading, taken before any block, so not hook-affected) is CELL_0_2, CELL_0_0 and CELL_0_1 in the three probed
+runs: the same tie, but not always the first cell. The retail desires differ between picks only by float noise that
+follows the pick time (`d` = 10.000000298 at 4.5 s in two runs on different cells), so the tie is real in retail too;
+which rule picks among the tied cells (proposal order per pass, the weighted random phase of Resolve, or a
+`TimeLastSeen` difference of the cells the start squadrons already see) is not settled. A scout at CELL_0_0 sees the
+Empire station and TIEs, and the free store's `Find_Nearest` attack-moves follow (port `fs order` to (-3155,-2530) from
+frame 1442-1946 in 7/10 seeds).

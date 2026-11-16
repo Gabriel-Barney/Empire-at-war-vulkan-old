@@ -490,6 +490,10 @@ void TacticalBattle::bt_battle_end() {
 
 // ---- battle host follow-up: TEAM containers (REMAINING_GAPS §3.4), landing reinforcement points (§3.3) --------------
 
+bool TacticalBattle::outside_threat_grid(objects::ObjectId id) const {
+    return std::binary_search(bt_grid_stale_.begin(), bt_grid_stale_.end(), id);
+}
+
 std::string_view TacticalBattle::map_hint(objects::ObjectId id) const {
     const auto it = std::lower_bound(map_hints_.begin(), map_hints_.end(), id,
                                      [](const std::pair<objects::ObjectId, std::string>& e, objects::ObjectId v) { return e.first < v; });
@@ -1015,6 +1019,18 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
         if (it == map_hints_.end() || it->first != id) map_hints_.insert(it, {id, p.hint});
     };
     const bool skirmish = skirmish_land() || skirmish_map();
+    // skai t22 (SKAI_T22_SPACE_AI_RE Q1.1 [H]): in a space skirmish the team-marker swap (0x295cf0) creates the start
+    // station before the skirmish start (0xeed80) deletes and rebuilds the threat grid, so it never enters the new one.
+    // [port] space only: whether the land start does the same is not read (land mode's grid reset is not traced).
+    bt_grid_stale_.clear();
+    auto note_stale = [&](const terrain::ObjectPlacement& p, objects::ObjectHandle h) {
+        const size_t pi = static_cast<size_t>(&p - map_.objects.data());
+        if (!space_ || !skirmish_map() || pi >= bt_team_swap_.size() || bt_team_swap_[pi] == 0 || !mode.primary().exists(h))
+            return;
+        const objects::ObjectId id = mode.primary().id(h);
+        const auto it = std::lower_bound(bt_grid_stale_.begin(), bt_grid_stale_.end(), id);
+        if (it == bt_grid_stale_.end() || *it != id) bt_grid_stale_.insert(it, id);
+    };
     for (const terrain::ObjectPlacement& pl : map_.objects) {
         // bkg3 b0028: a skirmish's team-marker structures and its map placements with byte 0 spawn nothing from their
         // hangar lists ([port] campaign / story maps keep spawning on: their placement byte is not read yet).
@@ -1087,6 +1103,7 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
             own_obstacles(pl, t, placed);
             note_pad(pl, placed);
             if (!picked) note_hint(pl, placed);
+            note_stale(pl, placed);
             // a1f t07: a SELECTABLE one (Secondary_Abandoned_Sensor: Tactical_Health 700, Structure, Neutral at start) is a
             // combat object too, so Destroy_Structure / attack orders can kill it; whatever its map owner (the Is_Neutral
             // player's objects are skipped by the target scan, TACTICAL_COMBAT §2.2). [port] a third party: never decides
@@ -1106,6 +1123,7 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
             own_obstacles(pl, t, h);
             note_pad(pl, h);
             if (!picked) note_hint(pl, h);
+            note_stale(pl, h);
             if (!bt_owner_neutral(owner)) bt_adopt_built(mode, h, owner, pl.health_fraction, &rng, true);
             continue;
         }
@@ -1113,6 +1131,7 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
         own_obstacles(pl, t, h);
         note_pad(pl, h);
         if (!picked) note_hint(pl, h);
+        note_stale(pl, h);
         if (kMarker != objects::kNoBehavior && types.has_behavior(t, objects::BehaviorSet::Union, kMarker) && owner >= 0) {
             MapMarker m;
             m.id = mode.primary().exists(h) ? mode.primary().id(h) : objects::kNoObjectId;
