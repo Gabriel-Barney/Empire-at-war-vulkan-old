@@ -5,7 +5,9 @@ without a console window, built by build_msvc.cmd), the Command Center launcher 
 launcher/target/release, built by build_launcher.cmd; it finds alamo_game.exe next to itself),
 tools/testbuild/CHANGES.txt and THIRD_PARTY_NOTICES.txt (the license of every third-party component in the zip, read
 from toolchain/ and the launcher's Rust crates, plus where to get the exact FFmpeg source and build options the LGPL
-asks for).
+asks for), and fxc/fxc.exe + fxc/d3dcompiler_47.dll from the toolchain's Windows SDK (Gabriel, 2026-11-16, docs/DECISIONS.md
+"fxc ships in test builds"; test builds only): alamo_game and alamo_mod_check compile a mounted mod's .fx sources with them
+(modc t36, docs/MODS.md 4.1).
 
 Usage (from the project root; tools/testbuild/package_testbuild.cmd wraps it):
   python -I tools/testbuild/package_testbuild.py [--build-dir build-msvc] [--name NAME] [--smoke] [--allow-dirty]
@@ -49,6 +51,8 @@ LAUNCHER = ROOT / "launcher"
 LAUNCHER_BIN = LAUNCHER / "target" / "release"
 # Command Center (docs/DECISIONS.md, 2026-11-13). No Valve DLL: the launcher uses Steam's web API and its records on disk.
 LAUNCHER_FILES = ["command-center.exe"]
+# The effect compiler a mounted mod's .fx sources need (modc t36): <zip>/fxc/, found by materials::default_fxc_path().
+FXC_FILES = ["fxc.exe", "d3dcompiler_47.dll"]
 SYMBOLS = ["alamo_game.pdb", "alamo_mod_check.pdb"]  # the PDBs of the packed engine exes (ALAMO_RELEASE_PDB=1 builds)
 
 
@@ -177,6 +181,16 @@ def cmd_value(script, pattern):
     return m.group(1)
 
 
+def sdk_fxc_dir():
+    """The newest toolchain Windows SDK bin/<ver>/x64 folder that has fxc.exe and d3dcompiler_47.dll, and its version."""
+    found = sorted((p.parent for p in (TOOLCHAIN / "msvc" / "Windows Kits" / "10" / "bin").glob("*/x64/fxc.exe")
+                    if (p.parent / "d3dcompiler_47.dll").exists()),
+                   key=lambda d: [int(x) if x.isdigit() else 0 for x in d.parent.name.split(".")])
+    if not found:
+        sys.exit("no fxc.exe + d3dcompiler_47.dll under toolchain/msvc/Windows Kits/10/bin/*/x64 (toolchain/2_setup.cmd)")
+    return found[-1], found[-1].parent.name
+
+
 def third_party_notices():
     """Text of THIRD_PARTY_NOTICES.txt: each third-party component in the zip with its full license text from
     toolchain\\. The MIT-style licenses want their notice in binary copies; the LGPL wants the FFmpeg source location
@@ -217,9 +231,11 @@ def third_party_notices():
            "The Alamo engine's own code is released into the public domain (the Unlicense). This build also contains",
            "the third-party software below, each under its own license. The game, its assets and its trademarks belong",
            "to their owners and are not part of this build.", ""]
+    sdk_title = "Microsoft Windows SDK %s: fxc\\fxc.exe and fxc\\d3dcompiler_47.dll, unmodified" % sdk_fxc_dir()[1]
     out += ["%d. %s: %s" % (i, name, where) for i, (name, where, _) in enumerate(parts, 1)]
     out.append("%d. %s" % (len(parts) + 1, ff_title))
     out.append("%d. Rust crates compiled into command-center.exe (the Command Center launcher)" % (len(parts) + 2))
+    out.append("%d. %s" % (len(parts) + 3, sdk_title))
     for name, where, files in parts:
         out += ["", rule, "%s: %s" % (name, where), rule]
         for f in files:
@@ -240,6 +256,10 @@ def third_party_notices():
             "The engine loads these DLLs at run time and links no FFmpeg code into its own executables. You may",
             "replace them with your own build of FFmpeg %s (same DLL names), for example one built from that source." % ff_ver]
     out += launcher_notices()
+    out += ["", rule, sdk_title, rule, "",
+            "The HLSL effect compiler and its runtime from the Microsoft Windows SDK, under the Windows SDK license terms.",
+            "This is a private test build: the engine runs fxc.exe to compile a mod's .fx effect sources and does not",
+            "link it. A public release does not include them."]
     return "\n".join(out) + "\n"
 
 
@@ -323,6 +343,11 @@ def main():
         shutil.copy2(bin_dir / f, stage / f)
     for f in LAUNCHER_FILES:
         shutil.copy2(LAUNCHER_BIN / f, stage / f)
+    fxc_dir, sdk_ver = sdk_fxc_dir()
+    (stage / "fxc").mkdir()
+    for f in FXC_FILES:
+        shutil.copy2(fxc_dir / f, stage / "fxc" / f)
+    (stage / "fxc" / "SDK_VERSION.txt").write_bytes(crlf((sdk_ver + "\n").encode("utf-8")))  # read by fxc_identity()
     for f in LAUNCHERS:
         (stage / f).write_bytes(crlf((HERE / "launchers" / f).read_bytes()))
     build = "%s %s%s, MSVC %s" % (branch, commit, " + uncommitted edits" if dirty else "", btype.lower())
@@ -337,7 +362,8 @@ def main():
             "packed: " + datetime.datetime.now().strftime("%Y-%m-%d %H:%M")]
     (stage / "BUILD_INFO.txt").write_bytes(crlf(("\n".join(info) + "\n").encode("utf-8")))
     (stage / "THIRD_PARTY_NOTICES.txt").write_bytes(crlf(third_party_notices().encode("utf-8")))
-    files = BINARIES + LAUNCHER_FILES + LAUNCHERS + ["CHANGES.txt", "BUILD_INFO.txt", "THIRD_PARTY_NOTICES.txt"]
+    files = (BINARIES + LAUNCHER_FILES + LAUNCHERS + ["fxc/" + f for f in FXC_FILES + ["SDK_VERSION.txt"]] +
+             ["CHANGES.txt", "BUILD_INFO.txt", "THIRD_PARTY_NOTICES.txt"])
 
     if a.smoke:
         err = smoke(stage, build_dir / "testbuild" / (name + "_smoke"))

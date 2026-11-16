@@ -31,6 +31,12 @@ bool has(const std::vector<alamo::game::LuaIssue>& v, const std::string& needle)
     return false;
 }
 
+std::string upper(std::string s) {
+    for (char& c : s)
+        if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
+    return s;
+}
+
 const alamo::game::ModFolderStats* folder(const ModCheckReport& r, const std::string& name) {
     for (const auto& f : r.mod_folders)
         if (f.folder == name) return &f;
@@ -162,8 +168,12 @@ void test_fake_install() {
         // modc t21: .fx sources without a compiled .fxo (source_only), one model effect and one terrain effect.
         write_file(mod2 / "Data/Art/Shaders/MC2Glow.fx", "// source only\n");
         write_file(mod2 / "Data/Art/Shaders/Terrain/MC2Ground.fx", "// source only\n");
-        const ModCheckReport r = alamo::game::check_mod_data(foc.string(), {"MODPATH=" + mod2.string()});
+        alamo::game::ModCheckOptions own_cache;
+        own_cache.fx_cache_dir = (root / "fx_cache_mc2").string();  // the .fx prebuild (modc t36) writes here, not to %LOCALAPPDATA%
+        const ModCheckReport r = alamo::game::check_mod_data(foc.string(), {"MODPATH=" + mod2.string()}, own_cache);
         CHECK(r.loaded && r.error_count() == 0);
+        CHECK(r.shaders.fx_prebuild.ran && r.shaders.fx_prebuild.sources.size() == 2);
+        for (const auto& f : r.shaders.fx_prebuild.sources) CHECK(!f.ok && !f.error.empty());  // no technique: fxc fails
         CHECK(r.missing_files.size() == 2);
         if (r.missing_files.size() == 2) {  // sorted by path
             CHECK(r.missing_files[0].path == "DATA\\ART\\MODELS\\MC2_MISSING.ALO");
@@ -227,9 +237,63 @@ void test_fake_install() {
         CHECK(text.find("1 more fail on a require of a missing script") != std::string::npos);
         alamo::game::ModCheckOptions o;
         o.files = o.xml_tags = o.lua_run = false;
+        o.fx_cache_dir = own_cache.fx_cache_dir;
         const ModCheckReport q = alamo::game::check_mod_data(foc.string(), {"MODPATH=" + mod2.string()}, o);
         CHECK(q.missing_files.empty() && q.unknown_xml_tags.empty() && q.lua_run == 0 && q.lua_run_errors.empty());
         CHECK(q.lua_scripts == 4);
+    }
+    {  // modc t36: a mounted mod's .fx sources are compiled before the audit; the report lists each with its result
+        const fs::path mod3 = root / "Mods" / "MC3";
+        write_file(mod3 / "Data/Art/Shaders/MC3Good.fx",
+                   "float4 PS() : COLOR { return float4(1, 0, 0, 1); }\n"
+                   "technique T { pass P { PixelShader = compile ps_2_0 PS(); } }\n");
+        write_file(mod3 / "Data/Art/Shaders/MC3Bad.fx",
+                   "float4 PS() : COLOR { return mc3_undeclared; }\n"
+                   "technique T { pass P { PixelShader = compile ps_2_0 PS(); } }\n");
+        alamo::game::ModCheckOptions o;
+        o.campaigns = o.files = o.xml_tags = o.lua = o.submod = false;
+        o.shader_compile = false;
+        o.fx_cache_dir = (root / "fx_cache_mc3").string();
+        const std::vector<std::string> args{"MODPATH=" + mod3.string()};
+        const ModCheckReport r = alamo::game::check_mod_data(foc.string(), args, o);
+        const alamo::game::FxPrebuild& fp = r.shaders.fx_prebuild;
+        CHECK(r.loaded && r.error_count() == 0 && fp.ran && fp.sources.size() == 2);
+        const std::string js = alamo::game::format_mod_report_json(r);
+        CHECK(js.find("\"fx_prebuild\": {") != std::string::npos);
+        const std::string text = alamo::game::format_mod_report(r);
+        CHECK(text.find(".fx prebuild: 2 sources") != std::string::npos);
+        if (fp.sources.size() == 2 && fp.fxc.empty()) {
+            std::printf("  fxc.exe not found: fx prebuild compile checked as 'not compiled' only\n");
+            for (const auto& f : fp.sources) CHECK(!f.ok && f.error.find("fxc.exe not found") != std::string::npos);
+        } else if (fp.sources.size() == 2) {  // by path: MC3BAD, MC3GOOD
+            const auto& bad = fp.sources[0];
+            const auto& good = fp.sources[1];
+            CHECK(upper(bad.path).find("MC3BAD.FX") != std::string::npos && !bad.ok && !bad.cached);
+            CHECK(bad.error.find("X3004") != std::string::npos && bad.error.find("mc3_undeclared") != std::string::npos);
+            CHECK(upper(good.path).find("MC3GOOD.FX") != std::string::npos && good.ok && !good.cached && good.error.empty());
+            CHECK(r.shaders.fx_sources == 2 && r.shaders.fx_sources_compiled == 1);  // the audit loads the compiled one
+            // Second run: both come from the cache, nothing is compiled again.
+            const ModCheckReport again = alamo::game::check_mod_data(foc.string(), args, o);
+            CHECK(again.shaders.fx_prebuild.sources.size() == 2);
+            for (const auto& f : again.shaders.fx_prebuild.sources) CHECK(f.cached);
+            // Without fxc (a test build without fxc\fxc.exe): the cached results still count; a new source says why.
+            write_file(mod3 / "Data/Art/Shaders/MC3New.fx", "// new\n");
+            _putenv_s("ALAMO_FXC", (root / "no_such_fxc.exe").string().c_str());
+            const ModCheckReport nofxc = alamo::game::check_mod_data(foc.string(), args, o);
+            _putenv_s("ALAMO_FXC", "");
+            const alamo::game::FxPrebuild& np = nofxc.shaders.fx_prebuild;
+            CHECK(np.sources.size() == 3 && np.fxc.empty());
+            if (np.sources.size() == 3) {
+                CHECK(upper(np.sources[1].path).find("MC3GOOD.FX") != std::string::npos && np.sources[1].ok && np.sources[1].cached);
+                CHECK(upper(np.sources[2].path).find("MC3NEW.FX") != std::string::npos && !np.sources[2].ok);
+                CHECK(np.sources[2].error.find("fxc.exe not found") != std::string::npos);
+            }
+            CHECK(nofxc.shaders.fx_sources_compiled == 1);
+        }
+        alamo::game::ModCheckOptions off = o;
+        off.fx_prebuild = false;
+        CHECK(!alamo::game::check_mod_data(foc.string(), args, off).shaders.fx_prebuild.ran);
+        CHECK(!alamo::game::check_mod_data(foc.string(), {}, o).shaders.fx_prebuild.ran);  // no mod: no prebuild
     }
     {  // not a folder: load fails, reported as one error
         const ModCheckReport r = alamo::game::check_mod_data((root / "no_such_dir").string(), {});

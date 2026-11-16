@@ -7,6 +7,7 @@
 #include "alamo/core/ascii.hpp"
 #include "alamo/core/host_fs.hpp"
 #include "alamo/data/xml.hpp"
+#include "alamo/game/mod_check.hpp"  // modc t36: prebuild_mod_effects
 #include "alamo/render/galactic/galactic_session.hpp"
 #include "alamo/render/pipelines.hpp"
 #include "alamo/sim/tactical_battle.hpp"
@@ -98,6 +99,18 @@ bool GpuCore::init(rhi::Context& c, const GameData& d, jobs::JobSystem& j, const
     if (!alloc.init(c) || !up.init(c, alloc) || !ring.init(c, alloc, fd)) {
         if (err) *err = "rhi init failed";
         return false;
+    }
+    // modc t36: with a mod mounted, its .fx sources are compiled into the FxCache before the first effect loads, so the
+    // loader takes them in place of the .fxo as the original does (docs/MODS.md 4.1); without fxc the t11 fallback stays.
+    const FxPrebuild fx = prebuild_mod_effects(d);
+    if (fx.ran && !fx.sources.empty()) {
+        size_t ok = 0;
+        for (const FxPrebuildSource& f : fx.sources) {
+            if (f.ok) ++ok;
+            else std::fprintf(stderr, "fx prebuild: %s not compiled: %s\n", f.path.c_str(), f.error.c_str());
+        }
+        std::fprintf(stderr, "fx prebuild: %zu of %zu .fx sources compiled (fxc %s, %.0f ms)\n", ok, fx.sources.size(),
+                     fx.fxc.empty() ? "not found" : fx.fxc.c_str(), fx.ms);
     }
     effects = std::make_unique<render::EffectCache>(d.files.get());
     render::RendererDesc rd;
