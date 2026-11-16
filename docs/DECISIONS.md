@@ -48,6 +48,14 @@ section 4.
   and runs `re-analyst` and the reviews itself; it ends a turn with a `REQUEST` only for the Ghidra turn (one ReVa session at a
   time), questions for Gabriel and waits on another lane (`lane.md`, "Coordinator protocol"). For a small group, or on request,
   the coordinator works it itself; background `lane` agents only when Gabriel asks for agents.
+- **Unattended runs** (Gabriel, 2026-11-15: "point it at tasks, have it ask for permissions and then walk away"): the
+  coordinator asks everything that would stop a lane before the first lane starts (`run-group` step 3a: switch itself to auto
+  mode, computer-use access for retail probes, open decisions in one question round, UAC needs) and starts lanes with
+  `permission_mode: "auto"`. Afterwards nothing waits on Gabriel that the rules settle: lanes take the documented default and
+  report it as `default taken:`; a task that needs him stays `todo` on a held list while its lane goes on. Retail probe runs
+  move from the lane to the coordinator (`REQUEST probe`), because the computer-use grant belongs to one session. The
+  allowlist, the `ask` rules (Frida, TTD, pushes to `main`, `gh pr merge`) and the `deny` rules (force push, bare
+  `git stash`) are Gabriel's to change; agents use the spellings in `docs/WORKFLOW_TIPS.md`, "Unattended runs".
 - **Retail RE access for every worker** (Gabriel, 2026-11-15, later the same day; replaces the earlier exception that kept the RE
   tools from engine-writing workers): every worker may use REA, WinDbg / cdb, Frida, TTD replays and the decompiled output in
   `re_reference/` directly, also while writing engine code. **Guard kept:** decompiled or disassembled code is never copied into

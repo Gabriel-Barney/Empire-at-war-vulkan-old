@@ -401,6 +401,7 @@ bool TacticalBattle::hyperspace_out(objects::ObjectId id, int32_t delay_frames, 
     }
     if (abilities_->has_object(id)) abilities_->set_locomotor_busy(id, true);
     l1_used_ = true;
+    story_generics_.push_back({"start_hyperspace", owner});  // STY1 t03 (0x41f70): the jump order was accepted
     return true;
 }
 

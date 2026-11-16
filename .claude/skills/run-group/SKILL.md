@@ -1,6 +1,6 @@
 ---
 name: run-group
-description: The default workflow for a request to complete roadmap work - "complete all tasks under AUD1", "do sty1", "finish skai", "work the AUDIO box", "clear stage 6", "pick up the next ready groups". This session becomes the coordinator - it resolves the groups, checks prerequisites, claims and the tier focus, splits the work into up to three parallel lanes, starts each lane as its own session nested under this one with its own worktree, serves what lanes cannot do alone (the Ghidra turn, questions for Gabriel, waits between lanes), and reports; each lane follows the full lane loop with every skill and tool.
+description: The default workflow for a request to complete roadmap work - "complete all tasks under AUD1", "do sty1", "finish skai", "work the AUDIO box", "clear stage 6", "pick up the next ready groups". This session becomes the coordinator - it resolves the groups, checks prerequisites, claims and the tier focus, splits the work into up to three parallel lanes, asks every approval and open decision up front so Gabriel can walk away, starts each lane as its own session (auto mode) nested under this one with its own worktree, serves what lanes cannot do alone (the Ghidra turn, retail probe runs, questions for Gabriel, waits between lanes), and reports; each lane follows the full lane loop with every skill and tool.
 argument-hint: <group id | box id | stage | "next"> [more ids]
 ---
 
@@ -15,8 +15,9 @@ own worktree** made by the app (`use_worktree: true`). It works one group (or on
 Why sessions and not background `lane` agents: a subagent runs inside the coordinator's session, which is bound to the
 coordinator's worktree, so its writes into another worktree hit the worktree write block; and a subagent cannot start agents.
 A lane session is bound to its own worktree and has the `Agent` tool, so it runs `re-analyst`, `/code-review`, `spec-review` and
-`reviewer` itself. What stays with the coordinator: the Ghidra turn (one ReVa session at a time across lanes), questions for
-Gabriel, and holding a lane that waits for another. ("Coordinator protocol" in `lane.md` is the lane side.)
+`reviewer` itself. What stays with the coordinator: the up-front round (step 3a), the Ghidra turn (one ReVa session at a time
+across lanes), retail probe runs (the computer-use grant is per session), questions for Gabriel, and holding a lane that waits
+for another. ("Coordinator protocol" in `lane.md` is the lane side.)
 
 ## 1. Resolve what was asked
 
@@ -48,7 +49,26 @@ For each group show: title, open tasks (tier, `g`, the modules each touches), `e
 - Never two lanes on the same files, goldens included (CLAUDE.md "Parallel work"); when two lanes would both move the same goldens,
   queue them in one lane.
 
-Show the plan (lanes, queues, shares, what waits on what) in a few lines, then start.
+Show the plan (lanes, queues, shares, what waits on what) in a few lines, then hold the up-front round.
+
+## 3a. Up-front round: every approval now, then Gabriel walks away
+
+Gabriel points the coordinator at work, answers once, and leaves (Gabriel, 2026-11-15). So everything that would stop a lane
+later is asked **before the first lane starts**, in as few cards as possible; done when each item below is settled or skipped:
+1. **Permission mode.** `get_session` on this session: not `auto` → `set_session_permission_mode` `self` `auto` (one card).
+   Lanes then start in `auto` (step 4); in `default` every unlisted command of every lane waits for a click.
+2. **Retail probes.** Any task that needs a probe-kit run: `request_access` for `StarWarsG.exe` now. The grant belongs to this
+   session, so lanes hand probe runs to the coordinator (`REQUEST probe`, step 5) instead of asking for their own.
+3. **Decisions.** Read every task in the run and collect what the docs do not settle: `g` tasks Gabriel can answer now, vague
+   tasks, a third-party dependency, a tier-1 rule with two readings, UAC needs (TTD recording, a toolchain install). Ask them in
+   one `AskUserQuestion` round (up to 4 per card, recommended answer first) and write each answer into the brief of the lane that
+   needs it (and into `docs/DECISIONS.md` / `docs/PHASE4.md` when it is a decision). Unanswered ones become held questions.
+4. **Say what is left.** One line: "you can leave now; I stop only for <held questions, `g` tasks, anything that needs a click>".
+
+After the round, a run never waits on Gabriel for something it can decide: a choice the rules or docs settle (tier focus, S3 to
+the backlog, golden drift to `regen-goldens`, a reversible default) is taken and listed in the report as `default taken:`; a task
+that truly needs him stays `todo`, its question goes on the held list, and its lane goes on with its other tasks. Command
+spellings that run without a prompt: `docs/WORKFLOW_TIPS.md`, "Unattended runs".
 
 ## 4. Start the lanes
 
@@ -56,7 +76,8 @@ For each lane:
 1. **Name**: the group id, plus `-a`, `-b` for shares (`sty1-a`).
 2. **Claim**: `roadmap_store.py claim <group> --by <lane-name>` (shares of one group: claim once, by the coordinator's name).
 3. **Start the lane session** (`start_session`): `initiation: "user_asked"` (the request for the group work is the ask),
-   `context: "fresh"`, `use_worktree: true`, `name` and `branch_name` the lane name, `wake_when_done: true`. Do not create the
+   `context: "fresh"`, `use_worktree: true`, `permission_mode: "auto"`, `name` and `branch_name` the lane name,
+   `wake_when_done: true`, and the up-front answers that concern it in the `prompt`. Do not create the
    worktree with `tools\new_worktree.cmd` first: the app makes it, and the session is then bound to it. The `prompt` names: "you
    are lane <name>, started by the run-group coordinator; read and follow `.claude/agents/lane.md` including its Coordinator
    protocol" (sessions do not load agent files), the group and the task ids of its share, the exit test, the modules it owns and
@@ -87,8 +108,12 @@ start) when it needs something only the coordinator can give. Serve it, then res
 `local_…` session id carrying the result:
 - **`ghidra`**: the lane wants to start `re-analyst` (ReVa). One at a time across lanes (Ghidra lock): answer "go" to one lane,
   queue the others, and give the next lane its "go" once the previous one reports `ghidra done`. REA needs no turn.
-- **A question for Gabriel** (a decision, a `g` task, a UAC prompt, a look at `alamo_game.exe`): ask him, send the answer back; if
-  he is away, tell the lane to continue with what does not depend on it.
+- **`probe`**: the lane has a probe kit ready (`tools/probe_mod/<kit>/`, committed on its branch). Run it with this session's
+  computer-use grant from the up-front round (one retail game at a time, like the Ghidra turn), then send the lane the result
+  files' paths. No grant (Gabriel declined or is away): the probe task stays `todo` and goes on the held list.
+- **A question for Gabriel** (a decision, a `g` task, a UAC prompt, a look at `alamo_game.exe`): settled up front → answer from
+  the round; a default the rules give → send it and list it under `default taken:`; otherwise ask him, and while he is away put it
+  on the held list and tell the lane to continue with what does not depend on it. Several held questions go out as one card.
 - **A blocker between lanes** (one lane needs another's work on `dev` first): hold the waiting lane until the other has landed,
   then resume it (it merges `origin/dev` on landing anyway).
 
@@ -100,10 +125,11 @@ When a lane reports it landed: check its `dev` commit exists (`git log origin/de
 claim released. For a group split into shares, once every share has landed: run the exit test once more on `dev` and close the
 group (`finish-group` step 3: group and box done, or `close-group`). Remove each landed lane's worktree from the coordinator's
 checkout once the lane is idle (`tools\clean_worktrees.cmd --apply --only <worktree name>`, which unlinks the junctions first),
-then offer Gabriel to archive the lane sessions (archive only on his yes).
+then offer Gabriel to archive the lane sessions, all in one ask at the end of the run (archive only on his yes).
 
-Report per group: tasks closed and open (why), the exit test result, the `dev` commits, goldens changed, skips, anything Gabriel
-must do, and the lanes' friction lines for `retro`.
+Report per group: tasks closed and open (why), the exit test result, the `dev` commits, goldens changed, skips, every
+`default taken:` line, the held questions, anything Gabriel must do, and the lanes' friction lines for `retro` (a prompt that
+kept coming is a missing allow rule: name its exact command).
 
 ## Running without lanes
 

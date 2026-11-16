@@ -391,6 +391,24 @@ public:
     // --- L1/S4 wave 2b story hooks (owner: L1/S4 agent; keep other hooks separate) ---
     // Reserve units deployed during the last tick() (StorySession STORY_REINFORCE), deploy order.
     std::span<const objects::ObjectId> story_reinforced() const { return story_reinforced_; }
+    // --- STY1 t06 story rewards on the battle (tactical_battle_story_rewards.cpp, STORY_REWARDS_GALACTIC §4) ---
+    // DISABLE_REINFORCEMENTS: a player whose switch is off cannot call reinforcements (order_reinforce / reinforce_block refuse
+    // with NotAllowed; the stand-in auto deploy skips its reserves). The campaign host copies the story's switches each tick.
+    void set_reinforcements_off(int32_t player, bool off);
+    bool reinforcements_off(int32_t player) const;
+    // CHANGE_OWNER / DESTROY_OBJECT on the battle's objects of `type`; return the objects changed / whether one was hit.
+    uint32_t reward_change_owner(TacticalMode& mode, objects::TypeIndex type, int32_t owner, int32_t count);
+    bool reward_destroy_object(TacticalMode& mode, objects::TypeIndex type);
+    // BOMBARD_DELAY: seconds replacing the faction's Bombardment_Initial_Delay for strikes started from now on (<= 0 = none).
+    void reward_bombard_delay(float seconds) { bombard_delay_override_ = seconds; }
+    // --- end STY1 t06 ---
+    // STY1 t03: STORY_GENERIC names the battle raised this tick (start_hyperspace, start_bombard, activate_deployed_ability),
+    // each with the acting player (-1 = every plot set).
+    struct StoryGeneric {
+        const char* name;
+        int32_t player;
+    };
+    std::span<const StoryGeneric> story_generics() const { return story_generics_; }
     // S7 t15 A1 - "unit ability finished" (object signal 0x29) raised during the last tick(), in order: ability ends
     // (AbilitySystem Ended: countdown expiry, special removals, the Remote_Bomb toss at its Toss_Anim end) and the jetpack's swap
     // back to the primary locomotor (MOVEMENT §3.1.1 step 6, seen as the end of the weapons suspension before the combat
@@ -574,10 +592,14 @@ public:
     // applies, the lowest non-negative max_speed wins). Registered per bridge owner `key`, like the movement lock.
     struct ScriptUnitControl {
         bool no_fire = false, loco_suspended = false, cannot_die = false;
+        bool limbo = false, capture_disabled = false;  // Set_In_Limbo; Disable_Capture (read through the capture service)
         float max_speed = -1.0f;  // < 0 = none
     };
     void set_script_unit_control(const void* key, std::function<ScriptUnitControl(objects::ObjectId)> fn);
     ScriptUnitControl script_unit_control(objects::ObjectId id) const;
+    // Lua Prevent_Opportunity_Fire (docs/re/STY1_OBJECT_SETTERS_RE_ANSWERS.md §1): the incognito bit on the object and, first,
+    // on every member of its TEAM container. An edge (damage clears it), so the bridge calls it when the setter runs.
+    void script_opportunity_fire(objects::ObjectId id, bool on);
     // s78n t06 review: the hero clash's share of the lock (+0x3b4, HERO_CLASH §3.2) while it is held. release_hero_clash_lock
     // = a Lua Unlock_Current_Orders through the hero's land TEAM object (A1_READINGS §28.9 item 4: retail's decrement of
     // the member's counter): the hero's movement orders are free again while +0x3b4 stays set (until the clash release
@@ -1920,7 +1942,10 @@ private:
     void register_clone_obstacle(TacticalMode& mode, objects::ObjectHandle clone, int32_t clone_type);
     void kill_pushed_clones(TacticalMode& mode);
     std::vector<AttachedEffect> effects_;
+    std::vector<StoryGeneric> story_generics_;  // STY1 t03: this tick's generic story names
     std::vector<objects::ObjectId> story_reinforced_;  // L1/S4 wave 2b: reserve units deployed this tick
+    std::vector<uint8_t> reinf_off_;                  // STY1 t06: per player, 1 = reinforcements disabled by the story
+    float bombard_delay_override_ = 0.0f;             // STY1 t06: BOMBARD_DELAY seconds
     std::vector<objects::ObjectId> ability_finished_;  // S7 t15 A1: signal 0x29 this tick (not saved: read the same tick)
     std::vector<std::pair<uint32_t, OrderReplacedListener>> order_replaced_listeners_;  // S7 t31: token order
     uint32_t next_listener_token_ = 1;
