@@ -1,7 +1,7 @@
 """skai t15: the Destroy_Structure goal desire per enemy base structure over time, retail against the port.
 
 Standard library only. Retail: the TDESIRE records of a run folder's lua_records.txt (GameScoring probe, every 10th
-tactical sample, about every 10 s): d = EvaluatePerception("Should_Destroy_Structure", ai, structure). Port: the
+tactical sample, about every 10 s; lframe = GetCurrentTime.Frame(), game seconds, x30 = frames): d = EvaluatePerception("Should_Destroy_Structure", ai, structure). Port: the
 `Should_Destroy_Structure: <obj>=<d> ...` lines that `alamo_headless --skirmish-ai ... --ai-log FILE` writes every 600
 frames, with the object types from that log's object list. For the Underworld base types the equation is
 0.001 + 15 * (1 - EnemyForce at the target's location), so EF = 1 - (d - 0.001) / 15 is printed too.
@@ -37,7 +37,7 @@ def retail_series(run, ai):
                 frame, d = float(m.group(1)), float(m.group(5))
             except ValueError:
                 continue
-            out[m.group(3) + "#" + m.group(4)].append((int(round(frame)), d))
+            out[m.group(3) + "#" + m.group(4)].append((int(round(frame * 30.0)), d))  # lframe is game seconds
     return out
 
 
@@ -80,8 +80,8 @@ def selftest():
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         with open(os.path.join(tmp, "lua_records.txt"), "w", encoding="latin-1") as f:
-            f.write("T 0001 5 TDESIRE lframe=300 ai=1 obj=U_GROUND_PALACE#77 d=15.001\n")
-            f.write("T 0001 6 TDESIRE lframe=600 ai=1 obj=U_GROUND_PALACE#77 d=7.501\n")
+            f.write("T 0001 5 TDESIRE lframe=10 ai=1 obj=U_GROUND_PALACE#77 d=15.001\n")
+            f.write("T 0001 6 TDESIRE lframe=20 ai=1 obj=U_GROUND_PALACE#77 d=7.501\n")
             f.write("T 0001 7 TDESIRE lframe=600 ai=0 obj=E_GROUND_BARRACKS#9 d=?\n")
         r = retail_series(tmp, "1")
         assert r == {"U_GROUND_PALACE#77": [(300, 15.001), (600, 7.501)]}, r
