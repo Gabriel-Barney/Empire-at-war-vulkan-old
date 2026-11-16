@@ -38,7 +38,10 @@
     {"run": "20261115-235429-skirmish-vanilla-lua", "note": "q4d t03 (2026-11-15/16): run_trace.ps1 -NoDrive -LuaProbe, menus set by hand to the q2_scenes.json setup, ticks_reached"},
     {"run": "20261116-002920-skirmish-vanilla-lua", "note": "q4d t03 (2026-11-15/16): run_trace.ps1 -NoDrive -LuaProbe, menus set by hand to the q2_scenes.json setup, ticks_reached"},
     {"run": "20261116-003415-skirmish-vanilla-lua", "note": "q4d t03 (2026-11-15/16): run_trace.ps1 -NoDrive -LuaProbe, menus set by hand to the q2_scenes.json setup, ticks_reached"},
-    {"run": "20261116-003910-skirmish-vanilla-lua", "note": "q4d t03 (2026-11-15/16): run_trace.ps1 -NoDrive -LuaProbe, menus set by hand to the q2_scenes.json setup, ticks_reached"}
+    {"run": "20261116-003910-skirmish-vanilla-lua", "note": "q4d t03 (2026-11-15/16): run_trace.ps1 -NoDrive -LuaProbe, menus set by hand to the q2_scenes.json setup, ticks_reached"},
+    {"run": "20261116-173353-skirmish-vanilla", "note": "skai t22 (2026-11-16): run_skai_t22_space.cmd, no Lua probe (unhooked), read-only Frida goal hooks, -NonInteractive, ticks_reached"},
+    {"run": "20261116-173917-skirmish-vanilla", "note": "skai t22 (2026-11-16): run_skai_t22_space.cmd, no Lua probe (unhooked), read-only Frida goal hooks, -NonInteractive, ticks_reached"},
+    {"run": "20261116-174437-skirmish-vanilla", "note": "skai t22 (2026-11-16): run_skai_t22_space.cmd, no Lua probe (unhooked), read-only Frida goal hooks, -NonInteractive, ticks_reached"}
    ],
    "kit": "tools/probe_mod/q2_traces/run_skirmish.cmd -LuaProbe (-NonInteractive drives the menus), README in that folder",
    "map": "_MP_SPACE_GEONOSIS",
