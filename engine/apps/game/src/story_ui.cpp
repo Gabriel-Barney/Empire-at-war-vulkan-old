@@ -5,6 +5,7 @@
 #include <span>
 
 #include "alamo/core/ascii.hpp"
+#include "alamo/galactic/special_systems.hpp"
 
 namespace alamo::game {
 
@@ -107,6 +108,20 @@ void StoryUiFeed::observe(const StoryUiView& v) {
         raise(E::ZoomIntoPlanet, now.zoom_planet, {});
     if (now.corruption_planet != 0 && now.corruption_planet != last_.corruption_planet)
         raise(E::OpenCorruption, now.corruption_planet, {});
+    // STY1 t03: STORY_GENERIC names the story plots wait on (b0333). Zoom ends are approximated by the zoom state change
+    // [port]; dialog names come from the special dialog that opened; drag names when a HUD drag begins.
+    if (last_.zoomed && !now.zoomed) generic("zoomed_out");
+    if (now.zoomed && !last_.zoomed) generic("zoomed_in");
+    if (now.special_kind != 0 && now.special_kind != last_.special_kind) {
+        switch (now.special_kind) {
+            case galactic::kSpecialBlackMarket: generic("open_black_market_menu"); break;
+            case galactic::kSpecialSabotage: generic("open_galactic_sabotage_menu"); break;
+            case galactic::kSpecialSlice: generic("slice_dialog"); break;
+            case galactic::kSpecialCorruption: generic("corruption_dialog"); break;
+            default: break;
+        }
+    }
+    if (now.drag != 0 && now.drag != last_.drag) generic(now.drag == 2 ? "start_land_drag" : "start_fleet_drag");
     last_ = std::move(now);
 }
 

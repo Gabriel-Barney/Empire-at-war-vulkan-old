@@ -392,6 +392,8 @@ void App::story_ui_step() {
         v.zoom_planet = zoom_planet_;
         if (const SpecialDialog* d = session_->special_dialog(); d && d->kind == galactic::kSpecialCorruption && corruption_.open())
             v.corruption_planet = d->planet_id;
+        if (const SpecialDialog* d = session_->special_dialog()) v.special_kind = d->kind;
+        if (const ui::GalacticDrag& drag = ui_.galactic_hud.drag(); drag.active) v.drag = drag.fleet_index == -1 ? 2 : 1;
         story_ui_.observe(v);
     }
     for (const sim::StoryUiNotification& n : story_ui_.take()) {
