@@ -969,6 +969,23 @@ const GalacticHud::PadSlot* GalacticHud::pad_of(int32_t component) const {
     return nullptr;
 }
 
+bool GalacticHud::pad_subject(int32_t component, PadSubject& out) const {
+    const PadSlot* p = pad_of(component);
+    if (!p || p->empty) return false;
+    out = {};
+    if (p->is_queue) {
+        out.type = p->queue.type_index;
+        return true;
+    }
+    if (std::find(create_.begin(), create_.end(), p->component) != create_.end()) {
+        out.type = p->option.type_index;
+        return true;
+    }
+    if (p->unit == 0) return false;  // a fleet header: the map fleet summary, not a unit pop-up
+    out.object = p->unit;
+    return true;
+}
+
 const GalacticHud::StackHit* GalacticHud::stack_at(int32_t component, float px, float py) const {
     if (component < 0) return nullptr;
     const Vec2f c = canvas_.pixel_to_canvas(px + 0.5f, py + 0.5f);

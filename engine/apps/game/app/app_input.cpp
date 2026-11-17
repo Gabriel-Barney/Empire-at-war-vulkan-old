@@ -664,6 +664,73 @@ void App::handle_hud_actions(const std::vector<ui::HudAction>& acts) {
     }
 }
 
+void App::fleet_drag_preview(const ui::View& view, const std::vector<ui::PickSphere>& fleets) {
+    // 0x3da30 [H]: while a fleet is dragged, the planet under the cursor (the world pick, else the HUD's hovered planet)
+    // gets the path finder's route drawn as grey (128) segments; with no planet there, a dark grey (50) line from the
+    // fleet's planet to the cursor's point on the z = 0 plane while that point is closer than MaximumFleetMovementDistance.
+    // Over the fleet's own planet, or with no path: nothing. [port] the HUD drag (map stack or organiser fleet, whole
+    // fleets only) and the port's world drag of a fleet sphere both show it; over any other HUD component nothing is drawn.
+    std::vector<render::GalacticDragLine> lines;
+    const galactic::GalacticSim* g = session_ ? session_->galaxy() : nullptr;
+    const ui::GalacticDrag& d = ui_.galactic_hud.drag();
+    const ui::ButtonState& lb = input_.button(ui::Button::Left);
+    uint32_t fleet = 0, over = 0;
+    bool over_hud = false;
+    ui::Vec2f cur{};
+    if (d.active && d.fleet != 0 && d.unit == 0 && d.fleet_index >= 0) {
+        fleet = d.fleet;
+        cur = d.cursor_px;
+        if (d.over_planet >= 0 && static_cast<size_t>(d.over_planet) < hud_planet_ids_.size())
+            over = hud_planet_ids_[static_cast<size_t>(d.over_planet)];
+        over_hud = over == 0 && d.over_component >= 0;
+    } else if (lb.dragging && routed_.owner[static_cast<size_t>(ui::Button::Left)] != ui::PointerTarget::Hud) {
+        if (const auto from = ui::pick_spheres(fleets, ui::pixel_ray(view, lb.drag.x0, lb.drag.y0));
+            from && fleets[*from].owner == local_player()) {
+            fleet = fleets[*from].id;
+            cur = {static_cast<float>(input_.mouse_x()), static_cast<float>(input_.mouse_y())};
+            std::vector<ui::PickSphere> planets;
+            for (const ui::PickSphere& s : gview_.pick_items())
+                if (s.kind == ui::PickKind::Planet) planets.push_back(s);
+            if (const auto at = ui::pick_spheres(planets, ui::pixel_ray(view, input_.mouse_x(), input_.mouse_y()))) over = planets[*at].id;
+        }
+    }
+    const uint32_t origin_id = fleet ? gview_.fleet_planet_id(fleet) : 0;
+    const render::GalacticFrame& fr = gview_.frame();
+    auto planet_row = [&fr](uint32_t id) -> const render::GalacticPlanetSnap* {
+        for (const render::GalacticPlanetSnap& p : fr.planets)
+            if (p.id == static_cast<objects::ObjectId>(id) && (p.flags & render::kGalPlanet)) return &p;
+        return nullptr;
+    };
+    const render::GalacticPlanetSnap* origin = origin_id ? planet_row(origin_id) : nullptr;
+    if (!g || !origin || over_hud || over == origin_id) {
+        drag_route_fleet_ = 0;
+        gview_.set_drag_lines({});
+        return;
+    }
+    if (const render::GalacticPlanetSnap* target = over ? planet_row(over) : nullptr) {
+        if (fleet != drag_route_fleet_ || over != drag_route_target_) {  // 0x3da30 recomputes only on a change
+            drag_route_fleet_ = fleet;
+            drag_route_target_ = over;
+            drag_route_ = game::fleet_drag_route(*g, local_player(), fleet, target->row);
+        }
+        std::vector<alamo::Vec3> at;
+        for (const PlanetIndex r : drag_route_)
+            for (const render::GalacticPlanetSnap& p : fr.planets)
+                if (p.row == r) at.push_back(p.position);
+        for (size_t i = 0; i + 1 < at.size(); ++i) lines.push_back({at[i], at[i + 1], 128});
+    } else {
+        drag_route_fleet_ = 0;
+        ui::Vec3 hit;
+        const float maxd = data_.db.constants().max_fleet_move_distance;
+        if (ui::ray_plane_z(ui::screen_ray(view, cur.x, cur.y), 0.0f, hit)) {
+            const alamo::Vec3 p = origin->position, q{hit.x, hit.y, 0.0f};
+            const float dx = q.x - p.x, dy = q.y - p.y, dz = q.z - p.z;
+            if (std::sqrt(dx * dx + dy * dy + dz * dz) < maxd) lines.push_back({p, q, 50});
+        }
+    }
+    gview_.set_drag_lines(std::move(lines));
+}
+
 void App::galactic_input() {
     const uint32_t w = targets_.width, h = targets_.height;
     {  // P1_CAMERA_INPUT.md §1: the scroll clamp box = the union of the planets' spheres (centre +- radius)
@@ -782,6 +849,7 @@ void App::galactic_input() {
         if (d.active && !was_dragging) audio_.ui("GUI_Drag_Fleet");
         if (!d.active && was_dragging && cmds.size() > before) audio_.ui("GUI_Drop_Fleet");
     }
+    fleet_drag_preview(ctx.view, fleets_only);
     // L1/S4 wave 1: STORY_CLICK_GUI - a left click on a HUD component that is not disabled (the HudButtons rule: hidden /
     // disabled components never click), name = its CommandBarComponents name (b_Create_NN, b_zoom, b_planet_tab, ...).
     for (const ui::HudPointerEvent& e : routed_.hud)

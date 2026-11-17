@@ -1857,7 +1857,37 @@ void hud_feeds_test(const game::GameData& data, const game::SessionSpec& spec) {
             CHECK(game::galactic_announcement(gg, ev, me) == nullptr);
         }
     }
-    std::printf("hud feeds: cycle %.4f -> %.4f, %zu galactic hero entries\n", static_cast<double>(f0), static_cast<double>(f1), heroes.size());
+    // ui4 t06 (GALAXY_MAP_PRESENTATION §2.2): the drag preview route of an orbiting fleet of the local player - origin first,
+    // target last, every hop a graph edge; its own planet, an unknown fleet or an invalid target give nothing.
+    size_t routes_checked = 0;
+    {
+        const galactic::GalacticSim& gg = *s.galaxy();
+        const int32_t me = s.local_player();
+        for (const galactic::FleetState& fl : gg.fleets()) {
+            if (!fl.alive || fl.owner != me || fl.moving || fl.planet == kInvalidPlanet) continue;
+            const uint32_t fid = static_cast<uint32_t>(gg.store().id(fl.object));
+            CHECK(game::fleet_drag_route(gg, me, fid, fl.planet).empty());
+            CHECK(game::fleet_drag_route(gg, me, fid, kInvalidPlanet).empty());
+            const galactic::PlanetGraph& gr = gg.graph();
+            auto adjacent = [&gr](PlanetIndex a, PlanetIndex b) {
+                for (uint32_t e = gr.edge_begin(a); e < gr.edge_end(a); ++e)
+                    if (gr.neighbour(e) == b) return true;
+                return false;
+            };
+            for (PlanetIndex t = 0; t < gg.planets().size(); ++t) {
+                const std::vector<PlanetIndex> r = game::fleet_drag_route(gg, me, fid, t);
+                if (r.empty()) continue;
+                ++routes_checked;
+                CHECK(r.front() == fl.planet && r.back() == t);
+                for (size_t i = 0; i + 1 < r.size(); ++i) CHECK(adjacent(r[i], r[i + 1]));
+            }
+            CHECK(routes_checked > 0);  // the start planet has revealed neighbours
+            break;
+        }
+        CHECK(game::fleet_drag_route(gg, me, 0xFFFFFFF0u, 0).empty());
+    }
+    std::printf("hud feeds: cycle %.4f -> %.4f, %zu galactic hero entries, %zu drag routes\n", static_cast<double>(f0),
+                static_cast<double>(f1), heroes.size(), routes_checked);
 }
 #endif
 // --- end OI host ---

@@ -38,6 +38,12 @@
 //                        the local player owns the planet or is the corrupter (GALACTIC_REVEAL_CORRUPTION §4.4 step 4 [H]);
 //                        FleetDeparted: SFXEvent_Enemy_Fleet_Approaching_Planet when a hostile fleet that is not all galactic-
 //                        stealthed sets off towards a planet of the local player [port].
+//   fleet_drag_route     ui4 t06 (GALAXY_MAP_PRESENTATION §2.2, 0x3da30 [H]): the planets (origin first) of the grey preview
+//                        line while the local player drags fleet object `fleet_id` onto planet `target`: the fleet path
+//                        finder from the fleet's orbit planet with the preview's request flags - unknown / neutral (0),
+//                        enemy owned (1) and skip-danger (2) only for a galactically hidden fleet (0x3a9760), flags 3 / 4
+//                        set [H]; flag 0 is also set for a local faction with Is_Neutral (never a playable one) [port: not
+//                        read]. Empty when the fleet is not orbiting, target is its planet, or there is no path.
 //   galactic_build_block a can_enqueue RejectReason as a pad block: QueueFull, the population cap, CannotAfford (Funds),
 //                        anything else Prerequisite (greyed, no tooltip [port]); None stays None.
 // Needs engine/ui's alamo_ui_hud (ALAMO_GAME_HAVE_CONTROLS).
@@ -121,6 +127,7 @@ ui::HudBuildOption::Block galactic_build_block(commands::RejectReason why);
 const char* galactic_announcement(const galactic::GalacticSim& g, const galactic::GalacticEvent& e, int32_t local_player);
 std::u32string conflict_log_line(const galactic::ConflictLogEntry& e, const std::function<std::u32string(PlanetIndex planet)>& planet_name,
                                  const std::function<std::u32string(int32_t player)>& faction_name);
+std::vector<PlanetIndex> fleet_drag_route(const galactic::GalacticSim& g, int32_t local_player, uint32_t fleet_id, PlanetIndex target);
 // `icon(type)` = the type's Icon_Name.
 std::vector<ui::GalacticBuildOption> galactic_build_options(const galactic::GalacticSim& g, int32_t player, PlanetIndex planet,
                                                             const std::function<std::string(uint32_t type)>& icon);

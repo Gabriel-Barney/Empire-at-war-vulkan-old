@@ -425,6 +425,8 @@ public:
     uint32_t last_fleet_sel_ = 0;  // galactic: the fleet selection of the last frame (organiser planet)
     uint32_t selected_planet_ = 0;        // galactic planet selection (object id, 0 = none)
     bool fleet_drag_active_ = false;      // galactic HUD fleet drag of the last frame (drag / drop sounds)
+    uint32_t drag_route_fleet_ = 0, drag_route_target_ = 0;  // ui4 t06: the cached route's fleet / target planet ids
+    std::vector<PlanetIndex> drag_route_;                    // ui4 t06: its planets (fleet_drag_route)
     bool battle_end_open_ = false;        // battle-end screen shown: ticks held until Continue (presentation only)
     std::u32string battle_place_;         // the running battle's localized place (the battle-end screen's title line)
     uint32_t invade_planet_ = 0;          // ui3 t05: planet object the battle-end "Invade System" button invades (0 = none)
@@ -856,6 +858,8 @@ public:
     void post_tick();
     void step_sim();
     void galactic_input();
+    // ui4 t06 (GALAXY_MAP_PRESENTATION §2.2): the grey route / cursor line while a fleet is dragged on the galaxy.
+    void fleet_drag_preview(const ui::View& view, const std::vector<ui::PickSphere>& fleets);
     void battle_input();
     // refixf t08: the world pick tests over the top tactical mode (null outside a battle). Valid until the next tick.
     const ui::WorldPickTests* world_pick_tests();

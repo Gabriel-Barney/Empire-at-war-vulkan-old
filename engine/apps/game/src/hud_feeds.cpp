@@ -311,5 +311,25 @@ const char* galactic_announcement(const galactic::GalacticSim& g, const galactic
     }
 }
 
+std::vector<PlanetIndex> fleet_drag_route(const galactic::GalacticSim& g, int32_t me, uint32_t fleet_id, PlanetIndex target) {
+    std::vector<PlanetIndex> path;
+    if (me < 0 || target >= g.planets().size()) return path;
+    const objects::ObjectHandle h = g.store().find(static_cast<objects::ObjectId>(fleet_id));
+    const uint32_t fi = h ? g.fleet_of(h) : galactic::kNoFleet;
+    if (fi == galactic::kNoFleet || fi >= g.fleets().size()) return path;
+    const galactic::FleetState& fl = g.fleets()[fi];
+    if (fl.moving || fl.planet == kInvalidPlanet || fl.planet == target) return path;
+    // 0x3da30's request: Path_Request_Init (every flag set), then flags 0..2 = the fleet is hidden, flag 4 = set.
+    const bool hidden = g.hidden(h);
+    galactic::PathRequest req;
+    req.source = fl.planet;
+    req.destination = target;
+    req.allow_unknown_or_neutral = req.allow_enemy_owned = req.skip_danger_check = hidden;
+    req.always_accept_destination = true;
+    galactic::PathScratch scratch;
+    if (!galactic::find_fleet_path(g.graph(), g.player_view(me), req, scratch, path)) path.clear();
+    return path;
+}
+
 }  // namespace alamo::game
 #endif

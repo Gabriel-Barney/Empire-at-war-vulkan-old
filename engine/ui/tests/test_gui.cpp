@@ -1828,6 +1828,22 @@ void test_galactic_hud() {
                 s.label_icons, s.buttons, s.build_buttons, s.queue_entries, s.fleet_slots, s.objectives, s.hit_boxes);
     CHECK(s.labels == 2 && s.label_icons == 1 && s.build_buttons == 1 && s.queue_entries == 1 && s.fleet_slots == 2 &&
           s.objectives == 2 && hud.selected_planet() == 1);
+    // ui4 t07 (HUD_GAPS §2.2): the encyclopedia subject of each pad - the build pad's and the queue hologram's type, the
+    // organiser unit pads' units; nothing for the other components.
+    {
+        uint32_t build_types = 0, queue_types = 0, units = 0, other = 0;
+        for (int32_t c = 0; c < static_cast<int32_t>(table.size()); ++c) {
+            GalacticHud::PadSubject ps;
+            if (!hud.pad_subject(c, ps)) continue;
+            if (ps.object == 0 && ps.type == 7) ++queue_types;
+            else if (ps.object == 0 && ps.type == planets[1].planet) ++build_types;
+            else if (ps.object == 901 || ps.object == 902) ++units;
+            else ++other;
+        }
+        CHECK(build_types == 1 && queue_types == 1 && units == 2 && other == 0);
+        GalacticHud::PadSubject ps;
+        CHECK(!hud.pad_subject(-1, ps));
+    }
     // t49: g_planet_ring round every visible planet, at its atlas size, selected or not, fogged too; g_planet_value only with
     // the b_filters0 toggle on.
     {

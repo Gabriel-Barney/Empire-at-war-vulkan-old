@@ -417,6 +417,14 @@ public:
     // ui1 t03: the g_planet_fleet / g_planet_land_forces button under pixel (px, py) of the last build: its fleet id (0 =
     // none or an empty slot) and whether it is the land-forces button.
     uint32_t stack_under(float px, float py, bool& land) const;
+    // ui4 t07 (HUD_GAPS §2.2): what the encyclopedia pop-up of a hovered pad of the last build shows - a build pad or a
+    // queue hologram: its type (object 0); an organiser or land-forces unit pad: its unit (the stack's first, type left
+    // kNoSlotType for the host to look up). False for a fleet header, an empty pad and any other component.
+    struct PadSubject {
+        uint32_t object = 0;
+        uint32_t type = kNoSlotType;
+    };
+    bool pad_subject(int32_t component, PadSubject& out) const;
     // RouteHooks::hud_takes: false for a right press on g_planet_fleet / g_planet_land_forces (they ignore the right
     // button, so a right-click move onto the planet under them reaches the world); true otherwise.
     bool takes_button(int32_t component, Button b) const;

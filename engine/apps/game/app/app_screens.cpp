@@ -959,6 +959,28 @@ void App::build_encyclopedia(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
                 object = id;
                 type = t;
             }
+    // ui4 t07 (HUD_GAPS §2.2): a hovered build pad or queue hologram shows its type's pop-up (keyed kEncyTypeKey | type: it
+    // has no object), an organiser / land-forces unit pad its unit's.
+    if (component < 0 && screen_ == Screen::Galactic && routed_.hover_component >= 0) {
+        constexpr uint32_t kEncyTypeKey = 0xE0000000u;  // [port] above every object id the sim hands out
+        ui::GalacticHud::PadSubject ps;
+        if (ui_.galactic_hud.pad_subject(routed_.hover_component, ps)) {
+            objects::TypeIndex t = objects::kNone;
+            if (ps.object != 0) {
+                if (const galactic::GalacticSim* g = galaxy()) {
+                    const objects::ObjectHandle hnd = g->store().find(static_cast<objects::ObjectId>(ps.object));
+                    if (hnd && g->store().alive(hnd)) t = g->store().type(hnd);
+                }
+            } else if (ps.type < data_.types.size()) {
+                t = static_cast<objects::TypeIndex>(ps.type);
+            }
+            if (t != objects::kNone && t < data_.types.size()) {
+                component = routed_.hover_component;
+                object = ps.object != 0 ? ps.object : (kEncyTypeKey | static_cast<uint32_t>(t));
+                type = t;
+            }
+        }
+    }
     ency_.update(component, object, now_s_);  // every frame: the countdown / fade run on the panel
     // Remember the hovered object's type so the pop-up of shown_object() still draws while it fades out; keep only the
     // shown and the hovered subjects.
