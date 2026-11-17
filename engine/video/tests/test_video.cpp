@@ -153,6 +153,17 @@ void test_captions() {
     check(t.text_id() == "TEXT_B", "caption: duration 0 = 120 frames (still on at 129)");
     t.step(129, 130, all);
     check(t.text_id().empty(), "caption: duration 0 = 120 frames (gone at 130)");
+    // Only the first match in id order counts: a hidden one ([TBL]) blocks a later match in the same window.
+    t.reset({{"TEXT_A", 5, 10}, {"TEXT_B", 5, 10}});
+    t.step(0, 5, [](std::string_view id) { return id != "TEXT_A"; });
+    check(t.text_id().empty(), "caption: a hidden first match shows nothing, no fallback to the next");
+    // A loop restarts the track: the shown caption goes, frame 5 matches again on the next pass.
+    t.step(0, 5, all);
+    const uint64_t before = t.serial();
+    t.restart();
+    check(t.text_id().empty() && t.serial() != before, "caption: restart clears the shown caption");
+    t.step(0, 5, all);
+    check(t.text_id() == "TEXT_A", "caption: shows again after a restart");
 #if defined(ALAMO_VIDEO_HAVE_MOVIE_DB)
     const char* xml = R"(<Movies><Movie Name="Win"><Movie_File>w.bik</Movie_File>
         <Caption_Frame> TEXT_Z, 60 </Caption_Frame><Caption_Duration> TEXT_Z, 150 </Caption_Duration>

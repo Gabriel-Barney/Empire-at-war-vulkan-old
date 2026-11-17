@@ -182,6 +182,7 @@ std::string master_text_path(std::string_view language);
 // UTF helpers (text is UTF-16 in the DAT files; the HUD lays out code points).
 std::u32string utf16_to_utf32(std::u16string_view s);
 std::u32string utf8_to_utf32(std::string_view s);
+std::string utf32_to_utf8(std::u32string_view s);
 
 // ---- Layout -------------------------------------------------------------------------------------
 // A bone of a shell model in shell MODEL space (bind pose, model units). Verified against the real

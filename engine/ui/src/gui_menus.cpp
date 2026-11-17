@@ -1167,7 +1167,7 @@ void FrontEnd::build_save_rows(GuiDialog& d, int32_t selected, int32_t top) {
             if (k.second >= 0) {
                 const SaveGameInfo& s = saves_[static_cast<size_t>(k.second)];
                 save_rows_.push_back({k.second, {}});
-                items.push_back(s.label.empty() ? ascii32(s.name) : s.label);
+                items.push_back(s.label.empty() ? utf8_to_utf32(s.name) : s.label);  // t13: names are UTF-8
                 icons.push_back(s.icon);
                 indent.push_back(depth);
                 continue;
@@ -1549,7 +1549,7 @@ void FrontEnd::setup(GuiDialog& d) {
         d.set_text("IDC_DIALOG_BOX_BUTTON_RIGHT", rebind ? text_or("TEXT_BUTTON_CANCEL", U"Cancel") : text("TEXT_BUTTON_NO"));
         for (const char* u : {"IDC_USER_TEXT_STRING_1", "IDC_USER_TEXT_STRING_2", "IDC_USER_TEXT_STRING_3"}) d.show(u, false);
         if (overwrite || del) {  // N1 / t09: the save the question is about
-            d.set_text("IDC_USER_TEXT_STRING_1", ascii32(confirm_save_));
+            d.set_text("IDC_USER_TEXT_STRING_1", utf8_to_utf32(confirm_save_));
             d.show("IDC_USER_TEXT_STRING_1", true);
         }
         if (rebind && rebind_other_ >= 0 && rebind_slot_ >= 0) {  // UI5 t09 (UI.md §4.3 Capture): retail's two lines
@@ -1741,7 +1741,7 @@ void FrontEnd::on_change(const GuiEvent& e, std::vector<MenuAction>& out) {
     } else if (ascii_iequals(n, kSave) && e.control == "IDC_SAVE_GAME_LIST" && e.kind == GuiEvent::Kind::SelectionChanged) {
         // N1 / t09: the save's name (the file), not its label.
         if (const int32_t si = row_save(e.value); si >= 0 && !save_blocked_)
-            d->set_text("IDC_SAVE_GAME_NAME_EDIT", ascii32(saves_[static_cast<size_t>(si)].name));
+            d->set_text("IDC_SAVE_GAME_NAME_EDIT", utf8_to_utf32(saves_[static_cast<size_t>(si)].name));
     } else if (ascii_iequals(n, kLoad) && e.kind == GuiEvent::Kind::DoubleClicked && e.control == "IDC_SAVE_GAME_LIST") {
         if (const int32_t si = row_save(e.value); si >= 0) {
             MenuAction a = act(MenuAction::Kind::LoadGame);
@@ -2076,9 +2076,9 @@ void FrontEnd::on_click(const GuiEvent& e, std::vector<MenuAction>& out) {
         if (is("IDC_SAVE_CANCEL_BUTTON")) pop();
         else if (is("IDC_SAVE_GAME_BUTTON") && !save_blocked_) {
             const GuiControl* ed = d->get("IDC_SAVE_GAME_NAME_EDIT");
-            std::string name;
-            if (ed)
-                for (char32_t ch : ed->text) name.push_back(ch < 0x80 ? static_cast<char>(ch) : '_');
+            // t13: the typed name goes out as UTF-8 (sanitize_save_name keeps valid UTF-8), so a selected non-ASCII
+            // save is overwritten, not copied under an underscored name.
+            const std::string name = ed ? utf32_to_utf8(ed->text) : std::string{};
             if (!name.empty() && p_.save_exists && p_.save_exists(name)) {  // N1 / t09: overwrite? (Yes = SaveGame)
                 confirm_save_ = name;
                 quit_action_ = "overwrite";

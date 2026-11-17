@@ -646,6 +646,18 @@ void test_routing_and_controls() {
         const float rh = static_cast<float>(env.fonts.metrics(env.gui.control_font(*d, static_cast<size_t>(d->find("IDC_TEST_COMBO")))).line_height) *
                          env.gui.canvas().units_per_pixel_y;
         const Vec2f row2 = env.gui.canvas().canvas_to_pixel(f.min.x + 10.0f, f.max.y - 15.0f - 2.0f - 2.5f * rh);
+        // UI5 t06 (UI.md §3.6): the open drop-down is silent; coming back onto the field hovers, the closing click presses.
+        env.sfx.clear();
+        env.frame(row2, false);
+        CHECK(env.sfx.empty());
+        env.frame(field, false);
+        CHECK(env.sfx.size() == 1 && env.sfx[0] == "GUI_Common_Dialog_Button_Hilight");
+        env.frame(field, true);
+        env.frame(field, false);
+        CHECK(!d->get("IDC_TEST_COMBO")->open && env.sfx.size() == 2 && env.sfx[1] == "GUI_Common_Dialog_Button_Press");
+        env.frame(field, true);  // open again for the row pick
+        env.frame(field, false);
+        CHECK(d->get("IDC_TEST_COMBO")->open);
         env.frame(row2, false);
         ev = env.frame(row2, true);
         env.frame(row2, false);

@@ -621,8 +621,9 @@ void App::begin_battle(bool from_save) {
     const PlanetIndex planet = b ? b->request().info.planet : kInvalidPlanet;
     battle_place_ = battle_place_name(planet);
     // ui5 t10 (UI.md §5.1 "Which dialog"): the Mission load dialogs only for a SET_TACTICAL_MAP map override or a save
-    // taken during the battle; LINK_TACTICAL story battles take the Battle pair like any other.
-    const bool story_mission = b && (b->request().story_map || from_save);
+    // taken during the battle (when the battle's map name is not empty, as 0x8dc40 checks); LINK_TACTICAL story battles
+    // take the Battle pair like any other.
+    const bool story_mission = b && (b->request().story_map || (from_save && !b->request().map.empty()));
     // story t13 (BT §2.9.1 P10 / P11): a story-linked battle opens with the record's presentation (applied by the start,
     // CampaignBattles::linked_presentation); any other battle with nothing held.
     {

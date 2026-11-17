@@ -327,7 +327,10 @@ std::string save_path(const std::string& dir, std::string_view name) {
     if (stem.empty()) return {};
     // A listed file is found by its own stem even when sanitizing would change it (a name over kMaxSaveName bytes copied
     // in by hand): the dialogs hand back SaveEntry::name, so load / delete must reach that file.
-    if (stem != name && name.find_first_of("/\\") == std::string_view::npos && name.find("..") == std::string_view::npos) {
+    // Only a plain file name: no separator, drive / stream colon or other character Windows forbids, no control byte.
+    const bool plain = name.find_first_of("<>:\"/\\|?*") == std::string_view::npos && name.find("..") == std::string_view::npos &&
+                       std::none_of(name.begin(), name.end(), [](char c) { return static_cast<unsigned char>(c) < 0x20; });
+    if (stem != name && plain) {
         std::error_code ec;
         const fs::path own = host_path(dir) / host_path(std::string(name) + kSaveExtension);
         if (fs::is_regular_file(own, ec)) return utf8_of(own);

@@ -118,7 +118,7 @@ bool MovieSlot::open(const GameData& data, GameAudioHost& audio, std::string_vie
     next_cue_ = 0;
     captions_ = std::make_unique<video::CaptionTrack>();  // ui5 t12: Caption_Frame / Caption_Duration
     captions_->reset(entry.captions);
-    caption_frame_ = 1;
+    caption_frame_ = 0;  // the first step covers (0, 1], so a caption on frame 1 shows
     fps_ = info.fps_num > 0 && info.fps_den > 0 ? static_cast<double>(info.fps_num) / static_cast<double>(info.fps_den) : 30.0;
     audio_ = &audio;
     // STRATEGIC_GAPS §7.4: the movie-music flag starts mode 14 music, Halt_Game_Music stops the game's music; both are
@@ -161,7 +161,10 @@ bool MovieSlot::update(double dt, ui::HudRenderer& hud, uint16_t page) {
     }
     if (captions_ && !captions_->empty()) {  // ui5 t12 (AUDIO.md §3.4): Bink frame numbers count from 1
         const int64_t frame = static_cast<int64_t>(std::floor(player_->time_s() * fps_)) + 1;
-        if (frame < caption_frame_) caption_frame_ = frame;  // a loop went back to the start
+        if (frame < caption_frame_) {  // a loop went back to the start
+            captions_->restart();
+            caption_frame_ = 0;
+        }
         if (frame > caption_frame_) {
             captions_->step(caption_frame_, frame, [this](std::string_view id) { return !caption_shows_ || caption_shows_(id); });
             caption_frame_ = frame;

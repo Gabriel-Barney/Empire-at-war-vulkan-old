@@ -124,11 +124,20 @@ public:
         start_ = duration_ = 0;
         ++serial_;
     }
+    // A looping movie went back to its start: nothing shown, the captions count again from frame 1.
+    void restart() {
+        if (shown_ >= 0) ++serial_;
+        shown_ = -1;
+        start_ = duration_ = 0;
+    }
     template <class Shows>
     void step(int64_t prev, int64_t cur, Shows&& shows) {
+        // AUDIO.md 3.4: only the first caption (text-id order) whose frame lies in (prev, cur] counts; when `shows`
+        // refuses it ([TBL]) nothing starts this frame, a later match in the same window is not tried.
         for (size_t i = 0; i < captions_.size(); ++i) {
             const MovieCaption& c = captions_[i];
-            if (c.frame < 0 || c.frame <= prev || c.frame > cur || !shows(std::string_view(c.text_id))) continue;
+            if (c.frame < 0 || c.frame <= prev || c.frame > cur) continue;
+            if (!shows(std::string_view(c.text_id))) break;
             shown_ = static_cast<int32_t>(i);
             start_ = cur;
             duration_ = c.duration == 0 ? 120 : c.duration;

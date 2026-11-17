@@ -28,15 +28,9 @@ std::string_view stem(std::string_view path) {
 
 // "TEXT_ID, 123" -> (id, value); false when either part is missing or the number does not parse.
 bool id_and_int(std::string_view t, std::string& id, int32_t& value) {
-    auto trim = [](std::string_view v) {
-        auto space = [](char c) { return (c == ' ' || c == '\t' || c == '\r' || c == '\n'); };
-        while (!v.empty() && space(v.front())) v.remove_prefix(1);
-        while (!v.empty() && space(v.back())) v.remove_suffix(1);
-        return v;
-    };
     const size_t comma = t.find(',');
     if (comma == std::string_view::npos) return false;
-    const std::string_view a = trim(t.substr(0, comma)), b = trim(t.substr(comma + 1));
+    const std::string_view a = ascii_trim(t.substr(0, comma)), b = ascii_trim(t.substr(comma + 1));
     if (a.empty() || b.empty()) return false;
     const std::string num(b);
     char* end = nullptr;

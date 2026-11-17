@@ -373,7 +373,7 @@ each line centred horizontally, the block's last line at 0.95 of the screen heig
 one font line height apart; shown from the current frame for `Caption_Duration` of that id (0 → 120 frames; a missing
 duration ends it on the next frame). No caption starts that frame: the shown one is removed once the current frame
 ≥ start + duration. A new caption replaces the old at once. The advisor / hologram talking-head loops (texture
-movies) have no captions.
+movies) have no captions. [port] A text id missing from the game text shows nothing (like `[TBL]`); a movie that loops starts its captions again from frame 1 with none shown.
 
 ---
 

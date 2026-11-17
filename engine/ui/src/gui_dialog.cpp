@@ -1013,25 +1013,37 @@ void GuiManager::update(const InputFrame& raw, const RoutedInput& routed, double
     }
     // Hover.
     const int32_t hc = target && raw.mouse_inside ? target->control_at(cursor_) : -1;
-    // UI5 t06: a list's scroll bar is its own gadget in retail (GUIGadgetVScrollbarClass): entering it is a hover too.
-    bool in_scroll = false;
-    if (target && hc >= 0 && (*target)[static_cast<size_t>(hc)].type == GuiGadgetType::ListBox) {
-        const ScrollBar sb = scroll_bar(*target, static_cast<size_t>(hc));
-        in_scroll = sb.active && sb.col.contains(cursor_);
+    // UI5 t06: a list's scroll bar is its own gadget in retail (GUIGadgetVScrollbarClass): entering it is a hover too,
+    // and so is the open drop-down's scroll bar. A combo box plays its hover only on entering its field rect (0x1e8970),
+    // also when the cursor comes back onto the field from its open drop-down.
+    bool in_scroll = false, in_field = false;
+    if (target && hc >= 0) {
+        const auto i = static_cast<size_t>(hc);
+        const GuiControl& c = (*target)[i];
+        if (c.type == GuiGadgetType::ListBox || (c.type == GuiGadgetType::ComboBox && c.open)) {
+            const ScrollBar sb = scroll_bar(*target, i);
+            in_scroll = sb.active && sb.col.contains(cursor_);
+        }
+        if (c.type == GuiGadgetType::ComboBox) in_field = combo_field(*target, i).contains(cursor_);
     }
-    if (target != hover_dialog_ || hc != hover_control_) {
+    const bool entered = target != hover_dialog_ || hc != hover_control_;
+    if (entered) {
         hover_dialog_ = target;
         hover_control_ = hc;
         hover_since_ = now;
         if (target && hc >= 0) {
             const GuiControl& c = (*target)[static_cast<size_t>(hc)];
-            // retail's combo plays it only over its closed field (0x1e8970), not over the open drop-down
-            if (hover_sound(c.type) && c.enabled && !c.open) sfx("GUI_Common_Dialog_Button_Hilight", hc);
+            if (hover_sound(c.type) && c.enabled && c.type != GuiGadgetType::ComboBox)
+                sfx("GUI_Common_Dialog_Button_Hilight", hc);
             if (clickable(c.type) && c.enabled) events.push_back(make_event(GuiEvent::Kind::Hovered, *target, hc));
         }
     }
-    if (in_scroll && !hover_scroll_ && (*target)[static_cast<size_t>(hc)].enabled) sfx("GUI_Common_Dialog_Button_Hilight", hc);
+    if (target && hc >= 0 && (*target)[static_cast<size_t>(hc)].enabled) {
+        if (in_field && (entered || !hover_field_)) sfx("GUI_Common_Dialog_Button_Hilight", hc);
+        if (in_scroll && (entered || !hover_scroll_)) sfx("GUI_Common_Dialog_Button_Hilight", hc);
+    }
     hover_scroll_ = in_scroll;
+    hover_field_ = in_field;
 
     const uint8_t lb = button_bit(Button::Left);
     const bool dialog_owns_left = routed.owner[static_cast<size_t>(Button::Left)] == PointerTarget::Dialog;
@@ -1059,6 +1071,8 @@ void GuiManager::update(const InputFrame& raw, const RoutedInput& routed, double
                 scroll_press(*target, i, part, now);  // the drop-down's scroll bar: stays open
                 continue;
             }
+            // UI5 t06 (UI.md §3.6): the click on the field that closes the drop-down is a press too.
+            if (combo_field(*target, i).contains(cursor_)) sfx("GUI_Common_Dialog_Button_Press", static_cast<int32_t>(i));
             const GuiRect lr = combo_list(*target, i);
             if (lr.contains(cursor_)) {
                 const float rh = row_height(*target, i);

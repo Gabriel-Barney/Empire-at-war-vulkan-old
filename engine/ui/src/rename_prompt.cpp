@@ -33,28 +33,7 @@ void RenamePrompt::open(uint32_t object, bool fleet, std::string_view current) {
     if (text_.size() > commands::kMaxObjectNameChars) text_.resize(commands::kMaxObjectNameChars);
 }
 
-std::string RenamePrompt::utf8() const {
-    std::string o;
-    for (const char32_t c : text_) {
-        const auto v = static_cast<uint32_t>(c);
-        if (v < 0x80) {
-            o.push_back(static_cast<char>(v));
-        } else if (v < 0x800) {
-            o.push_back(static_cast<char>(0xC0 | (v >> 6)));
-            o.push_back(static_cast<char>(0x80 | (v & 0x3F)));
-        } else if (v < 0x10000) {
-            o.push_back(static_cast<char>(0xE0 | (v >> 12)));
-            o.push_back(static_cast<char>(0x80 | ((v >> 6) & 0x3F)));
-            o.push_back(static_cast<char>(0x80 | (v & 0x3F)));
-        } else {
-            o.push_back(static_cast<char>(0xF0 | (v >> 18)));
-            o.push_back(static_cast<char>(0x80 | ((v >> 12) & 0x3F)));
-            o.push_back(static_cast<char>(0x80 | ((v >> 6) & 0x3F)));
-            o.push_back(static_cast<char>(0x80 | (v & 0x3F)));
-        }
-    }
-    return o;
-}
+std::string RenamePrompt::utf8() const { return utf32_to_utf8(text_); }
 
 RenamePrompt::Result RenamePrompt::update(std::u32string_view typed, bool backspace, bool enter, bool escape) {
     if (!active_) return Result::None;

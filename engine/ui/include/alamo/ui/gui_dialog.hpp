@@ -439,7 +439,8 @@ private:
     // Pointer state.
     GuiDialog* hover_dialog_ = nullptr;
     int32_t hover_control_ = -1;
-    bool hover_scroll_ = false;  // UI5 t06: the cursor is over the hovered list's scroll bar
+    bool hover_scroll_ = false;  // UI5 t06: the cursor is over the hovered list's (or open drop-down's) scroll bar
+    bool hover_field_ = false;   // UI5 t06: the cursor is over the hovered combo box's field rect
     double hover_since_ = 0.0;
     GuiDialog* press_dialog_ = nullptr;
     int32_t press_control_ = -1;

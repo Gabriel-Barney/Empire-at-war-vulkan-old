@@ -19,7 +19,7 @@
 //               id) > the saves, each row showing save_row_label (the week / battle time and when it was saved).
 //   LISTING     list_saves(dir): every *.alsv, newest first (SaveMeta::saved_at, else the file's write time), then by
 //               name (case-insensitive, then exact) - a deterministic order. Only the file header is read when it is in
-//               the format-1 layout (magic, version, tick, description); other versions fall back to SaveFile::read_file.
+//               the format-1 layout (magic, version, tick, description); other versions fall back to read_save_file.
 //               Unreadable files are listed with readable = false (so the player can delete them).
 //   WRITING     write_save_file: a temporary file next to the target, then a rename over it, so a failed write never
 //               destroys the save it was replacing.

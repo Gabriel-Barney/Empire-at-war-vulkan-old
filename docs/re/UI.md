@@ -592,8 +592,10 @@ the slots.
 - The bound key (key + modifier) is looked up in the working copy (0x2126d0). Free → the slot takes it, fields refresh.
   Held by another slot (a derived group slot 123..152 is reported as its group slot (i − 123) mod 10) → a message box,
   title `TEXT_KEYBOARD_OPTIONS`, buttons `TEXT_BUTTON_OK` and `TEXT_BUTTON_CANCEL`, text = `TEXT_KEYBIND_WARNING_0`
-  (%0 key name, %1 the other slot's label) + line break + `TEXT_KEYBIND_WARNING_1` (%0 key name, %2 this slot's label).
-  OK binds it (the set 0x212420 removes it from every other slot); Cancel changes nothing.
+  (`##0` key name, `##1` the other slot's label) + line break + `TEXT_KEYBIND_WARNING_1` (`##0` key name, `##2` this slot's label).
+  OK binds it (the set 0x212420 removes it from every other slot); Cancel changes nothing. [port] The port shows it in
+  `IDD_DIALOG_BOX_QUIT_CONFIRM` with the two lines as two one-line statics (`IDC_USER_TEXT_STRING_2` / `_3`) instead of
+  one text with a line break.
 - Cancel event (0): if a field is in capture (control flag +0x92), that slot is set back to its **applied** binding,
   the field loses focus and the page refreshes; otherwise the dialog closes and the options menu comes back.
 - `IDC_OK` (the Back button): closes the dialog and returns to the options menu, **no prompt, nothing applied**.
