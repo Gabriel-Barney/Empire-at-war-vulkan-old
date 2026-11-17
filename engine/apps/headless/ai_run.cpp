@@ -257,8 +257,12 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
             if (const auto scoring = db.constants().get("Game_Scoring_Script_Name"))
                 host.set_scoring_script(files.get(), std::string(*scoring));
         host.set_scoring_campaign(name);  // q6 t09: Game_Mode_Starting_Event("Galactic", campaign)
-        galactic::GalacticSim* gs = host.start_galactic(rules, setup);
-        if (!gs) return false;
+        std::vector<std::string> start_diag;
+        galactic::GalacticSim* gs = host.start_galactic(rules, setup, &start_diag);
+        if (!gs) {  // modc t39: say why (a setup larger than the session, a refused start)
+            for (const std::string& d : start_diag) std::fprintf(stderr, "galactic-ai: %s\n", d.c_str());
+            return false;
+        }
         if (print && aopt.verbose) {  // q6 t22: the victory records (setup 0x289a90) per player
             std::string vl = "galactic-ai: victory records:";
             for (const galactic::VictoryRecord& r : gs->victory_records())
@@ -354,7 +358,10 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
         };
         sim::CampaignBattles battles(host, crules, catalog, sim::CampaignBattles::file_map_loader(*files), bo);
         std::vector<std::string> ad;
-        if (!battles.attach(&ad)) return false;
+        if (!battles.attach(&ad)) {
+            for (const std::string& d : ad) std::fprintf(stderr, "galactic-ai: battles: %s\n", d.c_str());
+            return false;
+        }
         // battle host: the auto-resolve survival roll -> the galactic AI's survival learning (STRATEGIC_GAPS 1.1).
         battles.conflicts().on_survival_roll = [&world_ptr](int32_t owner, uint32_t type, bool survived) {
             if (world_ptr) world_ptr->record_auto_resolve_survival(owner, type, survived);

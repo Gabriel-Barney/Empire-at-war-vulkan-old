@@ -414,6 +414,17 @@ static void test_plots_file() {
     CHECK(fired_names(m) == "A1,B1,");  // second T9 after activation
     StoryModel bad;
     CHECK(!bad.load_plots(dp, "Missing.xml", &err) && !err.empty());
+    // modc t39 (STORY.md §2.1): a listed plot file that does not exist is skipped with a warning; the others load, and its
+    // pending Lua_Script does not pass to the next plot.
+    write_file(root / "Data/XML/Story_Plots_M.xml", "<Story_Mode_Plots><Lua_Script>Gone_Script</Lua_Script>"
+                                                    "<Active_Plot>Not_Shipped.xml</Active_Plot><Active_Plot>B.xml</Active_Plot>"
+                                                    "</Story_Mode_Plots>");
+    DirectoryProvider dpm(root.string());
+    StoryModel partial;
+    err.clear();
+    CHECK(partial.load_plots(dpm, "Story_Plots_M.xml", &err) && err.empty());
+    CHECK(partial.plot_count() == 1 && partial.find_plot("B.xml") == 0 && partial.plot(0).lua_script.empty() &&
+          partial.warnings().size() == 1);
     // Q6: names with a folder below Data\XML (Thrawn's Revenge) are read as written; a folder that does not exist falls
     // back to the base name (the FoC rule).
     write_file(root / "Data/XML/Conquests/Sub/Story_Plots_S.xml",

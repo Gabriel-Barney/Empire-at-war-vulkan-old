@@ -1390,6 +1390,9 @@ void CampaignBattles::story_load_map(galactic::BattleRequest& r) {
 void CampaignBattles::story_begin(SimHost& host, GameMode& mode) {
     if (!bridge_before_spawn_) story_bridge_begin(host, mode);
     bridge_before_spawn_ = false;
+#ifdef ALAMO_LUA_HAVE_FOG
+    story_fog_.epoch = fought_;  // modc t32 review: the early bridge ran before ++fought_; the epoch is this battle's number
+#endif
     StorySession* s = host.story();
     if (!s || !battle_ || !story_bridge_) return;
     StoryBattleStart st;

@@ -46,7 +46,8 @@ constexpr int32_t kAllBlocks = 8;  // any other name: a write goes to every terr
 struct RadarWalk {
     RadarSettings& out;
     int32_t block = -1;          // selected Passability_Color_Settings block, -1 none; kept when its element ends
-    std::string event;           // current Radar_Map_Event key (upper case), empty none
+    std::string event;           // current Radar_Map_Event key (upper case; an empty name is a key too)
+    bool has_event = false;
     RadarEventType scratch{};    // the Event_* scratch values ([port] start at the record defaults)
     explicit RadarWalk(RadarSettings& s) : out(s) {
         scratch.scale = 0.0125f;
@@ -74,7 +75,7 @@ struct RadarWalk {
     void field(std::string_view tag, std::string_view text) {
         if (ascii_iequals(text, "TBD")) return;  // the original only warns
         RadarEventType* cur = nullptr;
-        if (!event.empty())
+        if (has_event)
             if (auto it = out.events.find(event); it != out.events.end()) cur = &it->second;
         if (ascii_iequals(tag, "Event_Model_Name")) {
             if (cur) cur->model = std::string(text);
@@ -113,13 +114,13 @@ struct RadarWalk {
                 block = kAllBlocks;
                 for (int32_t i = 0; i < kAllBlocks; ++i)
                     if (b == kBiomeBlocks[i]) block = i;
-                event.clear();
+                has_event = false;
             } else if (ascii_iequals(tag, "Color")) {
                 const std::string cn = name_attr(c);
                 for (size_t i = 0; i < kPassabilityCount; ++i)
                     if (cn == kPassNames[i]) {
                         if (block >= 0) pass_color(c, i);  // no block selected: "Unprocessed entry"
-                        event.clear();
+                        has_event = false;
                     }
                 // a terrain category colour (DEFAULT, GRASS, ...): read by the original, not used by the port's radar
             } else if (ascii_iequals(tag, "Radar_Map_Event")) {
@@ -130,6 +131,7 @@ struct RadarWalk {
                 t.duration = 2.0f;
                 out.events[key] = std::move(t);
                 event = key;
+                has_event = true;
             } else if (const std::string_view text = data::trim(c.text()); !text.empty() && c.child_count() == 0) {
                 field(tag, text);
             }

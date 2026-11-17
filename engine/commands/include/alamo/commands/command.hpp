@@ -32,8 +32,8 @@ namespace alamo::commands {
 inline constexpr uint16_t kWireVersion = 2;  // canonical format (v1 = stage-1 typed orders, retired)
 inline constexpr size_t kCommandHeaderBytes = 28;
 // [port] PlayerList cap (the original keeps a vector with no fixed cap). 32 since Q6 (was 16): Thrawn's Revenge campaigns
-// have 22 players.
-inline constexpr uint8_t kMaxPlayerSlots = 32;
+// have 22 players. 64 since modc t39: Age of Legends' sandbox campaigns have 50 (one per faction).
+inline constexpr uint8_t kMaxPlayerSlots = 64;
 inline constexpr uint32_t kMaxPayloadBytes = 1u << 20;  // decode guard
 
 // Who produced the order. Player goes through the scheduler (Network: the original's peer source, kept as a
