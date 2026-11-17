@@ -531,10 +531,10 @@ Retail hook run `20261116-171531` (kit dev 1302b4ab, Resolve candidate hook) is 
 
 **Why the port differed.** The port proposed no Hold_Position at all; its stats had no Hold_Position line.
 - `Should_Hold_Position` is `20 × Game.IsLandControlGame + 5 × IsCampaignGame × … + 10 × (not campaign) × (AdditionalPopulationCapacity > UnitSpaceAvailable) × init × (Num_Refineries > 1)`.
-- Active goals carry the bare function value (Commit step 1), so 20.000 is reached only when IsLandControlGame = 1.
-- So in retail, `Game.IsLandControlGame` (GameModeManager +0x20 == 4) is 1 in a plain land skirmish that ends by destroying the base, not only in Capture Control Points.
+- ~~Active goals carry the bare function value (Commit step 1), so 20.000 is reached only when IsLandControlGame = 1.~~
+- ~~So in retail, `Game.IsLandControlGame` is 1 in a plain land skirmish.~~ **Wrong, corrected below in "IsLandControlGame is 0 in a conquest skirmish"**: `init` is a sum (1 with the base, 2 after tech 2), so 20 = 10 × 2.
 
-**Port fix:** `BattleAi::fill` sets `land_control` in every land skirmish. ccpgu t03 had tied it to `control_point_domination` as a [port] guess. With the fix, port seed 1 starts Hold_Position plans from frame 371 (12000 ticks: 6 accepted).
+**Port fix (reverted 2026-11-17):** `BattleAi::fill` sets `land_control` in every land skirmish. ccpgu t03 had tied it to `control_point_domination` as a [port] guess. With the fix, port seed 1 starts Hold_Position plans from frame 371 (12000 ticks: 6 accepted).
 
 **Exit test after the Hold_Position fix** (RETAIL now has Empire 5/7 with 22544):
 
@@ -572,3 +572,42 @@ skai-b's rule (SKAI_T22_SPACE_AI_RE Part 5): a unit handed to a task force stays
 - Solve failures on Plan dropped from 205 to 4. Contrast failures now dominate: 261 for proposals, 51 at re-solve.
 
 **Next lead:** the Destroy_Structure contrast solve. The run's `resolve_goals` events show retail's 7445 proposal and its plan; compare the port's contrast lists at the same point.
+
+## IsLandControlGame is 0 in a conquest skirmish (skai-a, 2026-11-17) [H: instructions + measured]
+
+The contrast lead led here. The port's Destroy_Structure solves failed on Contrast because the Empire had no army to send. In retail run 171531, the Empire fields 6 Dark Troopers by frame 5400 and 4 AT-STs by 7200. The port fielded only Stormtrooper teams until about 12600.
+
+The port's opening was wrong from frame 371. It started Build_Infantry_Emergency, Secure_Victory_Control_Point and Hold_Position plans. Its generic land-unit builds waited until 7458; retail's start at 2545. The hook run's `resolve_goals` events never show Build_Infantry_Emergency or Secure_Victory_Control_Point.
+
+**The token.** 0x6e2060 returns 1.0 when GameModeManager +0x20 (0x140b15400) is 4, else 0.0. Every writer of +0x20 copies a game-setup value at game start (0x2b8ed, 0x95aea, 0xb86e0, 0xb9ab1, 0xf46d9; 0xe4c2b and 0xe4f45 store 1). So the value is fixed for a battle.
+
+**The Hold_Position desires** (run 171531, Tactical_Targeted proposals):
+
+| Frame | Desire |
+|---|---|
+| 5902 | 10 |
+| 7054 | 5 |
+| from 7446 | 20 |
+
+These fit `20 × IsLandControlGame` = 0. The term `10 × (not campaign) × (AdditionalPopulationCapacity > UnitSpaceAvailable) × init × (Num_Refineries > 1)` gives the rest:
+- `init` (`Is_Initial_Skirmish_State_Established`) is a sum: 1 with barracks, command centre, a refinery and an army, plus 1 for each tech-2 / tech-3 upgrade held.
+- So the term gives 10 with the base, then 20 after tech 2. Retail buys tech 2 at 6670-7054.
+- 5 = 20 − 15: `Per_Activation_Failure_Desire_Adjust` −15 for one activation failure.
+- With IsLandControlGame = 1, 10 would be unreachable (20 + 10k − 15c).
+
+The 2026-11-16 reading ("20 only through IsLandControlGame") was wrong.
+
+**Port:** `BattleAi::fill` sets `land_control` only with `control_point_domination`, as ccpgu t03 had it. Port seed 1 (36000 ticks) now opens like retail:
+
+| Plan | Port frame | Retail frame |
+|---|---|---|
+| SecureBuildPad | 371 | 727 |
+| Build_Econ_Structure | 2216 | 2184 |
+| Early upgrades, generic land units, AV turret | 2589 | 2545 |
+| Flame_Infantry | 3701 | 4014 |
+| First Destroy_Structure | 4463 | 5138 |
+| Tech_Upgrade_Emergency | 6808 | 6670 |
+
+The army also matches: 6 Dark Troopers and 4 AT-STs by 5400.
+
+The port still proposes no Hold_Position; retail does from 5902. One of the 10-term factors is 0 in the port (most likely AdditionalPopulationCapacity > UnitSpaceAvailable). This does not block the exit test.

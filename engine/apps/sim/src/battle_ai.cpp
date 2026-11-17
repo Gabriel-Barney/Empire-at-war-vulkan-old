@@ -1432,12 +1432,14 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
     // Set every fill (a load restores it too); the callbacks below are installed whenever missing, so a world read
     // from a save (which keeps only the callbacks its owner copies) gets them back at the next fill.
     w.skirmish_or_mp = b_->cfg_.skirmish;
-    // Game.IsLandControlGame (AI_GALACTIC_TOKENS 0x6e2060) = GameModeManager +0x20 == 4. skai t15 [H, measured]: true in
-    // a plain (conquest) land skirmish too. Retail run 20261116-171531 (Utapau, Advanced Default, won by destroying the
-    // base) holds two active Hold_Position goals at desire 20.000, and Should_Hold_Position reaches 20 only through
-    // 20 * Game.IsLandControlGame (SKAI_T15_PLAN_RETEST "Hold_Position"). ccpgu t03 had tied it to the control-point
-    // win condition [port]. It gates Hold_Position, Secure_Victory_Control_Point and May_Lose_Land_Control_Game.
-    w.land_control = b_->cfg_.skirmish && !b_->space_;
+    // Game.IsLandControlGame (AI_GALACTIC_TOKENS 0x6e2060) = GameModeManager +0x20 == 4, a game-setup value written only
+    // when a game starts, so it is fixed for the whole battle. skai t15 [H, measured]: 0 in a conquest land skirmish.
+    // Retail run 20261116-171531 (Utapau, won by destroying the base) proposes Hold_Position at 10, then 5 (20 - 15, one
+    // activation failure) and 20: 10 * Is_Initial_Skirmish_State_Established (1 with the base, 2 after tech 2), none of
+    // it from 20 * IsLandControlGame (SKAI_T15_PLAN_RETEST "IsLandControlGame"). [port] the control-point win condition
+    // stands for type 4 (ccpgu t03). It gates Hold_Position, Secure_Victory_Control_Point and May_Lose_Land_Control_Game
+    // (which, when 1, holds back the opening unit builds).
+    w.land_control = b_->cfg_.skirmish && b_->cfg_.control_point_domination && !b_->space_;
     if (!w.parent_rep_type) {
         // The parent-mode (galactic) object by id (0x28aa50), not found -> -1; its type [M: 0x3973b0 on the galactic
         // object; the port's galactic units / companies are their own representative type, no TRANSPORT carried type].

@@ -472,9 +472,10 @@ Sources: 0x344710 case 0x15, 0x360d90 (arm), 0x3639d0 (tactical tick), 0x3611f0 
   or re-arm at that value (the shipped 900-frame timer gives the 30 s line at arming, then 15 s and 5 s); a Neutral observer
   hears nothing. Test `alamo_game_audio_host_tests`.
 - AI in a type-4 game (ccpgu t03, 2026-11-12): `Game.IsLandControlGame` (AI_GALACTIC_TOKENS 0x6e2060: GameModeManager +0x20 ==
-  4) was never set in the port, so the skirmish AI ignored the points. Since skai t15 (2026-11-16, [H] measured: retail
-  Hold_Position goals at desire 20 in a conquest land skirmish, SKAI_T15_PLAN_RETEST "Hold_Position") it is true in
-  every land skirmish (`BattleAi::fill`); ccpgu t03 had tied it to `control_point_domination` [port]. The shipped data has no other type-4 rule: `May_Lose_Land_Control_Game` (=
+  4) was never set in the port, so the skirmish AI ignored the points. +0x20 is written only when a game starts (from the
+  game setup), so the token is fixed for a battle; in a conquest land skirmish it is 0 ([H] measured, skai t15 2026-11-17:
+  SKAI_T15_PLAN_RETEST "IsLandControlGame is 0 in a conquest skirmish"; a 2026-11-16 reading of 1 was wrong and is
+  reverted). `BattleAi::fill` sets it with `control_point_domination` [port: that win condition stands for type 4]. The shipped data has no other type-4 rule: `May_Lose_Land_Control_Game` (=
   owns no Reinforcement_Point and IsLandControlGame) doubles `Should_Secure_Victory_Control_Point` (goal
   Secure_Victory_Control_Point, plan SecureVictoryControlPoint.lua: Produce_Force infantry + vehicle / hero escort, Move_To,
   Guard_Target), forces `Should_Build_Infantry_Emergency` and blocks unit / structure builds, tech and early upgrades and

@@ -176,7 +176,7 @@ P = the player the evaluator belongs to (`Variable_Self`, `Variable_Enemy`, `Var
 |---|---|---|---|---|
 | `Age` | 0x6e1f20 | 0 | `frame × (1/30)` seconds; frame = the **AI context's mode** frame when available, else the current mode | H |
 | `IsCampaignGame` | 0x6e1ff0 | −1 | tactical: 1 iff the battle has a galactic conflict parent (0x28aa00) | H |
-| `IsLandControlGame` | 0x6e2060 | −1 | [L: body not decompiled] | L |
+| `IsLandControlGame` | 0x6e2060 | −1 | 1.0 when GameModeManager +0x20 (0x140b15400) is 4, else 0.0; +0x20 is written only at game start, from the game setup (writers 0x2b8ed, 0x95aea, 0xb86e0, 0xb9ab1, 0xf46d9; 0xe4c2b / 0xe4f45 store 1), so it is fixed for a battle (skai t15, instruction-read 2026-11-17) | H |
 | `IsSetupPhase` | 0x6e2090 | 0 | 0x35f790 | M |
 | `ForceUnnormalized {Category, Attenuator}` | 0x737ee0 | 3 | 0x656400 over **all** players (P = null) — the denominator of every normalised token | H |
 | `ForceVisibility {Category}` | 0x737f80 | 2 | for Self: among other players' UNIT_AI objects in the category, fraction whose UnitAI reports visible to Self (unit-AI slot +0xa0). That slot is 0x17dc70, constant true (SKAI_T22_SPACE_AI_RE Part 4.4), so the value is 1.0 when any such object is in the other players' owner lists, else 0/0 → NaN (vanilla) | H |
@@ -275,7 +275,7 @@ Power is re-read now (type combat power or hard-point value) but the area is the
 
 ## 7. Open items
 
-1. Bodies not decompiled (Ghidra did not create functions): `IsBuildPad` 0x733830, `IsCashPoint` 0x6d71b0, `CashPointValue` 0x6d7170, `IsValidBombingTarget` 0x6d72c0, `AdditionalPopulationCapacity` 0x730dc0, `IsRetreating` 0x735ea0, `IsLandControlGame` 0x6e2060. Define functions there and decompile, or probe.
+1. Bodies not decompiled (Ghidra did not create functions): `IsBuildPad` 0x733830, `IsCashPoint` 0x6d71b0, `CashPointValue` 0x6d7170, `IsValidBombingTarget` 0x6d72c0, `AdditionalPopulationCapacity` 0x730dc0, `IsRetreating` 0x735ea0 (`IsLandControlGame` 0x6e2060 read from the instructions since skai t15, §3 table). Define functions there and decompile, or probe.
 2. (Settled in A1_READINGS §20-§23, 2026-10-31.) Hint evaluator (`Hints.<name>`, 0x6deb90 / 0x8c16e0) value rule; `Type.IsType` sub-evaluator wiring for tactical unit targets; `HardPointHealth`, `AreEnginesOnline`.
 3. (Settled in A1_READINGS §10-§11, 2026-10-31: (a) confirmed [H]; (b) loop order and gates recorded.) **Fog-memory counting.** (a) In CellForce (0x6545d0) memory entries are counted under the same "not fogged" test as live entries; concentration (0x656800) and bitfield (0x654d90) count them only while fogged. With shipped data AI players never have fogged objects, so every entry copied into an AI player's memory at a refog is counted a **second time** in that player's force sums until the cell refogs again or the object dies. Confirm the branch at the instruction level and with a probe (AI force token vs visible units after walking a unit out of view). (b) The meaning of `snapshot −= v` for non-hiding objects in add/remove.
 4. `relation ≠ 0` treated as "enemy" everywhere (includes neutral-relation players with a non-neutral faction); confirm relation values (PHASE2_ANSWERS Q5).
