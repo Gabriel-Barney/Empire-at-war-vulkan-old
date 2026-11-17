@@ -399,6 +399,14 @@ bool BattleView::start(GpuCore& gpu, const GameData& data, const GameSession& se
     ropt = render::RecordOptions{};
     ropt.threads = gpu.js->worker_count();
     scene_->apply(ropt);
+    // vis1 t01 / t02: weather presentation state and the blob shadows' material table (the scene's ShadowBlobMaterials).
+    weather_ = {};
+    lightning_ = render::LightningFlash{};
+    have_last_prepare_ = false;
+    weather_fx_ = 0;
+    weather_fx_name_.clear();
+    blob_shadows_.set_materials(scene_->blob_materials());
+    shadow_blobs_.clear();
     models_ = std::make_unique<render::StreamedSimModels>(table_, *gpu.streamer);
 #ifdef ALAMO_RENDER_HAVE_ANIM_DRIVER
     pose_fn_ = [this](objects::ObjectId id, const render::GpuModel& m) {
@@ -571,6 +579,10 @@ bool BattleView::kill_nearest_move_ack(ui::Vec3 p) {
 void BattleView::stop(GpuCore& gpu) {
     acks_.clear();
     lob_chargeups_.clear();
+    weather_ = {};
+    weather_fx_ = 0;  // the particle world goes below
+    weather_fx_name_.clear();
+    shadow_blobs_.clear();
     gpu.ring.wait_idle();
     gpu.ctx->wait_idle();
     gpu.renderer.set_scene_hook(nullptr);
@@ -637,6 +649,23 @@ void BattleView::capture(const GameSession& session) {
         if (const sim::TacticalMode* tm = host.modes().top_tactical())
             track_lob_chargeups(lob_chargeups_, tsw_cues(b->special_weapon_events(), tm->primary()));
         env_wanted_ = b->environment_index();  // cu8g t03: Set_New_Environment (applied by prepare)
+        // vis1 t01 (WEATHER_VISUALS §1-§3): the land weather's presentation values. Without a running scenario the lightning
+        // is the active environment's own (TEE 21); the emitter is the scenario of the active environment's Weather effect.
+        render::WeatherView w;
+        if (!space_) {
+            const terrain::Environment* env = render::active_environment(b->map(), b->environment_index());
+            if (env) w.lightning = env->lightning_intensity;
+            const tactical::combat::WeatherSystem& ws = b->weather();
+            if (ws.active()) {
+                w.active = true;
+                w.emitter_intensity = ws.intensity();
+                w.lightning = ws.lightning();
+                w.fog_alpha = ws.fog_alpha();
+                if (env && b->weather_data())
+                    if (const tactical::combat::WeatherScenario* sc = b->weather_data()->find(env->weather_effect)) w.emitter = sc->emitter;
+            }
+        }
+        weather_ = std::move(w);
     }
     if (!render::capture_snapshot(host, table_, *snap, pf)) return;
     if (const sim::TacticalBattle* b = session.battle()) {
@@ -727,6 +756,11 @@ void BattleView::prepare(GpuCore& gpu, float alpha) {
             stats_.decals = decorations_->stats().scorch_spawned;
         }
         // --- end R3/R5 render ---
+        // vis1 t02 (WEATHER_VISUALS §4): object blob shadows on the terrain (land; the type's Blob_Shadow_* fields).
+        if (!space_) {
+            blob_shadows_.build(frame_, table_, shadow_detail_, beam_bone_, shadow_blobs_);
+            scene_->set_shadow_blobs(shadow_blobs_);
+        }
         // R5 ability beams: the frame's tractor / energy / super laser / zap records with world endpoints (render pass: transparent bucket)
         if (beams_on_) {
             std::vector<render::BeamInstance> beams = render::beams_from_frame(frame_, &beam_styles_, beam_bone_);
@@ -740,6 +774,7 @@ void BattleView::prepare(GpuCore& gpu, float alpha) {
         if (pattach_) {
             render::particles::sync_sim_frame(*pattach_, frame_, table_, *models_, *builder_, pose_fn_ ? &pose_fn_ : nullptr, &popt_,
                                               decorations_ ? decorations_->effects() : std::span<const render::SimWorldEffect>());
+            sync_weather_emitter();  // vis1 t01: before the update that spawns its particles
             pworld_->update(render::particles::ParticleWorld::tick_delta(pending_ticks_));
             pending_ticks_ = 0;
             stats_.particles_spawned = pworld_->stats().spawned;
@@ -772,6 +807,14 @@ void BattleView::prepare(GpuCore& gpu, float alpha) {
         const std::function<float(float, float)> ground = [map](float x, float y) { return map->terrain.sample_height(x, y); };
         jam_models_.build_blobs(gpu.renderer, blob_tex, std::span<const render::JamBlob>(&*bombing_blob_, 1), ground, main);
     }
+    // vis1 t01 (WEATHER_VISUALS §2): the lightning-flash schedule at wall-clock steps (render frames, paused or not).
+    {
+        const auto now = std::chrono::steady_clock::now();
+        const double dt = have_last_prepare_ ? std::chrono::duration<double>(now - last_prepare_).count() : 0.0;
+        last_prepare_ = now;
+        have_last_prepare_ = true;
+        lightning_.advance(scene_ ? weather_.lightning : 0.0f, dt);
+    }
     if (scene_) {
         apply_environment();  // cu8g t03: before update(), which re-applies it on the GPU side
         scene_->update(gpu.renderer, *gpu.streamer);
@@ -790,6 +833,30 @@ void BattleView::apply_environment() {
     if (!scene_->set_environment(env_wanted_)) return;
 #ifdef ALAMO_PARTICLES_HAVE_SIM
     if (prender_.initialized()) prender_.set_wind(scene_->scene_wind());
+#endif
+}
+
+// vis1 t01 (WEATHER_VISUALS §1): the running scenario's emitter_name as one particle system at the origin (its emitters
+// are weather particles: camera-relative cube, ANIM_PARTICLES B.4), its Emitter_Intensity as the system Detail scalar
+// (active slots = intensity x pool; set without smoothing). A changed or stopped scenario removes the old system at once.
+void BattleView::sync_weather_emitter() {
+#ifdef ALAMO_PARTICLES_HAVE_SIM
+    if (!pworld_ || !plib_) return;
+    const std::string want = weather_.active ? weather_.emitter : std::string{};
+    if (want != weather_fx_name_) {
+        if (weather_fx_ != 0 && pworld_->valid(weather_fx_)) {
+            pworld_->set_visible(weather_fx_, false);
+            pworld_->release(weather_fx_);
+        }
+        weather_fx_ = 0;
+        weather_fx_name_ = want;
+        if (!want.empty())
+            if (render::particles::SystemPtr def = plib_->get(want)) weather_fx_ = pworld_->create(std::move(def), render::Mat3x4::identity());
+    }
+    if (weather_fx_ != 0 && pworld_->valid(weather_fx_)) {
+        const float intensity = weather_.emitter_intensity;
+        pworld_->set_scalar(weather_fx_, render::particles::SystemScalar::Detail, std::span<const float>(&intensity, 1), 0.0f);
+    }
 #endif
 }
 
@@ -835,6 +902,8 @@ ui::Vec3 BattleView::type_half_extents(objects::TypeIndex t) {
 void BattleView::use_scene(GpuCore& gpu) {
     if (!scene_) return;
     render::Lighting lit = scene_->lighting();
+    render::apply_fog_plane_alpha(lit, weather_.active ? weather_.fog_alpha : 0.0f);  // vis1 t01 (WEATHER_VISUALS §3)
+    lit.flash = lightning_.light();                                                  // vis1 t01 (§2)
     lit.fog_enabled = lit.fog_enabled && fog_master_ && fog_distance_;  // ui2 t08: Enable_Fog / Enable_Distance_Fog (false = no fog)
     gpu.renderer.set_lighting(lit);
     gpu.renderer.set_world(&scene_->world());

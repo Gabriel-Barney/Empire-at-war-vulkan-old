@@ -1,6 +1,7 @@
 // test_render: main and the tests that stayed (see test_render_common.hpp; the others are in test_render_*.cpp).
 #include "test_render_common.hpp"
 #include "alamo/core/host_fs.hpp"
+#include "alamo/render/weather_fx.hpp"
 
 namespace test_render_t {
 
@@ -532,6 +533,92 @@ void test_lighting() {
         CHECK(render::Renderer::frame_cb_sh_ok(materials::FrameCB{}, dark));
         CHECK(r0.frame_cb_violations() == 0);
     }
+}
+
+// vis1 t01 (docs/re/WEATHER_VISUALS.md §2 / §3): lightning-flash schedule, fog-plane alpha, the flash in the SH lighting.
+void test_weather_fx() {
+    using namespace alamo::render;
+    {  // fog plane: start pulled toward end - 0.0001, end kept; fog off or alpha 0: unchanged
+        Lighting l;
+        l.fog_enabled = true;
+        l.fog_start = 0.0f;
+        l.fog_end = 3500.0f;
+        apply_fog_plane_alpha(l, 0.3f);
+        CHECK(std::fabs(l.fog_start - 0.3f * (3500.0f - 0.0001f)) < 1e-3f && l.fog_end == 3500.0f);
+        Lighting a = l;
+        apply_fog_plane_alpha(a, 0.0f);
+        CHECK(a.fog_start == l.fog_start);
+        Lighting off;
+        off.fog_start = 100.0f;
+        apply_fog_plane_alpha(off, 1.0f);
+        CHECK(off.fog_start == 100.0f);
+        Lighting full;
+        full.fog_enabled = true;
+        full.fog_start = 200.0f;
+        full.fog_end = 1200.0f;
+        apply_fog_plane_alpha(full, 1.0f);
+        CHECK(std::fabs(full.fog_start - (1200.0f - 0.0001f)) < 1e-3f);
+    }
+    {  // L = 0: nothing ever flashes and no schedule is drawn
+        LightningFlash f;
+        for (int i = 0; i < 1000; ++i) f.step(0.0f);
+        CHECK(f.light().intensity == 0.0f && f.wait_steps() == 0 && f.flash_steps() == 0);
+    }
+    for (const float L : {1.0f, 0.25f}) {  // the schedule: draw (no flash), flash steps, wait steps, draw again
+        LightningFlash f(12345u);
+        uint32_t flashes = 0, draws = 0, steps = 0;
+        bool bounded = true, unit_dirs = true, strengths = true, order = true;
+        int32_t prev_flash = 0, prev_wait = 0;
+        for (; steps < 20000; ++steps) {
+            const bool both_over = f.flash_steps() == 0 && f.wait_steps() == 0;
+            const int32_t fl = f.flash_steps(), wt = f.wait_steps();
+            f.step(L);
+            if (both_over) {
+                ++draws;
+                order = order && f.light().intensity == 0.0f;  // the drawing step never flashes
+                bounded = bounded && f.wait_steps() <= static_cast<int32_t>(500.0f * L) && f.flash_steps() <= static_cast<int32_t>(30.0f * L);
+            } else if (fl > 0) {
+                order = order && f.flash_steps() == fl - 1 && f.wait_steps() == wt;  // flashing comes before waiting
+                const DirLight& d = f.light();
+                const float len = std::sqrt(d.direction.x * d.direction.x + d.direction.y * d.direction.y + d.direction.z * d.direction.z);
+                unit_dirs = unit_dirs && std::fabs(len - 1.0f) < 1e-4f;
+                strengths = strengths && d.intensity >= 0.0f && d.intensity <= 0.5f * L && d.color.x == 1.0f;
+                flashes += d.intensity > 0.0f ? 1u : 0u;
+            } else {
+                order = order && f.wait_steps() == wt - 1 && f.light().intensity == 0.0f;
+            }
+            prev_flash = fl;
+            prev_wait = wt;
+        }
+        (void)prev_flash;
+        (void)prev_wait;
+        CHECK(bounded && unit_dirs && strengths && order && draws > 10 && flashes > 10);
+    }
+    {  // wall clock: 60 steps per second, at most 8 per call
+        LightningFlash a(7u), b(7u);
+        for (int i = 0; i < 60; ++i) a.advance(1.0f, 1.0 / 60.0);
+        for (int i = 0; i < 60; ++i) b.step(1.0f);
+        CHECK(a.wait_steps() == b.wait_steps() && a.flash_steps() == b.flash_steps());
+        LightningFlash c(7u), d(7u);
+        c.advance(1.0f, 10.0);
+        for (int i = 0; i < 8; ++i) d.step(1.0f);
+        CHECK(c.wait_steps() == d.wait_steps() && c.flash_steps() == d.flash_steps());
+    }
+    {  // the flash brightens the SH irradiance toward its direction; intensity 0 changes nothing
+        Lighting l = Lighting::land_default();
+        const SceneLightConstants before = scene_light_constants(l);
+        l.flash.direction = {0, 0, 1};
+        l.flash.intensity = 0.0f;
+        const SceneLightConstants zero = scene_light_constants(l);
+        CHECK(std::memcmp(&zero, &before, sizeof zero) == 0);
+        l.flash.intensity = 0.4f;
+        const SceneLightConstants lit = scene_light_constants(l);
+        const assets::Float3 up{0, 0, 1};
+        const assets::Float3 e0 = sph_irradiance(before.sph_fill, up), e1 = sph_irradiance(lit.sph_fill, up);
+        const assets::Float3 a0 = sph_irradiance(before.sph_all, up), a1 = sph_irradiance(lit.sph_all, up);
+        CHECK(e1.x > e0.x + 0.2f && e1.y > e0.y + 0.2f && e1.z > e0.z + 0.2f && a1.x > a0.x + 0.2f);
+    }
+    std::printf("weather fx (fog plane, lightning flash): OK\n");
 }
 
 void test_pipeline_keys() {
@@ -1124,6 +1211,7 @@ int main() {
     test_idle_spin();
     test_lod();
     test_lighting();
+    test_weather_fx();
     test_pipeline_keys();
     test_ted();
     test_png();

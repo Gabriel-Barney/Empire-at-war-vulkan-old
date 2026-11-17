@@ -969,6 +969,9 @@ public:
     void set_hero_clash_data(std::shared_ptr<const tactical::combat::HeroClashData> d);
     const tactical::combat::HeroClashManager& hero_clashes() const { return hero_clash_; }
     const tactical::combat::WeatherSystem& weather() const { return l1_weather_; }
+    // vis1 t01: the weather data set above (null: none), so the render host can name the running scenario's emitter
+    // (the active environment's Weather effect name looked up here). Read-only; not hashed.
+    const tactical::combat::WeatherData* weather_data() const { return l1_weather_data_.get(); }
     bool force_weather(SimRng& rng);
     // Sight factor of a battle object (Weather_Category of its type; 1.0 without weather): the fog's Land_FOW_Reveal_Range
     // x weather factor (FOG_OF_WAR §3.1.1; owner: fog agent). Weather FowDirty events this tick: weather().events().

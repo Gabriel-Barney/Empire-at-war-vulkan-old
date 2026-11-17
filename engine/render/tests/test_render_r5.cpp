@@ -26,6 +26,7 @@
 #include "alamo/core/log.hpp"
 #include "alamo/jobs/job_system.hpp"
 #include "alamo/objects/game_object_types.hpp"
+#include "alamo/render/blob_shadows.hpp"
 #include "alamo/render/fog_view.hpp"
 #include "alamo/render/lod.hpp"
 #include "alamo/render/map_scene.hpp"
@@ -2025,6 +2026,91 @@ static void test_stealth_type_table() {
                 static_cast<double>(u.stealth_color[1]), static_cast<double>(u.stealth_color[3]), static_cast<double>(u.stealth_time));
 }
 
+// vis1 t02 (docs/re/WEATHER_VISUALS.md §4): object blob shadows - the shadow-detail rule, the per-object placement and the
+// type fields read from the real data.
+static void test_blob_shadows() {
+    using render::BlobShadowMode;
+    CHECK(render::blob_shadow_mode(0, 99) == BlobShadowMode::None);
+    CHECK(render::blob_shadow_mode(3, 99) == BlobShadowMode::Blob && render::blob_shadow_mode(3, 3) == BlobShadowMode::Stencil);
+    CHECK(render::blob_shadow_mode(2, 3) == BlobShadowMode::Blob && render::blob_shadow_mode(1, 0) == BlobShadowMode::Stencil);
+    const std::string dir = (fs::temp_directory_path() / "alamo_render_r5_tests").string();
+    std::string err;
+    const auto w = render::make_synthetic_sim_world(dir, &err);
+    CHECK(w != nullptr);
+    if (!w) return;
+    render::SnapshotTypeTable table;
+    table.build(w->types, objects::ModeKind::Land);
+    CHECK(table.size() >= 1 && table[0].blob_material.empty() && table[0].blob_size[0] == 1.0f && table[0].blob_below_detail == 0);
+    table.set_blob_shadow(0, "tree_shadow", 60.0f, 40.0f, 99, "B_Chest", 0.75f);
+    std::vector<terrain::ShadowBlobMaterial> mats = terrain::builtin_blob_materials();
+    mats.push_back({"Generic_Shadow", "w_shadow_blob.tga", "", "", terrain::RenderMode::Modulate});
+    mats.push_back({"Tree_Shadow", "w_shadow_tree_blob.tga", "", "", terrain::RenderMode::Modulate});
+    render::BlobShadowBuilder b;
+    b.set_materials(mats);
+    render::InterpolatedFrame f;
+    f.objects = {sobj(1, 10), sobj(2, 20), sobj(3, 30), sobj(4, 40), sobj(5, 50)};
+    for (render::SnapshotObject& o : f.objects) o.flags = render::kSnapDrawable;
+    f.objects[0].facing = {0, 1, 0};
+    f.objects[1].flags |= render::kSnapFogHidden;
+    f.objects[2].flags |= render::kSnapContained;
+    f.objects[3].flags = 0;  // no model
+    f.objects[4].script_hidden = true;
+    const render::BlobBoneFn bone = [](const render::SnapshotObject& o, std::string_view name, Vec3& out) {
+        if (o.id != 1 || name != "B_Chest") return false;
+        out = {o.position.x + 1.0f, 2.0f, 3.0f};
+        return true;
+    };
+    std::vector<terrain::ShadowBlob> out;
+    b.build(f, table, render::kPortShadowDetailOn, bone, out);
+    CHECK(out.size() == 1);
+    if (out.size() == 1) {
+        const terrain::ShadowBlob& s = out[0];
+        CHECK(s.position[0] == 11.0f && s.position[1] == 2.0f);  // the bone's world position, z dropped
+        CHECK(std::fabs(s.rotation - 1.5707964f) < 1e-5f && s.width == 60.0f && s.height == 40.0f && s.intensity == 0.75f);
+        CHECK(s.material == 3);  // Tree_Shadow, matched case-insensitively
+    }
+    b.build(f, table, 0, bone, out);  // shadows off: no blobs
+    CHECK(out.empty());
+    table.set_blob_shadow(0, "No_Such_Material", 5.0f, 5.0f, 3);  // level 3 at detail 3: the stencil shadow, no blob
+    b.set_materials(mats);
+    b.build(f, table, render::kPortShadowDetailOn, nullptr, out);
+    CHECK(out.empty());
+    b.build(f, table, 2, nullptr, out);  // detail 2 < 3: a blob; unknown material -> the default shadow (0)
+    CHECK(out.size() == 1 && out[0].material == 0 && out[0].position[0] == 10.0f);
+
+    const std::string root = env_or_empty("ALAMO_FOC_DATA");
+    if (root.empty()) {
+        std::printf("blob shadows: rules OK; real data: ALAMO_FOC_DATA not set, skipped\n");
+        return;
+    }
+    vfs::VfsConfig cfg;
+    cfg.foc_root = root;
+    auto files = vfs::Vfs::create(cfg, &err);
+    CHECK(files != nullptr);
+    if (!files) return;
+    objects::ObjectTypeDatabase db;
+    CHECK(db.load(*files));
+    objects::GameObjectTypes types;
+    CHECK(types.build(db, files.get()));
+    render::SnapshotTypeTable real;
+    real.build(types, objects::ModeKind::Land);
+    const objects::TypeIndex bush = real.find("Prop_Tatooine_Bush00"), scout = real.find("Scout_Trooper");
+    CHECK(bush != objects::kNone && scout != objects::kNone);
+    if (bush == objects::kNone || scout == objects::kNone) return;
+    CHECK(real[bush].blob_material == "Tree_Shadow" && real[bush].blob_below_detail == 99 && real[bush].blob_size[0] == 30.0f &&
+          real[bush].blob_size[1] == 30.0f);
+    CHECK(real[scout].blob_material == "Generic_Shadow" && real[scout].blob_below_detail == 3 && real[scout].blob_size[0] == 18.0f &&
+          real[scout].blob_size[1] == 7.0f && real[scout].blob_bone == "B_Chest");
+    uint32_t with_blob = 0, blob_at_on = 0;
+    for (objects::TypeIndex t = 0; t < real.size(); ++t) {
+        if (real[t].blob_material.empty()) continue;
+        ++with_blob;
+        blob_at_on += render::blob_shadow_mode(render::kPortShadowDetailOn, real[t].blob_below_detail) == BlobShadowMode::Blob ? 1u : 0u;
+    }
+    CHECK(with_blob >= 250 && blob_at_on >= 20 && blob_at_on < with_blob);
+    std::printf("blob shadows: %u types with Blob_Shadow_Material_Name, %u draw a blob at Shadow detail On\n", with_blob, blob_at_on);
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     log::set_min_level(log::Level::Error);
@@ -2043,6 +2129,7 @@ int main() {
     test_stealth_hardpoint_mask();
     test_stealth_builder();
     test_stealth_type_table();
+    test_blob_shadows();
 #ifdef ALAMO_R5_HAVE_ANIM
     test_anim_visibility();
 #endif
