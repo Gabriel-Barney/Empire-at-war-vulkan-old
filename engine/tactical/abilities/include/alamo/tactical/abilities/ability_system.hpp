@@ -127,6 +127,10 @@ enum class AbilityEventKind : uint8_t {
     // 0: remove it) generator `id`'s field.
     GravityFieldPower,
     GravitySlow,
+    // r3g t02 (REMAINING_GAPS §5.2, DEPLOY_TROOPERS 0x591a90 state 5): trooper `id` of owner `target` is released from its
+    // Owner_Attachment_Bone (0x392160) and its LANDING behaviour starts (the rope slide down, Rope Land); the host drops
+    // the bone attachment. The trooper stays movement-locked until its landing ends (`value` = that frame).
+    TrooperReleased,
 };
 
 // StopOrder `value` (cu8j t02, MOVEMENT §4.7.2 / §4.7.5): a plain stop; the stop-and-hold 0x3a9880 (leave every
@@ -711,12 +715,24 @@ private:
         uint8_t gravity_on = 0;              // generator: powered state of the last service (pack +0x48)
         uint8_t in_gravity_field = 0;        // victim: obj +0x3a1 bit 0x40 (slowed by some generator)
         std::vector<ObjectId> gravity_list;  // generator: the units it slows, in the order they were added (pack +0x30)
+        // ---- r3g t02: the timed DEPLOY_TROOPERS machine (owner) and the trooper's rope landing ----
+        uint8_t troop_state = 0;   // owner: 0 idle, 1 wait stopped, 2 wait deployed, 3 Drop Rope, 4 spawn, 5 Deploy
+                                   // Troopers, 8 Lift Rope (0x591a90 states; 6 / 7 folded into 5 -> 8 [port])
+        uint8_t troop_deploy = 0;  // owner: this deploy asked the locomotor to deploy (undeployed at the end)
+        uint32_t troop_end = 0;    // owner: the frame the playing clip reports finished
+        uint8_t rope_state = 0;    // trooper: 0 none, 1 hanging on the bone, 2 sliding down / Rope Land
+        uint32_t rope_end = 0;     // trooper: the frame its LANDING ends (unlocked, joins the coordinator)
+        float rope_z = 0.0f;       // trooper: the bone height it was created at
+        ObjectId rope_owner = kNoObject;
     };
     static constexpr uint8_t kAnimStay = 0;      // parks at its end (Super_Laser)
     static constexpr uint8_t kAnimIdle = 1;      // the owner returns to idle: the record ends
     static constexpr uint8_t kAnimHoldLoop = 2;  // begin -> hold: animation type + 1 loops (FB / FTK / Force_Revel)
     static constexpr uint8_t kLockGrenade = 1, kLockDeploy = 2, kLockSelfDestruct = 4, kLockConfuse = 8;
     static constexpr uint8_t kLockRemoteBomb = 16;  // S8 t06: the Remote_Bomb toss (LOB_SOLVER §3.5)
+    static constexpr uint8_t kLockCable = 32;       // r3g t04: a cable-paralyzed walker (0x6f3800 -> 0x3a8e50(target, 1))
+    static constexpr uint8_t kLockTroops = 64;      // r3g t02: DEPLOY_TROOPERS activate 0x58f6a0 .. release 0x58f600
+    static constexpr uint8_t kLockRope = 128;       // r3g t02: a trooper on its rope until its LANDING ends
     // The owner's primary slot as of the advance of `frame` (type -1 = none: every gate passes).
     struct AnimView {
         int32_t type = -1;
@@ -859,6 +875,10 @@ private:
     void h_instant(Obj& o, uint32_t t, ObjectId target, uint32_t frame);
     void h_eject_thief(Obj& o, uint32_t frame);                                // REMAINING_GAPS §5.1
     void deploy_troopers(Obj& o, const UnitAbilityRecord& r, uint32_t frame);  // §5.2 (state 4 -> 0x590730)
+    void troopers_service(Obj& o, uint32_t frame);   // r3g t02: the timed DEPLOY_TROOPERS states
+    void rope_service(Obj& t, uint32_t frame);       // r3g t02: a trooper's rope landing
+    uint32_t clip_finish(ObjectId id, int32_t anim_type) const;  // r3g t02: sim frames until a one-shot finishes (0 none)
+    void release_troopers(Obj& o, uint32_t frame);  // r3g t02: state 5's end (0x392160 + LANDING resume)
     SpecialState* blast_state(Obj& o);                                         // §5.5: the applied Blast, if any
     void h_behavior(Obj& o, uint32_t t, bool on, uint32_t frame);
     void behaviors_service(Obj& o, uint32_t frame);  // HUNT, SELF_DESTRUCT, CONFUSE expiry
@@ -922,6 +942,7 @@ private:
     AbilityHost host_;
     // s78n t04: Specific_Faction per special (AbilityData::specials index) resolved by set_host; -1 = unset / unknown.
     std::vector<int32_t> specific_faction_;
+    uint32_t frame_now_ = 0;  // r3g t02: the last begin_tick frame (not saved: rewritten by the next tick)
     SimRng* rng_ = nullptr;  // synced RNG for draws outside a tick (bind_rng) and inside (the hooks' rng)
     std::vector<SpawnRequest> spawns_;
     uint32_t spawn_serial_ = 1;

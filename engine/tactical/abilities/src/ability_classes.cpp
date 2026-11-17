@@ -32,6 +32,8 @@ namespace {
 using C = SpecialClass;
 constexpr float kDegToRad = 0.017453292519943295f;
 constexpr uint8_t kKind2 = 2, kKind3 = 3, kKind4 = 4, kKind5 = 5, kKind16 = 0x16;
+constexpr uint8_t kCablePulling = 3, kCableWrapping = 4, kCableParalyzed = 5;  // r3g t04: CableAttack states (+0x138)
+constexpr uint8_t kKindCableAttack = 8;                                         // Damage_Cable_Attack
 constexpr int32_t kHackFrames = 60;  // [port] Hack / Repair animation 0x5a length without a clip (§4.13 fallback)
 constexpr int32_t kAnimHacking = 0x5a;    // Hack (TACTICAL_GAPS §2.3.10)
 constexpr int32_t kAnimRepairing = 0x5b;  // r3g t08: Repair (RepairAbility apply 0x70c580 / update 0x70cb90, REPAIRING)
@@ -854,10 +856,16 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
         }
 
         case C::SaberThrow:
-        case C::Cable: {  // recharge (+ the cable circling start) [port: the thrown saber / cable phases are not modelled]
+        case C::Cable: {  // recharge (+ the cable circling start)
             if (!alive_unit(target) || !range_ok(o, s, target)) return false;
             start_recharge(o, s.cls == C::SaberThrow ? kSaberThrow : kCableAttack);
             if (s.cls == C::Cable && host_.cable_attack) host_.cable_attack(o.id, target, s.min_range, s.max_range);  // §6.5
+            if (s.cls == C::Cable) {  // r3g t04: the cable phases run in the update (state 3: drop + pull)
+                sp.applied = 1;
+                sp.target = target;
+                sp.phase = kCablePulling;
+                sp.counter = 0;
+            }
             event(AbilityEventKind::Unhandled, sp.trigger, o.id, target, frame);
             // cu8k t01 (CU8F_T01_T02_T07_RE §2.7 item 1): a saber throw records the target point at the apply (0x398440:
             // position + Ranged_Target_Z_Adjust) in the event's point and value 1; the host throws the Saber_Name
@@ -1362,6 +1370,53 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
             return;
         }
 
+        case C::Cable: {
+            // r3g t04 (CableAttackAbility service 0x6f2d50, states 3 / 4 / 5; interval 1). [port] the cable render object,
+            // its end points and the "user still circling" test (locomotor state 0x26, else cancel) are not modelled: the
+            // effect ends when the user or the walker is gone (or by Terminate_Effect_On_Move_Command).
+            if (!alive_unit(sp.target) || o.dead) {
+                remove_special(o, sp, frame);
+                return;
+            }
+            if (sp.phase == kCablePulling) {  // 0x6f3180: +1 per service; at Drop + Pull the wrapping starts (counter 0)
+                sp.counter += 1;
+                if (static_cast<float>(sp.counter) >= s.cable_drop_phase + s.cable_pull_phase) {
+                    sp.phase = kCableWrapping;
+                    sp.counter = 0;
+                }
+                return;
+            }
+            if (sp.phase == kCableWrapping) {  // 0x6f3800: +1 per service; past 30 the walker trips or is held
+                sp.counter += 1;
+                if (sp.counter <= 30) return;
+                Obj* t = obj(sp.target);
+                // Stopped = locomotor speed <= 0 and no path left (0x556840 <= 0.0001) [port: the movement host's moving
+                // test]: held for max(int(Paralyze_Phase_Duration), 70) services, stopped and locked.
+                if (t && !moving(*t)) {
+                    sp.phase = kCableParalyzed;
+                    sp.counter = std::max(static_cast<int32_t>(s.cable_paralyze_phase), 70);
+                    stop_order(sp.target, frame);  // 0x3a9880
+                    lock_pair(*t, kLockCable, true, frame);
+                    return;
+                }
+                // Still walking: the trip. Take_Damage(kind 8 Damage_Cable_Attack, its current hull health, source = the
+                // user): the walker dies through its Damage_Cable_Attack clone (CA_Die), or key 11 when deployed (S9 §1.2).
+                DamageRequest r;
+                r.victim = sp.target;
+                r.amount = combat_->health(sp.target);
+                r.kind = kKindCableAttack;
+                r.source = o.id;
+                remove_special(o, sp, frame);  // state 6: the cable fades (End_Effect, 0x48e920)
+                combat_->take_damage(r, frame);
+                return;
+            }
+            if (sp.phase == kCableParalyzed) {  // state 5: -1 per service; below 1 unlock and end
+                sp.counter -= 1;
+                if (sp.counter < 1) remove_special(o, sp, frame);
+            }
+            return;
+        }
+
         case C::CorruptSystems: {  // the victim's CORRUPT_SYSTEMS behaviour: shield drain per second, expiry
             sp.counter -= 1;
             if (alive_unit(sp.target)) {
@@ -1453,6 +1508,11 @@ void AbilitySystem::class_remove(Obj& o, SpecialState& sp, uint32_t frame) {
         case C::Weatherproof:
         case C::RetreatPrevention:
         case C::EnableAbility: aura_off(o, sp, frame); return;
+        case C::Cable:  // r3g t04: a paralyzed walker is unlocked (0x3a8e50(target, 0))
+            if (Obj* t = obj(sp.target)) lock_pair(*t, kLockCable, false, frame);
+            sp.phase = 0;
+            sp.counter = 0;
+            return;
         case C::CancelSpecial: {  // cu8f t01: remove 0x6f40c0 - SAP_Enable_All on each disabled target, then End_Effect
             std::vector<ObjectId> v;
             v.swap(sp.victims);

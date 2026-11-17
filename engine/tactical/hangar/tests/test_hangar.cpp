@@ -1485,7 +1485,7 @@ void test_hangar_save() {
     bad.push_back(0);
     CHECK(rejected(bad));
     bad = hg_bytes;
-    bad[0] = 2;
+    bad[0] = 3;  // r3g t03: versions 1 and 2 are read; 3 is unknown
     CHECK(rejected(bad));
     bad = hg_bytes;
     bad[4] = 3;  // descriptor count 3, the battle has 2
@@ -1655,8 +1655,107 @@ void test_contents_production_loops_save() {
 
 }  // namespace
 
+// r3g t03 (STATION_HANGARS_SOUND §2.5 "Land", §2.7; 0x594880 / 0x593760 / 0x593960): a land structure (no bays) at
+// (500, 0) facing +y, starting A x1 (unlimited reserve), 5 s delay, fly-out 50 (no bones). Services every 30 frames from 0.
+//   * clips Open 40 / Close 25 frames: Open at 0 (state 1); the service at 60 sees it finished -> the unit leaves (request
+//     land / leaving, at the structure, fly-out point 50 along the facing), Hold (looping), state 2; its exit move ends at
+//     75 (unit_left) -> Close (state 3, ends 100); the service at 120 -> state 0, next = 120 + 150. A x1 alive: nothing more.
+//     The unit dies at 300 (it already left: no Close) -> live 0, the respawn timer restarts: next = 150 + 300; Open at 450
+//     (the first service >= 450), the next unit at 510.
+//   * without clips: the unit leaves at the first service (no Open / Hold), its death while leaving closes at once:
+//     state 0 with next = int(now + 150).
+//   * Spawn_Garrison_On_Load (not skirmish): the first update spawns every entry x its count at once (A x2, B x1), none
+//     leaving, no clip; the structure then waits for losses.
+void test_land_structures() {
+    auto land_world = [](World& w, HangarDesc d, bool clips, bool skirmish, std::vector<int32_t>* played) {
+        w.make({d});
+        HangarConfig cfg;
+        cfg.land = true;
+        cfg.skirmish = skirmish;
+        w.hg = std::make_unique<HangarSystem>(*w.sys, std::vector<HangarDesc>{d}, cfg);
+        HangarHost h;
+        if (clips)
+            h.clip = [played](ObjectId, int32_t anim, bool loop, uint32_t& fin) {
+                if (played) played->push_back(anim);
+                fin = anim == 68 ? 40u : anim == 70 ? 25u : 0u;
+                return anim == 68 || anim == 70 || (anim == 69 && loop);
+            };
+        w.hg->set_host(std::move(h));
+        w.add(1, w.structure, 0, Vec3{500, 0, 0}, Vec3{0, 1, 0});
+        CHECK(w.hg->add_carrier(1, 0, 0, nullptr));  // due 0
+    };
+    HangarDesc d = one_entry_desc(1, -1, 5.0f);
+    d.default_flyout = 50.0f;
+    {
+        World w;
+        std::vector<int32_t> played;
+        land_world(w, d, true, true, &played);
+        w.step(0);
+        CHECK(w.hg->state(1) == 1 && w.log.empty() && played.size() == 1 && played[0] == 68);
+        w.run(1, 60);
+        CHECK(w.log.empty() && w.hg->state(1) == 1);  // the service at 30 still sees Open playing
+        w.step(60);
+        CHECK(w.log.size() == 1 && w.hg->state(1) == 2 && played.size() == 2 && played[1] == 69);
+        if (w.log.size() != 1) return;
+        const LaunchRequest& q = w.log[0];
+        CHECK(q.land && q.leaving && q.type == kTypeA && near3(q.origin, Vec3{500, 0, 0}) && near3(q.flyout, Vec3{500, 50, 0}));
+        const ObjectId u = w.log_id[0];
+        CHECK(w.hg->leaving_units().size() == 1 && w.hg->leaving_units()[0] == u);
+        w.run(61, 75);
+        CHECK(w.hg->state(1) == 2);  // waits for the exit move
+        w.hg->unit_left(u, 75);
+        CHECK(w.hg->state(1) == 3 && played.size() == 3 && played[2] == 70 && w.hg->leaving_units().empty());
+        w.run(75, 120);
+        CHECK(w.hg->state(1) == 3);  // the service at 90 sees Close playing (ends at 100)
+        w.step(120);
+        CHECK(w.hg->state(1) == 0 && w.hg->next_spawn_frame(1) == 270 && w.hg->live(1, 0) == 1);
+        w.run(121, 300);
+        CHECK(w.log.size() == 1);  // A x1 alive
+        w.lose(u, 300);
+        CHECK(w.hg->live(1, 0) == 0 && w.hg->next_spawn_frame(1) == 450 && w.hg->state(1) == 0);
+        w.run(300, 450);
+        CHECK(w.log.size() == 1 && w.hg->state(1) == 0);
+        w.step(450);
+        CHECK(w.hg->state(1) == 1 && played.back() == 68);
+        w.run(451, 511);
+        CHECK(w.log.size() == 2 && w.log_frame.back() == 510);
+        std::printf("land structure: open 0, out 60, left 75, closed 120 (next 270); lost 300 -> open 450, out %u\n",
+                    w.log_frame.empty() ? 0u : w.log_frame.back());
+    }
+    {
+        World w;
+        land_world(w, d, false, true, nullptr);
+        w.step(0);
+        CHECK(w.log.size() == 1 && w.hg->state(1) == 2);
+        if (w.log.size() != 1) return;
+        w.lose(w.log_id[0], 40);  // dies while leaving: Close without a clip -> state 0, next = int(40 + 150)
+        CHECK(w.hg->state(1) == 0 && w.hg->next_spawn_frame(1) == 190 && w.hg->live(1, 0) == 0);
+        w.run(41, 211);
+        CHECK(w.log.size() == 2 && w.log_frame.back() == 210);
+    }
+    {
+        World w;
+        HangarDesc g = two_entry_desc();
+        g.garrison_on_load = true;
+        std::vector<int32_t> played;
+        land_world(w, g, true, false, &played);
+        w.step(0);
+        CHECK(w.log.size() == 3 && played.empty() && w.hg->leaving_units().empty());
+        size_t a = 0, b = 0;
+        for (const LaunchRequest& q : w.log) {
+            CHECK(q.land && !q.leaving);
+            a += q.type == kTypeA ? 1u : 0u;
+            b += q.type == kTypeB ? 1u : 0u;
+        }
+        CHECK(a == 2 && b == 1 && w.hg->live(1, 0) == 2 && w.hg->live(1, 1) == 1 && w.hg->remaining(1, 0) == 1);
+        w.run(1, 300);
+        CHECK(w.log.size() == 3 && w.hg->state(1) == 0);  // full: no Open
+    }
+}
+
 int main() {
     test_parse();
+    test_land_structures();  // r3g t03
     test_launch_sequence();
     test_losses();
     test_gates_and_bays();

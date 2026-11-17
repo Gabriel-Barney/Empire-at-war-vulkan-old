@@ -410,6 +410,9 @@ SpecialAbilityDesc parse_special_ability(const data::XmlNode& e, const AbilityRe
     s.excluded_types = type_list(e.child_text("Excluded_Unit_Types"), r);
     s.min_range = f_or(e, "Activation_Min_Range", 0.0f);
     s.max_range = f_or(e, "Activation_Max_Range", 0.0f);
+    s.cable_drop_phase = f_or(e, "Drop_Phase_Duration", 0.0f);  // r3g t04 (Cable_Ability)
+    s.cable_pull_phase = f_or(e, "Pull_Phase_Duration", 0.0f);
+    s.cable_paralyze_phase = f_or(e, "Paralyze_Phase_Duration", 0.0f);
     s.target_speed_decrease = f_or(e, "Target_Speed_Decrease_Percent", 0.0f);
     s.target_damage_increase = f_or(e, "Target_Damage_Increase_Percent", 0.0f);
     s.stacking_category = i_or(e, "Stacking_Category", 0);

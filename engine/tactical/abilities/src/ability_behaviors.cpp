@@ -88,6 +88,15 @@ bool AbilitySystem::bind_spawn(uint32_t serial, ObjectId id) {
             if (!o) return false;
             o->troopers.push_back(id);
             o->trooper_squads.push_back(r.squad);  // cu8f t06: its squad (CU8F_T04_T06_RE §3.2)
+            // r3g t02: in the timed machine the trooper hangs on its bone (Rope Slide, +0x3a2 |= 2) until state 5 ends;
+            // it does not move until its LANDING has ended.
+            if (o->troop_state != 0)
+                if (Obj* t = obj(id)) {
+                    t->rope_state = 1;
+                    t->rope_z = r.position.z;
+                    t->rope_owner = o->id;
+                    lock_pair(*t, kLockRope, true, frame_now_);
+                }
             return true;
         }
     // cu8f t06 (CU8F_T04_T06_RE §3.1): the LURE Particle_Effect object (LureDataPack +0x18). cu8g t05: false (not bound:
@@ -884,6 +893,118 @@ int32_t AbilitySystem::trooper_squads(ObjectId id) const {
 }
 
 // ================================================================================================
+// r3g t02: the timed DEPLOY_TROOPERS machine (REMAINING_GAPS §5.2, DeployTroopersBehavior service 0x591a90, interval 1)
+// and the troopers' LANDING (0x630fe0)
+// ================================================================================================
+
+uint32_t AbilitySystem::clip_finish(ObjectId id, int32_t anim_type) const {
+    // One-shot end on sim frames: the first frame n with n x rate >= max(count - 2, 0) (OI t03 clock); 0 without the clip.
+    const ClipTiming ct = clip_timing(id, anim_type, {});
+    if (!(ct.count > 0.0f) || !(ct.rate > 0.0f)) return 0;
+    return static_cast<uint32_t>(std::ceil(ct.end / ct.rate));
+}
+
+void AbilitySystem::troopers_service(Obj& o, uint32_t frame) {
+    // States of 0x591a90 (clip ids: Drop Rope 0x61, Deploy Troopers 0x5e, Lift Rope 0x62). Settled from the binary
+    // (r3g t02): Drop Rope plays once the walker is deployed; at its end state 4 (0x590730) plays Deploy Troopers and
+    // spawns the troopers at their bones (each on Rope Slide, attached); at Deploy Troopers' end state 5 releases every
+    // trooper (0x392160, LANDING resumed). [port] states 6 / 7 (the troopers' squad grouping 0x590bb0 and 0x58fb80) are
+    // folded: Lift Rope follows the release; at its end (state 8) the ability recharges and goes inactive and the walker
+    // undeploys when this deploy deployed it (0x3ac100(obj, 0); the 0x39b950(obj, 45) test is not modelled). A clip the
+    // model lacks takes no time [port: retail's state 3 / 5 fail to state 10 then].
+    static constexpr int32_t kDropRope = 0x61, kTroopDrop = 0x5e, kLiftRope = 0x62;
+    const UnitAbilityRecord* r = record_of(o, kDeployTroopers);
+    if (!r) {
+        o.troop_state = 0;
+        lock_pair(o, kLockTroops, false, frame);
+        return;
+    }
+    switch (o.troop_state) {
+        case 1:  // wait until stopped (not moving / turning), then deploy (0x391260)
+            if (moving(o)) return;
+            o.troop_deploy = (host_.deploy && host_.deploy(o.id, true, frame)) ? 1 : 0;
+            o.troop_state = 2;
+            [[fallthrough]];
+        case 2:  // wait for deployed (0x39a390), then Drop Rope [port: a walker that cannot deploy counts as deployed]
+            if (o.troop_deploy && !o.deployed) return;
+            o.troop_end = frame + clip_finish(o.id, kDropRope);
+            o.troop_state = 3;
+            return;
+        case 3:  // Drop Rope finished -> state 4 (the spawn runs on the next service)
+            if (frame < o.troop_end) return;
+            o.troop_state = 4;
+            return;
+        case 4: {  // 0x590730: Deploy Troopers, the troopers at their bones
+            const int32_t before = o.troopers_deployed;
+            deploy_troopers(o, *r, frame);
+            o.troop_end = frame + clip_finish(o.id, kTroopDrop);
+            o.troop_state = o.troopers_deployed > before ? 5 : 8;
+            if (o.troop_state == 8) o.troop_end = frame + clip_finish(o.id, kLiftRope);
+            return;
+        }
+        case 5:  // Deploy Troopers finished: release them, then Lift Rope
+            if (frame < o.troop_end) return;
+            release_troopers(o, frame);
+            o.troop_end = frame + clip_finish(o.id, kLiftRope);
+            o.troop_state = 8;
+            return;
+        case 8:  // Lift Rope finished: recharge 38, inactive, undeploy
+            if (frame < o.troop_end) return;
+            o.troop_state = 0;
+            o.behavior[kDeployTroopers] = 0;
+            start_recharge(o, kDeployTroopers);
+            lock_pair(o, kLockTroops, false, frame);
+            if (o.troop_deploy && host_.deploy) (void)host_.deploy(o.id, false, frame);
+            o.troop_deploy = 0;
+            return;
+        default: o.troop_state = 0; return;
+    }
+}
+
+void AbilitySystem::release_troopers(Obj& o, uint32_t frame) {
+    // 0x392160 + LANDING (0x630fe0, every frame from the next one): while Rope Slide plays the trooper drops 3.9 per
+    // service until the ground is less than 3.9 below, then lands on it and plays Rope Land (0x60, blend 0.1); when that
+    // has finished it joins the coordinator (0x39bcb0) and LANDING ends. Without Rope Land it ends at the landing service.
+    static constexpr float kRopeDrop = 3.9f;
+    static constexpr int32_t kRopeLand = 0x60;
+    for (const ObjectId id : o.troopers) {
+        Obj* t = obj(id);
+        if (!t || t->rope_state != 1 || t->rope_owner != o.id) continue;
+        const Vec3 p = position(*t);
+        const float ground = host_.ground_height ? host_.ground_height(p.x, p.y) : t->rope_z;
+        const float drop = t->rope_z - ground;
+        const uint32_t services = drop > 0.0f ? static_cast<uint32_t>(drop / kRopeDrop) + 1u : 1u;
+        const uint32_t land = clip_finish(id, kRopeLand);
+        const bool has_land = clip_timing(id, kRopeLand, {}).count > 0.0f;
+        t->rope_state = 2;
+        t->rope_end = frame + services + (has_land ? std::max<uint32_t>(land, 1u) : 0u);
+        AbilityEvent e;
+        e.kind = AbilityEventKind::TrooperReleased;
+        e.type = kDeployTroopers;
+        e.id = id;
+        e.target = o.id;
+        e.frame = frame;
+        e.value = static_cast<int32_t>(t->rope_end);
+        events_.push_back(e);
+    }
+}
+
+void AbilitySystem::rope_service(Obj& t, uint32_t frame) {
+    // A trooper still hanging when its walker is gone is released at once [port]; a landing trooper is unlocked at the end.
+    if (t.rope_state == 1) {
+        const Obj* owner = obj(t.rope_owner);
+        if (owner && !owner->dead && owner->troop_state != 0) return;
+        t.rope_state = 2;
+        t.rope_end = frame;
+    }
+    if (t.rope_state == 2 && frame >= t.rope_end) {
+        t.rope_state = 0;
+        t.rope_owner = kNoObject;
+        lock_pair(t, kLockRope, false, frame);
+    }
+}
+
+// ================================================================================================
 // LURE (cu8f t06, CU8F_T04_T06_RE §3.1 [H]; LureBehaviorClass 0x23)
 // ================================================================================================
 
@@ -1074,7 +1195,14 @@ void AbilitySystem::h_behavior(Obj& o, uint32_t t, bool on, uint32_t frame) {
             }
         }
         // [port] DEPLOY_TROOPERS' stop + lock (0x58f6a0) and its release (0x58f600) fall in this same call: no net lock.
-        if (t == kDeployTroopers && r) {
+        // r3g t02: with clip data (AbilityHost::anim_clip set) the timed state machine runs instead (troopers_service).
+        if (t == kDeployTroopers && r && host_.anim_clip) {
+            stop_order(o.id, frame, kStopHold);
+            lock_pair(o, kLockTroops, true, frame);
+            o.troop_state = 1;
+            o.troop_deploy = 0;
+            o.troop_end = frame;
+        } else if (t == kDeployTroopers && r) {
             // DEPLOY_TROOPERS state machine 0x591a90: [port] the owner's anim 0x5e and the release state 5 (LANDING 0x1e)
             // are not timed here - state 4 (spawn, 0x590730) runs at once, then the behaviour is done and recharges.
             // cu8l t02 (CU8K_T02_T06_RE §2 row 0x58f7b0): the activate 0x58f6a0 stops and holds the unit at the deploy's
@@ -1106,7 +1234,9 @@ void AbilitySystem::h_behavior(Obj& o, uint32_t t, bool on, uint32_t frame) {
 // ================================================================================================
 
 void AbilitySystem::behaviors_service(Obj& o, uint32_t frame) {
+    if (o.rope_state != 0) rope_service(o, frame);  // r3g t02
     if (o.dead) return;
+    if (o.troop_state != 0) troopers_service(o, frame);  // r3g t02
     // CONFUSE expiry 0x636960: clear the flag, unlock, suspend.
     if (o.confused && frame >= o.confuse_end) {
         o.confused = 0;

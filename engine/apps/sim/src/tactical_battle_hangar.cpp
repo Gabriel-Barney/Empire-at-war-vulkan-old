@@ -150,11 +150,25 @@ void TacticalBattle::hg_setup(TacticalMode& mode) {
         d.community_property = types.get_bool(ti, "Is_Community_Property");
         d.station = star_base_behavior() != objects::kNoBehavior &&
                     types.has_behavior(ti, objects::BehaviorSet::Union, star_base_behavior());
+        // r3g t03 (STATION_HANGARS_SOUND §2.1 / §2.5 land): the spawn bones, their fly-out distances, the distance
+        // without one ([port] the type's movement radius; retail: a model size) and Spawn_Garrison_On_Load.
+        std::vector<std::string> bones;
+        for (const std::string_view b : types.get_list(ti, "Spawned_Squadron_Location_Bones"))
+            if (!hg_trim(b).empty()) bones.emplace_back(hg_trim(b));
+        d.land_bones = static_cast<uint32_t>(bones.size());
+        for (const std::string_view f : types.get_list(ti, "Spawned_Squadron_Location_Flyout_Distances")) {
+            const std::string v(hg_trim(f));
+            if (!v.empty()) d.land_flyouts.push_back(std::strtof(v.c_str(), nullptr));
+        }
+        d.default_flyout = mv::unit_desc_from_type(types, t).radius;
+        d.garrison_on_load = types.get_bool(ti, "Spawn_Garrison_On_Load");
+        hg_land_bones_.push_back(std::move(bones));
         hangar_desc_[t] = static_cast<int32_t>(descs.size());
         descs.push_back(std::move(d));
     }
     th::HangarConfig hc;
     hc.skirmish = cfg_.skirmish;
+    hc.land = !space_;  // r3g t03
     hangars_ = std::make_unique<th::HangarSystem>(*combat_, std::move(descs), hc);
     hangars_->set_abilities(abilities_.get());
     th::HangarHost h;
@@ -162,6 +176,32 @@ void TacticalBattle::hg_setup(TacticalMode& mode) {
     h.in_hyperspace = [this](tc::ObjectId id) { return l1_jumps_.departing(static_cast<objects::ObjectId>(id)); };
     // skm1 t07: the skirmish start-force re-delivery list (SKIRMISH_SETUP §2.4; skirmish map battles only).
     if (skirmish_map()) h.pending_delivery = [this](int32_t p, bool pop) { return sk_pending_delivery(p, pop); };
+    // r3g t03: the land structure clips (Structure Open / Hold / Close: static clip data from the model, the clip played on
+    // the animation world when one is attached; the finish = one_shot_frames) and the spawn bones (bind-pose bone point,
+    // [port] the structure's facing: the bone's own yaw is not read).
+    h.clip = [this](tc::ObjectId id, int32_t anim_type, bool loop, uint32_t& finish) {
+        if (!hg_mode_) return false;
+        uint32_t frames = 0;
+        float fps = 0.0f;
+        if (!anim_clip_info(*hg_mode_, static_cast<objects::ObjectId>(id), anim_type, frames, fps) || !(fps > 0.0f)) return false;
+        (void)play_clip(*hg_mode_, static_cast<objects::ObjectId>(id), static_cast<uint8_t>(anim_type), 0.0f, 1.0f, tick_.global_frame);
+        finish = loop ? 0u : clip_finish_frames(frames, fps);
+        return true;
+    };
+    h.land_bone = [this](tc::ObjectId id, uint32_t bone, tactical::Vec3& pos, tactical::Vec3& facing) {
+        if (!hg_mode_) return false;
+        const objects::ObjectStore& st = hg_mode_->primary();
+        const objects::ObjectHandle oh = st.find(static_cast<objects::ObjectId>(id));
+        if (!st.exists(oh) || st.type(oh) >= hangar_desc_.size()) return false;
+        const int32_t di = hangar_desc_[st.type(oh)];
+        if (di < 0 || static_cast<size_t>(di) >= hg_land_bones_.size() || bone >= hg_land_bones_[static_cast<size_t>(di)].size()) return false;
+        Vec3 p{};
+        if (model_bone_point(st, oh, hg_land_bones_[static_cast<size_t>(di)][bone], p) <= 0) return false;
+        const Vec3 f = st.facing(oh);
+        pos = tactical::Vec3{p.x, p.y, p.z};
+        facing = tactical::Vec3{f.x, f.y, 0.0f};
+        return true;
+    };
     // [port] unset: cinematic camera (no tactical cinematics gate yet), corruption / planet restrictions, bay bones (the
     // hangar's fallback: the hardpoint attachment offset with the carrier facing).
     hangars_->set_host(std::move(h));
@@ -509,6 +549,10 @@ void TacticalBattle::hg_tick(TacticalMode& mode, SimRng& rng) {
     const std::vector<th::LaunchRequest> launches(hangars_->launches().begin(), hangars_->launches().end());
     for (const th::LaunchRequest& r : launches) {
         if (r.type < 0) continue;
+        if (r.land) {  // r3g t03: a land structure's unit
+            hg_land_launch(mode, r, rng);
+            continue;
+        }
         std::vector<objects::ObjectId> ordered;
         const objects::ObjectId bound = hg_spawn(mode, r.type, r.owner, hg_sv(r.origin), hg_sv(r.facing), hg_sv(r.flyout), true, rng, ordered);
         if (bound == objects::kNoObjectId) continue;
@@ -534,6 +578,46 @@ void TacticalBattle::hg_tick(TacticalMode& mode, SimRng& rng) {
         }
     }
     hangars_->clear_requests();
+    // r3g t03 (signal 10): a land unit that has finished its exit move has left its structure (Close).
+    for (const objects::ObjectId id : hangars_->leaving_units())
+        if (hg_move_done(id)) hangars_->unit_left(id, frame_);
+}
+
+void TacticalBattle::hg_land_launch(TacticalMode& mode, const tactical::hangar::LaunchRequest& r, SimRng& rng) {
+    // r3g t03 (0x594dc0 land branch): the unit (or a company: its members at the spawn point, then the team container) at
+    // the spawn point with the spawn facing, spawned flag, then a move to the fly-out point (along the facing).
+    std::vector<objects::ObjectId> ordered;
+    objects::ObjectId bound = objects::kNoObjectId;
+    std::vector<int32_t> members;
+    if (oi_company_members(r.type, members) && !members.empty()) {
+        bound = hg_spawn(mode, r.type, r.owner, hg_sv(r.origin), hg_sv(r.facing), hg_sv(r.origin), true, rng, ordered);
+    } else {
+        bound = oi_spawn_unit(mode, r.type, hg_sv(r.origin), hg_sv(r.facing), r.owner);
+        if (Unit* u = unit_by_id(bound)) {
+            u->flags_3a2 = static_cast<uint8_t>(u->flags_3a2 | 2u);  // spawned (+0x3a2 |= 2)
+            if (u->movable) ordered.push_back(bound);
+        }
+    }
+    if (bound == objects::kNoObjectId) return;
+    hangars_->bind_launch(r.serial, bound);
+    ++hg_launches_;
+    if (!ordered.empty()) exec_move(mode, ordered, r.flyout.x, r.flyout.y, rng, mv::kNoFacing, false);
+}
+
+bool TacticalBattle::hg_move_done(objects::ObjectId id) const {
+    // [port] signal 10 = the object's move finished: no goal left on the mover, or on every live member of a container.
+    if (!movement_) return true;
+    if (movement_->has_unit(id)) {
+        const mv::UnitView v = movement_->view(id);
+        return !v.has_goal && !v.pushed;
+    }
+    for (const Unit& u : units_) {
+        if (!u.alive || u.retreated || u.container >= containers_.size() || containers_[u.container].id != id) continue;
+        if (!movement_->has_unit(u.id)) continue;
+        const mv::UnitView v = movement_->view(u.id);
+        if (v.has_goal || v.pushed) return false;
+    }
+    return true;
 }
 
 void TacticalBattle::hg_station_upgrade(TacticalMode& mode, const tactical::abilities::SpawnRequest& q) {

@@ -474,14 +474,31 @@ uint32_t TacticalBattle::anim_clip_frames(const TacticalMode& mode, objects::Obj
     return anim_clip_info(mode, id, anim_type, frames, fps) ? frames : 0u;
 }
 
+uint32_t TacticalBattle::clip_finish_frames(uint32_t frames, float fps) {
+#ifdef ALAMO_SIM_HAVE_ANIM
+    const uint64_t n = anim::one_shot_frames(frames, fps, 1.0f);
+    return n >= 0xFFFFFFFFull ? 0xFFFFFFFEu : static_cast<uint32_t>(n);
+#else
+    (void)frames, (void)fps;
+    return 0;
+#endif
+}
+
 bool TacticalBattle::anim_clip_info(const TacticalMode& mode, objects::ObjectId id, int32_t anim_type, uint32_t& frames,
                                     float& fps, uint32_t variant) const {
 #ifdef ALAMO_SIM_HAVE_ANIM
-    if (!anim_ || anim_type < 0) return false;
+    // r3g: static clip data, the same with and without the animation service (refixf t04's rule for death clones): the
+    // attached service's models, else the clone-model source, else the battle's own loader over the catalog's files.
+    SimAnimation* src = anim_ ? anim_ : clone_models_;
+    if (!src && catalog_->files()) {
+        if (!own_clone_models_) own_clone_models_ = std::make_unique<SimAnimation>(catalog_->types(), *catalog_->files());
+        src = own_clone_models_.get();
+    }
+    if (!src || anim_type < 0) return false;
     const objects::ObjectStore& st = mode.primary();
     const objects::ObjectHandle h = st.find(id);
     if (!st.exists(h)) return false;
-    const anim::AnimModel* m = anim_->model_for(st.type(h), mode.kind());
+    const anim::AnimModel* m = src->model_for(st.type(h), mode.kind());
     const anim::ClipRef* c = m ? m->clip(anim_type, variant) : nullptr;
     if (!c || !c->clip || c->clip->frame_count == 0) return false;
     frames = c->clip->frame_count;

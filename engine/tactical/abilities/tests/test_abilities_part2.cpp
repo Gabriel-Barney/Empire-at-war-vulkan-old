@@ -159,6 +159,135 @@ int oi_hack_timing(uint32_t count, float fps) {
     return -1;
 }
 
+// r3g t04 (CableAttackAbility 0x6f2d50 / 0x6f3180 / 0x6f3800): a snowspeeder cables a walker (Drop 110, Pull 140,
+// Paralyze `paralyze`). After Drop + Pull services the wrapping starts; past 30 more services a walker still walking takes
+// a kind-8 (Damage_Cable_Attack) kill for its hull health, credited to the speeder; a stopped one is stopped and locked for
+// max(Paralyze, 70) services, then released. Returns the tick of the kill / lock (relative to the order) and the release.
+struct CableRun {
+    int order_tick = 0, hit = -1, released = -1;
+    bool died = false;
+    uint8_t kind = 0;
+    ObjectId killer = kNoObject;
+};
+CableRun oi_cable_run(bool walker_moving, float paralyze) {
+    OiWorld w;
+    SpecialAbilityDesc cb = oi_special("Cable", SpecialClass::Cable, ActivationStyle::UserInput);
+    cb.min_range = 0.0f;
+    cb.max_range = 1000.0f;
+    cb.cable_drop_phase = 110.0f;
+    cb.cable_pull_phase = 140.0f;
+    cb.cable_paralyze_phase = paralyze;
+    const uint32_t cs = add_special(w.ad, cb);
+    AbilityObjectDesc a;
+    a.unit_abilities = {oi_gui(kCableAttack, 0.0f, 10.0f, "Cable")};
+    a.specials = {cs};
+    const uint32_t sd = push(w.cd, w.ad, oi_unit("Speeder", 100.0f), a);
+    UnitDesc wd = oi_unit("Walker", 5000.0f);
+    wd.has_locomotor = true;
+    const uint32_t td = push(w.cd, w.ad, wd, AbilityObjectDesc{});
+    w.make(GameMode::Land);
+    AbilityHost h;
+    h.moving = [walker_moving](ObjectId id) { return id == 2 && walker_moving; };
+    w.ab->set_host(std::move(h));
+    w.add(1, sd, 0, {0, 0, 0});
+    w.add(2, td, 1, {50, 0, 0});
+    const ObjectId one[] = {1};
+    CHECK(w.ab->targeted_ability(one, kCableAttack, 2, -1, w.frame) == 1);
+    CableRun r;
+    for (int i = 1; i <= 800 && r.released < 0 && !r.died; ++i) {
+        w.tick();
+        for (const DeathEvent& d : w.sys->deaths())
+            if (d.id == 2) {
+                r.died = true;
+                r.kind = d.kind;
+                r.killer = d.killer;
+                r.hit = i;
+            }
+        if (r.hit < 0 && w.count(AbilityEventKind::Immobilised, 2) > 0) r.hit = i;
+        if (r.hit >= 0 && !r.died && w.count(AbilityEventKind::Released, 2) > 0) r.released = i;
+    }
+    return r;
+}
+
+// r3g t02 (REMAINING_GAPS §5.2, 0x591a90): the timed DEPLOY_TROOPERS machine with clip data - Drop Rope 31 frames, Deploy
+// Troopers 16, Lift Rope 31 on the walker, Rope Land 13 on each trooper (30 fps), bones at height 20 over flat ground 0
+// (5 slide services). Ticks from the order: Drop Rope finishes after 29 (state 4 at that service), the troopers spawn at
+// the next service (30); Deploy Troopers finishes 14 later (44): both troopers are released, each unlocked after its 5
+// slide services, the landing service and Rope Land's 11 frames (61); Lift Rope finishes 29 after the release (73): the
+// ability recharges and the walker is released. Without an anim_clip host the spawn stays instant (test_gaps_deploy_troopers).
+void test_r3g_deploy_troopers_timed() {
+    OiWorld w;
+    AbilityObjectDesc a;
+    UnitAbilityRecord dt = rec(kDeployTroopers, 0.0f, 20.0f);
+    dt.spawned_object_type = "Squad";
+    dt.spawned_type = 7;
+    dt.max_spawned_objects = 9;
+    dt.owner_attachment_bones = {"B_Trooper_00", "B_Trooper_01"};
+    a.unit_abilities = {dt};
+    const uint32_t ud = push(w.cd, w.ad, oi_unit("AT_AT", 1000.0f), a);
+    const uint32_t trd = push(w.cd, w.ad, oi_unit("Trooper", 50.0f), AbilityObjectDesc{});
+    w.make(GameMode::Land);
+    AbilityHost h;
+    h.company_members = [](int32_t type, std::vector<int32_t>& m) {
+        if (type != 7) return false;
+        m = {100, 101};
+        return true;
+    };
+    h.bone_position = [](ObjectId, std::string_view bone, Vec3& p) {
+        p = Vec3{bone == "B_Trooper_00" ? 10.0f : 30.0f, 5.0f, 20.0f};
+        return 1;
+    };
+    h.ground_height = [](float, float) { return 0.0f; };
+    h.moving = [](ObjectId) { return false; };
+    h.anim_clip = [](ObjectId id, int32_t type, std::string_view, uint32_t, uint32_t& n, float& f) {
+        f = 30.0f;
+        n = 0;
+        if (id == 1) n = type == 0x61 ? 31u : type == 0x5e ? 16u : type == 0x62 ? 31u : 0u;
+        else if (type == 0x60) n = 13u;
+        return n > 0;
+    };
+    w.ab->set_host(std::move(h));
+    w.add(1, ud, 0, {0, 0, 0}, {0, 1, 0});
+    const ObjectId one[] = {1};
+    CHECK(w.ab->set_unit_ability_mode(one, kDeployTroopers, true, w.frame) == 1);
+    CHECK(w.ab->spawn_requests().empty());  // nothing at the order
+    int spawn = -1, released = -1, unlocked = -1, done = -1;
+    int32_t rope_end = -1;
+    const uint32_t f0 = w.frame;
+    for (int i = 0; i < 120; ++i) {
+        // OiWorld::tick with the host's spawn pass between the ability tick and the event collection (which clears
+        // the requests).
+        const int at = static_cast<int>(w.frame - f0);
+        w.collect();
+        w.ab->tick(w.frame, w.trees, w.rng, serial_for);
+        if (spawn < 0 && !w.ab->spawn_requests().empty()) {
+            spawn = at;
+            ObjectId tid = 50;
+            const std::vector<SpawnRequest> reqs(w.ab->spawn_requests().begin(), w.ab->spawn_requests().end());
+            for (const SpawnRequest& q : reqs) {
+                CHECK(q.purpose == SpawnPurpose::Troopers && q.position.z == 20.0f);
+                w.add(tid, trd, 0, q.position);
+                CHECK(w.ab->bind_spawn(q.serial, tid));
+                ++tid;
+            }
+        }
+        w.collect();
+        ++w.frame;
+        if (released < 0 && w.count(AbilityEventKind::TrooperReleased) == 2) {
+            released = at;
+            rope_end = w.last(AbilityEventKind::TrooperReleased)->value - static_cast<int32_t>(f0);
+        }
+        if (unlocked < 0 && w.count(AbilityEventKind::Released, 50) > 0 && w.count(AbilityEventKind::Released, 51) > 0) unlocked = at;
+        if (done < 0 && w.count(AbilityEventKind::Released, 1) > 0) done = at;
+    }
+    std::printf("r3g deploy troopers: spawn %d, released %d (rope end %d), unlocked %d, done %d\n", spawn, released, rope_end,
+                unlocked, done);
+    CHECK(spawn == 30 && released == 44 && rope_end == 61 && unlocked == 61 && done == 73);
+    CHECK(w.count(AbilityEventKind::Immobilised, 50) == 1 && w.count(AbilityEventKind::Immobilised, 1) == 1);
+    CHECK(!w.ab->is_active(1, kDeployTroopers) && w.ab->countdown_counter(1, kDeployTroopers) > 0);
+    CHECK(w.ab->troopers_deployed(1) == 2);
+}
+
 // r3g t08: ticks from the order to the Repair's heal; the model has HACKING 0x5a (`hack` frames) and REPAIRING 0x5b
 // (`repair` frames, 0 = missing), both 30 fps. Repair times on 0x5b only (RepairAbility 0x70c580 / 0x70cb90).
 int oi_repair_timing(uint32_t hack, uint32_t repair) {
@@ -261,6 +390,17 @@ void test_oi_anim_timings() {
     CHECK(rep60 > 60);
     CHECK(oi_repair_timing(92, 32) == rep60 - 30);
     CHECK(oi_repair_timing(0, 32) == rep60 - 30);
+    // r3g t04: the tow cable. Drop + Pull = 250 services, then 31 wrapping services: a walking walker dies (kind 8, the
+    // speeder's kill) at the same service where a stopped one is locked; that lock lasts max(Paralyze, 70) services.
+    const CableRun trip = oi_cable_run(true, 300.0f);
+    const CableRun hold = oi_cable_run(false, 300.0f);
+    const CableRun short_hold = oi_cable_run(false, 20.0f);
+    std::printf("r3g cable: trip at %d (kind %u), hold %d..%d, short hold %d..%d\n", trip.hit, static_cast<unsigned>(trip.kind), hold.hit,
+                hold.released, short_hold.hit, short_hold.released);
+    CHECK(trip.died && trip.kind == 8 && trip.killer == 1 && trip.hit >= 281 && trip.hit <= 283);
+    CHECK(!hold.died && hold.hit == trip.hit && hold.released - hold.hit == 300);
+    CHECK(!short_hold.died && short_hold.hit == trip.hit && short_hold.released - short_hold.hit == 70);
+    test_r3g_deploy_troopers_timed();  // r3g t02
     // Berserker: passes on counters 55, 50, ... 5 (n = 5 .. 55); a 50-frame clip loops at 49, window (10, 40) strict:
     // n = 15, 20, 25, 30, 35 only.
     CHECK(oi_berserker_damage(0) == 110.0f);

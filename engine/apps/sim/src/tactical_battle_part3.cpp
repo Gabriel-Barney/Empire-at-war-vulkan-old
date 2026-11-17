@@ -1396,6 +1396,13 @@ bool TacticalBattle::test_attack_idle(objects::ObjectId id, bool arg, SimRng& rn
 #endif
 }
 
+bool TacticalBattle::test_crush(objects::ObjectId crusher, objects::ObjectId victim) {
+    if (!unit_by_id(crusher) || !combat_->alive(victim)) return false;
+    oi_crush_.push_back(mv::CrushEvent{crusher, victim});
+    oi_apply_crush(frame_);
+    return true;
+}
+
 bool TacticalBattle::test_play_clip(objects::ObjectId id, int32_t clip_type) {
 #ifdef ALAMO_SIM_HAVE_ANIM
     if (!hooks_ || !hooks_->world() || !hooks_->world()->contains(id)) return false;

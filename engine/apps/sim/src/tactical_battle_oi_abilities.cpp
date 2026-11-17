@@ -553,6 +553,12 @@ void TacticalBattle::oi_events(TacticalMode& mode) {
             case ta::AbilityEventKind::Immobilised:  // cu8l t02 (CU8K_T02_T06_RE §3, rule 6): the first movement lock
                 if (bt_rng_ && !script_movement_locked(e.id) && !landing_locked(e.id)) (void)mv_first_lock(mode, e.id, *bt_rng_);
                 break;
+            case ta::AbilityEventKind::TrooperReleased:  // r3g t02: 0x392160 - off the walker's bone, LANDING starts
+                if (Unit* u = unit_by_id(e.id)) {
+                    u->attached_to = objects::kNoObjectId;
+                    u->attach_bone = -1;
+                }
+                break;
             case ta::AbilityEventKind::MarkerTossed: {
                 // S8 t10 (LOB_SOLVER Â§3.5 "MARKER removal"): the toss kills its ground-point MARKER (Dummy_Barrage_Target)
                 // with an ordinary Destroy_Object, spawned bomb or not. [port] removed here, after the ability pass.

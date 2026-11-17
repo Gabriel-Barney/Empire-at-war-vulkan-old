@@ -828,6 +828,9 @@ public:
     float ground_height(float x, float y) const;
     // Frame count of clip `anim` (index 0) of the object's model in this mode (sim animation); 0 = unknown.
     uint32_t anim_clip_frames(const TacticalMode& mode, objects::ObjectId id, uint8_t anim) const;
+    // r3g: sim frames a one-shot clip of `frames` at `fps` (speed 1) takes until it reports finished (anim::one_shot_frames;
+    // 0 without the anim module).
+    static uint32_t clip_finish_frames(uint32_t frames, float fps);
     // Frame count and fps of clip `anim` (a ModelAnimType id, index `variant`) of the object's model (OI t03 ability timings:
     // static clip data, never the playing clock). False without a sim animation, model or clip.
     bool anim_clip_info(const TacticalMode& mode, objects::ObjectId id, int32_t anim, uint32_t& frames, float& fps,
@@ -1335,6 +1338,9 @@ public:
     // (index 0, looping, hard cut). False when the battle has no animation world or `id` has no row in it.
     bool test_attack_idle(objects::ObjectId id, bool arg, SimRng& rng);
     bool test_play_clip(objects::ObjectId id, int32_t clip_type);
+    // r3g t05 test seam (MOVEMENT §5.5): `crusher` (a battle unit) crushes `victim` now, as a movement crush event does.
+    // False when either is not a live battle unit.
+    bool test_crush(objects::ObjectId crusher, objects::ObjectId victim);
     // s78n t09 test seam (TACTICAL_COMBAT §5.4.4 item 1, 0x404450): the joint box half-extents (along / across the
     // facing) of movement-backed land squad container `id` - the AbilityHost::land_squad_slots input Bribe's E_T folds
     // (abilities::squad_joint_half_extents). False: not such a container. Const read only.
@@ -1980,7 +1986,7 @@ private:
     static constexpr uint32_t kForeverFrame = 0xFFFFFFFFu;
     SimAnimation* clone_models_ = nullptr;
 #ifdef ALAMO_SIM_HAVE_ANIM
-    std::unique_ptr<SimAnimation> own_clone_models_;  // made on first use when neither anim_ nor clone_models_ is set
+    mutable std::unique_ptr<SimAnimation> own_clone_models_;  // made on first use when neither anim_ nor clone_models_ is set
 #endif
     void schedule_death_clone(TacticalMode& mode, objects::ObjectHandle clone, int32_t clone_type, uint8_t kind, SimRng& rng);
     void remove_death_clones(TacticalMode& mode, bool all);  // due ones (expire_objects), or all (battle end)
@@ -2499,6 +2505,9 @@ private:
     bool prod_used_ = false;
     std::unique_ptr<tactical::hangar::HangarSystem> hangars_;
     std::vector<int32_t> hangar_desc_;           // TypeIndex -> HangarDesc index (-1 none)
+    std::vector<std::vector<std::string>> hg_land_bones_;  // r3g t03: per HangarDesc, Spawned_Squadron_Location_Bones
+    void hg_land_launch(TacticalMode& mode, const tactical::hangar::LaunchRequest& r, SimRng& rng);  // r3g t03
+    bool hg_move_done(objects::ObjectId id) const;  // r3g t03: the "move finished" (signal 10) test of a land launch
     tactical::hangar::EngineLoops engine_loops_;
     std::vector<tactical::hangar::EngineLoopRequest> engine_loop_requests_;
     std::vector<int32_t> hg_tech_bonus_;         // per player: station-upgrade tech levels in this battle [port]

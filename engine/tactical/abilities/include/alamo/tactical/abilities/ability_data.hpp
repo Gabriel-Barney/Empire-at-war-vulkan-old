@@ -149,6 +149,9 @@ struct SpecialAbilityDesc {
     float saber_speed = 0.0f;
     float saber_max_flight = 0.0f;  // cu8j t03: the Saber_Name type's Projectile_Max_Flight_Distance (0 = unknown)
     int32_t saber_projectile = -1;  // cu8k t01: the Saber_Name type's ProjectileDesc (the thrown saber), -1 unknown
+    // Cable (r3g t04, CableAttackAbilityClass record +0x184 / +0x188 / +0x18c, frames): Drop_Phase_Duration,
+    // Pull_Phase_Duration, Paralyze_Phase_Duration (FoC: 110 / 140 / 300).
+    float cable_drop_phase = 0.0f, cable_pull_phase = 0.0f, cable_paralyze_phase = 0.0f;
     // Proximity_Mines (§2.3.3) / Buzz_Droids / Summon / Spawn / Radioactive (Object_Type, Mine_Type, ...)
     float activation_time = 0.0f;         // Activation_Time_In_Seconds
     float trigger_radius = 0.0f;          // Trigger_Radius

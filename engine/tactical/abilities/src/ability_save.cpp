@@ -43,9 +43,9 @@ using save_io::put_vec3;
 namespace {
 
 // 2: OI follow-up animation record + lock pairs; 3: cu8 t02 stealth bonus gone; 4: cu8f t01 special restore target,
-// cu8f t06 trooper squads, LURE pack, spawn-request squad; 5: TRU1 t03 gravity control field state. Only the current
-// version is read (cu6).
-constexpr uint32_t kAbilitySaveVersion = 5;
+// cu8f t06 trooper squads, LURE pack, spawn-request squad; 5: TRU1 t03 gravity control field state; 6: r3g t02 the timed
+// DEPLOY_TROOPERS machine and the rope landing. Only the current version is read (cu6).
+constexpr uint32_t kAbilitySaveVersion = 6;
 constexpr uint32_t kSpecialWeaponSaveVersion = 1;
 constexpr uint32_t kSpaceFieldSaveVersion = 1;
 
@@ -114,6 +114,7 @@ void AbilitySystem::write(ByteWriter& w) const {
         w.i32(o.squads_formed).u8(o.lure_on).i32(o.lure_pulses).u32(o.lure_next).i32(o.lure_effect);
         w.u32(o.gravity_due).u8(o.gravity_on).u8(o.in_gravity_field);  // v5 (TRU1 t03)
         put_ids(w, o.gravity_list);
+        w.u8(o.troop_state).u8(o.troop_deploy).u32(o.troop_end).u8(o.rope_state).u32(o.rope_end).f32(o.rope_z).i32(o.rope_owner);  // v6
     }
 
     w.u32(static_cast<uint32_t>(spawns_.size()));
@@ -285,6 +286,14 @@ bool AbilitySystem::read(ByteReader& r) {
         o.gravity_on = r.u8();
         o.in_gravity_field = r.u8();
         if (!r.ok() || !get_ids(r, o.gravity_list)) return false;
+        o.troop_state = r.u8();  // v6 (r3g t02)
+        o.troop_deploy = r.u8();
+        o.troop_end = r.u32();
+        o.rope_state = r.u8();
+        o.rope_end = r.u32();
+        o.rope_z = r.f32();
+        o.rope_owner = r.i32();
+        if (!r.ok()) return false;
     }
 
     if (!r.count(n, 55u)) return false;
@@ -352,7 +361,7 @@ bool AbilitySystem::read(ByteReader& r) {
         e.frame = r.u32();
         e.point = get_vec3<Vec3>(r);
         e.value = r.i32();
-        if (!r.ok() || kind > static_cast<uint8_t>(AbilityEventKind::GravitySlow)) return false;
+        if (!r.ok() || kind > static_cast<uint8_t>(AbilityEventKind::TrooperReleased)) return false;
         e.kind = static_cast<AbilityEventKind>(kind);
     }
     if (!r.count(n, 9)) return false;

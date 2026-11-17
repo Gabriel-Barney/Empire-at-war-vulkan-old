@@ -29,7 +29,7 @@ using save_io::put_vec3;
 
 namespace {
 
-constexpr uint32_t kHangarSaveVersion = 1;
+constexpr uint32_t kHangarSaveVersion = 2;  // 2: r3g t03 land state (clip end, leaving unit; request land / leaving)
 constexpr uint32_t kContentsSaveVersion = 1;
 constexpr uint32_t kProductionSaveVersion = 1;
 constexpr uint32_t kEngineLoopsSaveVersion = 4;  // 2: cu8g t01 holster state per object, request op + fade; 3: cu8i t01 catch frame; 4: cu8j t03 throw / catch / end
@@ -62,6 +62,7 @@ void HangarSystem::write(ByteWriter& w) const {
     for (const Carrier& c : carriers_) {
         w.i32(c.id).u32(c.desc).i32(c.owner).i32(c.spawn_player).u32(c.due).u32(c.next);
         w.u8(c.state).u8(c.enabled).u8(c.deploy_latch).u8(c.bays_gone);
+        w.u32(c.clip_end).u32(c.leaving_serial).i32(c.leaving);  // version 2
         w.u32(static_cast<uint32_t>(c.bays.size()));
         for (const uint32_t b : c.bays) w.u32(b);
         w.u32(static_cast<uint32_t>(c.entries.size()));
@@ -77,17 +78,19 @@ void HangarSystem::write(ByteWriter& w) const {
         put_vec3(w, q.direction);
         put_vec3(w, q.facing);
         w.boolean(q.escort);
+        w.boolean(q.land).boolean(q.leaving);  // version 2
     }
     w.u32(static_cast<uint32_t>(events_.size()));
     for (const HangarEvent& e : events_) w.u8(static_cast<uint8_t>(e.kind)).i32(e.id).i32(e.target).i32(e.value).u32(e.frame);
 }
 
 bool HangarSystem::read(ByteReader& r) {
-    if (r.u32() != kHangarSaveVersion || !r.ok()) return false;
+    const uint32_t version = r.u32();
+    if ((version != 1 && version != kHangarSaveVersion) || !r.ok()) return false;
     const uint32_t ndesc = r.u32(), serial = r.u32();
     if (!r.ok() || ndesc != descs_.size()) return false;
     uint32_t n = 0;
-    if (!r.count(n, 40)) return false;
+    if (!r.count(n, version >= 2 ? 52u : 40u)) return false;
     std::vector<Carrier> carriers(n);
     for (size_t i = 0; i < carriers.size(); ++i) {
         Carrier& c = carriers[i];
@@ -101,6 +104,11 @@ bool HangarSystem::read(ByteReader& r) {
         c.enabled = r.u8();
         c.deploy_latch = r.u8();
         c.bays_gone = r.u8();
+        if (version >= 2) {
+            c.clip_end = r.u32();
+            c.leaving_serial = r.u32();
+            c.leaving = r.i32();
+        }
         if (!r.ok() || c.desc >= ndesc || (i > 0 && c.id <= carriers[i - 1].id)) return false;
         uint32_t m = 0;
         if (!r.count(m, 4)) return false;
@@ -127,7 +135,7 @@ bool HangarSystem::read(ByteReader& r) {
         }
         if (!r.ok()) return false;
     }
-    if (!r.count(n, 74)) return false;
+    if (!r.count(n, version >= 2 ? 76u : 74u)) return false;
     std::vector<LaunchRequest> requests(n);
     for (LaunchRequest& q : requests) {
         q.serial = r.u32();
@@ -142,6 +150,10 @@ bool HangarSystem::read(ByteReader& r) {
         q.direction = get_vec3<Vec3>(r);
         q.facing = get_vec3<Vec3>(r);
         q.escort = r.boolean();
+        if (version >= 2) {
+            q.land = r.boolean();
+            q.leaving = r.boolean();
+        }
     }
     if (!r.count(n, 17)) return false;
     std::vector<HangarEvent> events(n);

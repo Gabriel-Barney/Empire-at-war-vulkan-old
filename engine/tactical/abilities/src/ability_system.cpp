@@ -1905,6 +1905,7 @@ void AbilitySystem::set_black_market_blocked(int32_t player, std::vector<uint32_
 // ================================================================================================
 
 void AbilitySystem::begin_tick(uint32_t frame) {
+    frame_now_ = frame;  // r3g t02: the frame of host calls between ticks (bind_spawn's trooper lock)
     for (const Obj& o : objs_) refresh_stealth_flag(o, frame);
 }
 
@@ -2293,6 +2294,17 @@ void AbilitySystem::hash(StateHasher& h) const {
             // cu8f t06: the squad numbers (CU8F_T04_T06_RE §3.2)
             h.i32(o.squads_formed);
             for (const int32_t q : o.trooper_squads) h.i32(q);
+        }
+        // r3g t02: the timed DEPLOY_TROOPERS machine and the rope landing, only while running
+        if (o.troop_state != 0 || o.rope_state != 0) {
+            h.u32(0x45504f52u);  // "ROPE"
+            h.u8(o.troop_state);
+            h.u8(o.troop_deploy);
+            h.u32(o.troop_end);
+            h.u8(o.rope_state);
+            h.u32(o.rope_end);
+            h.f32(o.rope_z);
+            h.i32(o.rope_owner);
         }
         // TRU1 t03: gravity control field state, only for generators and slowed units (keeps the other digests)
         if (desc(o).gravity_field || o.in_gravity_field != 0 || !o.gravity_list.empty()) {
