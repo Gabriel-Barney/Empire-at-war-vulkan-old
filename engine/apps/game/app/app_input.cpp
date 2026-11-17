@@ -144,7 +144,9 @@ void App::announcer_feedback() {
         // <old> to <new>" at the back of the advisor hint queue in red, whoever the owners are; the _BONUS text with the
         // planet's Planet_Capture_Bonus_Reward when the new owner is the local player and the bonus was paid (planet not
         // destroyed, new owner's faction playable).
-        if (e.kind == K::PlanetOwnerChanged && e.planet < g->planets().size()) {
+        // [port] retail queues it when the HUD text method (0x140b31410) exists, i.e. whenever the HUD is up; the port's
+        // queue is drained only while a story presenter runs (story_present_frame), so it queues only then (no growth).
+        if (e.kind == K::PlanetOwnerChanged && e.planet < g->planets().size() && story_present_story_) {
             std::optional<int32_t> bonus;
             if (me >= 0 && e.player == me && !g->planets()[e.planet].destroyed && static_cast<size_t>(me) < g->players().size()) {
                 const uint32_t fac = g->players()[static_cast<size_t>(me)].faction;

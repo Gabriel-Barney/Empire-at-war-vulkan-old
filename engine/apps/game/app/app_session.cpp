@@ -638,6 +638,11 @@ void App::end_session() {
     if (ui_.load.is_open()) ui_.load.close();
     battle_view_pending_ = false;
     load_intro_frames_ = 0;
+    if (light_loop_held()) {  // q6 t36: the HUD's Light_Loop ends with the session (light_loop_step no longer runs)
+        advisor_movie_.stop(audio_);
+        gpu_.hud.clear_image_page(kAdvisorPage);
+    }
+    light_loop_ = false;
     session_.reset();
     ui_.front.set_in_game(false);
 }

@@ -194,6 +194,8 @@ Heartbeats every 0.25 s instead of 1 s would make each of these readings exact t
   `Light_Loop`) holds the queue; the advisor slot plays `Light_Loop` looping while a text or an encyclopedia pop-up is
   up; the campaign end screen comes only with no message box, no Bink open, no text up and no pop-up. [port] The text and
   the pop-up are tested directly as well, so the hold is the same when `Light_Loop` cannot open (no Bink decoder).
+  [port] Retail queues the changed-hands text when the HUD text method `0x140b31410` exists (whenever the HUD is up); the
+  port queues it while a story presenter runs, the only time its queue is drained.
 
 ## How this was read
 

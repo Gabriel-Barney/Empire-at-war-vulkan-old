@@ -108,7 +108,9 @@ are registered by `0x1402b5ad0`; whether that runs in record order was not read 
   behaviour (newest first); `Find_Hint` with one argument, a non-string second argument (nil included) or an empty string
   returns the newest object of the type with `HINT`, without a hint compare; only a call without arguments is a count
   error. Company expansion (map1 t03) gives every member `HINT` and the hint, and the company object is removed, so it is
-  never found (`test_map1`). The every-map test checks that every object given a map hint has `HINT` (FoC and EaW).
+  never found (`test_map1`). As the reader (§3), the map load keeps a 0x482 hint only on an object with `HINT` (type or
+  0x4B7), and a company's members inherit only when the company has `HINT`; the every-map test counts the skipped hints
+  (FoC: 2 of 7100, a Star_Destroyer and a Calamari_Cruiser hinted "pointguard" on `_SPACE_PLANET_AETENII_PIRACY`; EaW: 0).
 
 ## How this was read
 
