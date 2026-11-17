@@ -60,9 +60,13 @@ add_library(alamo_shaderxlat_checked STATIC EXCLUDE_FROM_ALL ${_xlat_sources})
 target_include_directories(alamo_shaderxlat_checked PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(alamo_shaderxlat_checked PUBLIC alamo_core)
 target_compile_definitions(alamo_shaderxlat_checked PUBLIC ${_xlat_checked_defs})
+# The hardening defines differ from the shared PCH's (engine/CMakeLists.txt, ALAMO_PCH): reusing it gives C4005
+# (_MSVC_STL_HARDENING redefinition) whenever these files recompile, so the checked copy and its tests opt out.
+set_property(TARGET alamo_shaderxlat_checked PROPERTY DISABLE_PRECOMPILE_HEADERS ON)
 
 add_executable(alamo_shaderxlat_tests tests/test_shaderxlat.cpp tests/mini_asm.cpp tests/corpus.cpp tests/gpu_diff.cpp)
 target_link_libraries(alamo_shaderxlat_tests PRIVATE alamo_shaderxlat_checked alamo_fx2 alamo_test_support)
+set_property(TARGET alamo_shaderxlat_tests PROPERTY DISABLE_PRECOMPILE_HEADERS ON)  # the checked copy's defines (above)
 target_include_directories(alamo_shaderxlat_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 target_compile_definitions(alamo_shaderxlat_tests PRIVATE
   "ALAMO_SHADERXLAT_GOLDEN_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/golden\"")
