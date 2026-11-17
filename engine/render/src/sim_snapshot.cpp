@@ -219,6 +219,10 @@ void SnapshotTypeTable::build(const GameObjectTypes& types, objects::ModeKind mo
         // but never show in the base game (fixpass_capture C2_space_*: no flag at the start positions; playtest V3). The drawing
         // rule itself is not traced. In_Background markers (Death_Star_Position: a backdrop model) stay drawn.
         const bool marker = types.get_bool(t, "Is_Marker") || yes_text(type_text(types, t, "Is_Marker"));
+        // storyb t16 [port]: a SKY_DOME object (the battle's environment sky dome, STORYB_T16_SKY_DOME) is drawn by the map
+        // scene from the environment (MapScene skydomes), so its store object adds no snapshot model.
+        static const objects::BehaviorTypeId kSkyDome = objects::behavior_type_id("SKY_DOME");
+        const bool sky_dome = kSkyDome != objects::kNoBehavior && types.has_behavior(t, objects::BehaviorSet::Union, kSkyDome);
         terrain::ResolvedType rt;
         if (resolver && resolver->resolve(ti.name_crc, space, rt)) {
             ti.model = laser ? std::string() : rt.model_name;
@@ -227,6 +231,7 @@ void SnapshotTypeTable::build(const GameObjectTypes& types, objects::ModeKind mo
             ti.lod_bias = ri.lod_bias;
             ti.in_background = ri.in_background;
             if (marker && !ti.in_background) ti.model.clear();
+            if (sky_dome) ti.model.clear();
             ti.has_no_colorization = ri.has_no_colorization;
             ti.no_colorization = ri.no_colorization;
             for (const std::string& h : ri.hardpoints) ti.hardpoint_crcs.push_back(alamo::name_crc(h));
@@ -247,6 +252,7 @@ void SnapshotTypeTable::build(const GameObjectTypes& types, objects::ModeKind mo
         const std::string bg = type_text(types, t, "In_Background");
         ti.in_background = yes_text(bg);
         if (marker && !ti.in_background) ti.model.clear();
+        if (sky_dome) ti.model.clear();
         const auto& hp_names = types.hardpoint_names();
         for (uint32_t h : types.hardpoints(t))
             if (h < hp_names.size()) ti.hardpoint_crcs.push_back(alamo::name_crc(hp_names[h]));
