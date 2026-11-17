@@ -407,8 +407,7 @@ void test_space(const Data& d) {
     CHECK(a.release_counter.size() == 3 && a.release_counter[0] == 30 && a.release_counter[1] == 31 && a.release_counter[2] == 34);
     CHECK(a.completed && a.complete_frame_ok);
     CHECK(a.saved);
-    std::printf("  pursuit (trn1 t06): %d unit-frames checked during the countdown, ok %d
-", a.pursue_checks, a.pursue_ok);
+    std::printf("  pursuit (trn1 t06): %d unit-frames checked during the countdown, ok %d\n", a.pursue_checks, a.pursue_ok);
     CHECK(a.pursue_checks > 0 && a.pursue_ok);
     std::printf("  debris: tracked %d (life %lld frames), moved %d, turned %d, particle followed %d, expired %d at %u (spawned %u), "
                 "particle gone %d, explosion %d\n",

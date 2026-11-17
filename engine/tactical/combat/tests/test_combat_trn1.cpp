@@ -152,7 +152,7 @@ void test_surface_fx_terrain_modifiers() {
     s.w.sys->set_position(1, Vec3{50, 0, 0});  // leaving to default stops it
     for (int i = 0; i < 40; ++i) s.w.tick();
     CHECK_F(s.w.sys->health(1), h0 - 20.0f);
-    CHECK_F(s.w.sys->health(2), 1000.0f);
+    CHECK_F(s.w.sys->health(2), s.w.sys->max_health(2));
 }
 
 void test_surface_fx_converted_and_save() {
@@ -182,7 +182,7 @@ void test_surface_fx_converted_and_save() {
         t.w.tick();
     }
     CHECK_F(s.w.sys->health(2), t.w.sys->health(2));
-    CHECK(s.w.sys->health(2) < 1000.0f);
+    CHECK(s.w.sys->health(2) < s.w.sys->max_health(2));
 }
 
 void test_burning_speed_factor() {
