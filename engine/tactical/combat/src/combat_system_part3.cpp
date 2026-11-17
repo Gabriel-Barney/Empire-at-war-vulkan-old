@@ -147,6 +147,13 @@ HardpointKind CombatSystem::hardpoint_kind(ObjectId id, uint32_t hp) const {
     return (u && hp < u->hp_count) ? data_->hardpoints[hps_[u->hp_begin + hp].desc].kind : HardpointKind::DummyArt;
 }
 
+bool CombatSystem::hardpoint_world(ObjectId id, int32_t hp, Vec3& out) const {
+    const Unit* u = unit(id);
+    if (!u || hp < 0 || static_cast<uint32_t>(hp) >= u->hp_count) return false;
+    out = hp_world(*u, data_->hardpoints[hps_[u->hp_begin + static_cast<uint32_t>(hp)].desc]);
+    return true;
+}
+
 float CombatSystem::hardpoint_max(ObjectId id, uint32_t hp) const {
     const Unit* u = unit(id);
     return (u && hp < u->hp_count) ? hp_max(*u, hps_[u->hp_begin + hp]) : 0.0f;

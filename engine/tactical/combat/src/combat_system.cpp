@@ -1870,7 +1870,34 @@ CanHit CombatSystem::line_of_fire_from(ObjectId attacker, Vec3 from, ObjectId ta
 }
 
 CanHit CombatSystem::fire_line(const Unit& src, Vec3 from, const Unit& tu, const Vec3* to) const {
-    const Unit* t = &tu;  // (the body as it stood in can_hit_from)
+    Vec3 b = to ? *to : tu.pos;  // bkt1 t06: the trim's G when given
+    b.z = b.z + desc_of(tu).ranged_target_z_adjust;
+    return fire_line_to(src, from, b);
+}
+
+CanHit CombatSystem::can_hit_point(ObjectId attacker, Vec3 from, Vec3 point, float extent) const {
+    const Unit* u = unit(attacker);
+    if (!live(u)) return CanHit::NoTarget;
+    const Unit* head = land_team_lead(*u);
+    const Unit& src = head ? team_weapon_source(*head) : *u;
+    const ProjectileDesc* gw = grenade_weapon(src);
+    const float range = fire_range(base_attack_range(src), mod_r(src, ModList::FireRange));
+    if (!gw && !(range > 0.0f)) return CanHit::NoTarget;
+    const float dx = point.x - from.x, dy = point.y - from.y;
+    const float d = dmath::sqrt(dx * dx + dy * dy);
+    if (gw) {
+        LobSolution s;
+        if (!lob_solve(from, point, gw->max_speed, lob_g(*gw), false, s)) return CanHit::OutOfMaxRange;
+    } else if (!(d <= range + extent)) {
+        return CanHit::OutOfMaxRange;
+    }
+    // slot 46 as min_range_hit: r <= 0 -> false, else D <= r + E
+    const float mr = desc_of(src).min_attack_distance;
+    if (mr > 0.0f && d <= mr + extent) return CanHit::InsideMinRange;
+    return fire_line_to(src, from, point);
+}
+
+CanHit CombatSystem::fire_line_to(const Unit& src, Vec3 from, Vec3 b) const {
     if (cfg_.mode == GameMode::Land && shield_sides_) {
         // 0x3b5ad0's projectile gate: every projectile the attacker would fire (its WEAPON projectile and its live weapon
         // hard points') must do shield damage for the shields to count
@@ -1883,9 +1910,8 @@ CanHit CombatSystem::fire_line(const Unit& src, Vec3 from, const Unit& tu, const
             if (hp_out(h) || !is_weapon(hd.kind) || hd.projectile < 0) continue;
             if (!data_->projectiles[static_cast<size_t>(hd.projectile)].does_shield_damage) shield_damage = false;
         }
-        Vec3 a = from, b = to ? *to : t->pos;  // bkt1 t06: the trim's G when given
+        Vec3 a = from;
         a.z = a.z + ud.ranged_target_z_adjust;
-        b.z = b.z + desc_of(*t).ranged_target_z_adjust;
         if (shield_sides_(a, b, shield_damage)) return CanHit::LineBlocked;
     }
     return CanHit::Yes;

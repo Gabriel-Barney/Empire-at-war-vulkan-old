@@ -415,9 +415,10 @@ inline void test_landing_drop(bool timed, uint32_t destroy_at = 0) {
             // blocks); fleet cohesion: version 13 (per-player cohesion); TRU1: version 14 (retreat flight, spawners, debris;
             // exact: every other version is refused); skm1 t07: version 15 (skirmish garrison re-delivery); r3g t01: version 16
             // (the landing's Land / Takeoff clip); skm2 t02: version 17 (skirmish sides 2..7); cmb1 t01 / t06: version 18
-            // (land formation records, the attack blocks' last-observed point): 16, 17 and 19 are refused.
+            // (land formation records, the attack blocks' last-observed point); cmb2 t03: version 19 (the attack blocks'
+            // plan retry frame): 17, 18 and 20 are refused.
             std::vector<uint8_t> stale(w.bytes().begin(), w.bytes().end());
-            for (const uint32_t v : {16u, 17u, 19u}) {
+            for (const uint32_t v : {17u, 18u, 20u}) {
                 for (size_t k = 0; k < 4; ++k) stale[k] = static_cast<uint8_t>(v >> (8 * k));
                 ByteReader rs(stale);
                 CHECK(!b->read_part(TacticalBattle::SavePart::State, rs));
@@ -1566,6 +1567,9 @@ struct LandGuardRun {
     size_t blocks0 = 0;
     bool nudged = false, rechecked = false;  // cmb1 t04: the arrived re-check (0x410a60) below R
     uint32_t recheck_frames = 0;
+    bool marker_attack_move = false, marker_kept = false;  // cmb2 t06: own Attack_Move on a non-combat object
+    float marker_goal_d = 0.0f;
+    objects::ObjectId marker = objects::kNoObjectId;
 };
 
 inline LandGuardRun run_land_guard(const Data& d) {
@@ -1592,7 +1596,7 @@ inline LandGuardRun run_land_guard(const Data& d) {
     Vec3 dir{}, perp{};
     mv::UnitView slot0;
     uint32_t replans0 = 0;
-    for (uint64_t t = 0; t < 6000 && stage < 9; ++t) {
+    for (uint64_t t = 0; t < 6000 && stage != 9; ++t) {
         TacticalBattle* b = s.tick();
         TacticalMode* tm = s.host->tactical();
         if (!b || !tm || b->frame() < 3) {
@@ -1781,6 +1785,53 @@ inline LandGuardRun run_land_guard(const Data& d) {
         }
         if (stage == 6 && b->frame() >= stage_frame + 45) {  // through the block's first 30-frame check: kept (no lock)
             out.block_kept = out.blocks0 > 0 && b->attack_blocks() == out.blocks0;
+            stage = 12;
+            continue;
+        }
+        if (stage == 12) {
+            // cmb2 t06 (b0075, BKT1_ATTACK_RE §3 [H]): the squad's own Attack_Move (arg 0) on an object that is not a combat
+            // unit (a story-marker stand-in: a store object of the company type, never adopted by the combat system), about
+            // 700 away: the land attack move on it - an attack block naming it, kept by its checks (no lock, TARGETING by
+            // geometry), the plan trimmed to weapon range (250) of it, not onto it
+            const Vec3 sp = st.position(st.find(sq[0]));
+            objects::SpawnParams spn;
+            spn.type = d.types.resolve_name("S10_Squad");
+            spn.owner = 1;
+            // 700 away, kept 300 inside the map bounds on both axes (a clamped destination would not be the object's point)
+            const tactical::Aabb& mb = tm->bounds();
+            const float mx = std::clamp(sp.x - dir.x * 700.0f, mb.min.x + 300.0f, mb.max.x - 300.0f);
+            const float my = std::clamp(sp.y - dir.y * 700.0f, mb.min.y + 300.0f, mb.max.y - 300.0f);
+            spn.position = Vec3{mx, my, sp.z};
+            const objects::ObjectHandle mh = st.create(spn);
+            out.marker = st.alive(mh) ? st.id(mh) : objects::kNoObjectId;
+            CHECK(out.marker != objects::kNoObjectId && !cs.has_unit(out.marker));
+            if (out.marker == objects::kNoObjectId) {
+                stage = 9;
+                continue;
+            }
+            std::vector<uint8_t> pay;
+            const auto put = [&pay](uint32_t v) {
+                for (int i = 0; i < 4; ++i) pay.push_back(static_cast<uint8_t>(v >> (8 * i)));
+            };
+            put(static_cast<uint32_t>(sq[0]));
+            put(static_cast<uint32_t>(out.marker));
+            put(std::bit_cast<uint32_t>(spn.position.x));
+            put(std::bit_cast<uint32_t>(spn.position.y));
+            put(std::bit_cast<uint32_t>(spn.position.z));
+            put(0u);
+            const auto sub = static_cast<uint16_t>(lua::kLuaOrderSubtype + static_cast<uint16_t>(lua::LuaOrder::AttackMove));
+            const bool ok = bai->execute(0, commands::ev::port_extension(sub, pay)) == commands::RejectReason::None;
+            const mv::UnitView v = ms.view(sq[0]);
+            const float gx = v.goal.x - spn.position.x, gy = v.goal.y - spn.position.y;
+            out.marker_goal_d = std::sqrt(gx * gx + gy * gy);
+            out.marker_attack_move = ok && v.has_goal && v.atk_target == out.marker;
+            out.blocks0 = b->attack_blocks();
+            stage = 13;
+            stage_frame = b->frame();
+            continue;
+        }
+        if (stage == 13 && b->frame() >= stage_frame + 45) {
+            out.marker_kept = out.blocks0 > 0 && b->attack_blocks() == out.blocks0;
             stage = 9;
         }
     }
@@ -1803,6 +1854,9 @@ inline void test_land_guard() {
     CHECK(r.nudged && r.rechecked && r.recheck_frames <= 31);
     std::printf("  own Attack_Move on the friendly squad: attack block, no lock %d\n", r.own_attack_move ? 1 : 0);
     CHECK(r.own_attack_move && r.block_kept);  // bkt1 t05
+    std::printf("  own Attack_Move on a non-combat object (cmb2 t06): attack block %d, kept %d, goal %.1f from it\n",
+                r.marker_attack_move ? 1 : 0, r.marker_kept ? 1 : 0, static_cast<double>(r.marker_goal_d));
+    CHECK(r.marker_attack_move && r.marker_kept && r.marker_goal_d > 150.0f && r.marker_goal_d < 300.0f);  // cmb2 t06
 }
 
 // s78n t26 review round 2 (LUA_API "Move_To / Attack_Move / Guard_Target - Move_Internal 0x57da90" [H]: for Move_To,

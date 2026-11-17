@@ -884,7 +884,8 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
             lf.fwd = normalize_retail(lf.centre - lf.centroid);
             if (length_sq(lf.fwd) == 0.0f) lf.fwd = {1.0f, 0.0f};
             lf.keep_id = keys[gi];
-            set_form_mask(idx, lf, lf.centre);  // s78n t26 review round 2 (0x4779e0); bkm1 t03: 0x414720
+            // cmb2 t05 (BKT1_ATTACK_RE §2.2 [H]): 0x414720's G0 is the block's goal point C (staging has not run yet)
+            set_form_mask(idx, lf, order.attack.c);  // s78n t26 review round 2 (0x4779e0); bkm1 t03: 0x414720
             forms.push_back(std::move(lf));
         }
     }
@@ -935,7 +936,8 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
             lf.slots = layout_formation(mem, f, fwd, k);
             lf.centre = centre;
             lf.fresh = fresh;
-            set_form_mask(idx, lf, attack ? order.attack.g : centre);  // s78n t26 review round 2 (0x4779e0); bkm1 t03: 0x414720
+            // cmb2 t05 (BKT1_ATTACK_RE §2.2 [H]): an attack order's G0 is the block's goal point C, not the staged G
+            set_form_mask(idx, lf, attack ? order.attack.c : centre);  // s78n t26 review round 2 (0x4779e0); bkm1 t03: 0x414720
             forms.push_back(std::move(lf));
         }
     }

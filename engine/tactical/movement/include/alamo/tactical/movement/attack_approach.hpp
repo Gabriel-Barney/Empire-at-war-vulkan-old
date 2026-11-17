@@ -13,12 +13,14 @@
 // (formation_right(direction) * lateral, formation.hpp). Determinism (rule 3): float +, -, *, /, IEEE sqrt and
 // alamo::dmath only; sorts are stable with an object-id tie-break.
 #pragma once
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <span>
 #include <vector>
 
 #include "alamo/tactical/movement/common.hpp"
+#include "alamo/tactical/movement/land_path.hpp"
 
 namespace alamo::tactical::movement {
 
@@ -106,5 +108,18 @@ float fire_trim(std::span<const V2> path, std::span<const TrimMember> members, b
 // q = the distance the terrain line test from G toward Q = G + rho rot(-v, theta) gets; rho when clear). False when
 // q <= 0 (no leg).
 bool slot_leg_point(V2 g, V2 v, float theta, float q, V2& out);
+
+// cmb2 t01 (BKR1 Q7 (c) [H], 0x5a4c10 -> 0x5a5810): q, the slot leg's reach from G toward Q = G + rho rot(-v, theta) for the
+// formation's plan class `mask`. 0 when |Q - G| = 0 or G's cell is off the grid. A piece a -> b (first the whole line): a's
+// cell enterable for the class and in the same region as b's cell (0x50e780) -> the whole piece, no cell walk (blocked cells
+// on the line inside one region do not shorten it); else a piece shorter than 40 gets the cell walk 0x5a51f0 (the distance
+// to the entry of the first refused cell, the piece when every cell passes); a longer piece is halved at its midpoint and
+// the first half decides: failure -> its partial reach, success -> its length + the second half's reach.
+float slot_leg_reach(const PassabilityGrid& grid, const RegionMap& regions, V2 g, V2 q, uint32_t mask);
+
+// cmb2 t02 (BKR2 Q7 item 3 [H], 0x438c10): the reference formation of an order's attack slots - the index of the point
+// (xy[i], z[i]) nearest the points' mean by the 3-D distance (strict <, the first wins). attack_slots passes each
+// formation's centroid with its members' mean height ([port] a member's z is the terrain height under it).
+size_t attack_reference_index(std::span<const V2> xy, std::span<const float> z);
 
 }  // namespace alamo::tactical::movement

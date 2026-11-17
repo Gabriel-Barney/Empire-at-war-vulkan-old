@@ -563,8 +563,14 @@ play is filed as a `modc` task (as t33).
 - What is out of scope for every mod (§4): multiplayer and the original game's save files.
 - Mods that change the game executable or load native code (DLLs) instead of data: they are outside the data mechanisms the
   port reads.
+- Mods made for base Empire at War only (retail runs them with `sweaw.exe`, not FoC): FoC mods only (Gabriel, 2026-11-17,
+  D1); the port detects them and refuses them with that reason (roadmap `mcx3`).
 
 Anything else a mod needs is a gap in the port, fixed as a general mechanism (§1 rule 6).
+
+The next step past this checklist, a graded corpus of every installed mod (grades G0-G4, coverage ledgers, asset salvage,
+load report v4), is designed in [`MOD_COMPAT_DESIGN.md`](MOD_COMPAT_DESIGN.md) and tracked as roadmap Stage 9 · Mod
+compatibility system (groups `mcx0`-`mcx9`); its decisions are in `DECISIONS.md`, "Mod compatibility system decisions".
 
 ### 10.3 Reference set
 

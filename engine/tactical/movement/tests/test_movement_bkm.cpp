@@ -133,6 +133,36 @@ void test_shield_class() {
     }
 }
 
+// cmb2 t05 (BKT1_ATTACK_RE §2.2 [H]): for an attack order 0x414720 tests the block's goal point C (G0, before staging), not
+// the staged G. A shield band across the whole map at x = 24 .. 27; the vehicle at cell (10, 20), C at cell (16, 20) on its
+// side, G at cell (40, 20) beyond the band (as a staging away from C would give). C is zone-connected for WheeledNoShield,
+// so the plan class drops the Shield bit: G is then re-validated into the vehicle's zone and the path stays out of the
+// band (with G0 = G the class would be Wheeled and the path would cross it).
+void test_attack_plan_class_goal() {
+    ::alamo::test::section("attack_plan_class_goal");
+    MovementSystem sys{MovementConfig{}};
+    land_system(sys, 60);
+    shield(sys, 24, 27, 0, 59);
+    CHECK(sys.add_unit(vehicle(1, cell_center(10, 20))));
+    SimRng rng(7);
+    MoveOrder o;
+    o.units = {1};
+    o.destination = cell_center(40, 20);
+    o.attack.target = 99;
+    o.attack.c = cell_center(16, 20);
+    o.attack.g = cell_center(40, 20);
+    o.attack.t_hx = o.attack.t_hy = 5.0f;
+    LandAttackUnit e;
+    e.id = 1;
+    e.range = e.engage = 20.0f;
+    o.attack.units.push_back(e);
+    sys.move(o, rng, 1);
+    for (uint32_t f = 1; f < 200 && sys.land_path(1).size() < 2; ++f) sys.tick(f, rng);
+    const bool pathed = sys.land_path(1).size() >= 2, crosses = path_crosses_shield(sys, 1);
+    std::printf("attack plan class goal: pathed %d, crosses the shield band %d\n", pathed ? 1 : 0, crosses ? 1 : 0);
+    CHECK(pathed && !crosses);
+}
+
 // ---------------------------------------------------------------- b0055: an unplanned order survives the old path's stop
 // MOVEMENT §3.5.2 G, §4.6.2: between a land order and its plan the old order path stays on the stack (the stack reset
 // 0x554480 comes with the path set), so a moving unit walks on along it. When that walk meets a terrain stamp, the
@@ -479,6 +509,7 @@ void test_attack_validation_failure() {
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);  // unbuffered: a crash keeps the log
     test_shield_class();  // bkm1 t03 (b0035)
+    test_attack_plan_class_goal();  // cmb2 t05
     test_unplanned_order_kept();  // bkm1 t07 (b0055)
     test_lane_segments();         // bkm1 t01 (b0095)
     test_engagement_recruit();    // bkm1 t04 (b0036)
