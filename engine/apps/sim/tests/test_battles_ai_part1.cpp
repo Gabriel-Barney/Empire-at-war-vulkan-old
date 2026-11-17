@@ -655,6 +655,13 @@ void test_battle_map_hints() {
                                     p.position[0] = x;
                                     p.position[1] = 400.0f;
                                     p.hint = hint;
+                                    // q6 t32: an editor-written hint comes with HINT (Q6_T30 §3: the record's 0x4B7 list
+                                    // when the type lacks it); Find_Hint sees only objects with HINT.
+                                    if (*hint) {
+                                        terrain::ObjectPlacement::ExtraBehavior e;
+                                        e.name_crc = name_crc("HINT");
+                                        p.extra_behaviors.push_back(e);
+                                    }
                                     m.objects.push_back(p);
                                 };
                                 add("S10_Obst_Rock", "FalconGear1", 300.0f);
