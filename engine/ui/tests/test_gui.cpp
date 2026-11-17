@@ -451,6 +451,22 @@ void test_parse() {
     CHECK(k.font("IDD_X", "IDC_HINT_LIST", GuiGadgetType::ListBox, TextAlign::Left).face == "Arial Unicode MS");
     CHECK(k.font("IDD_X", "", GuiGadgetType::Text, TextAlign::Center).face == "EmpireAtWar-Medium");  // C_Text -> global
     CHECK(k.tooltip("idc_test_check") == "TEXT_TIP" && k.tooltip_count() == 1);
+    // modc t34 (UI.md 3.2): a run of commas is one separator, as spaces and tabs ("215,,22": height 22, no empty field).
+    {
+        DialogScript dc;
+        std::string err;
+        dc.parse("IDD_DC DIALOGEX 0, 0, 512, 1024\nBEGIN\n    PUSHBUTTON      \"TEXT_A\",\n                    IDC_A,265,550,215,,22\n"
+                 "    PUSHBUTTON      \"TEXT_B\",IDC_B,265,,590 ,\t215,23\nEND\n",
+                 &err);
+        const RcDialog* d = dc.find("IDD_DC");
+        CHECK(d && d->controls.size() == 2);
+        if (d && d->controls.size() == 2) {
+            const RcControl& a = d->controls[0];
+            const RcControl& b = d->controls[1];
+            CHECK(a.id == "IDC_A" && a.x == 265 && a.y == 550 && a.w == 215 && a.h == 22 && a.visible);
+            CHECK(b.id == "IDC_B" && b.x == 265 && b.y == 590 && b.w == 215 && b.h == 23);
+        }
+    }
 }
 
 void test_placement() {

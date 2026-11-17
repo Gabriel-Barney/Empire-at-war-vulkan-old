@@ -271,6 +271,7 @@ bool TacticalBattle::read_part(SavePart p, ByteReader& r) {
             // draws and one advance [M]) are not modelled.
             if (!set_environment(static_cast<int32_t>(map_.environments.start_index))) env_index_ = 0;
             l1_weather_env_ = env_index_;
+            env_saved_ = 0xFFFFFFFFu;  // ui2 t08: a Set_Cinematic_Environment(true) of the saving run is not remembered
             // The combat hooks' tick context (the synced RNG + the global frame of the last battle tick) is used by
             // command-phase hooks before the next battle tick: as in the saving run.
             resume_tick_context();

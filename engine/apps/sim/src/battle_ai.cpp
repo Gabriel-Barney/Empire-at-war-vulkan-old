@@ -321,6 +321,7 @@ BattleAi::BattleAi(TacticalBattle& battle, TacticalMode& mode, SimHost& host, co
         k.hyperspace_out_link = [bt, bid](objects::ObjectHandle u, int32_t delay, bool keep) { return bt->hyperspace_out(bid(u), delay, keep); };
         k.retreat_increment_frames = [bt](int32_t player) { return bt->retreat_increment_frames(player); };
         k.set_new_environment = [bt](int32_t index) { bt->set_environment(index); };  // cu8g t03
+        k.set_cinematic_environment = [bt](bool on) { bt->set_cinematic_environment(on); };  // ui2 t08
         k.spawn = [bt, md](const objects::SpawnParams& p) {
             const objects::ObjectHandle o = md->spawn(p);
             bt->adopt_object(*md, o);
@@ -369,7 +370,8 @@ namespace {
 enum HostOp : uint8_t {
     kHostDivert = 64, kHostBuild, kHostLockPad, kHostBombard, kHostBombingRun, kHostBombingDisabled, kHostBombardDisabled,
     kHostRemoveBombard, kHostForceWeather, kHostSwBegin, kHostSwFire, kHostSwLob, kHostTswFire, kHostTeleport, kHostFirstLock,
-    kHostHyperspaceOut, kHostSetEnvironment, kHostReleaseClash, kHostFogRevealAll, kHostFogTempReveal, kHostFogDisableRendering
+    kHostHyperspaceOut, kHostSetEnvironment, kHostReleaseClash, kHostFogRevealAll, kHostFogTempReveal, kHostFogDisableRendering,
+    kHostSetCinematicEnvironment
 };
 }
 
@@ -590,6 +592,10 @@ void BattleAi::wrap_lane_hooks() {
         if (!lane_view()) return f(index);
         queue(kHostSetEnvironment, -1, {}, {}, index);
     };
+    k.set_cinematic_environment = [this, queue, f = k.set_cinematic_environment](bool on) {  // ui2 t08
+        if (!lane_view()) return f(on);
+        queue(kHostSetCinematicEnvironment, -1, {}, {}, 0, on);
+    };
 #ifdef ALAMO_LUA_HAVE_FOG
     // slice 4e (part 3): the fogged test from the capture; Reveal_All / Temporary_Reveal / Disable_Rendering queued
     fog_hooks_.object_hidden = [this, vid, f = fog_hooks_.object_hidden](objects::ObjectHandle o, int32_t player, bool force) {
@@ -753,6 +759,7 @@ void BattleAi::apply_host_write(const lua::LaneWrite& w) {
         case kHostFirstLock: if (k.movement_first_lock) k.movement_first_lock(h); break;
         case kHostHyperspaceOut: if (k.hyperspace_out_link) k.hyperspace_out_link(h, w.value, w.on != 0); break;
         case kHostSetEnvironment: if (k.set_new_environment) k.set_new_environment(w.value); break;
+        case kHostSetCinematicEnvironment: if (k.set_cinematic_environment) k.set_cinematic_environment(w.on != 0); break;
         case kHostFogRevealAll:
             if (tactical::fog::FogOfWar* fog = b_->fog()) fog->reveal_all(w.owner);
             break;

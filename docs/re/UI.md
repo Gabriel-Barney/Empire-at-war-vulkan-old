@@ -341,6 +341,10 @@ The original game does not use .rc compilation: the engine parses the script tex
 
 ### 3.2 Dialog format [H for syntax, M for interpretation]
 
+- Words (modc t34, REA): the script is split into words on runs of tabs, spaces and commas (0x1401e0010; a quoted
+  string is one word; a line end ends a word), so commas are separators, not arguments: `215,,22` is `215 22`
+  (EAW-Remake's main menu writes its Single Player button that way and gets a 22-unit-high button). Control fields are
+  read as the next words in order (0x1401df720 reads the four rectangle words). [H]
 - Header: `IDD_NAME DIALOGEX 0, 0, W, H`, `STYLE`, `CAPTION`, `FONT size, "face"` (Win32 header
   fields; the face is ignored in favour of GUIDialogs.xml fonts [M]).
 - Controls: `PUSHBUTTON`/`DEFPUSHBUTTON` (288/51), `LTEXT`/`RTEXT`/`CTEXT` (630/124/80),

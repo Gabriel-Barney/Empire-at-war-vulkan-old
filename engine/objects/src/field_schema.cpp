@@ -57,7 +57,9 @@ const char* to_string(FieldKind k) {
 
 FieldKind kind_of_code(uint8_t code) {
     switch (code) {
-        case 0x0: return FieldKind::Bool;
+        // 0x50: a bool stored as one bit of a flag byte through a setter (CommandBarComponent rows,
+        // docs/re/xml_field_tables.md table 0xa38dd0); the row's offset is the flag byte, not a member.
+        case 0x0: case 0x50: return FieldKind::Bool;
         case 0x2: case 0x3: case 0x4: case 0x5: case 0x6: return FieldKind::Int;
         case 0x8: case 0x9: case 0xa: return FieldKind::Float;
         case 0xc: case 0xd: case 0xe: case 0x17: case 0x1c: case 0x1d: case 0x1f: case 0x20: case 0x21:

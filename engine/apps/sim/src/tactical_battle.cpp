@@ -710,7 +710,12 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
 #endif
     retreat_allowed_frame_ = static_cast<uint32_t>((space_ ? rules_->space_retreat_allowed : rules_->land_retreat_allowed) * 30.0f);
     fog_begin(mode, players);  // fog of war: grids (owner: fog agent)
-    bt_map_load(mode, rng);      // REMAINING_GAPS §3.1: map objects in map order (Map_Load_Spawn_Table draws)
+    if (before_map_load_) {  // modc t32: the host binds the object bridge before the map objects attach their scripts
+        const std::function<void()> fn = std::move(before_map_load_);
+        before_map_load_ = nullptr;
+        fn();
+    }
+    bt_map_load(mode, rng);     // REMAINING_GAPS §3.1: map objects in map order (Map_Load_Spawn_Table draws)
     // cu8g t02 (CU8G_T02_ENV_PICK_RE §1 / §3 step 7): the environment pick, the map loader's last synced draw - after the
     // chunk-0x102 objects and their spawn-table draws, before every post-load step (skirmish base / start forces, the
     // campaign starbase / structures). Not saved: a loaded battle's read_part(State) takes the map's start index instead.

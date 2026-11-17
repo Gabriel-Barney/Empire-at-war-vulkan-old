@@ -861,6 +861,20 @@ void CampaignBattles::push_battle(SimHost& host) {
         scripts->set_player_world(m.primary(), s ? s->player_world() : host.object_script_players());
     }
 #endif
+#ifdef ALAMO_SIM_HAVE_STORY
+    // modc t32 (OBJECT_SCRIPTS §1.2 / §1.3): retail attaches a map object's script inside Create_Object at map load, with
+    // the game commands (abilities, Change_Owner, Spawn_Unit, ...) working on the mode's systems. The object bridge is
+    // built once the battle's systems exist, just before the map objects spawn. Object-script sessions only.
+    bridge_before_spawn_ = false;
+    if (host.object_scripts()) {
+        SimHost* hp = &host;
+        GameMode* mp = &m;
+        battle_->set_before_map_load([this, hp, mp] {
+            bridge_before_spawn_ = true;  // set first: story_fog_begin stamps this battle's epoch (fought_ + 1 until setup ends)
+            story_bridge_begin(*hp, *mp);
+        });
+    }
+#endif
     if (!rebuilding_) battle_->apply_skirmish_start_credits();  // skm1 t01: SKIRMISH_SETUP §2 step 3 (skirmish map battles)
     battle_->setup(static_cast<TacticalMode&>(m), std::move(pending_map_), host.random().synced(), host.players(),
                    host.parallel_for());
@@ -1374,6 +1388,26 @@ void CampaignBattles::story_load_map(galactic::BattleRequest& r) {
 #ifdef ALAMO_SIM_HAVE_STORY
 // --- L1/S4 wave 2a story hookup (story_session.hpp "battle-host calls") ---
 void CampaignBattles::story_begin(SimHost& host, GameMode& mode) {
+    if (!bridge_before_spawn_) story_bridge_begin(host, mode);
+    bridge_before_spawn_ = false;
+#ifdef ALAMO_LUA_HAVE_FOG
+    story_fog_.epoch = fought_;  // modc t32 review: the early bridge ran before ++fought_; the epoch is this battle's number
+#endif
+    StorySession* s = host.story();
+    if (!s || !battle_ || !story_bridge_) return;
+    StoryBattleStart st;
+    st.request = &pending_req_;
+    st.store = &mode.primary();
+    st.bridge = story_bridge_.get();
+    story_fog_start(st);
+    if (corruption_active_.player >= 0 && !corruption_active_.plots.empty()) st.plots_file = corruption_active_.plots;  // S4 mission plots
+    std::vector<std::string> diag;
+    s->begin_battle(st, host.frame(), &diag);
+    for (std::string& d : diag) log_.push_back(std::move(d));
+    if (corruption_active_.player >= 0) s->set_corruption_mission(corruption_active_.player, corruption_active_.type);  // S4
+}
+
+void CampaignBattles::story_bridge_begin(SimHost& host, GameMode& mode) {
     StorySession* s = host.story();
     // q6: the battle's game-object scripts use this bridge too, so it is built without a story session as well when the
     // host runs object scripts (SimConfig::object_scripts; off by default, so the sessions before q6 are unchanged).
@@ -1493,12 +1527,8 @@ void CampaignBattles::story_begin(SimHost& host, GameMode& mode) {
             if (gst.exists(sh)) story_base_ids_.push_back(gst.id(sh));
     }
     // --- end L1/S4 wave 2b ---
-    StoryBattleStart st;
-    st.request = &pending_req_;
-    st.store = &mode.primary();
-    st.bridge = &b;
-    story_fog_begin(st);  // fog follow-up
-    l1_hooks(host);       // L1 systems: special weapons, TSW, engines, teleport, hyperspace, fields, weather
+    story_fog_begin();  // fog follow-up
+    l1_hooks(host);      // L1 systems: special weapons, TSW, engines, teleport, hyperspace, fields, weather
     // --- L1 bindings (script_remaining.hpp / script_gaps.hpp): the L1 systems APIs without a hook in l1_hooks ---
     {
         auto bid = [h](objects::ObjectHandle o) {
@@ -1550,7 +1580,6 @@ void CampaignBattles::story_begin(SimHost& host, GameMode& mode) {
             if (s2.container(m) == o) out.push_back(m);
         return out;
     };
-    if (corruption_active_.player >= 0 && !corruption_active_.plots.empty()) st.plots_file = corruption_active_.plots;  // mission plots
     // --- end S4 ---
     if (scripts) {  // q6: Spawn_Unit of an object script makes battle units (TacticalBattle::script_spawn)
         b.spawn_unit = [this, h](const objects::SpawnParams& p) {
@@ -1614,11 +1643,6 @@ void CampaignBattles::story_begin(SimHost& host, GameMode& mode) {
         scripts->set_player_world(mode.primary(), s ? s->player_world() : host.object_script_players());
 #endif
     }
-    if (!s) return;
-    std::vector<std::string> diag;
-    s->begin_battle(st, host.frame(), &diag);
-    for (std::string& d : diag) log_.push_back(std::move(d));
-    if (corruption_active_.player >= 0) s->set_corruption_mission(corruption_active_.player, corruption_active_.type);  // S4
 }
 
 // This tick's combat deaths and hardpoint destructions -> StorySession::notify_tactical (names resolved now).
@@ -1727,7 +1751,16 @@ void CampaignBattles::story_feed(SimHost& host) {
 // --- end L1/S4 wave 2a ---
 
 // --- fog follow-up (campaign_battles.hpp): fog for the tactical story, station special weapon, ENABLE_FOW ---
-void CampaignBattles::story_fog_begin(StoryBattleStart& st) {
+void CampaignBattles::story_fog_start(StoryBattleStart& st) {
+    // STORY_FOG_POSITION_REVEAL / STORY_FOG_OBJECT_REVEAL (FOG_OF_WAR.md §6.6): "not fogged" for the plot's player,
+    // force 0 (both fire at once for non-human plot players and while the fog is off, as in the original).
+    st.fog_point_visible = [this](int32_t player, double x, double y, double) {
+        return battle_ && !battle_->fog_point_fogged(player, static_cast<float>(x), static_cast<float>(y), false);
+    };
+    st.fog_object_visible = [this](int32_t player, int32_t id) { return battle_ && !battle_->fog_object_hidden(player, id, false); };
+}
+
+void CampaignBattles::story_fog_begin() {
     // S8: Fire_Special_Weapon on a space station (SCRIPT_GAPS.md §1.1 step 5) -> the battle's CombatSystem (the
     // can-fire test refuses targets hidden from the station's owner with force 1).
     story_hooks_.station_readiness = [this](objects::ObjectHandle h) {
@@ -1740,16 +1773,12 @@ void CampaignBattles::story_fog_begin(StoryBattleStart& st) {
         const objects::ObjectStore& s = tm->primary();
         return battle_->abilities().combat().special_weapon_fire(s.id(h), s.id(t));
     };
-    // STORY_FOG_POSITION_REVEAL / STORY_FOG_OBJECT_REVEAL (FOG_OF_WAR.md §6.6): "not fogged" for the plot's player,
-    // force 0 (both fire at once for non-human plot players and while the fog is off, as in the original).
-    st.fog_point_visible = [this](int32_t player, double x, double y, double) {
-        return battle_ && !battle_->fog_point_fogged(player, static_cast<float>(x), static_cast<float>(y), false);
-    };
-    st.fog_object_visible = [this](int32_t player, int32_t id) { return battle_ && !battle_->fog_object_hidden(player, id, false); };
 #ifdef ALAMO_LUA_HAVE_FOG
     // L1: FogOfWar.* / Undo_Reveal of the tactical story VMs on the battle's fog (null when BattleConfig::fog is off).
     story_fog_.fog = battle_ ? battle_->fog() : nullptr;
-    story_fog_.epoch = fought_;
+    // modc t32 review: inside setup (the early object bridge) ++fought_ has not run yet; the epoch is this battle's number
+    // either way, so a reveal made by a map object's Base_Definitions can be undone later in the battle.
+    story_fog_.epoch = fought_ + (bridge_before_spawn_ ? 1u : 0u);
     story_fog_.cells.clear();
     story_fog_.object = [this](objects::ObjectHandle h, tactical::fog::FogObject& out) {
         TacticalMode* tm = host_->tactical();
@@ -2024,6 +2053,7 @@ void CampaignBattles::l1_hooks(SimHost& host) {
     };
     k.retreat_increment_frames = [this](int32_t player) { return battle_ ? battle_->retreat_increment_frames(player) : 0; };
     k.set_new_environment = [this](int32_t index) { if (battle_) battle_->set_environment(index); };  // cu8g t03
+    k.set_cinematic_environment = [this](bool on) { if (battle_) battle_->set_cinematic_environment(on); };  // ui2 t08
     // Script spawns through the mode; special weapons / TSWs among them join the L1 systems (Spawn_Special_Weapon).
     k.spawn = [this, h](const objects::SpawnParams& p) {
         TacticalMode* tm = h->tactical();

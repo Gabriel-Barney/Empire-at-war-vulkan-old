@@ -812,7 +812,7 @@ struct EnvRun {
     CrcLog crc;
     uint64_t trace = 0;
     bool fought = false, start_on = false, picked_ok = false, off_after_1 = false, sight_clear = false;
-    bool restarted = false, saved = false, kept = false, clamped = false, typed = false;
+    bool restarted = false, saved = false, kept = false, clamped = false, typed = false, cinematic = false;
     uint32_t picked = 0;
 };
 
@@ -927,6 +927,11 @@ EnvRun run_env(const Data& d, int32_t workers) {
             out.kept = b->environment_index() == 0 && b->weather().active() && !started;
         }
         if (f == 180) out.clamped = b->set_environment(99) && b->environment_index() == 3 && b->set_environment(-5) && b->environment_index() == 0;
+        if (f == 200) {  // ui2 t08: Set_Cinematic_Environment - the "Cinematic" record (3), then back; repeats change nothing
+            const uint32_t before = b->environment_index();
+            out.cinematic = b->set_cinematic_environment(true) && b->environment_index() == 3 && !b->set_cinematic_environment(true) &&
+                            b->set_cinematic_environment(false) && b->environment_index() == before && !b->set_cinematic_environment(false);
+        }
         if (f == 240) {  // vf27 on a scratch stream (the draws are checked against a copy)
             SimRng r(0x1234u), ref(0x1234u);
             const uint32_t k1 = ref.range_int(0, 1) == 0 ? 0u : 2u;  // rain (type 1): {0, 2}, one int(0, 1)
@@ -990,7 +995,7 @@ void test_environment(const Data& d) {
                 a.fought, a.picked, a.picked_ok, a.start_on, a.off_after_1, a.sight_clear, a.restarted, a.saved, a.kept,
                 a.clamped, a.typed, a.trace);
     CHECK(a.fought && a.picked_ok && a.start_on);
-    CHECK(a.off_after_1 && a.sight_clear && a.restarted && a.saved && a.kept && a.clamped && a.typed);
+    CHECK(a.off_after_1 && a.sight_clear && a.restarted && a.saved && a.kept && a.clamped && a.typed && a.cinematic);
     const EnvRun w = run_env(d, 4);
     CHECK(!first_divergence(a.crc, w.crc).diverged && a.trace == w.trace);
 }

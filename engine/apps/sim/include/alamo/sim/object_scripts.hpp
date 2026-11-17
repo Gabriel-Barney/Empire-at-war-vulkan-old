@@ -143,6 +143,8 @@ public:
 
     struct Stats {
         uint64_t attached = 0;       // object attaches (Base_Definitions run when fresh, main thread made)
+        uint64_t attached_no_bridge = 0;  // modc t32: attaches whose store had no object bridge bound yet (its
+                                          // Base_Definitions saw no abilities / Change_Owner / Spawn_Unit hooks)
         uint64_t load_failures = 0;  // missing / not compiling: no script
         uint64_t loaded = 0;         // instances loaded (new VM, top level run): pool loads + unpooled ones
         uint64_t reused = 0;         // attaches that took a free pooled instance

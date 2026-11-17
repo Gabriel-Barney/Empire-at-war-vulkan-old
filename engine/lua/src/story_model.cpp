@@ -475,8 +475,12 @@ bool StoryModel::load_plots(const FileProvider& files, std::string_view plots_fi
         const bool active = tag == "Active_Plot";  // Â§2.1: exactly this tag; any other tag loads suspended
         std::vector<uint8_t> plot_bytes;
         if (read_xml_file(files, text, plot_bytes).empty()) {
-            if (err) *err = "cannot read plot Data\\XML\\" + std::string(text) + " (listed in " + path + ")";
-            return false;
+            // modc t39 (STORY.md §2.1, 0x329aa0): the original logs "Story mode unable to open listed XML file" and
+            // creates no plot for the entry; the other entries load (Fall of the Republic lists a CIS plot it does not ship).
+            warnings_.push_back("Story mode unable to open listed XML file 'Data\\XML\\" + std::string(text) + "' (listed in " +
+                                path + ")");
+            pending_script.clear();
+            continue;
         }
         std::string perr;
         const std::string_view xml(reinterpret_cast<const char*>(plot_bytes.data()), plot_bytes.size());

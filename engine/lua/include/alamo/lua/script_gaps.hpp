@@ -97,6 +97,10 @@ struct TacticalScriptHooks {
     // index := clamp(index, 0, n - 1) (the battle's TacticalBattle::set_environment; land weather re-inits on its next
     // service, the renderer re-applies lighting / fog / clouds / sky / land wind). Unset: only the presentation event.
     std::function<void(int32_t index)> set_new_environment;
+    // ui2 t08: Set_Cinematic_Environment(bool) (0x5441a0, CU8G_T02_ENV_PICK_RE 5): true switches to the map's "Cinematic"
+    // environment (the replaced index is remembered), false restores it (TacticalBattle::set_cinematic_environment). Unset:
+    // only the presentation state.
+    std::function<void(bool on)> set_cinematic_environment;
     // The player's faction Space_Retreat_Unit_Increment_Wait_Frames (+0x20c0). Unset: 0 [port].
     std::function<int32_t(int32_t player)> retreat_increment_frames;
 

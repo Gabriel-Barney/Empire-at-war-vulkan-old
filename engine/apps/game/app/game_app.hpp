@@ -608,7 +608,8 @@ public:
     void story_advisor_frame();  // ui2 t07: the periodic advisor hint (6.4) and the hint sound cue
     // The advisor's current mode (0 galactic, 1 space, 2 land, 255 none), the render time it began and the faction's hint ids.
     uint8_t advisor_mode_ = 255;
-    double advisor_t0_ = 0.0;
+    double advisor_gal_s_ = 0.0;        // ui2 t11: render seconds spent on the galactic map this campaign
+    bool advisor_gal_started_ = false;  // the galactic mode's begin-mode ran
     uint32_t advisor_last_tick_ = 0;
     std::vector<std::string> advisor_hints_;
     void build_story_overlay(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
@@ -619,6 +620,9 @@ public:
     void story_forced_clicks();  // FORCE_CLICK_GUI: queued clicks ahead of the HUD's input (app_input.cpp)
     bool story_project(const ui::HudCanvas& canvas, float x, float y, float z, ui::Vec2f& out) const;
     bool story_type_position(std::string_view type, ui::Vec3& out) const;
+    // FLASH_FLEET_WITH_UNIT (3.5): the first fleet holding a unit of the type (its position), else the first planet whose
+    // garrison has one (the planet's position).
+    bool story_container_position(std::string_view type, ui::Vec3& out) const;
     bool story_object_position(int32_t object, ui::Vec3& out) const;
     std::set<int32_t> story_flashed_;  // components whose runtime flash the presenter set
     // ui2 t03 / t04 / t05 (app_story_camera.cpp): the script's fade, bars, cinematic camera and RTS camera moves.

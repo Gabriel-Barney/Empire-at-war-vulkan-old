@@ -360,6 +360,8 @@ int g_set_cinematic_environment(Call& c) {
     if (!need_bool1(c, "LuaSetCinematicEnvironment")) return 0;
     record(c, PresentationOp::SetCinematicEnvironment);
     state(c).cinematic_environment = boolean(c, 1);
+    if (ObjectBridge* b = c.vm->owner ? attached_object_bridge(*c.vm->owner) : nullptr; b && b->tactical && b->tactical->set_cinematic_environment)
+        b->tactical->set_cinematic_environment(boolean(c, 1));  // ui2 t08: the sim-side environment switch
     return 0;
 }
 

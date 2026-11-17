@@ -217,6 +217,10 @@ of every plots and story file `AoL_mod_files`, 562 files; modc t06]:
   (Operation Shadow Hand) list each plot file once per game.
 
 `<Suspended_Plot />` with no text creates nothing.
+A listed plot file that cannot be opened logs "Error: Story mode unable to open listed XML file '%s'" and creates no
+plot; the loop goes on with the next entry (0x329aa0; modc t39: Fall of the Republic's Rimward sandbox lists a CIS
+government plot it does not ship) [M: the rest of the loop read from REA pseudo code]. A Story_Plots file that cannot
+be opened logs "Error!  Can't find story XML file called %s" and loads nothing [H].
 
 ### 2.2 Activation [H]
 

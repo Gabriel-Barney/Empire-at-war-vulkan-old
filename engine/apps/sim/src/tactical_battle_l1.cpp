@@ -3,6 +3,7 @@
 // "L1 systems" block; docs/re/SCRIPT_GAPS.md §1-§3). Serial code only; the synced RNG is drawn by the departure
 // timers (HyperspaceDepartures) and nothing else here.
 #include <algorithm>
+#include <utility>
 #include <array>
 
 #include "alamo/core/dmath.hpp"
@@ -745,6 +746,22 @@ bool TacticalBattle::set_environment(int32_t index) {
     const int32_t hi = static_cast<int32_t>(std::min<size_t>(n - 1, 0x7fffffff));
     env_index_ = static_cast<uint32_t>(std::clamp(index, 0, hi));
     return true;
+}
+
+bool TacticalBattle::set_cinematic_environment(bool on) {
+    const std::vector<terrain::Environment>& envs = map_.environments.environments;
+    if (on) {
+        for (uint32_t i = 0; i < envs.size(); ++i)
+            if (envs[i].name == "Cinematic") {
+                if (i == env_index_) return false;  // already active
+                env_saved_ = env_index_;
+                return set_environment(static_cast<int32_t>(i));
+            }
+        return false;
+    }
+    if (env_saved_ == 0xFFFFFFFFu) return false;
+    const uint32_t back = std::exchange(env_saved_, 0xFFFFFFFFu);
+    return set_environment(static_cast<int32_t>(back));
 }
 
 // cu8g t02: 0x277030 (CU8G_T02_ENV_PICK_RE §1). [port] n == 0 (a map without environments; retail keeps the ctor's

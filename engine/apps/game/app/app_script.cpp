@@ -116,6 +116,29 @@ ScriptStep step_select_row(std::string dialog, std::string control, std::functio
             2000};
 }
 
+// modc t34: a mod's skirmish staging dialog may have no game-type list (Age of Legends' layout): the dialog keeps the type it
+// opened on and the run plays that type's first map. These steps note that instead of waiting for a row that cannot exist.
+bool staging_has_game_types(App& a) {
+    ui::GuiDialog* d = a.ui_.gui.find("IDD_SKIRMISH_STAGING_DIALOG");
+    return !d || d->get("IDC_GAME_TYPE_LIST") != nullptr;
+}
+
+ScriptStep step_select_game_type(int32_t type) {
+    ScriptStep pick = step_select_row("IDD_SKIRMISH_STAGING_DIALOG", "IDC_GAME_TYPE_LIST", [type](App& a) {
+        return static_cast<size_t>(std::max<int32_t>(a.ui_.front.skirmish_game_type_row(type), 0));
+    });
+    auto inner = pick.run;
+    pick.run = [inner](App& a, ui::InputFrame& f) {
+        if (!a.ui_.gui.find("IDD_SKIRMISH_STAGING_DIALOG")) return false;
+        if (!staging_has_game_types(a)) {
+            a.notes_.push_back("skirmish staging has no IDC_GAME_TYPE_LIST: the dialog's default game type is played");
+            return true;
+        }
+        return inner(a, f);
+    };
+    return pick;
+}
+
 // [port: Gabriel, 2026-11-13] a new campaign opens the mission holocron by itself once its first chapter is added, and
 // the open summary holds the ticks: wait until that has happened (or the campaign added no chapter early on), then close
 // the summary with its Close button like a player. Nothing to do when it never opened.
@@ -433,18 +456,22 @@ ScriptStep step_victory_screen(std::string file) {
             },
             1400};
 }
-// Ctrl+Y (the SelectAll hotkey slot's default).
+// Ctrl+Y (the SelectAll hotkey slot's default). modc t40: a mod's start forces can arrive later than the base game's (they
+// hyperspace in): while the press selected nothing, it is pressed again every 30 frames until a unit is selected.
 ScriptStep step_select_all() {
     auto st = std::make_shared<int>(0);
-    return {"select all", [st](App&, ui::InputFrame& f) {
-                if (*st == 1) {
+    return {"select all", [st](App& a, ui::InputFrame& f) {
+                if (*st % 30 == 1) {
                     f.keys_down.set(ui::vk::kControl);
                     f.keys_down.set(ui::vk::key('Y'));
                     f.keys_pressed.set(ui::vk::key('Y'));
                 }
-                return ++*st > 3;
+                if (++*st <= 3) return false;
+                const bool any = !a.session_ || !a.session_->host().selection(static_cast<uint8_t>(a.local_player())).empty();
+                if (any && *st > 4) a.notes_.push_back("select all: the first unit was selectable after " + std::to_string(*st) + " frames");
+                return any;
             },
-            100};
+            1800};
 }
 
 // Battle: aim the camera at the nearest enemy unit, then right-click it (Attack).
@@ -1451,12 +1478,17 @@ void App::make_script() {
             if (!space_buy) return size_t{0};
             for (size_t i = 0; i < u.size(); ++i)
                 if (u[i].type == kSmokeSkirmishBuyType) return i;
+            // modc t39: the mod fallbacks take only rows the player can buy now (Fall of the Republic lists its most
+            // expensive ships first: the first corvette row cost more than the start credits, so Buy did nothing).
+            auto affordable = [&a, &u](size_t i) { return u[i].can_buy && u[i].cost >= 0 && u[i].cost <= a.buy_.credits; };
             for (size_t i = 0; i < u.size(); ++i)
-                if (ascii_upper(u[i].type).find("_CORVETTE") != std::string::npos) return i;
+                if (affordable(i) && ascii_upper(u[i].type).find("_CORVETTE") != std::string::npos) return i;
             for (size_t i = 0; i < u.size(); ++i) {
                 const uint32_t t = a.data_.rules.find_type(u[i].type);
-                if (t != galactic::kNoIndex && !a.data_.rules.types[t].build_initially_locked) return i;
+                if (affordable(i) && t != galactic::kNoIndex && !a.data_.rules.types[t].build_initially_locked) return i;
             }
+            for (size_t i = 0; i < u.size(); ++i)
+                if (affordable(i)) return i;
             return size_t{0};
         }));
         s.push_back(step_click_control(ui::dlg::kBuyUnits, "IDC_BUY_BUTTON"));
@@ -1472,10 +1504,8 @@ void App::make_script() {
     if (opt_.smoke == "land") {  // land skirmish: the first land map of the list (rows after the space maps)
         s.push_back(step_click_control("IDD_SINGLE_PLAYER_GAMES_MENU_DIALOG", "IDC_SKIRMISH_GAMES_BUTTON"));
         // p4uim t01: the Land game type (ccpgt t02: its row, the rows are sorted by text).
-        s.push_back(step_select_row("IDD_SKIRMISH_STAGING_DIALOG", "IDC_GAME_TYPE_LIST", [](App& a) {
-            return static_cast<size_t>(std::max<int32_t>(a.ui_.front.skirmish_game_type_row(ui::kSkirmishGameLand), 0));
-        }));
-        s.push_back(step_wait("land game type listed", [](App& a) { return !a.ui_.front.skirmish_space_type(); }, 60));
+        s.push_back(step_select_game_type(ui::kSkirmishGameLand));
+        s.push_back(step_wait("land game type listed", [](App& a) { return !a.ui_.front.skirmish_space_type() || !staging_has_game_types(a); }, 60));
         s.push_back(step_select_row("IDD_SKIRMISH_STAGING_DIALOG", "IDC_STAGING_MAP_LIST", [](App& a) {
             // The first land map by name (the old list's first land row): its row in the staging list as the front end sorted it;
             // else the first land row of the Official tab.
@@ -1495,10 +1525,10 @@ void App::make_script() {
         s.push_back(step_click_control("IDD_SINGLE_PLAYER_GAMES_MENU_DIALOG", "IDC_SKIRMISH_GAMES_BUTTON"));
         // The dialog opens on Land (UI.md 9.7): select the Space game type (its row; ccpgt t02: the rows are sorted by text); the
         // run starts on its row 0 (modc t19).
-        s.push_back(step_select_row("IDD_SKIRMISH_STAGING_DIALOG", "IDC_GAME_TYPE_LIST", [](App& a) {
-            return static_cast<size_t>(std::max<int32_t>(a.ui_.front.skirmish_game_type_row(ui::kSkirmishGameSpace), 0));
-        }));
-        s.push_back(step_wait("space game type listed", [](App& a) { return a.ui_.front.skirmish_space_type(); }, 60));
+        s.push_back(step_select_game_type(ui::kSkirmishGameSpace));
+        s.push_back(step_wait("space game type listed", [](App& a) {
+            return a.ui_.front.skirmish_space_type() || !staging_has_game_types(a);
+        }, 60));
         s.push_back(step_shot("game_skirmish_staging.png"));
         s.push_back(step_click_control("IDD_SKIRMISH_STAGING_DIALOG", "IDC_SKIRMISH_START_GAME_BUTTON"));
         buy_steps("game_skirmish");
