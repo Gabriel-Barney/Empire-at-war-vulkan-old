@@ -460,8 +460,9 @@ void test_tangents() {
     CHECK(approx(rt[0].x, 1) && approx(rb[0].y, 1) && approx(rt[1].x * rt[1].x + rt[1].y * rt[1].y, 1, 1e-4f));
 }
 
-// Review finding 1: block layout, num_frames = 0, an animated translation index and no data must
-// fail cleanly (error, no out-of-bounds read).
+// Review finding 1: block layout, num_frames = 0, an animated translation index and no data must not read out of
+// bounds. Since mcx2 t03 the runtime salvages it as retail reads it (ala.hpp): no frame reads anything, so the track is
+// left at the bone's default and the clip loads with no animated track.
 void test_animation_zero_frames() {
     auto info = chunk(0x1001, cat({mini(1, bytes_of(0u)), mini(2, bytes_of(30.f)), mini(3, bytes_of(1u)),
                                    mini(0xB, bytes_of(0u)), mini(0xC, bytes_of(3u)), mini(0xD, bytes_of(0u))}), false);
@@ -470,8 +471,9 @@ void test_animation_zero_frames() {
     const Bytes file = chunk(0x1000, cat({info, chunk(0x1002, binfo, true)}), true);
     AnimationClip clip;
     std::string err;
-    CHECK(!build_animation(file, "zero", clip, &err) && !err.empty());
-    std::printf("  zero-frame ALA (%zu bytes) rejected: %s\n", file.size(), err.c_str());
+    CHECK(build_animation(file, "zero", clip, &err));
+    CHECK(clip.tracks.size() == 1 && clip.tracks[0].translation.size() <= 1);
+    std::printf("  zero-frame ALA (%zu bytes) salvaged: %zu track(s)\n", file.size(), clip.tracks.size());
 }
 
 void test_animation() {

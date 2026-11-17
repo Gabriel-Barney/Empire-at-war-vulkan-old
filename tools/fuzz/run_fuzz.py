@@ -21,7 +21,9 @@ import sys
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-TARGETS = ["fuzz_xml", "fuzz_meg", "fuzz_alo", "fuzz_ala", "fuzz_texture", "fuzz_fx2"]
+TARGETS = ["fuzz_xml", "fuzz_meg", "fuzz_alo", "fuzz_ala", "fuzz_texture", "fuzz_fx2",
+           # mcx2 t08: the smoke targets (smoke/fuzz_targets.hpp); alamo_fuzz_smoke runs the same readers in every tree
+           "fuzz_ted", "fuzz_dat", "fuzz_mtd", "fuzz_rc", "fuzz_clip", "fuzz_particle", "fuzz_lc", "fuzz_wav", "fuzz_bink"]
 
 # target -> (meg file name, globs, max seed bytes, max seed count)
 SEEDS = {
@@ -30,6 +32,11 @@ SEEDS = {
     "fuzz_ala": ("models.meg", ["*.ALA"], 128 * 1024, 200),
     "fuzz_texture": ("textures.meg", ["*.DDS", "*.TGA", "*.BMP"], 64 * 1024, 150),
     "fuzz_fx2": ("shaders.meg", ["*.FXO"], 128 * 1024, 150),
+    "fuzz_ted": ("maps.meg", ["*.TED"], 256 * 1024, 60),
+    "fuzz_clip": ("models.meg", ["*.ALA"], 128 * 1024, 200),
+    "fuzz_particle": ("models.meg", ["P_*.ALO"], 128 * 1024, 150),
+    "fuzz_mtd": ("textures.meg", ["*.MTD"], 256 * 1024, 10),
+    "fuzz_rc": ("config.meg", ["*.RC"], 256 * 1024, 10),
 }
 
 

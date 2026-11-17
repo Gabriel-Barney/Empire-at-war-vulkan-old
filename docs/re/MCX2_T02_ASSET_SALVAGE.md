@@ -30,13 +30,23 @@ probe copies:
 
 ## 3. Probe results
 
-Not run yet. Per slot, from `out\<run>\report.txt` and the screenshots:
+**Run 1 (2026-11-17, `out\20261117-175406`, coordinator session; all 16 slots).** `CTRL` spawned through `Spawn_Unit`
+and drew like a shipped AT-ST (walk pose). `NOCONN` (no connections chunk) did not come back from `Spawn_Unit`; the
+probe's fallback `Create_Generic_Object` returned an object, and from that moment the simulation stopped: the credits
+stayed at 6,272, no further record was written (its `HOLD_END`, due 270 frames later, never came), the camera showed
+`NOCONN`'s spot with nothing drawn, and the game kept presenting the same frame until a system bugcheck (0x133
+DPC_WATCHDOG_VIOLATION) rebooted the PC about 2.5 minutes later. So **retail hangs on a model without a connections
+chunk** (at least when such an object is created; whether the bugcheck is the game's or the driver's is not known).
+`NOINFO`, `OVR` and `ANS` were left out of the reruns after this (Gabriel, 2026-11-17: too risky after the bugcheck);
+they stay unprobed guesses.
+
+Per slot, from `out\<run>\report.txt` and the screenshots:
 
 | Slot | Retail | Port rule (t03) |
 |---|---|---|
 | `CTRL` / `SKCTRL` / `PCTRL` | | controls |
-| `NOCONN` | | |
-| `NOINFO` | | |
+| `NOCONN` | **hangs** (run 1: the sim froze when the object was created; nothing drawn; bugcheck followed) | do not draw it, `asset_rejected` (port shows nothing, keeps running) |
+| `NOINFO` | unprobed (skipped after run 1) | |
 | `SPILL` | | |
 | `COLL` | | |
 | `TRAIL` | | |
@@ -45,6 +55,6 @@ Not run yet. Per slot, from `out\<run>\report.txt` and the screenshots:
 | `ANG` | | |
 | `SKIN` | | |
 | `PBAD` | | |
-| `ANS` | | |
-| `OVR` | | |
+| `ANS` | unprobed (skipped after run 1) | |
+| `OVR` | unprobed (skipped after run 1) | |
 | `EMPTY` | | |
