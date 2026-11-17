@@ -141,9 +141,11 @@ void GalacticHud::build_planet_map(const GalacticHudFrame& f) {
         ps.icon = gp.icon;
         ps.foreign = m.foreign;
         ps.map_tag = gp.tag;
-        // §6.1: an enabled pad holding an object can be dragged. [port] build pads only take part in rule 5, which needs
-        // SetMarkerID (no sim handler yet): not draggable until then.
-        ps.draggable = gp.unit_pad && !m.foreign && gp.object != 0 && data::parse_flag_char(c.raw_value("DRAG_AND_DROP"));
+        ps.map_marker = gp.marker;
+        // §6.1: an enabled pad holding an object can be dragged - unit pads and build_pad00..32 (only In / Out pads, tag 1 /
+        // 2, ever hold a structure object there; build_pad33..79 have no drag handler).
+        const bool can_drag = gp.unit_pad || (gp.index <= 32 && (gp.tag == 1 || gp.tag == 2));
+        ps.draggable = can_drag && !m.foreign && gp.object != 0 && data::parse_flag_char(c.raw_value("DRAG_AND_DROP"));
         pads_.push_back(std::move(ps));
         ++stats_.map_pads;
     }
@@ -188,21 +190,41 @@ bool GalacticHud::map_drop(std::vector<commands::EventData>* out) const {
     };
     if (!map_open_ || map_foreign_ || map_planet_ == 0) return false;
     const PadSlot* over = pad_of(drag_.over_component);
-    if (!over || drag_.unit == 0) return false;
-    // A launch into a new fleet at this planet (§6.2 rules 2 and 4: op 4 launch + op 0 form, one command here).
+    const PadSlot* from = pad_of(drag_.component);
+    if (!over || !from || drag_.unit == 0 || over == from) return false;
+    const auto marker = [&](uint32_t object, int32_t m) { return emit(commands::ev::set_marker_id(object, m)); };
+    // A launch into a new fleet at this planet (§6.2 rules 2 and 4: op 4 launch + op 0 form, one command here) that also
+    // forgets the unit's marker.
     const auto launch = [&](uint32_t unit) {
-        return emit(fleet_management_event(commands::kFleetMoveNew, map_planet_, kNone, unit, map_planet_));
+        emit(fleet_management_event(commands::kFleetMoveNew, map_planet_, kNone, unit, map_planet_));
+        return marker(unit, -1);
     };
     if (drag_.fleet_index == kMapOrbitIndex) {  // rules 1 and 2: land the stack's representative
         const bool to_pad = over->fleet_index == kMapUnitPadIndex;
         if (over->component != map_window_ && !to_pad) return false;
         bool any = false;
+        if (to_pad) any = marker(drag_.unit, over->map_marker);  // rule 2: the pad it is to stand on
         if (!map_surface_full_) any = emit(fleet_management_event(commands::kFleetLand, map_planet_, drag_.fleet, drag_.unit));
-        if (to_pad && over->unit != 0) any = launch(over->unit) || any;  // the pad's occupant goes to orbit
+        if (to_pad && over->unit != 0) any = launch(over->unit);  // the pad's occupant goes to orbit
         return any;
     }
-    if (drag_.fleet_index == kMapUnitPadIndex && over->fleet_index == kMapOrbitIndex) return launch(drag_.unit);  // rule 4
-    return false;  // rules 3 and 5 move markers only (SetMarkerID): [port] not yet
+    if (drag_.fleet_index == kMapUnitPadIndex) {
+        if (over->fleet_index == kMapOrbitIndex) return launch(drag_.unit);  // rule 4
+        if (over->fleet_index != kMapUnitPadIndex) return false;
+        marker(drag_.unit, over->map_marker);  // rule 3: the units swap pads (an empty target just takes it)
+        if (over->unit != 0) marker(over->unit, from->map_marker);
+        return true;
+    }
+    if (drag_.fleet_index == kMapBuildPadIndex) {  // rule 5: In / Out structures swap or move, same tag 1 or 2 only
+        if (over->fleet_index != kMapBuildPadIndex || over->map_tag != from->map_tag || (from->map_tag != 1 && from->map_tag != 2))
+            return false;
+        if (over->component < 0 || std::find(map_build_pad_.begin(), map_build_pad_.begin() + 33, over->component) == map_build_pad_.begin() + 33)
+            return false;
+        marker(drag_.unit, over->map_marker);
+        if (over->unit != 0) marker(over->unit, from->map_marker);
+        return true;
+    }
+    return false;
 }
 
 }  // namespace alamo::ui

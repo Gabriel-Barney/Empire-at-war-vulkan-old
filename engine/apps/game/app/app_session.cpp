@@ -523,6 +523,7 @@ void App::session_started(const std::vector<std::string>& diag) {
     planet_map_open_ = false;  // ui4 t04: the planet map and its marker cache start fresh per session
     planet_map_planet_ = 0;
     planet_map_markers_.clear();
+    map_marker_sent_.clear();
     story_cursor_ = 0;
     story_ui_.reset();  // L1/S4 wave 1: a new session's UI state
     reward_cursor_.clear();  // ... and its story reward media from the start

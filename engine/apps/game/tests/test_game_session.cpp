@@ -2061,6 +2061,27 @@ void hud_feeds_test(const game::GameData& data, const game::SessionSpec& spec) {
         const uint32_t units[] = {31, 32}, utypes[] = {7, 8};
         game::place_map_units(pads, units, utypes);
         CHECK(pad(G::Unit, 0)->object == 31 && pad(G::Unit, 1)->object == 32 && pad(G::Unit, 1)->type == 8 && pad(G::Unit, 2)->object == 0);
+        // ui4 t13 (§4.4 step 3, §4.5): the marker sends. Structures: 902 already remembers marker 10 (no send); 903 / 904
+        // are sent their pads' markers 3 / 1. Units: 41 remembers marker 11 (unit_pad01: kept, no send), 42 remembers a
+        // marker with no pad (sent -1, waits), 43 has none (unit_pad00, sent 4); the waiting 42 then takes unit_pad02 (sent
+        // 100).
+        {
+            std::vector<game::PlanetMapPad> p2 = game::planet_map_pads(m);
+            std::vector<game::MapMarkerSend> sends;
+            game::place_map_structures(p2, st, {}, &sends);
+            CHECK(sends.size() == 2 && sends[0].object == 903 && sends[0].marker == 3 && sends[1].object == 904 && sends[1].marker == 1);
+            sends.clear();
+            const uint32_t u2[] = {41, 42, 43}, t2[] = {7, 7, 8};
+            const int32_t mk[] = {11, 999, -1};
+            game::place_map_units(p2, u2, t2, mk, &sends);
+            auto unit_pad = [&](int32_t index) {
+                for (const game::PlanetMapPad& p : p2)
+                    if (p.group == G::Unit && p.index == index) return p.object;
+                return 0u;
+            };
+            CHECK(unit_pad(0) == 43 && unit_pad(1) == 41 && unit_pad(2) == 42);
+            CHECK(sends.size() == 2 && sends[0].object == 43 && sends[0].marker == 4 && sends[1].object == 42 && sends[1].marker == 100);
+        }
         // §5: stacks per type, type-index order [port], representative = the first unit of the type.
         const game::MapOrbitUnit ou[] = {{1, 10, 9}, {2, 10, 4}, {3, 11, 9}};
         const std::vector<game::MapOrbitStack> os = game::map_orbit_stacks(ou);

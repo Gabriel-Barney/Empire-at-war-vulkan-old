@@ -319,6 +319,11 @@ its fleet, 4 launch, 5 land.
 - **engine/galactic** (sim, through commands only): FleetManagement ops 2 / 5 / 4 / 0 and SetMarkerID (kind 53, object
   +0x3b0) exactly as §6.2 and §4.4–4.5. The UI must send the same SetMarkerID commands on open as retail (§4.4 step 3, §4.5),
   because the tactical placement reads +0x3b0 (REMAINING_GAPS §3.2).
+- **SetMarkerID execute (0x5b0660, ui4 t13)** [H]: in galactic mode only, find the object by id and set +0x3b0 to the marker; no
+  owner, type or range check, nothing else written. A scan of the decompile for +0x3b0 reads finds only the battle structure
+  placement (0x2a1eb0, REMAINING_GAPS §3.2 step 4) and this map (0x3d7790, 0x3d93f0): a landed unit's marker is the map's pad
+  memory and does not steer the land battle's defender placement (0x2a00b0 does not read it) [M: an indirect read through a
+  helper is not excluded].
 - **[port] choices to record**: the orbit-stack order (retail sorts by type address; use a stable type order, for example type
   index), and the marker y direction until §10 item 1 is captured.
 

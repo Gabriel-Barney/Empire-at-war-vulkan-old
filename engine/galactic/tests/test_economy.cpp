@@ -1734,6 +1734,19 @@ void test_oi_company_transports() {
     CHECK(fm(kFleetMoveNew, w.pid(rA), none, w.id(s0), w.pid(rB)) == RejectReason::None);
     const uint32_t mover = s.fleet_containing(s0);
     CHECK(mover != kNoFleet && mover != of && w.fl(mover).moving && w.fl(mover).to == rB);
+    // ui4 t13: a surface unit launched by op 6 into a new fleet at its own planet (the planet map's launch) runs the launch
+    // reveal (REMAINING_GAPS 6.1) as op 4 does.
+    {
+        const ObjectHandle s1 = w.planet(rA).surface[0];
+        const auto sid = static_cast<int32_t>(w.store.id(s1));
+        CHECK(fm(kFleetMoveNew, w.pid(rA), none, w.id(s1), w.pid(rA)) == RejectReason::None);
+        const uint32_t nf = s.fleet_containing(s1);
+        CHECK(nf != kNoFleet && nf != of && !w.fl(nf).moving && w.fl(nf).planet == rA);
+        bool revealed = false;
+        for (const PlanetState& ps : s.planets())
+            revealed = revealed || std::find(ps.influence.begin(), ps.influence.end(), sid) != ps.influence.end();
+        CHECK(revealed);
+    }
     CHECK(fm(kFleetSlot, none, w.id(w.fl(of).object), none) == RejectReason::None);
     // Always_Spawn_In_Orbit: in orbit unless stealthed-or-quiet fails (a hostile visible fleet in orbit -> surface).
     const size_t before = s.fleets_at(rA, pEmpire).size();

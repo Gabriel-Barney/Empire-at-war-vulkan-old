@@ -242,6 +242,7 @@ void App::set_planet_map(bool open) {
     if (open && (planet_map_open_ || dialog || !gview_.camera().zoomed() || !planet_map_allowed(foreign))) return;
     planet_map_open_ = open;
     planet_map_planet_ = open ? selected_planet_ : 0u;
+    map_marker_sent_.clear();
 }
 
 const App::PlanetMapMarkers& App::planet_map_markers(objects::TypeIndex planet_type) {
@@ -312,16 +313,36 @@ void App::planet_map_feed(ui::GalacticPlanetMap& m) {
             if (const objects::TypeIndex x = data_.types.resolve_name(ascii_trim(tok)); x != objects::kNone) s.additional.push_back(x);
         structures.push_back(std::move(s));
     }
-    game::place_map_structures(pads, structures, [this](uint32_t t) {
-        return t < data_.types.size() ? data_.types.get_float(static_cast<objects::TypeIndex>(t), "Base_Shield_Radius") : 0.0f;
-    });
+    std::vector<game::MapMarkerSend> sends;  // ui4 t13: the SetMarkerID commands of this rebuild (§4.4 step 3, §4.5)
+    game::place_map_structures(
+        pads, structures,
+        [this](uint32_t t) {
+            return t < data_.types.size() ? data_.types.get_float(static_cast<objects::TypeIndex>(t), "Base_Shield_Radius") : 0.0f;
+        },
+        &sends);
     std::vector<uint32_t> units, unit_types;
+    std::vector<int32_t> unit_markers;
     for (const objects::ObjectHandle h : ps.surface)
         if (st.alive(h) && st.owner(h) == ps.owner) {
             units.push_back(static_cast<uint32_t>(st.id(h)));
             unit_types.push_back(st.type(h));
+            const galactic::GalacticSim::StructureSlot* sl = g->structure_slot(st.id(h));
+            unit_markers.push_back(sl ? sl->marker : -1);
         }
-    game::place_map_units(pads, units, unit_types);
+    game::place_map_units(pads, units, unit_types, unit_markers, &sends);
+    // [port] each change once: the feed runs every frame and the command lands a tick later (retail sends on each rebuild).
+    // An entry the sim has applied is dropped, so a later change back is sent again.
+    for (auto it = map_marker_sent_.begin(); it != map_marker_sent_.end();) {
+        const galactic::GalacticSim::StructureSlot* sl = g->structure_slot(static_cast<objects::ObjectId>(it->first));
+        if ((sl ? sl->marker : -1) == it->second) it = map_marker_sent_.erase(it);
+        else ++it;
+    }
+    for (const game::MapMarkerSend& e : sends) {
+        auto [it, fresh] = map_marker_sent_.try_emplace(e.object, e.marker);
+        if (!fresh && it->second == e.marker) continue;
+        it->second = e.marker;
+        submit(commands::ev::set_marker_id(e.object, e.marker), false);
+    }
     for (const game::PlanetMapPad& p : pads) {
         ui::GalacticMapPad q;
         q.unit_pad = p.group == game::MapPadGroup::Unit;
@@ -330,6 +351,7 @@ void App::planet_map_feed(ui::GalacticPlanetMap& m) {
         q.icon = p.type != game::kNoMapType ? icon(p.type) : std::string();
         q.object = p.holds_type ? 0u : p.object;
         q.tag = p.tag;
+        q.marker = p.marker;
         q.alt = p.cls == game::MapMarkerClass::Bunker ? 0 : p.cls == game::MapMarkerClass::BuildPad ? 1 : -1;  // §4.2
         q.dimmed = p.dimmed;
         q.shield = mk.world_width > 0.0f ? 2.0f * p.shield_radius / mk.world_width : 0.0f;

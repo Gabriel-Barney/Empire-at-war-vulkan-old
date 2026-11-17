@@ -1384,7 +1384,7 @@ const char* kGalacticXml = R"(<?xml version="1.0"?>
   <CommandBarComponent Name="hero_slot_good00"><Type>TextButton</Type><Blank_Texture_Name>rebel_hero_ring.tga</Blank_Texture_Name>
     <No_Shell>True</No_Shell><Hidden>True</Hidden></CommandBarComponent>
   <CommandBarComponent Name="build_pad00"><Type>TextButton</Type><Blank_Texture_Name>i_button_units.tga</Blank_Texture_Name>
-    <Group>build_pad</Group><Build_Texture_Name>i_button_build.tga</Build_Texture_Name></CommandBarComponent>
+    <Group>build_pad</Group><Build_Texture_Name>i_button_build.tga</Build_Texture_Name><Drag_And_Drop>True</Drag_And_Drop></CommandBarComponent>
   <CommandBarComponent Name="build_pad01"><Type>TextButton</Type><Blank_Texture_Name>i_button_units.tga</Blank_Texture_Name></CommandBarComponent>
   <CommandBarComponent Name="b_Create_00"><Type>TextButton</Type><Blank_Texture_Name>i_button_units.tga</Blank_Texture_Name>
     <Build_Texture_Name>i_button_build.tga</Build_Texture_Name></CommandBarComponent>
@@ -1403,6 +1403,8 @@ const char* kGalacticXml = R"(<?xml version="1.0"?>
   <CommandBarComponent Name="land_fleet_00"><Type>TextButton</Type><Drag_And_Drop>True</Drag_And_Drop></CommandBarComponent>
   <CommandBarComponent Name="map_window"><Type>Icon</Type><Size>512 512</Size><Scale>1.25</Scale><Color>200 200 200 255</Color></CommandBarComponent>
   <CommandBarComponent Name="unit_pad00"><Type>TextButton</Type><Blank_Texture_Name>i_button_buildings.tga</Blank_Texture_Name>
+    <Drag_And_Drop>True</Drag_And_Drop></CommandBarComponent>
+  <CommandBarComponent Name="unit_pad01"><Type>TextButton</Type><Blank_Texture_Name>i_button_buildings.tga</Blank_Texture_Name>
     <Drag_And_Drop>True</Drag_And_Drop></CommandBarComponent>
   <CommandBarComponent Name="unit_cap_number"><Type>TextButton</Type></CommandBarComponent>
   <CommandBarComponent Name="back_button"><Type>TextButton</Type><Icon_Texture_Name>back_button.tga</Icon_Texture_Name></CommandBarComponent>
@@ -2154,16 +2156,29 @@ void test_galactic_hud() {
         up.unit_pad = true;
         up.uv = {0.75f, 0.25f};
         up.object = 555;
+        up.marker = 4;
         up.icon = "i_button_units.tga";
-        GalacticMapPad bp;
+        GalacticMapPad up1;  // an empty unit pad (marker 11)
+        up1.unit_pad = true;
+        up1.index = 1;
+        up1.uv = {0.9f, 0.1f};
+        up1.marker = 11;
+        GalacticMapPad bp;  // an In-base structure 901 on marker 3
         bp.uv = {0.5f, 0.5f};
-        bp.tag = 3;
+        bp.tag = 1;
+        bp.object = 901;
+        bp.marker = 3;
         bp.shield = 0.25f;
         bp.alt = 1;  // §4.2: the build-pad alternate, whatever the player's faction
-        m.planet_map.pads = {up, bp};
+        GalacticMapPad bp1;  // a free In-base pad (marker 9)
+        bp1.index = 1;
+        bp1.uv = {0.25f, 0.75f};
+        bp1.tag = 1;
+        bp1.marker = 9;
+        m.planet_map.pads = {up, up1, bp, bp1};
         m.planet_map.orbit = {{777, 50, 2, "i_button_units.tga"}};
         hud.build(m);
-        CHECK(hud.stats().planet_map && hud.stats().map_pads == 2 && hud.stats().map_stacks == 1 && hud.stats().map_shields == 1);
+        CHECK(hud.stats().planet_map && hud.stats().map_pads == 4 && hud.stats().map_stacks == 1 && hud.stats().map_shields == 1);
         bool bar_off = false, map_on = false;
         for (const GalacticShellVisibility& v : hud.shell_visibility()) {
             bar_off = bar_off || (v.component == static_cast<uint32_t>(table.find("i_main_commandbar")) && !v.visible);
@@ -2209,10 +2224,21 @@ void test_galactic_hud() {
         };
         std::vector<commands::EventData> o = map_drag("land_fleet_00", "map_window");
         CHECK(o.size() == 1 && o[0] == commands::fleet_management_event(commands::kFleetLand, 101, 50, 777));
-        o = map_drag("land_fleet_00", "unit_pad00");  // lands, and the pad's occupant goes to orbit as a new fleet
-        CHECK(o.size() == 2 && o[1] == commands::fleet_management_event(commands::kFleetMoveNew, 101, commands::kNoObject, 555, 101));
-        o = map_drag("unit_pad00", "land_fleet_00");
-        CHECK(o.size() == 1 && o[0] == commands::fleet_management_event(commands::kFleetMoveNew, 101, commands::kNoObject, 555, 101));
+        // §6.2 rule 2 (ui4 t13): the unit is given the pad's marker and lands; the pad's occupant goes to orbit as a new fleet
+        // and forgets its marker.
+        const commands::EventData launch555 = commands::fleet_management_event(commands::kFleetMoveNew, 101, commands::kNoObject, 555, 101);
+        o = map_drag("land_fleet_00", "unit_pad00");
+        CHECK(o.size() == 4 && o[0] == commands::ev::set_marker_id(777, 4) &&
+              o[1] == commands::fleet_management_event(commands::kFleetLand, 101, 50, 777) && o[2] == launch555 &&
+              o[3] == commands::ev::set_marker_id(555, -1));
+        o = map_drag("unit_pad00", "land_fleet_00");  // rule 4
+        CHECK(o.size() == 2 && o[0] == launch555 && o[1] == commands::ev::set_marker_id(555, -1));
+        o = map_drag("unit_pad00", "unit_pad01");  // rule 3: an empty pad just takes the unit
+        CHECK(o.size() == 1 && o[0] == commands::ev::set_marker_id(555, 11));
+        o = map_drag("build_pad00", "build_pad01");  // rule 5: In-base structures move between tag-1 pads
+        CHECK(o.size() == 1 && o[0] == commands::ev::set_marker_id(901, 9));
+        o = map_drag("build_pad00", "unit_pad01");  // a structure never goes onto a unit pad
+        CHECK(o.empty());
         m.planet_map.surface_full = true;  // §5: the stacks are disabled, no drag
         hud.build(m);
         CHECK(!hud.draggable(table.find("land_fleet_00")) && hud.draggable(table.find("unit_pad00")));
