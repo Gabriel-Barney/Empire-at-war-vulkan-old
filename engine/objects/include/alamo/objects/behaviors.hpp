@@ -33,6 +33,9 @@ inline constexpr BehaviorTypeId Locomotor = 0x01, Selectable = 0x02, Planet = 0x
 
 // XML behaviour name (ASCII case-insensitive) -> type id; kNoBehavior if unknown.
 BehaviorTypeId behavior_type_id(std::string_view xml_name);
+// map1 t04 (docs/re/Q6_T30_FIND_HINT_ORDER.md 3): a map record's extra behaviour (.ted chunk 0x4B8 mini 0) names its behaviour
+// by alamo::name_crc of the XML name (every shipped entry is HINT, 0x0253EEE7) -> type id; kNoBehavior if unknown.
+BehaviorTypeId behavior_type_id_from_crc(uint32_t crc);
 
 // Service class of a behaviour (OBJECT_RUNTIME.md §9.1): whether it is serviced at all and its
 // service interval in frames. Never serviced: TACTICAL_BUILD_OBJECTS, MARKER, HINT, TRANSPORT,

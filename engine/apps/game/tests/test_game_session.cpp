@@ -1963,6 +1963,52 @@ void save_files_test() {
     CHECK(!game::delete_save(d, "missing", &err) && !err.empty());
     CHECK(game::list_saves(path_to_utf8(dir / "none")).empty());
     remove_all_long(dir, ec);
+
+    // ui5 t13: names and folders outside the ANSI code page (Greek kappa + CJK, UTF-8 escapes): a typed name keeps its
+    // valid UTF-8, a broken byte becomes '_', the length cap cuts at a character boundary; the folder and the save list,
+    // load (header), exist and delete without the old std::system_error from path::string().
+    const std::string kappa = "\xCE\x9A", cjk = "\xE6\xB8\xAC";  // U+039A, U+6E2C
+    CHECK(game::sanitize_save_name("S" + kappa + cjk) == "S" + kappa + cjk);
+    CHECK(game::sanitize_save_name("a\xFF" "b\xC3") == "a_b_");               // invalid lead / truncated sequence
+    CHECK(game::sanitize_save_name("x\xE0\x80\x80" "y") == "x___y");           // overlong form
+    {
+        const std::string longname = std::string(63, 'x') + kappa;  // 65 bytes: the cut drops the whole kappa
+        CHECK(game::sanitize_save_name(longname) == std::string(63, 'x'));
+    }
+    const fs::path udir = fs::temp_directory_path() / path_from_utf8("alamo_saves_" + kappa + cjk);
+    remove_all_long(udir, ec);
+    const std::string ud = path_to_utf8(udir);
+    const std::string uname = "Spiel " + kappa + cjk;
+    {
+        SaveFile f;
+        f.tick = 7;
+        game::SaveMeta mm;
+        mm.name = uname;
+        mm.kind = "campaign";
+        f.description = game::encode_description(mm);
+        ByteWriter w;
+        w.u32(1).u64(7);
+        f.add("frame", 1, w);
+        std::string uerr;
+        CHECK(game::write_save_file(f, game::save_path(ud, uname), &uerr));
+        if (!uerr.empty()) std::printf("  write %s: %s\n", uname.c_str(), uerr.c_str());
+    }
+    bool listed = false;
+    try {
+        const std::vector<game::SaveEntry> ul = game::list_saves(ud);
+        listed = ul.size() == 1 && ul[0].name == uname && ul[0].readable && ul[0].tick == 7;
+    } catch (const std::exception& ex) {
+        std::printf("  list_saves threw: %s\n", ex.what());
+    }
+    CHECK(listed);
+    SaveFile back_file;
+    CHECK(game::read_save_file(game::save_path(ud, uname), back_file, &err) && back_file.tick == 7);
+    CHECK(game::save_exists(ud, uname) && game::delete_save(ud, uname, &err) && !game::save_exists(ud, uname));
+    // A file copied in under a name sanitizing would change (over kMaxSaveName bytes) is still reached by its listed name.
+    const std::string longname = std::string(70, 'L');
+    write_file(udir / (longname + ".alsv"), "not a save");
+    CHECK(game::save_exists(ud, longname) && game::delete_save(ud, longname, &err) && !game::save_exists(ud, longname));
+    remove_all_long(udir, ec);
 }
 
 // A skirmish saved through the menus' path (save_game) on the galactic map, loaded into a new session: the load continues

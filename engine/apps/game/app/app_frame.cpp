@@ -189,6 +189,12 @@ bool App::render_frame() {
         q.color = {255, 255, 255, 255};
         q.page = kMoviePage;
         dialogs.add(0, ui::HudList::Quads, q);
+        // ui5 t02 / t12 (AUDIO.md §3.4): the movie's caption, with IDC_USE_MOVIE_SUBTITLES on.
+        if (audio_opts_.subtitles && ui_.fonts)
+            if (const std::string_view id = full_movie_.caption(); !id.empty())
+                if (const std::u16string* t = ui_.text.find(id))
+                    ui::add_movie_caption(dialogs, 1, *ui_.fonts, *canvas, ui::gui_unescape(ui::utf16_to_utf32(*t)),
+                                          ui::movie_caption_style(data_.db.constants()));
     }
     // Panels (hero roster, black market, sabotage, corruption, hack) on top of the HUD list; their shells draw at the
     // HUD's ShellModels step.

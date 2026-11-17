@@ -356,9 +356,24 @@ use `Probability` 50–60, and `Allow_Unit_Reponse_VO` (Lua) can switch them off
 Speech `Text_ID` is shown as on-screen text by the story/hologram paths: the tactical "external hologram"
 (common tick 0x3639d0) queues a speech event, plays a Bink talking-head movie, displays the speech's
 subtitle text through the HUD while it plays and removes both when the speech ends; it aborts a pending
-hologram if another speech is active. Story speech uses `TEXT_SPEECH_%s` ids (0x32e290). The registry
-option `Subtitles` and the dialog option `IDC_USE_MOVIE_SUBTITLES` gate movie subtitles [L]. SFX
+hologram if another speech is active. Story speech uses `TEXT_SPEECH_%s` ids (0x32e290). SFX
 `Text_ID` lists (unit responses) are not displayed in game [L].
+
+**Movie subtitles** [H unless marked] (ui5 t12): the audio-options box `IDC_USE_MOVIE_SUBTITLES` is the profile flag
+`Subtitles` (options +0x212, global 0x140a7c442). It gates two things: the hologram subtitle above (0x2dff30 shows a
+subtitle-kind line only with it on) and the **full-screen Bink player's captions**. Their source is Movies.xml:
+`<Caption_Frame> TEXT_ID, frame </Caption_Frame>` and `<Caption_Duration> TEXT_ID, frames </Caption_Duration>` per
+`<Movie>` (several of each; both kept in maps keyed by the text id), e.g. the FoC win movies `Empire_Land_Win` (26
+captions in the FoC data). Per Bink frame (0x44dea0, after `BinkNextFrame`; frames numbered from 1), with the box on,
+0x44f420 looks for a caption whose frame lies in (previous frame, current frame] (0x5dba50; the map's first match in
+text-id order). Found: the text id is looked up in the game text; a text equal to `[TBL]` shows nothing; else the
+caption on screen is replaced: font = GameConstants `Bink_Player_Caption_Font_Name` / `_Font_Size` (FoC
+EmpireAtWar-Medium, 10), white (255,255,255,255), split into lines (line breaks, wrapped [M: to the screen width]),
+each line centred horizontally, the block's last line at 0.95 of the screen height from the top and the lines above it
+one font line height apart; shown from the current frame for `Caption_Duration` of that id (0 → 120 frames; a missing
+duration ends it on the next frame). No caption starts that frame: the shown one is removed once the current frame
+≥ start + duration. A new caption replaces the old at once. The advisor / hologram talking-head loops (texture
+movies) have no captions. [port] A text id missing from the game text shows nothing (like `[TBL]`); a movie that loops starts its captions again from frame 1 with none shown.
 
 ---
 

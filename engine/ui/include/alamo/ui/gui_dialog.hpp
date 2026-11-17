@@ -202,6 +202,10 @@ public:
     bool set_image(std::string_view id, std::string texture);
     bool focus(std::string_view id);
     int32_t focus_index() const { return focus_; }
+    void clear_focus() {  // UI5 t09: no control has the keyboard focus (a key field leaves capture)
+        focus_ = -1;
+        keyboard_focus_ = false;
+    }
 
     // Placement (canvas units): top-left corner of the dialog.
     Vec2f origin() const { return origin_; }
@@ -242,6 +246,8 @@ struct GuiEvent {
         Closed,
         RowClicked,        // [port] list row pressed with the mouse (value = row; after its SelectionChanged; the second press of a
                            // double click sends DoubleClicked instead)
+        Hovered,           // UI5 t08: the cursor entered an enabled push button / check box / radio button (retail dialog
+                           // event 0x0d; the single-player menu's hint list reads it)
     };
     Kind kind = Kind::Clicked;
     std::string dialog;
@@ -368,6 +374,8 @@ public:
         int32_t max_top = 0, vis = 1;
     };
     ScrollBar scroll_bar(const GuiDialog& d, size_t i) const;
+    // UI5 t08: a dialog tooltip's box of `size` (canvas units) for the cursor at `cursor` (HUD_GAPS §2.1 placement, on screen).
+    GuiRect tooltip_box(Vec2f cursor, Vec2f size) const;
     // Closed-field height of combo i: the skin's Combo_Box_Popdown_Button height (25 units, UI.md §3.7.1), else 15 [port].
     float combo_field_height(const GuiDialog& d, size_t i) const;
 
@@ -431,6 +439,8 @@ private:
     // Pointer state.
     GuiDialog* hover_dialog_ = nullptr;
     int32_t hover_control_ = -1;
+    bool hover_scroll_ = false;  // UI5 t06: the cursor is over the hovered list's (or open drop-down's) scroll bar
+    bool hover_field_ = false;   // UI5 t06: the cursor is over the hovered combo box's field rect
     double hover_since_ = 0.0;
     GuiDialog* press_dialog_ = nullptr;
     int32_t press_control_ = -1;

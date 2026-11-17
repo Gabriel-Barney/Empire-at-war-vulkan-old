@@ -421,7 +421,7 @@ private:
 // *path_out = the file written.
 bool save_game(GameSession& session, const std::string& dir, std::string_view name, const std::string& title, int64_t saved_at,
                std::string* path_out = nullptr, std::string* err = nullptr);
-// SaveFile::read_file(path) -> spec_from_save -> a new GameSession -> start_from_save (replay / record as there). Null +
+// read_save_file(path) (UTF-8, save_games.hpp) -> spec_from_save -> a new GameSession -> start_from_save (replay / record as there). Null +
 // *err when the file is not a save of this game, belongs to other game data / options (SessionDescriptor::mismatch) or a
 // chunk does not load; the half-loaded session is discarded. `file_out` (optional) gets the save read.
 std::unique_ptr<GameSession> load_game(const GameData& data, jobs::JobSystem& js, const std::string& path, std::string* err = nullptr,

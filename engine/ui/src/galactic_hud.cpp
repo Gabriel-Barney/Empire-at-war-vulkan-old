@@ -1643,8 +1643,10 @@ void GalacticHud::update_input(const RoutedInput& routed, bool shift, bool ctrl,
             handled = true;
             if (s.foreign) break;  // UI.md §7.2 [port]: a foreign fleet's pads are drawn, not clickable
             if (s.is_queue) {
-                if (k.button == Button::Left)
+                if (k.button == Button::Left) {
                     out.push_back(commands::ev::production(s.queue.type_index, s.queue.location, true, s.queue.queue, s.queue.index));
+                    buttons_.play_sfx("GUI_Cancel_SFX", k.component);  // UI5 t06: CommandBarClass::Cancel_Production (UI.md §3.6)
+                }
             } else if (!s.select.empty()) {
                 HudAction a;
                 a.kind = HudAction::Kind::GalacticSelect;

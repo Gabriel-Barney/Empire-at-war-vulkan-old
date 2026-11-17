@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
 
 #include "alamo/core/ascii.hpp"
 #include "alamo/core/file_provider.hpp"
@@ -189,6 +190,48 @@ std::vector<uint8_t> passability_rgba(std::span<const uint8_t> classes, const Pa
         out[i * 4 + 2] = c.b;
         out[i * 4 + 3] = c.a;
     }
+    return out;
+}
+
+std::string_view radar_biome(uint32_t index) {
+    return index < std::size(kBiomeBlocks) ? std::string_view(kBiomeBlocks[index]) : std::string_view();
+}
+
+Passability radar_cell_class(uint32_t bits, bool water_surface) {
+    if (water_surface || (bits & 0x20u) != 0) return Passability::Water;
+    if ((bits & 0x2u) != 0) return Passability::Steep;
+    if ((bits & 0x4u) != 0) return Passability::Obstacle;
+    if ((bits & 0x80u) != 0) return Passability::InfantryOnly;
+    if ((bits & 0x100u) != 0) return Passability::Impassable;
+    if ((bits & 0x18u) != 0) return Passability::Wall;
+    return Passability::Clear;
+}
+
+std::vector<uint8_t> radar_terrain_rgba(const RadarTerrainSource& src, const PassabilityPalette& palette, uint32_t size, float min_x,
+                                        float min_y, float max_x, float max_y) {
+    size = std::max<uint32_t>(size, 1);
+    std::vector<uint8_t> out(static_cast<size_t>(size) * size * 4, 0);
+    if (src.gw == 0 || src.gh == 0 || src.cells.size() < static_cast<size_t>(src.gw) * src.gh || src.cell <= 0.0f) return out;
+    const float w = max_x - min_x, h = max_y - min_y;
+    const float lo_x = min_x + 0.001f, hi_x = std::max(lo_x, max_x - 10.0f - 0.001f);
+    const float lo_y = min_y + 0.001f, hi_y = std::max(lo_y, max_y - 10.0f - 0.001f);
+    const float half = 0.5f * src.cell;
+    for (uint32_t row = 0; row < size; ++row)
+        for (uint32_t col = 0; col < size; ++col) {
+            const float x = std::clamp(min_x + w * static_cast<float>(col) / static_cast<float>(size), lo_x, hi_x);
+            const float y = std::clamp(min_y + h * static_cast<float>(row) / static_cast<float>(size), lo_y, hi_y);
+            if (x + half < 0.0f || y + half < 0.0f) continue;
+            const auto cx = static_cast<uint32_t>((x + half) / src.cell), cy = static_cast<uint32_t>((y + half) / src.cell);
+            if (cx >= src.gw || cy >= src.gh) continue;  // outside the grid: transparent
+            uint32_t bits = src.cells[static_cast<size_t>(cy) * src.gw + cx];
+            if (src.has_box && (x < src.box_min_x || x > src.box_max_x || y < src.box_min_y || y > src.box_max_y)) bits |= 0x4u;
+            const Rgba8 c = palette[static_cast<size_t>(radar_cell_class(bits, src.water && src.water(x, y)))];
+            uint8_t* px = &out[(static_cast<size_t>(row) * size + col) * 4];
+            px[0] = c.r;
+            px[1] = c.g;
+            px[2] = c.b;
+            px[3] = c.a;
+        }
     return out;
 }
 

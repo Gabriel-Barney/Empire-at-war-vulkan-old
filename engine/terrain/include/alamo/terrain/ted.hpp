@@ -274,6 +274,17 @@ struct ObjectPlacement {
     // 0x482 (TERRAIN_WATER_POST 1.6): the object's hint (marker) name, leaf child 0 mini 01 (NUL-terminated);
     // empty = the object has no 0x482 chunk. Lua Find_Hint / Get_Hint read it.
     std::string hint;
+    // 0x46E (docs/re/Q6_T30_FIND_HINT_ORDER.md 3): the object's marker name (MarkerDataPack), same layout as 0x482 (leaf
+    // child 0 mini 01); shipped maps mostly store an empty name. has_marker_name = the chunk exists.
+    std::string marker_name;
+    bool has_marker_name = false;
+    // 0x459/0x4B7 (same doc 3): extra behaviours the loader attaches to the placed object, one 0x4B8 leaf each: mini 00 the
+    // behaviour's name CRC (alamo::name_crc of the XML name; every shipped entry is HINT), minis 01..03 kept as stored [L].
+    struct ExtraBehavior {
+        uint32_t name_crc = 0;
+        std::vector<RawMini> raw;  // every 0x4B8 mini as stored
+    };
+    std::vector<ExtraBehavior> extra_behaviors;
 };
 
 // ---------------------------------------------------------------- 0x10B: AI zones (cheap decode)

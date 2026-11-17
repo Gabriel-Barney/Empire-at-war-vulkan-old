@@ -18,6 +18,12 @@ bool clickable(GuiGadgetType t) {
     return t == GuiGadgetType::PushButton || t == GuiGadgetType::CheckBox || t == GuiGadgetType::RadioButton;
 }
 
+// UI5 t06 (UI.md §3.6, the gadget classes' input handlers): GUI_Common_Dialog_Button_Hilight when the cursor enters an
+// enabled push button, check box, radio button, combo box (its field), trackbar slider or a list's scroll bar.
+bool hover_sound(GuiGadgetType t) {
+    return clickable(t) || t == GuiGadgetType::ComboBox || t == GuiGadgetType::TrackbarSlider;
+}
+
 constexpr uint32_t kPopupLayer = 12;
 constexpr float kScrollWidth = 12.0f;  // [port] list scroll bar column width (canvas units) when no texture size
 constexpr float kFieldInset = 5.0f;    // [port] QA D8 / D10: left padding of edit and closed combo text (canvas units)
@@ -1008,15 +1014,37 @@ void GuiManager::update(const InputFrame& raw, const RoutedInput& routed, double
     }
     // Hover.
     const int32_t hc = target && raw.mouse_inside ? target->control_at(cursor_) : -1;
-    if (target != hover_dialog_ || hc != hover_control_) {
+    // UI5 t06: a list's scroll bar is its own gadget in retail (GUIGadgetVScrollbarClass): entering it is a hover too,
+    // and so is the open drop-down's scroll bar. A combo box plays its hover only on entering its field rect (0x1e8970),
+    // also when the cursor comes back onto the field from its open drop-down.
+    bool in_scroll = false, in_field = false;
+    if (target && hc >= 0) {
+        const auto i = static_cast<size_t>(hc);
+        const GuiControl& c = (*target)[i];
+        if (c.type == GuiGadgetType::ListBox || (c.type == GuiGadgetType::ComboBox && c.open)) {
+            const ScrollBar sb = scroll_bar(*target, i);
+            in_scroll = sb.active && sb.col.contains(cursor_);
+        }
+        if (c.type == GuiGadgetType::ComboBox) in_field = combo_field(*target, i).contains(cursor_);
+    }
+    const bool entered = target != hover_dialog_ || hc != hover_control_;
+    if (entered) {
         hover_dialog_ = target;
         hover_control_ = hc;
         hover_since_ = now;
         if (target && hc >= 0) {
             const GuiControl& c = (*target)[static_cast<size_t>(hc)];
-            if (clickable(c.type) && c.enabled) sfx("GUI_Common_Dialog_Button_Hilight", hc);
+            if (hover_sound(c.type) && c.enabled && c.type != GuiGadgetType::ComboBox)
+                sfx("GUI_Common_Dialog_Button_Hilight", hc);
+            if (clickable(c.type) && c.enabled) events.push_back(make_event(GuiEvent::Kind::Hovered, *target, hc));
         }
     }
+    if (target && hc >= 0 && (*target)[static_cast<size_t>(hc)].enabled) {
+        if (in_field && (entered || !hover_field_)) sfx("GUI_Common_Dialog_Button_Hilight", hc);
+        if (in_scroll && (entered || !hover_scroll_)) sfx("GUI_Common_Dialog_Button_Hilight", hc);
+    }
+    hover_scroll_ = in_scroll;
+    hover_field_ = in_field;
 
     const uint8_t lb = button_bit(Button::Left);
     const bool dialog_owns_left = routed.owner[static_cast<size_t>(Button::Left)] == PointerTarget::Dialog;
@@ -1040,9 +1068,12 @@ void GuiManager::update(const InputFrame& raw, const RoutedInput& routed, double
             consumed = true;
             const ScrollBar sb = scroll_bar(*target, i);
             if (const ScrollPart part = scroll_part_at(sb, cursor_); part != ScrollPart::None) {
+                sfx("GUI_Common_Dialog_Button_Press", static_cast<int32_t>(i));  // UI5 t06: the scroll bar gadget's press
                 scroll_press(*target, i, part, now);  // the drop-down's scroll bar: stays open
                 continue;
             }
+            // UI5 t06 (UI.md §3.6): the click on the field that closes the drop-down is a press too.
+            if (combo_field(*target, i).contains(cursor_)) sfx("GUI_Common_Dialog_Button_Press", static_cast<int32_t>(i));
             const GuiRect lr = combo_list(*target, i);
             if (lr.contains(cursor_)) {
                 const float rh = row_height(*target, i);
@@ -1064,11 +1095,15 @@ void GuiManager::update(const InputFrame& raw, const RoutedInput& routed, double
                 }
                 const GuiRect r = target->control_rect(i);
                 switch (c.type) {
+                    // UI5 t06 (UI.md §3.6): GUI_Common_Dialog_Button_Press on the mouse-down of a slider, a combo box's
+                    // field (it opens / closes the drop-down), an edit box and a list's scroll bar.
                     case GuiGadgetType::TrackbarSlider:
+                        sfx("GUI_Common_Dialog_Button_Press", hc);
                         slider_drag_ = true;
                         slider_from_cursor(*target, i);
                         break;
                     case GuiGadgetType::ComboBox:
+                        sfx("GUI_Common_Dialog_Button_Press", hc);
                         c.open = !c.open && !c.items.empty();
                         if (c.open) {  // the drop-down opens scrolled to the selection (first row when it can be)
                             const int32_t max_top = std::max(0, static_cast<int32_t>(c.items.size()) - combo_rows(*target, i));
@@ -1077,6 +1112,7 @@ void GuiManager::update(const InputFrame& raw, const RoutedInput& routed, double
                         break;
                     case GuiGadgetType::EditBox:
                     case GuiGadgetType::IMEEditBox:
+                        sfx("GUI_Common_Dialog_Button_Press", hc);
                         c.caret = edit_index_at(*target, i, cursor_.x);
                         if (!raw.keys_down.test(vk::kShift)) c.sel_anchor = c.caret;
                         edit_drag_ = true;
@@ -1085,6 +1121,7 @@ void GuiManager::update(const InputFrame& raw, const RoutedInput& routed, double
                     case GuiGadgetType::ListBox: {
                         const ScrollBar sb = scroll_bar(*target, i);
                         if (const ScrollPart part = scroll_part_at(sb, cursor_); part != ScrollPart::None) {
+                            sfx("GUI_Common_Dialog_Button_Press", hc);
                             scroll_press(*target, i, part, now);
                         } else if (sb.active && cursor_.x >= sb.col.min.x) {
                             // inside the column but outside every part: nothing
@@ -1225,6 +1262,17 @@ bool GuiManager::quad(HudDrawList& dl, uint32_t layer, std::string_view tex, Gui
     q.page = img.page;
     dl.add(layer, HudList::Alpha, q);
     return true;
+}
+
+GuiRect GuiManager::tooltip_box(Vec2f cursor, Vec2f size) const {
+    const float ox = 8.0f * canvas_.units_per_pixel_x, oy = 24.0f * canvas_.units_per_pixel_y;
+    const float hw = 0.5f * canvas_.width, hh = 0.5f * canvas_.height;
+    Vec2f min{cursor.x + ox, cursor.y - oy - size.y};
+    if (min.x + size.x > hw) min.x -= size.x + 2.0f * ox;  // the right edge: left of the cursor
+    if (min.y < -hh) min.y += size.y + 2.0f * oy;          // the bottom edge: above it
+    min.x = std::clamp(min.x, -hw, std::max(-hw, hw - size.x));
+    min.y = std::clamp(min.y, -hh, std::max(-hh, hh - size.y));
+    return GuiRect{min, {min.x + size.x, min.y + size.y}};
 }
 
 void GuiManager::fill(HudDrawList& dl, uint32_t layer, GuiRect r, Rgba8 color) const {
@@ -1728,7 +1776,9 @@ void GuiManager::build(HudDrawList& dl, double now) {
         frame16(dl, layer, d);
         for (size_t i = 0; i < d.size(); ++i) draw_control(dl, layer, d, i, now);
     }
-    // Tooltip (GUIDialogs.xml <Tooltips>) after Tooltip_Delay of hover, above-right of the cursor [port].
+    // Tooltip (GUIDialogs.xml <Tooltips>) after Tooltip_Delay of hover. UI5 t08 [port: the HUD tooltip's rules, HUD_GAPS
+    // §2.1, as retail's dialog tooltip is not traced]: below-right of the cursor (+8 px, 24 px down), flipped left / above
+    // at the right / bottom edge, kept on screen; the HUD tooltip's i_tooltip_back.tga skin (a dark fill without it).
     if (hover_dialog_ && hover_control_ >= 0 && now - hover_since_ >= style_.tooltip_delay) {
         const GuiControl& c = (*hover_dialog_)[static_cast<size_t>(hover_control_)];
         const std::string_view key = skin_->tooltip(c.id());
@@ -1738,8 +1788,8 @@ void GuiManager::build(HudDrawList& dl, double now) {
             s.font = fonts_->font(skin_->global_font().face, skin_->global_font().size, canvas_.font_height());
             s.color = {255, 255, 255, 255};
             const TextBlock b = measure_text_block(*fonts_, canvas_, t, 200.0f, s);
-            const GuiRect box{{cursor_.x + 12.0f, cursor_.y + 8.0f}, {cursor_.x + 20.0f + b.width, cursor_.y + 12.0f + b.height}};
-            fill(dl, kPopupLayer, box, {0, 0, 0, 200});
+            const GuiRect box = tooltip_box(cursor_, {b.width + 8.0f, b.height + 4.0f});
+            if (!quad(dl, kPopupLayer, "i_tooltip_back.tga", box, {255, 255, 255, 255})) fill(dl, kPopupLayer, box, {0, 0, 0, 200});
             add_text_block(dl, kPopupLayer, HudList::Text, *fonts_, canvas_, t, {box.min.x + 4.0f, box.max.y - 2.0f}, 200.0f, s);
         }
     }

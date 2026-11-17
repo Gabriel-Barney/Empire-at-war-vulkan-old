@@ -172,6 +172,10 @@ struct BattleRequest {
     // one battle in which the original's conflict state GOM+0x618 is 9 (set by 0x28f590): nothing built there is
     // persisted, nothing destroyed or sold there is removed from the planet's records.
     bool sandbox = false;
+    // ui5 t10 (UI.md §5.1 "Which dialog"): a STORY_LOAD_TACTICAL_MAP + SET_TACTICAL_MAP override replaced `map` (the
+    // retail "story map" flag 0x140a61d3b): the battle-load screen is the Mission pair. Presentation only: not saved, not
+    // hashed.
+    bool story_map = false;
 };
 struct BattleResult {
     int32_t winner = kNoPlayer;

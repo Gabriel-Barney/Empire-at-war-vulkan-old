@@ -1,6 +1,7 @@
 // test_gui_screens: tests split from test_gui_screens.cpp (PAF t08).
 #include "test_gui_screens_common.hpp"
 #include "alamo/ui/credits_roll.hpp"
+#include "alamo/ui/movie_caption.hpp"
 
 namespace test_gui_screens_t {
 
@@ -50,6 +51,34 @@ void test_credits_roll() {
     CHECK(roll.build(dl, fonts, cv, 100.0 + 5.0) && roll.drawn() == 2);  // half a screen scrolled: both text lines visible
     dl.clear();
     CHECK(!roll.build(dl, fonts, cv, 100.0 + roll.duration() + 0.1) && !roll.active());
+
+    // ui5 t12 (AUDIO.md §3.4): a movie caption - white, centred, the last line's top at 0.95 of the screen height, the
+    // line above one font line higher; nothing for an empty text.
+    dl.clear();
+    MovieCaptionStyle cs;
+    CHECK(add_movie_caption(dl, 1, fonts, cv, U"", cs) == 0 && dl.total() == 0);
+    CHECK(add_movie_caption(dl, 1, fonts, cv, U"First line\nSecond", cs) == 2);
+    const std::span<const HudQuad> glyphs = dl.items(1, HudList::Text);
+    CHECK(!glyphs.empty());
+    if (!glyphs.empty()) {
+        const int32_t font = fonts.font(cs.font, cs.font_size, cv.font_height());
+        const float lh_units = static_cast<float>(fonts.metrics(font).line_height) * (cv.pixel_to_canvas(0.0f, 0.0f).y -
+                                                                                       cv.pixel_to_canvas(0.0f, 1.0f).y);
+        float lo = 1e9f, hi = -1e9f, left = 1e9f, right = -1e9f;
+        bool white = true;
+        for (const HudQuad& q : glyphs) {
+            lo = std::min(lo, q.min.y);
+            hi = std::max(hi, q.max.y);
+            left = std::min(left, q.min.x);
+            right = std::max(right, q.max.x);
+            white = white && q.color.r == 255 && q.color.g == 255 && q.color.b == 255 && q.color.a == 255;
+        }
+        const float bottom_line_top = cv.pixel_to_canvas(0.0f, 0.95f * static_cast<float>(cv.screen_height)).y;
+        CHECK(white);
+        CHECK(hi <= bottom_line_top + 2.0f * lh_units + 0.01f && hi > bottom_line_top);  // two lines: the top one above 0.95
+        CHECK(lo >= bottom_line_top - lh_units - 0.01f);                                  // the last starts at 0.95
+        CHECK(std::fabs(0.5f * (left + right)) < 0.25f * cv.width);                       // centred on the screen
+    }
 }
 
 void test_cursor() {

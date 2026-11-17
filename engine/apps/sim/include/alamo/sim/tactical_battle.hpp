@@ -198,6 +198,24 @@ struct BattleStats {
     uint32_t attack_unseen_drops = 0;
 };
 
+// map1 (REMAINING_GAPS §3.1 - §3.2, Q6_T30): what the battle's map load did with the .ted placements, for the every-map
+// test and diagnostics. Presentation of the setup only: not saved, not hashed.
+struct MapLoadStats {
+    uint32_t placements = 0;        // .ted placements before the prepass
+    uint32_t base_level_drops = 0;  // §3.1 item 3: mini 0x0B above the battle's base level
+    uint32_t owner_drops = 0;       // §3.1 item 2: an owner id without a player
+    uint32_t discards = 0;          // §3.1 item 4: the branched-map discard
+    uint32_t unknown_types = 0;     // kept placements whose type is not in the data (and not a start marker by name)
+    uint32_t spawn_tables = 0, spawn_table_picks = 0;  // §3.1 item 5: Map_Load_Spawn_Table placeholders, picks spawned
+    uint32_t companies = 0, company_members = 0;        // map1 t03: company placements expanded, members created
+    uint32_t hangar_off = 0;        // map1 t05: SPAWN_SQUADRON placements with mini 0x29 = 0 (no Starting_Spawned_Units)
+    uint32_t extra_behaviors = 0;   // map1 t04: 0x4B7 behaviours attached
+    uint32_t marker_names = 0;      // map1 t04: placements with a non-empty 0x46E marker name
+    uint32_t remembered_markers = 0;  // map1 t06: structures placed on their remembered marker (pass 1)
+    uint32_t escorts = 0;           // map1 t07: Space_Escort_Unit_Types participants added
+    bool starbase_picked = false;   // map1 t07: the starbase type came from the DUMMY_STAR_BASE pick (0x407b60)
+};
+
 // A render-side attachment reported by the sim (Damaged_Smoke_Asset_Name at 75 % / 50 %).
 struct AttachedEffect {
     objects::ObjectId id = kNoObjectId;
@@ -945,6 +963,8 @@ public:
     // mini 06 (0 Temperate .. 6 Urban, 7 Space; a missing mini reads 0), forced to 7 on space maps. Presentation only (music /
     // map ambience key); not hashed.
     uint32_t terrain_type() const { return space_ ? 7u : map_.info.counts[4]; }
+    // map1 t02: the battle's map after the prepass (the radar's passability picture reads its 0x10A bits and water).
+    const terrain::MapData& map() const { return map_; }
     bool is_space_battle() const { return space_; }  // aud1 t08
     bool set_environment(int32_t index);
     // ui2 t08: Set_Cinematic_Environment (0x2769a0): true switches to the first environment named "Cinematic" (exact name) and
@@ -1397,6 +1417,21 @@ public:
     // q6 t28 (TERRAIN_WATER_POST 1.6): the map hint name (.ted chunk 0x482) of an object the map load created for a
     // placement (lua::ObjectBridge::map_hint: Find_Hint / Get_Hint / Find_All_Objects_With_Hint); "" when it has none.
     std::string_view map_hint(objects::ObjectId id) const;
+    // map1 t04 (Q6_T30 3): the map marker name (.ted chunk 0x46E, MarkerDataPack) of an object the map load created; "" when
+    // it has none or an empty one. [port] No reader in the port yet.
+    std::string_view map_marker_name(objects::ObjectId id) const;
+    // map1: what the map load did (MapLoadStats).
+    const MapLoadStats& map_load_stats() const { return map_stats_; }
+    // map1 t07 (REMAINING_GAPS §3.2 step 1): the local camera focus of the battle start - the chosen Space Station marker when
+    // `player` is the defender of a space battle that placed its starbase there; false otherwise. [port] Read by the host.
+    bool start_camera_focus(int32_t player, Vec3& out) const;
+    // map1 t06 (REMAINING_GAPS §3.2 step 4): the galaxy whose structure marker memory (GalacticSim::structure_slot) the
+    // placement reads (pass 1) and, when `write`, updates after placing the planet's structures (null: none, the old
+    // behaviour). A battle rebuilt by a save load passes write = false.
+    void set_structure_memory(galactic::GalacticSim* galaxy, bool write = true) {
+        slot_memory_ = galaxy;
+        slot_memory_write_ = write;
+    }
     // The fog's view of a live object (Lua Reveal / Temporary_Reveal input); false when not alive.
     bool fog_object(objects::ObjectId id, tactical::fog::FogObject& out) const;
     // OI fog: host-level FOW-active flag / render option (FOG_OF_WAR §1.3, §6.5: Lua Disable_Rendering, story
@@ -1484,6 +1519,7 @@ private:
         bool third = false;  // owned by neither the attacker nor the defender: not counted for victory / side power
         bool unplaced = false;  // §3.2 step 4: a structure with no free marker is not spawned
         int32_t other_type = -1;  // §3.2 step 3: Place_Other_Type_At_Every_Specific_Marker_Position (one per spot)
+        bool escort = false;  // map1 t07: a Space_Escort_Unit_Types object of a start unit (built, deployed with its side) [not saved: setup only]
         std::vector<std::pair<Vec3, Vec3>> spots;  // marker positions / facings (starbase, structures, step 3 types)
     };
     struct Unit {
@@ -2284,10 +2320,25 @@ private:
         Vec3 pos{}, facing{1.0f, 0.0f, 0.0f};
         std::vector<objects::TypeIndex> specific;  // Marker_For_Specific_Object_Type
         bool used = false;
+        int32_t map_id = -1;  // map1 t06: the placement's .ted object id (0x4B0 mini 00), the remembered marker id
     };
     // q6 t28: map hint names by object id (ascending), set by bt_map_load. [port] Not saved: a loaded battle is rebuilt
     // through the same map load, which hands the map objects the same ids.
     std::vector<std::pair<objects::ObjectId, std::string>> map_hints_;
+    std::vector<std::pair<objects::ObjectId, std::string>> map_marker_names_;  // map1 t04: 0x46E names (non-empty), id order
+    MapLoadStats map_stats_;
+    galactic::GalacticSim* slot_memory_ = nullptr;  // map1 t06
+    bool slot_memory_write_ = false;
+    bool have_focus_ = false;  // map1 t07: start_camera_focus
+    Vec3 focus_{};
+    int32_t focus_player_ = -1;
+    // map1 t03: one map company's expansion (0x2ab060 -> 0x29e960); `record` = the placement's own record data (hint) applies
+    void bt_expand_company(TacticalMode& mode, const terrain::ObjectPlacement& pl, objects::TypeIndex t, int32_t owner, bool record);
+    // map1 t04: a map object's record data - the 0x4B7 extra behaviours and the 0x46E marker name
+    void bt_note_record(TacticalMode& mode, const terrain::ObjectPlacement& pl, objects::ObjectHandle h);
+    void bt_company_types(uint32_t company, std::vector<uint32_t>& out) const;  // map1 t03 / t07: a company's table types
+    void bt_space_escorts(uint8_t side);  // map1 t07: Space_Escort_Unit_Types of the side's start units
+    void bt_pick_starbase();              // map1 t07: DUMMY_STAR_BASE with Base_Level (0x407b60)
     std::vector<MapMarker> bt_markers_;  // MARKER objects with an owner, map (GOM list) order
     // S10 land outcome: the start markers for the AI's IsFriendly / IsEnemyStartLocation (AI_TACTICAL_PERCEPTION §3):
     // (true = Defending Forces Position, false = Attacker Entry Position, position), map order.

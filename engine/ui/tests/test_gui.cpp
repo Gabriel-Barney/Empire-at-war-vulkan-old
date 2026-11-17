@@ -86,6 +86,7 @@ BEGIN
     PUSHBUTTON      "TEXT_BUTTON_SKIRMISH",IDC_SKIRMISH_GAMES_BUTTON,265,598,236,23
     PUSHBUTTON      "TEXT_BUTTON_DEBUG_LOAD_SKIRMISH_MAP",
                     IDC_DEBUG_LOAD_SKIRMISH_MAP_BUTTON,284,723,196,22
+    LISTBOX         IDC_HINT_LIST,284,658,228,107,LBS_SORT | LBS_NOINTEGRALHEIGHT | WS_TABSTOP
 END
 
 IDD_CAMPAIGN_SELECTION_DIALOG DIALOGEX 0, 0, 620, 441
@@ -140,6 +141,8 @@ BEGIN
     PUSHBUTTON      "TEXT_BUTTON",IDC_DIALOG_BOX_BUTTON_LEFT,22,95,128,24
     PUSHBUTTON      "TEXT_BUTTON",IDC_DIALOG_BOX_BUTTON_RIGHT,181,95,128,24
     LTEXT           "USER STRING 1 HERE",IDC_USER_TEXT_STRING_1,17,45,296,8
+    LTEXT           "USER STRING 2 HERE",IDC_USER_TEXT_STRING_2,17,63,296,8
+    LTEXT           "USER STRING 3 HERE",IDC_USER_TEXT_STRING_3,17,81,296,8
 END
 
 IDD_AUDIO_OPTIONS_DIALOG DIALOGEX 0, 0, 551, 372
@@ -335,6 +338,7 @@ struct Env {
         text.add("TEXT_BUTTON_BEGIN", u"Begin");
         text.add("TEXT_DIFFICULTY_NORMAL_NAME", u"Normal");
         text.add("TEXT_BUTTON_YES", u"Yes");
+        text.add("Hint_IDC_SKIRMISH_GAMES_BUTTON", u"Fight a single battle.");
         gui.init(script, skin, atlas, fonts, &text);
         gui.resize(1024, 768);
         gui.set_sfx_hook([this](std::string_view e, int32_t) { sfx.emplace_back(e); });
@@ -589,8 +593,12 @@ void test_routing_and_controls() {
         const GuiRect r = d->control_rect(static_cast<size_t>(d->find("IDC_TEST_SLIDER")));
         const Vec2f right = env.gui.canvas().canvas_to_pixel(r.max.x - 0.5f, 0.5f * (r.min.y + r.max.y));
         const Vec2f left = env.gui.canvas().canvas_to_pixel(r.min.x + 0.5f, 0.5f * (r.min.y + r.max.y));
+        env.sfx.clear();
+        env.frame(right, false);  // UI5 t06: entering the slider is a hover, the press a Button_Press
+        CHECK(env.sfx.size() == 1 && env.sfx[0] == "GUI_Common_Dialog_Button_Hilight");
         ev = env.frame(right, true);
         CHECK(has_event(ev, GuiEvent::Kind::ValueChanged, "IDC_TEST_SLIDER", 100));
+        CHECK(env.sfx.size() == 2 && env.sfx[1] == "GUI_Common_Dialog_Button_Press");
         ev = env.frame(left, true);
         CHECK(has_event(ev, GuiEvent::Kind::ValueChanged, "IDC_TEST_SLIDER", 0));
         env.frame(left, false);
@@ -628,13 +636,28 @@ void test_routing_and_controls() {
         d->set_items("IDC_TEST_COMBO", {U"Rebel", U"Empire", U"Underworld"}, 0);
         const GuiRect f = d->control_rect(static_cast<size_t>(d->find("IDC_TEST_COMBO")));
         const Vec2f field = env.gui.canvas().canvas_to_pixel(f.min.x + 20.0f, f.max.y - 7.0f);  // closed field (15 units)
+        env.sfx.clear();
         env.frame(field, false);
         env.frame(field, true);
         env.frame(field, false);
         CHECK(d->get("IDC_TEST_COMBO")->open);
+        // UI5 t06: hover and the open click sound like a button.
+        CHECK(env.sfx.size() == 2 && env.sfx[0] == "GUI_Common_Dialog_Button_Hilight" && env.sfx[1] == "GUI_Common_Dialog_Button_Press");
         const float rh = static_cast<float>(env.fonts.metrics(env.gui.control_font(*d, static_cast<size_t>(d->find("IDC_TEST_COMBO")))).line_height) *
                          env.gui.canvas().units_per_pixel_y;
         const Vec2f row2 = env.gui.canvas().canvas_to_pixel(f.min.x + 10.0f, f.max.y - 15.0f - 2.0f - 2.5f * rh);
+        // UI5 t06 (UI.md §3.6): the open drop-down is silent; coming back onto the field hovers, the closing click presses.
+        env.sfx.clear();
+        env.frame(row2, false);
+        CHECK(env.sfx.empty());
+        env.frame(field, false);
+        CHECK(env.sfx.size() == 1 && env.sfx[0] == "GUI_Common_Dialog_Button_Hilight");
+        env.frame(field, true);
+        env.frame(field, false);
+        CHECK(!d->get("IDC_TEST_COMBO")->open && env.sfx.size() == 2 && env.sfx[1] == "GUI_Common_Dialog_Button_Press");
+        env.frame(field, true);  // open again for the row pick
+        env.frame(field, false);
+        CHECK(d->get("IDC_TEST_COMBO")->open);
         env.frame(row2, false);
         ev = env.frame(row2, true);
         env.frame(row2, false);
@@ -642,7 +665,10 @@ void test_routing_and_controls() {
     }
     // Edit: typed text (WM_CHAR), VK fallback, Backspace, Enter = Submitted.
     {
+        env.sfx.clear();
         env.click(*d, "IDC_TEST_EDIT");
+        CHECK(!env.sfx.empty() && env.sfx.back() == "GUI_Common_Dialog_Button_Press");  // UI5 t06: no hover sound, a press
+        CHECK(std::count(env.sfx.begin(), env.sfx.end(), std::string("GUI_Common_Dialog_Button_Hilight")) == 0);
         ev = env.frame({0, 0}, false, {}, false, U"Save 1");
         CHECK(has_event(ev, GuiEvent::Kind::TextChanged, "IDC_TEST_EDIT") && d->get("IDC_TEST_EDIT")->text == U"Save 1");
         env.frame({0, 0}, false, {vk::kBack});
@@ -867,6 +893,18 @@ void test_widgets_ui5() {
     env.gui.build(a, env.now);
     env.gui.build(b, env.now);
     CHECK(a.digest() == b.digest());
+    // UI5 t08: a dialog tooltip sits below-right of the cursor, flips at the right / bottom edge and stays on screen.
+    {
+        const HudCanvas& cv = env.gui.canvas();
+        const float hw = 0.5f * cv.width, hh = 0.5f * cv.height;
+        const Vec2f size{120.0f, 30.0f};
+        const GuiRect mid = env.gui.tooltip_box({0.0f, 0.0f}, size);
+        CHECK(mid.min.x > 0.0f && mid.max.y < 0.0f && std::fabs(mid.width() - size.x) < 1e-3f);
+        const GuiRect corner = env.gui.tooltip_box({hw - 5.0f, -hh + 5.0f}, size);  // bottom-right corner
+        CHECK(corner.max.x <= hw + 1e-3f && corner.min.y >= -hh - 1e-3f && corner.max.x < hw - 5.0f && corner.min.y > -hh + 5.0f);
+        const GuiRect huge = env.gui.tooltip_box({0.0f, 0.0f}, {cv.width + 50.0f, 10.0f});  // wider than the screen: left edge
+        CHECK(std::fabs(huge.min.x + hw) < 1e-3f);
+    }
 }
 
 void test_menus() {
@@ -912,6 +950,15 @@ void test_menus() {
     step(env.click(*mm, "IDC_MAIN_MENU_SINGLE_PLAYER_GAMES"));
     CHECK(fe.top() == "IDD_SINGLE_PLAYER_GAMES_MENU_DIALOG" && env.gui.open_count() == 1);
     CHECK(!env.gui.top()->get("IDC_DEBUG_LOAD_SKIRMISH_MAP_BUTTON")->visible);
+    {  // UI5 t08 (UI.md §4.5 Hint list): hidden until a button is hovered, then "Hint_<id>" (a blank row without one)
+        GuiDialog* sp = env.gui.top();
+        CHECK(!sp->get("IDC_HINT_LIST")->visible);
+        step(env.frame(env.px_of(*sp, "IDC_SKIRMISH_GAMES_BUTTON"), false));
+        const GuiControl* hl = sp->get("IDC_HINT_LIST");
+        CHECK(hl->visible && hl->items.size() == 1 && hl->items[0] == U"Fight a single battle.");
+        step(env.frame(env.px_of(*sp, "IDC_BACK_BUTTON_MAIN"), false));
+        CHECK(hl->visible && hl->items.size() == 1 && hl->items[0] == U" ");
+    }
     step(env.click(*env.gui.top(), "IDC_NEW_CAMPAIGN_BUTTON"));
     CHECK(fe.top() == "IDD_CAMPAIGN_SELECTION_DIALOG");
     GuiDialog* cs = env.gui.top();
@@ -1116,12 +1163,14 @@ void test_menus() {
     step(env.click(*kb, "IDC_EDIT_STOP"));
     step(env.frame({0, 0}, false, {vk::key('j')}));  // a free key: taken at once
     CHECK(kb->get("IDC_EDIT_STOP")->text == U"J" && keys.binding(hk::kStop).key == 'H');  // not applied yet
-    step(env.frame({0, 0}, false, {vk::kControl, vk::key('q')}));  // Ctrl+Q is select like's key: UI5 t05 asks first
+    step(env.frame({0, 0}, false, {vk::kControl, vk::key('q')}));  // Ctrl+Q is select like's key: UI5 t09 asks first
     CHECK(fe.top() == "IDD_DIALOG_BOX_QUIT_CONFIRM" && kb->get("IDC_EDIT_STOP")->text == U"J");
     {
         GuiDialog* qb = env.gui.top();
-        CHECK(qb->get("IDC_USER_TEXT_STRING_1")->text == U"Ctrl+Q: Select Like" && qb->get("IDC_USER_TEXT_STRING_1")->visible);
-        step(env.click(*qb, "IDC_DIALOG_BOX_BUTTON_LEFT"));  // Yes: the key moves here
+        CHECK(qb->get("IDC_USER_TEXT_STRING_1")->text == U"Ctrl+Q is already assigned to the game command Select Like." &&
+              qb->get("IDC_USER_TEXT_STRING_1")->visible);
+        CHECK(qb->get("IDC_USER_TEXT_STRING_2")->text == U"Do you want to re-assign Ctrl+Q to game command Stop?");
+        step(env.click(*qb, "IDC_DIALOG_BOX_BUTTON_LEFT"));  // OK: the key moves here
     }
     CHECK(fe.top() == "IDD_KEYBOARD_OPTIONS_DIALOG" && kb->get("IDC_EDIT_STOP")->text == U"Ctrl+Q");
     acts.clear();
@@ -1135,8 +1184,10 @@ void test_menus() {
     CHECK(hotkey_label({0x7B, HotkeyMod::None}) == U"F12" && hotkey_label({0x6D, HotkeyMod::None}) == U"Numpad -" &&
           hotkey_label({'1', HotkeyMod::Shift}) == U"Shift+1");
 
-    // UI5 t05: clear with Delete / Backspace, Tab is a key (focus stays), a conflict can be refused, Back / Esc with
-    // unapplied edits ask Apply? (No discards, Yes applies).
+    // UI5 t09 (UI.md §4.3 Capture): Delete / Backspace bind like any key, Tab is a key (focus stays), a conflict can be
+    // refused (Cancel), Back closes without applying or asking, Esc on a field in capture restores its applied key.
+    CHECK(std::string_view(hotkey_action_text_id(hk::kSelectLike)) == "TEXT_SELECT_LIKE" &&
+          std::string_view(hotkey_action_text_id(130)) == "TEXT_GROUP_8_SELECT" && hotkey_action_text_id(160) == nullptr);
     CHECK(hotkey_action_label(hk::kSelectLike) == U"Select Like" &&
           hotkey_action_label(static_cast<uint16_t>(hotkey_slot("Ability_SpreadOut"))) == U"Spread Out" &&
           hotkey_action_label(static_cast<uint16_t>(hotkey_slot("Taunt1"))) == U"Taunt 1");
@@ -1159,32 +1210,28 @@ void test_menus() {
     };
     kb = open_keys();
     CHECK(fe.top() == "IDD_KEYBOARD_OPTIONS_DIALOG" && kb->get("IDC_EDIT_STOP")->text == U"Ctrl+Q");
-    step(env.frame({0, 0}, false, {vk::kDelete}));
-    CHECK(kb->get("IDC_EDIT_STOP")->text.empty() && keys.binding(hk::kStop).key == 'Q');
+    step(env.frame({0, 0}, false, {vk::kDelete}));  // a key like any other
+    CHECK(kb->get("IDC_EDIT_STOP")->text == U"Delete" && keys.binding(hk::kStop).key == 'Q');
     step(env.frame({0, 0}, false, {vk::kTab}));  // Tab: MissionHolocron's key -> asks; focus stays on the field
-    CHECK(fe.top() == "IDD_DIALOG_BOX_QUIT_CONFIRM");
-    step(env.click(*env.gui.top(), "IDC_DIALOG_BOX_BUTTON_RIGHT"));  // No: nothing changes
-    CHECK(fe.top() == "IDD_KEYBOARD_OPTIONS_DIALOG" && kb->get("IDC_EDIT_STOP")->text.empty() &&
+    CHECK(fe.top() == "IDD_DIALOG_BOX_QUIT_CONFIRM" && env.gui.top()->get("IDC_DIALOG_BOX_BUTTON_RIGHT")->text == U"Cancel");
+    step(env.click(*env.gui.top(), "IDC_DIALOG_BOX_BUTTON_RIGHT"));  // Cancel: nothing changes
+    CHECK(fe.top() == "IDD_KEYBOARD_OPTIONS_DIALOG" && kb->get("IDC_EDIT_STOP")->text == U"Delete" &&
           kb->focus_index() == kb->find("IDC_EDIT_STOP"));
+    step(env.frame({0, 0}, false, {vk::kEscape}));  // Esc on the field in capture: back to the applied key, focus gone
+    CHECK(fe.top() == "IDD_KEYBOARD_OPTIONS_DIALOG" && kb->get("IDC_EDIT_STOP")->text == U"Ctrl+Q" && kb->focus_index() < 0);
+    step(env.click(*kb, "IDC_EDIT_STOP"));
+    step(env.frame({0, 0}, false, {vk::kBack}));
+    CHECK(kb->get("IDC_EDIT_STOP")->text == U"Backspace");
     acts.clear();
-    step(env.click(*kb, "IDC_OK"));  // Back with an unapplied edit: Apply?
-    CHECK(fe.top() == "IDD_DIALOG_BOX_QUIT_CONFIRM" && acts.empty());
-    step(env.click(*env.gui.top(), "IDC_DIALOG_BOX_BUTTON_RIGHT"));  // No: discarded, the page closes
+    step(env.click(*kb, "IDC_OK"));  // Back with an unapplied edit: closes, nothing applied, no question
     CHECK(fe.top() != "IDD_KEYBOARD_OPTIONS_DIALOG" && fe.top() != "IDD_DIALOG_BOX_QUIT_CONFIRM" && acts.empty() &&
           keys.binding(hk::kStop).key == 'Q');
     kb = open_keys();
-    CHECK(kb->get("IDC_EDIT_STOP")->text == U"Ctrl+Q");  // the discarded edit is gone
-    step(env.frame({0, 0}, false, {vk::kBack}));
-    CHECK(kb->get("IDC_EDIT_STOP")->text.empty());
-    step(env.frame({0, 0}, false, {vk::kEscape}));  // Esc with an unapplied edit asks too
-    CHECK(fe.top() == "IDD_DIALOG_BOX_QUIT_CONFIRM");
-    step(env.click(*env.gui.top(), "IDC_DIALOG_BOX_BUTTON_LEFT"));  // Yes: applied, the page closes
-    CHECK(fe.top() != "IDD_KEYBOARD_OPTIONS_DIALOG" && !acts.empty() && acts.back().kind == MenuAction::Kind::KeybindingsChanged &&
-          keys.binding(hk::kStop).key == -1);
-    // Back without edits closes at once.
-    kb = open_keys();
-    step(env.click(*kb, "IDC_OK"));
-    CHECK(fe.top() != "IDD_KEYBOARD_OPTIONS_DIALOG" && fe.top() != "IDD_DIALOG_BOX_QUIT_CONFIRM");
+    CHECK(kb->get("IDC_EDIT_STOP")->text == U"Ctrl+Q");  // the dropped edit is gone
+    // Esc with no field in capture closes the page the same way.
+    step(env.frame({0, 0}, false, {vk::kEscape}));
+    step(env.frame({0, 0}, false, {vk::kEscape}));
+    CHECK(fe.top() != "IDD_KEYBOARD_OPTIONS_DIALOG" && fe.top() != "IDD_DIALOG_BOX_QUIT_CONFIRM" && acts.empty());
     // UI5 t07: Esc in the tutorial list goes where its Cancel goes (the main menu, which opened it).
     {
         std::vector<GuiEvent> e(1);

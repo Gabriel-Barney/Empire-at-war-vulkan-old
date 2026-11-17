@@ -90,6 +90,9 @@ public:
     ButtonRuntime& state(uint32_t component);
     const ButtonRuntime* find_state(uint32_t component) const;
     void set_sfx_hook(HudSfxHook hook) { sfx_ = std::move(hook); }
+    void play_sfx(std::string_view event, int32_t component) const {  // a HUD's own sound (UI5 t06: GUI_Cancel_SFX)
+        if (sfx_) sfx_(event, component);
+    }
     // Can_Animate frame animation (anim_frame): start (restarts when already playing) / stop.
     void play_anim(uint32_t component, double now, bool loop = false, std::string name = "play");
     void stop_anim(uint32_t component);

@@ -1,6 +1,8 @@
 #include "alamo/video/movie_db.hpp"
 
 #include <cmath>
+#include <cstdlib>
+#include <map>
 #include <string>
 
 #include "alamo/core/ascii.hpp"
@@ -23,6 +25,41 @@ std::string_view stem(std::string_view path) {
     if (d != std::string_view::npos) path = path.substr(0, d);
     return path;
 }
+
+// "TEXT_ID, 123" -> (id, value); false when either part is missing or the number does not parse.
+bool id_and_int(std::string_view t, std::string& id, int32_t& value) {
+    const size_t comma = t.find(',');
+    if (comma == std::string_view::npos) return false;
+    const std::string_view a = ascii_trim(t.substr(0, comma)), b = ascii_trim(t.substr(comma + 1));
+    if (a.empty() || b.empty()) return false;
+    const std::string num(b);
+    char* end = nullptr;
+    const long v = std::strtol(num.c_str(), &end, 10);
+    if (end == num.c_str()) return false;
+    id = std::string(a);
+    value = static_cast<int32_t>(v);
+    return true;
+}
+
+// Caption_Frame / Caption_Duration of one <Movie> (ui5 t12): maps keyed by the text id, as retail keeps them.
+std::vector<MovieCaption> parse_captions(const data::XmlNode& m) {
+    std::map<std::string, int32_t> frames, durations;
+    std::string id;
+    int32_t v = 0;
+    for (data::XmlNode c : m.children("Caption_Frame"))
+        if (id_and_int(c.text(), id, v)) frames[id] = v;
+    for (data::XmlNode c : m.children("Caption_Duration"))
+        if (id_and_int(c.text(), id, v)) durations[id] = v;
+    std::vector<MovieCaption> out;
+    for (const auto& [key, frame] : frames) {
+        MovieCaption c;
+        c.text_id = key;
+        c.frame = frame;
+        if (const auto it = durations.find(key); it != durations.end()) c.duration = it->second;
+        out.push_back(std::move(c));
+    }
+    return out;
+}
 }  // namespace
 
 std::vector<MovieEntry> parse_movies(const data::XmlNode& root) {
@@ -39,6 +76,7 @@ std::vector<MovieEntry> parse_movies(const data::XmlNode& root) {
             e.commandbar_offset[0] = static_cast<int>(std::lround(off[0]));
             e.commandbar_offset[1] = static_cast<int>(std::lround(off[1]));
         }
+        e.captions = parse_captions(m);
         out.push_back(std::move(e));
     }
     return out;

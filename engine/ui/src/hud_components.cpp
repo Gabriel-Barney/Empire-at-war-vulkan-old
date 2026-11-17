@@ -520,6 +520,29 @@ std::u32string utf16_to_utf32(std::u16string_view s) {
     return o;
 }
 
+std::string utf32_to_utf8(std::u32string_view s) {
+    std::string o;
+    for (const char32_t c : s) {
+        const auto v = static_cast<uint32_t>(c);
+        if (v < 0x80) {
+            o.push_back(static_cast<char>(v));
+        } else if (v < 0x800) {
+            o.push_back(static_cast<char>(0xC0 | (v >> 6)));
+            o.push_back(static_cast<char>(0x80 | (v & 0x3F)));
+        } else if (v < 0x10000) {
+            o.push_back(static_cast<char>(0xE0 | (v >> 12)));
+            o.push_back(static_cast<char>(0x80 | ((v >> 6) & 0x3F)));
+            o.push_back(static_cast<char>(0x80 | (v & 0x3F)));
+        } else {
+            o.push_back(static_cast<char>(0xF0 | (v >> 18)));
+            o.push_back(static_cast<char>(0x80 | ((v >> 12) & 0x3F)));
+            o.push_back(static_cast<char>(0x80 | ((v >> 6) & 0x3F)));
+            o.push_back(static_cast<char>(0x80 | (v & 0x3F)));
+        }
+    }
+    return o;
+}
+
 std::u32string utf8_to_utf32(std::string_view s) {
     std::u32string o;
     for (size_t i = 0; i < s.size();) {

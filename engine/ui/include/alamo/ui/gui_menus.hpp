@@ -452,6 +452,9 @@ std::u32string hotkey_label(const HotkeyBinding& b);
 // UI5 t05 [port]: an English name for a hotkey slot (its hotkeys.cpp name with "Ability_" / "FoC" dropped and spaces
 // between words: "Ability_SpreadOut" -> "Spread Out", "Taunt1" -> "Taunt 1"), for the "already in use" question.
 std::u32string hotkey_action_label(uint16_t slot);
+// UI5 t09: the retail label text id of a slot ("TEXT_SELECT_LIKE"; a derived group slot gives its group's), nullptr for
+// the port's own slots 153..
+const char* hotkey_action_text_id(uint16_t slot);
 
 class FrontEnd {
 public:
@@ -554,6 +557,7 @@ private:
     HotkeyBinding rebind_key_{};
     void apply_keys(std::vector<MenuAction>& out);
     void refill_keys();
+    void show_hint(GuiDialog& d, std::string_view control);  // UI5 t08: IDC_HINT_LIST of the single-player menu
     std::vector<SaveGameInfo> saves_;
     // [port: Gabriel] the saved games tree: one entry per list row, a save (index into saves_) or a group (save = -1, its
     // key path); the open groups' key paths (kept across refills).

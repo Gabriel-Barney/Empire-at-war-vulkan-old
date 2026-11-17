@@ -453,6 +453,7 @@ bool CampaignBattles::read_state(ByteReader& r) {
         // links it; no recreate: the battle was set up already).
         GalacticMode* gm = host_->galactic_mode();
         battle_->set_pad_persistence(gm && gm->sim() ? gm->sim()->built_objects(pending_req_.info.planet) : nullptr, false);
+        battle_->set_structure_memory(gm ? gm->sim() : nullptr, false);  // map1 t06: relinked, read only
     }
     return true;
 }
@@ -820,6 +821,9 @@ void CampaignBattles::push_battle(SimHost& host) {
     // not the sandbox battle). A battle rebuilt by a save load does not recreate them (the save has the battle's objects).
     if (pending_req_.info.planet != kInvalidPlanet)
         battle_->set_pad_persistence(g->sim()->built_objects(pending_req_.info.planet), !rebuilding_);
+    // map1 t06 (REMAINING_GAPS 3.2 step 4): the galactic structure marker memory (pass 1 reads it, the placement updates it;
+    // a battle rebuilt by a save load reads it only).
+    battle_->set_structure_memory(g->sim(), !rebuilding_);
     // galab t03 (GALAB_ABILITIES_RE §4.3, 0x2a1eb0 -> 0x2afc10): the battle players' planet-bonus upgrades (attacker's list,
     // then defender's), each kept only when its type is affiliated with the player's faction (0x3751a0). A battle rebuilt
     // by a save load gets the types (its tables must match the saved ones) but spawns nothing (its objects are in the save).
@@ -1379,6 +1383,7 @@ void CampaignBattles::story_load_map(galactic::BattleRequest& r) {
     if (map.empty()) return;
     log_.push_back("story: SET_TACTICAL_MAP " + map + " replaces " + r.map);
     r.map = map;
+    r.story_map = true;  // ui5 t10: the Mission load dialogs
 #else
     (void)r;
 #endif
