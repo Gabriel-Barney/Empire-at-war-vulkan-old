@@ -36,6 +36,8 @@ enum class Format : uint8_t {
     RGBA32F,
     B4G4R4A4,  // VK B4G4R4A4_UNORM_PACK16 (mandatory sampled format)
     R4G4B4A4,  // VK R4G4B4A4_UNORM_PACK16
+    RG8_SNORM,    // VK R8G8_SNORM (D3D9 V8U8 bump maps; mandatory sampled format)
+    RGBA8_SNORM,  // VK R8G8B8A8_SNORM (Q8W8V8U8, CxV8U8; mandatory sampled format)
     D16,
     D24S8,
     D32F,

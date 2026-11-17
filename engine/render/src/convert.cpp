@@ -20,6 +20,10 @@ rhi::Format to_rhi_format(assets::TextureFormat f) {
     case TF::BGRA8: return rhi::Format::BGRA8;
     case TF::R8: return rhi::Format::R8;
     case TF::R8G8: return rhi::Format::R8G8;
+    case TF::R8G8_SNORM: return rhi::Format::RG8_SNORM;
+    case TF::RGBA8_SNORM: return rhi::Format::RGBA8_SNORM;
+    case TF::RGBA16F: return rhi::Format::RGBA16F;
+    case TF::RGBA32F: return rhi::Format::RGBA32F;
     case TF::Unknown: break;
     }
     return rhi::Format::Undefined;

@@ -18,7 +18,8 @@ void test_formats() {
     CHECK(render::to_rhi_format(TF::R8G8) == rhi::Format::R8G8);
     CHECK(render::to_rhi_format(TF::Unknown) == rhi::Format::Undefined);
     // The VkFormat names assets documents agree with what rhi creates.
-    for (TF f : {TF::BC1_RGBA, TF::BC2, TF::BC3, TF::RGBA8, TF::BGRA8, TF::R8, TF::R8G8}) {
+    for (TF f : {TF::BC1_RGBA, TF::BC2, TF::BC3, TF::RGBA8, TF::BGRA8, TF::R8, TF::R8G8, TF::R8G8_SNORM, TF::RGBA8_SNORM,
+                 TF::RGBA16F, TF::RGBA32F}) {
         const rhi::Format r = render::to_rhi_format(f);
         CHECK(rhi::to_vk(r) != VK_FORMAT_UNDEFINED);
         CHECK(render::to_rhi_format(f) != rhi::Format::Undefined);

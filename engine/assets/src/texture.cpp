@@ -1,6 +1,8 @@
 #include "alamo/assets/texture.hpp"
 
 #include <algorithm>
+#include <bit>
+#include <cmath>
 #include <cstring>
 #include <exception>
 
@@ -39,11 +41,13 @@ std::uint32_t max_mips(std::uint32_t w, std::uint32_t h) {
     return n;
 }
 
-// Uncompressed source pixel description (DDS masks).
+// Uncompressed source pixel description (DDS masks). A colour channel the format lacks reads 0, or 1.0 when
+// absent_one is set (D3D9 G16R16: (R, G, 1, 1)).
 struct MaskFormat {
     std::uint32_t bits = 0;
     std::uint32_t r = 0, g = 0, b = 0, a = 0;
     bool luminance = false;
+    bool absent_one = false;
 };
 
 struct Channel {
@@ -72,10 +76,135 @@ void convert_masked(const std::uint8_t* src, std::uint32_t w, std::uint32_t h, c
         int r = cr.get(px), g = cg.get(px), b = cb.get(px);
         const int a = ca.get(px);
         if (mf.luminance) g = b = r;
-        dst[i * 4 + 0] = static_cast<std::uint8_t>(r < 0 ? 0 : r);
-        dst[i * 4 + 1] = static_cast<std::uint8_t>(g < 0 ? 0 : g);
-        dst[i * 4 + 2] = static_cast<std::uint8_t>(b < 0 ? 0 : b);
+        const int none = mf.absent_one ? 255 : 0;
+        dst[i * 4 + 0] = static_cast<std::uint8_t>(r < 0 ? none : r);
+        dst[i * 4 + 1] = static_cast<std::uint8_t>(g < 0 ? none : g);
+        dst[i * 4 + 2] = static_cast<std::uint8_t>(b < 0 ? none : b);
         dst[i * 4 + 3] = static_cast<std::uint8_t>(a < 0 ? 255 : a);
+    }
+}
+
+// ---- conversions for the formats the GPU path has no direct equivalent for (mcx2 t04, MOD_COMPAT_DESIGN 10.3) ----
+
+// How a DDS level is turned into upload data. Masked: convert_masked to RGBA8. The others are named after the source.
+enum class Source : std::uint8_t {
+    Native, Masked, BC4, BC5, V8U8, Q8W8V8U8, CxV8U8, Unorm16x4, Half, Float, P8, A8P8
+};
+
+// One BC4 block (8 bytes) -> 16 values, written with stride `step` into the 4x4 area of `dst` (row pitch `pitch`).
+// Palette as the D3D10 BC4_UNORM rule: r0 > r1 -> 6 interpolated values, else 4 plus 0 and 255; rounding to nearest.
+void decode_bc4_block(const std::uint8_t* b, std::uint8_t* dst, std::size_t pitch, std::size_t step, std::uint32_t bw,
+                      std::uint32_t bh) {
+    const unsigned r0 = b[0], r1 = b[1];
+    std::uint8_t pal[8];
+    pal[0] = static_cast<std::uint8_t>(r0);
+    pal[1] = static_cast<std::uint8_t>(r1);
+    if (r0 > r1) {
+        for (unsigned i = 1; i <= 6; ++i) pal[i + 1] = static_cast<std::uint8_t>(((7 - i) * r0 + i * r1 + 3) / 7);
+    } else {
+        for (unsigned i = 1; i <= 4; ++i) pal[i + 1] = static_cast<std::uint8_t>(((5 - i) * r0 + i * r1 + 2) / 5);
+        pal[6] = 0;
+        pal[7] = 255;
+    }
+    std::uint64_t bits = 0;
+    for (int i = 0; i < 6; ++i) bits |= std::uint64_t(b[2 + i]) << (8 * i);
+    for (std::uint32_t y = 0; y < bh; ++y)
+        for (std::uint32_t x = 0; x < bw; ++x)
+            dst[y * pitch + x * step] = pal[(bits >> (3 * (y * 4 + x))) & 7u];
+}
+
+// BC4 (ATI1) -> R8, BC5 (ATI2) -> R8G8 (first block = red, second = green, as the D3D10 BC5 layout).
+void convert_bc45(const std::uint8_t* src, std::uint32_t w, std::uint32_t h, bool two, std::uint8_t* dst) {
+    const std::size_t ch = two ? 2 : 1, pitch = std::size_t(w) * ch;
+    const std::uint32_t bw = (w + 3) / 4, bh = (h + 3) / 4;
+    for (std::uint32_t by = 0; by < bh; ++by)
+        for (std::uint32_t bx = 0; bx < bw; ++bx) {
+            const std::uint32_t cw = std::min(4u, w - bx * 4), chh = std::min(4u, h - by * 4);
+            std::uint8_t* d = dst + (std::size_t(by) * 4 * w + std::size_t(bx) * 4) * ch;
+            for (std::size_t c = 0; c < ch; ++c) decode_bc4_block(src + c * 8, d + c, pitch, ch, cw, chh);
+            src += 8 * ch;
+        }
+}
+
+// IEEE half bits of 1.0.
+constexpr std::uint16_t kHalfOne = 0x3C00;
+
+// Signed bump and the wider formats: one level of `w * h` pixels.
+void convert_level(Source s, const std::uint8_t* src, std::uint32_t w, std::uint32_t h, std::uint32_t channels,
+                   const std::uint8_t* palette, std::uint8_t* dst) {
+    const std::size_t n = std::size_t(w) * h;
+    switch (s) {
+        case Source::BC4: convert_bc45(src, w, h, false, dst); return;
+        case Source::BC5: convert_bc45(src, w, h, true, dst); return;
+        case Source::V8U8:  // byte 0 = U, byte 1 = V -> RGBA8_SNORM (U, V, 1, 1), as D3D9 sampled it
+            for (std::size_t i = 0; i < n; ++i) {
+                dst[i * 4 + 0] = src[i * 2];
+                dst[i * 4 + 1] = src[i * 2 + 1];
+                dst[i * 4 + 2] = dst[i * 4 + 3] = 127;
+            }
+            return;
+        case Source::Q8W8V8U8:  // bytes U V W Q -> RGBA8_SNORM as stored
+            std::memcpy(dst, src, n * 4);
+            return;
+        case Source::CxV8U8:  // (U, V, sqrt(1 - U^2 - V^2), 1): D3D9 computes the third component
+            for (std::size_t i = 0; i < n; ++i) {
+                const double u = std::max(-1.0, static_cast<std::int8_t>(src[i * 2]) / 127.0);
+                const double v = std::max(-1.0, static_cast<std::int8_t>(src[i * 2 + 1]) / 127.0);
+                const double c = std::sqrt(std::max(0.0, 1.0 - u * u - v * v));
+                dst[i * 4 + 0] = src[i * 2];
+                dst[i * 4 + 1] = src[i * 2 + 1];
+                dst[i * 4 + 2] = static_cast<std::uint8_t>(static_cast<std::int8_t>(std::lround(c * 127.0)));
+                dst[i * 4 + 3] = 127;
+            }
+            return;
+        case Source::Unorm16x4:  // A16B16G16R16: R G B A as 16-bit -> RGBA8, rounded
+            for (std::size_t i = 0; i < n * 4; ++i) {
+                std::uint16_t v = 0;
+                std::memcpy(&v, src + i * 2, 2);
+                dst[i] = static_cast<std::uint8_t>((std::uint32_t(v) * 255u + 32767u) / 65535u);
+            }
+            return;
+        case Source::Half:  // 1, 2 or 4 halves -> RGBA16F, missing components 1.0 (D3D9 R16F = (R, 1, 1, 1))
+            for (std::size_t i = 0; i < n; ++i)
+                for (std::uint32_t c = 0; c < 4; ++c) {
+                    std::uint16_t v = kHalfOne;
+                    if (c < channels) std::memcpy(&v, src + (i * channels + c) * 2, 2);
+                    std::memcpy(dst + (i * 4 + c) * 2, &v, 2);
+                }
+            return;
+        case Source::Float:  // 1, 2 or 4 floats -> RGBA32F, missing components 1.0
+            for (std::size_t i = 0; i < n; ++i)
+                for (std::uint32_t c = 0; c < 4; ++c) {
+                    float v = 1.0f;
+                    if (c < channels) std::memcpy(&v, src + (i * channels + c) * 4, 4);
+                    std::memcpy(dst + (i * 4 + c) * 4, &v, 4);
+                }
+            return;
+        case Source::P8:
+        case Source::A8P8:  // PALETTEENTRY = R, G, B, flags (flags as alpha) -> RGBA8; A8P8: index, alpha
+            for (std::size_t i = 0; i < n; ++i) {
+                const std::uint8_t idx = s == Source::P8 ? src[i] : src[i * 2];
+                std::memcpy(dst + i * 4, palette + std::size_t(idx) * 4, 4);
+                if (s == Source::A8P8) dst[i * 4 + 3] = src[i * 2 + 1];
+            }
+            return;
+        case Source::Native:
+        case Source::Masked: return;
+    }
+}
+
+// Source bytes per pixel of the per-pixel sources (0 for the block formats).
+std::uint32_t source_bytes(Source s, std::uint32_t channels) {
+    switch (s) {
+        case Source::V8U8: return 2;
+        case Source::Q8W8V8U8: return 4;
+        case Source::CxV8U8: return 2;
+        case Source::Unorm16x4: return 8;
+        case Source::Half: return 2 * channels;
+        case Source::Float: return 4 * channels;
+        case Source::P8: return 1;
+        case Source::A8P8: return 2;
+        default: return 0;
     }
 }
 
@@ -95,6 +224,10 @@ bool d3dfmt_masks(std::uint32_t f, MaskFormat& mf) {
         case 33: mf = {32, 0xFF, 0xFF00, 0xFF0000, 0, false}; return true;           // X8B8G8R8
         case 50: mf = {8, 0xFF, 0, 0, 0, true}; return true;                         // L8
         case 51: mf = {16, 0xFF, 0, 0, 0xFF00, true}; return true;                   // A8L8
+        case 31: mf = {32, 0x3FF, 0xFFC00, 0x3FF00000, 0xC0000000u, false}; return true;  // A2B10G10R10
+        case 35: mf = {32, 0x3FF00000, 0xFFC00, 0x3FF, 0xC0000000u, false}; return true;  // A2R10G10B10
+        case 34: mf = {32, 0xFFFF, 0xFFFF0000u, 0, 0, false, true}; return true;         // G16R16: (R, G, 1, 1)
+        case 81: mf = {16, 0xFFFF, 0, 0, 0, true}; return true;                          // L16
         default: return false;
     }
 }
@@ -129,6 +262,10 @@ const char* texture_format_name(TextureFormat f) {
         case TextureFormat::BGRA8: return "BGRA8";
         case TextureFormat::R8: return "R8";
         case TextureFormat::R8G8: return "R8G8";
+        case TextureFormat::R8G8_SNORM: return "R8G8_SNORM";
+        case TextureFormat::RGBA8_SNORM: return "RGBA8_SNORM";
+        case TextureFormat::RGBA16F: return "RGBA16F";
+        case TextureFormat::RGBA32F: return "RGBA32F";
         default: return "Unknown";
     }
 }
@@ -142,6 +279,10 @@ const char* texture_format_vk_name(TextureFormat f) {
         case TextureFormat::BGRA8: return "VK_FORMAT_B8G8R8A8_UNORM";
         case TextureFormat::R8: return "VK_FORMAT_R8_UNORM";
         case TextureFormat::R8G8: return "VK_FORMAT_R8G8_UNORM";
+        case TextureFormat::R8G8_SNORM: return "VK_FORMAT_R8G8_SNORM";
+        case TextureFormat::RGBA8_SNORM: return "VK_FORMAT_R8G8B8A8_SNORM";
+        case TextureFormat::RGBA16F: return "VK_FORMAT_R16G16B16A16_SFLOAT";
+        case TextureFormat::RGBA32F: return "VK_FORMAT_R32G32B32A32_SFLOAT";
         default: return "VK_FORMAT_UNDEFINED";
     }
 }
@@ -153,21 +294,28 @@ std::uint64_t texture_level_size(TextureFormat f, std::uint32_t w, std::uint32_t
         case TextureFormat::BC2:
         case TextureFormat::BC3: return bw * bh * 16;
         case TextureFormat::RGBA8:
-        case TextureFormat::BGRA8: return std::uint64_t(w) * h * 4;
+        case TextureFormat::BGRA8:
+        case TextureFormat::RGBA8_SNORM: return std::uint64_t(w) * h * 4;
         case TextureFormat::R8: return std::uint64_t(w) * h;
-        case TextureFormat::R8G8: return std::uint64_t(w) * h * 2;
+        case TextureFormat::R8G8:
+        case TextureFormat::R8G8_SNORM: return std::uint64_t(w) * h * 2;
+        case TextureFormat::RGBA16F: return std::uint64_t(w) * h * 8;
+        case TextureFormat::RGBA32F: return std::uint64_t(w) * h * 16;
         default: return 0;
     }
 }
 
 bool generate_mips(TextureAsset& t) {
     std::size_t bpp = 0;
+    bool snorm = false;
     switch (t.format) {
         case TextureFormat::RGBA8:
         case TextureFormat::BGRA8: bpp = 4; break;
         case TextureFormat::R8G8: bpp = 2; break;
         case TextureFormat::R8: bpp = 1; break;
-        default: return false;
+        case TextureFormat::R8G8_SNORM: bpp = 2; snorm = true; break;
+        case TextureFormat::RGBA8_SNORM: bpp = 4; snorm = true; break;
+        default: return false;  // block-compressed and float: the levels the file has
     }
     if (t.mip_levels != 1 || t.layers == 0 || t.levels.size() != t.layers || t.width == 0 || t.height == 0) return false;
     const std::uint32_t mips = max_mips(t.width, t.height);
@@ -199,10 +347,20 @@ bool generate_mips(TextureAsset& t) {
                 for (std::uint32_t x = 0; x < dw; ++x)
                     for (std::size_t c = 0; c < bpp; ++c) {
                         std::uint32_t sum = 0;
+                        std::int32_t ssum = 0;
                         for (std::uint32_t j = 0; j < ny; ++j)
-                            for (std::uint32_t i = 0; i < nx; ++i)
-                                sum += s[(std::size_t(y * ny + j) * sw + (x * nx + i)) * bpp + c];
-                        d[(std::size_t(y) * dw + x) * bpp + c] = static_cast<std::uint8_t>((sum + n / 2) / n);
+                            for (std::uint32_t i = 0; i < nx; ++i) {
+                                const std::uint8_t v = s[(std::size_t(y * ny + j) * sw + (x * nx + i)) * bpp + c];
+                                sum += v;
+                                ssum += static_cast<std::int8_t>(v);
+                            }
+                        std::uint8_t out = static_cast<std::uint8_t>((sum + n / 2) / n);
+                        if (snorm) {  // signed mean, rounded half away from zero
+                            const std::int32_t sn = static_cast<std::int32_t>(n);
+                            const std::int32_t q = ssum >= 0 ? (ssum + sn / 2) / sn : -((-ssum + sn / 2) / sn);
+                            out = static_cast<std::uint8_t>(static_cast<std::int8_t>(q));
+                        }
+                        d[(std::size_t(y) * dw + x) * bpp + c] = out;
                     }
             levels.push_back({l, k, dw, dh, doff, dsz});
         }
@@ -226,26 +384,43 @@ bool decode_dds(std::vector<std::uint8_t> file, TextureAsset& out, std::string* 
     const std::size_t H = 4;
     if (rd32(file, H + 0) != 124) return fail(error, "DDS header size is not 124");
     const std::uint32_t height = rd32(file, H + 8), width = rd32(file, H + 12);
-    const std::uint32_t depth = rd32(file, H + 20), mip_field = rd32(file, H + 24);
+    const std::uint32_t depth_field = rd32(file, H + 20), mip_field = rd32(file, H + 24);
     const std::uint32_t pf_flags = rd32(file, H + 76), pf_fourcc = rd32(file, H + 80);
     const std::uint32_t caps2 = rd32(file, H + 108);
     if (width == 0 || height == 0 || width > kMaxDim || height > kMaxDim)
         return fail(error, "DDS dimensions out of range (" + std::to_string(width) + "x" + std::to_string(height) + ")");
-    if ((caps2 & 0x200000u) && depth > 1) return fail(error, "volume DDS textures are not supported");
+    // A volume texture keeps its first slice (the port samples every texture as 2D) [port]; each level of the file
+    // holds `depth >> mip` slices.
+    const std::uint32_t depth = (caps2 & 0x200000u) && depth_field > 1 ? std::min(depth_field, kMaxDim) : 1;
 
     TextureAsset t;
     std::size_t data_off = 128;
     std::uint32_t layers = 1;
+    std::uint32_t faces_in_file = 1;
+    std::uint32_t face_mask = 0x3Fu;  // cube faces present, bit i = Vulkan layer i
     if (caps2 & 0x200u) {
-        if ((caps2 & 0xFC00u) != 0xFC00u) return fail(error, "partial cubemap (not all 6 faces present)");
+        face_mask = (caps2 >> 10) & 0x3Fu;
+        if (!face_mask) return fail(error, "cubemap without faces");
         layers = 6;
         t.cubemap = true;
+        faces_in_file = static_cast<std::uint32_t>(std::popcount(face_mask));
+        if (faces_in_file != 6)
+            t.warnings.push_back("partial cubemap: " + std::to_string(faces_in_file) +
+                                 " faces present, the others are black");
     }
+    if (depth > 1) t.warnings.push_back("volume texture: slice 0 of " + std::to_string(depth) + " used");
 
-    Plan plan = Plan::Native;
+    Source src = Source::Native;
+    std::uint32_t channels = 0;
     MaskFormat mf;
     TextureFormat fmt = TextureFormat::Unknown;
     ComponentMapping sw;
+    const std::uint8_t* palette = nullptr;
+    auto use = [&](Source s, TextureFormat f, std::uint32_t ch = 0) {
+        src = s;
+        fmt = f;
+        channels = ch;
+    };
 
     if (pf_flags & 0x4u) {  // FourCC
         switch (pf_fourcc) {
@@ -254,12 +429,34 @@ bool decode_dds(std::vector<std::uint8_t> file, TextureAsset& out, std::string* 
             case fourcc('D', 'X', 'T', '3'): fmt = TextureFormat::BC2; break;
             case fourcc('D', 'X', 'T', '4'): fmt = TextureFormat::BC3; t.premultiplied = true; break;
             case fourcc('D', 'X', 'T', '5'): fmt = TextureFormat::BC3; break;
+            // ATI1 / BC4: one channel; R8 with the identity mapping samples (R, 0, 0, 1) [port: inferred, the D3D10
+            // BC4 rule]. ATI2 / BC5: two channels, the first block red; R8G8 samples (R, G, 0, 1) [port: inferred].
+            case fourcc('A', 'T', 'I', '1'):
+            case fourcc('B', 'C', '4', 'U'): use(Source::BC4, TextureFormat::R8); break;
+            case fourcc('A', 'T', 'I', '2'):
+            case fourcc('B', 'C', '5', 'U'): use(Source::BC5, TextureFormat::R8G8); break;
+            case 60: use(Source::V8U8, TextureFormat::RGBA8_SNORM); break;  // V8U8: (U, V, 1, 1), signed
+            case 63: use(Source::Q8W8V8U8, TextureFormat::RGBA8_SNORM); break;  // Q8W8V8U8: (U, V, W, Q)
+            case 117: use(Source::CxV8U8, TextureFormat::RGBA8_SNORM); break;   // CxV8U8: (U, V, C, 1)
+            case 36: use(Source::Unorm16x4, TextureFormat::RGBA8); break;       // A16B16G16R16
+            case 111: use(Source::Half, TextureFormat::RGBA16F, 1); break;     // R16F
+            case 112: use(Source::Half, TextureFormat::RGBA16F, 2); break;     // G16R16F
+            case 113: use(Source::Half, TextureFormat::RGBA16F, 4); break;     // A16B16G16R16F
+            case 114: use(Source::Float, TextureFormat::RGBA32F, 1); break;    // R32F
+            case 115: use(Source::Float, TextureFormat::RGBA32F, 2); break;    // G32R32F
+            case 116: use(Source::Float, TextureFormat::RGBA32F, 4); break;    // A32B32G32R32F
+            case 40: use(Source::A8P8, TextureFormat::RGBA8); break;           // A8P8
+            case 41: use(Source::P8, TextureFormat::RGBA8); break;             // P8
             case fourcc('D', 'X', '1', '0'): {
                 if (file.size() < 148) return fail(error, "truncated DX10 header");
                 const std::uint32_t dxgi = rd32(file, 128), misc = rd32(file, 136), array = rd32(file, 140);
                 data_off = 148;
                 if (array > 1) return fail(error, "DDS texture arrays are not supported");
-                if (misc & 0x4u) { layers = 6; t.cubemap = true; }
+                if (misc & 0x4u) {
+                    layers = faces_in_file = 6;
+                    face_mask = 0x3Fu;
+                    t.cubemap = true;
+                }
                 switch (dxgi) {
                     case 71: case 72: fmt = TextureFormat::BC1_RGBA; break;
                     case 74: case 75: fmt = TextureFormat::BC2; break;
@@ -270,6 +467,17 @@ bool decode_dds(std::vector<std::uint8_t> file, TextureAsset& out, std::string* 
                     case 61: fmt = TextureFormat::R8; sw = {Swizzle::R, Swizzle::R, Swizzle::R, Swizzle::One}; break;
                     case 65: fmt = TextureFormat::R8; sw = {Swizzle::Zero, Swizzle::Zero, Swizzle::Zero, Swizzle::R}; break;
                     case 49: fmt = TextureFormat::R8G8; sw = {Swizzle::R, Swizzle::G, Swizzle::Zero, Swizzle::One}; break;
+                    case 80: use(Source::BC4, TextureFormat::R8); break;
+                    case 83: use(Source::BC5, TextureFormat::R8G8); break;
+                    case 51: fmt = TextureFormat::R8G8_SNORM; break;
+                    case 31: fmt = TextureFormat::RGBA8_SNORM; break;
+                    case 11: use(Source::Unorm16x4, TextureFormat::RGBA8); break;
+                    case 10: use(Source::Half, TextureFormat::RGBA16F, 4); break;
+                    case 34: use(Source::Half, TextureFormat::RGBA16F, 2); break;
+                    case 54: use(Source::Half, TextureFormat::RGBA16F, 1); break;
+                    case 2: use(Source::Float, TextureFormat::RGBA32F, 4); break;
+                    case 16: use(Source::Float, TextureFormat::RGBA32F, 2); break;
+                    case 41: use(Source::Float, TextureFormat::RGBA32F, 1); break;
                     default: return fail(error, "unsupported DXGI format " + std::to_string(dxgi));
                 }
                 break;
@@ -278,6 +486,8 @@ bool decode_dds(std::vector<std::uint8_t> file, TextureAsset& out, std::string* 
                 if (!d3dfmt_masks(pf_fourcc, mf)) return fail(error, "unsupported DDS FourCC " + std::to_string(pf_fourcc));
                 break;
         }
+    } else if (pf_flags & 0x20u) {  // PALETTEINDEXED8: 256 PALETTEENTRYs after the header
+        use(Source::P8, TextureFormat::RGBA8);
     } else if (pf_flags & (0x40u | 0x20000u | 0x2u)) {  // RGB / LUMINANCE / ALPHA
         mf.bits = rd32(file, H + 84);
         mf.r = rd32(file, H + 88);
@@ -290,6 +500,11 @@ bool decode_dds(std::vector<std::uint8_t> file, TextureAsset& out, std::string* 
         if (mf.luminance) mf.g = mf.b = 0;
     } else {
         return fail(error, "DDS pixel format has neither FourCC nor RGB/luminance/alpha flags");
+    }
+    if (src == Source::P8 || src == Source::A8P8) {
+        if (file.size() < data_off + 1024) return fail(error, "DDS palette truncated");
+        palette = file.data() + data_off;
+        data_off += 1024;
     }
 
     if (fmt == TextureFormat::Unknown) {
@@ -315,22 +530,32 @@ bool decode_dds(std::vector<std::uint8_t> file, TextureAsset& out, std::string* 
             if (!mf.a) sw.a = Swizzle::One;
         } else {
             fmt = TextureFormat::RGBA8;
-            plan = Plan::Convert;
+            src = Source::Masked;
         }
     }
 
-    // Source level sizes (for Convert: source bytes are bits/8 per pixel, tightly packed).
-    auto src_size = [&](std::uint32_t w, std::uint32_t h) -> std::uint64_t {
-        return plan == Plan::Native ? texture_level_size(fmt, w, h) : std::uint64_t(w) * h * (mf.bits / 8);
+    // Bytes one slice of a level takes in the file.
+    auto src_slice = [&](std::uint32_t w, std::uint32_t h) -> std::uint64_t {
+        const std::uint64_t bw = (std::uint64_t(w) + 3) / 4, bh = (std::uint64_t(h) + 3) / 4;
+        switch (src) {
+            case Source::Native: return texture_level_size(fmt, w, h);
+            case Source::Masked: return std::uint64_t(w) * h * (mf.bits / 8);
+            case Source::BC4: return bw * bh * 8;
+            case Source::BC5: return bw * bh * 16;
+            default: return std::uint64_t(w) * h * source_bytes(src, channels);
+        }
+    };
+    auto src_size = [&](std::uint32_t k) -> std::uint64_t {
+        return src_slice(mip_dim(width, k), mip_dim(height, k)) * mip_dim(depth, k);
     };
     std::uint32_t mips = std::max<std::uint32_t>(1, mip_field);
-    mips = std::min(mips, max_mips(width, height));
+    mips = std::min(mips, max_mips(std::max(width, depth), height));
     const std::uint64_t avail = file.size() - data_off;
     std::uint32_t fit = 0;
     for (std::uint32_t m = 1; m <= mips; ++m) {
         std::uint64_t per_layer = 0;
-        for (std::uint32_t k = 0; k < m; ++k) per_layer += src_size(mip_dim(width, k), mip_dim(height, k));
-        if (per_layer * layers <= avail) fit = m;
+        for (std::uint32_t k = 0; k < m; ++k) per_layer += src_size(k);
+        if (per_layer * faces_in_file <= avail) fit = m;
         else break;
     }
     if (fit == 0) return fail(error, "DDS data truncated (first mip level incomplete)");
@@ -338,12 +563,11 @@ bool decode_dds(std::vector<std::uint8_t> file, TextureAsset& out, std::string* 
         t.warnings.push_back("mip chain truncated: " + std::to_string(mips) + " declared, " + std::to_string(fit) + " present");
         // Layer strides in the file still use the declared chain length for cubemaps; only a
         // single-layer texture can be cut safely.
-        if (layers > 1) return fail(error, "cubemap DDS data truncated");
+        if (faces_in_file > 1) return fail(error, "cubemap DDS data truncated");
     }
     std::uint64_t layer_stride = 0;  // in the file
-    for (std::uint32_t k = 0; k < (layers > 1 ? mips : fit); ++k)
-        layer_stride += src_size(mip_dim(width, k), mip_dim(height, k));
-    mips = fit;
+    for (std::uint32_t k = 0; k < (faces_in_file > 1 ? mips : fit); ++k) layer_stride += src_size(k);
+    mips = std::min(fit, max_mips(width, height));
     if (!within_budget(fmt, width, height, mips, layers, error)) return false;
 
     t.format = fmt;
@@ -354,7 +578,7 @@ bool decode_dds(std::vector<std::uint8_t> file, TextureAsset& out, std::string* 
     t.layers = layers;
     t.levels.reserve(std::size_t(layers) * mips);
 
-    if (plan == Plan::Native) {
+    if (src == Source::Native && depth == 1 && faces_in_file == layers) {
         for (std::uint32_t l = 0; l < layers; ++l) {
             std::uint64_t off = data_off + l * layer_stride;
             for (std::uint32_t k = 0; k < mips; ++k) {
@@ -368,22 +592,37 @@ bool decode_dds(std::vector<std::uint8_t> file, TextureAsset& out, std::string* 
     } else {
         std::uint64_t total = 0;
         for (std::uint32_t k = 0; k < mips; ++k) total += texture_level_size(fmt, mip_dim(width, k), mip_dim(height, k));
-        t.data.resize(static_cast<std::size_t>(total * layers));
+        t.data.assign(static_cast<std::size_t>(total * layers), 0);  // a missing cube face stays black
         std::uint64_t dst_off = 0;
+        std::uint32_t file_face = 0;
         for (std::uint32_t l = 0; l < layers; ++l) {
-            std::uint64_t src_off = data_off + l * layer_stride;
+            const bool present = (face_mask >> l) & 1u;
+            std::uint64_t src_off = data_off + std::uint64_t(file_face) * layer_stride;
+            if (present) ++file_face;
             for (std::uint32_t k = 0; k < mips; ++k) {
                 const std::uint32_t w = mip_dim(width, k), h = mip_dim(height, k);
                 const std::uint64_t sz = texture_level_size(fmt, w, h);
-                convert_masked(file.data() + src_off, w, h, mf, t.data.data() + dst_off);
+                if (present) {
+                    const std::uint8_t* s = file.data() + src_off;  // slice 0 of the level
+                    std::uint8_t* d = t.data.data() + dst_off;
+                    if (src == Source::Native) std::memcpy(d, s, static_cast<std::size_t>(sz));
+                    else if (src == Source::Masked) convert_masked(s, w, h, mf, d);
+                    else convert_level(src, s, w, h, channels, palette, d);
+                }
                 t.levels.push_back({l, k, w, h, dst_off, sz});
-                src_off += src_size(w, h);
+                src_off += src_size(k);
                 dst_off += sz;
             }
         }
+        if (src == Source::P8 || src == Source::A8P8) {  // a palette whose flags byte is 0 everywhere is opaque
+            bool any_alpha = false;
+            for (std::size_t i = 0; i < 256 && !any_alpha; ++i) any_alpha = palette[i * 4 + 3] != 0;
+            if (!any_alpha && src == Source::P8)
+                for (std::size_t i = 3; i < t.data.size(); i += 4) t.data[i] = 255;
+        }
         std::vector<std::uint8_t>().swap(file);  // release the source before mips are generated
     }
-    if (t.mip_levels == 1) generate_mips(t);  // no-op for BC formats
+    if (t.mip_levels == 1) generate_mips(t);  // no-op for BC and float formats
     out = std::move(t);
     return true;
 }
@@ -397,16 +636,27 @@ bool decode_tga(std::vector<std::uint8_t> file, TextureAsset& out, std::string* 
     const std::uint8_t cmap_bits = file[7];
     const std::uint32_t width = rd16(file, 12), height = rd16(file, 14);
     const std::uint8_t bpp = file[16], desc = file[17];
-    const bool rle = type == 10 || type == 11;
+    const bool rle = type == 9 || type == 10 || type == 11;
     const bool grey = type == 3 || type == 11;
-    if (!(type == 2 || type == 3 || type == 10 || type == 11))
+    const bool mapped = type == 1 || type == 9;  // colour-mapped: pixels are indices into the colour map
+    if (!(type == 1 || type == 2 || type == 3 || type == 9 || type == 10 || type == 11))
         return fail(error, "unsupported TGA image type " + std::to_string(type));
     if (width == 0 || height == 0 || width > kMaxDim || height > kMaxDim) return fail(error, "TGA dimensions out of range");
-    if (grey ? (bpp != 8 && bpp != 16) : (bpp != 15 && bpp != 16 && bpp != 24 && bpp != 32))
+    if (mapped) {
+        if (cmap_type != 1 || cmap_len == 0) return fail(error, "colour-mapped TGA without a colour map");
+        if (bpp != 8 && bpp != 16) return fail(error, "unsupported TGA index depth " + std::to_string(bpp));
+        if (cmap_bits != 15 && cmap_bits != 16 && cmap_bits != 24 && cmap_bits != 32)
+            return fail(error, "unsupported TGA colour-map entry size " + std::to_string(cmap_bits));
+    } else if (grey ? (bpp != 8 && bpp != 16) : (bpp != 15 && bpp != 16 && bpp != 24 && bpp != 32)) {
         return fail(error, "unsupported TGA bit depth " + std::to_string(bpp));
+    }
     std::size_t pos = 18 + std::size_t(id_len);
-    if (cmap_type == 1) pos += (std::size_t(cmap_len) * cmap_bits + 7) / 8;
+    const std::size_t cmap_pos = pos, cmap_spp = (cmap_bits + 7u) / 8u;
+    const std::uint16_t cmap_first = rd16(file, 3);
+    if (cmap_type == 1) pos += std::size_t(cmap_len) * cmap_spp;  // entries are whole bytes (15 bits: 2)
     if (pos > file.size()) return fail(error, "TGA truncated header");
+    std::vector<std::uint8_t> cmap;
+    if (mapped) cmap.assign(file.begin() + static_cast<std::ptrdiff_t>(cmap_pos), file.begin() + static_cast<std::ptrdiff_t>(pos));
 
     const std::size_t spp = (bpp + 7u) / 8u;  // source bytes per pixel
     const std::size_t count = std::size_t(width) * height;
@@ -415,7 +665,7 @@ bool decode_tga(std::vector<std::uint8_t> file, TextureAsset& out, std::string* 
     // capped at kMaxRlePixels (8192^2; the largest shipped TGA is 2048^2).
     const std::size_t remaining = file.size() - pos;
     if (!rle && remaining < count * spp) return fail(error, "TGA pixel data truncated");
-    if (!within_budget(grey ? (bpp == 8 ? TextureFormat::R8 : TextureFormat::R8G8) : TextureFormat::BGRA8, width,
+    if (!within_budget(grey && !mapped ? (bpp == 8 ? TextureFormat::R8 : TextureFormat::R8G8) : TextureFormat::BGRA8, width,
                        height, 1, 1, error))
         return false;
     if (rle) {
@@ -468,7 +718,28 @@ bool decode_tga(std::vector<std::uint8_t> file, TextureAsset& out, std::string* 
             const std::uint32_t sx = right ? width - 1 - x : x;
             const std::uint8_t* s = raw.data() + (std::size_t(sy) * width + sx) * spp;
             std::uint8_t* d = t.data.data() + (std::size_t(y) * width + x) * dpp;
-            if (grey) {
+            if (mapped) {
+                const std::uint32_t idx = spp == 2 ? std::uint32_t(s[0] | (s[1] << 8)) : s[0];
+                if (idx < cmap_first || idx - cmap_first >= cmap_len) {  // outside the map: opaque black [port]
+                    d[0] = d[1] = d[2] = 0;
+                    d[3] = 255;
+                    continue;
+                }
+                const std::uint8_t* e = cmap.data() + std::size_t(idx - cmap_first) * cmap_spp;
+                if (cmap_spp == 2) {
+                    const std::uint16_t v = static_cast<std::uint16_t>(e[0] | (e[1] << 8));
+                    const auto x5 = [](unsigned c) { return static_cast<std::uint8_t>((c << 3) | (c >> 2)); };
+                    d[0] = x5(v & 0x1Fu);
+                    d[1] = x5((v >> 5) & 0x1Fu);
+                    d[2] = x5((v >> 10) & 0x1Fu);
+                    d[3] = (cmap_bits == 16 && alpha_bits > 0) ? ((v & 0x8000u) ? 255 : 0) : 255;
+                } else {
+                    d[0] = e[0];
+                    d[1] = e[1];
+                    d[2] = e[2];
+                    d[3] = cmap_spp == 4 ? e[3] : 255;
+                }
+            } else if (grey) {
                 d[0] = s[0];
                 if (dpp == 2) d[1] = s[1];
             } else if (spp == 2) {
