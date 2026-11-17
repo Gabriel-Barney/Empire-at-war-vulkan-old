@@ -1240,6 +1240,11 @@ void App::handle_menu_actions(const std::vector<ui::MenuAction>& acts) {
                 if (s.skirmish.ai_faction.empty() || ascii_iequals(s.skirmish.ai_faction, s.skirmish.human_faction))  // [port] the AI needs a hostile faction
                     s.skirmish.ai_faction = game::default_skirmish_faction(data_.rules, true, s.skirmish.human_faction);
                 for (const int32_t c : a.colors) s.skirmish.colors.push_back(static_cast<uint8_t>(std::clamp(c, 0, 8)));
+                // modc t47 (SKIRMISH_SETUP §2.8): the local slot's faction and colour open the next staging dialog (kept in
+                // the options profile; retail's profile keeps both when the player changes them).
+                if (!a.factions.empty() && !a.factions[0].empty()) skirmish_profile_.faction = a.factions[0];
+                if (!a.colors.empty()) skirmish_profile_.colour = std::clamp(a.colors[0], 0, 8);
+                save_game_options();
                 // skm2 t02: the opened slots 2.. (ui1 t07 staging rows, up to the map's 8 starts) are AI players with their
                 // own faction ("" = the data's default AI faction), team and difficulty.
                 for (size_t k = 2; k < a.factions.size() && k < 8; ++k) s.skirmish.extra_slots.push_back({a.factions[k], {}, {}});

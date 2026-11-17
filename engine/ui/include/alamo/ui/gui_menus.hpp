@@ -415,8 +415,15 @@ struct SkirmishFaction {
     std::string name;     // Factions.xml Name (what StartSkirmish reports)
     std::string text_id;  // Text_ID ("" = the TEXT_FACTION_<NAME> guess, then the name)
 };
+// modc t47 (SKIRMISH_SETUP §2.8): the local skirmish slot's faction and colour kept between runs (retail keeps both in the
+// player profile). [port] the faction by name, not by row: a mod with another faction list falls back to row 0.
+struct SkirmishProfile {
+    std::string faction;   // "" = never stored (row 0, as a fresh retail profile)
+    int32_t colour = -1;   // colour index 0..8, -1 = never stored (the slot index)
+};
 struct MenuProviders {
     std::function<std::vector<SaveGameInfo>()> saves;
+    std::function<SkirmishProfile()> skirmish_profile;  // modc t47: null = a fresh profile
     // N1 / t09: save_blocker = "" when the game can be saved now, else why not (asked when the Save dialog opens);
     // save_exists = a save of this name exists (Save then asks to overwrite). Null: always allowed / never asks.
     std::function<std::u32string()> save_blocker;
@@ -577,6 +584,7 @@ private:
     int32_t game_type_ = kSkirmishGameLand;
     int32_t skirmish_slots_ = 2;  // ui1 t07: player rows shown (the selected map's players, 2..8)
     std::vector<std::u32string> skirmish_factions_;  // ui1 t07: the faction combo rows
+    int32_t local_faction_row_ = 0;  // modc t47: the profile's faction row for slot 0 (0 = none stored or not in the list)
     SkirmishOptionsSetup skirmish_options_;   // skm1 t02: the skirmish options accepted last (set = false until then)
     std::vector<int32_t> skirmish_win_rows_;  // skm1 t02: the win condition of each IDC_WIN_CONDITION_COMBO row
     GameOptionsSetup game_options_;  // ui1 t06: the advanced options accepted last (set = false until then)  // skirmish list: the game type selected last (UI.md 9.7)

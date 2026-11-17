@@ -567,6 +567,14 @@ ScriptStep step_select_all(std::shared_ptr<bool> none = nullptr) {
                 if (sel && a.session_->battle())
                     for (const objects::ObjectId id : *sel) moves = moves || a.session_->battle()->movement().has_unit(id);
                 const bool any = !sel || (!sel->empty() && (moves || *st >= 300));
+                // modc t49: only static objects after 300 frames (Fall of the Republic with free starting units off: the
+                // slots hold only the map's pre-built base): the unit steps need units that move and are skipped.
+                if (any && !moves && none) {
+                    *none = true;
+                    a.notes_.push_back("select all: only static objects after " + std::to_string(*st) + " frames: the unit steps are skipped");
+                    std::printf("script: select all - only static objects after %d frames, unit steps skipped\n", *st);
+                    return true;
+                }
                 if (any && *st > 4) a.notes_.push_back("select all: the first unit was selectable after " + std::to_string(*st) + " frames");
                 if (!any && none && *st >= 1500) {
                     *none = true;
@@ -1614,6 +1622,12 @@ void App::make_script() {
                     std::printf(" %u %s%s", static_cast<uint32_t>(id), ty.c_str(), moves ? "" : " (no movement)");
                 }
                 std::printf("\n");
+                std::map<std::string, uint32_t> mine;  // the local player's objects on the map, by type
+                for (const ui::HudUnit& u : a.hud_units_)
+                    if (u.owner == a.local_player() && u.type < a.ui_.hud_types.size()) ++mine[a.ui_.hud_types[u.type].name];
+                std::printf("script:   local objects on the map:");
+                for (const auto& [ty, n] : mine) std::printf(" %s x%u", ty.c_str(), n);
+                std::printf("\n");
             }
             return false;
         }, 600));
@@ -1660,8 +1674,15 @@ void App::make_script() {
         // modc t40: the buy screen is a [port] feature (SKIRMISH_SETUP §2.7: retail has none); a faction with nothing to buy
         // (Age of Legends' list-header faction) passes it with nothing bought instead of stopping the smoke.
         auto empty = std::make_shared<bool>(false);
-        s.push_back({"buy list read", [empty, space_buy](App& a, ui::InputFrame&) {
-                         if (!a.ui_.gui.find(ui::dlg::kBuyUnits)) return false;
+        auto skipped = std::make_shared<bool>(false);  // modc t49: no buy screen (free starting units off): nothing to click
+        s.push_back({"buy list read", [empty, skipped, space_buy](App& a, ui::InputFrame&) {
+                         if (!a.ui_.gui.find(ui::dlg::kBuyUnits)) {
+                             if (!a.session_) return false;
+                             *empty = *skipped = true;
+                             a.notes_.push_back("no buy screen (free starting units off): the slots start without forces");
+                             std::printf("script: buy screen skipped - free starting units off\n");
+                             return true;
+                         }
                          // modc t49: a row counts when it is affordable and, in the space smoke, can move (Max_Speed > 0);
                          // with none the default start force plays (Fall of the Republic's start credits buy only static
                          // stations). Land rows are companies (no Max_Speed of their own): affordable is enough.
@@ -1709,7 +1730,11 @@ void App::make_script() {
             return size_t{0};
         }));
         s.push_back(step_click_control(ui::dlg::kBuyUnits, "IDC_BUY_BUTTON"));
-        s.push_back(step_wait("unit bought", [](App& a) { return !a.bought_.empty(); }, 120));
+        s.push_back(step_wait("unit bought", [](App& a) {
+            if (a.bought_.empty()) return false;
+            for (const auto& [type, n] : a.bought_) std::printf("script: bought %s x%u\n", type.c_str(), static_cast<unsigned>(n));
+            return true;
+        }, 120));
         s.push_back(step_shot(prefix + "_buy_units.png"));
         if (prefix == "game_skirmish") {
             for (int i = 0; i < kSmokeSkirmishBuys - 1; ++i) s.push_back(step_click_control(ui::dlg::kBuyUnits, "IDC_BUY_BUTTON"));
@@ -1717,7 +1742,9 @@ void App::make_script() {
             s.push_back(step_click_control(ui::dlg::kBuyUnits, "IDC_SELL_ALL_BUTTON"));
         }
         gate_steps(s, buy_from, empty);
+        const size_t next_from = s.size();
         s.push_back(step_click_control(ui::dlg::kBuyUnits, "IDC_NEXT_BUTTON"));
+        gate_steps(s, next_from, skipped);
     };
     if (opt_.smoke == "land") {  // land skirmish: the first land map of the list (rows after the space maps)
         s.push_back(step_click_control("IDD_SINGLE_PLAYER_GAMES_MENU_DIALOG", "IDC_SKIRMISH_GAMES_BUTTON"));

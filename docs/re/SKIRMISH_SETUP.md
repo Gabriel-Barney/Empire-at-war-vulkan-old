@@ -221,6 +221,12 @@ member (+0x958 entry 1) [M].
 - The port's pre-battle buy screen (`engine/apps/game/app/app_screens.cpp`, `open_buy_units`) is a [port] feature: the
   original single-player skirmish has none. Its budget, its use of the bought list as the start force and the screen
   itself stay port decisions (kept by Gabriel 2026-11-04; PHASE4 Decisions).
+- modc t49: with option flag 0x2 off (the GameConstants default `MP_Default_Free_Starting_Units = no`, as Fall of the
+  Republic ships it) the slots start without forces (§2 step 4), so a bought list would never reach the map. The port
+  skips its buy screen then and starts the battle with the map's pre-built bases only; the flag's control
+  (`IDC_ALLOW_STARTING_UNIT_PURCHASE`) names the starting purchase, which the original then does not allow either.
+- modc t48: a slot whose faction has no default forces starts the map battle empty (`SkirmishSetup::empty_slots_ok`),
+  as retail starts Age of Legends' land skirmish (modc t09 A4); only the older hop scaffold (tests) still refuses it.
 - To match the original's list, replace the port's filter (unit kind from `galactic_unit_kind`, first 24 by type index,
   ascending cost) with steps 1–4 above plus the named-hero rule; no cap; order by cost descending. The original's tie
   order is undefined; use type index ascending for equal costs [port].
@@ -250,8 +256,10 @@ through 0xfe7c0); the profile copy 0x338e80; the faction-change handlers in 0xf2
 - Retail run 2026-11-17 (a profile whose saved faction index is 1): EAW-Remake (list Rebel, Empire, ...) opens on
   Empire for the player and Rebel for the AI; Age of Legends (list "= MAJOR POWERS ===", New Republic, ...) opens on New
   Republic for the player and the header row for the AI. Both match index 1 / (1 XOR 1).
-- [port] `FrontEnd::fill_skirmish_slots` gives slot p the row p % 2: the same as retail on a fresh profile (0 / 1). The
-  port does not remember the last faction in a profile (modc t47).
+- Port (modc t47): `FrontEnd::fill_skirmish` / `fill_skirmish_slots` apply the rules above. The local faction and colour
+  come from the port's options profile (`game_options.txt` keys `skirmish_faction` / `skirmish_colour`, written when a
+  skirmish starts). [port] The faction is kept by name, not by row, so a mod with another faction list opens on row 0; the
+  port writes it at Start, not on each faction change; slots 2.. keep row p % 2 and their slot index as colour.
 
 ## 3. Tactical production (item 1)
 
@@ -264,6 +272,11 @@ Enqueue 0x496a20(manager, type, builder, queue) [H]:
   (behaviour 0x45, 0x4c3700); the type is in the builder type's buildable list for the builder owner's
   faction (§7); Build_Limit fields +0x880..+0x88c counting queued entries; price and time finite and
   greater than zero; prerequisites (+0xa18) owned.
+- [open, modc t50] Retail run modc_t45 (2026-11-17): EAW-Remake's TIE / Arquitens (no `Tactical_Build_Prerequisites`;
+  `Required_Star_Base_Level` 2, `Required_Special_Structures` `E_Shipyard_1`, Arquitens also `Required_Planets`) stay
+  grey on the skirmish station at level 1 and after the level-2 upgrade, and a click queues nothing. So the build bar's
+  test reads more than the check above lists. Which field (special structures, planets, star base level counted
+  another way) is still to be read in the binary.
 - A human is limited to fewer than GC Max_Build_Queue entries (0x140b26f78, default 5); AI is unlimited.
 - Pay-as-you-go test 0x289050: an AI player always counts as PAYG; a human uses GC Pay_As_You_Go
   (+0x320, false in FoC). Not PAYG (FoC humans): fail if credits < cost, else deduct the full cost at

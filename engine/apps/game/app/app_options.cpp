@@ -19,6 +19,7 @@ void App::load_game_options() {
     gameplay_ = p.gameplay;
     camera_ = p.camera;
     tactical_fov_set_ = p.tactical_fov_set;
+    skirmish_profile_ = p.skirmish;
     gview_.camera().set_fov_deg(camera_.galactic_fov_deg);
     bview_.camera().set_fov_override(tactical_fov_set_ ? camera_.tactical_fov_deg : 0.0f);
     if (!p.keys.empty()) ui_.hotkeys.load(p.keys);
@@ -33,6 +34,7 @@ void App::save_game_options() {
     p.gameplay = gameplay_;
     p.camera = camera_;
     p.tactical_fov_set = tactical_fov_set_;
+    p.skirmish = skirmish_profile_;
     ui_.hotkeys.save(p.keys);
     if (!save_options_profile(options_path_, p)) std::printf("options: %s not written\n", options_path_.c_str());
 }

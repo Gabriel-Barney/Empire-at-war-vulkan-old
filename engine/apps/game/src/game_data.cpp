@@ -277,7 +277,7 @@ bool make_skirmish_galaxy(const GameData& data, const SkirmishSetup& setup, gala
         nh = add(0, kSkirmishHumanPlanet, s.units_human, s.human_faction);
         if (nh > 0 && !s.ground_human.empty()) add(0, kSkirmishHumanPlanet, s.ground_human, s.human_faction, true);  // P4 host
     }
-    if (na == 0 || nh == 0) {
+    if ((na == 0 || nh == 0) && !s.empty_slots_ok) {
         if (err) *err = "skirmish: no known unit type in the " + std::string(nh == 0 ? "human" : "AI") + " fleet";
         return false;
     }
@@ -285,7 +285,7 @@ bool make_skirmish_galaxy(const GameData& data, const SkirmishSetup& setup, gala
     for (int32_t k = 2; k < slots; ++k) {
         const SkirmishSetup::ExtraSlot& x = s.extra_slots[static_cast<size_t>(k - 2)];
         const uint32_t n = s.land ? add(k, skirmish_slot_planet(k), x.ground, x.faction, true) : add(k, skirmish_slot_planet(k), x.units, x.faction);
-        if (n == 0) {
+        if (n == 0 && !s.empty_slots_ok) {
             if (err) *err = "skirmish: no known unit type in slot " + std::to_string(k) + "'s forces";
             return false;
         }
