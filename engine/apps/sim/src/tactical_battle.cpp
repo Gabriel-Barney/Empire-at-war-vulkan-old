@@ -38,17 +38,17 @@ TacticalBattle::TacticalBattle(const BattleCatalog& catalog, const galactic::Gal
     : catalog_(&catalog), galaxy_(&galaxy), rules_(&rules), req_(std::move(request)), cfg_(cfg) {
     space_ = req_.info.kind == galactic::ConflictKind::Space;
     for (const galactic::BattleForces& f : req_.forces) {
-        const uint8_t side = f.player == req_.info.defender ? 0 : 1;
+        const uint8_t side = owner_side(f.player);  // skm2 t02: a skirmish slot k >= 2 is side k
         for (objects::ObjectHandle h : f.start) add_participant(h, f.player, side, false, false, false);
         for (objects::ObjectHandle h : f.reserve) add_participant(h, f.player, side, true, false, false);
     }
     const objects::ObjectStore& gs = galaxy.store();
     if (gs.alive(req_.starbase)) {
         const int32_t o = gs.owner(req_.starbase);
-        add_participant(req_.starbase, o, o == req_.info.defender ? 0 : 1, false, true, false);
+        add_participant(req_.starbase, o, owner_side(o), false, true, false);
     }
     for (objects::ObjectHandle s : req_.structures)
-        if (gs.alive(s)) add_participant(s, gs.owner(s), gs.owner(s) == req_.info.defender ? 0 : 1, false, false, true);
+        if (gs.alive(s)) add_participant(s, gs.owner(s), owner_side(gs.owner(s)), false, false, true);
     bt_force_split();  // battle host: land lead / raid split, space super-weapon start rule (TACTICAL_GAPS §4.2 / §4.6)
     // Types spawned in this battle, first-use order -> the battle tables (team containers after their members,
     // the dummy target type last).
@@ -431,6 +431,17 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
         facing_[0] = {-1.0f, 0.0f, 0.0f};
         facing_[1] = {1.0f, 0.0f, 0.0f};
         drop_facing_[0] = drop_facing_[1] = Vec3{};  // a1h t06: mode +0x288 starts zeroed (no marker -> yaw 0)
+        // skm2 t02 [port]: a skirmish map's slots 2.. without a spawn marker: +-45% of the box on Y, then the corners, facing
+        // the centre.
+        const float hy = 0.5f * (mx[1] - mn[1]);
+        static constexpr float kExtra[6][2] = {{0.0f, 0.45f}, {0.0f, -0.45f}, {0.45f, 0.45f}, {-0.45f, -0.45f}, {0.45f, -0.45f}, {-0.45f, 0.45f}};
+        for (uint8_t s = 2; s < kMaxSides; ++s) {
+            const float ox = kExtra[s - 2][0], oy = kExtra[s - 2][1];
+            anchor_[s] = {cx + ox * hx, cy + oy * hy, 0.0f};
+            const float len = dmath::sqrt(ox * ox * hx * hx + oy * oy * hy * hy);
+            facing_[s] = len > 0.0f ? Vec3{-ox * hx / len, -oy * hy / len, 0.0f} : Vec3{1.0f, 0.0f, 0.0f};
+            drop_facing_[s] = Vec3{};
+        }
     }
     // Movement world.
     mv::MovementConfig mc;
@@ -855,7 +866,7 @@ void TacticalBattle::deploy(TacticalMode& mode, uint32_t pi, SimRng& rng, uint32
         // object it creates the owner's entry-facing record (mode +0x288; yaw 0 when unset). A landing object's company
         // takes the per-member unload facing of drop_face_ (s78j t01).
         if (P.reserve && !range && !deploy_unload_) {
-            const Vec3 df = side < 2 ? drop_facing_[side] : Vec3{};  // as spawn_landing: the participant's side record
+            const Vec3 df = side < kMaxSides ? drop_facing_[side] : Vec3{};  // as spawn_landing: the participant's side record
             face = df.x == 0.0f && df.y == 0.0f ? facing_of_yaw(0.0f) : df;
         }
         if (mk < drop_face_.size()) face = drop_face_[mk];
@@ -910,7 +921,7 @@ void TacticalBattle::deploy(TacticalMode& mode, uint32_t pi, SimRng& rng, uint32
             mv_type_extents(md, t);  // s78n t20
             movement_->add_unit(md);
         }
-        if (side < 2 && u.movable && !P.reserve && !P.built && !stats_.start_placed[side]) {  // s78n t20 (stats only)
+        if (side < kMaxSides && u.movable && !P.reserve && !P.built && !stats_.start_placed[side]) {  // s78n t20 (stats only)
             stats_.start_placed[side] = true;
             stats_.first_start[side] = pos;
         }
@@ -1163,7 +1174,7 @@ float TacticalBattle::side_power(uint8_t side) const {
 
 void TacticalBattle::reinforce(TacticalMode& mode, SimRng& rng, bool force_empty_sides) {
     if (arrival_held()) return;  // story t12: reinforcements wait in hyperspace
-    for (uint8_t side = 0; side < 2; ++side) {
+    for (uint8_t side = 0; side < side_count(); ++side) {  // skm2 t02: a skirmish map's slots 2.. too
         bool empty = true;
         float live_pop = 0.0f;
         std::vector<uint8_t> counted(parts_.size(), 0);
@@ -1209,6 +1220,8 @@ void TacticalBattle::issue_orders(TacticalMode& mode, SimRng& rng) {
         float best_d2 = 0.0f;
         for (const Unit& e : units_) {
             if (!e.alive || e.retreated || e.side == u.side) continue;
+            // skm2 t02: more than two skirmish sides - only an enemy of the unit's owner (allied slots are other sides)
+            if (side_count() > 2 && combat_ && !combat_->is_enemy(store.owner(u.h), store.owner(e.h))) continue;
             // s78n t25.3 [port]: on land the pick is an enemy of the unit's owner (the auto-attack push 0x41fd30 names what
             // the targeting scan picked, never a neutral object)
             if (!space_ && combat_ && !combat_->is_enemy(store.owner(u.h), store.owner(e.h))) continue;

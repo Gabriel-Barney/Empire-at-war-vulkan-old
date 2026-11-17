@@ -123,6 +123,12 @@ commands::EventData battle_choice_event(galactic::BattleChoice choice);
 // summary's Abandon is dead in retail (§9.1): no command. See GameSession::port_event.
 inline constexpr uint16_t kTacticalAutoResolveSubtype = 0x5441;  // "TA"
 commands::EventData tactical_auto_resolve_event();
+// skm2 t01 (SKIRMISH_SETUP 1.1): the Gameplay options Accept's IDC_RADIO_EASY / _MEDIUM / _HARD (one byte, 0..2) as a port
+// command, so a replay reproduces it: GameSession::port_event sets the session difficulty and calls Set_Difficulty on every
+// non-human AI player of the running game (GameSession::set_ai_difficulty). Retail does it on the GUI thread (0xa0f30 ->
+// 0x28d760) with no command.
+inline constexpr uint16_t kAiDifficultySubtype = 0x4144;  // "AD"
+commands::EventData ai_difficulty_event(int32_t difficulty);
 // Difficulty 0..2 -> DifficultyAdjustments name ([port] Easy_Default / Normal_Default / Hard_Default).
 const char* difficulty_name(int32_t difficulty);
 
@@ -136,6 +142,7 @@ struct PortEventStats {
     uint64_t tactical_auto_resolve = 0, tactical_auto_resolve_refused = 0;
     uint64_t story_esc = 0;  // bkc1 t01: story Esc commands applied (Story_Handle_Esc offered to the plots)
     uint64_t story_ui = 0, story_ui_dropped = 0;  // L1/S4 wave 1: story UI events applied / dropped (no story, bad payload)
+    uint64_t ai_difficulty = 0;  // skm2 t01: kAiDifficultySubtype commands applied
 };
 
 // P4 host: the FoC galactic special dialogs (docs/re/P4_SIM_SYSTEMS.md §1-§5). A human's Ground_Activated hero ability
@@ -247,6 +254,14 @@ public:
     // while it differs there (after_tick), so it lasts across battles. Not saved [port]: a new session starts loose.
     bool set_fleet_cohesion(bool tight);
     bool toggle_fleet_cohesion() { return set_fleet_cohesion(!fleet_cohesion_); }
+    // skm2 t01 (SKIRMISH_SETUP 1.1): the Gameplay options difficulty radio accepted during the game: sends kAiDifficultySubtype
+    // (0..2). At the command phase the session difficulty (SessionSpec::difficulty, every skirmish slot's too) becomes d and
+    // every non-human AI player gets it: GalacticSim::set_ai_difficulty (the DifficultyAdjustments row), the galactic AI,
+    // the running battle (its objects' health and shields rescaled, its tactical AI) and later battles' tactical AI. False
+    // when no live session runs or the submit failed (a replay sends nothing: the recorded command does it).
+    bool set_ai_difficulty(int32_t difficulty);
+    // skm2 t01 / t02: an AI player's current difficulty 0..2 (a skirmish slot's own, else the session's).
+    int32_t ai_difficulty_of(int32_t player) const;
     bool fleet_cohesion() const { return fleet_cohesion_; }
     const PortEventStats& port_stats() const { return port_stats_; }
     // L1/S4 wave 1: a local UI notification for the story (story_ui.hpp) as a command; GameSession::port_event hands it
@@ -404,6 +419,11 @@ private:
     commands::SavePoint load_point_;
     sim::LoadReport load_report_;
     std::vector<std::string> ai_types_;  // per player: the galactic AI type ("" = none), for the descriptor
+#ifdef ALAMO_SIM_HAVE_TACTICAL_AI
+    // skm2 t01: the battles' tactical AI setup (shared with CampaignBattleOptions::tactical_ai; null without a tactical AI)
+    std::shared_ptr<sim::TacticalAiSetup> tactical_setup_;
+#endif
+    void apply_ai_difficulty(int32_t difficulty);  // skm2 t01: the kAiDifficultySubtype command's effect
     uint64_t submits_ = 0;               // commands submitted (check_save's cache key with the host frame)
     std::optional<SaveFile> save_cache_;
     std::string save_refusal_;           // check_save()'s cached answer when it refused

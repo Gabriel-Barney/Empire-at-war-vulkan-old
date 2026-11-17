@@ -32,19 +32,24 @@ void TacticalBattle::vm_setup(TacticalMode& mode) {
         // ccpgt t02 (SKIRMISH_SETUP §0 / §4.2): game type 4 forces the win condition 0x15, the only record of each player, so
         // nothing else can win. Players: the skirmish slots on a skirmish map; [port] the attacker and the defender in the
         // game's skirmish (a galactic hop battle).
-        int32_t ids[2] = {skirmish_map() ? skirmish_slot_player(0) : req_.info.defender, skirmish_map() ? skirmish_slot_player(1) : req_.info.attacker};
-        if (!skirmish_map() && ids[0] > ids[1]) std::swap(ids[0], ids[1]);
-        for (int32_t i = 0; i < 2; ++i)
-            if (ids[i] >= 0 && (i == 0 || ids[1] != ids[0])) vm_add_record(kControlPointDomination, ids[i], kRecordCountdown, false);
+        if (skirmish_map()) {  // skm2 t02: every slot
+            for (int32_t s = 0; s < skirmish_slot_count(); ++s)
+                if (const int32_t p = skirmish_slot_player(s); p >= 0) vm_add_record(kControlPointDomination, p, kRecordCountdown, false);
+        } else {
+            int32_t ids[2] = {req_.info.defender, req_.info.attacker};
+            if (ids[0] > ids[1]) std::swap(ids[0], ids[1]);
+            for (int32_t i = 0; i < 2; ++i)
+                if (ids[i] >= 0 && (i == 0 || ids[1] != ids[0])) vm_add_record(kControlPointDomination, ids[i], kRecordCountdown, false);
+        }
     } else if (skirmish_map()) {
         // SKIRMISH_SETUP §2 step 4: one record per player with the option's win condition (skm1 t02: BattleConfig::skirmish_options;
         // 0x4ad000's valid sets: land 0x12..0x14, space 0x12 / 0x16; anything else = the kind's MP_Default_Land / Space_Tactical_
-        // Win_Condition, 0x13 / 0x16) [port: only the two slot players].
+        // Win_Condition, 0x13 / 0x16) [port: only the slot players; skm2 t02: every slot].
         const uint8_t want = cfg_.skirmish_options.set ? cfg_.skirmish_options.win_condition : 0;
         const bool valid = space_ ? (want == kSkirmishAllUnits || want == kSkirmishStarbase)
                                   : (want >= kSkirmishAllUnits && want <= kSkirmishCommandHq);
         const uint8_t type = valid ? want : space_ ? kSkirmishStarbase : kSkirmishLandBase;
-        for (int32_t s = 0; s < 2; ++s)
+        for (int32_t s = 0; s < skirmish_slot_count(); ++s)
             if (const int32_t p = skirmish_slot_player(s); p >= 0) vm_add_record(type, p, kRecordCountdown, false);
     } else {
         // §2.5 (0x28fda0): 0xb and 0xc for every player that is not Is_Neutral [port: the attacker and the defender, the only
@@ -166,13 +171,12 @@ bool TacticalBattle::vm_blocker(int32_t player, bool base_only) {
     // (SKIRMISH_SETUP §4: Neutral / Hostile objects never block).
     if (!vm_mode_ || !combat_) return false;
     const objects::ObjectStore& st = vm_mode_->primary();
-    const int32_t slots[2] = {skirmish_slot_player(0), skirmish_slot_player(1)};
     for (const objects::ObjectHandle h : st.all_objects()) {
         if (!st.active(h)) continue;
         const int32_t o = st.owner(h);
         if (o < 0 || o == player || !combat_->is_enemy(player, o) || !victory_relevant(static_cast<uint32_t>(st.type(h)))) continue;
         if (const Unit* u = unit_by_id(st.id(h)); u && u->retreated) continue;
-        if (base_only && (!vm_base_object(st, h) || (o != slots[0] && o != slots[1]))) continue;
+        if (base_only && (!vm_base_object(st, h) || skirmish_slot_of(o) < 0)) continue;  // skm2 t02: any slot's
         // skm1 t02 (§4, 0x12): in a skirmish only objects whose owner is human or has an AI count (Neutral / Hostile never block).
         if (!base_only && skirmish_map()) {
             const auto& ps = galaxy_->players();
@@ -280,7 +284,7 @@ void TacticalBattle::vm_object_lost(const VmTracked& t) {
         const auto has = [this](uint8_t type, int32_t e) {
             return std::any_of(vm_records_.begin(), vm_records_.end(), [&](const VmRecord& r) { return r.type == type && r.player == e; });
         };
-        for (int32_t s = 0; s < 2; ++s) {
+        for (int32_t s = 0; s < skirmish_slot_count(); ++s) {  // skm2 t02: every slot, in slot order
             const int32_t e = skirmish_slot_player(s);
             if (e < 0 || e == p || !combat_->is_enemy(p, e)) continue;
             if (has(kSkirmishAllUnits, e) && vm_test(kSkirmishAllUnits, e)) continue;

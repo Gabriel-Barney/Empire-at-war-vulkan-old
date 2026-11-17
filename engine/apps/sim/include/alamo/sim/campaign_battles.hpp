@@ -197,6 +197,10 @@ public:
     // the original starts that player's tactical retreat / early withdrawal, §9.3 step 3]. False when refused.
     // The Withdraw of a running galactic auto-resolve (event 49) is conflicts().set_retreating(player) (BT §4.6, §9.2).
     bool auto_resolve_battle(int32_t player);
+    // skm2 t01 (SKIRMISH_SETUP 1.1, Set_Difficulty from the Gameplay options Accept): the galaxy's AI difficulty of `player`
+    // changed (GalacticSim::set_ai_difficulty) and its AI now plays at `difficulty` (0..2): the running battle rescales its
+    // objects and its tactical AI takes the new difficulty. Nothing without a running battle.
+    void apply_ai_difficulty(int32_t player, int32_t difficulty);
     // --- end P4 sim ---
     // GALAXY_MAP_PRESENTATION §6 (OI host, the main-menu attract demo): a tactical battle on `r.map` with no conflict and
     // no galactic forces (r.forces empty: every unit comes from the map, owners = player indices). It starts at the next

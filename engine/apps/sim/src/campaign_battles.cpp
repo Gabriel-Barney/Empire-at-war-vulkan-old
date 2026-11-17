@@ -784,8 +784,11 @@ void CampaignBattles::push_battle(SimHost& host) {
 #ifdef ALAMO_SIM_HAVE_AI_TACTICAL
     // Land campaign battle: AI credits swapped for the tactical budget (A1 tactical_credits.hpp).
     credits_.clear();
+    std::vector<int32_t> budget_players{pending_req_.info.defender, pending_req_.info.attacker};
+    if (direct_)  // skm2 t02: a skirmish map battle's slots 2..
+        for (size_t s = 2; s < opt_.battle.skirmish_slots.size(); ++s) budget_players.push_back(opt_.battle.skirmish_slots[s].player);
     if (kind == ModeKind::Land && opt_.tactical_budget)
-        for (int32_t p : {pending_req_.info.defender, pending_req_.info.attacker}) {
+        for (int32_t p : budget_players) {
             galactic::econ::CreditAccount* acct = g->sim()->credit_account(p);
             if (!acct) continue;
             CreditTransfer ct;
@@ -1087,6 +1090,16 @@ bool CampaignBattles::auto_resolve_battle(int32_t player) {
     return true;
 }
 // --- end P4 sim ---
+
+void CampaignBattles::apply_ai_difficulty(int32_t player, int32_t difficulty) {
+    if (!battle_) return;
+    battle_->refresh_ai_difficulty(player);
+#ifdef ALAMO_SIM_HAVE_TACTICAL_AI
+    if (ai_) ai_->set_difficulty(player, difficulty);
+#else
+    (void)difficulty;
+#endif
+}
 
 bool CampaignBattles::change_owner(objects::ObjectHandle h, int32_t owner) {
     // S10-int: Lua Change_Owner on a tactical host (ObjectBridge::change_owner, L1/S4 ask).

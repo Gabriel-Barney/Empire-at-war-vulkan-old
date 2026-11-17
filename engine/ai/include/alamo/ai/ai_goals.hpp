@@ -233,6 +233,9 @@ public:
     void init(const AiDefinitions& defs, std::vector<GoalSource> sources, GoalModeHooks* hooks, LearningSystem* learning,
               const TemplateSystem* templates, SimRng* rng, GoalSystemConfig cfg);
     void service(int64_t now);  // Goal subsystem Service (every frame)
+    // skm2 t01 (SKIRMISH_SETUP 1.1, Set_Difficulty): a new difficulty's Goal_Cycle_Sleep_Duration frames; a running sleep
+    // keeps its countdown, the next commit sleeps the new value. Configuration, like init's (not saved: the host rebuilds it).
+    void set_sleep_frames(int32_t frames) { cfg_.sleep_frames = frames; }
 
     // ---- state queries ----
     const std::vector<GoalSource>& sources() const { return sources_; }

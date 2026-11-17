@@ -12,7 +12,7 @@ namespace alamo::sim {
 
 namespace {
 
-constexpr uint32_t kBattleStateVersion = 16;  // 16: r3g t01 landing Land / Takeoff clip timing; 15: skm1 t07 skirmish garrison re-delivery; 14: TRU1 t06 retreat flight, t05 / t07 spawners and debris; 13: [port] fleet cohesion per player; 2: S7 t22 fighter formations; 3: S7 t24 formation follow_next / a1i t04 landing objects (two branches); 4: S7 t37 follow_next dropped (the follow is in the movement layer); 5: both merged (formations + landing objects); 6: story t06 victory monitor (replaces the end-hold fields); 7: q6 attacks on TEAM containers / s78f t02 FighterFormationRecord::pushed dropped (the auto blocks are in the movement save) (two branches); 8: both merged; 9: ccpgt t02 domination timer; 10: cu8k t01 Saber_Throw thrower machines; 11: cu8l t03 start fleet arrivals; 12: s78n t20 land attack blocks (exact: older versions are refused)
+constexpr uint32_t kBattleStateVersion = 17;  // 17: skm2 t02 skirmish sides 2..7 (anchors, facings, records); 16: r3g t01 landing Land / Takeoff clip timing; 15: skm1 t07 skirmish garrison re-delivery; 14: TRU1 t06 retreat flight, t05 / t07 spawners and debris; 13: [port] fleet cohesion per player; 2: S7 t22 fighter formations; 3: S7 t24 formation follow_next / a1i t04 landing objects (two branches); 4: S7 t37 follow_next dropped (the follow is in the movement layer); 5: both merged (formations + landing objects); 6: story t06 victory monitor (replaces the end-hold fields); 7: q6 attacks on TEAM containers / s78f t02 FighterFormationRecord::pushed dropped (the auto blocks are in the movement save) (two branches); 8: both merged; 9: ccpgt t02 domination timer; 10: cu8k t01 Saber_Throw thrower machines; 11: cu8l t03 start fleet arrivals; 12: s78n t20 land attack blocks (exact: older versions are refused)
 constexpr uint32_t kBattlePartVersion = 2;  // 2: s78n t06 running hero clashes in the Combat part (1 still read: none)
 
 // One module system in a part: presence flag + a section with its own write.
@@ -66,6 +66,7 @@ void TacticalBattle::state_io(Ar& a, Self& b) {
     a.seq(b.effects_, [](auto& x, auto& e) { x(e.id, e.asset, e.percent, e.frame); });
     a(b.anchor_[0], b.anchor_[1], b.facing_[0], b.facing_[1], b.placed_[0], b.placed_[1]);
     a(b.drop_facing_[0], b.drop_facing_[1]);  // a1h t06
+    for (size_t s = 2; s < TacticalBattle::kMaxSides; ++s) a(b.anchor_[s], b.facing_[s], b.placed_[s], b.drop_facing_[s]);  // skm2 t02 (17)
     a.seq(b.landings_, [](auto& x, auto& l) {  // a1i t04: landing objects (state version 3)
         x(l.id, l.h, l.participant, l.state, l.timed, l.timer_start, l.timer_len, l.unloaded, l.next_offset, l.remove_frame);
         x(l.anim_start, l.anim_count, l.anim_rate);  // r3g t01 (state version 16)

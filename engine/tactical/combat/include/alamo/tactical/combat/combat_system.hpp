@@ -1143,6 +1143,11 @@ public:
     // Relation matrix (attacker player +0x370[id]); default: different players are enemies.
     void set_enemy(int32_t a, int32_t b, bool enemy);
     bool is_enemy(int32_t a, int32_t b) const;
+    // skm2 t01 (SKIRMISH_SETUP 1.1, AI_GALACTIC §1.2 Set_Difficulty 0x4b0dc0): the AI player's new DifficultyAdjustments
+    // multipliers. Every live unit of `player` has its hull and shield scaled by new / old Health_ / Shield_Multiplier (in
+    // unit id order), then PlayerInfo takes the new values. [port] hard-point health is not rescaled: the port's hard-point
+    // maximum has no difficulty factor. Serial (command phase); an invalid player does nothing.
+    void set_player_difficulty(int32_t player, float damage_multiplier, float health_multiplier, float shield_multiplier);
 
     // Pre-sizes per-tick scratch so steady-state ticks never allocate.
     void reserve(uint32_t units, uint32_t projectiles, uint32_t candidates_per_unit, uint32_t delayed = 256);

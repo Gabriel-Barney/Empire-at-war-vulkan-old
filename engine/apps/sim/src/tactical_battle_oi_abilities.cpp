@@ -343,7 +343,7 @@ objects::ObjectHandle TacticalBattle::script_spawn_company(TacticalMode& mode, c
     P.galactic_id = objects::kNoObjectId;
     P.owner = p.owner;
     P.type = ct;
-    P.side = p.owner == req_.info.defender ? 0 : 1;
+    P.side = owner_side(p.owner);
     P.built = true;
     P.pop = 0.0f;
     const auto& gt = galaxy_->rules().types;

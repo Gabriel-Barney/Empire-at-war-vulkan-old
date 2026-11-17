@@ -506,6 +506,12 @@ public:
     // neutral player); NotInitialised: its AI has not had its first service.
     lua::PreventAiResult prevent_ai_usage(int32_t id, int32_t owner, bool on);
 
+    // skm2 t01 (SKIRMISH_SETUP 1.1: Set_Difficulty 0x4b0dc0 from the Gameplay options Accept): the AI player keeps its state
+    // and takes `difficulty`'s (0 Easy, 1 Normal, 2 Hard) Land_ / Space_ contrast multiplier, goal-cycle sleep and build
+    // time multiplier (this battle's mode) from now on. False without an AI for the player or when it already has that
+    // difficulty. Serial, between updates.
+    bool set_difficulty(int32_t player, int32_t difficulty);
+
     // ---- inspection ----
     bool is_ai_player(int32_t player) const;
     // skm1 t04 (SKIRMISH_SETUP 0x496f00, AI_TACTICAL §4.5): the AI player's Land_ / Space_Build_Time_Multiplier of its

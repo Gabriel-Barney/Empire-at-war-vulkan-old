@@ -2700,6 +2700,27 @@ bool GalacticAiWorld::set_ai_type(int32_t player, std::string_view type_name, in
     return true;
 }
 
+bool GalacticAiWorld::set_difficulty(int32_t player, int32_t difficulty) {
+    Impl& w = *impl_;
+    PlayerAi* p = w.player_ai(player);
+    const int32_t d = std::clamp(difficulty, 0, 2);
+    if (!p || p->difficulty == d) return false;
+    p->difficulty = d;
+    float sleep = 0.0f;
+    p->contrast_mult = 1.0f;
+    const std::string& dname = p->type->difficulty[static_cast<size_t>(d)];
+    for (const GalacticAiDifficulty& e : w.cfg.difficulties)  // as make_player
+        if (ai_iequal(e.name, dname)) {
+            p->contrast_mult = e.galactic_contrast;
+            sleep = e.galactic_goal_sleep;
+        }
+    p->ctx.goals.set_sleep_frames(static_cast<int32_t>(static_cast<float>(kAiFps) * sleep));
+    for (GalacticAiPlayerConfig& pc : w.cfg.players)
+        if (pc.player == player) pc.difficulty = d;
+    w.decide(player, "difficulty " + std::to_string(d));
+    return true;
+}
+
 std::string GalacticAiWorld::ai_type(int32_t player) const {
     const PlayerAi* p = impl_->player_ai(player);
     return p ? p->type->name : std::string();

@@ -36,6 +36,12 @@ BattleConfig::SkirmishOptions skirmish_option_defaults(const data::GameConstants
     return o;
 }
 
+void TacticalBattle::refresh_ai_difficulty(int32_t player) {
+    if (!combat_ || player < 0 || static_cast<uint32_t>(player) >= combat_->player_count()) return;
+    const galactic::DifficultyRules* d = galaxy_->ai_difficulty(player);  // as the construction (cu8 t03): none = 1.0
+    combat_->set_player_difficulty(player, d ? d->damage_multiplier : 1.0f, d ? d->health_multiplier : 1.0f, d ? d->shield_multiplier : 1.0f);
+}
+
 void TacticalBattle::apply_skirmish_start_credits() {
     // SKIRMISH_SETUP §2 step 3 (0x291d40): EVERY player (Neutral and the other non-playable ones included) gets credits set
     // to the option credits when the skirmish starts. The port's skirmish galaxy may have paid scaffold income before the
@@ -51,7 +57,7 @@ void TacticalBattle::apply_skirmish_start_credits() {
 void TacticalBattle::sk_garrison_setup() {
     sk_garrisons_.clear();
     if (!skirmish_map()) return;
-    for (int32_t s = 0; s < 2; ++s) {
+    for (int32_t s = 0; s < skirmish_slot_count(); ++s) {  // skm2 t02: every slot
         const int32_t p = skirmish_slot_player(s);
         if (p < 0) continue;
         SkGarrison g;
@@ -163,11 +169,10 @@ void TacticalBattle::sk_income(const TacticalMode& mode) {
     // give exactly 300 / 600 / 900; the 0.3 shortfall per 1800 frames is the float rounding of a 1/6 credit add near 6000).
     if (!skirmish_map() || !credits_add_) return;
     const objects::ObjectStore& st = mode.primary();
-    const int32_t slots[2] = {skirmish_slot_player(0), skirmish_slot_player(1)};
     for (const Unit& u : units_) {
         if (!u.alive || u.retreated || !st.alive(u.h)) continue;
         const int32_t owner = st.owner(u.h);
-        if (owner < 0 || (owner != slots[0] && owner != slots[1])) continue;
+        if (owner < 0 || skirmish_slot_of(owner) < 0) continue;  // skm2 t02: every slot
         const SkIncome& in = sk_income_of(u.type);
         if (in.value <= 0.0f || in.interval <= 0.0f) continue;
         const float per_interval = in.value * in.multiplier + in.additive;

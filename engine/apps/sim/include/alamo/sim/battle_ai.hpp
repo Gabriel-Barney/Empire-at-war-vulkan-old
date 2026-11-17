@@ -76,6 +76,9 @@ struct TacticalAiSetup {
     // AIPlayerType of a battle player ("" = no tactical AI). Default: default_tactical_ai_type.
     std::function<std::string(int32_t player, const galactic::GalacticSim& galaxy)> ai_type;
     int32_t difficulty = 1;  // 0 Easy, 1 Normal, 2 Hard
+    // skm2 t02: per player index its difficulty (0..2; -1 or missing = `difficulty`): a skirmish slot's own (SKIRMISH_SETUP
+    // §1, slot +0x158).
+    std::vector<int32_t> player_difficulty;
     ai::tactical::TacticalAiConstants constants;
     bool log_decisions = true;
     // OPT2 t01 / t02 (TacticalAiConfig::stagger / path_latency): per-player planning phases; the land path finder's
@@ -118,6 +121,9 @@ public:
     // One AI frame, after the battle tick (T7 order, see tactical_ai.hpp).
     void update();
     void end();  // battle end: every plan released
+    // skm2 t01 (SKIRMISH_SETUP 1.1): TacticalAiWorld::set_difficulty for `player`, then the battle's build-time multipliers
+    // again. False when the player has no tactical AI here or the difficulty is unchanged.
+    bool set_difficulty(int32_t player, int32_t difficulty);
     // a1h t02: the object-goal follow records' 30-frame re-path (the first step of update(); public for the host tests).
     void follow_service();
     // sp3 t04 (AI lane, docs/SIM_PARALLEL_DESIGN.md 5.1): with TacticalAiConfig::ai_lane on, the AI's unit orders (moves,

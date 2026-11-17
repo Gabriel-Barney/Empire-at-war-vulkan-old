@@ -121,10 +121,14 @@ BattleAi::BattleAi(TacticalBattle& battle, TacticalMode& mode, SimHost& host, co
             ls.ai = ps.ai;
             ls.credits = g.credits(static_cast<int32_t>(p));
             const auto pi = static_cast<int32_t>(p);
-            const bool participant = pi == cfg.attacker || pi == cfg.defender;
+            // skm2 t02: a skirmish map battle's slots 2.. take part too.
+            const bool participant = pi == cfg.attacker || pi == cfg.defender || (b_->skirmish_map() && b_->skirmish_slot_of(pi) >= 0);
             const std::string type = !participant ? std::string() : setup.ai_type ? setup.ai_type(pi, g) : default_tactical_ai_type(pi, g);
             if (!type.empty()) {
-                cfg.players.push_back({pi, type, setup.difficulty});
+                // skm2 t02 (SKIRMISH_SETUP §1: the slot's difficulty +0x158 -> the player's +0x3bc): the player's own entry,
+                // else the setup's.
+                const int32_t d = p < setup.player_difficulty.size() && setup.player_difficulty[p] >= 0 ? setup.player_difficulty[p] : setup.difficulty;
+                cfg.players.push_back({pi, type, d});
                 ai_side_[p] = 1;
             }
         }
@@ -1062,6 +1066,12 @@ void BattleAi::lane_collect() {
 
 void BattleAi::end() { world_->end_battle(); }
 
+bool BattleAi::set_difficulty(int32_t player, int32_t difficulty) {
+    if (!controls(player) || !world_->set_difficulty(player, difficulty)) return false;
+    set_build_time_multipliers();
+    return true;
+}
+
 std::string BattleAi::summary() const {
     return "tactical AI: " + std::to_string(world_->orders_issued()) + " orders, " + std::to_string(world_->orders_rejected()) +
            " rejected, " + std::to_string(world_->decision_log().size()) + " decisions, " + std::to_string(world_->lua_errors().size()) +
@@ -1298,10 +1308,11 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
         } else {
             // t48: skirmish reads Player_%d_Position_Marker of Self. [port] the port's skirmish deploys both sides at the battle
             // anchors, not at those markers, so each side's start position is its anchor (defender 0, attacker 1).
-            for (const int side : {0, 1}) {
+            // skm2 t02: every side of a skirmish map with more than two slots (side k >= 2 = slot k).
+            for (uint8_t side = 0; side < b_->side_count(); ++side) {
                 at::StartMarker m;
                 m.kind = at::StartMarker::Kind::PlayerPosition;
-                m.player_id = side == 0 ? b_->req_.info.defender : b_->req_.info.attacker;
+                m.player_id = b_->side_player(side);
                 m.position = {b_->anchor_[side].x, b_->anchor_[side].y, b_->anchor_[side].z};
                 w.markers.push_back(m);
             }
@@ -3078,6 +3089,8 @@ void BattleAi::standin_orders() {
         float best_d2 = 0.0f;
         for (const TacticalBattle::Unit& e : b_->units_) {
             if (!e.alive || e.retreated || e.side == u.side) continue;
+            // skm2 t02: more than two skirmish sides - only an enemy of the unit's owner (allied slots are other sides)
+            if (b_->side_count() > 2 && b_->combat_ && !b_->combat_->is_enemy(st.owner(u.h), st.owner(e.h))) continue;
             // s78n t25.3 [port]: on land the pick is an enemy of the unit's owner (the auto-attack push 0x41fd30 names what
             // the targeting scan picked, never a neutral object)
             if (!b_->space_ && b_->combat_ && !b_->combat_->is_enemy(st.owner(u.h), st.owner(e.h))) continue;

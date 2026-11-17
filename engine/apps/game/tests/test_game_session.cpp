@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <initializer_list>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -29,6 +30,7 @@
 #include <string>
 #include <vector>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/host_fs.hpp"
@@ -1620,6 +1622,173 @@ void skirmish_map_real_test() {
     }
 }
 
+// skm2 t02 / t01 (the group's exit test): a space skirmish as the front end starts it with four playing slots on two teams
+// (IDC_PLAYER_TEAM_n: slots 0 and 3 team 0, slots 1 and 2 team 1; slot 3 is Rebel like slot 1, so the team decides, not the
+// faction): every slot is a player of its faction with its own start forces, AI difficulty and victory record
+// (SKIRMISH_SETUP §1, §2 step 4), allies are not enemies (TACTICAL_COMBAT §2.10, 0x297470), the battle does not end while
+// one slot of the other team is left and ends with a team-0 winner once the whole team 1 is gone (§4). Then the Gameplay
+// options difficulty (SKIRMISH_SETUP 1.1) as a recorded command: every AI player Hard (galaxy row, tactical AI, health
+// rescaled), and the replay of the recording reproduces the CRC log. Real data (ALAMO_FOC_DATA); skipped when unset.
+namespace {
+game::SessionSpec four_slot_spec(const game::GameData& data) {
+    game::SessionSpec spec;
+    spec.kind = game::SessionKind::Skirmish;
+    spec.skirmish_map = "_MP_SPACE_GEONOSIS";
+    spec.skirmish.human_faction = "Empire";
+    spec.skirmish.ai_faction = "Rebel";
+    spec.skirmish.extra_slots = {{"Underworld", {}, {}}, {"Rebel", {}, {}}};
+    spec.skirmish.teams = {0, 1, 1, 0};
+    spec.skirmish.difficulties = {1, 0, 2, 1};
+    spec.seed = 5;
+    spec.skirmish_options = sim::skirmish_option_defaults(data.db.constants());
+    spec.skirmish_options.win_condition = 0x12;  // SKIRMISH_ALL_ENEMY_UNITS_DESTROYED
+    return spec;
+}
+
+// Kills every combat unit of `players` in the running battle (Lua Take_Damage's path); the number killed.
+uint32_t kill_players(game::GameSession& s, std::initializer_list<int32_t> players) {
+    sim::TacticalBattle* b = s.battles() ? s.battles()->battle() : nullptr;
+    sim::TacticalMode* m = s.host().modes().top_tactical();
+    if (!b || !m) return 0;
+    std::vector<objects::ObjectId> ids;
+    const objects::ObjectStore& st = m->primary();
+    for (const objects::ObjectHandle h : st.all_objects())
+        if (st.active(h) && std::find(players.begin(), players.end(), st.owner(h)) != players.end() && b->combat().has_unit(st.id(h)))
+            ids.push_back(st.id(h));
+    uint32_t n = 0;
+    for (const objects::ObjectId id : ids) n += b->script_damage(*m, id, 1.0e9f, false) ? 1u : 0u;
+    return n;
+}
+}  // namespace
+
+void skirmish_four_slot_real_test() {
+    const char* foc = std::getenv("ALAMO_FOC_DATA");
+    if (!foc || !*foc) {
+        std::printf("four-slot skirmish (real data): ALAMO_FOC_DATA not set: skipped\n");
+        return;
+    }
+    game::GameData data;
+    std::string err;
+    if (!game::load_game_data(foc, {}, data, &err)) {
+        std::printf("four-slot skirmish (real data): load failed: %s\n", err.c_str());
+        CHECK(false);
+        return;
+    }
+    const game::SessionSpec spec = four_slot_spec(data);
+    // 1. The slots, their forces, records, difficulties and relations; the team end.
+    {
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        game::GameSession s(data, js, spec);
+        std::vector<std::string> diag;
+        CHECK(s.start(&diag, nullptr, nullptr));
+        for (const std::string& d : diag) std::printf("  diag: %s\n", d.c_str());
+        if (!s.started()) return;
+        uint64_t t = 0;
+        while (t < 300 && !(s.in_battle() && s.battle() && s.battle()->frame() >= 2)) {
+            s.tick();
+            ++t;
+        }
+        const sim::TacticalBattle* b = s.battle();
+        const galactic::GalacticSim* g = s.galaxy();
+        CHECK(b != nullptr && g != nullptr);
+        if (!b || !g) return;
+        const char* factions[4] = {"Empire", "Rebel", "Underworld", "Rebel"};
+        uint32_t owned[4] = {};
+        const objects::ObjectStore& st = s.host().modes().top_tactical()->primary();
+        for (const objects::ObjectHandle h : st.all_objects())
+            if (st.active(h) && st.owner(h) >= 0 && st.owner(h) < 4 && b->combat().has_unit(st.id(h))) ++owned[st.owner(h)];
+        for (int32_t k = 0; k < 4; ++k) {
+            const galactic::PlayerState& ps = g->players()[static_cast<size_t>(k)];
+            const uint32_t row = data.rules.find_difficulty(game::difficulty_name(spec.skirmish.difficulties[static_cast<size_t>(k)]));
+            std::printf("four-slot skirmish: slot %d faction %s human %d ai %d difficulty row %u (want %u) units %u record 0x%x team %d\n", k,
+                        data.rules.factions[ps.faction].name.c_str(), ps.human ? 1 : 0, ps.ai ? 1 : 0, ps.difficulty, row, owned[k],
+                        b->victory_record_type(k), b->skirmish_team(k));
+            CHECK(ascii_iequals(data.rules.factions[ps.faction].name, factions[k]));
+            CHECK(ps.human == (k == 0) && ps.ai == (k != 0));
+            if (k > 0) CHECK(ps.difficulty == row);
+            CHECK(owned[k] > 0);                       // its own start forces
+            CHECK(b->victory_record_type(k) == 0x12);  // its own victory record
+            CHECK(b->skirmish_team(k) == spec.skirmish.teams[static_cast<size_t>(k)]);
+        }
+        const tactical::combat::CombatSystem& c = b->combat();
+        CHECK(c.is_enemy(0, 1) && c.is_enemy(0, 2) && !c.is_enemy(0, 3) && !c.is_enemy(1, 2) && c.is_enemy(1, 3) && c.is_enemy(2, 3));
+        CHECK(!c.is_enemy(3, 0) && !c.is_enemy(2, 1));
+#ifdef ALAMO_SIM_HAVE_TACTICAL_AI
+        if (const sim::BattleAi* ai = s.battles()->tactical_ai()) {
+            for (int32_t k = 1; k < 4; ++k) CHECK(ai->world().is_ai_player(k));
+            std::printf("  tactical AI build-time multipliers: %.3f / %.3f / %.3f\n", static_cast<double>(ai->world().build_time_multiplier(1)),
+                        static_cast<double>(ai->world().build_time_multiplier(2)), static_cast<double>(ai->world().build_time_multiplier(3)));
+        }
+#endif
+        // Team 1 loses slot 1: slot 2 is left, so nothing is declared.
+        const uint32_t k1 = kill_players(s, {1});
+        for (int i = 0; i < 260 && s.battle(); ++i) s.tick();
+        std::printf("  slot 1 killed (%u units): battle %s\n", k1, s.battle() && !s.battle()->finished() ? "running" : "over");
+        CHECK(k1 > 0 && s.battle() && !s.battle()->finished());
+        // Then slot 2 (and whatever team 1 still has): team 0 wins.
+        int32_t winner = -1;
+        for (int i = 0; i < 1500 && s.battle(); ++i) {
+            if (i % 30 == 0) (void)kill_players(s, {1, 2});
+            if (s.battle()->finished()) winner = s.battle()->result().winner;
+            s.tick();
+        }
+        std::printf("  team 1 killed: winner %d\n", winner);
+        CHECK(winner == 0 || winner == 3);
+    }
+    // 2. The Gameplay options difficulty in the running battle, recorded and replayed.
+    commands::CommandRecording rec;
+    RunResult live;
+    {
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        game::GameSession s(data, js, spec);
+        std::vector<std::string> diag;
+        CHECK(s.start(&diag, nullptr, &rec));
+        if (!s.started()) return;
+        uint64_t t = 0;
+        while (t < 300 && !(s.in_battle() && s.battle() && s.battle()->frame() >= 10)) {
+            s.tick();
+            ++t;
+        }
+        const sim::TacticalBattle* b = s.battle();
+        CHECK(b != nullptr);
+        if (!b) return;
+        // The slot-1 (Easy) unit with the most health (its star base): its health is rescaled by Hard / Easy.
+        const objects::ObjectStore& st = s.host().modes().top_tactical()->primary();
+        objects::ObjectId big = objects::kNoObjectId;
+        float h0 = 0.0f;
+        for (const objects::ObjectHandle h : st.all_objects())
+            if (st.active(h) && st.owner(h) == 1 && b->combat().has_unit(st.id(h)) && b->combat().health(st.id(h)) > h0) {
+                big = st.id(h);
+                h0 = b->combat().health(big);
+            }
+        CHECK(s.set_ai_difficulty(2));
+        s.tick();
+        ++t;
+        const uint32_t hard = data.rules.find_difficulty("Hard_Default"), easy = data.rules.find_difficulty("Easy_Default");
+        const galactic::GalacticSim* g = s.galaxy();
+        for (int32_t k = 1; k < 4; ++k) CHECK(g->players()[static_cast<size_t>(k)].difficulty == hard);
+        CHECK(s.port_stats().ai_difficulty == 1 && s.ai_difficulty_of(1) == 2 && s.ai_difficulty_of(3) == 2);
+        if (big != objects::kNoObjectId && hard < data.rules.difficulties.size() && easy < data.rules.difficulties.size()) {
+            const float want = h0 * data.rules.difficulties[hard].health_multiplier / data.rules.difficulties[easy].health_multiplier;
+            const float h1 = s.battle()->combat().health(big);
+            std::printf("  difficulty Hard: slot-1 unit %u health %.1f -> %.1f (want %.1f)\n", big, static_cast<double>(h0), static_cast<double>(h1),
+                        static_cast<double>(want));
+            CHECK(std::fabs(h1 - want) <= 0.02f * want + 1.0f);
+        }
+        for (int i = 0; i < 120; ++i) {
+            s.tick();
+            ++t;
+        }
+        live.crc = s.host().crc_log();
+        live.ticks = t;
+    }
+    RunResult rp;
+    replay_run(data, spec, rec, live.ticks, 0, rp);
+    const CrcDivergence d = first_divergence(live.crc, rp.crc);
+    std::printf("  difficulty replay vs live: %s\n", d.message.c_str());
+    CHECK(!d.diverged && rp.crc.records.size() == live.crc.records.size());
+}
+
 void hero_roster_real_test() {
     const char* foc = std::getenv("ALAMO_FOC_DATA");
     if (!foc || !*foc) {
@@ -2506,6 +2675,7 @@ int main() {
         hud_feeds_test(data, spec);
         hero_roster_real_test();
         skirmish_map_real_test();  // skm1 t01 / t02
+        skirmish_four_slot_real_test();  // skm2 t01 / t02
 #endif
     }
     std::error_code ec;
