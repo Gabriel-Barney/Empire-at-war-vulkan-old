@@ -138,15 +138,18 @@ struct FactionRules {
     std::string icon;
     // Land_ / Space_Mode_Selection_Blob_Material_Name (+0x2818 / +0x2840; UI.md selection circle's faction default).
     std::string land_selection_blob, space_selection_blob;
-    // cu5 t01: every child element of this <Faction> definition, (tag, trimmed text) in document order. The loaders of
-    // the other faction tags (Basic_AI map, campaign seed options, skirmish default forces, retreat and bombardment
-    // data, conflict unit caps) read them here instead of parsing FactionFiles.xml again. Not saved, not in the CRC.
+    // cu5 t01: every field of this faction definition, (tag, trimmed text) in document order. The loaders of the other
+    // faction tags (Basic_AI map, campaign seed options, skirmish default forces, retreat and bombardment data, conflict
+    // unit caps) read them here instead of parsing FactionFiles.xml again. Not saved, not in the CRC. mcx1 t03: retail's
+    // walk (MCX1_RE_ANSWERS Q1): nested elements descended into, empty and TBD values left out.
     std::vector<std::pair<std::string, std::string>> xml_fields;
-    // Trimmed text of the first child element named `tag` (case-insensitive), "" if none (XmlNode::child_text).
+    // Trimmed text of the last field named `tag` (case-insensitive; retail: a repeated scalar's last occurrence wins),
+    // "" if none.
     std::string_view xml_text(std::string_view tag) const {
+        std::string_view out;
         for (const auto& [k, v] : xml_fields)
-            if (ascii_iequals(k, tag)) return v;
-        return {};
+            if (ascii_iequals(k, tag)) out = v;
+        return out;
     }
 };
 

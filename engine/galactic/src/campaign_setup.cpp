@@ -1,6 +1,7 @@
 // Campaign definition (engine/data CampaignDef) -> GalacticSetup.
 #include <algorithm>
 
+#include "alamo/data/xml_values.hpp"
 #include "alamo/data/game_database.hpp"
 #include "alamo/core/ascii.hpp"
 #include "alamo/data/values.hpp"
@@ -108,8 +109,9 @@ GalacticSetup build_campaign_setup(const data::GameDatabase& db, const GalacticR
         if (f != kNoIndex && player_of[f] != kNoPlayer && s.players[static_cast<size_t>(player_of[f])].home == kInvalidPlanet)
             s.players[static_cast<size_t>(player_of[f])].home = p;
     }
-    for (std::string_view v : c->raw_values("Planet_Auto_Reveal"))  // GRC 0: campaign default true
-        s.planet_auto_reveal = data::parse_bool_or(data::trim(v), s.planet_auto_reveal);
+    // GRC 0: campaign default true. mcx1 t02 / t03: bool code 0x0 ("1" or a first Y / T), the last occurrence wins
+    // (MCX1_RE_ANSWERS Q1 / Q2; raw_values holds no empty or TBD value).
+    for (std::string_view v : c->raw_values("Planet_Auto_Reveal")) s.planet_auto_reveal = data::xml_values::to_bool(v);
     for (const std::string& r : c->starting_forces) {
         const std::vector<std::string_view> fields = data::split_fields(r);
         if (fields.size() < 3) continue;

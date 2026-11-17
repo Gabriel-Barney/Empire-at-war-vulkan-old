@@ -7,6 +7,7 @@
 #include "alamo/core/hash.hpp"
 #include "alamo/data/values.hpp"
 #include "alamo/data/xml.hpp"
+#include "alamo/data/xml_values.hpp"
 
 namespace alamo::tactical::abilities {
 
@@ -41,22 +42,22 @@ void note(std::vector<std::string>* diag, const data::XmlNode& e, std::string ms
     if (diag) diag->push_back(std::to_string(e.line()) + ": " + std::move(msg));
 }
 
+// mcx1 t02 / t03 (MCX1_RE_ANSWERS Q1 / Q2): the ability sub-objects read every direct child (nested elements are not
+// descended into), a repeated tag's last occurrence wins, an empty value changes nothing and TBD is converted like any
+// value (a TBD bool is true, a TBD number 0). Values convert by retail's rules: bool "1" or a first Y / T, atoi, atof.
+std::string_view last_text(const data::XmlNode& e, std::string_view tag) {
+    return data::xml_values::text(e, tag, data::xml_values::kAbility);
+}
 float f_or(const data::XmlNode& e, std::string_view tag, float fallback) {
-    const data::XmlNode c = e.child(tag);
-    return c ? data::parse_float_or(c.text_trimmed(), fallback) : fallback;
+    return data::xml_values::float_or(e, tag, fallback, data::xml_values::kAbility);
 }
 int32_t i_or(const data::XmlNode& e, std::string_view tag, int32_t fallback) {
-    const data::XmlNode c = e.child(tag);
-    return c ? data::parse_int_or(c.text_trimmed(), fallback) : fallback;
+    return data::xml_values::int_or(e, tag, fallback, data::xml_values::kAbility);
 }
 bool b_or(const data::XmlNode& e, std::string_view tag, bool fallback) {
-    const data::XmlNode c = e.child(tag);
-    return c ? data::parse_bool_or(c.text_trimmed(), fallback) : fallback;
+    return data::xml_values::bool_or(e, tag, fallback, data::xml_values::kAbility);
 }
-std::string s_or(const data::XmlNode& e, std::string_view tag) {
-    const data::XmlNode c = e.child(tag);
-    return c ? std::string(c.text_trimmed()) : std::string();
-}
+std::string s_or(const data::XmlNode& e, std::string_view tag) { return std::string(last_text(e, tag)); }
 
 std::vector<int32_t> type_list(std::string_view text, const AbilityResolvers& r) {
     std::vector<int32_t> out;
@@ -72,19 +73,19 @@ bool is_projectile_name(std::string_view n, const AbilityResolvers& r) {
     return n.size() >= 4 && iequals(n.substr(0, 4), "Proj");  // [port] naming convention fallback
 }
 int32_t projectile_of(const data::XmlNode& e, std::string_view tag, const AbilityResolvers& r) {
-    const std::string_view n = data::trim(e.child_text(tag));
+    const std::string_view n = data::trim(last_text(e, tag));
     if (n.empty() || !r.projectile) return -1;
     return r.projectile(n);
 }
 int32_t object_of(const data::XmlNode& e, std::string_view tag, const AbilityResolvers& r) {
-    const std::string_view n = data::trim(e.child_text(tag));
+    const std::string_view n = data::trim(last_text(e, tag));
     if (n.empty() || !r.object_type) return -1;
     return r.object_type(n);
 }
 // First present tag of a list (classes spell the same field differently).
 float f_any(const data::XmlNode& e, std::initializer_list<std::string_view> tags, float fallback) {
     for (std::string_view t : tags)
-        if (const data::XmlNode c = e.child(t)) return data::parse_float_or(c.text_trimmed(), fallback);
+        if (const std::string_view v = last_text(e, t); !v.empty()) return data::xml_values::to_float(v);
     return fallback;
 }
 
@@ -92,7 +93,7 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
     // Activation_Chance: one value, or a flat (x, y) list read as a CubicInterpolator (§2.3.7, §3.3).
     {
         std::vector<float> v;
-        for (std::string_view t : data::split_list(e.child_text("Activation_Chance"))) {
+        for (std::string_view t : data::split_list(last_text(e, "Activation_Chance"))) {
             const auto f = data::parse_float(t);
             if (f) v.push_back(*f);
         }
@@ -108,7 +109,7 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
     s.damage_percentage = f_or(e, "Damage_Percentage", 0.0f);
     s.damage_interval = f_or(e, "Damage_Interval_In_Secs", 0.0f);
     if (r.damage) {
-        const std::string_view dt = data::trim(e.child_text("Damage_Type"));
+        const std::string_view dt = data::trim(last_text(e, "Damage_Type"));
         if (!dt.empty()) s.damage_type = r.damage(dt);
     }
     s.damage_range = f_any(e, {"Damage_Range", "Damage_Radius"}, 0.0f);
@@ -151,7 +152,7 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
     s.berserker_duration = f_or(e, "Berserker_Duration_In_Secs", 0.0f);
     s.catch_dist = f_or(e, "Catch_Dist", 0.0f);  // cu8i t01: Saber_Throw
     if (r.type_max_speed) {
-        const std::string_view saber = data::trim(e.child_text("Saber_Name"));
+        const std::string_view saber = data::trim(last_text(e, "Saber_Name"));
         if (!saber.empty()) s.saber_speed = std::max(0.0f, r.type_max_speed(saber));
         if (!saber.empty() && r.type_max_flight_distance) s.saber_max_flight = std::max(0.0f, r.type_max_flight_distance(saber));
         if (!saber.empty() && r.projectile) s.saber_projectile = r.projectile(saber);  // cu8k t01: the thrown saber's desc
@@ -201,9 +202,9 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
     s.damage_arc = f_or(e, "Damage_Arc_In_Degrees", 0.0f);
     s.distance_to_infect = f_or(e, "Distance_To_Infect", 0.0f);
     s.seconds_to_infect = f_or(e, "Seconds_To_Infect", 0.0f);
-    s.infection_categories = parse_category_mask(e.child_text("Infection_CategoryMask"), r);
+    s.infection_categories = parse_category_mask(last_text(e, "Infection_CategoryMask"), r);
     for (std::string_view tag : {"Ability_Name", "Special_Ability_Name"}) {
-        const std::string_view n = data::trim(e.child_text(tag));
+        const std::string_view n = data::trim(last_text(e, tag));
         if (!n.empty() && s.ability_name_crc == 0) s.ability_name_crc = name_crc(n);
     }
     s.weapon_index = i_or(e, "Weapon_Index", 0);
@@ -315,7 +316,7 @@ uint32_t parse_projectile_categories(std::string_view text) {
 bool parse_unit_ability(const data::XmlNode& e, UnitAbilityRecord& out, const AbilityResolvers& r,
                         std::vector<std::string>* diag) {
     out = UnitAbilityRecord{};
-    const std::string_view type_name = e.child_text("Type");
+    const std::string_view type_name = last_text(e, "Type");
     out.type = ability_type_from_name(type_name);
     if (out.type == 0) {
         note(diag, e, "unknown Unit_Ability Type '" + std::string(type_name) + "'");
@@ -354,7 +355,7 @@ bool parse_unit_ability(const data::XmlNode& e, UnitAbilityRecord& out, const Ab
         out.spawned_type = r.object_type ? r.object_type(out.spawned_object_type) : -1;
         if (is_projectile_name(out.spawned_object_type, r) && r.projectile) out.spawned_projectile = r.projectile(out.spawned_object_type);
     }
-    out.target_types = type_list(e.child_text("Target_Types"), r);
+    out.target_types = type_list(last_text(e, "Target_Types"), r);
     for (data::XmlNode c : e.children("Owner_Attachment_Bone"))  // REMAINING_GAPS §5.2
         for (std::string_view n : data::split_list(c.text_trimmed())) out.owner_attachment_bones.emplace_back(n);
     out.combat.range_override = f_or(e, "Targeting_Max_Attack_Distance", 0.0f);
@@ -375,7 +376,7 @@ bool parse_unit_ability(const data::XmlNode& e, UnitAbilityRecord& out, const Ab
     for (data::XmlNode c : e.children("Mod_Flag")) {
         const auto pr = data::parse_pair(c.text_trimmed());
         const uint8_t k = pr ? mod_flag_from_name(pr->first) : 0;
-        const auto v = pr ? data::parse_bool(pr->second) : std::nullopt;
+        const std::optional<bool> v = pr ? std::optional<bool>(data::xml_values::to_bool(pr->second)) : std::nullopt;
         if (k == 0 || k >= combat::kModFlagCount || !v) {
             note(diag, c, "bad Mod_Flag '" + std::string(c.text_trimmed()) + "'");
             continue;
@@ -402,13 +403,13 @@ SpecialAbilityDesc parse_special_ability(const data::XmlNode& e, const AbilityRe
     s.cls = special_class_from_tag(e.name());
     s.name = std::string(e.attribute("Name"));
     s.name_crc = s.name.empty() ? 0u : name_crc(s.name);
-    const std::string_view style = e.child_text("Activation_Style");
+    const std::string_view style = last_text(e, "Activation_Style");
     s.style = activation_style_from_name(style);
     if (!style.empty() && s.style == ActivationStyle::None) note(diag, e, "unknown Activation_Style '" + std::string(style) + "'");
     s.initially_enabled = b_or(e, "Initially_Enabled", true);
-    s.applicable_categories = parse_category_mask(e.child_text("Applicable_Unit_Categories"), r, diag);
-    s.applicable_types = type_list(e.child_text("Applicable_Unit_Types"), r);
-    s.excluded_types = type_list(e.child_text("Excluded_Unit_Types"), r);
+    s.applicable_categories = parse_category_mask(last_text(e, "Applicable_Unit_Categories"), r, diag);
+    s.applicable_types = type_list(last_text(e, "Applicable_Unit_Types"), r);
+    s.excluded_types = type_list(last_text(e, "Excluded_Unit_Types"), r);
     s.min_range = f_or(e, "Activation_Min_Range", 0.0f);
     s.max_range = f_or(e, "Activation_Max_Range", 0.0f);
     s.cable_drop_phase = f_or(e, "Drop_Phase_Duration", 0.0f);  // r3g t04 (Cable_Ability)
@@ -426,7 +427,7 @@ SpecialAbilityDesc parse_special_ability(const data::XmlNode& e, const AbilityRe
     s.protection_radius = f_or(e, "Protection_Radius", 0.0f);
     s.zap_recharge = f_or(e, "Recharge_Time_In_Secs", 0.0f);
     s.dist_travelled = f_or(e, "Projectile_Dist_Travelled", 0.0f);
-    s.targeted_categories = parse_projectile_categories(e.child_text("Projectile_Types_Targeted"));
+    s.targeted_categories = parse_projectile_categories(last_text(e, "Projectile_Types_Targeted"));
     s.redirect_chance = f_or(e, "Redirect_Chance", 0.0f);
     s.block_chance = f_or(e, "Block_Chance", 0.0f);
     s.reaction_arc_deg = f_or(e, "Reaction_Arc_In_Degrees", 360.0f);
@@ -435,17 +436,17 @@ SpecialAbilityDesc parse_special_ability(const data::XmlNode& e, const AbilityRe
     // R5 jamming visual (presentation only): Blob_* / Owner_Particle_* of Sensor_Jamming_Ability.
     if (s.cls == SpecialClass::SensorJamming) {
         s.blob_material = s_or(e, "Blob_Material_Name");
-        const std::vector<std::string_view> bc = data::split_list(e.child_text("Blob_Color"));
+        const std::vector<std::string_view> bc = data::split_list(last_text(e, "Blob_Color"));
         for (size_t k = 0; k < 4 && k < bc.size(); ++k)
             s.blob_color[k] = std::clamp(data::parse_float_or(bc[k], 255.0f) / 255.0f, 0.0f, 1.0f);
         s.show_blob_to_enemies = b_or(e, "Show_Blob_To_Enemies", false);
         s.owner_particle_effect = s_or(e, "Owner_Particle_Effect");
-        const std::vector<std::string_view> bones = data::split_list(e.child_text("Owner_Particle_Bone_Name"));
+        const std::vector<std::string_view> bones = data::split_list(last_text(e, "Owner_Particle_Bone_Name"));
         if (!bones.empty()) s.owner_particle_bone = std::string(bones.front());
     }
     // vis1 t06 (presentation only): the target / status particle names.
     s.target_particle_effect = s_or(e, "Target_Particle_Effect");
-    for (std::string_view b : data::split_list(e.child_text("Target_Particle_Bone_Name"))) s.target_particle_bones.emplace_back(b);
+    for (std::string_view b : data::split_list(last_text(e, "Target_Particle_Bone_Name"))) s.target_particle_bones.emplace_back(b);
     s.stunned_effect = s_or(e, "Stunned_Effect");
     s.infection_particle = s_or(e, "Infection_Particle");
     // vis1 t08 (presentation only): the Drain_Life lightning, the Force_Healing range blob.
@@ -456,7 +457,7 @@ SpecialAbilityDesc parse_special_ability(const data::XmlNode& e, const AbilityRe
     }
     if (s.cls == SpecialClass::ForceHealing) {
         s.blob_material = s_or(e, "Heal_Range_Blob_Material");
-        const std::vector<std::string_view> bc = data::split_list(e.child_text("Blob_Color"));
+        const std::vector<std::string_view> bc = data::split_list(last_text(e, "Blob_Color"));
         for (size_t k = 0; k < 4 && k < bc.size(); ++k)
             s.blob_color[k] = std::clamp(data::parse_float_or(bc[k], 255.0f) / 255.0f, 0.0f, 1.0f);
     }

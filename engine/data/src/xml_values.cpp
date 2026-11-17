@@ -4,6 +4,7 @@
 #include <cmath>
 #include <limits>
 
+#include "alamo/core/hash.hpp"
 #include "alamo/data/values.hpp"
 
 namespace alamo::data::xml_values {
@@ -121,27 +122,67 @@ XmlNode last_child(XmlNode e, std::string_view tag) {
     return last;
 }
 
-std::string_view text(XmlNode e, std::string_view tag) {
-    std::string_view out;
-    for (XmlNode c : e.children(tag)) {
+namespace {
+// Visits every field occurrence of entry `e` in document order with the rule's walk: (element, trimmed value) for each
+// occurrence that changes a field. A child with element children is a container (kData descends into it; its own text
+// is not a field value in practice and is ignored); kAbility looks at direct children only.
+template <typename F>
+void walk(XmlNode e, EntryRule rule, F&& visit) {
+    for (XmlNode c = e.first_child(); c; c = c.next_sibling()) {
+        if (c.first_child()) {
+            if (rule.descend) walk(c, rule, visit);
+            continue;
+        }
         const std::string_view v = c.text_trimmed();
-        if (!skipped(v)) out = v;
+        if (v.empty() || (rule.skip_tbd && v == "TBD")) continue;
+        visit(c, v);
     }
+}
+}  // namespace
+
+std::string_view text(XmlNode e, std::string_view tag, EntryRule rule) {
+    std::string_view out;
+    walk(e, rule, [&](XmlNode c, std::string_view v) {
+        if (iequals(c.name(), tag)) out = v;
+    });
     return out;
 }
 
-bool bool_or(XmlNode e, std::string_view tag, bool fallback) {
-    const std::string_view v = text(e, tag);
+std::vector<std::string_view> texts(XmlNode e, std::string_view tag, EntryRule rule) {
+    std::vector<std::string_view> out;
+    walk(e, rule, [&](XmlNode c, std::string_view v) {
+        if (iequals(c.name(), tag)) out.push_back(v);
+    });
+    return out;
+}
+
+std::vector<std::string_view> list(XmlNode e, std::string_view tag, EntryRule rule) {
+    std::vector<std::string_view> out;
+    walk(e, rule, [&](XmlNode c, std::string_view v) {
+        if (!iequals(c.name(), tag)) return;
+        for (std::string_view t : to_list(v)) out.push_back(t);
+    });
+    return out;
+}
+
+std::vector<std::pair<std::string_view, std::string_view>> fields(XmlNode e, EntryRule rule) {
+    std::vector<std::pair<std::string_view, std::string_view>> out;
+    walk(e, rule, [&](XmlNode c, std::string_view v) { out.emplace_back(c.name(), v); });
+    return out;
+}
+
+bool bool_or(XmlNode e, std::string_view tag, bool fallback, EntryRule rule) {
+    const std::string_view v = text(e, tag, rule);
     return v.empty() ? fallback : to_bool(v);
 }
 
-int32_t int_or(XmlNode e, std::string_view tag, int32_t fallback) {
-    const std::string_view v = text(e, tag);
+int32_t int_or(XmlNode e, std::string_view tag, int32_t fallback, EntryRule rule) {
+    const std::string_view v = text(e, tag, rule);
     return v.empty() ? fallback : to_int(v);
 }
 
-float float_or(XmlNode e, std::string_view tag, float fallback) {
-    const std::string_view v = text(e, tag);
+float float_or(XmlNode e, std::string_view tag, float fallback, EntryRule rule) {
+    const std::string_view v = text(e, tag, rule);
     return v.empty() ? fallback : to_float(v);
 }
 

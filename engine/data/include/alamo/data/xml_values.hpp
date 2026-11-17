@@ -17,6 +17,7 @@
 #pragma once
 #include <cstdint>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "alamo/data/xml.hpp"
@@ -43,13 +44,32 @@ std::vector<std::string_view> to_mask(std::string_view v);
 // The last child element named `tag` (case-insensitive), or a null node: retail's "last occurrence wins" for a scalar.
 XmlNode last_child(XmlNode e, std::string_view tag);
 
-// Scalar reads of a child tag with retail's rules: the last occurrence that is not skipped() decides; a missing tag, or
-// only skipped occurrences, gives `fallback` (the field keeps its default).
-bool bool_or(XmlNode e, std::string_view tag, bool fallback);
-int32_t int_or(XmlNode e, std::string_view tag, int32_t fallback);
-float float_or(XmlNode e, std::string_view tag, float fallback);
-// The trimmed text of the last non-skipped occurrence, or empty.
-std::string_view text(XmlNode e, std::string_view tag);
+// How one class's entry parse walks its element (docs/re/MCX1_RE_ANSWERS.md Q1):
+// - kData: Faction, Campaign, GameConstants, TradeRoute, HardPoint (and GameObjectType): every child, a child with element
+//   children is descended into at any depth and its children are fields of the same entry; `TBD` skipped.
+// - kAbility: the `*_Ability` and `Unit_Ability` sub-objects: direct children only, `TBD` is a value like any other.
+// In both an empty value never changes a field.
+struct EntryRule {
+    bool descend = true;
+    bool skip_tbd = true;
+};
+inline constexpr EntryRule kData{true, true};
+inline constexpr EntryRule kAbility{false, false};
+
+// Scalar reads of a field of entry `e` with retail's rules: the last occurrence that changes the field decides; a missing
+// tag, or only empty / skipped occurrences, gives `fallback` (the field keeps its default).
+bool bool_or(XmlNode e, std::string_view tag, bool fallback, EntryRule rule = kData);
+int32_t int_or(XmlNode e, std::string_view tag, int32_t fallback, EntryRule rule = kData);
+float float_or(XmlNode e, std::string_view tag, float fallback, EntryRule rule = kData);
+// The trimmed text of that last occurrence, or empty.
+std::string_view text(XmlNode e, std::string_view tag, EntryRule rule = kData);
+// Every occurrence that changes the field, in document order (a list field appends each one).
+std::vector<std::string_view> texts(XmlNode e, std::string_view tag, EntryRule rule = kData);
+// to_list() of every occurrence, appended.
+std::vector<std::string_view> list(XmlNode e, std::string_view tag, EntryRule rule = kData);
+// Every field of the entry in document order as (tag, trimmed value), with the rule's walk; occurrences that do not change a
+// field (empty, or `TBD` under kData) are left out.
+std::vector<std::pair<std::string_view, std::string_view>> fields(XmlNode e, EntryRule rule = kData);
 
 // The same rules on a value already taken from a table (GameConstants keeps tag / value pairs).
 inline bool bool_or(std::string_view v, bool fallback) { return skipped(v) ? fallback : to_bool(v); }

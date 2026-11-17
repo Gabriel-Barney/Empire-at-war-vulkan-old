@@ -1935,10 +1935,9 @@ private:
     std::map<std::string, std::string> files_;
 };
 
-// q6 t03: the galactic role of a type (galactic_unit_kind). Element tags outside the port's table (Thrawn's Revenge:
-// SkirmishSquadron, Generic_Structure, ...) take their DUMMY_* behaviour's role; a tag in the table keeps its role
-// unless the behaviour says otherwise (TR: Starbase-tagged orbital structures, HeroCompany fighter squadrons); the
-// vanilla tags the port left Other stay Other; a starting force of each placeable role is placed, not dropped.
+// q6 t03 / mcx1 t05 (D4; MCX1_RE_ANSWERS Q7.2 / Q7.3): the galactic role of a type comes from the first DUMMY_* id of its
+// generic Behavior list in retail's order, never from its element tag; a type with none has no role (Other: retail
+// creates nothing); a planet is any type with PLANET in Behavior or GalacticBehavior.
 void test_unit_roles() {
     std::printf("  q6: unit roles\n");
     CHECK(unit_kind_from_dummy(0) == UnitKind::Other && unit_kind_from_dummy(kDummyStarBase) == UnitKind::StarBase);
@@ -1948,14 +1947,9 @@ void test_unit_roles() {
     CHECK(unit_kind_from_dummy(kDummyGroundCompany) == UnitKind::GroundUnit &&
           unit_kind_from_dummy(kDummyFighterSquadron) == UnitKind::Squadron &&
           unit_kind_from_dummy(kDummyStarship) == UnitKind::SpaceUnit);
-    CHECK(unit_kind_from_element("uniqueunit", true) == UnitKind::SpaceUnit &&
-          unit_kind_from_element("UniqueUnit", false) == UnitKind::GroundUnit);
-    CHECK(unit_kind_from_element("SkirmishSquadron", false) == UnitKind::Other);
-    CHECK(galactic_unit_kind("SkirmishSquadron", false, kDummyFighterSquadron) == UnitKind::Squadron);
-    CHECK(galactic_unit_kind("Planet", false, kDummyStarship) == UnitKind::Planet);
-    CHECK(galactic_unit_kind("SpaceUnit", false, 0) == UnitKind::SpaceUnit);  // a fighter: no dummy, the tag decides
-    CHECK(galactic_unit_kind("Props_Story", false, kDummyStarship) == UnitKind::Other);  // vanilla compatibility
-    CHECK(galactic_unit_kind("Props_TR", false, 0) == UnitKind::Other);
+    CHECK(galactic_unit_kind(kDummyFighterSquadron, false) == UnitKind::Squadron);
+    CHECK(galactic_unit_kind(kDummyStarship, true) == UnitKind::Planet);
+    CHECK(galactic_unit_kind(0, false) == UnitKind::Other);
 
     MemoryFiles f;
     f.add("Data\\XML\\GameObjectFiles.xml", "<Game_Object_Files><File>Units\\Roles.xml</File></Game_Object_Files>");
@@ -1968,6 +1962,10 @@ void test_unit_roles() {
   <Starbase Name="Syn_Orbital"><Behavior>DUMMY_ORBITAL_STRUCTURE</Behavior></Starbase>
   <HeroCompany Name="Syn_Hero_Squadron"><Behavior>DUMMY_SPACE_FIGHTER_SQUADRON</Behavior></HeroCompany>
   <SpaceUnit Name="Syn_Fighter"><Hyperspace>No</Hyperspace></SpaceUnit>
+  <Weird_Tag Name="Syn_Planet"><GalacticBehavior>PLANET</GalacticBehavior></Weird_Tag>
+  <Planet Name="Syn_Not_Planet"><Behavior>SELECTABLE</Behavior></Planet>
+  <SpaceUnit Name="Syn_Two"><Behavior>DUMMY_STARSHIP, DUMMY_GROUND_COMPANY</Behavior></SpaceUnit>
+  <SpaceUnit Name="Syn_Space_Only"><SpaceBehavior>DUMMY_ORBITAL_STRUCTURE</SpaceBehavior></SpaceUnit>
   <SlaveCompany Name="Syn_Slaves"><Behavior>DUMMY_GROUND_COMPANY</Behavior></SlaveCompany>
   <Props_TR Name="Syn_Prop"><Behavior>SELECTABLE</Behavior></Props_TR>
   <DummyStructure Name="Syn_Child"><Variant_Of_Existing_Type>Syn_Ship</Variant_Of_Existing_Type></DummyStructure>
@@ -1989,8 +1987,12 @@ void test_unit_roles() {
     CHECK(kind("Syn_Base") == UnitKind::GroundStructure);
     CHECK(kind("Syn_Orbital") == UnitKind::GroundStructure);
     CHECK(kind("Syn_Hero_Squadron") == UnitKind::Squadron);
-    CHECK(kind("Syn_Fighter") == UnitKind::SpaceUnit);
-    CHECK(kind("Syn_Slaves") == UnitKind::Other);
+    CHECK(kind("Syn_Fighter") == UnitKind::Other);       // no DUMMY_*: no role, whatever the SpaceUnit tag
+    CHECK(kind("Syn_Slaves") == UnitKind::GroundUnit);   // SlaveCompany with DUMMY_GROUND_COMPANY
+    CHECK(kind("Syn_Planet") == UnitKind::Planet);       // PLANET in GalacticBehavior, any tag
+    CHECK(kind("Syn_Not_Planet") == UnitKind::Other);    // a <Planet> element without PLANET
+    CHECK(kind("Syn_Two") == UnitKind::GroundUnit);      // 0x5D comes before 0x61 in retail's order
+    CHECK(kind("Syn_Space_Only") == UnitKind::Other);    // only the generic Behavior list counts
     CHECK(kind("Syn_Prop") == UnitKind::Other);
     CHECK(kind("Syn_Child") == UnitKind::SpaceUnit);  // the behaviour list is inherited from the variant's parent
 }
@@ -2650,17 +2652,15 @@ void test_oi_foc(const FocData& d) {
     }
     std::printf("  oi FoC: planets with starbase stealth %d, ground-base stealth %d\n", sb_stealth, gb_stealth);
     CHECK(sb_stealth == 1 && gb_stealth == 7);
-    // q6 t03: vanilla maps exactly as the element-tag table did before the behaviour roles; the vanilla types that keep
-    // Other despite a role behaviour (is_vanilla_unclassified_element) are counted.
-    int32_t role_mismatch = 0, kept_other = 0;
+    // mcx1 t05: every role comes from the behaviours (no type with a DUMMY_* behaviour is left without a role).
+    int32_t with_role = 0, kept_other = 0;
     for (objects::TypeIndex t = 0; t < d.types.size(); ++t) {
         const TypeInfo& ti = r.types[t];
-        role_mismatch += ti.kind != unit_kind_from_element(d.types.raw().element_name(t), ti.hyperspace) ? 1 : 0;
+        with_role += ti.kind != UnitKind::Other ? 1 : 0;
         kept_other += (ti.kind == UnitKind::Other && unit_kind_from_dummy(ti.dummy) != UnitKind::Other) ? 1 : 0;
     }
-    std::printf("  q6 FoC: %d types map differently from the tag table, %d role-behaviour types kept Other\n", role_mismatch,
-                kept_other);
-    CHECK(role_mismatch == 0 && kept_other > 0);
+    std::printf("  FoC galactic roles: %d types with a role, %d role-behaviour types without one\n", with_role, kept_other);
+    CHECK(with_role > 0 && kept_other == 0);
     // The saboteur team is created as a transport on Underworld's Shola, launches and jumps at the shuttle's speed x M.
     objects::IdCounter ids;
     objects::ObjectStore store(objects::ModeKind::Galactic, objects::StoreKind::Primary, d.types, &ids);
@@ -3005,26 +3005,13 @@ void test_oi_thrawns_revenge() {
     const uint32_t miytil = rules.find_type("Miytil_Fighter_Squadron_Buildable"), golan = rules.find_type("Secondary_Golan_Two");
     CHECK(miytil != kNoIndex && rules.types[miytil].kind == UnitKind::Squadron);
     CHECK(golan != kNoIndex && rules.types[golan].kind == UnitKind::GroundStructure);
-    int32_t by_tag = 0, by_behavior = 0, kept_other = 0;
-    for (objects::TypeIndex t = 0; t < types.size(); ++t) {
-        const TypeInfo& ti = rules.types[t];
-        const UnitKind old_kind = unit_kind_from_element(types.raw().element_name(t), ti.hyperspace);
-        by_tag += old_kind != UnitKind::Other ? 1 : 0;
-        by_behavior += ti.kind != old_kind ? 1 : 0;
-        kept_other += (ti.kind == UnitKind::Other && unit_kind_from_dummy(ti.dummy) != UnitKind::Other) ? 1 : 0;
-    }
-    std::printf("  q6 TR: %d types with a tag role, %d changed by their behaviour, %d role-behaviour types kept Other\n",
-                by_tag, by_behavior, kept_other);
-    // Starting forces: dropped with the tag table alone (before q6 t03) and now ("has no galactic role").
+    int32_t with_role = 0;
+    for (objects::TypeIndex t = 0; t < types.size(); ++t) with_role += rules.types[t].kind != UnitKind::Other ? 1 : 0;
+    std::printf("  TR galactic roles: %d types with a role\n", with_role);
+    // Starting forces dropped for want of a galactic role ("has no galactic role").
     for (const char* name : {"Thrawn_Empire", "ShadowHand_Empire"}) {
         std::vector<std::string> sd;
         const GalacticSetup setup = build_campaign_setup(db, rules, name, {}, &sd);
-        int32_t dropped_before = 0;
-        for (const StartingForce& f : setup.forces) {
-            if (f.type >= rules.types.size()) continue;
-            const UnitKind k = unit_kind_from_element(types.raw().element_name(f.type), rules.types[f.type].hyperspace);
-            dropped_before += (k == UnitKind::Other || k == UnitKind::Planet) ? 1 : 0;
-        }
         objects::IdCounter ids;
         objects::ObjectStore store(objects::ModeKind::Galactic, objects::StoreKind::Primary, types, &ids);
         SimRng rng(7u);
@@ -3036,8 +3023,7 @@ void test_oi_thrawns_revenge() {
                 ++dropped;
                 std::printf("    %s: %s\n", name, m.c_str());
             }
-        std::printf("  q6 TR %s: %zu starting forces, %d without a galactic role (tag table alone: %d)\n", name,
-                    setup.forces.size(), dropped, dropped_before);
+        std::printf("  q6 TR %s: %zu starting forces, %d without a galactic role\n", name, setup.forces.size(), dropped);
         CHECK(!setup.forces.empty() && dropped == 0);
     }
 #endif

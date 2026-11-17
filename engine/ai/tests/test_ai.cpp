@@ -1012,8 +1012,8 @@ static void test_path_finder_determinism() {
 
 using ::alamo::test::env_or;  // alamo/test/support.hpp
 
-// q6: galactic seed roles (make_force_type_lookup) follow galactic::galactic_unit_kind. Synthetic types: a mod tag takes
-// its DUMMY_* behaviour's role; the seed's vanilla tags keep their rule (a vanilla-unclassified tag ignores the behaviour).
+// q6 / mcx1 t05 (D4; MCX1_RE_ANSWERS Q7.2): galactic seed roles come from the DUMMY_* behaviours alone, never the element
+// tag; a type without one is not a valid starting force (retail creates nothing: "Unknown type").
 
 static void test_seed_roles() {
     MemFiles f;
@@ -1037,19 +1037,16 @@ static void test_seed_roles() {
     const ForceType ship = lookup("Mod_Ship"), base = lookup("Mod_Base"), barracks = lookup("Mod_Barracks"),
                     company = lookup("Mod_Company"), wing = lookup("Mod_Wing"), plain = lookup("Mod_Plain"),
                     frigate = lookup("Van_Frigate"), gbase = lookup("Van_Ground_Base"), story = lookup("Van_Story_Prop");
-    CHECK(ship.valid && ship.layer == UnitLayer::Space && !ship.starbase && !ship.structure);  // the old rule: ground
+    CHECK(ship.valid && ship.layer == UnitLayer::Space && !ship.starbase && !ship.structure);  // CategoryMask ignored
     CHECK(base.valid && base.starbase && base.layer == UnitLayer::Space && base.base_level == 3);
     CHECK(barracks.valid && barracks.structure && barracks.layer == UnitLayer::Ground);
-    CHECK(company.valid && company.layer == UnitLayer::Ground && !company.structure);  // the old rule: space (Capital)
+    CHECK(company.valid && company.layer == UnitLayer::Ground && !company.structure);  // CategoryMask ignored
     CHECK(wing.valid && wing.layer == UnitLayer::Space);
-    CHECK(plain.valid && plain.layer == UnitLayer::Space && !plain.structure);  // no behaviour: CategoryMask
-    CHECK(frigate.valid && frigate.layer == UnitLayer::Space);
-    CHECK(gbase.valid && !gbase.structure && gbase.layer == UnitLayer::Ground);  // the seed's GroundBase rule [port]
-    CHECK(story.valid && story.layer == UnitLayer::Ground);  // vanilla-unclassified tag: the behaviour is ignored
+    CHECK(!plain.valid && !frigate.valid);  // no DUMMY_* behaviour: no role, whatever the tag
+    CHECK(gbase.valid && gbase.structure && gbase.layer == UnitLayer::Ground);  // DUMMY_GROUND_BASE: a structure
+    CHECK(story.valid && story.layer == UnitLayer::Space);  // Props_Story with DUMMY_STARSHIP: a starship
     CHECK(!lookup("Missing").valid);
-    const ForceType old_ship = force_type_of(types, types.resolve_name("Mod_Ship"), true);
-    CHECK(old_ship.layer == UnitLayer::Ground);
-    std::printf("   seed roles (synthetic): mod tags by DUMMY_* behaviour, vanilla tags unchanged\n");
+    std::printf("   seed roles (synthetic): by DUMMY_* behaviour only, element tags ignored\n");
 }
 
 static void real_data(const std::string& root, const char* label, bool foc) {
@@ -1169,21 +1166,12 @@ static void real_data(const std::string& root, const char* label, bool foc) {
     raw.load(*v, &diag);
     objects::GameObjectTypes types;
     types.build(raw, v.get(), &diag);
-    // q6: the seed's roles come from galactic_unit_kind; every vanilla type keeps the role of the seed's old tag rule.
+    // mcx1 t05: the seed's roles come from the DUMMY_* behaviours (galactic::galactic_dummy), never the element tag.
     {
-        uint32_t differ = 0;
-        for (objects::TypeIndex t = 0; t < types.size(); ++t) {
-            const ForceType a = force_type_of(types, t), b = force_type_of(types, t, true);
-            if (a.layer == b.layer && a.starbase == b.starbase && a.structure == b.structure && a.base_level == b.base_level)
-                continue;
-            if (++differ <= 20)
-                std::printf("   seed role differs: %s <%.*s> layer %d/%d starbase %d/%d structure %d/%d\n",
-                            std::string(types.raw().types().name[t]).c_str(), static_cast<int>(types.raw().element_name(t).size()),
-                            types.raw().element_name(t).data(), static_cast<int>(a.layer), static_cast<int>(b.layer), a.starbase,
-                            b.starbase, a.structure, b.structure);
-        }
-        std::printf("   %s seed roles: %zu types, %u differ from the old tag rule\n", label, types.size(), differ);
-        CHECK(differ == 0);
+        uint32_t with_role = 0;
+        for (objects::TypeIndex t = 0; t < types.size(); ++t) with_role += force_type_of(types, t).valid ? 1u : 0u;
+        std::printf("   %s seed roles: %zu types, %u with a galactic role\n", label, types.size(), with_role);
+        CHECK(with_role > 0);
     }
     const ForceTypeLookup lookup = make_force_type_lookup(types);
 #ifdef ALAMO_AI_HAVE_GALACTIC_SIM
@@ -1222,7 +1210,8 @@ static void real_data(const std::string& root, const char* label, bool foc) {
 }
 
 // q6: Thrawn's Revenge (workshop 1125571106, next to a Steam FoC install or ALAMO_TR_DATA) through the VFS: its own
-// element tags (SkirmishSpaceUnit, DummyStructure, ...) take their DUMMY_* roles in the galactic seed.
+// element tags (SkirmishSpaceUnit, DummyStructure, ...) take their DUMMY_* roles in the galactic seed (mcx1 t05: every
+// type does).
 static void tr_seed_roles(const std::string& foc_data) {
 #ifdef ALAMO_AI_HAVE_VFS
     std::string tr = env_or("ALAMO_TR_DATA", "");
@@ -1246,19 +1235,17 @@ static void tr_seed_roles(const std::string& foc_data) {
     objects::ObjectTypeDatabase raw;
     objects::GameObjectTypes types;
     CHECK(raw.load(*v, &diag) && types.build(raw, v.get(), &diag));
-    uint32_t differ = 0, starbases = 0, structures = 0, space = 0;
+    uint32_t starbases = 0, structures = 0, space = 0;
     for (objects::TypeIndex t = 0; t < types.size(); ++t) {
-        const ForceType a = force_type_of(types, t), b = force_type_of(types, t, true);
-        if (a.layer == b.layer && a.starbase == b.starbase && a.structure == b.structure) continue;
-        ++differ;
+        const ForceType a = force_type_of(types, t);
+        if (!a.valid) continue;
         starbases += a.starbase ? 1u : 0u;
         structures += a.structure ? 1u : 0u;
         space += !a.starbase && a.layer == UnitLayer::Space ? 1u : 0u;
     }
-    std::printf("   Thrawn's Revenge seed roles: %zu types, %u take a DUMMY_* role the old tag rule missed (%u starbases, %u "
-                "structures, %u space units)\n",
-                types.size(), differ, starbases, structures, space);
-    CHECK(differ > 0 && structures > 0 && space > 0);
+    std::printf("   Thrawn's Revenge seed roles: %zu types, %u starbases, %u structures, %u space units by DUMMY_* role\n",
+                types.size(), starbases, structures, space);
+    CHECK(starbases > 0 && structures > 0 && space > 0);
 #else
     (void)foc_data;
 #endif

@@ -71,6 +71,16 @@ static void test_xml_values() {
     CHECK(xv::float_or(e, "F", 0.0f) == 1.5f);
     CHECK(xv::last_child(e, "A").text_trimmed() == "TBD" && xv::text(e, "A") == "7");
     CHECK(xv::bool_or(std::string_view("TBD"), true) && !xv::bool_or(std::string_view("On"), true));
+    // MCX1_RE_ANSWERS Q1: data classes descend into nested elements and skip TBD; abilities read direct children only and
+    // convert TBD like any value (a TBD bool is true there, Q2). Lists append every occurrence.
+    const auto n = XmlDocument::parse("<E><Group><X>3</X><L>a, b</L></Group><X>TBD</X><L>c</L><Y>TBD</Y><X></X></E>");
+    CHECK(n.ok());
+    const XmlNode ne = n.root();
+    CHECK(xv::int_or(ne, "X", -1) == 3);                         // nested 3; TBD and empty change nothing
+    CHECK(xv::int_or(ne, "X", -1, xv::kAbility) == 0);           // direct TBD only: atoi("TBD") = 0
+    CHECK(xv::bool_or(ne, "Y", false, xv::kAbility) && !xv::bool_or(ne, "Y", false));
+    CHECK(xv::list(ne, "L").size() == 3 && xv::list(ne, "L", xv::kAbility).size() == 1);
+    CHECK(xv::texts(ne, "X").size() == 1 && xv::fields(ne).size() == 3);
 }
 
 static void test_xml_basic() {
