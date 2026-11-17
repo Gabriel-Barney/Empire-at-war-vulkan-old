@@ -1828,9 +1828,10 @@ private:
     bool attack_path(const Unit& lead, uint32_t mask, V2 centroid, V2& g, std::vector<V2>& path) const;
     void attack_slots(const MoveOrder& order, const std::vector<uint32_t>& idx, const std::vector<LandForm>& forms);
     bool arc_slot_test(const MoveOrder& order, const std::vector<uint32_t>& idx, const LandForm& f, float hx, float hy, V2 p) const;
-    // `kept` (indexed like idx): the members a re-path leaves on their own path (LandAttack::repath, G 5)
-    void attack_plan(const MoveOrder& order, const std::vector<uint32_t>& idx, const LandForm& f, uint32_t frame,
-                     const std::vector<uint8_t>& kept, std::span<const FormationMember> mem);
+    // `kept` (indexed like idx): the members a re-path leaves on their own path (LandAttack::repath, G 5). mov2 t12: `snap`
+    // (indexed like idx) = each member as it was before this order's set-up; a failed plan restores it. True: failed.
+    bool attack_plan(const MoveOrder& order, const std::vector<uint32_t>& idx, const LandForm& f, uint32_t frame,
+                     const std::vector<uint8_t>& kept, std::span<const FormationMember> mem, std::span<const Unit> snap);
     // s78p (b0049): each member's lane on the formation path `fpath` (Unit::lane, member_lane) and its goal := the lane's end
     // - not for air, forced or `kept` members (indexed like idx) or a member without a goal
     // bkm1 t06: fz = the stored height of fpath's last point (a slot-leg G; 0 for any other formation path)

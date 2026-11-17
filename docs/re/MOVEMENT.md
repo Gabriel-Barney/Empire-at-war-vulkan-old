@@ -2039,6 +2039,21 @@ exact only for z = 0 paths and otherwise an approximation that is short on slope
     brake fits a top path that was not started for one move step [L].
   - The port's t26.5 container rule (a new order while moving is not started at the path set: coast in End Move to
     0x15, then start from 0x16 with the 0x10 turn) stops and turns in place where retail turns at speed (roadmap mov2).
+  - **mov2 t09 (2026-11-17, lane-mov, decompile read of `re_reference/` 0x410170, 0x61dff0, 0x61d890, 0x61ca90,
+    0x372560, 0x371310) [H read, M where noted].** obj +0x348 is the **TEAM behaviour slot** (A2M_T04 behaviour table,
+    A1_READINGS §"TEAM (+0x348)"), not a formation slot: `0x410170` returns aligned at once for any object with a TEAM
+    behaviour (a squad container) once its top path's waypoint 0 value +4 is > 0, whatever the angle. Its callers are the
+    formation member starts `0x4192b0` and `0x41c1a0`, which pass the container itself, so a squad container re-ordered
+    while marching keeps 0x13 at full speed: **this explains the 12 / 12 squad re-orders**, and the port's t26.5 "never
+    started at the path set" rule is wrong for a moving container. For an object without TEAM the angle test reads the
+    wanted yaw from Walk vf +0x1f0 = `0x61dff0` called with (path index 0, plan flag 1, no collision vector): `0x61d890`
+    then returns the leg direction of path index 0 plus `0x42d440(path, 0, pos)` (the lane / line term), and `0x61ca90`
+    snaps it to the type's movement directions (type +0x23fc: 1 = as is; < 1 = the current facing; N > 1 = the one of
+    wanted + k x 360 / N closest to the facing). R = `0x372560` (type +0x38c x a difficulty factor unless the type's
+    flag byte +0x790+1 bit 0) and CE = `0x371310` (type +0x16b4 when > 0, else a GameConstants default) [M field names].
+    The T4B has no Movement_Directions_Count (1), so a 90 / 180 degree re-order is **not** aligned by this function -
+    its 5 / 6 turns at speed are still unexplained (roadmap mov2 t09, a ReVa question: who else sets P +0x6d or keeps
+    a T4B out of the 0x14 coast).
 
 So with f_min = 0 (most units) each corner is slowed separately to v and never forced to 0 (a fraction of 0 comes
 only from failed probes); with f_min > 0 sharp corners on short legs are merged, and a corner slower than f_min ×

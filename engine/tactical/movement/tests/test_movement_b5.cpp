@@ -555,6 +555,31 @@ void test_scene_plan_failure() {
     CHECK(!failed[0] && failed[1] && moving[0]);
     std::printf("plan failure: G on the grid failed %d (moving %d), G off the grid failed %d (moving %d)\n", failed[0] ? 1 : 0,
                 moving[0] ? 1 : 0, failed[1] ? 1 : 0, moving[1] ? 1 : 0);
+    // mov2 t12 (b0198, BKR2 Q7 item 6 [H]): a failed plan sets no path - a unit walking a move keeps its goal, its path and
+    // its speed (before t12 it was stopped: no goal, failed). The lead on the obstacle cell holds a plain move (it cannot
+    // leave the cell, speed 0) when the attack order with G off the grid comes: the plan fails, the move order stays.
+    {
+        MovementSystem sys{MovementConfig{}};
+        scene_system(sys);
+        sys.grid().set_base(world_to_cell(kO.x), world_to_cell(kO.y), kPassObstacle);
+        CHECK(sys.add_unit(attacker(10, kO)));
+        SimRng rng(8);
+        MoveOrder mv;
+        mv.units = {10};
+        mv.destination = kO + V2{0.0f, 300.0f};
+        sys.move(mv, rng, 1);
+        for (uint32_t f = 1; f <= 30; ++f) sys.tick(f, rng, serial_for);
+        const UnitView before = sys.view(10);
+        sys.clear_attack_plan_failures();
+        sys.move(attack_order({10}, 900, before.pos + V2{4000.0f, 0.0f}, 5.0f, 255.0f), rng, 31);
+        const UnitView after = sys.view(10);
+        const bool kept_failed = sys.attack_plan_failed(10);
+        std::printf("plan failure keeps the walk: failed %d, has_goal %d -> %d, speed %.3f -> %.3f, failed flag %d\n",
+                    kept_failed ? 1 : 0, before.has_goal ? 1 : 0, after.has_goal ? 1 : 0, static_cast<double>(before.speed),
+                    static_cast<double>(after.speed), after.failed ? 1 : 0);
+        CHECK(kept_failed && before.has_goal && after.has_goal && !after.failed && after.speed == before.speed);
+        CHECK(after.atk_target == 900);
+    }
 }
 
 // bkm3 t02 (b0072): the two-formation scene with both leads standing on their cell centres ((100, 440) and (100, 760) from
