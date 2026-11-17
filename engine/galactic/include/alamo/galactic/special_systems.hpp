@@ -58,6 +58,7 @@ namespace alamo::galactic {
 // SpecialAbility (event 13) kinds (P4 0 item 1, COMMANDS.md id 13) [H].
 inline constexpr uint32_t kSpecialActivate = 1;
 inline constexpr uint32_t kSpecialSlice = 2;  // REMAINING_GAPS 1.3.1
+inline constexpr uint32_t kSpecialNeutralize = 3;  // GALAB §7.5: the human's pick from the Neutralize_Hero panel
 inline constexpr uint32_t kSpecialBlackMarket = 4;
 inline constexpr uint32_t kSpecialSabotage = 5;
 inline constexpr uint32_t kSpecialCorruption = 6;  // apps/sim CampaignBattles (kSpecialAbilityCorrupt)
@@ -76,6 +77,21 @@ struct BlackMarketOffer {
     uint32_t item = 0xFFFFFFFFu;  // SpecialRules::items index
     float price = 0.0f;
     bool purchased = false;
+};
+
+// Neutralize_Hero candidate (GALAB §7.2, the 0x68-byte record): a visible enemy hero at the planet, or the planet's
+// siphoning hero. `terms` = the cost lines in panel order (zero lines left out); the price is their sum, at least 1.0.
+enum class NeutralizeTerm : uint8_t { Base, BaseLevels, HeroProtection, PriorNeutralizations, PlanetaryCorruption };
+struct NeutralizeCandidate {
+    uint32_t type = 0xFFFFFFFFu;  // the target's type (siphon: D +0x218 the siphoning hero's type)
+    int32_t object = 0;           // the target's ObjectId (siphon: the siphoning hero's, D +0x220)
+    bool space = false;           // found in orbit (+0x60)
+    bool eligible = false;        // the Can_Neutralize / Can_Be_Neutralized flags allow it (+0x61)
+    bool siphon = false;          // the siphon entry (+0x62)
+    float owner_respawn = 0.0f;   // +0x38: the neutralizer's respawn time
+    float target_respawn = 0.0f;  // +0x3C: the target's respawn time
+    std::vector<std::pair<NeutralizeTerm, float>> terms;
+    float price() const;          // 0x4b40b0: the sum in list order, clamped to >= 1.0
 };
 
 struct SabotageTarget {
@@ -128,11 +144,14 @@ struct RespawnEntry {
 // kind 4: u32 planet, u32 buyer hero, u32 item name CRC, u32 q8 price code, u32 q5 respawn-seconds code, u8 only-one
 // kind 5: u32 planet, u32 saboteur, u32 structure, u32 q8 cost code, u32 q5 respawn-seconds code
 // kind 7: u32 planet, u32 hacker, u32 q8 cost code
+// kind 3: u32 planet, u32 neutralizer, u32 target ObjectId, u32 target type, u32 q8 price code, u32 q5 neutralizer respawn
+//         code, u32 q5 target respawn code, u8 flags (1 space, 2 eligible, 4 siphon) (0x4b4990 case 3)
 commands::EventData special_activate_event(uint32_t planet_id, uint32_t unit_id);
 commands::EventData black_market_purchase_event(uint32_t planet_id, uint32_t hero_id, uint32_t item_crc, float price,
                                                 float respawn_seconds, bool only_one = false);
 commands::EventData sabotage_structure_event(uint32_t planet_id, uint32_t saboteur_id, uint32_t structure_id, float cost,
                                              float respawn_seconds = 0.0f);
+commands::EventData neutralize_hero_event(uint32_t planet_id, uint32_t neutralizer_id, const NeutralizeCandidate& c);
 commands::EventData hack_super_weapon_event(uint32_t planet_id, uint32_t hacker_id, float cost);
 // kind 2: u32 planet, u32 slicer, u32 type, u32 q8 price code, u32 q5 code of chance x 1000, u32 q5 respawn code, u8 only-one
 commands::EventData slice_event(uint32_t planet_id, uint32_t slicer_id, uint32_t type, float price, float chance,
@@ -145,8 +164,10 @@ struct SpecialPayload {
     float amount = 0.0f;   // dequantized q8 (price / cost)
     float seconds = 0.0f;  // dequantized q5
     bool only_one = false;
-    uint32_t type = 0xFFFFFFFFu;  // kind 2: the sliced type
+    uint32_t type = 0xFFFFFFFFu;  // kind 2: the sliced type; kind 3: the target's type
     float chance = 0.0f;          // kind 2: dequantized q5 / 1000
+    float target_seconds = 0.0f;  // kind 3: the target's respawn time (q5); `seconds` = the neutralizer's
+    bool space = false, eligible = false, siphon = false;  // kind 3 candidate flags; `structure` = the target's ObjectId
 };
 // False for another event type, kind 6 or a malformed size.
 bool read_special_payload(const commands::EventData& ev, SpecialPayload& out);

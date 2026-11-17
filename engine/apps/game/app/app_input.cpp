@@ -1243,6 +1243,19 @@ void App::handle_menu_actions(const std::vector<ui::MenuAction>& acts) {
                 if (a.factions.size() > 2)  // ui1 t07: the staging rows take up to 8 players; the skirmish sim two (backlog b0240)
                     notes_.push_back("skirmish: " + std::to_string(a.factions.size() - 2) + " extra AI slot(s) not played yet (two-player skirmish)");
                 s.skirmish.control_points = a.game_type == ui::kSkirmishGameControl;  // ccpgt t02
+                // skm1 t06: the AI slot's difficulty (TEXT_EASY / MEDIUM / HARD_AI_PLAYER) drives the AI players' difficulty.
+                s.difficulty = std::clamp(a.difficulty, 0, 2);
+                // skm1 t02: the skirmish options dialog (never accepted: GameSession takes the MP_Default_* values).
+                if (a.skirmish_options.set) {
+                    sim::BattleConfig::SkirmishOptions& o = s.skirmish_options;
+                    o.set = true;
+                    o.credits = std::max(0, a.skirmish_options.credits);
+                    o.win_condition = static_cast<uint8_t>(std::clamp(a.skirmish_options.win_condition, 0, 0xff));
+                    o.heroes = a.skirmish_options.heroes;
+                    o.starting_units = a.skirmish_options.starting_units;
+                    o.super_weapons = a.skirmish_options.super_weapons;
+                    o.prebuilt_base = a.skirmish_options.prebuilt_base;
+                }
                 s.seed = opt_.seed;
                 s.battle_max_frames = opt_.battle_max_frames;
                 s.battle_end_hold_frames = kBattleEndHoldFrames;

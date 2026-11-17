@@ -290,6 +290,10 @@ public:
     // clear. Defaults: no frame, no prevention, every point valid (hosts without the hooks drop at the target).
     virtual bool space_drop_frame(int32_t /*player*/, SpaceDropFrame& /*out*/) { return false; }
     virtual bool space_prevention_hit(int32_t /*player*/, const Vec3f& /*p*/) { return false; }
+    // skm1 t03 (AI_TACTICAL §7.4, 0x6e8620): in a skirmish a space TF.Reinforce needs a live DUMMY_STAR_BASE owned by
+    // `player` or an ally; false = refused ("AI players cannot reinforce after their starbase has been destroyed", nil).
+    // Campaign battles always pass. Default: allowed.
+    virtual bool space_reinforce_base_alive(int32_t /*player*/) { return true; }
     virtual bool space_drop_ok(int32_t /*player*/, int32_t /*key*/, const Vec3f& /*p*/, float /*facing_deg*/, float /*sweep*/) {
         return true;
     }
@@ -504,6 +508,9 @@ public:
 
     // ---- inspection ----
     bool is_ai_player(int32_t player) const;
+    // skm1 t04 (SKIRMISH_SETUP 0x496f00, AI_TACTICAL §4.5): the AI player's Land_ / Space_Build_Time_Multiplier of its
+    // difficulty adjustment (this battle's mode); 1.0 for a player without a tactical AI.
+    float build_time_multiplier(int32_t player) const;
     int32_t opponent(int32_t player) const;
     const AiContext* context(int32_t player) const;
     size_t free_store_size(int32_t player) const;

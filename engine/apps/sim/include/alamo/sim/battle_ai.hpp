@@ -203,6 +203,9 @@ public:
     // mask, 0 -> 4) | 8 [M: the moving query stands in for the swept box; state-4 reservations are not tolerated].
     bool space_drop_frame(int32_t player, ai::tactical::SpaceDropFrame& out) override;
     bool space_prevention_hit(int32_t player, const ai::tactical::Vec3f& p) override;
+    // skm1 t03 (AI_TACTICAL §7.4): skirmish battles (BattleConfig::skirmish) only - a live DUMMY_STAR_BASE owned by the player
+    // or an ally (bt_allied); other battles always true.
+    bool space_reinforce_base_alive(int32_t player) override;
     bool space_drop_ok(int32_t player, int32_t key, const ai::tactical::Vec3f& p, float facing_deg, float sweep) override;
     // a1g t04 follow-up - land TF.Reinforce drop validity: TacticalBattle::land_drop_valid (a1h t06: moved to the host so the
     // Reinforce command re-runs it) with this battle's mode. AI drops pass human = false (movers ignored, landing
@@ -405,6 +408,7 @@ private:
     std::vector<int32_t> weather_category_;  // per type: index into weather_categories_ (-1: none)
     std::vector<std::string> weather_categories_;
     void capture_lane_view();
+    void set_build_time_multipliers();  // skm1 t04: TacticalBattle::ai_build_time_mult_ after the world's start
     // sp3 slice 4c: TacticalBattle::unit_by_id / team_units / hostile_owner on the view (predict_order on the AI lane).
     const LaneView::Unit* view_unit(objects::ObjectId id) const;
     std::vector<objects::ObjectId> view_team_units(uint8_t player, uint32_t wire) const;

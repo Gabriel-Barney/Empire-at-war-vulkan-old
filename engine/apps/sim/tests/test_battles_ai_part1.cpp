@@ -433,6 +433,10 @@ void test_battle_ai_station_level(bool skirmish) {
             }
         }
         CHECK(stations == 1 && others == 0);
+        // skm1 t03 (AI_TACTICAL §7.4): a space TF.Reinforce needs a live allied DUMMY_STAR_BASE in a skirmish only - player 0
+        // owns the star base, player 1 (the attacker) has none.
+        CHECK(ai.space_reinforce_base_alive(0));
+        CHECK(ai.space_reinforce_base_alive(1) == !skirmish);
         CHECK(w.campaign == !skirmish);  // t48: space skirmish runs the skirmish rules, its markers are the battle anchors
         if (skirmish) {
             CHECK(w.markers.size() == 2);

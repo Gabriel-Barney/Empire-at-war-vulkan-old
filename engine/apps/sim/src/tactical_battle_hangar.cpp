@@ -160,8 +160,10 @@ void TacticalBattle::hg_setup(TacticalMode& mode) {
     th::HangarHost h;
     h.tech_level = [this](int32_t p) { return hg_tech(p); };
     h.in_hyperspace = [this](tc::ObjectId id) { return l1_jumps_.departing(static_cast<objects::ObjectId>(id)); };
-    // [port] unset: cinematic camera (no tactical cinematics gate yet), corruption / planet restrictions, the skirmish
-    // pending-delivery list, bay bones (the hangar's fallback: the hardpoint attachment offset with the carrier facing).
+    // skm1 t07: the skirmish start-force re-delivery list (SKIRMISH_SETUP §2.4; skirmish map battles only).
+    if (skirmish_map()) h.pending_delivery = [this](int32_t p, bool pop) { return sk_pending_delivery(p, pop); };
+    // [port] unset: cinematic camera (no tactical cinematics gate yet), corruption / planet restrictions, bay bones (the
+    // hangar's fallback: the hardpoint attachment offset with the carrier facing).
     hangars_->set_host(std::move(h));
     contents_ = std::make_unique<th::ContentsSystem>();
     production_ = std::make_unique<th::TacticalProduction>();
@@ -583,6 +585,12 @@ uint8_t TacticalBattle::hg_build_check(const objects::ObjectStore& st, int32_t p
     if (!production_enabled() || player < 0 || static_cast<size_t>(player) >= galaxy_->players().size()) return 1;
     if (type == objects::kNone || type >= types.size()) return 1;
     if (std::find(types_used_.begin(), types_used_.end(), static_cast<uint32_t>(type)) == types_used_.end()) return 1;
+    // skm1 t02 (0x288b80): named heroes (+0x13 Is_Named_Hero) only with the heroes option bit 0x1, skirmish super weapons
+    // (+0x1c Is_Skirmish_Tactical_Super_Weapon) only with bit 0x4 (BattleConfig::skirmish_options, skirmish battles).
+    if (cfg_.skirmish && cfg_.skirmish_options.set) {
+        if (!cfg_.skirmish_options.heroes && types.get_bool(type, "Is_Named_Hero")) return 1;
+        if (!cfg_.skirmish_options.super_weapons && types.get_bool(type, "Is_Skirmish_Tactical_Super_Weapon")) return 1;
+    }
     const objects::ObjectHandle bh = st.find(builder);
     if (!st.alive(bh) || st.owner(bh) != player) return 1;
     bool unit = false;
@@ -714,8 +722,11 @@ commands::RejectReason TacticalBattle::hg_production_command(TacticalMode& mode,
         if (have < cost) return R::CannotAfford;
         if (credits_add_) credits_add_(p, -cost);
     }
-    // [port] Tactical_Build_Time_Seconds without the AI Space_Build_Time_Multiplier / build-time modifiers.
-    const float seconds = static_cast<float>(types.get_int(type, "Tactical_Build_Time_Seconds"));  // int field
+    // 0x496f00: Tactical_Build_Time_Seconds x (skm1 t04) the AI difficulty multiplier for a non-human AI player (Space_ /
+    // Land_Build_Time_Multiplier, set by BattleAi). [port] GC Tactical_Build_Time_Multiplier (shipped 1.0) and the
+    // build-time modifiers (list 10) are not applied.
+    float seconds = static_cast<float>(types.get_int(type, "Tactical_Build_Time_Seconds"));  // int field
+    if (static_cast<size_t>(p) < ai_build_time_mult_.size()) seconds *= ai_build_time_mult_[static_cast<size_t>(p)];
     const uint32_t id = production_->enqueue(p, builder, static_cast<int32_t>(type), seconds, frame_);
     hg_order_cost_.push_back(HgOrderCost{id, p, cost});
     prod_used_ = hg_used_ = true;
@@ -829,6 +840,65 @@ void TacticalBattle::hg_hash(StateHasher& h) const {
     }
     h.u32(static_cast<uint32_t>(hg_upgrade_objs_.size()));
     for (const HgUpgradeObject& u : hg_upgrade_objs_) h.i32(u.id);
+}
+
+}  // namespace alamo::sim
+
+namespace alamo::sim {
+
+// ---- galab t03: planet-bonus upgrade objects (docs/re/GALAB_ABILITIES_RE.md §4.3) ----------------------------------------
+
+void TacticalBattle::ga_add_types() {
+    if (cfg_.skirmish) ga_upgrades_.clear();  // no galactic planets behind a skirmish
+    if (!tables_ || ga_upgrades_.empty()) return;
+    const size_t before = types_used_.size();
+    for (const auto& [player, t] : ga_upgrades_) {
+        (void)player;
+        if (std::find(types_used_.begin(), types_used_.end(), t) == types_used_.end()) types_used_.push_back(t);
+    }
+    if (types_used_.size() != before) tables_extend();
+}
+
+void TacticalBattle::ga_spawn_upgrades(TacticalMode& mode) {
+    // 0x2afc10 per battle player [H]: each listed type that has no Previous_Upgrade_Level_Type (type +0xa60) and is not
+    // yet owned by the player at that level or a later one (the Next_Upgrade_Level_Type chain, type +0xa70) is created
+    // for the player at the origin (0x29f810). The affiliation test (0x3751a0) was applied when the list was made.
+    // [port] The object joins the ability system like a produced DUMMY_UPGRADE (add_container), so its automatic
+    // abilities apply; it is tracked with the production upgrades (hashed and saved with them).
+    if (!ga_spawn_) ga_upgrades_.clear();  // a battle rebuilt by a save load: the objects come from the save
+    if (ga_upgrades_.empty() || !abilities_) return;
+    const objects::GameObjectTypes& types = catalog_->types();
+    objects::ObjectStore& store = mode.primary();
+    const auto owns_level = [&](int32_t player, uint32_t t) {
+        for (int guard = 0; guard < 16 && t < types.size(); ++guard) {
+            for (const objects::ObjectHandle h : store.all_objects())
+                if (store.alive(h) && store.owner(h) == player && static_cast<uint32_t>(store.type(h)) == t) return true;
+            const objects::TypeIndex next =
+                types.resolve_name(hg_trim(types.get_string(static_cast<objects::TypeIndex>(t), "Next_Upgrade_Level_Type")));
+            if (next == objects::kNone) break;
+            t = static_cast<uint32_t>(next);
+        }
+        return false;
+    };
+    for (const auto& [player, t] : ga_upgrades_) {
+        if (t >= types.size()) continue;
+        const auto ti = static_cast<objects::TypeIndex>(t);
+        if (!hg_trim(types.get_string(ti, "Previous_Upgrade_Level_Type")).empty()) continue;
+        if (owns_level(player, t)) continue;
+        objects::SpawnParams sp;
+        sp.type = ti;
+        sp.owner = player;
+        sp.position = Vec3{};
+        sp.facing = Vec3{1.0f, 0.0f, 0.0f};
+        const objects::ObjectHandle h = store.create(sp);
+        if (!store.alive(h)) continue;
+        const objects::ObjectId id = store.id(h);
+        const std::vector<tc::ObjectId> none;
+        abilities_->add_container(id, desc_of(t), player, none, frame_, bt_rng_);
+        hg_upgrade_objs_.push_back(HgUpgradeObject{id, h});
+        prod_used_ = true;
+    }
+    ga_upgrades_.clear();
 }
 
 }  // namespace alamo::sim

@@ -147,6 +147,19 @@ struct BattleConfig {
     // both slots' team markers become their faction's objects, Income_Stream_Ability pays, the skirmish victory rules apply
     // (tactical_battle_skirmish.cpp). The attract demo's map battle leaves it off.
     bool skirmish_map = false;
+    // skm1 t02: the skirmish game options record (SKIRMISH_SETUP §0: GMM+0xbc, defaults GameConstants MP_Default_*). Read in
+    // a skirmish battle (BattleConfig::skirmish) only when `set`; unset = the behaviour of the MP_Default_* values the port
+    // used before (alamo_headless, tests).
+    struct SkirmishOptions {
+        bool set = false;
+        int32_t credits = 6000;     // §2 step 3: every player's credits at the start of a skirmish map battle
+        uint8_t win_condition = 0;  // §4: 0x12 / 0x13 / 0x14 (land), 0x12 / 0x16 (space); 0 or invalid = the kind's default
+        // option flags +0x20: 0x1 heroes (named heroes buildable), 0x2 free starting units (the host places the start
+        // forces), 0x4 super weapons (Is_Skirmish_Tactical_Super_Weapon buildable, bombing runs), 0x8 pre-built bases.
+        bool heroes = true, starting_units = true, super_weapons = true, prebuilt_base = true;
+        friend bool operator==(const SkirmishOptions&, const SkirmishOptions&) = default;
+    };
+    SkirmishOptions skirmish_options;
     // ccpgt t02 (SKIRMISH_SETUP §4.2): the Capture Control Points game type (4), land only: each player's win condition is 0x15
     // CONTROL_POINT_DOMINATION instead of the map kind's default. Off: unchanged rules.
     bool control_point_domination = false;
@@ -1064,6 +1077,8 @@ public:
     bool skirmish_land() const { return cfg_.skirmish && !space_; }
     // skai: a skirmish map battle with the skirmish setup (BattleConfig::skirmish_map), land or space.
     bool skirmish_map() const { return cfg_.skirmish && cfg_.map_battle && cfg_.skirmish_map; }
+    // skm1 t02: the type of `player`'s first victory-monitor record (0x12..0x16, campaign 0xb..; 0 = none). Tests / diagnostics.
+    uint8_t victory_record_type(int32_t player) const;
     // skai t17 (L1_S4_REMAINING §3.6, SKIRMISH_SETUP 0x372c10: "skirmish (0x28afb0)"): every skirmish, land or space, lists
     // pad builds from _Multiplayer (a space skirmish read _Campaign, which the Mineral_Extractor_Pad does not have).
     const char* pad_list_tag() const { return cfg_.skirmish ? "Tactical_Buildable_Objects_Multiplayer" : "Tactical_Buildable_Objects_Campaign"; }
@@ -1086,6 +1101,16 @@ public:
     //                        for the record's owner at the pad's build point with the pad's facing, full health, in the
     //                        pad's child slot (so a pre-placed type is not spawned). No match / unknown type / owner -1:
     //                        nothing, the record stays. [port] an owner that is not a battle player: nothing either.
+    // galab t03 (GALAB_ABILITIES_RE §4.3, 0x2afc10): the planet-bonus upgrade objects of the battle players, {player, type}
+    // in spawn order (attacker's list, then defender's: GalacticSim::player_upgrades of the battle mode, filtered by the
+    // player's faction affiliation). Set before setup(); setup() adds the types to the tables and, after the start forces,
+    // creates each one for its player (a DUMMY_UPGRADE object whose automatic abilities - the Combat_Bonus auras - apply
+    // to the player's units), unless the player already owns that type or a later level of it. A battle rebuilt by a
+    // save load passes none (the save holds the objects).
+    void set_galactic_upgrades(std::vector<std::pair<int32_t, uint32_t>> upgrades, bool spawn = true) {
+        ga_upgrades_ = std::move(upgrades);
+        ga_spawn_ = spawn;
+    }
     using PadRecord = galactic::PersistedBuiltObject;
     void set_pad_persistence(std::vector<PadRecord>* records, bool restore = true) {
         pad_records_ = records;
@@ -1096,6 +1121,18 @@ public:
     void set_credit_hooks(std::function<float(int32_t)> get, std::function<void(int32_t, float)> add) {
         credits_get_ = std::move(get);
         credits_add_ = std::move(add);
+    }
+    // skm1 t01 / t02 (SKIRMISH_SETUP §2 step 3): a skirmish map battle with BattleConfig::skirmish_options set sets every
+    // galactic player's credits to the option credits through the credit hooks (tactical_battle_skirmish.cpp). The host calls
+    // it once, before setup() of a new battle (never for a battle rebuilt by a load: the save holds the credits).
+    void apply_skirmish_start_credits();
+    // skm1 t04 (SKIRMISH_SETUP 0x496f00): the factor the tactical build queue applies to `player`'s Tactical_Build_Time_Seconds
+    // (BattleAi sets each non-human AI player's Space_ / Land_Build_Time_Multiplier at its start; default 1.0; not saved: a
+    // loaded battle's AI start sets it again).
+    void set_ai_build_time_multiplier(int32_t player, float m) {
+        if (player < 0) return;
+        if (ai_build_time_mult_.size() <= static_cast<size_t>(player)) ai_build_time_mult_.resize(static_cast<size_t>(player) + 1, 1.0f);
+        ai_build_time_mult_[static_cast<size_t>(player)] = m;
     }
     // --- end battle host pads ---
     // --- story t12: the reinforcement hyperspace hold (L1_S4_REMAINING §3.4, flag 0x140b27d5f = LINK_TACTICAL P9 == 2,
@@ -1585,6 +1622,7 @@ private:
     bool vm_test(uint8_t type, int32_t player);       // 0x344710 with its gates
     bool vm_evaluate(uint8_t type, int32_t player);   // the condition alone
     bool vm_blocker(int32_t player, bool base_only);  // an active relevant object of an enemy of `player`
+    bool vm_hq_blocker(int32_t player) const;         // skm1 t02: 0x14, an enemy HQ_Win_Condition_Relevant structure
     void vm_object_lost(const VmTracked& t);          // 0x2c0340
     void vm_retreat_complete(int32_t retreated);      // 0x340750
     void vm_raise();                                  // 0x341fe0
@@ -2338,6 +2376,8 @@ private:
     // --- hangars / station upgrade / engine loops (tactical_battle_hangar.cpp) ---
     bool hg_is_spawner(uint32_t type) const;
     void hg_add_types();                         // setup(): spawn lists, members, team types, Next_Level_Base -> tables
+    void ga_add_types();                         // galab: the planet-bonus upgrade types (set_galactic_upgrades) -> tables
+    void ga_spawn_upgrades(TacticalMode& mode);  // galab: after the start forces (0x2afc10 per battle player)
     void hg_setup(TacticalMode& mode);           // setup(): HangarSystem (after combat / abilities)
     void hg_ability_host(tactical::abilities::AbilityHost& h);  // oi_install(): DEPLOY_SQUAD hooks
     int32_t hg_tech(int32_t player) const;
@@ -2434,7 +2474,29 @@ private:
     std::unique_ptr<tactical::hangar::ContentsSystem> contents_;
     std::unique_ptr<tactical::hangar::TacticalProduction> production_;
     std::vector<HgOrderCost> hg_order_cost_;                  // charged credits per open order (issue order)
+    // skm1 t04 (SKIRMISH_SETUP 0x496f00): per player, the tactical AI's difficulty build-time multiplier (Space_ / Land_
+    // Build_Time_Multiplier) for non-human AI players, set by BattleAi::start (a load's start sets it again; not saved).
+    // Missing entry = 1.0.
+    std::vector<float> ai_build_time_mult_;
+    // skm1 t07 (SKIRMISH_SETUP §2.4, BKG3 Q3.3): start-force re-delivery of each skirmish slot (skirmish_map only). The start
+    // forces placed at setup are the slot's garrison list (GOM+0x550); when the last of them is gone, after the faction's
+    // Garrison_Reinforcement_Delay_Seconds (+0x2ee4, 20 s), the start-force list (+0x2a8) is delivered once more: land into
+    // the reinforcement pool (add_built_reserve), space as the pending list (+0x2d8) the slot's (or an ally's) skirmish
+    // station hangar launches one type at a time. Re-delivered units are not garrison objects, so it happens once. Saved.
+    struct SkGarrison {
+        int32_t player = -1;
+        std::vector<uint32_t> types;          // the start-force list, participant order
+        std::vector<objects::ObjectId> ids;   // the garrison objects (start-force units); cleared when the timer arms
+        int32_t timer = -1;                   // re-delivery frame, -1 = not armed
+        std::vector<uint32_t> pending;        // space: types not launched yet
+    };
+    std::vector<SkGarrison> sk_garrisons_;
+    void sk_garrison_setup();                 // setup, after the start forces are placed
+    void sk_garrison_tick();                  // tick
+    int32_t sk_pending_delivery(int32_t player, bool pop);  // HangarHost::pending_delivery
     std::vector<HgUpgradeObject> hg_upgrade_objs_;            // DUMMY_UPGRADE objects created by production (creation order)
+    std::vector<std::pair<int32_t, uint32_t>> ga_upgrades_;   // galab: {player, upgrade type} to spawn at setup (not saved)
+    bool ga_spawn_ = true;                                    // galab: false for a battle rebuilt by a save load (types only)
     std::vector<objects::ObjectId> hg_orphans_;               // contents of a removed container: removed next frame
     bool prod_used_ = false;
     std::unique_ptr<tactical::hangar::HangarSystem> hangars_;

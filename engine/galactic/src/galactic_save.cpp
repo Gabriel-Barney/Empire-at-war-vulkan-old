@@ -50,8 +50,11 @@ namespace {
 // t01): + i32 x 2 build queue phases per planet, - the two PlanetState build bonus floats (the production modifiers are
 // derived, GalacticSim::production_bonus); v5 (cu8f t04b): + the Prefer_Ground_Over_Space false ids; v6 (q6 t21): + the
 // deferred victory tests; v7 (2026-11-13, [port: Gabriel]): + the fleet / ship names. Only the current version is read,
-// and v6 (no names: read as none), so saves from before the names still load.
-constexpr uint32_t kGalacticSaveVersion = 7;
+// and v6 (no names: read as none), so saves from before the names still load. v8 (galab): + per player the home planet,
+// per planet the siphon source type / object and the bonus holder, then the neutralized counts {player, type, count};
+// v6 / v7 read them as the session's start() values (home) and none.
+constexpr uint32_t kGalacticSaveVersion = 8;
+constexpr uint32_t kGalacticSaveVersionNoGalab = 7;
 constexpr uint32_t kGalacticSaveVersionNoNames = 6;
 constexpr uint32_t kConflictSaveVersion = 3;  // v2: BattleRequest::linked (story t10); v3: BattleRequest::sandbox (q6)
 
@@ -242,12 +245,18 @@ void GalacticSim::write(ByteWriter& w) const {
     w.u32(live_names);
     for (const auto& e : names_)
         if (st.alive(st.find(e.first))) w.i32(e.first).str(e.second);
+    for (const PlayerState& p : players_) w.u32(p.home);  // v8 (galab)
+    for (const PlanetState& p : planets_) w.u32(p.siphon_type).i32(p.siphon_source).i32(p.bonus_holder);
+    w.u32(static_cast<uint32_t>(neutralized_.size()));  // GA §7 neutralized counts, (player, type)-ascending
+    for (const NeutralizedEntry& e : neutralized_) w.i32(e.player).u32(e.type).i32(e.count);
 }
 
 bool GalacticSim::read(ByteReader& r) {
     const objects::ObjectStore& st = *store_;
     const uint32_t version = r.u32();
-    if ((version != kGalacticSaveVersion && version != kGalacticSaveVersionNoNames) || !r.ok()) return false;
+    if ((version != kGalacticSaveVersion && version != kGalacticSaveVersionNoGalab && version != kGalacticSaveVersionNoNames) ||
+        !r.ok())
+        return false;
     const uint32_t rows = r.u32(), routes = r.u32(), types = r.u32(), np = r.u32();
     if (!r.ok() || rows != planets_.size() || routes != map_.routes.size() || types != rules_->types.size() ||
         np != players_.size())
@@ -543,6 +552,39 @@ bool GalacticSim::read(ByteReader& r) {
             if (i > 0 && names[i].first <= names[i - 1].first) return false;  // ascending, unique
         }
     }
+    std::vector<NeutralizedEntry> neutralized;
+    for (size_t i = 0; i < players.size(); ++i)  // galab (v8); older saves: the session's start() home, no state
+        players[i].home = i < players_.size() ? players_[i].home : kInvalidPlanet;
+    for (PlanetState& p : planets) {
+        p.siphon_type = kNoIndex;
+        p.siphon_source = 0;
+        p.bonus_holder = kNoPlayer;
+    }
+    if (version >= 8) {
+        for (PlayerState& p : players) {
+            p.home = r.u32();
+            if (!r.ok() || (p.home != kInvalidPlanet && p.home >= rows)) return false;
+        }
+        for (PlanetState& p : planets) {
+            p.siphon_type = r.u32();
+            p.siphon_source = r.i32();
+            p.bonus_holder = r.i32();
+            if (!r.ok() || (p.siphon_type != kNoIndex && p.siphon_type >= types) || !player_ok(p.bonus_holder)) return false;
+        }
+        const uint32_t nn = r.u32();
+        if (!r.ok() || nn > types * np) return false;
+        neutralized.resize(nn);
+        for (uint32_t i = 0; i < nn; ++i) {
+            NeutralizedEntry& e = neutralized[i];
+            e.player = r.i32();
+            e.type = r.u32();
+            e.count = r.i32();
+            if (!r.ok() || !valid_player(e.player) || e.type >= types || e.count < 1) return false;
+            if (i > 0 && (neutralized[i - 1].player > e.player ||
+                          (neutralized[i - 1].player == e.player && neutralized[i - 1].type >= e.type)))
+                return false;  // ascending, unique
+        }
+    }
     if (!r.ok() || !r.done()) return false;
 
     // ---- commit ----
@@ -569,6 +611,8 @@ bool GalacticSim::read(ByteReader& r) {
     victory_hold_ = hold;
     victory_deferred_ = std::move(deferred);
     names_ = std::move(names);
+    neutralized_ = std::move(neutralized);
+    neutralize_offer_.clear();
     events_ = std::move(events);
     // Rebuilt caches: store slot -> fleet / planet (creation order, so a reused slot maps to the newest fleet as
     // create_fleet left it), the per-tick owner derivation scratch, the spawn payload latch.

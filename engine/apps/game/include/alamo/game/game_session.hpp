@@ -71,6 +71,16 @@ struct SessionSpec {
     std::string skirmish_map;
     SkirmishSetup skirmish;
     std::shared_ptr<const terrain::MapData> skirmish_map_data;  // tests: used instead of loading skirmish_map
+    // skm1 t01: a skirmish starts straight on its map (CampaignBattles::start_map_battle with BattleConfig::skirmish_map,
+    // as alamo_headless --skirmish-ai skirmish and the retail skirmish start, SKIRMISH_SETUP §2): both slots' starting
+    // forces (when skirmish_options.starting_units) are its units, the skirmish map rules apply (Income_Stream, per-slot
+    // victory, team markers, the option credits). [port, tests only] skirmish_hop = the older scaffold kept for the
+    // galactic conflict tests: the human fleet hops to the AI's planet and the battle is that conflict's (battle choice,
+    // auto-resolve, retreat), without the skirmish map rules. The front end never sets it. Saved.
+    bool skirmish_hop = false;
+    // skm1 t02: the skirmish game options (the staging screen's IDD_INTERNET_STAGING_DIALOG_ADVANCED_SKIRMISH_OPTIONS);
+    // set = false: the GameConstants MP_Default_* values (sim::skirmish_option_defaults). Saved (map battle only).
+    sim::BattleConfig::SkirmishOptions skirmish_options;
     // Sim.
     uint32_t seed = 1;
     uint32_t aggressor_period = 600;  // CampaignAggressor for the AI players (0 = off)
@@ -386,6 +396,8 @@ private:
     BattleOrderStats order_stats_;
     // N1 / t09 save / load.
     bool loading_ = false;  // start() runs for start_from_save (no skirmish opening order)
+    // skm1 t01: a skirmish started on its map (not the attract demo, not the tests' skirmish_hop)
+    bool skirmish_map_battle() const { return spec_.kind == SessionKind::Skirmish && !spec_.attract && !spec_.skirmish_hop; }
     bool loaded_ = false;
     std::string playthrough_;           // [port: Gabriel] presentation only, never read by the sim
     int64_t playthrough_started_ = 0;

@@ -50,6 +50,7 @@ constexpr const char* kSingle = "IDD_SINGLE_PLAYER_GAMES_MENU_DIALOG";
 constexpr const char* kCampaignSelect = "IDD_CAMPAIGN_SELECTION_DIALOG";
 constexpr const char* kCustomStaging = "IDD_CUSTOM_CAMPAIGN_STAGING_DIALOG";
 constexpr const char* kAdvanced = "IDD_CAMPAIGN_ADVANCED_OPTIONS_DIALOG";
+constexpr const char* kSkirmishAdvanced = "IDD_INTERNET_STAGING_DIALOG_ADVANCED_SKIRMISH_OPTIONS";  // skm1 t02 (0xea8d0)
 constexpr const char* kSkirmish = "IDD_SKIRMISH_STAGING_DIALOG";
 constexpr const char* kTutorial = "IDD_SELECT_TUTORIAL_DIALOG";
 constexpr const char* kOptions = "IDD_MAIN_OPTIONS_DIALOG";
@@ -875,6 +876,69 @@ GameOptionsSetup FrontEnd::read_game_options(const GuiDialog& d) const {
     return o;
 }
 
+// ---- skm1 t02: the skirmish options dialog ----
+namespace {
+const char* win_condition_key(int32_t w) {
+    switch (w) {
+        case kWinAllUnits: return "TEXT_WIN_CONDITION_ALL_ENEMY_UNITS_DESTROYED";
+        case kWinAllStructures: return "TEXT_WIN_CONDITION_ALL_ENEMY_STRUCTURES_DESTROYED";
+        case kWinCommandHq: return "TEXT_WIN_CONDITION_ENEMY_COMMAND_HQ_DESTROYED";
+        case kWinControlPoints: return "TEXT_WIN_CONDITION_CONTROL_POINT_DOMINATION";
+        default: return "TEXT_WIN_CONDITION_SPACE_ENEMY_STARBASE_DESTROYED";
+    }
+}
+}  // namespace
+
+void FrontEnd::fill_skirmish_options(GuiDialog& d, const SkirmishOptionsSetup& o) {
+    const int32_t lo = std::max(0, o.min_credits / kCreditStep), hi = std::max(lo, o.max_credits / kCreditStep);
+    d.set_range("IDC_SKIRMISH_CREDITS_SLIDER", lo, hi);
+    d.set_value("IDC_SKIRMISH_CREDITS_SLIDER", std::clamp(o.credits / kCreditStep, lo, hi));
+    d.set_checked("IDC_ALLOW_HEROES", o.heroes);
+    d.set_checked("IDC_ALLOW_STARTING_UNIT_PURCHASE", o.starting_units);
+    d.set_checked("IDC_ALLOW_SUPER_WEAPONS", o.super_weapons);
+    d.set_checked("IDC_PRE_BUILT_BASE", o.prebuilt_base);
+    // UI.md 9.7 (0x4ace40): the rows of the game type; the value steps to the type's default when it is not one of them
+    // (0x4ad000). CBS_SORT is not acted on by the gadget (UI.md 3.7.1 [M]): the rows stay in condition order.
+    skirmish_win_rows_ = game_type_ == kSkirmishGameControl ? std::vector<int32_t>{kWinControlPoints}
+                         : game_type_ == kSkirmishGameSpace ? std::vector<int32_t>{kWinAllUnits, kWinStarbase}
+                                                            : std::vector<int32_t>{kWinAllUnits, kWinAllStructures, kWinCommandHq};
+    const int32_t fallback = game_type_ == kSkirmishGameControl ? kWinControlPoints : game_type_ == kSkirmishGameSpace ? kWinStarbase : kWinAllStructures;
+    int32_t sel = -1;
+    for (size_t i = 0; i < skirmish_win_rows_.size(); ++i)
+        if (skirmish_win_rows_[i] == o.win_condition) sel = static_cast<int32_t>(i);
+    for (size_t i = 0; i < skirmish_win_rows_.size() && sel < 0; ++i)
+        if (skirmish_win_rows_[i] == fallback) sel = static_cast<int32_t>(i);
+    std::vector<std::u32string> rows;
+    for (const int32_t w : skirmish_win_rows_) rows.push_back(text(win_condition_key(w)));
+    d.set_items("IDC_WIN_CONDITION_COMBO", std::move(rows), sel);
+    skirmish_options_rules(d);
+}
+
+void FrontEnd::skirmish_options_rules(GuiDialog& d) const {
+    if (const GuiControl* c = d.get("IDC_SKIRMISH_CREDITS_SLIDER")) d.set_text("IDC_SKIRMISH_CREDITS_VALUE", ascii32(std::to_string(c->value * kCreditStep)));
+    // 0x4aceb0: the HQ condition forces the pre-built base on and disables the box; the Space type unchecks and disables it.
+    const GuiControl* w = d.get("IDC_WIN_CONDITION_COMBO");
+    const int32_t win = w && w->selected >= 0 && static_cast<size_t>(w->selected) < skirmish_win_rows_.size()
+                            ? skirmish_win_rows_[static_cast<size_t>(w->selected)]
+                            : 0;
+    if (game_type_ == kSkirmishGameSpace) d.set_checked("IDC_PRE_BUILT_BASE", false);
+    if (win == kWinCommandHq) d.set_checked("IDC_PRE_BUILT_BASE", true);
+    d.enable("IDC_PRE_BUILT_BASE", game_type_ != kSkirmishGameSpace && win != kWinCommandHq);
+}
+
+SkirmishOptionsSetup FrontEnd::read_skirmish_options(const GuiDialog& d) const {
+    SkirmishOptionsSetup o = p_.skirmish_option_defaults;
+    if (const GuiControl* c = d.get("IDC_SKIRMISH_CREDITS_SLIDER")) o.credits = c->value * kCreditStep;
+    if (const GuiControl* c = d.get("IDC_ALLOW_HEROES")) o.heroes = c->checked;
+    if (const GuiControl* c = d.get("IDC_ALLOW_STARTING_UNIT_PURCHASE")) o.starting_units = c->checked;
+    if (const GuiControl* c = d.get("IDC_ALLOW_SUPER_WEAPONS")) o.super_weapons = c->checked;
+    if (const GuiControl* c = d.get("IDC_PRE_BUILT_BASE")) o.prebuilt_base = c->checked;
+    if (const GuiControl* c = d.get("IDC_WIN_CONDITION_COMBO"); c && c->selected >= 0 && static_cast<size_t>(c->selected) < skirmish_win_rows_.size())
+        o.win_condition = skirmish_win_rows_[static_cast<size_t>(c->selected)];
+    o.set = true;
+    return o;
+}
+
 // The value statics beside the sliders: the credits amount and "Tech n" (TEXT_TECH_LEVEL_n).
 void FrontEnd::show_game_option_values(GuiDialog& d) const {
     if (const GuiControl* c = d.get("IDC_SKIRMISH_CREDITS_SLIDER")) d.set_text("IDC_SKIRMISH_CREDITS_VALUE", ascii32(std::to_string(c->value * kCreditStep)));
@@ -908,9 +972,13 @@ void FrontEnd::fill_skirmish_slots(GuiDialog& d) {
         if (!used) continue;
         std::snprintf(id, sizeof id, "IDC_PLAYER_NAME_%d", p);
         const GuiControl* name = d.get(id);
-        const int32_t keep = name && name->items.size() == 2 ? name->selected : 0;
-        if (p < 2) d.set_items(id, {gui_->port_text(p == 0 ? U"Player" : U"AI")}, 0);
-        else d.set_items(id, {gui_->port_text(U"Closed"), gui_->port_text(U"AI")}, std::clamp(keep, 0, 1));
+        // skm1 t06 (SKIRMISH_SETUP §1, staging open path 0xf1230): an AI slot picks its difficulty (slot +0x158) from
+        // TEXT_EASY / MEDIUM / HARD_AI_PLAYER, Medium first; slots 2.. start TEXT_OPEN_PLAYER (no player) [port: slot 0 is the
+        // local player, slot 1 always an AI].
+        const std::u32string easy = text("TEXT_EASY_AI_PLAYER"), medium = text("TEXT_MEDIUM_AI_PLAYER"), hard = text("TEXT_HARD_AI_PLAYER");
+        if (p == 0) d.set_items(id, {gui_->port_text(U"Player")}, 0);
+        else if (p == 1) d.set_items(id, {easy, medium, hard}, name && name->items.size() == 3 ? std::clamp(name->selected, 0, 2) : 1);
+        else d.set_items(id, {text("TEXT_OPEN_PLAYER"), easy, medium, hard}, name && name->items.size() == 4 ? std::clamp(name->selected, 0, 3) : 0);
         std::snprintf(id, sizeof id, "IDC_PLAYER_FACTION_%d", p);
         const GuiControl* fc = d.get(id);
         const int32_t fdefault = skirmish_factions_.empty() ? -1 : std::min<int32_t>(p % 2, static_cast<int32_t>(skirmish_factions_.size()) - 1);
@@ -1369,6 +1437,8 @@ void FrontEnd::setup(GuiDialog& d) {
         fill_skirmish(d);
     } else if (ascii_iequals(n, kAdvanced)) {  // ui1 t06: the accepted values, else the defaults
         fill_game_options(d, game_options_.set ? game_options_ : p_.game_option_defaults);
+    } else if (ascii_iequals(n, kSkirmishAdvanced)) {  // skm1 t02: the accepted values, else the defaults
+        fill_skirmish_options(d, skirmish_options_.set ? skirmish_options_ : p_.skirmish_option_defaults);
     } else if (ascii_iequals(n, kTutorial)) {
         std::vector<std::u32string> items;
         for (const CampaignSetInfo& s : menu_.tutorials) items.push_back(text(s.text_id.empty() ? s.set : s.text_id));
@@ -1557,6 +1627,9 @@ void FrontEnd::on_change(const GuiEvent& e, std::vector<MenuAction>& out) {
         if (e.control == "IDC_GAME_TYPE_LIST" && e.value >= 0 && static_cast<size_t>(e.value) < game_type_rows_.size()) {
             if (const int32_t t = game_type_rows_[static_cast<size_t>(e.value)]; t != game_type_) {
                 game_type_ = t;
+                skirmish_options_.win_condition = 0;  // skm1 t02 (UI.md 9.7, 0x4acf00 keep = 1): the type's default condition
+                // [port] the pre-built base the Space type forced off is not carried to a land type
+                if (t != kSkirmishGameSpace) skirmish_options_.prebuilt_base = p_.skirmish_option_defaults.prebuilt_base;
                 fill_skirmish_maps(*d);
             }
         } else if (e.control == "IDC_STAGING_MAP_LIST") {
@@ -1576,6 +1649,9 @@ void FrontEnd::on_change(const GuiEvent& e, std::vector<MenuAction>& out) {
         }
     }
     else if (ascii_iequals(n, kAdvanced) && e.kind == GuiEvent::Kind::ValueChanged) show_game_option_values(*d);  // ui1 t06
+    else if (ascii_iequals(n, kSkirmishAdvanced) && (e.kind == GuiEvent::Kind::ValueChanged || e.kind == GuiEvent::Kind::SelectionChanged ||
+                                                    e.kind == GuiEvent::Kind::Checked))
+        skirmish_options_rules(*d);  // skm1 t02
     else if (ascii_iequals(n, kAudio) && e.kind == GuiEvent::Kind::ValueChanged) {
         MenuAction a = act(MenuAction::Kind::PreviewAudio);
         a.audio = read_audio(*d);
@@ -1693,9 +1769,21 @@ void FrontEnd::on_click(const GuiEvent& e, std::vector<MenuAction>& out) {
         } else if (is("IDC_DEFAULTS_BUTTON")) {
             fill_game_options(*d, p_.game_option_defaults);
         }
+    } else if (ascii_iequals(n, kSkirmishAdvanced) && d) {  // skm1 t02
+        if (is("IDC_BUTTON_ACCEPT")) {
+            skirmish_options_ = read_skirmish_options(*d);
+            pop();
+        } else if (is("IDC_CANCEL_BUTTON")) {
+            pop();
+        } else if (is("IDC_DEFAULTS_BUTTON")) {
+            fill_skirmish_options(*d, p_.skirmish_option_defaults);
+        } else if (is("IDC_ALLOW_HEROES") || is("IDC_ALLOW_STARTING_UNIT_PURCHASE") || is("IDC_ALLOW_SUPER_WEAPONS") ||
+                   is("IDC_PRE_BUILT_BASE")) {
+            skirmish_options_rules(*d);
+        }
     } else if (ascii_iequals(n, kSkirmish) && d) {
         if (is("IDC_CANCEL_BUTTON")) go(kSingle);
-        else if (is("IDC_SELECT_OPTIONS")) push(kAdvanced);
+        else if (is("IDC_SELECT_OPTIONS")) push(kSkirmishAdvanced);  // skm1 t02: retail 0xea8d0 picks the skirmish dialog
         else if (is("IDC_SELECT_OFFICIAL_MAPS") || is("IDC_SELECT_CUSTOM_MAPS")) {
             custom_tab_ = is("IDC_SELECT_CUSTOM_MAPS");
             fill_skirmish_maps(*d);
@@ -1705,10 +1793,16 @@ void FrontEnd::on_click(const GuiEvent& e, std::vector<MenuAction>& out) {
                 MenuAction a = act(MenuAction::Kind::StartSkirmish);
                 a.map = maps_[map_view_[static_cast<size_t>(list->selected)]].map;
                 a.game_type = game_type_;
+                a.skirmish_options = skirmish_options_;  // skm1 t02 (set = false: the host's defaults)
                 for (int32_t p = 0; p < skirmish_slots_; ++p) {
                     char id[32];
                     std::snprintf(id, sizeof id, "IDC_PLAYER_NAME_%d", p);
-                    if (const GuiControl* nm = d->get(id); p >= 2 && (!nm || nm->selected != 1)) continue;  // ui1 t07: closed
+                    const GuiControl* nm = d->get(id);
+                    if (p >= 2 && (!nm || nm->selected < 1)) continue;  // ui1 t07: Open (no player)
+                    // skm1 t06: the slot's AI difficulty (slot 1: rows Easy / Medium / Hard; slots 2..: Open first)
+                    const int32_t row = nm && nm->selected >= 0 ? nm->selected : (p >= 2 ? 2 : 1);
+                    a.difficulties.push_back(p == 0 ? 1 : std::clamp(p >= 2 ? row - 1 : row, 0, 2));
+                    if (p == 1) a.difficulty = a.difficulties.back();
                     a.colors.push_back(slot_colour_[p]);
                     std::snprintf(id, sizeof id, "IDC_PLAYER_FACTION_%d", p);
                     const GuiControl* f = d->get(id);

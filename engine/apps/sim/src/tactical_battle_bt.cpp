@@ -1770,8 +1770,11 @@ void TacticalBattle::bt_skirmish_base(TacticalMode& mode) {
     const objects::GameObjectTypes& types = catalog_->types();
     objects::ObjectStore& st = mode.primary();
     std::vector<objects::ObjectHandle> pads;
+    // skm1 t02: the option flag 0x8 off (BattleConfig::skirmish_options) - no pad pre-builds (every skirmish pad respects it or
+    // is skipped here).
+    const bool prebuild = !cfg_.skirmish_options.set || cfg_.skirmish_options.prebuilt_base;
     for (const objects::ObjectHandle h : st.all_objects())
-        if (st.active(h) && st.has_behavior(h, pad_behavior()) && types.get_bool(st.type(h), "Respects_Skirmish_Pre_Build_Bases_Option"))
+        if (prebuild && st.active(h) && st.has_behavior(h, pad_behavior()) && types.get_bool(st.type(h), "Respects_Skirmish_Pre_Build_Bases_Option"))
             pads.push_back(h);
     for (const objects::ObjectHandle ph : pads) {
         const int32_t owner = st.owner(ph);

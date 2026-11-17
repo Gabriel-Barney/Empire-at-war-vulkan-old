@@ -214,6 +214,16 @@ bool App::init() {
         o.random_events = gc.get_bool("MP_Default_Allow_Random_Events", o.random_events);
         o.min_credits = gc.get_int("Min_Skirmish_Credits", o.min_credits);
         o.max_credits = std::max(o.min_credits, gc.get_int("Max_Skirmish_Credits", o.max_credits));
+        // skm1 t02: the skirmish options dialog (same credits default and range; flags MP_Default_Allow_Heroes / _Free_Starting_
+        // Units / _Allow_SuperWeapons / _Pre_Built_Base; win condition 0 = the game type's default)
+        ui::SkirmishOptionsSetup& k = mp.skirmish_option_defaults;
+        k.credits = o.credits;
+        k.min_credits = o.min_credits;
+        k.max_credits = o.max_credits;
+        k.heroes = gc.get_bool("MP_Default_Allow_Heroes", k.heroes);
+        k.starting_units = gc.get_bool("MP_Default_Free_Starting_Units", k.starting_units);
+        k.super_weapons = gc.get_bool("MP_Default_Allow_SuperWeapons", k.super_weapons);
+        k.prebuilt_base = gc.get_bool("MP_Default_Pre_Built_Base", k.prebuilt_base);
     }
     // Video options: the primary display's modes (the current window size selected, else the largest mode under it); the
     // display mode list picks fullscreen (exclusive when the driver offers it) / borderless / windowed; v-sync = a FIFO or Mailbox present mode (the port's

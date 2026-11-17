@@ -302,6 +302,22 @@ struct GameOptionsSetup {
     bool set = false;  // Accept was pressed: the game uses these (else the campaign's own values)
     friend bool operator==(const GameOptionsSetup&, const GameOptionsSetup&) = default;
 };
+// skm1 t02: IDD_INTERNET_STAGING_DIALOG_ADVANCED_SKIRMISH_OPTIONS (opened by the skirmish staging screen's Select Options,
+// retail 0xea8d0) = the skirmish part of the game options record (SKIRMISH_SETUP.md §0, UI.md 9.7): start credits, the win
+// condition (0x12 all units, 0x13 all base structures, 0x14 command HQ, 0x15 control points, 0x16 star base; the rows a game
+// type offers: Land 0x12..0x14, Space 0x12 / 0x16, Capture Control Points 0x15 only), and the flags heroes (0x1), free starting
+// units (0x2), super weapons (0x4), pre-built base (0x8). Defaults GameConstants MP_Default_* (host). The HQ condition forces
+// the pre-built base on; the Space type unchecks and disables it (0x4aceb0).
+struct SkirmishOptionsSetup {
+    int32_t credits = 6000;
+    int32_t win_condition = 0;  // 0 = the game type's default (MP_Default_Land / Space_Tactical_Win_Condition: 0x13 / 0x16)
+    bool heroes = true, starting_units = true, super_weapons = true, prebuilt_base = true;
+    int32_t min_credits = 2000, max_credits = 8000;  // the slider range (host: Min_ / Max_Skirmish_Credits)
+    bool set = false;  // Accept was pressed (else the host's defaults)
+    friend bool operator==(const SkirmishOptionsSetup&, const SkirmishOptionsSetup&) = default;
+};
+inline constexpr int32_t kWinAllUnits = 0x12, kWinAllStructures = 0x13, kWinCommandHq = 0x14, kWinControlPoints = 0x15,
+                         kWinStarbase = 0x16;
 // [port: Gabriel] one level of the saved games tree (SaveGameInfo::groups, outermost first). Saves with the same keys up to
 // a level share that level's group; its row shows the first such save's label and icon.
 struct SaveGroupLevel {
@@ -380,6 +396,11 @@ struct MenuAction {
     AdvancedVideoSettings advanced;
     CameraSettings camera;
     GameOptionsSetup game_options;  // ui1 t06: StartCampaign / StartSkirmish (set = Accepted on the advanced options)
+    // StartSkirmish (skm1 t02): the skirmish options dialog's values (set = false: never accepted, the host's defaults).
+    SkirmishOptionsSetup skirmish_options;
+    // StartSkirmish (skm1 t06): per playing slot (same order as factions), the AI difficulty 0 Easy / 1 Medium / 2 Hard of
+    // the slot combo (TEXT_EASY / MEDIUM / HARD_AI_PLAYER; slot 0, the local player, carries 1). `difficulty` = slot 1's.
+    std::vector<int32_t> difficulties;
 };
 const char* menu_action_name(MenuAction::Kind k);
 
@@ -410,6 +431,7 @@ struct MenuProviders {
     std::function<VideoSettings()> video;
     std::function<GameplaySettings()> gameplay;
     GameOptionsSetup game_option_defaults;  // ui1 t06: the advanced options' defaults and slider range (host: GameConstants)
+    SkirmishOptionsSetup skirmish_option_defaults;  // skm1 t02: the skirmish options' defaults and slider range (host)
     std::function<AdvancedVideoSettings()> advanced_video;  // null: defaults
     std::function<CameraSettings()> camera_settings;        // [port: Gabriel] null: defaults
     HotkeyTable* hotkeys = nullptr;  // edited by the keyboard dialogs (Accept)
@@ -488,6 +510,9 @@ private:
     void fill_skirmish(GuiDialog& d);
     void fill_skirmish_slots(GuiDialog& d);  // ui1 t07: the player rows for the selected map's player count
     void fill_game_options(GuiDialog& d, const GameOptionsSetup& o);  // ui1 t06
+    void fill_skirmish_options(GuiDialog& d, const SkirmishOptionsSetup& o);  // skm1 t02
+    SkirmishOptionsSetup read_skirmish_options(const GuiDialog& d) const;
+    void skirmish_options_rules(GuiDialog& d) const;  // credits label; HQ forces / Space disables the pre-built base
     GameOptionsSetup read_game_options(const GuiDialog& d) const;
     void show_game_option_values(GuiDialog& d) const;
     void fill_skirmish_maps(GuiDialog& d);  // the list of the active tab and game type, from maps_
@@ -548,6 +573,8 @@ private:
     int32_t game_type_ = kSkirmishGameLand;
     int32_t skirmish_slots_ = 2;  // ui1 t07: player rows shown (the selected map's players, 2..8)
     std::vector<std::u32string> skirmish_factions_;  // ui1 t07: the faction combo rows
+    SkirmishOptionsSetup skirmish_options_;   // skm1 t02: the skirmish options accepted last (set = false until then)
+    std::vector<int32_t> skirmish_win_rows_;  // skm1 t02: the win condition of each IDC_WIN_CONDITION_COMBO row
     GameOptionsSetup game_options_;  // ui1 t06: the advanced options accepted last (set = false until then)  // skirmish list: the game type selected last (UI.md 9.7)
     std::vector<int32_t> game_type_rows_;    // IDC_GAME_TYPE_LIST rows -> game type (sorted by row text)
     // The map selected last [0 land, 1 space] ("" = none yet; UI.md 9.5 / 9.7: retail keeps one land key for types 2 and 4).

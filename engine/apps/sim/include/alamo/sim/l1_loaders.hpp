@@ -20,5 +20,9 @@ std::vector<int32_t> load_retreat_increments(const galactic::GalacticRules& rule
 std::vector<float> load_retreat_flight_increments(const galactic::GalacticRules& rules);  // unset = 500 [port]
 TacticalBattle::L1Constants load_l1_constants(const data::GameConstants& constants);  // missing tags keep the defaults
 std::vector<TacticalBattle::L1Faction> load_l1_factions(const galactic::GalacticRules& rules);
+// skm1 t02 (SKIRMISH_SETUP §0, 0x4acc60): the skirmish game options at their GameConstants defaults - MP_Default_Credits,
+// MP_Default_Allow_Heroes / _Free_Starting_Units / _Allow_SuperWeapons / _Pre_Built_Base, and the win condition 0 (the
+// map kind's MP_Default_Land_ / Space_Tactical_Win_Condition). `set` is true. Missing tags keep the BattleConfig defaults.
+BattleConfig::SkirmishOptions skirmish_option_defaults(const data::GameConstants& constants);
 
 }  // namespace alamo::sim
