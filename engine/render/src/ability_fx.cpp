@@ -202,7 +202,9 @@ void apply_battle_ability_fx(const sim::TacticalBattle& battle, AbilityFxTracker
             in.states.push_back({o.id, kEffectInfection, infection, std::string(status_bones)});
         // vis1 t08 Base_Shield_Penetration_Particle (§6): world-placed at the dome contact while the unit straddles a shield.
         // [M] orientation: facing = the horizontal part of the dome normal (retail: the normal's angles with pitch + 90).
-        if (types && o.type < types->size() && combat.base_shield_straddled(o.id) != tactical::combat::kNoObject) {
+        // Not while the unit is fogged for the local player [port: retail's particle object fog rule not read].
+        if (types && o.type < types->size() && (o.flags & kSnapFogHidden) == 0 &&
+            combat.base_shield_straddled(o.id) != tactical::combat::kNoObject) {
             const std::string pen = trimmed(types->get_string(o.type, "Base_Shield_Penetration_Particle"));
             tactical::Vec3 point{}, normal{};
             if (!pen.empty() && types->resolve_name(pen) != objects::kNone && combat.base_shield_contact(o.id, point, normal)) {

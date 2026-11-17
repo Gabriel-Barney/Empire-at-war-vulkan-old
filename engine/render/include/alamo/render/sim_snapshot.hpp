@@ -411,7 +411,8 @@ struct SimSnapshot {
     std::vector<SnapshotFootPlant> foot_plants;  // R5: this tick's foot plants (event order)
     std::vector<SnapshotAbilityEvent> ability_events;  // R5: changes against the previous snapshot (ascending id, type)
     std::vector<SnapshotProjectile> projectiles;  // live projectiles (ascending serial; apply_battle_projectiles)
-    std::vector<SnapshotBeam> beams;              // R5: ability beams (ascending owner id, then kind; apply_battle_beams)
+    std::vector<SnapshotBeam> beams;              // R5: ability beams (ascending owner id, then kind; apply_battle_beams;
+                                                  // vis1 t08 drain bolts appended after them)
     SnapshotJamming jamming;                      // R5: sensor jamming (apply_battle_jamming)
     // vis1 t08: world-placed sim effects (Base_Shield_Penetration_Particle at the dome contact; apply_battle_ability_fx),
     // synced with the decoration effects (keys (id << 8) | 2).

@@ -166,12 +166,10 @@ bool CombatSystem::straddles_base_shield(const Unit& u, const Unit& s) const {
     const float d = distance3(u.pos, s.pos);
     const float R = desc_of(s).base_shield_radius;
     if (R < d - r || d + r < R) return false;
-    const Vec3 tu{u.pos.x, u.pos.y, u.pos.z + ud.ranged_target_z_adjust};
-    const Vec3 ts{s.pos.x, s.pos.y, s.pos.z + desc_of(s).ranged_target_z_adjust};
-    const Vec3 dir = dot(ts - tu, ts - tu) > 0.0f ? normalize(ts - tu) : Vec3{1.0f, 0.0f, 0.0f};
-    const float e = hx > hy ? hx : hy;
+    Vec3 a{}, b{};
+    straddle_segment(u, s, a, b);  // the same segment base_shield_contact reads
     float t = 0.0f;
-    return dome_segment(s, tu + dir * e, tu - dir * e, t);
+    return dome_segment(s, a, b, t);
 }
 
 void CombatSystem::service_base_shields(uint32_t frame) {

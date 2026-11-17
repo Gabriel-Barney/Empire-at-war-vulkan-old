@@ -832,13 +832,9 @@ void BattleView::prepare(GpuCore& gpu, float alpha) {
         jam_models_.build_blobs(gpu.renderer, blob_tex, std::span<const render::JamBlob>(&*bombing_blob_, 1), ground, main);
     }
     // vis1 t08 (ABILITY_PARTICLES §8): the Heal_Range_Blob_Material square under a selected Force_Healing owner of the local
-    // player (the selection circles name the selected objects; none while a cinematic hides the HUD).
-    if (scene_ && p.curr && !frame_.jamming.heal_blobs.empty() && !blobs_.empty()) {
-        std::vector<uint32_t> selected;
-        selected.reserve(blobs_.size());
-        for (const ui::SelectionBlob& b : blobs_) selected.push_back(b.id);
-        std::sort(selected.begin(), selected.end());
-        const std::vector<render::JamBlob> heal = render::heal_range_blobs(frame_, selected, local_);
+    // player (set_heal_selection; none while a cinematic hides the HUD).
+    if (scene_ && p.curr && !frame_.jamming.heal_blobs.empty() && !heal_sel_.empty()) {
+        const std::vector<render::JamBlob> heal = render::heal_range_blobs(frame_, heal_sel_, local_);
         if (!heal.empty()) {
             const render::TextureSource blob_tex = [&gpu](std::string_view n, assets::TextureRole role) { return gpu.cache->texture(n, role); };
             std::function<float(float, float)> ground;
