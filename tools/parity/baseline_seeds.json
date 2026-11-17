@@ -1,5 +1,5 @@
 {
- "commit": "fb7288e8",
+ "commit": "2bcc1e2a+bkx1",
  "mode": "distribution",
  "scenarios": {
   "geonosis_skirmish": {
@@ -166,6 +166,8 @@
     "outcome.planets_final[Empire]": "PASS",
     "outcome.planets_final[Rebel]": "FAIL",
     "outcome.planets_final[Underworld]": "FAIL",
+    "outcome.shola_capture_tick[Rebel]": "PASS",
+    "outcome.shola_captured[Rebel]": "PASS",
     "travel.hop_ticks[Rebel:CORELLIA->KUAT]": "PASS",
     "travel.hop_ticks[Rebel:CORELLIA->TATOOINE]": "PASS",
     "travel.hop_ticks[Rebel:FELUCIA->KASHYYYK]": "PASS",
@@ -225,7 +227,7 @@
     },
     "battle outcomes": {
      "FAIL": 2,
-     "PASS": 5
+     "PASS": 7
     },
     "diagnostic": {
      "INFO": 1

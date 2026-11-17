@@ -1,195 +1,194 @@
 # A1 stage 2 synthetic space skirmish (mock battle host): per-frame CRC (every 150th + last), decisions, orders
-frame 150 a27925b13259f28b
-frame 300 3d97607511e4c1e6
-frame 450 55b29dd897458385
-frame 600 2641469c3683cb7a
-frame 750 03fa05dd3ae36a7b
-frame 900 9d3bc039c9e00cfa
-frame 1050 ec65eb12cf12d2cc
-frame 1200 a2ce8986885872ff
-frame 1350 4a3e412889198dd8
-frame 1500 28697c39db303a53
-frame 1650 34ba84d83cdeb036
-frame 1800 e513d8d30d080eb5
-frame 1950 2c2b7dfdc648392d
-frame 2100 84fd31b6dd18b2e8
-frame 2250 067d9f8020f3df13
-frame 2400 8b94d6edeb8a666e
-frame 2550 625424f68fbe93cc
-frame 2700 3a023f63155db23e
-frame 2850 7d0b6ff3a7643f98
-frame 3000 e922bbf81cf0c31d
-frame 3150 9ba4600f35bf6629
-frame 3300 c583475d525df73a
-frame 3450 e361d37545ee3d00
-frame 3600 83d464a0bc1d2143
-frames 3600 orders 57 rejected 0 deaths E=6 R=5 units left 5 plans 2
+frame 150 92fd83aa72d00016
+frame 300 9a813c9c19fb42ca
+frame 450 0b6e775d6aed2113
+frame 600 f8772f9bf9c77440
+frame 750 9b1562fd2b21b011
+frame 900 1f0ab1ba8bb47d88
+frame 1050 334652d87b1fde1e
+frame 1200 021316bad2d4fc46
+frame 1350 b4bee688de5f81e7
+frame 1500 ed5e4143cc4d815b
+frame 1650 c4d6f1ed88f3c875
+frame 1800 c766fe74520ce71a
+frame 1950 31c296dbdfbe29ef
+frame 2100 c3850631d3cb360c
+frame 2250 15837b1fd162bac2
+frame 2400 bb361f2349afe7aa
+frame 2550 b4abd572d3d35b4d
+frame 2700 fba80b694dbe28d8
+frame 2850 37b0eeb7bc88152e
+frame 3000 d7e6603fc7f20ab6
+frame 3150 4ecf215d3514be3d
+frame 3300 5fa20fc3ccbfded4
+frame 3450 cb5b6116d1e3debe
+frame 3600 301364d0187dc67f
+frames 3600 orders 59 rejected 0 deaths E=5 R=5 units left 6 plans 2
 1 p0 opponent 1
 1 p0 targets 25 free store 3
 1 p0 templates Syn_Space
 1 p1 opponent 0
 1 p1 targets 25 free store 3
 1 p1 templates Syn_Space
-4 p0 plan 1 SYNESCORT for Syn_Escort @global Lead Escort
-4 p0 plan 2 SYNSWEEP for Syn_Sweep_Area @CELL_2_1 SweepForce
-4 p0 plan 3 SYNBUILD for Syn_Build @OBJECT_9 Builder
-4 p0 tf Lead produce: 1 units, 0 pending reinforcements, 0 pads
-4 p0 tf Escort produce: 2 units, 0 pending reinforcements, 0 pads
-4 p0 tf SweepForce produce: 0 units, 1 pending reinforcements, 0 pads
-4 p0 tf Builder produce: 0 units, 0 pending reinforcements, 1 pads
-5 p1 plan 4 SYNESCORT for Syn_Escort @global Lead Escort
-5 p1 tf Lead produce: 1 units, 0 pending reinforcements, 0 pads
-5 p1 tf Escort produce: 1 units, 1 pending reinforcements, 0 pads
-10 p0 order tf Lead move 1 units -> (-3400, -600)
-10 p0 build UC_Syn_Turret on pad 9 refused: pad may be occupied or enemies may be too close
-11 p1 order tf Lead move 1 units -> (2600, -600)
-16 p0 order skirmish reinforce Syn_Corvette (tf SweepForce)
-16 p0 plan 3 SYNBUILD ended failure
-22 p0 order tf SweepForce attack 6
-24 p0 plan 5 SYNSWEEP for Syn_Sweep_Area @CELL_2_2 SweepForce
+23 p1 plan 1 SYNESCORT for Syn_Escort @global Lead Escort
+24 p0 plan 2 SYNESCORT for Syn_Escort @global Lead Escort
+24 p0 plan 3 SYNSWEEP for Syn_Sweep_Area @CELL_2_1 SweepForce
+24 p0 plan 4 SYNBUILD for Syn_Build @OBJECT_9 Builder
+25 p0 tf Lead produce: 1 units, 0 pending reinforcements, 0 pads
+25 p0 tf Escort produce: 2 units, 0 pending reinforcements, 0 pads
 25 p0 tf SweepForce produce: 0 units, 1 pending reinforcements, 0 pads
+25 p0 tf Builder produce: 0 units, 0 pending reinforcements, 1 pads
+25 p1 tf Lead produce: 1 units, 0 pending reinforcements, 0 pads
+25 p1 tf Escort produce: 1 units, 1 pending reinforcements, 0 pads
+31 p0 order tf Lead move 1 units -> (-3400, -600)
+31 p0 build UC_Syn_Turret on pad 9 refused: pad may be occupied or enemies may be too close
+31 p1 order tf Lead move 1 units -> (2600, -600)
 37 p0 order skirmish reinforce Syn_Corvette (tf SweepForce)
-40 p0 order tf Escort guard 2 units -> (-3318, -518) obj 2 Syn_Frigate/p0
-41 p1 order tf Escort guard 1 units -> (2750, -374) obj 6 Syn_Frigate/p1
+37 p0 plan 4 SYNBUILD ended failure
 43 p0 order tf SweepForce attack 6
-94 p1 plan 6 SYNDESTROY for Syn_Destroy_Unit @OBJECT_10 MainForce
-95 p1 tf MainForce produce: 1 units, 1 pending reinforcements, 0 pads
-254 p1 order tf MainForce attack 10
-265 p0 tf SweepForce no units remaining
-268 p0 plan 2 SYNSWEEP ended success
-269 p1 plan 6 SYNDESTROY ended success
-270 p1 plan 7 SYNDESTROY for Syn_Destroy_Unit @OBJECT_11 MainForce
-272 p1 tf MainForce produce: 1 units, 1 pending reinforcements, 0 pads
-284 p0 plan 8 SYNSWEEP for Syn_Sweep_Area @CELL_3_2 SweepForce
-286 p0 tf SweepForce produce: 0 units, 1 pending reinforcements, 0 pads
-289 p0 tf SweepForce no units remaining
-292 p0 plan 5 SYNSWEEP ended success
-298 p0 order skirmish reinforce Syn_Corvette (tf SweepForce)
-304 p0 order tf SweepForce attack 8
-431 p1 plan 7 SYNDESTROY ended success
-434 p1 fs order attack-move Syn_Frigate 7 (+0) -> (-256, -194) obj 12 Syn_Corvette
-444 p1 plan 9 SYNDESTROY for Syn_Destroy_Unit @OBJECT_12 MainForce
-446 p1 tf MainForce produce: 1 units, 1 pending reinforcements, 0 pads
-472 p0 plan 10 SYNDESTROY for Syn_Destroy_Unit @OBJECT_7 MainForce
-472 p0 tf MainForce produce: 0 units, 1 pending reinforcements, 0 pads
-538 p0 tf SweepForce no units remaining
-538 p0 order skirmish reinforce Syn_Frigate (tf MainForce)
-538 p0 order tf MainForce attack 7 hp 8
-541 p0 plan 8 SYNSWEEP ended success
-605 p1 plan 9 SYNDESTROY ended success
-623 p1 fs order attack-move Syn_Frigate 7 (+0) -> (-3400, -600) obj 2 Syn_Frigate
-637 p1 plan 11 SYNDESTROY for Syn_Destroy_Unit @OBJECT_13 MainForce
-638 p1 tf MainForce produce: 0 units, 1 pending reinforcements, 0 pads
-652 p0 plan 1 SYNESCORT ended success
-657 p0 plan 12 SYNSWEEP for Syn_Sweep_Area @CELL_2_1 SweepForce
-658 p0 tf SweepForce produce: 1 units, 0 pending reinforcements, 0 pads
-664 p0 order tf SweepForce attack-move 1 units -> (1000, -1000)
-665 p1 plan 4 SYNESCORT ended success
-678 p0 plan 13 SYNESCORT for Syn_Escort @global Lead Escort
-678 p0 pp 173 SYNSWEEP: unit 3 reserved by pp 179, plan invalid
-678 p0 plan 12 SYNSWEEP ended failure (released)
-679 p0 tf Lead produce: 1 units, 0 pending reinforcements, 0 pads
-679 p0 tf Escort produce: 2 units, 0 pending reinforcements, 0 pads
-679 p1 plan 14 SYNSWEEP for Syn_Sweep_Area @CELL_0_2 SweepForce
-680 p1 tf SweepForce produce: 1 units, 1 pending reinforcements, 0 pads
-685 p0 order tf Lead move 1 units -> (-3000, -200)
-686 p1 fs order attack-move Syn_Frigate 6 (+0) -> (-3389, -589) obj 2 Syn_Frigate
-692 p1 order skirmish reinforce Syn_Corvette (tf SweepForce)
-692 p1 order tf SweepForce attack-move 1 units -> (-3000, 1000)
-700 p1 plan 15 SYNESCORT for Syn_Escort @global Lead Escort
-700 p1 pp 176 SYNSWEEP: unit 8 reserved by pp 181, plan invalid
-700 p1 plan 14 SYNSWEEP ended failure (released)
-701 p1 tf Lead produce: 1 units, 0 pending reinforcements, 0 pads
-701 p1 tf Escort produce: 1 units, 0 pending reinforcements, 0 pads
-707 p1 order tf Lead move 1 units -> (3000, -600)
-715 p0 order tf Escort guard 2 units -> (-3082, -282) obj 2 Syn_Frigate/p0
-737 p1 order tf Escort guard 1 units -> (2735, -600) obj 6 Syn_Frigate/p1
-749 p1 fs order attack-move Syn_Corvette 14 (+0) -> (-3000, -200) obj 2 Syn_Frigate
-788 p1 order skirmish reinforce Syn_Frigate (tf MainForce)
-788 p1 order tf MainForce attack 13 hp 6
-790 p0 plan 10 SYNDESTROY ended success
-811 p0 fs order attack-move Syn_Frigate 13 (+0) -> (2735, -600) obj 8 Syn_Corvette
-833 p0 plan 16 SYNDESTROY for Syn_Destroy_Unit @OBJECT_14 MainForce
-835 p0 tf MainForce produce: 1 units, 0 pending reinforcements, 0 pads
-841 p0 order tf MainForce attack 14 hp 8
-847 p1 plan 17 SYNSWEEP for Syn_Sweep_Area @CELL_1_1 SweepForce
-848 p1 tf SweepForce produce: 1 units, 0 pending reinforcements, 0 pads
-854 p1 order tf SweepForce attack-move 1 units -> (-1000, -1000)
-941 p1 order tf SweepForce attack 13
-986 p0 tf MainForce no units remaining
-988 p0 plan 16 SYNDESTROY ended failure
-989 p1 plan 11 SYNDESTROY ended success
-989 p1 order tf SweepForce attack 4
-1032 p0 plan 18 SYNDESTROY for Syn_Destroy_Unit @OBJECT_15 MainForce
-1033 p0 tf MainForce produce: 0 units, 1 pending reinforcements, 0 pads
-1045 p0 order skirmish reinforce Syn_Frigate (tf MainForce)
-1045 p0 order tf MainForce attack 15 hp 1
-1085 p1 tf SweepForce no units remaining
-1088 p1 plan 17 SYNSWEEP ended success
-1124 p1 fs order attack-move Syn_Frigate 15 (+0) -> (-3082, -282) obj 3 Syn_Corvette
-1177 p1 plan 19 SYNDESTROY for Syn_Destroy_Unit @OBJECT_16 MainForce
-1178 p1 tf MainForce produce: 1 units, 0 pending reinforcements, 0 pads
-1184 p1 order tf MainForce attack 16 hp 0
-1327 p0 plan 13 SYNESCORT ended success
-1329 p0 plan 20 SYNSWEEP for Syn_Sweep_Area @CELL_1_1 SweepForce
-1330 p0 tf SweepForce produce: 2 units, 0 pending reinforcements, 0 pads
-1336 p0 order tf SweepForce attack-move 2 units -> (-1000, -1000)
-1350 p0 plan 21 SYNESCORT for Syn_Escort @global Lead Escort
-1350 p0 pp 309 SYNSWEEP: unit 3 reserved by pp 318, plan invalid
-1350 p0 plan 20 SYNSWEEP ended failure (released)
-1351 p0 tf Lead produce: 1 units, 0 pending reinforcements, 0 pads
-1351 p0 tf Escort produce: 2 units, 0 pending reinforcements, 0 pads
-1357 p0 order tf Lead move 1 units -> (-2600, -1000)
-1358 p1 plan 15 SYNESCORT ended success
-1366 p1 plan 22 SYNSWEEP for Syn_Sweep_Area @CELL_1_1 SweepForce
-1367 p1 tf SweepForce produce: 1 units, 0 pending reinforcements, 0 pads
-1373 p1 order tf SweepForce attack-move 1 units -> (-1000, -1000)
-1376 p1 fs order attack-move Syn_Frigate 6 (+0) -> (-2136, -608) obj 3 Syn_Corvette
-1387 p0 order tf Escort guard 2 units -> (-2799, -602) obj 2 Syn_Frigate/p0
-1387 p1 plan 23 SYNESCORT for Syn_Escort @global Lead Escort
-1387 p1 pp 319 SYNSWEEP: unit 8 reserved by pp 328, plan invalid
-1387 p1 plan 22 SYNSWEEP ended failure (released)
-1388 p1 tf Lead produce: 1 units, 0 pending reinforcements, 0 pads
-1388 p1 tf Escort produce: 1 units, 0 pending reinforcements, 0 pads
-1394 p1 order tf Lead move 1 units -> (2600, -1000)
-1424 p1 order tf Escort guard 1 units -> (2600, -1000) obj 6 Syn_Frigate/p1
-2020 p0 plan 21 SYNESCORT ended success
-2022 p0 plan 24 SYNSWEEP for Syn_Sweep_Area @CELL_0_1 SweepForce
-2023 p0 tf SweepForce produce: 1 units, 0 pending reinforcements, 0 pads
-2027 p1 plan 23 SYNESCORT ended success
-2029 p0 order tf SweepForce attack-move 1 units -> (-3000, -1000)
-2038 p1 plan 25 SYNSWEEP for Syn_Sweep_Area @CELL_1_2 SweepForce
-2039 p1 tf SweepForce produce: 1 units, 0 pending reinforcements, 0 pads
-2043 p0 plan 26 SYNESCORT for Syn_Escort @global Lead Escort
-2043 p0 pp 546 SYNSWEEP: unit 4 reserved by pp 561, plan invalid
-2043 p0 plan 24 SYNSWEEP ended failure (released)
-2044 p0 tf Lead produce: 1 units, 0 pending reinforcements, 0 pads
-2044 p0 tf Escort produce: 1 units, 0 pending reinforcements, 0 pads
-2045 p1 order tf SweepForce attack-move 1 units -> (-1000, 1000)
-2050 p0 order tf Lead move 1 units -> (-3000, -1000)
-2059 p1 plan 27 SYNESCORT for Syn_Escort @global Lead Escort
-2059 p1 pp 555 SYNSWEEP: unit 8 reserved by pp 567, plan invalid
-2059 p1 plan 25 SYNSWEEP ended failure (released)
-2060 p1 tf Lead produce: 1 units, 0 pending reinforcements, 0 pads
-2060 p1 tf Escort produce: 1 units, 0 pending reinforcements, 0 pads
-2066 p1 order tf Lead move 1 units -> (2600, -1000)
-2071 p0 fs order attack-move Syn_Corvette 3 (+0) -> (-1417, -82) obj 15 Syn_Frigate
-2080 p0 order tf Escort guard 1 units -> (-3000, -1000) obj 2 Syn_Frigate/p0
-2096 p1 order tf Escort guard 1 units -> (2600, -1000) obj 6 Syn_Frigate/p1
-2251 p0 plan 18 SYNDESTROY ended success
-2254 p0 plan 28 SYNRETREAT for Syn_Retreat @global RetreatForce
-2254 p0 order withdraw (tf RetreatForce)
-2254 p0 plan 26 SYNESCORT ended failure (released)
-2260 p0 fs order attack-move Syn_Frigate 2 (+0) -> (-1417, -82) obj 15 Syn_Frigate
-2260 p0 fs order attack-move Syn_Corvette 4 (+0) -> (-1417, -82) obj 15 Syn_Frigate
-2262 p1 plan 29 SYNRETREAT for Syn_Retreat @global RetreatForce
-2264 p1 order withdraw (tf RetreatForce)
-2264 p1 plan 27 SYNESCORT ended failure (released)
-2264 p1 plan 19 SYNDESTROY ended failure (released)
-2321 p1 fs order attack-move Syn_Frigate 6 (+0) -> (247, -148) obj 16 Syn_Frigate
-2321 p1 fs order attack-move Syn_Corvette 8 (+0) -> (247, -148) obj 16 Syn_Frigate
-2386 p0 fs order attack-move Syn_Frigate 2 (+0) -> (1683, -668) obj 6 Syn_Frigate
-2386 p0 fs order attack-move Syn_Corvette 4 (+0) -> (1683, -668) obj 6 Syn_Frigate
+45 p0 plan 5 SYNSWEEP for Syn_Sweep_Area @CELL_2_2 SweepForce
+46 p0 tf SweepForce produce: 0 units, 1 pending reinforcements, 0 pads
+58 p0 order skirmish reinforce Syn_Corvette (tf SweepForce)
+61 p0 order tf Escort guard 2 units -> (-3318, -518) obj 2 Syn_Frigate/p0
+61 p1 order tf Escort guard 1 units -> (2750, -374) obj 6 Syn_Frigate/p1
+64 p0 order tf SweepForce attack 6
+116 p1 plan 6 SYNDESTROY for Syn_Destroy_Unit @OBJECT_10 MainForce
+118 p1 tf MainForce produce: 1 units, 1 pending reinforcements, 0 pads
+280 p1 order tf MainForce attack 10
+286 p0 tf SweepForce no units remaining
+289 p0 plan 3 SYNSWEEP ended success
+289 p1 plan 6 SYNDESTROY ended success
+297 p0 plan 7 SYNSWEEP for Syn_Sweep_Area @CELL_3_2 SweepForce
+298 p0 tf SweepForce produce: 0 units, 1 pending reinforcements, 0 pads
+300 p1 plan 8 SYNDESTROY for Syn_Destroy_Unit @OBJECT_11 MainForce
+301 p1 tf MainForce produce: 1 units, 1 pending reinforcements, 0 pads
+310 p0 order skirmish reinforce Syn_Corvette (tf SweepForce)
+311 p0 tf SweepForce no units remaining
+316 p0 plan 5 SYNSWEEP ended success
+316 p0 order tf SweepForce attack 6
+463 p1 plan 8 SYNDESTROY ended success
+483 p1 plan 9 SYNDESTROY for Syn_Destroy_Unit @OBJECT_12 MainForce
+484 p1 tf MainForce produce: 1 units, 1 pending reinforcements, 0 pads
+556 p0 tf SweepForce no units remaining
+559 p0 plan 7 SYNSWEEP ended success
+560 p0 plan 10 SYNDESTROY for Syn_Destroy_Unit @OBJECT_7 MainForce
+562 p0 tf MainForce produce: 0 units, 2 pending reinforcements, 0 pads
+574 p0 order skirmish reinforce Syn_Frigate (tf MainForce)
+646 p1 plan 9 SYNDESTROY ended success
+673 p0 plan 2 SYNESCORT ended success
+685 p0 fs order attack-move Syn_Frigate 2 (+0) -> (2600, -600) obj 6 Syn_Frigate
+685 p0 fs order attack-move Syn_Corvette 3 (+0) -> (2600, -600) obj 6 Syn_Frigate
+685 p0 fs order attack-move Syn_Corvette 4 (+0) -> (2600, -600) obj 6 Syn_Frigate
+685 p1 plan 1 SYNESCORT ended success
+685 p1 fs order attack-move Syn_Frigate 6 (+0) -> (-3400, -600) obj 2 Syn_Frigate
+685 p1 fs order attack-move Syn_Frigate 7 (+0) -> (-3400, -600) obj 2 Syn_Frigate
+685 p1 fs order attack-move Syn_Corvette 8 (+0) -> (-3400, -600) obj 2 Syn_Frigate
+686 p1 plan 11 SYNSWEEP for Syn_Sweep_Area @CELL_0_2 SweepForce
+688 p1 tf SweepForce produce: 1 units, 1 pending reinforcements, 0 pads
+692 p0 plan 12 SYNSWEEP for Syn_Sweep_Area @CELL_2_1 SweepForce
+694 p0 tf SweepForce produce: 1 units, 0 pending reinforcements, 0 pads
+700 p0 order tf SweepForce attack-move 1 units -> (1000, -1000)
+700 p1 order skirmish reinforce Syn_Corvette (tf SweepForce)
+700 p1 order tf SweepForce attack-move 1 units -> (-3000, 1000)
+709 p1 plan 13 SYNESCORT for Syn_Escort @global Lead Escort
+709 p1 pp 168 SYNSWEEP: unit 8 reserved by pp 175, plan invalid
+709 p1 plan 11 SYNSWEEP ended failure (released)
+709 p1 tf Lead produce: 1 units, 0 pending reinforcements, 0 pads
+709 p1 tf Escort produce: 1 units, 0 pending reinforcements, 0 pads
+714 p0 plan 14 SYNESCORT for Syn_Escort @global Lead Escort
+714 p0 pp 169 SYNSWEEP: unit 3 reserved by pp 176, plan invalid
+714 p0 plan 12 SYNSWEEP ended failure (released)
+715 p0 tf Lead produce: 1 units, 0 pending reinforcements, 0 pads
+715 p0 tf Escort produce: 2 units, 0 pending reinforcements, 0 pads
+715 p1 order tf Lead move 1 units -> (3000, -200)
+721 p0 order tf Lead move 1 units -> (-2600, -1000)
+724 p0 order tf MainForce attack 7 hp 4
+745 p1 order tf Escort guard 1 units -> (2557, -408) obj 6 Syn_Frigate/p1
+748 p1 fs order attack-move Syn_Corvette 14 (+0) -> (-2639, -940) obj 2 Syn_Frigate
+751 p0 order tf Escort guard 2 units -> (-2615, -977) obj 2 Syn_Frigate/p0
+755 p1 plan 15 SYNDESTROY for Syn_Destroy_Unit @OBJECT_1 MainForce
+757 p1 tf MainForce produce: 2 units, 0 pending reinforcements, 0 pads
+763 p1 order tf MainForce attack 1 hp 2
+1019 p1 plan 16 SYNDESTROY for Syn_Destroy_Unit @OBJECT_13 MainForce
+1021 p1 tf MainForce produce: 0 units, 1 pending reinforcements, 0 pads
+1050 p1 tf MainForce no units remaining
+1051 p1 plan 15 SYNDESTROY ended failure
+1051 p1 order skirmish reinforce Syn_Frigate (tf MainForce)
+1051 p1 order tf MainForce attack 13 hp 7
+1054 p0 plan 10 SYNDESTROY ended success
+1201 p1 plan 16 SYNDESTROY ended success
+1218 p0 plan 17 SYNDESTROY for Syn_Destroy_Unit @OBJECT_15 MainForce
+1219 p0 tf MainForce produce: 0 units, 1 pending reinforcements, 0 pads
+1231 p0 order skirmish reinforce Syn_Frigate (tf MainForce)
+1231 p0 order tf MainForce attack 15 hp 0
+1252 p1 fs order attack-move Syn_Frigate 15 (+0) -> (-2615, -977) obj 3 Syn_Corvette
+1357 p0 plan 14 SYNESCORT ended success
+1372 p0 plan 18 SYNSWEEP for Syn_Sweep_Area @CELL_2_2 SweepForce
+1372 p0 tf SweepForce produce: 1 units, 0 pending reinforcements, 0 pads
+1375 p1 plan 19 SYNDESTROY for Syn_Destroy_Unit @OBJECT_16 MainForce
+1375 p1 tf MainForce produce: 1 units, 0 pending reinforcements, 0 pads
+1378 p0 order tf SweepForce attack-move 1 units -> (1000, 1000)
+1378 p0 fs order attack-move Syn_Frigate 2 (+0) -> (-451, -542) obj 15 Syn_Frigate
+1378 p0 fs order attack-move Syn_Corvette 4 (+0) -> (-451, -542) obj 15 Syn_Frigate
+1381 p1 plan 13 SYNESCORT ended success
+1381 p1 order tf MainForce attack 16 hp 6
+1394 p0 plan 20 SYNESCORT for Syn_Escort @global Lead Escort
+1394 p0 pp 314 SYNSWEEP: unit 3 reserved by pp 320, plan invalid
+1394 p0 plan 18 SYNSWEEP ended failure (released)
+1396 p0 tf Lead produce: 1 units, 0 pending reinforcements, 0 pads
+1396 p0 tf Escort produce: 2 units, 0 pending reinforcements, 0 pads
+1397 p1 plan 21 SYNSWEEP for Syn_Sweep_Area @CELL_1_1 SweepForce
+1399 p1 tf SweepForce produce: 1 units, 0 pending reinforcements, 0 pads
+1402 p0 order tf Lead move 1 units -> (-2600, -1000)
+1405 p1 order tf SweepForce attack-move 1 units -> (-1000, -1000)
+1419 p1 plan 22 SYNESCORT for Syn_Escort @global Lead Escort
+1419 p1 pp 317 SYNSWEEP: unit 8 reserved by pp 328, plan invalid
+1419 p1 plan 21 SYNSWEEP ended failure (released)
+1420 p1 tf Lead produce: 1 units, 0 pending reinforcements, 0 pads
+1420 p1 tf Escort produce: 1 units, 0 pending reinforcements, 0 pads
+1426 p1 order tf Lead move 1 units -> (3000, -600)
+1432 p0 order tf Escort guard 2 units -> (-2600, -1000) obj 2 Syn_Frigate/p0
+1456 p1 order tf Escort guard 1 units -> (3000, -600) obj 6 Syn_Frigate/p1
+2032 p0 plan 20 SYNESCORT ended success
+2054 p0 plan 23 SYNSWEEP for Syn_Sweep_Area @CELL_0_1 SweepForce
+2056 p0 tf SweepForce produce: 1 units, 0 pending reinforcements, 0 pads
+2056 p1 plan 22 SYNESCORT ended success
+2057 p1 plan 24 SYNSWEEP for Syn_Sweep_Area @CELL_1_2 SweepForce
+2059 p1 tf SweepForce produce: 1 units, 0 pending reinforcements, 0 pads
+2062 p0 order tf SweepForce attack-move 1 units -> (-3000, -1000)
+2065 p1 order tf SweepForce attack-move 1 units -> (-1000, 1000)
+2071 p0 fs order attack-move Syn_Frigate 2 (+0) -> (-1251, -78) obj 15 Syn_Frigate
+2071 p0 fs order attack-move Syn_Corvette 4 (+0) -> (-1251, -78) obj 15 Syn_Frigate
+2071 p1 fs order attack-move Syn_Frigate 6 (+0) -> (-2600, -1000) obj 4 Syn_Corvette
+2076 p0 plan 25 SYNESCORT for Syn_Escort @global Lead Escort
+2076 p0 pp 553 SYNSWEEP: unit 3 reserved by pp 569, plan invalid
+2076 p0 plan 23 SYNSWEEP ended failure (released)
+2077 p0 tf Lead produce: 1 units, 0 pending reinforcements, 0 pads
+2077 p0 tf Escort produce: 2 units, 0 pending reinforcements, 0 pads
+2079 p1 plan 26 SYNESCORT for Syn_Escort @global Lead Escort
+2079 p1 pp 557 SYNSWEEP: unit 8 reserved by pp 572, plan invalid
+2079 p1 plan 24 SYNSWEEP ended failure (released)
+2080 p1 tf Lead produce: 1 units, 0 pending reinforcements, 0 pads
+2080 p1 tf Escort produce: 1 units, 0 pending reinforcements, 0 pads
+2083 p0 order tf Lead move 1 units -> (-2600, -600)
+2086 p1 order tf Lead move 1 units -> (3400, -1000)
+2113 p0 order tf Escort guard 2 units -> (-2600, -600) obj 2 Syn_Frigate/p0
+2116 p1 order tf Escort guard 1 units -> (3159, -852) obj 6 Syn_Frigate/p1
+2122 p1 tf Escort no units remaining
+2255 p1 plan 27 SYNRETREAT for Syn_Retreat @global RetreatForce
+2257 p1 order withdraw (tf RetreatForce)
+2257 p1 plan 26 SYNESCORT ended failure (released)
+2257 p1 plan 19 SYNDESTROY ended failure (released)
+2260 p1 fs order attack-move Syn_Frigate 6 (+0) -> (-2600, -600) obj 2 Syn_Frigate
+2260 p1 fs order attack-move Syn_Frigate 15 (+0) -> (-2600, -600) obj 2 Syn_Frigate
+2267 p0 plan 28 SYNRETREAT for Syn_Retreat @global RetreatForce
+2269 p0 order withdraw (tf RetreatForce)
+2269 p0 plan 25 SYNESCORT ended failure (released)
+2269 p0 plan 17 SYNDESTROY ended failure (released)
+2449 p0 fs order attack-move Syn_Frigate 2 (+0) -> (571, -811) obj 6 Syn_Frigate
+2449 p0 fs order attack-move Syn_Corvette 3 (+0) -> (571, -811) obj 6 Syn_Frigate
+2449 p0 fs order attack-move Syn_Corvette 4 (+0) -> (571, -811) obj 6 Syn_Frigate
+2449 p0 fs order attack-move Syn_Frigate 16 (+0) -> (571, -811) obj 6 Syn_Frigate
 exec p0 MoveToPositionFacing
 exec p1 MoveToPositionFacing
 exec p0 Reinforce key 1001
@@ -201,49 +200,51 @@ exec p0 Attack ref2 0
 exec p1 Attack ref2 0
 exec p0 Reinforce key 1004
 exec p0 Attack ref2 0
+exec p0 Reinforce key 1005
+exec p0 PortExtension sub 2 units 1
+exec p0 PortExtension sub 2 units 1
+exec p0 PortExtension sub 2 units 1
 exec p1 PortExtension sub 2 units 1
-exec p0 Reinforce key 1002
-exec p0 Attack ref2 9
+exec p1 PortExtension sub 2 units 1
 exec p1 PortExtension sub 2 units 1
 exec p0 PortExtension sub 2 units 1
-exec p0 MoveToPositionFacing
-exec p1 PortExtension sub 2 units 1
 exec p1 Reinforce key 2001
 exec p1 PortExtension sub 2 units 1
 exec p1 MoveToPositionFacing
-exec p0 PortExtension sub 3 units 2
+exec p0 MoveToPositionFacing
+exec p0 Attack ref2 5
 exec p1 PortExtension sub 3 units 1
 exec p1 PortExtension sub 2 units 1
+exec p0 PortExtension sub 3 units 2
+exec p1 Attack ref2 3
 exec p1 Reinforce key 2002
+exec p1 Attack ref2 8
+exec p0 Reinforce key 1002
+exec p0 Attack ref2 1
+exec p1 PortExtension sub 2 units 1
+exec p0 PortExtension sub 2 units 1
+exec p0 PortExtension sub 2 units 1
+exec p0 PortExtension sub 2 units 1
 exec p1 Attack ref2 7
-exec p0 PortExtension sub 2 units 1
-exec p0 Attack ref2 9
-exec p1 PortExtension sub 2 units 1
-exec p1 Attack ref2 0
-exec p1 Attack ref2 0
-exec p0 Reinforce key 1005
-exec p0 Attack ref2 2
-exec p1 PortExtension sub 2 units 1
-exec p1 Attack ref2 1
-exec p0 PortExtension sub 2 units 2
 exec p0 MoveToPositionFacing
 exec p1 PortExtension sub 2 units 1
-exec p1 PortExtension sub 2 units 1
+exec p1 MoveToPositionFacing
 exec p0 PortExtension sub 3 units 2
-exec p1 MoveToPositionFacing
 exec p1 PortExtension sub 3 units 1
+exec p0 PortExtension sub 2 units 1
+exec p1 PortExtension sub 2 units 1
+exec p0 PortExtension sub 2 units 1
 exec p0 PortExtension sub 2 units 1
 exec p1 PortExtension sub 2 units 1
 exec p0 MoveToPositionFacing
 exec p1 MoveToPositionFacing
-exec p0 PortExtension sub 2 units 1
-exec p0 PortExtension sub 3 units 1
+exec p0 PortExtension sub 3 units 2
 exec p1 PortExtension sub 3 units 1
-exec p0 Retreat
-exec p0 PortExtension sub 2 units 1
-exec p0 PortExtension sub 2 units 1
 exec p1 Retreat
 exec p1 PortExtension sub 2 units 1
 exec p1 PortExtension sub 2 units 1
+exec p0 Retreat
+exec p0 PortExtension sub 2 units 1
+exec p0 PortExtension sub 2 units 1
 exec p0 PortExtension sub 2 units 1
 exec p0 PortExtension sub 2 units 1
