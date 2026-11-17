@@ -477,6 +477,14 @@ Player" as a heading with no button under it); on Age of Legends the skirmish st
 to select. Age of Legends' main menu draws its own background and title. Both are **modc t34**; t09 looks at them in the
 game.
 
+**modc t34 (2026-11-17):** both stops were general gaps. The Remake's main menu writes the Single Player button as
+`265,550,215,,22`; retail splits `.rc` words on runs of spaces, tabs and commas (UI.md 3.2), so it is a 22-unit-high
+button, while the port read an empty height. Age of Legends' skirmish staging dialog has no `IDC_GAME_TYPE_LIST` at all:
+the dialog keeps its default type, and the smoke now notes that instead of waiting for a row. With both fixed the Remake
+smoke reaches a running space skirmish (it then stops at the smoke's control-group step: **t40**), and the Age of Legends
+smoke reaches the battle start as slot 0's default faction, the mod's list-header faction `Faction_Header_Major_Powers`,
+which has nothing to buy (**t41**).
+
 **General gaps found and fixed** (none names a mod; base-FoC goldens unchanged):
 
 - `Find_Nearest` raised "invalid type for parameter 2" for a non-player in its player slot (a mod's free store passes the
