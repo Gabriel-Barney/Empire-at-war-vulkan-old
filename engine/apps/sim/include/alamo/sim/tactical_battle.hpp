@@ -218,6 +218,7 @@ struct BattleStats {
     uint32_t attack_unseen_drops = 0;
     // cmb1 t01 (land Auto_Engage, LandFormationRecord; not saved): auto attack blocks pushed and popped (the order resumed)
     uint32_t land_auto_pushes = 0, land_auto_pops = 0;
+    uint32_t land_step10_pushes = 0;  // cmb2 t07: MovingVsStopped step 10 attack blocks issued (not saved)
     // cmb1 t04 (land guard follow; not saved): re-plans while moving (D > R), arrived re-checks that re-planned (0x410a60),
     // re-plans toward the last-observed point and position guards made (C 3)
     uint32_t guard_repaths = 0, guard_rechecks = 0, guard_unseen_plans = 0, guard_unseen_drops = 0;
@@ -1324,6 +1325,10 @@ public:
     size_t arrivals_pending() const { return arrivals_.size(); }
     // s78n t20 stage A: the land attack blocks alive (AttackBlock records, one per mover).
     size_t attack_blocks() const { return attack_blocks_.size(); }
+    // cmb2 t07 (BKR2_RE_ANSWERS Q3 [H]): one MovementSystem::formation_attacks() pair - the mover's land formation (its
+    // record) gets the kind-3 attack block on a hostile target (Push 0x41fd30). False: no record, locked, already on it,
+    // the target gone or not hostile. land_engage_service runs it for every pair of the tick; public for tests.
+    bool land_step10_attack(TacticalMode& mode, objects::ObjectId mover, objects::ObjectId target, SimRng& rng);
     // cmb2 t04 (tests): the hard point the mover's land attack block names (-1 none or no block)
     int32_t attack_block_hp(objects::ObjectId mover) const {
         for (const AttackBlock& r : attack_blocks_)
@@ -1924,6 +1929,8 @@ private:
     bool land_auto_pushed(objects::ObjectId unit) const;  // the unit's mover record holds an auto block
     std::vector<objects::ObjectId> land_mover_units(objects::ObjectId mover) const;  // a squad's members, else the mover
     objects::ObjectId land_mover_target_unit(objects::ObjectId mover);  // its TARGETING unit (the container, else the lead)
+    // Push 0x41fd30 of an auto / step-10 attack block on object t (unit tu: the record's TARGETING unit)
+    void land_push(TacticalMode& mode, LandFormationRecord& r, objects::ObjectId tu, const Unit& t, SimRng& rng);
     void land_pop(TacticalMode& mode, LandFormationRecord& r, SimRng& rng);  // 0x4105a0 of the auto block: the order resumes
     uint32_t land_type_of(objects::ObjectId mover) const;
     // cmb1 review: a block's object as a live unit - the unit, or for a land TEAM container its first live member ([port],

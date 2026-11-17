@@ -236,6 +236,11 @@ void TacticalBattle::land_engage_service(TacticalMode& mode, SimRng& rng) {
         if (c.removed || !combat_->has_unit(c.id)) continue;
         combat_->set_flag(c.id, tc::kUnitScanQuery, movement_->has_unit(c.id) && land_formation(c.id) != nullptr);
     }
+    // cmb2 t07 (BKR2_RE_ANSWERS Q3 [H], mov1 t06): MovingVsStopped step 10 (0x685490) found a hostile unit on the mover's
+    // probe detour - its formation F gets the kind-3 attack block on it (flags 0, +0x50 = 1, Push 0x41fd30: the attack slots
+    // and the plan), so the whole formation switches to attacking it. F null (no land formation record) -> nothing
+    // ([port] the movement already resolved the pair). The pairs in the movement's order (its serial tick).
+    for (const mv::MovementSystem::FormationAttack& fa : movement_->formation_attacks()) (void)land_step10_attack(mode, fa.mover, fa.target, rng);
     // Per record, ascending mover (land_attack_order / land_pop do not touch lformations_).
     for (size_t i = 0; i < lformations_.size(); ++i) {
         LandFormationRecord& r = lformations_[i];
@@ -332,23 +337,48 @@ void TacticalBattle::land_engage_service(TacticalMode& mode, SimRng& rng) {
         if (t == goal || (r.pushed == objects::kNoObjectId && land_goal_member(goal, t))) continue;
         float rr = 0.0f;
         if (land_chase(st, r, tu, t, combat_->attack_range(tu), rr) == 0) continue;
-        // Push 0x41fd30: the block goes on top (the pre-pop drops an earlier auto block, never the order's own); the
-        // formation goal becomes t (path B locks it in weapon range: the units' attack goal); the members plan to it
-        // (land_attack_order; the AttackBlock with kAttackBlockNoLock carries its 30-frame checks: no unit's order names it)
-        const std::vector<objects::ObjectId> us = land_mover_units(r.mover);
-        if (us.empty()) continue;
-        const Vec3 tp = st.position(tt->h);
-        r.pushed = t;
-        r.next = frame_ + 30u;
-        // cmb2 t04 (FIGHTER_FLYING §4.11 B, BKT1_ATTACK_RE §1.3 [H]): Push gives the block a hard point when the object has
-        // hard points (0x394610 Choose_Target_Hardpoint for the TARGETING unit; -1 none)
-        const int32_t hp = combat_->hardpoint_count(t) > 0 ? combat_->choose_target_hardpoint(tu, t) : -1;
-        for (const objects::ObjectId id : us)
-            if (combat_->has_unit(id)) combat_->set_attack_goal(id, t, hp);
-        attack_block_set(us.front(), t, kAttackBlockNoLock, tp, hp);
-        (void)land_attack_order(mode, us, t, tp, 0, false, rng);
+        if (land_mover_units(r.mover).empty()) continue;
+        land_push(mode, r, tu, *tt, rng);
         ++stats_.land_auto_pushes;
     }
+}
+
+bool TacticalBattle::land_step10_attack(TacticalMode& mode, objects::ObjectId mover, objects::ObjectId target, SimRng& rng) {
+    if (space_ || !movement_ || !combat_) return false;
+    const objects::ObjectStore& st = mode.primary();
+    const auto live = [&](objects::ObjectId id) -> const Unit* {
+        const Unit* x = id != objects::kNoObjectId ? unit_by_id(id) : nullptr;
+        return x && x->alive && !x->retreated && st.alive(x->h) && combat_->has_unit(x->id) ? x : nullptr;
+    };
+    const auto it = std::lower_bound(lformations_.begin(), lformations_.end(), mover,
+                                     [](const LandFormationRecord& x, objects::ObjectId m) { return x.mover < m; });
+    if (it == lformations_.end() || it->mover != mover || it->locked || it->pushed == target) return false;
+    const Unit* tt = live(target);
+    const objects::ObjectId tu = land_mover_target_unit(mover);
+    const Unit* lu = live(attack_lead(mover));
+    if (!tt || !lu || tu == objects::kNoObjectId || !combat_->has_unit(tu)) return false;
+    if (!combat_->is_enemy(st.owner(lu->h), st.owner(tt->h))) return false;
+    land_push(mode, *it, tu, *tt, rng);
+    ++stats_.land_step10_pushes;
+    return true;
+}
+
+// Push 0x41fd30: the block goes on top (the pre-pop drops an earlier auto block, never the order's own); the formation goal
+// becomes t (path B locks it in weapon range: the units' attack goal); the members plan to it (land_attack_order; the
+// AttackBlock with kAttackBlockNoLock carries its 30-frame checks: no unit's order names it).
+void TacticalBattle::land_push(TacticalMode& mode, LandFormationRecord& r, objects::ObjectId tu, const Unit& t, SimRng& rng) {
+    const std::vector<objects::ObjectId> us = land_mover_units(r.mover);
+    if (us.empty()) return;
+    const Vec3 tp = mode.primary().position(t.h);
+    r.pushed = t.id;
+    r.next = frame_ + 30u;
+    // cmb2 t04 (FIGHTER_FLYING §4.11 B, BKT1_ATTACK_RE §1.3 [H]): Push gives the block a hard point when the object has hard
+    // points (0x394610 Choose_Target_Hardpoint for the TARGETING unit; -1 none)
+    const int32_t hp = combat_->hardpoint_count(t.id) > 0 ? combat_->choose_target_hardpoint(tu, t.id) : -1;
+    for (const objects::ObjectId id : us)
+        if (combat_->has_unit(id)) combat_->set_attack_goal(id, t.id, hp);
+    attack_block_set(us.front(), t.id, kAttackBlockNoLock, tp, hp);
+    (void)land_attack_order(mode, us, t.id, tp, 0, false, rng);
 }
 
 // 0x4105a0 of the auto block (FIGHTER_FLYING §4.11 B 1): the order's own block is the top again and the formation plans to

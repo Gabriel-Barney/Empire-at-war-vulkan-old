@@ -182,6 +182,70 @@ LandAutoEngageRun run_land_auto_engage(const Data& d) {
     return out;
 }
 
+// cmb2 t07 (BKR2_RE_ANSWERS Q3 [H]): a MovingVsStopped step-10 pair {mover, hostile target} pushes the kind-3 attack block
+// onto the mover's land formation (TacticalBattle::land_step10_attack, the consumer of MovementSystem::formation_attacks()):
+// a squad never ordered has no formation record (F null -> nothing); once ordered, the pair on an enemy member pushes it
+// (the record's `pushed`, an attack block, the squad's attack goal); the same pair again and a pair on a friendly unit do
+// nothing.
+struct LandStep10Run {
+    bool found = false, no_record_refused = false, pushed = false, block = false, goal = false, again_refused = false;
+    bool friend_refused = false;
+};
+
+LandStep10Run run_land_step10(const Data& d) {
+    LandStep10Run out;
+    CampaignBattleOptions opt;
+    opt.conflict.human_choice = galactic::BattleChoice::Fight;
+    opt.battle.max_frames = 600;
+    opt.battle.skip_human_units = true;
+    opt.battle.order_interval = 0;
+    opt.battle.fog = false;
+    ClashSession s(d, 0, opt, {"S10_Squad"}, {}, true);
+    if (!s.gs) return out;
+    for (uint64_t t = 0; t < 600; ++t) {
+        TacticalBattle* b = s.tick();
+        TacticalMode* tm = s.host->tactical();
+        if (!b || !tm || b->frame() < 3) continue;
+        objects::ObjectStore& st = tm->primary();
+        auto& cs = const_cast<tc::CombatSystem&>(b->combat());
+        const mv::MovementSystem& ms = b->movement();
+        objects::ObjectId sq = objects::kNoObjectId, enemy = objects::kNoObjectId;
+        std::vector<objects::ObjectId> mem;
+        std::map<uint32_t, std::vector<objects::ObjectId>> teams;
+        for (size_t i = 0; i < cs.unit_count(); ++i) {
+            const auto id = cs.unit_id_at(i);
+            if (cs.team(id) != 0 && cs.alive(id)) teams[cs.team(id)].push_back(id);
+        }
+        for (const auto& [tid, m] : teams) {
+            const auto cid = static_cast<objects::ObjectId>(tid);
+            const objects::ObjectHandle th = st.find(cid);
+            if (m.size() < 2 || !st.alive(th) || !ms.has_unit(cid)) continue;
+            if (st.owner(th) == 0 && sq == objects::kNoObjectId) {
+                sq = cid;
+                mem = m;
+            } else if (st.owner(th) == 1 && enemy == objects::kNoObjectId) {
+                enemy = m.front();
+            }
+        }
+        out.found = sq != objects::kNoObjectId && enemy != objects::kNoObjectId;
+        CHECK(out.found);
+        if (!out.found) break;
+        SimRng& rng = s.host->random().synced();
+        out.no_record_refused = !b->land_step10_attack(*tm, sq, enemy, rng) && record_of(*b, sq) == nullptr;
+        const mv::UnitView v = ms.view(sq);
+        CHECK(b->order_move(*tm, 0, mem, v.pos.x + 60.0f, v.pos.y, rng) == commands::RejectReason::None);
+        out.pushed = b->land_step10_attack(*tm, sq, enemy, rng);
+        const LandFormationRecord* r = record_of(*b, sq);
+        out.pushed = out.pushed && r && r->pushed == enemy && b->stats().land_step10_pushes == 1;
+        out.block = b->attack_blocks() > 0;
+        out.goal = cs.attack_goal(mem.front()) == enemy;
+        out.again_refused = !b->land_step10_attack(*tm, sq, enemy, rng);
+        out.friend_refused = !b->land_step10_attack(*tm, sq, mem.back(), rng);
+        break;
+    }
+    return out;
+}
+
 // cmb1 t03 (BKR1 Q8 table [H]): the scan cube of a non-turret land unit moving on a plain Move_To is 0 - a squad that starts
 // its move 200 from an enemy squad (inside the weapon range 250) acquires nothing while it walks away; the same start with
 // an Attack_Move (R + Attack_Move_Response_Range while under way) acquires the enemy.
@@ -342,6 +406,15 @@ void test_land_auto_engage() {
         std::printf("  land Auto_Engage with a hard point on the target: pushed %d, hard point %d (without: %d)\n", h.pushed ? 1 : 0,
                     h.push_hp, r.push_hp);
         CHECK(h.pushed && h.push_hp >= 0);
+    }
+    {
+        auto d = chase_data(true);
+        const LandStep10Run r = run_land_step10(*d);
+        std::printf("  land step-10 attack block (cmb2 t07): no record -> refused %d; ordered -> pushed %d, attack block %d, attack goal %d; "
+                    "again refused %d, friendly refused %d\n",
+                    r.no_record_refused ? 1 : 0, r.pushed ? 1 : 0, r.block ? 1 : 0, r.goal ? 1 : 0, r.again_refused ? 1 : 0,
+                    r.friend_refused ? 1 : 0);
+        CHECK(r.found && r.no_record_refused && r.pushed && r.block && r.goal && r.again_refused && r.friend_refused);
     }
     {
         auto d = chase_data(true);
