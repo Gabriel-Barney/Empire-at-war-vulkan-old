@@ -39,6 +39,7 @@
 #include "alamo/game/mod_picker.hpp"
 #include "alamo/game/radar_feed.hpp"
 #include "alamo/game/save_games.hpp"
+#include "alamo/game/story_camera.hpp"
 #include "alamo/game/story_present.hpp"
 #include "alamo/game/story_ui.hpp"
 #include "alamo/game/world_pick.hpp"
@@ -250,9 +251,9 @@ public:
     void cinematic_step();    // per frame after the sim: shot clock, timer end, letterbox slide
     void cinematic_input(ui::InputFrame& raw);  // §11.2 input skip rules (before the HUD / world routing)
     bool cinematic_camera(ui::CameraParams& cp);  // the shot's camera over the RTS params; false when no shot runs
-    bool cinematic_hides_hud() const { return cine_.shot.active(); }
+    bool cinematic_hides_hud() const { return cine_.shot.active() || story_hides_hud(); }
     // The cursor is hidden unless the attract demo runs; [port] a GUI dialog with the focus (pause menu) shows it again.
-    bool cinematic_hides_cursor() const { return cine_.shot.active() && !demo_session() && !ui_.gui.has_focus(); }
+    bool cinematic_hides_cursor() const { return (cine_.shot.active() || story_cam_.active() || story_lua_mode_ || story_present_.cinematic_mode()) && !demo_session() && !ui_.gui.has_focus(); }
     void draw_letterbox(ui::HudDrawList& dl, const ui::HudCanvas& canvas, uint32_t w, uint32_t h) const;
     // story t13 (story_ui.hpp LinkedBattleOverlay): a story-linked battle's P10 letterbox / P11 input block and the story
     // scripts' letterbox, drawn by draw_letterbox with the cinematic's bars; begun by begin_battle, stepped by
@@ -614,6 +615,29 @@ public:
     bool story_type_position(std::string_view type, ui::Vec3& out) const;
     bool story_object_position(int32_t object, ui::Vec3& out) const;
     std::set<int32_t> story_flashed_;  // components whose runtime flash the presenter set
+    // ui2 t03 / t04 / t05 (app_story_camera.cpp): the script's fade, bars, cinematic camera and RTS camera moves.
+    ScreenFade story_fade_;
+    ScreenLetterbox story_box_;
+    ScriptCamera story_cam_;
+    bool story_lua_mode_ = false;  // Start_Cinematic_Mode .. End_Cinematic_Mode
+    struct ScriptMoves {
+        bool scroll = false, follow_on_arrival = false, following = false, rotate = false;
+        ui::Vec3 target;
+        int32_t follow_object = -1;
+        float yaw0 = 0.0f, dyaw = 0.0f;
+        double t0 = 0.0, duration = 0.0;
+    } story_moves_;
+    Screen story_fx_screen_ = Screen::Menu;
+    uint64_t story_fx_battle_ = 0;
+    void story_script_event(const lua::PresentationEvent& e);
+    void story_script_frame();
+    void story_camera_commands();
+    void build_story_fade(ui::HudDrawList& dl, const ui::HudCanvas& canvas, uint32_t w, uint32_t h) const;
+    uint32_t story_frame() const;
+    bool story_object_frame(int32_t id, ObjectFrame& out) const;
+    ScriptPose story_rts_pose() const;
+    bool story_camera_view(ui::CameraParams& cp) const;
+    bool story_hides_hud() const;
     int32_t story_page_ = -1;   // ui ask 11: the GUI image page the story movie fills (the dialog portrait), -1 none
     void galactic_screens();
     void open_holocron(ui::InfoPage page);

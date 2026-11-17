@@ -250,6 +250,7 @@ void App::lua_presentation() {
             // STY1 t07: Retry ("Load autosave") loads [AutoSave], written when the battle began (handle_screen_actions).
             if (screens_.show_retry()) ++retry_boxes_;
         }
+        story_script_event(e);  // ui2 t03 / t04 / t05: fades, bars, the script cinematic camera, the RTS camera moves
         if (session_->battle()) {  // story t13: the battle's letterbox overlay and the P11 hand-over (story_ui.hpp)
             using Op = lua::PresentationOp;
             if (e.op == Op::LetterBoxIn || e.op == Op::LetterBoxOn) linked_ui_.script_letterbox(true);

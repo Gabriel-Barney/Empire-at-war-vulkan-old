@@ -190,7 +190,7 @@ bool App::render_frame() {
     for (const ui::HudDrawList& pl : panel_lists) merge_lists(hud_list, pl);
     if ((galactic || battle_hud) && !bench_active()) build_encyclopedia(hud_list, *canvas);  // BM2a: no tooltips
     if (!bench_active()) build_story_overlay(hud_list, *canvas);  // ui2: story text lines, advisor hint (and the pointers)
-    if (battle_view) draw_letterbox(dialogs, *canvas, w, h);  // refixf t05: cinematic letterbox, over the world, under the dialogs
+    if (battle_view || galactic) draw_letterbox(dialogs, *canvas, w, h);  // refixf t05: cinematic letterbox, over the world, under the dialogs
     // OI host: the attract demo world under the menu. GuiManager's backdrop paints an opaque black fill under the
     // MenuBack_overlay quad, which would hide the world: left out while the demo is drawn [port: until engine/ui draws the
     // overlay alone - stretched to the window, straight alpha - over a world, MAIN_MENU_BACKGROUND.md §6.4].
@@ -232,6 +232,7 @@ bool App::render_frame() {
             dialogs.add(ui::kHudLayers - 1, ui::HudList::Alpha, q);
         }
     }
+    build_story_fade(dialogs, *canvas, w, h);  // ui2 t04: Fade_Screen_In / _Out, Fade_On / _Off (render clock)
     // Playtest QA D1: the end-of-battle hold ends in a fade to black over its last 2 s [port]
     if (const sim::TacticalBattle* hb = battle(); hb && hb->end_hold_active()) {
         const float fade = 1.0f - std::min(static_cast<float>(hb->end_hold_frames_left()) / 60.0f, 1.0f);
@@ -562,6 +563,7 @@ void App::frame() {
     lua_presentation();
     linked_ui_step();  // story t13: after this frame's Lua ops
     story_reward_step();  // L1/S4 wave 1: START_MOVIE / MULTIMEDIA reward media
+    story_script_frame();  // ui2: the script's bars / camera moves / camera rewards, mode-change reset
     if (screen_ == Screen::Galactic && session_) galactic_screens();
     if (bench_active()) bench_autopilot();  // BM2a: battle prompts, load screens, battle-end and story dialogs, movies
     if (screen_ != Screen::Movie) {
