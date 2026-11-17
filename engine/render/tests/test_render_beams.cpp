@@ -407,6 +407,58 @@ static void test_frame_resolution() {
     CHECK(render::beams_from_frame(f, &styles, bone).size() == 1);  // only the zap (fixed end) remains
 }
 
+// vis1 t08 (ABILITY_PARTICLES §5): Drain_Life bolts - one record per victim (own key), the far end at Drain_Target_Bone_Name
+// when the victim's model has it (else centre + z adjust), and a style without a texture draws its lightning only.
+static void test_drain_beams() {
+    render::InterpolatedFrame f;
+    f.objects = {obj(10, 0, 0, 0, 0, 0), obj(20, 1, 600, 0, 0, 1), obj(30, 1, 600, 500, 0, 1)};
+    const render::BeamBoneFn bone = [](const render::SnapshotObject& o, std::string_view name, Vec3& out) {
+        if (o.id == 10 && name == "HP_Drain") out = {4, 0, 20};
+        else if (o.id == 20 && name == "B_Chest") out = {601, 0, 9};
+        else return false;
+        return true;
+    };
+    render::SnapshotBeam d;
+    d.kind = render::kBeamDrain;
+    d.owner = 10;
+    d.end_z_adjust = 6.0f;
+    d.style.texture.clear();
+    d.style.lightning = "Tractor_Beam";
+    d.style.start_bone = "HP_Drain";
+    d.style.end_bone = "B_Chest";
+    render::SnapshotBeam d2 = d;
+    d.target = 20;
+    d2.target = 30;
+    f.beams = {d, d2};
+    CHECK(render::beam_key(d) != render::beam_key(d2));
+    const std::vector<render::BeamInstance> out = render::beams_from_frame(f, nullptr, bone);
+    CHECK(out.size() == 2);
+    if (out.size() == 2) {
+        CHECK(out[0].continuous && out[0].start.x == 4.0f && out[0].start.z == 20.0f && out[0].end.x == 601.0f && out[0].end.z == 9.0f);
+        CHECK(out[1].end.y == 500.0f && out[1].end.z == 6.0f);  // no B_Chest: centre + Ranged_Target_Z_Adjust
+    }
+    // geometry: bolts only, no ribbon / dots; without a lightning effect nothing is drawn
+    const render::LightningLibrary lib = render::LightningLibrary::builtin();
+    render::BeamAnimator an(1u);
+    an.set_lightning(&lib);
+    for (uint64_t k = 0; k < 20; ++k) an.step(k, out);
+    render::OrbitCamera cam;
+    cam.distance = 900.0f;
+    const render::ViewMatrices view = render::make_view(cam, 640, 360, 10.0f, 7000.0f);
+    render::BeamGeometry geo;
+    geo.build(an.draws(), view);
+    CHECK(geo.ribbons == 0 && geo.dots == 0 && geo.skipped == 0 && geo.bolts >= 2);
+    for (const render::BeamGeometry::Batch& b : geo.batches) CHECK(!b.texture.empty());
+    std::vector<render::BeamInstance> bare = out;
+    for (render::BeamInstance& b : bare) b.style.lightning.clear();
+    render::BeamAnimator an2(1u);
+    an2.set_lightning(&lib);
+    an2.step(0, bare);
+    render::BeamGeometry g2;
+    g2.build(an2.draws(), view);
+    CHECK(g2.ribbons == 0 && g2.bolts == 0 && g2.skipped == 2 && g2.vertices.empty());
+}
+
 static void test_snapshot_fields() {
     render::SimSnapshot a, b;
     a.objects = {obj(1, 0, 0, 0, 0, 0), obj(2, 0, 100, 0, 0, 1)};
@@ -885,6 +937,7 @@ int main() {
     test_animation();
     test_geometry_build();
     test_frame_resolution();
+    test_drain_beams();  // vis1 t08
     test_snapshot_fields();
     test_apply_beams();
     const bool strict = render::setup_validation_env(src_dir);

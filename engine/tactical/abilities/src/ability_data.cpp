@@ -447,6 +447,18 @@ SpecialAbilityDesc parse_special_ability(const data::XmlNode& e, const AbilityRe
     for (std::string_view b : data::split_list(e.child_text("Target_Particle_Bone_Name"))) s.target_particle_bones.emplace_back(b);
     s.stunned_effect = s_or(e, "Stunned_Effect");
     s.infection_particle = s_or(e, "Infection_Particle");
+    // vis1 t08 (presentation only): the Drain_Life lightning, the Force_Healing range blob.
+    if (s.cls == SpecialClass::DrainLife) {
+        s.drain_effect = s_or(e, "Drain_Effect_Name");
+        s.drain_source_bone = s_or(e, "Drain_Source_Bone_Name");
+        s.drain_target_bone = s_or(e, "Drain_Target_Bone_Name");
+    }
+    if (s.cls == SpecialClass::ForceHealing) {
+        s.blob_material = s_or(e, "Heal_Range_Blob_Material");
+        const std::vector<std::string_view> bc = data::split_list(e.child_text("Blob_Color"));
+        for (size_t k = 0; k < 4 && k < bc.size(); ++k)
+            s.blob_color[k] = std::clamp(data::parse_float_or(bc[k], 255.0f) / 255.0f, 0.0f, 1.0f);
+    }
     return s;
 }
 

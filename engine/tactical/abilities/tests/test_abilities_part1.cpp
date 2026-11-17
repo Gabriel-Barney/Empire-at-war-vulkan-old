@@ -1069,6 +1069,12 @@ void test_jamming_visual_fields() {
         "<Target_Particle_Bone_Name>Turret_00, B_Turret_00, ROOT</Target_Particle_Bone_Name>"
         "<Stunned_Effect>Stunned_Particle_Effect</Stunned_Effect><Infection_Particle>Infection_Particle_Effect</Infection_Particle>"
         "</Tractor_Beam_Attack_Ability>"
+        "<Drain_Life_Ability Name=\"D\"><Drain_Effect_Name> Drain_Life_Effect </Drain_Effect_Name>"
+        "<Drain_Source_Bone_Name>HP_Drain</Drain_Source_Bone_Name><Drain_Target_Bone_Name>B_Chest</Drain_Target_Bone_Name>"
+        "</Drain_Life_Ability>"
+        "<Force_Healing_Ability Name=\"H\"><Heal_Range>5.0</Heal_Range>"
+        "<Heal_Range_Blob_Material>Reinforcement_Point_Radius_Overlay</Heal_Range_Blob_Material>"
+        "<Blob_Color>0, 255, 0, 64</Blob_Color></Force_Healing_Ability>"
         "</Abilities>";
     const data::XmlDocument doc = data::XmlDocument::parse(xml, "j.xml");
     AbilityResolvers r;
@@ -1089,6 +1095,15 @@ void test_jamming_visual_fields() {
           other.target_particle_bones[0] == "Turret_00" && other.target_particle_bones[2] == "ROOT");
     CHECK(other.stunned_effect == "Stunned_Particle_Effect" && other.infection_particle == "Infection_Particle_Effect");
     CHECK(part.target_particle_effect.empty() && part.target_particle_bones.empty() && part.stunned_effect.empty());
+    // vis1 t08: Drain_Life's lightning and bones, Force_Healing's range blob (presentation only)
+    const data::XmlNode dn = block.first_child().next_sibling().next_sibling().next_sibling();
+    const SpecialAbilityDesc drain = parse_special_ability(dn, r, nullptr);
+    CHECK(drain.cls == SpecialClass::DrainLife && drain.drain_effect == "Drain_Life_Effect" && drain.drain_source_bone == "HP_Drain" &&
+          drain.drain_target_bone == "B_Chest" && drain.blob_material.empty());
+    const SpecialAbilityDesc heal = parse_special_ability(dn.next_sibling(), r, nullptr);
+    CHECK(heal.cls == SpecialClass::ForceHealing && heal.blob_material == "Reinforcement_Point_Radius_Overlay" && heal.heal_range == 5.0f);
+    CHECK(heal.blob_color[0] == 0.0f && heal.blob_color[1] == 1.0f && heal.blob_color[3] == 64.0f / 255.0f && heal.drain_effect.empty());
+    CHECK(other.drain_effect.empty());
 }
 }  // namespace bo3split
 
@@ -2107,6 +2122,46 @@ void test_oi_class_bodies() {
         // vis1 t06 (ABILITY_PARTICLES §2.3): one target visual, on the first victim (the primary).
         CHECK(w.ab->visual_events().size() == 1 && w.ab->visual_events()[0].target == 3 && w.ab->visual_events()[0].special == ls);
         CHECK(w.ab->countdown_counter(1, kForceLightning) == 900);
+    }
+    // vis1 t08 (ABILITY_PARTICLES §5): Drain_Life's victims are visible through applied_specials while the drain runs (the
+    // renderer draws one Drain_Effect_Name bolt per victim); the presentation fields leave the ability hash unchanged.
+    {
+        auto run = [](bool fx, OiWorld& w, uint32_t& ds) {
+            SpecialAbilityDesc d = oi_special("Drain", SpecialClass::DrainLife, ActivationStyle::UserInput);
+            d.max_range = 200.0f;
+            d.max_targets = 2;
+            d.targets_radius = 100.0f;
+            d.duration_secs = 5.0f;
+            d.damage_per_second = 3.0f;
+            if (fx) {
+                d.drain_effect = "Drain_Life_Effect";
+                d.drain_source_bone = "HP_Drain";
+                d.drain_target_bone = "B_Chest";
+            }
+            ds = add_special(w.ad, d);
+            AbilityObjectDesc a;
+            a.unit_abilities = {oi_gui(kDrainLife, 0.0f, 30.0f, "Drain")};
+            a.specials = {ds};
+            const uint32_t ud = push(w.cd, w.ad, oi_unit("Nightsister", 100.0f), a);
+            const uint32_t td = push(w.cd, w.ad, oi_unit("Trooper", 100.0f), AbilityObjectDesc{});
+            w.make(GameMode::Land);
+            w.add(1, ud, 0, {0, 0, 0});
+            w.add(2, td, 1, {150, 0, 0});
+            w.add(3, td, 1, {150, 50, 0});
+            const ObjectId one[] = {1};
+            CHECK(w.ab->targeted_ability(one, kDrainLife, 3, -1, w.frame) == 1);
+            for (int i = 0; i < 30; ++i) w.tick();
+        };
+        OiWorld w, plain;
+        uint32_t ds = 0, ps = 0;
+        run(true, w, ds);
+        run(false, plain, ps);
+        std::vector<AppliedSpecialView> applied;
+        w.ab->applied_specials(1, applied);
+        const auto it = std::find_if(applied.begin(), applied.end(), [&](const AppliedSpecialView& v) { return v.special == ds; });
+        CHECK(it != applied.end() && !it->victims.empty() && it->victims[0] == 3);
+        CHECK(w.sys->alive(2) && w.sys->alive(3) && w.sys->health(3) < 100.0f);
+        CHECK(ability_hash(*plain.ab) == ability_hash(*w.ab));
     }
     // DEPLOY / SPREAD_OUT / instant effect / SELF_DESTRUCT (§2.1, §2.2)
     {

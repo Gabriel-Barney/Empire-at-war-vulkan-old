@@ -278,6 +278,7 @@ private:
     std::unique_ptr<render::StreamedSimModels> models_;
     std::unique_ptr<render::SimInstanceBuilder> builder_;
     render::InterpolatedFrame frame_;
+    std::vector<render::SimWorldEffect> world_fx_;  // vis1 t08: decoration effects + the frame's (shield penetration)
     std::vector<render::Instance> bg_;
     render::SimInstanceStats istats_;
     ui::TacticalCameraController camera_;

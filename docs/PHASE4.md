@@ -1148,3 +1148,15 @@ This list holds the [port] / [inferred] / [M] choices and per-step notes. Finish
   retail's rule for a particle whose parent dies is not read). A particle name that is no object type draws nothing. Earthquake / Telekinesis dust is drawn while the special is applied (state, not the stored particle id).
   `Infection_Particle` comes from the first special that names one (the victim keeps no infector type; vanilla has one).
   The status bones come from GameConstants `Object_Visual_Status_Particle_Attach_Bone_Names` (default: the vanilla list).
+- ⬜ **OPEN** · vis1 t08 (2026-11-17; same spec and file; combat `stun_visual_events` / `base_shield_contact`, marked
+  "vis1 t08"). [port] choices, all presentation only (no CRC change): `Projectile_Stun_Spawn_Effect` is a one-shot like
+  `Stunned_Effect`, from an **unhashed, unsaved** combat list of each stun a land stun detonation made (64 frames, serial).
+  `Drain_Effect_Name` is a lightning-only beam (`kBeamDrain`, one key per victim) from `Drain_Source_Bone_Name` (else the
+  owner position, not its target point [M]) to `Drain_Target_Bone_Name` (else the victim centre + `Ranged_Target_Z_Adjust`),
+  listed while the Drain_Life special is applied. The `Heal_Range_Blob_Material` square (side 2 x `Heal_Range`, colour
+  `Blob_Color` with alpha 1, both modes; flat at the ground height on land, not a draped decal) is drawn through the jammer's
+  blob models under an owner that the local player owns and that has a selection circle; a material missing from
+  ShadowBlobMaterials uses the jammer blob's fallback texture where retail draws none [M]. `Base_Shield_Penetration_Particle`
+  is a world-placed render particle at the dome crossing of the straddle segment (recomputed by a const accessor on the
+  port's ellipsoid dome), kept while the unit straddles; it faces the horizontal part of the dome normal (retail: the
+  normal's angles with pitch + 90; tilt not modelled) and consumes no object id.

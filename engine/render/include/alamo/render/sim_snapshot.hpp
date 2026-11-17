@@ -376,6 +376,10 @@ struct SnapshotJamming {
     // ascending id. Their radar blip is dropped like a jammed one.
     std::vector<objects::ObjectId> stealthed;
     bool is_stealthed(objects::ObjectId id) const { return std::binary_search(stealthed.begin(), stealthed.end(), id); }
+    // vis1 t08 (ABILITY_PARTICLES §8): the owners of an applied Force_Healing with a Heal_Range_Blob_Material, ascending id:
+    // radius = Heal_Range, blob_material / blob_color = the special's (allied / show_to_enemies unused). Drawn only under
+    // a selected owner of the local player (render::heal_range_blobs).
+    std::vector<SnapshotJammer> heal_blobs;
 };
 
 // ---- R5 ability beams (ABILITY_VISUALS §2, §4, §6 finding 1; presentation only; filled by apply_battle_beams /
@@ -409,6 +413,9 @@ struct SimSnapshot {
     std::vector<SnapshotProjectile> projectiles;  // live projectiles (ascending serial; apply_battle_projectiles)
     std::vector<SnapshotBeam> beams;              // R5: ability beams (ascending owner id, then kind; apply_battle_beams)
     SnapshotJamming jamming;                      // R5: sensor jamming (apply_battle_jamming)
+    // vis1 t08: world-placed sim effects (Base_Shield_Penetration_Particle at the dome contact; apply_battle_ability_fx),
+    // synced with the decoration effects (keys (id << 8) | 2).
+    std::vector<SimWorldEffect> world_effects;
     uint32_t store_objects = 0;                // objects in the store (incl. not drawable / dying)
     const SnapshotObject* find(objects::ObjectId id) const;  // binary search, null if absent
     // Ordered digest of every field (thread-determinism tests).
@@ -694,6 +701,7 @@ struct InterpolatedFrame {
     std::vector<SnapshotProjectile> projectiles;
     std::vector<SnapshotBeam> beams;  // the current snapshot's (R5 ability beams)
     SnapshotJamming jamming;  // the current snapshot's (R5)
+    std::vector<SimWorldEffect> world_effects;  // the current snapshot's (vis1 t08)
 };
 
 // Frame view between prev (may be null) and curr at `alpha` in [0, 1] (clamped; non-finite -> 1).

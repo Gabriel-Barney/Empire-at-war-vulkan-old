@@ -808,7 +808,12 @@ void CombatSystem::detonation_effects(const Projectile& p, Vec3 center, ObjectId
         for (const ObjectId id : ids) {
             Unit* v = unit(id);
             if (!live(v)) continue;
-            if (desc_of(*v).stunnable && effect_match(*v, pd.stun_mask, &pd.stun_types)) stun_unit(id, pd.stun_frames, frame);
+            if (desc_of(*v).stunnable && effect_match(*v, pd.stun_mask, &pd.stun_types) && stun_unit(id, pd.stun_frames, frame)) {
+                // vis1 t08: the presentation copy (Projectile_Stun_Spawn_Effect on the victim); never read by the sim
+                if (!stun_visuals_.empty() && stun_visuals_.front().frame + kStunVisualKeepFrames < frame)
+                    std::erase_if(stun_visuals_, [frame](const StunVisualEvent& e) { return e.frame + kStunVisualKeepFrames < frame; });
+                stun_visuals_.push_back({frame, id, p.desc, ++stun_visual_serial_});
+            }
             stun_water_kill(id, frame);
         }
     }

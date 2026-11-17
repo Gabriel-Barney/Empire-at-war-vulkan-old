@@ -216,6 +216,10 @@ struct SpecialAbilityDesc {
     std::vector<std::string> target_particle_bones;
     std::string stunned_effect;
     std::string infection_particle;
+    // vis1 t08 (ABILITY_PARTICLES §5, presentation only): Drain_Life_Ability Drain_Effect_Name (a LightningEffect name),
+    // Drain_Source_Bone_Name on the owner and Drain_Target_Bone_Name on each victim ("" = the object's target point).
+    // Force_Healing_Ability (§8) fills blob_material from Heal_Range_Blob_Material and blob_color from Blob_Color.
+    std::string drain_effect, drain_source_bone, drain_target_bone;
 };
 
 // Ability description of one object type. Index = the host's ability-type index (for combat units

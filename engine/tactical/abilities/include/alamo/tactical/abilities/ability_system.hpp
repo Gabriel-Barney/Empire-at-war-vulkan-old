@@ -170,6 +170,7 @@ struct AbilityActivation {
 struct AppliedSpecialView {
     uint32_t special = 0;  // AbilityData::specials index
     ObjectId target = kNoObject;
+    std::span<const ObjectId> victims;  // vis1 t08: the cast's victim list (Drain_Life...); valid until the next tick
 };
 
 struct AbilityEvent {

@@ -389,6 +389,17 @@ uint64_t SimSnapshot::digest() const {
         h.u32(static_cast<uint32_t>(jamming.stealthed.size()));
         for (const objects::ObjectId id : jamming.stealthed) h.i32(id);
     }
+    if (!jamming.heal_blobs.empty()) {  // vis1 t08 (hashed only when present)
+        h.u32(static_cast<uint32_t>(jamming.heal_blobs.size()));
+        for (const SnapshotJammer& j : jamming.heal_blobs) {
+            h.i32(j.id);
+            h.i32(j.owner);
+            h.f32(j.radius);
+            h.u32(static_cast<uint32_t>(j.blob_material.size()));
+            if (!j.blob_material.empty()) h.bytes(j.blob_material.data(), j.blob_material.size());
+            for (float v : j.blob_color) h.f32(v);
+        }
+    }
     h.u32(static_cast<uint32_t>(beams.size()));  // R5 ability beams
     for (const SnapshotBeam& b : beams) {
         h.u8(b.kind);
@@ -403,6 +414,16 @@ uint64_t SimSnapshot::digest() const {
         h.bytes(b.style.color, 4);
         h.i32(b.style.frames);
         h.u8(b.style.mode);
+    }
+    if (!world_effects.empty()) {  // vis1 t08 (hashed only when present)
+        h.u32(static_cast<uint32_t>(world_effects.size()));
+        for (const SimWorldEffect& w : world_effects) {
+            h.u64(w.key);
+            h.u32(static_cast<uint32_t>(w.asset.size()));
+            if (!w.asset.empty()) h.bytes(w.asset.data(), w.asset.size());
+            h.i32(w.owner);
+            for (float v : {w.position.x, w.position.y, w.position.z, w.facing.x, w.facing.y, w.facing.z, w.intensity}) h.f32(v);
+        }
     }
     h.u8(fog ? 1 : 0);
     if (fog) {
@@ -441,6 +462,7 @@ void build_snapshot(const objects::ObjectStore& store, uint64_t tick, uint64_t m
     out.ability_events.clear();
     out.projectiles.clear();
     out.beams.clear();
+    out.world_effects.clear();
     const std::span<const ObjectHandle> all = store.all_objects();
     out.store_objects = static_cast<uint32_t>(all.size());
     const auto n = static_cast<uint32_t>(all.size());
@@ -993,6 +1015,7 @@ void interpolate(const SimSnapshot* prev, const SimSnapshot& curr, float alpha, 
     out.projectiles.assign(curr.projectiles.begin(), curr.projectiles.end());
     out.beams.assign(curr.beams.begin(), curr.beams.end());
     out.jamming = curr.jamming;
+    out.world_effects.assign(curr.world_effects.begin(), curr.world_effects.end());
     if (mode == InterpMode::Original || !prev || alpha >= 1.0f) return;
     {  // projectiles: both ascend by serial
         size_t k = 0;

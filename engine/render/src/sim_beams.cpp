@@ -164,6 +164,7 @@ void BeamStyleTable::build(const objects::GameObjectTypes& types, const BeamCons
 uint64_t beam_key(const SnapshotBeam& b) {
     uint64_t k = (static_cast<uint64_t>(static_cast<uint32_t>(b.owner)) << 8) | b.kind;
     if (b.kind == kBeamLaserZap) k |= static_cast<uint64_t>(b.frame & 0xFFFFFFu) << 40;
+    if (b.kind == kBeamDrain) k |= static_cast<uint64_t>(static_cast<uint32_t>(b.target) & 0xFFFFFFu) << 40;  // one per victim
     return k;
 }
 
@@ -202,6 +203,8 @@ std::vector<BeamInstance> beams_from_frame(const InterpolatedFrame& frame, const
                 Vec3 p{};
                 if (!hb.empty() && bone(*target, hb, p)) end = p;
             }
+            Vec3 p{};
+            if (!r.style.end_bone.empty() && bone && bone(*target, r.style.end_bone, p)) end = p;  // vis1 t08: drain
         }
         b.end = f3(end);
         // near end: the owner's bone, else the owner position

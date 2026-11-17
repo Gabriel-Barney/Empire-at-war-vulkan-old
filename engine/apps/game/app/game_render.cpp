@@ -782,8 +782,16 @@ void BattleView::prepare(GpuCore& gpu, float alpha) {
         stats_.model_projectiles_peak = std::max(stats_.model_projectiles_peak, istats_.projectiles_drawn - istats_.projectiles_lasers);
 #ifdef ALAMO_PARTICLES_HAVE_SIM
         if (pattach_) {
+            // vis1 t08: the frame's world effects (Base_Shield_Penetration_Particle) join the decoration effects.
+            std::span<const render::SimWorldEffect> world =
+                decorations_ ? decorations_->effects() : std::span<const render::SimWorldEffect>();
+            if (!frame_.world_effects.empty()) {
+                world_fx_.assign(world.begin(), world.end());
+                world_fx_.insert(world_fx_.end(), frame_.world_effects.begin(), frame_.world_effects.end());
+                world = world_fx_;
+            }
             render::particles::sync_sim_frame(*pattach_, frame_, table_, *models_, *builder_, pose_fn_ ? &pose_fn_ : nullptr, &popt_,
-                                              decorations_ ? decorations_->effects() : std::span<const render::SimWorldEffect>());
+                                              world);
             sync_weather_emitter();  // vis1 t01: before the update that spawns its particles
             pworld_->update(render::particles::ParticleWorld::tick_delta(pending_ticks_));
             pending_ticks_ = 0;
@@ -822,6 +830,24 @@ void BattleView::prepare(GpuCore& gpu, float alpha) {
         const terrain::MapData* map = &scene_->map();
         const std::function<float(float, float)> ground = [map](float x, float y) { return map->terrain.sample_height(x, y); };
         jam_models_.build_blobs(gpu.renderer, blob_tex, std::span<const render::JamBlob>(&*bombing_blob_, 1), ground, main);
+    }
+    // vis1 t08 (ABILITY_PARTICLES §8): the Heal_Range_Blob_Material square under a selected Force_Healing owner of the local
+    // player (the selection circles name the selected objects; none while a cinematic hides the HUD).
+    if (scene_ && p.curr && !frame_.jamming.heal_blobs.empty() && !blobs_.empty()) {
+        std::vector<uint32_t> selected;
+        selected.reserve(blobs_.size());
+        for (const ui::SelectionBlob& b : blobs_) selected.push_back(b.id);
+        std::sort(selected.begin(), selected.end());
+        const std::vector<render::JamBlob> heal = render::heal_range_blobs(frame_, selected, local_);
+        if (!heal.empty()) {
+            const render::TextureSource blob_tex = [&gpu](std::string_view n, assets::TextureRole role) { return gpu.cache->texture(n, role); };
+            std::function<float(float, float)> ground;
+            if (!space_) {
+                const terrain::MapData* map = &scene_->map();
+                ground = [map](float x, float y) { return map->terrain.sample_height(x, y); };
+            }
+            jam_models_.build_blobs(gpu.renderer, blob_tex, heal, ground, main);
+        }
     }
     // vis1 t01 (WEATHER_VISUALS §2): the lightning-flash schedule at wall-clock steps (render frames, paused or not).
     {
