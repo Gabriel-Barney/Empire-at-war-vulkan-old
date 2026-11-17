@@ -872,6 +872,7 @@ void GalacticHud::build_fleets(const GalacticHudFrame& f) {
         const auto u = static_cast<uint32_t>(ci);
         ButtonRuntime& r = buttons_.state(u);
         r.hidden = false;
+        r.disabled = false;  // ui4 t04: the planet map may have left land_fleet_NN disabled
         r.icon_override = s.icon;
         r.selected = s.selected;
         r.text = s.count > 1 ? num32(s.count) : std::u32string();

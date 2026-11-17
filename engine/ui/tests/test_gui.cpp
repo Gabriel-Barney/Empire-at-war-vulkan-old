@@ -2159,6 +2159,7 @@ void test_galactic_hud() {
         bp.uv = {0.5f, 0.5f};
         bp.tag = 3;
         bp.shield = 0.25f;
+        bp.alt = 1;  // §4.2: the build-pad alternate, whatever the player's faction
         m.planet_map.pads = {up, bp};
         m.planet_map.orbit = {{777, 50, 2, "i_button_units.tga"}};
         hud.build(m);
@@ -2176,7 +2177,8 @@ void test_galactic_hud() {
         const ComponentPlacement& wp = hud.layout().placement(static_cast<uint32_t>(table.find("map_window")));
         CHECK(wp.from_bone && std::fabs(pad_at.x - wp.center.x - 160.0f) < 1e-3f && std::fabs(pad_at.y - wp.center.y + 160.0f) < 1e-3f);
         const ButtonRuntime* uc = state("unit_cap_number");
-        CHECK(uc && uc->text == U"3/10" && state("land_fleet_00")->text == U"2" && !state("build_pad00")->hidden);
+        CHECK(uc && uc->text == U"3/10" && state("land_fleet_00")->text == U"2" && !state("build_pad00")->hidden &&
+              state("build_pad00")->alt == 1);
         auto map_drag = [&](const char* from, const char* to) {
             const int32_t fc = table.find(from), tc = table.find(to);
             Vec2f a{}, b{};
@@ -2221,6 +2223,7 @@ void test_galactic_hud() {
         hud.resize(1024, 768);
         hud.build(f);
         CHECK(!hud.stats().planet_map && state("unit_pad00")->hidden);
+        CHECK(!state("land_fleet_00")->disabled);  // closing after a full surface leaves the organiser's pads usable
     }
     click_component("b_option_g", cmds, acts);
     CHECK(acts.size() == 3 && acts[2].kind == HudAction::Kind::Button && acts[2].name == "b_option_g");

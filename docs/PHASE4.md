@@ -1099,7 +1099,9 @@ This list holds the [port] / [inferred] / [M] choices and per-step notes. Finish
   (`maptemp.dds` fallback) and the pads at the markers; orbit stack -> map / unit pad lands (kFleetLand), unit pad -> orbit stack and
   a pad's occupant launch into a new fleet (kFleetMoveNew). [port]: markers read on the first open per planet type, not at boot;
   marker y read upward (§10 capture open); orbit stacks in type-index order; a launch is one kFleetMoveNew (retail op 4 + op 0);
-  unit_cap = 10 [M]; SetMarkerID (kind 53) has no sim handler, so pad-to-pad moves, the unit marker memory and the SetMarkerID
+  unit_cap = 10 [M]; no pulse on the valid drop pads during a drag (§4.6) and Specific pads keep their blank art; selecting another
+  planet closes the map without the zoom-out, and a radar click with the map open does not re-open it (§1.3, §8); the surface
+  counts as full only outside a battle (the sim's land rule); SetMarkerID (kind 53) has no sim handler, so pad-to-pad moves, the unit marker memory and the SetMarkerID
   sends on open are not done (ui4 t13). **t06** drag preview: path find with the fleet's hidden flags, grey 128 route segments, grey
   50 cursor line within MaximumFleetMovementDistance (`game::fleet_drag_route`, `GalacticView::set_drag_lines`). **t07** summary
   sort keys 1-10 (numeric columns largest first, same key reverses; [M] the producing / upgrades keys), IDC_HINTS_CHECK toggles all

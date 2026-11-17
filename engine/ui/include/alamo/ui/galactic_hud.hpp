@@ -260,6 +260,7 @@ struct GalacticMapPad {
     int32_t index = 0;          // NN
     Vec2f uv{};                 // marker position 0..1 across the map (§4.3; [port] y up)
     std::string icon;           // occupant's Icon_Name ("" = the pad's own art: blank, or the reinforce / bunker icon)
+    int32_t alt = -1;           // Icon_Alternate_Texture_Name index (§4.2 build_pad40..79: 0 bunker, 1 build pad); -1 = faction
     uint32_t object = 0;        // the structure or landed unit on it (0: empty or a structure type): drag source
     uint8_t tag = 0;            // §4.2 pad data slot 3: 1 In / Out, 3 Specific
     bool dimmed = false;        // §4.4 step 2: tint (255, 255, 255, 192)

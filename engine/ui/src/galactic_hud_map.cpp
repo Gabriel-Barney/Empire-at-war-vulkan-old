@@ -28,7 +28,10 @@ void GalacticHud::build_planet_map(const GalacticHudFrame& f) {
     map_foreign_ = map_open_ && m.foreign;
     map_surface_full_ = map_open_ && m.surface_full;
     map_planet_ = map_open_ ? m.planet : 0u;
-    if (!map_open_) return;
+    if (!map_open_) {
+        for (const int32_t ci : land_) buttons_.state(static_cast<uint32_t>(ci)).disabled = false;  // the organiser's land pads
+        return;
+    }
     stats_.planet_map = true;
     auto state = [&](int32_t ci) -> ButtonRuntime* { return ci >= 0 ? &buttons_.state(static_cast<uint32_t>(ci)) : nullptr; };
     // §1.2 step 7 / §8: Planetary_Income_number and the c_filters are hidden on every open (all pads always show).
@@ -118,6 +121,7 @@ void GalacticHud::build_planet_map(const GalacticHudFrame& f) {
         ButtonRuntime& r = buttons_.state(u);
         r.hidden = false;
         r.icon_override = gp.icon;
+        r.alt = gp.alt;
         // §4.6: disabled when empty (or holding a structure type) or in foreign view.
         r.disabled = m.foreign || gp.object == 0;
         r.tint = gp.dimmed ? Rgba8{255, 255, 255, 192} : Rgba8{255, 255, 255, 255};

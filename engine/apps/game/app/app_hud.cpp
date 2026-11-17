@@ -330,6 +330,7 @@ void App::planet_map_feed(ui::GalacticPlanetMap& m) {
         q.icon = p.type != game::kNoMapType ? icon(p.type) : std::string();
         q.object = p.holds_type ? 0u : p.object;
         q.tag = p.tag;
+        q.alt = p.cls == game::MapMarkerClass::Bunker ? 0 : p.cls == game::MapMarkerClass::BuildPad ? 1 : -1;  // §4.2
         q.dimmed = p.dimmed;
         q.shield = mk.world_width > 0.0f ? 2.0f * p.shield_radius / mk.world_width : 0.0f;
         m.pads.push_back(std::move(q));
