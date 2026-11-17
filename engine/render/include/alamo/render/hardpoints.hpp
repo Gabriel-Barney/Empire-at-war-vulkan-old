@@ -160,4 +160,33 @@ private:
     bool ready_ = false;
 };
 
+// bkx1 t05 (b0019 / b0020, docs/re/BKX1_RENDER_RE.md §1 [H]): the model's particle groups switched by the engine state. A
+// group is the particle proxies whose name starts with a fixed prefix (case-insensitive, prefix length only: "pe" also
+// matches "pem*", not "pte*"): pe = the engine glow, pte = the turbo engines, pi = the ion-stun effect. 0 = none.
+inline constexpr uint8_t kGlowPe = 1, kGlowPte = 2, kGlowPi = 4;
+// SnapshotObject::engine_flags: a SimpleSpace-locomotor unit / its engines off / ion-stunned (apply_battle_state)
+inline constexpr uint8_t kEngineGlowUnit = 1, kEngineGlowOff = 2, kEngineGlowIonStun = 4;
+uint8_t particle_glow_group(std::string_view proxy_name);
+// The SimpleSpace locomotor's per-service glow rule (0x626420, §1.2 / §1.5) and the death / ion-stun switches (§1.3) for
+// one unit. Inputs: SnapshotObject engine flags (kEngineGlow*), the timed disable's frames left (0 = none), v / V and
+// TURBO active. G = pte while TURBO is active, else pe; the other group is hidden.
+//   engines off, no timer (destroyed engine hard point, indefinite disable) -> G hidden;
+//   engines off, timed (energy-pool ion drain) -> G shown, tint = (n x 0.5 + 0.5) x 0.2 snapped, n in [-1, 1] a fixed
+//     per-frame value of x = 2 x frames left ([port] a hash lattice: retail's noise table 0x140a45f20 is not used), and
+//     1.0 over 0.1 s on the last frame (frames left = 1);
+//   engines on -> G shown, tint = clamp(0.8 v / V + 0.2, 0, 1) snapped;
+//   ion stun (behaviour 0x45) -> pi shown, else pi hidden ([port]: retail hides it at the stun's end; before the first
+//     stun it keeps the model's flag); dying -> pe and pte hidden.
+// show bits mean "not hidden by this rule" ([port] only pi is un-hidden: pe / pte stay under the hard-point mask, so
+// the B.10 Engine_Particles subtree rule keeps them hidden after the engine hard point dies).
+struct EngineGlow {
+    bool applies = false;  // a unit with the SimpleSpace glow rule
+    uint8_t hide = 0, show = 0;
+    uint8_t tint_group = 0;  // the group the tint applies to (G)
+    float tint = -1.0f;      // colour RGBA brightness (SystemScalar::Color), < 0 = none
+    float tint_seconds = 0.0f;
+};
+EngineGlow engine_glow(uint8_t engine_flags, uint32_t timer_frames, float speed_ratio, bool turbo, bool dying);
+float engine_glow_flicker(uint32_t timer_frames);  // the timed-disable tint, in [0, 0.2]
+
 }  // namespace alamo::render

@@ -139,6 +139,11 @@ struct LocomotorInput {
     // s78l t02: the host's locomotor plays the stationary turn clips itself (the Walk arrival turn's events): no TURNL /
     // TURNR from the yaw change here.
     bool host_turn = false;
+    // bkx1 t04 (b0059, BKX1_RENDER_RE §2): a Walk_Transition unit's clip as its locomotor runs it (MovementSystem UnitView
+    // wt_clip / wt_pos / wt_rate): 16 MOVESTART, 17..20 the end clips, 2 MOVE after MOVESTART, -1 none. The locomotor's
+    // frame and rate (clip frames per sim frame = fps / 30 x rate) start the clip.
+    int32_t wt_clip = -1;
+    float wt_pos = 0.0f, wt_rate = 0.0f;
 };
 
 // Locomotor / default-idle rules, exposed for tests.
@@ -147,6 +152,7 @@ inline constexpr int32_t kAnimFwDie = 32, kAnimFtkDie = 36, kAnimFlDie = 41, kAn
 inline constexpr int32_t kAnimTurnLeftCrouch = 72, kAnimTurnRightCrouch = 73;
 inline constexpr float kDeployBlendSeconds = 0.0333f;
 bool is_move_family(int32_t type);                     // 2, 61, 66, 67, 115
+bool is_walk_transition_clip(int32_t type);            // bkx1 t04: 16 MOVESTART, 17..20 MOVE_ENDONE..MOVE_ENDFOUR
 int32_t default_idle_type(const AnimModel* m, const LocomotorInput& in, const IdleParams& idle);
 // s78l t03: `idle.idle_type`, or the presence step's answer for `records` when idle.presence is set, the records are not
 // empty and the answer has a clip in `m` ([port] no clip: the plain type, as default_idle_type).

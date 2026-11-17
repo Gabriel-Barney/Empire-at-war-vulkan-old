@@ -308,6 +308,10 @@ struct UnitView {
     // s78n t26.1 (MOVEMENT §3.2.1): walking while deployed (pack +0x2b3). deploy_state stays WalkDeployed meanwhile (every
     // 0x39a390 reader sees it deployed); the walk runs with the Deployed_Walk_Speed cap and the host plays clip 115.
     bool walk_deployed = false;
+    // bkx1 t04 (b0059, BKX1_RENDER_RE §2): a Walk_Transition unit's clip as the locomotor tracks it (LandMotion::wt_clip /
+    // wt_pos / wt_rate: -1 none, 2 MOVE, 16 MOVESTART, 17..20 the end clips; its frame and play rate). The host plays it.
+    int32_t wt_clip = -1;
+    float wt_pos = 0.0f, wt_rate = 0.0f;
     // S8 t24: the TURRET's current elevation / yaw (degrees, relative to the body; UnitDesc::turret units only).
     float turret_elevation = 0.0f, turret_yaw = 0.0f;
     // s78f t03 (TACTICAL_COMBAT §3.1.1 "Targeting states"): the TURRET's aim toward the host's aim point - 1 the current

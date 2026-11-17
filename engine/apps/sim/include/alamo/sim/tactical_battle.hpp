@@ -1356,6 +1356,7 @@ public:
     std::vector<BuildOptionInfo> station_build_options(const objects::ObjectStore& st, int32_t player, objects::ObjectId builder) const;
     // --- end hangars ---
     uint32_t frame() const { return frame_; }
+    bool is_space() const { return space_; }  // bkx1: the battle's mode (renderer snapshot)
     // Retreat coordinator request (§3.4 vf9): false when not a participant, not yet allowed, already retreating or
     // (cu8 t01) prevented by an interdict / Retreat_Prevention entry.
     bool request_retreat(int32_t player);

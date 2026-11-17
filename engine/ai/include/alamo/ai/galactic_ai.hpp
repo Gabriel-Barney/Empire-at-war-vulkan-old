@@ -315,4 +315,7 @@ std::vector<GalacticAiDifficulty> load_ai_difficulties(const FileProvider& files
 // from the typed object database.
 std::vector<GalacticAiTypeInfo> make_galactic_ai_type_info(const objects::GameObjectTypes& types);
 
+// a2m r2 / bkx1 t01: goal_quota_players (ai_goals.hpp) over the galaxy's players and faction table.
+int32_t goal_quota_players(const galactic::GalacticSim& sim);
+
 }  // namespace alamo::ai

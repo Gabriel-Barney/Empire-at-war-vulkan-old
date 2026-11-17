@@ -83,6 +83,27 @@ void test_cadence() {
 // quota min(ceil(200 / 150), 3) = 2; the seed is kept, so pass 1 ends with 400 -> pass 2 quota 3; pass 2 ends with 200 ->
 // pass 3 quota 2. A slice stops when its counter reaches the quota, so a pass takes floor(E / q) + 1 frames: 101, 67, 101.
 // Without retail_cadence: quota 3 at once and ceil(E / q) = 67 frames per pass.
+// bkx1 t01 (BKX1_CADENCE_RE §2 [H]): N - H of the goal quota's cap over the global PlayerList: the session players, then
+// one player per faction no player has. FoC's 8 factions: 1v1 Empire vs Rebel with one human -> 8 - 1 = 7 (cap 3, as HotM);
+// AI vs AI -> 8; a 2v2 mirror (2 Empire, 2 Rebel, one human) -> 4 + 6 - 1 = 9 (cap 2); a faction named twice counts once.
+void test_goal_quota_players() {
+    const std::vector<std::string> foc = {"Empire", "Rebel", "Underworld", "Hutts", "Pirates", "Neutral", "Hostile", "Corporate_Sector"};
+    const auto name = [&foc](size_t f) { return std::string_view(foc[f]); };
+    const std::vector<ai::QuotaPlayer> one_v_one = {{0, true}, {1, false}};
+    CHECK(ai::goal_quota_players(one_v_one, foc.size(), name) == 7);
+    const std::vector<ai::QuotaPlayer> ai_v_ai = {{0, false}, {1, false}};
+    CHECK(ai::goal_quota_players(ai_v_ai, foc.size(), name) == 8);
+    const std::vector<ai::QuotaPlayer> mirror = {{0, true}, {0, false}, {1, false}, {1, false}};
+    CHECK(ai::goal_quota_players(mirror, foc.size(), name) == 9);
+    std::vector<std::string> dup = foc;
+    dup.push_back("EMPIRE");  // a second definition of a faction already counted
+    const auto dname = [&dup](size_t f) { return std::string_view(dup[f]); };
+    CHECK(ai::goal_quota_players(ai_v_ai, dup.size(), dname) == 8);
+    // the cap of the first quota, (int)(20 / (N - H) + 0.5)
+    CHECK(static_cast<int32_t>(20.0 / 7.0 + 0.5) == 3 && static_cast<int32_t>(20.0 / 9.0 + 0.5) == 2);
+    std::printf("goal quota players: 1v1 7, AI vs AI 8, 2v2 mirror 9, duplicate faction name counted once\n");
+}
+
 void test_goal_pass_cadence() {
     struct CadenceHooks final : GoalModeHooks {
         uint32_t target_count() override { return 100; }

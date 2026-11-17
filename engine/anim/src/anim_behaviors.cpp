@@ -220,6 +220,8 @@ bool is_move_family(int32_t t) {
     return t == kAnimMove || t == kAnimFireMove || t == kAnimWalkMove || t == kAnimCrouchMove || t == kAnimDeployedWalk;
 }
 
+bool is_walk_transition_clip(int32_t t) { return t >= 16 && t <= 20; }
+
 int32_t default_idle_type(const AnimModel* m, const LocomotorInput& in, const IdleParams& idle) {
     // 0x395920: Idle Crouch when crouched, else the container's mapping when garrisoned, else the idle. [port] a
     // type without clips falls back to the plain idle.
@@ -263,6 +265,26 @@ uint32_t AnimBehaviors::service_locomotor(AnimWorld& w, ObjectId id, const Locom
         }
         return plays + (service_idle(w, id, ip, in.target, rng, frame, crouch_changed && plays == 0) ? 1u : 0u);
     };
+    // bkx1 t04 (b0059, BKX1_RENDER_RE §2.1 / §2.2 [H]): the Walk_Transition clips follow the locomotor. MOVESTART (16, state
+    // 0x12) and the end clip (17..20, state 0x14) start when the locomotor starts them: variant 0 ([port] no variant draw,
+    // vanilla ships only _00), one-shot, at the locomotor's frame and rate; MOVESTART blends in over the move blend ([port]
+    // retail's blend global 0x140b39904 is unread), an end clip is a hard cut. A missing clip changes nothing (§2.3: the
+    // current clip stays).
+    if (is_walk_transition_clip(in.wt_clip)) {
+        if (cur == in.wt_clip) {
+            w.set_speed(id, in.wt_rate);
+            return then_idle(0);
+        }
+        if (m->variant_count(in.wt_clip) == 0) return then_idle(0);
+        PlayRequest r;
+        r.type = in.wt_clip;
+        r.index = 0;
+        r.loop = false;
+        r.blend_seconds = in.wt_clip == 16 ? move_blend : 0.0f;
+        r.speed = in.wt_rate;
+        r.start_frame = in.wt_pos;
+        return then_idle(w.play(id, r, nullptr, frame) == PlayResult::Played ? 1u : 0u);
+    }
     if (moving) {
         const float ratio = in.max_speed > 0.0f ? in.speed / in.max_speed : 1.0f;
         int32_t want = kAnimMove;
@@ -273,7 +295,10 @@ uint32_t AnimBehaviors::service_locomotor(AnimWorld& w, ObjectId id, const Locom
         if (m->variant_count(want) == 0) want = kAnimMove;
         if (m->variant_count(want) == 0) return then_idle(0);
         const float base = want == kAnimDeployedWalk ? p.deployed_walk_anim_speed : p.movement_anim_speed;
-        const float speed = base * std::max(ratio, p.min_move_ratio);
+        float speed = base * std::max(ratio, p.min_move_ratio);
+        // bkx1 t04 (MOVEMENT §3.5.2 C.1, BKX1_RENDER_RE §2.1): a Walk_Transition unit's MOVE clip is the locomotor's tracked
+        // clip, at its rate f x V / S, so the end clip it picks from that phase starts from the pose on screen.
+        if (want == kAnimMove && in.wt_clip == kAnimMove) speed = in.wt_rate;
         if (cur == want) {
             w.set_speed(id, speed);
             return then_idle(0);
@@ -290,7 +315,9 @@ uint32_t AnimBehaviors::service_locomotor(AnimWorld& w, ObjectId id, const Locom
         r.speed = speed;
         const ClipRef* c = m->clip(want, 0);
         const uint32_t count = c && c->clip ? c->clip->frame_count : 0u;
-        if (count > 0) r.start_frame = static_cast<float>(rng.range_int(0, static_cast<int32_t>(count) - 1));  // synced
+        // bkx1 t04 (§2.1, state 0x13 [H]): MOVE after MOVESTART starts at the locomotor's carry-over frame int(+0xf4), no draw
+        if (in.wt_clip == kAnimMove && is_walk_transition_clip(cur)) r.start_frame = in.wt_pos;
+        else if (count > 0) r.start_frame = static_cast<float>(rng.range_int(0, static_cast<int32_t>(count) - 1));  // synced
         w.play(id, r, &rng, frame);
         return then_idle(1);
     }
@@ -308,7 +335,7 @@ uint32_t AnimBehaviors::service_locomotor(AnimWorld& w, ObjectId id, const Locom
             return then_idle(w.play(id, r, &rng, frame) == PlayResult::Played ? 1u : 0u);
         }
     }
-    if (is_move_family(cur)) {
+    if (is_move_family(cur) || is_walk_transition_clip(cur)) {  // bkx1 t04: also after an end clip (0x15 -> the idle, §2.2)
         PlayRequest r;  // stopped: back to the idle (then the idle behaviour); the records before this frame's aging
         r.type = presence_idle_type(m, id, ip, e.records);
         r.loop = p.idle.loop_idle;

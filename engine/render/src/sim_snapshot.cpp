@@ -12,6 +12,7 @@
 #include "alamo/data/values.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/type_fields.hpp"
+#include "alamo/render/hardpoints.hpp"
 #include "alamo/render/map_scene.hpp"
 #include "alamo/render/sim_beams.hpp"
 #include "alamo/sim/sim_host.hpp"
@@ -717,6 +718,23 @@ void apply_battle_state(const sim::TacticalBattle& battle, SimSnapshot& snap, co
         }
         if (stealth_applied) o.flags = static_cast<uint8_t>(o.flags | kSnapStealthMeshes);
         else if (stealth_broken) o.stealth_time = kStealthBreakFade;
+    }
+    // bkx1 t05 (b0019 / b0020, BKX1_RENDER_RE §1.2): the engine glow inputs of every space unit with a locomotor other than
+    // the fighters' (the SimpleSpace service runs for corvettes, frigates, capitals and transports): engines off (a
+    // destroyed engine hard point or a disable), the timed disable's frames left, ion stun, v / V.
+    if (battle.is_space()) {
+        const tactical::movement::MovementSystem& mv = battle.movement();
+        for (SnapshotObject& o : snap.objects) {
+            const int32_t on = battle.engines_online(o.id);
+            if (on < 0 || !mv.has_unit(o.id)) continue;
+            const tactical::movement::UnitView v = mv.view(o.id);
+            if (v.locomotor == tactical::movement::LocomotorKind::Fighter) continue;
+            o.engine_flags = static_cast<uint8_t>(kEngineGlowUnit | (on == 0 ? kEngineGlowOff : 0) |
+                                                  (combat.ion_stunned(o.id, battle.frame()) ? kEngineGlowIonStun : 0));
+            const uint32_t re = battle.engines().reenable_frame(o.id);
+            o.engine_timer_frames = on == 0 && re > battle.frame() ? re - battle.frame() : 0u;
+            o.engine_speed_ratio = v.max_speed > 0.0f ? v.speed / v.max_speed : 0.0f;
+        }
     }
     // R4: Particle_Effect of active unit abilities (resolved through the type table).
     if (table) {

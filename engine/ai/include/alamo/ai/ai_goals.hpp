@@ -54,8 +54,11 @@
 // and reserves at accept (refresh_plan); maintenance re-reserves every surviving goal.
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <map>
+#include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "alamo/ai/ai_definitions.hpp"
@@ -327,5 +330,17 @@ private:
     uint32_t next_serial_ = 1;
     int64_t now_ = 0;
 };
+
+// a2m r2 / bkx1 t01 (A2M_R2_RE_A §2.1, BKX1_CADENCE_RE §2) [H]: the goal quota cap's N - H. N = the global PlayerList:
+// Create_Default_Players 0x293390 puts the session players first, then one player for every faction of the faction table
+// that has no player yet; players are never removed. H = the human players. The same count for the galactic AI and every
+// battle (skirmish or campaign). A faction defined twice under one name counts once [port]. (FoC: 8 factions, so HotM and
+// a 1v1 skirmish with one human give 7.)
+struct QuotaPlayer {
+    size_t faction = 0;
+    bool human = false;
+};
+int32_t goal_quota_players(std::span<const QuotaPlayer> players, size_t faction_count,
+                           const std::function<std::string_view(size_t)>& faction_name);
 
 }  // namespace alamo::ai
