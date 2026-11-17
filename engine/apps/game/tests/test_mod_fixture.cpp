@@ -6,6 +6,7 @@
 // session state and one that really fails, t12) and FixtureSub (a submod of FixtureMod, t16; fake Steam library under
 // testdata/mod_fixture/steamlib). Read only: nothing is written anywhere.
 //   alamo_game_mod_fixture_tests <testdata/mod_fixture>
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -88,7 +89,21 @@ void test_mod(const std::string& foc) {
         // The machine-readable summary.
         const std::string js = alamo::game::format_mod_report_json(r);
         CHECK(contains(js, "\"schema\": \"alamo.mod_report\""));
-        CHECK(contains(js, "\"version\": 3"));
+        CHECK(contains(js, "\"version\": 4"));
+        // mcx0 t06: the version 4 keys are there (the fixture mod's findings are checked in test_mod_check.cpp).
+        for (const char* k : {"\"honour_gaps\":", "\"retail_equivalent\":", "\"bindings\":", "\"story\":", "\"token_coverage\":",
+                              "\"limits\":", "\"grade\":"})
+            CHECK(contains(js, k));
+        CHECK(r.grade.grade == "G1");
+        // ModObjects.xml sets Size_Value (a stored tag, ledger) to 3: an honour gap from the mod's file that blocks G3's
+        // static part; Fires_Forward = No is the default, so it is no gap.
+        const auto gap = std::find_if(r.honour_gaps.begin(), r.honour_gaps.end(),
+                                      [](const alamo::game::HonourGap& g) { return g.cls == "GameObjectType" && g.tag == "Size_Value"; });
+        CHECK(gap != r.honour_gaps.end() && gap->in_mod && gap->uses == 1 && gap->state == "stored");
+        CHECK(std::none_of(r.honour_gaps.begin(), r.honour_gaps.end(),
+                           [](const alamo::game::HonourGap& g) { return g.tag == "Fires_Forward"; }));
+        CHECK(!r.grade.g3_static && !r.grade.blocking.empty());
+        CHECK(r.issues.find(alamo::IssueKind::HonourGap, "GameObjectType.Size_Value", gap != r.honour_gaps.end() ? gap->first_file : "") != nullptr);
         CHECK(contains(js, "\"result\": \"ok\""));
         CHECK(contains(js, "\"errors\": 0"));
         CHECK(contains(js, "\"added\": 5"));

@@ -20,6 +20,9 @@
 #include "alamo/data/xml_list.hpp"
 #include "alamo/objects/coverage.hpp"
 #include "alamo/objects/field_schema.hpp"
+#include "alamo/objects/tag_ledger.hpp"
+#include "alamo/objects/type_fields.hpp"
+#include "alamo/sim/story_rewards.hpp"
 #include "alamo/game/mod_picker.hpp"  // mod_folders, workshop_content_dir (cu9 t03)
 #include "alamo/vfs/vfs.hpp"
 #include "json_text.hpp"  // the JSON string escaper, shared with benchmark.cpp
@@ -29,6 +32,11 @@
 #include "alamo/materials/effect_loader.hpp"
 #include "alamo/shaderxlat/dxc.hpp"
 #include "fx_compile.hpp"  // materials/tools: the .fx prebuild (alamo_fxbuild, modc t36)
+#endif
+#ifdef ALAMO_GAME_HAVE_GALACTIC_AI
+#include "alamo/ai/galactic_ai_tokens.hpp"
+#include "alamo/ai/perception_equations.hpp"
+#include "alamo/ai/tactical/tactical_perception.hpp"
 #endif
 #ifdef ALAMO_GAME_HAVE_LUA_VM
 #include <lua.h>  // Lua 5.0 is built as C++ (engine/lua/CMakeLists.txt): no extern "C"
@@ -838,6 +846,55 @@ void add_unbound(UnboundMap& calls, const std::map<std::string, uint32_t>& found
         ++c.scripts;
     }
 }
+// mcx0 t06: calls to engine bindings, by binding; the ones with an effect gap (lua::binding_effect_gap) or a retail no-op
+// become report v4 entries. Methods are matched by name (the static scan does not know the receiver's class).
+struct BindingCallAcc {
+    uint32_t call_sites = 0, scripts = 0;
+    std::string first_script;
+    bool in_mod = false;
+};
+using BindingCallMap = std::map<std::string, BindingCallAcc>;  // Lua name (global) / method name: sorted, deterministic
+
+void note_binding_calls(BindingCallMap& m, const std::map<std::string, uint32_t>& found, const std::string& path, bool in_mod) {
+    for (const auto& [name, sites] : found) {
+        BindingCallAcc& a = m[name];
+        if (a.scripts++ == 0) a.first_script = path;
+        a.call_sites += sites;
+        a.in_mod = a.in_mod || in_mod;
+    }
+}
+
+void binding_findings(const BindingCallMap& globals, const BindingCallMap& methods, ModCheckReport& r) {
+    std::set<std::string> called;
+    for (const lua::BindingInfo& b : lua::binding_table()) {
+        const bool global = b.kind == lua::BindingKind::Global;
+        const BindingCallMap& m = global ? globals : methods;
+        const auto it = m.find(b.name);
+        if (it == m.end()) continue;
+        const std::string key = global ? std::string(b.name) : std::string(b.cls) + "." + b.name;
+        called.insert(global ? key : std::string(b.name));
+        const BindingCallAcc& a = it->second;
+        if (b.effect == lua::BindingEffect::NoopRetail) {
+            r.retail_equivalent.push_back({"noop_binding", key, a.call_sites, a.first_script, a.in_mod, b.consumer});
+            continue;
+        }
+        if (!lua::binding_effect_gap(b)) continue;
+        BindingGapCall g;
+        g.name = key;
+        g.effect = lua::to_string(b.effect);
+        g.detail = b.consumer;
+        g.call_sites = a.call_sites;
+        g.scripts = a.scripts;
+        g.first_script = a.first_script;
+        g.in_mod = a.in_mod;
+        r.binding_gaps.push_back(std::move(g));
+    }
+    r.binding_calls = static_cast<uint32_t>(called.size());
+    std::stable_sort(r.binding_gaps.begin(), r.binding_gaps.end(), [](const BindingGapCall& a, const BindingGapCall& b) {
+        if (a.call_sites != b.call_sites) return a.call_sites > b.call_sites;
+        return a.name < b.name;
+    });
+}
 #endif
 
 void check_lua(const GameData& d, ModCheckReport& r, bool run_chunks) {
@@ -849,6 +906,7 @@ void check_lua(const GameData& d, ModCheckReport& r, bool run_chunks) {
     lua::LuaVm compiler(host);
     const UnboundNames unbound;
     UnboundMap calls;
+    BindingCallMap binding_globals, binding_methods;  // mcx0 t06
     std::vector<uint8_t> bytes;
     // One GlobalValue store for every run, as the session has one: a value a main chunk sets is seen by later ones.
     lua::GlobalValueStore global_values;
@@ -878,6 +936,8 @@ void check_lua(const GameData& d, ModCheckReport& r, bool run_chunks) {
         scan_requires(chunk, path, required_by);
         add_unbound(calls, scan.global_calls, unbound.globals, false);
         add_unbound(calls, scan.method_calls, unbound.methods, true);
+        note_binding_calls(binding_globals, scan.global_calls, path, in_mod);
+        note_binding_calls(binding_methods, scan.method_calls, path, in_mod);
         if (!run_chunks || !is_entry_script(path)) continue;
         // What loading the script runs: its main chunk (requires, definitions, top-level calls), in a VM of its own as
         // the original gives every script (lua_vm.hpp). No objects, players or session values exist here.
@@ -908,6 +968,7 @@ void check_lua(const GameData& d, ModCheckReport& r, bool run_chunks) {
         (f.issue.global_value.empty() ? r.lua_run_errors : r.lua_session_errors).push_back(std::move(f.issue));
     }
     classify_missing_requires(d, r, required_by);
+    binding_findings(binding_globals, binding_methods, r);
     for (auto& [key, c] : calls) r.unbound_lua_calls.push_back(std::move(c));
     std::sort(r.unbound_lua_calls.begin(), r.unbound_lua_calls.end(), [](const UnboundLuaCall& a, const UnboundLuaCall& b) {
         if (a.call_sites != b.call_sites) return a.call_sites > b.call_sites;
@@ -919,6 +980,306 @@ void check_lua(const GameData& d, ModCheckReport& r, bool run_chunks) {
     (void)r;
     (void)run_chunks;
 #endif
+}
+
+// ---- mcx0 t06: report version 4 (docs/MOD_COMPAT_DESIGN.md §12.1) ----
+
+// True when `text` leaves the field at `def` (the class default; "" = zero / false / empty): empty, TBD, or the same
+// value after the type code's conversion (objects/type_fields.hpp). A tag set to its default does not need honouring.
+bool default_value(std::string_view text, uint8_t code, std::string_view def) {
+    text = ascii_trim(text);
+    if (text.empty() || iequals(text, "TBD")) return true;
+    switch (objects::conv_of_code(code)) {
+        case objects::Conv::Bool: return objects::parse_type_bool(text) == (!def.empty() && objects::parse_type_bool(def));
+        case objects::Conv::Int32:
+        case objects::Conv::Int8:
+        case objects::Conv::UIntClamp100: return objects::c_atoi(text) == objects::c_atoi(def.empty() ? "0" : def);
+        case objects::Conv::Float:
+        case objects::Conv::Float01:
+        case objects::Conv::Double:
+        case objects::Conv::Double01: return objects::c_atof(text) == objects::c_atof(def.empty() ? "0" : def);
+        default: return !def.empty() && iequals(text, def);
+    }
+}
+
+struct GapAcc {
+    HonourGap g;
+    std::set<std::string> entries;
+};
+using GapMap = std::map<std::pair<std::string, std::string>, GapAcc>;  // (class, tag lower): sorted, deterministic
+
+void note_gap(GapMap& m, const objects::TagLedgerRow& row, const std::string& entry, const std::string& file, bool in_mod) {
+    GapAcc& a = m[{std::string(row.cls), ascii_lower(row.tag)}];
+    if (a.g.uses++ == 0) {
+        a.g.cls = std::string(row.cls);
+        a.g.tag = std::string(row.tag);
+        a.g.state = objects::to_string(row.state);
+        a.g.first_file = file;
+        a.g.tier = row.tier;
+        a.g.base_uses = row.base_uses;
+        a.g.spec = std::string(row.spec);
+    }
+    a.g.in_mod = a.g.in_mod || in_mod;
+    a.entries.insert(entry);
+}
+
+bool object_type_owner(std::string_view owner) {
+    return owner == "GameObjectType" || owner == "SpaceProp" || owner == "HeroUnit";
+}
+
+void honour_gaps_object_types(const GameData& d, GapMap& m) {
+    const objects::ObjectTypeDatabase& db = d.raw;
+    const objects::FieldColumns& f = db.fields();
+    const auto& files = db.files();
+    std::map<std::string, std::string_view, std::less<>> defaults;  // lower tag -> constructor default text
+    for (const auto& [tag, value] : objects::type_field_defaults()) defaults.emplace(ascii_lower(tag), value);
+    const auto rows = objects::field_schema();
+    std::vector<const objects::TagLedgerRow*> ledger(rows.size(), nullptr);
+    std::vector<uint8_t> looked(rows.size(), 0);
+    std::vector<int8_t> file_in_mod(files.size(), -1);
+    for (size_t i = 0; i < f.size(); ++i) {
+        const uint32_t sr = f.schema[i];
+        if (sr >= rows.size()) continue;
+        if (!looked[sr]) {
+            looked[sr] = 1;
+            const objects::TagLedgerRow* row = objects::find_tag_ledger(rows[sr].owner, rows[sr].tag);
+            ledger[sr] = row && objects::is_honour_gap(row->state) ? row : nullptr;
+        }
+        const objects::TagLedgerRow* row = ledger[sr];
+        if (!row) continue;
+        std::string_view def;
+        if (object_type_owner(rows[sr].owner)) {
+            const auto it = defaults.find(ascii_lower(rows[sr].tag));
+            if (it != defaults.end()) def = it->second;
+        }
+        if (default_value(f.text[i], rows[sr].code, def)) continue;
+        const objects::TypeIndex t = f.type[i];
+        const uint32_t fi = db.types().file[t];
+        if (fi >= files.size()) continue;
+        if (file_in_mod[fi] < 0) file_in_mod[fi] = static_cast<int8_t>(d.vfs && in_mod_layer(*d.vfs, files[fi].path) ? 1 : 0);
+        note_gap(m, *row, "type#" + std::to_string(t), files[fi].path, file_in_mod[fi] != 0);
+    }
+}
+
+void honour_gaps_databases(const GameData& d, GapMap& m) {
+    std::vector<uint8_t> bytes;
+    for (const XmlDatabase& db : kXmlDatabases) {
+        for (const std::string& path : database_files(d, db)) {
+            if (!d.files->read(path, bytes)) continue;
+            const data::XmlDocument doc = data::XmlDocument::parse(bytes, path);
+            if (!doc.ok()) continue;
+            const bool in_mod = d.vfs && in_mod_layer(*d.vfs, path);
+            std::vector<std::pair<data::XmlNode, data::XmlNode>> checked;
+            if (db.walk) {
+                walk_text_elements(doc.root(), checked);
+            } else {
+                std::vector<data::XmlNode> entries;
+                if (db.element.empty()) entries.push_back(doc.root());
+                else
+                    for (data::XmlNode e : doc.root().children())
+                        if (db.element == "*" || iequals(e.name(), db.element)) entries.push_back(e);
+                for (const data::XmlNode e : entries)
+                    for (data::XmlNode c : e.children()) checked.emplace_back(e, c);
+            }
+            for (const auto& [e, c] : checked) {
+                for (const std::string_view owner : db.owners) {
+                    const objects::TagLedgerRow* row = objects::find_tag_ledger(owner, c.name());
+                    if (!row || !objects::is_honour_gap(row->state)) continue;
+                    if (!default_value(c.text_trimmed(), row->code, {}))
+                        note_gap(m, *row, path + "#" + std::to_string(e.index()), path, in_mod);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+void check_honour_gaps(const GameData& d, ModCheckReport& r) {
+    GapMap m;
+    honour_gaps_object_types(d, m);
+    if (d.files) honour_gaps_databases(d, m);
+    for (auto& [key, a] : m) {
+        a.g.entries = static_cast<uint32_t>(a.entries.size());
+        r.honour_gaps.push_back(std::move(a.g));
+    }
+    std::stable_sort(r.honour_gaps.begin(), r.honour_gaps.end(), [](const HonourGap& a, const HonourGap& b) {
+        if (a.uses != b.uses) return a.uses > b.uses;
+        if (a.cls != b.cls) return a.cls < b.cls;
+        return a.tag < b.tag;
+    });
+}
+
+// Every <Event_Type> / <Reward_Type> value of the Data\XML files (the story plots; a plain text scan, so a mod's plot
+// counts whether or not a campaign names it).
+void scan_story_values(std::string_view text, std::string_view lower, std::string_view open, std::vector<std::string>& out) {
+    size_t pos = 0;
+    while ((pos = lower.find(open, pos)) != std::string_view::npos) {
+        pos += open.size();
+        const size_t end = text.find('<', pos);
+        if (end == std::string_view::npos) break;
+        std::string v = normalize_name(ascii_trim(text.substr(pos, end - pos)));
+        if (!v.empty()) out.push_back(std::move(v));
+        pos = end;
+    }
+}
+
+void check_story(const GameData& d, ModCheckReport& r) {
+    if (!d.vfs || !d.files) return;
+    std::map<std::string, StoryUse> rewards, events;  // upper-case name: sorted, deterministic
+    std::vector<uint8_t> bytes;
+    std::vector<std::string> found;
+    for (const std::string& path : d.vfs->list("Data\\XML\\**.xml")) {
+        if (!d.files->read(path, bytes)) continue;
+        const std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        const std::string lower = ascii_lower(text);
+        if (lower.find("<event_type>") == std::string::npos) continue;
+        ++r.story.files;
+        const bool in_mod = in_mod_layer(*d.vfs, path);
+        for (const bool reward : {true, false}) {
+            found.clear();
+            scan_story_values(text, lower, reward ? "<reward_type>" : "<event_type>", found);
+            std::map<std::string, StoryUse>& m = reward ? rewards : events;
+            for (const std::string& v : found) {
+                StoryUse& u = m[v];
+                if (u.uses++ == 0) {
+                    u.name = v;
+                    u.first_file = path;
+                }
+                u.in_mod = u.in_mod || in_mod;
+            }
+        }
+    }
+    r.story.rewards_used = static_cast<uint32_t>(rewards.size());
+    r.story.events_used = static_cast<uint32_t>(events.size());
+    for (auto& [name, u] : rewards) {
+        const sim::StoryRewardRow* row = sim::find_story_reward(name);
+        if (row && row->owner == sim::StoryRewardOwner::Missing) {
+            u.note = std::string(row->note);
+            r.story.rewards_missing.push_back(u);
+        } else if (!row || row->owner == sim::StoryRewardOwner::Retail) {
+            std::string why = row ? std::string(row->note)
+                                  : std::string("not in retail's Reward_Type enum: its dispatcher ignores it (STORY_REWARDS_GALACTIC.md 0.1)");
+            r.retail_equivalent.push_back({"unknown_reward", name, u.uses, u.first_file, u.in_mod, std::move(why)});
+        }
+    }
+    for (auto& [name, u] : events) {
+        const sim::StoryEventRow* row = sim::find_story_event(name);
+        if (row && row->state == sim::StoryEventState::Partial) {
+            u.note = std::string(row->note);
+            r.story.events_partial.push_back(u);
+        } else if (!row || row->state == sim::StoryEventState::Retail) {
+            std::string why = row ? std::string(row->note) : std::string("not a retail event type: retail creates no event for it");
+            r.retail_equivalent.push_back({"dropped_event", name, u.uses, u.first_file, u.in_mod, std::move(why)});
+        }
+    }
+}
+
+void check_token_coverage(const GameData& d, ModCheckReport& r) {
+#ifdef ALAMO_GAME_HAVE_GALACTIC_AI
+    if (!d.ai) return;
+    const ai::EquationSet& set = d.ai->equations;
+    TokenCoverage& tc = r.token_coverage;
+    tc.checked = true;
+    struct Acc {
+        TokenGap g;
+        bool unregistered = false;
+        bool implemented = false;
+    };
+    std::map<std::string, Acc> paths;  // display path: sorted, deterministic
+    std::map<std::string, int8_t> file_in_mod;
+    for (uint32_t i = 0; i < static_cast<uint32_t>(set.size()); ++i) {
+        const ai::Equation& e = set.equation(i);
+        if (!e.parsed) continue;
+        ++tc.equations;
+        std::set<std::string> seen;  // an equation counts once per path
+        for (const ai::ExprNode& n : e.expr.nodes) {
+            if (n.op != ai::Op::Token) continue;
+            const auto path = std::span<const ai::TokenId>(e.expr.path).subspan(n.path_begin, n.path_len);
+            std::string shown = ai::root_name(n.root);  // as the equations write it: Variable_Target.EnemyForce.X
+            for (const ai::TokenId t : path) shown += "." + std::string(set.tokens().name(t));
+            if (!seen.insert(shown).second) continue;
+            Acc& a = paths[shown];
+            if (a.g.equations++ == 0) {
+                a.g.token = shown;
+                a.g.first_equation = e.name;
+                a.g.first_file = e.file;
+                std::string key;
+                bool registered = true;
+                for (const ai::TokenId t : path) {
+                    registered = registered && ai::TokenTable::is_registered(t);
+                    if (!key.empty()) key += '.';
+                    key += normalize_name(set.tokens().name(t));
+                }
+                a.unregistered = !registered;
+                a.implemented = registered && (ai::GalacticSimTokenResolver::path_registered(n.root, key) ||
+                                               ai::tactical::TacticalTokenResolver::path_implemented(n.root, path, set.tokens()));
+            }
+            int8_t& im = file_in_mod[e.file];
+            if (im == 0) im = static_cast<int8_t>(d.vfs && in_mod_layer(*d.vfs, e.file) ? 1 : -1);
+            a.g.in_mod = a.g.in_mod || im > 0;
+        }
+    }
+    tc.leaves = static_cast<uint32_t>(paths.size());
+    for (auto& [shown, a] : paths) {
+        if (a.unregistered) {
+            r.retail_equivalent.push_back({"unregistered_token", shown, a.g.equations, a.g.first_file, a.g.in_mod,
+                                           "a token retail's token table does not register: retail fails the whole equation too"});
+            continue;
+        }
+        if (!a.implemented) tc.missing.push_back(std::move(a.g));
+    }
+    std::stable_sort(tc.missing.begin(), tc.missing.end(), [](const TokenGap& a, const TokenGap& b) {
+        if (a.equations != b.equations) return a.equations > b.equations;
+        return a.token < b.token;
+    });
+#else
+    (void)d;
+    (void)r;
+#endif
+}
+
+// Findings retail shares that the earlier checks already list: the unread tags (no retail descriptor table lists them;
+// mcx0 t07: the most used ones are not even strings in the binary) and the scripts the shared Lua 5.0.2 rejects.
+void retail_equivalent_from_checks(ModCheckReport& r) {
+    for (const UnknownXmlTag& u : r.unknown_xml_tags)
+        r.retail_equivalent.push_back({"unread_tag", u.database + ": " + u.tag, u.occurrences, u.first_file, u.in_mod,
+                                       "no retail descriptor table lists the tag: retail ignores it too"});
+    for (const LuaIssue& e : r.lua_errors)
+        r.retail_equivalent.push_back({"script_error", e.path, 1, e.path, e.in_mod,
+                                       "retail's Lua 5.0.2 rejects it too (MODS.md section 9): " + e.error});
+}
+
+// The issue records of report v4 and the static grade (§12.2): an error gives G0, else G1 (G2 and up need runs). The
+// static part of G3 holds when no honour gap, binding gap, missing reward or missing token comes from the mod's files.
+void compat_issues_and_grade(ModCheckReport& r) {
+    using alamo::IssueKind;
+    using alamo::IssueSeverity;
+    const auto layer = [](bool in_mod) { return in_mod ? uint16_t{0} : alamo::kBaseLayer; };
+    for (const HonourGap& g : r.honour_gaps)
+        r.issues.add(IssueKind::HonourGap, IssueSeverity::Info, g.cls + "." + g.tag, g.first_file,
+                     g.state + ", " + std::to_string(g.uses) + " uses", false, layer(g.in_mod));
+    for (const BindingGapCall& b : r.binding_gaps)
+        r.issues.add(IssueKind::BindingUnconsumed, IssueSeverity::Info, b.name, b.first_script, b.effect, false, layer(b.in_mod));
+    for (const StoryUse& u : r.story.rewards_missing)
+        r.issues.add(IssueKind::RewardMissing, IssueSeverity::Info, u.name, u.first_file, u.note, false, layer(u.in_mod));
+    for (const TokenGap& t : r.token_coverage.missing)
+        r.issues.add(IssueKind::TokenMissing, IssueSeverity::Info, t.token, t.first_file, t.first_equation, false, layer(t.in_mod));
+    std::stable_sort(r.retail_equivalent.begin(), r.retail_equivalent.end(),
+                     [](const RetailEquivalentFinding& a, const RetailEquivalentFinding& b) {
+                         if (a.kind != b.kind) return a.kind < b.kind;
+                         if (a.uses != b.uses) return a.uses > b.uses;
+                         return a.subject < b.subject;
+                     });
+    for (const RetailEquivalentFinding& f : r.retail_equivalent)
+        r.issues.add(IssueKind::RetailEquivalent, IssueSeverity::Info, f.kind + " " + f.subject, f.first_file, f.detail, true,
+                     layer(f.in_mod));
+    r.grade.grade = r.error_count() ? "G0" : "G1";
+    for (const alamo::CompatIssue& i : r.issues.issues())
+        if (!i.retail_equivalent && i.layer != alamo::kBaseLayer &&
+            (i.kind == IssueKind::HonourGap || i.kind == IssueKind::BindingUnconsumed || i.kind == IssueKind::RewardMissing ||
+             i.kind == IssueKind::TokenMissing || i.kind == IssueKind::AssetRejected))
+            r.grade.blocking.push_back(std::string(alamo::issue_kind_name(i.kind)) + " " + i.subject);
+    r.grade.g3_static = r.grade.grade != "G0" && r.grade.blocking.empty();
 }
 
 void append(std::string& s, const char* fmt, auto... args) {
@@ -1014,6 +1375,13 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
         guarded("fx prebuild", [&] { r.shaders.fx_prebuild = prebuild_mod_effects(d, options.fx_cache_dir); });
     if (options.shaders) guarded("shaders", [&] { check_shaders(d, r, options.shader_compile, options.fx_cache_dir); });
     if (options.files && options.submod) guarded("submod", [&] { check_submod(r, options, r.submod); });
+    if (options.compat) {  // mcx0 t06: report version 4 (after the checks it reads)
+        guarded("honour gaps", [&] { check_honour_gaps(d, r); });
+        guarded("story", [&] { check_story(d, r); });
+        guarded("token coverage", [&] { check_token_coverage(d, r); });
+        retail_equivalent_from_checks(r);
+        compat_issues_and_grade(r);
+    }
     return r;
 }
 
@@ -1165,6 +1533,41 @@ std::string format_mod_report(const ModCheckReport& r, bool verbose) {
             s += "    check it stacked:" + args + "\n";
         }
     }
+    {  // mcx0 t06 (version 4): none of this counts as a warning
+        const size_t limit = verbose ? SIZE_MAX : 20;
+        size_t gaps_in_mod = 0;
+        for (const HonourGap& g : r.honour_gaps) gaps_in_mod += g.in_mod ? 1 : 0;
+        append(s, "== compat (report v4; info): grade %s, G3 static part %s, %zu blocking\n", r.grade.grade.c_str(),
+               r.grade.g3_static ? "ok" : "open", r.grade.blocking.size());
+        append(s, "honour gaps: %zu tags set but not honoured (%zu from mod files)\n", r.honour_gaps.size(), gaps_in_mod);
+        for (size_t i = 0; i < r.honour_gaps.size() && i < limit; ++i) {
+            const HonourGap& g = r.honour_gaps[i];
+            append(s, "    %6u %-8s %s.%s  %s%s\n", g.uses, g.state.c_str(), g.cls.c_str(), g.tag.c_str(), g.first_file.c_str(),
+                   g.in_mod ? " [mod]" : "");
+        }
+        append(s, "bindings: %u called, %zu with an effect gap\n", r.binding_calls, r.binding_gaps.size());
+        for (size_t i = 0; i < r.binding_gaps.size() && i < limit; ++i) {
+            const BindingGapCall& b = r.binding_gaps[i];
+            append(s, "    %6u %-9s %s  %s%s\n", b.call_sites, b.effect.c_str(), b.name.c_str(), b.first_script.c_str(),
+                   b.in_mod ? " [mod]" : "");
+        }
+        append(s, "story: %u files, %u reward types (%zu the port lacks), %u event types (%zu partial)\n", r.story.files,
+               r.story.rewards_used, r.story.rewards_missing.size(), r.story.events_used, r.story.events_partial.size());
+        for (const StoryUse& u : r.story.rewards_missing)
+            append(s, "    %6u reward %s  %s%s\n", u.uses, u.name.c_str(), u.first_file.c_str(), u.in_mod ? " [mod]" : "");
+        for (const StoryUse& u : r.story.events_partial)
+            append(s, "    %6u event  %s  %s%s\n", u.uses, u.name.c_str(), u.first_file.c_str(), u.in_mod ? " [mod]" : "");
+        append(s, "ai tokens: %u equations, %u paths, %zu not evaluated by the port\n", r.token_coverage.equations,
+               r.token_coverage.leaves, r.token_coverage.missing.size());
+        for (size_t i = 0; i < r.token_coverage.missing.size() && i < limit; ++i) {
+            const TokenGap& t = r.token_coverage.missing[i];
+            append(s, "    %6u %s  %s (%s)%s\n", t.equations, t.token.c_str(), t.first_file.c_str(), t.first_equation.c_str(),
+                   t.in_mod ? " [mod]" : "");
+        }
+        append(s, "retail-equivalent findings (retail does the same; never lower the grade): %zu\n", r.retail_equivalent.size());
+        for (size_t i = 0; i < r.grade.blocking.size() && i < limit; ++i)
+            append(s, "    blocks G3: %s\n", r.grade.blocking[i].c_str());
+    }
     if (!r.check_errors.empty()) {
         append(s, "== check errors: %zu\n", r.check_errors.size());
         append_list(s, r.check_errors, 0, r.check_errors.size(), true);
@@ -1285,7 +1688,7 @@ std::string format_mod_report_json(const ModCheckReport& r) {
     j.open('{');
     j.key("schema");
     j.str("alamo.mod_report");
-    count(j, "version", 3);
+    count(j, "version", 4);
     j.key("result");
     j.str(r.error_count() ? "errors" : "ok");
     count(j, "errors", r.error_count());
@@ -1503,6 +1906,147 @@ std::string format_mod_report_json(const ModCheckReport& r) {
     j.close('}');
 
     j.strings("check_errors", r.check_errors);
+
+    // ---- version 4 (mcx0 t06, docs/MOD_COMPAT_DESIGN.md §12.1) ----
+    j.key("honour_gaps");
+    j.open('[');
+    for (const HonourGap& g : r.honour_gaps) {
+        j.open('{');
+        j.key("class");
+        j.str(g.cls);
+        j.key("tag");
+        j.str(g.tag);
+        j.key("state");
+        j.str(g.state);
+        count(j, "uses", g.uses);
+        count(j, "entries", g.entries);
+        j.key("first_file");
+        j.str(g.first_file);
+        j.key("in_mod");
+        j.boolean(g.in_mod);
+        count(j, "tier", g.tier);
+        count(j, "base_uses", g.base_uses);
+        j.key("spec");
+        j.str(g.spec);
+        j.close('}');
+    }
+    j.close(']');
+    j.key("retail_equivalent");
+    j.open('{');
+    count(j, "count", r.retail_equivalent.size());
+    j.key("items");
+    j.open('[');
+    for (const RetailEquivalentFinding& f : r.retail_equivalent) {
+        j.open('{');
+        j.key("kind");
+        j.str(f.kind);
+        j.key("subject");
+        j.str(f.subject);
+        count(j, "uses", f.uses);
+        j.key("first_file");
+        j.str(f.first_file);
+        j.key("in_mod");
+        j.boolean(f.in_mod);
+        j.key("detail");
+        j.str(f.detail);
+        j.close('}');
+    }
+    j.close(']');
+    j.close('}');
+    j.key("bindings");
+    j.open('{');
+    count(j, "called", r.binding_calls);
+    j.key("unconsumed");
+    j.open('[');
+    for (const BindingGapCall& b : r.binding_gaps) {
+        j.open('{');
+        j.key("name");
+        j.str(b.name);
+        j.key("effect");
+        j.str(b.effect);
+        j.key("detail");
+        j.str(b.detail);
+        count(j, "call_sites", b.call_sites);
+        count(j, "scripts", b.scripts);
+        j.key("first_script");
+        j.str(b.first_script);
+        j.key("in_mod");
+        j.boolean(b.in_mod);
+        j.close('}');
+    }
+    j.close(']');
+    j.close('}');
+    const auto story_uses = [&](std::string_view k, const std::vector<StoryUse>& v) {
+        j.key(k);
+        j.open('[');
+        for (const StoryUse& u : v) {
+            j.open('{');
+            j.key("name");
+            j.str(u.name);
+            count(j, "uses", u.uses);
+            j.key("first_file");
+            j.str(u.first_file);
+            j.key("in_mod");
+            j.boolean(u.in_mod);
+            j.key("note");
+            j.str(u.note);
+            j.close('}');
+        }
+        j.close(']');
+    };
+    j.key("story");
+    j.open('{');
+    count(j, "files", r.story.files);
+    count(j, "rewards_used", r.story.rewards_used);
+    story_uses("rewards_missing", r.story.rewards_missing);
+    count(j, "events_used", r.story.events_used);
+    story_uses("events_partial", r.story.events_partial);
+    j.close('}');
+    j.key("ai");
+    j.open('{');
+    j.key("token_coverage");
+    j.open('{');
+    j.key("checked");
+    j.boolean(r.token_coverage.checked);
+    count(j, "equations", r.token_coverage.equations);
+    count(j, "leaves", r.token_coverage.leaves);
+    j.key("missing");
+    j.open('[');
+    for (const TokenGap& t : r.token_coverage.missing) {
+        j.open('{');
+        j.key("token");
+        j.str(t.token);
+        count(j, "equations", t.equations);
+        j.key("first_equation");
+        j.str(t.first_equation);
+        j.key("first_file");
+        j.str(t.first_file);
+        j.key("in_mod");
+        j.boolean(t.in_mod);
+        j.close('}');
+    }
+    j.close(']');
+    j.close('}');
+    j.close('}');
+    j.key("limits");
+    j.open('[');
+    for (const LimitHit& l : r.limits) {
+        j.open('{');
+        j.key("limit");
+        j.str(l.limit);
+        count(j, "value", l.value);
+        count(j, "needed", l.needed);
+        j.close('}');
+    }
+    j.close(']');
+    j.key("grade");
+    j.open('{');
+    j.key("grade");
+    j.str(r.grade.grade);
+    j.key("g3_static");
+    j.boolean(r.grade.g3_static);
+    j.strings("blocking", r.grade.blocking);
+    j.close('}');
     j.close('}');
     j.out.push_back('\n');
     return std::move(j.out);

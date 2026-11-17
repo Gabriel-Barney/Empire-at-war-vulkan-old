@@ -125,6 +125,8 @@ public:
     TacticalTokenResolver(const TacticalPerception& p, const PerceptionWorld& w) : p_(p), w_(w) {}
     bool resolve(const EvalContext& ctx, const TokenRef& token, double& out) const override;
     bool implements(Root root, std::span<const TokenId> path, const TokenTable& tokens) const override;
+    // implements() without a resolver (it reads only the leaf tables): the load report's ai.token_coverage (mcx0 t06).
+    static bool path_implemented(Root root, std::span<const TokenId> path, const TokenTable& tokens);
     // Script_<File>.Evaluate (AI_GALACTIC_2 §4.4, unchanged in tactical): TacticalPerception's script evaluator
     // (fails without one). Serial callers only.
     bool resolve_script(const EvalContext& ctx, std::string_view name, std::span<const Param> params,
