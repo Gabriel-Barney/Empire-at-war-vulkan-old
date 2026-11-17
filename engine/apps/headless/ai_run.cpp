@@ -603,6 +603,7 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
             std::printf("galactic-ai: story: %zu events fired, %zu Lua notes\n", st.log().size(), st.lua_messages().size());
             if (aopt.verbose)
                 for (const auto& m : st.lua_messages()) std::printf("  story lua: %s\n", m.c_str());
+            if (aopt.verbose) std::fputs(st.log_text("galactic-ai: story event log").c_str(), stdout);  // storyb t17
             if (const lua::StoryHolocron* h = st.holocron()) {  // q6 t14 (GALACTIC_DIALOGS §2.8)
                 size_t done = 0;
                 for (const lua::StoryHolocronEntry& e : h->entries()) done += e.completed ? 1u : 0u;
