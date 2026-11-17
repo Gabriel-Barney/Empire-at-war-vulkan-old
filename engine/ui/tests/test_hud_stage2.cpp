@@ -617,6 +617,30 @@ void test_radar() {
     CHECK2(click && near2(click->duration, 0.8f) && click->model == "I_minimap_default_click.alo" && !click->single_instance);
     const RadarEventType* inter = s.event("Interdict_Activated");
     CHECK2(inter && inter->persistent && inter->single_instance);
+    // modc t30: the Event_* scratch values carry over (Interdict_Activated has no Event_Duration: Default_Click's .8).
+    CHECK2(inter && near2(inter->duration, 0.8f) && near2(inter->scale, 0.001f));
+    {  // whole-file walk: no path check, known tags at any depth; a fresh record keeps 0.0125 / 2.0 until an Event_* field
+        const char* walk = R"(<Mod_Radar><Radar_Map_Event name="A"><Event_Model_Name>a.alo</Event_Model_Name></Radar_Map_Event>
+          <Wrapper><Radar_Map_Event name="B"><Event_Persistent>Yes</Event_Persistent></Radar_Map_Event>
+          <Deep><Space_Backdrop_Texture_Name>mod_grid.tga</Space_Backdrop_Texture_Name></Deep></Wrapper>
+          <Radar_Map_Event name="C"><Event_Duration>3</Event_Duration></Radar_Map_Event>
+          <Passability_Color_Settings name="Default"><Color name="passability_clear">1,2,3,255</Color></Passability_Color_Settings>
+          <Passability_Color_Settings name="Urban"></Passability_Color_Settings><Color name="passability_clear">9,9,9,255</Color>
+          </Mod_Radar>)";
+        const data::XmlDocument wd = data::XmlDocument::parse(std::string_view(walk));
+        RadarSettings w;
+        CHECK2(w.parse(wd.root()));
+        const RadarEventType* ea = w.event("a");
+        const RadarEventType* eb = w.event("B");
+        const RadarEventType* ec = w.event("C");
+        CHECK2(ea && ea->model == "a.alo" && near2(ea->scale, 0.0125f) && near2(ea->duration, 2.0f) && !ea->persistent);
+        CHECK2(eb && eb->persistent && near2(eb->duration, 2.0f) && near2(eb->scale, 0.0125f));
+        CHECK2(ec && ec->persistent && near2(ec->duration, 3.0f));  // persistent carried over from B
+        CHECK2(w.space_backdrop == "mod_grid.tga");
+        // the block stays selected after its element ends: the loose Color writes Urban's block
+        CHECK2(w.palette("Urban")[static_cast<size_t>(Passability::Clear)] == (Rgba8{9, 9, 9, 255}) &&
+               w.palette("Desert")[static_cast<size_t>(Passability::Clear)] == (Rgba8{1, 2, 3, 255}));
+    }
     CHECK2(s.space_fow == (Rgba8{25, 66, 120, 100}) && s.land_fow == (Rgba8{10, 10, 10, 100}));
     const PassabilityPalette temp = s.palette("temperate"), def = s.palette("Volcanic");
     CHECK2(temp[static_cast<size_t>(Passability::Clear)] == (Rgba8{152, 203, 95, 255}) &&
