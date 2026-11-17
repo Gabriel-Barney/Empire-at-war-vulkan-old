@@ -49,9 +49,27 @@
    "ticks": 5400,
    "frames": [600, 1200, 1800, 2400, 3000, 3600, 4200, 4800, 5400],
    "workers": 4
+  },
+  "story_kessel": {
+   "kind": "story",
+   "title": "Underworld campaign (Full_Story_Campaign_Underworld), Kessel UM01 land mission, fully hands-off, seed 0, battle frames 0-18000",
+   "references": [
+    {"run": "20261109-053933-story-vanilla", "note": "storyb t09 hands-off reference (STORY_T04_KESSEL_RUN.md §6): no key or click after Start Game, 18003 samples"},
+    {"run": "20261109-064135-story-vanilla", "note": "second hands-off run, same kit: MATCH with the first on all 18000 ticks (q2trace.py compare)"}
+   ],
+   "kit": "tools/probe_mod/q2_traces/run_story.cmd (README 'Story mission run'; no input in the battle)",
+   "campaign": "Full_Story_Campaign_Underworld",
+   "human": "Underworld",
+   "ai_types": ["Underworld=AI_Player_Underworld"],
+   "ticks": 18003,
+   "workers": 4
   }
  },
  "tolerances": {
+  "story.census_frame1": {"abs": 0, "why": "storyb t03: the battle's objects per owner index at battle frame 1; the two retail hands-off runs agree and the map, the story setup and the linked battle's participants are data: exact"},
+  "story.first_spawn_frame": {"abs": 0, "why": "storyb t03: the mission Lua's first spawn (retail: the Begin state's bribe squad at frame 6); both retail runs agree: exact"},
+  "story.spawned": {"abs": 0, "why": "storyb t03: objects appearing after battle frame 1 (Lua spawns, the cinematic's objects); a hands-off run repeats frame for frame in retail (STORY_T04_KESSEL_RUN.md §6): exact"},
+  "story.health_change_samples": {"abs": 0, "why": "storyb t03: samples in which an object's health changes; retail hands-off: nothing fights, only the cinematic's objects: exact"},
   "travel.hop_ticks": {"abs": 3, "rel": 0.03, "nearest": true, "why": "keyed by faction and route; a hop takes its fleet's speed (the units' Hyperspace_Speed, the Underworld corruption bonus), so one route has several durations in retail (Underworld Nal Hutta -> Shola: 89 and 107 ticks) and each port hop must lie within tolerance of some retail hop of that route. A leg is timed from the last sample at its start planet to the first sample at its end planet, a trip passing a planet centre is split there (same rule on both sides, q4hf t04); retail hops of one route and fleet differ by up to 6 ticks (Rebel Kamino -> Shola 221 / 227, Mon Calamari -> Shola 74 / 80), so 3%, at least 3 ticks; a wrong speed multiplier shows as 100+ ticks (tools/probe_mod/g1_hops/README.md)"},
   "build.ticks": {"abs": 3, "rel": 0.05, "why": "the shortest completed build per type and planet: retail from its queue start to leaving the queue (production.q2q: items finish 2 ticks after start + frames), the port from the AI build order to the new object in its state trace. The retail runs themselves differ by 5% on one planet (mining facility at Mon Calamari 686 vs 722 ticks, Y-wings 344 vs 362: a build-time modifier present in one run only), so 5%, at least 3 ticks"},
   "econ.cycle_tick": {"abs": 0, "why": "the fiscal period is data (45 s = 1350 frames) and the first payment rule is known (q2f t02): exact; a retail cycle seen across missed samples is a window and the port tick must fall inside it"},

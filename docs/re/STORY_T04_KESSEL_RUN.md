@@ -284,3 +284,24 @@ after the crawl is already the battle. That run diverges at tick 227 and was qui
 Copy `trace.q2t`, `summary.json`, `reference.crc`, `run_status.json`, `reader_status.json`, `run_trace.log`,
 `manifest.json`, `cleanup.log` and `playerlist_dump.txt` (not `profile_backup/`, which is a copy of the player's save
 profile).
+
+## 7. storyb t03: the port's battle trace and the `story_kessel` scenario (2026-11-17)
+
+`alamo_headless --galactic-ai` now writes the battle on top with `--tactical-trace-out FILE` (the `--skirmish-ai`
+tactical trace format, `engine/apps/headless/tactical_trace.hpp`), and `tools/parity` has the scenario `story_kessel`
+(kind `story`, references `20261109-053933` and `20261109-064135`). With the map hints loaded (q6 t28, map1 t04) the
+mission script runs: 0 Lua errors in 18003 ticks, and the Begin state's bribe squad appears at battle frame 6, as in
+retail. The port's player list now has 8 players with the human at index 6, as retail. First port run (dev `5146e1a1` +
+storyb t03; `python tools/parity/parity_harness.py run --scenario story_kessel`):
+
+| Metric | Retail (2 runs) | Port | |
+|---|---|---|---|
+| battle ended | no | no | PASS |
+| objects at frame 1, owner 1 (Empire) | 74 | 117 | FAIL: the port adds the galactic garrison: `E_GROUND_BARRACKS`, 4 `SCOUT_TROOPER`, 36 more `SQUAD_STORMTROOPER`, 2 more `STORMTROOPER_TEAM`; retail has `HONOGHR_PLANETARY_ADVANTAGE`, the port does not |
+| objects at frame 1, owner 3 (Neutral) | 619 | 713 | FAIL: 94 more props (`PROP_CRATE01` 28, `PROP_CRATE19_PARTS` 18, `PROP_CRATE18_PARTS` 15 are not among retail's types) |
+| objects at frame 1, owners 4 / 6 | 2 / 2 | 2 / 2 | PASS |
+| first object the mission spawns | frame 6 | frame 6 | PASS (the port's container of the squad is `IMPERIAL_MEDIUM_STORMTROOPER_SQUAD`, retail's `STORMTROOPER_TEAM`) |
+| objects appearing after frame 1 | 22 | 955 | FAIL: the barracks sends reinforcements (scout troopers frame 1271, squads 1370-1563), the Empire fights Tyber and the fight leaves explosion objects (`SMALL_DUD`, `LARGE_DAMAGE_LAND`, ...); the intro cinematic's spawns never come (retail: `MILLENNIUM_FALCON_LANDING` 5361, `URAI_FEN` 5528, `UMP_HANSOLO` / `UMP_CHEWBACCA` 5661, `UMP_MANDALORIAN` 5961, cleanup 7541, objective highlights 7574 / 7668) |
+| health-change samples | 1 | 398 | FAIL: Tyber is attacked (392 samples) |
+
+The four failures are storyb tasks (2026-11-17).

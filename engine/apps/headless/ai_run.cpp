@@ -42,6 +42,7 @@
 #endif
 #include "alamo/vfs/vfs.hpp"
 #include "port_trace.hpp"
+#include "tactical_trace.hpp"  // storyb t03: --tactical-trace-out
 
 namespace {
 
@@ -332,6 +333,20 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
                 return false;
             }
         }
+        // storyb t03: the tactical trace of the battle on top (read-only, as the galactic trace); the first run only.
+        PortTacticalTrace ttrace;
+        if (print && !aopt.tactical_trace_out.empty()) {
+            std::string terr;
+            const std::vector<std::pair<std::string, std::string>> meta = {
+                {"reader", "alamo_headless"}, {"scenario", "story"}, {"game", "foc"}, {"campaign", name},
+                {"label", "alamo_headless --economy --galactic-ai" + std::string(aopt.story ? " --story" : "") +
+                              (aopt.human.empty() ? std::string() : " --human " + aopt.human) + " --battles " + aopt.battles},
+                {"game_type", "0"}, {"mode_type", "1"}, {"target_ticks", std::to_string(opt.ticks)}};
+            if (!ttrace.open(aopt.tactical_trace_out, meta, cfg.seed, terr)) {
+                std::fprintf(stderr, "galactic-ai: %s\n", terr.c_str());
+                return false;
+            }
+        }
         sim::CampaignBattleOptions bo;
         bo.conflict.human_choice = aopt.battles == "auto" ? galactic::BattleChoice::AutoResolve : galactic::BattleChoice::Fight;
         bo.conflict.fight_ai_battles = aopt.battles == "fight-all";
@@ -486,6 +501,15 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
                 ts.stack_depth = static_cast<uint32_t>(host.modes().depth());
                 trace.sample(*gs, ts);
             }
+            if (ttrace.is_open())  // storyb t03: after every tick in which a battle is on top
+                if (const sim::TacticalMode* tmode = host.tactical(); tmode && battles.battle() && host.modes().top() == tmode) {
+                    PortTacticalTrace::Sample ts;
+                    ts.global_frame = host.frame();
+                    ts.mode_type = static_cast<uint32_t>(tmode->kind());
+                    ts.rng_state = host.random().synced().state();
+                    ts.stack_depth = static_cast<uint32_t>(host.modes().depth());
+                    ttrace.sample(*tmode, *battles.battle(), *gs, ts);
+                }
             for (size_t i = 0; i < owner_prev.size() && i < gs->planets().size(); ++i) {  // planets changing hands
                 const int32_t o = gs->planets()[i].owner;
                 if (o == owner_prev[i]) continue;
@@ -522,6 +546,14 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
                 return false;
             }
             std::printf("wrote %s\n", aopt.trace_out.c_str());
+        }
+        if (ttrace.is_open()) {
+            std::string terr;
+            if (!ttrace.finish("ticks_reached", terr)) {
+                std::fprintf(stderr, "galactic-ai: %s\n", terr.c_str());
+                return false;
+            }
+            std::printf("wrote %s\n", aopt.tactical_trace_out.c_str());
         }
         out.crc = host.crc_log();
         for (const ai::AiDecision& d : world.decision_log())

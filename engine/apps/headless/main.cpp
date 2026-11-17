@@ -58,6 +58,8 @@
 //       (q6 t07 [port] test knob: as a SWITCH_CONTROL story reward at frame 0, e.g. Thrawn's Revenge's INITIALIZE_AI types).
 //       [--trace-out FILE]: per-tick Q2TRACE 1 state trace (port_trace.hpp) for tools/probe_mod/q2_traces/q2trace.py; with
 //       --skirmish-ai (q4hf t02) the tactical battle's trace (tactical_trace.hpp: owner / type / hull per object, first shot).
+//       [--tactical-trace-out FILE] (storyb t03): in --galactic-ai runs, the same tactical trace of every battle while it is
+//       on top (story missions: tools/parity story_kessel).
 //       [--story]: also run the campaign's story plot sets, as the retail sandbox does (q2f t03).
 //       [--ai-latency F] [--no-ai-stagger | --ai-stagger] (also --skirmish-ai): OPT2 t02 / t01 parity knobs - the AI path
 //       recompute latency (default 15 frames, 0 = the original timing) and every AI player planning on the same frames (the
@@ -229,6 +231,7 @@ struct Options {
     std::string ai_human, ai_human_script;  // A2 galactic: --human FACTION [--human-script FILE]
     std::vector<std::string> ai_types;      // q6 t07: --ai-type FACTION=TYPE (repeatable)
     std::string trace_out;                  // q2f t05: --trace-out FILE (Q2TRACE 1 state trace, galactic AI runs; q4hf t02: --skirmish-ai)
+    std::string tactical_trace_out;         // storyb t03: --tactical-trace-out FILE (galactic AI runs: the battles on top)
     int64_t ai_latency = -1;                // OPT2 t02: --ai-latency F (galactic / tactical AI path recomputes)
     int8_t ai_stagger = -1;                 // OPT2 t01: --no-ai-stagger 0, --ai-stagger 1, -1 = the mode's default
     bool pp_streams = true;                 // OPT2 t10: --no-pp-streams
@@ -944,6 +947,7 @@ static int headless_main(int argc, char** argv) {
         else if (a == "--human-script") opt.ai_human_script = next();  // A2 galactic
         else if (a == "--ai-type") opt.ai_types.push_back(next());        // q6 t07
         else if (a == "--trace-out") opt.trace_out = next();            // q2f t05
+        else if (a == "--tactical-trace-out") opt.tactical_trace_out = next();  // storyb t03
         else if (a == "--ai-latency") opt.ai_latency = std::strtoll(next().c_str(), nullptr, 10);  // OPT2 t02
         else if (a == "--no-ai-stagger") opt.ai_stagger = 0;                                       // OPT2 t01
         else if (a == "--ai-stagger") opt.ai_stagger = 1;                                          // a2m r4
@@ -1148,6 +1152,7 @@ static int headless_main(int argc, char** argv) {
             a.human_script = opt.ai_human_script;  // A2 galactic
             a.ai_types = opt.ai_types;             // q6 t07
             a.trace_out = opt.trace_out;           // q2f t05
+            a.tactical_trace_out = opt.tactical_trace_out;  // storyb t03
             a.story = opt.story;                   // q2f t03
             a.verbose = !opt.quiet;
             return ai_campaign_run(m, a);

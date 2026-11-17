@@ -934,8 +934,28 @@ def resolve_refs(scen, refs_dir, fallback=()):
     return have, missing
 
 
+def story_metrics(trace_path):
+    """storyb t03: a story mission's battle (retail `story` trace, or the port's --tactical-trace-out), reduced by the kit's
+    story_battle.py reader on both sides: objects by owner index at battle frame 1 (the two sides have the same player
+    list), the first object the mission Lua spawns after frame 1, how many objects appear after frame 1, how many samples
+    change an object's health, and whether the battle ended."""
+    import story_battle  # tools/probe_mod/q2_traces/analysis (on sys.path above)
+    r = story_battle.retail(trace_path)
+    out = {}
+    for owner, c in sorted((r.get("census_frame1") or {}).items()):
+        out["story.census_frame1[owner %d]" % int(owner)] = c["total"]
+    sp = r.get("spawned_after_frame1") or []
+    out["story.first_spawn_frame"] = min(s["frame"] for s in sp) if sp else -1
+    out["story.spawned"] = len(sp)
+    out["story.health_change_samples"] = sum(h["samples"] for h in r.get("health_changes") or [])
+    out["outcome.battle_ended"] = 0 if r.get("end_reason") in ("ticks_reached", "frames_reached") else 1
+    return out, [], {"ticks": r.get("last_mode_frame"), "seed": "0", "label": r.get("label"), "end": r.get("end_reason")}
+
+
 def retail_metrics(scen, run_dir):
     trace = os.path.join(run_dir, "trace.q2t")
+    if scen["kind"] == "story":
+        return story_metrics(trace)
     if scen["kind"] == "galactic":
         return galactic_metrics(trace, os.path.join(run_dir, "production.q2q"), max_tick=scen.get("max_tick"),
                                 hop_max_tick=scen.get("hop_max_tick", scen.get("max_tick")))
@@ -947,6 +967,8 @@ def default_seed(scen, ref_info):
     skirmish, none (the host's default, 1: retail seeds a skirmish itself, tools/probe_mod/q2_traces/README.md)."""
     if scen["kind"] == "galactic":
         return int(ref_info.get("seed") or "0", 16)
+    if scen["kind"] == "story":  # retail starts the campaign from seed 0 on the menu path (STORY_T04_KESSEL_RUN.md §1)
+        return 0
     return None
 
 
@@ -960,6 +982,12 @@ def port_command(scen, exe, out_dir, ref_info, seed=None):
     if seed is None:
         seed = default_seed(scen, ref_info)
     seed_args = ["--seed", str(seed)] if seed is not None else []
+    if scen["kind"] == "story":  # storyb t03: the campaign's linked mission, hands-off, the battle's tactical trace
+        return [exe, "--economy", "--galactic-ai", "--story", "--battles", "fight", "--campaign", scen["campaign"],
+                "--human", scen["human"]] + [x for t in scen.get("ai_types", []) for x in ("--ai-type", t)] + seed_args + [
+                "--ticks", str(scen["ticks"]), "--workers", str(scen.get("workers", 4)), "--quiet",
+                "--crc-out", os.path.join(out_dir, "port.crc"), "--ai-log", os.path.join(out_dir, "port_ai.txt"),
+                "--tactical-trace-out", os.path.join(out_dir, "port.q2t")]
     if scen["kind"] == "galactic":
         campaign = ref_info["campaign"]
         human = campaign.rsplit("_", 1)[-1]
@@ -1007,7 +1035,9 @@ def run_port(scen, exe, out_dir, ref_info, reuse, seed=None):
             raise RuntimeError("port run failed (exit %d), see %s" % (r.returncode, log))
     with open(log, "r", encoding="utf-8", errors="replace") as fh:
         text = fh.read()
-    if scen["kind"] == "galactic":
+    if scen["kind"] == "story":
+        m, notes, info = story_metrics(os.path.join(out_dir, "port.q2t"))
+    elif scen["kind"] == "galactic":
         m, notes, info = galactic_metrics(os.path.join(out_dir, "port.q2t"), ai_log=os.path.join(out_dir, "port_ai.txt"))
     else:
         m, notes, info = skirmish_port_metrics(os.path.join(out_dir, "port_ai.txt"), set(scen["frames"]), scen["ticks"] + 1, text)
