@@ -54,6 +54,11 @@ public:
     void clear();  // releases every owner
 
     static uint64_t static_key(const Instance& inst, uint64_t salt);
+    // vis1 t04 (docs/re/WEATHER_VISUALS.md §6, 0x13c870 / 0x12db30): the parent mesh of a proxy on bone `proxy_bone` - the
+    // first mesh attached to that bone's parent bone (none for a proxy on the root bone), its first submesh's positions and
+    // triangles; `submesh` = that submesh's index (its vertex space: the attach bone, or model space when skinned).
+    // Null when there is none.
+    static SpawnMeshPtr parent_mesh(const assets::ModelAsset& m, uint32_t proxy_bone, uint32_t* submesh = nullptr);
     size_t owners() const { return owners_.size(); }
     const AttachStats& stats() const { return stats_; }  // of the last begin() .. end()
 
@@ -65,6 +70,7 @@ private:
         int alt = -1, lod = -1;
         bool finished = false;
         float intensity = -1.0f;  // last scalar-setter intensity (sync_effect)
+        int64_t mesh_sub = -1;    // vis1 t04: the parent mesh's submesh (spawn sources 1-3), -1 = none
     };
     struct Owner {
         uint64_t model_uid = 0;

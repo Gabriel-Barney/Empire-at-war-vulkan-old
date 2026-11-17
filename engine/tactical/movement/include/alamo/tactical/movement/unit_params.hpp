@@ -72,6 +72,10 @@ struct UnitDesc {
     // rises before its first move and counts as "raised" in the land contact tests from then on (FoC:
     // Lancet_Air_Artillery, Gallofree_HTT_Transport). [port] the rise only takes its time: the unit's z is not raised.
     float hover_height = 0.0f;
+    // trn1 t03 (MOVEMENT §3.6, 0x42bb40; save version 33): Overall_Length / Overall_Width (+0x1a20 / +0x1a24) x Scale_Factor:
+    // the land conform's pitch (and z lift) and roll sample spans; 0 = no tilt.
+    float overall_length = 0.0f;
+    float overall_width = 0.0f;
     // s78n t20 batch 1 (MOVEMENT §5.4.5 item 2, §5.2 item 7; save version 20): an object without a locomotor (obj +0x333 =
     // -1) in the land layer, and the type's IsDeathCloneObstacle (+0xcf). Such a unit is never Moving, never a collision
     // checker and never walks: it is only ever the obstacle b. The host registers the land death clones of types with

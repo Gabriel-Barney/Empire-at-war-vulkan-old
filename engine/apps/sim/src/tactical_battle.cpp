@@ -540,6 +540,8 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
         movement_->air().set_box({mn[0], mn[1]}, {mx[0], mx[1]});  // REMAINING_GAPS §4.3-4.6: air units plan in the playable box
         const terrain::MapData* m = &map_;
         movement_->set_height_fn([m](float x, float y) { return m->terrain.sample_height(x, y); });
+        // trn1 t03 (MOVEMENT §3.6): Water-class units (hover) stand on the water plane where it lies above the ground.
+        movement_->set_water_plane(m->terrain.header.water_type != terrain::WaterType::None, m->terrain.header.water_height);
         // FIGHTER_FLYING §6: flying hooks. object_position = a circling target that is not a mover (structures: the
         // combat position). clearance (0x63b640, §6.3.1) = the movers' Corvette-layer query with the type data of
         // clearance_info (MovementSystem::clearance_query).
@@ -801,6 +803,16 @@ void TacticalBattle::attach_rocket_terrain() {
         rt.grid.water_type = static_cast<uint32_t>(tr.header.water_type);
     }
     combat_->set_rocket_terrain(std::move(rt));
+    // trn1 t01 / t02 (docs/re/TRN1_TERRAIN_GAMEPLAY.md §1 - §2): the cover cell test and the SurfaceFX surface reading.
+    // Land maps with a heightmap only; not saved (re-attached after a load, like the rocket terrain).
+    tc::SurfaceQueries sq;
+    if (!space_ && tr.present && tr.width >= 2 && tr.height >= 2) {
+        const terrain::Terrain* tp = &tr;
+        sq.cell_surface = [tp](float x, float y) { return tp->cell_surface_type(x, y); };
+        sq.surface = [tp](float x, float y) { return tp->surface_type_at(x, y); };
+        sq.under_water = [tp](float x, float y) { return tp->under_water(x, y); };  // trn1 t04
+    }
+    combat_->set_surface_queries(std::move(sq));
 }
 
 Vec3 TacticalBattle::slot_position(uint8_t side, uint32_t mask) {

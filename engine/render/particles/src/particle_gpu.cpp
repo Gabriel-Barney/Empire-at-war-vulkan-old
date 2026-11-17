@@ -56,8 +56,9 @@ struct FrameConsts {
     uint32_t counts[4];
     float fog_color[4];  // scene fog (set_scene_fog)
     float fog_vals[4];   // FOG_VALS x, y
+    float ground[4];     // vis1 t05: terrain grid width, height, spacing, enabled (1 / 0)
 };
-static_assert(sizeof(FrameConsts) == 192);
+static_assert(sizeof(FrameConsts) == 208);
 struct Push {
     uint32_t emitter = 0, mode = 0, fog = 0, pad1 = 0;
 };
@@ -65,6 +66,7 @@ struct Push {
 enum : uint32_t {
     kFObjectSpace = 1u, kFObjectSpaceAccel = 2u, kFWind = 4u, kFRotationFixed = 8u, kFRandomDirection = 16u,
     kFColorUniform = 32u, kFWeather = 64u, kFTail = 128u, kFAdditiveFade = 256u, kFTriangle = 512u,
+    kFGroundKill = 1024u, kFGroundBounce = 2048u,  // vis1 t05: ground behaviour 1 / 2
 };
 enum : uint32_t { kEParent = 1u, kESorted = 2u };
 
@@ -104,6 +106,8 @@ DescGpu desc_gpu(const EmitterDef& e) {
     if (e.has_tail) f |= kFTail;
     if (e.blend_mode == 1 || e.blend_mode == 4) f |= kFAdditiveFade;
     if (e.geometry == 0) f |= kFTriangle;
+    if (!e.weather && e.ground_behavior == 1) f |= kFGroundKill;  // weather particles ignore the ground (SPEC 0x3D)
+    if (!e.weather && e.ground_behavior == 2) f |= kFGroundBounce;
     d.flags[0] = f;
     d.flags[1] = e.blend_mode;
     d.flags[2] = std::max<uint32_t>(e.texture_cells, 1u);
@@ -115,6 +119,7 @@ DescGpu desc_gpu(const EmitterDef& e) {
     d.rot[3] = e.weather_camera_distance;
     d.weather[0] = e.weather_fade_start;
     d.weather[1] = e.weather_fade_length;
+    d.weather[2] = e.bounciness;  // vis1 t05
     d.vel = shape_gpu(e.velocity);
     d.pos = shape_gpu(e.position);
     for (uint32_t t = 0; t < kTrackCount; ++t) {
@@ -151,8 +156,8 @@ ParticleRenderer::~ParticleRenderer() { shutdown(); }
 bool ParticleRenderer::create_layouts() {
     const rhi::DeviceFns& fn = ctx_->vkd();
     const VkShaderStageFlags all = VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    std::array<VkDescriptorSetLayoutBinding, 8> b0{};
-    for (uint32_t i = 0; i < 8; ++i) {
+    std::array<VkDescriptorSetLayoutBinding, 9> b0{};
+    for (uint32_t i = 0; i < 9; ++i) {
         b0[i].binding = i;
         b0[i].descriptorType = i == 7 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         b0[i].descriptorCount = 1;
@@ -218,7 +223,8 @@ bool ParticleRenderer::init(rhi::Context& ctx, rhi::Allocator& alloc, rhi::Uploa
     if (!alloc.create_buffer(static_cast<VkDeviceSize>(capacity_) * sizeof(ParticleGpu), su, rhi::MemoryUsage::GpuOnly, particles_,
                              "particles.pool") ||
         !alloc.create_buffer(static_cast<VkDeviceSize>(capacity_) * 4, su, rhi::MemoryUsage::GpuOnly, order_, "particles.order") ||
-        !alloc.create_buffer(static_cast<VkDeviceSize>(capacity_) * 16, su, rhi::MemoryUsage::GpuOnly, death_, "particles.death")) {
+        !alloc.create_buffer(static_cast<VkDeviceSize>(capacity_) * 16, su, rhi::MemoryUsage::GpuOnly, death_, "particles.death") ||
+        !alloc.create_buffer(16, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::Dynamic, heights_, "particles.heights")) {
         log::errorf("particles", "particle buffers (%u particles) failed", capacity_);
         shutdown();
         return false;
@@ -286,8 +292,9 @@ void ParticleRenderer::shutdown() {
         alloc_->destroy(default_tex_.image);
     }
     default_tex_ = GpuTexture{};
-    for (rhi::Buffer* b : {&particles_, &order_, &death_})
+    for (rhi::Buffer* b : {&particles_, &order_, &death_, &heights_})
         if (*b) alloc_->destroy(*b);
+    ground_[3] = 0.0f;
     cache_.shutdown(false);
     samplers_.shutdown();
     if (world_) world_->set_record_packets(false);
@@ -295,6 +302,27 @@ void ParticleRenderer::shutdown() {
     tex_sets_.clear();
     ctx_ = nullptr;
     world_ = nullptr;
+}
+
+bool ParticleRenderer::set_terrain(std::span<const float> heights, uint32_t width, uint32_t height, float spacing) {
+    if (!alloc_) return false;
+    ground_[3] = 0.0f;
+    const bool ok_grid = width >= 2 && height >= 2 && spacing > 0.0f && heights.size() >= static_cast<size_t>(width) * height;
+    const VkDeviceSize bytes = ok_grid ? static_cast<VkDeviceSize>(heights.size_bytes()) : 16;
+    rhi::Buffer b;
+    if (!alloc_->create_buffer(bytes, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, rhi::MemoryUsage::Dynamic, b, "particles.heights") || !b.mapped()) {
+        if (b) alloc_->destroy(b);
+        return false;
+    }
+    if (ok_grid) std::memcpy(b.mapped(), heights.data(), heights.size_bytes());
+    if (heights_) alloc_->destroy(heights_);
+    heights_ = b;
+    if (!ok_grid) return heights.empty();
+    ground_[0] = static_cast<float>(width);
+    ground_[1] = static_cast<float>(height);
+    ground_[2] = spacing;
+    ground_[3] = 1.0f;
+    return true;
 }
 
 const ParticleRenderer::GpuTexture* ParticleRenderer::texture(const std::string& name) {
@@ -444,6 +472,7 @@ void ParticleRenderer::prepare(rhi::Frame& frame, VkCommandBuffer cmd, const Vie
     fc.fog_color[2] = fog_color_.z;
     fc.fog_vals[0] = fog_x_;
     fc.fog_vals[1] = fog_y_;
+    for (int i = 0; i < 4; ++i) fc.ground[i] = ground_[i];
 
     // ---- Draw list (B.5): visible systems with parent fade > 0.01, AABB vs frustum, back-to-front.
     std::vector<EmitterGpu> draw_table;
@@ -527,12 +556,13 @@ void ParticleRenderer::prepare(rhi::Frame& frame, VkCommandBuffer cmd, const Vie
     auto make_set = [&](const rhi::UniformAlloc& em, const rhi::UniformAlloc& sp, const rhi::UniformAlloc& gr, const rhi::UniformAlloc& cb) {
         const VkDescriptorSet set = frame.descriptors(0).allocate(set0_);
         if (!set) return set;
-        VkDescriptorBufferInfo bi[8] = {{particles_.handle, 0, VK_WHOLE_SIZE}, {order_.handle, 0, VK_WHOLE_SIZE},
+        VkDescriptorBufferInfo bi[9] = {{particles_.handle, 0, VK_WHOLE_SIZE}, {order_.handle, 0, VK_WHOLE_SIZE},
                                         {death_.handle, 0, VK_WHOLE_SIZE},     range_of(em),
                                         range_of(da),                          range_of(sp),
-                                        range_of(gr),                          range_of(cb)};
-        VkWriteDescriptorSet w[8];
-        for (uint32_t i = 0; i < 8; ++i) {
+                                        range_of(gr),                          range_of(cb),
+                                        {heights_.handle, 0, VK_WHOLE_SIZE}};
+        VkWriteDescriptorSet w[9];
+        for (uint32_t i = 0; i < 9; ++i) {
             w[i] = rhi::vk_struct<VkWriteDescriptorSet>(VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
             w[i].dstSet = set;
             w[i].dstBinding = i;
@@ -540,7 +570,7 @@ void ParticleRenderer::prepare(rhi::Frame& frame, VkCommandBuffer cmd, const Vie
             w[i].descriptorType = i == 7 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             w[i].pBufferInfo = &bi[i];
         }
-        fn.vkUpdateDescriptorSets(ctx_->device(), 8, w, 0, nullptr);
+        fn.vkUpdateDescriptorSets(ctx_->device(), 9, w, 0, nullptr);
         return set;
     };
     auto alloc_copy = [&](const void* data, size_t bytes) {

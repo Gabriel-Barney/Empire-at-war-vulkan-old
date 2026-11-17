@@ -380,6 +380,12 @@ public:
     void rebuild_regions_if_dirty(const ParallelFor& pf = serial_for);
     using HeightFn = std::function<float(float x, float y)>;  // const and thread-safe
     void set_height_fn(HeightFn fn) { height_ = std::move(fn); }
+    // trn1 t03 (MOVEMENT §3.6): the map's water plane for the land conform (a Water-class unit stands on it where it lies
+    // above the ground). Unset / has = false: no water. Not saved (setup, like the height function).
+    void set_water_plane(bool has, float height) {
+        water_ = has;
+        water_height_ = height;
+    }
 
     // ---- space world
     SpaceOccupancy& space() { return space_; }
@@ -1058,6 +1064,7 @@ private:
         LandMotion m;
         WalkTransition wt;  // s78n t26 closing review: Walk_Transition clip data (walk_transition_fill; not saved)
         float z = 0.0f;
+        float conform_pitch = 0.0f, conform_roll = 0.0f;  // trn1 t03: the land conform's attitude, degrees (saved, v33)
         bool has_goal = false, need_path = false, arrived = false, failed = false;
         V2 goal;
         float facing = kNoFacing;
@@ -1696,6 +1703,9 @@ private:
     V2 svs_escape_dir(const Unit& x, const Unit& o) const;
     static void end_push(Unit& u);
     void update_tree(const Unit& u);
+    // trn1 t03 (MOVEMENT §3.6, 0x42bb40): the land terrain conform - returns the ground z (water plane for a Water class)
+    // plus the length tilt's lift, and sets u.conform_pitch / conform_roll. Needs height_.
+    float conform(Unit& u) const;
     V2 pick_land_slot(const Unit& u, V2 slot, std::vector<uint64_t>& taken) const;
     // s78n t20 (MOVEMENT §4.3.1 items 2 - 4, 0x439360 / 0x43d6a0): the destination check of a land move order, run once
     // at the order ([port] the split and the layout are made at the order, with the positions of the order frame; retail
@@ -1765,6 +1775,8 @@ private:
     RegionMap regions_;
     bool regions_built_ = false;
     HeightFn height_;
+    bool water_ = false;         // trn1 t03: set_water_plane
+    float water_height_ = 0.0f;
     SpaceOccupancy space_;
     std::vector<Unit> units_;  // ascending id
     SpatialTree tree_;

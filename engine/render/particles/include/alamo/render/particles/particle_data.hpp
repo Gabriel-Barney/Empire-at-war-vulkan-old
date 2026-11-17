@@ -77,7 +77,8 @@ struct EmitterDef {
     float initial_delay = 0;    // 0x24
     float stop_time = 0;        // 0x32
     float skip_time = 0;        // 0x33
-    uint32_t spawn_source = 0;  // 0x34
+    uint32_t spawn_source = 0;  // 0x34 (vis1 t04: 1 random vertex, 2 random triangle point, 3 every vertex of the parent mesh)
+    float mesh_normal_offset = 0;  // 0x3C (vis1 t04: offset along the mesh normal x 0.5, sources 1 / 2)
     // Particle life + motion
     float lifetime = 1;         // 0x0F
     float random_lifetime = 0;  // 0x13
@@ -90,7 +91,8 @@ struct EmitterDef {
     bool inherit_velocity = false;   // 0x43
     float inherit_velocity_factor = 0;  // 0x28
     bool affected_by_wind = false;   // 0x31
-    uint32_t ground_behavior = 0;    // 0x2F (not simulated yet, R4 open item)
+    uint32_t ground_behavior = 0;    // 0x2F (vis1 t05: 1 dies on the terrain, 2 bounces; particles.hlsl CSUpdate)
+    float bounciness = 1;            // 0x30 (vis1 t05: bounce v -= n (v.n)(1 + bounciness))
     // Randomisation
     float random_color[4] = {0, 0, 0, 0};  // 0x2C
     bool random_color_uniform = false;     // 0x2D

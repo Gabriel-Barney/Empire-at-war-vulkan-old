@@ -250,6 +250,18 @@ struct Terrain {
     // Height of the rendered surface at world (wx, wy): linear over the mesh triangle containing
     // the point (diagonal (0,0)-(1,1) of each quad), clamped to the map.
     float sample_height(float wx, float wy) const;
+    // trn1 (docs/re/TRN1_TERRAIN_GAMEPLAY.md §1): the gameplay surface type of a world point.
+    // cell_surface_type: the TEM `surface_type` (mini 14) of the material at the grid vertex nearest (wx, wy) - indices
+    //   floor(w / 20 + 0.5) clamped to the grid, no water test (0x133b10 + material +0x84; Get_Damage_Multiplier's cover
+    //   test). 0 for a material slot past the table.
+    // under_water: the map has a water plane and the terrain height at (wx, wy) is below the water height - 0.5 (the
+    //   literal of 0x5efe50 and of the Destroy_When_Stunned_Over_Water test; local water patches [M] are not modelled).
+    // water_surface_type: 4 water, 8 lava, 7 ice (table 0x140a123c8), 0 without a water plane.
+    // surface_type_at: water_surface_type when under_water, else cell_surface_type (SurfaceFX 0x5efe50).
+    uint32_t cell_surface_type(float wx, float wy) const;
+    bool under_water(float wx, float wy) const;
+    uint32_t water_surface_type() const;
+    uint32_t surface_type_at(float wx, float wy) const;
 };
 
 // ---------------------------------------------------------------- 0x102: objects (1.6)

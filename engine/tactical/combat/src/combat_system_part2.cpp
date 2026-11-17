@@ -690,9 +690,18 @@ void CombatSystem::detonation_effects(const Projectile& p, Vec3 center, ObjectId
     // Stun (land only): STUNNABLE victims of every enemy player in radius (0x4d01c0 -> 0x647290).
     if (pd.stun && cfg_.mode == GameMode::Land && pd.stun_radius > 0.0f && pd.stun_frames != 0) {
         effect_victims(p.owner, true, center, pd.stun_radius, vs);
-        for (Unit* v : vs)
-            if (desc_of(*v).stunnable && effect_match(*v, pd.stun_mask, &pd.stun_types)) stun_unit(v->id, pd.stun_frames, frame);
-        // Destroy_When_Stunned_Over_Water: the abilities' Stunned hook (ABILITIES_HARDPOINTS §4.12 [port]).
+        // trn1 t04 (ABILITIES_HARDPOINTS §4.12, 0x4d01c0): per object, the stun, then the Destroy_When_Stunned_Over_Water
+        // test for every object of the query (stunnable or not). Ids first: the water kill's Take_Damage may detonate
+        // (death projectile) into effect_scratch_ and add units.
+        std::vector<ObjectId> ids;
+        ids.reserve(vs.size());
+        for (const Unit* v : vs) ids.push_back(v->id);
+        for (const ObjectId id : ids) {
+            Unit* v = unit(id);
+            if (!live(v)) continue;
+            if (desc_of(*v).stunnable && effect_match(*v, pd.stun_mask, &pd.stun_types)) stun_unit(id, pd.stun_frames, frame);
+            stun_water_kill(id, frame);
+        }
     }
     // Distract: enemies in radius matching the mask get an order toward the detonation (0x2a7b80) [M] - the host's.
     if (pd.distract && pd.distract_radius > 0.0f && hooks_) {
@@ -757,7 +766,17 @@ void CombatSystem::detonation_effects(const Projectile& p, Vec3 center, ObjectId
             if (live(v)) ion_stun_unit(*v, p.desc, frame);
         } else {
             effect_victims(p.owner, true, center, pd.ion_stun_radius, vs);
-            for (Unit* v : vs) ion_stun_unit(*v, p.desc, frame);
+            // trn1 t04 (ABILITIES_HARDPOINTS §4.12, 0x4cbbb0): the ion stun, then the water test, in the same per-object
+            // block (skipped for a locomotor-busy object).
+            std::vector<ObjectId> ids;
+            ids.reserve(vs.size());
+            for (const Unit* v : vs) ids.push_back(v->id);
+            for (const ObjectId id : ids) {
+                Unit* v = unit(id);
+                if (!live(v) || (v->flags & kUnitLocomotorBusy)) continue;
+                ion_stun_unit(*v, p.desc, frame);
+                stun_water_kill(id, frame);
+            }
         }
     }
     // Combat mod (0x4c6950): enemies within Projectile_Blast_Area_Range: append-insert into list (code - 1).
@@ -1249,7 +1268,7 @@ DamageResult CombatSystem::take_damage_inner(const DamageRequest& r, uint32_t fr
     {  // 12 Get_Damage_Multiplier
         const float a1 = src ? mod_r(*src, ModList::Damage) : 0.0f;
         const float ai = (src && player(src->owner).ai) ? player(src->owner).ai_damage_multiplier : 1.0f;
-        x = x * damage_multiplier(a1, mod_r(v, ModList::Defense), ai, 1.0f);
+        x = x * damage_multiplier(a1, mod_r(v, ModList::Defense), ai, cover_factor(v));  // trn1 t01: cover
     }
     // 13 damage listeners (style Take_Damage special abilities, e.g. Redirect_Blaster) may cancel.
     if (hooks_ && hooks_->damage_listener(v.id, r.source, r.source_is_projectile ? r.projectile_desc : -1, frame,
@@ -2036,6 +2055,7 @@ void CombatSystem::tick(uint32_t frame, const TreeSet& trees, SimRng& rng, const
     profile::Steps steps;  // SP5: the phases' times (cmb.*), timing only
 
     service_base_shields(frame);  // tru1 t02: BASE_SHIELD state, AFFECTED_BY_SHIELD straddles (serial)
+    service_surface_fx(frame);  // trn1 t02: SURFACE_FX terrain modifiers / terrain damage (serial, unit order)
     // A. modifiers
     for (ModifierSet& ps : player_mods_) ps.purge_expired(frame);  // player-level purge [M: cadence]
     {

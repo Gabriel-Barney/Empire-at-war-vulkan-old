@@ -222,6 +222,7 @@ bool load_system(std::span<const uint8_t> bytes, std::string_view name, SystemDe
             e.stop_time = d.stop_time;
             e.skip_time = d.skip_time;
             e.spawn_source = d.spawn_source;
+            e.mesh_normal_offset = d.mesh_normal_offset;
             e.lifetime = d.lifetime;
             e.random_lifetime = d.random_lifetime;
             e.object_space = d.object_space;
@@ -236,6 +237,7 @@ bool load_system(std::span<const uint8_t> bytes, std::string_view name, SystemDe
             e.inherit_velocity_factor = d.inherit_velocity_factor;
             e.affected_by_wind = d.affected_by_wind;
             e.ground_behavior = d.ground_behavior;
+            e.bounciness = d.bounciness;
             e.random_color[0] = d.random_color.x;
             e.random_color[1] = d.random_color.y;
             e.random_color[2] = d.random_color.z;

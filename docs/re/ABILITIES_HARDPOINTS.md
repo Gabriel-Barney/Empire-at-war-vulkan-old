@@ -823,7 +823,7 @@ through **globals** 0x140b2c380–0x140b2c394. The port must pass that context e
 root-finder method is not identified; any deterministic method with the same bracket and stop rule is
 acceptable for our own clients.
 
-### 4.12 `Destroy_When_Stunned_Over_Water` (type +0xe6) — port guess (probe 2026-11-04), RE reading 2026-11-15: port rule differs
+### 4.12 `Destroy_When_Stunned_Over_Water` (type +0xe6) — port guess (probe 2026-11-04), RE reading 2026-11-15; port follows the RE reading since trn1 t04 (2026-11-17)
 Port guess first, then the probe, then the binary reading, which replaces the guess where they differ.
 Not traced when the rule was written (Gabriel 2026-10-30, `docs/DECISIONS.md` "Roadmap trim": a documented guess instead of an RE pass). The
 only vanilla user is `MAL_Rocket_Vehicle` (`UNITS_LAND_UNDERWORLD_MAL.XML`): a `Hover` movement-class vehicle with

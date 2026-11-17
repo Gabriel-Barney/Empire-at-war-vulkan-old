@@ -87,6 +87,11 @@ add_executable(alamo_tactical_movement_b5_tests tests/test_movement_b5.cpp)
 target_link_libraries(alamo_tactical_movement_b5_tests PRIVATE alamo_tactical_movement Threads::Threads alamo_test_support)
 add_test(NAME alamo_tactical_movement_b5_tests COMMAND alamo_tactical_movement_b5_tests)
 set_tests_properties(alamo_tactical_movement_b5_tests PROPERTIES TIMEOUT 300)
+# trn1 t03 (MOVEMENT §3.6): the land terrain conform (water plane, Overall_Length / Width tilt).
+add_executable(alamo_tactical_movement_trn1_tests tests/test_movement_trn1.cpp)
+target_link_libraries(alamo_tactical_movement_trn1_tests PRIVATE alamo_tactical_movement Threads::Threads alamo_test_support)
+add_test(NAME alamo_tactical_movement_trn1_tests COMMAND alamo_tactical_movement_trn1_tests)
+set_tests_properties(alamo_tactical_movement_trn1_tests PROPERTIES TIMEOUT 120)
 # [port: Gabriel 2026-11-13] fleet cohesion (MoveOrder::cohesion_tight): the tight space move's shared speed cap.
 add_executable(alamo_tactical_movement_cohesion_tests tests/test_movement_cohesion.cpp)
 target_link_libraries(alamo_tactical_movement_cohesion_tests PRIVATE alamo_tactical_movement Threads::Threads alamo_test_support)

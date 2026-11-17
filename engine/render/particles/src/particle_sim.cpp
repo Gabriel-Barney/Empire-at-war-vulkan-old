@@ -63,7 +63,7 @@ float ParticleWorld::tick_delta(uint32_t ticks) {
     return std::min(kTickSeconds * static_cast<float>(ticks), kMaxUpdateSeconds);
 }
 
-ParticleWorld::Handle ParticleWorld::create(SystemPtr def, const Mat3x4& transform) {
+ParticleWorld::Handle ParticleWorld::create(SystemPtr def, const Mat3x4& transform, SpawnMeshPtr mesh, const Mat3x4& mesh_world) {
     if (!def) return 0;
     uint32_t index;
     if (!free_systems_.empty()) {
@@ -80,6 +80,10 @@ ParticleWorld::Handle ParticleWorld::create(SystemPtr def, const Mat3x4& transfo
     s.def = std::move(def);
     s.cur = s.prev = transform;
     s.alive = true;
+    if (mesh && !mesh->positions.empty()) {
+        s.mesh = std::move(mesh);
+        s.mesh_world = mesh_world;
+    }
     init_emitters(s);
     return (static_cast<uint64_t>(gen) << 32) | index;
 }
@@ -99,6 +103,9 @@ void ParticleWorld::set_transform(Handle h, const Mat3x4& t, bool teleport) {
     if (!s) return;
     s->cur = t;
     if (teleport) s->prev = t;
+}
+void ParticleWorld::set_spawn_mesh_transform(Handle h, const Mat3x4& mesh_world) {
+    if (auto* s = const_cast<SystemState*>(system(h))) s->mesh_world = mesh_world;
 }
 void ParticleWorld::set_visible(Handle h, bool v) {
     if (auto* s = const_cast<SystemState*>(system(h))) s->visible = v;
@@ -210,6 +217,9 @@ void ParticleWorld::init_emitters(SystemState& s) {
         EmitterState& e = s.emitters[i];
         e.def = &d;
         e.pool = d.pool;
+        // vis1 t04 (B.4 pool size): spawn source 3 spawns one particle per parent-mesh vertex per event.
+        if (d.spawn_source == 3 && !d.weather && d.parent < 0 && s.mesh)
+            e.pool = static_cast<uint32_t>(std::min<uint64_t>(static_cast<uint64_t>(d.pool) * s.mesh->positions.size(), kPoolCap));
         e.age.assign(e.pool, 0.0f);
         e.life.assign(e.pool, -1.0f);
         if (e.pool) {
@@ -225,7 +235,8 @@ void ParticleWorld::init_emitters(SystemState& s) {
             e.schedules.resize(1);
             e.schedules[0].running = true;
         } else {
-            const uint32_t parent_pool = def.emitters[static_cast<size_t>(d.parent)].pool;
+            const size_t pi = static_cast<size_t>(d.parent);
+            const uint32_t parent_pool = pi < i ? s.emitters[pi].pool : def.emitters[pi].pool;
             e.schedules.resize(parent_pool);
         }
     }
@@ -243,6 +254,53 @@ void ParticleWorld::free_system(SystemState& s) {
     s.alive = false;
     s.def.reset();
     free_systems_.push_back(static_cast<uint32_t>(&s - systems_.data()));
+}
+
+bool ParticleWorld::mesh_point(const SystemState& s, const EmitterDef& ed, uint32_t vertex, float (&out)[3]) {
+    if (!s.mesh) return false;
+    const std::vector<Float3>& pos = s.mesh->positions;
+    const std::vector<uint32_t>& ix = s.mesh->indices;
+    const uint32_t nv = static_cast<uint32_t>(pos.size());
+    Float3 p{}, n{};
+    auto pick = [this](uint32_t count) { return std::min(count - 1u, static_cast<uint32_t>(rng_.uniform() * static_cast<float>(count))); };
+    if (ed.spawn_source == 1) {  // a random vertex; its position doubles as the offset direction (0x13e930)
+        p = pos[pick(nv)];
+        n = p;
+    } else if (ed.spawn_source == 2) {  // a random triangle (uniform over triangles), a random point on it, its face normal
+        const uint32_t nt = static_cast<uint32_t>(ix.size() / 3);
+        if (nt == 0) return false;
+        const uint32_t t = pick(nt);
+        const uint32_t i0 = ix[3 * t], i1 = ix[3 * t + 1], i2 = ix[3 * t + 2];
+        if (i0 >= nv || i1 >= nv || i2 >= nv) return false;
+        const Float3 a = pos[i0], b = pos[i1], c = pos[i2];
+        float u = rng_.uniform(), v = rng_.uniform();
+        if (u + v > 1.0f) {
+            u = 1.0f - u;
+            v = 1.0f - v;
+        }
+        const Float3 e1{b.x - a.x, b.y - a.y, b.z - a.z}, e2{c.x - a.x, c.y - a.y, c.z - a.z};
+        p = {a.x + e1.x * u + e2.x * v, a.y + e1.y * u + e2.y * v, a.z + e1.z * u + e2.z * v};
+        n = {e1.y * e2.z - e1.z * e2.y, e1.z * e2.x - e1.x * e2.z, e1.x * e2.y - e1.y * e2.x};
+    } else if (ed.spawn_source == 3) {
+        if (vertex >= nv) return false;
+        p = pos[vertex];
+    } else {
+        return false;
+    }
+    const Mat3x4& m = s.mesh_world;
+    Float3 w = m.transform_point(p);
+    Float3 nw{m.m[0][0] * n.x + m.m[0][1] * n.y + m.m[0][2] * n.z, m.m[1][0] * n.x + m.m[1][1] * n.y + m.m[1][2] * n.z,
+              m.m[2][0] * n.x + m.m[2][1] * n.y + m.m[2][2] * n.z};
+    const float nl = std::sqrt(nw.x * nw.x + nw.y * nw.y + nw.z * nw.z);
+    if (nl > 0.0f) {  // offset along the normal: Mesh_Normal_Offset x 0.5 x the emission scalar [M on that factor]
+        const float k = ed.mesh_normal_offset * 0.5f * s.emission_scale / nl;
+        w = {w.x + nw.x * k, w.y + nw.y * k, w.z + nw.z * k};
+    }
+    if (ed.object_space) w = s.cur.inverse().transform_point(w);  // object-space emitters keep positions in system space
+    out[0] = w.x;
+    out[1] = w.y;
+    out[2] = w.z;
+    return true;
 }
 
 bool ParticleWorld::take_slot(EmitterState& e, uint32_t& slot) {
@@ -408,7 +466,17 @@ void ParticleWorld::step_system(SystemState& s, float d, UpdatePacket* pkt) {
                 ++sc.events;
                 emitted_zero_interval = true;
                 const float pre_age = static_cast<float>(static_cast<double>(a1) - t);
-                for (uint32_t n = 0; n < ed.per_event; ++n) {
+                // vis1 t04: spawn source 3 - one particle per parent-mesh vertex for each of the event's particles, the
+                // vertices in a shuffled order [port: the free RNG, not CRT rand()]; sources 1 / 2 take a point each.
+                const bool on_mesh = s.mesh && parent_slot < 0 && ed.spawn_source >= 1 && ed.spawn_source <= 3;
+                const uint32_t per_vertex = on_mesh && ed.spawn_source == 3 ? static_cast<uint32_t>(s.mesh->positions.size()) : 1u;
+                std::vector<uint32_t> vorder;
+                if (per_vertex > 1) {
+                    vorder.resize(per_vertex);
+                    for (uint32_t k = 0; k < per_vertex; ++k) vorder[k] = k;
+                    for (uint32_t k = per_vertex; k > 1; --k) std::swap(vorder[k - 1], vorder[rng_.next() % k]);
+                }
+                for (uint32_t n = 0; n < ed.per_event * per_vertex; ++n) {
                     if (!(rng_.uniform() < s.emission_scale)) continue;
                     const float life = ed.lifetime * (1.0f - ed.random_lifetime * rng_.uniform());
                     if (pre_age >= life) continue;  // older than its lifetime: skipped
@@ -422,9 +490,12 @@ void ParticleWorld::step_system(SystemState& s, float d, UpdatePacket* pkt) {
                     ++e.live;
                     ++e.spawned;
                     const float lerp = std::clamp(1.0f - pre_age / d, 0.0f, 1.0f);
-                    if (pkt && pe >= 0)
-                        pkt->spawns.push_back({slot, static_cast<uint32_t>(pe), pre_age, life, lerp, rng_.next(), parent_slot,
-                                               sc.from_death ? kSpawnFromDeath : 0u});
+                    if (pkt && pe >= 0) {
+                        SpawnRecord rec{slot, static_cast<uint32_t>(pe), pre_age, life, lerp, rng_.next(), parent_slot,
+                                        sc.from_death ? kSpawnFromDeath : 0u};
+                        if (on_mesh && mesh_point(s, ed, vorder.empty() ? 0u : vorder[n % per_vertex], rec.point)) rec.flags |= kSpawnMeshPoint;
+                        pkt->spawns.push_back(rec);
+                    }
                     // A during-life child gets one schedule per parent particle, running from the next update.
                     if (ed.spawn_during_life >= 0 && static_cast<size_t>(ed.spawn_during_life) < s.emitters.size()) {
                         EmitterState& c = s.emitters[static_cast<size_t>(ed.spawn_during_life)];

@@ -336,6 +336,34 @@ Terrain tiny_terrain() {
     return t;
 }
 
+// trn1 (docs/re/TRN1_TERRAIN_GAMEPLAY.md §1, §2.1): the gameplay surface type of a world point - the nearest vertex's
+// material (floor(w / 20 + 0.5), clamped), the water types under the plane (more than 0.5 below it).
+void test_surface_types() {
+    Terrain t = tiny_terrain();
+    t.materials[0].surface_type = 1;   // grass
+    t.materials[5].surface_type = 10;  // cover
+    t.material[3 * 32 + 2] = 5;        // vertex (2, 3) = world (40, 60)
+    CHECK(t.cell_surface_type(40.0f, 60.0f) == 10);
+    CHECK(t.cell_surface_type(49.9f, 69.9f) == 10);  // rounds to vertex (2, 3)
+    CHECK(t.cell_surface_type(50.0f, 60.0f) == 1);   // 50 / 20 + 0.5 = 3 -> vertex (3, 3)
+    CHECK(t.cell_surface_type(30.0f, 50.0f) == 10);  // 2.0 / 3.0 exactly
+    CHECK(t.cell_surface_type(29.9f, 60.0f) == 1);
+    CHECK(t.cell_surface_type(-100.0f, 1.0e6f) == 1);  // clamped to the grid
+    CHECK(t.surface_type_at(40.0f, 60.0f) == 10);      // no water plane
+    CHECK(!t.under_water(40.0f, 60.0f) && t.water_surface_type() == 0);
+    // flat ground at 0: a plane at 0.5 is not "under" (0 < 0.5 - 0.5 fails); at 0.6 it is
+    t.header.water_type = WaterType::Lava;
+    t.header.water_height = 0.5f;
+    CHECK(!t.under_water(40.0f, 60.0f) && t.surface_type_at(40.0f, 60.0f) == 10);
+    t.header.water_height = 0.6f;
+    CHECK(t.under_water(40.0f, 60.0f) && t.surface_type_at(40.0f, 60.0f) == 8);
+    CHECK(t.cell_surface_type(40.0f, 60.0f) == 10);  // the cover cell test ignores the water
+    t.header.water_type = WaterType::Water;
+    CHECK(t.surface_type_at(40.0f, 60.0f) == 4);
+    t.header.water_type = WaterType::Ice;
+    CHECK(t.surface_type_at(40.0f, 60.0f) == 7);
+}
+
 void test_mesh_blend_rules() {
     Terrain t = tiny_terrain();
     auto set = [&](uint32_t x, uint32_t y, uint8_t m) { t.material[y * 32 + x] = m; };
@@ -2053,6 +2081,7 @@ int main() {
     test_dynamic_track();
     test_fow();
 #if defined(ALAMO_TERRAIN_HAVE_DATA)
+    test_surface_types();  // trn1
     test_real_data();
 #else
     std::printf("real data: built without vfs/data/jobs, skipped\n");

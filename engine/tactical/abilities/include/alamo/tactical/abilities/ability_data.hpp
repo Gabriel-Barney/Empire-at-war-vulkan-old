@@ -226,9 +226,7 @@ struct AbilityObjectDesc {
     float stealth_detection_range = 0.0f;        // 0x3979d0: Target_Stealth_Units ? FOW reveal range : 0
     float passive_missile_shield_radius = 0.0f;  // Passive_Missile_Shield_Radius
     bool garrison_style = false;                 // obj +0x3a7 [M meaning]
-    // Destroy_When_Stunned_Over_Water (type +0xe6; only MAL_Rocket_Vehicle sets it): [port] a STUNNABLE stun that starts
-    // while the host reports the unit over water destroys it (ABILITIES_HARDPOINTS.md §4.12, no RE pass).
-    bool destroy_when_stunned_over_water = false;
+    // trn1 t04: Destroy_When_Stunned_Over_Water moved to combat::UnitDesc (the stun detonations test it, §4.12).
     // ---- s78l t05: Tactical_Bribe acceptance (TACTICAL_COMBAT §5.4.1, 0x5b0f70 / 0x5b0ec0 / 0x395c10) ----
     // Read from the target side (the team container for a member, else the unit) and the user side (the modifiers).
     // A team container's desc should carry its representative type's values (0x3973b0) [inferred].

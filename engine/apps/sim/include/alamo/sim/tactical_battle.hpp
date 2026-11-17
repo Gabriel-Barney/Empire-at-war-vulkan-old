@@ -1816,6 +1816,7 @@ private:
     void unit_gone(TacticalMode& mode, Unit& u);  // container bookkeeping after a death / retreat
     // S10-int steps
     void apply_speed_factors();
+    std::vector<float> retreat_pursue_factors() const;  // trn1 t06: per player (MOVEMENT §3.4 item 6)
     // s78n t18 review: the movement system's pair gates / "hidden" from the garrison state (tactical_battle.cpp): every
     // tick, after garrison events, at the tick end and after a load.
     void feed_pair_gates();

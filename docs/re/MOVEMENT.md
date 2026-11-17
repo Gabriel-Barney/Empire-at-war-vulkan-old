@@ -1610,10 +1610,10 @@ fold of frame N reads the record answers left by frame N − 1's driver (§5.4.1
   3. **Fleeing_Infantry_Speed_Bonus = 2** when fleeing;
   4. combat modifier 6;
   5. **Engines_Disabled_Speed_Modifier = 0.4** when engines are disabled;
-  6. retreat pursuit factors from the faction (+0x20b4 space / +0x2194 land) [M];
+  6. retreat pursuit factors from the faction (+0x20b4 space / +0x2194 land) [H: who pursues, TRN1_TERRAIN_GAMEPLAY §4];
   7. (1 + the sum of the speed bonuses), which is where `Movement_Speed_Bonus_Percentage` lands [M];
-  8. **Base_Shield_Speed_Modifier = 0.5** when base shields are active [M];
-  9. `On_Fire_Speed_Modifier` (+0x2040) when burning.
+  8. **Base_Shield_Speed_Modifier = 0.5** while the unit straddles an active hostile shield wall [H: TRU1_A A2];
+  9. `On_Fire_Speed_Modifier` (+0x2040) when burning (obj +0x3a1 bit 2) [H: TRN1_TERRAIN_GAMEPLAY §4].
 
 **Mode multipliers** (`Object_Max_Speed_Multiplier_*`) are galactic **5.0**, land **1.56**, space **1.2**. They are applied by the type getters for turn rate, roll, alternate turn rate, min speed and vertical step (`0x372440`, `0x3724d0`, `0x372560`, `0x370fd0`, `0x3728f0`), together with a global factor at `0x140a28568` whose value was not read. They are skipped when type flag (+0x790)→byte1 bit0 is set.
 
@@ -2165,6 +2165,7 @@ than one block, set the body yaw to Y2. Nothing else (start test, travel, collis
 - Roll is computed the same way with `Overall_Width` (+0x1a24) at yaw + 90°.
 - Raised hover adds `Hover_Height`.
 - The position setter stores the position and marks the object dirty.
+- Full reading (passability cut of the samples, the angle helper, the roll-side slip): TRN1_TERRAIN_GAMEPLAY.md §3.
 
 ### 3.7 Infantry teams [H]
 
