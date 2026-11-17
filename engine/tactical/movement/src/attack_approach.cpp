@@ -224,7 +224,6 @@ bool slot_leg_point(V2 g, V2 v, float theta, float q, V2& out) {
 
 namespace {
 
-constexpr float kAttackInf = 3.0e38f;
 constexpr float kLineReachPiece = 40.0f;  // 0x5a5810: pieces of 40 or more are halved (BKR1 Q7 (c) [H])
 
 // The cell walk 0x5a51f0 of a short piece: the distance from a toward b to the entry of the first cell the line test
@@ -566,10 +565,10 @@ void MovementSystem::attack_slots(const MoveOrder& order, const std::vector<uint
 // formation path). An air lead keeps the plain move the slot loop gave (the plan is for land formations).
 // s78n t26 review round 3: no item-6 stop when T is unseen (LandAttack::unseen: 0x40edd0's fog / stealth terms, FIGHTER_FLYING
 // §4.11 E [H]); the members a re-path keeps (G 5, `kept`) get no goal and are not stopped by a failed plan.
-void MovementSystem::attack_plan(const MoveOrder& order, const std::vector<uint32_t>& idx, const LandForm& f, uint32_t frame,
-                                 const std::vector<uint8_t>& kept, std::span<const FormationMember> mem) {
+bool MovementSystem::attack_plan(const MoveOrder& order, const std::vector<uint32_t>& idx, const LandForm& f, uint32_t frame,
+                                 const std::vector<uint8_t>& kept, std::span<const FormationMember> mem, std::span<const Unit> snap) {
     const Unit& lead = units_[idx[f.members[0]]];
-    if (is_air(lead)) return;
+    if (is_air(lead)) return false;
     const ObjectId target = order.attack.target;
     const bool guard = order.attack.guard;
     std::vector<ObjectId> ids;
@@ -593,7 +592,7 @@ void MovementSystem::attack_plan(const MoveOrder& order, const std::vector<uint3
                 x.failed = false;
             }
             ++stats_.attack_stops;
-            return;
+            return false;
         }
     }
     V2 g = order.attack.g;
@@ -606,29 +605,28 @@ void MovementSystem::attack_plan(const MoveOrder& order, const std::vector<uint3
             --stats_.formation_paths;
             ++stats_.formation_path_failures;
         }
-        // the plan fails: the members do not move ([port] stopped and failed, as the batch-2 zone failure; the block kept).
-        // cmb2 t03 (BKR2 Q7 item 6 [H]): the movers are listed for the host, which keeps the block and retries the plan
-        // once 2 x FPS < now - the failure frame (TacticalBattle::AttackBlock::retry)
+        // the plan fails: no path is set. cmb2 t03 (BKR2 Q7 item 6 [H]): the movers are listed for the host, which keeps the
+        // block and retries the plan once 2 x FPS < now - the failure frame (TacticalBattle::AttackBlock::retry).
+        // mov2 t12 (b0198, BKR2 Q7 item 6 [H]): the members keep their current path stacks - each is restored to what it
+        // was before this order's set-up (`snap`: goal, path, push record, start, facings, pending composition), keeping
+        // only the new block's formation and attack-slot data. (Before t12: stopped and failed.)
         for (const uint32_t m : f.members) attack_failed_.push_back(units_[idx[m]].d.id);
         for (const uint32_t m : f.members) {
-            if (kept[m]) continue;
-            const ObjectId id = units_[idx[m]].d.id;
-            const ObjectId one[] = {id};
-            Unit* x = unit_ptr(id);
-            const float th = x->atk_theta, rh = x->atk_rho;
-            const uint32_t af = x->atk_form;
-            const ObjectId at = x->atk_target;
-            stop(one);
-            x->atk_theta = th;
-            x->atk_rho = rh;
-            x->atk_form = af;
-            x->atk_target = at;
-            x->failed = true;
-            x->arrived = false;
-            x->in_formation = false;
-            x->formation_speed = kAttackInf;
+            if (kept[m] || m >= snap.size()) continue;
+            Unit& x = units_[idx[m]];
+            const Unit now = x;
+            x = snap[m];
+            x.atk_theta = now.atk_theta;
+            x.atk_rho = now.atk_rho;
+            x.atk_form = now.atk_form;
+            x.atk_target = now.atk_target;
+            x.form_id = now.form_id;
+            x.form_slot = now.form_slot;
+            x.form_rank = now.form_rank;
+            x.form_first = now.form_first;
+            x.coord_id = now.coord_id;
         }
-        return;
+        return true;
     }
     const uint32_t mask = f.mask;  // s78n t26 review round 2: the formation class 0x4779e0
     if (lead.atk_rho > 0.0f && path.size() >= 2) {
@@ -726,6 +724,7 @@ void MovementSystem::attack_plan(const MoveOrder& order, const std::vector<uint3
     // s78p (b0049, MOVEMENT §3.5.2 D / G): the members of a formation of 2+ follow their lanes on the formation path (the slot
     // leg's and the fire trim's cut path), each ending at its slot point above ([port] the members planned singly before)
     if (f.members.size() > 1 && path.size() >= 2) set_lanes(idx, f, path, kept, mem, fz);
+    return false;
 }
 
 void MovementSystem::set_lanes(const std::vector<uint32_t>& idx, const LandForm& f, std::span<const V2> fpath,
