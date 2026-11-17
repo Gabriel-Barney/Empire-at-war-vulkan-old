@@ -204,6 +204,11 @@ public:
     void set_selection_blobs(std::span<const ui::SelectionBlob> blobs) { blobs_.assign(blobs.begin(), blobs.end()); }
     // cu9g t03: the bombing-run targeting blob of this frame (HUD_GAPS §9.5; nullopt = none). Set before prepare().
     void set_bombing_blob(const std::optional<render::JamBlob>& blob) { bombing_blob_ = blob; }
+    // ui2 t08 (STORY_PRESENTATION_LUA.md 4.1 / 4.2): the story script's Play_Lightning_Effect bolts of this frame (extra beams
+    // drawn with the ability beams, lightning only) and its Enable_Fog / Enable_Distance_Fog switches (scene fog off when either
+    // is false; the environment's own setting decides otherwise). Presentation only.
+    void set_script_beams(std::vector<render::BeamInstance> beams) { script_beams_ = std::move(beams); }
+    void set_fog_switches(bool master, bool distance) { fog_master_ = master; fog_distance_ = distance; }
     const render::FogRenderer& fog() const { return fog_; }
     // --- R3/R5 render ---
     // Space reinforcement overlay (palette 3 + W_Space_Reinforce_FOW_Grid): on while the local player picks a space
@@ -232,6 +237,8 @@ private:
     // cu8g t03: the battle's active environment at the last capture (TacticalBattle::environment_index); prepare()
     // re-applies it on the scene (MapScene::set_environment) and the particle wind when it changed.
     uint32_t env_wanted_ = 0;
+    std::vector<render::BeamInstance> script_beams_;  // ui2 t08
+    bool fog_master_ = true, fog_distance_ = true;     // ui2 t08
     void apply_environment();
     bool space_ = true;
     bool blocking_models_ = false;

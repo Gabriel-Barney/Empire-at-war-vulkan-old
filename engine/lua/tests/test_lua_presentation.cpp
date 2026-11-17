@@ -573,11 +573,39 @@ static void test_save_load() {
     attach_presentation(b, nullptr);
 }
 
+// ui2 t03: a position argument is resolved when the script calls: "@pos", x, y, z follow the call's own arguments.
+static void test_camera_positions() {
+    World w;
+    LuaHost h = w.host();
+    LuaVm vm(h);
+    PresentationLog log;
+    attach_presentation(vm, &log);
+    CHECK(run(vm, std::string(kFind) +
+                      "Set_Cinematic_Camera_Key(Create_Position(1, 2, 3), 4, 5, 6, 0, 0, 0, 0) Point_Camera_At(Create_Position(7, 8, 9)) "
+                      "Transition_Cinematic_Target_Key(trooper, 2, 0, 0, 7, 0, trooper, 0, 0) Scroll_Camera_To(trooper)") == "");
+    const auto& ev = log.events();
+    CHECK(ev.size() == 4);
+    CHECK(ev[0].args.size() == 12 && ev[0].args[8].text == "@pos" && ev[0].args[9].number == 1.0 && ev[0].args[10].number == 2.0 &&
+          ev[0].args[11].number == 3.0);
+    CHECK(ev[1].op == PresentationOp::PointCameraAt && ev[1].args.size() == 5 && ev[1].args[1].text == "@pos" && ev[1].args[2].number == 7.0 &&
+          ev[1].args[4].number == 9.0);
+    CHECK(ev[2].args.size() == 13 && ev[2].args[9].text == "@pos");  // the object's own position at call time
+    CHECK(ev[3].args.size() == 5 && ev[3].args[1].text == "@pos");
+    // ui2 t08: Play_Lightning_Effect carries the resolved end (param 2) and start (param 3) after its own arguments.
+    CHECK(run(vm, "Play_Lightning_Effect('Zap', Create_Position(1, 2, 3), Create_Position(4, 5, 6))") == "");
+    const PresentationEvent& zap = log.events().back();
+    CHECK(zap.op == PresentationOp::PlayLightningEffect && zap.args.size() == 11 && zap.args[0].text == "Zap");
+    CHECK(zap.args[3].text == "@pos" && zap.args[4].number == 1.0 && zap.args[6].number == 3.0);
+    CHECK(zap.args[7].text == "@pos" && zap.args[8].number == 4.0 && zap.args[10].number == 6.0);
+    attach_presentation(vm, nullptr);
+}
+
 int main() {
     test_registry();
     test_argument_contracts();
     test_set_new_environment();
     test_object_effects();
+    test_camera_positions();
     test_cinematic_sequence();
     test_private_log_and_digest();
     test_blocking();

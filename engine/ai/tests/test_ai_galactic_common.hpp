@@ -338,6 +338,7 @@ void test_sim_hooks();
 void test_starbase_force_split();
 void test_leaf_cache();
 void test_force_members();
+void test_home_planet();  // galab t06
 
 // A2 galactic, AI_GALACTIC_3 rules: heroes never attach through their AI script (§2.4), the TerrainType veto (§6.3),
 // the galactic population cap when AI_Uses_Galactic_Pop_Cap is set (§3.5), MagicPlan spawns without production or

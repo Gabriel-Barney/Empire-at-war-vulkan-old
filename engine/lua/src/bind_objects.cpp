@@ -28,6 +28,7 @@
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/lua/object_bridge.hpp"
 #include "alamo/lua/players.hpp"
+#include "alamo/lua/presentation.hpp"
 #include "alamo/lua/script_gaps.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "vm_internal.hpp"
@@ -2307,6 +2308,19 @@ int highlight(Call& c, const char* method, bool small) {
     if (ScriptObjectState* s = edit_self(c)) {
         (small ? s->highlighted_small : s->highlighted) = to_bool(c, 1);
         if (c.nargs == 2) s->highlight_offset = static_cast<float>(c.number(2));
+        // ui2 t02: the host draws the highlight (retail spawns the Object_Highlight[_Small] effect on the target,
+        // STORY_PRESENTATION_LUA.md 5.1): receiver, on, z offset (default 0).
+        PresentationEvent& e = detail::presentation_of(c.L).record(c.vm->frame, small ? PresentationOp::ObjectHighlightSmall : PresentationOp::ObjectHighlight);
+        PresentationArg self;
+        self.kind = PresentationArg::Kind::Object;
+        self.id = c.self->id;
+        PresentationArg on;
+        on.kind = PresentationArg::Kind::Bool;
+        on.b = to_bool(c, 1);
+        PresentationArg z;
+        z.kind = PresentationArg::Kind::Number;
+        z.number = c.nargs == 2 ? c.number(2) : 0.0;
+        e.args = {self, on, z};
     }
     return 0;
 }

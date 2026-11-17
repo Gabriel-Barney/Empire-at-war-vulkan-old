@@ -3195,6 +3195,93 @@ void test_service_modes(const Data& d) {
 }  // namespace
 
 
+// galab t03 (GALAB_ABILITIES_RE §4.3): the planet-bonus upgrade objects at the start of a campaign battle. B (Empire) holds
+// two Galaxy_Wide_Upgrade bonuses (an Empire upgrade, an Underworld one); C (Underworld) holds an Underworld upgrade and its
+// level 2. The space battle at B gives the Empire its own upgrade only (affiliation), the Underworld its level 1 only (a type
+// with a Previous_Upgrade_Level_Type is skipped).
+namespace {
+std::string galab_upgrade_types(std::string t) {
+    const auto rep = [&t](const std::string& a, const std::string& b) {
+        const size_t p = t.find(a);
+        if (p != std::string::npos) t.replace(p, a.size(), b);
+    };
+    const auto bonus = [](const char* name, const char* type) {
+        return std::string("<Galaxy_Wide_Upgrade_Ability Name=\"") + name + "\"><Space_Upgrade_Type>" + type +
+               "</Space_Upgrade_Type></Galaxy_Wide_Upgrade_Ability>";
+    };
+    rep("<Land_Tactical_Map>S10_Land_B</Land_Tactical_Map></Planet>",
+        "<Land_Tactical_Map>S10_Land_B</Land_Tactical_Map><Abilities SubObjectList=\"Yes\">" + bonus("S10_B_Emp", "S10_Emp_Upgrade") +
+            bonus("S10_B_UW", "S10_UW_Upgrade") + "</Abilities></Planet>");
+    rep("<Terrain>Desert</Terrain><Planet_Credit_Value>10</Planet_Credit_Value></Planet>",
+        "<Terrain>Desert</Terrain><Planet_Credit_Value>10</Planet_Credit_Value><Abilities SubObjectList=\"Yes\">" +
+            bonus("S10_C_UW", "S10_UW_Upgrade") + bonus("S10_C_UW2", "S10_UW_Upgrade_L2") + "</Abilities></Planet>");
+    rep("</S10>", " <UpgradeObject Name=\"S10_Emp_Upgrade\"><Behavior>DUMMY_UPGRADE</Behavior><Affiliation>Empire</Affiliation></UpgradeObject>\n"
+                  " <UpgradeObject Name=\"S10_UW_Upgrade\"><Behavior>DUMMY_UPGRADE</Behavior><Affiliation>Underworld</Affiliation>"
+                  "<Next_Upgrade_Level_Type>S10_UW_Upgrade_L2</Next_Upgrade_Level_Type></UpgradeObject>\n"
+                  " <UpgradeObject Name=\"S10_UW_Upgrade_L2\"><Behavior>DUMMY_UPGRADE</Behavior><Affiliation>Underworld</Affiliation>"
+                  "<Previous_Upgrade_Level_Type>S10_UW_Upgrade</Previous_Upgrade_Level_Type></UpgradeObject>\n</S10>");
+    return t;
+}
+}  // namespace
+
+void test_galactic_upgrade_spawns() {
+    const char* prefix = g_temp_prefix;
+    g_types_patch = galab_upgrade_types;
+    g_temp_prefix = "alamo_sim_battle_tests_galab";
+    {
+        auto d = make_data();
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        SimConfig cfg;
+        cfg.seed = 2026;
+        cfg.players = 4;
+        SimHost host(d->types, js, cfg);
+        galactic::GalacticSim* gs = host.start_galactic(d->rules, make_setup(*d, false));
+        CHECK(gs != nullptr);
+        if (gs) {
+            CampaignBattleOptions opt;
+            opt.conflict.human_choice = galactic::BattleChoice::Fight;
+            opt.battle.max_frames = 600;
+            CampaignBattles battles(host, d->crules, *d->catalog,
+                                    [](const std::string& name, terrain::MapData& m) {
+                                        if (name != "S10_Space_B") return false;
+                                        m = space_map();
+                                        return true;
+                                    },
+                                    opt);
+            std::vector<std::string> diag;
+            CHECK(battles.attach(&diag));
+            const std::vector<uint32_t> uf = gs->fleets_at(2, 1);
+            CHECK(!uf.empty() && gs->move_fleet(1, uf[0], 1) == commands::RejectReason::None);
+            const auto emp = static_cast<objects::TypeIndex>(type_of(*d, "S10_Emp_Upgrade"));
+            const auto uw = static_cast<objects::TypeIndex>(type_of(*d, "S10_UW_Upgrade"));
+            const auto uw2 = static_cast<objects::TypeIndex>(type_of(*d, "S10_UW_Upgrade_L2"));
+            bool seen = false;
+            for (uint64_t t = 0; t < 4000 && !seen; ++t) {
+                host.tick_once();
+                TacticalMode* tm = host.tactical();
+                if (!battles.battle() || !tm || battles.battle()->frame() < 1) continue;
+                seen = true;
+                CHECK(gs->player_upgrades(0, true).size() == 2 && gs->player_upgrades(1, true).size() == 2);
+                uint32_t emp_e = 0, uw_u = 0, uw_e = 0, uw2_any = 0;
+                const objects::ObjectStore& st = tm->primary();
+                for (const objects::ObjectHandle h : st.all_objects()) {
+                    if (!st.alive(h)) continue;
+                    emp_e += st.type(h) == emp && st.owner(h) == 0 ? 1u : 0u;
+                    uw_u += st.type(h) == uw && st.owner(h) == 1 ? 1u : 0u;
+                    uw_e += st.type(h) == uw && st.owner(h) == 0 ? 1u : 0u;
+                    uw2_any += st.type(h) == uw2 ? 1u : 0u;
+                }
+                std::printf("  galactic upgrades in the battle: Empire %u, Underworld %u, Underworld's for the Empire %u, level 2 %u\n",
+                            emp_e, uw_u, uw_e, uw2_any);
+                CHECK(emp_e == 1 && uw_u == 1 && uw_e == 0 && uw2_any == 0);
+            }
+            CHECK(seen);
+        }
+    }
+    g_types_patch = nullptr;
+    g_temp_prefix = prefix;
+}
+
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     g_temp_prefix = "alamo_sim_battle_tests";
@@ -3211,6 +3298,8 @@ int main(int argc, char** argv) {
     test_retreat(*d);
     std::printf("auto-resolve only\n");
     test_auto_only(*d);
+    std::printf("galab: planet-bonus upgrade objects at a campaign battle's start\n");
+    test_galactic_upgrade_spawns();
     std::printf("human orders + order queue (integration fixes, [port: Gabriel])\n");
     test_orders_and_queue(*d);
     std::printf("fog of war battles\n");

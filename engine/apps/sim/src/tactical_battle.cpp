@@ -391,6 +391,7 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
     bt_add_pad_types(map_);    // battle host: the map's pad UC / constructed types join the tables (before combat exists)
     oi_add_ability_types();    // OI abilities: ability-spawned / survivor types join the tables (before combat exists)
     hg_add_types();            // hangars: launched squadrons / ships and the station chain join the tables
+    ga_add_types();            // galab t03: the battle players' planet-bonus upgrade types join the tables
     sp_add_types();            // TRU1 t05: the map spawners' indigenous units (and pack teams) join the tables
     // b0417: hg_add_types adds the skirmish production lists, so the ability / survivor types of those units join now
     // (Pirate_Skiff_U's Destruction_Survivors pilot was created as a prop: no combat, no movement, never used by the AI).
@@ -729,6 +730,7 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
     bt_place_forces(mode, rng, pf);  // §3.2: starbase, structures, defender / attacker start forces
     sk_garrison_setup();             // skm1 t07: the skirmish slots' garrison (start-force) lists
     bt_landing_points(mode);     // §3.3: the attacker's map-owned reinforcement points
+    ga_spawn_upgrades(mode);     // galab t03 (0x2a1eb0 -> 0x2afc10): planet-bonus upgrade objects, after the start forces
     mode.finish_load(pf);
     space_obstacles_sync(mode);  // refixf t02: the starbase / structures as space static entries (MOVEMENT §2.2)
     land_obstacles_sync(mode, pf);   // S8 t02: LAND_OBSTACLE objects spawned during the setup (MOVEMENT §1.3)

@@ -21,6 +21,20 @@ bool TacticalBattle::reinforcements_off(int32_t player) const {
     return player >= 0 && static_cast<size_t>(player) < reinf_off_.size() && reinf_off_[static_cast<size_t>(player)] != 0;
 }
 
+void TacticalBattle::set_retreat_off(int32_t player, bool off) {
+    if (player < 0) return;
+    const size_t i = static_cast<size_t>(player);
+    if (i >= retreat_off_.size()) {
+        if (!off) return;
+        retreat_off_.resize(i + 1, 0);
+    }
+    retreat_off_[i] = off ? 1 : 0;
+}
+
+bool TacticalBattle::retreat_off(int32_t player) const {
+    return player >= 0 && static_cast<size_t>(player) < retreat_off_.size() && retreat_off_[static_cast<size_t>(player)] != 0;
+}
+
 // CHANGE_OWNER §4.1: Reward_Param3 absent = the first instance, 0 = every instance, n = the first n (creation order).
 uint32_t TacticalBattle::reward_change_owner(TacticalMode& mode, objects::TypeIndex type, int32_t owner, int32_t count) {
     if (finished_ || owner < 0) return 0;

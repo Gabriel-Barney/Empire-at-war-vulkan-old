@@ -519,6 +519,8 @@ public:
     const galactic::StoryGates& gates() const { return gates_; }
     // True when the story did not disable `player`'s reinforcements (DISABLE_REINFORCEMENTS; default enabled).
     bool reinforcements_enabled(int32_t player) const;
+    // ui2 t06: true when the story did not disable `player`'s retreat (DISABLE_RETREAT, a faction-keyed list in retail; default enabled).
+    bool retreat_enabled(int32_t player) const;
     const StoryTutorialState& tutorial() const { return tutorial_; }
     // The tutorial's GUI event gate (0x446220): the GUI handlers drop a tutorial event that is not allowed.
     bool gui_event_allowed(int32_t kind, std::string_view name1 = {}, std::string_view name2 = {}) const;
@@ -668,6 +670,7 @@ private:
     galactic::StoryGates gates_;
     StoryTutorialState tutorial_;
     std::vector<uint8_t> reinforce_off_;  // per player: DISABLE_REINFORCEMENTS (1 = disabled); sized on first write
+    std::vector<uint8_t> retreat_off_;    // per player: DISABLE_RETREAT (1 = cannot retreat), ui2 t06 (save v5); sized on first write
     std::optional<StoryLoadCampaign> load_campaign_;
     std::function<void(const std::string&, const std::vector<std::string>&)> tactical_reward_;
     void sync_gates() { sim_->set_story_gates(gates_); }
@@ -679,9 +682,10 @@ private:
         galactic::StoryGates gates;
         StoryTutorialState tutorial;
         std::vector<uint8_t> reinforce_off;
+        std::vector<uint8_t> retreat_off;  // save v5
     };
     void write_sty1(ByteWriter& w) const;
-    static bool read_sty1(ByteReader& r, Sty1Save& out);
+    static bool read_sty1(ByteReader& r, Sty1Save& out, uint32_t version);
     void hash_sty1(StateHasher& h) const;
     void note(const std::string& text) { lua_messages_.push_back(std::to_string(frame_) + " story: " + text); }
     bool autoresolve_disabled_ = false;              // OI galactic: story lock global flag (+0x41)

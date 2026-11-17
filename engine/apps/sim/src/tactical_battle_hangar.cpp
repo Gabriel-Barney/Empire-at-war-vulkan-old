@@ -843,3 +843,62 @@ void TacticalBattle::hg_hash(StateHasher& h) const {
 }
 
 }  // namespace alamo::sim
+
+namespace alamo::sim {
+
+// ---- galab t03: planet-bonus upgrade objects (docs/re/GALAB_ABILITIES_RE.md §4.3) ----------------------------------------
+
+void TacticalBattle::ga_add_types() {
+    if (cfg_.skirmish) ga_upgrades_.clear();  // no galactic planets behind a skirmish
+    if (!tables_ || ga_upgrades_.empty()) return;
+    const size_t before = types_used_.size();
+    for (const auto& [player, t] : ga_upgrades_) {
+        (void)player;
+        if (std::find(types_used_.begin(), types_used_.end(), t) == types_used_.end()) types_used_.push_back(t);
+    }
+    if (types_used_.size() != before) tables_extend();
+}
+
+void TacticalBattle::ga_spawn_upgrades(TacticalMode& mode) {
+    // 0x2afc10 per battle player [H]: each listed type that has no Previous_Upgrade_Level_Type (type +0xa60) and is not
+    // yet owned by the player at that level or a later one (the Next_Upgrade_Level_Type chain, type +0xa70) is created
+    // for the player at the origin (0x29f810). The affiliation test (0x3751a0) was applied when the list was made.
+    // [port] The object joins the ability system like a produced DUMMY_UPGRADE (add_container), so its automatic
+    // abilities apply; it is tracked with the production upgrades (hashed and saved with them).
+    if (!ga_spawn_) ga_upgrades_.clear();  // a battle rebuilt by a save load: the objects come from the save
+    if (ga_upgrades_.empty() || !abilities_) return;
+    const objects::GameObjectTypes& types = catalog_->types();
+    objects::ObjectStore& store = mode.primary();
+    const auto owns_level = [&](int32_t player, uint32_t t) {
+        for (int guard = 0; guard < 16 && t < types.size(); ++guard) {
+            for (const objects::ObjectHandle h : store.all_objects())
+                if (store.alive(h) && store.owner(h) == player && static_cast<uint32_t>(store.type(h)) == t) return true;
+            const objects::TypeIndex next =
+                types.resolve_name(hg_trim(types.get_string(static_cast<objects::TypeIndex>(t), "Next_Upgrade_Level_Type")));
+            if (next == objects::kNone) break;
+            t = static_cast<uint32_t>(next);
+        }
+        return false;
+    };
+    for (const auto& [player, t] : ga_upgrades_) {
+        if (t >= types.size()) continue;
+        const auto ti = static_cast<objects::TypeIndex>(t);
+        if (!hg_trim(types.get_string(ti, "Previous_Upgrade_Level_Type")).empty()) continue;
+        if (owns_level(player, t)) continue;
+        objects::SpawnParams sp;
+        sp.type = ti;
+        sp.owner = player;
+        sp.position = Vec3{};
+        sp.facing = Vec3{1.0f, 0.0f, 0.0f};
+        const objects::ObjectHandle h = store.create(sp);
+        if (!store.alive(h)) continue;
+        const objects::ObjectId id = store.id(h);
+        const std::vector<tc::ObjectId> none;
+        abilities_->add_container(id, desc_of(t), player, none, frame_, bt_rng_);
+        hg_upgrade_objs_.push_back(HgUpgradeObject{id, h});
+        prod_used_ = true;
+    }
+    ga_upgrades_.clear();
+}
+
+}  // namespace alamo::sim

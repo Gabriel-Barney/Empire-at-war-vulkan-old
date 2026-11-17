@@ -64,6 +64,10 @@ bool read_records(ByteReader& r, std::vector<StoryGuiRecord>& v) {
 
 }  // namespace
 
+bool StorySession::retreat_enabled(int32_t player) const {
+    return player < 0 || static_cast<size_t>(player) >= retreat_off_.size() || retreat_off_[static_cast<size_t>(player)] == 0;
+}
+
 bool StorySession::reinforcements_enabled(int32_t player) const {
     return player < 0 || static_cast<size_t>(player) >= reinforce_off_.size() || reinforce_off_[static_cast<size_t>(player)] == 0;
 }
@@ -283,6 +287,18 @@ bool StorySession::apply_sty1_reward(int32_t plot_player, bool tactical, const s
             if (player < 0) note(std::string("Unable to ") + (off ? "disable" : "enable") + " reinforcements for player of faction " + p2);
             else reinforce_off_[static_cast<size_t>(player)] = off ? 1 : 0;
         }
+    } else if (type == "DISABLE_RETREAT") {
+        // ui2 t06 (STORY_PRESENTATION_REWARDS.md 5.2): P1 faction, P2 atoi, both required; a listed faction cannot retreat. Retail
+        // keeps a faction list; the port keeps it per player of that faction [port], re-read each hook like the reinforcements.
+        if (p1.empty() || p2.empty()) return true;
+        const bool off = atoi_text(p2) != 0;
+        const int32_t player = sim_->player_of_faction(p1);
+        if (player < 0) {
+            note("Unable to find player of faction " + p1 + " for DISABLE_RETREAT");
+        } else {
+            if (retreat_off_.size() < sim_->players().size()) retreat_off_.resize(sim_->players().size(), 0);
+            retreat_off_[static_cast<size_t>(player)] = off ? 1 : 0;
+        }
     } else if (type == "CHANGE_OWNER" || type == "DESTROY_OBJECT" || type == "BOMBARD_DELAY") {
         if (tactical) {
             if (tactical_reward_) tactical_reward_(type, params);  // the battle host applies it to the battle's objects
@@ -330,9 +346,11 @@ void StorySession::write_sty1(ByteWriter& w) const {
     w.u32(static_cast<uint32_t>(t.finished.size()));
     for (const std::string& f : t.finished) w.str(f);
     w.boolean(t.skirmish_rules).u32(t.filter_resets).u32(t.sandbox_requests);
+    w.u32(static_cast<uint32_t>(retreat_off_.size()));  // v5
+    for (const uint8_t b : retreat_off_) w.u8(b);
 }
 
-bool StorySession::read_sty1(ByteReader& r, Sty1Save& out) {
+bool StorySession::read_sty1(ByteReader& r, Sty1Save& out, uint32_t version) {
     constexpr uint32_t kMax = 1u << 20;
     uint32_t n = r.u32();
     if (n > kMax) r.fail();
@@ -366,12 +384,18 @@ bool StorySession::read_sty1(ByteReader& r, Sty1Save& out) {
     t.skirmish_rules = r.boolean();
     t.filter_resets = r.u32();
     t.sandbox_requests = r.u32();
+    if (version >= 5) {  // DISABLE_RETREAT (ui2 t06)
+        n = r.u32();
+        if (n > kMax) r.fail();
+        for (uint32_t i = 0; i < n && r.ok(); ++i) out.retreat_off.push_back(r.u8());
+    }
     return r.ok();
 }
 
 void StorySession::hash_sty1(StateHasher& h) const {
     bool off = false;
     for (const uint8_t b : reinforce_off_) off = off || b != 0;
+    for (const uint8_t b : retreat_off_) off = off || b != 0;
     if (gates_.is_default() && tutorial_.is_default() && !off) return;  // runs without these rewards hash as before
     h.u32(0x53545931u);  // "STY1"
     h.u32(static_cast<uint32_t>(gates_.planet.size()));
@@ -389,6 +413,7 @@ void StorySession::hash_sty1(StateHasher& h) const {
     }
     h.u32(static_cast<uint32_t>(reinforce_off_.size()));
     for (const uint8_t b : reinforce_off_) h.u32(b);
+    for (const uint8_t b : retreat_off_) h.u32(b);  // empty (hashes nothing) unless DISABLE_RETREAT ran
     h.boolean(tutorial_.all_allowed);
     h.u32(static_cast<uint32_t>(tutorial_.allowed.size()));
     h.u32(static_cast<uint32_t>(tutorial_.blocked.size()));

@@ -170,6 +170,7 @@ static std::string sty1_plot() {
     p += ev("No_Bounty", "DISABLE_BOUNTY_COLLECTION", {});
     p += ev("Movie", "ENABLE_CAMPAIGN_VICTORY_MOVIE", {});
     p += ev("No_Reinf", "DISABLE_REINFORCEMENTS", {"1", "Underworld"});
+    p += ev("No_Retreat", "DISABLE_RETREAT", {"Underworld", "1"});
     p += ev("Destroy_Bar", "DESTROY_OBJECT", {"Barracks"});
     p += ev("Own_SB", "CHANGE_OWNER", {"SB1", "Underworld"});
     p += ev("Ai_Flag", "TRIGGER_AI", {"Flag_X", "Underworld", "PlanetC"});
@@ -265,6 +266,8 @@ static void test_sty1_rewards() {
         CHECK(taken && !ss->pending_load_campaign());
         // DISABLE_REINFORCEMENTS (Underworld only).
         CHECK(!ss->reinforcements_enabled(pUnder) && ss->reinforcements_enabled(pEmpire));
+        // DISABLE_RETREAT (ui2 t06): P1 faction, P2 flag; Underworld only.
+        CHECK(!ss->retreat_enabled(pUnder) && ss->retreat_enabled(pEmpire));
         // Galactic DESTROY_OBJECT / CHANGE_OWNER (first instance): Barracks gone, SB1 handed over.
         CHECK(gs->store().find_all_of_type(static_cast<objects::TypeIndex>(tBarracks)).empty());
         for (const ObjectHandle h : gs->store().find_all_of_type(static_cast<objects::TypeIndex>(tSB1))) CHECK(gs->store().owner(h) == pUnder);
@@ -285,6 +288,14 @@ static void test_sty1_rewards() {
         std::snprintf(buf, sizeof buf, "%016llx", static_cast<unsigned long long>(h1.digest()));
         if (first_hash.empty()) first_hash = buf;
         CHECK(first_hash == buf);
+        {  // ui2 t06: the DISABLE_RETREAT switch survives a save (v5) and moves the story hash (a 0 alone would not).
+            ByteReader rd(w1.bytes());
+            CHECK(ss->read(rd));
+            CHECK(!ss->retreat_enabled(pUnder) && ss->retreat_enabled(pEmpire));
+            StateHasher h2;
+            ss->hash(h2);
+            CHECK(h2.digest() == h1.digest());
+        }
         std::printf("  sty1 rewards: workers %d ok, story hash %s\n", workers, buf);
     }
     std::error_code ec;

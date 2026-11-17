@@ -16,6 +16,7 @@
 // tick (plus the shared IdCounter value), which is what ObjectStore::read must reproduce.
 #include <algorithm>
 #include <cstdio>
+#include <cstddef>
 #include <cstdlib>
 #include <functional>
 #include <memory>
@@ -784,20 +785,29 @@ void test_queue_phases() {
         // q6 t21: v6 adds the deferred victory tests after them (u32 count 0 here); a v5 image is refused.
         // [port] v7 adds the fleet / ship names after them (u32 count 0 here). v6 is still read (as no names), so saves
         // from before the names load; v5 and older are refused.
-        CHECK(bytes.size() >= 12 && bytes[0] == 7 && bytes[bytes.size() - 12] == 0 && bytes[bytes.size() - 1] == 0);
-        std::vector<uint8_t> v6(bytes.begin(), bytes.end() - 4);
+        // galab: v8 adds after them the home planets (u32 per player), per planet the siphon type / source and the bonus
+        // holder (12 bytes) and the neutralized counts (u32 count 0 here); a v7 image is read with the start() homes and
+        // no galab state, which is this session's state, so it writes back as the v8 bytes.
+        const size_t galab = 4 * s.players().size() + 12 * s.planets().size() + 4;
+        CHECK(bytes.size() >= galab + 12 && bytes[0] == 8 && bytes[bytes.size() - 1] == 0);
+        std::vector<uint8_t> v7(bytes.begin(), bytes.end() - static_cast<std::ptrdiff_t>(galab));
+        v7[0] = 7;
+        ByteReader r7(v7);
+        CHECK(o.read(r7) && sim_bytes(o) == bytes);
+        CHECK(v7[v7.size() - 12] == 0 && v7[v7.size() - 1] == 0);
+        std::vector<uint8_t> v6(v7.begin(), v7.end() - 4);
         v6[0] = 6;
         ByteReader r6(v6);
         CHECK(o.read(r6) && o.object_names().empty() && sim_bytes(o) == bytes);
-        std::vector<uint8_t> v6names = bytes;  // a v6 image with the v7 tail is refused (trailing bytes)
+        std::vector<uint8_t> v6names = v7;  // a v6 image with the v7 tail is refused (trailing bytes)
         v6names[0] = 6;
         ByteReader r6n(v6names);
         CHECK(!o.read(r6n));
-        std::vector<uint8_t> v5(bytes.begin(), bytes.end() - 8);
+        std::vector<uint8_t> v5(v7.begin(), v7.end() - 8);
         v5[0] = 5;
         ByteReader r5(v5);
         CHECK(!o.read(r5));
-        std::vector<uint8_t> v4(bytes.begin(), bytes.end() - 12);
+        std::vector<uint8_t> v4(v7.begin(), v7.end() - 12);
         v4[0] = 4;
         ByteReader r4(v4);
         CHECK(!o.read(r4));

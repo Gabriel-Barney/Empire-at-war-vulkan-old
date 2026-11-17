@@ -1433,6 +1433,7 @@ bool TacticalBattle::retreat_prevented(int32_t player) const {
     // cu8 t01 (TACTICAL_GAPS §1.5, BATTLE_TRANSITIONS §3.4 request check): an interdict / Retreat_Prevention entry that
     // targets the player refuses the request (0x282750 space / 0x2825e0 land).
     if (abilities_ && abilities_->retreat_blocked(player)) return true;
+    if (retreat_off(player)) return true;  // ui2 t06: the story's DISABLE_RETREAT
     // cu8f t07 (CU8F_T01_T02_T07_RE.md §3.2): space only, the fallback query 0x2a9ff0 - behaviour 0x2C
     // TACTICAL_SUPER_WEAPON in the requesting player's own object list, no distance or hostility test: a player who owns
     // such an object in the battle (FoC: Death_Star, Death_Star_II) cannot retreat (reason 6). Land has no such query.

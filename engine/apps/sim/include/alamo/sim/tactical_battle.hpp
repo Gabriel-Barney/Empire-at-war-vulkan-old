@@ -409,6 +409,9 @@ public:
     // with NotAllowed; the stand-in auto deploy skips its reserves). The campaign host copies the story's switches each tick.
     void set_reinforcements_off(int32_t player, bool off);
     bool reinforcements_off(int32_t player) const;
+    // ui2 t06 DISABLE_RETREAT: a player whose switch is off cannot retreat (retreat_prevented is true for it).
+    void set_retreat_off(int32_t player, bool off);
+    bool retreat_off(int32_t player) const;
     // CHANGE_OWNER / DESTROY_OBJECT on the battle's objects of `type`; return the objects changed / whether one was hit.
     uint32_t reward_change_owner(TacticalMode& mode, objects::TypeIndex type, int32_t owner, int32_t count);
     bool reward_destroy_object(TacticalMode& mode, objects::TypeIndex type);
@@ -1093,6 +1096,16 @@ public:
     //                        for the record's owner at the pad's build point with the pad's facing, full health, in the
     //                        pad's child slot (so a pre-placed type is not spawned). No match / unknown type / owner -1:
     //                        nothing, the record stays. [port] an owner that is not a battle player: nothing either.
+    // galab t03 (GALAB_ABILITIES_RE §4.3, 0x2afc10): the planet-bonus upgrade objects of the battle players, {player, type}
+    // in spawn order (attacker's list, then defender's: GalacticSim::player_upgrades of the battle mode, filtered by the
+    // player's faction affiliation). Set before setup(); setup() adds the types to the tables and, after the start forces,
+    // creates each one for its player (a DUMMY_UPGRADE object whose automatic abilities - the Combat_Bonus auras - apply
+    // to the player's units), unless the player already owns that type or a later level of it. A battle rebuilt by a
+    // save load passes none (the save holds the objects).
+    void set_galactic_upgrades(std::vector<std::pair<int32_t, uint32_t>> upgrades, bool spawn = true) {
+        ga_upgrades_ = std::move(upgrades);
+        ga_spawn_ = spawn;
+    }
     using PadRecord = galactic::PersistedBuiltObject;
     void set_pad_persistence(std::vector<PadRecord>* records, bool restore = true) {
         pad_records_ = records;
@@ -1975,6 +1988,7 @@ private:
     std::vector<AttachedEffect> effects_;
     std::vector<StoryGeneric> story_generics_;  // STY1 t03: this tick's generic story names
     std::vector<objects::ObjectId> story_reinforced_;  // L1/S4 wave 2b: reserve units deployed this tick
+    std::vector<uint8_t> retreat_off_;                // ui2 t06: per player, 1 = retreat disabled by the story
     std::vector<uint8_t> reinf_off_;                  // STY1 t06: per player, 1 = reinforcements disabled by the story
     float bombard_delay_override_ = 0.0f;             // STY1 t06: BOMBARD_DELAY seconds
     std::vector<objects::ObjectId> ability_finished_;  // S7 t15 A1: signal 0x29 this tick (not saved: read the same tick)
@@ -2356,6 +2370,8 @@ private:
     // --- hangars / station upgrade / engine loops (tactical_battle_hangar.cpp) ---
     bool hg_is_spawner(uint32_t type) const;
     void hg_add_types();                         // setup(): spawn lists, members, team types, Next_Level_Base -> tables
+    void ga_add_types();                         // galab: the planet-bonus upgrade types (set_galactic_upgrades) -> tables
+    void ga_spawn_upgrades(TacticalMode& mode);  // galab: after the start forces (0x2afc10 per battle player)
     void hg_setup(TacticalMode& mode);           // setup(): HangarSystem (after combat / abilities)
     void hg_ability_host(tactical::abilities::AbilityHost& h);  // oi_install(): DEPLOY_SQUAD hooks
     int32_t hg_tech(int32_t player) const;
@@ -2473,6 +2489,8 @@ private:
     void sk_garrison_tick();                  // tick
     int32_t sk_pending_delivery(int32_t player, bool pop);  // HangarHost::pending_delivery
     std::vector<HgUpgradeObject> hg_upgrade_objs_;            // DUMMY_UPGRADE objects created by production (creation order)
+    std::vector<std::pair<int32_t, uint32_t>> ga_upgrades_;   // galab: {player, upgrade type} to spawn at setup (not saved)
+    bool ga_spawn_ = true;                                    // galab: false for a battle rebuilt by a save load (types only)
     std::vector<objects::ObjectId> hg_orphans_;               // contents of a removed container: removed next frame
     bool prod_used_ = false;
     std::unique_ptr<tactical::hangar::HangarSystem> hangars_;

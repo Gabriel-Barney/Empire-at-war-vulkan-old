@@ -1917,6 +1917,67 @@ void test_force_members() {
                 "ground leaf 800, 0x5f2430 untyped 4350 / 2300, typed Capital 1800, Structure 1500\n");
 }
 
+// galab t06 (GALAB_ABILITIES_RE §8): Variable_Self.HomePlanet.* resolves through the player's campaign Home_Location planet
+// (player +0x188); Is_Home_Planet (BasicGalacticEquations) compares the target's type token with it. A player without a
+// home planet: the root is unbound, the leaf (and the equation) fails.
+void test_home_planet() {
+    MemoryFiles files;
+    AiDefinitions defs;
+    EquationSet eqs;
+    std::vector<std::string> plan_files;
+    syn_data(files, defs, eqs, plan_files);
+    eqs.add("Is_Home_Planet", "Variable_Target.Type.Token == Variable_Self.HomePlanet.Type.Token");
+    eqs.add("Home_Base_Income", "Variable_Self.HomePlanet.BaseIncome");
+    eqs.link();
+    gal::GalacticRules rules = syn_rules();
+    const uint32_t tOther = static_cast<uint32_t>(rules.types.size());
+    {
+        gal::TypeInfo other = rules.types[tPlanet];
+        other.name = "OtherPlanet";
+        rules.types.push_back(other);
+    }
+    objects::GameObjectTypes types;
+    objects::IdCounter ids;
+    objects::ObjectStore store(objects::ModeKind::Galactic, objects::StoreKind::Primary, types, &ids);
+    GameRandom rng(4243u, 78u);
+    gal::GalacticSim sim(rules, store, rng.synced());
+    gal::GalacticSetup setup = syn_setup();
+    setup.planet_type[5] = tOther;
+    setup.players[0].home = 5;  // the Empire's Home_Location: P5 (the Rebel has none)
+    CHECK(sim.start(setup));
+    CHECK(sim.home_planet(0) == 5 && sim.home_planet(1) == kInvalidPlanet);
+    std::vector<GalacticAiTypeInfo> tinfo(rules.types.size());
+    fill_category_masks(tinfo);
+    GalacticAiConfig cfg;
+    cfg.players = {{0, "SynEmpire", 1}, {1, "SynRebel", 1}};
+    cfg.difficulties = {{"Normal_Default", 1.1f, 0.0f}};
+    GalacticAiWorld world(sim, store, &types, &files, rng, defs, eqs, tinfo,
+                          [&sim](uint8_t p, const commands::EventData& ev) { return sim.execute(p, ev); }, cfg);
+    CHECK(world.load_plans(plan_files) && world.start());
+    sim.update();
+    EvalContext c;
+    c.self = 0;
+    const auto eval = [&](const char* name, int32_t self, int32_t target) {
+        c.self = self;
+        c.target = target;
+        return evaluate(eqs, eqs.find(name), c, world.resolver());
+    };
+    EvalResult r = eval("Is_Home_Planet", 0, 5);
+    CHECK(r.ok && r.value == 1.0);
+    r = eval("Is_Home_Planet", 0, 4);  // another type
+    CHECK(r.ok && r.value == 0.0);
+    r = eval("Home_Base_Income", 0, 0);  // the home planet's own target token, whatever the target
+    double base5 = 0.0;
+    {
+        const EvalResult direct = eval("Home_Base_Income", 0, 5);
+        CHECK(direct.ok);
+        base5 = direct.value;
+    }
+    CHECK(r.ok && r.value == base5);
+    CHECK(!eval("Is_Home_Planet", 1, 5).ok);  // no Home_Location: unbound root
+    std::printf("home planet: Self.HomePlanet.Type.Token resolves through Home_Location; none -> the leaf fails\n");
+}
+
 // a2m t03: a test plan that calls Wait_For_Members gets the units its PotentialPlan selected (take_selection_units)
 // once it is waiting; the task force starts with no members (A2M_T03_PRODUCE_FORCE_CLAIMS Q1).
 void take_when_ready(ParityWorld& pw, lua::GlobalValueStore& gv) {

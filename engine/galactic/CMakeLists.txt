@@ -37,6 +37,7 @@ if("data" IN_LIST ALAMO_ENGINE_MODULES AND "objects" IN_LIST ALAMO_ENGINE_MODULE
     src/strategic.cpp  # OI galactic: STRATEGIC_GAPS speed M, company transports, buildability, stealth, victory claims
     src/special_rules.cpp    # P4 sim: special-system tables (special_data.hpp)
     src/special_systems.cpp  # P4 sim: hero trigger / respawn, black market, sabotage, hack, income abilities, corruption
+    src/galab_abilities.cpp  # galab: Remove_Corruption, Death Star, Siphon, planet bonuses, Tarkin, Neutralize_Hero
     src/galactic_save.cpp    # N1: GalacticSim / ConflictManager write / read
     src/bounty.cpp           # a2m r2: bounty values (auto-resolve bounty, results screen)
   )
@@ -79,6 +80,17 @@ if("data" IN_LIST ALAMO_ENGINE_MODULES AND "objects" IN_LIST ALAMO_ENGINE_MODULE
   endif()
   add_test(NAME alamo_galactic_special_tests COMMAND alamo_galactic_special_tests)
   set_tests_properties(alamo_galactic_special_tests PROPERTIES TIMEOUT 600)
+
+  # galab (docs/re/GALAB_ABILITIES_RE.md): Remove_Corruption, Death Star, Siphon, planet owner bonuses, Tarkin's political
+  # transition bonus, Neutralize_Hero; FoC tables with ALAMO_FOC_DATA.
+  add_executable(alamo_galactic_galab_tests tests/test_galab.cpp)
+  target_include_directories(alamo_galactic_galab_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+  target_link_libraries(alamo_galactic_galab_tests PRIVATE alamo_galactic_sim alamo_test_support)
+  if(TARGET alamo_vfs)
+    target_link_libraries(alamo_galactic_galab_tests PRIVATE alamo_vfs)
+    target_compile_definitions(alamo_galactic_galab_tests PRIVATE ALAMO_GALACTIC_TESTS_HAVE_VFS=1)
+  endif()
+  add_test(NAME alamo_galactic_galab_tests COMMAND alamo_galactic_galab_tests)
 
   # GRC 2 (docs/re/GALACTIC_REVEAL_CORRUPTION.md §2): planet visibility masks (baseline, presence, spies, story, expiry,
   # fold, CRC tail); FoC spy data with ALAMO_FOC_DATA.

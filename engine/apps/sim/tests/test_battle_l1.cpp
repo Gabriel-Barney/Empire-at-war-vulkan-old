@@ -406,6 +406,10 @@ Run run(const Data& d, int32_t workers, int follow = 0, bool via_command = false
             // cu8f t07 (CU8F_T01_T02_T07_RE.md §3.2): in space the owner of a TACTICAL_SUPER_WEAPON (the Underworld's
             // L1_Death_Star) cannot retreat; the Empire can.
             CHECK(b->retreat_prevented(1) && !b->retreat_prevented(0));
+            b->set_retreat_off(0, true);  // ui2 t06: the story's DISABLE_RETREAT refuses the request too
+            CHECK(b->retreat_prevented(0) && b->retreat_off(0) && !b->retreat_off(1));
+            b->set_retreat_off(0, false);
+            CHECK(!b->retreat_prevented(0));
             CHECK(b->engines_online(weapon) == -1);
             // Teleport the frigate (store, movement, combat).
             CHECK(b->teleport(*tm, slowed, Vec3{-1000.0f, -2000.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}));

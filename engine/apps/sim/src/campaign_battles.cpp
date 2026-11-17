@@ -810,11 +810,38 @@ void CampaignBattles::push_battle(SimHost& host) {
     battle_->set_hero_clash_data(opt_.hero_clash);  // s78n t06
     battle_->set_l1_factions(opt_.l1_factions);    // L1 systems
     battle_->enable_fleet_groups(opt_.fleet_groups);  // [port] fleet groups (off by default)
+#ifdef ALAMO_SIM_HAVE_STORY
+    // ui2 t06: the story's per-player switches (DISABLE_RETREAT / DISABLE_REINFORCEMENTS) are in place before the battle's first
+    // update, as in a run that kept them from the previous tick (the battle itself does not save them; a load rebuilds it here).
+    if (StorySession* st = host.story()) story_sync_switches(*st);
+#endif
     battle_->set_arrival_hold([this] { return lk_.presentation.hyperspace_hold; });  // story t12 (P9 == 2)
     // AI_GALACTIC_TOKENS §9.4: the battle planet's persisted built objects (the battle applies the gate: not in a skirmish,
     // not the sandbox battle). A battle rebuilt by a save load does not recreate them (the save has the battle's objects).
     if (pending_req_.info.planet != kInvalidPlanet)
         battle_->set_pad_persistence(g->sim()->built_objects(pending_req_.info.planet), !rebuilding_);
+    // galab t03 (GALAB_ABILITIES_RE §4.3, 0x2a1eb0 -> 0x2afc10): the battle players' planet-bonus upgrades (attacker's list,
+    // then defender's), each kept only when its type is affiliated with the player's faction (0x3751a0). A battle rebuilt
+    // by a save load gets the types (its tables must match the saved ones) but spawns nothing (its objects are in the save).
+    {
+        const galactic::GalacticSim& gs = *g->sim();
+        const objects::GameObjectTypes& types = catalog_->types();
+        std::vector<std::pair<int32_t, uint32_t>> ups;
+        for (const int32_t p : {pending_req_.info.attacker, pending_req_.info.defender}) {
+            if (p < 0 || static_cast<size_t>(p) >= gs.players().size()) continue;
+            const uint32_t f = gs.players()[static_cast<size_t>(p)].faction;
+            if (f >= gs.rules().factions.size()) continue;
+            const std::string& fname = gs.rules().factions[f].name;
+            for (const uint32_t t : gs.player_upgrades(p, kind == ModeKind::Space)) {
+                if (t >= types.size()) continue;
+                bool affiliated = false;
+                for (const uint32_t fi : types.factions(static_cast<objects::TypeIndex>(t)))
+                    affiliated = affiliated || (fi < types.faction_names().size() && ascii_iequals(types.faction_names()[fi], fname));
+                if (affiliated) ups.push_back({p, t});
+            }
+        }
+        battle_->set_galactic_upgrades(std::move(ups), !rebuilding_);
+    }
     {  // battle host: TacticalBuild charges / TacticalSell refunds spend the galactic account ([port] no AI notify)
         galactic::GalacticSim* gsim = g->sim();
         battle_->set_credit_hooks(
@@ -1779,8 +1806,10 @@ void CampaignBattles::story_victory(const std::string& faction, bool short_silen
 void CampaignBattles::story_sync_switches(const StorySession& s) {
     GalacticMode* g = host_->galactic_mode();
     if (!battle_ || !g || !g->sim()) return;
-    for (size_t p = 0; p < g->sim()->players().size(); ++p)
+    for (size_t p = 0; p < g->sim()->players().size(); ++p) {
         battle_->set_reinforcements_off(static_cast<int32_t>(p), !s.reinforcements_enabled(static_cast<int32_t>(p)));
+        battle_->set_retreat_off(static_cast<int32_t>(p), !s.retreat_enabled(static_cast<int32_t>(p)));
+    }
 }
 
 void CampaignBattles::story_tactical_reward(const std::string& type, const std::vector<std::string>& params) {
