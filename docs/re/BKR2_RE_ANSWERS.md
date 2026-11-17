@@ -350,6 +350,10 @@ hidden and stealthed: retail returns the frozen point (hidden is tested first), 
    `0x4241a0`), whose writer in `0x43c1b0` was not traced [L]. Probe: in retail, order two Snowspeeders (one formation)
    onto a standing AT-ST 1000 away on open ground; they stop near weapon range iff the trim applies.
 
+> **Ported (cmb2, 2026-11-17):** item 3 is `attack_reference_index` (attack_approach.cpp; a formation's z = its members'
+> mean terrain height). Item 6: the plan failure keeps the block and retries after 60 frames (`TacticalBattle::AttackBlock::
+> retry`); the members are still stopped at the failure (keeping their paths needs `MovementSystem::move()`, open).
+
 **Port consequence.** Backlog text (tier 1, S2): *"Attack slots reference formation (attack_approach.cpp attack_slots
 437-445): retail 0x438c10 picks the formation nearest the mean of 0x41a9b0's points by the 3-D distance (z included,
 strict <, first wins); the port measures 2-D, so on uneven ground the reference path, d0 / d1 and the ring order can

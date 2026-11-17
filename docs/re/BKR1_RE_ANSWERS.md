@@ -349,7 +349,8 @@ G + ρ·rot(−v, θ), the formation's class +0x1c4, &q); there is **no q > 0 te
    (§4.3.1 item 7 (b)) this needs a G on a cell the class may reach but not enter (rare).
 
 > **Ported (cmb1 t05, 2026-11-17):** (a) is `MovementSystem::attack_plan`'s guard range (`LandAttack::guard_obstacle` /
-> `t_radius` from the host); the two `[port]` tags are `[H]` now. (c) is cmb2 t01.
+> `t_radius` from the host); the two `[port]` tags are `[H]` now. (c) is cmb2 t01 (`slot_leg_reach`, attack_approach.cpp;
+> the q = 0 case stays S3).
 
 **Port consequence.** Staging and the guard L rule: none (port retail; retag the `[port]` 2-D distance in
 attack_approach.cpp 401-403 and tactical_battle.cpp 2023 as [H]). Two differences (tier 1). Backlog text (tier 1, S2):
