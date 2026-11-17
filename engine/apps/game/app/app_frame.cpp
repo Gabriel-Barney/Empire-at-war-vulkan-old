@@ -189,6 +189,7 @@ bool App::render_frame() {
     if (galactic || battle_hud) build_panels(panel_lists);
     for (const ui::HudDrawList& pl : panel_lists) merge_lists(hud_list, pl);
     if ((galactic || battle_hud) && !bench_active()) build_encyclopedia(hud_list, *canvas);  // BM2a: no tooltips
+    if (!bench_active()) build_story_overlay(hud_list, *canvas);  // ui2: story text lines, advisor hint (and the pointers)
     if (battle_view) draw_letterbox(dialogs, *canvas, w, h);  // refixf t05: cinematic letterbox, over the world, under the dialogs
     // OI host: the attract demo world under the menu. GuiManager's backdrop paints an opaque black fill under the
     // MenuBack_overlay quad, which would hide the world: left out while the demo is drawn [port: until engine/ui draws the

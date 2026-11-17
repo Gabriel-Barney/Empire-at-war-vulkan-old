@@ -38,6 +38,7 @@
 #include "alamo/game/mod_picker.hpp"
 #include "alamo/game/radar_feed.hpp"
 #include "alamo/game/save_games.hpp"
+#include "alamo/game/story_present.hpp"
 #include "alamo/game/story_ui.hpp"
 #include "alamo/game/world_pick.hpp"
 #include "alamo/jobs/crc_recorder.hpp"
@@ -594,6 +595,17 @@ public:
     size_t reward_tac_cursor_ = 0;
     uint64_t reward_movies_ = 0, reward_speeches_ = 0;
     void story_reward_step();
+    // ui2: the story presentation rewards (app_story_present.cpp): the presenter, its hooks, what lua_presentation passes on,
+    // the per-frame step and the text / hint drawing (the rest of the group's overlay builders are added there).
+    StoryPresenter story_present_;
+    const void* story_present_story_ = nullptr;  // the story session the presenter state belongs to
+    void story_present_setup();
+    void story_present_reward(const lua::StoryFired& f, uint8_t mode);
+    void story_present_lua(const lua::PresentationEvent& e);
+    void story_present_frame();
+    void build_story_overlay(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
+    void build_story_text(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
+    void build_story_hint(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
     int32_t story_page_ = -1;   // ui ask 11: the GUI image page the story movie fills (the dialog portrait), -1 none
     void galactic_screens();
     void open_holocron(ui::InfoPage page);

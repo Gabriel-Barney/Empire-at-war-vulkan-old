@@ -243,6 +243,9 @@ void App::lua_presentation() {
             if (!slot.open(data_, audio_, name, &slot == &advisor_movie_, &err)) std::fprintf(stderr, "Lua movie %s: %s\n", name.c_str(), err.c_str());
         } else if (e.op == lua::PresentationOp::StopBinkMovie) {
             stop_movies();
+        } else if (e.op == lua::PresentationOp::GameMessage || e.op == lua::PresentationOp::RemoveAllText ||
+                   e.op == lua::PresentationOp::ObjectHighlight || e.op == lua::PresentationOp::ObjectHighlightSmall) {
+            story_present_lua(e);  // ui2
         } else if (e.op == lua::PresentationOp::ActivateRetryDialog) {  // mission lost: IDD_RETRY_DIALOG (ui1 t05)
             // STY1 t07: Retry ("Load autosave") loads [AutoSave], written when the battle began (handle_screen_actions).
             if (screens_.show_retry()) ++retry_boxes_;
@@ -300,14 +303,24 @@ void App::story_reward_step() {
         reward_cursor_.clear();
         reward_tac_model_ = nullptr;
         reward_tac_cursor_ = 0;
+        if (story_present_story_) {  // ui2: the story ended with its session: the presenter's text, locks and pointers go
+            story_present_.reset();
+            story_present_story_ = nullptr;
+        }
         return;
     }
+    if (story_present_story_ != story) {  // ui2: a new story session
+        story_present_.reset();
+        story_present_setup();
+        story_present_story_ = story;
+    }
     std::vector<StoryMediaCue> cues;
-    auto scan = [&cues](const lua::StoryModel& m, size_t& cursor) {
+    auto scan = [&](const lua::StoryModel& m, size_t& cursor, uint8_t mode) {
         const std::vector<lua::StoryFired>& fired = m.fired();
         if (cursor > fired.size()) cursor = fired.size();
         for (; cursor < fired.size(); ++cursor) {
             const lua::StoryFired& f = fired[cursor];
+            story_present_reward(f, mode);  // ui2: the presentation rewards (text, pointers, locks, camera, advisor)
             if (f.reward_type != "START_MOVIE" && f.reward_type != "MULTIMEDIA" && f.reward_type != "STOP_COMMANDBAR_MOVIE") continue;
             std::vector<std::string> params;
             for (const lua::StoryParam& p : f.reward_params) params.push_back(p.text);
@@ -316,7 +329,7 @@ void App::story_reward_step() {
     };
     reward_cursor_.resize(story->plot_set_count(), 0);
     for (size_t set = 0; set < story->plot_set_count(); ++set) {
-        if (story->plot_set_player(set) == local_player()) scan(story->model(set), reward_cursor_[set]);
+        if (story->plot_set_player(set) == local_player()) scan(story->model(set), reward_cursor_[set], 0);
         else reward_cursor_[set] = story->model(set).fired().size();
     }
     const lua::StoryModel* tac = story->tactical_model();
@@ -330,7 +343,8 @@ void App::story_reward_step() {
         reward_tac_battle_ = battles_seen_;
         reward_tac_cursor_ = 0;
     }
-    if (tac && story->tactical_player() == local_player()) scan(*tac, reward_tac_cursor_);
+    if (tac && story->tactical_player() == local_player()) scan(*tac, reward_tac_cursor_, bview_.space() ? 1 : 2);
+    story_present_frame();
     for (const StoryMediaCue& c : cues) {
         if (c.kind == StoryMediaCue::Kind::Speech) {
             audio_.speech(c.name);

@@ -827,6 +827,7 @@ void App::open_story_summary() {
 
 bool App::story_controls_locked() const {
 #ifdef ALAMO_SIM_HAVE_STORY
+    if (story_present_.controls_locked()) return true;  // ui2 t06: the LOCK_CONTROLS reward (distinct from the Lua call, §5.1)
     if (sim::StorySession* story = session_ ? session_->host().story() : nullptr)
         if (const lua::PresentationLog* log = story->presentation()) return log->state().controls_locked;
 #endif
