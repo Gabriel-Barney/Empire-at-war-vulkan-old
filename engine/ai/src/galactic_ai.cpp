@@ -49,6 +49,10 @@ GalacticAiWorld::Impl::Impl(gal::GalacticSim& s, objects::ObjectStore& st, const
 GalacticSimTokenResolver::Hooks GalacticAiWorld::Impl::make_hooks() {
     GalacticSimTokenResolver::Hooks h;
     h.story_campaign = cfg.story_campaign;
+    // storyb t10 (STORYB_T10_TRIGGER_AI.md): StoryTrigger reads an AI story flag without clearing it.
+    h.story_flag = [this](int32_t p, std::string_view name) {
+        return story_model != nullptr && story_model->check_ai_flag(p, name, -1, false);
+    };
     h.active_goals = [this](int32_t p, std::string_view cat, int32_t& n) { return active_goals(p, cat, n); };
     h.markup = [this](int32_t p, int32_t planet) {
         const auto it = markup.find({p, planet});
@@ -2470,6 +2474,8 @@ GalacticAiWorld::GalacticAiWorld(gal::GalacticSim& sim, objects::ObjectStore& st
         return h;
     };
     setup.prepare = [&w](lua::LuaVm& vm) {
+        if (w.story_table) lua::attach_story_table(vm, w.story_table);  // storyb t10
+        if (w.story_model) lua::attach_story(vm, w.story_model);
         lua::attach_player_world(vm, &w.world);
         lua::attach_ai_host(vm, &w, -1);
         lua::attach_markup_host(vm, &w);
@@ -2812,6 +2818,11 @@ void GalacticAiWorld::record_auto_resolve_survival(int32_t owner, uint32_t type,
 double GalacticAiWorld::survival_ratio(int32_t player, uint32_t type) const {
     const PlayerAi* p = impl_->player_ai(player);
     return p ? p->ctx.learning.survival_ratio(impl_->survival_key(type)) : 1.0;
+}
+
+void GalacticAiWorld::attach_story(lua::StoryTable* table, lua::StoryModel* model) {
+    impl_->story_table = table;
+    impl_->story_model = model;
 }
 
 void GalacticAiWorld::attach_story_world(lua::LuaPlayerWorld* world) {

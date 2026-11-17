@@ -691,6 +691,39 @@ void test_player_conflict_tokens() {
     }
 }
 
+// storyb t10 (STORYB_T10_TRIGGER_AI.md §3.2): the player-root StoryTrigger reads the attached story's AI flag of the
+// evaluated player with no target and never clears it; without a story (or after detaching) it is 0.
+void test_story_trigger_token() {
+    ParityWorld pw(false, {"HeroAttach"});
+    pw.run(2);
+    auto token = [&pw](const char* text, int32_t self, bool& ok) {
+        EquationSet e;
+        e.add("T", text);
+        e.link();
+        EvalContext c;
+        c.self = self;
+        c.enemy = 1 - self;
+        c.human = 1;
+        const EvalResult r = evaluate(e, e.find("T"), c, pw.world->resolver());
+        ok = r.ok;
+        return r.value;
+    };
+    bool ok = false;
+    lua::StoryModel model;
+    CHECK(token("Variable_Self.StoryTrigger {Parameter_Name = \"FLAG_A\"}", 0, ok) == 0.0 && ok);  // nothing attached
+    pw.world->attach_story(nullptr, &model);
+    model.raise_ai_flag(0, "FLAG_B", -1);
+    model.raise_ai_flag(0, "FLAG_C", 7);  // a planet-keyed flag is not the player-root one
+    CHECK(token("Variable_Self.StoryTrigger {Parameter_Name = \"FLAG_B\"}", 0, ok) == 1.0 && ok);
+    CHECK(token("Variable_Self.StoryTrigger {Parameter_Name = \"FLAG_B\"}", 0, ok) == 1.0 && ok);  // not cleared
+    CHECK(model.check_ai_flag(0, "FLAG_B", -1, false));
+    CHECK(token("Variable_Self.StoryTrigger {Parameter_Name = \"FLAG_B\"}", 1, ok) == 0.0 && ok);  // the other player
+    CHECK(token("Variable_Self.StoryTrigger {Parameter_Name = \"FLAG_C\"}", 0, ok) == 0.0 && ok);
+    token("Variable_Self.StoryTrigger", 0, ok);
+    CHECK(!ok);  // no Parameter_Name: the token fails
+    pw.world->attach_story(nullptr, nullptr);
+}
+
 // q6 t03 (AI_GALACTIC_TOKENS §8.3): Variable_Self.BudgetAllocation{Parameter_Category}: the normalised weight of the
 // category key (AIGoalCategoryType value, low 32 bits) in Self's budget; 0.0 for a key the budget does not hold or no
 // parameter (-1); fails on any root but Self.

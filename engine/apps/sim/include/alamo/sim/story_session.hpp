@@ -165,6 +165,7 @@ struct ObjectHandle;
 }  // namespace alamo::objects
 namespace alamo::lua {
 class StoryModel;
+class StoryTable;  // storyb t10
 class StoryHolocron;
 class LuaVm;
 class LuaPlayerWorld;
@@ -542,6 +543,10 @@ public:
     lua::PresentationLog* presentation();
     lua::ObjectBridge* object_bridge();
     lua::LuaPlayerWorld* player_world();
+    // storyb t10: the galactic mode's plot table (every galactic plot set; null before the sets load) and the first set's
+    // model (AI story flags are raised on every set's model, StoryModel::raise_ai_flag), for the galactic AI's plan VMs.
+    lua::StoryTable* galactic_story_table();
+    lua::StoryModel* first_story_model();
 
     // ---- results ----
     const std::vector<StoryTrigger>& triggers() const { return triggers_; }

@@ -32,6 +32,7 @@
 #include "alamo/ai/ai_plans.hpp"
 #include "alamo/ai/galactic_ai.hpp"
 #include "alamo/ai/perception_equations.hpp"
+#include "alamo/lua/story_model.hpp"  // storyb t10
 #include "alamo/core/bytes.hpp"
 #include "alamo/core/compress.hpp"
 #include "alamo/core/file_provider.hpp"
@@ -1177,6 +1178,7 @@ void test_save_synthetic();
 void test_planet_type_is_type();
 void test_player_conflict_tokens();
 void test_budget_allocation_token();
+void test_story_trigger_token();
 void test_loaded_category_enum();
 void test_ai_type_switch();
 

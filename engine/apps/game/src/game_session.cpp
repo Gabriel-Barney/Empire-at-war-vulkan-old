@@ -44,7 +44,10 @@ GameSession::~GameSession() {
     // The galactic AI lets go of the story's player world first; then CampaignBattles (it clears its host hooks), the
     // host (its controllers and CRC hashers reference the AI and the animation), then the AI and the animation.
 #ifdef ALAMO_GAME_HAVE_GALACTIC_AI
-    if (galactic_ai_) galactic_ai_->attach_story_world(nullptr);
+    if (galactic_ai_) {
+        galactic_ai_->attach_story_world(nullptr);
+        galactic_ai_->attach_story(nullptr, nullptr);
+    }
 #endif
     battles_.reset();
     host_.reset();
@@ -357,6 +360,11 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
         galactic_ai_ =std::make_unique<ai::GalacticAiWorld>(
             *gs, host_->galactic_mode()->primary(), &d.types, d.files.get(), host_->random(), d.ai->defs, d.ai->equations, d.ai->type_info,
             [h](uint8_t p, const commands::EventData& ev) { return h->execute_direct(p, commands::CommandSource::AI, ev); }, gcfg);
+#ifdef ALAMO_SIM_HAVE_STORY
+        // storyb t10: the plan scripts see the story (Get_Story_Plot, Check_Story_Flag); before load_plans builds their VMs.
+        if (host_->story())
+            galactic_ai_->attach_story(host_->story()->galactic_story_table(), host_->story()->first_story_model());
+#endif
         std::vector<std::string> wd;
         if (!galactic_ai_->load_plans(d.ai->plan_files, &wd) || !galactic_ai_->start(&wd)) {
             if (diag)
