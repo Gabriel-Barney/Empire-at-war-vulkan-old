@@ -110,6 +110,9 @@ struct Db {
         std::error_code ec;
         remove_all_long(root, ec);
         write_file(root / "Data/XML/GameObjectFiles.xml", "<L><File>S.xml</File></L>");
+        // r1b t01: the hardpoint data list, so a type's HardPoints resolve (Take_Damage(n, name) checks the name there).
+        write_file(root / "Data/XML/HardPointDataFiles.xml", "<L><File>HP.xml</File></L>");
+        write_file(root / "Data/XML/HP.xml", "<R><HardPoint Name=\"HP_Gun\"/></R>");
         write_file(root / "Data/XML/S.xml",
                    "<R>\n"
                    "<GroundInfantry Name=\"Trooper\"><Tactical_Health>100</Tactical_Health>"
@@ -121,7 +124,7 @@ struct Db {
                    "</Unit_Abilities_Data></GroundInfantry>\n"
                    "<GroundVehicle Name=\"Tank\"><Tactical_Health>400</Tactical_Health><Shield_Points>50</Shield_Points>"
                    "<CategoryMask>Vehicle</CategoryMask><Property_Flags>HealsInfantry</Property_Flags>"
-                   "<Behavior>SELECTABLE, UNIT_AI</Behavior></GroundVehicle>\n"
+                   "<Behavior>SELECTABLE, UNIT_AI</Behavior><HardPoints>HP_Gun</HardPoints></GroundVehicle>\n"
                    "<GroundCompany Name=\"Trooper_Team\"><Company_Units>Trooper, Trooper</Company_Units>"
                    "<Behavior>TEAM, TEAM_LOCOMOTOR</Behavior></GroundCompany>\n"
                    "<GroundCompany Name=\"Squad\"><Company_Units>Squaddie, Squaddie</Company_Units>"
@@ -155,7 +158,7 @@ struct Db {
                    "<Behavior>UNIT_AI</Behavior></GroundStructure>\n"
                    "</R>");
         dp = std::make_unique<DirectoryProvider>(root.string());
-        ok = raw.load(*dp) && types.build(raw);
+        ok = raw.load(*dp) && types.build(raw, dp.get());
     }
     ~Db() {
         std::error_code ec;
@@ -767,7 +770,33 @@ static void test_spawn_and_state(const Db& db) {
                   "gun = Find_First_Object('HP_Gun') gh = gun.Get_Hull() tank.Take_Damage(-100000) hmax = tank.Get_Hull()") == "");
     // q6 t12: Take_Damage is damage kind 0, which passes invulnerability (OBJECT_SCRIPTS §6.1 step 4): h2 drops too.
     CHECK(gnum(vm, "h0") == 1.0 && gnum(vm, "h1") == 0.75 && gnum(vm, "h2") == 0.5 && gnum(vm, "h3") == 1.0 / 400.0);
-    CHECK(gnum(vm, "v3") == 1.0 && gnum(vm, "gh") == 0.5 && gnum(vm, "hmax") == 1.0);
+    // r1b t01: a HardPoints name goes to the host's hardpoint record; none here, so nothing (the attached object untouched).
+    CHECK(gnum(vm, "v3") == 1.0 && gnum(vm, "gh") == 1.0 && gnum(vm, "hmax") == 1.0);
+    {  // r1b t01 (R1_T01_HARDPOINT_RUN): the name is checked against the type's HardPoints, case-insensitively; a match is
+       // handed to the host with the script's spelling; an unknown name (or a type without hardpoints) stops, no damage.
+        std::string got;
+        float amount = 0.0f;
+        int calls = 0, plain = 0;
+        s.bridge.take_hardpoint_damage = [&](objects::ObjectHandle h, float a, bool, std::string_view n) {
+            ++calls;
+            CHECK(h == s.tank);
+            amount = a;
+            got = std::string(n);
+            return true;
+        };
+        s.bridge.take_damage = [&](objects::ObjectHandle, float, bool) {
+            ++plain;
+            return true;
+        };
+        const float before = s.store.health(s.tank);
+        CHECK(run(vm, "tank.Take_Damage(7, 'hp_GUN')") == "");
+        CHECK(calls == 1 && amount == 7.0f && got == "hp_GUN" && plain == 0 && s.store.health(s.tank) == before);
+        CHECK(contains(run_stop(vm, "tank.Take_Damage(7, 'HP_Nope')"), "GameObjectWrapper::Take_Damage -- unknown hard point HP_Nope."));
+        CHECK(contains(run_stop(vm, "t1.Take_Damage(7, 'HP_Gun')"), "GameObjectWrapper::Take_Damage -- unknown hard point HP_Gun."));
+        CHECK(calls == 1 && plain == 0 && s.store.health(s.tank) == before);
+        s.bridge.take_hardpoint_damage = nullptr;
+        s.bridge.take_damage = nullptr;
+    }
     CHECK(run(vm, "tank.Set_Cannot_Be_Killed(false) tank.Take_Damage(1000) v4 = tank.Is_Valid() and 1 or 0") == "");
     CHECK(gnum(vm, "v4") == 0.0);
     {  // q6 t12: a host damage system takes Take_Damage(amount) (not the hardpoint form); refused -> the store path

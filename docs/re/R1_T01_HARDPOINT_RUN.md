@@ -144,6 +144,9 @@ the follow-ups).
   - something on the attachment list (0x12d770).
 
   Write the answer into `SPACE_AND_OPEN.md` §B.10.
+  **Answered 2026-11-17 (r1b t05):** the owner bookkeeping 0x3a5700 is the path. It erases the first attachment
+  list entry named like the `Model_To_Attach` file (stem, case-insensitive) on every destroyable hardpoint's
+  death, breakoff prop or not (`SPACE_AND_OPEN.md` §B.10 answer 4).
 - [RE] V3: what turns the engine glow off? The candidate is the ENGINE offline path → `Locomotor_Set_Engines`
   0x5545a0 (`TACTICAL_COMBAT.md:2359`; `HARDPOINT_DISABLED.md` §2). Find the reader of the locomotor engines-on word
   (+0xd0) on the draw side, and how it picks the proxies to hide (by proxy name, by bone `engines_big`, or by

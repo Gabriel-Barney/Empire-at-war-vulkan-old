@@ -297,6 +297,10 @@ public:
     // combat Take_Damage with kind 0, TacticalBattle::script_damage); `cannot_die` = the object's Set_Cannot_Be_Killed.
     // True = applied by the host (the death, if any, processed there); false or unset: the store-only health change.
     std::function<bool(objects::ObjectHandle unit, float amount, bool cannot_die)> take_damage;
+    // r1b t01: Take_Damage(amount, name) with a name of the type's HardPoints (checked by the binding): the host damages that
+    // hardpoint record (a tactical battle: combat Take_Damage kind 0 with the hardpoint index, shield first). True = applied;
+    // false or unset: no damage (hardpoints are combat records, there is no object to damage).
+    std::function<bool(objects::ObjectHandle unit, float amount, bool cannot_die, std::string_view hardpoint)> take_hardpoint_damage;
     // q6 (OBJECT_SCRIPTS §10.2): Make_Invulnerable(on), called after ScriptObjectState::invulnerable is stored: the host's
     // INVULNERABLE behaviour (a tactical battle: the combat gate that drops every damage kind but 0 and 13; a TEAM
     // container passes it to its members). Unset: only the flag is stored.

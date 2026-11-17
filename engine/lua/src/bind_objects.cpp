@@ -2085,8 +2085,10 @@ int m_despawn(Call& c) {
 // Take_Damage(amount, [hardpoint type name]): damage kind 0 (OBJECT_SCRIPTS §6.1 step 4), which passes
 // invulnerability (TACTICAL_COMBAT §3.6 step 3), so Make_Invulnerable does not stop it (q6 t12). Without a name, a
 // host damage system (ObjectBridge::take_damage: a tactical battle's combat) takes it when it knows the object;
-// otherwise a direct health change [inferred]: with a name the attached child of that type takes it (none: no-op);
-// Cannot_Be_Killed: health stops at min(current, 1); <= 0 destroys.
+// otherwise a direct health change [inferred]; Cannot_Be_Killed: health stops at min(current, 1); <= 0 destroys.
+// r1b t01 (R1_T01_HARDPOINT_RUN, retail 0x581710): a name is matched ASCII case-insensitively against the object type's
+// HardPoints type names; no match stops the script ("unknown hard point") with no damage; a match goes to the host's
+// hardpoint record (ObjectBridge::take_hardpoint_damage; none: no damage - hardpoints are records, not objects).
 int m_take_damage(Call& c) {
     if (c.nargs < 1 || c.nargs > 2)
         return c.script_error_stop("GameObjectWrapper::Take_Damage -- invalid number of parameters. Expected 1 or 2, got %d.", c.nargs);
@@ -2094,17 +2096,20 @@ int m_take_damage(Call& c) {
     if (c.nargs == 2 && !c.is_string(2))
         return c.script_error_stop("GameObjectWrapper::Take_Damage -- invalid type for parameter 2. Expected string.");
     objects::ObjectStore* st = store(c);
-    ObjectHandle target = self_object(c);
+    const ObjectHandle target = self_object(c);
     if (c.nargs == 2) {
-        const std::string_view hp = c.string(2);
-        ObjectHandle found{};
-        for (const ObjectHandle h : st->all_objects())
-            if (st->alive(h) && st->attach_parent(h) == target && type_matches(c, h, hp)) {
-                found = h;
-                break;
-            }
-        if (!found) return 0;
-        target = found;
+        const std::string name(c.string(2));
+        const objects::GameObjectTypes* hty = types(c);
+        const TypeIndex ht = st->type(target);
+        bool known = false;
+        if (hty && ht < hty->size())
+            for (const uint32_t id : hty->hardpoints(ht))
+                if (id < hty->hardpoint_names().size() && ascii_iequals(hty->hardpoint_names()[id], name)) known = true;
+        if (!known) return c.script_error_stop("GameObjectWrapper::Take_Damage -- unknown hard point %s.", name.c_str());
+        const ScriptObjectState& hs = state_of(c, st->id(target));
+        if (const ObjectBridge* b = bridge(c); b && b->take_hardpoint_damage)
+            (void)b->take_hardpoint_damage(target, static_cast<float>(c.number(1)), hs.cannot_be_killed, name);
+        return 0;
     }
     const ScriptObjectState& s = state_of(c, st->id(target));
     if (c.nargs == 1)

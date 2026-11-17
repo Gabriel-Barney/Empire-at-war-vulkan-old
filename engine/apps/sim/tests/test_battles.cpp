@@ -2559,6 +2559,10 @@ struct GateRun {
     bool seen = false, sw0 = false, sw1 = false, br0 = false, br1 = false, bd0 = false, bd_off = true, bd_on = false;
     bool killed = false, sw1_after = false;
     float rt0 = -1.0f, rt1 = -1.0f, rt0_after = -1.0f, rt1_after = -1.0f;
+    // r1b t01: Take_Damage(30, "hp_s10_laser_b") on that frigate before it dies: hardpoint 1 loses 30, hardpoint 0 and
+    // the hull nothing; an unknown name applies nothing.
+    bool named = false, unknown = true, hp0_full = false, hull_same = false;
+    float hp1_lost = 0.0f;
 };
 GateRun run_gate(const Data& d, bool skirmish) {
     GateRun out;
@@ -2608,7 +2612,15 @@ GateRun run_gate(const Data& d, bool skirmish) {
         out.bd_on = b->player_gate_allows(0, PlayerGate::Bombardment);
         for (const objects::ObjectHandle h : tm->primary().owned_by(1))
             if (tm->primary().alive(h) && tm->primary().type(h) == frigate) {
-                out.killed = b->script_damage(*tm, tm->primary().id(h), 1.0e9f, false);
+                const objects::ObjectId fid = tm->primary().id(h);
+                const auto& cs = b->combat();
+                const float hp1 = cs.hardpoint_health(fid, 1), hull = cs.health(fid);
+                out.named = b->script_hardpoint_damage(*tm, fid, 30.0f, false, "hp_s10_laser_b");
+                out.unknown = b->script_hardpoint_damage(*tm, fid, 30.0f, false, "HP_Nope");
+                out.hp1_lost = hp1 - cs.hardpoint_health(fid, 1);
+                out.hp0_full = cs.hardpoint_health(fid, 0) == cs.hardpoint_max(fid, 0);
+                out.hull_same = cs.health(fid) == hull;
+                out.killed = b->script_damage(*tm, fid, 1.0e9f, false);
                 break;
             }
         out.sw1_after = b->special_weapons_allowed(1);
@@ -2629,7 +2641,10 @@ void test_battlefield_modifier_gates() {
                     static_cast<double>(r.rt0), static_cast<double>(r.rt1), r.killed, r.sw1_after, static_cast<double>(r.rt0_after),
                     static_cast<double>(r.rt1_after));
         CHECK(r.seen && r.killed);
-        CHECK(r.sw0 && r.br0);                                // the star base's entries: allowed in both modes
+        std::printf("  r1b t01: named hardpoint hit %d (lost %.1f, other full %d, hull same %d), unknown name applied %d\n", r.named,
+                    static_cast<double>(r.hp1_lost), r.hp0_full, r.hull_same, r.unknown);
+        CHECK(r.named && !r.unknown && r.hp1_lost == 30.0f && r.hp0_full && r.hull_same);
+        CHECK(r.sw0 && r.br0);                              // the star base's entries: allowed in both modes
         CHECK(r.sw1 == !skirmish && r.br1 == !skirmish);      // empty lists: campaign yes, skirmish no
         CHECK(r.bd0 == !skirmish && !r.bd_off && r.bd_on);    // empty, then the Lua entry alone (false, then true)
         CHECK(r.rt0 == 0.0f && r.rt1 == 0.0f);                // reverse: nothing while the sources live

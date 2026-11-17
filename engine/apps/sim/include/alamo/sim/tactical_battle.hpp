@@ -911,6 +911,9 @@ public:
     // order) [port: outside the battle tick; the original's Die runs inside Take_Damage]. False when `id` is not a live
     // combat unit of this battle (the caller keeps its store-only path).
     bool script_damage(TacticalMode& mode, objects::ObjectId id, float amount, bool cannot_die);
+    // r1b t01: the same with a hardpoint type name: the unit's first hardpoint of that name takes the hit (step 17 routing);
+    // false when the unit has no such combat hardpoint (nothing applied).
+    bool script_hardpoint_damage(TacticalMode& mode, objects::ObjectId id, float amount, bool cannot_die, std::string_view name);
     // q6 (OBJECT_SCRIPTS §10.2): Lua Make_Invulnerable(on) (ObjectBridge::invulnerable_changed). The INVULNERABLE behaviour:
     // on = CombatSystem kUnitInvulnerable (permanent, only damage kinds 0 / 13 pass, targeting unchanged); off = detached,
     // which also ends an Invulnerability-ability duration. A TEAM container passes it to each member, not to itself. False
