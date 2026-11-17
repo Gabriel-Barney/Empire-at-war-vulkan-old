@@ -28,6 +28,7 @@ add_library(alamo_game_core STATIC
   src/story_camera.cpp
   src/save_games.cpp
   src/mod_check.cpp
+  src/asset_audit.cpp
   src/mod_picker.cpp
   src/benchmark.cpp
   src/benchmark_scenario.cpp
@@ -65,6 +66,12 @@ endif()
 if(TARGET alamo_audio)
   target_link_libraries(alamo_game_core PUBLIC alamo_audio)
   target_compile_definitions(alamo_game_core PUBLIC ALAMO_GAME_HAVE_AUDIO=1)
+endif()
+# mcx2 t01 asset audit (asset_audit.hpp): ALO / ALA parse through tools/formats; Bink header probe for movies.
+target_link_libraries(alamo_game_core PRIVATE alamo_formats)
+if(TARGET alamo_video)
+  target_link_libraries(alamo_game_core PRIVATE alamo_video)
+  target_compile_definitions(alamo_game_core PRIVATE ALAMO_GAME_HAVE_VIDEO=1)
 endif()
 
 # Data-free: synthetic skirmish through GameSession (human orders routed into the battle, battle end, record/replay CRC).
@@ -160,6 +167,14 @@ add_executable(alamo_game_mod_check_tests tests/test_mod_check.cpp)
 target_link_libraries(alamo_game_mod_check_tests PRIVATE alamo_core alamo_game_core alamo_test_support)
 add_test(NAME alamo_game_mod_check_tests COMMAND alamo_game_mod_check_tests)
 set_tests_properties(alamo_game_mod_check_tests PROPERTIES TIMEOUT 300)
+# mcx2 t01: alamo_asset_audit prints the report's `assets` section for a mounted mod (the seam until the v4 report
+# calls audit_mod_assets itself).
+add_executable(alamo_asset_audit tools/asset_audit_main.cpp)
+target_link_libraries(alamo_asset_audit PRIVATE alamo_core alamo_game_core alamo_vfs)
+# mcx2 t01: the mod asset audit (asset_audit.hpp) on a fake install with a mod folder in its own temp folder; data-free.
+add_executable(alamo_game_asset_audit_tests tests/test_asset_audit.cpp)
+target_link_libraries(alamo_game_asset_audit_tests PRIVATE alamo_core alamo_game_core alamo_vfs alamo_test_support)
+add_test(NAME alamo_game_asset_audit_tests COMMAND alamo_game_asset_audit_tests)
 # modc t07: the synthetic mod of testdata/mod_fixture (a new faction, unit, planet, campaign and a Lua override) through
 # the real MODPATH= route, no game data; read only (no fixture path shared with any other test). The second entry runs the
 # exe itself and checks its JSON summary (docs/MODS.md section 5.1).

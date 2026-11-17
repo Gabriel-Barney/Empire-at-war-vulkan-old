@@ -40,14 +40,23 @@ chunk** (at least when such an object is created; whether the bugcheck is the ga
 `NOINFO`, `OVR` and `ANS` were left out of the reruns after this (Gabriel, 2026-11-17: too risky after the bugcheck);
 they stay unprobed guesses.
 
+**Run 2 (2026-11-17, `out\20261117-183558`, `--skip NOINFO,OVR,ANS`).** Same start: `CTRL` drawn (walk pose),
+`NOCONN` again only through `Create_Generic_Object` (f=606). The presented frame then stayed byte-identical for about
+30 s (shots 11-25), and from there on the AT-ST's pose and the credits (6,272, the same value as run 1) never changed
+again; `NOCONN` was never drawn at its spot, 87 units beside `CTRL`. The script still wrote `NOCONN`'s `HOLD_END`
+(f=876) and `SPILL`'s `SPAWN_BEGIN` (f=909), then nothing; the game was still running, unresponsive, when the run
+ended. So both runs agree: **once a model without a connections chunk is created, retail stops (the picture, then the
+game); the object is never drawn.** Run 2 says nothing about `SPILL` (it spawned into an already stalled game); the
+next run skips `NOCONN` as well.
+
 Per slot, from `out\<run>\report.txt` and the screenshots:
 
 | Slot | Retail | Port rule (t03) |
 |---|---|---|
 | `CTRL` / `SKCTRL` / `PCTRL` | | controls |
-| `NOCONN` | **hangs** (run 1: the sim froze when the object was created; nothing drawn; bugcheck followed) | do not draw it, `asset_rejected` (port shows nothing, keeps running) |
+| `NOCONN` | **hangs** (runs 1 and 2: never drawn; the picture, then the game stop once the object is created; run 1 ended in a bugcheck) | do not draw it, `asset_rejected` marked retail-equivalent (port shows nothing, keeps running) |
 | `NOINFO` | unprobed (skipped after run 1) | |
-| `SPILL` | | |
+| `SPILL` | unknown (run 2 reached it only after `NOCONN` had stalled the game) | |
 | `COLL` | | |
 | `TRAIL` | | |
 | `BORDER` | | |

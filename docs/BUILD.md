@@ -138,6 +138,15 @@ the retail MEGs (`ALAMO_FOC_DATA`), grows in `build-fuzz\fuzz\corpus\`, and cras
 - First finding: `alamo::meg::Archive::read` allocated an entry's size (up to 4 GB from a corrupt table) before the bounds check;
   fixed in `tools/meg/src/meg.cpp`.
 
+**Fuzz smoke (mcx2 t08, 2026-11-17): a ctest entry in every build.** `alamo_fuzz_smoke` (`tools/fuzz/smoke/`) is an in-repo,
+seeded mutation harness (splitmix64, no libFuzzer, no new dependency) over the other mod-supplied readers: TED maps, DAT text,
+MTD, GUI `.rc`, ALA clips, particle ALOs, precompiled Lua (`.lc`), WAV and the Bink header. Seeds: synthetic files, the game's
+files (`ALAMO_FOC_DATA` through the VFS) and the smallest files of installed workshop mods. The ctest entry (label `slow`) runs
+6 s per target and passes on `FUZZ_SMOKE PASS`; a crash writes `<build>\tools\fuzz\fuzz_smoke\crash_<target>.bin`, replayed with
+`alamo_fuzz_smoke --repro <file> --target <name>`. The same readers have libFuzzer targets (`fuzz_<name>`) under `ALAMO_FUZZ`.
+First finding: precompiled Lua chunks with huge string lengths / vector counts overflowed the heap (lu_mem is 32-bit on Win64);
+`engine/lua` now refuses them (`lundump.c` patch, stock 5.0.2 and retail share the bug).
+
 ## clang-tidy (2026-11-15)
 
 `python -I tools/lint/run_tidy.py [--tree build-wt-clang] [--only REGEX] [--tests] [-j N] [--strict]` runs
