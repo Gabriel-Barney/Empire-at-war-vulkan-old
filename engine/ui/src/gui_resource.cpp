@@ -183,6 +183,9 @@ public:
         out.push_back(arg());
         while (peek().kind == Token::Kind::Comma) {
             next();
+            // modc t34 (UI.md 3.2): the original splits words on runs of spaces, tabs and commas, so ",," is one
+            // separator and makes no empty argument (EAW-Remake's main menu: "265,550,215,,22" is a 22-unit-high button).
+            while (peek().kind == Token::Kind::Comma) next();
             out.push_back(arg());
         }
         return out;
