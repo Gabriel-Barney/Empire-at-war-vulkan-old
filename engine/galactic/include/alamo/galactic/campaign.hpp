@@ -165,7 +165,7 @@ struct PlayerState {
     std::vector<std::pair<uint32_t, int32_t>> built;  // lifetime build counts (P +0x198 map, 0x2821b0), first-build order
     // galab t06 (GALAB_ABILITIES_RE §8): the campaign Home_Location planet of the player's faction (player +0x188, set at
     // campaign setup for every player with a faction: 0x4af240, the first matching entry). Read by the AI token
-    // Self.HomePlanet. Saved (v8); hashed in the "GLB1" tail.
+    // Self.HomePlanet. Saved (v8); not hashed (fixed at setup, like the faction).
     PlanetIndex home = kInvalidPlanet;
 };
 

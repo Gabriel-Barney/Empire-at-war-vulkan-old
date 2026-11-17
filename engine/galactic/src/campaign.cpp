@@ -2137,7 +2137,7 @@ void GalacticSim::hash_state(StateHasher& h) const {
     if (!oi_state_default()) hash_oi(h);  // OI galactic: stealth bytes, victory claims, max tech, build counts
     if (!reveal_state_default()) hash_reveal(h);  // GRC: local player, auto-reveal, revealed bytes, transitions
     if (!visibility_state_default()) hash_visibility(h);  // GRC 2: stored visibility modifier entries
-    if (!galab_state_default()) hash_galab(h);  // galab: home planets, planet bonus holders, siphon sources
+    if (!galab_state_default()) hash_galab(h);  // galab: planet bonus holders, siphon sources, neutralized counts
 }
 
 void GalacticSim::register_crc(CrcRegistry& registry, const std::string& prefix, bool include_store) const {

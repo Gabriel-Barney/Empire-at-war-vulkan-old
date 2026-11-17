@@ -263,10 +263,6 @@ bool GalacticSim::political_control_protected(PlanetIndex planet) const {
 
 namespace alamo::galactic {
 
-// ---- CRC tail "GLB1" -----------------------------------------------------------------------------------------------------
-// Only while some planet holds a bonus or a siphon source, so sessions that never use these abilities keep their CRC
-// stream. Player home planets are fixed at setup and not hashed (like the faction).
-
 // ---- GA §7 Neutralize_Hero_Ability / Hero_Protection_Ability ------------------------------------------------------------
 
 float NeutralizeCandidate::price() const {
@@ -337,18 +333,21 @@ float GalacticSim::hero_protection(PlanetIndex planet, ObjectHandle target) cons
     return m;
 }
 
+namespace {
+// neutralized_ is (player, type)-ascending.
+constexpr auto neutralized_before = [](const auto& e, const std::pair<int32_t, uint32_t>& k) {
+    return e.player != k.first ? e.player < k.first : e.type < k.second;
+};
+}  // namespace
+
 int32_t GalacticSim::neutralized_count(int32_t player, uint32_t type) const {
-    for (const NeutralizedEntry& e : neutralized_)
-        if (e.player == player && e.type == type) return e.count;
-    return 0;
+    const auto it = std::lower_bound(neutralized_.begin(), neutralized_.end(), std::make_pair(player, type), neutralized_before);
+    return it != neutralized_.end() && it->player == player && it->type == type ? it->count : 0;
 }
 
 void GalacticSim::count_neutralized(int32_t player, uint32_t type) {
     // GameScoring.lua Galactic_Neutralized_Event(hero_type, killer): GalacticNeutralizedTable[killer owner][type] += 1.
-    const auto before = [](const NeutralizedEntry& e, const std::pair<int32_t, uint32_t>& k) {
-        return e.player != k.first ? e.player < k.first : e.type < k.second;
-    };
-    auto it = std::lower_bound(neutralized_.begin(), neutralized_.end(), std::make_pair(player, type), before);
+    auto it = std::lower_bound(neutralized_.begin(), neutralized_.end(), std::make_pair(player, type), neutralized_before);
     if (it != neutralized_.end() && it->player == player && it->type == type) ++it->count;
     else neutralized_.insert(it, NeutralizedEntry{player, type, 1});
 }
@@ -477,11 +476,14 @@ bool GalacticSim::apply_neutralize(const SpecialAbilityDef& a, ObjectHandle neut
 
 RejectReason GalacticSim::neutralize_execute(int32_t player, PlanetIndex planet, ObjectHandle neutralizer,
                                              const NeutralizeCandidate& c) {
-    // SpecialAbility kind 3 (0x4b4d70 case 3): runs for a neutralizer at a planet. [port] Owner test as the other kinds.
+    // SpecialAbility kind 3 (0x4b4d70 case 3): runs for a neutralizer at a planet. The candidate comes from the payload as
+    // in the original (its price is the q8 code; the executor re-checks eligibility, credits, a live target or the
+    // siphon). [port] Owner test as the other kinds, and the type must be a type (it is counted and saved).
     if (!valid_player(player)) return RejectReason::InvalidPlayer;
     if (!valid_planet(planet)) return RejectReason::InvalidTarget;
     if (!store_->alive(neutralizer) || store_->owner(neutralizer) != player) return RejectReason::InvalidUnit;
     if (location_of(neutralizer) != planet) return RejectReason::InvalidTarget;
+    if (c.type >= rules_->types.size()) return RejectReason::Malformed;
     return neutralize_do(player, planet, neutralizer, c) ? RejectReason::None : RejectReason::NotAllowed;
 }
 
@@ -498,8 +500,11 @@ bool GalacticSim::neutralize_do(int32_t player, PlanetIndex planet, ObjectHandle
     const float price = c.price();
     ObjectHandle target;
     if (!c.siphon) target = store_->find(static_cast<objects::ObjectId>(c.object));
-    const bool ok = (c.siphon ? p.siphon_player != kNoPlayer : store_->alive(target)) && c.eligible &&
-                    price <= players_[static_cast<size_t>(player)].account.credits;
+    // [port] A siphon entry also needs the siphon it was made for (a player not allied with `player`, the same hero type):
+    // a pick that arrives after the record changed hands is refused rather than clearing another siphon.
+    const bool target_ok = c.siphon ? valid_player(p.siphon_player) && !allied(player, p.siphon_player) && p.siphon_type == c.type
+                                    : store_->alive(target);
+    const bool ok = target_ok && c.eligible && price <= players_[static_cast<size_t>(player)].account.credits;
     if (!ok) {
         emit_special(GalacticEventKind::SpecialError, player, planet, neutralizer, kNoIndex, 0, -1);
         return false;
@@ -511,6 +516,7 @@ bool GalacticSim::neutralize_do(int32_t player, PlanetIndex planet, ObjectHandle
         return false;
     }
     const int32_t target_owner = c.siphon ? p.siphon_player : store_->owner(target);
+    const uint32_t counted = c.siphon ? p.siphon_type : static_cast<uint32_t>(store_->type(target));  // the real type
     if (!c.siphon) {
         hero_depart(target, planet, c.target_respawn);
     } else {
@@ -519,7 +525,7 @@ bool GalacticSim::neutralize_do(int32_t player, PlanetIndex planet, ObjectHandle
         p.siphon_type = kNoIndex;
         p.siphon_source = 0;
     }
-    count_neutralized(player, c.type);
+    count_neutralized(player, counted);
     add_credits(player, -price, false);
     uint32_t ref = kNoIndex;  // the neutralizer's Neutralize_Hero entry, for the LAND_ON event
     for (uint32_t r : special_type(neutralizer).triggers())
@@ -529,11 +535,16 @@ bool GalacticSim::neutralize_do(int32_t player, PlanetIndex planet, ObjectHandle
         }
     emit_special(GalacticEventKind::SpecialApplied, player, planet, neutralizer,
                  static_cast<uint32_t>(store_->type(neutralizer)), static_cast<int32_t>(ref), -1);
-    emit_special(GalacticEventKind::HeroNeutralized, player, planet, target, c.type, static_cast<int32_t>(price + 0.5f),
+    emit_special(GalacticEventKind::HeroNeutralized, player, planet, target, counted, static_cast<int32_t>(price + 0.5f),
                  target_owner);
     hero_depart(neutralizer, planet, c.owner_respawn);
     return true;
 }
+
+// ---- CRC tail "GLB1" -----------------------------------------------------------------------------------------------------
+// Only while some planet holds a bonus or a siphon source, or a hero was neutralized, so sessions that never use these
+// abilities keep their CRC stream (an FoC campaign has bonus holders from its first planet service). Player home planets
+// are fixed at setup and not hashed (like the faction).
 
 bool GalacticSim::galab_state_default() const {
     if (!neutralized_.empty()) return false;

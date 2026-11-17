@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 
+#include "alamo/core/bytes.hpp"
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/data/game_database.hpp"
@@ -43,7 +44,7 @@ namespace {
 enum TypeId : uint32_t {
     tPA, tPB, tPC, tPD, tPE,  // planets
     tVader, tDeathStar, tFrigate, tHan, tSmuggler, tTarkin, tPalpatine, tMothma, tSpaceUp, tLandUp,
-    tBoba, tHunter, tJabba,
+    tBoba, tHunter, tJabba, tStarbase, tAce,
     tTypeCount
 };
 enum Row : PlanetIndex { rA = 0, rB = 1, rC = 2, rD = 3, rE = 4 };
@@ -101,6 +102,8 @@ GalacticRules make_rules() {
     unit(tBoba, "Boba_Fett", UnitKind::GroundUnit);
     unit(tHunter, "Bounty_Hunter", UnitKind::GroundUnit);
     unit(tJabba, "Jabba", UnitKind::GroundUnit);
+    unit(tStarbase, "Star_Base_3", UnitKind::StarBase).base_level = 3;
+    unit(tAce, "Space_Ace", UnitKind::SpaceUnit);
 
     SpecialRules& s = r.special;
     s.galab.resize(gCount);
@@ -168,6 +171,9 @@ GalacticRules make_rules() {
     s.types[tJabba].named_hero = true;
     s.types[tHan].neutralization_cost = 2500.0f;  // FoC Han: major only
     s.types[tHan].neutralizable_by_major = true;
+    s.types[tAce].named_hero = true;  // a named space hero (orbit candidate)
+    s.types[tAce].neutralization_cost = 1000.0f;
+    s.types[tAce].neutralizable_by_major = true;
     s.types[tSmuggler].neutralization_cost = 100.0f;  // FoC smugglers: both
     s.types[tSmuggler].neutralizable_by_major = s.types[tSmuggler].neutralizable_by_minor = true;
     s.types[tPA].corruption_removal_cost = 800.0f;
@@ -368,6 +374,9 @@ void test_planet_bonuses() {
     CHECK(w.planet(rC).bonus_holder == pEmp && s.player_upgrades(pEmp, true) == std::vector<uint32_t>{tSpaceUp} &&
           s.player_upgrades(pUnd, true).empty());
     CHECK(s.players()[pEmp].tech_cost_mult == 1.0f && s.players()[pReb].tech_cost_mult == 1.0f - 0.15f);
+    // A destroyed planet gives no bonus: D's holder loses the tech price.
+    CHECK(s.super_weapon_destroy_planet(rD, pEmp, false) && w.planet(rD).bonus_holder == kNoPlayer &&
+          s.players()[pReb].tech_cost_mult == 1.0f);
     {
         World w2;  // the first apply needs corruption != Intimidation (type 0)
         w2.sim.set_corruption(rC, 0, pUnd);
@@ -464,6 +473,15 @@ void test_neutralize() {
         (void)expect2.range_float(120.0f, 150.0f);
         (void)expect2.range_float(240.0f, 300.0f);
         CHECK(!s.ground_activated_trigger(boba2, rB) && w.store.alive(boba2) && s.credits(pEmp) == credits1 && w.rng == expect2);
+        // Base levels: a Rebel space hero in B's orbit under a Rebel starbase of level 3 -> curve (0,0)-(5,1) at 3 = 0.6.
+        CHECK(s.replace_starbase(rB, tStarbase) || static_cast<bool>(s.spawn_unit(pReb, rB, tStarbase)));
+        CHECK(w.planet(rB).starbase_level == 3);
+        s.spawn_unit(pReb, rB, tAce);
+        s.spawn_unit(pEmp, rB, tFrigate);  // an Empire fleet in orbit sees the fleet contents (a surface unit does not)
+        CHECK(s.can_see_planet_info(pEmp, rB, GalacticSim::PlanetInfo::FleetContents));
+        const std::vector<NeutralizeCandidate> c2 = s.neutralize_candidates(w.rules.special.galab[gBobaNeut], boba2, pEmp, rB);
+        const NeutralizeCandidate* ace = find_candidate(c2, tAce);
+        CHECK(ace && ace->space && std::fabs(term(*ace, NeutralizeTerm::BaseLevels) - 600.0f) < 0.01f);
         // Protection does not cover Jabba's own entry, and a reducing holder (< 1) needs the holder NOT allied.
         CHECK(s.hero_protection(rB, {}) == 2.0f && s.hero_protection(rA, {}) == 1.0f);
     }
@@ -518,8 +536,39 @@ void test_neutralize() {
               pl.seconds == commands::requantize(kQuantDuration, 130.0f) &&
               pl.target_seconds == commands::requantize(kQuantDuration, 250.0f) && pl.eligible && !pl.space && !pl.siphon);
         CHECK(s.neutralize_execute(pEmp, rA, boba, c) == RejectReason::InvalidTarget);  // not there
-        CHECK(s.neutralize_execute(pEmp, rB, boba, c) == RejectReason::None && !w.store.alive(han) && !w.store.alive(boba));
-        CHECK(s.neutralized_count(pEmp, tHan) == 1);
+        NeutralizeCandidate bad = c;
+        bad.type = 0xFFFFu;  // not a type: refused before anything is counted or charged
+        CHECK(s.neutralize_execute(pEmp, rB, boba, bad) == RejectReason::Malformed && w.store.alive(han));
+        NeutralizeCandidate wrong = c;
+        wrong.type = tSmuggler;  // a valid type that is not the target's: the target's real type is counted
+        CHECK(s.neutralize_execute(pEmp, rB, boba, wrong) == RejectReason::None && !w.store.alive(han) && !w.store.alive(boba));
+        CHECK(s.neutralized_count(pEmp, tHan) == 1 && s.neutralized_count(pEmp, tSmuggler) == 0);
+        // A siphon pick needs the siphon it was made for: a Rebel siphon (own player) or another type is refused.
+        NeutralizeCandidate sip;
+        sip.type = tSmuggler;
+        sip.siphon = true;
+        sip.eligible = true;
+        sip.terms.emplace_back(NeutralizeTerm::Base, 100.0f);
+        const ObjectHandle hunter = s.spawn_unit(pReb, rA, tHunter);
+        s.set_siphon(rA, pReb, 0.5f, s.frame() + 1000);
+        CHECK(s.neutralize_execute(pReb, rA, hunter, sip) == RejectReason::NotAllowed && w.planet(rA).siphon_player == pReb);
+        // Save v8 round trip with galab state: the neutralized counts, the planet bonus holders, a siphon record.
+        w.run(2);
+        const ObjectHandle sm = s.spawn_unit(pUnd, rB, tSmuggler);
+        CHECK(s.ground_activated_trigger(sm, rB) && w.planet(rB).siphon_type == tSmuggler && w.planet(rC).bonus_holder == pUnd);
+        ByteWriter out;
+        s.write(out);
+        World w2;
+        w2.store = w.store;
+        w2.ids.set_next(w.ids.next());
+        ByteReader in(out.bytes());
+        CHECK(w2.sim.read(in));
+        CHECK(w2.sim.neutralized_count(pEmp, tHan) == 1 && w2.planet(rB).siphon_type == tSmuggler &&
+              w2.planet(rB).siphon_source == w.planet(rB).siphon_source && w2.planet(rC).bonus_holder == pUnd &&
+              w2.sim.home_planet(pEmp) == rA);
+        ByteWriter again;
+        w2.sim.write(again);
+        CHECK(again.bytes() == out.bytes());
     }
 }
 

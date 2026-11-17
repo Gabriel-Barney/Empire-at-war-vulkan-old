@@ -93,8 +93,11 @@ Shared terms:
      - +0x220 = the type of the hero's container (0x3973b0).
 
      The planet's income loses the fraction to the siphoner until the end frame. The record is cleared (0x3ff1f0) when
-     it runs out, on an owner change, or by Neutralize_Hero (§7).
+     it runs out, when the siphoning player becomes the planet's owner (GALACTIC_ECONOMY), when the planet is destroyed,
+     or by Neutralize_Hero (§7).
 - [port] The original also needs the hero inside a container slot. The port's heroes at a planet always qualify.
+- [port] The port's galactic hero object already carries the container's type, so it stores the hero's type
+  (`siphon_type`, for +0x218 and +0x220) and the hero's object id (`siphon_source`, kept for the panel only).
 - [M] The two lists 0x4b8410 reads are taken as the surface units and the orbiting fleets' contents.
 
 ## 4. Galaxy_Wide_Upgrade_Ability: planet owner bonuses [H]
@@ -113,6 +116,8 @@ Shared terms:
 - [M] As a Galactic_Automatic ability, the apply is retried until it succeeds. The port tries in every planet service
   while nobody holds the planet's bonuses.
 - [port] The list order is planet row order.
+- [M] A destroyed planet gives no bonus: both apply paths test it, and the port takes the bonuses from their holder when
+  the planet is destroyed (the original's removal on destruction was not traced).
 
 ### 4.3 Tactical spawn [H]
 

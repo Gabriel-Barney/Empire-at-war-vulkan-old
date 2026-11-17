@@ -948,6 +948,13 @@ bool GalacticSim::planet_destroy_impl(PlanetIndex planet, int32_t destroyer, int
         p.siphon_amount = 0.0f;
         p.siphon_type = kNoIndex;
         p.siphon_source = 0;
+        // galab §4 / §5 [M]: a destroyed planet gives no Galaxy_Wide_Upgrade / Reduce_Technology_Price bonus (both apply
+        // paths test it); its holder loses them now.
+        if (p.bonus_holder != kNoPlayer) {
+            const int32_t holder = p.bonus_holder;
+            p.bonus_holder = kNoPlayer;
+            refresh_tech_cost(holder);
+        }
     }
     auto remove = [this, planet](ObjectHandle h) {
         if (!store_->alive(h)) return;
