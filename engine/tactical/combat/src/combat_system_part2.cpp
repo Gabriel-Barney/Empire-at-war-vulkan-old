@@ -375,18 +375,27 @@ void CombatSystem::turret_frame(const Unit& u, const HardpointDesc& hd, Vec3& o,
 
 void CombatSystem::turret_slew(const Unit& u, Hardpoint& h) {
     // HP_Update's turret step (TACTICAL_COMBAT §2.9 Q2 "Hardpoint turret slew") [H unless tagged]. Aim (0x383650): the
-    // target when its position passes the turret cone, else the opportunity target (no cone test; retail's +0xa8
-    // candidate before it is not modelled [M]); a manual-target turret has no target in the port and holds its last aim
-    // (the pose while that is zero); otherwise the rest pose. A target's position in the turret frame gives yaw (+ 90:
+    // target when its aim point (0x398440: its closest live targetable hardpoint, else its position) passes the turret
+    // cone, else the opportunity target (no cone test; retail's +0xa8 candidate before it is not modelled [M]); none: a
+    // manual-target turret holds its last aim (the pose while that is zero), others the rest pose. [port] The port has
+    // no manual target assignment (hp +0xc0), so a manual-target turret takes the weapon's target as that, with no cone
+    // test (vanilla: HP_Underworld_L3_Station_Main_Cannon). A target's position in the turret frame gives yaw (+ 90:
     // the frame's centre is -y) and pitch, each clamped to its extent when that is in (0, 180), plus the rest angles.
     const HardpointDesc& hd = data_->hardpoints[h.desc];
     float pitch = hd.turret_rest_pitch, yaw = hd.turret_rest_yaw;
     const Unit* t = nullptr;
-    if (!hd.manual_target) {
-        const Unit* main = unit(h.target);
+    const Unit* main = unit(h.target);
+    if (hd.manual_target) {
+        if (live(main)) t = main;
+    } else {
         const Unit* opp = unit(h.opp_target);
-        if (live(main) && in_cone(u, h, main->pos)) t = main;
-        else if (live(opp)) t = opp;
+        if (live(main)) {
+            const int32_t chp = main->hp_count > 0 ? closest_hardpoint(*main, u.pos, true) : -1;
+            const Vec3 ap = chp >= 0 ? hp_world(*main, data_->hardpoints[hps_[main->hp_begin + static_cast<uint32_t>(chp)].desc])
+                                     : main->pos;
+            if (in_cone(u, h, ap)) t = main;
+        }
+        if (!t && live(opp)) t = opp;
     }
     if (t) {
         Vec3 o, x, y, z;

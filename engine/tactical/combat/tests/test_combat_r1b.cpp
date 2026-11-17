@@ -11,7 +11,7 @@ namespace {
 // One turret hardpoint (Turret_Rotate_Speed 5, elevation 45) on unit 1 at the origin facing +x; targets are owner 1.
 struct TurretWorld {
     World w;
-    explicit TurretWorld(bool model, float extent = 120.0f, float cone = 25.0f) {
+    explicit TurretWorld(bool model, float extent = 120.0f, float cone = 25.0f, bool manual = false) {
         ProjectileDesc p;
         p.max_speed = 20.0f;
         w.data.projectiles.push_back(p);
@@ -29,6 +29,7 @@ struct TurretWorld {
         gun.turret_rotate_speed = 5.0f;
         gun.turret_rotate_extent = extent;
         gun.turret_elevate_extent = 45.0f;
+        gun.manual_target = manual;
         w.data.hardpoints.push_back(gun);
         UnitDesc sh;
         sh.tactical_health = 100.0f;
@@ -51,6 +52,11 @@ struct TurretWorld {
         float p = 0.0f, y = 0.0f;
         CHECK(w.sys->hardpoint_turret_pose(1, 0, p, y));
         return y;
+    }
+    float pitch() const {
+        float p = 0.0f, y = 0.0f;
+        CHECK(w.sys->hardpoint_turret_pose(1, 0, p, y));
+        return p;
     }
 };
 
@@ -97,6 +103,23 @@ void test_turret_slew() {
         t.w.sys->order_attack(1, 3);
         for (int k = 0; k < 9; ++k) t.w.tick();
         CHECK_NEAR(t.yaw(), 0.0, 1.0e-3);
+    }
+    {   // Elevation: pitch moves Turret_Rotate_Speed (5) per update, clamped to Turret_Elevate_Extent_Degrees (45).
+        TurretWorld t(true);
+        t.w.add(2, 1, 1, Vec3{300.0f, 0.0f, 600.0f});  // 63.4 degrees up, dead ahead
+        t.w.sys->order_attack(1, 2);
+        for (int k = 1; k <= 12; ++k) {
+            t.w.tick();
+            CHECK_NEAR(t.pitch(), std::min(45.0, 5.0 * k), 1.0e-3);
+        }
+        CHECK_NEAR(t.yaw(), 0.0, 1.0e-3);
+    }
+    {   // [port] Requires_Manual_Target_Assignment: the weapon's target stands in for the manual target (no cone test).
+        TurretWorld t(true, 60.0f, 25.0f, true);
+        t.w.add(2, 1, 1, at_bearing(90.0f, 500.0f));  // outside the 60 extent: aim clamped to 60
+        t.w.sys->order_attack(1, 2);
+        for (int k = 0; k < 10; ++k) t.w.tick();
+        CHECK_NEAR(t.yaw(), 60.0, 1.0e-3);
     }
     {   // Retail quirk (0x381ff0): pose 170 and aim -170 straddle +-180; the plain step (-5) and the wrapped one (+5)
         // cancel, so the turret stays put (extent 360: no clamp).

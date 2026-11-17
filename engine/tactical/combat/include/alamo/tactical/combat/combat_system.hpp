@@ -2034,12 +2034,12 @@ private:
     bool targeting_idle(const Unit& u, uint32_t frame) const;  // phase D: stunned, unpowered or targeting suspended
     void drop_clash_targets();  // s78n t06: before phase D, targets of / at units in a hero clash dropped
     void drop_target(Unit& u);                        // slot 27: the order and scan targets are dropped
-    bool lob_turret_aim(Unit& u);
+    bool lob_turret_aim(Unit& u);  // s78f t04: 0x631fe0 toward the lobbing order's point (one slew step)
     // r1b t10 (TACTICAL_COMBAT §2.9 Q2 "Hardpoint turret slew"): the turret frame of a hardpoint (origin, x, y, z; the
     // centre is -y), one HP_Update slew step (0x381ff0 with the aim 0x383650), and Fire_At's barrel pre-check (step 2).
     void turret_frame(const Unit& u, const HardpointDesc& hd, Vec3& o, Vec3& x, Vec3& y, Vec3& z) const;
     void turret_slew(const Unit& u, Hardpoint& h);
-    bool turret_on_target(const Unit& u, const Hardpoint& h, Vec3 target) const;                     // s78f t04: 0x631fe0 toward the lobbing order's point (one slew step)
+    bool turret_on_target(const Unit& u, const Hardpoint& h, Vec3 target) const;
     int32_t model_alt_of(const Unit& u) const;
     // S8 t10: Spawn_Projectile's garrison branch - a synced pick among the host's gun bones within 60 degrees of the target.
     bool garrison_muzzle(const Unit& shooter, Vec3 target, SimRng& rng, Vec3& out) const;
