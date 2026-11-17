@@ -23,6 +23,7 @@
 #include <string>
 #include <vector>
 
+#include "alamo/core/compress.hpp"
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/host_fs.hpp"
 #include "alamo/core/sim_crc.hpp"
@@ -786,10 +787,27 @@ int main(int argc, char** argv) {
         const std::string p = save_check(data, js, argv[0], dir, saves, c);
         CHECK(!p.empty());
         if (!p.empty()) {
-            constexpr uintmax_t kStoryBattleMaxBytes = 300000;  // 2026-10-31: 142916 bytes at battle tick 150
+            // 2026-10-31: 142916 bytes at battle tick 150, guard 300000. tst1 t07 (2026-11-17): 317988 bytes; the save
+            // grew with the systems saved since (object_scripts ~53 KB packed, scoring ~25 KB, battle.ai ~81 KB, battle.fog
+            // ~38 KB, story.lua ~63 KB; breakdown printed below) and crossed 300000 as lanes added saved state, no single
+            // jump. Guard raised to 400000 (about 25% over today's size) to keep catching runaway growth.
+            constexpr uintmax_t kStoryBattleMaxBytes = 400000;
             const uintmax_t size = fs::file_size(path_from_utf8(p), ec);
             std::printf("story battle save: %" PRIuMAX " bytes (guard %" PRIuMAX ")\n", size, kStoryBattleMaxBytes);
             CHECK(size > 0 && size <= kStoryBattleMaxBytes);
+            // tst1 t07: where the bytes are (the guard is on the packed file; each chunk packed on its own approximates
+            // its share), largest first, so a growth past the guard names its chunks.
+            SaveFile f;
+            if (SaveFile::read_file(p, f)) {
+                std::vector<const SaveChunk*> by_size;
+                for (const SaveChunk& ch : f.chunks()) by_size.push_back(&ch);
+                std::sort(by_size.begin(), by_size.end(), [](const SaveChunk* x, const SaveChunk* y) {
+                    return x->data.size() != y->data.size() ? x->data.size() > y->data.size() : x->name < y->name;
+                });
+                for (size_t i = 0; i < by_size.size() && i < 12; ++i)
+                    std::printf("  chunk %-28s v%-3u %8zu bytes, %7zu packed\n", by_size[i]->name.c_str(), by_size[i]->version,
+                                by_size[i]->data.size(), lz_compress(by_size[i]->data).size());
+            }
         }
     }
     remove_all_long(dir, ec);
