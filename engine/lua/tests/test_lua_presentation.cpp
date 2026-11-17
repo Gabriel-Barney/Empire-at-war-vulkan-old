@@ -189,13 +189,20 @@ static void test_object_effects() {
           ev[2].args[1].text == "Rescue_Effect");
     CHECK(ev[3].args.size() == 3 && ev[3].args[1].kind == PresentationArg::Kind::Type && ev[3].args[2].text == "Bone_A");
     // OI lua: the resolved requests a render host consumes (object id, type index / name, bone), drained with the events.
+    // storyb t17 (STORYB_T17_SPAWNS_AND_DEATH.md §2): a known type without PARTICLE becomes an object of that type at the
+    // receiver, its owner's, returned; an unknown (or a PARTICLE) type stays a render request.
     const auto& pe = log.particle_effects();
-    CHECK(pe.size() == 2 && pe[0].frame == 7 && pe[0].seq == ev[2].seq && pe[0].object == 2 && pe[0].type == -1 &&
+    CHECK(pe.size() == 1 && pe[0].frame == 7 && pe[0].seq == ev[2].seq && pe[0].object == 2 && pe[0].type == -1 &&
           pe[0].type_name == "Rescue_Effect" && pe[0].bone.empty());
-    CHECK(pe.size() == 2 && pe[1].seq == ev[3].seq && pe[1].type == ev[3].args[1].id && pe[1].type_name == "Trooper" &&
-          pe[1].bone == "Bone_A");
-    CHECK(run(vm, "trooper.Attach_Particle_Effect('TROOPER')") == "" && log.particle_effects().size() == 3 &&
-          log.particle_effects()[2].type == ev[3].args[1].id && log.particle_effects()[2].type_name == "Trooper");
+    const auto trooper_t = static_cast<objects::TypeIndex>(ev[3].args[1].id);
+    auto count_t = [&] {
+        size_t n = 0;
+        for (const objects::ObjectHandle o : w.store->all_objects()) n += w.store->alive(o) && w.store->type(o) == trooper_t ? 1u : 0u;
+        return n;
+    };
+    const size_t before = count_t();
+    CHECK(run(vm, "fx = trooper.Attach_Particle_Effect('TROOPER') assert(fx)") == "" &&
+          log.particle_effects().size() == 1 && count_t() == before + 1);
     CHECK(ev[4].op == PresentationOp::ObjectCinematicHyperspaceIn && ev[4].args[1].number == 20.0);
     CHECK(ev[6].op == PresentationOp::ResumeHyperspaceIn && ev[8].op == PresentationOp::ObjectPlayCinematicEngineFlyby);
     const PresentationState& s = log.state();
@@ -501,7 +508,7 @@ static void test_save_load() {
     const PresentationState& sa = la.state();
     CHECK(sa.camera == CameraMode::Cinematic && sa.controls_locked && sa.movie == "Mid_Movie" && sa.movie_block != 0 &&
           !sa.hidden_sub_objects.empty() && !sa.emitters.empty() && !sa.in_end_cinematic.empty() && la.events().size() > 10 &&
-          la.particle_effects().size() == 1);
+          la.particle_effects().empty());  // storyb t17: the 'Trooper' effect is an object
     ByteWriter wl;
     la.write(wl);
     ByteWriter wv;

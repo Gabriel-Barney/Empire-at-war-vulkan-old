@@ -188,7 +188,10 @@ void TacticalBattle::sp_debris_expire(TacticalMode& mode, SimRng& rng, const Deb
         schedule_death_clone(mode, ch, static_cast<int32_t>(t), 1, rng);
     }
     const objects::TypeIndex ex = first_type_of_list(catalog_->types(), t, "Death_Explosions");
-    if (ex != objects::kNone) spawn_particle(mode, static_cast<int32_t>(ex), at, owner);
+    if (ex != objects::kNone) {
+        const int32_t neutral = galaxy_ ? galaxy_->neutral_player() : -1;  // storyb t17: the clone's owner
+        spawn_death_explosion(mode, static_cast<int32_t>(ex), at, neutral >= 0 ? neutral : owner);
+    }
 }
 
 void TacticalBattle::sp_activate(const TacticalMode& mode, SimRng& rng, size_t index) {

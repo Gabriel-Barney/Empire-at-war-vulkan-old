@@ -268,6 +268,9 @@ public:
     bool read_state(ByteReader& r) override;
 
     uint64_t ai_services() const { return ai_services_; }
+    // storyb t17 (objects::kFlagUnlinkedInRetail): the primary store's dead objects pending the flush at the end of SimHost
+    // T5 (the battle and its animation step) get the mark; story-script deaths after it do not.
+    void mark_step_deaths();
 
 protected:
     void pre_service(objects::ObjectStore& store, const ModeTickContext& ctx) override;

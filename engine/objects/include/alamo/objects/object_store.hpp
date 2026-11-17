@@ -106,6 +106,12 @@ enum ObjectFlag : uint8_t {
     // but is left out of what the secondary store keeps it out of: the store's CRC, the tactical trace and every Lua
     // object search (lua detail::script_objects). Not one of the original's +0x3A0 bits.
     kFlagMapDecoration = 0x10,
+    // storyb t17 (STORYB_T17_SPAWNS_AND_DEATH.md §3.1 [H]): a dead object that retail has already unlinked. Retail's battle
+    // deaths happen inside the store update and leave the store at its end-of-step flush, the same frame; the port's battle
+    // runs after the store update (SimHost T5), so its dead objects wait for the next frame's flush. [port] The host marks
+    // the ones dead by the end of T5 (TacticalMode::mark_step_deaths): the tactical trace leaves them out, as retail's
+    // sample does, while a later death (a T9 story script) is sampled once, dead. Not one of the original's +0x3A0 bits.
+    kFlagUnlinkedInRetail = 0x20,
     // refix t01 (S9_DEATH_CLONE_SHIELDS.md §1.6 [H], AI_TACTICAL.md §2, L1_S4_REMAINING.md): +0x3a0 bit 0x40 = dying /
     // dead state (Die sets it; death clones are created with it), bit 0x80 = removing. A death clone gets both (0xc0).
     // Such an object still exists and is alive() (it is drawn and runs its death sequence), but gameplay searches skip

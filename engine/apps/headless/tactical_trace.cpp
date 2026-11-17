@@ -64,8 +64,12 @@ void PortTacticalTrace::sample(const alamo::sim::TacticalMode& tm, const alamo::
         ObjectHandle h;
     };
     std::vector<Obj> live;
-    for (ObjectHandle h : store.all_objects())  // storyb t16: a map decoration is in retail's secondary store, not traced
-        if (store.alive(h) && (store.flags(h) & alamo::objects::kFlagMapDecoration) == 0)
+    // storyb t16: a map decoration is in retail's secondary store, not traced. storyb t17: a dead object still waiting for
+    // the store's flush is sampled as retail samples it (a story-script death: dead, health 0), unless retail has already
+    // unlinked it (kFlagUnlinkedInRetail: dead by the end of the battle step).
+    for (ObjectHandle h : store.all_objects())
+        if (store.exists(h) &&
+            (store.flags(h) & (alamo::objects::kFlagMapDecoration | alamo::objects::kFlagUnlinkedInRetail)) == 0)
             live.push_back({static_cast<uint32_t>(store.id(h)), h});
     std::sort(live.begin(), live.end(), [](const Obj& a, const Obj& b) { return a.id < b.id; });
 
@@ -86,6 +90,10 @@ void PortTacticalTrace::sample(const alamo::sim::TacticalMode& tm, const alamo::
         } else if (combat_ids_.count(o.id)) {  // removed from combat, the store object not yet gone
             dead = true;
             health = 0.0f;
+        }
+        if (!store.alive(o.h)) {  // storyb t17: destroyed, pending the flush: Die set its health to 0, a Despawn kept it
+            dead = true;
+            health = store.health(o.h);
         }
         const uint32_t t = store.type(o.h) < types.size() ? store.type(o.h) : kNone;
         if (!types_.count(t))

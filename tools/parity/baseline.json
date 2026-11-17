@@ -1,5 +1,5 @@
 {
- "commit": "2bcc1e2a+bkx1",
+ "commit": "67b38a02",
  "scenarios": {
   "geonosis_skirmish": {
    "references": [
@@ -194,6 +194,30 @@
     "timing": {
      "FAIL": 7,
      "PASS": 50
+    }
+   }
+  },
+  "story_kessel": {
+   "references": [
+    "20261109-053933-story-vanilla",
+    "20261109-064135-story-vanilla"
+   ],
+   "status": {
+    "outcome.battle_ended": "PASS",
+    "story.census_frame1[owner 1]": "PASS",
+    "story.census_frame1[owner 3]": "PASS",
+    "story.census_frame1[owner 4]": "PASS",
+    "story.census_frame1[owner 6]": "PASS",
+    "story.first_spawn_frame": "PASS",
+    "story.health_change_samples": "PASS",
+    "story.spawned": "PASS"
+   },
+   "summary": {
+    "battle outcomes": {
+     "PASS": 1
+    },
+    "other": {
+     "PASS": 7
     }
    }
   }

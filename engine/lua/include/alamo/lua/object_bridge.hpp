@@ -195,6 +195,9 @@ struct ScriptObjectState {
     float max_speed_override = -1.0f; // Override_Max_Speed; < 0 = none
     float shield = -1.0f;             // shield fraction 0..1; < 0 = full (1 if the type has shields, else 0)
     float highlight_offset = 0.0f;
+    // storyb t17: the Object_Highlight effect a Highlight(true) made ([port] not saved; Highlight(false) after a load finds
+    // the effect attached to the object).
+    objects::ObjectId highlight_effect = objects::kNoObjectId;
     int32_t importance = 0;
     objects::ObjectId attack_target = objects::kNoObjectId;
     std::string targeting_priorities;

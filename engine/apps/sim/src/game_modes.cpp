@@ -480,6 +480,11 @@ void TacticalMode::after_store_update(const ModeTickContext&) {
                  dying_.end());
 }
 
+void TacticalMode::mark_step_deaths() {
+    for (const ObjectHandle h : primary_.all_objects())
+        if (primary_.exists(h) && !primary_.alive(h)) primary_.set_flag(h, objects::kFlagUnlinkedInRetail);
+}
+
 void TacticalMode::hash(StateHasher& h) const {
     GameMode::hash(h);
     h.u64(tactical_frame_);
