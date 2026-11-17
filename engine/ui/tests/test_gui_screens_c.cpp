@@ -2,6 +2,7 @@
 #include "test_gui_screens_common.hpp"
 #include "alamo/ui/credits_roll.hpp"
 #include "alamo/ui/movie_caption.hpp"
+#include "alamo/ui/text_crawl.hpp"
 
 namespace test_gui_screens_t {
 
@@ -51,6 +52,32 @@ void test_credits_roll() {
     CHECK(roll.build(dl, fonts, cv, 100.0 + 5.0) && roll.drawn() == 2);  // half a screen scrolled: both text lines visible
     dl.clear();
     CHECK(!roll.build(dl, fonts, cv, 100.0 + roll.duration() + 0.1) && !roll.active());
+
+    // storyb t13: the text crawl - nothing before its lines reach the screen, lines once it scrolled, the header first and
+    // larger at the start, all yellow, alpha following Fadein, nothing once every line passed the horizon.
+    {
+        HudDrawList cl;
+        TextCrawlLayout lay;
+        lay.fadein_start = 0;
+        lay.fadein_end = 60;
+        const std::u32string paras[] = {U"First paragraph of the crawl", U"Second paragraph"};
+        CHECK(add_text_crawl(cl, 1, fonts, cv, lay, U"EPISODE", paras, 0) == 0);
+        cl.clear();
+        const uint32_t early = add_text_crawl(cl, 1, fonts, cv, lay, U"EPISODE", paras, 30);
+        bool yellow = true;
+        uint8_t alpha = 0;
+        for (const HudQuad& q : cl.items(1, HudList::Text)) {
+            yellow = yellow && q.color.r == 255 && q.color.g == 232 && q.color.b == 31;
+            alpha = std::max(alpha, q.color.a);
+        }
+        CHECK(early >= 1 && yellow && alpha > 0 && alpha < 255);  // half way through the fade-in
+        cl.clear();
+        const uint32_t mid = add_text_crawl(cl, 1, fonts, cv, lay, U"EPISODE", paras, 30 * 8);
+        CHECK(mid >= early && mid >= 3);
+        cl.clear();
+        CHECK(add_text_crawl(cl, 1, fonts, cv, lay, U"EPISODE", paras, 30 * 3000) == 0);
+        std::printf("text crawl: %u lines at 1 s, %u at 8 s\n", early, mid);
+    }
 
     // ui5 t12 (AUDIO.md §3.4): a movie caption - white, centred, the last line's top at 0.95 of the screen height, the
     // line above one font line higher; nothing for an empty text.

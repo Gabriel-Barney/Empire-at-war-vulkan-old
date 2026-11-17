@@ -55,6 +55,10 @@ public:
     // text id on screen now ("" = none); drawing it, and only with the subtitles option on, is the host's.
     void set_caption_filter(std::function<bool(std::string_view)> shows) { caption_shows_ = std::move(shows); }
     std::string_view caption() const;
+    // storyb t13: the open movie's Movies.xml Text_Crawl_Name ("" = none) and the movie frame counted from its
+    // Text_Crawl_Start_Frame (-1 before that frame, or without a crawl).
+    const std::string& text_crawl() const { return crawl_name_; }
+    int32_t text_crawl_frame() const;
     // Frame size of the open movie (0 when none).
     uint32_t width() const { return width_; }
     uint32_t height() const { return height_; }
@@ -81,6 +85,8 @@ private:
     int64_t caption_frame_ = 1;                      // last Bink frame number stepped (frames count from 1)
     uint32_t width_ = 0, height_ = 0;
     std::string name_;
+    std::string crawl_name_;   // storyb t13
+    int32_t crawl_start_ = 0;
 };
 
 }  // namespace alamo::game
