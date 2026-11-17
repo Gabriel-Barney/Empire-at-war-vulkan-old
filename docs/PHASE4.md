@@ -1137,3 +1137,13 @@ This list holds the [port] / [inferred] / [M] choices and per-step notes. Finish
   (storage buffer, `ParticleRenderer::set_terrain`), tested at the step segment's two ends; behaviour 1 hides and freezes
   the particle at the hit and the CPU frees its slot at the lifetime's end (a spawn-on-death child starts then);
   object-space emitters are not tested.
+- ⬜ **OPEN** · vis1 t06 (2026-11-17; spec `docs/re/ABILITY_PARTICLES.md`; code `engine/render/src/ability_fx.cpp`,
+  `AbilitySystem::visual_events` / `applied_specials`, marked "vis1 t06"). [port] choices: the target / status particles
+  are **render particles**, not particle GameObjects (as the R5 owner particles, ABILITY_VISUALS §6.4): no object ids are
+  consumed. The abilities record each one-shot (heal / harm target, Force_Lightning primary, Hack / Repair target,
+  Stun_Ability victim) in an **unhashed, unsaved** list kept for 64 frames, which the render host reads by serial
+  number; a one-shot lasts its type's `Particle_Lifetime_Frames` (no lifetime: while its target exists, once per target
+  and particle) and ends with its target, which includes the target's corpse (Force_Lightning kills its primary at once;
+  retail's rule for a particle whose parent dies is not read). A particle name that is no object type draws nothing. Earthquake / Telekinesis dust is drawn while the special is applied (state, not the stored particle id).
+  `Infection_Particle` comes from the first special that names one (the victim keeps no infector type; vanilla has one).
+  The status bones come from GameConstants `Object_Visual_Status_Particle_Attach_Bone_Names` (default: the vanilla list).

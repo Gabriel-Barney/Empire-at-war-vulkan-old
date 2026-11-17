@@ -209,6 +209,13 @@ struct SpecialAbilityDesc {
     float blob_color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     bool show_blob_to_enemies = false;
     std::string owner_particle_effect, owner_particle_bone;
+    // vis1 t06 (ABILITY_PARTICLES §2-§4, §7; presentation only like the jammer fields): Target_Particle_Effect (any class)
+    // with its Target_Particle_Bone_Name candidates (the first the target's model has, else the root), Stun_Ability
+    // Stunned_Effect, Infection_Ability Infection_Particle (particle / GameObjectType names).
+    std::string target_particle_effect;
+    std::vector<std::string> target_particle_bones;
+    std::string stunned_effect;
+    std::string infection_particle;
 };
 
 // Ability description of one object type. Index = the host's ability-type index (for combat units

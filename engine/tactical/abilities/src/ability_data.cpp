@@ -442,6 +442,11 @@ SpecialAbilityDesc parse_special_ability(const data::XmlNode& e, const AbilityRe
         const std::vector<std::string_view> bones = data::split_list(e.child_text("Owner_Particle_Bone_Name"));
         if (!bones.empty()) s.owner_particle_bone = std::string(bones.front());
     }
+    // vis1 t06 (presentation only): the target / status particle names.
+    s.target_particle_effect = s_or(e, "Target_Particle_Effect");
+    for (std::string_view b : data::split_list(e.child_text("Target_Particle_Bone_Name"))) s.target_particle_bones.emplace_back(b);
+    s.stunned_effect = s_or(e, "Stunned_Effect");
+    s.infection_particle = s_or(e, "Infection_Particle");
     return s;
 }
 

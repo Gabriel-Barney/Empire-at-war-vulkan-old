@@ -354,6 +354,7 @@ uint64_t SimSnapshot::digest() const {
     }
     for (const SnapshotEffect& e : effects) {
         h.u32(e.lua_seq);
+        h.u32(e.fx_seq);  // vis1 t06
         h.u32(static_cast<uint32_t>(e.bone.size()));
         if (!e.bone.empty()) h.bytes(e.bone.data(), e.bone.size());
     }

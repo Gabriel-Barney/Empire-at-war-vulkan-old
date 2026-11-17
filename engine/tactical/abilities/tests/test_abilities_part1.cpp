@@ -1050,7 +1050,11 @@ void test_jamming_visual_fields() {
         "<Sensor_Jamming_Ability Name=\"Skipray_Sensor_Jamming\"><Activation_Style> User_Input </Activation_Style>"
         "<Owner_Particle_Effect>Sensor_Jamming_Effect_Skipray</Owner_Particle_Effect>"
         "<Owner_Particle_Bone_Name>HP_Jam, ROOT</Owner_Particle_Bone_Name></Sensor_Jamming_Ability>"
-        "<Tractor_Beam_Attack_Ability Name=\"T\"><Blob_Material_Name>Ignored</Blob_Material_Name></Tractor_Beam_Attack_Ability>"
+        "<Tractor_Beam_Attack_Ability Name=\"T\"><Blob_Material_Name>Ignored</Blob_Material_Name>"
+        "<Target_Particle_Effect>Force_Telekinesis_Particles</Target_Particle_Effect>"
+        "<Target_Particle_Bone_Name>Turret_00, B_Turret_00, ROOT</Target_Particle_Bone_Name>"
+        "<Stunned_Effect>Stunned_Particle_Effect</Stunned_Effect><Infection_Particle>Infection_Particle_Effect</Infection_Particle>"
+        "</Tractor_Beam_Attack_Ability>"
         "</Abilities>";
     const data::XmlDocument doc = data::XmlDocument::parse(xml, "j.xml");
     AbilityResolvers r;
@@ -1066,6 +1070,11 @@ void test_jamming_visual_fields() {
     CHECK(part.blob_material.empty() && !part.show_blob_to_enemies && part.blob_color[0] == 1.0f && part.blob_color[3] == 1.0f);
     const SpecialAbilityDesc other = parse_special_ability(block.first_child().next_sibling().next_sibling(), r, nullptr);
     CHECK(other.blob_material.empty());  // only the jammer class reads the Blob_* fields
+    // vis1 t06: the target / status particle names (any class; presentation only)
+    CHECK(other.target_particle_effect == "Force_Telekinesis_Particles" && other.target_particle_bones.size() == 3 &&
+          other.target_particle_bones[0] == "Turret_00" && other.target_particle_bones[2] == "ROOT");
+    CHECK(other.stunned_effect == "Stunned_Particle_Effect" && other.infection_particle == "Infection_Particle_Effect");
+    CHECK(part.target_particle_effect.empty() && part.target_particle_bones.empty() && part.stunned_effect.empty());
 }
 }  // namespace bo3split
 
@@ -1403,6 +1412,7 @@ void test_oi_waves_and_confuse() {
     SpecialAbilityDesc st = oi_special("Stun", SpecialClass::StunWave, ActivationStyle::UserInput);
     st.wave_range = 100.0f;
     st.wave_time = 2.0f;
+    st.stunned_effect = "Stunned_Particle_Effect";  // vis1 t06
     const uint32_t sts = add_special(w.ad, st);
     SpecialAbilityDesc cf = oi_special("Confuse", SpecialClass::ForceConfuse, ActivationStyle::UserInput);
     cf.wave_range = 100.0f;
@@ -1425,6 +1435,9 @@ void test_oi_waves_and_confuse() {
     CHECK(w.ab->set_unit_ability_mode(one, kStun, true, w.frame) == 1);
     CHECK(w.sys->stunned(2, w.frame) && !w.sys->stunned(3, w.frame) && !w.sys->stunned(4, w.frame));
     CHECK(w.ab->countdown_counter(1, kStun) == 600);  // recharge started at apply
+    // vis1 t06 (ABILITY_PARTICLES §4): one Stunned_Effect visual per victim the wave stunned (not the non-STUNNABLE 4).
+    CHECK(w.ab->visual_events().size() == 1 && w.ab->visual_events()[0].kind == AbilityVisualKind::StunnedEffect &&
+          w.ab->visual_events()[0].target == 2 && w.ab->visual_events()[0].owner == 1 && w.ab->visual_events()[0].special == sts);
     for (int i = 0; i < 61; ++i) w.tick();  // end frame = activation + 60: released at that frame's update
     CHECK(!w.sys->stunned(2, w.frame) && w.count(AbilityEventKind::Stunned, 2) == 2);  // stunned, then released
     // Confuse: victims 2 and 4 (ascending id), 2 draws each in the map rectangle
@@ -2011,28 +2024,47 @@ namespace bo3split {
 void test_oi_class_bodies() {
     // Force_Healing (§2.3.1): due := now + int(FPS x interval + 0.5); all damaged allies in range get amount added.
     {
+        auto heal_world = [](OiWorld& w, bool fx) {
+            SpecialAbilityDesc h = oi_special("Heal", SpecialClass::ForceHealing, ActivationStyle::GroundAutomatic);
+            h.heal_range = 100.0f;
+            h.heal_amount = 10.0f;
+            h.heal_interval = 1.0f;
+            h.service_interval = 1;
+            if (fx) h.target_particle_effect = "Unit_Healed_Particles";  // vis1 t06
+            const uint32_t hs = add_special(w.ad, h);
+            AbilityObjectDesc a;
+            a.specials = {hs};
+            const uint32_t hd = push(w.cd, w.ad, oi_unit("Healer", 100.0f), a);
+            const uint32_t td = push(w.cd, w.ad, oi_unit("Trooper", 100.0f), AbilityObjectDesc{});
+            w.make(GameMode::Land);
+            w.add(1, hd, 0, {0, 0, 0});
+            w.add(2, td, 0, {50, 0, 0});
+            w.add(3, td, 0, {500, 0, 0});
+            w.add(4, td, 1, {60, 0, 0});
+            for (ObjectId id : {2, 3, 4}) w.sys->set_health(id, 50.0f);
+            return hs;
+        };
         OiWorld w;
-        SpecialAbilityDesc h = oi_special("Heal", SpecialClass::ForceHealing, ActivationStyle::GroundAutomatic);
-        h.heal_range = 100.0f;
-        h.heal_amount = 10.0f;
-        h.heal_interval = 1.0f;
-        h.service_interval = 1;
-        const uint32_t hs = add_special(w.ad, h);
-        AbilityObjectDesc a;
-        a.specials = {hs};
-        const uint32_t hd = push(w.cd, w.ad, oi_unit("Healer", 100.0f), a);
-        const uint32_t td = push(w.cd, w.ad, oi_unit("Trooper", 100.0f), AbilityObjectDesc{});
-        w.make(GameMode::Land);
-        w.add(1, hd, 0, {0, 0, 0});
-        w.add(2, td, 0, {50, 0, 0});
-        w.add(3, td, 0, {500, 0, 0});
-        w.add(4, td, 1, {60, 0, 0});
-        for (ObjectId id : {2, 3, 4}) w.sys->set_health(id, 50.0f);
+        const uint32_t hs = heal_world(w, true);
         w.tick();
         w.tick();  // the SAP update stagger (now or now + 1)
         CHECK(w.sys->health(2) == 60.0f && w.sys->health(3) == 50.0f && w.sys->health(4) == 50.0f);
+        // vis1 t06 (ABILITY_PARTICLES §2.1): one target visual per healed unit per pass, kept across ticks (not cleared
+        // with the events) and never hashed.
+        CHECK(w.ab->visual_events().size() == 1 && w.ab->visual_events()[0].target == 2 &&
+              w.ab->visual_events()[0].owner == 1 && w.ab->visual_events()[0].special == hs &&
+              w.ab->visual_events()[0].kind == AbilityVisualKind::TargetParticle);
         for (int i = 0; i < 30; ++i) w.tick();  // the next pass int(30 x 1.0 + 0.5) = 30 frames after the first
         CHECK_EQ(w.sys->health(2), 70.0f);
+        CHECK(w.ab->visual_events().size() == 2 && w.ab->visual_events()[1].frame > w.ab->visual_events()[0].frame);
+        for (int i = 0; i < 100; ++i) w.tick();  // older entries are dropped when a new one is recorded
+        CHECK(!w.ab->visual_events().empty() &&
+              w.ab->visual_events().front().frame + AbilitySystem::kVisualKeepFrames >= w.ab->visual_events().back().frame);
+        // The record is presentation only: the same battle without the particle name hashes the same.
+        OiWorld plain;
+        heal_world(plain, false);
+        for (int i = 0; i < 132; ++i) plain.tick();
+        CHECK(plain.ab->visual_events().empty() && ability_hash(*plain.ab) == ability_hash(*w.ab));
     }
     // Force_Lightning (§2.3.6): the primary, then the target player's objects within the radius, up to Max_Targets; each
     // takes its current health at once.
@@ -2042,6 +2074,7 @@ void test_oi_class_bodies() {
         l.max_range = 200.0f;
         l.max_targets = 2;
         l.targets_radius = 100.0f;
+        l.target_particle_effect = "Force_Lightning_Smoke";  // vis1 t06
         const uint32_t ls = add_special(w.ad, l);
         AbilityObjectDesc a;
         a.unit_abilities = {oi_gui(kForceLightning, 0.0f, 30.0f, "Lightning")};
@@ -2057,6 +2090,8 @@ void test_oi_class_bodies() {
         CHECK(w.ab->targeted_ability(one, kForceLightning, 3, -1, w.frame) == 1);
         w.tick();
         CHECK(!w.sys->alive(3) && !w.sys->alive(2) && w.sys->alive(4));  // primary 3, then 2 (ascending id), cap 2
+        // vis1 t06 (ABILITY_PARTICLES §2.3): one target visual, on the first victim (the primary).
+        CHECK(w.ab->visual_events().size() == 1 && w.ab->visual_events()[0].target == 3 && w.ab->visual_events()[0].special == ls);
         CHECK(w.ab->countdown_counter(1, kForceLightning) == 900);
     }
     // DEPLOY / SPREAD_OUT / instant effect / SELF_DESTRUCT (§2.1, §2.2)

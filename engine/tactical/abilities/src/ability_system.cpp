@@ -1695,6 +1695,20 @@ const SpecialAbilityDesc* AbilitySystem::jamming_special(ObjectId id, float& rad
     return nullptr;
 }
 
+// vis1 t06: presentation-only reads and the visual record (no state the sim reads, hashes or saves).
+void AbilitySystem::applied_specials(ObjectId id, std::vector<AppliedSpecialView>& out) const {
+    out.clear();
+    const Obj* o = obj(id);
+    if (!o || o->dead) return;
+    for (const SpecialState& sp : o->specials)
+        if (sp.applied) out.push_back({sp.desc, sp.target});
+}
+void AbilitySystem::visual(AbilityVisualKind k, uint32_t frame, ObjectId owner, ObjectId target, uint32_t special) {
+    if (!visuals_.empty() && visuals_.front().frame + kVisualKeepFrames < frame)
+        std::erase_if(visuals_, [frame](const AbilityVisualEvent& v) { return v.frame + kVisualKeepFrames < frame; });
+    visuals_.push_back({k, frame, owner, target, special, ++visual_serial_});
+}
+
 uint32_t AbilitySystem::set_unit_ability_mode(std::span<const ObjectId> objects, uint8_t type, bool on, uint32_t frame,
                                               ObjectId target) {
     uint32_t n = 0;
