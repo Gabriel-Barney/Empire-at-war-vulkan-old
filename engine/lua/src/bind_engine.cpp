@@ -96,9 +96,8 @@ int m_type_get_name(Call& c) {
     const objects::GameObjectTypes* types = c.vm->host.types;
     if (!types || c.self->value >= types->raw().type_count()) return push_nil(c);
     // q6 (OBJECT_SCRIPTS.md §6.1 step 4, OBJECT_TYPES §3.1): the original stores type names upper-cased, so Get_Name
-    // returns the upper-case name (TR's GroundCompanyList keys are upper-case type names). [port interim] Only VMs with
-    // LuaVmOptions::upper_type_names (the object-script VMs) do so; the others keep the name as written, so the AI /
-    // story goldens and tests stay as they are until the switch is made for every VM.
+    // returns the upper-case name (TR's GroundCompanyList keys, FotR's PlanetTable keys are upper-case type names).
+    // LuaVmOptions::upper_type_names is on for every VM since modc t45.
     const std::string_view n = types->raw().types().name[c.self->value];
     if (!c.vm->options.upper_type_names) {
         lua_pushlstring(c.L, n.data(), n.size());

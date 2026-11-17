@@ -101,6 +101,9 @@ are registered by `0x1402b5ad0`; whether that runs in record order was not read 
 - Spawn-table picks and search order need no change.
 - The port finds a hinted object by its `0x482` chunk whether or not it has `HINT`. That gives the
   same result as retail for map files written by the original editor (a hint implies `HINT`) [M].
+- map1 t04 (2026-11-17): the port reads 0x4B7 (each 0x4B8 entry's mini 0 is the behaviour's name CRC; all 3954 shipped
+  entries in FoC + EaW maps.meg are `HINT`) and attaches it, and keeps 0x46E per object (`TacticalBattle::map_marker_name`).
+  Company expansion copies the hint and `HINT` to the members (map1 t03).
 - Open checks, filed as q6 tasks: company expansion (each member inherits the hint, the company
   object is not findable); `Find_Hint` without a hint string considers only objects with `HINT`.
 

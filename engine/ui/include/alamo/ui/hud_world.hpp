@@ -114,6 +114,11 @@ struct HudUnit {
     // q6 t19 (OBJECT_SCRIPTS §10.3, same filter): Lua Hide(true) (render::SnapshotObject::script_hidden). The radar drops
     // its blip for every viewer unless the type has Visible_On_Radar_When_Fogged.
     bool script_hidden = false;
+    // map1 t01 (radar filter 0x35b4d0): hidden from the local player by the fog (render::kSnapFogHidden: HIDE_WHEN_FOGGED
+    // not visible, or a hostile Is_Stealthed object). The radar drops its blip unless Visible_On_Radar_When_Fogged.
+    bool fog_hidden = false;
+    // map1 t01 (same filter, obj +0x3A7): inside a garrison / transport (render::kSnapContained). No blip, whoever owns it.
+    bool contained = false;
 };
 
 // One live unit and the unit standing for its squadron / company (itself when alone): TacticalBattle::icon_links.

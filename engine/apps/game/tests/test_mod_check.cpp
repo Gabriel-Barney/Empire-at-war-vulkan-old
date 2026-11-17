@@ -145,7 +145,7 @@ void test_fake_install() {
                    "<MC2_Not_A_Real_Tag>1</MC2_Not_A_Real_Tag></SpaceUnit>\n"
                    "<SpaceUnit Name=\"MC2_Ship_B\"><Space_Model_Name>mc2_missing.ALO</Space_Model_Name>"
                    "<MC2_Not_A_Real_Tag>2</MC2_Not_A_Real_Tag></SpaceUnit>\n"
-                   "<SpaceUnit Name=\"MC2_Ok\"><Land_Model_Name>MC2_Present</Land_Model_Name>"
+                   "<SpaceUnit Name=\"MC2_Ok\"><Land_Model_Name>MC2_Present</Land_Model_Name><Toggle>Yes</Toggle>"
                    "<Lua_Script>MC2_Named</Lua_Script></SpaceUnit></Units>\n");
         write_file(mod2 / "Data/Art/Models/MC2_Present.alo", "x");  // no extension in the XML: .ALO tried
         // modc t25: command bar components (every root child is an entry; tags match case-insensitively) and the
@@ -183,7 +183,8 @@ void test_fake_install() {
             CHECK(r.missing_files[1].path == "DATA\\XML\\MC2GHOST.XML");
             CHECK(r.missing_files[1].referenced_by.find("GAMEOBJECTFILES.XML") != std::string::npos);
         }
-        CHECK(r.unknown_xml_tags.size() == 3);
+        // modc t37: Toggle has rows only for CommandBarComponent, so on an object type it is not read (owner-strict).
+        CHECK(r.unknown_xml_tags.size() == 4);
         const auto unknown_in = [&](std::string_view db, std::string_view tag) {
             for (const auto& t : r.unknown_xml_tags)
                 if (t.database == db && t.tag == tag) return t.occurrences == 1 && t.types == 1 && t.in_mod;
@@ -191,6 +192,7 @@ void test_fake_install() {
         };
         CHECK(unknown_in("command bar components", "MC2_Bar_Tag"));
         CHECK(unknown_in("radar map", "MC2_Radar_Tag"));
+        CHECK(unknown_in("object types", "Toggle"));
         if (!r.unknown_xml_tags.empty()) {
             CHECK(r.unknown_xml_tags[0].tag == "MC2_Not_A_Real_Tag");
             CHECK(r.unknown_xml_tags[0].occurrences == 2 && r.unknown_xml_tags[0].types == 2);

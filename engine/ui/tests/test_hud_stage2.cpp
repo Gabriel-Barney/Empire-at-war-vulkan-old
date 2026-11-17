@@ -682,6 +682,42 @@ void test_radar() {
         CHECK2(texel(3, 3)[0] == s.space_asteroid.r && texel(3, 3)[3] == s.space_asteroid.a && texel(0, 0)[3] == 0);
         CHECK2(texel(0, 3)[0] == s.space_asteroid_border.r && texel(0, 3)[3] == s.space_asteroid_border.a);
     }
+    // map1 t02 (MAP1_RADAR_TERRAIN_RE): biome blocks by map environment index, the per-cell class order, and the land picture
+    // over a 3 x 2 cell grid (20-unit cells, index (coord + 10) / 20) on a 4 x 4 radar over the box [-10, 70] x [-10, 70].
+    {
+        CHECK2(radar_biome(0) == "TEMPERATE" && radar_biome(6) == "URBAN" && radar_biome(7) == "SPACE" && radar_biome(8).empty());
+        CHECK2(radar_cell_class(0x20u | 0x2u | 0x4u, false) == Passability::Water && radar_cell_class(0x1u, true) == Passability::Water);
+        CHECK2(radar_cell_class(0x2u | 0x4u | 0x100u, false) == Passability::Steep);
+        CHECK2(radar_cell_class(0x4u | 0x80u | 0x100u | 0x8u, false) == Passability::Obstacle);
+        CHECK2(radar_cell_class(0x80u | 0x100u, false) == Passability::InfantryOnly);
+        CHECK2(radar_cell_class(0x100u | 0x10u, false) == Passability::Impassable);
+        CHECK2(radar_cell_class(0x8u, false) == Passability::Wall && radar_cell_class(0x10u, false) == Passability::Wall);
+        CHECK2(radar_cell_class(0x40u, false) == Passability::Clear && radar_cell_class(0u, false) == Passability::Clear);
+        const uint32_t cells[6] = {0x1u, 0x2u, 0x20u, 0x4u, 0x1u, 0x8u};  // row 0 (y 0): clear, steep, water; row 1: obstacle, clear, wall
+        RadarTerrainSource src;
+        src.cells = cells;
+        src.gw = 3;
+        src.gh = 2;
+        const std::vector<uint8_t> px = radar_terrain_rgba(src, temp, 4, -10.0f, -10.0f, 70.0f, 70.0f);
+        CHECK2(px.size() == 64);
+        const auto at = [&](uint32_t col, uint32_t row) { return Rgba8{px[(row * 4 + col) * 4], px[(row * 4 + col) * 4 + 1],
+                                                                        px[(row * 4 + col) * 4 + 2], px[(row * 4 + col) * 4 + 3]}; };
+        // texel (col, row) samples world (-10 + 20 col, -10 + 20 row), clamped to [-9.999, 59.999]: cells (0, 0) .. (3, 3)
+        CHECK2(at(0, 0) == temp[static_cast<size_t>(Passability::Clear)] && at(1, 0) == temp[static_cast<size_t>(Passability::Steep)] &&
+               at(2, 0) == temp[static_cast<size_t>(Passability::Water)]);
+        CHECK2(at(0, 1) == temp[static_cast<size_t>(Passability::Obstacle)] && at(2, 1) == temp[static_cast<size_t>(Passability::Wall)]);
+        CHECK2(at(3, 0).a == 0 && at(0, 2).a == 0);  // outside the grid: transparent
+        src.has_box = true;  // outside the playable box: Obstacle too
+        src.box_min_x = src.box_min_y = 0.0f;
+        src.box_max_x = src.box_max_y = 100.0f;
+        src.water = [](float x, float) { return x >= 25.0f; };  // the water surface reaches column 2
+        const std::vector<uint8_t> px2 = radar_terrain_rgba(src, temp, 4, -10.0f, -10.0f, 70.0f, 70.0f);
+        const Rgba8 c00{px2[0], px2[1], px2[2], px2[3]};
+        const Rgba8 c11{px2[(1 * 4 + 1) * 4], px2[(1 * 4 + 1) * 4 + 1], px2[(1 * 4 + 1) * 4 + 2], px2[(1 * 4 + 1) * 4 + 3]};
+        const Rgba8 c21{px2[(1 * 4 + 2) * 4], px2[(1 * 4 + 2) * 4 + 1], px2[(1 * 4 + 2) * 4 + 2], px2[(1 * 4 + 2) * 4 + 3]};
+        CHECK2(c00 == temp[static_cast<size_t>(Passability::Obstacle)] && c11 == temp[static_cast<size_t>(Passability::Clear)] &&
+               c21 == temp[static_cast<size_t>(Passability::Water)]);
+    }
     // Events.
     RadarEvents ev;
     ev.add(s, "Default_Click", 10, 20);

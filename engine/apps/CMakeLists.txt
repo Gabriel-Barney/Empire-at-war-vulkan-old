@@ -166,6 +166,15 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
     target_compile_definitions(alamo_sim_r3g_tests PRIVATE "ALAMO_SIM_TESTDATA=\"${CMAKE_CURRENT_SOURCE_DIR}/sim/testdata\"")
     add_test(NAME alamo_sim_r3g_tests COMMAND alamo_sim_r3g_tests)
     set_tests_properties(alamo_sim_r3g_tests PROPERTIES TIMEOUT 600)
+    # map1: the battle's map load and start placement (synthetic, fast) and --every-map, every retail .ted map through the
+    # TacticalBattle map load (real data, slow; skipped without ALAMO_FOC_DATA / ALAMO_EAW_DATA).
+    add_executable(alamo_sim_map1_tests sim/tests/test_map1.cpp)
+    target_link_libraries(alamo_sim_map1_tests PRIVATE alamo_sim alamo_vfs alamo_test_support)
+    target_compile_definitions(alamo_sim_map1_tests PRIVATE "ALAMO_SIM_TESTDATA=\"${CMAKE_CURRENT_SOURCE_DIR}/sim/testdata\"")
+    add_test(NAME alamo_sim_map1_tests COMMAND alamo_sim_map1_tests)
+    set_tests_properties(alamo_sim_map1_tests PROPERTIES TIMEOUT 600)
+    add_test(NAME alamo_sim_tests_every_map COMMAND alamo_sim_map1_tests --every-map)
+    set_tests_properties(alamo_sim_tests_every_map PROPERTIES TIMEOUT 3600 LABELS slow)
     # --- end L1 systems ---
   endif()
 

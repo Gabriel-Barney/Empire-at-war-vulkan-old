@@ -690,7 +690,38 @@ void App::update_radar() {
         }
     paint.fill = radar_settings_.space_asteroid;
     paint.border = radar_settings_.space_asteroid_border;
-    radar_.build(128, {}, 0, 0, vis, w, h, bview_.space() ? radar_settings_.space_fow : radar_settings_.land_fow, paint);
+    // map1 t02 (MAP1_RADAR_TERRAIN_RE): the land radar's passability picture, built once per battle (retail builds it at the
+    // land mode's activation and never repaints it): the map's 0x10A cell bits in the RadarMap.xml colours of the map's
+    // environment block (map info mini 0x06); no block (index >= 8) or a space battle: no picture.
+    constexpr uint32_t kRadarSize = 128;
+    if (!radar_terrain_built_ && battle()) {
+        radar_terrain_built_ = true;
+        radar_terrain_.clear();
+        const sim::TacticalBattle* b = battle();
+        const std::string_view biome = b ? ui::radar_biome(b->terrain_type()) : std::string_view();
+        if (b && !bview_.space() && !b->is_space_battle() && !biome.empty() && b->map().passability_present) {
+            const terrain::MapData& md = b->map();
+            ui::RadarTerrainSource src;
+            src.cells = md.passability;
+            src.gw = md.terrain.width;
+            src.gh = md.terrain.height;
+            float bmin[2] = {0.0f, 0.0f}, bmax[2] = {0.0f, 0.0f};
+            if (md.playable.has_box && md.playable_box(bmin, bmax)) {
+                src.has_box = true;
+                src.box_min_x = bmin[0];
+                src.box_min_y = bmin[1];
+                src.box_max_x = bmax[0];
+                src.box_max_y = bmax[1];
+            }
+            if (md.terrain.present && md.terrain.header.water_type != terrain::WaterType::None) {
+                const terrain::Terrain* tr = &md.terrain;
+                src.water = [tr](float x, float y) { return tr->header.water_height >= tr->sample_height(x, y); };
+            }
+            radar_terrain_ = ui::radar_terrain_rgba(src, radar_settings_.palette(biome), kRadarSize, paint.min_x, paint.min_y, paint.max_x, paint.max_y);
+        }
+    }
+    const uint32_t ts = radar_terrain_.empty() ? 0u : kRadarSize;
+    radar_.build(kRadarSize, radar_terrain_, ts, ts, vis, w, h, bview_.space() ? radar_settings_.space_fow : radar_settings_.land_fow, paint);
     if (!radar_.empty()) gpu_.hud.set_dynamic_page(ui::kHudPageRadar, radar_.width(), radar_.height(), radar_.rgba(), radar_.generation());
 }
 

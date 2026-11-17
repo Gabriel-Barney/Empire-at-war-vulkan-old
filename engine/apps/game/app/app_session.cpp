@@ -691,6 +691,8 @@ void App::start_battle_view() {
     radar_feed_.reset();
     radar_fields_.clear();
     radar_fields_built_ = radar_fields_dirty_ = false;
+    radar_terrain_.clear();  // map1 t02
+    radar_terrain_built_ = false;
 }
 
 void App::end_battle() {

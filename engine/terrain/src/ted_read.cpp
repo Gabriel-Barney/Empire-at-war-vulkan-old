@@ -626,6 +626,17 @@ bool parse_object(std::span<const uint8_t> node, ObjectPlacement& o, Ctx& c) {
                             if (!n.empty() && n != "NONE") o.attachments.push_back(std::move(n));
                         }
                     }
+                } else if (s.id == 0x4B7 && s.has_children) {  // map1 t04: extra behaviours (Q6_T30 3)
+                    if (!read_chunks(s.payload, sub2)) return c.fail("object behaviours 0x4B7: malformed");
+                    for (const ChunkView& b : sub2) {
+                        if (b.id != 0x4B8 || b.has_children) continue;
+                        if (!read_minis(b.payload, minis)) return c.fail("object behaviour 0x4B8: malformed");
+                        ObjectPlacement::ExtraBehavior e;
+                        e.raw = copy_minis(minis);
+                        for (const MiniView& m : minis)
+                            if (m.id == 0x00) mini_u32(m, e.name_crc);
+                        o.extra_behaviors.push_back(std::move(e));
+                    }
                 }
             }
         } else if (k.id == 0x476 && k.has_children) {
@@ -642,6 +653,15 @@ bool parse_object(std::span<const uint8_t> node, ObjectPlacement& o, Ctx& c) {
                 if (!read_minis(s.payload, minis)) return c.fail("object hint 0x482/0: malformed");
                 for (const MiniView& m : minis)
                     if (m.id == 0x01) o.hint = mini_string(m);
+            }
+        } else if (k.id == 0x46E && k.has_children) {  // map1 t04: marker name, the layout of 0x482 (Q6_T30 3)
+            if (!read_chunks(k.payload, sub)) return c.fail("object marker name 0x46E: malformed");
+            o.has_marker_name = true;
+            for (const ChunkView& s : sub) {
+                if (s.id != 0 || s.has_children) continue;
+                if (!read_minis(s.payload, minis)) return c.fail("object marker name 0x46E/0: malformed");
+                for (const MiniView& m : minis)
+                    if (m.id == 0x01) o.marker_name = mini_string(m);
             }
         }
     }

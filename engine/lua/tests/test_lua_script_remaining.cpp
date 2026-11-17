@@ -449,13 +449,13 @@ static void test_object_methods(const Db& db) {
     CHECK(run(vm, "Pad.Build('Fighter', 1)") == "" && last_message_has(vm, "Expected boolean."));
     CHECK(run(vm, "Pad.Lock_Build_Pad_Contents(true)") == "" && last_message_has(vm, "cannot lock an empty build pad"));
     CHECK(run(vm, "r = Pad.Build('Fighter'); bc = Pad.Get_Build_Pad_Contents(); bn = bc.Get_Type().Get_Name()") == "");
-    CHECK(gtrue(vm, "r") && gstr(vm, "bn") == "Fighter");
+    CHECK(gtrue(vm, "r") && gstr(vm, "bn") == "FIGHTER");
     CHECK(run(vm, "Pad.Build('Fighter')") == "" && last_message_has(vm, "already has something built on it"));
     // Projectiles without the combat hook: the type's Projectile_Types.
     CHECK(run(vm, "pt = Ship.Get_All_Projectile_Types(); n = table.getn(pt); p1 = pt[1].Get_Name(); "
                   "cp = Ship.Get_Current_Projectile_Type().Get_Name(); none = table.getn(Pad.Get_All_Projectile_Types()); "
                   "cn = Pad.Get_Current_Projectile_Type()") == "");
-    CHECK(gnum(vm, "n") == 1.0 && gstr(vm, "p1") == "Laser_P" && gstr(vm, "cp") == "Laser_P" && gnum(vm, "none") == 0.0 && gnil(vm, "cn"));
+    CHECK(gnum(vm, "n") == 1.0 && gstr(vm, "p1") == "LASER_P" && gstr(vm, "cp") == "LASER_P" && gnum(vm, "none") == 0.0 && gnil(vm, "cn"));
     // State setters.
     const int loco = objects::behavior_type_id("STARSHIP_LOCOMOTOR");
     CHECK(run(vm, "Pad.Lock_Build_Pad_Contents(true); Ship.Enable_Behavior(" + std::to_string(loco) + ", false); Ship.Enable_Behavior(78, true); "
@@ -523,14 +523,14 @@ static void test_object_methods(const Db& db) {
                   "cp = Ship.Get_Current_Projectile_Type().Get_Name(); pw = Ship.Get_AI_Power_Vs_Unit(Bunker); "
                   "cf = Bunker.Can_Garrison_Fire(); cs = Ship.Can_Garrison_Fire(); Pad.Lock_Build_Pad_Contents(true)") == "");
     CHECK(gtrue(vm, "dv") && gtrue(vm, "od") && gnum(vm, "en") == 0.5 && !gnil(vm, "fb") && gnum(vm, "rd") == 30.0 && gnum(vm, "td") == 4.0 &&
-          gtrue(vm, "bc") && gstr(vm, "cp") == "Missile_P" && gnum(vm, "pw") == 80.0 && !gtrue(vm, "cf") && gtrue(vm, "cs") && locked);
+          gtrue(vm, "bc") && gstr(vm, "cp") == "MISSILE_P" && gnum(vm, "pw") == 80.0 && !gtrue(vm, "cf") && gtrue(vm, "cs") && locked);
     CHECK(goal.x == 20.0f && goal.y == 0.0f);
     goal = Vec3{99.0f, 0.0f, 0.0f};  // another move replaced the diversion
     CHECK(run(vm, "od = Ship.Is_On_Diversion()") == "" && !gtrue(vm, "od"));
     report = false;  // the host reports no goal after the move (it ended at once)
     CHECK(run(vm, "dv = Ship.Divert(Pad); has = Ship.Is_On_Diversion()") == "" && gtrue(vm, "dv") && !gtrue(vm, "has"));
     CHECK(run(vm, "pt = Ship.Get_All_Projectile_Types(); n = table.getn(pt); p1 = pt[1].Get_Name(); p3 = pt[3].Get_Name()") == "");
-    CHECK(gnum(vm, "n") == 3.0 && gstr(vm, "p1") == "Missile_P" && gstr(vm, "p3") == "Missile_P");  // duplicates kept
+    CHECK(gnum(vm, "n") == 3.0 && gstr(vm, "p1") == "MISSILE_P" && gstr(vm, "p3") == "MISSILE_P");  // duplicates kept
     // Locked movement.
     e.bridge.state(e.store.id(ship)).orders_locked = true;
     CHECK(run(vm, "dv = Ship.Divert(Pad)") == "" && !gtrue(vm, "dv") && last_message_has(vm, "has had its movement locked"));
@@ -561,7 +561,7 @@ static void test_player_methods(const Db& db) {
     e.hooks.give_random_sliceable_tech = [&db](int32_t) { return db.t("Fighter"); };
     e.hooks.type_obsolete = [](objects::TypeIndex, int32_t p) { return p == 0; };
     CHECK(run(vm, "t = P.Give_Random_Sliceable_Tech().Get_Name(); ob = Ship.Get_Type().Is_Obsolete(P)") == "");
-    CHECK(gstr(vm, "t") == "Fighter" && gtrue(vm, "ob"));
+    CHECK(gstr(vm, "t") == "FIGHTER" && gtrue(vm, "ob"));
     CHECK(run(vm, "Ship.Get_Type().Is_Obsolete()") == "" && last_message_has(vm, "Expected 1, got 0"));
     CHECK(run(vm, "Ship.Get_Type().Is_Obsolete(1)") == "" && last_message_has(vm, "Expected player"));
     // _ProduceObject (§1.9): argument checks; refused without a galactic sim.
@@ -595,7 +595,7 @@ static void test_task_forces(const Db& db) {
     e.global("T1", t1);
     CHECK(run(vm, "a = TF.Add_Force(Ship); n = TF.Get_Force_Count(); ty = TF.Get_Type_Of_Unit(2).Get_Name(); "
                   "t0 = TF.Get_Type_Of_Unit(0).Get_Name(); t9 = TF.Get_Type_Of_Unit(9); tn = TF.Get_Type_Of_Unit(-1)") == "");
-    CHECK(gnil(vm, "a") && gnum(vm, "n") == 3.0 && gstr(vm, "ty") == "Ship" && gstr(vm, "t0") == "Trooper" && gnil(vm, "t9") && gnil(vm, "tn"));
+    CHECK(gnil(vm, "a") && gnum(vm, "n") == 3.0 && gstr(vm, "ty") == "SHIP" && gstr(vm, "t0") == "TROOPER" && gnil(vm, "t9") && gnil(vm, "tn"));
     CHECK(run_stop(vm, "TF.Add_Force(3)").find("expected a GameObjectClass") != std::string::npos);
     CHECK(run_stop(vm, "TF.Get_Type_Of_Unit('x')").find("expected an integer index") != std::string::npos);
     // Opportunity-fire subscriptions: weapon hard-point types only.

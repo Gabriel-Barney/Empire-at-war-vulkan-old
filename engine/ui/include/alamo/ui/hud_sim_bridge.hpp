@@ -48,6 +48,8 @@ inline void hud_units_from_frame(const render::InterpolatedFrame& frame, std::sp
         u.jammed = frame.jamming.is_jammed(o.id);  // R5: the radar drops hostile jammed blips (tactical_hud.cpp)
         u.stealthed = frame.jamming.is_stealthed(o.id);  // R5: ... and hostile stealthed ones
         u.script_hidden = o.script_hidden;  // q6 t19: ... and Lua-hidden ones
+        u.fog_hidden = (o.flags & render::kSnapFogHidden) != 0;  // map1 t01: ... and fog-hidden ones
+        u.contained = (o.flags & render::kSnapContained) != 0;   // map1 t01: ... and garrisoned / transported ones
         out.push_back(u);
     }
 }

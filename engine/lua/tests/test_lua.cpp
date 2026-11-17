@@ -489,9 +489,9 @@ static void test_objects() {
                   "same = (all[1] == Find_All_Objects_Of_Type(tt)[1]) and rawequal(all[1], Find_All_Objects_Of_Type(tt)[1])\n"
                   "tn = all[2].Get_Type().Get_Name() owner = all[1].Get_Owner().Get_ID() mode = Get_Game_Mode()\n"
                   "victim = all[2]") == "");
-    CHECK(gstr(vm, "nm") == "Trooper" && gstr(vm, "none") == "nil");
+    CHECK(gstr(vm, "nm") == "TROOPER" && gstr(vm, "none") == "nil");
     CHECK(gnum(vm, "n") == 3.0 && gstr(vm, "ids") == "4,2,1,");  // newest first
-    CHECK(gnum(vm, "byname") == 1.0 && gstr(vm, "tn") == "Trooper" && gnum(vm, "owner") == 3.0 && gstr(vm, "mode") == "Land");
+    CHECK(gnum(vm, "byname") == 1.0 && gstr(vm, "tn") == "TROOPER" && gnum(vm, "owner") == 3.0 && gstr(vm, "mode") == "Land");
     CHECK(run(vm, "ok = same and 1 or 0") == "" && gnum(vm, "ok") == 1.0);
     // Wrapper identity: tables keyed by wrappers hit (raw identity), for objects, types and players.
     CHECK(run(vm, "keyed = {} keyed[all[1]] = 'o' keyed[tt] = 't' keyed[all[1].Get_Owner()] = 'p'\n"

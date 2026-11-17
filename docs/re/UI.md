@@ -535,6 +535,25 @@ fleet summary row fill 0x116070; data: `GUIDialogs.rc`, `GUIDialogs.xml`, FoC `M
   filled, `IDC_HEROES_DIVIDERS(r − 1)` gets `i_tree_arrow_right.tga`, white, alpha mode, and is shown; when row r
   is empty that divider and the row's icon are hidden. [H]
 
+#### 3.7.3 Listbox rows wider than the box (2026-11-17, modc t38)
+
+Sources: `GUIGadgetListboxClass` (vtable 0x84ed68), add-text-row 0x1cb500 (callers 0x1c3d10, 0x1cb4e0), add-column-row
+0x1cc020, row layout 0x1d02a0, wrap helper 0x1cd540 (callers 0x1c3f50 / 0x1c4030), gap constant set at 0x13ce0.
+
+- **A one-text row is cut, not squeezed or scrolled.** When a text row is added, the space for its text is the box
+  width − 2 × the box's margin − the row icon's width − a gap of 3 / 1024 of the screen width. If that space is
+  positive, the gadget drops the **last character** of the shown text, one at a time, while the text's measured width
+  (row font) is larger than the space. No ellipsis, no horizontal scroll bar, no glyph narrowing. The item keeps its
+  whole text (the copy stored with the row is taken before the cut), so the item's text a caller reads back is
+  unchanged. [H]
+- **Multi-column rows are not cut**: the column-row form places each column's text at its column offset with no
+  width check. [H]
+- **Wrapping is the caller's choice**: the gadget has a helper that breaks a text into lines that each fit within the
+  box width − 4 × margin, at the last space before the overflow (at the overflowing character when the line has no
+  space); a caller that wants wrapped text calls it and adds each line as its own row. Plain row adds do not wrap. [H]
+- [port] the port's row text rectangle already excludes the row insets and the icon, so it applies the cut against
+  that rectangle less 3 canvas units (`kListTextGap`, `engine/ui/src/gui_dialog.cpp`).
+
 ---
 
 ## 4. Input routing (P1 input layer)

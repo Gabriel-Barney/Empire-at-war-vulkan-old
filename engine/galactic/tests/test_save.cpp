@@ -711,6 +711,18 @@ void test_synthetic() {
     sc.prepare = [](GalacticSim& s) {
         s.set_emit_events(true);
         s.reveal_all_planets();
+        // map1 t06: a structure marker record (saved v9, hashed) on two live objects, written out of id order
+        std::vector<objects::ObjectId> ids;
+        for (const PlanetState& p : s.planets())
+            if (p.is_planet && s.store().alive(p.object)) ids.push_back(s.store().id(p.object));
+        if (ids.size() >= 2) {
+            s.set_structure_slot(ids[1], 3, 7001);
+            s.set_structure_slot(ids[0], 0, 7002);
+            s.set_structure_slot(ids[1], 4, 7003);  // overwrite
+            CHECK(s.structure_slots().size() == 2 && s.structure_slots()[0].object < s.structure_slots()[1].object);
+            const GalacticSim::StructureSlot* e = s.structure_slot(ids[1]);
+            CHECK(e && e->slot == 4 && e->marker == 7003 && !s.structure_slot(objects::kNoObjectId));
+        }
     };
     sc.drive = drive_synthetic;
     sc.full_prefix_limit = 1u << 20;  // every prefix
@@ -720,6 +732,43 @@ void test_synthetic() {
 // A2k t04 (A2J_RE_BUILD_MARKET §4): start() draws each planet's two build-queue phases (synced Get_Int(1, 30), queue 0
 // then 1, row order) at the PRODUCTION attach; nothing else in start() draws, so the RNG after start() is the reference
 // stream after exactly those draws. The phases are saved: a session started from another seed reads the saved values.
+// map1 t06: the structure marker memory is saved for live objects only, so the hash covers live objects only too: after the
+// remembered object dies, a session restored from the save hashes exactly like the one that saved it.
+void test_structure_slots_dead() {
+    std::printf("  structure marker memory: dead objects\n");
+    const GalacticRules rules = make_rules();
+    const objects::GameObjectTypes types;
+    const GalacticSetup setup = make_setup();
+    objects::IdCounter ids;
+    objects::ObjectStore store(objects::ModeKind::Galactic, objects::StoreKind::Primary, types, &ids);
+    SimRng rng(0x5A5Eu);
+    GalacticSim s(rules, store, rng);
+    CHECK(s.start(setup));
+    ObjectHandle unit{}, planet{};
+    for (const PlanetState& ps : s.planets()) {
+        if (!planet && ps.is_planet && store.alive(ps.object)) planet = ps.object;
+        for (ObjectHandle u : ps.surface)
+            if (!unit && store.alive(u)) unit = u;
+    }
+    CHECK(static_cast<bool>(unit) && static_cast<bool>(planet));
+    if (!unit || !planet) return;
+    s.set_structure_slot(store.id(unit), 1, 77);
+    s.set_structure_slot(store.id(planet), 0, 78);
+    CHECK(s.destroy_object(unit) && !store.alive(unit));
+    const std::vector<uint8_t> bytes = sim_bytes(s);
+    const uint64_t h = sim_hash(s);
+    objects::IdCounter ids2;
+    objects::ObjectStore store2(objects::ModeKind::Galactic, objects::StoreKind::Primary, types, &ids2);
+    SimRng rng2(0x5A5Eu);
+    GalacticSim c(rules, store2, rng2);
+    CHECK(c.start(setup));
+    store2 = store;  // ObjectStore::read stand-in, as in run_scenario
+    ids2.set_next(ids.next());
+    ByteReader r(bytes);
+    CHECK(c.read(r));
+    CHECK(c.structure_slots().size() == 1 && sim_hash(c) == h && sim_bytes(c) == bytes);
+}
+
 void test_queue_phases() {
     std::printf("  queue phases\n");
     const GalacticRules rules = make_rules();
@@ -789,8 +838,13 @@ void test_queue_phases() {
         // holder (12 bytes) and the neutralized counts (u32 count 0 here); a v7 image is read with the start() homes and
         // no galab state, which is this session's state, so it writes back as the v8 bytes.
         const size_t galab = 4 * s.players().size() + 12 * s.planets().size() + 4;
-        CHECK(bytes.size() >= galab + 12 && bytes[0] == 8 && bytes[bytes.size() - 1] == 0);
-        std::vector<uint8_t> v7(bytes.begin(), bytes.end() - static_cast<std::ptrdiff_t>(galab));
+        // map1 t06: v9 adds the structure marker memory after them (u32 count 0 here); a v8 image reads as none.
+        CHECK(bytes.size() >= galab + 16 && bytes[0] == 9 && bytes[bytes.size() - 1] == 0);
+        std::vector<uint8_t> v8(bytes.begin(), bytes.end() - 4);
+        v8[0] = 8;
+        ByteReader r8(v8);
+        CHECK(o.read(r8) && o.structure_slots().empty() && sim_bytes(o) == bytes);
+        std::vector<uint8_t> v7(v8.begin(), v8.end() - static_cast<std::ptrdiff_t>(galab));
         v7[0] = 7;
         ByteReader r7(v7);
         CHECK(o.read(r7) && sim_bytes(o) == bytes);
@@ -992,6 +1046,7 @@ int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     test_synthetic();
     test_queue_phases();
+    test_structure_slots_dead();  // map1 t06
     test_name_rules();
     test_foc();
     if (g_fail) {
