@@ -358,7 +358,7 @@ removed or changed in meaning without raising `version`. Paths are game-relative
 | `story` | object | (v4) `files` (Data\XML files with story events), `rewards_used`, `rewards_missing` [{`name`, `uses`, `first_file`, `in_mod`, `note`}] (retail rewards the port lacks), `events_used`, `events_partial` [same shape] (event types the port dispatches with a documented gap) |
 | `ai` | object | (v4) `token_coverage`: {`checked` (AI data loaded), `equations`, `leaves` (distinct token paths), `missing` [{`token` (as written: `Variable_Target.EnemyForce.X`), `equations`, `first_equation`, `first_file`, `in_mod`}]}: paths neither the galactic resolver's registry nor the tactical leaf tables evaluate, so the equation fails (retail's rule for an unknown leaf, `AI_GALACTIC_TOKENS.md` §9.1) |
 | `limits` | [object] | (v4) `limit`, `value`, `needed`: data that hits a guard or a cited retail limit (filled by `mcx5`; empty until then) |
-| `grade` | object | (v4) `grade` (`"G0"` errors, `"G1"` loads; G2 and up need runs), `g3_static` (bool: no honour gap, binding gap, missing reward or missing token from the mod's own files), `blocking` [`"<issue kind> <subject>"`] |
+| `grade` | object | (v4) `grade` (`"G0"` errors, `"G1"` loads; G2 and up need runs), `g3_static` (bool: no honour gap, binding gap, missing reward or missing token from the mod's own files), `blocking` [`"<issue kind> <subject>"`], `check_errors` [string] (a version 4 check that threw; not counted in `errors`) |
 
 `in_mod` is true when the file the finding comes from resolves to a mod folder. The synthetic mods of
 `engine/apps/game/testdata/mod_fixture` (modc t07, t12, t15, t16; README there) are checked through this summary in ctest

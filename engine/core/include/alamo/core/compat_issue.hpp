@@ -70,7 +70,8 @@ struct CompatIssue {
 
 class IssueSink {
 public:
-    // Adds the issue, or counts it on the record with the same (kind, subject, source). Returns that record.
+    // Adds the issue, or counts it on the record with the same (kind, subject, source). Returns that record; the
+    // reference is valid until the next add / merge / clear.
     const CompatIssue& add(CompatIssue issue);
     const CompatIssue& add(IssueKind kind, IssueSeverity severity, std::string subject, std::string source,
                            std::string detail = {}, bool retail_equivalent = false, uint16_t layer = kNoLayer);

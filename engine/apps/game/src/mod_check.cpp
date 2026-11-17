@@ -1084,8 +1084,8 @@ void honour_gaps_databases(const GameData& d, GapMap& m) {
             for (const auto& [e, c] : checked) {
                 for (const std::string_view owner : db.owners) {
                     const objects::TagLedgerRow* row = objects::find_tag_ledger(owner, c.name());
-                    if (!row || !objects::is_honour_gap(row->state)) continue;
-                    if (!default_value(c.text_trimmed(), row->code, {}))
+                    if (!row) continue;  // the first owner that lists the tag decides
+                    if (objects::is_honour_gap(row->state) && !default_value(c.text_trimmed(), row->code, {}))
                         note_gap(m, *row, path + "#" + std::to_string(e.index()), path, in_mod);
                     break;
                 }
@@ -1281,7 +1281,7 @@ void compat_issues_and_grade(ModCheckReport& r) {
             (i.kind == IssueKind::HonourGap || i.kind == IssueKind::BindingUnconsumed || i.kind == IssueKind::RewardMissing ||
              i.kind == IssueKind::TokenMissing || i.kind == IssueKind::AssetRejected))
             r.grade.blocking.push_back(std::string(alamo::issue_kind_name(i.kind)) + " " + i.subject);
-    r.grade.g3_static = r.grade.grade != "G0" && r.grade.blocking.empty();
+    r.grade.g3_static = r.grade.grade != "G0" && r.grade.blocking.empty() && r.grade.check_errors.empty();
 }
 
 void append(std::string& s, const char* fmt, auto... args) {
@@ -1378,9 +1378,17 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
     if (options.shaders) guarded("shaders", [&] { check_shaders(d, r, options.shader_compile, options.fx_cache_dir); });
     if (options.files && options.submod) guarded("submod", [&] { check_submod(r, options, r.submod); });
     if (options.compat) {  // mcx0 t06: report version 4 (after the checks it reads)
-        guarded("honour gaps", [&] { check_honour_gaps(d, r); });
-        guarded("story", [&] { check_story(d, r); });
-        guarded("token coverage", [&] { check_token_coverage(d, r); });
+        // A throw here is not a load error (version 4 never changes errors / warnings): grade.check_errors, G3 stays open.
+        const auto compat_guarded = [&](const char* what, auto&& fn) {
+            try {
+                fn();
+            } catch (const std::exception& e) {
+                r.grade.check_errors.push_back(std::string(what) + ": exception: " + e.what());
+            }
+        };
+        compat_guarded("honour gaps", [&] { check_honour_gaps(d, r); });
+        compat_guarded("story", [&] { check_story(d, r); });
+        compat_guarded("token coverage", [&] { check_token_coverage(d, r); });
         retail_equivalent_from_checks(r);
         compat_issues_and_grade(r);
     }
@@ -2048,6 +2056,7 @@ std::string format_mod_report_json(const ModCheckReport& r) {
     j.key("g3_static");
     j.boolean(r.grade.g3_static);
     j.strings("blocking", r.grade.blocking);
+    j.strings("check_errors", r.grade.check_errors);
     j.close('}');
     j.close('}');
     j.out.push_back('\n');

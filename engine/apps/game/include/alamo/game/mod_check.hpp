@@ -249,7 +249,7 @@ struct TokenGap {
 struct TokenCoverage {
     bool checked = false;       // AI data loaded and the build has the galactic AI
     uint32_t equations = 0, leaves = 0;  // parsed equations; distinct token paths
-    std::vector<TokenGap> missing;       // paths the port's galactic resolver does not evaluate (the equation fails)
+    std::vector<TokenGap> missing;       // paths neither the galactic registry nor the tactical leaf tables evaluate
 };
 struct LimitHit {
     std::string limit;
@@ -259,6 +259,7 @@ struct CompatGrade {
     std::string grade;                 // "G0" (errors) or "G1" (loads); G2+ need runs (corpus runner, mcx7)
     bool g3_static = false;            // no blocking finding in the mod's own content
     std::vector<std::string> blocking; // "<issue kind> <subject>" of the findings that block G3
+    std::vector<std::string> check_errors;  // a version 4 check that threw (not counted as errors; G3 stays open)
 };
 
 struct ModCheckReport {
@@ -297,8 +298,9 @@ struct ModCheckReport {
     ShaderCheck shaders;                         // effect audit issues (warnings)
     SubmodHint submod;                           // empty unless the mod's own data names missing files
     std::vector<std::string> check_errors;       // a check above that threw: "<check>: exception: <what>"
-    // mcx0 t06 (version 4). `issues` holds every finding below as core CompatIssue records (layer 0 = a mod folder,
-    // kBaseLayer = base game); the lists are its views for the report.
+    // mcx0 t06 (version 4). `issues` holds every finding below as core CompatIssue records; the lists are its views for
+    // the report. Layer: 0 = any mod folder (the report does not tell stacked mods apart yet: mcx3 provenance),
+    // kBaseLayer = base game.
     IssueSink issues;
     std::vector<HonourGap> honour_gaps;            // most uses first, then class and tag
     std::vector<RetailEquivalentFinding> retail_equivalent;  // by kind, then most uses

@@ -1938,9 +1938,6 @@ void test_force_members() {
                 "ground leaf 800, 0x5f2430 untyped 4350 / 2300, typed Capital 1800, Structure 1500\n");
 }
 
-// galab t06 (GALAB_ABILITIES_RE §8): Variable_Self.HomePlanet.* resolves through the player's campaign Home_Location planet
-// (player +0x188); Is_Home_Planet (BasicGalacticEquations) compares the target's type token with it. A player without a
-// home planet: the root is unbound, the leaf (and the equation) fails.
 // mcx0 t05 (docs/MOD_COMPAT_DESIGN.md §9.4): the token path registry and the handlers agree. Every registered path is
 // taken by its root's handler chain (dispatches), and no candidate path the chain takes is missing from the registry.
 // Candidates: the registry itself, every registered path tried on the other roots, and the paths AI_GALACTIC_TOKENS.md §5
@@ -2002,6 +1999,9 @@ void test_token_registry() {
     std::printf("  token registry: %zu registered, %zu candidates, %u handled\n", reg.size(), cand.size(), taken);
 }
 
+// galab t06 (GALAB_ABILITIES_RE §8): Variable_Self.HomePlanet.* resolves through the player's campaign Home_Location planet
+// (player +0x188); Is_Home_Planet (BasicGalacticEquations) compares the target's type token with it. A player without a
+// home planet: the root is unbound, the leaf (and the equation) fails.
 void test_home_planet() {
     MemoryFiles files;
     AiDefinitions defs;

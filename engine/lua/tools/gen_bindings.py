@@ -106,9 +106,6 @@ def op_consumers():
                 for m in note.finditer(text):  # an indirect consumer (a request list the host reads)
                     if m.group(1) in ops:
                         out.setdefault(ops[m.group(1)], set()).add(f"{rel_dir}/{name}")
-                for m in note.finditer(text):  # an indirect consumer (a request list the host reads)
-                    if m.group(1) in ops:
-                        out.setdefault(ops[m.group(1)], set()).add(f"{rel_dir}/{name}")
     return {k: sorted(v) for k, v in out.items()}
 
 
