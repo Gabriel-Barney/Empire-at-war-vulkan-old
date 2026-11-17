@@ -1,6 +1,7 @@
 # Mod compatibility system: design
 
-**Status: proposal (2026-11-17), not yet decided.** It turns the evidence in
+**Status: accepted with Gabriel's decisions D1-D7 (2026-11-17, §17, `DECISIONS.md` "Mod compatibility system
+decisions"). The work is roadmap Stage 9 · Mod compatibility system (groups `mcx0`-`mcx9`, §16).** It turns the evidence in
 [`MOD_AUDIT_2026-11-17.md`](MOD_AUDIT_2026-11-17.md) into a system whose goal is that **most, if not all, Forces of
 Corruption mods play in the port as they do in retail**.
 
@@ -27,7 +28,7 @@ Contents:
 14. Retail as the oracle
 15. Saves, mod versions and the launcher
 16. Delivery plan (roadmap groups with exit tests)
-17. Decisions needed from Gabriel
+17. Decisions (Gabriel, 2026-11-17)
 18. Risks
 Appendix A. Glossary · Appendix B. Gap index (audit → design section)
 
@@ -57,7 +58,8 @@ The corpus target is in §16.
 | Lua 5.0.2 scripts, every retail binding, story / AI / object / scoring / free-store scripts | 32-bit Lua bytecode (retail x64 rejects it too) |
 | ALO, ALA, particles, DDS / TGA / BMP, `.ted`, `.fx` / `.fxo`, WAV / MP3, Bink 1, DAT text, fonts, GUI files | Mods that patch the game executable or inject native code (none found, audit §7) |
 | `modinfo.json` (the community `eaw.modinfo` spec) for names, languages and dependencies | Matching retail's crashes or hangs (§2 P6) |
-| Base-EaW mods (`sweaw MODPATH=`): **decision needed, §17 D1** | Speed while tier-3 work is paused: a too-slow mod is filed, not fixed (DECISIONS "Current focus") |
+| Detecting base-EaW mods so they are refused with a clear reason (D1) | Base-EaW mods (`sweaw MODPATH=`): FoC mods only (D1) |
+| | Speed while tier-3 work is paused: a too-slow mod is filed, not fixed (DECISIONS "Current focus") |
 
 ### 1.3 Compatibility grades
 
@@ -194,7 +196,7 @@ Every mounted mod gets one `ModDescriptor`, built from its folder before anythin
 | `name`, `version`, `summary`, `icon` | `modinfo.json` (and `*-modinfo.json` variants), else `<Info Name=...>` in its MEG lists, else folder | Picker, report, save mismatch text |
 | `languages` | `modinfo.json` `languages` (`code`, `support` bit flags 1 text / 2 speech / 4 SFX) | Text / speech language choice (§10.4) |
 | `dependencies` | `modinfo.json` `dependencies` (ordered; `modtype` 0 local / 1 workshop / 2 virtual; optional resolve layout first element) | Stack resolution (§5.2) |
-| `game_tag` | `steamdata.tags` contains `EAW` or `FOC`; else heuristics (§5.4) | Refuse or route base-EaW mods (§17 D1) |
+| `game_tag` | `steamdata.tags` contains `EAW` or `FOC`; else heuristics (§5.4) | Refuse base-EaW mods (D1, §17) |
 | `content_hash` | hash of the sorted (path, size, mtime) list of `Data\` plus MEG headers | Save fingerprint, corpus cache key, "mod updated" detection |
 
 `modinfo.json` parsing follows the AlamoEngine-Tools `eaw.modinfo` spec: comments and trailing commas allowed, unknown
@@ -228,8 +230,8 @@ Downloading a parent is outside the port: no Steam API, by decision. The launche
 ### 5.4 Base-EaW mods
 
 A folder tagged `EAW`, or one whose `GameObjectFiles.xml` names no FoC-only file and whose scripts call no FoC-only
-binding, is a probable base-EaW mod. Retail FoC does not run those. Until Gabriel decides D1 (§17), the registry
-reports "base-EaW mod: retail runs it with sweaw.exe" and the grade is G0 with that reason.
+binding, is a probable base-EaW mod. Retail FoC does not run those, and the port supports FoC mods only (D1): the
+registry refuses it with "base-EaW mod: retail runs it with sweaw.exe", and the grade is G0 with that reason.
 
 ---
 
@@ -361,7 +363,7 @@ the four tags in a comment (`// limit: retail SKIRMISH_SETUP §1`).
 | `.ted` grid 1,985 vertices | Retail's limit (`re-question`), else dynamic |
 | Fog 512 cells per axis | Dynamic with the map, or cite |
 | Lua `Company_Units` 256 views | Dynamic |
-| Squadron resize `kPortSquadronSize` | A [port] rule by Gabriel. **D2**: keep it for mods, or apply it only with no mod (mods tuned their squadrons for retail sizes) |
+| Squadron resize `kPortSquadronSize` | Removed (D2): retail's `Squadron_Units` lists and prices for base FoC and mods. The wing HUD stays |
 
 ---
 
@@ -585,8 +587,7 @@ headless runs (G2), the smokes (G3 front end), and recorded retail results (G4).
 | Set | What | Who maintains it |
 |---|---|---|
 | **Reference set** (`MODS.md` §10.3) | TR, FotR, EAW-Remake, Age of Legends | Must reach G4 |
-| **Corpus** | Every mod installed on the PC (workshop and `Mods\`), with its stacks | Must reach G3, and lists the rest with blockers |
-| **Wish list** (audit §7) | The most-subscribed mods not installed: Republic at War, Awakening of the Rebellion, The Clone Wars, Old Republic at War, Battlefront Commander, Ultimate GC CE, Rise of the Mandalorians, Revan's Revenge, Stargate: Pegasus Chronicles, a pure XML cap mod, an EaWX submod (Shield Penetration), one base-EaW mod (D1) | Gabriel subscribes. They join the corpus automatically |
+| **Corpus** (D6) | The currently installed workshop mods and their local `Mods\` submods, with their stacks: 1125571106, 1976399102, 1770851727, 2858787558, 3622043265, and `Thrawns_Legacy_HD`, `Legeds_ships_transfer`, `AOW_Thrawns_Legacy_Compatibility` on TR. 3830298393 is an uploader test item without `Data\` (G0, nothing to mount) | Must reach G3, and lists the rest with blockers. A mod installed later joins automatically |
 | **Conformance mods** | Small generated mods, one per mechanism, under `engine/apps/game/testdata/conformance/` | Lanes, with each mechanism |
 
 **Conformance mods** extend today's fixture: one tiny mod per mechanism, generated by a script from a template and
@@ -681,7 +682,9 @@ Additions:
   than the first differing hash.
 - **Allow-different-data (D3).** The player may load anyway. The load goes ahead only when every type, faction and
   script the save references still exists, and the session is marked "loaded with different data". Retail lets players
-  load saves across mod updates and often breaks; this is the friendlier version.
+  load saves across mod updates and often breaks; this is the friendlier version. Continuing an outdated save on a newer
+  mod version is **not supported** (Gabriel, D3): the dialog says so, and bugs in such a session are not filed as port
+  bugs.
 
 **Launcher and mod picker.**
 - The resolved stack of §5.2: a submod pulls in its declared or likely parent (today it is only checked in the crash
@@ -706,16 +709,16 @@ The plan follows the roadmap rules:
 | Order | Group (proposed id) | Contents (§) | Exit test |
 |---|---|---|---|
 | 1 | `mcx0` Ledgers and issue sink | Issue sink (§11.1); tag ledger generator, accessor annotation, lint (§7.2); binding effect column (§9.1); story and token registration (§9.3, §9.4); report v4 keys `honour_gaps`, `bindings`, `story`, `ai.token_coverage`, `retail_equivalent` | `alamo_mod_check` v4 on the 4 reference mods lists honour gaps, unconsumed bindings, missing rewards and tokens; ledger lint in the gate; base FoC report unchanged except the new keys |
-| 2 ∥ | `mcx1` Value semantics and XML robustness | §7.1 module; per-class duplicate rule (`re-question`); UTF-16; multiple roots; element-tag independence (D4) | Conformance mod `values` passes; base goldens unchanged, or moved with Gabriel's approval (D4) |
+| 2 ∥ | `mcx1` Value semantics and XML robustness | §7.1 module; per-class duplicate rule (`re-question`); UTF-16; multiple roots; element-tag independence (D4); retail squadrons (D2) | Conformance mod `values` passes; base goldens unchanged, or moved with Gabriel's approval (D4) |
 | 2 ∥ | `mcx2` Assets: audit and salvage | Report `assets` section (§12.1, loose and MEG); salvage mode with the §10.2 rules; probe kit `compat_assets` for retail's behaviour; texture formats (§10.3) | Every asset referenced by the 4 reference mods decodes or salvages under a retail-confirmed rule; 0 `asset_rejected` outside retail-equivalent cases |
-| 2 ∥ | `mcx3` Registry and stacks | Descriptor, `modinfo.json`, stack resolution, conflicts (§5); MEG verify / normalise (§6); launcher and picker use it (§15) | Conformance mods `stack_dep`, `stack_cycle`, `meg_unsorted` pass; the AOW → Legacy HD → TR stack resolves from the AOW folder alone |
+| 2 ∥ | `mcx3` Registry, stacks and saves | Descriptor, `modinfo.json`, stack resolution, conflicts (§5); base-EaW refusal (D1); MEG verify / normalise (§6); save load-anyway (D3); launcher and picker use it (§15) | Conformance mods `stack_dep`, `stack_cycle`, `meg_unsorted` pass; the AOW → Legacy HD → TR stack resolves from the AOW folder alone |
 | 3 | `mcx4` Honour gaps: base-used tags | Ledger rows with `base_uses > 0` and tier 1, by use: `Special_Case_Production`, `Size_Value`, the GameConstants level maxima and taxation, turret target filters, `Fires_Forward`, blast dropoff, tech increment / decrement, bribe and cash points, ability modifiers (each needs its `docs/re` spec first) | Every tier-1 ledger row used by base FoC is `consumed` with a test; the remaining rows are filed by corpus use |
 | 3 ∥ | `mcx5` Limits | §8 table: dynamic players, GameConstants maxima, fleet distance, `.ted`, fog, company views; limit lint | Conformance mods `factions_80`, `levels_10` run G2; lint passes |
 | 3 ∥ | `mcx6` Story and bindings | The 18 rewards; WIN/LOSE composition; `Hide_Sub_Object` and the cinematic consumers; land task-force bodies; `require`; AI `.lc`; skirmish scoring world; `Player_Quit_Event`; runaway budget | Story ledger: 0 missing retail rewards; binding ledger: 0 `recorded` without a consumer, 0 `noop-gap`; TR's SWITCH_SIDES / FORCE_RETREAT plots run |
 | 4 | `mcx7` Corpus runner and mod goldens | §13.2 runner, cache, matrix, regression exit code; §13.3 mod goldens; `MODS.md` §10.4 generated | One full sweep recorded; a deliberately broken conformance mod drops a grade and the runner exits non-zero |
-| 5 | `mcx8` Corpus to G3 | Fix the blockers the matrix lists, mechanism by mechanism; add wish-list mods as Gabriel installs them | Every installed mod and stack at G3, or G0 / G1 / G2 with only retail-equivalent or out-of-scope blockers |
+| 5 | `mcx8` Corpus to G3 | Fix the blockers the matrix lists, mechanism by mechanism, on the installed corpus (D6) | Every installed mod and stack at G3, or G0 / G1 / G2 with only retail-equivalent or out-of-scope blockers (D7) |
 | 6 | `mcx9` Reference set to G4 | Differential retail runs (§14.3) on the 4 reference mods; Gabriel's played battle (`modc` t51) | Tier-1 checks agree; tier-2 metrics inside the distribution |
-| later (tier 3) | `mcx-perf` | Big-obstacle movement cost (`modc` t33); out-of-process picker check (b0479); asset decode cache | When the tier focus lifts |
+| later (tier 3) | no group | Big-obstacle movement cost (`modc` t33, stays in `modc`); out-of-process picker check (backlog b0479) | When the tier focus lifts |
 
 How the groups depend on each other:
 - `mcx0` comes first: every later group's exit test reads its report.
@@ -723,22 +726,38 @@ How the groups depend on each other:
 - `mcx4-6` need `mcx0`'s ledgers.
 - `mcx7` can start after `mcx0`.
 
-On the roadmap these become groups in the MODC box (or a new box in Stage 6). The open `modc` tasks (t33, t35, t50, t51)
-move into the matching group. Writing them to the roadmap is a `to-tickets` step after Gabriel's review.
+**On the roadmap** (Gabriel, 2026-11-17): the groups form their own stage, **Stage 9 · Mod compatibility system** (lane
+`st9`), separate from Stage 6's `modc` and `q6`. The open `modc` tasks (t33, t35, t50, t51) stay in `modc`. Stage 9
+follows the normal group rules: a cap of 8 tasks, and S3 findings go to the backlog. Stage 6's keep-follow-ups exception
+does not apply.
+
+Boxes:
+
+| Box | Label | Groups |
+|---|---|---|
+| `MCX1` | Ledgers and load report v4 | `mcx0` |
+| `MCX2` | Data, values and limits | `mcx1`, `mcx4`, `mcx5` |
+| `MCX3` | Scripts, story and presentation | `mcx6` |
+| `MCX4` | Assets and salvage | `mcx2` |
+| `MCX5` | Registry, stacks and saves | `mcx3` |
+| `MCX6` | Corpus and grades | `mcx7`, `mcx8`, `mcx9` |
 
 ---
 
-## 17. Decisions needed from Gabriel
+## 17. Decisions (Gabriel, 2026-11-17)
 
-| # | Question | Options | Recommendation |
+Recorded in `DECISIONS.md`, "Mod compatibility system decisions".
+
+| # | Question | Decision | Where it lands |
 |---|---|---|---|
-| D1 | Base-EaW mods (run by retail through `sweaw.exe`, not FoC) | a) out of scope, refused with a reason; b) supported: an EaW mode that mounts EaW's data only and uses the EaW schema | a) for now. The port is a FoC engine, and the EaW mods with a following mostly have FoC editions. Revisit when the corpus says otherwise |
-| D2 | The squadron resize rule for mods | a) apply to every mod (today); b) apply only with no mod; c) a setting, default as a) | c). Mods balance their squadrons for retail sizes, so a player of a mod should be able to turn it off without a command-line flag |
-| D3 | Loading a save made with a different mod version | a) refuse (today); b) offer "load anyway" when every referenced type, faction and script still exists | b) |
-| D4 | Element-tag independence (planets from any element, galactic roles from behaviours) can move base-FoC goldens | Approve the moves once the lane shows that the moved behaviour matches retail | Approve, as with modc t17 / t19 |
-| D5 | Run-time salvage of broken assets where retail also shows nothing | a) match retail (show nothing, report); b) draw what can be salvaged | a). P6 keeps a mod tested in the port honest in retail |
-| D6 | Wish-list mods | Gabriel subscribes to the ones he wants covered | At least: Republic at War, Awakening of the Rebellion, The Clone Wars, Stargate: Pegasus Chronicles, one XML cap mod |
-| D7 | The corpus target | a) G3 on every installed mod; b) G3 on 90 % | a). Every miss is a mechanism, and fixing it helps every mod that uses it |
+| D1 | Base-EaW mods (run by retail through `sweaw.exe`) | **FoC mods only.** Keep the detection, so the refusal message says why | §5.4; `mcx3` |
+| D2 | The squadron resize rule (2026-11-13) | **Back to retail's squadron handling** for base FoC and mods: no resize to 12, no price scaling. The wing HUD stays | §8; `mcx1` (base goldens move, named in the commit) |
+| D3 | Loading a save made with a different mod version | **Load anyway after a check**: every referenced type, faction and script still exists; the session is marked "loaded with different data"; the message names the mod and both versions. Continuing an outdated save on a newer mod version is **not supported** | §15; `mcx3` |
+| D4 | Element-tag independence (may move base-FoC goldens) | **Fix it everywhere.** Golden moves are approved once the lane shows the behaviour matches retail | §7.1; `mcx1` |
+| D5 | Broken mod art | **Match retail**: salvage and draw where retail draws, show nothing and report where retail shows nothing. A "lenient art" setting only if players ask; `--strict` lists every defect | §10.2; `mcx2` |
+| D6 | Corpus | **The currently installed workshop mods** (and their local submods); no extra subscriptions | §13.1; `mcx7`, `mcx8` |
+| D7 | Corpus target | **G3 on every installed mod and stack**, lower only for retail-equivalent or out-of-scope reasons; G4 on the reference set | §1.3; `mcx8`, `mcx9` |
+| — | Roadmap placement | **Its own numbered stage**, separate from the current mod groups: Stage 9 · Mod compatibility system | §16 |
 
 ---
 
