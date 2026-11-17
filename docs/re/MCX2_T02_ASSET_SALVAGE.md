@@ -30,7 +30,7 @@ probe copies:
 
 ## 3. Probe results
 
-**Run 1 (2026-11-17, `out\2061117-175406`, coordinator session; all 16 slots).** `CTRL` spawned through `Spawn_Unit`
+**Run 1 (2026-11-17, `out\20261117-175406`, coordinator session; all 16 slots).** `CTRL` spawned through `Spawn_Unit`
 and drew like a shipped AT-ST (walk pose). `NOCONN` (no connections chunk) did not come back from `Spawn_Unit`; the
 probe's fallback `Create_Generic_Object` returned an object. The game then froze at the credits value 6,272 and a system
 bugcheck (0x133 DPC_WATCHDOG_VIOLATION) rebooted the PC about 2.5 minutes later. The records stop after `NOCONN`'s
@@ -38,7 +38,7 @@ bugcheck (0x133 DPC_WATCHDOG_VIOLATION) rebooted the PC about 2.5 minutes later.
 places the freeze at slot 3's spawn (`NOINFO` in this run). `OVR` and `ANS` stay out of every rerun (Gabriel,
 2026-11-17: too risky after the bugcheck); they stay unprobed guesses.
 
-**Run 2 (2026-11-17, `out\2061117-183558`, `--skip NOINFO,OVR,ANS`).** `CTRL` drawn (walk pose). `NOCONN` again only
+**Run 2 (2026-11-17, `out\20261117-183558`, `--skip NOINFO,OVR,ANS`).** `CTRL` drawn (walk pose). `NOCONN` again only
 through `Create_Generic_Object` (f=606); it stayed alive to its `HOLD_END` (f=876, `alive=1`) and the game ran on, but
 **nothing was drawn at its spot**: shot 8 shows the slot caption, the camera on `NOCONN`'s position and only `CTRL`
 beside it. Then `SPILL`'s `SPAWN_BEGIN` (f=909) and nothing more: the picture stopped (shots 11-33 identical apart from
