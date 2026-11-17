@@ -190,9 +190,8 @@ saves carry it.
   Phase 1 is done; phases 2 and 3 are on the backlog.
 - **Fleet cohesion** (hotkey O): Loose (retail, the default) or Tight, where the player's moves cap every non-fighter ship
   at the slowest one's speed so the fleet keeps its spacing.
-- **Fighter and bomber squadrons of 12**, with build prices and AI combat power scaled to match, and FIGHTERS / BOMBERS
-  wing buttons (F2 / F3) in the tactical HUD. This one departs from the retail rules on purpose; parity checks run with
-  `alamo_headless --squadron-size 0` (the retail squadrons).
+- **Fighter and bomber wings**: FIGHTERS / BOMBERS wing buttons (F2 / F3) in the tactical HUD select every fighter or
+  bomber squadron at once. Squadrons themselves are retail's (the 2026-11-13 squadrons of 12 were reverted 2026-11-17).
 - **Fleet and ship names**, renamed in the galactic fleet organiser.
 - **Unit path lines** (optional): a thin line along each own moving unit's path, one per squadron or company.
 
@@ -382,7 +381,8 @@ worker count so the counts run side by side. Clang's logs equal MSVC's.
 | Mod platform (MODC) | **Nearly done** (42 of 44 tasks); the goal is near-full compatibility with FoC mods, checked on a reference set of four mods (`docs/MODS.md` §10: Thrawn's Revenge, Fall of the Republic, EAW-Remake, Age of Legends). In place: the loading contract, a lint against mod and faction names in engine code, the mod load report and picker, a `STEAMMOD=` resolver, shader model 3 translation and mod `.fx` compiling, the §10 checklist run on all four mods (2026-11-16), a player cap of 64 for large mod sandboxes, and fixes found on the way (scripted hyperspace entry, upper-case type names in every Lua VM, story `LOAD_CAMPAIGN`, skirmish staging rules). Left: EAW-Remake's station build locks and Gabriel playing a skirmish to a result with a reference mod |
 | Performance (OPT1-OPT3) | **Paused** (tier 3): p99 budget met everywhere; the first tick of a battle (setup) is still over 33.3 ms (group OPT3f, parked) |
 | All-core simulation (SP0-SP7) | **In progress** (exception to the parity focus, 2026-11-14): measurement, topology-aware job system, checkpoint-only checksums with parallel space path tries, the services phase graph and cheaper galactic goal evaluation are done (SP0-SP2, SP5); the tactical AI lane (SP3) is in progress; galactic AI on the lane, the tree-hash checksum and AI players in parallel are next |
-| Reverse-engineering tools (2026-11-15) | **In place**: Ghidra with ReVa and REA, Frida, TTD and WinDbg under `toolchaine`. Every worker may read the binary and the decompiled output, never copying it; Ghidra itself is driven by the `re-analyst` agent. Answers so far include the land and space skirmish AI rules, the story presentation rewards, the planet map and the UI widget rules |
+| Reverse-engineering tools (2026-11-15) | **In place**: Ghidra with ReVa and REA, Frida, TTD and WinDbg under `toolchain
+e`. Every worker may read the binary and the decompiled output, never copying it; Ghidra itself is driven by the `re-analyst` agent. Answers so far include the land and space skirmish AI rules, the story presentation rewards, the planet map and the UI widget rules |
 | Full QA pass | **Open**: a playtest to confirm what only tests and smoke shots have covered, and a fresh 4K capture pass over galactic, land, space and menus |
 | Benchmark (side goal) | BM1-BM3 and their follow-ups done (scenarios, sim-only and rendered runs, stress scenes, reports); the in-game screen (BM4) is in progress on a branch, not on `dev` yet |
 The detail, task by task, is on the project roadmap, which is kept in its own repository (not this one) and is the only place for status.
