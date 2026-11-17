@@ -253,6 +253,9 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
         cfg.seed = opt.seed;
         cfg.story_crc = aopt.story;
         cfg.players = sim::session_players(setup.players.size());
+        // storyb t17 / t18: a run that fights its battles runs the game-object scripts in them, as the game does (Spawn_Unit
+        // of a story script makes battle units and companies only through them); --no-object-scripts turns them off.
+        cfg.object_scripts = opt.object_scripts && aopt.battles != "auto";
         sim::SimHost host(types, js, cfg);
         if (opt.scoring)  // q6 t06
             if (const auto scoring = db.constants().get("Game_Scoring_Script_Name"))
