@@ -37,6 +37,7 @@
 #include "alamo/game/hud_feeds.hpp"
 #include "alamo/game/mod_check.hpp"
 #include "alamo/game/mod_picker.hpp"
+#include "alamo/game/planet_map.hpp"
 #include "alamo/game/radar_feed.hpp"
 #include "alamo/game/save_games.hpp"
 #include "alamo/game/story_camera.hpp"
@@ -577,6 +578,20 @@ public:
     std::string representative_icon(std::span<const objects::ObjectHandle> units, bool hero_filter = false) const;
     void planet_status(const galactic::GalacticSim& g, PlanetIndex row, ui::GalacticPlanetInfo& out) const;  // ui4 t03
     bool local_benefits_from_corruption(const galactic::GalacticSim& g) const;  // ui4 t10: the local faction's flag
+    // ui4 t04 (GALACTIC_PLANET_MAP): the planet map. planet_map_allowed = the open rules of §1.1 for the selected planet
+    // (`foreign` = the foreign-view flag); set_planet_map opens / closes it; planet_map_feed fills the HUD's map data.
+    bool planet_map_allowed(bool& foreign) const;
+    void set_planet_map(bool open);
+    void planet_map_feed(ui::GalacticPlanetMap& m);
+    // §3.2 the UI markers and world width of a planet type's land map, read on the first open [port: retail reads every
+    // planet's at boot] and kept for the session.
+    struct PlanetMapMarkers {
+        std::vector<game::PlanetMapMarker> markers;
+        float world_width = 0.0f;
+    };
+    const PlanetMapMarkers& planet_map_markers(objects::TypeIndex planet_type);
+    std::map<objects::TypeIndex, PlanetMapMarkers> planet_map_markers_;
+    uint32_t planet_map_planet_ = 0;  // the planet the map was opened for (another selection closes it)
     mutable std::vector<std::string> corruption_planet_icons_;  // ui4 t10: GameConstants Corruption_Planet_Icon
     mutable bool corruption_icons_loaded_ = false;
     bool hero_filter_ = false;  // ui4 t03: b_filters3 on (GalacticHud::filter_bits, last build)

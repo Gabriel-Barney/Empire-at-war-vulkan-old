@@ -224,10 +224,32 @@ void GalacticHud::init(const ComponentTable& table, const TextureAtlas& atlas, F
                 if (r == 0 && c == 0) pathfinder_[static_cast<size_t>(fl)] = i;  // UI.md §7.4: the header pad is no unit pad
                 else fleet_[static_cast<size_t>(fl)].push_back(i);
             }
+    // ui4 t04: the planet map's components (map_shell = planetary_mode.alo).
+    map_window_ = f("map_window");
+    radar_adv_ = f("radar_galactic_adv_map");
+    map_name_ = f("Planet_name_text");
+    map_allegiance_ = f("Allegiance_A");
+    map_day_ = f("Day_Counter_text");
+    map_income_ = f("Planetary_Income_number");
+    map_weather_ = f("weather");
+    map_bonus_ = f("planet_bonus");
+    map_back_ = f("back_button");
+    unit_cap_ = f("unit_cap_number");
+    building_cap_ = f("building_cap_number");
+    map_build_pad_.assign(80, -1);
+    map_unit_pad_.assign(10, -1);
+    for (int k = 0; k < 80; ++k) map_build_pad_[static_cast<size_t>(k)] = find_fmt(table, "build_pad%02d", k);
+    for (int k = 0; k < 10; ++k) map_unit_pad_[static_cast<size_t>(k)] = find_fmt(table, "unit_pad%02d", k);
+    map_filters_.clear();
+    for (int k = 0; k < 4; ++k) map_filters_.push_back(find_fmt(table, "c_filters%d", k));
+    map_texts_ = {f("ground_forces_text"), f("drage_drop_text"), f("unit_cap_text"), f("building_cap_text")};
     dynamic_.assign(table.size(), 0);
     auto mark = [&](int32_t i) {
         if (i >= 0) dynamic_[static_cast<size_t>(i)] = 1;
     };
+    mark(map_window_);
+    mark(radar_adv_);
+    for (const int32_t i : map_unit_pad_) mark(i);
     for (int32_t i : {name_, value_, control_, ground_, space_, conflict_, hero_, smuggler_, bounty_, ring_, planet_text_, obj_back_, obj_header_,
                       obj_text_, obj_icon_, balance_pip_, choice_text_, choice_left_, choice_right_, graph_left_, graph_right_,
                       single_text_, single_button_})
@@ -618,7 +640,7 @@ void GalacticHud::build_bar(const GalacticHudFrame& f) {
     // D12 (25.jpg, bone (175, 257)): the name's line is centred on the bone, inside the top strip. Drawn here because the generic
     // button text hangs a Max_Text_Width block below its anchor, half a line low: onto the Day bar. Bold 9, outlined and the
     // owner's colour are as in 25.jpg and the XML.
-    if (planet_text_ >= 0 && sel && fonts_) {
+    if (planet_text_ >= 0 && sel && fonts_ && !map_open_) {
         const auto u = static_cast<uint32_t>(planet_text_);
         const ComponentPlacement& p = layout_.placement(u);
         const CommandBarComponent& c = (*table_)[u];
@@ -680,6 +702,7 @@ void GalacticHud::build_bar(const GalacticHudFrame& f) {
         if (c.type != ComponentType::Button && c.type != ComponentType::TextButton && c.type != ComponentType::Icon) continue;
         const ComponentPlacement& p = layout_.placement(i);
         if (!p.placed) continue;
+        if (map_open_ && !p.from_bone) continue;  // ui4 t04: the command bar is hidden; no fallback-placed component shows
         const ButtonRuntime* r = buttons_.find_state(i);
         if (r ? r->hidden : c.hidden) continue;
         const bool has_art = !c.blank_texture.empty() || !c.icon_texture.empty() || !c.icon_alternate_texture.empty() ||
@@ -697,6 +720,11 @@ void GalacticHud::build_bar(const GalacticHudFrame& f) {
     // odd pads b_Create_01, 03 .. (lower row), any other GUI_Row the even pads b_Create_00, 02 .. (upper row), each from
     // the left in provider order; past a row's pads the options are dropped (no scrolling: b_scroll_left / _right stay
     // hidden). The shell has no build_padNN bones, so those components stay unused here.
+    if (map_open_) {  // ui4 t04 (GALACTIC_PLANET_MAP §1.2): no build pads or queue under the planet map
+        for (const auto* v : {&create_, &queue_})
+            for (const int32_t ci : *v) buttons_.state(static_cast<uint32_t>(ci)).hidden = true;
+        return;
+    }
     std::vector<GalacticBuildOption> options;
     if (sel && f.providers.build_options) f.providers.build_options(sel->planet, options);
     for (const int32_t ci : {scroll_left_, scroll_right_})
@@ -931,7 +959,7 @@ void GalacticHud::build_fleets(const GalacticHudFrame& f) {
             else buttons_.state(static_cast<uint32_t>(slots[next])).hidden = true;
         }
     }
-    for (size_t k = 0; k < land_.size(); ++k) {
+    for (size_t k = 0; k < land_.size() && !map_open_; ++k) {  // ui4 t04: the planet map owns land_fleet_NN while open
         if (k >= land.size()) {
             buttons_.state(static_cast<uint32_t>(land_[k])).hidden = true;
             continue;
@@ -1153,6 +1181,7 @@ bool GalacticHud::drop(std::vector<commands::EventData>* out) {
         if (out) out->push_back(std::move(e));
         return true;
     };
+    if (drag_.fleet_index >= kMapOrbitIndex) return map_drop(out);  // ui4 t04: a planet-map drag
     const PadSlot* over = pad_of(drag_.over_component);
     const bool from_fleet = drag_.fleet_index >= 0;
     const uint32_t unit = drag_.unit != 0 ? drag_.unit : kNone;
@@ -1307,10 +1336,12 @@ void GalacticHud::build_special_abilities(const GalacticHudFrame& f) {
 // outline (i_radar_view is in no atlas: 1-unit lines in the same layer). Mapping [port]: the planets' bounding box,
 // squared and padded 10 %, fills the radar rectangle (+X right, +Y up).
 void GalacticHud::build_radar(const GalacticHudFrame& f) {
-    if (radar_ < 0) return;
-    const ComponentPlacement& rp = layout_.placement(static_cast<uint32_t>(radar_));
-    if (!rp.placed) return;
-    const CommandBarComponent& rc = (*table_)[static_cast<size_t>(radar_)];
+    // ui4 t04 (GALACTIC_PLANET_MAP §8): while the planet map is open the blips are laid out on radar_galactic_adv_map.
+    const int32_t radar = map_open_ && radar_adv_ >= 0 ? radar_adv_ : radar_;
+    if (radar < 0) return;
+    const ComponentPlacement& rp = layout_.placement(static_cast<uint32_t>(radar));
+    if (!rp.placed || (map_open_ && !rp.from_bone)) return;
+    const CommandBarComponent& rc = (*table_)[static_cast<size_t>(radar)];
     const Vec2f size = rp.size.x > 0 ? rp.size : rc.has_size ? rc.size : Vec2f{175, 175};
     const Vec2f rc_at = rp.size.x > 0 ? rp.rect_center : rp.center;
     // Opaque backdrop (playtest: trade routes showed through the radar box). In i_galactic_controls.alo the radar_galactic
@@ -1324,7 +1355,7 @@ void GalacticHud::build_radar(const GalacticHudFrame& f) {
     add_atlas_quad(dl_, 0, HudList::Opaque, *atlas_, {}, rc_at, {}, 1.0f, kGalacticRadarBackdrop, size);
     stats_.radar_backdrop = true;
     radar_half_ = 0.0f;
-    hit(radar_, static_cast<uint32_t>(std::max(0, rc.base_layer)), rc_at, size);  // ui4 t07: the radar takes clicks
+    hit(radar, static_cast<uint32_t>(std::max(0, rc.base_layer)), rc_at, size);  // ui4 t07: the radar takes clicks
     if (f.planets.empty()) return;
     float x0 = f.planets[0].position.x, x1 = x0, y0 = f.planets[0].position.y, y1 = y0, z = 0.0f;
     for (const GalacticPlanetInfo& p : f.planets) {
@@ -1610,13 +1641,20 @@ void GalacticHud::build(const GalacticHudFrame& f) {
     shell(organize_, organize);
     shell(pending_shell_, prompt2);
     shell(story_pending_shell_, prompt1);
+    // ui4 t04 (GALACTIC_PLANET_MAP §1.2 / §1.3): the planet map replaces the command bar (and the organiser, above).
+    map_open_ = f.advanced_map_open;
+    shell(commandbar_, !map_open_);
+    shell(map_shell_, map_open_);
     stats_.organize_shown = organize;
     // Prompt buttons not shown this frame take no clicks.
     for (const int32_t ci : {choice_left_, choice_right_, single_button_})
         if (ci >= 0) buttons_.state(static_cast<uint32_t>(ci)).hidden = true;
     layout_.update(canvas_, *table_);
-    build_labels(f);
-    build_special_abilities(f);
+    build_planet_map(f);  // before build_bar: the map's text states feed its generic component loop
+    if (!map_open_) {     // §1.4: the galaxy is covered by pm_backdrop
+        build_labels(f);
+        build_special_abilities(f);
+    }
     build_bar(f);
     build_radar(f);
     build_day_pips(f);
@@ -1772,7 +1810,7 @@ void GalacticHud::update_input(const RoutedInput& routed, bool shift, bool ctrl,
         // ui4 t07 (HUD_GAPS §10.1, 0x3d1260): a left click on the galactic radar moves the camera to that point; it never
         // selects a planet. [port] the point is the inverse of the blips' fit to the planets (build_radar), so the click
         // lands where the radar shows it; retail maps the radar to a fixed +-380 x +-460 galaxy extent.
-        if (k.component == radar_ && radar_ >= 0) {
+        if (k.component >= 0 && (k.component == radar_ || k.component == radar_adv_)) {
             if (k.button == Button::Left && radar_half_ > 0.0f && radar_size_.x > 0.0f && radar_size_.y > 0.0f) {
                 const Vec2f c = canvas_.pixel_to_canvas(static_cast<float>(k.x) + 0.5f, static_cast<float>(k.y) + 0.5f);
                 HudAction a;

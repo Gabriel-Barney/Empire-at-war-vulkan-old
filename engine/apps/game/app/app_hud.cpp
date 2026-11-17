@@ -2,6 +2,8 @@
 #include "game_app.hpp"
 
 #include "alamo/assets/texture.hpp"
+#include "alamo/sim/map_spawn.hpp"  // ui4 t04: TypeCrcIndex for the land-map UI markers
+#include "alamo/terrain/ted.hpp"
 
 namespace alamo_game_app {
 
@@ -212,6 +214,151 @@ bool App::local_benefits_from_corruption(const galactic::GalacticSim& g) const {
     if (me < 0 || static_cast<size_t>(me) >= g.players().size()) return false;
     const uint32_t fx = g.players()[static_cast<size_t>(me)].faction;
     return fx < g.rules().factions.size() && g.rules().factions[fx].benefits_from_corruption;
+}
+
+// ---- ui4 t04: the planet map (GALACTIC_PLANET_MAP) -------------------------------------------------------------------
+// §1.1: a selected planet in galactic mode with an accessible surface; for a planet the local player does not own, ground
+// the local player may see (GroundCompanyContents: the corruption bypass, the Planet_Groundbase_Stealth gate, the
+// visibility bit) - then `foreign` is set.
+bool App::planet_map_allowed(bool& foreign) const {
+    foreign = false;
+    const galactic::GalacticSim* g = galaxy();
+    if (!g || screen_ != Screen::Galactic || selected_planet_ == 0) return false;
+    const PlanetIndex row = planet_index(*g, selected_planet_);
+    if (row == kInvalidPlanet || !g->surface_accessible(row)) return false;
+    const int32_t me = local_player();
+    if (g->planets()[row].owner == me) return true;
+    using PI = galactic::GalacticSim::PlanetInfo;
+    if (!g->can_see_planet_info(me, row, PI::GroundCompanyContents)) return false;
+    foreign = true;
+    return true;
+}
+
+void App::set_planet_map(bool open) {
+    bool foreign = false;
+    // §1.1 condition 2: no FoC ability dialog (corruption, sabotage, black market / slice, hack) open. A refused open does
+    // nothing (no sound, no text).
+    const bool dialog = corruption_.open() || sabotage_.open() || market_.open() || slice_.open() || hack_.open();
+    if (open && (planet_map_open_ || dialog || !gview_.camera().zoomed() || !planet_map_allowed(foreign))) return;
+    planet_map_open_ = open;
+    planet_map_planet_ = open ? selected_planet_ : 0u;
+}
+
+const App::PlanetMapMarkers& App::planet_map_markers(objects::TypeIndex planet_type) {
+    auto [it, fresh] = planet_map_markers_.try_emplace(planet_type);
+    if (!fresh || planet_type == objects::kNone || planet_type >= data_.types.size() || !data_.files) return it->second;
+    const std::string_view map = ascii_trim(data_.types.get_string(planet_type, "Land_Tactical_Map"));
+    if (map.empty()) return it->second;
+    terrain::MapData md;
+    terrain::ParseOptions po;
+    po.objects = false;
+    po.zones = false;
+    if (!terrain::load_map(*data_.files, map, md, nullptr, po)) return it->second;
+    it->second.world_width = md.info.world_width;
+    const sim::TypeCrcIndex index(data_.types);
+    const auto& names = data_.types.raw().types().name;
+    for (const terrain::PreviewObject& o : md.preview_objects) {
+        const objects::TypeIndex t = index.find(o.type_crc);
+        if (t == objects::kNone || t >= names.size()) continue;
+        game::PlanetMapMarker m;
+        m.id = static_cast<int32_t>(o.object_id);
+        m.x = o.position.x;
+        m.y = o.position.y;
+        for (const std::string_view tok : data_.types.get_list(t, "Marker_For_Specific_Object_Type"))
+            if (const objects::TypeIndex x = data_.types.resolve_name(ascii_trim(tok)); x != objects::kNone) m.specific.push_back(x);
+        m.cls = game::classify_map_marker(names[t], !m.specific.empty());
+        if (m.cls != game::MapMarkerClass::None) it->second.markers.push_back(std::move(m));
+    }
+    return it->second;
+}
+
+void App::planet_map_feed(ui::GalacticPlanetMap& m) {
+    const galactic::GalacticSim* g = galaxy();
+    if (!g) return;
+    const PlanetIndex row = planet_index(*g, selected_planet_);
+    if (row == kInvalidPlanet) return;
+    const galactic::PlanetState& ps = g->planets()[row];
+    const objects::ObjectStore& st = g->store();
+    const int32_t me = local_player();
+    planet_map_allowed(m.foreign);
+    m.planet = selected_planet_;
+    const auto pt = static_cast<objects::TypeIndex>(ps.type);
+    auto icon = [&](uint32_t t) { return t < ui_.hud_types.size() ? ui_.hud_types[t].icon_name : std::string(); };
+    if (pt != objects::kNone && pt < data_.types.size()) {  // §3.1 picture, §1.2 step 6 icons
+        m.picture = ui::planet_info_map_icon(ascii_trim(data_.types.get_string(pt, "Land_Tactical_Map")));
+        m.weather_icon = std::string(data_.types.get_string(pt, "Encyclopedia_Weather_Icon"));
+        m.ability_icon = std::string(data_.types.get_string(pt, "Planet_Ability_Icon"));
+    }
+    m.images = &hud_images_;
+    // §4: pads from the markers, the structures (§4.4) and the owner's landed units (§4.5).
+    const PlanetMapMarkers& mk = planet_map_markers(pt);
+    std::vector<game::PlanetMapPad> pads = game::planet_map_pads(mk.markers);
+    std::vector<game::PlanetMapStructure> structures;
+    int32_t live_structures = 0;
+    for (const objects::ObjectHandle h : ps.structures) {
+        if (!st.alive(h)) continue;
+        ++live_structures;
+        const objects::TypeIndex t = st.type(h);
+        game::PlanetMapStructure s;
+        s.object = static_cast<uint32_t>(st.id(h));
+        s.type = t;
+        const std::string_view base = ascii_trim(data_.types.get_string(t, "Base_Position"));
+        s.base = ascii_iequals(base, "In_Base") ? uint8_t{1} : ascii_iequals(base, "Out_Base") ? uint8_t{2} : uint8_t{0};
+        if (const galactic::GalacticSim::StructureSlot* sl = g->structure_slot(st.id(h))) s.marker = sl->marker;
+        const objects::TypeIndex other =
+            data_.types.resolve_name(ascii_trim(data_.types.get_string(t, "Place_Other_Type_At_Every_Specific_Marker_Position")));
+        s.place_other = other != objects::kNone ? other : game::kNoMapType;
+        for (const std::string_view tok : data_.types.get_list(t, "Tactical_Additional_Structure_Type"))
+            if (const objects::TypeIndex x = data_.types.resolve_name(ascii_trim(tok)); x != objects::kNone) s.additional.push_back(x);
+        structures.push_back(std::move(s));
+    }
+    game::place_map_structures(pads, structures, [this](uint32_t t) {
+        return t < data_.types.size() ? data_.types.get_float(static_cast<objects::TypeIndex>(t), "Base_Shield_Radius") : 0.0f;
+    });
+    std::vector<uint32_t> units, unit_types;
+    for (const objects::ObjectHandle h : ps.surface)
+        if (st.alive(h) && st.owner(h) == ps.owner) {
+            units.push_back(static_cast<uint32_t>(st.id(h)));
+            unit_types.push_back(st.type(h));
+        }
+    game::place_map_units(pads, units, unit_types);
+    for (const game::PlanetMapPad& p : pads) {
+        ui::GalacticMapPad q;
+        q.unit_pad = p.group == game::MapPadGroup::Unit;
+        q.index = p.index;
+        q.uv = {p.x, p.y};
+        q.icon = p.type != game::kNoMapType ? icon(p.type) : std::string();
+        q.object = p.holds_type ? 0u : p.object;
+        q.tag = p.tag;
+        q.dimmed = p.dimmed;
+        q.shield = mk.world_width > 0.0f ? 2.0f * p.shield_radius / mk.world_width : 0.0f;
+        m.pads.push_back(std::move(q));
+    }
+    // §5: the local player's ground units in orbit (their fleets in orbit-slot order), stacked by type.
+    std::vector<const galactic::FleetState*> fleets;
+    for (const galactic::FleetState& fl : g->fleets())
+        if (fl.alive && fl.planet == row && fl.owner == me) fleets.push_back(&fl);
+    std::stable_sort(fleets.begin(), fleets.end(), [](const galactic::FleetState* a, const galactic::FleetState* b) {
+        return static_cast<uint32_t>(a->slot) < static_cast<uint32_t>(b->slot);  // slot -1 last
+    });
+    std::vector<game::MapOrbitUnit> orbit;
+    for (const galactic::FleetState* fl : fleets) {
+        if (!st.alive(fl->object)) continue;
+        for (const objects::ObjectHandle h : fl->contents) {
+            if (!st.alive(h)) continue;
+            const objects::TypeIndex t = st.type(h);
+            if (t >= g->rules().types.size() || g->rules().types[t].kind != galactic::UnitKind::GroundUnit) continue;
+            orbit.push_back({static_cast<uint32_t>(st.id(h)), static_cast<uint32_t>(st.id(fl->object)), t});
+        }
+    }
+    for (const game::MapOrbitStack& o : game::map_orbit_stacks(orbit)) m.orbit.push_back({o.unit, o.fleet, o.count, icon(o.type)});
+    // §7 caps; §5 surface full (0x3f9530 >= Max_Ground_Forces_On_Planet; [port] the land refusal's own rule, so a planet in
+    // battle takes more).
+    m.units = g->surface_forces(row);
+    m.surface_full = !ps.in_battle && m.units >= g->rules().constants.max_ground_forces_on_planet;
+    m.unit_cap = game::kMapUnitPads;  // §7 [M]: the organiser's garrison pad count
+    m.structures = g->ground_base_level(row) < 1 ? 0 : live_structures;
+    m.structure_cap = ps.type < g->rules().types.size() ? g->rules().types[ps.type].ground_structure_slots : -1;
 }
 
 void App::planet_status(const galactic::GalacticSim& g, PlanetIndex row, ui::GalacticPlanetInfo& out) const {
@@ -530,8 +677,15 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
     // GALACTIC_DIALOGS §4: the advanced planet map is the FoC planet map entered by the organiser's advanced_planetary
     // ("Base Layout") button - not the zoomed planet view. [port] it closes when the close-up or the selection ends; the
     // map screen itself is not built yet (only map_shell is shown).
-    if (planet_map_open_ && (!gview_.camera().zoomed() || selected_planet_ == 0)) planet_map_open_ = false;
+    // ui4 t04 (GALACTIC_PLANET_MAP §1.3): closed when the close-up or the selection ends, another planet is selected, or a
+    // foreign planet's ground can no longer be seen (the per-frame check of 0x3e4cb0).
+    if (planet_map_open_) {
+        bool foreign = false;
+        if (!gview_.camera().zoomed() || selected_planet_ == 0 || selected_planet_ != planet_map_planet_ || !planet_map_allowed(foreign))
+            set_planet_map(false);
+    }
     f.advanced_map_open = planet_map_open_;
+    if (planet_map_open_) planet_map_feed(f.planet_map);
     if (f.advanced_map_open != map_shell_open_) {
         map_shell_open_ = f.advanced_map_open;
         for (const ui::ShellSet::Shell& s : ui_.galactic_shells.shells())

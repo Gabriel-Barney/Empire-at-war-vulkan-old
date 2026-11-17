@@ -581,7 +581,7 @@ void App::handle_hud_actions(const std::vector<ui::HudAction>& acts) {
                             zoom_planet_ = s.id;  // L1/S4 wave 1: ZOOM_INTO_PLANET's planet
                         }
                 } else if (planet_map_open_) {
-                    planet_map_open_ = false;  // the advanced planet map closes instead of zooming out
+                    set_planet_map(false);  // GALACTIC_PLANET_MAP §1.3: zoom out at the close-up only closes the map
                 } else {
                     gview_.camera().zoom_out();
                 }
@@ -627,7 +627,14 @@ void App::handle_hud_actions(const std::vector<ui::HudAction>& acts) {
                     break;
                 }
                 if (a.name == "advanced_planetary") {  // GALACTIC_DIALOGS §4: "Base Layout" enters / leaves the planet map
-                    planet_map_open_ = !planet_map_open_ && selected_planet_ != 0 && gview_.camera().zoomed();
+                    set_planet_map(!planet_map_open_);   // ui4 t04: GALACTIC_PLANET_MAP §1.1 open rules
+                    break;
+                }
+                // ui4 t04 (GALACTIC_PLANET_MAP §1.3): back_button closes the map; b_zoom_adv_map at the close-up zooms out,
+                // which with the map open only closes it.
+                if (a.name == "back_button" || a.name == "b_zoom_adv_map") {
+                    if (planet_map_open_) set_planet_map(false);
+                    else if (a.name == "b_zoom_adv_map" && gview_.camera().zoomed()) gview_.camera().zoom_out();
                     break;
                 }
                 if (a.name == "b_story_arc_g") {  // GALACTIC_DIALOGS §2.1: the holocron button opens the story summary
@@ -752,7 +759,16 @@ void App::galactic_input() {
         if (!centres.empty()) gview_.set_camera_bounds(ui::galactic_scroll_box(centres, half));
     }
     gview_.camera().set_scroll_locked(story_present_.scroll_locked() || story_present_.controls_locked());  // ui2 t06: the story's SCROLL_LOCK reward
-    if (!opt_.hidden || !opt_.smoke.empty()) gview_.camera().update(input_, ui_.bindings, dt_);
+    // ui4 t04 (GALACTIC_PLANET_MAP §1.3, P1_CAMERA_INPUT §5): the wheel steps galaxy -> close-up -> planet map and back. Up at
+    // the settled close-up opens the map; down with the map open only closes it (the camera does not see that notch).
+    bool wheel_to_camera = true;
+    if (!story_controls_locked() && input_.wheel() < 0.0f && planet_map_open_) {
+        set_planet_map(false);
+        wheel_to_camera = false;
+    } else if (!story_controls_locked() && input_.wheel() > 0.0f && !planet_map_open_ && gview_.camera().zoom_state() == 3) {
+        set_planet_map(true);
+    }
+    if ((!opt_.hidden || !opt_.smoke.empty()) && wheel_to_camera) gview_.camera().update(input_, ui_.bindings, dt_);
     gview_.camera().step(dt_);
     const uint32_t planet_before_input = selected_planet_;  // ui2 t06: LOCK_PLANET_SELECTION restores it below
     const ui::CameraParams cp = gview_.camera_params(w, h);

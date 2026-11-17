@@ -520,6 +520,9 @@ void App::session_started(const std::vector<std::string>& diag) {
     apply_gameplay_options();  // ui1 t02: the session start reset the game speed indices (MAIN_LOOP.md §1.5)
     holo_.reset();
     droid_rows_.clear();  // ui4 t11: the Droid Log starts empty with each session [port: not saved]
+    planet_map_open_ = false;  // ui4 t04: the planet map and its marker cache start fresh per session
+    planet_map_planet_ = 0;
+    planet_map_markers_.clear();
     story_cursor_ = 0;
     story_ui_.reset();  // L1/S4 wave 1: a new session's UI state
     reward_cursor_.clear();  // ... and its story reward media from the start

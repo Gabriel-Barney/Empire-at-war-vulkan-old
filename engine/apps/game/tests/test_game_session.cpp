@@ -36,6 +36,7 @@
 #include "alamo/game/attract_mode.hpp"
 #include "alamo/game/game_controls.hpp"
 #include "alamo/game/hud_feeds.hpp"
+#include "alamo/game/planet_map.hpp"
 #include "alamo/game/radar_feed.hpp"
 #include "alamo/game/game_session.hpp"
 #include "alamo/game/save_games.hpp"
@@ -1728,6 +1729,73 @@ void hud_feeds_test(const game::GameData& data, const game::SessionSpec& spec) {
         const std::vector<std::u32string> r = game::droid_log_rows(U"Day ##0", 12, U"Enemy fleet approaching Kuat", U"____");
         CHECK(r.size() == 3 && r[0] == U"Day 12" && r[1] == U"Enemy fleet approaching Kuat" && r[2] == U"____");
         CHECK(game::droid_log_rows(U"", 3, U"x", U"-")[0] == U"3");
+    }
+    // ui4 t04 (GALACTIC_PLANET_MAP §4.1): marker classes, first match wins.
+    {
+        using MC = game::MapMarkerClass;
+        CHECK(game::classify_map_marker("Out Base Special Structure Position", true) == MC::Out);
+        CHECK(game::classify_map_marker("IN BASE SPECIAL STRUCTURE POSITION", false) == MC::In);
+        CHECK(game::classify_map_marker("Defending Forces Position", false) == MC::Defender);
+        CHECK(game::classify_map_marker("Reinforcement_Point_Plus10_cap", true) == MC::Specific);
+        CHECK(game::classify_map_marker("reinforcement_point_plus10_cap", false) == MC::Reinforcement);
+        CHECK(game::classify_map_marker("Garrison_Bunker_Capturable", false) == MC::Bunker);
+        CHECK(game::classify_map_marker("Skirmish_Build_Pad", false) == MC::BuildPad);
+        CHECK(game::classify_map_marker("Attacker Entry Position", false) == MC::None);
+    }
+    // §4.2 pad groups, §4.4 structures, §4.5 units, §5 orbit stacks.
+    {
+        using MC = game::MapMarkerClass;
+        std::vector<game::PlanetMapMarker> m;
+        auto add = [&](int32_t id, MC c, std::vector<uint32_t> spec = {}) { m.push_back({id, c, 0.1f * static_cast<float>(id), 0.5f, std::move(spec)}); };
+        add(1, MC::Out);
+        add(2, MC::Specific, {50});
+        add(3, MC::In);
+        add(4, MC::Defender);
+        add(5, MC::BuildPad);
+        add(6, MC::Bunker);
+        add(7, MC::Reinforcement);
+        add(8, MC::Specific, {60});
+        add(9, MC::Specific, {70});
+        add(10, MC::In);
+        add(11, MC::Defender);
+        for (int32_t k = 0; k < 12; ++k) add(100 + k, MC::Defender);  // past unit_pad09: dropped
+        std::vector<game::PlanetMapPad> pads = game::planet_map_pads(m);
+        auto pad = [&](game::MapPadGroup g, int32_t index) -> const game::PlanetMapPad* {
+            for (const game::PlanetMapPad& p : pads)
+                if (p.group == g && p.index == index) return &p;
+            return nullptr;
+        };
+        using G = game::MapPadGroup;
+        // build_pad00.. = In (3, 10), Specific (2, 8, 9), Out (1); 33 = reinforcement; 40 = bunker, 41 = build pad.
+        CHECK(pad(G::Build, 0) && pad(G::Build, 0)->marker == 3 && pad(G::Build, 0)->tag == 1);
+        CHECK(pad(G::Build, 1)->marker == 10 && pad(G::Build, 2)->marker == 2 && pad(G::Build, 2)->tag == 3);
+        CHECK(pad(G::Build, 4)->marker == 9 && pad(G::Build, 5)->marker == 1 && pad(G::Build, 5)->tag == 1);
+        CHECK(pad(G::Build, 6) == nullptr && pad(G::Build, 33)->marker == 7 && pad(G::Build, 33)->tag == 0);
+        CHECK(pad(G::Build, 40)->marker == 6 && pad(G::Build, 41)->marker == 5);
+        CHECK(pad(G::Unit, 0)->marker == 4 && pad(G::Unit, 1)->marker == 11 && pad(G::Unit, 9)->marker == 107 && pad(G::Unit, 10) == nullptr);
+        // Structures: type 70 places itself at every Specific marker listing 60; type 50 (dimmed, shield 400) on marker 2;
+        // additional 50 again finds no free pad; in-base structure 20 remembers marker 10; 21 takes the first free In pad;
+        // 22 is out-base; 23 out-base too: Out is full (one pad) so it falls over to the In group - also full: not shown.
+        std::vector<game::PlanetMapStructure> st(6);
+        st[0] = {900, 70, 0, -1, 60, {}};
+        st[1] = {901, 50, 1, -1, game::kNoMapType, {50}};
+        st[2] = {902, 20, 1, 10, game::kNoMapType, {}};
+        st[3] = {903, 21, 1, -1, game::kNoMapType, {}};
+        st[4] = {904, 22, 2, -1, game::kNoMapType, {}};
+        st[5] = {905, 23, 2, -1, game::kNoMapType, {}};
+        game::place_map_structures(pads, st, [](uint32_t t) { return t == 50 ? 400.0f : 0.0f; });
+        CHECK(pad(G::Build, 3)->holds_type && pad(G::Build, 3)->type == 70 && !pad(G::Build, 3)->dimmed);
+        CHECK(pad(G::Build, 2)->holds_type && pad(G::Build, 2)->type == 50 && pad(G::Build, 2)->dimmed && pad(G::Build, 2)->shield_radius == 400.0f);
+        CHECK(pad(G::Build, 1)->object == 902 && pad(G::Build, 0)->object == 903 && pad(G::Build, 5)->object == 904);
+        CHECK(pad(G::Build, 4)->type == game::kNoMapType);
+        for (const game::PlanetMapPad& p : pads) CHECK(p.object != 905);
+        const uint32_t units[] = {31, 32}, utypes[] = {7, 8};
+        game::place_map_units(pads, units, utypes);
+        CHECK(pad(G::Unit, 0)->object == 31 && pad(G::Unit, 1)->object == 32 && pad(G::Unit, 1)->type == 8 && pad(G::Unit, 2)->object == 0);
+        // §5: stacks per type, type-index order [port], representative = the first unit of the type.
+        const game::MapOrbitUnit ou[] = {{1, 10, 9}, {2, 10, 4}, {3, 11, 9}};
+        const std::vector<game::MapOrbitStack> os = game::map_orbit_stacks(ou);
+        CHECK(os.size() == 2 && os[0].type == 4 && os[0].count == 1 && os[1].type == 9 && os[1].count == 2 && os[1].unit == 1 && os[1].fleet == 10);
     }
     // §4: (frame - cycle start) / cycle frames, clamped; no cycle length hides the pips.
     CHECK(game::day_cycle_fraction(0, 0, 1350) == 0.0f && game::day_cycle_fraction(675, 0, 1350) == 0.5f);
