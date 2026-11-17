@@ -230,7 +230,7 @@ void test_crouch() {
     int phase = 0;
     objects::ObjectId unit = objects::kNoObjectId;
     uint32_t on_frame = 0, off_frame = 0;
-    int32_t crouched = -1, standing = -1, last_type = -2;
+    int32_t crouched = -1, standing = -1, standing_type = -1, last_type = -2;
     bool other = false;
     std::string trace;
     land_battle(*d, &animation, 900, [&](TacticalBattle& b, TacticalMode& tm, SimHost&) {
@@ -269,6 +269,7 @@ void test_crouch() {
             }
         } else if (phase == 2 && (type == anim::kAnimIdle || type == anim::kAnimMove)) {
             standing = static_cast<int32_t>(b.frame() - off_frame);
+            standing_type = type;
             return false;
         }
         return b.frame() < on_frame + 600;
@@ -278,7 +279,10 @@ void test_crouch() {
     std::printf("  r3g crouch: crouch clip %d frames after SPREAD_OUT on (stopped crouching at +%d), standing clip %d frames "
                 "after off; clip types (frame:type)%s\n",
                 crouched, static_cast<int>(off_frame - on_frame), standing, trace.c_str());
-    CHECK(!other && crouched >= 0 && crouched <= 2 && standing >= 0 && standing <= 2);
+    // mov1 (2026-11-17: the retail land tick order and the kept StoppedVsStopped record): the trooper can be set walking by a
+    // collision resolution right when SPREAD_OUT goes off - then no IDLE service runs (it counts as moving) and the plain
+    // clip is MOVE once the walk starts (measured +12); standing still, the plain idle comes at the next IDLE service
+    CHECK(!other && crouched >= 0 && crouched <= 2 && standing >= 0 && (standing <= 2 || standing_type == anim::kAnimMove));
 #else
     std::printf("  r3g crouch: skipped (no engine/anim)\n");
 #endif
