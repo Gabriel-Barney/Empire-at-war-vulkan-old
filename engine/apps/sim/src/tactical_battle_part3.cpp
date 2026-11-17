@@ -707,6 +707,12 @@ void TacticalBattle::process_death(TacticalMode& mode, const tc::DeathEvent& d, 
         const Vec3 at = store.position(u->h);
         const Vec3 face = store.facing(u->h);
         const int32_t owner = store.owner(u->h);
+        if (scoring_death_) {  // storyb t14: Tactical_Unit_Destroyed_Event while the object is still in the store
+            int32_t killer = -1;
+            if (const Unit* k = d.killer != tc::kNoObject ? unit_by_id(d.killer) : nullptr; k && store.alive(k->h))
+                killer = store.owner(k->h);
+            scoring_death_(u->h, killer);
+        }
         mode.destroy(u->h);
         vm_deaths_.push_back(u->id);  // story t06: the victory monitor sees this tick's deaths in this order
         s4_hover_death(u->id, at, face);  // s78n t20 batch 2: before the mover (and its hover state) goes

@@ -191,3 +191,16 @@ flag (retail order not read here [L]).
 - Port: `story_session.cpp` reward branch, `bind_story.cpp` (`g_check_story_flag`, `g_get_story_plot`,
   `attach_story*`), `story_model.cpp` (`raise_ai_flag`, `check_ai_flag`), `galactic_ai.cpp` (VM setup, hooks),
   `galactic_ai_tokens.{hpp,cpp}` (`STORYTRIGGER`). No engine code was changed.
+
+## Port status (storyb t10, 2026-11-17)
+
+- Item 1 done: `GalacticAiWorld::attach_story(table, model)` (`engine/ai/include/alamo/ai/galactic_ai.hpp`). The hosts call
+  it before `load_plans` (`game_session.cpp`, `ai_run.cpp`, `save_run.cpp`) with `StorySession::galactic_story_table()`
+  and `first_story_model()`, so every plan VM gets `attach_story_table` and `attach_story` in `VmSetup.prepare`
+  (Get_Story_Plot, the event setters, plot.Activate, Check_Story_Flag / Wait_On_Flag on the shared flag table).
+- Item 2 done earlier (t10 first part): TRIGGER_AI with no Param3 stores -1, as the nil reader looks it up.
+- Item 3 done for the player root: `Hooks::story_flag` reads the attached model's AI flag with target none and does not
+  clear it (`test_story_trigger_token`). [port] The planet-root `StoryTrigger` (target = the planet) still reads target
+  none: the hook has no target argument yet (no shipped equation uses the planet root outside one trap notification).
+- Not checked yet: an Intervention plan running end to end in a sandbox campaign (the headless smoke runs tried
+  could not load those campaigns), and the Lua save of a plan VM that holds story wrappers.

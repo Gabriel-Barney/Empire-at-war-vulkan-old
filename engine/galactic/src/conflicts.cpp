@@ -186,6 +186,8 @@ bool load_conflict_rules(const FileProvider& provider, const data::GameDatabase&
         ci.land_retreat_countdown = num("Land_Retreat_Countdown_Seconds", ci.land_retreat_countdown);
         ci.space_retreat_damage_mod = num("Space_Retreat_Units_Damaged_Mod_Factor", ci.space_retreat_damage_mod);
         ci.land_retreat_damage_mod = num("Land_Retreat_Units_Damaged_Mod_Factor", ci.land_retreat_damage_mod);
+        ci.space_retreat_pursue = num("Space_Retreat_Pursue_Max_Speed_Mod_Factor", ci.space_retreat_pursue);  // trn1 t06
+        ci.land_retreat_pursue = num("Land_Retreat_Pursue_Max_Speed_Mod_Factor", ci.land_retreat_pursue);
         if (const std::string_view sc = fr.xml_text("Scatters_From_Crushers"); !sc.empty())  // s78n t14 part B
             ci.scatters_from_crushers = data::parse_type_bool(data::trim(sc));  // bool code 0x0: "1" or Y / y / T / t
         {  // t50: "players, cap, players, cap, ..." (numbers separated by commas / blanks)

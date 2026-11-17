@@ -112,6 +112,8 @@ bool MovieSlot::open(const GameData& data, GameAudioHost& audio, std::string_vie
     has_frame_ = false;
     alpha_ = entry.alpha;
     cannot_skip_ = entry.cannot_skip;
+    crawl_name_ = entry.text_crawl_name;  // storyb t13
+    crawl_start_ = entry.text_crawl_start_frame;
     has_credits_ = credits_flag;
     halt_music_ = halt_flag;
     cues_ = std::move(cues);
@@ -147,6 +149,14 @@ void MovieSlot::stop(GameAudioHost& audio) {
     has_frame_ = false;
     cannot_skip_ = false;
     name_.clear();
+    crawl_name_.clear();
+    crawl_start_ = 0;
+}
+
+int32_t MovieSlot::text_crawl_frame() const {
+    if (!player_ || crawl_name_.empty()) return -1;
+    const int64_t frame = static_cast<int64_t>(std::floor(player_->time_s() * fps_));
+    return frame >= crawl_start_ ? static_cast<int32_t>(frame - crawl_start_) : -1;
 }
 
 std::string_view MovieSlot::caption() const { return captions_ ? captions_->text_id() : std::string_view(); }

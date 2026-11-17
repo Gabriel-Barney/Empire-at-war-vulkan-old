@@ -654,6 +654,9 @@ public:
     uint32_t advisor_last_tick_ = 0;
     std::vector<std::string> advisor_hints_;
     void build_story_overlay(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
+    // storyb t13 (app_text_crawl.cpp): the full-screen movie's text crawl (StarWars3DTextCrawl.xml, read once).
+    void draw_text_crawl(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
+    std::shared_ptr<struct TextCrawlCache> text_crawls_;
     void build_story_text(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
     void build_story_hint(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
     void build_story_pointers(ui::HudDrawList& dl, const ui::HudCanvas& canvas);

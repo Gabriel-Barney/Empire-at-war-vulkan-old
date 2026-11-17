@@ -179,6 +179,39 @@ void test_captions() {
         check(a.text_id == "TEXT_A" && a.frame == 99 && a.duration == -1 && z.text_id == "TEXT_Z" && z.frame == 60 && z.duration == 150,
               "captions in text-id order with their durations");
     }
+    check(db.size() == 2 && db[1].text_crawl_name.empty() && db[1].text_crawl_start_frame == 0 && db[1].text_crawl_end_frame == -1,
+          "no text crawl by default");
+    // storyb t13: the movie's crawl fields and StarWars3DTextCrawl.xml (English first, then the language's own fields).
+    const char* mxml = R"(<Movies><Movie Name="Intro"><Movie_File>t.bik</Movie_File><Text_Crawl_Name> UW_CRAWL </Text_Crawl_Name>
+        <Text_Crawl_Start_Frame>250</Text_Crawl_Start_Frame></Movie></Movies>)";
+    const std::vector<uint8_t> mb(mxml, mxml + std::strlen(mxml));
+    const alamo::data::XmlDocument mdoc = alamo::data::XmlDocument::parse(mb, "Movies.xml");
+    const std::vector<alamo::video::MovieEntry> mdb = alamo::video::parse_movies(mdoc.root());
+    check(mdb.size() == 1 && mdb[0].text_crawl_name == "UW_CRAWL" && mdb[0].text_crawl_start_frame == 250 &&
+              mdb[0].text_crawl_end_frame == -1, "Movies.xml Text_Crawl_Name / Text_Crawl_Start_Frame");
+    const char* cxml = R"(<StarWars3DTextScroll>
+        <TextScroll name="Other"><Data_Specifications language="English"><Font_Size>9</Font_Size></Data_Specifications></TextScroll>
+        <TextScroll name="UW_Crawl">
+          <Data_Specifications language="English"><Model_Name>W_TextScroll.alo</Model_Name><Fadein_End_Frame>60</Fadein_End_Frame>
+            <Text_IDs>TEXT_A, TEXT_B,TEXT_C</Text_IDs><Font_Name>Arial Bold</Font_Name><Font_Size>52</Font_Size>
+            <Font_Stretch_Factor>1.5</Font_Stretch_Factor><Has_Header>Yes</Has_Header><Header_Text_IDs>TEXT_H</Header_Text_IDs>
+            <Header_Font_Size>100</Header_Font_Size></Data_Specifications>
+          <Data_Specifications language="Russian"><Font_Size>10</Font_Size><Text_IDs>TEXT_R</Text_IDs></Data_Specifications>
+        </TextScroll></StarWars3DTextScroll>)";
+    const std::vector<uint8_t> cb(cxml, cxml + std::strlen(cxml));
+    const alamo::data::XmlDocument cdoc = alamo::data::XmlDocument::parse(cb, "StarWars3DTextCrawl.xml");
+    const std::vector<alamo::video::TextCrawlSpec> en = alamo::video::parse_text_crawls(cdoc.root());
+    const std::vector<alamo::video::TextCrawlSpec> ru = alamo::video::parse_text_crawls(cdoc.root(), "Russian");
+    const alamo::video::TextCrawlSpec* e = alamo::video::find_text_crawl(en, mdb.empty() ? "" : mdb[0].text_crawl_name);
+    const alamo::video::TextCrawlSpec* r = alamo::video::find_text_crawl(ru, "uw_crawl");
+    check(en.size() == 2 && e && e->model_name == "W_TextScroll.alo" && e->fadein_end_frame == 60 && e->fadein_start_frame == -1 &&
+              e->text_ids == std::vector<std::string>{"TEXT_A", "TEXT_B", "TEXT_C"} && e->font_name == "Arial Bold" &&
+              e->font_size == 52 && e->font_stretch_factor == 1.5f && e->has_header &&
+              e->header_text_ids == std::vector<std::string>{"TEXT_H"} && e->header_font_size == 100,
+          "text crawl: English fields, case-insensitive find");
+    check(r && r->font_size == 10 && r->text_ids == std::vector<std::string>{"TEXT_R"} && r->font_name == "Arial Bold" &&
+              r->header_font_size == 100, "text crawl: a language's fields over English");
+    check(!alamo::video::find_text_crawl(en, "Missing"), "text crawl: unknown name");
 #endif
 }
 
@@ -539,6 +572,25 @@ void test_real_data() {
                     alpha_open, alpha_ok);
         check(db.size() > 20 && alpha_entries > 10, "Movies.xml parsed (Alpha entries present)");
         check(alpha_open > 0 && alpha_ok == alpha_open, "every Alpha movie decodes an alpha plane");
+        {  // storyb t13: every movie's text crawl names a scroll of StarWars3DTextCrawl.xml with text and a model
+            std::vector<uint8_t> cx;
+            check(vfs->read("Data\\XML\\StarWars3DTextCrawl.xml", cx), "StarWars3DTextCrawl.xml reads");
+            const alamo::data::XmlDocument cdoc = alamo::data::XmlDocument::parse(cx, "StarWars3DTextCrawl.xml");
+            const std::vector<alamo::video::TextCrawlSpec> crawls = alamo::video::parse_text_crawls(cdoc.root());
+            size_t with_crawl = 0, resolved = 0;
+            for (const MovieEntry& m : db) {
+                if (m.text_crawl_name.empty()) continue;
+                ++with_crawl;
+                const alamo::video::TextCrawlSpec* c = alamo::video::find_text_crawl(crawls, m.text_crawl_name);
+                if (c && !c->text_ids.empty() && !c->model_name.empty() && c->font_size > 0) ++resolved;
+                else std::printf("  crawl %s of movie %s: unresolved\n", m.text_crawl_name.c_str(), m.name.c_str());
+            }
+            const MovieEntry* intro = find_movie(db, "Star_Wars_Intro");
+            std::printf("text crawls: %zu scrolls, %zu movies with a crawl, %zu resolved\n", crawls.size(), with_crawl, resolved);
+            check(crawls.size() >= 6 && with_crawl >= 3 && resolved == with_crawl, "every movie text crawl resolves");
+            check(intro && intro->text_crawl_name == "A_Long_Time_Ago" && intro->text_crawl_start_frame == 0,
+                  "Star_Wars_Intro crawls A_Long_Time_Ago from frame 0");
+        }
         const MovieEntry* logo = find_movie(db, "Logo1");
         check(logo && !logo->alpha && logo->file.find("LucasArtsLogo") != std::string::npos, "Logo1 entry (no Alpha)");
         check(find_movie(db, "pirate_loop2") != nullptr && find_movie(db, "pirate_loop2")->alpha, "find_movie by file name");

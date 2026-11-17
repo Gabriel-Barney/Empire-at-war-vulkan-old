@@ -239,6 +239,7 @@ void SimHost::create_scoring(GameMode& m) {
     else if (vm->has_function("Base_Definitions") && !vm->call("Base_Definitions", &err)) note("Base_Definitions: " + err);
     vm->create_thread("main");  // missing main: no thread (§1.1 step 5)
     scoring_vm_ = std::move(vm);
+    scoring_store_ = &m.primary();  // storyb t14
     scoring_collect();
 #else
     (void)m;
@@ -407,6 +408,45 @@ void SimHost::service_scoring() {
 #endif
 }
 
+// storyb t14: the neutral player of the galactic campaign (any depth: a battle sits on top of it), -1 without one.
+int32_t SimHost::scoring_neutral_player() const {
+    for (size_t i = 0; i < modes_.depth(); ++i)
+        if (const auto* g = dynamic_cast<const GalacticMode*>(&modes_.at(i)); g && g->sim()) return g->sim()->neutral_player();
+    return -1;
+}
+
+void SimHost::scoring_tactical_death(objects::ObjectStore& store, objects::ObjectHandle object, int32_t killer) {
+#ifdef ALAMO_SIM_HAVE_STORY
+    if (!scoring_vm_ || !store.alive(object) || !scoring_vm_->has_function("Tactical_Unit_Destroyed_Event")) return;
+    const int32_t k = killer >= 0 ? killer : scoring_neutral_player();
+    lua::AiEventArg obj = arg_object(object);
+    lua::ObjectBridge* prev = lua::attached_object_bridge(*scoring_vm_);
+    const bool other_store = &store != scoring_store_;
+    if (other_store) {
+        if (!scoring_battle_bridge_) scoring_battle_bridge_ = std::make_shared<lua::ObjectBridge>();
+        scoring_battle_bridge_->parent_store = &store;
+        if (prev) scoring_battle_bridge_->is_enemy = prev->is_enemy;
+        lua::attach_object_bridge(*scoring_vm_, scoring_battle_bridge_.get());
+        obj.kind = lua::AiEventArg::ParentObject;
+    }
+    scoring_call("Tactical_Unit_Destroyed_Event", {obj, k >= 0 ? arg_player(k) : lua::AiEventArg{}});
+    if (other_store && scoring_vm_) lua::attach_object_bridge(*scoring_vm_, prev);
+#else
+    (void)store;
+    (void)object;
+    (void)killer;
+#endif
+}
+
+void SimHost::scoring_tactical_production(uint32_t type, int32_t player) {
+#ifdef ALAMO_SIM_HAVE_STORY
+    if (scoring_vm_) scoring_call("Tactical_Production_End_Event", {arg_type(type), arg_player(player), lua::AiEventArg{}});
+#else
+    (void)type;
+    (void)player;
+#endif
+}
+
 // After T9: the galactic events the story drained this tick (stream order).
 void SimHost::scoring_deliver_events() {
 #ifdef ALAMO_SIM_HAVE_STORY
@@ -450,10 +490,15 @@ void SimHost::scoring_deliver_events() {
                              {arg_object(planet_object(e.planet)), st.alive(h) ? arg_object(h) : arg_type(e.type)});
                 break;
             }
-            case K::ObjectDestroyed: {
-                const objects::ObjectHandle h = object_of(e.object);
-                if (st.alive(h))
-                    scoring_call("Galactic_Unit_Destroyed_Event", {arg_object(h), arg_player(gs->neutral_player())});
+            case K::StarbaseLevelChanged: {  // storyb t14: planet signal 0x26 (old type, new type; nil when absent)
+                const auto type_or_nil = [](int64_t t) {
+                    lua::AiEventArg a;
+                    if (t >= 0 && t < static_cast<int64_t>(UINT32_MAX)) a = arg_type(static_cast<uint32_t>(t));
+                    return a;
+                };
+                scoring_call("Galactic_Starbase_Level_Change",
+                             {arg_object(planet_object(e.planet)), type_or_nil(e.other_player),
+                              type_or_nil(e.value > 0 && e.type != galactic::kNoIndex ? static_cast<int64_t>(e.type) : -1)});
                 break;
             }
             default: break;
@@ -541,6 +586,18 @@ galactic::GalacticSim* SimHost::start_galactic(const galactic::GalacticRules& ru
         return nullptr;
     }
     mode.attach_sim(std::move(sim));
+#ifdef ALAMO_SIM_HAVE_STORY
+    {   // storyb t14 (GAME_SCORING.md §3): the death and neutralized signals reach the scoring script while the objects live.
+        galactic::GalacticSim::ScoringHooks hooks;
+        hooks.destroyed = [this](objects::ObjectHandle h) {
+            if (scoring_vm_) scoring_call("Galactic_Unit_Destroyed_Event", {arg_object(h), arg_player(scoring_neutral_player())});
+        };
+        hooks.neutralized = [this](uint32_t hero_type, objects::ObjectHandle neutralizer) {
+            if (scoring_vm_) scoring_call("Galactic_Neutralized_Event", {arg_type(hero_type), arg_object(neutralizer)});
+        };
+        mode.sim()->set_scoring_hooks(std::move(hooks));
+    }
+#endif
 #if defined(ALAMO_SIM_HAVE_STORY) && defined(ALAMO_LUA_PLAYERS)
     // q6 t03 (GAME_SCORING.md §3, the PlayerWrapper arguments; TR's plugins call Find_Player / Get_Name): until a story
     // session gives it the story's world, the scoring VM gets a player world of its own over the campaign's players. [port]

@@ -831,6 +831,15 @@ public:
     // ---- story / script event stream (S4, galactic_events.hpp) --------------------------------------------
     // Off by default. Events are appended in emission order; the stream is not part of hash_state.
     void set_emit_events(bool on) { emit_events_ = on; }
+    // storyb t14 (GAME_SCORING.md §3): synchronous GameScoring signals that need the objects alive, called on the sim
+    // thread at the signal moment whether or not events are emitted. destroyed: every object destroy_object removes
+    // (fleet members first, never the fleet object), before it leaves the store. neutralized: a hero neutralized
+    // (executor 0x616740 step 3), with the counted type and the neutralizer (still on the map). Not hashed, not saved.
+    struct ScoringHooks {
+        std::function<void(ObjectHandle object)> destroyed;
+        std::function<void(uint32_t hero_type, ObjectHandle neutralizer)> neutralized;
+    };
+    void set_scoring_hooks(ScoringHooks hooks) { scoring_hooks_ = std::move(hooks); }
     const std::vector<GalacticEvent>& events() const { return events_; }
     // Moves the pending events to the end of `out` (stream order) and clears the stream.
     void drain_events(std::vector<GalacticEvent>& out);
@@ -1363,6 +1372,7 @@ private:
     PathScratch scratch_;
     std::vector<Derived> derived_;   // per planet row (parallel derivation output)
     bool emit_events_ = false;
+    ScoringHooks scoring_hooks_;  // storyb t14
     ObjectHandle last_spawn_;  // newest object made by spawn() (event payloads only, never hashed)
     std::vector<GalacticEvent> events_;  // S4 stream (not hashed)
     ConflictHooks* conflicts_ = nullptr;  // S10 (not owned)

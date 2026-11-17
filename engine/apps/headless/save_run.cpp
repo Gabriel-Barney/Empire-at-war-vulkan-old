@@ -689,6 +689,10 @@ public:
             [hp](uint8_t p, const commands::EventData& ev) { return hp->execute_direct(p, commands::CommandSource::AI, ev); }, wcfg);
         ai::GalacticAiWorld& world = *s->world;
         world.set_conflicts(&s->battles->conflicts());  // q6 t03: TimeSince*Defender/Attacker stamps
+        // storyb t10: the plan scripts see the story (Get_Story_Plot, Check_Story_Flag); before load_plans builds their VMs.
+#ifdef ALAMO_SIM_HAVE_STORY
+        if (host.story()) world.attach_story(host.story()->galactic_story_table(), host.story()->first_story_model());
+#endif
         std::vector<std::string> wd;
         if (!world.load_plans(plan_files_, &wd) || !world.start(&wd)) {
             err = "galactic: AI start failed: " + join(wd, "; ");

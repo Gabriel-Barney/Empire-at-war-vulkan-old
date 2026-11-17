@@ -1243,7 +1243,11 @@ static const char* kScoringStory =
     "function Galactic_Production_Canceled_Event(planet, t) Log(\"PC\") end\n"
     "function Galactic_Production_End_Event(planet, o) Log(\"PE:\" .. tostring(planet ~= nil) .. tostring(o ~= nil)) end\n"
     "function Galactic_Planet_Faction_Change(planet, n, o) Log(\"FC:\" .. tostring(planet ~= nil and n ~= nil and o ~= nil)) end\n"
-    "function Galactic_Unit_Destroyed_Event(object, killer) Log(\"UD\") end\n";
+    "function Galactic_Unit_Destroyed_Event(object, killer) Log(\"UD:\" .. tostring(object ~= nil) .. tostring(killer ~= nil)) end\n"
+    // storyb t14: tactical deaths (the object of the battle's store, as a parent-store wrapper) and starbase levels.
+    "function Tactical_Unit_Destroyed_Event(object, killer) Log(\"TD:\" .. tostring(object ~= nil and object.Is_Valid())"
+    " .. tostring(killer ~= nil)) end\n"
+    "function Galactic_Starbase_Level_Change(planet, old_type, new_type) Log(\"SB:\" .. tostring(planet ~= nil)) end\n";
 
 static void test_scoring_story(const World& w) {
     const fs::path root = fs::temp_directory_path() / "alamo_sim_scoring_story";
@@ -1295,6 +1299,50 @@ static void test_scoring_story(const World& w) {
                     b.scoring_log == a.scoring_log ? "identical" : "DIFFERS");
         CHECK(!d.diverged && b.scoring_log == a.scoring_log && b.log == a.log);
     }
+}
+
+// storyb t14 (GAME_SCORING.md §3): the death signals reach the scoring script while the objects are alive, in a galactic
+// session without a story: GalacticSim::destroy_object -> Galactic_Unit_Destroyed_Event(object, neutral player); a
+// battle death (SimHost::scoring_tactical_death, as TacticalBattle::process_death calls it) -> Tactical_Unit_Destroyed_Event
+// with the tactical object as a wrapper the galactic-store VM can use (Is_Valid runs on the battle store), the killer's
+// player or the neutral player; the object of the store the VM runs on is passed as a plain wrapper.
+static void test_scoring_deaths(const World& w) {
+    const fs::path root = fs::temp_directory_path() / "alamo_sim_scoring_deaths";
+    std::error_code ec;
+    remove_all_long(root, ec);
+    write_file(root / "Data/Scripts/Miscellaneous/GameScoring.lua", std::string(kScoringCommon) + kScoringStory);
+    DirectoryProvider files(path_to_utf8(root));
+    jobs::JobSystem js(jobs::JobSystemConfig{0});
+    SimConfig cfg;
+    cfg.seed = 7;
+    SimHost host(w.types, js, cfg);
+    host.set_scoring_script(&files, "GameScoring");
+    const GalacticRules r = rules();  // the sim keeps a pointer to the rules
+    GalacticSim* gs = host.start_galactic(r, setup());
+    CHECK(gs != nullptr && host.scoring_vm() != nullptr);
+    if (!gs) return;
+    host.tick_once();
+    auto log = [&host] { return host.global_values()->get("Scoring_Log").text; };
+    const bool neutral = gs->neutral_player() >= 0;
+    const ObjectHandle inf = gs->planets()[rD].surface[0];
+    CHECK(gs->destroy_object(inf) && !gs->store().alive(inf));
+    CHECK(log().find(neutral ? "UD:truetrue;" : "UD:truefalse;") != std::string::npos);
+    host.start_game(ModeKind::Space);
+    objects::SpawnParams sp;
+    sp.type = w.types.resolve_name("Sim_Frigate");
+    sp.parent_mode_id = 1;
+    const ObjectHandle ship = host.tactical()->spawn(sp);
+    const ObjectHandle ship2 = host.tactical()->spawn(sp);
+    host.scoring_tactical_death(host.tactical()->primary(), ship, pEmpire);
+    host.scoring_tactical_death(host.tactical()->primary(), ship2, -1);
+    const std::string l = log();
+    std::printf("scoring deaths: %s (%" PRIu64 " calls, releases %" PRIu64 ")\n", l.c_str(), host.scoring_calls(),
+                host.scoring_releases());
+    for (const std::string& m : host.scoring_messages()) std::printf("  scoring: %s\n", m.c_str());
+    CHECK(l.find("TD:truetrue;") != std::string::npos);  // the Empire killed it: object valid on the battle store
+    CHECK(l.find(neutral ? "TD:truetrue;TD:truetrue;" : "TD:truetrue;TD:truefalse;") != std::string::npos);
+    CHECK(host.scoring_releases() == 0);
+    host.end_game_mode();
 }
 
 // q6 (Thrawn's Revenge story chain): (1) a tick-2 event (ELAPSED 0, A2i t01) reaches a PGStoryMode-style script whose
@@ -3375,6 +3423,7 @@ int main(int argc, char** argv) {
     story_test::test_scoring_script(*world);  // q6 t06
     story_test::test_scoring_service(*world);  // q6 t09
     story_test::test_scoring_story(*world);    // q6 t09
+    story_test::test_scoring_deaths(*world);   // storyb t14
     story_test::test_story_handle_esc(*world);  // bkc1 t01
     story_test::test_q6_story_chain(*world);   // q6: load-time resume, Perpetual ELAPSED, SWITCH_CONTROL hook
     object_script_test::test_object_scripts();  // q6: game-object Lua scripts

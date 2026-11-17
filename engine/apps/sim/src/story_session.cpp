@@ -420,6 +420,8 @@ void StorySession::set_command_pipeline(commands::CommandPipeline* pipeline) {
 }
 lua::PresentationLog* StorySession::presentation() { return &lua_->presentation; }
 lua::ObjectBridge* StorySession::object_bridge() { return &lua_->bridge; }
+lua::StoryTable* StorySession::galactic_story_table() { return &lua_->table; }
+lua::StoryModel* StorySession::first_story_model() { return sets_.empty() ? nullptr : &sets_.front()->model; }
 lua::LuaPlayerWorld* StorySession::player_world() {
 #if defined(ALAMO_LUA_PLAYERS)
     return &lua_->players;

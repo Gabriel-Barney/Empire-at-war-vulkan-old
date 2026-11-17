@@ -55,6 +55,8 @@ class ConflictManager;
 }
 namespace alamo::lua {
 class LuaPlayerWorld;
+class StoryModel;  // storyb t10
+class StoryTable;
 class GlobalValueStore;  // Int-final
 }
 namespace alamo::objects {
@@ -153,6 +155,11 @@ public:
     // like the AI's own: GiveDesireBonus, Purge_Goals, Budget.Flush_Category and Suspend_AI reach the galactic AI.
     // Null detaches. The world must outlive this object (or be detached first).
     void attach_story_world(lua::LuaPlayerWorld* world);
+    // storyb t10 (docs/re/STORYB_T10_TRIGGER_AI.md): the story's plot table and a model for the plan scripts. Every plan VM
+    // created afterwards gets them (Get_Story_Plot, plot.Activate, Set_Reward_Parameter: the Intervention plans arm their
+    // TRIGGER_AI events; Check_Story_Flag / Wait_On_Flag read the flags), and the StoryTrigger perception reads the AI story
+    // flags (no target [port: the planet-root variant's target is not passed]). Null detaches; they must outlive this.
+    void attach_story(lua::StoryTable* table, lua::StoryModel* model);
     // Int-final: the session-wide GlobalValue table (L1_S4_REMAINING §1.5) for every AI VM's GlobalValue.Get / Set;
     // null (default) = the world's own map (its CRC section). Hosts attach SimHost::global_values().
     void set_global_values(lua::GlobalValueStore* store);

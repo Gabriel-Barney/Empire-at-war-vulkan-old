@@ -210,6 +210,7 @@ private:
     int32_t hardpoint_on_model(int32_t base, uint32_t unit_type, BuildState& s) const;  // battle host
     void load_hardpoints(const FileProvider& files, std::vector<std::string>* diag);
     void load_priority_sets(const FileProvider& files, std::vector<std::string>* diag);
+    void load_surface_fx(const FileProvider& files, std::vector<std::string>* diag);  // trn1 t02
     tactical::combat::UnitDesc unit_desc(uint32_t t, BuildState& s) const;
     int32_t projectile(uint32_t t, BuildState& s) const;
     int32_t hardpoint(std::string_view name, BuildState& s) const;
@@ -226,6 +227,7 @@ private:
     const objects::GameObjectTypes* types_;
     tactical::combat::DamageArmorTable damage_;
     std::vector<tactical::combat::PrioritySet> priority_sets_;
+    std::vector<tactical::combat::SurfaceFxDef> surface_fx_;  // trn1 t02: SURFACEFX.XML (CombatData::surface_fx)
     std::map<std::string, Tags> hardpoints_;  // upper-cased name -> tags (lookup only)
     float space_health_mult_ = 1.5f, land_health_mult_ = 1.0f;
     float space_idle_speed_ = 0.0f;

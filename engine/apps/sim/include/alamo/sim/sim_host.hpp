@@ -84,6 +84,7 @@ namespace alamo::lua {
 class GlobalValueStore;
 class LuaVm;
 class LuaPlayerWorld;
+class ObjectBridge;  // storyb t14
 struct AiEventArg;
 }  // namespace alamo::lua
 namespace alamo::galactic {
@@ -167,8 +168,12 @@ public:
     //     story session), in stream order: PlanetOwnerChanged -> Galactic_Planet_Faction_Change(planet, new, old) when
     //     new != old (a missing player = the neutral player); ProductionBegin / Canceled -> Galactic_Production_Begin_ /
     //     _Canceled_Event(planet, type); ProductionCompleted -> Galactic_Production_End_Event(planet, object (its team
-    //     container), else the type); ObjectDestroyed -> Galactic_Unit_Destroyed_Event(object, neutral player) only while
-    //     the object is still alive in the store [port: the stream is read after the destroy, so in practice skipped].
+    //     container), else the type); StarbaseLevelChanged -> Galactic_Starbase_Level_Change(planet, old type, new type)
+    //     (storyb t14; each nil when absent).
+    //   * storyb t14, at the signal moment (GalacticSim::ScoringHooks, any galactic session): Galactic_Unit_Destroyed_Event
+    //     (object, killer) for every object GalacticSim::destroy_object removes, before it leaves the store [port: the
+    //     killer is not tracked in galactic mode: the neutral player]; Galactic_Neutralized_Event(hero type, neutralizer).
+    //   * storyb t14: scoring_tactical_death (the battle host, Tactical_Unit_Destroyed_Event).
     //   * scoring_reset_tactical_stats(): Reset_Tactical_Stats() (the battle host at auto-resolve begin).
     // Missing functions are skipped; calls are protected and not threads (they cannot yield). With a story session the
     // scoring VM also gets the story's player world, object bridge and presentation families.
@@ -182,6 +187,16 @@ public:
     void scoring_mode_started(ModeKind kind, std::string map_name);
     // q6 t09: Reset_Tactical_Stats() at auto-resolve begin (BATTLE_TRANSITIONS §"auto-resolve").
     void scoring_reset_tactical_stats();
+    // storyb t14 (GAME_SCORING.md §3, death signal 0x25 in a tactical mode): Tactical_Unit_Destroyed_Event(object,
+    // killer player) for `object` of the battle's store `store`, called by the battle host before the object leaves the
+    // store. killer < 0 (unknown) -> the neutral player of the galactic campaign under the battle (nil without one).
+    // When the scoring VM runs on another store (a campaign battle: the galactic store), the object is passed as a
+    // wrapper of that store (the parent-store wrapper of a private bridge whose parent_store is `store`, swapped in for
+    // the call) [port: a wrapper the script keeps resolves only during the call].
+    void scoring_tactical_death(objects::ObjectStore& store, objects::ObjectHandle object, int32_t killer);
+    // storyb t14 (signal 0x22, a tactical build finished): Tactical_Production_End_Event(type, player, nil location);
+    // the battle host calls it for TacticalBattle::production_done after its tick (land builds go to the pool).
+    void scoring_tactical_production(uint32_t type, int32_t player);
     // ui1 t05 (GAME_SCORING.md §7, 0x485760): the statistics dialog's value for `control_id`
     // (IDC_MILITARY_EFFICIENCY_STATIC, IDC_CONQUEST_EFFICIENCY_STATIC, IDC_KILL_EFFICIENCY_STATIC, IDC_TITLE_STATIC, ...):
     // Get_Game_Stat_For_Control_ID(PlayerWrapper, control_id, tactical) of the scoring script, its first result as a
@@ -438,6 +453,9 @@ private:
     std::string scoring_campaign_;
     std::vector<std::pair<std::string, std::string>> scoring_starts_;  // (mode, map) waiting for the next Service
     std::vector<galactic::GalacticEvent> scoring_events_;              // tapped from the story drains, delivered after T9
+    objects::ObjectStore* scoring_store_ = nullptr;                     // storyb t14: the store the scoring VM runs on
+    std::shared_ptr<lua::ObjectBridge> scoring_battle_bridge_;  // storyb t14: parent_store = the battle's store (shared: incomplete type here)
+    int32_t scoring_neutral_player() const;                             // storyb t14
     bool scoring_failed_ = false;  // the original's exited flag: a Lua error in an event call / thread
     size_t scoring_seen_messages_ = 0, scoring_seen_errors_ = 0;
     uint64_t scoring_services_ = 0, scoring_calls_ = 0, scoring_releases_ = 0;

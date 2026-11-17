@@ -197,6 +197,7 @@ bool App::render_frame() {
                 if (const std::u16string* t = ui_.text.find(id))
                     ui::add_movie_caption(dialogs, 1, *ui_.fonts, *canvas, ui::gui_unescape(ui::utf16_to_utf32(*t)),
                                           ui::movie_caption_style(data_.db.constants()));
+        draw_text_crawl(dialogs, *canvas);  // storyb t13: Movies.xml Text_Crawl_Name
     }
     // Panels (hero roster, black market, sabotage, corruption, hack) on top of the HUD list; their shells draw at the
     // HUD's ShellModels step.

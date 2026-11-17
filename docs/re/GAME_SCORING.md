@@ -273,15 +273,27 @@ Can wait / skip: Get_CRC (MP only), the debug file-watcher reload, the `from sav
   `busid:main:publish` at frame 271, the GameScoring main bus hands it to GCPlayerAgnostic's OptionsHandler, and
   StoryUtil.ChangeAIPlayer's 20 SWITCH_CONTROL rewards set the AI types at frame 281 (STORY.md §8 items 9-12).
   Event calls: 69 (Thrawn_Empire) / 66 (CrimsonEmpire_Pentastar), from 1 before.
+- Done (storyb t14, 2026-11-17):
+  - `Galactic_Unit_Destroyed_Event(object, killer)`: `GalacticSim::ScoringHooks::destroyed`, called by `destroy_object`
+    for every object it removes (fleet members, never the fleet object) while the object is still in the store, in any
+    galactic session (no story session needed). [port] The killer is the neutral player: the galactic sim does not
+    track who destroyed an object.
+  - `Galactic_Neutralized_Event(hero_type, neutralizer)`: `ScoringHooks::neutralized` in the executor's step 3, before the
+    target and the neutralizer leave (a siphon entry raises nothing: the hero object is not involved).
+  - `Galactic_Starbase_Level_Change(planet, old_type, new_type)`: from the story drain like the other planet events; the
+    event's `other_player` carries the old starbase type (-1 none), `type` the new one (nil at level 0). [port] A starbase
+    that left the store without `destroy_object` (`sync_starbases`) reports old type nil.
+  - `Tactical_Unit_Destroyed_Event(object, killer_player)`: `TacticalBattle::set_scoring_death`, called in
+    `process_death` before the object leaves the battle store; killer = the killing unit's owner, else the campaign's
+    neutral player. In a campaign battle the scoring VM runs on the galactic store, so `SimHost::scoring_tactical_death`
+    swaps in a private object bridge whose `parent_store` is the battle store for the call and passes the object as a
+    parent-store wrapper (`AiEventArg::ParentObject`). [port] A wrapper the script keeps resolves only during that call.
+    [port] The 0x2e type skip is not modelled (meaning unknown).
+  - `Tactical_Production_End_Event(object_type, player, location)`: the battle's finished land builds
+    (`TacticalBattle::production_done`, after the battle tick), location nil (the build goes to the reinforcement pool).
 - Open:
-  - `Galactic_Unit_Destroyed_Event`: wired (object, neutral player as the killer) but only called while the object is
-    still alive; the stream is read after the destroy, so in practice it never fires. Needs a death hook in GalacticSim
-    at the destroy moment, and the killer player.
-  - `Tactical_Unit_Destroyed_Event`, `Tactical_Production_End_Event`: the scoring VM is bound to the galactic store, so
-    tactical objects have no wrapper in it (and the port's tactical deaths are already dead when the battle host reads
-    them). Needs a dual-store wrapper (the parent-store tag in reverse) or a VM store switch per mode.
-  - `Galactic_Starbase_Level_Change` (the stream has the new level, not the old / new types), `Galactic_Neutralized_Event`,
-    `Player_Quit_Event`: no source yet.
+  - `Player_Quit_Event`: no source. The retail callers are the quit-game event (0x499420) and its neighbour [M roles];
+    the single-player port has no quit-game command executor.
   - Galactic events only arrive with a story session (no story: nobody drains the stream at a fixed point).
   - (q6 t03, done for galactic sessions) Without a story session the scoring VM gets a player world of its own over the
     campaign's players (`SimHost::start_galactic`; the story's world replaces it in `start_story`). Before, Find_Player gave

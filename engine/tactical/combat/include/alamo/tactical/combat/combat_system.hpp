@@ -85,6 +85,7 @@
 #include "alamo/tactical/combat/formulas.hpp"
 #include "alamo/tactical/combat/modifiers.hpp"
 #include "alamo/tactical/combat/rocket.hpp"
+#include "alamo/tactical/combat/surface_fx.hpp"
 #include "alamo/tactical/combat/tables.hpp"
 #include "alamo/tactical/geometry.hpp"
 #include "alamo/tactical/tree_set.hpp"
@@ -136,6 +137,7 @@ enum DamageKind : uint8_t {
     kKindVehicleThief = 13,
     kKindNoDeathClone = 15,
     kKindConvertedDecay = 0x11,
+    kKindTerrain = 0x13,  // trn1 t02: SurfaceFX Terrain_Damage (damage ground / lava), 0x5ee820 [M name]
     kKindInfection = 0x14,
     kKindBypassShield = 22,
 };
@@ -523,7 +525,18 @@ struct UnitDesc {
     float turret_elevate_extent = 90.0f;
     bool turret_xy_only = false;
     float turret_rest_pitch = 0.0f, turret_rest_yaw = 0.0f;
+    // ---- trn1 (docs/re/TRN1_TERRAIN_GAMEPLAY.md) ----
+    // t01: Surface_Type_Cover_Damage_Shield (+0x1e48): Get_Damage_Multiplier's factor on cover cells (surface 9-11), land.
+    float cover_damage_shield = 1.0f;
+    // t02: the SURFACE_FX instances of a type with the SURFACE_FX behaviour in the battle's mode: CombatData::surface_fx
+    // indices of its SurfaceFX_Name entries that have a sim term (list order, at most kMaxUnitSurfaceFx).
+    std::vector<uint16_t> surface_fx;
+    // t05: On_Fire_Speed_Modifier (+0x2040): the speed factor while burning (obj +0x3a1 bit 2); 1 when unset.
+    float on_fire_speed = 1.0f;
+    // t04: Destroy_When_Stunned_Over_Water (+0xe6; FoC: MAL_Rocket_Vehicle): ABILITIES_HARDPOINTS §4.12 RE reading.
+    bool destroy_when_stunned_over_water = false;
 };
+inline constexpr uint32_t kMaxUnitSurfaceFx = 4;
 
 struct CombatData {
     DamageArmorTable damage;
@@ -532,6 +545,17 @@ struct CombatData {
     std::vector<HardpointDesc> hardpoints;
     std::vector<UnitAbilityDesc> abilities;
     std::vector<UnitDesc> units;
+    std::vector<SurfaceFxDef> surface_fx;  // trn1 t02: SURFACEFX.XML (surface_fx.hpp)
+};
+
+// trn1 t01 / t02: the host's terrain surface queries (land battles; unset = no cover, no SurfaceFX). Both take world
+// (x, y): cell_surface = the cell material's surface type (Terrain::cell_surface_type), surface = the same with the
+// under-water test (Terrain::surface_type_at). Const and thread-safe.
+struct SurfaceQueries {
+    std::function<uint32_t(float, float)> cell_surface;
+    std::function<uint32_t(float, float)> surface;
+    // trn1 t04: a water plane exists and the terrain at (x, y) lies more than 0.5 below it (Terrain::under_water).
+    std::function<bool(float, float)> under_water;
 };
 
 // Host input per player (set at construction; configuration, not saved or hashed).
@@ -1317,6 +1341,12 @@ public:
     // §2.4.6 ground points). Read in the serial commit phase only; S8 t04: also the land grenade ground test (LOB_SOLVER
     // §6.2). Unset [port]: flat ground at z 0, no box.
     void set_rocket_terrain(RocketTerrain t) { rocket_terrain_ = std::move(t); }
+    // trn1 t01 / t02: the terrain surface queries (land; not saved: the host re-attaches them, like the rocket terrain).
+    void set_surface_queries(SurfaceQueries q) { surface_ = std::move(q); }
+    // trn1 t02: the surface type under a live unit (the SurfaceFX reading: water types under water); 0 in space / unset.
+    uint32_t surface_type(ObjectId id) const;
+    // trn1 t05 (MOVEMENT §3.4 item 9, 0x376990): On_Fire_Speed_Modifier while the unit burns, else 1.
+    float burn_speed_factor(ObjectId id) const;
     // S8 t06: the host's tree set for detonations it triggers between ticks (DETONATE_REMOTE_BOMB). Set at setup so a
     // detonation before the first tick after a load queries the same trees as an uninterrupted run; tick() also sets it.
     void set_trees(const TreeSet* trees) { last_trees_ = trees; }
@@ -1743,6 +1773,12 @@ private:
         uint32_t bshield_off_stamp = 0;   // pack +0x10: frame of the last service that found the shield off
         uint32_t bshield_next = 0;        // next service frame (15-frame cadence, attach phase draw)
         ObjectId bshield_in = kNoObject;  // AFFECTED_BY_SHIELD pack +0x18: the straddled shield
+        // ---- trn1 t02 (SurfaceFX terrain modifiers; saved, hashed under tag 0x5B when not at the spawn values) ----
+        uint8_t sfx_ready = 0;  // the instances exist (first update done); evaluated from the next update
+        std::array<uint8_t, kMaxUnitSurfaceFx> sfx_prev{};  // per instance the surface of its last update (+0xc)
+        float terrain_damage = 0.0f;  // data pack +0x188: Terrain_Damage of the surface being stood on
+        uint32_t terrain_next = 0;    // +0x18c: frame of the next terrain damage
+        float terrain_delay = 0.0f;   // +0x190: Terrain_Damage_Delay (seconds)
         ModifierSet mods;
         // ---- caches (never hashed) ----
         std::array<float, kModListCount> mod_r{};
@@ -2103,6 +2139,12 @@ private:
     void service_repairs(Unit& u, uint32_t frame);
     // ---- tru1 t02: base shields (base_shield.cpp) ----
     void service_base_shields(uint32_t frame);
+    // trn1 (surface_fx.cpp): the cover term of Get_Damage_Multiplier and the SURFACE_FX service.
+    float cover_factor(const Unit& victim) const;
+    void service_surface_fx(uint32_t frame);
+    void surface_fx_step(Unit& u, uint16_t def_index, uint32_t slot, uint32_t surface, uint32_t frame);
+    // trn1 t04 (ABILITIES_HARDPOINTS §4.12): a stun detonation's water test on one object of its victim query.
+    void stun_water_kill(ObjectId id, uint32_t frame);
     void evaluate_base_shield(Unit& s, uint32_t frame);
     bool straddles_base_shield(const Unit& u, const Unit& s) const;
     bool dome_segment(const Unit& s, Vec3 a, Vec3 b, float& t) const;
@@ -2118,6 +2160,7 @@ private:
     std::vector<uint32_t> emitters_;  // unit indices with emitter_radius > 0 (ascending id), phase F scratch
     std::vector<Rocket> rockets_;          // refixf t01: spline-rocket state, serial order
     std::vector<RocketNext> rocket_next_;  // refixf t01: phase E per-projectile scratch
+    SurfaceQueries surface_;               // trn1: host terrain surface queries (not saved)
     RocketTerrain rocket_terrain_;         // refixf t01: host terrain (not saved: the host re-attaches it)
     CombatHooks* hooks_ = nullptr;
     SimRng* bound_rng_ = nullptr;

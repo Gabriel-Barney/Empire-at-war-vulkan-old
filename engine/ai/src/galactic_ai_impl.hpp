@@ -28,6 +28,7 @@
 #include "alamo/lua/players.hpp"
 #include "alamo/lua/script_gaps.hpp"
 #include "alamo/lua/script_remaining.hpp"  // L1 final
+#include "alamo/lua/story_model.hpp"  // storyb t10: attach_story
 #include "galactic_goal_time.hpp"
 #include "galactic_slots.hpp"
 #include "alamo/objects/game_object_types.hpp"
@@ -256,6 +257,8 @@ struct GalacticAiWorld::Impl final : lua::AiScriptHost, lua::ScriptMarkupHost, A
 
     // Lua
     lua::LuaPlayerWorld world;
+    lua::StoryTable* story_table = nullptr;    // storyb t10: attach_story
+    lua::StoryModel* story_model = nullptr;
     lua::LuaPlayerWorld* story_world = nullptr;  // the story session's world, drained each frame (attach_story_world)
     PlanLibrary library;
     std::unique_ptr<PlanScriptRuntime> runtime;

@@ -527,6 +527,11 @@ bool MovementSystem::attitude(ObjectId id, float& roll_deg, float& pitch_deg) co
     } else {
         roll_deg = u->sm.lean;  // bike lean / flying roll O +0x84 (0 for the other locomotors)
         if (u->d.locomotor == LocomotorKind::Flying) pitch_deg = u->sm.pitch;  // flying pitch O +0x88 (§6.3)
+        // trn1 t03 (MOVEMENT §3.6): a ground unit's terrain conform attitude (the bike lean adds to the roll)
+        else if (!is_air(*u)) {
+            pitch_deg = u->conform_pitch;
+            roll_deg = u->conform_roll + u->sm.lean;
+        }
     }
     return true;
 }

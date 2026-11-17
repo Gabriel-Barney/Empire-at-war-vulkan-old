@@ -90,36 +90,56 @@ void test_oi_berserker_speed() {
 namespace bo3split {
 
 void test_oi_stun_over_water() {
-    // OI t02 (ABILITIES_HARDPOINTS §4.12 [port]): Destroy_When_Stunned_Over_Water - a flagged STUNNABLE unit whose stun
-    // starts over water (host: here x < 0) is destroyed at once; on land, or without the flag, it is only stunned. No
-    // over_water host: never destroyed.
+    // trn1 t04 (ABILITIES_HARDPOINTS §4.12, RE reading 2026-11-15): Destroy_When_Stunned_Over_Water is tested by the stun
+    // detonation (0x4d01c0) for every flagged enemy object in its radius, stunnable or not: water plane present and the
+    // terrain more than 0.5 below it (host: under_water) -> Take_Damage kind 1, 999999, no source. A plain stun
+    // (stun_unit: the Stun_Ability wave) never kills.
     for (const bool water_host : {true, false}) {
         OiWorld w;
+        ProjectileDesc d;
+        d.name = "Proj_Stun_Blast";
+        d.max_speed = 10.0f;
+        d.stun = true;
+        d.stun_frames = 90;
+        d.stun_radius = 200.0f;
+        w.cd.projectiles = {d};
         UnitDesc u = oi_unit("MAL", 100.0f);
         u.stunnable = true;
-        AbilityObjectDesc flagged;
+        UnitDesc flagged = u;
         flagged.destroy_when_stunned_over_water = true;
-        const uint32_t fd = push(w.cd, w.ad, u, flagged);
+        UnitDesc rigid = flagged;  // flagged but not STUNNABLE: still tested
+        rigid.stunnable = false;
+        const uint32_t fd = push(w.cd, w.ad, flagged, AbilityObjectDesc{});
         const uint32_t pd = push(w.cd, w.ad, u, AbilityObjectDesc{});
+        const uint32_t rd = push(w.cd, w.ad, rigid, AbilityObjectDesc{});
         w.make(GameMode::Land);
         if (water_host) {
-            AbilityHost h;
-            h.over_water = [](Vec3 p) { return p.x < 0.0f; };
-            w.ab->set_host(std::move(h));
+            SurfaceQueries q;
+            q.under_water = [](float x, float) { return x < 0.0f; };
+            w.sys->set_surface_queries(std::move(q));
         }
-        w.add(1, fd, 0, {-50, 0, 0});  // flagged, over water
-        w.add(2, fd, 0, {50, 0, 0});   // flagged, on land
-        w.add(3, pd, 0, {-60, 0, 0});  // not flagged, over water
-        for (ObjectId id : {ObjectId{1}, ObjectId{2}, ObjectId{3}}) CHECK(w.sys->stun_unit(id, 30, w.frame));
-        const bool sunk = (w.sys->flags(1) & kUnitDead) != 0;
-        CHECK(sunk == water_host);
-        CHECK((w.sys->flags(2) & kUnitDead) == 0 && w.sys->stunned(2, w.frame));
-        CHECK((w.sys->flags(3) & kUnitDead) == 0 && w.sys->stunned(3, w.frame));
-        size_t deaths = 0;
-        for (const DeathEvent& d : w.sys->deaths()) deaths += d.id == 1 ? 1u : 0u;
-        CHECK(deaths == (water_host ? 1u : 0u));
-        w.tick();
-        CHECK((w.sys->flags(2) & kUnitDead) == 0 && (w.sys->flags(3) & kUnitDead) == 0);
+        w.add(1, fd, 1, {-50, 0, 0});  // flagged, over water
+        w.add(2, fd, 1, {50, 0, 0});   // flagged, on land
+        w.add(3, pd, 1, {-60, 0, 0});  // not flagged, over water
+        w.add(4, rd, 1, {-70, 0, 0});  // flagged, not stunnable, over water
+        w.add(5, fd, 1, {-80, 0, 0});  // flagged, over water: a plain stun only
+        CHECK(w.sys->stun_unit(5, 30, w.frame));
+        CHECK((w.sys->flags(5) & kUnitDead) == 0);
+        ProjectileLaunch l;
+        l.owner = 0;
+        l.projectile = 0;
+        l.from = Vec3{0, 0, 0};
+        l.point = l.from;
+        l.fuse_seconds = 0.0f;
+        CHECK(w.sys->launch_projectile(l, w.frame));
+        w.tick();  // spawned
+        w.tick();  // detonates
+        CHECK(!w.sys->alive(1) == water_host);  // a dead unit is dropped at the tick's end
+        CHECK(!w.sys->alive(4) == water_host);
+        CHECK(!w.sys->alive(5) == water_host);  // in the blast radius too
+        CHECK(w.sys->alive(2) && w.sys->stunned(2, w.frame));
+        CHECK(w.sys->alive(3) && w.sys->stunned(3, w.frame));
+        CHECK(!w.sys->stunned(4, w.frame) || water_host);
     }
 }
 }  // namespace bo3split

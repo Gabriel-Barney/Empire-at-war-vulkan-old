@@ -109,6 +109,11 @@ struct MovieEntry {
     // Caption_Frame / Caption_Duration, one entry per text id in byte order of the id (retail keeps both in maps keyed
     // by it); a text id given twice keeps its last value [port]. Only ids with a Caption_Frame are listed.
     std::vector<MovieCaption> captions;
+    // storyb t13 (xml_field_tables.md, Movie fields +0xa8 / +0xc8 / +0xcc): the 3D text crawl drawn over the movie, a
+    // <TextScroll name> of StarWars3DTextCrawl.xml ("" = none), from movie frame Text_Crawl_Start_Frame; End -1 = unset.
+    std::string text_crawl_name;
+    int32_t text_crawl_start_frame = 0;
+    int32_t text_crawl_end_frame = -1;
 };
 
 // ui5 t12: which caption is on screen (AUDIO.md §3.4). Frames are numbered from 1 like Bink's; step() is called once per
