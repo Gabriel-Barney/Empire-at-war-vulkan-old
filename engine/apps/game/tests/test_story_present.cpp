@@ -239,6 +239,14 @@ void advisor_test() {
     s.update(5.0, false);
     CHECK(s.shown_hint() && s.shown_hint()->hint.text == U"<TEXT_MSG>" && s.shown_hint()->hint.color == (game::StoryColor{255, 255, 255, 255}));
     CHECK(s.shown_hint()->hint.sound == game::StoryHint::Sound::Urgent);
+    // COMMANDBAR_MOVIE clears the hint on screen first, but not for Light_Loop (6.2).
+    s.clear_shown_hint("light_loop");
+    CHECK(s.shown_hint() != nullptr);
+    s.clear_shown_hint("Vader_Loop");
+    CHECK(s.shown_hint() == nullptr);
+    // The faction's hint lists are comma / whitespace separated ids.
+    const std::vector<std::string> ids = game::split_story_ids(" TEXT_A, TEXT_B\n TEXT_C ,, ");
+    CHECK(ids.size() == 3 && ids[0] == "TEXT_A" && ids[2] == "TEXT_C" && game::split_story_ids("").empty());
 }
 
 }  // namespace

@@ -641,8 +641,10 @@ void App::galactic_input() {
             }
         if (!centres.empty()) gview_.set_camera_bounds(ui::galactic_scroll_box(centres, half));
     }
+    gview_.camera().set_scroll_locked(story_present_.scroll_locked());  // ui2 t06: the story's SCROLL_LOCK reward
     if (!opt_.hidden || !opt_.smoke.empty()) gview_.camera().update(input_, ui_.bindings, dt_);
     gview_.camera().step(dt_);
+    const uint32_t planet_before_input = selected_planet_;  // ui2 t06: LOCK_PLANET_SELECTION restores it below
     const ui::CameraParams cp = gview_.camera_params(w, h);
     ui::OrderContext ctx;
     ctx.mode = ui::UiMode::Galactic;
@@ -715,6 +717,9 @@ void App::galactic_input() {
             if (const uint32_t at = sel ? gview_.fleet_planet_id(sel) : 0; at != 0) selected_planet_ = at;
         last_fleet_sel_ = sel;
     }
+    // ui2 t06 (STORY_PRESENTATION_REWARDS.md 5.12): while the story locks planet selection a click, a wheel zoom or a fleet
+    // selection does not change the selected planet; the story's own SELECT_PLANET reward writes it outside this input pass.
+    if (story_present_.planet_selection_locked()) selected_planet_ = planet_before_input;
     if (const auto z = orders_.take_planet_zoom())
         for (const ui::PickSphere& s : items)
             if (s.id == *z) {
@@ -777,6 +782,7 @@ void App::battle_input() {
     const sim::TacticalMode* tm = session_ ? session_->host().modes().top_tactical() : nullptr;
     if (!tm || !bview_.active()) return;
     const uint32_t w = targets_.width, h = targets_.height;
+    bview_.camera().set_scroll_locked(story_present_.scroll_locked());  // ui2 t06: the story's SCROLL_LOCK reward
     if (!opt_.hidden || !opt_.smoke.empty()) bview_.camera().update(input_, ui_.bindings, dt_);
     const ui::CameraParams cp = bview_.camera_params(w, h);
     ui::OrderContext ctx;

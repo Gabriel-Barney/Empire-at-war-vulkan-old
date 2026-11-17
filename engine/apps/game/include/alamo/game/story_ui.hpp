@@ -69,8 +69,10 @@ struct StoryMediaCue {
     enum class Kind : uint8_t { Movie, Speech, AdvisorMovie, AdvisorStop };
     Kind kind = Kind::Movie;
     std::string name;
+    bool loop = false;  // AdvisorMovie: COMMANDBAR_MOVIE P2 / MULTIMEDIA P10 != 0 (STORY_PRESENTATION_REWARDS.md 1.3, 6.2); else it plays once
 };
-// Appends the cues of one fired reward (type upper-case as in StoryFired; params[0] = Reward_Param1).
+// Appends the cues of one fired reward (type upper-case as in StoryFired; params[0] = Reward_Param1): START_MOVIE (P1), SPEECH (P1),
+// MULTIMEDIA (P8 speech, P9 talking head with the P10 loop flag), COMMANDBAR_MOVIE (P1 head, P2 loop), STOP_COMMANDBAR_MOVIE.
 void story_reward_media(std::string_view reward_type, const std::vector<std::string>& params, std::vector<StoryMediaCue>& out);
 
 // One frame of the galactic UI as the story sees it (object ids of the galactic store, 0 = none).

@@ -379,6 +379,26 @@ void test_camera() {
         const float x1 = c.look_at().x;
         c.update(in, keys, u);
         CHECK(c.scroll_velocity_x() == 0.0f && c.look_at().x == x1);
+        // ui2 t06 (story SCROLL_LOCK): a held scroll key does nothing while the lock is set, and scrolls again once it clears.
+        TacticalCameraController locked;
+        locked.set_scroll_locked(true);
+        InputState in2;
+        Script s2;
+        s2.key(vk::key('D'), true);
+        for (int i = 0; i < 10; ++i) frame(locked, in2, keys, s2.f, u);
+        CHECK(locked.look_at().x == 0.0f && locked.scroll_velocity_x() == 0.0f);
+        locked.set_scroll_locked(false);
+        for (int i = 0; i < 10; ++i) frame(locked, in2, keys, s2.f, u);
+        CHECK(locked.look_at().x > 0.0f);
+        GalacticCameraController g;
+        g.set_bounds({-5000.0f, -5000.0f, 5000.0f, 5000.0f});
+        const float gx0 = g.look_at().x;
+        g.set_scroll_locked(true);
+        for (int i = 0; i < 10; ++i) frame(g, in2, keys, s2.f, u);
+        CHECK(g.look_at().x == gx0 && g.scroll_velocity_x() == 0.0f);
+        g.set_scroll_locked(false);
+        for (int i = 0; i < 10; ++i) frame(g, in2, keys, s2.f, u);
+        CHECK(g.scroll_velocity_x() != 0.0f);
     }
     // Mouse (§3): middle drag pans 4 x distance / width per pixel with the mouse; Ctrl + middle rotates 150 deg / width;
     // a middle click without movement resets; the wheel is ignored during a drag.

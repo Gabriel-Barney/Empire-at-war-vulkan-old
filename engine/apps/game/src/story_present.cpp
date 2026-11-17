@@ -5,6 +5,7 @@
 #include <cstdlib>
 
 #include "alamo/core/ascii.hpp"
+#include "alamo/data/game_database.hpp"
 
 namespace alamo::game {
 
@@ -317,6 +318,10 @@ uint8_t StoryPresenter::hint_alpha(double now) const {
     return static_cast<uint8_t>(std::clamp(a, 0.0, 1.0) * 255.0 + 0.5);
 }
 
+void StoryPresenter::clear_shown_hint(std::string_view movie) {
+    if (!ascii_iequals(movie, "Light_Loop")) hint_shown_ = false;
+}
+
 void StoryPresenter::begin_mode(uint8_t mode) {
     if (mode >= 3) return;
     next_hint_[mode] = config_.first_hint_tick;
@@ -362,5 +367,32 @@ bool StoryPresenter::slot_forced(std::string_view planet, std::string_view slot)
 std::vector<StoryCameraCommand> StoryPresenter::take_camera_commands() { return std::exchange(camera_, {}); }
 std::vector<StoryTutorialDialog> StoryPresenter::take_dialogs() { return std::exchange(dialogs_, {}); }
 std::vector<std::string> StoryPresenter::take_forced_clicks() { return std::exchange(forced_clicks_, {}); }
+
+std::vector<std::string> split_story_ids(std::string_view list) {
+    std::vector<std::string> out;
+    std::string cur;
+    for (const char c : list) {
+        if (c == ',' || c == ' ' || c == '\t' || c == '\r' || c == '\n') {
+            if (!cur.empty()) out.push_back(std::exchange(cur, {}));
+        } else {
+            cur.push_back(c);
+        }
+    }
+    if (!cur.empty()) out.push_back(std::move(cur));
+    return out;
+}
+
+void load_story_advisor_config(const data::GameConstants& gc, StoryPresenter::Config& out) {
+    out.advisor_hint_interval = std::max(0.0, static_cast<double>(gc.get_float("Advisor_Hint_Interval", static_cast<float>(out.advisor_hint_interval))));
+    out.advisor_hint_duration = std::max(0.0, static_cast<double>(gc.get_float("Advisor_Hint_Duration", static_cast<float>(out.advisor_hint_duration))));
+}
+
+std::vector<std::string> faction_advisor_hints(const data::GameDatabase& db, std::string_view faction, uint8_t mode) {
+    static constexpr const char* kTags[3] = {"Galactic_Advisor_Hints", "Space_Advisor_Hints", "Land_Advisor_Hints"};
+    if (mode >= 3 || faction.empty()) return {};
+    for (const data::GameObjectRecord* rec : db.find_game_objects(faction))
+        if (rec->type == "Faction") return split_story_ids(rec->element.child_text(kTags[mode]));
+    return {};
+}
 
 }  // namespace alamo::game

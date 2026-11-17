@@ -26,6 +26,11 @@
 #include <utility>
 #include <vector>
 
+namespace alamo::data {
+struct GameConstants;
+class GameDatabase;
+}  // namespace alamo::data
+
 namespace alamo::game {
 
 struct StoryColor {
@@ -174,6 +179,8 @@ public:
     // §6.4 periodic hint: call once per tick of the local human's mode; `hints` = that mode's faction hint ids.
     // Returns true when a hint was queued (at the back, the Hint sound).
     bool tick_advisor(uint8_t mode, uint32_t tick, const std::vector<std::string>& hints);
+    // COMMANDBAR_MOVIE / MULTIMEDIA's head (6.2): the hint text on screen goes first, unless the movie is "Light_Loop".
+    void clear_shown_hint(std::string_view movie);
     void begin_mode(uint8_t mode);  // the mode started: the first hint is due config().first_hint_tick ticks later
 
     // ---- state the host draws / obeys ----
@@ -200,6 +207,7 @@ public:
     bool movies_disabled() const { return movies_disabled_; }
     bool retry_dialog_used() const { return retry_dialog_; }
     bool retry_dialog_requested() const { return retry_requested_; }
+    bool take_retry_request() { return std::exchange(retry_requested_, false); }  // ACTIVATE_RETRY_DIALOG reward: show it once
     bool hide_cursor_on_click() const { return hide_cursor_on_click_; }
     bool hide_autoresolve() const { return hide_autoresolve_; }
     bool advisor_enabled(uint8_t mode) const { return mode < 3 && advisor_[mode]; }
@@ -248,5 +256,13 @@ private:
     mutable std::vector<StoryTextLine> live_;
     uint64_t handled_ = 0;
 };
+
+// ---- data readers (ui2 t07, STORY_PRESENTATION_REWARDS.md 6.4) ----
+// A comma / whitespace separated id list ("A, B C" -> A, B, C).
+std::vector<std::string> split_story_ids(std::string_view list);
+// GameConstants Advisor_Hint_Interval (seconds, shipped 300) and Advisor_Hint_Duration (seconds per character, shipped 0.1).
+void load_story_advisor_config(const data::GameConstants& gc, StoryPresenter::Config& out);
+// The faction's hint text ids for a game mode (0 galactic, 1 space, 2 land): Galactic_ / Space_ / Land_Advisor_Hints.
+std::vector<std::string> faction_advisor_hints(const data::GameDatabase& db, std::string_view faction, uint8_t mode);
 
 }  // namespace alamo::game

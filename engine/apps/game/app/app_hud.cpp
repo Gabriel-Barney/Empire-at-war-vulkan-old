@@ -391,6 +391,7 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
     const uint32_t w = targets_.width, h = targets_.height;
     const galactic::GalacticSim* g = galaxy();
     f.view = ui::make_view(gview_.camera_params(w, h), w, h);
+    f.objectives_open = story_present_.objectives_shown();  // ui2 t06: ENABLE_OBJECTIVE_DISPLAY
     planets.clear();
     for (const render::GalacticPlanetSnap& p : gview_.frame().planets) {
         if (!(p.flags & render::kGalPlanet) || (p.flags & render::kGalHidden) || p.id == objects::kNoObjectId) continue;

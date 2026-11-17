@@ -24,6 +24,9 @@ void App::story_present_setup() {
         if (const std::u16string* s = ui_.text.find(id)) return ui::utf16_to_utf32(*s);
         return {};
     };
+    StoryPresenter::Config& cfg = story_present_.config();  // ui2 t07: Advisor_Hint_Interval / Advisor_Hint_Duration
+    load_story_advisor_config(data_.db.constants(), cfg);
+    advisor_mode_ = 255;
     h.type_name = [this](std::string_view type) -> std::u32string {
         const uint32_t t = data_.rules.find_type(type);
         if (t == 0xFFFFFFFFu) return {};
@@ -53,10 +56,51 @@ void App::story_present_lua(const lua::PresentationEvent& e) {
     }
 }
 
+// 6.4 / 6.5: the local player's periodic hint text (Galactic / Space / Land_Advisor_Hints of the faction), the first one 90
+// ticks after the mode starts, then every Advisor_Hint_Interval seconds; the hint sound per queue entry (6.6). Retail runs it per
+// sim tick of the mode: a battle uses its frame (a pause stops it), the galactic mode the render clock since it began [port].
+void App::story_advisor_frame() {
+    if (!session_ || bench_active() || demo_session()) return;
+    uint8_t mode = 255;
+    uint32_t tick = 0;
+    if (const sim::TacticalBattle* b = battle(); b && screen_ == Screen::Battle) {
+        mode = bview_.space() ? 1 : 2;
+        tick = static_cast<uint32_t>(b->frame());
+    } else if (galaxy() && screen_ == Screen::Galactic) {
+        mode = 0;
+        tick = static_cast<uint32_t>(std::max(0.0, (now_s_ - advisor_t0_) * static_cast<double>(StoryPresenter::kTicksPerSecond)));
+    }
+    if (mode == 255) {
+        advisor_mode_ = 255;
+        return;
+    }
+    if (mode != advisor_mode_ || (mode != 0 && tick < advisor_last_tick_)) {  // a new mode (or a new battle): the first hint is due again
+        advisor_mode_ = mode;
+        advisor_t0_ = now_s_;
+        tick = 0;
+        story_present_.begin_mode(mode);
+        advisor_hints_ = faction_advisor_hints(data_.db, local_faction(), mode);
+    }
+    advisor_last_tick_ = tick;
+    story_present_.tick_advisor(mode, tick, advisor_hints_);
+}
+
 void App::story_present_frame() {
     // Retail shows the next hint only with no Bink movie open, no advanced map and no cinematic mode (§6.3).
     const bool blocked = full_movie_.playing() || planet_map_open_ || story_present_.cinematic_mode();
     story_present_.update(now_s_, blocked);
+    // ACTIVATE_RETRY_DIALOG as a reward (5.4): the same IDD_RETRY_DIALOG as the Lua call. USE_RETRY_DIALOG only marks the end-of-battle
+    // choice (retail reads it in the battle-end flow, which the port's defeat path already routes to this dialog); HIDE_AUTORESOLVE
+    // has no reader in retail (5.3), so the flag is kept and nothing reads it.
+    if (story_present_.take_retry_request() && screens_.show_retry()) ++retry_boxes_;
+    story_advisor_frame();
+    if (story_present_.hint_started()) {  // 6.6: Message for the back of the queue, Urgent for a front insert, Hint for the periodic text
+        const StoryShownHint* sh = story_present_.shown_hint();
+        const StoryHint::Sound snd = sh ? sh->hint.sound : StoryHint::Sound::Message;
+        audio_.faction_sfx(snd == StoryHint::Sound::Urgent ? "SFXEvent_HUD_Advisor_Urgent_Message"
+                           : snd == StoryHint::Sound::Hint ? "SFXEvent_HUD_Advisor_Hint"
+                                                           : "SFXEvent_HUD_Advisor_Message");
+    }
 }
 
 // The text column (§1.1): lines from the top-left, the typewriter reveal, one back plate around the block.

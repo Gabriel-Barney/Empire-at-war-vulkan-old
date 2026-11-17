@@ -13,6 +13,9 @@ namespace alamo_game_app {
 
 namespace {
 
+// Play_Lightning_Effect's block length in battle frames (the Lua config default, PresentationConfig::lightning_frames): the bolts show that long.
+constexpr uint32_t kStoryLightningFrames = 30;
+
 // The trailing "@pos", x, y, z of a camera event (bind_presentation.cpp append_position), false when the call had none.
 bool resolved_position(const lua::PresentationEvent& e, ui::Vec3& out) {
     const size_t n = e.args.size();
@@ -111,6 +114,25 @@ void App::story_script_event(const lua::PresentationEvent& e) {
     const uint32_t frame = story_frame();
     const ScriptCamera::Resolver r = [this](int32_t id, ObjectFrame& f) { return story_object_frame(id, f); };
     switch (e.op) {
+        case Op::PlayLightningEffect: {  // 4.2: the effect's name, then the end (param 2) and the start (param 3) point at the call
+            std::vector<ui::Vec3> pts;
+            for (size_t i = 0; i + 3 < e.args.size(); ++i)
+                if (e.args[i].kind == lua::PresentationArg::Kind::String && e.args[i].text == "@pos") {
+                    pts.push_back({static_cast<float>(e.args[i + 1].number), static_cast<float>(e.args[i + 2].number), static_cast<float>(e.args[i + 3].number)});
+                    i += 3;
+                }
+            if (pts.size() == 2 && !e.args.empty() && battle()) {
+                const uint32_t f = story_frame();
+                story_lightning_.push_back({e.args[0].text, pts[1], pts[0], f, f + kStoryLightningFrames});
+            }
+            break;
+        }
+        case Op::EnableFog:
+            if (!e.args.empty()) story_fog_master_ = e.args[0].b;
+            break;
+        case Op::EnableDistanceFog:
+            if (!e.args.empty()) story_fog_distance_ = e.args[0].b;
+            break;
         case Op::FadeScreenOut: story_fade_.fade_out(number_or(e, 0, 0.5), now_s_); break;
         case Op::FadeScreenIn: story_fade_.fade_in(number_or(e, 0, 0.5), now_s_); break;
         case Op::FadeOn: story_fade_.on(); break;
@@ -212,6 +234,8 @@ void App::story_script_frame() {
         story_cam_.end();
         story_moves_ = {};
         story_lua_mode_ = false;
+        story_lightning_.clear();  // ui2 t08: the effects and fog switches belong to the mode
+        story_fog_master_ = story_fog_distance_ = true;
     }
     story_box_.update(now_s_);
     if (screen_ == Screen::Battle && bview_.active()) {
@@ -242,6 +266,27 @@ void App::story_script_frame() {
         }
     }
     story_camera_commands();
+    if (screen_ == Screen::Battle && bview_.active()) {  // ui2 t08: the script's lightning bolts and fog switches go to the scene
+        const uint32_t now = story_frame();
+        std::erase_if(story_lightning_, [now](const StoryLightning& l) { return now >= l.to; });
+        std::vector<render::BeamInstance> beams;
+        uint64_t key = 0x5C170000u;
+        for (const StoryLightning& l : story_lightning_) {
+            render::BeamInstance b;
+            b.key = key++;
+            b.kind = render::kBeamEnergyWeapon;
+            b.start = {l.start.x, l.start.y, l.start.z};
+            b.end = {l.end.x, l.end.y, l.end.z};
+            b.style.texture.clear();  // bolts only: no ribbon, no dots
+            b.style.width = 0.0f;
+            b.style.dots = 0;
+            b.style.lightning = l.name;
+            b.continuous = true;
+            beams.push_back(std::move(b));
+        }
+        bview_.set_script_beams(std::move(beams));
+        bview_.set_fog_switches(story_fog_master_, story_fog_distance_);
+    }
 }
 
 // The camera commands of the rewards (STORY_PRESENTATION_REWARDS.md §5): POSITION_CAMERA / SCROLL_CAMERA at an object type's

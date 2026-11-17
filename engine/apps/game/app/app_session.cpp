@@ -322,7 +322,9 @@ void App::story_reward_step() {
         for (; cursor < fired.size(); ++cursor) {
             const lua::StoryFired& f = fired[cursor];
             story_present_reward(f, mode);  // ui2: the presentation rewards (text, pointers, locks, camera, advisor)
-            if (f.reward_type != "START_MOVIE" && f.reward_type != "MULTIMEDIA" && f.reward_type != "STOP_COMMANDBAR_MOVIE") continue;
+            if (f.reward_type != "START_MOVIE" && f.reward_type != "MULTIMEDIA" && f.reward_type != "STOP_COMMANDBAR_MOVIE" &&
+                f.reward_type != "SPEECH" && f.reward_type != "COMMANDBAR_MOVIE")
+                continue;
             std::vector<std::string> params;
             for (const lua::StoryParam& p : f.reward_params) params.push_back(p.text);
             story_reward_media(f.reward_type, params, cues);
@@ -355,9 +357,14 @@ void App::story_reward_step() {
         if (c.kind == StoryMediaCue::Kind::AdvisorMovie || c.kind == StoryMediaCue::Kind::AdvisorStop) {
             if (story_movie_) continue;  // a random-plot offer's dialog holds the slot
             std::string err;
+            if (c.kind == StoryMediaCue::Kind::AdvisorMovie) story_present_.clear_shown_hint(c.name);  // 6.2: the hint text goes first
             if (c.kind == StoryMediaCue::Kind::AdvisorStop) advisor_movie_.stop(audio_);
-            else if (!advisor_movie_.open(data_, audio_, c.name, true, &err)) std::fprintf(stderr, "advisor movie %s: %s\n", c.name.c_str(), err.c_str());
+            else if (!advisor_movie_.open(data_, audio_, c.name, c.loop, &err)) std::fprintf(stderr, "advisor movie %s: %s\n", c.name.c_str(), err.c_str());
             if (!advisor_movie_.playing()) gpu_.hud.clear_image_page(kAdvisorPage);
+            continue;
+        }
+        if (story_present_.movies_disabled()) {  // ui2 t07: DISABLE_MOVIES skips START_MOVIE (5.17); MOVIE_DONE is raised at once [port]
+            story_ui_.movie_done(c.name);
             continue;
         }
         ++reward_movies_;

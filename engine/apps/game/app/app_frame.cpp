@@ -167,6 +167,14 @@ bool App::render_frame() {
             layout = &ui_.tactical_hud.layout();
         }
     }
+    // ui2 t06 (STORY_PRESENTATION_REWARDS.md 5.6): SHOW_COMMAND_BAR 0 hides the command bar and the HUD built on it (a hide
+    // counter: nested hides need matching shows); the story overlay, dialogs and cursor stay.
+    if (story_present_.command_bar_hidden() && (galactic || (screen_ == Screen::Battle && battle_view))) {
+        hud_list = ui::HudDrawList{};
+        drawer = nullptr;
+        shells = nullptr;
+        layout = nullptr;
+    }
     // HUD advisor loop: the galactic and battle HUDs draw it in Movie_galactic / Movie_tactical (FIXPASS_GALACTIC §4.2);
     // elsewhere 200 x 200 px, top-left [port].
     if (screen_ != Screen::Battle && !galactic && advisor_loop_shown()) {

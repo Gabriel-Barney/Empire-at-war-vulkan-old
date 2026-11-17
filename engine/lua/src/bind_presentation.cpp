@@ -673,6 +673,8 @@ int g_play_lightning_effect(Call& c) {
         if (!engine_ud(c, i)) return c.script_error_stop("%s -- invalid type for parameter %d. Expected position of some sort.", n, i);
     PresentationLog& log = log_of(c);
     PresentationEvent& e = record(c, PresentationOp::PlayLightningEffect);
+    append_position(c, e, 2);  // ui2 t08: the end (param 2) then the start (param 3), read once at the call (a moving bone is not tracked)
+    append_position(c, e, 3);
     const PresentationConfig& cfg = log.config();
     const uint32_t frames = cfg.lightning_frames_of ? cfg.lightning_frames_of(c.string(1)) : cfg.lightning_frames;
     e.block = log.open_block(frame_of(c) + frames);

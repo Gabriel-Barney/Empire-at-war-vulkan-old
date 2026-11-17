@@ -591,6 +591,12 @@ static void test_camera_positions() {
           ev[1].args[4].number == 9.0);
     CHECK(ev[2].args.size() == 13 && ev[2].args[9].text == "@pos");  // the object's own position at call time
     CHECK(ev[3].args.size() == 5 && ev[3].args[1].text == "@pos");
+    // ui2 t08: Play_Lightning_Effect carries the resolved end (param 2) and start (param 3) after its own arguments.
+    CHECK(run(vm, "Play_Lightning_Effect('Zap', Create_Position(1, 2, 3), Create_Position(4, 5, 6))") == "");
+    const PresentationEvent& zap = log.events().back();
+    CHECK(zap.op == PresentationOp::PlayLightningEffect && zap.args.size() == 11 && zap.args[0].text == "Zap");
+    CHECK(zap.args[3].text == "@pos" && zap.args[4].number == 1.0 && zap.args[6].number == 3.0);
+    CHECK(zap.args[7].text == "@pos" && zap.args[8].number == 4.0 && zap.args[10].number == 6.0);
     attach_presentation(vm, nullptr);
 }
 

@@ -605,6 +605,12 @@ public:
     void story_present_reward(const lua::StoryFired& f, uint8_t mode);
     void story_present_lua(const lua::PresentationEvent& e);
     void story_present_frame();
+    void story_advisor_frame();  // ui2 t07: the periodic advisor hint (6.4) and the hint sound cue
+    // The advisor's current mode (0 galactic, 1 space, 2 land, 255 none), the render time it began and the faction's hint ids.
+    uint8_t advisor_mode_ = 255;
+    double advisor_t0_ = 0.0;
+    uint32_t advisor_last_tick_ = 0;
+    std::vector<std::string> advisor_hints_;
     void build_story_overlay(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
     void build_story_text(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
     void build_story_hint(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
@@ -631,6 +637,14 @@ public:
     uint64_t story_fx_battle_ = 0;
     void story_script_event(const lua::PresentationEvent& e);
     void story_script_frame();
+    // ui2 t08: Play_Lightning_Effect bolts (battle frames, 30 per second) and the Enable_Fog / Enable_Distance_Fog switches.
+    struct StoryLightning {
+        std::string name;
+        ui::Vec3 start, end;
+        uint32_t from = 0, to = 0;
+    };
+    std::vector<StoryLightning> story_lightning_;
+    bool story_fog_master_ = true, story_fog_distance_ = true;
     void story_camera_commands();
     void build_story_fade(ui::HudDrawList& dl, const ui::HudCanvas& canvas, uint32_t w, uint32_t h) const;
     uint32_t story_frame() const;

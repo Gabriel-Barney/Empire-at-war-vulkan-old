@@ -1778,8 +1778,10 @@ void CampaignBattles::story_victory(const std::string& faction, bool short_silen
 void CampaignBattles::story_sync_switches(const StorySession& s) {
     GalacticMode* g = host_->galactic_mode();
     if (!battle_ || !g || !g->sim()) return;
-    for (size_t p = 0; p < g->sim()->players().size(); ++p)
+    for (size_t p = 0; p < g->sim()->players().size(); ++p) {
         battle_->set_reinforcements_off(static_cast<int32_t>(p), !s.reinforcements_enabled(static_cast<int32_t>(p)));
+        battle_->set_retreat_off(static_cast<int32_t>(p), !s.retreat_enabled(static_cast<int32_t>(p)));
+    }
 }
 
 void CampaignBattles::story_tactical_reward(const std::string& type, const std::vector<std::string>& params) {

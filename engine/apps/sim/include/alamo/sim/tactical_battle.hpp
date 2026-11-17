@@ -396,6 +396,9 @@ public:
     // with NotAllowed; the stand-in auto deploy skips its reserves). The campaign host copies the story's switches each tick.
     void set_reinforcements_off(int32_t player, bool off);
     bool reinforcements_off(int32_t player) const;
+    // ui2 t06 DISABLE_RETREAT: a player whose switch is off cannot retreat (retreat_prevented is true for it).
+    void set_retreat_off(int32_t player, bool off);
+    bool retreat_off(int32_t player) const;
     // CHANGE_OWNER / DESTROY_OBJECT on the battle's objects of `type`; return the objects changed / whether one was hit.
     uint32_t reward_change_owner(TacticalMode& mode, objects::TypeIndex type, int32_t owner, int32_t count);
     bool reward_destroy_object(TacticalMode& mode, objects::TypeIndex type);
@@ -1947,6 +1950,7 @@ private:
     std::vector<AttachedEffect> effects_;
     std::vector<StoryGeneric> story_generics_;  // STY1 t03: this tick's generic story names
     std::vector<objects::ObjectId> story_reinforced_;  // L1/S4 wave 2b: reserve units deployed this tick
+    std::vector<uint8_t> retreat_off_;                // ui2 t06: per player, 1 = retreat disabled by the story
     std::vector<uint8_t> reinf_off_;                  // STY1 t06: per player, 1 = reinforcements disabled by the story
     float bombard_delay_override_ = 0.0f;             // STY1 t06: BOMBARD_DELAY seconds
     std::vector<objects::ObjectId> ability_finished_;  // S7 t15 A1: signal 0x29 this tick (not saved: read the same tick)

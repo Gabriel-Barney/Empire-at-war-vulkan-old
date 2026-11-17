@@ -728,7 +728,11 @@ void BattleView::prepare(GpuCore& gpu, float alpha) {
         }
         // --- end R3/R5 render ---
         // R5 ability beams: the frame's tractor / energy / super laser / zap records with world endpoints (render pass: transparent bucket)
-        if (beams_on_) gpu.renderer.set_beams(render::beams_from_frame(frame_, &beam_styles_, beam_bone_), p.curr->tick);
+        if (beams_on_) {
+            std::vector<render::BeamInstance> beams = render::beams_from_frame(frame_, &beam_styles_, beam_bone_);
+            beams.insert(beams.end(), script_beams_.begin(), script_beams_.end());  // ui2 t08: the script's lightning
+            gpu.renderer.set_beams(beams, p.curr->tick);
+        }
         gpu.renderer.set_lasers(builder_->lasers(), laser_k_);  // the frame's laser projectiles (Transparent bucket, main scene)
         stats_.lasers_peak = std::max(stats_.lasers_peak, static_cast<uint32_t>(builder_->lasers().size()));
         stats_.model_projectiles_peak = std::max(stats_.model_projectiles_peak, istats_.projectiles_drawn - istats_.projectiles_lasers);
@@ -830,7 +834,9 @@ ui::Vec3 BattleView::type_half_extents(objects::TypeIndex t) {
 
 void BattleView::use_scene(GpuCore& gpu) {
     if (!scene_) return;
-    gpu.renderer.set_lighting(scene_->lighting());
+    render::Lighting lit = scene_->lighting();
+    lit.fog_enabled = lit.fog_enabled && fog_master_ && fog_distance_;  // ui2 t08: Enable_Fog / Enable_Distance_Fog (false = no fog)
+    gpu.renderer.set_lighting(lit);
     gpu.renderer.set_world(&scene_->world());
 #ifdef ALAMO_PARTICLES_HAVE_SIM
     gpu.renderer.set_scene_hook(prender_.initialized() ? &prender_ : nullptr);

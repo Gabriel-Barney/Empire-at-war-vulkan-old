@@ -318,7 +318,7 @@ bool App::tactical_button(const ui::HudAction& a) {
 
 void App::fill_command_buttons(ui::TacticalHudFrame& hf) const {
     hf.world.interface_hidden = interface_hidden_ || movie_mode_;
-    hf.objectives_hidden = objectives_hidden_;
+    hf.objectives_hidden = objectives_hidden_ || !story_present_.objectives_shown();  // ui2 t06: ENABLE_OBJECTIVE_DISPLAY
     const sim::TacticalBattle* b = battle();
     if (!b) return;
     ui::HudCommandButtons& c = hf.command_buttons;
