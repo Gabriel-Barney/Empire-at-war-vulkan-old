@@ -354,6 +354,9 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
         bo.conflict.human_choice = aopt.battles == "auto" ? galactic::BattleChoice::AutoResolve : galactic::BattleChoice::Fight;
         bo.conflict.fight_ai_battles = aopt.battles == "fight-all";
         bo.tactical = aopt.battles != "auto";
+        // storyb t17: the --human player's units take commands only, as in alamo_game (game_session.cpp) and the skirmish
+        // run: without it the battle's stand-in ordered the hands-off human's units (UM01: Tyber walked off at frame 482).
+        bo.battle.skip_human_units = human >= 0;
         sim::load_tactical_systems(*files, rules, &db.constants(), bo);  // Int-final: weather, retreat, strikes data
         // cu8f t03: the random map picker's candidate table (CU8F_T03_T05_RE §1.1), built on the first pick [port].
         bo.map_candidate_source = sim::map_candidate_source(*files, [v = files.get()](std::string_view g, bool mod) {
