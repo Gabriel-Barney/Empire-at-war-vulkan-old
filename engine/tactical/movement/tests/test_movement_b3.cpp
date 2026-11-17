@@ -733,9 +733,10 @@ void test_t23_save_try_again() {
 // ahead), so it and the rear one are Speed Slave Only with M = the front one; a crawler of another order (max speed
 // 0.02, below the 0.05 acceleration default) ahead of it caps it below its acceleration (Moving With Speed Only: it
 // does not overtake). The rear one, answered below its own acceleration, starves: 30 frames later it becomes M of state
-// 15. Case 1: one rear unit, which also has a record with the crawler - two records, so it stands in state 15. Case 2:
-// a Giant leads two rear units side by side, each with that one record - state 16 in the same frame, a detour around
-// the Giant.
+// 15. Case 1: one rear unit, which also has a record with the crawler - two records; mov1 t01 (b0176, BKR1_RE_ANSWERS Q1
+// [H]): 0x505630 counts only the state-15 records whose master is M, so the crawler record does not count and M detours
+// (state 16) in the same frame (before mov1 every record of M counted and it stood). Case 2: a Giant leads two rear
+// units side by side, each with that one record - state 16 in the same frame, a detour around the Giant.
 void test_t23_starvation() {
     ::alamo::test::section("t23_starvation");
     for (int with_detour = 0; with_detour < 2; ++with_detour) {
@@ -778,7 +779,7 @@ void test_t23_starvation() {
         }
         CHECK(slave > 0 && starved > slave + 29 && starved_m == 2);
         if (with_detour) CHECK(records == 1 && detour == starved);
-        else CHECK(records == 2 && detour == 0 && stood);
+        else CHECK(records == 2 && detour == starved);
         std::printf("t23 starvation: Speed Slave Only from %u, starved at %u (M %d, the rear one, %u record(s)), state 16 at %u%s\n",
                     slave, starved, starved_m, records, detour, with_detour ? "" : stood ? ", stands" : ", moves");
     }

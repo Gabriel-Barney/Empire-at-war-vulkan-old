@@ -1653,6 +1653,11 @@ private:
     bool rejoin_search(const Unit& u, std::span<const V2> base, uint32_t cur, float d, const std::function<int(const Rejoin&)>& fn,
                        const Unit* forced = nullptr) const;
     bool rejoin_accept(const Unit& u, V2 cand, V2 path_end, V2& q, const Unit* forced = nullptr) const;
+    // mov1 t01 (BKR1_RE_ANSWERS Q1 [H]): 0x505630 - the number of MovingVsMoving records in state 15 (Starved) whose
+    // master is u; master_list_partner: o is the slave of one of u's MovingVsMoving records in state 4 (Pass, 0x505e10)
+    // or state 15 (0x505630) where u is the master - an obstacle of every Path Around of u (0x67d580's "always" lists)
+    uint32_t starved_partner_count(const Unit& u) const;
+    bool master_list_partner(const Unit& u, const Unit& o) const;
     // 0x67d580(request, object, 1): the goal-spot obstacle filter of 0x679aa0 (relation mask 0x10)
     bool goal_obstacle(const Unit& u, const Unit& o, const Unit* forced = nullptr) const;
     // 0x67d580 + 0x677650: the obstacle set of a Path Around call among the layer objects around u, ascending id, with

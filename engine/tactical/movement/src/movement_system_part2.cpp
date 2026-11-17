@@ -611,6 +611,22 @@ bool MovementSystem::early_arrival(Unit& a, const Unit& b, bool have_v, V2 v, ui
 
 // ---- s78n t20 (MOVEMENT §1.5.1): the Path Around call of the dynamic land pathfinder ----
 
+uint32_t MovementSystem::starved_partner_count(const Unit& u) const {
+    uint32_t n = 0;
+    for (const CollisionObject& c : coll_.list())
+        if (c.kind == CollisionKind::MovingVsMoving && c.state == CollisionState::Starved && (c.master == 0 ? c.a : c.b) == u.d.id) ++n;
+    return n;
+}
+
+bool MovementSystem::master_list_partner(const Unit& u, const Unit& o) const {
+    for (const CollisionObject& c : coll_.list()) {
+        if (c.kind != CollisionKind::MovingVsMoving || (c.state != CollisionState::Pass && c.state != CollisionState::Starved)) continue;
+        const ObjectId mid = c.master == 0 ? c.a : c.b, sid = c.master == 0 ? c.b : c.a;
+        if (mid == u.d.id && sid == o.d.id) return true;
+    }
+    return false;
+}
+
 bool MovementSystem::shares_open_record(const Unit& u, const Unit& o) const {
     // record vf +0x58: MovingVsStopped state 0 / 1, MovingVsMoving state 0 / 1 / 4 (Pass)
     for (const CollisionObject& c : coll_.list()) {
@@ -687,7 +703,8 @@ FootRect MovementSystem::unit_swept_box(const Unit& o, const Unit& u, uint8_t re
 // undecided / detouring record with u; 2: the same for every standing unit; 4: the obstacle classes 2 - 4 are ignored;
 // a deployed / deploying unit always is one); held, head-on, crossing, same way and slower -> an obstacle; same way and
 // not slower -> ignored, unless it is on its final leg, not behind u's facing and the pair has such a record. s78n t23
-// (MOVEMENT §5.4.6): the slaves of u's MovingVsMoving records in state 4 (Pass) where u is the master are always obstacles.
+// (MOVEMENT §5.4.6): the slaves of u's MovingVsMoving records in state 4 (Pass) where u is the master are always obstacles;
+// mov1 t01 (BKR1 Q1 [H]): so are the slaves of u's state-15 (Starved) records where u is the master (0x505630).
 void MovementSystem::around_obstacles(const Unit& u, const Unit* forced, uint8_t flags, float half, std::vector<AroundObstacle>& out,
                                       std::vector<uint32_t>& ids) const {
     out.clear();
@@ -701,17 +718,7 @@ void MovementSystem::around_obstacles(const Unit& u, const Unit* forced, uint8_t
         const Unit& o = units_[ci];
         if (o.d.id == u.d.id) continue;
         const uint8_t rel = unit_relation(o, u);
-        bool is_forced = forced && forced->d.id == o.d.id;
-        if (!is_forced) {
-            for (const CollisionObject& c : coll_.list()) {
-                if (c.kind != CollisionKind::MovingVsMoving || c.state != CollisionState::Pass) continue;
-                const ObjectId mid = c.master == 0 ? c.a : c.b, sid = c.master == 0 ? c.b : c.a;
-                if (mid == u.d.id && sid == o.d.id) {
-                    is_forced = true;
-                    break;
-                }
-            }
-        }
+        const bool is_forced = (forced && forced->d.id == o.d.id) || master_list_partner(u, o);
         if (!is_forced) {
             if (crushes(u, o) || !collision_classes_interact(cu, o.d.collision_class) || pair_gated(u, o)) continue;
             if (skip_infantry && o.d.collision_class == kUccInfantry && !o.ci.hero_clash) continue;
@@ -759,7 +766,7 @@ bool MovementSystem::around_base(const Unit& u, std::vector<V2>& scratch, std::s
 
 // 0x67d580(request, object, 1) - the goal-spot filter of 0x679aa0 (s78n t24, MOVEMENT §5.4.7 "Rejoin candidates of a
 // kind-3 Path Around" item 2; relation mask 0x10): never an obstacle - u, anything u crushes, a class-exempt or gated
-// pair; always - u's MovingVsMoving partners; then by the relation (object, u): standing, held, head-on, crossing, same
+// pair; always - the forced object, the slaves of u's Pass / Starved records where u is master (mov1 t01); then by the relation (object, u): standing, held, head-on, crossing, same
 // way slower -> an obstacle; same way not slower -> not, unless it is on its final approach, not behind u's facing and
 // the pair has an undecided / detouring record. Infantry are obstacles here even for an Infantry / Giant u (the mask
 // has no bit 0).
@@ -769,10 +776,10 @@ bool MovementSystem::goal_obstacle(const Unit& u, const Unit& o, const Unit* for
     // s78o (b0065, MOVEMENT §5.4.7 "Rejoin candidates" item 2): the forced object (0x67d580's object argument, a flag-1
     // detour's obstacle) is an obstacle before the partner and relation tests (today only MvM detours pass flag 1, and
     // their obstacle is a MovingVsMoving partner already)
+    // mov1 t01 (b0176, BKR1_RE_ANSWERS Q1 [H]): the "always" list of 0x67d580 is the forced list (the forced id plus
+    // 0x505e10, the slaves of u's Pass records) and the 0x505630 partners (the S of u's Starved records), not any MvM partner
     if (forced && o.d.id == forced->d.id) return true;
-    for (const CollisionObject& c : coll_.list())
-        if (c.kind == CollisionKind::MovingVsMoving && ((c.a == u.d.id && c.b == o.d.id) || (c.a == o.d.id && c.b == u.d.id)))
-            return true;
+    if (master_list_partner(u, o)) return true;
     if (unit_relation(o, u) != kRelSameWay) return true;
     return near_path_end(o, u) && !(dot(o.m.pos - u.m.pos, dir_from_deg(u.m.yaw)) < 0.0f) && shares_open_record(u, o);
 }
@@ -1766,14 +1773,18 @@ void MovementSystem::mvm_service(CollisionObject& c, Unit& a, Unit& b, bool full
             mvm_swap_slots(m, s, frame);
             c.state = S::Resolved;
             break;
-        case S::Starved: {  // 15: M stops; while M has exactly one record it path-arounds S
+        case S::Starved: {  // 15: M stops; while M is the starved master of exactly one record it path-arounds S
+            // mov1 t01 (b0176, BKR1_RE_ANSWERS Q1 [H], 0x681ef0): the list is 0x505630 - M's MovingVsMoving records in
+            // state 15 whose master is M - not every record of M, so a Pass / MovingVsStopped / Terrain record of M does
+            // not make it stand. Flag = (wanted yaw M - wanted yaw S) wrapped into [0, 360) < 90 (0x20b100, one-sided). No
+            // timeout and no retry count: the search runs every frame until it succeeds or the record ends by validity.
             if (c.starve == 0) c.starve = 30;
             reset();
             vm = 0.0f;
-            uint32_t n = 0;
-            for (const CollisionObject& k : coll_.list())
-                if (k.a == m.d.id || k.b == m.d.id) ++n;
-            if (n == 1 && path_around(c, m, &s, dot(wanted_dir(m), wanted_dir(s)) > 0.0f, 4, 0, frame)) c.state = S::StarvedDetour;
+            if (starved_partner_count(m) == 1) {
+                const bool flag = norm_deg(heading_deg(wanted_dir(m)) - heading_deg(wanted_dir(s))) < 90.0f;
+                if (path_around(c, m, &s, flag, 4, 0, frame)) c.state = S::StarvedDetour;
+            }
             break;
         }
         case S::StarvedDetour:  // 16: M walks its detour, S stands
