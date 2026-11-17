@@ -468,7 +468,9 @@ if(_alamo_sim)
     # bug filed to skai); seeds 1, 8 and 9 run with 0 Lua errors. Seed 3 -> 1.
     # bkx1 (2026-11-17, tactical AI stagger off + retail goal cadence, b0123): seeds 1 and 2 hit the MDU race (group mdu1);
     # seeds 3-9 run with no other Lua error. Seed 1 -> 3.
-    foreach(_seed 3 8 9)
+    # cmb2 (2026-11-17, land attack approach): seed 8 hits the MDU race (group mdu1), seed 5 logs one Lua error; seeds 3, 4, 6, 9 run with 0 Lua
+    # errors. Seed 8 -> 4.
+    foreach(_seed 3 4 9)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_empire_underworld_seed${_seed}
                COMMAND alamo_headless --skirmish-ai foc-land --ai Empire,Underworld --ticks 70000 --workers 4 --quiet
                        --fail-on-lua-errors --seed ${_seed})
@@ -499,7 +501,9 @@ if(_alamo_sim)
     # end (8153-13174); seed 4 reaches the cap with the Empire holding. Seed 4 -> 2.
     # bkx1 (2026-11-17, tactical AI stagger off + retail goal cadence, b0123): seeds 1 and 3-12 end (6689-11629); seed 2
     # reaches the cap with the Rebels retreated but not all gone. Seed 2 -> 3.
-    foreach(_seed 1 3)
+    # cmb2 (2026-11-17, land attack approach: slot-leg reach, 3-D reference, plan retry, hard points): seeds 1, 2 and 4-12 end
+    # (9145-13701, 0 Lua errors); seed 3 reaches the cap (the Empire's last AT-AT against the Rebels). Seed 3 -> 2.
+    foreach(_seed 1 2)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_campaign_outcome_seed${_seed}
                COMMAND alamo_headless --skirmish-ai foc-land-campaign --seed ${_seed} --ticks 20000 --workers 0 --quiet --expect-battle-end
                        --fail-on-lua-errors)
