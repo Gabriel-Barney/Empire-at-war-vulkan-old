@@ -126,11 +126,11 @@ the follow-ups).
   - On a match, apply the damage to that CombatSystem hardpoint. The shield takes it first, as in this run.
   - With no match: `script_error_stop("GameObjectWrapper::Take_Damage -- unknown hard point %s.", name)`, with no
     damage. Today it returns 0 and the script continues (`:1815`).
-- [port] Delete the provisional rule:
+- [port] Delete the provisional rule (done 2026-11-17, r1b t02):
   - `sim_snapshot.cpp:473-487` (pass 3) and the header text `sim_snapshot.hpp:17-21`;
   - `SnapshotObject::attach_parent` (`sim_snapshot.hpp:213`) if nothing else reads it;
   - the comment at `sim_snapshot.cpp:513-515` and the test wording at `engine/render/tests/test_render_r5.cpp:251`.
-- [port] V1: hide the `Model_To_Attach` slot on destruction. Today it is kept by design (`hardpoints.hpp:17`,
+- [port] V1 (done 2026-11-17, r1b t03: every destroyable hardpoint, per B.10 answer 4): hide the `Model_To_Attach` slot on destruction. Today it is kept by design (`hardpoints.hpp:17`,
   `hardpoints.cpp:158-164`). Whether this applies to every destroyable hardpoint or only to those with a
   `Death_Breakoff_Prop` waits for the RE / probe items below. Until then, hiding it when a breakoff prop exists
   matches the one observation.
