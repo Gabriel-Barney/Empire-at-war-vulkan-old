@@ -171,8 +171,10 @@ ModelClass +0x148 holds the sim time of the last advance; it is set by every pla
 **`GameObjectClass::Play_Animation` 0x3a92f0** takes (object, type, index, loop, blend seconds, speed,
 start frame, blend mode, lock, flag). Every behaviour, ability and Lua call goes through it (103 call sites). [H]
 
-1. Special case: while a Berserker ability is active, any request other than `Attack`, `Attack Idle` or `Idle`
-   becomes `SpinMove` (104), looped, at speed 1. The spin is left alone until it is within 2 frames of its end. [M]
+1. Special case: while a Berserker ability is active, an `Idle` / `Attack` / `Attack Idle` request is ignored while a
+   `SpinMove` (104) runs short of its end (frame < count − 2 − speed) and otherwise becomes `SpinMove` at speed 1 from
+   frame 1; any other request (but SpinMove) first ends the Berserker and then plays. [H, r3h 2026-11-17; details:
+   ABILITIES_HARDPOINTS §4.15]
 2. **Lock:** object +0x3a0 bit 3 is set when a call passes lock = 1. While it is set, calls without lock are
    ignored. Every accepted call rewrites the bit. [H]
 3. **Index 0xFFFF means a random variant:** synchronized-RNG integer in [0, count − 1] (0x1ffb40 on

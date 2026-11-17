@@ -907,9 +907,9 @@ sim code (determinism rule 3); instead a clip position is a pure function of fix
   (anim_state.hpp `advance_one_shot`). Generic / Eat / Arc_Sweep hold the unit (the special stays applied) until
   then, after their last frame-numbered event; Grenade until the end of `Toss_Anim` after the throw; Hack / Repair
   change the owner / repair at the end of animation 0x5a: ceil(max(count − 2, 0) / rate) sim frames after the apply.
-- **Berserker window**: animation 0x68 is taken as looping [port]: position = (n × rate) mod (count − 1), n = the
-  frames since the apply (int(FPS × duration) − counter); a damage pass needs counter % 5 = 0 and 0.2 × count <
-  position < 0.8 × count.
+- **Berserker window** (r3h: §4.15): the SpinMove the apply / restart recorded loops: position = (n × rate) mod
+  (count − 1), n = the frames since that play; near its end (position ≥ count − 3) it restarts with a new variant draw;
+  a damage pass needs (near its end or counter % 5 = 0) and 0.2 × count < position < 0.8 × count.
 - **Clip data**: frame count and fps of variant 0 of the clip, from the type's sim model (`AbilityHost::anim_clip`,
   battle host `TacticalBattle::anim_clip_info`; XML names such as `Attack_Animation` / `Toss_Anim` values resolve to
   ModelAnimType ids with `anim::find_anim_type`). This is static model data loaded from the ALA files, the same for
@@ -928,6 +928,7 @@ sim code (determinism rule 3); instead a clip position is a pure function of fix
   within the reader's ±1 frame. The attach (re-own) frame was not visible in memory.
 - Infiltrator `STICKY_BOMB`: `PROJ_STICKY_BOMB` appears at `Bombtoss` (47) start + 12 / + 13 (port: position ≥ 12);
   the clip ends at + 29 and the thrower's next clip starts at + 30 (port: ceil(max(count − 2, 0) / rate)). Match.
+- (r3h 2026-11-17: explained and ported by the restart rule of §4.15; the two differences below are gone.)
 - Yoda `BERSERKER`: damage passes come every 5 frames (counter % 5 = 0 confirmed) and only in the middle of the clip
   (passes at clip positions 8–29, none at 3–5 or 30+, i.e. about 20 %–80 %). Two differences, kept as the [port]
   approximation: retail played **variant 1** of `RI_YODA_SPINMOVE` (38 frames; the port uses variant 0, 36 frames)
@@ -1072,6 +1073,83 @@ frame, rate, end, loop, what follows; saved from ability save v2, hashed only wh
 unless an explicit sub-index); Eat's `Target_Grabbed_Animation` is not parsed; a Super_Laser whose variant is missing
 keeps the §4.13 rate-1 fallback (the host cannot tell "no model" from "no variant"); writers outside the ability
 system (Lua / cinematic Play_Animation, death, the Berserker redirect) are not seen by the record.
+r3h (2026-11-17) replaced the first two and the last: see §4.15.
+
+### 4.15 Clip playback: Berserker, blaster, flame, demolition, shield and structure clips (r3h RE pass 2026-11-17) [H unless tagged]
+Read with REA from retail StarWarsG.exe (the Play_Animation callers, the special-ability vtables); behaviour in words.
+
+**Play_Animation's Berserker case (0x3a92f0).** While the object's Berserker counter (SAP +0x2cc) is non-zero and the
+request is not SpinMove (0x68):
+- "near its end" = the primary clip's frame ≥ frame count − 2 − its speed, or the clip has finished (0x39a180);
+- a request for Idle (0), Attack (5) or Attack Idle (6) is **ignored** while a SpinMove runs and is not near its end;
+  otherwise (no SpinMove, or near its end) it is **rewritten to SpinMove**, speed 1, start frame 1, keeping the
+  request's index (0xFFFF draws over the SpinMove variants), loop flag and blend;
+- **any other request** (Move, a flinch, a Force clip, Lua, death ...) first **ends the Berserker** (the special's
+  remove-all, vf15 0x48f1e0, with reason 3) and then plays as asked.
+This corrects ANIM_PARTICLES §A.4 item 1 ("anything but Attack / Attack Idle / Idle becomes SpinMove").
+
+**Berserker (BerserkerAbilityClass).** Apply 0x712dc0: counter := int(FPS × `Berserker_Duration_In_Secs`), recharge 51,
+then **SpinMove, 0xFFFF (one synced draw over its variants), looped, blend 0.5, speed 1**. Update 0x712fd0 (every frame):
+counter − 1, at < 1 the remove (reason 3). The update continues only when the primary clip is near its end (as above)
+or counter % 5 == 0. A damage pass needs 0.2 × count < frame < 0.8 × count **of the current primary clip** (whatever it
+is). After the pass, **near its end the SpinMove restarts**: 0xFFFF (a new draw), loop, blend 0.1, speed 1. Then the
+target upkeep (§2.3.2). Remove 0x713710: counter 0, signal 0x29, the speed override cleared; with a reason other than 3
+it plays a closing SpinMove one-shot (0xFFFF, blend 0.5); the expiry (reason 3) plays nothing.
+Shipped Yoda: `RI_YODA_SPINMOVE_00/01/02` = 36 / 38 / 36 frames at 30 fps, so a loop restarts every 33 (variants 0, 2)
+or 35 (variant 1) frames, which explains the probe's irregular 33-36-frame loops (§4.13). With the draws of the probe's
+run 1 (variant 1, 1, 1, 0 or 2, 1: loops 35 + 35 + 35 + 33 + 35 = 173 frames; probe 36 + 35 + 34 + 34 + 34 = 173) the
+rule gives the measured **23 passes** in 6 s; a single 38-frame clip gives 25, a single 36-frame clip 22.
+
+**Redirect_Blaster (RedirectBlasterAbilityClass, Take_Damage listener vf30 0x709c90).** Fields: +0x178
+`Redirect_Chance`, +0x17c `Block_Chance`, +0x180 `Reaction_Arc_In_Degrees`, +0x184
+`Max_Projectile_Redirection_Angle_In_Degrees` (range checks in vf29 0x70a0d0). The projectile's damage category must not
+be 1, 2, 3, 4, 6, 8 or 9. A shot from **outside** the reaction arc is not blocked; when the special's turn flag (+0x188)
+is set and the unit's clip is idle-like, the unit turns to 1.01 × the arc edge [M: flag name]. Inside the arc: one
+synced float draw against the projectile's redirect factor × `Redirect_Chance` (redirect, 0x4cca10), else a second draw
+against its block factor × `Block_Chance` (block). After a redirect or block: **a unit whose clip is Move (2) returns
+"not handled"** [M: 0x4cca10 already redirected / blocked the shot; the damage then still lands]; otherwise it plays
+**Idle_Blockblaster (0x1e), 0xFFFF, one-shot, blend 0.1, speed 2** when its clip is idle-like (0x27b5e0) or is a
+finished Idle_Blockblaster (the redirect path also needs 0x397040 false [M]), and runs the activation presentation.
+Absorb_Blaster (vf30 0x6ee840) plays nothing. **Block_Blaster (28) and Redirect_Blaster (29) are played by no
+Play_Animation (103 callers) or ModelClass-play (28 callers) call with a constant type**: they are reachable only
+through a variable type (Lua / cinematic Play_Animation by name, type data) [M: unused by the engine].
+
+**Flame_Attack (PersonalFlameThrowerAbilityClass update 0x705e50).** State (SAP +0x130) 1: turn toward the target
+(locomotor vf +0x2f0) until the facing is within 0.1 rad; then state 2, timer := int(FPS × +0x18c [duration]) and
+**FLAME_ATTACK (0x2d), index 0, looped, blend 0.2, speed 1**. State 2: keep facing, flame (0x7061b0), timer − 1; at 0
+the end 0x7060e0 (release the hold 0x63f060(obj, 0, 1), state 0, signal 0x29) **plays nothing**: the loop runs on until
+another clip replaces it.
+
+**Demolition (DemolitionBehaviorClass, behaviour 0x33 DEMOLITION, service 0x640060).** State 1: turn toward the target
+until within 0.1 rad, then 0x6403f0: state 2, start time := now, **DEMOLITION (0x2e), 0xFFFF, one-shot, blend 0.1,
+speed 1**, and the hold calls 0x63f060(obj, 0, 0) / (obj, 1). State 2: 0x6401b0 [the plant, not read]. State 3:
+signals 0x29 / 0x28 and the cleanup.
+
+**SHIELD_ON / SHIELD_OFF.** Played only by the base shield's Set_State 0x56b540 (TRU1_A_RE_ANSWERS, item 6): when the
+type sets both `Shield_On_Anim` (+0xde4) and `Shield_Off_Anim` (+0xde8), turning on plays the on clip and turning off
+the off clip, **0xFFFF, looped, blend 0, speed 1**, start frame = round(frame) of the opposite clip when that one is the
+current clip, else 0. Shipped: one Hutt type (HUTT_FACTION_UNITS.XML).
+
+**Build pads and structures (L1_S4_REMAINING §3.6).** Start build 0x42dbd0: the pad plays **Pad_Build (0x74), 0xFFFF,
+one-shot, blend 0, speed 1**. The pad plays **Pad_Sell (0x75)** with the same arguments when its child goes away
+(0x42e6d0), on a sale's release (0x42ecd0) and at a battle start that does not pre-build (0x42df80). The
+under-construction object's init 0x5d70f0 plays **Build (0x4a), index 0, one-shot, blend 0, speed = (clip frames / fps)
+/ build seconds, start frame 0** (the restore 0x5d6e40: start frame = the elapsed build frames).
+
+**Capture points (CapturePointBehaviorClass service 0x501980).** When the progress of a point decays to 0 under its
+owner, the point plays **Idle (0)** looped, blend 0, speed 1, index = the owner faction's `Faction_Anim_Subindex`
+(type +0x2098, 0x371070; an unlisted faction gives 0xFFFF = a draw). When another controller starts a transition
+(progress exactly 0), it plays **Transition_Ownership (0x4b)** looped, blend 0, speed 1, index = the controller faction's
+`Faction_Anim_Subindex` (the owner's when the controller's faction has its +0x108 flag [M: Is_Neutral]).
+
+**Port (r3h, 2026-11-17).** The record of §4.14 is kept and also handed to the host: each play is queued as an
+`AbilityAnimPlay` (type, drawn variant, loop, blend, speed, frame) and the battle plays it on its animation world after
+the combat tick (`TacticalBattle::oi_ability_anims`). 0xFFFF plays draw in the ability system when the clip has >= 2
+variants (`AbilityHost::anim_variants`; one variant: no draw, as 0x1ffb40). What follows a finished one-shot is queued
+in the frame it finishes (`anim_follow_ups`): the hold loop (0xFFFF, blend 0.1), Earthquake / Telekinesis's Idle loop
+(0xFFFF, blend 0.2) or the default idle; Force_Revel_End is followed by nothing (the IDLE behaviour). The record follows
+the world: when the battle's world shows another primary clip than the record (`observe_clip`), the record ends
+(Generic / Arc / Eat abort at their next update, Generic / Eat with the default idle; a Berserker ends).
 
 ---
 
