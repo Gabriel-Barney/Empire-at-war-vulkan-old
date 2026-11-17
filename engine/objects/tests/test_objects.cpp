@@ -92,6 +92,10 @@ static void test_schema() {
     CHECK(is_behavior_list_tag("spacebehavior") && !is_behavior_list_tag("Behaviors"));
     CHECK(kind_of_code(0x2a) == FieldKind::Raw && kind_of_code(0x17) == FieldKind::Name &&
           kind_of_code(0x16) == FieldKind::NumberList && kind_of_code(0x5) == FieldKind::Int);
+    // modc t29: code 0x50 is a bool written into a flag bit (CommandBarComponent Hidden / Toggle / ...).
+    CHECK(kind_of_code(0x50) == FieldKind::Bool);
+    const uint32_t hidden = find_field_schema("Hidden", "CommandBarComponent");
+    CHECK(hidden != kNoSchema && field_schema()[hidden].code == 0x50 && field_schema()[hidden].kind() == FieldKind::Bool);
 }
 
 static void test_classify() {

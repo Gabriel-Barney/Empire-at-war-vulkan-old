@@ -15,7 +15,7 @@ namespace alamo::objects {
 
 enum class FieldKind : uint8_t {
     Raw,         // text kept as written (lists, names lists, structured values, unknown codes)
-    Bool,        // code 0x0: yes/no, true/false, 1/0, on/off
+    Bool,        // code 0x0: yes/no, true/false, 1/0, on/off; code 0x50: the same, stored as a flag bit
     Int,         // codes 0x2..0x6: atoi-style (fraction truncated)
     Float,       // codes 0x8..0xa: atof-style
     Name,        // single name/string codes (0xc..0xe, 0x17, 0x1c, 0x1d, 0x1f, 0x20, 0x21, ...)
