@@ -2547,7 +2547,7 @@ float MovementSystem::conform(Unit& u) const {
         const float h = height_(q.x, q.y);
         return water && h < water_height_ ? water_height_ : h;
     };
-    const auto angle = [kRad](V2 a, float az, V2 b, float bz) {
+    const auto angle = [](V2 a, float az, V2 b, float bz) {
         if (az == bz && a.x == b.x) return 0.0f;
         const float dx = b.x - a.x, dy = b.y - a.y;
         return -(dmath::atan2(bz - az, dmath::sqrt(dy * dy + dx * dx)) * kRad);

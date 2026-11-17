@@ -351,11 +351,12 @@ namespace {
 // Unit 2 (player 1, enemy) sits 30 to the side of the ground hit / expiry area, inside the effect radius 100.
 struct DetonationWorld {
     World w;
-    explicit DetonationWorld(GameMode mode, ProjectileDesc shot, Vec3 unit_at) {
+    explicit DetonationWorld(GameMode mode, ProjectileDesc shot, Vec3 unit_at, bool sinks = false, bool busy = false) {
         w.data.projectiles = {shot};
         UnitDesc t;
         t.tactical_health = 1000.0f;
         t.radius = 5.0f;
+        t.destroy_when_stunned_over_water = sinks;  // trn1 t04
         const uint32_t td = push_unit(w.data, t);
         CombatConfig cfg;
         cfg.mode = mode;
@@ -367,6 +368,12 @@ struct DetonationWorld {
         rt.grid = g;
         w.sys->set_rocket_terrain(std::move(rt));
         w.add(2, td, 1, unit_at);
+        if (sinks) {  // trn1 t04: the whole map lies under water
+            SurfaceQueries q;
+            q.under_water = [](float, float) { return true; };
+            w.sys->set_surface_queries(std::move(q));
+        }
+        if (busy) w.sys->set_flag(2, kUnitLocomotorBusy, true);
         ProjectileLaunch l;
         l.owner = 0;
         l.from = Vec3{0, 0, 1};
@@ -388,6 +395,36 @@ struct DetonationWorld {
     }
 };
 }  // namespace
+
+void test_ion_stun_water_kill() {
+    // trn1 t04 (ABILITIES_HARDPOINTS §4.12, 0x4cbbb0): the ion-stun detonation tests Destroy_When_Stunned_Over_Water in its
+    // per-object block, after the ion stun; a locomotor-busy object skips the whole block (no stun, no water kill).
+    ProjectileDesc shot;
+    shot.max_speed = 10.0f;
+    shot.damage = 10.0f;
+    shot.max_flight_distance = 200.0f;
+    shot.ion_stun = true;
+    shot.ion_stun_radius = 100.0f;
+    shot.ion_stun_duration = 5.0f;
+    {
+        DetonationWorld d(GameMode::Land, shot, Vec3{142, 30, 0}, true);
+        bool found = false;
+        (void)d.run(found);
+        CHECK(found && !d.w.sys->alive(2));
+    }
+    {
+        DetonationWorld d(GameMode::Land, shot, Vec3{142, 30, 0}, true, true);
+        bool found = false;
+        (void)d.run(found);
+        CHECK(found && d.w.sys->alive(2) && !d.w.sys->ion_stunned(2, d.w.frame));
+    }
+    {  // not flagged: stunned, alive
+        DetonationWorld d(GameMode::Land, shot, Vec3{142, 30, 0});
+        bool found = false;
+        (void)d.run(found);
+        CHECK(found && d.w.sys->alive(2) && d.w.sys->ion_stunned(2, d.w.frame));
+    }
+}
 
 void test_ground_detonation_particle() {
     // tru1 t08 (TRU1_A_RE_ANSWERS B1): a land ground / water hit (0x4cb070) reports `ground` - the host spawns

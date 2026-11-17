@@ -21,6 +21,7 @@
 #include "alamo/core/ascii.hpp"
 #include "alamo/core/hash.hpp"
 #include "alamo/data/xml.hpp"
+#include "alamo/objects/type_fields.hpp"
 #include "combat_system_internal.hpp"
 
 namespace alamo::tactical::combat {
@@ -29,7 +30,7 @@ namespace {
 
 constexpr uint32_t kTimerKeepMask = 0xf150u;  // surfaces 4, 6, 8, 12, 14, 15: leaving lava / damage ground keeps the timer
 
-float number(std::string_view s) { return s.empty() ? 0.0f : static_cast<float>(std::atof(std::string(s).c_str())); }
+float number(std::string_view s) { return s.empty() ? 0.0f : static_cast<float>(objects::c_atof(s)); }  // retail atof, no locale
 
 bool is_damage_surface(uint32_t s) { return s == kSurfaceDamageGround || s == kSurfaceLava; }
 bool is_slow_surface(uint32_t s) { return s == kSurfaceSlowGround || s == kSurfaceWater; }
@@ -118,6 +119,7 @@ void CombatSystem::stun_water_kill(ObjectId id, uint32_t frame) {
     const Unit* v = unit(id);
     if (!live(v) || cfg_.mode != GameMode::Land || !surface_.under_water || !desc_of(*v).destroy_when_stunned_over_water) return;
     if (!surface_.under_water(v->pos.x, v->pos.y)) return;
+    ensure_cache(*unit(id));
     DamageRequest r;
     r.victim = id;
     r.amount = 999999.0f;
@@ -155,6 +157,7 @@ void CombatSystem::surface_fx_step(Unit& u, uint16_t def_index, uint32_t slot, u
         if (is_damage_surface(s) && u.terrain_damage > 0.0f && u.terrain_next <= frame) {
             u.terrain_next = static_cast<uint32_t>(static_cast<int32_t>(static_cast<float>(cfg_.fps) * u.terrain_delay)) +
                              u.terrain_next;
+            ensure_cache(u);  // the victim's defense / modifiers as they are now (phase A runs after this service)
             DamageRequest r;
             r.victim = u.id;
             r.amount = u.terrain_damage;

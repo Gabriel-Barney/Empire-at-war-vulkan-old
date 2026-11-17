@@ -27,6 +27,9 @@ constexpr const char* kSurfaceXml = R"(<?xml version="1.0"?>
     <Surface_Settings name="damage_ground"><Terrain_Damage>10</Terrain_Damage><Terrain_Damage_Delay>1.0</Terrain_Damage_Delay></Surface_Settings>
     <Surface_Settings name="lava"><Terrain_Damage>10</Terrain_Damage><Terrain_Damage_Delay>1.0</Terrain_Damage_Delay></Surface_Settings>
   </SurfaceFX>
+  <SurfaceFX name="High_Ground">
+    <Surface_Settings name="high_ground"><FOW_Reveal_Range_Mod>0.25</FOW_Reveal_Range_Mod><Fire_Range_Mod>0.25</Fire_Range_Mod></Surface_Settings>
+  </SurfaceFX>
   <SurfaceFX name="Generic_Footprint">
     <Surface_Settings name="water"><Particle_Name>Splash_Wake_Continuous</Particle_Name></Surface_Settings>
   </SurfaceFX>
@@ -35,13 +38,13 @@ constexpr const char* kSurfaceXml = R"(<?xml version="1.0"?>
 
 struct SurfaceWorld {
     World w;
-    uint32_t infantry = 0, plain = 0;
+    uint32_t infantry = 0, plain = 0, both = 0;
     explicit SurfaceWorld(GameMode mode = GameMode::Land) {
         const data::XmlDocument doc = data::XmlDocument::parse(std::string_view(kSurfaceXml), "SurfaceFX.xml");
         CHECK(doc.ok());
         w.data.surface_fx = load_surface_fx(doc.root());
-        CHECK(w.data.surface_fx.size() == 2u);
-        CHECK(w.data.surface_fx[0].affects_sim() && !w.data.surface_fx[1].affects_sim());
+        CHECK(w.data.surface_fx.size() == 3u);
+        CHECK(w.data.surface_fx[0].affects_sim() && w.data.surface_fx[1].affects_sim() && !w.data.surface_fx[2].affects_sim());
         UnitDesc u;
         u.tactical_health = 1000.0f;
         u.radius = 2.0f;
@@ -52,6 +55,8 @@ struct SurfaceWorld {
         p.tactical_health = 1000.0f;
         p.radius = 2.0f;
         plain = push_unit(w.data, p);
+        u.surface_fx = {0, 1};  // Infantry_Terrain_Modifier + High_Ground (the one FoC type with both)
+        both = push_unit(w.data, u);
         CombatConfig cfg;
         cfg.mode = mode;
         w.make(cfg);
@@ -153,6 +158,21 @@ void test_surface_fx_terrain_modifiers() {
     for (int i = 0; i < 40; ++i) s.w.tick();
     CHECK_F(s.w.sys->health(1), h0 - 20.0f);
     CHECK_F(s.w.sys->health(2), s.w.sys->max_health(2));
+}
+
+void test_surface_fx_two_instances() {
+    // t02 (TRN1 §2.2): two instances on one unit put their high-ground entries in the same category 0, so they stack by the
+    // max (0.25, not 0.5); leaving takes each instance's own entries off.
+    SurfaceWorld s;
+    s.w.add(1, s.both, 1, Vec3{250, 0, 0});
+    s.w.tick();
+    s.w.tick();
+    CHECK_F(s.w.sys->modifier(1, ModList::RevealRange), 0.25f);
+    CHECK_F(s.w.sys->modifier(1, ModList::FireRange), 0.25f);
+    CHECK(s.w.sys->unit_modifiers(1) && s.w.sys->unit_modifiers(1)->entries().size() == 4u);
+    s.w.sys->set_position(1, Vec3{50, 0, 0});
+    s.w.tick();
+    CHECK(s.w.sys->unit_modifiers(1)->entries().empty());
 }
 
 void test_surface_fx_converted_and_save() {

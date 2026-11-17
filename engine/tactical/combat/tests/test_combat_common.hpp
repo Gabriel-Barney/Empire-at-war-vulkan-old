@@ -1200,6 +1200,8 @@ void test_ground_detonation_particle();  // tru1 t08
 void test_terrain_cover();  // trn1 t01 (test_combat_trn1.cpp)
 void test_surface_fx_terrain_modifiers();  // trn1 t02
 void test_surface_fx_converted_and_save();
+void test_surface_fx_two_instances();
+void test_ion_stun_water_kill();  // trn1 t04 (test_combat_tru1.cpp)
 void test_burning_speed_factor();  // trn1 t05
 
 }  // namespace
