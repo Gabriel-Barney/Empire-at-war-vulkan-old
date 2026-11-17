@@ -153,8 +153,11 @@ void App::announcer_feedback() {
         }
         // aud2 t07 (BATTLE_TRANSITIONS, departure 0x431c80): Galactic_Fleet_Hyperspace when the local player owns or sees
         // the departing fleet. [port] "sees": the local player can see fleet presence at the origin planet
-        // (can_see_planet_info FleetPresence) and the fleet is not all stealthed (the announcer's hidden test).
-        if (e.kind == K::FleetDeparted && me >= 0) {
+        // (can_see_planet_info FleetPresence) and the fleet is not all stealthed (the announcer's hidden test). Only the
+        // move order's departure (from the path's first planet) plays it: a pass-through hop re-departs without 0x431c80.
+        const bool order_departure = e.fleet < g->fleets().size() && !g->fleets()[e.fleet].path.empty() &&
+                                     g->fleets()[e.fleet].path.front() == e.planet;
+        if (e.kind == K::FleetDeparted && me >= 0 && order_departure) {
             bool sees = false;
             if (e.player != me && e.planet < g->planets().size() &&
                 g->can_see_planet_info(me, e.planet, galactic::GalacticSim::PlanetInfo::FleetPresence)) {
