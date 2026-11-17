@@ -1,5 +1,5 @@
 {
- "commit": "a00f5334",
+ "commit": "fb7288e8",
  "mode": "distribution",
  "scenarios": {
   "geonosis_skirmish": {
@@ -90,7 +90,7 @@
    ],
    "status": {
     "ai.build_count[Empire]": "PASS",
-    "ai.build_count[Rebel]": "PASS",
+    "ai.build_count[Rebel]": "FAIL",
     "ai.build_count[Underworld]": "PASS",
     "ai.build_mix[Empire]": "PASS",
     "ai.build_mix[Rebel]": "FAIL",
@@ -111,19 +111,19 @@
     "build.ticks[CRUSADER_GUNSHIP@NALHUTTA]": "PASS",
     "build.ticks[DESTROYER_DROID_COMPANY@NALHUTTA]": "FAIL",
     "build.ticks[INTERCEPTOR4_FRIGATE@THE_MAW]": "PASS",
-    "build.ticks[MAL_ROCKET_VEHICLE_COMPANY@NALHUTTA]": "FAIL",
+    "build.ticks[MAL_ROCKET_VEHICLE_COMPANY@NALHUTTA]": "PASS",
     "build.ticks[REBEL_GROUND_MINING_FACILITY@KAMINO]": "PASS",
     "build.ticks[REBEL_GROUND_MINING_FACILITY@MONCALIMARI]": "PASS",
     "build.ticks[REBEL_GROUND_MINING_FACILITY@NABOO]": "PASS",
     "build.ticks[REBEL_INFANTRY_SQUAD@KAMINO]": "FAIL",
+    "build.ticks[REBEL_INFANTRY_SQUAD@MONCALIMARI]": "PASS",
     "build.ticks[REBEL_INFANTRY_SQUAD@NABOO]": "FAIL",
     "build.ticks[REBEL_LIGHT_TANK_BRIGADE@YAVIN]": "PASS",
     "build.ticks[REBEL_TANK_BUSTER_SQUAD@KAMINO]": "PASS",
-    "build.ticks[REBEL_TANK_BUSTER_SQUAD@NABOO]": "PASS",
+    "build.ticks[REBEL_TANK_BUSTER_SQUAD@NABOO]": "FAIL",
     "build.ticks[R_GALACTIC_TURBOLASER_TOWER_DEFENSES@YAVIN]": "PASS",
     "build.ticks[R_GROUND_BARRACKS@KAMINO]": "PASS",
     "build.ticks[R_GROUND_BARRACKS@NABOO]": "PASS",
-    "build.ticks[R_GROUND_BARRACKS@SHOLA]": "PASS",
     "build.ticks[R_GROUND_HEAVY_VEHICLE_FACTORY@YAVIN]": "PASS",
     "build.ticks[UNDERWORLD_DISRUPTOR_MERC_SQUAD@NALHUTTA]": "PASS",
     "build.ticks[UNDERWORLD_MDU_COMPANY@SHOLA]": "FAIL",
@@ -176,18 +176,18 @@
     "travel.hop_ticks[Rebel:KASHYYYK->THE_MAW]": "PASS",
     "travel.hop_ticks[Rebel:KUAT->CORELLIA]": "PASS",
     "travel.hop_ticks[Rebel:KUAT->KASHYYYK]": "PASS",
-    "travel.hop_ticks[Rebel:MONCALIMARI->KAMINO]": "PASS",
     "travel.hop_ticks[Rebel:MONCALIMARI->SHOLA]": "PASS",
     "travel.hop_ticks[Rebel:MONCALIMARI->YAVIN]": "PASS",
     "travel.hop_ticks[Rebel:NABOO->SHOLA]": "PASS",
     "travel.hop_ticks[Rebel:NABOO->TATOOINE]": "PASS",
     "travel.hop_ticks[Rebel:NALHUTTA->KASHYYYK]": "PASS",
+    "travel.hop_ticks[Rebel:NALHUTTA->SHOLA]": "PASS",
     "travel.hop_ticks[Rebel:SHOLA->MONCALIMARI]": "PASS",
     "travel.hop_ticks[Rebel:SHOLA->NABOO]": "PASS",
     "travel.hop_ticks[Rebel:SHOLA->NALHUTTA]": "PASS",
-    "travel.hop_ticks[Rebel:SHOLA->THE_MAW]": "PASS",
     "travel.hop_ticks[Rebel:TATOOINE->CORELLIA]": "PASS",
     "travel.hop_ticks[Rebel:TATOOINE->NABOO]": "PASS",
+    "travel.hop_ticks[Rebel:THE_MAW->YAVIN]": "PASS",
     "travel.hop_ticks[Rebel:YAVIN->MONCALIMARI]": "PASS",
     "travel.hop_ticks[Rebel:YAVIN->THE_MAW]": "PASS",
     "travel.hop_ticks[Underworld:CORELLIA->KUAT]": "PASS",
@@ -202,7 +202,7 @@
     "travel.hop_ticks[Underworld:MONCALIMARI->SHOLA]": "PASS",
     "travel.hop_ticks[Underworld:MONCALIMARI->YAVIN]": "PASS",
     "travel.hop_ticks[Underworld:NABOO->SHOLA]": "PASS",
-    "travel.hop_ticks[Underworld:NABOO->TATOOINE]": "FAIL",
+    "travel.hop_ticks[Underworld:NABOO->TATOOINE]": "PASS",
     "travel.hop_ticks[Underworld:NALHUTTA->KASHYYYK]": "PASS",
     "travel.hop_ticks[Underworld:NALHUTTA->SHOLA]": "FAIL",
     "travel.hop_ticks[Underworld:SHOLA->MONCALIMARI]": "PASS",
@@ -210,7 +210,7 @@
     "travel.hop_ticks[Underworld:SHOLA->NALHUTTA]": "FAIL",
     "travel.hop_ticks[Underworld:SHOLA->THE_MAW]": "PASS",
     "travel.hop_ticks[Underworld:TATOOINE->CORELLIA]": "PASS",
-    "travel.hop_ticks[Underworld:TATOOINE->NABOO]": "FAIL",
+    "travel.hop_ticks[Underworld:TATOOINE->NABOO]": "PASS",
     "travel.hop_ticks[Underworld:THE_MAW->KASHYYYK]": "FAIL",
     "travel.hop_ticks[Underworld:THE_MAW->SHOLA]": "FAIL",
     "travel.hop_ticks[Underworld:THE_MAW->YAVIN]": "PASS",
@@ -219,9 +219,9 @@
    },
    "summary": {
     "AI choices": {
-     "FAIL": 1,
+     "FAIL": 2,
      "N/A": 1,
-     "PASS": 15
+     "PASS": 14
     },
     "battle outcomes": {
      "FAIL": 2,
@@ -235,8 +235,8 @@
      "PASS": 24
     },
     "timing": {
-     "FAIL": 12,
-     "PASS": 65
+     "FAIL": 10,
+     "PASS": 67
     }
    }
   }
