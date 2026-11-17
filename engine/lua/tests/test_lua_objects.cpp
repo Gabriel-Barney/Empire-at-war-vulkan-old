@@ -397,7 +397,7 @@ static void test_stage3(const Db& db) {
                   "fin = blk.IsFinished() and 1 or 0 units = blk.Result() rn = table.getn(units) "
                   "rt = units[1].Get_Type().Get_Name() ro = units[1].Get_Owner().Get_ID() "
                   "b2 = Reinforce_Unit('Tank', false, p1) f2 = b2.IsFinished() and 1 or 0 n2 = table.getn(b2.Result())") == "");
-    CHECK(gnum(vm, "fin") == 1.0 && gnum(vm, "rn") == 1.0 && gstr(vm, "rt") == "Trooper_Team" && gnum(vm, "ro") == 1.0);
+    CHECK(gnum(vm, "fin") == 1.0 && gnum(vm, "rn") == 1.0 && gstr(vm, "rt") == "TROOPER_TEAM" && gnum(vm, "ro") == 1.0);
     CHECK(gnum(vm, "f2") == 1.0 && gnum(vm, "n2") == 0.0);
     // With a hook: pending until the host finishes the request.
     ReinforceRequest seen;
@@ -419,7 +419,7 @@ static void test_stage3(const Db& db) {
     CHECK(contains(run_stop(vm, "Reinforce_Unit('Tank', 5, p1)"), "Reinforce -- Invalid position parameter."));
     // Spawn_From_Reinforcement_Pool: direct spawn stand-in, or the host's pool.
     CHECK(run(vm, "sp = Spawn_From_Reinforcement_Pool(Find_Object_Type('Tank'), tank, p1) sn = table.getn(sp) "
-                  "st = sp[1].Get_Type().Get_Name()") == "" && gnum(vm, "sn") == 1.0 && gstr(vm, "st") == "Tank");
+                  "st = sp[1].Get_Type().Get_Name()") == "" && gnum(vm, "sn") == 1.0 && gstr(vm, "st") == "TANK");
     s.bridge.spawn_from_pool = [](objects::TypeIndex, int32_t, Vec3) { return std::vector<objects::ObjectHandle>{}; };
     CHECK(run(vm, "sn2 = table.getn(Spawn_From_Reinforcement_Pool('Tank', tank, p1))") == "" && gnum(vm, "sn2") == 0.0);
     s.bridge.spawn_from_pool = nullptr;
@@ -550,7 +550,7 @@ static void test_queries(const Db& db) {
                   "mv = t1.Can_Move() and 1 or 0 mv2 = tank.Can_Move() and 1 or 0 tr = t1.Is_Transport() and 1 or 0") == "");
     CHECK(gstr(vm, "nm") == "Tank" && gnum(vm, "c1") == 1.0 && gnum(vm, "c2") == 0.0 && gnum(vm, "c3") == 0.0);
     CHECK(gnum(vm, "pr") == 1.0 && gnum(vm, "pr2") == 0.0 && gnum(vm, "sh") == 1.0 && gnum(vm, "sh2") == 0.0);
-    CHECK(gstr(vm, "st") == "Tank" && gnum(vm, "sel") == 1.0 && gnum(vm, "mv") == 1.0 && gnum(vm, "mv2") == 0.0 && gnum(vm, "tr") == 0.0);
+    CHECK(gstr(vm, "st") == "TANK" && gnum(vm, "sel") == 1.0 && gnum(vm, "mv") == 1.0 && gnum(vm, "mv2") == 0.0 && gnum(vm, "tr") == 0.0);
     CHECK(contains(run_stop(vm, "t1.Is_Category()"), "GameObjectWrapper::Is_Category -- invalid number of parameters. Expected 1, got 0."));
     CHECK(contains(run_stop(vm, "t1.Is_Category(1)"), "GameObjectWrapper::Is_Category -- parameter 1 is not a valid string."));
     // Type wrapper data.
@@ -662,7 +662,7 @@ static void test_spawn_and_state(const Db& db) {
                   "own = team.Get_Owner().Get_ID() tx = team.Get_Position().Get_XYZ() "
                   "members = Find_All_Objects_Of_Type('Trooper') par = members[1].Get_Parent_Object().Get_Object_ID() "
                   "tid = team.Get_Object_ID()") == "");
-    CHECK(gnum(vm, "sn") == 1.0 && gstr(vm, "tn") == "Trooper_Team" && gnum(vm, "cnt") == 2.0 && gnum(vm, "has") == 1.0);
+    CHECK(gnum(vm, "sn") == 1.0 && gstr(vm, "tn") == "TROOPER_TEAM" && gnum(vm, "cnt") == 2.0 && gnum(vm, "has") == 1.0);
     // OI follow-up t04 (A1_READINGS §28.9 item 4): in land a team that is not a squad container locks / unlocks each
     // member (a second lock or unlock warns per member); a squad container locks itself, a squad member locks its
     // container, and Unlock on the container walks the members and leaves the container locked.
