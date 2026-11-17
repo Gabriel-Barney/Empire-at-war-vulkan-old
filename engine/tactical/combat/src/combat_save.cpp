@@ -662,6 +662,7 @@ bool CombatSystem::read(ByteReader& r) {
     effect_scratch_.clear();
     leaders_.clear();
     flush_hps_.clear();
+    stun_visuals_.clear();  // vis1 t08: presentation only, not saved (the serial keeps counting)
     rebuild_team_members();  // cu8f t04a: derived from the units (phase A rebuilds it every tick)
     return true;
 }

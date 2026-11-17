@@ -7,12 +7,24 @@
 //   * one-shots (Target_Particle_Effect of Force_Healing / Force_Lightning / Hack / Repair, Stun_Ability's Stunned_Effect):
 //     each occurrence gets its own system (SnapshotEffect::fx_seq), listed until Particle_Lifetime_Frames have passed
 //     (a type without a lifetime: while its target exists).
+// vis1 t08 adds (no CRC change either):
+//   * Projectile_Stun_Spawn_Effect (§3): a one-shot on each victim of a land stun detonation
+//     (CombatSystem::stun_visual_events), at the status bone list, like Stunned_Effect;
+//   * Drain_Effect_Name (§5): one lightning-only SnapshotBeam (kBeamDrain) per Drain_Life victim while the drain runs,
+//     from Drain_Source_Bone_Name to Drain_Target_Bone_Name;
+//   * Heal_Range_Blob_Material (§8): SnapshotJamming::heal_blobs, drawn by heal_range_blobs under a selected owner of the
+//     local player;
+//   * Base_Shield_Penetration_Particle (§6): a world-placed SimWorldEffect at the dome contact
+//     (CombatSystem::base_shield_contact) while the unit straddles a hostile shield.
 #pragma once
 #include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include <span>
+
+#include "alamo/render/jam_fx.hpp"
 #include "alamo/render/sim_snapshot.hpp"
 
 namespace alamo::sim {
@@ -56,8 +68,10 @@ public:
     void apply(const AbilityFxInput& in, SimSnapshot& snap, const SnapshotTypeTable* table);
     size_t live() const { return live_.size(); }
 
-    // apply_battle_ability_fx: the serial of the last AbilitySystem::visual_events entry taken.
+    // apply_battle_ability_fx: the serial of the last AbilitySystem::visual_events entry taken, and of the last
+    // CombatSystem::stun_visual_events entry (vis1 t08).
     uint32_t visual_serial = 0;
+    uint32_t stun_serial = 0;
 
 private:
     struct Live {
@@ -69,6 +83,13 @@ private:
     std::vector<Live> live_;
     uint32_t next_seq_ = 1;
 };
+
+// vis1 t08 (§8): the Force_Healing range blobs of `frame` to draw: a square of side 2 x Heal_Range centred on the owner,
+// only for owners in `selected` (ascending ids) that `local_player` owns and that are drawable (not dying, contained,
+// a corpse or faded out). Colour Blob_Color with alpha 1 (0x6fc3d0); ascending owner id.
+std::vector<JamBlob> heal_range_blobs(const InterpolatedFrame& frame, std::span<const uint32_t> selected, int32_t local_player);
+// The world effect key of a unit's shield penetration particle (SimWorldEffect::key).
+inline uint64_t shield_penetration_key(objects::ObjectId id) { return (static_cast<uint64_t>(static_cast<uint32_t>(id)) << 8) | 0x02u; }
 
 #ifdef ALAMO_SIM_HAVE_BATTLES
 // Fills the input from the battle (const reads between ticks): applied Earthquake / Telekinesis specials, active

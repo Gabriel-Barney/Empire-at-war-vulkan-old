@@ -1163,3 +1163,15 @@ This list holds the [port] / [inferred] / [M] choices and per-step notes. Finish
   pte, engines off without a timer hide the group, a timed disable flickers ([port] a hash lattice for retail's noise
   table), ion stun shows pi, dying hides pe and pte; only pi is un-hidden by the rule, so a dead engine hard point keeps
   its particles hidden. The tint is computed but not applied yet (backlog b0203). **t07** (b0021) already on dev from ui2 t03: `Point_Camera_At` events carry the point (`"@pos"` + x, y, z) and the game host jumps the tactical camera there at the current zoom (`app_story_camera.cpp`, `PointCameraAt`); the 2026-11-12 Position-argument variant was dropped when bkx1 was ported.
+- ⬜ **OPEN** · vis1 t08 (2026-11-17; same spec and file; combat `stun_visual_events` / `base_shield_contact`, marked
+  "vis1 t08"). [port] choices, all presentation only (no CRC change): `Projectile_Stun_Spawn_Effect` is a one-shot like
+  `Stunned_Effect`, from an **unhashed, unsaved** combat list of each stun a land stun detonation made (64 frames, serial).
+  `Drain_Effect_Name` is a lightning-only beam (`kBeamDrain`, one key per victim) from `Drain_Source_Bone_Name` (else the
+  owner position, not its target point [M]) to `Drain_Target_Bone_Name` (else the victim centre + `Ranged_Target_Z_Adjust`),
+  listed while the Drain_Life special is applied. The `Heal_Range_Blob_Material` square (side 2 x `Heal_Range`, colour
+  `Blob_Color` with alpha 1, both modes; flat at the ground height on land, not a draped decal) is drawn through the jammer's
+  blob models under an owner that the local player owns and that has a selection circle; a material missing from
+  ShadowBlobMaterials uses the jammer blob's fallback texture where retail draws none [M]. `Base_Shield_Penetration_Particle`
+  is a world-placed render particle at the dome crossing of the straddle segment (recomputed by a const accessor on the
+  port's ellipsoid dome), kept while the unit straddles; it faces the horizontal part of the dome normal (retail: the
+  normal's angles with pitch + 90; tilt not modelled) and consumes no object id.

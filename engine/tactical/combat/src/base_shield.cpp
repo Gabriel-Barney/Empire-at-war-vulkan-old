@@ -12,7 +12,8 @@
 // - the first evaluation of a new generator runs at its first tick (state 0, no on-delay), not inside add_unit, so a
 //   generator and its power source spawned in either order start the battle in the same state;
 // - the unit bound radius is the model's horizontal half extents (else Custom_Hard extents, else the radius);
-// - not modelled: the story disable bit (DISABLE_SPECIAL_STRUCTURE has no port reader), the penetration particle,
+// - not modelled: the story disable bit (DISABLE_SPECIAL_STRUCTURE has no port reader), the penetration particle (a
+//   render particle at base_shield_contact, vis1 t08),
 //   the idle nudge (a move order: host), the SHIELD_ON / OFF animation and its variant draw, the HUD / loop SFX.
 #include "combat_system_internal.hpp"
 
@@ -113,6 +114,42 @@ bool CombatSystem::dome_segment(const Unit& s, Vec3 a, Vec3 b, float& t) const {
     return false;
 }
 
+void CombatSystem::straddle_segment(const Unit& u, const Unit& s, Vec3& a, Vec3& b) const {
+    // Straddles_Shield step 3 [H]: along the line between the two target points, from +e to -e around the unit's,
+    // e = the larger horizontal half extent.
+    const UnitDesc& ud = desc_of(u);
+    float hx = ud.radius, hy = ud.radius;
+    if (ud.model_x_extent >= 0.0f) {
+        hx = ud.model_y_extent;  // model_x_extent is |half y| (models face -Y), model_y_extent |half x|
+        hy = ud.model_x_extent;
+    } else if (ud.hard_x_extent > 0.0f || ud.hard_y_extent > 0.0f) {
+        hx = ud.hard_x_extent;
+        hy = ud.hard_y_extent;
+    }
+    const Vec3 tu{u.pos.x, u.pos.y, u.pos.z + ud.ranged_target_z_adjust};
+    const Vec3 ts{s.pos.x, s.pos.y, s.pos.z + desc_of(s).ranged_target_z_adjust};
+    const Vec3 dir = dot(ts - tu, ts - tu) > 0.0f ? normalize(ts - tu) : Vec3{1.0f, 0.0f, 0.0f};
+    const float e = hx > hy ? hx : hy;
+    a = tu + dir * e;
+    b = tu - dir * e;
+}
+
+bool CombatSystem::base_shield_contact(ObjectId id, Vec3& point, Vec3& normal) const {
+    const Unit* u = unit(id);
+    if (!u || u->bshield_in == kNoObject) return false;
+    const Unit* s = unit(u->bshield_in);
+    if (!s) return false;
+    Vec3 a{}, b{};
+    straddle_segment(*u, *s, a, b);
+    float t = 0.0f;
+    if (!dome_segment(*s, a, b, t)) return false;
+    point = a + (b - a) * t;
+    // gradient of the ellipsoid x^2 + y^2 + (z / kDomeHeight)^2 = R^2 at the point, normalised
+    const Vec3 g{point.x - s->pos.x, point.y - s->pos.y, (point.z - s->pos.z) / (kDomeHeight * kDomeHeight)};
+    normal = dot(g, g) > 0.0f ? normalize(g) : Vec3{0.0f, 0.0f, 1.0f};
+    return true;
+}
+
 bool CombatSystem::straddles_base_shield(const Unit& u, const Unit& s) const {
     // Straddles_Shield 0x5031c0 [H]: R - r <= d <= R + r (3-D), then the dome ray test 0x502770 along the line between
     // the two target points, from +e to -e around the unit's.
@@ -129,12 +166,10 @@ bool CombatSystem::straddles_base_shield(const Unit& u, const Unit& s) const {
     const float d = distance3(u.pos, s.pos);
     const float R = desc_of(s).base_shield_radius;
     if (R < d - r || d + r < R) return false;
-    const Vec3 tu{u.pos.x, u.pos.y, u.pos.z + ud.ranged_target_z_adjust};
-    const Vec3 ts{s.pos.x, s.pos.y, s.pos.z + desc_of(s).ranged_target_z_adjust};
-    const Vec3 dir = dot(ts - tu, ts - tu) > 0.0f ? normalize(ts - tu) : Vec3{1.0f, 0.0f, 0.0f};
-    const float e = hx > hy ? hx : hy;
+    Vec3 a{}, b{};
+    straddle_segment(u, s, a, b);  // the same segment base_shield_contact reads
     float t = 0.0f;
-    return dome_segment(s, tu + dir * e, tu - dir * e, t);
+    return dome_segment(s, a, b, t);
 }
 
 void CombatSystem::service_base_shields(uint32_t frame) {

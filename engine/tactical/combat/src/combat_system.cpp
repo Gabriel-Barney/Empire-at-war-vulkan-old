@@ -147,6 +147,7 @@ void CombatSystem::reserve(uint32_t units, uint32_t projectiles, uint32_t candid
     delayed_.reserve(delayed);
     deaths_.reserve(units);
     hp_events_.reserve(static_cast<size_t>(units) * 4);
+    stun_visuals_.reserve(units);  // vis1 t08
     smoke_events_.reserve(units);
     emitters_.reserve(units);
     damage_events_.reserve(std::max<size_t>(projectiles, static_cast<size_t>(units) * 4));

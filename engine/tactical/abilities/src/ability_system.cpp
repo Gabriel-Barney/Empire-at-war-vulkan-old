@@ -1708,7 +1708,7 @@ void AbilitySystem::applied_specials(ObjectId id, std::vector<AppliedSpecialView
     const Obj* o = obj(id);
     if (!o || o->dead) return;
     for (const SpecialState& sp : o->specials)
-        if (sp.applied) out.push_back({sp.desc, sp.target});
+        if (sp.applied) out.push_back({sp.desc, sp.target, sp.victims});
 }
 void AbilitySystem::visual(AbilityVisualKind k, uint32_t frame, ObjectId owner, ObjectId target, uint32_t special) {
     if (!visuals_.empty() && visuals_.front().frame + kVisualKeepFrames < frame)
