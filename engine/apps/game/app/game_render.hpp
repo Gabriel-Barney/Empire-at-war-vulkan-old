@@ -308,7 +308,7 @@ private:
     std::vector<terrain::ShadowBlobMaterial> blob_mats_;
     uint32_t blob_fallback_ = UINT32_MAX;  // the first Selection* material (UINT32_MAX: none)
     std::vector<std::unique_ptr<SelectionModel>> sel_models_;
-    const render::GpuModel* selection_model(GpuCore& gpu, const std::string& material);
+    render::GpuModel* selection_model(GpuCore& gpu, const std::string& material);
     std::optional<render::JamBlob> bombing_blob_;  // cu9g t03: the land bombing-run targeting blob (drawn through jam_models_)
     render::JamBlobModels jam_models_;  // R5 sensor jamming radius blobs (one model per material + colour)
     render::BeamStyleTable beam_styles_;  // R5 ability beams: per-special styles over the GameConstants fallbacks (ABILITY_VISUALS 4.2)

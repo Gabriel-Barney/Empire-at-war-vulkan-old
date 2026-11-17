@@ -78,7 +78,9 @@ size or rotation changed (DECORATIONS §3.3).
 Rock_Shadow); levels 1 (76), 2 (115), 3 (90), 99 (27, plus one `99r` that reads as 99). At the shipped default
 ShadowDetail 3 only the level-99 types (trees, bushes, rocks) draw a blob; units (levels 1-3) draw stencil shadows.
 
-Port: `render::BlobShadowBuilder` → `MapScene::set_shadow_blobs` each frame (land). [port] the port's Shadow detail
+Port: `render::BlobShadowBuilder` → `MapScene::set_shadow_blobs` each frame (land), and
+`SimInstanceBuilder::set_blob_shadow_detail` drops the shadow volume (`Instance::no_shadow`) of every type in blob mode.
+Not reproduced: the "stencil shadows unavailable → blob" branch (the port always has its shadow volumes). [port] the port's Shadow detail
 option is Off / On: Off = 0, On = 3 (`kPortShadowDetailOn`). [port] objects hidden by the fog of war, contained, Lua
 hidden, dying or corpses draw no blob. Bone positions come from the drawn model's pose (`model_bone_source`).
 

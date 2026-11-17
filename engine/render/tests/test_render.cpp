@@ -568,7 +568,6 @@ void test_weather_fx() {
         LightningFlash f(12345u);
         uint32_t flashes = 0, draws = 0, steps = 0;
         bool bounded = true, unit_dirs = true, strengths = true, order = true;
-        int32_t prev_flash = 0, prev_wait = 0;
         for (; steps < 20000; ++steps) {
             const bool both_over = f.flash_steps() == 0 && f.wait_steps() == 0;
             const int32_t fl = f.flash_steps(), wt = f.wait_steps();
@@ -587,11 +586,7 @@ void test_weather_fx() {
             } else {
                 order = order && f.wait_steps() == wt - 1 && f.light().intensity == 0.0f;
             }
-            prev_flash = fl;
-            prev_wait = wt;
         }
-        (void)prev_flash;
-        (void)prev_wait;
         CHECK(bounded && unit_dirs && strengths && order && draws > 10 && flashes > 10);
     }
     {  // wall clock: 60 steps per second, at most 8 per call

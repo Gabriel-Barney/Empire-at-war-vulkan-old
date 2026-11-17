@@ -653,7 +653,7 @@ private:
     const SceneLightConstants& scene_lights();
     struct SlcCache {
         bool valid = false;
-        DirLight sun, fill[2];
+        DirLight sun, fill[2], flash;  // vis1 t01: the lightning flash is part of the SH too
         assets::Float3 ambient{0, 0, 0};
         SceneLightConstants slc;
     };

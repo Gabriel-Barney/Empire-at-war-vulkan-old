@@ -741,6 +741,7 @@ void BattleView::prepare(GpuCore& gpu, float alpha) {
         render::interpolate(p.prev.get(), *p.curr, alpha, render::InterpMode::Smooth, frame_);  // alpha 1 = the current snapshot (Original)
         models_->request(frame_);
         if (blocking_models_) gpu.streamer->finish_pending();
+        builder_->set_blob_shadow_detail(space_ ? -1 : shadow_detail_);  // vis1 t02: blob types drop their shadow volume
         builder_->build(frame_, *models_, main, bg_, &istats_);
         stats_.drawn = istats_.drawn;
         stats_.fog_hidden = istats_.fog_hidden;
@@ -784,7 +785,7 @@ void BattleView::prepare(GpuCore& gpu, float alpha) {
             ground = [map](float x, float y) { return map->terrain.sample_height(x, y); };
         }
         for (const ui::SelectionBlob& b : blobs_) {
-            const render::GpuModel* m = selection_model(gpu, b.material);
+            render::GpuModel* m = selection_model(gpu, b.material);
             if (!m) continue;
             gpu.renderer.make_resident(*m);
             main.push_back(ground ? ui::selection_blob_ground_instance(*m, b, ground) : ui::selection_blob_instance(*m, b));
@@ -839,7 +840,7 @@ void BattleView::apply_environment() {
 
 // vis1 t03: the uploaded model of a selection material by name (case-insensitive; unknown / empty: the fallback). Null when
 // there is no material or its upload failed.
-const render::GpuModel* BattleView::selection_model(GpuCore& gpu, const std::string& material) {
+render::GpuModel* BattleView::selection_model(GpuCore& gpu, const std::string& material) {
     uint32_t idx = blob_fallback_;
     if (!material.empty())
         for (size_t i = 0; i < blob_mats_.size(); ++i)
@@ -866,7 +867,7 @@ void BattleView::sync_weather_emitter() {
 #ifdef ALAMO_PARTICLES_HAVE_SIM
     if (!pworld_ || !plib_) return;
     const std::string want = weather_.active ? weather_.emitter : std::string{};
-    if (want != weather_fx_name_) {
+    if (want != weather_fx_name_ || (weather_fx_ != 0 && !pworld_->valid(weather_fx_))) {  // changed, or the system ended
         if (weather_fx_ != 0 && pworld_->valid(weather_fx_)) {
             pworld_->set_visible(weather_fx_, false);
             pworld_->release(weather_fx_);

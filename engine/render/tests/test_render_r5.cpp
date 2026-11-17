@@ -2077,6 +2077,29 @@ static void test_blob_shadows() {
     CHECK(out.empty());
     b.build(f, table, 2, nullptr, out);  // detail 2 < 3: a blob; unknown material -> the default shadow (0)
     CHECK(out.size() == 1 && out[0].material == 0 && out[0].position[0] == 10.0f);
+    {  // the instance builder drops the shadow volume of a type in blob mode (and only then)
+        render::GpuModel gm;
+        gm.asset = three_bone_model();
+        gm.mesh_hidden.assign(3, 0);
+        FakeModels models;
+        models.model = &gm;
+        render::SimInstanceBuilder ib(table);
+        render::InterpolatedFrame one;
+        one.objects = {sobj(1, 0)};
+        one.objects[0].flags = render::kSnapDrawable;
+        one.tick = 1;
+        std::vector<render::Instance> main, bg;
+        ib.build(one, models, main, bg);  // detail unset: unchanged behaviour
+        CHECK(main.size() == 1 && !main[0].no_shadow);
+        ib.set_blob_shadow_detail(render::kPortShadowDetailOn);  // level 3 type at detail 3: stencil shadow kept
+        ib.build(one, models, main, bg);
+        CHECK(main.size() == 1 && !main[0].no_shadow);
+        table.set_blob_shadow(0, "Tree_Shadow", 30.0f, 30.0f, 99);
+        render::SimInstanceBuilder ib2(table);
+        ib2.set_blob_shadow_detail(render::kPortShadowDetailOn);
+        ib2.build(one, models, main, bg);
+        CHECK(main.size() == 1 && main[0].no_shadow);
+    }
 
     const std::string root = env_or_empty("ALAMO_FOC_DATA");
     if (root.empty()) {

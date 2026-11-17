@@ -38,11 +38,13 @@ const SceneLightConstants& Renderer::scene_lights() {
     const bool same = c.valid && std::memcmp(&c.sun, &l.sun, sizeof c.sun) == 0 &&
                       std::memcmp(&c.fill[0], &l.fill[0], sizeof c.fill[0]) == 0 &&
                       std::memcmp(&c.fill[1], &l.fill[1], sizeof c.fill[1]) == 0 &&
+                      std::memcmp(&c.flash, &l.flash, sizeof c.flash) == 0 &&
                       std::memcmp(&c.ambient, &l.ambient, sizeof c.ambient) == 0;
     if (!same) {
         c.sun = l.sun;
         c.fill[0] = l.fill[0];
         c.fill[1] = l.fill[1];
+        c.flash = l.flash;
         c.ambient = l.ambient;
         c.slc = scene_light_constants(l);
         c.valid = true;
