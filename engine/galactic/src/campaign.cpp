@@ -250,6 +250,7 @@ bool GalacticSim::start(const GalacticSetup& setup, std::vector<std::string>* di
         p.account.credits = ps.credits;
         p.tech_level = ps.tech_level;
         p.max_tech_level = ps.max_tech_level;
+        p.home = ps.home;  // galab t06: player +0x188 (0x4af240 at campaign setup)
         players_.push_back(p);
     }
     last_income_.assign(players_.size(), 0.0f);
@@ -437,6 +438,8 @@ float GalacticSim::planet_income(PlanetIndex planet, bool gross) {
         if (p.corruption == kCorruptionNone && p.siphon_until < now) {  // siphon ended (0x3ff1f0)
             p.siphon_player = kNoPlayer;
             p.siphon_amount = 0.0f;
+            p.siphon_type = kNoIndex;  // 0x3ff1f0 clears the whole record
+            p.siphon_source = 0;
         } else {
             siphon = true;
         }
@@ -695,8 +698,11 @@ void GalacticSim::apply_ownership(PlanetIndex planet, int32_t derived) {
     // Ramp (0x4adab0), one elapsed frame per service.
     const TypeInfo& ti = rules_->types[p.type];
     const ForceSide side = valid_player(p.owner) ? faction_of(p.owner).force_alignment : ForceSide::Neutral;
+    // galab t07: Tarkin's Political_Transition_Bonus entries multiply in (0x4adab0 product over categories) [M: the
+    // alignment factor is taken as its own category].
     const float m = econ::influence_alignment_factor(side, ti.the_force, ti.force_strength, c.influence_alignment_bonus,
-                                                     c.influence_alignment_penalty);
+                                                     c.influence_alignment_penalty) *
+                    political_transition_factor(planet);
     const float before = p.control;
     p.control = econ::political_ramp(p.control, p.target_control,
                                      econ::political_delta(1, m, c.political_control_change_seconds));
@@ -738,7 +744,11 @@ void GalacticSim::on_owner_change(PlanetIndex planet, int32_t old_owner) {
     if (p.siphon_player == now_owner) {
         p.siphon_player = kNoPlayer;
         p.siphon_amount = 0.0f;
+        p.siphon_type = kNoIndex;
+        p.siphon_source = 0;
     }
+    // galab §4 / §5: the owner-changed signal moves the planet's held bonuses (vf21) [port order: after the siphon step].
+    move_planet_bonuses(planet);
     // GE 2.8: the space queue is re-evaluated at level 0 [M]. The ground queue's entries of other players are dropped
     // without refund ([L]: 0x2bff60 not traced).
     reevaluate_queue(planet, kSpaceQueue, 0);
@@ -1644,6 +1654,7 @@ void GalacticSim::update() {
             apply_ownership(p, derived_[p].owner);
             planet_production(p);
             service_income_abilities(p);  // P4 sim
+            service_planet_bonuses(p);    // galab §4 / §5
         }
     } else {
         for (ObjectHandle h : order) {
@@ -1660,6 +1671,7 @@ void GalacticSim::update() {
             apply_ownership(p, derive_owner(p));
             planet_production(p);
             service_income_abilities(p);  // P4 sim
+            service_planet_bonuses(p);    // galab §4 / §5
         }
     }
     // 2. P4 sim: the planets' hero spawn lists (0x3fc750, P4 6.2), planet row order [inferred].
@@ -1826,6 +1838,8 @@ void GalacticSim::set_siphon(PlanetIndex planet, int32_t player, float fraction,
     planets_[planet].siphon_fraction = fraction;
     planets_[planet].siphon_until = until_frame;
     planets_[planet].siphon_amount = 0.0f;
+    planets_[planet].siphon_type = kNoIndex;  // galab: set by Siphon_Credits_Ability after this call
+    planets_[planet].siphon_source = 0;
 }
 void GalacticSim::set_income_limits(PlanetIndex planet, bool has_min, float min_value, bool has_max, float max_value) {
     if (!valid_planet(planet)) return;
@@ -1986,6 +2000,9 @@ std::string_view galactic_event_name(GalacticEventKind kind) {
     case GalacticEventKind::TypeUnlocked: return "TypeUnlocked";
     case GalacticEventKind::Slice: return "Slice";
     case GalacticEventKind::CorruptionStarted: return "CorruptionStarted";
+    case GalacticEventKind::SiphonStarted: return "SiphonStarted";
+    case GalacticEventKind::SiphonVigilance: return "SiphonVigilance";
+    case GalacticEventKind::HeroNeutralized: return "HeroNeutralized";
     case GalacticEventKind::Count: break;
     }
     return "?";
@@ -2113,6 +2130,7 @@ void GalacticSim::hash_state(StateHasher& h) const {
     if (!oi_state_default()) hash_oi(h);  // OI galactic: stealth bytes, victory claims, max tech, build counts
     if (!reveal_state_default()) hash_reveal(h);  // GRC: local player, auto-reveal, revealed bytes, transitions
     if (!visibility_state_default()) hash_visibility(h);  // GRC 2: stored visibility modifier entries
+    if (!galab_state_default()) hash_galab(h);  // galab: home planets, planet bonus holders, siphon sources
 }
 
 void GalacticSim::register_crc(CrcRegistry& registry, const std::string& prefix, bool include_store) const {

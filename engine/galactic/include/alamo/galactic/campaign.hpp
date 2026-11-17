@@ -163,6 +163,10 @@ struct PlayerState {
     // OI galactic (STRATEGIC_GAPS 1.3)
     int32_t max_tech_level = 5;                  // P +0x88 (step 7); default [L], story SET_MAX_TECH_LEVEL writes it
     std::vector<std::pair<uint32_t, int32_t>> built;  // lifetime build counts (P +0x198 map, 0x2821b0), first-build order
+    // galab t06 (GALAB_ABILITIES_RE §8): the campaign Home_Location planet of the player's faction (player +0x188, set at
+    // campaign setup for every player with a faction: 0x4af240, the first matching entry). Read by the AI token
+    // Self.HomePlanet. Saved (v8); hashed in the "GLB1" tail.
+    PlanetIndex home = kInvalidPlanet;
 };
 
 // OI galactic: buildability 0x2804d0 (STRATEGIC_GAPS 1.3). `reason` = the out-argument code the GUI / Lua read (0 = the
@@ -291,6 +295,13 @@ struct PlanetState {
     float siphon_fraction = 0.0f;         // D +0x204
     int32_t siphon_until = 0;             // D +0x208
     float siphon_amount = 0.0f;           // D +0x20c
+    // galab (GALAB_ABILITIES_RE §3): the siphoning hero's type D +0x218 and object D +0x220 (an ObjectId, 0 = none), set by
+    // Siphon_Credits_Ability; read by Neutralize_Hero (§7). Saved (v8); hashed in the "GLB1" tail.
+    uint32_t siphon_type = kNoIndex;
+    int32_t siphon_source = 0;
+    // galab (§4 / §5): the player holding this planet's Galaxy_Wide_Upgrade / Reduce_Technology_Price bonuses (kNoPlayer =
+    // not applied yet). Saved (v8); hashed in the "GLB1" tail.
+    int32_t bonus_holder = kNoPlayer;
     int32_t halt_until = INT32_MIN;       // credit halt list folded: halted while now <= halt_until [M]
     bool min_income_set = false, max_income_set = false;  // D +0x280 / +0x281
     float min_income = 0.0f, max_income = 0.0f;           // D +0x278 / +0x27c
@@ -602,6 +613,23 @@ public:
     void set_destroyed(PlanetIndex planet, bool destroyed);
     void set_credit_halt(PlanetIndex planet, int32_t until_frame);
     void set_siphon(PlanetIndex planet, int32_t player, float fraction, int32_t until_frame);
+    // ---- galab (src/galab_abilities.cpp, docs/re/GALAB_ABILITIES_RE.md) ------------------------------------------
+    // Accept tests of the Ground_Activated GALAB abilities (also used by AI and UI callers): Remove_Corruption (own planet,
+    // corrupted, no transition), Planet_Destruction (not destroyed, owner not self / ally), Siphon_Credits (owner not self
+    // / ally, playable).
+    bool remove_corruption_accepts(int32_t player, PlanetIndex planet) const;
+    float corruption_removal_cost(const SpecialAbilityDef& a, PlanetIndex planet) const;
+    bool planet_destruction_accepts(int32_t player, PlanetIndex planet) const;
+    bool siphon_accepts(int32_t player, PlanetIndex planet) const;
+    // The Space_ / Land_Upgrade_Type list of the player's held Galaxy_Wide_Upgrade bonuses (player +0x300 / +0x318),
+    // spawned for the player at the start of a space / land battle (0x2afc10).
+    std::vector<uint32_t> player_upgrades(int32_t player, bool space) const;
+    // Tarkin's Political_Transition_Bonus at the planet: the product over stacking categories of the smallest
+    // Time_Reduction_Percentage of the owner's holders present (1.0 = none); it divides the political ramp time.
+    float political_transition_factor(PlanetIndex planet) const;
+    PlanetIndex home_planet(int32_t player) const {
+        return valid_player(player) ? players_[static_cast<size_t>(player)].home : kInvalidPlanet;
+    }
     void set_income_limits(PlanetIndex planet, bool has_min, float min_value, bool has_max, float max_value);
     void add_income_entry(PlanetIndex planet, float value, int32_t expiry);
     void set_hidden(PlanetIndex planet, bool hidden);
@@ -1226,6 +1254,18 @@ private:
     bool apply_sabotage(const SpecialAbilityDef& a, ObjectHandle saboteur, int32_t player, PlanetIndex planet);
     bool apply_hack(ObjectHandle hacker, int32_t player, PlanetIndex planet);
     bool apply_corruption(ObjectHandle defiler, int32_t player, PlanetIndex planet);
+    // galab (src/galab_abilities.cpp)
+    const SpecialAbilityDef& special_def(uint32_t ref) const;  // TypeSpecial::trigger_order entry -> definition
+    bool apply_remove_corruption(const SpecialAbilityDef& a, ObjectHandle hero, int32_t player, PlanetIndex planet);
+    bool apply_planet_destruction(ObjectHandle shooter, int32_t player, PlanetIndex planet);
+    bool apply_siphon(const SpecialAbilityDef& a, ObjectHandle hero, int32_t player, PlanetIndex planet);
+    bool siphon_blocked_by_presence(PlanetIndex planet) const;
+    bool has_planet_bonus(PlanetIndex planet) const;
+    void service_planet_bonuses(PlanetIndex planet);
+    void move_planet_bonuses(PlanetIndex planet);
+    void refresh_tech_cost(int32_t player);
+    bool galab_state_default() const;
+    void hash_galab(StateHasher& h) const;
     std::vector<uint8_t> sabotage_options_of(const SpecialAbilityDef& a, PlanetIndex planet, int32_t player) const;
     int32_t sabotage_cost_with(const SpecialAbilityDef* a, int32_t player, PlanetIndex planet, ObjectHandle structure) const;
     std::vector<BlackMarketOffer> offers_with(const SpecialAbilityDef* a, int32_t player, PlanetIndex planet) const;

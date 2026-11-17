@@ -41,6 +41,15 @@ enum class SpecialAbilityClass : uint8_t {
     SystemSpy = 8,      // System_Spy_Ability (GRC 2.3 / 2.3.1: planet visibility modifiers)
     ReducePrice = 9,    // Reduce_Production_Price_Ability (A2K_T01_BUILD_COST_RE 1.3)
     ReduceTime = 10,    // Reduce_Production_Time_Ability (same class family, the time tables)
+    // galab (docs/re/GALAB_ABILITIES_RE.md)
+    RemoveCorruption = 11,     // Remove_Corruption_Ability (heroes; §1)
+    PlanetDestruction = 12,    // Planet_Destruction_Ability (Death Star / Death Star II; §2)
+    SiphonCredits = 13,        // Siphon_Credits_Ability (Han Solo, smugglers; §3)
+    GalaxyWideUpgrade = 14,    // Galaxy_Wide_Upgrade_Ability (planet bonuses, PLANETS.XML; §4)
+    ReduceTechPrice = 15,      // Reduce_Technology_Price_Ability (The Maw; §5)
+    PoliticalTransition = 16,  // Political_Transition_Bonus_Ability (Tarkin; §6)
+    NeutralizeHero = 17,       // Neutralize_Hero_Ability (bounty hunters; §7)
+    HeroProtection = 18,       // Hero_Protection_Ability (Neutralization_Cost_Multiplier; §7)
 };
 
 struct SpecialAbilityDef {
@@ -97,6 +106,22 @@ struct SpecialAbilityDef {
     uint64_t applicable_categories = 0;      // GameObjectCategoryType mask; ~0 = All
     std::vector<uint32_t> applicable_types;  // type indices
     std::vector<uint32_t> excluded_types;    // type indices
+    // galab: Remove_Corruption_Ability (GALAB §1; ctor 0x5b1310, post-load 0x5b17f0): Corruption_Removal_Cost_Multiplier
+    // +0x17C (negative -> 1.0) and Corruption_Removal_Time_In_Secs +0x180 (float; <= 0 -> 10.0).
+    float removal_cost_multiplier = 1.0f;
+    float removal_seconds = 10.0f;
+    // Siphon_Credits_Ability (GALAB §3; post-load 0x70e9e0): Min / Max_Siphon_Percentage +0x178 / +0x17C (outside 0..1:
+    // clamped with an error), Siphon_Duration_In_Cycles +0x180 (< 1 -> 1); Ground_Activated only.
+    float siphon_min = 0.0f;
+    float siphon_max = 0.0f;
+    int32_t siphon_cycles = 0;
+    // Galaxy_Wide_Upgrade_Ability (GALAB §4): Space_Upgrade_Type +0x180 / Land_Upgrade_Type +0x190 (type indices,
+    // 0xFFFFFFFF = none). Galactic_Automatic only (post-load 0x6ffae0).
+    uint32_t space_upgrade = 0xFFFFFFFFu;
+    uint32_t land_upgrade = 0xFFFFFFFFu;
+    std::string space_upgrade_name, land_upgrade_name;  // as written (resolved by the loader)
+    // Reduce_Technology_Price_Ability (GALAB §5) and Political_Transition_Bonus_Ability (GALAB §6) keep their
+    // Price_ / Time_Reduction_Percentage in `production_reduction` and Stacking_Category in `stacking_category`.
 };
 
 // BlackMarketItems.xml entry (P4 1.1), table order = file order.
@@ -156,6 +181,8 @@ struct BountyAbilityDef {
     bool apply_to_all_allies = false;     // Apply_To_All_Allies (parsed; allies are not modelled [port])
 };
 
+inline constexpr uint32_t kGalabRef = 0x80000000u;  // TypeSpecial::trigger_order: the entry is a `galab` index
+
 // Per object type (index = TypeIndex). Default-constructed for every type without these fields.
 struct TypeSpecial {
     std::vector<uint32_t> abilities;     // SpecialRules::abilities indices, <Abilities> list order; a team without its own
@@ -191,12 +218,23 @@ struct TypeSpecial {
     // a2m r2: SpecialRules::bounty indices of this type's Bounty_On_Faction_Ability entries (list order). Kept out of
     // `abilities` so those indices stay unchanged.
     std::vector<uint32_t> bounty;
+    // galab: SpecialRules::galab indices of this type's GALAB abilities (Remove_Corruption, Planet_Destruction,
+    // Siphon_Credits, Galaxy_Wide_Upgrade, Reduce_Technology_Price, Political_Transition_Bonus, Neutralize_Hero,
+    // Hero_Protection; list order; a team without its own uses its first member's). Kept out of `abilities` so those
+    // indices (and the CRC of sessions that never use these abilities) stay unchanged.
+    std::vector<uint32_t> galab;
+    // The Ground_Activated walk order of P4 6.1 over both tables, <Abilities> list order: an `abilities` index, or
+    // kGalabRef | a `galab` index. Equal to `abilities` for a type without GALAB entries.
+    std::vector<uint32_t> trigger_order;
+    float corruption_removal_cost = 0.0f;  // planets: Planet_Corruption_Removal_Base_Cost (T +0x804, read as float)
+    bool prevents_minor_siphons = false;   // Prevents_Minor_Credit_Siphons (T +0x63; no FoC type sets it)
 };
 
 struct SpecialRules {
     std::vector<SpecialAbilityDef> abilities;  // every galactic-relevant <Abilities> entry, type order then list order
     std::vector<SpecialAbilityDef> production; // Reduce_Production_Price / _Time entries (ReducePrice / ReduceTime)
     std::vector<BountyAbilityDef> bounty;      // a2m r2: Bounty_On_Faction_Ability entries, type order then list order
+    std::vector<SpecialAbilityDef> galab;      // galab: GALAB ability entries (TypeSpecial::galab), type order then list order
     std::vector<BlackMarketItemDef> items;     // BlackMarketItems.xml, file order
     std::vector<TypeSpecial> types;            // index = TypeIndex (empty in hand-built rules: every lookup defaults)
     // GameConstants

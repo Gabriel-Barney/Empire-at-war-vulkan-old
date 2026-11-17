@@ -50,8 +50,11 @@ namespace {
 // t01): + i32 x 2 build queue phases per planet, - the two PlanetState build bonus floats (the production modifiers are
 // derived, GalacticSim::production_bonus); v5 (cu8f t04b): + the Prefer_Ground_Over_Space false ids; v6 (q6 t21): + the
 // deferred victory tests; v7 (2026-11-13, [port: Gabriel]): + the fleet / ship names. Only the current version is read,
-// and v6 (no names: read as none), so saves from before the names still load.
-constexpr uint32_t kGalacticSaveVersion = 7;
+// and v6 (no names: read as none), so saves from before the names still load. v8 (galab): + per player the home planet,
+// per planet the siphon source type / object and the bonus holder; v6 / v7 read them as the session's start() values
+// (home) and none.
+constexpr uint32_t kGalacticSaveVersion = 8;
+constexpr uint32_t kGalacticSaveVersionNoGalab = 7;
 constexpr uint32_t kGalacticSaveVersionNoNames = 6;
 constexpr uint32_t kConflictSaveVersion = 3;  // v2: BattleRequest::linked (story t10); v3: BattleRequest::sandbox (q6)
 
@@ -242,12 +245,16 @@ void GalacticSim::write(ByteWriter& w) const {
     w.u32(live_names);
     for (const auto& e : names_)
         if (st.alive(st.find(e.first))) w.i32(e.first).str(e.second);
+    for (const PlayerState& p : players_) w.u32(p.home);  // v8 (galab)
+    for (const PlanetState& p : planets_) w.u32(p.siphon_type).i32(p.siphon_source).i32(p.bonus_holder);
 }
 
 bool GalacticSim::read(ByteReader& r) {
     const objects::ObjectStore& st = *store_;
     const uint32_t version = r.u32();
-    if ((version != kGalacticSaveVersion && version != kGalacticSaveVersionNoNames) || !r.ok()) return false;
+    if ((version != kGalacticSaveVersion && version != kGalacticSaveVersionNoGalab && version != kGalacticSaveVersionNoNames) ||
+        !r.ok())
+        return false;
     const uint32_t rows = r.u32(), routes = r.u32(), types = r.u32(), np = r.u32();
     if (!r.ok() || rows != planets_.size() || routes != map_.routes.size() || types != rules_->types.size() ||
         np != players_.size())
@@ -541,6 +548,25 @@ bool GalacticSim::read(ByteReader& r) {
                 normalized.empty())
                 return false;
             if (i > 0 && names[i].first <= names[i - 1].first) return false;  // ascending, unique
+        }
+    }
+    for (size_t i = 0; i < players.size(); ++i)  // galab (v8); older saves: the session's start() home, no state
+        players[i].home = i < players_.size() ? players_[i].home : kInvalidPlanet;
+    for (PlanetState& p : planets) {
+        p.siphon_type = kNoIndex;
+        p.siphon_source = 0;
+        p.bonus_holder = kNoPlayer;
+    }
+    if (version >= 8) {
+        for (PlayerState& p : players) {
+            p.home = r.u32();
+            if (!r.ok() || (p.home != kInvalidPlanet && p.home >= rows)) return false;
+        }
+        for (PlanetState& p : planets) {
+            p.siphon_type = r.u32();
+            p.siphon_source = r.i32();
+            p.bonus_holder = r.i32();
+            if (!r.ok() || (p.siphon_type != kNoIndex && p.siphon_type >= types) || !player_ok(p.bonus_holder)) return false;
         }
     }
     if (!r.ok() || !r.done()) return false;

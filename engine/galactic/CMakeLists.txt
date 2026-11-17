@@ -37,6 +37,7 @@ if("data" IN_LIST ALAMO_ENGINE_MODULES AND "objects" IN_LIST ALAMO_ENGINE_MODULE
     src/strategic.cpp  # OI galactic: STRATEGIC_GAPS speed M, company transports, buildability, stealth, victory claims
     src/special_rules.cpp    # P4 sim: special-system tables (special_data.hpp)
     src/special_systems.cpp  # P4 sim: hero trigger / respawn, black market, sabotage, hack, income abilities, corruption
+    src/galab_abilities.cpp  # galab: Remove_Corruption, Death Star, Siphon, planet bonuses, Tarkin, Neutralize_Hero
     src/galactic_save.cpp    # N1: GalacticSim / ConflictManager write / read
     src/bounty.cpp           # a2m r2: bounty values (auto-resolve bounty, results screen)
   )

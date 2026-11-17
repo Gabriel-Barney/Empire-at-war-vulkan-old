@@ -213,12 +213,22 @@ bool GalacticSim::special_accepts(const SpecialAbilityDef& a, ObjectHandle unit,
         return slice_accepts(owner, planet);
     case SpecialAbilityClass::SystemSpy:  // GRC 2.3: no accept rule recovered [L]: any planet, a non-empty mask
         return a.spy_mask != 0;
+    case SpecialAbilityClass::RemoveCorruption:  // galab §1: vf5 0x5b1770
+        return remove_corruption_accepts(owner, planet);
+    case SpecialAbilityClass::PlanetDestruction:  // galab §2: vf5 0x7079c0
+        return planet_destruction_accepts(owner, planet);
+    case SpecialAbilityClass::SiphonCredits:  // galab §3: vf5 0x70e8c0
+        return siphon_accepts(owner, planet);
     default: return false;  // income abilities are Galactic_Automatic (service_income_abilities)
     }
 }
 
+const SpecialAbilityDef& GalacticSim::special_def(uint32_t ref) const {
+    return (ref & kGalabRef) != 0 ? special().galab[ref & ~kGalabRef] : special().abilities[ref];
+}
+
 bool GalacticSim::special_apply(uint32_t ability, ObjectHandle unit, int32_t owner, PlanetIndex planet) {
-    const SpecialAbilityDef& a = special().abilities[ability];
+    const SpecialAbilityDef& a = special_def(ability);
     bool applied = false;
     switch (a.cls) {
     case SpecialAbilityClass::BlackMarket: applied = apply_black_market(a, unit, owner, planet); break;
@@ -227,10 +237,14 @@ bool GalacticSim::special_apply(uint32_t ability, ObjectHandle unit, int32_t own
     case SpecialAbilityClass::Corruption: applied = apply_corruption(unit, owner, planet); break;
     case SpecialAbilityClass::Slicer: applied = apply_slicer(a, unit, owner, planet); break;
     case SpecialAbilityClass::SystemSpy: applied = apply_system_spy(a, unit, owner, planet); break;  // GRC 2.3
+    case SpecialAbilityClass::RemoveCorruption: applied = apply_remove_corruption(a, unit, owner, planet); break;  // galab
+    case SpecialAbilityClass::PlanetDestruction: applied = apply_planet_destruction(unit, owner, planet); break;
+    case SpecialAbilityClass::SiphonCredits: applied = apply_siphon(a, unit, owner, planet); break;
     default: break;
     }
-    // Story LAND_ON (2) + DEPLOY (0xC) for every successful apply (0x3284c0) [H]; type = the unit's type.
-    if (applied)
+    // Story LAND_ON (2) + DEPLOY (0xC) for every successful apply (0x3284c0) [H]; type = the unit's type. galab: the
+    // planet destruction ability does not call it (0x707670).
+    if (applied && a.cls != SpecialAbilityClass::PlanetDestruction)
         emit_special(GalacticEventKind::SpecialApplied, owner, planet, unit, static_cast<uint32_t>(store_->exists(unit) ? store_->type(unit) : kNoIndex),
                      static_cast<int32_t>(ability), -1);
     return applied;
@@ -242,11 +256,12 @@ bool GalacticSim::ground_activated_trigger(ObjectHandle unit, PlanetIndex planet
     const int32_t owner = store_->owner(unit);
     if (!valid_player(owner)) return false;
     const uint32_t type = static_cast<uint32_t>(store_->type(unit));
-    const std::vector<uint32_t> list = special().type(type).abilities;  // copy: the unit may leave during the walk
+    // galab: both tables in <Abilities> list order (TypeSpecial::trigger_order).
+    const std::vector<uint32_t> list = special().type(type).trigger_order;  // copy: the unit may leave during the walk
     bool any = false;
     for (const uint32_t ai : list) {
         if (!store_->alive(unit)) break;  // [inferred] a departed hero tries nothing more
-        const SpecialAbilityDef& a = special().abilities[ai];
+        const SpecialAbilityDef& a = special_def(ai);
         if (a.style != ActivationStyle::GroundActivated || !ability_ready(a, owner, type)) continue;  // style + "ready" (0x37be10)
         if (!special_accepts(a, unit, owner, planet)) continue;
         if (!bm_allows_special_ability(owner, a.name_crc, a.must_be_bought)) continue;  // 0x39b0b0
@@ -901,6 +916,8 @@ bool GalacticSim::planet_destroy_impl(PlanetIndex planet, int32_t destroyer, int
         PlanetState& p = planets_[planet];
         p.siphon_player = kNoPlayer;  // siphon fields cleared
         p.siphon_amount = 0.0f;
+        p.siphon_type = kNoIndex;
+        p.siphon_source = 0;
     }
     auto remove = [this, planet](ObjectHandle h) {
         if (!store_->alive(h)) return;
@@ -1279,8 +1296,8 @@ RejectReason GalacticSim::special_command(int32_t player, const commands::EventD
             if (fleets_[f].planet != planet || fleets_[f].moving) return RejectReason::InvalidTarget;
             for (ObjectHandle m : fleets_[f].contents) {
                 if (!store_->alive(m)) continue;
-                for (uint32_t ai : special_type(m).abilities) {
-                    const SpecialAbilityDef& a = special().abilities[ai];
+                for (uint32_t ai : special_type(m).trigger_order) {
+                    const SpecialAbilityDef& a = special_def(ai);
                     if (a.style == ActivationStyle::GroundActivated && ability_ready(a, player, static_cast<uint32_t>(store_->type(m))) && special_accepts(a, m, player, planet)) {
                         users.push_back(m);
                         break;

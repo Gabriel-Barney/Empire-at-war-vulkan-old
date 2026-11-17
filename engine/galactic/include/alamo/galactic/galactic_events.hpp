@@ -59,7 +59,7 @@ enum class GalacticEventKind : uint8_t {
                              // 7 hack), value = q5 code of the black-market respawn time R (else 0)
     SpecialError,            // the local error SFX: player, planet, object = hero
     SpecialApplied,          // a Ground_Activated apply succeeded (story LAND_ON 2 + DEPLOY 0xC): player, planet, object, type = unit
-                             // type, value = SpecialRules::abilities index
+                             // type, value = SpecialRules::abilities index (galab: kGalabRef | SpecialRules::galab index)
     BlackMarketPurchase,     // player, planet, object = hero, value = item index, other_player = 1 for a human buyer
                              // (story BUY_BLACK_MARKET 0x38 with the item Name [port: at execute time; humans only])
     GalacticSabotage,        // story GALACTIC_SABOTAGE 0x39: player (-1 story reward), planet, type = structure type
@@ -77,6 +77,13 @@ enum class GalacticEventKind : uint8_t {
     // STY1 t08 (retail wrappers 0x3f6810 / 0x3f6770 -> 0x32edd0, GRC 4.3): a timed corruption transition begins:
     CorruptionStarted,       // planet, player = corrupting player (gain), value = 1 gain / 0 removal; story STORY_GENERIC
                              // "increase_corruption" / "decrease_corruption"
+    // galab (docs/re/GALAB_ABILITIES_RE.md):
+    SiphonStarted,           // Siphon_Credits applied: player = siphoner, planet, object = hero, type = hero type, value =
+                             // Siphon_Duration_In_Cycles, other_player = planet owner (TEXT_SIPHON_BEGIN)
+    SiphonVigilance,         // a generic siphoner caught on Planet_Vigilance (killed): player, planet, object = hero,
+                             // other_player = planet owner (TEXT_SIPHON_FAILURE_VIGILANCE / _PREVENTED_VIGILANCE)
+    HeroNeutralized,         // Neutralize_Hero executed: player = the neutralizer's owner, planet, type = the target's type,
+                             // object = the target, other_player = the target's owner, value = credits charged
     Count
 };
 

@@ -44,7 +44,20 @@ SpecialAbilityClass class_of(std::string_view tag) {
     if (ascii_iequals(tag, "System_Spy_Ability")) return SpecialAbilityClass::SystemSpy;
     if (ascii_iequals(tag, "Reduce_Production_Price_Ability")) return SpecialAbilityClass::ReducePrice;
     if (ascii_iequals(tag, "Reduce_Production_Time_Ability")) return SpecialAbilityClass::ReduceTime;
+    // galab (docs/re/GALAB_ABILITIES_RE.md)
+    if (ascii_iequals(tag, "Remove_Corruption_Ability")) return SpecialAbilityClass::RemoveCorruption;
+    if (ascii_iequals(tag, "Planet_Destruction_Ability")) return SpecialAbilityClass::PlanetDestruction;
+    if (ascii_iequals(tag, "Siphon_Credits_Ability")) return SpecialAbilityClass::SiphonCredits;
+    if (ascii_iequals(tag, "Galaxy_Wide_Upgrade_Ability")) return SpecialAbilityClass::GalaxyWideUpgrade;
+    if (ascii_iequals(tag, "Reduce_Technology_Price_Ability")) return SpecialAbilityClass::ReduceTechPrice;
+    if (ascii_iequals(tag, "Political_Transition_Bonus_Ability")) return SpecialAbilityClass::PoliticalTransition;
+    if (ascii_iequals(tag, "Neutralize_Hero_Ability")) return SpecialAbilityClass::NeutralizeHero;
+    if (ascii_iequals(tag, "Hero_Protection_Ability")) return SpecialAbilityClass::HeroProtection;
     return SpecialAbilityClass::Other;
+}
+
+bool is_galab(SpecialAbilityClass c) {
+    return c >= SpecialAbilityClass::RemoveCorruption && c <= SpecialAbilityClass::HeroProtection;
 }
 
 // GRC 2.3.1: System_Spy_Ability See_* flags -> VisibilityLevelType bits (0x70fd20). A spy never grants bit 0.
@@ -119,6 +132,13 @@ SpecialAbilityDef parse_ability(const objects::ObjectTypeDatabase& raw, objects:
         else if (ascii_iequals(tag, "Price_Reduction_Percentage") || ascii_iequals(tag, "Time_Reduction_Percentage")) a.production_reduction = to_f(v);
         else if (ascii_iequals(tag, "Stacking_Category")) a.stacking_category = static_cast<int32_t>(to_f(v));
         else if (ascii_iequals(tag, "Galaxy_Wide")) a.galaxy_wide = objects::parse_type_bool(v);
+        else if (ascii_iequals(tag, "Corruption_Removal_Cost_Multiplier")) a.removal_cost_multiplier = to_f(v);
+        else if (ascii_iequals(tag, "Corruption_Removal_Time_In_Secs")) a.removal_seconds = to_f(v);
+        else if (ascii_iequals(tag, "Min_Siphon_Percentage")) a.siphon_min = to_f(v);
+        else if (ascii_iequals(tag, "Max_Siphon_Percentage")) a.siphon_max = to_f(v);
+        else if (ascii_iequals(tag, "Siphon_Duration_In_Cycles")) a.siphon_cycles = static_cast<int32_t>(to_f(v));
+        else if (ascii_iequals(tag, "Space_Upgrade_Type")) a.space_upgrade_name = std::string(v);
+        else if (ascii_iequals(tag, "Land_Upgrade_Type")) a.land_upgrade_name = std::string(v);
         else if (a.cls == SpecialAbilityClass::SystemSpy) {
             for (const SpyFlag& sf : kSpyFlags)
                 if (ascii_iequals(tag, sf.tag)) {
@@ -226,6 +246,59 @@ SpecialAbilityDef parse_ability(const objects::ObjectTypeDatabase& raw, objects:
         if (have_style && a.style != ActivationStyle::GalacticAutomatic)
             note(diag, "galactic: " + a.name + ": production ability needs Galactic_Automatic");
         a.style = ActivationStyle::GalacticAutomatic;
+        break;
+    // galab post-load rules (docs/re/GALAB_ABILITIES_RE.md) [H].
+    case SpecialAbilityClass::RemoveCorruption:
+        // 0x5b17f0: a negative multiplier -> 1.0 (0 is kept); a time <= 0 -> 10.0. The style stays as written
+        // (Ground_Activated in every FoC entry).
+        if (a.removal_cost_multiplier < 0.0f) a.removal_cost_multiplier = 1.0f;
+        if (a.removal_seconds <= 0.0f) a.removal_seconds = 10.0f;
+        break;
+    case SpecialAbilityClass::PlanetDestruction:
+        if (!have_style) a.style = ActivationStyle::GroundActivated;  // ctor 0x7075d0: style 6
+        break;
+    case SpecialAbilityClass::SiphonCredits:
+        // 0x70e9e0: each percentage outside 0..1 is clamped into it (error logged); Ground_Activated only; cycles < 1 -> 1.
+        if (a.siphon_min < 0.0f || a.siphon_min > 1.0f) {
+            note(diag, "galactic: " + a.name + ": Min_Siphon_Percentage outside 0-1");
+            a.siphon_min = std::clamp(a.siphon_min, 0.0f, 1.0f);
+        }
+        if (a.siphon_max < 0.0f || a.siphon_max > 1.0f) {
+            note(diag, "galactic: " + a.name + ": Max_Siphon_Percentage outside 0-1");
+            a.siphon_max = std::clamp(a.siphon_max, 0.0f, 1.0f);
+        }
+        if (a.style != ActivationStyle::GroundActivated) {
+            note(diag, "galactic: " + a.name + ": Siphon_Credits_Ability needs Ground_Activated");
+            a.style = ActivationStyle::GroundActivated;
+        }
+        if (a.siphon_cycles < 1) {
+            note(diag, "galactic: " + a.name + ": Siphon_Duration_In_Cycles must be > 0");
+            a.siphon_cycles = 1;
+        }
+        break;
+    case SpecialAbilityClass::GalaxyWideUpgrade:
+    case SpecialAbilityClass::ReduceTechPrice:
+        // 0x6ffae0 / 0x70c260: Galactic_Automatic only (anything else is forced to it, Causes_Despawn cleared); a price
+        // reduction >= 1.0 -> 1.0 with an error.
+        if (have_style && a.style != ActivationStyle::GalacticAutomatic)
+            note(diag, "galactic: " + a.name + ": only Galactic_Automatic is supported");
+        a.style = ActivationStyle::GalacticAutomatic;
+        a.causes_despawn = false;
+        if (a.cls == SpecialAbilityClass::ReduceTechPrice && a.production_reduction >= 1.0f) {
+            note(diag, "galactic: " + a.name + ": Price_Reduction_Percentage must be < 1.0");
+            a.production_reduction = 1.0f;
+        }
+        break;
+    case SpecialAbilityClass::PoliticalTransition:
+        // ctor 0x709590: Galactic_Automatic; post-load 0x709b50: Time_Reduction_Percentage outside [0, 1) -> 0.
+        if (!have_style) a.style = ActivationStyle::GalacticAutomatic;
+        if (a.production_reduction < 0.0f || a.production_reduction >= 1.0f) {
+            note(diag, "galactic: " + a.name + ": Time_Reduction_Percentage must be >= 0.0 and < 1.0");
+            a.production_reduction = 0.0f;
+        }
+        break;
+    case SpecialAbilityClass::NeutralizeHero:
+    case SpecialAbilityClass::HeroProtection:
         break;
     case SpecialAbilityClass::Other: break;
     }
@@ -405,7 +478,7 @@ void load_special_rules(const FileProvider& provider, const data::GameDatabase& 
     const objects::ObjectTypeDatabase& raw = types.raw();
     const size_t n = types.size();
     s.types.assign(n, TypeSpecial{});
-    std::map<objects::FieldIndex, uint32_t> parsed, parsed_production, parsed_bounty;  // lookup only
+    std::map<objects::FieldIndex, uint32_t> parsed, parsed_production, parsed_bounty, parsed_galab;  // lookup only
     for (objects::TypeIndex t = 0; t < n; ++t) {
         TypeSpecial& ts = s.types[t];
         for (objects::FieldIndex f : types.get_sub_objects(t, "Abilities")) {
@@ -432,6 +505,25 @@ void load_special_rules(const FileProvider& provider, const data::GameDatabase& 
             }
             const SpecialAbilityClass cls = class_of(tag);
             if (cls == SpecialAbilityClass::Other) continue;
+            if (is_galab(cls)) {  // galab: own table, so the `abilities` indices stay unchanged
+                auto git = parsed_galab.find(f);
+                if (git == parsed_galab.end()) {
+                    SpecialAbilityDef a = parse_ability(raw, f, diagnostics);
+                    const auto resolve = [&](const std::string& name) {
+                        if (name.empty()) return kNoIndex;
+                        const objects::TypeIndex r = types.resolve_name(ascii_trim(name));
+                        if (r == objects::kNone) note(diagnostics, "galactic: " + a.name + ": unknown type " + name);
+                        return r == objects::kNone ? kNoIndex : static_cast<uint32_t>(r);
+                    };
+                    a.space_upgrade = resolve(a.space_upgrade_name);
+                    a.land_upgrade = resolve(a.land_upgrade_name);
+                    git = parsed_galab.emplace(f, static_cast<uint32_t>(s.galab.size())).first;
+                    s.galab.push_back(std::move(a));
+                }
+                ts.galab.push_back(git->second);
+                ts.trigger_order.push_back(kGalabRef | git->second);
+                continue;
+            }
             if (cls == SpecialAbilityClass::ReducePrice || cls == SpecialAbilityClass::ReduceTime) {
                 auto pit = parsed_production.find(f);
                 if (pit == parsed_production.end()) {
@@ -450,6 +542,7 @@ void load_special_rules(const FileProvider& provider, const data::GameDatabase& 
                 s.abilities.push_back(parse_ability(raw, f, diagnostics));
             }
             ts.abilities.push_back(it->second);
+            ts.trigger_order.push_back(it->second);
         }
         for (objects::TypeIndex m : types.get_type_refs(t, "Company_Units"))
             if (m != objects::kNone) ts.members.push_back(m);
@@ -465,6 +558,8 @@ void load_special_rules(const FileProvider& provider, const data::GameDatabase& 
         ts.destroy_when_prereq = types.get_bool(t, "Destroy_When_Used_As_Corruption_Prereq");
         ts.generic_hero = types.get_bool(t, "Is_Generic_Hero");
         ts.named_hero = types.get_bool(t, "Is_Named_Hero");
+        ts.corruption_removal_cost = types.get_float(t, "Planet_Corruption_Removal_Base_Cost");  // galab §1 (T +0x804)
+        ts.prevents_minor_siphons = types.get_bool(t, "Prevents_Minor_Credit_Siphons");         // galab §3 (T +0x63)
         {
             const std::string_view prev = ascii_trim(types.get_string(t, "Prev_Level_Base"));
             if (!prev.empty()) {
@@ -515,7 +610,11 @@ void load_special_rules(const FileProvider& provider, const data::GameDatabase& 
             ts.galactic_stealth = all;
         }
         const TypeSpecial& m = s.types[ts.members.front()];
-        if (ts.abilities.empty()) ts.abilities = m.abilities;
+        if (ts.abilities.empty() && ts.galab.empty()) {
+            ts.abilities = m.abilities;
+            ts.galab = m.galab;
+            ts.trigger_order = m.trigger_order;
+        }
         if (ts.production.empty()) ts.production = m.production;
         ts.generic_hero = ts.generic_hero || m.generic_hero;
         ts.named_hero = ts.named_hero || m.named_hero;
