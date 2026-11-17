@@ -1776,7 +1776,7 @@ void skirmish_four_slot_real_test() {
         CHECK(b != nullptr);
         if (b) {
             uint32_t owned[3] = {}, pads[3] = {};
-            static const objects::BehaviorTypeId kPad = objects::behavior_type_id("BUILD_PAD");
+            static const objects::BehaviorTypeId kPad = objects::behavior_type_id("TACTICAL_BUILD_OBJECTS");
             const objects::ObjectStore& st = s.host().modes().top_tactical()->primary();
             for (const objects::ObjectHandle h : st.all_objects()) {
                 if (!st.active(h) || st.owner(h) < 0 || st.owner(h) >= 3) continue;
