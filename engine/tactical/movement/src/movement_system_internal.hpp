@@ -8,6 +8,7 @@
 #include <cmath>
 
 #include "alamo/core/dmath.hpp"
+#include "alamo/tactical/movement/corridor.hpp"  // trn1 t03: passability_ray (the conform cut)
 #include "alamo/objects/object_store.hpp"
 
 namespace alamo::tactical::movement {

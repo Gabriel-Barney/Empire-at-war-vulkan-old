@@ -14,6 +14,11 @@ UnitDesc unit_desc_from_type(const objects::GameObjectTypes& t, uint32_t ti) {
     d.accel = t.get_float(ti, "OverrideAcceleration");
     d.decel = t.get_float(ti, "OverrideDeceleration");
     d.hover_height = t.get_float(ti, "Hover_Height");  // s78n t18
+    {  // trn1 t03 (MOVEMENT §3.6): x Scale_Factor (type +0x658)
+        const float sc = t.get_float(ti, "Scale_Factor") > 0.0f ? t.get_float(ti, "Scale_Factor") : 1.0f;
+        d.overall_length = t.get_float(ti, "Overall_Length") * sc;
+        d.overall_width = t.get_float(ti, "Overall_Width") * sc;
+    }
     d.close_enough_angle = t.get_float(ti, "Close_Enough_Angle_For_Move_Start");
     d.movement_class = t.get_enum(ti, "MovementClass");
     d.collision_class = t.get_enum(ti, "UnitCollisionClass");

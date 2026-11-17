@@ -2521,10 +2521,66 @@ void MovementSystem::tick_land(uint32_t frame, SimRng& rng, const ParallelFor& p
         stats_.walk_degen_skips += r.degen_skips;
         // s78n t20 batch 2 (MOVEMENT §5.3 "Hover in full", commit 0x42d6a0): a raised hover unit stands at G + Hover_Height;
         // a rising / lowering one keeps the z its hover step wrote
-        if (height_ && u.hover < 2) u.z = height_(u.m.pos.x, u.m.pos.y) + (u.hover == 1 ? u.d.hover_height : 0.0f);
+        // trn1 t03 (MOVEMENT §3.6, 0x42d6a0 -> 0x42bb40): the conform's ground (water plane for a Water class, + the length
+        // tilt's lift) and attitude.
+        if (height_) {
+            const float g = conform(u);
+            if (u.hover < 2) u.z = g + (u.hover == 1 ? u.d.hover_height : 0.0f);
+        }
         update_tree(u);
     }
     crush_pass(res);  // OI tactical
     for (ObjectId id : despawned_) remove_unit(id);  // §4.6: bombers at path end (reported, then dropped)
 }
+
+float MovementSystem::conform(Unit& u) const {
+    // 0x42bb40 [H]. Ground G(q) = the terrain height at q, raised to the water plane for a movement class with the Water
+    // bit where the plane lies above it. z = G(p). With L = Overall_Length x Scale_Factor > 0: front / back = p +- d L/2
+    // along the facing d (0x2bab90 rotation of (1, 0) by the yaw), each cut at the first impassable cell of the unit's
+    // class (0x5a4c10); pitch = -atan2(G(front) - G(back), |front - back|_xy) in degrees (0 when x and the heights both
+    // match, the 0x20acd0 test); z += |G(front) - G(back)| / 5. With W = Overall_Width x Scale_Factor > 0, the same across
+    // d rotated by +90 degrees gives the roll, from the + side to the - side; a cut of the - ray moves the + point to
+    // p - d' t (retail writes the cut into the other point; kept).
+    constexpr float kDeg = 0.017453292f, kRad = 57.295776f;
+    const bool water = water_ && (u.lp.mask & kPassWater) != 0u;
+    const auto ground = [&](V2 q) {
+        const float h = height_(q.x, q.y);
+        return water && h < water_height_ ? water_height_ : h;
+    };
+    const auto angle = [kRad](V2 a, float az, V2 b, float bz) {
+        if (az == bz && a.x == b.x) return 0.0f;
+        const float dx = b.x - a.x, dy = b.y - a.y;
+        return -(dmath::atan2(bz - az, dmath::sqrt(dy * dy + dx * dx)) * kRad);
+    };
+    const auto rotate = [](V2 v, float rad) {
+        const float c = dmath::cos(rad), s = dmath::sin(rad);
+        return V2{c * v.x - s * v.y, c * v.y + s * v.x};
+    };
+    const V2 p = u.m.pos;
+    float z = ground(p);
+    u.conform_pitch = 0.0f;
+    u.conform_roll = 0.0f;
+    const V2 d = rotate(V2{1.0f, 0.0f}, u.m.yaw * kDeg);
+    if (const float len = u.d.overall_length; len > 0.0f) {
+        const float half = len / 2.0f;
+        V2 front = d * half + p;
+        if (const float t = passability_ray(grid_, p, d, half, u.lp.mask); t < half) front = d * t + p;
+        V2 back = d * (-len / 2.0f) + p;
+        if (const float t = passability_ray(grid_, p, d * -1.0f, half, u.lp.mask); t < half) back = p - d * t;
+        const float hf = ground(front), hb = ground(back);
+        u.conform_pitch = angle(back, hb, front, hf);
+        z = std::fabs(hf - hb) / 5.0f + z;
+    }
+    if (const float wid = u.d.overall_width; wid > 0.0f) {
+        const V2 e = rotate(d, 1.5707964f);
+        const float half = wid / 2.0f;
+        V2 plus = e * half + p;
+        if (const float t = passability_ray(grid_, p, e, half, u.lp.mask); t < half) plus = e * t + p;
+        const V2 minus = e * (-wid / 2.0f) + p;
+        if (const float t = passability_ray(grid_, p, e * -1.0f, half, u.lp.mask); t < half) plus = p - e * t;
+        u.conform_roll = angle(plus, ground(plus), minus, ground(minus));
+    }
+    return z;
+}
+
 }  // namespace alamo::tactical::movement

@@ -242,6 +242,9 @@ struct SpaceRun {
     bool debris_tracked = false, debris_moved = true, debris_turned = false, debris_expired = false, particle_followed = true;
     bool particle_gone = false, boom_seen = false, saved = false;
     uint32_t debris_spawn_frame = 0, debris_gone_frame = 0;
+    // trn1 t06: the pursuers' movement speed factor before the request and during the countdown, the retreating side's
+    int32_t pursue_checks = 0;
+    bool pursue_ok = true;
     int64_t debris_life = -1;
 };
 
@@ -256,6 +259,9 @@ SpaceRun run_space(const Data& d, int32_t workers) {
     const uint32_t empire = d.rules.find_faction("Empire");
     if (crules.factions.size() <= empire) crules.factions.resize(empire + 1);
     crules.factions[empire].space_retreat_countdown = 1.0f;
+    // trn1 t06 (MOVEMENT §3.4 item 6): every other faction pursues at 3; the retreating Empire's own factor never applies
+    for (galactic::ConflictFactionInfo& fi : crules.factions) fi.space_retreat_pursue = 3.0f;
+    crules.factions[empire].space_retreat_pursue = 7.0f;
     galactic::GalacticSetup s = make_setup(d);
     const uint32_t fr = type_of(d, "S10_Frigate"), cr = type_of(d, "T_Cruiser");
     s.forces = {{0, 1, fr}, {0, 1, cr}, {0, 1, fr}, {1, 2, fr}, {1, 2, fr}};
@@ -333,6 +339,17 @@ SpaceRun run_space(const Data& d, int32_t workers) {
                     out.boom_seen = out.boom_seen || (st.exists(o) && static_cast<uint32_t>(st.type(o)) == boom);
             }
         }
+        // trn1 t06: before the request every unit's factor is its own (1 here); during the countdown (the retreat runs, no
+        // flight yet) the pursuers' (player 1) are x 3 and the retreating player's stay
+        if (b->retreat_flight_state() == 0 && !out.flight)
+            for (const objects::ObjectHandle o : st.all_objects()) {
+                if (!st.alive(o) || !b->movement().has_unit(st.id(o))) continue;
+                const float fac = b->movement().speed_factor(st.id(o));
+                const bool running = b->retreating_player() >= 0;
+                const float want = running && st.owner(o) == 1 ? 3.0f : 1.0f;
+                if (running) ++out.pursue_checks;
+                if (std::fabs(fac - want) > 1e-6f) out.pursue_ok = false;
+            }
         if (!out.requested && b->retreat_block(0) == 0) out.requested = b->request_retreat(0);
         // mid-flight save / load (units released and creeping, the debris piece alive)
         if (b->retreat_flight_state() == 2 && b->retreat_flight_counter() == 32) out.saved = state_round_trip(*b);
@@ -390,6 +407,9 @@ void test_space(const Data& d) {
     CHECK(a.release_counter.size() == 3 && a.release_counter[0] == 30 && a.release_counter[1] == 31 && a.release_counter[2] == 34);
     CHECK(a.completed && a.complete_frame_ok);
     CHECK(a.saved);
+    std::printf("  pursuit (trn1 t06): %d unit-frames checked during the countdown, ok %d
+", a.pursue_checks, a.pursue_ok);
+    CHECK(a.pursue_checks > 0 && a.pursue_ok);
     std::printf("  debris: tracked %d (life %lld frames), moved %d, turned %d, particle followed %d, expired %d at %u (spawned %u), "
                 "particle gone %d, explosion %d\n",
                 a.debris_tracked, static_cast<long long>(a.debris_life), a.debris_moved, a.debris_turned, a.particle_followed,

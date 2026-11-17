@@ -1669,9 +1669,35 @@ bool TacticalBattle::victory_relevant(uint32_t type) {
     return c == 2;
 }
 
+std::vector<float> TacticalBattle::retreat_pursue_factors() const {
+    // trn1 t06 (MOVEMENT §3.4 item 6, 0x376990): per player, x its faction's pursue factor for the battle's mode while
+    // another (non-neutral) player's retreat runs; 1 otherwise. "Neutral" = the first player whose faction is Is_Neutral
+    // (0x294aa0), as retail.
+    const size_t n = galaxy_ ? galaxy_->players().size() : 0;
+    std::vector<float> out(n, 1.0f);
+    const int32_t r = retreating_player();
+    if (r < 0 || !rules_) return out;
+    int32_t neutral = -1;
+    for (size_t p = 0; p < n && neutral < 0; ++p)
+        if (bt_owner_neutral(static_cast<int32_t>(p))) neutral = static_cast<int32_t>(p);
+    for (size_t p = 0; p < n; ++p) {
+        if (static_cast<int32_t>(p) == r || static_cast<int32_t>(p) == neutral) continue;
+        const galactic::ConflictFactionInfo& fi = rules_->faction(galaxy_->players()[p].faction);
+        out[p] = space_ ? fi.space_retreat_pursue : fi.land_retreat_pursue;
+    }
+    return out;
+}
+
 void TacticalBattle::apply_speed_factors() {
     // MOVEMENT 3.4 items 4, 5, 7 (product order: Mod_Multiplier, engines, list 5) [port: one factor].
     const float engines = catalog_->engines_disabled_speed_modifier();
+    // trn1 t06 (MOVEMENT §3.4 item 6, 0x376990 [H]): while a retreat runs (coordinator +0x1c set), every unit whose owner is
+    // neither the retreating player nor the first player of an Is_Neutral faction, and which is not on the retreat list,
+    // moves at x its faction's Space_ / Land_Retreat_Pursue_Max_Speed_Mod_Factor. One factor per player, 1 otherwise.
+    const std::vector<float> pursue = retreat_pursue_factors();
+    const auto pursue_of = [&pursue](int32_t owner) {
+        return owner >= 0 && static_cast<size_t>(owner) < pursue.size() ? pursue[static_cast<size_t>(owner)] : 1.0f;
+    };
     // s78k t03 (TACTICAL_COMBAT §4.4 "Who the squad leader is", MOVEMENT §3.4 / §3.7, FIGHTER_FLYING §4.11 item 4): a TEAM
     // container's locomotor runs at the container's effective max speed - the minimum member Max_Speed (0x4049e0) x the
     // container's factors, whose SPEED Mod_Multiplier is the squad value 0x398010 returns for the container
@@ -1703,7 +1729,12 @@ void TacticalBattle::apply_speed_factors() {
     const ParallelFor& pf = tick_.pf ? *tick_.pf : serial;
     const auto nt = static_cast<uint32_t>(team_speed.size());
     const auto team_fill = [&](uint32_t b, uint32_t e) {
-        for (uint32_t i = b; i < e; ++i) team_speed[i].second = combat_->team_mod_multiplier(team_speed[i].first, tc::ModKind::Speed);
+        for (uint32_t i = b; i < e; ++i) {
+            // trn1 t06: the pursuit factor is part of the container's own chain (its owner = its members' owner)
+            const auto team = static_cast<objects::ObjectId>(team_speed[i].first);
+            team_speed[i].second = combat_->team_mod_multiplier(team_speed[i].first, tc::ModKind::Speed) *
+                                   pursue_of(combat_->has_unit(team) ? combat_->owner(team) : container_owner(team));
+        }
     };
     if (nt >= 8 && units_.size() >= svc_parallel_min_) pf(nt, 1, team_fill);
     else team_fill(0, nt);
@@ -1735,10 +1766,14 @@ void TacticalBattle::apply_speed_factors() {
         for (uint32_t i = b; i < e; ++i) {
             const Unit& u = units_[i];
             if (!u.alive || u.retreated || !u.movable) continue;
+            // MOVEMENT §3.4 (0x376990) order: Mod_Multiplier SPEED, engines, retreat pursuit (trn1 t06), (1 + list 5), base
+            // shield (tru1 t02), burning (trn1 t05: On_Fire_Speed_Modifier while +0x3a1 bit 2).
             float f = combat_->mod_multiplier(u.id, tc::ModKind::Speed);
-            f = f * combat_->base_shield_speed_factor(u.id);  // tru1 t02 (TRU1_A A2): straddling a hostile shield wall
             if (u.engines_offline || l1_engines_off(u.id)) f = f * engines;  // L1 systems: + timed engine disables
+            if (!rt_listed(u.id)) f = f * pursue_of(combat_->owner(u.id));
             f = f * (1.0f + combat_->modifier(u.id, tc::ModList::MaxSpeed));
+            f = f * combat_->base_shield_speed_factor(u.id);  // tru1 t02 (TRU1_A A2): straddling a hostile shield wall
+            f = f * combat_->burn_speed_factor(u.id);
             // OI follow-up t03 (A1_READINGS §28.9): the movement lock does not slow the unit (no speed-0 freeze); its users
             // stop it first and new move orders skip it (movement_locked).
             if (combat_->stunned(u.id, frame_)) f = 0.0f;  // OI abilities: land stun suspends the locomotor (0x647290)

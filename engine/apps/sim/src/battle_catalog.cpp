@@ -136,6 +136,7 @@ BattleCatalog::BattleCatalog(const objects::GameObjectTypes& types, const FilePr
     if (files) {
         load_hardpoints(*files, diag);
         load_priority_sets(*files, diag);
+        load_surface_fx(*files, diag);
     }
 }
 
@@ -198,6 +199,21 @@ void BattleCatalog::load_priority_sets(const FileProvider& files, std::vector<st
         for (tc::PrioritySet& s : sets) priority_sets_.push_back(std::move(s));
     }, battle_list_options());
     if (st != data::ListStatus::Ok) note(diag, "battle: TargetingPrioritySetFiles.xml not found");
+}
+
+void BattleCatalog::load_surface_fx(const FileProvider& files, std::vector<std::string>* diag) {
+    // trn1 t02 (docs/re/TRN1_TERRAIN_GAMEPLAY.md §2): the sim terms of Data\XML\SurfaceFX.xml.
+    std::vector<uint8_t> bytes;
+    if (!files.read("Data\\XML\\SurfaceFX.xml", bytes)) {
+        note(diag, "battle: SurfaceFX.xml not found");
+        return;
+    }
+    const data::XmlDocument doc = data::XmlDocument::parse(std::span<const uint8_t>(bytes), "SurfaceFX.xml");
+    if (!doc.ok()) {
+        note(diag, "battle: SurfaceFX.xml does not parse");
+        return;
+    }
+    surface_fx_ = tc::load_surface_fx(doc.root());
 }
 
 int32_t BattleCatalog::type_or_none(std::string_view name) const {
@@ -598,6 +614,31 @@ tc::UnitDesc BattleCatalog::unit_desc(uint32_t t, BuildState& s) const {
                               ty.company_member(t)) &&
                              (!beh(kSpecialWeapon) || beh(kDummyStarBase));
     }
+    // trn1 t01 / t02 / t05 (docs/re/TRN1_TERRAIN_GAMEPLAY.md): cover factor, SURFACE_FX instances, burning speed.
+    if (!ty.get_string(t, "Surface_Type_Cover_Damage_Shield").empty())
+        u.cover_damage_shield = ty.get_float(t, "Surface_Type_Cover_Damage_Shield");
+    if (!ty.get_string(t, "On_Fire_Speed_Modifier").empty()) u.on_fire_speed = ty.get_float(t, "On_Fire_Speed_Modifier");
+    u.destroy_when_stunned_over_water = ty.get_bool(t, "Destroy_When_Stunned_Over_Water");  // t04
+    {
+        static const objects::BehaviorTypeId kSurfaceFxBeh = objects::behavior_type_id("SURFACE_FX");
+        const objects::BehaviorSet mode_set = s.model_mode < 0    ? objects::BehaviorSet::Union
+                                              : s.model_mode == 1 ? objects::BehaviorSet::Space
+                                                                  : objects::BehaviorSet::Land;
+        const bool has = kSurfaceFxBeh != objects::kNoBehavior &&
+                         (ty.has_behavior(t, mode_set, kSurfaceFxBeh) || ty.has_behavior(t, objects::BehaviorSet::Generic, kSurfaceFxBeh));
+        if (has)
+            for (const std::string_view item : ty.get_list(t, "SurfaceFX_Name")) {
+                size_t at = 0;
+                while (at <= item.size() && u.surface_fx.size() < tc::kMaxUnitSurfaceFx) {  // "A, B" in one item: split
+                    const size_t comma = item.find(',', at);
+                    const std::string_view name = ascii_trim(item.substr(at, comma == std::string_view::npos ? std::string_view::npos : comma - at));
+                    const int32_t k = name.empty() ? -1 : tc::find_surface_fx(surface_fx_, name);
+                    if (k >= 0 && surface_fx_[static_cast<size_t>(k)].affects_sim()) u.surface_fx.push_back(static_cast<uint16_t>(k));
+                    if (comma == std::string_view::npos) break;
+                    at = comma + 1;
+                }
+            }
+    }
     if (s.full) s9_unit_fields(t, u, s);
     return u;
 }
@@ -752,7 +793,6 @@ ta::AbilityObjectDesc BattleCatalog::ability_desc(uint32_t t, BuildState& s) con
     d.team_container = ty.has_behavior(t, objects::BehaviorSet::Union, objects::beh::Team);
     d.hero = ty.get_bool(t, "Is_Named_Hero") || ty.get_bool(t, "Is_Generic_Hero");
     d.passive_missile_shield_radius = ty.get_float(t, "Passive_Missile_Shield_Radius");
-    d.destroy_when_stunned_over_water = ty.get_bool(t, "Destroy_When_Stunned_Over_Water");  // OI t02 [port]
     // s78l t05 (TACTICAL_COMBAT §5.4.1): Tactical_Bribe acceptance / cost. [port] every desc (a TEAM container too) reads
     // its own type: the FoC containers carry their own Tactical_Bribe_Cost (Stormtrooper_Team 25, its member 10), and
     // the container type does not name a member type here.
@@ -856,6 +896,7 @@ tc::CombatData BattleCatalog::build(const std::vector<uint32_t>& unit_types, std
     tc::CombatData d;
     d.damage = damage_;
     d.priority_sets = priority_sets_;
+    d.surface_fx = surface_fx_;  // trn1 t02
     BuildState s;
     s.d = &d;
     out_unit_index.clear();
@@ -867,6 +908,7 @@ BattleTables BattleCatalog::build_battle(const std::vector<uint32_t>& unit_types
     BattleTables b;
     b.combat.damage = damage_;
     b.combat.priority_sets = priority_sets_;
+    b.combat.surface_fx = surface_fx_;  // trn1 t02
     BuildState s;
     s.d = &b.combat;
     s.full = &b;
@@ -1298,6 +1340,7 @@ std::unique_ptr<BattleCatalog::BattleBuild> BattleCatalog::begin_battle(BattleTa
     out = BattleTables{};
     out.combat.damage = damage_;
     out.combat.priority_sets = priority_sets_;
+    out.combat.surface_fx = surface_fx_;  // trn1 t02
     auto b = std::make_unique<BattleBuild>();
     b->state.d = &out.combat;
     b->state.full = &out;

@@ -161,6 +161,32 @@ uint8_t Terrain::material_at(int64_t x, int64_t y) const {
     y = std::clamp<int64_t>(y, 0, height - 1);
     return material[static_cast<size_t>(y) * width + static_cast<size_t>(x)];
 }
+uint32_t Terrain::cell_surface_type(float wx, float wy) const {
+    if (width == 0 || height == 0 || !std::isfinite(wx) || !std::isfinite(wy)) return 0;
+    const auto index = [](float w, uint32_t n) {
+        const float f = std::floor(w / kVertexSpacing + 0.5f);
+        if (!(f > 0.0f)) return int64_t{0};
+        const auto top = static_cast<float>(n - 1);
+        return static_cast<int64_t>(f < top ? f : top);
+    };
+    const uint8_t m = material_at(index(wx, width), index(wy, height));
+    return m < materials.size() ? materials[m].surface_type : 0u;
+}
+bool Terrain::under_water(float wx, float wy) const {
+    if (header.water_type == WaterType::None) return false;
+    return sample_height(wx, wy) < header.water_height - 0.5f;
+}
+uint32_t Terrain::water_surface_type() const {
+    switch (header.water_type) {
+        case WaterType::Water: return 4;
+        case WaterType::Lava: return 8;
+        case WaterType::Ice: return 7;
+        default: return 0;
+    }
+}
+uint32_t Terrain::surface_type_at(float wx, float wy) const {
+    return under_water(wx, wy) ? water_surface_type() : cell_surface_type(wx, wy);
+}
 float Terrain::sample_height(float wx, float wy) const {
     if (width < 2 || height < 2 || !std::isfinite(wx) || !std::isfinite(wy)) return 0.0f;
     const float maxx = static_cast<float>(width - 1), maxy = static_cast<float>(height - 1);

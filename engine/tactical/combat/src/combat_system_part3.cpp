@@ -421,6 +421,11 @@ bool CombatSystem::burning(ObjectId id) const {
     return u && u->burning != 0;
 }
 
+float CombatSystem::burn_speed_factor(ObjectId id) const {
+    const Unit* u = unit(id);
+    return u && u->burning != 0 ? desc_of(*u).on_fire_speed : 1.0f;
+}
+
 bool CombatSystem::infection_attached(ObjectId id) const {
     const Unit* u = unit(id);
     return u && u->infect_attached != 0;
@@ -962,6 +967,14 @@ void CombatSystem::hash_extended(StateHasher& h) const {
         if (u.stickiness != 0.0f) {  // cu8f t04a: TD +0x158 stickiness threshold (format unchanged at the spawn 0.0)
             h.u8(0x58);
             h.f32(u.stickiness);
+        }
+        if (u.sfx_ready != 0 || u.terrain_damage != 0.0f || u.terrain_next != 0 || u.terrain_delay != 0.0f) {
+            h.u8(0x5B);  // trn1 t02: SurfaceFX instances and the terrain damage timer (format unchanged at the spawn values)
+            h.u8(u.sfx_ready);
+            for (const uint8_t p : u.sfx_prev) h.u8(p);
+            h.f32(u.terrain_damage);
+            h.u32(u.terrain_next);
+            h.f32(u.terrain_delay);
         }
         h.u32(u.stun_end);
         h.u32(u.invuln_end);

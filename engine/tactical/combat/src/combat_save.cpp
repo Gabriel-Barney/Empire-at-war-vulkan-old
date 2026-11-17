@@ -48,7 +48,7 @@ using save_io::put_vec3;
 
 namespace {
 
-constexpr uint32_t kCombatSaveVersion = 16;  // 2: refix t02 INFECTION state, refix t03 death clone key; 3: refixf t01 rockets;
+constexpr uint32_t kCombatSaveVersion = 17;  // 2: refix t02 INFECTION state, refix t03 death clone key; 3: refixf t01 rockets;
                                              // 4: refixf t06 attack goal / weapon aim / order lock; 5: refixf t06 scan
                                              // target hardpoint (auto_hp); 6: a1g t03 damage event hull_lost; 7: S8 t04
                                              // grenade flight / sticky state; 8: S8 t06 stuck_offset in the parent's frame
@@ -63,7 +63,8 @@ constexpr uint32_t kCombatSaveVersion = 16;  // 2: refix t02 INFECTION state, re
                                              // word), s78n t13 last-hit stamp written only by a diminishing hit
                                              // (same layout); 16: tru1 t02 base-shield unit state + the
                                              // Base_Shield_Upgrade list, tru1 t08 hit event ground /
-                                             // commanded flags. Only the current version is read (cu6).
+                                             // commanded flags; 17: trn1 t02 SurfaceFX instance
+                                             // state + terrain damage timer. Only the current version is read (cu6).
 constexpr uint32_t kWeatherSaveVersion = 1;
 constexpr uint32_t kNoIndex = 0xFFFFFFFFu;
 
@@ -146,6 +147,9 @@ void CombatSystem::write(ByteWriter& w) const {
         w.u8(u.infect_attached).u32(u.infect_suspend).i32(u.infect_desc).i32(u.infect_player).i32(u.infect_source);
         w.i32(u.infect_left).u32(u.infect_seen).i32(u.infect_count);  // v13 (cu8f t06)
         w.u8(u.bshield_state).u8(u.bshield_upgraded).u32(u.bshield_off_stamp).u32(u.bshield_next).i32(u.bshield_in);  // v16
+        w.u8(u.sfx_ready);  // v17 (trn1 t02)
+        for (const uint8_t p : u.sfx_prev) w.u8(p);
+        w.f32(u.terrain_damage).u32(u.terrain_next).f32(u.terrain_delay);
         u.mods.write(w);
         // caches
         for (const float v : u.mod_r) w.f32(v);
@@ -355,6 +359,14 @@ bool CombatSystem::read(ByteReader& r) {
         u.bshield_next = r.u32();
         u.bshield_in = r.i32();
         if (u.bshield_state > 2 || u.bshield_upgraded > 1) return false;
+        u.sfx_ready = r.u8();  // trn1 t02 (v17)
+        for (uint8_t& p : u.sfx_prev) p = r.u8();
+        u.terrain_damage = r.f32();
+        u.terrain_next = r.u32();
+        u.terrain_delay = r.f32();
+        if (u.sfx_ready > 1) return false;
+        for (const uint8_t p : u.sfx_prev)
+            if (p >= kSurfaceTypeCount) return false;
         if (!r.ok() || u.infect_attached > 1 || u.infect_desc < -1 ||
             (u.infect_desc >= 0 && static_cast<uint32_t>(u.infect_desc) >= unit_descs))
             return false;

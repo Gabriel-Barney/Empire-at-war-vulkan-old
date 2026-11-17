@@ -119,6 +119,10 @@ int main(int argc, char** argv) {
     test_base_shield_straddle();
     test_base_shield_dome();
     test_ground_detonation_particle();  // tru1 t08
+    test_terrain_cover();  // trn1 t01
+    test_surface_fx_terrain_modifiers();  // trn1 t02
+    test_surface_fx_converted_and_save();
+    test_burning_speed_factor();  // trn1 t05
     if (bench) bench_modifiers();
     if (g_fail) {
         std::printf("%d check(s) FAILED\n", g_fail);

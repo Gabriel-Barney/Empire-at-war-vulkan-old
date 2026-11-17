@@ -85,6 +85,11 @@ struct ConflictFactionInfo {
     // 4.0 / 2.0, Underworld 2.0 / 2.0; 1.0 [port] for factions without the tag (none of them retreats).
     float space_retreat_damage_mod = 1.0f;
     float land_retreat_damage_mod = 1.0f;
+    // trn1 t06 (MOVEMENT §3.4 item 6, 0x376990): Space_ / Land_Retreat_Pursue_Max_Speed_Mod_Factor (+0x20b4 / +0x2194;
+    // faction ctor default 1.0 [H]): the speed factor of this faction's units while another player retreats. FoC: Rebel /
+    // Empire 3.0 / 2.0, Underworld 2.0 / 2.0.
+    float space_retreat_pursue = 1.0f;
+    float land_retreat_pursue = 1.0f;
     // s78n t14 part B (FIGHTER_FLYING §7.1, 0x5c8890): Scatters_From_Crushers (+0x2f88): the faction's infantry squads flee
     // from a hostile crusher's collision path. FoC: true for every faction entry but the Empire; [port] false when unset.
     bool scatters_from_crushers = false;
