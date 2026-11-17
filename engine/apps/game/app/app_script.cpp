@@ -355,7 +355,8 @@ ScriptStep step_encyclopedia(std::string name) {
                         const ui::WorldPickTests* pt = a.world_pick_tests();
                         auto pickable = [pt](uint32_t id) { return !pt || !pt->skip || !pt->skip(id); };
                         for (const render::SnapshotObject& o : a.bview_.frame().objects)
-                            if (sel && std::find(sel->begin(), sel->end(), o.id) != sel->end() && pickable(o.id)) local.push_back(&o);
+                            if (sel && std::find(sel->begin(), sel->end(), o.id) != sel->end() && pickable(static_cast<uint32_t>(o.id)))
+                                local.push_back(&o);
                         if (local.empty())
                             for (const render::SnapshotObject& o : a.bview_.frame().objects)
                                 if (o.owner == a.local_player() && a.session_ && a.session_->battle() && a.session_->battle()->movement().has_unit(o.id))
@@ -364,7 +365,7 @@ ScriptStep step_encyclopedia(std::string name) {
                             const render::SnapshotObject& o = *local[*aims % local.size()];
                             a.bview_.camera().jump_to({o.position.x, o.position.y, o.position.z});
                             *target = {o.position.x, o.position.y, o.position.z};
-                            *target_id = o.id;
+                            *target_id = static_cast<uint32_t>(o.id);
                             ++*aims;
                             *since_aim = 0;
                             *aimed = true;
