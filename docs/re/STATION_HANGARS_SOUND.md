@@ -221,6 +221,7 @@ type CRC (4), live (5), max (6), remaining (7).
    +0x60 := i, true. [H read; L: what fills that list — skirmish-bought space units waiting to launch]
 
 ### 2.5 Launch one (space: service state 0) [H unless tagged]
+> r3g t03 (2026-11-16): the land states (Structure Open / Hold / Close, signal 10 = the leaving unit's move finished, Spawn_Garrison_On_Load bulk via vf13) are in R3G_ANIM_TIMED_RE.md §3.
 - If the spawner has the DEPLOY_SQUAD (75) unit ability and its owner is **not** an AI player (0x2814d0
   false, or player +0x62 ≠ 0): state := 4 and nothing spawns. Launches then happen only through the
   DEPLOY_SQUAD activation (ABILITIES_HARDPOINTS §2.5: reset, next-ready frame, recharge). Vanilla: Executor.

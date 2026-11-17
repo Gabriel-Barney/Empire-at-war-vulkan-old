@@ -1230,6 +1230,7 @@ as ready; keep it.
 - Port: replace the `(uint32)trunc(XY distance)` default in zone_reachability.hpp.
 
 ### 6.2 "Garrison container → idle animation" is presence-induced idle [H]
+> r3g t06 (2026-11-16): the port feeds SPREAD_OUT (+0x448) to step (1): R3G_ANIM_TIMED_RE.md §6. Cable states / phase fields (r3g t04): §4 there.
 Default idle type (0x395920): (1) SPREAD_OUT active → **71 Idle Crouch**; (2) else, when the object's IDLE data
 (obj +0xd8 → +0x18 map presence-object id → remaining frames +0x14) is non-empty, pick a winner (strictly
 larger remaining wins; on ≤ an allied presence object, 0x2823e0, replaces a non-allied best), and the idle =

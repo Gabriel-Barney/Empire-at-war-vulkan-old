@@ -94,6 +94,7 @@ So one death can take **up to two** synced draws before the death-projectile dra
 | infected (not deployed) | check: key 20; missing → K = kind. Spawn: key 20 or the kind's path above |
 
 ### 1.4 How the XML keys map [H]
+> r3g t07 (2026-11-16): the death clip comes only from the clone's own Specific_Death_Anim_Type, never from the damage kind: R3G_ANIM_TIMED_RE.md §7.
 `Death_Clone` = `<key>, <TypeName>` (OBJECT_TYPES §3.5). The key is first converted through `tDamageType`. Otherwise
 it is a name from the GameConstants `Damage_Types` list and maps to **0x18 + its index**. The FoC list ends with
 copies of the `tDamageType` names (index 79 `Damage_Normal` …). The enum is tried first, so those copies never become

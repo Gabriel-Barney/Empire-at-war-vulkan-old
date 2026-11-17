@@ -4635,6 +4635,7 @@ its report call; whether anything outside the class walks the system's record li
 record (the three other classes' partner tests need two participants).
 
 ### 5.5 Crush (`SquashBehaviorClass`, vf6 `0x629fa0`; vftable `0x8af300`) [H]
+> r3g t05 (2026-11-16): Squash_Damage_Type (+0x36c) is the kill's damage kind (default 14 Damage_Crush, 0x367250), not an armour row: R3G_ANIM_TIMED_RE.md §5.
 
 The `SQUASH` behaviour token is on AT-AT, AT-ST and MAL. Crush runs only while the crusher is moving (`0x39ade0` → locomotor vf +0x1c0).
 

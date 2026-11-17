@@ -1728,9 +1728,12 @@ void test_land_structures() {
         w.step(0);
         CHECK(w.log.size() == 1 && w.hg->state(1) == 2);
         if (w.log.size() != 1) return;
+        w.run(1, 40);
         w.lose(w.log_id[0], 40);  // dies while leaving: Close without a clip -> state 0, next = int(40 + 150)
         CHECK(w.hg->state(1) == 0 && w.hg->next_spawn_frame(1) == 190 && w.hg->live(1, 0) == 0);
-        w.run(41, 211);
+        w.run(40, 211);  // services at 60 .. 180 wait; 210 launches
+        std::printf("land structure, no clips: lost 40 -> next 190, out %u (%zu launches, state %u)\n",
+                    w.log_frame.empty() ? 0u : w.log_frame.back(), w.log.size(), static_cast<unsigned>(w.hg->state(1)));
         CHECK(w.log.size() == 2 && w.log_frame.back() == 210);
     }
     {

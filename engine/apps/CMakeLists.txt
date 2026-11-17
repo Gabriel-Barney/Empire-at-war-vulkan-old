@@ -163,6 +163,7 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
     # r3g t01 / t05 / t06: landing Land / Takeoff clip timing, crush kind and clones, crouch under SPREAD_OUT.
     add_executable(alamo_sim_r3g_tests sim/tests/test_battle_r3g.cpp)
     target_link_libraries(alamo_sim_r3g_tests PRIVATE alamo_sim alamo_vfs alamo_test_support)
+    target_compile_definitions(alamo_sim_r3g_tests PRIVATE "ALAMO_SIM_TESTDATA=\"${CMAKE_CURRENT_SOURCE_DIR}/sim/testdata\"")
     add_test(NAME alamo_sim_r3g_tests COMMAND alamo_sim_r3g_tests)
     set_tests_properties(alamo_sim_r3g_tests PROPERTIES TIMEOUT 600)
     # --- end L1 systems ---

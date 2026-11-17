@@ -556,6 +556,7 @@ circling, follower vf +0x1d8 = SimpleSpace Hermite with strict bracketing); its 
 - Users: FoC 18, TR 107.
 
 ### 5.2 DEPLOY_TROOPERS spawn (state 4 of 0x591a90 → 0x590730) [H]
+> r3g t02 (2026-11-16): the full clip-timed state order (Drop Rope, Deploy Troopers, rope slide 3.9 per frame, Rope Land, Lift Rope) is in R3G_ANIM_TIMED_RE.md §2.
 - **Spawned type.** Ability 38's record `Spawned_Object_Type` (+0x90 / +0x98) must have `Company_Units` (+0x958 / +0x960) or else `Squadron_Units` (+0x978 / +0x980). If neither exists, or there is no model → state 10 (failed).
 - The owner first plays anim 0x5e.
 - **Count:** N = member count − troopers already deployed (behaviour data +0x40).

@@ -2218,8 +2218,8 @@ the order.
   before [port: the original spawns nothing visible for such a skirmish type and still unloads nothing; kept so
   synthetic data without transports works].
 - Timing: the unload steps use the RE timer, 2 s × (1 + s) per step, s = `AbilitySystem::player_list(ReinforcementDeploy)`.
-  The `Land` / `Takeoff` clip lengths are unknown to the headless host [M], so landing and take-off take no time [port];
-  no clearance wait (state 4) and no skirmish `Reinforcement_Time_Multiplier` wait (its constant F is unknown).
+  Since r3g t01 the timed mode waits for the `Land` / `Takeoff` clips (1.15, past 98 %) on static clip data
+  (R3G_ANIM_TIMED_RE.md §1); a model without them takes no time [port]. No clearance wait (state 4) and no skirmish `Reinforcement_Time_Multiplier` wait (its constant F is unknown).
 - **Two modes (`BattleConfig::landing_unload_timed`).** The port's tactical AI (`tf_reinforce`) takes the units it
   finds right after the Reinforce order and finishes the status at once; it has no in-flight count and no 0x19 handler.
   - **Untimed [port] (the default until a1j, §36.3):** every unload step runs at the order (members placed at their unload slots), the 0x19

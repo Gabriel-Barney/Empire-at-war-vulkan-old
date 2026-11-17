@@ -172,13 +172,12 @@ void test_crush_kind() {
     const objects::TypeIndex trooper = d->types.resolve_name("S10_Trooper"), crush_clone = d->types.resolve_name("S10_Trooper_Crush_Clone");
     CHECK(trooper != objects::kNone && crush_clone != objects::kNone);
     CHECK(d->types.get_string(crush_clone, "Specific_Death_Anim_Type").find("Crushed") != std::string_view::npos);
-    int phase = 0;
     objects::ObjectId victim = objects::kNoObjectId, crusher = objects::kNoObjectId;
     uint8_t kind = 0;
     int32_t clone = -2;
     land_battle(*d, nullptr, 600, [&](TacticalBattle& b, TacticalMode& tm, SimHost&) {
         objects::ObjectStore& st = tm.primary();
-        if (phase == 0) {
+        {
             if (b.frame() < 2) return true;
             for (const objects::ObjectHandle h : st.all_objects()) {
                 if (!st.alive(h) || !b.combat().has_unit(st.id(h)) || !b.combat().alive(st.id(h))) continue;
@@ -188,15 +187,14 @@ void test_crush_kind() {
             CHECK(victim != objects::kNoObjectId && crusher != objects::kNoObjectId);
             if (victim == objects::kNoObjectId || crusher == objects::kNoObjectId) return false;
             CHECK(b.test_crush(crusher, victim));
-            phase = 1;
-            return true;
+            // The kill is reported at once (combat deaths() of this frame; the next tick clears them).
+            for (const tactical::combat::DeathEvent& e : b.combat().deaths())
+                if (e.id == victim) {
+                    kind = e.kind;
+                    clone = e.death_clone;
+                }
         }
-        for (const tactical::combat::DeathEvent& e : b.combat().deaths())
-            if (e.id == victim) {
-                kind = e.kind;
-                clone = e.death_clone;
-            }
-        return clone == -2 && b.frame() < 60;
+        return false;
     });
     std::printf("  r3g crush: kind %u, clone %d (Damage_Crush clone %d)\n", static_cast<unsigned>(kind), clone, static_cast<int>(crush_clone));
     CHECK(kind == 14 && clone == static_cast<int32_t>(crush_clone));
@@ -204,9 +202,13 @@ void test_crush_kind() {
 
 // ---- t06 ----
 std::string spread_patch(std::string t) {
-    // IDLE (the idle service runs only for it) and a SPREAD_OUT unit ability on the trooper.
+    // IDLE (the idle service runs only for it) and a SPREAD_OUT unit ability on the trooper. Attack range 1: with a
+    // target held the IDLE service changes nothing (0x62e570 step 4), so the troopers must not engage.
     const std::string beh = "<Behavior>SELECTABLE, WEAPON</Behavior>";
     if (const size_t p = t.find(beh); p != std::string::npos) t.replace(p, beh.size(), "<Behavior>SELECTABLE, WEAPON, IDLE</Behavior>");
+    const std::string range = "<Targeting_Max_Attack_Distance>250</Targeting_Max_Attack_Distance>";
+    if (const size_t p = t.find(range); p != std::string::npos)
+        t.replace(p, range.size(), "<Targeting_Max_Attack_Distance>1</Targeting_Max_Attack_Distance>");
     const std::string at = "<GroundInfantry Name=\"S10_Trooper\">";
     if (const size_t p = t.find(at); p != std::string::npos)
         t.insert(p + at.size(), "<Unit_Abilities_Data SubObjectList=\"Yes\"><Unit_Ability><Type>SPREAD_OUT</Type>"
@@ -228,7 +230,9 @@ void test_crouch() {
     int phase = 0;
     objects::ObjectId unit = objects::kNoObjectId;
     uint32_t on_frame = 0, off_frame = 0;
-    int32_t crouched = -1, standing = -1;
+    int32_t crouched = -1, standing = -1, last_type = -2;
+    bool other = false;
+    std::string trace;
     land_battle(*d, &animation, 900, [&](TacticalBattle& b, TacticalMode& tm, SimHost&) {
         objects::ObjectStore& st = tm.primary();
         const anim::AnimWorld* w = animation.find_world(tm);
@@ -246,22 +250,35 @@ void test_crouch() {
             phase = 1;
             return true;
         }
-        if (!w || !w->contains(unit)) return false;
+        if (!w || !w->contains(unit) || !b.combat().alive(unit)) return false;
         const int32_t type = w->current_type(unit);
-        if (phase == 1 && type == anim::kAnimIdleCrouch) {
-            crouched = static_cast<int32_t>(b.frame() - on_frame);
-            const objects::ObjectId ids[] = {unit};
-            CHECK(b.abilities().set_unit_ability_mode(ids, tactical::abilities::kSpreadOut, false, b.frame()) == 1);
-            off_frame = b.frame();
-            phase = 2;
-        } else if (phase == 2 && type == anim::kAnimIdle) {
+        if (type != last_type) {
+            trace += " " + std::to_string(b.frame()) + ":" + std::to_string(type);
+            last_type = type;
+        }
+        const bool crouch_clip = type == anim::kAnimIdleCrouch || type == anim::kAnimCrouchMove;
+        if (phase == 1) {
+            if (crouched < 0 && crouch_clip) crouched = static_cast<int32_t>(b.frame() - on_frame);
+            if (type != anim::kAnimIdle && type != anim::kAnimMove && !crouch_clip) other = true;  // only the four clips
+            if (type == anim::kAnimIdleCrouch) {  // stopped and crouching: SPREAD_OUT off
+                const objects::ObjectId ids[] = {unit};
+                CHECK(b.abilities().set_unit_ability_mode(ids, tactical::abilities::kSpreadOut, false, b.frame()) == 1);
+                CHECK(!b.abilities().spread_out(unit));
+                off_frame = b.frame();
+                phase = 2;
+            }
+        } else if (phase == 2 && (type == anim::kAnimIdle || type == anim::kAnimMove)) {
             standing = static_cast<int32_t>(b.frame() - off_frame);
             return false;
         }
-        return b.frame() < on_frame + 300;
+        return b.frame() < on_frame + 600;
     });
-    std::printf("  r3g crouch: Idle Crouch %d frames after SPREAD_OUT on, Idle %d frames after off\n", crouched, standing);
-    CHECK(crouched >= 0 && crouched <= 2 && standing >= 0 && standing <= 2);
+    // On: the next locomotor service plays a crouch clip (CROUCHMOVE while moving, Idle Crouch once stopped); off: the
+    // crouch change forces the plain idle at the next IDLE service.
+    std::printf("  r3g crouch: crouch clip %d frames after SPREAD_OUT on (stopped crouching at +%d), standing clip %d frames "
+                "after off; clip types (frame:type)%s\n",
+                crouched, static_cast<int>(off_frame - on_frame), standing, trace.c_str());
+    CHECK(!other && crouched >= 0 && crouched <= 2 && standing >= 0 && standing <= 2);
 #else
     std::printf("  r3g crouch: skipped (no engine/anim)\n");
 #endif
