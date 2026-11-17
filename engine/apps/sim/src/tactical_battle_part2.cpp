@@ -2189,7 +2189,11 @@ bool TacticalBattle::fighter_goal_live(objects::ObjectId key, const objects::Obj
 
 // A move / attack order replaces the formation of every fighter squadron it names (one record per squadron).
 void TacticalBattle::fighter_order(std::span<const objects::ObjectId> ids, uint8_t flags, Vec3 goal, objects::ObjectId goal_object) {
-    if (!space_ || !movement_) return;
+    if (!space_) {  // cmb1 t01 / t03: the land formation records (LandFormationRecord) take the same order paths
+        land_order(ids, flags, goal, goal_object);
+        return;
+    }
+    if (!movement_) return;
     for (const objects::ObjectId id : ids) {
         const Unit* u = unit_by_id(id);
         if (!u || !u->alive || u->retreated || !movement_->has_unit(id) || movement_->view(id).locomotor != mv::LocomotorKind::Fighter) continue;
@@ -2209,6 +2213,10 @@ void TacticalBattle::fighter_order(std::span<const objects::ObjectId> ids, uint8
 }
 
 void TacticalBattle::fighter_order_clear(std::span<const objects::ObjectId> ids) {
+    if (!space_) {  // cmb1 t01: Stop leaves the land formation too
+        land_order_clear(ids);
+        return;
+    }
     for (const objects::ObjectId id : ids)
         if (const Unit* u = unit_by_id(id)) {
             const objects::ObjectId key = fighter_key(*u);

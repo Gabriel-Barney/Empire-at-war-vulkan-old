@@ -212,6 +212,8 @@ void test_reserve_drop_facing(bool attacker_marker);
 void test_battle_ai_land_drop(const Data& d);
 void test_tactical_ai_constants_load();
 #endif
+// cmb1 t01 - t03 (test_battles_ai_part3.cpp): land Auto_Engage, the land scan range while moving, land Order_Attack issue
+void test_land_auto_engage();
 
 }  // namespace
 using namespace bo3split;
@@ -412,9 +414,10 @@ inline void test_landing_drop(bool timed, uint32_t destroy_at = 0) {
             // thrown sabers); cu8l t03: version 11 (the start fleet arrivals); s78n t20 stage A: version 12 (the land attack
             // blocks); fleet cohesion: version 13 (per-player cohesion); TRU1: version 14 (retreat flight, spawners, debris;
             // exact: every other version is refused); skm1 t07: version 15 (skirmish garrison re-delivery); r3g t01: version 16
-            // (the landing's Land / Takeoff clip); skm2 t02: version 17 (skirmish sides 2..7): 15, 16 and 18 are refused.
+            // (the landing's Land / Takeoff clip); skm2 t02: version 17 (skirmish sides 2..7); cmb1 t01 / t06: version 18
+            // (land formation records, the attack blocks' last-observed point): 16, 17 and 19 are refused.
             std::vector<uint8_t> stale(w.bytes().begin(), w.bytes().end());
-            for (const uint32_t v : {15u, 16u, 18u}) {
+            for (const uint32_t v : {16u, 17u, 19u}) {
                 for (size_t k = 0; k < 4; ++k) stale[k] = static_cast<uint8_t>(v >> (8 * k));
                 ByteReader rs(stale);
                 CHECK(!b->read_part(TacticalBattle::SavePart::State, rs));
@@ -1561,6 +1564,8 @@ struct LandGuardRun {
     uint32_t replan_frames = 0;
     bool own_attack_move = false, block_kept = false;  // bkt1 t05
     size_t blocks0 = 0;
+    bool nudged = false, rechecked = false;  // cmb1 t04: the arrived re-check (0x410a60) below R
+    uint32_t recheck_frames = 0;
 };
 
 inline LandGuardRun run_land_guard(const Data& d) {
@@ -1703,10 +1708,36 @@ inline LandGuardRun run_land_guard(const Data& d) {
             if (!v.has_goal && v.speed == 0.0f) {
                 out.arrived2 = true;
                 out.end_d = gd(v.pos);
-                stage = 5;
+                // cmb1 t04 (FIGHTER_FLYING §4.11 A [H], 0x410a60): the guarded squad moves 110 straight away from the guard -
+                // less than R = min(half the range 250, Land_Guard_Range 150) = 125, so no re-path rule fires, but the guard's
+                // members are then out of their max range of it: the arrived re-check re-plans within one 30-frame check
+                const objects::ObjectHandle gh = st.find(sq[1]);
+                const Vec3 gp = st.position(gh);
+                const float ux = gp.x - v.pos.x, uy = gp.y - v.pos.y, ul = std::sqrt(ux * ux + uy * uy);
+                out.nudged = ul > 1.0f && b->teleport(*tm, sq[1], Vec3{gp.x + ux / ul * 110.0f, gp.y + uy / ul * 110.0f, gp.z}, st.facing(gh));
+                replans0 = b->stats().guard_rechecks;
+                stage = 7;
+                stage_frame = b->frame();
             } else if (b->frame() > stage_frame + 1500) {
                 stage = 9;
             }
+            continue;
+        }
+        if (stage == 7) {
+            if (b->stats().guard_rechecks > replans0 && ms.view(sq[0]).has_goal) {
+                out.rechecked = true;
+                out.recheck_frames = b->frame() - stage_frame;
+                stage = 8;
+                stage_frame = b->frame();
+            } else if (b->frame() > stage_frame + 40) {
+                stage = 9;
+            }
+            continue;
+        }
+        if (stage == 8) {  // the re-plan walks in again
+            const mv::UnitView v = ms.view(sq[0]);
+            if (!v.has_goal && v.speed == 0.0f) stage = 5;
+            else if (b->frame() > stage_frame + 1500) stage = 9;
             continue;
         }
         if (stage == 5) {
@@ -1767,6 +1798,9 @@ inline void test_land_guard() {
                 r.same_slot ? 1 : 0, static_cast<double>(r.goal_d2), r.arrived2 ? 1 : 0, static_cast<double>(r.end_d));
     CHECK(r.ordered && r.slotted && r.near_goal && r.arrived);
     CHECK(r.moved && r.replanned && r.replan_frames <= 31 && r.same_slot && r.near_goal2 && r.arrived2);
+    std::printf("  land guard (cmb1 t04): moved 110 < R, nudged %d, arrived re-check re-planned %d after %u frame(s)\n", r.nudged ? 1 : 0,
+                r.rechecked ? 1 : 0, r.recheck_frames);
+    CHECK(r.nudged && r.rechecked && r.recheck_frames <= 31);
     std::printf("  own Attack_Move on the friendly squad: attack block, no lock %d\n", r.own_attack_move ? 1 : 0);
     CHECK(r.own_attack_move && r.block_kept);  // bkt1 t05
 }
@@ -2059,6 +2093,7 @@ struct LandAttackUnseenRun {
     uint32_t window = 0, replans_moving = 0, stops_moving = 0, replan_frames = 0;
     bool stealthed = false, dropped = false, orders_cleared = false, block_cleared = false, stood = false;
     uint32_t drop_frames = 0;
+    bool to_frozen = false, dropped_at_p = false;  // cmb1 t06: the last-observed point (frozen while hidden)
 };
 
 inline std::string trooper_stealth(std::string t) {  // S10_Trooper: unit ability STEALTH + its Stealth_Ability
@@ -2085,7 +2120,7 @@ inline LandAttackUnseenRun run_land_attack_unseen(const Data& d, bool stealth) {
     uint32_t stage_frame = 0, replans0 = 0, stops0 = 0;
     objects::ObjectId sq = objects::kNoObjectId, tcid = objects::kNoObjectId, target = objects::kNoObjectId;
     std::vector<objects::ObjectId> mem, tmem;
-    Vec3 dir{}, perp{};
+    Vec3 dir{}, perp{}, frozen{};
     mv::V2 goal0{}, pos0{};
     for (uint64_t t = 0; t < 9000 && stage < 9; ++t) {
         TacticalBattle* b = s.tick();
@@ -2154,6 +2189,7 @@ inline LandAttackUnseenRun run_land_attack_unseen(const Data& d, bool stealth) {
             CHECK(v.has_goal);
             const objects::ObjectHandle th = st.find(tcid);
             const Vec3 tp = st.position(th);
+            frozen = st.position(st.find(target));  // cmb1 t06: the block's last-observed point stays here while hidden
             out.moved = b->teleport(*tm, tcid, Vec3{tp.x + perp.x * 300.0f, tp.y + perp.y * 300.0f, tp.z}, st.facing(th));
             replans0 = ms.stats().attack_replans;
             stops0 = b->stats().attack_land_stops;
@@ -2185,8 +2221,23 @@ inline LandAttackUnseenRun run_land_attack_unseen(const Data& d, bool stealth) {
                 const Vec3 tp = st.position(st.find(tcid));
                 const auto dd = [&](mv::V2 p) { return std::sqrt((p.x - tp.x) * (p.x - tp.x) + (p.y - tp.y) * (p.y - tp.y)); };
                 out.nearer = dd(v.goal) < dd(goal0);
-                stage = 9;
+                // cmb1 t06 (BKR2 Q6 [H]): the plan goes to the frozen last-observed point, not to where the target is now
+                const auto df = [&](mv::V2 p) { return std::sqrt((p.x - frozen.x) * (p.x - frozen.x) + (p.y - frozen.y) * (p.y - frozen.y)); };
+                out.to_frozen = df(v.goal) < dd(v.goal);
+                replans0 = b->stats().attack_unseen_drops;
+                stage = 8;
+                stage_frame = b->frame();
             } else if (b->frame() > stage_frame + 40) {
+                stage = 9;
+            }
+            continue;
+        }
+        if (stage == 8) {  // cmb1 t06: arrival near the point: d < 40 -> a position block at L (the block dropped)
+            if (b->attack_blocks() == 0) {
+                const float fx = v.pos.x - frozen.x, fy = v.pos.y - frozen.y;
+                out.dropped_at_p = b->stats().attack_unseen_drops == replans0 + 1 && std::sqrt(fx * fx + fy * fy) < 120.0f;
+                stage = 9;
+            } else if (b->frame() > stage_frame + 3000) {
                 stage = 9;
             }
             continue;
@@ -2241,6 +2292,7 @@ inline void test_land_attack_unseen() {
                     r.goal_kept ? 1 : 0, r.arrived ? 1 : 0, r.replanned ? 1 : 0, r.replan_frames, r.nearer ? 1 : 0);
         CHECK(r.ordered && r.hidden && r.moved && r.window > 31 && r.replans_moving == 0 && r.stops_moving == 0 && r.goal_kept);
         CHECK(r.arrived && r.replanned && r.replan_frames <= 31 && r.nearer);
+        CHECK(r.to_frozen && r.dropped_at_p);  // cmb1 t06
     }
     {
         auto d = squad_data_patched("_stealth", trooper_stealth);

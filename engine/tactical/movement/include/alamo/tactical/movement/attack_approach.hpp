@@ -93,8 +93,9 @@ struct TrimMember {
 // within the guard range and the line of fire clear). The caller supplies the rule.
 using MemberFireFn = std::function<bool(const TrimMember& m, V2 p)>;
 
-// 0x410e90 (§4.3.2 item 7): the fire trim. L = the path's length, s := L, last good g := L (guard: g := max(0, L -
-// guard_range) [L reading of item 7]). At each s every tested member whose trim point exists (trim_point, no extend)
+// 0x410e90 (§4.3.2 item 7): the fire trim. L = the path's length, s := L, last good g := L (`guard`: g := max(0, L -
+// guard_range); cmb1 t05, BKR1 Q7 (a) [H]: retail starts back only for a guard whose object has LAND_OBSTACLE, so the
+// caller passes `guard` true for that case alone). At each s every tested member whose trim point exists (trim_point, no extend)
 // must pass can_fire; a failure returns g. All pass -> g := s; s == 0 returns 0; else s := max(0, s - 10.0). Returns the
 // keep length: the caller cuts the path with cut_points(path, keep) (path_around.hpp; keep 0 leaves the first node).
 // When some member fails at the path end nothing is cut (keep = L).

@@ -1399,18 +1399,28 @@ void CombatSystem::gather(uint32_t index, QueryContext& ctx) {
     u.scan_due = 1;
     const float range = fire_range(base_attack_range(u), mod_r(u, ModList::FireRange));
     // Current target kept when still valid and sticky or scored exactly 1.0 (section 2.1).
+    bool cur_valid = false;
     if (const Unit* cur = unit(u.auto_target)) {
-        const bool valid = live(cur) && is_enemy(u.owner, cur->owner) && candidate_ok(u, *cur, range) &&
-                           score(u, *cur) != -1.0f;
-        if (valid && (u.target_score == 1.0f || sticky(u, *cur, frame_))) return;
+        cur_valid = live(cur) && is_enemy(u.owner, cur->owner) && candidate_ok(u, *cur, range) && score(u, *cur) != -1.0f;
+        if (cur_valid && (u.target_score == 1.0f || sticky(u, *cur, frame_))) return;
     }
     u.needs_scan = 1;
     // S8 t17: Get_Scan_Range 0x566f50 (FIGHTER_FLYING §4.10 A) - R + Rr while the unit's formation answers 0x4160a0(F, u,
-    // none) != 0, else R ([port] the land "R with a TURRET slot, else 0" branch needs a land formation: none in the port).
+    // none) != 0, else R. cmb1 t03 (BKR1 Q8 [H]): on land a kUnitScanQuery unit (one with a formation, not deployed) whose
+    // formation does not answer scans R only with a TURRET slot, else 0 (step 4) - and a cube <= 0 scans nothing, so a
+    // still-valid current target is kept (the keep / switch step finds no other) and an invalid one is dropped.
     float half = range;
     if ((u.flags & kUnitScanQuery) && scan_range_) {
         float rr = 0.0f;
-        if (scan_range_(u.id, kNoObject, range, rr) != 0 && rr > 0.0f) half = range + rr;
+        if (scan_range_(u.id, kNoObject, range, rr) != 0) {
+            if (rr > 0.0f) half = range + rr;
+        } else if (cfg_.mode == GameMode::Land) {
+            half = desc_of(u).turret ? range : 0.0f;
+        }
+    }
+    if (!(half > 0.0f)) {
+        u.needs_scan = cur_valid ? 0 : 1;
+        return;
     }
     const Vec3 up = scan_pos(u);  // s78n t03: a land team scans around its container (§2.2 box centre)
     const Aabb box{{up.x - half, up.y - half, up.z - half}, {up.x + half, up.y + half, up.z + half}};

@@ -1364,7 +1364,9 @@ CtlRun run_script_control(const Data& d, int32_t workers, CtlMode mode) {
                     enemy = st.position(h);
                     break;
                 }
-            CHECK(b->order_move(*tm, 1, mine, enemy.x, enemy.y, host.random().synced()) == commands::RejectReason::None);
+            // cmb1 t03 (BKR1 Q8 [H]): an attack-move - a land unit on a plain Move_To under way scans nothing (cube 0)
+            CHECK(b->order_move(*tm, 1, mine, enemy.x, enemy.y, host.random().synced(), tactical::movement::kNoFacing, true) ==
+                  commands::RejectReason::None);
             continue;
         }
         if (mine.empty()) continue;

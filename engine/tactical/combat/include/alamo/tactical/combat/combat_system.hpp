@@ -866,8 +866,9 @@ enum UnitFlag : uint32_t {
     // are also read directly. Derived state: not hashed.
     kUnitRocketAttack = 1u << 17,
     // S8 t17 (FIGHTER_FLYING §4.10 A, TACTICAL_COMBAT §2.2): the unit's formation answers the response-range test
-    // 0x4160a0 (a space fighter / squadron member with a formation record): its scan asks set_scan_range_query for the
-    // cube R + Rr and for candidates beyond R. Mirrored by the host before every tick; derived state, not hashed.
+    // 0x4160a0 (a space fighter / squadron member with a formation record; cmb1 t03: a land unit or squad container with a
+    // land formation record, not deployed): its scan asks set_scan_range_query for the cube R + Rr (land: else R with a
+    // TURRET, else 0) and for candidates beyond R. Mirrored by the host before every tick; derived state, not hashed.
     kUnitScanQuery = 1u << 18,
     // S8 t25 (LOB_SOLVER §3.5 apply / release): TARGETING alone disabled (slot 9) - the Grenade_Attack / Remote_Bomb throw
     // from the apply to the toss animation's end or interruption. The unit acquires no target (decide skipped); its
@@ -1568,8 +1569,9 @@ public:
     void set_precise_hit(PreciseHitFn fn) { precise_hit_ = std::move(fn); }
     // ---- S8 t17: squadron targeting (FIGHTER_FLYING §4.10 A / B, TACTICAL_COMBAT §2.1 / §2.2) ----
     // Scan cube Get_Scan_Range 0x566f50: a unit flagged kUnitScanQuery whose formation answers fn(unit, none) != 0 scans
-    // the cube R + Rr, and accepts a candidate beyond R (filter 9) when fn(unit, candidate) != 0. Every other unit: R
-    // ([port] land: no formations, so a land unit always scans R). Unset: R. Not saved (the host installs it at setup).
+    // the cube R + Rr, and accepts a candidate beyond R (filter 9) when fn(unit, candidate) != 0. cmb1 t03 (BKR1 Q8 [H]):
+    // a land kUnitScanQuery unit whose formation answers 0 scans R with a TURRET slot (UnitDesc::turret), else nothing (a
+    // cube of 0: a valid current target is kept). Every other unit: R. Unset: R. Not saved (the host installs it at setup).
     void set_scan_range_query(ScanRangeFn fn) { scan_range_ = std::move(fn); }
     // Shared team target 0x406370: the squadron (container id) a member belongs to, kNoObject for none. Set by the host
     // before every tick (derived state: not saved, not hashed). A member whose due scan picks a target while its own
