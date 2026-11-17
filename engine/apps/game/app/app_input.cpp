@@ -140,6 +140,27 @@ void App::announcer_feedback() {
     constexpr uint32_t kNoPassThrough = 0xFFFFFFFFu;
     uint32_t pass_through_fleet = kNoPassThrough;  // aud2 t07: the fleet of the event before, when a pass-through arrival
     for (const galactic::GalacticEvent& e : session_->take_announce_events()) {
+        // q6 t36 (owner setter 0x3fb040 tail, Q6_T27 §1 [H]): every owner change queues "<planet>: Control changed from
+        // <old> to <new>" at the back of the advisor hint queue in red, whoever the owners are; the _BONUS text with the
+        // planet's Planet_Capture_Bonus_Reward when the new owner is the local player and the bonus was paid (planet not
+        // destroyed, new owner's faction playable).
+        // [port] retail queues it when the HUD text method (0x140b31410) exists, i.e. whenever the HUD is up; the port's
+        // queue is drained only while a story presenter runs (story_present_frame), so it queues only then (no growth).
+        if (e.kind == K::PlanetOwnerChanged && e.planet < g->planets().size() && story_present_story_) {
+            std::optional<int32_t> bonus;
+            if (me >= 0 && e.player == me && !g->planets()[e.planet].destroyed && static_cast<size_t>(me) < g->players().size()) {
+                const uint32_t fac = g->players()[static_cast<size_t>(me)].faction;
+                const uint32_t ptype = g->planets()[e.planet].type;
+                if (fac < g->rules().factions.size() && g->rules().factions[fac].is_playable && ptype < g->rules().types.size())
+                    bonus = g->rules().types[ptype].capture_bonus;
+            }
+            const char* id = bonus ? "TEXT_PLANET_CHANGED_HANDS_BONUS" : "TEXT_PLANET_CHANGED_HANDS";
+            const std::u16string* fmt = ui_.text.find(id);
+            const std::u32string format = fmt ? ui::utf16_to_utf32(*fmt) : ui::utf8_to_utf32(id);  // [port] a missing id shows the id
+            story_present_.queue_message(changed_hands_text(format, planet_label(data_, ui_.text, *g, e.planet), owner_label(e.other_player),
+                                                            owner_label(e.player), bonus),
+                                         kChangedHandsColor);
+        }
         // ui4 t11 (P4_SIM_SYSTEMS §2.7.3): an enemy approach at most every 5 s of wall-clock time (all planets together),
         // with the urgent line TEXT_ENEMY_FLEET_APPROACHING_LOCATION ("##0" = the planet) in (0, 193, 91).
         const bool approach = e.kind == K::FleetDeparted;
