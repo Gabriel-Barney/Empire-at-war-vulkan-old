@@ -734,6 +734,7 @@ void App::galactic_input() {
     {
         const size_t before = cmds.size();
         const bool was_dragging = fleet_drag_active_;
+        story_forced_clicks();  // ui2 t02: FORCE_CLICK_GUI
         ui_.galactic_hud.update_input(routed_, input_.shift(), input_.ctrl(), now_s_, cmds, &acts);
         // Fleet drag sounds: GUI_Drag_Fleet when a fleet / unit drag starts, GUI_Drop_Fleet when its drop issued an order.
         const ui::GalacticDrag& d = ui_.galactic_hud.drag();
@@ -1062,6 +1063,7 @@ void App::battle_input() {
         else if (e.slot == ui::hk::kDroidAdvisor) open_holocron(ui::InfoPage::DroidLog);  // capture C2 (no galaxy in a skirmish: nothing)
         else if (e.slot == ui::hk::kFleetCohesion && bview_.space()) session_->toggle_fleet_cohesion();  // [port] fleet cohesion
     }
+    story_forced_clicks();  // ui2 t02: FORCE_CLICK_GUI
     ui_.tactical_hud.update_input(routed_, input_.shift(), input_.ctrl(), now_s_, cmds, &acts);
     // L1/S4 wave 1 (tactical): STORY_CLICK_GUI to the tactical plot set - the galactic rule (left click on a component that
     // is not disabled, name = its CommandBarComponents name: b_reinforcement, b_special_weapon, ...) on the tactical HUD.

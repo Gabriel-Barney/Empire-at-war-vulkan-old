@@ -15,6 +15,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <thread>
@@ -606,6 +607,13 @@ public:
     void build_story_overlay(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
     void build_story_text(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
     void build_story_hint(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
+    void build_story_pointers(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
+    void story_component_flash(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
+    void story_forced_clicks();  // FORCE_CLICK_GUI: queued clicks ahead of the HUD's input (app_input.cpp)
+    bool story_project(const ui::HudCanvas& canvas, float x, float y, float z, ui::Vec2f& out) const;
+    bool story_type_position(std::string_view type, ui::Vec3& out) const;
+    bool story_object_position(int32_t object, ui::Vec3& out) const;
+    std::set<int32_t> story_flashed_;  // components whose runtime flash the presenter set
     int32_t story_page_ = -1;   // ui ask 11: the GUI image page the story movie fills (the dialog portrait), -1 none
     void galactic_screens();
     void open_holocron(ui::InfoPage page);

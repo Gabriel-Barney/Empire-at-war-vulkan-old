@@ -125,9 +125,227 @@ void App::build_story_hint(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
     ui::add_text_block(dl, kTextLayer, ui::HudList::Text, *ui_.fonts, canvas, sh->hint.text, {cx, top}, width, st);
 }
 
+// ---- pointers, flashes, highlights (t02) ----------------------------------------------------------------------------
+
+namespace {
+constexpr uint32_t kPointerLayer = 10;
+constexpr ui::Rgba8 kArrowColor{255, 224, 40, 255}, kFlashColor{255, 255, 80, 255}, kHighlightColor{80, 255, 120, 255};
+
+// A downward arrow whose tip is at `tip` (canvas units) bouncing with the clock: [port] a 2D stand-in for the 3D model
+// i_tutorial_arrow.alo (docs/re/STORY_PRESENTATION_REWARDS.md §3.2).
+void draw_arrow(ui::HudDrawList& dl, ui::Vec2f tip, double now, float scale = 1.0f) {
+    const float bob = 5.0f * static_cast<float>(std::sin(now * 6.0));
+    const float x = tip.x, y = tip.y + 6.0f * scale + std::abs(bob);
+    ui::HudQuad head;
+    head.has_corners = true;
+    head.corners = {ui::Vec2f{x - 11.0f * scale, y + 16.0f * scale}, ui::Vec2f{x + 11.0f * scale, y + 16.0f * scale}, ui::Vec2f{x, y},
+                    ui::Vec2f{x, y}};
+    head.color = kArrowColor;
+    dl.add(kPointerLayer, ui::HudList::Alpha, head);
+    ui::HudQuad stem;
+    stem.min = {x - 4.0f * scale, y + 16.0f * scale};
+    stem.max = {x + 4.0f * scale, y + 34.0f * scale};
+    stem.color = kArrowColor;
+    dl.add(kPointerLayer, ui::HudList::Alpha, stem);
+}
+
+// Four corner brackets around `center` pulsing with the clock: the stand-in for the Object_Highlight effect.
+void draw_highlight(ui::HudDrawList& dl, ui::Vec2f center, float half, double now, ui::Rgba8 color) {
+    const float pulse = 0.75f + 0.25f * static_cast<float>(std::sin(now * 5.0));
+    const float h = half * pulse, t = 2.0f, l = std::max(6.0f, half * 0.45f);
+    color.a = static_cast<uint8_t>(190.0f + 65.0f * pulse);
+    auto bar = [&](float x0, float y0, float x1, float y1) {
+        ui::HudQuad q;
+        q.min = {std::min(x0, x1), std::min(y0, y1)};
+        q.max = {std::max(x0, x1), std::max(y0, y1)};
+        q.color = color;
+        dl.add(kPointerLayer, ui::HudList::Alpha, q);
+    };
+    for (const float sx : {-1.0f, 1.0f})
+        for (const float sy : {-1.0f, 1.0f}) {
+            const float cx = center.x + sx * h, cy = center.y + sy * h;
+            bar(cx, cy, cx - sx * l, cy + sy * t);
+            bar(cx, cy, cx + sx * t, cy - sy * l);
+        }
+}
+}  // namespace
+
+// The screen position (canvas units) of a world point in the screen's world view, false off screen.
+bool App::story_project(const ui::HudCanvas& canvas, float x, float y, float z, ui::Vec2f& out) const {
+    const uint32_t w = targets_.width, h = targets_.height;
+    if (w == 0 || h == 0) return false;
+    ui::View v;
+    if (screen_ == Screen::Galactic && gview_.attached()) v = ui::make_view(gview_.camera_params(w, h), w, h);
+    else if (screen_ == Screen::Battle && bview_.active()) v = ui::make_view(bview_.camera_params(w, h), w, h);
+    else return false;
+    float sx = 0.0f, sy = 0.0f;
+    if (!ui::project(v, {x, y, z}, sx, sy)) return false;
+    if (sx < 0.0f || sy < 0.0f || sx >= static_cast<float>(w) || sy >= static_cast<float>(h)) return false;
+    out = canvas.pixel_to_canvas(sx, sy);
+    return true;
+}
+
+// First instance of an object type by name: the first planet of that planet type on the galactic screen, the first object
+// in the snapshot on a battle (STORY_PRESENTATION_REWARDS.md §2.1, §3: "the first instance").
+bool App::story_type_position(std::string_view type, ui::Vec3& out) const {
+    const uint32_t t = data_.rules.find_type(type);
+    if (t == galactic::kNoIndex) return false;
+    if (screen_ == Screen::Galactic) {
+        const galactic::GalacticSim* g = galaxy();
+        if (!g) return false;
+        for (const galactic::PlanetState& p : g->planets())
+            if (p.type == t) {
+                out = {p.position.x, p.position.y, p.position.z};
+                return true;
+            }
+        return false;
+    }
+    if (screen_ == Screen::Battle && bview_.active())
+        for (const render::SnapshotObject& o : bview_.frame().objects)
+            if (o.type == t) {
+                out = {o.position.x, o.position.y, o.position.z};
+                return true;
+            }
+    return false;
+}
+
+bool App::story_object_position(int32_t object, ui::Vec3& out) const {
+    if (screen_ == Screen::Galactic) {
+        const galactic::GalacticSim* g = galaxy();
+        if (!g) return false;
+        const PlanetIndex row = planet_index(*g, static_cast<uint32_t>(object));
+        if (row == kInvalidPlanet) return false;
+        const Vec3 p = g->planets()[row].position;
+        out = {p.x, p.y, p.z};
+        return true;
+    }
+    if (screen_ == Screen::Battle && bview_.active())
+        for (const render::SnapshotObject& o : bview_.frame().objects)
+            if (static_cast<int32_t>(o.id) == object) {
+                out = {o.position.x, o.position.y, o.position.z};
+                return true;
+            }
+    return false;
+}
+
+// The component flashes (§3.1) set the button's runtime flash; a component the presenter flashes is outlined as well, so a
+// component without a flash texture still reads [port].
+void App::story_component_flash(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
+    (void)canvas;
+    const bool gal = screen_ == Screen::Galactic;
+    if (!gal && screen_ != Screen::Battle) return;
+    ui::HudButtons& buttons = gal ? ui_.galactic_hud.buttons() : ui_.tactical_hud.buttons();
+    const ui::HudLayout& layout = gal ? ui_.galactic_hud.layout() : ui_.tactical_hud.layout();
+    std::set<int32_t> active;
+    for (const StoryComponentFlash& f : story_present_.flashes()) {
+        if (!story_present_.component_flashing(f.component, now_s_)) continue;
+        const int32_t idx = ui_.components.find(f.component);
+        if (idx < 0) continue;
+        active.insert(idx);
+        ui::ButtonRuntime& st = buttons.state(static_cast<uint32_t>(idx));
+        st.flash = true;
+        const ui::ComponentPlacement& pl = layout.placement(static_cast<uint32_t>(idx));
+        if (!pl.placed || st.hidden) continue;
+        const bool on = (static_cast<int64_t>(std::floor((now_s_ - f.start) / (kFlashSeconds * 0.5))) % 2) == 0;
+        if (on)
+            ui::frame_rect(dl, kPointerLayer, pl.center, {std::max(pl.size.x, 24.0f) + 6.0f, std::max(pl.size.y, 24.0f) + 6.0f},
+                           ui::Rgba8{255, 255, 80, 40}, kFlashColor);
+    }
+    for (const int32_t idx : story_flashed_)
+        if (!active.contains(idx)) buttons.state(static_cast<uint32_t>(idx)).flash = false;
+    story_flashed_ = std::move(active);
+}
+
+void App::build_story_pointers(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
+    if (screen_ != Screen::Galactic && screen_ != Screen::Battle) return;
+    story_component_flash(dl, canvas);
+    const bool gal = screen_ == Screen::Galactic;
+    const ui::HudLayout& layout = gal ? ui_.galactic_hud.layout() : ui_.tactical_hud.layout();
+    const ui::HudButtons& buttons = gal ? ui_.galactic_hud.buttons() : ui_.tactical_hud.buttons();
+    // Arrow slots (§3.2): one arrow per slot at its target.
+    for (const StoryArrow& a : story_present_.arrows()) {
+        if (!a.has_pointer) continue;
+        ui::Vec2f at;
+        bool ok = false;
+        if (a.kind == StoryArrow::Kind::Component) {
+            const int32_t idx = ui_.components.find(a.target);
+            if (idx >= 0) {
+                const ui::ComponentPlacement& pl = layout.placement(static_cast<uint32_t>(idx));
+                const ui::ButtonRuntime* st = buttons.find_state(static_cast<uint32_t>(idx));
+                if (pl.placed && !(st && st->hidden)) {
+                    at = {pl.center.x, pl.center.y + 0.5f * std::max(pl.size.y, 24.0f)};
+                    ok = true;
+                }
+            }
+        } else if (a.kind == StoryArrow::Kind::Planet || a.kind == StoryArrow::Kind::MapObject) {
+            ui::Vec3 p;
+            if (story_type_position(a.target, p) && story_project(canvas, p.x, p.y, p.z, at)) {
+                at.y += 14.0f;
+                ok = true;
+            }
+        }
+        if (ok) draw_arrow(dl, at, now_s_);
+    }
+    // Numeric 2D pointers (HIGHLIGHT_OBJECT P3, FLASH_TERRAIN): at an object type's first instance or a world position.
+    for (const StoryPointer& pt : story_present_.pointers()) {
+        ui::Vec3 p{pt.x, pt.y, pt.z};
+        ui::Vec2f at;
+        if ((pt.terrain || story_type_position(pt.object_type, p)) && story_project(canvas, p.x, p.y, p.z, at)) draw_arrow(dl, at, now_s_, 0.8f);
+    }
+    // Object highlights: the reward's by type (first instance) and Lua Highlight / Highlight_Small by object id.
+    for (const StoryHighlight& hl : story_present_.highlights()) {
+        ui::Vec3 p;
+        ui::Vec2f at;
+        const bool found = hl.object != 0 ? story_object_position(hl.object, p) : story_type_position(hl.type_name, p);
+        if (found && story_project(canvas, p.x, p.y, p.z + hl.z_offset, at))
+            draw_highlight(dl, at, hl.small ? 14.0f : 26.0f, now_s_, kHighlightColor);
+    }
+    for (const StoryObjectFlash& f : story_present_.object_flashes()) {  // FLASH_OBJECT / FLASH_PLANET: the object's colour flash
+        if (now_s_ >= f.until) continue;
+        ui::Vec3 p;
+        ui::Vec2f at;
+        if ((static_cast<int64_t>(std::floor((now_s_ - f.start) / 0.2)) % 2) == 0 && story_type_position(f.type_name, p) &&
+            story_project(canvas, p.x, p.y, p.z, at))
+            draw_highlight(dl, at, 22.0f, now_s_, kFlashColor);
+    }
+    // Planet highlights of the story (Add_Planet_Highlight): a bracket frame on the planet while listed.
+#ifdef ALAMO_SIM_HAVE_STORY
+    if (gal)
+        if (const sim::StorySession* story = session_ && !demo_session() ? session_->host().story() : nullptr)
+            for (size_t set = 0; set < story->plot_set_count(); ++set) {
+                if (story->plot_set_player(set) != local_player()) continue;
+                for (const lua::StoryHighlight& hl : story->model(set).highlights()) {
+                    ui::Vec3 p;
+                    ui::Vec2f at;
+                    if (story_object_position(hl.object_id, p) && story_project(canvas, p.x, p.y, p.z, at))
+                        draw_highlight(dl, at, 30.0f, now_s_, kHighlightColor);
+                }
+            }
+#endif
+}
+
 void App::build_story_overlay(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
     build_story_text(dl, canvas);
+    build_story_pointers(dl, canvas);
     build_story_hint(dl, canvas);
+}
+
+// FORCE_CLICK_GUI (§3.4): the presenter's queued component names become a click on the component, ahead of the HUD's own
+// input handling (appended to the routed pointer events).
+void App::story_forced_clicks() {
+    if (screen_ != Screen::Galactic && screen_ != Screen::Battle) {
+        (void)story_present_.take_forced_clicks();
+        return;
+    }
+    const bool gal = screen_ == Screen::Galactic;
+    const ui::HudLayout& layout = gal ? ui_.galactic_hud.layout() : ui_.tactical_hud.layout();
+    for (const std::string& name : story_present_.take_forced_clicks()) {
+        const int32_t idx = ui_.components.find(name);
+        if (idx < 0) continue;
+        const ui::ComponentPlacement& pl = layout.placement(static_cast<uint32_t>(idx));
+        const ui::Vec2f px = ui_.gui.canvas().canvas_to_pixel(pl.center.x, pl.center.y);
+        routed_.hud.push_back({ui::HudPointerEvent::Kind::Click, ui::Button::Left, idx, static_cast<int32_t>(px.x), static_cast<int32_t>(px.y)});
+    }
 }
 
 }  // namespace alamo_game_app
