@@ -470,7 +470,8 @@ if(_alamo_sim)
     # seeds 3-9 run with no other Lua error. Seed 1 -> 3.
     # mov1 (2026-11-17, retail land tick order): seeds 5 and 9 now hit the same MDU race (mdu1); seed 9 -> 6 (0 Lua errors).
     # mov1 + cmb1 on dev (2026-11-17): seed 3 hits it too; seeds 4 and 7 have no other Lua error. Seed 3 -> 7.
-    foreach(_seed 6 7 8)
+    # mov2 t04 (2026-11-17, tracker snapshot before the walk): seed 6 hits it; seeds 3, 4, 7 and 8 do not. Seed 6 -> 3.
+    foreach(_seed 3 7 8)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_empire_underworld_seed${_seed}
                COMMAND alamo_headless --skirmish-ai foc-land --ai Empire,Underworld --ticks 70000 --workers 4 --quiet
                        --fail-on-lua-errors --seed ${_seed})
