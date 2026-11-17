@@ -16,14 +16,15 @@
 | Graphics and shaders | Vulkan SDK 1.3.296 headers and validation layers, Vulkan Memory Allocator 3.3.0, DXC 1.8.2407 (HLSL to SPIR-V), fxc from the Windows SDK (compiling mod `.fx` sources) |
 | Libraries in the engine | Lua 5.0.2 (vendored), miniaudio 0.11.25, FFmpeg 8.1.3's Bink decoder (built with MSYS2), the reference SMAA, AMD FidelityFX SDK 2.4.0 (FSR upscaler DLLs), Intel XeSS SDK 3.0.2 (`libxess.dll`) |
 | Launcher | Rust 1.100 (project-local) with egui / eframe for the Command Center launcher |
-| Reverse engineering (specs only, never engine code) | Ghidra 12.1.4 with the ReVa 7.3.2 MCP server and REA 6.8.0, driven by a dedicated `re-analyst` agent that writes behaviour into `docs/re/`; Ghidra 12.2 headless decompiler export; Frida 17.26.3, Microsoft TTD and WinDbg (with mcp-windbg) for tracing the running game; Python with pefile, Capstone and LIEF for static analysis; DXVK 3.1.1 and apitrace 14.0 for capturing the original's rendering; in-game probe mods |
+| Reverse engineering (read, never copied) | Ghidra 12.1.4 with the ReVa 7.3.2 MCP server (driven by a dedicated `re-analyst` agent that writes behaviour into `docs/re/`) and REA 6.8.0; Ghidra 12.2 headless decompiler export; Frida 17.26.3, Microsoft TTD and WinDbg (with mcp-windbg) for tracing the running game; Python with pefile, Capstone and LIEF for static analysis; DXVK 3.1.1 and apitrace 14.0 for capturing the original's rendering; in-game probe mods |
 | Version control | Git (MinGit 2.47, project-local), GitHub and the GitHub CLI |
 
 </details>
 
 # Empire at War: Vulkan
 
-A clean-room C++20 rewrite of the *Star Wars: Empire at War: Forces of Corruption* engine (Petroglyph's "Alamo").
+A from-scratch C++20 rewrite of the *Star Wars: Empire at War: Forces of Corruption* engine (Petroglyph's "Alamo"),
+written in its own words.
 The simulation is rebuilt from scratch as a headless, multithreaded, deterministic core, with a Vulkan 1.3 renderer
 on top. The goal is the game you already own, running on an engine that uses a modern PC.
 
@@ -34,30 +35,34 @@ original game cannot be loaded; all three are out of scope by design.
 feature of your own, you are more than welcome to fork it and add whatever features and systems you like. The code is
 released into the public domain under [the Unlicense](LICENSE).
 
-> **Status (2026-11-15):** active development, playable end to end through its own host, `alamo_game`, and handed out
+> **Status (2026-11-17):** active development, playable end to end through its own host, `alamo_game`, and handed out
 > as packaged test builds (started from the **Command Center** launcher or a double-click `Play.exe`). Simulation,
 > renderer, Lua layer, AI, UI, story and save/load are in place, and **Thrawn's Revenge loads and plays**. Since
 > 2026-11-10 the work is limited to **parity** with the original (rules, data and feel exactly; random-driven outcomes
 > by their distribution over many seeds): land movement and combat were ported in full from the specs, the galactic AI's
-> production and task-force rules follow the original, and the land skirmish AI (Rebel, Empire and Underworld) builds and
-> techs at retail's pace. Named exceptions to that focus: the graphics and display menu (SMAA / TAA / MSAA, **AMD FSR and
-> Intel XeSS upscaling**, render and UI scale, exclusive full screen) and port features for space battles (2026-11-13),
-> and the **all-core simulation redesign** (since 2026-11-14). Open questions about the original are now answered by
-> reading the shipped binary through Ghidra with an agent-driven toolset (2026-11-15), before any in-game probe.
+> production and task-force rules follow the original, and the land skirmish AI (Rebel, Empire and Underworld) is checked
+> against retail runs by its distribution over seeds. New since 2026-11-15: **skirmish from the game's own front end** with the original's
+> options, teams of more than two players and per-slot AI difficulty; the **galactic abilities** (corruption removal,
+> Death Star, planet bonuses, Neutralize, Siphon); **animation-timed gameplay** (transport landings, AT-AT troopers,
+> land spawners, tow cables); **story and tutorial presentation** (text, pointers, cinematic camera, fades, control
+> locks); the FoC **Base Layout planet map** and galactic build tabs; and every retail map loading with its placements
+> and radar. Named exceptions to the parity focus: the graphics and display menu (SMAA / TAA / MSAA, **AMD FSR and Intel
+> XeSS upscaling**, render and UI scale, exclusive full screen) and port features for space battles (2026-11-13), and the
+> **all-core simulation redesign** (since 2026-11-14). Open questions about the original are answered by reading the
+> shipped binary (Ghidra, REA, tracing tools) before any in-game probe.
 >
-> **Tests:** **280 tests** pass with 0 warnings on MSVC and on clang on the tip of `dev` (2026-11-15), including every
-> land skirmish seed; the 166-test fast tier is what landing runs, and the sim modules' 72 tests pass under the
-> sanitizer (2026-11-14). The parity harness runs the port with retail squadron sizes, so it keeps measuring the
-> original's rules.
+> **Tests:** **292 tests** pass with 0 warnings on MSVC and on clang (2026-11-17, the test-suite health group TST1 on
+> `dev`); the 175-test fast tier is what landing runs, and the sim modules' tests pass under the sanitizer. The parity
+> harness runs the port with retail squadron sizes, so it keeps measuring the original's rules.
 >
-> Task tracking is the project roadmap, kept in its own repository and not in this one (1,149 roadmap tasks done and 156
-> open, 154 of 191 groups done, about 240 open backlog entries). Results and notes per phase are in [`docs/PHASE2.md`](docs/PHASE2.md),
+> Task tracking is the project roadmap, kept in its own repository and not in this one (1,294 roadmap tasks done and 211
+> open, 169 of 215 groups done, about 180 open backlog entries). Results and notes per phase are in [`docs/PHASE2.md`](docs/PHASE2.md),
 > [`docs/PHASE3.md`](docs/PHASE3.md) and [`docs/PHASE4.md`](docs/PHASE4.md), and every document is indexed in
 > [`docs/README.md`](docs/README.md).
 
 This repository contains **no game assets and no original code**. You need your own copy of the game (Steam:
 *Star Wars: Empire at War - Forces of Corruption*). Behaviour was recovered by studying the shipped binary and data
-and written up as specs in [`docs/re/`](docs/re/) (about 150 documents) before any engine code was written.
+and written up as specs in [`docs/re/`](docs/re/) (about 200 documents) before the engine follows it.
 
 **Contents:** [Goals](#goals) · [Features](#features) · [Performance](#performance) · [Architecture](#architecture) ·
 [Quality](#quality-and-process) · [Where the project is](#where-the-project-is) · [Building](#building-and-running) ·
@@ -109,17 +114,25 @@ precompile wait until the core game and the mod platform are complete.
 ### Simulation and game rules
 - Full object model: about 4,000 unit definitions with about 1,000 fields each, and the original behaviour set.
 - **Galactic layer:** economy, production, fleets and hyperspace, planets and garrisons, fog of war, black market,
-  sabotage, hacking, hero respawn, corruption (Underworld), special weapons.
+  sabotage, hacking, hero respawn, corruption (Underworld), special weapons, and the galactic abilities (corruption
+  removal, Death Star planet destruction, planet bonuses, Neutralize hero, Siphon).
 - **Tactical layer:** land and space combat, formations, abilities, hardpoint destruction, garrisons and hangars,
   landing drops, weather, fog of war, construction pads, reinforcement, victory conditions.
 - **Land movement as the original does it:** infantry squads move as one container with members on formation slots,
   one formation path per land formation, the original's collision decisions between moving and stopped units, attack
   approach arcs, garrison approach and exit, hover units and walking while deployed.
 - **Hero clashes** on land, the vehicle thief, Bribe, Hack, Saber Throw and bombing runs.
+- **Animation-timed gameplay:** reinforcement transports unload on their landing clip and leave after take-off, AT-AT
+  troopers rope down on their clips, land spawners open and close, tow cables wrap, and crush, crouch and repair follow
+  their clips.
+- **Maps:** every retail land and space map loads with its company placements, structure markers and radar picture.
 - **Story campaigns** with the original event system (shared flags, prerequisites, perpetual events), **linked story
   battles** that start from a galactic event, and corruption missions.
 - **Skirmish and galactic conquest**, including the original's Capture Control Points skirmish type, plus the
   main-menu attract battle (the shipped attract script runs as it does in the original).
+- **Skirmish from the front end** with the original's options (credits, win condition, heroes, super weapons, pre-built
+  base, starting units), more than two players in teams, and an AI difficulty per slot that can also be changed during
+  the game.
 - Behaviour comes from written specs ([`docs/re/`](docs/re/)): movement, combat, AI, fog of war, story, commands.
 
 ### AI and scripting
@@ -192,10 +205,14 @@ saves carry it.
   dialogs, story dialogs and subtitles, and the linked-battle banner and letterbox for story battles.
 - **Tactical HUD:** order buttons and hotkeys, retreat and reinforcement, the space special-weapon button, battle-end
   scoring with the retry dialog, tooltips, and a cursor that changes with the object under it.
-- **Galactic HUD:** hero roster, build-pad prices and the reason a build is blocked, map filters and planet-label icons,
-  on-screen galactic messages and announcer events.
+- **Galactic HUD:** hero roster, build-pad prices and the reason a build is blocked, land and space build tabs, map
+  filters and planet labels, the FoC **Base Layout planet map**, the fleet route preview while dragging, encyclopedia
+  pop-ups, on-screen galactic messages, advisor lines and the Droid Log.
+- **Story and tutorial presentation:** mission and tutorial text, tutorial pointers, flashes and highlights, the story
+  cinematic camera, screen fades and letterbox, and the scripted control locks.
 - **Front end and options:** key rebinding (clear, conflict prompt, apply prompt), drop-down, list and edit-box
-  behaviour with selection and the Windows clipboard, and options kept between runs.
+  behaviour with selection and the Windows clipboard, the original's dialog sounds, movie captions, and options kept
+  between runs.
 - **Save and load dialogs** list saves as a tree (map, faction with its emblem, playthrough), each save showing its week
   and when it was saved. A new campaign opens the mission holocron by itself.
 
@@ -304,9 +321,9 @@ worker count so the counts run side by side. Clang's logs equal MSVC's.
 - **Two compilers in the loop.** MSVC ships; clang 20 checks (extra warnings: `-Wconversion -Wshadow`) and provides a
   second compiler for determinism. Sim changes get both; threading changes also run under a clang sanitizer.
 - **Zero warnings** at MSVC `/W4 /permissive-` and clang `-Wall -Wextra -Wpedantic -Wconversion -Wshadow`.
-- **280 tests** on each of MSVC and clang (plus 72 sim-module tests under the sanitizer), with golden-file checks of
+- **292 tests** on each of MSVC and clang (plus the sim-module tests under the sanitizer), with golden-file checks of
   whole battles and campaigns, each compared across worker counts. Goldens store a checkpoint every 64 ticks, so a
-  behaviour change is a small diff. Slow tests carry a label, and the 166-test fast tier (about a minute) is what quick
+  behaviour change is a small diff. Slow tests carry a label, and the 175-test fast tier (about a minute) is what quick
   iteration and landing run. Build-speed work in November (shared PCH, compiler-cache hits across worktrees, a header
   diet and split big files) keeps incremental builds short.
 - **Pre-merge gate** (`build_gate.cmd`): MSVC, clang and sanitizer builds, each recorded on the roadmap. A nightly
@@ -314,23 +331,26 @@ worker count so the counts run side by side. Clang's logs equal MSVC's.
   result without a passing MSVC build and fast-tier test run, so `dev` is never pushed red; an identical failing rerun is
   refused, and build summaries separate real failures from golden drift.
 - **Parity is checked against the real game.** A question about the original goes first to the binary (an RE agent
-  reads it through Ghidra and writes the answer into `docs/re/`); reference traces recorded from the original (credits,
+  reads it through Ghidra, or any worker through REA and the tracing tools, and the answer is written into `docs/re/`); reference traces recorded from the original (credits,
   owners, production, RNG draws per tick) and in-game probe runs, driven by an agent with computer use, settle what only
   the running game shows. Each answer is written into the matching spec before the engine follows it.
 - **Parallel agent workflow.** Work is split by roadmap group across agent sessions, each in its own git worktree, with
   claims so two sessions do not take the same group. **`dev` is the development branch** (GitHub's default); sessions land
   on it directly, and `main` is the released branch, updated from `dev` by a release pull request once the full gate
   passes. The roadmap lives in its own repository so every session shares one copy. Each roadmap group has an exit test;
-  findings that do not block it go to a triaged backlog (about 250 entries, each with a parity tier and severity) and
-  become work only when picked. Parity groups (Stage 6) keep their follow-ups as their own tasks.
-- **Clean-room.** Engine code is written from the specs in `docs/re/`, never from decompiled output, which is kept out of
-  the engine tree.
+  crashes and parity differences that block it are tasks of the group that owns the work, and polish findings go to a
+  triaged backlog (about 180 open entries, each with a parity tier and severity) that becomes work only when picked.
+  Parity groups (Stage 6) keep their follow-ups as their own tasks.
+- **Own words, never copied.** Workers may read the decompiled original while writing engine code (since 2026-11-15),
+  but decompiled code is never copied into the repository: engine code is written in the port's own words and
+  structure, and behaviour goes into the `docs/re/` specs in words and tables. The decompiled output itself is kept
+  out of the repository.
 - **Project-local toolchain.** MSVC 14.51, Windows SDK, CMake, Ninja, DXC, LLVM, Rust and FFmpeg's Bink decoder live under
   `toolchain\` with pinned versions and hashes. Nothing is installed system-wide.
 - **Third-party code** in `engine/` is limited to approved dependencies: Vulkan-Headers, DXC, VMA, Lua 5.0.2 (vendored,
   original semantics), miniaudio, FFmpeg's Bink decoder (LGPL, dynamically linked), the reference SMAA, and the AMD
   FidelityFX (FSR) and Intel XeSS runtime DLLs (loaded at run time, optional).
-- About **445,000 lines** of C++ in `engine/` (tests included), across 21 modules plus a shared test-support library.
+- About **480,000 lines** of C++ in `engine/` (tests included), across 21 modules plus a shared test-support library.
 
 ---
 
@@ -343,22 +363,26 @@ worker count so the counts run side by side. Clang's logs equal MSVC's.
 | Clean-up and production audit (CU1-CU18, PA) | **Done** (2026-11-08): dead code and bring-up guards removed, shared core and test helpers, each XML file read once, save helpers unified, ported-but-unwired original behaviour wired in |
 | Movement and combat parity (S78, MOVE) | **Done** (2026-11-11): land squads, formation paths, the collision decisions, attack and garrison approaches, hover units, hero clashes and the vehicle thief follow the specs; follow-ups are in the backlog |
 | Galactic AI parity (A2, AIVIEW) | **Done** (2026-11-12): free-store claims, build-queue slots, budget, goal cadence and task-force rules follow the original; Shola attack timing matches retail in 11 of 12 seeds. Remaining tier-2 metrics are worked from the backlog |
-| Land skirmish AI and Capture Control Points | The land AI builds its base, charges its pads and techs at retail's pace (2026-11-15: pre-placed base structures left out of force sums, tactical goal categories in retail's order, Underworld build-pad rules as in retail); Empire-vs-Underworld games run with 0 Lua errors; control-point skirmish and its announcer are in. AI-vs-AI land tests no longer require a winner, since retail's AI does not finish an idle base either |
-| Parity check against the original (Q4) | **Harness built** (`tools/parity/`) with a baseline from several retail runs and a many-seed distribution mode. Open: the Geonosis skirmish, where the port's Rebel AI attacks about a minute early, and the final Q4 run |
-| Interface gaps from the 2026-11-12 test build (UI1, UI3-UI5) | **Mostly done** (2026-11-13): tactical and galactic HUD controls, cursor, key rebinding, list / combo / edit widgets, clipboard, full screen. Left: install-language detection, unit-cap and under-attack feedback in the tactical HUD, the FoC planet map and fleet route preview, UI sounds and a few dialog details |
-| Story and tutorial presentation (UI2) | **Not started**: story text rewards, tutorial pointers and flashes, the story cinematic camera and screen fades |
-| Story campaigns end to end | Event system, linked tactical battles, victory handling and corruption missions in; map hints now load, so the Kessel mission script runs further; Kessel story parity checks remain |
-| Animation-driven gameplay (R3g, R3h) | **Open**: reinforcement transport landing timing, AT-AT troop deployment, structures that spawn squadrons, tow cables, and ability and hero-clash clips |
-| Graphics and display menu (2026-11-13) | **Built**: separate Display and Graphics pages, display modes with exclusive full screen, SMAA / TAA / MSAA, FSR and XeSS upscaling, render and UI scale, custom frame-rate cap. Waiting for Gabriel's in-game look at the anti-aliasing and upscaler modes |
+| Land skirmish AI and Capture Control Points (SKAI, CCPGU) | **Done** (2026-11-16): the land AI builds its base, charges its pads and techs at retail's pace; space skirmish AI builds as retail on Geonosis; the exit test compares end rate and end frames over 10 seeds per AI (Rebel, Empire, Underworld) with retail runs (a tier-2 distribution), and the group closed with all 22 tasks done. AI-vs-AI land games run with no Lua errors other than ones retail raises too (each shown from the binary). Control-point skirmish and its announcer are in |
+| Skirmish in the game (SKM1, SKM2) | **Done** (2026-11-17): skirmish started from `alamo_game`'s front end on its map with the original's options, per-slot and live AI difficulty, and more than two players in teams, with in-battle save and load |
+| Galactic abilities (GALAB) | **Done** (2026-11-16): corruption removal, Death Star planet destruction, planet bonuses, Neutralize hero / hero protection, Siphon and galactic upgrade spawns, each tested against its spec |
+| Parity check against the original (Q4) | **Harness built** (`tools/parity/`) with a baseline from several retail runs and a many-seed distribution mode. Open: the Geonosis skirmish (the port's Rebel AI still attacks early and takes more damage than retail), Rebel infantry build times in the Hammer of the Mon galactic scenario, a few galactic AI metrics (GAI3), and the final Q4 run |
+| Interface (UI1, UI3-UI5) | Galactic HUD (UI4: build tabs, FoC Base Layout planet map, fleet route preview, encyclopedia pop-ups, advisor lines) and front-end widgets and options (UI5: retail key capture, dialog sounds, movie captions, UTF-8 save names) **built** on 2026-11-17 and waiting for Gabriel's playtest. Still open: about half of the UI1 and UI3 gaps (install-language detection, unit-cap and under-attack feedback and other tactical HUD details) |
+| Story and tutorial presentation (UI2) | **Built** (2026-11-16): story text and advisor hints, tutorial pointers, flashes and highlights, script fades, letterbox, cinematic and RTS camera moves, control locks. Waiting for Gabriel's playtest of the FoC and EaW tutorials and first missions |
+| Story campaigns end to end | Event system, linked tactical battles, victory handling and corruption missions in. Open (STORYB): Kessel story parity, the TRIGGER_AI story reward, scripted unit animations, intro text crawls and some GameScoring script events |
+| Animation-driven gameplay (R3g-R3j, ANM1) | **R3g done** (2026-11-16): transport landing and take-off timing, AT-AT trooper drops, land spawners, tow cables, crush, crouch and repair clips. Open: ability, hero-clash and structure clips (R3h), the weapon-fire gate on animation state (R3i), battle wiring of the troopers (R3j) and locomotor clip timing (ANM1) |
+| Maps (MAP1-MAP3) | **MAP1 done** (2026-11-17): every retail FoC and EaW map loads with its placements, structure markers, radar picture and space starts. Open: planet-specific corruption upgrades at battle start (MAP2) and keeping a map's setup tables over a mid-battle load (MAP3) |
+| Audio (AUD1-AUD7) | Battle music, weather and core hookups and the galactic, app and mixer fixes (AUD2, 2026-11-16) are in. Open: the battle announcer and unit voice lines, tactical sound effects, galactic and UI audio gaps |
+| Graphics and display menu (2026-11-13) | **Built**: separate Display and Graphics pages, display modes with exclusive full screen, SMAA / TAA / MSAA, FSR and XeSS upscaling, render and UI scale, custom frame-rate cap. Waiting for Gabriel's in-game look at the FSR and XeSS modes |
 | Port features (2026-11-13) | **Built**: fleet groups phase 1, fleet cohesion, squadrons of 12 with wing buttons, fleet and ship names, unit path lines. Waiting for in-game checks; fleet groups phases 2-3 are on the backlog |
 | Command Center launcher | **In the repository** (`launcher/`, imported 2026-11-13) and shipped with the test build |
-| Full test suite | **Green** on `dev` (2026-11-15): all 280 tests on MSVC and clang, including the land skirmish seeds that failed until 2026-11-14 (the harness and the station skirmish run with retail squadron sizes, `--squadron-size 0`) |
+| Full test suite | **Green** (2026-11-17): all 292 tests on MSVC and clang after the test-suite health group (TST1: smoke, golden and parity tests on `dev` with the compiler cache off) |
 | Mod diagnostics (Q5) | Done |
-| Thrawn's Revenge (Q6) | **Plays**: the mod loads with no loader diagnostics, its skirmish, land and campaign smoke runs pass, and its galactic AI plays. 2026-11-13: an event-driven galactic victory monitor (the mod's campaign menu holds and grants victory), base-game objects run their Lua scripts, and map hint names reach Lua; 2026-11-15: the map-hint rules and the end-screen timing after an elimination were read from the binary. Left: implementing those readings and a final re-check after the parity check |
-| Mod platform (MODC) | **In progress**; the goal was widened on 2026-11-13 to near-full compatibility with FoC mods, checked on a reference set of four mods (`docs/MODS.md` §10). Done so far: the loading contract (`docs/MODS.md`), a lint against mod and faction names in engine code, the mod load report, a `STEAMMOD=` resolver, a mod picker in the game UI, shader model 3 translation, compiling mod `.fx` sources, and a synthetic fixture mod in the tests; two non-TR workshop mods load, start skirmishes and run galactic-AI sessions headless. Left: the §10 checklist on every reference mod, Gabriel playing a second mod in game, the game's front end with other mods, shader model 3 leftovers, an automatic `.fx` prebuild, field-schema and load-report fixes, and picker polish |
+| Thrawn's Revenge (Q6) | **Plays**: the mod loads with no loader diagnostics, its skirmish, land and campaign smoke runs pass, its galactic AI plays, and its campaign menu holds and grants victory. Left: the map-hint and galactic end-screen rules read from the binary on 2026-11-15 (`Find_Hint` without a hint, hints on company placements, the end-screen gate, the advisor text queue), and a final re-check after the parity check |
+| Mod platform (MODC) | **Nearly done** (42 of 44 tasks); the goal is near-full compatibility with FoC mods, checked on a reference set of four mods (`docs/MODS.md` §10: Thrawn's Revenge, Fall of the Republic, EAW-Remake, Age of Legends). In place: the loading contract, a lint against mod and faction names in engine code, the mod load report and picker, a `STEAMMOD=` resolver, shader model 3 translation and mod `.fx` compiling, the §10 checklist run on all four mods (2026-11-16), a player cap of 64 for large mod sandboxes, and fixes found on the way (scripted hyperspace entry, upper-case type names in every Lua VM, story `LOAD_CAMPAIGN`, skirmish staging rules). Left: EAW-Remake's station build locks and Gabriel playing a skirmish to a result with a reference mod |
 | Performance (OPT1-OPT3) | **Paused** (tier 3): p99 budget met everywhere; the first tick of a battle (setup) is still over 33.3 ms (group OPT3f, parked) |
-| All-core simulation (SP0-SP7) | **In progress** (exception to the parity focus, 2026-11-14): measurement, topology-aware job system, checkpoint-only checksums with parallel space path tries, the services phase graph and cheaper galactic goal evaluation are done; the tactical AI lane is active; galactic AI on the lane, the tree-hash checksum and AI players in parallel are next |
-| Reverse-engineering tools (2026-11-15) | **In place**: Ghidra with ReVa and REA, Frida, TTD and WinDbg under `toolchain\re`, used only by the `re-analyst` agent (clean-room rule). First answers already in `docs/re/` (Thrawn's Revenge map hints, galactic end-screen timing, a hardpoint stun rule) |
+| All-core simulation (SP0-SP7) | **In progress** (exception to the parity focus, 2026-11-14): measurement, topology-aware job system, checkpoint-only checksums with parallel space path tries, the services phase graph and cheaper galactic goal evaluation are done (SP0-SP2, SP5); the tactical AI lane (SP3) is in progress; galactic AI on the lane, the tree-hash checksum and AI players in parallel are next |
+| Reverse-engineering tools (2026-11-15) | **In place**: Ghidra with ReVa and REA, Frida, TTD and WinDbg under `toolchaine`. Every worker may read the binary and the decompiled output, never copying it; Ghidra itself is driven by the `re-analyst` agent. Answers so far include the land and space skirmish AI rules, the story presentation rewards, the planet map and the UI widget rules |
 | Full QA pass | **Open**: a playtest to confirm what only tests and smoke shots have covered, and a fresh 4K capture pass over galactic, land, space and menus |
 | Benchmark (side goal) | BM1-BM3 and their follow-ups done (scenarios, sim-only and rendered runs, stress scenes, reports); the in-game screen (BM4) is in progress on a branch, not on `dev` yet |
 The detail, task by task, is on the project roadmap, which is kept in its own repository (not this one) and is the only place for status.
