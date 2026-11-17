@@ -555,3 +555,29 @@ with its id and why it adds coverage.
 
 The synthetic fixture mod (`engine/apps/game/testdata/mod_fixture`, modc t07) keeps the agnostic loading route covered in ctest without game
 data; it is not a substitute for the set.
+
+### 10.4 Checklist run (modc t39, 2026-11-17)
+
+MSVC Release of the lane-modc branch (dev + t29 / t30 / t32 / t34 / t39 fixes), `alamo_mod_check`, `alamo_headless` (skirmish
+`--skirmish-ai skirmish --map M --ticks 3000`, once with `--workers 4` and once with `--workers 0`, CRCs compared with
+`--compare`; galactic `--economy --galactic-ai --story --scoring --object-scripts --ticks 9000`) and the hidden
+`alamo_game --smoke skirmish` for the front end. Several `_MP_*` entries in the TR / FotR `Maps.meg` are empty files (the
+port skips them, the skirmish host says `not loaded (empty file)`), so the maps below are non-empty ones.
+
+| Item | Thrawn's Revenge | Fall of the Republic | EAW-Remake | Age of Legends |
+|---|---|---|---|---|
+| 1 Load | OK, 0 errors, 216 warnings | OK, 0 errors, 103 warnings; one terrain `.fx` fxc rejects (**t42**) | OK, 0 errors, 187 warnings | OK, 0 errors, 1474 warnings (877 skipped campaign rows, 97 non-compiling scripts: §9) |
+| 2 Front end (smoke) | not rerun (q6 t02 / t13 passed) | see the FotR smoke line below | main menu, staging and a running space skirmish; stops at the encyclopedia step (**t43**) | main menu, staging (no game-type list); stops at the buy screen: default faction is a header faction (**t41**) |
+| 3 Space skirmish 3000 ticks | `_MP_SPACE_FIERY`: 833 orders, 1070 decisions, 0 Lua errors | `_MP_SPACE_TRANSITORY_TWISTS`: 724 orders, 860 decisions, 2 Lua errors (**t44**) | `_MP_SPACE_GEONOSIS`: 95 orders, 139 decisions, 0 Lua errors; 189 s (t33, speed not in the checklist) | `_MP_SPACE_GEONOSIS`: 13 orders, 45 decisions, 0 Lua errors |
+| 3 Land skirmish 3000 ticks | `_MP_LAND_BLOOD_GULCH`: 120 orders, 200 decisions, 0 Lua errors | `_MP_LAND_HOTH_ECHO_BASE`: 181 orders, 213 decisions, 2 Lua errors (**t44**) | `_MP_LAND_UTAPAU`: 62 orders, 32 decisions, 0 Lua errors | `_MP_LAND_UTAPAU`: 374 orders, 445 decisions, 0 Lua errors |
+| 4 Galactic 9000 ticks | `Thrawn_Empire`: 4384 decisions, 1281 orders, 4 owner changes, 0 Lua errors | `Sandbox_Rimward_Republic`: starts after the missing-plot fix, 131 decisions, **0 orders**, 1 story Lua error (**t45**) | `GC_Mini_Web_Way_Imperial`: 456 decisions, 137 orders, 11 owner changes, 0 Lua errors | `Sandbox_Balance_New_Republic`: starts after the player-cap fix (50 players), 533 decisions, 298 orders, 0 Lua errors |
+| 5 Story start | 1145 story events | 400 story events | (galactic run: story on) | 54,856 story events, 38 Lua notes |
+| 6 Deterministic | 0 vs 4 workers identical (space, land) | identical (space, land) | identical (space, land) | identical (space, land) |
+
+General gaps fixed in this run (no mod named in engine code): the `.rc` word splitter (§9, t34), a skirmish staging dialog
+without a game-type list in the smoke, the smoke's select all waiting for start forces that arrive later (t40), the
+`[port]` player cap 32 → 64 (`commands::kMaxPlayerSlots`, `sim::kMaxPlayers`; retail's PlayerList has no cap; Age of
+Legends' sandboxes make one player per faction, 50), and a listed story plot file that does not exist is skipped with
+retail's warning instead of failing the story start (STORY.md §2.1; FotR's Rimward sandbox lists a CIS plot it does not
+ship). **Not passed yet:** t41, t43, t44, t45 (and t42 for the look); one skirmish played to a result in the game and the
+retail comparison (t09) need a person or the coordinator's retail run.
