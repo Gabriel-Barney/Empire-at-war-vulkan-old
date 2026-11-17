@@ -25,6 +25,9 @@ target_include_directories(alamo_miniaudio SYSTEM PUBLIC "${ALAMO_MINIAUDIO_DIR}
 # helpers on the engine side (all data comes through the VFS as memory).
 target_compile_definitions(alamo_miniaudio PUBLIC MA_NO_FLAC MA_NO_ENCODING MA_NO_GENERATION)
 target_compile_features(alamo_miniaudio PRIVATE cxx_std_20)
+# tst1: vendored, built without alamo_engine_flags (/fp:precise), so the shared PCH (ALAMO_PCH, on without the compiler
+# cache) does not fit it: MSVC warned C4651 ('/D_M_FP_PRECISE' specified for precompiled header) on every fresh compile.
+set_property(TARGET alamo_miniaudio PROPERTY DISABLE_PRECOMPILE_HEADERS ON)
 if(MSVC)
   target_compile_options(alamo_miniaudio PRIVATE /W0)
 else()
