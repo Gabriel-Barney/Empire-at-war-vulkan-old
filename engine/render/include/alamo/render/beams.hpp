@@ -34,6 +34,9 @@ namespace alamo::render {
 
 // Unit-ability types that draw a beam (ability_types.hpp 30 / 31 / 55 / 56 / 58).
 inline constexpr uint8_t kBeamTractor = 30, kBeamEnergyWeapon = 31, kBeamSuperLaser = 55, kBeamLaserZap = 56, kBeamLeech = 58;
+// vis1 t08 (ABILITY_PARTICLES §5): Drain_Life (unit-ability type 69) draws one Drain_Effect_Name LightningEffect per victim and
+// no ribbon (a style without a texture draws its lightning only).
+inline constexpr uint8_t kBeamDrain = 69;
 inline constexpr float kBeamDotSize = 3.5f, kBeamDotColorScale = 0.7f;  // 0x37e650 / 0x1f9860
 inline constexpr uint32_t kBeamDotPeriod = 50;                           // counter period: 1/50 of the beam per tick
 inline constexpr float kBeamDefaultWidth = 10.0f;                        // [M] width <= 0 (0x271cd0 default untraced)
@@ -70,6 +73,7 @@ struct BeamStyle {
     int8_t dot_dir = 1;               // +1 owner -> target, -1 target -> owner
     std::string lightning;            // LightningEffect name ("" none)
     std::string start_bone;           // owner bone the beam starts at ("" = the owner position)
+    std::string end_bone;             // vis1 t08: target bone the beam ends at ("" = the target centre + z adjust)
     std::vector<std::string> bones;   // zap: Bone_Names (the one nearest the far end starts the beam)
     int32_t lifetime = 0;             // zap: ticks the beam lasts (Laser_Beam_Frames); 0 = while the ability lists it
     int32_t continuation = 0;         // super laser: ticks kept after the target is lost (Fire_Continuation x FPS)

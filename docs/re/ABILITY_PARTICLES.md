@@ -240,8 +240,18 @@ Done, render particles through `render::apply_battle_ability_fx` (`engine/render
   (presentation only). Bone lists are passed as comma-separated candidates; the particle attachment takes the first bone
   the model has.
 
-Not done (vis1 t08): `Projectile_Stun_Spawn_Effect` (the stun call in combat has no effect / source parameter),
-`Drain_Effect_Name` bolts, `Base_Shield_Penetration_Particle` (needs the dome hit point), `Heal_Range_Blob_Material`.
+### 10.2 Port (vis1 t08, 2026-11-17)
+
+Done, also without a CRC change (`render::apply_battle_ability_fx`):
+- `Projectile_Stun_Spawn_Effect`: `CombatSystem::stun_visual_events()` (victim + projectile of each successful stun of
+  a land stun detonation), one-shot at the status bones;
+- `Drain_Effect_Name`: `AppliedSpecialView::victims` of an applied Drain_Life, one lightning-only beam per victim
+  (`kBeamDrain`, `BeamStyle::end_bone`);
+- `Heal_Range_Blob_Material` / `Blob_Color`: `SnapshotJamming::heal_blobs`, drawn by `render::heal_range_blobs` under a
+  selected owner of the local player;
+- `Base_Shield_Penetration_Particle`: `CombatSystem::base_shield_contact()` (dome crossing and normal), a
+  `SimSnapshot::world_effects` entry synced with the decoration effects.
+The [port] / [M] choices are listed in `docs/PHASE4.md` (vis1 t08).
 
 ## 11. Function index
 

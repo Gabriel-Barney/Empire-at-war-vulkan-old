@@ -495,4 +495,62 @@ void test_ground_detonation_particle() {
     }
 }
 
+void test_stun_visuals() {
+    // vis1 t08 (ABILITY_PARTICLES §3): each victim a land stun detonation stuns is kept for the renderer
+    // (stun_visual_events: frame, victim, ProjectileDesc index, serial) - presentation only: not saved, not hashed.
+    ProjectileDesc shot;
+    shot.name = "Proj_Stun";
+    shot.max_speed = 10.0f;
+    shot.damage = 10.0f;
+    shot.max_flight_distance = 200.0f;
+    shot.stun = true;
+    shot.stun_frames = 90;
+    shot.stun_radius = 100.0f;
+    {
+        DetonationWorld d(GameMode::Land, shot, Vec3{142, 30, 0});
+        d.w.data.units.back().stunnable = true;
+        bool found = false;
+        (void)d.run(found);
+        const auto ev = d.w.sys->stun_visual_events();
+        CHECK(found && d.w.sys->stunned(2, d.w.frame));
+        CHECK(ev.size() == 1 && ev[0].victim == 2 && ev[0].projectile == 0 && ev[0].serial == 1 && ev[0].frame <= d.w.frame);
+        StateHasher before;
+        d.w.sys->hash_extended(before);
+        const std::vector<uint8_t> saved = combat_bytes(*d.w.sys);
+        ByteReader rd(saved);
+        CHECK(d.w.sys->read(rd));
+        StateHasher after;
+        d.w.sys->hash_extended(after);
+        CHECK(d.w.sys->stun_visual_events().empty() && before.digest() == after.digest() && combat_bytes(*d.w.sys) == saved);
+    }
+    {  // not STUNNABLE: no stun, nothing kept
+        DetonationWorld d(GameMode::Land, shot, Vec3{142, 30, 0});
+        bool found = false;
+        (void)d.run(found);
+        CHECK(found && !d.w.sys->stunned(2, d.w.frame) && d.w.sys->stun_visual_events().empty());
+    }
+}
+
+void test_base_shield_contact() {
+    // vis1 t08 (TRU1_A A2 step 3): the straddle segment's dome crossing and the dome's outward normal there, for the
+    // render particle; none for a unit that straddles no shield. A const read: the state hash does not move.
+    ShieldWorld s;
+    s.w.add(2, s.walker, 1, Vec3{500, 0, 0});  // on the wall
+    s.w.add(3, s.walker, 1, Vec3{100, 0, 0});  // deep inside
+    s.ticks(1);
+    CHECK(s.in(2) && !s.in(3));
+    StateHasher before;
+    s.w.sys->hash_extended(before);
+    Vec3 p{}, n{};
+    CHECK(s.w.sys->base_shield_contact(2, p, n));
+    const float ez = p.z / 0.3f;  // the dome: semi-axes 500, 500, 0.3 x 500 around the generator at the origin
+    CHECK(std::fabs(std::sqrt(p.x * p.x + p.y * p.y + ez * ez) - 500.0f) < 0.5f);
+    CHECK(std::fabs(std::sqrt(n.x * n.x + n.y * n.y + n.z * n.z) - 1.0f) < 1e-4f && n.x > 0.9f);
+    CHECK(std::fabs(p.x - 500.0f) <= 10.0f && std::fabs(p.y) < 1e-3f);
+    CHECK(!s.w.sys->base_shield_contact(3, p, n) && !s.w.sys->base_shield_contact(99, p, n));
+    StateHasher after;
+    s.w.sys->hash_extended(after);
+    CHECK(before.digest() == after.digest());
+}
+
 }  // namespace bo3split

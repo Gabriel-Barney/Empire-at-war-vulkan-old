@@ -104,9 +104,13 @@ bool App::render_frame() {
                                   nullptr, gview_.background);
     } else if (battle_view) {
         // story t13: no selection circles while a linked battle's P11 input block holds (UI.md §1.3, flag 0x140a28c91).
-        if (screen_ == Screen::Battle && !cinematic_hides_hud() && !linked_ui_.input_blocked())
+        if (screen_ == Screen::Battle && !cinematic_hides_hud() && !linked_ui_.input_blocked()) {
             bview_.set_selection_blobs(ui_.tactical_hud.selection_blobs());  // last HUD build's circles (one frame behind)
-        else bview_.set_selection_blobs({});  // load screen / attract demo: no selection
+            bview_.set_heal_selection(synced_selection());                   // vis1 t08: Force_Healing range blobs
+        } else {
+            bview_.set_selection_blobs({});  // load screen / attract demo: no selection
+            bview_.set_heal_selection({});
+        }
         // cu9g t03 bombing-run blob; ui3 t04: the reinforcement drop preview takes the same slot (one pick at a time).
         bview_.set_bombing_blob(screen_ != Screen::Battle ? std::nullopt : bombing_targeting_ ? bombing_blob_ : reinforce_blob_);
         const auto prep0 = Clock::now();

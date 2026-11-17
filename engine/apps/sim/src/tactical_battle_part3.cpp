@@ -492,6 +492,10 @@ void TacticalBattle::drive_animation(objects::ObjectStore& store, SimRng& rng, u
             // does not count that frame as moving: the path pops inside the locomotor (behaviour 1) before the IDLE service
             // (behaviour 7) of the same frame (MOVEMENT 3.5.1 step 6).
             in.host_turn = v.arrival_turn || v.arrival_turn_ended;
+            // bkx1 t04 (b0059, MOVEMENT §3.2 states 0x12 / 0x14): the walk's Walk_Transition clip, its start position and rate
+            in.wt_clip = v.wt_clip;
+            in.wt_pos = v.wt_pos;
+            in.wt_rate = v.wt_rate;
         }
         stats_.anim_plays += anim_->service_locomotor(*gm, u.id, in, cfg_.walk_speed_ratio, cfg_.min_move_anim_ratio, rng, gframe, &presence);
     }

@@ -87,6 +87,8 @@
   "outcome.planets_final": {"abs": 0, "why": "a planet is one discrete outcome; the retail runs already span the outcomes seen (Shola captured or not)"},
   "outcome.captures": {"abs": 1, "why": "planet captures per faction: one capture more or less than the retail envelope"},
   "outcome.owner_changes": {"abs": 1, "why": "total planet owner changes: one more or less than the retail envelope"},
+  "outcome.shola_captured": {"abs": 0.1, "why": "b0107 (Gabriel 2026-11-12): whether the Rebel takes Shola within the scenario (1 / 0; over seeds the mean is the capture rate). Single run: exact against the retail runs; seeds: the rate within 0.1 of retail's plus the z * se allowance (retail captured it in every reference run)"},
+  "outcome.shola_capture_tick": {"abs": 150, "rel": 0.05, "why": "b0107 (Gabriel 2026-11-12): the tick of the first Rebel capture of Shola (the a2m exit metric; seeds without a capture leave it out). The capture follows the Rebel attack plan's timing and its space and land battles; 5% (at least 150 ticks, five seconds of galactic time) on top of the retail envelope. Retail: 7498 in the three reader-2 runs; the reader-1 run 20261027-101057 shows 9898 because it missed 577 ticks (a2m t03: a 2026-11-12 retail rerun gave 7498 again), which widens the envelope upwards only"},
   "outcome.units_final": {"abs": 2, "rel": 0.2, "why": "units alive at the end of a skirmish: production and losses both depend on AI timing; 20% (at least 2 units)"},
   "outcome.units_lost": {"abs": 2, "rel": 0.25, "why": "units destroyed during the skirmish: 25% (at least 2 units)"},
   "outcome.battle_ended": {"abs": 0, "why": "whether the battle ends before the tick limit is a discrete outcome"},

@@ -1348,7 +1348,10 @@ struct PlayerAi final : GoalModeHooks, ContextModeServices {
     // A2h t06 (A2H_T06_TACTICAL_ETA §4) [H]: retail skips the maintenance time-drop outside galactic mode, so 0 is exact,
     // not a stand-in (the goal system's time-drop never fires: uses_budget() false and this 0).
     float elapsed_eta(const Goal&) override { return 0.0f; }
-    int32_t quota_players() override {
+    int32_t quota_players() override {  // the goal quota's N - H (bkx1 t01: the host's global PlayerList count)
+        return w->cfg.quota_players >= 0 ? w->cfg.quota_players : perception_players();
+    }
+    int32_t perception_players() const {  // the battle's players - humans (the zone recompute's K, PHASE2_ANSWERS Q11)
         int32_t n = 0, humans = 0;
         for (const PerceptionPlayerInfo& p : w->w.players) {
             ++n;
@@ -1470,7 +1473,7 @@ void PlayerAi::first_service(int64_t) {
         paths = w->zones;
         recompute_paths();
         paths_built = true;
-        next_recompute = galactic::first_recompute_due(static_cast<int32_t>(w->mode_frame), player, quota_players());
+        next_recompute = galactic::first_recompute_due(static_cast<int32_t>(w->mode_frame), player, perception_players());
     }
     for (size_t i = 0; i < w->facts.size(); ++i) w->admit(*this, i, false);
     w->decide(player, "targets " + std::to_string(slots.size()) + " free store " + std::to_string(fs.size()));
@@ -3979,6 +3982,9 @@ bool TacticalAiWorld::start(std::vector<std::string>* diagnostics) {
         gcfg.reaccept_old_candidates = true;
         // skai t15 (SKAI_T15_TARGET_CHOICE Q3 [H]): a failed re-evaluation keeps the incumbent's desire; land only for now [port].
         gcfg.keep_desire_on_failed_eval = w.cfg.mode == TacticalMode::Land;
+        // bkx1 t01 (b0123, BKX1_CADENCE_RE §1 / §3 [H]): the battle goal systems run the galactic cadence (Service 0x6cacd0,
+        // Init 0x6ca1f0): the first quota seeded from sources x max(1, targets), each slice ends at the quota.
+        gcfg.retail_cadence = w.cfg.retail_cadence;
         p.ctx.goals.init(w.defs, std::move(sources), &p, &p.ctx.learning, &p.ctx.templates, &w.rng.synced(), gcfg);
         p.ctx.attach(&p, [&w, &p](const std::string& eq, double& out) { return w.evaluate(p.player, eq, -1, out); });
         if (w.cfg.stagger) {  // OPT2 t01: a fixed planning phase from the player's AI ordinal (players in index order)

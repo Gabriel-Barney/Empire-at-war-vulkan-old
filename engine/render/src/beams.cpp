@@ -434,14 +434,21 @@ void BeamGeometry::build(std::span<const BeamDraw> draws, const ViewMatrices& vi
     };
     for (const BeamDraw& d : draws) {
         const BeamInstance& b = d.beam;
-        if (!beam_ribbon(b, d.u_offset, vertices, group(b.style.texture))) {
-            ++skipped;
-            continue;
+        if (b.style.texture.empty()) {  // vis1 t08: a lightning-only beam (Drain_Life)
+            if (!d.lightning) {
+                ++skipped;
+                continue;
+            }
+        } else {
+            if (!beam_ribbon(b, d.u_offset, vertices, group(b.style.texture))) {
+                ++skipped;
+                continue;
+            }
+            ++ribbons;
+            for (float f : d.dots)
+                if (beam_dot(b, f, vertices, group(kBeamDotTexture))) ++dots;
+            if (!d.lightning) continue;
         }
-        ++ribbons;
-        for (float f : d.dots)
-            if (beam_dot(b, f, vertices, group(kBeamDotTexture))) ++dots;
-        if (!d.lightning) continue;
         for (const BoltDraw& bolt : d.bolts) {
             const std::vector<Float3> pts = lightning_points(*d.lightning, b.start, b.end, bolt.seed, d.time, bolt.phase);
             if (pts.size() < 2) continue;

@@ -503,6 +503,9 @@ UnitView MovementSystem::view(ObjectId id) const {
     v.deploy_state = u->deploy;  // S8 t11
     v.deploy_clip = u->dclip;
     v.walk_deployed = u->walk_deployed;  // s78n t26.1
+    v.wt_clip = u->m.wt_clip;  // bkx1 t04 (b0059)
+    v.wt_pos = u->m.wt_pos;
+    v.wt_rate = u->m.wt_rate;
     v.turret_elevation = u->tcur[1];  // S8 t24
     v.turret_yaw = u->tcur[2];
     if (u->d.turret && u->taim) {  // s78f t03: the aim state (0x386170 equality: negatives wrapped by +360, within 0.0001)

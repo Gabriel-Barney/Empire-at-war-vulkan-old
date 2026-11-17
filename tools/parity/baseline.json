@@ -1,5 +1,5 @@
 {
- "commit": "fb7288e8",
+ "commit": "2bcc1e2a+bkx1",
  "scenarios": {
   "geonosis_skirmish": {
    "references": [
@@ -29,7 +29,7 @@
     "econ.credits_at_3600[Empire]": "PASS",
     "econ.credits_at_3600[Rebel]": "PASS",
     "econ.credits_at_5400[Empire]": "PASS",
-    "econ.credits_at_5400[Rebel]": "FAIL",
+    "econ.credits_at_5400[Rebel]": "PASS",
     "outcome.battle_ended": "PASS",
     "outcome.units_final[Empire]": "PASS",
     "outcome.units_final[Rebel]": "PASS",
@@ -47,8 +47,7 @@
      "PASS": 3
     },
     "income": {
-     "FAIL": 1,
-     "PASS": 5
+     "PASS": 6
     }
    }
   },
@@ -135,6 +134,8 @@
     "outcome.planets_final[Empire]": "PASS",
     "outcome.planets_final[Rebel]": "FAIL",
     "outcome.planets_final[Underworld]": "FAIL",
+    "outcome.shola_capture_tick[Rebel]": "PASS",
+    "outcome.shola_captured[Rebel]": "PASS",
     "travel.hop_ticks[Rebel:CORELLIA->KUAT]": "PASS",
     "travel.hop_ticks[Rebel:CORELLIA->TATOOINE]": "PASS",
     "travel.hop_ticks[Rebel:KAMINO->MONCALIMARI]": "PASS",
@@ -181,7 +182,7 @@
     },
     "battle outcomes": {
      "FAIL": 2,
-     "PASS": 5
+     "PASS": 7
     },
     "diagnostic": {
      "INFO": 1

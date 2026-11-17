@@ -335,6 +335,41 @@ void SimInstanceBuilder::build(const InterpolatedFrame& frame, SimModelSource& m
                 }
             }
         }
+        // bkx1 t05 (b0019 / b0020, BKX1_RENDER_RE §1): the SimpleSpace engine glow - the engine particle proxies by name
+        // prefix (pe / pte / pi) hidden or shown on top of the mask above (engine_glow: TURBO picks pte over pe, engines
+        // off hide G, ion stun shows pi). Only pi is ever un-hidden here: pe / pte keep the mask above, so a destroyed engine
+        // hard point's Hide_Engine_Particles stays. [port] the glow brightness (EngineGlow::tint, SystemScalar::Color) is
+        // not applied.
+        if ((o.engine_flags & kEngineGlowUnit) != 0 && m->asset && s.vis.layout()) {
+            const EngineGlow glow = engine_glow(o.engine_flags, o.engine_timer_frames, o.engine_speed_ratio,
+                                                o.ability_active(9), (o.flags & kSnapDying) != 0);  // 9: TURBO
+            const assets::ModelAsset& ma = *m->asset;
+            const HardpointLayout& lay = *s.vis.layout();
+            if (glow.applies && (glow.hide | glow.show) != 0) {
+                if (!s.use_combined) {
+                    const std::span<const uint8_t> base = s.vis.mask();
+                    s.combined.assign(base.begin(), base.end());
+                }
+                bool changed = false;
+                for (size_t p = 0; p < ma.proxies.size() && p < lay.proxies; ++p) {
+                    const size_t sub = lay.proxy_index(static_cast<uint32_t>(p));
+                    if (sub >= s.combined.size()) continue;
+                    const uint8_t g = particle_glow_group(ma.proxies[p].name);
+                    const uint8_t want = (g & glow.hide) != 0                ? uint8_t{1}
+                                         : (g & glow.show & kGlowPi) != 0 ? uint8_t{0}
+                                                                           : s.combined[sub];
+                    if (want != s.combined[sub]) {
+                        s.combined[sub] = want;
+                        changed = true;
+                    }
+                }
+                if (changed || s.use_combined) {
+                    s.use_combined = true;
+                    in.mesh_hidden = s.combined;
+                    st.engine_glow_changed += changed ? 1u : 0u;
+                }
+            }
+        }
         const bool bg = (o.flags & kSnapBackground) != 0;
         std::vector<Instance>& dst = bg ? background : main;
         dst.push_back(in);

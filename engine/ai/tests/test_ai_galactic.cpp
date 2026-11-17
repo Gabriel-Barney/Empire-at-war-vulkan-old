@@ -8,6 +8,7 @@ int main(int argc, char** argv) {
         if (std::strcmp(argv[i], "--write-golden") == 0) g_write_golden = true;
     test_cadence();
     test_goal_pass_cadence();  // a2m r2
+    test_goal_quota_players();  // bkx1 t01
     test_goal_target_walk_order();  // gai3 t06
     test_desire_and_hysteresis();
     test_goal_reservations();

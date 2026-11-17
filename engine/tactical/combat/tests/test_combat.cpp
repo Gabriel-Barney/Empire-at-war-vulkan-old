@@ -124,6 +124,8 @@ int main(int argc, char** argv) {
     test_surface_fx_converted_and_save();
     test_surface_fx_two_instances();
     test_ion_stun_water_kill();  // trn1 t04
+    test_stun_visuals();         // vis1 t08
+    test_base_shield_contact();  // vis1 t08
     test_burning_speed_factor();  // trn1 t05
     test_turret_slew();           // r1b t10
     if (bench) bench_modifiers();

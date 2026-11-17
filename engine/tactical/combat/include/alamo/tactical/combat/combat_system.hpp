@@ -1022,6 +1022,16 @@ struct HardpointEvent {
     int32_t explosion_type = -1, breakoff_type = -1;
 };
 
+// vis1 t08 (ABILITY_PARTICLES §3, presentation only: never hashed, saved or read by the sim): one successful stun of a
+// land stun detonation's victim, with the detonating projectile's ProjectileDesc index (its type's
+// Projectile_Stun_Spawn_Effect plays on the victim, one per stun call). Serial 1, 2, ... (the host's cursor).
+struct StunVisualEvent {
+    uint32_t frame = 0;
+    ObjectId victim = kNoObject;
+    uint32_t projectile = 0;
+    uint32_t serial = 0;
+};
+
 // One applied Take_Damage call (for the tactical AI's damage tracking). Filled in call order inside
 // the serial phases (delayed damage, unit updates, projectile commit) and by host calls; cleared at
 // the start of each tick. Hits stopped by the gates or cancelled by listeners are not reported.
@@ -1439,6 +1449,12 @@ public:
     // (s78n t19: named apart from remove_unit(id), the host's removal of a unit from the combat system.)
     void remove_from_world(ObjectId id, ObjectId killer, uint32_t frame);
     std::span<const HardpointEvent> hardpoint_events() const { return hp_events_; }  // this tick
+    // vis1 t08: the stun visuals of the last kStunVisualKeepFrames frames (presentation only; record order).
+    static constexpr uint32_t kStunVisualKeepFrames = 64;
+    std::span<const StunVisualEvent> stun_visual_events() const { return stun_visuals_; }
+    // vis1 t08 (TRU1_A A2 step 3, presentation only, const): where the unit's straddle segment crosses the dome of the
+    // shield it straddles (base_shield_straddled), with the dome's outward normal there; false when it straddles none.
+    bool base_shield_contact(ObjectId id, Vec3& point, Vec3& normal) const;
     std::span<const SmokeEvent> smoke_events() const { return smoke_events_; }      // this tick
     std::span<const DamageEvent> damage_events() const { return damage_events_; }   // this tick (A1 AI)
     std::span<const HitEvent> hit_events() const { return hit_events_; }            // this tick (S10-int, R4)
@@ -2143,6 +2159,8 @@ private:
     std::vector<Delayed> delayed_;
     std::vector<DeathEvent> deaths_;
     std::vector<HardpointEvent> hp_events_;
+    std::vector<StunVisualEvent> stun_visuals_;  // vis1 t08: presentation only (not hashed / saved)
+    uint32_t stun_visual_serial_ = 0;
     std::vector<SmokeEvent> smoke_events_;
     std::vector<DamageEvent> damage_events_;
     std::vector<HitEvent> hit_events_;  // S10-int
@@ -2174,6 +2192,8 @@ private:
     void evaluate_base_shield(Unit& s, uint32_t frame);
     bool straddles_base_shield(const Unit& u, const Unit& s) const;
     bool dome_segment(const Unit& s, Vec3 a, Vec3 b, float& t) const;
+    // Straddles_Shield's dome ray (the segment from +e to -e through the unit's target point): its ends.
+    void straddle_segment(const Unit& u, const Unit& s, Vec3& a, Vec3& b) const;
     void dome_sweep(const Projectile& p, const ProjectileDesc& pd, Vec3 delta, SweepHit& best) const;
     void death_spawns(Unit& v, uint32_t frame);  // Die step 7 (respawn, Destruction_Survivors)
     bool effect_match(const Unit& v, uint64_t mask, const std::vector<int32_t>* types) const;

@@ -918,26 +918,8 @@ PlayerAi::PlayerAi(GalacticAiWorld::Impl* world, int32_t p, const AiPlayerTypeDe
     paths.set_background(world->cfg.path_latency, world->cfg.background);  // OPT2 t02
 }
 
-// a2m r2 (A2M_R2_RE_A §2.1) [H]: the goal quota's cap divides by N - H, N = the whole PlayerList. Create_Default_Players
-// 0x293390 puts the session players first, then one player for every faction of the faction table that has no player
-// yet, in faction order; players are never removed. H = the active human players. (FoC: 8 factions, so HotM gives 8 - 1.)
-// A faction defined twice under one name counts once [port].
-int32_t PlayerAi::quota_players() {
-    const auto players = w->sim.players();
-    const auto& factions = w->sim.rules().factions;
-    int32_t n = 0, humans = 0;
-    for (const gal::PlayerState& ps : players) {
-        ++n;
-        humans += ps.human ? 1 : 0;
-    }
-    for (size_t f = 0; f < factions.size(); ++f) {
-        bool seen = false;
-        for (size_t g = 0; g < f && !seen; ++g) seen = ascii_iequals(factions[g].name, factions[f].name);
-        for (const gal::PlayerState& ps : players) seen = seen || ps.faction == f;
-        n += seen ? 0 : 1;
-    }
-    return n - humans;
-}
+// a2m r2 (A2M_R2_RE_A §2.1) [H]: the goal quota's cap divides by N - H over the whole PlayerList (goal_quota_players).
+int32_t PlayerAi::quota_players() { return goal_quota_players(w->sim); }
 
 // Path-finder stagger K (execution slot 6, PHASE2_ANSWERS Q11): the session players minus the humans [M], unchanged by
 // the a2m r2 PlayerList reading (not re-checked for this count).
@@ -3248,6 +3230,13 @@ std::vector<GalacticAiTypeInfo> make_galactic_ai_type_info(const objects::GameOb
     }
     fill_category_masks(out, &types.enums().get(objects::EnumId::GameObjectCategory));  // q6 t03: the loaded enum
     return out;
+}
+
+int32_t goal_quota_players(const galactic::GalacticSim& sim) {
+    std::vector<QuotaPlayer> players;
+    for (const gal::PlayerState& ps : sim.players()) players.push_back({ps.faction, ps.human});
+    const auto& factions = sim.rules().factions;
+    return goal_quota_players(players, factions.size(), [&factions](size_t f) { return std::string_view(factions[f].name); });
 }
 
 }  // namespace alamo::ai

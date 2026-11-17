@@ -7,6 +7,7 @@
 //   * snapshot plumbing: SnapshotJamming::is_jammed, digest sensitivity (and unchanged when empty), interpolate() copies it
 //   * vis1 t06 AbilityFxTracker (ability_fx.hpp): state effects once per (target, percent), one-shots with their own
 //     fx_seq until Particle_Lifetime_Frames pass or the target leaves, missing targets skipped
+//   * vis1 t08 heal_range_blobs (selected local-player owners only) and the snapshot's heal blobs / world effects
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -246,6 +247,39 @@ static void test_ability_fx() {
     CHECK(t.live() == 2);
 }
 
+// vis1 t08: Force_Healing range blobs (§8) only under a selected, drawable owner of the local player, colour alpha 1; the
+// snapshot's heal blobs and world effects reach the digest and the interpolated frame.
+static void test_heal_blobs_and_world_effects() {
+    render::InterpolatedFrame f;
+    f.objects = {object(1, 0, 10, 20, 0), object(2, 1, 50, 0, 0), object(3, 0, 90, 0, 0, render::kSnapDying), object(4, 0, 0, 0, 0)};
+    render::SnapshotJammer h = jammer(1, 0, 5.0f, true);
+    h.blob_material = "Reinforcement_Point_Radius_Overlay";
+    f.jamming.heal_blobs = {h, jammer(2, 1, 5.0f, false), jammer(3, 0, 5.0f, true), jammer(4, 0, 5.0f, true)};
+    const uint32_t sel[] = {1, 2, 3};  // 4 is not selected, 2 is not ours, 3 is dying
+    std::vector<render::JamBlob> b = render::heal_range_blobs(f, sel, 0);
+    CHECK(b.size() == 1);
+    if (b.size() == 1) {
+        CHECK(b[0].jammer == 1 && b[0].center.x == 10.0f && b[0].center.y == 20.0f && b[0].half_size == 5.0f);
+        CHECK(b[0].material == "Reinforcement_Point_Radius_Overlay" && b[0].color[0] == 200.0f / 255.0f && b[0].color[3] == 1.0f);
+    }
+    CHECK(render::heal_range_blobs(f, {}, 0).empty() && render::heal_range_blobs(f, sel, 1).size() == 1);
+    render::SimSnapshot s;
+    s.objects = f.objects;
+    const uint64_t d0 = s.digest();
+    s.jamming.heal_blobs = {h};
+    const uint64_t d1 = s.digest();
+    render::SimWorldEffect w;
+    w.key = render::shield_penetration_key(4);
+    w.asset = "p_Shield_Penetration_Generic.alo";
+    w.position = {500, 0, 3};
+    s.world_effects = {w};
+    const uint64_t d2 = s.digest();
+    CHECK(d0 != d1 && d1 != d2);
+    render::InterpolatedFrame out;
+    render::interpolate(nullptr, s, 1.0f, render::InterpMode::Original, out);
+    CHECK(out.world_effects.size() == 1 && out.world_effects[0].key == ((4ull << 8) | 2u) && out.jamming.heal_blobs.size() == 1);
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     log::set_min_level(log::Level::Error);
@@ -254,6 +288,7 @@ int main() {
     test_model();
     test_snapshot();
     test_ability_fx();
+    test_heal_blobs_and_world_effects();  // vis1 t08
     if (g_fail) {
         std::printf("alamo_render_jam_tests: %d FAILED\n", g_fail);
         return 1;

@@ -290,4 +290,56 @@ void HardpointVisibility::recompute() {
     }
 }
 
+// ---- bkx1 t05: engine glow groups (BKX1_RENDER_RE §1) ----------------------------------------------------------------
+
+uint8_t particle_glow_group(std::string_view n) {
+    const auto starts = [&](std::string_view p) {
+        if (n.size() < p.size()) return false;
+        for (size_t i = 0; i < p.size(); ++i)
+            if (ascii_to_upper(n[i]) != ascii_to_upper(p[i])) return false;
+        return true;
+    };
+    uint8_t g = 0;
+    if (starts("pe")) g |= kGlowPe;
+    if (starts("pte")) g |= kGlowPte;
+    if (starts("pi")) g |= kGlowPi;
+    return g;
+}
+
+float engine_glow_flicker(uint32_t timer_frames) {
+    // n = a fixed value in [-1, 1] per lattice point x = 2 x frames left (murmur-style integer hash) [port]
+    uint32_t x = timer_frames * 2u;
+    x ^= x >> 16;
+    x *= 0x7feb352du;
+    x ^= x >> 15;
+    x *= 0x846ca68bu;
+    x ^= x >> 16;
+    const float n = static_cast<float>(x & 0xFFFFu) / 32767.5f - 1.0f;
+    return (n * 0.5f + 0.5f) * 0.2f;
+}
+
+EngineGlow engine_glow(uint8_t flags, uint32_t timer_frames, float speed_ratio, bool turbo, bool dying) {
+    EngineGlow e;
+    if ((flags & kEngineGlowUnit) == 0) return e;
+    e.applies = true;
+    const uint8_t g = turbo ? kGlowPte : kGlowPe, other = turbo ? kGlowPe : kGlowPte;
+    e.hide = other;
+    e.tint_group = g;
+    if (dying) {
+        e.hide = kGlowPe | kGlowPte;
+    } else if ((flags & kEngineGlowOff) != 0 && timer_frames == 0) {
+        e.hide |= g;
+    } else if ((flags & kEngineGlowOff) != 0) {
+        e.show = g;
+        e.tint = timer_frames == 1 ? 1.0f : engine_glow_flicker(timer_frames);
+        e.tint_seconds = timer_frames == 1 ? 0.1f : 0.0f;
+    } else {
+        e.show = g;
+        e.tint = std::clamp(0.8f * speed_ratio + 0.2f, 0.0f, 1.0f);
+    }
+    if ((flags & kEngineGlowIonStun) != 0) e.show |= kGlowPi;
+    else e.hide |= kGlowPi;
+    return e;
+}
+
 }  // namespace alamo::render

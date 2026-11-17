@@ -56,7 +56,8 @@ using BeamBoneFn = std::function<bool(const SnapshotObject& o, std::string_view 
 // energy weapon ends at the target centre).
 std::vector<BeamInstance> beams_from_frame(const InterpolatedFrame& frame, const BeamStyleTable* styles, const BeamBoneFn& bone);
 
-// Stable identity of a beam across frames: owner id and kind; a zap also carries its battle frame (one-shot).
+// Stable identity of a beam across frames: owner id and kind; a zap also carries its battle frame (one-shot), a drain bolt
+// its victim (one per victim).
 uint64_t beam_key(const SnapshotBeam& b);
 
 #ifdef ALAMO_SIM_HAVE_BATTLES

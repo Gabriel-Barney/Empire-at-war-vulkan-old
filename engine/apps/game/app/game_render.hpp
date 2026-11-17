@@ -217,6 +217,9 @@ public:
     // ShadowBlobMaterials entry (vis1 t03: the blob's own material, UI.md 1.3; unknown / empty: the first Selection*
     // material); land: on the terrain under the unit (ui::selection_blob_ground_instance). Set before prepare().
     void set_selection_blobs(std::span<const ui::SelectionBlob> blobs) { blobs_.assign(blobs.begin(), blobs.end()); }
+    // vis1 t08: the local player's selected object ids (ascending; empty in a cinematic / outside the battle screen): the
+    // Force_Healing range blob is drawn under a selected owner (also while an ability target is picked). Set before prepare().
+    void set_heal_selection(std::vector<uint32_t> ids) { heal_sel_ = std::move(ids); }
     // cu9g t03: the bombing-run targeting blob of this frame (HUD_GAPS §9.5; nullopt = none). Set before prepare().
     void set_bombing_blob(const std::optional<render::JamBlob>& blob) { bombing_blob_ = blob; }
     // ui2 t08 (STORY_PRESENTATION_LUA.md 4.1 / 4.2): the story script's Play_Lightning_Effect bolts of this frame (extra beams
@@ -278,6 +281,8 @@ private:
     std::unique_ptr<render::StreamedSimModels> models_;
     std::unique_ptr<render::SimInstanceBuilder> builder_;
     render::InterpolatedFrame frame_;
+    std::vector<render::SimWorldEffect> world_fx_;  // vis1 t08: decoration effects + the frame's (shield penetration)
+    std::vector<uint32_t> heal_sel_;                  // vis1 t08: set_heal_selection
     std::vector<render::Instance> bg_;
     render::SimInstanceStats istats_;
     ui::TacticalCameraController camera_;
