@@ -500,13 +500,16 @@ Retail run `modc_t45` (2026-11-17, screenshots in the kit's `out\`, not committe
   loader galaxy (empty radar, "Initializing Galactic Conquest"), and a Lua year popup (22 / 21 / 20 / 19 BBY) appears.
   The choice calls `StoryUtil.LoadCampaign` (the `Template_Load_Campaign` event's `LOAD_CAMPAIGN` reward, campaign
   `<PLANET>_Era_<n>_<FACTION>`). About 30 s later the full galaxy (about 100 planets, pop 66/826) replaces it, with no
-  game end. The port's one-planet start is that loader. What the port lacks is the load: nothing takes the queued
-  `LOAD_CAMPAIGN` request (**t45**). `GCProgressiveStateMachine.lua` (the missing `FotRProgressiveStates`) is a leftover
-  that no campaign uses.
+  game end. The port's one-planet start is that loader. The load was missing: nothing took the queued `LOAD_CAMPAIGN`
+  request. Since **t45** the host starts the named campaign on the next frame (STORY_REWARDS_GALACTIC §2.1, retail
+  0x44a3f0). `GCProgressiveStateMachine.lua` (the missing `FotRProgressiveStates`) is a leftover that no campaign uses.
+  Whether the year popup (option objects picked with the `Event_Trigger` fleet's ability) works in the port is a
+  played-game check.
 - EAW-Remake: the station's ship buttons stay grey and unbuildable at station level 2 too (clicking TIE does nothing);
-  no timer unlock at 3.5 min. The tooltips name no missing requirement. TIE and Arquitens carry
-  `Required_Star_Base_Level 2` and `Required_Special_Structures E_Shipyard_1`, so retail's tactical check reads more than
-  `Tactical_Build_Prerequisites` (**t50**: which field, from the binary).
+  no timer unlock at 3.5 min. The tooltips name no missing requirement. The binary settles that tactical production never
+  reads `Required_*`, `Tech_Level` or `Build_Initially_Locked` (SKIRMISH_SETUP §3), and the port does the same. Left in
+  retail's code: a full `Tactical_Units` queue, or a build limit counting queued units; the mod sets `Pay_As_You_Go`, so
+  credits cannot grey a button (**t50**, needs a trace of retail).
 
 **General gaps found and fixed** (none names a mod; base-FoC goldens unchanged):
 
@@ -621,13 +624,14 @@ Explained without a port change (2026-11-17):
   keyed by upper-case planet type names. The port gave story and AI scripts the type name as written (`Trandosha`); the
   original stores every type name upper-cased (OBJECT_TYPES §3.1), so `Get_Type().Get_Name()` is now upper-case in every
   Lua VM, not only in object scripts. No golden moved; Thrawn's Revenge's AI changed slightly (numbers in the table).
-  Still open in t45: `CloneWars_Medium_Republic` is a loader campaign whose year choice loads the era campaign through
-  `LOAD_CAMPAIGN` (retail run modc_t45, §9); the port never takes that request.
+  Fixed in t45 too: `CloneWars_Medium_Republic` is a loader campaign whose year choice loads the era campaign through
+  `LOAD_CAMPAIGN` (retail run modc_t45, §9). The host now starts that campaign (a general gap: every story
+  `LOAD_CAMPAIGN`, the stock tutorials' included, was dropped before).
 - **t49** (fixed) Fall of the Republic sets `MP_Default_Free_Starting_Units` to no: the slots start without forces, so the
   port's buy screen is skipped (a bought fleet would never reach the map; SKIRMISH_SETUP §2.7). Space smoke 91 / 91.
 - **t48** (fixed) a map-battle slot whose faction has no forces starts empty (`SkirmishSetup::empty_slots_ok`); Age of
   Legends' land smoke plays to the battle end (52 / 52).
 - **t47** (done) the staging dialog keeps the last faction and colour (`game_options.txt`) and applies the AI slot rule.
 
-**Not passed yet:** t45 (`LOAD_CAMPAIGN` load), t50 (Remake tactical build locks); one skirmish played to a result in the
-game needs a person. The retail comparison (t09) ran on 2026-11-17 (§9).
+**Not passed yet:** t50 (Remake ship buttons grey in retail: needs a trace of retail); one skirmish played to a result in
+the game, and FotR's year popup, need a person. The retail comparison (t09) ran on 2026-11-17 (§9).

@@ -155,6 +155,10 @@ bool make_skirmish_galaxy(const GameData& data, const SkirmishSetup& s, galactic
 // Is_Playable faction in FactionFiles.xml order; AI slot: the first Is_Playable faction other than `human` (FoC: Rebel,
 // Empire, the port's old built-in defaults). "" when the data has none.
 std::string default_skirmish_faction(const galactic::GalacticRules& rules, bool ai_slot, std::string_view human = {});
+// modc t45 (STORY_REWARDS_GALACTIC §2.1, retail 0x479320): the campaign a LOAD_CAMPAIGN reward starts. `name` (any case)
+// selects a campaign's Campaign_Set; the result is the member of that set whose Starting_Active_Player is the faction at
+// index `side` of the faction list (FactionFiles load order). nullptr when the name, the faction or the member is unknown.
+const data::CampaignDef* load_campaign_target(const GameData& data, std::string_view name, int32_t side);
 // `s` with its empty slot factions replaced by default_skirmish_faction.
 SkirmishSetup resolve_skirmish_factions(const galactic::GalacticRules& rules, SkirmishSetup s);
 // q6 t08: the default forces make_skirmish_galaxy uses, as type names the data defines (skirmish_rules.hpp

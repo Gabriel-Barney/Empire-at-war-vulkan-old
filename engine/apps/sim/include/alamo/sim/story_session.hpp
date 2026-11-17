@@ -373,13 +373,16 @@ struct StoryTutorialState {
     }
 };
 
-// LOAD_CAMPAIGN (§2.1): retail stores a pending campaign record and lets the end-of-game flow start it. The port queues the
-// request here; the game host takes it (StorySession::take_load_campaign) when the current game ends.
+// LOAD_CAMPAIGN (§2.1): retail stores a pending campaign record; the story controller's per-frame update ends the running
+// game and starts it (modc t45). The port queues the request here; the game host takes it (StorySession::take_load_campaign)
+// on the next frame and starts that campaign.
 struct StoryLoadCampaign {
     uint64_t frame = 0;
-    std::string name;       // Reward_Param1, as written
-    int32_t side = 0;       // Reward_Param2 (0 rebel, non-zero empire; the Underworld uses 6)
+    std::string name;       // Reward_Param1, as written (selects the campaign set)
+    int32_t side = 0;       // Reward_Param2: a faction index (faction list order); the set member it starts as active player
     std::string upper_name; // the name upper-cased (the campaign table key)
+    int32_t difficulty = -1;  // Reward_Param3 when 0..2 (the new game's difficulty), else -1 (difficulty 1)
+    int32_t tech = -1;        // Reward_Param4 when 0..5 (every player's tech level), else -1 (the campaign's own)
 };
 
 class StorySession {

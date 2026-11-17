@@ -154,7 +154,7 @@ static std::string sty1_plot() {
     p += ev("Move_Enemy", "MOVE_FLEET", {"PlanetD", "PlanetB", "FILTER_ENEMY_ONLY"});
     p += ev("No_Direct", "DISABLE_DIRECT_INVASION", {});
     p += ev("Spawn_Noop", "SET_PLANET_SPAWN", {"PlanetA"});
-    p += ev("Load", "LOAD_CAMPAIGN", {"Tutorial_Campaign", "1"});
+    p += ev("Load", "LOAD_CAMPAIGN", {"Tutorial_Campaign", "1", "2", "7"});  // modc t45: P3 kept (0..2), P4 7 dropped (0..5)
     p += ev("Tut_Player", "TUTORIAL_PLAYER", {"Empire"});
     p += ev("Tut_Done", "FINISHED_TUTORIAL", {"Tutorial_One"});
     p += ev("Tut_Done2", "FINISHED_TUTORIAL", {"Tutorial_One"}, "Tut_Done");
@@ -263,7 +263,7 @@ static void test_sty1_rewards() {
         // LOAD_CAMPAIGN.
         CHECK(ss->pending_load_campaign() && ss->pending_load_campaign()->upper_name == "TUTORIAL_CAMPAIGN" && ss->pending_load_campaign()->side == 1);
         const auto taken = ss->take_load_campaign();
-        CHECK(taken && !ss->pending_load_campaign());
+        CHECK(taken && !ss->pending_load_campaign() && taken->difficulty == 2 && taken->tech == -1);
         // DISABLE_REINFORCEMENTS (Underworld only).
         CHECK(!ss->reinforcements_enabled(pUnder) && ss->reinforcements_enabled(pEmpire));
         // DISABLE_RETREAT (ui2 t06): P1 faction, P2 flag; Underworld only.

@@ -216,6 +216,15 @@ bool StorySession::apply_sty1_reward(int32_t plot_player, bool tactical, const s
         l.side = atoi_text(p2);
         l.upper_name = p1;
         ascii_upper_in_place(l.upper_name);
+        // modc t45 (§2.1): P3 kept only when 0..2 (difficulty), P4 only when 0..5 (tech level); else -1.
+        if (!p3.empty()) {
+            const int32_t d = atoi_text(p3);
+            if (d >= 0 && d < 3) l.difficulty = d;
+        }
+        if (const std::string p4 = trimmed(params, 3); !p4.empty()) {
+            const int32_t t = atoi_text(p4);
+            if (t >= 0 && t < 6) l.tech = t;
+        }
         load_campaign_ = std::move(l);
     } else if (type == "TUTORIAL_PLAYER") {
         // §2.2: marks the faction's player (+0x3c0 := 1); never cleared.

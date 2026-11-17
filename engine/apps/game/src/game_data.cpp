@@ -158,6 +158,17 @@ std::string default_skirmish_faction(const galactic::GalacticRules& rules, bool 
     return {};
 }
 
+const data::CampaignDef* load_campaign_target(const GameData& data, std::string_view name, int32_t side) {
+    const data::CampaignDef* named = nullptr;
+    for (const data::CampaignDef& c : data.db.campaigns())
+        if (!named && ascii_iequals(c.name, name)) named = &c;
+    if (!named || side < 0 || static_cast<size_t>(side) >= data.rules.factions.size()) return nullptr;
+    const std::string& faction = data.rules.factions[static_cast<size_t>(side)].name;
+    for (const data::CampaignDef& c : data.db.campaigns())
+        if (ascii_iequals(c.campaign_set, named->campaign_set) && ascii_iequals(c.starting_active_player, faction)) return &c;
+    return nullptr;
+}
+
 SkirmishSetup resolve_skirmish_factions(const galactic::GalacticRules& rules, SkirmishSetup s) {
     if (s.human_faction.empty()) s.human_faction = default_skirmish_faction(rules, false);
     if (s.ai_faction.empty()) s.ai_faction = default_skirmish_faction(rules, true, s.human_faction);

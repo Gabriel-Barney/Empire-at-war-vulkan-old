@@ -135,7 +135,12 @@ fs::path make_data() {
                "<Campaigns><Campaign Name=\"MF_GC\"><Locations>MF_Planet</Locations>"
                "<AI_Player_Control> Chiss, ChissCampaignAI </AI_Player_Control><AI_Player_Control>Empire, None</AI_Player_Control>"
                "<AI_Player_Control>Yevetha, Human</AI_Player_Control><AI_Player_Control>Rebel, None</AI_Player_Control>"
-               "<AI_Player_Control>Pirates, None</AI_Player_Control></Campaign></Campaigns>\n");
+               "<AI_Player_Control>Pirates, None</AI_Player_Control></Campaign>"
+               // modc t45: a campaign set with one member per active player (a LOAD_CAMPAIGN target)
+               "<Campaign Name=\"MF_Era_2_Empire\"><Campaign_Set>MF_Era_2</Campaign_Set><Locations>MF_Planet</Locations>"
+               "<Starting_Active_Player>Empire</Starting_Active_Player></Campaign>"
+               "<Campaign Name=\"MF_Era_2_Chiss\"><Campaign_Set>MF_Era_2</Campaign_Set><Locations>MF_Planet</Locations>"
+               "<Starting_Active_Player>Chiss</Starting_Active_Player></Campaign></Campaigns>\n");
     write_file(x / "GameConstants.xml", "<GameConstants></GameConstants>\n");
     return root;
 }
@@ -192,6 +197,20 @@ void test_synthetic() {
         CHECK(game::resolve_ai_type("Chiss", d.basic_ai, &none, &defs).empty());
     }
 #endif
+
+    // modc t45 (STORY_REWARDS_GALACTIC §2.1): LOAD_CAMPAIGN's P1 picks the set, P2 (a faction index: Empire 0, Rebel 1,
+    // Neutral 2, Chiss 3) the member whose Starting_Active_Player it is; any case; unknown -> nullptr.
+    {
+        auto target = [&](std::string_view name, int32_t side) {
+            const data::CampaignDef* t = game::load_campaign_target(d, name, side);
+            return t ? t->name : std::string("-");
+        };
+        CHECK(d.rules.find_faction("Chiss") == 3);
+        CHECK(target("MF_ERA_2_EMPIRE", 0) == "MF_Era_2_Empire");
+        CHECK(target("mf_era_2_empire", 3) == "MF_Era_2_Chiss");  // the named campaign only selects the set
+        CHECK(target("MF_Era_2_Chiss", 1) == "-");                // no member for Rebel
+        CHECK(target("MF_Era_2_Chiss", 99) == "-" && target("MF_Era_9", 0) == "-");
+    }
 
     // modc t17: no built-in lists. Empire has no default forces in the data: the [port] fallback.
     CHECK((game::default_skirmish_fleet(d, "Empire") == Names{"Star_Destroyer"}));

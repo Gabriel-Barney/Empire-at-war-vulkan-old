@@ -312,6 +312,12 @@ void App::story_reward_step() {
         }
         return;
     }
+    // modc t45 (STORY_REWARDS_GALACTIC §2.1, retail 0x44a3f0): a LOAD_CAMPAIGN request ends the running game (no end
+    // screen) and starts the campaign it names, on the next frame.
+    if (std::optional<sim::StoryLoadCampaign> lc = story->take_load_campaign()) {
+        load_story_campaign(*lc);
+        return;
+    }
     if (story_present_story_ != story) {  // ui2: a new story session
         story_present_.reset();
         story_present_setup();
@@ -508,6 +514,44 @@ bool App::start_session(const SessionSpec& spec) {
     }
     return true;
 }
+
+#ifdef ALAMO_SIM_HAVE_STORY
+// modc t45: the campaign a story LOAD_CAMPAIGN reward names replaces the running game. Retail (§2.1): the set member whose
+// Starting_Active_Player is faction `side` starts as a fresh game, that faction plays (the active player [M]), difficulty =
+// P3 or 1; the old game's options are kept [M]. [port] P4 (every player's tech level) is not applied (no shipped data sets it).
+// An unknown campaign leaves the game running (retail stores nothing then).
+void App::load_story_campaign(const sim::StoryLoadCampaign& lc) {
+    const data::CampaignDef* c = game::load_campaign_target(data_, lc.name, lc.side);
+    if (!c) {
+        std::printf("story: LOAD_CAMPAIGN %s side %d: unable to find campaign data\n", lc.name.c_str(), lc.side);
+        return;
+    }
+    SessionSpec s;
+    const SessionSpec& old = session_->spec();
+    s.kind = SessionKind::Campaign;
+    s.campaign = c->name;
+    s.faction = c->starting_active_player;
+    s.difficulty = lc.difficulty >= 0 ? lc.difficulty : 1;
+    s.ask_battle_choice = old.ask_battle_choice;
+    s.game_options = old.game_options;
+    s.start_credits = old.start_credits;
+    s.start_tech = old.start_tech;
+    s.max_tech = old.max_tech;
+    s.auto_resolve_option = old.auto_resolve_option;
+    s.random_events = old.random_events;
+    s.seed = old.seed;
+    s.battle_max_frames = old.battle_max_frames;
+    s.battle_end_hold_frames = old.battle_end_hold_frames;
+    s.fleet_groups = old.fleet_groups;
+    std::printf("story: LOAD_CAMPAIGN %s side %d -> campaign %s (%s), difficulty %d\n", lc.name.c_str(), lc.side, c->name.c_str(),
+                c->starting_active_player.c_str(), s.difficulty);
+    ++story_campaign_loads_;
+    if (!start_session(s)) {
+        notes_.push_back("campaign " + c->name + " (LOAD_CAMPAIGN) did not start");
+        open_main_menu();
+    }
+}
+#endif
 
 // The presentation side of a session that just started or was loaded (session_ is set).
 void App::session_started(const std::vector<std::string>& diag) {

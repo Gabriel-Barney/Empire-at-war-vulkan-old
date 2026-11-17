@@ -622,6 +622,10 @@ public:
     size_t reward_tac_cursor_ = 0;
     uint64_t reward_movies_ = 0, reward_speeches_ = 0;
     void story_reward_step();
+#ifdef ALAMO_SIM_HAVE_STORY
+    void load_story_campaign(const sim::StoryLoadCampaign& lc);  // modc t45: LOAD_CAMPAIGN replaces the running game
+#endif
+    uint32_t story_campaign_loads_ = 0;  // modc t45: campaigns started by LOAD_CAMPAIGN (smoke / test count)
     // ui2: the story presentation rewards (app_story_present.cpp): the presenter, its hooks, what lua_presentation passes on,
     // the per-frame step and the text / hint drawing (the rest of the group's overlay builders are added there).
     StoryPresenter story_present_;

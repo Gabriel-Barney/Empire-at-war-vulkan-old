@@ -268,15 +268,63 @@ Tactical_Production_Queue +0xa30 minus 2, so only 2 and 3 are valid), player id 
 modifier map +0x38, price modifier map +0x78. [H]
 
 Enqueue 0x496a20(manager, type, builder, queue) [H]:
-- Check 0x497140: queue 2 or 3; builder friendly; in land the builder is not ion-stunned
-  (behaviour 0x45, 0x4c3700); the type is in the builder type's buildable list for the builder owner's
-  faction (§7); Build_Limit fields +0x880..+0x88c counting queued entries; price and time finite and
-  greater than zero; prerequisites (+0xa18) owned.
-- [open, modc t50] Retail run modc_t45 (2026-11-17): EAW-Remake's TIE / Arquitens (no `Tactical_Build_Prerequisites`;
-  `Required_Star_Base_Level` 2, `Required_Special_Structures` `E_Shipyard_1`, Arquitens also `Required_Planets`) stay
-  grey on the skirmish station at level 1 and after the level-2 upgrade, and a click queues nothing. So the build bar's
-  test reads more than the check above lists. Which field (special structures, planets, star base level counted
-  another way) is still to be read in the binary.
+- Check 0x497140(manager, type, builder, counting_self), in read order [H]: type set and `Tactical_Production_Queue`
+  (+0xa30) 2 or 3; the manager's player (+0x30) exists; builder set and friendly to that player (0x39a2c0); in land
+  (mode vf 0xe0 == 1) the builder is not ion-stunned (behaviour 0x45, 0x4c3700); the type is in the builder type's list
+  (0x372c10 / 0x374420, §7) for the faction of the **builder's owner**; `Build_Limit_Lifetime_Per_Player` +0x888 (0
+  fails; above 0, the lifetime count 0x281c70 must stay below it); `Build_Limit_Current_Per_Player` +0x880 (0 fails;
+  above 0, current count 0x281df0 plus queued count 0x281ac0 must stay below it, or may equal it when counting_self);
+  `Build_Limit_Lifetime_For_All_Allies` +0x88c and `Build_Limit_Current_For_All_Allies` +0x884 the same with allies; cost
+  0x496d80 and build time 0x496f00 above 0 and not the 1e18 "never" value; every `Tactical_Build_Prerequisites` type
+  (+0xa18, count +0xa20) owned by the player or an ally (0x281df0 with allies). It also calls 0x370320(type, 0x65) and
+  ignores the result. No credit test here. [M: the three counters' exact meaning is from their use, not read]
+- **Build bar** (command bar refresh 0x31b590, run for tactical modes by 0x30c3b0) [H]. For the selected object without a
+  `TACTICAL_BUILD_OBJECTS` behaviour whose type has a list for the **local player's** faction, each list entry:
+  1. skipped when `Is_Named_Hero` (+0x13) and the heroes option bit (0x140b154bc & 1) is off, or
+     `Is_Skirmish_Tactical_Super_Weapon` (+0x1c) and bit 4 is off;
+  2. **shown** only when 0x288b80(local player, type) passes: `Cinematic_Object_Only` (+0x21) clear, tactical cost
+     0x3743f0 above 0, the same two option bits, company member (+0x2a) and squadron member (+0x29) clear (STRATEGIC_GAPS
+     §1.2), `Affiliation` (+0xef0) contains the player's faction (0x3751a0), every prerequisite owned with allies, no
+     hostile-owned object on the +0xa70 type chain, and the four `Build_Limit_*` fields not reached (built counts only);
+  3. **enabled** = 0x288d70(local player, type, no credit check): the same reads in the order +0x21, cost, +0x2a, +0x29,
+     affiliation, prerequisites, +0x888, +0x88c, +0x880, +0x884, except that the current limits count built **plus
+     queued**; in land it is forced off while the selected builder is ion-stunned;
+  4. "queue open" = the local player has a build manager and its queue for the type's +0xa30 holds fewer than
+     `Max_Build_Queue` (0x140b26f78) entries;
+  5. 0x309af0 draws the button: cost text from 0x496d80 (0x3744e0 for behaviour-0x2a types); the button is greyed
+     (tint 0x808080, disabled state) when cost > credits (player +0x70) and the player is not pay-as-you-go (0x289050),
+     or not enabled, or the queue is full, or, only outside a builder's list while a galactic mode exists, the population
+     test 0x2ac320 fails (the builder-list path sets command bar +0x2042, so a station's or factory's buttons never test
+     population). The tooltip adds no requirement text.
+  The AI's tactical buy path 0x727d30 uses 0x288b80 and then 0x497140 per free-store builder, so the AI follows the
+  same rule. [H]
+- **Not read by any tactical path** [H]: `Required_Timeline` +0xf08, `Required_Ground_Base_Level` +0xf0c,
+  `Required_Star_Base_Level` +0xf10, `Required_Special_Structures` +0xf18, `Required_Planets` +0xf50 (and the +0xf58 /
+  +0xf60 / +0xf80 lists), `Tech_Level` +0x89c, `Build_Advances_Tech_Level` +0x894, `Build_Initially_Locked` +0xc1 and the
+  per-player lock / unlock lists (0x282550 / 0x282580). A byte scan of every instruction with those displacements finds
+  them only in galactic production (0x2804d0 used by the galactic enqueue 0x3fff70 and the galactic build bar 0x3145c0;
+  0x280190; 0x282400), the variant copy 0x36c000, text / encyclopedia code (0x2c4370, 0x367250, 0x36a070) [M on those
+  roles] and AI galactic code (0x726010, 0x6xxxxx), never in 0x31b590 / 0x309af0 / 0x288b80 / 0x288d70 / 0x496a20 /
+  0x497140 / the production event 0x524130 (whose tactical branch calls 0x496a20 directly). So in tactical a special
+  structure, a planet list, a star-base / ground-base level or a tech level is **not compared against anything**: not
+  the station's level, not the structures owned in battle, not the galactic planet. In tactical, the station level is
+  expressed only by which station type (`Skirmish_..._Star_Base_N`, each with its own list) is on the map.
+- Skirmish versus a galactic-launched battle [H]: the predicates have no skirmish branch. Only the inputs differ: the
+  list (`Tactical_Buildable_Objects_Multiplayer` +0x9d0 when 0x28afb0 "is skirmish" or 0x140b15490 is set, else
+  `..._Campaign` +0x9b8) and the cost (+0x9fc in skirmish, else +0x9f8 falling back to +0x9fc below 1). The option bits
+  read from 0x140b154bc apply in both (in a campaign the GC menu's copy) [M]. The rule above is common to all tactical
+  production.
+- [open, modc t50] Retail run modc_t45 (2026-11-17): EAW-Remake's TIE / Arquitens buttons (no `Tactical_Build_
+  Prerequisites`; `Required_Star_Base_Level` 2, `Required_Special_Structures` `E_Shipyard_1`, Arquitens_E also a
+  `Required_Planets` list) are shown but grey on the skirmish station at level 1 and after the level-2 upgrade, and a click
+  queues nothing. The binary rules out the Required_* fields, Tech_Level (99 on the Remake's squadron) and locks as the
+  cause. The Remake sets `Pay_As_You_Go` true (its `Gameconstants.xml`), so the credit test cannot grey either. Because
+  the button is shown, 0x288b80 passed, which reads the same type fields as 0x288d70; what is left in the code is (a) the
+  human's `Tactical_Units` queue (2) already holding `Max_Build_Queue` entries, or (b) a current build limit reached once
+  queued entries are counted (0x281ac0). Neither shows in the loose XML (no `Build_Limit_*` on `TIE_Fighter_Squadron`;
+  the type default of +0x884 / +0x88c is -1, +0x880 / +0x888 assumed the same [M]), so the Remake's cause is still
+  unexplained [L]. Next step: hook 0x288d70's result and 0x497510(manager, 2) in that skirmish (Frida or a TTD trace),
+  and check which XML the game really loads for those types.
 - A human is limited to fewer than GC Max_Build_Queue entries (0x140b26f78, default 5); AI is unlimited.
 - Pay-as-you-go test 0x289050: an AI player always counts as PAYG; a human uses GC Pay_As_You_Go
   (+0x320, false in FoC). Not PAYG (FoC humans): fail if credits < cost, else deduct the full cost at

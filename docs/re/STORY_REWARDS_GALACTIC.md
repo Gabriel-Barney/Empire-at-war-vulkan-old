@@ -202,24 +202,75 @@ image-relative (image base 0x140000000 removed), as in the other `docs/re/` file
 
 ### 2.1 LOAD_CAMPAIGN (0x23) [H]
 
-- P1 campaign name (copied, **upper-cased**, hashed with 0x215a30), P2 side index (`atoi`; the log prints "EMPIRE" for
-  non-zero and "REBEL" for 0, but the **number** itself is passed on, the Underworld comment in the data uses 6). Both
+- P1 campaign name (copied, **upper-cased**, hashed with 0x215a30), P2 faction index (`atoi`; the log prints "EMPIRE"
+  for non-zero and "REBEL" for 0, but the **number** itself is passed on, the Underworld comment in the data uses 6). Both
   required, else "Requires two parameters: campaign name & rebel/empire index (0 or 1)". Optional P3 (`atoi`, stored only
   if below 3) and P4 (stored only if below 6).
-- Lookup: the campaign table at 0xb31160 (0x4792f0 by name hash, then 0x479320 by campaign id +0x208 and side). Not found:
-  "Unable to find campaign data".
-- **It does not load anything now.** It stores the campaign-set record in a global, **0xb303d0 "pending campaign"**,
-  P3 in 0xb303d8, P4 in 0xb303dc. Readers of 0xb303d0: 0x5f6b0 and 0x884c0 (the end-of-game / leave-battle flows) and
-  0x93ef0 (campaign end): when it is **null** they go back to the main menu (0xc58e0); when it is set they do not, and
-  the start of the new campaign is left to the code that consumes the global (not traced). 0xb303d8 is read only by the
-  dispatcher itself and 0xb303dc is never read, so P3 / P4 have no other effect found. [H writes and the three
-  readers, L for what finally starts the campaign and when]
-- Retail run modc_t45 (2026-11-17): in a running galactic game, Fall of the Republic's loader campaign fires this reward
-  (P1 `Clone_Wars_Medium_Era_2_EMPIRE`, P2 the faction index, P3 the difficulty) from a Lua year popup. The named
-  campaign's full galaxy replaces the loader galaxy within about 30 s, with no game-end screen. So something starts the
-  pending campaign during play, not only at the end flows above. Which code does this is not traced yet (modc t45).
+- Lookup [H] (0x4792f0, 0x479320, campaign table 0xb31160): P1 is upper-cased and hashed; 0x4792f0 finds the campaign
+  with that name. **P1 only selects the Campaign_Set**: its set id (+0x208, from `Campaign_Set`) goes to 0x479320, which
+  walks every campaign and returns the first one with the same set id whose `Starting_Active_Player` (+0xa8, resolved to
+  a faction) is **faction-list entry P2** (the faction type vector 0xa172e0, XML load order). So P2 is a plain faction
+  index, the same index space as the GC menu's faction combo (0x95ca0 / 0x950f0 / 0x957a0 call 0x479320 the same way),
+  not a side flag: 0 and 1 are the first two factions, FotR's 6..11 are its later factions. The started campaign is the
+  set member whose active player is that faction, which need not be P1 itself. There is **no range check** on P2 (the
+  vector is indexed directly) [H read; what an out-of-range index does is L]. The log's "REBEL" / "EMPIRE" text only
+  means P2 == 0 / P2 != 0.
+- Not found [H]: P1 unknown, or no member of its set for faction P2: the log "STORY REWARD - Unable to find campaign data"
+  and **nothing else**: the pending slot, P3 and P4 are not touched and the running game goes on. P1 or P2 missing: the
+  "Requires two parameters" log and nothing. Reward parameters are parsed with `atoi`, so a non-numeric P2 is faction 0.
+- Found [H]: the record goes to the **story / tutorial controller**, a global object at 0xb30350 (ctor 0x445ad0): field
+  +0x80 (= the address 0xb303d0, which is why the earlier reading saw a bare global) := campaign record; P3 (`atoi`, kept
+  only when 0..2 unsigned) -> +0x88 (0xb303d8); P4 (kept only when 0..5) -> +0x8c (0xb303dc). Both start as -1 (ctor) and
+  an out-of-range P3 / P4 leaves the previous value. A second LOAD_CAMPAIGN before the consumer runs overwrites the
+  record (last one wins).
+- **Consumer: 0x44a3f0, the controller's per-frame update** [H], called from the main loop 0x5d990 in the
+  simulation-frame step, after the game mode manager update (0x28d400), the player list update and the current mode's
+  per-frame calls. Nothing else dereferences the record: the scan of every RIP-relative, absolute and image-base reference
+  to 0xb303c0..0xb303e8 finds only the dispatcher writes, three null tests (below) and this function, which reaches the
+  fields through the object base. When +0x80 is set, in this order:
+  1. It calls the controller's callback +8, set once at startup by 0x447190 (from 0x4b250) to **0x5f6b0 with argument 1,
+     the "end current game" path** (the same one a player leaving uses): in single player it queues the local player as
+     leaving, then tears down: every game mode on the stack is destroyed (0x28d940 pops and deletes the galactic mode and
+     any tactical mode above it, resets the frame clock and the type / object registries), the player list is reset
+     (0x297630), the GUI / audio / event state is cleared (0x1c1e00, 0x3027d0, 0x2d2790, ...). Its last step would open
+     the main menu (0xc58e0) only when the pending record is null, so it does not. No game-end, battle-summary or victory
+     screen is part of this path. [H calls read; M for what each cleanup call clears]
+  2. 0x28dbe0 (game mode manager "start campaign", the same function the GC menu's Play button uses in 0x957a0) with
+     the controller's +0x78 (set at startup to the same start parameter the menu passes, 0xa61a10), the record, "new game"
+     (not a load), **difficulty 1** and no faction override. Because the mode stack is now empty, Start_Game 0x28e890
+     takes its fresh-start branch (frame clock and player list reset, new galactic mode, galaxy load), and 0x28dbe0 sets
+     every player up from the campaign (0x289a90), loads its story plots and applies its starting credits, tech and forces
+     (0x292050 / 0x291f70 / 0x292590 / 0x291d80). The new campaign's `Starting_Active_Player` faction is the human side,
+     as for a menu start [M: the local-player assignment inside the player setup was not traced].
+  3. If +0x88 (P3) is 0..2: 0x28d760 sets the game difficulty (GMM +0xb8) and every AI-controlled, non-human player's AI
+     difficulty to P3. Without P3 the new campaign runs at difficulty 1 (Normal), whatever the old game used.
+  4. If +0x8c (P4) is 0..5: for **every** player in the list, 0x288980(player, P4, 1, 1) sets the tech level (clamped to
+     0..the player's max tech) and runs the tech-unlock pass for `Build_Initially_Locked` types below that level.
+  5. +0x88 / +0x8c := -1, +0x80 := 0.
+- Delay [M]: the reward is applied inside the story update of a simulation frame and 0x44a3f0 runs later in the same
+  frame step, so the switch starts in the same or the next simulation frame. There is no timer. The ~30 s seen in the
+  FotR run is the teardown plus the synchronous load of the new galaxy. Whether a loading screen is drawn meanwhile was
+  not traced [L]; with no simulation frames (game paused) the consumer would not run [L].
+- Kept across the switch [M, from what the path does not write]: the game options record 0xb1549c (start credits / tech
+  bounds, option bits) is **not** re-copied from the GC menu (0x957a0 copies it before its own start; this path does not),
+  so the old game's options stay; the player profile is untouched. Everything in the old game (planets, units, credits,
+  story state, players) is gone.
+- The three other readers of +0x80 only test it for null [H]: 0x5f6b0 (step 1 above, also the multiplayer leave path),
+  0x884c0 (battle-summary dialog closed) and 0x93ef0 (movie finished). Each skips its return to the main menu when a
+  campaign is pending, because 0x44a3f0 starts it on the next frame anyway. 0xb303d8 / 0xb303dc have no reader outside
+  the dispatcher and 0x44a3f0.
+- Retail run modc_t45 (2026-11-17) matches: in Fall of the Republic's one-planet loader GC a Lua popup fires this reward
+  (P1 `Clone_Wars_Medium_Era_2_EMPIRE`, P2 the faction index, P3 the difficulty; `StoryUtil.LoadCampaign`, event
+  `Template_Load_Campaign` in `Player_Agnostic_Plot.xml`); the era campaign's galaxy replaces the loader galaxy within
+  about 30 s with no game-end screen, and the credits change to the new campaign's starting credits.
 - Shipped: 19 files, `Tutorial_One..Seven` and `Full_Story_Campaign_*` with side 0 / 1; the Underworld tutorial ends with
   a commented-out LOAD_CAMPAIGN.
+- Port (modc t45): `StorySession` queues the request with P3 / P4 kept under the same ranges. The game host
+  (`App::story_reward_step` → `load_story_campaign`) takes it on the next frame and resolves the target with
+  `game::load_campaign_target` (set by P1, member by faction index P2). It then replaces the session: the target's
+  `Starting_Active_Player` plays, difficulty P3 or 1, the old game's options, seed and battle settings kept, no end
+  screen. An unknown target leaves the game running. [port] P4 (every player's tech level) is not applied: no shipped or
+  reference-mod data sets it. The headless tools (`alamo_headless`) do not switch campaigns.
 
 ### 2.2 TUTORIAL_PLAYER (0x60) [H]
 
@@ -450,7 +501,8 @@ polls with `Check_Story_Flag`. Enum code 0x1f (name string 0x86c358, table entry
 ## 5. Questions still open
 
 1. DIRECT_INVASION reader (§1.7): none found.
-2. What consumes the pending campaign (§2.1) and starts it; whether P3 / P4 are used.
+2. ~~What consumes the pending campaign (§2.1)~~ answered 2026-11-17 (modc t45): controller update 0x44a3f0. Still
+   open: whether a loading screen is drawn during the switch, and the local-player assignment from the campaign.
 3. SET_SANDBOX_OBJECTIVES body (§2.7).
 4. SET_PLANET_SPAWN: reader of the planet spawn map (§1.8); shipped use is a no-op.
 5. Power rewards: the unit-side state values of 0x37df00 and the reader of player +0x378 (§1.5).
