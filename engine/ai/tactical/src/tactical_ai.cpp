@@ -420,7 +420,10 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
         c.rng = &rng.synced();  // Script_ evaluators only
         const EvalResult r = perc.evaluate(eqs, e, c, w);
         ++eval_count;
-        if (!r.ok) return false;
+        if (!r.ok) {
+            ++stats["eval FAIL " + fn + " at " + eval_failure_site(eqs, r)];  // modc t44: which leaf failed
+            return false;
+        }
         out = r.value;
         return true;
     }

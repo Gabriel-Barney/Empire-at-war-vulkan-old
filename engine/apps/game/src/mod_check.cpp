@@ -324,11 +324,32 @@ void check_database_tags(const GameData& d, const XmlDatabase& db, ModCheckRepor
     }
 }
 
+// modc t37: tags with a field_schema() row that is not one of the hand-verified tables of another class, lower case.
+// objects::find_field_schema falls back to any owner's row (the loader keeps that), so the report checks the owner here:
+// a tag whose only rows are in the CommandBarComponent table (0xa38dd0: Hidden, Toggle, ...) or the RadarMapClass table
+// (0xa39c50) is not read on an object type; each owner's Parse_Database_Entry reads only its own table
+// (xml_field_tables.md, modc t25 sections, [H]). The other segment labels of the doc are its generator's guesses (see
+// gen_field_schema.py OWNER_FIXES: "MousePointer" runs hold Land_Upgrade_Type, ...), so they do not make a tag unread.
+constexpr std::string_view kVerifiedForeignOwners[] = {"CommandBarComponent", "RadarMapSettings", "Radar_Map_Event",
+                                                       "Passability_Color_Settings"};
+
+std::set<std::string, std::less<>> object_type_tags() {
+    std::set<std::string, std::less<>> out;
+    for (const objects::FieldSchema& row : objects::field_schema()) {
+        bool foreign = false;
+        for (const std::string_view o : kVerifiedForeignOwners) foreign = foreign || iequals(row.owner, o);
+        if (!foreign) out.insert(ascii_lower(row.tag));
+    }
+    return out;
+}
+
 void check_xml_tags(const GameData& d, ModCheckReport& r) {
     const objects::CoverageReport cov = objects::build_coverage(d.raw, 0);
     const auto& files = d.raw.files();
+    const std::set<std::string, std::less<>> object_tags = object_type_tags();
     for (const objects::TagCoverage& t : cov.tags) {
-        if (!t.unknown() || t.occurrences == 0) continue;
+        if (t.occurrences == 0) continue;
+        if (!t.unknown() && (t.sub_object || object_tags.count(ascii_lower(t.name)) != 0)) continue;
         UnknownXmlTag u;
         u.database = "object types";
         u.tag = std::string(t.name);
