@@ -1478,12 +1478,17 @@ void App::make_script() {
             if (!space_buy) return size_t{0};
             for (size_t i = 0; i < u.size(); ++i)
                 if (u[i].type == kSmokeSkirmishBuyType) return i;
+            // modc t39: the mod fallbacks take only rows the player can buy now (Fall of the Republic lists its most
+            // expensive ships first: the first corvette row cost more than the start credits, so Buy did nothing).
+            auto affordable = [&a, &u](size_t i) { return u[i].can_buy && u[i].cost >= 0 && u[i].cost <= a.buy_.credits; };
             for (size_t i = 0; i < u.size(); ++i)
-                if (ascii_upper(u[i].type).find("_CORVETTE") != std::string::npos) return i;
+                if (affordable(i) && ascii_upper(u[i].type).find("_CORVETTE") != std::string::npos) return i;
             for (size_t i = 0; i < u.size(); ++i) {
                 const uint32_t t = a.data_.rules.find_type(u[i].type);
-                if (t != galactic::kNoIndex && !a.data_.rules.types[t].build_initially_locked) return i;
+                if (affordable(i) && t != galactic::kNoIndex && !a.data_.rules.types[t].build_initially_locked) return i;
             }
+            for (size_t i = 0; i < u.size(); ++i)
+                if (affordable(i)) return i;
             return size_t{0};
         }));
         s.push_back(step_click_control(ui::dlg::kBuyUnits, "IDC_BUY_BUTTON"));
