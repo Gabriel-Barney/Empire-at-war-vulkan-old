@@ -732,6 +732,43 @@ void test_synthetic() {
 // A2k t04 (A2J_RE_BUILD_MARKET §4): start() draws each planet's two build-queue phases (synced Get_Int(1, 30), queue 0
 // then 1, row order) at the PRODUCTION attach; nothing else in start() draws, so the RNG after start() is the reference
 // stream after exactly those draws. The phases are saved: a session started from another seed reads the saved values.
+// map1 t06: the structure marker memory is saved for live objects only, so the hash covers live objects only too: after the
+// remembered object dies, a session restored from the save hashes exactly like the one that saved it.
+void test_structure_slots_dead() {
+    std::printf("  structure marker memory: dead objects\n");
+    const GalacticRules rules = make_rules();
+    const objects::GameObjectTypes types;
+    const GalacticSetup setup = make_setup();
+    objects::IdCounter ids;
+    objects::ObjectStore store(objects::ModeKind::Galactic, objects::StoreKind::Primary, types, &ids);
+    SimRng rng(0x5A5Eu);
+    GalacticSim s(rules, store, rng);
+    CHECK(s.start(setup));
+    ObjectHandle unit{}, planet{};
+    for (const PlanetState& ps : s.planets()) {
+        if (!planet && ps.is_planet && store.alive(ps.object)) planet = ps.object;
+        for (ObjectHandle u : ps.surface)
+            if (!unit && store.alive(u)) unit = u;
+    }
+    CHECK(static_cast<bool>(unit) && static_cast<bool>(planet));
+    if (!unit || !planet) return;
+    s.set_structure_slot(store.id(unit), 1, 77);
+    s.set_structure_slot(store.id(planet), 0, 78);
+    CHECK(s.destroy_object(unit) && !store.alive(unit));
+    const std::vector<uint8_t> bytes = sim_bytes(s);
+    const uint64_t h = sim_hash(s);
+    objects::IdCounter ids2;
+    objects::ObjectStore store2(objects::ModeKind::Galactic, objects::StoreKind::Primary, types, &ids2);
+    SimRng rng2(0x5A5Eu);
+    GalacticSim c(rules, store2, rng2);
+    CHECK(c.start(setup));
+    store2 = store;  // ObjectStore::read stand-in, as in run_scenario
+    ids2.set_next(ids.next());
+    ByteReader r(bytes);
+    CHECK(c.read(r));
+    CHECK(c.structure_slots().size() == 1 && sim_hash(c) == h && sim_bytes(c) == bytes);
+}
+
 void test_queue_phases() {
     std::printf("  queue phases\n");
     const GalacticRules rules = make_rules();
@@ -1009,6 +1046,7 @@ int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     test_synthetic();
     test_queue_phases();
+    test_structure_slots_dead();  // map1 t06
     test_name_rules();
     test_foc();
     if (g_fail) {

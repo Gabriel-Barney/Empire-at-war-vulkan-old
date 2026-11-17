@@ -677,7 +677,7 @@ public:
     // it places the structure on a map marker: obj +0x3ac (the slot index) and +0x3b0 (the marker's map object id). The next
     // battle on that planet reuses the remembered marker before the normal placement (pass 1). The original keeps both on the
     // object; the port keeps one record per galactic object id (id-ascending). Saved (v9, live objects only), hashed in the
-    // "MSL1" tail once non-empty.
+    // "MSL1" tail once a live entry exists.
     struct StructureSlot {
         int32_t object = objects::kNoObjectId;
         int32_t slot = -1;

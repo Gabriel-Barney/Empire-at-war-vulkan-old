@@ -1330,7 +1330,8 @@ void TacticalBattle::bt_expand_company(TacticalMode& mode, const terrain::Object
 void TacticalBattle::bt_pick_starbase() {
     // map1 t07 (REMAINING_GAPS §3.2 step 1, 0x407b60 [H]): the space starbase is the first DUMMY_STAR_BASE type (type order
     // [M: the list's order]) whose Base_Level equals the battle's starbase level (D +0x148) and that is affiliated with the
-    // record defender's faction (0x3751a0); it is spawned for the defender. No such type: the galactic starbase's own type
+    // record defender's faction (0x3751a0); it is spawned for the defender. Any behaviour list counts (retail STARBASES.XML
+    // names DUMMY_STAR_BASE under <Behavior>, not <SpaceBehavior>). No such type: the galactic starbase's own type
     // [port].
     if (!space_) return;
     static const objects::BehaviorTypeId kStarBase = objects::behavior_type_id("DUMMY_STAR_BASE");
@@ -1344,7 +1345,7 @@ void TacticalBattle::bt_pick_starbase() {
         if (!p.starbase || p.reserve) continue;
         for (uint32_t t = 0; t < types.size(); ++t) {
             const auto ti = static_cast<objects::TypeIndex>(t);
-            if (!types.has_behavior(ti, objects::BehaviorSet::Space, kStarBase) || types.get_int(ti, "Base_Level") != req_.base_level) continue;
+            if (!types.has_behavior(ti, objects::BehaviorSet::Union, kStarBase) || types.get_int(ti, "Base_Level") != req_.base_level) continue;
             bool aff = false;
             for (const std::string_view a : types.get_list(ti, "Affiliation")) aff = aff || iequal_trim(a, faction);
             if (!aff) continue;

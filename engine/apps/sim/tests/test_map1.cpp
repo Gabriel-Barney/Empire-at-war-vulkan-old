@@ -3,7 +3,8 @@
 //     * t03 a company placed on a land map is expanded into its members at the placement (Q6_T30 1, 0x2ab060), the
 //       members carry the placement's hint and HINT;
 //     * t04 a record's 0x4B7 extra behaviour (HINT) is attached and its 0x46E marker name kept;
-//     * t05 a placement with mini 0x29 = 0 counts as hangar-off on a campaign / map battle too (BKG3 Q3.2);
+//     * t05 a hangar placement with mini 0x29 = 0 has spawning off on a campaign / map battle too, one without the
+//       mini keeps it on (BKG3 Q3.2);
 //     * t06 a structure is placed on its remembered marker (pass 1) and the placement writes the galactic memory
 //       (REMAINING_GAPS 3.2 step 4);
 //     * t07 space start: the DUMMY_STAR_BASE of the battle's starbase level for the defender, the start units'
@@ -27,9 +28,10 @@ std::string map1_types(std::string t) {
         " <SpecialStructure Name=\"M1_Shield\"><Base_Position>In_Base</Base_Position><Tactical_Health>500</Tactical_Health>"
         "<CategoryMask>Structure</CategoryMask><Behavior>SELECTABLE</Behavior></SpecialStructure>\n"
         " <StarBase Name=\"M1_Star_Base_E\"><Variant_Of_Existing_Type>S10_Star_Base_1</Variant_Of_Existing_Type>"
-        "<Affiliation>Empire</Affiliation><SpaceBehavior>DUMMY_STAR_BASE</SpaceBehavior></StarBase>\n"
+        "<Affiliation>Empire</Affiliation><Behavior>DUMMY_STAR_BASE, SELECTABLE</Behavior></StarBase>\n"
         " <SpecialStructure Name=\"M1_Hangar\"><Tactical_Health>500</Tactical_Health><CategoryMask>Structure</CategoryMask>"
-        "<Behavior>SELECTABLE, SPAWN_SQUADRON</Behavior></SpecialStructure>\n"
+        "<Behavior>SELECTABLE, SPAWN_SQUADRON</Behavior><Starting_Spawned_Units_Tech_0>S10_Trooper, 1</Starting_Spawned_Units_Tech_0>"
+        "</SpecialStructure>\n"
         " <SpaceUnit Name=\"M1_Escorted\"><Variant_Of_Existing_Type>S10_Frigate</Variant_Of_Existing_Type>"
         "<Space_Escort_Unit_Types>S10_Corvette, S10_Corvette</Space_Escort_Unit_Types></SpaceUnit>\n";
     t.insert(t.rfind("</S10>"), add);
@@ -122,6 +124,7 @@ void test_land(const Data& d) {
     terrain::ObjectPlacement hangar = place("M1_Hangar", 1100.0f, 1100.0f, 0);  // t05: a hangar placement with byte 0
     hangar.placement_raw.push_back(terrain::RawMini{0x29, {0}});
     m.objects.push_back(hangar);
+    m.objects.push_back(place("M1_Hangar", 1300.0f, 1100.0f, 0));  // t05: the same without the byte (creation value: on)
     galactic::GalacticSetup setup = make_setup(d, true);
     setup.forces.push_back({0, 1, shield});
     for (const int32_t remembered : {-1, 12}) {
@@ -162,6 +165,17 @@ void test_land(const Data& d) {
                                     std::string(b.map_marker_name(id)).c_str());
                 }
                 CHECK(members == 4 && hinted == 4 && named == 1);
+                // t05: the byte-0 hangar spawns nothing (+0x3CB off); the one without the byte spawns
+                const uint32_t hangar_type = type_of(d, "M1_Hangar");
+                uint32_t hangars_off = 0, hangars_on = 0;
+                for (const objects::ObjectHandle h : st.all_objects()) {
+                    if (!st.alive(h) || static_cast<uint32_t>(st.type(h)) != hangar_type) continue;
+                    const bool on = b.hangars() && b.hangars()->spawn_enabled(st.id(h));
+                    const float x = st.position(h).x;
+                    hangars_off += x == 1100.0f && !on ? 1u : 0u;
+                    hangars_on += x == 1300.0f && on ? 1u : 0u;
+                }
+                CHECK(hangars_off == 1 && hangars_on == 1);
                 // t06: the structure on the remembered marker (pass 1), else the first free in-base marker; the memory follows
                 Vec3 at{};
                 CHECK(count_of(st, shield, 0) == 1);
