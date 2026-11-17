@@ -1562,6 +1562,7 @@ private:
     // S7 collision layer (TACTICAL_GAPS §6.7)
     void detect_collisions(uint32_t frame);
     void drive_collisions(uint32_t frame, SimRng& rng);
+    void fold_collision_answers();  // mov1 t08: 0x509ea0's fold, right before the walk
     void land_candidates(size_t ai, std::vector<uint32_t>& out) const;
     bool mvm_contact(const Unit& a, const Unit& b) const;
     float mvs_contact(const Unit& a, const Unit& b) const;

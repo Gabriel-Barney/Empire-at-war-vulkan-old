@@ -2000,7 +2000,8 @@ static void test_land_group() {
     // s78n t18 review: the bound the comment derives - the first clear point is 41 .. 46 before the standing unit (steps of
     // 5 from the path end), the cut takes 3 more, and the walker stops on the cut path's end: 44 .. 49
     const float d4 = distance(s4.view(1).pos, cell_center(30, 30));
-    std::printf("early arrival: stopped %.3f before the standing unit\n", static_cast<double>(d4));
+    std::printf("early arrival: stopped %.3f before the standing unit (cuts %u, dynamic re-paths %u)\n", static_cast<double>(d4),
+                s4.stats().early_arrivals, s4.stats().dynamic_repaths);
     CHECK(s4.view(1).arrived && d4 >= 44.0f - 1e-3f && d4 <= 49.0f + 1e-3f && s4.stats().early_arrivals == 1);
 
     // a1j t02 (A1_READINGS §36.4): a Giant Vehicle pushes a stopped unit it does not crush aside (0x684f90 -> 0x6859a0)

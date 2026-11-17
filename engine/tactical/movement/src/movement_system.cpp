@@ -1898,11 +1898,10 @@ void MovementSystem::plan_land(uint32_t frame, const ParallelFor& pf) {
         }
     });
     // s78n t26.3 (MOVEMENT §5.3.2 "Freshness"): the corridor test reads the layer flags of the last tracker update, so a unit
-    // is Static for every corner pass of this plan when it was not moving before the plan (members planned earlier in the
-    // loop do not turn Moving for the later ones)
-    corner_static_.assign(units_.size(), 0);
-    if (cfg_.mode == MoveMode::Land)
-        for (size_t i = 0; i < units_.size(); ++i) corner_static_[i] = unit_moving(units_[i]) ? 0 : 1;
+    // is Static for every corner pass of this plan when it was not moving at the tracker (members planned earlier in the
+    // loop do not turn Moving for the later ones). mov1 t08 / mov2 t04 (BKR1 Q6 [H]): the flags are taken at the start of
+    // the tick (tick_land's tracker snapshot), before this tick's driver; the footprints are the units' places then (the
+    // driver and detection move nobody).
     for (size_t r = 0; r < req.size(); ++r) {
         Unit& u = units_[req[r]];
         u.need_path = false;
@@ -1915,6 +1914,7 @@ void MovementSystem::plan_land(uint32_t frame, const ParallelFor& pf) {
         u.around.clear();  // s78n t18: a new path (pack +0x288 := NOW), planned around nobody
         u.path_change = frame;
         u.approx_countdown = 0;  // mov1 t04: a path push zeroes pack +0x275
+        u.cut_pending = false;   // mov1 t08: the plan (after the driver) replaced the path a cut left
         if (is_air(u)) {
             if (air_out[r].fallback) ++stats_.space_fallbacks;
             if (!air_out[r].ok || air_out[r].wps.empty()) {
@@ -2349,6 +2349,12 @@ void MovementSystem::drive_collisions(uint32_t frame, SimRng& rng) {
         [&](CollisionObject& c, bool full) { resolve_collision(c, full, frame, rng); });
     stats_.collisions_cancelled += coll_.last_cancelled();
     stats_.collisions_resolved += coll_.last_resolved();
+}
+
+// mov1 t08: 0x509ea0 as the walk reads it - the lowest answer of each unit's records and the "at once" flag, folded right
+// before the walk from every live record (after this tick's driver, detection and plans: a record detection just made
+// answers its constructor values, 0 for a MovingVsMoving record, until the next driver services it).
+void MovementSystem::fold_collision_answers() {
     // s78n t20 F6: the early arrival (resolve, record removed) set its mover's "at once" flag directly; [port] it is kept
     // through the fold below (before, the flag of any later record of that unit overwrote it)
     std::vector<uint32_t> early_now;

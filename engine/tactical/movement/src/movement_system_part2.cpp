@@ -2158,9 +2158,18 @@ void MovementSystem::tick_land(uint32_t frame, SimRng& rng, const ParallelFor& p
     }
     rebuild_regions_if_dirty(pf);
     tree_.maintain(static_cast<double>(frame) / 30.0);  // shape only; query results do not depend on it
-    plan_land(frame, pf);
-    detect_collisions(frame);  // S7: checks create collision objects
+    // mov1 t08 (b0182, BKR1_RE_ANSWERS Q1 / Q6 [H]; design note docs/PHASE4.md "mov1"): retail's land frame 0x3639d0 is
+    // tracker update 0x539b20 -> object walks -> collision driver 0x50a780 (detection 0x508170 at its end) -> movement
+    // coordinators 0x426eb0 (every plan). The port's tick is that cycle started at the tracker: the tracker snapshot
+    // (the Moving / Static flags the plan's corridor test reads), the driver (services only), detection (a new record
+    // waits for the next driver), the plans (after this cycle's driver: a unit the driver stopped still counts as Moving
+    // at its place for the corridor test, one planned last cycle as Moving), the answer fold, then the walk.
+    corner_static_.assign(units_.size(), 0);
+    for (size_t i = 0; i < units_.size(); ++i) corner_static_[i] = unit_moving(units_[i]) ? 0 : 1;
     drive_collisions(frame, rng);  // S7: cancel / priority sort / resolve (TACTICAL_GAPS §6.7)
+    detect_collisions(frame);      // S7: checks create collision objects
+    plan_land(frame, pf);
+    fold_collision_answers();
     // s78n t23 step 0 (MOVEMENT §5.4.4 item 5): a record a cut left on its last waypoint is finished at the walk step
     // (serial, ascending index, before the parallel walk: a pop walks on along the order path in this tick's walk)
     for (Unit& u : units_) {
