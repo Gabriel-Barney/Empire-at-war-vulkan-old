@@ -370,8 +370,8 @@ void test_fleet_dividers() {
     InfoScreens is;
     is.init(f.gui);
     SummaryInfo sm;
-    sm.fleets.push_back({"i_planet.tga", U"Kuat", {}});
-    sm.fleets.push_back({"i_planet.tga", U"Hoth", {}});
+    sm.fleets.push_back({"i_planet.tga", U"Kuat", {}, {}});
+    sm.fleets.push_back({"i_planet.tga", U"Hoth", {}, {}});
     is.set_summary(sm);
     CHECK(is.show_info(InfoPage::SummaryFleets));
     const GuiDialog* d = f.gui.find(dlg::kSummaryFleets);
@@ -384,7 +384,7 @@ void test_fleet_dividers() {
     CHECK(d1 && !d1->visible);
     CHECK(!d->get("IDC_PLANET_ICON2")->visible);
     // a third row makes the second divider appear
-    sm.fleets.push_back({"i_planet.tga", U"Endor", {}});
+    sm.fleets.push_back({"i_planet.tga", U"Endor", {}, {}});
     is.set_summary(sm);
     CHECK(is.show_info(InfoPage::SummaryFleets));
     d = f.gui.find(dlg::kSummaryFleets);

@@ -101,6 +101,10 @@ public:
     }
 
     ui::GalacticCameraController& camera() { return camera_; }
+    // ui4 t06: the fleet drag preview segments of the next prepare() (GalacticSceneBuilder::set_drag_lines).
+    void set_drag_lines(std::vector<render::GalacticDragLine> lines) {
+        if (builder_) builder_->set_drag_lines(std::move(lines));
+    }
     // The camera's planet box (ui::galactic_scroll_box; the camera widens it by 15 %).
     void set_camera_bounds(const ui::CameraBox& b) { camera_.set_bounds(b); }
     ui::CameraParams camera_params(uint32_t w, uint32_t h) const;

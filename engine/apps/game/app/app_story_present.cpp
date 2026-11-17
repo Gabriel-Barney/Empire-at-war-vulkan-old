@@ -122,6 +122,16 @@ void App::story_present_frame() {
         audio_.faction_sfx(snd == StoryHint::Sound::Urgent ? "SFXEvent_HUD_Advisor_Urgent_Message"
                            : snd == StoryHint::Sound::Hint ? "SFXEvent_HUD_Advisor_Hint"
                                                            : "SFXEvent_HUD_Advisor_Message");
+        // ui4 t11 (P4_SIM_SYSTEMS §2.7.2): a line shown in galactic mode goes to the Droid Log as three rows.
+        if (sh && screen_ == Screen::Galactic)
+            if (const galactic::GalacticSim* g = galaxy()) {
+                const std::u16string* day = ui_.text.find("TEXT_LOG_CYCLE_01");
+                const std::u16string* sep = ui_.text.find("TEXT_HELP_SEPERATOR");
+                for (std::u32string& r : game::droid_log_rows(day ? ui::utf16_to_utf32(*day) : std::u32string(U"Day ##0"),
+                                                              static_cast<int32_t>(g->galactic_day()), sh->hint.text,
+                                                              sep ? ui::utf16_to_utf32(*sep) : std::u32string(U"________")))
+                    droid_rows_.push_back(std::move(r));
+            }
     }
 }
 

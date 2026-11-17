@@ -21,6 +21,7 @@ add_library(alamo_game_core STATIC
   src/game_controls.cpp
   src/attract_mode.cpp
   src/hud_feeds.cpp
+  src/planet_map.cpp
   src/battle_summary.cpp
   src/story_ui.cpp
   src/story_present.cpp

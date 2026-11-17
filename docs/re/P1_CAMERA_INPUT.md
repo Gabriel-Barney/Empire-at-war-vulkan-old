@@ -289,7 +289,8 @@ At pose build an extra margin is subtracted, depending on view height, pitch and
 - **Wheel up** (0x3e4660), gated by the tutorial input lock (0x446220 id 4) [M]:
   - zoom state 0: select the hovered planet (HUD +0x2030), or the planet of the hovered fleet. Then, if a planet is
     selected and nothing blocks it (0x3d4130), start the zoom-in (0x3c3ee0) and open the planet panel;
-  - state 3: a further wheel up runs 0x3c5fc0 [L: probably the next planet level].
+  - state 3: a further wheel up runs 0x3c5fc0, which opens the FoC planet map ("Base Layout"; GALACTIC_PLANET_MAP.md §1,
+    ui4 t09, 2026-11-17). Wheel down with the map open closes only the map.
 - **Wheel down** (0x3e48a0): from state 3, zoom out (0x3c4080; the planet sub-view first closes via 0x3ce970 if open).
 - So there is no continuous galactic zoom: the port's "0.5–1 × pullback" range should become the two-state planet
   zoom. `Max_Galactic_Zoom_Distance` / `Min/Max_Galactic_Zoom_Speed` / `Galactic_Zoom_Acceleration` are parsed only. [M]

@@ -247,6 +247,7 @@ std::vector<ui::GalacticBuildOption> galactic_build_options(const galactic::Gala
                                                             const std::function<std::string(uint32_t type)>& icon) {
     std::vector<ui::GalacticBuildOption> out;
     if (planet >= g.planets().size() || player < 0 || static_cast<size_t>(player) >= g.players().size()) return out;
+    if (g.planets()[planet].owner != player) return out;  // §5.1.1: the bar lists only at the local player's own planet
     for (const uint32_t t : g.buildable(planet, player)) {
         if (t >= g.rules().types.size() || t > 0xFFFFu) continue;
         const galactic::TypeInfo& ti = g.rules().types[t];
@@ -261,23 +262,21 @@ std::vector<ui::GalacticBuildOption> galactic_build_options(const galactic::Gala
                 if (b.player == player && b.type == t) ++o.queued;
         o.structure = galactic::is_ground_structure_type(ti) || galactic::is_orbital_structure_type(ti) || galactic::is_star_base_type(ti);
         o.production_disabled = g.production_disabled(player, t);
-        // GALACTIC_DIALOGS §5.1: the space tab = space-queue units, starbases and orbital structures.
-        o.space = g.queue_kind(t) == galactic::kSpaceQueue || galactic::is_star_base_type(ti) || galactic::is_orbital_structure_type(ti);
+        // GALACTIC_DIALOGS §5.1.1 (0x3145c0): the land tab lists Build_Cost_Credits > 0 types that need a ground base level or
+        // are a DUMMY_GROUND_STRUCTURE (the can-build gate's ground-buildable test); every other type is a space-tab option.
+        o.space = !(ti.build_cost > 0 && (ti.required_ground_base != 0 || galactic::is_ground_structure_type(ti)));
         out.push_back(std::move(o));
     }
     return out;
 }
 
-std::u32string conflict_log_line(const galactic::ConflictLogEntry& e, const std::function<std::u32string(PlanetIndex planet)>& planet_name,
-                                 const std::function<std::u32string(int32_t player)>& faction_name) {
-    auto who = [&](int32_t p) { return p >= 0 && faction_name ? faction_name(p) : std::u32string(U"?"); };
-    std::u32string s = U"Battle of " + (planet_name ? planet_name(e.planet) : std::u32string(U"?")) +
-                       (e.kind == galactic::ConflictKind::Space ? U" (space): " : U" (land): ") + who(e.attacker) + U" vs " + who(e.defender);
-    if (e.how == 0) return s + U" - called off";
-    if (e.retreating >= 0) s += U" - " + who(e.retreating) + U" retreated";
-    else if (e.winner >= 0) s += U" - " + who(e.winner) + U" victorious";
-    if (e.how == 1) s += U" (auto-resolved)";
-    return s;
+std::vector<std::u32string> droid_log_rows(std::u32string_view day_text, int32_t cycle, std::u32string_view text, std::u32string_view separator) {
+    std::u32string day(day_text);
+    std::u32string num;
+    for (const char c : std::to_string(cycle)) num.push_back(static_cast<char32_t>(c));
+    if (const size_t at = day.find(U"##0"); at != std::u32string::npos) day.replace(at, 3, num);
+    else day += (day.empty() ? U"" : U" ") + num;
+    return {std::move(day), std::u32string(text), std::u32string(separator)};
 }
 
 const char* galactic_announcement(const galactic::GalacticSim& g, const galactic::GalacticEvent& e, int32_t me) {
@@ -298,6 +297,11 @@ const char* galactic_announcement(const galactic::GalacticSim& g, const galactic
         case K::FleetDeparted: {
             const PlanetIndex to = e.other_planet;
             if (to >= g.planets().size() || g.planets()[to].owner != me || e.player < 0 || g.allied(me, e.player)) return nullptr;
+            // ui4 t11 (P4_SIM_SYSTEMS §2.7.3): only when the local player has something in the destination's orbit [port:
+            // its fleets; whether retail's orbit list also counts the starbase is M].
+            bool present = false;
+            for (const galactic::FleetState& f : g.fleets()) present = present || (f.alive && f.owner == me && f.planet == to && !f.contents.empty());
+            if (!present) return nullptr;
             if (e.fleet < g.fleets().size()) {
                 const galactic::FleetState& fl = g.fleets()[e.fleet];
                 bool all_hidden = !fl.contents.empty();
@@ -309,6 +313,26 @@ const char* galactic_announcement(const galactic::GalacticSim& g, const galactic
         }
         default: return nullptr;
     }
+}
+
+std::vector<PlanetIndex> fleet_drag_route(const galactic::GalacticSim& g, int32_t me, uint32_t fleet_id, PlanetIndex target) {
+    std::vector<PlanetIndex> path;
+    if (me < 0 || target >= g.planets().size()) return path;
+    const objects::ObjectHandle h = g.store().find(static_cast<objects::ObjectId>(fleet_id));
+    const uint32_t fi = h ? g.fleet_of(h) : galactic::kNoFleet;
+    if (fi == galactic::kNoFleet || fi >= g.fleets().size()) return path;
+    const galactic::FleetState& fl = g.fleets()[fi];
+    if (fl.moving || fl.planet == kInvalidPlanet || fl.planet == target) return path;
+    // 0x3da30's request: Path_Request_Init (every flag set), then flags 0..2 = the fleet is hidden, flag 4 = set.
+    const bool hidden = g.hidden(h);
+    galactic::PathRequest req;
+    req.source = fl.planet;
+    req.destination = target;
+    req.allow_unknown_or_neutral = req.allow_enemy_owned = req.skip_danger_check = hidden;
+    req.always_accept_destination = true;
+    galactic::PathScratch scratch;
+    if (!galactic::find_fleet_path(g.graph(), g.player_view(me), req, scratch, path)) path.clear();
+    return path;
 }
 
 }  // namespace alamo::game

@@ -874,6 +874,25 @@ static void test_fleets_and_selection(const render::GalacticWorld& w) {
             o.build(cf, models, ofg, obg, &os);
             CHECK(os.corruption_paths == 1);
         }
+        // ui4 t06: fleet drag preview segments (GALAXY_MAP_PRESENTATION §2.2): one ribbon each, grey tint, width 2 x the
+        // corruption width scale; cleared by an empty list.
+        {
+            const Vec3 pa = fr.planets[0].position, pb = fr.planets[1].position;
+            o.set_drag_lines({{pa, pb, 128}, {pb, Vec3{pb.x + 10.0f, pb.y, 0.0f}, 50}});
+            o.build(fr, models, ofg, obg, &os);
+            CHECK(os.drag_lines == 2);
+            const assets::Mat3x4 rt = render::GalacticSceneBuilder::ribbon_transform(pa, pb, 2.0f * o.options().corruption_width_scale);
+            bool grey128 = false, grey50 = false;
+            for (const render::Instance& in : ofg) {
+                grey128 = grey128 || (near(in.light_scale.x, 128.0f / 255.0f) && near(in.transform.m[0][3], pa.x) &&
+                                      near(in.transform.m[1][1], rt.m[1][1]));
+                grey50 = grey50 || (near(in.light_scale.y, 50.0f / 255.0f) && near(in.light_scale.w, 1.0f));
+            }
+            CHECK(grey128 && grey50);
+            o.set_drag_lines({});
+            o.build(fr, models, ofg, obg, &os);
+            CHECK(os.drag_lines == 0);
+        }
         // t34: a fogged planet whose model has an _ALT2 mesh draws that alternate; without one, the procedural globe.
         render::GalacticFrame ff = frame;
         ff.routes.clear();

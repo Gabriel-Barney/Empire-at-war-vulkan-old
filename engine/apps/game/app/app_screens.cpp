@@ -244,6 +244,9 @@ void App::handle_screen_actions(const std::vector<ui::ScreenAction>& acts) {
                 if (a.button >= 0 && static_cast<size_t>(a.button) < summary_rows_.size()) summary_entry_ = summary_rows_[static_cast<size_t>(a.button)];
                 open_story_summary();
                 break;
+            case K::InfoHintsToggled:  // ui4 t07 (HUD_GAPS §10.2): IDC_HINTS_CHECK switches every mode's advisor hints
+                story_present_.set_advisor_all(a.button == 1);
+                break;
             case K::StorySummaryFilter:
                 summary_completed_ = a.button == 1;
                 summary_entry_ = 0;    // the tab's first row
@@ -866,7 +869,9 @@ void App::show_campaign_end(bool victory) {
 void App::open_holocron(ui::InfoPage page) {
     const galactic::GalacticSim* g = galaxy();
     if (!g) return;
-    info_.set_droid_log(holo_.droid_log(*session_, data_, ui_.text));
+    ui::DroidLogInfo dl = holo_.droid_log(*session_, data_, ui_.text, droid_rows_);
+    dl.hints = story_present_.any_advisor();  // HUD_GAPS §10.2: checked when any mode's advisor hints are on
+    info_.set_droid_log(std::move(dl));
     info_.set_data_chart(holo_.chart(*g, data_, ui_.text));
     info_.set_tech_tree(holo_.tech_tree(*g, data_, ui_.hud_types, local_player(), false));
     info_.set_summary(holo_.summary(*g, data_, ui_.text, ui_.hud_types, local_player()));
@@ -970,6 +975,28 @@ void App::build_encyclopedia(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
                 object = id;
                 type = t;
             }
+    // ui4 t07 (HUD_GAPS §2.2): a hovered build pad or queue hologram shows its type's pop-up (keyed kEncyTypeKey | type: it
+    // has no object), an organiser / land-forces unit pad its unit's.
+    if (component < 0 && screen_ == Screen::Galactic && routed_.hover_component >= 0) {
+        constexpr uint32_t kEncyTypeKey = 0xE0000000u;  // [port] above every object id the sim hands out
+        ui::GalacticHud::PadSubject ps;
+        if (ui_.galactic_hud.pad_subject(routed_.hover_component, ps)) {
+            objects::TypeIndex t = objects::kNone;
+            if (ps.object != 0) {
+                if (const galactic::GalacticSim* g = galaxy()) {
+                    const objects::ObjectHandle hnd = g->store().find(static_cast<objects::ObjectId>(ps.object));
+                    if (hnd && g->store().alive(hnd)) t = g->store().type(hnd);
+                }
+            } else if (ps.type < data_.types.size()) {
+                t = static_cast<objects::TypeIndex>(ps.type);
+            }
+            if (t != objects::kNone && t < data_.types.size()) {
+                component = routed_.hover_component;
+                object = ps.object != 0 ? ps.object : (kEncyTypeKey | static_cast<uint32_t>(t));
+                type = t;
+            }
+        }
+    }
     ency_.update(component, object, now_s_);  // every frame: the countdown / fade run on the panel
     // Remember the hovered object's type so the pop-up of shown_object() still draws while it fades out; keep only the
     // shown and the hovered subjects.

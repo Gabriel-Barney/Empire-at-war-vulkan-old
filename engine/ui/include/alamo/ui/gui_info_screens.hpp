@@ -26,6 +26,7 @@
 // dots every 2 units along each segment, the y range 0..max(values) (min 0); summary trackbar v scrolls by
 // round(v / 100 * (rows - visible)); missing rows / icons are hidden.
 #pragma once
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <span>
@@ -120,6 +121,11 @@ struct TechTreeInfo {
     // Object type name (the IDC_TECHTREE_<name> suffix) -> item; false hides the control.
     std::function<bool(std::string_view type, TechTreeItem& out)> item;
 };
+// ui4 t07 (HUD_GAPS §10.2, 0x10a250): summary sort keys - 1 planet name (IDC_BUTTON_PLANETARY), 2 base credit value, 3
+// trade-route income, 4 mining income, 5 total income, 6 pop cap, 7 producing, 8 upgrades, 9 land fleets, 10 space fleets.
+inline constexpr size_t kSummarySortKeys = 11;
+// The key of a summary button (IDC_BUTTON_PLANETARY, IDC_BUTTON_BASE_CREDIT_VALUE, ...), 0 for any other control.
+int32_t summary_button_key(std::string_view control);
 struct SummaryProductionRow {
     std::string icon;
     std::u32string name;
@@ -127,11 +133,15 @@ struct SummaryProductionRow {
     std::u32string space_text, ground_text;
     std::vector<std::string> heroes;  // up to 8
     std::u32string pop;
+    // ui4 t07 (HUD_GAPS §10.2): the row's sort values by sort key 1..10 (index 0 unused; key 1 sorts by `name`).
+    std::array<double, kSummarySortKeys> sort{};
 };
 struct SummaryFleetRow {
     std::string icon;
     std::u32string name;
     std::vector<std::string> fleets;  // up to 15
+    // ui4 t07 (HUD_GAPS §10.2): the row's sort values by sort key 1..10 (index 0 unused; key 1 sorts by `name`).
+    std::array<double, kSummarySortKeys> sort{};
 };
 struct SummaryEconomyRow {
     std::string icon;
@@ -139,6 +149,8 @@ struct SummaryEconomyRow {
     std::u32string total, base, trade, mining;
     std::string mining_icon;
     int32_t mining_count = 0;
+    // ui4 t07 (HUD_GAPS §10.2): the row's sort values by sort key 1..10 (index 0 unused; key 1 sorts by `name`).
+    std::array<double, kSummarySortKeys> sort{};
 };
 struct SummaryInfo {
     std::vector<SummaryProductionRow> production;
@@ -184,12 +196,21 @@ public:
     void set_droid_log(DroidLogInfo d) { droid_ = std::move(d); }
     void set_data_chart(DataChartInfo c) { chart_ = std::move(c); }
     void set_tech_tree(TechTreeInfo t) { tech_ = std::move(t); }
-    void set_summary(SummaryInfo s) { summary_ = std::move(s); }
+    void set_summary(SummaryInfo s) {
+        summary_ = std::move(s);
+        apply_summary_sort();
+    }
     bool show_info(InfoPage page);
     InfoPage info_page() const { return page_; }
     std::string info_dialog() const;  // the open holocron page's dialog, "" when closed
     int32_t chart_mode() const { return chart_mode_; }  // 0 economy, 1 military, 2 planets
     int32_t summary_offset() const { return summary_off_; }
+    // ui4 t07 (HUD_GAPS §10.2): the summary sort. A key sorts the numeric columns largest first and the name A to Z; the
+    // same key again reverses it, a third time restores it. All three summary screens share the key and direction, kept
+    // across opens; set_summary applies them; the scroll position is kept. [port] a stable sort (retail's may reorder ties).
+    void sort_summary(int32_t key);
+    int32_t summary_sort_key() const { return sort_key_; }
+    bool summary_sort_reversed() const { return sort_reversed_; }
     void close_all();
 
     // Data-chart lines over IDC_DATA_CHART_IMAGE (call after GuiManager::build, into the same list). Returns the dots.
@@ -205,6 +226,7 @@ private:
     void fill_chart(GuiDialog& d);
     void fill_tech(GuiDialog& d);
     void fill_summary(GuiDialog& d);
+    void apply_summary_sort();
     void fill_tabs(GuiDialog& d);
     std::u32string text(std::string_view key, std::u32string_view fallback) const;
     void on_click(const GuiEvent& e, std::vector<ScreenAction>& out);
@@ -225,6 +247,8 @@ private:
     std::string info_open_;
     int32_t chart_mode_ = 0;
     int32_t summary_off_ = 0;
+    int32_t sort_key_ = 0;
+    bool sort_reversed_ = false;
 };
 
 }  // namespace alamo::ui

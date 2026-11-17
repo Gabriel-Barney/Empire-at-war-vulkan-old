@@ -375,6 +375,10 @@ frameArg < end (unsigned). Otherwise it:
 
 This is the only sim-relevant use of the transition: integer frames. The fraction itself is presentation only.
 
+ui4 t11 (2026-11-17): the other faction announcer events (fleet approaching, pop cap, invasion, campaign start; credit cap
+and blockade are never played), the advisor text box the message callback writes to, and the Droid Log entries:
+P4_SIM_SYSTEMS.md §2.7.
+
 ### 4.5 Pairs and their tags [H]
 0x3ff230, when the particle object +0x300 exists, writes:
 - start = f(current type +0x2F4);

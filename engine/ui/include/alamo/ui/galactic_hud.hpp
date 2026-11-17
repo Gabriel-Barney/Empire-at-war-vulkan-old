@@ -84,14 +84,20 @@ struct GalacticPlanetInfo {
     Vec3 position{};
     float radius = 50.0f;    // world radius (ring size)
     std::u32string name;
-    int32_t credits = -1;    // g_planet_value: the planet's credit value, shown while the b_filters0 toggle is on; < 0: no value text
+    // g_planet_value (GALAXY_MAP_PRESENTATION §1.7): "+N" while the b_filters0 toggle is on; host: the planet income when the
+    // local player may see it, else the planet base value; < 0: no value text.
+    int32_t credits = -1;
     int64_t income = kNoGalacticAmount;  // Text_Planetary_Income of the selected planet, may be negative
     Rgba8 owner_color{255, 255, 255, 255};
-    float political_control = -1.0f;  // 0..1, < 0 none
-    int32_t ground_level = -1, space_level = -1;  // starbase / ground base levels (bar index), < 0 none
-    // REMAINING_GAPS §6.3 display gates (host: GalacticSim::can_see_starbase_info / can_see_groundbase_info for the local
-    // player): false hides g_space_level / g_ground_level whatever the level.
+    float political_control = -1.0f;  // 0..1, < 0 none (g_political_control is never drawn on the map, §1.7)
+    // §1.7 level pip rows (b_filters1): g_ground_level_pips i < ground_max, full owner colour for i < ground_level, half
+    // intensity above; the same for space (g_space_level_pips, max 5). Levels count as 0 when the local player may not
+    // see them (starbase_info / groundbase_info, REMAINING_GAPS §6.3). max < 0: no row.
+    int32_t ground_level = -1, space_level = -1;
+    int32_t ground_max = -1, space_max = -1;
     bool starbase_info = true, groundbase_info = true;
+    // §1.7 status row: g_smuggler = the local player siphons income here, g_smuggled = another player does (both shown to
+    // every viewer); g_bounty_hunter [M].
     bool conflict = false, smuggler = false, bounty_hunter = false;
     // GALAXY_MAP_PRESENTATION §1.5: one g_hero medal per faction with a hero on the surface (orbiting heroes show only in
     // their fleet slot, Gabriel 2026-10-29) [inferred: surface only]. The you / enemy alternates (mode flag not traced) are unused.
@@ -110,15 +116,16 @@ struct GalacticPlanetInfo {
     bool fogged = false;
     std::string garrison_icon;
     std::vector<GalacticPlanetStack> stacks;
-    // ui4 t03 (GALAXY_MAP_PRESENTATION §1.1 / §1.2; [port] choices in docs/PHASE4.md "ui4 t03"). Filter-gated: the planet
-    // type's Encyclopedia_Weather_Icon on g_weather and Planet_Ability_Icon on g_planet_ability (b_filters2, "" = none);
-    // credit_level 0..10 on g_credit_bar (b_filters0 with the value text, < 0 none). Status row after g_conflict / g_hero:
-    // g_build (the local player builds here), g_smuggled (an income siphon is active here), g_corruption_icon (corrupted),
-    // g_enemy_hero (an enemy hero is seen here: Icon_Alternate 0 i_icon_hero, 1 i_icon_empire_hero; < 0 none).
-    // g_corruption_text: the corruption transition line (TEXT_CORRUPTION_PERCENT / _REMOVE_PERCENT), "" none.
+    // ui4 t03 / t10 (GALAXY_MAP_PRESENTATION §1.7). b_filters2: the planet type's Encyclopedia_Weather_Icon on g_weather and
+    // Planet_Ability_Icon on g_planet_ability ("" = none), fogged planets too. Status row: g_build (the local player owns
+    // the planet and a production queue there has an entry), g_corruption_icon = corruption_icon ("" none; on a corrupted
+    // planet it needs b_filters2, the uncorrupted-planet info icon of a Benefits_From_Corruption faction does not).
+    // g_enemy_hero / g_hero "you" are the multiplayer medals (global 0x140a7c475): never drawn here. credit_level is no
+    // longer drawn (g_credit_bar does not exist in retail). g_corruption_text: the transition line, "" none.
     std::string weather_icon, ability_icon;
     int32_t credit_level = -1;
     bool building = false, smuggled = false, corrupted = false;
+    std::string corruption_icon;
     int32_t enemy_hero = -1;
     std::u32string corruption_text;
 };
@@ -159,12 +166,16 @@ struct GalacticBuildOption {
     bool structure = false;             // placed before the units in the b_Create_NN grid
     std::string tooltip_key;
     // The player's production-disabled list (story ENABLE / DISABLE_BUILDABLE, REMAINING_GAPS §1.5: read by the GUI build
-    // bar 0x3145c0, not by buildability). Host: GalacticSim::production_disabled(player, type). [port] such options take
-    // no pad (hidden) unless GalacticHudFrame::show_production_disabled, then drawn greyed with clicks ignored.
+    // bar 0x3145c0, not by buildability). Host: GalacticSim::production_disabled(player, type). Listed greyed, clicks
+    // ignored, no tooltip line (GALACTIC_DIALOGS §5.1.1).
     bool production_disabled = false;
-    // GALACTIC_DIALOGS §5.1: the build tab the option belongs to (space = true -> blue pad i_button_pad_empire, Blank
-    // index 1; ground -> amber i_button_pad_rebel, index 0). Host: true for space units / starbases.
+    // GALACTIC_DIALOGS §5.1.1 (ui4 t12): the build tab the option is listed on - land when Build_Cost_Credits > 0 and it
+    // needs a ground base level or is a DUMMY_GROUND_STRUCTURE, space otherwise (host rule). Only the current tab's
+    // options take pads; every pad is drawn on the tab's Blank_Texture_Name (land amber, space blue).
     bool space = false;
+    // §5.1.1: GUI_Row 0 -> row 0 = the odd pads b_Create_01, 03 .. (lower row); any other GUI_Row -> row 1 = the even pads
+    // b_Create_00, 02 .. (upper row). Each row fills from the left in list order; options past its 13 pads are dropped.
+    uint8_t row = 1;
     // ui4 t02: why the pad is greyed (GalacticSim::can_enqueue at the planet). != None -> disabled; the b_Create_NN
     // Tooltip_Text entry follows the reason (0 TEXT_PRODUCTION_QUEUE_FULL, 1 _POP_CAP_REACHED, 2 _INSUFFICIENT_FUNDS; other
     // reasons: no tooltip) and a left click plays the GUI negative feedback (HudAction::BuildRefused) instead of sending
@@ -241,8 +252,42 @@ struct GalacticShellVisibility {
     bool visible = false;
 };
 
+// ui4 t04: the FoC planet map ("Base Layout", docs/re/GALACTIC_PLANET_MAP.md), drawn while GalacticHudFrame::
+// advanced_map_open. The host feeds the pads (placed by the planet's land-map UI markers, game::planet_map_pads), the
+// ground forces in orbit and the caps; the HUD draws map_shell's components and turns drags into commands.
+struct GalacticMapPad {
+    bool unit_pad = false;      // unit_padNN, else build_padNN
+    int32_t index = 0;          // NN
+    Vec2f uv{};                 // marker position 0..1 across the map (§4.3; [port] y up)
+    std::string icon;           // occupant's Icon_Name ("" = the pad's own art: blank, or the reinforce / bunker icon)
+    int32_t alt = -1;           // Icon_Alternate_Texture_Name index (§4.2 build_pad40..79: 0 bunker, 1 build pad); -1 = faction
+    uint32_t object = 0;        // the structure or landed unit on it (0: empty or a structure type): drag source
+    uint8_t tag = 0;            // §4.2 pad data slot 3: 1 In / Out, 3 Specific
+    bool dimmed = false;        // §4.4 step 2: tint (255, 255, 255, 192)
+    float shield = 0.0f;        // §4.4: shield_range.tga diameter as a fraction of the map width (0 = none)
+};
+struct GalacticMapStack {       // §5: one land_fleet_NN stack
+    uint32_t unit = 0, fleet = 0;  // representative unit and its fleet
+    uint32_t count = 1;
+    std::string icon;
+};
+struct GalacticPlanetMap {
+    uint32_t planet = 0;        // the planet object (land target)
+    bool foreign = false;       // §1.1 foreign view (HUD +0x2ae4): every pad and stack disabled, no drag
+    // §3.1 the land-map picture: "<Land_Tactical_Map>.dds" through `images`; "" or unresolved -> maptemp.dds.
+    std::string picture;
+    const GuiImageResolver* images = nullptr;
+    std::vector<GalacticMapPad> pads;
+    std::vector<GalacticMapStack> orbit;  // land_fleet_00..19
+    bool surface_full = false;  // §5: landed units >= Max_Ground_Forces_On_Planet: the stacks are disabled
+    // §7: unit_cap_number "%d/%d" (landed units, any owner / the garrison pad count), building_cap_number (ground special
+    // structures / Special_Structures_Land); a cap < 0 hides the number.
+    int32_t units = 0, unit_cap = 10, structures = 0, structure_cap = -1;
+    std::string weather_icon, ability_icon;  // §1.2 step 6: weather / planet_bonus
+};
+
 struct GalacticHudFrame {
-    View view;                    // galactic camera (make_view of the GalacticCameraController's params)
+    View view;                   // galactic camera (make_view of the GalacticCameraController's params)
     int32_t zoom_state = 0;       // galactic camera zoom state (§1.6)
     float zoom = 0.0f;            // zoom fraction z
     std::span<const GalacticPlanetInfo> planets;
@@ -264,7 +309,13 @@ struct GalacticHudFrame {
     double time = 0.0;
     Vec2f cursor_px{};
     GalacticProviders providers;
-    bool show_production_disabled = false;  // [port] grey production-disabled build options instead of hiding them
+    // §5.1.1 (0x3e8a80): the selected planet's surface is accessible. False forces the space tab and disables
+    // b_planet_tab (the dial cannot reach the land tab either).
+    bool land_tab_allowed = true;
+    // ui4 t10 (GALAXY_MAP_PRESENTATION §1.7, 0x3e83a0): the organiser's Text_Land_Fleet = TEXT_BASE_LAYOUT, second line
+    // (Text_Offset2) TEXT_UNKNOWN while the local player may not see the selected planet's ground forces; hidden on a
+    // destroyed planet.
+    bool planet_destroyed = false, ground_forces_unknown = false;
     bool paused = false;          // [port: Gabriel] b_play_pause look; a click emits pause_event(!paused) (orders.hpp)
     // Day pips (docs/re/HUD_GAPS.md §4): the fiscal-cycle (income) timer as 10 balance_pip clones from the bone fight_bar_g
     // of i_main_commandbar, left to right, pip width apart (Pixel_Align: snapped to the pixel centre). k = floor(10 x
@@ -277,6 +328,10 @@ struct GalacticHudFrame {
     // (planetary_mode.alo) instead of fight_bar_g (HUD_GAPS §4.2). Host: map_shell's bones must be in layout() (ShellSet
     // load of "map_shell" + apply); [port] without that bone the pips stay on fight_bar_g.
     bool advanced_map_open = false;
+    // ui4 t04: what the open planet map shows (GALACTIC_PLANET_MAP §1.2-§7). While advanced_map_open the command bar and
+    // organiser shells are hidden (shell_visibility), the planet labels, ability rows, build pads and queue are not
+    // drawn, the radar moves to radar_galactic_adv_map, and only components on a shell bone are drawn.
+    GalacticPlanetMap planet_map;
     // GALACTIC_DIALOGS §4: the organiser (i_main_organize) and planet_info show only while organize_open (host: selected
     // planet && planet close-up) and the advanced planet map is closed. NOTE host: advanced_map_open must mean the FoC
     // planet map (advanced_planetary / map_shell), not the zoomed planet view, or the organiser never shows.
@@ -326,6 +381,15 @@ struct GalacticHudFrame {
 // re-slots / merges in place; op 8 {slot, a = planet} is the slot to take on arrival there (ahead of the move order);
 // `b` = the slot a new fleet takes (detach, launch, op 6 with its destination).
 inline constexpr int32_t kMapFleetIndex = 3;  // GalacticDrag::fleet_index of a fleet dragged from its map button
+// ui4 t04 planet map drags (GALACTIC_PLANET_MAP §6), GalacticDrag::fleet_index: an orbit stack land_fleet_NN, a landed unit
+// on unit_padNN, a structure on build_pad00..32. Drops ([port] SetMarkerID, kind 53, has no sim handler yet: the marker
+// moves of rules 2, 3 and 5 are not sent, so unit pad -> unit pad and build pad -> build pad do nothing):
+//   orbit stack -> map_window       FleetManagement detach + land = kFleetLand {target = planet, fleet, unit} (one unit;
+//                                    not while the surface is full)
+//   orbit stack -> unit_padNN       the same landing; an occupant of that pad is launched into a new fleet
+//                                    (kFleetMoveNew {target = planet, unit, a = planet}) [port: op 4 + op 0 in one command]
+//   unit pad -> land_fleet_NN       launch into a new fleet (kFleetMoveNew as above)
+inline constexpr int32_t kMapOrbitIndex = 4, kMapUnitPadIndex = 5, kMapBuildPadIndex = 6;
 struct GalacticDrag {
     bool active = false;
     int32_t component = -1;      // dragged pad
@@ -362,6 +426,8 @@ struct GalacticHudStats {
     uint32_t battle_graphs = 0, screen_text_lines = 0;
     bool advisor_movie = false;  // Movie_galactic drew the advisor loop this frame
     bool organize_shown = false;                       // §4 organiser shell active this build
+    bool planet_map = false, map_picture = false;      // ui4 t04: the planet map drawn / its land-map picture resolved
+    uint32_t map_pads = 0, map_stacks = 0, map_shields = 0;
     bool fleet_slots_shown = false;                    // slot ovals shown this build
     uint32_t empty_slots = 0, slot_highlights = 0;     // fleet_empty ovals drawn / mouse-over frames on slots
 };
@@ -395,6 +461,11 @@ public:
     void build(const GalacticHudFrame& frame);
     const HudDrawList& draw_list() const { return dl_; }
     const GalacticHudStats& stats() const { return stats_; }
+    // ui4 t12 (GALACTIC_DIALOGS §5.1.1): the build tab - false land (b_planet_tab, the start), true space (b_space_tab).
+    // Clicks on b_space_tab / b_planet_tab / b_dial switch it (GUI_Dial_Switch_SFX on a change); planet selection keeps
+    // it. set_build_tab is the same switch for the host (a loaded game, a story click).
+    bool build_space_tab() const { return build_space_tab_; }
+    void set_build_tab(bool space);
     // ui4 t03: the filter bits (kFilter*) of the b_filters0..3 toggles now on (the host feeds the hero bit back into the
     // fleet buttons' representative icon).
     uint32_t filter_bits() const;
@@ -417,6 +488,14 @@ public:
     // ui1 t03: the g_planet_fleet / g_planet_land_forces button under pixel (px, py) of the last build: its fleet id (0 =
     // none or an empty slot) and whether it is the land-forces button.
     uint32_t stack_under(float px, float py, bool& land) const;
+    // ui4 t07 (HUD_GAPS §2.2): what the encyclopedia pop-up of a hovered pad of the last build shows - a build pad or a
+    // queue hologram: its type (object 0); an organiser or land-forces unit pad: its unit (the stack's first, type left
+    // kNoSlotType for the host to look up). False for a fleet header, an empty pad and any other component.
+    struct PadSubject {
+        uint32_t object = 0;
+        uint32_t type = kNoSlotType;
+    };
+    bool pad_subject(int32_t component, PadSubject& out) const;
     // RouteHooks::hud_takes: false for a right press on g_planet_fleet / g_planet_land_forces (they ignore the right
     // button, so a right-click move onto the planet under them reaches the world); true otherwise.
     bool takes_button(int32_t component, Button b) const;
@@ -439,6 +518,8 @@ private:
     void build_day_pips(const GalacticHudFrame& f);
     void build_battle_prompt(const GalacticHudFrame& f);
     void build_screen_text(const GalacticHudFrame& f);
+    void build_planet_map(const GalacticHudFrame& f);  // ui4 t04
+    bool map_drop(std::vector<commands::EventData>* out) const;
     std::u32string text_or(const char* key, std::u32string_view fallback) const;
     void hit(int32_t component, uint32_t layer, Vec2f center, Vec2f size);
     Vec2f component_size(uint32_t component, const ComponentPlacement& p) const;
@@ -466,6 +547,14 @@ private:
             bounty_ = -1, ring_ = -1, credit_filter_ = -1;
     // ui4 t03: b_filters0..3 and the extra planet-label components.
     int32_t filters_[4] = {-1, -1, -1, -1};
+    int32_t ground_pips_ = -1, space_pips_ = -1, ground_icon_ = -1, land_fleet_text_ = -1;  // ui4 t10
+    // ui4 t07: the radar mapping of the last build (canvas centre / size, galaxy centre and half extent; half 0 = none).
+    Vec2f radar_at_{}, radar_size_{};
+    float radar_cx_ = 0.0f, radar_cy_ = 0.0f, radar_half_ = 0.0f;
+    // ui4 t12: build tabs.
+    int32_t space_tab_ = -1, planet_tab_ = -1, dial_ = -1, scroll_left_ = -1, scroll_right_ = -1;
+    bool build_space_tab_ = false;
+    bool land_tab_allowed_ = true;
     int32_t build_icon_ = -1, smuggled_ = -1, corruption_icon_ = -1, corruption_text_ = -1, enemy_hero_ = -1, weather_ = -1,
             ability_ = -1, credit_bar_ = -1;
     int32_t credits_ = -1, pop_ = -1, day_ = -1, planet_text_ = -1, income_ = -1, tech_ = -1, planet_info_ = -1;
@@ -474,6 +563,12 @@ private:
     int32_t obj_back_ = -1, obj_header_ = -1, obj_text_ = -1, obj_icon_ = -1, commandbar_ = -1, organize_ = -1;
     int32_t pause_ = -1;
     int32_t balance_pip_ = -1, map_shell_ = -1;
+    // ui4 t04: the planet map (map_shell components) and its state of the last build.
+    bool map_open_ = false, map_foreign_ = false, map_surface_full_ = false;
+    uint32_t map_planet_ = 0;
+    int32_t map_window_ = -1, radar_adv_ = -1, map_name_ = -1, map_allegiance_ = -1, map_day_ = -1, map_income_ = -1,
+            map_weather_ = -1, map_bonus_ = -1, map_back_ = -1, unit_cap_ = -1, building_cap_ = -1;
+    std::vector<int32_t> map_build_pad_, map_unit_pad_, map_filters_, map_texts_;
     // §1 battle prompt / §2 holocron / §5.3 emblem.
     int32_t pending_shell_ = -1, story_pending_shell_ = -1, choice_text_ = -1, choice_left_ = -1, choice_right_ = -1,
             graph_left_ = -1, graph_right_ = -1, single_text_ = -1, single_button_ = -1;
@@ -505,6 +600,7 @@ private:
         bool empty = false;            // an empty organiser pad shown while dragging (UI.md §7.3): fleet 0 = a pane without a fleet
         std::string icon;
         std::u32string name;           // [port] the fleet's (header) or the unit's (stack of one) name, "" = none
+        uint8_t map_tag = 0;           // ui4 t04: a planet-map build pad's tag (GalacticMapPad::tag)
     };
     // [port: Gabriel] double click on an own organiser pad -> HudAction::Rename
     int32_t last_pad_click_ = -1;
