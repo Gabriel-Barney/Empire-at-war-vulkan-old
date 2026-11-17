@@ -444,8 +444,13 @@ only dialog / chapter tags shipped events use are `Story_Dialog`, `Story_Chapter
 `Story_Dialog_Popup` (always False) - item 7's fields to trace.
 
 1. Timeout (`<Timeout>`, `+0x308`): registration on arm and cancellation on fire are seen. The expiry handler
-   (indirect plot call in T9) was not resolved: does it fire the event, or fail it? [L: fires, given the 60 s
-   default for SPEECH_DONE]. Port reading: §8 item 4.
+   (indirect plot call in T9) was not resolved in the binary. Retail behaviour (storyb t17, 2026-11-17) says it does
+   **not fire** the event [M]: the Kessel UM01 mission arms 50 SPEECH_DONE events at its Begin (frame 4), whose 60 s
+   default expires together at frame 1804. Fired there, they take the plot script's single pending state slot
+   (PGStoryMode `Story_Event_Trigger` sets the next state only when none is pending) in the frame a dialog line ends,
+   so CINE_Start_Mission_B never sees that line's Done flag and stops; in both hands-off retail runs the cinematic
+   runs on (Tyber moves at frame 3303, the landing spawns at 5361), and the port without the fire matches that
+   timeline within 21 frames. What else expiry does (nothing, or a "failed" mark) is still open. Port reading: §8 item 4.
 2. ~~Lua `Activate`/`Suspend` bodies~~ confirmed from the bytes: plot (wrapper +0x38) +0x660 := 1 / 0 when non-null,
    no return values (STRATEGIC_GAPS §4) [H].
 3. ~~Exact T9 time argument~~ = (float)(mode frame) × seconds-per-frame 0x140b0a344; paused = galactic and counter
@@ -503,7 +508,8 @@ rules above where they leave a choice. Tests: `engine/lua/tests/test_lua_story.c
    branch's events (TRIGGER fires), then fires Param2 (even when disabled it is still called: Fire does nothing);
    depth 3, so an event that resets its own branch and fires itself through Param2 fires 1 + 3 times. DISABLE_BRANCH
    needs Param2 (`atoi(P2) != 0` disables, 0 re-enables); no reset touches the disabled flag.
-4. **Timeout expiry** (§7 item 1) [L, kept]: an expired Timeout **fires** the event, at the plot's T9 step 3 while
+4. **Timeout expiry** (§7 item 1) [M, storyb t17; was [L] "fires" until 2026-11-17]: an expired Timeout is
+   **cancelled and fires nothing**; the event stays armed for its own trigger. Checked at the plot's T9 step 3 while
    the plot is active and the event is armed, unfired and enabled (time = mode time, the paused flag is not applied
    [port]). A Timeout is registered only when the event is armed by its prereqs (or RESET_BRANCH's re-check), never at
    load, so a prereq-less event's `<Timeout>` (including SPEECH_DONE's 60 s default) never runs; the Perpetual re-arm

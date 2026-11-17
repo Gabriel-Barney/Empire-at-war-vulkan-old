@@ -43,6 +43,9 @@
 #include "alamo/vfs/vfs.hpp"
 #include "port_trace.hpp"
 #include "tactical_trace.hpp"  // storyb t03: --tactical-trace-out
+#if defined(ALAMO_SIM_HAVE_STORY) && defined(ALAMO_HEADLESS_HAVE_SPEECH)
+#include "story_speech.hpp"  // storyb t17: the story speech clock
+#endif
 
 namespace {
 
@@ -501,8 +504,23 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
         uint32_t owner_changes = 0;
         bool campaign_end = false;  // q6 t21: the galactic victory monitor's result (reported once; the run goes on)
         if (trace.is_open()) trace.start(*gs, cfg.seed);
+#if defined(ALAMO_SIM_HAVE_STORY) && defined(ALAMO_HEADLESS_HAVE_SPEECH)
+        // storyb t17 (story_speech.hpp): the --human player's story speech ends at the line's length, not the 60 s Timeout.
+        std::unique_ptr<alamo_headless::StorySpeechClock> speech;
+        if (aopt.story && host.story() && human >= 0) {
+            speech = std::make_unique<alamo_headless::StorySpeechClock>();
+            std::string se;
+            if (!speech->init(*files, cfg.seed, &se)) {
+                if (print) std::fprintf(stderr, "galactic-ai: story speech clock off: %s\n", se.c_str());
+                speech.reset();
+            }
+        }
+#endif
         while (n < opt.ticks && host.tick_once()) {
             ++n;
+#if defined(ALAMO_SIM_HAVE_STORY) && defined(ALAMO_HEADLESS_HAVE_SPEECH)
+            if (speech && host.story()) speech->step(*host.story(), human);
+#endif
             if (trace.is_open()) {
                 const sim::GameMode* top = host.modes().top();
                 PortStateTrace::Sample ts;
@@ -604,6 +622,9 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
             if (aopt.verbose)
                 for (const auto& m : st.lua_messages()) std::printf("  story lua: %s\n", m.c_str());
             if (aopt.verbose) std::fputs(st.log_text("galactic-ai: story event log").c_str(), stdout);  // storyb t17
+#if defined(ALAMO_HEADLESS_HAVE_SPEECH)
+            if (speech) std::printf("galactic-ai: story speech: %u lines played, %u ends reported\n", speech->speeches(), speech->ends());
+#endif
             if (const lua::StoryHolocron* h = st.holocron()) {  // q6 t14 (GALACTIC_DIALOGS §2.8)
                 size_t done = 0;
                 for (const lua::StoryHolocronEntry& e : h->entries()) done += e.completed ? 1u : 0u;

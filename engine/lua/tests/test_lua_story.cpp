@@ -1094,7 +1094,8 @@ static void test_branches() {
     CHECK(fired_count(m, "Loop") == 4 && m.plot(0).state[m.find_event(0, "Loop")].fire_count == 4);
 }
 
-// l1s3 t01 / t02: Timeout expiry fires the event [L]; the T9 paused flag stops ELAPSED accumulation.
+// l1s3 t01 / t02, storyb t17: Timeout expiry cancels the timeout and fires nothing (STORY.md §8 item 4 [M]); the event
+// stays armed for its own trigger. The T9 paused flag stops ELAPSED accumulation.
 static void test_timeouts_and_pause() {
     StoryModel m;
     std::string err;
@@ -1115,13 +1116,15 @@ static void test_timeouts_and_pause() {
     m.update(2, 2.9);
     CHECK(fired_count(m, "Timed") == 0);
     m.update(3, 3.0);
-    CHECK(fired_count(m, "Timed") == 1 && fired_count(m, "Early") == 1);
+    CHECK(fired_count(m, "Timed") == 0 && fired_count(m, "Early") == 1);  // expired: not fired
+    CHECK(m.plot(0).state[2].timeout_at < 0.0 && m.plot(0).state[2].armed);  // cancelled, still armed
+    CHECK(m.story_event("NEVER") == 1 && fired_count(m, "Timed") == 1);      // its own trigger still fires it
     m.update(4, 60.9);
-    CHECK(fired_count(m, "Speech") == 0);
+    CHECK(m.plot(0).state[1].timeout_at == 61.0);  // SPEECH_DONE's default 60 s Timeout, from its activation at 1.0
     m.update(5, 61.0);
-    CHECK(fired_count(m, "Speech") == 1);  // SPEECH_DONE's default 60 s Timeout, from its activation at 1.0
+    CHECK(fired_count(m, "Speech") == 0 && m.plot(0).state[1].timeout_at < 0.0);
     m.update(6, 100.0);
-    CHECK(fired_count(m, "Free") == 0);  // a Timeout is registered when an event is armed by prereqs, never at load
+    CHECK(fired_count(m, "Free") == 0 && m.plot(0).state[4].timeout_at < 0.0);  // registered only when armed by prereqs
 
     // Paused T9s add nothing even when the time argument moves; time goes on from the paused T9's value.
     StoryModel p;

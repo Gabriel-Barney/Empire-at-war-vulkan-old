@@ -1250,11 +1250,15 @@ void StoryModel::service_plot(uint32_t p) {
             }
         }
     }
-    // Timeouts [L]: an expired Timeout fires the event (STORY.md Â§7.1 open).
+    // Timeouts (storyb t17, STORY.md §8 item 4 [M]): an expired Timeout is cancelled and fires nothing; the event stays
+    // armed for its own trigger. Retail evidence: in the two hands-off UM01 runs the mission's 50 SPEECH_DONE events armed
+    // by Underworld_A01M01_Begin reach their 60 s default together; firing them there takes the plot script's one pending
+    // state slot (PGStoryMode Story_Event_Trigger) in the frame a dialog line ends, so CINE_Start_Mission_B waits for ever,
+    // while retail's cinematic runs on (Tyber at frame 3303, the landing spawns at 5361).
     for (const uint32_t e : walk) {
         if (!gated(p, e)) continue;
-        const StoryEventState& st = plots_[p].state[e];
-        if (st.timeout_at >= 0.0 && time_ >= st.timeout_at) fire(p, e);
+        StoryEventState& st = plots_[p].state[e];
+        if (st.timeout_at >= 0.0 && time_ >= st.timeout_at) st.timeout_at = -1.0;
     }
 }
 
