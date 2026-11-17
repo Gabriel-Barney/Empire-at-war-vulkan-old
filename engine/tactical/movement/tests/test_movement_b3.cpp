@@ -173,7 +173,6 @@ void test_step0_squad_final_facing() {
     const V2 goal = cell_center(25, 20);
     UnitDesc x = unit(70, goal, 2, 1.0f, 6.0f);
     x.owner = 1;
-    CHECK(sys.add_unit(x));
     SimRng rng(303);
     sys.tick(1, rng, serial_for);
     MoveOrder o;
@@ -181,8 +180,11 @@ void test_step0_squad_final_facing() {
     o.destination = goal;
     o.final_facing_deg = 90.0f;
     sys.move(o, rng, 2);
-    bool arrived = false, turned = false;
+    bool arrived = false, turned = false, placed = false;
     for (uint32_t f = 2; f < 900 && !arrived; ++f) {
+        // mov1 t04 (BKR1 Q5 [H]): the destination counts as blocked only once the squad's approximation byte +0x28c says
+        // its path ends within L = 60 (rebuilt every 8 frames): the unit steps onto the goal when the squad is 45 out
+        if (!placed && sys.view(100).pos.x > goal.x - 45.0f) placed = sys.add_unit(x);
         sys.tick(f, rng, serial_for);
         turned = turned || sys.view(100).team_final_turn;
         arrived = sys.view(100).arrived && !sys.view(100).team_final_turn;
@@ -733,9 +735,10 @@ void test_t23_save_try_again() {
 // ahead), so it and the rear one are Speed Slave Only with M = the front one; a crawler of another order (max speed
 // 0.02, below the 0.05 acceleration default) ahead of it caps it below its acceleration (Moving With Speed Only: it
 // does not overtake). The rear one, answered below its own acceleration, starves: 30 frames later it becomes M of state
-// 15. Case 1: one rear unit, which also has a record with the crawler - two records, so it stands in state 15. Case 2:
-// a Giant leads two rear units side by side, each with that one record - state 16 in the same frame, a detour around
-// the Giant.
+// 15. Case 1: one rear unit, which also has a record with the crawler - two records; mov1 t01 (b0176, BKR1_RE_ANSWERS Q1
+// [H]): 0x505630 counts only the state-15 records whose master is M, so the crawler record does not count and M detours
+// (state 16) in the same frame (before mov1 every record of M counted and it stood). Case 2: a Giant leads two rear
+// units side by side, each with that one record - state 16 in the same frame, a detour around the Giant.
 void test_t23_starvation() {
     ::alamo::test::section("t23_starvation");
     for (int with_detour = 0; with_detour < 2; ++with_detour) {
@@ -778,7 +781,7 @@ void test_t23_starvation() {
         }
         CHECK(slave > 0 && starved > slave + 29 && starved_m == 2);
         if (with_detour) CHECK(records == 1 && detour == starved);
-        else CHECK(records == 2 && detour == 0 && stood);
+        else CHECK(records == 2 && detour == starved);
         std::printf("t23 starvation: Speed Slave Only from %u, starved at %u (M %d, the rear one, %u record(s)), state 16 at %u%s\n",
                     slave, starved, starved_m, records, detour, with_detour ? "" : stood ? ", stands" : ", moves");
     }
@@ -914,6 +917,120 @@ void test_t24_role_slots() {
     CHECK(s.master == 0 && s.speed_a == 1.0f && s.speed_b == 2.0f);
 }
 
+// mov1 t02 (b0179, BKR1_RE_ANSWERS Q3 [H]): the head-on tie-break of two equal-class formations compares 0x41a5c0. Two
+// small vehicles (half extents 10 x 6) in one formation against one long vehicle (40 x 6) alone: by member count the pair
+// would be M; by 0x41a5c0 the pair is max(2 x (0 + 20 / 20) + 0.25, sqrt(1.8 x 2 x 1 x 0.6)) = 2.25 and the long one
+// max(1 x 4 + 0.25, sqrt(1.8 x 4 x 0.6)) = 4.25 - the long one is M (it walks on, the small one detours).
+void test_mov1_head_on_extent() {
+    ::alamo::test::section("mov1_head_on_extent");
+    MovementSystem sys{MovementConfig{}};
+    land_system(sys, 120);
+    const V2 w = cell_center(20, 60), e = cell_center(55, 60);
+    CHECK(sys.add_unit(vehicle(1, w, 0)) && sys.add_unit(vehicle(2, w + V2{0.0f, 30.0f}, 0)));
+    UnitDesc big = vehicle(3, e, 1, 40.0f, 6.0f);
+    big.yaw_deg = 180.0f;
+    CHECK(sys.add_unit(big));
+    SimRng rng(902);
+    order(sys, rng, {1, 2}, cell_center(95, 60), 1);
+    order(sys, rng, {3}, cell_center(5, 60), 1);
+    CHECK(sys.view(1).form_id != 0 && sys.view(1).form_id == sys.view(2).form_id && sys.view(3).form_id != sys.view(1).form_id);
+    CollisionState decided = CollisionState::Active;
+    ObjectId master = -1;
+    for (uint32_t f = 1; f < 600 && decided == CollisionState::Active; ++f) {
+        sys.tick(f, rng, serial_for);
+        for (const ObjectId small : {1, 2}) {
+            const CollisionObject* c = mvm_record(sys, small, 3);
+            if (c && c->state != CollisionState::Active && decided == CollisionState::Active) {
+                decided = c->state;
+                master = master_of(*c);
+            }
+        }
+    }
+    std::printf("mov1 head-on extent: state %d, master %d (the long vehicle is 3)\n", static_cast<int>(decided), master);
+    CHECK(decided == CollisionState::PathAround && master == 3);
+}
+
+// mov1 t05 (b0186, BKR1_RE_ANSWERS Q3 [H]): within one coordinator the overtake 0x683260 needs rank_b > rank_a. One order
+// with a fast rear vehicle and a slow front one, each its own formation (their footprint area makes two k-means buckets),
+// a long way: the time test passes (before mov1: Pass), but the front formation's goal lies ahead (rank 0) of the rear's
+// (rank 1), so the rear one is slaved (Moving With Speed Only).
+void test_mov1_overtake_rank() {
+    ::alamo::test::section("mov1_overtake_rank");
+    MovementSystem sys{MovementConfig{}};
+    land_system(sys, 160);
+    const V2 at = cell_center(20, 80);
+    UnitDesc r = vehicle(1, at, 0, 10.0f, 6.0f, 1.0f);
+    r.radius = 30.0f;
+    UnitDesc f = vehicle(2, at + V2{100.0f, 0.0f}, 0, 10.0f, 6.0f, 0.5f);
+    f.radius = 30.0f;
+    CHECK(sys.add_unit(r) && sys.add_unit(f));
+    SimRng rng(903);
+    order(sys, rng, {1, 2}, at + V2{2000.0f, 0.0f}, 1);
+    const UnitView v1 = sys.view(1), v2 = sys.view(2);
+    CHECK(v1.form_id != 0 && v2.form_id != 0 && v1.form_id != v2.form_id && v1.coord_id != 0 && v1.coord_id == v2.coord_id);
+    CollisionState decided = CollisionState::Active;
+    ObjectId master = -1;
+    for (uint32_t fr = 1; fr < 900 && decided == CollisionState::Active; ++fr) {
+        sys.tick(fr, rng, serial_for);
+        const CollisionObject* c = mvm_record(sys, 1, 2);
+        if (c && c->state != CollisionState::Active) {
+            decided = c->state;
+            master = master_of(*c);
+        }
+    }
+    std::printf("mov1 overtake rank: ranks rear %d / front %d, state %d, master %d\n", v1.form_rank, v2.form_rank,
+                static_cast<int>(decided), master);
+    CHECK(v1.form_rank == 1 && v2.form_rank == 0);
+    CHECK(decided == CollisionState::MovingWithSpeed && master == 2);
+    // a queued order adds a block to the existing formations [M]: each unit keeps its coordinator, rank and member 0
+    MoveOrder q;
+    q.units = {1, 2};
+    q.destination = at + V2{2000.0f, 400.0f};
+    q.flags = kMoveFlagQueue;
+    sys.move(q, rng, 900);
+    const UnitView q1 = sys.view(1), q2 = sys.view(2);
+    CHECK(q1.coord_id == v1.coord_id && q2.coord_id == v2.coord_id && q1.form_rank == 1 && q2.form_rank == 0);
+}
+
+// mov1 t06 (b0189, BKR2_RE_ANSWERS Q3 [H]): MovingVsStopped step 10's 0x685490. A corridor five cells wide is closed by
+// two standing vehicles, b in its upper half (on the mover's line) and c in its lower half. Retail's Path Around crosses
+// an obstacle in its second pass, so the scene's own decision detours (state 1); the probe is run through the test seam on
+// the live record: its search (flags 2) keeps b (it shares the record) and ignores c (no record with the mover), so its
+// line runs through c's half and meets c's footprint - a hostile c gives the mover's formation an attack block on c; a
+// friendly c gives nothing (state 7 would follow).
+void test_mov1_step10_attack() {
+    ::alamo::test::section("mov1_step10_attack");
+    for (const int32_t c_owner : {1, 0}) {
+        MovementSystem sys{MovementConfig{}};
+        land_system(sys, 60);
+        for (int32_t y = 0; y < 60; ++y)
+            for (int32_t x = 0; x < 60; ++x)
+                if (y < 18 || y > 22 || x < 2 || x > 57) sys.grid().set_base(x, y, kPassImpassable);
+        const float yc = cell_center(0, 20).y;
+        CHECK(sys.add_unit(vehicle(1, {cell_center(5, 20).x, yc - 25.0f}, 0)));
+        CHECK(sys.add_unit(vehicle(2, {cell_center(30, 20).x, yc - 25.0f}, 1, 10.0f, 25.0f)));        // b
+        CHECK(sys.add_unit(vehicle(3, {cell_center(30, 20).x, yc + 25.0f}, c_owner, 10.0f, 25.0f)));  // c
+        SimRng rng(904);
+        order(sys, rng, {1}, {cell_center(55, 20).x, yc - 25.0f}, 1);
+        bool probed = false, attacked = false;
+        std::vector<MovementSystem::FormationAttack> got;
+        for (uint32_t f = 1; f < 400 && !probed; ++f) {
+            sys.tick(f, rng, serial_for);
+            for (const CollisionObject& c : sys.collisions().list())
+                if (c.kind == CollisionKind::MovingVsStopped && c.a == 1 && c.b == 2 && c.state != CollisionState::Active) {
+                    probed = true;
+                    attacked = sys.test_step10_probe(1, 2, f);
+                    got.assign(sys.formation_attacks().begin(), sys.formation_attacks().end());
+                    break;
+                }
+        }
+        std::printf("mov1 step 10: c owner %d - probe run %d, attack block %d (%zu)\n", c_owner, probed ? 1 : 0, attacked ? 1 : 0, got.size());
+        CHECK(probed);
+        if (c_owner == 1) CHECK(attacked && got.size() == 1 && got[0].mover == 1 && got[0].target == 3);
+        else CHECK(!attacked && got.empty());
+    }
+}
+
 int main() {
     test_step0_halt_brake();
     test_step0_crush_no_locomotor();
@@ -932,5 +1049,8 @@ int main() {
     test_t23_early_pop();
     test_t23_state2_self_read();
     test_t24_role_slots();
+    test_mov1_head_on_extent();
+    test_mov1_overtake_rank();
+    test_mov1_step10_attack();
     return ::alamo::test::report("alamo_tactical_movement_b3_tests");
 }

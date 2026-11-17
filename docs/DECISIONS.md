@@ -296,3 +296,11 @@ Gabriel, 2026-11-16, in the up-front round of the "needs Gabriel and probe runs"
   (Claude can't hear). Outside that run, rule 7 is unchanged.
 - Renewed for the second 2026-11-16 coordinator run (Trace parity gaps / UI art and fonts): Claude drove alamo_game for
   aamode t04, names t03, pathl t03 and gchk t01/t02 (done; findings in backlog b0442-b0448). Rule 7 unchanged otherwise.
+
+## Land tick runs in retail's frame order (mov1 t08, Gabriel, 2026-11-17)
+
+Gabriel, 2026-11-17, up-front answer for lane-mov: write the design note first, then reorder the land tick to retail's order
+if records, Starved or detour timing measurably differ. They did (`test_land_group`: old order 1906 frames / 36 dynamic
+re-paths / 6 early arrivals / 4 terrain records, retail order 1955 / 25 / 4 / 3), so `MovementSystem::tick_land` now runs
+retail `0x3639d0` as a cycle: tracker snapshot -> collision services -> detection -> plans -> answer fold -> walk. A new
+record waits one tick in state 0. Every land golden moved. Design note and measurements: `docs/PHASE4.md`, mov1 entry.

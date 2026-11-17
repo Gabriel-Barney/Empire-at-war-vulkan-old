@@ -291,6 +291,63 @@ uint8_t edge_class(const PassabilityGrid& grid, const AroundRequest& q, std::spa
 
 }  // namespace
 
+std::vector<uint32_t> terrain_corners(int32_t bw, int32_t bh, std::span<const uint8_t> open, std::span<const uint8_t> reach) {
+    std::vector<uint32_t> out;
+    if (bw <= 0 || bh <= 0) return out;
+    const size_t n = static_cast<size_t>(bw) * static_cast<size_t>(bh);
+    const auto at = [bw](int32_t x, int32_t y) { return static_cast<size_t>(y) * static_cast<size_t>(bw) + static_cast<size_t>(x); };
+    const auto in = [bw, bh](int32_t x, int32_t y) { return x >= 0 && y >= 0 && x < bw && y < bh; };
+    // (3) 0x67a2d0: the blocked-neighbour mask, outside the window = blocked
+    static constexpr int32_t kNx[8] = {-1, 0, 1, -1, 1, -1, 0, 1};
+    static constexpr int32_t kNy[8] = {-1, -1, -1, 0, 0, 1, 1, 1};
+    std::vector<uint8_t> m(n, 0), c(n, 0);
+    for (int32_t y = 0; y < bh; ++y)
+        for (int32_t x = 0; x < bw; ++x) {
+            uint8_t bits = 0;
+            for (uint32_t k = 0; k < 8; ++k) {
+                const int32_t nx = x + kNx[k], ny = y + kNy[k];
+                if (!in(nx, ny) || !open[at(nx, ny)]) bits = static_cast<uint8_t>(bits | (1u << k));
+            }
+            m[at(x, y)] = bits;
+        }
+    // (4) 0x67ce80 on every window cell (its own passability is not tested)
+    for (size_t i = 0; i < n; ++i) {
+        const uint32_t b = m[i];
+        const bool convex = (b & 0xD0u) == 0x80u || (b & 0x68u) == 0x20u || (b & 0x0Bu) == 0x01u || (b & 0x16u) == 0x04u;
+        const bool concave = (b & 0x0Au) == 0x0Au || (b & 0x12u) == 0x12u || (b & 0x50u) == 0x50u || (b & 0x48u) == 0x48u;
+        c[i] = convex || concave ? 1 : 0;
+    }
+    // (5) pass 1, row-major, clearing C in place: unreached cells, then the four staircase steps against live C (the open
+    // sides of each pattern are free cells, so the neighbours read lie inside the window)
+    const auto cand = [&](int32_t x, int32_t y) { return in(x, y) && c[at(x, y)] != 0; };
+    for (int32_t y = 0; y < bh; ++y)
+        for (int32_t x = 0; x < bw; ++x) {
+            const size_t i = at(x, y);
+            if (!c[i]) continue;
+            if (!reach[i]) {
+                c[i] = 0;
+                continue;
+            }
+            const uint32_t b = m[i];
+            if (((b & 0xDAu) == 0x0Au && cand(x + 1, y) && cand(x, y + 1)) || ((b & 0x7Au) == 0x12u && cand(x, y + 1) && cand(x - 1, y)) ||
+                ((b & 0x5Bu) == 0x50u && cand(x - 1, y) && cand(x, y - 1)) || ((b & 0x5Eu) == 0x48u && cand(x, y - 1) && cand(x + 1, y)))
+                c[i] = 0;
+        }
+    // (6) pass 2: a lone convex corner whose blocked diagonal cell has both cross diagonals blocked (a one-cell-thick
+    // diagonal wall) is dropped. [port] a diagonal cell outside the window has no mask: the corner is kept.
+    const auto mask_has = [&](int32_t x, int32_t y, uint32_t want) { return in(x, y) && (m[at(x, y)] & want) == want; };
+    for (int32_t y = 0; y < bh; ++y)
+        for (int32_t x = 0; x < bw; ++x) {
+            const size_t i = at(x, y);
+            if (!c[i]) continue;
+            const uint32_t b = m[i];
+            const bool drop = (b == 0x20u && mask_has(x - 1, y + 1, 0x81u)) || (b == 0x01u && mask_has(x - 1, y - 1, 0x24u)) ||
+                              (b == 0x04u && mask_has(x + 1, y - 1, 0x81u)) || (b == 0x80u && mask_has(x + 1, y + 1, 0x24u));
+            if (!drop) out.push_back(static_cast<uint32_t>(i));
+        }
+    return out;
+}
+
 bool around_search(const PassabilityGrid& grid, const MovementConstants& k, const AroundRequest& q, AroundResult& out) {
     out = AroundResult{};
     const int32_t gw = static_cast<int32_t>(grid.width()), gh = static_cast<int32_t>(grid.height());
@@ -305,7 +362,7 @@ bool around_search(const PassabilityGrid& grid, const MovementConstants& k, cons
     std::vector<Box> obox(q.obstacles.size());
     for (size_t i = 0; i < q.obstacles.size(); ++i) obox[i] = rect_aabb(rect_grown(q.obstacles[i].shape, grow2));
     const CellBox base = around_window(q.start, q.goal, k.dynamic_avoidance_rectangle_bound, q.giant, gw, gh);
-    std::vector<uint8_t> reach;
+    std::vector<uint8_t> reach, open;
     std::vector<int32_t> stack;
     for (int32_t attempt = 0; attempt < 5; ++attempt) {
         CellBox w = base;
@@ -376,18 +433,15 @@ bool around_search(const PassabilityGrid& grid, const MovementConstants& k, cons
         std::vector<FootRect> rect1(win.size());
         for (size_t i = 0; i < win.size(); ++i) rect1[i] = rect_grown(q.obstacles[win[i]].shape, q.grow);
         std::vector<Vertex> vs;
-        // (i) terrain corners, row-major over the reached cells: a blocked diagonal neighbour with both adjacent
-        // orthogonals passable ([port] convex corners only), at the cell centre
-        for (int32_t cy = w.y0; cy <= w.y1; ++cy) {
-            for (int32_t cx = w.x0; cx <= w.x1; ++cx) {
-                if (!reach[li(cx, cy)]) continue;
-                bool corner = false;
-                for (int32_t dy = -1; dy <= 1 && !corner; dy += 2)
-                    for (int32_t dx = -1; dx <= 1 && !corner; dx += 2)
-                        corner = !grid.passable_cell(cx + dx, cy + dy, q.mask) && grid.passable_cell(cx + dx, cy, q.mask) &&
-                                 grid.passable_cell(cx, cy + dy, q.mask);
-                if (corner) vs.push_back({cell_center(cx, cy), -1, 0, cell_center(cx, cy)});
-            }
+        // (i) terrain corners (mov1 t03, b0180, BKR1_RE_ANSWERS Q4 [H]): 0x677e40's mask, candidates and prunes over the
+        // window (outside the window = blocked), at the cell centre, row-major
+        open.assign(reach.size(), 0);
+        for (int32_t cy = w.y0; cy <= w.y1; ++cy)
+            for (int32_t cx = w.x0; cx <= w.x1; ++cx) open[li(cx, cy)] = grid.passable_cell(cx, cy, q.mask) ? 1 : 0;
+        for (const uint32_t i : terrain_corners(bw, bh, open, reach)) {
+            const V2 p = cell_center(w.x0 + static_cast<int32_t>(i % static_cast<uint32_t>(bw)),
+                                     w.y0 + static_cast<int32_t>(i / static_cast<uint32_t>(bw)));
+            vs.push_back({p, -1, 0, p});
         }
         // (ii) per obstacle the corners of rect1, kept when the matching rect2 corner passes and the corner lies inside
         // no other obstacle's tracker rectangle

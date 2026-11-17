@@ -2233,7 +2233,7 @@ void test_land_squad_repulsion() {
             for (const CollisionObject& c : sys.collisions().list())
                 if (c.a == 100 && c.b == oid) {
                     if (c.kind == CollisionKind::MovingVsStopped && c.state == CollisionState::Repulsion) rep = true;
-                    else ++r.other_states;
+                    else if (c.state != CollisionState::Active) ++r.other_states;  // mov1 t08: a new record waits one tick in 0
                     if (k.pos.x > op.x + 80.0f) ++r.records_after;
                 }
             if (rep) ++r.repulsion_frames;
@@ -2267,18 +2267,21 @@ void test_land_squad_repulsion() {
         const V2 goal = cell_center(25, 20);
         UnitDesc x = unit(70, goal, 2, 1.0f, 6.0f, LocomotorKind::Default);
         x.owner = 1;
-        CHECK(sys.add_unit(x));
         SimRng rng(72);
         sys.tick(1, rng, serial_for);
         MoveOrder o;
         o.units = {1};
         o.destination = goal;
         sys.move(o, rng, 2);
-        bool arrived = false;
+        bool arrived = false, placed = false;
         for (uint32_t f = 2; f < 900 && !arrived; ++f) {
+            // mov1 t04 (BKR1 Q5 [H]): the destination counts as blocked only once the squad's approximation byte +0x28c
+            // says its path ends within L = 60 (rebuilt every 8 frames): the unit steps onto the goal when it is 45 out
+            if (!placed && sys.view(100).pos.x > goal.x - 45.0f) placed = sys.add_unit(x);
             sys.tick(f, rng, serial_for);
             arrived = sys.view(100).arrived;
         }
+        CHECK(placed);
         const UnitView k = sys.view(100);
         // the box (15 + 5, 15) at the stop point clears the unit's circle of 6: the centre at least 26 before it; the
         // search steps back by 5 and the cut takes 3 more, the walk stops within 5 of the cut path's end
@@ -2323,7 +2326,7 @@ void test_land_squad_repulsion() {
                 if (cb && kb.pos.x > pa.x + 60.0f) r.min_b = std::min(r.min_b, kb.speed);
                 for (const CollisionObject& c : sys.collisions().list()) {
                     if (c.kind == CollisionKind::MovingVsMoving && c.state == CollisionState::Repulsion) ++r.repulse;
-                    else ++r.other;
+                    else if (c.state != CollisionState::Active) ++r.other;  // mov1 t08: a new record waits one tick in 0
                 }
                 const V2 fw = dir_from_deg(ka.yaw);
                 for (ObjectId id = 101; id <= 104; ++id)
@@ -2490,7 +2493,7 @@ void test_land_squad_repulsion() {
                 tal = tal || c.state == CollisionState::TryAgainLater;
                 // s78n t18 review (MOVEMENT 5.3.2, the crowd box query on layer 0x10): the 9-member squad counts once, as
                 // its container, with the vehicle: 5 x 2 (the members are no layer objects: 5 x 11 would be 55)
-                if (c.a == 100 && c.b == 70) {
+                if (c.a == 100 && c.b == 70 && c.state != CollisionState::Active) {  // mov1 t08: not before its first service
                     if (c.crowd == 10.0f) ++crowd_frames;
                     else ++crowd_other;
                 }
@@ -2539,7 +2542,7 @@ void test_land_squad_repulsion() {
                 if (dot(v.pos - path[0], t) < length(path[1] - path[0]) * 0.75f) bend = std::max(bend, dot(v.pos - path[0], left));
                 for (const CollisionObject& c : sys.collisions().list()) {
                     if (c.a == 1 && c.b == 2 && c.state == CollisionState::Repulsion) ++repulsion;
-                    else ++other;
+                    else if (c.state != CollisionState::Active) ++other;  // mov1 t08: a new record waits one tick in 0
                 }
             }
             CHECK(arrived && length(sys.view(1).pos - cell_center(45, 25)) < 1.0f);

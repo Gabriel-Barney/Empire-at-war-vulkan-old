@@ -468,9 +468,8 @@ if(_alamo_sim)
     # bug filed to skai); seeds 1, 8 and 9 run with 0 Lua errors. Seed 3 -> 1.
     # bkx1 (2026-11-17, tactical AI stagger off + retail goal cadence, b0123): seeds 1 and 2 hit the MDU race (group mdu1);
     # seeds 3-9 run with no other Lua error. Seed 1 -> 3.
-    # cmb2 (2026-11-17, land attack approach): seed 8 hits the MDU race (group mdu1), seed 5 logs one Lua error; seeds 3, 4, 6, 9 run with 0 Lua
-    # errors. Seed 8 -> 4.
-    foreach(_seed 3 4 9)
+    # mov1 (2026-11-17, retail land tick order): seeds 5 and 9 now hit the same MDU race (mdu1); seed 9 -> 6 (0 Lua errors).
+    foreach(_seed 3 6 8)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_empire_underworld_seed${_seed}
                COMMAND alamo_headless --skirmish-ai foc-land --ai Empire,Underworld --ticks 70000 --workers 4 --quiet
                        --fail-on-lua-errors --seed ${_seed})

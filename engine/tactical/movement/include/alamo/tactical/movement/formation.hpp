@@ -17,10 +17,6 @@
 //   max speed s_c is also rejected when max(s_c, s_seed) / min(s_c, s_seed) > the ratio (DoubleClickMoveMaxSpeedRatio;
 //   symmetric; a zero-speed seed rejects every moving candidate); rejected units seed later formations, so the
 //   selection splits into speed bands. PROVISIONAL [M]: the engagement-distance test is not modelled.
-// large_hover_formation_order (P1_DOUBLE_CLICK_MOVE.md §4.3, 0x439360): the index order of the LargeHover formations
-//   of one order: without 0x80 by centroid projection on the move direction, descending (front to back); with 0x80
-//   by formation speed, descending (fastest first). Ties keep creation order (stable [port]). The retail layout of
-//   these formations around the group centroid is not modelled.
 // layout_formation (§4.3): ranks (Hero first; then the rank key ascending: the attack range 0x3749d0 (§4.3
 //   "Correction, s78n t19" [H]), so the shortest range goes in front; keys within tolerance T are one rank, T (in key
 //   units) starting at 0 and growing by 15 while >= 4 ranks remain, cap 4 steps [L]; equal keys by case-insensitive
@@ -86,12 +82,6 @@ std::vector<std::vector<uint32_t>> split_into_formations(std::span<const Formati
                                                          const MovementConstants& k, const CompatibleFn& compatible = {},
                                                          float double_click_speed_ratio = 0.0f, const ReachFn& reach = {});
 
-struct FormationKey {
-    float speed = 0.0f;  // formation speed (slowest member)
-    V2 centroid;
-};
-// Returns indices into `f` in index order (position = the formation's +0x22c index).
-std::vector<uint32_t> large_hover_formation_order(std::span<const FormationKey> f, V2 move_dir, bool fastest_first);
 
 // Rank order (front to back) and per-member rank, for `members` (indices into m).
 struct RankedMember {

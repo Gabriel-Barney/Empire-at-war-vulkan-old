@@ -27,6 +27,10 @@ MovementConstants MovementConstants::from_game_constants(const data::GameConstan
     c.close_enough_angle_for_move_start = gc.get_float("CloseEnoughAngleForMoveStart", c.close_enough_angle_for_move_start);
     c.frames_per_collision_check = get_u32(gc, "FramesPerCollisionCheck", c.frames_per_collision_check);
     c.moving_vs_moving_look_ahead_time = gc.get_float("MovingVsMovingLookAheadTime", c.moving_vs_moving_look_ahead_time);
+    c.land_prediction_time_interval = gc.get_float("LandPredictionTimeInterval", c.land_prediction_time_interval);  // mov1 t04
+    c.min_land_prediction_distance = gc.get_float("MinLandPredictionDistance", c.min_land_prediction_distance);
+    c.frames_per_position_approximation_rebuild =
+        get_u32(gc, "FramesPerPositionApproximationRebuild", c.frames_per_position_approximation_rebuild);
     c.minimum_stopped_vs_stopped_overlap =
         gc.get_float("MinimumStoppedVsStoppedOverlapCoefficient", c.minimum_stopped_vs_stopped_overlap);
     c.space_pathfind_max_expansions = get_u32(gc, "SpacePathfindMaxExpansions", c.space_pathfind_max_expansions);

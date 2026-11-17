@@ -104,6 +104,7 @@ void MovementSystem::push_top(Unit& u, std::vector<V2> path, uint8_t kind, bool 
     u.push_next = 1;
     u.around.clear();
     u.path_change = frame;  // s78n t18: pack +0x288 (a path record is pushed on its stack)
+    u.approx_countdown = 0;  // mov1 t04: a path push zeroes pack +0x275 (the next detection pass rebuilds)
     // s78n t23 (MOVEMENT §5.4.1 "The stamp in full" item 1): the push stamps the unit's held records (0x50a020). The
     // record that pushes is never stamped by its own detour - by the role test, the detour lands on its detourer.
     stamp_held(u, frame);
@@ -410,26 +411,37 @@ void MovementSystem::terrain_service(CollisionObject& c, bool full, uint32_t fra
     c.state = S::Resolved;
 }
 
-// Destination blocked 0x684710(a, b): a's path approximation reaches the end of its path stack and a's rectangle placed
-// at the path end overlaps b's or that of a layer object standing within the 160 x 160 box around the end. [port] "the
-// approximation reaches the path end" = near_path_end: the path end is no farther from the mover (straight line) than
-// the contact test's look-ahead distance + the two footprint radii, so a contact with a unit on the destination is
-// decided as blocked from its first frame (the port keeps no approximation; its cell paths have many short legs, so "on
-// the last waypoint" would be too narrow).
-bool MovementSystem::near_path_end(const Unit& a, const Unit& b) const {
-    std::vector<V2> scratch;
-    const StackPoly sp = stack_poly(a, scratch);  // s78n t20: the end of the path stack
-    return sp.next < sp.pts.size() &&
-           distance(a.m.pos, sp.pts.back()) <= mvs_look_distance(a, b) + foot_radius(a) + foot_radius(b);
+// mov1 t04 (b0181, BKR1_RE_ANSWERS Q5 [H]): pack +0x28c, written only by the position approximation 0x505fe0. Nothing
+// is written while the locomotor is not moving or its speed is 0, nor with a missing or unstarted top record. Otherwise
+// the walk is simulated along the top record from its current waypoint, then the record directly below it; +0x28c :=
+// it ran out of path before the travelled distance reached L = max(MinLandPredictionDistance 60, 30 x max(the type's
+// MovementPredictionInterval, LandPredictionTimeInterval 2.0) x max speed). [port] [M] the travelled distance is the
+// remaining path length of the stack (unit -> top record -> the order path below; the port's stack has no third
+// record), i.e. the simulated walk without its turn arcs; the rebuild runs on detection's countdown (detect_collisions),
+// not at 0x50aad0's trim or the push search 0x441750.
+void MovementSystem::refresh_near_end(Unit& u) const {
+    if (!unit_moving(u) || !(u.m.speed > 0.0f)) return;
+    const bool started = u.pushed || (u.d.team_container ? u.path_started : u.m.started);
+    if (!started) return;
+    std::vector<V2> pts;
+    stack_points(u, pts);
+    if (pts.size() < 2) return;  // no path record on the stack
+    const MovementConstants& k = cfg_.constants;
+    const float t = std::max(u.d.movement_prediction_interval, k.land_prediction_time_interval);
+    const float look = std::max(k.min_land_prediction_distance, 30.0f * t * walk_max_speed(u));
+    u.near_end = path_length(pts) < look;
 }
 
+// Destination blocked 0x684710(a, b): a's path approximation reaches the end of its path stack (mov1 t04: pack +0x28c)
+// and a's rectangle placed at the path end overlaps b's or that of a layer object standing within the 160 x 160 box
+// around the end.
 bool MovementSystem::destination_blocked(const Unit& a, const Unit& b) const {
     // s78n t20 batch 1: E = the end of the path stack (a collision-owned top record included), at or beyond the top
     // record's current waypoint line: n . (E - W) >= -0.1 (W = its current waypoint, n = the bisector of its two segments;
     // the last waypoint: its segment's direction)
     std::vector<V2> scratch;
     const StackPoly sp = stack_poly(a, scratch);
-    if (sp.next >= sp.pts.size() || !near_path_end(a, b)) return false;
+    if (sp.next >= sp.pts.size() || !near_path_end(a)) return false;
     const V2 e = sp.pts.back();
     const std::vector<V2>& top = a.pushed ? a.push_path : a.m.path;
     const uint32_t ti = a.pushed ? a.push_next : a.m.next;
@@ -611,6 +623,22 @@ bool MovementSystem::early_arrival(Unit& a, const Unit& b, bool have_v, V2 v, ui
 
 // ---- s78n t20 (MOVEMENT §1.5.1): the Path Around call of the dynamic land pathfinder ----
 
+uint32_t MovementSystem::starved_partner_count(const Unit& u) const {
+    uint32_t n = 0;
+    for (const CollisionObject& c : coll_.list())
+        if (c.kind == CollisionKind::MovingVsMoving && c.state == CollisionState::Starved && (c.master == 0 ? c.a : c.b) == u.d.id) ++n;
+    return n;
+}
+
+bool MovementSystem::master_list_partner(const Unit& u, const Unit& o) const {
+    for (const CollisionObject& c : coll_.list()) {
+        if (c.kind != CollisionKind::MovingVsMoving || (c.state != CollisionState::Pass && c.state != CollisionState::Starved)) continue;
+        const ObjectId mid = c.master == 0 ? c.a : c.b, sid = c.master == 0 ? c.b : c.a;
+        if (mid == u.d.id && sid == o.d.id) return true;
+    }
+    return false;
+}
+
 bool MovementSystem::shares_open_record(const Unit& u, const Unit& o) const {
     // record vf +0x58: MovingVsStopped state 0 / 1, MovingVsMoving state 0 / 1 / 4 (Pass)
     for (const CollisionObject& c : coll_.list()) {
@@ -667,7 +695,7 @@ FootRect MovementSystem::unit_swept_box(const Unit& o, const Unit& u, uint8_t re
             const V2 rel_v = dir_from_deg(o.m.yaw) * vo - dir_from_deg(u.m.yaw) * vu;
             const float closing = dot(rel_v, normalize_retail(to_u));
             stack_points(o, poly);
-            if ((rel == kRelSameWay || rel == kRelSameWaySlower) && near_path_end(o, u)) {
+            if ((rel == kRelSameWay || rel == kRelSameWaySlower) && near_path_end(o)) {
                 in.sweep = path_length(poly);
             } else if (vo > 0.0f && vu > 0.0f && closing > 0.0f) {
                 const float frames = std::min(std::max(0.0f, (length(to_u) - foot_radius(u) - foot_radius(o)) / closing),
@@ -687,7 +715,8 @@ FootRect MovementSystem::unit_swept_box(const Unit& o, const Unit& u, uint8_t re
 // undecided / detouring record with u; 2: the same for every standing unit; 4: the obstacle classes 2 - 4 are ignored;
 // a deployed / deploying unit always is one); held, head-on, crossing, same way and slower -> an obstacle; same way and
 // not slower -> ignored, unless it is on its final leg, not behind u's facing and the pair has such a record. s78n t23
-// (MOVEMENT §5.4.6): the slaves of u's MovingVsMoving records in state 4 (Pass) where u is the master are always obstacles.
+// (MOVEMENT §5.4.6): the slaves of u's MovingVsMoving records in state 4 (Pass) where u is the master are always obstacles;
+// mov1 t01 (BKR1 Q1 [H]): so are the slaves of u's state-15 (Starved) records where u is the master (0x505630).
 void MovementSystem::around_obstacles(const Unit& u, const Unit* forced, uint8_t flags, float half, std::vector<AroundObstacle>& out,
                                       std::vector<uint32_t>& ids) const {
     out.clear();
@@ -701,17 +730,7 @@ void MovementSystem::around_obstacles(const Unit& u, const Unit* forced, uint8_t
         const Unit& o = units_[ci];
         if (o.d.id == u.d.id) continue;
         const uint8_t rel = unit_relation(o, u);
-        bool is_forced = forced && forced->d.id == o.d.id;
-        if (!is_forced) {
-            for (const CollisionObject& c : coll_.list()) {
-                if (c.kind != CollisionKind::MovingVsMoving || c.state != CollisionState::Pass) continue;
-                const ObjectId mid = c.master == 0 ? c.a : c.b, sid = c.master == 0 ? c.b : c.a;
-                if (mid == u.d.id && sid == o.d.id) {
-                    is_forced = true;
-                    break;
-                }
-            }
-        }
+        const bool is_forced = (forced && forced->d.id == o.d.id) || master_list_partner(u, o);
         if (!is_forced) {
             if (crushes(u, o) || !collision_classes_interact(cu, o.d.collision_class) || pair_gated(u, o)) continue;
             if (skip_infantry && o.d.collision_class == kUccInfantry && !o.ci.hero_clash) continue;
@@ -724,7 +743,7 @@ void MovementSystem::around_obstacles(const Unit& u, const Unit* forced, uint8_t
                     if (open_only && !shares_open_record(u, o)) continue;
                 }
             } else if (rel == kRelSameWay) {
-                if (!(near_path_end(o, u) && !(dot(o.m.pos - u.m.pos, fu) < 0.0f) && shares_open_record(u, o))) continue;
+                if (!(near_path_end(o) && !(dot(o.m.pos - u.m.pos, fu) < 0.0f) && shares_open_record(u, o))) continue;
             }
         }
         AroundObstacle ob;
@@ -759,7 +778,7 @@ bool MovementSystem::around_base(const Unit& u, std::vector<V2>& scratch, std::s
 
 // 0x67d580(request, object, 1) - the goal-spot filter of 0x679aa0 (s78n t24, MOVEMENT §5.4.7 "Rejoin candidates of a
 // kind-3 Path Around" item 2; relation mask 0x10): never an obstacle - u, anything u crushes, a class-exempt or gated
-// pair; always - u's MovingVsMoving partners; then by the relation (object, u): standing, held, head-on, crossing, same
+// pair; always - the forced object, the slaves of u's Pass / Starved records where u is master (mov1 t01); then by the relation (object, u): standing, held, head-on, crossing, same
 // way slower -> an obstacle; same way not slower -> not, unless it is on its final approach, not behind u's facing and
 // the pair has an undecided / detouring record. Infantry are obstacles here even for an Infantry / Giant u (the mask
 // has no bit 0).
@@ -769,12 +788,12 @@ bool MovementSystem::goal_obstacle(const Unit& u, const Unit& o, const Unit* for
     // s78o (b0065, MOVEMENT §5.4.7 "Rejoin candidates" item 2): the forced object (0x67d580's object argument, a flag-1
     // detour's obstacle) is an obstacle before the partner and relation tests (today only MvM detours pass flag 1, and
     // their obstacle is a MovingVsMoving partner already)
+    // mov1 t01 (b0176, BKR1_RE_ANSWERS Q1 [H]): the "always" list of 0x67d580 is the forced list (the forced id plus
+    // 0x505e10, the slaves of u's Pass records) and the 0x505630 partners (the S of u's Starved records), not any MvM partner
     if (forced && o.d.id == forced->d.id) return true;
-    for (const CollisionObject& c : coll_.list())
-        if (c.kind == CollisionKind::MovingVsMoving && ((c.a == u.d.id && c.b == o.d.id) || (c.a == o.d.id && c.b == u.d.id)))
-            return true;
+    if (master_list_partner(u, o)) return true;
     if (unit_relation(o, u) != kRelSameWay) return true;
-    return near_path_end(o, u) && !(dot(o.m.pos - u.m.pos, dir_from_deg(u.m.yaw)) < 0.0f) && shares_open_record(u, o);
+    return near_path_end(o) && !(dot(o.m.pos - u.m.pos, dir_from_deg(u.m.yaw)) < 0.0f) && shares_open_record(u, o);
 }
 
 // 0x679aa0: the candidate is taken at the nearest passable point Q of the unit's region within LandDestinationProximity
@@ -907,11 +926,11 @@ bool MovementSystem::spare_point(const Unit& a, const Unit& b, V2& v) const {
 // Path Around 0x5c80e0 (MOVEMENT §1.5.1). The detour goes on top of the unit's path stack; the ordered path stays
 // underneath, untouched, and resumes at the first waypoint line not yet crossed when the detour ends (pop_top). The
 // complexity (the vertex count of every A* pass) goes to the quota counter. [port] not modelled: the escape vertices of
-// a start inside a same-way obstacle, the formation-path refusal 0x41cf40, concave terrain corners and the corner
-// pruning masks. s78n t24: kind 3 (TerrainCollision, no obstacle) adds 40.0 to D and skips the last-point drop.
+// a start inside a same-way obstacle and the formation-path refusal 0x41cf40 (mov1 t03: the terrain corners are 0x677e40's
+// with the concave candidates and the pruning masks, terrain_corners). s78n t24: kind 3 (TerrainCollision, no obstacle) adds 40.0 to D and skips the last-point drop.
 // ("Crosses an obstacle" = the segment meets its tracker rectangle, touching counts: §1.5.1 item 4a, path_around.cpp.)
 bool MovementSystem::path_around(const CollisionObject& c, Unit& u, const Unit* o, bool flag, uint8_t kind, uint8_t flags,
-                                 uint32_t frame) {
+                                 uint32_t frame, std::vector<V2>* probe, float probe_d) {
     const MovementConstants& k = cfg_.constants;
     if (!(walk_max_speed(u) > 0.0f)) return false;
     std::vector<V2> scratch;
@@ -935,6 +954,7 @@ bool MovementSystem::path_around(const CollisionObject& c, Unit& u, const Unit* 
         }
     }
     if (kind == 3) d += 40.0f;  // s78n t24 (§1.5.1 item 1, §5.4.7 item 3.5): TerrainCollision, D = r_u + 40
+    if (probe) d = probe_d;     // mov1 t06: 0x685490 computes its own D
     // The obstacle set, once for the call: every layer object the largest window can reach (the rejoin point lies within
     // D + the candidates' reach of the unit; the window adds its bound, its growth and the retries)
     std::vector<AroundObstacle> obs;
@@ -975,6 +995,11 @@ bool MovementSystem::path_around(const CollisionObject& c, Unit& u, const Unit* 
         }
         if (refuse_back && dot(normalize_retail(res.points[1] - res.points[0]), dir_from_deg(u.m.yaw)) < -0.5f)
             return kRejoinFail;  // refused: the search ends, nothing changed
+        if (probe) {  // mov1 t06: 0x685490's local path - never pushed
+            *probe = std::move(res.points);
+            done = true;
+            return kRejoinTaken;
+        }
 
         // 0x6744a0: the path's id list - every obstacle of the window that is not moving or lies behind the detour's end
         const V2 last = res.points.back();
@@ -995,8 +1020,53 @@ bool MovementSystem::path_around(const CollisionObject& c, Unit& u, const Unit* 
         done = true;
         return kRejoinTaken;
     }, flag ? o : nullptr);  // s78o (b0065): a flag-1 call's obstacle is the goal-spot filter's forced object
-    if (searched) ++stats_.dynamic_repaths;
+    if (searched && !probe) ++stats_.dynamic_repaths;
     return done;
+}
+
+// mov1 t06 (b0189, BKR2_RE_ANSWERS Q3 [H]): 0x685490(record, a, b). D = |X - a| + r_a, X = where a's travel ray leaves
+// b's swept rectangle (as Path Around flag 0), 0 when the ray does not leave it (no |a - b| + r_a + r_b fallback). A
+// Path Around search with flags 2 and no forced id whose path is never pushed (a probe line). No path, or a without a
+// locomotor: false. Then the layer objects in the box of half size max(80, 1.75 D) around a, nearest first (3-D distance,
+// strict <: ties keep the box order): the first o != a whose owner is hostile to a's and whose footprint the probe path
+// meets (0x441b60, the MovingVsStopped swept test) is the answer - a's formation (none: false) gets a kind-3 attack block
+// on o (formation_attacks_, flags 0) and the call is true. No such o: false. b itself is not excluded.
+bool MovementSystem::test_step10_probe(ObjectId mover, ObjectId obstacle, uint32_t frame) {
+    Unit* a = unit_ptr(mover);
+    const Unit* b = unit_ptr(obstacle);
+    if (!a || !b) return false;
+    for (const CollisionObject& c : coll_.list())
+        if (c.kind == CollisionKind::MovingVsStopped && c.a == mover && c.b == obstacle) return mvs_hostile_in_way(c, *a, *b, frame);
+    return false;
+}
+
+bool MovementSystem::mvs_hostile_in_way(const CollisionObject& c, Unit& a, const Unit& b, uint32_t frame) {
+    float d = 0.0f;
+    {
+        const FootRect obox = unit_swept_box(b, a, unit_relation(b, a));
+        V2 exit;
+        if (ray_leaves_rect(obox, a.m.pos, wanted_dir(a), exit)) d = distance(exit, a.m.pos) + foot_radius(a);
+    }
+    std::vector<V2> probe;
+    if (!path_around(c, a, &b, false, 4, 2, frame, &probe, d) || probe.size() < 2) return false;
+    if (a.d.no_locomotor) return false;
+    std::vector<uint32_t> cand;
+    layer_box_query(a.m.pos, std::max(80.0f, 1.75f * d), cand);
+    const auto dist3 = [&](const Unit& o) {
+        const V2 dd = o.m.pos - a.m.pos;
+        const float dz = o.z - a.z;
+        return std::sqrt(dd.x * dd.x + dd.y * dd.y + dz * dz);
+    };
+    std::stable_sort(cand.begin(), cand.end(), [&](uint32_t x, uint32_t y) { return dist3(units_[x]) < dist3(units_[y]); });
+    for (const uint32_t ci : cand) {
+        const Unit& o = units_[ci];
+        if (o.d.id == a.d.id || !hostile(a.d.owner, o.d.owner)) continue;
+        if (foot_path_contact(probe[0], probe, 1, foot_half(a), foot_of(o), 3.0e38f) < 0.0f) continue;
+        if (a.form_id == 0) return false;  // no formation (pack +0x1f0 null)
+        formation_attacks_.push_back({a.d.id, o.d.id});
+        return true;
+    }
+    return false;
 }
 
 bool MovementSystem::mvs_path_around(const CollisionObject& c, Unit& a, const Unit& b, uint8_t p, uint32_t frame) {
@@ -1004,8 +1074,7 @@ bool MovementSystem::mvs_path_around(const CollisionObject& c, Unit& a, const Un
 }
 
 // MovingVsStopped decision 0x684f90 (MOVEMENT §5.4.1; a = mover, b = obstacle), first match wins. s78n t20 batch 1: the
-// death-clone obstacle clauses of steps 2 and 8 (§5.4.5 item 2). Not modelled ([port]): step 10's units-ignoring detour
-// 0x685490 (state 8) is a stand-in (see there). s78n t20: the spare point 0x5c6ba0 and the Path Around calls are §1.5.1's; §5.4.5 - the target
+// death-clone obstacle clauses of steps 2 and 8 (§5.4.5 item 2). mov1 t06: step 10 is 0x685490 (BKR2 Q3). s78n t20: the spare point 0x5c6ba0 and the Path Around calls are §1.5.1's; §5.4.5 - the target
 // clause of step 4, the hero-clash test of step 8 and the crusher's record (set_collision_info gives the target, the
 // range, "short-range" and the clash state).
 void MovementSystem::mvs_decide(CollisionObject& c, Unit& a, Unit& b, uint32_t frame) {
@@ -1051,7 +1120,7 @@ void MovementSystem::mvs_decide(CollisionObject& c, Unit& a, Unit& b, uint32_t f
     }
     // 6. destination blocked: the early-arrival cut, then Path Around; destination free: Repulsion for two Infantry
     // classes, else Path Around
-    bool alt = false;
+    bool alt = true;  // mov1 t06 (BKR2 Q3 [H]): false only when step 6 ran the spare-point search and it failed
     if (!crush && destination_blocked(a, b)) {
         bool to_push = false;
         if (side_step_ok(a, b, c)) {
@@ -1094,29 +1163,22 @@ void MovementSystem::mvs_decide(CollisionObject& c, Unit& a, Unit& b, uint32_t f
         c.state = S::Crusher;
         return;
     }
-    // 10. a pair with a class above Bike: a second Path Around, else 0x685490 - a detour that ignores units (state 8,
-    // Resolved at the next service). [port] The mover keeps its path and b counts as planned around (step 3) until b
-    // changes paths: it walks on through b's footprint; the attack block retail gives the mover's formation on a hostile
-    // unit in the way is not issued.
-    if (ca > kUccBike || cb > kUccBike) {
-        if (alt && mvs_path_around(c, a, b, 1, frame)) {  // 0x685920(a, b, 1): standing friends are no obstacles
+    // 10. (mov1 t06, b0189, BKR2_RE_ANSWERS Q3 [H]) only with alt: a pair with a class above Bike takes a second Path
+    // Around (0x685920(a, b, 1): standing friends are no obstacles), else 0x685490 - a hostile unit on a probe detour
+    // gives a's formation an attack block on it (state 8: max speed, ended at the next service; [port] Resolved at once,
+    // one frame early). The step-3 walk-through stand-in is gone; [port] the host does not issue the attack block yet
+    // (formation_attacks() has no consumer), so until it does the hostile case resolves with no hold.
+    if (alt && (ca > kUccBike || cb > kUccBike)) {
+        if (mvs_path_around(c, a, b, 1, frame)) {
             c.state = S::PathAround;
             return;
         }
-        // s78n t18 review: only b is stamped with this frame. The list has one stamp, so an older entry that step 3 no
-        // longer accepts (its unit changed paths at or after the old stamp, or is gone) is dropped first - the new stamp
-        // would make it count as planned around again.
-        std::erase_if(a.around, [&](ObjectId id) {
-            if (id == b.d.id) return false;
-            const Unit* o = unit_ptr(id);
-            return !o || !(o->path_change < a.around_frame);
-        });
-        if (std::find(a.around.begin(), a.around.end(), b.d.id) == a.around.end()) a.around.push_back(b.d.id);
-        a.around_frame = frame;
-        c.state = S::Resolved;
-        return;
+        if (mvs_hostile_in_way(c, a, b, frame)) {
+            c.state = S::Resolved;
+            return;
+        }
     }
-    // 11.
+    // 7 Try Again Later: the mover is held at speed 0 and the record is re-decided every 30 frames
     c.state = S::TryAgainLater;
 }
 
@@ -1376,24 +1438,16 @@ MovementSystem::MvmChoice MovementSystem::mvm_choose(const CollisionObject& c, c
             r.state = S::PathAround;
             r.mode = 2;
             r.swap_ok = !c0 && !c1;
-            // M = the higher class; equal class, both in formations: the larger formation (member count), equal -> p0
-            // unless formation 0's first member id is lower (then p1); else the lower max speed (tie p0)
+            // M = the higher class; equal class, both in formations: the larger formation by 0x41a5c0's half extent
+            // (form_extent), equal -> p1 when the id of formation 0's member-vector index 0 is lower than formation 1's,
+            // else p0 (mov1 t02, b0179, BKR1_RE_ANSWERS Q3 [H]); else the lower max speed (tie p0)
             if (k0 != k1) {
                 r.master = k0 > k1 ? uint8_t{0} : uint8_t{1};
             } else if (p0.form_id != 0 && p1.form_id != 0) {
-                uint32_t n0 = 0, n1 = 0;
-                ObjectId l0 = std::numeric_limits<ObjectId>::max(), l1 = std::numeric_limits<ObjectId>::max();
-                for (const Unit& x : units_) {
-                    if (x.form_id == p0.form_id) {
-                        ++n0;
-                        l0 = std::min(l0, x.d.id);
-                    } else if (x.form_id == p1.form_id) {
-                        ++n1;
-                        l1 = std::min(l1, x.d.id);
-                    }
-                }
-                if (n0 != n1) r.master = n0 > n1 ? uint8_t{0} : uint8_t{1};
-                else r.master = l0 < l1 ? uint8_t{1} : uint8_t{0};
+                const float e0 = form_extent(p0.form_id), e1 = form_extent(p1.form_id);
+                if (e1 > e0) r.master = 1;
+                else if (e0 > e1) r.master = 0;
+                else r.master = p0.form_first < p1.form_first ? uint8_t{1} : uint8_t{0};
             } else {
                 r.master = walk_max_speed(p1) < walk_max_speed(p0) ? uint8_t{1} : uint8_t{0};
             }
@@ -1443,21 +1497,50 @@ MovementSystem::MvmChoice MovementSystem::mvm_choose(const CollisionObject& c, c
     }
 }
 
-// Overtake test 0x683260(a = rear, b = front): a can get past b, with b slowed to vs, before its own path ends.
+// Overtake test 0x683260(a = rear, b = front): a can get past b, with b slowed to vs, before its own path ends. mov1 t05
+// (b0186, BKR1_RE_ANSWERS Q3 [H]): a and b of the same coordinator (0x426140: one group order, Unit::coord_id) skip the
+// Vb <= Va test, and when the time test passes with both in formations a passes only when b's formation ranks behind a's
+// (FormationClass +0x23c, unsigned: rank_b > rank_a) - inside one group move the rear unit passes the front one only when
+// the front one heads to a destination behind its own. [port] the killed / being-removed bit +0x3a0 & 2 is not tested
+// (a removed unit has no record here; S3).
 bool MovementSystem::mvm_overtake(const Unit& a, const Unit& b) const {
     if (a.d.collision_class == kUccGiantVehicle) return false;
     const auto speed = [this](const Unit& x) { return x.in_formation && x.formation_speed < kInf ? x.formation_speed : walk_max_speed(x); };
     const float va = speed(a), vb = speed(b);
-    if (!(vb <= va)) return false;
+    const bool same = a.coord_id != 0 && a.coord_id == b.coord_id;
+    if (!(vb <= va) && !same) return false;
     const float vs = std::min(vb, 0.5f * va);
-    if (va == 0.0f || va - vs == 0.0f || near_path_end(a, b)) return false;
+    if (!(vs <= va) || va == 0.0f || va - vs == 0.0f || near_path_end(a)) return false;
     std::vector<V2> pts;
     stack_points(a, pts);
     const float d = path_length(pts);
     const V2 dd = a.m.pos - b.m.pos;
     const float dz = a.z - b.z;
     const float dist = std::sqrt(dd.x * dd.x + dd.y * dd.y + dz * dz);
-    return (steer_radius(a) + steer_radius(b) + dist) / (va - vs) <= d / va;
+    if (!((steer_radius(a) + steer_radius(b) + dist) / (va - vs) <= d / va)) return false;
+    if (same && a.form_id != 0 && b.form_id != 0)
+        return static_cast<uint32_t>(b.form_rank) > static_cast<uint32_t>(a.form_rank);
+    return true;
+}
+
+// 0x41a5c0(formation): a scalar half extent in cells (mov1 t02, BKR1_RE_ANSWERS Q3 [H]). n = the member count, k =
+// ceil(sqrt n), cell = the largest (FormationSpacing + 2 hx / 20) over the members with a locomotor, hx = the X (length)
+// half extent (0x396a30: the hard X extent, deployed when deployed, a squad container's team box); A = the sum over
+// members of (2 hx / 20 + g)(2 hy / 20 + g), g = FormationSpacing. Result max(k cell + 0.25, sqrt(max(1, 1.8 A))).
+// [port] a squad container's area term uses its team box like every member ([M] in retail: (2 x 0x404cd0 / 20)^2).
+float MovementSystem::form_extent(uint32_t form_id) const {
+    uint32_t n = 0;
+    float cell = 0.0f, area = 0.0f;
+    for (const Unit& x : units_) {
+        if (x.form_id != form_id) continue;
+        ++n;
+        const V2 h = foot_half(x);
+        const float g = x.d.formation_spacing;
+        if (!x.d.no_locomotor) cell = std::max(cell, g + 2.0f * h.x / kCellSize);
+        area += (2.0f * h.x / kCellSize + g) * (2.0f * h.y / kCellSize + g);
+    }
+    const float side = std::ceil(std::sqrt(static_cast<float>(n)));
+    return std::max(side * cell + 0.25f, std::sqrt(std::max(1.0f, area * cfg_.constants.spread_out_spacing_coefficient)));
 }
 
 // 0x680c00: Try Again Later with a retry frame NOW + 30 + one synced draw in [0, 15].
@@ -1766,14 +1849,18 @@ void MovementSystem::mvm_service(CollisionObject& c, Unit& a, Unit& b, bool full
             mvm_swap_slots(m, s, frame);
             c.state = S::Resolved;
             break;
-        case S::Starved: {  // 15: M stops; while M has exactly one record it path-arounds S
+        case S::Starved: {  // 15: M stops; while M is the starved master of exactly one record it path-arounds S
+            // mov1 t01 (b0176, BKR1_RE_ANSWERS Q1 [H], 0x681ef0): the list is 0x505630 - M's MovingVsMoving records in
+            // state 15 whose master is M - not every record of M, so a Pass / MovingVsStopped / Terrain record of M does
+            // not make it stand. Flag = (wanted yaw M - wanted yaw S) wrapped into [0, 360) < 90 (0x20b100, one-sided). No
+            // timeout and no retry count: the search runs every frame until it succeeds or the record ends by validity.
             if (c.starve == 0) c.starve = 30;
             reset();
             vm = 0.0f;
-            uint32_t n = 0;
-            for (const CollisionObject& k : coll_.list())
-                if (k.a == m.d.id || k.b == m.d.id) ++n;
-            if (n == 1 && path_around(c, m, &s, dot(wanted_dir(m), wanted_dir(s)) > 0.0f, 4, 0, frame)) c.state = S::StarvedDetour;
+            if (starved_partner_count(m) == 1) {
+                const bool flag = norm_deg(heading_deg(wanted_dir(m)) - heading_deg(wanted_dir(s))) < 90.0f;
+                if (path_around(c, m, &s, flag, 4, 0, frame)) c.state = S::StarvedDetour;
+            }
             break;
         }
         case S::StarvedDetour:  // 16: M walks its detour, S stands
@@ -1996,10 +2083,11 @@ uint8_t MovementSystem::svs_pick_mover(const CollisionObject& c, const Unit& p0,
 // svs_pick_mover walks a land path to the first free spot of the ring search around itself (cone toward its escape
 // direction), pushed above its own paths as a collision path; the record is Resolving while it holds that path and
 // Resolved when the path is gone. No mover, no spot (or its own position: ring 0), no path or a refused claim -> Try Again
-// Later, re-tried every 30 frames. [port] retail never re-tests the contact, so a record whose resolution failed would
-// cycle 4 -> 0 -> 4 for as long as both units live; the port ends it at a retry when the two footprints no longer overlap
-// by more than MinimumStoppedVsStoppedOverlapCoefficient or either unit is Moving (the next check makes whatever record
-// then applies).
+// Later, re-tried every 30 frames. mov1 t07 (b0190, BKR2_RE_ANSWERS Q4 [H]): the contact is never re-tested - a record
+// whose resolution failed cycles 4 -> 0 -> 4 until validity ends it (a participant gone, or one on a cell impassable for
+// it), and while it lives detection's pair filter (0x5c7900, any kind, any state) gives the pair no MovingVsStopped /
+// MovingVsMoving record. Each retry re-runs the mover pick and the ring search, so a mover now walking an order still gets
+// the spot's path pushed over it when the other unit is near (ring 0, its own position, when they are apart: state 4).
 void MovementSystem::svs_service(CollisionObject& c, Unit& a, Unit& b, uint32_t frame) {
     using S = CollisionState;
     // Validity 0x686e80: a participant standing on a cell that is impassable for it -> Unresolvable
@@ -2052,8 +2140,7 @@ void MovementSystem::svs_service(CollisionObject& c, Unit& a, Unit& b, uint32_t 
     }
     if (c.state == S::TryAgainLater && frame >= c.retry) {
         c.retry = frame + 30;
-        const bool apart = foot_overlap_coefficient(foot_of(a), foot_of(b)) <= cfg_.constants.minimum_stopped_vs_stopped_overlap;
-        c.state = apart || unit_moving(a) || unit_moving(b) ? S::Resolved : S::Active;  // ([port] the end rule above)
+        c.state = S::Active;  // mov1 t07: no end rule - the resolution runs again at the next service
     }
 }
 
@@ -2081,9 +2168,18 @@ void MovementSystem::tick_land(uint32_t frame, SimRng& rng, const ParallelFor& p
     }
     rebuild_regions_if_dirty(pf);
     tree_.maintain(static_cast<double>(frame) / 30.0);  // shape only; query results do not depend on it
-    plan_land(frame, pf);
-    detect_collisions(frame);  // S7: checks create collision objects
+    // mov1 t08 (b0182, BKR1_RE_ANSWERS Q1 / Q6 [H]; design note docs/PHASE4.md "mov1"): retail's land frame 0x3639d0 is
+    // tracker update 0x539b20 -> object walks -> collision driver 0x50a780 (detection 0x508170 at its end) -> movement
+    // coordinators 0x426eb0 (every plan). The port's tick is that cycle started at the tracker: the tracker snapshot
+    // (the Moving / Static flags the plan's corridor test reads), the driver (services only), detection (a new record
+    // waits for the next driver), the plans (after this cycle's driver: a unit the driver stopped still counts as Moving
+    // at its place for the corridor test, one planned last cycle as Moving), the answer fold, then the walk.
+    corner_static_.assign(units_.size(), 0);
+    for (size_t i = 0; i < units_.size(); ++i) corner_static_[i] = unit_moving(units_[i]) ? 0 : 1;
     drive_collisions(frame, rng);  // S7: cancel / priority sort / resolve (TACTICAL_GAPS §6.7)
+    detect_collisions(frame);      // S7: checks create collision objects
+    plan_land(frame, pf);
+    fold_collision_answers();
     // s78n t23 step 0 (MOVEMENT §5.4.4 item 5): a record a cut left on its last waypoint is finished at the walk step
     // (serial, ascending index, before the parallel walk: a pop walks on along the order path in this tick's walk)
     for (Unit& u : units_) {
