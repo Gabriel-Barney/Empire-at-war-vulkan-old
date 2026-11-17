@@ -1714,8 +1714,7 @@ void skirmish_four_slot_real_test() {
         }
         // A team game (the map has start positions, +0xb5): allies by team; else by faction (slots 1 and 3 are both Rebel).
         const tactical::combat::CombatSystem& c = b->combat();
-        std::printf("  team game %d
-", b->skirmish_team_game() ? 1 : 0);
+        std::printf("  team game %d\n", b->skirmish_team_game() ? 1 : 0);
         if (b->skirmish_team_game()) {
             CHECK(c.is_enemy(0, 1) && c.is_enemy(0, 2) && !c.is_enemy(0, 3) && !c.is_enemy(1, 2) && c.is_enemy(1, 3) && c.is_enemy(2, 3));
             CHECK(!c.is_enemy(3, 0) && !c.is_enemy(2, 1));
@@ -1753,6 +1752,47 @@ void skirmish_four_slot_real_test() {
         std::printf("  team 1 killed: battle %s, winner %d\n", s.battle() ? "still running" : "over", winner);
         CHECK(!s.battle());
         CHECK(winner == 0 || winner == 3);
+    }
+    // 1b. Land, three slots (Utapau): every slot's start forces stand on the map, every slot has its record, the land unit cap
+    // is the three-player one, and the team-1 pads go to the team's first slot (BKG3 Q3.1).
+    {
+        game::SessionSpec land = spec;
+        land.skirmish_map = "_MP_LAND_UTAPAU";
+        land.skirmish.extra_slots = {{"Underworld", {}, {}}};
+        land.skirmish.teams = {0, 1, 1};
+        land.skirmish.difficulties = {1, 1, 2};
+        land.skirmish_options.win_condition = 0x13;
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        game::GameSession s(data, js, land);
+        std::vector<std::string> diag;
+        CHECK(s.start(&diag, nullptr, nullptr));
+        for (const std::string& d : diag) std::printf("  diag: %s\n", d.c_str());
+        uint64_t t = 0;
+        while (s.started() && t < 300 && !(s.in_battle() && s.battle() && s.battle()->frame() >= 2)) {
+            s.tick();
+            ++t;
+        }
+        const sim::TacticalBattle* b = s.battle();
+        CHECK(b != nullptr);
+        if (b) {
+            uint32_t owned[3] = {}, pads[3] = {};
+            static const objects::BehaviorTypeId kPad = objects::behavior_type_id("BUILD_PAD");
+            const objects::ObjectStore& st = s.host().modes().top_tactical()->primary();
+            for (const objects::ObjectHandle h : st.all_objects()) {
+                if (!st.active(h) || st.owner(h) < 0 || st.owner(h) >= 3) continue;
+                if (b->combat().has_unit(st.id(h))) ++owned[st.owner(h)];
+                if (kPad != objects::kNoBehavior && st.has_behavior(h, kPad)) ++pads[st.owner(h)];
+            }
+            std::printf("  land three slots: team game %d, units %u / %u / %u, pads %u / %u / %u, records 0x%x / 0x%x / 0x%x, caps %.0f / %.0f\n",
+                        b->skirmish_team_game() ? 1 : 0, owned[0], owned[1], owned[2], pads[0], pads[1], pads[2], b->victory_record_type(0),
+                        b->victory_record_type(1), b->victory_record_type(2), static_cast<double>(b->skirmish_land_unit_cap(0)),
+                        static_cast<double>(b->skirmish_land_unit_cap(2)));
+            for (int32_t k = 0; k < 3; ++k) {
+                CHECK(owned[k] > 0);
+                CHECK(b->victory_record_type(k) == 0x13);
+            }
+            if (b->skirmish_team_game()) CHECK(pads[1] > 0 && pads[2] == 0);  // Team_01 markers: slot 1 only
+        }
     }
     // 2. The Gameplay options difficulty in the running battle, recorded and replayed; then saved in the battle and loaded.
     commands::CommandRecording rec;
