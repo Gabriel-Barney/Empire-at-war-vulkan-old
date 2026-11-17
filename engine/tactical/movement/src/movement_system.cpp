@@ -965,6 +965,11 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
     // a member that is in range (slots 44 / 45 from where it stands, the host's in_range) and not moving (no goal, speed 0:
     // locomotor vf +0x1c0(0) false) on its own path - no new goal, no path, its slot kept
     std::vector<uint8_t> atk_keep(idx.size(), 0);
+    // mov2 t12 (b0198, BKR2_RE_ANSWERS Q7 item 6 [H]): an attack order's members as they were before the slot loop - a
+    // failed plan (0x41c1a0 returns 0) sets no path, so they keep their path stacks and walk on
+    std::vector<Unit> atk_snap(attack ? idx.size() : 0);
+    std::vector<uint8_t> snapped(idx.size(), 0);
+    std::vector<uint32_t> no_draw;
     if (replan && order.attack.repath && !order.attack.guard)
         for (size_t n = 0; n < idx.size(); ++n) {
             const Unit& u = units_[idx[n]];
@@ -980,6 +985,10 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
             for (const Slot& s : lf.slots) {
                 if (atk_keep[s.member]) continue;  // s78n t26 review round 3: G 5
                 Unit& u = units_[idx[s.member]];
+                if (attack) {  // mov2 t12
+                    atk_snap[s.member] = u;
+                    snapped[s.member] = 1;
+                }
                 // mov1 t02 / t05 (BKR1_RE_ANSWERS Q3 [H]): the formation's rank (0x439360), its member-vector index 0 (seed
                 // first, 0x43e5b0) and the order's coordinator (an attack re-plan keeps the order's). A queued order adds a
                 // block to the existing formations [M]: a unit that has a coordinator keeps it, its rank and member 0
@@ -1042,7 +1051,8 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
                 // s78n t23 review fix 6 (MOVEMENT §5.4.1 "The stamp in full" item 7): the order path goes through the push
                 // and stamps the unit's held records only when no collision record owns the unit; with an owner every
                 // path record (the detour too) is destroyed with no stamp, and that record ends at its next service
-                if (u.push_owner == kNoDetour) stamp_held(u, frame);
+                // mov2 t12: an attack order's stamp waits for its plan (a failed plan sets no path, so no stamp)
+                if (u.push_owner == kNoDetour && !attack) stamp_held(u, frame);
                 end_push(u);  // a1k t03 [port]: a new move ends a pushed move
                 u.threat = order.threat_threshold;  // §4.2
                 if (u.d.locomotor != LocomotorKind::Default) {  // §4.3-4.6
@@ -1101,7 +1111,16 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
     if (attack) {
         ++(replan ? stats_.attack_replans : stats_.attack_orders);
         if (!replan) attack_slots(order, idx, forms);
-        for (const LandForm& lf : forms) attack_plan(order, idx, lf, frame, atk_keep, mem);
+        std::vector<uint8_t> plan_failed(idx.size(), 0);
+        for (const LandForm& lf : forms)
+            if (attack_plan(order, idx, lf, frame, atk_keep, mem, atk_snap))
+                for (const uint32_t m : lf.members) plan_failed[m] = 1;
+        // mov2 t12: the order path's stamp of the held records (deferred from the slot loop) for the members that got one
+        for (size_t n = 0; n < idx.size(); ++n)
+            if (snapped[n] && !plan_failed[n] && atk_snap[n].push_owner == kNoDetour)
+                stamp_held(units_[idx[n]], frame);
+        for (size_t n = 0; n < idx.size(); ++n)
+            if (plan_failed[n]) no_draw.push_back(idx[n]);
     }
     // s78n t14 (FIGHTER_FLYING §7.3 item 2, the path-set hook 0x5ad140 for a kind-1 path): a squad container standing still
     // (speed 0) that gets this move draws every steering member's start delay, synced int [0, Max_Move_Frame_Delay], in team
@@ -1111,6 +1130,7 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
         const Unit& tc = units_[i];
         // (s78n t20 batch 2: a container the failed zone validation left without a formation gets no path: no draw)
         if (!tc.d.team_container || tc.m.speed != 0.0f || !tc.has_goal) continue;
+        if (std::find(no_draw.begin(), no_draw.end(), i) != no_draw.end()) continue;  // mov2 t12: a failed plan sets no path
         for (const LandTeamSlot& e : land_team(tc.d.id))
             if (Unit* m = unit_ptr(e.member))
                 m->start_delay = static_cast<uint32_t>(rng.range_int(0, cfg_.constants.max_move_frame_delay));
