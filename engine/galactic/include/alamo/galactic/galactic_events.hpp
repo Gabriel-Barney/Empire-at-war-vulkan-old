@@ -43,7 +43,8 @@ enum class GalacticEventKind : uint8_t {
     ProductionBegin,         // player, planet, type, value = queue (0 ground, 1 space)
     ProductionCanceled,      // player, planet, type, value = queue, other_player = 1 if refunded
     ProductionCompleted,     // player, planet, type, object = created object (0 = none: tech upgrade)
-    StarbaseLevelChanged,    // player, planet, value = new level (0 = destroyed)
+    StarbaseLevelChanged,    // player, planet, value = new level (0 = destroyed), type = new starbase type (level 0: none),
+                             // other_player = the old starbase type, -1 none (storyb t14: Galactic_Starbase_Level_Change)
     ObjectDestroyed,         // object, type (kNoIndex for a fleet object), player = owner, planet (or invalid)
     UnitsLanded,             // player, planet, value = units landed
     CorruptionChanged,       // planet, player = corrupting player, value = corruption type, other_player = old type

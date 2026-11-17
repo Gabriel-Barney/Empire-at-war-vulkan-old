@@ -1098,6 +1098,8 @@ void GalacticSim::complete_build(PlanetIndex planet, const BuildEntry& e) {
         return;
     }
     last_spawn_ = {};
+    const ObjectHandle old_base = t.kind == UnitKind::StarBase ? planets_[planet].starbase : ObjectHandle{};
+    const int32_t old_base_type = store_->alive(old_base) ? static_cast<int32_t>(store_->type(old_base)) : -1;  // storyb t14
     const bool created = create_unit(e.player, planet, e.type);
     const int32_t made = created && store_->exists(last_spawn_) ? static_cast<int32_t>(store_->id(last_spawn_)) : 0;
     emit_production(GalacticEventKind::ProductionCompleted, planet, q, e, made);
@@ -1108,6 +1110,7 @@ void GalacticSim::complete_build(PlanetIndex planet, const BuildEntry& e) {
         ev.planet = planet;
         ev.type = e.type;
         ev.value = planets_[planet].starbase_level;
+        ev.other_player = old_base_type;
         emit(ev);
     }
     if (!created && t.kind != UnitKind::StarBase && t.kind != UnitKind::GroundStructure)
@@ -1236,6 +1239,7 @@ void GalacticSim::emit_production(GalacticEventKind kind, PlanetIndex planet, ui
 bool GalacticSim::destroy_object(ObjectHandle object) {
     if (!store_->alive(object)) return false;
     auto destroyed = [this](ObjectHandle h, PlanetIndex at, bool fleet) {
+        if (!fleet && scoring_hooks_.destroyed && store_->alive(h)) scoring_hooks_.destroyed(h);  // storyb t14
         if (!emit_events_ || !store_->alive(h)) return;
         GalacticEvent ev;
         ev.kind = GalacticEventKind::ObjectDestroyed;
@@ -1264,6 +1268,7 @@ bool GalacticSim::destroy_object(ObjectHandle object) {
             ev.player = p.starbase_owner;
             ev.planet = pi;
             ev.value = 0;
+            ev.other_player = store_->alive(object) ? static_cast<int32_t>(store_->type(object)) : -1;  // storyb t14
             emit(ev);
             p.starbase_owner = kNoPlayer;
         }
@@ -1961,6 +1966,7 @@ bool GalacticSim::replace_starbase(PlanetIndex planet, uint32_t type) {
     if (!store_->alive(p.starbase)) return false;
     if (type == kNoIndex || type >= rules_->types.size()) return destroy_object(p.starbase);
     const int32_t owner = p.starbase_owner;
+    const int32_t old_type = static_cast<int32_t>(store_->type(p.starbase));  // storyb t14
     store_->destroy(p.starbase);
     p.starbase = spawn(owner, planet, type, p.object);
     p.starbase_level = rules_->types[type].base_level;
@@ -1970,6 +1976,7 @@ bool GalacticSim::replace_starbase(PlanetIndex planet, uint32_t type) {
     ev.planet = planet;
     ev.type = type;
     ev.value = p.starbase_level;
+    ev.other_player = old_type;
     emit(ev);
     return true;
 }

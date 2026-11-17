@@ -897,6 +897,11 @@ void CampaignBattles::push_battle(SimHost& host) {
 #endif
     register_battle_chunks();  // N1 stage 2: the running battle's save chunks
     host.scoring_mode_started(kind, pending_req_.map);  // q6 t09: Game_Mode_Starting_Event(Land / Space, map)
+    // storyb t14: battle deaths -> Tactical_Unit_Destroyed_Event (the battle store's objects, before they leave it).
+    objects::ObjectStore* bstore = &static_cast<TacticalMode&>(m).primary();
+    battle_->set_scoring_death([hp = &host, bstore](objects::ObjectHandle h, int32_t killer) {
+        hp->scoring_tactical_death(*bstore, h, killer);
+    });
 }
 
 // q6 t09 (campaign_battles.hpp ar_log_seen_): Reset_Tactical_Stats once per auto-resolve, at its begin when it is seen
@@ -961,6 +966,8 @@ void CampaignBattles::hook(SimHost& host) {
     TacticalMode* tm = host.tactical();
     if (!tm) return;
     battle_->tick(*tm, host.random().synced(), host.parallel_for(), host.sim_time(), host.frame());
+    for (const TacticalBattle::ProductionDone& d : battle_->production_done())  // storyb t14: signal 0x22
+        host.scoring_tactical_production(d.type, d.player);
     // L1 systems (TSW_PLANET_DESTROY §4 steps 7-9): the TSW's state-9 frame destroys the galactic planet now, mid-battle
     // (the parent galaxy is mutated while the tactical mode runs); only with a parent conflict (not a map battle).
     if (const int32_t tsw_owner = battle_->tsw_kill_owner(); tsw_owner >= 0 && !direct_ && cm_) {

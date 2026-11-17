@@ -517,6 +517,9 @@ bool GalacticSim::neutralize_do(int32_t player, PlanetIndex planet, ObjectHandle
     }
     const int32_t target_owner = c.siphon ? p.siphon_player : store_->owner(target);
     const uint32_t counted = c.siphon ? p.siphon_type : static_cast<uint32_t>(store_->type(target));  // the real type
+    // storyb t14: the "neutralized" object signal (Galactic_Neutralized_Event) is raised before the despawn, while the
+    // neutralizer is still on the map; the siphon entry counts without it [GAME_SCORING §3 lists the object signal only].
+    if (!c.siphon && scoring_hooks_.neutralized) scoring_hooks_.neutralized(counted, neutralizer);
     if (!c.siphon) {
         hero_depart(target, planet, c.target_respawn);
     } else {

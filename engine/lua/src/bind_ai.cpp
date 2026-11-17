@@ -562,6 +562,7 @@ void push_arg(lua_State* L, LuaVm::Impl& vm, const AiEventArg& a) {
                 lua_pushnil(L);
             break;
         case AiEventArg::Object: detail::push_object(L, vm, a.object); break;
+        case AiEventArg::ParentObject: detail::push_parent_object(L, vm, a.object); break;  // storyb t14
         case AiEventArg::TaskForce:
             if (a.id >= 0)
                 push_tf(L, a.id, a.tf_kind);

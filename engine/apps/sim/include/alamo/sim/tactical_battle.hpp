@@ -1213,6 +1213,10 @@ public:
     // just before the map objects spawn, so the host can bind what an object's script attach needs (the object bridge:
     // Base_Definitions runs inside the spawn). Cleared when called; unset: nothing.
     void set_before_map_load(std::function<void()> fn) { before_map_load_ = std::move(fn); }
+    // storyb t14 (GAME_SCORING.md §3, death signal 0x25): called for every battle unit's death, before the object leaves
+    // the store, with the killer's owner (-1 when the killer is unknown or gone) [M: retail reads the victim's
+    // last-attacker player; the 0x2e type skip is not modelled, L meaning]. Unset: nothing.
+    void set_scoring_death(std::function<void(objects::ObjectHandle object, int32_t killer)> fn) { scoring_death_ = std::move(fn); }
 
     // --- battle host (BT pass): HIJACK reserve (AI_GALACTIC_3 §4.3 step 5 "tactical with parent") ---
     // Appends a galactic object (a unit the galactic sim just created at the battle planet, e.g. GalacticSim::magic_spawn
@@ -2431,6 +2435,7 @@ private:
     std::function<float(int32_t)> credits_get_;
     std::function<void(int32_t, float)> credits_add_;
     std::function<bool()> arrival_hold_;  // story t12
+    std::function<void(objects::ObjectHandle, int32_t)> scoring_death_;  // storyb t14
     std::function<void()> before_map_load_;  // modc t32
     SimRng* bt_rng_ = nullptr;                 // the host's synced RNG (setup / commands): pad objects' add_unit draws
     std::vector<objects::ObjectId> bt_attrition_ids_;

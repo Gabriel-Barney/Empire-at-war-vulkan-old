@@ -223,7 +223,8 @@ void set_objectless_global(LuaVm& vm, std::string_view name);
 // the next PumpEvents); else called at once (protected). Skipped when the script is exiting. Returns
 // false when no handler exists. Errors go to *err.
 struct AiEventArg {
-    enum Kind : uint8_t { Nil, Number, Boolean, String, Player, Object, TaskForce, Type } kind = Nil;
+    // ParentObject (storyb t14): `object` of the attached ObjectBridge's parent_store (push_parent_object; nil without one).
+    enum Kind : uint8_t { Nil, Number, Boolean, String, Player, Object, TaskForce, Type, ParentObject } kind = Nil;
     double number = 0.0;
     bool boolean = false;
     std::string text;

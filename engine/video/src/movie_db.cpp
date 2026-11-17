@@ -77,6 +77,9 @@ std::vector<MovieEntry> parse_movies(const data::XmlNode& root) {
             e.commandbar_offset[1] = static_cast<int>(std::lround(off[1]));
         }
         e.captions = parse_captions(m);
+        e.text_crawl_name = std::string(data::trim(m.child_text("Text_Crawl_Name")));  // storyb t13
+        e.text_crawl_start_frame = data::parse_int_or(m.child_text("Text_Crawl_Start_Frame"), 0);
+        e.text_crawl_end_frame = data::parse_int_or(m.child_text("Text_Crawl_End_Frame"), -1);
         out.push_back(std::move(e));
     }
     return out;
@@ -89,6 +92,75 @@ const MovieEntry* find_movie(const std::vector<MovieEntry>& movies, std::string_
         if (!by_file && !movies[i].file.empty() && ascii_iequals(stem(movies[i].file), stem(key))) by_file = &movies[i];
     }
     return by_file;
+}
+
+// ---- storyb t13: StarWars3DTextCrawl.xml ----------------------------------------------------------------------------
+
+namespace {
+std::vector<std::string> names(std::string_view t) {
+    std::vector<std::string> out;
+    for (std::string_view s : data::split_list(t)) out.emplace_back(s);
+    return out;
+}
+// The fields `spec` sets replace those of `c` (a tag present with empty text counts as set).
+void apply_spec(const data::XmlNode& spec, TextCrawlSpec& c) {
+    auto str = [&spec](std::string_view tag, std::string& out) {
+        if (spec.child(tag)) out = std::string(data::trim(spec.child_text(tag)));
+    };
+    auto num = [&spec](std::string_view tag, int32_t& out) {
+        if (spec.child(tag)) out = data::parse_int_or(spec.child_text(tag), out);
+    };
+    auto real = [&spec](std::string_view tag, float& out) {
+        if (spec.child(tag)) out = data::parse_float_or(spec.child_text(tag), out);
+    };
+    auto list = [&spec](std::string_view tag, std::vector<std::string>& out) {
+        if (spec.child(tag)) out = names(spec.child_text(tag));
+    };
+    str("Model_Name", c.model_name);
+    str("Polygon_Shader_Name", c.polygon_shader_name);
+    str("Polygon_Tex_Param_Name", c.polygon_tex_param_name);
+    str("Model_Camera_Bone_Name", c.model_camera_bone_name);
+    num("Fadein_Start_Frame", c.fadein_start_frame);
+    num("Fadein_End_Frame", c.fadein_end_frame);
+    num("Fadeout_Start_Frame", c.fadeout_start_frame);
+    num("Fadeout_End_Frame", c.fadeout_end_frame);
+    list("Text_IDs", c.text_ids);
+    str("Font_Name", c.font_name);
+    num("Font_Size", c.font_size);
+    num("Texture_Width_Pow_2", c.texture_width_pow_2);
+    num("Texture_Height_Pow_2", c.texture_height_pow_2);
+    real("Font_Stretch_Factor", c.font_stretch_factor);
+    num("Font_Character_Padding", c.font_character_padding);
+    if (spec.child("Has_Header")) c.has_header = flag(spec, "Has_Header", c.has_header);
+    list("Header_Text_IDs", c.header_text_ids);
+    str("Header_Font_Name", c.header_font_name);
+    num("Header_Font_Size", c.header_font_size);
+    num("Header_Texture_Width_Pow_2", c.header_texture_width_pow_2);
+    num("Header_Texture_Height_Pow_2", c.header_texture_height_pow_2);
+    real("Header_Font_Stretch_Factor", c.header_font_stretch_factor);
+    num("Header_Font_Character_Padding", c.header_font_character_padding);
+}
+}  // namespace
+
+std::vector<TextCrawlSpec> parse_text_crawls(const data::XmlNode& root, std::string_view language) {
+    std::vector<TextCrawlSpec> out;
+    for (data::XmlNode s : root.children("TextScroll")) {
+        TextCrawlSpec c;
+        c.name = std::string(s.attribute("name"));
+        for (data::XmlNode d : s.children("Data_Specifications"))
+            if (ascii_iequals(d.attribute("language"), "English")) apply_spec(d, c);
+        if (!ascii_iequals(language, "English"))
+            for (data::XmlNode d : s.children("Data_Specifications"))
+                if (ascii_iequals(d.attribute("language"), language)) apply_spec(d, c);
+        out.push_back(std::move(c));
+    }
+    return out;
+}
+
+const TextCrawlSpec* find_text_crawl(const std::vector<TextCrawlSpec>& crawls, std::string_view name) {
+    for (size_t i = crawls.size(); i-- > 0;)
+        if (ascii_iequals(crawls[i].name, name)) return &crawls[i];
+    return nullptr;
 }
 
 }  // namespace alamo::video
