@@ -92,6 +92,14 @@ bool parse_float(std::string_view s, float& v) {
 
 bool yes_text(const std::string& s) { return data::parse_type_bool(s); }
 
+// The leading integer of a text, 0 when it has none (vis1 t02: Blob_Shadow_Below_Detail_Level "99r" reads 99).
+int32_t leading_int(std::string_view s) {
+    while (!s.empty() && (s.front() == ' ' || s.front() == '	')) s.remove_prefix(1);
+    int32_t v = 0;
+    const auto r = std::from_chars(s.data(), s.data() + s.size(), v);
+    return r.ec == std::errc{} ? v : 0;
+}
+
 bool finite(float f) { return std::isfinite(f); }
 
 float length3(const Vec3& v) { return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z); }
@@ -149,6 +157,16 @@ void SnapshotTypeTable::build(const GameObjectTypes& types, objects::ModeKind mo
         ti.surface_fx = type_tokens(types, t, "SurfaceFX_Name");
         ti.scorch_mark = type_text(types, t, "Explosion_Scorch_Mark");
         ti.spin_away_explosion = type_text(types, t, "Spin_Away_On_Death_Explosion");
+        {  // vis1 t02: blob shadow fields (defaults of the type constructor: size 1 x 1, intensity 1, level 0)
+            ti.blob_material = type_text(types, t, "Blob_Shadow_Material_Name");
+            float v = 0.0f;
+            const std::vector<std::string> sz = type_tokens(types, t, "Blob_Shadow_Scale");
+            for (size_t k = 0; k < 2 && k < sz.size(); ++k)
+                if (parse_float(sz[k], v)) ti.blob_size[k] = v;
+            if (parse_float(type_text(types, t, "Blob_Shadow_Intensity"), v)) ti.blob_intensity = v;
+            ti.blob_below_detail = leading_int(type_text(types, t, "Blob_Shadow_Below_Detail_Level"));
+            ti.blob_bone = type_text(types, t, "Blob_Shadow_Bone_Name");
+        }
         {  // projectile laser bolts (Projectile_Custom_Render / _Width / _Length)
             float v = 0.0f;
             if (parse_float(type_text(types, t, "Projectile_Custom_Render"), v)) ti.projectile_custom_render = static_cast<int32_t>(v);

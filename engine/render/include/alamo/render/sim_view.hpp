@@ -117,6 +117,10 @@ public:
     // switch instantly. `seconds` 0 = instant for every type. Objects new in a frame start at their target.
     static constexpr float kFogHideAlpha = 0.025f;
     void set_fog_smooth_time(float seconds) { fog_smooth_time_ = seconds; }
+    // vis1 t02 (WEATHER_VISUALS §4): land hosts pass the shadow detail of the object blob shadows (blob_shadows.hpp); a
+    // type in blob mode at that detail (0 < detail < Blob_Shadow_Below_Detail_Level) draws without its shadow volume
+    // (Instance::no_shadow), as retail turns the model's stencil shadow off when it creates the blob. < 0 (default): off.
+    void set_blob_shadow_detail(int32_t detail) { blob_detail_ = detail; }
     float fog_alpha(objects::ObjectId id) const;  // 1 when unknown
     // R5 stealth presentation (ABILITY_VISUALS 1.1-1.3): per object a critically damped spring 0 -> 1 over the type's
     // Stealth_Transition_Time (or SnapshotObject::stealth_time) towards the fade target (kSnapStealthMeshes: 1, else 0),
@@ -182,6 +186,7 @@ private:
     PoseSource pose_;  // R3
     VisibilitySource visibility_;  // R3
     float fog_smooth_time_ = kFogSpringTime;  // R5
+    int32_t blob_detail_ = -1;                 // vis1 t02
     AttachmentPoseSource attach_pose_;  // R3 T6
     bool ghosts_enabled_ = true;        // R5
     std::map<objects::ObjectId, Ghost> ghosts_;  // R5, ordered by id

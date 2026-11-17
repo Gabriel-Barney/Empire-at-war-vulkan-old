@@ -399,6 +399,14 @@ bool BattleView::start(GpuCore& gpu, const GameData& data, const GameSession& se
     ropt = render::RecordOptions{};
     ropt.threads = gpu.js->worker_count();
     scene_->apply(ropt);
+    // vis1 t01 / t02: weather presentation state and the blob shadows' material table (the scene's ShadowBlobMaterials).
+    weather_ = {};
+    lightning_ = render::LightningFlash{};
+    have_last_prepare_ = false;
+    weather_fx_ = 0;
+    weather_fx_name_.clear();
+    blob_shadows_.set_materials(scene_->blob_materials());
+    shadow_blobs_.clear();
     models_ = std::make_unique<render::StreamedSimModels>(table_, *gpu.streamer);
 #ifdef ALAMO_RENDER_HAVE_ANIM_DRIVER
     pose_fn_ = [this](objects::ObjectId id, const render::GpuModel& m) {
@@ -487,26 +495,20 @@ bool BattleView::start(GpuCore& gpu, const GameData& data, const GameSession& se
         if (n) camera_.set_look_at({static_cast<float>(sx / n), static_cast<float>(sy / n), 0.0f});
         else camera_.set_look_at({0.5f * (bb.min.x + bb.max.x), 0.5f * (bb.min.y + bb.max.y), 0.0f});
     }
-    // Selection circle: one blob model from the selection material ([port] the first Selection* material of
-    // ShadowBlobMaterials.xml / the built-in list; per-faction materials not distinguished yet). Land uses the same flat
-    // instances at the unit's ground height: the terrain shadow-blob path drew the selection material's grid patches
-    // with the decal shader (dark patch borders between neighbouring units).
+    // Selection circles (vis1 t03, UI.md 1.3): the ShadowBlobMaterials table; each blob's model is uploaded on first use
+    // (selection_model). Fallback for an unknown / empty name: the first Selection* material, else entry 0.
     {
-        std::vector<terrain::ShadowBlobMaterial> mats = terrain::builtin_blob_materials();
+        blob_mats_ = terrain::builtin_blob_materials();
         std::vector<uint8_t> xml;
-        if (data.files->read("Data\\XML\\ShadowBlobMaterials.xml", xml)) terrain::parse_shadow_blob_materials(xml, mats);
-        jam_models_.set_materials(mats);  // R5 sensor jamming blobs use the same ShadowBlobMaterials table
-        const terrain::ShadowBlobMaterial* m = mats.empty() ? nullptr : &mats.front();
-        for (const terrain::ShadowBlobMaterial& x : mats)
-            if (x.name.find("Selection") != std::string::npos || x.name.find("selection") != std::string::npos) {
-                m = &x;
+        if (data.files->read("Data\\XML\\ShadowBlobMaterials.xml", xml)) terrain::parse_shadow_blob_materials(xml, blob_mats_);
+        jam_models_.set_materials(blob_mats_);  // R5 sensor jamming blobs use the same ShadowBlobMaterials table
+        blob_fallback_ = blob_mats_.empty() ? UINT32_MAX : 0u;
+        for (size_t i = 0; i < blob_mats_.size(); ++i)
+            if (blob_mats_[i].name.find("Selection") != std::string::npos || blob_mats_[i].name.find("selection") != std::string::npos) {
+                blob_fallback_ = static_cast<uint32_t>(i);
                 break;
             }
-        if (m) {
-            const render::TextureSource blob_tex = [&gpu](std::string_view n, assets::TextureRole role) { return gpu.cache->texture(n, role); };
-            std::string e2;
-            blob_ok_ = gpu.renderer.upload_model(ui::selection_blob_model(*m), blob_tex, blob_model_, nullptr, &e2);
-        }
+        sel_models_.clear();
     }
     (void)width;
     (void)height;
@@ -571,6 +573,10 @@ bool BattleView::kill_nearest_move_ack(ui::Vec3 p) {
 void BattleView::stop(GpuCore& gpu) {
     acks_.clear();
     lob_chargeups_.clear();
+    weather_ = {};
+    weather_fx_ = 0;  // the particle world goes below
+    weather_fx_name_.clear();
+    shadow_blobs_.clear();
     gpu.ring.wait_idle();
     gpu.ctx->wait_idle();
     gpu.renderer.set_scene_hook(nullptr);
@@ -589,8 +595,9 @@ void BattleView::stop(GpuCore& gpu) {
     beams_on_ = false;
     beam_bone_ = nullptr;
     beam_styles_ = render::BeamStyleTable{};
-    if (blob_ok_) gpu.renderer.destroy_model(blob_model_);
-    blob_ok_ = false;
+    for (const std::unique_ptr<SelectionModel>& m : sel_models_)
+        if (m->ok) gpu.renderer.destroy_model(m->model);
+    sel_models_.clear();
     blobs_.clear();
     if (scene_) scene_->stop(gpu.renderer);
     gpu.renderer.set_world(nullptr);
@@ -637,6 +644,23 @@ void BattleView::capture(const GameSession& session) {
         if (const sim::TacticalMode* tm = host.modes().top_tactical())
             track_lob_chargeups(lob_chargeups_, tsw_cues(b->special_weapon_events(), tm->primary()));
         env_wanted_ = b->environment_index();  // cu8g t03: Set_New_Environment (applied by prepare)
+        // vis1 t01 (WEATHER_VISUALS §1-§3): the land weather's presentation values. Without a running scenario the lightning
+        // is the active environment's own (TEE 21); the emitter is the scenario of the active environment's Weather effect.
+        render::WeatherView w;
+        if (!space_) {
+            const terrain::Environment* env = render::active_environment(b->map(), b->environment_index());
+            if (env) w.lightning = env->lightning_intensity;
+            const tactical::combat::WeatherSystem& ws = b->weather();
+            if (ws.active()) {
+                w.active = true;
+                w.emitter_intensity = ws.intensity();
+                w.lightning = ws.lightning();
+                w.fog_alpha = ws.fog_alpha();
+                if (env && b->weather_data())
+                    if (const tactical::combat::WeatherScenario* sc = b->weather_data()->find(env->weather_effect)) w.emitter = sc->emitter;
+            }
+        }
+        weather_ = std::move(w);
     }
     if (!render::capture_snapshot(host, table_, *snap, pf)) return;
     if (const sim::TacticalBattle* b = session.battle()) {
@@ -717,6 +741,7 @@ void BattleView::prepare(GpuCore& gpu, float alpha) {
         render::interpolate(p.prev.get(), *p.curr, alpha, render::InterpMode::Smooth, frame_);  // alpha 1 = the current snapshot (Original)
         models_->request(frame_);
         if (blocking_models_) gpu.streamer->finish_pending();
+        builder_->set_blob_shadow_detail(space_ ? -1 : shadow_detail_);  // vis1 t02: blob types drop their shadow volume
         builder_->build(frame_, *models_, main, bg_, &istats_);
         stats_.drawn = istats_.drawn;
         stats_.fog_hidden = istats_.fog_hidden;
@@ -727,6 +752,11 @@ void BattleView::prepare(GpuCore& gpu, float alpha) {
             stats_.decals = decorations_->stats().scorch_spawned;
         }
         // --- end R3/R5 render ---
+        // vis1 t02 (WEATHER_VISUALS §4): object blob shadows on the terrain (land; the type's Blob_Shadow_* fields).
+        if (!space_) {
+            blob_shadows_.build(frame_, table_, shadow_detail_, beam_bone_, shadow_blobs_);
+            scene_->set_shadow_blobs(shadow_blobs_);
+        }
         // R5 ability beams: the frame's tractor / energy / super laser / zap records with world endpoints (render pass: transparent bucket)
         if (beams_on_) {
             std::vector<render::BeamInstance> beams = render::beams_from_frame(frame_, &beam_styles_, beam_bone_);
@@ -740,18 +770,25 @@ void BattleView::prepare(GpuCore& gpu, float alpha) {
         if (pattach_) {
             render::particles::sync_sim_frame(*pattach_, frame_, table_, *models_, *builder_, pose_fn_ ? &pose_fn_ : nullptr, &popt_,
                                               decorations_ ? decorations_->effects() : std::span<const render::SimWorldEffect>());
+            sync_weather_emitter();  // vis1 t01: before the update that spawns its particles
             pworld_->update(render::particles::ParticleWorld::tick_delta(pending_ticks_));
             pending_ticks_ = 0;
             stats_.particles_spawned = pworld_->stats().spawned;
         }
 #endif
     }
-    // Selection circles (P2): flat blob instances (land: at the unit's ground height).
-    if (scene_ && blob_ok_) {
-        gpu.renderer.make_resident(blob_model_);
-        for (ui::SelectionBlob b : blobs_) {
-            if (!space_) b.center.z = scene_->map().terrain.sample_height(b.center.x, b.center.y);
-            main.push_back(ui::selection_blob_instance(blob_model_, b));
+    // Selection circles (P2; vis1 t03): the blob's own material; land: laid on the terrain under the unit.
+    if (scene_ && !blobs_.empty()) {
+        std::function<float(float, float)> ground;
+        if (!space_) {
+            const terrain::MapData* map = &scene_->map();
+            ground = [map](float x, float y) { return map->terrain.sample_height(x, y); };
+        }
+        for (const ui::SelectionBlob& b : blobs_) {
+            render::GpuModel* m = selection_model(gpu, b.material);
+            if (!m) continue;
+            gpu.renderer.make_resident(*m);
+            main.push_back(ground ? ui::selection_blob_ground_instance(*m, b, ground) : ui::selection_blob_instance(*m, b));
         }
     }
     // R5 sensor jamming (ABILITY_VISUALS 3): radius blobs of the allied jammers (jam_fx.hpp), flat at the jammer's height
@@ -772,6 +809,14 @@ void BattleView::prepare(GpuCore& gpu, float alpha) {
         const std::function<float(float, float)> ground = [map](float x, float y) { return map->terrain.sample_height(x, y); };
         jam_models_.build_blobs(gpu.renderer, blob_tex, std::span<const render::JamBlob>(&*bombing_blob_, 1), ground, main);
     }
+    // vis1 t01 (WEATHER_VISUALS §2): the lightning-flash schedule at wall-clock steps (render frames, paused or not).
+    {
+        const auto now = std::chrono::steady_clock::now();
+        const double dt = have_last_prepare_ ? std::chrono::duration<double>(now - last_prepare_).count() : 0.0;
+        last_prepare_ = now;
+        have_last_prepare_ = true;
+        lightning_.advance(scene_ ? weather_.lightning : 0.0f, dt);
+    }
     if (scene_) {
         apply_environment();  // cu8g t03: before update(), which re-applies it on the GPU side
         scene_->update(gpu.renderer, *gpu.streamer);
@@ -790,6 +835,52 @@ void BattleView::apply_environment() {
     if (!scene_->set_environment(env_wanted_)) return;
 #ifdef ALAMO_PARTICLES_HAVE_SIM
     if (prender_.initialized()) prender_.set_wind(scene_->scene_wind());
+#endif
+}
+
+// vis1 t03: the uploaded model of a selection material by name (case-insensitive; unknown / empty: the fallback). Null when
+// there is no material or its upload failed.
+render::GpuModel* BattleView::selection_model(GpuCore& gpu, const std::string& material) {
+    uint32_t idx = blob_fallback_;
+    if (!material.empty())
+        for (size_t i = 0; i < blob_mats_.size(); ++i)
+            if (ascii_iequals(blob_mats_[i].name, material)) {
+                idx = static_cast<uint32_t>(i);
+                break;
+            }
+    if (idx >= blob_mats_.size()) return nullptr;
+    for (const std::unique_ptr<SelectionModel>& m : sel_models_)
+        if (m->material == idx) return m->ok ? &m->model : nullptr;
+    auto m = std::make_unique<SelectionModel>();
+    m->material = idx;
+    const render::TextureSource blob_tex = [&gpu](std::string_view n, assets::TextureRole role) { return gpu.cache->texture(n, role); };
+    std::string e2;
+    m->ok = gpu.renderer.upload_model(ui::selection_blob_model(blob_mats_[idx]), blob_tex, m->model, nullptr, &e2);
+    sel_models_.push_back(std::move(m));
+    return sel_models_.back()->ok ? &sel_models_.back()->model : nullptr;
+}
+
+// vis1 t01 (WEATHER_VISUALS §1): the running scenario's emitter_name as one particle system at the origin (its emitters
+// are weather particles: camera-relative cube, ANIM_PARTICLES B.4), its Emitter_Intensity as the system Detail scalar
+// (active slots = intensity x pool; set without smoothing). A changed or stopped scenario removes the old system at once.
+void BattleView::sync_weather_emitter() {
+#ifdef ALAMO_PARTICLES_HAVE_SIM
+    if (!pworld_ || !plib_) return;
+    const std::string want = weather_.active ? weather_.emitter : std::string{};
+    if (want != weather_fx_name_ || (weather_fx_ != 0 && !pworld_->valid(weather_fx_))) {  // changed, or the system ended
+        if (weather_fx_ != 0 && pworld_->valid(weather_fx_)) {
+            pworld_->set_visible(weather_fx_, false);
+            pworld_->release(weather_fx_);
+        }
+        weather_fx_ = 0;
+        weather_fx_name_ = want;
+        if (!want.empty())
+            if (render::particles::SystemPtr def = plib_->get(want)) weather_fx_ = pworld_->create(std::move(def), render::Mat3x4::identity());
+    }
+    if (weather_fx_ != 0 && pworld_->valid(weather_fx_)) {
+        const float intensity = weather_.emitter_intensity;
+        pworld_->set_scalar(weather_fx_, render::particles::SystemScalar::Detail, std::span<const float>(&intensity, 1), 0.0f);
+    }
 #endif
 }
 
@@ -835,6 +926,8 @@ ui::Vec3 BattleView::type_half_extents(objects::TypeIndex t) {
 void BattleView::use_scene(GpuCore& gpu) {
     if (!scene_) return;
     render::Lighting lit = scene_->lighting();
+    render::apply_fog_plane_alpha(lit, weather_.active ? weather_.fog_alpha : 0.0f);  // vis1 t01 (WEATHER_VISUALS §3)
+    lit.flash = lightning_.light();                                                  // vis1 t01 (§2)
     lit.fog_enabled = lit.fog_enabled && fog_master_ && fog_distance_;  // ui2 t08: Enable_Fog / Enable_Distance_Fog (false = no fog)
     gpu.renderer.set_lighting(lit);
     gpu.renderer.set_world(&scene_->world());

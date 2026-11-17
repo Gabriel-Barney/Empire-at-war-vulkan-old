@@ -104,6 +104,14 @@ struct SnapshotTypeInfo {
     float stealth_color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     float cloak_color[4] = {1.0f, 1.0f, 1.0f, 1.0f};
     float stealth_time = 0.0f, cloak_time = 0.0f;
+    // vis1 t02 blob shadows (OBJECT_TYPES type +0x17bc..+0x17f0, docs/re/WEATHER_VISUALS.md §4): Blob_Shadow_Material_Name
+    // ("" = no blob), Blob_Shadow_Scale (width, height in world units; default 1, 1), Blob_Shadow_Intensity (default 1),
+    // Blob_Shadow_Below_Detail_Level (leading integer, default 0) and Blob_Shadow_Bone_Name ("" = the object position).
+    std::string blob_material;
+    float blob_size[2] = {1.0f, 1.0f};
+    float blob_intensity = 1.0f;
+    int32_t blob_below_detail = 0;
+    std::string blob_bone;
 };
 
 // Current _ALT index for a health fraction (SnapshotObject::alt), TACTICAL_GAPS §6.3 (0x3ac290) [H]: walk EVERY
@@ -147,6 +155,17 @@ public:
         info_[t].ghost_initial_state = initial_state;
     }
     void set_max_speed(objects::TypeIndex t, float v) { info_[t].max_speed = v; }
+    // vis1 t02 (tests / hosts): the type's blob shadow fields.
+    void set_blob_shadow(objects::TypeIndex t, std::string material, float width, float height, int32_t below_detail,
+                         std::string bone = {}, float intensity = 1.0f) {
+        SnapshotTypeInfo& i = info_[t];
+        i.blob_material = std::move(material);
+        i.blob_size[0] = width;
+        i.blob_size[1] = height;
+        i.blob_below_detail = below_detail;
+        i.blob_bone = std::move(bone);
+        i.blob_intensity = intensity;
+    }
     void set_spin_away_explosion(objects::TypeIndex t, std::string name) { info_[t].spin_away_explosion = std::move(name); }
     void set_projectile_render(objects::TypeIndex t, int32_t custom_render, float width, float length, uint8_t slot_col = 0,
                                uint8_t slot_row = 0) {

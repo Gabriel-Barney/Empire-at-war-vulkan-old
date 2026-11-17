@@ -50,6 +50,10 @@ struct Lighting {
     std::string skydome[2];
     float skydome_scale[2] = {1, 1};
     float skydome_angle[2][2] = {{0, 0}, {0, 0}};
+    // vis1 t01 (TERRAIN_WATER_POST 5.3 item 1, docs/re/WEATHER_VISUALS.md §2): the lightning flash of this frame, a white
+    // directional light added to the spherical harmonics (SPH_LIGHT_FILL and SPH_LIGHT_ALL) only; intensity 0 = no flash.
+    // Set per frame by the battle host from render::LightningFlash; environments never set it.
+    DirLight flash{{0, 0, 1}, {1, 1, 1}, {0, 0, 0}, 0.0f};
 
     // Built-in defaults from TERRAIN_WATER_POST.md 5.4 (real first environment records):
     //   space_default(): _MP_SPACE_KUAT "Environment 1" (sun (0.918,1,0.988) x 0.646 at yaw 217.1,
