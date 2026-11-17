@@ -861,6 +861,7 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             start_recharge(o, s.cls == C::SaberThrow ? kSaberThrow : kCableAttack);
             if (s.cls == C::Cable && host_.cable_attack) host_.cable_attack(o.id, target, s.min_range, s.max_range);  // §6.5
             if (s.cls == C::Cable) {  // r3g t04: the cable phases run in the update (state 3: drop + pull)
+                if (sp.applied) class_remove(o, sp, frame);  // a cable still on another walker lets it go first
                 sp.applied = 1;
                 sp.target = target;
                 sp.phase = kCablePulling;
@@ -1396,7 +1397,7 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
                     sp.phase = kCableParalyzed;
                     sp.counter = std::max(static_cast<int32_t>(s.cable_paralyze_phase), 70);
                     stop_order(sp.target, frame);  // 0x3a9880
-                    lock_pair(*t, kLockCable, true, frame);
+                    if (t->cable_holds++ == 0) lock_pair(*t, kLockCable, true, frame);
                     return;
                 }
                 // Still walking: the trip. Take_Damage(kind 8 Damage_Cable_Attack, its current hull health, source = the
@@ -1508,8 +1509,9 @@ void AbilitySystem::class_remove(Obj& o, SpecialState& sp, uint32_t frame) {
         case C::Weatherproof:
         case C::RetreatPrevention:
         case C::EnableAbility: aura_off(o, sp, frame); return;
-        case C::Cable:  // r3g t04: a paralyzed walker is unlocked (0x3a8e50(target, 0))
-            if (Obj* t = obj(sp.target)) lock_pair(*t, kLockCable, false, frame);
+        case C::Cable:  // r3g t04: a paralyzed walker is unlocked (0x3a8e50(target, 0)) when no other cable holds it
+            if (Obj* t = obj(sp.target); t && sp.phase == kCableParalyzed && t->cable_holds > 0)
+                if (--t->cable_holds == 0) lock_pair(*t, kLockCable, false, frame);
             sp.phase = 0;
             sp.counter = 0;
             return;

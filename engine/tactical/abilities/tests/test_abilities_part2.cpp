@@ -215,7 +215,10 @@ CableRun oi_cable_run(bool walker_moving, float paralyze) {
 // the next service (30); Deploy Troopers finishes 14 later (44): both troopers are released, each unlocked after its 5
 // slide services, the landing service and Rope Land's 11 frames (61); Lift Rope finishes 29 after the release (73): the
 // ability recharges and the walker is released. Without an anim_clip host the spawn stays instant (test_gaps_deploy_troopers).
-void test_r3g_deploy_troopers_timed() {
+// `cut` (review follow-up, [port]): 1 turns the ability off at tick 35 (troopers hanging), 2 kills the walker then; both
+// release the hanging troopers at their next rope service (TrooperReleased, unlocked there: no slide); 1 also unlocks
+// the walker at once.
+void r3g_troopers_run(int cut) {
     OiWorld w;
     AbilityObjectDesc a;
     UnitAbilityRecord dt = rec(kDeployTroopers, 0.0f, 20.0f);
@@ -259,6 +262,8 @@ void test_r3g_deploy_troopers_timed() {
         // the requests).
         const int at = static_cast<int>(w.frame - f0);
         w.collect();
+        if (at == 35 && cut == 1) CHECK(w.ab->set_unit_ability_mode(one, kDeployTroopers, false, w.frame) == 1);
+        if (at == 35 && cut == 2) w.sys->kill_unit(1, kNoObject, kKindNormal, w.frame);
         w.ab->tick(w.frame, w.trees, w.rng, serial_for);
         if (spawn < 0 && !w.ab->spawn_requests().empty()) {
             spawn = at;
@@ -280,12 +285,27 @@ void test_r3g_deploy_troopers_timed() {
         if (unlocked < 0 && w.count(AbilityEventKind::Released, 50) > 0 && w.count(AbilityEventKind::Released, 51) > 0) unlocked = at;
         if (done < 0 && w.count(AbilityEventKind::Released, 1) > 0) done = at;
     }
-    std::printf("r3g deploy troopers: spawn %d, released %d (rope end %d), unlocked %d, done %d\n", spawn, released, rope_end,
-                unlocked, done);
+    std::printf("r3g deploy troopers (cut %d): spawn %d, released %d (rope end %d), unlocked %d, done %d\n", cut, spawn, released,
+                rope_end, unlocked, done);
+    if (cut == 1) {
+        CHECK(spawn == 30 && released == 35 && rope_end == 35 && unlocked == 35 && done == 35);
+        CHECK(!w.ab->is_active(1, kDeployTroopers) && w.ab->countdown_counter(1, kDeployTroopers) > 0);
+        return;
+    }
+    if (cut == 2) {
+        CHECK(spawn == 30 && released == 35 && rope_end == 35 && unlocked == 35);
+        return;
+    }
     CHECK(spawn == 30 && released == 44 && rope_end == 61 && unlocked == 61 && done == 73);
     CHECK(w.count(AbilityEventKind::Immobilised, 50) == 1 && w.count(AbilityEventKind::Immobilised, 1) == 1);
     CHECK(!w.ab->is_active(1, kDeployTroopers) && w.ab->countdown_counter(1, kDeployTroopers) > 0);
     CHECK(w.ab->troopers_deployed(1) == 2);
+}
+
+void test_r3g_deploy_troopers_timed() {
+    r3g_troopers_run(0);
+    r3g_troopers_run(1);
+    r3g_troopers_run(2);
 }
 
 // r3g t08: ticks from the order to the Repair's heal; the model has HACKING 0x5a (`hack` frames) and REPAIRING 0x5b

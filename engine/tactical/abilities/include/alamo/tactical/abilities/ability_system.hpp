@@ -720,10 +720,12 @@ private:
                                    // Troopers, 8 Lift Rope (0x591a90 states; 6 / 7 folded into 5 -> 8 [port])
         uint8_t troop_deploy = 0;  // owner: this deploy asked the locomotor to deploy (undeployed at the end)
         uint32_t troop_end = 0;    // owner: the frame the playing clip reports finished
-        uint8_t rope_state = 0;    // trooper: 0 none, 1 hanging on the bone, 2 sliding down / Rope Land
+        uint8_t rope_state = 0;    // trooper: 0 none, 1 hanging on the bone, 2 sliding down / Rope Land, 3 hanging, lock
+                                   // not taken yet (spawned this tick)
         uint32_t rope_end = 0;     // trooper: the frame its LANDING ends (unlocked, joins the coordinator)
         float rope_z = 0.0f;       // trooper: the bone height it was created at
         ObjectId rope_owner = kNoObject;
+        uint8_t cable_holds = 0;   // r3g t04: cables holding this walker paralyzed (kLockCable while > 0; 0x3a8e50 counts)
     };
     static constexpr uint8_t kAnimStay = 0;      // parks at its end (Super_Laser)
     static constexpr uint8_t kAnimIdle = 1;      // the owner returns to idle: the record ends
@@ -879,6 +881,8 @@ private:
     void rope_service(Obj& t, uint32_t frame);       // r3g t02: a trooper's rope landing
     uint32_t clip_finish(ObjectId id, int32_t anim_type) const;  // r3g t02: sim frames until a one-shot finishes (0 none)
     void release_troopers(Obj& o, uint32_t frame);  // r3g t02: state 5's end (0x392160 + LANDING resume)
+    void troopers_abort(Obj& o, uint32_t frame);    // r3g t02: the machine's end / abort (unlock, undeploy)
+    void rope_release(Obj& t, uint32_t frame, uint32_t rope_end);  // r3g t02: off the bone, TrooperReleased
     SpecialState* blast_state(Obj& o);                                         // §5.5: the applied Blast, if any
     void h_behavior(Obj& o, uint32_t t, bool on, uint32_t frame);
     void behaviors_service(Obj& o, uint32_t frame);  // HUNT, SELF_DESTRUCT, CONFUSE expiry

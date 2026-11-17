@@ -2306,6 +2306,10 @@ void AbilitySystem::hash(StateHasher& h) const {
             h.f32(o.rope_z);
             h.i32(o.rope_owner);
         }
+        if (o.cable_holds != 0) {  // r3g t04: cables holding a walker
+            h.u32(0x4c424143u);  // "CABL"
+            h.u8(o.cable_holds);
+        }
         // TRU1 t03: gravity control field state, only for generators and slowed units (keeps the other digests)
         if (desc(o).gravity_field || o.in_gravity_field != 0 || !o.gravity_list.empty()) {
             h.u32(0x56415247u);  // "GRAV"

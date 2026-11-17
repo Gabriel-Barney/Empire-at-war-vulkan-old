@@ -1569,6 +1569,9 @@ void TacticalBattle::hash(StateHasher& h) const {
             h.u32(l.unloaded);
             h.u32(l.timer_start + l.timer_len);
             h.u32(l.remove_frame);
+            h.u32(l.anim_start);  // r3g t01: the Land / Takeoff clip that gates states 1 and 3
+            h.u32(l.anim_count);
+            h.f32(l.anim_rate);
         }
     }
 }

@@ -44,7 +44,7 @@ namespace {
 
 // 2: OI follow-up animation record + lock pairs; 3: cu8 t02 stealth bonus gone; 4: cu8f t01 special restore target,
 // cu8f t06 trooper squads, LURE pack, spawn-request squad; 5: TRU1 t03 gravity control field state; 6: r3g t02 the timed
-// DEPLOY_TROOPERS machine and the rope landing. Only the current version is read (cu6).
+// DEPLOY_TROOPERS machine and the rope landing, r3g t04 the cable hold count. Only the current version is read (cu6).
 constexpr uint32_t kAbilitySaveVersion = 6;
 constexpr uint32_t kSpecialWeaponSaveVersion = 1;
 constexpr uint32_t kSpaceFieldSaveVersion = 1;
@@ -115,6 +115,7 @@ void AbilitySystem::write(ByteWriter& w) const {
         w.u32(o.gravity_due).u8(o.gravity_on).u8(o.in_gravity_field);  // v5 (TRU1 t03)
         put_ids(w, o.gravity_list);
         w.u8(o.troop_state).u8(o.troop_deploy).u32(o.troop_end).u8(o.rope_state).u32(o.rope_end).f32(o.rope_z).i32(o.rope_owner);  // v6
+        w.u8(o.cable_holds);  // v6
     }
 
     w.u32(static_cast<uint32_t>(spawns_.size()));
@@ -293,7 +294,8 @@ bool AbilitySystem::read(ByteReader& r) {
         o.rope_end = r.u32();
         o.rope_z = r.f32();
         o.rope_owner = r.i32();
-        if (!r.ok()) return false;
+        o.cable_holds = r.u8();  // r3g t04
+        if (!r.ok() || o.rope_state > 3) return false;
     }
 
     if (!r.count(n, 55u)) return false;

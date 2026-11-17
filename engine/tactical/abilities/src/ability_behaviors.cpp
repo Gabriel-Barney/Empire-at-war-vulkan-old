@@ -89,13 +89,13 @@ bool AbilitySystem::bind_spawn(uint32_t serial, ObjectId id) {
             o->troopers.push_back(id);
             o->trooper_squads.push_back(r.squad);  // cu8f t06: its squad (CU8F_T04_T06_RE §3.2)
             // r3g t02: in the timed machine the trooper hangs on its bone (Rope Slide, +0x3a2 |= 2) until state 5 ends;
-            // it does not move until its LANDING has ended.
+            // it does not move until its LANDING has ended. The lock is taken at its first rope service (state 3): the
+            // host binds between its event pass and the event clear, so a lock here would lose its Immobilised event.
             if (o->troop_state != 0)
                 if (Obj* t = obj(id)) {
-                    t->rope_state = 1;
+                    t->rope_state = 3;
                     t->rope_z = r.position.z;
                     t->rope_owner = o->id;
-                    lock_pair(*t, kLockRope, true, frame_now_);
                 }
             return true;
         }
@@ -915,8 +915,8 @@ void AbilitySystem::troopers_service(Obj& o, uint32_t frame) {
     static constexpr int32_t kDropRope = 0x61, kTroopDrop = 0x5e, kLiftRope = 0x62;
     const UnitAbilityRecord* r = record_of(o, kDeployTroopers);
     if (!r) {
-        o.troop_state = 0;
-        lock_pair(o, kLockTroops, false, frame);
+        o.behavior[kDeployTroopers] = 0;
+        troopers_abort(o, frame);
         return;
     }
     switch (o.troop_state) {
@@ -950,15 +950,37 @@ void AbilitySystem::troopers_service(Obj& o, uint32_t frame) {
             return;
         case 8:  // Lift Rope finished: recharge 38, inactive, undeploy
             if (frame < o.troop_end) return;
-            o.troop_state = 0;
             o.behavior[kDeployTroopers] = 0;
             start_recharge(o, kDeployTroopers);
-            lock_pair(o, kLockTroops, false, frame);
-            if (o.troop_deploy && host_.deploy) (void)host_.deploy(o.id, false, frame);
-            o.troop_deploy = 0;
+            troopers_abort(o, frame);
             return;
         default: o.troop_state = 0; return;
     }
+}
+
+void AbilitySystem::troopers_abort(Obj& o, uint32_t frame) {
+    // The end of the timed machine (state 8), or [port] its abort (the behaviour turned off mid-sequence or the record
+    // gone; retail's handling not read): the walker is unlocked and undeployed when this deploy deployed it. Troopers
+    // still hanging drop at their next rope service (their owner's state is 0).
+    o.troop_state = 0;
+    lock_pair(o, kLockTroops, false, frame);
+    if (o.troop_deploy && host_.deploy) (void)host_.deploy(o.id, false, frame);
+    o.troop_deploy = 0;
+}
+
+void AbilitySystem::rope_release(Obj& t, uint32_t frame, uint32_t rope_end) {
+    // 0x392160: off the bone (the host clears the attachment on TrooperReleased), LANDING runs until `rope_end`.
+    if (t.rope_state == 3) lock_pair(t, kLockRope, true, frame);  // released before its first rope service
+    t.rope_state = 2;
+    t.rope_end = rope_end;
+    AbilityEvent e;
+    e.kind = AbilityEventKind::TrooperReleased;
+    e.type = kDeployTroopers;
+    e.id = t.id;
+    e.target = t.rope_owner;
+    e.frame = frame;
+    e.value = static_cast<int32_t>(rope_end);
+    events_.push_back(e);
 }
 
 void AbilitySystem::release_troopers(Obj& o, uint32_t frame) {
@@ -967,35 +989,31 @@ void AbilitySystem::release_troopers(Obj& o, uint32_t frame) {
     // has finished it joins the coordinator (0x39bcb0) and LANDING ends. Without Rope Land it ends at the landing service.
     static constexpr float kRopeDrop = 3.9f;
     static constexpr int32_t kRopeLand = 0x60;
+    static constexpr float kMaxServices = 100000.0f;  // [port] bound of the slide (no terrain under the bone)
     for (const ObjectId id : o.troopers) {
         Obj* t = obj(id);
-        if (!t || t->rope_state != 1 || t->rope_owner != o.id) continue;
+        if (!t || (t->rope_state != 1 && t->rope_state != 3) || t->rope_owner != o.id) continue;
         const Vec3 p = position(*t);
-        const float ground = host_.ground_height ? host_.ground_height(p.x, p.y) : t->rope_z;
+        float ground = host_.ground_height ? host_.ground_height(p.x, p.y) : t->rope_z;
+        if (!(ground > -1.0e37f)) ground = t->rope_z;  // no terrain (the host's -3e38): no slide [port]
         const float drop = t->rope_z - ground;
-        const uint32_t services = drop > 0.0f ? static_cast<uint32_t>(drop / kRopeDrop) + 1u : 1u;
+        const uint32_t services = drop > 0.0f ? static_cast<uint32_t>(std::min(drop / kRopeDrop, kMaxServices)) + 1u : 1u;
         const uint32_t land = clip_finish(id, kRopeLand);
         const bool has_land = clip_timing(id, kRopeLand, {}).count > 0.0f;
-        t->rope_state = 2;
-        t->rope_end = frame + services + (has_land ? std::max<uint32_t>(land, 1u) : 0u);
-        AbilityEvent e;
-        e.kind = AbilityEventKind::TrooperReleased;
-        e.type = kDeployTroopers;
-        e.id = id;
-        e.target = o.id;
-        e.frame = frame;
-        e.value = static_cast<int32_t>(t->rope_end);
-        events_.push_back(e);
+        rope_release(*t, frame, frame + services + (has_land ? std::max<uint32_t>(land, 1u) : 0u));
     }
 }
 
 void AbilitySystem::rope_service(Obj& t, uint32_t frame) {
     // A trooper still hanging when its walker is gone is released at once [port]; a landing trooper is unlocked at the end.
+    if (t.rope_state == 3) {  // first service after the spawn: the rope lock (its Immobilised event in this tick)
+        lock_pair(t, kLockRope, true, frame);
+        t.rope_state = 1;
+    }
     if (t.rope_state == 1) {
         const Obj* owner = obj(t.rope_owner);
         if (owner && !owner->dead && owner->troop_state != 0) return;
-        t.rope_state = 2;
-        t.rope_end = frame;
+        rope_release(t, frame, frame);
     }
     if (t.rope_state == 2 && frame >= t.rope_end) {
         t.rope_state = 0;
@@ -1178,7 +1196,8 @@ void AbilitySystem::h_behavior(Obj& o, uint32_t t, bool on, uint32_t frame) {
     // cu8l t02 (CU8K_T02_T06_RE §2 rows 0x3a4138 / 0x3a41e6, rule 5): every toggle but HUNT on and SELF_DESTRUCT stops and
     // holds the unit (0x3a9880: one draw when it is not a squad member) before the behaviour's activate / deactivate; turning
     // a running behaviour off (0x4c3700; not HUNT) holds it a second time. [M] after the port's already-on / already-off
-    // returns; [port] DEPLOY_TROOPERS is never running here (its state machine finishes in the toggle).
+    // returns; [port] DEPLOY_TROOPERS without clip data finishes in the toggle; its timed machine (r3g t02) is aborted
+    // by the off toggle (troopers_abort).
     const bool hold = t != kSelfDestruct && !(t == kHunt && on);
     if (on) {
         if (o.behavior[t]) return;
@@ -1224,6 +1243,7 @@ void AbilitySystem::h_behavior(Obj& o, uint32_t t, bool on, uint32_t frame) {
             o.self_destruct = 0;
             lock_pair(o, kLockSelfDestruct, false, frame);  // vf24 0x630840
         }
+        if (t == kDeployTroopers && o.troop_state != 0) troopers_abort(o, frame);  // r3g t02 [port]: off mid-sequence
         if (t == kLure) lure_deactivate(o, frame);  // cu8f t06
         start_recharge(o, t);
     }
