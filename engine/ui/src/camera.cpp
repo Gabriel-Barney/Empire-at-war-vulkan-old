@@ -571,7 +571,7 @@ void TacticalCameraController::mouse(const InputState& in) {
     const float mux = 100.0f * fmul * static_cast<float>(dx) / w;
     const float muy = -100.0f * fmul * static_cast<float>(dy) / h;  // mouse up > 0
     if (drag_ == Drag::Pan) {
-        if (t_.absolute_scrolling) pan(0.01f * dist_.value * mux, 0.01f * dist_.value * muy);  // else push-scroll
+        if (t_.absolute_scrolling && !scroll_locked_) pan(0.01f * dist_.value * mux, 0.01f * dist_.value * muy);  // else push-scroll
     } else if (drag_ == Drag::Rotate && ov_level_ == 0) {
         const float ppu = t_.free_rotation && c_.pitch_per_mouse_unit == 0.0f ? t_.free_pitch_per_mouse_unit : c_.pitch_per_mouse_unit;
         rotate(mux * c_.yaw_per_mouse_unit, muy * ppu);
@@ -589,7 +589,7 @@ void TacticalCameraController::update(const InputState& in, const Bindings& keys
                       (in.frame().mouse_inside || dragging);
     const ButtonState& db = in.button(in.button(Button::Middle).down ? Button::Middle : Button::Right);
     float tx = 0, ty = 0;
-    scroll_target(in, keys, s_, t_, edge, push, db.drag.x0, db.drag.y0, tx, ty);
+    if (!scroll_locked_) scroll_target(in, keys, s_, t_, edge, push, db.drag.x0, db.drag.y0, tx, ty);  // ui2 t06: SCROLL_LOCK
     scroll_smooth(tx, ty, dt, s_, scroll_vx_, scroll_vy_);
     if (scroll_vx_ != 0.0f || scroll_vy_ != 0.0f) {
         const float k = 3e-4f * dist_.value * dt;  // world speed = S x 3e-4 x distance
@@ -722,7 +722,7 @@ void GalacticCameraController::update(const InputState& in, const Bindings& keys
     // zoomed in.
     const ButtonState& b = mb.down ? mb : rb;
     dragging_ = (mb.down || (t_.right_button_scroll && rb.down)) && zoom_state() != 3;
-    if (dragging_ && t_.absolute_scrolling && (b.dx != 0 || b.dy != 0)) {
+    if (dragging_ && t_.absolute_scrolling && !scroll_locked_ && (b.dx != 0 || b.dy != 0)) {
         const float w = static_cast<float>(f.width > 0 ? f.width : 1), h = static_cast<float>(f.height > 0 ? f.height : 1);
         const float fmul = in.ctrl() ? 1.0f : 4.0f;
         const float k = c_.right_button_scroll_factor * 1000.0f;
@@ -732,7 +732,7 @@ void GalacticCameraController::update(const InputState& in, const Bindings& keys
     const bool push = !t_.absolute_scrolling && dragging_;
     const bool edge = !(t_.absolute_scrolling && dragging_) && !in.button(Button::Left).down && (f.mouse_inside || dragging_);
     float tx = 0, ty = 0;
-    scroll_target(in, keys, s_, t_, edge, push, b.drag.x0, b.drag.y0, tx, ty);
+    if (!scroll_locked_) scroll_target(in, keys, s_, t_, edge, push, b.drag.x0, b.drag.y0, tx, ty);  // ui2 t06: SCROLL_LOCK
     scroll_smooth(tx, ty, dt, s_, scroll_vx_, scroll_vy_);
     if (scroll_vx_ != 0.0f || scroll_vy_ != 0.0f) pan(scroll_vx_ * dt, -scroll_vy_ * dt);
     // Wheel = planet zoom (§5); [port: Gabriel] the zoom keys act as one notch per press.

@@ -142,6 +142,9 @@ struct ScreenAction {
         SummarySort,          // tag = the column button id (IDC_BUTTON_*)
         SummaryPlanetary,
         StorySummaryGoal,     // GALACTIC_DIALOGS §2.2, appended: IDC_GOAL_LIST row chosen (button = row); host refills the summary
+        TutorialContinue,     // ui2 t02, appended: IDD_TUTORIAL_DIALOG's IDC_CONTINUE (the story's "Continue_Tutorial" trigger)
+        TutorialClosed,       // Esc: the dialog closes, no trigger
+        TutorialQuit,         // IDC_QUIT_TO_MAIN: the host asks TEXT_QUIT_SURE
     };
     Kind kind = Kind::MessageBoxResult;
     std::string tag, map;

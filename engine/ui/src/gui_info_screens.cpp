@@ -52,7 +52,7 @@ std::u32string InfoScreens::text(std::string_view key, std::u32string_view fallb
 
 void InfoScreens::close_all() {
     if (!gui_) return;
-    for (const char* n : {dlg::kBuyUnits, dlg::kStory, dlg::kStorySummary}) gui_->close(n);
+    for (const char* n : {dlg::kBuyUnits, dlg::kStory, dlg::kStorySummary, dlg::kTutorial}) gui_->close(n);
     if (!info_open_.empty()) gui_->close(info_open_);
     info_open_.clear();
 }
@@ -123,6 +123,16 @@ bool InfoScreens::show_story(const StoryDialogInfo& s) {
     d->show("IDC_STORY_DIALOG_ACCEPT", s.accept);
     d->show("IDC_STORY_DIALOG_CANCEL", s.cancel);
     d->show("IDC_STORY_DIALOG_CLOSE_BUTTON", s.close);
+    return true;
+}
+
+bool InfoScreens::show_tutorial(const std::vector<std::u32string>& lines, bool continue_button) {
+    if (!gui_ || gui_->find(dlg::kTutorial)) return false;
+    GuiDialog* d = gui_->open(dlg::kTutorial);
+    if (!d) return false;
+    d->set_items("IDC_TUTORIAL_TEXT", lines, -1);
+    gui_->wrap_list_items(*d, "IDC_TUTORIAL_TEXT");
+    d->show("IDC_CONTINUE", continue_button);
     return true;
 }
 
@@ -436,6 +446,13 @@ void InfoScreens::on_click(const GuiEvent& e, std::vector<ScreenAction>& out) {
         a.tag = story_tag_;
         gui_->close(n);
         out.push_back(std::move(a));
+    } else if (iequals(n, dlg::kTutorial)) {  // ui2 t02: Continue closes and raises the trigger; Quit keeps the dialog up
+        if (is("IDC_CONTINUE")) {
+            gui_->close(n);
+            out.push_back(act(ScreenAction::Kind::TutorialContinue));
+        } else if (is("IDC_QUIT_TO_MAIN")) {
+            out.push_back(act(ScreenAction::Kind::TutorialQuit));
+        }
     } else if (iequals(n, dlg::kStorySummary)) {
         if (is("IDC_SUMMARY_DIALOG_CLOSE_BUTTON")) {
             gui_->close(n);
@@ -551,6 +568,9 @@ void InfoScreens::update(std::span<const GuiEvent> events, std::vector<ScreenAct
                     a.tag = story_tag_;
                     gui_->close(e.dialog);
                     out.push_back(std::move(a));
+                } else if (iequals(e.dialog, dlg::kTutorial)) {
+                    gui_->close(e.dialog);
+                    out.push_back(act(ScreenAction::Kind::TutorialClosed));
                 } else if (iequals(e.dialog, dlg::kStorySummary)) {
                     gui_->close(e.dialog);
                     out.push_back(act(ScreenAction::Kind::StorySummaryClosed));

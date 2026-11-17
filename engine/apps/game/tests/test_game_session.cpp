@@ -2205,8 +2205,23 @@ static void story_ui_test() {
     game::story_reward_media("MULTIMEDIA", {"T", "-1", "", "", "", "", "", "", "-1"}, media);
     game::story_reward_media("MULTIMEDIA", {"T", "-1", "", "", "", "", "", "", ""}, media);
     game::story_reward_media("STOP_COMMANDBAR_MOVIE", {}, media);
-    CHECK(media.size() == 2 && media[0].kind == game::StoryMediaCue::Kind::AdvisorMovie && media[0].name == "Tyber_loop" &&
+    CHECK(media.size() == 2 && media[0].kind == game::StoryMediaCue::Kind::AdvisorMovie && media[0].name == "Tyber_loop" && !media[0].loop &&
           media[1].kind == game::StoryMediaCue::Kind::AdvisorStop);
+    // ui2 t07: P10 / P2 are the loop flag (atoi, empty = 0); SPEECH P1 and COMMANDBAR_MOVIE P1 are cues; the head's name is not tested.
+    media.clear();
+    game::story_reward_media("MULTIMEDIA", {"T", "-1", "", "", "", "", "", "", "Han_Loop", "1"}, media);
+    game::story_reward_media("MULTIMEDIA", {"T", "-1", "", "", "", "", "", "", "Han_Loop", "0"}, media);
+    game::story_reward_media("MULTIMEDIA", {"T", "-1", "", "", "", "", "", "", "Plain_Name", "3"}, media);
+    game::story_reward_media("SPEECH", {" EMPIRE_ACT04_MISSION_TEN_04 "}, media);
+    game::story_reward_media("SPEECH", {}, media);
+    game::story_reward_media("COMMANDBAR_MOVIE", {"Vader_Loop"}, media);
+    game::story_reward_media("COMMANDBAR_MOVIE", {"Moff_Loop", "1"}, media);
+    game::story_reward_media("COMMANDBAR_MOVIE", {"-1"}, media);
+    CHECK(media.size() == 6);
+    CHECK(media[0].kind == game::StoryMediaCue::Kind::AdvisorMovie && media[0].loop && !media[1].loop && media[2].name == "Plain_Name" && media[2].loop);
+    CHECK(media[3].kind == game::StoryMediaCue::Kind::Speech && media[3].name == "EMPIRE_ACT04_MISSION_TEN_04");
+    CHECK(media[4].kind == game::StoryMediaCue::Kind::AdvisorMovie && media[4].name == "Vader_Loop" && !media[4].loop);
+    CHECK(media[5].name == "Moff_Loop" && media[5].loop);
     std::printf("story UI feed: %" PRIu64 " notifications raised\n", f.raised_total());
 }
 

@@ -599,6 +599,20 @@ void test_info_screens() {
         is.update(env.click(dlg::kStory, "IDC_STORY_DIALOG_ACCEPT"), acts);
         CHECK(acts.size() == 1 && acts[0].tag == "timed" && !is.update_story(13.0, &due));
     }
+    // ui2 t02: IDD_TUTORIAL_DIALOG - text in the list, Continue only when asked, Continue / Quit / Esc actions, one instance.
+    {
+        acts.clear();
+        CHECK(is.show_tutorial({U"Click the planet."}, true) && !is.show_tutorial({U"again"}, false) && is.tutorial_open());
+        const GuiDialog* td = env.gui.find(dlg::kTutorial);
+        CHECK(td && td->get("IDC_TUTORIAL_TEXT")->items.size() >= 1 && td->get("IDC_CONTINUE")->visible);
+        is.update(env.click(dlg::kTutorial, "IDC_QUIT_TO_MAIN"), acts);
+        CHECK(acts.size() == 1 && acts[0].kind == ScreenAction::Kind::TutorialQuit && is.tutorial_open());  // the host asks first
+        is.update(env.click(dlg::kTutorial, "IDC_CONTINUE"), acts);
+        CHECK(acts.size() == 2 && acts[1].kind == ScreenAction::Kind::TutorialContinue && !is.tutorial_open());
+        CHECK(is.show_tutorial({U"No button"}, false) && !env.gui.find(dlg::kTutorial)->get("IDC_CONTINUE")->visible);
+        is.update(std::vector<GuiEvent>{event(GuiEvent::Kind::Cancel, dlg::kTutorial, "", 0)}, acts);
+        CHECK(acts.size() == 3 && acts[2].kind == ScreenAction::Kind::TutorialClosed && !is.tutorial_open());
+    }
     // GALACTIC_DIALOGS Â§9 IDD_PLANET_INFO (GameScreens): name line in the owner colour, overlay, wrapped lists (tactical in
     // 50/200/255), icon-name rewrites, map icon off when missing; single instance; Close / Esc -> PlanetInfoClosed; host close.
     {

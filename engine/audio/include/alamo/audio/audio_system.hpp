@@ -58,6 +58,11 @@ public:
     virtual void stop(uint32_t voice) = 0;
     // false once a non-looping voice reached its end (or was stopped / never started).
     virtual bool playing(uint32_t voice) const = 0;
+    // aud2 t04: holds (`paused`) or resumes a voice at its position; a held voice still counts as playing. Default: no-op.
+    virtual void pause(uint32_t voice, bool paused) {
+        (void)voice;
+        (void)paused;
+    }
     // Called once per AudioSystem::update before voices are polled.
     virtual void advance(double seconds) = 0;
     // Streaming PCM voice (pcm_stream.hpp): the backend resamples `format` to its device format and calls
@@ -95,6 +100,7 @@ public:
     void set(uint32_t voice, const VoiceParams& p) override;
     void stop(uint32_t voice) override;
     bool playing(uint32_t voice) const override;
+    void pause(uint32_t voice, bool paused) override;  // a held voice does not advance
     void advance(double seconds) override;
     bool start_stream(uint32_t voice, const PcmStreamFormat& format, PcmPullFn pull, const VoiceParams& p) override;
 
@@ -113,6 +119,7 @@ public:
         double length = 0.0;    // seconds at pitch 1
         double position = 0.0;  // seconds of sample consumed
         bool active = false;
+        bool paused = false;    // aud2 t04: held by pause()
     };
     const Voice* voice(uint32_t id) const;
     uint32_t active_count() const;
@@ -300,6 +307,13 @@ public:
     void resume_mode_based_music(bool force);
     void notify_combat(bool involves_local_player);  // Land/Space slot-76 notification (§2.3)
     void music_sim_tick();                           // peace counter, once per sim tick
+    // aud2 t04 (AUDIO.md §2.3, §6.1): the music manager's pause counter. Application deactivation (WndProc 0x60c60) raises
+    // it; while it is above 0 the music manager does not update. [port] The playing music voices are held at their
+    // position (VoiceBackend::pause) on the first pause and resume on the last resume_music; play requests made meanwhile
+    // queue and start with the first update after it. resume_music never takes the counter below 0.
+    void pause_music();
+    void resume_music();
+    bool music_paused() const { return music_pause_ > 0; }
     uint8_t music_mode() const { return music_mode_; }
     std::string current_music() const;
 
@@ -458,6 +472,7 @@ private:
     bool music_enabled_ = true, music_lock_ = false;
     uint8_t music_mode_ = 0, base_music_mode_ = music_mode::kGalactic;
     uint32_t peace_ticks_ = 0;
+    uint32_t music_pause_ = 0;  // aud2 t04: pause counter
     std::vector<MusicEntry> music_queue_;
     std::map<uint32_t, uint32_t> music_file_counter_;  // event -> next file index (session-wide)
     Stream music_current_, music_previous_;

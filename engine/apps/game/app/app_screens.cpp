@@ -168,6 +168,19 @@ void App::handle_screen_actions(const std::vector<ui::ScreenAction>& acts) {
             case K::StorySummaryClosed:
                 story_summary_open_ = false;
                 break;
+            case K::TutorialContinue:  // ui2 t02: IDC_CONTINUE closes the dialog and raises the story's generic trigger (4)
+                story_ui_.generic("Continue_Tutorial");
+                break;
+            case K::TutorialQuit: {  // IDC_QUIT_TO_MAIN asks TEXT_QUIT_SURE (yes / no); yes leaves the session
+                ui::MessageBoxSpec m;
+                m.tag = "tutorial_quit";
+                if (const std::u16string* s = ui_.text.find("TEXT_QUIT_SURE")) m.caption = ui::utf16_to_utf32(*s);
+                if (const std::u16string* y = ui_.text.find("TEXT_YES")) m.buttons.push_back(ui::utf16_to_utf32(*y));
+                if (const std::u16string* n = ui_.text.find("TEXT_NO")) m.buttons.push_back(ui::utf16_to_utf32(*n));
+                if (m.buttons.size() < 2) m.buttons = {U"Yes", U"No"};
+                screens_.show_message(m);
+                break;
+            }
             case K::LandInvade:  // ui3 t05: "Invade System" - the Invade command at the battle's planet, then as Continue
                 if (session_ && invade_planet_ != 0) {
                     commands::EventData ev(commands::EventType::Invade);
@@ -189,7 +202,13 @@ void App::handle_screen_actions(const std::vector<ui::ScreenAction>& acts) {
                 }
                 break;
             case K::MessageBoxResult:
-                if (a.tag == "battle_choice") {  // [port] a scripted message-box prompt: button 1 = Auto-Resolve
+                if (a.tag == "tutorial_quit") {
+                    if (a.button == 0) {
+                        end_session();
+                        screen_ = Screen::Menu;
+                        open_main_menu();
+                    }
+                } else if (a.tag == "battle_choice") {  // [port] a scripted message-box prompt: button 1 = Auto-Resolve
                     answer_battle_prompt(a.button == 1);
                 } else if (a.tag == "retry") {  // Lua Activate_Retry_Dialog: Retry restarts the session, Quit leaves it
                     if (a.button == 0 && session_) {
@@ -787,6 +806,16 @@ void App::show_campaign_end(bool victory) {
         if (stats.ok && host.scoring_game_stat(local_player(), "IDC_TITLE_STATIC", false, v, t, num) && !num) stats.title_key = t;
     }
     if (!screens_.show_campaign_score(campaign_score(*session_, *g, ui_.text, victory, tally_, stats))) notes_.push_back("campaign score dialog missing");
+    {  // aud2 t08: Music_Event_Strategic_Win / _Lose (mode 16); a lost campaign names the winner as the enemy faction, as
+       // the battle end does (the _Vs_Faction row first).
+        std::string winner;
+        const galactic::VictoryResult vr = galactic::check_victory(*g);
+        if (!victory && vr.winner >= 0 && static_cast<size_t>(vr.winner) < g->players().size()) {
+            const uint32_t f = g->players()[static_cast<size_t>(vr.winner)].faction;
+            if (f < g->rules().factions.size()) winner = g->rules().factions[f].name;
+        }
+        audio_.campaign_end(victory, winner);
+    }
     std::printf("campaign end: %s\n", victory ? "victory" : "defeat");
 }
 
@@ -827,6 +856,7 @@ void App::open_story_summary() {
 
 bool App::story_controls_locked() const {
 #ifdef ALAMO_SIM_HAVE_STORY
+    if (story_present_.controls_locked()) return true;  // ui2 t06: the LOCK_CONTROLS reward (distinct from the Lua call, §5.1)
     if (sim::StorySession* story = session_ ? session_->host().story() : nullptr)
         if (const lua::PresentationLog* log = story->presentation()) return log->state().controls_locked;
 #endif

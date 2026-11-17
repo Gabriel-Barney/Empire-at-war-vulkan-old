@@ -34,9 +34,10 @@ std::string GameSampleSource::path_for(const SampleRef& ref) const {
     return "Data\\Audio\\SFX\\" + ref.file;
 }
 
-// SFX: the SFX archives by leaf name, then the loose Data\Audio\SFX\<name> [port]. Music and speech:
-// streamed through the normal file layer only (AUDIO.md §5), so a speech event naming a file that only
-// exists in an SFX archive does not play, as in the original.
+// SFX (aud2 t05, AUDIO.md §5): the archives store bare leaf names and the original resolves them through the normal file
+// layer, where loose files override archives: the loose Data\Audio\SFX\<name> first (mod, then FoC, through the VFS),
+// then the SFX archives by leaf name. Music and speech: streamed through the normal file layer only (AUDIO.md §5), so a
+// speech event naming a file that only exists in an SFX archive does not play, as in the original.
 const meg::Entry* GameSampleSource::find_in_archives(std::string_view name, const meg::Archive** owner) const {
     for (const auto& a : archives_) {
         if (const meg::Entry* e = a->find(name)) {
@@ -49,33 +50,50 @@ const meg::Entry* GameSampleSource::find_in_archives(std::string_view name, cons
 
 bool GameSampleSource::read(const SampleRef& ref, std::vector<uint8_t>& out) const {
     out.clear();
+    if (files_->read(path_for(ref), out)) return true;
+    out.clear();
     if (ref.bus == Bus::Sfx2D || ref.bus == Bus::Sfx3D) {
         const meg::Archive* a = nullptr;
         if (const meg::Entry* e = find_in_archives(ref.file, &a)) return a->read(*e, out);
     }
-    return files_->read(path_for(ref), out);
+    return false;
 }
 
 bool GameSampleSource::exists(const SampleRef& ref) const {
+    if (files_->exists(path_for(ref))) return true;
     const meg::Archive* a = nullptr;
-    if ((ref.bus == Bus::Sfx2D || ref.bus == Bus::Sfx3D) && find_in_archives(ref.file, &a)) return true;
-    return files_->exists(path_for(ref));
+    return (ref.bus == Bus::Sfx2D || ref.bus == Bus::Sfx3D) && find_in_archives(ref.file, &a);
 }
 
 std::string GameSampleSource::origin(const SampleRef& ref) const {
+    const std::string loose = files_->origin(path_for(ref));
+    if (!loose.empty()) return loose;
     const meg::Archive* a = nullptr;
     if (ref.bus == Bus::Sfx2D || ref.bus == Bus::Sfx3D)
         if (const meg::Entry* e = find_in_archives(ref.file, &a)) return a->path() + "#" + e->name;
-    return files_->origin(path_for(ref));
+    return {};
 }
+
 std::vector<std::string> GameSampleSource::default_sfx_megs(const vfs::Vfs& vfs, std::string_view language) {
     const std::string names[3] = {"sfx2d_" + std::string(language) + ".meg", "sfx2d_non_localized.meg",
                                   "sfx3d_non_localized.meg"};
     std::vector<std::string> out;
+    auto add = [&out](const std::filesystem::path& p) {
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(p, ec)) return;
+        const std::string s = path_to_utf8(p);
+        for (const std::string& o : out)
+            if (iequals(o, s)) return;
+        out.push_back(s);
+    };
+    // aud2 t05: a mod's own copy of an SFX archive layers over FoC's instead of replacing it (the original mounts the
+    // archive both at the install prefix and through the normal mod-first file open, 0x227b90): every loose copy, mod
+    // search order first, then FoC's. A MEG inside a MEG is not a host file.
     for (const std::string& n : names) {
-        auto res = vfs.resolve("Data\\Audio\\SFX\\" + n);
-        // Loose layers only: a MEG inside a MEG is not a host file.
-        if (res && res->layer != vfs::Vfs::Resolution::Meg) out.push_back(res->location);
+        for (const std::string& dir : vfs.mod_dirs()) add(path_from_utf8(dir) / "Data" / "Audio" / "SFX" / n);
+        add(path_from_utf8(vfs.foc_root()) / "Data" / "Audio" / "SFX" / n);
+        auto res = vfs.resolve("Data\\Audio\\SFX\\" + n);  // a FALLBACKPATH copy when neither has one
+        if (res && res->layer == vfs::Vfs::Resolution::Fallback) add(path_from_utf8(res->location));
     }
     if (!vfs.eaw_root().empty()) {
         for (const std::string& n : names) {

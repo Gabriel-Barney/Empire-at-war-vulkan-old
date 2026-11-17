@@ -242,6 +242,9 @@ public:
     // Mouse drag mode of this frame (middle / right-scroll / both-buttons drag).
     enum class Drag : uint8_t { None, Pan, Rotate };
     Drag drag() const { return drag_; }
+    // ui2 t06 (story SCROLL_LOCK, STORY_PRESENTATION_REWARDS.md 5.11): no key, edge or drag scrolling while set; rotation and zoom stay.
+    void set_scroll_locked(bool locked) { scroll_locked_ = locked; }
+    bool scroll_locked() const { return scroll_locked_; }
 
     // Overview zoom (see the header comment). Level 0 = normal, 1 / 2 = Tactical_Overview_* / *2.
     int32_t overview_level() const { return ov_level_; }
@@ -314,6 +317,7 @@ private:
     // [port: Gabriel] free rotation / FOV setting
     float pitch_free_ = 0.0f, roll_ = 0.0f, fov_override_ = 0.0f;
     float scroll_vx_ = 0.0f, scroll_vy_ = 0.0f;  // scroll smoothing (STRATEGIC_GAPS §7.1)
+    bool scroll_locked_ = false;                  // ui2 t06
 };
 
 // Galactic map camera (RENDER.md §3.5 [M], SPACE_AND_OPEN B.8): looks north (+Y) pitched down by
@@ -330,6 +334,9 @@ public:
     void set_look_at(Vec3 p);  // z := Galactic_Scroll_Plane
     void update(const InputState& in, const Bindings& keys, float dt);
     void pan(float dx, float dy);  // only while zoomed out and settled (zoom state 0)
+    // ui2 t06 (story SCROLL_LOCK): no key, edge or drag scrolling while set; the wheel zoom stays.
+    void set_scroll_locked(bool locked) { scroll_locked_ = locked; }
+    bool scroll_locked() const { return scroll_locked_; }
     // Wheel: notches > 0 = zoom-in request for the host (take_zoom_in_request: the hovered or selected planet ->
     // zoom_to_planet), < 0 = zoom out from the settled zoomed view. No continuous zoom (P1_CAMERA_INPUT.md §5).
     void zoom(float notches);
@@ -384,6 +391,7 @@ private:
     float t_anim_ = 1.0f;
     float fov_deg_ = 0.0f;
     float scroll_vx_ = 0.0f, scroll_vy_ = 0.0f;
+    bool scroll_locked_ = false;  // ui2 t06
 };
 
 }  // namespace alamo::ui

@@ -243,10 +243,14 @@ void App::lua_presentation() {
             if (!slot.open(data_, audio_, name, &slot == &advisor_movie_, &err)) std::fprintf(stderr, "Lua movie %s: %s\n", name.c_str(), err.c_str());
         } else if (e.op == lua::PresentationOp::StopBinkMovie) {
             stop_movies();
+        } else if (e.op == lua::PresentationOp::GameMessage || e.op == lua::PresentationOp::RemoveAllText ||
+                   e.op == lua::PresentationOp::ObjectHighlight || e.op == lua::PresentationOp::ObjectHighlightSmall) {
+            story_present_lua(e);  // ui2
         } else if (e.op == lua::PresentationOp::ActivateRetryDialog) {  // mission lost: IDD_RETRY_DIALOG (ui1 t05)
             // STY1 t07: Retry ("Load autosave") loads [AutoSave], written when the battle began (handle_screen_actions).
             if (screens_.show_retry()) ++retry_boxes_;
         }
+        story_script_event(e);  // ui2 t03 / t04 / t05: fades, bars, the script cinematic camera, the RTS camera moves
         if (session_->battle()) {  // story t13: the battle's letterbox overlay and the P11 hand-over (story_ui.hpp)
             using Op = lua::PresentationOp;
             if (e.op == Op::LetterBoxIn || e.op == Op::LetterBoxOn) linked_ui_.script_letterbox(true);
@@ -291,8 +295,8 @@ void App::lua_presentation() {
 // no timeout); MULTIMEDIA (Reward_Param8) -> GameAudioHost::speech, whose end (AudioSystem::on_speech_done) raises
 // STORY_SPEECH_DONE (a speech that cannot play keeps the 60 s timeout); MULTIMEDIA Reward_Param9 *_Loop -> the advisor slot
 // (Movie_galactic / Movie_tactical) until STOP_COMMANDBAR_MOVIE (FIXPASS_GALACTIC §4.2). Presentation only: the sim sees the
-// ends through the recorded story UI commands. [port] the reward's other presentation (MULTIMEDIA text, START_MOVIE music
-// halt) is not shown here.
+// ends through the recorded story UI commands. ui2: the presentation rewards (text, pointers, locks, camera, hints) go through
+// story_present_reward; any MULTIMEDIA / SPEECH / COMMANDBAR_MOVIE movie or speech is a cue here.
 void App::story_reward_step() {
 #ifdef ALAMO_SIM_HAVE_STORY
     sim::StorySession* story = session_ && !demo_session() ? session_->host().story() : nullptr;
@@ -300,15 +304,31 @@ void App::story_reward_step() {
         reward_cursor_.clear();
         reward_tac_model_ = nullptr;
         reward_tac_cursor_ = 0;
+        if (story_present_story_) {  // ui2: the story ended with its session: the presenter's text, locks and pointers go
+            story_present_.reset();
+            story_present_story_ = nullptr;
+        }
         return;
     }
+    if (story_present_story_ != story) {  // ui2: a new story session
+        story_present_.reset();
+        story_present_setup();
+        story_present_story_ = story;
+        // A loaded save has its fired rewards already: the presentation they made is not replayed (no forced clicks, speech,
+        // camera moves) - the presenter keeps no saved state, so a load starts it clean [port].
+        reward_cursor_.assign(story->plot_set_count(), 0);
+        for (size_t set = 0; set < story->plot_set_count(); ++set) reward_cursor_[set] = story->model(set).fired().size();
+    }
     std::vector<StoryMediaCue> cues;
-    auto scan = [&cues](const lua::StoryModel& m, size_t& cursor) {
+    auto scan = [&](const lua::StoryModel& m, size_t& cursor, uint8_t mode) {
         const std::vector<lua::StoryFired>& fired = m.fired();
         if (cursor > fired.size()) cursor = fired.size();
         for (; cursor < fired.size(); ++cursor) {
             const lua::StoryFired& f = fired[cursor];
-            if (f.reward_type != "START_MOVIE" && f.reward_type != "MULTIMEDIA" && f.reward_type != "STOP_COMMANDBAR_MOVIE") continue;
+            story_present_reward(f, mode);  // ui2: the presentation rewards (text, pointers, locks, camera, advisor)
+            if (f.reward_type != "START_MOVIE" && f.reward_type != "MULTIMEDIA" && f.reward_type != "STOP_COMMANDBAR_MOVIE" &&
+                f.reward_type != "SPEECH" && f.reward_type != "COMMANDBAR_MOVIE")
+                continue;
             std::vector<std::string> params;
             for (const lua::StoryParam& p : f.reward_params) params.push_back(p.text);
             story_reward_media(f.reward_type, params, cues);
@@ -316,7 +336,7 @@ void App::story_reward_step() {
     };
     reward_cursor_.resize(story->plot_set_count(), 0);
     for (size_t set = 0; set < story->plot_set_count(); ++set) {
-        if (story->plot_set_player(set) == local_player()) scan(story->model(set), reward_cursor_[set]);
+        if (story->plot_set_player(set) == local_player()) scan(story->model(set), reward_cursor_[set], 0);
         else reward_cursor_[set] = story->model(set).fired().size();
     }
     const lua::StoryModel* tac = story->tactical_model();
@@ -330,7 +350,8 @@ void App::story_reward_step() {
         reward_tac_battle_ = battles_seen_;
         reward_tac_cursor_ = 0;
     }
-    if (tac && story->tactical_player() == local_player()) scan(*tac, reward_tac_cursor_);
+    if (tac && story->tactical_player() == local_player()) scan(*tac, reward_tac_cursor_, bview_.space() ? 1 : 2);
+    story_present_frame();
     for (const StoryMediaCue& c : cues) {
         if (c.kind == StoryMediaCue::Kind::Speech) {
             audio_.speech(c.name);
@@ -340,9 +361,14 @@ void App::story_reward_step() {
         if (c.kind == StoryMediaCue::Kind::AdvisorMovie || c.kind == StoryMediaCue::Kind::AdvisorStop) {
             if (story_movie_) continue;  // a random-plot offer's dialog holds the slot
             std::string err;
+            if (c.kind == StoryMediaCue::Kind::AdvisorMovie) story_present_.clear_shown_hint(c.name);  // 6.2: the hint text goes first
             if (c.kind == StoryMediaCue::Kind::AdvisorStop) advisor_movie_.stop(audio_);
-            else if (!advisor_movie_.open(data_, audio_, c.name, true, &err)) std::fprintf(stderr, "advisor movie %s: %s\n", c.name.c_str(), err.c_str());
+            else if (!advisor_movie_.open(data_, audio_, c.name, c.loop, &err)) std::fprintf(stderr, "advisor movie %s: %s\n", c.name.c_str(), err.c_str());
             if (!advisor_movie_.playing()) gpu_.hud.clear_image_page(kAdvisorPage);
+            continue;
+        }
+        if (story_present_.movies_disabled()) {  // ui2 t07: DISABLE_MOVIES skips START_MOVIE (5.17); MOVIE_DONE is raised at once [port]
+            story_ui_.movie_done(c.name);
             continue;
         }
         ++reward_movies_;
@@ -475,6 +501,7 @@ void App::session_started(const std::vector<std::string>& diag) {
     story_cursor_ = 0;
     story_ui_.reset();  // L1/S4 wave 1: a new session's UI state
     reward_cursor_.clear();  // ... and its story reward media from the start
+    story_present_story_ = nullptr;  // ui2: the presenter starts afresh (a reused story address must not keep the old locks)
     reward_tac_model_ = nullptr;
     reward_tac_cursor_ = 0;
     zoom_planet_ = 0;

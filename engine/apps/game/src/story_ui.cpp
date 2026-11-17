@@ -1,6 +1,7 @@
 #include "alamo/game/story_ui.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <iterator>
 #include <span>
 
@@ -46,11 +47,20 @@ void story_reward_media(std::string_view reward_type, const std::vector<std::str
         while (!v.empty() && static_cast<unsigned char>(v.back()) <= 0x20) v.remove_suffix(1);
         return v;
     };
+    // ui2 t07 (STORY_PRESENTATION_REWARDS.md 1.3, 1.4, 6.2): the loop flag is atoi(P10) / atoi(P2), an empty one 0.
+    auto flag = [&param](size_t i) {
+        const std::string_view v = param(i);
+        return !v.empty() && std::atoi(std::string(v).c_str()) != 0;
+    };
     if (reward_type == "START_MOVIE" && !param(0).empty()) out.push_back({StoryMediaCue::Kind::Movie, std::string(param(0))});
+    if (reward_type == "SPEECH" && !param(0).empty()) out.push_back({StoryMediaCue::Kind::Speech, std::string(param(0))});
     if (reward_type == "MULTIMEDIA" && !param(7).empty()) out.push_back({StoryMediaCue::Kind::Speech, std::string(param(7))});
-    // FIXPASS_GALACTIC §4.2 (capture C2): Reward_Param9 = the talking head; the data also holds "" and "-1" (no head).
-    if (reward_type == "MULTIMEDIA" && param(8).size() > 5 && ascii_iends_with(param(8), "_loop"))
-        out.push_back({StoryMediaCue::Kind::AdvisorMovie, std::string(param(8))});
+    // FIXPASS_GALACTIC §4.2 (capture C2): Reward_Param9 = the talking head; the data also holds "" and "-1" (no head). Retail opens
+    // any given name (the shipped ones end in _Loop), so the name is not tested; a head named without the suffix plays too.
+    if (reward_type == "MULTIMEDIA" && !param(8).empty() && param(8) != "-1")
+        out.push_back({StoryMediaCue::Kind::AdvisorMovie, std::string(param(8)), flag(9)});
+    if (reward_type == "COMMANDBAR_MOVIE" && !param(0).empty() && param(0) != "-1")
+        out.push_back({StoryMediaCue::Kind::AdvisorMovie, std::string(param(0)), flag(1)});
     if (reward_type == "STOP_COMMANDBAR_MOVIE") out.push_back({StoryMediaCue::Kind::AdvisorStop, {}});
 }
 

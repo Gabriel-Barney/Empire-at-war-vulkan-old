@@ -41,6 +41,11 @@ bool NullBackend::playing(uint32_t voice) const {
     return it != voices_.end() && it->second.active;
 }
 
+void NullBackend::pause(uint32_t voice, bool paused) {
+    auto it = voices_.find(voice);
+    if (it != voices_.end()) it->second.paused = paused;
+}
+
 bool NullBackend::start_stream(uint32_t voice, const PcmStreamFormat& format, PcmPullFn pull, const VoiceParams& p) {
     voices_.erase(voice);
     StreamVoice s;
@@ -77,7 +82,7 @@ void NullBackend::advance(double seconds) {
     }
     for (auto& kv : voices_) {
         Voice& v = kv.second;
-        if (!v.active) continue;
+        if (!v.active || v.paused) continue;
         v.position += seconds * static_cast<double>(v.params.pitch);
         if (v.position >= v.length) {
             if (v.params.loop && v.length > 0.0) v.position = std::fmod(v.position, v.length);
@@ -602,14 +607,16 @@ VoiceParams AudioSystem::voice_params(const Instance& in) const {
     g *= in.fading ? in.fade_level : 1.0f;
     g *= in.fade_in_level;
     if (in.type == 3 && !in.audible) g = 0.0f;  // visibility factor
+    if (in.is3d()) g *= scale_3d_ * (attract_ ? 0.0f : 1.0f);
+    // §1.6 / §3.2 ducking (+ movie streams): the cap applies to the voice gain the game hands Miles; aud2 t06: the 3D
+    // distance attenuation (Miles' own rolloff in the original) comes on top of the capped gain.
+    if (ducking_active() && !modal_dialog_) g = std::min(g, cfg_.speech_duck_cap);
     if (in.is3d()) {
-        g *= scale_3d_ * (attract_ ? 0.0f : 1.0f);
         g *= attenuation(distance_to_listener(in.pos), e.volume_saturation_distance);
         vp.pan = pan_for(in.pos);
     } else {
         vp.pan = std::clamp(static_cast<float>(in.pan) / 100.0f * 2.0f - 1.0f, -1.0f, 1.0f);
     }
-    if (ducking_active() && !modal_dialog_) g = std::min(g, cfg_.speech_duck_cap);  // §3.2 ducking (+ movie streams)
     vp.gain = g;
     vp.pitch = static_cast<float>(in.pitch) / 100.0f;
     vp.loop = in.voice_loop;
@@ -1050,7 +1057,20 @@ void AudioSystem::start_music_file(MusicEntry& e) {
     e.state = 2;
 }
 
+void AudioSystem::pause_music() {
+    if (music_pause_++ != 0) return;
+    for (const Stream* s : {&music_previous_, &music_current_})
+        if (s->voice) backend_->pause(s->voice, true);
+}
+
+void AudioSystem::resume_music() {
+    if (music_pause_ == 0 || --music_pause_ != 0) return;
+    for (const Stream* s : {&music_previous_, &music_current_})
+        if (s->voice) backend_->pause(s->voice, false);
+}
+
 void AudioSystem::update_music(int64_t dt_us) {
+    if (music_pause_ > 0) return;  // aud2 t04: the paused manager does not update (§2.3)
     const double secs = static_cast<double>(dt_us) / kUsPerSecond;
     // Playlist manager (§2.2): 1 start file -> 2 playing -> 3 ended.
     for (int guard = 0; guard < 4 && !music_queue_.empty(); ++guard) {

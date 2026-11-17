@@ -2125,7 +2125,7 @@ namespace {
 
 // 2 (stage 2): + the attached tactical story; 3 (q6 t14): + the holocron list (GALACTIC_DIALOGS §2.8). 1 and 2 still load
 // (with an empty holocron); 3 loads with default STY1 state.
-constexpr uint32_t kStorySaveVersion = 4;  // 4 (STY1 lane B): + the story rule gates / tutorial state / reinforcement switches
+constexpr uint32_t kStorySaveVersion = 5;  // 5 (ui2 t06): + the DISABLE_RETREAT switches at the end of the STY1 block; 4 (STY1 lane B): + the story rule gates / tutorial state / reinforcement switches
 // "story.lua" (write_scripts): 1 galactic sets, 2 + the tactical set, 3 = 2 (it followed kStorySaveVersion), 4 (q6 t19):
 // each script's Lua state is a script block (alamo/lua/script_save.hpp, LUA_SAVE.md §2) instead of a bare LuaVm image.
 constexpr uint32_t kStoryScriptsVersion = 4;
@@ -2388,7 +2388,7 @@ bool StorySession::read(ByteReader& r) {
         if (!r.ok()) return false;
     }
     Sty1Save sty1;
-    if (version >= 4 && !read_sty1(r, sty1)) return false;
+    if (version >= 4 && !read_sty1(r, sty1, version)) return false;
     // v2: the attached tactical story (stage 2; see the header for the two load passes).
     bool has_tac = false, has_set = false, has_own = false;
     uint64_t tac_start = 0;
@@ -2512,6 +2512,7 @@ bool StorySession::read(ByteReader& r) {
     gates_ = std::move(sty1.gates);  // STY1 lane B (defaults for a version-3 save)
     tutorial_ = std::move(sty1.tutorial);
     reinforce_off_ = std::move(sty1.reinforce_off);
+    retreat_off_ = std::move(sty1.retreat_off);
     load_campaign_.reset();
     sync_gates();
     tactical_headers_ = std::move(tactical_headers);
