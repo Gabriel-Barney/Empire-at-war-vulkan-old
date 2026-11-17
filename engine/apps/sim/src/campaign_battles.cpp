@@ -870,8 +870,8 @@ void CampaignBattles::push_battle(SimHost& host) {
         SimHost* hp = &host;
         GameMode* mp = &m;
         battle_->set_before_map_load([this, hp, mp] {
+            bridge_before_spawn_ = true;  // set first: story_fog_begin stamps this battle's epoch (fought_ + 1 until setup ends)
             story_bridge_begin(*hp, *mp);
-            bridge_before_spawn_ = true;
         });
     }
 #endif
@@ -1776,7 +1776,9 @@ void CampaignBattles::story_fog_begin() {
 #ifdef ALAMO_LUA_HAVE_FOG
     // L1: FogOfWar.* / Undo_Reveal of the tactical story VMs on the battle's fog (null when BattleConfig::fog is off).
     story_fog_.fog = battle_ ? battle_->fog() : nullptr;
-    story_fog_.epoch = fought_;
+    // modc t32 review: inside setup (the early object bridge) ++fought_ has not run yet; the epoch is this battle's number
+    // either way, so a reveal made by a map object's Base_Definitions can be undone later in the battle.
+    story_fog_.epoch = fought_ + (bridge_before_spawn_ ? 1u : 0u);
     story_fog_.cells.clear();
     story_fog_.object = [this](objects::ObjectHandle h, tactical::fog::FogObject& out) {
         TacticalMode* tm = host_->tactical();
