@@ -584,6 +584,34 @@ void test_object_sfx_t05() {
     CHECK(user && target);
     h.ability_effect(types, healer, ta::kAreaEffectHeal, 5, Vec3{10, 0, 0}, 0, Vec3{});  // no target: the activation only
     CHECK(h.ability_sfx_played() == 3);
+
+    // aud1 t10: object_events reads AbilitySystem::activation_events (the EffectOn copy kept after the battle's tick clears
+    // events(); the battle side: alamo_sim_battle_tests fog_effect_kept) once each, by serial: an entry whose user is
+    // gone plays nothing, a smaller newest serial (a new battle's system) starts over.
+    objects::ObjectStore store(objects::ModeKind::Space, objects::StoreKind::Primary, types);
+    objects::SpawnParams sp;
+    sp.type = healer;
+    sp.owner = 0;
+    sp.position = Vec3{10, 0, 0};
+    const objects::ObjectId healer_id = store.id(store.create(sp));
+    sp.type = hero;
+    sp.position = Vec3{20, 0, 0};
+    const objects::ObjectId victim = store.id(store.create(sp));
+    std::vector<ta::AbilityActivation> log = {{30, ta::kAreaEffectHeal, static_cast<ta::ObjectId>(healer_id), static_cast<ta::ObjectId>(victim), 1},
+                                              {30, ta::kAreaEffectHeal, 999, ta::kNoObject, 2}};
+    h.update(5.0);
+    h.ability_activations(log, store, types);
+    CHECK(h.ability_sfx_played() == 5);  // activation + target; the unknown user: nothing
+    h.ability_activations(log, store, types);
+    CHECK(h.ability_sfx_played() == 5);  // already played
+    log.push_back({31, ta::kAreaEffectHeal, static_cast<ta::ObjectId>(healer_id), ta::kNoObject, 3});
+    h.update(5.0);
+    h.ability_activations(log, store, types);
+    CHECK(h.ability_sfx_played() == 6);  // only the new one
+    log = {{1, ta::kAreaEffectHeal, static_cast<ta::ObjectId>(healer_id), ta::kNoObject, 1}};
+    h.update(5.0);
+    h.ability_activations(log, store, types);
+    CHECK(h.ability_sfx_played() == 7);  // a new system's serial 1
 #endif
 }
 

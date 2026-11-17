@@ -328,6 +328,9 @@ void test_fog_battle(const Data& d) {
         CHECK(off.fog_frames == 0);
         CHECK(a.fog_new_targets > 0 && a.fog_bad_targets == 0);
         CHECK(a.fog_ability_frame == 30 && a.fog_probe_before && a.fog_probe_after);
+        // aud1 t10: Force Sight's EffectOn (the audio host's SFXEvent_Activate) survives the tick that clears events()
+        // (the space ping raises none)
+        if (land) CHECK(a.fog_effect_cleared && a.fog_effect_kept);
         if (land) CHECK(a.fog_force_on && a.fog_force_frames >= 59 && a.fog_force_frames <= 61);
         else CHECK(a.fog_force_frames == 0);
         CHECK(a.fog_hash == w4.fog_hash && !first_divergence(a.crc, w4.crc).diverged && a.battles == w4.battles);
