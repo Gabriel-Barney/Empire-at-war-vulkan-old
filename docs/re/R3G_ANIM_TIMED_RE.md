@@ -56,7 +56,12 @@ SpawnSquadron service 0x594880 (land mode, every 30 frames), signal handler 0x59
   can-spawn (with its draws), and spawns every entry's max-alive count at once at one point (one bone pick); no
   Open / Close, no leaving unit.
 
-[port] the bone's facing is the structure's facing; the distance without a flyout entry is the type's movement radius
+Shipped FoC land spawners (the game XML): 17 structures - the E / R / U barracks and vehicle factories, the
+advanced vehicle factory, Ground_Infiltrator_Facility, the Hutt and Pirate command centres and the Secondary_*
+facilities; 14 of them set Spawn_Garrison_On_Load, and all of them name a spawn bone with a fly-out distance.
+
+[port] the bone's facing is the structure's facing (so the fly-out direction of every shipped spawner is a guess:
+filed as r3j t02); the distance without a flyout entry is the type's movement radius
 (retail: a model size); Spawn_Garrison_On_Load runs at the first update after the structure is added [M: vf13's
 trigger]; signal 10 is "no goal left on the mover, or on every live member of a container".
 
@@ -74,7 +79,8 @@ Pull_Phase_Duration +0x188, Paralyze_Phase_Duration +0x18c.
 - The effect ends early if the target or the user dies.
 
 The roadmap wording ("trip after > 30 wraps") is the moving case; a stopped walker is held, not tripped.
-[port] the cable render object and the circling check are not modelled.
+[port] the cable render object and the circling check are not modelled (a user that stops circling does not cancel
+the cable, so the port trips some walkers retail lets go: filed as r3j t03).
 
 ## 5. Crush kind (t05; extends MOVEMENT §5.5) [H]
 
@@ -100,7 +106,7 @@ RepairAbility apply 0x70c580 plays 0x5b (REPAIRING; random variant, blend 0.1); 
 has finished. Hack keeps 0x5a (HACKING). Retail refuses the apply when the model lacks the clip (0x397ae0 == 0).
 [port] the port cannot tell a model without the clip from a host without clip data and keeps the 60-frame fallback.
 
-## 9. Open: the weapon's animation fire gate (filed as an S2 task)
+## 9. Open: the weapon's animation fire gate (roadmap group r3i)
 
 WeaponBehavior's fire service 0x54d090 calls 0x54c910 as its gate before it fires; that gate holds fire on
 animation state (flinch, a crossfade in progress, the CROUCHMOVE facing cone). The port's `fire_gate` has none of

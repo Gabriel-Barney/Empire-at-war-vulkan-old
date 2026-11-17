@@ -254,20 +254,20 @@ bool HangarSystem::can_spawn(Carrier& c, uint32_t frame, SimRng& rng) {
     if (c.state != 0 || c.next > frame) return false;                                  // 5
     // 6 (space): erase destroyed bays (destroyable and health <= 0); disabled bays stay. Empty -> never again.
     if (!cfg_.land) {
-    const combat::CombatData& cd = combat_->data();
-    const combat::UnitDesc& ud = cd.units[combat_->desc_index(c.id)];
-    c.bays.erase(std::remove_if(c.bays.begin(), c.bays.end(),
-                                [&](uint32_t i) {
-                                    if (combat_->hardpoint_destroyed(c.id, i)) return true;
-                                    const bool destroyable = i < ud.hardpoints.size() && cd.hardpoints[ud.hardpoints[i]].destroyable;
-                                    return destroyable && !(combat_->hardpoint_health(c.id, i) > 0.0f);
-                                }),
-                 c.bays.end());
-    if (c.bays.empty()) {
-        if (!c.bays_gone) events_.push_back(HangarEvent{HangarEventKind::BaysGone, c.id, kNoObject, 0, frame});
-        c.bays_gone = 1;
-        return false;
-    }
+        const combat::CombatData& cd = combat_->data();
+        const combat::UnitDesc& ud = cd.units[combat_->desc_index(c.id)];
+        c.bays.erase(std::remove_if(c.bays.begin(), c.bays.end(),
+                                    [&](uint32_t i) {
+                                        if (combat_->hardpoint_destroyed(c.id, i)) return true;
+                                        const bool destroyable = i < ud.hardpoints.size() && cd.hardpoints[ud.hardpoints[i]].destroyable;
+                                        return destroyable && !(combat_->hardpoint_health(c.id, i) > 0.0f);
+                                    }),
+                     c.bays.end());
+        if (c.bays.empty()) {
+            if (!c.bays_gone) events_.push_back(HangarEvent{HangarEventKind::BaysGone, c.id, kNoObject, 0, frame});
+            c.bays_gone = 1;
+            return false;
+        }
     }
     // 7: entry draw (>= 2 entries), circular scan.
     if (c.enabled && !c.entries.empty()) {

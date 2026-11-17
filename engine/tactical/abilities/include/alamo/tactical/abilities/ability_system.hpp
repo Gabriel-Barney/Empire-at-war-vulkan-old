@@ -946,7 +946,6 @@ private:
     AbilityHost host_;
     // s78n t04: Specific_Faction per special (AbilityData::specials index) resolved by set_host; -1 = unset / unknown.
     std::vector<int32_t> specific_faction_;
-    uint32_t frame_now_ = 0;  // r3g t02: the last begin_tick frame (not saved: rewritten by the next tick)
     SimRng* rng_ = nullptr;  // synced RNG for draws outside a tick (bind_rng) and inside (the hooks' rng)
     std::vector<SpawnRequest> spawns_;
     uint32_t spawn_serial_ = 1;

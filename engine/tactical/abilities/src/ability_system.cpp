@@ -1905,7 +1905,6 @@ void AbilitySystem::set_black_market_blocked(int32_t player, std::vector<uint32_
 // ================================================================================================
 
 void AbilitySystem::begin_tick(uint32_t frame) {
-    frame_now_ = frame;  // r3g t02: the frame of host calls between ticks (bind_spawn's trooper lock)
     for (const Obj& o : objs_) refresh_stealth_flag(o, frame);
 }
 
