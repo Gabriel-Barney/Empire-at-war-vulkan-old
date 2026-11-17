@@ -1,6 +1,7 @@
 // alamo_game App: screens, panels, saves, battle prompts, holocron / encyclopedia, cursor (split from game_main.cpp).
 #include "game_app.hpp"
 #include "alamo/vfs/vfs.hpp"  // q6: the mod layer decides the buy list's [port interim rule]
+#include "alamo/sim/l1_loaders.hpp"  // modc t49: skirmish_option_defaults
 
 namespace alamo_game_app {
 
@@ -90,6 +91,16 @@ bool App::skirmish_map_is_land(const std::string& map) const {
 // default fleet. The list is the original dialog's (game::skirmish_buy_list: cost > 0, Affiliation, Available_In_Skirmish
 // or the map kind's build tab, not cinematic-only, named heroes hidden, most expensive first, no cap: the list box scrolls).
 void App::open_buy_units(const SessionSpec& spec) {
+    // modc t49: with the "free starting units" option off (Fall of the Republic sets MP_Default_Free_Starting_Units = no) the
+    // slots start without forces (SKIRMISH_SETUP §2 step 4) and the original allows no starting purchase (the flag's control
+    // is IDC_ALLOW_STARTING_UNIT_PURCHASE, §2.7): the screen is skipped, as a bought fleet would never reach the map.
+    const sim::BattleConfig::SkirmishOptions opts =
+        spec.skirmish_options.set ? spec.skirmish_options : sim::skirmish_option_defaults(data_.db.constants());
+    if (!opts.starting_units && !spec.attract && !spec.skirmish_hop) {
+        std::printf("skirmish buy screen skipped: free starting units off, the slots start without forces\n");
+        if (!start_session(spec)) open_main_menu();
+        return;
+    }
     pending_skirmish_ = spec;
     bought_.clear();
     buy_ = {};

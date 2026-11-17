@@ -214,6 +214,10 @@ image-relative (image base 0x140000000 removed), as in the other `docs/re/` file
   the start of the new campaign is left to the code that consumes the global (not traced). 0xb303d8 is read only by the
   dispatcher itself and 0xb303dc is never read, so P3 / P4 have no other effect found. [H writes and the three
   readers, L for what finally starts the campaign and when]
+- Retail run modc_t45 (2026-11-17): in a running galactic game, Fall of the Republic's loader campaign fires this reward
+  (P1 `Clone_Wars_Medium_Era_2_EMPIRE`, P2 the faction index, P3 the difficulty) from a Lua year popup. The named
+  campaign's full galaxy replaces the loader galaxy within about 30 s, with no game-end screen. So something starts the
+  pending campaign during play, not only at the end flows above. Which code does this is not traced yet (modc t45).
 - Shipped: 19 files, `Tutorial_One..Seven` and `Full_Story_Campaign_*` with side 0 / 1; the Underworld tutorial ends with
   a commented-out LOAD_CAMPAIGN.
 

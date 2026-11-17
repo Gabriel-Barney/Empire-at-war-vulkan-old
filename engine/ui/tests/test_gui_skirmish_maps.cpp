@@ -44,6 +44,9 @@ BEGIN
     COMBOBOX        IDC_PLAYER_NAME_0,410,300,100,128,CBS_DROPDOWNLIST | WS_TABSTOP
     COMBOBOX        IDC_PLAYER_NAME_1,410,320,100,128,CBS_DROPDOWNLIST | WS_TABSTOP
     COMBOBOX        IDC_PLAYER_NAME_2,410,340,100,128,CBS_DROPDOWNLIST | WS_TABSTOP
+    COMBOBOX        IDC_PLAYER_FACTION_0,300,300,100,128,CBS_DROPDOWNLIST | WS_TABSTOP
+    COMBOBOX        IDC_PLAYER_FACTION_1,300,320,100,128,CBS_DROPDOWNLIST | WS_TABSTOP
+    COMBOBOX        IDC_PLAYER_FACTION_2,300,340,100,128,CBS_DROPDOWNLIST | WS_TABSTOP
     PUSHBUTTON      "x",IDC_SELECT_OPTIONS,240,398,150,24
 END
 
@@ -107,7 +110,9 @@ struct Rig {
     std::vector<SkirmishMapInfo> maps;
     std::vector<MenuAction> acts;
     std::vector<std::string> previews_asked;  // map ids the preview provider was called with
-    explicit Rig(std::vector<SkirmishMapInfo> m, bool palette = true, bool preview = true) : maps(std::move(m)) {
+    explicit Rig(std::vector<SkirmishMapInfo> m, bool palette = true, bool preview = true,
+                 const std::function<void(MenuProviders&)>& extra = {})
+        : maps(std::move(m)) {
         env.script.merge(kSkirmishRc);
         env.text.add("TEXT_MAP_NAME_KUAT", u"Kuat");
         env.text.add("TEXT_MAP_NAME_ALPHA", u"Alpha");
@@ -128,6 +133,7 @@ struct Rig {
                 pv.starts = {{0.25f, 0.5f}, {0.75f, 0.5f}, {0.5f, 0.1f}};
                 return pv;
             };
+        if (extra) extra(p);
         fe.init(env.gui, {}, p);
     }
     void game_type(bool space) { set_type(space ? kSkirmishGameSpace : kSkirmishGameLand); }
@@ -441,6 +447,42 @@ void test_skirmish_colours() {
     bare.acts.clear();
     bare.click(kStaging, "IDC_SKIRMISH_START_GAME_BUTTON");
     CHECK(bare.acts.size() == 1 && bare.acts[0].colors == (std::vector<int32_t>{0, 1}));
+}
+
+// modc t47 (SKIRMISH_SETUP §2.8): the staging dialog opens slot 0 on the profile's faction (by name; row 0 when none is
+// stored or the list lacks it) and colour; the AI slot takes that row XOR 1 (0 when the list has no such row) and colour 1,
+// or 2 when the local colour is 1.
+void test_skirmish_slot_defaults() {
+    SkirmishProfile prof;
+    auto with = [&prof](std::vector<SkirmishFaction> factions) {
+        return [&prof, factions](MenuProviders& p) {
+            p.skirmish_factions = factions;
+            p.skirmish_profile = [&prof] { return prof; };
+        };
+    };
+    const std::vector<SkirmishFaction> three = {{"Rebel", ""}, {"Empire", ""}, {"Underworld", ""}};
+    struct Want {
+        int32_t f0, f1, c0, c1;
+    };
+    auto check = [&](const std::vector<SkirmishFaction>& factions, Want w) {
+        Rig rig({map_row("_MP_LAND_X", "", 2, false, false)}, true, false, with(factions));
+        rig.open_staging();
+        const bool ok = rig.control("IDC_PLAYER_FACTION_0")->selected == w.f0 && rig.control("IDC_PLAYER_FACTION_1")->selected == w.f1 &&
+                        rig.fe.skirmish_colour(0) == w.c0 && rig.fe.skirmish_colour(1) == w.c1;
+        if (!ok)
+            std::printf("slot defaults: factions %d / %d, colours %d / %d\n", rig.control("IDC_PLAYER_FACTION_0")->selected,
+                        rig.control("IDC_PLAYER_FACTION_1")->selected, rig.fe.skirmish_colour(0), rig.fe.skirmish_colour(1));
+        return ok;
+    };
+    CHECK(check(three, {0, 1, 0, 1}));  // a fresh profile: rows 0 / 1, colours 0 / 1
+    prof = {"Empire", 1};
+    CHECK(check(three, {1, 0, 1, 2}));  // retail run 2026-11-17: index 1 -> AI row 0; local colour 1 -> AI colour 2
+    prof = {"Underworld", 4};
+    CHECK(check(three, {2, 0, 4, 1}));  // 2 XOR 1 = 3: no such row -> 0
+    prof = {"Chiss", -1};
+    CHECK(check(three, {0, 1, 0, 1}));  // a faction the list lacks: row 0; no colour stored: the slot indices
+    prof = {"Rebel", 0};
+    CHECK(check({{"Rebel", ""}}, {0, 0, 0, 1}));  // one faction: the AI row 0 XOR 1 does not exist -> 0
 }
 
 // skm1 t02 / t06: the staging screen's Select Options opens IDD_INTERNET_STAGING_DIALOG_ADVANCED_SKIRMISH_OPTIONS (retail

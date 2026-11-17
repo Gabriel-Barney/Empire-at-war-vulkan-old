@@ -316,6 +316,7 @@ bool App::init() {
         return ui::utf8_to_utf32(session_->check_save());
     };
     mp.save_exists = [this](const std::string& name) { return game::save_exists(saves_dir_, name); };
+    mp.skirmish_profile = [this] { return skirmish_profile_; };  // modc t47 (load_game_options fills it in live play)
     mp.skirmish_maps = [map_rows] { return map_rows; };
     if (!opt_.bench.active()) init_mod_picker(mp);  // modc t08: the Mods button (scripted runs open it, never Launch)
     // modc t20: the staging faction list from the data (Is_Playable, non-neutral, FactionFiles.xml order), not built-in names.

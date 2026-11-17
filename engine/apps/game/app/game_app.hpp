@@ -372,6 +372,7 @@ public:
     // bindings in game_options.txt (game_display.hpp OptionsProfile; live play only, app_options.cpp).
     ui::GameplaySettings gameplay_;
     ui::AudioVolumes audio_opts_;
+    ui::SkirmishProfile skirmish_profile_;  // modc t47: the local skirmish slot's faction / colour (the staging dialog's start)
     std::string options_path_;
     std::vector<uint32_t> autofire_seen_;  // ui1 t02: local objects already given their default autofire (sorted)
     void load_game_options();

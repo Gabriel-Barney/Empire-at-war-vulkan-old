@@ -1035,7 +1035,11 @@ void FrontEnd::fill_skirmish_slots(GuiDialog& d) {
         else d.set_items(id, {text("TEXT_OPEN_PLAYER"), easy, medium, hard}, name && name->items.size() == 4 ? std::clamp(name->selected, 0, 3) : 0);
         std::snprintf(id, sizeof id, "IDC_PLAYER_FACTION_%d", p);
         const GuiControl* fc = d.get(id);
-        const int32_t fdefault = skirmish_factions_.empty() ? -1 : std::min<int32_t>(p % 2, static_cast<int32_t>(skirmish_factions_.size()) - 1);
+        // modc t47 (SKIRMISH_SETUP §2.8): slot 0 = the profile's faction row; the AI slot = that row XOR 1, 0 when the list
+        // has no such row [port: slots 2.. row p % 2].
+        const auto nfac = static_cast<int32_t>(skirmish_factions_.size());
+        const int32_t want = p == 0 ? local_faction_row_ : p == 1 ? (local_faction_row_ ^ 1) : p % 2;
+        const int32_t fdefault = nfac == 0 ? -1 : want < nfac ? want : 0;
         const int32_t fsel = fc && fc->selected >= 0 && fc->items.size() == skirmish_factions_.size() ? fc->selected : fdefault;
         d.set_items(id, skirmish_factions_, fsel);
         std::snprintf(id, sizeof id, "IDC_PLAYER_TEAM_%d", p);
@@ -1050,6 +1054,16 @@ void FrontEnd::fill_skirmish(GuiDialog& d) {
     maps_ = p_.skirmish_maps ? p_.skirmish_maps() : std::vector<SkirmishMapInfo>{};
     colour_palette_ = p_.player_colors ? p_.player_colors() : std::vector<Rgba8>{};
     for (int32_t i = 0; i < 8; ++i) slot_colour_[i] = i;  // the default colour is the slot index
+    // modc t47 (SKIRMISH_SETUP §2.8): the local slot opens on the profile's faction and colour; the AI slot takes colour 1,
+    // or 2 when the local colour is 1 [port: slots 2.. keep their index].
+    const SkirmishProfile prof = p_.skirmish_profile ? p_.skirmish_profile() : SkirmishProfile{};
+    local_faction_row_ = 0;
+    for (size_t i = 0; i < p_.skirmish_factions.size(); ++i)
+        if (!prof.faction.empty() && p_.skirmish_factions[i].name == prof.faction) local_faction_row_ = static_cast<int32_t>(i);
+    if (prof.colour >= 0 && prof.colour <= 8) {
+        slot_colour_[0] = prof.colour;
+        slot_colour_[1] = prof.colour == 1 ? 2 : 1;
+    }
     custom_tab_ = false;  // the Official tab is active when the dialog opens
     fill_skirmish_game_types(d);
     fill_skirmish_maps(d);
