@@ -527,6 +527,13 @@ public:
     bool summary_completed_ = false;
     BattleTally tally_;
     bool campaign_over_ = false;
+    // q6 t34: the campaign end screen may come (no message box, no Bink open, no hint text or encyclopedia pop-up up).
+    bool end_screen_clear() const;
+    // q6 t36: the advisor slot plays Light_Loop for a hint text / encyclopedia pop-up (light_loop_step); a failed open is
+    // not retried.
+    bool light_loop_ = false, light_loop_failed_ = false;
+    bool light_loop_held() const;
+    void light_loop_step(bool popup);
     bool choice_open_ = false;
     // GALACTIC_DIALOGS §1 battle prompt: the banner (pending_battle_shell / story_pending_battle_shell) fed through
     // GalacticHudFrame::battle while choice_open_; its clicks are HudAction BattleBegin / BattleAutoResolve.
@@ -638,6 +645,7 @@ public:
     void story_present_reward(const lua::StoryFired& f, uint8_t mode);
     void story_present_lua(const lua::PresentationEvent& e);
     void story_present_frame();
+    std::u32string owner_label(int32_t player) const;  // q6 t36: a planet owner's name in the changed-hands line
     void story_advisor_frame();  // ui2 t07: the periodic advisor hint (6.4) and the hint sound cue
     // The advisor's current mode (0 galactic, 1 space, 2 land, 255 none), the render time it began and the faction's hint ids.
     uint8_t advisor_mode_ = 255;

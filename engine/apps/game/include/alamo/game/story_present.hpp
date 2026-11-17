@@ -174,14 +174,22 @@ public:
     // ui4 t11 (P4_SIM_SYSTEMS §2.7.1): the message callback 0x140b313c0 - an urgent advisor line (front of the queue, the
     // Urgent sound) in `color`.
     void urgent_message(std::u32string text, StoryColor color);
+    // q6 t36 (Q6_T27_ELIM_END_TIMING.md "Probe answer"): a game text queued at the BACK of the hint queue (0x1402dd630 with
+    // front = 0, the Message sound), such as the "planet changed hands" line of the owner setter 0x3fb040 (changed_hands_text).
+    void queue_message(std::u32string text, StoryColor color);
     // ui4 t11 (HUD_GAPS §10.2): the Droid Log's IDC_HINTS_CHECK writes all three modes' advisor-hint flags.
     void set_advisor_all(bool on) { advisor_ = {on, on, on}; }
     bool any_advisor() const { return advisor_[0] || advisor_[1] || advisor_[2]; }
     void lua_highlight(int32_t object, bool on, bool small, float z_offset);  // GameObjectWrapper.Highlight(_Small)
 
-    // Per frame: expires lines, pointers and flashes; shows the next hint when `hints_blocked` is false (retail: no Bink
-    // movie open, no advanced map, no cinematic mode).
+    // Per frame: expires lines, pointers and flashes; shows the next hint when no text is up (hint_up) and `hints_blocked`
+    // is false (retail: no Bink movie open, no advanced map, no cinematic mode). q6 t36 (Q6_T27 "Probe answer" 3 [H]): the
+    // next queued text starts as soon as the one on screen has had its characters x Advisor_Hint_Duration seconds; the
+    // fade-out is not waited for (only the last text of a run is drawn fading).
     void update(double now, bool hints_blocked);
+    // A hint text is up at `now` (retail GUI +0x26b2): shown and its display time not over. While it is up the HUD keeps the
+    // looping Light_Loop movie open and the campaign end screen waits (Q6_T27 §2 / §3, q6 t34 / t36).
+    bool hint_up(double now) const { return hint_shown_ && now < shown_.start + shown_.seconds; }
 
     // §6.4 periodic hint: call once per tick of the local human's mode; `hints` = that mode's faction hint ids.
     // Returns true when a hint was queued (at the back, the Hint sound).
@@ -282,5 +290,13 @@ std::vector<std::string> split_story_ids(std::string_view list);
 void load_story_advisor_config(const data::GameConstants& gc, StoryPresenter::Config& out);
 // The faction's hint text ids for a game mode (0 galactic, 1 space, 2 land): Galactic_ / Space_ / Land_Advisor_Hints.
 std::vector<std::string> faction_advisor_hints(const data::GameDatabase& db, std::string_view faction, uint8_t mode);
+// q6 t36 (owner setter 0x3fb040 tail, Q6_T27 §1): TEXT_PLANET_CHANGED_HANDS ("%ls: Control changed from %ls to %ls") or,
+// with `bonus`, TEXT_PLANET_CHANGED_HANDS_BONUS (".. Credit bonus: %d") filled by the original's wide printf: %ls / %s / %S
+// take planet, old owner, new owner in that order, %d the bonus, "%%" is "%"; a conversion with no argument left prints
+// nothing and any other one stays as written.
+std::u32string changed_hands_text(std::u32string_view format, std::u32string_view planet, std::u32string_view from,
+                                  std::u32string_view to, std::optional<int32_t> bonus);
+// The line's colour (0x1401f93e0(255, 24, 39, 255)).
+inline constexpr StoryColor kChangedHandsColor{255, 24, 39, 255};
 
 }  // namespace alamo::game

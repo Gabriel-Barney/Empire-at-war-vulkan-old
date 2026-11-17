@@ -388,6 +388,7 @@ void App::story_reward_step() {
             if (story_movie_) continue;  // a random-plot offer's dialog holds the slot
             std::string err;
             if (c.kind == StoryMediaCue::Kind::AdvisorMovie) story_present_.clear_shown_hint(c.name);  // 6.2: the hint text goes first
+            light_loop_ = false;  // the cue owns the advisor slot now (a COMMANDBAR_MOVIE "Light_Loop" included)
             if (c.kind == StoryMediaCue::Kind::AdvisorStop) advisor_movie_.stop(audio_);
             else if (!advisor_movie_.open(data_, audio_, c.name, c.loop, &err)) std::fprintf(stderr, "advisor movie %s: %s\n", c.name.c_str(), err.c_str());
             if (!advisor_movie_.playing()) gpu_.hud.clear_image_page(kAdvisorPage);

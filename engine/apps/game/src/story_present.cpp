@@ -308,6 +308,15 @@ void StoryPresenter::urgent_message(std::u32string text, StoryColor color) {
     hint_shown_ = false;  // a front insert shows at once
 }
 
+void StoryPresenter::queue_message(std::u32string text, StoryColor color) {
+    if (text.empty()) return;  // §6.3: the enqueue needs a non-empty text
+    StoryHint h;
+    h.text = std::move(text);
+    h.color = color;
+    h.sound = StoryHint::Sound::Message;
+    hint_queue_.push_back(std::move(h));
+}
+
 void StoryPresenter::lua_highlight(int32_t object, bool on, bool small, float z_offset) {
     std::erase_if(highlights_, [&](const StoryHighlight& h) { return h.object == object && h.small == small; });
     if (on && object != 0) highlights_.push_back({{}, object, small, z_offset});
@@ -320,7 +329,7 @@ void StoryPresenter::update(double now, bool hints_blocked) {
     std::erase_if(object_flashes_, [&](const StoryObjectFlash& f) { return now >= f.until; });
     std::erase_if(map_flashes_, [&](const StoryObjectFlash& f) { return now >= f.until; });
     if (hint_shown_ && now >= shown_.start + shown_.seconds + kHintFadeSeconds) hint_shown_ = false;
-    if (!hint_shown_ && !hints_blocked && !hint_queue_.empty()) {
+    if (!hint_up(now) && !hints_blocked && !hint_queue_.empty()) {  // q6 t36: a fading text is replaced at once
         shown_.hint = std::move(hint_queue_.front());
         hint_queue_.erase(hint_queue_.begin());
         shown_.start = now;
@@ -413,6 +422,38 @@ std::vector<std::string> faction_advisor_hints(const data::GameDatabase& db, std
     for (const data::GameObjectRecord* rec : db.find_game_objects(faction))
         if (rec->type == "Faction") return split_story_ids(rec->element.child_text(kTags[mode]));
     return {};
+}
+
+std::u32string changed_hands_text(std::u32string_view fmt, std::u32string_view planet, std::u32string_view from,
+                                  std::u32string_view to, std::optional<int32_t> bonus) {
+    const std::u32string_view strings[3] = {planet, from, to};
+    size_t next = 0;
+    bool number_used = false;
+    std::u32string out;
+    for (size_t i = 0; i < fmt.size(); ++i) {
+        if (fmt[i] != U'%' || i + 1 >= fmt.size()) {
+            out.push_back(fmt[i]);
+            continue;
+        }
+        const char32_t n = fmt[i + 1];
+        if (n == U'%') {
+            out.push_back(U'%');
+            ++i;
+        } else if (n == U's' || n == U'S' || (n == U'l' && i + 2 < fmt.size() && fmt[i + 2] == U's')) {
+            if (next < 3) out.append(strings[next]);
+            ++next;
+            i += n == U'l' ? 2 : 1;
+        } else if (n == U'd' || n == U'i') {
+            if (bonus && !number_used) {
+                for (const char ch : std::to_string(*bonus)) out.push_back(static_cast<char32_t>(static_cast<unsigned char>(ch)));
+            }
+            number_used = true;
+            ++i;
+        } else {
+            out.push_back(fmt[i]);
+        }
+    }
+    return out;
 }
 
 }  // namespace alamo::game
