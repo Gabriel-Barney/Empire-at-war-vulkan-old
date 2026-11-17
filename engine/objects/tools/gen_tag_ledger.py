@@ -120,7 +120,8 @@ def scan_source(text, concat=None):
             comments.append((line, text[i:j]))
             line += text.count("\n", i, j)
             i = j
-        elif c == "R" and text.startswith('R"', i) and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")):
+        elif c == "R" and text.startswith('R"', i) and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")
+                                                        or text[max(0, i - 2):i] in ("u8", "8") or text[i - 1] in "uUL"):
             k = text.find("(", i + 2)
             delim = text[i + 2:k] if k >= 0 else ""
             end = text.find(")" + delim + '"', k + 1) if k >= 0 else -1

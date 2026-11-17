@@ -850,7 +850,7 @@ void add_unbound(UnboundMap& calls, const std::map<std::string, uint32_t>& found
 // become report v4 entries. Methods are matched by name (the static scan does not know the receiver's class).
 struct BindingCallAcc {
     uint32_t call_sites = 0, scripts = 0;
-    std::string first_script;
+    std::string first_script, first_mod_script;  // path order; the first one in a mod folder
     bool in_mod = false;
 };
 using BindingCallMap = std::map<std::string, BindingCallAcc>;  // Lua name (global) / method name: sorted, deterministic
@@ -859,6 +859,7 @@ void note_binding_calls(BindingCallMap& m, const std::map<std::string, uint32_t>
     for (const auto& [name, sites] : found) {
         BindingCallAcc& a = m[name];
         if (a.scripts++ == 0) a.first_script = path;
+        if (in_mod && a.first_mod_script.empty()) a.first_mod_script = path;
         a.call_sites += sites;
         a.in_mod = a.in_mod || in_mod;
     }
@@ -875,7 +876,8 @@ void binding_findings(const BindingCallMap& globals, const BindingCallMap& metho
         called.insert(global ? key : std::string(b.name));
         const BindingCallAcc& a = it->second;
         if (b.effect == lua::BindingEffect::NoopRetail) {
-            r.retail_equivalent.push_back({"noop_binding", key, a.call_sites, a.first_script, a.in_mod, b.consumer});
+            r.retail_equivalent.push_back(
+                {"noop_binding", key, a.call_sites, a.in_mod ? a.first_mod_script : a.first_script, a.in_mod, b.consumer});
             continue;
         }
         if (!lua::binding_effect_gap(b)) continue;
@@ -885,7 +887,7 @@ void binding_findings(const BindingCallMap& globals, const BindingCallMap& metho
         g.detail = b.consumer;
         g.call_sites = a.call_sites;
         g.scripts = a.scripts;
-        g.first_script = a.first_script;
+        g.first_script = a.in_mod ? a.first_mod_script : a.first_script;  // a mod's finding cites the mod's file
         g.in_mod = a.in_mod;
         r.binding_gaps.push_back(std::move(g));
     }
@@ -989,6 +991,8 @@ void check_lua(const GameData& d, ModCheckReport& r, bool run_chunks) {
 bool default_value(std::string_view text, uint8_t code, std::string_view def) {
     text = ascii_trim(text);
     if (text.empty() || iequals(text, "TBD")) return true;
+    if (objects::kind_of_code(code) == objects::FieldKind::Bool)  // 0x0 and the flag-bit booleans 0x50
+        return objects::parse_type_bool(text) == (!def.empty() && objects::parse_type_bool(def));
     switch (objects::conv_of_code(code)) {
         case objects::Conv::Bool: return objects::parse_type_bool(text) == (!def.empty() && objects::parse_type_bool(def));
         case objects::Conv::Int32:
@@ -1130,7 +1134,13 @@ void check_story(const GameData& d, ModCheckReport& r) {
     std::vector<std::string> found;
     for (const std::string& path : d.vfs->list("Data\\XML\\**.xml")) {
         if (!d.files->read(path, bytes)) continue;
-        const std::string_view text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        std::string text(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+        for (size_t c = text.find("<!--"); c != std::string::npos; c = text.find("<!--", c)) {  // commented-out events
+            const size_t e = text.find("-->", c + 4);
+            const size_t end = e == std::string::npos ? text.size() : e + 3;
+            std::fill(text.begin() + static_cast<std::ptrdiff_t>(c), text.begin() + static_cast<std::ptrdiff_t>(end), ' ');
+            c = end;
+        }
         const std::string lower = ascii_lower(text);
         if (lower.find("<event_type>") == std::string::npos) continue;
         ++r.story.files;
@@ -1359,7 +1369,10 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
         r.mod_dirs = d.vfs->mod_dirs();
         list_mod_files(*d.vfs, r);
     }
-    if (!r.loaded) return r;
+    if (!r.loaded) {
+        r.grade.grade = "G0";  // version 4: the data does not load
+        return r;
+    }
     // The checks below read what loaded; a throw in one is reported as that check's error, the others still run.
     const auto guarded = [&](const char* what, auto&& fn) {
         try {
@@ -1391,6 +1404,10 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
         compat_guarded("token coverage", [&] { check_token_coverage(d, r); });
         retail_equivalent_from_checks(r);
         compat_issues_and_grade(r);
+    } else {  // check_lua collects the binding findings with its scan; version 4 lists stay empty without compat
+        r.binding_gaps.clear();
+        r.retail_equivalent.clear();
+        r.binding_calls = 0;
     }
     return r;
 }
