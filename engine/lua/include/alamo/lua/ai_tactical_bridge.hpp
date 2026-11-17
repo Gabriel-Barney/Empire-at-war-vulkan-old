@@ -54,7 +54,8 @@ public:
                                       double number, bool flag) = 0;
     // Attack_Target(unit [, hardpoint]): `hardpoint` = "" (none), "Random" or a hard-point type name.
     virtual int32_t tf_attack_target(int32_t tf, const AiArg& target, std::string_view hardpoint) = 0;
-    // Reinforce(target [, max wait]): -2 = "taskforce has no reinforcements" (nil + script message).
+    // Reinforce(target [, max wait]): -2 = "taskforce has no reinforcements" (nil + script message); -3 = space skirmish
+    // without a live allied starbase (nil + the "Rule Change" message, AI_TACTICAL §7.4).
     virtual int32_t tf_reinforce(int32_t tf, const AiArg& target, const AiPoint& point, double max_wait) = 0;
     virtual int32_t tf_build_all(int32_t tf) = 0;
     virtual int32_t tf_build(int32_t tf, std::string_view type_name, const AiArg& pad) = 0;

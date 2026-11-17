@@ -187,6 +187,10 @@ int m_reinforce(Call& c) {
         c.vm->message(std::string(tf_class_name(c)) + "::Reinforce -- taskforce has no reinforcements");
         return push_nil(c);
     }
+    if (s == -3) {  // skm1 t03 (AI_TACTICAL §7.4): space skirmish without a live allied starbase
+        c.vm->message("Rule Change: AI players cannot reinforce after their starbase has been destroyed");
+        return push_nil(c);
+    }
     return push_status(c, s);
 }
 

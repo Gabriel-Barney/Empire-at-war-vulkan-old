@@ -2424,6 +2424,10 @@ private:
     std::unique_ptr<tactical::hangar::ContentsSystem> contents_;
     std::unique_ptr<tactical::hangar::TacticalProduction> production_;
     std::vector<HgOrderCost> hg_order_cost_;                  // charged credits per open order (issue order)
+    // skm1 t04 (SKIRMISH_SETUP 0x496f00): per player, the tactical AI's difficulty build-time multiplier (Space_ / Land_
+    // Build_Time_Multiplier) for non-human AI players, set by BattleAi::start (a load's start sets it again; not saved).
+    // Missing entry = 1.0.
+    std::vector<float> ai_build_time_mult_;
     std::vector<HgUpgradeObject> hg_upgrade_objs_;            // DUMMY_UPGRADE objects created by production (creation order)
     std::vector<objects::ObjectId> hg_orphans_;               // contents of a removed container: removed next frame
     bool prod_used_ = false;

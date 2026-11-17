@@ -779,16 +779,32 @@ BattleAi::~BattleAi() {
 
 bool BattleAi::start(std::vector<std::string>* diag) {
     if (!world_->load_plans(diag) && diag) diag->push_back("tactical AI: no plan loaded");
-    if (!world_->ai_lane()) return world_->start(diag);
+    if (!world_->ai_lane()) {
+        const bool ok = world_->start(diag);
+        set_build_time_multipliers();
+        return ok;
+    }
     // sp3 slice 4c: the start scripts (critical lane, before the first AI slot) read a view captured now, and what they
     // queue is collected at once (no job is pending yet: the first update would otherwise drop it).
     capture_lane_view();
     const bool ok = world_->start(diag);
+    set_build_time_multipliers();
     queue_global_writes();  // slice 4e (part 3)
     for (cmd::Command& c : lane_job_.batch) lane_batch_.push_back(std::move(c));
     lane_job_.batch.clear();
     lane_locks_ = world_->object_bridge().script_lock_facts();  // slice 4e
     return ok;
+}
+
+// skm1 t04 (SKIRMISH_SETUP 0x496f00): the tactical build queue's AI difficulty factor, for the non-human players the world
+// created an AI for (TacticalAiWorld::build_time_multiplier); everyone else 1.0.
+void BattleAi::set_build_time_multipliers() {
+    const auto& gps = b_->galaxy_->players();
+    b_->ai_build_time_mult_.assign(host_->players(), 1.0f);
+    for (size_t p = 0; p < b_->ai_build_time_mult_.size(); ++p) {
+        const auto pi = static_cast<int32_t>(p);
+        if (p < gps.size() && !gps[p].human && controls(pi)) b_->ai_build_time_mult_[p] = world_->build_time_multiplier(pi);
+    }
 }
 
 bool BattleAi::controls(int32_t player) const {
@@ -2789,6 +2805,26 @@ bool BattleAi::space_prevention_hit(int32_t player, const at::Vec3f& p) {
         const Vec3 q = st.position(h);
         const float dx = p.x - q.x, dy = p.y - q.y;
         if (dx * dx + dy * dy < r * r) return true;
+    }
+    return false;
+}
+
+bool BattleAi::space_reinforce_base_alive(int32_t player) {
+    if (!b_->cfg_.skirmish) return true;  // 0x28afb0: the rule is the skirmish's
+    // sp3 t02: with the lane view, the snapshot store and the captured alliance table (think() never reads the battle)
+    const objects::ObjectStore& st = lane_view() ? world_->view_store() : mode_->primary();
+    const auto allied = [&](int32_t o) {
+        if (o == player) return true;
+        if (!lane_view()) return b_->bt_allied(player, o);
+        const int32_t n = view_.allied_n;
+        return player >= 0 && o >= 0 && player < n && o < n && view_.allied[static_cast<size_t>(player * n + o)] != 0;
+    };
+    static const objects::BehaviorTypeId kStarBase = objects::behavior_type_id("DUMMY_STAR_BASE");
+    if (kStarBase == objects::kNoBehavior) return true;
+    for (const objects::ObjectHandle h : st.all_objects()) {
+        if (!st.active(h) || !st.has_behavior(h, kStarBase)) continue;
+        const int32_t o = st.owner(h);
+        if (o >= 0 && allied(o)) return true;
     }
     return false;
 }

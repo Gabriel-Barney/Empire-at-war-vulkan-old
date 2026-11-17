@@ -3282,9 +3282,14 @@ int32_t TacticalAiWorld::Impl::tf_reinforce(int32_t tf, const lua::AiArg& target
         // refixf t06 - SpaceReinforceBlockStatus (0x6e8620 / init 0x7235c0, AI_TACTICAL §7.4 [H]): the target T is the centre
         // of a ring search (z := 0), not a drop point; the units are placed by the status's IsFinished, one per Lua poll
         // (space_reinforce_poll). Optional max wait in seconds -> timeout frame. R = 1000 when T lies inside a non-allied
-        // Reinforcement_Prevention_Radius, else 0. [port: the campaign "no allied DUMMY_STAR_BASE" refusal is not modelled.]
+        // Reinforcement_Prevention_Radius, else 0. skm1 t03: in a skirmish (0x28afb0) the player needs a live allied
+        // DUMMY_STAR_BASE, else the call is refused with nil (-3: "Rule Change: ..." message, no status).
         Vec3f p;
         if (!arg_position(target, point, p)) return -1;
+        if (!host.space_reinforce_base_alive(t->player)) {
+            decide(t->player, "tf " + t->name + " Reinforce refused: no allied starbase (skirmish)");
+            return -3;
+        }
         p.z = 0.0f;
         const int32_t id = new_status(t->plan, tf, StatusKind::SpaceReinforce);
         StatusRec& s = statuses[id];
@@ -4118,6 +4123,10 @@ lua::PreventAiResult TacticalAiWorld::prevent_ai_usage(int32_t id, int32_t owner
 }
 
 bool TacticalAiWorld::is_ai_player(int32_t player) const { return impl_->player_ai(player) != nullptr; }
+float TacticalAiWorld::build_time_multiplier(int32_t player) const {
+    const PlayerAi* p = impl_->player_ai(player);
+    return p ? p->build_time_mult : 1.0f;
+}
 int32_t TacticalAiWorld::opponent(int32_t player) const {
     const PlayerAi* p = impl_->player_ai(player);
     return p ? p->ctx.opponent : -1;

@@ -714,8 +714,11 @@ commands::RejectReason TacticalBattle::hg_production_command(TacticalMode& mode,
         if (have < cost) return R::CannotAfford;
         if (credits_add_) credits_add_(p, -cost);
     }
-    // [port] Tactical_Build_Time_Seconds without the AI Space_Build_Time_Multiplier / build-time modifiers.
-    const float seconds = static_cast<float>(types.get_int(type, "Tactical_Build_Time_Seconds"));  // int field
+    // 0x496f00: Tactical_Build_Time_Seconds x (skm1 t04) the AI difficulty multiplier for a non-human AI player (Space_ /
+    // Land_Build_Time_Multiplier, set by BattleAi). [port] GC Tactical_Build_Time_Multiplier (shipped 1.0) and the
+    // build-time modifiers (list 10) are not applied.
+    float seconds = static_cast<float>(types.get_int(type, "Tactical_Build_Time_Seconds"));  // int field
+    if (static_cast<size_t>(p) < ai_build_time_mult_.size()) seconds *= ai_build_time_mult_[static_cast<size_t>(p)];
     const uint32_t id = production_->enqueue(p, builder, static_cast<int32_t>(type), seconds, frame_);
     hg_order_cost_.push_back(HgOrderCost{id, p, cost});
     prod_used_ = hg_used_ = true;
