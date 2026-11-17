@@ -21,6 +21,7 @@
 #include "alamo/data/values.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/data/xml_list.hpp"
+#include "alamo/data/xml_values.hpp"
 #include "alamo/test/support.hpp"
 #ifdef ALAMO_DATA_HAVE_VFS
 #include "alamo/vfs/vfs.hpp"
@@ -36,6 +37,40 @@ static bool has_warning(const XmlDocument& d, uint32_t line, std::string_view ne
     for (const auto& w : d.diagnostics())
         if (w.line == line && w.message.find(needle) != std::string::npos) return true;
     return false;
+}
+
+// mcx1 t02: retail value kinds (docs/re/OBJECT_TYPES.md §4.5 type codes; §4.4 repeated tags; §6.3 TBD).
+static void test_xml_values() {
+    namespace xv = alamo::data::xml_values;
+    // code 0x0: "1" or a first character Y / y / T / t; everything else false.
+    CHECK(xv::to_bool("1") && xv::to_bool("Yes") && xv::to_bool("yes") && xv::to_bool("True") && xv::to_bool("t"));
+    CHECK(xv::to_bool(" \n\tYes ") && xv::to_bool("Ynot") && xv::to_bool("Tx"));
+    CHECK(!xv::to_bool("10") && !xv::to_bool("On") && !xv::to_bool("No") && !xv::to_bool("0") && !xv::to_bool("False"));
+    CHECK(!xv::to_bool("") && !xv::to_bool("Nos") && !xv::to_bool("np") && !xv::to_bool("2"));
+    // codes 0x1 / 0x5 / 0x6: atoi prefix, garbage 0, clamp on overflow.
+    CHECK(xv::to_int(" 18 ") == 18 && xv::to_int("2.9") == 2 && xv::to_int("12abc") == 12 && xv::to_int("-7x") == -7);
+    CHECK(xv::to_int("abc") == 0 && xv::to_int("") == 0 && xv::to_int("+5") == 5);
+    CHECK(xv::to_int("99999999999") == 2147483647 && xv::to_int("-99999999999") == -2147483647 - 1);
+    // code 0x8: atof prefix.
+    CHECK(xv::to_float("5.0f") == 5.0f && xv::to_float(" 0.25 ") == 0.25f && xv::to_float("x") == 0.0f);
+    CHECK(xv::to_float("3") == 3.0f && xv::to_float("-1.5e1") == -15.0f);
+    // lists: space, comma, tab, CR, LF; masks also '|'.
+    const auto l = xv::to_list("A, B\tC\r\nD,,E");
+    CHECK(l.size() == 5 && l[0] == "A" && l[4] == "E");
+    const auto m = xv::to_mask("Fighter | Bomber|Corvette");
+    CHECK(m.size() == 3 && m[1] == "Bomber" && m[2] == "Corvette");
+    CHECK(xv::to_list("A|B").size() == 1);
+    // TBD / empty skipped; repeated scalar: last non-skipped occurrence wins.
+    CHECK(xv::skipped("TBD") && xv::skipped("  ") && !xv::skipped("tbd") && !xv::skipped("0"));
+    const auto d = XmlDocument::parse("<E><A>1</A><A>7</A><A>TBD</A><B>Yes</B><B>No</B><C> </C><F>1.5</F></E>");
+    CHECK(d.ok());
+    const XmlNode e = d.root();
+    CHECK(xv::int_or(e, "A", -1) == 7 && xv::int_or(e, "a", -1) == 7);
+    CHECK(!xv::bool_or(e, "B", true));
+    CHECK(xv::int_or(e, "C", 3) == 3 && xv::int_or(e, "Missing", 4) == 4);
+    CHECK(xv::float_or(e, "F", 0.0f) == 1.5f);
+    CHECK(xv::last_child(e, "A").text_trimmed() == "TBD" && xv::text(e, "A") == "7");
+    CHECK(xv::bool_or(std::string_view("TBD"), true) && !xv::bool_or(std::string_view("On"), true));
 }
 
 static void test_xml_basic() {
@@ -873,6 +908,7 @@ int main() {
     test_xml_recovery();
     test_xml_robustness();
     test_values();
+    test_xml_values();
     test_database_synthetic();
     test_planet_variants();
     test_database_install_layout();
