@@ -3611,6 +3611,7 @@ static void test_real_data() {
     std::vector<NotArrived> not_arrived;  // bkm2 t02 (b0041)
     uint32_t all_stops = 0, stopped_units = 0;  // terrain stops observed per unit (TerrainStopLog), every map
     for (const std::string& path : maps) {
+        if (std::getenv("MOV2_MAP") && path.find(std::getenv("MOV2_MAP")) == std::string::npos) continue;  // DBGTMP
         std::vector<uint8_t> bytes;
         terrain::MapData map;
         if (!fs->read(path, bytes) || !terrain::parse_ted(bytes, map)) continue;
@@ -3672,6 +3673,15 @@ static void test_real_data() {
             SimRng tick_rng(1);
             TerrainStopLog tlog;
             run_land(sys, 0, 12000, tick_rng, serial_for, ground, nullptr, nullptr, &tlog);
+            if (std::getenv("MOV2_MAP")) {  // DBGTMP
+                for (const CollisionObject& c : sys.collisions().list())
+                    if (c.a == 13 || c.a == 14 || c.a == 22 || c.b == 13 || c.b == 14 || c.b == 22)
+                        std::printf("DBG rec kind %d a %d b %d state %d master %d\n", static_cast<int>(c.kind), c.a, c.b, static_cast<int>(c.state), static_cast<int>(c.master));
+                for (const ObjectId id : {13, 14, 22}) {
+                    const UnitView v = sys.view(id);
+                    std::printf("DBG unit %d pos %.1f %.1f speed %.3f yaw %.1f\n", id, static_cast<double>(v.pos.x), static_cast<double>(v.pos.y), static_cast<double>(v.speed), static_cast<double>(v.yaw));
+                }
+            }
             if (!ground) ++off_ground;
             uint32_t arrived = 0;
             for (const auto& [id, goal] : goals) {

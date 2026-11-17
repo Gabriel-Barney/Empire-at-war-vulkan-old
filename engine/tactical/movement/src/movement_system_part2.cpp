@@ -1,4 +1,5 @@
 // movement_system: part 2 (bo3 t03 split; shared code in movement_system_internal.hpp).
+#include <cstdlib>  // DBGTMP
 #include "movement_system_internal.hpp"
 
 namespace alamo::tactical::movement {
@@ -798,9 +799,10 @@ bool MovementSystem::goal_obstacle(const Unit& u, const Unit& o, const Unit* for
 
 // 0x679aa0: the candidate is taken at the nearest passable point Q of the unit's region within LandDestinationProximity
 // (60), when the unit's rectangle placed at Q, axis along Q - E (its facing when zero), overlaps no layer object that
-// the goal-spot filter counts as an obstacle (s78n t24: goal_obstacle). [port] the tracker argument of goals 2 - 11
-// (the previous window's grown shapes, [M] in the spec) is not modelled: every goal queries the layer.
-bool MovementSystem::rejoin_accept(const Unit& u, V2 cand, V2 path_end, V2& q, const Unit* forced) const {
+// the goal-spot filter counts as an obstacle (s78n t24: goal_obstacle). mov2 t08 (docs/re/MOV2_T05_TERRAIN_STOPS.md [H]):
+// with a tracker (goals 2 - 11 of a Path Around: the window the last failed goal built) the objects met are the
+// tracker's (their tracker rectangles, 0x6b4cb0), not the layer's; a rejected candidate is not a goal.
+bool MovementSystem::rejoin_accept(const Unit& u, V2 cand, V2 path_end, V2& q, const Unit* forced, const RejoinTracker* trk) const {
     q = cand;
     const int32_t comp = regions_.component_at(u.slot, world_to_cell(u.m.pos.x), world_to_cell(u.m.pos.y));
     const int32_t cx = world_to_cell(cand.x), cy = world_to_cell(cand.y);
@@ -812,6 +814,13 @@ bool MovementSystem::rejoin_accept(const Unit& u, V2 cand, V2 path_end, V2& q, c
     FootRect r = foot_at(u, q);
     const V2 axis = normalize_retail(q - path_end);
     if (length_sq(axis) > 0.0f) r.a = axis;
+    if (trk && trk->set) {
+        for (size_t i = 0; i < trk->rects.size(); ++i) {
+            const Unit& o = units_[trk->units[i]];
+            if (o.d.id != u.d.id && foot_overlap(r, trk->rects[i]) && goal_obstacle(u, o, forced)) return false;
+        }
+        return true;
+    }
     std::vector<uint32_t> near_units;
     layer_box_query(q, foot_radius(u), near_units);
     for (uint32_t ci : near_units) {
@@ -822,7 +831,7 @@ bool MovementSystem::rejoin_accept(const Unit& u, V2 cand, V2 path_end, V2& q, c
 }
 
 bool MovementSystem::rejoin_search(const Unit& u, std::span<const V2> base, uint32_t cur, float d,
-                                   const std::function<int(const Rejoin&)>& fn, const Unit* forced) const {
+                                   const std::function<int(const Rejoin&)>& fn, const Unit* forced, const RejoinTracker* trk) const {
     // 0x675ed0: at most 11 accepted goals (0x676020 cmp r12d, 0xa); the generator itself has no count
     constexpr uint32_t kMaxGoals = 11;
     uint32_t goals = 0;
@@ -843,7 +852,7 @@ bool MovementSystem::rejoin_search(const Unit& u, std::span<const V2> base, uint
         Rejoin r;
         r.on_path = !u.pushed;
         r.resume = u.pushed ? u.m.next : p.next;  // (a detour off an older collision path resumes the order path by its lines)
-        if (rejoin_accept(u, p.p, end, r.q, forced) && offer(r)) return verdict == kRejoinTaken;
+        if (rejoin_accept(u, p.p, end, r.q, forced, trk) && offer(r)) return verdict == kRejoinTaken;
     }
     // 0x679e20: a land path from the end E to the spot no longer than 2 x the straight line
     LandPathScratch sc;
@@ -872,7 +881,7 @@ bool MovementSystem::rejoin_search(const Unit& u, std::span<const V2> base, uint
         const V2 spot = end + dir * s;
         Rejoin r;
         r.resume = past;
-        if (!rejoin_accept(u, spot, end, r.q, forced)) continue;
+        if (!rejoin_accept(u, spot, end, r.q, forced, trk)) continue;
         if (!reachable(spot)) break;
         if (offer(r)) return verdict == kRejoinTaken;
     }
@@ -965,6 +974,7 @@ bool MovementSystem::path_around(const CollisionObject& c, Unit& u, const Unit* 
     // whose first segment makes more than 120 degrees with u's facing; the call then fails
     const bool refuse_back = c.kind == CollisionKind::MovingVsMoving && c.state == CollisionState::Pass;
     bool searched = false, done = false;
+    RejoinTracker trk;  // mov2 t08: the goal loop's tracker, kept from one failed goal to the next
     rejoin_search(u, base, cur, d, [&](const Rejoin& rj) {
         AroundRequest q;
         q.start = u.m.pos;
@@ -981,6 +991,13 @@ bool MovementSystem::path_around(const CollisionObject& c, Unit& u, const Unit* 
         searched = true;
         const bool ok = around_search(grid_, k, q, res);
         quota_used_ += res.complexity;
+        trk.set = true;
+        trk.rects.clear();
+        trk.units.clear();
+        for (const uint32_t wi : res.window) {
+            trk.rects.push_back(rect_grown(obs[wi].shape, q.tracker));
+            trk.units.push_back(obs_units[wi]);
+        }
         // s78n t24 (§5.4.7 "Rejoin candidates" item 3): an A* failure fails the call; an earlier failure tries the next goal
         if (!ok || res.points.size() < 2) return res.graph ? kRejoinFail : kRejoinNext;
         // Last-point drop: the last corner sees the next original waypoint N -> the rejoin point is removed
@@ -1019,7 +1036,7 @@ bool MovementSystem::path_around(const CollisionObject& c, Unit& u, const Unit* 
         u.around_frame = frame;
         done = true;
         return kRejoinTaken;
-    }, flag ? o : nullptr);  // s78o (b0065): a flag-1 call's obstacle is the goal-spot filter's forced object
+    }, flag ? o : nullptr, std::getenv("MOV2_NOTRK") ? nullptr : &trk);  // DBGTMP  // mov2 t08: + the tracker; s78o (b0065): a flag-1 call's obstacle is the goal-spot filter's forced object
     if (searched && !probe) ++stats_.dynamic_repaths;
     return done;
 }
@@ -2170,16 +2187,16 @@ void MovementSystem::tick_land(uint32_t frame, SimRng& rng, const ParallelFor& p
     tree_.maintain(static_cast<double>(frame) / 30.0);  // shape only; query results do not depend on it
     // mov1 t08 (b0182, BKR1_RE_ANSWERS Q1 / Q6 [H]; design note docs/PHASE4.md "mov1"): retail's land frame 0x3639d0 is
     // tracker update 0x539b20 -> object walks -> collision driver 0x50a780 (detection 0x508170 at its end) -> movement
-    // coordinators 0x426eb0 (every plan). The port's tick is that cycle started at the tracker: the tracker snapshot
-    // (the Moving / Static flags the plan's corridor test reads), the driver (services only), detection (a new record
-    // waits for the next driver), the plans (after this cycle's driver: a unit the driver stopped still counts as Moving
-    // at its place for the corridor test, one planned last cycle as Moving), the answer fold, then the walk.
-    corner_static_.assign(units_.size(), 0);
-    for (size_t i = 0; i < units_.size(); ++i) corner_static_[i] = unit_moving(units_[i]) ? 0 : 1;
+    // coordinators 0x426eb0 (every plan). The port's tick is that cycle started at the driver: the driver (services
+    // only), detection (a new record waits for the next driver), the plans (they read the tracker flags of the snapshot
+    // the last tick took before its walk - mov2 t04: a unit that arrived in that walk still counts as Moving, one the
+    // driver just stopped too), the answer fold, the tracker snapshot (Unit::trk_static), then the walk.
+    if (std::getenv("MOV2_NOSNAP")) for (Unit& u : units_) u.trk_static = !unit_moving(u);  // DBGTMP
     drive_collisions(frame, rng);  // S7: cancel / priority sort / resolve (TACTICAL_GAPS §6.7)
     detect_collisions(frame);      // S7: checks create collision objects
     plan_land(frame, pf);
     fold_collision_answers();
+    if (!std::getenv("MOV2_NOSNAP")) for (Unit& u : units_) u.trk_static = !unit_moving(u);  // mov2 t04: the tracker update before the walk
     // s78n t23 step 0 (MOVEMENT §5.4.4 item 5): a record a cut left on its last waypoint is finished at the walk step
     // (serial, ascending index, before the parallel walk: a pop walks on along the order path in this tick's walk)
     for (Unit& u : units_) {

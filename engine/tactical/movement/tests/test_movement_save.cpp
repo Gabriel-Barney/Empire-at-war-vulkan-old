@@ -1463,12 +1463,12 @@ void test_s78o_unit_rejections() {
         if (std::equal(th.begin(), th.end(), good.begin() + static_cast<std::ptrdiff_t>(i)) &&
             std::equal(rh.begin(), rh.end(), good.begin() + static_cast<std::ptrdiff_t>(i + 4)))
             hits.push_back(i);
-    CHECK(hits.size() == 1 && hits[0] >= 172);
-    if (hits.size() != 1 || hits[0] < 172) return;
+    CHECK(hits.size() == 1 && hits[0] >= 173);
+    if (hits.size() != 1 || hits[0] < 173) return;
     // 131 = the bytes from the end of the wt block to atk_theta (bkm1, version 31: + end_z / end_at / yaw2 and lane_z;
     // version 32: + the fleet cohesion speed; version 33: + the trn1 t03 conform pitch / roll; version 34: + mov1's
-    // form_first / coord_id / near_end / approx_countdown, 13 bytes)
-    const size_t at_th = hits[0], at_wt = at_th - 152 - 20;
+    // form_first / coord_id / near_end / approx_countdown, 13 bytes; version 35: + mov2's trk_static, 1 byte)
+    const size_t at_th = hits[0], at_wt = at_th - 153 - 20;
     const uint8_t idle[20] = {0xFF, 0xFF, 0xFF, 0xFF};  // wt_clip -1, then 4 x 0.0f
     CHECK(std::equal(std::begin(idle), std::end(idle), good.begin() + static_cast<std::ptrdiff_t>(at_wt)));
     World t(sc.cfg);
@@ -1852,7 +1852,9 @@ void test_rejections() {
     CHECK(rejects(u.sys, bad));
     put_u32(bad, 0, 33);  // 33: before mov1's formation rank / coordinator / approximation byte (34)
     CHECK(rejects(u.sys, bad));
-    put_u32(bad, 0, 35);
+    put_u32(bad, 0, 34);  // 34: before mov2's tracker snapshot (35)
+    CHECK(rejects(u.sys, bad));
+    put_u32(bad, 0, 36);
     CHECK(rejects(u.sys, bad));
     bad = good;
     bad[4] = static_cast<uint8_t>(bad[4] ^ 3);  // mode

@@ -300,6 +300,7 @@ struct UnitView {
     int32_t form_rank = 0;
     uint32_t coord_id = 0;
     bool near_end = false;  // mov1 t04: pack +0x28c as of its last rebuild (BKR1 Q5)
+    bool trk_static = false;  // mov2 t04: the tracker's Static flag taken before the last walk (the next plans read it)
     // REMAINING_GAPS §4.3-4.7: special locomotors
     LocomotorKind locomotor = LocomotorKind::Default;  // the active locomotor
     bool secondary_locomotor = false;                  // S7 t06: the Uses_Multiple_Locomotors secondary is active
@@ -1117,6 +1118,12 @@ private:
         // frames to the next rebuild (a path push zeroes it)
         bool near_end = false;
         int32_t approx_countdown = 0;
+        // mov2 t04 (b0187, BKR1_RE_ANSWERS Q6 [H]; save version 35, not hashed): the tracker's Static flag (not Moving,
+        // unit_moving) as retail's tracker update 0x539b20 left it before this frame's walks - the port takes it after the
+        // plans and the answer fold, before the walk, and the next tick's plans read it (the corner pass's corridor test).
+        // A unit added since the last snapshot is not in the tracker yet (false). [port] the corridor test reads the
+        // footprint at the live position: a Static unit does not move in the walk
+        bool trk_static = false;
         // s78n t18 (0x509ea0): the lowest speed this tick's collision records answer the unit (3e38: none) and the "at
         // once" flag of the last record that writes one. Rebuilt by every land tick's driver before the walk (transient:
         // not saved, not hashed; the records' own answers are).
@@ -1386,7 +1393,6 @@ private:
     void plan_deploy_cap(Unit& u, uint32_t frame, float d = -1.0f);  // the plan's cap test for an auto-deployer (d < 0: own path)
     // s78n t26.3 (MOVEMENT §3.5.2 D): the corner-speed pass 0x5070b0 on a new land order path (u.m.frac); serial.
     void corner_pass(Unit& u);
-    std::vector<uint8_t> corner_static_;  // per unit index: Static (not moving) before this plan; scratch, not saved
     void tick_deploy(uint32_t frame);
     void hash_deploy(StateHasher& h) const;
     void hash_turrets(StateHasher& h) const;  // S8 t24
@@ -1690,10 +1696,20 @@ private:
         bool on_path = false;
     };
     static constexpr int kRejoinNext = 0, kRejoinTaken = 1, kRejoinFail = -1;
-    // s78o (b0065): `forced` = 0x67d580's object argument (a flag-1 Path Around's obstacle): an obstacle for every goal
+    // mov2 t08 (docs/re/MOV2_T05_TERRAIN_STOPS.md [H]): the goal loop 0x675ed0's tracker - the tracker rectangles (shape
+    // + the request's tracker growth) and unit indices of the window the last failed goal built (0x677340). Unset before
+    // the first goal: 0x679aa0 then queries the layer; set, it queries these instead.
+    struct RejoinTracker {
+        bool set = false;
+        std::vector<FootRect> rects;
+        std::vector<uint32_t> units;
+    };
+    // s78o (b0065): `forced` = 0x67d580's object argument (a flag-1 Path Around's obstacle): an obstacle for every goal.
+    // `trk`: the caller's goal-loop tracker (Path Around), read at each (a) / (b) acceptance; null: the layer every time
     bool rejoin_search(const Unit& u, std::span<const V2> base, uint32_t cur, float d, const std::function<int(const Rejoin&)>& fn,
-                       const Unit* forced = nullptr) const;
-    bool rejoin_accept(const Unit& u, V2 cand, V2 path_end, V2& q, const Unit* forced = nullptr) const;
+                       const Unit* forced = nullptr, const RejoinTracker* trk = nullptr) const;
+    bool rejoin_accept(const Unit& u, V2 cand, V2 path_end, V2& q, const Unit* forced = nullptr,
+                       const RejoinTracker* trk = nullptr) const;
     // mov1 t01 (BKR1_RE_ANSWERS Q1 [H]): 0x505630 - the number of MovingVsMoving records in state 15 (Starved) whose
     // master is u; master_list_partner: o is the slave of one of u's MovingVsMoving records in state 4 (Pass, 0x505e10)
     // or state 15 (0x505630) where u is the master - an obstacle of every Path Around of u (0x67d580's "always" lists)

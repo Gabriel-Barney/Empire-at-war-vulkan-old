@@ -493,6 +493,7 @@ UnitView MovementSystem::view(ObjectId id) const {
     v.form_rank = u->form_rank;
     v.coord_id = u->coord_id;
     v.near_end = u->near_end;
+    v.trk_static = u->trk_static;
     v.jiggle = u->jiggle;
     v.locomotor = u->d.locomotor;  // §4.3-4.7
     v.secondary_locomotor = u->on_secondary;  // S7 t06
@@ -2099,7 +2100,7 @@ void MovementSystem::set_path_started(Unit& u) const {
 // radius), a container max(2, max(HX, HY) / 2). Line test = 0x5a4c10 for the unit's movement class; corridor 0x5093c0 =
 // per probe segment a zero-width rectangle (centre the midpoint, half length |seg| / 2), failed by any land layer object
 // other than the unit whose footprint rectangle overlaps it and that was Static (not moving, unit_moving) before the plan
-// (corner_static_: the flags of the last tracker update, §5.3.2). The splice
+// (Unit::trk_static: the flags of the last tracker update, taken before the last walk, mov2 t04). The splice
 // (item 1) is not reachable: the plan resets the stack before the path set (§3.5.2 G), as plan_land replaces the path.
 void MovementSystem::corner_pass(Unit& u) {
     if (cfg_.mode != MoveMode::Land || u.form_id == 0 || is_air(u) || u.m.path.size() < 2) return;
@@ -2144,7 +2145,7 @@ void MovementSystem::corner_pass(Unit& u) {
             x.sys->layer_box_query(seg.c, seg.hx, x.cand);
             for (const uint32_t oi : x.cand) {
                 const Unit& o = x.sys->units_[oi];
-                if (o.d.id == x.u->d.id || oi >= x.sys->corner_static_.size() || !x.sys->corner_static_[oi]) continue;
+                if (o.d.id == x.u->d.id || !o.trk_static) continue;
                 if (foot_overlap(seg, x.sys->foot_of(o))) return false;  // a Static record (flag 2)
             }
         }
