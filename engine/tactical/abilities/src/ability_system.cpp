@@ -1167,7 +1167,7 @@ bool AbilitySystem::apply(Obj& o, SpecialState& sp, ObjectId target, int32_t hp,
             // OI abilities: the apply stops the unit (animation 0x69, §2.3.10); cu8j t02: Force Reveal begin 0x713a90 is a
             // stop-and-hold 0x3a9880 (MOVEMENT §4.7.2): one ctor draw.
             stop_order(o.id, frame, kStopHold);
-            play_anim(o, kAnimRevealBegin, {}, 0, false, 1.0f, kAnimHoldLoop, frame);  // §4.14: Begin, then the Loop
+            play_anim(o, kAnimRevealBegin, {}, kDrawVariant, false, 1.0f, kAnimHoldLoop, frame);  // §4.14: Begin, then the Loop
             sp.frames = static_cast<int32_t>(static_cast<float>(cfg_.fps) * s.force_sight_duration);
             sp.applied = 1;
             sp.target = o.id;
@@ -1251,7 +1251,7 @@ void AbilitySystem::remove_special(Obj& o, SpecialState& sp, uint32_t frame) {
             if (fog_reveal_all_ && sp.player >= 0) fog_reveal_all_(sp.player, false);
             sp.player = -1;
             sp.frames = 0;
-            play_anim(o, kAnimRevealEnd, {}, 0, false, 1.0f, kAnimIdle, frame);  // §4.14: End one-shot, then the idle
+            play_anim(o, kAnimRevealEnd, {}, kDrawVariant, false, 1.0f, kAnimIdleService, frame, 0.5f);  // §4.14: End, then IDLE
             break;
         default: class_remove(o, sp, frame); break;  // OI abilities
     }
@@ -2007,7 +2007,7 @@ void AbilitySystem::shot_fired(ObjectId shooter, ObjectId target, int32_t /*targ
     if (host_.attack_overlay && !host_.attack_overlay(shooter) && anim_view(*u, frame).type < 0 &&
         (class_has(*u, SpecialClass::ArcSweep) || class_has(*u, SpecialClass::GenericAttack) ||
          class_has(*u, SpecialClass::EatAttack)))
-        play_anim(*u, 5, {}, 0, false, 1.0f, kAnimIdle, frame);
+        play_anim(*u, 5, {}, 0, false, 1.0f, kAnimWeaponShot, frame);
 }
 
 bool AbilitySystem::class_has(const Obj& o, SpecialClass cls) const {

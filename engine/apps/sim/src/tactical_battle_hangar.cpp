@@ -281,6 +281,10 @@ void TacticalBattle::saber_throw_service(TacticalMode& mode) {
         SaberThrowState& s = sabers_[k];
         const Unit* u = unit_by_id(s.thrower);
         bool keep = u && u->alive && !u->retreated && st.alive(u->h) && combat_ && combat_->has_unit(s.thrower);
+        // r3h t01 (§2.7 item 2): SWORD_THROW finishes 5 frames after the throw -> SWORD_CONTROL (0x6d) loops (speed 1)
+        // while the saber flies. [port] blend 0.1 (as the throw); SWORDSPIN (0x6f) on the saber needs a model row the
+        // port's saber projectile does not have.
+        if (keep && s.serial != 0 && s.end_frame == 0 && frame_ == s.throw_frame + 5) play_battle_clip(s.thrower, 0x6d, true, 1.0f, 0.1f);
         if (keep && s.serial == 0) {
             if (frame_ >= s.throw_frame) {
                 // Spawn_Projectile 0x54ade0: shooter the thrower, target the recorded object, fire-at point T, max travel =
@@ -312,6 +316,7 @@ void TacticalBattle::saber_throw_service(TacticalMode& mode) {
                 if (s.catch_dist > 0.0f && dx * dx + dy * dy + dz * dz < s.catch_dist * s.catch_dist) {
                     s.end_frame = frame_ + 11u;  // SWORD_CATCH (30 frames at speed 3) finishes at the 10th advance after its play
                     engine_loops_.saber_resolve(s.thrower, frame_, s.end_frame);
+                    play_battle_clip(s.thrower, 0x6e, false, 3.0f, 0.1f);  // r3h t01: SWORD_CATCH (0x6e), speed 3 [port: blend 0.1]
                 }
             }
         }

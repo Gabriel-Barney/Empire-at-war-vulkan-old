@@ -172,6 +172,7 @@ struct SpecialAbilityDesc {
     float arc_width = 0.0f, arc_min = 0.0f, arc_max = 0.0f, sweep_time = 0.0f, anim_speedup = 1.0f;
     bool right_to_left = false;
     std::string attack_anim;              // Attack_Animation (animation type name; t03 clip timing, empty = none)
+    std::string grabbed_anim;             // Target_Grabbed_Animation (r3h t04, Eat +0x1d0: the held victim's loop; empty = none)
     // Arc_Sweep Attack_Animation_Subindex (+0x198) / Super_Laser Attack_Anim_Sub_Index (+0x188): the explicit variant
     // of the attack clip (OI follow-up t01, §4.14); 0 elsewhere.
     int32_t anim_sub_index = 0;

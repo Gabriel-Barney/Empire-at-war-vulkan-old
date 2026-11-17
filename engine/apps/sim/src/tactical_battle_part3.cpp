@@ -377,6 +377,22 @@ void TacticalBattle::play_turn_clip_events(SimRng& rng, uint64_t gframe) {
 #endif
 }
 
+anim::AnimWorld* TacticalBattle::anim_world_now() const {
+#ifdef ALAMO_SIM_HAVE_ANIM
+    return hooks_ ? hooks_->world() : nullptr;
+#else
+    return nullptr;
+#endif
+}
+
+const GameMode* TacticalBattle::anim_mode_now() const {
+#ifdef ALAMO_SIM_HAVE_ANIM
+    return hooks_ ? hooks_->anim_mode() : nullptr;
+#else
+    return nullptr;
+#endif
+}
+
 bool TacticalBattle::anim_engaged_clip(objects::ObjectId id) const {
     // cu8g t01 (CU8F_T01_T02_T07_RE.md §2.3): HOLSTER_WEAPON's "engaged" clip test - the current animation type is ATTACK
     // (5) or SPINMOVE (0x68). Without the animation service: false.
@@ -395,6 +411,7 @@ void TacticalBattle::drive_animation(objects::ObjectStore& store, SimRng& rng, u
 #ifdef ALAMO_SIM_HAVE_ANIM
     // R3 anim: WalkLocomotor (0x61f840, A.7 walk / move / turn rows) and the idle behaviour (0x62e570) for battle
     // units, through SimAnimation::service_locomotor (rules in anim_behaviors.hpp); Berserker state first.
+    oi_ability_anims(gframe);  // r3h t01: ability clips made between ticks (Lua, commands after the last tick)
     anim::AnimWorld* w = hooks_ ? hooks_->world() : nullptr;
     const GameMode* gm = hooks_ ? hooks_->anim_mode() : nullptr;
     if (!anim_ || !w || !gm) return;
@@ -442,7 +459,14 @@ void TacticalBattle::drive_animation(objects::ObjectStore& store, SimRng& rng, u
     for (size_t i = 0; i < units_.size(); ++i) {
         const Unit& u = units_[i];
         if (!u.alive || u.retreated || !w->contains(u.id)) continue;
-        anim_->set_berserker(*gm, u.id, abilities_->is_active(u.id, ta::kBerserker));
+        const bool berserk = abilities_->is_active(u.id, ta::kBerserker);
+        anim_->set_berserker(*gm, u.id, berserk);
+        // r3h t04 (§4.14 "What else ends them"): the ability record follows the world's primary clip (a Lua / cinematic
+        // play, a flinch or a refused play replaced the ability's clip: Generic / Arc / Eat abort at their next update).
+        abilities_->observe_clip(u.id, w->current_type(u.id), frame_);
+        // r3h t03 [port]: while the Berserker runs, its SpinMove (the ability's plays) owns the primary slot: no locomotor
+        // clip and no IDLE service (retail's redirect would end the ability on a locomotor clip, §4.15).
+        if (berserk) continue;
         // s78k t02 (TACTICAL_COMBAT slot 47 "s78k t02", IdleBehavior 0x62e570) [H]: the IDLE service reads the TARGETING
         // behaviour's target (a land team member: its head's) whether or not it is suspended (Prevent_All_Fire), and
         // draws Get_Int(0, FPS) every service while one is held. current_target keeps the target while suspended.
@@ -681,6 +705,8 @@ void TacticalBattle::consume_events(TacticalMode& mode, SimRng& rng) {
                           sabers_.end());  // a new throw replaces a pending one (as saber_schedule)
             sabers_.push_back(st);
             engine_loops_.saber_schedule(e.id, st.throw_frame, 0u, tactical::hangar::EngineLoops::kSaberOpenEnd);
+            // r3h t01 (CU8F_T01_T02_T07_RE §2.7 item 1): the apply plays SWORD_THROW (0x6c) one-shot, blend 0.1, speed 3.
+            play_battle_clip(e.id, 0x6c, false, 3.0f, 0.1f);
         }
         // S7 t15 A1 (ABILITIES_HARDPOINTS §2.6): every ability end raises signal 0x29, including the Remote_Bomb toss, which
         // ends at its Toss_Anim end (LOB_SOLVER §3.5 step 4, S8 t06).

@@ -274,6 +274,7 @@ void TacticalBattle::build_service_graph() {
     g.add("abilities_combat", kAll, kAll, [this] {
         hooks_->set_tick(tick_.rng, tick_.global_frame);
         abilities_->tick(frame_, tick_.mode->trees(), *tick_.rng, *tick_.pf);
+        oi_ability_anims(tick_.global_frame);  // r3h t01: this tick's ability clips on the animation world
         combat_->clear_team_positions();  // s78n t03: readers between ticks use the head's own position (save / load equal)
     });
     lap("tac.combat");

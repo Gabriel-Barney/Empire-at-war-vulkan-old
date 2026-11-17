@@ -180,6 +180,7 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
     s.anim_speedup = f_or(e, "Attack_Animation_Speedup", 1.0f);
     s.right_to_left = b_or(e, "Apply_Damage_Right_To_Left", false);
     s.attack_anim = s_or(e, "Attack_Animation");
+    s.grabbed_anim = s_or(e, "Target_Grabbed_Animation");  // r3h t04: Eat (+0x1d0): the victim loops it while held
     s.anim_sub_index = i_or(e, "Attack_Animation_Subindex", i_or(e, "Attack_Anim_Sub_Index", 0));
     s.damage_frame = i_or(e, "Damage_Frame_Number", 0);
     s.begin_damage_frame = i_or(e, "Begin_Applying_Damage_Frame", 0);

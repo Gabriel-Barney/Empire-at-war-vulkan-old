@@ -8,6 +8,7 @@
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/sim/tactical_battle.hpp"
 #ifdef ALAMO_SIM_HAVE_ANIM
+#include "alamo/anim/anim_state.hpp"
 #include "alamo/anim/anim_types.hpp"
 #include "alamo/sim/sim_anim.hpp"
 #endif
@@ -29,7 +30,8 @@ Vec3 clash_facing(float yaw_deg) {
 
 class BattleClashHost final : public tc::HeroClashHost {
 public:
-    BattleClashHost(TacticalBattle& b, TacticalMode& mode, SimRng& rng) : b_(b), mode_(mode), st_(mode.primary()), rng_(rng) {}
+    BattleClashHost(TacticalBattle& b, TacticalMode& mode, SimRng& rng, uint64_t gframe)
+        : b_(b), mode_(mode), st_(mode.primary()), rng_(rng), gframe_(gframe) {}
 
     void candidates(int32_t type, std::vector<tc::ObjectId>& out) override {
         // Battle units only: team containers are not battle units ([port], HeroClashHost::candidates).
@@ -183,6 +185,24 @@ public:
         return false;
 #endif
     }
+    void play(tc::ObjectId id, std::string_view anim, uint32_t variant) override {
+        // r3h t02 (HERO_CLASH §3.6): the exchange clip on the battle's animation world (Play_Animation: one-shot, blend 0.1,
+        // speed 1, the manager's variant - no draw here).
+#ifdef ALAMO_SIM_HAVE_ANIM
+        anim::AnimWorld* w = b_.anim_world_now();
+        if (!b_.anim_ || !w || !w->contains(id)) return;
+        anim::PlayRequest r;
+        r.type = anim::find_anim_type(anim);
+        if (r.type == anim::kNoAnimType) return;
+        r.index = variant;
+        r.loop = false;
+        r.blend_seconds = 0.1f;
+        r.speed = 1.0f;
+        if (w->play(id, r, nullptr, gframe_) == anim::PlayResult::Played) ++b_.stats_.anim_plays;
+#else
+        (void)id, (void)anim, (void)variant;
+#endif
+    }
     bool speech_idle() override { return true; }  // [port] no speech manager in the sim
     void damage(tc::ObjectId victim, float amount, tc::ObjectId source) override {
         // Take_Damage kind 1, the winner as a non-projectile source, no hardpoint: queued for combat phase D of this tick
@@ -205,6 +225,7 @@ private:
     TacticalMode& mode_;
     objects::ObjectStore& st_;
     SimRng& rng_;
+    uint64_t gframe_ = 0;  // r3h t02: the host frame (animation time base)
 };
 
 void TacticalBattle::set_hero_clash_data(std::shared_ptr<const tc::HeroClashData> d) {
@@ -225,7 +246,7 @@ void TacticalBattle::set_hero_clash_data(std::shared_ptr<const tc::HeroClashData
 void TacticalBattle::hero_clash_tick(TacticalMode& mode, SimRng& rng, uint64_t global_frame) {
     // HERO_CLASH §2.1: land only (the mode's manager is null in space); 0x56ce20(manager, global frame).
     if (space_ || !hero_clash_data_ || !combat_ || !movement_) return;
-    BattleClashHost host(*this, mode, rng);
+    BattleClashHost host(*this, mode, rng, global_frame);
     hero_clash_.update(static_cast<uint32_t>(global_frame), host, rng);
     (void)hero_clash_.take_ended();  // [port] the end events are diagnostics (the win speech is audio only)
     if (hero_clash_.take_changed()) hero_clash_sync();

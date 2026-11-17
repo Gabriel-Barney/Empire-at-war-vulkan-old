@@ -409,8 +409,8 @@ void HeroClashManager::new_exchange(Clash& c, uint32_t frame, HeroClashHost& hos
         fps1 = fps2 = kClashFallbackClipFps;
     }
     bool play = false;
+    uint32_t v = 0;
     if (n1 == n2 && n1 > 0) {
-        uint32_t v = 0;
         if (n1 >= 2) v = static_cast<uint32_t>(rng.range_int(0, static_cast<int32_t>(n1) - 1));  // 0x1ffb40
         if (v != 0 && !fallback) {
             uint32_t vn = 0;
@@ -422,6 +422,11 @@ void HeroClashManager::new_exchange(Clash& c, uint32_t frame, HeroClashHost& hos
         play = f1 > 0 && f1 == f2 && fps1 == fps2 && fps1 > 0.0f;
     }
     // Otherwise nothing is played: the next frame starts a new exchange (and draws again) [H; M in practice].
+    // r3h t02: both heroes start their exchange clips (variant v, one-shot, blend 0.1, speed 1).
+    if (play) {
+        host.play(c.hero1, a1, v);
+        host.play(c.hero2, a2, v);
+    }
     c.playing = play;
     c.ex_start = frame;
     c.ex_frames = play ? f1 : 0u;

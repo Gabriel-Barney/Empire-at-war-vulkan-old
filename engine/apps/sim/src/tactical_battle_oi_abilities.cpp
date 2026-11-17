@@ -169,6 +169,13 @@ void TacticalBattle::oi_install(TacticalMode& mode, SimRng& rng) {
                                     float& fps) {
         return anim_clip_info(*m, id, type >= 0 ? type : anim::find_anim_type(name), frames, fps, variant);
     };
+    // r3h t03 (§4.15): the variant count of a clip on the same model (the 0xFFFF draws of the ability plays).
+    h.anim_variants = [this, m = &mode](tc::ObjectId id, int32_t type) -> uint32_t {
+        uint32_t frames = 0, n = 0;
+        float fps = 0.0f;
+        while (n < 256 && anim_clip_info(*m, id, type, frames, fps, n)) ++n;
+        return n;
+    };
     // OI follow-up t01 (Â§4.14): the ModelAnimType id of a name, and the type's Attack_Animation_Is_Overlay.
     h.anim_type = [](std::string_view name) { return anim::find_anim_type(name); };
     h.attack_overlay = [this, m = &mode](tc::ObjectId id) {
@@ -854,6 +861,60 @@ void TacticalBattle::oi_deploy_sync(TacticalMode& mode) {
         if (!u.alive || !u.movable || movement_->deploy_state(u.id) != mv::LocoState::WalkDeploying || !combat_->has_unit(u.id)) continue;
         combat_->set_flag(u.id, tc::kUnitDeploying, movement_->walking_deployed(u.id));
     }
+}
+
+void TacticalBattle::oi_ability_anims(uint64_t gframe) {
+    // r3h t01 (ABILITIES_HARDPOINTS §4.15): the ability system's clips on the battle's animation world, play order. The
+    // variant is the one the ability system drew (no draw here); a default-idle entry plays the default idle type (index 0,
+    // Loop_Idle_Anim_00, speed 1) unless an idle-class clip already plays. A play made in an earlier tick (between ticks:
+    // Lua / commands after the tick) is played at its own frame. [port] Super_Laser's direct ModelClass play goes through
+    // the same path (its owners hold no lock and no Berserker).
+    if (!abilities_) return;
+    abilities_->take_anim_plays(oi_anim_plays_);
+#ifdef ALAMO_SIM_HAVE_ANIM
+    anim::AnimWorld* w = anim_world_now();
+    const GameMode* gm = anim_mode_now();
+    if (!anim_ || !w || !gm || oi_anim_plays_.empty()) return;
+    const objects::ObjectStore& st = gm->primary();
+    const anim::PresenceIdleFn presence = [this, &st](anim::ObjectId unit, std::span<const anim::IdleRecord> recs) {
+        return presence_pick(st, unit, recs.data(), recs.size());
+    };
+    for (const ta::AbilityAnimPlay& p : oi_anim_plays_) {
+        if (!w->contains(p.id)) continue;
+        const uint64_t back = p.frame <= frame_ ? static_cast<uint64_t>(frame_ - p.frame) : 0u;
+        const uint64_t at = gframe >= back ? gframe - back : 0u;
+        if (p.type == ta::kAbilityPlayDefaultIdle) {
+            if (anim_->play_default_idle(*gm, p.id, at, &presence)) ++stats_.anim_plays;
+            continue;
+        }
+        anim::PlayRequest r;
+        r.type = p.type;
+        r.index = p.variant;
+        r.loop = p.loop != 0;
+        r.blend_seconds = p.blend;
+        r.speed = p.speed;
+        if (w->play(p.id, r, nullptr, at) == anim::PlayResult::Played) ++stats_.anim_plays;
+    }
+#else
+    (void)gframe;
+#endif
+    oi_anim_plays_.clear();
+}
+
+void TacticalBattle::play_battle_clip(objects::ObjectId id, int32_t type, bool loop, float speed, float blend) {
+#ifdef ALAMO_SIM_HAVE_ANIM
+    anim::AnimWorld* w = anim_world_now();
+    if (!anim_ || !w || !w->contains(id)) return;
+    anim::PlayRequest r;
+    r.type = type;
+    r.index = 0;
+    r.loop = loop;
+    r.speed = speed;
+    r.blend_seconds = blend;
+    if (w->play(id, r, nullptr, oi_global_frame_) == anim::PlayResult::Played) ++stats_.anim_plays;
+#else
+    (void)id, (void)type, (void)loop, (void)speed, (void)blend;
+#endif
 }
 
 void TacticalBattle::oi_hash(StateHasher& h) const {

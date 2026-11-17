@@ -98,6 +98,7 @@
 
 namespace alamo::anim {
 struct IdleRecord;  // s78l t03 (alamo/anim/anim_behaviors.hpp)
+class AnimWorld;    // r3h (alamo/anim/anim_state.hpp)
 }  // namespace alamo::anim
 
 namespace alamo::sim {
@@ -2488,6 +2489,17 @@ private:
     void script_add_types(std::span<const uint32_t> types);
     void oi_hash(StateHasher& h) const;
     bool oi_company_members(int32_t type, std::vector<int32_t>& members) const;  // §5.2 Company_Units / Squadron_Units
+    // r3h t01 (ABILITIES_HARDPOINTS §4.15): the clips the ability system started this tick, played on the battle's animation
+    // world in play order (variants already drawn: no draw here); the default-idle entries through SimAnimation. Called
+    // right after the combat tick (and at the start of the next tick for plays made between ticks).
+    void oi_ability_anims(uint64_t global_frame);
+    // r3h: the battle's animation world and its mode (BattleHooks; null without the animation service).
+    anim::AnimWorld* anim_world_now() const;
+    const GameMode* anim_mode_now() const;
+    // r3h t01: a clip the battle plays for an ability it runs itself (Saber_Throw's 0x6c / 0x6d / 0x6e): index 0 (Luke's
+    // clips have one variant, so 0xFFFF draws nothing), at the current host frame. No animation world: nothing.
+    void play_battle_clip(objects::ObjectId id, int32_t type, bool loop, float speed, float blend);
+    std::vector<tactical::abilities::AbilityAnimPlay> oi_anim_plays_;  // scratch (r3h t01)
     struct OiRespawn {
         uint32_t due = 0;
         int32_t type = -1, owner = -1;

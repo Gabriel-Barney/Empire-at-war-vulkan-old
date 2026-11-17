@@ -118,6 +118,10 @@ public:
     // Clip of animation `anim` (a ModelAnimType name) on `id`'s model: variant count, frame count and fps of `variant`.
     // False: no model data ([port] the manager then uses the shipped clip, kClashFallbackClip*).
     virtual bool clip(ObjectId id, std::string_view anim, uint32_t variant, uint32_t& variants, uint32_t& frames, float& fps) = 0;
+    // r3h t02 (§3.6): an exchange starts: `id` plays animation `anim` (a ModelAnimType name, the clip clip() described)
+    // variant `variant` (already drawn), one-shot, blend 0.1, speed 1, start frame 0, no lock (Play_Animation 0x3a92f0).
+    // Called for both heroes only when the manager plays the exchange. Default: nothing (no animation world).
+    virtual void play(ObjectId id, std::string_view anim, uint32_t variant) { (void)id, (void)anim, (void)variant; }
     // The speech manager allows / is done with a conversation (0x3223c0 / 0x3223f0). [port] audio: the host may answer true.
     virtual bool speech_idle() = 0;
     // Take_Damage (0x3a9e30): victim, kind 1, amount, the winner as a non-projectile source, no hardpoint.

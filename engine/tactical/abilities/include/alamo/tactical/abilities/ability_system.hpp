@@ -166,6 +166,22 @@ struct AbilityActivation {
     ObjectId target = kNoObject;
     uint32_t serial = 0;  // 1, 2, ... in event order (the host's cursor; restarts with a new system)
 };
+// r3h t01 (ABILITIES_HARDPOINTS §4.15): a clip the ability system starts on an object's model (Play_Animation 0x3a92f0 /
+// ModelClass play 0x265560 calls of the special-ability classes), for the host's animation world. The variant is already
+// resolved (the ability system made any synced 0xFFFF draw), so the host plays it without drawing. Taken by the host in
+// the tick that made it (AbilitySystem::take_anim_plays); never hashed or saved.
+inline constexpr int32_t kAbilityPlayDefaultIdle = -2;  // AbilityAnimPlay::type: the default idle (0x395920), index 0
+struct AbilityAnimPlay {
+    ObjectId id = kNoObject;
+    int32_t type = -1;      // ModelAnimType id, or kAbilityPlayDefaultIdle (index 0, Loop_Idle_Anim_00, speed 1, blend 0)
+    uint32_t variant = 0;
+    uint8_t loop = 0;
+    uint8_t direct = 0;     // ModelClass play called directly (Super_Laser): no lock test, no Berserker redirect
+    float blend = 0.0f;     // seconds (0 = hard cut)
+    float speed = 1.0f;
+    uint32_t frame = 0;     // the sim frame of the play
+};
+
 // vis1 t06: an applied special of an object (AbilitySystem::applied_specials).
 struct AppliedSpecialView {
     uint32_t special = 0;  // AbilityData::specials index
@@ -290,6 +306,10 @@ struct AbilityHost {
     std::function<bool(ObjectId id, int32_t anim_type, std::string_view anim_name, uint32_t variant, uint32_t& frame_count,
                        float& fps)>
         anim_clip;
+    // r3h t03 (ABILITIES_HARDPOINTS §4.15): the number of variants of animation `anim_type` on `id`'s sim model (the same
+    // static model data as anim_clip; 0 = no clip). A 0xFFFF play draws one synced Get_Int(0, n - 1) when n >= 2. Unset:
+    // [port] one variant when anim_clip finds variant 0 (no draw).
+    std::function<uint32_t(ObjectId id, int32_t anim_type)> anim_variants;
     // OI follow-up t01 (§4.14): the ModelAnimType id of an XML animation name (-1 unknown). Unset: names never resolve
     // (the melee / grenade animations leave no record).
     std::function<int32_t(std::string_view anim_name)> anim_type;
@@ -473,6 +493,21 @@ public:
     // aud1 t10 (presentation only, like visual_events): the EffectOn events of the last kVisualKeepFrames frames. The
     // battle clears events() inside its tick (consume_events), so a host reading between ticks takes these, by serial.
     std::span<const AbilityActivation> activation_events() const { return activations_; }
+    // r3h t01: the clips started since the last take (play order), moved into `out` (cleared first). The battle takes
+    // them right after its combat tick and plays them on its animation world (presentation of the ability record).
+    void take_anim_plays(std::vector<AbilityAnimPlay>& out) {
+        out.clear();
+        out.swap(anim_plays_);
+    }
+    // r3h t04: a clip the host started on `id` outside the ability system (Lua / cinematic Play_Animation, a flinch, a
+    // death): Generic / Arc_Sweep / Eat see their Attack_Animation replaced and abort at their next update (§4.14 "What else
+    // ends them"); the others ignore it. The record ends (type none).
+    void external_play(ObjectId id, uint32_t frame);
+    // r3h t04: the host's animation world shows `type` as `id`'s primary clip after the advance of frame - 1 (the state an
+    // apply of `frame` reads). When the record's view of that frame shows another clip, a play outside the ability system
+    // replaced it (or the world refused the ability's play): external_play. Weapon-shot records and finished views are
+    // not compared.
+    void observe_clip(ObjectId id, int32_t type, uint32_t frame);
     float get_hull(ObjectId id) const { return combat_->script_hull(id); }      // Lua Get_Hull
     float get_shield(ObjectId id) const { return combat_->shield_fraction(id); }  // Lua Get_Shield
 
@@ -634,6 +669,7 @@ public:
 
     void tick(uint32_t frame, const TreeSet& trees, SimRng& rng, const ParallelFor& pf = serial_for) {
         combat_->tick(frame, trees, rng, pf);
+        anim_follow_ups(frame, rng);  // r3h t01: the clips that follow a finished one-shot (hold loop / idle)
     }
 
     // ---- CombatHooks ----
@@ -769,6 +805,11 @@ private:
     static constexpr uint8_t kAnimStay = 0;      // parks at its end (Super_Laser)
     static constexpr uint8_t kAnimIdle = 1;      // the owner returns to idle: the record ends
     static constexpr uint8_t kAnimHoldLoop = 2;  // begin -> hold: animation type + 1 loops (FB / FTK / Force_Revel)
+    // r3h t01: what the host plays when the one-shot finishes (anim_view treats them as kAnimIdle: the record ends).
+    static constexpr uint8_t kAnimIdleLoop0 = 3;     // Idle (type 0) loop, 0xFFFF, blend 0.2 (FB / FTK release end)
+    static constexpr uint8_t kAnimIdleService = 4;   // nothing: the IDLE behaviour replaces it (Force_Revel_End, Hack)
+    static constexpr uint8_t kAnimWeaponShot = 5;    // a weapon shot's Attack (the host played it): never mirrored
+    static constexpr uint32_t kDrawVariant = 0xFFFF;  // play_anim: index 0xFFFF (one synced draw when >= 2 variants)
     static constexpr uint8_t kLockGrenade = 1, kLockDeploy = 2, kLockSelfDestruct = 4, kLockConfuse = 8;
     static constexpr uint8_t kLockRemoteBomb = 16;  // S8 t06: the Remote_Bomb toss (LOB_SOLVER §3.5)
     static constexpr uint8_t kLockCable = 32;       // r3g t04: a cable-paralyzed walker (0x6f3800 -> 0x3a8e50(target, 1))
@@ -967,9 +1008,18 @@ private:
     };
     ClipTiming clip_timing(ObjectId id, int32_t anim_type, std::string_view anim_name, uint32_t variant = 0) const;
     // OI follow-up t01 (§4.14 [port]): start a clip in the owner's record (type < 0: resolve `anim_name`). Without clip
-    // data nothing changes (as the original play returns 0 for a missing clip). No synced draw: variant 0 unless given.
+    // data nothing changes (as the original play returns 0 for a missing clip). r3h t03: variant kDrawVariant = one synced
+    // draw when the clip has >= 2 variants; r3h t01: the play is also queued for the host (AbilityAnimPlay) unless `then`
+    // is kAnimWeaponShot. `direct`: ModelClass play called directly (no lock, no Berserker redirect).
     void play_anim(Obj& o, int32_t type, std::string_view anim_name, uint32_t variant, bool loop, float speed, uint8_t then,
-                   uint32_t frame);
+                   uint32_t frame, float blend = 0.0f, bool direct = false);
+    // r3h t01: a play without a record (victims: FW_Attack, Eat's grab; Contaminate / Heal / Hack users ...): queued for the
+    // host when `id`'s model has the clip, variant kDrawVariant drawn as play_anim does. True when queued.
+    bool queue_play(ObjectId id, int32_t type, uint32_t variant, bool loop, float blend, float speed, uint32_t frame);
+    uint32_t resolve_variant(ObjectId id, int32_t type, uint32_t variant);  // kDrawVariant -> the draw; else as given
+    uint32_t variant_count(ObjectId id, int32_t type) const;
+    void anim_follow_ups(uint32_t frame, SimRng& rng);  // r3h t01: plays that follow a one-shot finishing at `frame`
+    std::vector<AbilityAnimPlay> anim_plays_;          // r3h t01: presentation only (never hashed / saved)
     AnimView anim_view(const Obj& o, uint32_t frame) const;
     // Apply gates read the previous frame's advance (Object Service advances the model before the SAP update).
     AnimView anim_before(const Obj& o, uint32_t frame) const { return anim_view(o, frame > 0 ? frame - 1 : 0); }

@@ -38,6 +38,9 @@ constexpr int32_t kHackFrames = 60;  // [port] Hack / Repair animation 0x5a leng
 constexpr int32_t kAnimHacking = 0x5a;    // Hack (TACTICAL_GAPS §2.3.10)
 constexpr int32_t kAnimRepairing = 0x5b;  // r3g t08: Repair (RepairAbility apply 0x70c580 / update 0x70cb90, REPAIRING)
 constexpr int32_t kAnimBerserk = 0x68;  // Berserker (TACTICAL_GAPS §2.3.2)
+constexpr int32_t kAnimFwAttack = 0x1f;     // r3h t01: Force_Whirlwind victims (TACTICAL_GAPS §2.3.7)
+constexpr int32_t kAnimContaminate = 0x70;  // r3h t01: Radioactive_Contaminate's throw (CU8K_T02_T06_RE §2)
+constexpr int32_t kAnimHeal = 0x76;         // r3h t01: Force_Healing harm (TACTICAL_GAPS §2.3.1)
 constexpr int32_t kAnimAttack = 5;      // Super_Laser (TACTICAL_GAPS §2.3.9), weapon shots, the Arc / Eat gates
 // §4.14: begin / hold / release clips (anim_types.cpp)
 constexpr int32_t kAnimFtkAttack = 0x21, kAnimFtkRelease = 0x23;  // Telekinesis
@@ -99,10 +102,26 @@ int32_t AbilitySystem::anim_type_of(std::string_view anim_name) const {
     return (host_.anim_type && !anim_name.empty()) ? host_.anim_type(anim_name) : -1;
 }
 
+uint32_t AbilitySystem::variant_count(ObjectId id, int32_t type) const {
+    if (type < 0) return 0;
+    if (host_.anim_variants) return host_.anim_variants(id, type);
+    return clip_timing(id, type, {}, 0).count > 0.0f ? 1u : 0u;  // [port] unset: one variant when the clip exists
+}
+
+uint32_t AbilitySystem::resolve_variant(ObjectId id, int32_t type, uint32_t variant) {
+    // r3h t03 (§4.15): index 0xFFFF = one synced Get_Int(0, n - 1) when the model has n >= 2 variants (0x1ffb40 returns at
+    // once for one variant; no clip: no draw); an explicit index is kept.
+    if (variant != kDrawVariant) return variant;
+    const uint32_t n = variant_count(id, type);
+    return n >= 2 ? static_cast<uint32_t>(draw_int(0, static_cast<int32_t>(n) - 1)) : 0u;
+}
+
 void AbilitySystem::play_anim(Obj& o, int32_t type, std::string_view anim_name, uint32_t variant, bool loop, float speed,
-                              uint8_t then, uint32_t frame) {
+                              uint8_t then, uint32_t frame, float blend, bool direct) {
     if (type < 0) type = anim_type_of(anim_name);
     if (type < 0) return;
+    if (variant == kDrawVariant && variant_count(o.id, type) == 0) return;  // no clip: no draw, nothing changes
+    variant = resolve_variant(o.id, type, variant);
     const ClipTiming ct = clip_timing(o.id, type, {}, variant);
     if (ct.count <= 0.0f) return;  // the model lacks the clip: the play returns 0, nothing changes
     o.anim_type = type;
@@ -111,6 +130,80 @@ void AbilitySystem::play_anim(Obj& o, int32_t type, std::string_view anim_name, 
     o.anim_end = ct.end;
     o.anim_loop = loop ? 1 : 0;
     o.anim_then = then;
+    if (then == kAnimWeaponShot) return;  // the host's weapon behaviour played it already
+    AbilityAnimPlay p;
+    p.id = o.id;
+    p.type = type;
+    p.variant = variant;
+    p.loop = loop ? 1 : 0;
+    p.direct = direct ? 1 : 0;
+    p.blend = blend;
+    p.speed = speed;
+    p.frame = frame;
+    anim_plays_.push_back(p);
+}
+
+bool AbilitySystem::queue_play(ObjectId id, int32_t type, uint32_t variant, bool loop, float blend, float speed, uint32_t frame) {
+    if (type < 0 || variant_count(id, type) == 0) return false;  // no clip: the play returns 0 (and draws nothing)
+    AbilityAnimPlay p;
+    p.id = id;
+    p.type = type;
+    p.variant = resolve_variant(id, type, variant);
+    p.loop = loop ? 1 : 0;
+    p.blend = blend;
+    p.speed = speed;
+    p.frame = frame;
+    anim_plays_.push_back(p);
+    return true;
+}
+
+void AbilitySystem::anim_follow_ups(uint32_t frame, SimRng& rng) {
+    // r3h t01 (§4.14 sequences, §4.15): a one-shot of the record that finishes at `frame` (the first frame its view reports
+    // finished) gets what follows it - the hold loop (type + 1, 0xFFFF, blend 0.1), the Idle loop (FB / FTK release end) or
+    // the default idle - in ascending object id. [port] played at the finish frame (retail: the class's next update, every
+    // 3 frames for Earthquake / Telekinesis).
+    SimRng* const saved = rng_;
+    rng_ = &rng;
+    const auto finished_at = [](const Obj& o, uint32_t f) {
+        const float n = f > o.anim_start ? static_cast<float>(f - o.anim_start) : 0.0f;
+        return n * o.anim_rate >= o.anim_end;
+    };
+    for (Obj& o : objs_) {
+        if (o.anim_type < 0 || o.anim_loop || o.dead || frame < o.anim_start) continue;
+        if (!finished_at(o, frame) || (frame > o.anim_start && finished_at(o, frame - 1))) continue;
+        switch (o.anim_then) {
+            case kAnimHoldLoop: queue_play(o.id, o.anim_type + 1, kDrawVariant, true, 0.1f, 1.0f, frame); break;
+            case kAnimIdleLoop0: queue_play(o.id, 0, kDrawVariant, true, 0.2f, 1.0f, frame); break;
+            case kAnimIdle: {
+                AbilityAnimPlay p;
+                p.id = o.id;
+                p.type = kAbilityPlayDefaultIdle;
+                p.frame = frame;
+                anim_plays_.push_back(p);
+                break;
+            }
+            default: break;
+        }
+    }
+    rng_ = saved;
+}
+
+void AbilitySystem::observe_clip(ObjectId id, int32_t type, uint32_t frame) {
+    const Obj* o = obj(id);
+    if (!o || o->anim_type < 0 || o->anim_then == kAnimWeaponShot) return;
+    const AnimView v = anim_before(*o, frame);
+    if (v.type < 0 || v.finished || v.type == type) return;
+    external_play(id, frame);
+}
+
+void AbilitySystem::external_play(ObjectId id, uint32_t frame) {
+    // r3h t04 (§4.14 "What else ends them"): the record no longer shows the ability's clip; Generic / Arc / Eat test "type !=
+    // Attack_Animation" at their next update and abort (Generic / Eat: default idle and release; Arc: release only).
+    Obj* o = obj(id);
+    if (!o || o->anim_type < 0) return;
+    o->anim_type = -1;
+    o->anim_start = frame;
+    o->anim_then = kAnimStay;
 }
 
 AbilitySystem::AnimView AbilitySystem::anim_view(const Obj& o, uint32_t frame) const {
@@ -122,7 +215,10 @@ AbilitySystem::AnimView AbilitySystem::anim_view(const Obj& o, uint32_t frame) c
     const float n = frame > o.anim_start ? static_cast<float>(frame - o.anim_start) : 0.0f;
     if (!(n * o.anim_rate >= o.anim_end)) return v;
     switch (o.anim_then) {
-        case kAnimIdle: v.type = -1; break;           // the update that saw it finish played the idle
+        case kAnimIdle:  // the update that saw it finish played the idle
+        case kAnimIdleLoop0:
+        case kAnimIdleService:
+        case kAnimWeaponShot: v.type = -1; break;
         case kAnimHoldLoop: v.type = o.anim_type + 1; break;  // begin -> hold loop
         default: v.finished = true; break;
     }
@@ -137,8 +233,8 @@ bool AbilitySystem::class_state(const Obj& o, SpecialClass cls) const {
 
 bool AbilitySystem::anim_busy(const Obj& o, uint32_t frame) const {
     // 0x39a350: OR of the owner's abilities' type-only tests (the mode is ignored). Earthquake / Telekinesis / Lightning /
-    // Generic / Eat count in land only; Arc_Sweep by its applied state in any mode. [port] Eat's Target_Grabbed_Animation
-    // is not parsed (only Attack_Animation counts).
+    // Generic / Eat count in land only; Arc_Sweep by its applied state in any mode. r3h t04: Eat also counts its
+    // Target_Grabbed_Animation (+0x1d0) [M intent].
     if (class_state(o, C::ArcSweep)) return true;
     if (cfg_.mode != GameMode::Land) return false;
     const int32_t type = anim_before(o, frame).type;
@@ -158,6 +254,7 @@ bool AbilitySystem::anim_busy(const Obj& o, uint32_t frame) const {
             case C::GenericAttack:
             case C::EatAttack:
                 if (type == anim_type_of(s.attack_anim)) return true;
+                if (s.cls == C::EatAttack && type == anim_type_of(s.grabbed_anim)) return true;
                 break;
             default: break;
         }
@@ -399,6 +496,8 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             sp.target = target;
             sp.counter = frames_of(s.berserker_duration, fps);
             start_recharge(o, kBerserker);
+            // r3h t03 (§4.15, apply 0x712dc0): SpinMove (0x68) loops from here, 0xFFFF (one synced draw), blend 0.5, speed 1.
+            play_anim(o, kAnimBerserk, {}, kDrawVariant, true, 1.0f, kAnimStay, frame, 0.5f);
             event(AbilityEventKind::EffectOn, kBerserker, o.id, target, frame);
             return true;
         }
@@ -459,7 +558,8 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             sp.next = frame + static_cast<uint32_t>(std::max(1, frames_of(s.damage_interval, fps)));
             if (s.cls == C::Telekinesis) start_recharge(o, kForceTelekinesis);
             // §4.14: FB_Attack / FTK_Attack one-shot, then the hold clip loops
-            play_anim(o, s.cls == C::Earthquake ? kAnimFbAttack : kAnimFtkAttack, {}, 0, false, 1.0f, kAnimHoldLoop, frame);
+            play_anim(o, s.cls == C::Earthquake ? kAnimFbAttack : kAnimFtkAttack, {}, kDrawVariant, false, 1.0f, kAnimHoldLoop, frame,
+                      0.2f);
             event(AbilityEventKind::EffectOn, sp.trigger, o.id, target, frame);
             return true;
         }
@@ -505,7 +605,7 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
                 combat_->take_damage(r, frame);
             }
             start_recharge(o, kForceLightning);
-            play_anim(o, kAnimFlAttack, {}, 0, false, 1.0f, kAnimIdle, frame);  // §4.14: the cast lasts the clip
+            play_anim(o, kAnimFlAttack, {}, kDrawVariant, false, 1.0f, kAnimIdle, frame, 0.1f);  // §4.14: the cast lasts the clip
             event(AbilityEventKind::EffectOn, kForceLightning, o.id, primary, frame);
             // vis1 t06 (ABILITY_PARTICLES §2.3): the target particle on the first entry of the victim list.
             if (!s.target_particle_effect.empty())
@@ -570,10 +670,10 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             sp.phase = 0;
             sp.radius = s.right_to_left ? 0.5f * s.arc_width : -0.5f * s.arc_width;  // sweep start angle
             sp.victims.clear();
-            // §4.14: Attack_Animation one-shot at Speedup, then the default idle (Arc: the explicit Subindex variant;
-            // [port] Generic / Eat use variant 0, no draw; Eat plays at the apply)
-            play_anim(o, -1, s.attack_anim, s.cls == C::ArcSweep ? static_cast<uint32_t>(std::max(0, s.anim_sub_index)) : 0u,
-                      false, s.anim_speedup, kAnimIdle, frame);
+            // §4.14: Attack_Animation one-shot at Speedup, blend 0.2, then the default idle (Arc: the explicit Subindex
+            // variant; Generic / Eat: 0xFFFF, r3h t03; [port] Eat plays at the apply)
+            play_anim(o, -1, s.attack_anim, s.cls == C::ArcSweep ? static_cast<uint32_t>(std::max(0, s.anim_sub_index)) : kDrawVariant,
+                      false, s.anim_speedup, kAnimIdle, frame, 0.2f);
             event(AbilityEventKind::EffectOn, sp.trigger, o.id, target, frame);
             return true;
         }
@@ -595,7 +695,8 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
                 sp.phase = 1;  // type 5 / Attack_Anim_Sub_Index at once
                 sp.counter = 0;
                 sp.cooldown = static_cast<int32_t>(frame);
-                play_anim(o, kAnimAttack, {}, static_cast<uint32_t>(std::max(0, s.anim_sub_index)), false, 1.0f, kAnimStay, frame);
+                play_anim(o, kAnimAttack, {}, static_cast<uint32_t>(std::max(0, s.anim_sub_index)), false, 1.0f, kAnimStay, frame, 0.0f,
+                          true);
             }
             event(AbilityEventKind::EffectOn, kSuperLaser, o.id, target, frame);
             return true;
@@ -694,10 +795,15 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             // 0.1) and its update 0x70cb90 repairs when 0x5b has finished. Its end on sim frames, else kHackFrames (§4.13).
             // [port] retail refuses the apply when the model lacks the clip (0x397ae0 == 0); the port cannot tell a model
             // without the clip from a host without clip data and keeps the fallback. Variant 0's length [port].
+            // r3h t01 / t03: the clip plays on the user (0xFFFF: one synced draw when >= 2 variants; blend 0.1, [port] Hack's
+            // blend taken as Repair's) and the timing reads the drawn variant.
             uint32_t len = 0;
             if (s.cls != C::TacticalBribe) {
-                const ClipTiming ct = clip_timing(o.id, s.cls == C::Repair ? kAnimRepairing : kAnimHacking, {});
+                const int32_t at = s.cls == C::Repair ? kAnimRepairing : kAnimHacking;
+                const uint32_t v = variant_count(o.id, at) > 0 ? resolve_variant(o.id, at, kDrawVariant) : 0u;
+                const ClipTiming ct = clip_timing(o.id, at, {}, v);
                 len = ct.count > 0.0f ? static_cast<uint32_t>(std::ceil(ct.end / ct.rate)) : static_cast<uint32_t>(kHackFrames);
+                if (ct.count > 0.0f) queue_play(o.id, at, v, false, 0.1f, 1.0f, frame);
             }
             sp.next = frame + len;
             start_recharge(o, s.cls == C::Hack ? kTargetedHack : (s.cls == C::Repair ? kTargetedRepair : kTacticalBribe));
@@ -770,6 +876,9 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             // Contaminate stop and hold the user (one draw when not a squad member). [port] Radioactive's hold is at the
             // apply (retail: when the throw starts, anim 0x70); the generic Spawn class has none.
             if (s.cls != C::Spawn) stop_order(o.id, frame, kStopHold);
+            // r3h t01 (CU8K_T02_T06_RE §2 row 0x712727): Radioactive_Contaminate's throw plays Contaminate_Attack (0x70) on
+            // the user. [port] at the apply, 0xFFFF, blend 0, one-shot; the IDLE behaviour follows.
+            if (s.cls == C::Radioactive) queue_play(o.id, kAnimContaminate, kDrawVariant, false, 0.0f, 1.0f, frame);
             sp.applied = 1;
             sp.point = (target != kNoObject && combat_->has_unit(target)) ? combat_->position(target) : me;
             const float delay = s.cls == C::BuzzDroids ? s.activation_time : s.creation_delay;
@@ -966,15 +1075,20 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
                 remove_special(o, sp, frame);
                 return;
             }
-            // Damage pass every 5th update while the looping animation 0x68 is strictly inside 20 %-80 % of the clip
-            // (§4.13 [port]: loops wrap at count - 1; position from the frames since the apply; no clip: always open).
-            bool window = true;
-            if (const ClipTiming ct = clip_timing(o.id, kAnimBerserk, {}); ct.count > 1.0f) {
-                const float n = static_cast<float>(frames_of(s.berserker_duration, fps) - sp.counter);
-                const float pos = std::fmod(n * ct.rate, ct.count - 1.0f);
-                window = pos > 0.2f * ct.count && pos < 0.8f * ct.count;
+            // r3h t03 (§4.15, update 0x712fd0): the current clip is "near its end" when its frame >= count - 2 - speed (or it
+            // has finished; 0x39a180). Near the end the update runs every frame, else only when counter % 5 == 0; a damage
+            // pass needs the clip strictly inside 20 %-80 % of its frame count. Near the end SpinMove restarts (0xFFFF: a
+            // new synced variant draw, loop, blend 0.1). The clip is the record's SpinMove (the drawn variant: frame count
+            // = end + 2, loops wrap at count - 1); no clip data: always open, never near the end (§4.13 fallback).
+            bool window = true, near_end = false;
+            if (o.anim_type == kAnimBerserk && o.anim_loop) {
+                const float count = o.anim_end + 2.0f;
+                const float n = frame > o.anim_start ? static_cast<float>(frame - o.anim_start) : 0.0f;
+                const float pos = std::fmod(n * o.anim_rate, count - 1.0f);
+                near_end = pos >= count - 2.0f - 1.0f;
+                window = pos > 0.2f * count && pos < 0.8f * count;
             }
-            if (sp.counter % 5 == 0 && window) {
+            if ((near_end || sp.counter % 5 == 0) && window) {
                 for (size_t i = 0; i < combat_->unit_count(); ++i) {
                     const ObjectId u = combat_->unit_id_at(i);
                     if (!alive_unit(u) || !enemy(o.owner, combat_->owner(u))) continue;
@@ -990,6 +1104,7 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
                     if (o.dead) return;
                 }
             }
+            if (near_end) play_anim(o, kAnimBerserk, {}, kDrawVariant, true, 1.0f, kAnimStay, frame, 0.1f);  // after the pass
             // target upkeep: drop it when not moving and beyond Damage_Range; pick the nearest acceptable enemy with
             // (squared distance - radius) < (1.3 x Activation_Max_Range)^2 (mixed units - the quirk is kept) and move to it.
             bool keep = alive_unit(sp.target);
@@ -1087,7 +1202,7 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
                 }
                 // Toss_Anim one-shot (0x3a92f0, speed 1). sp.counter = the play was recorded (clip data): later plays that
                 // replace it are seen as an interruption.
-                play_anim(o, -1, s.toss_anim, 0, false, 1.0f, kAnimIdle, frame);
+                play_anim(o, -1, s.toss_anim, kDrawVariant, false, 1.0f, kAnimIdle, frame);  // r3h: [port] 0xFFFF, blend 0
                 const int32_t tt = anim_type_of(s.toss_anim);
                 sp.counter = (tt >= 0 && o.anim_type == tt && o.anim_start == frame) ? 1 : 0;
             }
@@ -1122,6 +1237,9 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
                     r.kind = kKind2;
                     r.source = o.id;
                     combat_->take_damage(r, frame);
+                    // r3h t01 (TACTICAL_GAPS §2.3.7): the Whirlwind victim plays FW_Attack (0x1f). [port] 0xFFFF, blend 0,
+                    // one-shot, only when it survived (a killed victim plays its death).
+                    if (alive_unit(v)) queue_play(v, kAnimFwAttack, kDrawVariant, false, 0.0f, 1.0f, frame);
                 } else if (s.cls == C::StunWave) {
                     // vis1 t06 (ABILITY_PARTICLES §4): each victim the apply stunned gets Stunned_Effect.
                     if (combat_->stun_unit(v, static_cast<int32_t>(s.wave_time * 30.0f), frame) && !s.stunned_effect.empty())  // literal 30.0
@@ -1147,6 +1265,20 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
             const float anim = static_cast<float>(frame - sp.next) * ct.rate * s.anim_speedup;
             // the hold ends at the animation end, or with the last frame-numbered event when there is no clip
             const bool ended = ct.count <= 0.0f || anim >= ct.end;
+            // r3h t04 (§4.14 "What else ends them"): the attack clip the apply recorded was replaced (a clip started outside
+            // the ability system: external_play) -> abort before any frame event: Generic / Eat play the default idle and
+            // release, Arc only releases. Only with clip data (a record was made at the apply).
+            if (ct.count > 0.0f && (o.anim_type != anim_type_of(s.attack_anim) || o.anim_start != sp.next)) {
+                if (s.cls != C::ArcSweep && !o.dead) {
+                    AbilityAnimPlay p;
+                    p.id = o.id;
+                    p.type = kAbilityPlayDefaultIdle;
+                    p.frame = frame;
+                    anim_plays_.push_back(p);
+                }
+                remove_special(o, sp, frame);
+                return;
+            }
             if (s.cls == C::GenericAttack) {
                 if (sp.phase == 0 && anim >= static_cast<float>(s.damage_frame)) {
                     sp.phase = 1;  // hit
@@ -1165,7 +1297,12 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
             if (s.cls == C::EatAttack) {
                 if (sp.phase == 0 && anim >= static_cast<float>(s.attachment_frame)) {
                     sp.phase = 1;  // grab: the victim is held (its targeting off) [port: no bone attachment / re-own]
-                    if (alive_unit(sp.target)) stop_order(sp.target, frame);
+                    if (alive_unit(sp.target)) {
+                        stop_order(sp.target, frame);
+                        // r3h t04 (§4.14 Eat): the victim loops Target_Grabbed_Animation (0xFFFF, blend 0), else Idle index 0
+                        if (!queue_play(sp.target, anim_type_of(s.grabbed_anim), kDrawVariant, true, 0.0f, 1.0f, frame))
+                            queue_play(sp.target, 0, 0, true, 0.0f, 1.0f, frame);
+                    }
                 }
                 if (sp.phase == 1 && anim >= static_cast<float>(s.destruction_frame)) {
                     sp.phase = 2;  // destroyed
@@ -1256,7 +1393,8 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
                 sp.counter = 0;
                 sp.cooldown = static_cast<int32_t>(frame);
                 // §4.14: type 5, index Attack_Anim_Sub_Index, one-shot (parks at its end)
-                play_anim(o, kAnimAttack, {}, static_cast<uint32_t>(std::max(0, s.anim_sub_index)), false, 1.0f, kAnimStay, frame);
+                play_anim(o, kAnimAttack, {}, static_cast<uint32_t>(std::max(0, s.anim_sub_index)), false, 1.0f, kAnimStay, frame, 0.0f,
+                          true);
             }
             if (sp.phase == 1 && frame >= sp.next &&
                 static_cast<float>(frame - static_cast<uint32_t>(sp.cooldown)) *
@@ -1566,7 +1704,8 @@ void AbilitySystem::class_remove(Obj& o, SpecialState& sp, uint32_t frame) {
             break;
         case C::Earthquake:  // §4.14 remove: FB_Release / FTK_Release one-shot, then the idle loop
         case C::Telekinesis:
-            play_anim(o, s.cls == C::Earthquake ? kAnimFbRelease : kAnimFtkRelease, {}, 0, false, 1.0f, kAnimIdle, frame);
+            play_anim(o, s.cls == C::Earthquake ? kAnimFbRelease : kAnimFtkRelease, {}, kDrawVariant, false, 1.0f, kAnimIdleLoop0, frame,
+                      0.2f);
             break;
         default: break;
     }
@@ -1765,6 +1904,9 @@ void AbilitySystem::heal_pass(Obj& o, const SpecialAbilityDesc& s, uint32_t fram
         r.source = o.id;
         combat_->take_damage(r, frame);
     };
+    // r3h t01 (TACTICAL_GAPS §2.3.1 "Animation state 0x76 when present"): a harm pass that hits someone plays Heal (0x76)
+    // on the owner [M: the owner; 0xFFFF, blend 0, one-shot].
+    const bool harmed = s.single_target_heal ? single != kNoObject : !scratch_.empty();
     if (s.single_target_heal) {
         if (single != kNoObject) {
             harm_one(single);
@@ -1777,6 +1919,7 @@ void AbilitySystem::heal_pass(Obj& o, const SpecialAbilityDesc& s, uint32_t fram
             if (o.dead) return;
         }
     }
+    if (harmed && !o.dead) queue_play(o.id, kAnimHeal, kDrawVariant, false, 0.0f, 1.0f, frame);
 }
 
 uint32_t AbilitySystem::wave_victims(Obj& o, SpecialState& sp, float radius, std::vector<ObjectId>& out) {
