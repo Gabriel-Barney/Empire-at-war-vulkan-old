@@ -691,7 +691,10 @@ void test_info_screens() {
     };
     is.set_tech_tree(tt);
     SummaryInfo sm;
-    for (int i = 0; i < 9; ++i) sm.production.push_back({"i_planet.tga", U"P" + std::u32string(1, static_cast<char32_t>(U'0' + static_cast<char32_t>(i))), "", "", U"", U"", {"i_hero.tga"}, U"5"});
+    for (int i = 0; i < 9; ++i) {
+        sm.production.push_back({"i_planet.tga", U"P" + std::u32string(1, static_cast<char32_t>(U'0' + static_cast<char32_t>(i))), "", "", U"", U"", {"i_hero.tga"}, U"5", {}});
+        sm.production.back().sort[6] = static_cast<double>(i % 5);  // pop cap key: P4 / P3 ties broken by list order
+    }
     is.set_summary(sm);
     CHECK(is.show_info(InfoPage::DataChart) && is.info_dialog() == dlg::kDataChart);
     d = env.gui.find(dlg::kDataChart);
@@ -717,10 +720,19 @@ void test_info_screens() {
     is.update(std::vector<GuiEvent>{event(GuiEvent::Kind::ValueChanged, dlg::kSummaryProduction, "IDC_SCROLLBAR_SLIDER", 100)}, acts);
     CHECK(is.summary_offset() == 3 && d->get("IDC_PLANET_NAME0")->text == U"P3");
     acts.clear();
+    // ui4 t07 (HUD_GAPS §10.2): POP_CAP sorts largest first (stable: P4 P3 P8 P2 P7 P1 P6 P0 P5), the scroll position stays
+    // (row 0 = list row 3); a second click reverses (stable from that order: P0 P5 P1 P6 ...); key 1 (PLANETARY) sorts by
+    // name A to Z.
     is.update(env.click(dlg::kSummaryProduction, "IDC_BUTTON_POP_CAP"), acts);
+    CHECK(is.summary_sort_key() == 6 && !is.summary_sort_reversed() && is.summary_offset() == 3 && d->get("IDC_PLANET_NAME0")->text == U"P2");
+    is.update(env.click(dlg::kSummaryProduction, "IDC_BUTTON_POP_CAP"), acts);
+    CHECK(is.summary_sort_reversed() && d->get("IDC_PLANET_NAME0")->text == U"P6");
+    is.sort_summary(1);
+    CHECK(is.summary_sort_key() == 1 && !is.summary_sort_reversed() && d->get("IDC_PLANET_NAME0")->text == U"P3");
+    CHECK(summary_button_key("IDC_BUTTON_PLANETARY") == 1 && summary_button_key("idc_button_total_income") == 5 && summary_button_key("IDC_BUTTON_EXIT") == 0);
     is.update(env.click(dlg::kSummaryProduction, "IDC_BUTTON_EXIT"), acts);
-    CHECK(acts.size() == 2 && acts[0].kind == ScreenAction::Kind::SummarySort && acts[0].tag == "IDC_BUTTON_POP_CAP" &&
-          acts[1].kind == ScreenAction::Kind::InfoClosed && is.info_dialog().empty() && env.gui.open_count() == 0);
+    CHECK(acts.size() == 3 && acts[0].kind == ScreenAction::Kind::SummarySort && acts[0].tag == "IDC_BUTTON_POP_CAP" &&
+          acts[2].kind == ScreenAction::Kind::InfoClosed && is.info_dialog().empty() && env.gui.open_count() == 0);
     CHECK(tech_tree_dialog("IDD_TECH_TREE_BLACKMARKET", true) == "IDD_TECH_TREE_BLACKMARKET_SPACE");
     CHECK(tech_tree_dialog("", true).empty());  // modc t20: a faction without Tech_Tree_Dialog_Name has no tech tree
 }

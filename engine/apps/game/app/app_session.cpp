@@ -497,7 +497,8 @@ bool App::start_session(const SessionSpec& spec) {
     }
     loaded_save_.clear();
     session_started(diag);
-    credits_capped_ = false;
+    prev_pop_used_ = 0;
+    last_approach_s_ = -1e9;
     // ui4 t08 [port]: a new campaign (not a load, a skirmish or the attract demo) plays the faction's
     // SFXEvent_GUI_Start_Campaign once it has started.
     if (spec.kind == SessionKind::Campaign && !spec.attract && galaxy()) {
@@ -518,6 +519,7 @@ void App::session_started(const std::vector<std::string>& diag) {
     }
     apply_gameplay_options();  // ui1 t02: the session start reset the game speed indices (MAIN_LOOP.md §1.5)
     holo_.reset();
+    droid_rows_.clear();  // ui4 t11: the Droid Log starts empty with each session [port: not saved]
     story_cursor_ = 0;
     story_ui_.reset();  // L1/S4 wave 1: a new session's UI state
     reward_cursor_.clear();  // ... and its story reward media from the start

@@ -233,6 +233,9 @@ void App::handle_screen_actions(const std::vector<ui::ScreenAction>& acts) {
                 if (a.button >= 0 && static_cast<size_t>(a.button) < summary_rows_.size()) summary_entry_ = summary_rows_[static_cast<size_t>(a.button)];
                 open_story_summary();
                 break;
+            case K::InfoHintsToggled:  // ui4 t07 (HUD_GAPS §10.2): IDC_HINTS_CHECK switches every mode's advisor hints
+                story_present_.set_advisor_all(a.button == 1);
+                break;
             case K::StorySummaryFilter:
                 summary_completed_ = a.button == 1;
                 summary_entry_ = 0;    // the tab's first row
@@ -855,7 +858,9 @@ void App::show_campaign_end(bool victory) {
 void App::open_holocron(ui::InfoPage page) {
     const galactic::GalacticSim* g = galaxy();
     if (!g) return;
-    info_.set_droid_log(holo_.droid_log(*session_, data_, ui_.text));
+    ui::DroidLogInfo dl = holo_.droid_log(*session_, data_, ui_.text, droid_rows_);
+    dl.hints = story_present_.any_advisor();  // HUD_GAPS §10.2: checked when any mode's advisor hints are on
+    info_.set_droid_log(std::move(dl));
     info_.set_data_chart(holo_.chart(*g, data_, ui_.text));
     info_.set_tech_tree(holo_.tech_tree(*g, data_, ui_.hud_types, local_player(), false));
     info_.set_summary(holo_.summary(*g, data_, ui_.text, ui_.hud_types, local_player()));

@@ -299,6 +299,15 @@ void StoryPresenter::game_message(std::string_view text_id) {
     hint_shown_ = false;  // a front insert resets the display timer: it shows at once
 }
 
+void StoryPresenter::urgent_message(std::u32string text, StoryColor color) {
+    StoryHint h;
+    h.text = std::move(text);
+    h.color = color;
+    h.sound = StoryHint::Sound::Urgent;
+    hint_queue_.insert(hint_queue_.begin(), std::move(h));
+    hint_shown_ = false;  // a front insert shows at once
+}
+
 void StoryPresenter::lua_highlight(int32_t object, bool on, bool small, float z_offset) {
     std::erase_if(highlights_, [&](const StoryHighlight& h) { return h.object == object && h.small == small; });
     if (on && object != 0) highlights_.push_back({{}, object, small, z_offset});

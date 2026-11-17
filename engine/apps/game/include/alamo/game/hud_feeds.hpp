@@ -29,17 +29,17 @@
 //                        queued = the player's entries of the type in the planet's two queues; empty unless the player owns
 //                        the planet; space = not a land-tab type (ui4 t12, §5.1.1: Build_Cost_Credits > 0 and a required
 //                        ground base level or a ground structure). Const reads only.
-//   conflict_log_line    ui4 t05 [port]: the Holocron Droid Log line of a battle record (instead of ConflictLogEntry::text's
-//                        debug line): "Battle of <planet> (space|land): <attacker> vs <defender> - <winner> victorious", with
-//                        " (auto-resolved)", "<player> retreated" or "called off" (a dropped conflict). Names come from the
-//                        callbacks (planet display name, faction display name).
+//   droid_log_rows       ui4 t11 (P4_SIM_SYSTEMS §2.7.2): the three Droid Log rows of an advisor line shown in galactic mode -
+//                        TEXT_LOG_CYCLE_01 with "##0" = the galactic cycle, the line's text, TEXT_HELP_SEPERATOR. There is no
+//                        battle entry of its own (retail logs only shown advisor lines).
 //   galactic_announcement ui4 t08: the local player's Factions.xml announcer tag for one galactic event, nullptr none -
 //                        PlanetOwnerChanged: SFXEvent_Planet_Gained_Control when the local player gains a planet ("plays anytime
 //                        control is gained"), _Lost_Control when another player takes it from the local player (XML comments);
 //                        CorruptionChanged: SFXEvent_Planet_Corrupted (a type set) / SFXEvent_Corruption_Removed (cleared) when
 //                        the local player owns the planet or is the corrupter (GALACTIC_REVEAL_CORRUPTION §4.4 step 4 [H]);
 //                        FleetDeparted: SFXEvent_Enemy_Fleet_Approaching_Planet when a hostile fleet that is not all galactic-
-//                        stealthed sets off towards a planet of the local player [port].
+//                        stealthed sets off towards a planet of the local player that has a local fleet in orbit (ui4 t11,
+//                        P4_SIM_SYSTEMS §2.7.3; the 5 s limit and the advisor line are the host's).
 //   fleet_drag_route     ui4 t06 (GALAXY_MAP_PRESENTATION §2.2, 0x3da30 [H]): the planets (origin first) of the grey preview
 //                        line while the local player drags fleet object `fleet_id` onto planet `target`: the fleet path
 //                        finder from the fleet's orbit planet with the preview's request flags - unknown / neutral (0),
@@ -127,8 +127,7 @@ int32_t ar_result_magnitude(bool win, uint32_t n_own, uint32_t n_other);
 
 ui::HudBuildOption::Block galactic_build_block(commands::RejectReason why);
 const char* galactic_announcement(const galactic::GalacticSim& g, const galactic::GalacticEvent& e, int32_t local_player);
-std::u32string conflict_log_line(const galactic::ConflictLogEntry& e, const std::function<std::u32string(PlanetIndex planet)>& planet_name,
-                                 const std::function<std::u32string(int32_t player)>& faction_name);
+std::vector<std::u32string> droid_log_rows(std::u32string_view day_text, int32_t cycle, std::u32string_view text, std::u32string_view separator);
 std::vector<PlanetIndex> fleet_drag_route(const galactic::GalacticSim& g, int32_t local_player, uint32_t fleet_id, PlanetIndex target);
 // `icon(type)` = the type's Icon_Name.
 std::vector<ui::GalacticBuildOption> galactic_build_options(const galactic::GalacticSim& g, int32_t player, PlanetIndex planet,

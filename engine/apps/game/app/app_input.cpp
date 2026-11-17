@@ -88,7 +88,7 @@ void App::special_feedback() {
                 break;
             case K::SabotageVigilance:  // TEXT_SABOTAGE_FAILURE_VIGILANCE to the saboteur's owner, _PREVENTED_ to the planet's
                 if (local || e.other_player == local_player()) {
-                    // ui4 t05 [port]: the message callback (P4 §2.3) as a white screen-text line, as the holocron message.
+                    // ui4 t11: the message callback (P4 §2.7.1) as an urgent advisor line.
                     galactic_message(local ? "TEXT_SABOTAGE_FAILURE_VIGILANCE" : "TEXT_SABOTAGE_PREVENTED_VIGILANCE");
                     ++special_msgs_;
                 }
@@ -114,7 +114,7 @@ void App::special_feedback() {
                     std::printf("slice: %s %s%s%s\n", type_name(e.type), e.value == 0 ? "unlocked" : e.value == 2 ? "lost effort" : "failed",
                                 id ? ", message " : "", id ? id : "");
                     if (id) {
-                        galactic_message(id);  // ui4 t05 [port]: screen-text line
+                        galactic_message(id);  // ui4 t11: an urgent advisor line
                         ++special_msgs_;
                     }
                     if (local && e.value == 0) {
@@ -140,9 +140,19 @@ void App::announcer_feedback() {
     constexpr uint32_t kNoPassThrough = 0xFFFFFFFFu;
     uint32_t pass_through_fleet = kNoPassThrough;  // aud2 t07: the fleet of the event before, when a pass-through arrival
     for (const galactic::GalacticEvent& e : session_->take_announce_events()) {
-        if (const char* tag = galactic_announcement(*g, e, me)) {
+        // ui4 t11 (P4_SIM_SYSTEMS §2.7.3): an enemy approach at most every 5 s of wall-clock time (all planets together),
+        // with the urgent line TEXT_ENEMY_FLEET_APPROACHING_LOCATION ("##0" = the planet) in (0, 193, 91).
+        const bool approach = e.kind == K::FleetDeparted;
+        if (const char* tag = galactic_announcement(*g, e, me); tag && !(approach && now_s_ - last_approach_s_ < 5.0)) {
             audio_.faction_sfx(tag);
             ++announcements_;
+            if (approach) {
+                last_approach_s_ = now_s_;
+                const std::u16string* t = ui_.text.find("TEXT_ENEMY_FLEET_APPROACHING_LOCATION");
+                std::u32string line = t ? ui::utf16_to_utf32(*t) : std::u32string(U"##0");
+                if (const size_t at = line.find(U"##0"); at != std::u32string::npos) line.replace(at, 3, planet_label(data_, ui_.text, *g, e.other_planet));
+                story_present_.urgent_message(std::move(line), StoryColor{0, 193, 91, 255});
+            }
         }
         // aud2 t03: the local player's production begin / cancel / complete -> the built type's SFXEvent_Build_* (and
         // Build_Music_Completed). Galactic production types index the object type table (as HeroRespawned).
@@ -176,23 +186,27 @@ void App::announcer_feedback() {
             audio_.fleet_departure(e.player == me, sees);
         }
     }
+    // ui4 t11 (§2.7.3, player tick 0x287e70): SFXEvent_Strategic_Pop_Cap_Reached when the population used rises above a
+    // previous value > 0 and reaches the capacity. Retail never plays SFXEvent_Max_Credits_Limit_Reached or
+    // _Build_Impossible_Location_Blockaded (no reader of either field).
     if (me >= 0 && static_cast<size_t>(me) < g->players().size()) {
-        const auto& acc = g->players()[static_cast<size_t>(me)].account;
-        const bool capped = acc.cap >= 0.0f && acc.credits >= acc.cap;
-        if (capped && !credits_capped_) {
-            audio_.faction_sfx("SFXEvent_Max_Credits_Limit_Reached");
+        const int32_t used = g->population_used(me);
+        if (prev_pop_used_ > 0 && used > prev_pop_used_ && g->population_capacity(me) <= used) {
+            audio_.faction_sfx("SFXEvent_Strategic_Pop_Cap_Reached");
             ++announcements_;
         }
-        credits_capped_ = capped;
+        prev_pop_used_ = used;
     }
 }
 
-// ui4 t05 [port]: a galactic message (the original's message callback 0x140b313c0, P4_SIM_SYSTEMS §2.3) shown as a white
-// screen-text line (GALACTIC_DIALOGS §2: the holocron message uses that line), text from the MasterTextFile (the id when
-// missing).
+// ui4 t05 / t11: a galactic message (the original's message callback 0x140b313c0, P4_SIM_SYSTEMS §2.7.1): text from the
+// MasterTextFile (the id when missing) as an urgent advisor line.
 void App::galactic_message(std::string_view id) {
     const std::u16string* t = ui_.text.find(id);
-    screen_line(t ? ui::utf16_to_utf32(*t) : ui::utf8_to_utf32(id), ui::Rgba8{255, 255, 255, 255});
+    // ui4 t11 (P4_SIM_SYSTEMS §2.7.1): an urgent advisor line in the local player's faction <Color>.
+    ui::Rgba8 c{255, 255, 255, 255};
+    if (const galactic::GalacticSim* g = galaxy()) c = faction_rgba(*g, local_player(), false, c);
+    story_present_.urgent_message(t ? ui::utf16_to_utf32(*t) : ui::utf8_to_utf32(id), StoryColor{c.r, c.g, c.b, 255});
 }
 // --- end P4 host ---
 
@@ -519,23 +533,9 @@ void App::handle_hud_actions(const std::vector<ui::HudAction>& acts) {
                                                     static_cast<uint8_t>(a.ids[0]), static_cast<uint8_t>(a.ids[1])));
                 break;
             case ui::HudAction::Kind::BuildRefused: {  // ui4 t02: a greyed galactic build pad: GUI negative feedback, no command
-                // ui4 t08 [port]: the announcer instead when the reason has one - the population cap
-                // (SFXEvent_Strategic_Pop_Cap_Reached), or a space-tab item at a planet with enemy ships in orbit
-                // (SFXEvent_Build_Impossible_Location_Blockaded: "enemy ships in orbit so can't build space station").
-                const galactic::GalacticSim* g = galaxy();
-                const PlanetIndex pi = g ? planet_index(*g, selected_planet_) : kInvalidPlanet;
-                const bool space = g && a.unit < g->rules().types.size() &&
-                                   (g->queue_kind(a.unit) == galactic::kSpaceQueue || galactic::is_star_base_type(g->rules().types[a.unit]) ||
-                                    galactic::is_orbital_structure_type(g->rules().types[a.unit]));
-                if (a.value == static_cast<int32_t>(ui::HudBuildOption::Block::PopCap)) {
-                    audio_.faction_sfx("SFXEvent_Strategic_Pop_Cap_Reached");
-                    ++announcements_;
-                } else if (space && pi != kInvalidPlanet && g->blockaded(pi, local_player())) {
-                    audio_.faction_sfx("SFXEvent_Build_Impossible_Location_Blockaded");
-                    ++announcements_;
-                } else {
-                    audio_.negative_feedback();
-                }
+                // ui4 t11 (P4_SIM_SYSTEMS §2.7.3): no announcer here - a refused build plays nothing of its own in retail, and
+                // its blockaded speech has no reader.
+                audio_.negative_feedback();
                 ++build_refusals_;
                 break;
             }

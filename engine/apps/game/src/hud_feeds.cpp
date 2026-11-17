@@ -270,16 +270,13 @@ std::vector<ui::GalacticBuildOption> galactic_build_options(const galactic::Gala
     return out;
 }
 
-std::u32string conflict_log_line(const galactic::ConflictLogEntry& e, const std::function<std::u32string(PlanetIndex planet)>& planet_name,
-                                 const std::function<std::u32string(int32_t player)>& faction_name) {
-    auto who = [&](int32_t p) { return p >= 0 && faction_name ? faction_name(p) : std::u32string(U"?"); };
-    std::u32string s = U"Battle of " + (planet_name ? planet_name(e.planet) : std::u32string(U"?")) +
-                       (e.kind == galactic::ConflictKind::Space ? U" (space): " : U" (land): ") + who(e.attacker) + U" vs " + who(e.defender);
-    if (e.how == 0) return s + U" - called off";
-    if (e.retreating >= 0) s += U" - " + who(e.retreating) + U" retreated";
-    else if (e.winner >= 0) s += U" - " + who(e.winner) + U" victorious";
-    if (e.how == 1) s += U" (auto-resolved)";
-    return s;
+std::vector<std::u32string> droid_log_rows(std::u32string_view day_text, int32_t cycle, std::u32string_view text, std::u32string_view separator) {
+    std::u32string day(day_text);
+    std::u32string num;
+    for (const char c : std::to_string(cycle)) num.push_back(static_cast<char32_t>(c));
+    if (const size_t at = day.find(U"##0"); at != std::u32string::npos) day.replace(at, 3, num);
+    else day += (day.empty() ? U"" : U" ") + num;
+    return {std::move(day), std::u32string(text), std::u32string(separator)};
 }
 
 const char* galactic_announcement(const galactic::GalacticSim& g, const galactic::GalacticEvent& e, int32_t me) {
@@ -300,6 +297,11 @@ const char* galactic_announcement(const galactic::GalacticSim& g, const galactic
         case K::FleetDeparted: {
             const PlanetIndex to = e.other_planet;
             if (to >= g.planets().size() || g.planets()[to].owner != me || e.player < 0 || g.allied(me, e.player)) return nullptr;
+            // ui4 t11 (P4_SIM_SYSTEMS §2.7.3): only when the local player has something in the destination's orbit [port:
+            // its fleets; whether retail's orbit list also counts the starbase is M].
+            bool present = false;
+            for (const galactic::FleetState& f : g.fleets()) present = present || (f.alive && f.owner == me && f.planet == to && !f.contents.empty());
+            if (!present) return nullptr;
             if (e.fleet < g.fleets().size()) {
                 const galactic::FleetState& fl = g.fleets()[e.fleet];
                 bool all_hidden = !fl.contents.empty();

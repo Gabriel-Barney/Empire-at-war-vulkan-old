@@ -1723,24 +1723,11 @@ void hero_roster_real_test() {
 // HUD_GAPS feeds (hud_feeds.hpp): day pips (§4), order buttons (§5), hard-point type names / placement (§1), galactic
 // hero roster (§3.2) on a running session galaxy.
 void hud_feeds_test(const game::GameData& data, const game::SessionSpec& spec) {
-    // ui4 t05: the Droid Log battle line.
+    // ui4 t11 (P4_SIM_SYSTEMS §2.7.2): a shown advisor line's Droid Log rows - "Day N", the text, the separator.
     {
-        galactic::ConflictLogEntry e;
-        e.kind = galactic::ConflictKind::Land;
-        e.planet = 3;
-        e.attacker = 0;
-        e.defender = 1;
-        e.how = 1;
-        e.winner = 1;
-        const auto pn = [](PlanetIndex p) { return p == 3 ? std::u32string(U"Kuat") : std::u32string(U"?"); };
-        const auto fn = [](int32_t p) { return p == 0 ? std::u32string(U"Rebellion") : std::u32string(U"Empire"); };
-        CHECK(game::conflict_log_line(e, pn, fn) == U"Battle of Kuat (land): Rebellion vs Empire - Empire victorious (auto-resolved)");
-        e.kind = galactic::ConflictKind::Space;
-        e.how = 2;
-        e.retreating = 0;
-        CHECK(game::conflict_log_line(e, pn, fn) == U"Battle of Kuat (space): Rebellion vs Empire - Rebellion retreated");
-        e.how = 0;
-        CHECK(game::conflict_log_line(e, pn, fn) == U"Battle of Kuat (space): Rebellion vs Empire - called off");
+        const std::vector<std::u32string> r = game::droid_log_rows(U"Day ##0", 12, U"Enemy fleet approaching Kuat", U"____");
+        CHECK(r.size() == 3 && r[0] == U"Day 12" && r[1] == U"Enemy fleet approaching Kuat" && r[2] == U"____");
+        CHECK(game::droid_log_rows(U"", 3, U"x", U"-")[0] == U"3");
     }
     // §4: (frame - cycle start) / cycle frames, clamped; no cycle length hides the pips.
     CHECK(game::day_cycle_fraction(0, 0, 1350) == 0.0f && game::day_cycle_fraction(675, 0, 1350) == 0.5f);
@@ -1826,8 +1813,16 @@ void hud_feeds_test(const game::GameData& data, const game::SessionSpec& spec) {
         for (int32_t p = 0; p < static_cast<int32_t>(gg.players().size()); ++p)
             if (p != me && !gg.allied(me, p)) other = p;
         PlanetIndex mine = kInvalidPlanet;
+        bool guarded = false;  // ui4 t11: a local fleet orbits `mine` (the enemy-approach announcer needs one)
         for (PlanetIndex i = 0; i < gg.planets().size(); ++i)
-            if (gg.planets()[i].owner == me) mine = i;
+            if (gg.planets()[i].owner == me) {
+                bool g2 = false;
+                for (const galactic::FleetState& f : gg.fleets()) g2 = g2 || (f.alive && f.owner == me && f.planet == i && !f.contents.empty());
+                if (mine == kInvalidPlanet || (g2 && !guarded)) {
+                    mine = i;
+                    guarded = g2;
+                }
+            }
         using K = galactic::GalacticEventKind;
         galactic::GalacticEvent ev;
         ev.kind = K::PlanetOwnerChanged;
@@ -1852,7 +1847,8 @@ void hud_feeds_test(const game::GameData& data, const game::SessionSpec& spec) {
             ev.kind = K::FleetDeparted;
             ev.fleet = 0xFFFFFFFFu;
             ev.other_planet = mine;
-            if (other >= 0) CHECK(std::string_view(game::galactic_announcement(gg, ev, me)) == "SFXEvent_Enemy_Fleet_Approaching_Planet");
+            if (other >= 0 && guarded) CHECK(std::string_view(game::galactic_announcement(gg, ev, me)) == "SFXEvent_Enemy_Fleet_Approaching_Planet");
+            if (other >= 0 && !guarded) CHECK(game::galactic_announcement(gg, ev, me) == nullptr);
             ev.player = me;
             CHECK(game::galactic_announcement(gg, ev, me) == nullptr);
         }

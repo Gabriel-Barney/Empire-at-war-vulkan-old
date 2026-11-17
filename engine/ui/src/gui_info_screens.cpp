@@ -279,6 +279,39 @@ void InfoScreens::fill_tech(GuiDialog& d) {
     }
 }
 
+int32_t summary_button_key(std::string_view c) {
+    static constexpr std::pair<const char*, int32_t> kKeys[] = {
+        {"IDC_BUTTON_PLANETARY", 1},           {"IDC_BUTTON_BASE_CREDIT_VALUE", 2}, {"IDC_BUTTON_TRADE_ROUTE_INCOME", 3},
+        {"IDC_BUTTON_MINING_FACILITY_INCOME", 4}, {"IDC_BUTTON_TOTAL_INCOME", 5},    {"IDC_BUTTON_POP_CAP", 6},
+        {"IDC_BUTTON_PRODUCING", 7},           {"IDC_BUTTON_UPGRADES", 8},          {"IDC_BUTTON_LAND_FLEETS", 9},
+        {"IDC_BUTTON_SPACE_FLEETS", 10}};
+    for (const auto& [name, key] : kKeys)
+        if (iequals(c, name)) return key;
+    return 0;
+}
+
+void InfoScreens::sort_summary(int32_t key) {
+    if (key <= 0 || static_cast<size_t>(key) >= kSummarySortKeys) return;
+    sort_reversed_ = key == sort_key_ ? !sort_reversed_ : false;
+    sort_key_ = key;
+    apply_summary_sort();
+    if (GuiDialog* d = gui_ ? gui_->find(info_open_) : nullptr)
+        if (page_ == InfoPage::SummaryProduction || page_ == InfoPage::SummaryFleets || page_ == InfoPage::SummaryEconomy) fill_summary(*d);
+}
+
+void InfoScreens::apply_summary_sort() {
+    if (sort_key_ <= 0) return;
+    const auto k = static_cast<size_t>(sort_key_);
+    const bool rev = sort_reversed_;
+    auto by = [k, rev](const auto& a, const auto& b) {
+        if (k == 1) return rev ? b.name < a.name : a.name < b.name;  // A to Z by code unit
+        return rev ? a.sort[k] < b.sort[k] : a.sort[k] > b.sort[k];  // largest first
+    };
+    std::stable_sort(summary_.production.begin(), summary_.production.end(), by);
+    std::stable_sort(summary_.fleets.begin(), summary_.fleets.end(), by);
+    std::stable_sort(summary_.economy.begin(), summary_.economy.end(), by);
+}
+
 void InfoScreens::fill_summary(GuiDialog& d) {
     auto set = [&](const std::string& id, const std::u32string& t) { d.set_text(id, t); };
     if (page_ == InfoPage::SummaryProduction) {
@@ -464,8 +497,10 @@ void InfoScreens::on_click(const GuiEvent& e, std::vector<ScreenAction>& out) {
             info_open_.clear();
             out.push_back(act(ScreenAction::Kind::InfoClosed));
         } else if (is("IDC_BUTTON_PLANETARY")) {
+            sort_summary(1);
             out.push_back(act(ScreenAction::Kind::SummaryPlanetary));
         } else if (ascii_istarts_with(c, "IDC_BUTTON_")) {
+            if (const int32_t key = summary_button_key(c); key > 0) sort_summary(key);
             ScreenAction a = act(ScreenAction::Kind::SummarySort);
             a.tag = std::string(c);
             out.push_back(std::move(a));
