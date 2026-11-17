@@ -294,29 +294,34 @@ struct Vfs::Impl {
         warnings.push_back(std::move(msg));
     }
 
-    bool find(const std::string& norm, Hit& out) const {
+    bool find(const std::string& norm, Hit& out) const { return find_nth(norm, 0, out); }
+
+    // The n-th copy of `norm` in resolution order (0 = what find() returns): the same walk, counting the layers that
+    // hold the file instead of stopping at the first.
+    bool find_nth(const std::string& norm, size_t n, Hit& out) const {
         const bool data = is_data_path(norm);
-        if (data) {
-            for (size_t i = 0; i < mods.size(); ++i) {
-                if (const std::string* h = mods[i].find(norm)) {
-                    out = Hit{Resolution::Mod, static_cast<int>(i), h, nullptr, nullptr};
-                    return true;
-                }
-            }
-            if (const std::string* h = base.find(norm)) {
-                out = Hit{Resolution::Base, 0, h, nullptr, nullptr};
+        const auto take = [&](const Hit& h) {
+            if (n == 0) {
+                out = h;
                 return true;
             }
-        }
-        if (find_meg(norm, archives.size(), out)) return true;
+            --n;
+            return false;
+        };
         if (data) {
-            for (size_t i = 0; i < fallbacks.size(); ++i) {
-                if (const std::string* h = fallbacks[i].find(norm)) {
-                    out = Hit{Resolution::Fallback, static_cast<int>(i), h, nullptr, nullptr};
-                    return true;
-                }
-            }
+            for (size_t i = 0; i < mods.size(); ++i)
+                if (const std::string* h = mods[i].find(norm))
+                    if (take(Hit{Resolution::Mod, static_cast<int>(i), h, nullptr, nullptr})) return true;
+            if (const std::string* h = base.find(norm))
+                if (take(Hit{Resolution::Base, 0, h, nullptr, nullptr})) return true;
         }
+        for (size_t i = archives.size(); i-- > 0;)
+            if (const meg::Entry* e = archives[i]->find(norm))
+                if (take(Hit{Resolution::Meg, static_cast<int>(i), nullptr, archives[i].get(), e})) return true;
+        if (data)
+            for (size_t i = 0; i < fallbacks.size(); ++i)
+                if (const std::string* h = fallbacks[i].find(norm))
+                    if (take(Hit{Resolution::Fallback, static_cast<int>(i), h, nullptr, nullptr})) return true;
         return false;
     }
 
@@ -528,6 +533,23 @@ bool Vfs::read(std::string_view path, std::vector<uint8_t>& out) const {
     const bool ok = h.archive ? h.archive->read(*h.entry, out) : read_host_file(*h.host, out);
     if (!ok) out.clear();
     return ok;
+}
+
+bool Vfs::read_nth(std::string_view path, size_t n, std::vector<uint8_t>& out, Resolution* where) const {
+    out.clear();
+    Hit h;
+    if (!impl_->find_nth(normalize_path(path), n, h)) return false;
+    const bool ok = h.archive ? h.archive->read(*h.entry, out) : read_host_file(*h.host, out);
+    if (!ok) {
+        out.clear();
+        return false;
+    }
+    if (where) {
+        where->layer = h.layer;
+        where->layer_index = h.index;
+        where->location = h.archive ? impl_->mounts[static_cast<size_t>(h.index)].path + "#" + h.entry->name : *h.host;
+    }
+    return true;
 }
 
 bool Vfs::exists(std::string_view path) const {

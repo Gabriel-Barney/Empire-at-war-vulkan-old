@@ -108,6 +108,11 @@ public:
     std::string origin(std::string_view path) const override;  // Resolution::location or ""
 
     std::optional<Resolution> resolve(std::string_view path) const;
+    // The n-th copy of `path` in resolution order (mcx2 t07): n = 0 is what read() returns, n = 1 the copy the next
+    // layer down holds (a mod's file -> the base game's), and so on. False (out empty) when fewer copies exist or the
+    // read fails. `where`, when given, receives the copy's layer and location. For a fallback when a mod's copy of a
+    // file fails to load; normal reads never use it.
+    bool read_nth(std::string_view path, size_t n, std::vector<uint8_t>& out, Resolution* where = nullptr) const;
 
     // Union of all logical paths matching `glob` over every layer, each once, normalised
     // (upper-case, '\\'), sorted by byte order. Glob: '*' and '?' do not cross '\\'; '**' does.

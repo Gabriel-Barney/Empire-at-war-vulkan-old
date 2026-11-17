@@ -2,35 +2,136 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <map>
+#include <memory>
 #include <string_view>
+#include <utility>
 
+#include "alamo/assets/texture.hpp"
 #include "alamo/core/ascii.hpp"
 #include "alamo/data/game_database.hpp"
 #include "alamo/vfs/vfs.hpp"
 
+#include <windows.h>
+
 namespace alamo::game {
+
+namespace {
+
+// mcx2 t07 (MOD_COMPAT_DESIGN.md 10.4): reads a path from a chosen copy (Vfs::read_nth), so a mod's GUI file that fails
+// to load can be replaced by the next layer's copy (usually the base game's). Without a Vfs it is the plain provider.
+class LayerFallbackFiles final : public FileProvider {
+public:
+    LayerFallbackFiles(const FileProvider& files, const vfs::Vfs* v) : files_(files), vfs_(v) {}
+    bool read(std::string_view path, std::vector<uint8_t>& out) const override {
+        const size_t n = copy_of(path);
+        return n == 0 || !vfs_ ? files_.read(path, out) : vfs_->read_nth(path, n, out);
+    }
+    bool exists(std::string_view path) const override {
+        std::vector<uint8_t> b;
+        return copy_of(path) == 0 ? files_.exists(path) : read(path, b);
+    }
+    std::string origin(std::string_view path) const override { return files_.origin(path); }
+    // Moves `path` on to its next copy; false (nothing changed) when there is none. *where = the copy's location.
+    bool next(std::string_view path, std::string* where) {
+        if (!vfs_) return false;
+        std::vector<uint8_t> b;
+        vfs::Vfs::Resolution r{};
+        const size_t n = copy_of(path) + 1;
+        if (!vfs_->read_nth(path, n, b, &r)) return false;
+        copies_[ascii_upper(path)] = n;
+        if (where) *where = r.location;
+        return true;
+    }
+
+private:
+    size_t copy_of(std::string_view path) const {
+        const auto it = copies_.find(ascii_upper(path));
+        return it == copies_.end() ? 0 : it->second;
+    }
+    const FileProvider& files_;
+    const vfs::Vfs* vfs_;
+    std::map<std::string, size_t> copies_;
+};
+
+void report_gui_fallback(const char* path, const std::string& why, const std::string& where) {
+    std::fprintf(stderr, "gui_fallback: %s did not load (%s); using the next layer's copy %s\n", path, why.c_str(),
+                 where.c_str());
+}
+
+}  // namespace
 
 bool GameUi::init(GpuCore& gpu, const GameData& data, ui::MenuProviders providers, std::string* err) {
     std::string e;
-    if (!ui::load_gui_data(*data.files, gui_data, &e)) {
-        if (err) *err = "GUI dialogs: " + e;
-        return false;
+    // A mod's GUIDialogs.rc / .xml, MT_CommandBar.mtd / .tga that does not load falls back to the next layer's copy with
+    // a gui_fallback line, instead of the game refusing to start (mcx2 t07). [port] retail's behaviour for a broken
+    // copy is not checked; the game cannot run without them, so a fallback is never worse.
+    LayerFallbackFiles gui_files(*data.files, data.vfs);
+    for (uint32_t failed = 0; !ui::load_gui_data(gui_files, gui_data, &e, &failed);) {
+        bool moved = false;
+        for (const auto& [path, bit] : {std::pair{ui::kGuiDialogsRcPath, ui::kGuiRcFailed},
+                                        std::pair{ui::kGuiDialogsXmlPath, ui::kGuiXmlFailed}}) {
+            std::string where;
+            if ((failed & bit) && gui_files.next(path, &where)) {
+                report_gui_fallback(path, e, where);
+                moved = true;
+            }
+        }
+        if (!moved) {
+            if (err) *err = "GUI dialogs: " + e;
+            return false;
+        }
+        gui_data = ui::GuiData{};
     }
     if (!gui_data.script.merge(ui::kPortDialogsRc, &e)) std::fprintf(stderr, "port dialogs: %s\n", e.c_str());  // camera / controls
     if (!gui_data.script.extend(ui::kPortDialogExtensionsRc, &e)) std::fprintf(stderr, "port dialog controls: %s\n", e.c_str());  // v-sync mode
     std::vector<uint8_t> mtd;
-    if (!data.files->read("Data\\Art\\Textures\\MT_CommandBar.mtd", mtd) || !atlas.parse(mtd, &e)) {
-        if (err) *err = "MT_CommandBar.mtd: " + e;
-        return false;
+    constexpr const char* kMtd = "Data\\Art\\Textures\\MT_CommandBar.mtd";
+    while (!gui_files.read(kMtd, mtd) || !atlas.parse(mtd, &e)) {
+        std::string where;
+        if (!gui_files.next(kMtd, &where)) {
+            if (err) *err = std::string("MT_CommandBar.mtd: ") + e;
+            return false;
+        }
+        report_gui_fallback(kMtd, e, where);
+        atlas = ui::TextureAtlas{};
     }
-    const auto atlas_tex = gpu.cache->texture("MT_CommandBar.tga");
+    std::shared_ptr<const assets::TextureAsset> atlas_tex = gpu.cache->texture("MT_CommandBar.tga");
+    if ((!atlas_tex || atlas_tex->is_fallback) && data.vfs) {
+        // The copy the cache found did not decode: the next copies of each lookup candidate, in lookup order.
+        for (const auto& c : assets::texture_lookup("MT_CommandBar.tga")) {
+            std::vector<uint8_t> bytes;
+            vfs::Vfs::Resolution where{};
+            bool done = false;
+            for (size_t n = 1; !done && data.vfs->read_nth(c.path, n, bytes, &where); ++n) {
+                auto t = std::make_shared<assets::TextureAsset>();
+                std::string why;
+                if (assets::decode_texture(std::move(bytes), *t, &why)) {
+                    report_gui_fallback(c.path.c_str(), "did not decode", where.location);
+                    atlas_tex = std::move(t);
+                    done = true;
+                }
+            }
+            if (done) break;
+        }
+    }
     if (!atlas_tex || atlas_tex->is_fallback || !gpu.hud.set_atlas_texture(*atlas_tex)) {
         if (err) *err = "MT_CommandBar.tga not loaded";
         return false;
     }
     atlas.texture_width = atlas_tex->width;
     atlas.texture_height = atlas_tex->height;
-    if (!ui::load_master_text(*data.files, "ENGLISH", text)) std::fprintf(stderr, "MasterTextFile not loaded: keys shown as text\n");
+    {
+        // Retail's text language: the Windows user language through its table, else English (UI.md 3.5, mcx2 t06);
+        // a missing MasterTextFile_<LANGUAGE>.DAT falls back to English, a DAT with a bad record keeps the entries
+        // before it (text_salvaged).
+        const std::string language = ui::retail_language_for_langid(GetUserDefaultLangID());
+        std::string log;
+        if (!ui::load_master_text(*data.files, language, text, &log))
+            std::fprintf(stderr, "MasterTextFile not loaded: keys shown as text\n");
+        if (!log.empty()) std::fprintf(stderr, "%s", log.c_str());
+        std::printf("text: %s, %zu strings\n", text.language.c_str(), text.size());
+    }
     {  // [port] dev tool, off by default: ALAMO_PSEUDO_LOC=1 makes every MasterTextFile string 35 % longer (overflow check)
         char* v = nullptr;
         size_t len = 0;

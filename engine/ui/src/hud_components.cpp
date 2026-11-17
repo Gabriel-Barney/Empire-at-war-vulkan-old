@@ -300,23 +300,43 @@ bool TextDatabase::parse(std::span<const uint8_t> bytes, std::string* error) {
         values_.clear();
         return false;
     };
+    declared_ = 0;
     if (bytes.size() < 4) return fail("DAT: truncated header");
     const uint32_t count = rd32(bytes.data());
     if (count > (bytes.size() - 4) / 12) return fail("DAT: truncated records");
-    size_t value_chars = 0, key_chars = 0;
+    declared_ = count;
+    uint64_t value_chars = 0, key_chars = 0;
     for (uint32_t i = 0; i < count; ++i) {
         const uint8_t* r = bytes.data() + 4 + static_cast<size_t>(i) * 12;
         value_chars += rd32(r + 4);
         key_chars += rd32(r + 8);
     }
     const size_t head = 4 + static_cast<size_t>(count) * 12;
-    if (value_chars > (bytes.size() - head) / 2 || key_chars > bytes.size() - head - value_chars * 2)
-        return fail("DAT: truncated strings");
-    size_t vo = head, ko = head + value_chars * 2;
-    crcs_.reserve(count);
-    keys_.reserve(count);
-    values_.reserve(count);
-    for (uint32_t i = 0; i < count; ++i) {
+    const uint64_t room = bytes.size() - head;
+    // Where the key block starts: after the values when they fit, else at the file's tail (salvage).
+    const bool values_fit = value_chars * 2 <= room;
+    const uint64_t key_start = values_fit ? head + value_chars * 2 : (key_chars <= room ? bytes.size() - key_chars : 0);
+    if (!values_fit && key_start == 0) return fail("DAT: truncated strings");
+    // Records kept: every one whose value ends before the key block and whose key ends inside the file.
+    uint32_t keep = 0;
+    {
+        uint64_t v = head, k = key_start;
+        for (; keep < count; ++keep) {
+            const uint8_t* r = bytes.data() + 4 + static_cast<size_t>(keep) * 12;
+            v += uint64_t(rd32(r + 4)) * 2;
+            k += rd32(r + 8);
+            if (v > key_start || k > bytes.size()) break;
+        }
+    }
+    if (keep == 0 && count > 0) return fail("DAT: truncated strings");
+    if (keep < count && error)
+        *error = "text_salvaged: DAT record " + std::to_string(keep) + " does not fit the file; kept " +
+                 std::to_string(keep) + " of " + std::to_string(count) + " entries";
+    size_t vo = head, ko = static_cast<size_t>(key_start);
+    crcs_.reserve(keep);
+    keys_.reserve(keep);
+    values_.reserve(keep);
+    for (uint32_t i = 0; i < keep; ++i) {
         const uint8_t* r = bytes.data() + 4 + static_cast<size_t>(i) * 12;
         const uint32_t vc = rd32(r + 4), kc = rd32(r + 8);
         std::u16string v(vc, u'\0');
@@ -484,6 +504,22 @@ std::u16string pseudo_localize(std::u16string_view s) {
     return out;
 }
 
+std::string retail_language_for_langid(uint16_t langid) {
+    // UI.md 3.5: retail maps the Windows user LANGID (GetUserDefaultLangID) through a fixed table to one of its
+    // languages; Japanese, Korean, Chinese and Thai are then overridden to English, and a LANGID outside the table is
+    // English. The table lists these primary languages with these sublanguages.
+    const unsigned primary = langid & 0x3FFu, sub = langid >> 10;
+    switch (primary) {
+        case 0x07: return sub >= 1 && sub <= 5 ? "GERMAN" : "ENGLISH";
+        case 0x0C: return sub >= 1 && sub <= 6 ? "FRENCH" : "ENGLISH";
+        case 0x0A: return sub >= 1 && sub <= 20 ? "SPANISH" : "ENGLISH";
+        case 0x10: return sub >= 1 && sub <= 2 ? "ITALIAN" : "ENGLISH";
+        case 0x15: return sub == 1 ? "POLISH" : "ENGLISH";
+        case 0x19: return sub == 1 ? "RUSSIAN" : "ENGLISH";
+        default: return "ENGLISH";
+    }
+}
+
 std::string master_text_path(std::string_view language) {
     return "Data\\Text\\MasterTextFile_" + ascii_upper(language) + ".DAT";
 }
@@ -501,6 +537,7 @@ bool load_master_text(const FileProvider& files, std::string_view language, Text
         if (log) *log += err + "\n";
         return false;
     }
+    if (!err.empty() && log) *log += err + "\n";  // text_salvaged
     out.language = lang;
     return true;
 }

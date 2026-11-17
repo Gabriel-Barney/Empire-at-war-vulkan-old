@@ -5,6 +5,7 @@
 
 #include "alamo/core/file_provider.hpp"
 #include "alamo/video/video.hpp"
+#include "alamo/video/bink_header.hpp"
 #include "ffmpeg_api.hpp"
 
 namespace alamo::video {
@@ -332,6 +333,13 @@ std::unique_ptr<BinkDecoder> BinkDecoder::open(const alamo::FileProvider& files,
 std::unique_ptr<BinkDecoder> BinkDecoder::open_memory(std::vector<uint8_t> bytes, const OpenOptions& opt,
                                                       std::string* err) {
     std::string e;
+    if (const auto h = probe_bink_header(bytes)) {  // a movie FFmpeg cannot play is named before it is opened (mcx2 t05)
+        const std::string why = bink_unsupported_reason(*h);
+        if (!why.empty()) {
+            if (err) *err = why;
+            return nullptr;
+        }
+    }
     const Api* ff = detail::api(&e);
     if (!ff) {
         if (err) *err = e;

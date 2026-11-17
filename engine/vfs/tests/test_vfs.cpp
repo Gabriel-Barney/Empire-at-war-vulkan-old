@@ -231,6 +231,20 @@ int main() {
         CHECK(r && r->location.find("Config.meg#") != std::string::npos);
         CHECK(v->origin("Data\\XML\\P_Meg_FB.xml") == r->location);
     }
+    // read_nth (mcx2 t07): the copies in resolution order: mod A, mod B; mod B, base; base, MEG, fallback
+    {
+        std::vector<uint8_t> b;
+        Vfs::Resolution w{};
+        const auto str = [&b] { return std::string(b.begin(), b.end()); };
+        CHECK(v->read_nth("Data\\XML\\P_ModA_ModB.xml", 0, b) && str() == "A");
+        CHECK(v->read_nth("Data\\XML\\P_ModA_ModB.xml", 1, b, &w) && str() == "B" && w.layer == Vfs::Resolution::Mod &&
+              w.layer_index == 1);
+        CHECK(!v->read_nth("Data\\XML\\P_ModB_Base.xml", 2, b) && b.empty());
+        CHECK(v->read_nth("Data\\XML\\P_ModB_Base.xml", 1, b, &w) && str() == "BASE" && w.layer == Vfs::Resolution::Base);
+        CHECK(v->read_nth("Data\\XML\\P_Meg_FB.xml", 1, b, &w) && w.layer == Vfs::Resolution::Fallback);
+        CHECK(v->read_nth("Data\\XML\\Order0.xml", 1, b, &w) && w.layer == Vfs::Resolution::Meg && w.layer_index == 8);
+        CHECK(!v->read_nth("Data\\XML\\Nothing.xml", 0, b));
+    }
 
     // Case / separator / prefix insensitivity; not found.
     CHECK(read_str(*v, "data/xml/p_moda_modb.XML") == "A");

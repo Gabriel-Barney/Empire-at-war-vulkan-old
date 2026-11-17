@@ -309,9 +309,30 @@ void test_atlas_text() {
     esc.add("TEXT_ESC", u"a\\nb");
     CHECK(*esc.find("TEXT_ESC") == u"a\\nb" && esc.text("TEXT_ESC") == u"a\\nb");
     std::vector<uint8_t> bad = make_dat(kv);
-    bad.resize(bad.size() - 3);
+    bad.resize(bad.size() - 3);  // the last key cut: the entries before it are kept (mcx2 t06, text_salvaged)
     TextDatabase e2;
-    CHECK(!e2.parse(bad) && e2.size() == 0);
+    std::string why;
+    CHECK(e2.parse(bad, &why) && e2.size() == kv.size() - 1 && e2.salvaged() && e2.declared() == kv.size() &&
+          why.find("text_salvaged") != std::string::npos);
+    {  // one bad value count in the middle: the keys come from the file's tail, entries before the bad record are kept
+        const std::vector<std::pair<std::string, std::u16string>> three = {{"TEXT_A", u"aa"}, {"TEXT_B", u"bb"}, {"TEXT_C", u"cc"}};
+        std::vector<uint8_t> one_bad = make_dat(three);
+        one_bad[4 + 12 + 4] = 200;  // record 1 claims 200 characters
+        TextDatabase s;
+        CHECK(s.parse(one_bad) && s.size() == 1 && s.text("TEXT_A") == u"aa" && s.salvaged());
+        std::vector<uint8_t> none = make_dat(three);
+        none[4 + 4] = 200;  // record 0 bad: nothing to keep
+        CHECK(!s.parse(none) && s.size() == 0);
+        TextDatabase ok;
+        CHECK(ok.parse(make_dat(three)) && !ok.salvaged() && ok.size() == 3);
+    }
+    // Retail's language from the Windows LANGID (UI.md 3.5)
+    CHECK(retail_language_for_langid(0x0407) == "GERMAN" && retail_language_for_langid(0x0807) == "GERMAN");
+    CHECK(retail_language_for_langid(0x040C) == "FRENCH" && retail_language_for_langid(0x2C0A) == "SPANISH");
+    CHECK(retail_language_for_langid(0x0419) == "RUSSIAN" && retail_language_for_langid(0x0415) == "POLISH");
+    CHECK(retail_language_for_langid(0x0411) == "ENGLISH" && retail_language_for_langid(0x0804) == "ENGLISH");
+    CHECK(retail_language_for_langid(0x041E) == "ENGLISH" && retail_language_for_langid(0x0413) == "ENGLISH");
+    CHECK(retail_language_for_langid(0x0809) == "ENGLISH" && retail_language_for_langid(0x0816) == "ENGLISH");
     // Language fallback to English.
     MemProvider files;
     files.put("Data\\Text\\MasterTextFile_ENGLISH.DAT", make_dat(kv));
