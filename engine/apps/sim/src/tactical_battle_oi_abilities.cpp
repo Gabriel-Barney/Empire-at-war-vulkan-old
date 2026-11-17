@@ -386,14 +386,23 @@ objects::ObjectHandle TacticalBattle::script_spawn_company(TacticalMode& mode, c
 }
 
 bool TacticalBattle::script_damage(TacticalMode& mode, objects::ObjectId id, float amount, bool cannot_die) {
+    return script_hardpoint_damage(mode, id, amount, cannot_die, {});
+}
+
+bool TacticalBattle::script_hardpoint_damage(TacticalMode& mode, objects::ObjectId id, float amount, bool cannot_die,
+                                             std::string_view name) {
     Unit* u = unit_by_id(id);
     if (finished_ || !combat_ || !bt_rng_ || !u || !u->alive || u->retreated || !combat_->has_unit(id) || !combat_->alive(id))
         return false;
+    // r1b t01 (R1_T01_HARDPOINT_RUN): a named hit goes to that hardpoint record; none of that name: nothing applied.
+    const int32_t hp = name.empty() ? -1 : combat_->hardpoint_by_name(id, name);
+    if (!name.empty() && hp < 0) return false;
     const bool had_cannot_die = (combat_->flags(id) & tc::kUnitCannotDie) != 0;
     if (cannot_die && !had_cannot_die) combat_->set_flag(id, tc::kUnitCannotDie, true);
     tc::DamageRequest r;
     r.victim = id;
     r.amount = amount;
+    r.hardpoint = hp;
     r.kind = tc::kKindDebug;  // Lua Take_Damage: kind 0 (OBJECT_SCRIPTS Â§6.1 step 4)
     const size_t deaths_before = combat_->deaths().size();
     combat_->take_damage(r, frame_);

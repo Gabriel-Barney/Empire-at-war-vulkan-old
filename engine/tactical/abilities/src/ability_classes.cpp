@@ -507,6 +507,9 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             start_recharge(o, kForceLightning);
             play_anim(o, kAnimFlAttack, {}, 0, false, 1.0f, kAnimIdle, frame);  // §4.14: the cast lasts the clip
             event(AbilityEventKind::EffectOn, kForceLightning, o.id, primary, frame);
+            // vis1 t06 (ABILITY_PARTICLES §2.3): the target particle on the first entry of the victim list.
+            if (!s.target_particle_effect.empty())
+                visual(AbilityVisualKind::TargetParticle, frame, o.id, sp.victims.empty() ? primary : sp.victims.front(), sp.desc);
             return true;  // update is visuals only
         }
 
@@ -700,6 +703,9 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             start_recharge(o, s.cls == C::Hack ? kTargetedHack : (s.cls == C::Repair ? kTargetedRepair : kTacticalBribe));
             if (s.cls != C::TacticalBribe) stop_order(o.id, frame);  // the bribe's user is already held (above)
             event(AbilityEventKind::EffectOn, sp.trigger, o.id, target, frame);
+            // vis1 t06 (ABILITY_PARTICLES §2.4): Hack / Repair run the presentation on the target once per apply.
+            if (s.cls != C::TacticalBribe && !s.target_particle_effect.empty())
+                visual(AbilityVisualKind::TargetParticle, frame, o.id, target, sp.desc);
             if (s.cls == C::TacticalBribe) class_update(o, sp, frame);  // changes the owner at once
             return true;
         }
@@ -1117,7 +1123,9 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
                     r.source = o.id;
                     combat_->take_damage(r, frame);
                 } else if (s.cls == C::StunWave) {
-                    combat_->stun_unit(v, static_cast<int32_t>(s.wave_time * 30.0f), frame);  // literal 30.0
+                    // vis1 t06 (ABILITY_PARTICLES §4): each victim the apply stunned gets Stunned_Effect.
+                    if (combat_->stun_unit(v, static_cast<int32_t>(s.wave_time * 30.0f), frame) && !s.stunned_effect.empty())  // literal 30.0
+                        visual(AbilityVisualKind::StunnedEffect, frame, o.id, v, sp.desc);
                 } else if (Obj* vo = obj(v)) {
                     confuse(*vo, s.wave_time, frame);  // 2 synced draws per victim
                 }
@@ -1657,6 +1665,12 @@ void AbilitySystem::heal_pass(Obj& o, const SpecialAbilityDesc& s, uint32_t fram
     const bool harm = s.heal_amount < 0.0f && s.heal_percent <= 0.0f;
     if (!heal && !harm) return;
     const Vec3 me = position(o);
+    // vis1 t06 (ABILITY_PARTICLES §2.1): Target_Particle_Effect on each unit healed / harmed with Heal_Range > 0 (not on
+    // a self-healer). Presentation only.
+    const auto special = static_cast<uint32_t>(&s - data_->specials.data());
+    auto shown = [&](ObjectId u) {
+        if (!s.target_particle_effect.empty()) visual(AbilityVisualKind::TargetParticle, frame, o.id, u, special);
+    };
     auto fraction = [this](ObjectId id) { return combat_->script_hull(id); };  // combined fraction (0x396e60) [M]
     auto heal_one = [&](ObjectId id) {
         // 0x6fb940: the damaged targetable hardpoint with the LOWEST fraction, else the hull: max x percent + amount + cur.
@@ -1709,9 +1723,15 @@ void AbilitySystem::heal_pass(Obj& o, const SpecialAbilityDesc& s, uint32_t fram
             }
         }
         if (s.single_target_heal) {
-            if (single != kNoObject) heal_one(single);
+            if (single != kNoObject) {
+                heal_one(single);
+                shown(single);
+            }
         } else {
-            for (ObjectId u : scratch_) heal_one(u);
+            for (ObjectId u : scratch_) {
+                heal_one(u);
+                shown(u);
+            }
         }
         return;
     }
@@ -1746,10 +1766,14 @@ void AbilitySystem::heal_pass(Obj& o, const SpecialAbilityDesc& s, uint32_t fram
         combat_->take_damage(r, frame);
     };
     if (s.single_target_heal) {
-        if (single != kNoObject) harm_one(single);
+        if (single != kNoObject) {
+            harm_one(single);
+            shown(single);
+        }
     } else {
         for (ObjectId u : scratch_) {
             harm_one(u);
+            shown(u);
             if (o.dead) return;
         }
     }

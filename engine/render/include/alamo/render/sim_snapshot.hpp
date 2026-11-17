@@ -14,11 +14,9 @@
 //
 // Fade: 1 for live objects; 0 for objects destroyed this tick but not yet flushed (kSnapDying) - the
 // smooth mode fades them out over one tick, the original mode hides them.
-// Hardpoints: the sim does not spawn hardpoint sub-objects yet (engine/apps/sim map_spawn open item).
-// PROVISIONAL rule: a child attached to an object (ObjectStore::attach_parent) whose type name CRC is
-// one of the parent type's <HardPoints> names marks that hardpoint destroyed while it is dying or at
-// health <= 0. The render side keeps destroyed bits sticky (the game never repairs hardpoint visuals,
-// SPACE_AND_OPEN.md B.10).
+// Hardpoints: battle hardpoints are CombatSystem records, not objects; their destroyed bits come from
+// apply_hardpoint_source (r1b t02 removed the provisional attach-child rule). The render side keeps destroyed
+// bits sticky (the game never repairs hardpoint visuals, SPACE_AND_OPEN.md B.10).
 //
 // Interpolation (docs/re/MAIN_LOOP.md: the original renders once per loop iteration with NO
 // interpolation): InterpMode::Original (default, parity) draws the latest snapshot as is;
@@ -229,7 +227,6 @@ struct SnapshotObject {
     objects::ObjectId id = objects::kNoObjectId;
     objects::TypeIndex type = objects::kNone;
     int32_t owner = -1;
-    objects::ObjectId attach_parent = objects::kNoObjectId;  // id of the attach parent (hardpoints), none otherwise
     Vec3 position{};
     Vec3 facing{1, 0, 0};
     float health = 0.0f;
@@ -292,7 +289,9 @@ struct SnapshotEffect {
     // R5 Lua GameObjectWrapper.Attach_Particle_Effect(type [, bone]) (lua::ParticleEffectRequest): seq + 1 of the request
     // (0 = not a Lua effect; one system per request, keyed by it) and the bone the system follows ("" = the root).
     uint32_t lua_seq = 0;
-    std::string bone{};
+    std::string bone{};  // vis1 t06: may list candidates, comma separated (the first the model has)
+    // vis1 t06: an ability one-shot (ability_fx.hpp): its occurrence number (0 = none; one system per occurrence).
+    uint32_t fx_seq = 0;
 };
 // R4: SnapshotEffect::percent of an active unit ability's Particle_Effect (128 + ability type 0..75).
 inline constexpr uint8_t kEffectAbilityBase = 128;
@@ -457,7 +456,7 @@ std::vector<SnapshotEffect> snapshot_lua_effects(const RequestRange& requests, c
     return out;
 }
 // Destroyed hardpoints from a source that knows them per (object, HardPoints index) - the battle's CombatSystem, whose
-// hardpoints are flat sub-records (no sub-objects for the PROVISIONAL rule): OR'd into snap.hardpoint_destroyed for
+// hardpoints are flat sub-records: written into snap.hardpoint_destroyed for
 // every object with `count(id)` == its type's hardpoint count (other counts: a different list, left alone).
 void apply_hardpoint_source(SimSnapshot& snap, const std::function<uint32_t(objects::ObjectId)>& count,
                             const std::function<bool(objects::ObjectId, uint32_t)>& destroyed);

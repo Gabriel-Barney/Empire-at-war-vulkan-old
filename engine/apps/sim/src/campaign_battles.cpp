@@ -1622,6 +1622,11 @@ void CampaignBattles::story_bridge_begin(SimHost& host, GameMode& mode) {
             TacticalMode* tm = h->tactical();
             return battle_ && tm && tm->primary().alive(u) && battle_->script_damage(*tm, tm->primary().id(u), amount, cannot_die);
         };
+        b.take_hardpoint_damage = [this, h](objects::ObjectHandle u, float amount, bool cannot_die, std::string_view hp) {  // r1b t01
+            TacticalMode* tm = h->tactical();
+            return battle_ && tm && tm->primary().alive(u) &&
+                   battle_->script_hardpoint_damage(*tm, tm->primary().id(u), amount, cannot_die, hp);
+        };
         // q6 (OBJECT_SCRIPTS §10.1-10.3): Make_Invulnerable -> combat's damage-kind gate, Prevent_AI_Usage -> the owner's
         // AI free store, Hide -> the model test. [port] Object-script sessions only, like the hooks above.
         b.invulnerable_changed = [this, h](objects::ObjectHandle u, bool on) {

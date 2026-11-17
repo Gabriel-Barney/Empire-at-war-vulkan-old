@@ -249,7 +249,7 @@ static void test_oi_snapshot() {
     quirk.damage_thresholds = {1.0f};
     quirk.damage_alternates = {3};
     CHECK(render::damage_alt_index(quirk, 1.0f) == 3);
-    // R1 authoritative combat source: its states replace the provisional bits of the objects it tracks.
+    // R1 authoritative combat source: its states replace the bits of the objects it tracks.
     render::SimSnapshot s;
     s.objects = {sobj(3, 1, 0, 3), sobj(5, 2, 3, 2)};
     s.hardpoint_destroyed = {1, 0, 1, 1, 0};

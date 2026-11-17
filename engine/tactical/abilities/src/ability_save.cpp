@@ -400,6 +400,7 @@ bool AbilitySystem::read(ByteReader& r) {
     source_entries_ = std::move(source_entries);
     remote_bombs_ = std::move(remote_bombs);
     events_ = std::move(events);
+    visuals_.clear();  // vis1 t06: presentation only, not saved (the serial keeps counting)
     overrides_ = std::move(overrides);
     type_overrides_ = std::move(type_overrides);
     bm_blocked_ = std::move(bm_blocked);

@@ -126,11 +126,11 @@ the follow-ups).
   - On a match, apply the damage to that CombatSystem hardpoint. The shield takes it first, as in this run.
   - With no match: `script_error_stop("GameObjectWrapper::Take_Damage -- unknown hard point %s.", name)`, with no
     damage. Today it returns 0 and the script continues (`:1815`).
-- [port] Delete the provisional rule:
+- [port] Delete the provisional rule (done 2026-11-17, r1b t02):
   - `sim_snapshot.cpp:473-487` (pass 3) and the header text `sim_snapshot.hpp:17-21`;
   - `SnapshotObject::attach_parent` (`sim_snapshot.hpp:213`) if nothing else reads it;
   - the comment at `sim_snapshot.cpp:513-515` and the test wording at `engine/render/tests/test_render_r5.cpp:251`.
-- [port] V1: hide the `Model_To_Attach` slot on destruction. Today it is kept by design (`hardpoints.hpp:17`,
+- [port] V1 (done 2026-11-17, r1b t03: every destroyable hardpoint, per B.10 answer 4): hide the `Model_To_Attach` slot on destruction. Today it is kept by design (`hardpoints.hpp:17`,
   `hardpoints.cpp:158-164`). Whether this applies to every destroyable hardpoint or only to those with a
   `Death_Breakoff_Prop` waits for the RE / probe items below. Until then, hiding it when a breakoff prop exists
   matches the one observation.
@@ -144,6 +144,9 @@ the follow-ups).
   - something on the attachment list (0x12d770).
 
   Write the answer into `SPACE_AND_OPEN.md` §B.10.
+  **Answered 2026-11-17 (r1b t05):** the owner bookkeeping 0x3a5700 is the path. It erases the first attachment
+  list entry named like the `Model_To_Attach` file (stem, case-insensitive) on every destroyable hardpoint's
+  death, breakoff prop or not (`SPACE_AND_OPEN.md` §B.10 answer 4).
 - [RE] V3: what turns the engine glow off? The candidate is the ENGINE offline path → `Locomotor_Set_Engines`
   0x5545a0 (`TACTICAL_COMBAT.md:2359`; `HARDPOINT_DISABLED.md` §2). Find the reader of the locomotor engines-on word
   (+0xd0) on the draw side, and how it picks the proxies to hide (by proxy name, by bone `engines_big`, or by

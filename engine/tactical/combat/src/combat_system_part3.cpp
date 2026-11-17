@@ -1,5 +1,6 @@
 // combat_system: part 3 (bo3 t03 split; shared code in combat_system_internal.hpp).
 #include "combat_system_internal.hpp"
+#include "alamo/core/ascii.hpp"
 
 namespace alamo::tactical::combat {
 void CombatSystem::flush() {
@@ -122,6 +123,14 @@ ObjectId CombatSystem::unit_id_at(size_t index) const { return index < units_.si
 uint32_t CombatSystem::hardpoint_count(ObjectId id) const {
     const Unit* u = unit(id);
     return u ? u->hp_count : 0u;
+}
+
+int32_t CombatSystem::hardpoint_by_name(ObjectId id, std::string_view name) const {
+    const Unit* u = unit(id);
+    if (!u) return -1;
+    for (uint32_t i = 0; i < u->hp_count; ++i)
+        if (ascii_iequals(data_->hardpoints[hps_[u->hp_begin + i].desc].name, name)) return static_cast<int32_t>(i);
+    return -1;
 }
 
 HardpointKind CombatSystem::hardpoint_kind(ObjectId id, uint32_t hp) const {

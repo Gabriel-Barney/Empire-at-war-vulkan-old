@@ -680,6 +680,39 @@ the hardpoints. Mode ids: 1 land, 2 space (§0.3; confirmed by Take_Damage choos
    - Fail → `Fire_At` returns 0 (the cooldown stays expired; opportunity fire may shoot something else, §2.6).
 6. Then muzzle, inaccuracy, spawn as in §3.1.
 
+**Hardpoint turret slew (r1b t10, 2026-11-17; HP_Update 0x387010 → 0x381ff0, aim 0x383650).** [H for the code
+unless tagged]
+- **Who:** a hardpoint whose type has `Is_Turret` (+0x4e), every `HP_Update` while it is active (+0x6c), alive
+  (health > 0) and has an owner, **after** `Update_Weapon` (so the shot of a frame reads the previous frame's
+  pose). The turret model is the attached `Model_To_Attach` instance (0x385cf0: the attachment-list entry named
+  like the model stem, cached at +0x90), so a hardpoint whose attachment is gone (B.10 step (f)) or never resolved
+  does not turn. `Turret_Bone_Name` (type +0x1c0) and `Barrel_Bone_Name` (+0x1e0) are resolved in that model once
+  (+0x94 / +0x98, -1: none).
+- **Aim (0x383650)**, result (x, pitch, yaw) in degrees; the rest pose is `Turret_Rotation_Offset` (+0x4b4, three
+  floats x, pitch, yaw):
+  1. with `Requires_Manual_Target_Assignment` (type +0x50): the manually assigned target (hp +0xc0) only;
+  2. otherwise the weapon's target (+0x40) when its aim point (0x398440) passes the hardpoint cone test (0x383ba0,
+     the turret branch: |yaw + 90| ≤ `Turret_Rotate_Extent_Degrees`); else the object at hp +0xa8 [M: not
+     identified], else the opportunity target (+0x50); these two without a cone test;
+  3. none: with the manual flag the last aim (+0xb0..+0xb8; the current pose when that is all zero); otherwise the
+     rest pose;
+  4. with a target: its position (object +0x78) in the attachment bone's frame (hp +0x2c, inverse world transform), turned into
+     a yaw and a pitch; yaw clamped to ±`Turret_Rotate_Extent_Degrees` and pitch to
+     ±`Turret_Elevate_Extent_Degrees` (+0x4c8), each only when the extent is in (0, 180); then the rest yaw /
+     pitch is added and the result wrapped to ±180. The aim is kept at +0xb0..+0xb8. The turret's zero yaw is the
+     cone test's centre (the attachment frame's −Y axis, the `+ 90` above) [M: from the cone test's offset].
+- **Slew (0x381ff0):** nothing when the aim equals the pose (each component within 0.0001 after mapping negatives
+  to [0, 360), 0x386170). Otherwise, with s = `Turret_Rotate_Speed` (+0x4c0, degrees per update, no frame
+  scaling): pitch moves toward the aim by at most s (plain difference, no wrap); yaw moves the same way, **then**
+  by the wrapped difference clamped to ±s, then is wrapped to ±180. So yaw turns up to 2 s per update the short
+  way, and when pose and aim lie on opposite sides of ±180 the two steps cancel (the turret stops until the aim
+  moves) - a retail quirk kept as is. The turret bone gets a rotation about Z by the yaw, the barrel bone one about
+  Y by the pitch.
+- **Fire_At step 2** (above) then reads the turret bone's X axis, so a turret only fires once it has turned to
+  within `Fire_Cone_Width` (full angle) of the target object's position. Vanilla FoC turrets: the Gargantuan's two
+  main turrets (speed 5, extent 120, elevate 45, cone 20) and four small ones (speed 5, extent 80, cone 220), and
+  `HP_Underworld_L3_Station_Main_Cannon` (speed 0.5, extent 360, elevate 30, cone 40).
+
 So a very close ship **does** fire while each targeted hardpoint bone stays inside the firing bone's cone. Vanilla
 side batteries are narrow vertically (e.g. `Calamari_Cruiser` 160–170° × 130°, `Alliance_Assault_Frigate` 160–170°
 × 90°), so a target hardpoint far above or below the firing bone (pitch over 65° / 45°), or on the far side of

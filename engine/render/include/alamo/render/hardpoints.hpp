@@ -14,7 +14,11 @@
 // Subtree = the sub-object's bone is the target bone or a descendant, walking parents up to but not including
 // bone 0 (bone 0 never matches). Writes overwrite the bit (an ALO-hidden mesh can be shown); last write wins.
 // Not reversible in the game; DUMMY_ART and Is_Destroyable = No hardpoints never change visuals.
-// Model_To_Attach is never hidden or replaced by destruction (only by a subtree that contains its bone).
+// Model_To_Attach removal (B.10 answer 4, step (f) 0x3a5700, before the visibility changes; r1b t03): a destroyed
+// hardpoint with a Model_To_Attach erases the FIRST remaining sub-object named like that file's stem (upper-cased,
+// cut at ".ALO"; case-insensitive) in sub-object order - meshes, proxies, then the attachment slots in HardPoints
+// order. Usually its own slot; with several hardpoints attaching the same model, the first copy still present.
+// An erased sub-object stays hidden whatever later effects show.
 //
 // Threading: HardpointVisibility is written on the frame thread only, between Renderer builds. Its mask()
 // storage never moves after init(), so an Instance::mesh_hidden span taken from it stays valid; the
@@ -95,6 +99,9 @@ struct HardpointLayout {
     std::vector<HardpointEffect> effects;  // per hardpoint
     std::vector<int32_t> attach_bone;      // per hardpoint: owner bone of Attachment_Bone (-1: none / not found)
     std::vector<std::string> attach_model; // per hardpoint: Model_To_Attach ("" none)
+    // Per hardpoint: the sub-objects its destruction may erase, in lookup order (the first not yet erased goes);
+    // empty when it has no Model_To_Attach or never changes visuals.
+    std::vector<std::vector<uint32_t>> removes;
 };
 using HardpointLayoutPtr = std::shared_ptr<const HardpointLayout>;
 
@@ -148,7 +155,7 @@ private:
     void recompute();
     size_t hardpoint_count_ = 0;
     std::vector<uint32_t> order_;  // destroyed hardpoints in destruction order
-    std::vector<uint8_t> overrides_, mask_;
+    std::vector<uint8_t> overrides_, mask_, erased_;
     HardpointLayoutPtr layout_;
     bool ready_ = false;
 };

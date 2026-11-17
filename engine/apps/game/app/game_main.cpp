@@ -344,6 +344,7 @@ bool App::init() {
         cine_.enabled = gc.get_bool("In_Game_Cinematics", true);
         cine_.letterbox_height = gc.get_float("Camera_FX_Manager_Letterbox_Height", 0.085f);
         beacon_delay_s_ = gc.get_float("BeaconPlaceDelay", 5000.0f) / 1000.0f;  // ui3 t03: ms between two beacons
+        if (const auto v = gc.get("Object_Visual_Status_Particle_Attach_Bone_Names")) bview_.set_status_particle_bones(std::string(*v));  // vis1 t06
     }
     // The unsynced presentation generator (0x140a2ab18, seeded from the performance counter at boot); smoke runs fixed.
     cine_.rng.reseed(opt_.smoke.empty() && !bench_active() ? static_cast<uint64_t>(Clock::now().time_since_epoch().count()) : 0xf0f0f0f0u);

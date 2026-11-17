@@ -5,6 +5,8 @@
 //     Blob_Color carried over, ascending jammer id, missing objects skipped
 //   * jam_blob_model / jam_blob_instance: unit quad with the MeshAlpha effect, BaseTexture + Diffuse, scale r, lift in z
 //   * snapshot plumbing: SnapshotJamming::is_jammed, digest sensitivity (and unchanged when empty), interpolate() copies it
+//   * vis1 t06 AbilityFxTracker (ability_fx.hpp): state effects once per (target, percent), one-shots with their own
+//     fx_seq until Particle_Lifetime_Frames pass or the target leaves, missing targets skipped
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -14,6 +16,7 @@
 #include <vector>
 
 #include "alamo/core/log.hpp"
+#include "alamo/render/ability_fx.hpp"
 #include "alamo/render/jam_fx.hpp"
 #include "alamo/render/sim_snapshot.hpp"
 #include "alamo/test/support.hpp"
@@ -178,6 +181,71 @@ static void test_snapshot() {
     static_assert(render::kEffectJamming != render::kEffectLua && render::kEffectJamming >= render::kEffectAbilityBase + 76);
 }
 
+// vis1 t06 (ABILITY_PARTICLES §10): the ability particle tracker over plain inputs.
+static void test_ability_fx() {
+    auto snap_with = [](std::initializer_list<objects::ObjectId> ids) {
+        render::SimSnapshot s;
+        for (objects::ObjectId id : ids) s.objects.push_back(object(id, 0, 0, 0, 0));
+        return s;
+    };
+    render::AbilityFxTracker t;
+    // frame 10: Earthquake dust on 2 from two appliers (one system), infection on 3, a heal spark on 2 (30 frames) and a
+    // stun particle on missing 9 (skipped)
+    render::AbilityFxInput in;
+    in.frame = 10;
+    in.states.push_back({2, render::kEffectTargetState, "Earthquake_Dust_Particles", ""});
+    in.states.push_back({2, render::kEffectTargetState, "Earthquake_Dust_Particles", ""});
+    in.states.push_back({3, render::kEffectInfection, "Infection_Particle_Effect", "B_HEAD, ROOT"});
+    in.shots.push_back({10, 2, "Shield_Sparks_Medium", "B_TURRET, TURRET_00", 30});
+    in.shots.push_back({10, 9, "Stunned_Infantry", "B_HEAD", 300});
+    render::SimSnapshot s = snap_with({1, 2, 3});
+    t.apply(in, s, nullptr);
+    CHECK(s.effects.size() == 3 && t.live() == 1);
+    auto count = [](const render::SimSnapshot& snap, auto pred) {
+        return std::count_if(snap.effects.begin(), snap.effects.end(), pred);
+    };
+    CHECK(count(s, [](const render::SnapshotEffect& e) { return e.id == 2 && e.percent == render::kEffectTargetState && e.fx_seq == 0; }) == 1);
+    CHECK(count(s, [](const render::SnapshotEffect& e) {
+              return e.id == 3 && e.percent == render::kEffectInfection && e.bone == "B_HEAD, ROOT" && e.asset == "Infection_Particle_Effect";
+          }) == 1);
+    CHECK(count(s, [](const render::SnapshotEffect& e) { return e.id == 2 && e.fx_seq == 1 && e.asset == "Shield_Sparks_Medium" && e.frame == 10; }) == 1);
+    // frame 39: the spark still listed (no new input); a second spark on 3 gets its own sequence number
+    render::AbilityFxInput in2;
+    in2.frame = 39;
+    in2.shots.push_back({39, 3, "Shield_Sparks_Medium", "", 30});
+    s = snap_with({1, 2, 3});
+    t.apply(in2, s, nullptr);
+    CHECK(s.effects.size() == 2 && count(s, [](const render::SnapshotEffect& e) { return e.fx_seq == 1; }) == 1 &&
+          count(s, [](const render::SnapshotEffect& e) { return e.id == 3 && e.fx_seq == 2; }) == 1);
+    // frame 40: the first spark's lifetime is over (10 + 30); a no-lifetime shot on 1 lasts until 1 leaves
+    render::AbilityFxInput in3;
+    in3.frame = 40;
+    in3.shots.push_back({40, 1, "Corrupt_Systems_Effect", "", 0});
+    s = snap_with({1, 2, 3});
+    t.apply(in3, s, nullptr);
+    CHECK(s.effects.size() == 2 && count(s, [](const render::SnapshotEffect& e) { return e.fx_seq == 1; }) == 0);
+    render::AbilityFxInput later;
+    later.frame = 5000;
+    s = snap_with({1, 2});
+    t.apply(later, s, nullptr);
+    CHECK(s.effects.size() == 1 && s.effects[0].id == 1 && s.effects[0].fx_seq == 3 && t.live() == 1);
+    s = snap_with({2});
+    t.apply(later, s, nullptr);
+    CHECK(s.effects.empty() && t.live() == 0);
+    t.reset();
+    CHECK(t.live() == 0 && t.visual_serial == 0);
+    // a no-lifetime one-shot is kept once per target and asset (no pile-up from a repeated trigger)
+    render::AbilityFxInput rep;
+    rep.frame = 6000;
+    rep.shots.push_back({6000, 1, "Corrupt_Systems_Effect", "", 0});
+    rep.shots.push_back({6000, 1, "Corrupt_Systems_Effect", "", 0});
+    rep.shots.push_back({6000, 1, "Other_Effect", "", 0});
+    s = snap_with({1});
+    t.apply(rep, s, nullptr);
+    t.apply(rep, s, nullptr);
+    CHECK(t.live() == 2);
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     log::set_min_level(log::Level::Error);
@@ -185,6 +253,7 @@ int main() {
     test_blobs();
     test_model();
     test_snapshot();
+    test_ability_fx();
     if (g_fail) {
         std::printf("alamo_render_jam_tests: %d FAILED\n", g_fail);
         return 1;

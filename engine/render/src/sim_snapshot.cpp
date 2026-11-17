@@ -302,7 +302,6 @@ uint64_t SimSnapshot::digest() const {
         h.i32(o.id);
         h.u32(o.type);
         h.i32(o.owner);
-        h.i32(o.attach_parent);
         for (float f : {o.position.x, o.position.y, o.position.z, o.facing.x, o.facing.y, o.facing.z, o.health, o.health_fraction,
                         o.lod_bias, o.fade, o.team_color.x, o.team_color.y, o.team_color.z, o.team_color.w})
             h.f32(f);
@@ -355,6 +354,7 @@ uint64_t SimSnapshot::digest() const {
     }
     for (const SnapshotEffect& e : effects) {
         h.u32(e.lua_seq);
+        h.u32(e.fx_seq);  // vis1 t06
         h.u32(static_cast<uint32_t>(e.bone.size()));
         if (!e.bone.empty()) h.bytes(e.bone.data(), e.bone.size());
     }
@@ -456,8 +456,6 @@ void build_snapshot(const objects::ObjectStore& store, uint64_t tick, uint64_t m
             o.id = store.id(h);
             o.type = store.type(h);
             o.owner = store.owner(h);
-            const ObjectHandle ap = store.attach_parent(h);
-            o.attach_parent = (ap && store.exists(ap)) ? store.id(ap) : objects::kNoObjectId;
             o.position = store.position(h);
             o.facing = store.facing(h);
             o.health = store.health(h);
@@ -487,22 +485,7 @@ void build_snapshot(const objects::ObjectStore& store, uint64_t tick, uint64_t m
         o.hardpoint_first = hp;
         hp += o.hardpoint_count;
     }
-    out.hardpoint_destroyed.assign(hp, 0);
-    // Pass 3 (store order): destroyed hardpoint sub-objects (PROVISIONAL rule, see the header).
-    for (uint32_t i = 0; i < n; ++i) {
-        const SnapshotObject& c = tmp[i];
-        if (c.attach_parent == objects::kNoObjectId || !table.valid(c.type)) continue;
-        if ((c.flags & kSnapDying) == 0 && c.health > 0.0f) continue;
-        const SnapshotObject* p = out.find(c.attach_parent);
-        if (!p || !table.valid(p->type)) continue;
-        const std::vector<uint32_t>& crcs = table[p->type].hardpoint_crcs;
-        const uint32_t child_crc = table[c.type].name_crc;
-        for (uint32_t k = 0; k < crcs.size() && k < p->hardpoint_count; ++k)
-            if (crcs[k] == child_crc) {
-                out.hardpoint_destroyed[p->hardpoint_first + k] = 1;
-                break;
-            }
-    }
+    out.hardpoint_destroyed.assign(hp, 0);  // filled by apply_hardpoint_source (the battle's combat states)
 }
 
 bool capture_snapshot(const sim::SimHost& host, const SnapshotTypeTable& table, SimSnapshot& out, const ParallelFor& pf,
@@ -529,8 +512,9 @@ void append_snapshot_effects(SimSnapshot& snap, std::span<const SnapshotEffect> 
 }
 
 // R1: the combat source is authoritative for the objects it tracks (same hardpoint count as the type's list): their
-// bits are its destroyed states, replacing the PROVISIONAL attach-child rule of build_snapshot; objects it does not
-// track keep the provisional bits. (The instance builder keeps destroyed hardpoints sticky: B.10, no repair visuals.)
+// bits are its destroyed states; objects it does not track keep none (r1b t02: the provisional attach-child rule is
+// gone - battle hardpoints are combat records, not objects). (The instance builder keeps destroyed hardpoints sticky:
+// B.10, no repair visuals.)
 void apply_hardpoint_source(SimSnapshot& snap, const std::function<uint32_t(ObjectId)>& count,
                             const std::function<bool(ObjectId, uint32_t)>& destroyed) {
     if (!count || !destroyed) return;

@@ -1278,6 +1278,9 @@ public:
     uint32_t team(ObjectId id) const;
     ObjectId unit_id_at(size_t index) const;  // ascending id order (index < unit_count())
     uint32_t hardpoint_count(ObjectId id) const;
+    // r1b t01: the index of the unit's first hardpoint (HardPoints order) whose type name equals `name` ASCII
+    // case-insensitively (Lua Take_Damage(n, name), R1_T01_HARDPOINT_RUN); -1 for none / an unknown unit.
+    int32_t hardpoint_by_name(ObjectId id, std::string_view name) const;
     HardpointKind hardpoint_kind(ObjectId id, uint32_t hp) const;
     float hardpoint_max(ObjectId id, uint32_t hp) const;  // HP_Get_Max_Health
     bool hardpoint_targetable(ObjectId id, uint32_t hp) const;  // live and Is_Targetable

@@ -151,6 +151,7 @@ int oi_hack_timing(uint32_t count, float fps) {
     OiWorld w;
     SpecialAbilityDesc hk = oi_special("Hack", SpecialClass::Hack, ActivationStyle::UserInput);
     hk.max_range = 1000.0f;
+    hk.target_particle_effect = "Force_Lightning_Smoke";  // vis1 t06
     const uint32_t hs = add_special(w.ad, hk);
     AbilityObjectDesc a;
     a.unit_abilities = {oi_gui(kTargetedHack, 0.0f, 10.0f, "Hack")};
@@ -174,7 +175,14 @@ int oi_hack_timing(uint32_t count, float fps) {
     CHECK(w.ab->targeted_ability(one, kTargetedHack, 2, -1, w.frame) == 1);
     for (int i = 1; i <= 100; ++i) {
         w.tick();
-        if (w.sys->owner(2) == 0) return i;
+        // vis1 t06 (ABILITY_PARTICLES §2.4): the target particle once per apply, on the hacked object.
+        if (!w.ab->visual_events().empty())
+            CHECK(w.ab->visual_events().size() == 1 && w.ab->visual_events()[0].target == 2 && w.ab->visual_events()[0].owner == 1 &&
+                  w.ab->visual_events()[0].serial == 1 && w.ab->visual_events()[0].special == hs);
+        if (w.sys->owner(2) == 0) {
+            CHECK(w.ab->visual_events().size() == 1);
+            return i;
+        }
     }
     return -1;
 }
