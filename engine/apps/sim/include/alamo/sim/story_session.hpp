@@ -108,7 +108,7 @@
 // not feed. Wave 2b (SCRIPT_GAPS.md §4): DIFFICULTY_LEVEL is never dispatched (as in 1.121);
 // CORRUPTION_TACTICAL_COMPLETE / FAILED at end_battle of a pending corruption mission (set_corruption_mission);
 // FILTER_* compare factions (StoryModel::faction_of); the original vf3 rules of the wave-2a [inferred] types. SPEECH_DONE's 60 s
-// Timeout still runs [L] when no speech end is reported (the game host reports AudioSystem speech ends). Galactic notifications raised while a
+// Timeout expires without firing (storyb t17, STORY.md §8 item 4) when no speech end is reported (the game host reports AudioSystem speech ends). Galactic notifications raised while a
 // tactical mode runs are routed at once (the galactic sim emits nothing then).
 //
 // Lua bridge families attached to every story VM of the session (L1 stage 3):

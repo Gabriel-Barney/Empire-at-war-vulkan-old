@@ -295,7 +295,7 @@ void App::lua_presentation() {
 // order, then the tactical set; firing order within a set): START_MOVIE (Reward_Param1) -> the full-screen movie slot,
 // whose end raises STORY_MOVIE_DONE with the movie name (a movie that cannot be opened ends at once [port]: MOVIE_DONE has
 // no timeout); MULTIMEDIA (Reward_Param8) -> GameAudioHost::speech, whose end (AudioSystem::on_speech_done) raises
-// STORY_SPEECH_DONE (a speech that cannot play keeps the 60 s timeout); MULTIMEDIA Reward_Param9 *_Loop -> the advisor slot
+// STORY_SPEECH_DONE (a speech that cannot play has no end: its 60 s Timeout fires nothing, STORY.md §8 item 4); MULTIMEDIA Reward_Param9 *_Loop -> the advisor slot
 // (Movie_galactic / Movie_tactical) until STOP_COMMANDBAR_MOVIE (FIXPASS_GALACTIC §4.2). Presentation only: the sim sees the
 // ends through the recorded story UI commands. ui2: the presentation rewards (text, pointers, locks, camera, hints) go through
 // story_present_reward; any MULTIMEDIA / SPEECH / COMMANDBAR_MOVIE movie or speech is a cue here.
