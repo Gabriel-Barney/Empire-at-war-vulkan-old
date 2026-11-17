@@ -1734,6 +1734,7 @@ void MovementSystem::tick(uint32_t frame, SimRng& rng, const ParallelFor& pf) {
     if (interval < 2 || frame % interval == 0) quota_used_ = 0;
     crush_.clear();
     push_kills_.clear();  // s78n t20 batch 1
+    formation_attacks_.clear();  // mov1 t06
     deploy_pose_.clear();  // s78n t26.1 review
     despawned_.clear();
     fevents_.clear();

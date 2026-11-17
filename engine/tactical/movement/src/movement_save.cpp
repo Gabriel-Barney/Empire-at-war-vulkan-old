@@ -1138,6 +1138,14 @@ void MovementSystem::write(ByteWriter& w) const {
     w.u32(static_cast<uint32_t>(crush_.size()));
     for (const CrushEvent& e : crush_) w.i32(e.crusher).i32(e.victim);
     out.ids(push_kills_);  // s78n t20 batch 1 (version 20)
+    {  // mov1 t06 (version 34): the formation attack blocks of the tick, as (mover, target) pairs
+        std::vector<ObjectId> fa;
+        for (const FormationAttack& e : formation_attacks_) {
+            fa.push_back(e.mover);
+            fa.push_back(e.target);
+        }
+        out.ids(fa);
+    }
     out.ids(despawned_);
     w.u32(static_cast<uint32_t>(squads_.size()));
     for (const FighterSquad& s : squads_) io_squad(out, s);
@@ -1202,6 +1210,9 @@ bool MovementSystem::read(ByteReader& r) {
     }
     std::vector<ObjectId> push_kills;  // s78n t20 batch 1
     in.ids(push_kills);
+    std::vector<ObjectId> fa;  // mov1 t06 (version 34)
+    in.ids(fa);
+    if (fa.size() % 2 != 0) return false;
     std::vector<ObjectId> despawned;
     in.ids(despawned);
     if (!r.count(n, 60)) return false;
@@ -1324,6 +1335,8 @@ bool MovementSystem::read(ByteReader& r) {
     coll_ = std::move(coll);
     crush_ = std::move(crush);
     push_kills_ = std::move(push_kills);
+    formation_attacks_.clear();
+    for (size_t i = 0; i + 1 < fa.size(); i += 2) formation_attacks_.push_back({fa[i], fa[i + 1]});
     despawned_ = std::move(despawned);
     squads_ = std::move(squads);
     fgrids_ = std::move(fgrids);

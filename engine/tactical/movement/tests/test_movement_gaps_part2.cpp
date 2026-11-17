@@ -2267,18 +2267,21 @@ void test_land_squad_repulsion() {
         const V2 goal = cell_center(25, 20);
         UnitDesc x = unit(70, goal, 2, 1.0f, 6.0f, LocomotorKind::Default);
         x.owner = 1;
-        CHECK(sys.add_unit(x));
         SimRng rng(72);
         sys.tick(1, rng, serial_for);
         MoveOrder o;
         o.units = {1};
         o.destination = goal;
         sys.move(o, rng, 2);
-        bool arrived = false;
+        bool arrived = false, placed = false;
         for (uint32_t f = 2; f < 900 && !arrived; ++f) {
+            // mov1 t04 (BKR1 Q5 [H]): the destination counts as blocked only once the squad's approximation byte +0x28c
+            // says its path ends within L = 60 (rebuilt every 8 frames): the unit steps onto the goal when it is 45 out
+            if (!placed && sys.view(100).pos.x > goal.x - 45.0f) placed = sys.add_unit(x);
             sys.tick(f, rng, serial_for);
             arrived = sys.view(100).arrived;
         }
+        CHECK(placed);
         const UnitView k = sys.view(100);
         // the box (15 + 5, 15) at the stop point clears the unit's circle of 6: the centre at least 26 before it; the
         // search steps back by 5 and the cut takes 3 more, the walk stops within 5 of the cut path's end

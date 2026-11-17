@@ -173,7 +173,6 @@ void test_step0_squad_final_facing() {
     const V2 goal = cell_center(25, 20);
     UnitDesc x = unit(70, goal, 2, 1.0f, 6.0f);
     x.owner = 1;
-    CHECK(sys.add_unit(x));
     SimRng rng(303);
     sys.tick(1, rng, serial_for);
     MoveOrder o;
@@ -181,8 +180,11 @@ void test_step0_squad_final_facing() {
     o.destination = goal;
     o.final_facing_deg = 90.0f;
     sys.move(o, rng, 2);
-    bool arrived = false, turned = false;
+    bool arrived = false, turned = false, placed = false;
     for (uint32_t f = 2; f < 900 && !arrived; ++f) {
+        // mov1 t04 (BKR1 Q5 [H]): the destination counts as blocked only once the squad's approximation byte +0x28c says
+        // its path ends within L = 60 (rebuilt every 8 frames): the unit steps onto the goal when the squad is 45 out
+        if (!placed && sys.view(100).pos.x > goal.x - 45.0f) placed = sys.add_unit(x);
         sys.tick(f, rng, serial_for);
         turned = turned || sys.view(100).team_final_turn;
         arrived = sys.view(100).arrived && !sys.view(100).team_final_turn;

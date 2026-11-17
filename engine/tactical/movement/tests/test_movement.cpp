@@ -1319,6 +1319,41 @@ static void test_path_around() {
         w = around_window({20.0f, 20.0f}, {60.0f, 60.0f}, 3, false, 100, 100);
         CHECK(w.x0 == 0 && w.y0 == 0 && w.x1 == 6 && w.y1 == 6);  // clamped to the grid
     }
+    // ---- mov1 t03 (b0180, BKR1_RE_ANSWERS Q4 [H]): 0x677e40's terrain corners over a 7 x 7 window
+    {
+        constexpr int32_t kW = 7;
+        const auto run_corners = [](const std::vector<std::pair<int32_t, int32_t>>& blocked) {
+            std::vector<uint8_t> open(kW * kW, 1);
+            for (const auto& [x, y] : blocked) open[static_cast<size_t>(y * kW + x)] = 0;
+            return terrain_corners(kW, kW, open, open);  // every open cell reached (nothing here splits the window)
+        };
+        const auto has = [](const std::vector<uint32_t>& v, int32_t x, int32_t y) {
+            return std::find(v.begin(), v.end(), static_cast<uint32_t>(y * kW + x)) != v.end();
+        };
+        // all open: outside the window counts as blocked, so the four window corners are concave candidates; nothing else
+        CHECK((run_corners({}) == std::vector<uint32_t>{0, 6, 42, 48}));
+        // an L of blocked cells: the inner corner (3, 3) (two perpendicular orthogonals blocked) is a vertex - the convex-only
+        // rule had none there - and the outer end (5, 3) of the bar is a convex corner
+        const std::vector<uint32_t> l = run_corners({{2, 2}, {3, 2}, {4, 2}, {2, 3}, {2, 4}});
+        CHECK(has(l, 3, 3) && has(l, 5, 3) && !has(l, 3, 4));
+        // a one-cell-thick diagonal wall (1, 2) (2, 3) (3, 4): the lone convex corners beside its middle cell, (3, 2) with
+        // M = 0x20 and (1, 4) with M = 0x04, are dropped by pass 2; the corners at its ends stay
+        const std::vector<uint32_t> d = run_corners({{1, 2}, {2, 3}, {3, 4}});
+        CHECK(!has(d, 3, 2) && !has(d, 1, 4) && has(d, 2, 1) && has(d, 4, 3));
+        // a diagonal staircase (the triangle x + y <= 4 blocked): each open step cell x + y = 5 (concave, M 0x0B) is an inner
+        // L whose two open-side neighbours are candidates - pass 1 drops it; each x + y = 6 cell (convex, M exactly 0x01)
+        // sits against a blocked diagonal whose cross diagonals are blocked - pass 2 drops it
+        std::vector<std::pair<int32_t, int32_t>> tri;
+        for (int32_t y = 0; y < kW; ++y)
+            for (int32_t x = 0; x < kW; ++x)
+                if (x + y <= 4) tri.emplace_back(x, y);
+        const std::vector<uint32_t> st = run_corners(tri);
+        CHECK(!has(st, 2, 3) && !has(st, 3, 2) && !has(st, 3, 3) && !has(st, 2, 4));
+        // an unreached open cell is never a vertex (pass 1)
+        std::vector<uint8_t> open(kW * kW, 1), reach(kW * kW, 1);
+        reach[0] = 0;
+        CHECK((terrain_corners(kW, kW, open, reach) == std::vector<uint32_t>{6, 42, 48}));
+    }
     // ---- the search: one standing obstacle (10, 6) on the mover's line
     MovementConstants k;
     {
@@ -1342,7 +1377,8 @@ static void test_path_around() {
         q.obstacles = obs;
         AroundResult res;
         CHECK(around_search(g, k, q, res));
-        CHECK(res.vertices == 6 && res.complexity == 6 && !res.crossing && res.window.size() == 1);
+        // mov1 t03: + the four window-corner cells (concave: two sides outside the window), 0x677e40's terrain vertices
+        CHECK(res.vertices == 10 && res.complexity == 10 && !res.crossing && res.window.size() == 1);
         // around the -b side: the two side routes tie and the heap rules take the one expanded first
         CHECK(res.points.size() == 4 && res.points[0] == start && res.points[3] == goal);
         if (res.points.size() == 4) {
@@ -1357,7 +1393,7 @@ static void test_path_around() {
             CHECK(res.tags[0].index == 2 && res.tags[0].obstacle == 77 && res.tags[0].pt == (V2{497.5f, 386.5f}) && res.tags[0].dir == (V2{1.0f, 0.0f}));
         // no obstacle: start and goal see each other
         q.obstacles = {};
-        CHECK(around_search(g, k, q, res) && res.points.size() == 2 && res.vertices == 2 && res.complexity == 2);
+        CHECK(around_search(g, k, q, res) && res.points.size() == 2 && res.vertices == 6 && res.complexity == 6);
         // a goal inside the obstacle's grown rectangle: refused (the caller moves on to the next candidate)
         q.obstacles = obs;
         q.goal = {515.0f, 400.0f};

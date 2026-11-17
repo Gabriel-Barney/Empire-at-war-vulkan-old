@@ -319,6 +319,13 @@ void MovementSystem::hash_units(StateHasher& h) const {
         h.u32(static_cast<uint32_t>(push_kills_.size()));
         for (const ObjectId id : push_kills_) h.i32(id);
     }
+    if (!formation_attacks_.empty()) {  // mov1 t06: the formation attack blocks of this tick, only while any
+        h.u32(static_cast<uint32_t>(formation_attacks_.size()));
+        for (const FormationAttack& e : formation_attacks_) {
+            h.i32(e.mover);
+            h.i32(e.target);
+        }
+    }
     if (!deploy_kept_.empty()) {  // s78n t26.1 review: the kept deploy states of garrisoned units, only while any exists
         h.u8(0xDC);
         h.u32(static_cast<uint32_t>(deploy_kept_.size()));

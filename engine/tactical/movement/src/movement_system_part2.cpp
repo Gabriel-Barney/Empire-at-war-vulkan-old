@@ -930,7 +930,7 @@ bool MovementSystem::spare_point(const Unit& a, const Unit& b, V2& v) const {
 // with the concave candidates and the pruning masks, terrain_corners). s78n t24: kind 3 (TerrainCollision, no obstacle) adds 40.0 to D and skips the last-point drop.
 // ("Crosses an obstacle" = the segment meets its tracker rectangle, touching counts: §1.5.1 item 4a, path_around.cpp.)
 bool MovementSystem::path_around(const CollisionObject& c, Unit& u, const Unit* o, bool flag, uint8_t kind, uint8_t flags,
-                                 uint32_t frame) {
+                                 uint32_t frame, std::vector<V2>* probe, float probe_d) {
     const MovementConstants& k = cfg_.constants;
     if (!(walk_max_speed(u) > 0.0f)) return false;
     std::vector<V2> scratch;
@@ -954,6 +954,7 @@ bool MovementSystem::path_around(const CollisionObject& c, Unit& u, const Unit* 
         }
     }
     if (kind == 3) d += 40.0f;  // s78n t24 (§1.5.1 item 1, §5.4.7 item 3.5): TerrainCollision, D = r_u + 40
+    if (probe) d = probe_d;     // mov1 t06: 0x685490 computes its own D
     // The obstacle set, once for the call: every layer object the largest window can reach (the rejoin point lies within
     // D + the candidates' reach of the unit; the window adds its bound, its growth and the retries)
     std::vector<AroundObstacle> obs;
@@ -994,6 +995,11 @@ bool MovementSystem::path_around(const CollisionObject& c, Unit& u, const Unit* 
         }
         if (refuse_back && dot(normalize_retail(res.points[1] - res.points[0]), dir_from_deg(u.m.yaw)) < -0.5f)
             return kRejoinFail;  // refused: the search ends, nothing changed
+        if (probe) {  // mov1 t06: 0x685490's local path - never pushed
+            *probe = std::move(res.points);
+            done = true;
+            return kRejoinTaken;
+        }
 
         // 0x6744a0: the path's id list - every obstacle of the window that is not moving or lies behind the detour's end
         const V2 last = res.points.back();
@@ -1014,8 +1020,44 @@ bool MovementSystem::path_around(const CollisionObject& c, Unit& u, const Unit* 
         done = true;
         return kRejoinTaken;
     }, flag ? o : nullptr);  // s78o (b0065): a flag-1 call's obstacle is the goal-spot filter's forced object
-    if (searched) ++stats_.dynamic_repaths;
+    if (searched && !probe) ++stats_.dynamic_repaths;
     return done;
+}
+
+// mov1 t06 (b0189, BKR2_RE_ANSWERS Q3 [H]): 0x685490(record, a, b). D = |X - a| + r_a, X = where a's travel ray leaves
+// b's swept rectangle (as Path Around flag 0), 0 when the ray does not leave it (no |a - b| + r_a + r_b fallback). A
+// Path Around search with flags 2 and no forced id whose path is never pushed (a probe line). No path, or a without a
+// locomotor: false. Then the layer objects in the box of half size max(80, 1.75 D) around a, nearest first (3-D distance,
+// strict <: ties keep the box order): the first o != a whose owner is hostile to a's and whose footprint the probe path
+// meets (0x441b60, the MovingVsStopped swept test) is the answer - a's formation (none: false) gets a kind-3 attack block
+// on o (formation_attacks_, flags 0) and the call is true. No such o: false. b itself is not excluded.
+bool MovementSystem::mvs_hostile_in_way(const CollisionObject& c, Unit& a, const Unit& b, uint32_t frame) {
+    float d = 0.0f;
+    {
+        const FootRect obox = unit_swept_box(b, a, unit_relation(b, a));
+        V2 exit;
+        if (ray_leaves_rect(obox, a.m.pos, wanted_dir(a), exit)) d = distance(exit, a.m.pos) + foot_radius(a);
+    }
+    std::vector<V2> probe;
+    if (!path_around(c, a, &b, false, 4, 2, frame, &probe, d) || probe.size() < 2) return false;
+    if (a.d.no_locomotor) return false;
+    std::vector<uint32_t> cand;
+    layer_box_query(a.m.pos, std::max(80.0f, 1.75f * d), cand);
+    const auto dist3 = [&](const Unit& o) {
+        const V2 dd = o.m.pos - a.m.pos;
+        const float dz = o.z - a.z;
+        return std::sqrt(dd.x * dd.x + dd.y * dd.y + dz * dz);
+    };
+    std::stable_sort(cand.begin(), cand.end(), [&](uint32_t x, uint32_t y) { return dist3(units_[x]) < dist3(units_[y]); });
+    for (const uint32_t ci : cand) {
+        const Unit& o = units_[ci];
+        if (o.d.id == a.d.id || !hostile(a.d.owner, o.d.owner)) continue;
+        if (foot_path_contact(probe[0], probe, 1, foot_half(a), foot_of(o), 3.0e38f) < 0.0f) continue;
+        if (a.form_id == 0) return false;  // no formation (pack +0x1f0 null)
+        formation_attacks_.push_back({a.d.id, o.d.id});
+        return true;
+    }
+    return false;
 }
 
 bool MovementSystem::mvs_path_around(const CollisionObject& c, Unit& a, const Unit& b, uint8_t p, uint32_t frame) {
@@ -1023,8 +1065,7 @@ bool MovementSystem::mvs_path_around(const CollisionObject& c, Unit& a, const Un
 }
 
 // MovingVsStopped decision 0x684f90 (MOVEMENT §5.4.1; a = mover, b = obstacle), first match wins. s78n t20 batch 1: the
-// death-clone obstacle clauses of steps 2 and 8 (§5.4.5 item 2). Not modelled ([port]): step 10's units-ignoring detour
-// 0x685490 (state 8) is a stand-in (see there). s78n t20: the spare point 0x5c6ba0 and the Path Around calls are §1.5.1's; §5.4.5 - the target
+// death-clone obstacle clauses of steps 2 and 8 (§5.4.5 item 2). mov1 t06: step 10 is 0x685490 (BKR2 Q3). s78n t20: the spare point 0x5c6ba0 and the Path Around calls are §1.5.1's; §5.4.5 - the target
 // clause of step 4, the hero-clash test of step 8 and the crusher's record (set_collision_info gives the target, the
 // range, "short-range" and the clash state).
 void MovementSystem::mvs_decide(CollisionObject& c, Unit& a, Unit& b, uint32_t frame) {
@@ -1070,7 +1111,7 @@ void MovementSystem::mvs_decide(CollisionObject& c, Unit& a, Unit& b, uint32_t f
     }
     // 6. destination blocked: the early-arrival cut, then Path Around; destination free: Repulsion for two Infantry
     // classes, else Path Around
-    bool alt = false;
+    bool alt = true;  // mov1 t06 (BKR2 Q3 [H]): false only when step 6 ran the spare-point search and it failed
     if (!crush && destination_blocked(a, b)) {
         bool to_push = false;
         if (side_step_ok(a, b, c)) {
@@ -1113,29 +1154,21 @@ void MovementSystem::mvs_decide(CollisionObject& c, Unit& a, Unit& b, uint32_t f
         c.state = S::Crusher;
         return;
     }
-    // 10. a pair with a class above Bike: a second Path Around, else 0x685490 - a detour that ignores units (state 8,
-    // Resolved at the next service). [port] The mover keeps its path and b counts as planned around (step 3) until b
-    // changes paths: it walks on through b's footprint; the attack block retail gives the mover's formation on a hostile
-    // unit in the way is not issued.
-    if (ca > kUccBike || cb > kUccBike) {
-        if (alt && mvs_path_around(c, a, b, 1, frame)) {  // 0x685920(a, b, 1): standing friends are no obstacles
+    // 10. (mov1 t06, b0189, BKR2_RE_ANSWERS Q3 [H]) only with alt: a pair with a class above Bike takes a second Path
+    // Around (0x685920(a, b, 1): standing friends are no obstacles), else 0x685490 - a hostile unit on a probe detour
+    // gives a's formation an attack block on it (state 8: max speed, ended at the next service; [port] Resolved at once,
+    // one frame early). Nothing lets the mover walk through b.
+    if (alt && (ca > kUccBike || cb > kUccBike)) {
+        if (mvs_path_around(c, a, b, 1, frame)) {
             c.state = S::PathAround;
             return;
         }
-        // s78n t18 review: only b is stamped with this frame. The list has one stamp, so an older entry that step 3 no
-        // longer accepts (its unit changed paths at or after the old stamp, or is gone) is dropped first - the new stamp
-        // would make it count as planned around again.
-        std::erase_if(a.around, [&](ObjectId id) {
-            if (id == b.d.id) return false;
-            const Unit* o = unit_ptr(id);
-            return !o || !(o->path_change < a.around_frame);
-        });
-        if (std::find(a.around.begin(), a.around.end(), b.d.id) == a.around.end()) a.around.push_back(b.d.id);
-        a.around_frame = frame;
-        c.state = S::Resolved;
-        return;
+        if (mvs_hostile_in_way(c, a, b, frame)) {
+            c.state = S::Resolved;
+            return;
+        }
     }
-    // 11.
+    // 7 Try Again Later: the mover is held at speed 0 and the record is re-decided every 30 frames
     c.state = S::TryAgainLater;
 }
 
@@ -2040,10 +2073,11 @@ uint8_t MovementSystem::svs_pick_mover(const CollisionObject& c, const Unit& p0,
 // svs_pick_mover walks a land path to the first free spot of the ring search around itself (cone toward its escape
 // direction), pushed above its own paths as a collision path; the record is Resolving while it holds that path and
 // Resolved when the path is gone. No mover, no spot (or its own position: ring 0), no path or a refused claim -> Try Again
-// Later, re-tried every 30 frames. [port] retail never re-tests the contact, so a record whose resolution failed would
-// cycle 4 -> 0 -> 4 for as long as both units live; the port ends it at a retry when the two footprints no longer overlap
-// by more than MinimumStoppedVsStoppedOverlapCoefficient or either unit is Moving (the next check makes whatever record
-// then applies).
+// Later, re-tried every 30 frames. mov1 t07 (b0190, BKR2_RE_ANSWERS Q4 [H]): the contact is never re-tested - a record
+// whose resolution failed cycles 4 -> 0 -> 4 until validity ends it (a participant gone, or one on a cell impassable for
+// it), and while it lives detection's pair filter (0x5c7900, any kind, any state) gives the pair no MovingVsStopped /
+// MovingVsMoving record. Each retry re-runs the mover pick and the ring search, so a mover now walking an order still gets
+// the spot's path pushed over it when the other unit is near (ring 0, its own position, when they are apart: state 4).
 void MovementSystem::svs_service(CollisionObject& c, Unit& a, Unit& b, uint32_t frame) {
     using S = CollisionState;
     // Validity 0x686e80: a participant standing on a cell that is impassable for it -> Unresolvable
@@ -2096,8 +2130,7 @@ void MovementSystem::svs_service(CollisionObject& c, Unit& a, Unit& b, uint32_t 
     }
     if (c.state == S::TryAgainLater && frame >= c.retry) {
         c.retry = frame + 30;
-        const bool apart = foot_overlap_coefficient(foot_of(a), foot_of(b)) <= cfg_.constants.minimum_stopped_vs_stopped_overlap;
-        c.state = apart || unit_moving(a) || unit_moving(b) ? S::Resolved : S::Active;  // ([port] the end rule above)
+        c.state = S::Active;  // mov1 t07: no end rule - the resolution runs again at the next service
     }
 }
 

@@ -1381,7 +1381,9 @@ void test_t20_early_arrival() {
         sys.move(o, rng, 2);
         bool placed = false, arrived = false;
         for (uint32_t f = 2; f < 1500 && !arrived; ++f) {
-            if (!placed && sys.view(100).pos.x > start.x + 60.0f) {
+            // mov1 t04 (BKR1 Q5 [H]): the destination counts as blocked only once the mover's approximation byte +0x28c
+            // says its path ends within L = 60 (rebuilt every 8 frames), so the blocker appears when the squad is 45 out
+            if (!placed && sys.view(100).pos.x > dest.x - 45.0f) {
                 t20_squad(sys, 200, {bx, dest.y}, 1);
                 placed = true;
             }
@@ -1954,8 +1956,8 @@ void test_t20_stopped_vs_stopped() {
        // the left), overlapping an immobile unit 4 to its left, so its escape direction is +x, into the wall. The only
        // free ground lies behind it, 170 degrees and more off that direction: inside the Infantry cone (pi), outside the
        // cone of every other class (3 pi / 4), whose samples there sit 0.75 from the unit. An Infantry-class X walks to
-       // the spot behind; a Vehicle-class X of the same shape finds none (Try Again Later). [port] The record of a
-       // failed resolution ends at a retry once the two no longer overlap.
+       // the spot behind; a Vehicle-class X of the same shape finds none (Try Again Later). mov1 t07 (BKR2 Q4 [H]): the
+       // record of a failed resolution is kept after the two no longer overlap (validity alone ends it).
         const auto corner = [&](int32_t cls, bool& moved, bool& tal, float& angle, uint32_t& records_after_apart) {
             MovementSystem sys{MovementConfig{}};
             PassabilityGrid g = open_grid(60, 60);
@@ -1982,7 +1984,7 @@ void test_t20_stopped_vs_stopped() {
                 }
                 for (const CollisionObject& c : sys.collisions().list()) tal = tal || c.state == CollisionState::TryAgainLater;
             }
-            // the other unit goes away: a record left in Try Again Later ends at its next retry
+            // the other unit goes away: a record left in Try Again Later stays (its retries find ring 0, its own spot)
             CHECK(sys.teleport(2, cell_center(10, 20), 0.0f, 0.0f, f));
             for (uint32_t n = 0; n < 40; ++n, ++f) sys.tick(f, rng, serial_for);
             records_after_apart = static_cast<uint32_t>(sys.collisions().list().size());
@@ -1993,7 +1995,7 @@ void test_t20_stopped_vs_stopped() {
         corner(kUccInfantry, moved_i, tal_i, ang_i, left_i);
         corner(kUccVehicle, moved_v, tal_v, ang_v, left_v);
         CHECK(moved_i && ang_i > 135.0f && ang_i <= 180.0f && left_i == 0);
-        CHECK(!moved_v && tal_v && left_v == 0);
+        CHECK(!moved_v && tal_v && left_v == 1);
         std::printf("t20 stopped vs stopped: cone - Infantry spot %.1f degrees off its escape direction, Vehicle: Try Again Later %d\n",
                     static_cast<double>(ang_i), tal_v ? 1 : 0);
     }

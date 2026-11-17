@@ -523,6 +523,15 @@ public:
     // push 0x6859a0's first test, 0x391310(b, 1)), in the order of the pushes, each once. The host kills them by the
     // normal death after the tick and removes them (remove_unit).
     std::span<const ObjectId> push_kills() const { return push_kills_; }
+    // mov1 t06 (BKR2_RE_ANSWERS Q3 [H], MovingVsStopped decision step 10, 0x685490): the formation attack blocks this
+    // tick's decisions asked for, in decision order - the mover's formation gets a kind-3 block on `target` (flags 0, no
+    // attack-move, no guard; +0x50 = 1) pushed over its move block (0x41fd30, which runs the attack slots and the plan).
+    // The host issues them as land attack orders on the mover's formation after the tick.
+    struct FormationAttack {
+        ObjectId mover = -1;
+        ObjectId target = -1;
+    };
+    std::span<const FormationAttack> formation_attacks() const { return formation_attacks_; }
     // s78n t26.1 review: the units whose walk ended deployed this tick (Walk 0x16 -> 0x19 with the Deploy clip on its last
     // frame, tick_deploy; ascending id). The host sets that clip (AnimBehaviors::deploy_at_end) whatever clip plays then
     // (Deployed_Walk, a turn, an idle). Visual only: read in the same tick, not saved, not hashed.
@@ -1646,8 +1655,14 @@ private:
     // detour from u (a point) to a rejoin point on its own current path, pushed as a record on top of its path stack
     // (kind 4; 7 = a crush-flee path). `o` = the obstacle of the record (null: none), forced into the obstacle set when
     // `flag`; `flags` bit 1 / 2 / 4 as in item 1. False: nothing changed (stack, owner, state).
-    bool path_around(const CollisionObject& c, Unit& u, const Unit* o, bool flag, uint8_t kind, uint8_t flags, uint32_t frame);
+    // `probe` (mov1 t06, 0x685490's search): the path found is written there instead of being pushed (no claim, no stamp, no
+    // id list, not counted as a dynamic re-path) and `probe_d` replaces the rejoin distance D
+    bool path_around(const CollisionObject& c, Unit& u, const Unit* o, bool flag, uint8_t kind, uint8_t flags, uint32_t frame,
+                     std::vector<V2>* probe = nullptr, float probe_d = 0.0f);
     bool mvs_path_around(const CollisionObject& c, Unit& a, const Unit& b, uint8_t p, uint32_t frame);  // 0x685920: flags p, then p | 4
+    // mov1 t06: 0x685490 - a probe Path Around (not pushed) and the first hostile layer object on it, nearest first; true
+    // when a's formation was given an attack block on it (formation_attacks_)
+    bool mvs_hostile_in_way(const CollisionObject& c, Unit& a, const Unit& b, uint32_t frame);
     // 0x5c6ba0: the first accepted rejoin candidate with D = |a - b| (3-D) + r_a + r_b; no search, no complexity.
     bool spare_point(const Unit& a, const Unit& b, V2& v) const;
     // 0x676c10: the base path of a Path Around / spare point call - the unit's top path record from its current waypoint
@@ -1823,6 +1838,7 @@ private:
     ModelBoundFn model_bound_;       // s78n t10: the space composition's world boxes (host; not saved)
     std::vector<CrushEvent> crush_;  // OI tactical: this tick
     std::vector<ObjectId> push_kills_;  // s78n t20 batch 1: this tick (saved, hashed while any)
+    std::vector<FormationAttack> formation_attacks_;  // mov1 t06: this tick (saved, version 34; hashed while any)
     std::vector<ObjectId> deploy_pose_;  // s78n t26.1 review: this tick (not saved, not hashed)
     OwnerThreatFn threat_;           // REMAINING_GAPS §4.2
     AnimLengthFn anim_len_;          // §4.3-4.7
