@@ -557,6 +557,7 @@ private:
     HotkeyBinding rebind_key_{};
     void apply_keys(std::vector<MenuAction>& out);
     void refill_keys();
+    void show_hint(GuiDialog& d, std::string_view control);  // UI5 t08: IDC_HINT_LIST of the single-player menu
     std::vector<SaveGameInfo> saves_;
     // [port: Gabriel] the saved games tree: one entry per list row, a save (index into saves_) or a group (save = -1, its
     // key path); the open groups' key paths (kept across refills).

@@ -86,6 +86,7 @@ BEGIN
     PUSHBUTTON      "TEXT_BUTTON_SKIRMISH",IDC_SKIRMISH_GAMES_BUTTON,265,598,236,23
     PUSHBUTTON      "TEXT_BUTTON_DEBUG_LOAD_SKIRMISH_MAP",
                     IDC_DEBUG_LOAD_SKIRMISH_MAP_BUTTON,284,723,196,22
+    LISTBOX         IDC_HINT_LIST,284,658,228,107,LBS_SORT | LBS_NOINTEGRALHEIGHT | WS_TABSTOP
 END
 
 IDD_CAMPAIGN_SELECTION_DIALOG DIALOGEX 0, 0, 620, 441
@@ -337,6 +338,7 @@ struct Env {
         text.add("TEXT_BUTTON_BEGIN", u"Begin");
         text.add("TEXT_DIFFICULTY_NORMAL_NAME", u"Normal");
         text.add("TEXT_BUTTON_YES", u"Yes");
+        text.add("Hint_IDC_SKIRMISH_GAMES_BUTTON", u"Fight a single battle.");
         gui.init(script, skin, atlas, fonts, &text);
         gui.resize(1024, 768);
         gui.set_sfx_hook([this](std::string_view e, int32_t) { sfx.emplace_back(e); });
@@ -591,8 +593,12 @@ void test_routing_and_controls() {
         const GuiRect r = d->control_rect(static_cast<size_t>(d->find("IDC_TEST_SLIDER")));
         const Vec2f right = env.gui.canvas().canvas_to_pixel(r.max.x - 0.5f, 0.5f * (r.min.y + r.max.y));
         const Vec2f left = env.gui.canvas().canvas_to_pixel(r.min.x + 0.5f, 0.5f * (r.min.y + r.max.y));
+        env.sfx.clear();
+        env.frame(right, false);  // UI5 t06: entering the slider is a hover, the press a Button_Press
+        CHECK(env.sfx.size() == 1 && env.sfx[0] == "GUI_Common_Dialog_Button_Hilight");
         ev = env.frame(right, true);
         CHECK(has_event(ev, GuiEvent::Kind::ValueChanged, "IDC_TEST_SLIDER", 100));
+        CHECK(env.sfx.size() == 2 && env.sfx[1] == "GUI_Common_Dialog_Button_Press");
         ev = env.frame(left, true);
         CHECK(has_event(ev, GuiEvent::Kind::ValueChanged, "IDC_TEST_SLIDER", 0));
         env.frame(left, false);
@@ -630,10 +636,13 @@ void test_routing_and_controls() {
         d->set_items("IDC_TEST_COMBO", {U"Rebel", U"Empire", U"Underworld"}, 0);
         const GuiRect f = d->control_rect(static_cast<size_t>(d->find("IDC_TEST_COMBO")));
         const Vec2f field = env.gui.canvas().canvas_to_pixel(f.min.x + 20.0f, f.max.y - 7.0f);  // closed field (15 units)
+        env.sfx.clear();
         env.frame(field, false);
         env.frame(field, true);
         env.frame(field, false);
         CHECK(d->get("IDC_TEST_COMBO")->open);
+        // UI5 t06: hover and the open click sound like a button.
+        CHECK(env.sfx.size() == 2 && env.sfx[0] == "GUI_Common_Dialog_Button_Hilight" && env.sfx[1] == "GUI_Common_Dialog_Button_Press");
         const float rh = static_cast<float>(env.fonts.metrics(env.gui.control_font(*d, static_cast<size_t>(d->find("IDC_TEST_COMBO")))).line_height) *
                          env.gui.canvas().units_per_pixel_y;
         const Vec2f row2 = env.gui.canvas().canvas_to_pixel(f.min.x + 10.0f, f.max.y - 15.0f - 2.0f - 2.5f * rh);
@@ -644,7 +653,10 @@ void test_routing_and_controls() {
     }
     // Edit: typed text (WM_CHAR), VK fallback, Backspace, Enter = Submitted.
     {
+        env.sfx.clear();
         env.click(*d, "IDC_TEST_EDIT");
+        CHECK(!env.sfx.empty() && env.sfx.back() == "GUI_Common_Dialog_Button_Press");  // UI5 t06: no hover sound, a press
+        CHECK(std::count(env.sfx.begin(), env.sfx.end(), std::string("GUI_Common_Dialog_Button_Hilight")) == 0);
         ev = env.frame({0, 0}, false, {}, false, U"Save 1");
         CHECK(has_event(ev, GuiEvent::Kind::TextChanged, "IDC_TEST_EDIT") && d->get("IDC_TEST_EDIT")->text == U"Save 1");
         env.frame({0, 0}, false, {vk::kBack});
@@ -869,6 +881,18 @@ void test_widgets_ui5() {
     env.gui.build(a, env.now);
     env.gui.build(b, env.now);
     CHECK(a.digest() == b.digest());
+    // UI5 t08: a dialog tooltip sits below-right of the cursor, flips at the right / bottom edge and stays on screen.
+    {
+        const HudCanvas& cv = env.gui.canvas();
+        const float hw = 0.5f * cv.width, hh = 0.5f * cv.height;
+        const Vec2f size{120.0f, 30.0f};
+        const GuiRect mid = env.gui.tooltip_box({0.0f, 0.0f}, size);
+        CHECK(mid.min.x > 0.0f && mid.max.y < 0.0f && std::fabs(mid.width() - size.x) < 1e-3f);
+        const GuiRect corner = env.gui.tooltip_box({hw - 5.0f, -hh + 5.0f}, size);  // bottom-right corner
+        CHECK(corner.max.x <= hw + 1e-3f && corner.min.y >= -hh - 1e-3f && corner.max.x < hw - 5.0f && corner.min.y > -hh + 5.0f);
+        const GuiRect huge = env.gui.tooltip_box({0.0f, 0.0f}, {cv.width + 50.0f, 10.0f});  // wider than the screen: left edge
+        CHECK(std::fabs(huge.min.x + hw) < 1e-3f);
+    }
 }
 
 void test_menus() {
@@ -914,6 +938,15 @@ void test_menus() {
     step(env.click(*mm, "IDC_MAIN_MENU_SINGLE_PLAYER_GAMES"));
     CHECK(fe.top() == "IDD_SINGLE_PLAYER_GAMES_MENU_DIALOG" && env.gui.open_count() == 1);
     CHECK(!env.gui.top()->get("IDC_DEBUG_LOAD_SKIRMISH_MAP_BUTTON")->visible);
+    {  // UI5 t08 (UI.md §4.5 Hint list): hidden until a button is hovered, then "Hint_<id>" (a blank row without one)
+        GuiDialog* sp = env.gui.top();
+        CHECK(!sp->get("IDC_HINT_LIST")->visible);
+        step(env.frame(env.px_of(*sp, "IDC_SKIRMISH_GAMES_BUTTON"), false));
+        const GuiControl* hl = sp->get("IDC_HINT_LIST");
+        CHECK(hl->visible && hl->items.size() == 1 && hl->items[0] == U"Fight a single battle.");
+        step(env.frame(env.px_of(*sp, "IDC_BACK_BUTTON_MAIN"), false));
+        CHECK(hl->visible && hl->items.size() == 1 && hl->items[0] == U" ");
+    }
     step(env.click(*env.gui.top(), "IDC_NEW_CAMPAIGN_BUTTON"));
     CHECK(fe.top() == "IDD_CAMPAIGN_SELECTION_DIALOG");
     GuiDialog* cs = env.gui.top();

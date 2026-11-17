@@ -374,6 +374,7 @@ void TacticalHud::update_input(const RoutedInput& routed, bool shift, bool ctrl,
                 h.value = q.entry.type_index;
                 h.ids = {q.entry.queue, q.entry.index};
                 act(std::move(h));
+                buttons_.play_sfx("GUI_Cancel_SFX", k.component);  // UI5 t06: CommandBarClass::Cancel_Production (UI.md §3.6)
             }
             break;
         }

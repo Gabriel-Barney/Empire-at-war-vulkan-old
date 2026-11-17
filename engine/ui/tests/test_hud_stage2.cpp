@@ -1307,9 +1307,13 @@ void test_tactical_stage2() {
         hud.build(fr, units, types);  // back to the enabled buttons for the clicks below
     }
     {
+        std::vector<std::string> cancel_sfx;  // UI5 t06: Cancel_Production plays GUI_Cancel_SFX
+        hud.set_sfx_hook([&](std::string_view e, int32_t) { cancel_sfx.emplace_back(e); });
         auto [cmds, acts] = click("tqueue00", Button::Left);
         CHECK2(cmds.empty() && acts.size() == 1 && acts[0].kind == HudAction::Kind::TacticalCancel && acts[0].unit == 900 &&
                acts[0].value == 33 && acts[0].ids == (std::vector<uint32_t>{0, 1}));
+        CHECK2(std::count(cancel_sfx.begin(), cancel_sfx.end(), std::string("GUI_Cancel_SFX")) == 1);
+        hud.set_sfx_hook({});
     }
     {  // Tactical buy buttons: Build_00 enabled (cost text2), Build_01 blocked by funds (disabled, tooltip index 2).
         const HudBuildOption opts[2] = {{41, "i_button_hologram.tga", 1200, 0, HudBuildOption::Block::None, {}},

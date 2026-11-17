@@ -444,6 +444,18 @@ command bar per component `Mouse_Over_SFX` (mostly `GUI_Highlight_Mouse_Over`) a
 Underworld}_SFX`, toggles `GUI_Toggle_*_On/Off`. Menu music: `Main_Menu_Music_Event`; load screen
 music GameConstants `Music_Event_Battle_Load_Screen`. UI sounds use the free (non-sync) RNG. [H]
 
+**Which control plays what** (ui5 t06; each gadget class's input handler, vtable slot 14, classes named by RTTI) [H]:
+`GUI_Common_Dialog_Button_Hilight` when the cursor enters an enabled control (input event 0x13) and
+`GUI_Common_Dialog_Button_Press` on its left-button down (event 0): push button (0x1ef5d0), check box (0x1f0c40), radio
+button (0x1f19e0), combo box (0x1e8970: both only inside the closed field rect; the press is the click that opens or
+closes the drop-down), vertical scroll bar (0x1ecb90, its own gadget, e.g. a list's), trackbar slider (0x1d6290 / 0x1d6de0 /
+0x1d7cf0). Edit box (0x1e5e90): Press on the left-button down only, no hover sound. Custom image (0x1eaa80): Hilight only
+[M: under conditions not traced]. List box (0x1ceca0): `GUI_Common_Dialog_Listbox_Entry_Select` on a selection change.
+The other names above are not dialog sounds: `GUI_Cancel_SFX` is played only by `CommandBarClass::Cancel_Production`
+(0x3cb2f0, a production-queue entry cancelled from the command bar); `GUI_Select_{Rebel,Empire,Underworld}_SFX` are the
+factions' `SFXEvent_GUI_Start_Campaign` values (Factions.xml); `GUI_Toggle_*_On / _Off` are the per-ability values of the
+factions' `SFXEvent_GUI_Toggle_Non_Hero_Ability_On / _Off` lists (ability toggles, not front-end controls).
+
 ### 3.7 Colour combos and tech-tree arrows (2026-11-02, p4ui t03)
 
 Sources: the staging colour fill 0xfa1c0, the slot refresh 0xfe7c0, the LAN lobby fill 0xb1240, the colour-change

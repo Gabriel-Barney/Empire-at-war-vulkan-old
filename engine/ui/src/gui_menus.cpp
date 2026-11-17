@@ -722,7 +722,8 @@ void FrontEnd::fill_campaign_select(GuiDialog& d) {
         d.show(buttons[b], has);
         if (has) d.set_text(buttons[b], faction_label(s->factions[b].faction));
     }
-    d.set_text("IDC_STATIC_DIFFICULTY_DESCRIPTION", s ? text(s->description_text) : std::u32string());
+    // UI5 t08: IDC_STATIC_DIFFICULTY_DESCRIPTION (one line, 200 x 16 units) keeps its empty .rc caption: retail's code never
+    // names it (nor this dialog), so no campaign description is written into it.
 }
 
 void FrontEnd::fill_custom_staging(GuiDialog& d) {
@@ -1394,7 +1395,7 @@ void FrontEnd::fill_gameplay(GuiDialog& d, const GameplaySettings& g) {
     d.set_checked("IDC_ABILITIES_DEFAULT_TO_AUTOFIRE", g.abilities_autofire);
     const char* radios[3] = {"IDC_RADIO_EASY", "IDC_RADIO_MEDIUM", "IDC_RADIO_HARD"};
     d.set_checked(radios[std::clamp(g.difficulty, 0, 2)], true);
-    for (int32_t i = 0; i < 3; ++i) d.set_text(radios[i], text(kDifficultyKeys[i]));
+    // UI5 t08: the radios keep their empty .rc captions; IDC_RADIO_BLANK / 2 / 3 next to them carry the difficulty names.
 }
 
 GameplaySettings FrontEnd::read_gameplay(const GuiDialog& d) const {
@@ -1473,6 +1474,8 @@ void FrontEnd::setup(GuiDialog& d) {
         if (mods) d.set_text("IDC_PORT_MAIN_MENU_MODS", gui_->port_text(U"Mods"));
         close_multiplayer_gap(d);
     } else if (ascii_iequals(n, kSingle)) {
+        d.set_items("IDC_HINT_LIST", {});  // UI5 t08: hidden until a button is hovered (UI.md §4.5 "Hint list")
+        d.show("IDC_HINT_LIST", false);
         d.show("IDC_DEBUG_LOAD_SKIRMISH_MAP_BUTTON", false);
         d.enable("IDC_NEW_CAMPAIGN_BUTTON", !menu_.story.empty());
         d.enable("IDC_CUSTOM_CAMPAIGN_BUTTON", !menu_.custom.empty());
@@ -2153,6 +2156,17 @@ void FrontEnd::apply_keys(std::vector<MenuAction>& out) {
     out.push_back(act(MenuAction::Kind::KeybindingsChanged));
 }
 
+// UI5 t08 (UI.md §4.5 "Hint list"): "Hint_<control id>" from the game text, wrapped into IDC_HINT_LIST's rows (white); a
+// control without a hint shows one blank row. The list is shown from the first hover on.
+void FrontEnd::show_hint(GuiDialog& d, std::string_view control) {
+    if (!d.get("IDC_HINT_LIST")) return;
+    const std::string key = "Hint_" + std::string(control);
+    const TextDatabase* db = gui_->text_db();
+    std::u32string hint = db && db->find(key) ? gui_->caption_text(key) : std::u32string(U" ");
+    gui_->set_paragraphs(d, "IDC_HINT_LIST", {std::move(hint)}, Rgba8{255, 255, 255, 255});
+    d.show("IDC_HINT_LIST", true);
+}
+
 void FrontEnd::refill_keys() {
     if (GuiDialog* d = gui_->top(); d && (keyboard_page(d->name()) >= 0 || is_port_controls(d->name()))) fill_keyboard(*d);
 }
@@ -2212,6 +2226,10 @@ void FrontEnd::update(std::span<const GuiEvent> events, const InputFrame& raw, s
             case GuiEvent::Kind::ValueChanged: on_change(e, out); break;
             case GuiEvent::Kind::RowClicked:  // [port: Gabriel] only the saved games tree uses row clicks
                 if (ascii_iequals(e.dialog, kSave) || ascii_iequals(e.dialog, kLoad)) on_change(e, out);
+                break;
+            case GuiEvent::Kind::Hovered:  // UI5 t08: the single-player menu's hint list
+                if (ascii_iequals(e.dialog, kSingle))
+                    if (GuiDialog* d = gui_->find(kSingle)) show_hint(*d, e.control);
                 break;
             case GuiEvent::Kind::Submitted:
                 if (ascii_iequals(e.dialog, kSave)) {
