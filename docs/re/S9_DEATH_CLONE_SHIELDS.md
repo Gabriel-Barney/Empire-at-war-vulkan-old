@@ -148,6 +148,10 @@ Suspend is vfunc +0xc0 (+1). What suspends it, if anything, was not traced [L: c
   HIDE_WHEN_FOGGED, 0x40 IMPOSING_PRESENCE, 0x14 LAND_OBSTACLE and 0x55 PROXIMITY_MINE (and a 0x5051d0 test), and
   K ≠ 4 (Force lightning), the clone is created through a different object manager (mode +0x20 → +0x20). It is
   probably a lighter corpse list. Whether that path also consumes a sim id was not checked.
+- **Correction (storyb t17 RE, 2026-11-17) [H]:** the clone is owned by the **neutral** player (not the dying object's)
+  and starts at health 0. The infantry special case is exact now: the behaviour tests read the clone type's generic
+  `<Behavior>` set only (not `LandBehavior`), `0x5051d0` is "collision-avoiding and `IsDeathCloneObstacle`", and the
+  other manager is the mode's secondary store (own ids, no primary id, not in the CRC). `STORYB_T17_SPAWNS_AND_DEATH.md` §3.2.
 
 ---
 

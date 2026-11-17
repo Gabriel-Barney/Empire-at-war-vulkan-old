@@ -321,6 +321,11 @@ Lua_Call 0x6a5fc0. Exactly 3 parameters.
 Lua_Call 0x57a6f0 / 0x57a860. 1 or 2 parameters: boolean, optional number (default 0). Receiver must be a live object
 (dead = silent no-op).
 
+> **Correction (storyb t17 RE, 2026-11-17) [H]:** the effect is owned by the **neutral** player, not the local player;
+> its sim position gets the (0, 0, zoffset) offset only when the target has no model (with a model the offset is the
+> render-attach transform on bone 0), plus the effect type's `Layer_Z_Adjust` (0 in vanilla). Details, lifetime and the
+> UM01 case: `STORYB_T17_SPAWNS_AND_DEATH.md` §1.
+
 - `true`: spawns a **special-effect game object** of type `Object_Highlight` (model `W_HILIGHT_FX.ALO`) or
   `Object_Highlight_Small` (`W_HILIGHT_FX_SMALL.ALO`) from `SPECIALEFFECTS.XML` (decoration, idle, scale 1.0), owned by
   the local player, at the target's position with an offset of (0, 0, `zoffset`); if the target has a render model the
