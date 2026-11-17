@@ -2513,11 +2513,14 @@ cmd::RejectReason BattleAi::execute_order(uint8_t player, const cmd::EventData& 
                     // cmb2 t06 (b0075, BKT1_ATTACK_RE §3.1 / §3.5 [H]): an object's own Attack_Move (arg 0) on an object that is
                     // not a combat unit (a story marker) is the land attack move too - kind 3 with flag 0x01 on the object, no
                     // lock (TARGETING by geometry: TacticalBattle::attack_can_hit_at); not on the caller or its container
+                    // (review: not a TEAM container - its members are the combat units - and not a retreated unit)
                     const auto obj = static_cast<objects::ObjectId>(tw);
                     bool self = false;
                     for (const objects::ObjectId id : group.units)
                         self = self || id == obj || b_->attack_mover(id) == obj;
-                    nonhostile_block = !b_->space_ && !self && (le32(b, 20) & at::kTfAttackMoveIssueAttack) == 0;
+                    const bool combat_object = (tu && (tu->retreated || !tu->alive || b_->combat_->has_unit(tu->id))) ||
+                                               b_->team_target(obj) != nullptr || b_->movement_->is_land_team_container(obj);
+                    nonhostile_block = !b_->space_ && !self && !combat_object && (le32(b, 20) & at::kTfAttackMoveIssueAttack) == 0;
                 }
             }
             if (order != lua::LuaOrder::AttackMove || tw == cmd::kNoObject)  // refixf t06: position / guard / move blocks
@@ -2579,7 +2582,11 @@ cmd::RejectReason BattleAi::execute_order(uint8_t player, const cmd::EventData& 
                 for (const objects::ObjectId id : group.units) b_->combat_->clear_order(id);
                 const Vec3 gp = st.position(st.find(fobj));
                 b_->land_order(group.units, fflags, gp, fobj);  // cmb1 t01: the formation's guard block
-                (void)b_->land_attack_order(*mode_, group.units, fobj, gp, fflags, false, host_->random().synced(), true);
+                // cmb2 t03 (review): a failed first plan waits 2 x FPS before the follow tries again
+                if (b_->land_attack_order(*mode_, group.units, fobj, gp, fflags, false, host_->random().synced(), true) ==
+                        TacticalBattle::AttackPlan::Failed &&
+                    !follows_.empty() && follows_.back().target == fobj)
+                    follows_.back().next = b_->frame_ + 61;
                 return R::None;
             }
             // refixf t02 / t06 (MOVEMENT §6.3 [H]): Lua Attack_Move / Move_To on a task force build one parameter block and ONE

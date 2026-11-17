@@ -1823,10 +1823,12 @@ TacticalBattle::AttackPlan TacticalBattle::land_attack_order(TacticalMode& mode,
         if (it->target == target) hp = it->hp;
         break;
     }
-    if (hp >= 0) {
+    // a hard point no longer targetable: the object (review); a re-plan's tp is already the block's last-observed point
+    // (keep() writes the hard point's position into it while the target is seen), so only a first order reads it here
+    if (hp >= 0 && !(combat_->has_unit(target) && combat_->hardpoint_targetable(target, static_cast<uint32_t>(hp)))) hp = -1;
+    if (hp >= 0 && !replan) {
         tactical::Vec3 hpp;
-        if (combat_->has_unit(target) && combat_->hardpoint_world(target, hp, hpp)) tp = Vec3{hpp.x, hpp.y, hpp.z};
-        else hp = -1;
+        if (combat_->hardpoint_world(target, hp, hpp)) tp = Vec3{hpp.x, hpp.y, hpp.z};
     }
     float thx = 0.0f, thy = 0.0f;
     if (movement_->has_unit(target)) {
@@ -2006,7 +2008,9 @@ void TacticalBattle::attack_block_service(TacticalMode& mode, SimRng& rng) {
                 // cmb2 t04 (FIGHTER_FLYING §4.11 D 7): a block naming a hard point reads the hard point's position
                 Vec3 p = st.position(oh);
                 tactical::Vec3 hpp;
-                if (r.hp >= 0 && tid == r.target && combat_->hardpoint_world(tid, r.hp, hpp)) p = Vec3{hpp.x, hpp.y, hpp.z};
+                if (r.hp >= 0 && tid == r.target && combat_->hardpoint_targetable(tid, static_cast<uint32_t>(r.hp)) &&
+                    combat_->hardpoint_world(tid, r.hp, hpp))
+                    p = Vec3{hpp.x, hpp.y, hpp.z};
                 r.ox = p.x;
                 r.oy = p.y;
                 r.oz = p.z;
