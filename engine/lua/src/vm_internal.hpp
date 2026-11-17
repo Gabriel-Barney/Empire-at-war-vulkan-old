@@ -255,6 +255,10 @@ struct Call {
 //            (class, key), kept for the VM's lifetime (their entities live as long as the session).
 // Value wrappers (PositionWrapper, BlockingStatus, created instances) are new userdata per call.
 void push_object(lua_State* L, LuaVm::Impl& vm, objects::ObjectHandle h);
+// storyb t16 [port]: the store's objects a Lua search walks - all but the map decorations (objects::kFlagMapDecoration),
+// which retail keeps in the secondary store no search reads. Store order / newest first, as the store's own lists.
+std::vector<objects::ObjectHandle> script_objects(const objects::ObjectStore& st);
+std::vector<objects::ObjectHandle> script_objects_newest_first(const objects::ObjectStore& st);
 // L1/S4 wave 2b: the wrapper of object `h` of the parent mode's store (ObjectBridge::parent_store; nil without
 // one). Its methods run on that store (the dispatcher swaps LuaVm::Impl::host.store, kParentStoreTag).
 void push_parent_object(lua_State* L, LuaVm::Impl& vm, objects::ObjectHandle h);

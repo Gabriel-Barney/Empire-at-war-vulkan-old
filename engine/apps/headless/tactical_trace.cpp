@@ -64,8 +64,9 @@ void PortTacticalTrace::sample(const alamo::sim::TacticalMode& tm, const alamo::
         ObjectHandle h;
     };
     std::vector<Obj> live;
-    for (ObjectHandle h : store.all_objects())
-        if (store.alive(h)) live.push_back({static_cast<uint32_t>(store.id(h)), h});
+    for (ObjectHandle h : store.all_objects())  // storyb t16: a map decoration is in retail's secondary store, not traced
+        if (store.alive(h) && (store.flags(h) & alamo::objects::kFlagMapDecoration) == 0)
+            live.push_back({static_cast<uint32_t>(store.id(h)), h});
     std::sort(live.begin(), live.end(), [](const Obj& a, const Obj& b) { return a.id < b.id; });
 
     // Digests over the objects not flagged dead (q2trace.py validate recomputes them from the O lines).

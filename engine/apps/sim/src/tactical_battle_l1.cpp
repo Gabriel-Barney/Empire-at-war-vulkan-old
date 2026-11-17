@@ -345,6 +345,16 @@ bool TacticalBattle::tsw_fire(objects::ObjectId tsw) {
 
 // ---- motion: teleport, hyperspace, engines ----
 
+bool TacticalBattle::face_immediate(TacticalMode& mode, objects::ObjectId id, Vec3 facing) {
+    objects::ObjectStore& st = mode.primary();
+    const objects::ObjectHandle h = st.find(id);
+    if (!st.alive(h)) return false;
+    st.set_facing(h, facing);
+    if (movement_) (void)movement_->set_heading(id, yaw_deg_of(facing));  // unknown to movement: nothing
+    if (combat_ && combat_->has_unit(id)) combat_->set_facing(id, to_t(facing));
+    return true;
+}
+
 bool TacticalBattle::teleport(TacticalMode& mode, objects::ObjectId id, Vec3 position, Vec3 facing) {
     objects::ObjectStore& st = mode.primary();
     const objects::ObjectHandle h = st.find(id);

@@ -101,6 +101,11 @@ enum ObjectFlag : uint8_t {
     // skai t15 (SKAI_T15_TARGET_CHOICE Q5 [H]): pre-built at the skirmish start (team pads, before the start deletes and
     // rebuilds the threat grid); UNIT_AI never registers it again, so it is missing from every AI owner list all battle.
     kFlagNoAiOwnerList = 0x08,
+    // storyb t16 (STORY_T04_KESSEL_RUN §7.1 [H], object reader 0x2b0a20): an Is_Decoration map object, which retail
+    // registers in the mode's secondary store. [port] It stays in the primary store (ids, trees, obstacles, drawing),
+    // but is left out of what the secondary store keeps it out of: the store's CRC, the tactical trace and every Lua
+    // object search (lua detail::script_objects). Not one of the original's +0x3A0 bits.
+    kFlagMapDecoration = 0x10,
     // refix t01 (S9_DEATH_CLONE_SHIELDS.md §1.6 [H], AI_TACTICAL.md §2, L1_S4_REMAINING.md): +0x3a0 bit 0x40 = dying /
     // dead state (Die sets it; death clones are created with it), bit 0x80 = removing. A death clone gets both (0xc0).
     // Such an object still exists and is alive() (it is drawn and runs its death sequence), but gameplay searches skip

@@ -82,6 +82,9 @@ struct TacticalScriptHooks {
     CinematicTransports* transports = nullptr;
     // Teleport (Start_Cinematic_Space_Retreat line-up, 0x3a8f90): store + movement + trees. Unset: store only.
     std::function<void(objects::ObjectHandle unit, Vec3 position, Vec3 facing)> teleport;
+    // storyb t11 (STORYB_T17_HIDDEN_UNITS §5): Face_Immediate's orientation snap on the battle (store + combat + the
+    // movement heading; orders and paths kept). Unset: the store facing only.
+    std::function<void(objects::ObjectHandle unit, Vec3 facing)> face_immediate;
     // cu8l t02 (CU8K_T02_T06_RE §3 rule 6): Lock_Current_Orders took the movement lock counter 0 -> 1 on `unit` (0x3a8e50's
     // first lock: the split from its formation or the adopt, at most one synced draw). Unset: no draw.
     std::function<void(objects::ObjectHandle unit)> movement_first_lock;
