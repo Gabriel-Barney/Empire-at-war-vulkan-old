@@ -600,6 +600,7 @@ const std::vector<Vfs::Mount>& Vfs::mounts() const { return impl_->mounts; }
 const std::vector<std::string>& Vfs::mod_dirs() const { return impl_->mod_dirs; }
 const std::vector<std::string>& Vfs::warnings() const { return impl_->warnings; }
 const std::string& Vfs::eaw_root() const { return impl_->eaw_root; }
+const std::string& Vfs::foc_root() const { return impl_->foc_root; }
 
 std::unique_ptr<Vfs> mount_game(std::string_view foc_root, std::span<const std::string> game_args, std::string* err,
                                 std::optional<std::string> eaw_root) {

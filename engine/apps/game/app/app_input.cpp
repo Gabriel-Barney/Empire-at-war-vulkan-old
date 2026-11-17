@@ -136,11 +136,40 @@ void App::announcer_feedback() {
     const galactic::GalacticSim* g = galaxy();
     if (!session_ || !g) return;
     const int32_t me = local_player();
-    for (const galactic::GalacticEvent& e : session_->take_announce_events())
+    using K = galactic::GalacticEventKind;
+    for (const galactic::GalacticEvent& e : session_->take_announce_events()) {
         if (const char* tag = galactic_announcement(*g, e, me)) {
             audio_.faction_sfx(tag);
             ++announcements_;
         }
+        // aud2 t03: the local player's production begin / cancel / complete -> the built type's SFXEvent_Build_* (and
+        // Build_Music_Completed). Galactic production types index the object type table (as HeroRespawned).
+        if (me >= 0 && e.player == me && e.type < data_.types.size() &&
+            (e.kind == K::ProductionBegin || e.kind == K::ProductionCanceled || e.kind == K::ProductionCompleted)) {
+            const GameAudioHost::Production kind = e.kind == K::ProductionBegin      ? GameAudioHost::Production::Begin
+                                                   : e.kind == K::ProductionCanceled ? GameAudioHost::Production::Cancel
+                                                                                     : GameAudioHost::Production::Complete;
+            audio_.production(data_.types, static_cast<objects::TypeIndex>(e.type), kind);
+        }
+        // aud2 t07 (BATTLE_TRANSITIONS, departure 0x431c80): Galactic_Fleet_Hyperspace when the local player owns or sees
+        // the departing fleet. [port] "sees": the local player can see fleet presence at the origin planet
+        // (can_see_planet_info FleetPresence) and the fleet is not all stealthed (the announcer's hidden test).
+        if (e.kind == K::FleetDeparted && me >= 0) {
+            bool sees = false;
+            if (e.player != me && e.planet < g->planets().size() &&
+                g->can_see_planet_info(me, e.planet, galactic::GalacticSim::PlanetInfo::FleetPresence)) {
+                sees = true;
+                if (e.fleet < g->fleets().size()) {
+                    const galactic::FleetState& fl = g->fleets()[e.fleet];
+                    bool all_hidden = !fl.contents.empty();
+                    for (const objects::ObjectHandle m : fl.contents)
+                        if (g->store().alive(m)) all_hidden = all_hidden && g->hidden(m);
+                    sees = !all_hidden;
+                }
+            }
+            audio_.fleet_departure(e.player == me, sees);
+        }
+    }
     if (me >= 0 && static_cast<size_t>(me) < g->players().size()) {
         const auto& acc = g->players()[static_cast<size_t>(me)].account;
         const bool capped = acc.cap >= 0.0f && acc.credits >= acc.cap;
@@ -164,7 +193,7 @@ void App::galactic_message(std::string_view id) {
 void App::post_tick() {
     audio_.sim_tick();
     if (session_->take_reveal_sfx()) {  // GRC 1.3: a planet was revealed by the galactic pre-step (frame > 0)
-        audio_.ui("SFXEvent_Planet_Revealed");
+        audio_.planet_revealed();  // aud2 t01: Audio.xml's SFXEvent_Planet_Revealed value (FoC GUI_Planet_Mouse_Over)
         ++reveal_sfx_;
     }
     special_feedback();  // P4 host

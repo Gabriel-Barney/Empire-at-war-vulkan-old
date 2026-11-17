@@ -68,6 +68,7 @@ struct Voice {
     std::vector<uint8_t> bytes;
     ma_decoder dec{};
     bool dec_ok = false;
+    bool paused = false;  // aud2 t04: held by pause() (ma_sound_stop keeps the cursor)
 
     Voice() = default;
     Voice(const Voice&) = delete;
@@ -230,7 +231,17 @@ bool MiniaudioBackend::playing(uint32_t voice) const {
     auto it = impl_->voices.find(voice);
     if (it == impl_->voices.end()) return false;
     Voice& v = *it->second;
+    if (v.paused) return !ma_sound_at_end(&v.sound);
     return ma_sound_is_playing(&v.sound) && !ma_sound_at_end(&v.sound);
+}
+
+void MiniaudioBackend::pause(uint32_t voice, bool paused) {
+    auto it = impl_->voices.find(voice);
+    if (it == impl_->voices.end() || it->second->paused == paused) return;
+    Voice& v = *it->second;
+    v.paused = paused;
+    if (paused) ma_sound_stop(&v.sound);  // the cursor stays: ma_sound_start resumes from it
+    else ma_sound_start(&v.sound);
 }
 
 void MiniaudioBackend::advance(double) {}

@@ -182,6 +182,8 @@ listener first (`qsort`, not stable) [H] (0x2d3d90). So when voices are scarce, 
 
 voice gain = bus gain × (volume% / 100) × fade level × visibility factor × (3D only) global 3D scale ×
 (3D only) attract-mode factor, then capped at 0.3 while a speech stream plays and no modal dialog is open.
+Miles applies its 3D distance rolloff (§1.7) on top of this capped gain, so the port multiplies its distance
+attenuation in **after** the cap (aud2 t06): a distant 3D voice is ducked by the same factor as a near one.
 
 - Bus gain: §4. Fade level: 1.0 unless fading out (§1.5).
 - Visibility factor (3D-attached only): 0 when the object is hidden [L: flag +0x3a2 bit 0], when a
@@ -299,7 +301,12 @@ Other triggers: main menu `Main_Menu_Music_Event`, splash `Splash_E3_Music_Event
 Hutt Palace / Cantina structure selection (`Structure_..._Music_Event`, 0x44890), production complete
 (`Build_Music_Completed`), TSW activation (`TSW_MusicEvent_Activation_Start`). Lua: `Play_Music`,
 `Stop_All_Music` (closes both streams), `Resume_Mode_Based_Music`. Application deactivation increments
-the music manager's pause counter (WndProc 0x60c60), which stops its updates. [H]
+the music manager's pause counter (WndProc 0x60c60), which stops its updates. [H] [port] (aud2 t04) The port's
+`AudioSystem::pause_music` / `resume_music` keep the counter; the first pause also holds the playing music voices at
+their position (miniaudio keeps mixing on its own thread, where Miles' streams starve once step 14 stops) and the
+last resume releases them; play requests made meanwhile start with the first update after it. The game host raises
+it on WM_ACTIVATEAPP (inactive) and skips its whole audio update while inactive (§6.1); smoke, hidden and benchmark
+runs never pause.
 
 ---
 
@@ -389,6 +396,13 @@ option `Subtitles` and the dialog option `IDC_USE_MOVIE_SUBTITLES` gate movie su
   (0x227b90, 0x2299a0; also tried relative to the mod/install prefix), not through MegaFiles.xml.
   SFX archives store bare leaf names, so samples are resolved by leaf name through the normal VFS
   (loose files override) [H]. A missing sample logs `File %s not in SFX2D megafile.` and the stage is skipped.
+  Read with REA 2026-11-17 (aud2 t05): 0x227b90 mounts each archive twice, once as the prefix string
+  (0x140a15320) + `Data\Audio\SFX\SFX2D_Non_Localized.meg` and once by the plain relative name through the normal
+  file open; the localized one is built from the language name the same way; init fails when any mount fails. So a
+  mod's own copy (found first by the plain open) is mounted next to the install copy and **layers over it** rather
+  than replacing it [M: which string the prefix holds, read as the install folder]. [port] `default_sfx_megs`: per
+  archive name every mod search dir's copy, then FoC's, then EaW's; the loose `Data\Audio\SFX\<name>` (mod, then
+  FoC) is tried before any archive.
 - SFX samples are read whole into memory and handed to Miles; music and speech are **streamed** through
   Miles file callbacks that go to the game's file layer, so they also come from MEGs [H] (0x21c2f0).
 - No ADPCM, Ogg or Miles-specific compression was found in the vanilla archives (FoC and EaW scanned):

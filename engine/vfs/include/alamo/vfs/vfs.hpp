@@ -135,6 +135,7 @@ public:
     const std::vector<std::string>& mod_dirs() const;
     const std::vector<std::string>& warnings() const;
     const std::string& eaw_root() const;                // "" if none
+    const std::string& foc_root() const;                // host path of the FoC folder (the Base layer's root)
 
     struct Impl;
 

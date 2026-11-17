@@ -607,6 +607,9 @@ void App::frame() {
         audio_.set_listener({cp.eye.x, cp.eye.y, cp.eye.z}, {cp.target.x, cp.target.y, cp.target.z}, cinematic);
     }
     audio_flags();  // OI host: modal / GUI-only / attract
+    // aud2 t04 (AUDIO.md §6.1 / §2.3): audio updates and music only while this application is active. Smoke, hidden and
+    // benchmark runs (no live input) never pause: their audio clock must not depend on window focus.
+    audio_.set_app_active(win_.app_active() || !live_input());
     // BM2a: in a benchmark the audio clock runs on the sim (1/30 s per tick that ran this frame) and a speech's end is
     // taken now, before any later tick, so its STORY_SPEECH_DONE goes in before the next tick in every run.
     audio_.update(bench_active() ? (bench_.ticked ? 1.0f / 30.0f : 0.0f) : dt_);

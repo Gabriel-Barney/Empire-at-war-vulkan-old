@@ -587,6 +587,140 @@ void test_object_sfx_t05() {
 #endif
 }
 
+// aud2 (both builds): the production tag names; with engine/audio, every aud2 hookup on a synthetic tree and the null
+// backend - t01 planet reveal plays the Audio.xml constant's value, t02 Master_Volume_Restore returns to the profile's
+// master, t03 production begin / cancel / complete (+ Build_Music_Completed), t04 no updates and paused music while the
+// application is inactive, t07 the fleet departure line, t08 the strategic win / lose music.
+void test_aud2() {
+    using H = GameAudioHost;
+    CHECK(H::production_tag(H::Production::Begin) == "SFXEvent_Build_Started");
+    CHECK(H::production_tag(H::Production::Cancel) == "SFXEvent_Build_Cancelled");
+    CHECK(H::production_tag(H::Production::Complete) == "SFXEvent_Build_Complete");
+    MemoryProvider files;
+    files.add("Data\\XML\\GameObjectFiles.xml", "<L><File>Aud2.xml</File></L>");
+    files.add("Data\\XML\\Aud2.xml", R"(<?xml version="1.0"?>
+<SpaceUnits>
+  <SpaceUnit Name="Built_Ship">
+    <SFXEvent_Build_Started> HD_Build </SFXEvent_Build_Started>
+    <SFXEvent_Build_Cancelled> HD_Cancel </SFXEvent_Build_Cancelled>
+    <SFXEvent_Build_Complete> HD_Complete </SFXEvent_Build_Complete>
+  </SpaceUnit>
+  <SpaceUnit Name="Death_Star">
+    <SFXEvent_Build_Complete> HD_Complete </SFXEvent_Build_Complete>
+    <Build_Music_Completed> DS_Done </Build_Music_Completed>
+  </SpaceUnit>
+  <SpaceUnit Name="Silent_Ship"></SpaceUnit>
+</SpaceUnits>
+)");
+    objects::ObjectTypeDatabase raw;
+    CHECK(raw.load(files));
+    objects::GameObjectTypes types;
+    CHECK(types.build(raw));
+    const objects::TypeIndex ship = types.resolve_name("Built_Ship"), ds = types.resolve_name("Death_Star"),
+                             silent = types.resolve_name("Silent_Ship");
+    CHECK(ship != objects::kNone && ds != objects::kNone && silent != objects::kNone);
+    GameAudioHost off;  // never initialised: every call is a no-op, the activation bookkeeping still runs
+    CHECK(off.production(types, ship, H::Production::Begin) == 0 && off.fleet_departure(true, true) == 0);
+    off.planet_revealed();
+    off.campaign_end(true);
+    off.set_app_active(false);
+    CHECK(!off.app_active() && off.stats().deactivations == 1);
+#ifdef ALAMO_GAME_HAVE_AUDIO
+    if (ship == objects::kNone || ds == objects::kNone || silent == objects::kNone) return;
+    auto tree = std::make_unique<MemoryProvider>();
+    tree->add("Data\\XML\\SFXEventFiles.xml", "<SFXEvent_Files><File>SFXEventsAud2.xml</File></SFXEvent_Files>");
+    tree->add("Data\\XML\\SFXEventsAud2.xml", R"(<?xml version="1.0"?>
+<SFXEvents>
+  <SFXEvent Name="GUI_Planet_Mouse_Over"><Is_2D>Yes</Is_2D><Is_3D>No</Is_3D><Is_GUI>Yes</Is_GUI><Samples>MO.WAV</Samples></SFXEvent>
+  <SFXEvent Name="HD_Build"><Is_2D>Yes</Is_2D><Is_3D>No</Is_3D><Samples>B.WAV</Samples></SFXEvent>
+  <SFXEvent Name="HD_Cancel"><Is_2D>Yes</Is_2D><Is_3D>No</Is_3D><Samples>C.WAV</Samples></SFXEvent>
+  <SFXEvent Name="HD_Complete"><Is_2D>Yes</Is_2D><Is_3D>No</Is_3D><Samples>D.WAV</Samples></SFXEvent>
+  <SFXEvent Name="Galactic_Fleet_Hyperspace"><Is_2D>Yes</Is_2D><Is_3D>No</Is_3D><Is_GUI>Yes</Is_GUI><Samples>HS.WAV</Samples></SFXEvent>
+</SFXEvents>
+)");
+    tree->add("Data\\XML\\MusicEvents.xml", R"(<?xml version="1.0"?>
+<MusicEvents>
+  <MusicEvent Name="Gal_Rebel"><Files>G1.MP3</Files><Loop>Yes</Loop></MusicEvent>
+  <MusicEvent Name="DS_Done"><Files>DS.MP3</Files></MusicEvent>
+  <MusicEvent Name="Strat_Win"><Files>W.MP3</Files></MusicEvent>
+  <MusicEvent Name="Strat_Lose"><Files>L.MP3</Files></MusicEvent>
+  <MusicEvent Name="Strat_Lose_Empire"><Files>LE.MP3</Files></MusicEvent>
+</MusicEvents>
+)");
+    tree->add("Data\\XML\\SpeechEvents.xml", "<SpeechEvents/>");
+    tree->add("Data\\XML\\Audio.xml", "<Audio><SFXEvent_Planet_Revealed> GUI_Planet_Mouse_Over </SFXEvent_Planet_Revealed></Audio>");
+    tree->add("Data\\XML\\FactionFiles.xml", "<Faction_Files><File>Factions.xml</File></Faction_Files>");
+    tree->add("Data\\XML\\Factions.xml", R"(<?xml version="1.0" ?>
+<Factions>
+  <Faction Name="Rebel"><Strategic_Map_Music_Event> Gal_Rebel </Strategic_Map_Music_Event>
+    <Music_Event_Strategic_Win> Strat_Win </Music_Event_Strategic_Win>
+    <Music_Event_Strategic_Lose> Strat_Lose </Music_Event_Strategic_Lose>
+    <Music_Event_Strategic_Lose_Vs_Faction> Empire, Strat_Lose_Empire </Music_Event_Strategic_Lose_Vs_Faction></Faction>
+</Factions>
+)");
+    GameData data;
+    data.files = std::move(tree);
+    GameAudioHost h;
+    CHECK(h.init(data, AudioBackendKind::Null, 5));
+    if (!h.active()) return;
+    h.music(MusicScene::Galactic, "Rebel");
+
+    // t01: the constant's value plays, not the tag name (which is no SFX event).
+    h.planet_revealed();
+    CHECK(starts(h, "GUI_Planet_Mouse_Over") == 1 && h.stats().planet_reveals == 1);
+    CHECK(starts(h, "SFXEvent_Planet_Revealed") == 0);
+
+    // t02: the profile's master is the saved level; Lua Master_Volume_Restore ramps back to it.
+    h.set_volumes(0.55f, 0.8f, 0.8f, 0.8f);
+    CHECK(h.system()->saved_master_volume() == 0.55f);
+    h.system()->set_bus_level(audio::AudioBus::Master, 0.1f);  // a Lua fade
+    h.system()->master_volume_restore();
+    CHECK(h.system()->bus_level(audio::AudioBus::Master) == 0.55f);
+
+    // t03: begin / cancel / complete play the type's tags; a completion with Build_Music_Completed plays it in mode 4.
+    CHECK(h.production(types, ship, H::Production::Begin) != 0 && starts(h, "HD_Build") == 1);
+    CHECK(h.production(types, ship, H::Production::Cancel) != 0 && starts(h, "HD_Cancel") == 1);
+    CHECK(h.production(types, ship, H::Production::Complete) != 0 && starts(h, "HD_Complete") == 1);
+    CHECK(h.stats().production_sfx == 3 && h.stats().build_music == 0 && cur(h) == "Gal_Rebel");
+    CHECK(h.production(types, silent, H::Production::Begin) == 0);  // no tag: nothing
+    h.update(5.0);  // the HUD lines end (Max_Instances) before the next completion line
+    CHECK(h.production(types, ds, H::Production::Complete) != 0 && starts(h, "HD_Complete") == 2);
+    CHECK(h.stats().build_music == 1 && cur(h) == "DS_Done" && mode(h) == audio::music_mode::kBuildComplete);
+
+    // t07: owned or seen -> the hyperspace line; neither -> nothing.
+    CHECK(h.fleet_departure(false, false) == 0 && starts(h, H::kFleetHyperspaceEvent) == 0);
+    CHECK(h.fleet_departure(true, false) != 0 && starts(h, H::kFleetHyperspaceEvent) == 1);
+    h.update(5.0);
+    CHECK(h.fleet_departure(false, true) != 0 && starts(h, H::kFleetHyperspaceEvent) == 2 && h.stats().fleet_jumps == 2);
+
+    // t04: inactive -> no updates (the music voice is held, nothing advances) and the music manager paused; active again
+    // -> both resume. Only changes count.
+    h.music(MusicScene::None);
+    h.music(MusicScene::Galactic, "Rebel");
+    h.update(0.0);
+    CHECK(cur(h) == "Gal_Rebel" && !h.system()->music_paused());
+    h.set_app_active(false);
+    h.set_app_active(false);
+    CHECK(!h.app_active() && h.system()->music_paused() && h.stats().deactivations == 1);
+    const size_t log_inactive = h.system()->log().size();
+    h.update(1.0);
+    h.update(1.0);
+    CHECK(h.system()->log().size() == log_inactive);  // no update ran: no voice ended, no music step
+    h.set_app_active(true);
+    CHECK(h.app_active() && !h.system()->music_paused());
+    h.update(0.0);
+    CHECK(cur(h) == "Gal_Rebel");
+
+    // t08: campaign won / lost -> Music_Event_Strategic_Win / _Lose; the _Vs_Faction row first; mode 16.
+    h.campaign_end(true);
+    CHECK(cur(h) == "Strat_Win" && mode(h) == audio::music_mode::kBattleEnd);
+    h.campaign_end(false, "Empire");
+    CHECK(cur(h) == "Strat_Lose_Empire" && mode(h) == audio::music_mode::kBattleEnd);
+    h.campaign_end(false, "Underworld");
+    CHECK(cur(h) == "Strat_Lose" && h.stats().campaign_end_music == 3);
+#endif
+}
+
 }  // namespace
 
 int main() {
@@ -595,6 +729,7 @@ int main() {
     test_control_point_lines();
     test_garrison_and_clash_lines();
     test_intro_speech_t07();
+    test_aud2();
 #ifdef ALAMO_GAME_HAVE_AUDIO
     test_movie_music();
     test_missing_credits_event();

@@ -654,13 +654,66 @@ double GameAudioHost::output_latency_seconds() const { return backend_ ? backend
 void GameAudioHost::set_volumes(float master, float sfx, float speech, float music) {
     if (!system_) return;
     system_->set_bus_level(audio::AudioBus::Master, master);
+    system_->save_master_volume();  // aud2 t02: the profile's master is what Lua Master_Volume_Restore restores
     system_->set_bus_level(audio::AudioBus::Sfx, sfx);
     system_->set_bus_level(audio::AudioBus::Speech, speech);
     system_->set_bus_level(audio::AudioBus::Music, music);
 }
 
 void GameAudioHost::update(double dt) {
-    if (game_) game_->update(dt);
+    if (game_ && app_active_) game_->update(dt);  // aud2 t04: step 14 runs only while the application is active
+}
+
+void GameAudioHost::planet_revealed() {
+    if (!game_ || !db_) return;
+    const std::string& event = db_->constants().sfx_planet_revealed;
+    if (event.empty()) return;
+    ++stats_.planet_reveals;
+    ui(event);
+}
+
+void GameAudioHost::set_app_active(bool active) {
+    if (active == app_active_) return;
+    app_active_ = active;
+    if (!active) ++stats_.deactivations;
+    if (!system_) return;
+    if (active) system_->resume_music();
+    else system_->pause_music();
+}
+
+uint32_t GameAudioHost::production(const objects::GameObjectTypes& types, objects::TypeIndex type, Production kind) {
+    if (!game_ || type == objects::kNone || type >= types.size()) return 0;
+    uint32_t id = 0;
+    const std::string_view tag = types.get_string(type, production_tag(kind));
+    if (!tag.empty()) {
+        id = game_->gui_sfx(tag);
+        if (id) ++stats_.production_sfx;
+    }
+    if (kind == Production::Complete) {
+        const std::string_view music = types.get_string(type, "Build_Music_Completed");
+        if (!music.empty()) {
+            game_->build_complete(music);  // mode 4, the previous music resumes after it
+            ++stats_.build_music;
+        }
+    }
+    return id;
+}
+
+uint32_t GameAudioHost::fleet_departure(bool local_owner, bool local_sees) {
+    if (!game_ || !(local_owner || local_sees)) return 0;
+    const uint32_t id = game_->gui_sfx(kFleetHyperspaceEvent);
+    if (id) ++stats_.fleet_jumps;
+    return id;
+}
+
+void GameAudioHost::campaign_end(bool won, std::string_view enemy_faction) {
+    if (!game_) return;
+    audio::BattleResult r;
+    r.won = won;
+    r.strategic = true;  // Music_Event_Strategic_* instead of _Tactical_*
+    r.enemy_faction = std::string(enemy_faction);
+    game_->battle_end(r);  // mode 16, forced
+    ++stats_.campaign_end_music;
 }
 
 void GameAudioHost::set_log_limit(size_t limit) {
@@ -731,10 +784,28 @@ void GameAudioHost::set_flags(bool modal, bool gui_only, bool attract) {  // sam
 double GameAudioHost::output_latency_seconds() const { return 0.0; }
 void GameAudioHost::set_volumes(float, float, float, float) {}
 void GameAudioHost::update(double) {}
+void GameAudioHost::planet_revealed() {}
+void GameAudioHost::set_app_active(bool active) {  // same bookkeeping as with audio
+    if (active == app_active_) return;
+    app_active_ = active;
+    if (!active) ++stats_.deactivations;
+}
+uint32_t GameAudioHost::production(const objects::GameObjectTypes&, objects::TypeIndex, Production) { return 0; }
+uint32_t GameAudioHost::fleet_departure(bool, bool) { return 0; }
+void GameAudioHost::campaign_end(bool, std::string_view) {}
 void GameAudioHost::set_log_limit(size_t) {}
 void GameAudioHost::apply_presentation(const std::vector<lua::PresentationEvent>&, uint32_t*) {}
 
 #endif
+
+std::string_view GameAudioHost::production_tag(Production kind) {
+    switch (kind) {
+        case Production::Begin: return "SFXEvent_Build_Started";
+        case Production::Cancel: return "SFXEvent_Build_Cancelled";
+        case Production::Complete: return "SFXEvent_Build_Complete";
+    }
+    return {};
+}
 
 // Shared by both builds (cu9 t09): the same bookkeeping with and without engine/audio (nothing reads it without).
 void GameAudioHost::battle_reset() {

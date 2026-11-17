@@ -679,7 +679,8 @@ std::vector<galactic::GalacticEvent> GameSession::take_announce_events() {
 // One galactic event for the presentation tap (special events only; everything else is ignored).
 void GameSession::tap_event(const galactic::GalacticSim& gs, const galactic::GalacticEvent& e) {
     using K = galactic::GalacticEventKind;
-    if (e.kind == K::PlanetOwnerChanged || e.kind == K::CorruptionChanged || e.kind == K::FleetDeparted) {
+    if (e.kind == K::PlanetOwnerChanged || e.kind == K::CorruptionChanged || e.kind == K::FleetDeparted ||
+        e.kind == K::ProductionBegin || e.kind == K::ProductionCanceled || e.kind == K::ProductionCompleted) {  // aud2 t03
         if (announce_events_.size() < 256) announce_events_.push_back(e);  // ui4 t08 (bounded when nobody takes them)
         return;
     }
