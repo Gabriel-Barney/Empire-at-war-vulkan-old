@@ -240,6 +240,32 @@ void test_list_box_colours() {
     for (Rgba8 col : {kRed, kBlue}) CHECK(!any_colour(list_quads(dl, HudList::Alpha), col));
 }
 
+// UI.md §3.7.3 (modc t38): a row wider than the list box drops trailing characters until it fits; the glyphs keep their
+// width (no squeeze) and the item keeps its whole text.
+void test_list_box_long_row() {
+    Fix f;
+    GuiDialog* d = f.gui.open("IDD_LAN_LOBBY_DIALOG");
+    if (!d) {
+        CHECK(false);
+        return;
+    }
+    clear_other_combos(*d, "");
+    GuiControl* l = d->get("IDC_PLAYER_LIST");
+    const GuiRect lr = d->control_rect(static_cast<size_t>(d->find("IDC_PLAYER_LIST")));
+    l->items = {U"A"};
+    const std::vector<HudQuad> one = list_quads(f.draw(), HudList::Text);
+    CHECK(one.size() == 1);
+    const float glyph_w = one.empty() ? 0.0f : one[0].max.x - one[0].min.x;
+    const std::u32string long_row(400, U'A');
+    l->items = {long_row};
+    const std::vector<HudQuad> text = list_quads(f.draw(), HudList::Text);
+    CHECK(!text.empty() && text.size() < long_row.size());
+    const Bounds b = bounds(text);
+    CHECK(b.x1 <= lr.max.x && b.x0 >= lr.min.x);
+    for (const HudQuad& q : text) CHECK(std::fabs((q.max.x - q.min.x) - glyph_w) < 0.01f);
+    CHECK(l->items[0] == long_row);
+}
+
 void test_combo_field_text() {
     Fix f;
     GuiDialog* d = f.gui.open("IDD_LAN_LOBBY_DIALOG");
@@ -370,6 +396,7 @@ void test_fleet_dividers() {
 int main() {
     test_colour_combo_text();
     test_list_box_colours();
+    test_list_box_long_row();
     test_combo_field_text();
     test_tech_tree_arrows();
     test_battle_end_arrows();
