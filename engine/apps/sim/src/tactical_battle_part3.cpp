@@ -454,6 +454,9 @@ void TacticalBattle::drive_animation(objects::ObjectStore& store, SimRng& rng, u
         in.movable = u.movable;
         in.on_path = gated;
         in.target = target;
+        // r3g t06 (TACTICAL_GAPS §6.2, 0x395920 step 1): SPREAD_OUT on the unit (member flag obj +0x448) makes it crouched:
+        // default idle 71 Idle Crouch, CROUCHMOVE / crouch turns; a change of the state forces a new idle (crouch_changed).
+        in.crouched = abilities_ && abilities_->spread_out(u.id);
         if (u.movable) {
             const mv::UnitView v = movement_->view(u.id);
             // s78n t26.1 review: only 0x19 with the walking-deployed flag leaves the deploy states to the locomotor clips
@@ -772,7 +775,13 @@ void TacticalBattle::spawn_ability_object(TacticalMode& mode, const ta::AbilityE
 // --- end fog follow-up ---
 
 // --- OI tactical: crush (MOVEMENT.md 5.5) - 1,000,000 damage of the crusher type's Squash_Damage_Type ---
+// r3g t05 (MOVEMENT §5.5, S9_DEATH_CLONE_SHIELDS §1.4): Squash_Damage_Type (type +0x36c) is a tDamageType, the kill's kind
+// (the Death_Clone key), not a Damage_Types armour row. The type reset 0x367250 writes 14 (Damage_Crush) as its default,
+// so every crusher without the tag kills through the victim's Damage_Crush clones (21 FoC types, Specific_Death_Anim_Type
+// Crushed). No armour row (Take_Damage without a projectile).
 void TacticalBattle::oi_apply_crush(uint32_t frame) {
+    constexpr uint8_t kKindCrush = 14;  // Damage_Crush
+    const objects::GameObjectTypes& types = catalog_->types();
     for (const mv::CrushEvent& e : oi_crush_) {
         const Unit* cr = unit_by_id(e.crusher);
         if (!cr || !combat_->alive(e.victim)) continue;
@@ -780,10 +789,11 @@ void TacticalBattle::oi_apply_crush(uint32_t frame) {
         r.victim = e.victim;
         r.amount = mv::kCrushDamage;
         r.source = e.crusher;
-        std::string_view name = catalog_->types().get_string(cr->type, "Squash_Damage_Type");
-        while (!name.empty() && (name.front() == ' ' || name.front() == '\t')) name.remove_prefix(1);
-        while (!name.empty() && (name.back() == ' ' || name.back() == '\t')) name.remove_suffix(1);
-        r.damage_type = name.empty() ? tc::kNoTypeId : tables_->combat.damage.damage_index(name);
+        r.kind = kKindCrush;
+        if (!types.get_string(cr->type, "Squash_Damage_Type").empty()) {
+            const int32_t k = types.get_enum(cr->type, "Squash_Damage_Type");
+            if (k >= 0 && k <= 0xff) r.kind = static_cast<uint8_t>(k);
+        }
         combat_->take_damage(r, frame);
     }
     oi_crush_.clear();

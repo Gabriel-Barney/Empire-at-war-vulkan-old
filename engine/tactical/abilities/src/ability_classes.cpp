@@ -9,7 +9,7 @@
 // Fire_Frame) = the first update whose position >= N. "At the animation end" = position >= max(count - 2, 0), where a
 // one-shot finishes. Frame count and fps come from the model's clip data through AbilityHost::anim_clip (clip_timing);
 // without a clip (no host, no model, no such clip) rate is 1 and each end falls back: melee / grenade end at their last
-// frame-numbered event, Hack / Repair after kHackFrames, the Berserker damage window is always open.
+// frame-numbered event, Hack (HACKING 0x5a) / Repair (REPAIRING 0x5b) after kHackFrames, the Berserker damage window is always open.
 //
 // Synced draws (exactly these, in apply order): one per apply attempt that passed the range test for the chance
 // classes (Arc_Sweep / Generic / Eat: draw <= chance; Earthquake / Telekinesis / Vehicle_Thief / Whirlwind: draw <
@@ -33,7 +33,8 @@ using C = SpecialClass;
 constexpr float kDegToRad = 0.017453292519943295f;
 constexpr uint8_t kKind2 = 2, kKind3 = 3, kKind4 = 4, kKind5 = 5, kKind16 = 0x16;
 constexpr int32_t kHackFrames = 60;  // [port] Hack / Repair animation 0x5a length without a clip (§4.13 fallback)
-constexpr int32_t kAnimHacking = 0x5a;  // Hack / Repair (TACTICAL_GAPS §2.3.10)
+constexpr int32_t kAnimHacking = 0x5a;    // Hack (TACTICAL_GAPS §2.3.10)
+constexpr int32_t kAnimRepairing = 0x5b;  // r3g t08: Repair (RepairAbility apply 0x70c580 / update 0x70cb90, REPAIRING)
 constexpr int32_t kAnimBerserk = 0x68;  // Berserker (TACTICAL_GAPS §2.3.2)
 constexpr int32_t kAnimAttack = 5;      // Super_Laser (TACTICAL_GAPS §2.3.9), weapon shots, the Arc / Eat gates
 // §4.14: begin / hold / release clips (anim_types.cpp)
@@ -684,9 +685,13 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             }
             sp.applied = 1;
             sp.target = target;
-            uint32_t len = 0;  // animation 0x5a: its end on sim frames, else kHackFrames (§4.13)
+            // Hack: animation 0x5a (HACKING); r3g t08: Repair plays 0x5b (REPAIRING, apply 0x70c580: random variant, blend
+            // 0.1) and its update 0x70cb90 repairs when 0x5b has finished. Its end on sim frames, else kHackFrames (§4.13).
+            // [port] retail refuses the apply when the model lacks the clip (0x397ae0 == 0); the port cannot tell a model
+            // without the clip from a host without clip data and keeps the fallback. Variant 0's length [port].
+            uint32_t len = 0;
             if (s.cls != C::TacticalBribe) {
-                const ClipTiming ct = clip_timing(o.id, kAnimHacking, {});
+                const ClipTiming ct = clip_timing(o.id, s.cls == C::Repair ? kAnimRepairing : kAnimHacking, {});
                 len = ct.count > 0.0f ? static_cast<uint32_t>(std::ceil(ct.end / ct.rate)) : static_cast<uint32_t>(kHackFrames);
             }
             sp.next = frame + len;

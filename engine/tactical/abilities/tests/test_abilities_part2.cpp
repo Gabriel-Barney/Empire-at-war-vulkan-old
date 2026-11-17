@@ -158,6 +158,40 @@ int oi_hack_timing(uint32_t count, float fps) {
     }
     return -1;
 }
+
+// r3g t08: ticks from the order to the Repair's heal; the model has HACKING 0x5a (`hack` frames) and REPAIRING 0x5b
+// (`repair` frames, 0 = missing), both 30 fps. Repair times on 0x5b only (RepairAbility 0x70c580 / 0x70cb90).
+int oi_repair_timing(uint32_t hack, uint32_t repair) {
+    OiWorld w;
+    SpecialAbilityDesc rp = oi_special("Repair", SpecialClass::Repair, ActivationStyle::UserInput);
+    rp.max_range = 1000.0f;
+    const uint32_t rs = add_special(w.ad, rp);
+    AbilityObjectDesc a;
+    a.unit_abilities = {oi_gui(kTargetedRepair, 0.0f, 10.0f, "Repair")};
+    a.specials = {rs};
+    const uint32_t ad = push(w.cd, w.ad, oi_unit("R", 100.0f), a);
+    const uint32_t td = push(w.cd, w.ad, oi_unit("V", 100.0f), AbilityObjectDesc{});
+    w.make(GameMode::Land);
+    AbilityHost h;
+    h.anim_clip = [hack, repair](ObjectId id, int32_t type, std::string_view, uint32_t, uint32_t& n, float& f) {
+        const uint32_t c = id != 1 ? 0u : type == 0x5a ? hack : type == 0x5b ? repair : 0u;
+        if (c == 0) return false;
+        n = c;
+        f = 30.0f;
+        return true;
+    };
+    w.ab->set_host(std::move(h));
+    w.add(1, ad, 0, {0, 0, 0});
+    w.add(2, td, 0, {300, 0, 0});
+    w.sys->set_health(2, 40.0f);
+    const ObjectId one[] = {1};
+    CHECK(w.ab->targeted_ability(one, kTargetedRepair, 2, -1, w.frame) == 1);
+    for (int i = 1; i <= 200; ++i) {
+        w.tick();
+        if (w.sys->health(2) == 100.0f) return i;
+    }
+    return -1;
+}
 }  // namespace bo3split
 
 namespace bo3split {
@@ -222,6 +256,11 @@ void test_oi_anim_timings() {
     CHECK(oi_hack_timing(32, 30.0f) == hack60 - 30);
     CHECK(oi_hack_timing(32, 60.0f) == hack60 - 45);
     CHECK(oi_hack_timing(33, 60.0f) == hack60 - 44);  // 31 / 2 rounds up to 16
+    // r3g t08: Repair reads REPAIRING (0x5b), never HACKING: a 92-frame 0x5a changes nothing, the 0x5b length does.
+    const int rep60 = oi_repair_timing(92, 0);  // no 0x5b clip: the 60-frame fallback
+    CHECK(rep60 > 60);
+    CHECK(oi_repair_timing(92, 32) == rep60 - 30);
+    CHECK(oi_repair_timing(0, 32) == rep60 - 30);
     // Berserker: passes on counters 55, 50, ... 5 (n = 5 .. 55); a 50-frame clip loops at 49, window (10, 40) strict:
     // n = 15, 20, 25, 30, 35 only.
     CHECK(oi_berserker_damage(0) == 110.0f);

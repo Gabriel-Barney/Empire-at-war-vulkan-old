@@ -55,8 +55,7 @@
 //     the whole family; turn clips only for stationary units with a yaw change > 0.01 deg, index 0, speed 1
 //     (Rotation_Animation_Speed unused: units not documented), move blend; Walk_ / Crouch_Animation_Speed unused
 //     (the doc's walk row names Movement_Animation_Speed only);
-//   * death type by damage kind (death_type_for_kind) when the type has no Specific_Death_Anim_Type and the model
-//     has the clip; spin-away decided at death with one synced float when 0 < chance < 1 (the original draw was
+//   * spin-away decided at death with one synced float when 0 < chance < 1 (the original draw was
 //     not found, ABILITIES_HARDPOINTS §8 item 10), lasting Spin_Away_On_Death_Time, then removed (no fade).
 #pragma once
 #include <cstdint>
@@ -152,11 +151,9 @@ int32_t default_idle_type(const AnimModel* m, const LocomotorInput& in, const Id
 // s78l t03: `idle.idle_type`, or the presence step's answer for `records` when idle.presence is set, the records are not
 // empty and the answer has a clip in `m` ([port] no clip: the plain type, as default_idle_type).
 int32_t presence_idle_type(const AnimModel* m, ObjectId id, const IdleParams& idle, std::span<const IdleRecord> records);
-// [port] death type for a damage kind (DamageType enum) when the type does not set Specific_Death_Anim_Type:
-// Force_Whirlwind -> FW_DIE, Force_Telekinesis -> FTK_DIE, Force_Lightning -> FL_DIE, Fire -> FIRE_DIE,
-// Cable_Attack -> CA_DIE, Cable_Attack_Deployed -> DEPLOYED_CA_DIE, Normal_Deployed -> DEPLOYED_DIE,
-// Crush -> CRUSHED, Eat -> EATEN_DIE; kNoAnimType otherwise (used only when the model has that clip).
-int32_t death_type_for_kind(uint8_t damage_kind);
+// r3g t07 (S9_DEATH_CLONE_SHIELDS §1.3-1.4, DeathBehavior attach 0x58cdb0): the death clip is the type's
+// Specific_Death_Anim_Type / _Index only (+0xd98 / +0xd9c); the killing kind never picks a clip. Kind-specific deaths
+// (FW / FL / FTK / Fire / CA / Crushed) come from the Death_Clone the kind selects, whose type names its clip.
 
 // refixf t04: the data-driven part of Die + DeathBehavior, computed WITHOUT an AnimWorld so the sim can schedule the
 // removal of a death clone store object identically with and without the animation service (ANIM_PARTICLES §A.7: the
@@ -171,7 +168,7 @@ struct DeathPlan {
 };
 // Same draws in the same order as begin_death (spin: one synced float when 0 < chance < 1; then the variant: one int in
 // [0, n - 1] when `p.index` is random and `m` has n > 0 variants of the death type - AnimWorld::play's draw). The death
-// type is p.type, or death_type_for_kind(damage_kind) when the type sets none and `m` has that clip. m = null: no clip,
+// type is p.type (r3g t07: never chosen by `damage_kind`, which is only recorded). m = null: no clip,
 // no variant draw. lifetime = what AnimBehaviors::service's countdown gives a corpse that starts at the death frame:
 //   spin   Spin_Away_On_Death_Time;
 //   clip   one_shot_frames(clip, speed 1) + 1 (the corpse service runs before the advance, so it sees the finished clip
@@ -273,7 +270,7 @@ public:
     // ---- death / corpse ----
     // Die + DeathBehavior start. NoRow: `id` has no AnimWorld row (a corpse without clip is still recorded,
     // unless remove_upon_death). RemoveNow: the row (if any) was removed; the caller removes the object.
-    // `damage_kind` = the killing hit's DamageType (death_type_for_kind when the type has no explicit death type).
+    // `damage_kind` = the killing hit's DamageType (recorded on the corpse; it does not pick the clip, r3g t07).
     // Spin-away (Spin_Away_On_Death): [port] decided here, one synced float [0, 1) < chance when 0 < chance < 1
     // (chance >= 1 or unset: always); a spinning death plays no clip and is removed after Spin_Away_On_Death_Time.
     DeathResult begin_death(AnimWorld& w, ObjectId id, const DeathParams& p, const CorpseInfo& info, SimRng& rng, uint64_t frame,

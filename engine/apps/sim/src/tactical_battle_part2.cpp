@@ -913,11 +913,16 @@ bool TacticalBattle::landing_locked(objects::ObjectId id) const {
 
 // a1i t04 (A1_READINGS §35.2, timed mode): state 4 waits (hidden) until no other landing in state 1 / 2 overlaps its
 // footprint (drop_half_extents box along the yaw [port: the footprint AABB with z +-100 of 0x38de80 as an oriented box; only
-// this battle's landings are seen]); state 1 [port: the Land clip takes no time] turns into state 2 with the step timer;
+// this battle's landings are seen]); state 1 plays Land (anim 0x2b) at 1.15 and turns into state 2 with the step timer once
+// the clip passes 98 % (r3g t01, §35.2 service; [port] a model without the clip passes at once);
 // each expiry spawns one team chunk (min(k, members left)) or one vehicle at the landing position (deploy member range)
 // and sends it on a group move to its exit target [port: no forced-move flag in the movement system], locked
 // (landing_locked); after the last member the next expiry finishes: unlock, the signal 0x19 record (landings_unloaded),
-// state 3 and the take-off [port: no Takeoff clip: removed at once]. Untimed landings are only removed at their frame.
+// state 3 and the take-off: Takeoff (0x2c) at 1.15, removed once it passes 98 % (r3g t01; [port] no clip: at once; the dust
+// particle that goes at 50 % is not simulated). Untimed landings are only removed at their frame.
+// Clip progress p = n x rate / count, n = sim frames since the play, rate = clip fps / 30 x 1.15 (the sim animation's clock,
+// as the cinematic transports read it) [port: not clamped at the one-shot's last frame count - 2; every shipped Land /
+// Takeoff clip has >= 151 frames, where 98 % comes before that frame].
 void TacticalBattle::landing_service(TacticalMode& mode, SimRng& rng) {
     objects::ObjectStore& store = mode.primary();
     const objects::GameObjectTypes& types = catalog_->types();
@@ -940,6 +945,24 @@ void TacticalBattle::landing_service(TacticalMode& mode, SimRng& rng) {
         rec.units = l.units;
         landings_unloaded_.push_back(std::move(rec));
     };
+    // r3g t01: start clip `anim` at 1.15 on the landing (0 count: none) and read its progress.
+    constexpr float kLandingClipSpeed = 1.15f;
+    const auto start_clip = [&](Landing& l, int32_t anim) {
+        uint32_t count = 0;
+        float fps = 0.0f;
+        l.anim_start = frame_;
+        l.anim_count = 0;
+        l.anim_rate = 0.0f;
+        if (!anim_clip_info(mode, l.id, anim, count, fps) || count == 0 || !(fps > 0.0f)) return;
+        l.anim_count = count;
+        l.anim_rate = fps / 30.0f * kLandingClipSpeed;
+        (void)play_clip(mode, l.id, static_cast<uint8_t>(anim), 0.0f, kLandingClipSpeed, tick_.global_frame);
+    };
+    const auto clip_passed = [&](const Landing& l, float fraction) {
+        if (l.anim_count == 0) return true;
+        return static_cast<float>(frame_ - l.anim_start) * l.anim_rate / static_cast<float>(l.anim_count) > fraction;
+    };
+    constexpr int32_t kAnimLand = 0x2b, kAnimTakeoff = 0x2c;
     for (size_t li = 0; li < landings_.size(); ++li) {
         Landing& l = landings_[li];
         if (!store.alive(l.h)) {
@@ -964,8 +987,9 @@ void TacticalBattle::landing_service(TacticalMode& mode, SimRng& rng) {
                     blocked = drop_boxes_overlap(mine, footprint(landings_[o]));
             if (blocked) continue;
             l.state = 1;  // 0x642c70: shown, landing dust [port: no particle]
+            start_clip(l, kAnimLand);  // [port] the attach's play, rewound while blocked: it runs from the clearance
         }
-        if (l.state == 1) {  // [port] the Land clip passes 98 % at once
+        if (l.state == 1 && clip_passed(l, 0.98f)) {  // r3g t01: the Land clip passes 98 %
             l.state = 2;
             l.timer_start = frame_;
             l.timer_len = landing_step_frames(P.owner);
@@ -978,6 +1002,7 @@ void TacticalBattle::landing_service(TacticalMode& mode, SimRng& rng) {
             l.units.clear();  // unlocked
             l.state = 3;
             l.remove_frame = frame_;
+            start_clip(l, kAnimTakeoff);  // r3g t01: 0x644330 plays Takeoff at 1.15; removed past 98 %
             continue;
         }
         // 0x644330: one team chunk or one vehicle at the landing position.
@@ -1027,10 +1052,11 @@ void TacticalBattle::landing_service(TacticalMode& mode, SimRng& rng) {
         lr.timer_start = frame_;
         lr.timer_len = landing_step_frames(P.owner);
     }
-    // Take-off: removed at the frame (untimed: after the steps' timers; timed: at the finish).
+    // Take-off: removed at the frame (untimed: after the steps' timers; timed: r3g t01, once the Takeoff clip passes 98 %).
     size_t w = 0;
     for (size_t i = 0; i < landings_.size(); ++i) {
-        if (landings_[i].state == 3 && frame_ >= landings_[i].remove_frame) {
+        const Landing& l = landings_[i];
+        if (l.state == 3 && frame_ >= l.remove_frame && (!l.timed || !store.alive(l.h) || clip_passed(l, 0.98f))) {
             if (store.alive(landings_[i].h)) mode.destroy(landings_[i].h);
             continue;
         }

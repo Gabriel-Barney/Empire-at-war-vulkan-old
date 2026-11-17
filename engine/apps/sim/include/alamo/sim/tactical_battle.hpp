@@ -1533,6 +1533,10 @@ private:
         uint32_t unloaded = 0;           // [+0x68] members spawned
         uint32_t next_offset = 0;        // [+0x90]
         uint32_t remove_frame = 0;       // untimed: the take-off frame
+        // r3g t01: the Land (state 1) / Takeoff (state 3) clip at 1.15: the frame it started, its frame count (0: the
+        // model has no such clip - [port] the state passes at once) and its sim rate (fps / 30 x 1.15).
+        uint32_t anim_start = 0, anim_count = 0;
+        float anim_rate = 0.0f;
         std::vector<Vec3> targets;       // [+0x78] exit targets (world), one per step
         std::vector<objects::ObjectId> units;  // [+0xa8] unloaded units (locked while unloading)
     };

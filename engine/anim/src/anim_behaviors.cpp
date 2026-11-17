@@ -228,21 +228,6 @@ int32_t default_idle_type(const AnimModel* m, const LocomotorInput& in, const Id
     return t;
 }
 
-int32_t death_type_for_kind(uint8_t k) {
-    switch (k) {
-        case 2: return kAnimFwDie;
-        case 3: return kAnimFtkDie;
-        case 4: return kAnimFlDie;
-        case 7: return kAnimFireDie;
-        case 8: return kAnimCaDie;
-        case 11: return kAnimDeployedCaDie;
-        case 12: return kAnimDeployedDie;
-        case 14: return kAnimCrushed;
-        case 15: return kAnimEatenDie;
-        default: return kNoAnimType;
-    }
-}
-
 uint32_t AnimBehaviors::service_locomotor(AnimWorld& w, ObjectId id, const LocomotorParams& p, const LocomotorInput& in, SimRng& rng,
                                           uint64_t frame) {
     if (is_corpse(id) || !w.contains(id)) return 0;
@@ -391,11 +376,8 @@ DeathPlan plan_death(const AnimModel* m, const DeathParams& p, uint8_t damage_ki
         d.lifetime = seconds_to_frames(p.spin_away_seconds);
         return d;
     }
-    int32_t type = p.type;
-    if (!p.type_explicit && m) {
-        const int32_t k = death_type_for_kind(damage_kind);
-        if (k != kNoAnimType && m->variant_count(k) > 0) type = k;
-    }
+    (void)damage_kind;  // r3g t07: the kind never picks the death clip (DeathBehavior 0x58cdb0 plays +0xd98 / +0xd9c)
+    const int32_t type = p.type;
     uint32_t index = p.index;
     const uint32_t count = m ? m->variant_count(type) : 0u;
     if (index == kRandomVariant) index = count > 0 ? static_cast<uint32_t>(rng.range_int(0, static_cast<int32_t>(count) - 1)) : 0u;

@@ -1132,16 +1132,17 @@ void test_events_and_locomotor() {
         CHECK(w.slot(3).frame == static_cast<float>(w.current_frame_count(3) - 1) && dr.state() == before.state());
     }
     {
-        // Death type by damage kind (Damage_Fire -> FIRE_DIE when the model has it and the type sets none);
-        // explicit types win; spin-away: chance draw, no clip, removed after Spin_Away_On_Death_Time.
+        // r3g t07 (DeathBehavior 0x58cdb0): the death clip is the type's Specific_Death_Anim_Type only - a Damage_Fire
+        // kill of a model that has FIRE_DIE still plays Die (kind-specific clips come from death clones); explicit
+        // types win; spin-away: chance draw, no clip, removed after Spin_Away_On_Death_Time.
         AnimWorld w;
         AnimBehaviors b;
         SimRng rng(12);
         for (ObjectId id = 1; id <= 5; ++id) w.create(id, m.get(), {}, nullptr, 0);
         DeathParams dp;
-        CHECK(death_type_for_kind(7) == 62 && death_type_for_kind(14) == kAnimCrushed && death_type_for_kind(1) == kNoAnimType);
-        CHECK(b.begin_death(w, 1, dp, {}, rng, 0, 7) == DeathResult::Corpse && w.current_type(1) == 62 && b.corpse(1)->death_type == 62);
-        CHECK(b.begin_death(w, 2, dp, {}, rng, 0, 14) == DeathResult::Corpse && w.current_type(2) == kAnimDie);  // no CRUSHED clip
+        CHECK(m->variant_count(62) > 0);  // the model has FIRE_DIE
+        CHECK(b.begin_death(w, 1, dp, {}, rng, 0, 7) == DeathResult::Corpse && w.current_type(1) == kAnimDie && b.corpse(1)->death_type == kAnimDie);
+        CHECK(b.begin_death(w, 2, dp, {}, rng, 0, 14) == DeathResult::Corpse && w.current_type(2) == kAnimDie);
         DeathParams ex;
         ex.type_explicit = true;
         CHECK(b.begin_death(w, 3, ex, {}, rng, 0, 7) == DeathResult::Corpse && w.current_type(3) == kAnimDie);
