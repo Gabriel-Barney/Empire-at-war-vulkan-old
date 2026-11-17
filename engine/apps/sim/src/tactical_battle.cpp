@@ -727,6 +727,7 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
     bt_skirmish_base(mode);      // t50: the land skirmish's pre-built base
     l1_setup(mode);            // L1 systems: special weapons / hyperspace / engines (before the deploys)
     bt_place_forces(mode, rng, pf);  // §3.2: starbase, structures, defender / attacker start forces
+    sk_garrison_setup();             // skm1 t07: the skirmish slots' garrison (start-force) lists
     bt_landing_points(mode);     // §3.3: the attacker's map-owned reinforcement points
     mode.finish_load(pf);
     space_obstacles_sync(mode);  // refixf t02: the starbase / structures as space static entries (MOVEMENT §2.2)

@@ -36,6 +36,20 @@ Related: `AI_TACTICAL.md` §7, `L1_S4_REMAINING.md` §3.6 / §4.2, `STATION_HANG
   in FACTIONS.XML order (Pirates, Neutral, Hostile, Sarlacc, Hutts in FoC). Two slots give 7 players with
   Neutral = id 3, which matches the Geonosis trace (human Empire 0, AI Rebel 1, Neutral 3). [H]
 
+### 1.1 AI difficulty: the slot combo and the Gameplay options radio (skm1 t06, REA, 2026-11-17) [H unless tagged]
+
+- Staging slot combos: the single-player staging open path 0xf1230 (and the row rebuild 0x1013f0) fill an AI slot's
+  `IDC_PLAYER_NAME_n` combo from `TEXT_EASY_AI_PLAYER`, `TEXT_MEDIUM_AI_PLAYER`, `TEXT_HARD_AI_PLAYER`, with
+  `TEXT_OPEN_PLAYER` for an unused slot (`TEXT_NO_PLAYER` is the LAN / internet dialogs' text only, 0x271b0 / 0xb4b10).
+  The pick is the slot's difficulty +0x158, copied to the player's AI difficulty +0x3bc (§1). [H strings and xrefs; M row
+  order: Open first, then Easy / Medium / Hard]
+- Gameplay options Accept (`IDD_GAMEPLAY_OPTIONS_DIALOG` handler 0xa0f30): `IDC_RADIO_EASY` / `_MEDIUM` / `_HARD` give 0 / 1 /
+  2, passed to 0x28d760(GMM, d). That stores d at GMM+0xb8 (the session difficulty) and, for every PlayerList player that
+  has an AI (0x2814d0) and is not human (+0x62 == 0), calls Set_Difficulty 0x4b0dc0 on its AIPlayer (+0x360). So the radio
+  changes the difficulty of **every AI player of the running game at once** (Set_Difficulty rescales the health, hard-point
+  health and shields of the player's objects, AI_GALACTIC §1; the tactical multipliers of AI_TACTICAL §4.5 follow the new
+  record). Which later start reads GMM+0xb8 as its default was not traced [M].
+
 ## 2. Start sequence (item 3)
 
 Entry points: 0xeed80 single-player skirmish, 0xc9e10 MP lobby start, 0xbd380 debug/demo start. [H]
@@ -582,12 +596,12 @@ Port status (headless `--skirmish-ai skirmish` / `foc-land`, `tactical_battle_sk
 | Item | Port |
 |---|---|
 | §1 slot map | slot 0 / 1 = the two battle players by ascending id (Empire 0, Rebel 1); non-playable players follow in GalacticRules order, not the lobby order [M]. |
-| §2 step 3 credits | MP_Default_Credits for the two slots when the battle starts. |
-| §2.2 starting forces | the factions' Space_ / Land_Skirmish_AI_Default_Forces as the battle's start participants at the slot's start anchor (Player_k / Team_tt spawn markers, bt_skirmish_anchors); no garrison re-delivery (§2.4) [port]. |
+| §2 step 3 credits | MP_Default_Credits for the two slots when the battle starts. skm1 t01 / t02: alamo_game's skirmish (GameSession, a start_map_battle with BattleConfig::skirmish_map, no galactic hop) passes the staging options (BattleConfig::SkirmishOptions); every galactic player's credits are set to the option credits right before the battle's setup (the scaffold galaxy may have paid income). Flags: heroes (0x1) and super weapons (0x4) gate Is_Named_Hero / Is_Skirmish_Tactical_Super_Weapon production (0x288b80) and the bombing run (0x494410); pre-built base (0x8) gates §2.6; free starting units (0x2) decides whether the slots' start forces are placed. The buy-units screen's list still hides named heroes whatever the option [open]. |
+| §2.2 starting forces | the factions' Space_ / Land_Skirmish_AI_Default_Forces as the battle's start participants at the slot's start anchor (Player_k / Team_tt spawn markers, bt_skirmish_anchors). skm1 t07: the start participants' units are the slot's garrison list; when the last one is gone, after the faction's Garrison_Reinforcement_Delay_Seconds (default 20 s) the start-force types are delivered once: land into the reinforcement pool, space as the pending list the skirmish station hangar launches (§2.4). Garrison_Upgrade_Ability (0x6fffa0, *_More_Garrisons_L1_Bonus, Additional_Garrison_Units) is not modelled [open]. |
 | §2.3 space special weapons | not placed [port, open]. |
 | §2.5 / §2.6 pre-built pads | t50 rule kept: the Team_NN Command Center and Barracks pads of both slots start built, from MultiplayerStructureMarker data. §2.5 says retail reads that data only in campaign and pre-builds from the map's pre-placed pad type (+0x18), which the port's map reader does not decode [M, open]. |
 | §3 production | land and space skirmish; a finished land company joins the reinforcement pool and arrives by a later Reinforce landing (§3.1, q6 t19, 2026-11-04). Space production still appears in front of its builder [port]. |
-| §4 victory | 0x13 (land) and 0x16 (space) polled each frame, declared at once, reported as 0x0e / 0x0f [port]. |
+| §4 victory | 0x13 (land) and 0x16 (space) polled each frame, declared at once, reported as 0x0e / 0x0f [port]. skm1 t02: the option's win condition per slot (land 0x12 / 0x13 / 0x14, space 0x12 / 0x16; others fall back to the kind's default); 0x12 counts only human / AI owners' Victory_Relevant objects, 0x14 the enemy DUMMY_GROUND_STRUCTURE objects with HQ_Win_Condition_Relevant; a lost tracked object tests 0x12, then (base component) 0x13 and 0x14, (star base) 0x16, only the types the slot has a record of. |
 | §5 income | per-frame float add of (base × multiplier + additive) / interval / 30 for the object's own stream; a mod on the object's own stream (the supply dock) counts while the object lives; mods on other streams are not applied [M]. |
 | §6 unit cap | ConflictFactionInfo::unit_cap_for_players: sorted keys, linear, 0 outside, integer part (2 players: 9); N = the two slots. |
 | L1_S4 §4.2 capture start gate | 0 in skirmish map battles. |

@@ -160,8 +160,10 @@ void TacticalBattle::hg_setup(TacticalMode& mode) {
     th::HangarHost h;
     h.tech_level = [this](int32_t p) { return hg_tech(p); };
     h.in_hyperspace = [this](tc::ObjectId id) { return l1_jumps_.departing(static_cast<objects::ObjectId>(id)); };
-    // [port] unset: cinematic camera (no tactical cinematics gate yet), corruption / planet restrictions, the skirmish
-    // pending-delivery list, bay bones (the hangar's fallback: the hardpoint attachment offset with the carrier facing).
+    // skm1 t07: the skirmish start-force re-delivery list (SKIRMISH_SETUP §2.4; skirmish map battles only).
+    if (skirmish_map()) h.pending_delivery = [this](int32_t p, bool pop) { return sk_pending_delivery(p, pop); };
+    // [port] unset: cinematic camera (no tactical cinematics gate yet), corruption / planet restrictions, bay bones (the
+    // hangar's fallback: the hardpoint attachment offset with the carrier facing).
     hangars_->set_host(std::move(h));
     contents_ = std::make_unique<th::ContentsSystem>();
     production_ = std::make_unique<th::TacticalProduction>();

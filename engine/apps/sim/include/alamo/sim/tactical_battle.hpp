@@ -2456,6 +2456,22 @@ private:
     // Build_Time_Multiplier) for non-human AI players, set by BattleAi::start (a load's start sets it again; not saved).
     // Missing entry = 1.0.
     std::vector<float> ai_build_time_mult_;
+    // skm1 t07 (SKIRMISH_SETUP §2.4, BKG3 Q3.3): start-force re-delivery of each skirmish slot (skirmish_map only). The start
+    // forces placed at setup are the slot's garrison list (GOM+0x550); when the last of them is gone, after the faction's
+    // Garrison_Reinforcement_Delay_Seconds (+0x2ee4, 20 s), the start-force list (+0x2a8) is delivered once more: land into
+    // the reinforcement pool (add_built_reserve), space as the pending list (+0x2d8) the slot's (or an ally's) skirmish
+    // station hangar launches one type at a time. Re-delivered units are not garrison objects, so it happens once. Saved.
+    struct SkGarrison {
+        int32_t player = -1;
+        std::vector<uint32_t> types;          // the start-force list, participant order
+        std::vector<objects::ObjectId> ids;   // the garrison objects (start-force units); cleared when the timer arms
+        int32_t timer = -1;                   // re-delivery frame, -1 = not armed
+        std::vector<uint32_t> pending;        // space: types not launched yet
+    };
+    std::vector<SkGarrison> sk_garrisons_;
+    void sk_garrison_setup();                 // setup, after the start forces are placed
+    void sk_garrison_tick();                  // tick
+    int32_t sk_pending_delivery(int32_t player, bool pop);  // HangarHost::pending_delivery
     std::vector<HgUpgradeObject> hg_upgrade_objs_;            // DUMMY_UPGRADE objects created by production (creation order)
     std::vector<objects::ObjectId> hg_orphans_;               // contents of a removed container: removed next frame
     bool prod_used_ = false;

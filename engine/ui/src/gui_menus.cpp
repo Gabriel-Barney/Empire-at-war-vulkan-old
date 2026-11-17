@@ -1628,6 +1628,8 @@ void FrontEnd::on_change(const GuiEvent& e, std::vector<MenuAction>& out) {
             if (const int32_t t = game_type_rows_[static_cast<size_t>(e.value)]; t != game_type_) {
                 game_type_ = t;
                 skirmish_options_.win_condition = 0;  // skm1 t02 (UI.md 9.7, 0x4acf00 keep = 1): the type's default condition
+                // [port] the pre-built base the Space type forced off is not carried to a land type
+                if (t != kSkirmishGameSpace) skirmish_options_.prebuilt_base = p_.skirmish_option_defaults.prebuilt_base;
                 fill_skirmish_maps(*d);
             }
         } else if (e.control == "IDC_STAGING_MAP_LIST") {

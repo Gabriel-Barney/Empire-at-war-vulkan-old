@@ -12,7 +12,7 @@ namespace alamo::sim {
 
 namespace {
 
-constexpr uint32_t kBattleStateVersion = 14;  // 14: TRU1 t06 retreat flight, t05 / t07 spawners and debris; 13: [port] fleet cohesion per player; 2: S7 t22 fighter formations; 3: S7 t24 formation follow_next / a1i t04 landing objects (two branches); 4: S7 t37 follow_next dropped (the follow is in the movement layer); 5: both merged (formations + landing objects); 6: story t06 victory monitor (replaces the end-hold fields); 7: q6 attacks on TEAM containers / s78f t02 FighterFormationRecord::pushed dropped (the auto blocks are in the movement save) (two branches); 8: both merged; 9: ccpgt t02 domination timer; 10: cu8k t01 Saber_Throw thrower machines; 11: cu8l t03 start fleet arrivals; 12: s78n t20 land attack blocks (exact: older versions are refused)
+constexpr uint32_t kBattleStateVersion = 15;  // 15: skm1 t07 skirmish garrison re-delivery; 14: TRU1 t06 retreat flight, t05 / t07 spawners and debris; 13: [port] fleet cohesion per player; 2: S7 t22 fighter formations; 3: S7 t24 formation follow_next / a1i t04 landing objects (two branches); 4: S7 t37 follow_next dropped (the follow is in the movement layer); 5: both merged (formations + landing objects); 6: story t06 victory monitor (replaces the end-hold fields); 7: q6 attacks on TEAM containers / s78f t02 FighterFormationRecord::pushed dropped (the auto blocks are in the movement save) (two branches); 8: both merged; 9: ccpgt t02 domination timer; 10: cu8k t01 Saber_Throw thrower machines; 11: cu8l t03 start fleet arrivals; 12: s78n t20 land attack blocks (exact: older versions are refused)
 constexpr uint32_t kBattlePartVersion = 2;  // 2: s78n t06 running hero clashes in the Combat part (1 still read: none)
 
 // One module system in a part: presence flag + a section with its own write.
@@ -149,6 +149,8 @@ void TacticalBattle::state_io(Ar& a, Self& b) {
     a.seq(b.sp_spawners_, [](auto& x, auto& s) { x(s.id, s.state, s.next, s.spawned); });
     a.seq(b.sp_debris_, [](auto& x, auto& d) { x(d.id, d.particle, d.expiry, d.roll, d.pitch, d.yaw); });
     a(b.sp_scanned_, b.sp_used_);
+    // skm1 t07: the skirmish slots' start-force re-delivery (state version 15)
+    a.seq(b.sk_garrisons_, [](auto& x, auto& g) { x(g.player, g.types, g.ids, g.timer, g.pending); });
 }
 
 void TacticalBattle::write_part(SavePart p, ByteWriter& w) const {

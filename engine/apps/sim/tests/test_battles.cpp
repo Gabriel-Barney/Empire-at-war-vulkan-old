@@ -2388,6 +2388,80 @@ void test_land_upgrade_production_done() {
 // non-builder location too. After the 1 s build the upgrade object sits in the star base's contents, its
 // Skirmish_Automatic Starbase_Upgrade_Ability fires: S10_Star_Base_2 replaces the star base, the contents move with
 // it, the battle tech level rises by one and the upgrade object is removed silently.
+// skm1 t07 (SKIRMISH_SETUP §2.4, BKG3 Q3.3): a land skirmish map battle (start_map_battle, BattleConfig::skirmish_map) - the
+// Empire slot's start force (one S10_Squad) is its garrison list; once every member is dead, after the faction's
+// Garrison_Reinforcement_Delay_Seconds (none in the fixture: 20 s) the start-force list is added to its reinforcement pool
+// once (not again: re-delivered units are not garrison objects). Before the delay nothing is added.
+void test_skirmish_redelivery() {
+    auto d = make_data(false, false, false, false, true);
+    jobs::JobSystem js(jobs::JobSystemConfig{0});
+    SimConfig cfg;
+    cfg.seed = 2026;
+    cfg.players = 4;
+    SimHost host(d->types, js, cfg);
+    galactic::GalacticSim* gs = host.start_galactic(d->rules, make_setup(*d, true));
+    CHECK(gs != nullptr);
+    if (!gs) return;
+    CampaignBattleOptions opt;
+    opt.battle.max_frames = 0;
+    opt.battle.skirmish = true;
+    opt.battle.skirmish_map = true;
+    CampaignBattles battles(host, d->crules, *d->catalog,
+                            [](const std::string& name, terrain::MapData& m) {
+                                if (name != "S10_Land_B") return false;
+                                m = land_map();
+                                return true;
+                            },
+                            opt);
+    CHECK(battles.attach(nullptr));
+    galactic::BattleRequest r;
+    r.info.kind = galactic::ConflictKind::Land;
+    r.info.planet = 1;
+    r.info.defender = 0;
+    r.info.attacker = 1;
+    r.info.map = r.map = "S10_Land_B";
+    for (int32_t p = 0; p < 2; ++p) {
+        galactic::BattleForces f;
+        f.player = p;
+        for (const objects::ObjectHandle h : gs->planets()[static_cast<size_t>(p == 0 ? 1 : 2)].surface)
+            if (gs->store().alive(h) && gs->store().owner(h) == p) f.start.push_back(h);
+        r.forces.push_back(std::move(f));
+    }
+    CHECK(battles.start_map_battle(std::move(r)));
+    const uint32_t squad = type_of(*d, "S10_Squad");
+    auto pooled = [&](const TacticalBattle& b) {
+        size_t n = 0;
+        for (const TacticalBattle::Reserve& v : b.reserves(0)) n += v.type == squad ? 1u : 0u;
+        return n;
+    };
+    uint32_t killed_at = 0, delivered_at = 0;
+    size_t pool0 = 0, pool_before = 0;
+    for (uint64_t t = 0; t < 1200 && delivered_at == 0; ++t) {
+        host.tick_once();
+        TacticalBattle* b = battles.battle();
+        TacticalMode* tm = host.tactical();
+        if (!b || !tm || b->frame() < 3) continue;
+        if (killed_at == 0) {
+            CHECK(b->skirmish_map());
+            pool0 = pooled(*b);
+            std::vector<objects::ObjectId> mine;
+            for (const objects::ObjectHandle h : tm->primary().owned_by(0))
+                if (tm->primary().alive(h) && b->combat().has_unit(tm->primary().id(h))) mine.push_back(tm->primary().id(h));
+            for (const objects::ObjectId id : mine) (void)b->script_damage(*tm, id, 1.0e9f, false);
+            killed_at = b->frame();
+            std::printf("  frame %u: %zu Empire start-force units killed, pool %zu\n", killed_at, mine.size(), pool0);
+            CHECK(!mine.empty());
+            continue;
+        }
+        if (b->frame() == killed_at + 590) pool_before = pooled(*b);
+        if (pooled(*b) > pool0) delivered_at = b->frame();
+    }
+    std::printf("  start force re-delivered at frame %u (killed at %u), pool %zu -> %zu (%zu just before the delay)\n", delivered_at, killed_at,
+                pool0, battles.battle() ? pooled(*battles.battle()) : size_t{0}, pool_before);
+    CHECK(delivered_at >= killed_at + 600 && delivered_at <= killed_at + 602 && pool_before == pool0);
+    if (battles.battle()) CHECK(pooled(*battles.battle()) == pool0 + 1);
+}
+
 void test_station_production(float build_mult = 1.0f) {
     auto d = make_data(false, false, false, false, true);
     jobs::JobSystem js(jobs::JobSystemConfig{0});
@@ -3179,6 +3253,7 @@ int main(int argc, char** argv) {
     std::printf("skirmish station production: Production at the star base, upgrade object, station upgrade\n");
     test_station_production();
     test_station_production(1.5f);  // skm1 t04: Easy AI build time
+    test_skirmish_redelivery();      // skm1 t07
     test_land_upgrade_production_done();  // s78n t20 step 5
     std::printf("cu8g t05: Battlefield_Modifier gates at the battle (skirmish vs campaign, empty list, apply / remove / reverse)\n");
     test_battlefield_modifier_gates();

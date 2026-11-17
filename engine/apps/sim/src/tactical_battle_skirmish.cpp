@@ -3,6 +3,7 @@
 // The skirmish victory types 0x13 / 0x16 are the victory monitor's (tactical_battle_victory.cpp, story t06). Serial code, no
 // synced draws; credits go through the host's credit hooks.
 #include <algorithm>
+#include <vector>
 #include <cstdlib>
 #include <string>
 #include <string_view>
@@ -45,6 +46,70 @@ void TacticalBattle::apply_skirmish_start_credits() {
         const auto pi = static_cast<int32_t>(p);
         credits_add_(pi, want - credits_get_(pi));
     }
+}
+
+void TacticalBattle::sk_garrison_setup() {
+    sk_garrisons_.clear();
+    if (!skirmish_map()) return;
+    for (int32_t s = 0; s < 2; ++s) {
+        const int32_t p = skirmish_slot_player(s);
+        if (p < 0) continue;
+        SkGarrison g;
+        g.player = p;
+        for (uint32_t i = 0; i < parts_.size(); ++i) {
+            const Participant& pt = parts_[i];
+            if (pt.owner != p || pt.reserve || pt.starbase || pt.structure || pt.map || pt.built || !pt.deployed) continue;
+            g.types.push_back(pt.type);
+            for (const Unit& u : units_)
+                if (u.participant == i) g.ids.push_back(u.id);
+        }
+        std::sort(g.ids.begin(), g.ids.end());
+        if (!g.ids.empty()) sk_garrisons_.push_back(std::move(g));
+    }
+}
+
+void TacticalBattle::sk_garrison_tick() {
+    for (SkGarrison& g : sk_garrisons_) {
+        if (!g.ids.empty() && g.timer < 0 && g.pending.empty()) {
+            // 0x2a6a00 -> 0x280c50: the garrison list became empty (skirmish, nothing pending, timer not armed).
+            const bool any = std::any_of(g.ids.begin(), g.ids.end(), [this](objects::ObjectId id) {
+                const Unit* u = unit_by_id(id);
+                return u && u->alive && !u->retreated;
+            });
+            if (!any) {
+                g.ids.clear();
+                float delay = 20.0f;
+                const auto& ps = galaxy_->players();
+                if (static_cast<size_t>(g.player) < ps.size())
+                    if (const std::string_view v = rules_->faction(ps[static_cast<size_t>(g.player)].faction).xml_text("Garrison_Reinforcement_Delay_Seconds");
+                        !v.empty())
+                        delay = std::max(0.0f, to_f(v));
+                g.timer = static_cast<int32_t>(frame_) + static_cast<int32_t>(delay * 30.0f);
+            }
+        }
+        if (g.timer >= 0 && static_cast<int32_t>(frame_) >= g.timer) {
+            // 0x287e70: on expiry with nothing pending, the start-force list is delivered again.
+            g.timer = -1;
+            if (space_) {
+                g.pending = g.types;
+            } else {
+                for (const uint32_t t : g.types) {
+                    objects::ObjectId key = objects::kNoObjectId;
+                    (void)add_built_reserve(g.player, t, key);
+                }
+            }
+        }
+    }
+}
+
+int32_t TacticalBattle::sk_pending_delivery(int32_t player, bool pop) {
+    for (SkGarrison& g : sk_garrisons_) {
+        if (g.player != player || g.pending.empty()) continue;
+        const auto t = static_cast<int32_t>(g.pending.front());
+        if (pop) g.pending.erase(g.pending.begin());
+        return t;
+    }
+    return -1;
 }
 
 const TacticalBattle::SkIncome& TacticalBattle::sk_income_of(uint32_t type) {
