@@ -10,6 +10,8 @@ add_library(alamo_objects STATIC
   src/enums.cpp
   src/game_object_types.cpp
   src/object_store.cpp
+  # mcx0 t02: tag ledger (generated/tag_ledger.inc from tools/gen_tag_ledger.py; read by the load report).
+  src/tag_ledger.cpp
 )
 add_library(alamo::objects ALIAS alamo_objects)
 target_include_directories(alamo_objects PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -31,3 +33,19 @@ endif()
 target_link_libraries(alamo_objects_tests PRIVATE $<TARGET_NAME_IF_EXISTS:alamo_anim>)
 target_compile_definitions(alamo_objects_tests PRIVATE $<$<TARGET_EXISTS:alamo_anim>:ALAMO_OBJECTS_HAVE_ANIM=1>)
 add_test(NAME alamo_objects_tests COMMAND alamo_objects_tests)
+
+# mcx0 t02 / t03: the tag ledger's lookup, and the ledger lint (tools/lint/check_tag_ledger.py: tag_ledger.inc and the
+# Lua binding table's effect column match the code). build_agent.cmd and build_gate.cmd run the lint as well.
+add_executable(alamo_objects_tag_ledger_tests tests/test_tag_ledger.cpp)
+target_link_libraries(alamo_objects_tag_ledger_tests PRIVATE alamo_objects alamo_test_support)
+add_test(NAME alamo_objects_tag_ledger_tests COMMAND alamo_objects_tag_ledger_tests)
+set_tests_properties(alamo_objects_tag_ledger_tests PROPERTIES TIMEOUT 60)
+find_program(ALAMO_LINT_PYTHON NAMES python PATHS ${PROJECT_SOURCE_DIR}/toolchain/venv/Scripts NO_DEFAULT_PATH)
+find_program(ALAMO_LINT_PYTHON NAMES python python3)
+if(ALAMO_LINT_PYTHON)
+  add_test(NAME alamo_objects_tag_ledger_lint
+           COMMAND ${ALAMO_LINT_PYTHON} -I ${PROJECT_SOURCE_DIR}/tools/lint/check_tag_ledger.py)
+  add_test(NAME alamo_objects_tag_ledger_lint_selftest
+           COMMAND ${ALAMO_LINT_PYTHON} -I ${PROJECT_SOURCE_DIR}/tools/lint/check_tag_ledger.py --selftest)
+  set_tests_properties(alamo_objects_tag_ledger_lint alamo_objects_tag_ledger_lint_selftest PROPERTIES TIMEOUT 120)
+endif()

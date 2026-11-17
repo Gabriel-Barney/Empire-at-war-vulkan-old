@@ -344,6 +344,11 @@ int m_should_switch_weapons(Call& c) {
 constexpr BindingKind G = BindingKind::Global;
 constexpr BindingKind M = BindingKind::Method;
 
+// mcx0 t04 (binding effect ledger, engine/lua/tools/gen_bindings.py):
+// binding-effect: LandTaskForceClass.Enable_Attack_Positioning noop-gap retail 0x6eaa80 sets the unit AI attack-positioning flag (docs/re/SKAI_T19_MDU_DEPLOY_BLOCK.md)
+// binding-effect: SpaceTaskForceClass.Enable_Attack_Positioning noop-retail retail 0x17d070 is a shared no-op body (docs/re/A1_READINGS.md)
+// binding-effect: LandTaskForceClass.Release_Reinforcements noop-gap retail body 0x6e8a70 not read yet (docs/re/LUA_API.md)
+// binding-effect: SpaceTaskForceClass.Release_Reinforcements noop-gap retail body 0x6e8a70 not read yet (docs/re/LUA_API.md)
 #define ALAMO_TACTICAL_TF_METHODS(K)                                     \
     {M, K, "Move_To", m_move_to},                                        \
     {M, K, "Attack_Move", m_attack_move},                                \

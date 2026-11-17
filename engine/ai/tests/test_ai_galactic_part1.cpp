@@ -1941,6 +1941,67 @@ void test_force_members() {
 // galab t06 (GALAB_ABILITIES_RE §8): Variable_Self.HomePlanet.* resolves through the player's campaign Home_Location planet
 // (player +0x188); Is_Home_Planet (BasicGalacticEquations) compares the target's type token with it. A player without a
 // home planet: the root is unbound, the leaf (and the equation) fails.
+// mcx0 t05 (docs/MOD_COMPAT_DESIGN.md §9.4): the token path registry and the handlers agree. Every registered path is
+// taken by its root's handler chain (dispatches), and no candidate path the chain takes is missing from the registry.
+// Candidates: the registry itself, every registered path tried on the other roots, and the paths AI_GALACTIC_TOKENS.md §5
+// lists as not registered in retail.
+void test_token_registry() {
+    MemoryFiles files;
+    AiDefinitions defs;
+    EquationSet eqs;
+    std::vector<std::string> plan_files;
+    syn_data(files, defs, eqs, plan_files);
+    gal::GalacticRules rules = syn_rules();
+    objects::GameObjectTypes types;
+    objects::IdCounter ids;
+    objects::ObjectStore store(objects::ModeKind::Galactic, objects::StoreKind::Primary, types, &ids);
+    GameRandom rng(4242u, 77u);
+    gal::GalacticSim sim(rules, store, rng.synced());
+    gal::GalacticSetup setup = syn_setup();
+    setup.forces = {{0, 0, tSB1}, {1, 7, tSB1}, {1, 7, tBarracks}, {1, 7, tFrigate}};
+    CHECK(sim.start(setup));
+    std::vector<GalacticAiTypeInfo> tinfo(tTypes);
+    fill_category_masks(tinfo);
+    const std::span<const GalacticAiTypeInfo> ti(tinfo);
+    GalacticSimTokenResolver res(sim, ti, nullptr, {});
+    res.refresh(sim.frame() + 100);
+    EvalContext c;
+    c.self = 0;
+    c.human = 1;
+    c.enemy = 1;
+    c.target = 7;
+    c.location = 7;
+    const std::vector<std::pair<Root, std::string>> reg = GalacticSimTokenResolver::registered_paths();
+    CHECK(reg.size() > 150);
+    std::vector<std::pair<Root, std::string>> cand = reg;
+    for (const auto& [root, path] : reg)
+        for (const Root other : {Root::Self, Root::Target, Root::Game})
+            if (other != root) cand.emplace_back(other, path);
+    for (const char* t : {"ISCONTESTABLE", "HASBUILTOBJECT", "TIMELASTSEEN", "TIMELASTSEENUNNORMALIZED", "FORCE", "ENEMYFORCE",
+                          "FRIENDLYFORCE", "HINTS.HIGH_GROUND", "LOCATION.SPACETOTAL", "ENEMYFORCE.NOSUCHLEAF"})
+        cand.emplace_back(Root::Target, t);
+    cand.emplace_back(Root::Game, "FORCEVISIBILITY");
+    cand.emplace_back(Root::Game, "ENEMYFORCE.NOSUCHLEAF");
+    cand.emplace_back(Root::Self, "NOSUCHTOKEN");
+    uint32_t taken = 0, mismatched = 0;
+    for (const auto& [root, path] : cand) {
+        const bool listed = GalacticSimTokenResolver::path_registered(root, path);
+        const bool runs = res.dispatches(c, root, path);
+        if (listed != runs) {
+            ++mismatched;
+            std::printf("  token registry: %s.%s registered=%d handled=%d\n", root_name(root), path.c_str(), listed ? 1 : 0,
+                        runs ? 1 : 0);
+        }
+        if (runs) ++taken;
+    }
+    CHECK(mismatched == 0);
+    // The audit's example (MOD_AUDIT_2026-11-17 §5): evaluated by the shared force handler on both sides.
+    CHECK(GalacticSimTokenResolver::path_registered(Root::Target, "FRIENDLYFORCE.HASSPACEUNITSBITFIELD"));
+    CHECK(GalacticSimTokenResolver::path_registered(Root::Self, "HOMEPLANET.TYPE.TOKEN"));
+    CHECK(!GalacticSimTokenResolver::path_registered(Root::Game, "FORCEVISIBILITY"));
+    std::printf("  token registry: %zu registered, %zu candidates, %u handled\n", reg.size(), cand.size(), taken);
+}
+
 void test_home_planet() {
     MemoryFiles files;
     AiDefinitions defs;

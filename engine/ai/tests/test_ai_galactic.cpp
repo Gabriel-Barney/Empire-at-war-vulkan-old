@@ -29,6 +29,7 @@ int main(int argc, char** argv) {
     test_leaf_cache();
     test_force_members();
     test_home_planet();
+    test_token_registry();  // mcx0 t05
     test_escort_flag();
     test_category_masks_from_enum_files();  // A2k t06
     test_type_info_mod_categories();        // A2k t06
