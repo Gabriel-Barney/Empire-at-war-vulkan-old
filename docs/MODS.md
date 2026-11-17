@@ -566,11 +566,11 @@ port skips them, the skirmish host says `not loaded (empty file)`), so the maps 
 
 | Item | Thrawn's Revenge | Fall of the Republic | EAW-Remake | Age of Legends |
 |---|---|---|---|---|
-| 1 Load | OK, 0 errors, 216 warnings | OK, 0 errors, 103 warnings; one terrain `.fx` fxc rejects (**t42**) | OK, 0 errors, 187 warnings | OK, 0 errors, 1474 warnings (877 skipped campaign rows, 97 non-compiling scripts: §9) |
+| 1 Load | OK, 0 errors, 216 warnings | OK, 0 errors, 103 warnings; the one effect issue is `_TERRAINRENDERBUMP.fx`, an unused leftover (t42 below) | OK, 0 errors, 187 warnings | OK, 0 errors, 1474 warnings (877 skipped campaign rows, 97 non-compiling scripts: §9) |
 | 2 Front end (smoke) | not rerun (q6 t02 / t13 passed) | main menu, staging, buy (affordable-row pick), a running space skirmish, select all and control groups; stops at the encyclopedia step like the Remake (**t43**) | main menu, staging and a running space skirmish; stops at the encyclopedia step (**t43**) | main menu, staging (no game-type list); stops at the buy screen: default faction is a header faction (**t41**) |
-| 3 Space skirmish 3000 ticks | `_MP_SPACE_FIERY`: 833 orders, 1070 decisions, 0 Lua errors | `_MP_SPACE_TRANSITORY_TWISTS`: 724 orders, 860 decisions, 2 Lua errors (**t44**) | `_MP_SPACE_GEONOSIS`: 95 orders, 139 decisions, 0 Lua errors; 189 s (t33, speed not in the checklist) | `_MP_SPACE_GEONOSIS`: 13 orders, 45 decisions, 0 Lua errors |
-| 3 Land skirmish 3000 ticks | `_MP_LAND_BLOOD_GULCH`: 120 orders, 200 decisions, 0 Lua errors | `_MP_LAND_HOTH_ECHO_BASE`: 181 orders, 213 decisions, 2 Lua errors (**t44**) | `_MP_LAND_UTAPAU`: 62 orders, 32 decisions, 0 Lua errors | `_MP_LAND_UTAPAU`: 374 orders, 445 decisions, 0 Lua errors |
-| 4 Galactic 9000 ticks | `Thrawn_Empire`: 4384 decisions, 1281 orders, 4 owner changes, 0 Lua errors | `Sandbox_Rimward_Republic`: starts after the missing-plot fix, 131 decisions, **0 orders**, 1 story Lua error (**t45**) | `GC_Mini_Web_Way_Imperial`: 456 decisions, 137 orders, 11 owner changes, 0 Lua errors | `Sandbox_Balance_New_Republic`: starts after the player-cap fix (50 players), 533 decisions, 298 orders, 0 Lua errors |
+| 3 Space skirmish 3000 ticks | `_MP_SPACE_FIERY`: 833 orders, 1070 decisions, 0 Lua errors | `_MP_SPACE_TRANSITORY_TWISTS`: 724 orders, 860 decisions, 2 Lua errors AI vs AI; with `--human Rebel` 385 orders, 0 Lua errors (t44 below) | `_MP_SPACE_GEONOSIS`: 95 orders, 139 decisions, 0 Lua errors; 189 s (t33, speed not in the checklist) | `_MP_SPACE_GEONOSIS`: 13 orders, 45 decisions, 0 Lua errors |
+| 3 Land skirmish 3000 ticks | `_MP_LAND_BLOOD_GULCH`: 120 orders, 200 decisions, 0 Lua errors | `_MP_LAND_HOTH_ECHO_BASE`: 181 orders, 213 decisions, 2 Lua errors AI vs AI; with `--human Rebel` 68 orders, 0 Lua errors (t44 below) | `_MP_LAND_UTAPAU`: 62 orders, 32 decisions, 0 Lua errors | `_MP_LAND_UTAPAU`: 374 orders, 445 decisions, 0 Lua errors |
+| 4 Galactic 9000 ticks | `Thrawn_Empire`: 4384 decisions, 1281 orders, 4 owner changes, 0 Lua errors | `Sandbox_Rimward_Republic`: starts after the missing-plot fix, 400 story events; 0 AI orders headless by the mod's design (t45 below), 1 story Lua error (**t45**) | `GC_Mini_Web_Way_Imperial`: 456 decisions, 137 orders, 11 owner changes, 0 Lua errors | `Sandbox_Balance_New_Republic`: starts after the player-cap fix (50 players), 533 decisions, 298 orders, 0 Lua errors |
 | 5 Story start | 1145 story events | 400 story events | (galactic run: story on) | 54,856 story events, 38 Lua notes |
 | 6 Deterministic | 0 vs 4 workers identical (space, land) | identical (space, land) | identical (space, land) | identical (space, land) |
 
@@ -579,5 +579,21 @@ without a game-type list in the smoke, the smoke's select all waiting for start 
 `[port]` player cap 32 → 64 (`commands::kMaxPlayerSlots`, `sim::kMaxPlayers`; retail's PlayerList has no cap; Age of
 Legends' sandboxes make one player per faction, 50), and a listed story plot file that does not exist is skipped with
 retail's warning instead of failing the story start (STORY.md §2.1; FotR's Rimward sandbox lists a CIS plot it does not
-ship). **Not passed yet:** t41, t43, t44, t45 (and t42 for the look); one skirmish played to a result in the game and the
+ship).
+
+Explained without a port change (2026-11-17):
+- **t42** Fall of the Republic's `Data\Art\Shaders\Terrain\_TERRAINRENDERBUMP.fx` is an unused leftover: terrain effects
+  are picked by fixed names, the mod ships the real `TerrainRenderBump.fxo` (it loads), nothing names the underscore file,
+  and its line 172 builds a `float4` from a `float4` and a float, which no HLSL compiler accepts (retail's D3DX9 neither).
+- **t44** The two Fall of the Republic free-store errors come from `Variable_Human.IsFaction` leaves: with no human player
+  a `Variable_Human` leaf fails the whole equation (AI_GALACTIC_TOKENS §9.1), so `EvaluatePerception` gives nil in an
+  AI-vs-AI headless run. Retail skirmishes always have a human; with `--human Rebel` both maps run with 0 Lua errors. The
+  tactical AI stats now name the failing leaf (`eval FAIL <equation> at <site>`, `--ai-log`).
+- **t45** (AI part) Fall of the Republic's sandbox starts every player at `AI_Player_Control None`; its GC master script
+  (`GC_MasterScript_22_BBY_Rimward.lua`) publishes `INITIALIZE_AI` (the OptionsHandler then switches each AI type) only
+  after the human answers its `HISTORICAL_GC_CHOICE` popup, which the mod's GenericPopup offers as option objects to
+  build. A headless AI-only run never answers it, so 0 orders is the mod's design there. The hidden campaign smoke with
+  `ALAMO_SMOKE_CAMPAIGN_SET=Sandbox_Rimward_Republic` gets from the galaxy into a battle (then stops at t43).
+
+**Not passed yet:** t41, t43, the t45 news-plugin nil; one skirmish played to a result in the game and the
 retail comparison (t09) need a person or the coordinator's retail run.
