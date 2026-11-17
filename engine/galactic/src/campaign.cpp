@@ -104,6 +104,14 @@ const DifficultyRules* GalacticSim::ai_difficulty(int32_t player) const {
     return ps.ai && !ps.human && ps.difficulty < rules_->difficulties.size() ? &rules_->difficulties[ps.difficulty] : nullptr;
 }
 
+bool GalacticSim::set_ai_difficulty(int32_t player, uint32_t difficulty) {
+    if (!valid_player(player)) return false;
+    PlayerState& ps = players_[static_cast<size_t>(player)];
+    if (!ps.ai || ps.human || ps.difficulty == difficulty) return false;
+    ps.difficulty = difficulty;
+    return true;
+}
+
 int32_t GalacticSim::player_of_faction(std::string_view faction) const {
     const uint32_t f = rules_->find_faction(faction);
     for (size_t i = 0; i < players_.size(); ++i)

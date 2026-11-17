@@ -145,6 +145,10 @@ public:
     // Call on the sim thread between updates. Players that get an AI this way need a T7 controller from the host.
     bool set_ai_type(int32_t player, std::string_view type, int32_t difficulty, std::vector<std::string>* diagnostics = nullptr);
     std::string ai_type(int32_t player) const;  // the player's AIPlayerType name ("" = no AI)
+    // skm2 t01 (SKIRMISH_SETUP 1.1: Set_Difficulty 0x4b0dc0 from the Gameplay options Accept): the player's AI keeps its
+    // state and takes `difficulty`'s (0 Easy, 1 Normal, 2 Hard) Galactic_AI_Contrast_Multiplier and goal-cycle sleep from
+    // now on. False without an AI for the player or when it already has that difficulty. Sim thread, between updates.
+    bool set_difficulty(int32_t player, int32_t difficulty);
     // Story requests: the story session's LuaPlayerWorld (StorySession::player_world()) is drained every frame
     // like the AI's own: GiveDesireBonus, Purge_Goals, Budget.Flush_Category and Suspend_AI reach the galactic AI.
     // Null detaches. The world must outlive this object (or be detached first).

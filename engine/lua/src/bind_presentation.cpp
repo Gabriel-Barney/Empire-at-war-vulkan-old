@@ -611,6 +611,11 @@ int m_cinematic_hyperspace_in(Call& c) {
                       "delay frames");
     if (!c.is_number(1)) return c.script_error_stop("GameObjectWrapper::Cinematic_Hyperspace_In -- invalid type for parameter 1. Expected number.");
     record(c, PresentationOp::ObjectCinematicHyperspaceIn, true);
+    // modc t43 (L1_S4_REMAINING, 0x5c9a80): the arrival hides the model and shows it again 35 frames into the entry, so a
+    // Lua Hide(true) before the call ends with it (the EAW-Remake hides each arriving ship, then hyperspaces it in).
+    // [port] the hide clears at the call, not delay + 10 frames later (the state has no timer; the sim never reads it).
+    if (ObjectBridge* b = c.vm->owner ? attached_object_bridge(*c.vm->owner) : nullptr; b && b->find_state(c.self->id))
+        b->state(c.self->id).hidden = false;
     return 0;
 }
 

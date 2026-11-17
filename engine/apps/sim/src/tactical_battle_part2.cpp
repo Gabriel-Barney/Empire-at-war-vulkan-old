@@ -837,13 +837,13 @@ void TacticalBattle::mv_team_shape(const Unit& u) {
 }
 
 float TacticalBattle::drop_yaw(uint8_t side) const {
-    if (side >= 2) return 0.0f;  // third players: no record written
+    if (side >= side_count()) return 0.0f;  // third players: no record written (skm2 t02: skirmish slots 2.. have one)
     const Vec3 f = drop_facing_[side];
     return f.x == 0.0f && f.y == 0.0f ? 0.0f : yaw_of(f);
 }
 
 Vec3 TacticalBattle::player_drop_facing(int32_t player) const {
-    for (uint8_t side = 0; side < 2; ++side) {
+    for (uint8_t side = 0; side < side_count(); ++side) {
         if (side_player(side) != player) continue;
         const Vec3 f = drop_facing_[side];
         return f.x == 0.0f && f.y == 0.0f ? facing_of_yaw(0.0f) : f;
@@ -874,7 +874,7 @@ TacticalBattle::Landing TacticalBattle::spawn_landing(TacticalMode& mode, const 
     sp.type = l;
     sp.owner = p.owner;
     sp.position = {x, y, map_.terrain.sample_height(x, y) + types.get_float(l, "Hover_Offset")};
-    const Vec3 f = p.side < 2 ? drop_facing_[p.side] : Vec3{};
+    const Vec3 f = p.side < kMaxSides ? drop_facing_[p.side] : Vec3{};
     sp.facing = f.x == 0.0f && f.y == 0.0f ? facing_of_yaw(0.0f) : f;
     sp.parent_mode_id = p.built ? objects::kNoObjectId : p.galactic_id;  // q6 t19: tactical production pool entries
     const objects::ObjectHandle h = mode.spawn(sp, 1.0f);

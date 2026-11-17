@@ -99,8 +99,9 @@ bool load_game_data(const std::string& root, const std::vector<std::string>& arg
 // Any folder with Data\XML (tests: synthetic data written by the test). False + err.
 bool load_game_data_dir(const std::string& dir, GameData& out, std::string* err = nullptr);
 
-// Skirmish galaxy (see the file comment). Players: 0 = human (`human_faction`), 1 = AI (`ai_faction`), 2 = the first
-// neutral faction, then the native-owner faction (GalacticRules::native_owner_faction). An empty faction name is the
+// Skirmish galaxy (see the file comment). Players: 0 = human (`human_faction`), 1 = AI (`ai_faction`), then (skm2 t02) one
+// AI player per extra slot (slot k = player k, its forces on planet skirmish_slot_planet(k)), then the first neutral
+// faction, then the native-owner faction (GalacticRules::native_owner_faction). An empty faction name is the
 // default slot faction (default_skirmish_faction). `units_human` / `units_ai` = type names of the starting fleets (unknown names are skipped);
 // empty = the faction's default fleet (default_skirmish_fleet). `planet_type` = a planet type name ("" =
 // skirmish_galaxy_planet(rules, "", land): the first PLANET type that forbids no unit; GameSession passes the map's planet,
@@ -125,7 +126,26 @@ struct SkirmishSetup {
     // ccpgt t02: the staging screen's Capture Control Points game type (4) on a land map: the battle's win condition is 0x15
     // CONTROL_POINT_DOMINATION (sim::BattleConfig::control_point_domination, SKIRMISH_SETUP §4.2). Saved.
     bool control_points = false;
+    // skm2 t02 (SKIRMISH_SETUP §1, staging slots 2..7 opened as AI players): the slots after the human (0) and the AI (1),
+    // in slot order, each an AI player of its faction ("" = default_skirmish_faction for an AI slot) with its own forces
+    // ("" = the faction's defaults, as the AI slot's). Saved.
+    struct ExtraSlot {
+        std::string faction;
+        std::vector<std::string> units, ground;  // space fleet / land forces
+    };
+    std::vector<ExtraSlot> extra_slots;
+    // skm2 t02: per slot (0, 1, then extra_slots) its team (IDC_PLAYER_TEAM_n - 1); missing / negative = the slot's own index
+    // (every slot its own team). Saved.
+    std::vector<int32_t> teams;
+    // skm2 t02 (SKIRMISH_SETUP §1: slot +0x158 -> player +0x3bc): per slot its AI difficulty 0..2 (slot 0, the human, unused);
+    // missing / negative = SessionSpec::difficulty. Saved.
+    std::vector<int32_t> difficulties;
 };
+// skm2 t02: the slot count (2 + extra_slots, at most 8), a slot's team (SkirmishSetup::teams, else the slot) and its galaxy
+// planet (slot 0 kSkirmishHumanPlanet, 1 kSkirmishBattlePlanet, k >= 2 planet k + 1).
+int32_t skirmish_slot_count(const SkirmishSetup& s);
+int32_t skirmish_slot_team(const SkirmishSetup& s, int32_t slot);
+PlanetIndex skirmish_slot_planet(int32_t slot);
 bool make_skirmish_galaxy(const GameData& data, const SkirmishSetup& s, galactic::GalacticSetup& out, std::string* err = nullptr);
 // modc t03 [port] (retail's lobby always names both slots): the faction of an unnamed skirmish slot. Human slot: the first
 // Is_Playable faction in FactionFiles.xml order; AI slot: the first Is_Playable faction other than `human` (FoC: Rebel,

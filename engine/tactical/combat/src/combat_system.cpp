@@ -119,6 +119,21 @@ bool CombatSystem::is_enemy(int32_t a, int32_t b) const {
     return enemy_[static_cast<size_t>(a) * static_cast<size_t>(n) + static_cast<size_t>(b)] != 0;
 }
 
+void CombatSystem::set_player_difficulty(int32_t player, float damage_multiplier, float health_multiplier, float shield_multiplier) {
+    if (player < 0 || static_cast<size_t>(player) >= players_.size()) return;
+    PlayerInfo& pi = players_[static_cast<size_t>(player)];
+    const float hr = pi.faction_health > 0.0f ? health_multiplier / pi.faction_health : 1.0f;
+    const float sr = pi.faction_shield > 0.0f ? shield_multiplier / pi.faction_shield : 1.0f;
+    for (Unit& u : units_) {
+        if (u.owner != player || !live(&u)) continue;
+        u.health *= hr;
+        u.shield *= sr;
+    }
+    pi.ai_damage_multiplier = damage_multiplier;
+    pi.faction_health = health_multiplier;
+    pi.faction_shield = shield_multiplier;
+}
+
 void CombatSystem::reserve(uint32_t units, uint32_t projectiles, uint32_t candidates_per_unit, uint32_t delayed) {
     units_.reserve(units);
     hps_.reserve(static_cast<size_t>(units) * 4);

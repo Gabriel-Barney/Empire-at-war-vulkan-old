@@ -1332,8 +1332,11 @@ void App::handle_menu_actions(const std::vector<ui::MenuAction>& acts) {
                 if (s.skirmish.ai_faction.empty() || ascii_iequals(s.skirmish.ai_faction, s.skirmish.human_faction))  // [port] the AI needs a hostile faction
                     s.skirmish.ai_faction = game::default_skirmish_faction(data_.rules, true, s.skirmish.human_faction);
                 for (const int32_t c : a.colors) s.skirmish.colors.push_back(static_cast<uint8_t>(std::clamp(c, 0, 8)));
-                if (a.factions.size() > 2)  // ui1 t07: the staging rows take up to 8 players; the skirmish sim two (backlog b0240)
-                    notes_.push_back("skirmish: " + std::to_string(a.factions.size() - 2) + " extra AI slot(s) not played yet (two-player skirmish)");
+                // skm2 t02: the opened slots 2.. (ui1 t07 staging rows, up to the map's 8 starts) are AI players with their
+                // own faction ("" = the data's default AI faction), team and difficulty.
+                for (size_t k = 2; k < a.factions.size() && k < 8; ++k) s.skirmish.extra_slots.push_back({a.factions[k], {}, {}});
+                for (const int32_t t : a.teams) s.skirmish.teams.push_back(std::max(-1, t - 1));  // IDC_PLAYER_TEAM_n is 1-based
+                for (const int32_t d : a.difficulties) s.skirmish.difficulties.push_back(std::clamp(d, 0, 2));
                 s.skirmish.control_points = a.game_type == ui::kSkirmishGameControl;  // ccpgt t02
                 // skm1 t06: the AI slot's difficulty (TEXT_EASY / MEDIUM / HARD_AI_PLAYER) drives the AI players' difficulty.
                 s.difficulty = std::clamp(a.difficulty, 0, 2);
@@ -1368,13 +1371,20 @@ void App::handle_menu_actions(const std::vector<ui::MenuAction>& acts) {
                 sync_control_bindings(ui_.hotkeys, camera_, ui_.bindings);
                 save_game_options();
                 break;
-            case K::ApplyGameplay:  // HUD_GAPS §2.2: IDC_DELAY_TOOLTIPS -> Long_Encyclopedia_Delay
+            case K::ApplyGameplay: {  // HUD_GAPS §2.2: IDC_DELAY_TOOLTIPS -> Long_Encyclopedia_Delay
+                const int32_t before = gameplay_.difficulty;
                 gameplay_ = a.gameplay;
+                // skm2 t01 (SKIRMISH_SETUP 1.1): the Accept sets every AI player's difficulty in the running game (a command;
+                // retail 0xa0f30 -> 0x28d760 on every Accept). [port] only when the radio changed: the dialog fills it from the
+                // saved preference, not from the game's difficulty (the retail fill 0x9f320 is not read), so an Accept that
+                // leaves it alone must not reset per-slot or campaign difficulties.
+                if (session_ && live_input() && gameplay_.difficulty != before) (void)session_->set_ai_difficulty(gameplay_.difficulty);
                 apply_tooltip_config();
                 apply_camera_tuning();  // P1_CAMERA_INPUT.md §3.1 mouse / scroll options
                 apply_gameplay_options();  // ui1 t02: alternate mouse, game speeds
                 save_game_options();
                 break;
+            }
             case K::SaveGame: save_game_as(a.save); break;          // N1 / t09
             case K::LoadGame: load_saved_game(a.save); break;
             case K::DeleteSave: delete_saved_game(a.save); break;

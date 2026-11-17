@@ -798,6 +798,9 @@ static void test_spawn_and_state(const Db& db) {
     CHECK(st.capture_disabled && st.garrison_spawn && st.contested_check_off && st.animation == "Cinematic" &&
           !st.animation_loop && st.animation_index == 2);
     CHECK(s.bridge.state(2).hidden && gnum(vm, "pf") == 1.0 && gnum(vm, "sel") == 0.0 && gnum(vm, "mv") == 0.0);
+    // modc t43: the hyperspace-in arrival shows the model again, ending a Lua hide (the EAW-Remake's arriving ships).
+    CHECK(run(vm, "t2.Cinematic_Hyperspace_In(1)") == "" && !s.bridge.state(2).hidden && s.bridge.state(1).hidden);
+    CHECK(run(vm, "Hide_Object(t2, 1)") == "" && s.bridge.state(2).hidden);  // hidden again for the no-bridge check below
     CHECK(run(vm, "t1.Override_Max_Speed(false) t1.Unlock_Current_Orders()") == "" && s.bridge.state(1).max_speed_override < 0.0f &&
           !s.bridge.state(1).orders_locked);
     CHECK(contains(run_stop(vm, "t1.Hide()"), "GameObjectWrapper::Hide -- Missing required boolean parameter."));

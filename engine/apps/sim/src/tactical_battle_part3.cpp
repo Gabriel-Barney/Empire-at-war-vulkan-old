@@ -1522,6 +1522,7 @@ void TacticalBattle::hash(StateHasher& h) const {
     }
     h.u32(placed_[0]);
     h.u32(placed_[1]);
+    for (uint8_t s = 2; s < side_count(); ++s) h.u32(placed_[s]);  // skm2 t02: only with more than two sides
     h.u32(static_cast<uint32_t>(parts_.size()));
     for (const Participant& p : parts_) {
         h.i32(p.galactic_id);

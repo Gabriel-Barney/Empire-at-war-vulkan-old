@@ -161,7 +161,21 @@ std::string default_skirmish_faction(const galactic::GalacticRules& rules, bool 
 SkirmishSetup resolve_skirmish_factions(const galactic::GalacticRules& rules, SkirmishSetup s) {
     if (s.human_faction.empty()) s.human_faction = default_skirmish_faction(rules, false);
     if (s.ai_faction.empty()) s.ai_faction = default_skirmish_faction(rules, true, s.human_faction);
+    for (SkirmishSetup::ExtraSlot& x : s.extra_slots)  // skm2 t02: an AI slot's default
+        if (x.faction.empty()) x.faction = default_skirmish_faction(rules, true, s.human_faction);
     return s;
+}
+
+int32_t skirmish_slot_count(const SkirmishSetup& s) { return static_cast<int32_t>(std::min<size_t>(2 + s.extra_slots.size(), 8)); }
+
+int32_t skirmish_slot_team(const SkirmishSetup& s, int32_t slot) {
+    if (slot < 0) return -1;
+    const size_t k = static_cast<size_t>(slot);
+    return k < s.teams.size() && s.teams[k] >= 0 ? s.teams[k] : slot;
+}
+
+PlanetIndex skirmish_slot_planet(int32_t slot) {
+    return slot == 0 ? kSkirmishHumanPlanet : slot == 1 ? kSkirmishBattlePlanet : static_cast<PlanetIndex>(slot + 1);
 }
 
 bool make_skirmish_galaxy(const GameData& data, const SkirmishSetup& setup, galactic::GalacticSetup& g, std::string* err) {
@@ -181,6 +195,21 @@ bool make_skirmish_galaxy(const GameData& data, const SkirmishSetup& setup, gala
         if (err) *err = "skirmish: faction " + (human.faction == galactic::kNoIndex ? s.human_faction : s.ai_faction) + " unknown";
         return false;
     }
+    // skm2 t02: the extra slots' AI players (slot k = player k), as the AI slot.
+    const int32_t slots = skirmish_slot_count(s);
+    std::vector<galactic::PlayerSetup> extras;
+    for (int32_t k = 2; k < slots; ++k) {
+        const SkirmishSetup::ExtraSlot& x = s.extra_slots[static_cast<size_t>(k - 2)];
+        galactic::PlayerSetup p;
+        p.faction = rules.find_faction(x.faction);
+        p.ai = true;
+        p.credits = ai.credits;
+        if (p.faction == galactic::kNoIndex) {
+            if (err) *err = "skirmish: faction " + x.faction + " unknown";
+            return false;
+        }
+        extras.push_back(p);
+    }
     uint32_t planet = galactic::kNoIndex;
     if (!s.planet_type.empty()) planet = rules.find_type(s.planet_type);
     if (planet == galactic::kNoIndex) planet = skirmish_galaxy_planet(rules, {}, s.land);  // modc t19: from the data
@@ -190,25 +219,29 @@ bool make_skirmish_galaxy(const GameData& data, const SkirmishSetup& setup, gala
     }
     GalaxyMap& m = g.map;
     m.campaign_name = "Alamo_Skirmish";
-    for (uint32_t i = 0; i < 3; ++i) {
+    const uint32_t planets = 3u + static_cast<uint32_t>(extras.size());  // skm2 t02: one more per extra slot
+    for (uint32_t i = 0; i < planets; ++i) {
         m.planets.add(std::string("ALAMO_SKIRMISH_P") + std::to_string(i));
         m.planets.position[i] = {static_cast<float>(i) * 60.0f, 0.0f, 0.0f};
         m.planets.flags[i] = static_cast<uint32_t>(kPlanetHasPlanetBehavior);
     }
-    for (uint32_t i = 0; i + 1 < 3; ++i) {
+    for (uint32_t i = 0; i + 1 < planets; ++i) {
         const uint32_t r = m.routes.add("ALAMO_SKIRMISH_R" + std::to_string(i));
         m.routes.point_a[r] = i;
         m.routes.point_b[r] = i + 1;
         m.routes.hs_speed_factor[r] = 5.0f;
     }
-    g.planet_type = {planet, planet, planet};
+    g.planet_type.assign(planets, planet);
     g.players = {human, ai};
+    g.players.insert(g.players.end(), extras.begin(), extras.end());
     if (neutral.faction != galactic::kNoIndex) g.players.push_back(neutral);
     // S10 map owners [probe 2026-10-29]: retail skirmish has Neutral and Hostile players besides the slots; map objects
     // resolve their owner by faction (TacticalBattle::bt_map_owner), natives without a player go to Hostile.
     galactic::PlayerSetup hostile;
     hostile.faction = rules.native_owner_faction();  // modc t03: by data (FoC: Hostile)
-    if (hostile.faction != galactic::kNoIndex && hostile.faction != human.faction && hostile.faction != ai.faction) g.players.push_back(hostile);
+    bool hostile_slot = hostile.faction == human.faction || hostile.faction == ai.faction;
+    for (const galactic::PlayerSetup& x : extras) hostile_slot = hostile_slot || hostile.faction == x.faction;
+    if (hostile.faction != galactic::kNoIndex && !hostile_slot) g.players.push_back(hostile);
     auto add = [&](int32_t player, PlanetIndex at, const std::vector<std::string>& names, const std::string& faction, bool ground = false) {
         const std::vector<std::string> list =
             !names.empty() ? names : ground ? default_skirmish_ground(data, faction) : default_skirmish_fleet(data, faction);
@@ -247,6 +280,15 @@ bool make_skirmish_galaxy(const GameData& data, const SkirmishSetup& setup, gala
     if (na == 0 || nh == 0) {
         if (err) *err = "skirmish: no known unit type in the " + std::string(nh == 0 ? "human" : "AI") + " fleet";
         return false;
+    }
+    // skm2 t02: each extra slot's forces on its own planet (its fleet in space, its ground forces on land), as the AI slot's.
+    for (int32_t k = 2; k < slots; ++k) {
+        const SkirmishSetup::ExtraSlot& x = s.extra_slots[static_cast<size_t>(k - 2)];
+        const uint32_t n = s.land ? add(k, skirmish_slot_planet(k), x.ground, x.faction, true) : add(k, skirmish_slot_planet(k), x.units, x.faction);
+        if (n == 0) {
+            if (err) *err = "skirmish: no known unit type in slot " + std::to_string(k) + "'s forces";
+            return false;
+        }
     }
     return true;
 }

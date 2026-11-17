@@ -163,6 +163,23 @@ struct BattleConfig {
     // ccpgt t02 (SKIRMISH_SETUP §4.2): the Capture Control Points game type (4), land only: each player's win condition is 0x15
     // CONTROL_POINT_DOMINATION instead of the map kind's default. Off: unchanged rules.
     bool control_point_domination = false;
+    // skm2 t02 (SKIRMISH_SETUP §1, §2.2, TACTICAL_COMBAT §2.10 "Skirmish with ... +0xb5"): the skirmish slots of a skirmish
+    // map battle in slot order, each its player and team (IDC_PLAYER_TEAM_n, 0-based; -1 none). Set: the slots are these
+    // players (up to kMaxSides; the first two must be the request's defender and attacker) and every slot gets its start
+    // anchor, victory record, income, garrison and base. Empty: the two-slot rule of skirmish_slot_player (alamo_headless,
+    // tests).
+    struct SkirmishSlot {
+        int32_t player = -1;
+        int32_t team = -1;
+        friend bool operator==(const SkirmishSlot&, const SkirmishSlot&) = default;
+    };
+    std::vector<SkirmishSlot> skirmish_slots;
+    // skm2 t02 (SKIRMISH_SETUP §2 step 1, TACTICAL_COMBAT §2.10, TACTICAL_GAPS §4.2.2): the team game - the record byte +0xb5
+    // (CU8F_T03_T05_RE §1.2: the map's mini 0x12 "has start positions", MapInfo::flag_12) picks the player setup 0x295cf0:
+    // relations by slot team (allied = same team; Is_Neutral players 2; players without a slot have no team) and the slot's
+    // TEAM_tt spawn marker. False (0x294fa0, or no slot list): relations by faction and PLAYER_<k> markers, k = the slot's
+    // index among the slots of its faction, owned by its faction.
+    bool skirmish_team_game = false;
     // --- S4 garrisons / structure capture (owner: S4 agent; tactical_battle_garrison.cpp) ---
     // GameConstants Garrisoned_Max_Attack_Distance_Multiplier / Land_ / Space_Capture_Allowed_Countdown_Seconds (vanilla
     // values; used only when the catalog's GameConstants lack them: BattleCatalog::capture_countdown).
@@ -186,8 +203,9 @@ struct BattleStats {
     uint32_t pad_restored = 0;  // §9.4 persisted pad children recreated at setup
     // s78n t20 (skirmish, SKIRMISH_SETUP §2.2; not saved): per side, its spawn-point marker (when one was found) and where its
     // first start-force unit was placed.
-    bool skirmish_marked[2] = {false, false}, start_placed[2] = {false, false};
-    Vec3 skirmish_marker[2] = {}, first_start[2] = {};
+    // skm2 t02: per side, 8 = TacticalBattle::kMaxSides.
+    bool skirmish_marked[8] = {}, start_placed[8] = {};
+    Vec3 skirmish_marker[8] = {}, first_start[8] = {};
     // cu8l t03: the campaign space fleet placement (objects placed, their adopt draws), the vf82 pass's TEAM-container lock
     // adopt draws, the arrivals started and the arrival ends that registered a new coordinator.
     uint32_t fleet_placed = 0, fleet_adopts = 0, fleet_lock_adopts = 0, fleet_arrivals = 0, fleet_arrival_ends = 0;
@@ -570,6 +588,10 @@ public:
     // its own speed. Set by the port event kFleetCohesionSubtype (GameSession); saved in the battle state (version 13).
     // AI, Lua and script moves are never tight. Land ignores it (land group moves already share the slowest speed).
     void set_fleet_cohesion(uint8_t player, bool tight);
+    // skm2 t01 (SKIRMISH_SETUP 1.1, Set_Difficulty): the galaxy's AI difficulty row of `player` changed; the combat takes its
+    // damage / health / shield multipliers (live units rescaled, CombatSystem::set_player_difficulty). Serial (command
+    // phase); nothing before setup.
+    void refresh_ai_difficulty(int32_t player);
     bool fleet_cohesion(uint8_t player) const { return player < fleet_cohesion_.size() && fleet_cohesion_[player] != 0; }
     // Facing event (id 20, P1_DOUBLE_CLICK_MOVE.md §2.2: a land drag that started on a selected unit; rotate only) [port:
     // MovementSystem has no turn-in-place order]: one single-unit move per eligible movable unit (selection order) to its
@@ -702,7 +724,11 @@ public:
     // Unknown entry -> false. Space battles -> true.
     bool land_drop_valid(const TacticalMode& mode, int32_t player, objects::ObjectId key, float x, float y, bool human,
                          bool use_reinforcement_points) const;
-    float player_drop_yaw(int32_t player) const { return drop_yaw(side_player(1) == player ? uint8_t{1} : uint8_t{0}); }
+    float player_drop_yaw(int32_t player) const {
+        for (uint8_t s = 1; s < side_count(); ++s)  // skm2 t02: a skirmish slot's own side; anyone else side 0's
+            if (side_player(s) == player) return drop_yaw(s);
+        return drop_yaw(0);
+    }
     // ui3 t04 (presentation reads between ticks: the checks of order_reinforce, nothing changed). reinforce_block: None when
     // `player`'s reserve `galactic_id` could be called now - else InvalidUnit (not an undeployed reserve of the player),
     // NotAllowed (finished, its side retreating, the hyperspace hold, a campaign type that stays in its transport / the
@@ -1106,7 +1132,19 @@ public:
     // pad builds from _Multiplayer (a space skirmish read _Campaign, which the Mineral_Extractor_Pad does not have).
     const char* pad_list_tag() const { return cfg_.skirmish ? "Tactical_Buildable_Objects_Multiplayer" : "Tactical_Buildable_Objects_Campaign"; }
     // t50: the skirmish slot -> player map [M: slot N = the N-th battle participant by ascending player id]; -1 = none.
+    // skm2 t02: BattleConfig::skirmish_slots when set.
     int32_t skirmish_slot_player(int32_t slot) const;
+    // skm2 t02: the number of skirmish slots (BattleConfig::skirmish_slots, else the two-slot rule's), the slot of `player`
+    // (-1 none) and its team (-1 none: no slot or no team).
+    int32_t skirmish_slot_count() const;
+    int32_t skirmish_slot_of(int32_t player) const;
+    int32_t skirmish_team(int32_t player) const;
+    // skm2 t02: the slot list's team game (BattleConfig::skirmish_team_game with slots): team relations and TEAM_tt markers.
+    bool skirmish_team_game() const { return cfg_.skirmish_team_game && !cfg_.skirmish_slots.empty(); }
+    // skm2 t02: the battle's sides. Side 0 is the defender, 1 the attacker; a skirmish map battle's slot k >= 2 is side k
+    // (start anchor, facing records, formation slots). kMaxSides bounds the slots.
+    static constexpr uint8_t kMaxSides = 8;  // BattleStats' per-side arrays are sized 8 (static_assert below the class)
+    uint8_t side_count() const;
     // t50: Land_Skirmish_Unit_Cap_By_Player_Count of the player's faction at the battle's player count [M: linear
     // interpolation between the curve's keys, clamped to its ends]; -1 = no curve.
     float skirmish_land_unit_cap(int32_t player) const;
@@ -1692,7 +1730,10 @@ private:
     bool victory_relevant(uint32_t type);
     void finish(int32_t winner, uint8_t victory, int32_t retreated);
     float side_power(uint8_t side) const;
-    int32_t side_player(uint8_t side) const { return side == 0 ? req_.info.defender : req_.info.attacker; }
+    int32_t side_player(uint8_t side) const {
+        return side == 0 ? req_.info.defender : side == 1 ? req_.info.attacker : skirmish_slot_player(side);
+    }
+    uint8_t owner_side(int32_t owner) const;  // skm2 t02: 0 the defender, a skirmish slot k >= 2 -> k, else 1
     Unit* unit_by_id(objects::ObjectId id);
     // cu8j t02 (MOVEMENT §4.7.1): the adopt 0x39bcb0 of object h - the predicate (not a TEAM member; the mode's locomotor
     // kind, a TEAM_LOCOMOTOR container only when a member's locomotor admits; [port] builders and hyperspacing objects are
@@ -2096,9 +2137,10 @@ private:
     static constexpr float kMaxSpeedUnread = -2.0f;
     std::vector<float> sp_type_max_speed_;
     // --- end S4 ---
-    Vec3 anchor_[2]{}, facing_[2]{};
-    Vec3 drop_facing_[2]{};  // a1h t06: the sides' entry-facing records (mode +0x288; zero = yaw 0), see drop_yaw
-    uint32_t placed_[2] = {0, 0};
+    // skm2 t02: per side (kMaxSides; sides 2.. only in a skirmish map battle with more than two slots)
+    Vec3 anchor_[kMaxSides]{}, facing_[kMaxSides]{};
+    Vec3 drop_facing_[kMaxSides]{};  // a1h t06: the sides' entry-facing records (mode +0x288; zero = yaw 0), see drop_yaw
+    uint32_t placed_[kMaxSides] = {};
     uint32_t frame_ = 0;
     uint32_t retreat_allowed_frame_ = 0;
     int32_t retreat_side_ = -1;        // side retreating (-1 none)

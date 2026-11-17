@@ -22,6 +22,7 @@
 #include <filesystem>
 #include <fstream>
 #include <functional>
+#include <initializer_list>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -29,6 +30,7 @@
 #include <string>
 #include <vector>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/host_fs.hpp"
@@ -1621,6 +1623,273 @@ void skirmish_map_real_test() {
     }
 }
 
+CrcLog records_from(const CrcLog& log, uint64_t tick);  // below (N1 / t09)
+
+// skm2 t02 / t01 (the group's exit test): a space skirmish as the front end starts it with four playing slots on two teams
+// (IDC_PLAYER_TEAM_n: slots 0 and 3 team 0, slots 1 and 2 team 1; slot 3 is Rebel like slot 1, so the team decides, not the
+// faction): every slot is a player of its faction with its own start forces, AI difficulty and victory record
+// (SKIRMISH_SETUP §1, §2 step 4), allies are not enemies (TACTICAL_COMBAT §2.10, 0x297470), the battle does not end while
+// one slot of the other team is left and ends with a team-0 winner once the whole team 1 is gone (§4). Then the Gameplay
+// options difficulty (SKIRMISH_SETUP 1.1) as a recorded command: every AI player Hard (galaxy row, tactical AI, health
+// rescaled), and the replay of the recording reproduces the CRC log. Real data (ALAMO_FOC_DATA); skipped when unset.
+namespace {
+game::SessionSpec four_slot_spec(const game::GameData& data) {
+    game::SessionSpec spec;
+    spec.kind = game::SessionKind::Skirmish;
+    spec.skirmish_map = "_MP_SPACE_GEONOSIS";
+    spec.skirmish.human_faction = "Empire";
+    spec.skirmish.ai_faction = "Rebel";
+    spec.skirmish.extra_slots = {{"Underworld", {}, {}}, {"Rebel", {}, {}}};
+    spec.skirmish.teams = {0, 1, 1, 0};
+    spec.skirmish.difficulties = {1, 0, 2, 1};
+    spec.seed = 5;
+    spec.skirmish_options = sim::skirmish_option_defaults(data.db.constants());
+    spec.skirmish_options.win_condition = 0x12;  // SKIRMISH_ALL_ENEMY_UNITS_DESTROYED
+    return spec;
+}
+
+// Kills every combat unit of `players` in the running battle (Lua Take_Damage's path); the number killed.
+uint32_t kill_players(game::GameSession& s, std::initializer_list<int32_t> players) {
+    sim::TacticalBattle* b = s.battles() ? s.battles()->battle() : nullptr;
+    sim::TacticalMode* m = s.host().modes().top_tactical();
+    if (!b || !m) return 0;
+    std::vector<objects::ObjectId> ids;
+    const objects::ObjectStore& st = m->primary();
+    for (const objects::ObjectHandle h : st.all_objects())
+        if (st.active(h) && std::find(players.begin(), players.end(), st.owner(h)) != players.end() && b->combat().has_unit(st.id(h)))
+            ids.push_back(st.id(h));
+    uint32_t n = 0;
+    for (const objects::ObjectId id : ids) n += b->script_damage(*m, id, 1.0e9f, false) ? 1u : 0u;
+    return n;
+}
+}  // namespace
+
+void skirmish_four_slot_real_test() {
+    const char* foc = std::getenv("ALAMO_FOC_DATA");
+    if (!foc || !*foc) {
+        std::printf("four-slot skirmish (real data): ALAMO_FOC_DATA not set: skipped\n");
+        return;
+    }
+    game::GameData data;
+    std::string err;
+    if (!game::load_game_data(foc, {}, data, &err)) {
+        std::printf("four-slot skirmish (real data): load failed: %s\n", err.c_str());
+        CHECK(false);
+        return;
+    }
+    const game::SessionSpec spec = four_slot_spec(data);
+    // 1. The slots, their forces, records, difficulties and relations; the team end.
+    {
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        game::GameSession s(data, js, spec);
+        std::vector<std::string> diag;
+        CHECK(s.start(&diag, nullptr, nullptr));
+        for (const std::string& d : diag) std::printf("  diag: %s\n", d.c_str());
+        if (!s.started()) return;
+        uint64_t t = 0;
+        while (t < 300 && !(s.in_battle() && s.battle() && s.battle()->frame() >= 2)) {
+            s.tick();
+            ++t;
+        }
+        const sim::TacticalBattle* b = s.battle();
+        const galactic::GalacticSim* g = s.galaxy();
+        CHECK(b != nullptr && g != nullptr);
+        if (!b || !g) return;
+        const char* factions[4] = {"Empire", "Rebel", "Underworld", "Rebel"};
+        uint32_t owned[4] = {};
+        const objects::ObjectStore& st = s.host().modes().top_tactical()->primary();
+        for (const objects::ObjectHandle h : st.all_objects())
+            if (st.active(h) && st.owner(h) >= 0 && st.owner(h) < 4 && b->combat().has_unit(st.id(h))) ++owned[st.owner(h)];
+        for (int32_t k = 0; k < 4; ++k) {
+            const galactic::PlayerState& ps = g->players()[static_cast<size_t>(k)];
+            const uint32_t row = data.rules.find_difficulty(game::difficulty_name(spec.skirmish.difficulties[static_cast<size_t>(k)]));
+            std::printf("four-slot skirmish: slot %d faction %s human %d ai %d difficulty row %u (want %u) units %u record 0x%x team %d\n", k,
+                        data.rules.factions[ps.faction].name.c_str(), ps.human ? 1 : 0, ps.ai ? 1 : 0, ps.difficulty, row, owned[k],
+                        b->victory_record_type(k), b->skirmish_team(k));
+            CHECK(ascii_iequals(data.rules.factions[ps.faction].name, factions[k]));
+            CHECK(ps.human == (k == 0) && ps.ai == (k != 0));
+            if (k > 0) CHECK(ps.difficulty == row);
+            CHECK(owned[k] > 0);                       // its own start forces
+            CHECK(b->victory_record_type(k) == 0x12);  // its own victory record
+            CHECK(b->skirmish_team(k) == spec.skirmish.teams[static_cast<size_t>(k)]);
+        }
+        // A team game (the map has start positions, +0xb5): allies by team; else by faction (slots 1 and 3 are both Rebel).
+        const tactical::combat::CombatSystem& c = b->combat();
+        std::printf("  team game %d\n", b->skirmish_team_game() ? 1 : 0);
+        if (b->skirmish_team_game()) {
+            CHECK(c.is_enemy(0, 1) && c.is_enemy(0, 2) && !c.is_enemy(0, 3) && !c.is_enemy(1, 2) && c.is_enemy(1, 3) && c.is_enemy(2, 3));
+            CHECK(!c.is_enemy(3, 0) && !c.is_enemy(2, 1));
+        } else {
+            CHECK(c.is_enemy(0, 1) && c.is_enemy(0, 2) && c.is_enemy(0, 3) && c.is_enemy(1, 2) && !c.is_enemy(1, 3) && c.is_enemy(2, 3));
+        }
+#ifdef ALAMO_SIM_HAVE_TACTICAL_AI
+        if (const sim::BattleAi* ai = s.battles()->tactical_ai()) {
+            for (int32_t k = 1; k < 4; ++k) CHECK(ai->world().is_ai_player(k));
+            // skm2 t03: the perception's IsDifficulty input per slot (Easy / Hard / Normal), none for the human; team mates
+            // are allies (relation 0) there too.
+            const auto& pw = ai->world().world();
+            if (pw.players.size() >= 4) {
+                CHECK(pw.players[0].ai_difficulty.empty() && pw.players[1].ai_difficulty == "Easy" && pw.players[2].ai_difficulty == "Hard" &&
+                      pw.players[3].ai_difficulty == "Normal");
+                if (b->skirmish_team_game()) CHECK(pw.rel(1, 2) == 0 && pw.rel(0, 3) == 0 && pw.rel(0, 1) == 1);
+                else CHECK(pw.rel(1, 3) == 0 && pw.rel(1, 2) == 1);
+            }
+            std::printf("  tactical AI build-time multipliers: %.3f / %.3f / %.3f\n", static_cast<double>(ai->world().build_time_multiplier(1)),
+                        static_cast<double>(ai->world().build_time_multiplier(2)), static_cast<double>(ai->world().build_time_multiplier(3)));
+        }
+#endif
+        // Team 1 loses slot 1: slot 2 is left, so nothing is declared.
+        const uint32_t k1 = kill_players(s, {1});
+        for (int i = 0; i < 260 && s.battle(); ++i) s.tick();
+        std::printf("  slot 1 killed (%u units): battle %s\n", k1, s.battle() && !s.battle()->finished() ? "running" : "over");
+        CHECK(k1 > 0 && s.battle() && !s.battle()->finished());
+        // Then slot 2 (and whatever team 1 still has): team 0 wins.
+        for (int i = 0; i < 1500 && s.battle(); ++i) {
+            if (i % 30 == 0) (void)kill_players(s, {1, 2});
+            s.tick();
+        }
+        const auto& end = s.battles()->last_battle_end();  // the battle is popped in the tick it ends
+        const int32_t winner = end.valid ? end.winner : -1;
+        std::printf("  team 1 killed: battle %s, winner %d\n", s.battle() ? "still running" : "over", winner);
+        CHECK(!s.battle());
+        CHECK(winner == 0 || winner == 3);
+    }
+    // 1b. Land, three slots (Utapau): every slot's start forces stand on the map, every slot has its record, the land unit cap
+    // is the three-player one, and the team-1 pads go to the team's first slot (BKG3 Q3.1).
+    {
+        game::SessionSpec land = spec;
+        land.skirmish_map = "_MP_LAND_UTAPAU";
+        land.skirmish.extra_slots = {{"Underworld", {}, {}}};
+        land.skirmish.teams = {0, 1, 1};
+        land.skirmish.difficulties = {1, 1, 2};
+        land.skirmish_options.win_condition = 0x13;
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        game::GameSession s(data, js, land);
+        std::vector<std::string> diag;
+        CHECK(s.start(&diag, nullptr, nullptr));
+        for (const std::string& d : diag) std::printf("  diag: %s\n", d.c_str());
+        uint64_t t = 0;
+        while (s.started() && t < 300 && !(s.in_battle() && s.battle() && s.battle()->frame() >= 2)) {
+            s.tick();
+            ++t;
+        }
+        const sim::TacticalBattle* b = s.battle();
+        CHECK(b != nullptr);
+        if (b) {
+            uint32_t owned[3] = {}, pads[3] = {};
+            static const objects::BehaviorTypeId kPad = objects::behavior_type_id("TACTICAL_BUILD_OBJECTS");
+            const objects::ObjectStore& st = s.host().modes().top_tactical()->primary();
+            for (const objects::ObjectHandle h : st.all_objects()) {
+                if (!st.active(h) || st.owner(h) < 0 || st.owner(h) >= 3) continue;
+                if (b->combat().has_unit(st.id(h))) ++owned[st.owner(h)];
+                if (kPad != objects::kNoBehavior && st.has_behavior(h, kPad)) ++pads[st.owner(h)];
+            }
+            std::printf("  land three slots: team game %d, units %u / %u / %u, pads %u / %u / %u, records 0x%x / 0x%x / 0x%x, caps %.0f / %.0f\n",
+                        b->skirmish_team_game() ? 1 : 0, owned[0], owned[1], owned[2], pads[0], pads[1], pads[2], b->victory_record_type(0),
+                        b->victory_record_type(1), b->victory_record_type(2), static_cast<double>(b->skirmish_land_unit_cap(0)),
+                        static_cast<double>(b->skirmish_land_unit_cap(2)));
+            for (int32_t k = 0; k < 3; ++k) {
+                CHECK(owned[k] > 0);
+                CHECK(b->victory_record_type(k) == 0x13);
+            }
+            if (b->skirmish_team_game()) CHECK(pads[1] > 0 && pads[2] == 0);  // Team_01 markers: slot 1 only
+        }
+    }
+    // 2. The Gameplay options difficulty in the running battle, recorded and replayed; then saved in the battle and loaded.
+    commands::CommandRecording rec;
+    RunResult live;
+    const std::string save_dir = path_to_utf8(fs::temp_directory_path() / "alamo_game_four_slot_save_test");
+    {
+        std::error_code ec;
+        remove_all_long(fs::path(path_from_utf8(save_dir)), ec);
+    }
+    std::string save_file;
+    bool save_ok = false;
+    uint64_t save_tick = 0;
+    {
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        game::GameSession s(data, js, spec);
+        std::vector<std::string> diag;
+        CHECK(s.start(&diag, nullptr, &rec));
+        if (!s.started()) return;
+        uint64_t t = 0;
+        while (t < 300 && !(s.in_battle() && s.battle() && s.battle()->frame() >= 10)) {
+            s.tick();
+            ++t;
+        }
+        const sim::TacticalBattle* b = s.battle();
+        CHECK(b != nullptr);
+        if (!b) return;
+        // The slot-1 (Easy) unit with the most health (its star base): its health is rescaled by Hard / Easy.
+        const objects::ObjectStore& st = s.host().modes().top_tactical()->primary();
+        objects::ObjectId big = objects::kNoObjectId;
+        float h0 = 0.0f;
+        for (const objects::ObjectHandle h : st.all_objects())
+            if (st.active(h) && st.owner(h) == 1 && b->combat().has_unit(st.id(h)) && b->combat().health(st.id(h)) > h0) {
+                big = st.id(h);
+                h0 = b->combat().health(big);
+            }
+        CHECK(s.set_ai_difficulty(2));
+        s.tick();
+        ++t;
+        const uint32_t hard = data.rules.find_difficulty("Hard_Default"), easy = data.rules.find_difficulty("Easy_Default");
+        const galactic::GalacticSim* g = s.galaxy();
+        for (int32_t k = 1; k < 4; ++k) CHECK(g->players()[static_cast<size_t>(k)].difficulty == hard);
+        CHECK(s.port_stats().ai_difficulty == 1 && s.ai_difficulty_of(1) == 2 && s.ai_difficulty_of(3) == 2);
+        if (big != objects::kNoObjectId && hard < data.rules.difficulties.size() && easy < data.rules.difficulties.size()) {
+            const float want = h0 * data.rules.difficulties[hard].health_multiplier / data.rules.difficulties[easy].health_multiplier;
+            const float h1 = s.battle()->combat().health(big);
+            std::printf("  difficulty Hard: slot-1 unit %u health %.1f -> %.1f (want %.1f)\n", big, static_cast<double>(h0), static_cast<double>(h1),
+                        static_cast<double>(want));
+            CHECK(std::fabs(h1 - want) <= 0.02f * want + 1.0f);
+        }
+        for (int i = 0; i < 30; ++i) {
+            s.tick();
+            ++t;
+        }
+        // A save in the battle after the change (the extra slots, teams, difficulties and sides 2.. round-trip).
+        CHECK(s.save_blocker().empty() && s.check_save().empty());
+        save_ok = game::save_game(s, save_dir, "Four slots", "", game::unix_now(), &save_file, &err);
+        CHECK(save_ok);
+        save_tick = s.host().frame();
+        for (int i = 0; i < 90; ++i) {
+            s.tick();
+            ++t;
+        }
+        live.crc = s.host().crc_log();
+        live.ticks = t;
+    }
+    for (const int32_t w : {0, 4}) {  // determinism: the four sides' battle with workers too
+        RunResult rp;
+        replay_run(data, spec, rec, live.ticks, w, rp);
+        const CrcDivergence d = first_divergence(live.crc, rp.crc);
+        std::printf("  difficulty replay (%d workers) vs live: %s\n", w, d.message.c_str());
+        CHECK(!d.diverged && rp.crc.records.size() == live.crc.records.size());
+    }
+    if (save_ok) {
+        SaveFile f;
+        game::SessionSpec back;
+        CHECK(SaveFile::read_file(save_file, f, &err) && game::GameSession::spec_from_save(f, back, &err));
+        CHECK(back.skirmish.extra_slots.size() == 2 && back.skirmish.extra_slots[0].faction == "Underworld" &&
+              back.skirmish.teams == spec.skirmish.teams && back.skirmish.difficulties == std::vector<int32_t>({2, 2, 2, 2}) &&
+              back.difficulty == 2);
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        game::GameSession b(data, js, back);
+        CHECK(b.start_from_save(f, &err, nullptr, nullptr));
+        if (!err.empty()) std::printf("  load: %s\n", err.c_str());
+        CHECK(b.loaded() && b.host().frame() == save_tick);
+        for (int i = 0; i < 90; ++i) b.tick();
+        const CrcLog want = records_from(live.crc, save_tick);
+        const CrcDivergence dl = first_divergence(want, b.host().crc_log());
+        std::printf("  four-slot battle save at %" PRIu64 ", +90 ticks: loaded live vs original: %s\n", save_tick, dl.message.c_str());
+        CHECK(!dl.diverged && b.host().crc_log().records.size() == want.records.size() && !want.records.empty());
+        if (b.galaxy())
+            for (int32_t k = 1; k < 4; ++k) CHECK(b.galaxy()->players()[static_cast<size_t>(k)].difficulty == data.rules.find_difficulty("Hard_Default"));
+    }
+    std::error_code ec;
+    remove_all_long(fs::path(path_from_utf8(save_dir)), ec);
+}
+
 void hero_roster_real_test() {
     const char* foc = std::getenv("ALAMO_FOC_DATA");
     if (!foc || !*foc) {
@@ -2600,6 +2869,7 @@ int main() {
         hud_feeds_test(data, spec);
         hero_roster_real_test();
         skirmish_map_real_test();  // skm1 t01 / t02
+        skirmish_four_slot_real_test();  // skm2 t01 / t02
 #endif
     }
     std::error_code ec;

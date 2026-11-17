@@ -191,8 +191,10 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
             const std::string type = resolve_ai_type(d.rules.factions[ps.faction].name, d.basic_ai, control, &d.ai->defs);
             if (type.empty()) continue;
             ps.ai = true;
-            ps.difficulty = diff;
-            gcfg.players.push_back({static_cast<int32_t>(p), type, std::clamp(spec_.difficulty, 0, 2)});
+            // skm2 t02 (SKIRMISH_SETUP §1): a skirmish slot plays at its own difficulty (slot +0x158 -> player +0x3bc).
+            const int32_t pd = ai_difficulty_of(static_cast<int32_t>(p));
+            ps.difficulty = pd == std::clamp(spec_.difficulty, 0, 2) ? diff : d.rules.find_difficulty(difficulty_name(pd));  // diff: the session's
+            gcfg.players.push_back({static_cast<int32_t>(p), type, pd});
             ai_types_.resize(setup_.players.size());
             ai_types_[p] = type;
         }
@@ -239,7 +241,15 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
     bo.battle.skirmish = spec_.kind == SessionKind::Skirmish;  // SpecialWeaponsAllowed ANDs the hard-point flag
     // skm1 t01 / t02: the skirmish map rules and the game options (start_map_battle sets map_battle).
     bo.battle.skirmish_map = skirmish_map_battle();
-    if (skirmish_map_battle()) bo.battle.skirmish_options = spec_.skirmish_options;
+    if (skirmish_map_battle()) {
+        bo.battle.skirmish_options = spec_.skirmish_options;
+        // skm2 t02: every slot (slot k = player k) with its team (SKIRMISH_SETUP §1: team +0x54 = slot +0x98).
+        for (int32_t k = 0; k < skirmish_slot_count(spec_.skirmish); ++k)
+            bo.battle.skirmish_slots.push_back({k, skirmish_slot_team(spec_.skirmish, k)});
+        // The team game (SKIRMISH_SETUP §2 step 1: record +0xb5 = the map's "has start positions" mini 0x12, CU8F_T03_T05_RE
+        // §1.2 [M: that the lobby copies the map's byte]): team relations and TEAM_tt spawn markers; else the faction rules.
+        bo.battle.skirmish_team_game = skirmish_map_.info.flag_12 != 0;
+    }
     // ccpgt t02: the Capture Control Points game type (land maps only; SKIRMISH_SETUP §4.2).
     bo.battle.control_point_domination = spec_.kind == SessionKind::Skirmish && spec_.skirmish.land && spec_.skirmish.control_points;
     bo.battle.skip_human_units = true;  // the human's units take orders only from commands (stand-ins skip them)
@@ -254,6 +264,9 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
     if (spec_.tactical_ai && d.ai && d.ai->tactical) {
         auto ts = std::make_shared<sim::TacticalAiSetup>(*d.ai->tactical);
         ts->difficulty = std::clamp(spec_.difficulty, 0, 2);
+        if (spec_.kind == SessionKind::Skirmish)  // skm2 t02: each slot's own difficulty
+            for (int32_t k = 0; k < skirmish_slot_count(spec_.skirmish); ++k) ts->player_difficulty.push_back(ai_difficulty_of(k));
+        tactical_setup_ = ts;  // skm2 t01: a live difficulty change updates it for later battles
         bo.tactical_ai = std::move(ts);
     }
 #endif
@@ -430,10 +443,10 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
         r.info.defender = 0;
         r.info.attacker = 1;
         r.info.map = r.map = spec_.skirmish_map;
-        for (int32_t p = 0; p < 2; ++p) {
+        for (int32_t p = 0; p < skirmish_slot_count(spec_.skirmish); ++p) {  // skm2 t02: every slot (slot k = player k)
             galactic::BattleForces f;
             f.player = p;
-            const PlanetIndex at = p == 0 ? kSkirmishHumanPlanet : kSkirmishBattlePlanet;
+            const PlanetIndex at = skirmish_slot_planet(p);
             if (spec_.skirmish_options.starting_units) {
                 if (spec_.skirmish.land) {
                     for (const objects::ObjectHandle h : gs->planets()[at].surface)
@@ -604,6 +617,55 @@ commands::EventData fleet_cohesion_event(bool tight) {
     return commands::ev::port_extension(commands::kPortFleetCohesionSubtype, std::span<const uint8_t>(&b, 1));
 }
 }  // namespace
+commands::EventData ai_difficulty_event(int32_t difficulty) {
+    const auto b = static_cast<uint8_t>(std::clamp(difficulty, 0, 2));
+    return commands::ev::port_extension(kAiDifficultySubtype, std::span<const uint8_t>(&b, 1));
+}
+
+bool GameSession::set_ai_difficulty(int32_t difficulty) { return host_ && !replay_ && submit(ai_difficulty_event(difficulty)).ok(); }
+
+int32_t GameSession::ai_difficulty_of(int32_t player) const {
+    if (spec_.kind == SessionKind::Skirmish && player >= 0 && player < skirmish_slot_count(spec_.skirmish)) {
+        const auto& v = spec_.skirmish.difficulties;
+        if (static_cast<size_t>(player) < v.size() && v[static_cast<size_t>(player)] >= 0) return std::clamp(v[static_cast<size_t>(player)], 0, 2);
+    }
+    return std::clamp(spec_.difficulty, 0, 2);
+}
+
+void GameSession::apply_ai_difficulty(int32_t difficulty) {
+    // SKIRMISH_SETUP 1.1 (0x28d760): GMM+0xb8 = d, then Set_Difficulty(d) on every PlayerList player that has an AI and is
+    // not human, in player order. The spec follows (the descriptor written again), so a save and its rebuild carry d.
+    const int32_t d = std::clamp(difficulty, 0, 2);
+    spec_.difficulty = d;
+    if (spec_.kind == SessionKind::Skirmish) spec_.skirmish.difficulties.assign(static_cast<size_t>(skirmish_slot_count(spec_.skirmish)), d);
+    galactic::GalacticSim* gs = host_ ? host_->galactic_mode() ? host_->galactic_mode()->sim() : nullptr : nullptr;
+    const uint32_t row = data_->rules.find_difficulty(difficulty_name(d));
+#ifdef ALAMO_SIM_HAVE_TACTICAL_AI
+    if (tactical_setup_) {
+        tactical_setup_->difficulty = d;
+        for (int32_t& v : tactical_setup_->player_difficulty) v = d;
+    }
+#endif
+    if (gs)
+        for (size_t p = 0; p < gs->players().size(); ++p) {
+            const galactic::PlayerState& ps = gs->players()[p];
+            if (ps.human) continue;
+            const auto pi = static_cast<int32_t>(p);
+            if (!ps.ai) {  // no AI system in the galaxy, but the battle's tactical AI may play it (default_tactical_ai_type)
+                if (battles_) battles_->apply_ai_difficulty(pi, d);
+                continue;
+            }
+            (void)gs->set_ai_difficulty(pi, row);
+            // The setup row only where start() set one (with the galactic AI): a rebuild from the new spec sets the same.
+            if (p < setup_.players.size() && setup_.players[p].difficulty != galactic::kNoIndex) setup_.players[p].difficulty = row;
+#ifdef ALAMO_GAME_HAVE_GALACTIC_AI
+            if (galactic_ai_) (void)galactic_ai_->set_difficulty(pi, d);
+#endif
+            if (battles_) battles_->apply_ai_difficulty(pi, d);
+        }
+    describe_session();
+}
+
 bool GameSession::set_fleet_cohesion(bool tight) {
     fleet_cohesion_ = tight;
     if (!host_ || replay_ || !battle()) return false;
@@ -883,6 +945,13 @@ commands::RejectReason GameSession::port_event(uint8_t player, const commands::E
         }
         return R::None;
     }
+    if (sub == kAiDifficultySubtype) {  // skm2 t01: the Gameplay options difficulty, any issuer (one game-wide setting)
+        const std::span<const uint8_t> b = ev.bytes_view("data");
+        if (b.size() != 1 || b[0] > 2) return R::NotAllowed;
+        apply_ai_difficulty(b[0]);
+        ++port_stats_.ai_difficulty;
+        return R::None;
+    }
     if (sub == commands::kPortFleetCohesionSubtype) {
         // [port: Gabriel 2026-11-13] fleet cohesion: the issuer's setting in the running battle (refused without one)
         const std::span<const uint8_t> b = ev.bytes_view("data");
@@ -966,6 +1035,26 @@ std::vector<std::string> split_names(std::string_view s) {
 
 const char* flag(bool b) { return b ? "1" : "0"; }
 
+// skm2 t02: an int list as "a,b,c" (descriptor options) and back (an entry that is not a number reads as -1).
+std::string join_ints(const std::vector<int32_t>& v) {
+    std::string s;
+    for (const int32_t n : v) {
+        if (!s.empty()) s += ',';
+        s += std::to_string(n);
+    }
+    return s;
+}
+
+std::vector<int32_t> split_ints(std::string_view s) {
+    std::vector<int32_t> out;
+    for (const std::string& t : split_names(s)) {
+        int32_t n = -1;
+        const auto [p, ec] = std::from_chars(t.data(), t.data() + t.size(), n);
+        out.push_back(ec == std::errc() && p == t.data() + t.size() ? n : -1);
+    }
+    return out;
+}
+
 sim::SessionPlayer session_player(const galactic::GalacticRules& rules, const galactic::PlayerSetup& ps, std::string ai_type) {
     sim::SessionPlayer p;
     p.faction = ps.faction < rules.factions.size() ? rules.factions[ps.faction].name : std::string();
@@ -1040,6 +1129,19 @@ void GameSession::describe_session() {
         d.set_option("skirmish.planet_type", s.planet_type);
         d.set_option("skirmish.land", flag(s.land));
         if (s.control_points) d.set_option("skirmish.control_points", "1");  // ccpgt t02 (absent in older saves: off)
+        // skm2 t02: the slots after the first two, the teams and the slot difficulties (absent: two slots, own teams, the
+        // session difficulty).
+        if (!s.extra_slots.empty()) {
+            d.set_option("skirmish.extra_slots", std::to_string(s.extra_slots.size()));
+            for (size_t k = 0; k < s.extra_slots.size(); ++k) {
+                const std::string key = "skirmish.slot" + std::to_string(k + 2) + ".";
+                d.set_option(key + "faction", s.extra_slots[k].faction);
+                d.set_option(key + "units", join_names(s.extra_slots[k].units));
+                d.set_option(key + "ground", join_names(s.extra_slots[k].ground));
+            }
+        }
+        if (!s.teams.empty()) d.set_option("skirmish.teams", join_ints(s.teams));
+        if (!s.difficulties.empty()) d.set_option("skirmish.difficulties", join_ints(s.difficulties));
         if (skirmish_map_battle()) {  // skm1 t01 / t02 (absent: an older save, the galactic-hop skirmish)
             const sim::BattleConfig::SkirmishOptions& o = spec_.skirmish_options;
             d.set_option("skirmish.map_battle", "1");
@@ -1222,6 +1324,19 @@ bool GameSession::spec_from_save(const SaveFile& save, SessionSpec& out, std::st
         s.skirmish.planet_type = std::string(o.text("skirmish.planet_type"));
         s.skirmish.land = o.boolean("skirmish.land");
         s.skirmish.control_points = o.has("skirmish.control_points") && o.boolean("skirmish.control_points");
+        if (o.has("skirmish.extra_slots")) {  // skm2 t02
+            const uint32_t n = std::min<uint32_t>(o.u32("skirmish.extra_slots"), 6);
+            for (uint32_t k = 0; k < n; ++k) {
+                const std::string key = "skirmish.slot" + std::to_string(k + 2) + ".";
+                SkirmishSetup::ExtraSlot x;
+                x.faction = std::string(o.text((key + "faction").c_str()));
+                x.units = split_names(o.text((key + "units").c_str()));
+                x.ground = split_names(o.text((key + "ground").c_str()));
+                s.skirmish.extra_slots.push_back(std::move(x));
+            }
+        }
+        if (o.has("skirmish.teams")) s.skirmish.teams = split_ints(o.text("skirmish.teams"));
+        if (o.has("skirmish.difficulties")) s.skirmish.difficulties = split_ints(o.text("skirmish.difficulties"));
         s.skirmish_hop = !o.has("skirmish.map_battle");  // skm1 t01: an older save is the galactic-hop skirmish
         if (!s.skirmish_hop) {
             sim::BattleConfig::SkirmishOptions& so = s.skirmish_options;

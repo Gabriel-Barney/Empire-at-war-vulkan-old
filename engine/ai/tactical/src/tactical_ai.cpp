@@ -4126,9 +4126,35 @@ lua::PreventAiResult TacticalAiWorld::prevent_ai_usage(int32_t id, int32_t owner
 }
 
 bool TacticalAiWorld::is_ai_player(int32_t player) const { return impl_->player_ai(player) != nullptr; }
+bool TacticalAiWorld::set_difficulty(int32_t player, int32_t difficulty) {
+    Impl& w = *impl_;
+    PlayerAi* p = w.player_ai(player);
+    const int32_t d = std::clamp(difficulty, 0, 2);
+    if (!p || p->difficulty == d) return false;
+    p->difficulty = d;
+    float sleep = 0.0f;
+    p->contrast_mult = 1.0f;
+    const std::string& dname = p->type->difficulty[static_cast<size_t>(d)];
+    for (const TacticalAiDifficulty& e : w.cfg.difficulties)  // as start()
+        if (ai_iequal(e.name, dname)) {
+            sleep = w.cfg.mode == TacticalMode::Land ? e.land_goal_sleep : e.space_goal_sleep;
+            p->contrast_mult = w.cfg.mode == TacticalMode::Land ? e.land_contrast : e.space_contrast;
+        }
+    p->build_time_mult = tactical_build_time_multiplier(w.cfg.difficulties, dname, w.cfg.mode);
+    p->ctx.goals.set_sleep_frames(static_cast<int32_t>(static_cast<float>(kAiFps) * sleep));
+    for (TacticalAiPlayerConfig& pc : w.cfg.players)
+        if (pc.player == player) pc.difficulty = d;
+    w.decide(player, "difficulty " + std::to_string(d));
+    return true;
+}
+
 float TacticalAiWorld::build_time_multiplier(int32_t player) const {
     const PlayerAi* p = impl_->player_ai(player);
     return p ? p->build_time_mult : 1.0f;
+}
+int32_t TacticalAiWorld::difficulty(int32_t player) const {
+    const PlayerAi* p = impl_->player_ai(player);
+    return p ? p->difficulty : -1;
 }
 int32_t TacticalAiWorld::opponent(int32_t player) const {
     const PlayerAi* p = impl_->player_ai(player);
