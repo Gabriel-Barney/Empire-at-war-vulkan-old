@@ -199,7 +199,8 @@ leave the group.
   log line. It replaces the "follow-up group" step. A Stage 6 group is closed differently (next point).
 - **Follow-ups stay in Stage 6 groups** (Gabriel, 2026-11-12, to help development there). Stage 6 · Parity and mods (lane `st6`:
   boxes MODC, Q4, Q5, Q6 and any box added to it later; `meta/backlog` `keep_followups` lists the stages this applies to) is the
-  exception to the backlog rule. A follow-up of a Stage 6 group (a finding that does not block its exit test, or a task still open
+  exception to the backlog rule. Since 2026-11-17 (Gabriel) Stage 9 · Mod compatibility system (lane `st9`: boxes MCX1-MCX6,
+  groups `mcx0`-`mcx9`) follows the same rule: `keep_followups` is `["st6", "st9"]`, and everything below says "Stage 6" for both. A follow-up of a Stage 6 group (a finding that does not block its exit test, or a task still open
   when the test passes) becomes a new task of the group it came from, in that group's box, so the next session on the box finds it
   there:
   - `backlog add "<text>" --by S --from <group> [--sev S1|S2|S3] [--tier 1|2] [--ref PATH] [--g]` does it: it adds the group's next

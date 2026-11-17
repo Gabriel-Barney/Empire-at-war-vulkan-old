@@ -701,7 +701,7 @@ Additions:
 
 The plan follows the roadmap rules:
 - Groups have an exit test.
-- Stage 6 groups keep their follow-ups.
+- Stage 6 and Stage 9 groups keep their follow-ups as tasks (S3 included).
 - **Tier focus.** Everything below is tier 1 (how XML and Lua are read, visible states) or tier 2, except where marked.
   Tier-3 items (speed, memory) wait for the focus to lift.
 - **Lanes.** The groups are sized for lanes. Parallel lanes are marked ∥.
@@ -728,8 +728,9 @@ How the groups depend on each other:
 
 **On the roadmap** (Gabriel, 2026-11-17): the groups form their own stage, **Stage 9 · Mod compatibility system** (lane
 `st9`), separate from Stage 6's `modc` and `q6`. The open `modc` tasks (t33, t35, t50, t51) stay in `modc`. Stage 9
-follows the normal group rules: a cap of 8 tasks, and S3 findings go to the backlog. Stage 6's keep-follow-ups exception
-does not apply.
+keeps its follow-ups like Stage 6 (Gabriel, 2026-11-17): every follow-up of an `mcx` group, S3 included, becomes a task
+of that group, not a backlog entry, and the groups have no task cap. Tier-3 findings still go to the backlog while the
+current focus holds.
 
 Boxes:
 

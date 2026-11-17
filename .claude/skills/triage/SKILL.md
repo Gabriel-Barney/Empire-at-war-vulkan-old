@@ -65,7 +65,8 @@ since been answered (a new `docs/re/` spec or probe result). Counts plus one lin
 When Gabriel says "promote b0412 to skai" or "drop b0300", trust it: say what you will run, run it, report. If he promotes without
 a brief, ask whether he wants the task text rewritten as one.
 
-## Stage 6 groups
+## Stage 6 and Stage 9 groups
 
-Stage 6 · Parity and mods (boxes MODC, Q4, Q5, Q6) keeps its follow-ups: `backlog add ... --from <stage-6 group>` makes the finding
+Stage 6 · Parity and mods (boxes MODC, Q4, Q5, Q6) and Stage 9 · Mod compatibility system (boxes MCX1-MCX6, since 2026-11-17)
+keep their follow-ups: `backlog add ... --from <stage-6 or stage-9 group>` makes the finding
 a task of that group instead of a backlog entry (tier 3 still goes to the backlog). Triage there means writing the task as a brief.
