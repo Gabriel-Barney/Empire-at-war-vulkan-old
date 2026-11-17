@@ -194,6 +194,7 @@ int32_t TacticalBattle::pad_build(TacticalMode& mode, objects::ObjectId pad, obj
         bt_ramps_.insert(it, UcRamp{id, rate});
     }
     ++stats_.pad_builds;
+    play_battle_clip(pad, 0x74, false, 1.0f, 0.0f);  // r3h t05: Start build 0x42dbd0 plays Pad_Build on the pad (L1_S4 §3.6)
     return 1;
 }
 
@@ -231,6 +232,7 @@ void TacticalBattle::pads_tick(TacticalMode& mode) {
                 s.cooldown_start = frame_;
                 s.cooldown_end = frame_ + static_cast<uint32_t>(wait * 30.0f + 0.5f);
             }
+            if (pad_alive) play_battle_clip(s.pad, 0x75, false, 1.0f, 0.0f);  // r3h t05: 0x42e6d0 ends with Pad_Sell
         };
         if (s.uc != objects::kNoObjectId) {
             const objects::ObjectHandle uh = st.find(s.uc);

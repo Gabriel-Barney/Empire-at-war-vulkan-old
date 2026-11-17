@@ -13,7 +13,8 @@
 // Worlds of modes that left the stack are dropped at the next service.
 // [port] (listed in docs/PHASE4.md): model creation happens at the sync after the spawning step, not inside
 // the spawn call, so the start-frame draw sits after that tick's battle draws; hardpoints are flat combat
-// sub-records (no own models / rows); the T6 scene-model advance has no sim models yet (stub). Secondary stores
+// sub-records (no own models / rows); the T6 scene models (hardpoint Model_To_Attach models, not sim objects) are posed
+// render-side (alamo/render/scene_anim.hpp), so the host's T6 slot advances nothing here. Secondary stores
 // get their own world (model created with the FREE RNG, advanced, never hashed). While the top mode is paused
 // the service skips behaviours and the advance ([port] frozen rule, see service()).
 // Per-tick outputs for the renderer / audio (never hashed): muzzles() (fire-bone muzzle flashes, 4 ticks),

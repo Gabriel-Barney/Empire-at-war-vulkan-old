@@ -1031,25 +1031,36 @@ void test_events_and_locomotor() {
                                   {kAnimFireDie, 1, 50, 30.0f, 2}},
                               -1);
     {
-        // Berserker: Move -> SpinMove loop; Attack passes; a running spin is left alone until near its end.
+        // r3h t03 (0x3a92f0): Berserker - Move plays as asked (retail ends the ability first: the host's job); Idle / Attack
+        // / Attack Idle become SpinMove at speed 1 from frame 1 (index, loop and blend of the request), and are ignored while
+        // a SpinMove runs short of its end (frame < count - 2 - speed = 17 for 20 frames at speed 1).
         AnimWorld w;
         w.create(1, m.get(), {}, nullptr, 0);
         w.set_berserker(1, true);
         PlayRequest mv;
         mv.type = kAnimMove;
         mv.speed = 2.0f;
-        CHECK(w.play(1, mv, nullptr, 0) == PlayResult::Played && w.current_type(1) == kAnimSpinMove && w.current_mode(1) == SlotMode::Loop &&
-              w.slot(1).speed == 1.0f);
-        CHECK(w.play(1, mv, nullptr, 1) == PlayResult::Locked);
-        for (uint64_t f = 1; f <= 16; ++f) w.advance(f);  // frame 16: 16 + 2 < 19, still running
-        CHECK(w.play(1, mv, nullptr, 16) == PlayResult::Locked);
-        w.advance(17);  // 17 + 2 >= 19: restartable
-        CHECK(w.play(1, mv, nullptr, 17) == PlayResult::Played && w.slot(1).frame == 0.0f);
+        CHECK(w.play(1, mv, nullptr, 0) == PlayResult::Played && w.current_type(1) == kAnimMove && w.slot(1).speed == 2.0f);
         PlayRequest atk;
         atk.type = kAnimAttack;
-        CHECK(w.play(1, atk, nullptr, 18) == PlayResult::Played && w.current_type(1) == kAnimAttack);
+        atk.speed = 2.0f;
+        CHECK(w.play(1, atk, nullptr, 1) == PlayResult::Played && w.current_type(1) == kAnimSpinMove &&
+              w.current_mode(1) == SlotMode::OneShot && w.slot(1).speed == 1.0f && w.slot(1).frame == 1.0f);
+        PlayRequest idle;
+        idle.type = kAnimIdle;
+        idle.loop = true;
+        CHECK(w.play(1, idle, nullptr, 1) == PlayResult::Locked);
+        for (uint64_t f = 2; f <= 16; ++f) w.advance(f);  // frame 16 < 17: still running
+        CHECK(w.slot(1).frame == 16.0f && w.play(1, idle, nullptr, 16) == PlayResult::Locked);
+        w.advance(17);  // frame 17 >= 17: near its end, restartable
+        CHECK(w.play(1, idle, nullptr, 17) == PlayResult::Played && w.current_type(1) == kAnimSpinMove &&
+              w.current_mode(1) == SlotMode::Loop && w.slot(1).frame == 1.0f);
+        PlayRequest spin;
+        spin.type = kAnimSpinMove;
+        spin.loop = true;
+        CHECK(w.play(1, spin, nullptr, 18) == PlayResult::Played && w.slot(1).frame == 0.0f);  // the ability's own play
         w.set_berserker(1, false);
-        CHECK(w.play(1, mv, nullptr, 19) == PlayResult::Played && w.current_type(1) == kAnimMove);
+        CHECK(w.play(1, atk, nullptr, 19) == PlayResult::Played && w.current_type(1) == kAnimAttack);
     }
     {
         // Visibility bits == the pose path's bits (toggling visibility clip, crossfade, overlay).

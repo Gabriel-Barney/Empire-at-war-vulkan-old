@@ -132,9 +132,10 @@ public:
     PlayResult switch_preserving_phase(ObjectId id, int32_t type, uint32_t index, bool loop, float blend, float speed, uint64_t frame);
     void set_frozen(ObjectId id, bool frozen);  // object +0x3a7: advance skipped [L]
     bool frozen(ObjectId id) const;
-    // Berserker ability active (§A.4 item 1): play() rewrites requests other than Attack / Attack Idle / Idle to a
-    // looping SpinMove and leaves a running spin alone until it is within 2 frames of its end. The caller (the
-    // battle, from AbilitySystem::is_active(BERSERKER)) keeps the flag current.
+    // Berserker ability active (§A.4 item 1, r3h t03): play() ignores Idle / Attack / Attack Idle requests while a
+    // SpinMove runs short of its end (frame < count - 2 - speed) and otherwise turns them into SpinMove (speed 1, frame
+    // 1, the request's index / loop / blend); other requests play unchanged (retail ends the ability first: the host's
+    // job). The caller (the battle, from AbilitySystem::is_active(BERSERKER)) keeps the flag current.
     void set_berserker(ObjectId id, bool active);
     bool berserker(ObjectId id) const;
 

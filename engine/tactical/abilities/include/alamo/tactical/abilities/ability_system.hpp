@@ -177,6 +177,9 @@ struct AbilityAnimPlay {
     uint32_t variant = 0;
     uint8_t loop = 0;
     uint8_t direct = 0;     // ModelClass play called directly (Super_Laser): no lock test, no Berserker redirect
+    // r3h t06: 1 = only when the primary clip is idle-like (0x27b5e0) or this same type, finished (Redirect_Blaster's
+    // Idle_Blockblaster, 0x709c90); the host tests its own world.
+    uint8_t only_from_idle = 0;
     float blend = 0.0f;     // seconds (0 = hard cut)
     float speed = 1.0f;
     uint32_t frame = 0;     // the sim frame of the play
@@ -508,6 +511,9 @@ public:
     // replaced it (or the world refused the ability's play): external_play. Weapon-shot records and finished views are
     // not compared.
     void observe_clip(ObjectId id, int32_t type, uint32_t frame);
+    // r3h t01 (§4.14 "Hold"): an ability clip of the record runs on `id` as of the advance of frame - 1 (not finished, not a
+    // weapon shot): the hold suspends the IDLE behaviour and stops the locomotor, so the host plays no locomotor / idle clip.
+    bool ability_clip_running(ObjectId id, uint32_t frame) const;
     float get_hull(ObjectId id) const { return combat_->script_hull(id); }      // Lua Get_Hull
     float get_shield(ObjectId id) const { return combat_->shield_fraction(id); }  // Lua Get_Shield
 
@@ -1015,7 +1021,8 @@ private:
                    uint32_t frame, float blend = 0.0f, bool direct = false);
     // r3h t01: a play without a record (victims: FW_Attack, Eat's grab; Contaminate / Heal / Hack users ...): queued for the
     // host when `id`'s model has the clip, variant kDrawVariant drawn as play_anim does. True when queued.
-    bool queue_play(ObjectId id, int32_t type, uint32_t variant, bool loop, float blend, float speed, uint32_t frame);
+    bool queue_play(ObjectId id, int32_t type, uint32_t variant, bool loop, float blend, float speed, uint32_t frame,
+                    bool only_from_idle = false);
     uint32_t resolve_variant(ObjectId id, int32_t type, uint32_t variant);  // kDrawVariant -> the draw; else as given
     uint32_t variant_count(ObjectId id, int32_t type) const;
     void anim_follow_ups(uint32_t frame, SimRng& rng);  // r3h t01: plays that follow a one-shot finishing at `frame`

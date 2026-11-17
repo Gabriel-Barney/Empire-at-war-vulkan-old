@@ -1554,6 +1554,7 @@ void test_hero_clash_fight() {
         r.step();  // the start frame runs the update too: approach -> fight
         for (int i = 0; i < 10; ++i) r.step();
         CHECK(r.rng.draws() == 11 && r.host.damage_calls == 0);  // 11 updates since the fight
+        CHECK(r.host.plays.empty());  // r3h t02: nothing played
     }
     {  // two model variants: one extra synced int draw per exchange
         ClashRig r;
@@ -1564,6 +1565,22 @@ void test_hero_clash_fight() {
         r.step();
         r.step();  // first exchange
         CHECK(r.rng.draws() == 2 && r.m.clashes()[0].playing);
+        // r3h t02 (HERO_CLASH §3.6): both heroes play their exchange clip with the drawn variant (hero 1 the First_Hero_*
+        // anim of the outcome, hero 2 the Second_Hero_* one: win / lose, or both draw).
+        const HeroClashManager::Clash& c = r.m.clashes()[0];
+        CHECK(r.host.plays.size() == 2);
+        if (r.host.plays.size() == 2) {
+            CHECK(r.host.plays[0].id == 1 && r.host.plays[1].id == 2 && r.host.plays[0].variant == r.host.plays[1].variant &&
+                  r.host.plays[0].variant < 2);
+            const std::string& a1 = r.host.plays[0].anim;
+            const std::string& a2 = r.host.plays[1].anim;
+            const HeroClashEntry& e = r.data.entries[c.entry];
+            if (c.outcome == kExchangeFirstWins) CHECK(a1 == e.first_anims[0] && a2 == e.second_anims[1]);
+            if (c.outcome == kExchangeSecondWins) CHECK(a1 == e.first_anims[1] && a2 == e.second_anims[0]);
+            if (c.outcome == kExchangeDraw) CHECK(a1 == e.first_anims[2] && a2 == e.second_anims[2]);
+            std::printf("  r3h hero clash: outcome %u plays %s / %s variant %u\n", static_cast<unsigned>(c.outcome), a1.c_str(),
+                        a2.c_str(), r.host.plays[0].variant);
+        }
     }
 }
 }  // namespace bo3split

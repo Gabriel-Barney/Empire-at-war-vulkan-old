@@ -1159,6 +1159,13 @@ struct ClashStub final : HeroClashHost {
         fps = model_fps;
         return true;
     }
+    struct Play {  // r3h t02: the exchange clips the manager started
+        ObjectId id;
+        std::string anim;
+        uint32_t variant;
+    };
+    std::vector<Play> plays;
+    void play(ObjectId id, std::string_view anim, uint32_t variant) override { plays.push_back({id, std::string(anim), variant}); }
     bool speech_idle() override { return true; }
     void damage(ObjectId victim, float amount, ObjectId) override {
         U* u = get(victim);

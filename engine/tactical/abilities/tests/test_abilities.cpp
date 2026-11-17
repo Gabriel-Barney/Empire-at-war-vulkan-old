@@ -86,6 +86,7 @@ int main(int argc, char** argv) {
     test_oi_stun_over_water();
     test_oi_anim_timings();
     test_oi_anim_gates_and_locks();
+    test_r3h_anim_plays();
     test_bribe_hack_accept();
     test_maximum_firepower_incognito();  // s78n t05
     test_bribe_range();  // s78m t08

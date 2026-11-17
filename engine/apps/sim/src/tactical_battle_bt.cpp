@@ -353,6 +353,7 @@ cmd::RejectReason TacticalBattle::tactical_sell(TacticalMode& mode, uint8_t play
     // q6 t19 (AI_TACTICAL §7.5.1 item 4): a sale clears the slot and the persistence record but resets no ownership and
     // starts no cooldown: the pad keeps its owner until someone captures it (the capture rules of an empty pad).
     if (st.alive(ph)) pad_persist(st, ph, bt, st.position(h), false);  // §9.4: the sale removes the persistent record (the object's x, y)
+    if (st.alive(ph)) play_battle_clip(s->pad, 0x75, false, 1.0f, 0.0f);  // r3h t05: release 0x42ecd0 plays Pad_Sell (L1_S4 §3.6)
     if (Unit* u = unit_by_id(object); u && u->alive) {
         u->alive = false;
         --parts_[u->participant].alive;

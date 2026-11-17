@@ -41,6 +41,7 @@ constexpr int32_t kAnimBerserk = 0x68;  // Berserker (TACTICAL_GAPS §2.3.2)
 constexpr int32_t kAnimFwAttack = 0x1f;     // r3h t01: Force_Whirlwind victims (TACTICAL_GAPS §2.3.7)
 constexpr int32_t kAnimContaminate = 0x70;  // r3h t01: Radioactive_Contaminate's throw (CU8K_T02_T06_RE §2)
 constexpr int32_t kAnimHeal = 0x76;         // r3h t01: Force_Healing harm (TACTICAL_GAPS §2.3.1)
+constexpr int32_t kAnimFlameAttack = 0x2d;  // r3h t06: Personal_Flame_Thrower (0x705e50)
 constexpr int32_t kAnimAttack = 5;      // Super_Laser (TACTICAL_GAPS §2.3.9), weapon shots, the Arc / Eat gates
 // §4.14: begin / hold / release clips (anim_types.cpp)
 constexpr int32_t kAnimFtkAttack = 0x21, kAnimFtkRelease = 0x23;  // Telekinesis
@@ -143,7 +144,8 @@ void AbilitySystem::play_anim(Obj& o, int32_t type, std::string_view anim_name, 
     anim_plays_.push_back(p);
 }
 
-bool AbilitySystem::queue_play(ObjectId id, int32_t type, uint32_t variant, bool loop, float blend, float speed, uint32_t frame) {
+bool AbilitySystem::queue_play(ObjectId id, int32_t type, uint32_t variant, bool loop, float blend, float speed, uint32_t frame,
+                               bool only_from_idle) {
     if (type < 0 || variant_count(id, type) == 0) return false;  // no clip: the play returns 0 (and draws nothing)
     AbilityAnimPlay p;
     p.id = id;
@@ -153,6 +155,7 @@ bool AbilitySystem::queue_play(ObjectId id, int32_t type, uint32_t variant, bool
     p.blend = blend;
     p.speed = speed;
     p.frame = frame;
+    p.only_from_idle = only_from_idle ? 1 : 0;
     anim_plays_.push_back(p);
     return true;
 }
@@ -188,6 +191,13 @@ void AbilitySystem::anim_follow_ups(uint32_t frame, SimRng& rng) {
     rng_ = saved;
 }
 
+bool AbilitySystem::ability_clip_running(ObjectId id, uint32_t frame) const {
+    const Obj* o = obj(id);
+    if (!o || o->anim_type < 0 || o->anim_then == kAnimWeaponShot) return false;
+    const AnimView v = anim_before(*o, frame);
+    return v.type >= 0 && !v.finished;
+}
+
 void AbilitySystem::observe_clip(ObjectId id, int32_t type, uint32_t frame) {
     const Obj* o = obj(id);
     if (!o || o->anim_type < 0 || o->anim_then == kAnimWeaponShot) return;
@@ -201,9 +211,18 @@ void AbilitySystem::external_play(ObjectId id, uint32_t frame) {
     // Attack_Animation" at their next update and abort (Generic / Eat: default idle and release; Arc: release only).
     Obj* o = obj(id);
     if (!o || o->anim_type < 0) return;
+    const bool spin = o->anim_type == kAnimBerserk;
     o->anim_type = -1;
     o->anim_start = frame;
     o->anim_then = kAnimStay;
+    // r3h t03 (0x3a92f0): a request other than Idle / Attack / Attack Idle / SpinMove while the Berserker runs ends the
+    // ability first (its removal with reason 3: no closing spin). The world played that clip in place of the SpinMove.
+    if (spin)
+        for (SpecialState& sp : o->specials)
+            if (sp.applied && data_->specials[sp.desc].cls == C::Berserker) {
+                remove_special(*o, sp, frame);
+                break;
+            }
 }
 
 AbilitySystem::AnimView AbilitySystem::anim_view(const Obj& o, uint32_t frame) const {
@@ -1267,8 +1286,9 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
             const bool ended = ct.count <= 0.0f || anim >= ct.end;
             // r3h t04 (§4.14 "What else ends them"): the attack clip the apply recorded was replaced (a clip started outside
             // the ability system: external_play) -> abort before any frame event: Generic / Eat play the default idle and
-            // release, Arc only releases. Only with clip data (a record was made at the apply).
-            if (ct.count > 0.0f && (o.anim_type != anim_type_of(s.attack_anim) || o.anim_start != sp.next)) {
+            // release, Arc only releases. Only with clip data and a resolved type (a record was made at the apply).
+            const int32_t attack_type = anim_type_of(s.attack_anim);
+            if (attack_type >= 0 && ct.count > 0.0f && (o.anim_type != attack_type || o.anim_start != sp.next)) {
                 if (s.cls != C::ArcSweep && !o.dead) {
                     AbilityAnimPlay p;
                     p.id = o.id;
@@ -1596,6 +1616,10 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
 
         case C::FlameThrower: {  // after the delay: per frame each enemy in range inside the cone [M]
             if (frame < sp.next) return;
+            // r3h t06 (PersonalFlameThrowerAbility update 0x705e50): the flaming starts with FLAME_ATTACK (0x2d), index 0,
+            // loop, blend 0.2, speed 1; nothing is played at the end (the release 0x7060e0 only unholds). [port] at the first
+            // flame update (retail: once the turn toward the target is within 0.1 rad).
+            if (sp.counter == std::max(1, frames_of(s.duration_secs, fps))) queue_play(o.id, kAnimFlameAttack, 0, true, 0.2f, 1.0f, frame);
             sp.counter -= 1;
             const Vec3 f = o.combat_unit ? combat_->facing(o.id) : Vec3{1.0f, 0.0f, 0.0f};
             const float per = s.damage_amount / static_cast<float>(std::max(1, frames_of(s.duration_secs, fps)));
@@ -1701,6 +1725,9 @@ void AbilitySystem::class_remove(Obj& o, SpecialState& sp, uint32_t frame) {
         case C::RemoteBomb:  // S8 t06 (0x719ee0 end / interruption): TARGETING and the locomotor enabled, unlock
             lock_pair(o, kLockRemoteBomb, false, frame);
             if (o.combat_unit && combat_->has_unit(o.id)) combat_->set_flag(o.id, combat::kUnitTargetingSuspended, false);  // S8 t25
+            break;
+        case C::Berserker:  // r3h t03 (remove 0x713710, reason 3): no closing clip; the SpinMove loop runs on in the world
+            if (o.anim_type == kAnimBerserk) o.anim_type = -1;  // the record ends (the hold is over)
             break;
         case C::Earthquake:  // §4.14 remove: FB_Release / FTK_Release one-shot, then the idle loop
         case C::Telekinesis:

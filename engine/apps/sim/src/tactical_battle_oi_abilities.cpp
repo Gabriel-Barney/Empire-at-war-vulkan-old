@@ -887,6 +887,11 @@ void TacticalBattle::oi_ability_anims(uint64_t gframe) {
             if (anim_->play_default_idle(*gm, p.id, at, &presence)) ++stats_.anim_plays;
             continue;
         }
+        if (p.only_from_idle) {  // r3h t06: Idle_Blockblaster only over an idle-like clip or its own finished one
+            const anim::SlotView cur = w->slot(p.id);
+            const bool own_done = cur.type == p.type && cur.mode == anim::SlotMode::Finished;
+            if (cur.type != anim::kNoAnimType && !anim::is_idle_like(cur.type) && !own_done) continue;
+        }
         anim::PlayRequest r;
         r.type = p.type;
         r.index = p.variant;
@@ -914,6 +919,40 @@ void TacticalBattle::play_battle_clip(objects::ObjectId id, int32_t type, bool l
     if (w->play(id, r, nullptr, oi_global_frame_) == anim::PlayResult::Played) ++stats_.anim_plays;
 #else
     (void)id, (void)type, (void)loop, (void)speed, (void)blend;
+#endif
+}
+
+void TacticalBattle::bt_base_shield_anims(uint64_t gframe, SimRng& rng) {
+    if (!combat_) return;
+#ifdef ALAMO_SIM_HAVE_ANIM
+    anim::AnimWorld* w = anim_world_now();
+    const GameMode* gm = anim_mode_now();
+    if (!anim_ || !w || !gm) return;
+    const objects::ObjectStore& st = gm->primary();
+    const objects::GameObjectTypes& types = catalog_->types();
+    for (const tc::CombatSystem::BaseShieldSetState& e : combat_->base_shield_set_states()) {
+        const objects::ObjectHandle h = st.find(e.id);
+        if (!st.exists(h) || !w->contains(e.id)) continue;
+        const int32_t on_anim = anim::find_anim_type(types.get_string(st.type(h), "Shield_On_Anim"));
+        const int32_t off_anim = anim::find_anim_type(types.get_string(st.type(h), "Shield_Off_Anim"));
+        if (on_anim == anim::kNoAnimType || off_anim == anim::kNoAnimType) continue;
+        anim::PlayRequest r;
+        r.type = e.on ? on_anim : off_anim;
+        r.index = anim::kRandomVariant;
+        r.loop = true;
+        r.blend_seconds = 0.0f;
+        r.speed = 1.0f;
+        const anim::SlotView cur = w->slot(e.id);
+        if (cur.type == (e.on ? off_anim : on_anim) && cur.clip) {
+            const float f = cur.frame;  // the opposite clip's progress, rounded half away from zero (0x22f9c0)
+            r.start_frame = static_cast<float>(static_cast<int32_t>(f + 0.5f));
+        }
+        const anim::AnimModel* m = w->model(e.id);
+        if (m && m->variant_count(r.type) < 2) r.index = 0;  // one variant: no draw (0x1ffb40 returns at once)
+        if (w->play(e.id, r, &rng, gframe) == anim::PlayResult::Played) ++stats_.anim_plays;
+    }
+#else
+    (void)gframe, (void)rng;
 #endif
 }
 

@@ -1483,6 +1483,13 @@ public:
     // while it straddles one, else 1 (A2 "Speed": a plain factor after the SPEED multiplier, not a modifier entry).
     ObjectId base_shield_straddled(ObjectId id) const;
     float base_shield_speed_factor(ObjectId id) const;
+    // r3h t06 (TRU1_A_RE_ANSWERS Set_State 0x56b540 item 6): the generators whose Set_State got past its early outs in the
+    // last tick (unit order), with the new state (on) - the host plays SHIELD_ON / SHIELD_OFF. Presentation input, not saved.
+    struct BaseShieldSetState {
+        ObjectId id = kNoObject;
+        bool on = false;
+    };
+    std::span<const BaseShieldSetState> base_shield_set_states() const { return bshield_sets_; }
     // Hardpoint repair (command 45, RepairHardpointEvent 0x4308b0 -> 0x387d40; TACTICAL_GAPS §1.12): adds `player`
     // to the hardpoint's repairer list (no duplicates, no cancel, no ownership / credit check here). Serviced per
     // frame in the unit's phase-D update before its weapons: each repairer in list order pays Repair_Cost_Per_Frame
@@ -2172,6 +2179,7 @@ private:
     std::vector<std::pair<int32_t, ObjectId>> base_power_;  // (player, source), insertion order
     std::vector<std::pair<int32_t, ObjectId>> shield_upgrade_;  // tru1 t02: (player, source), insertion order
     std::vector<uint32_t> bshields_;  // tru1 t02: the shield list (live, not Always_Off), unit order; rebuilt each tick
+    std::vector<BaseShieldSetState> bshield_sets_;  // r3h t06: this tick's Set_State calls (base_shield_set_states)
     std::vector<Repairer> repairs_;
     ObstacleCellFn obstacle_cell_;                              // OI tactical / S8 t01: LAND_OBSTACLE aim walk
     ShieldSidesFn shield_sides_;                                // s78n t20: line of fire 0x3b5ad0 (not saved: host query)

@@ -182,18 +182,21 @@ const ClipRef* AnimWorld::slot_clip(uint32_t r, Slot s) const {
 
 PlayResult AnimWorld::play_row(uint32_t r, const PlayRequest& req_in, SimRng* rng, uint64_t frame) {
     PlayRequest req = req_in;
-    // Berserker (§A.4 item 1): any request but Attack / Attack Idle / Idle (or a clear) becomes SpinMove, looped,
-    // speed 1; a running spin is left alone until it is within 2 frames of its end ([port] frame + 2 >= count - 1).
-    if (berserk_[r] && req.type != kNoAnimType && req.type != kAnimAttack && req.type != kAnimAttackIdle && req.type != kAnimIdle) {
+    // Berserker (§A.4 item 1, r3h t03 reading of 0x3a92f0): an Idle / Attack / Attack Idle request is ignored while a
+    // SpinMove runs and is not near its end (frame < count - 2 - speed, not finished); otherwise it becomes SpinMove at
+    // speed 1 from frame 1, keeping its index (0xFFFF draws over the SpinMove variants), loop flag and blend. A SpinMove
+    // request plays as asked. Any other request plays as asked too: retail first ends the Berserker ability (its removal,
+    // reason 3), which is the host's job (the battle sees the replaced clip: AbilitySystem::observe_clip).
+    if (berserk_[r] && (req.type == kAnimIdle || req.type == kAnimAttack || req.type == kAnimAttackIdle)) {
         if (type_[kPrimary][r] == kAnimSpinMove) {
             const ClipRef* spin = slot_clip(r, kPrimary);
-            if (spin && frame_[kPrimary][r] + 2.0f < static_cast<float>(spin->clip->frame_count) - 1.0f) return PlayResult::Locked;
+            const bool near_end = !spin || mode_[kPrimary][r] == static_cast<uint8_t>(SlotMode::Finished) ||
+                                  static_cast<float>(spin->clip->frame_count) - 2.0f - speed_[kPrimary][r] <= frame_[kPrimary][r];
+            if (!near_end) return PlayResult::Locked;
         }
         req.type = kAnimSpinMove;
-        req.index = 0;  // [port] variant 0
-        req.loop = true;
         req.speed = 1.0f;
-        req.start_frame = 0.0f;
+        req.start_frame = 1.0f;
     }
     // Lock (object +0x3a0 bit 3): while set, calls without lock are ignored; accepted calls rewrite it.
     if (lock_[r] && !req.lock) return PlayResult::Locked;

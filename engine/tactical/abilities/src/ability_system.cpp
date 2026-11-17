@@ -18,6 +18,7 @@ namespace {
 
 constexpr float kDegToRad = 0.017453292519943295f;
 constexpr int32_t kAnimRevealBegin = 0x69, kAnimRevealLoop = 0x6a, kAnimRevealEnd = 0x6b;  // Force_Sight (§4.14)
+constexpr int32_t kAnimIdleBlockBlaster = 0x1e;  // r3h t06: Redirect_Blaster's block / redirect (0x709c90)
 
 bool forwards_to_special(uint32_t t) {
     // 2.5: re-check the gates, then forward to the special ability named by the record.
@@ -2098,12 +2099,16 @@ bool AbilitySystem::damage_listener(ObjectId victim, ObjectId source, int32_t pr
                     if (cosang < dmath::cos(s.reaction_arc_deg * 0.5f * kDegToRad)) continue;
                 }
             }
+            // r3h t06 (RedirectBlaster vf30 0x709c90): a redirect or block plays Idle_Blockblaster (0x1e), 0xFFFF, one-shot,
+            // blend 0.1, speed 2 when the primary clip is idle-like or a finished Idle_Blockblaster (the host tests that).
             if (rng->range_float(0.0f, 1.0f) < pd.redirect_chance_modifier * s.redirect_chance) {
                 event(AbilityEventKind::Redirected, 0, victim, source, frame);
+                queue_play(victim, kAnimIdleBlockBlaster, kDrawVariant, false, 0.1f, 2.0f, frame, true);
                 return true;
             }
             if (rng->range_float(0.0f, 1.0f) < pd.block_chance_modifier * s.block_chance) {
                 event(AbilityEventKind::Blocked, 0, victim, source, frame);
+                queue_play(victim, kAnimIdleBlockBlaster, kDrawVariant, false, 0.1f, 2.0f, frame, true);
                 return true;
             }
         } else if (rng->range_float(0.0f, 1.0f) < s.absorb_chance) {  // [L] one Absorb_Chance roll

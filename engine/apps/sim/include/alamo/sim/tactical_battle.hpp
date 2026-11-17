@@ -2500,6 +2500,10 @@ private:
     // r3h t01: a clip the battle plays for an ability it runs itself (Saber_Throw's 0x6c / 0x6d / 0x6e): index 0 (Luke's
     // clips have one variant, so 0xFFFF draws nothing), at the current host frame. No animation world: nothing.
     void play_battle_clip(objects::ObjectId id, int32_t type, bool loop, float speed, float blend);
+    // r3h t06 (TRU1_A_RE_ANSWERS Set_State 0x56b540 item 6): after the combat tick, each base-shield Set_State of the tick
+    // plays the type's Shield_On_Anim / Shield_Off_Anim (both must resolve): 0xFFFF on the synced RNG, loop, blend 0,
+    // speed 1, from the opposite clip's frame (rounded) when that one plays.
+    void bt_base_shield_anims(uint64_t global_frame, SimRng& rng);
     std::vector<tactical::abilities::AbilityAnimPlay> oi_anim_plays_;  // scratch (r3h t01)
     struct OiRespawn {
         uint32_t due = 0;

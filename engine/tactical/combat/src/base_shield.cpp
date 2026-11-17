@@ -84,6 +84,7 @@ void CombatSystem::evaluate_base_shield(Unit& s, uint32_t frame) {
         return;
     s.bshield_state = next;
     s.bshield_upgraded = up;
+    bshield_sets_.push_back({s.id, on});  // r3h t06: SHIELD_ON / SHIELD_OFF for the host (item 6)
 }
 
 bool CombatSystem::dome_segment(const Unit& s, Vec3 a, Vec3 b, float& t) const {
@@ -175,6 +176,7 @@ bool CombatSystem::straddles_base_shield(const Unit& u, const Unit& s) const {
 void CombatSystem::service_base_shields(uint32_t frame) {
     // The shield list (0x140a2bdf8): live BASE_SHIELD objects without Always_Off, in registration (unit) order.
     bshields_.clear();
+    bshield_sets_.clear();
     for (uint32_t i = 0; i < units_.size(); ++i) {
         Unit& s = units_[i];
         const UnitDesc& sd = desc_of(s);

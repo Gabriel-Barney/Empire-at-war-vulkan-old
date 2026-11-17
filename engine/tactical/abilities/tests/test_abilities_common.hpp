@@ -687,6 +687,7 @@ inline std::array<int, 2> oi_generic_timing(uint32_t count, float fps, float spe
 int oi_hack_timing(uint32_t count, float fps);
 float oi_berserker_damage(uint32_t count);
 void test_oi_anim_timings();
+void test_r3h_anim_plays();  // r3h (test_r3h.cpp)
 
 // ================================================================================================
 // scripted space battle (golden)

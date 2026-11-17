@@ -450,6 +450,25 @@ void TacticalBattle::drive_animation(objects::ObjectStore& store, SimRng& rng, u
         idle_gate_[i] = static_cast<uint8_t>(moving && !anim_->params_for(store.type(u.h), gm->kind()).allow_idle_when_moving);
     }
     imposing_presence(store, idle_gate_);
+    // r3h t05 (L1_S4 §3.6, UC init 0x5d70f0): an under-construction object plays Build (0x4a), index 0, one-shot, blend 0,
+    // at speed (clip length in seconds) / Tactical_Build_Time_Seconds, from its creation. [port] Its row exists from the
+    // sync after the spawn, so the clip starts one frame late at the position one frame of advance gives.
+    for (const PadState& ps : pads_) {
+        if (ps.uc == objects::kNoObjectId || !w->contains(ps.uc)) continue;
+        const objects::ObjectHandle uh = st.find(ps.uc);
+        if (!st.alive(uh)) continue;
+        const int32_t secs = std::max(0, catalog_->types().get_int(st.type(uh), "Tactical_Build_Time_Seconds"));
+        const uint32_t start = ps.uc_end - static_cast<uint32_t>(secs) * 30u;
+        if (frame_ != start + 1u) continue;
+        const anim::AnimModel* m = w->model(ps.uc);
+        const anim::ClipRef* c = m ? m->clip(74, 0) : nullptr;
+        if (!c || !c->clip || !(c->clip->fps > 0.0f)) continue;
+        anim::PlayRequest r;
+        r.type = 74;  // Build
+        r.speed = secs > 0 ? (static_cast<float>(c->clip->frame_count) / c->clip->fps) / static_cast<float>(secs) : 1.0f;
+        r.start_frame = c->clip->fps / static_cast<float>(anim::kSimTicksPerSecond) * r.speed;
+        if (w->play(ps.uc, r, nullptr, gframe) == anim::PlayResult::Played) ++stats_.anim_plays;
+    }
     // The default idle type's presence step (0x395920 step 2): among the records whose object still exists the largest
     // value wins; on <= an allied record (0x2823e0) replaces a non-allied best (ascending presence id); the idle = the
     // first Presence_Induced_Animations entry of the unit's type listing the winner's type, else none (the plain idle).
@@ -465,8 +484,9 @@ void TacticalBattle::drive_animation(objects::ObjectStore& store, SimRng& rng, u
         // play, a flinch or a refused play replaced the ability's clip: Generic / Arc / Eat abort at their next update).
         abilities_->observe_clip(u.id, w->current_type(u.id), frame_);
         // r3h t03 [port]: while the Berserker runs, its SpinMove (the ability's plays) owns the primary slot: no locomotor
-        // clip and no IDLE service (retail's redirect would end the ability on a locomotor clip, §4.15).
-        if (berserk) continue;
+        // clip and no IDLE service (retail's redirect would end the ability on a locomotor clip, §4.15). r3h t01 (§4.14
+        // "Hold"): the same while an ability clip of the record runs (the hold suspends IDLE and stops the locomotor).
+        if (berserk || abilities_->ability_clip_running(u.id, frame_)) continue;
         // s78k t02 (TACTICAL_COMBAT slot 47 "s78k t02", IdleBehavior 0x62e570) [H]: the IDLE service reads the TARGETING
         // behaviour's target (a land team member: its head's) whether or not it is suspended (Prevent_All_Fire), and
         // draws Get_Int(0, FPS) every service while one is held. current_target keeps the target while suspended.
@@ -481,6 +501,8 @@ void TacticalBattle::drive_animation(objects::ObjectStore& store, SimRng& rng, u
         // r3g t06 (TACTICAL_GAPS §6.2, 0x395920 step 1): SPREAD_OUT on the unit (member flag obj +0x448) makes it crouched:
         // default idle 71 Idle Crouch, CROUCHMOVE / crouch turns; a change of the state forces a new idle (crouch_changed).
         in.crouched = abilities_ && abilities_->spread_out(u.id);
+        // r3h t05 (ANIM_PARTICLES §A.7 move row, object +0x3a1 & 2): a burning unit moves with FIRE_MOVE (61).
+        in.burning = combat_->has_unit(u.id) && combat_->burning(u.id);
         if (u.movable) {
             const mv::UnitView v = movement_->view(u.id);
             // s78n t26.1 review: only 0x19 with the walking-deployed flag leaves the deploy states to the locomotor clips
