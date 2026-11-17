@@ -107,6 +107,33 @@ PresentationEvent& record(Call& c, PresentationOp op, bool with_self = false) {
 
 PresentationState& state(Call& c) { return log_of(c).mutable_state(); }
 
+// ui2 t03 (STORY_PRESENTATION_LUA.md 2.4): the position argument is resolved when the script calls, so the host that draws
+// the camera needs its coordinates: after the call's own arguments the event carries a String "@pos" and the three Number
+// coordinates (an object's position, or the PositionWrapper's). Nothing is appended for a dead object or an AI target.
+void append_position(Call& c, PresentationEvent& e, int i) {
+    const detail::Ud* ud = engine_ud(c, i);
+    if (!ud) return;
+    Vec3 p;
+    if (ud->cls == detail::cls_game_object()) {
+        if (!c.vm->host.store || !detail::object_alive(*c.vm, *ud)) return;
+        p = c.vm->host.store->position(detail::object_handle(*ud));
+    } else if (ud->cls == detail::cls_position()) {
+        p = detail::position_of(*ud);
+    } else {
+        return;
+    }
+    Arg tag;
+    tag.kind = Arg::Kind::String;
+    tag.text = "@pos";
+    e.args.push_back(tag);
+    for (const float v : {p.x, p.y, p.z}) {
+        Arg n;
+        n.kind = Arg::Kind::Number;
+        n.number = static_cast<double>(v);
+        e.args.push_back(n);
+    }
+}
+
 // ---------------------------------------------------------------- block statuses
 //
 // The original returns a BinkMovieBlockStatus / LightningEffectBlockStatus userdata; PGBase's
@@ -243,7 +270,7 @@ int set_key(Call& c, const char* cls, PresentationOp op, bool camera, bool trans
     if (at_least ? c.nargs < expected : c.nargs != expected) return c.script_error_stop("%s -- Expected %d parameters", cls, expected);
     if (!is_position(c, 1)) return c.script_warning("%s -- Invalid parameter 1, expected a position.", cls);
     if (!c.is_number(2)) return c.script_error_stop("%s -- Invalid parameter 2, expected a float", cls);
-    record(c, op);
+    append_position(c, record(c, op), 1);
     PresentationState& s = state(c);
     CameraKey& k = camera ? s.camera_key : s.target_key;
     k.set = true;
@@ -282,7 +309,7 @@ int g_transition_to_tactical(Call& c) {
 
 int focus(Call& c, const char* msg, PresentationOp op) {
     if (!is_position(c, 1)) return c.script_warning("%s", msg);  // q6 t11: a warning (LUA_API.md, the warning list)
-    record(c, op);
+    append_position(c, record(c, op), 1);
     PresentationState& s = state(c);
     s.camera_focus = to_arg(c, 1);
     s.following = false;
