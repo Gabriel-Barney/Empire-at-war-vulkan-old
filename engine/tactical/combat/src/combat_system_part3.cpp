@@ -125,6 +125,15 @@ uint32_t CombatSystem::hardpoint_count(ObjectId id) const {
     return u ? u->hp_count : 0u;
 }
 
+bool CombatSystem::hardpoint_turret_pose(ObjectId id, uint32_t hp, float& pitch, float& yaw) const {
+    const Unit* u = unit(id);
+    if (!u || hp >= u->hp_count) return false;
+    const Hardpoint& h = hps_[u->hp_begin + hp];
+    pitch = h.turret_pitch;
+    yaw = h.turret_yaw;
+    return true;
+}
+
 int32_t CombatSystem::hardpoint_by_name(ObjectId id, std::string_view name) const {
     const Unit* u = unit(id);
     if (!u) return -1;
@@ -1057,6 +1066,10 @@ void CombatSystem::hash_extended(StateHasher& h) const {
             h.i32(hp.opp_target);
             h.i32(hp.opp_hp);
             h.u32(hp.opp_next_scan);
+            if (data_->hardpoints[hp.desc].turret && data_->hardpoints[hp.desc].turret_model) {  // r1b t10
+                h.f32(hp.turret_pitch);
+                h.f32(hp.turret_yaw);
+            }
         }
     }
     h.u32(static_cast<uint32_t>(projectiles_.size()));

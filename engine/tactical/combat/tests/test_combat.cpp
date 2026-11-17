@@ -125,6 +125,7 @@ int main(int argc, char** argv) {
     test_surface_fx_two_instances();
     test_ion_stun_water_kill();  // trn1 t04
     test_burning_speed_factor();  // trn1 t05
+    test_turret_slew();           // r1b t10
     if (bench) bench_modifiers();
     if (g_fail) {
         std::printf("%d check(s) FAILED\n", g_fail);

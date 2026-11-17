@@ -1203,6 +1203,7 @@ void test_surface_fx_converted_and_save();
 void test_surface_fx_two_instances();
 void test_ion_stun_water_kill();  // trn1 t04 (test_combat_tru1.cpp)
 void test_burning_speed_factor();  // trn1 t05
+void test_turret_slew();           // r1b t10
 
 }  // namespace
 using namespace bo3split;
