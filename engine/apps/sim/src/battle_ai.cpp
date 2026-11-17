@@ -800,10 +800,9 @@ bool BattleAi::start(std::vector<std::string>* diag) {
 // created an AI for (TacticalAiWorld::build_time_multiplier); everyone else 1.0.
 void BattleAi::set_build_time_multipliers() {
     const auto& gps = b_->galaxy_->players();
-    b_->ai_build_time_mult_.assign(host_->players(), 1.0f);
-    for (size_t p = 0; p < b_->ai_build_time_mult_.size(); ++p) {
+    for (uint32_t p = 0; p < host_->players(); ++p) {
         const auto pi = static_cast<int32_t>(p);
-        if (p < gps.size() && !gps[p].human && controls(pi)) b_->ai_build_time_mult_[p] = world_->build_time_multiplier(pi);
+        b_->set_ai_build_time_multiplier(pi, p < gps.size() && !gps[p].human && controls(pi) ? world_->build_time_multiplier(pi) : 1.0f);
     }
 }
 

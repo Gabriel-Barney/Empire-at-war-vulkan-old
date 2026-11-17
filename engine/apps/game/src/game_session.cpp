@@ -12,6 +12,7 @@
 #include "alamo/game/story_ui.hpp"
 #include "alamo/galactic/campaign.hpp"
 #include "alamo/galactic/economy.hpp"
+#include "alamo/sim/l1_loaders.hpp"  // skm1 t02: skirmish_option_defaults
 #include "alamo/sim/save_session.hpp"
 #include "alamo/sim/tactical_battle.hpp"
 #include "alamo/terrain/ted.hpp"
@@ -135,6 +136,12 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
                 sk.planet_type = d.rules.types[pt].name;
         sk.no_forces = spec_.attract;  // q6 t02: the demo's forces are cleared below; a mod faction without a fleet must not fail it
         if (!make_skirmish_galaxy(d, sk, setup_, &err)) return fail(err);
+        if (skirmish_map_battle()) {
+            // skm1 t02: the options (unset = the MP_Default_* values); SKIRMISH_SETUP §2 step 3: every player starts with the
+            // option credits (the battle sets them again when it starts, after the scaffold galaxy's first income).
+            if (!spec_.skirmish_options.set) spec_.skirmish_options = sim::skirmish_option_defaults(d.db.constants());
+            for (galactic::PlayerSetup& p : setup_.players) p.credits = static_cast<float>(std::max(0, spec_.skirmish_options.credits));
+        }
         // GALAXY_MAP_PRESENTATION §6: the attract demo is a plain tactical space battle on the map. The map's object owners
         // are player indices in faction order (Factions.xml then Expansion_Factions.xml: Rebel 0, Empire 1, ..., Neutral 3,
         // Underworld 6), so every faction becomes the player of its index; AI on the Rebel and Underworld players (0x22f10's
@@ -230,6 +237,9 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
     bo.battle.end_hold_frames = spec_.battle_end_hold_frames;
     bo.battle.order_interval = spec_.battle_order_interval;
     bo.battle.skirmish = spec_.kind == SessionKind::Skirmish;  // SpecialWeaponsAllowed ANDs the hard-point flag
+    // skm1 t01 / t02: the skirmish map rules and the game options (start_map_battle sets map_battle).
+    bo.battle.skirmish_map = skirmish_map_battle();
+    if (skirmish_map_battle()) bo.battle.skirmish_options = spec_.skirmish_options;
     // ccpgt t02: the Capture Control Points game type (land maps only; SKIRMISH_SETUP §4.2).
     bo.battle.control_point_domination = spec_.kind == SessionKind::Skirmish && spec_.skirmish.land && spec_.skirmish.control_points;
     bo.battle.skip_human_units = true;  // the human's units take orders only from commands (stand-ins skip them)
@@ -398,7 +408,7 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
     replay_ = replay != nullptr;
     // Land skirmish: the human's ground units board its fleet at the start (GalacticSim's direct operation, part of the
     // session setup like the starting forces, so a replay does the same).
-    if (spec_.kind == SessionKind::Skirmish && spec_.skirmish.land) {
+    if (spec_.kind == SessionKind::Skirmish && spec_.skirmish.land && !skirmish_map_battle()) {
         std::vector<objects::ObjectHandle> ground;
         for (const objects::ObjectHandle u : gs->planets()[kSkirmishHumanPlanet].surface)
             if (gs->store().alive(u) && gs->store().owner(u) == local_player_) ground.push_back(u);
@@ -409,6 +419,34 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
     // pre-step, and the human hop gate refuses an unrevealed target - the battle planet is revealed with the setup (as
     // the home planet is), for recorded and replayed sessions alike.
     if (spec_.kind == SessionKind::Skirmish) gs->set_planet_revealed(kSkirmishBattlePlanet, true);
+    // skm1 t01: the skirmish starts on its map (SKIRMISH_SETUP §2): a direct setup operation like the attract demo's (a
+    // replay does the same; a load restores the running battle instead). Slot 0 = the human (player 0, the defender as in
+    // alamo_headless), slot 1 = the AI (player 1). Each slot's starting forces - its planet's surface units (land) or its
+    // fleets (space) - are the battle's start forces when the starting-units option is on, else the slots start empty.
+    if (skirmish_map_battle() && !loading_) {
+        galactic::BattleRequest r;
+        r.info.kind = spec_.skirmish.land ? galactic::ConflictKind::Land : galactic::ConflictKind::Space;
+        r.info.planet = kSkirmishBattlePlanet;
+        r.info.defender = 0;
+        r.info.attacker = 1;
+        r.info.map = r.map = spec_.skirmish_map;
+        for (int32_t p = 0; p < 2; ++p) {
+            galactic::BattleForces f;
+            f.player = p;
+            const PlanetIndex at = p == 0 ? kSkirmishHumanPlanet : kSkirmishBattlePlanet;
+            if (spec_.skirmish_options.starting_units) {
+                if (spec_.skirmish.land) {
+                    for (const objects::ObjectHandle h : gs->planets()[at].surface)
+                        if (gs->store().alive(h) && gs->store().owner(h) == p) f.start.push_back(h);
+                } else {
+                    for (const uint32_t fi : gs->fleets_at(at, p))
+                        for (const objects::ObjectHandle h : gs->fleets()[fi].contents) f.start.push_back(h);
+                }
+            }
+            r.forces.push_back(std::move(f));
+        }
+        if (!battles_->start_map_battle(std::move(r))) return fail("skirmish: map battle on " + spec_.skirmish_map + " refused");
+    }
     // 7. Skirmish opening: the human fleet hops to the AI's planet (an ordinary order in the stream). OI host: the attract
     // demo has no human to issue it - the hop is a direct GalacticSim operation of the setup (a replay does the same).
     if (spec_.kind == SessionKind::Skirmish && spec_.attract) {
@@ -421,7 +459,7 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
         if (r.info.attacker < 0 || r.info.defender < 0 || r.info.attacker == r.info.defender || !battles_ ||
             !battles_->start_map_battle(std::move(r)))
             return fail("attract demo: map battle on " + spec_.skirmish_map + " refused");
-    } else if (spec_.kind == SessionKind::Skirmish && !replay && !loading_) {  // a load: the saved queue holds it
+    } else if (spec_.kind == SessionKind::Skirmish && !skirmish_map_battle() && !replay && !loading_) {  // a load: the saved queue holds it
         const std::vector<uint32_t> fleets = gs->fleets_at(kSkirmishHumanPlanet, local_player_);
         const galactic::PlanetState& target = gs->planets()[kSkirmishBattlePlanet];
         if (fleets.empty() || !gs->store().exists(target.object)) return fail("skirmish: human fleet / battle planet missing");
@@ -468,7 +506,7 @@ bool GameSession::tick() {
 // Land skirmish: once the human fleet stopped at the AI's planet, the Invade order (an ordinary recorded command; a
 // replay carries it in its stream instead).
 void GameSession::land_skirmish_invade() {
-    if (invaded_ || replay_ || spec_.kind != SessionKind::Skirmish || !spec_.skirmish.land) return;
+    if (invaded_ || replay_ || spec_.kind != SessionKind::Skirmish || !spec_.skirmish.land || skirmish_map_battle()) return;
     const galactic::GalacticSim* gs = galaxy();
     if (!gs || host_->modes().top_tactical()) return;
     bool there = false;
@@ -1002,6 +1040,14 @@ void GameSession::describe_session() {
         d.set_option("skirmish.planet_type", s.planet_type);
         d.set_option("skirmish.land", flag(s.land));
         if (s.control_points) d.set_option("skirmish.control_points", "1");  // ccpgt t02 (absent in older saves: off)
+        if (skirmish_map_battle()) {  // skm1 t01 / t02 (absent: an older save, the galactic-hop skirmish)
+            const sim::BattleConfig::SkirmishOptions& o = spec_.skirmish_options;
+            d.set_option("skirmish.map_battle", "1");
+            d.set_option("skirmish.credits", std::to_string(o.credits));
+            d.set_option("skirmish.win_condition", std::to_string(o.win_condition));
+            d.set_option("skirmish.option_flags", std::to_string((o.heroes ? 1 : 0) | (o.starting_units ? 2 : 0) | (o.super_weapons ? 4 : 0) |
+                                                                  (o.prebuilt_base ? 8 : 0)));
+        }
     }
     // What this build attached (a save from a build without the AI / story / animation is not this session).
     d.set_option("run.galactic_ai", flag(galactic_ai_running()));
@@ -1176,6 +1222,18 @@ bool GameSession::spec_from_save(const SaveFile& save, SessionSpec& out, std::st
         s.skirmish.planet_type = std::string(o.text("skirmish.planet_type"));
         s.skirmish.land = o.boolean("skirmish.land");
         s.skirmish.control_points = o.has("skirmish.control_points") && o.boolean("skirmish.control_points");
+        s.skirmish_hop = !o.has("skirmish.map_battle");  // skm1 t01: an older save is the galactic-hop skirmish
+        if (!s.skirmish_hop) {
+            sim::BattleConfig::SkirmishOptions& so = s.skirmish_options;
+            so.set = true;
+            so.credits = static_cast<int32_t>(o.integer("skirmish.credits"));
+            so.win_condition = static_cast<uint8_t>(std::clamp<int64_t>(o.integer("skirmish.win_condition"), 0, 0xff));
+            const int64_t f = o.integer("skirmish.option_flags");
+            so.heroes = (f & 1) != 0;
+            so.starting_units = (f & 2) != 0;
+            so.super_weapons = (f & 4) != 0;
+            so.prebuilt_base = (f & 8) != 0;
+        }
     }
     if (!o.missing.empty()) return fail("save option " + o.missing + " missing");
     out = std::move(s);

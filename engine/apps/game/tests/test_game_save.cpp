@@ -496,6 +496,7 @@ game::SessionSpec skirmish_spec(const std::string& map) {
     s.skirmish.ai_faction = "Empire";
     s.seed = 5;
     s.animation = true;  // as the game runs it
+    s.skirmish_hop = true;  // skm1 t01: the save / load runs answer the galactic battle choice (the conflict scaffold)
     return s;
 }
 

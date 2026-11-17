@@ -834,6 +834,7 @@ void CampaignBattles::push_battle(SimHost& host) {
         scripts->set_player_world(m.primary(), s ? s->player_world() : host.object_script_players());
     }
 #endif
+    if (!rebuilding_) battle_->apply_skirmish_start_credits();  // skm1 t01: SKIRMISH_SETUP §2 step 3 (skirmish map battles)
     battle_->setup(static_cast<TacticalMode&>(m), std::move(pending_map_), host.random().synced(), host.players(),
                    host.parallel_for());
     pending_map_ = terrain::MapData{};

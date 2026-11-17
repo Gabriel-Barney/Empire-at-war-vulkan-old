@@ -16,7 +16,9 @@ namespace {
 constexpr int32_t kRecordCountdown = 210;  // 0xd2: 7 s at 30 frames (§2.5, SKIRMISH_SETUP §2 step 4)
 constexpr int32_t kStoryShortCountdown = 30;  // VICTORY with Reward_Param2 != 0: 1 s
 constexpr int32_t kTswStoryCountdown = 30;    // TSW_PLANET_DESTROY §6 item 5 (b)
+constexpr uint8_t kSkirmishAllUnits = 0x12;   // SKIRMISH_ALL_ENEMY_UNITS_DESTROYED (skm1 t02)
 constexpr uint8_t kSkirmishLandBase = 0x13;   // SKIRMISH_ALL_ENEMY_BASE_COMPONENTS_DESTROYED
+constexpr uint8_t kSkirmishCommandHq = 0x14;  // ENEMY_COMMAND_HQ_DESTROYED (skm1 t02)
 constexpr uint8_t kSkirmishStarbase = 0x16;   // SKIRMISH_SPACE_ENEMY_STARBASE_DESTROYED
 constexpr uint8_t kControlPointDomination = 0x15;  // CONTROL_POINT_DOMINATION (ccpgt t02)
 
@@ -35,10 +37,15 @@ void TacticalBattle::vm_setup(TacticalMode& mode) {
         for (int32_t i = 0; i < 2; ++i)
             if (ids[i] >= 0 && (i == 0 || ids[1] != ids[0])) vm_add_record(kControlPointDomination, ids[i], kRecordCountdown, false);
     } else if (skirmish_map()) {
-        // SKIRMISH_SETUP §2 step 4: one record per player with the option's win condition [port: the defaults, land 0x13 /
-        // space 0x16 (MP_Default_Land / Space_Tactical_Win_Condition); only the two slot players].
+        // SKIRMISH_SETUP §2 step 4: one record per player with the option's win condition (skm1 t02: BattleConfig::skirmish_options;
+        // 0x4ad000's valid sets: land 0x12..0x14, space 0x12 / 0x16; anything else = the kind's MP_Default_Land / Space_Tactical_
+        // Win_Condition, 0x13 / 0x16) [port: only the two slot players].
+        const uint8_t want = cfg_.skirmish_options.set ? cfg_.skirmish_options.win_condition : 0;
+        const bool valid = space_ ? (want == kSkirmishAllUnits || want == kSkirmishStarbase)
+                                  : (want >= kSkirmishAllUnits && want <= kSkirmishCommandHq);
+        const uint8_t type = valid ? want : space_ ? kSkirmishStarbase : kSkirmishLandBase;
         for (int32_t s = 0; s < 2; ++s)
-            if (const int32_t p = skirmish_slot_player(s); p >= 0) vm_add_record(space_ ? kSkirmishStarbase : kSkirmishLandBase, p, kRecordCountdown, false);
+            if (const int32_t p = skirmish_slot_player(s); p >= 0) vm_add_record(type, p, kRecordCountdown, false);
     } else {
         // §2.5 (0x28fda0): 0xb and 0xc for every player that is not Is_Neutral [port: the attacker and the defender, the only
         // players they are ever tested for], then the base / station types for the attacker.
@@ -56,6 +63,12 @@ void TacticalBattle::vm_setup(TacticalMode& mode) {
     }
     vm_scan(mode, vm_tracked_);  // the objects at the start: nothing has left a player yet
     vm_tsw_seen_ = l1_sw_.victory_holds();
+}
+
+uint8_t TacticalBattle::victory_record_type(int32_t player) const {
+    for (const VmRecord& r : vm_records_)
+        if (r.player == player) return r.type;
+    return 0;
 }
 
 bool TacticalBattle::vm_cp_relevant(const objects::ObjectStore& st, objects::ObjectHandle h) const {
@@ -160,7 +173,29 @@ bool TacticalBattle::vm_blocker(int32_t player, bool base_only) {
         if (o < 0 || o == player || !combat_->is_enemy(player, o) || !victory_relevant(static_cast<uint32_t>(st.type(h)))) continue;
         if (const Unit* u = unit_by_id(st.id(h)); u && u->retreated) continue;
         if (base_only && (!vm_base_object(st, h) || (o != slots[0] && o != slots[1]))) continue;
+        // skm1 t02 (§4, 0x12): in a skirmish only objects whose owner is human or has an AI count (Neutral / Hostile never block).
+        if (!base_only && skirmish_map()) {
+            const auto& ps = galaxy_->players();
+            if (static_cast<size_t>(o) >= ps.size() || (!ps[static_cast<size_t>(o)].human && !ps[static_cast<size_t>(o)].ai)) continue;
+        }
         return true;
+    }
+    return false;
+}
+
+bool TacticalBattle::vm_hq_blocker(int32_t player) const {
+    // skm1 t02 (SKIRMISH_SETUP §4, 0x14): a live DUMMY_GROUND_STRUCTURE (0x5F) object enemy to `player` whose type has
+    // HQ_Win_Condition_Relevant; no Victory_Relevant test.
+    static const objects::BehaviorTypeId kGroundStructure = objects::behavior_type_id("DUMMY_GROUND_STRUCTURE");
+    if (!vm_mode_ || !combat_ || kGroundStructure == objects::kNoBehavior) return false;
+    const objects::ObjectStore& st = vm_mode_->primary();
+    const objects::GameObjectTypes& types = catalog_->types();
+    for (const objects::ObjectHandle h : st.all_objects()) {
+        if (!st.active(h) || !st.has_behavior(h, kGroundStructure)) continue;
+        const int32_t o = st.owner(h);
+        if (o < 0 || o == player || !combat_->is_enemy(player, o)) continue;
+        const auto t = static_cast<uint32_t>(st.type(h));
+        if (t < types.size() && types.get_bool(t, "HQ_Win_Condition_Relevant")) return true;
     }
     return false;
 }
@@ -195,9 +230,13 @@ bool TacticalBattle::vm_evaluate(uint8_t type, int32_t player) {
         }
         case galactic::kVictoryStory:
             return true;  // §3.1a item 3: type 0x10 always succeeds when tested
+        case kSkirmishAllUnits:  // skm1 t02
+            return !vm_blocker(player, false);
         case kSkirmishLandBase:
         case kSkirmishStarbase:
             return !vm_blocker(player, true);
+        case kSkirmishCommandHq:  // skm1 t02
+            return !space_ && !vm_hq_blocker(player);
         case kControlPointDomination: {  // §4.2: playable, at least one relevant point, every one allied with E
             bool any = false;
             return vm_player_playable(player) && vm_cp_all_allied(player, objects::kNoObjectId, any) && any;
@@ -235,10 +274,23 @@ void TacticalBattle::vm_object_lost(const VmTracked& t) {
     if (!combat_) return;
     const int32_t p = t.owner;
     if (skirmish_map()) {
-        if (!t.base) return;
-        for (int32_t s = 0; s < 2; ++s)
-            if (const int32_t e = skirmish_slot_player(s); e >= 0 && e != p && combat_->is_enemy(p, e))
-                vm_test(space_ ? kSkirmishStarbase : kSkirmishLandBase, e);
+        // §4 (0x2c0340, no parent mode): for each enemy E of P test 0x12; then a base component: 0x13 and 0x14 (land), a
+        // starbase: 0x16 (space). [port] only the types E has a record of are tested (a test without one answers "no"; the
+        // held queue then keeps only pairs that can win).
+        const auto has = [this](uint8_t type, int32_t e) {
+            return std::any_of(vm_records_.begin(), vm_records_.end(), [&](const VmRecord& r) { return r.type == type && r.player == e; });
+        };
+        for (int32_t s = 0; s < 2; ++s) {
+            const int32_t e = skirmish_slot_player(s);
+            if (e < 0 || e == p || !combat_->is_enemy(p, e)) continue;
+            if (has(kSkirmishAllUnits, e) && vm_test(kSkirmishAllUnits, e)) continue;
+            if (!t.base) continue;
+            if (space_) {
+                if (has(kSkirmishStarbase, e)) vm_test(kSkirmishStarbase, e);
+            } else if (!(has(kSkirmishLandBase, e) && vm_test(kSkirmishLandBase, e)) && has(kSkirmishCommandHq, e)) {
+                vm_test(kSkirmishCommandHq, e);
+            }
+        }
         return;
     }
     int32_t ids[2] = {req_.info.defender, req_.info.attacker};

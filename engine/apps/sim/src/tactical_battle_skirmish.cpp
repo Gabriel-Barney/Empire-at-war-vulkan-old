@@ -11,6 +11,7 @@
 #include "alamo/core/ascii.hpp"
 #include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/game_object_types.hpp"
+#include "alamo/sim/l1_loaders.hpp"
 #include "alamo/sim/tactical_battle.hpp"
 
 namespace alamo::sim {
@@ -22,6 +23,29 @@ constexpr float kFrameSeconds = 1.0f / 30.0f;  // tactical frames are 1/30 s
 float to_f(std::string_view v) { return static_cast<float>(std::atof(std::string(ascii_trim(v)).c_str())); }
 
 }  // namespace
+
+BattleConfig::SkirmishOptions skirmish_option_defaults(const data::GameConstants& gc) {
+    BattleConfig::SkirmishOptions o;
+    o.set = true;
+    o.credits = std::max(0, gc.get_int("MP_Default_Credits", o.credits));
+    o.heroes = gc.get_bool("MP_Default_Allow_Heroes", o.heroes);
+    o.starting_units = gc.get_bool("MP_Default_Free_Starting_Units", o.starting_units);
+    o.super_weapons = gc.get_bool("MP_Default_Allow_SuperWeapons", o.super_weapons);
+    o.prebuilt_base = gc.get_bool("MP_Default_Pre_Built_Base", o.prebuilt_base);
+    return o;
+}
+
+void TacticalBattle::apply_skirmish_start_credits() {
+    // SKIRMISH_SETUP §2 step 3 (0x291d40): EVERY player (Neutral and the other non-playable ones included) gets credits set
+    // to the option credits when the skirmish starts. The port's skirmish galaxy may have paid scaffold income before the
+    // battle was pushed, so the account is set, not added to.
+    if (!skirmish_map() || !cfg_.skirmish_options.set || !credits_add_ || !credits_get_) return;
+    const auto want = static_cast<float>(std::max(0, cfg_.skirmish_options.credits));
+    for (size_t p = 0; p < galaxy_->players().size(); ++p) {
+        const auto pi = static_cast<int32_t>(p);
+        credits_add_(pi, want - credits_get_(pi));
+    }
+}
 
 const TacticalBattle::SkIncome& TacticalBattle::sk_income_of(uint32_t type) {
     if (sk_income_.size() <= type) sk_income_.resize(static_cast<size_t>(type) + 1);

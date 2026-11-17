@@ -1132,6 +1132,8 @@ public:
     const DamageTrackingStore& damage_store() const { return dt_; }
     bool emit_opportunity = false, allow_hijack = false;
     bool ring_test = false;   // refixf t06
+    bool base_alive = true;   // skm1 t03: space_reinforce_base_alive
+    bool space_reinforce_base_alive(int32_t) override { return base_alive; }
     uint32_t drop_tests = 0;
     uint32_t built = 0;
     uint32_t opp_frame = 0;
@@ -1304,6 +1306,7 @@ bool g_hero_frigate = false;  // S7 t26: Syn_Frigate is Is_Named_Hero (test_no_u
 bool g_ai_lane = false;  // sp3: TacticalAiConfig::ai_lane of the SaveSession worlds (test_ai_lane_save)
 bool g_original_timing = false;  // a1k t01: TacticalAiConfig::stagger / pp_streams off (the original's planning timing)
 bool g_plan_retest = false;  // skai t15: TacticalAiConfig::plan_retest (test_plan_retest)
+bool g_no_starbase = false;  // skm1 t03: MockHost::base_alive false (test_space_reinforce_needs_starbase)
 bool syn_object_types(MemoryFiles& tf, objects::ObjectTypeDatabase& raw, objects::GameObjectTypes& types, bool abilities) {
     const char* names[] = {"Syn_Frigate", "Syn_Corvette", "Syn_Station", "Syn_Pad", "UC_Syn_Turret"};
     std::string xml = "<SpaceUnits>";
@@ -1358,6 +1361,7 @@ RunResult run(int32_t frames, int32_t difficulty0, int variant = 0, std::vector<
     MockHost host(store, rng);
     host.emit_opportunity = host.allow_hijack = variant == 1;
     host.ring_test = variant == 4;  // refixf t06
+    host.base_alive = !g_no_starbase;  // skm1 t03
     // Player 0 (Empire) at -x, player 1 (Rebel) at +x; a pad; pools.
     const int32_t station0 = host.spawn(0, tStation, -3500.0f, 0.0f);
     host.spawn(0, tFrigate, -3000.0f, -200.0f);
@@ -2658,6 +2662,38 @@ void test_group_orders() {
     CHECK(shield > 0);
 }
 
+// skm1 t03 (AI_TACTICAL §7.4, 0x6e8620): a space skirmish TF.Reinforce with no live allied DUMMY_STAR_BASE (the host's
+// space_reinforce_base_alive false) returns nil: no SpaceReinforceBlockStatus, so no drop is tested or executed. The same
+// run with the starbase drops (test_group_orders). skm1 t04: the world reports each AI player's build-time multiplier of
+// its difficulty adjustment for the tactical build queue (Easy 1.5 / Normal 1.0 in space here).
+void test_space_reinforce_needs_starbase() {
+    g_no_starbase = true;
+    const RunResult r = run(30 * 120, 1, 4);
+    g_no_starbase = false;
+    size_t drops = 0;
+    for (const std::string& e : r.executed) drops += e.find(" Reinforce key ") != std::string::npos ? 1u : 0u;
+    size_t refused = 0;
+    for (const std::string& d : r.decisions) refused += d.find("Reinforce refused: no allied starbase") != std::string::npos ? 1u : 0u;
+    std::printf("space reinforce without a starbase: %zu refusals, %zu drops, %zu Lua errors\n", refused, drops, r.errors.size());
+    CHECK(refused > 0 && drops == 0);
+    std::vector<TacticalAiDifficulty> diffs(2);
+    diffs[0].name = "Easy_Default";
+    diffs[0].space_build_time = 1.5f;
+    diffs[0].land_build_time = 1.25f;
+    diffs[1].name = "Normal_Default";
+    g_difficulties = &diffs;
+    float easy = -1.0f, normal = -1.0f, none = -1.0f;
+    (void)run(3, 0, 0, nullptr, false, [&](int32_t, MockHost&, TacticalAiWorld& world) {
+        easy = world.build_time_multiplier(0);
+        normal = world.build_time_multiplier(1);
+        none = world.build_time_multiplier(5);
+    });
+    g_difficulties = nullptr;
+    std::printf("tactical build-time multiplier: Easy %.2f, Normal %.2f, no AI %.2f\n", static_cast<double>(easy), static_cast<double>(normal),
+                static_cast<double>(none));
+    CHECK(easy == 1.5f && normal == 1.0f && none == 1.0f);
+}
+
 // The Empire's first Report line of a plan (`tag` player=0 ...), and whether every Lua error is a Report line of that tag
 // (one per plan VM: the goal system runs the plan more than once) with at least one from the Empire.
 std::string report_of(const RunResult& r, const char* tag) {
@@ -3284,6 +3320,7 @@ int main(int argc, char** argv) {
     test_battle_budget();  // q6 (AI_GALACTIC_TOKENS 9.3)
     test_opportunity_and_hijack();
     test_group_orders();
+    test_space_reinforce_needs_starbase();  // skm1 t03 / t04
     test_tactical_production();
     test_reinforce_landing();
     test_script_evaluators();

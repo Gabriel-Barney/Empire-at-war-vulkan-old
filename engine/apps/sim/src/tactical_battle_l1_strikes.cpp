@@ -320,8 +320,8 @@ bool TacticalBattle::bombardment_available(int32_t player) const {
 }
 
 bool TacticalBattle::bombing_run_available(int32_t player) const {
-    // 0x494410: in a skirmish only with the special-weapons option (cu9h t01).
-    if (cfg_.skirmish && !l1_k_.skirmish_superweapons) return false;
+    // 0x494410: in a skirmish only with the special-weapons option (cu9h t01; skm1 t02: the session's option when set).
+    if (cfg_.skirmish && !(cfg_.skirmish_options.set ? cfg_.skirmish_options.super_weapons : l1_k_.skirmish_superweapons)) return false;
     for (const L1BombingRun& r : l1_runs_)
         if (r.player == player)
             return r.enabled && r.available && !r.in_progress && !r.disabled &&

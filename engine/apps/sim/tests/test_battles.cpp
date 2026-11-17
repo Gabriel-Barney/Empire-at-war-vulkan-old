@@ -2388,7 +2388,7 @@ void test_land_upgrade_production_done() {
 // non-builder location too. After the 1 s build the upgrade object sits in the star base's contents, its
 // Skirmish_Automatic Starbase_Upgrade_Ability fires: S10_Star_Base_2 replaces the star base, the contents move with
 // it, the battle tech level rises by one and the upgrade object is removed silently.
-void test_station_production() {
+void test_station_production(float build_mult = 1.0f) {
     auto d = make_data(false, false, false, false, true);
     jobs::JobSystem js(jobs::JobSystemConfig{0});
     SimConfig cfg;
@@ -2433,6 +2433,7 @@ void test_station_production() {
             before = gs->credits(0);
             commands::EventData ev(commands::EventType::Production);
             ev.set("type_index", up).set("location", static_cast<uint32_t>(station));
+            if (build_mult != 1.0f) b->set_ai_build_time_multiplier(0, build_mult);  // skm1 t04: as BattleAi sets it for an AI
             CHECK(host.execute_direct(0, commands::CommandSource::Player, ev) == commands::RejectReason::None);
             after = gs->credits(0);
             CHECK(host.execute_direct(0, commands::CommandSource::Player, ev) == commands::RejectReason::NotAllowed);  // limit 1
@@ -2447,7 +2448,10 @@ void test_station_production() {
             const tactical::combat::ObjectId uo = b->contents()->contents(station).front();
             std::printf("  frame %u: upgrade object %d built in the star base\n", b->frame(), uo);
             CHECK(b->abilities().has_object(uo) && b->contents()->container_of(uo) == station);
-            CHECK(b->frame() >= 2 + 30);  // Tactical_Build_Time_Seconds 1 at 30 FPS
+            // Tactical_Build_Time_Seconds 1 at 30 FPS; skm1 t04 (0x496f00): x the AI difficulty multiplier (Easy 1.5: 45 frames)
+            const auto want = static_cast<uint32_t>(30.0f * build_mult);
+            std::printf("  build time x %.2f: done at frame %u (enqueued at 2, %u frames wanted)\n", static_cast<double>(build_mult), b->frame(), want);
+            CHECK(b->frame() >= 2 + want && b->frame() <= 2 + want + 3);
         }
         if (bought && !b->station_upgrades().empty()) {
             const TacticalBattle::StationUpgrade& u = b->station_upgrades().front();
@@ -3174,6 +3178,7 @@ int main(int argc, char** argv) {
     }
     std::printf("skirmish station production: Production at the star base, upgrade object, station upgrade\n");
     test_station_production();
+    test_station_production(1.5f);  // skm1 t04: Easy AI build time
     test_land_upgrade_production_done();  // s78n t20 step 5
     std::printf("cu8g t05: Battlefield_Modifier gates at the battle (skirmish vs campaign, empty list, apply / remove / reverse)\n");
     test_battlefield_modifier_gates();

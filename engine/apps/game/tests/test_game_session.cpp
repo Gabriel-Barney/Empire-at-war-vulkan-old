@@ -42,6 +42,7 @@
 #include "alamo/game/story_script.hpp"
 #include "alamo/game/story_ui.hpp"
 #include "alamo/jobs/crc_recorder.hpp"
+#include "alamo/sim/l1_loaders.hpp"  // skm1: skirmish_option_defaults
 #include "alamo/sim/save_session.hpp"
 #include "alamo/sim/tactical_battle.hpp"
 #include "alamo/vfs/vfs.hpp"
@@ -210,6 +211,7 @@ game::SessionSpec spec_for(const std::shared_ptr<terrain::MapData>& map) {
     s.seed = 7;
     s.battle_max_frames = 900;
     s.ask_battle_choice = true;
+    s.skirmish_hop = true;  // skm1 t01: these runs test the galactic conflict flows (battle choice, auto-resolve, retreat)
     return s;
 }
 
@@ -1548,6 +1550,76 @@ void controls_test() {
 #ifdef ALAMO_GAME_HAVE_CONTROLS
 // Playtest 2: the Empire Heart of the Maw galaxy starts with Piett, Tarkin, Veers, Boba Fett and the Emperor in the hero
 // roster (base screenshots). Real data (ALAMO_FOC_DATA); skipped when unset.
+void hero_roster_real_test();
+
+// skm1 t01 / t02 (the group's exit test, alamo_game side): a space and a land skirmish as the front end starts them
+// (StartSkirmish -> buy units -> GameSession: no skirmish_hop) start straight on their map with BattleConfig::skirmish_map
+// and the staging dialog's options: every player at the option credits when the battle starts (SKIRMISH_SETUP §2 step 3),
+// Income_Stream pays the slots (§5), each slot's victory record is the option's win condition (§2 step 4; 0x12 / 0x14 here,
+// not the 0x16 / 0x13 defaults), the space team markers become each slot's star base (§2.2), and a land map pre-builds no
+// pad with the pre-built-base option off (§2.6). Real data (ALAMO_FOC_DATA); skipped when unset.
+void skirmish_map_real_test() {
+    const char* foc = std::getenv("ALAMO_FOC_DATA");
+    if (!foc || !*foc) {
+        std::printf("skirmish map battle (real data): ALAMO_FOC_DATA not set: skipped\n");
+        return;
+    }
+    game::GameData data;
+    std::string err;
+    if (!game::load_game_data(foc, {}, data, &err)) {
+        std::printf("skirmish map battle (real data): load failed: %s\n", err.c_str());
+        CHECK(false);
+        return;
+    }
+    static const objects::BehaviorTypeId kStarBase = objects::behavior_type_id("DUMMY_STAR_BASE");
+    for (const bool land : {false, true}) {
+        game::SessionSpec spec;
+        spec.kind = game::SessionKind::Skirmish;
+        spec.skirmish_map = land ? "_MP_LAND_UTAPAU" : "_MP_SPACE_GEONOSIS";
+        spec.skirmish.human_faction = "Empire";
+        spec.skirmish.ai_faction = "Rebel";
+        spec.seed = 3;
+        spec.skirmish_options = sim::skirmish_option_defaults(data.db.constants());
+        spec.skirmish_options.credits = 4000;
+        spec.skirmish_options.win_condition = land ? 0x14 : 0x12;
+        if (land) spec.skirmish_options.prebuilt_base = false;
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        game::GameSession s(data, js, spec);
+        std::vector<std::string> diag;
+        CHECK(s.start(&diag, nullptr, nullptr));
+        for (const std::string& d : diag) std::printf("  diag: %s\n", d.c_str());
+        if (!s.started()) continue;
+        uint64_t t = 0;
+        while (t < 300 && !(s.in_battle() && s.battle() && s.battle()->frame() >= 2)) {
+            s.tick();
+            ++t;
+        }
+        const sim::TacticalBattle* b = s.battle();
+        const galactic::GalacticSim* g = s.galaxy();
+        CHECK(b != nullptr && g != nullptr);
+        if (!b || !g) continue;
+        const float c0 = g->credits(0), c1 = g->credits(1);
+        int32_t bases[2] = {0, 0};
+        const objects::ObjectStore& st = s.host().modes().top_tactical()->primary();
+        for (const objects::ObjectHandle h : st.all_objects())
+            if (st.active(h) && kStarBase != objects::kNoBehavior && st.has_behavior(h, kStarBase) && st.owner(h) >= 0 && st.owner(h) < 2)
+                ++bases[st.owner(h)];
+        std::printf("skirmish map battle %s: started at tick %" PRIu64 ", skirmish_map %d, credits %.1f / %.1f, win records 0x%x / 0x%x, "
+                    "star bases %d / %d, pre-built pads %u of %u\n",
+                    spec.skirmish_map.c_str(), t, b->skirmish_map() ? 1 : 0, static_cast<double>(c0), static_cast<double>(c1),
+                    b->victory_record_type(0), b->victory_record_type(1), bases[0], bases[1], b->stats().skirmish_prebuilt, b->stats().skirmish_pads);
+        CHECK(b->skirmish_map());
+        CHECK(c0 >= 4000.0f && c0 < 4050.0f && c1 >= 4000.0f && c1 < 4050.0f);  // the option credits (plus a frame or two of income)
+        CHECK(b->victory_record_type(0) == spec.skirmish_options.win_condition && b->victory_record_type(1) == spec.skirmish_options.win_condition);
+        if (!land) CHECK(bases[0] == 1 && bases[1] == 1);  // the Team_00 / Team_01 markers became the slots' star bases
+        if (land) CHECK(b->stats().skirmish_pads > 0 && b->stats().skirmish_prebuilt == 0);
+        // Income_Stream: the human (idle, spends nothing) earns over 10 s.
+        for (int i = 0; i < 300 && s.in_battle(); ++i) s.tick();
+        std::printf("  after 300 ticks: credits %.1f / %.1f\n", static_cast<double>(g->credits(0)), static_cast<double>(g->credits(1)));
+        if (!land) CHECK(g->credits(0) > c0);  // the land slot's income structures are not pre-built here
+    }
+}
+
 void hero_roster_real_test() {
     const char* foc = std::getenv("ALAMO_FOC_DATA");
     if (!foc || !*foc) {
@@ -2372,6 +2444,7 @@ int main() {
         controls_test();
         hud_feeds_test(data, spec);
         hero_roster_real_test();
+        skirmish_map_real_test();  // skm1 t01 / t02
 #endif
     }
     std::error_code ec;

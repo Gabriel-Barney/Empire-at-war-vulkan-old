@@ -583,6 +583,12 @@ uint8_t TacticalBattle::hg_build_check(const objects::ObjectStore& st, int32_t p
     if (!production_enabled() || player < 0 || static_cast<size_t>(player) >= galaxy_->players().size()) return 1;
     if (type == objects::kNone || type >= types.size()) return 1;
     if (std::find(types_used_.begin(), types_used_.end(), static_cast<uint32_t>(type)) == types_used_.end()) return 1;
+    // skm1 t02 (0x288b80): named heroes (+0x13 Is_Named_Hero) only with the heroes option bit 0x1, skirmish super weapons
+    // (+0x1c Is_Skirmish_Tactical_Super_Weapon) only with bit 0x4 (BattleConfig::skirmish_options, skirmish battles).
+    if (cfg_.skirmish && cfg_.skirmish_options.set) {
+        if (!cfg_.skirmish_options.heroes && types.get_bool(type, "Is_Named_Hero")) return 1;
+        if (!cfg_.skirmish_options.super_weapons && types.get_bool(type, "Is_Skirmish_Tactical_Super_Weapon")) return 1;
+    }
     const objects::ObjectHandle bh = st.find(builder);
     if (!st.alive(bh) || st.owner(bh) != player) return 1;
     bool unit = false;
