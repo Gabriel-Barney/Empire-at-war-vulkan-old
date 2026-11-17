@@ -20,6 +20,8 @@
 // The run ends with the usual presentation-on/off check of the last loaded session (its save + the stream recorded after
 // the load replayed) and 0 validation messages.
 #include <filesystem>
+#include <memory>
+#include <optional>
 
 #include "app_script.hpp"
 
@@ -216,6 +218,32 @@ void open_save_dialog(std::vector<ScriptStep>& s) {
 // open / close on a click, so the first-row click and Down of step_select_row would close the save's group) and checks
 // the selection.
 void select_save(std::vector<ScriptStep>& s, const char* dialog, const char* name) {
+    // tst1 t01: the tree opens only the newest save's groups when it fills. In a saves folder kept from an earlier run that
+    // can be another save (an older Auto Save), leaving `name` inside a closed group: open closed group rows ("[+] ...",
+    // one click each, then a frame for the list to refill) until it is listed.
+    auto click = std::make_shared<std::optional<ScriptStep>>();
+    auto opened = std::make_shared<int>(0);
+    s.push_back({std::string("open groups to ") + name, [dialog, name, click, opened](App& a, ui::InputFrame& f) {
+                     if (click->has_value()) {
+                         if (!(**click).run(a, f)) return false;
+                         click->reset();
+                         return false;  // let the list refill before looking again
+                     }
+                     if (list_row(a, dialog, name) >= 0) return true;
+                     const ui::GuiControl* c = control(a, dialog, kList);
+                     if (!c || *opened >= 16) return true;  // "list shows" below reports it
+                     for (size_t i = 0; i < c->items.size(); ++i) {
+                         const std::u32string& l = c->items[i];
+                         const size_t at = l.find_first_not_of(U' ');
+                         if (at == std::u32string::npos || l.compare(at, 4, U"[+] ") != 0) continue;
+                         const int32_t row = static_cast<int32_t>(i);
+                         ++*opened;
+                         *click = step_click_row(dialog, kList, [row](App&) { return row; });
+                         return false;
+                     }
+                     return true;  // no closed group left
+                 },
+                 600});
     s.push_back(step_wait(std::string("list shows ") + name, [dialog, name](App& a) {
         if (list_row(a, dialog, name) >= 0) return true;
         return stop(a, dialog, std::string(name) + " not listed: " + list_text(a, dialog));
@@ -360,10 +388,11 @@ ScriptStep step_begin_battle() {
 void add_saveload_steps(std::vector<ScriptStep>& s) {
     auto run = std::make_shared<Run>();
     const std::string png = "game_smoke_saveload_";
-    // Setup: this run's save names are not in the folder (a re-run).
+    // Setup: this run's save names are not in the folder (a re-run). tst1 t01: nor the Auto Save an earlier run left in
+    // this smoke's own folder (the overwrite step counts the folder's saves).
     s.push_back(step_wait("saves folder ready", [](App& a) {
         if (a.saves_dir_.empty()) return stop(a, "setup", "no saves folder");
-        for (const char* n : {kMainSave, kExtraSave, kBattleSave}) {
+        for (const char* n : {kMainSave, kExtraSave, kBattleSave, kAutoSaveName}) {
             std::string err;
             if (save_exists(a.saves_dir_, n) && !delete_save(a.saves_dir_, n, &err)) return stop(a, "setup", "cannot remove the old " + std::string(n) + ": " + err);
         }
