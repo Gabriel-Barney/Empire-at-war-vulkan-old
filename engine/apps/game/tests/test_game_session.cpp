@@ -1828,9 +1828,10 @@ void skirmish_four_slot_real_test() {
         if (!err.empty()) std::printf("  load: %s\n", err.c_str());
         CHECK(b.loaded() && b.host().frame() == save_tick);
         for (int i = 0; i < 90; ++i) b.tick();
-        const CrcDivergence dl = first_divergence(records_from(live.crc, save_tick), b.host().crc_log());
+        const CrcLog want = records_from(live.crc, save_tick);
+        const CrcDivergence dl = first_divergence(want, b.host().crc_log());
         std::printf("  four-slot battle save at %" PRIu64 ", +90 ticks: loaded live vs original: %s\n", save_tick, dl.message.c_str());
-        CHECK(!dl.diverged && b.host().crc_log().records.size() == 90);
+        CHECK(!dl.diverged && b.host().crc_log().records.size() == want.records.size() && !want.records.empty());
         if (b.galaxy())
             for (int32_t k = 1; k < 4; ++k) CHECK(b.galaxy()->players()[static_cast<size_t>(k)].difficulty == data.rules.find_difficulty("Hard_Default"));
     }
