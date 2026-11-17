@@ -469,15 +469,6 @@ void TacticalMode::after_store_update(const ModeTickContext&) {
         else it->second.in_range = s.in_range;
     }
     steps_.clear();
-    unlink_dying();
-}
-
-void TacticalMode::flush_deaths() {
-    primary_.flush();
-    unlink_dying();
-}
-
-void TacticalMode::unlink_dying() {
     // Objects unlinked by the flush leave the trees.
     for (ObjectId id : dying_) {
         if (primary_.exists(primary_.find(id))) continue;
@@ -487,6 +478,11 @@ void TacticalMode::unlink_dying() {
     dying_.erase(std::remove_if(dying_.begin(), dying_.end(),
                                 [this](ObjectId id) { return !primary_.exists(primary_.find(id)); }),
                  dying_.end());
+}
+
+void TacticalMode::mark_step_deaths() {
+    for (const ObjectHandle h : primary_.all_objects())
+        if (primary_.exists(h) && !primary_.alive(h)) primary_.set_flag(h, objects::kFlagUnlinkedInRetail);
 }
 
 void TacticalMode::hash(StateHasher& h) const {

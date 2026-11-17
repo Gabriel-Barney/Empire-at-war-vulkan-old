@@ -54,10 +54,9 @@ void App::story_present_lua(const lua::PresentationEvent& e) {
         story_present_.game_message(e.args.front().text);
     } else if (e.op == Op::RemoveAllText) {
         story_present_.remove_all_text();
-    } else if ((e.op == Op::ObjectHighlight || e.op == Op::ObjectHighlightSmall) && e.args.size() >= 3) {
-        story_present_.lua_highlight(static_cast<int32_t>(e.args[0].id), e.args[1].b, e.op == Op::ObjectHighlightSmall,
-                                     static_cast<float>(e.args[2].number));
     }
+    // storyb t17: Lua Highlight / Highlight_Small make a real Object_Highlight[_Small] object (STORYB_T17_SPAWNS_AND_DEATH.md
+    // §1), which the scene draws; the 2D bracket stand-in is kept for the HIGHLIGHT_OBJECT reward only.
 }
 
 // 6.4 / 6.5: the local player's periodic hint text (Galactic / Space / Land_Advisor_Hints of the faction), the first one 90
