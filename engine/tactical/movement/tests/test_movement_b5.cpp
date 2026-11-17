@@ -940,6 +940,36 @@ void test_scene_guard_formation() {
                 static_cast<double>(a.goal.y - kO.y), static_cast<double>(b.goal.x - kO.x), static_cast<double>(b.goal.y - kO.y));
 }
 
+// cmb1 t05 (BKR1 Q7 (a) [H], 0x410e90): the guard trim's start value. The scene_guard order (path length L = 400 to C) with
+// a fire hook that refuses the line of fire everywhere, so the trim fails at s = L and returns its start value g:
+//   - a guarded object without LAND_OBSTACLE: g = L (no cut: the goal is C's own point, (400, 0)) - retail starts every
+//     non-obstacle block, guard or not, at L;
+//   - a LAND_OBSTACLE guarded object of radius 10: range = Land_Guard_Range 150 + 10 = 160, g = max(0, L - 160) = 240 (the
+//     goal (240, 0)); before cmb1 every guard started at max(0, L - 150) = 250.
+void test_scene_guard_trim_start() {
+    ::alamo::test::section("scene_guard_trim_start");
+    for (const bool obstacle : {false, true}) {
+        MovementSystem sys{MovementConfig{}};
+        scene_system(sys);
+        CHECK(sys.add_unit(attacker(10, kO)));
+        CHECK(sys.add_unit(attacker(900, kO + V2{400.0f, 0.0f}, 5.0f)));
+        sys.set_fire_test([](ObjectId, V2, ObjectId, bool, V2, float) { return false; });
+        MoveOrder o = attack_order({10}, 900, kO + V2{400.0f, 0.0f}, 5.0f, 150.0f);
+        o.flags = kMoveFlagGuardMove;
+        o.attack.guard = true;
+        o.attack.guard_obstacle = obstacle;
+        o.attack.t_radius = 10.0f;
+        o.attack.units[0].range = 250.0f;
+        SimRng rng(7);
+        sys.move(o, rng, 1);
+        const UnitView v = sys.view(10);
+        const float want = obstacle ? 240.0f : 400.0f;
+        std::printf("guard trim start, %s: goal (%.4f, %.4f), want x %.0f\n", obstacle ? "LAND_OBSTACLE object" : "unit",
+                    static_cast<double>(v.goal.x - kO.x), static_cast<double>(v.goal.y - kO.y), static_cast<double>(want));
+        CHECK(v.has_goal && close2(v.goal, kO + V2{want, 0.0f}, 0.01f));
+    }
+}
+
 void test_scene_workers() {
     ::alamo::test::section("scene_workers");
     const std::vector<uint64_t> s = run_approach(serial_for);
@@ -972,6 +1002,7 @@ int main() {
     test_scene_guard();  // s78n t25.4
     test_scene_short_range();      // s78n t25 review fixes
     test_scene_guard_formation();
+    test_scene_guard_trim_start();  // cmb1 t05
     test_scene_workers();
     test_scene_unseen();  // s78n t26 review round 3
     test_scene_repath_keep();

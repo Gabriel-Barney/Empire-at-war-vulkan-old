@@ -110,6 +110,10 @@ arrives at once [M overall: the chain is [H] per step]. Probe to settle it: unit
 (lock), move X out of A's range (Teleport), then `A.Attack_Move(Y)` with Y in A's range from where A stands; retail
 holds iff A neither fires at Y nor turns to X within 60 frames.
 
+> **Ported (cmb1 t01 / t02, 2026-11-17):** land `Auto_Engage` is `TacticalBattle::land_engage_service` on the land formation
+> records (`LandFormationRecord`, `tactical_battle_land_engage.cpp`); land `Order_Attack(ordered 1)` (human Attack, Lua
+> `Attack_Target`) on a non-TEAM-container target takes `CombatSystem::order_attack_issue` plus the attack goal (path B).
+
 **Port consequence.** Two differences that change sim results (tier 1). (1) The port keeps an **unlocked "ordered
 target"** that suppresses path B and the scan while it lives (`CombatSystem::gather` combat_system.cpp 1341-1345,
 `decide_target` 1477-1488; written by `CombatSystem::order_attack` 332 from Lua `Attack_Target` battle_ai.cpp 1070 and
@@ -344,6 +348,9 @@ G + ρ·rot(−v, θ), the formation's class +0x1c4, &q); there is **no q > 0 te
    zero-length last segment's effect on the end shift of §4.3.3 was not traced]. With G re-validated as reachable
    (§4.3.1 item 7 (b)) this needs a G on a cell the class may reach but not enter (rare).
 
+> **Ported (cmb1 t05, 2026-11-17):** (a) is `MovementSystem::attack_plan`'s guard range (`LandAttack::guard_obstacle` /
+> `t_radius` from the host); the two `[port]` tags are `[H]` now. (c) is cmb2 t01.
+
 **Port consequence.** Staging and the guard L rule: none (port retail; retag the `[port]` 2-D distance in
 attack_approach.cpp 401-403 and tactical_battle.cpp 2023 as [H]). Two differences (tier 1). Backlog text (tier 1, S2):
 *"Guard fire trim (attack_approach.cpp fire_trim 190-194, attack_plan ~622-627): retail 0x410e90 starts g at L for every
@@ -386,6 +393,11 @@ A turret unit gets R in every "0" row. Candidates beyond R are accepted, both in
 branch, the 0x5672b0 "attackable from the point Rr toward c" test apply). FoC land data: `Idle_Chase_Range` mostly
 50-500 (100 / 200 common), `Attack_Move_Response_Range` 150-500 (300 / 150 common), `Guard_Chase_Range` 200 common
 (up to 1000). So TACTICAL_COMBAT §2.8's "[M for land]" becomes [H], with the additions above.
+
+> **Ported (cmb1 t03, 2026-11-17):** the land scan-range query is `TacticalBattle::land_scan_range` (0x4160a0 on the mover's
+> land formation record, `land_chase`); `CombatSystem::gather` applies step 4 (TURRET ? R : 0, a cube of 0 scans nothing
+> and keeps a valid current target). [port] F's current path point of the attack-move branch is the formation's own position
+> (the unit answers 2 while its attack-move is under way), and "arrived" is the mover's own order done.
 
 **Port consequence.** Differs (tier 1): `CombatSystem::gather` (combat_system.cpp 1360-1366, stale comment: land
 formations exist now) scans R on land and `responds()` (1305-1311) never fires there, since the scan-range query is set

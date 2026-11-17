@@ -215,6 +215,11 @@ struct BattleStats {
     uint32_t attack_reissues = 0, attack_land_stops = 0, attack_reissue_skips = 0;
     // s78n t26 review round 3 (FIGHTER_FLYING §4.11 C 3): blocks dropped after arrival on a hidden / stealthed target
     uint32_t attack_unseen_drops = 0;
+    // cmb1 t01 (land Auto_Engage, LandFormationRecord; not saved): auto attack blocks pushed and popped (the order resumed)
+    uint32_t land_auto_pushes = 0, land_auto_pops = 0;
+    // cmb1 t04 (land guard follow; not saved): re-plans while moving (D > R), arrived re-checks that re-planned (0x410a60),
+    // re-plans toward the last-observed point and position guards made (C 3)
+    uint32_t guard_repaths = 0, guard_rechecks = 0, guard_unseen_plans = 0, guard_unseen_drops = 0;
 };
 
 // map1 (REMAINING_GAPS §3.1 - §3.2, Q6_T30): what the battle's map load did with the .ted placements, for the every-map
@@ -399,6 +404,29 @@ struct FighterOrderView {
     uint8_t flags = 0;
     Vec3 goal;
     objects::ObjectId goal_object = kNoObjectId;
+};
+
+// cmb1 t01 / t03 (BKR1_RE_ANSWERS Q2 / Q8 [H], FIGHTER_FLYING §4.10 A / §4.11 B): a land mover's formation as the host keeps
+// it (pack +0x1f0) [port: the retail coordinator / formation objects are not modelled on land]. One record per mover (a
+// steering squad's container, else the unit), written by every land move / attack / guard order (the host's fighter_order
+// call sites, TacticalBattle::land_order), replaced by the next order, removed by Stop and when the mover is gone. A
+// mover that never had an order has none: it scans with R and never chases (Get_Scan_Range step 2, 0x42d0f0's F test).
+// Like the fighter record it survives the end of the move, so an arrived formation answers Idle_Chase_Range around its
+// slot goal. The order's block is blocks[0]; `pushed` is the auto attack block LocomotorCommon 0x42d0f0 pushed on top
+// (0x41cf70 -> Push 0x41fd30: {kind 3, t, flags 0, +0x5d = 1}), at most one ([port] the pre-pop replaces an earlier auto
+// block of the same class, a guard is never popped by it). Saved (battle state 18), hashed while any exists.
+struct LandFormationRecord {
+    objects::ObjectId mover = kNoObjectId;        // ascending
+    uint8_t flags = 0;                            // blocks[0]'s flags: 0x01 attack-move, 0x02 guard
+    Vec3 goal;                                    // the order's goal point (an object block: the object's position then)
+    objects::ObjectId goal_object = kNoObjectId;  // the order's object block (Attack, Attack_Move / Guard of an object)
+    objects::ObjectId pushed = kNoObjectId;       // the auto attack block on top, none
+    uint32_t next = 0;                            // the auto block's 30-frame check (F +0x1d8: 0x4192b0 / 0x410a60)
+    // cmb1 t04 / t06 (BKR2 Q6 [H], 0x584750): blocks[0]'s last-observed point when it names an object (the guarded object
+    // of a land guard): rewritten every formation step (land_engage_service) - seen: the object's position; hidden for the
+    // lead's owner: frozen; stealthed against the lead's type: the lead's position
+    Vec3 seen;
+    bool locked = false;  // derived each tick by land_engage_service (0x39ad40 / 0x41fd30: a member order-locked)
 };
 
 class TacticalBattle {
@@ -1295,6 +1323,8 @@ public:
     size_t arrivals_pending() const { return arrivals_.size(); }
     // s78n t20 stage A: the land attack blocks alive (AttackBlock records, one per mover).
     size_t attack_blocks() const { return attack_blocks_.size(); }
+    // cmb1 t01 / t03: the land formation records (LandFormationRecord, ascending mover; tests and diagnostics)
+    std::span<const LandFormationRecord> land_formations() const { return lformations_; }
     // HARDPOINT_DISABLED.md §9.1 (presentation): units whose engines came back online this tick (EnginesOnline: an ENGINE
     // hardpoint repaired to max) - the host restarts their SFXEvent_Engine_Idle_Loop. Not hashed.
     const std::vector<objects::ObjectId>& engines_restarted() const { return engines_restarted_; }
@@ -1870,6 +1900,30 @@ private:
     void fighter_enter_idle();
     void fighter_formation_hooks();  // s78f t02: MovementSystem::set_fighter_formation_hooks (space setup)
     std::vector<FighterFormationRecord> fformations_;
+    // ---- cmb1 t01 / t03: land formation records (LandFormationRecord; tactical_battle_land_engage.cpp) ----
+    // land_order: a land order of `ids` (members map to their mover) replaces their record; land_order_clear: Stop.
+    void land_order(std::span<const objects::ObjectId> ids, uint8_t flags, Vec3 goal, objects::ObjectId goal_object = kNoObjectId);
+    void land_order_clear(std::span<const objects::ObjectId> ids);
+    const LandFormationRecord* land_formation(objects::ObjectId mover) const;
+    // 0x4160a0(F, u, c, &Rr) on land (BKR1 Q8 [H]; FIGHTER_FLYING §4.10 A without the Space_Layer gate) for mover record `r`
+    // and its TARGETING unit `unit`; c = kNoObjectId: the scan cube test. Read-only (combat's parallel gather calls it).
+    uint8_t land_chase(const objects::ObjectStore& store, const LandFormationRecord& r, objects::ObjectId unit, objects::ObjectId cand,
+                       float range, float& rr) const;
+    // combat's scan-range query on land (Get_Scan_Range 0x566f50 steps 3 / 4, candidate acceptance): `unit`'s mover record
+    uint8_t land_scan_range(const objects::ObjectStore& store, objects::ObjectId unit, objects::ObjectId cand, float range, float& rr) const;
+    // Service_Land 0x634810's Auto_Engage (LocomotorCommon 0x42d0f0) per record, the auto block's checks (0x4192b0 step 4 /
+    // 0x410a60 with n = 2) and pops, and the land kUnitScanQuery flags. Serial, ascending mover, before the attack blocks.
+    void land_engage_service(TacticalMode& mode, SimRng& rng);
+    bool land_auto_pushed(objects::ObjectId unit) const;  // the unit's mover record holds an auto block
+    std::vector<objects::ObjectId> land_mover_units(objects::ObjectId mover) const;  // a squad's members, else the mover
+    objects::ObjectId land_mover_target_unit(objects::ObjectId mover);  // its TARGETING unit (the container, else the lead)
+    void land_pop(TacticalMode& mode, LandFormationRecord& r, SimRng& rng);  // 0x4105a0 of the auto block: the order resumes
+    uint32_t land_type_of(objects::ObjectId mover) const;
+    // cmb1 review: a block's object as a live unit - the unit, or for a land TEAM container its first live member ([port],
+    // as attack_lead); nullptr when gone. goal_member: `id` is the object or one of its container's members.
+    const Unit* land_goal_unit(const objects::ObjectStore& st, objects::ObjectId id) const;
+    bool land_goal_member(objects::ObjectId goal, objects::ObjectId id) const;  // the chase ranges' type: the unit's, a squad container's company
+    std::vector<LandFormationRecord> lformations_;
     std::vector<std::array<float, 4>> fchase_cache_;  // per type: Guard / Idle_Chase_Range, Attack_Move_Response_Range,
                                                       // Autonomous_Move_Extension_Vs_Attacker (derived)
     std::vector<uint8_t> fchase_have_;
@@ -1979,9 +2033,10 @@ private:
     //   - moving and (stopping and not c, or D > R) -> plan again.
     // s78n t26 review round 3 (FIGHTER_FLYING §4.11 C / E [H]): c is false when the target is hidden for the lead's owner
     // or stealthed without Target_Stealth_Units; a hidden target is never re-pathed to while moving (0x4165f0 false);
-    // after arrival an unseen target gives P (hidden: its position; stealthed: the lead's own) and d = |centroid - P|:
-    // d >= 40 plans again toward P, d < 40 drops the block (a position block at the centroid, every unit's attack order
-    // and attack goal cleared).
+    // after arrival (cmb1 t06: on every formation step) an unseen target gives P = the block's last-observed point (ox..oz:
+    // hidden: frozen; stealthed: the lead's own position) and d = |centroid - P|: d >= 40 plans again toward P (untrimmed),
+    // d < 40 drops the block (a position block at the centroid with the plan to it, every unit's attack order and attack
+    // goal cleared). Plans and re-paths read the last-observed point.
     // A plan (land_attack_order, replan) is the movement's attack block (MOVEMENT §4.3.2 items 6 - 8): no path when
     // every member can fire, else the path to the staged target point, cut back to where every member can fire.
     // s78n t25.3: the re-plan takes every block on the same target whose mover is in the same attack formation
@@ -1993,6 +2048,10 @@ private:
         uint8_t flags = 0;                                // block flags: mv::kMoveFlagAttackMove for an Attack_Move
         uint32_t next = 0;                                // next check frame (order frame + 30, then every 30)
         float gx = 0.0f, gy = 0.0f;                       // recorded goal: the target's position at the last plan
+        // cmb1 t06 (BKR2 Q6 [H], 0x584750): the block's last-observed target point (+0x18), rewritten at every formation
+        // step from 0x583150(block, lead): the target's position while seen, frozen while hidden for the lead's owner, the
+        // lead's position while stealthed against its type. Every plan, re-path and C 3 test reads it. Saved (state 18).
+        float ox = 0.0f, oy = 0.0f, oz = 0.0f;
     };
     std::vector<AttackBlock> attack_blocks_;
     std::array<uint8_t, 8> fleet_cohesion_{};  // [port] fleet cohesion per player (1 = tight; state version 13)

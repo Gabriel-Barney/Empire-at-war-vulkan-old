@@ -74,6 +74,7 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
       sim/src/tactical_battle_save.cpp       # N1 stage 2 (owner: n2-host): battle save / load
       sim/src/tactical_battle_clash.cpp      # s78n t06: land hero clashes (HERO_CLASH.md)
       sim/src/tactical_battle_retreat.cpp    # TRU1 t06: space retreat jump-out flight (TRU1_C_RE §2)
+      sim/src/tactical_battle_land_engage.cpp  # cmb1 t01 / t03: land formation records, Auto_Engage, scan range (BKR1 Q2 / Q8)
       sim/src/tactical_battle_spawners.cpp   # TRU1 t05 / t07: indigenous spawners, debris (TRU1_C_RE §1 / §3)
       sim/src/fleet_groups.cpp               # [port] fleet groups, phase 1 (docs/DECISIONS.md)
       # Hangars / station upgrade / engine-loop requests (docs/re/STATION_HANGARS_SOUND.md): engine/tactical/hangar.
@@ -133,7 +134,8 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
     endforeach()
     # bo3 t03: test_battles_ai.cpp is split into parts (same exe, same test): main in test_battles_ai.cpp, shared code in
     # test_battles_ai_common.hpp.
-    target_sources(alamo_sim_battle_ai_tests PRIVATE sim/tests/test_battles_ai_part1.cpp sim/tests/test_battles_ai_part2.cpp)
+    target_sources(alamo_sim_battle_ai_tests PRIVATE sim/tests/test_battles_ai_part1.cpp sim/tests/test_battles_ai_part2.cpp
+                                                     sim/tests/test_battles_ai_part3.cpp)  # cmb1: land Auto_Engage / scan range
     # s78n t06 review: the hero-clash land battle per worker count (alamo_add_worker_count_check; the exe's --hero-clash
     # mode writes / compares its per-tick battle digests; each count has its own fixture folder).
     alamo_add_worker_count_check(alamo_sim_battle_ai_hero_clash

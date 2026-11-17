@@ -186,7 +186,8 @@ bool trim_point(std::span<const V2> path, float s, float depth, float lateral, b
     return true;
 }
 
-// s78n t25.1: 0x410e90, the fire trim (§4.3.2 item 7).
+// s78n t25.1: 0x410e90, the fire trim (§4.3.2 item 7). cmb1 t05: `guard` = start back by guard_range (BKR1 Q7 (a): only a
+// guard of a LAND_OBSTACLE object; the caller passes false for every other block, guard or not).
 float fire_trim(std::span<const V2> path, std::span<const TrimMember> members, bool guard, float guard_range,
                 const MemberFireFn& can_fire) {
     const float len = path_length(path);
@@ -399,7 +400,7 @@ bool MovementSystem::arc_slot_test(const MoveOrder& order, const std::vector<uin
 // (HX, HY) = formation_box on unit(C - centroid) ([port] 0x411640's mode-0 plan axis; the layout's fwd points at the
 // order's destination). No try succeeds -> nothing is written: the blocks stay plain.
 // s78n t25.4 (item 2, guard): a guard block's L = the formations whose lead is farther from C than min(the lead's attack
-// range, Land_Guard_Range) ([port] the 2-D distance, as the guard trim's); the rest as for an attack (R = the minimum
+// range, Land_Guard_Range) (cmb1 t05 retag [H], BKR1 Q7 (b): 2-D, strict, members[0]); the rest as for an attack (R = the minimum
 // engagement range, which the host caps at Land_Guard_Range for a guard block, item 1).
 void MovementSystem::attack_slots(const MoveOrder& order, const std::vector<uint32_t>& idx, const std::vector<LandForm>& forms) {
     std::vector<uint32_t> l;
@@ -619,9 +620,13 @@ void MovementSystem::attack_plan(const MoveOrder& order, const std::vector<uint3
             tm.push_back({s.member, -(s.back - b0), s.lateral, e == nullptr || e->targeting});
         }
         const float total = path_length(path);
-        const float guard_range = cfg_.constants.land_guard_range;
+        // cmb1 t05 (BKR1 Q7 (a) [H]): 0x410e90's guard range is Land_Guard_Range (GC +0x11ec4); the trim starts at the path
+        // length L for every block except a guard whose object has LAND_OBSTACLE: then the range is Land_Guard_Range +
+        // 0x397780(T) and the start max(0, L - range)
+        const bool obstacle = guard && order.attack.guard_obstacle;
+        const float guard_range = cfg_.constants.land_guard_range + (obstacle ? order.attack.t_radius : 0.0f);
         const V2 c = order.attack.c;
-        const float keep = fire_trim(path, tm, guard, guard_range, [&](const TrimMember& m, V2 p) {
+        const float keep = fire_trim(path, tm, obstacle, guard_range, [&](const TrimMember& m, V2 p) {
             // guard (item 7): within the guard range of T (2-D) and the line of fire clear; else the fire test
             if (guard && distance(p, c) > guard_range) return false;
             return fire_test_(units_[idx[m.member]].d.id, p, target, guard, g, order.attack.cz);  // bkt1 t06: to G

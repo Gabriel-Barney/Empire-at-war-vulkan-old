@@ -291,6 +291,8 @@ private:
     void follow_drop(const std::vector<objects::ObjectId>& units);
     void follow_add(const std::vector<objects::ObjectId>& units, objects::ObjectId target, float x, float y, float threat,
                     bool guard = false);
+    // cmb1 t04 (FIGHTER_FLYING §4.11 A / C 3 / G 1, BKR2 Q6 [H]): a land guard follow's formation step (every tick)
+    void guard_follow_step(ObjectFollow& f, Vec3 tp);
     commands::RejectReason execute_order(uint8_t player, const commands::EventData& ev);
     // s78f t10: `flags` / `goal_object` = the order's movement block (mv::MoveOrder::flags / goal_object), the same values the
     // host's fighter formation record gets (TacticalBattle::fighter_order), so the movement layer's fighter leash and the

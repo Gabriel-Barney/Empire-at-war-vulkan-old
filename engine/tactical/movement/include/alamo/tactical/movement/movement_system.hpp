@@ -184,6 +184,10 @@ struct LandAttack {
     V2 g;                    // G = C after the host's staging 0x40e260 (equal to C when not staged)
     float t_hx = 0.0f, t_hy = 0.0f;  // the target's footprint half extents (0x396850): r_T = sqrt(hx^2 + hy^2)
     bool guard = false;      // a guard block (s78n t25.4: the guard L rule, the guard trim, no item-6 stop, no solo rule)
+    // cmb1 t05 (BKR1 Q7 (a) [H], 0x410e90): the guarded object has LAND_OBSTACLE (obj +0x346) and its radius 0x397780(T):
+    // only then the guard range is Land_Guard_Range + that radius and the trim starts at max(0, L - range) (else at L)
+    bool guard_obstacle = false;
+    float t_radius = 0.0f;
     bool trim = true;        // 0x410e90's gate: T not fogged for the first member's owner, not stealthed (host)
     bool replan = false;     // a re-plan (0x410a60 / 0x4192b0): no split, no slot test, the slots and formations kept
     // s78n t26 review round 3 (FIGHTER_FLYING §4.11 E / C 4 [H]): 0x40edd0's fog and stealth terms - T hidden for the
