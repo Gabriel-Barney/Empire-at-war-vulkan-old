@@ -334,7 +334,8 @@ ScriptStep step_encyclopedia(std::string name) {
     auto aims = std::make_shared<uint32_t>(0);
     auto since_aim = std::make_shared<uint32_t>(0);
     auto target = std::make_shared<ui::Vec3>();
-    return {std::move(name), [aimed, shown0, waited, aims, since_aim, target](App& a, ui::InputFrame&) {
+    auto target_id = std::make_shared<uint32_t>(0);
+    return {std::move(name), [aimed, shown0, waited, aims, since_aim, target, target_id](App& a, ui::InputFrame&) {
                 // The pop-up's delay is wall time: the sim is held meanwhile (presentation-only) so the ticks of the
                 // run stay independent of the machine's speed (the CRC log compares across compilers).
                 a.hold_sim_ = true;
@@ -349,8 +350,12 @@ ScriptStep step_encyclopedia(std::string name) {
                         std::vector<const render::SnapshotObject*> local;
                         const std::vector<objects::ObjectId>* sel =
                             a.session_ ? &a.session_->host().selection(static_cast<uint8_t>(a.local_player())) : nullptr;
+                        // Only units the mouse can pick (not Lua-hidden or contained: the EAW-Remake's Z-layer scripts hide
+                        // selectable helper objects, OBJECT_SCRIPTS §10.3).
+                        const ui::WorldPickTests* pt = a.world_pick_tests();
+                        auto pickable = [pt](uint32_t id) { return !pt || !pt->skip || !pt->skip(id); };
                         for (const render::SnapshotObject& o : a.bview_.frame().objects)
-                            if (sel && std::find(sel->begin(), sel->end(), o.id) != sel->end()) local.push_back(&o);
+                            if (sel && std::find(sel->begin(), sel->end(), o.id) != sel->end() && pickable(o.id)) local.push_back(&o);
                         if (local.empty())
                             for (const render::SnapshotObject& o : a.bview_.frame().objects)
                                 if (o.owner == a.local_player() && a.session_ && a.session_->battle() && a.session_->battle()->movement().has_unit(o.id))
@@ -359,6 +364,7 @@ ScriptStep step_encyclopedia(std::string name) {
                             const render::SnapshotObject& o = *local[*aims % local.size()];
                             a.bview_.camera().jump_to({o.position.x, o.position.y, o.position.z});
                             *target = {o.position.x, o.position.y, o.position.z};
+                            *target_id = o.id;
                             ++*aims;
                             *since_aim = 0;
                             *aimed = true;
@@ -391,6 +397,25 @@ ScriptStep step_encyclopedia(std::string name) {
                         const ui::Vec3 la = a.bview_.camera().look_at();
                         std::printf("script:   last aim %.0f,%.0f,%.0f, camera look-at %.0f,%.0f,%.0f\n", target->x, target->y,
                                     target->z, la.x, la.y, la.z);
+                        if (const ui::WorldPickTests* pt = a.world_pick_tests(); pt && pt->precise) {
+                            const uint32_t w = a.targets_.width, h = a.targets_.height;
+                            const ui::View v = ui::make_view(a.bview_.camera_params(w, h), w, h);
+                            const tactical::Ray ray = ui::pixel_ray(v, mx, my);
+                            float t = 0.0f;
+                            const ui::PreciseOutcome po = pt->precise(*target_id, ray, t);
+                            ui::Vec3 c{};
+                            const float r = pt->sphere ? pt->sphere(*target_id, c) : 0.0f;
+                            std::printf("script:   aimed object %u: precise %d (t %.1f), override sphere %.1f, skipped %d\n",
+                                        *target_id, static_cast<int>(po), t, r, pt->skip && pt->skip(*target_id) ? 1 : 0);
+                            if (const sim::TacticalBattle* b = a.session_ ? a.session_->battle() : nullptr) {
+                                const objects::ObjectId box = b->contained_by(static_cast<objects::ObjectId>(*target_id));
+                                std::string box_type = "-";
+                                for (const ui::HudUnit& u : a.hud_units_)
+                                    if (u.id == static_cast<uint32_t>(box) && u.type < a.ui_.hud_types.size()) box_type = a.ui_.hud_types[u.type].name;
+                                std::printf("script:   contained by %u (%s, a hud unit: %s)\n", static_cast<uint32_t>(box), box_type.c_str(),
+                                            box_type == "-" ? "no" : "yes");
+                            }
+                        }
                         uint32_t shown_units = 0;
                         for (const ui::HudUnit& u : a.hud_units_)
                             if (u.owner == a.local_player() && u.type < a.ui_.hud_types.size() && shown_units++ < 6)
@@ -533,7 +558,14 @@ ScriptStep step_select_all(std::shared_ptr<bool> none = nullptr) {
                     f.keys_pressed.set(ui::vk::key('Y'));
                 }
                 if (++*st <= 3) return false;
-                const bool any = !a.session_ || !a.session_->host().selection(static_cast<uint8_t>(a.local_player())).empty();
+                const std::vector<objects::ObjectId>* sel =
+                    a.session_ ? &a.session_->host().selection(static_cast<uint8_t>(a.local_player())) : nullptr;
+                // modc t49: a selection of static objects only (Fall of the Republic's start defense stations, its bought
+                // ships arriving later) is pressed again until a unit that can move is in it; after 300 frames it is kept.
+                bool moves = !sel;
+                if (sel && a.session_->battle())
+                    for (const objects::ObjectId id : *sel) moves = moves || a.session_->battle()->movement().has_unit(id);
+                const bool any = !sel || (!sel->empty() && (moves || *st >= 300));
                 if (any && *st > 4) a.notes_.push_back("select all: the first unit was selectable after " + std::to_string(*st) + " frames");
                 if (!any && none && *st >= 1500) {
                     *none = true;
@@ -552,14 +584,18 @@ ScriptStep step_attack_enemy(bool shift = false) {
     auto target = std::make_shared<uint32_t>(0);
     auto px = std::make_shared<std::pair<int32_t, int32_t>>(0, 0);
     auto settle = std::make_shared<int>(0);
-    return {shift ? "shift+right-click an enemy" : "right-click an enemy", [st, target, px, settle, shift](App& a, ui::InputFrame& f) {
+    auto probe = std::make_shared<int32_t>(0);
+    return {shift ? "shift+right-click an enemy" : "right-click an enemy", [st, target, px, settle, shift, probe](App& a, ui::InputFrame& f) {
                 if (!a.session_ || !a.bview_.active() || a.screen_ != Screen::Battle) return false;
                 const render::InterpolatedFrame& fr = a.bview_.frame();
                 const render::SnapshotObject* t = nullptr;
+                // modc t43: only an enemy the mouse can pick (not Lua-hidden or contained: the EAW-Remake hides helper objects).
+                const ui::WorldPickTests* pt = a.world_pick_tests();
                 for (const render::SnapshotObject& o : fr.objects)
                     if (*target == 0 ? (o.owner >= 0 && o.owner != a.local_player() && (o.flags & render::kSnapDying) == 0 &&
                                         a.session_->battle() && a.session_->battle()->combat().has_unit(o.id) &&
-                                        a.session_->battle()->combat().is_enemy(a.local_player(), o.owner))
+                                        a.session_->battle()->combat().is_enemy(a.local_player(), o.owner) &&
+                                        (!pt || !pt->skip || !pt->skip(static_cast<uint32_t>(o.id))))
                                      : static_cast<uint32_t>(o.id) == *target) {
                         t = &o;
                         break;
@@ -576,10 +612,52 @@ ScriptStep step_attack_enemy(bool shift = false) {
                     const ui::View v = ui::make_view(a.bview_.camera_params(a.targets_.width, a.targets_.height), a.targets_.width, a.targets_.height);
                     float sx = 0, sy = 0;
                     if (!ui::project(v, {t->position.x, t->position.y, t->position.z}, sx, sy)) return false;
-                    *px = {static_cast<int32_t>(sx), static_cast<int32_t>(sy)};
+                    // modc t43: the hull may not cover its own centre (the EAW-Remake's enemy base is a shield-gate ring):
+                    // try the centre, then rings around it, one pixel a frame with the sim held, until the hover is the
+                    // target; none found: the centre as before. Vanilla hulls are hovered at the centre (one extra frame).
+                    constexpr int32_t kRings[] = {0, 16, 32, 56, 88};
+                    constexpr int32_t kDirs[8][2] = {{1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}, {0, -1}, {1, -1}};
+                    auto cand = [&](int32_t k) {
+                        const int32_t ring = k == 0 ? 0 : 1 + (k - 1) / 8, d = k == 0 ? 0 : (k - 1) % 8;
+                        return std::pair<int32_t, int32_t>{static_cast<int32_t>(sx) + kDirs[d][0] * kRings[ring],
+                                                           static_cast<int32_t>(sy) + kDirs[d][1] * kRings[ring]};
+                    };
+                    constexpr int32_t kCands = 1 + 8 * 4;
+                    if (*probe > 0 && a.hover_ship_ == *target) {
+                        *px = cand(*probe - 1);  // the pixel set last frame hovers the target
+                    } else if (*probe < kCands) {
+                        const auto p = cand(*probe);
+                        f.mouse_x = p.first;
+                        f.mouse_y = p.second;
+                        f.mouse_inside = true;
+                        ++*probe;
+                        return false;
+                    } else {
+                        *px = cand(0);
+                    }
                 }
                 const bool done = click_at(*st, f, px->first, px->second, ui::Button::Right, shift);
-                if (done) a.hold_sim_ = false;
+                if (done) {
+                    a.hold_sim_ = false;
+                    std::string ty = "?";  // modc t43: what was clicked (the attack must route; a miss shows here)
+                    for (const ui::HudUnit& u : a.hud_units_)
+                        if (u.id == *target && u.type < a.ui_.hud_types.size()) ty = a.ui_.hud_types[u.type].name;
+                    std::printf("script: enemy click - target %u %s at pixel %d,%d, hovered %u, hud component %d\n", *target, ty.c_str(),
+                                px->first, px->second, a.hover_ship_, a.routed_.hover_component);
+                    if (const ui::WorldPickTests* tests = a.world_pick_tests(); tests && tests->precise && a.hover_ship_ != *target) {
+                        const ui::View v = ui::make_view(a.bview_.camera_params(a.targets_.width, a.targets_.height), a.targets_.width,
+                                                         a.targets_.height);
+                        float hit_t = 0.0f;
+                        const ui::PreciseOutcome po = tests->precise(*target, ui::pixel_ray(v, px->first, px->second), hit_t);
+                        ui::Vec3 c{};
+                        const float r = tests->sphere ? tests->sphere(*target, c) : 0.0f;
+                        bool icon = false;
+                        for (const ui::HudUnit& u : a.hud_units_)
+                            if (u.id == *target && u.type < a.ui_.hud_types.size()) icon = !a.ui_.hud_types[u.type].icon_name.empty();
+                        std::printf("script:   target pick: precise %d (t %.1f), override sphere %.1f, icon %d\n", static_cast<int>(po), hit_t,
+                                    r, icon ? 1 : 0);
+                    }
+                }
                 return done;
             },
             600};
@@ -596,6 +674,16 @@ void camera_on_local_units(App& a) {
             ++n;
         }
     if (n) a.bview_.camera().jump_to({static_cast<float>(x / n), static_cast<float>(y / n), 0.0f});
+}
+
+// modc t49: a buy row the smoke can move: not a SpaceStructure (the category the mods' own scripts test with Is_Category;
+// Fall of the Republic's static defense stations carry a Max_Speed).
+bool smoke_unit_moves(App& a, const std::string& type) {
+    const objects::TypeIndex t = a.data_.types.resolve_name(type);
+    if (t == objects::kNone) return true;
+    for (const std::string_view c : a.data_.types.get_list(t, "CategoryMask"))
+        if (ascii_iequals(c, "SpaceStructure")) return false;
+    return true;
 }
 
 // modc t40: steps [from, end) of the script pass at once while *skip is set (a mod whose start leaves nothing for them to do).
@@ -1511,7 +1599,23 @@ void App::make_script() {
         s.push_back(step_shot(prefix + "_battle.png"));
         if (env_or_empty("ALAMO_SMOKE_DRAG_BOX") == "1") s.push_back(step_drag_box(prefix + "_drag_box.png"));
         s.push_back(step_move_ground());
-        s.push_back(step_wait("move routed", [](App& a) { return a.session_ && a.session_->order_stats().moves >= 1; }, 600));
+        s.push_back(step_wait("move routed", [](App& a) {
+            static uint32_t waits = 0;  // modc t49: what was selected when the move did not route
+            if (a.session_ && a.session_->order_stats().moves >= 1) return true;
+            if (a.session_ && ++waits == 300) {
+                std::printf("script: move not routed after 300 frames - %llu rejected; selection:",
+                            static_cast<unsigned long long>(a.session_->order_stats().rejected));
+                for (const objects::ObjectId id : a.session_->host().selection(static_cast<uint8_t>(a.local_player()))) {
+                    std::string ty = "?";
+                    for (const ui::HudUnit& u : a.hud_units_)
+                        if (u.id == static_cast<uint32_t>(id) && u.type < a.ui_.hud_types.size()) ty = a.ui_.hud_types[u.type].name;
+                    const bool moves = a.session_->battle() && a.session_->battle()->movement().has_unit(id);
+                    std::printf(" %u %s%s", static_cast<uint32_t>(id), ty.c_str(), moves ? "" : " (no movement)");
+                }
+                std::printf("\n");
+            }
+            return false;
+        }, 600));
         // Queueable actions: shift+right-click an enemy (queued attack), then shift+right-click the ground (queued move);
         // the HUD shows the selected units' queue markers.
         s.push_back(step_attack_enemy(true));
@@ -1555,14 +1659,20 @@ void App::make_script() {
         // modc t40: the buy screen is a [port] feature (SKIRMISH_SETUP §2.7: retail has none); a faction with nothing to buy
         // (Age of Legends' list-header faction) passes it with nothing bought instead of stopping the smoke.
         auto empty = std::make_shared<bool>(false);
-        s.push_back({"buy list read", [empty](App& a, ui::InputFrame&) {
+        s.push_back({"buy list read", [empty, space_buy](App& a, ui::InputFrame&) {
                          if (!a.ui_.gui.find(ui::dlg::kBuyUnits)) return false;
+                         // modc t49: a row counts when it is affordable and, in the space smoke, can move (Max_Speed > 0);
+                         // with none the default start force plays (Fall of the Republic's start credits buy only static
+                         // stations). Land rows are companies (no Max_Speed of their own): affordable is enough.
                          bool any = false;
-                         for (const ui::BuyUnitEntry& e : a.buy_.units) any = any || (e.can_buy && e.cost >= 0 && e.cost <= a.buy_.credits);
-                         if (!any) {
+                         for (const ui::BuyUnitEntry& e : a.buy_.units) {
+                             if (!(e.can_buy && e.cost >= 0 && e.cost <= a.buy_.credits)) continue;
+                             any = any || !space_buy || smoke_unit_moves(a, e.type);
+                         }
+                         if (!any && env_or_empty("ALAMO_SMOKE_BUY_TYPE").empty()) {
                              *empty = true;
-                             a.notes_.push_back("buy list has nothing to buy: nothing bought");
-                             std::printf("script: buy list - %zu rows, nothing to buy\n", a.buy_.units.size());
+                             a.notes_.push_back("buy list has no affordable unit that moves: nothing bought");
+                             std::printf("script: buy list - %zu rows, nothing to buy that moves\n", a.buy_.units.size());
                          }
                          return true;
                      },
@@ -1581,7 +1691,12 @@ void App::make_script() {
                 if (u[i].type == kSmokeSkirmishBuyType) return i;
             // modc t39: the mod fallbacks take only rows the player can buy now (Fall of the Republic lists its most
             // expensive ships first: the first corvette row cost more than the start credits, so Buy did nothing).
-            auto affordable = [&a, &u](size_t i) { return u[i].can_buy && u[i].cost >= 0 && u[i].cost <= a.buy_.credits; };
+            // modc t49: and that can move (Max_Speed > 0): Fall of the Republic's cheapest affordable row is a static
+            // defense station, which the smoke's move order cannot use.
+            auto affordable = [&a, &u](size_t i) {
+                if (!(u[i].can_buy && u[i].cost >= 0 && u[i].cost <= a.buy_.credits)) return false;
+                return smoke_unit_moves(a, u[i].type);
+            };
             for (size_t i = 0; i < u.size(); ++i)
                 if (affordable(i) && ascii_upper(u[i].type).find("_CORVETTE") != std::string::npos) return i;
             for (size_t i = 0; i < u.size(); ++i) {
