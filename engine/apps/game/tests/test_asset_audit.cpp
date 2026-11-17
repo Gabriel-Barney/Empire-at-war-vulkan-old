@@ -91,7 +91,7 @@ void test_bytes() {
     CHECK(rule.find("connections") != std::string::npos && rule.find("MCX2_T02") != std::string::npos);
     CHECK(alamo::game::audit_asset_bytes("texture", tga(), false, &rule, &eq) == 0);
     CHECK(alamo::game::audit_asset_bytes("texture", Bytes{'D', 'D', 'S', ' ', 1}, false, &rule, &eq) == 2 && !eq);
-    CHECK(alamo::game::audit_asset_bytes("animation", Bytes{}, false, &rule, &eq) == 2 && !rule.empty());
+    CHECK(alamo::game::audit_asset_bytes("animation", Bytes{}, false, &rule, &eq) == 2 && eq && rule.find("empty") != std::string::npos);
 }
 
 void test_mod_folder() {
@@ -120,7 +120,7 @@ void test_mod_folder() {
     opt.cache_dir = cache.string();
     const auto a = alamo::game::audit_mod_assets(*v, opt);
     CHECK(a.ran && a.checked == 6);
-    CHECK(a.decoded == 3 && a.salvaged_count == 0 && a.rejected_count == 3 && a.retail_equivalent == 1);
+    CHECK(a.decoded == 3 && a.salvaged_count == 0 && a.rejected_count == 3 && a.retail_equivalent == 2);
     CHECK(a.cache_hits == 0);
     const auto* noconn = find(a.rejected, "AA_NOCONN.ALO");
     CHECK(noconn && noconn->family == "model" && noconn->retail_equivalent);

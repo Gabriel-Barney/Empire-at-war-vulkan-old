@@ -6,6 +6,7 @@ add_library(alamo_assets STATIC
   src/model.cpp
   src/skeleton.cpp
   src/texture.cpp
+  src/png_decode.cpp
   src/asset_cache.cpp
 )
 add_library(alamo::assets ALIAS alamo_assets)

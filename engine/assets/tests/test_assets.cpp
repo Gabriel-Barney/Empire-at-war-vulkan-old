@@ -679,6 +679,70 @@ void test_dds() {
 
 // Mod texture formats (mcx2 t04, MOD_COMPAT_DESIGN.md 10.3): every one decodes to a format the renderer samples, with
 // the values D3D9 gave. Expected values worked out by hand from the format definitions.
+// mcx2: a PNG under any name decodes (retail's D3DX picks the decoder by content; Thrawn's Revenge icons are PNGs named
+// .tga). Built with stored deflate blocks: RGBA 8-bit, a 2-bit grey image with a colour key, an Adam7 RGB image.
+Bytes png_file(std::uint32_t w, std::uint32_t h, std::uint8_t depth, std::uint8_t ctype, std::uint8_t interlace,
+               const Bytes& raw, const Bytes& trns = {}) {
+    auto be = [](Bytes& b, std::uint32_t v) {
+        for (int i = 3; i >= 0; --i) b.push_back(static_cast<std::uint8_t>(v >> (8 * i)));
+    };
+    Bytes f{137, 80, 78, 71, 13, 10, 26, 10};
+    auto chunk = [&](const char* type, const Bytes& d) {
+        be(f, static_cast<std::uint32_t>(d.size()));
+        f.insert(f.end(), type, type + 4);
+        f.insert(f.end(), d.begin(), d.end());
+        be(f, 0);  // CRC is not checked
+    };
+    Bytes ihdr;
+    be(ihdr, w);
+    be(ihdr, h);
+    ihdr.insert(ihdr.end(), {depth, ctype, 0, 0, interlace});
+    chunk("IHDR", ihdr);
+    if (!trns.empty()) chunk("tRNS", trns);
+    Bytes z{0x78, 0x01, 0x01};
+    const auto n = static_cast<std::uint16_t>(raw.size());
+    z.insert(z.end(), {std::uint8_t(n & 0xFF), std::uint8_t(n >> 8), std::uint8_t(~n & 0xFF), std::uint8_t((~n >> 8) & 0xFF)});
+    z.insert(z.end(), raw.begin(), raw.end());
+    z.insert(z.end(), {0, 0, 0, 0});
+    chunk("IDAT", z);
+    chunk("IEND", {});
+    return f;
+}
+
+void test_png() {
+    // 2x1 RGBA, row filter 1 (sub): second pixel = first + delta.
+    Bytes f = png_file(2, 1, 8, 6, 0, {1, 10, 20, 30, 255, 5, 5, 5, 0});
+    CHECK(sniff_texture_file(f) == TextureFileKind::Png);
+    TextureAsset t;
+    std::string err;
+    CHECK(decode_texture(f, t, &err));
+    CHECK(t.format == TextureFormat::BGRA8 && t.width == 2 && t.height == 1);
+    if (t.data.size() >= 8) {
+        CHECK(t.data[0] == 30 && t.data[1] == 20 && t.data[2] == 10 && t.data[3] == 255);  // BGRA
+        CHECK(t.data[4] == 35 && t.data[5] == 25 && t.data[6] == 15 && t.data[7] == 255);
+    }
+    // 4x1 grey, 2 bits: values 0,1,2,3 -> 0,85,170,255; tRNS key 2 -> alpha 0 there.
+    f = png_file(4, 1, 2, 0, 0, {0, 0x1B}, {0, 2});
+    CHECK(decode_texture(f, t, &err));
+    if (t.data.size() >= 16) {
+        CHECK(t.data[0] == 0 && t.data[4] == 85 && t.data[8] == 170 && t.data[12] == 255);
+        CHECK(t.data[3] == 255 && t.data[11] == 0);
+    }
+    // 2x2 RGB, Adam7: pass 1 holds (0,0), pass 6 (1,0), pass 7 row y=1 (both); other passes are empty.
+    f = png_file(2, 2, 8, 2, 1, {0, 1, 2, 3, 0, 4, 5, 6, 0, 7, 8, 9, 10, 11, 12});
+    CHECK(decode_texture(f, t, &err));
+    if (t.data.size() >= 16) {
+        CHECK(t.data[2] == 1 && t.data[6] == 4 && t.data[10] == 7 && t.data[14] == 10);
+    }
+    // Truncated and corrupt files fail cleanly.
+    Bytes cut(f.begin(), f.begin() + 40);
+    CHECK(!decode_texture(cut, t, &err) && !err.empty());
+    Bytes bad = png_file(2, 1, 8, 6, 0, {1, 10, 20, 30, 255, 5, 5, 5, 0});
+    bad[bad.size() - 30] ^= 0xFF;  // inside the stored block header / data
+    (void)decode_texture(bad, t, &err);  // must not crash; result either way
+    CHECK(!decode_texture(png_file(70000, 70000, 8, 6, 0, {}), t, &err));
+}
+
 void test_dds_mod_formats() {
     std::string err;
     TextureAsset t;
@@ -1889,6 +1953,7 @@ int main() {
     test_animation();
     test_dds();
     test_dds_mod_formats();
+    test_png();
     test_tga();
     test_bmp();
     test_mips();

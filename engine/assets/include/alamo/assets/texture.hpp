@@ -119,7 +119,10 @@ bool decode_bmp(std::vector<std::uint8_t> file, TextureAsset& out, std::string* 
 // The format comes from the file's content, never its extension (the original loads image files by
 // content: Thrawn's Revenge ships a BMP named MT_Commandbar.tga): "DDS " -> DDS, "BM" -> BMP, else
 // TGA (which has no magic; a TGA's second byte, the colour-map type, is 0 or 1, never 'M').
-enum class TextureFileKind : std::uint8_t { Dds, Bmp, Tga };
+// PNG (mcx2): retail loads textures through D3DX, which picks the decoder by content, so a PNG named .tga or .dds draws
+// (Thrawn's Revenge icons). Decoded to BGRA8 with a generated mip chain, like BMP.
+bool decode_png(std::vector<std::uint8_t> file, TextureAsset& out, std::string* error = nullptr);
+enum class TextureFileKind : std::uint8_t { Dds, Bmp, Tga, Png };
 TextureFileKind sniff_texture_file(std::span<const std::uint8_t> bytes);
 bool decode_texture(std::vector<std::uint8_t> file, TextureAsset& out, std::string* error = nullptr);
 

@@ -67,3 +67,22 @@ Per slot, from `out\<run>\report.txt` and the screenshots:
 | `ANS` | unprobed (skipped after run 1) | |
 | `OVR` | unprobed (skipped after run 1) | |
 | `EMPTY` | | |
+
+## 4. Texture, font and movie lookups (t05, read with REA 2026-11-17)
+
+- **No retry after a decode failure.** `Load_Texture`'s inner step (0x13db20) asks the existence search (0x13f450:
+  the name as given, then each registered texture directory + the part after the last `\`) and, only when nothing
+  exists, repeats it for the `.dds` name. As soon as a candidate exists it builds the texture object from that path;
+  a file that then fails to decode is not followed by a `.dds` attempt. The port's `load_texture` does the same. [H]
+- **`.dds` substitute: cut at the first `.`.** The name is copied and cut by a C-runtime tokeniser with the delimiter
+  string `"."` (bytes at 0x14080329c: `2e 00`), then `.dds` is appended. Matches `texture_lookup` (`s.find('.')`). [H]
+- **Content decides the image format.** The texture object loads through D3DX, which detects the file type from its
+  bytes; Thrawn's Revenge ships 32 PNG files named `.TGA` (`Data\Art\Textures\Icons\I_BUTTON_*.TGA`, `89 50 4E 47`
+  header), so retail draws PNGs whatever the extension. Port: `decode_texture` sniffs PNG and decodes it
+  (`engine/assets/src/png_decode.cpp`). [M] (D3DX's documented behaviour; not traced in the binary)
+- **Fonts are not looked up through the file system.** The only font-registration name in the binary is the string
+  `AddFontMemResourceEx` (resolved at run time); there is no `.ttf` / `.otf` string. Retail registers the TrueType
+  fonts embedded in its exe from memory and otherwise uses installed system fonts; a font file in a mod's MEG or Data
+  folder is not loaded. The port's extra loose-file lookup (`ui::register_game_fonts`) is a superset; nothing to add. [M]
+- **Bink 2:** retail x64 1.121 imports `bink2w64.dll` (shipped with the game) and plays KB2 movies; the port's FFmpeg
+  path cannot (t09, honour gap until decided). [H]

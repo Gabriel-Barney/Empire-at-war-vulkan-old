@@ -256,7 +256,9 @@ struct CacheValue {
 };
 using Cache = std::unordered_map<CacheKey, CacheValue, CacheKeyHash>;  // looked up only, never iterated for output
 
-constexpr const char* kCacheHeader = "alamo asset audit cache v1";
+// The second number is the rules version: bump it whenever a decoder, salvage rule or retail-equivalent entry changes
+// what a file's verdict is, so a cache written by an older build is ignored.
+constexpr const char* kCacheHeader = "alamo asset audit cache v1 rules 2";
 
 std::string cache_file(const std::string& dir) { return dir + "\\asset_audit_v1.txt"; }
 
@@ -332,6 +334,13 @@ int audit_asset_bytes(const std::string& family_in, const std::vector<uint8_t>& 
                       bool* retail_equivalent_out) {
     std::string family = family_in, rule;
     int state = kDecoded;
+    if (bytes.empty()) {
+        // A 0-byte file: mods blank a base file this way (Thrawn's Revenge empties 50 base maps to drop them). There is
+        // nothing to decode, for retail either.
+        if (rule_out) *rule_out = "empty file (0 bytes) [retail-equivalent: nothing to decode, for retail either]";
+        if (retail_equivalent_out) *retail_equivalent_out = true;
+        return kRejected;
+    }
     if (family == "model" || family == "particle") state = audit_alo(bytes, &family, &rule);
     else if (family == "animation") state = audit_animation(bytes, strict, &rule);
     else if (family == "texture") state = audit_texture(bytes, strict, &rule);

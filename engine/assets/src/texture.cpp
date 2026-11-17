@@ -1,5 +1,7 @@
 #include "alamo/assets/texture.hpp"
 
+#include "png_decode.hpp"
+
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -867,8 +869,28 @@ bool decode_bmp(std::vector<std::uint8_t> file, TextureAsset& out, std::string* 
     return true;
 }
 
+bool decode_png(std::vector<std::uint8_t> file, TextureAsset& out, std::string* error) {
+    std::uint32_t w = 0, h = 0;
+    std::vector<std::uint8_t> px;
+    if (!png::decode(file, w, h, px, kMaxDecodedTextureBytes / 4, error)) return false;
+    std::vector<std::uint8_t>().swap(file);
+    if (!within_budget(TextureFormat::BGRA8, w, h, 1, 1, error)) return false;
+    TextureAsset t;
+    t.format = TextureFormat::BGRA8;
+    t.data = std::move(px);
+    t.width = w;
+    t.height = h;
+    t.mip_levels = 1;
+    t.layers = 1;
+    t.levels.push_back({0, 0, w, h, 0, t.data.size()});
+    generate_mips(t);
+    out = std::move(t);
+    return true;
+}
+
 TextureFileKind sniff_texture_file(std::span<const std::uint8_t> bytes) {
     if (bytes.size() >= 4 && bytes[0] == 'D' && bytes[1] == 'D' && bytes[2] == 'S' && bytes[3] == ' ') return TextureFileKind::Dds;
+    if (png::is_png(bytes)) return TextureFileKind::Png;
     // A TGA cannot start with "BM": its second byte is the colour-map type (0 or 1), never 'M'.
     if (bytes.size() >= 2 && bytes[0] == 'B' && bytes[1] == 'M') return TextureFileKind::Bmp;
     return TextureFileKind::Tga;
@@ -878,6 +900,7 @@ bool decode_texture(std::vector<std::uint8_t> file, TextureAsset& out, std::stri
     switch (sniff_texture_file(file)) {
         case TextureFileKind::Dds: return decode_dds(std::move(file), out, error);
         case TextureFileKind::Bmp: return decode_bmp(std::move(file), out, error);
+        case TextureFileKind::Png: return decode_png(std::move(file), out, error);
         case TextureFileKind::Tga: break;
     }
     return decode_tga(std::move(file), out, error);
