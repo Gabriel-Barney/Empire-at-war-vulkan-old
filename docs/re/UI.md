@@ -383,6 +383,20 @@ battle end `IDD_BATTLE_END_DIALOG`, `IDD_CAMPAIGN_SCORE_DIALOG`; in-game `IDD_IN
   the screen (the Petroglyph logo control has x = −374, i.e. outside the dialog to the left).
   `DS_CENTER` centres a dialog. Widescreen keeps 768 height and extends the width (same Hor+ rule as
   §2.4). [M for the placement, L for the exact unit → pixel factor]
+- **Options > Video > Widescreen (`IDC_WIDESCREEN`)** [H for the flow, M for the camera reading] (ui5 t11): the box shows
+  the profile flag `WidescreenMonitor` (options +0x23e, registry under the profile key, saved next to
+  `WidescreenAspectRatio` +0x1e0). It is not a mode filter: the resolution list is the same either way. Apply (0x12a150)
+  passes the box to the setter 0x25e390, which picks the **assumed monitor aspect**: 4:3 (1.3333) when off, 16:9
+  (1.7778) when on, or the stored `WidescreenAspectRatio` when that is non-zero (and only an on box with a stored value
+  > 1.4 writes it back). The aspect goes to one global (0x14ee20 / read by 0x14ee30), which the camera code uses as the
+  projection's aspect (0x2d03f0, 0x2d0df0, 0x3c2c00, 0x3c3590) instead of the back buffer's: above 4:3 the field of view is
+  widened to 2·atan(tan(fov/2)·4/3) (Hor+, the 4:3 view kept vertically) and the camera's ground framing term is
+  scaled by 1.25. So the box tells the game the monitor's shape for non-square pixels (e.g. 1280×1024 on a 16:9
+  panel). At start 0x65ad0 detects it: the larger of the monitor's physical-size ratio (GetDeviceCaps HORZSIZE /
+  VERTSIZE) and its pixel ratio; above 1.4 and with no stored aspect it stores that ratio and sets the flag, else 4:3.
+  The HUD / dialog Hor+ canvas (§2.4) does not read the flag. Port: the box is hidden (Gabriel, 2026-11-13) and the
+  projection follows the window's shape, which is retail's result on square pixels with the box matching the monitor
+  (its own default).
 
 ### 3.4 Fonts [H]
 
@@ -554,6 +568,26 @@ entry i is slot i (ui3 t02, 2026-11-13; e.g. `IDC_EDIT_DEPLOY_SQUADRON` = 66, `I
 Labels come from the keyboard dialog's table (0x807330, stride 0x40), whose order matches
 the slots.
 
+**Capture in `IDD_KEYBOARD_OPTIONS_DIALOG`** [H unless marked] (ui5 t09; page 1 proc 0xa9e70, pages 2-5 0xab7c0 /
+0xace60 / 0xae500 / 0xafba0, 24 edit fields a page; bind 0xab020; confirm 0xab790):
+- The dialog edits a **working copy** of the table (0x140a7c3c0); the game uses the **applied** table (0x140a7c3a8).
+  Opening the dialog from `IDC_MAIN_OPTIONS_KEYBOARD` / `IDC_IN_GAME_OPTIONS_KEYBOARD` (0xd35e0 area) copies applied →
+  working, so edits not applied are dropped then.
+- A key event on a field (dialog event 0x0e: key + modifier) is ignored for VK_SHIFT / VK_CONTROL / VK_MENU alone; **any
+  other key binds**, Delete and Backspace included. There is no per-slot clear; only `IDC_RESTORE_DEFAULTS` (defaults
+  into the working copy) unbinds. Esc never binds: the dialog's cancel event (0) comes first [M: event 0 = the Esc /
+  close path]. Whether Tab reaches the field is not settled [L]; the profile default for the holocron slot is Tab.
+- The bound key (key + modifier) is looked up in the working copy (0x2126d0). Free → the slot takes it, fields refresh.
+  Held by another slot (a derived group slot 123..152 is reported as its group slot (i − 123) mod 10) → a message box,
+  title `TEXT_KEYBOARD_OPTIONS`, buttons `TEXT_BUTTON_OK` and `TEXT_BUTTON_CANCEL`, text = `TEXT_KEYBIND_WARNING_0`
+  (%0 key name, %1 the other slot's label) + line break + `TEXT_KEYBIND_WARNING_1` (%0 key name, %2 this slot's label).
+  OK binds it (the set 0x212420 removes it from every other slot); Cancel changes nothing.
+- Cancel event (0): if a field is in capture (control flag +0x92), that slot is set back to its **applied** binding,
+  the field loses focus and the page refreshes; otherwise the dialog closes and the options menu comes back.
+- `IDC_OK` (the Back button): closes the dialog and returns to the options menu, **no prompt, nothing applied**.
+  `IDC_APPLY`: working → applied, profile saved. `IDC_RESTORE_DEFAULTS`: defaults into the working copy.
+  `IDC_KEYBOARD_OPTIONS_2..5`: switch page (close this one, open that one; the working copy carries over).
+
 | slot | action | default |
 |---|---|---|
 | 0–9 | select control group 1..9, 0 | 1..9, 0 |
@@ -596,6 +630,14 @@ jumps the camera to the group (local player only). The group number is drawn ove
    and fills planet name, faction, credit production, weather/terrain/native texts and icons, the
    historical-reference list and player names; **`IDC_BEGIN_BUTTON` is hidden**; the sim stops
    (FS +0x34 = 1, MAIN_LOOP §2.4).
+   **Which dialog** (0x8cb50, ui5 t10) [H]: a skirmish map name passed in (skirmish / MP start 0xc7ca0, 0xef700) →
+   `IDD_SKIRMISH_BATTLE_LOAD_DIALOG`; else the "story map" flag (0x140a61d3b) set → the Mission pair by mode, else the
+   Battle pair by mode (2 space, else land). Only two paths set the flag: (a) Activate's STORY_LOAD_TACTICAL_MAP
+   dispatch, when a SET_TACTICAL_MAP reward filled the land / space slot of this battle's kind and that map replaces the
+   battle's map (L1_S4_REMAINING §4.4; no shipped XML uses it); (b) loading a save taken during a battle (0x52d10 →
+   0x8dc40, which clears the skirmish flag and sets the story flag unless the battle record's map name is empty), so a
+   reloaded mid-battle save, skirmish included [M for skirmish], shows the Mission pair. The normal galactic battle start
+   (message 0x0c, 0x86d40) and LINK_TACTICAL story battles call Activate without a skirmish name and get the Battle pair.
 2. 0x8df00 starts the "LoadThread" worker; the main thread runs a small loop: progress update, network
    pump, present.
 3. Progress: single player uses `IDC_PROGRESS_SOLO`; multiplayer uses `IDC_PROGRESS0..8` (one per
