@@ -1712,9 +1712,16 @@ void skirmish_four_slot_real_test() {
             CHECK(b->victory_record_type(k) == 0x12);  // its own victory record
             CHECK(b->skirmish_team(k) == spec.skirmish.teams[static_cast<size_t>(k)]);
         }
+        // A team game (the map has start positions, +0xb5): allies by team; else by faction (slots 1 and 3 are both Rebel).
         const tactical::combat::CombatSystem& c = b->combat();
-        CHECK(c.is_enemy(0, 1) && c.is_enemy(0, 2) && !c.is_enemy(0, 3) && !c.is_enemy(1, 2) && c.is_enemy(1, 3) && c.is_enemy(2, 3));
-        CHECK(!c.is_enemy(3, 0) && !c.is_enemy(2, 1));
+        std::printf("  team game %d
+", b->skirmish_team_game() ? 1 : 0);
+        if (b->skirmish_team_game()) {
+            CHECK(c.is_enemy(0, 1) && c.is_enemy(0, 2) && !c.is_enemy(0, 3) && !c.is_enemy(1, 2) && c.is_enemy(1, 3) && c.is_enemy(2, 3));
+            CHECK(!c.is_enemy(3, 0) && !c.is_enemy(2, 1));
+        } else {
+            CHECK(c.is_enemy(0, 1) && c.is_enemy(0, 2) && c.is_enemy(0, 3) && c.is_enemy(1, 2) && !c.is_enemy(1, 3) && c.is_enemy(2, 3));
+        }
 #ifdef ALAMO_SIM_HAVE_TACTICAL_AI
         if (const sim::BattleAi* ai = s.battles()->tactical_ai()) {
             for (int32_t k = 1; k < 4; ++k) CHECK(ai->world().is_ai_player(k));
@@ -1724,7 +1731,8 @@ void skirmish_four_slot_real_test() {
             if (pw.players.size() >= 4) {
                 CHECK(pw.players[0].ai_difficulty.empty() && pw.players[1].ai_difficulty == "Easy" && pw.players[2].ai_difficulty == "Hard" &&
                       pw.players[3].ai_difficulty == "Normal");
-                CHECK(pw.rel(1, 2) == 0 && pw.rel(0, 3) == 0 && pw.rel(0, 1) == 1);
+                if (b->skirmish_team_game()) CHECK(pw.rel(1, 2) == 0 && pw.rel(0, 3) == 0 && pw.rel(0, 1) == 1);
+                else CHECK(pw.rel(1, 3) == 0 && pw.rel(1, 2) == 1);
             }
             std::printf("  tactical AI build-time multipliers: %.3f / %.3f / %.3f\n", static_cast<double>(ai->world().build_time_multiplier(1)),
                         static_cast<double>(ai->world().build_time_multiplier(2)), static_cast<double>(ai->world().build_time_multiplier(3)));

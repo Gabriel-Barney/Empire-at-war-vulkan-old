@@ -165,16 +165,21 @@ struct BattleConfig {
     bool control_point_domination = false;
     // skm2 t02 (SKIRMISH_SETUP §1, §2.2, TACTICAL_COMBAT §2.10 "Skirmish with ... +0xb5"): the skirmish slots of a skirmish
     // map battle in slot order, each its player and team (IDC_PLAYER_TEAM_n, 0-based; -1 none). Set: the slots are these
-    // players (up to kMaxSides; the first two must be the request's defender and attacker), every pair's relation is the
-    // team rule (allied = same team; Is_Neutral players 2; players without a slot team -1 enemies of every slot), and every
-    // slot gets its start anchor, victory record, income, garrison and base. Empty: the two-slot rule of skirmish_slot_player
-    // and the faction relation rule (alamo_headless, tests).
+    // players (up to kMaxSides; the first two must be the request's defender and attacker) and every slot gets its start
+    // anchor, victory record, income, garrison and base. Empty: the two-slot rule of skirmish_slot_player (alamo_headless,
+    // tests).
     struct SkirmishSlot {
         int32_t player = -1;
         int32_t team = -1;
         friend bool operator==(const SkirmishSlot&, const SkirmishSlot&) = default;
     };
     std::vector<SkirmishSlot> skirmish_slots;
+    // skm2 t02 (SKIRMISH_SETUP §2 step 1, TACTICAL_COMBAT §2.10, TACTICAL_GAPS §4.2.2): the team game - the record byte +0xb5
+    // (CU8F_T03_T05_RE §1.2: the map's mini 0x12 "has start positions", MapInfo::flag_12) picks the player setup 0x295cf0:
+    // relations by slot team (allied = same team; Is_Neutral players 2; players without a slot have no team) and the slot's
+    // TEAM_tt spawn marker. False (0x294fa0, or no slot list): relations by faction and PLAYER_<k> markers, k = the slot's
+    // index among the slots of its faction, owned by its faction.
+    bool skirmish_team_game = false;
     // --- S4 garrisons / structure capture (owner: S4 agent; tactical_battle_garrison.cpp) ---
     // GameConstants Garrisoned_Max_Attack_Distance_Multiplier / Land_ / Space_Capture_Allowed_Countdown_Seconds (vanilla
     // values; used only when the catalog's GameConstants lack them: BattleCatalog::capture_countdown).
@@ -1134,9 +1139,11 @@ public:
     int32_t skirmish_slot_count() const;
     int32_t skirmish_slot_of(int32_t player) const;
     int32_t skirmish_team(int32_t player) const;
+    // skm2 t02: the slot list's team game (BattleConfig::skirmish_team_game with slots): team relations and TEAM_tt markers.
+    bool skirmish_team_game() const { return cfg_.skirmish_team_game && !cfg_.skirmish_slots.empty(); }
     // skm2 t02: the battle's sides. Side 0 is the defender, 1 the attacker; a skirmish map battle's slot k >= 2 is side k
     // (start anchor, facing records, formation slots). kMaxSides bounds the slots.
-    static constexpr uint8_t kMaxSides = 8;
+    static constexpr uint8_t kMaxSides = 8;  // BattleStats' per-side arrays are sized 8 (static_assert below the class)
     uint8_t side_count() const;
     // t50: Land_Skirmish_Unit_Cap_By_Player_Count of the player's faction at the battle's player count [M: linear
     // interpolation between the curve's keys, clamped to its ends]; -1 = no curve.

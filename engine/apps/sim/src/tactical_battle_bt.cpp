@@ -204,7 +204,7 @@ uint32_t TacticalBattle::bt_adopt_built(TacticalMode& mode, objects::ObjectHandl
     p.deployed = true;
     p.built = true;
     p.map = map;
-    p.third = map && owner != req_.info.defender && owner != req_.info.attacker;
+    p.third = map && owner != req_.info.defender && owner != req_.info.attacker && owner_side(owner) < 2;  // skm2 t02: slots 2.. count
     p.pop = 0.0f;
     const auto& gt = galaxy_->rules().types;
     p.power = t < gt.size() ? gt[t].ai_combat_power : 0.0f;
@@ -820,9 +820,9 @@ int32_t TacticalBattle::bt_relation(int32_t p, int32_t q) const {
         if (np) return 2;  // its own entry too
         if (p == q) return 0;
         if (nq) return 2;
-        // skm2 t02 (TACTICAL_COMBAT §2.10, 0x295cf0 -> 0x297470 [M]): with the slot list, allies are the same team id
-        // (-1 = no team); the faction is not used. Players without a slot (Hostile, Pirates, ...) have no team.
-        if (!cfg_.skirmish_slots.empty()) {
+        // skm2 t02 (TACTICAL_COMBAT §2.10, 0x295cf0 -> 0x297470 [M]): in a team game (BattleConfig::skirmish_team_game) allies
+        // are the same team id (-1 = no team); the faction is not used. Players without a slot (Hostile, Pirates, ...) have no team.
+        if (!cfg_.skirmish_slots.empty() && cfg_.skirmish_team_game) {
             const int32_t tp = skirmish_team(p), tq = skirmish_team(q);
             return tp >= 0 && tp == tq ? 0 : 1;
         }
@@ -1328,7 +1328,7 @@ void TacticalBattle::bt_expand_company(TacticalMode& mode, const terrain::Object
     P.side = owner_side(owner);
     P.built = true;
     P.map = true;
-    P.third = owner != req_.info.defender && owner != req_.info.attacker;
+    P.third = owner != req_.info.defender && owner != req_.info.attacker && owner_side(owner) < 2;  // skm2 t02: slots 2.. count
     P.pop = 0.0f;
     const auto& gt = galaxy_->rules().types;
     P.power = ct < gt.size() ? gt[ct].ai_combat_power : 0.0f;
@@ -2185,7 +2185,22 @@ uint8_t TacticalBattle::bt_skirmish_anchors() {
         }
         char tt[8];
         std::snprintf(tt, sizeof tt, "%02d", static_cast<int>(team));
-        const std::string player_marker = "Player_" + std::to_string(slot) + "_Spawn_Point_Marker";
+        // skm2 t02 (TACTICAL_GAPS §4.2.2, 0x2a4fc0): with the slot list, a free-for-all game (no +0xb5) takes PLAYER_<k>, k = the
+        // slot's index among the slots of its faction, owned by a player of that faction; a team game only TEAM_tt markers.
+        // [port] either falls back to the next kind when the map has none (no slot list: the two-slot order as before).
+        const bool slots = !cfg_.skirmish_slots.empty();
+        const bool team_game = slots && cfg_.skirmish_team_game;
+        const auto& gps = galaxy_->players();
+        const uint32_t faction = static_cast<size_t>(player) < gps.size() ? gps[static_cast<size_t>(player)].faction : galactic::kNoIndex;
+        int32_t k_in_faction = 0;
+        for (int32_t s = 0; s < slot; ++s) {
+            const int32_t ps = skirmish_slot_player(s);
+            k_in_faction += ps >= 0 && static_cast<size_t>(ps) < gps.size() && gps[static_cast<size_t>(ps)].faction == faction ? 1 : 0;
+        }
+        const auto owner_faction = [&gps](int32_t o) {
+            return o >= 0 && static_cast<size_t>(o) < gps.size() ? gps[static_cast<size_t>(o)].faction : galactic::kNoIndex;
+        };
+        const std::string player_marker = "Player_" + std::to_string(slots ? k_in_faction : slot) + "_Spawn_Point_Marker";
         const std::string team_spawn = std::string("Team_") + tt + "_Spawn_Point_Marker";
         const std::string team_base = std::string("Team_") + tt + "_Base_Position_Marker";
         const MapMarker* pick = nullptr;
@@ -2199,7 +2214,7 @@ uint8_t TacticalBattle::bt_skirmish_anchors() {
             for (const MapMarker& m : bt_markers_) {
                 if (m.type == objects::kNone || m.type >= types.size()) continue;
                 if (!iequal_trim(types.raw().types().name[m.type], *want)) continue;
-                if (want == &player_marker && m.owner != player) continue;
+                if (want == &player_marker && (team_game || (slots ? owner_faction(m.owner) != faction : m.owner != player))) continue;
                 matches.push_back(&m);
             }
             if (matches.empty()) continue;
@@ -2219,6 +2234,14 @@ uint8_t TacticalBattle::bt_skirmish_anchors() {
             if (!space_) {
                 facing_[side] = pick->facing;
                 found = static_cast<uint8_t>(found | (1u << side));
+            } else if (side >= 2) {
+                // skm2 t02 [port]: a space slot 2.. (no older anchor rule) faces the playable box's centre from its marker.
+                float mn[2], mx[2];
+                if (map_.playable_box(mn, mx)) {
+                    const float dx = 0.5f * (mn[0] + mx[0]) - anchor_[side].x, dy = 0.5f * (mn[1] + mx[1]) - anchor_[side].y;
+                    const float len = dmath::sqrt(dx * dx + dy * dy);
+                    if (len > 0.0f) facing_[side] = Vec3{dx / len, dy / len, 0.0f};
+                }
             }
             stats_.skirmish_marked[side] = true;
             stats_.skirmish_marker[side] = anchor_[side];

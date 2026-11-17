@@ -32,6 +32,8 @@ Vec3 sv(tactical::Vec3 v) { return Vec3{v.x, v.y, v.z}; }
 
 // ---- construction ---------------------------------------------------------------------------------------------
 
+static_assert(TacticalBattle::kMaxSides == sizeof(BattleStats::skirmish_marked) / sizeof(bool), "skm2 t02: BattleStats' per-side arrays");
+
 TacticalBattle::TacticalBattle(const BattleCatalog& catalog, const galactic::GalacticSim& galaxy,
                                const galactic::ConflictRules& rules, galactic::BattleRequest request, BattleConfig cfg,
                                const ParallelFor& pf)

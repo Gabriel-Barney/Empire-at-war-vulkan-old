@@ -246,6 +246,9 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
         // skm2 t02: every slot (slot k = player k) with its team (SKIRMISH_SETUP §1: team +0x54 = slot +0x98).
         for (int32_t k = 0; k < skirmish_slot_count(spec_.skirmish); ++k)
             bo.battle.skirmish_slots.push_back({k, skirmish_slot_team(spec_.skirmish, k)});
+        // The team game (SKIRMISH_SETUP §2 step 1: record +0xb5 = the map's "has start positions" mini 0x12, CU8F_T03_T05_RE
+        // §1.2 [M: that the lobby copies the map's byte]): team relations and TEAM_tt spawn markers; else the faction rules.
+        bo.battle.skirmish_team_game = skirmish_map_.info.flag_12 != 0;
     }
     // ccpgt t02: the Capture Control Points game type (land maps only; SKIRMISH_SETUP §4.2).
     bo.battle.control_point_domination = spec_.kind == SessionKind::Skirmish && spec_.skirmish.land && spec_.skirmish.control_points;
@@ -646,8 +649,12 @@ void GameSession::apply_ai_difficulty(int32_t difficulty) {
     if (gs)
         for (size_t p = 0; p < gs->players().size(); ++p) {
             const galactic::PlayerState& ps = gs->players()[p];
-            if (!ps.ai || ps.human) continue;
+            if (ps.human) continue;
             const auto pi = static_cast<int32_t>(p);
+            if (!ps.ai) {  // no AI system in the galaxy, but the battle's tactical AI may play it (default_tactical_ai_type)
+                if (battles_) battles_->apply_ai_difficulty(pi, d);
+                continue;
+            }
             (void)gs->set_ai_difficulty(pi, row);
             // The setup row only where start() set one (with the galactic AI): a rebuild from the new spec sets the same.
             if (p < setup_.players.size() && setup_.players[p].difficulty != galactic::kNoIndex) setup_.players[p].difficulty = row;
