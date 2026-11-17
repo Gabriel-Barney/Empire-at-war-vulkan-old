@@ -200,7 +200,7 @@ this, see §2.6).
 3. k = options[Get_Int(0, n−1)] (**0x1ffb40; no draw when n = 1**, the vanilla case).
 4. **Vigilance**: if T(X).`Planet_Vigilance` and T(S).`Is_Generic_Hero` (+0x14): fail. Text
    `TEXT_SABOTAGE_FAILURE_VIGILANCE` to S's owner and `TEXT_SABOTAGE_PREVENTED_VIGILANCE` to X's owner (local only,
-   via the message callback 0x140b313c0); r = ability vf12 = `Get_Float(Min_Respawn_Time, Max_Respawn_Time)`
+   via the message callback 0x140b313c0; where it appears: §2.7.1); r = ability vf12 = `Get_Float(Min_Respawn_Time, Max_Respawn_Time)`
    (special-ability base +0x54/+0x58, **one synced draw**); if r > 0 schedule respawn at X; kill S (0x391310).
    Return true.
 5. Dispatch k:
@@ -249,6 +249,66 @@ Goals `Corrupt_Planet` (Infrastructure, TL 60) and `Sabotage_Planet` (Offensive,
 `AI_Plan_Underworld_DeploySaboteur.lua`: `Underworld_Saboteur_Team = 1`, `AssembleForce`, `Move_To(Target)`,
 `Activate_Ability()`, `Sleep(10)`; success only for Corrupt_Planet when `Target.Is_Corrupted()`; sabotage always
 reports failure on purpose (script comment: avoid repeating because the cost goes up). [H]
+
+### 2.7 ui4 t11: where the galactic messages appear, Droid Log entries, faction announcer triggers (2026-11-17)
+
+#### 2.7.1 The message callback 0x140b313c0 [H unless tagged]
+- Set once at boot (0x4b250 → 0x48f1b0) to the thunk 0x2e0550, which calls the advisor-queue enqueue 0x2dd630 with the text,
+  the caller's **second argument as the colour**, front = 1 and no sound, so the sound is the local faction's
+  `SFXEvent_HUD_Advisor_Urgent` (+0x2f68). The callers' icon name (`i_button_temporary.tga`, `i_information00.tga`), function
+  and object arguments are dropped.
+- So each text is an **urgent line of the advisor text box** (STORY_PRESENTATION_REWARDS §6.3), not a floating screen text:
+  inserted at the front of the mode's queue and shown at once; fade in (alpha +8 per update), held for character count ×
+  `Advisor_Hint_Duration` (0.1 s), fade out; one line at a time; the sound plays when it shows. Galactic: component
+  `text_galactic_help` (Arial 7, back colour 0,50,255,175), bone `Text_galactic_help` of `i_galactic_controls.alo` at (65, 309)
+  from the bar's bottom-left origin, just above the planet / credits panel; tactical: `text_tactical_help`. Text colour = the
+  entry's colour. Held back while the planet map (GALACTIC_PLANET_MAP §1.4) or a command-bar movie is up.
+- Callers and colours:
+
+| caller | texts | shown to | colour |
+|---|---|---|---|
+| slice 0x619160 / failure kind 0x618e30 | `TEXT_SLICE_SUCCESS` (+ the unlocked type's name), `TEXT_SLICE_FAILURE_CAPTURED` / `_LOST_EFFORT` / `_CHEATED`, `TEXT_SLICE_FAILURE_VIGILANCE` / `TEXT_SLICE_PREVENTED_VIGILANCE` | the slicer's owner / the planet owner, local only | that player's faction colour (0x33e340: faction `Color` +0xa8 in single player; other colour fields in multiplayer / player-colour mode [M]) |
+| sabotage 0x5b1920 (§2.3 step 4) | `TEXT_SABOTAGE_FAILURE_VIGILANCE` / `TEXT_SABOTAGE_PREVENTED_VIGILANCE` | saboteur owner / planet owner, local only | faction colour |
+| hero neutralise 0x616740 | `TEXT_<A>_NEUTRALIZES_<B>`, `TEXT_BOUNTY_HUNTER_NEUTRALIZES_<B>`, `TEXT_GENERIC_NEUTRALIZE_MESSAGE`, the two `TEXT_NEUTRALIZE_HERO_*_VIGILANCE` | local only | faction colour |
+| corruption begin 0x6f6120 / removal begin 0x5b13c0 | `TEXT_CORRUPTION_BEGIN` / `TEXT_REMOVE_CORRUPTION_BEGIN` | local only | faction colour |
+| special-structure sabotage 0x5b32c0 | `TEXT_SABOTAGE_ACCOMPLISHED_ALLY` / `_ENEMY` | local only | constant (230, 255, 255, 255) (0x140b2c230) |
+| credit halt 0x5b2450, assassination 0x702790 | English "TEMP TEXT: …" / "TEMP: …" strings built in code (not in the text database) | local only | (230, 255, 255, 255) |
+
+#### 2.7.2 Droid Log (Holocron) entries [H unless tagged]
+- HUD +0x2888 is 0x9d2a0 (given to the HUD init 0x30ae50 by 0x4b250). The advisor show 0x2e4260 calls it with each line's
+  text and colour **when the line is shown**. In galactic mode only (game mode type 0) it appends three rows to the log
+  (0x140a61e98, {text, colour} entries):
+  1. `TEXT_LOG_CYCLE_01` ("Day ##0", ##0 = galactic cycle count, mode +0x370) in `Droid_Date_Color` (GameConstants +0x12a0,
+     FoC 255 0 0);
+  2. the line's text in the line's own colour (`Droid_Text_Color` +0x12b0 is not used here);
+  3. `TEXT_HELP_SEPERATOR` (a row of underscores) in `Droid_Seperator_Color` (+0x12c0, 128 128 128).
+- The Droid Log page (fill 0x9db60) lists them oldest first in `IDC_DROID_LIST`, word-wrapping the text rows to the list width
+  (0x1c3f50) [M: then scrolls to the end, 0x1c4140].
+- So there is **no dedicated battle entry**. A battle reaches the log only through the advisor lines it produced and only once
+  they were shown: after an auto-resolve, `TEXT_AR_{SPACE,LAND}_{WIN,LOSS}_{MAJOR,REGULAR,MINOR}` ("##0 … at ##1 … ##2": faction
+  name, planet, losses) and `TEXT_AR_HERO_LOSS` per dead hero, red (255, 24, 39), when the local player took part or the planet
+  is visible (0x2b92e0 space / 0x2b76a0 land; GALACTIC_DIALOGS §3.1, BATTLE_TRANSITIONS §4.1 step 4); and
+  `TEXT_PLANET_CHANGED_HANDS[_BONUS]` (0x3fb040, red) when the planet changes owner. A battle fought in tactical mode adds no
+  AR line [M: the AR block runs only on auto-resolve completion].
+- Other lines that end up in the log the same way: enemy fleet approaching (§2.7.3), periodic advisor hints, allegiance
+  change (0x689be0), station level lost (0x387f50), planetary revolt (0x3f98a0), galactic control percentage (0x344710),
+  interrupted production (0x402840), Lua `Game_Message` (0x6a33e0), and the §2.7.1 texts.
+
+#### 2.7.3 Faction announcer events (Factions.xml `SFXEvent_*`) [H unless tagged]
+
+| field (faction offset) | who plays it, when | repeat limit |
+|---|---|---|
+| `SFXEvent_Enemy_Fleet_Approaching_Planet` (+0x6f0) | 0x2854c0, called for every player when a fleet starts a hop (0x431c80) and from the fleet destination setter 0x435690. Plays for player P when: P is the local player; the fleet has a fleet behaviour and not all its units are hidden (stealth predicate 0x3a9760); the destination is owned by P; the fleet owner's relation entry for P (owner +0x370[P]) is 1 [M: hostile]; and P has an object in the destination's orbit list (PD +0xc8, 0x3fa950) [M: whether that list holds only fleets]. Also enqueues `TEXT_ENEMY_FLEET_APPROACHING_LOCATION` ("##0" = planet name) at the front, (0, 193, 91), with the Urgent advisor sound | ≥ 5000 ms of wall-clock time (timeGetTime) since the last one for that player (player +0x3b8), all planets together |
+| `SFXEvent_Strategic_Pop_Cap_Reached` (+0x700) | player tick 0x287e70, galactic, local player: u = population used (0x2abb20); plays when the stored previous value (player +0x3fc) is > 0, u is above it, and the capacity (0x2ac700) ≤ u; u is stored every tick | once per rise; never on the first tick; a refused build plays nothing here |
+| `SFXEvent_Tactical_Pop_Cap_Reached` (+0x710) | same tick in tactical: when "room for one unit" (0x2b03e0, no type) turns false | once per change to false (player +0x400) |
+| `SFXEvent_Land_Invasion_Commencing` (+0x640) | `Land_Invade` 0x2b0520 when the attacker is the local player; replaced by the corruption-mission speech or +0x650 for the pending corruption mission (AUDIO §9.7). Played before the attacker ≠ defender test, so it also plays when no conflict is queued | every `Land_Invade` call by the local attacker [M: including the queued-battle replay 0x28f590] |
+| `SFXEvent_GUI_Start_Campaign` (+0x600) | campaign start in the campaign dialog (0xc5250) and a second start path 0xc5870 [M: its caller not resolved]: the faction named by the campaign's `Starting_Active_Player` (campaign +0xa8, 0x4af360), played just before the campaign starts (0x28dbe0) | once per start |
+| `SFXEvent_Max_Credits_Limit_Reached` (+0x630), `SFXEvent_Build_Impossible_Location_Blockaded` (+0x660) | **no reader found**: a byte search of every disp32 access to +0x630 / +0x660 finds only the faction constructor / destructor (0x33a580 / 0x33c160) and other structures' fields. Parsed, never played [M: absence by search] | — |
+| `SFXEvent_Planet_Corrupted` / `_Corruption_Removed` (+0x720 / +0x730) | GALACTIC_REVEAL_CORRUPTION §4.4 | — |
+| `SFXEvent_Planet_Gained_Control` / `_Lost_Control` (+0x780 / +0x790) | ownership change 0x3fb040, local faction's sound: Gained when the new owner is the local player; Lost when the old owner is the local player and the new owner's faction `Is_Playable` (+0x20a8) | once per ownership change |
+
+Port note: the `[port]` triggers for Max_Credits_Limit_Reached and Build_Impossible_Location_Blockaded (PHASE4 ui4 t05 / t08)
+have no retail counterpart found; retail stays silent [M].
 
 ---
 

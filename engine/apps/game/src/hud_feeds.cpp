@@ -247,6 +247,7 @@ std::vector<ui::GalacticBuildOption> galactic_build_options(const galactic::Gala
                                                             const std::function<std::string(uint32_t type)>& icon) {
     std::vector<ui::GalacticBuildOption> out;
     if (planet >= g.planets().size() || player < 0 || static_cast<size_t>(player) >= g.players().size()) return out;
+    if (g.planets()[planet].owner != player) return out;  // §5.1.1: the bar lists only at the local player's own planet
     for (const uint32_t t : g.buildable(planet, player)) {
         if (t >= g.rules().types.size() || t > 0xFFFFu) continue;
         const galactic::TypeInfo& ti = g.rules().types[t];
@@ -261,8 +262,9 @@ std::vector<ui::GalacticBuildOption> galactic_build_options(const galactic::Gala
                 if (b.player == player && b.type == t) ++o.queued;
         o.structure = galactic::is_ground_structure_type(ti) || galactic::is_orbital_structure_type(ti) || galactic::is_star_base_type(ti);
         o.production_disabled = g.production_disabled(player, t);
-        // GALACTIC_DIALOGS §5.1: the space tab = space-queue units, starbases and orbital structures.
-        o.space = g.queue_kind(t) == galactic::kSpaceQueue || galactic::is_star_base_type(ti) || galactic::is_orbital_structure_type(ti);
+        // GALACTIC_DIALOGS §5.1.1 (0x3145c0): the land tab lists Build_Cost_Credits > 0 types that need a ground base level or
+        // are a DUMMY_GROUND_STRUCTURE (the can-build gate's ground-buildable test); every other type is a space-tab option.
+        o.space = !(ti.build_cost > 0 && (ti.required_ground_base != 0 || galactic::is_ground_structure_type(ti)));
         out.push_back(std::move(o));
     }
     return out;

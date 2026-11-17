@@ -200,22 +200,48 @@ void App::planet_icons(const galactic::GalacticSim& g, PlanetIndex row, ui::Gala
     }
 }
 
-// ui4 t03 [port] (GALAXY_MAP_PRESENTATION §1.1): the status icons and the corruption line of planet `row` for the local
-// player. g_build: one of the planet's queues holds a local entry. g_smuggled: an income siphon runs on the planet and the
-// local player is its siphoner or the planet's owner. g_corruption_icon: corrupted (its owner or the corrupter sees it, or
-// the planet's CorruptionInfo is visible [port: the gate is the political-control one]). g_corruption_text: while a
-// corruption transition runs, (int)(fraction x 100) in TEXT_CORRUPTION_PERCENT / TEXT_CORRUPTION_REMOVE_PERCENT
-// (GALACTIC_REVEAL_CORRUPTION §4.6).
+// ui4 t03 / t10 (GALAXY_MAP_PRESENTATION §1.7, 0x3ec380): the status icons and the corruption line of planet `row` for the
+// local player. g_build: the local player owns the planet and one of its production queues has an entry. g_smuggler /
+// g_smuggled: an income siphon runs there, by the local player / by another player (every viewer sees it).
+// g_corruption_icon: a corrupted planet shows GameConstants Corruption_Planet_Icon[type] (with b_filters2); an
+// uncorrupted one shows entry 8 (i_icon_corruption_info) when the local faction has Benefits_From_Corruption.
+// g_corruption_text: while a corruption transition runs, (int)(fraction x 100) in TEXT_CORRUPTION_PERCENT /
+// TEXT_CORRUPTION_REMOVE_PERCENT (GALACTIC_REVEAL_CORRUPTION §4.6), shown to every viewer.
+bool App::local_benefits_from_corruption(const galactic::GalacticSim& g) const {
+    const int32_t me = local_player();
+    if (me < 0 || static_cast<size_t>(me) >= g.players().size()) return false;
+    const uint32_t fx = g.players()[static_cast<size_t>(me)].faction;
+    return fx < g.rules().factions.size() && g.rules().factions[fx].benefits_from_corruption;
+}
+
 void App::planet_status(const galactic::GalacticSim& g, PlanetIndex row, ui::GalacticPlanetInfo& out) const {
     const galactic::PlanetState& ps = g.planets()[row];
     const int32_t me = local_player();
-    for (uint32_t q = 0; q < 2 && !out.building; ++q)
-        for (const galactic::BuildEntry& b : g.queue_of(row, q))
-            if (b.player == me) out.building = true;
-    out.smuggled = ps.siphon_player != galactic::kNoPlayer && g.frame() < ps.siphon_until && (ps.siphon_player == me || ps.owner == me);
-    const bool seen = ps.owner == me || g.can_see_planet_info(me, row, galactic::GalacticSim::PlanetInfo::PoliticalControl);
-    out.corrupted = seen && g.corrupted(row);
-    if (seen && g.corruption_transition_active(row)) {
+    if (ps.owner == me)
+        for (uint32_t q = 0; q < 2 && !out.building; ++q) out.building = !g.queue_of(row, q).empty();
+    const bool siphon = ps.siphon_player != galactic::kNoPlayer && g.frame() < ps.siphon_until;
+    out.smuggler = siphon && ps.siphon_player == me;
+    out.smuggled = siphon && ps.siphon_player != me;
+    out.corrupted = g.corrupted(row);
+    {
+        if (!corruption_icons_loaded_) {  // GameConstants Corruption_Planet_Icon (8 types, then the info icon)
+            corruption_icons_loaded_ = true;
+            if (const data::XmlNode& gc = data_.db.constants().element) {
+                std::string word;
+                for (const char c : std::string(gc.child_text("Corruption_Planet_Icon")) + " ") {
+                    if (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == ',') {
+                        if (!word.empty()) corruption_planet_icons_.push_back(std::move(word));
+                        word.clear();
+                    } else {
+                        word.push_back(c);
+                    }
+                }
+            }
+        }
+        const int32_t idx = out.corrupted ? static_cast<int32_t>(ps.corruption) : (local_benefits_from_corruption(g) ? 8 : -1);
+        if (idx >= 0 && static_cast<size_t>(idx) < corruption_planet_icons_.size()) out.corruption_icon = corruption_planet_icons_[static_cast<size_t>(idx)];
+    }
+    if (g.corruption_transition_active(row)) {
         const auto pct = static_cast<int32_t>(g.corruption_transition_fraction(row) * 100.0f);
         const char* key = ps.corruption_removing ? "TEXT_CORRUPTION_REMOVE_PERCENT" : "TEXT_CORRUPTION_PERCENT";
         const std::u16string* t = ui_.text.find(key);
@@ -426,6 +452,13 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
         i.political_control = p.control;
         i.space_level = p.starbase_level > 0 ? p.starbase_level : -1;
         i.ground_level = p.ground_level > 0 ? p.ground_level : -1;
+        // ui4 t10 (GALAXY_MAP_PRESENTATION §1.7): the pip rows' lengths - the planet type's Max_Space_Base (0x372780) and
+        // Special_Structures_Land (0x372740) [port: the per-planet overrides of planet data +0x230 / +0x238 are not kept].
+        if (g && p.row < g->planets().size() && g->planets()[p.row].type < g->rules().types.size()) {
+            const galactic::TypeInfo& pt = g->rules().types[g->planets()[p.row].type];
+            i.space_max = std::min(pt.max_space_base, 5);
+            i.ground_max = std::min(pt.ground_structure_slots, 9);
+        }
         i.conflict = (p.flags & render::kGalInBattle) != 0;
         // ui4 t03 [port]: weather / ability icons from the planet type (b_filters2), the status icons and the corruption line.
         if (p.type != objects::kNone && p.type < data_.types.size()) {
@@ -443,6 +476,11 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
                 i.political_control = -1.0f;
             // Text_Planetary_Income (GALACTIC_DIALOGS §5.3), behind the same gate as the planet tooltips. GalacticSim::planet_income
             // refreshes the sim's lists, so the host only reads: the last fiscal cycle's entries, else Planet_Credit_Value [port].
+            {
+                const galactic::PlanetState& ps0 = g->planets()[p.row];
+                // §1.7 g_planet_value without the income visibility: the planet base value.
+                if (ps0.type < g->rules().types.size()) i.credits = ps0.destroyed ? g->rules().types[ps0.type].destroyed_credit_value : ps0.base_value;
+            }
             if (!i.fogged && g->can_see_planet_info(local_player(), p.row, galactic::GalacticSim::PlanetInfo::CreditIncome)) {
                 const galactic::PlanetState& ps = g->planets()[p.row];
                 float sum = ps.income.empty() && ps.type < g->rules().types.size() ? static_cast<float>(g->rules().types[ps.type].credit_value) : 0.0f;
@@ -451,20 +489,12 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
                 const float net = g->frame() <= ps.halt_until ? 0.0f
                                   : galactic::econ::income_finish(sum, ps.min_income_set, ps.min_income, ps.max_income_set, ps.max_income, false, 0.0f, &siphoned);
                 i.income = static_cast<int64_t>(std::lround(net));
-                // g_planet_value: TEXT_TOOLTIP_CREDIT_FILTER "credit value of planets" = the planet base value (GALACTIC_ECONOMY §1.4)
-                // [M: which number the text prints is read from the tooltip, no capture with the filter on].
-                if (ps.type < g->rules().types.size()) i.credits = ps.destroyed ? g->rules().types[ps.type].destroyed_credit_value : ps.base_value;
+                // §1.7 g_planet_value with the income visibility (0x50b2a0): the planet's income (Planet_Income, gross 0) [port: the
+                // last fiscal cycle's net, as Text_Planetary_Income].
+                i.credits = static_cast<int32_t>(std::max<int64_t>(0, i.income));
             }
         }
         planets.push_back(std::move(i));
-    }
-    // ui4 t03 [port]: g_credit_bar level = the planet's credit value against the highest value on the map, 0..10.
-    {
-        int32_t top = 0;
-        for (const ui::GalacticPlanetInfo& i : planets) top = std::max(top, i.credits);
-        if (top > 0)
-            for (ui::GalacticPlanetInfo& i : planets)
-                if (i.credits >= 0) i.credit_level = static_cast<int32_t>(std::lround(10.0 * static_cast<double>(i.credits) / static_cast<double>(top)));
     }
     hero_filter_ = (ui_.galactic_hud.filter_bits() & ui::kFilterHero) != 0;  // read by planet_icons next frame
     f.planets = planets;
@@ -594,14 +624,27 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
     // (queue full, pop cap, funds; const reads, no side effects), enabled = no block, queued = the local player's entries of
     // the type in the planet's queues; structure = ground / orbital structure or starbase (b_Create_NN);
     // production_disabled = the player's production-disabled list (REMAINING_GAPS §1.5).
-    f.providers.build_options = [s, types](uint32_t planet, std::vector<ui::GalacticBuildOption>& out) {
+    // ui4 t12 (GALACTIC_DIALOGS §5.1.1): row = GUI_Row 0 -> 0 (lower pads), else 1 (upper pads).
+    f.providers.build_options = [s, types, otypes = &data_.types](uint32_t planet, std::vector<ui::GalacticBuildOption>& out) {
         const galactic::GalacticSim* gs = s ? s->galaxy() : nullptr;
         if (!gs) return;
         const PlanetIndex pi = planet_index(*gs, planet);
         if (pi == kInvalidPlanet) return;
         out = galactic_build_options(*gs, s->local_player(), pi,
                                      [types](uint32_t t) { return t < types->size() ? (*types)[t].icon_name : std::string(); });
+        for (ui::GalacticBuildOption& o : out)
+            if (o.type_index < otypes->size())
+                o.row = otypes->get_int(static_cast<objects::TypeIndex>(o.type_index), "GUI_Row") == 0 ? 0 : 1;
     };
+    // §5.1.1 (0x3e8a80): an inaccessible (or destroyed) surface forces the space tab.
+    if (g && selected_planet_ != 0)
+        if (const PlanetIndex spi = planet_index(*g, selected_planet_); spi != kInvalidPlanet) {
+            f.land_tab_allowed = g->surface_accessible(spi);
+            // ui4 t10 (§1.7): Text_Land_Fleet's gates - a destroyed planet, the ground forces' visibility (0x50ba40).
+            f.planet_destroyed = g->planets()[spi].destroyed;
+            f.ground_forces_unknown = g->planets()[spi].owner != local_player() &&
+                                      !g->can_see_planet_info(local_player(), spi, galactic::GalacticSim::PlanetInfo::GroundCompanyContents);
+        }
     // GALACTIC_DIALOGS §5.2: the selected planet's build queues (the local player's entries, head first): space queue on
     // queue00..04, ground queue on queue05..09 (HudQueueEntry::land); the head's timer gives the dial. A click cancels
     // through Production {cancel, queue, index} at the planet.

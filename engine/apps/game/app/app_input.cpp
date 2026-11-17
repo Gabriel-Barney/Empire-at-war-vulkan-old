@@ -472,7 +472,15 @@ void App::handle_hud_actions(const std::vector<ui::HudAction>& acts) {
             case ui::HudAction::Kind::ResumeGame:  // the Game Paused banner's Resume Game (pause_event(false))
                 if (session_ && session_->pause_requested()) toggle_pause();
                 break;
-            case ui::HudAction::Kind::RadarCameraJump: bview_.camera().set_look_at({a.x, a.y, 0.0f}); break;
+            case ui::HudAction::Kind::RadarCameraJump:
+                // ui4 t07 (HUD_GAPS §10.1): the galactic radar jumps the galaxy camera (instant, no planet selection); ignored
+                // under the story's SCROLL_LOCK.
+                if (screen_ == Screen::Galactic) {
+                    if (!story_present_.scroll_locked() && !story_present_.controls_locked()) gview_.camera().set_look_at({a.x, a.y, 0.0f});
+                } else {
+                    bview_.camera().set_look_at({a.x, a.y, 0.0f});
+                }
+                break;
             case ui::HudAction::Kind::PlanetInfo: {  // GALACTIC_DIALOGS §9: the organiser's planet_info button -> IDD_PLANET_INFO
                 // Single instance: a click while it is open does nothing (the first planet is kept). No pause, no §6.3 gates.
                 if (screens_.planet_info_open()) break;

@@ -38,8 +38,9 @@ Implementing modules: **ui** = HUD components / dialogs, **render** = 3D models 
   its centre 11.5 below the slot position); `Size` x 0.75 is the unit icon's scale only (the XML's own note). `fleet_empty` is an opaque dark disc, not an outline: alpha 255 in the
   atlas, and the same fill over sky, dust and planet in 40.jpg, tinted Empire blue on every planet including unowned ones (fill ≈ RGB 4,16,30; the art x `<Color>` gives 11,27,48, so
   about 0.6 of it: source of the extra darkening not traced). `g_planet_name` starts about 31 units right of the planet centre, overlapping the disc's edge as in the port.
-- Value text needs filter bit 1, ground/space level pips need bit 4. Status details refresh
-  round-robin (0x3ec380), a few planets per frame.
+- Value text needs filter bit 1, the ground/space level pips need bit **2** (b_filters1, base level); bit 4 (b_filters2)
+  gates the weather / ability icons (corrected ui4 t10, 2026-11-17; earlier text said bit 4 for the pips). Status
+  details refresh round-robin (0x3ec380), a few planets per frame. Full gate list and the status row: §1.7.
 
 ### 1.3 Which fleet goes in which slot (0x3eb680) [H]
 - Orbit list 0x395900. A fleet's own slot = fleet +0xc0 → +0x48 (0x4327b0).
@@ -95,6 +96,75 @@ otherwise by hero faction: rebel / empire / underworld. Base 24.jpg: the blue me
 Replace the faction-emblem discs with: stack texture by unit count, the representative unit's
 `Icon_Name` on top, stealth/raid badge, three slots placed per §1.2/§1.3, land-forces button below.
 Keep the emblem only in the fleet tooltip.
+
+### 1.7 Label gates and status row (ui4 t10, 2026-11-17) [H unless tagged]
+Read through REA and the decompiled export: 0x3d3790 (per-planet record build), 0x3ea1b0 (per-frame placement),
+0x3db950 (pip rows), 0x3dbc00 (status row), 0x3ec380 (round-robin refresh). Filter bits = HUD +0x21c4 (§1.1:
+1 credit, 2 base level, 4 ability/weather, 8 hero).
+
+**Record.** Per planet the build clones, in this order: three `g_planet_fleet`, `g_planet_name` (the wide name text at
+type +0x140, upper-cased), `g_planet_value`, `g_space_level`, 5 × `g_space_level_pips`, `g_space_icon`, `g_ground_level`,
+9 × `g_ground_level_pips`, `g_ground_icon`, `g_conflict`, `g_hero`, `g_enemy_hero`, 3 more `g_hero`, `g_build`,
+`g_smuggler`, `g_bounty_hunter`, `g_planet_land_forces`, `g_radar_blip`, `g_smuggled`, 2 × `g_special_ability`,
+`g_planet_ring`, `g_weather` (icon = type `Encyclopedia_Weather_Icon` +0x18d0), `g_planet_ability` (icon = type
+`Planet_Ability_Icon` +0x2230), `g_corruption_text`, `g_corruption_icon`. Not cloned, so never drawn on the map:
+`g_political_control` (no code reference) and `g_credit_bar` (its name is not even in the executable).
+
+**Per frame (0x3ea1b0).** Owner colour = the owner faction's colour, or the `Neutral` faction's while the planet is
+unrevealed (+0x2c9) or its owner not visible (0x50bf10).
+- `g_planet_value` (bit 1): text "+N" (literal plus), N = round-half-away of the planet's income (Planet_Income with
+  gross = 0, 0x3f68b0, GALACTIC_ECONOMY §1.4) when the local player may see the credit income (0x50b2a0, REMAINING_GAPS
+  §6.3), else of the planet base value (0x3733c0); owner colour. Hidden without bit 1. This is the only credit read-out on the map
+  (answers t10's `g_credit_bar` question: there is none).
+- Level pips: ground pip i (0..8) is drawn for i < the planet's max ground base level (0x372740), in full owner
+  colour when i < the current ground base level, else in half-intensity owner colour (RGB / 2); the current level
+  counts as 0 when the local player may not see it (0x50b840). Space pips (0..4) the same with the max (0x372780) and
+  current starbase level (0x50c420 / 0x3f8b30). Pips at or past the max are hidden. 0x3db950 then hides **all** pips
+  without bit 2; with bit 2 it lays each row out from the planet plus the first pip's `Default_Offset` (space 34 −13,
+  ground 34 −26) [M: 0x34c050 = Default_Offset], one pip width per step, lowered by the value text's `Offset` y (−11)
+  when bit 1 is on. `g_space_level`, `g_ground_level` (the Bars) and `g_space_icon`, `g_ground_icon` are hidden every
+  frame.
+- `g_weather` and `g_planet_ability`: shown with bit 4, hidden without it; no visibility gate.
+- `g_corruption_text`: shown whenever planet data +0x2e2 or +0x2e3 is set (corruption being applied / removed):
+  `TEXT_CORRUPTION_PERCENT` (or `TEXT_CORRUPTION_REMOVE_PERCENT` with +0x2e3) formatted with 100 × the progress
+  (0x4b7e20). Such planets are refreshed every frame, the others round-robin.
+
+**Status row (0x3dbc00).** Start = planet position, + the value text's `Offset` y when bit 1 is on, + `g_ground_icon`'s
+`Default_Offset` y when bit 2 is on [M: which of its two `Default_Offset` tags], + `g_conflict`'s `Offset` (30, −16).
+The visible icons are then placed left to right in this **fixed order**, each centred half its width on, the pen moving
+by its width (no gap): `g_conflict`, `g_hero` (you), `g_enemy_hero`, `g_hero` (rebel), `g_hero` (empire), `g_hero`
+(underworld), `g_build`, `g_smuggler`, `g_bounty_hunter`, `g_smuggled`, `g_corruption_icon`.
+
+**Show rules (0x3ec380, round-robin: count / 30 + 1 planets per frame from HUD +0xfb0, 30 = 0x140b0a340).** No filter
+or visibility gate except where named; "local" = the local player.
+- `g_conflict`: when the planet is the one 0x3ce850 recorded (HUD +0xe08; set by the space / land conflict drivers
+  0x2b92e0 / 0x2b76a0 and by 0x2a7580) it is shown and starts blinking (`Blink_Duration` 3), and +0xe08 is cleared
+  [M: hidden again when the blink ends].
+- Hero medals (§1.5): `g_hero` (you) and `g_enemy_hero` only with the global 0x140a7c475; the three faction medals only
+  without it. "You" = a hero allied to the local player (0x39a230); enemy = another hero that passes the stealth-hero
+  view test 0x2e6810; the faction medal follows the hero owner's faction (the three faction names held at HUD
+  +0x2708 / +0x2728 / +0x2748) [M: which list, orbit or surface, is scanned first].
+- `g_build`: shown while the planet's owner is the local player and either production queue has a head entry
+  (0x401960, queue 0 or 1); otherwise it starts blinking (`Blink_Duration` 6) [M: then hides].
+- `g_smuggler` / `g_smuggled`: when planet data +0x200 (the siphoning player, GALACTIC_ECONOMY §1.3 / §1.4) is set:
+  `g_smuggler` if that player is local, else `g_smuggled`. Shown to every viewer.
+- `g_bounty_hunter`: when the planet data map at +0xa0 has a non-empty entry under key 14 and the planet's owner is
+  not the local player [M: key 14 = the bounty-hunter ability].
+- `g_corruption_icon`: on a corrupted planet (data +0x2f4 ≠ −1) and bit 4: GameConstants `Corruption_Planet_Icon`
+  [corruption type]; on an uncorrupted planet, when the local faction has `Benefits_From_Corruption` (+0x10b):
+  `Corruption_Planet_Icon`[8] = `i_icon_corruption_info.tga`, with no filter; otherwise hidden.
+
+**Organiser and planet map labels.**
+- `Text_Land_Fleet` (organiser, 0x3e83a0): hidden on a destroyed planet (data +0x2c8); otherwise line 1
+  `TEXT_BASE_LAYOUT`, line 2 (`Text_Offset2` 0 −20) `TEXT_UNKNOWN` when the local player may not see the planet's
+  ground forces (0x50ba40), else empty.
+- `planet_bonus` (planet-map shell, set on entering the map 0x3c5fc0): icon = the planet type's
+  `Planet_Ability_Icon` (+0x2230), the texture `g_planet_ability` uses on the map.
+
+**Port (2026-11-17).** `engine/ui/src/galactic_hud.cpp` draws `g_credit_bar` and `g_political_control`, shows the
+levels with the `g_ground_level` / `g_space_level` Bars instead of the pip rows, hides weather / ability / corruption
+text on fogged planets, and orders the status row differently (hero medals before build, enemy hero last, a 2-unit
+gap); retail does none of these.
 
 ---
 

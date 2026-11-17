@@ -812,12 +812,15 @@ void test_real(Gpu& g, const std::string& src_dir) {
                 ui::GalacticBuildOption o;
                 o.icon = icon;
                 o.cost = 500;
-                o.space = icon[9] == 'T';  // 5.1: the TIE options on blue (space) pads, the rest amber
+                o.space = icon[9] == 'T';  // 5.1.1: the TIE options on the space tab (not shown: land tab), the rest on land
                 out.push_back(o);
             }
             ui::GalacticBuildOption s;
             s.icon = "I_BUTTON_EMPIRE_BARRACKS.TGA";
             s.structure = true;
+            s.row = 0;  // GUI_Row 0: the lower row
+            out.push_back(s);
+            s.icon = "I_BUTTON_TIE_FIGHTER.TGA";
             out.push_back(s);
         };
         f.providers.build_queue = [](std::vector<ui::HudQueueEntry>& out) {

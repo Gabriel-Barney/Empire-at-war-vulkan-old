@@ -575,6 +575,9 @@ public:
     void open_linked_banner(const galactic::GalacticSim& g, const sim::CampaignBattles::LinkedRecord& r);  // story t13
     std::string representative_icon(std::span<const objects::ObjectHandle> units, bool hero_filter = false) const;
     void planet_status(const galactic::GalacticSim& g, PlanetIndex row, ui::GalacticPlanetInfo& out) const;  // ui4 t03
+    bool local_benefits_from_corruption(const galactic::GalacticSim& g) const;  // ui4 t10: the local faction's flag
+    mutable std::vector<std::string> corruption_planet_icons_;  // ui4 t10: GameConstants Corruption_Planet_Icon
+    mutable bool corruption_icons_loaded_ = false;
     bool hero_filter_ = false;  // ui4 t03: b_filters3 on (GalacticHud::filter_bits, last build)
     void answer_battle_prompt(bool auto_resolve);
     void auto_resolve_result(const galactic::GalacticSim& g, const galactic::ConflictLogEntry& e);

@@ -473,12 +473,78 @@ screen height / 768 (UI.md §2.4). Positions below are bone positions in canvas 
   `..._dark`). **Despite the names, `_rebel` is the amber/orange pad and `_empire` the blue pad** (atlas
   `MT_CommandBar`). 25/26.jpg (Empire, land tab) show amber pads, so the index is not "Empire = 1". It follows
   the build tab: land/ground tab → index 0 (amber), space tab → index 1 (blue), matching the queue holograms
-  (`i_button_hologram.tga` blue = space, `_land` orange = ground) [M; confirm with a space-tab screenshot].
-  The port shows blue pads on the land tab (33.webp).
+  (`i_button_hologram.tga` blue = space, `_land` orange = ground) [H since ui4 t12: 0x309af0 picks
+  `Blank_Texture_Name[tab]`, §5.1.1]. The port shows blue pads on the land tab (33.webp).
 - Cost text: `Text_Offset 0 0`, EmpireAtWar-Medium 6, outlined. In the original it sits **centred along the
   bottom edge inside the pad** and is **green** when affordable (25.jpg) [H screenshot]; red/grey when not
   [L]. Port draws it white at the top. `Text_Color2` (255, 189, 26, 180) with `Text_Offset2 0 −20` is the
   second line (queued count / bonus) [L]. Build progress = `i_button_build.tga` radial dial.
+
+### 5.1.1 Build tabs (ui4 t12, 2026-11-17) [H unless tagged]
+Read through REA and the decompiled export: 0x3145c0 (galactic build-bar fill), 0x309af0 (one pad), 0x3de450 /
+0x3de9b0 / 0x3ccfc0 (tab and dial clicks), 0x3e8a80 (tab gate), 0x3d3200 / 0x2fd330 (re-apply), HUD save / load
+0x304c10 / 0x2f9c60. Component ids below are the HUD enum (table 0x140a174e0, 72-byte entries: name, then the click
+handler at +0x18); the port resolves components by name.
+
+**Tab state.** HUD +0x21ac (byte): **0 = land (planet) tab, 1 = space tab.**
+- `b_space_tab` (id 0x45) click → 0x3de9b0 sets 1; `b_planet_tab` (0x46) click → 0x3de450 sets 0; `b_dial` (0x47)
+  click → 0x3ccfc0 "clicks" the other tab's button, with that button's click sound (land tab → b_space_tab, space tab →
+  b_planet_tab). Nothing else calls the two setters directly (their only references are these thunks) [M: a hotkey
+  that clicks the buttons by name was not looked for].
+- A setter that changes the value plays `GUI_Dial_Switch_SFX` and resets the "options shown last" list (HUD +0x1110);
+  setting the current value again is silent. Both set the dial icon: land tab → `b_dial` Icon_Alternate[1]
+  `i_button_dial_right.tga`, space tab → [0] `i_button_dial_left.tga`.
+- Default: no code writes +0x21ac except the two setters and the save loader. The HUD is the static object 0x140b27f60,
+  so the first campaign of a session starts on the land tab [M: zero-initialised static; whether a later campaign in
+  the same session keeps the previous campaign's tab is not settled]. Selecting another planet (0x3de570) does not
+  touch it. It is saved (HUD chunk 0x24) and restored; galactic map setup 0x3d3200 and 0x2fd330 click the current
+  tab's button again, silently, to re-apply it (0x2fd330 opens the story-manager event gate 0x446220 for that click).
+- Forced space tab: every galactic HUD update with a revealed planet selected (0x3e8a80), if that planet's surface is
+  not accessible (0x375220: `Planet_Surface_Accessible`, or planet data +0x2c8 "destroyed"), b_space_tab is clicked
+  (tab := 1) and b_planet_tab is disabled (Disabled_Texture `i_tab_land_disabled.tga`); otherwise b_planet_tab is
+  enabled. A disabled button ignores clicks, so the dial cannot reach the land tab there either [M: one component
+  flag can let a disabled button click; not set for b_planet_tab in the XML].
+
+**Which options a tab lists** (0x3145c0; galactic HUD mode only; every HUD update 0x30c3b0 and on planet selection):
+- Only for a selected planet owned by the local player (0x3956c0 record +4); for any other planet, or none, all
+  26 pads are hidden.
+- Every object type, in type-manager order (0x140b2f020, i.e. XML load order), is tested in this order:
+  1. Kind from the first set `Build_Tab_*` flag: Land_Units (+0x4c), Space_Units (+0x4d), Special_Structures
+     (+0x4f), Heroes (+0x4e), Outpost (+0x50), Space_Station (+0x51). A type with none of them is never listed. The
+     kind does **not** choose the tab.
+  2. Tab: **land** when `Build_Cost_Credits` (+0x86c) > 0 and (`Required_Ground_Base_Level` (+0xf0c) ≠ 0 or behaviour
+     DUMMY_GROUND_STRUCTURE 0x5f), the "ground-buildable" test of the can-build gate (STRATEGIC_GAPS §1.3 step 5);
+     **every other type is a space-tab option**. Only the current tab's types go on.
+  3. Listed only if the can-build gate 0x2804d0 passes for the local player at this planet **without** the credit
+     check (check_credits = 0). So unaffordable types are listed (greyed, below); types failing any other step are not.
+     The code also collects "not buildable but known" types (0x280190) into two lists that it never draws, and has a
+     reason-9 branch that is dead (0x2804d0 never writes reason 9).
+  4. `GUI_Row` (+0x1b40) 0 → list A; any other value → list B. −1 also prints "Warning!  %s does not have GUI_Row
+     set." (The `/10` and `>= 10` arithmetic in the decompile is only the list growth step.)
+- Pads `b_Create_00..25` are ids 10..35; their count is GameConstants `Strategic_Command_Bar_Buildable_Row_Count`
+  (+0x121f4; not in the shipped XML, code default 26 in the GameConstants ctor 0x2c91c0). **List A (GUI_Row 0) fills
+  the odd pads b_Create_01, 03 … 25 (lower row, y 12..62); list B fills the even pads b_Create_00, 02 … 24 (upper row,
+  y 67..117)**, each from the left in list order. FoC data: structures and starbases have GUI_Row 0, units GUI_Row 1.
+- So 13 pads per row, the same 26 pads on both tabs. Options past the 13th of a row are **dropped** (0x309af0 returns
+  nothing once the pad id would pass 35); there is no scrolling: `b_scroll_left` / `b_scroll_right` (0x49 / 0x48) are
+  hidden on every fill. Pads left over in a row are hidden.
+
+**One pad (0x309af0).**
+- Icon = the type's `Icon_Name` (+0x1820), `i_button_temporary.tga` when empty. Background = `Blank_Texture_Name[tab]`
+  (land → `i_button_pad_rebel.tga` amber, space → `i_button_pad_empire.tga` blue). Index 2 is used only with HUD
+  +0x2042 set and DUMMY_UPGRADE in the type's `Behavior` list; galactic pads list two textures, so it never applies here [M].
+- Cost = the planet-adjusted cost (0x3711c0). The pad is disabled and tinted grey (128, 128, 128) when the cost exceeds
+  the player's credits (unless 0x289050 [M: free-build flag]), the tab's queue at the planet is full (land: ground queue
+  count HUD +0x21bc, space: space queue count +0x21b8, ≥ GameConstants `Max_Build_Queue`, code default 5), the pop-cap
+  check 0x2ac320 fails [M: meaning], or the type is in the player's production-disabled list (+0x1e0, story
+  DISABLE_BUILDABLE, REMAINING_GAPS §1.5).
+- Tooltip_Text index, first match: pop cap → 1 `TEXT_PRODUCTION_POP_CAP_REACHED`; unaffordable → 2
+  `TEXT_PRODUCTION_INSUFFICIENT_FUNDS`; queue full → 0 `TEXT_PRODUCTION_QUEUE_FULL`; else 3 (past the list: no reason
+  line [M]). A production-disabled type alone gets 3.
+
+**Port (2026-11-17).** `engine/ui/src/galactic_hud.cpp` fills b_Create_00.. in one run with every option (structures
+first), has no tab state (`GalacticHudFrame` only notes the tab as informational), no GUI_Row rows, colours each pad
+by the option's own `space` flag, and hides production-disabled options by default (retail lists them greyed).
 
 ### 5.2 Build queue strip [H]
 `queue00..09` bones at y 174 (meshes y 147..201), x 343..960: the **row of dome lights along the top edge of
@@ -536,7 +602,7 @@ visible in the original.
 ---
 
 ## 7. Open items
-- Space-tab screenshot to confirm the pad index rule (§5.1) and the unaffordable cost colour.
+- The unaffordable cost colour (§5.1). The pad index rule is settled in code (§5.1.1).
 - Which side is `graph_left` in a battle the local player attacks (§1.3).
 - Source of the planet-name colour (owner colour vs. fixed blue).
 - 35.webp rectangle: port-side dump of the item drawn there.
@@ -559,6 +625,9 @@ visible in the original.
 | 0x82e60 / 0x82fe0 | IDD_AUTO_RESOLVE_DIALOG open (MP "Always") |
 | 0x3e83a0 / 0x3c5fc0 / 0x3ce970 | organiser visibility / enter / leave planet map |
 | 0x2706c0 | font load incl. stretch |
+| 0x3145c0 / 0x309af0 | galactic build-bar fill (tab filter, GUI_Row rows) / one build pad (§5.1.1) |
+| 0x3de450 / 0x3de9b0 / 0x3ccfc0 | land tab / space tab / dial click (HUD +0x21ac, §5.1.1) |
+| 0x3e8a80 | galactic HUD update: forces the space tab on a planet without accessible surface (§5.1.1) |
 | 0x47d9c0 / 0x47eac0 | story script load (cache by name) / parse; keyword table 0xa2a1d0 (§2.6) |
 | 0x1089e0 / 0x1053c0 | story script executors: holocron summary / IDD_STORY_DIALOG (§2.6) |
 | 0x1f9a60 → 0x1fabc0 | master text file load (§2.7) |

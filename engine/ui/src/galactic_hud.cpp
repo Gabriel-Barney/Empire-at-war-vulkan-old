@@ -92,6 +92,9 @@ void apply_galactic_fallback_layout(const ComponentTable& table, const HudCanvas
         std::snprintf(n, sizeof n, "b_Create_%02d", k);
         put(n, -W + 307.0f + 54.0f * static_cast<float>(k / 2), -H + (k % 2 == 0 ? 92.0f : 37.0f));
     }
+    // ui4 t12: the build tabs' bones of i_galactic_controls.alo, in the same frame as b_Create_00 (bone 332 -> 307).
+    put("b_space_tab", -W + 257.0f, -H + 92.6f);
+    put("b_planet_tab", -W + 258.0f, -H + 34.7f);
     for (int k = 0; k < 10; ++k) {
         char n[32];
         std::snprintf(n, sizeof n, "queue%02d", k);
@@ -135,6 +138,11 @@ void GalacticHud::init(const ComponentTable& table, const TextureAtlas& atlas, F
     value_ = f("g_planet_value");
     credit_filter_ = f("b_filters0");
     for (int k = 0; k < 4; ++k) filters_[k] = find_fmt(table, "b_filters%d", k);
+    space_tab_ = f("b_space_tab");
+    planet_tab_ = f("b_planet_tab");
+    dial_ = f("b_dial");
+    scroll_left_ = f("b_scroll_left");
+    scroll_right_ = f("b_scroll_right");
     build_icon_ = f("g_build");
     smuggled_ = f("g_smuggled");
     corruption_icon_ = f("g_corruption_icon");
@@ -145,6 +153,10 @@ void GalacticHud::init(const ComponentTable& table, const TextureAtlas& atlas, F
     credit_bar_ = f("g_credit_bar");
     control_ = f("g_political_control");
     ground_ = f("g_ground_level");
+    ground_pips_ = f("g_ground_level_pips");
+    space_pips_ = f("g_space_level_pips");
+    ground_icon_ = f("g_ground_icon");
+    land_fleet_text_ = f("Text_Land_Fleet");
     space_ = f("g_space_level");
     conflict_ = f("g_conflict");
     hero_ = f("g_hero");
@@ -468,25 +480,18 @@ void GalacticHud::build_labels(const GalacticHudFrame& f) {
         }
         build_planet_stacks(p, at, alpha, cursor);
         const uint32_t filters = filter_bits();
-        // §1.1 / §1.2: the credit filter b_filters0 (Toggle, off at start) shows it.
-        if (const CommandBarComponent* c = comp(value_); c && p.credits >= 0 && (filters & kFilterCredit)) {
+        const bool f_credit = (filters & kFilterCredit) != 0, f_level = (filters & kFilterBaseLevel) != 0,
+                   f_weather = (filters & kFilterAbilityWeather) != 0;
+        const float value_dy = value_ >= 0 ? (*table_)[static_cast<size_t>(value_)].offset.y : -11.0f;
+        // §1.7 (0x3ea1b0): b_filters0 shows "+N" (owner colour); the only credit read-out on the map.
+        if (const CommandBarComponent* c = comp(value_); c && p.credits >= 0 && f_credit) {
             const Vec2f o = up(c->offset);
-            text_at(value_, num32(p.credits), {at.x + o.x, at.y + o.y}, 0, alpha);
+            text_at(value_, U"+" + num32(p.credits), {at.x + o.x, at.y + o.y}, 0, alpha, &p.owner_color);
             ++stats_.planet_values;
         }
-        // ui4 t03 [port]: g_credit_bar with the credit filter, its Default_Offset (0, 8) below the value text, left edge on it.
-        if (const CommandBarComponent* c = comp(credit_bar_); c && p.credit_level >= 0 && (filters & kFilterCredit) && !c->bar_texture.empty()) {
-            const Vec2f vo = value_ >= 0 ? (*table_)[static_cast<size_t>(value_)].offset : Vec2f{30, -11};
-            const std::string* t = pick(c->bar_texture, std::clamp(p.credit_level, 0, std::max(0, c->max_bar_level)));
-            const AtlasEntry* e = t ? atlas_->find(*t) : nullptr;
-            const float w = e ? static_cast<float>(e->width) : 30.0f;
-            if (t && add_atlas_quad(dl_, 0, HudList::Alpha, *atlas_, *t, {at.x + vo.x + 0.5f * w, at.y + vo.y - c->default_offset.y}, {}, 1.0f,
-                                    with_alpha(Rgba8{}, alpha)))
-                ++stats_.credit_bars;
-        }
-        // ui4 t03 [port]: b_filters2 shows the planet's weather (g_weather, Offset -20 -31) and ability (g_planet_ability,
-        // Offset 0 -34) icons below the planet; not on a fogged planet.
-        if ((filters & kFilterAbilityWeather) && !p.fogged)
+        // §1.7: b_filters2 shows the weather (g_weather, Offset -20 -31) and ability (g_planet_ability, Offset 0 -34) icons;
+        // no visibility gate.
+        if (f_weather)
             for (auto [ci, tex, n] : {std::tuple{weather_, &p.weather_icon, &stats_.weather_icons}, std::tuple{ability_, &p.ability_icon, &stats_.ability_icons}}) {
                 const CommandBarComponent* c = comp(ci);
                 if (!c || tex->empty()) continue;
@@ -494,62 +499,89 @@ void GalacticHud::build_labels(const GalacticHudFrame& f) {
                 if (add_atlas_quad(dl_, 0, HudList::Alpha, *atlas_, *tex, {at.x + o.x, at.y + o.y}, {}, c->scale, with_alpha(c->color, alpha), {16, 16}))
                     ++*n;
             }
-        // ui4 t03: g_corruption_text (yellow, left-justified, Offset 30 15 above the name) - the transition percentage.
-        if (const CommandBarComponent* c = comp(corruption_text_); c && !p.corruption_text.empty() && !p.fogged) {
+        // §1.7: g_corruption_text (Offset 30 15) whenever a corruption transition runs.
+        if (const CommandBarComponent* c = comp(corruption_text_); c && !p.corruption_text.empty()) {
             const Vec2f o = up(c->offset);
             text_at(corruption_text_, p.corruption_text, {at.x + o.x, at.y + o.y}, 0, alpha);
             ++stats_.corruption_texts;
         }
-        if (const CommandBarComponent* c = comp(control_); c && p.political_control >= 0.0f && !c->bar_overlay.empty()) {
-            const auto n = static_cast<int32_t>(c->bar_overlay.size());
-            const auto lvl = static_cast<int32_t>(std::lround(std::clamp(p.political_control, 0.0f, 1.0f) * static_cast<float>(n - 1)));
-            const Vec2f vo = value_ >= 0 ? (*table_)[static_cast<size_t>(value_)].offset : Vec2f{30, -11};
-            const Vec2f o{vo.x + c->default_offset.x, vo.y - c->default_offset.y};
-            const AtlasEntry* e = atlas_->find(*pick(c->bar_overlay, lvl));
-            const float w = e ? static_cast<float>(e->width) : 30.0f;
-            add_atlas_quad(dl_, 0, HudList::Alpha, *atlas_, *pick(c->bar_overlay, lvl), {at.x + o.x + 0.5f * w, at.y + o.y}, {}, 1.0f,
-                           with_alpha(Rgba8{}, alpha));
-        }
-        // ui4 t03 [port]: the ground / space level pips need the base-level filter b_filters1 (§1.2 "ground/space level pips
-        // need" a filter bit; b_filters1's tooltip is TEXT_TOOLTIP_BASE_LEVEL_FILTER).
-        for (auto [ci, level] : {std::pair{ground_, p.groundbase_info ? p.ground_level : -1},
-                                 std::pair{space_, p.starbase_info ? p.space_level : -1}}) {
-            const CommandBarComponent* c = comp(ci);
-            if (!c || level < 0 || c->bar_texture.empty() || !(filters & kFilterBaseLevel)) continue;
-            const Vec2f o = up(c->default_offset);
-            add_atlas_quad(dl_, 0, HudList::Alpha, *atlas_, *pick(c->bar_texture, level), {at.x + o.x, at.y + o.y}, {}, 1.0f,
-                           with_alpha(Rgba8{}, alpha));
-            ++stats_.level_pips;
-        }
-        // Status icons in a row from g_conflict's Offset.
+        // §1.7 (0x3db950): the level pip rows, only with b_filters1. Pip i < max is drawn, in the owner colour while i < the
+        // level, else at half intensity; the row starts at the pips' Default_Offset (space 34 -13, ground 34 -26), one pip
+        // width per step, lowered by the value text's Offset y while b_filters0 is on.
+        if (f_level)
+            for (auto [ci, level, max] : {std::tuple{space_pips_, p.starbase_info ? std::max(0, p.space_level) : 0, p.space_max},
+                                          std::tuple{ground_pips_, p.groundbase_info ? std::max(0, p.ground_level) : 0, p.ground_max}}) {
+                const CommandBarComponent* c = comp(ci);
+                if (!c || max <= 0) continue;
+                const std::string* t = c->icon_alternate_texture.empty() ? pick(c->icon_texture, 0) : pick(c->icon_alternate_texture, 0);
+                if (!t) continue;
+                const AtlasEntry* e = atlas_->find(*t);
+                const float w = e ? static_cast<float>(e->width) : 6.0f;
+                const Vec2f o = up(c->default_offset);
+                const float y = at.y + o.y + (f_credit ? value_dy : 0.0f);
+                const Rgba8 full = p.owner_color;
+                const Rgba8 half{static_cast<uint8_t>(full.r / 2), static_cast<uint8_t>(full.g / 2), static_cast<uint8_t>(full.b / 2), full.a};
+                for (int32_t i = 0; i < max; ++i)
+                    if (add_atlas_quad(dl_, 0, HudList::Alpha, *atlas_, *t, {at.x + o.x + w * static_cast<float>(i), y}, {}, c->scale,
+                                       with_alpha(i < level ? full : half, alpha)))
+                        ++stats_.level_pips;
+            }
+        // §1.7 status row (0x3dbc00): from g_conflict's Offset, lowered by the value text's Offset y with b_filters0 and
+        // g_ground_icon's Default_Offset y with b_filters1; the visible icons left to right, each centred half its width
+        // on, the pen moving by its width.
         Vec2f pen = conflict_ >= 0 ? up(comp(conflict_)->offset) : Vec2f{30, -16};
+        if (f_credit) pen.y += value_dy;
+        if (f_level && ground_icon_ >= 0) pen.y += up(comp(ground_icon_)->default_offset).y;
         pen = {at.x + pen.x, at.y + pen.y};
-        auto icon = [&](int32_t ci, bool on, int32_t alt) {
+        auto icon = [&](int32_t ci, bool on, int32_t alt, const std::string* tex = nullptr) {
             const CommandBarComponent* c = comp(ci);
             if (!c || !on) return;
-            const std::string* t = c->icon_texture.empty() ? pick(c->icon_alternate_texture, alt) : pick(c->icon_texture, 0);
+            const std::string* t = tex && !tex->empty() ? tex
+                                   : c->icon_texture.empty() ? pick(c->icon_alternate_texture, alt) : pick(c->icon_texture, 0);
             if (!t) return;
             const AtlasEntry* e = atlas_->find(*t);
             const float w = e ? static_cast<float>(e->width) : 12.0f;
             add_atlas_quad(dl_, 0, HudList::Alpha, *atlas_, *t, {pen.x + 0.5f * w, pen.y}, {}, c->scale, with_alpha(c->color, alpha), {12, 12});
-            pen.x += w + 2.0f;
+            pen.x += w;
             ++stats_.label_icons;
         };
         icon(conflict_, p.conflict, 0);
-        icon(hero_, p.hero_rebel && !p.fogged, 2);  // g_hero alternates: you, enemy, rebel, empire, underworld
-        icon(hero_, p.hero_empire && !p.fogged, 3);
-        icon(hero_, p.hero_underworld && !p.fogged, 4);
+        icon(hero_, p.hero_rebel, 2);  // g_hero alternates: you, enemy (multiplayer), rebel, empire, underworld
+        icon(hero_, p.hero_empire, 3);
+        icon(hero_, p.hero_underworld, 4);
+        icon(build_icon_, p.building, 0);
         icon(smuggler_, p.smuggler, 0);
         icon(bounty_, p.bounty_hunter, 0);
-        // ui4 t03 [port: the row order after the original's groups is not traced].
-        icon(build_icon_, p.building && !p.fogged, 0);
-        icon(smuggled_, p.smuggled && !p.fogged, 0);
-        icon(corruption_icon_, p.corrupted && !p.fogged, 0);
-        icon(enemy_hero_, p.enemy_hero >= 0 && !p.fogged, std::max(0, p.enemy_hero));
+        icon(smuggled_, p.smuggled, 0);
+        icon(corruption_icon_, !p.corruption_icon.empty() && (!p.corrupted || f_weather), 0, &p.corruption_icon);
     }
 }
 
+void GalacticHud::set_build_tab(bool space) {
+    if (space == build_space_tab_) return;  // setting the current tab again is silent
+    build_space_tab_ = space;
+    buttons_.play_sfx("GUI_Dial_Switch_SFX", space ? space_tab_ : planet_tab_);
+}
+
 void GalacticHud::build_bar(const GalacticHudFrame& f) {
+    // ui4 t12 (GALACTIC_DIALOGS §5.1.1, 0x3e8a80): an inaccessible surface forces the space tab and disables the land tab;
+    // the tab buttons show the current tab Selected, the dial its arrow (land: Icon_Alternate 1 i_button_dial_right,
+    // space: 0 i_button_dial_left).
+    land_tab_allowed_ = f.land_tab_allowed;
+    if (!land_tab_allowed_) set_build_tab(true);
+    if (planet_tab_ >= 0) {
+        ButtonRuntime& r = buttons_.state(static_cast<uint32_t>(planet_tab_));
+        r.selected = !build_space_tab_;
+        r.disabled = !land_tab_allowed_;
+    }
+    if (space_tab_ >= 0) buttons_.state(static_cast<uint32_t>(space_tab_)).selected = build_space_tab_;
+    if (dial_ >= 0) buttons_.state(static_cast<uint32_t>(dial_)).alt = build_space_tab_ ? 0 : 1;
+    if (land_fleet_text_ >= 0) {  // ui4 t10: the organiser's "Base Layout" caption
+        ButtonRuntime& r = buttons_.state(static_cast<uint32_t>(land_fleet_text_));
+        r.hidden = f.planet_destroyed;
+        r.text = text_or("TEXT_BASE_LAYOUT", U"Base Layout");
+        r.text2 = f.ground_forces_unknown ? text_or("TEXT_UNKNOWN", U"Unknown") : std::u32string();
+    }
     auto set_text = [&](int32_t ci, std::u32string t) {
         if (ci >= 0) buttons_.state(static_cast<uint32_t>(ci)).text = std::move(t);
     };
@@ -661,12 +693,16 @@ void GalacticHud::build_bar(const GalacticHudFrame& f) {
         ++stats_.buttons;
     }
 
-    // Build pads (selected planet): GALACTIC_DIALOGS §5.1 one grid, b_Create_00.. filled from the left. [inferred] structures
-    // first, then units, in provider order; the shell has no build_padNN bones, so units never use those components here.
+    // Build pads (selected planet), GALACTIC_DIALOGS §5.1.1 (0x3145c0): only the current tab's options; GUI_Row 0 fills the
+    // odd pads b_Create_01, 03 .. (lower row), any other GUI_Row the even pads b_Create_00, 02 .. (upper row), each from
+    // the left in provider order; past a row's pads the options are dropped (no scrolling: b_scroll_left / _right stay
+    // hidden). The shell has no build_padNN bones, so those components stay unused here.
     std::vector<GalacticBuildOption> options;
     if (sel && f.providers.build_options) f.providers.build_options(sel->planet, options);
-    std::stable_partition(options.begin(), options.end(), [](const GalacticBuildOption& o) { return o.structure; });
-    size_t slots_used = 0;
+    for (const int32_t ci : {scroll_left_, scroll_right_})
+        if (ci >= 0) buttons_.state(static_cast<uint32_t>(ci)).hidden = true;
+    std::vector<uint8_t> pad_used(create_.size(), 0);
+    size_t row_next[2] = {1, 0};  // row 0 -> odd pads, row 1 -> even pads
     auto pad = [&](int32_t ci, PadSlot slot) {
         const auto u = static_cast<uint32_t>(ci);
         const ComponentPlacement& p = layout_.placement(u);
@@ -683,9 +719,12 @@ void GalacticHud::build_bar(const GalacticHudFrame& f) {
         return true;
     };
     for (const GalacticBuildOption& o : options) {
-        if (o.production_disabled && !f.show_production_disabled) continue;
-        if (slots_used >= create_.size()) break;
-        const int32_t ci = create_[slots_used++];
+        if (o.space != build_space_tab_) continue;
+        size_t& next = row_next[o.row == 0 ? 0 : 1];
+        if (next >= create_.size()) continue;  // the row is full: dropped
+        pad_used[next] = 1;
+        const int32_t ci = create_[next];
+        next += 2;
         ButtonRuntime& r = buttons_.state(static_cast<uint32_t>(ci));
         r.icon_override = o.icon;
         r.disabled = !o.enabled || o.production_disabled || o.block != HudBuildOption::Block::None;
@@ -698,7 +737,7 @@ void GalacticHud::build_bar(const GalacticHudFrame& f) {
         }
         // GALACTIC_DIALOGS §5.1 second line (Text_Offset2 0 -20, Text_Color2 gold) = the queued count [L; port: > 0].
         r.text2 = o.queued > 0 ? num32(static_cast<int32_t>(o.queued)) : std::u32string();
-        r.alt = o.space ? 1 : 0;  // §5.1: amber i_button_pad_rebel = ground tab, blue i_button_pad_empire = space tab
+        r.alt = build_space_tab_ ? 1 : 0;  // §5.1.1: Blank_Texture_Name[tab] (amber land, blue space)
         PadSlot s;
         s.option = o;
         if (!pad(ci, std::move(s))) continue;
@@ -724,7 +763,8 @@ void GalacticHud::build_bar(const GalacticHudFrame& f) {
         }
     }
     for (const int32_t ci : build_pad_) buttons_.state(static_cast<uint32_t>(ci)).hidden = true;
-    for (size_t k = slots_used; k < create_.size(); ++k) buttons_.state(static_cast<uint32_t>(create_[k])).hidden = true;
+    for (size_t k = 0; k < create_.size(); ++k)
+        if (!pad_used[k]) buttons_.state(static_cast<uint32_t>(create_[k])).hidden = true;
 
     // Build queue.
     std::vector<HudQueueEntry> queue;
@@ -1283,6 +1323,8 @@ void GalacticHud::build_radar(const GalacticHudFrame& f) {
     // draw over both. [port] colour = the faceplate's dark radar ground.
     add_atlas_quad(dl_, 0, HudList::Opaque, *atlas_, {}, rc_at, {}, 1.0f, kGalacticRadarBackdrop, size);
     stats_.radar_backdrop = true;
+    radar_half_ = 0.0f;
+    hit(radar_, static_cast<uint32_t>(std::max(0, rc.base_layer)), rc_at, size);  // ui4 t07: the radar takes clicks
     if (f.planets.empty()) return;
     float x0 = f.planets[0].position.x, x1 = x0, y0 = f.planets[0].position.y, y1 = y0, z = 0.0f;
     for (const GalacticPlanetInfo& p : f.planets) {
@@ -1295,6 +1337,11 @@ void GalacticHud::build_radar(const GalacticHudFrame& f) {
     z /= static_cast<float>(f.planets.size());
     const float half = 0.5f * std::max({x1 - x0, y1 - y0, 1.0f}) * 1.2f;
     const float cx = 0.5f * (x0 + x1), cy = 0.5f * (y0 + y1);
+    radar_at_ = rc_at;
+    radar_size_ = size;
+    radar_cx_ = cx;
+    radar_cy_ = cy;
+    radar_half_ = half;
     auto to_radar = [&](float wx, float wy) {
         return Vec2f{rc_at.x + (wx - cx) / half * 0.5f * size.x, rc_at.y + (wy - cy) / half * 0.5f * size.y};
     };
@@ -1720,6 +1767,29 @@ void GalacticHud::update_input(const RoutedInput& routed, bool shift, bool ctrl,
                 a.ctrl = k.ctrl;
                 act(std::move(a));
             }
+            continue;
+        }
+        // ui4 t07 (HUD_GAPS §10.1, 0x3d1260): a left click on the galactic radar moves the camera to that point; it never
+        // selects a planet. [port] the point is the inverse of the blips' fit to the planets (build_radar), so the click
+        // lands where the radar shows it; retail maps the radar to a fixed +-380 x +-460 galaxy extent.
+        if (k.component == radar_ && radar_ >= 0) {
+            if (k.button == Button::Left && radar_half_ > 0.0f && radar_size_.x > 0.0f && radar_size_.y > 0.0f) {
+                const Vec2f c = canvas_.pixel_to_canvas(static_cast<float>(k.x) + 0.5f, static_cast<float>(k.y) + 0.5f);
+                HudAction a;
+                a.kind = HudAction::Kind::RadarCameraJump;
+                a.component = k.component;
+                a.name = (*table_)[static_cast<size_t>(k.component)].name;
+                a.x = radar_cx_ + (c.x - radar_at_.x) / (0.5f * radar_size_.x) * radar_half_;
+                a.y = radar_cy_ + (c.y - radar_at_.y) / (0.5f * radar_size_.y) * radar_half_;
+                a.button = k.button;
+                act(std::move(a));
+            }
+            continue;
+        }
+        // ui4 t12 (GALACTIC_DIALOGS §5.1.1): the build tabs and the dial (which clicks the other tab's button).
+        if (k.button == Button::Left && k.component >= 0 && (k.component == space_tab_ || k.component == planet_tab_ || k.component == dial_)) {
+            const bool to_space = k.component == dial_ ? !build_space_tab_ : k.component == space_tab_;
+            if (to_space || land_tab_allowed_) set_build_tab(to_space);
             continue;
         }
         if (k.component == pause_ && k.button == Button::Left) {  // [port: Gabriel] pause through the command stream

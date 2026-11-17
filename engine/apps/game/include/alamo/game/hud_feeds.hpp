@@ -26,7 +26,9 @@
 //   galactic_build_options ui4 t02 (GALACTIC_DIALOGS §5.1, A2K_T01 §1): the galactic build pads of a player at a planet -
 //                        GalacticSim::buildable in type order; cost = build_cost_for (planet / player price modifiers,
 //                        corruption and tech-upgrade multipliers), block = can_enqueue's reason (galactic_build_block),
-//                        queued = the player's entries of the type in the planet's two queues. Const reads only.
+//                        queued = the player's entries of the type in the planet's two queues; empty unless the player owns
+//                        the planet; space = not a land-tab type (ui4 t12, §5.1.1: Build_Cost_Credits > 0 and a required
+//                        ground base level or a ground structure). Const reads only.
 //   conflict_log_line    ui4 t05 [port]: the Holocron Droid Log line of a battle record (instead of ConflictLogEntry::text's
 //                        debug line): "Battle of <planet> (space|land): <attacker> vs <defender> - <winner> victorious", with
 //                        " (auto-resolved)", "<player> retreated" or "called off" (a dropped conflict). Names come from the

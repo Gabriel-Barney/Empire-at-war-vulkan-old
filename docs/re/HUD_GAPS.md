@@ -666,3 +666,71 @@ retail run (CU9H_T02_BOMBING_HUD_RUN.md). §9.3 already holds the rule; this spe
   along the path / per-frame speed over the live bombers), and `game::bombing_run_button` shows it while disabled. The
   port's F uses the straight path to the exit instead of 0x5c5530's remaining path length [M: equal on the straight
   edge-to-edge run path]. Visual check left: the drawn sector during the run.
+
+---
+
+## 10. Galactic radar click and Holocron controls (ui4 t07, 2026-11-17) [H unless tagged]
+Read through REA and the decompiled export: 0x3d1260 (radar click), 0x448c20 (camera set-position), 0x10fd30 /
+0x114df0 / 0x118410 (summary screen callbacks), 0x10a250 (sort), 0x9cfd0 / 0x9db60 (Droid Log callback / fill).
+
+### 10.1 Clicking the galactic radar
+- `radar_galactic` (enum 0x4d) and the planet map's `radar_galactic_adv_map` (0x2c2) have the same click handler,
+  0x3d1260 (component table thunk 0x346d10). It **moves the galactic camera; it never selects or deselects a planet.**
+- Ignored while the story SCROLL_LOCK flag (current mode +0x2d1) is set (STORY_PRESENTATION_REWARDS §5.11).
+- Otherwise it takes the planet-map radar while the advanced map is open (HUD +0x2a34), else `radar_galactic`, converts
+  the mouse position (HUD +0x212c / +0x2130) into HUD coordinates (0x261a70) and measures it from the radar's centre.
+  With (w, h) the radar's size: **x = dx / (w / 2) × 380, y = dy / (h / 2) × 460** (galaxy units; a fixed galaxy
+  extent, not fitted to the planets), z = 10. [M: the sign of y, i.e. whether radar-up is galaxy +y, follows from
+  0x261a70's convention, not read.]
+- The point goes to 0x448c20, the POSITION_CAMERA entry (P1_CAMERA_INPUT §1): in galactic mode an **instant** jump of the
+  camera target to (x, y), z replaced by the scroll plane, pose rebuilt (no scroll animation, no clamp read here [M]).
+- With the planet map open, the map is then left and entered again (0x3ce970, 0x3c5fc0) to refresh it.
+- Only the click callback is wired (the table entry has no other handler) [M: whether a held button repeats the
+  click was not read].
+- **Port (2026-11-17):** `engine/ui/src/galactic_hud.cpp` draws the radar (`build_radar`, blips fitted to the planets'
+  bounding box) but has no click on it; `HudAction::RadarCameraJump` exists for the tactical radar only.
+
+### 10.2 Holocron controls
+The Holocron pages are the dialogs `IDD_DROID_LOG`, the data chart, `IDD_TECH_TREE_*` and the three summary screens
+`IDD_SUMMARY_SCREEN_ECONOMY` (callback 0x10fd30), `_FLEETS` (0x114df0) and `_PRODUCTION` (0x118410).
+
+**Sort buttons** (summary screens). Each button calls the sort 0x10a250(key), then refills the list (scroll position
+kept). `IDC_BUTTON_PLANETARY` is matched by inline 8-byte compares, so its name is not in the string table.
+
+| button | screen (FoC GUIDialogs.rc) | key | sorts the rows by |
+|---|---|---|---|
+| `IDC_BUTTON_PLANETARY` ("TEXT_PLANETARY") | all three | 1 | planet name (row +8, UTF-16 code-unit order, case-sensitive) |
+| `IDC_BUTTON_BASE_CREDIT_VALUE` | Economy | 2 | base credit value (row +0x34) |
+| `IDC_BUTTON_TRADE_ROUTE_INCOME` | Economy | 3 | trade-route income (+0x38) |
+| `IDC_BUTTON_MINING_FACILITY_INCOME` | Economy | 4 | mining income (+0x3c) |
+| `IDC_BUTTON_TOTAL_INCOME` | Economy (Production's callback handles it too; the FoC dialog has no such button) | 5 | +0x34 + +0x38 + +0x3c |
+| `IDC_BUTTON_POP_CAP` | Production | 6 | +0x68 [M: pop cap] |
+| `IDC_BUTTON_PRODUCING` | Production | 7 | a two-flag score from +0x80 / +0xa8 [M: "is producing"] |
+| `IDC_BUTTON_UPGRADES` | Production | 8 | number of 32-byte entries at +0xd8..+0xe0 [M: upgrades list] |
+| `IDC_BUTTON_LAND_FLEETS` / `_SPACE_FLEETS` | Fleets callback only; not in the FoC dialog | 9 / 10 | +0x110 / +0x120 + +0x130 + +0x140 |
+
+- Direction: choosing a key sorts the numeric columns **largest first** and the name column **A to Z**; clicking the
+  same key again reverses it; a third click restores the first direction. The last key and direction are globals
+  (0x140a62364 / 0x140a62368) shared by the three screens [M: kept across opens; no reset found].
+- The rows (0x1a8-byte records, 0x140a62538..0x140a62540) are sorted in place by 0x10dcf0 [M: an unstable sort; ties
+  may change order].
+- Not a sort button, same callbacks: clicking a row's `IDC_PLANET_ICON<n>` selects that planet (0x3de570), scrolls the
+  galactic camera to it (0x44a1a0, the SCROLL_CAMERA mover) and closes the Holocron; ignored while
+  LOCK_PLANET_SELECTION (0x140b2a993) is set.
+
+**`IDC_HINTS_CHECK`** ("TEXT_ENABLE_HINTS", Droid Log). On fill (0x9db60) it is checked when any of the local player's
+three per-mode advisor-hint flags (player +0x3f8 / +0x3f9 / +0x3fa) is on. Toggling it (0x9cfd0, check-changed event)
+writes the new state into **all three**, i.e. it switches the periodic advisor hints (STORY_PRESENTATION_REWARDS §6.4;
+the same flag as SET_ADVISOR and Lua `Enable_Advisor_Hints`) on or off for every mode.
+
+**Port (2026-11-17).** `engine/ui/src/gui_info_screens.cpp` emits `SummarySort` (with the button name),
+`SummaryPlanetary` and `InfoHintsToggled`, but the game host does nothing with them yet.
+
+### 10.3 Named entry points (this pass)
+| RVA | role |
+|---|---|
+| 0x3d1260 / 0x346d10 | galactic and planet-map radar click / its table thunk |
+| 0x448c20 | camera set-position (galactic: instant target jump) |
+| 0x10fd30 / 0x114df0 / 0x118410 | summary screen callbacks: Economy / Fleets / Production |
+| 0x10a250 / 0x10dcf0 | summary sort (key 1..10, toggled direction) / in-place sort |
+| 0x9cfd0 / 0x9db60 | Droid Log callback (hints check) / fill |
