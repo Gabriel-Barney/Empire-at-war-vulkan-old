@@ -1012,6 +1012,9 @@ int32_t neutral_player(Call& c) {
 #endif
     return -1;
 }
+}  // namespace
+int32_t detail::neutral_player_id(Call& c) { return neutral_player(c); }
+namespace {
 // Get_Final_Blow_Player() (§2.4): obj +0x330 (the hook), -1 -> the neutral player; nothing without such a player.
 int m_get_final_blow_player(Call& c) {
     RemainingScriptHooks* hk = hooks(c);

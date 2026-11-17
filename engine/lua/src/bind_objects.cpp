@@ -120,6 +120,36 @@ bool destroy_object(Call& c, ObjectHandle h) {
     if (b && b->destroy_object) return b->destroy_object(h);
     return store(c)->destroy(h);
 }
+}  // namespace
+
+bool detail::object_has_model(Call& c, ObjectHandle h) {
+    const objects::ObjectStore* st = store(c);
+    const objects::GameObjectTypes* ty = types(c);
+    if (!st || !ty || !st->exists(h)) return false;
+    const TypeIndex t = st->type(h);
+    if (t >= ty->size() || ty->has_behavior(t, objects::BehaviorSet::Union, objects::beh::Marker)) return false;
+    const char* tag = st->mode() == objects::ModeKind::Space      ? "Space_Model_Name"
+                      : st->mode() == objects::ModeKind::Galactic ? "Galactic_Model_Name"
+                                                                  : "Land_Model_Name";
+    return !ty->get_string(t, tag).empty();
+}
+
+ObjectHandle detail::spawn_attached_effect(Call& c, ObjectHandle parent, TypeIndex type, int32_t owner, float z_offset, bool layer_z) {
+    objects::ObjectStore* st = store(c);
+    const objects::GameObjectTypes* ty = types(c);
+    if (!st || !ty || !st->alive(parent) || type == objects::kNone || type >= ty->size()) return {};
+    objects::SpawnParams sp;
+    sp.type = type;
+    sp.owner = owner;
+    sp.position = st->position(parent);
+    sp.position.z += z_offset;
+    if (layer_z) sp.position.z += ty->get_float(type, "Layer_Z_Adjust");
+    sp.facing = st->facing(parent);
+    if (object_has_model(c, parent)) sp.attach_parent = parent;
+    return st->create(sp);
+}
+
+namespace {
 
 std::string_view type_name(Call& c, TypeIndex t) {
     const objects::GameObjectTypes* ty = types(c);
@@ -2322,6 +2352,33 @@ int highlight(Call& c, const char* method, bool small) {
     if (!is_bool(c, 1)) return c.script_error_stop("GameObjectWrapper::%s -- invalid type for parameter 1. Expected boolean.", method);
     if (c.nargs == 2 && !c.is_number(2))
         return c.script_error_stop("GameObjectWrapper::%s -- invalid type for parameter 2. Expected number.", method);
+    // storyb t17 (STORYB_T17_SPAWNS_AND_DEATH.md §1 [H]): true makes an Object_Highlight[_Small] object in the target's
+    // store, owned by the neutral player, at the target's position (+ (0, 0, zoffset) only for a model-less target, + the
+    // type's Layer_Z_Adjust), attached to a target with a model (dies with it); a second true leaves the first effect
+    // alive. false kills the held effect. A dead receiver does nothing.
+    objects::ObjectStore* st = store(c);
+    const ObjectHandle target = self_object(c);
+    if (st && st->alive(target)) {
+        const objects::GameObjectTypes* ty = types(c);
+        ScriptObjectState* hs = edit_self(c);
+        if (to_bool(c, 1)) {
+            const TypeIndex ht = ty ? ty->raw().find(small ? "Object_Highlight_Small" : "Object_Highlight") : objects::kNone;
+            const float z = c.nargs == 2 && !detail::object_has_model(c, target) ? static_cast<float>(c.number(2)) : 0.0f;
+            if (const ObjectHandle e = detail::spawn_attached_effect(c, target, ht, detail::neutral_player_id(c), z, true); e && hs)
+                hs->highlight_effect = st->id(e);
+        } else {
+            ObjectHandle e = hs && hs->highlight_effect != objects::kNoObjectId ? st->find(hs->highlight_effect) : ObjectHandle{};
+            if (!st->alive(e) && ty)  // [port] the handle is not saved: after a load, the effect attached to the target
+                for (const ObjectHandle h : st->all_objects())
+                    if (st->alive(h) && st->attach_parent(h) == target &&
+                        st->type(h) == ty->raw().find(small ? "Object_Highlight_Small" : "Object_Highlight")) {
+                        e = h;
+                        break;
+                    }
+            if (st->alive(e)) (void)destroy_object(c, e);
+            if (hs) hs->highlight_effect = objects::kNoObjectId;
+        }
+    }
     if (ScriptObjectState* s = edit_self(c)) {
         (small ? s->highlighted_small : s->highlighted) = to_bool(c, 1);
         if (c.nargs == 2) s->highlight_offset = static_cast<float>(c.number(2));

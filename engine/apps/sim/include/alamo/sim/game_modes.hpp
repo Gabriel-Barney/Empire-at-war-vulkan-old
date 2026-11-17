@@ -268,6 +268,11 @@ public:
     bool read_state(ByteReader& r) override;
 
     uint64_t ai_services() const { return ai_services_; }
+    // storyb t17 (STORYB_T17_SPAWNS_AND_DEATH.md §3.1 [H]): retail's battle deaths happen inside the store update and leave
+    // the store at its end-of-step flush, the same frame. The port's battle runs after the store update (SimHost T5), so the
+    // host flushes the primary store once more after it (and its animation step); deaths after that (the T9 story scripts)
+    // stay one frame, dead with health 0, as in retail. The flushed objects leave the trees and the order table.
+    void flush_deaths();
 
 protected:
     void pre_service(objects::ObjectStore& store, const ModeTickContext& ctx) override;
@@ -305,6 +310,7 @@ private:
     std::vector<uint32_t> step_of_slot_;
     std::vector<ObjectId> moved_;       // objects whose box changed; refit at the next store update
     std::vector<ObjectId> dying_;       // destroyed; removed from the trees after the flush
+    void unlink_dying();                // dying_ objects the flush unlinked leave the trees and orders_
 };
 
 class LandMode final : public TacticalMode {

@@ -469,6 +469,15 @@ void TacticalMode::after_store_update(const ModeTickContext&) {
         else it->second.in_range = s.in_range;
     }
     steps_.clear();
+    unlink_dying();
+}
+
+void TacticalMode::flush_deaths() {
+    primary_.flush();
+    unlink_dying();
+}
+
+void TacticalMode::unlink_dying() {
     // Objects unlinked by the flush leave the trees.
     for (ObjectId id : dying_) {
         if (primary_.exists(primary_.find(id))) continue;

@@ -519,10 +519,27 @@ objects::ObjectHandle TacticalBattle::spawn_death_clone(TacticalMode& mode, int3
     if (type < 0 || static_cast<size_t>(type) >= catalog_->types().size()) return {};
     objects::SpawnParams sp;
     sp.type = static_cast<objects::TypeIndex>(type);
-    sp.owner = owner;
+    // storyb t17 (STORYB_T17_SPAWNS_AND_DEATH.md §3.2 steps 2, 6 [H]): the clone belongs to the neutral player and starts at
+    // the dying object's health, which Die has set to 0.
+    const int32_t neutral = galaxy_ ? galaxy_->neutral_player() : -1;
+    sp.owner = neutral >= 0 ? neutral : owner;
     sp.position = pos;
     sp.facing = facing;
-    return mode.spawn_death_clone(sp);
+    const objects::ObjectHandle h = mode.spawn_death_clone(sp);
+    if (h) mode.primary().set_health(h, 0.0f);
+    return h;
+}
+
+void TacticalBattle::spawn_death_explosion(TacticalMode& mode, int32_t type, Vec3 pos, int32_t clone_owner) {
+    // storyb t17 (STORYB_T17_SPAWNS_AND_DEATH.md §3.4 [H]): owned by the clone's owner (the neutral player); an Is_Decoration
+    // explosion type goes to the mode's secondary store, which the port marks objects::kFlagMapDecoration (kept in the
+    // primary store for drawing, out of the CRC, the trace and the Lua searches). [port] The first list entry, no synced
+    // pick, no Ranged_Target_Z_Adjust lift.
+    const size_t before = particles_.size();
+    spawn_particle(mode, type, pos, clone_owner);
+    if (particles_.size() == before || type < 0 || static_cast<size_t>(type) >= catalog_->types().size()) return;
+    if (catalog_->types().get_bool(static_cast<objects::TypeIndex>(type), "Is_Decoration"))
+        mode.primary().set_flag(particles_.back().h, objects::kFlagMapDecoration);
 }
 
 bool TacticalBattle::death_clone_corpse_path(uint32_t dying_type, int32_t clone_type, int32_t key) const {
@@ -541,9 +558,15 @@ bool TacticalBattle::death_clone_corpse_path(uint32_t dying_type, int32_t clone_
     }
     if (*infantry_category_ == ~uint64_t{0} || (types.get_mask(dying_type, "CategoryMask") & *infantry_category_) == 0) return false;
     const auto ct = static_cast<objects::TypeIndex>(clone_type);
+    // storyb t17 (STORYB_T17_SPAWNS_AND_DEATH.md §3.2 step 4 [H]): the clone type's generic <Behavior> set only (not the
+    // Land / Space / Galactic sets), and 0x5051d0: a collision-avoiding (Avoidance_Disabled false, a UnitCollisionClass)
+    // death-clone obstacle (IsDeathCloneObstacle) keeps the primary path.
     for (const objects::BehaviorTypeId b : {objects::BehaviorTypeId{0x19}, objects::BehaviorTypeId{0x40}, objects::BehaviorTypeId{0x14},
                                             objects::BehaviorTypeId{0x55}})
-        if (types.has_behavior(ct, objects::BehaviorSet::Union, b)) return false;
+        if (types.has_behavior(ct, objects::BehaviorSet::Generic, b)) return false;
+    if (!types.get_bool(ct, "Avoidance_Disabled") && !types.get_string(ct, "UnitCollisionClass").empty() &&
+        types.get_bool(ct, "IsDeathCloneObstacle"))
+        return false;
     return true;
 }
 
@@ -713,6 +736,7 @@ void TacticalBattle::process_death(TacticalMode& mode, const tc::DeathEvent& d, 
                 killer = store.owner(k->h);
             scoring_death_(u->h, killer);
         }
+        if (!silent) store.set_health(u->h, 0.0f);  // storyb t17 (STORYB_T17 §3.1 [H]): Die sets health 0 before the kill
         mode.destroy(u->h);
         vm_deaths_.push_back(u->id);  // story t06: the victory monitor sees this tick's deaths in this order
         s4_hover_death(u->id, at, face);  // s78n t20 batch 2: before the mover (and its hover state) goes
@@ -752,7 +776,10 @@ void TacticalBattle::process_death(TacticalMode& mode, const tc::DeathEvent& d, 
         (void)carried_by_clone;
 #endif
         if (const BattleTables::UnitVisuals* vis = visuals_of_type(u->type))
-            if (!silent && !vis->death_explosions.empty()) spawn_particle(mode, vis->death_explosions.front(), at, owner);
+            if (!silent && !vis->death_explosions.empty()) {
+                const int32_t neutral = galaxy_ ? galaxy_->neutral_player() : -1;  // storyb t17: the clone's owner
+                spawn_death_explosion(mode, vis->death_explosions.front(), at, neutral >= 0 ? neutral : owner);
+            }
         unit_gone(mode, *u);
     }
 }

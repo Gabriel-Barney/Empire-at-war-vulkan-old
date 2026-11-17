@@ -1362,14 +1362,19 @@ void TacticalBattle::bt_expand_company(TacticalMode& mode, const terrain::Object
         company_hint = company_hint || (kHint != objects::kNoBehavior && objects::behavior_type_id_from_crc(e.name_crc) == kHint);
     const bool hinted = record && !pl.hint.empty() && company_hint;
     if (record && !pl.hint.empty() && !company_hint) ++map_stats_.hints_skipped;
-    auto inherit = [&](objects::ObjectHandle h) {
-        ++map_stats_.company_members;
+    // storyb t17 (Q6_T30 §1 [H]: "every object created for it"): the TEAM containers the company spawn makes get the hint too
+    // (UM01 Find_Hint("URBAN_HUMAN_CIV_TEAM", "first1")).
+    auto give_hint = [&](objects::ObjectHandle h) {
         if (!hinted || !st.exists(h)) return;
         if (kHint != objects::kNoBehavior) (void)st.add_behavior(h, kHint);
         const objects::ObjectId id = st.id(h);
         const auto it = std::lower_bound(map_hints_.begin(), map_hints_.end(), id,
                                          [](const std::pair<objects::ObjectId, std::string>& e, objects::ObjectId v) { return e.first < v; });
         if (it == map_hints_.end() || it->first != id) map_hints_.insert(it, {id, pl.hint});
+    };
+    auto inherit = [&](objects::ObjectHandle h) {
+        ++map_stats_.company_members;
+        give_hint(h);
     };
     Participant P;
     P.galactic_id = objects::kNoObjectId;
@@ -1408,7 +1413,7 @@ void TacticalBattle::bt_expand_company(TacticalMode& mode, const terrain::Object
                 sp.owner = st.owner(made[s0]);
                 sp.position = Vec3{c.x / inv, c.y / inv, c.z / inv};
                 sp.facing = st.facing(made[s0]);
-                (void)st.create(sp);
+                give_hint(st.create(sp));
                 ++map_stats_.neutral_teams;
             }
         }
@@ -1425,11 +1430,12 @@ void TacticalBattle::bt_expand_company(TacticalMode& mode, const terrain::Object
     for (size_t k = 0; k < n; ++k) P.spots.emplace_back(pos, face);
     const auto pi = static_cast<uint32_t>(parts_.size());
     parts_.push_back(std::move(P));
-    const size_t u0 = units_.size();
+    const size_t u0 = units_.size(), c0 = containers_.size();
     deploy_script_ = true;
     deploy(mode, pi, *bt_rng_);
     deploy_script_ = false;
     for (size_t k = u0; k < units_.size(); ++k) inherit(units_[k].h);
+    for (size_t k = c0; k < containers_.size(); ++k) give_hint(containers_[k].h);  // storyb t17: its TEAM containers
     bt_used_ = true;
 }
 

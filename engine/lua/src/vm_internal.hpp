@@ -97,6 +97,17 @@ std::span<const ImplEntry> impl_script_remaining();  // bind_script_remaining.cp
 // force's units (AiScriptHost::tf_units) and its player (§1.5 upgrade gate; -1 = the first unit's owner). Pushes the
 // result (the firing unit, or false / nothing on a script error) and returns the value count, like an ImplFn.
 int task_force_fire_special_weapon(Call& c, bool space, const std::vector<objects::ObjectHandle>& units, int32_t player);
+// bind_script_remaining.cpp: the neutral player id (the galactic sim's, else the first neutral-faction player); -1 unknown.
+int32_t neutral_player_id(Call& c);
+// storyb t17 (STORYB_T17_SPAWNS_AND_DEATH.md §1.2 / §1.3 / §2.2 [H]): an effect object of `type` made for `parent` in the
+// parent's store, at the parent's position and facing (+ `z_offset` and the type's Layer_Z_Adjust when `layer_z`), owned
+// by `owner`. When the parent has a model (object_has_model) it is attached to it (dies with it, objects::SpawnParams::
+// attach_parent); [port] the render attachment to a bone is not kept: the object draws at its own position.
+objects::ObjectHandle spawn_attached_effect(Call& c, objects::ObjectHandle parent, objects::TypeIndex type, int32_t owner,
+                                            float z_offset, bool layer_z);
+// [port] retail tests the object's render model (obj +0x2a0); the port: the type names a model for the store's mode and
+// is not a MARKER (markers make no model in the game).
+bool object_has_model(Call& c, objects::ObjectHandle h);
 // bind_script_remaining.cpp: calls GameObjectWrapper.<name> of `unit` with `nargs` arguments at stack index `first` (the
 // task-force variants delegate to the object bindings). The results are dropped; returns the first result's truth (false
 // on an error, whose message is discarded [port: the original logs per unit]).

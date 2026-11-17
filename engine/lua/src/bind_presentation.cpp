@@ -601,8 +601,23 @@ int m_attach_particle_effect(Call& c) {
         }
     }
     if (c.nargs == 2) r.bone = std::string(c.string(2));
-    log_of(c).record_particle_effect(std::move(r));
-    return 0;
+    // storyb t17 (STORYB_T17_SPAWNS_AND_DEATH.md §2 [H]): the effect is an object of the type in the parent's store (whatever
+    // its Is_Decoration says), owned by the parent's owner, at the parent's position and facing, attached to the parent (it
+    // dies with it; a PARTICLE type's Particle_Lifetime_Frames ends it on time); the call returns it. [port] It draws at its
+    // own position (the bone only placed the render attachment): the render request is kept only when no object was made.
+    // [port] A PARTICLE type stays a render request (no object): the store has no lifetime service for a Lua-made object.
+    objects::ObjectStore* st = c.vm->host.store;
+    const objects::ObjectHandle parent = detail::object_handle(*c.self);
+    objects::ObjectHandle made{};
+    if (st && st->alive(parent) && r.type >= 0 && types &&
+        !types->has_behavior(static_cast<objects::TypeIndex>(r.type), objects::BehaviorSet::Union, objects::beh::Particle))
+        made = detail::spawn_attached_effect(c, parent, static_cast<objects::TypeIndex>(r.type), st->owner(parent), 0.0f, false);
+    if (!made) {
+        log_of(c).record_particle_effect(std::move(r));
+        return 0;
+    }
+    detail::push_object(c.L, *c.vm, made);
+    return 1;
 }
 
 int m_cinematic_hyperspace_in(Call& c) {

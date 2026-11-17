@@ -684,6 +684,10 @@ bool SimHost::tick_once() {
         object_anim_(*this);
         step("T5.anim");
     }
+    if (TacticalMode* tm = tactical(); tm && modes_.top() == tm) {  // storyb t17: the battle's deaths leave the store this frame
+        tm->flush_deaths();
+        step("T5.flush");
+    }
     // T6 scene animations [stub].
     // T7 PlayerList update in player index order (AI controllers issue orders here).
     static const char* const kPlayerZone[] = {"T7.p0", "T7.p1", "T7.p2", "T7.p3", "T7.p4", "T7.p5", "T7.p6", "T7.p7", "T7.p8+"};
