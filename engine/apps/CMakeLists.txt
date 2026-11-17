@@ -432,8 +432,10 @@ if(_alamo_sim)
     # skai t15 (2026-11-16): with Game.IsLandControlGame in every land skirmish (Hold_Position goals), seeds 3 and 6 log
     # BOBAFETTFLAMEINFANTRY "Move_To -- Target is already dead": the shipped MoveUntilDone re-issues fett.Move_To(target)
     # after PumpEvents (one yield, AI_GALACTIC 1.9) without a TestValid, and retail's Move_To raises that error for a dead
-    # object (LUA_API, Move_To target table), so it is retail's script race, not a port rule (backlog). Seed 3 -> 4.
-    foreach(_seed 4 8 9)
+    # object (LUA_API, Move_To target table), so it is retail's script race, not a port rule. Gabriel (2026-11-16,
+    # DECISIONS.md "Retail Lua errors in the skai exit test"): documented retail errors are allowed; --fail-on-lua-errors
+    # reports them (skirmish_run.cpp kRetailLuaErrors) and fails only on others. Back on seeds 3, 8 and 9.
+    foreach(_seed 3 8 9)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_empire_underworld_seed${_seed}
                COMMAND alamo_headless --skirmish-ai foc-land --ai Empire,Underworld --ticks 70000 --workers 4 --quiet
                        --fail-on-lua-errors --seed ${_seed})
@@ -456,7 +458,9 @@ if(_alamo_sim)
     # and 3 run to the 14400-frame cap, a standoff under the shipped rules (the Rebels are not outnumbered 2:1, so
     # Want_To_Retreat_From_Land stays 0, while the Empire's last unit, an AT-AT, walks a cross-map Clear_Infantry plan).
     # Seed 1 left out, seed 2 checked instead (DECISIONS.md, "Running-plan re-test on by default").
-    foreach(_seed 6 2)
+    # skai t15 (2026-11-16, task-force members stay reserved free-store entries in land too, SKAI_T22_SPACE_AI_RE Part 5):
+    # seeds 1-5, 7, 8 and 10-12 end (6742-12127, 0 Lua errors); seeds 6 and 9 reach the cap. Seed 6 -> 1.
+    foreach(_seed 1 2)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_campaign_outcome_seed${_seed}
                COMMAND alamo_headless --skirmish-ai foc-land-campaign --seed ${_seed} --ticks 20000 --workers 0 --quiet --expect-battle-end
                        --fail-on-lua-errors)

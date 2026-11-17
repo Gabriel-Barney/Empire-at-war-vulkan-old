@@ -13,6 +13,7 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <string_view>
 
 #ifdef ALAMO_SIM_HAVE_TACTICAL_AI
 #include "alamo/ai/ai_definitions.hpp"
@@ -51,6 +52,21 @@ namespace {
 
 using namespace alamo;
 namespace fs = std::filesystem;
+
+// skai t15 (Gabriel, 2026-11-16: "allow retail's Lua errors in the exit test"; DECISIONS.md "Retail Lua errors in the skai
+// exit test"): Lua errors that retail raises too, each shown from the binary in docs/re. Exact text as the tactical AI
+// reports it. Reported, not counted against --fail-on-lua-errors.
+//   - BobaFettFlameInfantry.lua MoveUntilDone re-issues fett.Move_To(target) after PumpEvents (one yield, AI_GALACTIC
+//     §1.9) without a TestValid; retail's Move_To raises this for a dead object target (LUA_API, Move_To target table).
+constexpr std::string_view kRetailLuaErrors[] = {
+    "BOBAFETTFLAMEINFANTRY: SCRIPT ERROR: GameObjectWrapper::Move_To -- Target is already dead.",
+};
+
+bool is_retail_lua_error(std::string_view e) {
+    for (const std::string_view r : kRetailLuaErrors)
+        if (e == r) return true;
+    return false;
+}
 
 std::string env_value(const char* name) {
 #ifdef _MSC_VER
@@ -822,6 +838,7 @@ int skirmish_ai_run(const MapRunOptions& opt, const std::string& kind, const std
         std::string text;
         uint64_t ticks = 0;
         size_t lua_errors = 0;
+        size_t retail_lua_errors = 0;  // skai t15: of lua_errors, the ones retail raises too (kRetailLuaErrors)
         // S10 land outcome: from the battle summary (TacticalBattle::summary) - battle frames, winner faction, victory.
         bool ended = false, starbase_lost = false;
         unsigned long battle_frames = 0;
@@ -1036,7 +1053,11 @@ int skirmish_ai_run(const MapRunOptions& opt, const std::string& kind, const std
         out.pads = pads;
         out.structures = structures;
         out.shots = shots;
-        for (const std::string& e : error_list) out.text += "  Lua error: " + e + "\n";
+        for (const std::string& e : error_list) {
+            const bool retail = is_retail_lua_error(e);
+            if (retail) ++out.retail_lua_errors;
+            out.text += (retail ? "  Lua error (retail, documented): " : "  Lua error: ") + e + "\n";
+        }
         if (const sim::ObjectScriptHost* os = host.object_scripts()) {  // q6: diagnostics only (nothing hashed)
             const sim::ObjectScriptHost::Stats& st = os->stats();
             std::snprintf(buf, sizeof buf,
@@ -1116,9 +1137,13 @@ int skirmish_ai_run(const MapRunOptions& opt, const std::string& kind, const std
             counts);
     // t48: shipped scripts against the port: a Lua error here is a port bug until shown otherwise. a1j t07: any kind with
     // --fail-on-lua-errors.
-    if ((kind == "foc-station" || opt.fail_on_lua_errors) && first.lua_errors != 0) {
-        std::printf("Lua errors: %zu (none allowed)\n", first.lua_errors);
+    // skai t15 (Gabriel, 2026-11-16, DECISIONS.md "Retail Lua errors in the skai exit test"): a Lua error that retail raises
+    // too, shown from the binary in docs/re and listed in kRetailLuaErrors, is reported but allowed.
+    if ((kind == "foc-station" || opt.fail_on_lua_errors) && first.lua_errors > first.retail_lua_errors) {
+        std::printf("Lua errors: %zu (%zu retail, documented; no other allowed)\n", first.lua_errors, first.retail_lua_errors);
         good = false;
+    } else if (first.retail_lua_errors != 0) {
+        std::printf("Lua errors: %zu, all retail (documented, allowed)\n", first.retail_lua_errors);
     }
     if (opt.expect_battle_end) {  // S10 land outcome: a real result before the frame limit
         // q6 land end chain: a skirmish has no battle time limit (max_frames 0), so its limit is the run's tick count.
@@ -1151,7 +1176,7 @@ int skirmish_ai_run(const MapRunOptions& opt, const std::string& kind, const std
         // start companies stand on its own spawn-point marker (the free placement ring search around it).
         const bool start_ok = first.start_off[0] >= 0.0 && first.start_off[0] <= 100.0 && first.start_off[1] >= 0.0 && first.start_off[1] <= 100.0;
         const bool base_ok = kind == "foc-land" && first.prebuilt >= 20 && first.pads >= first.prebuilt && first.shots > 0 && first.orders > 0 &&
-                             first.lua_errors == 0 && start_ok;
+                             first.lua_errors == first.retail_lua_errors && start_ok;
         std::printf("skirmish start: first start-force unit %.0f / %.0f from the spawn-point markers\n", first.start_off[0], first.start_off[1]);
         std::printf("skirmish base: %s (%lu pre-built of %lu pads, %lu structures started, %lu shots, %" PRIu64 " AI orders, %zu Lua errors)\n",
                     base_ok ? "ok" : "MISSING", first.prebuilt, first.pads, first.structures, first.shots, first.orders, first.lua_errors);

@@ -272,6 +272,16 @@ part of the exit is unchanged (whole run, 0 Lua errors, no end needed). Port on 
 (33956) pass; Underworld 5 of 10 pass (retail has one run, so this proves little); **Empire 10 of 10, median 18747 < 20746:
 fails**, the open part of skai t15. More retail runs tighten the check: add them to `RETAIL` in the script.
 
+## Retail Lua errors in the skai exit test (Gabriel, 2026-11-16)
+
+Gabriel, 2026-11-16, through the skai coordinator: "allow retail's Lua errors in the exit test".
+
+- The AI-against-AI land games of skai's exit test pass with Lua errors that retail raises too. Each such error must be shown from the binary in docs/re.
+- `alamo_headless --fail-on-lua-errors` (and foc-station) report a listed error as "retail, documented" and fail only on others: `kRetailLuaErrors` in `engine/apps/headless/skirmish_run.cpp`, exact text.
+- First entry: BobaFettFlameInfantry.lua `MoveUntilDone` re-issues `fett.Move_To(target)` after `PumpEvents` without a `TestValid`. PumpEvents is one yield (AI_GALACTIC §1.9), and retail's `Move_To` raises "Target is already dead." for a dead object target (LUA_API, Move_To target table).
+- Found by lane skai-a (skai t15). With Hold_Position goals (IsLandControlGame in every land skirmish) AI-vs-AI seeds 3, 4 and 6 hit it.
+- A new error goes on the list only with its binary evidence, so a port bug still fails the test.
+
 ## fxc ships in test builds; Claude may drive alamo_game for one run (Gabriel, 2026-11-16)
 
 Gabriel, 2026-11-16, in the up-front round of the "needs Gabriel and probe runs" coordinator run:
