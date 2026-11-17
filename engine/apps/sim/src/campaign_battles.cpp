@@ -815,6 +815,28 @@ void CampaignBattles::push_battle(SimHost& host) {
     // not the sandbox battle). A battle rebuilt by a save load does not recreate them (the save has the battle's objects).
     if (pending_req_.info.planet != kInvalidPlanet)
         battle_->set_pad_persistence(g->sim()->built_objects(pending_req_.info.planet), !rebuilding_);
+    // galab t03 (GALAB_ABILITIES_RE §4.3, 0x2a1eb0 -> 0x2afc10): the battle players' planet-bonus upgrades (attacker's list,
+    // then defender's), each kept only when its type is affiliated with the player's faction (0x3751a0). Not for a battle
+    // rebuilt by a save load (its objects are in the save).
+    if (!rebuilding_) {
+        const galactic::GalacticSim& gs = *g->sim();
+        const objects::GameObjectTypes& types = catalog_->types();
+        std::vector<std::pair<int32_t, uint32_t>> ups;
+        for (const int32_t p : {pending_req_.info.attacker, pending_req_.info.defender}) {
+            if (p < 0 || static_cast<size_t>(p) >= gs.players().size()) continue;
+            const uint32_t f = gs.players()[static_cast<size_t>(p)].faction;
+            if (f >= gs.rules().factions.size()) continue;
+            const std::string& fname = gs.rules().factions[f].name;
+            for (const uint32_t t : gs.player_upgrades(p, kind == ModeKind::Space)) {
+                if (t >= types.size()) continue;
+                bool affiliated = false;
+                for (const uint32_t fi : types.factions(static_cast<objects::TypeIndex>(t)))
+                    affiliated = affiliated || (fi < types.faction_names().size() && ascii_iequals(types.faction_names()[fi], fname));
+                if (affiliated) ups.push_back({p, t});
+            }
+        }
+        battle_->set_galactic_upgrades(std::move(ups));
+    }
     {  // battle host: TacticalBuild charges / TacticalSell refunds spend the galactic account ([port] no AI notify)
         galactic::GalacticSim* gsim = g->sim();
         battle_->set_credit_hooks(

@@ -84,6 +84,13 @@ enum class GalacticEventKind : uint8_t {
                              // other_player = planet owner (TEXT_SIPHON_FAILURE_VIGILANCE / _PREVENTED_VIGILANCE)
     HeroNeutralized,         // Neutralize_Hero executed: player = the neutralizer's owner, planet, type = the target's type,
                              // object = the target, other_player = the target's owner, value = credits charged
+                             // (story generic "hero_neutralized"); a siphon entry: object = 0, type = the siphoner's type
+    NeutralizeDialog,        // a human's Neutralize_Hero found candidates (0x3c8d90 panel): player, planet, object = the
+                             // neutralizer, value = candidate count; the list is GalacticSim::neutralize_offer(), the pick
+                             // is SpecialAbility kind 3 (kSpecialNeutralize). [port] Kept apart from SpecialDialog until a
+                             // panel exists (backlog, GALAB §7.5).
+    NeutralizeVigilance,     // a generic neutralizer caught on Planet_Vigilance (killed): player, planet, object = the
+                             // neutralizer, other_player = planet owner
     Count
 };
 

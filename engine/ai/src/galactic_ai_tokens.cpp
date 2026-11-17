@@ -292,7 +292,7 @@ const std::string_view kKnownPaths[] = {
     "GROSSINCOMENBTF", "ACTIVEGOALS", "WORSTISLANDFRACTIONOFLARGEST", "HASTECHTOPRODUCE", "STORYTRIGGER",
     "SPACEDEFENDEDPLANETS", "GROUNDDEFENDEDPLANETS", "BUDGETALLOCATION", "TIMESINCESPACEDEFENDER",
     "TIMESINCESPACEATTACKER", "TIMESINCEGROUNDDEFENDER", "TIMESINCEGROUNDATTACKER", "MAXALLPLANETSINCOMEUNNORMALIZED",
-    "MAXOWNEDPLANETSINCOMEUNNORMALIZED",
+    "MAXOWNEDPLANETSINCOMEUNNORMALIZED", "HOMEPLANET.TYPE.TOKEN",
     // target root (planets)
     "ISHUMANCONTROLLED", "STARBASELEVEL", "STARBASELEVELUNNORMALIZED", "GROUNDBASELEVEL", "GROUNDBASELEVELUNNORMALIZED",
     "MAXSTARBASELEVEL", "MAXSTARBASELEVELUNNORMALIZED", "MAXGROUNDBASELEVEL", "MAXGROUNDBASELEVELUNNORMALIZED",
@@ -2042,7 +2042,16 @@ struct GalacticSimTokenResolver::Impl {
                 return r.hooks_.budget_weight && r.hooks_.budget_weight(pl, budget_key(params), v);
             }, out);
         }
-        return false;  // HomePlanet.*, ... (not modelled)
+        // galab t06 (GALAB_ABILITIES_RE §8) [H]: HomePlanet = a root lookup of the planet "Planet_<type name>" for the
+        // player's home planet type (player +0x188: the campaign Home_Location of the player's faction, set at campaign
+        // setup). The rest of the path is that planet's target token (Self.HomePlanet.Type.Token = its type token, as
+        // Target.Type.Token). No home planet (no Home_Location for the faction): the root is unbound and the leaf fails.
+        if (k.substr(0, 11) == "HOMEPLANET.") {
+            const PlanetIndex h = sim.home_planet(pl);
+            if (h >= planets.size() || !valid_planet(static_cast<int32_t>(h))) return false;
+            return resolve_target(static_cast<size_t>(h), k.substr(11), params, out);
+        }
+        return false;  // other player tokens are not registered here
     }
 
     // ---------------- game ----------------

@@ -50,6 +50,7 @@ enum class SpecialAbilityClass : uint8_t {
     PoliticalTransition = 16,  // Political_Transition_Bonus_Ability (Tarkin; §6)
     NeutralizeHero = 17,       // Neutralize_Hero_Ability (bounty hunters; §7)
     HeroProtection = 18,       // Hero_Protection_Ability (Neutralization_Cost_Multiplier; §7)
+    PoliticalProtection = 19,  // Political_Control_Protection_Ability (Tarkin; §6.1)
 };
 
 struct SpecialAbilityDef {
@@ -122,6 +123,22 @@ struct SpecialAbilityDef {
     std::string space_upgrade_name, land_upgrade_name;  // as written (resolved by the loader)
     // Reduce_Technology_Price_Ability (GALAB §5) and Political_Transition_Bonus_Ability (GALAB §6) keep their
     // Price_ / Time_Reduction_Percentage in `production_reduction` and Stacking_Category in `stacking_category`.
+    // Neutralize_Hero_Ability (GALAB §7; ctor 0x615b70, post-load 0x617f70): the three cost curves (fewer than 2 points ->
+    // the defaults (0,1)-(5,1), (0,1)-(1000,1), (0,1)-(1000,1)), General_Minor / Major_Hero_Cost_Mod (<= 0 -> 1.0), the
+    // Owner_ / Target_Respawn_Time_In_Secs pairs (min, max; either <= 0 -> Default_Hero_Respawn_Time) and
+    // Can_Neutralize_Minor / Major_Heroes (default Yes). Ground_Activated by default (ctor style 6).
+    PiecewiseCurve cost_by_base_level;          // Cost_Mod_By_Base_Level (+0x178)
+    PiecewiseCurve cost_by_neutralizations;     // Cost_Mod_By_Previous_Neutralizations (+0x1A0)
+    PiecewiseCurve cost_by_corruption;          // Cost_Mod_By_Planetary_Corruption_Level (+0x1C8)
+    float minor_cost_mod = 1.0f;                // +0x1F0
+    float major_cost_mod = 1.0f;                // +0x1F4
+    float owner_respawn_min = 0.0f, owner_respawn_max = 0.0f;    // +0x1F8 / +0x1FC
+    float target_respawn_min = 0.0f, target_respawn_max = 0.0f;  // +0x200 / +0x204
+    bool can_neutralize_minor = true;           // +0x208
+    bool can_neutralize_major = true;           // +0x209
+    // Hero_Protection_Ability (GALAB §7.3; ctor 0x703090): Neutralization_Cost_Multiplier +0x178 (default 1.0) under
+    // `stacking_category`; Galactic_Automatic.
+    float protection_multiplier = 1.0f;
 };
 
 // BlackMarketItems.xml entry (P4 1.1), table order = file order.
@@ -226,7 +243,14 @@ struct TypeSpecial {
     // The Ground_Activated walk order of P4 6.1 over both tables, <Abilities> list order: an `abilities` index, or
     // kGalabRef | a `galab` index. Equal to `abilities` for a type without GALAB entries.
     std::vector<uint32_t> trigger_order;
+    // The walk list: trigger_order, or `abilities` when it is empty (tables built by hand, without GALAB entries).
+    const std::vector<uint32_t>& triggers() const { return trigger_order.empty() ? abilities : trigger_order; }
     float corruption_removal_cost = 0.0f;  // planets: Planet_Corruption_Removal_Base_Cost (T +0x804, read as float)
+    // GALAB §7: Neutralization_Cost (T +0x1FBC, own or first member's) and Can_Be_Neutralized_By_Minor / Major_Heroes
+    // (T +0x7B / +0x7C, own or first member's; default No).
+    float neutralization_cost = 0.0f;
+    bool neutralizable_by_minor = false;
+    bool neutralizable_by_major = false;
     bool prevents_minor_siphons = false;   // Prevents_Minor_Credit_Siphons (T +0x63; no FoC type sets it)
 };
 

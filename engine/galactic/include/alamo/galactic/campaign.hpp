@@ -627,9 +627,27 @@ public:
     // Tarkin's Political_Transition_Bonus at the planet: the product over stacking categories of the smallest
     // Time_Reduction_Percentage of the owner's holders present (1.0 = none); it divides the political ramp time.
     float political_transition_factor(PlanetIndex planet) const;
+    // Tarkin's Political_Control_Protection (GA §6.1): a holder of the planet's owner is there (the planet's D +0x250
+    // list is non-empty). While it is, an adverse political update (owner change or a lower target) skips the ramp.
+    bool political_control_protected(PlanetIndex planet) const;
     PlanetIndex home_planet(int32_t player) const {
         return valid_player(player) ? players_[static_cast<size_t>(player)].home : kInvalidPlanet;
     }
+    // Neutralize_Hero (GALAB §7). Accept (vf5 0x6166d0): a planet with no hack-target super weapon in orbit. Candidates
+    // (0x615fd0 + cost 0x6171e0): the visible enemy heroes in orbit, then on the surface, then the siphoning hero; each
+    // with its two respawn times drawn (synced, Get_Float) and its cost lines. Draws: call it only where the original does.
+    bool neutralize_accepts(PlanetIndex planet) const;
+    std::vector<NeutralizeCandidate> neutralize_candidates(const SpecialAbilityDef& a, ObjectHandle neutralizer, int32_t player,
+                                                           PlanetIndex planet);
+    // The planet's Hero_Protection multiplier for `target` (map D +0x2A8 without the target's own entry): over stacking
+    // categories, the product of each category's largest Neutralization_Cost_Multiplier (1.0 = none).
+    float hero_protection(PlanetIndex planet, ObjectHandle target) const;
+    // GameScoring Get_Neutralized_Count_For_Type(type, player): heroes of `type` neutralized by `player` (saved, hashed).
+    int32_t neutralized_count(int32_t player, uint32_t type) const;
+    // The last human Neutralize_Hero panel (NeutralizeDialog event): its candidates, neutralizer and planet. Not sim state.
+    const std::vector<NeutralizeCandidate>& neutralize_offer() const { return neutralize_offer_; }
+    // 0x616740: execute one candidate for `neutralizer` (SpecialAbility kind 3, and the AI pick).
+    RejectReason neutralize_execute(int32_t player, PlanetIndex planet, ObjectHandle neutralizer, const NeutralizeCandidate& c);
     void set_income_limits(PlanetIndex planet, bool has_min, float min_value, bool has_max, float max_value);
     void add_income_entry(PlanetIndex planet, float value, int32_t expiry);
     void set_hidden(PlanetIndex planet, bool hidden);
@@ -1260,6 +1278,10 @@ private:
     bool apply_planet_destruction(ObjectHandle shooter, int32_t player, PlanetIndex planet);
     bool apply_siphon(const SpecialAbilityDef& a, ObjectHandle hero, int32_t player, PlanetIndex planet);
     bool siphon_blocked_by_presence(PlanetIndex planet) const;
+    bool apply_neutralize(const SpecialAbilityDef& a, ObjectHandle neutralizer, int32_t player, PlanetIndex planet);
+    bool neutralize_target_visible(ObjectHandle target, int32_t player, PlanetIndex planet, bool space) const;
+    bool neutralize_do(int32_t player, PlanetIndex planet, ObjectHandle neutralizer, const NeutralizeCandidate& c);
+    void count_neutralized(int32_t player, uint32_t type);
     bool has_planet_bonus(PlanetIndex planet) const;
     void service_planet_bonuses(PlanetIndex planet);
     void move_planet_bonuses(PlanetIndex planet);
@@ -1339,6 +1361,14 @@ private:
     StoryGates story_gates_;              // STY1 lane B: set by the story session, never saved here
     std::vector<std::pair<int32_t, uint8_t>> victory_deferred_;  // q6 t21: {player, type}, monitor +0x60
     std::vector<std::pair<int32_t, std::string>> names_;  // [port] fleet / ship names {ObjectId, name}, id-ascending (v7)
+    // galab §7: GameScoring's GalacticNeutralizedTable {player, type, count}, (player, type)-ascending (v8, "GLB1" tail)
+    struct NeutralizedEntry {
+        int32_t player = 0;
+        uint32_t type = 0;
+        int32_t count = 0;
+    };
+    std::vector<NeutralizedEntry> neutralized_;
+    std::vector<NeutralizeCandidate> neutralize_offer_;  // UI only (not saved, not hashed)
     void prune_names();                                     // drops names of objects that are no longer alive
     // q6 t21 / t22: from set_victory_rules (definition-derived, not saved, not hashed)
     VictoryRules victory_rules_;

@@ -689,12 +689,17 @@ void GalacticSim::apply_ownership(PlanetIndex planet, int32_t derived) {
         }
         return;
     }
+    // galab t07 (GA §6.1): an adverse update (a new owner, or a target below the current control; tested before the
+    // flip, as is the protection list) skips the ramp step while Political_Control_Protection holds the planet
+    // (0x3fb040 -> 0x4b8510) [H].
+    const bool shielded = (derived != p.owner || p.target_control < p.control) && political_control_protected(planet);
     if (derived != p.owner) {
         const int32_t old = p.owner;
         p.owner = derived;
         p.control = 0.0f;  // flips at once with control 0 [M]
         on_owner_change(planet, old);
     }
+    if (shielded) return;
     // Ramp (0x4adab0), one elapsed frame per service.
     const TypeInfo& ti = rules_->types[p.type];
     const ForceSide side = valid_player(p.owner) ? faction_of(p.owner).force_alignment : ForceSide::Neutral;
@@ -2003,6 +2008,8 @@ std::string_view galactic_event_name(GalacticEventKind kind) {
     case GalacticEventKind::SiphonStarted: return "SiphonStarted";
     case GalacticEventKind::SiphonVigilance: return "SiphonVigilance";
     case GalacticEventKind::HeroNeutralized: return "HeroNeutralized";
+    case GalacticEventKind::NeutralizeDialog: return "NeutralizeDialog";
+    case GalacticEventKind::NeutralizeVigilance: return "NeutralizeVigilance";
     case GalacticEventKind::Count: break;
     }
     return "?";

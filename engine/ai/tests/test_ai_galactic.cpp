@@ -27,6 +27,7 @@ int main(int argc, char** argv) {
     test_starbase_force_split();
     test_leaf_cache();
     test_force_members();
+    test_home_planet();
     test_escort_flag();
     test_category_masks_from_enum_files();  // A2k t06
     test_type_info_mod_categories();        // A2k t06

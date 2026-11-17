@@ -53,11 +53,12 @@ SpecialAbilityClass class_of(std::string_view tag) {
     if (ascii_iequals(tag, "Political_Transition_Bonus_Ability")) return SpecialAbilityClass::PoliticalTransition;
     if (ascii_iequals(tag, "Neutralize_Hero_Ability")) return SpecialAbilityClass::NeutralizeHero;
     if (ascii_iequals(tag, "Hero_Protection_Ability")) return SpecialAbilityClass::HeroProtection;
+    if (ascii_iequals(tag, "Political_Control_Protection_Ability")) return SpecialAbilityClass::PoliticalProtection;
     return SpecialAbilityClass::Other;
 }
 
 bool is_galab(SpecialAbilityClass c) {
-    return c >= SpecialAbilityClass::RemoveCorruption && c <= SpecialAbilityClass::HeroProtection;
+    return c >= SpecialAbilityClass::RemoveCorruption && c <= SpecialAbilityClass::PoliticalProtection;
 }
 
 // GRC 2.3.1: System_Spy_Ability See_* flags -> VisibilityLevelType bits (0x70fd20). A spy never grants bit 0.
@@ -139,6 +140,25 @@ SpecialAbilityDef parse_ability(const objects::ObjectTypeDatabase& raw, objects:
         else if (ascii_iequals(tag, "Siphon_Duration_In_Cycles")) a.siphon_cycles = static_cast<int32_t>(to_f(v));
         else if (ascii_iequals(tag, "Space_Upgrade_Type")) a.space_upgrade_name = std::string(v);
         else if (ascii_iequals(tag, "Land_Upgrade_Type")) a.land_upgrade_name = std::string(v);
+        else if (ascii_iequals(tag, "Cost_Mod_By_Base_Level")) a.cost_by_base_level = PiecewiseCurve::parse(v);
+        else if (ascii_iequals(tag, "Cost_Mod_By_Previous_Neutralizations")) a.cost_by_neutralizations = PiecewiseCurve::parse(v);
+        else if (ascii_iequals(tag, "Cost_Mod_By_Planetary_Corruption_Level")) a.cost_by_corruption = PiecewiseCurve::parse(v);
+        else if (ascii_iequals(tag, "General_Minor_Hero_Cost_Mod")) a.minor_cost_mod = to_f(v);
+        else if (ascii_iequals(tag, "General_Major_Hero_Cost_Mod")) a.major_cost_mod = to_f(v);
+        else if (ascii_iequals(tag, "Owner_Respawn_Time_In_Secs") || ascii_iequals(tag, "Target_Respawn_Time_In_Secs")) {
+            const std::vector<float> pair = float_list(v);  // "min, max"
+            const float lo = pair.empty() ? 0.0f : pair[0];
+            const float hi = pair.size() < 2 ? lo : pair[1];
+            if (ascii_iequals(tag, "Owner_Respawn_Time_In_Secs")) {
+                a.owner_respawn_min = lo;
+                a.owner_respawn_max = hi;
+            } else {
+                a.target_respawn_min = lo;
+                a.target_respawn_max = hi;
+            }
+        } else if (ascii_iequals(tag, "Can_Neutralize_Minor_Heroes")) a.can_neutralize_minor = objects::parse_type_bool(v);
+        else if (ascii_iequals(tag, "Can_Neutralize_Major_Heroes")) a.can_neutralize_major = objects::parse_type_bool(v);
+        else if (ascii_iequals(tag, "Neutralization_Cost_Multiplier")) a.protection_multiplier = to_f(v);
         else if (a.cls == SpecialAbilityClass::SystemSpy) {
             for (const SpyFlag& sf : kSpyFlags)
                 if (ascii_iequals(tag, sf.tag)) {
@@ -297,8 +317,35 @@ SpecialAbilityDef parse_ability(const objects::ObjectTypeDatabase& raw, objects:
             a.production_reduction = 0.0f;
         }
         break;
-    case SpecialAbilityClass::NeutralizeHero:
+    case SpecialAbilityClass::NeutralizeHero: {
+        // ctor 0x615b70: Ground_Activated. Post-load 0x617f70: a curve with fewer than 2 points gets its default; a
+        // General_*_Cost_Mod <= 0 -> 1.0 (error logged); neither Can_Neutralize flag set -> a warning only.
+        if (!have_style) a.style = ActivationStyle::GroundActivated;
+        const auto fix_curve = [&](PiecewiseCurve& c, float x1, const char* what) {
+            if (c.x.size() >= 2) return;
+            note(diag, "galactic: " + a.name + ": " + what + " needs at least 2 points");
+            c = PiecewiseCurve{{0.0f, x1}, {1.0f, 1.0f}};
+        };
+        fix_curve(a.cost_by_base_level, 5.0f, "Cost_Mod_By_Base_Level");
+        fix_curve(a.cost_by_neutralizations, 1000.0f, "Cost_Mod_By_Previous_Neutralizations");
+        fix_curve(a.cost_by_corruption, 1000.0f, "Cost_Mod_By_Planetary_Corruption_Level");
+        if (a.minor_cost_mod <= 0.0f) {
+            note(diag, "galactic: " + a.name + ": General_Minor_Hero_Cost_Mod must be > 0");
+            a.minor_cost_mod = 1.0f;
+        }
+        if (a.major_cost_mod <= 0.0f) {
+            note(diag, "galactic: " + a.name + ": General_Major_Hero_Cost_Mod must be > 0");
+            a.major_cost_mod = 1.0f;
+        }
+        if (!a.can_neutralize_minor && !a.can_neutralize_major)
+            note(diag, "galactic: " + a.name + ": can neutralize neither minor nor major heroes");
+        break;
+    }
     case SpecialAbilityClass::HeroProtection:
+        if (!have_style) a.style = ActivationStyle::GalacticAutomatic;  // ctor 0x703090: style 3
+        break;
+    case SpecialAbilityClass::PoliticalProtection:
+        if (!have_style) a.style = ActivationStyle::GalacticAutomatic;  // ctor 0x7090a0: style 3
         break;
     case SpecialAbilityClass::Other: break;
     }
@@ -560,6 +607,9 @@ void load_special_rules(const FileProvider& provider, const data::GameDatabase& 
         ts.named_hero = types.get_bool(t, "Is_Named_Hero");
         ts.corruption_removal_cost = types.get_float(t, "Planet_Corruption_Removal_Base_Cost");  // galab §1 (T +0x804)
         ts.prevents_minor_siphons = types.get_bool(t, "Prevents_Minor_Credit_Siphons");         // galab §3 (T +0x63)
+        ts.neutralization_cost = types.get_float(t, "Neutralization_Cost");                     // galab §7 (T +0x1FBC)
+        ts.neutralizable_by_minor = types.get_bool(t, "Can_Be_Neutralized_By_Minor_Heroes");   // T +0x7B
+        ts.neutralizable_by_major = types.get_bool(t, "Can_Be_Neutralized_By_Major_Heroes");   // T +0x7C
         {
             const std::string_view prev = ascii_trim(types.get_string(t, "Prev_Level_Base"));
             if (!prev.empty()) {
@@ -619,6 +669,11 @@ void load_special_rules(const FileProvider& provider, const data::GameDatabase& 
         ts.generic_hero = ts.generic_hero || m.generic_hero;
         ts.named_hero = ts.named_hero || m.named_hero;
         if (ts.text_crc == 0) ts.text_crc = m.text_crc;
+        if (ts.neutralization_cost == 0.0f) {  // galab §7: the hero's own values (the original reads the member)
+            ts.neutralization_cost = m.neutralization_cost;
+            ts.neutralizable_by_minor = ts.neutralizable_by_minor || m.neutralizable_by_minor;
+            ts.neutralizable_by_major = ts.neutralizable_by_major || m.neutralizable_by_major;
+        }
     }
     for (TypeSpecial& ts : s.types)
         for (uint32_t a : ts.abilities) {
