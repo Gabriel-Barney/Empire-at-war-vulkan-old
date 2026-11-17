@@ -1603,6 +1603,11 @@ void TacticalBattle::hash(StateHasher& h) const {
             h.u32(r.next);
             h.f32(r.gx);
             h.f32(r.gy);
+            h.f32(r.ox);  // cmb1 t06: the last-observed point
+            h.f32(r.oy);
+            h.f32(r.oz);
+            h.u32(r.retry);  // cmb2 t03
+            h.i32(r.hp);     // cmb2 t04
         }
     }
     h.u32(placed_[0]);
@@ -1644,6 +1649,23 @@ void TacticalBattle::hash(StateHasher& h) const {
             h.f32(r.goal.y);
             h.f32(r.goal.z);
             h.i32(r.goal_object);  // s78f t02: the auto blocks are hashed with the movement formation
+        }
+    }
+    if (!lformations_.empty()) {  // cmb1 t01: land formation records (absent while none: space and older land states as before)
+        h.u8(0x4C);
+        h.u32(static_cast<uint32_t>(lformations_.size()));
+        for (const LandFormationRecord& r : lformations_) {
+            h.i32(r.mover);
+            h.u8(r.flags);
+            h.f32(r.goal.x);
+            h.f32(r.goal.y);
+            h.f32(r.goal.z);
+            h.i32(r.goal_object);
+            h.i32(r.pushed);
+            h.u32(r.next);
+            h.f32(r.seen.x);
+            h.f32(r.seen.y);
+            h.f32(r.seen.z);
         }
     }
     if (!hero_clash_.empty()) hero_clash_.hash(h);  // s78n t06: running hero clashes (absent while none)

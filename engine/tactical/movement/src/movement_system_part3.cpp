@@ -150,9 +150,10 @@ void MovementSystem::hash_units(StateHasher& h) const {
             bh.u32(u.start_frame);
             bh.u32(u.pend);            // cu8j t01
             bh.boolean(u.adopted);     // cu8j t02
-            // s78n t24: Unit::blocked_frames / replans are gone (the blocked-frames re-plan); their constants keep the format
-            bh.u32(0);
-            bh.u32(0);
+            // s78n t24: Unit::blocked_frames / replans are gone (the blocked-frames re-plan); mov1 t04 hashes the
+            // approximation byte and countdown in their place (0 in space: the format and the space goldens are unchanged)
+            bh.u32(u.near_end ? 1u : 0u);
+            bh.u32(static_cast<uint32_t>(u.approx_countdown));
             bh.u32(u.path_change);  // s78n t18 (in the place of the dropped Unit::waits; 0 in space: the format is unchanged)
             bh.i32(u.check_countdown);
             // s78n t23: Unit::speed_cap / hold_until / nudge_frames are gone (the MovingVsMoving stand-in); their constants
@@ -317,6 +318,13 @@ void MovementSystem::hash_units(StateHasher& h) const {
         h.u8(0xD2);
         h.u32(static_cast<uint32_t>(push_kills_.size()));
         for (const ObjectId id : push_kills_) h.i32(id);
+    }
+    if (!formation_attacks_.empty()) {  // mov1 t06: the formation attack blocks of this tick, only while any
+        h.u32(static_cast<uint32_t>(formation_attacks_.size()));
+        for (const FormationAttack& e : formation_attacks_) {
+            h.i32(e.mover);
+            h.i32(e.target);
+        }
     }
     if (!deploy_kept_.empty()) {  // s78n t26.1 review: the kept deploy states of garrisoned units, only while any exists
         h.u8(0xDC);

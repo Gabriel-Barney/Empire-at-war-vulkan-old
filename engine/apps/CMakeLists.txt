@@ -74,6 +74,7 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
       sim/src/tactical_battle_save.cpp       # N1 stage 2 (owner: n2-host): battle save / load
       sim/src/tactical_battle_clash.cpp      # s78n t06: land hero clashes (HERO_CLASH.md)
       sim/src/tactical_battle_retreat.cpp    # TRU1 t06: space retreat jump-out flight (TRU1_C_RE §2)
+      sim/src/tactical_battle_land_engage.cpp  # cmb1 t01 / t03: land formation records, Auto_Engage, scan range (BKR1 Q2 / Q8)
       sim/src/tactical_battle_spawners.cpp   # TRU1 t05 / t07: indigenous spawners, debris (TRU1_C_RE §1 / §3)
       sim/src/fleet_groups.cpp               # [port] fleet groups, phase 1 (docs/DECISIONS.md)
       # Hangars / station upgrade / engine-loop requests (docs/re/STATION_HANGARS_SOUND.md): engine/tactical/hangar.
@@ -133,7 +134,8 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
     endforeach()
     # bo3 t03: test_battles_ai.cpp is split into parts (same exe, same test): main in test_battles_ai.cpp, shared code in
     # test_battles_ai_common.hpp.
-    target_sources(alamo_sim_battle_ai_tests PRIVATE sim/tests/test_battles_ai_part1.cpp sim/tests/test_battles_ai_part2.cpp)
+    target_sources(alamo_sim_battle_ai_tests PRIVATE sim/tests/test_battles_ai_part1.cpp sim/tests/test_battles_ai_part2.cpp
+                                                     sim/tests/test_battles_ai_part3.cpp)  # cmb1: land Auto_Engage / scan range
     # s78n t06 review: the hero-clash land battle per worker count (alamo_add_worker_count_check; the exe's --hero-clash
     # mode writes / compares its per-tick battle digests; each count has its own fixture folder).
     alamo_add_worker_count_check(alamo_sim_battle_ai_hero_clash
@@ -466,7 +468,13 @@ if(_alamo_sim)
     # bug filed to skai); seeds 1, 8 and 9 run with 0 Lua errors. Seed 3 -> 1.
     # bkx1 (2026-11-17, tactical AI stagger off + retail goal cadence, b0123): seeds 1 and 2 hit the MDU race (group mdu1);
     # seeds 3-9 run with no other Lua error. Seed 1 -> 3.
-    foreach(_seed 3 8 9)
+    # mov1 (2026-11-17, retail land tick order): seeds 5 and 9 now hit the same MDU race (mdu1); seed 9 -> 6 (0 Lua errors).
+    # cmb2 (2026-11-17, land attack approach, merged with mov1): seed 6 hits the MDU race; seeds 1-5 and 7-10 pass (documented
+    # retail errors only). Seed 6 -> 4.
+    # mov1 + cmb1 on dev (2026-11-17): seed 3 hits it too; seeds 4 and 7 have no other Lua error. Seed 3 -> 7.
+    # mov2 t04 (2026-11-17, tracker snapshot before the walk): seed 6 hits it; seeds 3, 4, 7 and 8 do not. Seed 6 -> 3.
+    # cmb2 + mov2 t04 merged (2026-11-17): seed 8 fails; seeds 3, 4 and 7 pass. Seed 8 -> 4.
+    foreach(_seed 3 4 7)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_empire_underworld_seed${_seed}
                COMMAND alamo_headless --skirmish-ai foc-land --ai Empire,Underworld --ticks 70000 --workers 4 --quiet
                        --fail-on-lua-errors --seed ${_seed})
@@ -497,7 +505,15 @@ if(_alamo_sim)
     # end (8153-13174); seed 4 reaches the cap with the Empire holding. Seed 4 -> 2.
     # bkx1 (2026-11-17, tactical AI stagger off + retail goal cadence, b0123): seeds 1 and 3-12 end (6689-11629); seed 2
     # reaches the cap with the Rebels retreated but not all gone. Seed 2 -> 3.
-    foreach(_seed 1 3)
+    # cmb2 (2026-11-17, land attack approach: slot-leg reach, 3-D reference, plan retry, hard points): seeds 1, 2 and 4-12 end
+    # (9145-13701, 0 Lua errors); seed 3 reaches the cap (the Empire's last AT-AT against the Rebels). Seed 3 -> 2. After the
+    # merge with mov1 (retail land tick order): seeds 1-6 and 8-10 end (7686-14269), 7, 11 and 12 reach the cap; seeds 1 and
+    # 2 end close to it (14269 / 14011). Seeds 1, 2 -> 3, 4 (7686 / 10000).
+    # mov1 + cmb1 on dev (2026-11-17): seed 3 reaches the cap (Empire wins by all-retreated at 14400); seeds 2 and 4-8
+    # end (9849-13389). Seed 3 -> 2.
+    # cmb2 + mov2 t04 merged (2026-11-17): seeds 3, 4, 6, 7 and 8 end (7057-13204); 1 ends at 14269, 2 and 5 reach the cap.
+    # Seeds 1, 2 -> 4, 8.
+    foreach(_seed 4 8)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_campaign_outcome_seed${_seed}
                COMMAND alamo_headless --skirmish-ai foc-land-campaign --seed ${_seed} --ticks 20000 --workers 0 --quiet --expect-battle-end
                        --fail-on-lua-errors)

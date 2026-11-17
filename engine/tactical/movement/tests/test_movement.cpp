@@ -805,10 +805,6 @@ static void test_double_click() {
     const auto f = split_into_formations(m, b, k, {}, k.double_click_move_max_speed_ratio);
     // {0, 1, 4}; then 2 seeds (nearest the centroid) and rejects 3 (2.6 / 1.5 > 1.25).
     CHECK(f.size() == 3 && (f[0] == std::vector<uint32_t>{0, 1, 4}) && (f[1] == std::vector<uint32_t>{2}));
-    // Ordering of LargeHover formations.
-    const std::vector<FormationKey> keys{{1.0f, {0.0f, 100.0f}}, {3.0f, {0.0f, 0.0f}}, {2.0f, {0.0f, 50.0f}}};
-    CHECK((large_hover_formation_order(keys, {0.0f, 1.0f}, false) == std::vector<uint32_t>{0, 2, 1}));
-    CHECK((large_hover_formation_order(keys, {0.0f, 1.0f}, true) == std::vector<uint32_t>{1, 2, 0}));
 
     // System: 3 fast (speeder-like, 3.0) + 3 slow (walker-like, 1.0) vehicles side by side on an open grid.
     const auto run = [](uint8_t flags, int32_t cls, std::vector<UnitView>& out) {
@@ -841,21 +837,20 @@ static void test_double_click() {
     for (const UnitView& v : plain) one = one && v.formation_speed == slow;  // one formation at the slowest speed
     for (const UnitView& v : dbl) bands = bands && v.formation_speed == v.max_speed;  // fast and slow bands
     CHECK(one && bands);
-    // LargeHover: without 0x80 one formation (index 0); with 0x80 the fast band gets index 0.
-    run(kMoveFlagPlayerOrder, static_cast<int32_t>(MovementClass::LargeHover), plain);
-    run(kMoveFlagPlayerOrder | kMoveFlagDoubleClick, static_cast<int32_t>(MovementClass::LargeHover), dbl);
-    bool idx_plain = true, idx_dbl = true;
-    float fast_h = 0.0f;
-    for (const UnitView& v : dbl) fast_h = std::max(fast_h, v.max_speed);
-    for (const UnitView& v : plain) idx_plain = idx_plain && v.large_hover_index == 0;
-    for (const UnitView& v : dbl) idx_dbl = idx_dbl && v.large_hover_index == (v.max_speed == fast_h ? 0 : 1);
-    CHECK(idx_plain && idx_dbl);
-    // Formations of other movement classes get no LargeHover index.
-    std::vector<UnitView> none;
-    run(kMoveFlagPlayerOrder | kMoveFlagDoubleClick, 0, none);
-    bool no_hover = true;
-    for (const UnitView& v : none) no_hover = no_hover && v.large_hover_index == -1;
-    CHECK(no_hover);
+    // mov1 t05 (BKR1_RE_ANSWERS Q3 [H]): the destination check 0x439360 ranks every Land-layer formation (+0x22c ->
+    // FormationClass +0x23c), whatever its movement class: without 0x80 one formation (rank 0); with 0x80 the fast band
+    // gets rank 0 (0x43b420, fastest first). Every unit of the order shares one coordinator (0x426140).
+    for (const int32_t cls : {static_cast<int32_t>(MovementClass::LargeHover), 0}) {
+        run(kMoveFlagPlayerOrder, cls, plain);
+        run(kMoveFlagPlayerOrder | kMoveFlagDoubleClick, cls, dbl);
+        bool idx_plain = true, idx_dbl = true, coord = plain[0].coord_id != 0;
+        float fast_h = 0.0f;
+        for (const UnitView& v : dbl) fast_h = std::max(fast_h, v.max_speed);
+        for (const UnitView& v : plain) idx_plain = idx_plain && v.form_rank == 0;
+        for (const UnitView& v : dbl) idx_dbl = idx_dbl && v.form_rank == (v.max_speed == fast_h ? 0 : 1);
+        for (const UnitView& v : dbl) coord = coord && v.coord_id == dbl[0].coord_id;
+        CHECK(idx_plain && idx_dbl && coord);
+    }
 }
 
 // ---------------------------------------------------------------- 7c. recruitment across classes (s78n t26 review round 2)
@@ -1324,6 +1319,41 @@ static void test_path_around() {
         w = around_window({20.0f, 20.0f}, {60.0f, 60.0f}, 3, false, 100, 100);
         CHECK(w.x0 == 0 && w.y0 == 0 && w.x1 == 6 && w.y1 == 6);  // clamped to the grid
     }
+    // ---- mov1 t03 (b0180, BKR1_RE_ANSWERS Q4 [H]): 0x677e40's terrain corners over a 7 x 7 window
+    {
+        constexpr int32_t kW = 7;
+        const auto run_corners = [](const std::vector<std::pair<int32_t, int32_t>>& blocked) {
+            std::vector<uint8_t> open(kW * kW, 1);
+            for (const auto& [x, y] : blocked) open[static_cast<size_t>(y * kW + x)] = 0;
+            return terrain_corners(kW, kW, open, open);  // every open cell reached (nothing here splits the window)
+        };
+        const auto has = [](const std::vector<uint32_t>& v, int32_t x, int32_t y) {
+            return std::find(v.begin(), v.end(), static_cast<uint32_t>(y * kW + x)) != v.end();
+        };
+        // all open: outside the window counts as blocked, so the four window corners are concave candidates; nothing else
+        CHECK((run_corners({}) == std::vector<uint32_t>{0, 6, 42, 48}));
+        // an L of blocked cells: the inner corner (3, 3) (two perpendicular orthogonals blocked) is a vertex - the convex-only
+        // rule had none there - and the outer end (5, 3) of the bar is a convex corner
+        const std::vector<uint32_t> l = run_corners({{2, 2}, {3, 2}, {4, 2}, {2, 3}, {2, 4}});
+        CHECK(has(l, 3, 3) && has(l, 5, 3) && !has(l, 3, 4));
+        // a one-cell-thick diagonal wall (1, 2) (2, 3) (3, 4): the lone convex corners beside its middle cell, (3, 2) with
+        // M = 0x20 and (1, 4) with M = 0x04, are dropped by pass 2; the corners at its ends stay
+        const std::vector<uint32_t> d = run_corners({{1, 2}, {2, 3}, {3, 4}});
+        CHECK(!has(d, 3, 2) && !has(d, 1, 4) && has(d, 2, 1) && has(d, 4, 3));
+        // a diagonal staircase (the triangle x + y <= 4 blocked): each open step cell x + y = 5 (concave, M 0x0B) is an inner
+        // L whose two open-side neighbours are candidates - pass 1 drops it; each x + y = 6 cell (convex, M exactly 0x01)
+        // sits against a blocked diagonal whose cross diagonals are blocked - pass 2 drops it
+        std::vector<std::pair<int32_t, int32_t>> tri;
+        for (int32_t y = 0; y < kW; ++y)
+            for (int32_t x = 0; x < kW; ++x)
+                if (x + y <= 4) tri.emplace_back(x, y);
+        const std::vector<uint32_t> st = run_corners(tri);
+        CHECK(!has(st, 2, 3) && !has(st, 3, 2) && !has(st, 3, 3) && !has(st, 2, 4));
+        // an unreached open cell is never a vertex (pass 1)
+        std::vector<uint8_t> open(kW * kW, 1), reach(kW * kW, 1);
+        reach[0] = 0;
+        CHECK((terrain_corners(kW, kW, open, reach) == std::vector<uint32_t>{6, 42, 48}));
+    }
     // ---- the search: one standing obstacle (10, 6) on the mover's line
     MovementConstants k;
     {
@@ -1347,7 +1377,8 @@ static void test_path_around() {
         q.obstacles = obs;
         AroundResult res;
         CHECK(around_search(g, k, q, res));
-        CHECK(res.vertices == 6 && res.complexity == 6 && !res.crossing && res.window.size() == 1);
+        // mov1 t03: + the four window-corner cells (concave: two sides outside the window), 0x677e40's terrain vertices
+        CHECK(res.vertices == 10 && res.complexity == 10 && !res.crossing && res.window.size() == 1);
         // around the -b side: the two side routes tie and the heap rules take the one expanded first
         CHECK(res.points.size() == 4 && res.points[0] == start && res.points[3] == goal);
         if (res.points.size() == 4) {
@@ -1362,7 +1393,7 @@ static void test_path_around() {
             CHECK(res.tags[0].index == 2 && res.tags[0].obstacle == 77 && res.tags[0].pt == (V2{497.5f, 386.5f}) && res.tags[0].dir == (V2{1.0f, 0.0f}));
         // no obstacle: start and goal see each other
         q.obstacles = {};
-        CHECK(around_search(g, k, q, res) && res.points.size() == 2 && res.vertices == 2 && res.complexity == 2);
+        CHECK(around_search(g, k, q, res) && res.points.size() == 2 && res.vertices == 6 && res.complexity == 6);
         // a goal inside the obstacle's grown rectangle: refused (the caller moves on to the next candidate)
         q.obstacles = obs;
         q.goal = {515.0f, 400.0f};
@@ -1618,6 +1649,10 @@ static void test_collision_system() {
         s.add_unit(land_unit(2, {405.0f, 400.0f}, 7, 1.0f, 40.0f, kUccVehicle));
         SimRng rng(1);
         s.tick(0, rng);
+        // mov1 t08 (BKR1 Q1 / Q6 [H]): detection runs at the end of the driver, so the record waits in state 0 for the next
+        // tick's driver
+        CHECK(s.collisions().list().size() == 1 && s.collisions().list()[0].state == CollisionState::Active);
+        s.tick(1, rng);
         CHECK(s.collisions().list().size() == 1);
         if (s.collisions().list().size() == 1) {
             const CollisionObject& c = s.collisions().list()[0];
@@ -1639,7 +1674,7 @@ static void test_collision_system() {
         CHECK(std::fabs(ring - 84.8f) < 1e-3f);
         const std::span<const V2> top = s.top_path(2);
         CHECK(top.size() >= 2 && std::fabs(top.back().x - (405.0f + ring)) < 1e-2f && std::fabs(top.back().y - 400.0f) < 1e-3f);
-        uint32_t f = 1;
+        uint32_t f = 2;
         for (; f < 300 && !s.collisions().list().empty(); ++f) s.tick(f, rng);
         CHECK(s.collisions().list().empty() && s.stats().collisions_created == 1 && s.stats().collisions_resolved == 1 &&
               s.stats().collisions_cancelled == 0);
@@ -1812,6 +1847,36 @@ static uint32_t run_land(MovementSystem& sys, uint32_t first, uint32_t max_frame
     return f - first;
 }
 
+// mov1 t04 (b0181, BKR1_RE_ANSWERS Q5 [H]): pack +0x28c. A vehicle (max speed 1.5 x 1.56 = 2.34: L = max(60, 30 x 2.0 x
+// 2.34) = 140.4) ordered 400 along x: the byte is false while the rest of its path is longer than L, turns true within
+// one rebuild (8 frames) of the rest dropping below L, and is not written while the unit stands (sticky).
+static void test_mov1_near_end() {
+    MovementSystem s{MovementConfig{}};
+    PassabilityGrid g;
+    g.init(60, 40);
+    s.set_grid(std::move(g));
+    s.add_unit(land_unit(1, cell_center(5, 20), 7, 1.5f, 18.0f, kUccVehicle));
+    SimRng rng(7);
+    MoveOrder o;
+    o.units = {1};
+    o.destination = cell_center(25, 20);
+    s.move(o, rng, 0);
+    const float vmax = s.view(1).max_speed, look = std::max(60.0f, 60.0f * vmax);
+    uint32_t first_true = 0, below = 0;
+    bool early = false;
+    for (uint32_t f = 0; f < 600 && !s.view(1).arrived; ++f) {
+        s.tick(f, rng, serial_for);
+        const UnitView v = s.view(1);
+        const float rest = distance(v.pos, cell_center(25, 20));
+        if (below == 0 && rest < look && v.speed > 0.0f) below = f;
+        if (v.near_end && first_true == 0) first_true = f;
+        early = early || (v.near_end && rest > look + 1e-3f);
+    }
+    std::printf("mov1 near_end: L %.2f, rest below L at frame %u, byte set at frame %u\n", static_cast<double>(look), below, first_true);
+    CHECK(s.view(1).arrived && below > 0 && first_true >= below && first_true <= below + 8 && !early);
+    CHECK(s.view(1).near_end);  // standing: not rewritten
+}
+
 static void test_land_group() {
     MovementSystem sys{MovementConfig{}};
     build_land_scenario(sys, 36);
@@ -1904,11 +1969,16 @@ static void test_land_group() {
     // §5.4.7 item 7: its order is lost and the member counts as arrived) - it had two records waiting (no duplicate rule,
     // item 1); the first decision's kind-3 Path Around failed (the "failed detour" stop), which cleared its paths, so the
     // second found no base path (the "no base" stop). It is the one unit that ends 400 or more from the destination.
-    CHECK(ground && frames == 8402 && arrived == 36 && jammed == 0 && cycle);
-    CHECK(near == 35 && stops == 2 && st.terrain_stops_failed == 1 && st.terrain_stops_nobase == 1 && st.terrain_stops_cell == 0);
-    CHECK(st.terrain_records == 22 && st.terrain_detours == 20);
-    CHECK(tlog.stops.size() == 1 && far_ids == std::vector<ObjectId>{1});
-    if (tlog.stops.size() == 1) CHECK(tlog.stops[0].id == 1 && tlog.stops[0].frame == 365 && tlog.stops[0].kind == "fn");
+    // mov1 (2026-11-17, BKR1 / BKR2 answers ported; a port measurement, MSVC and clang): the jam check is final - a starved
+    // M with other records detours (0x505630 counts only its state-15 master records), and with 0x677e40's concave terrain
+    // corners and the retail tick order every unit arrives, all 36 near the destination, at frame 1955; no terrain stop
+    // (3 records, 3 detours); before mov1: 8402 frames, 2 terrain stops of unit 1.
+    // mov2 t04 (2026-11-17, the corner pass reads the tracker flags taken before the last walk): 2025 frames, all 36 near
+    // the destination, 9 terrain records and 9 detours, no stop.
+    CHECK(ground && frames == 2025 && arrived == 36 && jammed == 0 && cycle);
+    CHECK(near == 36 && stops == 0);
+    CHECK(st.terrain_records == 9 && st.terrain_detours == 9);
+    CHECK(tlog.stops.empty() && far_ids.empty());
 
     // Head-on corridor: two units swap ends through a 3-cell-wide corridor.
     MovementSystem s2{MovementConfig{}};
@@ -1963,13 +2033,18 @@ static void test_land_group() {
     s4.move(d, rng, 0);
     // (s78n t20: the blocker comes after the order - the destination check 0x439360 of the order would move the goal off
     // a unit that already stands there)
-    s4.add_unit(land_unit(2, cell_center(30, 30), 7, 1.5f, 18.0f, kUccVehicle));
-    bool g4ok = true;
-    run_land(s4, 0, 2000, rng, serial_for, g4ok);
+    // mov1 t04 (BKR1 Q5 [H]): a destination counts as blocked only once the mover's approximation byte +0x28c (rebuilt
+    // every 8 frames) says its path ends within L = max(60, 60 x max speed), so the blocker comes inside that range
+    for (uint32_t f = 0; f < 2000 && !s4.view(1).arrived; ++f) {
+        if (s4.view(2).id != 2 && distance(s4.view(1).pos, cell_center(30, 30)) < 75.0f)
+            CHECK(s4.add_unit(land_unit(2, cell_center(30, 30), 7, 1.5f, 18.0f, kUccVehicle)));
+        s4.tick(f, rng, serial_for);
+    }
     // s78n t18 review: the bound the comment derives - the first clear point is 41 .. 46 before the standing unit (steps of
     // 5 from the path end), the cut takes 3 more, and the walker stops on the cut path's end: 44 .. 49
     const float d4 = distance(s4.view(1).pos, cell_center(30, 30));
-    std::printf("early arrival: stopped %.3f before the standing unit\n", static_cast<double>(d4));
+    std::printf("early arrival: stopped %.3f before the standing unit (cuts %u, dynamic re-paths %u)\n", static_cast<double>(d4),
+                s4.stats().early_arrivals, s4.stats().dynamic_repaths);
     CHECK(s4.view(1).arrived && d4 >= 44.0f - 1e-3f && d4 <= 49.0f + 1e-3f && s4.stats().early_arrivals == 1);
 
     // a1j t02 (A1_READINGS §36.4): a Giant Vehicle pushes a stopped unit it does not crush aside (0x684f90 -> 0x6859a0)
@@ -3453,7 +3528,7 @@ static CrcLog space_crc_run(const ParallelFor& pf) {
 // path (11 accepted goals); MovingVsMoving answers follow the role slots.
 // s78n t26.2 (MOVEMENT §3.5.2 A / B): the speed controller (End Move T = a, 0x15 restarts), the start turn in place.
 // s78n t26 closing review (FIGHTER_FLYING §7.5 item 4): formation mates side-step by their footprint overlap.
-static constexpr uint64_t kGoldenLand = 0xd4626c4a21629e46ull;  // sp6: tree-hash layout (movement / combat / objects hashes); bkm1: lane fallback / stop point, shield-free class, recruitment, stored z, secondary facing; s78p: formation path and lanes; s78n t26 review round 2 (mixed formations, range rank); closing review; t26.4 the move step C; t26.3 the corner pass
+static constexpr uint64_t kGoldenLand = 0x06244c22001b99e8ull;  // mov2 t04: tracker snapshot before the walk; mov1: Starved count, tie-break extent, terrain corners, +0x28c, overtake rank, step 10, SvS kept, tick order; sp6: tree-hash layout (movement / combat / objects hashes); bkm1: lane fallback / stop point, shield-free class, recruitment, stored z, secondary facing; s78p: formation path and lanes; s78n t26 review round 2 (mixed formations, range rank); closing review; t26.4 the move step C; t26.3 the corner pass
 static constexpr uint64_t kGoldenSpace = 0x8fc952146335d9dbull;  // sp6: tree-hash layout (movement / combat / objects hashes)
 
 static void test_determinism() {
@@ -3784,12 +3859,14 @@ static void test_real_data() {
     // why these three swing into the clearance (and whether retail does) is not settled (b0041's replay / RE part is open).
     std::printf("real maps: %u units stopped by a failed TerrainCollision detour (%u stop(s) of %u unit(s) observed per unit)\n",
                 land_stopped, all_stops, stopped_units);
-    CHECK(group_arrived == group_units && land_units - land_arrived == 3u && land_stopped == 3u && all_stops == 3u && stopped_units == 3u);
-    CHECK(not_arrived.size() == 3);
-    if (not_arrived.size() == 3) {
-        CHECK(not_arrived[0].map == "EM01_TRAIL_OF_A_JEDI.TED" && not_arrived[0].id == 18 && not_arrived[0].kind == "f");
-        CHECK(not_arrived[1].map == "EM08_SITH_TOMBS.TED" && not_arrived[1].id == 15 && not_arrived[1].kind == "f");
-        CHECK(not_arrived[2].map == "_MP_LAND_NABOO.TED" && not_arrived[2].id == 13 && not_arrived[2].kind == "f");
+    // mov1 (2026-11-17): with the BKR1 / BKR2 rules and the retail tick order 2 of 3240 stop by a failed TerrainCollision
+    // detour (EM08_SITH_TOMBS unit 13, _LAND_PLANET_SALEUCAMI_INTIMIDATION unit 17); mov2 t08 (the previous window's
+    // tracker for rejoin goals 2 - 11) re-measures them
+    CHECK(group_arrived == group_units && land_units - land_arrived == 2u && land_stopped == 2u && all_stops == 2u && stopped_units == 2u);
+    CHECK(not_arrived.size() == 2);
+    if (not_arrived.size() == 2) {
+        CHECK(not_arrived[0].map == "EM08_SITH_TOMBS.TED" && not_arrived[0].id == 13 && not_arrived[0].kind == "f");
+        CHECK(not_arrived[1].map == "_LAND_PLANET_SALEUCAMI_INTIMIDATION.TED" && not_arrived[1].id == 17 && not_arrived[1].kind == "f");
     }
     CHECK(space_arrived == space_units && space_hits == 0);
 }
@@ -4117,6 +4194,7 @@ int main() {
     test_destination_offsets();  // s78n t20
     test_walk_step_t20();        // s78n t20
     test_collision_system();
+    test_mov1_near_end();
     test_land_group();
     test_push_search();
     test_space();

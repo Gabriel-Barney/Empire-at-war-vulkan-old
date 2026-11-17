@@ -328,6 +328,42 @@ void test_slot_leg() {
     std::printf("slot leg Q' (%.4f, %.4f)\n", static_cast<double>(q.x), static_cast<double>(q.y));
 }
 
+// cmb2 t01 (BKR1 Q7 (c) [H]): the slot leg's reach. Open 40 x 20 grid, class mask Clear; G = (100, 100), Q = (400, 100).
+// (a) a cell on the line blocked after the regions were built: G and Q still share a region -> q = rho (300), no walk;
+// (b) the regions rebuilt: different regions -> halving down to pieces < 40, the walk stops at the blocked cell's entry
+//     (cell 12 spans x 230 .. 250: q = 130); (c) G's own cell blocked -> 0; (d) G off the grid -> 0; (e) all clear -> 300.
+void test_slot_leg_reach() {
+    ::alamo::test::section("slot_leg_reach");
+    PassabilityGrid g;
+    g.init(40, 20);
+    const uint32_t masks[] = {kPassClear};
+    RegionMap open;
+    open.build(g, masks);
+    const V2 G{100.0f, 100.0f}, Q{400.0f, 100.0f};
+    const bool same = open.region_at(5, 5) >= 0 && open.region_at(5, 5) == open.region_at(20, 5);
+    CHECK(same);
+    const float clear = slot_leg_reach(g, open, G, Q, kPassClear);
+    CHECK(clear == 300.0f);
+    g.set_base(12, 5, kPassObstacle);
+    const float shortcut = slot_leg_reach(g, open, G, Q, kPassClear);
+    CHECK(shortcut == 300.0f);
+    RegionMap rebuilt;
+    rebuilt.build(g, masks);
+    CHECK(rebuilt.region_at(5, 5) != rebuilt.region_at(20, 5));
+    const float walked = slot_leg_reach(g, rebuilt, G, Q, kPassClear);
+    CHECK(std::fabs(walked - 130.0f) < 1e-3f);
+    g.set_base(5, 5, kPassObstacle);
+    RegionMap blocked;
+    blocked.build(g, masks);
+    const float at_once = slot_leg_reach(g, blocked, G, Q, kPassClear);
+    CHECK(at_once == 0.0f);
+    const float off = slot_leg_reach(g, blocked, {-100.0f, 100.0f}, Q, kPassClear);
+    CHECK(off == 0.0f);
+    std::printf("slot leg reach: same region %d, clear %.4f, blocked cell inside one region %.4f, regions rebuilt %.4f, "
+                "G blocked %.4f, G off the grid %.4f\n",
+                same ? 1 : 0, static_cast<double>(clear), static_cast<double>(shortcut), static_cast<double>(walked),
+                static_cast<double>(at_once), static_cast<double>(off));
+}
 
 // ================================================================ s78n t25.2: MovementSystem scenes (MOVEMENT §4.3.2)
 // Open grid of 100 x 60 cells; every scene is translated by kO = (100, 600) (the spec's worked case has the attacker at
@@ -479,6 +515,46 @@ void test_scene_two_formations() {
                 static_cast<double>(b.atk_theta), static_cast<double>(a.atk_rho), static_cast<double>(b.atk_rho),
                 sys.stats().attack_legs, sys.stats().attack_leg_refused);
     CHECK(sys.stats().attack_legs + sys.stats().attack_leg_refused == 2);
+}
+
+// cmb2 t02 (BKR2 Q7 item 3 [H]): the reference formation is the one nearest the mean of the formations' points by the 3-D
+// distance (strict <, first wins). Points (0, -150), (0, 0), (0, 150): flat, the middle one (index 1) is at the mean. With
+// the middle one 400 up the mean z is 133.3: index 1 is 266.7 away, 0 and 2 sqrt(150^2 + 133.3^2) = 200.7, so 0 (the
+// first of the tie) - a 2-D distance would keep 1.
+void test_reference_3d() {
+    ::alamo::test::section("reference_3d");
+    const V2 xy[] = {{0.0f, -150.0f}, {0.0f, 0.0f}, {0.0f, 150.0f}};
+    const float flat[] = {0.0f, 0.0f, 0.0f}, hill[] = {0.0f, 400.0f, 0.0f}, low[] = {50.0f, 0.0f, 0.0f};
+    const size_t a = attack_reference_index(xy, flat), b = attack_reference_index(xy, hill), c = attack_reference_index(xy, low);
+    CHECK(a == 1 && b == 0 && c == 1);
+    std::printf("reference 3-D: flat %zu, middle 400 up %zu, first 50 up %zu\n", a, b, c);
+}
+
+// cmb2 t03 (BKR2 Q7 item 6 [H]): a failed attack plan is reported to the host (attack_plan_failed), which keeps the block and
+// retries after 60 frames. The plan fails when G cannot be re-validated against the lead's zone (0x50f480: no cell of its
+// zone within 29 rings): the lead stands on an obstacle cell (so the composition's check, which needs a passable seed cell,
+// is skipped) and G is 3000 to the right of the 100-cell grid. The open lead with G on the grid plans; the host clears the
+// list before each order.
+void test_scene_plan_failure() {
+    ::alamo::test::section("scene_plan_failure");
+    bool failed[2] = {}, moving[2] = {};
+    for (int off = 0; off < 2; ++off) {
+        MovementSystem sys{MovementConfig{}};
+        scene_system(sys);
+        if (off) sys.grid().set_base(world_to_cell(kO.x), world_to_cell(kO.y), kPassObstacle);
+        CHECK(sys.add_unit(attacker(10, kO)));
+        const V2 c = kO + V2{off ? 4000.0f : 1000.0f, 0.0f};
+        SimRng rng(7);
+        sys.clear_attack_plan_failures();
+        sys.move(attack_order({10}, 900, c, 5.0f, 255.0f), rng, 1);
+        failed[off] = sys.attack_plan_failed(10);
+        moving[off] = sys.view(10).has_goal;
+        sys.clear_attack_plan_failures();
+        CHECK(!sys.attack_plan_failed(10));
+    }
+    CHECK(!failed[0] && failed[1] && moving[0]);
+    std::printf("plan failure: G on the grid failed %d (moving %d), G off the grid failed %d (moving %d)\n", failed[0] ? 1 : 0,
+                moving[0] ? 1 : 0, failed[1] ? 1 : 0, moving[1] ? 1 : 0);
 }
 
 // bkm3 t02 (b0072): the two-formation scene with both leads standing on their cell centres ((100, 440) and (100, 760) from
@@ -940,6 +1016,36 @@ void test_scene_guard_formation() {
                 static_cast<double>(a.goal.y - kO.y), static_cast<double>(b.goal.x - kO.x), static_cast<double>(b.goal.y - kO.y));
 }
 
+// cmb1 t05 (BKR1 Q7 (a) [H], 0x410e90): the guard trim's start value. The scene_guard order (path length L = 400 to C) with
+// a fire hook that refuses the line of fire everywhere, so the trim fails at s = L and returns its start value g:
+//   - a guarded object without LAND_OBSTACLE: g = L (no cut: the goal is C's own point, (400, 0)) - retail starts every
+//     non-obstacle block, guard or not, at L;
+//   - a LAND_OBSTACLE guarded object of radius 10: range = Land_Guard_Range 150 + 10 = 160, g = max(0, L - 160) = 240 (the
+//     goal (240, 0)); before cmb1 every guard started at max(0, L - 150) = 250.
+void test_scene_guard_trim_start() {
+    ::alamo::test::section("scene_guard_trim_start");
+    for (const bool obstacle : {false, true}) {
+        MovementSystem sys{MovementConfig{}};
+        scene_system(sys);
+        CHECK(sys.add_unit(attacker(10, kO)));
+        CHECK(sys.add_unit(attacker(900, kO + V2{400.0f, 0.0f}, 5.0f)));
+        sys.set_fire_test([](ObjectId, V2, ObjectId, bool, V2, float) { return false; });
+        MoveOrder o = attack_order({10}, 900, kO + V2{400.0f, 0.0f}, 5.0f, 150.0f);
+        o.flags = kMoveFlagGuardMove;
+        o.attack.guard = true;
+        o.attack.guard_obstacle = obstacle;
+        o.attack.t_radius = 10.0f;
+        o.attack.units[0].range = 250.0f;
+        SimRng rng(7);
+        sys.move(o, rng, 1);
+        const UnitView v = sys.view(10);
+        const float want = obstacle ? 240.0f : 400.0f;
+        std::printf("guard trim start, %s: goal (%.4f, %.4f), want x %.0f\n", obstacle ? "LAND_OBSTACLE object" : "unit",
+                    static_cast<double>(v.goal.x - kO.x), static_cast<double>(v.goal.y - kO.y), static_cast<double>(want));
+        CHECK(v.has_goal && close2(v.goal, kO + V2{want, 0.0f}, 0.01f));
+    }
+}
+
 void test_scene_workers() {
     ::alamo::test::section("scene_workers");
     const std::vector<uint64_t> s = run_approach(serial_for);
@@ -960,9 +1066,12 @@ int main() {
     test_trim_point();
     test_fire_trim();
     test_slot_leg();
+    test_slot_leg_reach();  // cmb2 t01
     test_scene_unit_target();     // s78n t25.2
     test_scene_structure();
     test_scene_two_formations();
+    test_reference_3d();  // cmb2 t02
+    test_scene_plan_failure();  // cmb2 t03
     test_scene_zero_first_segment();
     test_scene_blockers();
     test_scene_all_in_range();
@@ -972,6 +1081,7 @@ int main() {
     test_scene_guard();  // s78n t25.4
     test_scene_short_range();      // s78n t25 review fixes
     test_scene_guard_formation();
+    test_scene_guard_trim_start();  // cmb1 t05
     test_scene_workers();
     test_scene_unseen();  // s78n t26 review round 3
     test_scene_repath_keep();

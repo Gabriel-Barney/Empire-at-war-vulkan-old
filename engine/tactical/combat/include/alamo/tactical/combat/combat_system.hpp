@@ -866,8 +866,9 @@ enum UnitFlag : uint32_t {
     // are also read directly. Derived state: not hashed.
     kUnitRocketAttack = 1u << 17,
     // S8 t17 (FIGHTER_FLYING §4.10 A, TACTICAL_COMBAT §2.2): the unit's formation answers the response-range test
-    // 0x4160a0 (a space fighter / squadron member with a formation record): its scan asks set_scan_range_query for the
-    // cube R + Rr and for candidates beyond R. Mirrored by the host before every tick; derived state, not hashed.
+    // 0x4160a0 (a space fighter / squadron member with a formation record; cmb1 t03: a land unit or squad container with a
+    // land formation record, not deployed): its scan asks set_scan_range_query for the cube R + Rr (land: else R with a
+    // TURRET, else 0) and for candidates beyond R. Mirrored by the host before every tick; derived state, not hashed.
     kUnitScanQuery = 1u << 18,
     // S8 t25 (LOB_SOLVER §3.5 apply / release): TARGETING alone disabled (slot 9) - the Grenade_Attack / Remote_Bomb throw
     // from the apply to the toss animation's end or interruption. The unit acquires no target (decide skipped); its
@@ -1261,6 +1262,12 @@ public:
     // bkt1 t06 (b0079, MOVEMENT §4.3.2 item 7): `to` (when given) is the line of fire's end point before T's
     // Ranged_Target_Z_Adjust (the fire trim's goal G); else T's position. The range tests always measure to T.
     CanHit can_hit_from(ObjectId attacker, Vec3 from, ObjectId target, const Vec3* to = nullptr) const;
+    // cmb2 t06 (BKT1_ATTACK_RE §3.2 [H]): TARGETING slots 43 - 46 against a point that is not a combat unit (a story marker,
+    // an object without TARGETING data): pure geometry - no TARGETING (no weapon range, no grenade arc) -> NoTarget; the XY
+    // distance from `from` to `point` > max range + extent -> OutOfMaxRange (a grenade weapon: the lob solver to the point);
+    // <= Targeting_Min_Attack_Distance + extent (a min range > 0) -> InsideMinRange; else the land line of fire (the shield sides, as
+    // can_hit_from; the point takes no Ranged_Target_Z_Adjust).
+    CanHit can_hit_point(ObjectId attacker, Vec3 from, Vec3 point, float extent) const;
     // s78n t25.4 (MOVEMENT §4.3.2 item 7, a guard block's trim): only the land line-of-fire term of can_hit_from (0x3b5ad0,
     // from `from` with the same weapon source): LineBlocked or Yes; NoTarget for an unknown / dead attacker or target.
     CanHit line_of_fire_from(ObjectId attacker, Vec3 from, ObjectId target, const Vec3* to = nullptr) const;  // (no TARGETING: NoTarget)
@@ -1304,6 +1311,9 @@ public:
     HardpointKind hardpoint_kind(ObjectId id, uint32_t hp) const;
     float hardpoint_max(ObjectId id, uint32_t hp) const;  // HP_Get_Max_Health
     bool hardpoint_targetable(ObjectId id, uint32_t hp) const;  // live and Is_Targetable
+    // cmb2 t04 (FIGHTER_FLYING §4.11 D 7, 0x396ce0): the world position of the unit's hard point `hp` (its attach offset);
+    // false for an unknown unit or index
+    bool hardpoint_world(ObjectId id, int32_t hp, Vec3& out) const;
     uint32_t live_hardpoints(ObjectId id, HardpointKind kind) const;  // functioning: not destroyed, not disabled
     ObjectId hardpoint_opportunity_target(ObjectId id, uint32_t hp) const;
     int32_t choose_target_hardpoint(ObjectId attacker, ObjectId target) const;  // 0x394610
@@ -1568,8 +1578,9 @@ public:
     void set_precise_hit(PreciseHitFn fn) { precise_hit_ = std::move(fn); }
     // ---- S8 t17: squadron targeting (FIGHTER_FLYING §4.10 A / B, TACTICAL_COMBAT §2.1 / §2.2) ----
     // Scan cube Get_Scan_Range 0x566f50: a unit flagged kUnitScanQuery whose formation answers fn(unit, none) != 0 scans
-    // the cube R + Rr, and accepts a candidate beyond R (filter 9) when fn(unit, candidate) != 0. Every other unit: R
-    // ([port] land: no formations, so a land unit always scans R). Unset: R. Not saved (the host installs it at setup).
+    // the cube R + Rr, and accepts a candidate beyond R (filter 9) when fn(unit, candidate) != 0. cmb1 t03 (BKR1 Q8 [H]):
+    // a land kUnitScanQuery unit whose formation answers 0 scans R with a TURRET slot (UnitDesc::turret), else nothing (a
+    // cube of 0: a valid current target is kept). Every other unit: R. Unset: R. Not saved (the host installs it at setup).
     void set_scan_range_query(ScanRangeFn fn) { scan_range_ = std::move(fn); }
     // Shared team target 0x406370: the squadron (container id) a member belongs to, kNoObject for none. Set by the host
     // before every tick (derived state: not saved, not hashed). A member whose due scan picks a target while its own
@@ -2032,6 +2043,7 @@ private:
     // s78n t20: the same test with its reason (Yes / OutOfMaxRange / InsideMinRange), max range first.
     CanHit range_test(const Unit& u, Vec3 from, const Unit& t) const;
     CanHit fire_line(const Unit& src, Vec3 from, const Unit& t, const Vec3* to = nullptr) const;  // s78n t25.4: can_hit_from's line-of-fire term
+    CanHit fire_line_to(const Unit& src, Vec3 from, Vec3 b) const;  // cmb2 t06: fire_line to a point (b's z adjusted)
     // s78n t20: the unit whose weapon a land team's range test uses (slot 42: the head's, else the first member's that
     // has one, team list order; the head itself when none has).
     const Unit& team_weapon_source(const Unit& head) const;

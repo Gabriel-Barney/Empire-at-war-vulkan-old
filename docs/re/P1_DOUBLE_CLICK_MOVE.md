@@ -349,6 +349,12 @@ Example (land multipliers apply equally, so ratios are type ratios):
 
 ### 4.3 LargeHover formation ordering (land, `0x439360`)
 
+> **Correction (BKR1_RE_ANSWERS Q3 [H], mov1 t05, 2026-11-17):** `0x439360` takes every formation whose first member's
+> `Space_Layer` is **Land (0x10)**, not movement class 16 LargeHover. It sorts them after the placement passes by the
+> descending projection of each block goal on the order axis (or, with 0x80, fastest first) and the index +0x22c is
+> copied to FormationClass +0x23c, which the MovingVsMoving overtake test `0x683260` reads. The port implements that
+> (`destination_check`, `Unit::form_rank`); the text below is the original reading.
+
 `0x43c1b0` calls `0x439360` at its end unless flag 0x20 is set (or `0x438c10` for object targets).
 It handles formations whose seed MovementClass is **LargeHover (16)**:
 - it lays them out around the group centroid;

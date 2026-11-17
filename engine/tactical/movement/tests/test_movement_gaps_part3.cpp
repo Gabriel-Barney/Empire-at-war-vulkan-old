@@ -1145,10 +1145,17 @@ void test_t20_path_around() {
         // (the cut end lies behind the unit here: the record is finished at once and the unit brakes where it is)
         const bool shorter = distance(x.pos, top.back()) > 20.0f;
         const float gap = foot_gap(foot_rect(x.pos, x.yaw, 10.0f, 6.0f), foot_rect(sys.view(22).pos, sys.view(22).yaw, 10.0f, 6.0f));
-        std::printf("t20 batch 1 cut top record: the pushed unit stopped %.2f from the vehicle on its push end (gap %.2f)\n",
-                    static_cast<double>(distance(x.pos, top.back())), static_cast<double>(gap));
-        CHECK(sys.stats().pushes == 1 && sys.stats().early_arrivals == 1 && shorter && !x.pushed && x.speed == 0.0f);
-        CHECK(!sys.view(22).pushed && sys.view(22).pos == top.back() && gap >= 5.0f && !svs);
+        std::printf("t20 batch 1 cut top record: the pushed unit stopped %.2f from the vehicle on its push end (gap %.2f) [cuts %u, "
+                    "pushes %u, svs %d, pushed %d, speed %.3f, push length %.2f]\n",
+                    static_cast<double>(distance(x.pos, top.back())), static_cast<double>(gap), sys.stats().early_arrivals,
+                    sys.stats().pushes, svs ? 1 : 0, x.pushed ? 1 : 0, static_cast<double>(x.speed), static_cast<double>(path_length(top)));
+        // mov1 t04 / t08 (BKR1 Q5 / Q6 [H]): the pushed unit's approximation byte +0x28c is written only while it moves
+        // (rebuilt every 8 frames from the push), so when its record with the vehicle is decided the destination is not yet
+        // blocked; and once it is (a 37.8 push), its own position no longer clears the vehicle - no cut (0x685e10 changes
+        // nothing), and the vehicle on the push end is pushed in turn (step 8), as before s78n t20 batch 1
+        CHECK(sys.stats().pushes == 2 && sys.stats().early_arrivals == 0 && !x.pushed && x.speed == 0.0f && !svs);
+        CHECK(distance(sys.view(22).pos, top.back()) > 5.0f && gap >= 0.0f);
+        (void)shorter;
         CHECK(sys.stats().collisions_created > created0 && sys.stats().dynamic_repaths == 0);
     }
 
@@ -1323,7 +1330,9 @@ void test_t20_early_arrival() {
         // one frame, and the cut frame has none - the new last waypoint's fraction is 1.0 (no brake-ahead); the braking
         // is End Move's T = a from the rest test on (the t20 sqrt(2 a rest) curve was a port stand-in)
         CHECK(r.speed_after == r.speed_before && near(r.speed_before, mult, 1e-4f));  // at the full 1 x 1.56
-        CHECK(r.min_gap >= 5.0f + 3.0f - 1e-3f);  // its front stays 5 + 3 short of the standing footprint
+        // its front stays 5 + 3 short of the standing footprint, less the frame it walks on at full speed before its record is
+        // decided (mov1 t08: detection at the end of the driver, the decision at the next one)
+        CHECK(r.min_gap >= 5.0f + 3.0f - mult - 1e-3f);
         std::printf("t20 early arrival: cut %.1f, stopped at %.3f, speed %.3f -> %.3f on the cut frame\n", static_cast<double>(back + 3.0f),
                     static_cast<double>(r.end.x), static_cast<double>(r.speed_before), static_cast<double>(r.speed_after));
     }
@@ -1381,7 +1390,9 @@ void test_t20_early_arrival() {
         sys.move(o, rng, 2);
         bool placed = false, arrived = false;
         for (uint32_t f = 2; f < 1500 && !arrived; ++f) {
-            if (!placed && sys.view(100).pos.x > start.x + 60.0f) {
+            // mov1 t04 (BKR1 Q5 [H]): the destination counts as blocked only once the mover's approximation byte +0x28c
+            // says its path ends within L = 60 (rebuilt every 8 frames), so the blocker appears when the squad is 45 out
+            if (!placed && sys.view(100).pos.x > dest.x - 45.0f) {
                 t20_squad(sys, 200, {bx, dest.y}, 1);
                 placed = true;
             }
@@ -1440,7 +1451,9 @@ void test_t20_early_arrival() {
         bool placed = false;
         uint32_t f = 1;
         for (; f < 2500 && sys.stats().early_arrivals == 0; ++f) {
-            if (!placed && sys.view(10).speed > 0.0f && sys.view(10).pos.x > cell_center(20, 20).x) {
+            // mov1 t04 (BKR1 Q5 [H]): a destination counts as blocked only once the mover's approximation byte +0x28c (rebuilt
+            // every 8 frames) says its path ends within L = max(60, 60 x max speed), so the blocker comes inside that range
+            if (!placed && sys.view(10).speed > 0.0f && sys.view(10 + lead).pos.x > goal[lead].x - 50.0f) {
                 CHECK(sys.add_unit(t20_vehicle(30, goal[lead], 1, 12.0f, 6.0f)));  // a unit now stands on the leader's slot
                 placed = true;
             }
@@ -1465,9 +1478,16 @@ void test_t20_early_arrival() {
         }
         bool kept = true;
         for (int i : side) kept = kept && sys.land_path(10 + i).back() == goal[i];
-        CHECK(cut && exact == 2 && walking == 2 && finished == 0 && kept);
-        std::printf("t20 early arrival: formation - leader cut 33, lane members cut 33: %u (walking on %u, finished %u), side lanes kept %d\n",
-                    exact, walking, finished, kept ? 1 : 0);
+        // mov1 t04: the blocker comes inside the leader's +0x28c look-ahead (60 out), so the cut is made with the members
+        // closer to their ends than before: the member one row back walks on, the one two rows back has less than 33 left
+        // and is finished (as before s78p)
+        CHECK(cut && exact == 2 && walking == 1 && finished == 1 && kept);
+        std::printf("t20 early arrival: formation - leader cut 33, lane members cut 33: %u (walking on %u, finished %u), side lanes kept %d "
+                    "[cut %d, cuts %u, frame %u, leader %.2f from its goal, path end %.2f, re-paths %u, pushes %u, unit 30 moved %.2f]\n",
+                    exact, walking, finished, kept ? 1 : 0, cut ? 1 : 0, sys.stats().early_arrivals, f,
+                    static_cast<double>(distance(sys.view(10 + lead).pos, goal[lead])),
+                    static_cast<double>(distance(sys.land_path(10 + lead).back(), goal[lead])), sys.stats().dynamic_repaths,
+                    sys.stats().pushes, static_cast<double>(distance(sys.view(30).pos, goal[lead])));
         bool all = false;
         for (; f < 4000 && !all; ++f) {
             sys.tick(f, rng, serial_for);
@@ -1491,7 +1511,9 @@ void test_t20_early_arrival() {
         bool placed = false, arrived = false, around = false;
         for (uint32_t f = 1; f < 1500 && !arrived; ++f) {
             // (late: the mover must be on its final leg when the record with the nearer unit is decided)
-            if (!placed && sys.view(10).pos.x >= dest.x - 90.0f) {
+            // mov1 t04 (BKR1 Q5 [H]): a destination counts as blocked only once the mover's approximation byte +0x28c (rebuilt
+            // every 8 frames) says its path ends within L = max(60, 60 x max speed), so the blocker comes inside that range
+            if (!placed && sys.view(10).pos.x >= dest.x - 80.0f) {
                 CHECK(sys.add_unit(t20_vehicle(11, {dest.x - 60.0f, dest.y}, 1)));  // on the path, 60 before the goal
                 CHECK(sys.add_unit(t20_vehicle(12, dest, 1, 12.0f, 6.0f)));         // on the goal
                 placed = true;
@@ -1537,7 +1559,9 @@ void test_t20_decision_leftovers() {
             sys.move(o, rng, 2);
             bool placed = false;
             for (uint32_t f = 2; f < 1500 && !r.arrived; ++f) {
-                if (!placed && sys.view(100).pos.x > start.x + 60.0f) {
+                // mov1 t04 (BKR1 Q5 [H]): a destination counts as blocked only once the mover's approximation byte +0x28c (rebuilt
+                // every 8 frames) says its path ends within L = max(60, 60 x max speed), so the blocker comes inside that range
+                if (!placed && sys.view(100).pos.x > dest.x - 45.0f) {
                     UnitDesc x = unit(70, dest, 2, 1.0f, 6.0f, LocomotorKind::Default);
                     x.owner = 2;
                     CHECK(sys.add_unit(x));
@@ -1730,7 +1754,10 @@ void test_t20_decision_leftovers() {
             arrived = v.arrived;
             pushed = pushed || v.pushed;
             held = held || (v.has_goal && v.speed < v.max_speed && v.pos.x > start.x + 20.0f && v.pos.x < dest.x - 20.0f);
-            for (const CollisionObject& c : sys.collisions().list()) listed = listed || (c.a == 10 && c.b == 11);
+            // (mov1 t08: a record detection made at the end of this tick's driver waits in state 0; validity drops it at the
+            // next driver)
+            for (const CollisionObject& c : sys.collisions().list())
+                listed = listed || (c.a == 10 && c.b == 11 && c.state != CollisionState::Active);
         }
         const MovementStats st = sys.stats();
         std::printf("t20 batch 1 impassable cell: stander on a stamped cell - records made %u, listed after a tick %d\n",
@@ -1849,6 +1876,7 @@ void test_t20_stopped_vs_stopped() {
         }
         if (what == 2) CHECK(sys.deploy(11, true, 0) == MovementSystem::DeployResult::Deploying);
         SimRng rng(101);
+        sys.tick(0, rng, pf);  // mov1 t08: detection at the end of the driver makes the record; the next driver decides it
         sys.tick(1, rng, pf);
         if (sys.collisions().list().size() == 1) {
             o.master = sys.collisions().list()[0].master;
@@ -1954,8 +1982,8 @@ void test_t20_stopped_vs_stopped() {
        // the left), overlapping an immobile unit 4 to its left, so its escape direction is +x, into the wall. The only
        // free ground lies behind it, 170 degrees and more off that direction: inside the Infantry cone (pi), outside the
        // cone of every other class (3 pi / 4), whose samples there sit 0.75 from the unit. An Infantry-class X walks to
-       // the spot behind; a Vehicle-class X of the same shape finds none (Try Again Later). [port] The record of a
-       // failed resolution ends at a retry once the two no longer overlap.
+       // the spot behind; a Vehicle-class X of the same shape finds none (Try Again Later). mov1 t07 (BKR2 Q4 [H]): the
+       // record of a failed resolution is kept after the two no longer overlap (validity alone ends it).
         const auto corner = [&](int32_t cls, bool& moved, bool& tal, float& angle, uint32_t& records_after_apart) {
             MovementSystem sys{MovementConfig{}};
             PassabilityGrid g = open_grid(60, 60);
@@ -1982,7 +2010,7 @@ void test_t20_stopped_vs_stopped() {
                 }
                 for (const CollisionObject& c : sys.collisions().list()) tal = tal || c.state == CollisionState::TryAgainLater;
             }
-            // the other unit goes away: a record left in Try Again Later ends at its next retry
+            // the other unit goes away: a record left in Try Again Later stays (its retries find ring 0, its own spot)
             CHECK(sys.teleport(2, cell_center(10, 20), 0.0f, 0.0f, f));
             for (uint32_t n = 0; n < 40; ++n, ++f) sys.tick(f, rng, serial_for);
             records_after_apart = static_cast<uint32_t>(sys.collisions().list().size());
@@ -1993,7 +2021,7 @@ void test_t20_stopped_vs_stopped() {
         corner(kUccInfantry, moved_i, tal_i, ang_i, left_i);
         corner(kUccVehicle, moved_v, tal_v, ang_v, left_v);
         CHECK(moved_i && ang_i > 135.0f && ang_i <= 180.0f && left_i == 0);
-        CHECK(!moved_v && tal_v && left_v == 0);
+        CHECK(!moved_v && tal_v && left_v == 1);
         std::printf("t20 stopped vs stopped: cone - Infantry spot %.1f degrees off its escape direction, Vehicle: Try Again Later %d\n",
                     static_cast<double>(ang_i), tal_v ? 1 : 0);
     }
@@ -2104,7 +2132,8 @@ void test_t20_death_clone() {
             bool placed = false, decided = false;
             around = false;
             for (uint32_t f = 1; f < 1500 && !decided; ++f) {
-                if (!placed && sys.view(10).pos.x >= dest.x - 90.0f) {
+                // mov1 t04 (BKR1 Q5 [H]): inside the approximation's look-ahead (the +0x28c byte, rebuilt every 8 frames)
+                if (!placed && sys.view(10).pos.x >= dest.x - 80.0f) {
                     CHECK(sys.add_unit(t20_vehicle(11, {dest.x - 60.0f, dest.y}, 1)));
                     CHECK(sys.add_unit(clone ? t20_clone(12, dest, kUccVehicle, 12.0f, 6.0f) : t20_vehicle(12, dest, 1, 12.0f, 6.0f)));
                     placed = true;
@@ -2180,6 +2209,7 @@ void test_t20_death_clone() {
         MovementSystem sys{MovementConfig{}};
         setup(sys);
         SimRng rng(525);
+        sys.tick(0, rng, serial_for);  // mov1 t08: the record detection makes waits for the next driver
         sys.tick(1, rng, serial_for);
         CHECK(sys.collisions().list().size() == 1);
         if (sys.collisions().list().size() == 1) {

@@ -12,7 +12,7 @@ namespace alamo::sim {
 
 namespace {
 
-constexpr uint32_t kBattleStateVersion = 17;  // 17: skm2 t02 skirmish sides 2..7 (anchors, facings, records); 16: r3g t01 landing Land / Takeoff clip timing; 15: skm1 t07 skirmish garrison re-delivery; 14: TRU1 t06 retreat flight, t05 / t07 spawners and debris; 13: [port] fleet cohesion per player; 2: S7 t22 fighter formations; 3: S7 t24 formation follow_next / a1i t04 landing objects (two branches); 4: S7 t37 follow_next dropped (the follow is in the movement layer); 5: both merged (formations + landing objects); 6: story t06 victory monitor (replaces the end-hold fields); 7: q6 attacks on TEAM containers / s78f t02 FighterFormationRecord::pushed dropped (the auto blocks are in the movement save) (two branches); 8: both merged; 9: ccpgt t02 domination timer; 10: cu8k t01 Saber_Throw thrower machines; 11: cu8l t03 start fleet arrivals; 12: s78n t20 land attack blocks (exact: older versions are refused)
+constexpr uint32_t kBattleStateVersion = 19;  // 19: cmb2 t03 / t04 AttackBlock::retry / hp; 18: cmb1 t01 land formation records; 17: skm2 t02 skirmish sides 2..7 (anchors, facings, records); 16: r3g t01 landing Land / Takeoff clip timing; 15: skm1 t07 skirmish garrison re-delivery; 14: TRU1 t06 retreat flight, t05 / t07 spawners and debris; 13: [port] fleet cohesion per player; 2: S7 t22 fighter formations; 3: S7 t24 formation follow_next / a1i t04 landing objects (two branches); 4: S7 t37 follow_next dropped (the follow is in the movement layer); 5: both merged (formations + landing objects); 6: story t06 victory monitor (replaces the end-hold fields); 7: q6 attacks on TEAM containers / s78f t02 FighterFormationRecord::pushed dropped (the auto blocks are in the movement save) (two branches); 8: both merged; 9: ccpgt t02 domination timer; 10: cu8k t01 Saber_Throw thrower machines; 11: cu8l t03 start fleet arrivals; 12: s78n t20 land attack blocks (exact: older versions are refused)
 constexpr uint32_t kBattlePartVersion = 2;  // 2: s78n t06 running hero clashes in the Combat part (1 still read: none)
 
 // One module system in a part: presence flag + a section with its own write.
@@ -142,7 +142,7 @@ void TacticalBattle::state_io(Ar& a, Self& b) {
     // cu8l t03: the start fleet's hyperspace arrivals (state version 11; a version 10 battle has none)
     a.seq(b.arrivals_, [](auto& x, auto& r) { x(r.id, r.container, r.timer, r.composes); });
     // s78n t20 stage A: the land attack blocks (state version 12)
-    a.seq(b.attack_blocks_, [](auto& x, auto& r) { x(r.mover, r.target, r.flags, r.next, r.gx, r.gy); });
+    a.seq(b.attack_blocks_, [](auto& x, auto& r) { x(r.mover, r.target, r.flags, r.next, r.gx, r.gy, r.ox, r.oy, r.oz, r.retry, r.hp); });  // ox..oz: v18, retry / hp: v19
     // [port] fleet cohesion per player (state version 13)
     for (auto& c : b.fleet_cohesion_) a(c);
     // TRU1 t06: the space retreat jump-out flight (state version 14)
@@ -153,6 +153,8 @@ void TacticalBattle::state_io(Ar& a, Self& b) {
     a(b.sp_scanned_, b.sp_used_);
     // skm1 t07: the skirmish slots' start-force re-delivery (state version 15)
     a.seq(b.sk_garrisons_, [](auto& x, auto& g) { x(g.player, g.types, g.ids, g.timer, g.pending); });
+    // cmb1 t01: the land formation records (state version 18; `locked` is derived each tick)
+    a.seq(b.lformations_, [](auto& x, auto& r) { x(r.mover, r.flags, r.goal, r.goal_object, r.pushed, r.next, r.seen); });
 }
 
 void TacticalBattle::write_part(SavePart p, ByteWriter& w) const {
@@ -254,6 +256,8 @@ bool TacticalBattle::read_part(SavePart p, ByteReader& r) {
                 if (u.participant >= parts_.size() || (u.container != 0xFFFFFFFFu && u.container >= containers_.size())) ok = false;
             for (size_t i = 1; i < attack_blocks_.size(); ++i)  // s78n t20 review: one block per mover, ascending (lower_bound)
                 if (!(attack_blocks_[i - 1].mover < attack_blocks_[i].mover)) ok = false;
+            for (size_t i = 1; i < lformations_.size(); ++i)  // cmb1 t01: one record per mover, ascending
+                if (!(lformations_[i - 1].mover < lformations_[i].mover)) ok = false;
             if (ok && extended) {
                 const std::vector<uint32_t> saved_descs = descs_;
                 descs_ = descs;

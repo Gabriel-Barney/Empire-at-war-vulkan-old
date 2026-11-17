@@ -156,6 +156,10 @@ n = trunc(2πR / r) + 1 samples (≥ 4 after ring 0) counter-clockwise from the 
 sample that is ≥ d from G (3-D), inside the map and in M's reachable region for M's own class (no occupancy
 test); none → leave G at T. Do not place on the T→M line at exactly d.
 
+> **Ported (cmb2 t04, 2026-11-17):** §1.1 step 4 / §1.3: `TacticalBattle::AttackBlock::hp` (Lua `Attack_Target(obj, hp)`,
+> the auto Push through `CombatSystem::choose_target_hardpoint`); C = `CombatSystem::hardpoint_world`, the engagement adds
+> `CombatSystem::target_radius`.
+
 ## 2. b0074: the movement class of a mixed land formation
 
 ### 2.1 `0x4779e0`(class manager, member vector): the intersection class [H]
@@ -216,6 +220,9 @@ goal point is zone-connected to the lead for it. Recompute at every plan from th
 current lead. Classes with equal masks are interchangeable; break other ties by the lowest class id [port].
 No class (only possible with bad data): skip validation. Composition-time validation keeps using the seed's own
 class and style; the arc-slot test uses the intersection class without the shield step.
+
+> **Ported (cmb2 t05, 2026-11-17):** §2.2 step 1: the attack order's plan class is taken for C (`order.attack.c`), not the
+> staged G (movement_system.cpp, both set_form_mask calls of an attack order).
 
 ## 3. b0075: `unit.Attack_Move` on a non-hostile or unattackable object
 
@@ -292,3 +299,7 @@ B needs a hostile object that passes the attackable test); they still take targe
 `Attack_Move_Response_Range`. A formation with no TARGETING member does not move. When the object moves, keep
 the same formation and re-plan it (30-frame checks: D > base range / 2, or stopping short; after arrival, any
 member unable to fire), never issue a new move.
+
+> **Ported (cmb2 t06, 2026-11-17):** §3.5: a unit's own Attack_Move on an object that is not a combat unit is the no-lock land
+> attack block (battle_ai.cpp); TARGETING against it is `CombatSystem::can_hit_point` (geometry, extent 0).
+

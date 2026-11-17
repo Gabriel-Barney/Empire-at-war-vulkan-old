@@ -38,7 +38,7 @@ constexpr uint32_t kFighterGridSaveVersion = 1;
 constexpr uint32_t kFighterGridsSaveVersion = 1;
 constexpr uint32_t kDeparturesSaveVersion = 1;
 constexpr uint32_t kEnginesSaveVersion = 1;
-constexpr uint32_t kMovementSaveVersion = 33;  // 33: trn1 t03 UnitDesc::overall_length / overall_width, Unit::conform_pitch / conform_roll; 32: [port] fleet cohesion Unit::cohesion_speed; 31: bkm1 LandMotion::end_z / end_at, Unit::lane_z (stored waypoint heights), the UseSecondaryFacing state; 30: s78p (b0049) Unit::lane / lane_d (the formation member lanes); 29: s78n t26 closing review UnitDesc::walk_transition / anim_scale_speed, LandMotion::wt_clip / wt_pos / wt_rate / wt_f4 / wt_f0 (Walk_Transition); 28: s78n t25.2 Unit::atk_theta / atk_rho / atk_form / atk_target (the land attack block), MovementStats attack counters (t25 lane, numbered after t26.4 at the merge); 27: s78n t26.4 LandMotion::last_dir / started, Unit::prev_pos, MovementStats::walk_coasts / walk_restarts / walk_tau_skips / walk_degen_skips; 26: s78n t26.3 UnitDesc::min_speed_fraction_for_turn, MovementStats::corner_zero / corner_slowed / corner_stepdowns; 25: s78n t26.2 LandMotion::frac / turn_done, Unit::push_frac / push_turn_done (replace push_turn_first), Unit::aturn_start; 24: s78n t24 Unit::push_turn_first; Unit::blocked_frames / replans / push_blocked dropped (the blocked-frames re-plan); MovementStats::terrain_records / terrain_detours / terrain_stops_cell / terrain_stops_nobase / terrain_stops_failed; 23: s78n t26.1 UnitDesc::deploys / auto_deploys / max_walk_deployed / deployed_walk_speed / deploy_ability, Unit::walk_deployed, garrison deploy records; 22: s78n t23 Unit::speed_cap / hold_until / nudge / nudge_frames dropped (the MovingVsMoving stand-in); 21: s78n t23 UnitDesc::hard_x_deployed / hard_y_deployed; 20: s78n t20 batch 1 UnitDesc::no_locomotor / death_clone_obstacle, the push kills of the tick; 19: s78n t20 F5 Unit::self_goal; 18: s78n t20 the collision-owned top path record (Unit::push_owner / push_weight / push_kind / push_resume / push_tags; Unit::detour_seq / detour_end dropped), Unit::form_id / form_slot / self_arrive and the last formation id, UnitDesc::type_hx / type_hy / box_expansion; 17: s78n t18 collision states (Repulsion / PathAround / Crusher / SpeedSlave) and record answers, Unit::detour_seq / detour_end / around / around_frame / path_change, Unit::coast / fturn / path_started (a squad container's walk), Unit::exit_host / hover / hover_off and UnitDesc::hover_height (pair gates), the parked members' shape / speed data, Unit::waits dropped; 16: s78n t14 part B UnitDesc::movement_prediction_interval / avoidance_disabled, Unit::push_flee (crush-flee push path), Unit::steer_blocked dropped (members are not passability-tested); 15: s78n t14 UnitDesc::container_arrangement, Unit::recovery (u8, replaces recovering) / start_delay / team shape / laid_out / lay_dir / spread / team_target, the parked members' offsets; 14: s78n t03 UnitDesc::team_container, Unit::anchor / tslot / tindex / recovering / steer_blocked (land squad containers), s78n review Unit::team / team_factor / team_cap / team_max and the parked squad members; 13: cu8j t01 / t02 UnitDesc::stationary_space_layer, Unit::pend / adopted, the pending compositions + last serial; 2: S7 t06 multi-locomotor fields (UnitDesc, Unit); 3: S7 t14 alternate speed / turn read raw (no 0 = unset); 4: S7 t15 jetpack turn band rate, S8 t09 jetpack_still_frames; 5: S7 t28 FighterSquad::speed_cap; 6: S8 t11 Walk deploy state + clip, Deployment_Anim_Rate; 7: S8 t24 turret params (UnitDesc) + TURRET state (Unit); 8: S7 t37 fighter object goal blocks (FighterGuard), FighterSquad::guard_follow; 9: a1k t03 pushed move (Unit::pushed / push_path / push_next / push_blocked), MovementStats::pushes / push_failures, UnitDesc::hard_x / hard_y; 10: s78f t02 fighter formation block stacks (FighterFormation replaces FighterGuard), FighterParams / FighterSquad chase ranges, FighterSquad::speed_cap dropped; 11: s78k t01 UnitDesc::stopped_turn_rate / movement_directions, Unit::forced (land straight move); 12: s78l t02 UnitDesc::rotation_animation_speed, the Walk arrival turn state (Unit::aturn / aturn_rate / tclip / tclip_start / tclip_speed / aturn_ended / aturn_end_pending)
+constexpr uint32_t kMovementSaveVersion = 35;  // 35: mov2 t04 Unit::trk_static (the tracker snapshot before the walk); 34: mov1 t02 / t05 Unit::form_rank / form_first / coord_id (replace large_hover_index) and the last coordinator id, mov1 t04 Unit::near_end / approx_countdown; 33: trn1 t03 UnitDesc::overall_length / overall_width, Unit::conform_pitch / conform_roll; 32: [port] fleet cohesion Unit::cohesion_speed; 31: bkm1 LandMotion::end_z / end_at, Unit::lane_z (stored waypoint heights), the UseSecondaryFacing state; 30: s78p (b0049) Unit::lane / lane_d (the formation member lanes); 29: s78n t26 closing review UnitDesc::walk_transition / anim_scale_speed, LandMotion::wt_clip / wt_pos / wt_rate / wt_f4 / wt_f0 (Walk_Transition); 28: s78n t25.2 Unit::atk_theta / atk_rho / atk_form / atk_target (the land attack block), MovementStats attack counters (t25 lane, numbered after t26.4 at the merge); 27: s78n t26.4 LandMotion::last_dir / started, Unit::prev_pos, MovementStats::walk_coasts / walk_restarts / walk_tau_skips / walk_degen_skips; 26: s78n t26.3 UnitDesc::min_speed_fraction_for_turn, MovementStats::corner_zero / corner_slowed / corner_stepdowns; 25: s78n t26.2 LandMotion::frac / turn_done, Unit::push_frac / push_turn_done (replace push_turn_first), Unit::aturn_start; 24: s78n t24 Unit::push_turn_first; Unit::blocked_frames / replans / push_blocked dropped (the blocked-frames re-plan); MovementStats::terrain_records / terrain_detours / terrain_stops_cell / terrain_stops_nobase / terrain_stops_failed; 23: s78n t26.1 UnitDesc::deploys / auto_deploys / max_walk_deployed / deployed_walk_speed / deploy_ability, Unit::walk_deployed, garrison deploy records; 22: s78n t23 Unit::speed_cap / hold_until / nudge / nudge_frames dropped (the MovingVsMoving stand-in); 21: s78n t23 UnitDesc::hard_x_deployed / hard_y_deployed; 20: s78n t20 batch 1 UnitDesc::no_locomotor / death_clone_obstacle, the push kills of the tick; 19: s78n t20 F5 Unit::self_goal; 18: s78n t20 the collision-owned top path record (Unit::push_owner / push_weight / push_kind / push_resume / push_tags; Unit::detour_seq / detour_end dropped), Unit::form_id / form_slot / self_arrive and the last formation id, UnitDesc::type_hx / type_hy / box_expansion; 17: s78n t18 collision states (Repulsion / PathAround / Crusher / SpeedSlave) and record answers, Unit::detour_seq / detour_end / around / around_frame / path_change, Unit::coast / fturn / path_started (a squad container's walk), Unit::exit_host / hover / hover_off and UnitDesc::hover_height (pair gates), the parked members' shape / speed data, Unit::waits dropped; 16: s78n t14 part B UnitDesc::movement_prediction_interval / avoidance_disabled, Unit::push_flee (crush-flee push path), Unit::steer_blocked dropped (members are not passability-tested); 15: s78n t14 UnitDesc::container_arrangement, Unit::recovery (u8, replaces recovering) / start_delay / team shape / laid_out / lay_dir / spread / team_target, the parked members' offsets; 14: s78n t03 UnitDesc::team_container, Unit::anchor / tslot / tindex / recovering / steer_blocked (land squad containers), s78n review Unit::team / team_factor / team_cap / team_max and the parked squad members; 13: cu8j t01 / t02 UnitDesc::stationary_space_layer, Unit::pend / adopted, the pending compositions + last serial; 2: S7 t06 multi-locomotor fields (UnitDesc, Unit); 3: S7 t14 alternate speed / turn read raw (no 0 = unset); 4: S7 t15 jetpack turn band rate, S8 t09 jetpack_still_frames; 5: S7 t28 FighterSquad::speed_cap; 6: S8 t11 Walk deploy state + clip, Deployment_Anim_Rate; 7: S8 t24 turret params (UnitDesc) + TURRET state (Unit); 8: S7 t37 fighter object goal blocks (FighterGuard), FighterSquad::guard_follow; 9: a1k t03 pushed move (Unit::pushed / push_path / push_next / push_blocked), MovementStats::pushes / push_failures, UnitDesc::hard_x / hard_y; 10: s78f t02 fighter formation block stacks (FighterFormation replaces FighterGuard), FighterParams / FighterSquad chase ranges, FighterSquad::speed_cap dropped; 11: s78k t01 UnitDesc::stopped_turn_rate / movement_directions, Unit::forced (land straight move); 12: s78l t02 UnitDesc::rotation_animation_speed, the Walk arrival turn state (Unit::aturn / aturn_rate / tclip / tclip_start / tclip_speed / aturn_ended / aturn_end_pending)
 
 // ---- enum validation (switches without default: -Wswitch flags a new enumerator here) ---------------------------
 bool valid_loco_state(uint8_t v) {
@@ -497,8 +497,13 @@ void io_unit(IO& io, U& u) {  // MovementSystem::Unit (deduced: the type is priv
     io.u32(u.start_frame);
     io.f32(u.formation_speed);
     io.f32(u.cohesion_speed);  // [port] fleet cohesion (version 32)
-    io.i32(u.large_hover_index);
+    io.i32(u.form_rank);  // mov1 t05 (version 34; replaces large_hover_index)
+    io.i32(u.form_first);
+    io.u32(u.coord_id);
     io.i32(u.check_countdown);
+    io.b(u.near_end);  // mov1 t04 (version 34)
+    io.i32(u.approx_countdown);
+    io.b(u.trk_static);  // mov2 t04 (version 35)
     io.b(u.pushed);  // a1k t03 (version 9)
     io.v2s(u.push_path);
     io.u32(u.push_next);
@@ -1134,6 +1139,14 @@ void MovementSystem::write(ByteWriter& w) const {
     w.u32(static_cast<uint32_t>(crush_.size()));
     for (const CrushEvent& e : crush_) w.i32(e.crusher).i32(e.victim);
     out.ids(push_kills_);  // s78n t20 batch 1 (version 20)
+    {  // mov1 t06 (version 34): the formation attack blocks of the tick, as (mover, target) pairs
+        std::vector<ObjectId> fa;
+        for (const FormationAttack& e : formation_attacks_) {
+            fa.push_back(e.mover);
+            fa.push_back(e.target);
+        }
+        out.ids(fa);
+    }
     out.ids(despawned_);
     w.u32(static_cast<uint32_t>(squads_.size()));
     for (const FighterSquad& s : squads_) io_squad(out, s);
@@ -1147,6 +1160,7 @@ void MovementSystem::write(ByteWriter& w) const {
         for (const FighterBlock& b : g.blocks) io_block(out, b);
     }
     w.u32(form_serial_);  // s78n t20 (version 18): the last formation id given
+    w.u32(coord_serial_);  // mov1 t05 (version 34)
     w.u32(pend_serial_);  // cu8j t01 (version 13): the pending compositions, creation order
     w.u32(static_cast<uint32_t>(pending_.size()));
     for (const PendingComposition& pc : pending_) {
@@ -1197,6 +1211,9 @@ bool MovementSystem::read(ByteReader& r) {
     }
     std::vector<ObjectId> push_kills;  // s78n t20 batch 1
     in.ids(push_kills);
+    std::vector<ObjectId> fa;  // mov1 t06 (version 34)
+    in.ids(fa);
+    if (fa.size() % 2 != 0) return false;
     std::vector<ObjectId> despawned;
     in.ids(despawned);
     if (!r.count(n, 60)) return false;
@@ -1235,6 +1252,7 @@ bool MovementSystem::read(ByteReader& r) {
         }
     }
     const uint32_t form_serial = r.u32();  // s78n t20 (version 18)
+    const uint32_t coord_serial = r.u32();  // mov1 t05 (version 34)
     const uint32_t pend_serial = r.u32();  // cu8j t01 (version 13)
     if (!r.count(n, 22)) return false;
     std::vector<PendingComposition> pending(n);
@@ -1318,6 +1336,8 @@ bool MovementSystem::read(ByteReader& r) {
     coll_ = std::move(coll);
     crush_ = std::move(crush);
     push_kills_ = std::move(push_kills);
+    formation_attacks_.clear();
+    for (size_t i = 0; i + 1 < fa.size(); i += 2) formation_attacks_.push_back({fa[i], fa[i + 1]});
     despawned_ = std::move(despawned);
     squads_ = std::move(squads);
     fgrids_ = std::move(fgrids);
@@ -1327,6 +1347,7 @@ bool MovementSystem::read(ByteReader& r) {
     pending_ = std::move(pending);
     pend_serial_ = pend_serial;
     form_serial_ = form_serial;
+    coord_serial_ = coord_serial;
     parked_ = std::move(parked);
     deploy_kept_ = std::move(kept);
     team_ix_rebuild();  // s78n review: derived from the units

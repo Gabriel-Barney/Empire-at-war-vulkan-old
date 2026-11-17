@@ -663,10 +663,11 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
             return tc::PreciseOutcome::Miss;
         });
     }
-    if (space_) {  // S8 t17 (FIGHTER_FLYING §4.10 A): the scan cube R + Rr of fighters with a formation (kUnitScanQuery)
+    {  // S8 t17 (FIGHTER_FLYING §4.10 A): the scan cube R + Rr of fighters with a formation (kUnitScanQuery); cmb1 t03 (BKR1
+       // Q8 [H]): on land the units and squad containers with a land formation record (land_scan_range)
         const TacticalMode* tm = &mode;
         combat_->set_scan_range_query([this, tm](tc::ObjectId u, tc::ObjectId c, float range, float& rr) {
-            return fighter_scan_range(tm->primary(), u, c, range, rr);
+            return space_ ? fighter_scan_range(tm->primary(), u, c, range, rr) : land_scan_range(tm->primary(), u, c, range, rr);
         });
     }
     if (!space_)  // s78n t20 (FIGHTER_FLYING §4.11 E, 0x40edd0): can_hit's land line-of-fire term 0x3b5ad0 (L1_S4_REMAINING §1.2)
@@ -701,7 +702,11 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
             if ((movement_->mask_of(mover) & mv::kPassWater) != 0u && map_.terrain.header.water_type != terrain::WaterType::None)
                 from.z = std::max(from.z, map_.terrain.header.water_height);
             const tactical::Vec3 to{g.x, g.y, gz};
-            const tc::CanHit c = los_only ? combat_->line_of_fire_from(unit, from, target, &to) : combat_->can_hit_from(unit, from, target, &to);
+            // cmb2 t06 (BKT1_ATTACK_RE §3.2 / §3.3 item 4 [H]): an object that is not a combat unit (a story marker) is
+            // tested by geometry against G
+            const tc::CanHit c = !combat_->has_unit(target) ? combat_->can_hit_point(unit, from, to, 0.0f)
+                                 : los_only                 ? combat_->line_of_fire_from(unit, from, target, &to)
+                                                            : combat_->can_hit_from(unit, from, target, &to);
             return c == tc::CanHit::Yes || c == tc::CanHit::NoTarget;
         });
         // s78n t26 review round 2 (MOVEMENT §4.3 correction [H]): the formation layout's rank key, Get attack range
@@ -1453,7 +1458,16 @@ uint32_t TacticalBattle::exec_attack(TacticalMode& mode, std::span<const objects
             if (!tu) continue;
         }
         const Vec3 tp = st.position(tu->h);
-        combat_->order_attack(u->id, tu->id, ct ? -1 : hp);
+        if (!space_ && !ct) {
+            // cmb1 t02 (BKR1 Q2 [H], TACTICAL_COMBAT §2.8 C): a land Order_Attack(ordered 1) - a unit that is not a team
+            // container / member / LUCKY_SHOT takes the weapon path (lock cleared, the weapon hard points aimed, its target
+            // kept unlocked), the others the set path (locked); the object is the formation's attack goal, so path B locks
+            // it in weapon range. [port] a TEAM container target keeps the ordered slot (TeamAttack re-picks through it).
+            (void)combat_->order_attack_issue(u->id, tu->id, hp);
+            combat_->set_attack_goal(u->id, tu->id, hp);
+        } else {
+            combat_->order_attack(u->id, tu->id, ct ? -1 : hp);
+        }
         if (ct) team_attack_set(u->id, ct->id, tu->id, false);
         const objects::ObjectId block = ct && movement_->fighter_squad(ct->id) ? ct->id : tu->id;
         if (!movement_locked(u->id))  // S7 t22: an object block (flags 0); a locked unit keeps its formation (as Move_To)
@@ -1648,7 +1662,19 @@ tc::CanHit TacticalBattle::attack_can_hit(objects::ObjectId unit, objects::Objec
     return combat_->can_hit_from(unit, from, target);
 }
 
-void TacticalBattle::attack_block_set(objects::ObjectId unit, objects::ObjectId target, uint8_t flags, Vec3 goal) {
+tc::CanHit TacticalBattle::attack_can_hit_at(objects::ObjectId unit, objects::ObjectId target, Vec3 point) const {
+    if (combat_->has_unit(target)) return attack_can_hit(unit, target);
+    tactical::Vec3 from = combat_->can_hit_origin(unit);
+    const objects::ObjectId mover = attack_mover(unit);
+    if (movement_ && movement_->has_unit(mover)) {
+        const mv::V2 p = movement_->view(mover).pos;
+        from.x = p.x;
+        from.y = p.y;
+    }
+    return combat_->can_hit_point(unit, from, tactical::Vec3{point.x, point.y, point.z}, 0.0f);
+}
+
+void TacticalBattle::attack_block_set(objects::ObjectId unit, objects::ObjectId target, uint8_t flags, Vec3 goal, int32_t hp) {
     if (space_ || !movement_ || target == objects::kNoObjectId) return;
     const Unit* u = unit_by_id(unit);
     if (!u || !u->movable) return;
@@ -1658,7 +1684,7 @@ void TacticalBattle::attack_block_set(objects::ObjectId unit, objects::ObjectId 
                                [](const AttackBlock& r, objects::ObjectId v) { return r.mover < v; });
     if (it == attack_blocks_.end() || it->mover != mover) it = attack_blocks_.insert(it, AttackBlock{});
     // [port] the first check 30 frames after the order (the formation timer F +0x1d8 is set at its first state-1 step)
-    *it = AttackBlock{mover, target, flags, frame_ + 30u, goal.x, goal.y};
+    *it = AttackBlock{mover, target, flags, frame_ + 30u, goal.x, goal.y, goal.x, goal.y, goal.z, 0u, hp};
 }
 
 void TacticalBattle::attack_block_drop(std::span<const objects::ObjectId> ids) {
@@ -1787,6 +1813,23 @@ TacticalBattle::AttackPlan TacticalBattle::land_attack_order(TacticalMode& mode,
     }
     if (o.units.empty()) return AttackPlan::None;
     // The target's footprint half extents (0x396850): its movement unit's, else the type's hard extents.
+    // cmb2 t04 (BKT1_ATTACK_RE §1.1 step 4 / §1.3, FIGHTER_FLYING §4.11 D 7 [H]): the hard point the movers' block names
+    // (the first mover's block on this target): C is its position (0x396ce0) and the engagement range adds 0x397780(T)
+    int32_t hp = -1;
+    for (const objects::ObjectId mover : movers) {
+        const auto it = std::lower_bound(attack_blocks_.begin(), attack_blocks_.end(), mover,
+                                         [](const AttackBlock& b, objects::ObjectId m) { return b.mover < m; });
+        if (it == attack_blocks_.end() || it->mover != mover) continue;
+        if (it->target == target) hp = it->hp;
+        break;
+    }
+    // a hard point no longer targetable: the object (review); a re-plan's tp is already the block's last-observed point
+    // (keep() writes the hard point's position into it while the target is seen), so only a first order reads it here
+    if (hp >= 0 && !(combat_->has_unit(target) && combat_->hardpoint_targetable(target, static_cast<uint32_t>(hp)))) hp = -1;
+    if (hp >= 0 && !replan) {
+        tactical::Vec3 hpp;
+        if (combat_->hardpoint_world(target, hp, hpp)) tp = Vec3{hpp.x, hpp.y, hpp.z};
+    }
     float thx = 0.0f, thy = 0.0f;
     if (movement_->has_unit(target)) {
         const mv::V2 h = movement_->collision_half(target);
@@ -1795,7 +1838,8 @@ TacticalBattle::AttackPlan TacticalBattle::land_attack_order(TacticalMode& mode,
     } else if (tu) {
         unit_half_extents(*tu, thx, thy);
     }
-    // s78n t25.4 [port]: a guard block is not staged (G = C; 0x40e260's min-range rule is for an attack on T)
+    // s78n t25.4, cmb1 t05 retag [H] (BKR1 Q7): a guard block is not staged (G = C; 0x40e260 acts only on a top whose flag 0x02
+    // is clear)
     const Vec3 g = guard ? tp : attack_stage_goal(mode, o.units, target, tp, movers.size());
     const tactical::Aabb& bb = mode.bounds();
     o.destination = {std::clamp(g.x, bb.min.x, bb.max.x), std::clamp(g.y, bb.min.y, bb.max.y)};
@@ -1809,19 +1853,21 @@ TacticalBattle::AttackPlan TacticalBattle::land_attack_order(TacticalMode& mode,
     o.attack.t_hy = thy;
     o.attack.replan = replan;
     o.attack.guard = guard;  // s78n t25.4
+    if (guard && tu) {  // cmb1 t05 (BKR1 Q7 (a) [H]): a LAND_OBSTACLE guarded object widens the guard range by 0x397780(T)
+        const objects::GameObjectTypes& types = catalog_->types();
+        o.attack.guard_obstacle = tu->type < types.size() && types.has_behavior(tu->type, objects::BehaviorSet::Union, 0x14);
+        o.attack.t_radius = combat_->has_unit(target) ? combat_->target_radius(target) : 0.0f;
+    }
     // 0x410e90's gate: the target point not fogged for the first unit's owner, and not a stealthed target the first unit
     // cannot target (Target_Stealth_Units)
+    // cmb1 t06 (BKR2 Q6 [H]): 0x410e90's gate is the object test FOW_Object_Hidden(members[0]'s owner, T, force 1) and the
+    // stealth test (no trim for an unseen target: the formation walks to its last-observed point)
     const Unit* first = unit_by_id(o.units.front());
-    bool trim = !fog_point_fogged(st.owner(first->h), tp.x, tp.y, false);
-    if (trim && abilities_ && abilities_->is_stealthed(target, frame_)) {
-        const objects::GameObjectTypes& types = catalog_->types();
-        trim = first->type < types.size() && types.get_bool(first->type, "Target_Stealth_Units");
-    }
-    o.attack.trim = trim;
     // s78n t26 review round 3 (FIGHTER_FLYING §4.11 E [H], 0x40edd0): c is false for a target hidden for the first unit's
     // owner or stealthed against its type - no item-6 stop; G 5: a re-path keeps the standing in-range members
     bool hidden = false, stealthed = false;
     attack_target_unseen(st, *first, target, hidden, stealthed);
+    o.attack.trim = !hidden && !stealthed;
     o.attack.unseen = hidden || stealthed;
     o.attack.repath = repath && replan;
     for (const objects::ObjectId mover : movers) {
@@ -1832,17 +1878,18 @@ TacticalBattle::AttackPlan TacticalBattle::land_attack_order(TacticalMode& mode,
             e.range = combat_->attack_range(lead);  // 0x3749d0 (Get_Base_Attack_Range)
             // 0x4f6e40 (§4.3.2 item 1; bkt1 t01, BKT1_ATTACK_RE §1.1 [H]): a pending targeted ability with an
             // Activation_Max_Range > 0 gives min(range, that range) - no extent, no guard cap; else + min(hx, hy) of the
-            // target's extents ([port] land blocks name no hard point: the hard-point radius term is not reached)
+            // target's extents, or (cmb2 t04, the block names a hard point) + 0x397780(T): the joint-box diagonal of a land
+            // squad container, else Scale_Factor x the soft footprint radius (CombatSystem::target_radius)
             float amin = 0.0f, amax = 0.0f;
             objects::ObjectId on = objects::kNoObjectId;
             if (pending_ability_ranges(lead, amin, amax, on) && amax > 0.0f) {
                 e.engage = std::min(e.range, amax);
             } else {
-                e.engage = e.range + std::min(thx, thy);
+                e.engage = e.range + (hp >= 0 ? combat_->target_radius(target) : std::min(thx, thy));
                 // s78n t25.4 (item 1): a guard block's engagement range is capped at Land_Guard_Range (GC +0x11ec4)
                 if (guard) e.engage = std::min(e.engage, movement_->constants().land_guard_range);
             }
-            const tc::CanHit c = attack_can_hit(lead, target);
+            const tc::CanHit c = attack_can_hit_at(lead, target, tp);  // cmb2 t06: a marker by geometry
             e.in_range = c == tc::CanHit::Yes || c == tc::CanHit::LineBlocked;  // slots 44 / 45: range only
             e.melee = combat_->melee_attacker(lead);
             // s78o (b0071): TARGETING - a weapon range, or a grenade arc (can_hit answers more than NoTarget)
@@ -1853,7 +1900,21 @@ TacticalBattle::AttackPlan TacticalBattle::land_attack_order(TacticalMode& mode,
         o.attack.units.push_back(e);
     }
     const uint32_t stops = movement_->stats().attack_stops;
+    movement_->clear_attack_plan_failures();
     movement_->move(o, rng, frame_);
+    // cmb2 t03 (BKR2 Q7 item 6 [H]): a failed plan keeps the block; its plan is tried again once 2 x FPS < now - frame
+    bool failed = false;
+    for (const objects::ObjectId mover : movers)
+        if (movement_->attack_plan_failed(mover)) {
+            failed = true;
+            const auto it = std::lower_bound(attack_blocks_.begin(), attack_blocks_.end(), mover,
+                                             [](const AttackBlock& b, objects::ObjectId m) { return b.mover < m; });
+            if (it != attack_blocks_.end() && it->mover == mover) it->retry = frame_ + 61u;
+        }
+    if (failed) {
+        ++stats_.attack_plan_retries;
+        return AttackPlan::Failed;
+    }
     for (const objects::ObjectId mover : movers)
         if (movement_->view(mover).has_goal) return AttackPlan::Moved;
     return movement_->stats().attack_stops != stops ? AttackPlan::Stopped : AttackPlan::None;
@@ -1891,7 +1952,10 @@ void TacticalBattle::attack_block_service(TacticalMode& mode, SimRng& rng) {
     const auto keep = [&](AttackBlock& r) {
         if (!movement_->has_unit(r.mover)) return false;
         const Container* ct = team_target(r.target);
-        if (!ct && !live(unit_by_id(r.target))) return false;  // the target died (signal 0x10)
+        // cmb2 t06 (BKT1_ATTACK_RE §3 [H]): a no-lock block (unit Attack_Move) may name an object that is not a combat unit
+        // (a story marker): it lasts while the object is alive in the store
+        const bool point_target = !ct && (r.flags & kAttackBlockNoLock) != 0 && !combat_->has_unit(r.target);
+        if (point_target ? !st.alive(st.find(r.target)) : (!ct && !live(unit_by_id(r.target)))) return false;  // the target died (signal 0x10)
         // The unit the target is attacked through: the target itself, or (a TEAM container) the member the lead's order names.
         const auto names = [&](const Unit* x) -> objects::ObjectId {
             if (!live(x)) return objects::kNoObjectId;
@@ -1931,6 +1995,27 @@ void TacticalBattle::attack_block_service(TacticalMode& mode, SimRng& rng) {
             tid = r.target;
         }
         if (!lead || tid == objects::kNoObjectId) return false;  // the order no longer names the target
+        // cmb1 t06 (BKR2 Q6 [H]): the last-observed point 0x584750, rewritten at every formation step (0x422b70) with the
+        // lead as viewer ([port] the block's lead): hidden for the lead's owner -> frozen; stealthed against the lead's type
+        // -> the formation lead's position (the member nearest the movers' centroid, set below where the formation's movers
+        // are grouped); else the target's position (a TEAM container: the member the order names)
+        {
+            bool h = false, s = false;
+            attack_target_unseen(st, *lead, tid, h, s);
+            const Unit* ou = unit_by_id(tid);
+            const objects::ObjectHandle oh = ou ? ou->h : st.find(tid);  // cmb2 t06: a marker is a store object
+            if (!h && !s && st.alive(oh)) {
+                // cmb2 t04 (FIGHTER_FLYING §4.11 D 7): a block naming a hard point reads the hard point's position
+                Vec3 p = st.position(oh);
+                tactical::Vec3 hpp;
+                if (r.hp >= 0 && tid == r.target && combat_->hardpoint_targetable(tid, static_cast<uint32_t>(r.hp)) &&
+                    combat_->hardpoint_world(tid, r.hp, hpp))
+                    p = Vec3{hpp.x, hpp.y, hpp.z};
+                r.ox = p.x;
+                r.oy = p.y;
+                r.oz = p.z;
+            }
+        }
         // s78n t26 review round 2: the checks are the attack formation's (below); here the timer gate only. bkt1 t03: a
         // locked lead no longer suspends its formation here - the formation's lead is picked below among unlocked members.
         checked.push_back({r.mover, lead->id, tid, frame_ >= r.next, false, false, movement_locked(lead->id), false, false, false, Vec3{}});
@@ -1994,7 +2079,8 @@ void TacticalBattle::attack_block_service(TacticalMode& mode, SimRng& rng) {
                 if (checked[j].locked) continue;
                 if (first_free == checked.size()) first_free = j;
                 const Vec3 q = pos3(checked[j].mover);
-                const Vec3 tc = st.position(unit_by_id(checked[j].tid)->h);
+                const Unit* tu = unit_by_id(checked[j].tid);
+                const Vec3 tc = st.position(tu ? tu->h : st.find(checked[j].tid));  // cmb2 t06: a marker
                 if (q.x == tc.x && q.y == tc.y && q.z == tc.z) continue;  // its goal point is where it stands
                 const float dx = q.x - L.x, dy = q.y - L.y, dz = q.z - L.z;
                 const float dd = (dx * dx + dy * dy) + dz * dz;
@@ -2010,63 +2096,82 @@ void TacticalBattle::attack_block_service(TacticalMode& mode, SimRng& rng) {
                 if (checked[j].due) bi(checked[j].mover)->next = frame_ + 30u;
             continue;
         }
+        // cmb2 t03 (BKR2 Q7 item 6 [H]): after a failed plan the formation is in state 0 - no 30-frame check, no C 3; the
+        // plan (toward the last-observed point) runs at the first step with 2 x FPS < now - the failure frame
+        {
+            uint32_t retry = 0;
+            for (const size_t j : g) retry = std::max(retry, bi(checked[j].mover)->retry);
+            if (retry != 0) {
+                if (frame_ >= retry) {
+                    for (const size_t j : g) bi(checked[j].mover)->retry = 0;
+                    checked[i].plan = true;
+                }
+                continue;
+            }
+        }
         const auto ri = bi(checked[i].mover);
-        if (!checked[i].due) continue;
-        for (const size_t j : g) bi(checked[j].mover)->next = frame_ + 30u;
-        bool can = true, moving = false, pushed = false;
+        bool moving = false, pushed = false;
         for (const size_t j : g) {
-            const tc::CanHit c = attack_can_hit(checked[j].lead, checked[j].tid);
-            can = can && (c == tc::CanHit::Yes || c == tc::CanHit::NoTarget);  // NoTarget: nothing tested (0x40edd0 true)
             const mv::UnitView vj = movement_->view(checked[j].mover);
             moving = moving || vj.has_goal;
             pushed = pushed || vj.pushed;
         }
         const Unit* lead = unit_by_id(checked[i].lead);
-        const Vec3 tp = st.position(unit_by_id(checked[i].tid)->h);
-        const float gx = tp.x - ri->gx, gy = tp.y - ri->gy, R = 0.5f * lead->range;
-        const bool far = gx * gx + gy * gy > R * R;
         // s78n t26 review round 3 (FIGHTER_FLYING §4.11 E [H]): c (0x40edd0) is false when the object is hidden for
         // members[0]'s owner or stealthed and members[0]'s type lacks Target_Stealth_Units ([port] the target unit the
         // lead's order names, tid: a TEAM container through that member)
         bool hidden = false, stealthed = false;
         attack_target_unseen(st, *lead, checked[i].tid, hidden, stealthed);
+        // cmb1 t06 (BKR2 Q6 [H], review): stealthed (and not hidden) -> the last-observed point is the formation lead's
+        // position (the member picked above, nearest the movers' centroid), on every block of the formation
+        if (stealthed && !hidden) {
+            const Vec3 np = st.position(lead->h);
+            for (const size_t j : g) {
+                const auto rj = bi(checked[j].mover);
+                rj->ox = np.x;
+                rj->oy = np.y;
+                rj->oz = np.z;
+            }
+        }
+        // cmb1 t06 (BKR2 Q6 [H]): every plan, re-path and C 3 test reads the block's last-observed point
+        const Vec3 tp{ri->ox, ri->oy, ri->oz};
+        // §4.11 C 3, BKR2 Q6 [H] (state 3 0x423070 on EVERY formation step, before the 30-frame 0x410a60; n = 1, the object
+        // hidden or stealthed for the lead): P = 0x583200(top, lead) = the last-observed point (hidden: frozen; stealthed:
+        // the lead's position). d = 2-D |L - P| (L the movers' centroid): d >= 40 -> state 0 and the plan in the same step
+        // toward P (no item-6 stop, no fire trim: the target is unseen); d < 40 -> the block becomes a position block at L
+        // (Set_Move kind 1, flags / theta / rho kept, clear) with the plan to L at once, and every member's attack order is
+        // cleared (0x38d730(member, null) [M]). Not for an auto block on top of an order (n = 2): land_engage_service.
+        const LandFormationRecord* lr = land_formation(checked[i].mover);
+        const bool auto_top = lr && lr->pushed != objects::kNoObjectId && lr->pushed == ri->target;
+        if (!moving && !pushed && (hidden || stealthed) && !auto_top) {
+            mv::V2 L{0.0f, 0.0f};
+            for (const size_t j : g) L = L + movement_->view(checked[j].mover).pos;
+            L = L * (1.0f / static_cast<float>(g.size()));
+            const float dx = L.x - tp.x, dy = L.y - tp.y;
+            if (dx * dx + dy * dy >= 40.0f * 40.0f) {
+                checked[i].plan = true;
+                checked[i].at_p = true;
+                checked[i].p = tp;
+            } else {
+                for (const size_t j : g) {
+                    checked[j].dropped = true;
+                    checked[j].p = Vec3{L.x, L.y, 0.0f};
+                }
+            }
+            continue;
+        }
+        if (!checked[i].due) continue;
+        for (const size_t j : g) bi(checked[j].mover)->next = frame_ + 30u;
+        bool can = true;
+        for (const size_t j : g) {
+            const tc::CanHit c = attack_can_hit_at(checked[j].lead, checked[j].tid, tp);  // cmb2 t06: a marker by geometry
+            can = can && (c == tc::CanHit::Yes || c == tc::CanHit::NoTarget);  // NoTarget: nothing tested (0x40edd0 true)
+        }
+        const float gx = tp.x - ri->gx, gy = tp.y - ri->gy, R = 0.5f * lead->range;
+        const bool far = gx * gx + gy * gy > R * R;
         if (hidden || stealthed) can = false;
         if (!moving) {
             if (pushed) continue;
-            if (hidden || stealthed) {
-                // §4.11 C 3 [H] (states 3 / 4, n = 1, the object hidden or stealthed for the lead): P = the object's goal
-                // point 0x583200 - hidden: its position ([M] the block's stored point is the 1e18 default); stealthed: the
-                // lead's own position (the member nearest the centroid L, G 3; [port] stealth is tested first). d = 2-D
-                // |L - P|: d >= 40 -> plan again toward P; d < 40 -> the block becomes a position block at L (Set_Move kind 1,
-                // clear) and every member's attack order is cleared (0x38d730(member, null) [M]). [port] checked on the
-                // block's 30-frame timer.
-                mv::V2 L{0.0f, 0.0f};
-                for (const size_t j : g) L = L + movement_->view(checked[j].mover).pos;
-                L = L * (1.0f / static_cast<float>(g.size()));
-                Vec3 P = tp;
-                if (stealthed) {
-                    float best = 0.0f;
-                    bool have = false;
-                    for (const size_t j : g) {
-                        const mv::V2 q = movement_->view(checked[j].mover).pos;
-                        const float dd = (q.x - L.x) * (q.x - L.x) + (q.y - L.y) * (q.y - L.y);
-                        if (!have || dd < best) {
-                            best = dd;
-                            have = true;
-                            P = {q.x, q.y, tp.z};
-                        }
-                    }
-                }
-                const float dx = L.x - P.x, dy = L.y - P.y;
-                if (dx * dx + dy * dy >= 40.0f * 40.0f) {
-                    checked[i].plan = true;
-                    checked[i].at_p = true;
-                    checked[i].p = P;
-                } else {
-                    for (const size_t j : g) checked[j].dropped = true;
-                }
-                continue;
-            }
             checked[i].plan = !can;  // arrived and some member cannot hit (FIGHTER_FLYING §4.11 A)
             continue;
         }
@@ -2098,7 +2203,7 @@ void TacticalBattle::attack_block_service(TacticalMode& mode, SimRng& rng) {
         const objects::ObjectId target = ri->target;
         const uint8_t flags = ri->flags;
         const uint32_t form = movement_->view(checked[i].mover).atk_form;
-        const Vec3 tp = checked[i].at_p ? checked[i].p : st.position(unit_by_id(checked[i].tid)->h);
+        const Vec3 tp = checked[i].at_p ? checked[i].p : Vec3{ri->ox, ri->oy, ri->oz};  // cmb1 t06: the last-observed point
         std::vector<objects::ObjectId> leads;
         for (size_t j = 0; j < checked.size(); ++j) {
             if (done[j] || checked[j].halted || checked[j].dropped) continue;
@@ -2116,30 +2221,58 @@ void TacticalBattle::attack_block_service(TacticalMode& mode, SimRng& rng) {
     }
     // s78n t26 review round 3 (FIGHTER_FLYING §4.11 C 3 [H]): the dropped blocks - each unit of the mover (a squad
     // container's members) loses its attack order and attack goal (a position block has none, TACTICAL_COMBAT §2.8), the
-    // movement its attack block; the record goes. [port] no move toward L (the formation stands within 40 of it).
-    std::vector<objects::ObjectId> gone;
-    for (const Checked& c : checked)
-        if (c.dropped) gone.push_back(c.mover);
-    if (gone.empty()) return;
-    for (const objects::ObjectId mover : gone) {
-        std::vector<objects::ObjectId> us;
-        if (movement_->is_land_team_container(mover)) {
-            for (const auto& [mid, slot] : movement_->land_team_slots(mover)) {
-                (void)slot;
-                us.push_back(mid);
-            }
-        } else {
-            us.push_back(mover);
+    // movement its attack block; the record goes. cmb1 t06 (BKR2 Q6 [H]): Set_Move(F, copy of the top as kind 1 at L, clear)
+    // - the formation keeps a position block at L with the block's flags (its land formation record: goal L, no object; an
+    // Attack_Move then scans as an arrived attack-move, BKR1 Q8) - and the plan to L runs at once: one move of the dropped
+    // formation's units to L (state 0; the members re-form around their centroid, a lone unit stands).
+    struct Drop {
+        Vec3 l;
+        uint8_t flags = 0;
+        std::vector<objects::ObjectId> movers, units;
+    };
+    std::vector<Drop> drops;
+    for (const Checked& c : checked) {
+        if (!c.dropped) continue;
+        auto d = std::find_if(drops.begin(), drops.end(), [&](const Drop& x) { return x.l.x == c.p.x && x.l.y == c.p.y; });
+        if (d == drops.end()) {
+            Drop nd;
+            nd.l = c.p;
+            const auto it = bi(c.mover);
+            nd.flags = static_cast<uint8_t>(it->flags & (mv::kMoveFlagAttackMove | mv::kMoveFlagGuardMove));
+            d = drops.insert(drops.end(), std::move(nd));
         }
-        for (const objects::ObjectId u : us) {
-            if (!combat_->has_unit(u)) continue;
-            combat_->clear_order(u);
-            combat_->set_attack_goal(u, tc::kNoObject);
-        }
-        const auto it = bi(mover);
-        if (it != attack_blocks_.end() && it->mover == mover) attack_blocks_.erase(it);
-        ++stats_.attack_unseen_drops;
+        d->movers.push_back(c.mover);
     }
-    movement_->clear_attack_block(gone);
+    if (drops.empty()) return;
+    for (Drop& d : drops) {
+        for (const objects::ObjectId mover : d.movers) {
+            for (const objects::ObjectId u : land_mover_units(mover)) {
+                d.units.push_back(u);
+                if (!combat_->has_unit(u)) continue;
+                combat_->clear_order(u);
+                combat_->set_attack_goal(u, tc::kNoObject);
+            }
+            const auto it = bi(mover);
+            if (it != attack_blocks_.end() && it->mover == mover) attack_blocks_.erase(it);
+            ++stats_.attack_unseen_drops;
+            const auto lr = std::lower_bound(lformations_.begin(), lformations_.end(), mover,
+                                             [](const LandFormationRecord& x, objects::ObjectId m) { return x.mover < m; });
+            if (lr != lformations_.end() && lr->mover == mover) {
+                d.flags = lr->flags;
+                lr->goal = d.l;
+                lr->goal_object = objects::kNoObjectId;
+                lr->pushed = objects::kNoObjectId;
+            }
+        }
+        movement_->clear_attack_block(d.movers);
+        mv::MoveOrder o;
+        for (const objects::ObjectId u : d.units)
+            if (!movement_locked(u)) o.units.push_back(u);
+        if (o.units.empty()) continue;
+        const tactical::Aabb& bb = mode.bounds();
+        o.destination = {std::clamp(d.l.x, bb.min.x, bb.max.x), std::clamp(d.l.y, bb.min.y, bb.max.y)};
+        o.flags = d.flags;
+        movement_->move(o, rng, frame_);
+    }
 }
 }  // namespace alamo::sim

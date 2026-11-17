@@ -293,6 +293,11 @@ in the same step** (members re-form around their centroid; the single-member sho
 `0x3a8710` per Land-layer member. Afterwards the formation holds a position block at L whose flags decide the scan
 range and auto-engage rules (BKR1 Q8 table: an Attack_Move(position) arrived row → R + `Attack_Move_Response_Range`).
 
+> **Ported (cmb1 t06, 2026-11-17):** `TacticalBattle::AttackBlock::ox..oz` (attack blocks) and
+> `LandFormationRecord::seen` (a guard's object) hold the last-observed point, rewritten every tick; C 3 runs every tick in
+> `attack_block_service` (d >= 40: the plan toward the point, untrimmed; d < 40: a position block at L with the plan to L,
+> the record's goal L) and in `BattleAi::guard_follow_step` for guards; the fire trim's gate is the object test.
+
 **Port consequence.** Differs (tier 1). Backlog text (tier 1, S2): *"Hidden / stealthed attack target (tactical_battle.cpp
 attack checks ~2179-2236, the drop ~2280-2300): retail keeps a last-observed point per kind-3 block (+0x18, 0x584750 at
 the start of every formation step 0x422b70 from 0x583150(block, lead): live while seen, frozen while hidden for the
@@ -344,6 +349,10 @@ hidden and stealthed: retail returns the frozen point (hidden is tested first), 
    stop, staging, fire trim) depends on the formation type F +0x228 copied from the composition descriptor (`0x43e5b0` →
    `0x4241a0`), whose writer in `0x43c1b0` was not traced [L]. Probe: in retail, order two Snowspeeders (one formation)
    onto a standing AT-ST 1000 away on open ground; they stop near weapon range iff the trim applies.
+
+> **Ported (cmb2, 2026-11-17):** item 3 is `attack_reference_index` (attack_approach.cpp; a formation's z = its members'
+> mean terrain height). Item 6: the plan failure keeps the block and retries after 60 frames (`TacticalBattle::AttackBlock::
+> retry`); the members are still stopped at the failure (keeping their paths needs `MovementSystem::move()`, open).
 
 **Port consequence.** Backlog text (tier 1, S2): *"Attack slots reference formation (attack_approach.cpp attack_slots
 437-445): retail 0x438c10 picks the formation nearest the mean of 0x41a9b0's points by the 3-D distance (z included,

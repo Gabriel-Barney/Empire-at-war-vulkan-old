@@ -1187,6 +1187,7 @@ void test_land_squad_container() {
     bool invaded = false, done = false;
     int stage = 0;
     uint32_t order_frame = 0, settle_frame = 0;
+    bool squad_engaged = false;  // cmb1 review: this squad's own land formation record had an auto block on top
     objects::ObjectId team_id = objects::kNoObjectId;
     std::vector<objects::ObjectId> members;
     std::vector<std::pair<mv::ObjectId, mv::V2>> slots;
@@ -1421,10 +1422,14 @@ void test_land_squad_container() {
             }
             continue;
         }
+        for (const auto& lr : b->land_formations())
+            if (lr.mover == team_id && lr.pushed != objects::kNoObjectId) squad_engaged = true;
         if (b->frame() < settle_frame + 120) continue;  // members recover to their slots once the team stopped
         settle_err = slot_error();
+        // cmb1 t01 (BKR1 Q2 [H]): an arrived squad with a target the land Auto_Engage takes (an auto attack block) moves on
+        const bool engaged = squad_engaged;
         for (const auto id : members) {
-            CHECK(!ms.view(id).has_goal);
+            CHECK(engaged || !ms.view(id).has_goal);
             settle_target = settle_target || cs.current_target(id) != tc::kNoObject;
         }
         done = true;

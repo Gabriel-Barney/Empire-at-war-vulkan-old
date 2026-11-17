@@ -849,6 +849,10 @@ int skirmish_ai_run(const MapRunOptions& opt, const std::string& kind, const std
         // s78n t20: per side, the 2-D distance of its first start-force unit from its spawn-point marker (-1: none)
         double start_off[2] = {-1.0, -1.0};
         unsigned long attack_reissues = 0, attack_stops = 0, attack_skips = 0;  // s78n t20 stage A (BattleStats)
+        // cmb1 t01 / t04 (BattleStats): land auto attack blocks pushed / popped, guard re-plans (moving, arrived, unseen) and
+        // position guards
+        unsigned long auto_pushes = 0, auto_pops = 0, guard_repaths = 0, guard_rechecks = 0, guard_unseen = 0, guard_drops = 0;
+        unsigned long step10 = 0;  // cmb2 t07: MovingVsStopped step 10 attack blocks issued
     };
     constexpr uint32_t kBattleFrames = 30 * 480;  // [port] the 15-min battle limit (S10)
     std::string log_text;
@@ -944,6 +948,8 @@ int skirmish_ai_run(const MapRunOptions& opt, const std::string& kind, const std
         unsigned long prebuilt = 0, pads = 0, structures = 0, shots = 0;
         double start_off[2] = {-1.0, -1.0};
         unsigned long attack_reissues = 0, attack_stops = 0, attack_skips = 0;
+        unsigned long auto_pushes = 0, auto_pops = 0, guard_repaths = 0, guard_rechecks = 0, guard_unseen = 0, guard_drops = 0;
+        unsigned long step10 = 0;
         std::vector<std::string> error_list;
         std::string state_text;  // skai: --ai-log state lines
         std::string script_state;  // q6: --object-scripts, the battle's last state line (units per player)
@@ -975,6 +981,13 @@ int skirmish_ai_run(const MapRunOptions& opt, const std::string& kind, const std
                 attack_reissues = bs.attack_reissues;
                 attack_stops = bs.attack_land_stops;
                 attack_skips = bs.attack_reissue_skips;
+                auto_pushes = bs.land_auto_pushes;
+                auto_pops = bs.land_auto_pops;
+                step10 = bs.land_step10_pushes;
+                guard_repaths = bs.guard_repaths;
+                guard_rechecks = bs.guard_rechecks;
+                guard_unseen = bs.guard_unseen_plans;
+                guard_drops = bs.guard_unseen_drops;
                 for (int sd = 0; sd < 2; ++sd)
                     if (bs.skirmish_marked[sd] && bs.start_placed[sd]) {
                         const double dx = static_cast<double>(bs.first_start[sd].x) - static_cast<double>(bs.skirmish_marker[sd].x);
@@ -1048,6 +1061,13 @@ int skirmish_ai_run(const MapRunOptions& opt, const std::string& kind, const std
         out.attack_reissues = attack_reissues;
         out.attack_stops = attack_stops;
         out.attack_skips = attack_skips;
+        out.auto_pushes = auto_pushes;
+        out.auto_pops = auto_pops;
+        out.step10 = step10;
+        out.guard_repaths = guard_repaths;
+        out.guard_rechecks = guard_rechecks;
+        out.guard_unseen = guard_unseen;
+        out.guard_drops = guard_drops;
         out.start_off[0] = start_off[0];
         out.start_off[1] = start_off[1];
         out.pads = pads;
@@ -1185,6 +1205,11 @@ int skirmish_ai_run(const MapRunOptions& opt, const std::string& kind, const std
     if (kind == "foc-land" || kind == "foc-land-campaign")  // s78n t20 stage A: the land attack blocks' 30-frame checks
         std::printf("land attack blocks: %lu approaches re-issued, %lu land stops, %lu re-approaches skipped (goal where the mover stood)\n",
                     first.attack_reissues, first.attack_stops, first.attack_skips);
+    if (kind == "foc-land" || kind == "foc-land-campaign")  // cmb1 t01 / t04
+        std::printf("land auto blocks: %lu pushed, %lu popped; step-10 attack blocks: %lu; guard re-plans: %lu moving, %lu arrived "
+                    "re-checks, %lu toward the last-observed point, %lu position guards\n",
+                    first.auto_pushes, first.auto_pops, first.step10, first.guard_repaths, first.guard_rechecks, first.guard_unseen,
+                    first.guard_drops);
     first.crc.comments = {"A1 skirmish-ai " + kind + " seed " + std::to_string(opt.seed) + " ticks " + std::to_string(first.ticks)};
     std::string err;
     if (!opt.crc_out.empty() && alamo_headless::save_crc_log(first.crc, opt.crc_out, &err)) std::printf("wrote %s\n", opt.crc_out.c_str());

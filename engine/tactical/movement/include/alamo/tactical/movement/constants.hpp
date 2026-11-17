@@ -21,6 +21,12 @@ struct MovementConstants {
     float close_enough_angle_for_move_start = 180.0f;
     uint32_t frames_per_collision_check = 4;
     float moving_vs_moving_look_ahead_time = 1.5f;  // seconds (x 30 frames)
+    // mov1 t04 (BKR1_RE_ANSWERS Q5 [H]): the position approximation 0x505fe0 - look-ahead L = max(MinLandPredictionDistance,
+    // 30 x max(the type's MovementPredictionInterval, LandPredictionTimeInterval) x max speed), rebuilt every
+    // FramesPerPositionApproximationRebuild frames per unit (not in the FoC XML: the exe default 8)
+    float land_prediction_time_interval = 2.0f;  // seconds
+    float min_land_prediction_distance = 60.0f;
+    uint32_t frames_per_position_approximation_rebuild = 8;
     float minimum_stopped_vs_stopped_overlap = 0.15f;
     // Space (§2.7)
     uint32_t space_pathfind_max_expansions = 3500;

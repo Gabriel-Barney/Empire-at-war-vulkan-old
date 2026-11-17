@@ -71,6 +71,8 @@ int main(int argc, char** argv) {
     test_land_move_to_object();  // s78n t26 review round 2
     test_land_attack_formation_stop();  // s78n t26 review round 2
     test_land_attack_unseen();          // s78n t26 review round 3
+    std::printf("cmb1 t01 - t03: land Auto_Engage (auto attack block, leash pop), scan range while moving, Order_Attack issue path\n");
+    test_land_auto_engage();
     test_land_attack_reach();  // s78n t20 review follow-ups
     test_land_death_clone_obstacle();  // s78n t20 batch 1 item 1.5
     test_vehicle_landing_exit();

@@ -1399,18 +1399,28 @@ void CombatSystem::gather(uint32_t index, QueryContext& ctx) {
     u.scan_due = 1;
     const float range = fire_range(base_attack_range(u), mod_r(u, ModList::FireRange));
     // Current target kept when still valid and sticky or scored exactly 1.0 (section 2.1).
+    bool cur_valid = false;
     if (const Unit* cur = unit(u.auto_target)) {
-        const bool valid = live(cur) && is_enemy(u.owner, cur->owner) && candidate_ok(u, *cur, range) &&
-                           score(u, *cur) != -1.0f;
-        if (valid && (u.target_score == 1.0f || sticky(u, *cur, frame_))) return;
+        cur_valid = live(cur) && is_enemy(u.owner, cur->owner) && candidate_ok(u, *cur, range) && score(u, *cur) != -1.0f;
+        if (cur_valid && (u.target_score == 1.0f || sticky(u, *cur, frame_))) return;
     }
     u.needs_scan = 1;
     // S8 t17: Get_Scan_Range 0x566f50 (FIGHTER_FLYING §4.10 A) - R + Rr while the unit's formation answers 0x4160a0(F, u,
-    // none) != 0, else R ([port] the land "R with a TURRET slot, else 0" branch needs a land formation: none in the port).
+    // none) != 0, else R. cmb1 t03 (BKR1 Q8 [H]): on land a kUnitScanQuery unit (one with a formation, not deployed) whose
+    // formation does not answer scans R only with a TURRET slot, else 0 (step 4) - and a cube <= 0 scans nothing, so a
+    // still-valid current target is kept (the keep / switch step finds no other) and an invalid one is dropped.
     float half = range;
     if ((u.flags & kUnitScanQuery) && scan_range_) {
         float rr = 0.0f;
-        if (scan_range_(u.id, kNoObject, range, rr) != 0 && rr > 0.0f) half = range + rr;
+        if (scan_range_(u.id, kNoObject, range, rr) != 0) {
+            if (rr > 0.0f) half = range + rr;
+        } else if (cfg_.mode == GameMode::Land) {
+            half = desc_of(u).turret ? range : 0.0f;
+        }
+    }
+    if (!(half > 0.0f)) {
+        u.needs_scan = cur_valid ? 0 : 1;
+        return;
     }
     const Vec3 up = scan_pos(u);  // s78n t03: a land team scans around its container (§2.2 box centre)
     const Aabb box{{up.x - half, up.y - half, up.z - half}, {up.x + half, up.y + half, up.z + half}};
@@ -1860,7 +1870,34 @@ CanHit CombatSystem::line_of_fire_from(ObjectId attacker, Vec3 from, ObjectId ta
 }
 
 CanHit CombatSystem::fire_line(const Unit& src, Vec3 from, const Unit& tu, const Vec3* to) const {
-    const Unit* t = &tu;  // (the body as it stood in can_hit_from)
+    Vec3 b = to ? *to : tu.pos;  // bkt1 t06: the trim's G when given
+    b.z = b.z + desc_of(tu).ranged_target_z_adjust;
+    return fire_line_to(src, from, b);
+}
+
+CanHit CombatSystem::can_hit_point(ObjectId attacker, Vec3 from, Vec3 point, float extent) const {
+    const Unit* u = unit(attacker);
+    if (!live(u)) return CanHit::NoTarget;
+    const Unit* head = land_team_lead(*u);
+    const Unit& src = head ? team_weapon_source(*head) : *u;
+    const ProjectileDesc* gw = grenade_weapon(src);
+    const float range = fire_range(base_attack_range(src), mod_r(src, ModList::FireRange));
+    if (!gw && !(range > 0.0f)) return CanHit::NoTarget;
+    const float dx = point.x - from.x, dy = point.y - from.y;
+    const float d = dmath::sqrt(dx * dx + dy * dy);
+    if (gw) {
+        LobSolution s;
+        if (!lob_solve(from, point, gw->max_speed, lob_g(*gw), false, s)) return CanHit::OutOfMaxRange;
+    } else if (!(d <= range + extent)) {
+        return CanHit::OutOfMaxRange;
+    }
+    // slot 46 as min_range_hit: r <= 0 -> false, else D <= r + E
+    const float mr = desc_of(src).min_attack_distance;
+    if (mr > 0.0f && d <= mr + extent) return CanHit::InsideMinRange;
+    return fire_line_to(src, from, point);
+}
+
+CanHit CombatSystem::fire_line_to(const Unit& src, Vec3 from, Vec3 b) const {
     if (cfg_.mode == GameMode::Land && shield_sides_) {
         // 0x3b5ad0's projectile gate: every projectile the attacker would fire (its WEAPON projectile and its live weapon
         // hard points') must do shield damage for the shields to count
@@ -1873,9 +1910,8 @@ CanHit CombatSystem::fire_line(const Unit& src, Vec3 from, const Unit& tu, const
             if (hp_out(h) || !is_weapon(hd.kind) || hd.projectile < 0) continue;
             if (!data_->projectiles[static_cast<size_t>(hd.projectile)].does_shield_damage) shield_damage = false;
         }
-        Vec3 a = from, b = to ? *to : t->pos;  // bkt1 t06: the trim's G when given
+        Vec3 a = from;
         a.z = a.z + ud.ranged_target_z_adjust;
-        b.z = b.z + desc_of(*t).ranged_target_z_adjust;
         if (shield_sides_(a, b, shield_damage)) return CanHit::LineBlocked;
     }
     return CanHit::Yes;
