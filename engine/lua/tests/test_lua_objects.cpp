@@ -191,6 +191,9 @@ struct Scene {
         marker1 = make(store, db.t("Marker_Generic"), -1, {100, 0, 0});
         marker2 = make(store, db.t("Marker_Generic"), -1, {200, 0, 0});
         gun = make(store, db.t("HP_Gun"), 2, {5, 1, 0}, tank);
+        // A hinted object has the HINT behaviour (Q6_T30_FIND_HINT_ORDER.md §3: a hint implies HINT); Find_Hint sees only those.
+        store.add_behavior(marker1, objects::beh::Hint);
+        store.add_behavior(marker2, objects::beh::Hint);
         bridge.set_hint(store.id(marker1), "spawnpoint");
         bridge.set_hint(store.id(marker2), "SpawnPoint");
         host.store = &store;
@@ -235,7 +238,24 @@ static void test_find(const Db& db) {
                   "h2 = Find_Hint(Find_Object_Type('marker_generic'), 'SPAWNPOINT').Get_Object_ID() "
                   "h3 = tostring(Find_Hint('Trooper', 'spawnpoint')) h4 = tostring(Find_Hint('Marker_Generic', 'nope'))") == "");
     CHECK(gnum(vm, "h1") == 5.0 && gnum(vm, "h2") == 5.0 && gstr(vm, "h3") == "nil" && gstr(vm, "h4") == "nil");
-    CHECK(contains(run_stop(vm, "Find_Hint('x')"), "LuaFindMarkerCommandClass -- Invalid number of parameters."));
+    CHECK(contains(run_stop(vm, "Find_Hint()"), "LuaFindMarkerCommandClass -- Invalid number of parameters."));
+    // q6 t29 (Q6_T30 §2 [H]): no hint, a nil / non-string hint or "" -> the newest object of the type in the hint list;
+    // arguments past 2 are ignored.
+    CHECK(run(vm, "z1 = Find_Hint('Marker_Generic').Get_Object_ID() z2 = Find_Hint('Marker_Generic', nil).Get_Object_ID() "
+                  "z3 = Find_Hint('Marker_Generic', '').Get_Object_ID() z4 = Find_Hint('Marker_Generic', 7).Get_Object_ID() "
+                  "z5 = Find_Hint('Marker_Generic', 'spawnpoint', 'extra').Get_Object_ID()") == "");
+    CHECK(gnum(vm, "z1") == 5.0 && gnum(vm, "z2") == 5.0 && gnum(vm, "z3") == 5.0 && gnum(vm, "z4") == 5.0 && gnum(vm, "z5") == 5.0);
+    // q6 t32 (Q6_T30 §2 [H]): only objects with HINT are in the hint list: a Trooper (no HINT) is not found without a
+    // hint, nor with a hint set on it; once it has HINT it is.
+    s.bridge.set_hint(s.store.id(s.trooper2), "nohintbeh");
+    CHECK(run(vm, "y1 = tostring(Find_Hint('Trooper')) y2 = tostring(Find_Hint('Trooper', 'nohintbeh')) "
+                  "y3 = table.getn(Find_All_Objects_With_Hint('nohintbeh'))") == "");
+    CHECK(gstr(vm, "y1") == "nil" && gstr(vm, "y2") == "nil" && gnum(vm, "y3") == 0.0);
+    s.store.add_behavior(s.trooper2, objects::beh::Hint);
+    CHECK(run(vm, "y4 = Find_Hint('Trooper').Get_Object_ID() y5 = Find_Hint('Trooper', 'NoHintBeh').Get_Object_ID() "
+                  "y6 = table.getn(Find_All_Objects_With_Hint('nohintbeh')) y7 = tostring(Find_Hint('Tank'))") == "");
+    CHECK(gnum(vm, "y4") == 2.0 && gnum(vm, "y5") == 2.0 && gnum(vm, "y6") == 1.0 && gstr(vm, "y7") == "nil");
+    s.bridge.set_hint(s.store.id(s.trooper2), "");
     CHECK(contains(run_stop(vm, "Find_Hint(5, 'x')"), "LuaFindMarkerCommandClass -- Expected type or name for parameter 1"));
     // Find_All_Objects_With_Hint: newest first.
     CHECK(run(vm, "l = Find_All_Objects_With_Hint('SpawnPoint') hn = table.getn(l) hs = l[1].Get_Object_ID() .. ',' .. l[2].Get_Object_ID() "
@@ -248,6 +268,7 @@ static void test_find(const Db& db) {
     // q6 t28: map hints (.ted 0x482) come from the host's map_hint hook; a script-set hint wins over it.
     {
         const objects::ObjectId tank_id = s.store.id(s.tank), m1 = s.store.id(s.marker1);
+        s.store.add_behavior(s.tank, objects::beh::Hint);  // a map hint implies HINT (from the type or the record's 0x4B7)
         s.bridge.map_hint = [&s, tank_id, m1](objects::ObjectHandle h) {
             const objects::ObjectId id = s.store.id(h);
             return id == tank_id ? std::string_view("falcongear1") : id == m1 ? std::string_view("mapname") : std::string_view();

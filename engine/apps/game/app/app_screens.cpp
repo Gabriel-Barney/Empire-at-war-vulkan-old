@@ -772,6 +772,7 @@ void App::galactic_screens() {
         if (!offer) break;  // [port] holocron chapters play no movie of their own; MULTIMEDIA rewards drive Movie_galactic
         std::string err;
         if (advisor_movie_.open(data_, audio_, m.name, m.loop, &err)) {
+            light_loop_ = false;  // the talking head took the advisor slot
             story_movie_ = true;
             story_page_ = ui_.pages.page(m.name);
             // Marked loaded at once (the movie's size) so the page loader never looks for a texture of that name.
@@ -824,8 +825,25 @@ void App::galactic_screens() {
             if (e.how == 1) auto_resolve_result(*g, e);
         }
     }
-    if (session_->spec().kind == SessionKind::Campaign && !campaign_over_)
+    // q6 t34 (Q6_T27_ELIM_END_TIMING.md §2 [H]): a ready monitor shows the end screen only while no message box is up and
+    // no Bink movie is open; the advisor hint texts hold it through the Light_Loop they keep open (q6 t36).
+    if (session_->spec().kind == SessionKind::Campaign && !campaign_over_ && end_screen_clear())
         if (const int32_t o = galactic::victory_outcome(*g, local_player()); o != 0) show_campaign_end(o > 0);  // Int-verify
+}
+
+bool App::end_screen_clear() const {
+    // [port] the hint text and the encyclopedia pop-up are tested themselves too, so the hold is the same when the Light_Loop
+    // movie cannot open (no FFmpeg Bink decoder): in retail they hold the end screen only through that movie.
+    return screens_.message_dialog().empty() && !full_movie_.playing() && !advisor_movie_.playing() &&
+           !story_present_.hint_up(now_s_) && ency_.stage() != ui::EncyclopediaPanel::Stage::Shown;
+}
+
+// q6 t36: a planet owner's name in the changed-hands line (the faction's Text_ID); [port] no player: "Neutral".
+std::u32string App::owner_label(int32_t player) const {
+    std::u32string s = faction_label(player);
+    // [name-ok: display text fallback when the text file lacks TEXT_FACTION_NEUTRAL, not a faction rule]
+    if (s.empty()) s = txt("TEXT_FACTION_NEUTRAL", U"Neutral");
+    return s;
 }
 
 void App::show_campaign_end(bool victory) {

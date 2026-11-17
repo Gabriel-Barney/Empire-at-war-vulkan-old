@@ -98,9 +98,16 @@ void App::story_advisor_frame() {
 void App::story_present_frame() {
     // Retail shows the next hint only with no Bink movie open, no advanced map and no cinematic mode (§6.3).
     // ... nor while the Lua cinematic camera or mode is on (5.8).
-    const bool blocked = full_movie_.playing() || planet_map_open_ || story_present_.cinematic_mode() || story_hides_hud();
+    // q6 t36 (Q6_T27 §3 and "Probe answer" 7 [H]): any open Bink holds the queue (the full-screen slot, a talking head on the
+    // advisor slot, the Light_Loop an encyclopedia pop-up keeps open), except the Light_Loop held for the text that just
+    // ended: retail closes it and opens it again in the frame the next text starts. [port] the pop-up holds the queue also
+    // when that movie cannot open.
+    const bool popup = ency_.stage() == ui::EncyclopediaPanel::Stage::Shown;
+    const bool bink = full_movie_.playing() || (advisor_movie_.playing() && !light_loop_held());
+    const bool blocked = bink || popup || planet_map_open_ || story_present_.cinematic_mode() || story_hides_hud();
     story_present_.config().subtitles = audio_opts_.subtitles;  // IDC_USE_MOVIE_SUBTITLES gates the Subtitle channel (1.1)
     story_present_.update(now_s_, blocked);
+    light_loop_step(popup);
     // ACTIVATE_RETRY_DIALOG as a reward (5.4): the same IDD_RETRY_DIALOG as the Lua call. USE_RETRY_DIALOG only marks the end-of-battle
     // choice (retail reads it in the battle-end flow, which the port's defeat path already routes to this dialog); HIDE_AUTORESOLVE
     // has no reader in retail (5.3), so the flag is kept and nothing reads it.
@@ -132,6 +139,29 @@ void App::story_present_frame() {
                                                               sep ? ui::utf16_to_utf32(*sep) : std::u32string(U"________")))
                     droid_rows_.push_back(std::move(r));
             }
+    }
+}
+
+// q6 t36 (Q6_T27 §3, 0x140305c40 [H]): while a hint text or an encyclopedia pop-up is up and no other movie is open, the
+// HUD plays Light_Loop looping on the advisor slot; when both are gone it closes it. The slot is shared with the story's
+// talking heads: one of those replaces it (light_loop_ is cleared where they open).
+bool App::light_loop_held() const { return light_loop_ && advisor_movie_.playing() && ascii_iequals(advisor_movie_.name(), "Light_Loop"); }
+
+void App::light_loop_step(bool popup) {
+    if (light_loop_ && !light_loop_held()) light_loop_ = false;  // stopped elsewhere (session end, benchmark)
+    const bool want = story_present_.hint_up(now_s_) || popup;
+    if (want && !light_loop_ && !light_loop_failed_ && !advisor_movie_.playing() && !full_movie_.playing() && !story_movie_) {
+        std::string err;
+        if (advisor_movie_.open(data_, audio_, "Light_Loop", true, &err)) {
+            light_loop_ = true;
+        } else {
+            light_loop_failed_ = true;  // once per run: no retry every frame
+            std::fprintf(stderr, "advisor movie Light_Loop: %s\n", err.c_str());
+        }
+    } else if (!want && light_loop_) {
+        advisor_movie_.stop(audio_);
+        gpu_.hud.clear_image_page(kAdvisorPage);
+        light_loop_ = false;
     }
 }
 

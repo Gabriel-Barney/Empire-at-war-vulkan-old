@@ -1242,7 +1242,7 @@ void StorySession::apply_reward(Set& s, const std::string& type, const std::vect
             if (player < 0) {
                 note("TRIGGER_AI failed: unknown faction " + faction);
             } else {
-                int32_t loc = 0;
+                int32_t loc = -1;  // storyb t10: "no target", the value Check_Story_Flag looks up for a nil location
                 if (params.size() > 2 && !ascii_trim(params[2]).empty()) {
                     const PlanetIndex row = reward_planet(std::string(ascii_trim(params[2])));
                     if (row == kInvalidPlanet) note("TRIGGER_AI: Unable to find planet " + std::string(ascii_trim(params[2])));
@@ -1256,6 +1256,10 @@ void StorySession::apply_reward(Set& s, const std::string& type, const std::vect
     }  // STY1 lane B (src/story_rewards_apply.cpp)
     else if (const StoryRewardRow* row = find_story_reward(type); row && row->owner == StoryRewardOwner::Session) {
         note("reward " + type + " has no handler");  // the coverage table says the session owns it: a table / handler mismatch
+    } else if (!row) {
+        // storyb t12: a Reward_Type the coverage table does not know (a mod's, or a typo) is logged instead of falling off
+        // silently; nothing is applied [port: retail's dispatcher ignores an unknown type, 0x456970 default case [M]].
+        note("reward " + type + " unknown (no row in the story reward table)");
     }
 }
 

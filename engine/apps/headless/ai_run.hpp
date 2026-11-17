@@ -20,6 +20,9 @@ struct AiRunOptions {
     std::string human;             // faction played by the scripted human (empty = AI vs AI)
     std::string human_script;      // the human's recorded command stream (empty = the human gives no orders)
     std::string trace_out;         // q2f t05: per-tick Q2TRACE 1 state trace of the run (port_trace.hpp); first run only
+    // storyb t03: per-tick Q2TRACE 1 trace of the tactical battle on top (tactical_trace.hpp, as --skirmish-ai's), one sample
+    // per tick while a battle runs: the story-mission scenario of tools/parity (story_kessel); first run only.
+    std::string tactical_trace_out;
     // q6 t07 [port] test knob: "FACTION=TYPE" entries that replace the campaign's AI_Player_Control type of that faction
     // from the start (what a SWITCH_CONTROL story reward at frame 0 would do; Thrawn's Revenge sets its AI types that way).
     std::vector<std::string> ai_types;

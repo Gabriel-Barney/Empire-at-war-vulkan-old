@@ -87,6 +87,8 @@ bool App::render_frame() {
         gpu_.renderer.set_texture_reduction(texture_reduction(adv_video_.texture));
         gview_.set_particle_detail(particle_detail(adv_video_.particle));
         bview_.set_particle_detail(particle_detail(adv_video_.particle));
+        // vis1 t02: blob shadows follow the Shadow detail option (Off = 0, On = retail's ShadowDetail 3).
+        bview_.set_shadow_detail(adv_video_.shadow > 0 ? render::kPortShadowDetailOn : 0);
     }
     // [port: Gabriel] Render Scale (Advanced video): the share of the window's pixels the galactic / battle scene is drawn with.
     gro.render_scale = bro.render_scale = render_scale_value(adv_video_.render_scale);

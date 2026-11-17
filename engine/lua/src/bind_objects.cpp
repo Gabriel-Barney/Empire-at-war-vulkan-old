@@ -787,32 +787,37 @@ ObjectHandle spawn(Call& c, TypeIndex type, int32_t owner, Vec3 pos, ObjectHandl
 
 // ---------------------------------------------------------------- globals
 
-// Find_Hint(type or type name, hint): the first object (newest first) of that type whose map hint
-// matches (case-insensitive [inferred]); nil if none.
+// Find_Hint(type or type name[, hint]) (LuaFindMarkerCommandClass 0x6a2ab0, Q6_T30_FIND_HINT_ORDER.md §2 [H]): walks the
+// mode's hint list, newest first, and returns the first object of that type whose hint matches (case-insensitive); nil
+// if none. Only objects with the HINT behaviour are in that list (from the type, a map record's 0x4B7 list, company
+// expansion or Create_Cinematic_Transport), so an object of the type without HINT is never found (q6 t32). No second
+// argument, a second argument that is not a string (nil included) or an empty string: the first object of the type in
+// the list, with no hint compare (q6 t29). Only a call without arguments is a count error; arguments past 2 are ignored.
 int g_find_hint(Call& c) {
-    if (c.nargs != 2) return c.script_error_stop("LuaFindMarkerCommandClass -- Invalid number of parameters.");
+    if (c.nargs < 1) return c.script_error_stop("LuaFindMarkerCommandClass -- Invalid number of parameters.");
     const TypeArg t = type_arg(c, 1);
     if (!t.given) return c.script_error_stop("LuaFindMarkerCommandClass -- Expected type or name for parameter 1");
-    if (!c.is_string(2)) return c.script_error_stop("LuaFindMarkerCommandClass -- Expected a hint name for parameter 2");  // [inferred]
     // q6 t11 (LUA_API.md "Lookups"): a type name the data does not have is a script error.
     if (t.index == objects::kNone && types(c))
         return c.script_error_stop("LuaFindMarkerCommandClass -- Unable to resolve type name %s", std::string(t.name).c_str());
-    const std::string_view hint = c.string(2);
+    const std::string_view hint = c.nargs >= 2 && c.is_string(2) ? c.string(2) : std::string_view();
     const objects::ObjectStore* st = store(c);
     const ObjectBridge* b = bridge(c);
     if (!st || !b) return push_nil(c);
     for (const ObjectHandle h : st->objects_newest_first()) {
-        if (!st->active(h) || !type_matches(c, h, t.name)) continue;
-        const std::string_view oh = hint_of(*b, *st, h);
-        if (!oh.empty() && ascii_iequals(oh, hint)) {
-            detail::push_object(c.L, *c.vm, h);
-            return 1;
+        if (!st->active(h) || !st->has_behavior(h, objects::beh::Hint) || !type_matches(c, h, t.name)) continue;
+        if (!hint.empty()) {
+            const std::string_view oh = hint_of(*b, *st, h);
+            if (oh.empty() || !ascii_iequals(oh, hint)) continue;
         }
+        detail::push_object(c.L, *c.vm, h);
+        return 1;
     }
     return push_nil(c);
 }
 
-// Find_All_Objects_With_Hint(hint): every live object with that hint, newest first.
+// Find_All_Objects_With_Hint(hint) (0x6a2860): every live object in the hint list (HINT behaviour, as Find_Hint [M])
+// with that hint, newest first.
 int g_find_all_with_hint(Call& c) {
     if (c.nargs != 1)
         return c.script_error_stop("Find_All_Objects_With_Hint -- invalid number of parameters. Expected 1, got %d.", c.nargs);
@@ -824,7 +829,7 @@ int g_find_all_with_hint(Call& c) {
     if (!st || !b) return 1;
     int n = 0;
     for (const ObjectHandle h : st->objects_newest_first()) {
-        if (!st->active(h)) continue;
+        if (!st->active(h) || !st->has_behavior(h, objects::beh::Hint)) continue;
         const std::string_view oh = hint_of(*b, *st, h);
         if (oh.empty() || !ascii_iequals(oh, hint)) continue;
         detail::push_object(c.L, *c.vm, h);

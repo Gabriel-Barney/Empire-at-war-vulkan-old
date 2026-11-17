@@ -278,6 +278,45 @@ void advisor_test() {
     CHECK(ids.size() == 3 && ids[0] == "TEXT_A" && ids[2] == "TEXT_C" && game::split_story_ids("").empty());
 }
 
+// q6 t36 (Q6_T27_ELIM_END_TIMING.md "Probe answer" [H]): the galactic hint text queue as retail ran it in the q6 t33 probe.
+void hint_queue_test() {
+    alamo::test::section("q6 t36: hint text queue");
+    game::StoryPresenter s = make();
+    s.config().advisor_hint_duration = 0.1;
+    // The owner setter's line: %ls planet / old / new, %d the bonus (TEXT_PLANET_CHANGED_HANDS[_BONUS] as shipped).
+    const std::u32string plain = game::changed_hands_text(U"%ls: Control changed from %ls to %ls", U"Tatooine", U"Empire", U"Neutral", {});
+    CHECK(plain == U"Tatooine: Control changed from Empire to Neutral" && plain.size() == 48);  // the probe's 48 characters
+    const std::u32string bonus = game::changed_hands_text(U"%ls: Control changed from %ls to %ls. Credit bonus: %d", U"Tatooine",
+                                                          U"Neutral", U"Empire", 900);
+    CHECK(bonus == U"Tatooine: Control changed from Neutral to Empire. Credit bonus: 900" && bonus.size() == 67);
+    CHECK(game::changed_hands_text(U"%s %S %ls %ls 100%% %d %x", U"a", U"b", U"c", {}) == U"a b c  100%  %x");
+    // Two game texts at the back, then a Game_Message: the script's message, queued last, shows first (finding 8).
+    s.queue_message(plain, game::kChangedHandsColor);
+    s.queue_message(U"", game::kChangedHandsColor);  // an empty text is not queued
+    CHECK(s.hint_queue_size() == 1);
+    s.queue_message(bonus, game::kChangedHandsColor);
+    s.game_message("TEXT_STORY_MSG");  // "<TEXT_STORY_MSG>": 16 characters
+    CHECK(s.hint_queue_size() == 3 && !s.hint_up(0.0));
+    // A blocking movie or pop-up holds the whole queue (finding 7).
+    s.update(0.0, true);
+    CHECK(s.shown_hint() == nullptr && !s.hint_up(0.0));
+    s.update(10.0, false);
+    CHECK(s.shown_hint() && s.shown_hint()->hint.text == U"<TEXT_STORY_MSG>" && s.hint_up(10.0) && s.hint_up(11.59) && !s.hint_up(11.61));
+    // Each text stays characters x Advisor_Hint_Duration and the next follows at once: no wait for the fade-out (finding 3).
+    s.update(11.61, false);
+    CHECK(s.shown_hint() && s.shown_hint()->hint.text == plain && s.shown_hint()->hint.color == game::kChangedHandsColor);
+    CHECK(s.shown_hint()->hint.sound == game::StoryHint::Sound::Message && s.hint_queue_size() == 1);
+    s.update(11.61 + 4.81, false);
+    CHECK(s.shown_hint() && s.shown_hint()->hint.text == bonus && s.hint_queue_size() == 0);
+    const double end = 11.61 + 4.81 + 6.7;
+    CHECK(s.hint_up(end - 0.01) && !s.hint_up(end + 0.01));
+    // The last text of a run is still drawn fading, but no longer "up" (the Light_Loop closes, the end screen may come).
+    s.update(end + 0.1, false);
+    CHECK(s.shown_hint() != nullptr && !s.hint_up(end + 0.1) && s.hint_alpha(end + 0.1) > 0);
+    s.update(end + game::kHintFadeSeconds + 0.01, false);
+    CHECK(s.shown_hint() == nullptr);
+}
+
 }  // namespace
 
 int main() {
@@ -285,5 +324,6 @@ int main() {
     pointer_test();
     lock_test();
     advisor_test();
+    hint_queue_test();
     return alamo::test::report("alamo_game_story_present_tests");
 }

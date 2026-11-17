@@ -175,6 +175,7 @@ static std::string sty1_plot() {
     p += ev("Own_SB", "CHANGE_OWNER", {"SB1", "Underworld"});
     p += ev("Ai_Flag", "TRIGGER_AI", {"Flag_X", "Underworld", "PlanetC"});
     p += ev("Ai_Flag_Bad", "TRIGGER_AI", {"Flag_Y"});
+    p += ev("Ai_Flag_None", "TRIGGER_AI", {"Flag_Z", "Underworld"});  // storyb t10: no planet
     return p + "</Story>\n";
 }
 
@@ -277,6 +278,9 @@ static void test_sty1_rewards() {
             CHECK(ss->model(0).check_ai_flag(pUnder, "Flag_X", loc, true) && !ss->model(0).check_ai_flag(pUnder, "Flag_X", loc, false));
             CHECK(!ss->model(0).check_ai_flag(pUnder, "Flag_Y", 0, false));
         }
+        {  // storyb t10: a TRIGGER_AI without a planet is found by Check_Story_Flag with a nil location (-1)
+            CHECK(ss->model(0).check_ai_flag(pUnder, "Flag_Z", -1, true) && !ss->model(0).check_ai_flag(pUnder, "Flag_Z", 0, false));
+        }
         // Save: a deterministic image; hash identical across worker counts.
         ByteWriter w1, w2;
         ss->write(w1);
@@ -342,6 +346,7 @@ static void test_session_rows_have_handlers() {
         const std::string name = "E" + std::to_string(n++);
         plot += ev(name.c_str(), std::string(row.name).c_str(), {});
     }
+    plot += ev("EUnknown", "STORYB_NOT_A_REWARD", {});  // storyb t12: an unknown Reward_Type is logged, not silent
     plot += "</Story>\n";
     write_file(root / "Data/XML/Story_Sty1.xml", plot);
     jobs::JobSystem js(jobs::JobSystemConfig{0});
@@ -365,6 +370,10 @@ static void test_session_rows_have_handlers() {
             std::printf("    %s\n", m.c_str());
         }
     CHECK(n > 40 && no_handler == 0);
+    size_t unknown = 0;
+    for (const std::string& m : host.story()->lua_messages())
+        unknown += m.find("reward STORYB_NOT_A_REWARD unknown") != std::string::npos ? 1u : 0u;
+    CHECK(unknown == 1);
     std::error_code ec;
     remove_all_long(root, ec);
 }

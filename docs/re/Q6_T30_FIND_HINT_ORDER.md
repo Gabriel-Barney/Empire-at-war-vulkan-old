@@ -104,8 +104,13 @@ are registered by `0x1402b5ad0`; whether that runs in record order was not read 
 - map1 t04 (2026-11-17): the port reads 0x4B7 (each 0x4B8 entry's mini 0 is the behaviour's name CRC; all 3954 shipped
   entries in FoC + EaW maps.meg are `HINT`) and attaches it, and keeps 0x46E per object (`TacticalBattle::map_marker_name`).
   Company expansion copies the hint and `HINT` to the members (map1 t03).
-- Open checks, filed as q6 tasks: company expansion (each member inherits the hint, the company
-  object is not findable); `Find_Hint` without a hint string considers only objects with `HINT`.
+- q6 t29 / t31 / t32 (2026-11-17): `Find_Hint` and `Find_All_Objects_With_Hint` walk only objects with the `HINT`
+  behaviour (newest first); `Find_Hint` with one argument, a non-string second argument (nil included) or an empty string
+  returns the newest object of the type with `HINT`, without a hint compare; only a call without arguments is a count
+  error. Company expansion (map1 t03) gives every member `HINT` and the hint, and the company object is removed, so it is
+  never found (`test_map1`). As the reader (§3), the map load keeps a 0x482 hint only on an object with `HINT` (type or
+  0x4B7), and a company's members inherit only when the company has `HINT`; the every-map test counts the skipped hints
+  (FoC: 2 of 7100, a Star_Destroyer and a Calamari_Cruiser hinted "pointguard" on `_SPACE_PLANET_AETENII_PIRACY`; EaW: 0).
 
 ## How this was read
 

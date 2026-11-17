@@ -186,9 +186,16 @@ Heartbeats every 0.25 s instead of 1 s would make each of these readings exact t
   (`Game_Message` at the front, the "planet changed hands" text and hints at the back) one after another, each for
   (characters × `Advisor_Hint_Duration`) seconds of real time, only while no movie is open, and keeps the `Light_Loop`
   movie open while a text or an encyclopedia pop-up is up; the campaign
-  end screen waits until no text is up, no movie is open and no message box is up. The port has no advisor hint text
-  queue yet (`Game_Message` is only recorded in the presentation log), so its end screen comes 30 frames after the
-  declare in every case: q6 t34 plus the hint queue task filed from t33.
+  end screen waits until no text is up, no movie is open and no message box is up.
+- Port (q6 t34 / t36, 2026-11-17, `engine/apps/game`): the advisor queue (`StoryPresenter`) starts the next text as soon
+  as the one up has had its characters x `Advisor_Hint_Duration` (no wait for the fade-out); every planet owner change
+  queues `TEXT_PLANET_CHANGED_HANDS` (`_BONUS` with the planet's `Planet_Capture_Bonus_Reward` when the local player
+  gains it and the bonus is paid) at the back in (255, 24, 39); any open Bink (full-screen, talking head, a pop-up's
+  `Light_Loop`) holds the queue; the advisor slot plays `Light_Loop` looping while a text or an encyclopedia pop-up is
+  up; the campaign end screen comes only with no message box, no Bink open, no text up and no pop-up. [port] The text and
+  the pop-up are tested directly as well, so the hold is the same when `Light_Loop` cannot open (no Bink decoder).
+  [port] Retail queues the changed-hands text when the HUD text method `0x140b31410` exists (whenever the HUD is up); the
+  port queues it while a story presenter runs, the only time its queue is drained.
 
 ## How this was read
 

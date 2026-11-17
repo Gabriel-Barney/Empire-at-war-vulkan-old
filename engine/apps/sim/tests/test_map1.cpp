@@ -112,10 +112,11 @@ void test_land(const Data& d) {
     m.objects.push_back(place("In Base Special Structure Position", 900.0f, 400.0f, 0, 12));
     terrain::ObjectPlacement squad = place("S10_Squad", 400.0f, 800.0f, 0);  // t03: a company with a hint
     squad.hint = "squadhint";
-    m.objects.push_back(squad);
-    terrain::ObjectPlacement one = place("S10_Trooper", 450.0f, 850.0f, 0);  // t04 / t05: extra HINT, marker name, byte 0
     terrain::ObjectPlacement::ExtraBehavior e;
     e.name_crc = name_crc("HINT");
+    squad.extra_behaviors.push_back(e);  // q6 t31: the company object has HINT (its hint pack), as an editor-written hint implies
+    m.objects.push_back(squad);
+    terrain::ObjectPlacement one = place("S10_Trooper", 450.0f, 850.0f, 0);  // t04 / t05: extra HINT, marker name, byte 0
     one.extra_behaviors.push_back(e);
     one.has_marker_name = true;
     one.marker_name = "inf4";
@@ -165,6 +166,12 @@ void test_land(const Data& d) {
                                     std::string(b.map_marker_name(id)).c_str());
                 }
                 CHECK(members == 4 && hinted == 4 && named == 1);
+                // q6 t31 (Q6_T30 §1-§2 [H]): the company object itself is not findable: it is removed after expansion
+                const uint32_t squad_type = type_of(d, "S10_Squad");
+                uint32_t squads = 0;
+                for (const objects::ObjectHandle h : st.all_objects())
+                    squads += st.exists(h) && static_cast<uint32_t>(st.type(h)) == squad_type ? 1u : 0u;
+                CHECK(squads == 0);
                 // t05: the byte-0 hangar spawns nothing (+0x3CB off); the one without the byte spawns
                 const uint32_t hangar_type = type_of(d, "M1_Hangar");
                 uint32_t hangars_off = 0, hangars_on = 0;
@@ -234,7 +241,7 @@ void test_space(const Data& d) {
 
 struct EveryMapTotals {
     uint32_t maps = 0, land = 0, space = 0, failed = 0, placements = 0, unknown = 0, unknown_maps = 0, companies = 0, members = 0;
-    uint32_t hangar_off = 0, extra = 0, names = 0, picks = 0, allowed = 0;
+    uint32_t hangar_off = 0, extra = 0, names = 0, picks = 0, allowed = 0, hinted = 0, hinted_no_beh = 0, hints_skipped = 0;
 };
 
 // Placements whose type is in no shipped XML or script of FoC or EaW (searched 2026-11-17: the CRCs match no name in the
@@ -342,6 +349,29 @@ void every_map(const char* label, vfs::VfsConfig vc, EveryMapTotals& tot) {
                 std::printf("    %s %s: %u placements, unknown %u, companies %u (%u members), hangar off %u, HINT %u, names %u\n", label,
                             name.c_str(), s.placements, s.unknown_types, s.companies, s.company_members, s.hangar_off, s.extra_behaviors,
                             s.marker_names);
+            // q6 t32: Find_Hint walks HINT objects only (Q6_T30 §2 [H]) and the reader keeps a 0x482 hint only on an object
+            // with HINT (§3), so every object that got a map hint has HINT; the skipped hints are counted (FoC: 2, on
+            // _SPACE_PLANET_AETENII_PIRACY: a Star_Destroyer and a Calamari_Cruiser hinted "pointguard").
+            tot.hints_skipped += s.hints_skipped;
+            if (const TacticalMode* tm = host.tactical()) {
+                static const objects::BehaviorTypeId kHint = objects::behavior_type_id("HINT");
+                uint32_t bad = 0;
+                for (const objects::ObjectHandle h : tm->primary().all_objects()) {
+                    if (!tm->primary().exists(h) || b->map_hint(tm->primary().id(h)).empty()) continue;
+                    ++tot.hinted;
+                    if (tm->primary().has_behavior(h, kHint)) continue;
+                    ++bad;
+                    const objects::TypeIndex ty = tm->primary().type(h);
+                    std::printf("    %s %s: hint '%s' on %s without HINT\n", label, name.c_str(),
+                                std::string(b->map_hint(tm->primary().id(h))).c_str(),
+                                static_cast<size_t>(ty) < d->types.size() ? std::string(d->types.raw().types().name[static_cast<size_t>(ty)]).c_str() : "?");
+                }
+                tot.hinted_no_beh += bad;
+                if (bad) {
+                    std::printf("FAIL %s %s: %u objects with a map hint but no HINT\n", label, name.c_str(), bad);
+                    ++g_fail;
+                }
+            }
             if (s.companies && s.company_members < s.companies) {  // a company that spawned nothing is a dropped placement
                 std::printf("FAIL %s %s: %u companies spawned %u members\n", label, name.c_str(), s.companies, s.company_members);
                 ++g_fail;
@@ -375,9 +405,10 @@ int run_every_map() {
         every_map("EaW", vc, tot);
     }
     std::printf("every map: %u maps (%u land, %u space), %u failed; %u placements, %u unknown types in %u maps, %u companies -> %u "
-                "members, %u hangar-off placements, %u extra behaviours, %u marker names, %u spawn-table picks\n",
+                "members, %u hangar-off placements, %u extra behaviours, %u marker names, %u spawn-table picks, %u hinted objects (%u "
+                "without HINT), %u hints skipped (no HINT)\n",
                 tot.maps, tot.land, tot.space, tot.failed, tot.placements, tot.unknown, tot.unknown_maps, tot.companies, tot.members,
-                tot.hangar_off, tot.extra, tot.names, tot.picks);
+                tot.hangar_off, tot.extra, tot.names, tot.picks, tot.hinted, tot.hinted_no_beh, tot.hints_skipped);
     CHECK(tot.maps > 300 && tot.failed == 0 && tot.unknown == tot.allowed);
     std::printf(g_fail ? "alamo_sim_map1_tests --every-map: %d failure(s)\n" : "alamo_sim_map1_tests --every-map: OK\n", g_fail);
     return g_fail ? 1 : 0;

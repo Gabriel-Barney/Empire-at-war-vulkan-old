@@ -229,6 +229,7 @@ struct MapLoadStats {
     uint32_t hangar_off = 0;        // map1 t05: SPAWN_SQUADRON placements with mini 0x29 = 0 (no Starting_Spawned_Units)
     uint32_t extra_behaviors = 0;   // map1 t04: 0x4B7 behaviours attached
     uint32_t marker_names = 0;      // map1 t04: placements with a non-empty 0x46E marker name
+    uint32_t hints_skipped = 0;     // q6 t32: 0x482 hints on objects without HINT (retail reads none)
     uint32_t remembered_markers = 0;  // map1 t06: structures placed on their remembered marker (pass 1)
     uint32_t escorts = 0;           // map1 t07: Space_Escort_Unit_Types participants added
     bool starbase_picked = false;   // map1 t07: the starbase type came from the DUMMY_STAR_BASE pick (0x407b60)
@@ -969,6 +970,9 @@ public:
     void set_hero_clash_data(std::shared_ptr<const tactical::combat::HeroClashData> d);
     const tactical::combat::HeroClashManager& hero_clashes() const { return hero_clash_; }
     const tactical::combat::WeatherSystem& weather() const { return l1_weather_; }
+    // vis1 t01: the weather data set above (null: none), so the render host can name the running scenario's emitter
+    // (the active environment's Weather effect name looked up here). Read-only; not hashed.
+    const tactical::combat::WeatherData* weather_data() const { return l1_weather_data_.get(); }
     bool force_weather(SimRng& rng);
     // Sight factor of a battle object (Weather_Category of its type; 1.0 without weather): the fog's Land_FOW_Reveal_Range
     // x weather factor (FOG_OF_WAR §3.1.1; owner: fog agent). Weather FowDirty events this tick: weather().events().

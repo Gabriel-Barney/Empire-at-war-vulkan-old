@@ -2,6 +2,7 @@
 // view (R1 + R3 + R4 + R5 over a running S10 battle). Both views only read the sim through immutable snapshots taken
 // between ticks (capture*), so the per-tick CRC is the same with presentation on or off.
 #pragma once
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -18,6 +19,7 @@
 #include "alamo/jobs/job_system.hpp"
 #include "alamo/render/fleet.hpp"
 #include "alamo/render/beams.hpp"       // R5 ability beams
+#include "alamo/render/blob_shadows.hpp"  // vis1 t02 object blob shadows
 #include "alamo/render/fog_view.hpp"
 #include "alamo/render/galactic/galactic_snapshot.hpp"
 #include "alamo/render/galactic/galactic_view.hpp"
@@ -31,6 +33,7 @@
 #include "alamo/render/sim_snapshot.hpp"
 #include "alamo/render/sim_view.hpp"
 #include "alamo/render/surface_fx.hpp"
+#include "alamo/render/weather_fx.hpp"  // vis1 t01 weather emitter / lightning / fog plane
 #include "alamo/rhi/rhi.hpp"
 #include "alamo/ui/camera.hpp"
 #include "alamo/ui/hud_renderer.hpp"
@@ -179,6 +182,10 @@ public:
     void set_particle_detail(float detail) {
         if (pworld_) pworld_->set_detail(detail);
     }
+    // vis1 t02: shadow detail of the object blob shadows (render::blob_shadow_mode; 0 = Off, kPortShadowDetailOn = On).
+    void set_shadow_detail(int32_t detail) { shadow_detail_ = detail; }
+    // vis1 t01: the weather the last capture read (land battles; inactive otherwise).
+    const render::WeatherView& weather() const { return weather_; }
     // Scripted runs: every model the frame requests is loaded and resident before it is built (ModelStreamer::
     // finish_pending), so a new type's first drawn frame and its particles do not depend on load timing; likewise each
     // snapshot's fog texture (WorldRenderer::finish_fow_upload).
@@ -203,8 +210,9 @@ public:
     bool space() const { return space_; }
     const BattleViewStats& stats() const { return stats_; }
     float clear_color(int i) const;
-    // P2 selection circles of this frame (TacticalHud::selection_blobs): flat blob instances in the main list (land: at
-    // the terrain height under the unit). Set before prepare().
+    // P2 selection circles of this frame (TacticalHud::selection_blobs): blob instances in the main list, one model per
+    // ShadowBlobMaterials entry (vis1 t03: the blob's own material, UI.md 1.3; unknown / empty: the first Selection*
+    // material); land: on the terrain under the unit (ui::selection_blob_ground_instance). Set before prepare().
     void set_selection_blobs(std::span<const ui::SelectionBlob> blobs) { blobs_.assign(blobs.begin(), blobs.end()); }
     // cu9g t03: the bombing-run targeting blob of this frame (HUD_GAPS §9.5; nullopt = none). Set before prepare().
     void set_bombing_blob(const std::optional<render::JamBlob>& blob) { bombing_blob_ = blob; }
@@ -244,6 +252,18 @@ private:
     std::vector<render::BeamInstance> script_beams_;  // ui2 t08
     bool fog_master_ = true, fog_distance_ = true;     // ui2 t08
     void apply_environment();
+    // vis1 t01 (WEATHER_VISUALS §1): the scenario emitter in the particle world, its intensity as the Detail scalar.
+    void sync_weather_emitter();
+    render::WeatherView weather_;
+    render::LightningFlash lightning_;
+    std::chrono::steady_clock::time_point last_prepare_{};
+    bool have_last_prepare_ = false;
+    uint64_t weather_fx_ = 0;  // ParticleWorld::Handle of the weather emitter (0 = none)
+    std::string weather_fx_name_;
+    // vis1 t02: object blob shadows (land).
+    render::BlobShadowBuilder blob_shadows_;
+    std::vector<terrain::ShadowBlob> shadow_blobs_;
+    int32_t shadow_detail_ = render::kPortShadowDetailOn;
     bool space_ = true;
     bool blocking_models_ = false;
     int32_t local_ = 0;
@@ -278,8 +298,17 @@ private:
     };
     std::vector<MoveAckFx> acks_;
     std::vector<ui::SelectionBlob> blobs_;
-    render::GpuModel blob_model_;
-    bool blob_ok_ = false;
+    // vis1 t03: selection blob models, uploaded on first use per material (index into blob_mats_; ok = false: the upload
+    // failed, not retried).
+    struct SelectionModel {
+        uint32_t material = 0;
+        render::GpuModel model;
+        bool ok = false;
+    };
+    std::vector<terrain::ShadowBlobMaterial> blob_mats_;
+    uint32_t blob_fallback_ = UINT32_MAX;  // the first Selection* material (UINT32_MAX: none)
+    std::vector<std::unique_ptr<SelectionModel>> sel_models_;
+    render::GpuModel* selection_model(GpuCore& gpu, const std::string& material);
     std::optional<render::JamBlob> bombing_blob_;  // cu9g t03: the land bombing-run targeting blob (drawn through jam_models_)
     render::JamBlobModels jam_models_;  // R5 sensor jamming radius blobs (one model per material + colour)
     render::BeamStyleTable beam_styles_;  // R5 ability beams: per-special styles over the GameConstants fallbacks (ABILITY_VISUALS 4.2)

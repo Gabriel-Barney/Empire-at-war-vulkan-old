@@ -183,7 +183,9 @@ report ends with the same leave-one-out counts, so a port FAIL count can be read
   Auto-resolve; forces, losses by company, owner change), beyond `max_tick`; no check reads it yet.
 - **Object counts by type** (galactic) are not compared: the retail store lists company and fleet members, the port's
   galactic store the companies (`BOBA_FETT` vs `BOBA_FETT_TEAM`).
-- **Story battles**: `20261108-234224-story-vanilla` (story t04, Kessel UM01 linked land battle, 18000 frames) is not a
-  scenario yet. The port's `--galactic-ai --trace-out` writes the galactic store only, not the battle's objects, so only
-  synced-RNG draws and the battle end would compare; `docs/re/STORY_T04_KESSEL_RUN.md` §2-§4 (comparison by hand with
-  `tools/probe_mod/q2_traces/analysis/story_battle.py`, and what a `story_kessel` scenario needs).
+- **Story battles** (storyb t03, 2026-11-17): scenario `story_kessel` (kind `story`) runs the Underworld campaign's
+  linked Kessel UM01 mission hands-off with `alamo_headless --galactic-ai --story --battles fight --tactical-trace-out`
+  and reduces both traces with `tools/probe_mod/q2_traces/analysis/story_battle.py`: objects per owner index at battle
+  frame 1, the mission Lua's first spawn frame, objects appearing after frame 1, health-change samples, battle end. Only
+  object counts, not types, are graded (the port's tactical type names differ in spelling: `DEFENDING FORCES POSITION`
+  vs `DEFENDING_FORCES_POSITION`). Results and open divergences: `docs/re/STORY_T04_KESSEL_RUN.md` §7.

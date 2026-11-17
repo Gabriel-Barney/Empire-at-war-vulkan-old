@@ -1063,6 +1063,13 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
     auto note_hint = [&](const terrain::ObjectPlacement& p, objects::ObjectHandle h) {
         bt_note_record(mode, p, h);  // map1 t04: 0x4B7 behaviours, 0x46E marker name
         if (p.hint.empty() || !mode.primary().exists(h)) return;
+        // q6 t32 (Q6_T30 §3 [H]): the reader skips chunk 0x482 when the object has no hint pack, that is no HINT from its
+        // type or the record's 0x4B7 list: such an object gets no hint (FoC _SPACE_PLANET_AETENII_PIRACY has two).
+        static const objects::BehaviorTypeId kHintBeh = objects::behavior_type_id("HINT");
+        if (!mode.primary().has_behavior(h, kHintBeh)) {
+            ++map_stats_.hints_skipped;
+            return;
+        }
         const objects::ObjectId id = mode.primary().id(h);
         const auto it = std::lower_bound(map_hints_.begin(), map_hints_.end(), id,
                                          [](const std::pair<objects::ObjectId, std::string>& e, objects::ObjectId v) { return e.first < v; });
@@ -1300,7 +1307,14 @@ void TacticalBattle::bt_expand_company(TacticalMode& mode, const terrain::Object
     const Vec3 pos{pl.position[0], pl.position[1], pl.position[2]};
     const Vec3 face = yaw_facing(pl.rotation_deg[2]);
     static const objects::BehaviorTypeId kHint = objects::behavior_type_id("HINT");
-    const bool hinted = record && !pl.hint.empty();
+    // q6 t31 (Q6_T30 §1 / §3 [H]): only a company object with HINT (its type, or the record's 0x4B7 list) has a hint pack
+    // for chunk 0x482, so only then do its members inherit.
+    bool company_hint = kHint != objects::kNoBehavior &&
+                        catalog_->types().has_behavior(t, objects::BehaviorSet::Union, kHint);
+    for (const terrain::ObjectPlacement::ExtraBehavior& e : pl.extra_behaviors)
+        company_hint = company_hint || (kHint != objects::kNoBehavior && objects::behavior_type_id_from_crc(e.name_crc) == kHint);
+    const bool hinted = record && !pl.hint.empty() && company_hint;
+    if (record && !pl.hint.empty() && !company_hint) ++map_stats_.hints_skipped;
     auto inherit = [&](objects::ObjectHandle h) {
         ++map_stats_.company_members;
         if (!hinted || !st.exists(h)) return;
