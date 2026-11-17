@@ -35,9 +35,10 @@ bool CombatSystem::fire_hardpoint(Unit& u, Hardpoint& h, uint32_t frame, SimRng&
     if (hooks_) hooks_->fire_bones(u.id, static_cast<uint32_t>(&h - &hps_[u.hp_begin]), a, b);  // S10-int: animated bones
     const Vec3 ref = hd.has_bone_b ? (a + b) * 0.5f : a;
     const float range = fire_range(hd.fire_range, mod_r(u, ModList::FireRange));
+    // r1b t10: turret pre-check (§2.9 Q2 step 2): the barrel (the turret pose) within Fire_Cone_Width (full angle) of the
+    //    target object's position; a turret still turning does not fire.
+    if (hd.turret && hd.turret_model && !turret_on_target(u, h, t.pos)) return false;
     // 3. aim point (§2.9 Q2 step 3): the target hardpoint's bone, else 0x383f70 (range + cone per candidate; none: no shot).
-    //    [port] Turret pre-check (Q2 step 2) not modelled: the port has no turret rotation state (the barrel is taken
-    //    as on target).
     Vec3 aim0;
     if (thp >= 0) {
         aim0 = hp_world(t, data_->hardpoints[hps_[t.hp_begin + static_cast<uint32_t>(thp)].desc]);
@@ -341,6 +342,105 @@ bool CombatSystem::lob_turret_aim(Unit& u) {
     }
     const auto w = [](float v) { return v < 0.0f ? v + 360.0f : v; };
     return abs_f(w(u.lob_tpitch) - w(pitch)) <= 0.0001f && abs_f(w(u.lob_tyaw) - w(yaw)) <= 0.0001f;
+}
+
+void CombatSystem::turret_frame(const Unit& u, const HardpointDesc& hd, Vec3& o, Vec3& x, Vec3& y, Vec3& z) const {
+    // [port] in_cone's turret frame: the attachment bone's bind-pose axes turned by the unit's yaw; without a model frame
+    // the unit facing + fire_yaw_deg is the centre (-y), x its left, z up. The origin is the attachment point.
+    float fx = u.facing.x, fy = u.facing.y;
+    const float len2 = fx * fx + fy * fy;
+    if (len2 > 0.0f) {
+        const float inv = 1.0f / dmath::sqrt(len2);
+        fx = fx * inv;
+        fy = fy * inv;
+    } else {
+        fx = 1.0f;
+        fy = 0.0f;
+    }
+    o = hp_world(u, hd);
+    if (hd.has_attach_frame) {
+        auto turn = [fx, fy](Vec3 l) { return Vec3{l.x * fx - l.y * fy, l.x * fy + l.y * fx, l.z}; };
+        x = turn(hd.attach_x);
+        y = turn(hd.attach_y);
+        z = turn(hd.attach_z);
+        return;
+    }
+    const float a = hd.fire_yaw_deg / kRadToDeg;
+    const float ca = dmath::cos(a), sa = dmath::sin(a);
+    const float cx = fx * ca - fy * sa, cy = fx * sa + fy * ca;
+    x = Vec3{-cy, cx, 0.0f};
+    y = Vec3{-cx, -cy, 0.0f};
+    z = Vec3{0.0f, 0.0f, 1.0f};
+}
+
+void CombatSystem::turret_slew(const Unit& u, Hardpoint& h) {
+    // HP_Update's turret step (TACTICAL_COMBAT §2.9 Q2 "Hardpoint turret slew") [H unless tagged]. Aim (0x383650): the
+    // target when its position passes the turret cone, else the opportunity target (no cone test; retail's +0xa8
+    // candidate before it is not modelled [M]); a manual-target turret has no target in the port and holds its last aim
+    // (the pose while that is zero); otherwise the rest pose. A target's position in the turret frame gives yaw (+ 90:
+    // the frame's centre is -y) and pitch, each clamped to its extent when that is in (0, 180), plus the rest angles.
+    const HardpointDesc& hd = data_->hardpoints[h.desc];
+    float pitch = hd.turret_rest_pitch, yaw = hd.turret_rest_yaw;
+    const Unit* t = nullptr;
+    if (!hd.manual_target) {
+        const Unit* main = unit(h.target);
+        const Unit* opp = unit(h.opp_target);
+        if (live(main) && in_cone(u, h, main->pos)) t = main;
+        else if (live(opp)) t = opp;
+    }
+    if (t) {
+        Vec3 o, x, y, z;
+        turret_frame(u, hd, o, x, y, z);
+        const Vec3 d = t->pos - o;
+        const float lx = dot(d, x), ly = dot(d, y), lz = dot(d, z);
+        float ty = wrap_deg(dmath::atan2(ly, lx) * kRadToDeg + 90.0f);
+        float tp = dmath::atan2(lz, dmath::sqrt(lx * lx + ly * ly)) * kRadToDeg;
+        const float ye = hd.turret_rotate_extent, pe = hd.turret_elevate_extent;
+        if (ye > 0.0f && ye < 180.0f) ty = std::clamp(ty, -ye, ye);
+        if (pe > 0.0f && pe < 180.0f) tp = std::clamp(tp, -pe, pe);
+        yaw = wrap_deg(ty + hd.turret_rest_yaw);
+        pitch = wrap_deg(tp + hd.turret_rest_pitch);
+        h.aim_pitch = pitch;
+        h.aim_yaw = yaw;
+    } else if (hd.manual_target) {
+        const bool none = h.aim_pitch == 0.0f && h.aim_yaw == 0.0f;
+        pitch = none ? h.turret_pitch : h.aim_pitch;
+        yaw = none ? h.turret_yaw : h.aim_yaw;
+    }
+    // 0x386170: nothing when the aim equals the pose (within 0.0001 after mapping negatives into [0, 360)).
+    const auto pos360 = [](float v) { return v < 0.0f ? v + 360.0f : v; };
+    if (abs_f(pos360(pitch) - pos360(h.turret_pitch)) < 0.0001f && abs_f(pos360(yaw) - pos360(h.turret_yaw)) < 0.0001f) return;
+    // 0x381ff0: pitch and yaw each move toward the aim by at most s (plain difference), then yaw also by the wrapped
+    // difference limited to +-s, then wraps. Pose and aim on opposite sides of +-180 cancel out (retail quirk, kept).
+    const float s = hd.turret_rotate_speed;
+    const auto toward = [s](float cur, float aim) {
+        if (aim > cur) return cur + s <= aim ? cur + s : aim;
+        if (aim < cur) return aim <= cur - s ? cur - s : aim;
+        return cur;
+    };
+    h.turret_pitch = toward(h.turret_pitch, pitch);
+    float ny = toward(h.turret_yaw, yaw);
+    const float dy = wrap_deg(yaw - ny);
+    if (dy != 0.0f) {
+        if (dy <= 0.0f) ny = ny + (-s <= dy ? dy : -s);
+        else ny = ny + (dy <= s ? dy : s);
+    }
+    h.turret_yaw = wrap_deg(ny);
+}
+
+bool CombatSystem::turret_on_target(const Unit& u, const Hardpoint& h, Vec3 target) const {
+    // Fire_At step 2: the turret bone's X axis (the barrel: the pose's yaw turned from the centre -y, raised by its
+    // pitch) . the unit direction to the target object's position >= cos(Fire_Cone_Width) (the full width) [M: axis].
+    const HardpointDesc& hd = data_->hardpoints[h.desc];
+    Vec3 o, x, y, z;
+    turret_frame(u, hd, o, x, y, z);
+    Vec3 d = target - o;
+    const float len2 = dot(d, d);
+    if (len2 > 0.0f) d = d * (1.0f / dmath::sqrt(len2));
+    const float yr = h.turret_yaw / kRadToDeg, pr = h.turret_pitch / kRadToDeg;
+    const float cp = dmath::cos(pr), sp = dmath::sin(pr);
+    const Vec3 barrel = (x * dmath::sin(yr) - y * dmath::cos(yr)) * cp + z * sp;
+    return dot(barrel, d) >= dmath::cos(hd.fire_cone_width / kRadToDeg);
 }
 
 void CombatSystem::lobbing_service(Unit& u, uint32_t frame) {

@@ -767,7 +767,7 @@ the movement / avoidance code keeps hulls apart (SPACE_AVOIDANCE) [M: not re-tra
 7. `in_cone`: vanilla uses the fire bone's full 3D frame (ship pitch / roll and bone orientation) and the
    **lead-adjusted** point; the port uses unit yaw + `fire_yaw_deg` [L] on the pre-lead point, and treats a cone of
    ≥ 360 × ≥ 180 as open. Unset `Fire_Cone_Width` / `Height` are **0** in vanilla (fires only dead ahead). Turrets
-   also need the barrel-direction pre-check (Q2 step 2).
+   also need the barrel-direction pre-check (Q2 step 2) - done 2026-11-17 (r1b t10: turret pose, slew and pre-check).
 8. Aim point without a target hardpoint: vanilla 0x383f70 (bone list, random-start hardpoints with one synced
    draw, then centre; each must be in 3D range and cone) instead of `t.pos`.
 9. The observed run (ships 30–900 units from the station centre) is outside vanilla geometry: from inside the

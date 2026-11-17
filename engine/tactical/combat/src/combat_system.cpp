@@ -1746,6 +1746,13 @@ void CombatSystem::update_weapons(Unit& u, uint32_t frame, SimRng& rng, bool sus
         // Opportunity fire (TACTICAL_COMBAT 2.6, S9): no shot at the owner's target.
         if (cfg_.opportunity_fire && opportunity_allowed(u, hd, idle)) opportunity_fire(u, h, frame, rng);
     }
+    // r1b t10 (TACTICAL_COMBAT §2.9 Q2 "Hardpoint turret slew"): HP_Update turns each live turret after its
+    // Update_Weapon, so this frame's shots above read the previous pose.
+    for (uint32_t i = 0; i < u.hp_count; ++i) {
+        Hardpoint& h = hps_[u.hp_begin + i];
+        const HardpointDesc& hd = data_->hardpoints[h.desc];
+        if (hd.turret && hd.turret_model && !hp_out(h)) turret_slew(u, h);
+    }
 }
 
 bool CombatSystem::deployed_or_deploying(const Unit& u) const {

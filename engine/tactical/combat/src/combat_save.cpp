@@ -48,7 +48,7 @@ using save_io::put_vec3;
 
 namespace {
 
-constexpr uint32_t kCombatSaveVersion = 17;  // 2: refix t02 INFECTION state, refix t03 death clone key; 3: refixf t01 rockets;
+constexpr uint32_t kCombatSaveVersion = 18;  // 2: refix t02 INFECTION state, refix t03 death clone key; 3: refixf t01 rockets;
                                              // 4: refixf t06 attack goal / weapon aim / order lock; 5: refixf t06 scan
                                              // target hardpoint (auto_hp); 6: a1g t03 damage event hull_lost; 7: S8 t04
                                              // grenade flight / sticky state; 8: S8 t06 stuck_offset in the parent's frame
@@ -64,7 +64,8 @@ constexpr uint32_t kCombatSaveVersion = 17;  // 2: refix t02 INFECTION state, re
                                              // (same layout); 16: tru1 t02 base-shield unit state + the
                                              // Base_Shield_Upgrade list, tru1 t08 hit event ground /
                                              // commanded flags; 17: trn1 t02 SurfaceFX instance
-                                             // state + terrain damage timer. Only the current version is read (cu6).
+                                             // state + terrain damage timer; 18: r1b t10 hardpoint turret pose
+                                             // and last aim. Only the current version is read (cu6).
 constexpr uint32_t kWeatherSaveVersion = 1;
 constexpr uint32_t kNoIndex = 0xFFFFFFFFu;
 
@@ -163,6 +164,7 @@ void CombatSystem::write(ByteWriter& w) const {
     for (const Hardpoint& h : hps_) {
         w.u32(h.desc).f32(h.health).i32(h.cooldown).i32(h.pulses).u8(h.destroyed).u8(h.disabled);
         w.i32(h.target).i32(h.target_hp).i32(h.opp_target).i32(h.opp_hp).u32(h.opp_next_scan);
+        w.f32(h.turret_pitch).f32(h.turret_yaw).f32(h.aim_pitch).f32(h.aim_yaw);  // r1b t10 (version 18)
     }
 
     w.u32(static_cast<uint32_t>(projectiles_.size()));
@@ -402,6 +404,10 @@ bool CombatSystem::read(ByteReader& r) {
         h.opp_target = r.i32();
         h.opp_hp = r.i32();
         h.opp_next_scan = r.u32();
+        h.turret_pitch = r.f32();
+        h.turret_yaw = r.f32();
+        h.aim_pitch = r.f32();
+        h.aim_yaw = r.f32();
         if (!r.ok() || h.desc >= hp_descs) return false;
     }
     for (const Unit& u : units) {

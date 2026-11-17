@@ -281,6 +281,16 @@ struct HardpointDesc {
     Vec3 fire_x, fire_y, fire_z;
     Vec3 attach_x, attach_y, attach_z;
     float turret_rotate_extent = 180.0f;
+    // r1b t10 (TACTICAL_COMBAT §2.9 Q2 "Hardpoint turret slew"): Turret_Rotate_Speed (+0x4c0, degrees per update),
+    // Turret_Elevate_Extent_Degrees (+0x4c8), Turret_Rotation_Offset (+0x4b4: x, pitch, yaw - the rest pose; x is not
+    // modelled), Requires_Manual_Target_Assignment (+0x50), and whether a Model_To_Attach carries the turret bones
+    // (turret_model: retail turns only the attached model's bones, so without one the turret neither turns nor runs the
+    // Fire_At barrel pre-check [M]). Synthetic tables leave turret_model false (the turret then fires as before).
+    float turret_rotate_speed = 0.0f;
+    float turret_elevate_extent = 180.0f;
+    float turret_rest_pitch = 0.0f, turret_rest_yaw = 0.0f;
+    bool manual_target = false;
+    bool turret_model = false;
     int32_t projectile = -1;           // Fire_Projectile_Type
     // OI abilities (REMAINING_GAPS §5.5): Blast_Ability_Fire_Projectile_Type (+0x220), fired instead of `projectile` while
     // the owner's Blast is charged (CombatHooks::fire_gate); -1 none.
@@ -1615,6 +1625,9 @@ public:
     const CombatStats& stats() const { return stats_; }
     size_t unit_count() const { return units_.size(); }
     size_t projectile_count() const { return projectiles_.size(); }
+    // r1b t10: a hardpoint's turret pose in degrees (pitch, yaw; yaw 0 = the turret frame's centre); false for an unknown
+    // unit or index. Presentation may turn the turret bone with it.
+    bool hardpoint_turret_pose(ObjectId id, uint32_t hp, float& pitch, float& yaw) const;
     ProjectileView projectile(size_t i) const;  // serial order
     bool has_unit(ObjectId id) const { return find(id) >= 0; }
     bool alive(ObjectId id) const;
@@ -1682,6 +1695,11 @@ private:
         ObjectId opp_target = kNoObject;
         int32_t opp_hp = -1;
         uint32_t opp_next_scan = 0;
+        // r1b t10: the turret pose (+0xa0 pitch / +0xa4 yaw, degrees, yaw 0 = the turret frame's centre) and the last aim
+        // (+0xb4 / +0xb8, held by a Requires_Manual_Target_Assignment turret). Saved; the pose is hashed in
+        // hash_extended for turret hardpoints.
+        float turret_pitch = 0.0f, turret_yaw = 0.0f;
+        float aim_pitch = 0.0f, aim_yaw = 0.0f;
     };
     struct Unit {
         ObjectId id = kNoObject;
@@ -2016,7 +2034,12 @@ private:
     bool targeting_idle(const Unit& u, uint32_t frame) const;  // phase D: stunned, unpowered or targeting suspended
     void drop_clash_targets();  // s78n t06: before phase D, targets of / at units in a hero clash dropped
     void drop_target(Unit& u);                        // slot 27: the order and scan targets are dropped
-    bool lob_turret_aim(Unit& u);                     // s78f t04: 0x631fe0 toward the lobbing order's point (one slew step)
+    bool lob_turret_aim(Unit& u);
+    // r1b t10 (TACTICAL_COMBAT §2.9 Q2 "Hardpoint turret slew"): the turret frame of a hardpoint (origin, x, y, z; the
+    // centre is -y), one HP_Update slew step (0x381ff0 with the aim 0x383650), and Fire_At's barrel pre-check (step 2).
+    void turret_frame(const Unit& u, const HardpointDesc& hd, Vec3& o, Vec3& x, Vec3& y, Vec3& z) const;
+    void turret_slew(const Unit& u, Hardpoint& h);
+    bool turret_on_target(const Unit& u, const Hardpoint& h, Vec3 target) const;                     // s78f t04: 0x631fe0 toward the lobbing order's point (one slew step)
     int32_t model_alt_of(const Unit& u) const;
     // S8 t10: Spawn_Projectile's garrison branch - a synced pick among the host's gun bones within 60 degrees of the target.
     bool garrison_muzzle(const Unit& shooter, Vec3 target, SimRng& rng, Vec3& out) const;

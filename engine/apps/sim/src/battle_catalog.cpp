@@ -374,6 +374,25 @@ int32_t BattleCatalog::hardpoint(std::string_view name, BuildState& s) const {
     h.fire_cone_width = num("FIRE_CONE_WIDTH", 0.0f);
     h.fire_cone_height = num("FIRE_CONE_HEIGHT", 0.0f);
     h.turret_rotate_extent = num("TURRET_ROTATE_EXTENT_DEGREES", h.turret_rotate_extent);
+    // r1b t10 (TACTICAL_COMBAT §2.9 Q2 "Hardpoint turret slew"): speed (default 0 [M]), elevation extent, the rest pose
+    // (Turret_Rotation_Offset x, pitch, yaw), the manual-target flag, and the attached model that carries the bones.
+    h.turret_rotate_speed = num("TURRET_ROTATE_SPEED", 0.0f);
+    h.turret_elevate_extent = num("TURRET_ELEVATE_EXTENT_DEGREES", h.turret_elevate_extent);
+    h.manual_target = flag("REQUIRES_MANUAL_TARGET_ASSIGNMENT", false);
+    h.turret_model = !ascii_trim(tag("MODEL_TO_ATTACH")).empty();
+    {
+        float rest[3] = {0.0f, 0.0f, 0.0f};
+        std::string_view v = tag("TURRET_ROTATION_OFFSET");
+        for (float& f : rest) {
+            const size_t comma = v.find(',');
+            const std::string_view part = ascii_trim(v.substr(0, comma));
+            if (!part.empty()) f = static_cast<float>(objects::c_atof(part));
+            if (comma == std::string_view::npos) break;
+            v.remove_prefix(comma + 1);
+        }
+        h.turret_rest_pitch = rest[1];
+        h.turret_rest_yaw = rest[2];
+    }
     const std::string_view proj = tag("FIRE_PROJECTILE_TYPE");
     if (!proj.empty()) {
         const objects::TypeIndex pt = types_->resolve_name(proj);
