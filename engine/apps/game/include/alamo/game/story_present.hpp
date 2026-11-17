@@ -20,6 +20,7 @@
 #include <array>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
@@ -181,6 +182,10 @@ public:
     bool tick_advisor(uint8_t mode, uint32_t tick, const std::vector<std::string>& hints);
     // COMMANDBAR_MOVIE / MULTIMEDIA's head (6.2): the hint text on screen goes first, unless the movie is "Light_Loop".
     void clear_shown_hint(std::string_view movie);
+    // A battle ends: a LOCK_CONTROLS it left on does not follow the player to the map (no unlock was found in retail for
+    // the shipped tactical plots that lock and end; 5.1's save / restore routine is unidentified) [port].
+    void unlock_controls() { controls_locked_ = false; }
+    uint32_t next_hint_index(uint8_t mode) const { return mode < 3 ? hint_index_[mode] : 0; }
     void begin_mode(uint8_t mode);  // the mode started: the first hint is due config().first_hint_tick ticks later
 
     // ---- state the host draws / obeys ----
@@ -202,11 +207,16 @@ public:
     bool scroll_locked() const { return scroll_locked_; }
     bool planet_selection_locked() const { return planet_selection_locked_; }
     bool objectives_shown() const { return objectives_shown_; }
+    // 5.5: ENABLE_OBJECTIVE_DISPLAY writes the byte the objectives key (S) toggles: the host applies the reward's value to that
+    // one flag, once (so the key can undo it and it can undo the key).
+    std::optional<bool> take_objective_display() { return std::exchange(objective_event_, std::nullopt); }
     bool command_bar_hidden() const { return command_bar_hide_ > 0; }
     bool cinematic_mode() const { return cinematic_mode_; }
     bool movies_disabled() const { return movies_disabled_; }
     bool retry_dialog_used() const { return retry_dialog_; }
     bool retry_dialog_requested() const { return retry_requested_; }
+    // 1.1: a HINT-channel text line plays the SFX event "GUI_Text_Hint_SFX" when it is added: how many since the last call.
+    uint32_t take_text_hint_sounds() { return std::exchange(text_hint_sounds_, 0u); }
     bool take_retry_request() { return std::exchange(retry_requested_, false); }  // ACTIVATE_RETRY_DIALOG reward: show it once
     bool hide_cursor_on_click() const { return hide_cursor_on_click_; }
     bool hide_autoresolve() const { return hide_autoresolve_; }
@@ -246,6 +256,8 @@ private:
     StoryShownHint shown_;
     bool controls_locked_ = false, scroll_locked_ = false, planet_selection_locked_ = false, objectives_shown_ = true;
     int command_bar_hide_ = 0;
+    uint32_t text_hint_sounds_ = 0;
+    std::optional<bool> objective_event_;
     bool cinematic_mode_ = false, movies_disabled_ = false, retry_dialog_ = false, retry_requested_ = false;
     bool hide_cursor_on_click_ = false, hide_autoresolve_ = false;
     std::array<bool, 3> advisor_{true, true, true};  // [port] default on: the retail default was not read

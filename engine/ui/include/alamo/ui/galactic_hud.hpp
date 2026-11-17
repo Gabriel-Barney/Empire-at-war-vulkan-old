@@ -28,6 +28,7 @@
 // Default_Offset (canvas centre + offset, +Y down) - widescreen variant above 4:3; objective lines wrapped at
 // objective_back Size.x - 24 units; without shell bones components sit at apply_galactic_fallback_layout positions.
 #pragma once
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <span>
@@ -379,6 +380,15 @@ public:
     HudLayout& layout() { return layout_; }
     const HudLayout& layout() const { return layout_; }
     HudButtons& buttons() { return buttons_; }
+    // ui2 t02 (FLASH_PRODUCTION_CHOICE, REWARDS 3.7): the b_Create_NN component of the build pad bound to a type, -1 when no
+    // pad shows it this frame.
+    int32_t build_component(uint16_t type_index) const {
+        for (const PadSlot& p : pads_)
+            if (p.component >= 0 && !p.is_queue && std::find(create_.begin(), create_.end(), p.component) != create_.end() &&
+                p.option.type_index == type_index)
+                return p.component;
+        return -1;
+    }
     void set_sfx_hook(HudSfxHook hook) { buttons_.set_sfx_hook(std::move(hook)); }
     void set_tooltip_config(const TooltipConfig& c) { tooltip_cfg_ = c; }
 

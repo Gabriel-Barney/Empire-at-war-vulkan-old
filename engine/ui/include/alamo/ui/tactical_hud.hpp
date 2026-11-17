@@ -361,6 +361,12 @@ public:
     const HudLayout& layout() const { return layout_; }
     const ComponentTable& components() const { return *table_; }
     HudButtons& buttons() { return buttons_; }
+    // ui2 t02 (FLASH_SPECIAL_ABILITY, REWARDS 3.6): the special_button_NN component bound to an ability type, -1 when none.
+    int32_t ability_component(uint8_t ability_type) const {
+        for (const AbilitySlot& s : ability_slots_)
+            if (s.component >= 0 && s.ability.ability_type == ability_type) return s.component;
+        return -1;
+    }
     const HudButtons& buttons() const { return buttons_; }
     void set_sfx_hook(HudSfxHook hook) { buttons_.set_sfx_hook(std::move(hook)); }
     void set_tooltip_config(const TooltipConfig& c) { tooltip_cfg_ = c; }

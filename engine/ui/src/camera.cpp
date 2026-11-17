@@ -571,7 +571,7 @@ void TacticalCameraController::mouse(const InputState& in) {
     const float mux = 100.0f * fmul * static_cast<float>(dx) / w;
     const float muy = -100.0f * fmul * static_cast<float>(dy) / h;  // mouse up > 0
     if (drag_ == Drag::Pan) {
-        if (t_.absolute_scrolling && !scroll_locked_) pan(0.01f * dist_.value * mux, 0.01f * dist_.value * muy);  // else push-scroll
+        if (t_.absolute_scrolling) pan(0.01f * dist_.value * mux, 0.01f * dist_.value * muy);  // else push-scroll
     } else if (drag_ == Drag::Rotate && ov_level_ == 0) {
         const float ppu = t_.free_rotation && c_.pitch_per_mouse_unit == 0.0f ? t_.free_pitch_per_mouse_unit : c_.pitch_per_mouse_unit;
         rotate(mux * c_.yaw_per_mouse_unit, muy * ppu);
@@ -722,7 +722,7 @@ void GalacticCameraController::update(const InputState& in, const Bindings& keys
     // zoomed in.
     const ButtonState& b = mb.down ? mb : rb;
     dragging_ = (mb.down || (t_.right_button_scroll && rb.down)) && zoom_state() != 3;
-    if (dragging_ && t_.absolute_scrolling && !scroll_locked_ && (b.dx != 0 || b.dy != 0)) {
+    if (dragging_ && t_.absolute_scrolling && (b.dx != 0 || b.dy != 0)) {
         const float w = static_cast<float>(f.width > 0 ? f.width : 1), h = static_cast<float>(f.height > 0 ? f.height : 1);
         const float fmul = in.ctrl() ? 1.0f : 4.0f;
         const float k = c_.right_button_scroll_factor * 1000.0f;

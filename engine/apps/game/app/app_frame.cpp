@@ -524,6 +524,19 @@ void App::frame() {
                 audio_.music(MusicScene::Battle, local_faction(), bview_.space(), battle_terrain());
             }
     }
+    // ui2 t09 (REWARDS 5.1): the LOCK_CONTROLS reward swallows all HUD and world input (buttons, wheel, keys, hover) while the
+    // galactic map or a battle is up. Dialogs keep working, and Esc stays so the player is never shut out of the pause menu [port].
+    if (story_present_.controls_locked() && (screen_ == Screen::Galactic || screen_ == Screen::Battle) && !ui_.gui.has_focus()) {
+        const bool esc_pressed = routed_.world.keys_pressed.test(ui::vk::kEscape), esc_down = routed_.world.keys_down.test(ui::vk::kEscape);
+        routed_.hud.clear();
+        routed_.hover_component = -1;
+        routed_.world.buttons_down = routed_.world.buttons_pressed = routed_.world.buttons_released = 0;
+        routed_.world.wheel = 0.0f;
+        routed_.world.keys_down = {};
+        routed_.world.keys_pressed = {};
+        routed_.world.keys_down.set(ui::vk::kEscape, esc_down);
+        routed_.world.keys_pressed.set(ui::vk::kEscape, esc_pressed);
+    }
     input_.update(routed_.world);
     if (screen_ == Screen::Movie) movie_step();
     // bkc1 t01 (BKC1_RE_ANSWERS Q1 step 2): an in-game full-screen Bink takes the key first: Esc or Space stops it

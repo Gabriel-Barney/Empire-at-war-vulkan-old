@@ -2048,6 +2048,7 @@ void CampaignBattles::l1_hooks(SimHost& host) {
     };
     k.retreat_increment_frames = [this](int32_t player) { return battle_ ? battle_->retreat_increment_frames(player) : 0; };
     k.set_new_environment = [this](int32_t index) { if (battle_) battle_->set_environment(index); };  // cu8g t03
+    k.set_cinematic_environment = [this](bool on) { if (battle_) battle_->set_cinematic_environment(on); };  // ui2 t08
     // Script spawns through the mode; special weapons / TSWs among them join the L1 systems (Spawn_Special_Weapon).
     k.spawn = [this, h](const objects::SpawnParams& p) {
         TacticalMode* tm = h->tactical();

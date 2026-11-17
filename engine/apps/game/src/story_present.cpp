@@ -127,6 +127,7 @@ void StoryPresenter::add_text(std::string_view type, const std::vector<std::stri
     StoryColor over;
     if (!param(p, 6).empty() && parse_rgb(param(p, 6), over)) l.color = over;
     l.text = resolve(id);
+    if (l.channel == StoryTextChannel::Hint) ++text_hint_sounds_;
     if (const std::string_view tn = param(p, 3); !tn.empty() && hooks_.type_name) {  // P3: the type's name replaces %s
         const std::u32string name = hooks_.type_name(tn);
         const size_t at = l.text.find(U"%s");
@@ -172,6 +173,12 @@ bool StoryPresenter::on_reward(std::string_view type, const std::vector<std::str
             a.sub = to_int(param(p, 3));
             a.label = std::string(param(p, 4));
             a.has_pointer = !param(p, 5).empty();
+            // 3.4: every region but PLANET flashes its planet-panel entry (the port has no such panel: the planet itself flashes
+            // [port]); AFFILIATION / CREDITS / COINS are no-ops; PLANET is the arrow alone.
+            std::string_view r = a.region;  // the shipped scripts spell the regions FLASH_TROOPS, FLASH_PLANET ...
+            if (r.starts_with("FLASH_")) r.remove_prefix(6);
+            if (r != "PLANET" && r != "AFFILIATION" && r != "CREDITS" && r != "COINS")
+                object_flashes_.push_back({a.target, now, now + kFlashSeconds * kFlashCount});
             add_arrow(std::move(a));
         }
     } else if (ty == "FLASH_FLEET_WITH_UNIT" || ty == "FLASH_SPECIAL_ABILITY" || ty == "FLASH_PRODUCTION_CHOICE") {
@@ -225,9 +232,11 @@ bool StoryPresenter::on_reward(std::string_view type, const std::vector<std::str
         if (!param(p, 1).empty()) controls_locked_ = to_int(param(p, 1)) != 0;
     } else if (ty == "SCROLL_LOCK") scroll_locked_ = to_int(param(p, 1)) != 0;
     else if (ty == "LOCK_PLANET_SELECTION") planet_selection_locked_ = to_int(param(p, 1)) != 0;
-    else if (ty == "ENABLE_OBJECTIVE_DISPLAY") objectives_shown_ = flag(1, true);
+    else if (ty == "ENABLE_OBJECTIVE_DISPLAY") objective_event_ = objectives_shown_ = flag(1, true);
     else if (ty == "SHOW_COMMAND_BAR") {
-        if (flag(1, false)) command_bar_hide_ = std::max(0, command_bar_hide_ - 1);
+        // 5.6: galactic = a plain show / hide; space and land = the hide counter (nested hides need matching shows)
+        if (mode == 0) command_bar_hide_ = flag(1, false) ? 0 : 1;
+        else if (flag(1, false)) command_bar_hide_ = std::max(0, command_bar_hide_ - 1);
         else ++command_bar_hide_;
     } else if (ty == "START_CINEMATIC_MODE") cinematic_mode_ = true;
     else if (ty == "STOP_CINEMATIC_MODE") cinematic_mode_ = false;
@@ -327,8 +336,7 @@ void StoryPresenter::clear_shown_hint(std::string_view movie) {
 
 void StoryPresenter::begin_mode(uint8_t mode) {
     if (mode >= 3) return;
-    next_hint_[mode] = config_.first_hint_tick;
-    hint_index_[mode] = 0;
+    next_hint_[mode] = config_.first_hint_tick;  // 6.5: only the next-tick field is set; the hint index runs on across modes / battles
 }
 
 bool StoryPresenter::tick_advisor(uint8_t mode, uint32_t tick, const std::vector<std::string>& hints) {

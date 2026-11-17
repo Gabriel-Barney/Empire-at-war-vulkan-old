@@ -6,6 +6,8 @@
 // Presentation only (rule 3): nothing here writes sim state. The presenter's clock is now_s_ (wall time).
 #include "game_app.hpp"
 
+#include "alamo/tactical/abilities/ability_types.hpp"
+
 namespace alamo_game_app {
 
 namespace {
@@ -27,6 +29,8 @@ void App::story_present_setup() {
     StoryPresenter::Config& cfg = story_present_.config();  // ui2 t07: Advisor_Hint_Interval / Advisor_Hint_Duration
     load_story_advisor_config(data_.db.constants(), cfg);
     advisor_mode_ = 255;
+    advisor_gal_s_ = 0.0;
+    advisor_gal_started_ = false;
     h.type_name = [this](std::string_view type) -> std::u32string {
         const uint32_t t = data_.rules.find_type(type);
         if (t == 0xFFFFFFFFu) return {};
@@ -68,32 +72,41 @@ void App::story_advisor_frame() {
         tick = static_cast<uint32_t>(b->frame());
     } else if (galaxy() && screen_ == Screen::Galactic) {
         mode = 0;
-        tick = static_cast<uint32_t>(std::max(0.0, (now_s_ - advisor_t0_) * static_cast<double>(StoryPresenter::kTicksPerSecond)));
+        // 6.4: the galactic mode starts once per campaign (a return from a battle does not restart its hint clock); its tick
+        // counts the render time spent on the map [port].
+        advisor_gal_s_ += static_cast<double>(dt_);
+        tick = static_cast<uint32_t>(advisor_gal_s_ * static_cast<double>(StoryPresenter::kTicksPerSecond));
+        if (!advisor_gal_started_) {
+            advisor_gal_started_ = true;
+            story_present_.begin_mode(0);
+        }
+        if (advisor_mode_ != 0) advisor_hints_ = faction_advisor_hints(data_.db, local_faction(), 0);  // back from a battle: the galactic list
     }
     if (mode == 255) {
         advisor_mode_ = 255;
         return;
     }
-    if (mode != advisor_mode_ || (mode != 0 && tick < advisor_last_tick_)) {  // a new mode (or a new battle): the first hint is due again
-        advisor_mode_ = mode;
-        advisor_t0_ = now_s_;
-        tick = 0;
+    if (mode != 0 && (mode != advisor_mode_ || tick < advisor_last_tick_)) {  // a new battle: the first hint is due 90 ticks in
         story_present_.begin_mode(mode);
         advisor_hints_ = faction_advisor_hints(data_.db, local_faction(), mode);
     }
+    advisor_mode_ = mode;
     advisor_last_tick_ = tick;
     story_present_.tick_advisor(mode, tick, advisor_hints_);
 }
 
 void App::story_present_frame() {
     // Retail shows the next hint only with no Bink movie open, no advanced map and no cinematic mode (§6.3).
-    const bool blocked = full_movie_.playing() || planet_map_open_ || story_present_.cinematic_mode();
+    // ... nor while the Lua cinematic camera or mode is on (5.8).
+    const bool blocked = full_movie_.playing() || planet_map_open_ || story_present_.cinematic_mode() || story_hides_hud();
     story_present_.config().subtitles = audio_opts_.subtitles;  // IDC_USE_MOVIE_SUBTITLES gates the Subtitle channel (1.1)
     story_present_.update(now_s_, blocked);
     // ACTIVATE_RETRY_DIALOG as a reward (5.4): the same IDD_RETRY_DIALOG as the Lua call. USE_RETRY_DIALOG only marks the end-of-battle
     // choice (retail reads it in the battle-end flow, which the port's defeat path already routes to this dialog); HIDE_AUTORESOLVE
     // has no reader in retail (5.3), so the flag is kept and nothing reads it.
     if (story_present_.take_retry_request() && screens_.show_retry()) ++retry_boxes_;
+    for (uint32_t n = story_present_.take_text_hint_sounds(); n > 0; --n) audio_.ui("GUI_Text_Hint_SFX");  // 1.1: the HINT channel's sound
+    if (const std::optional<bool> od = story_present_.take_objective_display()) objectives_hidden_ = !*od;  // 5.5: one shared byte
     story_advisor_frame();
     // TUTORIAL_DIALOG (4): IDD_TUTORIAL_DIALOG with the localized text; a dialog already up ignores the next one.
     for (const StoryTutorialDialog& d : story_present_.take_dialogs()) {
@@ -262,6 +275,27 @@ bool App::story_type_position(std::string_view type, ui::Vec3& out) const {
     return false;
 }
 
+bool App::story_container_position(std::string_view type, ui::Vec3& out) const {
+    const uint32_t t = data_.rules.find_type(type);
+    const galactic::GalacticSim* g = screen_ == Screen::Galactic ? galaxy() : nullptr;
+    if (t == galactic::kNoIndex || !g) return false;
+    for (const galactic::FleetState& f : g->fleets()) {
+        if (!f.alive) continue;
+        for (const objects::ObjectHandle h : f.contents)
+            if (static_cast<uint32_t>(g->store().type(h)) == t) {
+                out = {f.position.x, f.position.y, f.position.z};
+                return true;
+            }
+    }
+    for (const galactic::PlanetState& p : g->planets())
+        for (const objects::ObjectHandle h : p.surface)
+            if (static_cast<uint32_t>(g->store().type(h)) == t) {
+                out = {p.position.x, p.position.y, p.position.z};
+                return true;
+            }
+    return false;
+}
+
 bool App::story_object_position(int32_t object, ui::Vec3& out) const {
     if (screen_ == Screen::Galactic) {
         const galactic::GalacticSim* g = galaxy();
@@ -329,6 +363,32 @@ void App::build_story_pointers(ui::HudDrawList& dl, const ui::HudCanvas& canvas)
                     at = {pl.center.x, pl.center.y + 0.5f * std::max(pl.size.y, 24.0f)};
                     ok = true;
                 }
+            }
+        } else if (a.kind == StoryArrow::Kind::Production || a.kind == StoryArrow::Kind::Ability) {
+            // 3.6 / 3.7: the build pad / special button bound to the type; the arrow comes with a frame flash.
+            int32_t idx = -1;
+            if (a.kind == StoryArrow::Kind::Production && gal) {
+                const uint32_t t = data_.rules.find_type(a.target);
+                if (t != galactic::kNoIndex) idx = ui_.galactic_hud.build_component(static_cast<uint16_t>(t));
+            } else if (a.kind == StoryArrow::Kind::Ability && !gal) {
+                const uint8_t at_type = tactical::abilities::ability_type_from_name(a.target);
+                if (at_type != 0) idx = ui_.tactical_hud.ability_component(at_type);
+            }
+            if (idx >= 0) {
+                const ui::ComponentPlacement& pl = layout.placement(static_cast<uint32_t>(idx));
+                if (pl.placed) {
+                    const ui::Vec2f size{std::max(pl.size.x, 24.0f) + 6.0f, std::max(pl.size.y, 24.0f) + 6.0f};
+                    if ((static_cast<int64_t>(std::floor(now_s_ / (kFlashSeconds * 0.5))) % 2) == 0)
+                        ui::frame_rect(dl, kPointerLayer, pl.center, size, ui::Rgba8{255, 255, 80, 40}, kFlashColor);
+                    at = {pl.center.x, pl.center.y + 0.5f * std::max(pl.size.y, 24.0f)};
+                    ok = true;
+                }
+            }
+        } else if (a.kind == StoryArrow::Kind::Fleet) {
+            ui::Vec3 p;
+            if (story_container_position(a.target, p) && story_project(canvas, p.x, p.y, p.z, at)) {
+                at.y += 14.0f;
+                ok = true;
             }
         } else if (a.kind == StoryArrow::Kind::Planet || a.kind == StoryArrow::Kind::MapObject) {
             ui::Vec3 p;

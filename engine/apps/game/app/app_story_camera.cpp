@@ -164,6 +164,8 @@ void App::story_script_event(const lua::PresentationEvent& e) {
             break;
         }
         case Op::TransitionToTacticalCamera:
+            // 2.6: the RTS camera's zoom fraction snaps to 1.0 first (the second distance value; which end is [M], as Zoom_Camera)
+            if (story_cam_.active() && tactical) bview_.camera().set_distance(bview_.camera().constants().distance_max);
             if (story_cam_.active()) story_cam_.to_tactical(story_rts_pose(), number_or(e, 0, 1.0), frame, r);
             break;
         case Op::CinematicZoom:
@@ -189,6 +191,7 @@ void App::story_script_event(const lua::PresentationEvent& e) {
         }
         case Op::CameraToFollow:
             story_moves_.follow_object = !e.args.empty() && e.args[0].kind == lua::PresentationArg::Kind::Object ? e.args[0].id : -1;
+            story_moves_.following = story_moves_.follow_object >= 0;  // 0x44aef0: the id alone makes the camera follow
             break;
         case Op::RotateCameraBy:
         case Op::RotateCameraTo: {
@@ -228,6 +231,7 @@ void App::story_script_event(const lua::PresentationEvent& e) {
 // frame's sim step and Lua presentation, so what the new mode's first ticks set is not wiped.
 void App::story_script_mode_check() {
     if (screen_ != story_fx_screen_ || battles_seen_ != story_fx_battle_) {
+        if (story_fx_screen_ == Screen::Battle) story_present_.unlock_controls();  // the battle ended: its lock ends with it
         story_fx_screen_ = screen_;
         story_fx_battle_ = battles_seen_;
         story_fade_.clear();
@@ -300,6 +304,12 @@ void App::story_camera_commands() {
         using K = StoryCameraCommand::Kind;
         const bool gal = screen_ == Screen::Galactic;
         ui::Vec3 p;
+        // 5.13: ZOOM_IN / ZOOM_OUT act only when the story's TUTORIAL_ZOOM gate (DISABLE_EVENT / ENABLE_EVENT, kind 4) permits.
+        bool zoom_gate = true;
+#ifdef ALAMO_SIM_HAVE_STORY
+        if (const sim::StorySession* st = session_ ? session_->host().story() : nullptr) zoom_gate = st->gui_event_allowed(4);
+#endif
+        if ((c.kind == K::ZoomIn || c.kind == K::ZoomOut) && !zoom_gate) continue;
         switch (c.kind) {
             case K::Position:
             case K::Scroll:

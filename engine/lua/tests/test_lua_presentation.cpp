@@ -234,6 +234,11 @@ static void test_set_new_environment() {
     CHECK(run(vm, "Set_New_Environment(2) Set_New_Environment(3.9) Set_New_Environment(-1)") == "");
     CHECK(got == std::vector<int32_t>({2, 3, -1}) && log.events().size() == 4);
     CHECK(contains(run(vm, "Set_New_Environment(true)"), "Expected int.") && got.size() == 3);  // refused: no hook call
+    // ui2 t08: Set_Cinematic_Environment reaches the sim hook with its bool
+    std::vector<bool> cin;
+    hooks.set_cinematic_environment = [&cin](bool on) { cin.push_back(on); };
+    CHECK(run(vm, "Set_Cinematic_Environment(true) Set_Cinematic_Environment(false)") == "");
+    CHECK(cin == std::vector<bool>({true, false}));
     attach_object_bridge(vm, nullptr);
 }
 

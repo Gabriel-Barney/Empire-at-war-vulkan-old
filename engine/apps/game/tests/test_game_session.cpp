@@ -862,11 +862,9 @@ void linked_overlay_test() {
         CHECK(!o.input_blocked());
         o.update(42, true, kDt);   // a midtro locks again: P11 battles block again
         CHECK(o.input_blocked());
-        o.script_letterbox(false);  // Letter_Box_Out: 0.5 s slide
+        o.script_letterbox(false);  // Letter_Box_Out: the script's bars slide out (story box); this overlay's go at once
         o.update(43, false, 0.25f);
-        CHECK(o.letterbox_level() > 0.4f && o.letterbox_level() < 0.6f && !o.input_blocked());
-        o.update(44, false, 0.5f);
-        CHECK(o.letterbox_level() == 0.0f);
+        CHECK(o.letterbox_level() == 0.0f && !o.input_blocked());
         o.reset();
         CHECK(o.letterbox_level() == 0.0f && !o.input_blocked() && !o.letterbox_held());
     }
@@ -885,9 +883,9 @@ void linked_overlay_test() {
         o.begin(false, false, 0);
         o.update(1, true, kDt);
         CHECK(o.letterbox_level() == 0.0f && !o.input_blocked() && !o.letterbox_held() && !o.input_held());
-        o.script_letterbox(true);  // the scripts' letterbox is drawn in any battle
+        o.script_letterbox(true);  // the scripts' letterbox is the story box's, in any battle: nothing drawn here
         o.update(2, true, 0.5f);
-        CHECK(o.letterbox_level() == 1.0f && !o.input_blocked());
+        CHECK(o.letterbox_level() == 0.0f && !o.input_blocked());
     }
     std::printf("linked overlay: P10 letterbox / P11 block / hand-over checked\n");
 }

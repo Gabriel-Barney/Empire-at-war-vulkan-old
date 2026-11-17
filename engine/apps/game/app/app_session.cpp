@@ -1,6 +1,8 @@
 // alamo_game App: attract demo, movies, story steps, session / battle flow (split from game_main.cpp).
 #include "game_app.hpp"
 
+#include "alamo/audio/audio_system.hpp"
+
 namespace alamo_game_app {
 
 void App::show_menu_after_intro() {
@@ -314,10 +316,27 @@ void App::story_reward_step() {
         story_present_.reset();
         story_present_setup();
         story_present_story_ = story;
-        // A loaded save has its fired rewards already: the presentation they made is not replayed (no forced clicks, speech,
-        // camera moves) - the presenter keeps no saved state, so a load starts it clean [port].
+        // A loaded save has its fired rewards already. Retail saves the locks, the advisor switch and the screen text with the
+        // HUD; the port keeps no presenter state in its saves, so only the rewards that set a switch are fed again (locks,
+        // advisor, command bar, cinematic mode ...). Text, pointers, forced clicks, speech and camera moves are not replayed [port].
+        static const char* const kSwitchRewards[] = {"LOCK_CONTROLS", "SCROLL_LOCK", "LOCK_PLANET_SELECTION", "ENABLE_OBJECTIVE_DISPLAY",
+                                                     "SHOW_COMMAND_BAR", "DISABLE_MOVIES", "SET_ADVISOR", "START_CINEMATIC_MODE",
+                                                     "STOP_CINEMATIC_MODE", "HIDE_AUTORESOLVE", "ENABLE_GALACTIC_CORRUPTION_HOLOGRAM"};
         reward_cursor_.assign(story->plot_set_count(), 0);
-        for (size_t set = 0; set < story->plot_set_count(); ++set) reward_cursor_[set] = story->model(set).fired().size();
+        std::vector<const lua::StoryFired*> replay;
+        for (size_t set = 0; set < story->plot_set_count(); ++set) {
+            const std::vector<lua::StoryFired>& fired = story->model(set).fired();
+            reward_cursor_[set] = fired.size();
+            if (story->plot_set_player(set) != local_player()) continue;
+            for (const lua::StoryFired& f : fired)
+                for (const char* name : kSwitchRewards)
+                    if (f.reward_type == name) {
+                        replay.push_back(&f);
+                        break;
+                    }
+        }
+        std::stable_sort(replay.begin(), replay.end(), [](const lua::StoryFired* a, const lua::StoryFired* b) { return a->frame < b->frame; });
+        for (const lua::StoryFired* f : replay) story_present_reward(*f, 0);  // in firing order across the plot sets
     }
     std::vector<StoryMediaCue> cues;
     auto scan = [&](const lua::StoryModel& m, size_t& cursor, uint8_t mode) {
@@ -354,6 +373,7 @@ void App::story_reward_step() {
     story_present_frame();
     for (const StoryMediaCue& c : cues) {
         if (c.kind == StoryMediaCue::Kind::Speech) {
+            if (alamo::audio::AudioSystem* as = audio_.system()) as->stop_all_speech();  // 1.4: the speech manager is flushed first: the previous line is cut off
             audio_.speech(c.name);
             ++reward_speeches_;
             continue;
