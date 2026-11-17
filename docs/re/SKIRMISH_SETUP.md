@@ -232,6 +232,27 @@ member (+0x958 entry 1) [M].
   Say [port] where it is applied.
 - Cost column = `Build_Cost_Credits` (not the tactical cost); no population column.
 
+### 2.8 Slot defaults when the staging dialog opens (modc t40, 2026-11-17) [H unless tagged]
+
+Source: the single-player staging setup 0xf1230 (it fills `IDC_PLAYER_FACTION_n` through 0xfa1c0 and refreshes the slots
+through 0xfe7c0); the profile copy 0x338e80; the faction-change handlers in 0xf2690. Retail check: `tools/probe_mod/modc_t09`
+(A3, R2).
+
+- Two slot records are built: the local player and one AI (name `TEXT_AI_PLAYER_NAME`). The record's faction is an
+  index into the faction combo's list (the playable factions, §2.7 / UI.md 3.7).
+- **Local slot faction** = a global the player profile keeps (the profile copy writes it with the player colour; the
+  faction-change handlers set it when the player picks another faction). Nothing sets it before a profile has one, so a
+  fresh profile starts at index 0 [M for "fresh": the global's start value is 0 in the image; the profile load path that
+  fills it was not read].
+- **AI slot faction** = local index XOR 1; when that index has no faction or the faction is not playable (+0x20a8), 0.
+- **Colours**: local = the profile's colour (kept with the faction); AI = colour 1, or colour 2 when the local colour is 1.
+- **Teams**: the AI's team = local team XOR 1, 0 when that is not below the team count.
+- Retail run 2026-11-17 (a profile whose saved faction index is 1): EAW-Remake (list Rebel, Empire, ...) opens on
+  Empire for the player and Rebel for the AI; Age of Legends (list "= MAJOR POWERS ===", New Republic, ...) opens on New
+  Republic for the player and the header row for the AI. Both match index 1 / (1 XOR 1).
+- [port] `FrontEnd::fill_skirmish_slots` gives slot p the row p % 2: the same as retail on a fresh profile (0 / 1). The
+  port does not remember the last faction in a profile (modc t47).
+
 ## 3. Tactical production (item 1)
 
 Build manager at player+0x3a0 (ctor 0x4967a0): queues at +0 and +0x18 (queue index = type

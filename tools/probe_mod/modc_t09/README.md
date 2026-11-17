@@ -48,6 +48,29 @@ Take a screenshot at each **[shot]** and write the answers as `Rn: ...` lines.
 Results go to the lane-modc session (the coordinator relays the paths / screenshots); the lane files them on modc t40 /
 t41 / t34 and in `docs/MODS.md` §9.
 
+### Results (retail run 2026-11-17, coordinator session; screenshots were in `out\`, not kept)
+
+**Kit error:** R3 and A4 said "Ctrl+Y (select all)". Ctrl+Y is the port's binding; retail's Select All is **Ctrl+A**
+(UI.md hotkey table, Q6_T15_RETAIL_RUN row 6). The "Ctrl+Y selected nothing" readings say nothing about selection.
+
+- R1 Remake: "Single Player" is a normal button like the other four; one click opens Galactic Conquest / Skirmish
+  Battles / Back. Matches the port after t34.
+- R2 Remake: game types Land, Space, Land Control (Land selected at open). Official tab: Land lists no maps; Space lists
+  11 ("(4) [Re] Kuat Repair Yards" first). Custom tab empty for Space. Slots: player Empire / Team 1, AI Rebellion / Team 2.
+- R3 Remake (Kuat Repair Yards): **no buy screen** (Start Game goes to the load screen), as SKIRMISH_SETUP §2.7 says.
+  Start: own Space Station Level 1 and one TIE Fighter squadron (12); 0/150 population, 5,634 credits rising (about 24k
+  after 3 min). In the first 3 minutes the station's build bar allowed only upgrades; ship icons (TIE 480, Arquitens
+  1200, ...) stayed greyed. R4 not checked (no Geonosis space map in the Remake's list).
+- A1 Age of Legends: about 90 s splash; title "STAR WARS / AGE OF LEGENDS"; the five main buttons, no raw TEXT_ keys;
+  Single Player offers only "Galactic Conquest" and "Space Skirmish".
+- A2: dialog "SPACE SKIRMISH SETUP", a "Game Type:" label with no list; the map list shows **land** maps ((4) Dagobah
+  Rush first), plus a "Select Age of Legends Maps" button.
+- A3: player New Republic, AI the "= MAJOR POWERS ===" header row (combo rows listed in MODS.md §9). The profile had a
+  saved faction index 1; the rule is SKIRMISH_SETUP §2.8. Not checked between launches.
+- A4: Start Game gives a **land** battle at Dagobah (no type list: Land), no buy screen, Era 1, 0/0 population, 6,000
+  credits (not rising), no own units on the map or minimap, an empty reinforcement pool; quitting at 1:18 gives "You
+  have lost the battle" with no losses on either side.
+
 ## How to start (port, Gabriel only)
 
 From the repository root, after a normal `build_msvc.cmd` (or set `ALAMO_BIN` to a folder with `alamo_game.exe`):

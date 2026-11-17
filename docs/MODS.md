@@ -485,6 +485,16 @@ smoke reaches a running space skirmish (it then stops at the smoke's control-gro
 smoke reaches the buy screen as slot 0's default faction, the mod's list-header faction `Faction_Header_Major_Powers`,
 which has nothing to buy (**t41**).
 
+**Retail run (modc t09, 2026-11-17; results in `tools/probe_mod/modc_t09/README.md` "Results").** Neither mod has a
+pre-battle buy screen in retail (SKIRMISH_SETUP §2.7: single-player skirmish never had one; the port's is a kept [port]
+feature). The Remake's Single Player button and one-click menu match the port after t34. The slot factions come from the
+player profile (SKIRMISH_SETUP §2.8: player = the saved index, 0 on a fresh profile; AI = that index XOR 1), so the port's
+row 0 / row 1 default is retail's fresh-profile default and Age of Legends' header row is a legal retail choice; the port
+does not keep the last faction (**t47**). Age of Legends' "Space Skirmish" plays a land battle (no type list: Land) with no
+own units in retail too. The kit asked for Ctrl+Y (the port's key); retail's Select All is Ctrl+A, so its selection
+readings are void. Retail greys the Remake station's ship buttons for the first 3 minutes (only upgrades buildable,
+population 0/150): **t50** checks the port does the same.
+
 **General gaps found and fixed** (none names a mod; base-FoC goldens unchanged):
 
 - `Find_Nearest` raised "invalid type for parameter 2" for a non-player in its player slot (a mod's free store passes the
@@ -567,7 +577,7 @@ port skips them, the skirmish host says `not loaded (empty file)`), so the maps 
 | Item | Thrawn's Revenge | Fall of the Republic | EAW-Remake | Age of Legends |
 |---|---|---|---|---|
 | 1 Load | OK, 0 errors, 216 warnings | OK, 0 errors, 103 warnings; the one effect issue is `_TERRAINRENDERBUMP.fx`, an unused leftover (t42 below) | OK, 0 errors, 187 warnings | OK, 0 errors, 1474 warnings (877 skipped campaign rows, 97 non-compiling scripts: §9) |
-| 2 Front end (smoke) | not rerun (q6 t02 / t13 passed) | main menu, staging, buy (affordable-row pick), a running space skirmish, select all and control groups; stops at the encyclopedia step like the Remake (**t43**) | main menu, staging and a running space skirmish; stops at the encyclopedia step (**t43**) | main menu, staging (no game-type list); stops at the buy screen: default faction is a header faction (**t41**) |
+| 2 Front end (smoke) | not rerun (q6 t02 / t13 passed) | main menu, staging, buy (affordable-row pick), a running space skirmish, select all, control groups and (after t43's re-aim) the encyclopedia; stops at 'move routed' (**t49**) | main menu, staging and a running space skirmish; stops at the encyclopedia step: the world pick finds nothing at the centred corvette (**t43**) | main menu, staging (no game-type list), the buy screen passed with nothing to buy (header faction as on a fresh retail profile, or New Republic with `ALAMO_SMOKE_SKIRMISH_FACTION=1`: also an empty land list); the session refuses a skirmish with no human units (**t48**; retail starts it empty, t09 A4) |
 | 3 Space skirmish 3000 ticks | `_MP_SPACE_FIERY`: 833 orders, 1070 decisions, 0 Lua errors | `_MP_SPACE_TRANSITORY_TWISTS`: 724 orders, 860 decisions, 2 Lua errors AI vs AI; with `--human Rebel` 385 orders, 0 Lua errors (t44 below) | `_MP_SPACE_GEONOSIS`: 95 orders, 139 decisions, 0 Lua errors; 189 s (t33, speed not in the checklist) | `_MP_SPACE_GEONOSIS`: 13 orders, 45 decisions, 0 Lua errors |
 | 3 Land skirmish 3000 ticks | `_MP_LAND_BLOOD_GULCH`: 120 orders, 200 decisions, 0 Lua errors | `_MP_LAND_HOTH_ECHO_BASE`: 181 orders, 213 decisions, 2 Lua errors AI vs AI; with `--human Rebel` 68 orders, 0 Lua errors (t44 below) | `_MP_LAND_UTAPAU`: 62 orders, 32 decisions, 0 Lua errors | `_MP_LAND_UTAPAU`: 374 orders, 445 decisions, 0 Lua errors |
 | 4 Galactic 9000 ticks | `Thrawn_Empire`: 4338 decisions, 1267 orders, 3 owner changes, 0 Lua errors (after t45; before: 4384 / 1281 / 4) | `Sandbox_Rimward_Republic`: starts after the missing-plot fix, 400 story events; 0 AI orders headless by the mod's design (t45 below), 0 story Lua errors after t45 (was 1) | `GC_Mini_Web_Way_Imperial`: 456 decisions, 137 orders, 11 owner changes, 0 Lua errors | `Sandbox_Balance_New_Republic`: starts after the player-cap fix (50 players), 533 decisions, 298 orders, 0 Lua errors |
@@ -601,5 +611,5 @@ Explained without a port change (2026-11-17):
   Still open in t45: `CloneWars_Medium_Republic` requires `eawx-gc-states/FotRProgressiveStates`, which the mod does not
   ship (only `config.meg`'s `GCProgressiveStateMachine.lua` names it), so it needs a retail check.
 
-**Not passed yet:** t41, t43, t45's progressive GC (retail check); one skirmish played to a result in the game and the
-retail comparison (t09) need a person or the coordinator's retail run.
+**Not passed yet:** t43, t48, t49 (front-end smoke stops), t45's progressive GC (retail check); one skirmish played to a
+result in the game needs a person. The retail comparison (t09) ran on 2026-11-17 (§9).
