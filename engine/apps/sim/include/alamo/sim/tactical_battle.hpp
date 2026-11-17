@@ -1084,7 +1084,10 @@ public:
     // creates each one for its player (a DUMMY_UPGRADE object whose automatic abilities - the Combat_Bonus auras - apply
     // to the player's units), unless the player already owns that type or a later level of it. A battle rebuilt by a
     // save load passes none (the save holds the objects).
-    void set_galactic_upgrades(std::vector<std::pair<int32_t, uint32_t>> upgrades) { ga_upgrades_ = std::move(upgrades); }
+    void set_galactic_upgrades(std::vector<std::pair<int32_t, uint32_t>> upgrades, bool spawn = true) {
+        ga_upgrades_ = std::move(upgrades);
+        ga_spawn_ = spawn;
+    }
     using PadRecord = galactic::PersistedBuiltObject;
     void set_pad_persistence(std::vector<PadRecord>* records, bool restore = true) {
         pad_records_ = records;
@@ -2435,6 +2438,7 @@ private:
     std::vector<HgOrderCost> hg_order_cost_;                  // charged credits per open order (issue order)
     std::vector<HgUpgradeObject> hg_upgrade_objs_;            // DUMMY_UPGRADE objects created by production (creation order)
     std::vector<std::pair<int32_t, uint32_t>> ga_upgrades_;   // galab: {player, upgrade type} to spawn at setup (not saved)
+    bool ga_spawn_ = true;                                    // galab: false for a battle rebuilt by a save load (types only)
     std::vector<objects::ObjectId> hg_orphans_;               // contents of a removed container: removed next frame
     bool prod_used_ = false;
     std::unique_ptr<tactical::hangar::HangarSystem> hangars_;

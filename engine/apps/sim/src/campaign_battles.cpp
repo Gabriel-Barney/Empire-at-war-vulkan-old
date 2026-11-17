@@ -816,9 +816,9 @@ void CampaignBattles::push_battle(SimHost& host) {
     if (pending_req_.info.planet != kInvalidPlanet)
         battle_->set_pad_persistence(g->sim()->built_objects(pending_req_.info.planet), !rebuilding_);
     // galab t03 (GALAB_ABILITIES_RE §4.3, 0x2a1eb0 -> 0x2afc10): the battle players' planet-bonus upgrades (attacker's list,
-    // then defender's), each kept only when its type is affiliated with the player's faction (0x3751a0). Not for a battle
-    // rebuilt by a save load (its objects are in the save).
-    if (!rebuilding_) {
+    // then defender's), each kept only when its type is affiliated with the player's faction (0x3751a0). A battle rebuilt
+    // by a save load gets the types (its tables must match the saved ones) but spawns nothing (its objects are in the save).
+    {
         const galactic::GalacticSim& gs = *g->sim();
         const objects::GameObjectTypes& types = catalog_->types();
         std::vector<std::pair<int32_t, uint32_t>> ups;
@@ -835,7 +835,7 @@ void CampaignBattles::push_battle(SimHost& host) {
                 if (affiliated) ups.push_back({p, t});
             }
         }
-        battle_->set_galactic_upgrades(std::move(ups));
+        battle_->set_galactic_upgrades(std::move(ups), !rebuilding_);
     }
     {  // battle host: TacticalBuild charges / TacticalSell refunds spend the galactic account ([port] no AI notify)
         galactic::GalacticSim* gsim = g->sim();

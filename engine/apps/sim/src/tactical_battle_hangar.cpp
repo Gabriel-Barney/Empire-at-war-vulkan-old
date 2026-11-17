@@ -854,6 +854,7 @@ void TacticalBattle::ga_spawn_upgrades(TacticalMode& mode) {
     // for the player at the origin (0x29f810). The affiliation test (0x3751a0) was applied when the list was made.
     // [port] The object joins the ability system like a produced DUMMY_UPGRADE (add_container), so its automatic
     // abilities apply; it is tracked with the production upgrades (hashed and saved with them).
+    if (!ga_spawn_) ga_upgrades_.clear();  // a battle rebuilt by a save load: the objects come from the save
     if (ga_upgrades_.empty() || !abilities_) return;
     const objects::GameObjectTypes& types = catalog_->types();
     objects::ObjectStore& store = mode.primary();
