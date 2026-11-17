@@ -3,8 +3,8 @@ name space_battle
 version 62
 description One large AI-vs-AI space battle: FoC _MP_SPACE_KUAT, Empire vs Rebel with four times the --skirmish-ai foc fleets, saved at tick 300 in the battle, then 1 min of battle
 make --save-session skirmish --campaign foc-fleet --save-when battle --bench-save-at 300 --ticks 1800 --bench-every 16 --bench-desc "One large AI-vs-AI space battle: FoC _MP_SPACE_KUAT, Empire vs Rebel with four times the --skirmish-ai foc fleets, saved at tick 300 in the battle, then 1 min of battle"
-save space_battle.alsv 196657 a01526ac1a078f42
-orders space_battle.acmd 72 bd611b921314b10b
+save space_battle.alsv 196664 629f3c5b6f97eb05
+orders space_battle.acmd 72 dc5172e369d9737e
 fingerprint space_battle.crc 29259 1a94d163dc264238
 fingerprint_every 16
 start_tick 300

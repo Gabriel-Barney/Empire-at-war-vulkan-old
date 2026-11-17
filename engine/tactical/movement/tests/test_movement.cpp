@@ -1973,9 +1973,11 @@ static void test_land_group() {
     // M with other records detours (0x505630 counts only its state-15 master records), and with 0x677e40's concave terrain
     // corners and the retail tick order every unit arrives, all 36 near the destination, at frame 1955; no terrain stop
     // (3 records, 3 detours); before mov1: 8402 frames, 2 terrain stops of unit 1.
-    CHECK(ground && frames == 1955 && arrived == 36 && jammed == 0 && cycle);
+    // mov2 t04 (2026-11-17, the corner pass reads the tracker flags taken before the last walk): 2025 frames, all 36 near
+    // the destination, 9 terrain records and 9 detours, no stop.
+    CHECK(ground && frames == 2025 && arrived == 36 && jammed == 0 && cycle);
     CHECK(near == 36 && stops == 0);
-    CHECK(st.terrain_records == 3 && st.terrain_detours == 3);
+    CHECK(st.terrain_records == 9 && st.terrain_detours == 9);
     CHECK(tlog.stops.empty() && far_ids.empty());
 
     // Head-on corridor: two units swap ends through a 3-cell-wide corridor.
@@ -3526,7 +3528,7 @@ static CrcLog space_crc_run(const ParallelFor& pf) {
 // path (11 accepted goals); MovingVsMoving answers follow the role slots.
 // s78n t26.2 (MOVEMENT §3.5.2 A / B): the speed controller (End Move T = a, 0x15 restarts), the start turn in place.
 // s78n t26 closing review (FIGHTER_FLYING §7.5 item 4): formation mates side-step by their footprint overlap.
-static constexpr uint64_t kGoldenLand = 0x7ece74ef77f772e5ull;  // mov1: Starved count, tie-break extent, terrain corners, +0x28c, overtake rank, step 10, SvS kept, tick order; sp6: tree-hash layout (movement / combat / objects hashes); bkm1: lane fallback / stop point, shield-free class, recruitment, stored z, secondary facing; s78p: formation path and lanes; s78n t26 review round 2 (mixed formations, range rank); closing review; t26.4 the move step C; t26.3 the corner pass
+static constexpr uint64_t kGoldenLand = 0x06244c22001b99e8ull;  // mov2 t04: tracker snapshot before the walk; mov1: Starved count, tie-break extent, terrain corners, +0x28c, overtake rank, step 10, SvS kept, tick order; sp6: tree-hash layout (movement / combat / objects hashes); bkm1: lane fallback / stop point, shield-free class, recruitment, stored z, secondary facing; s78p: formation path and lanes; s78n t26 review round 2 (mixed formations, range rank); closing review; t26.4 the move step C; t26.3 the corner pass
 static constexpr uint64_t kGoldenSpace = 0x8fc952146335d9dbull;  // sp6: tree-hash layout (movement / combat / objects hashes)
 
 static void test_determinism() {

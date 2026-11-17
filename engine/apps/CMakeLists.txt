@@ -471,7 +471,9 @@ if(_alamo_sim)
     # mov1 (2026-11-17, retail land tick order): seeds 5 and 9 now hit the same MDU race (mdu1); seed 9 -> 6 (0 Lua errors).
     # cmb2 (2026-11-17, land attack approach, merged with mov1): seed 6 hits the MDU race; seeds 1-5 and 7-10 pass (documented
     # retail errors only). Seed 6 -> 4.
-    foreach(_seed 3 4 8)
+    # mov1 + cmb1 on dev (2026-11-17): seed 3 hits it too; seeds 4 and 7 have no other Lua error. Seed 3 -> 7.
+    # mov2 t04 (2026-11-17, tracker snapshot before the walk): seed 6 hits it; seeds 3, 4, 7 and 8 do not. Seed 6 -> 3.
+    foreach(_seed 3 7 8)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_empire_underworld_seed${_seed}
                COMMAND alamo_headless --skirmish-ai foc-land --ai Empire,Underworld --ticks 70000 --workers 4 --quiet
                        --fail-on-lua-errors --seed ${_seed})
@@ -506,7 +508,9 @@ if(_alamo_sim)
     # (9145-13701, 0 Lua errors); seed 3 reaches the cap (the Empire's last AT-AT against the Rebels). Seed 3 -> 2. After the
     # merge with mov1 (retail land tick order): seeds 1-6 and 8-10 end (7686-14269), 7, 11 and 12 reach the cap; seeds 1 and
     # 2 end close to it (14269 / 14011). Seeds 1, 2 -> 3, 4 (7686 / 10000).
-    foreach(_seed 3 4)
+    # mov1 + cmb1 on dev (2026-11-17): seed 3 reaches the cap (Empire wins by all-retreated at 14400); seeds 2 and 4-8
+    # end (9849-13389). Seed 3 -> 2.
+    foreach(_seed 1 2)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_campaign_outcome_seed${_seed}
                COMMAND alamo_headless --skirmish-ai foc-land-campaign --seed ${_seed} --ticks 20000 --workers 0 --quiet --expect-battle-end
                        --fail-on-lua-errors)

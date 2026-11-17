@@ -1031,6 +1031,38 @@ void test_mov1_step10_attack() {
     }
 }
 
+// mov2 t04 (b0187, BKR1_RE_ANSWERS Q6 [H]): retail's plans read the tracker flags of the update before this frame's walks,
+// so a unit that arrives in a walk still counts as Moving for the next plans' corridor test. The port's snapshot is taken
+// after the plans, before the walk: in the tick whose walk ends the unit's move the flag still says Moving (taken before
+// that walk); the next tick's snapshot says Static.
+void test_mov2_tracker_snapshot() {
+    ::alamo::test::section("mov2_tracker_snapshot");
+    MovementSystem sys{MovementConfig{}};
+    land_system(sys, 60);
+    CHECK(sys.add_unit(vehicle(1, cell_center(10, 30), 0)));
+    SimRng rng(905);
+    CHECK(!sys.view(1).trk_static);  // not in the tracker before its first tick
+    sys.tick(1, rng, serial_for);
+    CHECK(sys.view(1).trk_static);   // standing
+    order(sys, rng, {1}, cell_center(20, 30), 2);
+    uint32_t arrived = 0;
+    bool moving_at_arrival = false, static_after = false;
+    for (uint32_t f = 2; f < 600 && !arrived; ++f) {
+        const bool was_moving = sys.view(1).has_goal;
+        sys.tick(f, rng, serial_for);
+        const UnitView v = sys.view(1);
+        if (was_moving && !v.has_goal && !(v.speed > 0.0f)) {
+            arrived = f;
+            moving_at_arrival = !v.trk_static;
+            sys.tick(f + 1, rng, serial_for);
+            static_after = sys.view(1).trk_static;
+        }
+    }
+    std::printf("mov2 tracker snapshot: arrived at %u, Moving in that tick's snapshot %d, Static in the next %d\n", arrived,
+                moving_at_arrival ? 1 : 0, static_after ? 1 : 0);
+    CHECK(arrived != 0 && moving_at_arrival && static_after);
+}
+
 int main() {
     test_step0_halt_brake();
     test_step0_crush_no_locomotor();
@@ -1052,5 +1084,6 @@ int main() {
     test_mov1_head_on_extent();
     test_mov1_overtake_rank();
     test_mov1_step10_attack();
+    test_mov2_tracker_snapshot();
     return ::alamo::test::report("alamo_tactical_movement_b3_tests");
 }
