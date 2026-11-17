@@ -182,6 +182,9 @@ public:
     bool tick_advisor(uint8_t mode, uint32_t tick, const std::vector<std::string>& hints);
     // COMMANDBAR_MOVIE / MULTIMEDIA's head (6.2): the hint text on screen goes first, unless the movie is "Light_Loop".
     void clear_shown_hint(std::string_view movie);
+    // A battle ends: a LOCK_CONTROLS it left on does not follow the player to the map (no unlock was found in retail for
+    // the shipped tactical plots that lock and end; 5.1's save / restore routine is unidentified) [port].
+    void unlock_controls() { controls_locked_ = false; }
     uint32_t next_hint_index(uint8_t mode) const { return mode < 3 ? hint_index_[mode] : 0; }
     void begin_mode(uint8_t mode);  // the mode started: the first hint is due config().first_hint_tick ticks later
 

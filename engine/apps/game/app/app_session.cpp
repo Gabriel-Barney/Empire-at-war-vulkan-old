@@ -323,6 +323,7 @@ void App::story_reward_step() {
                                                      "SHOW_COMMAND_BAR", "DISABLE_MOVIES", "SET_ADVISOR", "START_CINEMATIC_MODE",
                                                      "STOP_CINEMATIC_MODE", "HIDE_AUTORESOLVE", "ENABLE_GALACTIC_CORRUPTION_HOLOGRAM"};
         reward_cursor_.assign(story->plot_set_count(), 0);
+        std::vector<const lua::StoryFired*> replay;
         for (size_t set = 0; set < story->plot_set_count(); ++set) {
             const std::vector<lua::StoryFired>& fired = story->model(set).fired();
             reward_cursor_[set] = fired.size();
@@ -330,10 +331,12 @@ void App::story_reward_step() {
             for (const lua::StoryFired& f : fired)
                 for (const char* name : kSwitchRewards)
                     if (f.reward_type == name) {
-                        story_present_reward(f, 0);
+                        replay.push_back(&f);
                         break;
                     }
         }
+        std::stable_sort(replay.begin(), replay.end(), [](const lua::StoryFired* a, const lua::StoryFired* b) { return a->frame < b->frame; });
+        for (const lua::StoryFired* f : replay) story_present_reward(*f, 0);  // in firing order across the plot sets
     }
     std::vector<StoryMediaCue> cues;
     auto scan = [&](const lua::StoryModel& m, size_t& cursor, uint8_t mode) {

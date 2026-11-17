@@ -79,8 +79,8 @@ void App::story_advisor_frame() {
         if (!advisor_gal_started_) {
             advisor_gal_started_ = true;
             story_present_.begin_mode(0);
-            advisor_hints_ = faction_advisor_hints(data_.db, local_faction(), 0);
         }
+        if (advisor_mode_ != 0) advisor_hints_ = faction_advisor_hints(data_.db, local_faction(), 0);  // back from a battle: the galactic list
     }
     if (mode == 255) {
         advisor_mode_ = 255;

@@ -153,6 +153,9 @@ void lock_test() {
     CHECK(s.controls_locked());
     s.on_reward("LOCK_CONTROLS", P{"0"}, 0.0, 0);
     CHECK(!s.controls_locked());
+    s.on_reward("LOCK_CONTROLS", P{"1"}, 0.0, 2);
+    s.unlock_controls();  // a battle ends with its lock on: the map is not locked
+    CHECK(!s.controls_locked());
     s.on_reward("SCROLL_LOCK", P{"1"}, 0.0, 0);
     s.on_reward("LOCK_PLANET_SELECTION", P{"1"}, 0.0, 0);
     CHECK(s.scroll_locked() && s.planet_selection_locked());

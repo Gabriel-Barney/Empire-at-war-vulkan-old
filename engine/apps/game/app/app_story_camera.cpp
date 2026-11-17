@@ -231,6 +231,7 @@ void App::story_script_event(const lua::PresentationEvent& e) {
 // frame's sim step and Lua presentation, so what the new mode's first ticks set is not wiped.
 void App::story_script_mode_check() {
     if (screen_ != story_fx_screen_ || battles_seen_ != story_fx_battle_) {
+        if (story_fx_screen_ == Screen::Battle) story_present_.unlock_controls();  // the battle ended: its lock ends with it
         story_fx_screen_ = screen_;
         story_fx_battle_ = battles_seen_;
         story_fade_.clear();
