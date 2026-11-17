@@ -629,6 +629,19 @@ the command queue; the selection is sim state. A second recall of the same group
 jumps the camera to the group (local player only). The group number is drawn over each member with
 `st_control_group`.
 
+### 4.5 Single-player menu hint list [H unless marked] (ui5 t08; open 0xe9450, proc 0xe9920)
+
+`IDD_SINGLE_PLAYER_GAMES_MENU_DIALOG`'s `IDC_HINT_LIST` is hidden when the dialog opens. On the dialog's control
+notification 0x0d [M: the cursor entering a control] for control `<id>`, the text `Hint_<id>` is looked up in the game
+text (FoC has `Hint_IDC_NEW_CAMPAIGN_BUTTON`, `Hint_IDC_CUSTOM_CAMPAIGN_BUTTON`, `Hint_IDC_SKIRMISH_GAMES_BUTTON`, their
+`_DEMO` forms and `Hint_IDC_NEW_FIGHT_BUTTON`); a missing key gives a one-character default string [M: a blank]. The list
+is cleared, the text is wrapped to the list's width and added row by row in white (255,255,255,255) (0xea430), and the
+list is shown. Nothing hides it again while the dialog is open. Port: `GuiEvent::Hovered` (enabled push button / check /
+radio) drives it; a missing hint is one blank row.
+
+Retail's code never names `IDD_CAMPAIGN_SELECTION_DIALOG` (nor its `IDC_STATIC_DIFFICULTY_DESCRIPTION`), so the port's
+use of that dialog is its own; the one-line description static keeps its empty `.rc` caption.
+
 ---
 
 ## 5. Load screens (P4)

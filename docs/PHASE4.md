@@ -1030,17 +1030,17 @@ This list holds the [port] / [inferred] / [M] choices and per-step notes. Finish
   width; click = nearest character boundary, drag / Shift+click / Shift+arrows select, Ctrl+Left / Right by word,
   Ctrl+A / C / X / V and Ctrl+Insert / Shift+Delete / Shift+Insert; the clipboard is a manager-private string unless the
   host sets `GuiManager::set_clipboard`; key-capture fields (read_only) keep the one-line narrowing and draw no caret.
-  **t05** key-capture fields (`GuiControl::key_capture`): unmodified Delete / Backspace clear the binding, Tab is bindable
-  (MissionHolocron's default; focus stays), Esc stays the dialog's Cancel (UI.md §4.2: in battle Esc closes the in-game
-  panel before the hotkey dispatch, so an Esc binding could never fire); a key another slot holds (`HotkeyTable::conflicts`,
-  derived group slots included) asks "Key already in use" (`<key>: <action>`, action = the slot name spaced, "Ability_" /
-  "FoC" dropped) in IDD_DIALOG_BOX_QUIT_CONFIRM, Yes moves it (the §4.3 rule), No keeps both; Back or Esc with unapplied
-  edits asks "Apply the changed key settings?" (Yes applies, No discards); Camera and Controls Defaults also resets
-  CameraZoomIn / ZoomOut. Retail capture behaviour is an RE gap (backlog, kind re).
-  **t07** a story-linked battle (`BattleRequest::linked`, LINK_TACTICAL) opens IDD_LAND / SPACE_MISSION_LOAD_DIALOG, a
-  skirmish the skirmish dialog, any other battle the Battle pair (the retail selector is an RE gap, backlog); Esc in
-  IDD_SELECT_TUTORIAL_DIALOG goes to the main menu like its Cancel; movies skip on Esc / Space only (UI.md §4.2), not on
-  a mouse click.
+  **t05 / t09** key-capture fields (`GuiControl::key_capture`) follow retail (UI.md §4.3 "Capture"): every key but Shift /
+  Ctrl / Alt alone binds, Delete and Backspace included (no per-slot clear); a key another slot holds asks
+  `TEXT_KEYBIND_WARNING_0` / `_1` under `TEXT_KEYBOARD_OPTIONS` (OK moves it, Cancel keeps both; IDD_DIALOG_BOX_QUIT_CONFIRM
+  lines 1 / 2, labels from the retail slot text table `hotkey_action_text_id`); Esc on a field in capture puts back its
+  applied key and drops the focus; Back, and Esc with no field in capture, close without applying or asking (the next open
+  copies the applied table). [port] Tab is bindable (MissionHolocron's default; whether retail's field gets Tab is not
+  settled); Camera and Controls Defaults also resets CameraZoomIn / ZoomOut.
+  **t07 / t10** the Mission load dialogs (UI.md §5.1 "Which dialog") only for a SET_TACTICAL_MAP map override
+  (`BattleRequest::story_map`) or a save taken during the battle (skirmish too); LINK_TACTICAL battles get the Battle pair;
+  Esc in IDD_SELECT_TUTORIAL_DIALOG goes to the main menu like its Cancel; movies skip on Esc / Space only (UI.md §4.2),
+  not on a mouse click.
   **t01** Windowed unchecked = full screen [port: borderless, no VK_EXT_full_screen_exclusive]: the monitor takes the
   chosen mode's resolution and rate (ChangeDisplaySettingsEx CDS_FULLSCREEN, restored at exit) and the window covers it
   without a frame; checked = the framed window as before. Windowed is stored in video_options.txt (the port
@@ -1049,7 +1049,13 @@ This list holds the [port] / [inferred] / [M] choices and per-step notes. Finish
   hidden, IDC_RESOLUTION_LIST lists every display mode, the HUD's wide layout follows the window's shape (an old
   `widescreen=` line in video_options.txt is ignored; the retail meaning stays an RE gap). **t02** Hardware Mouse: built, then removed
   2026-11-13 (Gabriel): the checkbox is hidden and the game always draws its own cursor (an old `hardware_mouse=` line
-  in video_options.txt is ignored). Movie subtitles: no subtitle text source is known (AUDIO.md §3.4 [L]) - RE gap, the option is only stored.
+  in video_options.txt is ignored). **t02 / t12** movie subtitles (AUDIO.md §3.4): Movies.xml Caption_Frame /
+  Caption_Duration (`video::MovieEntry::captions`, timed by `video::CaptionTrack` on the full-screen movie's Bink frame
+  clock) drawn by `ui::add_movie_caption` with IDC_USE_MOVIE_SUBTITLES on; Widescreen's retail meaning is now in UI.md §3.3
+  (the box stays hidden). **t06** dialog sounds per gadget class (UI.md §3.6) and GUI_Cancel_SFX on a production-queue
+  cancel. **t08** gameplay radios keep empty captions; IDC_STATIC_DIFFICULTY_DESCRIPTION stays empty; the single-player
+  IDC_HINT_LIST (UI.md §4.5, `GuiEvent::Hovered`); dialog tooltips placed by the HUD tooltip rule and skinned with
+  i_tooltip_back.tga [port]. **t13** save paths are UTF-8 end to end (`save_games.hpp` PATHS).
 - ⬜ **OPEN** · ui4 t01 / t02 / t03 (2026-11-13, galactic HUD; specs `docs/re/FIXPASS_GALACTIC.md` §2, `docs/re/A2K_T01_BUILD_COST_RE.md` §1,
   `docs/re/GALACTIC_DIALOGS.md` §5.1, `docs/re/GALAXY_MAP_PRESENTATION.md` §1.1 / §1.2, `docs/re/GALACTIC_REVEAL_CORRUPTION.md` §4.6):
   **t01** the galactic input loop now hands the routed input to the hero roster too (it was skipped as "tactical"), so a good slot's
