@@ -2156,10 +2156,14 @@ void GalacticSim::hash_state(StateHasher& h) const {
     if (!reveal_state_default()) hash_reveal(h);  // GRC: local player, auto-reveal, revealed bytes, transitions
     if (!visibility_state_default()) hash_visibility(h);  // GRC 2: stored visibility modifier entries
     if (!galab_state_default()) hash_galab(h);  // galab: planet bonus holders, siphon sources, neutralized counts
-    if (!structure_slots_.empty()) {  // map1 t06: structure marker memory
+    // map1 t06: structure marker memory of live objects only (the save keeps only those, so a loaded session hashes alike)
+    uint32_t live_slots = 0;
+    for (const StructureSlot& e : structure_slots_) live_slots += store_->alive(store_->find(e.object)) ? 1u : 0u;
+    if (live_slots != 0) {
         h.u32(0x314C534Du);  // section marker "MSL1"
-        h.u32(static_cast<uint32_t>(structure_slots_.size()));
+        h.u32(live_slots);
         for (const StructureSlot& e : structure_slots_) {
+            if (!store_->alive(store_->find(e.object))) continue;
             h.i32(e.object);
             h.i32(e.slot);
             h.i32(e.marker);

@@ -1416,7 +1416,10 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng, const Para
         if (!st.empty()) {
             const size_t k = st.size() >= 2 ? static_cast<size_t>(rng.range_int(0, static_cast<int32_t>(st.size()) - 1)) : 0u;
             take(st[k], p);
-            if (def >= 0) p.owner = def;
+            if (def >= 0) {  // spawned for the record defender, on the defender's side
+                p.owner = def;
+                p.side = 0;
+            }
             have_focus_ = true;
             focus_ = flat(bt_markers_[st[k]].pos);
             focus_player_ = def;
