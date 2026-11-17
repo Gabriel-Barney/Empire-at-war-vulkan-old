@@ -482,7 +482,7 @@ game.
 button, while the port read an empty height. Age of Legends' skirmish staging dialog has no `IDC_GAME_TYPE_LIST` at all:
 the dialog keeps its default type, and the smoke now notes that instead of waiting for a row. With both fixed the Remake
 smoke reaches a running space skirmish (it then stops at the smoke's control-group step: **t40**), and the Age of Legends
-smoke reaches the battle start as slot 0's default faction, the mod's list-header faction `Faction_Header_Major_Powers`,
+smoke reaches the buy screen as slot 0's default faction, the mod's list-header faction `Faction_Header_Major_Powers`,
 which has nothing to buy (**t41**).
 
 **General gaps found and fixed** (none names a mod; base-FoC goldens unchanged):
