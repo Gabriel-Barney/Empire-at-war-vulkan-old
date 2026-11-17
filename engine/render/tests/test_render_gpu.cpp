@@ -2544,9 +2544,12 @@ int run_gpu(const std::string& src_dir) {
                             std::sort(x.begin(), x.end());
                             return x;
                         };
-                        CHECK(lower_sorted(shown) == lower_sorted(expect_shown) && hidden.empty());
+                        // r1b t03 (B.10 answer 4, step (f)): the hardpoint's own Model_To_Attach is erased, nothing else hidden.
                         const std::string& own_attach = lay->attach_model[static_cast<size_t>(h)];
-                        CHECK(own_attach.empty() || v.attachment_visible(static_cast<uint32_t>(h)));  // Model_To_Attach stays
+                        CHECK(lower_sorted(shown) == lower_sorted(expect_shown));
+                        CHECK(own_attach.empty() ? hidden.empty()
+                                                 : (hidden == std::vector<std::string>{"attach:" + own_attach} &&
+                                                    !v.attachment_visible(static_cast<uint32_t>(h))));
                     };
                     destroy_case("Star_Destroyer", "HP_Star_Destroyer_Weapon_FL", {"HP_F-L_Blast", "p_hp_imperial_damage", "p_hp_imperial_damage"});
                     destroy_case("Star_Destroyer", "HP_Star_Destroyer_Engines",
@@ -2619,13 +2622,15 @@ int run_gpu(const std::string& src_dir) {
                             shoot(false, bare);
                             const size_t drawn_att = shoot(true, before);
                             for (uint32_t h = 0; h < lay->hardpoints; ++h) v.set_destroyed(h, true);
-                            shoot(true, after);
+                            const size_t after_att = shoot(true, after);
+                            size_t kept_att = 0;  // r1b t03: only a hardpoint that never changes visuals keeps its turret
+                            for (uint32_t h = 0; h < lay->hardpoints; ++h) kept_att += att[h] && lay->removes[h].empty() ? 1u : 0u;
                             const uint32_t d_turrets = differ(bare, before), d_destroy = differ(before, after);
                             std::printf("  Star_Destroyer hardpoints: %zu turrets attached (%u draws vs %u bare, %u pixels differ); all %u destroyed: "
                                         "%u draws, %u pixels differ\n",
                                         drawn_att, before.stats.draws, bare.stats.draws, d_turrets, lay->hardpoints, after.stats.draws, d_destroy);
                             CHECK(drawn_att == n_att && before.stats.draws > bare.stats.draws && d_turrets > 200);
-                            CHECK(after.stats.draws > before.stats.draws && d_destroy > 50);  // _Blast decals drawn
+                            CHECK(after_att == kept_att && after.stats.draws > bare.stats.draws && d_destroy > 50);  // turrets gone, _Blast decals drawn
                             save("render_sd_hardpoints_before.png", before);
                             save("render_sd_hardpoints_after.png", after);
                         }

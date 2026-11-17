@@ -122,6 +122,12 @@ int64_t first_named(const assets::ModelAsset& model, std::string_view name) {
         if (ascii_iequals(model.proxies[p].name, name)) return static_cast<int64_t>(model.meshes.size() + p);
     return -1;
 }
+// B.10 answer 4 (0x3a5700): the lookup name of a Model_To_Attach - upper-cased, cut at the first ".ALO".
+std::string attach_key(std::string_view model) {
+    std::string k = ascii_upper(model);
+    if (const size_t dot = k.find(".ALO"); dot != std::string::npos) k.resize(dot);
+    return k;
+}
 std::vector<uint32_t> subtree(const MeshBoneMap& bm, const std::vector<int32_t>& bones, int32_t root) {
     std::vector<uint32_t> out;
     for (uint32_t i = 0; i < bones.size(); ++i)
@@ -163,6 +169,21 @@ HardpointLayout build_hardpoint_layout(const assets::ModelAsset& model, std::spa
         sort_unique(e.show);
         sort_unique(e.hide);
     }
+    // Step (f): what each destruction may erase - every sub-object named like the Model_To_Attach stem, in lookup
+    // order (meshes, proxies, attachment slots). The slots' names are their models' stems [M].
+    l.removes.resize(hardpoints.size());
+    for (size_t h = 0; h < hardpoints.size(); ++h) {
+        const HardpointDef& d = hardpoints[h];
+        if (d.dummy_art() || !d.destroyable || d.model_to_attach.empty()) continue;
+        const std::string key = attach_key(d.model_to_attach);
+        std::vector<uint32_t>& r = l.removes[h];
+        for (uint32_t i = 0; i < l.meshes; ++i)
+            if (ascii_iequals(model.meshes[i].name, key)) r.push_back(i);
+        for (uint32_t p = 0; p < l.proxies; ++p)
+            if (ascii_iequals(model.proxies[p].name, key)) r.push_back(l.proxy_index(p));
+        for (uint32_t a = 0; a < l.hardpoints; ++a)
+            if (!l.attach_model[a].empty() && attach_key(l.attach_model[a]) == key) r.push_back(l.attachment_index(a));
+    }
     return l;
 }
 
@@ -177,6 +198,7 @@ HardpointLayout fallback_hardpoint_layout(const assets::ModelAsset& model, std::
     l.effects.resize(hardpoints);
     l.attach_bone.assign(hardpoints, -1);
     l.attach_model.assign(hardpoints, std::string());
+    l.removes.resize(hardpoints);
     return l;
 }
 
@@ -209,6 +231,7 @@ void HardpointVisibility::init(HardpointLayoutPtr layout) {
     const size_t n = layout_ ? layout_->base.size() : 0;
     overrides_.assign(n, 0);
     mask_.assign(n, 0);
+    erased_.assign(n, 0);
     recompute();
 }
 
@@ -244,7 +267,14 @@ void HardpointVisibility::recompute() {
     if (!layout_) return;
     // In place: mask_ keeps its size (and storage) from init().
     std::copy(layout_->base.begin(), layout_->base.end(), mask_.begin());
+    std::fill(erased_.begin(), erased_.end(), uint8_t{0});
     for (uint32_t h : order_) {
+        if (h < layout_->removes.size())  // step (f) before (g): the first sub-object of that name still present
+            for (uint32_t s : layout_->removes[h])
+                if (s < erased_.size() && !erased_[s]) {
+                    erased_[s] = 1;
+                    break;
+                }
         if (h >= layout_->effects.size()) continue;
         const HardpointEffect& e = layout_->effects[h];
         for (uint32_t s : e.show)
@@ -252,6 +282,8 @@ void HardpointVisibility::recompute() {
         for (uint32_t s : e.hide)
             if (s < mask_.size()) mask_[s] = 1;
     }
+    for (size_t i = 0; i < mask_.size(); ++i)
+        if (erased_[i]) mask_[i] = 1;  // gone from the model: no later show reaches it
     for (size_t i = 0; i < mask_.size(); ++i) {
         if (overrides_[i] == static_cast<uint8_t>(MeshOverride::Show)) mask_[i] = 0;
         else if (overrides_[i] == static_cast<uint8_t>(MeshOverride::Hide)) mask_[i] = 1;

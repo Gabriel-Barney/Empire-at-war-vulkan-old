@@ -1130,12 +1130,13 @@ void test_hardpoints() {
         v.init(std::make_shared<const render::HardpointLayout>(l));
         const uint8_t* storage = v.mask().data();
         auto mask = [&] { return V(v.mask().begin(), v.mask().end()); };
-        CHECK(v.ready() && mask() == (V{0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0}));  // A: decal + ALO-hidden scorch + proxy shown
-        CHECK(v.attachment_visible(0) && v.attachment_visible(1) && !v.attachment_visible(2));
+        // A: decal + ALO-hidden scorch + proxy shown; its Model_To_Attach slot (10) erased (r1b t03, B.10 step (f))
+        CHECK(v.ready() && mask() == (V{0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 1, 0, 0}));
+        CHECK(!v.attachment_visible(0) && v.attachment_visible(1) && !v.attachment_visible(2));
         CHECK(v.set_destroyed(1, true) && v.set_destroyed(1, true) && v.destroyed_count() == 2);
-        CHECK(mask() == (V{0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0}));  // B: damage proxy shown, engine subtree hidden
-        CHECK(v.attachment_visible(0) && !v.attachment_visible(1));
-        CHECK(v.set_destroyed(2, true) && mask() == (V{0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0}));  // dummy: no change
+        CHECK(mask() == (V{0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0}));  // B: damage proxy shown, engine subtree hidden
+        CHECK(!v.attachment_visible(0) && !v.attachment_visible(1));
+        CHECK(v.set_destroyed(2, true) && mask() == (V{0, 0, 0, 1, 1, 0, 0, 0, 1, 0, 1, 1, 0}));  // dummy: no change
         CHECK(v.set_override(3, render::MeshOverride::Show) && v.set_override(0, render::MeshOverride::Hide) &&
               !v.set_override(13, render::MeshOverride::Show));
         CHECK(v.mask()[3] == 0 && v.mask()[0] == 1);
@@ -1154,6 +1155,32 @@ void test_hardpoints() {
         // Fallback layout (no XML): the given mesh mask + ALO proxy flags, no effects.
         w.init(std::make_shared<const render::HardpointLayout>(render::fallback_hardpoint_layout(m, V{1, 0, 0, 0, 0, 0, 0}, 3)));
         CHECK(w.destroyed(0) && w.mask().size() == 13 && w.hidden(0) && !w.hidden(1) && !w.attachment_visible(0));
+    }
+    {   // r1b t03 (B.10 answer 4, 0x3a5700): a death erases the FIRST remaining sub-object named like its
+        // Model_To_Attach stem - meshes, proxies, then the slots in HardPoints order; not destroyable: nothing.
+        assets::ModelAsset t;
+        for (const char* n : {"HULL", "mesh_twin"}) {
+            assets::MeshInfo mi;
+            mi.name = n;
+            t.meshes.push_back(mi);
+        }
+        std::vector<render::HardpointDef> td(4);
+        td[0].model_to_attach = "T.alo";
+        td[1].model_to_attach = "t.ALO";  // the same model
+        td[2].model_to_attach = "X.alo";
+        td[2].destroyable = false;
+        td[3].model_to_attach = "Mesh_Twin.alo";  // an owner mesh carries that name
+        const render::HardpointLayout tl = render::build_hardpoint_layout(t, td);
+        CHECK(tl.removes.size() == 4 && tl.removes[0] == (U{2, 3}) && tl.removes[1] == (U{2, 3}) && tl.removes[2].empty() &&
+              tl.removes[3] == (U{1, 5}));
+        render::HardpointVisibility tv;
+        tv.reset(4);
+        tv.init(std::make_shared<const render::HardpointLayout>(tl));
+        CHECK(tv.set_destroyed(1, true) && !tv.attachment_visible(0) && tv.attachment_visible(1));  // the first copy goes
+        CHECK(tv.set_destroyed(0, true) && !tv.attachment_visible(0) && !tv.attachment_visible(1));
+        CHECK(tv.set_destroyed(3, true) && tv.hidden(1) && tv.attachment_visible(3) && tv.attachment_visible(2));
+        CHECK(tv.set_destroyed(3, false) && !tv.hidden(1));  // debug reset recomputes the erasures
+        CHECK(render::fallback_hardpoint_layout(t, V{0, 0}, 4).removes == std::vector<std::vector<uint32_t>>(4));
     }
     {   // Attachment transform: owner x bone (pose when given, else bind), identity bone for -1.
         assets::ModelAsset o;
