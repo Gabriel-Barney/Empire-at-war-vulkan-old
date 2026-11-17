@@ -23,6 +23,7 @@
 #include "alamo/lua/fog_bridge.hpp"
 #include "alamo/lua/lua_vm.hpp"
 #include "alamo/lua/object_bridge.hpp"
+#include "alamo/lua/presentation.hpp"
 #include "alamo/lua/script_gaps.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/object_store.hpp"
@@ -780,6 +781,16 @@ static void test_spawn_and_state(const Db& db) {
                   "t1.Disable_Capture(true) t1.Set_Garrison_Spawn(true) t1.Set_Check_Contested_Space(false) "
                   "b = t1.Play_Animation('Cinematic', false, 2) pf = b.IsFinished() and 1 or 0 "
                   "sel = t1.Is_Selectable() and 1 or 0 mv = t1.Can_Move() and 1 or 0 Hide_Object(t2, 1)") == "");
+    {  // ui2 t02: Highlight / Highlight_Small also record an event the host draws (receiver, on, z offset)
+        PresentationLog plog;
+        attach_presentation(vm, &plog);
+        CHECK(run(vm, "t1.Highlight(true, 25) t1.Highlight_Small(true)") == "");
+        const auto& pev = plog.events();
+        CHECK(pev.size() == 2 && pev[0].op == PresentationOp::ObjectHighlight && pev[0].args.size() == 3 &&
+              pev[0].args[0].kind == PresentationArg::Kind::Object && pev[0].args[1].b && pev[0].args[2].number == 25.0);
+        CHECK(pev[1].op == PresentationOp::ObjectHighlightSmall && pev[1].args[1].b && pev[1].args[2].number == 0.0);
+        attach_presentation(vm, nullptr);
+    }
     const ScriptObjectState& st = s.bridge.state(1);
     CHECK(st.hidden && st.selectable == 0 && st.prevent_ai_usage && st.prevent_all_fire && st.prevent_opportunity_fire);
     CHECK(st.locomotor_suspended && st.highlighted && st.highlight_offset == 25.0f && st.highlighted_small && st.in_limbo);

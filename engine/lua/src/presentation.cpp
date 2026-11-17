@@ -93,6 +93,8 @@ std::string_view op_name(PresentationOp op) {
         "Resume_Hyperspace_In",
         "GameObjectWrapper.Show_Emitter",
         "GameObjectWrapper.Play_Cinematic_Engine_Flyby",
+        "GameObjectWrapper.Highlight",
+        "GameObjectWrapper.Highlight_Small",
     };
     static_assert(std::size(kNames) == static_cast<size_t>(PresentationOp::Count));
     const auto i = static_cast<size_t>(op);

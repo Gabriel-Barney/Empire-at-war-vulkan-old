@@ -124,6 +124,8 @@ enum class PresentationOp : uint16_t {
     ResumeHyperspaceIn,             // Resume_Hyperspace_In()
     ObjectShowEmitter,              // GameObjectWrapper.Show_Emitter(name, bool)
     ObjectPlayCinematicEngineFlyby, // GameObjectWrapper.Play_Cinematic_Engine_Flyby(...)
+    ObjectHighlight,                // ui2 t02: GameObjectWrapper.Highlight(on [, z offset]) -> args: receiver, on, z offset
+    ObjectHighlightSmall,           // ui2 t02: GameObjectWrapper.Highlight_Small(on [, z offset]), same args
     Count
 };
 std::string_view op_name(PresentationOp op);  // the Lua name ("Fade_Screen_In", "GameObjectWrapper.Play_SFX_Event")
