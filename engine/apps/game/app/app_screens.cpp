@@ -806,6 +806,16 @@ void App::show_campaign_end(bool victory) {
         if (stats.ok && host.scoring_game_stat(local_player(), "IDC_TITLE_STATIC", false, v, t, num) && !num) stats.title_key = t;
     }
     if (!screens_.show_campaign_score(campaign_score(*session_, *g, ui_.text, victory, tally_, stats))) notes_.push_back("campaign score dialog missing");
+    {  // aud2 t08: Music_Event_Strategic_Win / _Lose (mode 16); a lost campaign names the winner as the enemy faction, as
+       // the battle end does (the _Vs_Faction row first).
+        std::string winner;
+        const galactic::VictoryResult vr = galactic::check_victory(*g);
+        if (!victory && vr.winner >= 0 && static_cast<size_t>(vr.winner) < g->players().size()) {
+            const uint32_t f = g->players()[static_cast<size_t>(vr.winner)].faction;
+            if (f < g->rules().factions.size()) winner = g->rules().factions[f].name;
+        }
+        audio_.campaign_end(victory, winner);
+    }
     std::printf("campaign end: %s\n", victory ? "victory" : "defeat");
 }
 

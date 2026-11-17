@@ -72,6 +72,8 @@ struct GameAudioStats {
     uint64_t control_point_lines = 0;                                    // ccpgu t01: control point countdown lines
     uint64_t garrison_lines = 0, clash_win_speech = 0;                   // aud4: SFXEvent_Bunker_Garrisoned / clash win speech
     uint64_t anim_sounds = 0;                                           // aud1 t03: AnimationSFXMaps SOUND rows started
+    uint64_t planet_reveals = 0, production_sfx = 0, build_music = 0;    // aud2 t01 / t03
+    uint64_t fleet_jumps = 0, campaign_end_music = 0, deactivations = 0;  // aud2 t07 / t08 / t04
 };
 
 class GameAudioHost {
@@ -289,7 +291,35 @@ public:
     // OI host (P3 video item 3): the output device's buffering in seconds (period size x periods / rate; 0 for the
     // null backend / inactive audio), subtracted from a movie's audio clock (MoviePlayer::set_audio_latency).
     double output_latency_seconds() const;
+    // The profile's bus levels (options load / apply / preview). aud2 t02 (AUDIO.md §4): the master level is also saved as
+    // the level Lua Master_Volume_Restore ramps back to (AudioSystem::save_master_volume).
     void set_volumes(float master, float sfx, float speech, float music);
+
+    // --- aud2 (galactic, app and mixer hookups; both builds, no-ops without engine/audio) ---
+    // t01 (GALACTIC_REVEAL_CORRUPTION 1.3): the galactic pre-step revealed a planet: Audio.xml's SFXEvent_Planet_Revealed
+    // value (AudioConstants::sfx_planet_revealed; FoC GUI_Planet_Mouse_Over), 2D. Nothing when the constant is empty.
+    void planet_revealed();
+    // t04 (AUDIO.md §6.1, §2.3): whether this application is the active one (WM_ACTIVATEAPP). Inactive: update() does
+    // nothing (step 14 runs only while active) and the music manager's pause counter is raised (AudioSystem::pause_music);
+    // active again: the counter drops and updates resume. Only a change does anything. The host starts active.
+    void set_app_active(bool active);
+    bool app_active() const { return app_active_; }
+    // t03 (AUDIO.md §6.2, xml_field_tables GameObject +0x1450 / +0x1460 / +0x1470): a galactic production event of the
+    // local player plays the built type's SFXEvent_Build_Started / _Build_Cancelled / _Build_Complete (2D, as the
+    // event's data says: the HUD voice lines use Preset_GUI-style 2D presets); a completion also starts the type's
+    // Build_Music_Completed as music mode 4 (STRATEGIC_GAPS §7.4; [port] for the local player's own production only).
+    // Returns the SFX instance id (0 = no tag / refused).
+    enum class Production : uint8_t { Begin, Cancel, Complete };
+    static std::string_view production_tag(Production kind);
+    uint32_t production(const objects::GameObjectTypes& types, objects::TypeIndex type, Production kind);
+    // t07 (BATTLE_TRANSITIONS, departure 0x431c80): a fleet left a planet's orbit. Galactic_Fleet_Hyperspace (2D, GUI
+    // preset) when the local player owns the fleet or sees it (`local_sees`: the host's visibility test). Returns the
+    // instance id (0 = not heard / refused).
+    static constexpr const char* kFleetHyperspaceEvent = "Galactic_Fleet_Hyperspace";
+    uint32_t fleet_departure(bool local_owner, bool local_sees);
+    // t08 (GAME_SCORING, STRATEGIC_GAPS §7.4): the campaign-end dialog opened - the local faction's
+    // Music_Event_Strategic_<Win/Lose>[_Vs_Faction] (GameAudio::battle_end with strategic set), music mode 16.
+    void campaign_end(bool won, std::string_view enemy_faction = {});
     // Lua presentation audio ops (Play_Music, Stop_All_Speech, SFX permissions, ...) of events with seq >= *next_seq
     // through GameAudio (audio::apply_presentation_audio); *next_seq advances. No-op without engine/lua.
     void apply_presentation(const std::vector<lua::PresentationEvent>& events, uint32_t* next_seq);
@@ -331,6 +361,7 @@ private:
     bool have_serial_ = false;
     int32_t retreating_player_ = -1;  // TacticalBattle::retreating_player() at the last battle_tick
     bool modal_ = false, gui_only_ = false, attract_ = false;  // OI host: flags last applied
+    bool app_active_ = true;                                   // aud2 t04: set_app_active
     bool pending_played_ = false;  // battle_pending ran since the last scene change
     bool movie_music_on_ = false, movie_halted_ = false;  // a movie's mode 14 / 17 music is the current one / it halted the music
     GameAudioStats stats_;

@@ -31,6 +31,7 @@ public:
     void set(uint32_t voice, const VoiceParams& p) override;
     void stop(uint32_t voice) override;
     bool playing(uint32_t voice) const override;
+    void pause(uint32_t voice, bool paused) override;  // aud2 t04: ma_sound_stop / ma_sound_start (position kept)
     void advance(double seconds) override;
     // Stream voices: StreamResampler converts to the engine rate/channels; pulls run on the device thread
     // (in no_device mode: inside read_mix). stop() returns after the sound left the node graph.
