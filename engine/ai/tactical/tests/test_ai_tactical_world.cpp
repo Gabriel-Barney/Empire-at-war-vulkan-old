@@ -454,7 +454,7 @@ function SweepForce_Thread()
   BlockOnCommand(SweepForce.Produce_Force())
   SweepForce.Collect_All_Free_Units("Corvette")
   for i, u in pairs(SweepForce.Get_Unit_Table()) do
-    if u.Get_Type().Get_Name() ~= "Syn_Corvette" then error("COLLECT took " .. u.Get_Type().Get_Name()) end
+    if u.Get_Type().Get_Name() ~= "SYN_CORVETTE" then error("COLLECT took " .. u.Get_Type().Get_Name()) end
   end
   SweepForce.Set_Targeting_Priorities("Syn_Sweep_Set")
   Sleep(15)

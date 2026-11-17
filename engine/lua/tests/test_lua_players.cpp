@@ -412,18 +412,18 @@ void test_players() {
         CHECK(g.world.ai_paths() == &stub);
         CHECK(run(vm, "sp = Find_Path(und, pa, pc) sn = table.getn(sp) s2 = sp[2].Get_Type().Get_Name() "
                       "sz = Find_Path(und, pa, pa)") == "");
-        CHECK(stub.calls == 2 && gnum(vm, "sn") == 2.0 && gstr(vm, "s2") == "Planet_C" && gnil(vm, "sz"));
+        CHECK(stub.calls == 2 && gnum(vm, "sn") == 2.0 && gstr(vm, "s2") == "PLANET_C" && gnil(vm, "sz"));
         CHECK(run(vm, "Find_Path(emp, pa, pc)").find("non-ai players") != std::string::npos && stub.calls == 2);
         stub.known = false;
         CHECK(run(vm, "fp = Find_Path(und, pa, pc) fn2 = table.getn(fp) fm = fp[2].Get_Type().Get_Name()") == "");
-        CHECK(stub.calls == 3 && gnum(vm, "fn2") == 3.0 && gstr(vm, "fm") == "Planet_B");
+        CHECK(stub.calls == 3 && gnum(vm, "fn2") == 3.0 && gstr(vm, "fm") == "PLANET_B");
         g.world.attach_ai_paths(nullptr);
         CHECK(run(vm, "fp2 = Find_Path(und, pa, pc) fn3 = table.getn(fp2)") == "" && gnum(vm, "fn3") == 3.0 &&
               stub.calls == 3);
     }
     CHECK(gnum(vm, "bl0") == 0.0 && gnum(vm, "bl1") == 1.0 && gnum(vm, "af1") == 1.0 && gnum(vm, "af2") == 0.0 &&
           gnum(vm, "af3") == 0.0);
-    CHECK(gnum(vm, "pn") == 3.0 && gstr(vm, "pm") == "Planet_B" && gnum(vm, "sl") == 0.0 && gnum(vm, "co") == 0.0 &&
+    CHECK(gnum(vm, "pn") == 3.0 && gstr(vm, "pm") == "PLANET_B" && gnum(vm, "sl") == 0.0 && gnum(vm, "co") == 0.0 &&
           gnum(vm, "de") == 0.0 && gnum(vm, "gt") == 0.0 && gnum(vm, "camp") == 0.0);
     CHECK(run(vm, "Find_Path(emp, pa)").find("Find_Path -- invalid number of parameters. Expected 3, got 2.") != std::string::npos);
     CHECK(run(vm, "Find_Path(emp, ft, pc)").find("parameter 2. This needs to be a valid planet") != std::string::npos);
@@ -734,8 +734,8 @@ void test_sliceable_unlock() {
     CHECK(!g.sim->type_unlocked(0, a) && !g.sim->type_unlocked(0, b));
     CHECK(run(vm, "emp = Find_Player('Empire') t1 = emp.Give_Random_Sliceable_Tech().Get_Name()") == "");
     const std::string t1 = gstr(vm, "t1");
-    const uint32_t first = t1 == "Slice_A_T" ? a : b;
-    CHECK((t1 == "Slice_A_T" || t1 == "Slice_B_T") && g.sim->type_unlocked(0, first) && !g.sim->type_unlocked(1, first));
+    const uint32_t first = t1 == "SLICE_A_T" ? a : b;
+    CHECK((t1 == "SLICE_A_T" || t1 == "SLICE_B_T") && g.sim->type_unlocked(0, first) && !g.sim->type_unlocked(1, first));
     // The unlocked type is no longer a candidate: the second call gives the other one; the single-candidate rule raises
     // the tech level (GalacticSim::raise_tech_level, REMAINING_GAPS 1.4), whose sweep unlocks it (Tech_Level 1 < 2).
     const int32_t tech0 = g.sim->players()[0].tech_level;
@@ -748,7 +748,7 @@ void test_sliceable_unlock() {
     LuaVm vm2(h.host());
     attach_player_world(vm2, &h.world);
     CHECK(run(vm2, "emp = Find_Player('Empire') u1 = emp.Give_Random_Sliceable_Tech().Get_Name()") == "");
-    const uint32_t other = gstr(vm2, "u1") == "Slice_A_T" ? b : a;
+    const uint32_t other = gstr(vm2, "u1") == "SLICE_A_T" ? b : a;
     const int32_t tech1 = h.sim->players()[0].tech_level;
     h.sim->set_max_tech_level(0, tech1);
     CHECK(run(vm2, "u2 = emp.Give_Random_Sliceable_Tech().Get_Name()") == "");
@@ -1293,9 +1293,9 @@ void test_company_member_views() {
                   "ct = Comp.Get_Type().Get_Name() pa = Comp.Get_Planet_Location() pl = pa ~= nil and rawequal(sm.Get_Planet_Location(), pa) "
                   "smuggler_transport = sm.Get_Parent_Object() isc = rawequal(smuggler_transport, Comp) "
                   "pf = rawequal(smuggler_transport.Get_Parent_Object(), Fleet) ts = tostring(sm)") == "");
-    CHECK(static_cast<int>(gnum(vm, "n")) == 2 && gtrue(vm, "same") && gtrue(vm, "two") && gstr(vm, "tn") == "Smuggler_T");
-    CHECK(gstr(vm, "cn") == "Crew_T" && static_cast<int>(gnum(vm, "ncrew")) == 1 && gtrue(vm, "differs") && gtrue(vm, "valid"));
-    CHECK(static_cast<int>(gnum(vm, "nemp")) == 0 && gstr(vm, "ct") == "Smuggler_Team_T" && gtrue(vm, "pl"));
+    CHECK(static_cast<int>(gnum(vm, "n")) == 2 && gtrue(vm, "same") && gtrue(vm, "two") && gstr(vm, "tn") == "SMUGGLER_T");
+    CHECK(gstr(vm, "cn") == "CREW_T" && static_cast<int>(gnum(vm, "ncrew")) == 1 && gtrue(vm, "differs") && gtrue(vm, "valid"));
+    CHECK(static_cast<int>(gnum(vm, "nemp")) == 0 && gstr(vm, "ct") == "SMUGGLER_TEAM_T" && gtrue(vm, "pl"));
     CHECK(gtrue(vm, "isc") && gtrue(vm, "pf") && gstr(vm, "ts").find("Smuggler_T") != std::string::npos);
     // refixf t03: every filter kind sees the member views (the original's cargo objects): a player alone lists the
     // company followed by its matching entries (company first, entry order).

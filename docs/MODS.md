@@ -570,7 +570,7 @@ port skips them, the skirmish host says `not loaded (empty file)`), so the maps 
 | 2 Front end (smoke) | not rerun (q6 t02 / t13 passed) | main menu, staging, buy (affordable-row pick), a running space skirmish, select all and control groups; stops at the encyclopedia step like the Remake (**t43**) | main menu, staging and a running space skirmish; stops at the encyclopedia step (**t43**) | main menu, staging (no game-type list); stops at the buy screen: default faction is a header faction (**t41**) |
 | 3 Space skirmish 3000 ticks | `_MP_SPACE_FIERY`: 833 orders, 1070 decisions, 0 Lua errors | `_MP_SPACE_TRANSITORY_TWISTS`: 724 orders, 860 decisions, 2 Lua errors AI vs AI; with `--human Rebel` 385 orders, 0 Lua errors (t44 below) | `_MP_SPACE_GEONOSIS`: 95 orders, 139 decisions, 0 Lua errors; 189 s (t33, speed not in the checklist) | `_MP_SPACE_GEONOSIS`: 13 orders, 45 decisions, 0 Lua errors |
 | 3 Land skirmish 3000 ticks | `_MP_LAND_BLOOD_GULCH`: 120 orders, 200 decisions, 0 Lua errors | `_MP_LAND_HOTH_ECHO_BASE`: 181 orders, 213 decisions, 2 Lua errors AI vs AI; with `--human Rebel` 68 orders, 0 Lua errors (t44 below) | `_MP_LAND_UTAPAU`: 62 orders, 32 decisions, 0 Lua errors | `_MP_LAND_UTAPAU`: 374 orders, 445 decisions, 0 Lua errors |
-| 4 Galactic 9000 ticks | `Thrawn_Empire`: 4384 decisions, 1281 orders, 4 owner changes, 0 Lua errors | `Sandbox_Rimward_Republic`: starts after the missing-plot fix, 400 story events; 0 AI orders headless by the mod's design (t45 below), 1 story Lua error (**t45**) | `GC_Mini_Web_Way_Imperial`: 456 decisions, 137 orders, 11 owner changes, 0 Lua errors | `Sandbox_Balance_New_Republic`: starts after the player-cap fix (50 players), 533 decisions, 298 orders, 0 Lua errors |
+| 4 Galactic 9000 ticks | `Thrawn_Empire`: 4338 decisions, 1267 orders, 3 owner changes, 0 Lua errors (after t45; before: 4384 / 1281 / 4) | `Sandbox_Rimward_Republic`: starts after the missing-plot fix, 400 story events; 0 AI orders headless by the mod's design (t45 below), 0 story Lua errors after t45 (was 1) | `GC_Mini_Web_Way_Imperial`: 456 decisions, 137 orders, 11 owner changes, 0 Lua errors | `Sandbox_Balance_New_Republic`: starts after the player-cap fix (50 players), 533 decisions, 298 orders, 0 Lua errors |
 | 5 Story start | 1145 story events | 400 story events | (galactic run: story on) | 54,856 story events, 38 Lua notes |
 | 6 Deterministic | 0 vs 4 workers identical (space, land) | identical (space, land) | identical (space, land) | identical (space, land) |
 
@@ -594,6 +594,12 @@ Explained without a port change (2026-11-17):
   after the human answers its `HISTORICAL_GC_CHOICE` popup, which the mod's GenericPopup offers as option objects to
   build. A headless AI-only run never answers it, so 0 orders is the mod's design there. The hidden campaign smoke with
   `ALAMO_SMOKE_CAMPAIGN_SET=Sandbox_Rimward_Republic` gets from the galaxy into a battle (then stops at t43).
+- **t45** (story Lua error, fixed) Fall of the Republic's news plugin names a conquered planet through `PlanetTable`,
+  keyed by upper-case planet type names. The port gave story and AI scripts the type name as written (`Trandosha`); the
+  original stores every type name upper-cased (OBJECT_TYPES §3.1), so `Get_Type().Get_Name()` is now upper-case in every
+  Lua VM, not only in object scripts. No golden moved; Thrawn's Revenge's AI changed slightly (numbers in the table).
+  Still open in t45: `CloneWars_Medium_Republic` requires `eawx-gc-states/FotRProgressiveStates`, which the mod does not
+  ship (only `config.meg`'s `GCProgressiveStateMachine.lua` names it), so it needs a retail check.
 
-**Not passed yet:** t41, t43, the t45 news-plugin nil; one skirmish played to a result in the game and the
+**Not passed yet:** t41, t43, t45's progressive GC (retail check); one skirmish played to a result in the game and the
 retail comparison (t09) need a person or the coordinator's retail run.
