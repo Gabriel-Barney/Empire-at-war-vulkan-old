@@ -307,3 +307,25 @@ storyb t03; `python tools/parity/parity_harness.py run --scenario story_kessel`)
 The four failures are storyb tasks (2026-11-17).
 
 After storyb t15 (a non-sandbox linked battle gets no galactic structures, starbase or base level, BT §2.9.5): owner 1 at frame 1 has 74 objects with the same type mix as retail (`HONOGHR_PLANETARY_ADVANTAGE` included, no barracks). Still failing: 94 extra Neutral props (t16), the Empire AI attacks Tyber (409 health-change samples; retail suspends the AI during `CINE_Start_Mission_A`) and the cinematic never reaches its spawns (t17), the bribe squad container type (t18).
+
+### 7.1 storyb t16 / t17 / t18 readings (2026-11-17)
+
+- **t18 (fixed, dev after 9c38ff6b):** `--galactic-ai` runs did not run the game-object scripts, and the story VM's
+  `Spawn_Unit` makes battle units and companies only through those hooks (`ObjectBridge::spawn_unit` / `spawn_company`). So the
+  bribe squad came down as a company-type object, and `Prox_Bribed`'s `Attack_Move` hit a binding error that set the
+  mission script's stop flag (no `Story_Event_Trigger` after it). With object scripts on in runs that fight their
+  battles, frame 6 matches retail (9 `SQUAD_STORMTROOPER` + 1 `STORMTROOPER_TEAM`).
+- **t16, decorations [H, static read of the object reader 0x2b0a20, `re_reference/`]:** after a map object's record
+  loop, an object whose type has `Is_Decoration` (type +0x3b) is registered in the mode's **secondary** store (mode
+  +0x20, 0x2b5ad0) instead of the primary one (0x28c4e0 is called with its id first), when the map is being loaded (the
+  reader's load flag) and 0x140b15490 is clear. So map decorations are not synchronised objects: not in the primary
+  store, the CRC or the retail trace. The port creates them in the primary store: 13 prop types, 94 objects on UM01
+  (`PROP_CRATE01` 28, `PROP_CRATE19_PARTS` 18, ...). Open in the same census: retail has 14 `URBAN_HUMAN_CIV_TEAM` and 2
+  `WOOKIE_TEAM` containers for the Neutral prisoner companies (the port expands Is_Neutral map companies without TEAM
+  containers, map1 t03 [port]) and the `NIGHT_STARS_NOFLARE` sky object.
+- **t17:** with the above, the mission script runs on (no error), but the port's Tyber, hidden by `tyber.Hide(true)` at
+  host frame ~380 during `CINE_Start_Mission_A/B` (`Suspend_AI(1)`, `Lock_Controls(1)`), turns and moves at battle frame 482
+  and is shot from frame 1194; retail's Tyber does not move until the cinematic walks him (3303). Retail `Hide` (0x57a5b0)
+  hides the model (+0x2a0, 0x264c80) and sets obj +0x3a2 bit 0; the port's `Hide` only records a script flag that no sim
+  code reads. Which retail code skips a hidden object (target scans, auto-acquire) or a unit under `Suspend_AI` is not
+  read yet.
