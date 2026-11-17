@@ -157,6 +157,15 @@ struct AbilityVisualEvent {
     uint32_t special = 0;  // AbilityData::specials index
     uint32_t serial = 0;   // 1, 2, ... in record order (the host's cursor; restarts with a new system)
 };
+// aud1 t10: an EffectOn event (the activation presentation 0x48e4d0) as kept for the host after clear_events
+// (AbilitySystem::activation_events). Presentation only.
+struct AbilityActivation {
+    uint32_t frame = 0;
+    uint8_t type = 0;  // AbilityEvent::type (unit-ability type)
+    ObjectId id = kNoObject;
+    ObjectId target = kNoObject;
+    uint32_t serial = 0;  // 1, 2, ... in event order (the host's cursor; restarts with a new system)
+};
 // vis1 t06: an applied special of an object (AbilitySystem::applied_specials).
 struct AppliedSpecialView {
     uint32_t special = 0;  // AbilityData::specials index
@@ -460,6 +469,9 @@ public:
     }
     static constexpr uint32_t kVisualKeepFrames = 64;
     std::span<const AbilityVisualEvent> visual_events() const { return visuals_; }
+    // aud1 t10 (presentation only, like visual_events): the EffectOn events of the last kVisualKeepFrames frames. The
+    // battle clears events() inside its tick (consume_events), so a host reading between ticks takes these, by serial.
+    std::span<const AbilityActivation> activation_events() const { return activations_; }
     float get_hull(ObjectId id) const { return combat_->script_hull(id); }      // Lua Get_Hull
     float get_shield(ObjectId id) const { return combat_->shield_fraction(id); }  // Lua Get_Shield
 
@@ -997,6 +1009,8 @@ private:
     std::vector<AbilityVisualEvent> visuals_;  // vis1 t06: presentation only (not hashed / saved; visual_events())
     uint32_t visual_serial_ = 0;               // vis1 t06: the last AbilityVisualEvent::serial
     void visual(AbilityVisualKind k, uint32_t frame, ObjectId owner, ObjectId target, uint32_t special);
+    std::vector<AbilityActivation> activations_;  // aud1 t10: presentation only (not hashed / saved)
+    uint32_t activation_serial_ = 0;
     std::vector<PlayerOverride> overrides_;
     struct TypeOverride {
         int32_t player;

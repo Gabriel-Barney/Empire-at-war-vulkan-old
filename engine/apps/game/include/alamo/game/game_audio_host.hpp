@@ -32,6 +32,7 @@
 #include "alamo/game/battle_fx.hpp"
 #include "alamo/game/game_data.hpp"
 #include "alamo/objects/object_store.hpp"
+#include "alamo/tactical/abilities/ability_system.hpp"  // aud1 t10: AbilityActivation
 
 namespace alamo::audio {
 class AudioDatabase;
@@ -159,7 +160,8 @@ public:
     // --- aud1 t05 (object SFX: abilities, shields, hyperspace; src/game_audio_host_objects.cpp) ---
     // AUDIO.md §9.6, after every battle tick (battle_tick calls it; presentation only, const reads):
     //   ability   AbilitySystem EffectOn (the activation presentation 0x48e4d0): the special ability's SFXEvent_Activate
-    //             attached to the user, SFXEvent_Target_Affected attached to the target when there is one.
+    //             attached to the user, SFXEvent_Target_Affected attached to the target when there is one. Read from
+    //             activation_events() after the last serial played (aud1 t10: the battle clears events() inside its tick).
     //   hyperspace TacticalBattle::hyperspace_sfx(): Arrive -> the owner faction's SFXEvent_Arrive_From_Hyperspace attached
     //             to the object; Depart -> the type's SFXEvent_Retreat_Engines_Jump, else the owner faction's
     //             SFXEvent_Exit_Into_Hyperspace, 3D at the object's position (not attached).
@@ -168,7 +170,11 @@ public:
     // `player_factions[p]` = player p's Faction name ("" / out of range: no faction sounds for its objects).
     void object_events(const sim::TacticalBattle& battle, const objects::ObjectStore& store, const objects::GameObjectTypes& types,
                        std::span<const std::string> player_factions);
-    void object_events_reset();  // battle_reset: forget the hyperspace log cursor and the shield states
+    void object_events_reset();  // battle_reset: forget the log cursors and the shield states
+    // aud1 t10, object_events' ability part (public for the tests): the activations after the last serial played (a
+    // smaller newest serial: a new system, start over), each through ability_effect with the store's types and positions.
+    void ability_activations(std::span<const tactical::abilities::AbilityActivation> log, const objects::ObjectStore& store,
+                             const objects::GameObjectTypes& types);
     struct AbilitySfx {
         std::string activate, target_affected;  // "" = none
     };
@@ -196,6 +202,7 @@ private:
     std::map<objects::TypeIndex, std::pair<std::string, std::string>> shield_tags_;   // type -> (down, back up)
     std::map<objects::ObjectId, int> shield_up_;                                      // ascending id
     size_t hyperspace_seen_ = 0;  // TacticalBattle::hyperspace_sfx() entries already played
+    uint32_t activation_seen_ = 0;  // aud1 t10: the last AbilityActivation::serial played
     uint64_t ability_sfx_played_ = 0, hyperspace_sfx_played_ = 0, shield_sfx_played_ = 0;
 
 public:

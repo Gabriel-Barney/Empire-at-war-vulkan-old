@@ -927,6 +927,10 @@ struct Run {
     std::map<int32_t, int32_t> fog_last_target;  // human unit -> auto target after the previous tick
     uint32_t fog_new_targets = 0, fog_bad_targets = 0, fog_force_frames = 0;
     uint32_t fog_ability_frame = 0;  // battle frame the ping / Force Sight was activated (0 = not used)
+    uint32_t fog_ability_user = 0;   // aud1 t10: its user
+    // aud1 t10: one tick later the battle has cleared the EffectOn from events() (consume_events) and the presentation
+    // copy (AbilitySystem::activation_events) still holds it
+    bool fog_effect_cleared = false, fog_effect_kept = false;
     float fog_probe_x = 0.0f, fog_probe_y = 0.0f;  // the user's position mirrored halfway through the map centre
     bool fog_probe_before = false, fog_probe_after = false, fog_force_on = false;
     // OI fog: shots (REVEAL vf26 flashes) seen, host API round trips (FOW-active flag, reinforcement overlay)
@@ -1013,8 +1017,15 @@ inline void fog_probe(TacticalBattle& b, TacticalMode& tm, Run& out, StateHasher
         out.fog_api_ok = out.fog_api_ok && b.fog_reinforce_overlay(0, ov) && f->grid(0) && ov.size() == f->grid(0)->cells() &&
                          !b.fog_reinforce_overlay(2, ov);
     }
-    if (out.fog_ability_frame && b.frame() == out.fog_ability_frame + 1)
+    if (out.fog_ability_frame && b.frame() == out.fog_ability_frame + 1) {
         out.fog_probe_after = !b.fog_point_fogged(0, out.fog_probe_x, out.fog_probe_y, false);
+        const auto user = static_cast<tactical::abilities::ObjectId>(out.fog_ability_user);
+        out.fog_effect_cleared = std::none_of(b.abilities().events().begin(), b.abilities().events().end(), [&](const auto& e) {
+            return e.kind == tactical::abilities::AbilityEventKind::EffectOn && e.id == user && e.frame == out.fog_ability_frame;
+        });
+        out.fog_effect_kept = std::any_of(b.abilities().activation_events().begin(), b.abilities().activation_events().end(),
+                                          [&](const auto& e) { return e.id == user && e.frame == out.fog_ability_frame; });
+    }
     StateHasher h;
     f->hash(h);
     acc.u64(h.digest());
@@ -1090,7 +1101,10 @@ inline void fog_use_ability(TacticalBattle& b, TacticalMode& tm, bool land, Run&
         out.fog_probe_y = p.y;
         out.fog_probe_before = b.fog_point_fogged(0, out.fog_probe_x, out.fog_probe_y, false);
         const tactical::combat::ObjectId ids[] = {id};
-        if (b.abilities().set_unit_ability_mode(ids, type, true, b.frame()) == 1) out.fog_ability_frame = b.frame();
+        if (b.abilities().set_unit_ability_mode(ids, type, true, b.frame()) == 1) {
+            out.fog_ability_frame = b.frame();
+            out.fog_ability_user = static_cast<uint32_t>(id);
+        }
         out.fog_force_on = land && b.fog()->grid(0) && b.fog()->grid(0)->reveal_all_active();
         return;
     }

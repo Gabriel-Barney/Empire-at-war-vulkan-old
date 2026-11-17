@@ -98,6 +98,8 @@ void squad_joint_half_extents(std::span<const SquadSlot> slots, float jiggle, fl
 void AbilitySystem::reserve(uint32_t objects, uint32_t events) {
     objs_.reserve(objects);
     events_.reserve(events);
+    visuals_.reserve(events);  // vis1 t06 / aud1 t10: the presentation copies (kVisualKeepFrames of entries)
+    activations_.reserve(events);
 }
 
 int32_t AbilitySystem::find(ObjectId id) const {
@@ -407,6 +409,11 @@ void AbilitySystem::event(AbilityEventKind k, uint8_t type, ObjectId id, ObjectI
     e.target = target;
     e.frame = frame;
     events_.push_back(e);
+    if (k == AbilityEventKind::EffectOn) {  // aud1 t10: the presentation copy (never read by the sim)
+        if (!activations_.empty() && activations_.front().frame + kVisualKeepFrames < frame)
+            std::erase_if(activations_, [frame](const AbilityActivation& v) { return v.frame + kVisualKeepFrames < frame; });
+        activations_.push_back({frame, type, id, target, ++activation_serial_});
+    }
 }
 
 void AbilitySystem::sync_combat(Obj& o) {

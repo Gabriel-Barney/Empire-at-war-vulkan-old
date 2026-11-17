@@ -206,8 +206,8 @@ Common facts:
 - `AbilitySystem::events()` (incl. `EffectOn`, `Stunned`) is cleared inside the tick (`TacticalBattle::consume_events`,
   tactical_battle_part3.cpp, `abilities_->clear_events()`), so `BattleView::capture` cannot read it. Per-tick lists that
   survive to the host are `TacticalBattle::special_weapon_events()` / `ability_finished_events()` (cleared at the next
-  tick start). [M] `GameAudioHost::object_events` reads `abilities().events()` after the tick for EffectOn SFX and may see
-  an empty list for the same reason (not verified).
+  tick start). `GameAudioHost::object_events` therefore saw no EffectOn; since aud1 t10 it reads
+  `AbilitySystem::activation_events()` (an unhashed copy of the EffectOn events, kept 64 frames, serial cursor).
 - The 2026-10-30 coordinator decision (ABILITY_VISUALS §6.4: owner particles are render particles, no sim objects, id
   divergence accepted) applies equally here: every row below can be done render-side without touching the CRC. Two
   render shapes exist: **state** effects (listed every capture while the state holds: Earthquake / Telekinesis dust,
