@@ -353,12 +353,12 @@ int bench_run(const BenchOptions& opt) {
         }
         // tst1: the golden is the 0-worker run's --crc-out (alamo_add_worker_count_check). A save that no longer loads makes
         // that run "not comparable" without writing it, so the other worker counts read it only after their own load, and
-        // report the same "not comparable" instead of a missing file.
+        // report the same "not comparable" instead of a missing file. Read after load_ms, so the timing leaves it out.
+        const double load_ms = ms_between(l0, Clock::now());
         if (run == 0 && !opt.golden.empty() && !CrcLog::load(opt.golden, golden, &err)) {
             std::fprintf(stderr, "bench: golden: %s\n", err.c_str());
             return 1;
         }
-        const double load_ms = ms_between(l0, Clock::now());
         actual_workers = s->worker_count();
         std::vector<double> ms;
         ms.reserve(static_cast<size_t>(ticks));

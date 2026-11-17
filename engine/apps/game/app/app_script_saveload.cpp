@@ -389,10 +389,12 @@ void add_saveload_steps(std::vector<ScriptStep>& s) {
     auto run = std::make_shared<Run>();
     const std::string png = "game_smoke_saveload_";
     // Setup: this run's save names are not in the folder (a re-run). tst1 t01: nor the Auto Save an earlier run left in
-    // this smoke's own folder (the overwrite step counts the folder's saves).
+    // this smoke's own folder (the overwrite step counts the folder's saves); never the player's own folder's Auto Save.
     s.push_back(step_wait("saves folder ready", [](App& a) {
         if (a.saves_dir_.empty()) return stop(a, "setup", "no saves folder");
+        const bool own_folder = a.saves_dir_ != default_saves_dir();
         for (const char* n : {kMainSave, kExtraSave, kBattleSave, kAutoSaveName}) {
+            if (n == kAutoSaveName && !own_folder) continue;
             std::string err;
             if (save_exists(a.saves_dir_, n) && !delete_save(a.saves_dir_, n, &err)) return stop(a, "setup", "cannot remove the old " + std::string(n) + ": " + err);
         }
