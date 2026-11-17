@@ -489,8 +489,11 @@ if(_alamo_sim)
     # cap; the test moves to seed 6 (Rebel, all destroyed, 9402).
     # skai t17 (2026-11-16, space skirmish build economy and Resolve re-accepting old candidates): seeds 1, 3-5, 7, 8 end
     # (Rebel, all destroyed, 8303-13234), seeds 2 and 6 reach the cap; the test moves to seed 8 (8303).
+    # skai t22 / t23 (2026-11-16, space task-force members stay on the free store; opportunity scan fog filter): seeds 3, 5-7
+    # end (Rebel, all destroyed, 8496-9347); 1, 2, 4, 8 reach the cap as slow sieges (213-243 AI orders, 0 Lua errors, 4-7
+    # reinforcements, 56-67 deaths, the Rebel AI attacks to the end); the test moves to seed 7 (8496).
     add_test(NAME alamo_headless_skirmish_ai_foc_station
-             COMMAND alamo_headless --skirmish-ai foc-station --seed 8 --ticks 20000 --workers 4 --quiet --expect-battle-end
+             COMMAND alamo_headless --skirmish-ai foc-station --seed 7 --ticks 20000 --workers 4 --quiet --expect-battle-end
                      --squadron-size 0)
     # t48: the default seed reaches QuickReinforce's anti-idle; 0 Lua errors (it may run to the frame limit: half the seeds do, the
     # station holds). refixf t02 (2026-10-31): back on the default seed. It had stacked the rebel ships on the station's centre

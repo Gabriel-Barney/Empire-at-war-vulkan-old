@@ -371,6 +371,23 @@ These apply in `Scan_Player` and again in `Validate_Current_Target` (0x567c50).
     random-start player loop (**one synced draw**) and a box of `Get_Fire_Range` × 1.1.
   - Candidates are filtered by `Fire_Category_Restrictions` (mask +0x408, 0x540140) and, for turrets, the fire
     cone.
+  - **Full candidate filter of 0x385190 (skai t23, 2026-11-16, read from `re_reference/`) [H]:** a candidate is
+    skipped when it has no type, its type is not `Is_Valid_Target` (+0x6b) or not `Collidable_By_Projectile_Living`
+    (+0x41); it is garrisoned (+0x3a7) or dead (+0x3a0 & 0x40); it is stealthed (0x39b140) and the hard point
+    owner's type lacks `Target_Stealth_Units` (+0xa4); it has behaviour 17 (vf +0x10(0x11) ≠ 0) [M: which
+    behaviour]; the hero-clash pairing (0x39a540) refuses it while either side has +0x3b4; it is inside a transport
+    (0x397060); it is **fully fogged for the hard point owner's player (0x35f470, force 1)**; the hard point is a
+    turret (+0x4e) and the candidate's position fails the cone (0x383ba0); or `Fire_Category_Restrictions` refuses
+    it. The fog test applies to every hard point kind, not only special weapons. A candidate with the incognito bit
+    (+0x3a1 & 0x10) is scored but never kept as the best.
+  - **Keeping the current opportunity target (0x387400) does not re-test fog for the target.** It is kept while
+    `Fire_At` (0x3825b0, mode 0) can fire at it, unless 0x39aa60(owner) holds and the owner's position is hidden
+    from the target's player (0x35f3b0, force 1) [M: what 0x39aa60 tests; the port does not model this drop]. The
+    same 0x39aa60 / 0x35f3b0 pair skips whole enemy players in the scan's player loop.
+  - Port: `CombatSystem::opportunity_fire` tests `target_hidden(owner, candidate, force 1)` on each new candidate;
+    `opportunity_valid` (the keep test) leaves it out except for WEAPON_SPECIAL. Found on Geonosis: the idle
+    Empire start station's missile hard point (`Allow_Opportunity_Fire_When_Idle` defaults on) shelled a fogged
+    Rebel extractor 2242 away; retail never damages it.
   - Scoring uses the owner's slot 35, and `HP_Choose_Aim_Point` must succeed. The scan stops at the first
     candidate scoring exactly 1.0 and otherwise keeps the best [M].
   - Acquiring an opportunity target raises signal 0x21.

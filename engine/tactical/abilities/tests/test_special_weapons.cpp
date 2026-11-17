@@ -485,6 +485,55 @@ void test_weapon_special_fog_gate() {
     }
 }
 
+void test_opportunity_fog_scan() {
+    // skai t23 (TACTICAL_COMBAT §2.6): the hard point opportunity scan (HP_Scan_Player 0x385190) skips a candidate hidden
+    // for the owner's player (force 1) for every hard point kind; a kept opportunity target is not re-tested. The station's
+    // own attack range (100) never reaches the target, so only opportunity fire can shoot (Geonosis: an idle start station
+    // shelled a fogged Rebel extractor 2242 away).
+    Combat c;
+    HardpointDesc hd;
+    hd.name = "HP_LASER";
+    hd.kind = HardpointKind::WeaponLaser;
+    hd.projectile = 0;
+    hd.min_recharge = hd.max_recharge = 1.0f;  // <= the 3.0 cutoff: idle opportunity fire allowed
+    hd.fire_range = 2000.0f;
+    hd.health = 100.0f;
+    c.cd.hardpoints.push_back(hd);
+    UnitDesc st;
+    st.name = "Station";
+    st.tactical_health = 5000.0f;
+    st.radius = 50.0f;
+    st.hardpoints = {0};
+    st.max_attack_distance = 100.0f;
+    c.cd.units.push_back(st);
+    c.cd.units[0].tactical_health = 1e6f;
+    CombatConfig cfg;
+    cfg.opportunity_fire = true;
+    cfg.inaccuracy_enabled = false;
+    c.sys = std::make_unique<CombatSystem>(c.cd, cfg, std::vector<PlayerInfo>{PlayerInfo{}, PlayerInfo{}});
+    c.sys->bind_rng(&c.rng);
+    HideAll hooks;
+    c.sys->set_hooks(&hooks);
+    c.add(1, 1, 0, {0, 0, 0});
+    c.add(2, 0, 1, {800, 0, 0});
+    uint32_t f = 1;
+    for (; f < 100; ++f) c.sys->tick(f, c.trees, c.rng);
+    CHECK_EQ(c.sys->stats().shots, 0);  // hidden: never picked
+    CHECK(c.sys->hardpoint_opportunity_target(1, 0) == kNoObject);
+    CHECK(hooks.forced_queries > 0);
+    hooks.hide = false;
+    for (; f < 160; ++f) c.sys->tick(f, c.trees, c.rng);
+    CHECK(c.sys->hardpoint_opportunity_target(1, 0) == 2);
+    const uint64_t shots = c.sys->stats().shots;
+    CHECK(shots > 0);
+    CHECK(c.sys->current_target(1) == kNoObject);  // the station itself never targeted it
+    hooks.hide = true;  // back in the fog: the kept target is not re-tested
+    for (; f < 220; ++f) c.sys->tick(f, c.trees, c.rng);
+    CHECK(c.sys->hardpoint_opportunity_target(1, 0) == 2);
+    CHECK(c.sys->stats().shots > shots);
+    c.sys->set_hooks(nullptr);
+}
+
 void test_space_fields() {
     SpaceFieldIndex f;
     CHECK(f.empty() && f.kinds_at(0, 0) == 0 && f.nearest(0, 0, ~0u) == -1);
@@ -774,6 +823,7 @@ int main() {
     test_tsw_attacker();
     test_launch_projectile();
     test_weapon_special_fog_gate();
+    test_opportunity_fog_scan();
     test_special_weapon_save();  // N1 stage 2
     if (g_fail) {
         std::printf("alamo_tactical_special_weapons_tests: %d failure(s)\n", g_fail);
