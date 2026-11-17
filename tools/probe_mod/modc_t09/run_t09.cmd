@@ -20,9 +20,10 @@ set "OUT=%~dp0out"
 if not exist "%OUT%" mkdir "%OUT%"
 for /f %%T in ('powershell -NoProfile -Command "Get-Date -Format yyyyMMdd-HHmmss"') do set "STAMP=%%T"
 if /i "%MODE%"=="retail" (
-  echo Starting the original: StarWarsG.exe STEAMMOD=%ID%  ^(Steam must be running^)
-  start "" /D "%GAME%" "%GAME%\StarWarsG.exe" STEAMMOD=%ID%
-  exit /b 0
+  rem launch_foc.py: a StarWarsG.exe started from a Claude shell otherwise exits at once (probe_mod\common\launch_foc.py).
+  echo Starting the original windowed: StarWarsG.exe STEAMMOD=%ID%  ^(Steam must be running^)
+  "%ROOT%\toolchain\venv\Scripts\python.exe" -I "%ROOT%\tools\probe_mod\common\launch_foc.py" STEAMMOD=%ID%
+  exit /b %errorlevel%
 )
 if not defined ALAMO_BIN (echo alamo_game.exe not found: build first ^(build_msvc.cmd^) or set ALAMO_BIN.& exit /b 1)
 if /i "%MODE%"=="check" (

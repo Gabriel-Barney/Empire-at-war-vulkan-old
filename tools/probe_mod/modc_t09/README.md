@@ -10,7 +10,45 @@ text, sound, how the AI plays). Nothing here drives the game for you and nothing
 | EAW-Remake (Empire at War Remake) | 1770851727 | Total conversion by its own team: Rebel / Empire / Underworld + Hutts and minor factions, own MEGs and shaders |
 | Star Wars: Age of Legends (New Jedi Order era) | 2858787558 | Era mod: New_Republic, Galactic_Empire, Vong and ~45 minor factions, loose XML, story files with their own root tag |
 
-## How to start
+## Retail run (Claude with computer use, 2026-11-17)
+
+Since 2026-11-14 Claude runs every probe kit in retail `StarWarsG.exe` (`docs/DECISIONS.md`); the port is never driven
+(the port side was checked by the hidden smokes, `docs/MODS.md` §9). This run answers what the port's smokes found and the
+docs do not settle. Per mod, start the original windowed, one at a time:
+
+```
+tools\probe_mod\modc_t09\run_t09.cmd retail 1770851727      EAW-Remake
+tools\probe_mod\modc_t09\run_t09.cmd retail 2858787558      Age of Legends
+tools\probe_mod\modc_t09\cleanup_t09.cmd                    afterwards (quit the game with Exit Game first): deletes out\
+```
+
+(`launch_foc.py` adds `WINDOWED SCREENWIDTH=1920 SCREENHEIGHT=1080`; computer use reaches the game as `StarWarsG.exe`.)
+Take a screenshot at each **[shot]** and write the answers as `Rn: ...` lines.
+
+**EAW-Remake 1770851727**
+- R1 [shot] Main menu: is "Single Player" a normal button under the menu heading, and does a click open the
+  single-player menu? (modc t34: the mod writes the button as `265,550,215,,22`; the port now reads it as 22 units high.)
+- R2 [shot] Skirmish setup: the game-type list, its rows and which row is selected when the dialog opens.
+- R3 Space skirmish on any space map, you vs one AI, buy a few units, Start. [shot] at the battle start and again after
+  about 20 s: which of your units are on the map (start forces? a space station only?) and where the bought units are
+  (on the map, arriving by hyperspace, or in the reinforcement pool behind "Call for Reinforcements")? Then Ctrl+Y
+  (select all): [shot] what is selected? (modc t40: in the port's smoke Ctrl+Y at battle tick 57 selected nothing.)
+- R4 Rough speed of that battle on a map with big asteroid fields (Geonosis): smooth / slow? (modc t33, known slow in the port.)
+
+**Age of Legends 2858787558**
+- A1 [shot] Main menu: background, title, buttons (any raw `TEXT_...` keys?).
+- A2 [shot] Skirmish setup right after it opens: is there a game-type (Land / Space) list at all? Which map list is shown
+  (land or space maps)? (The mod's `IDD_SKIRMISH_STAGING_DIALOG` has no `IDC_GAME_TYPE_LIST`.)
+- A3 [shot] Slot 0's faction combo **as it opens** (no clicks): which faction is selected? Open the combo: [shot] the
+  first rows, including any header-like entries such as the text of `TEXT_FACTION_HEADER_MAJOR_POWERS`. (modc t41: the
+  port defaults slot 0 to `Faction_Header_Major_Powers`, which has nothing to buy.) If time allows, close the game,
+  start it again and check A3 once more (is the choice remembered between launches?).
+- A4 [shot] Start Game with that default faction: what does the buy screen list?
+
+Results go to the lane-modc session (the coordinator relays the paths / screenshots); the lane files them on modc t40 /
+t41 / t34 and in `docs/MODS.md` §9.
+
+## How to start (port, Gabriel only)
 
 From the repository root, after a normal `build_msvc.cmd` (or set `ALAMO_BIN` to a folder with `alamo_game.exe`):
 

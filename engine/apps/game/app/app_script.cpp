@@ -456,18 +456,22 @@ ScriptStep step_victory_screen(std::string file) {
             },
             1400};
 }
-// Ctrl+Y (the SelectAll hotkey slot's default).
+// Ctrl+Y (the SelectAll hotkey slot's default). modc t40: a mod's start forces can arrive later than the base game's (they
+// hyperspace in): while the press selected nothing, it is pressed again every 30 frames until a unit is selected.
 ScriptStep step_select_all() {
     auto st = std::make_shared<int>(0);
-    return {"select all", [st](App&, ui::InputFrame& f) {
-                if (*st == 1) {
+    return {"select all", [st](App& a, ui::InputFrame& f) {
+                if (*st % 30 == 1) {
                     f.keys_down.set(ui::vk::kControl);
                     f.keys_down.set(ui::vk::key('Y'));
                     f.keys_pressed.set(ui::vk::key('Y'));
                 }
-                return ++*st > 3;
+                if (++*st <= 3) return false;
+                const bool any = !a.session_ || !a.session_->host().selection(static_cast<uint8_t>(a.local_player())).empty();
+                if (any && *st > 4) a.notes_.push_back("select all: the first unit was selectable after " + std::to_string(*st) + " frames");
+                return any;
             },
-            100};
+            1800};
 }
 
 // Battle: aim the camera at the nearest enemy unit, then right-click it (Attack).
