@@ -137,6 +137,8 @@ void App::announcer_feedback() {
     if (!session_ || !g) return;
     const int32_t me = local_player();
     using K = galactic::GalacticEventKind;
+    constexpr uint32_t kNoPassThrough = 0xFFFFFFFFu;
+    uint32_t pass_through_fleet = kNoPassThrough;  // aud2 t07: the fleet of the event before, when a pass-through arrival
     for (const galactic::GalacticEvent& e : session_->take_announce_events()) {
         if (const char* tag = galactic_announcement(*g, e, me)) {
             audio_.faction_sfx(tag);
@@ -154,10 +156,11 @@ void App::announcer_feedback() {
         // aud2 t07 (BATTLE_TRANSITIONS, departure 0x431c80): Galactic_Fleet_Hyperspace when the local player owns or sees
         // the departing fleet. [port] "sees": the local player can see fleet presence at the origin planet
         // (can_see_planet_info FleetPresence) and the fleet is not all stealthed (the announcer's hidden test). Only the
-        // move order's departure (from the path's first planet) plays it: a pass-through hop re-departs without 0x431c80.
-        const bool order_departure = e.fleet < g->fleets().size() && !g->fleets()[e.fleet].path.empty() &&
-                                     g->fleets()[e.fleet].path.front() == e.planet;
-        if (e.kind == K::FleetDeparted && me >= 0 && order_departure) {
+        // move order's departure plays it: a pass-through hop re-departs without 0x431c80, and GalacticSim emits that
+        // departure right after the fleet's FleetArrived(kArrivePassThrough), so the stream order tells them apart.
+        const bool pass_through_departure = e.kind == K::FleetDeparted && e.fleet == pass_through_fleet;
+        pass_through_fleet = e.kind == K::FleetArrived && e.value == galactic::kArrivePassThrough ? e.fleet : kNoPassThrough;
+        if (e.kind == K::FleetDeparted && me >= 0 && !pass_through_departure) {
             bool sees = false;
             if (e.player != me && e.planet < g->planets().size() &&
                 g->can_see_planet_info(me, e.planet, galactic::GalacticSim::PlanetInfo::FleetPresence)) {

@@ -268,8 +268,8 @@ public:
     // drains inside T9 (events raised by Lua / story rewards there, StorySession::set_drain_tap) and after each tick.
     std::vector<galactic::GalacticEvent> take_special_events();
     // ui4 t08: the galactic events the announcer reacts to (PlanetOwnerChanged, CorruptionChanged, FleetDeparted; aud2 t03:
-    // also ProductionBegin / ProductionCanceled / ProductionCompleted for the production SFX), since the last call
-    // (presentation only).
+    // also ProductionBegin / ProductionCanceled / ProductionCompleted for the production SFX; aud2 t07: FleetArrived pass-through
+    // hops, which mark the departure right after them as a hop, not a move order), since the last call (presentation only).
     std::vector<galactic::GalacticEvent> take_announce_events();
     const SpecialStats& special_stats() const { return special_stats_; }
     // OI host: the Lua presentation's cinematic rate lock (lua::PresentationState::cinematic_rate_lock: cinematic camera

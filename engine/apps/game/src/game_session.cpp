@@ -680,7 +680,8 @@ std::vector<galactic::GalacticEvent> GameSession::take_announce_events() {
 void GameSession::tap_event(const galactic::GalacticSim& gs, const galactic::GalacticEvent& e) {
     using K = galactic::GalacticEventKind;
     if (e.kind == K::PlanetOwnerChanged || e.kind == K::CorruptionChanged || e.kind == K::FleetDeparted ||
-        e.kind == K::ProductionBegin || e.kind == K::ProductionCanceled || e.kind == K::ProductionCompleted) {  // aud2 t03
+        e.kind == K::ProductionBegin || e.kind == K::ProductionCanceled || e.kind == K::ProductionCompleted ||  // aud2 t03
+        (e.kind == K::FleetArrived && e.value == galactic::kArrivePassThrough)) {  // aud2 t07: marks the next departure a hop
         if (announce_events_.size() < 256) announce_events_.push_back(e);  // ui4 t08 (bounded when nobody takes them)
         return;
     }
