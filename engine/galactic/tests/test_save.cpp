@@ -711,6 +711,18 @@ void test_synthetic() {
     sc.prepare = [](GalacticSim& s) {
         s.set_emit_events(true);
         s.reveal_all_planets();
+        // map1 t06: a structure marker record (saved v9, hashed) on two live objects, written out of id order
+        std::vector<objects::ObjectId> ids;
+        for (const PlanetState& p : s.planets())
+            if (p.is_planet && s.store().alive(p.object)) ids.push_back(s.store().id(p.object));
+        if (ids.size() >= 2) {
+            s.set_structure_slot(ids[1], 3, 7001);
+            s.set_structure_slot(ids[0], 0, 7002);
+            s.set_structure_slot(ids[1], 4, 7003);  // overwrite
+            CHECK(s.structure_slots().size() == 2 && s.structure_slots()[0].object < s.structure_slots()[1].object);
+            const GalacticSim::StructureSlot* e = s.structure_slot(ids[1]);
+            CHECK(e && e->slot == 4 && e->marker == 7003 && !s.structure_slot(objects::kNoObjectId));
+        }
     };
     sc.drive = drive_synthetic;
     sc.full_prefix_limit = 1u << 20;  // every prefix
@@ -789,8 +801,13 @@ void test_queue_phases() {
         // holder (12 bytes) and the neutralized counts (u32 count 0 here); a v7 image is read with the start() homes and
         // no galab state, which is this session's state, so it writes back as the v8 bytes.
         const size_t galab = 4 * s.players().size() + 12 * s.planets().size() + 4;
-        CHECK(bytes.size() >= galab + 12 && bytes[0] == 8 && bytes[bytes.size() - 1] == 0);
-        std::vector<uint8_t> v7(bytes.begin(), bytes.end() - static_cast<std::ptrdiff_t>(galab));
+        // map1 t06: v9 adds the structure marker memory after them (u32 count 0 here); a v8 image reads as none.
+        CHECK(bytes.size() >= galab + 16 && bytes[0] == 9 && bytes[bytes.size() - 1] == 0);
+        std::vector<uint8_t> v8(bytes.begin(), bytes.end() - 4);
+        v8[0] = 8;
+        ByteReader r8(v8);
+        CHECK(o.read(r8) && o.structure_slots().empty() && sim_bytes(o) == bytes);
+        std::vector<uint8_t> v7(v8.begin(), v8.end() - static_cast<std::ptrdiff_t>(galab));
         v7[0] = 7;
         ByteReader r7(v7);
         CHECK(o.read(r7) && sim_bytes(o) == bytes);

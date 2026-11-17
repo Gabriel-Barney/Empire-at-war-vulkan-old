@@ -1901,6 +1901,24 @@ void GalacticSim::set_in_battle(PlanetIndex planet, bool on) {
     if (valid_planet(planet)) planets_[planet].in_battle = on;
 }
 
+const GalacticSim::StructureSlot* GalacticSim::structure_slot(objects::ObjectId object) const {
+    const auto it = std::lower_bound(structure_slots_.begin(), structure_slots_.end(), object,
+                                     [](const StructureSlot& e, objects::ObjectId v) { return e.object < v; });
+    return it != structure_slots_.end() && it->object == object ? &*it : nullptr;
+}
+
+void GalacticSim::set_structure_slot(objects::ObjectId object, int32_t slot, int32_t marker) {
+    if (object == objects::kNoObjectId) return;
+    const auto it = std::lower_bound(structure_slots_.begin(), structure_slots_.end(), object,
+                                     [](const StructureSlot& e, objects::ObjectId v) { return e.object < v; });
+    if (it != structure_slots_.end() && it->object == object) {
+        it->slot = slot;
+        it->marker = marker;
+        return;
+    }
+    structure_slots_.insert(it, StructureSlot{object, slot, marker});
+}
+
 void GalacticSim::keep_built_objects(PlanetIndex planet, int32_t keep) {
     // AI_GALACTIC_TOKENS §9.4 owner filter 0x4b7d90: last to first, every record owned by another player is erased.
     if (planet >= planets_.size()) return;
@@ -2138,6 +2156,15 @@ void GalacticSim::hash_state(StateHasher& h) const {
     if (!reveal_state_default()) hash_reveal(h);  // GRC: local player, auto-reveal, revealed bytes, transitions
     if (!visibility_state_default()) hash_visibility(h);  // GRC 2: stored visibility modifier entries
     if (!galab_state_default()) hash_galab(h);  // galab: planet bonus holders, siphon sources, neutralized counts
+    if (!structure_slots_.empty()) {  // map1 t06: structure marker memory
+        h.u32(0x314C534Du);  // section marker "MSL1"
+        h.u32(static_cast<uint32_t>(structure_slots_.size()));
+        for (const StructureSlot& e : structure_slots_) {
+            h.i32(e.object);
+            h.i32(e.slot);
+            h.i32(e.marker);
+        }
+    }
 }
 
 void GalacticSim::register_crc(CrcRegistry& registry, const std::string& prefix, bool include_store) const {

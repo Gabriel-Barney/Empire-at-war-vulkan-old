@@ -359,6 +359,8 @@ public:
     RadarFeed radar_feed_;  // radar_feed.hpp: death / capture-point pings, story blips (host-side, read-only)
     std::vector<ui::RadarField> radar_fields_;  // space battle's asteroid fields (painted into the radar picture)
     bool radar_fields_built_ = false, radar_fields_dirty_ = false;
+    std::vector<uint8_t> radar_terrain_;  // map1 t02: the land battle's passability picture (RGBA, 128 x 128, row 0 = south)
+    bool radar_terrain_built_ = false;
     ui::EncyclopediaPanel ency_;
     // HUD_GAPS §2.2: the encyclopedia config (GameConstants) with the profile's IDC_DELAY_TOOLTIPS; the type of each recently
     // hovered object (the pop-up keeps drawing its shown_object() while fading out after the hover is lost).

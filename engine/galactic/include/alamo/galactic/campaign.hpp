@@ -673,6 +673,19 @@ public:
     std::vector<PersistedBuiltObject>* built_objects(PlanetIndex planet) {
         return planet < planets_.size() ? &planets_[planet].built_objects : nullptr;
     }
+    // map1 t06 (REMAINING_GAPS 3.2 step 4): a galactic structure's tactical placement memory, written by the battle host when
+    // it places the structure on a map marker: obj +0x3ac (the slot index) and +0x3b0 (the marker's map object id). The next
+    // battle on that planet reuses the remembered marker before the normal placement (pass 1). The original keeps both on the
+    // object; the port keeps one record per galactic object id (id-ascending). Saved (v9, live objects only), hashed in the
+    // "MSL1" tail once non-empty.
+    struct StructureSlot {
+        int32_t object = objects::kNoObjectId;
+        int32_t slot = -1;
+        int32_t marker = -1;
+    };
+    const StructureSlot* structure_slot(objects::ObjectId object) const;
+    void set_structure_slot(objects::ObjectId object, int32_t slot, int32_t marker);
+    std::span<const StructureSlot> structure_slots() const { return structure_slots_; }
     // Owner filter 0x4b7d90: erase every record of `planet` whose owner is not `keep`, walking last to first (the order of
     // the rest is unchanged). Called after every land result (ConflictManager: fought battle, land auto-resolve, invasion
     // without a battle); other owner changes keep the records.
@@ -1361,6 +1374,7 @@ private:
     StoryGates story_gates_;              // STY1 lane B: set by the story session, never saved here
     std::vector<std::pair<int32_t, uint8_t>> victory_deferred_;  // q6 t21: {player, type}, monitor +0x60
     std::vector<std::pair<int32_t, std::string>> names_;  // [port] fleet / ship names {ObjectId, name}, id-ascending (v7)
+    std::vector<StructureSlot> structure_slots_;  // map1 t06: structure marker memory, object-id-ascending (v9)
     // galab §7: GameScoring's GalacticNeutralizedTable {player, type, count}, (player, type)-ascending (v8, "GLB1" tail)
     struct NeutralizedEntry {
         int32_t player = 0;

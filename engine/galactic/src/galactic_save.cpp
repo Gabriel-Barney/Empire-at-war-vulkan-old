@@ -52,8 +52,10 @@ namespace {
 // deferred victory tests; v7 (2026-11-13, [port: Gabriel]): + the fleet / ship names. Only the current version is read,
 // and v6 (no names: read as none), so saves from before the names still load. v8 (galab): + per player the home planet,
 // per planet the siphon source type / object and the bonus holder, then the neutralized counts {player, type, count};
-// v6 / v7 read them as the session's start() values (home) and none.
-constexpr uint32_t kGalacticSaveVersion = 8;
+// v6 / v7 read them as the session's start() values (home) and none. v9 (map1 t06): + the structure marker memory
+// {i32 object, i32 slot, i32 marker}, object-id-ascending, live objects only; v6 - v8 read it as none.
+constexpr uint32_t kGalacticSaveVersion = 9;
+constexpr uint32_t kGalacticSaveVersionNoSlots = 8;
 constexpr uint32_t kGalacticSaveVersionNoGalab = 7;
 constexpr uint32_t kGalacticSaveVersionNoNames = 6;
 constexpr uint32_t kConflictSaveVersion = 3;  // v2: BattleRequest::linked (story t10); v3: BattleRequest::sandbox (q6)
@@ -249,12 +251,18 @@ void GalacticSim::write(ByteWriter& w) const {
     for (const PlanetState& p : planets_) w.u32(p.siphon_type).i32(p.siphon_source).i32(p.bonus_holder);
     w.u32(static_cast<uint32_t>(neutralized_.size()));  // GA §7 neutralized counts, (player, type)-ascending
     for (const NeutralizedEntry& e : neutralized_) w.i32(e.player).u32(e.type).i32(e.count);
+    uint32_t live_slots = 0;  // map1 t06 (v9): structure marker memory of live objects only
+    for (const StructureSlot& e : structure_slots_) live_slots += st.alive(st.find(e.object)) ? 1u : 0u;
+    w.u32(live_slots);
+    for (const StructureSlot& e : structure_slots_)
+        if (st.alive(st.find(e.object))) w.i32(e.object).i32(e.slot).i32(e.marker);
 }
 
 bool GalacticSim::read(ByteReader& r) {
     const objects::ObjectStore& st = *store_;
     const uint32_t version = r.u32();
-    if ((version != kGalacticSaveVersion && version != kGalacticSaveVersionNoGalab && version != kGalacticSaveVersionNoNames) ||
+    if ((version != kGalacticSaveVersion && version != kGalacticSaveVersionNoSlots && version != kGalacticSaveVersionNoGalab &&
+         version != kGalacticSaveVersionNoNames) ||
         !r.ok())
         return false;
     const uint32_t rows = r.u32(), routes = r.u32(), types = r.u32(), np = r.u32();
@@ -585,6 +593,19 @@ bool GalacticSim::read(ByteReader& r) {
                 return false;  // ascending, unique
         }
     }
+    std::vector<StructureSlot> slots;  // map1 t06 (v9)
+    if (version >= 9) {
+        uint32_t nslots = 0;
+        if (!r.count(nslots, 12)) return false;
+        slots.resize(nslots);
+        for (size_t i = 0; i < slots.size(); ++i) {
+            slots[i].object = r.i32();
+            slots[i].slot = r.i32();
+            slots[i].marker = r.i32();
+            if (!r.ok() || !st.alive(st.find(slots[i].object))) return false;  // a live object of the restored store
+            if (i > 0 && slots[i].object <= slots[i - 1].object) return false;  // ascending, unique
+        }
+    }
     if (!r.ok() || !r.done()) return false;
 
     // ---- commit ----
@@ -612,6 +633,7 @@ bool GalacticSim::read(ByteReader& r) {
     victory_deferred_ = std::move(deferred);
     names_ = std::move(names);
     neutralized_ = std::move(neutralized);
+    structure_slots_ = std::move(slots);
     neutralize_offer_.clear();
     events_ = std::move(events);
     // Rebuilt caches: store slot -> fleet / planet (creation order, so a reused slot maps to the newest fleet as

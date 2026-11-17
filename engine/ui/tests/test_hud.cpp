@@ -1157,6 +1157,20 @@ void test_tactical_hud() {
         CHECK(hud.stats().radar_blips == 4);
         types[0].visible_on_radar_when_fogged = false;
         units[3].script_hidden = false;
+        // map1 t01 (radar filter 0x35b4d0): a fog-hidden unit has no blip unless Visible_On_Radar_When_Fogged; a
+        // contained (garrisoned / transported) one has none either way.
+        units[3].fog_hidden = true;
+        hud.build(fr, units, types);
+        CHECK(hud.stats().radar_blips == 3);
+        types[0].visible_on_radar_when_fogged = true;
+        hud.build(fr, units, types);
+        CHECK(hud.stats().radar_blips == 4);
+        units[3].fog_hidden = false;
+        units[3].contained = true;
+        hud.build(fr, units, types);
+        CHECK(hud.stats().radar_blips == 3);
+        types[0].visible_on_radar_when_fogged = false;
+        units[3].contained = false;
     }
     CHECK(digest != 0);
 }

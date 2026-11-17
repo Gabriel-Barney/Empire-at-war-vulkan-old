@@ -233,6 +233,15 @@ void test_chunks() {
 void test_round_trip() {
     MapData m = make_map(2, 1);
     if (m.objects.size() > 1) m.objects[1].hint = "falcongear1";  // q6 t28: 0x482 hint name
+    if (m.objects.size() > 1) {  // map1 t04: 0x46E marker name (empty but present on object 0) and 0x4B7 extra behaviours
+        m.objects[0].has_marker_name = true;
+        m.objects[1].has_marker_name = true;
+        m.objects[1].marker_name = "inf4";
+        ObjectPlacement::ExtraBehavior e;
+        e.name_crc = alamo::name_crc("HINT");
+        e.raw = {mk_u32(0x01, 0), mk_u32(0x02, 0), mk_u32(0x03, 0x062E8B5Cu)};
+        m.objects[1].extra_behaviors.push_back(e);
+    }
     const std::vector<uint8_t> bytes = write_ted(m);
     MapData r;
     std::string err;
@@ -271,8 +280,15 @@ void test_round_trip() {
         CHECK(p.has_secondary == q.has_secondary && p.attachments == q.attachments && p.attachment_slots == q.attachment_slots);
         CHECK(p.owner_raw == q.owner_raw);
         CHECK(p.hint == q.hint);
+        CHECK(p.has_marker_name == q.has_marker_name && p.marker_name == q.marker_name);
+        CHECK(p.extra_behaviors.size() == q.extra_behaviors.size());
+        for (size_t k = 0; k < std::min(p.extra_behaviors.size(), q.extra_behaviors.size()); ++k)
+            CHECK(p.extra_behaviors[k].name_crc == q.extra_behaviors[k].name_crc && q.extra_behaviors[k].raw.size() == 4);
     }
     CHECK(r.objects.size() > 1 && r.objects[0].hint.empty() && r.objects[1].hint == "falcongear1");
+    CHECK(r.objects.size() > 1 && r.objects[0].has_marker_name && r.objects[0].marker_name.empty() && r.objects[1].marker_name == "inf4" &&
+          r.objects[0].extra_behaviors.empty() && r.objects[1].extra_behaviors.size() == 1 &&
+          r.objects[1].extra_behaviors[0].name_crc == 0x0253EEE7u);  // name_crc("HINT"), the shipped id
     CHECK(r.playable.has_box && r.playable.box_min[0] == 300.0f && r.playable.box_max[0] == 1000.0f);
     CHECK(r.zones.size() == 1 && r.zones[0].name == "New Zone 1" && r.zones[0].id == 77 && r.zones[0].cells.size() == 2 &&
           r.zones[0].cells[0].x == 38 && r.zones[0].cells[0].y == 59 && r.zones[0].links.size() == 1);
@@ -1704,7 +1720,7 @@ void test_real_data() {
 
     // 1. Every map in the VFS parses and (land) builds.
     const auto maps = vfs->list("Data\\Art\\Maps\\*.ted");
-    uint32_t ok = 0, land = 0, space = 0, legacy = 0, hints = 0, hint_maps = 0;
+    uint32_t ok = 0, land = 0, space = 0, legacy = 0, hints = 0, hint_maps = 0, extra = 0, extra_maps = 0, marker_names = 0;
     std::map<uint32_t, uint32_t> unknown_ids;
     const auto t_all = std::chrono::steady_clock::now();
     for (const std::string& path : maps) {
@@ -1722,6 +1738,14 @@ void test_real_data() {
             for (const ObjectPlacement& o : m.objects) n += o.hint.empty() ? 0u : 1u;
             hints += n;
             hint_maps += n ? 1u : 0u;
+            uint32_t x = 0;  // map1 t04: 0x4B7 extra behaviours (every shipped one is HINT), 0x46E marker names
+            for (const ObjectPlacement& o : m.objects) {
+                x += static_cast<uint32_t>(o.extra_behaviors.size());
+                marker_names += o.has_marker_name ? 1u : 0u;
+                for (const ObjectPlacement::ExtraBehavior& e : o.extra_behaviors) CHECK(e.name_crc == alamo::name_crc("HINT"));
+            }
+            extra += x;
+            extra_maps += x ? 1u : 0u;
         }
         {
             ParseOptions eo;
@@ -1756,6 +1780,10 @@ void test_real_data() {
     CHECK(ok == maps.size() && ok > 0);
     std::printf("map hints (0x482): %u in %u maps\n", hints, hint_maps);
     CHECK(hints > 2000 && hint_maps > 50);  // TERRAIN_WATER_POST 1.6 counts maps.meg alone (2741 in 155 maps)
+    // map1 t04: FoC + EaW maps.meg hold 3954 HINT entries in 182 maps and 6820 0x46E chunks (scan 2026-11-17); the VFS serves
+    // the patched copies, so the counts are bounds.
+    std::printf("map extra behaviours (0x4B7): %u in %u maps; marker names (0x46E): %u\n", extra, extra_maps, marker_names);
+    CHECK(extra > 1500 && extra_maps > 50 && marker_names > 2000);
     {  // UM01 (Underworld act I mission 1): 154 hints in maps.meg (the patched copy the VFS serves: 152); Find_Hint("UMP_SMALL_GEAR", "falcongear1") needs this one.
         MapData um;
         CHECK(load_map(*vfs, "UM01_A_Crimelord_Unleashed", um));
