@@ -16,7 +16,8 @@
 //   (only kAbilitySaveVersion is read, cu6)
 //   u32 + spawn requests (v4: + i32 trooper squad), mines, Battlefield_Modifier player entries (cu8f t06: the Enable_*
 //   gate lists use list numbers 4..6, same layout), interdict / retreat / weatherproof entries,
-//   remote bombs, events, player overrides, type overrides; u32 + per-player black-market lists (not hashed, but read
+//   remote bombs, events, v7 (r3h): queued animation plays (i32 id, i32 type, u32 variant, u8 loop / direct /
+//   only-from-idle, f32 blend, f32 speed, u32 frame), player overrides, type overrides; u32 + per-player black-market lists (not hashed, but read
 //   by the gates)
 // Rebuilt / not saved: the query scratch lists, the host query table (AbilityHost), the bound RNG, the fog callback.
 //
@@ -44,8 +45,10 @@ namespace {
 
 // 2: OI follow-up animation record + lock pairs; 3: cu8 t02 stealth bonus gone; 4: cu8f t01 special restore target,
 // cu8f t06 trooper squads, LURE pack, spawn-request squad; 5: TRU1 t03 gravity control field state; 6: r3g t02 the timed
-// DEPLOY_TROOPERS machine and the rope landing, r3g t04 the cable hold count. Only the current version is read (cu6).
-constexpr uint32_t kAbilitySaveVersion = 6;
+// DEPLOY_TROOPERS machine and the rope landing, r3g t04 the cable hold count; 7: r3h the queued animation plays (a
+// play queued after the host drained the queue - AI / Lua activations, damage listeners, deaths - waits for the next
+// tick). Only the current version is read (cu6).
+constexpr uint32_t kAbilitySaveVersion = 7;
 constexpr uint32_t kSpecialWeaponSaveVersion = 1;
 constexpr uint32_t kSpaceFieldSaveVersion = 1;
 
@@ -143,6 +146,9 @@ void AbilitySystem::write(ByteWriter& w) const {
         put_vec3(w, e.point);
         w.i32(e.value);
     }
+    w.u32(static_cast<uint32_t>(anim_plays_.size()));  // r3h: plays still waiting for the host
+    for (const AbilityAnimPlay& p : anim_plays_)
+        w.i32(p.id).i32(p.type).u32(p.variant).u8(p.loop).u8(p.direct).u8(p.only_from_idle).f32(p.blend).f32(p.speed).u32(p.frame);
     w.u32(static_cast<uint32_t>(overrides_.size()));
     for (const PlayerOverride& p : overrides_) w.i32(p.player).u32(p.crc).u8(p.enabled);
     w.u32(static_cast<uint32_t>(type_overrides_.size()));
@@ -366,6 +372,20 @@ bool AbilitySystem::read(ByteReader& r) {
         if (!r.ok() || kind > static_cast<uint8_t>(AbilityEventKind::TrooperReleased)) return false;
         e.kind = static_cast<AbilityEventKind>(kind);
     }
+    if (!r.count(n, 31)) return false;
+    std::vector<AbilityAnimPlay> anim_plays(n);
+    for (AbilityAnimPlay& p : anim_plays) {
+        p.id = r.i32();
+        p.type = r.i32();
+        p.variant = r.u32();
+        p.loop = r.u8();
+        p.direct = r.u8();
+        p.only_from_idle = r.u8();
+        p.blend = r.f32();
+        p.speed = r.f32();
+        p.frame = r.u32();
+    }
+    if (!r.ok()) return false;
     if (!r.count(n, 9)) return false;
     std::vector<PlayerOverride> overrides(n);
     for (PlayerOverride& p : overrides) {
@@ -400,6 +420,7 @@ bool AbilitySystem::read(ByteReader& r) {
     source_entries_ = std::move(source_entries);
     remote_bombs_ = std::move(remote_bombs);
     events_ = std::move(events);
+    anim_plays_ = std::move(anim_plays);  // r3h
     visuals_.clear();  // vis1 t06: presentation only, not saved (the serial keeps counting)
     activations_.clear();  // aud1 t10: likewise
     overrides_ = std::move(overrides);

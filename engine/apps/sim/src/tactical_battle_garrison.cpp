@@ -669,9 +669,11 @@ void TacticalBattle::bt_capture_anims(SimRng& rng, uint64_t gframe) {
     const objects::GameObjectTypes& types = catalog_->types();
     const auto& players = galaxy_->players();
     const auto& factions = galaxy_->rules().factions;
+    const anim::AnimBehaviors* beh = anim_->find_behaviors(*gm);
     for (const tg::CaptureAnim& a : captures_->anims()) {
         const objects::ObjectHandle h = st.find(a.point);
-        if (!st.exists(h) || !w->contains(a.point)) continue;
+        if (!st.exists(h) || !w->contains(a.point) || (beh && beh->is_corpse(a.point))) continue;  // r3h review: no corpse rows
+        if (combat_ && combat_->has_unit(a.point) && !combat_->alive(a.point)) continue;
         int32_t player = a.controller;
         if (a.transition && bt_owner_neutral(a.controller)) player = a.owner;
         std::string_view faction;

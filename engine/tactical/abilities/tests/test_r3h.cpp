@@ -111,6 +111,73 @@ void r3h_generic(bool interrupt) {
     }
 }
 
+// r3h review: Generic_Attack with two Attack_Animation variants (20 and 40 frames): the apply draws one (0xFFFF) and the
+// update times the hit and the end on the drawn clip - the 40-frame variant ends 20 frames later than the 20-frame one.
+// Returns the drawn variant, the tick the special was removed and the tick of the default idle.
+struct GenericRun {
+    uint32_t variant = 0xFFFFu;
+    int removed = -1, idle = -1;
+    float health = 0.0f;
+};
+GenericRun r3h_generic_variant(uint32_t seed) {
+    OiWorld w;
+    SpecialAbilityDesc g = oi_special("Pound", SpecialClass::GenericAttack, ActivationStyle::UserInput);
+    g.max_range = 100.0f;
+    g.damage_amount = 30.0f;
+    g.damage_frame = 10;
+    g.anim_speedup = 1.0f;
+    g.attack_anim = "POUND_ATTACK";
+    const uint32_t gs = add_special(w.ad, g);
+    AbilityObjectDesc a;
+    a.unit_abilities = {oi_gui(kTargetedHack, 0.0f, 0.0f, "Pound")};
+    a.specials = {gs};
+    const uint32_t ud = push(w.cd, w.ad, oi_unit("Rancor", 1000.0f), a);
+    const uint32_t td = push(w.cd, w.ad, oi_unit("Victim", 100.0f), AbilityObjectDesc{});
+    w.make(GameMode::Land);
+    w.rng = SimRng{seed};
+    AbilityHost h;
+    h.anim_type = [](std::string_view n) { return anim_id(n); };
+    h.anim_variants = [](ObjectId id, int32_t type) { return (id == 1 && type == 63) ? 2u : 0u; };
+    h.anim_clip = [](ObjectId id, int32_t type, std::string_view name, uint32_t v, uint32_t& n, float& f) {
+        if (id != 1 || v > 1 || (type != 63 && name != "POUND_ATTACK")) return false;
+        n = v == 0 ? 20u : 40u;
+        f = 30.0f;
+        return true;
+    };
+    w.ab->set_host(std::move(h));
+    w.add(1, ud, 0, {0, 0, 0});
+    w.add(2, td, 1, {50, 0, 0});
+    std::vector<PlayRec> log;
+    const ObjectId one[] = {1};
+    GenericRun r;
+    if (w.ab->targeted_ability(one, kTargetedHack, 2, -1, w.frame) != 1) return r;
+    drain(w, log);
+    for (int i = 1; i <= 60 && r.removed < 0; ++i) {
+        w.tick();
+        drain(w, log);
+        if (!w.ab->special_applied(1, name_crc("Pound"))) r.removed = i;
+    }
+    if (!log.empty()) r.variant = log[0].variant;
+    for (const PlayRec& p : log)
+        if (p.type == kAbilityPlayDefaultIdle && !log.empty()) r.idle = static_cast<int>(p.frame - log[0].frame);
+    r.health = w.sys->health(2);
+    return r;
+}
+
+void r3h_generic_variants() {
+    GenericRun v0, v1;
+    for (uint32_t seed = 1; seed <= 64 && (v0.removed < 0 || v1.removed < 0); ++seed) {
+        const GenericRun r = r3h_generic_variant(seed);
+        if (r.variant == 0 && v0.removed < 0) v0 = r;
+        if (r.variant == 1 && v1.removed < 0) v1 = r;
+    }
+    std::printf("  r3h generic variants: v0 removed %d idle +%d health %.0f; v1 removed %d idle +%d health %.0f\n", v0.removed,
+                v0.idle, static_cast<double>(v0.health), v1.removed, v1.idle, static_cast<double>(v1.health));
+    CHECK(v0.removed > 0 && v1.removed == v0.removed + 20);
+    CHECK(v0.idle == 18 && v1.idle == 38);
+    CHECK(v0.health == 70.0f && v1.health == 70.0f);
+}
+
 // Eat_Attack (§4.14, r3h t04): the owner plays Attack_Animation (blend 0.2); at Attachment_Frame the victim loops its
 // Target_Grabbed_Animation (EATEN_DIE 65, blend 0); it is destroyed at Target_Destruction_Frame.
 void r3h_eat() {
@@ -209,10 +276,36 @@ int r3h_berserker_passes(uint32_t seed, std::vector<uint32_t>* variants, const s
     return static_cast<int>(100000.0f - w.sys->health(2));
 }
 
+// r3h review S2-1: a play queued after the host drained the queue (here an activation between ticks) is saved: the run
+// loaded from that point hands its host the same plays and ends in the same state as the unbroken run.
+void r3h_save_queue() {
+    OiWorld a;
+    oi_gate_world(a, true, nullptr);
+    const ObjectId one[] = {1};
+    CHECK(a.ab->targeted_ability(one, kForceLightning, 2, -1, a.frame) == 1);
+    const SavedBattle saved = save_battle(*a.sys, *a.ab, a.rng);
+    OiWorld b;
+    oi_gate_world(b, true, nullptr);
+    CHECK(load_battle(*b.sys, *b.ab, b.rng, saved));
+    b.frame = a.frame;
+    std::vector<PlayRec> la, lb;
+    for (int i = 0; i < 40; ++i) {
+        a.tick();
+        drain(a, la);
+        b.tick();
+        drain(b, lb);
+    }
+    std::printf("  r3h save queue: unbroken%s / loaded%s\n", trace(la).c_str(), trace(lb).c_str());
+    CHECK(la.size() == 2 && trace(la) == trace(lb));
+    CHECK(battle_digest(*a.sys, *a.ab, a.rng) == battle_digest(*b.sys, *b.ab, b.rng));
+}
+
 void test_r3h_anim_plays() {
     r3h_lightning();
+    r3h_save_queue();
     r3h_generic(false);
     r3h_generic(true);
+    r3h_generic_variants();  // r3h review
     r3h_eat();
     // Berserker: one variant (no draws) - 38 frames: restarts every 35 frames, 25 passes; 36 frames: every 33, 22 passes.
     const int p38 = r3h_berserker_passes(777u, nullptr, {38u});

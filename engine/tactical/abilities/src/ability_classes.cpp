@@ -117,21 +117,32 @@ uint32_t AbilitySystem::resolve_variant(ObjectId id, int32_t type, uint32_t vari
     return n >= 2 ? static_cast<uint32_t>(draw_int(0, static_cast<int32_t>(n) - 1)) : 0u;
 }
 
-void AbilitySystem::play_anim(Obj& o, int32_t type, std::string_view anim_name, uint32_t variant, bool loop, float speed,
-                              uint8_t then, uint32_t frame, float blend, bool direct) {
+uint32_t AbilitySystem::play_anim(Obj& o, int32_t type, std::string_view anim_name, uint32_t variant, bool loop, float speed,
+                                  uint8_t then, uint32_t frame, float blend, bool direct) {
+    // Returns the variant played (the drawn one for 0xFFFF), 0 when nothing played.
+    // r3h review: a closing play (FB / FTK release, Force_Revel_End) the model lacks ends the hold in the record - the
+    // world keeps its last clip, and a record still holding would gate the locomotor / IDLE for good.
+    const auto closing_failed = [&o, then, frame] {
+        if ((then == kAnimIdleLoop0 || then == kAnimIdleService) && o.anim_type >= 0 && o.anim_then == kAnimHoldLoop) {
+            o.anim_type = -1;
+            o.anim_start = frame;
+            o.anim_then = kAnimStay;
+        }
+        return 0u;
+    };
     if (type < 0) type = anim_type_of(anim_name);
-    if (type < 0) return;
-    if (variant == kDrawVariant && variant_count(o.id, type) == 0) return;  // no clip: no draw, nothing changes
+    if (type < 0) return closing_failed();
+    if (variant == kDrawVariant && variant_count(o.id, type) == 0) return closing_failed();  // no clip: no draw
     variant = resolve_variant(o.id, type, variant);
     const ClipTiming ct = clip_timing(o.id, type, {}, variant);
-    if (ct.count <= 0.0f) return;  // the model lacks the clip: the play returns 0, nothing changes
+    if (ct.count <= 0.0f) return closing_failed();  // the model lacks the clip: the play returns 0, the record stays
     o.anim_type = type;
     o.anim_start = frame;
     o.anim_rate = ct.rate * speed;
     o.anim_end = ct.end;
     o.anim_loop = loop ? 1 : 0;
     o.anim_then = then;
-    if (then == kAnimWeaponShot) return;  // the host's weapon behaviour played it already
+    if (then == kAnimWeaponShot) return variant;  // the host's weapon behaviour played it already
     AbilityAnimPlay p;
     p.id = o.id;
     p.type = type;
@@ -142,6 +153,7 @@ void AbilitySystem::play_anim(Obj& o, int32_t type, std::string_view anim_name, 
     p.speed = speed;
     p.frame = frame;
     anim_plays_.push_back(p);
+    return variant;
 }
 
 bool AbilitySystem::queue_play(ObjectId id, int32_t type, uint32_t variant, bool loop, float blend, float speed, uint32_t frame,
@@ -175,7 +187,11 @@ void AbilitySystem::anim_follow_ups(uint32_t frame, SimRng& rng) {
         if (o.anim_type < 0 || o.anim_loop || o.dead || frame < o.anim_start) continue;
         if (!finished_at(o, frame) || (frame > o.anim_start && finished_at(o, frame - 1))) continue;
         switch (o.anim_then) {
-            case kAnimHoldLoop: queue_play(o.id, o.anim_type + 1, kDrawVariant, true, 0.1f, 1.0f, frame); break;
+            case kAnimHoldLoop:
+                // r3h review: no hold clip - the world keeps the finished begin clip; the record shows it finished
+                // (not a hold the world never played, which observe_clip would take for a replacement)
+                if (!queue_play(o.id, o.anim_type + 1, kDrawVariant, true, 0.1f, 1.0f, frame)) o.anim_then = kAnimStay;
+                break;
             case kAnimIdleLoop0: queue_play(o.id, 0, kDrawVariant, true, 0.2f, 1.0f, frame); break;
             case kAnimIdle: {
                 AbilityAnimPlay p;
@@ -691,8 +707,10 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             sp.victims.clear();
             // §4.14: Attack_Animation one-shot at Speedup, blend 0.2, then the default idle (Arc: the explicit Subindex
             // variant; Generic / Eat: 0xFFFF, r3h t03; [port] Eat plays at the apply)
-            play_anim(o, -1, s.attack_anim, s.cls == C::ArcSweep ? static_cast<uint32_t>(std::max(0, s.anim_sub_index)) : kDrawVariant,
-                      false, s.anim_speedup, kAnimIdle, frame, 0.2f);
+            // r3h review: sp.cooldown = the variant played, whose clip times the attack (class_update)
+            sp.cooldown = static_cast<int32_t>(
+                play_anim(o, -1, s.attack_anim, s.cls == C::ArcSweep ? static_cast<uint32_t>(std::max(0, s.anim_sub_index)) : kDrawVariant,
+                          false, s.anim_speedup, kAnimIdle, frame, 0.2f));
             event(AbilityEventKind::EffectOn, sp.trigger, o.id, target, frame);
             return true;
         }
@@ -1221,7 +1239,8 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
                 }
                 // Toss_Anim one-shot (0x3a92f0, speed 1). sp.counter = the play was recorded (clip data): later plays that
                 // replace it are seen as an interruption.
-                play_anim(o, -1, s.toss_anim, kDrawVariant, false, 1.0f, kAnimIdle, frame);  // r3h: [port] 0xFFFF, blend 0
+                // r3h: [port] 0xFFFF, blend 0; sp.cooldown = the variant played (its clip times the toss and the end)
+                sp.cooldown = static_cast<int32_t>(play_anim(o, -1, s.toss_anim, kDrawVariant, false, 1.0f, kAnimIdle, frame));
                 const int32_t tt = anim_type_of(s.toss_anim);
                 sp.counter = (tt >= 0 && o.anim_type == tt && o.anim_start == frame) ? 1 : 0;
             }
@@ -1232,7 +1251,7 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
             }
             // 2. animation frame >= Spawn_Frame (n x rate, §4.13; [port] no clip: rate 1): toss once (0x71a200, the
             // recharge only when a bomb spawned); at its end (no clip: at the toss) unlock and end the ability.
-            const ClipTiming ct = clip_timing(o.id, -1, s.toss_anim);
+            const ClipTiming ct = clip_timing(o.id, -1, s.toss_anim, static_cast<uint32_t>(std::max(0, sp.cooldown)));
             const float anim = static_cast<float>(frame - sp.next) * ct.rate;
             if (sp.phase == 1 && anim >= s.spawn_frame) {
                 sp.phase = 2;
@@ -1279,8 +1298,9 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
         case C::ArcSweep:
         case C::GenericAttack:
         case C::EatAttack: {  // Attack_Animation on sim frames x rate x Attack_Animation_Speedup (§4.13)
-            const ClipTiming ct =
-                clip_timing(o.id, -1, s.attack_anim, s.cls == C::ArcSweep ? static_cast<uint32_t>(std::max(0, s.anim_sub_index)) : 0u);
+            // r3h review: Arc its Subindex variant, Generic / Eat the variant the apply played (sp.cooldown)
+            const ClipTiming ct = clip_timing(o.id, -1, s.attack_anim,
+                                              static_cast<uint32_t>(std::max(0, s.cls == C::ArcSweep ? s.anim_sub_index : sp.cooldown)));
             const float anim = static_cast<float>(frame - sp.next) * ct.rate * s.anim_speedup;
             // the hold ends at the animation end, or with the last frame-numbered event when there is no clip
             const bool ended = ct.count <= 0.0f || anim >= ct.end;

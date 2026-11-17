@@ -1017,7 +1017,7 @@ private:
     // data nothing changes (as the original play returns 0 for a missing clip). r3h t03: variant kDrawVariant = one synced
     // draw when the clip has >= 2 variants; r3h t01: the play is also queued for the host (AbilityAnimPlay) unless `then`
     // is kAnimWeaponShot. `direct`: ModelClass play called directly (no lock, no Berserker redirect).
-    void play_anim(Obj& o, int32_t type, std::string_view anim_name, uint32_t variant, bool loop, float speed, uint8_t then,
+    uint32_t play_anim(Obj& o, int32_t type, std::string_view anim_name, uint32_t variant, bool loop, float speed, uint8_t then,
                    uint32_t frame, float blend = 0.0f, bool direct = false);
     // r3h t01: a play without a record (victims: FW_Attack, Eat's grab; Contaminate / Heal / Hack users ...): queued for the
     // host when `id`'s model has the clip, variant kDrawVariant drawn as play_anim does. True when queued.
@@ -1026,7 +1026,7 @@ private:
     uint32_t resolve_variant(ObjectId id, int32_t type, uint32_t variant);  // kDrawVariant -> the draw; else as given
     uint32_t variant_count(ObjectId id, int32_t type) const;
     void anim_follow_ups(uint32_t frame, SimRng& rng);  // r3h t01: plays that follow a one-shot finishing at `frame`
-    std::vector<AbilityAnimPlay> anim_plays_;          // r3h t01: presentation only (never hashed / saved)
+    std::vector<AbilityAnimPlay> anim_plays_;          // r3h t01: plays waiting for the host (saved, not hashed)
     AnimView anim_view(const Obj& o, uint32_t frame) const;
     // Apply gates read the previous frame's advance (Object Service advances the model before the SAP update).
     AnimView anim_before(const Obj& o, uint32_t frame) const { return anim_view(o, frame > 0 ? frame - 1 : 0); }

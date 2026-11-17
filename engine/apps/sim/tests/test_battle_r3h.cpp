@@ -154,12 +154,119 @@ void test_force_sight_rows() {
 #endif
 }
 
+// r3h review S2-2: a trooper killed by a lethal script Take_Damage while its Force_Sight loop runs - the dying removes
+// the special (Force_Revel_End queued) and the death clip starts; no ability clip is played over the death clip / corpse.
+// Without a Die clip the row stays as an unlocked corpse (no death clip locks it): the queued End must not play on it.
+void test_force_sight_death(bool die_clip) {
+#ifdef ALAMO_SIM_HAVE_ANIM
+    g_temp_prefix = die_clip ? "alamo_sim_r3h_tests_death" : "alamo_sim_r3h_tests_corpse";
+    g_types_patch = sight_patch;
+    auto d = make_data();
+    g_types_patch = nullptr;
+    const objects::TypeIndex trooper = d->types.resolve_name("S10_Trooper");
+    const auto model = die_clip ? synth_model("R3H_TROOPER", {{anim::kAnimIdle, 30u}, {anim::kAnimMove, 20u}, {anim::kAnimDie, 40u},
+                                                              {105, 20u}, {106, 40u}, {107, 12u}})
+                                : synth_model("R3H_TROOPER", {{anim::kAnimIdle, 30u}, {anim::kAnimMove, 20u}, {105, 20u}, {106, 40u}, {107, 12u}});
+    SimAnimation animation(d->types, *d->files);
+    animation.set_model(trooper, objects::ModeKind::Land, model.get());
+    objects::ObjectId unit = objects::kNoObjectId;
+    uint32_t on = 0;
+    int32_t last = -2, killed = -1;
+    bool death_seen = false, ability_after_death = false;
+    std::string trace;
+    land_battle(*d, &animation, 900, [&](TacticalBattle& b, TacticalMode& tm, SimHost&) {
+        objects::ObjectStore& st = tm.primary();
+        const anim::AnimWorld* w = animation.find_world(tm);
+        if (on == 0) {
+            if (b.frame() < 30) return true;
+            for (const objects::ObjectHandle h : st.all_objects())
+                if (unit == objects::kNoObjectId && st.alive(h) && st.type(h) == trooper && w && w->contains(st.id(h))) unit = st.id(h);
+            if (unit == objects::kNoObjectId) return false;
+            const objects::ObjectId ids[] = {unit};
+            CHECK(b.abilities().set_unit_ability_mode(ids, tactical::abilities::kForceSight, true, b.frame()) == 1);
+            on = b.frame();
+            return true;
+        }
+        const int32_t rel = static_cast<int32_t>(b.frame() - on);
+        if (!w || !w->contains(unit)) return false;
+        const int32_t type = w->current_type(unit);
+        if (type != last) {
+            trace += " +" + std::to_string(rel) + ":" + std::to_string(type);
+            last = type;
+        }
+        if (killed >= 0 && (type == anim::kAnimDie || !die_clip)) death_seen = true;
+        if (death_seen && type >= 105 && type <= 107 && type != 106) ability_after_death = true;
+        if (killed < 0 && rel == 30) {  // in the loop: a lethal script Take_Damage between ticks
+            CHECK(type == 106);
+            CHECK(b.script_damage(tm, unit, 1.0e6f, false));
+            killed = rel;
+        }
+        return rel < 120;
+    });
+    std::printf("  r3h force sight death (%s) rows (frame:type):%s\n", die_clip ? "Die clip" : "no Die clip", trace.c_str());
+    CHECK(killed == 30 && death_seen && !ability_after_death);
+#else
+    (void)die_clip;
+    std::printf("  r3h force sight death: skipped (no engine/anim)\n");
+#endif
+}
+
+// r3h review (stuck gate): a model with Force_Revel_Begin and _Loop but no _End - when the 2 s run out the closing play
+// fails; the record must end the hold so the unit's own clips (the locomotor) take over again instead of the loop
+// running for good behind a gate that skips the locomotor / IDLE service.
+void test_force_sight_no_end() {
+#ifdef ALAMO_SIM_HAVE_ANIM
+    g_temp_prefix = "alamo_sim_r3h_tests_noend";
+    g_types_patch = sight_patch;
+    auto d = make_data();
+    g_types_patch = nullptr;
+    const objects::TypeIndex trooper = d->types.resolve_name("S10_Trooper");
+    const auto model = synth_model("R3H_TROOPER", {{anim::kAnimIdle, 30u}, {anim::kAnimMove, 20u}, {105, 20u}, {106, 40u}});
+    SimAnimation animation(d->types, *d->files);
+    animation.set_model(trooper, objects::ModeKind::Land, model.get());
+    objects::ObjectId unit = objects::kNoObjectId;
+    uint32_t on = 0;
+    int32_t last = -2, after = -1;
+    std::string trace;
+    land_battle(*d, &animation, 900, [&](TacticalBattle& b, TacticalMode& tm, SimHost&) {
+        objects::ObjectStore& st = tm.primary();
+        const anim::AnimWorld* w = animation.find_world(tm);
+        if (on == 0) {
+            if (b.frame() < 30) return true;
+            for (const objects::ObjectHandle h : st.all_objects())
+                if (unit == objects::kNoObjectId && st.alive(h) && st.type(h) == trooper && w && w->contains(st.id(h))) unit = st.id(h);
+            if (unit == objects::kNoObjectId) return false;
+            const objects::ObjectId ids[] = {unit};
+            CHECK(b.abilities().set_unit_ability_mode(ids, tactical::abilities::kForceSight, true, b.frame()) == 1);
+            on = b.frame();
+            return true;
+        }
+        if (!w || !w->contains(unit) || !b.combat().alive(unit)) return false;
+        const int32_t type = w->current_type(unit);
+        const int32_t rel = static_cast<int32_t>(b.frame() - on);
+        if (type != last) {
+            trace += " +" + std::to_string(rel) + ":" + std::to_string(type);
+            last = type;
+            if (rel > 18 && type != 106 && after < 0) after = rel;
+        }
+        return rel < 200 && after < 0;
+    });
+    std::printf("  r3h force sight without End rows (frame:type):%s\n", trace.c_str());
+    CHECK(after >= 60 && after <= 62);
+#else
+    std::printf("  r3h force sight without End: skipped (no engine/anim)\n");
+#endif
+}
+
 }  // namespace
 
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::printf("r3h t01: Force_Sight clips on the battle's animation world\n");
     test_force_sight_rows();
+    test_force_sight_death(true);
+    test_force_sight_death(false);
+    test_force_sight_no_end();
     if (g_fail) {
         std::printf("alamo_sim_r3h_tests: %d failure(s)\n", g_fail);
         return 1;

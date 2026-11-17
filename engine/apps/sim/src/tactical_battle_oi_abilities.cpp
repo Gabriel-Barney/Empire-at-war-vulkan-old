@@ -879,8 +879,11 @@ void TacticalBattle::oi_ability_anims(uint64_t gframe) {
     const anim::PresenceIdleFn presence = [this, &st](anim::ObjectId unit, std::span<const anim::IdleRecord> recs) {
         return presence_pick(st, unit, recs.data(), recs.size());
     };
+    // r3h review: never over a dying unit or a corpse row (its death clip, or a corpse without one), as play_default_idle.
+    const anim::AnimBehaviors* beh = anim_->find_behaviors(*gm);
     for (const ta::AbilityAnimPlay& p : oi_anim_plays_) {
-        if (!w->contains(p.id)) continue;
+        if (!w->contains(p.id) || (beh && beh->is_corpse(p.id))) continue;
+        if (combat_ && combat_->has_unit(p.id) && !combat_->alive(p.id)) continue;
         const uint64_t back = p.frame <= frame_ ? static_cast<uint64_t>(frame_ - p.frame) : 0u;
         const uint64_t at = gframe >= back ? gframe - back : 0u;
         if (p.type == ta::kAbilityPlayDefaultIdle) {
@@ -909,7 +912,10 @@ void TacticalBattle::oi_ability_anims(uint64_t gframe) {
 void TacticalBattle::play_battle_clip(objects::ObjectId id, int32_t type, bool loop, float speed, float blend) {
 #ifdef ALAMO_SIM_HAVE_ANIM
     anim::AnimWorld* w = anim_world_now();
-    if (!anim_ || !w || !w->contains(id)) return;
+    const GameMode* gm = anim_mode_now();
+    if (!anim_ || !w || !gm || !w->contains(id)) return;
+    if (const anim::AnimBehaviors* beh = anim_->find_behaviors(*gm); beh && beh->is_corpse(id)) return;  // r3h review
+    if (combat_ && combat_->has_unit(id) && !combat_->alive(id)) return;
     anim::PlayRequest r;
     r.type = type;
     r.index = 0;
@@ -930,9 +936,11 @@ void TacticalBattle::bt_base_shield_anims(uint64_t gframe, SimRng& rng) {
     if (!anim_ || !w || !gm) return;
     const objects::ObjectStore& st = gm->primary();
     const objects::GameObjectTypes& types = catalog_->types();
+    const anim::AnimBehaviors* beh = anim_->find_behaviors(*gm);
     for (const tc::CombatSystem::BaseShieldSetState& e : combat_->base_shield_set_states()) {
         const objects::ObjectHandle h = st.find(e.id);
-        if (!st.exists(h) || !w->contains(e.id)) continue;
+        if (!st.exists(h) || !w->contains(e.id) || (beh && beh->is_corpse(e.id))) continue;  // r3h review: no corpse rows
+        if (combat_->has_unit(e.id) && !combat_->alive(e.id)) continue;
         const int32_t on_anim = anim::find_anim_type(types.get_string(st.type(h), "Shield_On_Anim"));
         const int32_t off_anim = anim::find_anim_type(types.get_string(st.type(h), "Shield_Off_Anim"));
         if (on_anim == anim::kNoAnimType || off_anim == anim::kNoAnimType) continue;
