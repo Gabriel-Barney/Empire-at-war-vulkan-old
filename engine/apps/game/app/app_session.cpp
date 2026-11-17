@@ -295,8 +295,8 @@ void App::lua_presentation() {
 // no timeout); MULTIMEDIA (Reward_Param8) -> GameAudioHost::speech, whose end (AudioSystem::on_speech_done) raises
 // STORY_SPEECH_DONE (a speech that cannot play keeps the 60 s timeout); MULTIMEDIA Reward_Param9 *_Loop -> the advisor slot
 // (Movie_galactic / Movie_tactical) until STOP_COMMANDBAR_MOVIE (FIXPASS_GALACTIC §4.2). Presentation only: the sim sees the
-// ends through the recorded story UI commands. [port] the reward's other presentation (MULTIMEDIA text, START_MOVIE music
-// halt) is not shown here.
+// ends through the recorded story UI commands. ui2: the presentation rewards (text, pointers, locks, camera, hints) go through
+// story_present_reward; any MULTIMEDIA / SPEECH / COMMANDBAR_MOVIE movie or speech is a cue here.
 void App::story_reward_step() {
 #ifdef ALAMO_SIM_HAVE_STORY
     sim::StorySession* story = session_ && !demo_session() ? session_->host().story() : nullptr;
@@ -314,6 +314,10 @@ void App::story_reward_step() {
         story_present_.reset();
         story_present_setup();
         story_present_story_ = story;
+        // A loaded save has its fired rewards already: the presentation they made is not replayed (no forced clicks, speech,
+        // camera moves) - the presenter keeps no saved state, so a load starts it clean [port].
+        reward_cursor_.assign(story->plot_set_count(), 0);
+        for (size_t set = 0; set < story->plot_set_count(); ++set) reward_cursor_[set] = story->model(set).fired().size();
     }
     std::vector<StoryMediaCue> cues;
     auto scan = [&](const lua::StoryModel& m, size_t& cursor, uint8_t mode) {
@@ -497,6 +501,7 @@ void App::session_started(const std::vector<std::string>& diag) {
     story_cursor_ = 0;
     story_ui_.reset();  // L1/S4 wave 1: a new session's UI state
     reward_cursor_.clear();  // ... and its story reward media from the start
+    story_present_story_ = nullptr;  // ui2: the presenter starts afresh (a reused story address must not keep the old locks)
     reward_tac_model_ = nullptr;
     reward_tac_cursor_ = 0;
     zoom_planet_ = 0;

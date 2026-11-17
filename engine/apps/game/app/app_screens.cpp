@@ -168,6 +168,19 @@ void App::handle_screen_actions(const std::vector<ui::ScreenAction>& acts) {
             case K::StorySummaryClosed:
                 story_summary_open_ = false;
                 break;
+            case K::TutorialContinue:  // ui2 t02: IDC_CONTINUE closes the dialog and raises the story's generic trigger (4)
+                story_ui_.generic("Continue_Tutorial");
+                break;
+            case K::TutorialQuit: {  // IDC_QUIT_TO_MAIN asks TEXT_QUIT_SURE (yes / no); yes leaves the session
+                ui::MessageBoxSpec m;
+                m.tag = "tutorial_quit";
+                if (const std::u16string* s = ui_.text.find("TEXT_QUIT_SURE")) m.caption = ui::utf16_to_utf32(*s);
+                if (const std::u16string* y = ui_.text.find("TEXT_YES")) m.buttons.push_back(ui::utf16_to_utf32(*y));
+                if (const std::u16string* n = ui_.text.find("TEXT_NO")) m.buttons.push_back(ui::utf16_to_utf32(*n));
+                if (m.buttons.size() < 2) m.buttons = {U"Yes", U"No"};
+                screens_.show_message(m);
+                break;
+            }
             case K::LandInvade:  // ui3 t05: "Invade System" - the Invade command at the battle's planet, then as Continue
                 if (session_ && invade_planet_ != 0) {
                     commands::EventData ev(commands::EventType::Invade);
@@ -189,7 +202,13 @@ void App::handle_screen_actions(const std::vector<ui::ScreenAction>& acts) {
                 }
                 break;
             case K::MessageBoxResult:
-                if (a.tag == "battle_choice") {  // [port] a scripted message-box prompt: button 1 = Auto-Resolve
+                if (a.tag == "tutorial_quit") {
+                    if (a.button == 0) {
+                        end_session();
+                        screen_ = Screen::Menu;
+                        open_main_menu();
+                    }
+                } else if (a.tag == "battle_choice") {  // [port] a scripted message-box prompt: button 1 = Auto-Resolve
                     answer_battle_prompt(a.button == 1);
                 } else if (a.tag == "retry") {  // Lua Activate_Retry_Dialog: Retry restarts the session, Quit leaves it
                     if (a.button == 0 && session_) {

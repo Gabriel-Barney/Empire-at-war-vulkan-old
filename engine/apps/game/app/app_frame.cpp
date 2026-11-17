@@ -558,6 +558,7 @@ void App::frame() {
     if (bview_.active()) bview_.set_space_reinforcement_overlay(screen_ == Screen::Battle && bview_.space() && reinforce_unit_ != 0);
     // 3. Sim, then the story's presentation ops (movies, audio) of the ticks just run; Lua movies advance.
     if (battle_view_pending_ && load_intro_frames_ == 0) start_battle_view();  // QA t11: the load screen is already up
+    story_script_mode_check();  // ui2: before the sim and the Lua ops of this frame (a new mode's first calls must survive)
     {
         const auto sim0 = Clock::now();
         step_sim();

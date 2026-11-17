@@ -425,3 +425,7 @@ carry fixed `TEXT_…` ids only (LUA_SCRIPT_OUTPUT.md). Queue order: `Game_Messa
 7. `Highlight` / `Highlight_Small` spawn `Object_Highlight(_Small)` special-effect objects at (0, 0, z) from the object;
    `Add_Planet_Highlight` keys a HUD highlight by tag; `Game_Message` pushes to the front of the hint queue (white, hint
    font); `Remove_All_Text` clears queued and shown hints.
+   **Correction (ui2, 2026-11-16):** the later targeted read in `STORY_PRESENTATION_REWARDS.md` (sections 1.1, 1.5, 6.3) governs: the
+   list at +0x1170 is the **screen-text list** (the SCREEN_TEXT rewards' lines), not the hint queue, and +0x2f68 is the Urgent
+   sound, not a font. `Game_Message` shows a text line and `Remove_All_Text` clears the screen-text lines; the port follows that.
+   Read section 5.3 above with this correction.

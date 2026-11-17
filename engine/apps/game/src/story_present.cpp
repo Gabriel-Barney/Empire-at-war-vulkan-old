@@ -217,7 +217,10 @@ bool StoryPresenter::on_reward(std::string_view type, const std::vector<std::str
             }
         }
     } else if (ty == "TUTORIAL_DIALOG") {
-        if (!param(p, 1).empty()) dialogs_.push_back({std::string(param(p, 1)), to_int(param(p, 2)) != 0});
+        if (!param(p, 1).empty()) {
+            cinematic_mode_ = false;  // 4: a cinematic mode in force ends first
+            dialogs_.push_back({std::string(param(p, 1)), to_int(param(p, 2)) != 0});
+        }
     } else if (ty == "LOCK_CONTROLS") {
         if (!param(p, 1).empty()) controls_locked_ = to_int(param(p, 1)) != 0;
     } else if (ty == "SCROLL_LOCK") scroll_locked_ = to_int(param(p, 1)) != 0;

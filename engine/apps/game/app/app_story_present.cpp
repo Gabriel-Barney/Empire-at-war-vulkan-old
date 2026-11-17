@@ -88,12 +88,21 @@ void App::story_advisor_frame() {
 void App::story_present_frame() {
     // Retail shows the next hint only with no Bink movie open, no advanced map and no cinematic mode (§6.3).
     const bool blocked = full_movie_.playing() || planet_map_open_ || story_present_.cinematic_mode();
+    story_present_.config().subtitles = audio_opts_.subtitles;  // IDC_USE_MOVIE_SUBTITLES gates the Subtitle channel (1.1)
     story_present_.update(now_s_, blocked);
     // ACTIVATE_RETRY_DIALOG as a reward (5.4): the same IDD_RETRY_DIALOG as the Lua call. USE_RETRY_DIALOG only marks the end-of-battle
     // choice (retail reads it in the battle-end flow, which the port's defeat path already routes to this dialog); HIDE_AUTORESOLVE
     // has no reader in retail (5.3), so the flag is kept and nothing reads it.
     if (story_present_.take_retry_request() && screens_.show_retry()) ++retry_boxes_;
     story_advisor_frame();
+    // TUTORIAL_DIALOG (4): IDD_TUTORIAL_DIALOG with the localized text; a dialog already up ignores the next one.
+    for (const StoryTutorialDialog& d : story_present_.take_dialogs()) {
+        if (info_.tutorial_open()) continue;
+        std::u32string text;
+        if (const std::u16string* s = ui_.text.find(d.text_id)) text = ui::utf16_to_utf32(*s);
+        else text = ui::utf8_to_utf32(d.text_id);  // [port] a missing id shows the id
+        info_.show_tutorial({std::move(text)}, d.continue_button);
+    }
     if (story_present_.hint_started()) {  // 6.6: Message for the back of the queue, Urgent for a front insert, Hint for the periodic text
         const StoryShownHint* sh = story_present_.shown_hint();
         const StoryHint::Sound snd = sh ? sh->hint.sound : StoryHint::Sound::Message;

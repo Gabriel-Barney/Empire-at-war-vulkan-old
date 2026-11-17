@@ -636,6 +636,7 @@ public:
     Screen story_fx_screen_ = Screen::Menu;
     uint64_t story_fx_battle_ = 0;
     void story_script_event(const lua::PresentationEvent& e);
+    void story_script_mode_check();
     void story_script_frame();
     // ui2 t08: Play_Lightning_Effect bolts (battle frames, 30 per second) and the Enable_Fog / Enable_Distance_Fog switches.
     struct StoryLightning {

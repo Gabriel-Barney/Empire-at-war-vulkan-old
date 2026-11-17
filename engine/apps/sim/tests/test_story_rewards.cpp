@@ -288,6 +288,14 @@ static void test_sty1_rewards() {
         std::snprintf(buf, sizeof buf, "%016llx", static_cast<unsigned long long>(h1.digest()));
         if (first_hash.empty()) first_hash = buf;
         CHECK(first_hash == buf);
+        {  // ui2 t06: the DISABLE_RETREAT switch survives a save (v5) and moves the story hash (a 0 alone would not).
+            ByteReader rd(w1.bytes());
+            CHECK(ss->read(rd));
+            CHECK(!ss->retreat_enabled(pUnder) && ss->retreat_enabled(pEmpire));
+            StateHasher h2;
+            ss->hash(h2);
+            CHECK(h2.digest() == h1.digest());
+        }
         std::printf("  sty1 rewards: workers %d ok, story hash %s\n", workers, buf);
     }
     std::error_code ec;

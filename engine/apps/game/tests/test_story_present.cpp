@@ -195,7 +195,10 @@ void lock_test() {
     s.on_reward("SELECT_PLANET", P{"Ryloth"}, 0.0, 0);
     s.on_reward("ZOOM_IN", P{}, 0.0, 0);
     s.on_reward("PAUSE_GALACTIC_GAME", P{"0"}, 0.0, 0);
+    s.on_reward("START_CINEMATIC_MODE", P{}, 0.0, 0);
+    CHECK(s.cinematic_mode());
     s.on_reward("TUTORIAL_DIALOG", P{"TEXT_TUTORIAL_2_COMPLETE", "1"}, 0.0, 0);
+    CHECK(!s.cinematic_mode());  // the dialog ends it
     const std::vector<game::StoryCameraCommand> cams = s.take_camera_commands();
     CHECK(cams.size() == 4 && s.take_camera_commands().empty());
     CHECK(cams[0].kind == game::StoryCameraCommand::Kind::Position && cams[0].type == "Bothawui" && cams[0].oy == -80.0f);

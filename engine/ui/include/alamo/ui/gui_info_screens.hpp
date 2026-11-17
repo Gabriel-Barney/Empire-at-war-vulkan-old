@@ -152,6 +152,7 @@ namespace dlg {
 inline constexpr const char* kBuyUnits = "IDD_SKIRMISH_BUY_UNITS_DIALOG";
 inline constexpr const char* kStory = "IDD_STORY_DIALOG";
 inline constexpr const char* kStorySummary = "IDD_STORY_SUMMARY_DIALOG";
+inline constexpr const char* kTutorial = "IDD_TUTORIAL_DIALOG";  // ui2 t02
 inline constexpr const char* kDroidLog = "IDD_DROID_LOG";
 inline constexpr const char* kDataChart = "IDD_DATA_CHART";
 inline constexpr const char* kSummaryProduction = "IDD_SUMMARY_SCREEN_PRODUCTION";
@@ -173,6 +174,11 @@ public:
     // True while lines or cues are still waiting.
     bool update_story(double now, std::vector<StoryDialogCue>* due = nullptr);
     size_t story_lines_shown() const { return story_shown_; }
+    // ui2 t02 (TUTORIAL_DIALOG, STORY_PRESENTATION_REWARDS 4): IDD_TUTORIAL_DIALOG with the wrapped text in
+    // IDC_TUTORIAL_TEXT; IDC_CONTINUE only when `continue_button` (-> ScreenAction::TutorialContinue). A second call while it
+    // is open does nothing (retail: 'already up') and returns false.
+    bool show_tutorial(const std::vector<std::u32string>& lines, bool continue_button);
+    bool tutorial_open() const { return gui_ && gui_->find(dlg::kTutorial) != nullptr; }
     bool show_story_summary(const StorySummaryInfo& s);
     // The holocron: data for every page, then open one (switching pages keeps the data).
     void set_droid_log(DroidLogInfo d) { droid_ = std::move(d); }

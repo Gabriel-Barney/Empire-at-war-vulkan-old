@@ -810,6 +810,11 @@ void CampaignBattles::push_battle(SimHost& host) {
     battle_->set_hero_clash_data(opt_.hero_clash);  // s78n t06
     battle_->set_l1_factions(opt_.l1_factions);    // L1 systems
     battle_->enable_fleet_groups(opt_.fleet_groups);  // [port] fleet groups (off by default)
+#ifdef ALAMO_SIM_HAVE_STORY
+    // ui2 t06: the story's per-player switches (DISABLE_RETREAT / DISABLE_REINFORCEMENTS) are in place before the battle's first
+    // update, as in a run that kept them from the previous tick (the battle itself does not save them; a load rebuilds it here).
+    if (StorySession* st = host.story()) story_sync_switches(*st);
+#endif
     battle_->set_arrival_hold([this] { return lk_.presentation.hyperspace_hold; });  // story t12 (P9 == 2)
     // AI_GALACTIC_TOKENS §9.4: the battle planet's persisted built objects (the battle applies the gate: not in a skirmish,
     // not the sandbox battle). A battle rebuilt by a save load does not recreate them (the save has the battle's objects).

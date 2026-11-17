@@ -224,8 +224,9 @@ void App::story_script_event(const lua::PresentationEvent& e) {
 
 // Per rendered frame: the bars' end, the RTS camera moves, a mode change clearing the fade / bars / camera (§1.5), the
 // presenter's camera commands.
-void App::story_script_frame() {
-    // A fade or bars left on at the end of a mode do not carry into the next (galactic <-> battle, battle -> battle).
+// A fade or bars left on at the end of a mode do not carry into the next (galactic <-> battle, battle -> battle). Called before the
+// frame's sim step and Lua presentation, so what the new mode's first ticks set is not wiped.
+void App::story_script_mode_check() {
     if (screen_ != story_fx_screen_ || battles_seen_ != story_fx_battle_) {
         story_fx_screen_ = screen_;
         story_fx_battle_ = battles_seen_;
@@ -237,6 +238,9 @@ void App::story_script_frame() {
         story_lightning_.clear();  // ui2 t08: the effects and fog switches belong to the mode
         story_fog_master_ = story_fog_distance_ = true;
     }
+}
+
+void App::story_script_frame() {
     story_box_.update(now_s_);
     if (screen_ == Screen::Battle && bview_.active()) {
         ui::TacticalCameraController& cam = bview_.camera();
@@ -305,8 +309,19 @@ void App::story_camera_commands() {
                     else if (screen_ == Screen::Battle && bview_.active()) bview_.camera().jump_to({at.x, at.y, bview_.camera().look_at().z});
                 }
                 break;
-            case K::SelectPlanet:
             case K::ZoomIn:
+                if (gal && c.type.empty()) {  // 5.13: every shipped ZOOM_IN has no P1: the player's own zoom, into the selected planet
+                    if (selected_planet_ != 0 && !gview_.camera().zoomed())
+                        for (const ui::PickSphere& s : gview_.pick_items())
+                            if (s.kind == ui::PickKind::Planet && s.id == selected_planet_) {
+                                gview_.camera().set_look_at({s.center.x, s.center.y, 0.0f});
+                                gview_.camera().zoom_to_planet(s.center, s.radius);
+                                zoom_planet_ = s.id;
+                            }
+                    break;
+                }
+                [[fallthrough]];
+            case K::SelectPlanet:
                 if (gal && !c.type.empty() && story_type_position(c.type, p)) {
                     const galactic::GalacticSim* g = galaxy();
                     if (!g) break;
