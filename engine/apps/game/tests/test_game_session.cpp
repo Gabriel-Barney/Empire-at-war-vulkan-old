@@ -1858,11 +1858,13 @@ void skirmish_four_slot_real_test() {
         live.crc = s.host().crc_log();
         live.ticks = t;
     }
-    RunResult rp;
-    replay_run(data, spec, rec, live.ticks, 0, rp);
-    const CrcDivergence d = first_divergence(live.crc, rp.crc);
-    std::printf("  difficulty replay vs live: %s\n", d.message.c_str());
-    CHECK(!d.diverged && rp.crc.records.size() == live.crc.records.size());
+    for (const int32_t w : {0, 4}) {  // determinism: the four sides' battle with workers too
+        RunResult rp;
+        replay_run(data, spec, rec, live.ticks, w, rp);
+        const CrcDivergence d = first_divergence(live.crc, rp.crc);
+        std::printf("  difficulty replay (%d workers) vs live: %s\n", w, d.message.c_str());
+        CHECK(!d.diverged && rp.crc.records.size() == live.crc.records.size());
+    }
     if (save_ok) {
         SaveFile f;
         game::SessionSpec back;
