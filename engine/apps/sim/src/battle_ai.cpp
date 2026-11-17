@@ -1400,10 +1400,17 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
                 pi.is_human = g.players()[a].human;
             }
             pi.attacker = static_cast<int32_t>(a) == b_->req_.info.attacker;
+            // skm2 t03 (AI_TACTICAL_PERCEPTION IsDifficulty 0x6e0620): the AI player's difficulty (AIPlayer +0x58); none for a
+            // human or a player without a tactical AI here.
+            static constexpr const char* kLevels[3] = {"Easy", "Normal", "Hard"};
+            const int32_t d = pi.is_human ? -1 : world_->difficulty(static_cast<int32_t>(a));
+            pi.ai_difficulty = d >= 0 && d <= 2 ? kLevels[d] : "";
             for (uint32_t bq = 0; bq < players; ++bq) {
                 if (a == bq) continue;
                 const bool hostile = c.is_enemy(static_cast<int32_t>(a), static_cast<int32_t>(bq));
-                w.relation[static_cast<size_t>(a) * players + bq] = hostile ? 1 : 2;
+                // skm2 t02: an ally (relation 0: a skirmish team mate) is friendly to the perception, as the combat table says.
+                const bool ally = !hostile && b_->bt_relation(static_cast<int32_t>(a), static_cast<int32_t>(bq)) == 0;
+                w.relation[static_cast<size_t>(a) * players + bq] = hostile ? 1 : ally ? 0 : 2;
             }
         }
         // S9 hard points (AI_TACTICAL_PERCEPTION �sec. 4): kind, weapon range, health; power = the unit's AI_Combat_Power

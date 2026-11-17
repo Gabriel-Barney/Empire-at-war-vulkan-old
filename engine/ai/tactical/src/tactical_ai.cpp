@@ -4152,6 +4152,10 @@ float TacticalAiWorld::build_time_multiplier(int32_t player) const {
     const PlayerAi* p = impl_->player_ai(player);
     return p ? p->build_time_mult : 1.0f;
 }
+int32_t TacticalAiWorld::difficulty(int32_t player) const {
+    const PlayerAi* p = impl_->player_ai(player);
+    return p ? p->difficulty : -1;
+}
 int32_t TacticalAiWorld::opponent(int32_t player) const {
     const PlayerAi* p = impl_->player_ai(player);
     return p ? p->ctx.opponent : -1;

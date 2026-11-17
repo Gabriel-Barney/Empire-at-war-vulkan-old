@@ -517,6 +517,8 @@ public:
     // skm1 t04 (SKIRMISH_SETUP 0x496f00, AI_TACTICAL §4.5): the AI player's Land_ / Space_Build_Time_Multiplier of its
     // difficulty adjustment (this battle's mode); 1.0 for a player without a tactical AI.
     float build_time_multiplier(int32_t player) const;
+    // skm2 t03: the AI player's difficulty 0 Easy / 1 Normal / 2 Hard (AIPlayer +0x58); -1 without a tactical AI here.
+    int32_t difficulty(int32_t player) const;
     int32_t opponent(int32_t player) const;
     const AiContext* context(int32_t player) const;
     size_t free_store_size(int32_t player) const;

@@ -1622,6 +1622,8 @@ void skirmish_map_real_test() {
     }
 }
 
+CrcLog records_from(const CrcLog& log, uint64_t tick);  // below (N1 / t09)
+
 // skm2 t02 / t01 (the group's exit test): a space skirmish as the front end starts it with four playing slots on two teams
 // (IDC_PLAYER_TEAM_n: slots 0 and 3 team 0, slots 1 and 2 team 1; slot 3 is Rebel like slot 1, so the team decides, not the
 // faction): every slot is a player of its faction with its own start forces, AI difficulty and victory record
@@ -1716,6 +1718,14 @@ void skirmish_four_slot_real_test() {
 #ifdef ALAMO_SIM_HAVE_TACTICAL_AI
         if (const sim::BattleAi* ai = s.battles()->tactical_ai()) {
             for (int32_t k = 1; k < 4; ++k) CHECK(ai->world().is_ai_player(k));
+            // skm2 t03: the perception's IsDifficulty input per slot (Easy / Hard / Normal), none for the human; team mates
+            // are allies (relation 0) there too.
+            const auto& pw = ai->world().world();
+            if (pw.players.size() >= 4) {
+                CHECK(pw.players[0].ai_difficulty.empty() && pw.players[1].ai_difficulty == "Easy" && pw.players[2].ai_difficulty == "Hard" &&
+                      pw.players[3].ai_difficulty == "Normal");
+                CHECK(pw.rel(1, 2) == 0 && pw.rel(0, 3) == 0 && pw.rel(0, 1) == 1);
+            }
             std::printf("  tactical AI build-time multipliers: %.3f / %.3f / %.3f\n", static_cast<double>(ai->world().build_time_multiplier(1)),
                         static_cast<double>(ai->world().build_time_multiplier(2)), static_cast<double>(ai->world().build_time_multiplier(3)));
         }
@@ -1726,18 +1736,27 @@ void skirmish_four_slot_real_test() {
         std::printf("  slot 1 killed (%u units): battle %s\n", k1, s.battle() && !s.battle()->finished() ? "running" : "over");
         CHECK(k1 > 0 && s.battle() && !s.battle()->finished());
         // Then slot 2 (and whatever team 1 still has): team 0 wins.
-        int32_t winner = -1;
         for (int i = 0; i < 1500 && s.battle(); ++i) {
             if (i % 30 == 0) (void)kill_players(s, {1, 2});
-            if (s.battle()->finished()) winner = s.battle()->result().winner;
             s.tick();
         }
-        std::printf("  team 1 killed: winner %d\n", winner);
+        const auto& end = s.battles()->last_battle_end();  // the battle is popped in the tick it ends
+        const int32_t winner = end.valid ? end.winner : -1;
+        std::printf("  team 1 killed: battle %s, winner %d\n", s.battle() ? "still running" : "over", winner);
+        CHECK(!s.battle());
         CHECK(winner == 0 || winner == 3);
     }
-    // 2. The Gameplay options difficulty in the running battle, recorded and replayed.
+    // 2. The Gameplay options difficulty in the running battle, recorded and replayed; then saved in the battle and loaded.
     commands::CommandRecording rec;
     RunResult live;
+    const std::string save_dir = path_to_utf8(fs::temp_directory_path() / "alamo_game_four_slot_save_test");
+    {
+        std::error_code ec;
+        remove_all_long(fs::path(path_from_utf8(save_dir)), ec);
+    }
+    std::string save_file;
+    bool save_ok = false;
+    uint64_t save_tick = 0;
     {
         jobs::JobSystem js(jobs::JobSystemConfig{0});
         game::GameSession s(data, js, spec);
@@ -1775,7 +1794,16 @@ void skirmish_four_slot_real_test() {
                         static_cast<double>(want));
             CHECK(std::fabs(h1 - want) <= 0.02f * want + 1.0f);
         }
-        for (int i = 0; i < 120; ++i) {
+        for (int i = 0; i < 30; ++i) {
+            s.tick();
+            ++t;
+        }
+        // A save in the battle after the change (the extra slots, teams, difficulties and sides 2.. round-trip).
+        CHECK(s.save_blocker().empty() && s.check_save().empty());
+        save_ok = game::save_game(s, save_dir, "Four slots", "", game::unix_now(), &save_file, &err);
+        CHECK(save_ok);
+        save_tick = s.host().frame();
+        for (int i = 0; i < 90; ++i) {
             s.tick();
             ++t;
         }
@@ -1787,6 +1815,27 @@ void skirmish_four_slot_real_test() {
     const CrcDivergence d = first_divergence(live.crc, rp.crc);
     std::printf("  difficulty replay vs live: %s\n", d.message.c_str());
     CHECK(!d.diverged && rp.crc.records.size() == live.crc.records.size());
+    if (save_ok) {
+        SaveFile f;
+        game::SessionSpec back;
+        CHECK(SaveFile::read_file(save_file, f, &err) && game::GameSession::spec_from_save(f, back, &err));
+        CHECK(back.skirmish.extra_slots.size() == 2 && back.skirmish.extra_slots[0].faction == "Underworld" &&
+              back.skirmish.teams == spec.skirmish.teams && back.skirmish.difficulties == std::vector<int32_t>({2, 2, 2, 2}) &&
+              back.difficulty == 2);
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        game::GameSession b(data, js, back);
+        CHECK(b.start_from_save(f, &err, nullptr, nullptr));
+        if (!err.empty()) std::printf("  load: %s\n", err.c_str());
+        CHECK(b.loaded() && b.host().frame() == save_tick);
+        for (int i = 0; i < 90; ++i) b.tick();
+        const CrcDivergence dl = first_divergence(records_from(live.crc, save_tick), b.host().crc_log());
+        std::printf("  four-slot battle save at %" PRIu64 ", +90 ticks: loaded live vs original: %s\n", save_tick, dl.message.c_str());
+        CHECK(!dl.diverged && b.host().crc_log().records.size() == 90);
+        if (b.galaxy())
+            for (int32_t k = 1; k < 4; ++k) CHECK(b.galaxy()->players()[static_cast<size_t>(k)].difficulty == data.rules.find_difficulty("Hard_Default"));
+    }
+    std::error_code ec;
+    remove_all_long(fs::path(path_from_utf8(save_dir)), ec);
 }
 
 void hero_roster_real_test() {

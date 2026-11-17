@@ -649,7 +649,8 @@ void GameSession::apply_ai_difficulty(int32_t difficulty) {
             if (!ps.ai || ps.human) continue;
             const auto pi = static_cast<int32_t>(p);
             (void)gs->set_ai_difficulty(pi, row);
-            if (p < setup_.players.size()) setup_.players[p].difficulty = row;
+            // The setup row only where start() set one (with the galactic AI): a rebuild from the new spec sets the same.
+            if (p < setup_.players.size() && setup_.players[p].difficulty != galactic::kNoIndex) setup_.players[p].difficulty = row;
 #ifdef ALAMO_GAME_HAVE_GALACTIC_AI
             if (galactic_ai_) (void)galactic_ai_->set_difficulty(pi, d);
 #endif
