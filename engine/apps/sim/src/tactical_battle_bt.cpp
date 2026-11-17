@@ -1121,6 +1121,7 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
                 }
             t = pick;
             picked = true;
+            hg_spawn_off_ = false;  // map1 (Q6_T30 1): the pick is a new object from the generic create, +0x3CB its creation value
             ++map_stats_.spawn_table_picks;
             bt_used_ = true;
             int32_t aff = -1;
@@ -1351,6 +1352,8 @@ void TacticalBattle::bt_pick_starbase() {
             if (!aff) continue;
             if (p.type != t) {
                 p.type = t;
+                const auto& gt = galaxy_->rules().types;
+                p.power = t < gt.size() ? gt[t].ai_combat_power : 0.0f;  // side power from the spawned type
                 if (std::find(types_used_.begin(), types_used_.end(), t) == types_used_.end()) types_used_.push_back(t);
             }
             map_stats_.starbase_picked = true;
