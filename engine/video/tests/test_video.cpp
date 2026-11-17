@@ -125,6 +125,52 @@ void test_yuv() {
     check(al[3] == 10 && al[7] == 20 && al[11] == 30 && al[15] == 40, "yuv alpha plane");
 }
 
+// ui5 t12 (docs/re/AUDIO.md §3.4): caption timing - window (prev, cur], first in text-id order, duration 0 -> 120, none ->
+// next step, expiry at start + duration, a hidden ("[TBL]") caption neither shows nor replaces; Movies.xml parsing.
+void test_captions() {
+    using alamo::video::CaptionTrack;
+    using alamo::video::MovieCaption;
+    CaptionTrack t;
+    t.reset({{"TEXT_A", 10, 5}, {"TEXT_B", 10, 0}, {"TEXT_C", 30, -1}, {"TEXT_TBL", 40, 50}});
+    const auto all = [](std::string_view) { return true; };
+    t.step(1, 9, all);
+    check(t.text_id().empty(), "caption: none before its frame");
+    t.step(9, 10, all);
+    check(t.text_id() == "TEXT_A", "caption: frame in (prev, cur], first in id order");
+    t.step(10, 14, all);
+    check(t.text_id() == "TEXT_A", "caption: shown for its duration");
+    t.step(14, 15, all);
+    check(t.text_id().empty(), "caption: ends at start + duration");
+    t.step(15, 30, all);
+    check(t.text_id() == "TEXT_C", "caption: a later caption");
+    t.step(30, 31, all);
+    check(t.text_id().empty(), "caption: no Caption_Duration ends at the next step");
+    t.reset({{"TEXT_B", 10, 0}, {"TEXT_TBL", 20, 50}});
+    t.step(1, 10, all);
+    t.step(10, 20, [](std::string_view id) { return id != "TEXT_TBL"; });
+    check(t.text_id() == "TEXT_B", "caption: a hidden caption does not replace the shown one");
+    t.step(20, 129, all);
+    check(t.text_id() == "TEXT_B", "caption: duration 0 = 120 frames (still on at 129)");
+    t.step(129, 130, all);
+    check(t.text_id().empty(), "caption: duration 0 = 120 frames (gone at 130)");
+#if defined(ALAMO_VIDEO_HAVE_MOVIE_DB)
+    const char* xml = R"(<Movies><Movie Name="Win"><Movie_File>w.bik</Movie_File>
+        <Caption_Frame> TEXT_Z, 60 </Caption_Frame><Caption_Duration> TEXT_Z, 150 </Caption_Duration>
+        <Caption_Frame>TEXT_A,99</Caption_Frame><Caption_Frame> broken </Caption_Frame></Movie>
+        <Movie Name="Plain"><Movie_File>p.bik</Movie_File></Movie></Movies>)";
+    const std::vector<uint8_t> bytes(xml, xml + std::strlen(xml));
+    const alamo::data::XmlDocument doc = alamo::data::XmlDocument::parse(bytes, "Movies.xml");
+    const std::vector<alamo::video::MovieEntry> db = alamo::video::parse_movies(doc.root());
+    check(db.size() == 2 && db[0].captions.size() == 2 && db[1].captions.empty(), "Movies.xml captions parsed");
+    if (db.size() == 2 && db[0].captions.size() == 2) {
+        const MovieCaption& a = db[0].captions[0];
+        const MovieCaption& z = db[0].captions[1];
+        check(a.text_id == "TEXT_A" && a.frame == 99 && a.duration == -1 && z.text_id == "TEXT_Z" && z.frame == 60 && z.duration == 150,
+              "captions in text-id order with their durations");
+    }
+#endif
+}
+
 bool test_runtime() {
     std::string err;
     const bool ok = alamo::video::ffmpeg_available(&err);
@@ -517,6 +563,7 @@ void test_real_data() {
 
 int main() {
     test_yuv();
+    test_captions();
     if (test_runtime()) {
 #if defined(ALAMO_VIDEO_HAVE_VFS)
         test_real_data();

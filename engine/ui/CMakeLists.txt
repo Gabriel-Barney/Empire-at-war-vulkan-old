@@ -34,6 +34,7 @@ add_library(alamo_ui_hud STATIC
   src/hud_font.cpp
   src/hud_draw.cpp
   src/credits_roll.cpp
+  src/movie_caption.cpp  # ui5 t02 / t12: full-screen movie captions (AUDIO.md §3.4)
   src/hud_world.cpp
   src/hud_input.cpp
   src/hud_buttons.cpp

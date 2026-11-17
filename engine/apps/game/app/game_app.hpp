@@ -73,6 +73,7 @@
 #include "frame_overlay.hpp"
 #include "game_display.hpp"
 #include "alamo/ui/credits_roll.hpp"
+#include "alamo/ui/movie_caption.hpp"
 #include "game_info.hpp"
 #include "game_render.hpp"
 #include "game_ui.hpp"
@@ -840,7 +841,8 @@ public:
     void delete_saved_game(const std::string& name);
     void save_message(std::u32string caption, const std::string& detail);
     std::string session_title() const;  // the campaign's display name / the skirmish map (save descriptions)
-    void begin_battle();
+    // from_save: the battle came back with a save taken during it (ui5 t10: the Mission load dialogs, UI.md §5.1).
+    void begin_battle(bool from_save = false);
     void start_battle_view();
     void end_battle();
     // QA t11 / t16: the battle load screen, filled from the planet's text, is on screen before the blocking loads.

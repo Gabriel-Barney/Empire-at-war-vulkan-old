@@ -5,6 +5,7 @@
 // support (or without audio) the player runs on Clock::Wall and the movie is silent.
 #pragma once
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -16,6 +17,7 @@
 
 namespace alamo::video {
 class MoviePlayer;
+class CaptionTrack;
 }
 
 namespace alamo::game {
@@ -48,6 +50,11 @@ public:
     // music mode 14), Halt_Game_Music (+0xD4) and the MusicEvent_Frame cues (mode 17, fired by update()).
     bool has_credits() const { return has_credits_; }
     bool halt_music() const { return halt_music_; }
+    // ui5 t02 / t12 (AUDIO.md §3.4): the open movie's Movies.xml captions, stepped by update() on the movie's frame
+    // clock. `shows` is the text check (false for a missing text or "[TBL]"; unset: every caption shows). caption() is the
+    // text id on screen now ("" = none); drawing it, and only with the subtitles option on, is the host's.
+    void set_caption_filter(std::function<bool(std::string_view)> shows) { caption_shows_ = std::move(shows); }
+    std::string_view caption() const;
     // Frame size of the open movie (0 when none).
     uint32_t width() const { return width_; }
     uint32_t height() const { return height_; }
@@ -69,6 +76,9 @@ private:
     std::vector<Cue> cues_;                         // MusicEvent_Frame, in file order
     size_t next_cue_ = 0;
     double fps_ = 30.0;
+    std::unique_ptr<video::CaptionTrack> captions_;  // ui5 t12
+    std::function<bool(std::string_view)> caption_shows_;
+    int64_t caption_frame_ = 1;                      // last Bink frame number stepped (frames count from 1)
     uint32_t width_ = 0, height_ = 0;
     std::string name_;
 };

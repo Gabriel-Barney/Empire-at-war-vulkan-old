@@ -140,6 +140,8 @@ BEGIN
     PUSHBUTTON      "TEXT_BUTTON",IDC_DIALOG_BOX_BUTTON_LEFT,22,95,128,24
     PUSHBUTTON      "TEXT_BUTTON",IDC_DIALOG_BOX_BUTTON_RIGHT,181,95,128,24
     LTEXT           "USER STRING 1 HERE",IDC_USER_TEXT_STRING_1,17,45,296,8
+    LTEXT           "USER STRING 2 HERE",IDC_USER_TEXT_STRING_2,17,63,296,8
+    LTEXT           "USER STRING 3 HERE",IDC_USER_TEXT_STRING_3,17,81,296,8
 END
 
 IDD_AUDIO_OPTIONS_DIALOG DIALOGEX 0, 0, 551, 372
@@ -1116,12 +1118,14 @@ void test_menus() {
     step(env.click(*kb, "IDC_EDIT_STOP"));
     step(env.frame({0, 0}, false, {vk::key('j')}));  // a free key: taken at once
     CHECK(kb->get("IDC_EDIT_STOP")->text == U"J" && keys.binding(hk::kStop).key == 'H');  // not applied yet
-    step(env.frame({0, 0}, false, {vk::kControl, vk::key('q')}));  // Ctrl+Q is select like's key: UI5 t05 asks first
+    step(env.frame({0, 0}, false, {vk::kControl, vk::key('q')}));  // Ctrl+Q is select like's key: UI5 t09 asks first
     CHECK(fe.top() == "IDD_DIALOG_BOX_QUIT_CONFIRM" && kb->get("IDC_EDIT_STOP")->text == U"J");
     {
         GuiDialog* qb = env.gui.top();
-        CHECK(qb->get("IDC_USER_TEXT_STRING_1")->text == U"Ctrl+Q: Select Like" && qb->get("IDC_USER_TEXT_STRING_1")->visible);
-        step(env.click(*qb, "IDC_DIALOG_BOX_BUTTON_LEFT"));  // Yes: the key moves here
+        CHECK(qb->get("IDC_USER_TEXT_STRING_1")->text == U"Ctrl+Q is already assigned to the game command Select Like." &&
+              qb->get("IDC_USER_TEXT_STRING_1")->visible);
+        CHECK(qb->get("IDC_USER_TEXT_STRING_2")->text == U"Do you want to re-assign Ctrl+Q to game command Stop?");
+        step(env.click(*qb, "IDC_DIALOG_BOX_BUTTON_LEFT"));  // OK: the key moves here
     }
     CHECK(fe.top() == "IDD_KEYBOARD_OPTIONS_DIALOG" && kb->get("IDC_EDIT_STOP")->text == U"Ctrl+Q");
     acts.clear();
@@ -1135,8 +1139,10 @@ void test_menus() {
     CHECK(hotkey_label({0x7B, HotkeyMod::None}) == U"F12" && hotkey_label({0x6D, HotkeyMod::None}) == U"Numpad -" &&
           hotkey_label({'1', HotkeyMod::Shift}) == U"Shift+1");
 
-    // UI5 t05: clear with Delete / Backspace, Tab is a key (focus stays), a conflict can be refused, Back / Esc with
-    // unapplied edits ask Apply? (No discards, Yes applies).
+    // UI5 t09 (UI.md §4.3 Capture): Delete / Backspace bind like any key, Tab is a key (focus stays), a conflict can be
+    // refused (Cancel), Back closes without applying or asking, Esc on a field in capture restores its applied key.
+    CHECK(std::string_view(hotkey_action_text_id(hk::kSelectLike)) == "TEXT_SELECT_LIKE" &&
+          std::string_view(hotkey_action_text_id(130)) == "TEXT_GROUP_8_SELECT" && hotkey_action_text_id(160) == nullptr);
     CHECK(hotkey_action_label(hk::kSelectLike) == U"Select Like" &&
           hotkey_action_label(static_cast<uint16_t>(hotkey_slot("Ability_SpreadOut"))) == U"Spread Out" &&
           hotkey_action_label(static_cast<uint16_t>(hotkey_slot("Taunt1"))) == U"Taunt 1");
@@ -1159,32 +1165,28 @@ void test_menus() {
     };
     kb = open_keys();
     CHECK(fe.top() == "IDD_KEYBOARD_OPTIONS_DIALOG" && kb->get("IDC_EDIT_STOP")->text == U"Ctrl+Q");
-    step(env.frame({0, 0}, false, {vk::kDelete}));
-    CHECK(kb->get("IDC_EDIT_STOP")->text.empty() && keys.binding(hk::kStop).key == 'Q');
+    step(env.frame({0, 0}, false, {vk::kDelete}));  // a key like any other
+    CHECK(kb->get("IDC_EDIT_STOP")->text == U"Delete" && keys.binding(hk::kStop).key == 'Q');
     step(env.frame({0, 0}, false, {vk::kTab}));  // Tab: MissionHolocron's key -> asks; focus stays on the field
-    CHECK(fe.top() == "IDD_DIALOG_BOX_QUIT_CONFIRM");
-    step(env.click(*env.gui.top(), "IDC_DIALOG_BOX_BUTTON_RIGHT"));  // No: nothing changes
-    CHECK(fe.top() == "IDD_KEYBOARD_OPTIONS_DIALOG" && kb->get("IDC_EDIT_STOP")->text.empty() &&
+    CHECK(fe.top() == "IDD_DIALOG_BOX_QUIT_CONFIRM" && env.gui.top()->get("IDC_DIALOG_BOX_BUTTON_RIGHT")->text == U"Cancel");
+    step(env.click(*env.gui.top(), "IDC_DIALOG_BOX_BUTTON_RIGHT"));  // Cancel: nothing changes
+    CHECK(fe.top() == "IDD_KEYBOARD_OPTIONS_DIALOG" && kb->get("IDC_EDIT_STOP")->text == U"Delete" &&
           kb->focus_index() == kb->find("IDC_EDIT_STOP"));
+    step(env.frame({0, 0}, false, {vk::kEscape}));  // Esc on the field in capture: back to the applied key, focus gone
+    CHECK(fe.top() == "IDD_KEYBOARD_OPTIONS_DIALOG" && kb->get("IDC_EDIT_STOP")->text == U"Ctrl+Q" && kb->focus_index() < 0);
+    step(env.click(*kb, "IDC_EDIT_STOP"));
+    step(env.frame({0, 0}, false, {vk::kBack}));
+    CHECK(kb->get("IDC_EDIT_STOP")->text == U"Backspace");
     acts.clear();
-    step(env.click(*kb, "IDC_OK"));  // Back with an unapplied edit: Apply?
-    CHECK(fe.top() == "IDD_DIALOG_BOX_QUIT_CONFIRM" && acts.empty());
-    step(env.click(*env.gui.top(), "IDC_DIALOG_BOX_BUTTON_RIGHT"));  // No: discarded, the page closes
+    step(env.click(*kb, "IDC_OK"));  // Back with an unapplied edit: closes, nothing applied, no question
     CHECK(fe.top() != "IDD_KEYBOARD_OPTIONS_DIALOG" && fe.top() != "IDD_DIALOG_BOX_QUIT_CONFIRM" && acts.empty() &&
           keys.binding(hk::kStop).key == 'Q');
     kb = open_keys();
-    CHECK(kb->get("IDC_EDIT_STOP")->text == U"Ctrl+Q");  // the discarded edit is gone
-    step(env.frame({0, 0}, false, {vk::kBack}));
-    CHECK(kb->get("IDC_EDIT_STOP")->text.empty());
-    step(env.frame({0, 0}, false, {vk::kEscape}));  // Esc with an unapplied edit asks too
-    CHECK(fe.top() == "IDD_DIALOG_BOX_QUIT_CONFIRM");
-    step(env.click(*env.gui.top(), "IDC_DIALOG_BOX_BUTTON_LEFT"));  // Yes: applied, the page closes
-    CHECK(fe.top() != "IDD_KEYBOARD_OPTIONS_DIALOG" && !acts.empty() && acts.back().kind == MenuAction::Kind::KeybindingsChanged &&
-          keys.binding(hk::kStop).key == -1);
-    // Back without edits closes at once.
-    kb = open_keys();
-    step(env.click(*kb, "IDC_OK"));
-    CHECK(fe.top() != "IDD_KEYBOARD_OPTIONS_DIALOG" && fe.top() != "IDD_DIALOG_BOX_QUIT_CONFIRM");
+    CHECK(kb->get("IDC_EDIT_STOP")->text == U"Ctrl+Q");  // the dropped edit is gone
+    // Esc with no field in capture closes the page the same way.
+    step(env.frame({0, 0}, false, {vk::kEscape}));
+    step(env.frame({0, 0}, false, {vk::kEscape}));
+    CHECK(fe.top() != "IDD_KEYBOARD_OPTIONS_DIALOG" && fe.top() != "IDD_DIALOG_BOX_QUIT_CONFIRM" && acts.empty());
     // UI5 t07: Esc in the tutorial list goes where its Cancel goes (the main menu, which opened it).
     {
         std::vector<GuiEvent> e(1);

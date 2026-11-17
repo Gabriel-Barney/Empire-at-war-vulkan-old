@@ -15,7 +15,8 @@
 #include "alamo/video/video.hpp"
 #else
 namespace alamo::video {
-class MoviePlayer {};  // complete stand-in for the owned pointer (no engine/video in this build)
+class MoviePlayer {};  // complete stand-ins for the owned pointers (no engine/video in this build)
+class CaptionTrack {};
 }  // namespace alamo::video
 #endif
 
@@ -115,6 +116,9 @@ bool MovieSlot::open(const GameData& data, GameAudioHost& audio, std::string_vie
     halt_music_ = halt_flag;
     cues_ = std::move(cues);
     next_cue_ = 0;
+    captions_ = std::make_unique<video::CaptionTrack>();  // ui5 t12: Caption_Frame / Caption_Duration
+    captions_->reset(entry.captions);
+    caption_frame_ = 1;
     fps_ = info.fps_num > 0 && info.fps_den > 0 ? static_cast<double>(info.fps_num) / static_cast<double>(info.fps_den) : 30.0;
     audio_ = &audio;
     // STRATEGIC_GAPS §7.4: the movie-music flag starts mode 14 music, Halt_Game_Music stops the game's music; both are
@@ -138,11 +142,14 @@ void MovieSlot::stop(GameAudioHost& audio) {
     audio_ = nullptr;
     cues_.clear();
     next_cue_ = 0;
+    captions_.reset();
     has_credits_ = halt_music_ = false;
     has_frame_ = false;
     cannot_skip_ = false;
     name_.clear();
 }
+
+std::string_view MovieSlot::caption() const { return captions_ ? captions_->text_id() : std::string_view(); }
 
 bool MovieSlot::update(double dt, ui::HudRenderer& hud, uint16_t page) {
     if (!player_) return false;
@@ -151,6 +158,14 @@ bool MovieSlot::update(double dt, ui::HudRenderer& hud, uint16_t page) {
         const int64_t frame = static_cast<int64_t>(std::floor(player_->time_s() * fps_));
         if (next_cue_ > 0 && frame < cues_[next_cue_ - 1].frame) next_cue_ = 0;
         while (next_cue_ < cues_.size() && cues_[next_cue_].frame <= frame) audio_->movie_cue(cues_[next_cue_++].event);
+    }
+    if (captions_ && !captions_->empty()) {  // ui5 t12 (AUDIO.md §3.4): Bink frame numbers count from 1
+        const int64_t frame = static_cast<int64_t>(std::floor(player_->time_s() * fps_)) + 1;
+        if (frame < caption_frame_) caption_frame_ = frame;  // a loop went back to the start
+        if (frame > caption_frame_) {
+            captions_->step(caption_frame_, frame, [this](std::string_view id) { return !caption_shows_ || caption_shows_(id); });
+            caption_frame_ = frame;
+        }
     }
     const video::VideoFrame* vf = player_->current_frame();
     if (vf && player_->frame_serial() != serial_ && vf->plane_count > 0) {
@@ -185,6 +200,7 @@ void MovieSlot::stop(GameAudioHost&) {
     name_.clear();
 }
 bool MovieSlot::update(double, ui::HudRenderer&, uint16_t) { return false; }
+std::string_view MovieSlot::caption() const { return {}; }
 bool MovieSlot::playing() const { return false; }
 
 #endif

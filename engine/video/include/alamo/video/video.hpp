@@ -27,6 +27,7 @@
 #include <mutex>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace alamo {
@@ -91,6 +92,13 @@ struct OpenOptions {
 };
 
 // Movies.xml <Movie> fields the players need (STRATEGIC_GAPS §7.3): parse_movies (movie_db.hpp, built with engine/data).
+// ui5 t12 (docs/re/AUDIO.md §3.4 "Movie subtitles"): one Movies.xml caption: <Caption_Frame> TEXT_ID, frame and
+// <Caption_Duration> TEXT_ID, frames of the same text id (-1 = no Caption_Duration for it).
+struct MovieCaption {
+    std::string text_id;
+    int32_t frame = 0;
+    int32_t duration = -1;
+};
 struct MovieEntry {
     std::string name;            // Name attribute
     std::string file;            // Movie_File (game-relative path, "" = none)
@@ -98,6 +106,50 @@ struct MovieEntry {
     bool cannot_skip = false;    // Cannot_Skip
     bool loop = false;           // Loop
     int commandbar_offset[2] = {0, 0};  // Commandbar_Offset
+    // Caption_Frame / Caption_Duration, one entry per text id in byte order of the id (retail keeps both in maps keyed
+    // by it); a text id given twice keeps its last value [port]. Only ids with a Caption_Frame are listed.
+    std::vector<MovieCaption> captions;
+};
+
+// ui5 t12: which caption is on screen (AUDIO.md §3.4). Frames are numbered from 1 like Bink's; step() is called once per
+// frame advance with the frame before and after it. A caption whose frame lies in (prev, cur] and that `shows(text_id)`
+// (the host's text lookup: false for a missing text or "[TBL]") replaces the shown one from `cur` for its duration
+// (0 -> 120 frames, none -> ends at the next step); the first such caption in the list's (text id) order wins. Without
+// one, the shown caption ends once cur >= start + duration. Pure: no clock, no I/O.
+class CaptionTrack {
+public:
+    void reset(std::vector<MovieCaption> captions) {
+        captions_ = std::move(captions);
+        shown_ = -1;
+        start_ = duration_ = 0;
+        ++serial_;
+    }
+    template <class Shows>
+    void step(int64_t prev, int64_t cur, Shows&& shows) {
+        for (size_t i = 0; i < captions_.size(); ++i) {
+            const MovieCaption& c = captions_[i];
+            if (c.frame < 0 || c.frame <= prev || c.frame > cur || !shows(std::string_view(c.text_id))) continue;
+            shown_ = static_cast<int32_t>(i);
+            start_ = cur;
+            duration_ = c.duration == 0 ? 120 : c.duration;
+            ++serial_;
+            return;
+        }
+        if (shown_ >= 0 && cur >= start_ + duration_) {
+            shown_ = -1;
+            ++serial_;
+        }
+    }
+    // The shown caption's text id ("" = none).
+    std::string_view text_id() const { return shown_ >= 0 ? std::string_view(captions_[static_cast<size_t>(shown_)].text_id) : std::string_view(); }
+    uint64_t serial() const { return serial_; }  // changes whenever the shown caption does
+    bool empty() const { return captions_.empty(); }
+
+private:
+    std::vector<MovieCaption> captions_;
+    int32_t shown_ = -1;
+    int64_t start_ = 0, duration_ = 0;
+    uint64_t serial_ = 0;
 };
 // OpenOptions for a Movies.xml entry (alpha = entry.alpha).
 inline OpenOptions open_options_for(const MovieEntry& m, PixelFormat format = PixelFormat::Rgba8, int audio_track = 0) {

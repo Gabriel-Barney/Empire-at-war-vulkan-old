@@ -1303,7 +1303,7 @@ std::unique_ptr<GameSession> load_game(const GameData& data, jobs::JobSystem& js
                                        const commands::CommandRecording* replay, commands::CommandRecording* record, SaveFile* file_out) {
     SaveFile f;
     std::string e;
-    if (!SaveFile::read_file(path, f, &e)) {
+    if (!read_save_file(path, f, &e)) {  // ui5 t13: a UTF-8 path (save_games.hpp PATHS)
         if (err) *err = e.empty() ? std::string("not a readable save") : e;
         return nullptr;
     }

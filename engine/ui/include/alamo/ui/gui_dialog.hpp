@@ -202,6 +202,10 @@ public:
     bool set_image(std::string_view id, std::string texture);
     bool focus(std::string_view id);
     int32_t focus_index() const { return focus_; }
+    void clear_focus() {  // UI5 t09: no control has the keyboard focus (a key field leaves capture)
+        focus_ = -1;
+        keyboard_focus_ = false;
+    }
 
     // Placement (canvas units): top-left corner of the dialog.
     Vec2f origin() const { return origin_; }

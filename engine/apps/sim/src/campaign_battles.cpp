@@ -1379,6 +1379,7 @@ void CampaignBattles::story_load_map(galactic::BattleRequest& r) {
     if (map.empty()) return;
     log_.push_back("story: SET_TACTICAL_MAP " + map + " replaces " + r.map);
     r.map = map;
+    r.story_map = true;  // ui5 t10: the Mission load dialogs
 #else
     (void)r;
 #endif

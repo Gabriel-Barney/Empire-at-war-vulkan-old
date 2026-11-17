@@ -478,6 +478,59 @@ std::u32string hotkey_action_label(uint16_t slot) {
     return out;
 }
 
+// UI5 t09 (UI.md §4.3 "Capture"): the keyboard dialog's label text of each original slot 0..122, in slot order (the
+// retail table next to the IDC_EDIT_* names); a derived group slot 123..152 is reported as its group slot.
+const char* hotkey_action_text_id(uint16_t slot) {
+    static constexpr const char* kIds[123] = {
+        "TEXT_GROUP_1_SELECT", "TEXT_GROUP_2_SELECT", "TEXT_GROUP_3_SELECT", "TEXT_GROUP_4_SELECT",
+        "TEXT_GROUP_5_SELECT", "TEXT_GROUP_6_SELECT", "TEXT_GROUP_7_SELECT", "TEXT_GROUP_8_SELECT",
+        "TEXT_GROUP_9_SELECT", "TEXT_GROUP_0_SELECT", "TEXT_SELECT_ALL", "TEXT_SELECT_LIKE", "TEXT_NEXT_UNIT",
+        "TEXT_PREV_UNIT", "TEXT_GUARD", "TEXT_ATTACK", "TEXT_STOP", "TEXT_MOVE", "TEXT_WAYPOINT", "TEXT_RETREAT",
+        "TEXT_REINFORCE", "TEXT_PLACE_BEACON", "TEXT_SUPER_WEAPON", "TEXT_ATTACK_MOVE",
+        "TEXT_TOOLTIP_ABILITY_DEPLOY_NAME", "TEXT_TOOLTIP_ABILITY_SPREAD_OUT_NAME", "TEXT_TOOLTIP_ABILITY_JET_PACK_NAME",
+        "TEXT_TOOLTIP_ABILITY_STICKY_BOMB_NAME", "TEXT_TOOLTIP_ABILITY_UNTARGETED_STICKY_BOMB_NAME",
+        "TEXT_TOOLTIP_ABILITY_ROCKET_ATTACK_NAME", "TEXT_TOOLTIP_ABILITY_CABLE_ATTACK_NAME",
+        "TEXT_TOOLTIP_ABILITY_FOW_REVEAL_PING_NAME", "TEXT_TOOLTIP_ABILITY_POWER_TO_WEAPONS_NAME",
+        "TEXT_TOOLTIP_ABILITY_SELF_DESTRUCT_NAME", "TEXT_TOOLTIP_ABILITY_DEPLOY_TROOPERS_NAME",
+        "TEXT_TOOLTIP_ABILITY_MAXIMUM_FIREPOWER_NAME", "TEXT_TOOLTIP_ABILITY_SPRINT_NAME", "TEXT_TOOLTIP_SYSTEM_CONTROL",
+        "TEXT_TOOLTIP_ABILITY_PLACE_REMOTE_BOMB_NAME", "TEXT_TOOLTIP_ABILITY_DETONATE_REMOTE_BOMB_NAME",
+        "TEXT_TOOLTIP_ABILITY_FIRE_LOBBING_SUPERWEAPON_NAME", "TEXT_TOOLTIP_ABILITY_LASER_DEFENSE_NAME",
+        "TEXT_TOOLTIP_ABILITY_STIM_PACK_NAME", "TEXT_TOOLTIP_ABILITY_SWAP_WEAPONS_NAME",
+        "TEXT_TOOLTIP_ABILITY_MINOR_DRAIN_LIFE_NAME", "TEXT_TOOLTIP_ABILITY_PROXIMITY_MINES_NAME",
+        "TEXT_TOOLTIP_ABILITY_DEFEND_NAME", "TEXT_TOOLTIP_ABILITY_TRACTOR_BEAM_NAME",
+        "TEXT_TOOLTIP_ABILITY_INTERDICT_NAME", "TEXT_TOOLTIP_ABILITY_BARRAGE_NAME", "TEXT_TOOLTIP_ABILITY_HUNT_NAME",
+        "TEXT_TOOLTIP_ABILITY_TURBO_NAME", "TEXT_TOOLTIP_ABILITY_LURE_NAME", "TEXT_TOOLTIP_ABILITY_MISSILE_SHIELD_NAME",
+        "TEXT_TOOLTIP_ABILITY_SPOLIER_LOCK_NAME", "TEXT_TOOLTIP_ABILITY_ION_CANON_SHOT_NAME",
+        "TEXT_TOOLTIP_ABILITY_DESTROY_PLANET_NAME", "TEXT_TOOLTIP_ABILITY_SENSOR_JAMMING_NAME",
+        "TEXT_TOOLTIP_ABILITY_STEALTH_NAME", "TEXT_TOOLTIP_ABILITY_LEECH_SHIELDS_NAME",
+        "TEXT_TOOLTIP_ABILITY_BUZZ_DROIDS_NAME", "TEXT_TOOLTIP_ABILITY_SUPER_LASER_NAME",
+        "TEXT_TOOLTIP_ABILITY_CLUSTER_BOMB_NAME", "TEXT_TOOLTIP_ABILITY_SPACE_LASER_DEFENSE_NAME",
+        "TEXT_TOOLTIP_ABILITY_SPACE_SELF_DESTRUCT_NAME", "TEXT_TOOLTIP_ABILITY_FULL_SALVO_NAME",
+        "TEXT_TOOLTIP_ABILITY_DEPLOY_SQUAD_NAME", "TEXT_GAME_DROID_ADVISOR_KEYBOARD", "TEXT_INITIATE_CHAT",
+        "TEXT_SCROLL_UP", "TEXT_SCROLL_DOWN", "TEXT_SCROLL_LEFT", "TEXT_SCROLL_RIGHT", "TEXT_CAMERA_RESET",
+        "TEXT_CAMERA_CENTER", "TEXT_CAMERA_HOME", "TEXT_TACTICAL_OVERVIEW", "TEXT_CAMERA_TETHER", "TEXT_MOVIE_MODE",
+        "TEXT_CINEMATIC_VIEW", "TEXT_SCREEN_SHOT", "TEXT_QUICK_SAVE", "TEXT_QUICK_LOAD", "TEXT_MISSION_HOLOCRON",
+        "TEXT_TAUNT_ONE", "TEXT_TAUNT_TWO", "TEXT_TAUNT_THREE", "TEXT_GIVE_CREDITS", "TEXT_TOGGLE_INTERFACE",
+        "TEXT_TOGGLE_PLAYER_LIST", "TEXT_TOOLTIP_ABILITY_LUCKY_SHOT_NAME", "TEXT_TOOLTIP_ABILITY_REPLENISH_WINGMEN_NAME",
+        "TEXT_TOOLTIP_ABILITY_FORCE_TELEKINESIS_NAME", "TEXT_TOOLTIP_ABILITY_FORCE_WHIRLWIND_NAME",
+        "TEXT_TOOLTIP_ABILITY_FORCE_LIGHTNING_NAME", "TEXT_TOOLTIP_ABILITY_AREA_EFFECT_CONVERT_NAME",
+        "TEXT_TOOLTIP_ABILITY_TARGETED_INVULNERABILITY_NAME", "TEXT_TOOLTIP_ABILITY_CAPTURE_VEHICLE_NAME",
+        "TEXT_TOOLTIP_ABILITY_EJECT_VEHICLE_THIEF_NAME", "TEXT_TOOLTIP_ABILITY_ENERGY_WEAPON_NAME",
+        "TEXT_TOOLTIP_ABILITY_HARMONIC_BOMB_NAME", "TEXT_TOOLTIP_ABILITY_WEAKEN_ENEMY_NAME",
+        "TEXT_TOOLTIP_ABILITY_INVULNERABILITY_NAME", "TEXT_TOOLTIP_ABILITY_AREA_EFFECT_STUN_NAME",
+        "TEXT_TOOLTIP_ABILITY_TARGETED_HACK_NAME", "TEXT_TOOLTIP_ABILITY_TARGETED_REPAIR_NAME",
+        "TEXT_TOOLTIP_ABILITY_FLAME_THROWER_NAME", "TEXT_TOOLTIP_ABILITY_HOME_ONE_NAME",
+        "TEXT_TOOLTIP_ABILITY_SABER_THROW_NAME", "TEXT_TOOLTIP_ABILITY_FORCE_CLOAK_NAME",
+        "TEXT_TOOLTIP_ABILITY_FORCE_CONFUSE_NAME", "TEXT_TOOLTIP_ABILITY_FORCE_SIGHT_NAME",
+        "TEXT_TOOLTIP_ABILITY_BERSERKER_NAME", "TEXT_TOOLTIP_ABILITY_RADIOACTIVE_CONTAMINATE_NAME",
+        "TEXT_TOOLTIP_ABILITY_INFECTION_NAME", "TEXT_TOOLTIP_ABILITY_DRAIN_LIFE_NAME",
+        "TEXT_TOOLTIP_ABILITY_SUMMON_NAME", "TEXT_TOOLTIP_ABILITY_BLAST_NAME", "TEXT_TOOLTIP_ABILITY_SHIELD_FLARE_NAME",
+        "TEXT_TOOLTIP_ABILITY_STUN_NAME", "TEXT_TOOLTIP_ABILITY_TACTICAL_BRIBE_NAME",
+        "TEXT_TOOLTIP_ABILITY_FULL_SALVO_NAME", "TEXT_TOOLTIP_ABILITY_SENSOR_JAMMING_NAME"};
+    if (slot >= 123 && slot < kOriginalHotkeySlots) slot = static_cast<uint16_t>((slot - 123) % 10);
+    return slot < 123 ? kIds[slot] : nullptr;
+}
+
 std::u32string hotkey_label(const HotkeyBinding& b) {
     if (b.key < 0) return {};
     std::string s;
@@ -1484,23 +1537,35 @@ void FrontEnd::setup(GuiDialog& d) {
         }
     } else if (ascii_iequals(n, kQuit)) {
         const bool overwrite = quit_action_ == "overwrite", del = quit_action_ == "delete";
-        const bool rebind = quit_action_ == "rebind", keys = quit_action_ == "keys";
+        const bool rebind = quit_action_ == "rebind";
         d.set_text("IDC_CAPTION", overwrite ? text_or("TEXT_SAVE_CONFIRM", U"Overwrite Save Game?")
                                   : del     ? text_or("TEXT_DELETE_CONFIRM", U"Delete saved game?")
-                                  : rebind  ? gui_->port_text(U"Key already in use")
-                                  : keys    ? gui_->port_text(U"Apply the changed key settings?")
+                                  : rebind  ? text_or("TEXT_KEYBOARD_OPTIONS", U"Keyboard")
                                             : text("TEXT_BUTTON_QUIT_GAME"));
-        d.set_text("IDC_DIALOG_BOX_BUTTON_LEFT", text("TEXT_BUTTON_YES"));
-        d.set_text("IDC_DIALOG_BOX_BUTTON_RIGHT", text("TEXT_BUTTON_NO"));
+        d.set_text("IDC_DIALOG_BOX_BUTTON_LEFT", rebind ? text_or("TEXT_BUTTON_OK", U"OK") : text("TEXT_BUTTON_YES"));
+        d.set_text("IDC_DIALOG_BOX_BUTTON_RIGHT", rebind ? text_or("TEXT_BUTTON_CANCEL", U"Cancel") : text("TEXT_BUTTON_NO"));
         for (const char* u : {"IDC_USER_TEXT_STRING_1", "IDC_USER_TEXT_STRING_2", "IDC_USER_TEXT_STRING_3"}) d.show(u, false);
         if (overwrite || del) {  // N1 / t09: the save the question is about
             d.set_text("IDC_USER_TEXT_STRING_1", ascii32(confirm_save_));
             d.show("IDC_USER_TEXT_STRING_1", true);
         }
-        if (rebind && rebind_other_ >= 0) {  // UI5 t05 [port]: which action holds the key, and what Yes does
-            d.set_text("IDC_USER_TEXT_STRING_1", hotkey_label(rebind_key_) + U": " +
-                                                     gui_->port_text(hotkey_action_label(static_cast<uint16_t>(rebind_other_))));
-            d.set_text("IDC_USER_TEXT_STRING_2", gui_->port_text(U"Assign it here? That action is left without a key."));
+        if (rebind && rebind_other_ >= 0 && rebind_slot_ >= 0) {  // UI5 t09 (UI.md §4.3 Capture): retail's two lines
+            auto action = [&](int32_t slot) {
+                const auto s = static_cast<uint16_t>(slot);
+                const char* id = hotkey_action_text_id(s);
+                return id ? text_or(id, hotkey_action_label(s)) : gui_->port_text(hotkey_action_label(s));
+            };
+            auto fill = [](std::u32string s, std::u32string_view tag, const std::u32string& v) {
+                for (size_t at = s.find(tag); at != std::u32string::npos; at = s.find(tag, at + v.size())) s.replace(at, tag.size(), v);
+                return s;
+            };
+            const std::u32string key = hotkey_label(rebind_key_);
+            d.set_text("IDC_USER_TEXT_STRING_1",
+                       fill(fill(text_or("TEXT_KEYBIND_WARNING_0", U"##0 is already assigned to the game command ##1."), U"##0", key),
+                            U"##1", action(rebind_other_)));
+            d.set_text("IDC_USER_TEXT_STRING_2",
+                       fill(fill(text_or("TEXT_KEYBIND_WARNING_1", U"Do you want to re-assign ##0 to game command ##2?"), U"##0", key),
+                            U"##2", action(rebind_slot_)));
             d.show("IDC_USER_TEXT_STRING_1", true);
             d.show("IDC_USER_TEXT_STRING_2", true);
         }
@@ -1590,12 +1655,23 @@ void FrontEnd::on_cancel(const GuiEvent& e, std::vector<MenuAction>& out) {
         go(kSingle);
         return;
     }
-    if (keyboard_page(n) >= 0 && keys_dirty_) {  // UI5 t05: as Back
-        quit_action_ = "keys";
-        push(kQuit);
+    if (keyboard_page(n) >= 0) {  // UI5 t09 (UI.md §4.3 Capture): a field in capture goes back to its applied key
+        if (GuiDialog* d = gui_->find(n); d && d->focus_index() >= 0) {
+            const GuiControl& c = (*d)[static_cast<size_t>(d->focus_index())];
+            const int32_t slot = c.type == GuiGadgetType::EditBox ? keyboard_edit_slot(c.id()) : -1;
+            if (slot >= 0) {
+                const HotkeyTable applied = p_.hotkeys ? *p_.hotkeys : HotkeyTable{};
+                keys_work_.bind(static_cast<uint16_t>(slot), applied.binding(static_cast<uint16_t>(slot)));
+                d->clear_focus();
+                fill_keyboard(*d);
+                return;
+            }
+        }
+        keys_dirty_ = false;  // otherwise the dialog closes like Back: nothing applied, no question
+        pop();
         return;
     }
-    if (ascii_iequals(n, kQuit) && (quit_action_ == "rebind" || quit_action_ == "keys")) {  // Esc = keep editing
+    if (ascii_iequals(n, kQuit) && quit_action_ == "rebind") {  // Esc = Cancel: keep editing
         quit_action_.clear();
         rebind_slot_ = rebind_other_ = -1;
     }
@@ -1941,13 +2017,9 @@ void FrontEnd::on_click(const GuiEvent& e, std::vector<MenuAction>& out) {
         if (is("IDC_APPLY")) {
             apply_keys(out);
             pop();
-        } else if (is("IDC_OK")) {  // Back: UI5 t05 [port] unapplied edits ask Apply? (Yes applies, No discards)
-            if (keys_dirty_) {
-                quit_action_ = "keys";
-                push(kQuit);
-            } else {
-                pop();
-            }
+        } else if (is("IDC_OK")) {  // Back: UI5 t09 (UI.md §4.3) closes, nothing applied, no question; the edits are
+            keys_dirty_ = false;     // dropped (the next open copies the applied table)
+            pop();
         } else if (is("IDC_RESTORE_DEFAULTS")) {
             keys_work_.reset_defaults();
             keys_dirty_ = true;
@@ -2044,24 +2116,17 @@ void FrontEnd::on_click(const GuiEvent& e, std::vector<MenuAction>& out) {
         if (is("IDC_DIALOG_BOX_BUTTON_LEFT")) end_resolution_confirm(true, out);
         else if (is("IDC_DIALOG_BOX_BUTTON_RIGHT")) end_resolution_confirm(false, out);
     } else if (ascii_iequals(n, kQuit)) {
-        if (is("IDC_DIALOG_BOX_BUTTON_LEFT") && (quit_action_ == "rebind" || quit_action_ == "keys")) {
+        if (is("IDC_DIALOG_BOX_BUTTON_LEFT") && quit_action_ == "rebind") {  // OK: the key moves here
             pop();
-            if (quit_action_ == "rebind" && rebind_slot_ >= 0) {
+            if (rebind_slot_ >= 0) {
                 keys_work_.bind(static_cast<uint16_t>(rebind_slot_), rebind_key_);
                 keys_dirty_ = true;
                 refill_keys();
-            } else if (quit_action_ == "keys") {
-                apply_keys(out);
-                pop();  // the keyboard page
             }
             quit_action_.clear();
             rebind_slot_ = rebind_other_ = -1;
-        } else if (is("IDC_DIALOG_BOX_BUTTON_RIGHT") && (quit_action_ == "rebind" || quit_action_ == "keys")) {
+        } else if (is("IDC_DIALOG_BOX_BUTTON_RIGHT") && quit_action_ == "rebind") {  // Cancel: nothing changes
             pop();
-            if (quit_action_ == "keys") {  // discard
-                keys_dirty_ = false;
-                pop();
-            }
             quit_action_.clear();
             rebind_slot_ = rebind_other_ = -1;
         } else if (is("IDC_DIALOG_BOX_BUTTON_LEFT")) {
@@ -2110,8 +2175,9 @@ void FrontEnd::update(std::span<const GuiEvent> events, const InputFrame& raw, s
         const int32_t slot = c.type == GuiGadgetType::EditBox ? keyboard_edit_slot(c.id()) : -1;
         if (slot >= 0) {
             for (uint32_t k = 1; k < 256; ++k) {
-                // UI5 t05 [port]: Tab is a key here (MissionHolocron's default); Esc stays the dialog's Cancel (§4.2: in
-                // battle Esc closes the in-game panel before the hotkey dispatch, so it could never fire a binding).
+                // UI5 t09 (UI.md §4.3 Capture): every key but Shift / Ctrl / Alt alone binds, Delete and Backspace
+                // included (retail has no per-slot clear); Esc is the dialog's cancel event. [port] Tab is a key here
+                // (MissionHolocron's default; whether retail's field receives Tab is not settled).
                 if (!raw.keys_pressed.test(k) || k == vk::kEscape || k == vk::kShift || k == vk::kControl || k == vk::kAlt ||
                     (k >= 0xA0 && k <= 0xA5))
                     continue;
@@ -2121,9 +2187,8 @@ void FrontEnd::update(std::span<const GuiEvent> events, const InputFrame& raw, s
                         : raw.keys_down.test(vk::kAlt)   ? HotkeyMod::Alt
                         : raw.keys_down.test(vk::kShift) ? HotkeyMod::Shift
                                                          : HotkeyMod::None;
-                if ((k == vk::kBack || k == vk::kDelete) && b.mod == HotkeyMod::None) b = HotkeyBinding{};  // [port] clears
                 if (const std::vector<uint16_t> cf = keys_work_.conflicts(static_cast<uint16_t>(slot), b); !cf.empty()) {
-                    rebind_slot_ = slot;  // [port] ask before taking the key from the other action
+                    rebind_slot_ = slot;  // TEXT_KEYBIND_WARNING_0 / _1: OK takes the key from the other action
                     rebind_other_ = cf.front();
                     rebind_key_ = b;
                     quit_action_ = "rebind";

@@ -260,6 +260,11 @@ bool App::init() {
         return v;
     };
     mp.advanced_video = [this] { return adv_video_; };
+    // ui5 t12 (AUDIO.md §3.4): a caption whose text is missing or "[TBL]" does not show (nor replace the one on screen).
+    full_movie_.set_caption_filter([this](std::string_view id) {
+        const std::u16string* t = ui_.text.find(id);
+        return t != nullptr && *t != u"[TBL]";
+    });
     // N1 / t09: the Save / Load dialogs' list (newest first), the Save dialog's blocker and the overwrite question.
     saves_dir_ = !opt_.saves_dir.empty()                          ? opt_.saves_dir
                  : !opt_.smoke.empty() && !opt_.png_dir.empty() ? opt_.png_dir + "/saves"

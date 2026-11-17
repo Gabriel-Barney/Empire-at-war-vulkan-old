@@ -566,7 +566,9 @@ void App::session_started(const std::vector<std::string>& diag) {
         audio_.music(MusicScene::Galactic, local_faction());
     } else {
         screen_ = Screen::SessionLoad;  // the hidden skirmish galaxy runs until the battle is pushed
-        open_battle_load(kInvalidPlanet, !spec.skirmish.land);  // QA t11: on screen before the push's blocking load
+        // QA t11: on screen before the push's blocking load; ui5 t10: not for a save taken in the battle, which comes back
+        // through begin_battle(true) with the Mission dialog (UI.md §5.1, retail 0x8dc40 clears the skirmish flag).
+        if (!(session_->loaded() && session_->in_battle())) open_battle_load(kInvalidPlanet, !spec.skirmish.land);
     }
     std::printf("session: %s %s, local player %d (%s), galactic AI %s, story %s\n", spec.kind == SessionKind::Campaign ? "campaign" : "skirmish",
                 spec.kind == SessionKind::Campaign ? spec.campaign.c_str() : spec.skirmish_map.c_str(), local_player(), local_faction().c_str(),
@@ -577,7 +579,7 @@ void App::session_started(const std::vector<std::string>& diag) {
     for (const std::string& d : diag) std::printf("  session: %s\n", d.c_str());
     // N1: a save taken during a battle comes back in it: the battle opens now (its load screen, then Begin), before any
     // tick - post_tick would only notice the pushed battle after a first tick on the galactic map / hidden skirmish galaxy.
-    if (session_->in_battle()) begin_battle();
+    if (session_->in_battle()) begin_battle(session_->loaded());
 }
 
 void App::end_session() {
@@ -589,7 +591,7 @@ void App::end_session() {
     ui_.front.set_in_game(false);
 }
 
-void App::begin_battle() {
+void App::begin_battle(bool from_save) {
     const sim::TacticalBattle* b = session_->battle();
     ++battles_seen_;
     reinforce_unit_ = 0;  // no drop point pending from an earlier battle
@@ -618,7 +620,9 @@ void App::begin_battle() {
     const bool space = tm && tm->kind() == objects::ModeKind::Space;
     const PlanetIndex planet = b ? b->request().info.planet : kInvalidPlanet;
     battle_place_ = battle_place_name(planet);
-    const bool story_mission = b && b->request().linked;  // UI5 t07: the Mission load dialogs
+    // ui5 t10 (UI.md §5.1 "Which dialog"): the Mission load dialogs only for a SET_TACTICAL_MAP map override or a save
+    // taken during the battle; LINK_TACTICAL story battles take the Battle pair like any other.
+    const bool story_mission = b && (b->request().story_map || from_save);
     // story t13 (BT §2.9.1 P10 / P11): a story-linked battle opens with the record's presentation (applied by the start,
     // CampaignBattles::linked_presentation); any other battle with nothing held.
     {
