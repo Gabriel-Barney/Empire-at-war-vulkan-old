@@ -2078,6 +2078,9 @@ void CampaignBattles::l1_hooks(SimHost& host) {
     k.teleport = [this, h, id_of](objects::ObjectHandle u, Vec3 p, Vec3 f) {
         if (TacticalMode* tm = h->tactical(); battle_ && tm) battle_->teleport(*tm, id_of(u), p, f);
     };
+    k.face_immediate = [this, h, id_of](objects::ObjectHandle u, Vec3 f) {  // storyb t11
+        if (TacticalMode* tm = h->tactical(); battle_ && tm) battle_->face_immediate(*tm, id_of(u), f);
+    };
     k.movement_first_lock = [this, h, id_of](objects::ObjectHandle u) {  // cu8l t02: Lock_Current_Orders' first lock
         if (TacticalMode* tm = h->tactical(); battle_ && tm) battle_->script_first_lock(*tm, id_of(u));
     };

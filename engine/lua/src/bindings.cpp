@@ -664,6 +664,22 @@ void push_cached_userdata(lua_State* L, const Ud& ud, lua_Number key) {
     push_cached_in_top(L, key, ud);
 }
 
+std::vector<objects::ObjectHandle> script_objects(const objects::ObjectStore& st) {
+    std::vector<objects::ObjectHandle> out;
+    out.reserve(st.all_objects().size());
+    for (const objects::ObjectHandle h : st.all_objects())
+        if ((st.flags(h) & objects::kFlagMapDecoration) == 0) out.push_back(h);
+    return out;
+}
+
+std::vector<objects::ObjectHandle> script_objects_newest_first(const objects::ObjectStore& st) {
+    std::vector<objects::ObjectHandle> out = st.objects_newest_first();
+    out.erase(std::remove_if(out.begin(), out.end(),
+                             [&st](objects::ObjectHandle h) { return (st.flags(h) & objects::kFlagMapDecoration) != 0; }),
+              out.end());
+    return out;
+}
+
 void push_object(lua_State* L, LuaVm::Impl& vm, objects::ObjectHandle h) {
     const objects::ObjectStore* st = vm.host.store;
     if (!st || !h || !st->exists(h)) {

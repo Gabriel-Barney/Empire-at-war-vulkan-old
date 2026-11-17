@@ -415,6 +415,13 @@ Run run(const Data& d, int32_t workers, int follow = 0, bool via_command = false
             CHECK(b->teleport(*tm, slowed, Vec3{-1000.0f, -2000.0f, 0.0f}, Vec3{0.0f, 1.0f, 0.0f}));
             out.teleported = b->movement().view(slowed).pos.x == -1000.0f && b->combat().position(slowed).y == -2000.0f &&
                              st.position(st.find(slowed)).x == -1000.0f;
+            // storyb t11 (STORYB_T17_HIDDEN_UNITS §5): Face_Immediate snaps store, combat and the movement heading, in place.
+            CHECK(b->face_immediate(*tm, slowed, Vec3{-1.0f, 0.0f, 0.0f}));
+            CHECK(std::fabs(std::fabs(b->movement().view(slowed).yaw) - 180.0f) < 1e-3f && st.facing(st.find(slowed)).x == -1.0f &&
+                  b->movement().view(slowed).pos.x == -1000.0f);
+            CHECK(!b->face_immediate(*tm, objects::kNoObjectId, Vec3{1.0f, 0.0f, 0.0f}));
+            CHECK(b->face_immediate(*tm, slowed, Vec3{0.0f, 1.0f, 0.0f}));  // back to the teleport's facing (golden unchanged)
+            CHECK(std::fabs(b->movement().view(slowed).yaw - 90.0f) < 1e-3f);
             out.increment = b->retreat_increment_frames(0);
             out.ground = b->ground_height(0.0f, 0.0f);
             out.fields = b->field_kinds_at(100.0f, -4000.0f) == 4u && b->field_kinds_at(100.0f, -3150.0f) == 0u &&

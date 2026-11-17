@@ -234,7 +234,7 @@ int g_spawn_special_weapon(Call& c) {
     if (!player || player->id < 0) return c.script_error_stop("%s -- invalid type for parameter 2. Expected player.", kName);
     // The first object of the mode with DUMMY_SPECIAL_WEAPON_SOURCE (insertion order [M]).
     ObjectHandle source;
-    for (const ObjectHandle h : st->all_objects())
+    for (const ObjectHandle h : detail::script_objects(*st))
         if (st->alive(h) && st->has_behavior(h, kBehWeaponSource)) {
             source = h;
             break;
@@ -370,7 +370,7 @@ int g_start_cinematic_space_retreat(Call& c) {
     // 2. Sort by speed, descending (0x3727a0 [M]: Max_Speed), stable.
     std::stable_sort(units.begin(), units.end(), [](const Entry& a, const Entry& b) { return a.speed > b.speed; });
     ObjectHandle marker;
-    for (const ObjectHandle h : st->all_objects())
+    for (const ObjectHandle h : detail::script_objects(*st))
         if (st->active(h) && ascii_iequals(type_name(c, st->type(h)), "Attacker Entry Position")) {
             marker = h;
             break;

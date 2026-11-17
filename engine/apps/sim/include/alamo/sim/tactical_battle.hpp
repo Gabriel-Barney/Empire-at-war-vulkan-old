@@ -229,7 +229,9 @@ struct MapLoadStats {
     uint32_t hangar_off = 0;        // map1 t05: SPAWN_SQUADRON placements with mini 0x29 = 0 (no Starting_Spawned_Units)
     uint32_t extra_behaviors = 0;   // map1 t04: 0x4B7 behaviours attached
     uint32_t marker_names = 0;      // map1 t04: placements with a non-empty 0x46E marker name
-    uint32_t hints_skipped = 0;     // q6 t32: 0x482 hints on objects without HINT (retail reads none)
+    uint32_t hints_skipped = 0;
+    uint32_t decorations = 0;
+    uint32_t neutral_teams = 0;  // storyb t16: TEAM containers of inert (Is_Neutral) map companies  // storyb t16: Is_Decoration map objects (objects::kFlagMapDecoration)     // q6 t32: 0x482 hints on objects without HINT (retail reads none)
     uint32_t remembered_markers = 0;  // map1 t06: structures placed on their remembered marker (pass 1)
     uint32_t escorts = 0;           // map1 t07: Space_Escort_Unit_Types participants added
     bool starbase_picked = false;   // map1 t07: the starbase type came from the DUMMY_STAR_BASE pick (0x407b60)
@@ -1219,6 +1221,9 @@ public:
     // storyb t14 (GAME_SCORING.md §3, death signal 0x25): called for every battle unit's death, before the object leaves
     // the store, with the killer's owner (-1 when the killer is unknown or gone) [M: retail reads the victim's
     // last-attacker player; the 0x2e type skip is not modelled, L meaning]. Unset: nothing.
+    // storyb t11 (STORYB_T17_HIDDEN_UNITS §5 [H]): Lua Face_Immediate - the store facing, the combat facing and the movement
+    // heading := `facing` (a squad container: the container only), orders and paths kept. False when `id` is not alive.
+    bool face_immediate(TacticalMode& mode, objects::ObjectId id, Vec3 facing);
     void set_scoring_death(std::function<void(objects::ObjectHandle object, int32_t killer)> fn) { scoring_death_ = std::move(fn); }
 
     // --- battle host (BT pass): HIJACK reserve (AI_GALACTIC_3 §4.3 step 5 "tactical with parent") ---

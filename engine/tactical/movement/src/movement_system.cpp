@@ -1618,6 +1618,13 @@ void MovementSystem::brake_to_stop(Unit& u, uint32_t frame) {
 }
 
 // L1 systems: Teleport (0x3a8f90): stop, place, re-register (collision tree / stationary space track).
+bool MovementSystem::set_heading(ObjectId id, float yaw_deg) {
+    Unit* u = unit_ptr(id);
+    if (!u) return false;
+    u->m.yaw = wrap_deg(yaw_deg);
+    return true;
+}
+
 bool MovementSystem::teleport(ObjectId id, V2 pos, float z, float yaw_deg, uint32_t frame) {
     Unit* u = unit_ptr(id);
     if (!u) return false;

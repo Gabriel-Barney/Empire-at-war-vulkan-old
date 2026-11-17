@@ -235,7 +235,7 @@ std::vector<FieldHit> space_fields(Call& c, uint32_t mask) {
     const objects::GameObjectTypes* ty = types(c);
     if (!st || !ty) return out;
     static const objects::BehaviorTypeId kObstacle = objects::behavior_type_id("SPACE_OBSTACLE");
-    for (const ObjectHandle h : st->all_objects()) {
+    for (const ObjectHandle h : detail::script_objects(*st)) {
         if (!st->alive(h)) continue;
         const TypeIndex t = st->type(h);
         if (t >= ty->size()) continue;
@@ -618,7 +618,7 @@ ObjectHandle pad_contents(Call& c, ObjectHandle pad) {
             const ObjectHandle uc = st->find(s->pad_uc);
             if (uc && st->alive(uc)) return uc;
         }
-    for (const ObjectHandle h : st->all_objects())
+    for (const ObjectHandle h : detail::script_objects(*st))
         if (st->alive(h) && h != pad && (st->attach_parent(h) == pad || st->container(h) == pad)) return h;
     return {};
 }
@@ -653,7 +653,7 @@ bool pad_rule(Call& c, ObjectHandle pad) {
     const Vec3 p = st->position(pad);
     const int32_t owner = st->owner(pad);
     ObjectBridge* b = bridge(c);
-    for (const ObjectHandle h : st->all_objects()) {
+    for (const ObjectHandle h : detail::script_objects(*st)) {
         if (!st->alive(h) || h == pad) continue;
         const TypeIndex t = st->type(h);
         if (t >= ty->size() || !ty->get_bool(t, "Influences_Capture_Point")) continue;
@@ -1038,7 +1038,7 @@ int m_get_time_till_dead(Call& c) {
 bool object_in_field(Call& c, ObjectHandle h, uint32_t mask, int depth) {
     const objects::ObjectStore* st = store(c);
     if (st->has_behavior(h, objects::beh::Team) && depth < 8) {
-        for (const ObjectHandle m : st->all_objects())
+        for (const ObjectHandle m : detail::script_objects(*st))
             if (st->alive(m) && st->container(m) == h && object_in_field(c, m, mask, depth + 1)) return true;
         return false;
     }
@@ -1116,7 +1116,7 @@ void set_stickiness(Call& c, ObjectHandle u, float seconds) {
         };
         add(u);
         if (st->has_behavior(u, objects::beh::Team))
-            for (const ObjectHandle m : st->all_objects())
+            for (const ObjectHandle m : detail::script_objects(*st))
                 if (st->alive(m) && st->container(m) == u) add(m);
         if (!w.ids.empty() && b->lane_write) b->lane_write(w);
         return;
@@ -1129,7 +1129,7 @@ void set_stickiness(Call& c, ObjectHandle u, float seconds) {
     };
     write(u);
     if (st->has_behavior(u, objects::beh::Team))
-        for (const ObjectHandle m : st->all_objects())
+        for (const ObjectHandle m : detail::script_objects(*st))
             if (st->alive(m) && st->container(m) == u) write(m);
 #endif
 }
@@ -1414,7 +1414,7 @@ int m_tf_find_closest_enemy(Call& c) {
     ObjectBridge* b = bridge(c);
     ObjectHandle best;
     double best_d = 0.0;
-    for (const ObjectHandle h : st->all_objects()) {
+    for (const ObjectHandle h : detail::script_objects(*st)) {
         if (!st->alive(h) || st->container(h) || st->attach_parent(h)) continue;
         const int32_t owner = st->owner(h);
         const bool enemy = (b && b->is_enemy) ? b->is_enemy(me, owner) : (owner != me && owner >= 0 && me >= 0);

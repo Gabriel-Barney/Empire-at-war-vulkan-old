@@ -526,6 +526,11 @@ public:
     // s78n t18 (FIGHTER_FLYING §7.4, 0x3abb80): a land squad container takes its members along - each steering (or
     // suspended) member is put at `pos` + its old offset from the container, speed 0, its facing kept.
     bool teleport(ObjectId id, V2 pos, float z, float yaw_deg, uint32_t frame);
+    // storyb t11 (STORYB_T17_HIDDEN_UNITS §5, Face_Immediate 0x394440 [H]): the unit's current heading := yaw_deg, nothing
+    // else (no stop, no path or order change, no turn target, the secondary facing kept): retail's object orientation is
+    // the locomotor's only current heading. A moving unit then steers back toward its path at its turn rate. False when
+    // the unit is unknown. [port] a fighter's flight state keeps its own yaw.
+    bool set_heading(ObjectId id, float yaw_deg);
     // S7 t06 / t14 (MOVEMENT §3.1.1, 0x3a9910): swap a Uses_Multiple_Locomotors unit to its secondary locomotor (true)
     // or back to its primary (false); see "multi" in the header comment. Returns false when the unit is unknown, the mode
     // is space, or the type has no Uses_Multiple_Locomotors / no JETPACK Secondary_Locomotor_Name

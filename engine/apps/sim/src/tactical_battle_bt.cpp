@@ -1086,6 +1086,13 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
             return;
         mode.primary().set_flag(h, objects::kFlagNoAiOwnerList);
     };
+    // storyb t16 (STORY_T04 §7.1 [H]): an Is_Decoration map object goes to retail's secondary store (objects::kFlagMapDecoration).
+    auto note_decoration = [&](objects::TypeIndex t, objects::ObjectHandle h) {
+        if (mode.primary().alive(h) && t < types.size() && types.get_bool(t, "Is_Decoration")) {
+            mode.primary().set_flag(h, objects::kFlagMapDecoration);
+            ++map_stats_.decorations;
+        }
+    };
     struct CompanyPlacement {
         const terrain::ObjectPlacement* pl;
         objects::TypeIndex type;
@@ -1183,6 +1190,7 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
             note_pad(pl, placed);
             if (!picked) note_hint(pl, placed);
             note_stale(pl, placed);
+            note_decoration(t, placed);
             // a1f t07: a SELECTABLE one (Secondary_Abandoned_Sensor: Tactical_Health 700, Structure, Neutral at start) is a
             // combat object too, so Destroy_Structure / attack orders can kill it; whatever its map owner (the Is_Neutral
             // player's objects are skipped by the target scan, TACTICAL_COMBAT §2.2). [port] a third party: never decides
@@ -1199,6 +1207,7 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
             note_pad(pl, h);
             if (!picked) note_hint(pl, h);
             note_stale(pl, h);
+            note_decoration(t, h);
             if (!bt_owner_neutral(owner)) bt_adopt_built(mode, h, owner, pl.health_fraction, &rng, true);
             continue;
         }
@@ -1207,6 +1216,7 @@ void TacticalBattle::bt_map_load(TacticalMode& mode, SimRng& rng) {
         note_pad(pl, h);
         if (!picked) note_hint(pl, h);
         note_stale(pl, h);
+        note_decoration(t, h);
         if (kMarker != objects::kNoBehavior && types.has_behavior(t, objects::BehaviorSet::Union, kMarker) && owner >= 0) {
             MapMarker m;
             m.id = mode.primary().exists(h) ? mode.primary().id(h) : objects::kNoObjectId;
@@ -1329,13 +1339,41 @@ void TacticalBattle::bt_expand_company(TacticalMode& mode, const terrain::Object
     P.owner = owner;
     P.type = ct;
     if (bt_owner_neutral(owner) || !combat_ || !bt_rng_) {
+        std::vector<objects::ObjectHandle> made;
         for (const uint32_t m : spawn_types(P)) {
             objects::SpawnParams sp;
             sp.type = static_cast<objects::TypeIndex>(m);
             sp.owner = owner;
             sp.position = pos;
             sp.facing = face;
-            inherit(mode.spawn(sp, 1.0f));
+            made.push_back(mode.spawn(sp, 1.0f));
+            inherit(made.back());
+        }
+        // storyb t16 (STORY_T04 §7.1: retail UM01 has 14 URBAN_HUMAN_CIV_TEAM + 2 WOOKIE_TEAM for its Neutral prisoner
+        // companies): the company spawn runs the TEAM helper (REMAINING_GAPS §3.4) for an inert company too - one store
+        // object of the team type per Max_Squad_Size chunk, at the chunk's centroid, owner / facing of its first member,
+        // after every member. [port] The containers are inert like the members (no Container record, no movement unit).
+        uint32_t team_obj = 0xFFFFFFFFu, team_beh = 0xFFFFFFFFu, squad = 0;
+        if (!made.empty() && st.exists(made.front()) &&
+            bt_team(ct, static_cast<uint32_t>(st.type(made.front())), team_obj, team_beh, squad) && squad > 0) {
+            for (size_t s0 = 0; s0 < made.size(); s0 += squad) {
+                const size_t end = std::min(made.size(), s0 + squad);
+                Vec3 c{0.0f, 0.0f, 0.0f};
+                for (size_t i = s0; i < end; ++i) {
+                    const Vec3 p = st.position(made[i]);
+                    c.x = c.x + p.x;
+                    c.y = c.y + p.y;
+                    c.z = c.z + p.z;
+                }
+                const float inv = static_cast<float>(end - s0);
+                objects::SpawnParams sp;
+                sp.type = static_cast<objects::TypeIndex>(team_obj);
+                sp.owner = st.owner(made[s0]);
+                sp.position = Vec3{c.x / inv, c.y / inv, c.z / inv};
+                sp.facing = st.facing(made[s0]);
+                (void)st.create(sp);
+                ++map_stats_.neutral_teams;
+            }
         }
         return;
     }

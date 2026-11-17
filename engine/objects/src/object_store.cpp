@@ -404,7 +404,8 @@ uint32_t ObjectStore::parity_crc() const {
 void ObjectStore::hash_state(StateHasher& hs) const {
     std::vector<uint32_t> slots;
     slots.reserve(all_.size());
-    for (ObjectHandle h : all_) slots.push_back(h.slot());
+    for (ObjectHandle h : all_)
+        if ((flags_[h.slot()] & kFlagMapDecoration) == 0) slots.push_back(h.slot());  // storyb t16: not hashed
     std::sort(slots.begin(), slots.end(), [this](uint32_t a, uint32_t b) { return id_[a] < id_[b]; });
     auto id_of = [this](ObjectHandle r) { return exists(r) ? id_[r.slot()] : kNoObjectId; };
     hs.i32(ids_->next());

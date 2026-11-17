@@ -111,7 +111,7 @@ std::vector<ObjectHandle> contents_of(Call& c, ObjectHandle h) {
             if (st->alive(m)) out.push_back(m);
         return out;
     }
-    for (const ObjectHandle m : st->all_objects())
+    for (const ObjectHandle m : detail::script_objects(*st))
         if (st->alive(m) && st->container(m) == h) out.push_back(m);
     return out;
 }
@@ -804,7 +804,7 @@ int g_find_hint(Call& c) {
     const objects::ObjectStore* st = store(c);
     const ObjectBridge* b = bridge(c);
     if (!st || !b) return push_nil(c);
-    for (const ObjectHandle h : st->objects_newest_first()) {
+    for (const ObjectHandle h : detail::script_objects_newest_first(*st)) {
         if (!st->active(h) || !st->has_behavior(h, objects::beh::Hint) || !type_matches(c, h, t.name)) continue;
         if (!hint.empty()) {
             const std::string_view oh = hint_of(*b, *st, h);
@@ -828,7 +828,7 @@ int g_find_all_with_hint(Call& c) {
     const ObjectBridge* b = bridge(c);
     if (!st || !b) return 1;
     int n = 0;
-    for (const ObjectHandle h : st->objects_newest_first()) {
+    for (const ObjectHandle h : detail::script_objects_newest_first(*st)) {
         if (!st->active(h) || !st->has_behavior(h, objects::beh::Hint)) continue;
         const std::string_view oh = hint_of(*b, *st, h);
         if (oh.empty() || !ascii_iequals(oh, hint)) continue;
@@ -875,7 +875,7 @@ int g_find_all_objects_of_type(Call& c) {
     const ObjectBridge* b = bridge(c);
     const bool members = st->mode() == objects::ModeKind::Galactic;
     int n = 0;
-    for (const ObjectHandle h : st->objects_newest_first()) {
+    for (const ObjectHandle h : detail::script_objects_newest_first(*st)) {
         if (!st->alive(h)) continue;  // [port] killed, not yet flushed (see above)
         if (f.have_owner && st->owner(h) != f.owner) continue;
         if (type_filters_pass(*ty, f, representative_type(c, b, h))) {
@@ -910,7 +910,7 @@ int find_first(Call& c) {
     const TypeIndex t = ty->raw().find(c.string(1));
     if (t == objects::kNone) return push_nil(c);
     const bool members = st->mode() == objects::ModeKind::Galactic;
-    for (const ObjectHandle h : st->objects_newest_first()) {
+    for (const ObjectHandle h : detail::script_objects_newest_first(*st)) {
         if (!st->alive(h)) continue;
         if (st->type(h) == t) {
             detail::push_object(c.L, *c.vm, h);
@@ -935,7 +935,7 @@ int m_get_all_planets(Call& c) {
     const objects::ObjectStore* st = store(c);
     if (!st) return 1;
     int n = 0;
-    for (const ObjectHandle h : st->objects_newest_first()) {
+    for (const ObjectHandle h : detail::script_objects_newest_first(*st)) {
         if (!st->active(h) || !st->has_behavior(h, objects::beh::Planet)) continue;
         detail::push_object(c.L, *c.vm, h);
         lua_rawseti(c.L, -2, ++n);
@@ -1014,7 +1014,7 @@ int g_find_nearest(Call& c) {
     ObjectHandle best{};
     int32_t best_owner = 0;
     double best_d = 0.0;
-    for (const ObjectHandle h : st->objects_newest_first()) {
+    for (const ObjectHandle h : detail::script_objects_newest_first(*st)) {
         if (h == self || !st->active(h)) continue;
         const int32_t q = st->owner(h);
         if (q < 0 || !st->has_behavior(h, unit_ai)) continue;
@@ -2073,7 +2073,7 @@ int m_despawn(Call& c) {
     const ObjectHandle self = self_object(c);
     if (st->has_behavior(self, objects::beh::Team)) {
         std::vector<ObjectHandle> members;
-        for (const ObjectHandle h : st->all_objects())
+        for (const ObjectHandle h : detail::script_objects(*st))
             if (st->alive(h) && st->container(h) == self) members.push_back(h);
         for (auto it = members.rbegin(); it != members.rend(); ++it) st->destroy(*it);
         return 0;
@@ -2181,7 +2181,10 @@ int m_teleport_and_face(Call& c) {
     return 0;
 }
 
-// Face_Immediate(target): facing set at once to the unit XY direction towards the target [inferred].
+// Face_Immediate(target) (0x576110 -> 0x394440, STORYB_T17_HIDDEN_UNITS §5 [H]): the orientation snaps to the target's
+// direction, yaw 0 when the target has the same x and y; on a battle host the movement heading and the combat facing
+// too (TacticalScriptHooks::face_immediate), orders and paths untouched. [port] XY facing only (the pitch toward the
+// target is not kept), a stunned unit is not skipped, and no terrain re-seat runs here (movement conforms each tick).
 int m_face_immediate(Call& c) {
     if (c.nargs < 1) return c.script_error_stop("GameObjectWrapper::Face_Immediate -- Missing required position or gameobject parameter.");
     Vec3 p{};
@@ -2191,7 +2194,11 @@ int m_face_immediate(Call& c) {
     const Vec3 from = st->position(self_object(c));
     const float dx = p.x - from.x, dy = p.y - from.y;
     const float len = dmath::sqrt(dx * dx + dy * dy);
-    if (len > 0.0f) st->set_facing(self_object(c), {dx / len, dy / len, 0.0f});
+    const Vec3 face = len > 0.0f ? Vec3{dx / len, dy / len, 0.0f} : Vec3{1.0f, 0.0f, 0.0f};  // same x and y: yaw 0
+    if (const ObjectBridge* b = bridge(c); b && b->tactical && b->tactical->face_immediate)
+        b->tactical->face_immediate(self_object(c), face);
+    else
+        st->set_facing(self_object(c), face);
     return 0;
 }
 
@@ -2791,7 +2798,7 @@ void prox_hits(Call& c, ObjectHandle self, double range, int32_t player, int32_t
         // The hook answers a sphere; the box's corners are sqrt(3) x range away (it may over-report: tested below).
         b->objects_in_range(center, static_cast<float>(range * 1.7320508075688772), ids);
     } else {
-        for (const ObjectHandle h : st->all_objects())
+        for (const ObjectHandle h : detail::script_objects(*st))
             if (st->alive(h)) ids.push_back(st->id(h));
     }
     std::sort(ids.begin(), ids.end());
@@ -2992,7 +2999,7 @@ int m_get_space_station(Call& c) {
     const objects::ObjectStore* st = store(c);
     const objects::GameObjectTypes* ty = types(c);
     if (!st || !ty) return push_nil(c);
-    for (const ObjectHandle h : st->objects_newest_first()) {
+    for (const ObjectHandle h : detail::script_objects_newest_first(*st)) {
         if (!st->active(h) || st->owner(h) != c.self->id) continue;
         const TypeIndex t = st->type(h);
         if (t < ty->raw().type_count() && ascii_iequals(ty->raw().element_name(t), "StarBase")) {
