@@ -1140,7 +1140,9 @@ under-construction object's init 0x5d70f0 plays **Build (0x4a), index 0, one-sho
 owner, the point plays **Idle (0)** looped, blend 0, speed 1, index = the owner faction's `Faction_Anim_Subindex`
 (type +0x2098, 0x371070; an unlisted faction gives 0xFFFF = a draw). When another controller starts a transition
 (progress exactly 0), it plays **Transition_Ownership (0x4b)** looped, blend 0, speed 1, index = the controller faction's
-`Faction_Anim_Subindex` (the owner's when the controller's faction has its +0x108 flag [M: Is_Neutral]).
+`Faction_Anim_Subindex` (the owner's when the controller's faction has its +0x108 flag [M: Is_Neutral]). A point
+already at progress 0 under its owner returns before the step and plays nothing; a running transition plays nothing
+new; after a completed capture (owner := controller, progress 0) the Transition_Ownership loop stays on.
 
 **Port (r3h, 2026-11-17).** The record of §4.14 is kept and also handed to the host: each play is queued as an
 `AbilityAnimPlay` (type, drawn variant, loop, blend, speed, frame) and the battle plays it on its animation world after
@@ -1150,6 +1152,9 @@ in the frame it finishes (`anim_follow_ups`): the hold loop (0xFFFF, blend 0.1),
 (0xFFFF, blend 0.2) or the default idle; Force_Revel_End is followed by nothing (the IDLE behaviour). The record follows
 the world: when the battle's world shows another primary clip than the record (`observe_clip`), the record ends
 (Generic / Arc / Eat abort at their next update, Generic / Eat with the default idle; a Berserker ends).
+Capture points: the capture service lists the clips it asks for (`CapturePointSystem::anims`) and the battle plays
+them (`bt_capture_anims`); the Idle only on a decay from above 0 (at progress 0 under the owner retail returns before
+the step).
 
 ---
 

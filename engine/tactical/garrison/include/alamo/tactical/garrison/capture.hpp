@@ -49,6 +49,16 @@ struct CaptureEvent {
     uint32_t frame = 0;
 };
 
+// r3h t05 (ABILITIES_HARDPOINTS §4.15, service 0x501980): a clip the point asks for. `transition` false: Idle when the
+// progress decays to 0 under the owner (from above 0); true: Transition_Ownership when another controller starts a
+// transition (progress exactly 0 before the step). The host picks the variant from the faction of `controller` (the
+// owner's when the controller's faction is neutral). Presentation only: not saved, not hashed.
+struct CaptureAnim {
+    ObjectId point = kNoObject;
+    int32_t owner = -1, controller = -1;
+    bool transition = false;
+};
+
 class CapturePointSystem {
 public:
     CapturePointSystem(int32_t neutral_player, uint32_t interval = 4, uint32_t allowed_frame = 0)
@@ -85,6 +95,7 @@ public:
 
     std::span<const CaptureEvent> events() const { return events_; }
     void clear_events() { events_.clear(); }
+    std::span<const CaptureAnim> anims() const { return anims_; }  // r3h t05: the last service's, in point order
     void hash(StateHasher& h) const;
     // N1 stage 2 (save_file.hpp contract, garrison_save.cpp): the constructor parameters (neutral player, interval,
     // allowed frame - restored), every point (owner, position, descriptor, step, pending, progress, next service) and
@@ -117,6 +128,7 @@ private:
     std::function<bool(ObjectId)> pad_occupied_;
     std::vector<Point> points_;  // ascending id
     std::vector<CaptureEvent> events_;
+    std::vector<CaptureAnim> anims_;  // r3h t05: presentation, not saved
 };
 
 }  // namespace alamo::tactical::garrison

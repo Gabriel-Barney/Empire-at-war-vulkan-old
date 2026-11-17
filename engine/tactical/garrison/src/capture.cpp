@@ -91,6 +91,7 @@ int32_t CapturePointSystem::controller(const Point& p, std::span<const Influence
 }
 
 void CapturePointSystem::service(uint32_t frame, std::span<const Influencer> influencers) {
+    anims_.clear();  // r3h t05: only this service's clip requests
     for (Point& p : points_) {
         if (suspended_ && suspended_(p.id)) continue;  // STY1 t01: Disable_Capture
         if (frame < p.next) continue;
@@ -99,13 +100,16 @@ void CapturePointSystem::service(uint32_t frame, std::span<const Influencer> inf
             continue;  // start gate
         const int32_t ctl = controller(p, influencers);
         if (ctl == p.owner) {
+            const bool decaying = p.progress > 0.0f;
             p.progress = p.progress - p.step;
             if (p.progress <= 0.0f) {
                 p.progress = 0.0f;
                 p.pending = p.owner;
+                if (decaying) anims_.push_back({p.id, p.owner, p.owner, false});  // r3h t05: back to the owner's Idle
             }
             continue;
         }
+        if (p.progress == 0.0f) anims_.push_back({p.id, p.owner, ctl, true});  // r3h t05: a transition starts
         p.pending = ctl;
         p.progress = p.progress + p.step;
         if (p.progress < 1.0f) continue;

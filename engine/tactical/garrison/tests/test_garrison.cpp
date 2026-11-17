@@ -312,6 +312,34 @@ void test_capture_suspended() {
     CHECK(c.owner(5) == 0 && !c.events().empty());
 }
 
+// r3h t05 (ABILITIES_HARDPOINTS §4.15): a transition from progress 0 asks for Transition_Ownership (the controller), a
+// decay to 0 under the owner asks for the owner's Idle; a running transition or a settled owner asks for nothing.
+void test_capture_anims() {
+    constexpr int32_t kNeutral = 9;
+    CapturePointSystem c(kNeutral, 4, 0);
+    CapturePointDesc d;
+    d.radius = 100.0f;
+    d.transition_seconds = 0.4f;  // step 1/3
+    d.sticky = true;
+    CHECK(c.add_point(5, 1, {0, 0, 0}, d));
+    std::vector<Influencer> inf = {{1, 1, {50, 0, 0}}};
+    c.service(0, inf);  // owner alone, progress 0: nothing
+    CHECK(c.anims().empty());
+    inf = {{2, 0, {50, 0, 0}}};
+    c.service(4, inf);  // enemy alone on an owned point: the neutral controller starts a transition
+    CHECK(c.anims().size() == 1 && c.anims()[0].point == 5 && c.anims()[0].transition && c.anims()[0].controller == kNeutral &&
+          c.anims()[0].owner == 1);
+    c.service(8, inf);  // running: nothing new
+    CHECK(c.anims().empty());
+    inf = {{1, 1, {50, 0, 0}}};
+    c.service(12, inf);  // 2/3 -> 1/3
+    CHECK(c.anims().empty());
+    c.service(16, inf);  // -> 0: the owner's Idle
+    CHECK(c.anims().size() == 1 && !c.anims()[0].transition && c.anims()[0].controller == 1);
+    c.service(20, inf);  // settled
+    CHECK(c.anims().empty());
+}
+
 void test_capture() {
     constexpr int32_t kNeutral = 9;
     CapturePointSystem c(kNeutral, 4, 8);
@@ -1128,6 +1156,7 @@ int main() {
     const uint64_t h1 = scripted_hash(), h2 = scripted_hash();
     CHECK(h1 == h2);
     test_capture();
+    test_capture_anims();  // r3h t05
     test_capture_suspended();  // STY1 t01
     test_owner_change();  // A1 t08
     test_types();

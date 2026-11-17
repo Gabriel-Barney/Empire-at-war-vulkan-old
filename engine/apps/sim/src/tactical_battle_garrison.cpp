@@ -28,6 +28,12 @@
 #include "alamo/tactical/garrison/garrison_types.hpp"
 #include "alamo/tactical/movement/special_locomotors.hpp"
 #include "alamo/tactical/movement/unit_params.hpp"
+#include "alamo/core/ascii.hpp"
+#include <charconv>
+#ifdef ALAMO_SIM_HAVE_ANIM
+#include "alamo/anim/anim_types.hpp"
+#include "alamo/sim/sim_anim.hpp"
+#endif
 
 namespace alamo::sim {
 
@@ -584,7 +590,7 @@ void TacticalBattle::s4_apply(TacticalMode& mode) {
     if (!events.empty()) feed_pair_gates();
 }
 
-void TacticalBattle::s4_tick(TacticalMode& mode, SimRng&) {
+void TacticalBattle::s4_tick(TacticalMode& mode, SimRng& rng) {
     if (!s4_used_) return;
     objects::ObjectStore& store = mode.primary();
     s4_store_ = &store;  // s78n t12 review: a loaded battle whose own setup registered nothing has none yet
@@ -645,8 +651,56 @@ void TacticalBattle::s4_tick(TacticalMode& mode, SimRng&) {
             inf.push_back({u.id, owner, store.position(u.h)});
         }
         captures_->service(frame_, inf);
+        bt_capture_anims(rng, tick_.global_frame);
         s4_apply(mode);
     }
+}
+
+void TacticalBattle::bt_capture_anims(SimRng& rng, uint64_t gframe) {
+    // r3h t05 (ABILITIES_HARDPOINTS §4.15, 0x501980): Idle / Transition_Ownership, looped, blend 0, speed 1, index = the
+    // faction's Faction_Anim_Subindex pair (0x371070; an unlisted faction or player draws, 0xFFFF). The transition picks
+    // the controller's faction, the owner's when the controller's faction is neutral.
+#ifdef ALAMO_SIM_HAVE_ANIM
+    if (!captures_ || captures_->anims().empty()) return;
+    anim::AnimWorld* w = anim_world_now();
+    const GameMode* gm = anim_mode_now();
+    if (!anim_ || !w || !gm) return;
+    const objects::ObjectStore& st = gm->primary();
+    const objects::GameObjectTypes& types = catalog_->types();
+    const auto& players = galaxy_->players();
+    const auto& factions = galaxy_->rules().factions;
+    for (const tg::CaptureAnim& a : captures_->anims()) {
+        const objects::ObjectHandle h = st.find(a.point);
+        if (!st.exists(h) || !w->contains(a.point)) continue;
+        int32_t player = a.controller;
+        if (a.transition && bt_owner_neutral(a.controller)) player = a.owner;
+        std::string_view faction;
+        if (player >= 0 && static_cast<size_t>(player) < players.size()) {
+            const uint32_t f = players[static_cast<size_t>(player)].faction;
+            if (f < factions.size()) faction = factions[f].name;
+        }
+        uint32_t index = anim::kRandomVariant;
+        const std::span<const std::string_view> pairs = types.get_list(st.type(h), "Faction_Anim_Subindex");
+        for (size_t i = 0; !faction.empty() && i + 1 < pairs.size(); i += 2) {
+            if (!ascii_iequals(pairs[i], faction)) continue;
+            uint32_t v = 0;
+            const std::string_view n = pairs[i + 1];
+            if (std::from_chars(n.data(), n.data() + n.size(), v).ec == std::errc{}) index = v;
+            break;
+        }
+        anim::PlayRequest r;
+        r.type = a.transition ? 0x4b : anim::kAnimIdle;  // 0x4b Transition_Ownership
+        r.index = index;
+        r.loop = true;
+        r.blend_seconds = 0.0f;
+        r.speed = 1.0f;
+        const anim::AnimModel* m = w->model(a.point);
+        if (index == anim::kRandomVariant && m && m->variant_count(r.type) < 2) r.index = 0;  // one variant: no draw
+        if (w->play(a.point, r, &rng, gframe) == anim::PlayResult::Played) ++stats_.anim_plays;
+    }
+#else
+    (void)rng, (void)gframe;
+#endif
 }
 
 cmd::RejectReason TacticalBattle::s4_command(TacticalMode& mode, uint8_t player, const cmd::EventData& ev, SimRng& rng) {

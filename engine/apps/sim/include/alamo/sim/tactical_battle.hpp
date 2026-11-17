@@ -2504,6 +2504,7 @@ private:
     // plays the type's Shield_On_Anim / Shield_Off_Anim (both must resolve): 0xFFFF on the synced RNG, loop, blend 0,
     // speed 1, from the opposite clip's frame (rounded) when that one plays.
     void bt_base_shield_anims(uint64_t global_frame, SimRng& rng);
+    void bt_capture_anims(SimRng& rng, uint64_t global_frame);  // r3h t05: capture point Idle / Transition_Ownership
     std::vector<tactical::abilities::AbilityAnimPlay> oi_anim_plays_;  // scratch (r3h t01)
     struct OiRespawn {
         uint32_t due = 0;
