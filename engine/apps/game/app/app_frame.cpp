@@ -193,7 +193,8 @@ bool App::render_frame() {
         if (audio_opts_.subtitles && ui_.fonts)
             if (const std::string_view id = full_movie_.caption(); !id.empty())
                 if (const std::u16string* t = ui_.text.find(id))
-                    ui::add_movie_caption(dialogs, 1, *ui_.fonts, *canvas, ui::utf16_to_utf32(*t), ui::movie_caption_style(data_.db.constants()));
+                    ui::add_movie_caption(dialogs, 1, *ui_.fonts, *canvas, ui::gui_unescape(ui::utf16_to_utf32(*t)),
+                                          ui::movie_caption_style(data_.db.constants()));
     }
     // Panels (hero roster, black market, sabotage, corruption, hack) on top of the HUD list; their shells draw at the
     // HUD's ShellModels step.

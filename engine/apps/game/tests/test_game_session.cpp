@@ -2004,6 +2004,10 @@ void save_files_test() {
     SaveFile back_file;
     CHECK(game::read_save_file(game::save_path(ud, uname), back_file, &err) && back_file.tick == 7);
     CHECK(game::save_exists(ud, uname) && game::delete_save(ud, uname, &err) && !game::save_exists(ud, uname));
+    // A file copied in under a name sanitizing would change (over kMaxSaveName bytes) is still reached by its listed name.
+    const std::string longname = std::string(70, 'L');
+    write_file(udir / (longname + ".alsv"), "not a save");
+    CHECK(game::save_exists(ud, longname) && game::delete_save(ud, longname, &err) && !game::save_exists(ud, longname));
     remove_all_long(udir, ec);
 }
 

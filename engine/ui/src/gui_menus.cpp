@@ -1663,8 +1663,8 @@ void FrontEnd::on_cancel(const GuiEvent& e, std::vector<MenuAction>& out) {
             const GuiControl& c = (*d)[static_cast<size_t>(d->focus_index())];
             const int32_t slot = c.type == GuiGadgetType::EditBox ? keyboard_edit_slot(c.id()) : -1;
             if (slot >= 0) {
-                const HotkeyTable applied = p_.hotkeys ? *p_.hotkeys : HotkeyTable{};
-                keys_work_.bind(static_cast<uint16_t>(slot), applied.binding(static_cast<uint16_t>(slot)));
+                const auto s = static_cast<uint16_t>(slot);
+                keys_work_.bind(s, p_.hotkeys ? p_.hotkeys->binding(s) : HotkeyTable{}.binding(s));
                 d->clear_focus();
                 fill_keyboard(*d);
                 return;
@@ -2201,6 +2201,8 @@ void FrontEnd::update(std::span<const GuiEvent> events, const InputFrame& raw, s
                         : raw.keys_down.test(vk::kAlt)   ? HotkeyMod::Alt
                         : raw.keys_down.test(vk::kShift) ? HotkeyMod::Shift
                                                          : HotkeyMod::None;
+                // [port] the port's own controls dialog (no retail counterpart) keeps a way to unbind its keys.
+                if (is_port_controls(d->name()) && (k == vk::kBack || k == vk::kDelete) && b.mod == HotkeyMod::None) b = HotkeyBinding{};
                 if (const std::vector<uint16_t> cf = keys_work_.conflicts(static_cast<uint16_t>(slot), b); !cf.empty()) {
                     rebind_slot_ = slot;  // TEXT_KEYBIND_WARNING_0 / _1: OK takes the key from the other action
                     rebind_other_ = cf.front();

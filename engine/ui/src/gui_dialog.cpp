@@ -1025,7 +1025,8 @@ void GuiManager::update(const InputFrame& raw, const RoutedInput& routed, double
         hover_since_ = now;
         if (target && hc >= 0) {
             const GuiControl& c = (*target)[static_cast<size_t>(hc)];
-            if (hover_sound(c.type) && c.enabled) sfx("GUI_Common_Dialog_Button_Hilight", hc);
+            // retail's combo plays it only over its closed field (0x1e8970), not over the open drop-down
+            if (hover_sound(c.type) && c.enabled && !c.open) sfx("GUI_Common_Dialog_Button_Hilight", hc);
             if (clickable(c.type) && c.enabled) events.push_back(make_event(GuiEvent::Kind::Hovered, *target, hc));
         }
     }

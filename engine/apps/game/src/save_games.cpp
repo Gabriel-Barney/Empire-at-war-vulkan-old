@@ -26,7 +26,14 @@ namespace {
 
 // ui5 t13: every path string here is UTF-8 (the dialogs' text); std::string <-> fs::path goes through these, never through
 // fs::path(std::string) / path::string(), which use the ANSI code page and throw on a name outside it.
-fs::path host_path(const std::string& utf8) { return path_from_utf8(utf8); }
+// Not valid UTF-8 (a folder passed on the command line in the ANSI code page): read it as ANSI instead of throwing.
+fs::path host_path(const std::string& utf8) {
+    try {
+        return path_from_utf8(utf8);
+    } catch (const std::exception&) {
+        return fs::path(utf8);
+    }
+}
 // Native separators ('\' on Windows), unlike path_to_utf8's generic form; "" for a name that has no UTF-8 form (a lone
 // UTF-16 surrogate), so the caller can skip it instead of throwing.
 std::string utf8_of(const fs::path& p) {
@@ -318,6 +325,13 @@ std::string sanitize_save_name(std::string_view typed) {
 std::string save_path(const std::string& dir, std::string_view name) {
     const std::string stem = sanitize_save_name(name);
     if (stem.empty()) return {};
+    // A listed file is found by its own stem even when sanitizing would change it (a name over kMaxSaveName bytes copied
+    // in by hand): the dialogs hand back SaveEntry::name, so load / delete must reach that file.
+    if (stem != name && name.find_first_of("/\\") == std::string_view::npos && name.find("..") == std::string_view::npos) {
+        std::error_code ec;
+        const fs::path own = host_path(dir) / host_path(std::string(name) + kSaveExtension);
+        if (fs::is_regular_file(own, ec)) return utf8_of(own);
+    }
     return utf8_of(host_path(dir) / host_path(stem + kSaveExtension));
 }
 
@@ -348,6 +362,7 @@ bool write_save_file(const SaveFile& save, const std::string& path, std::string*
         const std::vector<uint8_t> bytes = save.encode();
         std::ofstream f(tmp, std::ios::binary | std::ios::trunc);
         if (f) f.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+        if (f) f.close();  // a failed flush is a failed write too: never rename a truncated file over the save
         if (!f) {
             f.close();
             fs::remove(tmp, ec);
