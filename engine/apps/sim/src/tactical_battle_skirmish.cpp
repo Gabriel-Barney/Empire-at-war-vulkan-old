@@ -80,8 +80,9 @@ void TacticalBattle::sk_garrison_tick() {
                 g.ids.clear();
                 float delay = 20.0f;
                 const auto& ps = galaxy_->players();
-                if (static_cast<size_t>(g.player) < ps.size())
-                    if (const std::string_view v = rules_->faction(ps[static_cast<size_t>(g.player)].faction).xml_text("Garrison_Reinforcement_Delay_Seconds");
+                const auto& fs = galaxy_->rules().factions;
+                if (static_cast<size_t>(g.player) < ps.size() && ps[static_cast<size_t>(g.player)].faction < fs.size())
+                    if (const std::string_view v = fs[ps[static_cast<size_t>(g.player)].faction].xml_text("Garrison_Reinforcement_Delay_Seconds");
                         !v.empty())
                         delay = std::max(0.0f, to_f(v));
                 g.timer = static_cast<int32_t>(frame_) + static_cast<int32_t>(delay * 30.0f);
