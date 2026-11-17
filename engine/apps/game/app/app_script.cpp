@@ -116,6 +116,29 @@ ScriptStep step_select_row(std::string dialog, std::string control, std::functio
             2000};
 }
 
+// modc t34: a mod's skirmish staging dialog may have no game-type list (Age of Legends' layout): the dialog keeps the type it
+// opened on and the run plays that type's first map. These steps note that instead of waiting for a row that cannot exist.
+bool staging_has_game_types(App& a) {
+    ui::GuiDialog* d = a.ui_.gui.find("IDD_SKIRMISH_STAGING_DIALOG");
+    return !d || d->get("IDC_GAME_TYPE_LIST") != nullptr;
+}
+
+ScriptStep step_select_game_type(int32_t type) {
+    ScriptStep pick = step_select_row("IDD_SKIRMISH_STAGING_DIALOG", "IDC_GAME_TYPE_LIST", [type](App& a) {
+        return static_cast<size_t>(std::max<int32_t>(a.ui_.front.skirmish_game_type_row(type), 0));
+    });
+    auto inner = pick.run;
+    pick.run = [inner](App& a, ui::InputFrame& f) {
+        if (!a.ui_.gui.find("IDD_SKIRMISH_STAGING_DIALOG")) return false;
+        if (!staging_has_game_types(a)) {
+            a.notes_.push_back("skirmish staging has no IDC_GAME_TYPE_LIST: the dialog's default game type is played");
+            return true;
+        }
+        return inner(a, f);
+    };
+    return pick;
+}
+
 // [port: Gabriel, 2026-11-13] a new campaign opens the mission holocron by itself once its first chapter is added, and
 // the open summary holds the ticks: wait until that has happened (or the campaign added no chapter early on), then close
 // the summary with its Close button like a player. Nothing to do when it never opened.
@@ -1472,10 +1495,8 @@ void App::make_script() {
     if (opt_.smoke == "land") {  // land skirmish: the first land map of the list (rows after the space maps)
         s.push_back(step_click_control("IDD_SINGLE_PLAYER_GAMES_MENU_DIALOG", "IDC_SKIRMISH_GAMES_BUTTON"));
         // p4uim t01: the Land game type (ccpgt t02: its row, the rows are sorted by text).
-        s.push_back(step_select_row("IDD_SKIRMISH_STAGING_DIALOG", "IDC_GAME_TYPE_LIST", [](App& a) {
-            return static_cast<size_t>(std::max<int32_t>(a.ui_.front.skirmish_game_type_row(ui::kSkirmishGameLand), 0));
-        }));
-        s.push_back(step_wait("land game type listed", [](App& a) { return !a.ui_.front.skirmish_space_type(); }, 60));
+        s.push_back(step_select_game_type(ui::kSkirmishGameLand));
+        s.push_back(step_wait("land game type listed", [](App& a) { return !a.ui_.front.skirmish_space_type() || !staging_has_game_types(a); }, 60));
         s.push_back(step_select_row("IDD_SKIRMISH_STAGING_DIALOG", "IDC_STAGING_MAP_LIST", [](App& a) {
             // The first land map by name (the old list's first land row): its row in the staging list as the front end sorted it;
             // else the first land row of the Official tab.
@@ -1495,10 +1516,10 @@ void App::make_script() {
         s.push_back(step_click_control("IDD_SINGLE_PLAYER_GAMES_MENU_DIALOG", "IDC_SKIRMISH_GAMES_BUTTON"));
         // The dialog opens on Land (UI.md 9.7): select the Space game type (its row; ccpgt t02: the rows are sorted by text); the
         // run starts on its row 0 (modc t19).
-        s.push_back(step_select_row("IDD_SKIRMISH_STAGING_DIALOG", "IDC_GAME_TYPE_LIST", [](App& a) {
-            return static_cast<size_t>(std::max<int32_t>(a.ui_.front.skirmish_game_type_row(ui::kSkirmishGameSpace), 0));
-        }));
-        s.push_back(step_wait("space game type listed", [](App& a) { return a.ui_.front.skirmish_space_type(); }, 60));
+        s.push_back(step_select_game_type(ui::kSkirmishGameSpace));
+        s.push_back(step_wait("space game type listed", [](App& a) {
+            return a.ui_.front.skirmish_space_type() || !staging_has_game_types(a);
+        }, 60));
         s.push_back(step_shot("game_skirmish_staging.png"));
         s.push_back(step_click_control("IDD_SKIRMISH_STAGING_DIALOG", "IDC_SKIRMISH_START_GAME_BUTTON"));
         buy_steps("game_skirmish");
