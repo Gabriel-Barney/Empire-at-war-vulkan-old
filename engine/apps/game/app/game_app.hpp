@@ -593,6 +593,10 @@ public:
     const PlanetMapMarkers& planet_map_markers(objects::TypeIndex planet_type);
     std::map<objects::TypeIndex, PlanetMapMarkers> planet_map_markers_;
     uint32_t planet_map_planet_ = 0;  // the planet the map was opened for (another selection closes it)
+    struct MapMarkerSent {
+        int32_t sent = -1, before = -1;  // the marker sent, the sim's marker when it was sent
+    };
+    std::map<uint32_t, MapMarkerSent> map_marker_sent_;  // ui4 t13: SetMarkerID sent while the map is open, by object
     mutable std::vector<std::string> corruption_planet_icons_;  // ui4 t10: GameConstants Corruption_Planet_Icon
     mutable bool corruption_icons_loaded_ = false;
     bool hero_filter_ = false;  // ui4 t03: b_filters3 on (GalacticHud::filter_bits, last build)

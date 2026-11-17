@@ -263,6 +263,7 @@ struct GalacticMapPad {
     int32_t alt = -1;           // Icon_Alternate_Texture_Name index (§4.2 build_pad40..79: 0 bunker, 1 build pad); -1 = faction
     uint32_t object = 0;        // the structure or landed unit on it (0: empty or a structure type): drag source
     uint8_t tag = 0;            // §4.2 pad data slot 3: 1 In / Out, 3 Specific
+    int32_t marker = -1;        // the pad's UI marker id (SetMarkerID target of the drops, ui4 t13)
     bool dimmed = false;        // §4.4 step 2: tint (255, 255, 255, 192)
     float shield = 0.0f;        // §4.4: shield_range.tga diameter as a fraction of the map width (0 = none)
 };
@@ -381,14 +382,16 @@ struct GalacticHudFrame {
 // re-slots / merges in place; op 8 {slot, a = planet} is the slot to take on arrival there (ahead of the move order);
 // `b` = the slot a new fleet takes (detach, launch, op 6 with its destination).
 inline constexpr int32_t kMapFleetIndex = 3;  // GalacticDrag::fleet_index of a fleet dragged from its map button
-// ui4 t04 planet map drags (GALACTIC_PLANET_MAP §6), GalacticDrag::fleet_index: an orbit stack land_fleet_NN, a landed unit
-// on unit_padNN, a structure on build_pad00..32. Drops ([port] SetMarkerID, kind 53, has no sim handler yet: the marker
-// moves of rules 2, 3 and 5 are not sent, so unit pad -> unit pad and build pad -> build pad do nothing):
+// ui4 t04 / t13 planet map drags (GALACTIC_PLANET_MAP §6), GalacticDrag::fleet_index: an orbit stack land_fleet_NN, a landed
+// unit on unit_padNN, a structure on build_pad00..32. Drops (SetMarkerID = commands::ev::set_marker_id, kind 53):
 //   orbit stack -> map_window       FleetManagement detach + land = kFleetLand {target = planet, fleet, unit} (one unit;
 //                                    not while the surface is full)
-//   orbit stack -> unit_padNN       the same landing; an occupant of that pad is launched into a new fleet
-//                                    (kFleetMoveNew {target = planet, unit, a = planet}) [port: op 4 + op 0 in one command]
-//   unit pad -> land_fleet_NN       launch into a new fleet (kFleetMoveNew as above)
+//   orbit stack -> unit_padNN       SetMarkerID {unit, pad's marker}, the same landing; an occupant of that pad is launched
+//                                    into a new fleet (kFleetMoveNew {target = planet, unit, a = planet}) [port: op 4 + op 0
+//                                    in one command] and sent SetMarkerID -1
+//   unit pad -> unit pad            SetMarkerID for each unit with its new pad's marker (swap; an empty pad just takes it)
+//   unit pad -> land_fleet_NN       launch into a new fleet (as above) + SetMarkerID -1
+//   build pad -> build pad          00..32, both tag 1 (or both 2): SetMarkerID for each moved structure (swap or move)
 inline constexpr int32_t kMapOrbitIndex = 4, kMapUnitPadIndex = 5, kMapBuildPadIndex = 6;
 struct GalacticDrag {
     bool active = false;
@@ -601,6 +604,7 @@ private:
         std::string icon;
         std::u32string name;           // [port] the fleet's (header) or the unit's (stack of one) name, "" = none
         uint8_t map_tag = 0;           // ui4 t04: a planet-map build pad's tag (GalacticMapPad::tag)
+        int32_t map_marker = -1;       // ui4 t13: a planet-map pad's marker id (GalacticMapPad::marker)
     };
     // [port: Gabriel] double click on an own organiser pad -> HudAction::Rename
     int32_t last_pad_click_ = -1;

@@ -729,6 +729,45 @@ void test_synthetic() {
     run_scenario(sc);
 }
 
+// ui4 t13 (COMMANDS kind 53, execute 0x5b0660): SetMarkerID sets the marker of any live object (no owner check) in the
+// structure marker records, keeps the slot, and a record back at slot / marker -1 is erased (the hash returns to the
+// untouched state). A dead or unknown object is refused.
+void test_set_marker_id() {
+    std::printf("  SetMarkerID\n");
+    const GalacticRules rules = make_rules();
+    const objects::GameObjectTypes types;
+    const GalacticSetup setup = make_setup();
+    objects::IdCounter ids;
+    objects::ObjectStore store(objects::ModeKind::Galactic, objects::StoreKind::Primary, types, &ids);
+    SimRng rng(0x5A5Eu);
+    GalacticSim s(rules, store, rng);
+    CHECK(s.start(setup));
+    ObjectHandle unit{}, planet{};
+    for (const PlanetState& ps : s.planets()) {
+        if (!planet && ps.is_planet && store.alive(ps.object)) planet = ps.object;
+        for (ObjectHandle u : ps.surface)
+            if (!unit && store.alive(u)) unit = u;
+    }
+    CHECK(static_cast<bool>(unit) && static_cast<bool>(planet));
+    if (!unit || !planet) return;
+    const uint64_t h0 = sim_hash(s);
+    const auto uid = static_cast<uint32_t>(store.id(unit)), pid = static_cast<uint32_t>(store.id(planet));
+    const uint8_t other = 1;  // any player: retail checks no owner
+    CHECK(s.execute(other, commands::ev::set_marker_id(uid, 4711)) == RejectReason::None);
+    const GalacticSim::StructureSlot* e = s.structure_slot(store.id(unit));
+    CHECK(e && e->slot == -1 && e->marker == 4711 && sim_hash(s) != h0);
+    CHECK(s.execute(other, commands::ev::set_marker_id(uid, -1)) == RejectReason::None);
+    CHECK(!s.structure_slot(store.id(unit)) && sim_hash(s) == h0);
+    s.set_structure_slot(store.id(planet), 2, 78);  // a battle-placed record keeps its slot
+    CHECK(s.execute(other, commands::ev::set_marker_id(pid, 90)) == RejectReason::None);
+    e = s.structure_slot(store.id(planet));
+    CHECK(e && e->slot == 2 && e->marker == 90);
+    CHECK(s.execute(other, commands::ev::set_marker_id(pid, -1)) == RejectReason::None);
+    e = s.structure_slot(store.id(planet));
+    CHECK(e && e->slot == 2 && e->marker == -1);
+    CHECK(s.execute(other, commands::ev::set_marker_id(commands::kNoObject, 5)) == RejectReason::InvalidUnit);
+}
+
 // A2k t04 (A2J_RE_BUILD_MARKET §4): start() draws each planet's two build-queue phases (synced Get_Int(1, 30), queue 0
 // then 1, row order) at the PRODUCTION attach; nothing else in start() draws, so the RNG after start() is the reference
 // stream after exactly those draws. The phases are saved: a session started from another seed reads the saved values.
@@ -1047,6 +1086,7 @@ int main() {
     test_synthetic();
     test_queue_phases();
     test_structure_slots_dead();  // map1 t06
+    test_set_marker_id();  // ui4 t13
     test_name_rules();
     test_foc();
     if (g_fail) {

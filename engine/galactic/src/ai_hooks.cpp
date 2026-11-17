@@ -343,20 +343,27 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         std::vector<ObjectHandle> moved;
         std::vector<uint8_t> carried;
         const uint32_t from = holder_at(p, unit);
+        bool launched = false;
         if (from != kNoFleet) {
             take(from, unit, moved, carried);
         } else if (surface_planet_of(unit) == p) {  // launch first
             planets_[p].surface.erase(std::remove(planets_[p].surface.begin(), planets_[p].surface.end(), unit), planets_[p].surface.end());
             moved.push_back(unit);
             carried.push_back(0);
+            launched = true;
         } else {
             return RejectReason::InvalidUnit;
         }
         const uint32_t nf = create_fleet(player, p);
         fleets_[nf].contents = std::move(moved);
         fleets_[nf].carried = std::move(carried);
+        // ui4 t13: a launch from the surface is retail's op 4 (launch: the reveal, REMAINING_GAPS 6.1) then op 0 (a new
+        // fleet: the space conflict in a hostile orbit), as kFleetLaunch runs them (GALACTIC_PLANET_MAP §6.2 rules 2 / 4).
+        // [port] the conflict only for a fleet that stays: one moving on leaves the orbit (a lone ground unit is no attacker).
+        if (launched) launch_reveal(p, unit);
         if (dest == p) {
             slot_new_fleet(nf);
+            if (launched) new_fleet_conflict(p);
             return RejectReason::None;
         }
         if (want_slot < static_cast<uint32_t>(kOrbitSlots)) {  // the slot it takes on arrival at `dest`

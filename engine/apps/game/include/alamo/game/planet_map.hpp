@@ -58,16 +58,26 @@ struct PlanetMapStructure {
 };
 // Shield radius per type (Base_Shield_Radius, 0 none).
 using MapShieldRadius = std::function<float(uint32_t type)>;
+// A SetMarkerID the map sends (COMMANDS kind 53): object +0x3b0 := marker. [port] only when it changes the object's
+// remembered marker (retail resends the same ids on every rebuild; the sim state is the same).
+struct MapMarkerSend {
+    uint32_t object = 0;
+    int32_t marker = -1;
+};
 // Fills the pads' occupants (§4.4): step 1 every Specific pad whose marker lists a structure's place_other type gets the
 // structure's type; step 2 each other structure type and each additional type (each once) takes the first free Specific
 // pad listing it (dimmed, with its shield radius); step 3 the structures not placed in step 2 go by Base_Position - a
 // remembered marker first, then the first free pad of their group (In: tag-1 pads from In markers, Out: from Out
-// markers), falling over to the other group when it is full. Structures without a pad are not shown.
+// markers), falling over to the other group when it is full; each step-3 structure is sent its pad's marker. Structures
+// without a pad are not shown.
 void place_map_structures(std::vector<PlanetMapPad>& pads, std::span<const PlanetMapStructure> structures,
-                          const MapShieldRadius& shield = {});
-// §4.5: landed units (the planet owner's, surface list order) on the free unit pads in pad order ([port] the port keeps no
-// unit marker memory: every unit takes the next free pad). `types` parallel to `units`.
-void place_map_units(std::vector<PlanetMapPad>& pads, std::span<const uint32_t> units, std::span<const uint32_t> types);
+                          const MapShieldRadius& shield = {}, std::vector<MapMarkerSend>* sends = nullptr);
+// §4.5: landed units (the planet owner's, surface list order; `types` and `markers` parallel, `markers` = the remembered
+// marker, -1 none, may be empty). A unit with a marker takes the free unit pad with that marker id, else it is sent -1 and
+// waits; then the units without a marker, then the waiting ones, take the free unit pads in pad order and are sent the
+// pad's marker. Units past the pads are not shown.
+void place_map_units(std::vector<PlanetMapPad>& pads, std::span<const uint32_t> units, std::span<const uint32_t> types,
+                     std::span<const int32_t> markers = {}, std::vector<MapMarkerSend>* sends = nullptr);
 
 // §5: one ground-force stack in orbit (land_fleet_NN): the local player's units with the land behaviour in the planet's
 // orbiting fleets, stacked by display type. Input order = fleet order, then contents order; the representative is the

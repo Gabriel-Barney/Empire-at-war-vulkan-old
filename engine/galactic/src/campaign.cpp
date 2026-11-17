@@ -1800,6 +1800,12 @@ RejectReason GalacticSim::execute(uint8_t player_id, const commands::EventData& 
         return fleet_management(player, ev);
     case EventType::SpecialAbility:  // P4 sim: kinds 1 / 4 / 5 / 7 (kind 6 and others: Unhandled -> host hooks)
         return special_command(player, ev);
+    case EventType::SetMarkerID: {  // ui4 t13 (COMMANDS kind 53, execute 0x5b0660): any object found by id, no owner check
+        const ObjectHandle h = store_->find(static_cast<objects::ObjectId>(ev.u("object")));
+        if (!store_->alive(h)) return RejectReason::InvalidUnit;
+        set_object_marker(store_->id(h), static_cast<int32_t>(ev.u("marker")));
+        return RejectReason::None;
+    }
     case EventType::PortExtension: {  // [port: Gabriel] fleet and ship names (src/object_names.cpp)
         if (ev.u("subtype") != commands::kRenameSubtype) return RejectReason::Unhandled;
         commands::ObjectId id = commands::kNoObject;
@@ -1925,6 +1931,20 @@ void GalacticSim::set_structure_slot(objects::ObjectId object, int32_t slot, int
         return;
     }
     structure_slots_.insert(it, StructureSlot{object, slot, marker});
+}
+
+void GalacticSim::set_object_marker(objects::ObjectId object, int32_t marker) {
+    if (object == objects::kNoObjectId) return;
+    const auto it = std::lower_bound(structure_slots_.begin(), structure_slots_.end(), object,
+                                     [](const StructureSlot& e, objects::ObjectId v) { return e.object < v; });
+    const bool found = it != structure_slots_.end() && it->object == object;
+    if (found && it->slot < 0 && marker < 0) {
+        structure_slots_.erase(it);
+    } else if (found) {
+        it->marker = marker;
+    } else if (marker >= 0) {
+        structure_slots_.insert(it, StructureSlot{object, -1, marker});
+    }
 }
 
 void GalacticSim::keep_built_objects(PlanetIndex planet, int32_t keep) {

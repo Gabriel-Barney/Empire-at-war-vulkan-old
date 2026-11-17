@@ -309,6 +309,11 @@ EventData retreat(bool request) {
     e.set("request", request ? 1u : 0u);
     return e;
 }
+EventData set_marker_id(ObjectId object, int32_t marker) {
+    EventData e(EventType::SetMarkerID);
+    e.set("object", object).set("marker", static_cast<uint32_t>(marker));
+    return e;
+}
 EventData port_extension(uint16_t subtype, std::span<const uint8_t> data) {
     EventData e(EventType::PortExtension);
     e.set("subtype", subtype).set_bytes("data", data);

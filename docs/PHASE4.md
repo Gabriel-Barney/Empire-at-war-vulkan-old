@@ -1101,8 +1101,12 @@ This list holds the [port] / [inferred] / [M] choices and per-step notes. Finish
   marker y read upward (§10 capture open); orbit stacks in type-index order; a launch is one kFleetMoveNew (retail op 4 + op 0);
   unit_cap = 10 [M]; no pulse on the valid drop pads during a drag (§4.6) and Specific pads keep their blank art; selecting another
   planet closes the map without the zoom-out, and a radar click with the map open does not re-open it (§1.3, §8); the surface
-  counts as full only outside a battle (the sim's land rule); SetMarkerID (kind 53) has no sim handler, so pad-to-pad moves, the unit marker memory and the SetMarkerID
-  sends on open are not done (ui4 t13). **t06** drag preview: path find with the fleet's hidden flags, grey 128 route segments, grey
+  counts as full only outside a battle (the sim's land rule); **t13** SetMarkerID (kind 53): `GalacticSim::set_object_marker` keeps
+  any object's marker in the map1 t06 marker records (no owner check, as execute 0x5b0660; slot kept; a record back at -1 / -1
+  is erased; no save-format change); the map sends a structure's / unit's pad marker on open, the pad-to-pad moves (rules 3 /
+  5) and -1 on a launch; [port] only changed markers are sent (retail resends on every rebuild). Units' markers are read only by
+  the map (the battle's defender placement does not read +0x3b0; structures' pass 1 does). A surface launch by op 6 / 7 now
+  runs the launch reveal and the new-fleet conflict, as op 4 does. **t06** drag preview: path find with the fleet's hidden flags, grey 128 route segments, grey
   50 cursor line within MaximumFleetMovementDistance (`game::fleet_drag_route`, `GalacticView::set_drag_lines`). **t07** summary
   sort keys 1-10 (numeric columns largest first, same key reverses; [M] the producing / upgrades keys), IDC_HINTS_CHECK toggles all
   advisor flags, the radar click is a camera jump only ([port] inverse of the port's planet-fitted blip layout, not retail's fixed

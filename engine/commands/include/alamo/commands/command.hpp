@@ -154,6 +154,9 @@ EventData tactical_build(ObjectId pad, uint16_t type_index, uint8_t player);
 EventData ability(std::vector<ObjectId> users, uint8_t ability_type, ObjectId target);
 EventData move_object_to_object(ObjectId object, ObjectId target);  // galactic fleet hop
 EventData retreat(bool request);
+// COMMANDS kind 53 (galactic only): object +0x3b0 := marker, the UI marker the object stands on in the planet map / its
+// next land battle (-1 = none). Execute 0x5b0660 sets it on any object found by id: no owner or type check.
+EventData set_marker_id(ObjectId object, int32_t marker);
 // Port-only event (id 63): engine test hooks / features without an original event.
 EventData port_extension(uint16_t subtype, std::span<const uint8_t> data);
 }  // namespace ev

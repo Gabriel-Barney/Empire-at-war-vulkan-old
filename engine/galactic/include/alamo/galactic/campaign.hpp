@@ -686,6 +686,10 @@ public:
     const StructureSlot* structure_slot(objects::ObjectId object) const;
     void set_structure_slot(objects::ObjectId object, int32_t slot, int32_t marker);
     std::span<const StructureSlot> structure_slots() const { return structure_slots_; }
+    // ui4 t13 (COMMANDS kind 53 SetMarkerID, execute 0x5b0660; GALACTIC_PLANET_MAP §4.4-§6.2): the marker alone (+0x3b0) of
+    // any object, kept in the same records - a structure's for its next battle placement, a landed unit's for its planet-map
+    // pad. The slot (+0x3ac) is kept; a record with neither (slot and marker -1, the object's default) is erased.
+    void set_object_marker(objects::ObjectId object, int32_t marker);
     // Owner filter 0x4b7d90: erase every record of `planet` whose owner is not `keep`, walking last to first (the order of
     // the rest is unchanged). Called after every land result (ConflictManager: fought battle, land auto-resolve, invasion
     // without a battle); other owner changes keep the records.

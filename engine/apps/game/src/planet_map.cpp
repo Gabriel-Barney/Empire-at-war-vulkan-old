@@ -62,7 +62,8 @@ std::vector<PlanetMapPad> planet_map_pads(std::span<const PlanetMapMarker> marke
     return out;
 }
 
-void place_map_structures(std::vector<PlanetMapPad>& pads, std::span<const PlanetMapStructure> structures, const MapShieldRadius& shield) {
+void place_map_structures(std::vector<PlanetMapPad>& pads, std::span<const PlanetMapStructure> structures, const MapShieldRadius& shield,
+                          std::vector<MapMarkerSend>* sends) {
     // Step 1: Place_Other_Type_At_Every_Specific_Marker_Position.
     for (const PlanetMapStructure& s : structures) {
         if (s.place_other == kNoMapType) continue;
@@ -106,15 +107,18 @@ void place_map_structures(std::vector<PlanetMapPad>& pads, std::span<const Plane
     auto in_group = [](const PlanetMapPad& p, uint8_t base) {
         return p.tag == 1 && ((base == 1 && p.cls == MapMarkerClass::In) || (base == 2 && p.cls == MapMarkerClass::Out));
     };
-    auto put_object = [](PlanetMapPad& p, const PlanetMapStructure& s) {
+    auto put_object = [sends](PlanetMapPad& p, const PlanetMapStructure& s) {
         p.object = s.object;
         p.type = s.type;
+        if (sends && s.marker != p.marker) sends->push_back({s.object, p.marker});
     };
-    for (size_t i = 0; i < structures.size(); ++i) {  // a remembered marker first
+    // A remembered marker first, on any In / Out pad: rule 5 (§6.2) moves structures between tag-1 pads of either group, so
+    // [port] (pass order [M]) a structure moved to the other group stays there rather than jumping back on the next rebuild.
+    for (size_t i = 0; i < structures.size(); ++i) {
         const PlanetMapStructure& s = structures[i];
         if (placed[i] || s.marker < 0 || (s.base != 1 && s.base != 2)) continue;
         for (PlanetMapPad& p : pads)
-            if (in_group(p, s.base) && empty_pad(p) && p.marker == s.marker) {
+            if ((in_group(p, 1) || in_group(p, 2)) && empty_pad(p) && p.marker == s.marker) {
                 put_object(p, s);
                 placed[i] = 1;
                 break;
@@ -135,15 +139,42 @@ void place_map_structures(std::vector<PlanetMapPad>& pads, std::span<const Plane
     }
 }
 
-void place_map_units(std::vector<PlanetMapPad>& pads, std::span<const uint32_t> units, std::span<const uint32_t> types) {
+void place_map_units(std::vector<PlanetMapPad>& pads, std::span<const uint32_t> units, std::span<const uint32_t> types,
+                     std::span<const int32_t> markers, std::vector<MapMarkerSend>* sends) {
+    auto type_of = [&](size_t i) { return i < types.size() ? types[i] : kNoMapType; };
+    auto marker_of = [&](size_t i) { return i < markers.size() ? markers[i] : -1; };
+    auto put = [&](PlanetMapPad& p, size_t i) {
+        p.object = units[i];
+        p.type = type_of(i);
+        if (sends && marker_of(i) != p.marker) sends->push_back({units[i], p.marker});
+    };
+    std::vector<uint8_t> placed(units.size(), 0);
+    std::vector<size_t> waiting;
+    for (size_t i = 0; i < units.size(); ++i) {  // 1. a remembered marker
+        if (marker_of(i) < 0) continue;
+        for (PlanetMapPad& p : pads)
+            if (p.group == MapPadGroup::Unit && empty_pad(p) && p.marker == marker_of(i)) {
+                put(p, i);
+                placed[i] = 1;
+                break;
+            }
+        if (!placed[i]) waiting.push_back(i);
+    }
+    std::vector<size_t> order;  // 2. no marker, then the waiting ones
+    for (size_t i = 0; i < units.size(); ++i)
+        if (!placed[i] && marker_of(i) < 0) order.push_back(i);
+    order.insert(order.end(), waiting.begin(), waiting.end());
     size_t next = 0;
     for (PlanetMapPad& p : pads) {
         if (p.group != MapPadGroup::Unit || !empty_pad(p)) continue;
-        if (next >= units.size()) break;
-        p.object = units[next];
-        p.type = next < types.size() ? types[next] : kNoMapType;
+        if (next >= order.size()) break;
+        put(p, order[next]);
+        placed[order[next]] = 1;
         ++next;
     }
+    if (sends)  // a waiting unit with no pad keeps the -1 it was sent
+        for (const size_t i : waiting)
+            if (!placed[i]) sends->push_back({units[i], -1});
 }
 
 std::vector<MapOrbitStack> map_orbit_stacks(std::span<const MapOrbitUnit> units) {
