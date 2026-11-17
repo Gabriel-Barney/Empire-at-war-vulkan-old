@@ -300,6 +300,7 @@ struct UnitView {
     int32_t form_rank = 0;
     uint32_t coord_id = 0;
     bool near_end = false;  // mov1 t04: pack +0x28c as of its last rebuild (BKR1 Q5)
+    bool trk_static = false;  // mov2 t04: the tracker's Static flag taken before the last walk (the next plans read it)
     // REMAINING_GAPS §4.3-4.7: special locomotors
     LocomotorKind locomotor = LocomotorKind::Default;  // the active locomotor
     bool secondary_locomotor = false;                  // S7 t06: the Uses_Multiple_Locomotors secondary is active
@@ -1117,6 +1118,12 @@ private:
         // frames to the next rebuild (a path push zeroes it)
         bool near_end = false;
         int32_t approx_countdown = 0;
+        // mov2 t04 (b0187, BKR1_RE_ANSWERS Q6 [H]; save version 35, not hashed): the tracker's Static flag (not Moving,
+        // unit_moving) as retail's tracker update 0x539b20 left it before this frame's walks - the port takes it after the
+        // plans and the answer fold, before the walk, and the next tick's plans read it (the corner pass's corridor test).
+        // A unit added since the last snapshot is not in the tracker yet (false). [port] the corridor test reads the
+        // footprint at the live position: a Static unit does not move in the walk
+        bool trk_static = false;
         // s78n t18 (0x509ea0): the lowest speed this tick's collision records answer the unit (3e38: none) and the "at
         // once" flag of the last record that writes one. Rebuilt by every land tick's driver before the walk (transient:
         // not saved, not hashed; the records' own answers are).
@@ -1386,7 +1393,6 @@ private:
     void plan_deploy_cap(Unit& u, uint32_t frame, float d = -1.0f);  // the plan's cap test for an auto-deployer (d < 0: own path)
     // s78n t26.3 (MOVEMENT §3.5.2 D): the corner-speed pass 0x5070b0 on a new land order path (u.m.frac); serial.
     void corner_pass(Unit& u);
-    std::vector<uint8_t> corner_static_;  // per unit index: Static (not moving) before this plan; scratch, not saved
     void tick_deploy(uint32_t frame);
     void hash_deploy(StateHasher& h) const;
     void hash_turrets(StateHasher& h) const;  // S8 t24
