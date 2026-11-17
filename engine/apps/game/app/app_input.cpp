@@ -676,7 +676,7 @@ void App::galactic_input() {
             }
         if (!centres.empty()) gview_.set_camera_bounds(ui::galactic_scroll_box(centres, half));
     }
-    gview_.camera().set_scroll_locked(story_present_.scroll_locked());  // ui2 t06: the story's SCROLL_LOCK reward
+    gview_.camera().set_scroll_locked(story_present_.scroll_locked() || story_present_.controls_locked());  // ui2 t06: the story's SCROLL_LOCK reward
     if (!opt_.hidden || !opt_.smoke.empty()) gview_.camera().update(input_, ui_.bindings, dt_);
     gview_.camera().step(dt_);
     const uint32_t planet_before_input = selected_planet_;  // ui2 t06: LOCK_PLANET_SELECTION restores it below
@@ -817,7 +817,7 @@ void App::battle_input() {
     const sim::TacticalMode* tm = session_ ? session_->host().modes().top_tactical() : nullptr;
     if (!tm || !bview_.active()) return;
     const uint32_t w = targets_.width, h = targets_.height;
-    bview_.camera().set_scroll_locked(story_present_.scroll_locked());  // ui2 t06: the story's SCROLL_LOCK reward
+    bview_.camera().set_scroll_locked(story_present_.scroll_locked() || story_present_.controls_locked());  // ui2 t06: the story's SCROLL_LOCK reward
     if (!opt_.hidden || !opt_.smoke.empty()) bview_.camera().update(input_, ui_.bindings, dt_);
     const ui::CameraParams cp = bview_.camera_params(w, h);
     ui::OrderContext ctx;

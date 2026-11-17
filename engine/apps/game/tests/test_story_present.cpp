@@ -66,6 +66,10 @@ void text_test() {
     f.set_hooks(h);
     f.on_reward("SCREEN_TEXT", P{"TEXT_F", "5", "X_WING"}, 0.0, 0);
     CHECK(f.lines().size() == 1 && f.lines()[0].text == U"Build an X-wing now");
+    // 1.1: a HINT-channel line plays GUI_Text_Hint_SFX once when added.
+    CHECK(f.take_text_hint_sounds() == 0);
+    f.on_reward("SCREEN_TEXT", P{"TEXT_H", "5", "", "", "", "", "HINT"}, 0.0, 0);
+    CHECK(f.take_text_hint_sounds() == 1 && f.take_text_hint_sounds() == 0);
     // Remove_All_Text clears them.
     s.remove_all_text();
     CHECK(s.lines().empty());
@@ -94,6 +98,7 @@ void pointer_test() {
           s.arrows()[1].sub == 1 && s.arrows()[1].has_pointer);
     s.on_reward("FLASH_PLANET_GUI", P{"Ilum", "FLASH_PLANET"}, 1.0, 0);
     CHECK(s.arrows().size() == 3 && !s.arrows()[2].has_pointer && s.arrows()[2].label.empty());
+    CHECK(s.object_flashes().size() == 1 && s.object_flashes()[0].type_name == "Kashyyyk");  // TROOPS flashes the planet; PLANET is the arrow alone
     s.on_reward("FLASH_FLEET_WITH_UNIT", P{"Han_Solo", "Han_Solo_Team_Flash"}, 1.0, 0);
     s.on_reward("FLASH_SPECIAL_ABILITY", P{"STEALTH", "flash_stealh_buttons"}, 1.0, 0);
     s.on_reward("FLASH_PRODUCTION_CHOICE", P{"Probe_Droid_Team", "Flash_Probe_Droid"}, 1.0, 0);
@@ -157,14 +162,24 @@ void lock_test() {
     CHECK(!s.objectives_shown());
     s.on_reward("ENABLE_OBJECTIVE_DISPLAY", P{}, 0.0, 0);  // P1 defaults to 1
     CHECK(s.objectives_shown());
-    // SHOW_COMMAND_BAR keeps a hide counter: nested hides need matching shows.
-    s.on_reward("SHOW_COMMAND_BAR", P{"0"}, 0.0, 0);
-    s.on_reward("SHOW_COMMAND_BAR", P{"0"}, 0.0, 0);
-    s.on_reward("SHOW_COMMAND_BAR", P{"1"}, 0.0, 0);
+    // SHOW_COMMAND_BAR keeps a hide counter in a battle (mode 2): nested hides need matching shows.
+    s.on_reward("SHOW_COMMAND_BAR", P{"0"}, 0.0, 2);
+    s.on_reward("SHOW_COMMAND_BAR", P{"0"}, 0.0, 2);
+    s.on_reward("SHOW_COMMAND_BAR", P{"1"}, 0.0, 2);
     CHECK(s.command_bar_hidden());
-    s.on_reward("SHOW_COMMAND_BAR", P{"1"}, 0.0, 0);
-    s.on_reward("SHOW_COMMAND_BAR", P{"1"}, 0.0, 0);  // never below 0
+    s.on_reward("SHOW_COMMAND_BAR", P{"1"}, 0.0, 2);
+    s.on_reward("SHOW_COMMAND_BAR", P{"1"}, 0.0, 2);  // never below 0
     CHECK(!s.command_bar_hidden());
+    // 5.6 galactic (mode 0): a plain show / hide, no counter.
+    s.on_reward("SHOW_COMMAND_BAR", P{"0"}, 0.0, 0);
+    s.on_reward("SHOW_COMMAND_BAR", P{"0"}, 0.0, 0);
+    s.on_reward("SHOW_COMMAND_BAR", P{"1"}, 0.0, 0);
+    CHECK(!s.command_bar_hidden());
+    // 5.5: ENABLE_OBJECTIVE_DISPLAY hands its value to the host once (the objectives key's byte).
+    s.on_reward("ENABLE_OBJECTIVE_DISPLAY", P{"0"}, 0.0, 0);
+    CHECK(s.take_objective_display() == std::optional<bool>(false) && !s.take_objective_display());
+    s.on_reward("ENABLE_OBJECTIVE_DISPLAY", P{}, 0.0, 0);
+    CHECK(s.take_objective_display() == std::optional<bool>(true));
     s.on_reward("START_CINEMATIC_MODE", P{}, 0.0, 0);
     CHECK(s.cinematic_mode());
     s.on_reward("STOP_CINEMATIC_MODE", P{}, 0.0, 0);
@@ -220,6 +235,14 @@ void advisor_test() {
     CHECK(!s.tick_advisor(0, 91, hints) && !s.tick_advisor(0, 9089, hints));  // next = 90 + 30 * 300
     CHECK(s.tick_advisor(0, 9090, hints) && s.hint_queue_size() == 2);
     CHECK(s.tick_advisor(0, 9090 + 9000, hints) && s.hint_queue_size() == 3);  // the list wraps
+    // 6.5: a new mode start sets only the next tick; the list position runs on (every battle does not repeat the first hint).
+    {
+        game::StoryPresenter t = make();
+        t.begin_mode(0);
+        CHECK(t.tick_advisor(0, 90, hints) && t.next_hint_index(0) == 1);
+        t.begin_mode(0);
+        CHECK(t.next_hint_index(0) == 1 && t.tick_advisor(0, 90, hints) && t.next_hint_index(0) == 0);
+    }
     // SET_ADVISOR 0 (plot player, per mode) stops the periodic hint of that mode only.
     s.on_reward("SET_ADVISOR", P{"0"}, 0.0, 1);
     CHECK(!s.advisor_enabled(1) && s.advisor_enabled(0));

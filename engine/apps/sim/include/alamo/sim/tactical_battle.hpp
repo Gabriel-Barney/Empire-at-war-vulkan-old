@@ -931,6 +931,11 @@ public:
     uint32_t terrain_type() const { return space_ ? 7u : map_.info.counts[4]; }
     bool is_space_battle() const { return space_; }  // aud1 t08
     bool set_environment(int32_t index);
+    // ui2 t08: Set_Cinematic_Environment (0x2769a0): true switches to the first environment named "Cinematic" (exact name) and
+    // remembers the index it replaced; false restores it. Nothing changes without such an environment, when it is already
+    // active, or on false with nothing remembered. Like set_environment it takes effect through env_index_ (land weather
+    // restarts on its next service; not saved).
+    bool set_cinematic_environment(bool on);
     // Mode vf27 (0x2770e0, "random environment of a weather type"; no caller found in retail or the port): type <= 4 ->
     // the environments whose mini 13 (Environment::field_13) equals type, in index order; m = 1 -> that one, m >= 2 ->
     // one synced int(0, m - 1) (no "Cinematic" skip); m = 0 or type > 4 -> pick_environment over all n. False when the
@@ -2106,6 +2111,7 @@ private:
     bool l1_weather_started_ = false;
     uint32_t l1_weather_env_ = 0;  // cu8g t03: the environment index the weather was (re)initialised for (not saved)
     uint32_t env_index_ = 0;       // cu8g t02: the active environment (not saved; see environment_index)
+    uint32_t env_saved_ = 0xFFFFFFFFu;  // ui2 t08: the index Set_Cinematic_Environment(true) replaced (RtsScene +0xa4)
     bool fog_weather_dirty_ = false;  // Int-final: a weather FowDirty event not yet seen by fog_service
     void l1_weather_note_fow();       // Int-final: FowDirty in weather().events() -> fog_weather_dirty_
     struct L1Tracker {

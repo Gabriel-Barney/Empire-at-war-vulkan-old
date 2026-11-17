@@ -185,10 +185,12 @@ void LinkedBattleOverlay::reset() {
     block_ = letterbox_hold_ = input_hold_ = blocked_ = false;
 }
 
+// ui2 t10: the script's own bars (Letter_Box_In / Out with their times) are the story box's (App::story_box_); this overlay
+// only ends its battle-start hold. A held bar stays up until the script's bars take over; Out drops it at once so the
+// two slides are not drawn on top of each other.
 void LinkedBattleOverlay::script_letterbox(bool in) {
     letterbox_hold_ = false;
-    if (in) bars_.slide_in();
-    else bars_.slide_out();
+    if (!in) bars_.remove();
 }
 
 void LinkedBattleOverlay::script_controls() { input_hold_ = false; }
