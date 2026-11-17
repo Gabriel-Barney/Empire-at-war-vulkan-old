@@ -607,9 +607,13 @@ void test_dds() {
         CHECK(decode_dds(f, t, &err));
         CHECK(t.cubemap && t.layers == 6 && t.format == TextureFormat::BC3 && t.levels.size() == 6);
         CHECK(t.level(5, 0) && t.level_bytes(*t.level(5, 0))[0] == 5 && t.level(4, 0)->offset == 128 + 64);
-        Bytes partial = dds_header(4, 4, 1, 0x4, FCC("DXT5"), 0, 0, 0, 0, 0, 0x200u | 0x400u);
-        partial.resize(partial.size() + 16);
-        CHECK(!decode_dds(partial, t, &err));
+        // partial cubemap (mcx2 t04): the faces present keep their data, the others are black, with a warning
+        Bytes partial = dds_header(4, 4, 1, 0x4, FCC("DXT5"), 0, 0, 0, 0, 0, 0x200u | 0x400u | 0x2000u);
+        for (int face = 0; face < 2; ++face)
+            for (int i = 0; i < 16; ++i) partial.push_back(static_cast<std::uint8_t>(9 + face));
+        CHECK(decode_dds(partial, t, &err) && t.layers == 6 && t.cubemap && !t.warnings.empty());
+        CHECK(t.level_bytes(*t.level(0, 0))[0] == 9 && t.level_bytes(*t.level(1, 0))[0] == 0 &&
+              t.level_bytes(*t.level(3, 0))[0] == 10 && t.level_bytes(*t.level(5, 0))[15] == 0);
     }
     {  // A8R8G8B8 native BGRA8 and X8R8G8B8 with alpha swizzle
         Bytes f = dds_header(1, 1, 1, 0x41, 0, 32, 0xFF0000, 0xFF00, 0xFF, 0xFF000000u);
@@ -654,7 +658,7 @@ void test_dds() {
     {
         TextureAsset t;
         CHECK(!decode_dds(Bytes(10, 0), t, &err));
-        Bytes bad = dds_header(4, 4, 1, 0x4, FCC("ATI2"), 0, 0, 0, 0, 0);
+        Bytes bad = dds_header(4, 4, 1, 0x4, FCC("ZZZZ"), 0, 0, 0, 0, 0);
         bad.resize(bad.size() + 16);
         CHECK(!decode_dds(bad, t, &err) && err.find("FourCC") != std::string::npos);
     }
@@ -668,6 +672,103 @@ void test_dds() {
         small.resize(small.size() + 64 * 64, 0xFF);
         CHECK(decode_dds(std::move(small), t, &err) && t.format == TextureFormat::RGBA8 && t.mip_levels == 7 &&
               t.data[0] == 255 && t.data[3] == 255);
+    }
+}
+
+// Mod texture formats (mcx2 t04, MOD_COMPAT_DESIGN.md 10.3): every one decodes to a format the renderer samples, with
+// the values D3D9 gave. Expected values worked out by hand from the format definitions.
+void test_dds_mod_formats() {
+    std::string err;
+    TextureAsset t;
+    {  // ATI1 (BC4) 4x4: r0 = 200 > r1 = 100 -> 8-value palette; index 0 everywhere but texel (1,0) = index 1,
+       // texel (2,0) = index 2 = (6*200 + 1*100 + 3) / 7 = 186
+        Bytes f = dds_header(4, 4, 1, 0x4, FCC("ATI1"), 0, 0, 0, 0, 0);
+        const std::uint64_t idx = (1ull << 3) | (2ull << 6);
+        f.push_back(200);
+        f.push_back(100);
+        for (int i = 0; i < 6; ++i) f.push_back(static_cast<std::uint8_t>(idx >> (8 * i)));
+        CHECK(decode_dds(f, t, &err) && t.format == TextureFormat::R8 && t.swizzle.r == Swizzle::R &&
+              t.swizzle.g == Swizzle::G && t.width == 4 && t.mip_levels == 3);
+        CHECK(t.data[0] == 200 && t.data[1] == 100 && t.data[2] == 186 && t.data[15] == 200);
+        // ATI2 (BC5): red block then green block; green r0 <= r1 -> 6-value palette, index 7 = 255
+        Bytes g = dds_header(4, 4, 1, 0x4, FCC("ATI2"), 0, 0, 0, 0, 0);
+        g.insert(g.end(), {10, 20, 0, 0, 0, 0, 0, 0});  // red: every texel index 0 = 10
+        g.insert(g.end(), {50, 60, 7, 0, 0, 0, 0, 0});  // green: texel 0 index 7 = 255, the rest index 0 = 50
+        CHECK(decode_dds(g, t, &err) && t.format == TextureFormat::R8G8);
+        CHECK(t.data[0] == 10 && t.data[1] == 255 && t.data[2] == 10 && t.data[3] == 50);
+        Bytes dx10 = dds_header(4, 4, 1, 0x4, FCC("DX10"), 0, 0, 0, 0, 0);
+        W x;
+        x.put(83u).put(3u).put(0u).put(1u).put(0u);
+        dx10.insert(dx10.end(), x.b.begin(), x.b.end());
+        dx10.insert(dx10.end(), g.begin() + 128, g.end());
+        CHECK(decode_dds(dx10, t, &err) && t.format == TextureFormat::R8G8 && t.data[1] == 255);
+    }
+    {  // V8U8 (D3DFMT 60): (U, V, 1, 1) signed; 2x1 -> RGBA8_SNORM with a signed generated mip
+        Bytes f = dds_header(2, 1, 1, 0x4, 60, 0, 0, 0, 0, 0);
+        f.insert(f.end(), {0x81, 0x7F, 0x7F, 0x01});  // (-127, 127), (127, 1)
+        CHECK(decode_dds(f, t, &err) && t.format == TextureFormat::RGBA8_SNORM && t.mip_levels == 2);
+        CHECK(t.data[0] == 0x81 && t.data[1] == 0x7F && t.data[2] == 127 && t.data[3] == 127 && t.data[4] == 0x7F);
+        // means: (-127 + 127) / 2 = 0, (127 + 1) / 2 = 64
+        CHECK(static_cast<std::int8_t>(t.data[8]) == 0 && static_cast<std::int8_t>(t.data[9]) == 64);
+        CHECK(std::string(texture_format_vk_name(t.format)) == "VK_FORMAT_R8G8B8A8_SNORM");
+        // CxV8U8 (117): third component sqrt(1 - u^2 - v^2): (0, 0) -> 127
+        Bytes c = dds_header(1, 1, 1, 0x4, 117, 0, 0, 0, 0, 0);
+        c.insert(c.end(), {0, 0});
+        CHECK(decode_dds(c, t, &err) && t.format == TextureFormat::RGBA8_SNORM && t.data[2] == 127 && t.data[3] == 127);
+        // Q8W8V8U8 (63): stored as is
+        Bytes q = dds_header(1, 1, 1, 0x4, 63, 0, 0, 0, 0, 0);
+        q.insert(q.end(), {1, 0xFE, 3, 0x80});
+        CHECK(decode_dds(q, t, &err) && t.format == TextureFormat::RGBA8_SNORM && t.data[1] == 0xFE && t.data[3] == 0x80);
+    }
+    {  // 16-bit per channel: A16B16G16R16 (36) -> RGBA8 rounded; G16R16 (34) -> (R, G, 1, 1); L16 (81)
+        Bytes f = dds_header(1, 1, 1, 0x4, 36, 0, 0, 0, 0, 0);
+        W x;
+        x.put(std::uint16_t(65535)).put(std::uint16_t(0)).put(std::uint16_t(32896)).put(std::uint16_t(257));
+        f.insert(f.end(), x.b.begin(), x.b.end());
+        CHECK(decode_dds(f, t, &err) && t.format == TextureFormat::RGBA8 && t.data[0] == 255 && t.data[1] == 0 &&
+              t.data[2] == 128 && t.data[3] == 1);
+        Bytes g = dds_header(1, 1, 1, 0x4, 34, 0, 0, 0, 0, 0);
+        W y;
+        y.put(std::uint16_t(0)).put(std::uint16_t(65535));
+        g.insert(g.end(), y.b.begin(), y.b.end());
+        CHECK(decode_dds(g, t, &err) && t.data[0] == 0 && t.data[1] == 255 && t.data[2] == 255 && t.data[3] == 255);
+        Bytes l = dds_header(1, 1, 1, 0x4, 81, 0, 0, 0, 0, 0);
+        l.insert(l.end(), {0xFF, 0xFF});
+        CHECK(decode_dds(l, t, &err) && t.data[0] == 255 && t.data[2] == 255);
+    }
+    {  // float: R16F (111) -> RGBA16F (r, 1, 1, 1); A32B32G32R32F (116) -> RGBA32F as stored; no generated mips
+        Bytes f = dds_header(2, 2, 1, 0x4, 111, 0, 0, 0, 0, 0);
+        for (int i = 0; i < 4; ++i) f.insert(f.end(), {0x00, 0x40});  // 2.0
+        CHECK(decode_dds(f, t, &err) && t.format == TextureFormat::RGBA16F && t.mip_levels == 1 && t.data.size() == 32);
+        CHECK(t.data[0] == 0x00 && t.data[1] == 0x40 && t.data[2] == 0x00 && t.data[3] == 0x3C);
+        Bytes g = dds_header(1, 1, 1, 0x4, 116, 0, 0, 0, 0, 0);
+        W x;
+        x.put(0.5f).put(-2.0f).put(8.0f).put(1.0f);
+        g.insert(g.end(), x.b.begin(), x.b.end());
+        CHECK(decode_dds(g, t, &err) && t.format == TextureFormat::RGBA32F);
+        float v[4] = {};
+        std::memcpy(v, t.data.data(), 16);
+        CHECK(v[0] == 0.5f && v[1] == -2.0f && v[2] == 8.0f && v[3] == 1.0f);
+    }
+    {  // P8: palette (R, G, B, flags) after the header; all-zero flags -> opaque
+        Bytes f = dds_header(2, 1, 1, 0x20, 0, 8, 0, 0, 0, 0);
+        Bytes pal(1024, 0);
+        pal[4] = 10;
+        pal[5] = 20;
+        pal[6] = 30;
+        f.insert(f.end(), pal.begin(), pal.end());
+        f.insert(f.end(), {1, 0});
+        CHECK(decode_dds(f, t, &err) && t.format == TextureFormat::RGBA8 && t.data[0] == 10 && t.data[2] == 30 &&
+              t.data[3] == 255 && t.data[4] == 0);
+        Bytes nopal = dds_header(2, 1, 1, 0x20, 0, 8, 0, 0, 0, 0);
+        nopal.insert(nopal.end(), {1, 0});
+        CHECK(!decode_dds(nopal, t, &err) && err.find("palette") != std::string::npos);
+    }
+    {  // volume 2x2x2 L8: slice 0 only, with a warning
+        Bytes f = dds_header(2, 2, 1, 0x20000, 0, 8, 0xFF, 0, 0, 0, 0x200000u);
+        f[4 + 20] = 2;  // depth
+        f.insert(f.end(), {1, 2, 3, 4, 5, 6, 7, 8});
+        CHECK(decode_dds(f, t, &err) && t.width == 2 && t.data[0] == 1 && t.data[3] == 4 && !t.warnings.empty());
     }
 }
 
@@ -777,7 +878,17 @@ void test_tga() {
     // RLE overrun and truncated data are rejected
     CHECK(!decode_tga(tga(10, 2, 1, 32, 0, {0x85, 1, 2, 3, 4}), t, &err));
     CHECK(!decode_tga(tga(2, 2, 2, 24, 0, {1, 2, 3}), t, &err));
-    CHECK(!decode_tga(tga(1, 2, 2, 8, 0, {}), t, &err));
+    CHECK(!decode_tga(tga(1, 2, 2, 8, 0, {}), t, &err));  // type 1 without a colour map
+    {  // colour-mapped (mcx2 t04): 2 entries of 24 bits starting at index 5, 8-bit indices; type 9 = RLE
+        const Bytes h = {0, 1, 1, 5, 0, 2, 0, 24, 0, 0, 0, 0, 2, 0, 1, 0, 8, 0x20};
+        const Bytes map = {10, 20, 30, 40, 50, 60};
+        CHECK(decode_tga(cat({h, map, {6, 5}}), t, &err) && t.format == TextureFormat::BGRA8 && t.data[0] == 40 &&
+              t.data[2] == 60 && t.data[4] == 10 && t.data[7] == 255);
+        Bytes r = cat({h, map, {0x81, 5}});
+        r[2] = 9;
+        CHECK(decode_tga(r, t, &err) && t.data[0] == 10 && t.data[4] == 10);
+        CHECK(decode_tga(cat({h, map, {0, 5}}), t, &err) && t.data[0] == 0 && t.data[3] == 255);  // outside the map
+    }
     // Review finding 2: huge claims are rejected before any large allocation.
     CHECK(!decode_tga(tga(2, 16384, 16384, 32, 0, {}), t, &err) && err.find("truncated") != std::string::npos);
     CHECK(!decode_tga(tga(10, 16384, 16384, 32, 0, {0xFF, 1, 2, 3, 4}), t, &err) && err.find("budget") != std::string::npos);
@@ -1775,6 +1886,7 @@ int main() {
     test_animation_zero_frames();
     test_animation();
     test_dds();
+    test_dds_mod_formats();
     test_tga();
     test_bmp();
     test_mips();
