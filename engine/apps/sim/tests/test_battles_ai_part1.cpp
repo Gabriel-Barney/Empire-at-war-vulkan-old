@@ -505,7 +505,7 @@ void test_battle_ai_land_mode(bool skirmish, bool control_points) {
         std::vector<ai::tactical::TacticalAiObject> facts;
         ai.fill(w, facts);
         CHECK(w.campaign == !skirmish);  // t50: a land skirmish runs the skirmish rules too (it has its skirmish base now)
-        CHECK(!w.land_control);  // skai t15: only a control-point game (none here), not every land skirmish
+        CHECK(w.land_control == (skirmish && control_points));  // ccpgu t03; skai t15: not every land skirmish
         CHECK(w.conflict_ground_structures == 1);  // set in both modes; the token picks by mode
         int own = 0, other = 0;
         for (const ai::tactical::PerceptionObject& o : w.objects)
