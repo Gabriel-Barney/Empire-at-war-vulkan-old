@@ -1,16 +1,16 @@
 ALAMO_BENCH 2
 name water_battle
-version 50
+version 51
 description Water reflection and refraction: the land map _MP_LAND_KAMINO (60% of the terrain under water, reflection 1.0, refraction 1.0, constant rain), an idle Empire army against the Rebel AI with four times the default ground forces, 1 min of battle on the platform's edge; the camera stays low over the fight
 make --bench-map _MP_LAND_KAMINO --bench-human Empire --bench-ai Rebel --bench-scale 4 --bench-save-after 2600 --bench-seed 1
-save water_battle.alsv 447772 ce1b65ef58e26dc1
-orders water_battle.acmd 72 c3229446703aa610
-fingerprint water_battle.crc 31242 149c494bcbe50b9a
+save water_battle.alsv 457829 7c60d6bc030f6006
+orders water_battle.acmd 72 192ad299094f40b4
+fingerprint water_battle.crc 31242 d520c85403f74217
 fingerprint_every 16
 start_tick 2623
 ticks 1800
 workers auto
-final_crc 0b68a5c7f6b3a40c
+final_crc a3b3e807e940384e
 host game
 mode fixed
 preset bm-high
