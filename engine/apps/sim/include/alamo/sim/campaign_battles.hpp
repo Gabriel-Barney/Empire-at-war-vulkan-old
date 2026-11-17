@@ -385,6 +385,11 @@ private:
     // above. Story notifications fed after each battle tick (deaths, hardpoints); end_battle before the pop.
     std::unique_ptr<lua::ObjectBridge> story_bridge_;
     void story_begin(SimHost& host, GameMode& mode);
+    // modc t32: story_begin's first half, the bridge and its hooks (no story session part). Object-script sessions run it
+    // inside TacticalBattle::setup before the map objects spawn (set_before_map_load), as their Base_Definitions run in
+    // the spawn (OBJECT_SCRIPTS §1.2); bridge_before_spawn_ tells story_begin it is done for this battle.
+    void story_bridge_begin(SimHost& host, GameMode& mode);
+    bool bridge_before_spawn_ = false;
     void story_feed(SimHost& host);
     // --- end L1/S4 wave 2a ---
     // --- L1/S4 wave 2b story hookup (owner: L1/S4 agent) ---
@@ -410,7 +415,8 @@ private:
     // weapon of Fire_Special_Weapon (story_hooks_.station_readiness / station_fire -> CombatSystem, fog force 1).
     // ENABLE_FOW story rewards (StorySession::set_enable_fow_hook, installed by hook() once a story runs): the running
     // battle's fog, else the carried fog_active_ / fog_render_.
-    void story_fog_begin(StoryBattleStart& st);
+    void story_fog_begin();                     // story_hooks_ / story_fog_ (bridge half)
+    void story_fog_start(StoryBattleStart& st);  // the StoryBattleStart fog polls (session half)
     void story_fog_reward(bool has_param, int32_t value);
     StorySession* story_fog_session_ = nullptr;  // the session the ENABLE_FOW (and story t09 victory) hooks are installed on
     // story t09: the tactical plot set's ENABLE_VICTORY / VICTORY rewards (StorySession::set_victory_hooks, installed with the

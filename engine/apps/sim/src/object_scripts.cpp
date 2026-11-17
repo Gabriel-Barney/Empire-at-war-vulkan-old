@@ -407,6 +407,7 @@ void ObjectScriptHost::attach(StoreScripts& ss, objects::ObjectHandle h) {
     if (!s->inst) return;
     lua::LuaVm& vm = *s->inst->vm;
     attach_engine(vm, globals_, ss.world, ss.bridge);  // step 3
+    if (!ss.bridge) ++stats_.attached_no_bridge;
     std::string err;
     if (s->inst->fresh && vm.has_function("Base_Definitions") && !vm.call("Base_Definitions", &err))  // step 4
         note(frame, s->name, s->id, "Base_Definitions: " + err, true);  // the script stays attached (its globals as far as they got)

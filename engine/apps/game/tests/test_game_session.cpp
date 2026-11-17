@@ -1141,6 +1141,8 @@ void attract_demo_script_test(const game::GameData& data, const game::SessionSpe
         }
         CHECK(revealed());  // the controller's FogOfWar.Reveal_All for the three players
         CHECK(scripts->stats().attached == 1 && scripts->stats().pumps >= 1 && scripts->error_total() == 0);
+        // modc t32: the map-placed controller attached (Base_Definitions ran) with the battle's object bridge bound.
+        CHECK(scripts->stats().attached_no_bridge == 0);
         for (const std::string& m : scripts->messages()) std::printf("  attract script: %s\n", m.c_str());
         const sim::TacticalBattle* b = s.battle();
         CHECK(b != nullptr);

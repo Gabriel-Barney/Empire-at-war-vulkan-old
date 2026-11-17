@@ -1139,6 +1139,10 @@ public:
     // and land battles are not affected. Unset: never held. ---
     void set_arrival_hold(std::function<bool()> held) { arrival_hold_ = std::move(held); }
     bool arrival_held() const { return space_ && arrival_hold_ && arrival_hold_(); }
+    // modc t32 (OBJECT_SCRIPTS §1.2): called once by setup after the battle's systems exist (combat, abilities, fog) and
+    // just before the map objects spawn, so the host can bind what an object's script attach needs (the object bridge:
+    // Base_Definitions runs inside the spawn). Cleared when called; unset: nothing.
+    void set_before_map_load(std::function<void()> fn) { before_map_load_ = std::move(fn); }
 
     // --- battle host (BT pass): HIJACK reserve (AI_GALACTIC_3 §4.3 step 5 "tactical with parent") ---
     // Appends a galactic object (a unit the galactic sim just created at the battle planet, e.g. GalacticSim::magic_spawn
@@ -2314,6 +2318,7 @@ private:
     std::function<float(int32_t)> credits_get_;
     std::function<void(int32_t, float)> credits_add_;
     std::function<bool()> arrival_hold_;  // story t12
+    std::function<void()> before_map_load_;  // modc t32
     SimRng* bt_rng_ = nullptr;                 // the host's synced RNG (setup / commands): pad objects' add_unit draws
     std::vector<objects::ObjectId> bt_attrition_ids_;
     uint32_t bt_attrition_kills_ = 0;
