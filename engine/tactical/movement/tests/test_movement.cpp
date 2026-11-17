@@ -1847,6 +1847,36 @@ static uint32_t run_land(MovementSystem& sys, uint32_t first, uint32_t max_frame
     return f - first;
 }
 
+// mov1 t04 (b0181, BKR1_RE_ANSWERS Q5 [H]): pack +0x28c. A vehicle (max speed 1.5 x 1.56 = 2.34: L = max(60, 30 x 2.0 x
+// 2.34) = 140.4) ordered 400 along x: the byte is false while the rest of its path is longer than L, turns true within
+// one rebuild (8 frames) of the rest dropping below L, and is not written while the unit stands (sticky).
+static void test_mov1_near_end() {
+    MovementSystem s{MovementConfig{}};
+    PassabilityGrid g;
+    g.init(60, 40);
+    s.set_grid(std::move(g));
+    s.add_unit(land_unit(1, cell_center(5, 20), 7, 1.5f, 18.0f, kUccVehicle));
+    SimRng rng(7);
+    MoveOrder o;
+    o.units = {1};
+    o.destination = cell_center(25, 20);
+    s.move(o, rng, 0);
+    const float vmax = s.view(1).max_speed, look = std::max(60.0f, 60.0f * vmax);
+    uint32_t first_true = 0, below = 0;
+    bool early = false;
+    for (uint32_t f = 0; f < 600 && !s.view(1).arrived; ++f) {
+        s.tick(f, rng, serial_for);
+        const UnitView v = s.view(1);
+        const float rest = distance(v.pos, cell_center(25, 20));
+        if (below == 0 && rest < look && v.speed > 0.0f) below = f;
+        if (v.near_end && first_true == 0) first_true = f;
+        early = early || (v.near_end && rest > look + 1e-3f);
+    }
+    std::printf("mov1 near_end: L %.2f, rest below L at frame %u, byte set at frame %u\n", static_cast<double>(look), below, first_true);
+    CHECK(s.view(1).arrived && below > 0 && first_true >= below && first_true <= below + 8 && !early);
+    CHECK(s.view(1).near_end);  // standing: not rewritten
+}
+
 static void test_land_group() {
     MovementSystem sys{MovementConfig{}};
     build_land_scenario(sys, 36);
@@ -1939,11 +1969,14 @@ static void test_land_group() {
     // §5.4.7 item 7: its order is lost and the member counts as arrived) - it had two records waiting (no duplicate rule,
     // item 1); the first decision's kind-3 Path Around failed (the "failed detour" stop), which cleared its paths, so the
     // second found no base path (the "no base" stop). It is the one unit that ends 400 or more from the destination.
-    CHECK(ground && frames == 8402 && arrived == 36 && jammed == 0 && cycle);
-    CHECK(near == 35 && stops == 2 && st.terrain_stops_failed == 1 && st.terrain_stops_nobase == 1 && st.terrain_stops_cell == 0);
-    CHECK(st.terrain_records == 22 && st.terrain_detours == 20);
-    CHECK(tlog.stops.size() == 1 && far_ids == std::vector<ObjectId>{1});
-    if (tlog.stops.size() == 1) CHECK(tlog.stops[0].id == 1 && tlog.stops[0].frame == 365 && tlog.stops[0].kind == "fn");
+    // mov1 (2026-11-17, BKR1 / BKR2 answers ported; a port measurement, MSVC and clang): the jam check is final - a starved
+    // M with other records detours (0x505630 counts only its state-15 master records), and with 0x677e40's concave terrain
+    // corners and the retail tick order every unit arrives, all 36 near the destination, at frame 1955; no terrain stop
+    // (3 records, 3 detours); before mov1: 8402 frames, 2 terrain stops of unit 1.
+    CHECK(ground && frames == 1955 && arrived == 36 && jammed == 0 && cycle);
+    CHECK(near == 36 && stops == 0);
+    CHECK(st.terrain_records == 3 && st.terrain_detours == 3);
+    CHECK(tlog.stops.empty() && far_ids.empty());
 
     // Head-on corridor: two units swap ends through a 3-cell-wide corridor.
     MovementSystem s2{MovementConfig{}};
@@ -1998,9 +2031,8 @@ static void test_land_group() {
     s4.move(d, rng, 0);
     // (s78n t20: the blocker comes after the order - the destination check 0x439360 of the order would move the goal off
     // a unit that already stands there)
-    // // mov1 t04 (BKR1 Q5 [H]): a destination counts as blocked only once the mover's approximation byte +0x28c (rebuilt
+    // mov1 t04 (BKR1 Q5 [H]): a destination counts as blocked only once the mover's approximation byte +0x28c (rebuilt
     // every 8 frames) says its path ends within L = max(60, 60 x max speed), so the blocker comes inside that range
-    bool g4ok = true;
     for (uint32_t f = 0; f < 2000 && !s4.view(1).arrived; ++f) {
         if (s4.view(2).id != 2 && distance(s4.view(1).pos, cell_center(30, 30)) < 75.0f)
             CHECK(s4.add_unit(land_unit(2, cell_center(30, 30), 7, 1.5f, 18.0f, kUccVehicle)));
@@ -3494,7 +3526,7 @@ static CrcLog space_crc_run(const ParallelFor& pf) {
 // path (11 accepted goals); MovingVsMoving answers follow the role slots.
 // s78n t26.2 (MOVEMENT §3.5.2 A / B): the speed controller (End Move T = a, 0x15 restarts), the start turn in place.
 // s78n t26 closing review (FIGHTER_FLYING §7.5 item 4): formation mates side-step by their footprint overlap.
-static constexpr uint64_t kGoldenLand = 0xd4626c4a21629e46ull;  // sp6: tree-hash layout (movement / combat / objects hashes); bkm1: lane fallback / stop point, shield-free class, recruitment, stored z, secondary facing; s78p: formation path and lanes; s78n t26 review round 2 (mixed formations, range rank); closing review; t26.4 the move step C; t26.3 the corner pass
+static constexpr uint64_t kGoldenLand = 0x7ece74ef77f772e5ull;  // mov1: Starved count, tie-break extent, terrain corners, +0x28c, overtake rank, step 10, SvS kept, tick order; sp6: tree-hash layout (movement / combat / objects hashes); bkm1: lane fallback / stop point, shield-free class, recruitment, stored z, secondary facing; s78p: formation path and lanes; s78n t26 review round 2 (mixed formations, range rank); closing review; t26.4 the move step C; t26.3 the corner pass
 static constexpr uint64_t kGoldenSpace = 0x8fc952146335d9dbull;  // sp6: tree-hash layout (movement / combat / objects hashes)
 
 static void test_determinism() {
@@ -3825,12 +3857,14 @@ static void test_real_data() {
     // why these three swing into the clearance (and whether retail does) is not settled (b0041's replay / RE part is open).
     std::printf("real maps: %u units stopped by a failed TerrainCollision detour (%u stop(s) of %u unit(s) observed per unit)\n",
                 land_stopped, all_stops, stopped_units);
-    CHECK(group_arrived == group_units && land_units - land_arrived == 3u && land_stopped == 3u && all_stops == 3u && stopped_units == 3u);
-    CHECK(not_arrived.size() == 3);
-    if (not_arrived.size() == 3) {
-        CHECK(not_arrived[0].map == "EM01_TRAIL_OF_A_JEDI.TED" && not_arrived[0].id == 18 && not_arrived[0].kind == "f");
-        CHECK(not_arrived[1].map == "EM08_SITH_TOMBS.TED" && not_arrived[1].id == 15 && not_arrived[1].kind == "f");
-        CHECK(not_arrived[2].map == "_MP_LAND_NABOO.TED" && not_arrived[2].id == 13 && not_arrived[2].kind == "f");
+    // mov1 (2026-11-17): with the BKR1 / BKR2 rules and the retail tick order 2 of 3240 stop by a failed TerrainCollision
+    // detour (EM08_SITH_TOMBS unit 13, _LAND_PLANET_SALEUCAMI_INTIMIDATION unit 17); mov2 t08 (the previous window's
+    // tracker for rejoin goals 2 - 11) re-measures them
+    CHECK(group_arrived == group_units && land_units - land_arrived == 2u && land_stopped == 2u && all_stops == 2u && stopped_units == 2u);
+    CHECK(not_arrived.size() == 2);
+    if (not_arrived.size() == 2) {
+        CHECK(not_arrived[0].map == "EM08_SITH_TOMBS.TED" && not_arrived[0].id == 13 && not_arrived[0].kind == "f");
+        CHECK(not_arrived[1].map == "_LAND_PLANET_SALEUCAMI_INTIMIDATION.TED" && not_arrived[1].id == 17 && not_arrived[1].kind == "f");
     }
     CHECK(space_arrived == space_units && space_hits == 0);
 }
@@ -4158,6 +4192,7 @@ int main() {
     test_destination_offsets();  // s78n t20
     test_walk_step_t20();        // s78n t20
     test_collision_system();
+    test_mov1_near_end();
     test_land_group();
     test_push_search();
     test_space();

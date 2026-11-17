@@ -295,6 +295,7 @@ struct UnitView {
     // destination; 0 when the destination check did not rank) and the coordinator of its last land order (0x426140; 0 none)
     int32_t form_rank = 0;
     uint32_t coord_id = 0;
+    bool near_end = false;  // mov1 t04: pack +0x28c as of its last rebuild (BKR1 Q5)
     // REMAINING_GAPS §4.3-4.7: special locomotors
     LocomotorKind locomotor = LocomotorKind::Default;  // the active locomotor
     bool secondary_locomotor = false;                  // S7 t06: the Uses_Multiple_Locomotors secondary is active
@@ -532,6 +533,9 @@ public:
         ObjectId target = -1;
     };
     std::span<const FormationAttack> formation_attacks() const { return formation_attacks_; }
+    // mov1 t06 test seam: runs 0x685490 (mvs_hostile_in_way) for the live MovingVsStopped record of (mover, obstacle) as
+    // step 10 would - true when an attack block was handed out (appended to formation_attacks). False without a record.
+    bool test_step10_probe(ObjectId mover, ObjectId obstacle, uint32_t frame);
     // s78n t26.1 review: the units whose walk ended deployed this tick (Walk 0x16 -> 0x19 with the Deploy clip on its last
     // frame, tick_deploy; ascending id). The host sets that clip (AnimBehaviors::deploy_at_end) whatever clip plays then
     // (Deployed_Walk, a turn, an idle). Visual only: read in the same tick, not saved, not hashed.

@@ -492,6 +492,7 @@ UnitView MovementSystem::view(ObjectId id) const {
     v.arrival_turn_ended = u->aturn_ended;
     v.form_rank = u->form_rank;
     v.coord_id = u->coord_id;
+    v.near_end = u->near_end;
     v.jiggle = u->jiggle;
     v.locomotor = u->d.locomotor;  // §4.3-4.7
     v.secondary_locomotor = u->on_secondary;  // S7 t06

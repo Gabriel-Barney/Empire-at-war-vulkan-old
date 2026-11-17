@@ -1133,9 +1133,6 @@ void test_t20_path_around() {
         // (before: the top record never counted as blocked, and the third vehicle was pushed in turn)
         const ObjectId pusher = 20;
         sys.stop(std::span<const ObjectId>(&pusher, 1));
-        // mov1 t04 (BKR1 Q5 [H]): the pushed unit's approximation byte +0x28c is written only while it moves (rebuilt every 8
-        // frames), so the third vehicle comes once it has walked its push path for 12 frames
-        for (uint32_t n = 0; n < 12; ++n, ++f) sys.tick(f, rng, serial_for);
         CHECK(sys.add_unit(t20_vehicle(22, top.back(), 1)));
         const uint32_t created0 = sys.stats().collisions_created;
         bool svs = false;
@@ -1148,10 +1145,17 @@ void test_t20_path_around() {
         // (the cut end lies behind the unit here: the record is finished at once and the unit brakes where it is)
         const bool shorter = distance(x.pos, top.back()) > 20.0f;
         const float gap = foot_gap(foot_rect(x.pos, x.yaw, 10.0f, 6.0f), foot_rect(sys.view(22).pos, sys.view(22).yaw, 10.0f, 6.0f));
-        std::printf("t20 batch 1 cut top record: the pushed unit stopped %.2f from the vehicle on its push end (gap %.2f)\n",
-                    static_cast<double>(distance(x.pos, top.back())), static_cast<double>(gap));
-        CHECK(sys.stats().pushes == 1 && sys.stats().early_arrivals == 1 && shorter && !x.pushed && x.speed == 0.0f);
-        CHECK(!sys.view(22).pushed && sys.view(22).pos == top.back() && gap >= 5.0f && !svs);
+        std::printf("t20 batch 1 cut top record: the pushed unit stopped %.2f from the vehicle on its push end (gap %.2f) [cuts %u, "
+                    "pushes %u, svs %d, pushed %d, speed %.3f, push length %.2f]\n",
+                    static_cast<double>(distance(x.pos, top.back())), static_cast<double>(gap), sys.stats().early_arrivals,
+                    sys.stats().pushes, svs ? 1 : 0, x.pushed ? 1 : 0, static_cast<double>(x.speed), static_cast<double>(path_length(top)));
+        // mov1 t04 / t08 (BKR1 Q5 / Q6 [H]): the pushed unit's approximation byte +0x28c is written only while it moves
+        // (rebuilt every 8 frames from the push), so when its record with the vehicle is decided the destination is not yet
+        // blocked; and once it is (a 37.8 push), its own position no longer clears the vehicle - no cut (0x685e10 changes
+        // nothing), and the vehicle on the push end is pushed in turn (step 8), as before s78n t20 batch 1
+        CHECK(sys.stats().pushes == 2 && sys.stats().early_arrivals == 0 && !x.pushed && x.speed == 0.0f && !svs);
+        CHECK(distance(sys.view(22).pos, top.back()) > 5.0f && gap >= 0.0f);
+        (void)shorter;
         CHECK(sys.stats().collisions_created > created0 && sys.stats().dynamic_repaths == 0);
     }
 
@@ -1447,9 +1451,9 @@ void test_t20_early_arrival() {
         bool placed = false;
         uint32_t f = 1;
         for (; f < 2500 && sys.stats().early_arrivals == 0; ++f) {
-            // // mov1 t04 (BKR1 Q5 [H]): a destination counts as blocked only once the mover's approximation byte +0x28c (rebuilt
+            // mov1 t04 (BKR1 Q5 [H]): a destination counts as blocked only once the mover's approximation byte +0x28c (rebuilt
             // every 8 frames) says its path ends within L = max(60, 60 x max speed), so the blocker comes inside that range
-            if (!placed && sys.view(10).speed > 0.0f && sys.view(10 + lead).pos.x > goal[lead].x - 70.0f) {
+            if (!placed && sys.view(10).speed > 0.0f && sys.view(10 + lead).pos.x > goal[lead].x - 50.0f) {
                 CHECK(sys.add_unit(t20_vehicle(30, goal[lead], 1, 12.0f, 6.0f)));  // a unit now stands on the leader's slot
                 placed = true;
             }
@@ -1474,9 +1478,16 @@ void test_t20_early_arrival() {
         }
         bool kept = true;
         for (int i : side) kept = kept && sys.land_path(10 + i).back() == goal[i];
-        CHECK(cut && exact == 2 && walking == 2 && finished == 0 && kept);
-        std::printf("t20 early arrival: formation - leader cut 33, lane members cut 33: %u (walking on %u, finished %u), side lanes kept %d\n",
-                    exact, walking, finished, kept ? 1 : 0);
+        // mov1 t04: the blocker comes inside the leader's +0x28c look-ahead (60 out), so the cut is made with the members
+        // closer to their ends than before: the member one row back walks on, the one two rows back has less than 33 left
+        // and is finished (as before s78p)
+        CHECK(cut && exact == 2 && walking == 1 && finished == 1 && kept);
+        std::printf("t20 early arrival: formation - leader cut 33, lane members cut 33: %u (walking on %u, finished %u), side lanes kept %d "
+                    "[cut %d, cuts %u, frame %u, leader %.2f from its goal, path end %.2f, re-paths %u, pushes %u, unit 30 moved %.2f]\n",
+                    exact, walking, finished, kept ? 1 : 0, cut ? 1 : 0, sys.stats().early_arrivals, f,
+                    static_cast<double>(distance(sys.view(10 + lead).pos, goal[lead])),
+                    static_cast<double>(distance(sys.land_path(10 + lead).back(), goal[lead])), sys.stats().dynamic_repaths,
+                    sys.stats().pushes, static_cast<double>(distance(sys.view(30).pos, goal[lead])));
         bool all = false;
         for (; f < 4000 && !all; ++f) {
             sys.tick(f, rng, serial_for);
@@ -1500,7 +1511,7 @@ void test_t20_early_arrival() {
         bool placed = false, arrived = false, around = false;
         for (uint32_t f = 1; f < 1500 && !arrived; ++f) {
             // (late: the mover must be on its final leg when the record with the nearer unit is decided)
-            // // mov1 t04 (BKR1 Q5 [H]): a destination counts as blocked only once the mover's approximation byte +0x28c (rebuilt
+            // mov1 t04 (BKR1 Q5 [H]): a destination counts as blocked only once the mover's approximation byte +0x28c (rebuilt
             // every 8 frames) says its path ends within L = max(60, 60 x max speed), so the blocker comes inside that range
             if (!placed && sys.view(10).pos.x >= dest.x - 80.0f) {
                 CHECK(sys.add_unit(t20_vehicle(11, {dest.x - 60.0f, dest.y}, 1)));  // on the path, 60 before the goal
@@ -1548,7 +1559,7 @@ void test_t20_decision_leftovers() {
             sys.move(o, rng, 2);
             bool placed = false;
             for (uint32_t f = 2; f < 1500 && !r.arrived; ++f) {
-                // // mov1 t04 (BKR1 Q5 [H]): a destination counts as blocked only once the mover's approximation byte +0x28c (rebuilt
+                // mov1 t04 (BKR1 Q5 [H]): a destination counts as blocked only once the mover's approximation byte +0x28c (rebuilt
                 // every 8 frames) says its path ends within L = max(60, 60 x max speed), so the blocker comes inside that range
                 if (!placed && sys.view(100).pos.x > dest.x - 45.0f) {
                     UnitDesc x = unit(70, dest, 2, 1.0f, 6.0f, LocomotorKind::Default);

@@ -1031,6 +1031,15 @@ bool MovementSystem::path_around(const CollisionObject& c, Unit& u, const Unit* 
 // strict <: ties keep the box order): the first o != a whose owner is hostile to a's and whose footprint the probe path
 // meets (0x441b60, the MovingVsStopped swept test) is the answer - a's formation (none: false) gets a kind-3 attack block
 // on o (formation_attacks_, flags 0) and the call is true. No such o: false. b itself is not excluded.
+bool MovementSystem::test_step10_probe(ObjectId mover, ObjectId obstacle, uint32_t frame) {
+    Unit* a = unit_ptr(mover);
+    const Unit* b = unit_ptr(obstacle);
+    if (!a || !b) return false;
+    for (const CollisionObject& c : coll_.list())
+        if (c.kind == CollisionKind::MovingVsStopped && c.a == mover && c.b == obstacle) return mvs_hostile_in_way(c, *a, *b, frame);
+    return false;
+}
+
 bool MovementSystem::mvs_hostile_in_way(const CollisionObject& c, Unit& a, const Unit& b, uint32_t frame) {
     float d = 0.0f;
     {
