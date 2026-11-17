@@ -841,6 +841,7 @@ bool App::end_screen_clear() const {
 // q6 t36: a planet owner's name in the changed-hands line (the faction's Text_ID); [port] no player: "Neutral".
 std::u32string App::owner_label(int32_t player) const {
     std::u32string s = faction_label(player);
+    // [name-ok: display text fallback when the text file lacks TEXT_FACTION_NEUTRAL, not a faction rule]
     if (s.empty()) s = txt("TEXT_FACTION_NEUTRAL", U"Neutral");
     return s;
 }
