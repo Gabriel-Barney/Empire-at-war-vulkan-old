@@ -21,6 +21,7 @@ bool clickable(GuiGadgetType t) {
 constexpr uint32_t kPopupLayer = 12;
 constexpr float kScrollWidth = 12.0f;  // [port] list scroll bar column width (canvas units) when no texture size
 constexpr float kFieldInset = 5.0f;    // [port] QA D8 / D10: left padding of edit and closed combo text (canvas units)
+constexpr float kListTextGap = 3.0f;   // UI.md §3.7.3: listbox rows are cut to the row width less 3 / 1024 of the screen width
 constexpr float kCheckGlyph = 13.0f;   // [port] QA D8: one check box size; the shipped rows are 10 to 23 units tall
 
 }  // namespace
@@ -1560,7 +1561,16 @@ void GuiManager::draw_control(HudDrawList& dl, uint32_t layer, const GuiDialog& 
                     // UI.md §3.7.1: an item colour recolours the item's text (flat), also on a disabled control.
                     const Rgba8* ic = ri < c.item_colors.size() ? &c.item_colors[ri] : nullptr;
                     const Rgba8* tc = ic ? ic : ri < c.item_text_colors.size() && c.item_text_colors[ri].a > 0 ? &c.item_text_colors[ri] : nullptr;
-                    draw_text(dl, layer, d, i, c.items[ri], tr, TextAlign::Left, false, true, !c.enabled && !ic, tc);
+                    // UI.md §3.7.3: a row wider than the box drops trailing characters (no ellipsis, no squeeze) until it
+                    // fits the row less a 3-unit gap; the item keeps its whole text.
+                    std::u32string_view txt = c.items[ri];
+                    const float avail = tr.width() - kListTextGap;
+                    if (fonts_ && avail > 0.0f) {
+                        const HudTextStyle ms = text_style(d, i, !c.enabled && !ic);
+                        if (ms.font >= 0)
+                            while (!txt.empty() && measure_text_block(*fonts_, canvas_, txt, 0.0f, ms).width > avail) txt.remove_suffix(1);
+                    }
+                    draw_text(dl, layer, d, i, txt, tr, TextAlign::Left, false, true, !c.enabled && !ic, tc);
                 }
             }
             if (sb.active) draw_scroll_bar(dl, layer, d, i, sb);
