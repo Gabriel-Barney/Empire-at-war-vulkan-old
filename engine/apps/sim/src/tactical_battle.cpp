@@ -751,6 +751,7 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
     sk_garrison_setup();             // skm1 t07: the skirmish slots' garrison (start-force) lists
     bt_landing_points(mode);     // §3.3: the attacker's map-owned reinforcement points
     ga_spawn_upgrades(mode);     // galab t03 (0x2a1eb0 -> 0x2afc10): planet-bonus upgrade objects, after the start forces
+    bt_sky_domes(mode);          // storyb t16: the post-load start's sky dome objects (the last ids of the setup)
     mode.finish_load(pf);
     space_obstacles_sync(mode);  // refixf t02: the starbase / structures as space static entries (MOVEMENT §2.2)
     land_obstacles_sync(mode, pf);   // S8 t02: LAND_OBSTACLE objects spawned during the setup (MOVEMENT §1.3)

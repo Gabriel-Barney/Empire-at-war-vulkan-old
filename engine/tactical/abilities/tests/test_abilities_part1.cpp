@@ -1000,6 +1000,20 @@ void test_fog_abilities() {
     CHECK(calls.size() == 1 && calls[0] == std::make_pair(int32_t{0}, true));
     CHECK(w.ab->special_applied(1, name_crc("Yoda_Force_Sight")) && w.has_event(AbilityEventKind::EffectOn, 1));
     CHECK(w.ab->countdown_counter(1, kForceSight) == 1500);
+    {
+        // aud1 t10: the EffectOn outlives clear_events (the battle clears inside its tick) as a presentation copy, kept
+        // kVisualKeepFrames frames, numbered for the host's cursor; not hashed.
+        StateHasher before;
+        w.ab->hash(before);
+        const auto act = w.ab->activation_events();
+        CHECK(act.size() == 1 && act[0].id == 1 && act[0].type == kForceSight && act[0].target == kNoObject && act[0].serial == 1 &&
+              act[0].frame == w.frame);
+        w.ab->clear_events();
+        CHECK(w.ab->events().empty() && w.ab->activation_events().size() == 1);
+        StateHasher after;
+        w.ab->hash(after);
+        CHECK(before.digest() == after.digest());
+    }
     for (int i = 0; i < 299; ++i) w.tick();
     CHECK(calls.size() == 1 && w.ab->special_applied(1, name_crc("Yoda_Force_Sight")));
     w.tick();

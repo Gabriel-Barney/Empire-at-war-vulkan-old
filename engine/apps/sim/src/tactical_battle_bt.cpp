@@ -1302,6 +1302,43 @@ void TacticalBattle::bt_company_types(uint32_t company, std::vector<uint32_t>& o
     }
 }
 
+void TacticalBattle::bt_sky_domes(TacticalMode& mode) {
+    // storyb t16 (docs/re/STORYB_T16_SKY_DOME.md [H]; land 0x3bc1c0, space 0x4d98c0, from the post-load start): one object
+    // per non-empty sky dome name (TEE minis 0x19 / 0x1A) of the picked environment that names a type, made with the plain
+    // create in the PRIMARY store (Is_Decoration only matters to the map object reader), owner = the first Is_Neutral
+    // faction's player, facing (roll A, pitch 0, yaw B) from the dome's two angles. Land position: half the terrain box
+    // per axis (x = width x spacing / 2, y = height x spacing / 2, z = (max(0, top) - min(0, bottom)) / 2); space: the
+    // origin. [port] the roll is not kept (the store facing is a direction); not saved separately (a store object).
+    if (env_index_ >= map_.environments.environments.size()) return;
+    const terrain::Environment& env = map_.environments.environments[env_index_];
+    const objects::GameObjectTypes& types = catalog_->types();
+    const int32_t owner = galaxy_->neutral_player();
+    Vec3 pos{0.0f, 0.0f, 0.0f};
+    if (!space_ && map_.terrain.present) {
+        float lo = 0.0f, hi = 0.0f;
+        for (const int16_t h : map_.terrain.heights) {
+            const float z = static_cast<float>(h) * terrain::kHeightScale;
+            lo = std::min(lo, z);
+            hi = std::max(hi, z);
+        }
+        pos = Vec3{std::fabs(static_cast<float>(map_.terrain.width) * terrain::kVertexSpacing) / 2.0f,
+                   std::fabs(static_cast<float>(map_.terrain.height) * terrain::kVertexSpacing) / 2.0f, std::fabs(hi - lo) / 2.0f};
+    }
+    for (int k = 0; k < 2; ++k) {
+        const std::string_view name = ascii_trim(env.skydome[k]);
+        if (name.empty()) continue;
+        const objects::TypeIndex t = types.resolve_name(name);
+        if (t == objects::kNone || t >= types.size()) continue;
+        objects::SpawnParams sp;
+        sp.type = t;
+        sp.owner = owner;
+        sp.position = pos;
+        sp.facing = yaw_facing(env.skydome_angle_deg[k][1]);
+        (void)mode.primary().create(sp);
+        ++map_stats_.sky_domes;
+    }
+}
+
 void TacticalBattle::bt_expand_company(TacticalMode& mode, const terrain::ObjectPlacement& pl, objects::TypeIndex t, int32_t owner,
                                        bool record) {
     // map1 t03 (company expansion 0x2ab060 [H]): the company spawn 0x29e960 creates every member (Company_Units / Squadron_Units

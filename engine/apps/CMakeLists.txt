@@ -219,6 +219,11 @@ if(_alamo_sim)
   target_compile_definitions(alamo_headless PRIVATE ALAMO_HEADLESS_HAVE_SIM=1)
   # --- A2: --economy --galactic-ai (AI-vs-AI galactic campaign, headless/ai_run.cpp) ---
   target_sources(alamo_headless PRIVATE headless/ai_run.cpp headless/port_trace.cpp)
+  if(TARGET alamo_audio)  # storyb t17: --story runs end the human's story speech at the line's length (headless/story_speech.hpp)
+    target_sources(alamo_headless PRIVATE headless/story_speech.cpp)
+    target_link_libraries(alamo_headless PRIVATE alamo_audio)
+    target_compile_definitions(alamo_headless PRIVATE ALAMO_HEADLESS_HAVE_SPEECH=1)
+  endif()
   if(TARGET alamo_ai_galactic)
     target_link_libraries(alamo_headless PRIVATE alamo_ai_galactic)
     target_compile_definitions(alamo_headless PRIVATE ALAMO_HEADLESS_HAVE_GALACTIC_AI=1)
@@ -480,7 +485,9 @@ if(_alamo_sim)
     # seeds 1-5, 7, 8 and 10-12 end (6742-12127, 0 Lua errors); seeds 6 and 9 reach the cap. Seed 6 -> 1.
     # trn1 (2026-11-17, terrain gameplay: SurfaceFX terrain modifiers on infantry, the conform z lift, cover): seeds 1, 4, 5, 7,
     # 8, 10-12 end (7672-14056, 0 Lua errors); seeds 2, 3, 6 and 9 reach the cap with the Rebels holding. Seed 2 -> 4.
-    foreach(_seed 1 4)
+    # storyb t16(c) (2026-11-17, the environment's sky dome objects join the battle's store, so ids shift): seeds 1-3 and 5-12
+    # end (8153-13174); seed 4 reaches the cap with the Empire holding. Seed 4 -> 2.
+    foreach(_seed 1 2)
       add_test(NAME alamo_headless_skirmish_ai_foc_land_campaign_outcome_seed${_seed}
                COMMAND alamo_headless --skirmish-ai foc-land-campaign --seed ${_seed} --ticks 20000 --workers 0 --quiet --expect-battle-end
                        --fail-on-lua-errors)

@@ -82,6 +82,7 @@ int GameAudioHost::shield_transition(int was_up, float fraction) {
 
 void GameAudioHost::object_events_reset() {
     hyperspace_seen_ = 0;
+    activation_seen_ = 0;
     shield_up_.clear();
 }
 
@@ -110,18 +111,12 @@ uint32_t GameAudioHost::hyperspace_arrival(uint64_t object, std::string_view own
     return id;
 }
 
-void GameAudioHost::object_events(const sim::TacticalBattle& battle, const objects::ObjectStore& store,
-                                  const objects::GameObjectTypes& types, std::span<const std::string> player_factions) {
-    if (!game_) return;
-    auto faction_tag = [&](int32_t owner, std::string_view tag) -> std::string_view {
-        if (owner < 0 || static_cast<size_t>(owner) >= player_factions.size() || player_factions[static_cast<size_t>(owner)].empty())
-            return {};
-        const audio::FactionAudio* f = game_data_->find_faction(player_factions[static_cast<size_t>(owner)]);
-        return f ? f->get(tag) : std::string_view{};
-    };
-    // Abilities: EffectOn = the activation presentation (light, particle, sound), event order.
-    for (const tactical::abilities::AbilityEvent& e : battle.abilities().events()) {
-        if (e.kind != tactical::abilities::AbilityEventKind::EffectOn) continue;
+void GameAudioHost::ability_activations(std::span<const tactical::abilities::AbilityActivation> log, const objects::ObjectStore& store,
+                                        const objects::GameObjectTypes& types) {
+    if (!log.empty() && log.back().serial < activation_seen_) activation_seen_ = 0;
+    for (const tactical::abilities::AbilityActivation& e : log) {
+        if (e.serial <= activation_seen_) continue;
+        activation_seen_ = e.serial;
         const objects::ObjectHandle h = store.find(static_cast<objects::ObjectId>(e.id));
         if (!store.alive(h)) continue;
         uint64_t target = 0;
@@ -135,6 +130,19 @@ void GameAudioHost::object_events(const sim::TacticalBattle& battle, const objec
         }
         ability_effect(types, store.type(h), e.type, static_cast<uint64_t>(e.id), store.position(h), target, tp);
     }
+}
+
+void GameAudioHost::object_events(const sim::TacticalBattle& battle, const objects::ObjectStore& store,
+                                  const objects::GameObjectTypes& types, std::span<const std::string> player_factions) {
+    if (!game_) return;
+    auto faction_tag = [&](int32_t owner, std::string_view tag) -> std::string_view {
+        if (owner < 0 || static_cast<size_t>(owner) >= player_factions.size() || player_factions[static_cast<size_t>(owner)].empty())
+            return {};
+        const audio::FactionAudio* f = game_data_->find_faction(player_factions[static_cast<size_t>(owner)]);
+        return f ? f->get(tag) : std::string_view{};
+    };
+    // Abilities: EffectOn = the activation presentation (light, particle, sound), event order (aud1 t10: the kept copy).
+    ability_activations(battle.abilities().activation_events(), store, types);
     // Hyperspace: the battle's append-only log from our cursor (a shorter log = a new battle or a load).
     const std::span<const sim::TacticalBattle::HyperspaceSfx> log = battle.hyperspace_sfx();
     if (log.size() < hyperspace_seen_) hyperspace_seen_ = 0;
@@ -181,6 +189,8 @@ void GameAudioHost::object_events(const sim::TacticalBattle& battle, const objec
 
 void GameAudioHost::ability_effect(const objects::GameObjectTypes&, objects::TypeIndex, uint8_t, uint64_t, const Vec3&, uint64_t,
                                    const Vec3&) {}
+void GameAudioHost::ability_activations(std::span<const tactical::abilities::AbilityActivation>, const objects::ObjectStore&,
+                                        const objects::GameObjectTypes&) {}
 void GameAudioHost::object_events(const sim::TacticalBattle&, const objects::ObjectStore&, const objects::GameObjectTypes&,
                                   std::span<const std::string>) {}
 uint32_t GameAudioHost::hyperspace_arrival(uint64_t, std::string_view, const Vec3&) { return 0; }

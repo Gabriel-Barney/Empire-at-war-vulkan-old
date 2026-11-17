@@ -231,7 +231,8 @@ struct MapLoadStats {
     uint32_t marker_names = 0;      // map1 t04: placements with a non-empty 0x46E marker name
     uint32_t hints_skipped = 0;
     uint32_t decorations = 0;
-    uint32_t neutral_teams = 0;  // storyb t16: TEAM containers of inert (Is_Neutral) map companies  // storyb t16: Is_Decoration map objects (objects::kFlagMapDecoration)     // q6 t32: 0x482 hints on objects without HINT (retail reads none)
+    uint32_t neutral_teams = 0;
+    uint32_t sky_domes = 0;  // storyb t16: environment sky dome objects (STORYB_T16_SKY_DOME)  // storyb t16: TEAM containers of inert (Is_Neutral) map companies  // storyb t16: Is_Decoration map objects (objects::kFlagMapDecoration)     // q6 t32: 0x482 hints on objects without HINT (retail reads none)
     uint32_t remembered_markers = 0;  // map1 t06: structures placed on their remembered marker (pass 1)
     uint32_t escorts = 0;           // map1 t07: Space_Escort_Unit_Types participants added
     bool starbase_picked = false;   // map1 t07: the starbase type came from the DUMMY_STAR_BASE pick (0x407b60)
@@ -2505,6 +2506,7 @@ private:
     void hg_add_types();                         // setup(): spawn lists, members, team types, Next_Level_Base -> tables
     void ga_add_types();                         // galab: the planet-bonus upgrade types (set_galactic_upgrades) -> tables
     void ga_spawn_upgrades(TacticalMode& mode);  // galab: after the start forces (0x2afc10 per battle player)
+    void bt_sky_domes(TacticalMode& mode);       // storyb t16 (STORYB_T16_SKY_DOME): the environment's sky dome objects
     void hg_setup(TacticalMode& mode);           // setup(): HangarSystem (after combat / abilities)
     void hg_ability_host(tactical::abilities::AbilityHost& h);  // oi_install(): DEPLOY_SQUAD hooks
     int32_t hg_tech(int32_t player) const;
