@@ -1336,7 +1336,11 @@ void test_t20_states() {
             if (which == 1 && c.kind == CollisionKind::StoppedVsStopped && c.a == 20 && c.state == CollisionState::Resolving &&
                 w.sys.view(21).pushed && w.sys.view(21).push_kind == 3)
                 return true;
-            if (which == 2 && c.kind == CollisionKind::StoppedVsStopped && c.a == 30 && c.state == CollisionState::TryAgainLater) return true;
+            // mov1 t07 (BKR2 Q4 [H]): the failed record is kept and cycles 4 -> 0 -> 4 (state 0 between a retry and its
+            // resolution, which mov1 t08's tick order shows after the tick)
+            if (which == 2 && c.kind == CollisionKind::StoppedVsStopped && c.a == 30 &&
+                (c.state == CollisionState::TryAgainLater || c.state == CollisionState::Active))
+                return true;
         }
         return false;
     };

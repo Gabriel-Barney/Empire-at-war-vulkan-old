@@ -1649,6 +1649,10 @@ static void test_collision_system() {
         s.add_unit(land_unit(2, {405.0f, 400.0f}, 7, 1.0f, 40.0f, kUccVehicle));
         SimRng rng(1);
         s.tick(0, rng);
+        // mov1 t08 (BKR1 Q1 / Q6 [H]): detection runs at the end of the driver, so the record waits in state 0 for the next
+        // tick's driver
+        CHECK(s.collisions().list().size() == 1 && s.collisions().list()[0].state == CollisionState::Active);
+        s.tick(1, rng);
         CHECK(s.collisions().list().size() == 1);
         if (s.collisions().list().size() == 1) {
             const CollisionObject& c = s.collisions().list()[0];
@@ -1670,7 +1674,7 @@ static void test_collision_system() {
         CHECK(std::fabs(ring - 84.8f) < 1e-3f);
         const std::span<const V2> top = s.top_path(2);
         CHECK(top.size() >= 2 && std::fabs(top.back().x - (405.0f + ring)) < 1e-2f && std::fabs(top.back().y - 400.0f) < 1e-3f);
-        uint32_t f = 1;
+        uint32_t f = 2;
         for (; f < 300 && !s.collisions().list().empty(); ++f) s.tick(f, rng);
         CHECK(s.collisions().list().empty() && s.stats().collisions_created == 1 && s.stats().collisions_resolved == 1 &&
               s.stats().collisions_cancelled == 0);
@@ -1994,9 +1998,14 @@ static void test_land_group() {
     s4.move(d, rng, 0);
     // (s78n t20: the blocker comes after the order - the destination check 0x439360 of the order would move the goal off
     // a unit that already stands there)
-    s4.add_unit(land_unit(2, cell_center(30, 30), 7, 1.5f, 18.0f, kUccVehicle));
+    // // mov1 t04 (BKR1 Q5 [H]): a destination counts as blocked only once the mover's approximation byte +0x28c (rebuilt
+    // every 8 frames) says its path ends within L = max(60, 60 x max speed), so the blocker comes inside that range
     bool g4ok = true;
-    run_land(s4, 0, 2000, rng, serial_for, g4ok);
+    for (uint32_t f = 0; f < 2000 && !s4.view(1).arrived; ++f) {
+        if (s4.view(2).id != 2 && distance(s4.view(1).pos, cell_center(30, 30)) < 75.0f)
+            CHECK(s4.add_unit(land_unit(2, cell_center(30, 30), 7, 1.5f, 18.0f, kUccVehicle)));
+        s4.tick(f, rng, serial_for);
+    }
     // s78n t18 review: the bound the comment derives - the first clear point is 41 .. 46 before the standing unit (steps of
     // 5 from the path end), the cut takes 3 more, and the walker stops on the cut path's end: 44 .. 49
     const float d4 = distance(s4.view(1).pos, cell_center(30, 30));
