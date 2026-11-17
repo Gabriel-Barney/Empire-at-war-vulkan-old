@@ -86,6 +86,15 @@ void test_cpu() {
     const render::Instance in = ui::selection_blob_instance(dummy, b);
     CHECK(in.model == &dummy && near(in.transform.m[0][0], 25) && near(in.transform.m[1][3], 20) &&
           near(in.transform.m[2][3], 30 + ui::kSpaceBlobLift));
+    {  // vis1 t03: land circles lie on the ground's local slope (z = 0.1 x + 0.2 y + 5): footprint kept, axes sheared
+        const std::function<float(float, float)> ground = [](float x, float y) { return 0.1f * x + 0.2f * y + 5.0f; };
+        const render::Instance g = ui::selection_blob_ground_instance(dummy, b, ground);
+        CHECK(near(g.transform.m[0][0], 25) && near(g.transform.m[1][1], 25) && near(g.transform.m[2][0], 0.1f * 25) &&
+              near(g.transform.m[2][1], 0.2f * 25) && near(g.transform.m[2][3], 1.0f + 4.0f + 5.0f + ui::kSpaceBlobLift) &&
+              near(g.transform.m[0][3], 10) && near(g.transform.m[1][3], 20));
+        const render::Instance flat = ui::selection_blob_ground_instance(dummy, b, nullptr);
+        CHECK(near(flat.transform.m[2][3], 30 + ui::kSpaceBlobLift) && near(flat.transform.m[2][0], 0));
+    }
 
 #ifdef ALAMO_UI_HAVE_OBJECTS
     // Snapshot bridge: dying / faded objects skipped, selection by binary search, groups, hover, team colour.

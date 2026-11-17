@@ -495,26 +495,20 @@ bool BattleView::start(GpuCore& gpu, const GameData& data, const GameSession& se
         if (n) camera_.set_look_at({static_cast<float>(sx / n), static_cast<float>(sy / n), 0.0f});
         else camera_.set_look_at({0.5f * (bb.min.x + bb.max.x), 0.5f * (bb.min.y + bb.max.y), 0.0f});
     }
-    // Selection circle: one blob model from the selection material ([port] the first Selection* material of
-    // ShadowBlobMaterials.xml / the built-in list; per-faction materials not distinguished yet). Land uses the same flat
-    // instances at the unit's ground height: the terrain shadow-blob path drew the selection material's grid patches
-    // with the decal shader (dark patch borders between neighbouring units).
+    // Selection circles (vis1 t03, UI.md 1.3): the ShadowBlobMaterials table; each blob's model is uploaded on first use
+    // (selection_model). Fallback for an unknown / empty name: the first Selection* material, else entry 0.
     {
-        std::vector<terrain::ShadowBlobMaterial> mats = terrain::builtin_blob_materials();
+        blob_mats_ = terrain::builtin_blob_materials();
         std::vector<uint8_t> xml;
-        if (data.files->read("Data\\XML\\ShadowBlobMaterials.xml", xml)) terrain::parse_shadow_blob_materials(xml, mats);
-        jam_models_.set_materials(mats);  // R5 sensor jamming blobs use the same ShadowBlobMaterials table
-        const terrain::ShadowBlobMaterial* m = mats.empty() ? nullptr : &mats.front();
-        for (const terrain::ShadowBlobMaterial& x : mats)
-            if (x.name.find("Selection") != std::string::npos || x.name.find("selection") != std::string::npos) {
-                m = &x;
+        if (data.files->read("Data\\XML\\ShadowBlobMaterials.xml", xml)) terrain::parse_shadow_blob_materials(xml, blob_mats_);
+        jam_models_.set_materials(blob_mats_);  // R5 sensor jamming blobs use the same ShadowBlobMaterials table
+        blob_fallback_ = blob_mats_.empty() ? UINT32_MAX : 0u;
+        for (size_t i = 0; i < blob_mats_.size(); ++i)
+            if (blob_mats_[i].name.find("Selection") != std::string::npos || blob_mats_[i].name.find("selection") != std::string::npos) {
+                blob_fallback_ = static_cast<uint32_t>(i);
                 break;
             }
-        if (m) {
-            const render::TextureSource blob_tex = [&gpu](std::string_view n, assets::TextureRole role) { return gpu.cache->texture(n, role); };
-            std::string e2;
-            blob_ok_ = gpu.renderer.upload_model(ui::selection_blob_model(*m), blob_tex, blob_model_, nullptr, &e2);
-        }
+        sel_models_.clear();
     }
     (void)width;
     (void)height;
@@ -601,8 +595,9 @@ void BattleView::stop(GpuCore& gpu) {
     beams_on_ = false;
     beam_bone_ = nullptr;
     beam_styles_ = render::BeamStyleTable{};
-    if (blob_ok_) gpu.renderer.destroy_model(blob_model_);
-    blob_ok_ = false;
+    for (const std::unique_ptr<SelectionModel>& m : sel_models_)
+        if (m->ok) gpu.renderer.destroy_model(m->model);
+    sel_models_.clear();
     blobs_.clear();
     if (scene_) scene_->stop(gpu.renderer);
     gpu.renderer.set_world(nullptr);
@@ -781,12 +776,18 @@ void BattleView::prepare(GpuCore& gpu, float alpha) {
         }
 #endif
     }
-    // Selection circles (P2): flat blob instances (land: at the unit's ground height).
-    if (scene_ && blob_ok_) {
-        gpu.renderer.make_resident(blob_model_);
-        for (ui::SelectionBlob b : blobs_) {
-            if (!space_) b.center.z = scene_->map().terrain.sample_height(b.center.x, b.center.y);
-            main.push_back(ui::selection_blob_instance(blob_model_, b));
+    // Selection circles (P2; vis1 t03): the blob's own material; land: laid on the terrain under the unit.
+    if (scene_ && !blobs_.empty()) {
+        std::function<float(float, float)> ground;
+        if (!space_) {
+            const terrain::MapData* map = &scene_->map();
+            ground = [map](float x, float y) { return map->terrain.sample_height(x, y); };
+        }
+        for (const ui::SelectionBlob& b : blobs_) {
+            const render::GpuModel* m = selection_model(gpu, b.material);
+            if (!m) continue;
+            gpu.renderer.make_resident(*m);
+            main.push_back(ground ? ui::selection_blob_ground_instance(*m, b, ground) : ui::selection_blob_instance(*m, b));
         }
     }
     // R5 sensor jamming (ABILITY_VISUALS 3): radius blobs of the allied jammers (jam_fx.hpp), flat at the jammer's height
@@ -834,6 +835,28 @@ void BattleView::apply_environment() {
 #ifdef ALAMO_PARTICLES_HAVE_SIM
     if (prender_.initialized()) prender_.set_wind(scene_->scene_wind());
 #endif
+}
+
+// vis1 t03: the uploaded model of a selection material by name (case-insensitive; unknown / empty: the fallback). Null when
+// there is no material or its upload failed.
+const render::GpuModel* BattleView::selection_model(GpuCore& gpu, const std::string& material) {
+    uint32_t idx = blob_fallback_;
+    if (!material.empty())
+        for (size_t i = 0; i < blob_mats_.size(); ++i)
+            if (ascii_iequals(blob_mats_[i].name, material)) {
+                idx = static_cast<uint32_t>(i);
+                break;
+            }
+    if (idx >= blob_mats_.size()) return nullptr;
+    for (const std::unique_ptr<SelectionModel>& m : sel_models_)
+        if (m->material == idx) return m->ok ? &m->model : nullptr;
+    auto m = std::make_unique<SelectionModel>();
+    m->material = idx;
+    const render::TextureSource blob_tex = [&gpu](std::string_view n, assets::TextureRole role) { return gpu.cache->texture(n, role); };
+    std::string e2;
+    m->ok = gpu.renderer.upload_model(ui::selection_blob_model(blob_mats_[idx]), blob_tex, m->model, nullptr, &e2);
+    sel_models_.push_back(std::move(m));
+    return sel_models_.back()->ok ? &sel_models_.back()->model : nullptr;
 }
 
 // vis1 t01 (WEATHER_VISUALS §1): the running scenario's emitter_name as one particle system at the origin (its emitters

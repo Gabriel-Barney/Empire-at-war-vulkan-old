@@ -210,8 +210,9 @@ public:
     bool space() const { return space_; }
     const BattleViewStats& stats() const { return stats_; }
     float clear_color(int i) const;
-    // P2 selection circles of this frame (TacticalHud::selection_blobs): flat blob instances in the main list (land: at
-    // the terrain height under the unit). Set before prepare().
+    // P2 selection circles of this frame (TacticalHud::selection_blobs): blob instances in the main list, one model per
+    // ShadowBlobMaterials entry (vis1 t03: the blob's own material, UI.md 1.3; unknown / empty: the first Selection*
+    // material); land: on the terrain under the unit (ui::selection_blob_ground_instance). Set before prepare().
     void set_selection_blobs(std::span<const ui::SelectionBlob> blobs) { blobs_.assign(blobs.begin(), blobs.end()); }
     // cu9g t03: the bombing-run targeting blob of this frame (HUD_GAPS §9.5; nullopt = none). Set before prepare().
     void set_bombing_blob(const std::optional<render::JamBlob>& blob) { bombing_blob_ = blob; }
@@ -297,8 +298,17 @@ private:
     };
     std::vector<MoveAckFx> acks_;
     std::vector<ui::SelectionBlob> blobs_;
-    render::GpuModel blob_model_;
-    bool blob_ok_ = false;
+    // vis1 t03: selection blob models, uploaded on first use per material (index into blob_mats_; ok = false: the upload
+    // failed, not retried).
+    struct SelectionModel {
+        uint32_t material = 0;
+        render::GpuModel model;
+        bool ok = false;
+    };
+    std::vector<terrain::ShadowBlobMaterial> blob_mats_;
+    uint32_t blob_fallback_ = UINT32_MAX;  // the first Selection* material (UINT32_MAX: none)
+    std::vector<std::unique_ptr<SelectionModel>> sel_models_;
+    const render::GpuModel* selection_model(GpuCore& gpu, const std::string& material);
     std::optional<render::JamBlob> bombing_blob_;  // cu9g t03: the land bombing-run targeting blob (drawn through jam_models_)
     render::JamBlobModels jam_models_;  // R5 sensor jamming radius blobs (one model per material + colour)
     render::BeamStyleTable beam_styles_;  // R5 ability beams: per-special styles over the GameConstants fallbacks (ABILITY_VISUALS 4.2)
