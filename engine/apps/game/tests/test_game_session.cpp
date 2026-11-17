@@ -2081,6 +2081,14 @@ void hud_feeds_test(const game::GameData& data, const game::SessionSpec& spec) {
             };
             CHECK(unit_pad(0) == 43 && unit_pad(1) == 41 && unit_pad(2) == 42);
             CHECK(sends.size() == 2 && sends[0].object == 43 && sends[0].marker == 4 && sends[1].object == 42 && sends[1].marker == 100);
+            // Rule 5 moved the In-base structure 903 onto the Out pad (marker 1): it stays there, nothing is sent.
+            std::vector<game::PlanetMapPad> p3 = game::planet_map_pads(m);
+            std::vector<game::PlanetMapStructure> st3 = st;
+            st3[3].marker = 1;
+            sends.clear();
+            game::place_map_structures(p3, st3, {}, &sends);
+            CHECK(pad(G::Build, 5) && p3[5].marker == 1 && p3[5].object == 903);
+            for (const game::MapMarkerSend& e : sends) CHECK(e.object != 903);
         }
         // §5: stacks per type, type-index order [port], representative = the first unit of the type.
         const game::MapOrbitUnit ou[] = {{1, 10, 9}, {2, 10, 4}, {3, 11, 9}};

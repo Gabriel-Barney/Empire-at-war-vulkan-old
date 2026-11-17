@@ -331,16 +331,20 @@ void App::planet_map_feed(ui::GalacticPlanetMap& m) {
         }
     game::place_map_units(pads, units, unit_types, unit_markers, &sends);
     // [port] each change once: the feed runs every frame and the command lands a tick later (retail sends on each rebuild).
-    // An entry the sim has applied is dropped, so a later change back is sent again.
+    // An entry is dropped as soon as the object's marker in the sim changes at all (this send applied, or another one such as
+    // a pad drop), so a later change back is sent again.
+    auto sim_marker = [g](uint32_t object) {
+        const galactic::GalacticSim::StructureSlot* sl = g->structure_slot(static_cast<objects::ObjectId>(object));
+        return sl ? sl->marker : -1;
+    };
     for (auto it = map_marker_sent_.begin(); it != map_marker_sent_.end();) {
-        const galactic::GalacticSim::StructureSlot* sl = g->structure_slot(static_cast<objects::ObjectId>(it->first));
-        if ((sl ? sl->marker : -1) == it->second) it = map_marker_sent_.erase(it);
+        if (sim_marker(it->first) != it->second.before) it = map_marker_sent_.erase(it);
         else ++it;
     }
     for (const game::MapMarkerSend& e : sends) {
-        auto [it, fresh] = map_marker_sent_.try_emplace(e.object, e.marker);
-        if (!fresh && it->second == e.marker) continue;
-        it->second = e.marker;
+        const auto it = map_marker_sent_.find(e.object);
+        if (it != map_marker_sent_.end() && it->second.sent == e.marker) continue;
+        map_marker_sent_[e.object] = {e.marker, sim_marker(e.object)};
         submit(commands::ev::set_marker_id(e.object, e.marker), false);
     }
     for (const game::PlanetMapPad& p : pads) {

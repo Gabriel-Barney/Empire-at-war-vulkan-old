@@ -359,13 +359,13 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         fleets_[nf].carried = std::move(carried);
         // ui4 t13: a launch from the surface is retail's op 4 (launch: the reveal, REMAINING_GAPS 6.1) then op 0 (a new
         // fleet: the space conflict in a hostile orbit), as kFleetLaunch runs them (GALACTIC_PLANET_MAP §6.2 rules 2 / 4).
+        // [port] the conflict only for a fleet that stays: one moving on leaves the orbit (a lone ground unit is no attacker).
         if (launched) launch_reveal(p, unit);
         if (dest == p) {
             slot_new_fleet(nf);
             if (launched) new_fleet_conflict(p);
             return RejectReason::None;
         }
-        if (launched) new_fleet_conflict(p);
         if (want_slot < static_cast<uint32_t>(kOrbitSlots)) {  // the slot it takes on arrival at `dest`
             fleets_[nf].want_planet = dest;
             fleets_[nf].want_slot = static_cast<int8_t>(want_slot);

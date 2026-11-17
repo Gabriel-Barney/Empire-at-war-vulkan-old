@@ -112,11 +112,13 @@ void place_map_structures(std::vector<PlanetMapPad>& pads, std::span<const Plane
         p.type = s.type;
         if (sends && s.marker != p.marker) sends->push_back({s.object, p.marker});
     };
-    for (size_t i = 0; i < structures.size(); ++i) {  // a remembered marker first
+    // A remembered marker first, on any In / Out pad: rule 5 (§6.2) moves structures between tag-1 pads of either group, so
+    // [port] (pass order [M]) a structure moved to the other group stays there rather than jumping back on the next rebuild.
+    for (size_t i = 0; i < structures.size(); ++i) {
         const PlanetMapStructure& s = structures[i];
         if (placed[i] || s.marker < 0 || (s.base != 1 && s.base != 2)) continue;
         for (PlanetMapPad& p : pads)
-            if (in_group(p, s.base) && empty_pad(p) && p.marker == s.marker) {
+            if ((in_group(p, 1) || in_group(p, 2)) && empty_pad(p) && p.marker == s.marker) {
                 put_object(p, s);
                 placed[i] = 1;
                 break;
