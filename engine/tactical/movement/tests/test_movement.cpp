@@ -805,10 +805,6 @@ static void test_double_click() {
     const auto f = split_into_formations(m, b, k, {}, k.double_click_move_max_speed_ratio);
     // {0, 1, 4}; then 2 seeds (nearest the centroid) and rejects 3 (2.6 / 1.5 > 1.25).
     CHECK(f.size() == 3 && (f[0] == std::vector<uint32_t>{0, 1, 4}) && (f[1] == std::vector<uint32_t>{2}));
-    // Ordering of LargeHover formations.
-    const std::vector<FormationKey> keys{{1.0f, {0.0f, 100.0f}}, {3.0f, {0.0f, 0.0f}}, {2.0f, {0.0f, 50.0f}}};
-    CHECK((large_hover_formation_order(keys, {0.0f, 1.0f}, false) == std::vector<uint32_t>{0, 2, 1}));
-    CHECK((large_hover_formation_order(keys, {0.0f, 1.0f}, true) == std::vector<uint32_t>{1, 2, 0}));
 
     // System: 3 fast (speeder-like, 3.0) + 3 slow (walker-like, 1.0) vehicles side by side on an open grid.
     const auto run = [](uint8_t flags, int32_t cls, std::vector<UnitView>& out) {
@@ -841,21 +837,20 @@ static void test_double_click() {
     for (const UnitView& v : plain) one = one && v.formation_speed == slow;  // one formation at the slowest speed
     for (const UnitView& v : dbl) bands = bands && v.formation_speed == v.max_speed;  // fast and slow bands
     CHECK(one && bands);
-    // LargeHover: without 0x80 one formation (index 0); with 0x80 the fast band gets index 0.
-    run(kMoveFlagPlayerOrder, static_cast<int32_t>(MovementClass::LargeHover), plain);
-    run(kMoveFlagPlayerOrder | kMoveFlagDoubleClick, static_cast<int32_t>(MovementClass::LargeHover), dbl);
-    bool idx_plain = true, idx_dbl = true;
-    float fast_h = 0.0f;
-    for (const UnitView& v : dbl) fast_h = std::max(fast_h, v.max_speed);
-    for (const UnitView& v : plain) idx_plain = idx_plain && v.large_hover_index == 0;
-    for (const UnitView& v : dbl) idx_dbl = idx_dbl && v.large_hover_index == (v.max_speed == fast_h ? 0 : 1);
-    CHECK(idx_plain && idx_dbl);
-    // Formations of other movement classes get no LargeHover index.
-    std::vector<UnitView> none;
-    run(kMoveFlagPlayerOrder | kMoveFlagDoubleClick, 0, none);
-    bool no_hover = true;
-    for (const UnitView& v : none) no_hover = no_hover && v.large_hover_index == -1;
-    CHECK(no_hover);
+    // mov1 t05 (BKR1_RE_ANSWERS Q3 [H]): the destination check 0x439360 ranks every Land-layer formation (+0x22c ->
+    // FormationClass +0x23c), whatever its movement class: without 0x80 one formation (rank 0); with 0x80 the fast band
+    // gets rank 0 (0x43b420, fastest first). Every unit of the order shares one coordinator (0x426140).
+    for (const int32_t cls : {static_cast<int32_t>(MovementClass::LargeHover), 0}) {
+        run(kMoveFlagPlayerOrder, cls, plain);
+        run(kMoveFlagPlayerOrder | kMoveFlagDoubleClick, cls, dbl);
+        bool idx_plain = true, idx_dbl = true, coord = plain[0].coord_id != 0;
+        float fast_h = 0.0f;
+        for (const UnitView& v : dbl) fast_h = std::max(fast_h, v.max_speed);
+        for (const UnitView& v : plain) idx_plain = idx_plain && v.form_rank == 0;
+        for (const UnitView& v : dbl) idx_dbl = idx_dbl && v.form_rank == (v.max_speed == fast_h ? 0 : 1);
+        for (const UnitView& v : dbl) coord = coord && v.coord_id == dbl[0].coord_id;
+        CHECK(idx_plain && idx_dbl && coord);
+    }
 }
 
 // ---------------------------------------------------------------- 7c. recruitment across classes (s78n t26 review round 2)

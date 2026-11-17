@@ -155,6 +155,17 @@ CellBox around_window(V2 start, V2 goal, uint32_t bound, bool giant, int32_t gri
 // either way.
 bool around_search(const PassabilityGrid& grid, const MovementConstants& k, const AroundRequest& q, AroundResult& out);
 
+// mov1 t03 (b0180, BKR1_RE_ANSWERS Q4 [H]): the terrain-corner cells of the feasibility step 0x677e40 over a window of
+// bw x bh cells, row-major local indices. open[i]: the cell passes the class mask (0x67cd80); reach[i]: it is in the
+// 4-neighbour flood fill from the start cell. Steps: (3) the blocked-neighbour mask M of every window cell (bit k =
+// neighbour k outside the window or not open; bits 0 (-1,-1), 1 (0,-1), 2 (+1,-1), 3 (-1,0), 4 (+1,0), 5 (-1,+1),
+// 6 (0,+1), 7 (+1,+1)); (4) the candidates C = 0x67ce80(M) - convex (one diagonal blocked, its two orthogonals free) or
+// concave (two perpendicular orthogonals blocked) - on every window cell; (5) pass 1, row-major, in place: an unreached
+// cell is dropped, and a reached one matching a staircase step (an inner L whose two open-side neighbours are candidates,
+// read live) too; (6) pass 2: a lone convex corner (M exactly one diagonal) against a one-cell-thick diagonal wall is
+// dropped. The rest are the vertices (type 4, at the cell centre), in this order.
+std::vector<uint32_t> terrain_corners(int32_t bw, int32_t bh, std::span<const uint8_t> open, std::span<const uint8_t> reach);
+
 // Test accessor for the edge rules of around_search (0x678e80 / 0x67a3d0, MOVEMENT §1.5.1 item 4a): a graph vertex is
 // corner `corner` ((+a +b), (+a -b), (-a -b), (-a +b)) of q.obstacles[obs], or with obs -1 the point p (the start, the
 // goal or a terrain corner). Every obstacle of q counts as in the window. 1 no edge, 2 an edge at x 1, 3 a crossing edge

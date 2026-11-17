@@ -76,7 +76,8 @@ bool MovementSystem::swap_locomotor(Unit& u, bool secondary) {
         u.in_formation = false;
         u.jiggle = V2{};
         u.formation_speed = 3.0e38f;  // alone
-        u.large_hover_index = -1;
+        u.form_rank = 0;  // mov1 t05: it leaves its coordinator
+        u.coord_id = 0;
         end_push(u);  // a1k t03 [port]
         if (u.has_goal) {
             u.need_path = true;

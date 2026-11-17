@@ -104,6 +104,7 @@ void MovementSystem::push_top(Unit& u, std::vector<V2> path, uint8_t kind, bool 
     u.push_next = 1;
     u.around.clear();
     u.path_change = frame;  // s78n t18: pack +0x288 (a path record is pushed on its stack)
+    u.approx_countdown = 0;  // mov1 t04: a path push zeroes pack +0x275 (the next detection pass rebuilds)
     // s78n t23 (MOVEMENT §5.4.1 "The stamp in full" item 1): the push stamps the unit's held records (0x50a020). The
     // record that pushes is never stamped by its own detour - by the role test, the detour lands on its detourer.
     stamp_held(u, frame);
@@ -410,26 +411,37 @@ void MovementSystem::terrain_service(CollisionObject& c, bool full, uint32_t fra
     c.state = S::Resolved;
 }
 
-// Destination blocked 0x684710(a, b): a's path approximation reaches the end of its path stack and a's rectangle placed
-// at the path end overlaps b's or that of a layer object standing within the 160 x 160 box around the end. [port] "the
-// approximation reaches the path end" = near_path_end: the path end is no farther from the mover (straight line) than
-// the contact test's look-ahead distance + the two footprint radii, so a contact with a unit on the destination is
-// decided as blocked from its first frame (the port keeps no approximation; its cell paths have many short legs, so "on
-// the last waypoint" would be too narrow).
-bool MovementSystem::near_path_end(const Unit& a, const Unit& b) const {
-    std::vector<V2> scratch;
-    const StackPoly sp = stack_poly(a, scratch);  // s78n t20: the end of the path stack
-    return sp.next < sp.pts.size() &&
-           distance(a.m.pos, sp.pts.back()) <= mvs_look_distance(a, b) + foot_radius(a) + foot_radius(b);
+// mov1 t04 (b0181, BKR1_RE_ANSWERS Q5 [H]): pack +0x28c, written only by the position approximation 0x505fe0. Nothing
+// is written while the locomotor is not moving or its speed is 0, nor with a missing or unstarted top record. Otherwise
+// the walk is simulated along the top record from its current waypoint, then the record directly below it; +0x28c :=
+// it ran out of path before the travelled distance reached L = max(MinLandPredictionDistance 60, 30 x max(the type's
+// MovementPredictionInterval, LandPredictionTimeInterval 2.0) x max speed). [port] [M] the travelled distance is the
+// remaining path length of the stack (unit -> top record -> the order path below; the port's stack has no third
+// record), i.e. the simulated walk without its turn arcs; the rebuild runs on detection's countdown (detect_collisions),
+// not at 0x50aad0's trim or the push search 0x441750.
+void MovementSystem::refresh_near_end(Unit& u) const {
+    if (!unit_moving(u) || !(u.m.speed > 0.0f)) return;
+    const bool started = u.pushed || (u.d.team_container ? u.path_started : u.m.started);
+    if (!started) return;
+    std::vector<V2> pts;
+    stack_points(u, pts);
+    if (pts.size() < 2) return;  // no path record on the stack
+    const MovementConstants& k = cfg_.constants;
+    const float t = std::max(u.d.movement_prediction_interval, k.land_prediction_time_interval);
+    const float look = std::max(k.min_land_prediction_distance, 30.0f * t * walk_max_speed(u));
+    u.near_end = path_length(pts) < look;
 }
 
+// Destination blocked 0x684710(a, b): a's path approximation reaches the end of its path stack (mov1 t04: pack +0x28c)
+// and a's rectangle placed at the path end overlaps b's or that of a layer object standing within the 160 x 160 box
+// around the end.
 bool MovementSystem::destination_blocked(const Unit& a, const Unit& b) const {
     // s78n t20 batch 1: E = the end of the path stack (a collision-owned top record included), at or beyond the top
     // record's current waypoint line: n . (E - W) >= -0.1 (W = its current waypoint, n = the bisector of its two segments;
     // the last waypoint: its segment's direction)
     std::vector<V2> scratch;
     const StackPoly sp = stack_poly(a, scratch);
-    if (sp.next >= sp.pts.size() || !near_path_end(a, b)) return false;
+    if (sp.next >= sp.pts.size() || !near_path_end(a)) return false;
     const V2 e = sp.pts.back();
     const std::vector<V2>& top = a.pushed ? a.push_path : a.m.path;
     const uint32_t ti = a.pushed ? a.push_next : a.m.next;
@@ -683,7 +695,7 @@ FootRect MovementSystem::unit_swept_box(const Unit& o, const Unit& u, uint8_t re
             const V2 rel_v = dir_from_deg(o.m.yaw) * vo - dir_from_deg(u.m.yaw) * vu;
             const float closing = dot(rel_v, normalize_retail(to_u));
             stack_points(o, poly);
-            if ((rel == kRelSameWay || rel == kRelSameWaySlower) && near_path_end(o, u)) {
+            if ((rel == kRelSameWay || rel == kRelSameWaySlower) && near_path_end(o)) {
                 in.sweep = path_length(poly);
             } else if (vo > 0.0f && vu > 0.0f && closing > 0.0f) {
                 const float frames = std::min(std::max(0.0f, (length(to_u) - foot_radius(u) - foot_radius(o)) / closing),
@@ -731,7 +743,7 @@ void MovementSystem::around_obstacles(const Unit& u, const Unit* forced, uint8_t
                     if (open_only && !shares_open_record(u, o)) continue;
                 }
             } else if (rel == kRelSameWay) {
-                if (!(near_path_end(o, u) && !(dot(o.m.pos - u.m.pos, fu) < 0.0f) && shares_open_record(u, o))) continue;
+                if (!(near_path_end(o) && !(dot(o.m.pos - u.m.pos, fu) < 0.0f) && shares_open_record(u, o))) continue;
             }
         }
         AroundObstacle ob;
@@ -781,7 +793,7 @@ bool MovementSystem::goal_obstacle(const Unit& u, const Unit& o, const Unit* for
     if (forced && o.d.id == forced->d.id) return true;
     if (master_list_partner(u, o)) return true;
     if (unit_relation(o, u) != kRelSameWay) return true;
-    return near_path_end(o, u) && !(dot(o.m.pos - u.m.pos, dir_from_deg(u.m.yaw)) < 0.0f) && shares_open_record(u, o);
+    return near_path_end(o) && !(dot(o.m.pos - u.m.pos, dir_from_deg(u.m.yaw)) < 0.0f) && shares_open_record(u, o);
 }
 
 // 0x679aa0: the candidate is taken at the nearest passable point Q of the unit's region within LandDestinationProximity
@@ -914,8 +926,8 @@ bool MovementSystem::spare_point(const Unit& a, const Unit& b, V2& v) const {
 // Path Around 0x5c80e0 (MOVEMENT §1.5.1). The detour goes on top of the unit's path stack; the ordered path stays
 // underneath, untouched, and resumes at the first waypoint line not yet crossed when the detour ends (pop_top). The
 // complexity (the vertex count of every A* pass) goes to the quota counter. [port] not modelled: the escape vertices of
-// a start inside a same-way obstacle, the formation-path refusal 0x41cf40, concave terrain corners and the corner
-// pruning masks. s78n t24: kind 3 (TerrainCollision, no obstacle) adds 40.0 to D and skips the last-point drop.
+// a start inside a same-way obstacle and the formation-path refusal 0x41cf40 (mov1 t03: the terrain corners are 0x677e40's
+// with the concave candidates and the pruning masks, terrain_corners). s78n t24: kind 3 (TerrainCollision, no obstacle) adds 40.0 to D and skips the last-point drop.
 // ("Crosses an obstacle" = the segment meets its tracker rectangle, touching counts: §1.5.1 item 4a, path_around.cpp.)
 bool MovementSystem::path_around(const CollisionObject& c, Unit& u, const Unit* o, bool flag, uint8_t kind, uint8_t flags,
                                  uint32_t frame) {
@@ -1383,24 +1395,16 @@ MovementSystem::MvmChoice MovementSystem::mvm_choose(const CollisionObject& c, c
             r.state = S::PathAround;
             r.mode = 2;
             r.swap_ok = !c0 && !c1;
-            // M = the higher class; equal class, both in formations: the larger formation (member count), equal -> p0
-            // unless formation 0's first member id is lower (then p1); else the lower max speed (tie p0)
+            // M = the higher class; equal class, both in formations: the larger formation by 0x41a5c0's half extent
+            // (form_extent), equal -> p1 when the id of formation 0's member-vector index 0 is lower than formation 1's,
+            // else p0 (mov1 t02, b0179, BKR1_RE_ANSWERS Q3 [H]); else the lower max speed (tie p0)
             if (k0 != k1) {
                 r.master = k0 > k1 ? uint8_t{0} : uint8_t{1};
             } else if (p0.form_id != 0 && p1.form_id != 0) {
-                uint32_t n0 = 0, n1 = 0;
-                ObjectId l0 = std::numeric_limits<ObjectId>::max(), l1 = std::numeric_limits<ObjectId>::max();
-                for (const Unit& x : units_) {
-                    if (x.form_id == p0.form_id) {
-                        ++n0;
-                        l0 = std::min(l0, x.d.id);
-                    } else if (x.form_id == p1.form_id) {
-                        ++n1;
-                        l1 = std::min(l1, x.d.id);
-                    }
-                }
-                if (n0 != n1) r.master = n0 > n1 ? uint8_t{0} : uint8_t{1};
-                else r.master = l0 < l1 ? uint8_t{1} : uint8_t{0};
+                const float e0 = form_extent(p0.form_id), e1 = form_extent(p1.form_id);
+                if (e1 > e0) r.master = 1;
+                else if (e0 > e1) r.master = 0;
+                else r.master = p0.form_first < p1.form_first ? uint8_t{1} : uint8_t{0};
             } else {
                 r.master = walk_max_speed(p1) < walk_max_speed(p0) ? uint8_t{1} : uint8_t{0};
             }
@@ -1450,21 +1454,50 @@ MovementSystem::MvmChoice MovementSystem::mvm_choose(const CollisionObject& c, c
     }
 }
 
-// Overtake test 0x683260(a = rear, b = front): a can get past b, with b slowed to vs, before its own path ends.
+// Overtake test 0x683260(a = rear, b = front): a can get past b, with b slowed to vs, before its own path ends. mov1 t05
+// (b0186, BKR1_RE_ANSWERS Q3 [H]): a and b of the same coordinator (0x426140: one group order, Unit::coord_id) skip the
+// Vb <= Va test, and when the time test passes with both in formations a passes only when b's formation ranks behind a's
+// (FormationClass +0x23c, unsigned: rank_b > rank_a) - inside one group move the rear unit passes the front one only when
+// the front one heads to a destination behind its own. [port] the killed / being-removed bit +0x3a0 & 2 is not tested
+// (a removed unit has no record here; S3).
 bool MovementSystem::mvm_overtake(const Unit& a, const Unit& b) const {
     if (a.d.collision_class == kUccGiantVehicle) return false;
     const auto speed = [this](const Unit& x) { return x.in_formation && x.formation_speed < kInf ? x.formation_speed : walk_max_speed(x); };
     const float va = speed(a), vb = speed(b);
-    if (!(vb <= va)) return false;
+    const bool same = a.coord_id != 0 && a.coord_id == b.coord_id;
+    if (!(vb <= va) && !same) return false;
     const float vs = std::min(vb, 0.5f * va);
-    if (va == 0.0f || va - vs == 0.0f || near_path_end(a, b)) return false;
+    if (!(vs <= va) || va == 0.0f || va - vs == 0.0f || near_path_end(a)) return false;
     std::vector<V2> pts;
     stack_points(a, pts);
     const float d = path_length(pts);
     const V2 dd = a.m.pos - b.m.pos;
     const float dz = a.z - b.z;
     const float dist = std::sqrt(dd.x * dd.x + dd.y * dd.y + dz * dz);
-    return (steer_radius(a) + steer_radius(b) + dist) / (va - vs) <= d / va;
+    if (!((steer_radius(a) + steer_radius(b) + dist) / (va - vs) <= d / va)) return false;
+    if (same && a.form_id != 0 && b.form_id != 0)
+        return static_cast<uint32_t>(b.form_rank) > static_cast<uint32_t>(a.form_rank);
+    return true;
+}
+
+// 0x41a5c0(formation): a scalar half extent in cells (mov1 t02, BKR1_RE_ANSWERS Q3 [H]). n = the member count, k =
+// ceil(sqrt n), cell = the largest (FormationSpacing + 2 hx / 20) over the members with a locomotor, hx = the X (length)
+// half extent (0x396a30: the hard X extent, deployed when deployed, a squad container's team box); A = the sum over
+// members of (2 hx / 20 + g)(2 hy / 20 + g), g = FormationSpacing. Result max(k cell + 0.25, sqrt(max(1, 1.8 A))).
+// [port] a squad container's area term uses its team box like every member ([M] in retail: (2 x 0x404cd0 / 20)^2).
+float MovementSystem::form_extent(uint32_t form_id) const {
+    uint32_t n = 0;
+    float cell = 0.0f, area = 0.0f;
+    for (const Unit& x : units_) {
+        if (x.form_id != form_id) continue;
+        ++n;
+        const V2 h = foot_half(x);
+        const float g = x.d.formation_spacing;
+        if (!x.d.no_locomotor) cell = std::max(cell, g + 2.0f * h.x / kCellSize);
+        area += (2.0f * h.x / kCellSize + g) * (2.0f * h.y / kCellSize + g);
+    }
+    const float side = std::ceil(std::sqrt(static_cast<float>(n)));
+    return std::max(side * cell + 0.25f, std::sqrt(std::max(1.0f, area * cfg_.constants.spread_out_spacing_coefficient)));
 }
 
 // 0x680c00: Try Again Later with a retry frame NOW + 30 + one synced draw in [0, 15].

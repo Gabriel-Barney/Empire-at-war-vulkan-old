@@ -490,7 +490,8 @@ UnitView MovementSystem::view(ObjectId id) const {
     v.team_final_turn = u->d.team_container && u->fturn;
     v.arrival_turn = u->aturn != LocoState::None;  // s78l t02
     v.arrival_turn_ended = u->aturn_ended;
-    v.large_hover_index = u->large_hover_index;
+    v.form_rank = u->form_rank;
+    v.coord_id = u->coord_id;
     v.jiggle = u->jiggle;
     v.locomotor = u->d.locomotor;  // §4.3-4.7
     v.secondary_locomotor = u->on_secondary;  // S7 t06
@@ -731,6 +732,7 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
     // formations (no split, no slot test)
     const bool attack = order.attack.target >= 0;
     const bool replan = attack && order.attack.replan;
+    const uint32_t coord = replan ? 0u : ++coord_serial_;  // mov1 t05: one movement coordinator per order (0x426140)
     for (size_t n = 0; n < idx.size(); ++n) {  // bkm1 t04: E and K of the recruitment's test 9
         if (attack)
             if (const LandAttackUnit* e = attack_entry(order, units_[idx[n]].d.id)) mem[n].engage = e->engage;
@@ -817,11 +819,9 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
     std::vector<uint64_t> taken;
     std::vector<LandForm> forms;  // s78n t20: every formation of the order, laid out before any goal is given
     PendingComposition* pc = serial != 0 ? &pending_.back() : nullptr;
-    // P1 double-click (0x80): speed-band recruitment; LargeHover formations indexed fastest-first (0x439360).
+    // P1 double-click (0x80): speed-band recruitment; the destination check ranks the formations fastest-first (0x439360).
     const bool dbl = (order.flags & kMoveFlagDoubleClick) != 0;
     const float speed_ratio = dbl ? k.double_click_move_max_speed_ratio : 0.0f;
-    std::vector<FormationKey> hover_keys;
-    std::vector<std::vector<uint32_t>> hover_members;  // indices into idx
     V2 group_c{};
     for (const FormationMember& f : mem) group_c = group_c + f.pos;
     group_c = group_c * (1.0f / static_cast<float>(mem.size()));
@@ -922,10 +922,6 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
                 fspeed = std::min(fspeed, mem[m].max_speed);
             }
             c = c * (1.0f / static_cast<float>(f.size()));
-            if (units_[idx[f[0]]].d.movement_class == static_cast<int32_t>(MovementClass::LargeHover)) {  // seed's class
-                hover_keys.push_back({fspeed, c});
-                hover_members.push_back(f);
-            }
             // s78n t20 batch 2: a fresh block (V != P) carries no formation facing
             V2 fwd = order.facing_deg != kNoFacing && !fresh ? dir_from_deg(order.facing_deg) : normalize_retail(centre - c);
             if (length_sq(fwd) == 0.0f) fwd = {1.0f, 0.0f};
@@ -980,7 +976,11 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
             for (const Slot& s : lf.slots) {
                 if (atk_keep[s.member]) continue;  // s78n t26 review round 3: G 5
                 Unit& u = units_[idx[s.member]];
-                u.large_hover_index = -1;
+                // mov1 t02 / t05 (BKR1_RE_ANSWERS Q3 [H]): the formation's rank (0x439360), its member-vector index 0 (seed
+                // first, 0x43e5b0) and the order's coordinator (an attack re-plan keeps the order's)
+                u.form_rank = lf.rank;
+                u.form_first = units_[idx[f[0]]].d.id;
+                if (!replan) u.coord_id = coord;
                 const V2 exact = slot_world(lf.centre, fwd, s);
                 V2 target = exact;
                 // s78n t20 F5 (MOVEMENT §4.3.1: the block goal := the accepted centre): the cell snap only for slots the
@@ -1107,15 +1107,6 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
         for (const LandTeamSlot& e : land_team(tc.d.id))
             if (Unit* m = unit_ptr(e.member))
                 m->start_delay = static_cast<uint32_t>(rng.range_int(0, cfg_.constants.max_move_frame_delay));
-    }
-    // 0x439360 (skipped with 0x20): index the LargeHover formations. [port] move direction = group centroid ->
-    // destination; the retail layout around the centroid and the consumer of the index are not modelled.
-    if (!hover_keys.empty() && !(order.flags & kMoveFlagSkipValidation)) {
-        V2 dir = normalize_retail(order.destination - group_c);
-        if (length_sq(dir) == 0.0f) dir = {1.0f, 0.0f};
-        const std::vector<uint32_t> ord = large_hover_formation_order(hover_keys, dir, dbl);
-        for (size_t n = 0; n < ord.size(); ++n)
-            for (uint32_t m : hover_members[ord[n]]) units_[idx[m]].large_hover_index = static_cast<int32_t>(n);
     }
 }
 
@@ -1256,6 +1247,18 @@ void MovementSystem::destination_check(const MoveOrder& order, const std::vector
             forms[ord[r]].centre = centres[r];
             forms[ord[r]].checked = true;  // s78n t20 F5
         }
+        // mov1 t05 (b0186, BKR1_RE_ANSWERS Q3 [H]): after the placement passes the Land-layer formations are sorted by
+        // 0x43b110 - descending projection of the block goal on the order axis about D, front-most first - or, with order
+        // flag 0x80, by 0x43b420 - descending speed of the slowest member, fastest first - and given ranks 0, 1, 2, ...
+        // (descriptor +0x22c, copied to FormationClass +0x23c). [port] ties keep the nearest-first order (retail std::sort
+        // is unstable).
+        std::vector<uint32_t> rk = ord;
+        const bool fastest = (order.flags & kMoveFlagDoubleClick) != 0;
+        std::stable_sort(rk.begin(), rk.end(), [&](uint32_t x, uint32_t y) {
+            if (fastest) return forms[x].speed > forms[y].speed;
+            return dot(forms[x].centre - dest, axis) > dot(forms[y].centre - dest, axis);
+        });
+        for (size_t r = 0; r < rk.size(); ++r) forms[rk[r]].rank = static_cast<int32_t>(r);
         return;
     }
 }
@@ -1514,6 +1517,9 @@ void MovementSystem::stop(std::span<const ObjectId> ids) {
         u->m.state = LocoState::WalkStopped;
         u->around.clear();  // s78n t18: the path stack is cleared
         u->form_id = 0;     // s78n t20: it leaves its formation
+        u->form_rank = 0;   // mov1 t05: and its coordinator
+        u->form_first = -1;
+        u->coord_id = 0;
         u->cohesion_speed = kInf;  // [port] fleet cohesion: a stop ends the move's cap
         u->self_arrive = false;
         u->atk_theta = u->atk_rho = 0.0f;  // s78n t25.2: a stop drops the attack block (halt() keeps it)
@@ -1559,6 +1565,8 @@ void MovementSystem::halt(std::span<const ObjectId> ids, uint32_t frame) {
             const uint32_t af = u ? u->atk_form : 0u;
             const ObjectId at = u ? u->atk_target : -1;
             const uint32_t fid = u ? u->form_id : 0u;  // s78o (b0066): and the formation identity
+            const int32_t frk = u ? u->form_rank : 0, ffi = u ? u->form_first : -1;  // mov1 t05: and the coordinator
+            const uint32_t cid = u ? u->coord_id : 0u;
             stop(one);
             if (u) {
                 u->atk_theta = th;
@@ -1566,6 +1574,9 @@ void MovementSystem::halt(std::span<const ObjectId> ids, uint32_t frame) {
                 u->atk_form = af;
                 u->atk_target = at;
                 u->form_id = fid;
+                u->form_rank = frk;
+                u->form_first = ffi;
+                u->coord_id = cid;
             }
             continue;
         }
@@ -1579,12 +1590,17 @@ void MovementSystem::halt(std::span<const ObjectId> ids, uint32_t frame) {
         const uint32_t af = u->atk_form;
         const ObjectId at = u->atk_target;
         const uint32_t fid = u->form_id;
+        const int32_t frk = u->form_rank, ffi = u->form_first;  // mov1 t05
+        const uint32_t cid = u->coord_id;
         stop(one);
         u->atk_theta = th;
         u->atk_rho = rh;
         u->atk_form = af;
         u->atk_target = at;
         u->form_id = fid;
+        u->form_rank = frk;
+        u->form_first = ffi;
+        u->coord_id = cid;
         if (!(v > 0.0f)) continue;
         u->m.speed = v;  // the speed is kept: the unit brakes through End Move
         u->m.state = s;
@@ -1645,6 +1661,9 @@ bool MovementSystem::teleport(ObjectId id, V2 pos, float z, float yaw_deg, uint3
     u->wps.clear();
     u->around.clear();  // s78n t18
     u->form_id = 0;     // s78n t20
+    u->form_rank = 0;   // mov1 t05
+    u->form_first = -1;
+    u->coord_id = 0;
     u->self_arrive = false;
     u->atk_theta = u->atk_rho = 0.0f;  // s78n t25.2
     u->atk_form = 0;
@@ -1894,6 +1913,7 @@ void MovementSystem::plan_land(uint32_t frame, const ParallelFor& pf) {
         lane.swap(u.lane);  // s78p: a lane is taken by this plan or dropped
         u.around.clear();  // s78n t18: a new path (pack +0x288 := NOW), planned around nobody
         u.path_change = frame;
+        u.approx_countdown = 0;  // mov1 t04: a path push zeroes pack +0x275
         if (is_air(u)) {
             if (air_out[r].fallback) ++stats_.space_fallbacks;
             if (!air_out[r].ok || air_out[r].wps.empty()) {
@@ -2235,6 +2255,13 @@ void MovementSystem::detect_collisions(uint32_t frame) {
         // a locomotor (a death-clone obstacle) is never a checker - only a candidate (and the pair filter's "neither side
         // has a locomotor" then never applies: the checker has one)
         if (a.d.no_locomotor) continue;
+        // mov1 t04 (BKR1_RE_ANSWERS Q5 [H]): detection 0x508170 rebuilds the position approximation (and +0x28c) when the
+        // countdown pack +0x275 has run out, then sets it to FramesPerPositionApproximationRebuild (8): a per-unit phase
+        if (a.approx_countdown <= 0) {
+            refresh_near_end(a);
+            a.approx_countdown = static_cast<int32_t>(k.frames_per_position_approximation_rebuild);
+        }
+        --a.approx_countdown;
         if (a.check_countdown > 0) {
             --a.check_countdown;
             continue;

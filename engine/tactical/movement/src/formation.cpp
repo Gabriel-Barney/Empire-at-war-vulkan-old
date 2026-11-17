@@ -155,16 +155,6 @@ std::vector<std::vector<uint32_t>> split_into_formations(std::span<const Formati
     return out;
 }
 
-std::vector<uint32_t> large_hover_formation_order(std::span<const FormationKey> f, V2 move_dir, bool fastest_first) {
-    std::vector<uint32_t> out(f.size());
-    for (uint32_t i = 0; i < static_cast<uint32_t>(f.size()); ++i) out[i] = i;
-    std::stable_sort(out.begin(), out.end(), [&](uint32_t a, uint32_t b) {
-        if (fastest_first) return f[a].speed > f[b].speed;
-        return dot(f[a].centroid, move_dir) > dot(f[b].centroid, move_dir);
-    });
-    return out;
-}
-
 std::vector<RankedMember> rank_members(std::span<const FormationMember> m, std::span<const uint32_t> members, RankKey key) {
     std::vector<uint32_t> heroes, others;
     for (uint32_t i : members) (m[i].hero ? heroes : others).push_back(i);

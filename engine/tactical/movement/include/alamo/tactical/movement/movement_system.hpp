@@ -291,7 +291,10 @@ struct UnitView {
     bool arrival_turn_ended = false;
     // s78n t20 (FIGHTER_FLYING §4.11 E "stopping"): the land Walk state (LandMotion::state; WalkEndMove = braking for the end)
     LocoState walk_state = LocoState::None;
-    int32_t large_hover_index = -1;      // land: index (+0x22c) of its LargeHover formation in the last order, else -1
+    // mov1 t05 (BKR1_RE_ANSWERS Q3 [H]): the rank of its formation (FormationClass +0x23c from 0x439360: 0 = the front-most
+    // destination; 0 when the destination check did not rank) and the coordinator of its last land order (0x426140; 0 none)
+    int32_t form_rank = 0;
+    uint32_t coord_id = 0;
     // REMAINING_GAPS §4.3-4.7: special locomotors
     LocomotorKind locomotor = LocomotorKind::Default;  // the active locomotor
     bool secondary_locomotor = false;                  // S7 t06: the Uses_Multiple_Locomotors secondary is active
@@ -1082,8 +1085,21 @@ private:
         uint32_t start_frame = 0;
         float formation_speed = 3.0e38f;
         float cohesion_speed = 3.0e38f;  // [port] fleet cohesion: the space plan speed cap of this move (saved, version 32)
-        int32_t large_hover_index = -1;  // P1 double-click: formation +0x22c (not hashed; no modelled consumer)
+        // mov1 t02 / t05 (BKR1_RE_ANSWERS Q3 [H]; save version 34, not hashed, like form_id): form_rank = the formation's
+        // +0x23c rank written by the destination check 0x439360 (descending goal projection on the order axis, fastest
+        // first with flag 0x80; 0 when it did not rank: the overtake's same-coordinator test); form_first = the id of the
+        // formation's member-vector index 0 (composition order, seed first: the head-on tie-break); coord_id = the
+        // movement coordinator of the unit's last land order (0x426140; 0 none: left by a stop or a teleport)
+        int32_t form_rank = 0;
+        ObjectId form_first = -1;
+        uint32_t coord_id = 0;
         int32_t check_countdown = 0;
+        // mov1 t04 (BKR1_RE_ANSWERS Q5 [H]; save version 34; hashed in the place of a dropped constant): near_end = pack
+        // +0x28c, "the path stack's end lies within the approximation's look-ahead" as of the last rebuild 0x505fe0 (sticky:
+        // unchanged while the unit stands, has speed 0 or an unstarted top record); approx_countdown = pack +0x275, the
+        // frames to the next rebuild (a path push zeroes it)
+        bool near_end = false;
+        int32_t approx_countdown = 0;
         // s78n t18 (0x509ea0): the lowest speed this tick's collision records answer the unit (3e38: none) and the "at
         // once" flag of the last record that writes one. Rebuilt by every land tick's driver before the walk (transient:
         // not saved, not hashed; the records' own answers are).
@@ -1613,7 +1629,8 @@ private:
     // (quota pass, state None) and service 0x687ea0.
     void terrain_report(Unit& u, uint32_t frame);
     void terrain_service(CollisionObject& c, bool full, uint32_t frame);
-    bool near_path_end(const Unit& a, const Unit& b) const;
+    bool near_path_end(const Unit& a) const { return a.near_end; }  // mov1 t04: pack +0x28c
+    void refresh_near_end(Unit& u) const;                            // mov1 t04: 0x505fe0's +0x28c write
     bool destination_blocked(const Unit& a, const Unit& b) const;
     bool side_step_ok(const Unit& a, const Unit& b, const CollisionObject& self) const;
     // s78n t20 (MOVEMENT §5.4.4): the early-arrival cut 0x685e10(a, b, v); `have_v` / `v` = the spare point of 0x5c6ba0.
@@ -1684,6 +1701,7 @@ private:
     void mvm_service(CollisionObject& c, Unit& a, Unit& b, bool full, uint32_t frame, SimRng& rng);
     bool mvm_decide(CollisionObject& c, Unit& a, Unit& b, uint32_t frame, SimRng& rng);  // false: no service this frame
     bool mvm_valid(CollisionObject& c, Unit& a, Unit& b, uint32_t frame);              // validity 0x680650
+    float form_extent(uint32_t form_id) const;  // 0x41a5c0: the head-on tie-break size (mov1 t02)
     bool mvm_overtake(const Unit& a, const Unit& b) const;                              // 0x683260(rear a, front b)
     void mvm_fail(CollisionObject& c, uint32_t frame, SimRng& rng);                     // 0x680c00
     bool mvm_pass_setup(CollisionObject& c, Unit& m, const Unit& s, uint32_t frame);  // 0x682e80
@@ -1745,6 +1763,7 @@ private:
         // from them for `centre` (shield_free_mask)
         uint32_t inter = ~0u;
         uint32_t best = kPassClear;
+        int32_t rank = 0;  // mov1 t05: +0x22c / +0x23c from the destination check (0x439360)
     };
     // s78n t26 review round 2 / bkm1 t03: the members' intersection, 0x4779e0's class and 0x414720's plan class for `goal`
     void set_form_mask(const std::vector<uint32_t>& idx, LandForm& lf, V2 goal) const;
@@ -1842,6 +1861,7 @@ private:
     void park_record(const Unit& u);  // park_team_member / suspend_team_member: the (member, container, slot, index) record
     bool deferred_compose_ = false;           // cu8j t01: the host runs coordinator_update (not saved: host setup)
     uint32_t form_serial_ = 0;                // s78n t20: the last Unit::form_id given (saved, version 18)
+    uint32_t coord_serial_ = 0;               // mov1 t05: the last Unit::coord_id given (saved, version 34)
     FireTestFn fire_test_;                    // s78n t25.2 (not saved: host setup)
     AttackRangeFn attack_range_fn_;           // s78n t26 review round 2 (not saved: host setup)
     AttackRangeFn min_attack_fn_;             // bkm1 t04 (not saved: host setup)
