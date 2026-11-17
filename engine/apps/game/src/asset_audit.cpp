@@ -57,7 +57,7 @@ struct RetailEquivalent {
     const char* citation;
 };
 constexpr RetailEquivalent kRetailEquivalent[] = {
-    {"no connections chunk 0x600", "retail hangs on a model without its connections chunk (docs/re/MCX2_T02_ASSET_SALVAGE.md 3)"},
+    {"no connections chunk 0x600", "retail does not draw a model without its connections chunk (docs/re/MCX2_T02_ASSET_SALVAGE.md 3, run 2)"},
 };
 
 bool retail_equivalent_reason(const std::string& reason, std::string* citation) {

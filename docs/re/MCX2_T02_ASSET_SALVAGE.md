@@ -30,33 +30,31 @@ probe copies:
 
 ## 3. Probe results
 
-**Run 1 (2026-11-17, `out\20261117-175406`, coordinator session; all 16 slots).** `CTRL` spawned through `Spawn_Unit`
+**Run 1 (2026-11-17, `out\2061117-175406`, coordinator session; all 16 slots).** `CTRL` spawned through `Spawn_Unit`
 and drew like a shipped AT-ST (walk pose). `NOCONN` (no connections chunk) did not come back from `Spawn_Unit`; the
-probe's fallback `Create_Generic_Object` returned an object, and from that moment the simulation stopped: the credits
-stayed at 6,272, no further record was written (its `HOLD_END`, due 270 frames later, never came), the camera showed
-`NOCONN`'s spot with nothing drawn, and the game kept presenting the same frame until a system bugcheck (0x133
-DPC_WATCHDOG_VIOLATION) rebooted the PC about 2.5 minutes later. So **retail hangs on a model without a connections
-chunk** (at least when such an object is created; whether the bugcheck is the game's or the driver's is not known).
-`NOINFO`, `OVR` and `ANS` were left out of the reruns after this (Gabriel, 2026-11-17: too risky after the bugcheck);
-they stay unprobed guesses.
+probe's fallback `Create_Generic_Object` returned an object. The game then froze at the credits value 6,272 and a system
+bugcheck (0x133 DPC_WATCHDOG_VIOLATION) rebooted the PC about 2.5 minutes later. The records stop after `NOCONN`'s
+`SHOW`, but the record reader lagged far behind (25 GB scanned), so they do not show which slot was on screen: run 2
+places the freeze at slot 3's spawn (`NOINFO` in this run). `OVR` and `ANS` stay out of every rerun (Gabriel,
+2026-11-17: too risky after the bugcheck); they stay unprobed guesses.
 
-**Run 2 (2026-11-17, `out\20261117-183558`, `--skip NOINFO,OVR,ANS`).** Same start: `CTRL` drawn (walk pose),
-`NOCONN` again only through `Create_Generic_Object` (f=606). The presented frame then stayed byte-identical for about
-30 s (shots 11-25), and from there on the AT-ST's pose and the credits (6,272, the same value as run 1) never changed
-again; `NOCONN` was never drawn at its spot, 87 units beside `CTRL`. The script still wrote `NOCONN`'s `HOLD_END`
-(f=876) and `SPILL`'s `SPAWN_BEGIN` (f=909), then nothing; the game was still running, unresponsive, when the run
-ended. So both runs agree: **once a model without a connections chunk is created, retail stops (the picture, then the
-game); the object is never drawn.** Run 2 says nothing about `SPILL` (it spawned into an already stalled game); the
-next run skips `NOCONN` as well.
+**Run 2 (2026-11-17, `out\2061117-183558`, `--skip NOINFO,OVR,ANS`).** `CTRL` drawn (walk pose). `NOCONN` again only
+through `Create_Generic_Object` (f=606); it stayed alive to its `HOLD_END` (f=876, `alive=1`) and the game ran on, but
+**nothing was drawn at its spot**: shot 8 shows the slot caption, the camera on `NOCONN`'s position and only `CTRL`
+beside it. Then `SPILL`'s `SPAWN_BEGIN` (f=909) and nothing more: the picture stopped (shots 11-33 identical apart from
+the hung window greying) at the same credits (6,272) as run 1, and the coordinator ended the game. So the freeze comes
+at slot 3's spawn in both runs, and slot 3 was a mesh without its info chunk both times (`NOINFO`, then `SPILL`, the
+z-95 shape of the same defect). Run 3 (`--skip NOINFO,SPILL,OVR,ANS`) puts the intact-parsing `COLL` in the same third
+spawn and position, to rule out a kit cause before "retail hangs" is recorded for that defect.
 
 Per slot, from `out\<run>\report.txt` and the screenshots:
 
 | Slot | Retail | Port rule (t03) |
 |---|---|---|
 | `CTRL` / `SKCTRL` / `PCTRL` | | controls |
-| `NOCONN` | **hangs** (runs 1 and 2: never drawn; the picture, then the game stop once the object is created; run 1 ended in a bugcheck) | do not draw it, `asset_rejected` marked retail-equivalent (port shows nothing, keeps running) |
-| `NOINFO` | unprobed (skipped after run 1) | |
-| `SPILL` | unknown (run 2 reached it only after `NOCONN` had stalled the game) | |
+| `NOCONN` | **not drawn**, object alive, game runs on (run 2; `Spawn_Unit` fails, `Create_Generic_Object` works) | do not draw it, `asset_rejected` marked retail-equivalent |
+| `NOINFO` | froze retail at its spawn (run 1, with a bugcheck); kit cause not yet ruled out (run 3) | |
+| `SPILL` | froze retail at its spawn (run 2); kit cause not yet ruled out (run 3) | |
 | `COLL` | | |
 | `TRAIL` | | |
 | `BORDER` | | |
@@ -64,8 +62,8 @@ Per slot, from `out\<run>\report.txt` and the screenshots:
 | `ANG` | | |
 | `SKIN` | | |
 | `PBAD` | | |
-| `ANS` | unprobed (skipped after run 1) | |
-| `OVR` | unprobed (skipped after run 1) | |
+| `ANS` | unprobed (left out after run 1) | |
+| `OVR` | unprobed (left out after run 1) | |
 | `EMPTY` | | |
 
 ## 4. Texture, font and movie lookups (t05, read with REA 2026-11-17)
