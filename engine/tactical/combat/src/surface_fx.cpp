@@ -129,17 +129,20 @@ void CombatSystem::stun_water_kill(ObjectId id, uint32_t frame) {
 
 void CombatSystem::service_surface_fx(uint32_t frame) {
     if (cfg_.mode != GameMode::Land || !surface_.surface || data_->surface_fx.empty()) return;
-    for (Unit& u : units_) {
-        if (u.flags & kUnitDead) continue;
-        const UnitDesc& d = desc_of(u);
+    // By index, the unit re-fetched for every instance: a terrain-damage Take_Damage may add units (host hooks), which
+    // moves units_. Units added during the pass are serviced from the next tick.
+    const size_t count = units_.size();
+    for (size_t k = 0; k < count; ++k) {
+        if (units_[k].flags & kUnitDead) continue;
+        const UnitDesc& d = desc_of(units_[k]);  // data_ is not touched by the pass
         if (d.surface_fx.empty()) continue;
-        if (!u.sfx_ready) {  // vf6 first call: the instances are made, nothing is evaluated
-            u.sfx_ready = 1;
+        if (!units_[k].sfx_ready) {  // vf6 first call: the instances are made, nothing is evaluated
+            units_[k].sfx_ready = 1;
             continue;
         }
-        const uint32_t s = surface_.surface(u.pos.x, u.pos.y);
+        const uint32_t s = surface_.surface(units_[k].pos.x, units_[k].pos.y);
         const auto n = static_cast<uint32_t>(d.surface_fx.size() < kMaxUnitSurfaceFx ? d.surface_fx.size() : kMaxUnitSurfaceFx);
-        for (uint32_t i = 0; i < n; ++i) surface_fx_step(u, d.surface_fx[i], i, s, frame);
+        for (uint32_t i = 0; i < n && !(units_[k].flags & kUnitDead); ++i) surface_fx_step(units_[k], d.surface_fx[i], i, s, frame);
     }
 }
 
