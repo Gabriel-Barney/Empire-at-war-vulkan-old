@@ -1148,3 +1148,18 @@ This list holds the [port] / [inferred] / [M] choices and per-step notes. Finish
   retail's rule for a particle whose parent dies is not read). A particle name that is no object type draws nothing. Earthquake / Telekinesis dust is drawn while the special is applied (state, not the stored particle id).
   `Infection_Particle` comes from the first special that names one (the victim keeps no infector type; vanilla has one).
   The status bones come from GameConstants `Object_Visual_Status_Particle_Attach_Bone_Names` (default: the vanilla list).
+- 🟡 **PARTLY DONE** · BKX1 (2026-11-12, ported 2026-11-17, AI cadence, Shola metric, engine glow, walk transitions, camera; specs
+  `docs/re/BKX1_CADENCE_RE.md`, `docs/re/BKX1_RENDER_RE.md`): **t01** (b0123) the tactical / skirmish AI stagger is off
+  by default (`--ai-stagger` keeps it); the battle goal systems take `retail_cadence` (seeded first quota, slice ends at
+  the quota) and the goal quota's N - H comes from the host (`BattleAi`: the galaxy's players plus one per faction of the
+  table no player has, a faction named twice counted once [port]; H = human players), not the battle's perception
+  players, which still set the zone recompute's K. Cadence check against CADENCE_RE §2 (record): a FoC 1v1 skirmish
+  (8 factions, 2 slot players, one human) gives N = 8, N - H = 7, cap (int)(20 / 7 + 0.5) = 3, the galactic HotM value;
+  a campaign battle uses the campaign's players (the same count). Not done: land slot 9's unreachable-target skip
+  (CADENCE_RE "Open", only needed if E differs; backlog b0204). **t02** (b0107) `outcome.shola_captured[Rebel]` /
+  `outcome.shola_capture_tick[Rebel]` in tools/parity (an Underworld retake is not counted). **t03** (b0136) DECISIONS row. **t04** (b0059) Walk_Transition
+  clips (MOVESTART 16, end clips 17..20, MOVE carried after MOVESTART) through `UnitView::wt_clip` / `wt_pos` / `wt_rate`.
+  **t05 / t06** (b0019 / b0020) the SimpleSpace engine glow (`render::engine_glow`): pe / pte / pi proxy groups by name prefix, TURBO picks
+  pte, engines off without a timer hide the group, a timed disable flickers ([port] a hash lattice for retail's noise
+  table), ion stun shows pi, dying hides pe and pte; only pi is un-hidden by the rule, so a dead engine hard point keeps
+  its particles hidden. The tint is computed but not applied yet (backlog b0203). **t07** (b0021) already on dev from ui2 t03: `Point_Camera_At` events carry the point (`"@pos"` + x, y, z) and the game host jumps the tactical camera there at the current zoom (`app_story_camera.cpp`, `PointCameraAt`); the 2026-11-12 Position-argument variant was dropped when bkx1 was ported.

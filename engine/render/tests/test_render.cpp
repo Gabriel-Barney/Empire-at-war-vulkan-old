@@ -1038,6 +1038,43 @@ using namespace test_render_t;
 
 
 // Hardpoint plumbing (hardpoints.hpp): XML record, mesh -> bone map, effects, per-instance visibility composition.
+// bkx1 t05 (b0019 / b0020, BKX1_RENDER_RE §1 [H]): the SimpleSpace engine glow rule. Proxy groups by name prefix
+// (pe engines, pte turbo engines, pi ion stun; case-insensitive); G = pte while TURBO is active, else pe, the other group
+// hidden; engines off without a timer (a destroyed engine hard point) hide G; a timed disable keeps G with the flicker
+// tint (in [0, 0.2], 1.0 over 0.1 s at the last frame); online: brightness 0.8 v / V + 0.2; ion stun shows pi; dying hides
+// pe and pte; a unit without the rule (no SimpleSpace locomotor) is left alone.
+void test_engine_glow() {
+    using render::EngineGlow;
+    CHECK(render::particle_glow_group("pe_StarDestroyerEngines") == render::kGlowPe);
+    CHECK(render::particle_glow_group("PTE_turbo") == render::kGlowPte);
+    CHECK(render::particle_glow_group("pi_ion_sparks") == render::kGlowPi);
+    CHECK(render::particle_glow_group("p_smoke") == 0 && render::particle_glow_group("") == 0 &&
+          render::particle_glow_group("engine") == 0);
+    const uint8_t unit = render::kEngineGlowUnit;
+    CHECK(!render::engine_glow(0, 0, 1.0f, false, false).applies);
+    const EngineGlow on = render::engine_glow(unit, 0, 0.5f, false, false);
+    CHECK(on.applies && on.show == render::kGlowPe && on.hide == (render::kGlowPte | render::kGlowPi) && on.tint_group == render::kGlowPe);
+    CHECK(std::fabs(on.tint - 0.6f) < 1e-6f);
+    CHECK(render::engine_glow(unit, 0, 3.0f, false, false).tint == 1.0f);  // clamped
+    const EngineGlow turbo = render::engine_glow(unit, 0, 1.0f, true, false);
+    CHECK(turbo.show == render::kGlowPte && (turbo.hide & render::kGlowPe) != 0);
+    const EngineGlow off = render::engine_glow(unit | render::kEngineGlowOff, 0, 0.0f, false, false);
+    CHECK((off.hide & render::kGlowPe) != 0 && (off.show & render::kGlowPe) == 0 && off.tint < 0.0f);
+    const EngineGlow timed = render::engine_glow(unit | render::kEngineGlowOff, 90, 0.0f, false, false);
+    CHECK((timed.show & render::kGlowPe) != 0 && timed.tint >= 0.0f && timed.tint <= 0.2f);
+    CHECK(timed.tint == render::engine_glow_flicker(90));  // a fixed value per frame left
+    const EngineGlow last = render::engine_glow(unit | render::kEngineGlowOff, 1, 0.0f, false, false);
+    CHECK(last.tint == 1.0f && last.tint_seconds == 0.1f);
+    const EngineGlow ion = render::engine_glow(unit | render::kEngineGlowOff | render::kEngineGlowIonStun, 0, 0.0f, false, false);
+    CHECK((ion.show & render::kGlowPi) != 0 && (ion.hide & render::kGlowPi) == 0 && (ion.hide & render::kGlowPe) != 0);
+    const EngineGlow dying = render::engine_glow(unit, 0, 1.0f, false, true);
+    CHECK((dying.hide & (render::kGlowPe | render::kGlowPte)) == (render::kGlowPe | render::kGlowPte) && (dying.show & render::kGlowPe) == 0);
+    for (uint32_t f = 2; f < 400; ++f) {
+        const float t = render::engine_glow_flicker(f);
+        CHECK(t >= 0.0f && t <= 0.2f);
+    }
+}
+
 void test_hardpoints() {
     {   // <HardPoint> record: known fields + every tag kept (repeats, case-insensitive lookup, empty element).
         const std::string xml =
@@ -1225,6 +1262,7 @@ void operator delete(void* p, std::size_t) noexcept { std::free(p); }
 int main() {
     test_formats();
     test_hardpoints();
+    test_engine_glow();
     test_layouts();
     test_samplers();
     test_camera();

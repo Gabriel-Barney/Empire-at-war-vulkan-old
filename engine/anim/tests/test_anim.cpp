@@ -1796,6 +1796,56 @@ void test_idle_records() {
     std::printf("idle records: aging / clear / gate / presence idle ok\n");
 }
 
+// bkx1 t04 (b0059, BKX1_RENDER_RE §2.1 / §2.2 [H]): the Walk_Transition clips follow the locomotor's state. MOVESTART (16)
+// and an end clip (17) start at the locomotor's frame and rate with no draw; MOVE after MOVESTART starts at the carry-over
+// frame with no draw (a plain MOVE start draws its frame); the end clip gives way to the idle when the locomotor stops;
+// a model without the clip keeps its current clip.
+void test_walk_transition_clips() {
+    const auto m = make_model(3, {{kAnimIdle, 1, 30, 30.0f, 2}, {kAnimMove, 1, 24, 30.0f, 2}, {16, 1, 12, 30.0f, 2}, {17, 1, 12, 30.0f, 2}});
+    const auto bare = make_model(3, {{kAnimIdle, 1, 30, 30.0f, 2}, {kAnimMove, 1, 24, 30.0f, 2}});
+    AnimWorld w;
+    AnimBehaviors b;
+    w.create(1, m.get(), {}, nullptr, 0);
+    w.create(2, bare.get(), {}, nullptr, 0);
+    SimRng rng(77);
+    LocomotorParams lp;
+    LocomotorInput in;
+    in.has_idle = false;
+    in.speed = 0.4f;
+    in.max_speed = 1.0f;
+    in.on_path = true;
+    in.wt_clip = 16;  // state 0x12: MOVESTART
+    in.wt_pos = 0.0f;
+    in.wt_rate = 1.5f;
+    uint32_t st = rng.state();
+    CHECK(b.service_locomotor(w, 1, lp, in, rng, 1) == 1 && w.current_type(1) == 16 && rng.state() == st);
+    CHECK(b.service_locomotor(w, 1, lp, in, rng, 2) == 0 && w.current_type(1) == 16);  // running: the rate only
+    in.wt_clip = kAnimMove;  // state 0x13: MOVE from the carry-over frame, no draw
+    in.wt_pos = 5.0f;
+    in.wt_rate = 1.0f;
+    CHECK(b.service_locomotor(w, 1, lp, in, rng, 3) == 1 && w.current_type(1) == kAnimMove && rng.state() == st);
+    in.wt_rate = 0.25f;  // walking: the MOVE clip runs at the locomotor's tracked rate f x V / S, not Movement_Animation_Speed
+    CHECK(b.service_locomotor(w, 1, lp, in, rng, 4) == 0 && w.current_type(1) == kAnimMove && w.slot(1).speed == 0.25f);
+    in.wt_clip = 17;  // state 0x14: the end clip, a hard cut
+    in.speed = 0.0f;
+    in.on_path = false;
+    in.wt_pos = 0.0f;
+    CHECK(b.service_locomotor(w, 1, lp, in, rng, 5) == 1 && w.current_type(1) == 17 && rng.state() == st);
+    in.wt_clip = -1;  // state 0x15 -> stopped: the idle
+    CHECK(b.service_locomotor(w, 1, lp, in, rng, 6) == 1 && w.current_type(1) == kAnimIdle);
+    // No MOVESTART clip: nothing changes, nothing drawn
+    in.wt_clip = 16;
+    in.speed = 0.4f;
+    in.on_path = true;
+    const int32_t before = w.current_type(2);
+    st = rng.state();
+    CHECK(b.service_locomotor(w, 2, lp, in, rng, 1) == 0 && w.current_type(2) == before && rng.state() == st);
+    // Without a transition clip a MOVE start draws its frame (the contrast to state 0x13)
+    in.wt_clip = -1;
+    CHECK(b.service_locomotor(w, 2, lp, in, rng, 2) == 1 && w.current_type(2) == kAnimMove && rng.state() != st);
+    std::printf("  walk transition clips: MOVESTART / MOVE carry-over / end clip / idle ok\n");
+}
+
 int main() {
     test_types();
     test_death_plan();
@@ -1806,6 +1856,7 @@ int main() {
     test_poses();
     test_determinism();
     test_behaviors();
+    test_walk_transition_clips();
     test_events_and_locomotor();
     test_save();
     test_idle_records();

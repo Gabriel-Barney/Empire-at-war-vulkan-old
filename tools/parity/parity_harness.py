@@ -60,6 +60,9 @@ NOT_UNIT = ("PROJ_", "_MARKER", "BACKDROP", "ASTEROID", "NEBULA", "STARS_", "STA
 
 
 # ---- small helpers ---------------------------------------------------------------------------------------------------
+SHOLA_CAPTURERS = ("Rebel",)  # b0107: the factions whose Shola captures are graded
+
+
 def load_json(path):
     with open(path, "r", encoding="utf-8") as fh:
         return json.load(fh)
@@ -427,6 +430,16 @@ def galactic_metrics(trace_path, queue_path=None, ai_log=None, sample_ticks=(450
             out["outcome.planets_final[%s]" % f] = cnt.get(f, 0)
             out["outcome.captures[%s]" % f] = caps.get(f, 0)
         out["outcome.owner_changes"] = len(m["owner_changes"])
+        # b0107 (Gabriel 2026-11-12, bkx1): the Shola capture, the a2m exit metric. Per capturing faction in
+        # SHOLA_CAPTURERS (the Rebel only: an Underworld retake of a Rebel-held Shola is not counted), captured = 1 when
+        # Shola changed owner to that faction from another (0 otherwise; its mean over seeds is the capture rate) and
+        # capture_tick = the first such change. Only for a galaxy that has Shola.
+        if any(n.lower() == "shola" for n in own):
+            for f in SHOLA_CAPTURERS:
+                ticks = [tk for tk, n, a, b in m["owner_changes"] if n.lower() == "shola" and b == f and a != f]
+                out["outcome.shola_captured[%s]" % f] = 1 if ticks else 0
+                if ticks:
+                    out["outcome.shola_capture_tick[%s]" % f] = min(ticks)
     # Diagnostic: synced-RNG draws (not graded: parity is behaviour, and the draw order is an implementation detail).
     if m["rng_draws"]:
         out["diag.rng_draws_total"] = sum(n for _, _, n in m["rng_draws"] if n is not None)

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <utility>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/profile.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/sim_rng.hpp"
@@ -686,6 +687,23 @@ void GoalSystem::hash(StateHasher& h) const {
         h.u32(static_cast<uint32_t>(pending_.size()));
         for (const Goal& g : pending_) goal(g);
     }
+}
+
+// bkx1 t01 (BKX1_CADENCE_RE §2 [H]): see ai_goals.hpp.
+int32_t goal_quota_players(std::span<const QuotaPlayer> players, size_t faction_count,
+                           const std::function<std::string_view(size_t)>& faction_name) {
+    int32_t n = 0, humans = 0;
+    for (const QuotaPlayer& ps : players) {
+        ++n;
+        humans += ps.human ? 1 : 0;
+    }
+    for (size_t f = 0; f < faction_count; ++f) {
+        bool seen = false;
+        for (size_t k = 0; k < f && !seen; ++k) seen = ascii_iequals(faction_name(k), faction_name(f));
+        for (const QuotaPlayer& ps : players) seen = seen || ps.faction == f;
+        n += seen ? 0 : 1;
+    }
+    return n - humans;
 }
 
 }  // namespace alamo::ai

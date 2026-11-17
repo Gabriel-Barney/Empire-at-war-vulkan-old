@@ -82,8 +82,8 @@ struct TacticalAiSetup {
     ai::tactical::TacticalAiConstants constants;
     bool log_decisions = true;
     // OPT2 t01 / t02 (TacticalAiConfig::stagger / path_latency): per-player planning phases; the land path finder's
-    // background recompute latency (0 = the original timing).
-    bool stagger = true;
+    // background recompute latency (0 = the original timing). bkx1 t01 (b0123): stagger off by default.
+    bool stagger = false;
     uint32_t path_latency = galactic::kDefaultAllPairsLatency;
     // OPT2 t10 (TacticalAiConfig::pp_streams / pp_latency): slot-10 solves on their own RNG streams, applied pp_latency
     // frames after their slice; pp_streams false = the original synced draws in proposal order.

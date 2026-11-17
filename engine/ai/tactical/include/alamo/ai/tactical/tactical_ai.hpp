@@ -385,8 +385,16 @@ struct TacticalAiConfig {
     // original timing).
     uint32_t path_latency = galactic::kDefaultAllPairsLatency;
     BackgroundStart background;
-    // OPT2 t01: per-player planning phases (AiContext::set_stagger); false = the original timing.
-    bool stagger = true;
+    // OPT2 t01: per-player planning phases (AiContext::set_stagger); false = the original timing. bkx1 t01 (b0123, Gabriel
+    // 2026-11-12): off by default, as galactic (AI_GALACTIC 1.3); alamo_headless --ai-stagger keeps it as a benchmark knob.
+    bool stagger = false;
+    // bkx1 t01 (b0123, BKX1_CADENCE_RE §2 [H]): N - H of the goal quota's cap, N = the global PlayerList (the session
+    // players plus one per faction no player has; a campaign battle: the campaign's list), H = the active humans. The
+    // host computes it (BattleAi); -1 = count the perception players.
+    int32_t quota_players = -1;
+    // bkx1 t01 (BKX1_CADENCE_RE §1 / §3 [H]): the battle goal systems run the galactic cadence (GoalSystemConfig::
+    // retail_cadence: seeded first quota, slice ends at the quota). false = the earlier [port] cadence (tests written for it).
+    bool retail_cadence = true;
     // OPT2 t03: fan-out for the goal candidates' perception values (ai_goals.hpp batched values); any value gives
     // identical results.
     ParallelFor pf = serial_for;

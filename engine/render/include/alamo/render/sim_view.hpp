@@ -76,6 +76,7 @@ struct SimInstanceStats {
     uint32_t script_hidden = 0;     // q6 t19: Lua Hide(true) objects (SnapshotObject::script_hidden: not drawn, no ghost)
     uint32_t ghosts = 0;            // R5: last-seen ghosts drawn this frame
     uint32_t muzzle_meshes = 0;     // R3: sub-objects shown by muzzle state
+    uint32_t engine_glow_changed = 0;  // bkx1 t05: instances whose engine glow proxies changed visibility
     uint32_t attachment_posed = 0;  // R3 T6: Model_To_Attach instances posed by the scene-model source
     uint32_t stealthed = 0;         // R5: drawn with the stealth mesh swap (kSnapStealthMeshes)
     uint32_t stealth_tinted = 0;    // R5: drawn with the Stealth_Color multiply (spring value > 0.01)

@@ -151,6 +151,7 @@ combat hull every tick, reduced by the same reader as the retail trace) on the o
 | AI choices | `ai.build_count[F]`, `ai.build_mix[F]`, `ai.first_build_tick[F]` | queued items (retail queue starts, port build orders incl. starbases) | units and structures gained between snapshots (`ai.first_build_frame`) |
 | AI choices | `ai.fleet_departures[F]`, `ai.fleet_targets[F]`, `ai.first_departure_tick[F]` | fleet trips (stop to stop, not split at planets passed) by faction and target planet | - |
 | battle outcomes | `outcome.planets_final[F]`, `outcome.captures[F]`, `outcome.owner_changes` | planet owners at the end, captures | - |
+| battle outcomes | `outcome.shola_captured[Rebel]`, `outcome.shola_capture_tick[Rebel]` | b0107 (bkx1, 2026-11-12): 1 when Shola changed owner to the Rebel (an Underworld retake is not counted), and the first such tick; over seeds the mean of `shola_captured` is the capture rate. Only in a galaxy with Shola | - |
 | battle outcomes | `outcome.units_final[F]`, `outcome.units_lost[F]`, `outcome.battle_ended` | - | units alive at the end, units lost, battle over before the limit |
 | damage | `combat.damage_taken[F]`, `combat.first_shot_frame` | - | hull lost per faction (health drops of live units between samples, same rule both sides), first projectile (retail: first `PROJ_` object; port: `M first_shot_frame`, the battle frame of the first shot, since its projectiles are not store objects) |
 | diagnostic | `diag.rng_draws_total` | synced-RNG draws over the run, never graded | - |

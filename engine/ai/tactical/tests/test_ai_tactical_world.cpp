@@ -1307,6 +1307,9 @@ bool g_ai_lane = false;  // sp3: TacticalAiConfig::ai_lane of the SaveSession wo
 bool g_original_timing = false;  // a1k t01: TacticalAiConfig::stagger / pp_streams off (the original's planning timing)
 bool g_plan_retest = false;  // skai t15: TacticalAiConfig::plan_retest (test_plan_retest)
 bool g_no_starbase = false;  // skm1 t03: MockHost::base_alive false (test_space_reinforce_needs_starbase)
+// bkx1 t01: the tactical goal systems run the retail cadence since b0123; the scenario checks written for the earlier
+// [port] cadence (group orders, Prepare_Ambush: which plan instance reports first) keep it.
+bool g_port_cadence = false;
 bool syn_object_types(MemoryFiles& tf, objects::ObjectTypeDatabase& raw, objects::GameObjectTypes& types, bool abilities) {
     const char* names[] = {"Syn_Frigate", "Syn_Corvette", "Syn_Station", "Syn_Pad", "UC_Syn_Turret"};
     std::string xml = "<SpaceUnits>";
@@ -1397,6 +1400,7 @@ RunResult run(int32_t frames, int32_t difficulty0, int variant = 0, std::vector<
     cfg.defender = 0;
     cfg.map = {-4000.0f, -4000.0f, 4000.0f, 4000.0f};
     cfg.plan_retest = g_plan_retest;  // skai t15
+    if (g_port_cadence) cfg.retail_cadence = false;  // bkx1 t01
     if (g_original_timing) {  // a1k t01: the OPT2 t01 / t10 timing knobs off (test_replan_and_priority_lifetime)
         cfg.stagger = false;
         cfg.pp_streams = false;
@@ -2625,7 +2629,9 @@ void test_damage_tracking_save() {
 // refixf t06: a task force's Attack_Move is ONE PortExtension order carrying all its movable units (MOVEMENT §6.3: one
 // coordinator), and Attack_Target(x, "Shield_Generator") orders hard-point type 1 (ref2 = 1 + type) [M: short name form].
 void test_group_orders() {
+    g_port_cadence = true;
     const RunResult r = run(30 * 120, 1, 4);
+    g_port_cadence = false;
     size_t groups = 0, single = 0, shield = 0;
     for (const std::string& e : r.executed) {
         if (e.find("PortExtension sub 2 units ") != std::string::npos) {
@@ -2898,6 +2904,7 @@ void test_replan_and_priority_lifetime() {
 // the last plan, polled by BlockOnCommand); the block finishes (movement finished for every mover, or a death rule).
 void test_prepare_ambush() {
     bool checked = false, point_ok = false;
+    g_port_cadence = true;  // bkx1 t01
     const RunResult r = run(30 * 120, 1, 6, nullptr, false, [&](int32_t, MockHost& host, TacticalAiWorld& world) {
         if (checked) return;
         for (const TacticalAiDecision& d : world.decision_log()) {
@@ -2937,6 +2944,7 @@ void test_prepare_ambush() {
         arrived = arrived || (e.find("AMBUSH player=0 ") != std::string::npos && e.find(" moved=0") == std::string::npos);
     CHECK(arrived);
     const RunResult again = run(30 * 120, 1, 6);
+    g_port_cadence = false;
     CHECK(again.crc == r.crc && again.decisions == r.decisions);
 }
 

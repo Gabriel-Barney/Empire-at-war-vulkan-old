@@ -63,8 +63,8 @@
 //       [--story]: also run the campaign's story plot sets, as the retail sandbox does (q2f t03).
 //       [--ai-latency F] [--no-ai-stagger | --ai-stagger] (also --skirmish-ai): OPT2 t02 / t01 parity knobs - the AI path
 //       recompute latency (default 15 frames, 0 = the original timing) and every AI player planning on the same frames (the
-//       original; the galactic AI default since a2m r4, --ai-stagger restores the OPT2 per-player phases there; the
-//       tactical / skirmish AI keeps the phases unless --no-ai-stagger).
+//       original; the default of the galactic AI since a2m r4 and of the tactical / skirmish AI since bkx1 t01 (b0123);
+//       --ai-stagger restores the OPT2 per-player phases as a benchmark knob).
 //       [--no-pp-streams] [--pp-latency F] (--skirmish-ai): OPT2 t10 parity knobs - slot-10 plan picks and PotentialPlan
 //       solves on the synced stream in proposal order (the original), and the frames from a goal slice to the apply of
 //       its solves (default 1; 0 = in the slice, on the job system).

@@ -260,6 +260,12 @@ struct SnapshotObject {
     // 0x4eb020), no surface FX / foot plants play (surface type 0x11); the host also drops its radar blip, mutes its sounds
     // and skips it in the mouse pick. Presentation only, not in digest().
     bool script_hidden = false;
+    // bkx1 t05 (b0019 / b0020, BKX1_RENDER_RE §1): the engine glow inputs of a space unit with a non-fighter locomotor
+    // (apply_battle_state): kEngineGlow* bits (hardpoints.hpp), the timed engine disable's frames left (0 = none or
+    // permanent) and speed / effective max speed. Presentation only, not in digest().
+    uint8_t engine_flags = 0;
+    uint32_t engine_timer_frames = 0;
+    float engine_speed_ratio = 0.0f;
 };
 // R5 stealth (ABILITIES_HARDPOINTS §3.7, TACTICAL_GAPS §2.3 Force_Cloak): while applied, meshes named BASEMESH are hidden
 // and STEALTH meshes shown. Set by apply_battle_state (AbilitySystem::is_stealthed or an active STEALTH (48) /

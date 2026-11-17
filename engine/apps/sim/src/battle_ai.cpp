@@ -8,6 +8,7 @@
 #include <map>
 
 #include "alamo/ai/ai_types.hpp"
+#include "alamo/ai/ai_goals.hpp"  // bkx1 t01: goal_quota_players
 #include "alamo/ai/tactical/tactical_perception.hpp"
 #include "alamo/core/ascii.hpp"
 #include "alamo/core/dmath.hpp"
@@ -90,6 +91,13 @@ BattleAi::BattleAi(TacticalBattle& battle, TacticalMode& mode, SimHost& host, co
     cfg.background = jobs::make_background_start(host.jobs());  // OPT2 t02: background path recomputes
     cfg.path_latency = setup.path_latency;
     cfg.stagger = setup.stagger;  // OPT2 t01
+    // bkx1 t01 (b0123, BKX1_CADENCE_RE §2 [H]): the goal quota's N - H over the global PlayerList, as galactic
+    {
+        std::vector<ai::QuotaPlayer> qp;
+        for (const galactic::PlayerState& ps : g.players()) qp.push_back({ps.faction, ps.human});
+        const auto& factions = g.rules().factions;
+        cfg.quota_players = ai::goal_quota_players(qp, factions.size(), [&factions](size_t f) { return std::string_view(factions[f].name); });
+    }
     cfg.pf = host.parallel_for();  // OPT2 t03: goal candidates' perception values; OPT2 t10: slot-10 solves
     cfg.pp_streams = setup.pp_streams;  // OPT2 t10
     cfg.plan_retest = setup.plan_retest;  // skai t15
