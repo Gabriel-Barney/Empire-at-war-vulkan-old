@@ -305,3 +305,5 @@ storyb t03; `python tools/parity/parity_harness.py run --scenario story_kessel`)
 | health-change samples | 1 | 398 | FAIL: Tyber is attacked (392 samples) |
 
 The four failures are storyb tasks (2026-11-17).
+
+After storyb t15 (a non-sandbox linked battle gets no galactic structures, starbase or base level, BT §2.9.5): owner 1 at frame 1 has 74 objects with the same type mix as retail (`HONOGHR_PLANETARY_ADVANTAGE` included, no barracks). Still failing: 94 extra Neutral props (t16), the Empire AI attacks Tyber (409 health-change samples; retail suspends the AI during `CINE_Start_Mission_A`) and the cinematic never reaches its spawns (t17), the bribe squad container type (t18).
