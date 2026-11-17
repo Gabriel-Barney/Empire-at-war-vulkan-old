@@ -92,3 +92,43 @@ pass (docs/shaders/CATALOG.md). Retail draws it on an `alTerrainShadowBlob` drap
 the port draws the circle as a unit-quad instance with the blob's own material (per type / faction / hero, as
 `ui::TacticalHud` resolves it) and lays it on the ground's local slope under the unit
 (`ui::selection_blob_ground_instance`), because the terrain decoration path draws only an effect's first pass.
+
+## 6. Particle spawn sources 1 / 2 / 3 (0x164b00 per-particle start, 0x13c870 / 0x12db30 parent mesh) [H unless tagged]
+
+Emitter `0x34` (desc +0x8b0) chooses where a new particle starts; weather emitters (`3D`) ignore it.
+- **Parent mesh:** the model attachment record of the particle system gives its bone B; the parent mesh is the first
+  attachment whose bone is B's skeleton parent (none when B is the root bone). Only that mesh's **first submesh** is used,
+  through its CPU copy of the vertex positions and the 16-bit triangle indices; the mesh's world matrix places the points.
+- **Source 1:** a random vertex (free RNG, uniform over vertices). Its offset direction is the vertex **position** taken as
+  a vector (the helper fills both outputs from the position table), turned to world by the mesh rotation.
+- **Source 2:** a random triangle (uniform over triangles, not area-weighted), a random point on it (u, v uniform in
+  [0, 1], folded when u + v > 1), the face normal (edge 1 × edge 2, normalised).
+- **Source 3:** vertex k (one particle per vertex per spawn event, the vertices in an order shuffled with CRT `rand()`),
+  no offset. The emitter's pool is its file pool × the mesh's vertex count (cap 5,003; ANIM_PARTICLES B.4).
+- Sources 1 / 2: the start point moves along the normalised world normal by `Mesh_Normal_Offset` (`0x3C`) × 0.5 × the
+  value the system scalar getter returns for index 1 [M: the emission scale, normally 1].
+- The point is already in world space: the system transform is not applied (object-space emitters convert it into the
+  system's space). Velocity, colour and the rest come from the emitter as usual.
+- With no parent mesh, retail starts the particle at the untransformed shape sample (near the world origin) [M: a
+  retail quirk].
+
+Port (vis1 t04): `ProxyAttachments::parent_mesh` builds the mesh for systems on model proxies, `ParticleWorld::create` /
+`set_spawn_mesh_transform` keep it, the CPU places the point (`SpawnRecord::point`, flag `kSpawnMeshPoint`) and CSSpawn
+starts there. [port] without a parent mesh (sim-object particles, Lua effects) the emitter keeps its position shape; the
+source-3 shuffle uses the port's free RNG; back-filled events use the current mesh transform, not the sub-step one.
+
+## 7. Particle ground behaviour 1 / 2 (0x166020 dispatch, 0x167350 test) [H unless tagged]
+
+Emitter `0x2F` (desc +0x898) ≠ 0 and the particle not yet stuck: before each integration step the segment from the
+particle position p to p + v·d·1.1 (v = the velocity before this step's forces) is cast against the scene terrain (land
+scenes; every system starts with its terrain-collision bit set) or, failing that, against an optional per-system plane.
+On a hit:
+- **1:** the particle dies there (the normal death path, so a spawn-on-death child starts at the hit).
+- **2:** bounce: v := v − n (v·n)(1 + `Bounciness` `0x30`), then the normal step.
+- **3** (no shipped emitter): the particle sticks at the hit height.
+No hit: the normal step. Shipped data: ground behaviour 1 / 2 on 5 / 1 FoC and 53 / 10 EaW emitters.
+
+Port (vis1 t05): `ParticleRenderer::set_terrain` uploads the land height grid; CSUpdate tests the segment's ends against
+it (`ground_hit`). [port] the two ends are tested, not each terrain triangle under the segment; behaviour 1 hides and
+freezes the particle at the hit (its death position is kept) and the CPU frees it at its lifetime's end, so a
+spawn-on-death child starts then, not at the hit; object-space emitters skip the test; no per-system plane.

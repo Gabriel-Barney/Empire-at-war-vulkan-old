@@ -1,5 +1,6 @@
 #include "alamo/render/particles/particle_attach.hpp"
 
+#include <algorithm>
 #include <cstring>
 #include <iterator>
 
@@ -22,6 +23,55 @@ uint64_t ProxyAttachments::static_key(const Instance& inst, uint64_t salt) {
     h = fnv1a64(&inst.transform, sizeof inst.transform, h);
     return h | 1ull;  // never 0
 }
+
+SpawnMeshPtr ProxyAttachments::parent_mesh(const assets::ModelAsset& m, uint32_t proxy_bone, uint32_t* submesh) {
+    const std::vector<int32_t>& parents = m.skeleton.parents;
+    if (proxy_bone == 0 || proxy_bone >= parents.size() || parents[proxy_bone] < 0) return nullptr;
+    const auto pb = static_cast<uint32_t>(parents[proxy_bone]);
+    for (const assets::MeshInfo& mi : m.meshes) {
+        if (mi.attach_bone != pb) continue;
+        if (mi.submesh_count == 0 || mi.first_submesh >= m.submeshes.size()) return nullptr;
+        const assets::Submesh& sm = m.submeshes[mi.first_submesh];
+        const size_t stride = assets::vertex_stride(sm.layout);
+        if (sm.vertex_count == 0 || sm.vertices.size() < static_cast<size_t>(sm.vertex_count) * stride) return nullptr;
+        auto out = std::make_shared<SpawnMesh>();
+        out->positions.resize(sm.vertex_count);
+        for (uint32_t v = 0; v < sm.vertex_count; ++v) {  // position: the first 12 bytes of both vertex layouts
+            float p[3];
+            std::memcpy(p, sm.vertices.data() + static_cast<size_t>(v) * stride, sizeof p);
+            out->positions[v] = {p[0], p[1], p[2]};
+        }
+        const uint32_t isz = assets::index_size(sm.index_type);
+        const uint32_t n = std::min<uint32_t>(sm.index_count, static_cast<uint32_t>(sm.indices.size() / isz)) / 3u * 3u;
+        out->indices.resize(n);
+        for (uint32_t i = 0; i < n; ++i) {
+            if (isz == 2) {
+                uint16_t x;
+                std::memcpy(&x, sm.indices.data() + static_cast<size_t>(i) * 2, 2);
+                out->indices[i] = x;
+            } else {
+                std::memcpy(&out->indices[i], sm.indices.data() + static_cast<size_t>(i) * 4, 4);
+            }
+        }
+        if (submesh) *submesh = mi.first_submesh;
+        return out;
+    }
+    return nullptr;
+}
+
+namespace {
+// The world transform of a parent mesh's vertex space (skinned submeshes: model space).
+Mat3x4 mesh_space(const assets::ModelAsset& m, const Instance& inst, uint32_t sub) {
+    const assets::Submesh& sm = m.submeshes[sub];
+    if (sm.skinned()) return inst.transform;
+    return attachment_transform(m, inst.transform, inst.bone_world, static_cast<int32_t>(sm.attach_bone));
+}
+bool needs_mesh(const SystemDef& d) {
+    for (const EmitterDef& e : d.emitters)
+        if (e.spawn_source >= 1 && e.spawn_source <= 3 && !e.weather) return true;
+    return false;
+}
+}  // namespace
 
 void ProxyAttachments::release_owner(Owner& o) {
     for (ProxySys& s : o.systems)
@@ -52,7 +102,17 @@ void ProxyAttachments::sync(uint64_t key, const Instance& inst, bool water, int 
             s.alt = pn.alt;
             s.lod = pn.lod;
             const Mat3x4 t = attachment_transform(m, inst.transform, inst.bone_world, static_cast<int32_t>(s.bone));
-            s.h = world_->create(std::move(def), t);
+            SpawnMeshPtr mesh;
+            Mat3x4 mw;
+            if (needs_mesh(*def)) {
+                uint32_t sub = 0;
+                mesh = parent_mesh(m, s.bone, &sub);
+                if (mesh) {
+                    s.mesh_sub = sub;
+                    mw = mesh_space(m, inst, sub);
+                }
+            }
+            s.h = world_->create(std::move(def), t, std::move(mesh), mw);
             o.systems.push_back(s);
         }
     }
@@ -70,6 +130,7 @@ void ProxyAttachments::sync(uint64_t key, const Instance& inst, bool water, int 
         ++stats_.systems;
         const Mat3x4 t = attachment_transform(m, inst.transform, inst.bone_world, static_cast<int32_t>(s.bone));
         world_->set_transform(s.h, t);
+        if (s.mesh_sub >= 0) world_->set_spawn_mesh_transform(s.h, mesh_space(m, inst, static_cast<uint32_t>(s.mesh_sub)));
         const size_t sub = meshes + s.proxy;
         bool hidden = sub < inst.mesh_hidden.size() ? inst.mesh_hidden[sub] != 0 : m.proxies[s.proxy].hidden;
         if (s.alt >= 0 && s.alt != cur_alt) hidden = true;

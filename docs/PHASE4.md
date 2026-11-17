@@ -1128,3 +1128,10 @@ This list holds the [port] / [inferred] / [M] choices and per-step notes. Finish
   **land selection circles** use the blob's own material (per type / faction / hero) on a unit quad sheared onto the
   ground's local slope (retail drapes an alTerrainShadowBlob; the two-pass BlobStencilMasked effect does not fit the
   terrain decoration path).
+- ⬜ **OPEN** · vis1 t04 / t05 (2026-11-17; spec `docs/re/WEATHER_VISUALS.md` §6 / §7; code `engine/render/particles`,
+  marked "vis1 t04" / "t05"). [port] choices: **spawn sources** use the parent mesh only for systems on model proxies
+  (sim-object / Lua particles keep the position shape); the source-3 vertex shuffle uses the port's free RNG; back-filled
+  events take the current mesh transform. **Ground behaviour**: a CPU-built height grid uploaded once per land battle
+  (storage buffer, `ParticleRenderer::set_terrain`), tested at the step segment's two ends; behaviour 1 hides and freezes
+  the particle at the hit and the CPU frees its slot at the lifetime's end (a spawn-on-death child starts then);
+  object-space emitters are not tested.

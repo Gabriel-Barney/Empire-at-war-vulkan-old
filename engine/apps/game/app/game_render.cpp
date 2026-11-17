@@ -431,6 +431,15 @@ bool BattleView::start(GpuCore& gpu, const GameData& data, const GameSession& se
     // cu8f t05 (CU8F_T03_T05_RE §2.2): the scene wind at map load (land: the active environment's, space: zero); cu8g t03:
     // rewritten by apply_environment after Set_New_Environment.
     prender_.set_wind(scene_->scene_wind());
+    // vis1 t05: the land terrain's height grid for the particles' ground behaviour (space: none).
+    if (!space_) {
+        const terrain::Terrain& t = scene_->map().terrain;
+        std::vector<float> h(static_cast<size_t>(t.width) * t.height);
+        for (uint32_t y = 0; y < t.height; ++y)
+            for (uint32_t x = 0; x < t.width; ++x) h[static_cast<size_t>(y) * t.width + x] = t.height_at(x, y);
+        if (!prender_.set_terrain(h, t.width, t.height, terrain::kVertexSpacing))
+            std::fprintf(stderr, "battle: particle ground test off (terrain upload failed)\n");
+    }
     pattach_ = std::make_unique<render::particles::ProxyAttachments>(*pworld_, *plib_);
 #endif
     // R5: fog colours (GameConstants), land decorations (tracks, scorch marks).

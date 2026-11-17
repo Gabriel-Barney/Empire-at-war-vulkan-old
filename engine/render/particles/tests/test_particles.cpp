@@ -337,6 +337,95 @@ static render::GpuModel fake_model(std::shared_ptr<assets::ModelAsset>& asset, c
     return m;
 }
 
+// vis1 t04 (docs/re/WEATHER_VISUALS.md §6): spawn sources 1 / 2 / 3 place particles on the proxy's parent mesh.
+static void test_spawn_sources() {
+    auto asset = std::make_shared<assets::ModelAsset>();
+    asset->name = "MESHY";
+    asset->skeleton.names = {"ROOT", "B1"};
+    asset->skeleton.parents = {-1, 0};
+    asset->skeleton.visible = {1, 1};
+    asset->skeleton.billboard_mode = {0, 0};
+    assets::Mat3x4 b1;
+    b1.m[2][3] = 30.0f;
+    asset->skeleton.bind_local = {assets::Mat3x4{}, b1};
+    asset->skeleton.finalize();
+    assets::MeshInfo mi;
+    mi.name = "HULL";
+    mi.attach_bone = 0;
+    mi.first_submesh = 0;
+    mi.submesh_count = 1;
+    asset->meshes.push_back(mi);
+    assets::Submesh sm;
+    sm.layout = assets::VertexLayout::Static;
+    sm.vertex_count = 3;
+    sm.vertices.resize(3 * 64);
+    const float vx[3][3] = {{0, 0, 0}, {4, 0, 0}, {0, 4, 0}};
+    for (int k = 0; k < 3; ++k) std::memcpy(sm.vertices.data() + k * 64, vx[k], 12);
+    const uint16_t idx[3] = {0, 1, 2};
+    sm.index_type = assets::IndexType::U16;
+    sm.index_count = 3;
+    sm.indices.resize(sizeof idx);
+    std::memcpy(sm.indices.data(), idx, sizeof idx);
+    asset->submeshes.push_back(sm);
+    asset->proxies.push_back({"SYN_MESH", 1, false});
+    CHECK(ProxyAttachments::parent_mesh(*asset, 0) == nullptr);  // a proxy on the root bone has no parent mesh
+    uint32_t sub = 99;
+    const SpawnMeshPtr pm = ProxyAttachments::parent_mesh(*asset, 1, &sub);
+    CHECK(pm && sub == 0 && pm->positions.size() == 3 && pm->indices.size() == 3 && pm->positions[1].x == 4.0f);
+
+    auto def = std::make_shared<SystemDef>();
+    def->name = "SYN_MESH";
+    for (uint32_t src = 1; src <= 3; ++src) {
+        EmitterDef e = basic_emitter(30, 2.0f, 2.0f);
+        e.spawn_source = src;
+        e.mesh_normal_offset = 2.0f;
+        def->emitters.push_back(e);
+    }
+    finalize_system(*def);
+    ParticleLibrary lib;
+    lib.add(def);
+    ParticleWorld w(1u << 18);
+    w.set_throttle(false);
+    w.set_record_packets(true);
+    ProxyAttachments at(w, lib);
+    render::GpuModel m;
+    m.uid = 91;
+    m.asset = asset;
+    render::Instance in;
+    in.model = &m;
+    in.transform.m[0][3] = 100.0f;  // the mesh is on the root bone: vertex space = the owner transform
+    at.begin();
+    at.sync(1, in);
+    at.end();
+    uint32_t pool3 = 0;
+    w.for_each([&](uint32_t, const SystemState& s) {
+        CHECK(s.mesh != nullptr && s.emitters.size() == 3);
+        if (s.emitters.size() == 3) pool3 = s.emitters[2].pool;
+    });
+    CHECK(pool3 == def->emitters[2].pool * 3u);
+    for (int t = 0; t < 30; ++t) w.update(ParticleWorld::tick_delta(1));
+    const std::vector<UpdatePacket> pk = w.take_packets();
+    uint32_t n[4] = {}, ok[4] = {}, flagged = 0;
+    for (const UpdatePacket& p : pk)
+        for (const SpawnRecord& r : p.spawns) {
+            const uint32_t src = p.emitters[r.emitter].def->spawn_source;
+            flagged += (r.flags & kSpawnMeshPoint) != 0 ? 1u : 0u;
+            const float x = r.point[0] - 100.0f, y = r.point[1], z = r.point[2];
+            ++n[src];
+            bool good = false;
+            if (src == 1)  // a vertex; (4,0,0) and (0,4,0) pushed 1 unit outward along their own direction
+                good = z == 0.0f && ((x == 0.0f && y == 0.0f) || (std::fabs(x - 5.0f) < 1e-4f && y == 0.0f) || (x == 0.0f && std::fabs(y - 5.0f) < 1e-4f));
+            else if (src == 2)  // inside the triangle, 1 unit up its normal
+                good = std::fabs(z - 1.0f) < 1e-4f && x >= -1e-4f && y >= -1e-4f && x + y <= 4.0f + 1e-4f;
+            else  // exactly a vertex, no offset
+                good = z == 0.0f && ((x == 0.0f && y == 0.0f) || (x == 4.0f && y == 0.0f) || (x == 0.0f && y == 4.0f));
+            ok[src] += good ? 1u : 0u;
+        }
+    std::printf("spawn sources: %u / %u / %u spawns on the mesh (sources 1 / 2 / 3)\n", n[1], n[2], n[3]);
+    CHECK(n[1] > 5 && n[2] > 5 && n[3] >= 3 * n[1] - 3 && ok[1] == n[1] && ok[2] == n[2] && ok[3] == n[3]);
+    CHECK(flagged == n[1] + n[2] + n[3]);
+}
+
 static void test_attach() {
     ParticleLibrary lib;
     for (const SystemPtr& s : synthetic_systems()) lib.add(s);
@@ -684,6 +773,79 @@ static void test_gpu(const std::string& src_dir) {
         for (auto h : hs) world.set_visible(h, false);
         world.update(0.03f);
         CHECK(frame(g, o, vm, {}, ro) && pr.last_stats().draw_calls == 0 && pr.last_stats().systems_hidden >= 1);
+        // vis1 t05: ground behaviour over a flat terrain at z = 0 - falling particles pass below it (0x2F = 0), die on it (1)
+        // or bounce off it (2). Lit pixels under each system's ground point: many for 0, (almost) none for 1 and 2.
+        {
+            std::vector<float> flat(21u * 21u, 0.0f);
+            CHECK(pr.set_terrain(flat, 21, 21, 20.0f));
+            ParticleWorld::Handle gh[3] = {};
+            const float gx[3] = {100.0f, 200.0f, 300.0f};
+            for (uint32_t k = 0; k < 3; ++k) {
+                auto s = std::make_shared<SystemDef>();
+                s->name = "SYN_GROUND";
+                EmitterDef e = basic_emitter(40, 3.0f, 5.0f);
+                e.gravity = 90.0f;  // falls: z' = -90
+                e.ground_behavior = k;
+                e.bounciness = 0.5f;
+                s->emitters.push_back(e);
+                finalize_system(*s);
+                assets::Mat3x4 t;
+                t.m[0][3] = gx[k];
+                t.m[1][3] = 200.0f;
+                t.m[2][3] = 40.0f;
+                gh[k] = world.create(s, t);
+            }
+            // A view along the row of systems' normal: pick the orbit yaw that spreads them most on screen.
+            render::ViewMatrices gv{};
+            float spread = -1.0f;
+            float sx[3] = {}, sy = 0.0f;
+            for (const float yaw : {0.0f, 1.5707963f}) {
+                render::OrbitCamera c;
+                c.target = {200, 200, 0};
+                c.yaw = yaw;
+                c.pitch = 0.05f;
+                c.distance = 420.0f;
+                const render::ViewMatrices v = render::make_view(c, o.w, o.h, 1.0f, 5000.0f);
+                float px3[3];
+                float py = 0.0f;
+                for (int k = 0; k < 3; ++k) {
+                    const render::Float4 cl = v.view_proj * render::Float4{gx[k], 200.0f, 0.0f, 1.0f};
+                    px3[k] = (cl.x / cl.w * 0.5f + 0.5f) * static_cast<float>(o.w);
+                    py = (0.5f - cl.y / cl.w * 0.5f) * static_cast<float>(o.h);
+                }
+                const float sp = std::min(std::fabs(px3[1] - px3[0]), std::fabs(px3[2] - px3[1]));
+                if (sp > spread) {
+                    spread = sp;
+                    gv = v;
+                    for (int k = 0; k < 3; ++k) sx[k] = px3[k];
+                    sy = py;
+                }
+            }
+            CHECK(spread > 60.0f);
+            bool gok = true;
+            for (int f = 0; f < 90; ++f) {
+                world.update(ParticleWorld::tick_delta(1));
+                gok = frame(g, o, gv, {}, ro) && gok;
+            }
+            CHECK(gok);
+            const auto* gp = static_cast<const uint8_t*>(o.readback.mapped());
+            uint32_t below[3] = {};
+            for (int k = 0; k < 3; ++k) {
+                const int x0 = std::max(0, static_cast<int>(sx[k]) - 20), x1 = std::min(static_cast<int>(o.w), static_cast<int>(sx[k]) + 20);
+                const int y0 = std::max(0, static_cast<int>(sy) + 6), y1 = static_cast<int>(o.h);
+                for (int y = y0; y < y1; ++y)
+                    for (int x = x0; x < x1; ++x) {
+                        const uint8_t* q = gp + (static_cast<size_t>(y) * o.w + static_cast<size_t>(x)) * 4;
+                        if (q[0] > 60 || q[1] > 60) ++below[k];
+                    }
+            }
+            std::printf("gpu: ground behaviour - lit pixels below the ground: none %u, die %u, bounce %u\n", below[0], below[1], below[2]);
+            CHECK(below[0] > 100 && below[1] < below[0] / 20 && below[2] < below[0] / 20);
+            for (ParticleWorld::Handle h : gh) {
+                world.set_visible(h, false);
+                world.release(h);
+            }
+        }
         g.renderer.set_scene_hook(nullptr);
     }
     g.ring.wait_idle();
@@ -952,6 +1114,7 @@ int main() {
     test_timing();
     test_throttle();
     test_attach();
+    test_spawn_sources();
     test_real_data();
     test_gpu(src_dir);
 #if defined(ALAMO_PARTICLES_HAVE_SIM)

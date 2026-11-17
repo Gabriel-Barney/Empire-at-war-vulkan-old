@@ -42,6 +42,15 @@ private:
     uint32_t s_;
 };
 
+// vis1 t04 (docs/re/WEATHER_VISUALS.md §6, 0x164b00): the parent mesh of a system on a model proxy - submesh 0 of the
+// mesh attached to the proxy bone's parent bone, positions in its vertex space, triangle list indices into them. The
+// spawn sources 1 / 2 / 3 of the system's emitters place particles on it (ParticleWorld::create / set_spawn_mesh_transform).
+struct SpawnMesh {
+    std::vector<Float3> positions;
+    std::vector<uint32_t> indices;
+};
+using SpawnMeshPtr = std::shared_ptr<const SpawnMesh>;
+
 // One particle to initialise on the GPU. `slot` is local to the emitter's pool.
 struct SpawnRecord {
     uint32_t slot = 0;
@@ -52,9 +61,12 @@ struct SpawnRecord {
     uint32_t seed = 0;         // GPU random stream
     int32_t parent_slot = -1;  // linked child: slot in the parent's pool whose particle drives the spawn
     uint32_t flags = 0;        // kSpawnFromDeath: parent position from the death buffer (spawn-on-death child)
+    float point[3] = {0, 0, 0};  // kSpawnMeshPoint: the start position (emitter space: world, or the system's for object space)
+    float pad = 0;
 };
-static_assert(sizeof(SpawnRecord) == 32, "SpawnRecord is a 32-byte GPU record");
+static_assert(sizeof(SpawnRecord) == 48, "SpawnRecord is a 48-byte GPU record");
 inline constexpr uint32_t kSpawnFromDeath = 1u;
+inline constexpr uint32_t kSpawnMeshPoint = 2u;  // vis1 t04: `point` replaces the position shape
 
 // Per emitter of one update.
 struct PacketEmitter {
@@ -137,6 +149,8 @@ struct SystemState {
     bool water = false;     // system flag +0x338: bucket 7 instead of 8
     bool released = false;  // detached: no new spawns (leave particles) - removed once empty
     bool alive = false;
+    SpawnMeshPtr mesh;      // vis1 t04: parent mesh for spawn sources 1-3 (null: they use the position shape [port])
+    Mat3x4 mesh_world;      // its vertex space -> world
     float emission_scale = 1.0f;  // current emission scale (setter index 1, "scalar 0" of B.4: the spawn test)
     float detail_scale = 1.0f;    // current detail scale (setter index 0, "scalar 2" of B.4: Particle Detail slots)
     // Scalar setter state (STRATEGIC_GAPS §6.2, 0x173220): critically damped springs toward the targets, smoothed at the
@@ -176,7 +190,10 @@ public:
     using Handle = uint64_t;  // (generation << 32) | index; 0 = none
     explicit ParticleWorld(uint32_t gpu_capacity = 1u << 19, uint32_t seed = 0x12345678u);
 
-    Handle create(SystemPtr def, const Mat3x4& transform);
+    // vis1 t04: `mesh` / `mesh_world` = the parent mesh of spawn sources 1-3 (a source-3 emitter's pool is its file pool x
+    // the mesh's vertex count, capped at 5,003).
+    Handle create(SystemPtr def, const Mat3x4& transform, SpawnMeshPtr mesh = nullptr, const Mat3x4& mesh_world = {});
+    void set_spawn_mesh_transform(Handle h, const Mat3x4& mesh_world);
     bool valid(Handle h) const;
     // Moves the system. teleport: no velocity / interpolation from the old transform.
     void set_transform(Handle h, const Mat3x4& t, bool teleport = false);
@@ -231,6 +248,8 @@ private:
     void free_system(SystemState& s);
     void step_system(SystemState& s, float d, UpdatePacket* pkt);
     bool take_slot(EmitterState& e, uint32_t& slot);
+    // vis1 t04: a start point on the system's parent mesh for `ed` (source 3: vertex `vertex`); false = no mesh / empty.
+    bool mesh_point(const SystemState& s, const EmitterDef& ed, uint32_t vertex, float (&out)[3]);
     std::vector<SystemState> systems_;
     std::vector<uint32_t> free_systems_;
     RangeAllocator ranges_;
