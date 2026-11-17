@@ -346,6 +346,7 @@ function(alamo_render_add_sim_targets)
   target_sources(alamo_render_sim PRIVATE ${_dir}/src/sim_beams.cpp)  # R5 t04 ability beams (sim_beams.hpp)
   target_sources(alamo_render_sim PRIVATE ${_dir}/src/jam_fx.cpp)  # R5 sensor jamming blob (jam_fx.hpp)
   target_sources(alamo_render_sim PRIVATE ${_dir}/src/blob_shadows.cpp)  # vis1 t02 type blob shadows (blob_shadows.hpp)
+  target_sources(alamo_render_sim PRIVATE ${_dir}/src/ability_fx.cpp)  # vis1 t06 ability target / status particles (ability_fx.hpp)
 
   target_sources(alamo_render_app PRIVATE ${_dir}/app/sim_main.cpp)
   target_link_libraries(alamo_render_app PRIVATE alamo_render_sim)

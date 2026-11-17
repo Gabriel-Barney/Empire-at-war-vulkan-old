@@ -143,6 +143,26 @@ inline constexpr int32_t kStopAdopt = 2;
 // Disable_Movement): stop and leave every coordinator, no adopt (so the first lock that follows adopts: one draw).
 inline constexpr int32_t kStopLeave = 3;
 
+// vis1 t06 (ABILITY_PARTICLES §2-§4): one target visual a special's class ran (the target half of the activation
+// presentation 0x48e4d0, or the stun apply's Stunned_Effect). Presentation only: never hashed, saved or read by the sim.
+enum class AbilityVisualKind : uint8_t {
+    TargetParticle,  // the special's Target_Particle_Effect on `target` (Force_Healing heal / harm, Force_Lightning, Hack, Repair)
+    StunnedEffect,   // Stun_Ability's Stunned_Effect on `target` (each victim the wave stunned)
+};
+struct AbilityVisualEvent {
+    AbilityVisualKind kind = AbilityVisualKind::TargetParticle;
+    uint32_t frame = 0;
+    ObjectId owner = kNoObject;
+    ObjectId target = kNoObject;
+    uint32_t special = 0;  // AbilityData::specials index
+    uint32_t serial = 0;   // 1, 2, ... in record order (the host's cursor; restarts with a new system)
+};
+// vis1 t06: an applied special of an object (AbilitySystem::applied_specials).
+struct AppliedSpecialView {
+    uint32_t special = 0;  // AbilityData::specials index
+    ObjectId target = kNoObject;
+};
+
 struct AbilityEvent {
     AbilityEventKind kind = AbilityEventKind::Activated;
     uint8_t type = 0;  // unit-ability type (0 if not tied to one)
@@ -434,6 +454,15 @@ public:
     // R5 jamming visual (presentation only): the applied Sensor_Jamming_Ability of `id` (null when none / dead) and the radius
     // its update jams with (unit ability 63 Effective_Radius, else the type's Passive_Missile_Shield_Radius).
     const SpecialAbilityDesc* jamming_special(ObjectId id, float& radius) const;
+    // vis1 t06 (ABILITY_PARTICLES §10, presentation only): the specials of `id` that are applied now (list order) with
+    // their targets; the description of a specials index; the target visuals of the last kVisualKeepFrames frames
+    // (record order; a host takes the entries whose serial is above the last one it saw).
+    void applied_specials(ObjectId id, std::vector<AppliedSpecialView>& out) const;
+    const SpecialAbilityDesc* special_desc(uint32_t index) const {
+        return index < data_->specials.size() ? &data_->specials[index] : nullptr;
+    }
+    static constexpr uint32_t kVisualKeepFrames = 64;
+    std::span<const AbilityVisualEvent> visual_events() const { return visuals_; }
     float get_hull(ObjectId id) const { return combat_->script_hull(id); }      // Lua Get_Hull
     float get_shield(ObjectId id) const { return combat_->shield_fraction(id); }  // Lua Get_Shield
 
@@ -968,6 +997,9 @@ private:
     AbilityConfig cfg_;
     std::vector<Obj> objs_;  // sorted by id
     std::vector<AbilityEvent> events_;
+    std::vector<AbilityVisualEvent> visuals_;  // vis1 t06: presentation only (not hashed / saved; visual_events())
+    uint32_t visual_serial_ = 0;               // vis1 t06: the last AbilityVisualEvent::serial
+    void visual(AbilityVisualKind k, uint32_t frame, ObjectId owner, ObjectId target, uint32_t special);
     std::vector<PlayerOverride> overrides_;
     struct TypeOverride {
         int32_t player;

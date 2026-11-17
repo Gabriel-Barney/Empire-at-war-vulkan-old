@@ -229,6 +229,20 @@ Common facts:
 | Heal_Range_Blob_Material | Force_Healing exists (`heal_range` parsed) | none for the special; the selection is the game app's own state | needs a const accessor like `jamming_special` for an object's Force_Healing special (+ material / colour parsing); draw fits `render/jam_fx` |
 | Lighting_Effect_Name | n/a | n/a | none: retail ignores it |
 
+### 10.1 Port (vis1 t06, 2026-11-17)
+
+Done, render particles through `render::apply_battle_ability_fx` (`engine/render/src/ability_fx.cpp`), no CRC change:
+- Force_Healing heal / harm targets, Force_Lightning primary victim, Hack / Repair targets, Stun_Ability victims:
+  `AbilitySystem::visual_events()` (one-shots, recorded at the class sites named in the table above);
+- Earthquake / Telekinesis dust: `AbilitySystem::applied_specials()` (state while applied on the target);
+- Infection: `CombatSystem::infection_attached` + `infection_suspend_count == 0` (state).
+- The descriptions now parse `Target_Particle_Effect`, `Target_Particle_Bone_Name`, `Stunned_Effect`, `Infection_Particle`
+  (presentation only). Bone lists are passed as comma-separated candidates; the particle attachment takes the first bone
+  the model has.
+
+Not done (vis1 t08): `Projectile_Stun_Spawn_Effect` (the stun call in combat has no effect / source parameter),
+`Drain_Effect_Name` bolts, `Base_Shield_Penetration_Particle` (needs the dome hit point), `Heal_Range_Blob_Material`.
+
 ## 11. Function index
 
 | RVA | Function |

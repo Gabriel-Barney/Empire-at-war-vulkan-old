@@ -18,6 +18,7 @@
 #include "alamo/game/game_session.hpp"
 #include "alamo/jobs/job_system.hpp"
 #include "alamo/render/fleet.hpp"
+#include "alamo/render/ability_fx.hpp"  // vis1 t06 ability target / status particles
 #include "alamo/render/beams.hpp"       // R5 ability beams
 #include "alamo/render/blob_shadows.hpp"  // vis1 t02 object blob shadows
 #include "alamo/render/fog_view.hpp"
@@ -184,6 +185,8 @@ public:
     }
     // vis1 t02: shadow detail of the object blob shadows (render::blob_shadow_mode; 0 = Off, kPortShadowDetailOn = On).
     void set_shadow_detail(int32_t detail) { shadow_detail_ = detail; }
+    // vis1 t06: GameConstants Object_Visual_Status_Particle_Attach_Bone_Names (stun / infection particle bones).
+    void set_status_particle_bones(std::string bones) { status_bones_ = std::move(bones); }
     // vis1 t01: the weather the last capture read (land battles; inactive otherwise).
     const render::WeatherView& weather() const { return weather_; }
     // Scripted runs: every model the frame requests is loaded and resident before it is built (ModelStreamer::
@@ -246,6 +249,8 @@ private:
     GpuCore* gpu_ = nullptr;
     const objects::GameObjectTypes* types_ = nullptr;  // S8 t31: the lobbing XML tags
     std::vector<TswCue> lob_chargeups_;               // S8 t31: track_lob_chargeups (battle_fx.hpp)
+    render::AbilityFxTracker ability_fx_;             // vis1 t06 (ability_fx.hpp)
+    std::string status_bones_ = "B_HEAD, Turret_00, B_Turret_00, B_Turret, B_Turret_Base, ROOT";  // vis1 t06 (vanilla value)
     // cu8g t03: the battle's active environment at the last capture (TacticalBattle::environment_index); prepare()
     // re-applies it on the scene (MapScene::set_environment) and the particle wind when it changed.
     uint32_t env_wanted_ = 0;

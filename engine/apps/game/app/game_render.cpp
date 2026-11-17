@@ -370,6 +370,7 @@ bool BattleView::start(GpuCore& gpu, const GameData& data, const GameSession& se
     gpu_ = &gpu;
     types_ = &data.types;
     lob_chargeups_.clear();
+    ability_fx_.reset();  // vis1 t06
     local_ = session.local_player();
     const sim::TacticalBattle* b = session.battle();
     const sim::TacticalMode* tm = session.host().modes().top_tactical();
@@ -582,6 +583,7 @@ bool BattleView::kill_nearest_move_ack(ui::Vec3 p) {
 void BattleView::stop(GpuCore& gpu) {
     acks_.clear();
     lob_chargeups_.clear();
+    ability_fx_.reset();  // vis1 t06
     weather_ = {};
     weather_fx_ = 0;  // the particle world goes below
     weather_fx_name_.clear();
@@ -720,6 +722,9 @@ void BattleView::capture(const GameSession& session) {
             // --- end R3/R5 render ---
         }
 #endif
+    // vis1 t06 (ABILITY_PARTICLES): ability target / status particles, after the corpses so a one-shot on a unit the
+    // ability killed (Force_Lightning's primary) stays on its corpse [port: retail's child-on-parent-death rule is not read].
+    if (const sim::TacticalBattle* b = session.battle()) render::apply_battle_ability_fx(*b, ability_fx_, status_bones_, types_, *snap, &table_);
     if (captured_any_ && snap->tick > last_tick_) pending_ticks_ += static_cast<uint32_t>(snap->tick - last_tick_);
     captured_any_ = true;
     last_tick_ = snap->tick;

@@ -292,7 +292,9 @@ struct SnapshotEffect {
     // R5 Lua GameObjectWrapper.Attach_Particle_Effect(type [, bone]) (lua::ParticleEffectRequest): seq + 1 of the request
     // (0 = not a Lua effect; one system per request, keyed by it) and the bone the system follows ("" = the root).
     uint32_t lua_seq = 0;
-    std::string bone{};
+    std::string bone{};  // vis1 t06: may list candidates, comma separated (the first the model has)
+    // vis1 t06: an ability one-shot (ability_fx.hpp): its occurrence number (0 = none; one system per occurrence).
+    uint32_t fx_seq = 0;
 };
 // R4: SnapshotEffect::percent of an active unit ability's Particle_Effect (128 + ability type 0..75).
 inline constexpr uint8_t kEffectAbilityBase = 128;
