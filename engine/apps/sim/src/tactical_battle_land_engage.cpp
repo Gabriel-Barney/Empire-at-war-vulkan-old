@@ -340,9 +340,12 @@ void TacticalBattle::land_engage_service(TacticalMode& mode, SimRng& rng) {
         const Vec3 tp = st.position(tt->h);
         r.pushed = t;
         r.next = frame_ + 30u;
+        // cmb2 t04 (FIGHTER_FLYING §4.11 B, BKT1_ATTACK_RE §1.3 [H]): Push gives the block a hard point when the object has
+        // hard points (0x394610 Choose_Target_Hardpoint for the TARGETING unit; -1 none)
+        const int32_t hp = combat_->hardpoint_count(t) > 0 ? combat_->choose_target_hardpoint(tu, t) : -1;
         for (const objects::ObjectId id : us)
-            if (combat_->has_unit(id)) combat_->set_attack_goal(id, t);
-        attack_block_set(us.front(), t, kAttackBlockNoLock, tp);
+            if (combat_->has_unit(id)) combat_->set_attack_goal(id, t, hp);
+        attack_block_set(us.front(), t, kAttackBlockNoLock, tp, hp);
         (void)land_attack_order(mode, us, t, tp, 0, false, rng);
         ++stats_.land_auto_pushes;
     }

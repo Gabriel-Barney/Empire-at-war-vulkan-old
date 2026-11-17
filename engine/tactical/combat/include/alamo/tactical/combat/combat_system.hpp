@@ -1262,6 +1262,12 @@ public:
     // bkt1 t06 (b0079, MOVEMENT §4.3.2 item 7): `to` (when given) is the line of fire's end point before T's
     // Ranged_Target_Z_Adjust (the fire trim's goal G); else T's position. The range tests always measure to T.
     CanHit can_hit_from(ObjectId attacker, Vec3 from, ObjectId target, const Vec3* to = nullptr) const;
+    // cmb2 t06 (BKT1_ATTACK_RE §3.2 [H]): TARGETING slots 43 - 46 against a point that is not a combat unit (a story marker,
+    // an object without TARGETING data): pure geometry - no TARGETING (no weapon range, no grenade arc) -> NoTarget; the XY
+    // distance from `from` to `point` > max range + extent -> OutOfMaxRange (a grenade weapon: the lob solver to the point);
+    // <= Targeting_Min_Attack_Distance + extent (a min range > 0) -> InsideMinRange; else the land line of fire (the shield sides, as
+    // can_hit_from; the point takes no Ranged_Target_Z_Adjust).
+    CanHit can_hit_point(ObjectId attacker, Vec3 from, Vec3 point, float extent) const;
     // s78n t25.4 (MOVEMENT §4.3.2 item 7, a guard block's trim): only the land line-of-fire term of can_hit_from (0x3b5ad0,
     // from `from` with the same weapon source): LineBlocked or Yes; NoTarget for an unknown / dead attacker or target.
     CanHit line_of_fire_from(ObjectId attacker, Vec3 from, ObjectId target, const Vec3* to = nullptr) const;  // (no TARGETING: NoTarget)
@@ -1305,6 +1311,9 @@ public:
     HardpointKind hardpoint_kind(ObjectId id, uint32_t hp) const;
     float hardpoint_max(ObjectId id, uint32_t hp) const;  // HP_Get_Max_Health
     bool hardpoint_targetable(ObjectId id, uint32_t hp) const;  // live and Is_Targetable
+    // cmb2 t04 (FIGHTER_FLYING §4.11 D 7, 0x396ce0): the world position of the unit's hard point `hp` (its attach offset);
+    // false for an unknown unit or index
+    bool hardpoint_world(ObjectId id, int32_t hp, Vec3& out) const;
     uint32_t live_hardpoints(ObjectId id, HardpointKind kind) const;  // functioning: not destroyed, not disabled
     ObjectId hardpoint_opportunity_target(ObjectId id, uint32_t hp) const;
     int32_t choose_target_hardpoint(ObjectId attacker, ObjectId target) const;  // 0x394610
@@ -2034,6 +2043,7 @@ private:
     // s78n t20: the same test with its reason (Yes / OutOfMaxRange / InsideMinRange), max range first.
     CanHit range_test(const Unit& u, Vec3 from, const Unit& t) const;
     CanHit fire_line(const Unit& src, Vec3 from, const Unit& t, const Vec3* to = nullptr) const;  // s78n t25.4: can_hit_from's line-of-fire term
+    CanHit fire_line_to(const Unit& src, Vec3 from, Vec3 b) const;  // cmb2 t06: fire_line to a point (b's z adjusted)
     // s78n t20: the unit whose weapon a land team's range test uses (slot 42: the head's, else the first member's that
     // has one, team list order; the head itself when none has).
     const Unit& team_weapon_source(const Unit& head) const;

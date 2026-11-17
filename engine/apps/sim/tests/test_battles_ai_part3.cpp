@@ -9,23 +9,31 @@ namespace {
 
 // The chase ranges on the land types (the test data has none): Idle_Chase_Range 300, Attack_Move_Response_Range 200,
 // Guard_Chase_Range 400 on the company (a squad container's ranges, 0x3973b0) and the trooper (a unit's own).
+// cmb2 t04: with g_trooper_hp the trooper also gets the targetable hard point HP_S10_Laser_A
+bool g_trooper_hp = false;
+
 std::string chase_ranges(std::string t) {
     for (const char* at : {"<GroundCompany Name=\"S10_Squad\">", "<GroundInfantry Name=\"S10_Trooper\">"})
         if (const size_t p = t.find(at); p != std::string::npos)
             t.insert(p + std::strlen(at), "<Idle_Chase_Range>300</Idle_Chase_Range><Attack_Move_Response_Range>200</Attack_Move_Response_Range>"
                                           "<Guard_Chase_Range>400</Guard_Chase_Range>");
+    if (g_trooper_hp)
+        if (const size_t p = t.find("<GroundInfantry Name=\"S10_Trooper\">"); p != std::string::npos)
+            t.insert(p + std::strlen("<GroundInfantry Name=\"S10_Trooper\">"), "<HardPoints>HP_S10_Laser_A</HardPoints>");
     return t;
 }
 
-std::unique_ptr<Data> chase_data(bool squad) {
+std::unique_ptr<Data> chase_data(bool squad, bool trooper_hp = false) {
     static std::string prefix;
     const char* const old = g_temp_prefix;
-    prefix = std::string(old) + (squad ? "_chase_squad" : "_chase_unit");
+    prefix = std::string(old) + (squad ? "_chase_squad" : "_chase_unit") + (trooper_hp ? "_hp" : "");
     g_temp_prefix = prefix.c_str();
+    g_trooper_hp = trooper_hp;
     g_types_patch = chase_ranges;
     auto d = make_data(false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false,
                        false, false, squad);
     g_types_patch = nullptr;
+    g_trooper_hp = false;
     g_temp_prefix = old;
     return d;
 }
@@ -52,6 +60,7 @@ struct LandAutoEngageRun {
     bool found = false, idle_none = false, ordered = false, arrived = false, pushed = false, moved_toward = false;
     bool popped = false, resumed = false;
     uint32_t push_frames = 0, pop_frames = 0;
+    int32_t push_hp = -2;  // cmb2 t04: the hard point the auto block names (-1 none)
 };
 
 LandAutoEngageRun run_land_auto_engage(const Data& d) {
@@ -140,6 +149,7 @@ LandAutoEngageRun run_land_auto_engage(const Data& d) {
             if (r && r->pushed != objects::kNoObjectId) {
                 out.pushed = std::find(emem.begin(), emem.end(), r->pushed) != emem.end();
                 out.push_frames = b->frame() - stage_frame;
+                out.push_hp = b->attack_block_hp(sq);
                 stage = 3;
                 stage_frame = b->frame();
             } else if (b->frame() > stage_frame + 300) {
@@ -324,6 +334,14 @@ void test_land_auto_engage() {
                     r.moved_toward ? 1 : 0, r.popped ? 1 : 0, r.pop_frames, r.resumed ? 1 : 0);
         CHECK(r.found && r.idle_none && r.ordered && r.arrived && r.pushed && r.push_frames <= 120 && r.moved_toward);
         CHECK(r.popped && r.pop_frames <= 61 && r.resumed);
+        CHECK(r.push_hp == -1);  // cmb2 t04: no hard points, no hard point named
+        // cmb2 t04 (FIGHTER_FLYING §4.11 B, BKT1_ATTACK_RE §1.3 [H]): the troopers carry a targetable hard point -> the Push
+        // names one (0x394610); its position is the block's goal point and the engagement adds 0x397780(T)
+        auto dh = chase_data(true, true);
+        const LandAutoEngageRun h = run_land_auto_engage(*dh);
+        std::printf("  land Auto_Engage with a hard point on the target: pushed %d, hard point %d (without: %d)\n", h.pushed ? 1 : 0,
+                    h.push_hp, r.push_hp);
+        CHECK(h.pushed && h.push_hp >= 0);
     }
     {
         auto d = chase_data(true);

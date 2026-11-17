@@ -12,7 +12,7 @@ namespace alamo::sim {
 
 namespace {
 
-constexpr uint32_t kBattleStateVersion = 18;  // 18: cmb1 t01 land formation records; 17: skm2 t02 skirmish sides 2..7 (anchors, facings, records); 16: r3g t01 landing Land / Takeoff clip timing; 15: skm1 t07 skirmish garrison re-delivery; 14: TRU1 t06 retreat flight, t05 / t07 spawners and debris; 13: [port] fleet cohesion per player; 2: S7 t22 fighter formations; 3: S7 t24 formation follow_next / a1i t04 landing objects (two branches); 4: S7 t37 follow_next dropped (the follow is in the movement layer); 5: both merged (formations + landing objects); 6: story t06 victory monitor (replaces the end-hold fields); 7: q6 attacks on TEAM containers / s78f t02 FighterFormationRecord::pushed dropped (the auto blocks are in the movement save) (two branches); 8: both merged; 9: ccpgt t02 domination timer; 10: cu8k t01 Saber_Throw thrower machines; 11: cu8l t03 start fleet arrivals; 12: s78n t20 land attack blocks (exact: older versions are refused)
+constexpr uint32_t kBattleStateVersion = 19;  // 19: cmb2 t03 / t04 AttackBlock::retry / hp; 18: cmb1 t01 land formation records; 17: skm2 t02 skirmish sides 2..7 (anchors, facings, records); 16: r3g t01 landing Land / Takeoff clip timing; 15: skm1 t07 skirmish garrison re-delivery; 14: TRU1 t06 retreat flight, t05 / t07 spawners and debris; 13: [port] fleet cohesion per player; 2: S7 t22 fighter formations; 3: S7 t24 formation follow_next / a1i t04 landing objects (two branches); 4: S7 t37 follow_next dropped (the follow is in the movement layer); 5: both merged (formations + landing objects); 6: story t06 victory monitor (replaces the end-hold fields); 7: q6 attacks on TEAM containers / s78f t02 FighterFormationRecord::pushed dropped (the auto blocks are in the movement save) (two branches); 8: both merged; 9: ccpgt t02 domination timer; 10: cu8k t01 Saber_Throw thrower machines; 11: cu8l t03 start fleet arrivals; 12: s78n t20 land attack blocks (exact: older versions are refused)
 constexpr uint32_t kBattlePartVersion = 2;  // 2: s78n t06 running hero clashes in the Combat part (1 still read: none)
 
 // One module system in a part: presence flag + a section with its own write.
@@ -142,7 +142,7 @@ void TacticalBattle::state_io(Ar& a, Self& b) {
     // cu8l t03: the start fleet's hyperspace arrivals (state version 11; a version 10 battle has none)
     a.seq(b.arrivals_, [](auto& x, auto& r) { x(r.id, r.container, r.timer, r.composes); });
     // s78n t20 stage A: the land attack blocks (state version 12)
-    a.seq(b.attack_blocks_, [](auto& x, auto& r) { x(r.mover, r.target, r.flags, r.next, r.gx, r.gy, r.ox, r.oy, r.oz); });  // ox..oz: v18
+    a.seq(b.attack_blocks_, [](auto& x, auto& r) { x(r.mover, r.target, r.flags, r.next, r.gx, r.gy, r.ox, r.oy, r.oz, r.retry, r.hp); });  // ox..oz: v18, retry / hp: v19
     // [port] fleet cohesion per player (state version 13)
     for (auto& c : b.fleet_cohesion_) a(c);
     // TRU1 t06: the space retreat jump-out flight (state version 14)

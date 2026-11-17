@@ -1606,6 +1606,8 @@ void TacticalBattle::hash(StateHasher& h) const {
             h.f32(r.ox);  // cmb1 t06: the last-observed point
             h.f32(r.oy);
             h.f32(r.oz);
+            h.u32(r.retry);  // cmb2 t03
+            h.i32(r.hp);     // cmb2 t04
         }
     }
     h.u32(placed_[0]);

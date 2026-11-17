@@ -1895,7 +1895,7 @@ void BattleAi::guard_follow_step(ObjectFollow& f, Vec3 tp) {
     const objects::ObjectStore& st = mode_->primary();
     if (b_->land_auto_pushed(f.units.front())) return;
     std::vector<objects::ObjectId> movers;
-    bool moving = false, pushed = false;
+    bool moving = false, pushed = false, failed = false;
     for (const objects::ObjectId id : f.units) {
         const objects::ObjectId m = b_->attack_mover(id);
         if (!b_->movement_->has_unit(m) || std::find(movers.begin(), movers.end(), m) != movers.end()) continue;
@@ -1903,8 +1903,12 @@ void BattleAi::guard_follow_step(ObjectFollow& f, Vec3 tp) {
         const mv::UnitView v = b_->movement_->view(m);
         moving = moving || v.has_goal;
         pushed = pushed || v.pushed;
+        failed = failed || v.failed;
     }
     if (movers.empty()) return;
+    // cmb2 t03 (BKR2 Q7 item 6 [H]): after a failed plan the formation is in state 0 until 2 x FPS < now - the failure
+    // frame (f.next, stamped by replan below): no C 3, no check
+    if (failed && !moving && b_->frame_ < f.next) return;
     const objects::ObjectId lead_id = b_->attack_lead(movers.front());
     const TacticalBattle::Unit* lead = lead_id == objects::kNoObjectId ? nullptr : b_->unit_by_id(lead_id);
     if (!lead) return;
@@ -1912,7 +1916,10 @@ void BattleAi::guard_follow_step(ObjectFollow& f, Vec3 tp) {
     const auto replan = [&](Vec3 goal) {
         f.gx = goal.x;
         f.gy = goal.y;
-        (void)b_->land_attack_order(*mode_, f.units, f.target, goal, mv::kMoveFlagGuardMove, true, rng, true);
+        // cmb2 t03 (BKR2 Q7 item 6 [H]): a failed plan keeps the guard block; the next try waits until 2 x FPS < now - frame
+        if (b_->land_attack_order(*mode_, f.units, f.target, goal, mv::kMoveFlagGuardMove, true, rng, true) ==
+            TacticalBattle::AttackPlan::Failed)
+            f.next = b_->frame_ + 61;
     };
     // BKR2 Q6 [H] (review): every plan, re-path and C 3 test reads the guard's last-observed point P - seen: the object's
     // position (tp); hidden for the lead's owner: frozen (LandFormationRecord::seen); stealthed against the lead's type: the
@@ -2388,7 +2395,7 @@ cmd::RejectReason BattleAi::execute_order(uint8_t player, const cmd::EventData& 
                     auto g = std::find_if(groups.begin(), groups.end(), [&](const auto& x) { return x.first == tu->id; });
                     if (g == groups.end()) g = groups.insert(groups.end(), {tu->id, {}});
                     g->second.push_back(u->id);
-                    b_->attack_block_set(u->id, ct ? ct->id : tu->id, 0, tp);
+                    b_->attack_block_set(u->id, ct ? ct->id : tu->id, 0, tp, ct ? -1 : hp);  // cmb2 t04: the named hard point
                     continue;
                 }
                 const Vec3 up = st.position(u->h);
@@ -2503,6 +2510,14 @@ cmd::RejectReason BattleAi::execute_order(uint8_t player, const cmd::EventData& 
                     // s78n t25.3: on land it is TacticalBattle::attack_stage_goal, inside the attack order below.
                 } else if (order == lua::LuaOrder::AttackMove) {
                     for (const objects::ObjectId id : group.units) b_->combat_->set_attack_goal(id, tc::kNoObject);
+                    // cmb2 t06 (b0075, BKT1_ATTACK_RE §3.1 / §3.5 [H]): an object's own Attack_Move (arg 0) on an object that is
+                    // not a combat unit (a story marker) is the land attack move too - kind 3 with flag 0x01 on the object, no
+                    // lock (TARGETING by geometry: TacticalBattle::attack_can_hit_at); not on the caller or its container
+                    const auto obj = static_cast<objects::ObjectId>(tw);
+                    bool self = false;
+                    for (const objects::ObjectId id : group.units)
+                        self = self || id == obj || b_->attack_mover(id) == obj;
+                    nonhostile_block = !b_->space_ && !self && (le32(b, 20) & at::kTfAttackMoveIssueAttack) == 0;
                 }
             }
             if (order != lua::LuaOrder::AttackMove || tw == cmd::kNoObject)  // refixf t06: position / guard / move blocks
@@ -2528,18 +2543,20 @@ cmd::RejectReason BattleAi::execute_order(uint8_t player, const cmd::EventData& 
             // object (bkt1 t05: a non-hostile one too, no lock) is an attack block of each mover (TacticalBattle::AttackBlock, whose 30-frame checks re-path it: the
             // object follow below leaves it out), and a unit that can already hit it from where it stands takes no path.
             const TacticalBattle::Unit* atu = tw != cmd::kNoObject && tw <= 0x7FFFFFFFu ? b_->unit_by_id(static_cast<objects::ObjectId>(tw)) : nullptr;
-            const bool attack_block = !b_->space_ && order == lua::LuaOrder::AttackMove && !point_goal && atu && atu->alive &&
-                                      !atu->retreated && b_->combat_->has_unit(atu->id) &&
-                                      (nonhostile_block || hostile_owner(player, st.owner(atu->h)));
+            const bool combat_target = atu && atu->alive && !atu->retreated && b_->combat_->has_unit(atu->id);
+            // cmb2 t06: a non-combat object (nonhostile_block set above) is a no-lock attack block as well
+            const bool attack_block = !b_->space_ && order == lua::LuaOrder::AttackMove && !point_goal && tw != cmd::kNoObject &&
+                                      (combat_target ? (nonhostile_block || hostile_owner(player, st.owner(atu->h))) : nonhostile_block);
             if (attack_block) {
                 // s78n t25.3 (MOVEMENT §4.3.2 items 2 / 6 / 7): one movement order with the attack block (flags 0x01) for
                 // the movers; the staging 0x40e260 is the builder's (attack_stage_goal); a formation whose members can all
                 // fire already is stopped by the plan (item 6), the others take the slot and the fire trim
-                const Vec3 tp = st.position(atu->h);
+                const auto aid = static_cast<objects::ObjectId>(tw);
+                const Vec3 tp = st.position(st.find(aid));
                 const uint8_t bf = static_cast<uint8_t>(mv::kMoveFlagAttackMove | (nonhostile_block ? TacticalBattle::kAttackBlockNoLock : 0));
-                for (const objects::ObjectId id : group.units) b_->attack_block_set(id, atu->id, bf, tp);
-                b_->land_order(group.units, mv::kMoveFlagAttackMove, tp, atu->id);  // cmb1 t01: the formation's block
-                (void)b_->land_attack_order(*mode_, group.units, atu->id, tp, mv::kMoveFlagAttackMove, false, host_->random().synced());
+                for (const objects::ObjectId id : group.units) b_->attack_block_set(id, aid, bf, tp);
+                b_->land_order(group.units, mv::kMoveFlagAttackMove, tp, aid);  // cmb1 t01: the formation's block
+                (void)b_->land_attack_order(*mode_, group.units, aid, tp, mv::kMoveFlagAttackMove, false, host_->random().synced());
                 return R::None;
             }
             // a1h t02: an object goal (kind 3) is followed by the movement layer (§33.4). s78n t26 review round 2: Move_To on an

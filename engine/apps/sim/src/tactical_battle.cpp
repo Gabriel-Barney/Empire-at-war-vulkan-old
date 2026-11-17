@@ -702,7 +702,11 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
             if ((movement_->mask_of(mover) & mv::kPassWater) != 0u && map_.terrain.header.water_type != terrain::WaterType::None)
                 from.z = std::max(from.z, map_.terrain.header.water_height);
             const tactical::Vec3 to{g.x, g.y, gz};
-            const tc::CanHit c = los_only ? combat_->line_of_fire_from(unit, from, target, &to) : combat_->can_hit_from(unit, from, target, &to);
+            // cmb2 t06 (BKT1_ATTACK_RE §3.2 / §3.3 item 4 [H]): an object that is not a combat unit (a story marker) is
+            // tested by geometry against G
+            const tc::CanHit c = !combat_->has_unit(target) ? combat_->can_hit_point(unit, from, to, 0.0f)
+                                 : los_only                 ? combat_->line_of_fire_from(unit, from, target, &to)
+                                                            : combat_->can_hit_from(unit, from, target, &to);
             return c == tc::CanHit::Yes || c == tc::CanHit::NoTarget;
         });
         // s78n t26 review round 2 (MOVEMENT §4.3 correction [H]): the formation layout's rank key, Get attack range
@@ -1658,7 +1662,19 @@ tc::CanHit TacticalBattle::attack_can_hit(objects::ObjectId unit, objects::Objec
     return combat_->can_hit_from(unit, from, target);
 }
 
-void TacticalBattle::attack_block_set(objects::ObjectId unit, objects::ObjectId target, uint8_t flags, Vec3 goal) {
+tc::CanHit TacticalBattle::attack_can_hit_at(objects::ObjectId unit, objects::ObjectId target, Vec3 point) const {
+    if (combat_->has_unit(target)) return attack_can_hit(unit, target);
+    tactical::Vec3 from = combat_->can_hit_origin(unit);
+    const objects::ObjectId mover = attack_mover(unit);
+    if (movement_ && movement_->has_unit(mover)) {
+        const mv::V2 p = movement_->view(mover).pos;
+        from.x = p.x;
+        from.y = p.y;
+    }
+    return combat_->can_hit_point(unit, from, tactical::Vec3{point.x, point.y, point.z}, 0.0f);
+}
+
+void TacticalBattle::attack_block_set(objects::ObjectId unit, objects::ObjectId target, uint8_t flags, Vec3 goal, int32_t hp) {
     if (space_ || !movement_ || target == objects::kNoObjectId) return;
     const Unit* u = unit_by_id(unit);
     if (!u || !u->movable) return;
@@ -1668,7 +1684,7 @@ void TacticalBattle::attack_block_set(objects::ObjectId unit, objects::ObjectId 
                                [](const AttackBlock& r, objects::ObjectId v) { return r.mover < v; });
     if (it == attack_blocks_.end() || it->mover != mover) it = attack_blocks_.insert(it, AttackBlock{});
     // [port] the first check 30 frames after the order (the formation timer F +0x1d8 is set at its first state-1 step)
-    *it = AttackBlock{mover, target, flags, frame_ + 30u, goal.x, goal.y, goal.x, goal.y, goal.z};
+    *it = AttackBlock{mover, target, flags, frame_ + 30u, goal.x, goal.y, goal.x, goal.y, goal.z, 0u, hp};
 }
 
 void TacticalBattle::attack_block_drop(std::span<const objects::ObjectId> ids) {
@@ -1797,6 +1813,21 @@ TacticalBattle::AttackPlan TacticalBattle::land_attack_order(TacticalMode& mode,
     }
     if (o.units.empty()) return AttackPlan::None;
     // The target's footprint half extents (0x396850): its movement unit's, else the type's hard extents.
+    // cmb2 t04 (BKT1_ATTACK_RE §1.1 step 4 / §1.3, FIGHTER_FLYING §4.11 D 7 [H]): the hard point the movers' block names
+    // (the first mover's block on this target): C is its position (0x396ce0) and the engagement range adds 0x397780(T)
+    int32_t hp = -1;
+    for (const objects::ObjectId mover : movers) {
+        const auto it = std::lower_bound(attack_blocks_.begin(), attack_blocks_.end(), mover,
+                                         [](const AttackBlock& b, objects::ObjectId m) { return b.mover < m; });
+        if (it == attack_blocks_.end() || it->mover != mover) continue;
+        if (it->target == target) hp = it->hp;
+        break;
+    }
+    if (hp >= 0) {
+        tactical::Vec3 hpp;
+        if (combat_->has_unit(target) && combat_->hardpoint_world(target, hp, hpp)) tp = Vec3{hpp.x, hpp.y, hpp.z};
+        else hp = -1;
+    }
     float thx = 0.0f, thy = 0.0f;
     if (movement_->has_unit(target)) {
         const mv::V2 h = movement_->collision_half(target);
@@ -1845,17 +1876,18 @@ TacticalBattle::AttackPlan TacticalBattle::land_attack_order(TacticalMode& mode,
             e.range = combat_->attack_range(lead);  // 0x3749d0 (Get_Base_Attack_Range)
             // 0x4f6e40 (§4.3.2 item 1; bkt1 t01, BKT1_ATTACK_RE §1.1 [H]): a pending targeted ability with an
             // Activation_Max_Range > 0 gives min(range, that range) - no extent, no guard cap; else + min(hx, hy) of the
-            // target's extents ([port] land blocks name no hard point: the hard-point radius term is not reached)
+            // target's extents, or (cmb2 t04, the block names a hard point) + 0x397780(T): the joint-box diagonal of a land
+            // squad container, else Scale_Factor x the soft footprint radius (CombatSystem::target_radius)
             float amin = 0.0f, amax = 0.0f;
             objects::ObjectId on = objects::kNoObjectId;
             if (pending_ability_ranges(lead, amin, amax, on) && amax > 0.0f) {
                 e.engage = std::min(e.range, amax);
             } else {
-                e.engage = e.range + std::min(thx, thy);
+                e.engage = e.range + (hp >= 0 ? combat_->target_radius(target) : std::min(thx, thy));
                 // s78n t25.4 (item 1): a guard block's engagement range is capped at Land_Guard_Range (GC +0x11ec4)
                 if (guard) e.engage = std::min(e.engage, movement_->constants().land_guard_range);
             }
-            const tc::CanHit c = attack_can_hit(lead, target);
+            const tc::CanHit c = attack_can_hit_at(lead, target, tp);  // cmb2 t06: a marker by geometry
             e.in_range = c == tc::CanHit::Yes || c == tc::CanHit::LineBlocked;  // slots 44 / 45: range only
             e.melee = combat_->melee_attacker(lead);
             // s78o (b0071): TARGETING - a weapon range, or a grenade arc (can_hit answers more than NoTarget)
@@ -1866,7 +1898,21 @@ TacticalBattle::AttackPlan TacticalBattle::land_attack_order(TacticalMode& mode,
         o.attack.units.push_back(e);
     }
     const uint32_t stops = movement_->stats().attack_stops;
+    movement_->clear_attack_plan_failures();
     movement_->move(o, rng, frame_);
+    // cmb2 t03 (BKR2 Q7 item 6 [H]): a failed plan keeps the block; its plan is tried again once 2 x FPS < now - frame
+    bool failed = false;
+    for (const objects::ObjectId mover : movers)
+        if (movement_->attack_plan_failed(mover)) {
+            failed = true;
+            const auto it = std::lower_bound(attack_blocks_.begin(), attack_blocks_.end(), mover,
+                                             [](const AttackBlock& b, objects::ObjectId m) { return b.mover < m; });
+            if (it != attack_blocks_.end() && it->mover == mover) it->retry = frame_ + 61u;
+        }
+    if (failed) {
+        ++stats_.attack_plan_retries;
+        return AttackPlan::Failed;
+    }
     for (const objects::ObjectId mover : movers)
         if (movement_->view(mover).has_goal) return AttackPlan::Moved;
     return movement_->stats().attack_stops != stops ? AttackPlan::Stopped : AttackPlan::None;
@@ -1904,7 +1950,10 @@ void TacticalBattle::attack_block_service(TacticalMode& mode, SimRng& rng) {
     const auto keep = [&](AttackBlock& r) {
         if (!movement_->has_unit(r.mover)) return false;
         const Container* ct = team_target(r.target);
-        if (!ct && !live(unit_by_id(r.target))) return false;  // the target died (signal 0x10)
+        // cmb2 t06 (BKT1_ATTACK_RE §3 [H]): a no-lock block (unit Attack_Move) may name an object that is not a combat unit
+        // (a story marker): it lasts while the object is alive in the store
+        const bool point_target = !ct && (r.flags & kAttackBlockNoLock) != 0 && !combat_->has_unit(r.target);
+        if (point_target ? !st.alive(st.find(r.target)) : (!ct && !live(unit_by_id(r.target)))) return false;  // the target died (signal 0x10)
         // The unit the target is attacked through: the target itself, or (a TEAM container) the member the lead's order names.
         const auto names = [&](const Unit* x) -> objects::ObjectId {
             if (!live(x)) return objects::kNoObjectId;
@@ -1952,8 +2001,12 @@ void TacticalBattle::attack_block_service(TacticalMode& mode, SimRng& rng) {
             bool h = false, s = false;
             attack_target_unseen(st, *lead, tid, h, s);
             const Unit* ou = unit_by_id(tid);
-            if (!h && !s && ou) {
-                const Vec3 p = st.position(ou->h);
+            const objects::ObjectHandle oh = ou ? ou->h : st.find(tid);  // cmb2 t06: a marker is a store object
+            if (!h && !s && st.alive(oh)) {
+                // cmb2 t04 (FIGHTER_FLYING §4.11 D 7): a block naming a hard point reads the hard point's position
+                Vec3 p = st.position(oh);
+                tactical::Vec3 hpp;
+                if (r.hp >= 0 && tid == r.target && combat_->hardpoint_world(tid, r.hp, hpp)) p = Vec3{hpp.x, hpp.y, hpp.z};
                 r.ox = p.x;
                 r.oy = p.y;
                 r.oz = p.z;
@@ -2022,7 +2075,8 @@ void TacticalBattle::attack_block_service(TacticalMode& mode, SimRng& rng) {
                 if (checked[j].locked) continue;
                 if (first_free == checked.size()) first_free = j;
                 const Vec3 q = pos3(checked[j].mover);
-                const Vec3 tc = st.position(unit_by_id(checked[j].tid)->h);
+                const Unit* tu = unit_by_id(checked[j].tid);
+                const Vec3 tc = st.position(tu ? tu->h : st.find(checked[j].tid));  // cmb2 t06: a marker
                 if (q.x == tc.x && q.y == tc.y && q.z == tc.z) continue;  // its goal point is where it stands
                 const float dx = q.x - L.x, dy = q.y - L.y, dz = q.z - L.z;
                 const float dd = (dx * dx + dy * dy) + dz * dz;
@@ -2037,6 +2091,19 @@ void TacticalBattle::attack_block_service(TacticalMode& mode, SimRng& rng) {
             for (const size_t j : g)
                 if (checked[j].due) bi(checked[j].mover)->next = frame_ + 30u;
             continue;
+        }
+        // cmb2 t03 (BKR2 Q7 item 6 [H]): after a failed plan the formation is in state 0 - no 30-frame check, no C 3; the
+        // plan (toward the last-observed point) runs at the first step with 2 x FPS < now - the failure frame
+        {
+            uint32_t retry = 0;
+            for (const size_t j : g) retry = std::max(retry, bi(checked[j].mover)->retry);
+            if (retry != 0) {
+                if (frame_ >= retry) {
+                    for (const size_t j : g) bi(checked[j].mover)->retry = 0;
+                    checked[i].plan = true;
+                }
+                continue;
+            }
         }
         const auto ri = bi(checked[i].mover);
         bool moving = false, pushed = false;
@@ -2093,7 +2160,7 @@ void TacticalBattle::attack_block_service(TacticalMode& mode, SimRng& rng) {
         for (const size_t j : g) bi(checked[j].mover)->next = frame_ + 30u;
         bool can = true;
         for (const size_t j : g) {
-            const tc::CanHit c = attack_can_hit(checked[j].lead, checked[j].tid);
+            const tc::CanHit c = attack_can_hit_at(checked[j].lead, checked[j].tid, tp);  // cmb2 t06: a marker by geometry
             can = can && (c == tc::CanHit::Yes || c == tc::CanHit::NoTarget);  // NoTarget: nothing tested (0x40edd0 true)
         }
         const float gx = tp.x - ri->gx, gy = tp.y - ri->gy, R = 0.5f * lead->range;

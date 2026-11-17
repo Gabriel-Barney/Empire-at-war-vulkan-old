@@ -225,11 +225,11 @@ bool slot_leg_point(V2 g, V2 v, float theta, float q, V2& out) {
 namespace {
 
 constexpr float kAttackInf = 3.0e38f;
+constexpr float kLineReachPiece = 40.0f;  // 0x5a5810: pieces of 40 or more are halved (BKR1 Q7 (c) [H])
 
-// [port] (§4.3.2 item 6, the value the terrain line test 0x5a4c10 "gets" [M]): the distance from a toward b to the entry
-// of the first cell the line test refuses (the thin cell walk of line_passable); the full length when the line is
-// clear, 0 when a's own cell is refused.
-float line_reach(const PassabilityGrid& grid, V2 a, V2 b, uint32_t mask) {
+// The cell walk 0x5a51f0 of a short piece: the distance from a toward b to the entry of the first cell the line test
+// refuses (the thin cell walk of line_passable); the full length when the line is clear, 0 when a's own cell is refused.
+float walk_reach(const PassabilityGrid& grid, V2 a, V2 b, uint32_t mask, bool& ok) {
     int32_t fx = 0, fy = 0;
     bool hit = false;
     walk_cells(a, b, [&](int32_t cx, int32_t cy) {
@@ -240,6 +240,7 @@ float line_reach(const PassabilityGrid& grid, V2 a, V2 b, uint32_t mask) {
         return false;
     });
     const float len = distance(a, b);
+    ok = !hit;
     if (!hit || !(len > 0.0f)) return hit ? 0.0f : len;
     const V2 d = (b - a) * (1.0f / len);
     const float x0 = static_cast<float>(fx) * kCellSize - kHalfCell, y0 = static_cast<float>(fy) * kCellSize - kHalfCell;
@@ -250,6 +251,26 @@ float line_reach(const PassabilityGrid& grid, V2 a, V2 b, uint32_t mask) {
     if (d.y > 0.0f) t = std::max(t, (y0 - a.y) / d.y);
     else if (d.y < 0.0f) t = std::max(t, (y1 - a.y) / d.y);
     return std::min(t, len);
+}
+
+// cmb2 t01 (BKR1 Q7 (c) [H], 0x5a4c10 -> 0x5a5810): the reach of one piece a -> b. a's cell off the grid -> 0 (failure);
+// a's cell enterable for the class and in the same region as b's cell (0x50e780) -> the whole piece with no cell walk (blocked
+// cells inside one region do not shorten it); else a piece shorter than 40 gets the cell walk, a longer one is halved at its
+// midpoint and the first half decides: failure -> its partial reach; success -> its length + the second half's reach.
+float piece_reach(const PassabilityGrid& grid, const RegionMap& regions, V2 a, V2 b, uint32_t mask, bool& ok) {
+    const int32_t ax = world_to_cell(a.x), ay = world_to_cell(a.y);
+    const int32_t ra = regions.region_at(ax, ay);
+    ok = false;
+    if (ra < 0) return 0.0f;
+    if (grid.passable_cell(ax, ay, mask) && ra == regions.region_at(world_to_cell(b.x), world_to_cell(b.y))) {
+        ok = true;
+        return distance(a, b);
+    }
+    if (distance(a, b) < kLineReachPiece) return walk_reach(grid, a, b, mask, ok);
+    const V2 mid = (a + b) * 0.5f;
+    const float first = piece_reach(grid, regions, a, mid, mask, ok);
+    if (!ok) return first;
+    return first + piece_reach(grid, regions, mid, b, mask, ok);
 }
 
 // The unit direction of a path's first / last non-zero segment ((0, 0) when it has none). [port] the port's paths may
@@ -266,6 +287,35 @@ V2 last_dir(std::span<const V2> p) {
 }
 
 }  // namespace
+
+size_t attack_reference_index(std::span<const V2> xy, std::span<const float> z) {
+    if (xy.empty()) return 0;
+    V2 mean{};
+    float mz = 0.0f;
+    for (size_t i = 0; i < xy.size(); ++i) {
+        mean = mean + xy[i];
+        mz += z[i];
+    }
+    mean = mean * (1.0f / static_cast<float>(xy.size()));
+    mz /= static_cast<float>(xy.size());
+    size_t ref = 0;
+    float best = 3.0e38f;
+    for (size_t i = 0; i < xy.size(); ++i) {
+        const float dz = z[i] - mz;
+        const float d = length_sq(xy[i] - mean) + dz * dz;
+        if (d < best) {
+            best = d;
+            ref = i;
+        }
+    }
+    return ref;
+}
+
+float slot_leg_reach(const PassabilityGrid& grid, const RegionMap& regions, V2 g, V2 q, uint32_t mask) {
+    if (!(distance(g, q) > 0.0f)) return 0.0f;
+    bool ok = false;
+    return piece_reach(grid, regions, g, q, mask, ok);
+}
 
 // s78n t25.2: the box loop of place_formation (0x43d6a0; the union of the slot rectangles), factored out for 0x438c10.
 bool MovementSystem::formation_box(const std::vector<uint32_t>& idx, const LandForm& f, V2 axis, float& x0, float& x1,
@@ -393,7 +443,7 @@ bool MovementSystem::arc_slot_test(const MoveOrder& order, const std::vector<uin
 
 // s78n t25.2: 0x438c10 (§4.3.2 item 2) at a new non-guard attack order. L = the formations whose lead is a Land layer
 // object and that have a member not in range (slots 44 / 45 at order time); R = the minimum engagement range over the
-// order's units; the reference formation (nearest to the mean of L's centroids, strict <, first wins; [port] 2-D) is
+// order's units; the reference formation (nearest to the mean of L's centroids, strict <, first wins; cmb2 t02: 3-D) is
 // test-planned (attack_path); fewer than 2 points or a zero last segment -> nothing written. L sorted rear-most first
 // (ascending (centroid - path start) . d0; [port] stable, lead-id tie-break), the six coefficient tries of ring_layout
 // on the ring axis u = -d1 around C, the first success re-run with commit and written to every member of each formation.
@@ -431,18 +481,17 @@ void MovementSystem::attack_slots(const MoveOrder& order, const std::vector<uint
     float r = 3.0e38f;
     for (const uint32_t i : idx)
         if (const LandAttackUnit* e = attack_entry(order, units_[i].d.id)) r = std::min(r, e->engage);
-    V2 mean{};
-    for (const uint32_t i : l) mean = mean + forms[i].centroid;
-    mean = mean * (1.0f / static_cast<float>(l.size()));
-    uint32_t ref = l[0];
-    float best = 3.0e38f;
+    // cmb2 t02 (BKR2 Q7 item 3 [H]): 0x41a9b0's points carry z (the members' 3-D mean; [port] a member's z is the terrain
+    // height under it) and the reference is the formation nearest their mean by the 3-D distance (strict <, first wins)
+    std::vector<V2> lxy;
+    std::vector<float> lz;
     for (const uint32_t i : l) {
-        const float d = length_sq(forms[i].centroid - mean);
-        if (d < best) {
-            best = d;
-            ref = i;
-        }
+        float z = 0.0f;
+        for (const uint32_t m : forms[i].members) z += terrain(units_[idx[m]].m.pos);
+        lxy.push_back(forms[i].centroid);
+        lz.push_back(forms[i].members.empty() ? 0.0f : z / static_cast<float>(forms[i].members.size()));
     }
+    const uint32_t ref = l[attack_reference_index(lxy, lz)];
     const Unit& rlead = units_[idx[forms[ref].members[0]]];
     if (!(r < 3.0e38f)) {
         unslotted(forms[ref]);
@@ -509,7 +558,7 @@ void MovementSystem::attack_slots(const MoveOrder& order, const std::vector<uint
 // able to fire from where it stands (0x40edd0): the members stop as halt() stops them (End Move braking, the path stack
 // cleared), arrived, the slot kept; no path. Else the path to G (attack_path; failure: the members are stopped and
 // failed, the block kept); with a slot (the lead's rho > 0) the slot leg Q' = G + q rot(-v, theta) (v = the first path's
-// last segment, q = line_reach toward G + rho rot(-v, theta)) is taken when a path start -> Q' succeeds and its first
+// last segment, q = slot_leg_reach toward G + rho rot(-v, theta)) is taken when a path start -> Q' succeeds and its first
 // segment points the same way as the first path's (dot > 0): start -> ... -> Q' -> G. The fire trim (trim gate and hook
 // set) cuts the path to fire_trim's keep length (cut_points); each member's goal is its slot point at arc length keep
 // on the uncut path (trim_point, extended, no cell snap): the point the trim tested, also at keep 0 (the path cut to its
@@ -557,7 +606,10 @@ void MovementSystem::attack_plan(const MoveOrder& order, const std::vector<uint3
             --stats_.formation_paths;
             ++stats_.formation_path_failures;
         }
-        // the plan fails: the members do not move ([port] stopped and failed, as the batch-2 zone failure; the block kept)
+        // the plan fails: the members do not move ([port] stopped and failed, as the batch-2 zone failure; the block kept).
+        // cmb2 t03 (BKR2 Q7 item 6 [H]): the movers are listed for the host, which keeps the block and retries the plan
+        // once 2 x FPS < now - the failure frame (TacticalBattle::AttackBlock::retry)
+        for (const uint32_t m : f.members) attack_failed_.push_back(units_[idx[m]].d.id);
         for (const uint32_t m : f.members) {
             if (kept[m]) continue;
             const ObjectId id = units_[idx[m]].d.id;
@@ -583,7 +635,7 @@ void MovementSystem::attack_plan(const MoveOrder& order, const std::vector<uint3
         const V2 v = last_dir(path);
         bool taken = false;
         if (length_sq(v) > 0.0f) {
-            const float q = line_reach(grid_, g, g + rot(v * -1.0f, lead.atk_theta) * lead.atk_rho, mask);
+            const float q = slot_leg_reach(grid_, regions_, g, g + rot(v * -1.0f, lead.atk_theta) * lead.atk_rho, mask);
             V2 qp;
             if (slot_leg_point(g, v, lead.atk_theta, q, qp)) {
                 LandPathRequest rq;

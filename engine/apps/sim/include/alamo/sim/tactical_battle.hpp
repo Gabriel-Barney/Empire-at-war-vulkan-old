@@ -213,6 +213,7 @@ struct BattleStats {
     // s78n t20 stage A (land attack blocks; not saved): approaches re-issued by the 30-frame checks, land stops, and
     // re-approaches skipped because their goal was where the mover stood (s78n t25.3: not retail, dropped - always 0).
     uint32_t attack_reissues = 0, attack_land_stops = 0, attack_reissue_skips = 0;
+    uint32_t attack_plan_retries = 0;  // cmb2 t03: land attack plans that failed and were stamped for the 60-frame retry
     // s78n t26 review round 3 (FIGHTER_FLYING §4.11 C 3): blocks dropped after arrival on a hidden / stealthed target
     uint32_t attack_unseen_drops = 0;
     // cmb1 t01 (land Auto_Engage, LandFormationRecord; not saved): auto attack blocks pushed and popped (the order resumed)
@@ -1323,6 +1324,12 @@ public:
     size_t arrivals_pending() const { return arrivals_.size(); }
     // s78n t20 stage A: the land attack blocks alive (AttackBlock records, one per mover).
     size_t attack_blocks() const { return attack_blocks_.size(); }
+    // cmb2 t04 (tests): the hard point the mover's land attack block names (-1 none or no block)
+    int32_t attack_block_hp(objects::ObjectId mover) const {
+        for (const AttackBlock& r : attack_blocks_)
+            if (r.mover == mover) return r.hp;
+        return -1;
+    }
     // cmb1 t01 / t03: the land formation records (LandFormationRecord, ascending mover; tests and diagnostics)
     std::span<const LandFormationRecord> land_formations() const { return lformations_; }
     // HARDPOINT_DISABLED.md §9.1 (presentation): units whose engines came back online this tick (EnginesOnline: an ENGINE
@@ -2052,6 +2059,14 @@ private:
         // step from 0x583150(block, lead): the target's position while seen, frozen while hidden for the lead's owner, the
         // lead's position while stealthed against its type. Every plan, re-path and C 3 test reads it. Saved (state 18).
         float ox = 0.0f, oy = 0.0f, oz = 0.0f;
+        // cmb2 t03 (BKR2 Q7 item 6 [H]): after a failed plan (0x41c1a0: F +0x1dc := now, the block kept, state 0) the frame
+        // at which the plan is tried again (the first step with 2 x FPS < now - F +0x1dc: failure frame + 61); 0 = none.
+        // Until then the block's checks wait. Saved (state 19).
+        uint32_t retry = 0;
+        // cmb2 t04 (BKT1_ATTACK_RE §1.1 / §1.3 [H]): the hard point the block names (B +0x30; -1 none): Lua
+        // Attack_Target(obj, hpType) and the auto attack Push of an object with hard points (0x394610). Its position is the
+        // block's goal point C (0x396ce0) and the engagement range adds 0x397780(T) instead of min(hx, hy). Saved (state 19).
+        int32_t hp = -1;
     };
     std::vector<AttackBlock> attack_blocks_;
     std::array<uint8_t, 8> fleet_cohesion_{};  // [port] fleet cohesion per player (1 = tight; state version 13)
@@ -2065,10 +2080,14 @@ private:
     tactical::combat::CanHit attack_can_hit(objects::ObjectId unit, objects::ObjectId target) const;
     // The stand-in loops' arrived re-check (land): `u`'s mover has no goal and no top record, and u cannot hit `enemy`.
     bool standin_recheck(const Unit& u, objects::ObjectId enemy) const;
-    void attack_block_set(objects::ObjectId unit, objects::ObjectId target, uint8_t flags, Vec3 goal);  // land only
+    // cmb2 t06 (BKT1_ATTACK_RE §3.2 [H]): attack_can_hit, or for a target that is not a combat unit (a story marker) the
+    // geometric slots 43 - 46 against `point` (CombatSystem::can_hit_point, extent 0 [M: marker types not checked])
+    tactical::combat::CanHit attack_can_hit_at(objects::ObjectId unit, objects::ObjectId target, Vec3 point) const;
+    void attack_block_set(objects::ObjectId unit, objects::ObjectId target, uint8_t flags, Vec3 goal,
+                          int32_t hp = -1);  // land only; hp: cmb2 t04, the block's hard point
     void attack_block_drop(std::span<const objects::ObjectId> ids);
     void attack_block_service(TacticalMode& mode, SimRng& rng);
-    enum class AttackPlan : uint8_t { None, Stopped, Moved };
+    enum class AttackPlan : uint8_t { None, Stopped, Moved, Failed };  // Failed: cmb2 t03, the plan failed (retry stamped)
     // s78n t25.3 (MOVEMENT §4.3.2, FIGHTER_FLYING §4.11 A / E): every land attack order on an object - the human and AI
     // Attack (one call per resolved target), the AI's Attack_Move on an enemy object (flags 0x01), the stand-in loops'
     // auto-attack pushes (0x41fd30, one unit), the TEAM re-pick and the stage A re-plans (replan) - is one movement order

@@ -126,6 +126,7 @@
 // (corridor.hpp) is a stand-alone pass: the port's formation members path individually (no shared formation path).
 // The jiggle draws skip special air units.
 #pragma once
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <span>
@@ -725,6 +726,12 @@ public:
     void tick(uint32_t frame, SimRng& rng, const ParallelFor& pf = serial_for);
     void commit(objects::ObjectStore& store) const;
     const MovementStats& stats() const { return stats_; }
+    // cmb2 t03 (BKR2 Q7 item 6 [H]): the movers whose land attack plan failed (0x41c1a0 returned 0) in the move() calls since
+    // the host last cleared the list. Transient (not saved): the host clears it before an attack order and reads it after.
+    void clear_attack_plan_failures() { attack_failed_.clear(); }
+    bool attack_plan_failed(ObjectId id) const {
+        return std::find(attack_failed_.begin(), attack_failed_.end(), id) != attack_failed_.end();
+    }
     const CollisionLayer& collisions() const { return coll_; }  // land: live collision objects, last driver order
 
     // ---- S10-int: effective-speed factor from the host (MOVEMENT.md 3.4: Mod_Multiplier Speed x
@@ -1797,6 +1804,7 @@ private:
     uint32_t quota_used_ = 0;
     CollisionLayer coll_;  // S7: persistent land collision objects (hashed)
     MovementStats stats_;
+    std::vector<ObjectId> attack_failed_;  // cmb2 t03: transient, see attack_plan_failed
     HostileFn hostile_;              // OI tactical
     ScattersFn scatters_;            // s78n t14 part B: Scatters_From_Crushers by owner (host; not saved)
     LockedFn locked_;                // cu8l t03: the space composition's seed lock (host)
