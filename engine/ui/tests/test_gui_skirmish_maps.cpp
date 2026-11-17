@@ -41,8 +41,30 @@ BEGIN
     COMBOBOX        IDC_PLAYER_COLOR_0,520,68,75,216,CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP
     COMBOBOX        IDC_PLAYER_COLOR_1,520,100,75,216,CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP
     COMBOBOX        IDC_PLAYER_COLOR_2,520,132,75,216,CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_PLAYER_NAME_0,410,300,100,128,CBS_DROPDOWNLIST | WS_TABSTOP
+    COMBOBOX        IDC_PLAYER_NAME_1,410,320,100,128,CBS_DROPDOWNLIST | WS_TABSTOP
+    COMBOBOX        IDC_PLAYER_NAME_2,410,340,100,128,CBS_DROPDOWNLIST | WS_TABSTOP
+    PUSHBUTTON      "x",IDC_SELECT_OPTIONS,240,398,150,24
+END
+
+IDD_INTERNET_STAGING_DIALOG_ADVANCED_SKIRMISH_OPTIONS DIALOGEX 0, 0, 598, 377
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP
+CAPTION "Dialog"
+FONT 8, "Arial", 400, 0, 0x0
+BEGIN
+    PUSHBUTTON      "x",IDC_CANCEL_BUTTON,24,333,160,24
+    PUSHBUTTON      "x",IDC_BUTTON_ACCEPT,410,333,160,24
+    CONTROL         "",IDC_SKIRMISH_CREDITS_SLIDER,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,134,202,322,14
+    LTEXT           "0",IDC_SKIRMISH_CREDITS_VALUE,465,204,87,18
+    PUSHBUTTON      "x",IDC_DEFAULTS_BUTTON,217,333,160,24
+    CONTROL         "x",IDC_ALLOW_HEROES,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,37,54,329,16
+    CONTROL         "x",IDC_ALLOW_STARTING_UNIT_PURCHASE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,37,85,329,16
+    CONTROL         "x",IDC_ALLOW_SUPER_WEAPONS,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,37,114,329,16
+    CONTROL         "x",IDC_PRE_BUILT_BASE,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,37,145,329,16
+    COMBOBOX        IDC_WIN_CONDITION_COMBO,134,261,322,95,CBS_DROPDOWN | CBS_SORT | WS_VSCROLL | WS_TABSTOP
 END
 )RC";
+constexpr const char* kSkirmishOptions = "IDD_INTERNET_STAGING_DIALOG_ADVANCED_SKIRMISH_OPTIONS";
 
 constexpr const char* kSingle = "IDD_SINGLE_PLAYER_GAMES_MENU_DIALOG";
 constexpr const char* kStaging = "IDD_SKIRMISH_STAGING_DIALOG";
@@ -419,6 +441,80 @@ void test_skirmish_colours() {
     bare.acts.clear();
     bare.click(kStaging, "IDC_SKIRMISH_START_GAME_BUTTON");
     CHECK(bare.acts.size() == 1 && bare.acts[0].colors == (std::vector<int32_t>{0, 1}));
+}
+
+// skm1 t02 / t06: the staging screen's Select Options opens IDD_INTERNET_STAGING_DIALOG_ADVANCED_SKIRMISH_OPTIONS (retail
+// 0xea8d0, not the campaign dialog) with the host's defaults; the win condition rows follow the game type (UI.md 9.7: Land
+// 0x12..0x14 with 0x13 selected, Space 0x12 / 0x16 with 0x16, Control 0x15 only); HQ forces the pre-built base on and disables
+// it, Space unchecks and disables it; Accept stores the values and StartSkirmish carries them; a game type change steps the win
+// condition back to the type's default. t06: slot 1 offers TEXT_EASY / MEDIUM / HARD_AI_PLAYER (Medium first), slot 2
+// TEXT_OPEN_PLAYER then the three; Start carries each playing slot's difficulty and slot 1's as `difficulty`.
+void test_skirmish_options() {
+    Rig rig({map_row("_MP_LAND_X", "", 3, false, false), map_row("_MP_SPACE_X", "", 3, true, false)});
+    rig.env.text.add("TEXT_WIN_CONDITION_ALL_ENEMY_UNITS_DESTROYED", u"Units");
+    rig.env.text.add("TEXT_WIN_CONDITION_ALL_ENEMY_STRUCTURES_DESTROYED", u"Structures");
+    rig.env.text.add("TEXT_WIN_CONDITION_ENEMY_COMMAND_HQ_DESTROYED", u"HQ");
+    rig.env.text.add("TEXT_WIN_CONDITION_CONTROL_POINT_DOMINATION", u"Control");
+    rig.env.text.add("TEXT_WIN_CONDITION_SPACE_ENEMY_STARBASE_DESTROYED", u"Starbase");
+    rig.env.text.add("TEXT_EASY_AI_PLAYER", u"Easy");
+    rig.env.text.add("TEXT_MEDIUM_AI_PLAYER", u"Medium");
+    rig.env.text.add("TEXT_HARD_AI_PLAYER", u"Hard");
+    rig.env.text.add("TEXT_OPEN_PLAYER", u"Open");
+    rig.open_staging();
+    rig.select(0);
+    // t06: the AI slot combos
+    CHECK(rig.control("IDC_PLAYER_NAME_1")->items == (std::vector<std::u32string>{U"Easy", U"Medium", U"Hard"}) &&
+          rig.control("IDC_PLAYER_NAME_1")->selected == 1);
+    CHECK(rig.control("IDC_PLAYER_NAME_2")->items == (std::vector<std::u32string>{U"Open", U"Easy", U"Medium", U"Hard"}) &&
+          rig.control("IDC_PLAYER_NAME_2")->selected == 0);
+    auto opts = [&](const GuiDialog* o, const char* id) { return o ? o->get(id) : nullptr; };
+    // Select Options on Land: the skirmish dialog, the defaults, the Land rows with 0x13 selected.
+    rig.click(kStaging, "IDC_SELECT_OPTIONS");
+    CHECK(rig.fe.top() == kSkirmishOptions);
+    const GuiDialog* o = rig.env.gui.find(kSkirmishOptions);
+    CHECK(o != nullptr);
+    if (!o) return;
+    CHECK(opts(o, "IDC_WIN_CONDITION_COMBO")->items == (std::vector<std::u32string>{U"Units", U"Structures", U"HQ"}) &&
+          opts(o, "IDC_WIN_CONDITION_COMBO")->selected == 1);
+    CHECK(opts(o, "IDC_ALLOW_HEROES")->checked && opts(o, "IDC_PRE_BUILT_BASE")->checked && opts(o, "IDC_PRE_BUILT_BASE")->enabled);
+    // HQ: the pre-built base forced on and disabled.
+    rig.env.gui.find(kSkirmishOptions)->set_checked("IDC_PRE_BUILT_BASE", false);
+    rig.env.gui.find(kSkirmishOptions)->set_selected("IDC_WIN_CONDITION_COMBO", 2);
+    rig.fe.update(std::vector<GuiEvent>{event(GuiEvent::Kind::SelectionChanged, kSkirmishOptions, "IDC_WIN_CONDITION_COMBO", 2)}, InputFrame{}, rig.acts);
+    CHECK(opts(o, "IDC_PRE_BUILT_BASE")->checked && !opts(o, "IDC_PRE_BUILT_BASE")->enabled);
+    rig.env.gui.find(kSkirmishOptions)->set_checked("IDC_ALLOW_HEROES", false);
+    rig.env.gui.find(kSkirmishOptions)->set_value("IDC_SKIRMISH_CREDITS_SLIDER", 4);
+    rig.click(kSkirmishOptions, "IDC_BUTTON_ACCEPT");
+    CHECK(rig.fe.top() == kStaging);
+    // t06: slot 1 Hard, slot 2 Easy (playing)
+    rig.env.gui.find(kStaging)->set_selected("IDC_PLAYER_NAME_1", 2);
+    rig.env.gui.find(kStaging)->set_selected("IDC_PLAYER_NAME_2", 1);
+    rig.acts.clear();
+    rig.click(kStaging, "IDC_SKIRMISH_START_GAME_BUTTON");
+    CHECK(rig.acts.size() == 1);
+    if (rig.acts.size() == 1) {
+        const MenuAction& a = rig.acts[0];
+        std::printf("skirmish options: set %d credits %d win 0x%x heroes %d prebuilt %d; difficulties", a.skirmish_options.set ? 1 : 0,
+                    a.skirmish_options.credits, a.skirmish_options.win_condition, a.skirmish_options.heroes ? 1 : 0,
+                    a.skirmish_options.prebuilt_base ? 1 : 0);
+        for (const int32_t v : a.difficulties) std::printf(" %d", v);
+        std::printf(" (slot 1: %d)\n", a.difficulty);
+        CHECK(a.skirmish_options.set && a.skirmish_options.credits == 4000 && a.skirmish_options.win_condition == kWinCommandHq &&
+              !a.skirmish_options.heroes && a.skirmish_options.prebuilt_base && a.skirmish_options.starting_units);
+        CHECK(a.difficulties == (std::vector<int32_t>{1, 2, 0}) && a.difficulty == 2 && a.factions.size() == 3);
+    }
+    // Space: the win condition steps back to the type's default (0x16) and the pre-built base is off and disabled.
+    rig.game_type(true);
+    rig.click(kStaging, "IDC_SELECT_OPTIONS");
+    o = rig.env.gui.find(kSkirmishOptions);
+    CHECK(o && opts(o, "IDC_WIN_CONDITION_COMBO")->items == (std::vector<std::u32string>{U"Units", U"Starbase"}) &&
+          opts(o, "IDC_WIN_CONDITION_COMBO")->selected == 1 && !opts(o, "IDC_PRE_BUILT_BASE")->checked && !opts(o, "IDC_PRE_BUILT_BASE")->enabled);
+    rig.click(kSkirmishOptions, "IDC_CANCEL_BUTTON");
+    // Control points: one row.
+    rig.set_type(kSkirmishGameControl);
+    rig.click(kStaging, "IDC_SELECT_OPTIONS");
+    o = rig.env.gui.find(kSkirmishOptions);
+    CHECK(o && opts(o, "IDC_WIN_CONDITION_COMBO")->items == (std::vector<std::u32string>{U"Control"}));
 }
 
 }  // namespace test_gui_screens_t

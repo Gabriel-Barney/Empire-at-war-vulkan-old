@@ -572,6 +572,7 @@ void test_targeting() {
 
 namespace test_gui_screens_t {
 void test_skirmish_maps();  // test_gui_skirmish_maps.cpp (p4ui t06)
+void test_skirmish_options();  // test_gui_skirmish_maps.cpp (skm1 t02 / t06)
 void test_skirmish_preview();  // p4uim t03 / t04
 void test_skirmish_colours();  // p4uia t01 / t02
 void test_skirmish_control_points();  // ccpgt t02
@@ -579,6 +580,7 @@ void test_skirmish_control_points();  // ccpgt t02
 
 int main() {
     test_skirmish_maps();
+    test_skirmish_options();
     test_skirmish_preview();
     test_skirmish_colours();
     test_skirmish_control_points();
