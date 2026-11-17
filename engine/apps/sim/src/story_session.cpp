@@ -1242,7 +1242,7 @@ void StorySession::apply_reward(Set& s, const std::string& type, const std::vect
             if (player < 0) {
                 note("TRIGGER_AI failed: unknown faction " + faction);
             } else {
-                int32_t loc = 0;
+                int32_t loc = -1;  // storyb t10: "no target", the value Check_Story_Flag looks up for a nil location
                 if (params.size() > 2 && !ascii_trim(params[2]).empty()) {
                     const PlanetIndex row = reward_planet(std::string(ascii_trim(params[2])));
                     if (row == kInvalidPlanet) note("TRIGGER_AI: Unable to find planet " + std::string(ascii_trim(params[2])));

@@ -1135,6 +1135,14 @@ bool ConflictManager::begin_battle(const ConflictInfo& head, Linked linked, uint
     bool ok = true;
     req.map = choose_map(head, req.base_level, &ok);
     if (!ok) return false;
+    if (linked == Linked::Plain) {
+        // storyb t15 (BT §2.9.3 step 5-6 / §2.9.5 [H]): a non-sandbox linked battle clears the planet snapshot (+0x518, the
+        // base fields) with both force maps, so no galactic structure or starbase enters and the base level is 0: every
+        // map object comes from the .ted (objects above base level 0 are dropped) and the mission's plots.
+        req.structures.clear();
+        req.starbase = ObjectHandle{};
+        req.base_level = 0;
+    }
     if (linked == Linked::Plain) {  // BT §2.9.5: both force maps cleared, no galactic unit enters the battle
         for (int32_t pl : {head.defender, head.attacker}) {
             BattleForces f;

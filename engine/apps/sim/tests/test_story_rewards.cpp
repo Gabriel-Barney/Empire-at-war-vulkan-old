@@ -175,6 +175,7 @@ static std::string sty1_plot() {
     p += ev("Own_SB", "CHANGE_OWNER", {"SB1", "Underworld"});
     p += ev("Ai_Flag", "TRIGGER_AI", {"Flag_X", "Underworld", "PlanetC"});
     p += ev("Ai_Flag_Bad", "TRIGGER_AI", {"Flag_Y"});
+    p += ev("Ai_Flag_None", "TRIGGER_AI", {"Flag_Z", "Underworld"});  // storyb t10: no planet
     return p + "</Story>\n";
 }
 
@@ -276,6 +277,9 @@ static void test_sty1_rewards() {
             CHECK(!ss->model(0).check_ai_flag(pUnder, "Flag_X", 0, false));
             CHECK(ss->model(0).check_ai_flag(pUnder, "Flag_X", loc, true) && !ss->model(0).check_ai_flag(pUnder, "Flag_X", loc, false));
             CHECK(!ss->model(0).check_ai_flag(pUnder, "Flag_Y", 0, false));
+        }
+        {  // storyb t10: a TRIGGER_AI without a planet is found by Check_Story_Flag with a nil location (-1)
+            CHECK(ss->model(0).check_ai_flag(pUnder, "Flag_Z", -1, true) && !ss->model(0).check_ai_flag(pUnder, "Flag_Z", 0, false));
         }
         // Save: a deterministic image; hash identical across worker counts.
         ByteWriter w1, w2;

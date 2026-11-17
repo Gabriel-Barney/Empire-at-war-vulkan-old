@@ -477,8 +477,10 @@ polls with `Check_Story_Flag`. Enum code 0x1f (name string 0x86c358, table entry
   no AI (player +0x360 null, e.g. a human) logs "player of faction %s has no AI, trigger failed" and stops. So a missing
   Param2 never defaults to the plot player.
   Many shipped events (INTERVENTION_*, SANDBOX_EVENT_CONTRIVED_ATTACK, SANDBOX_EVENT_TRAP_GALACTIC, ...) give only
-  Param1, so they are **dropped by the missing-Param2 rule**: [M] the check on +0x80 is read in the decompile exactly as
-  written; no second default path was seen. Events with Param2 (Rebel / Empire) do reach the AI.
+  Param1 in XML, but the AI plan scripts (`Data/Scripts/Interventions/*.lua`) fill Param2 (and Param3 for four) with
+  `Set_Reward_Parameter` before `plot.Activate()`; only Pirate_Defection_02, Rebel_Sabotage_02 and
+  Indigenous_Revolt_08 never get a Param2 and are dropped (storyb t10, `STORYB_T10_TRIGGER_AI.md` §2, corrects the
+  earlier "all Param1-only events are dropped").
 - **Param3** [H]: planet found by type name through 0x407e00 + 0x2a87d0 (first live instance); if not found it logs
   "STORY REWARD TRIGGER AI- Unable to find planet %s" and the flag is still set with **no target** (key target 0).
 - **Write** [H]: 0x4b0d20 finds the AI sub-object whose mode equals the current game mode (the player AI keeps one
