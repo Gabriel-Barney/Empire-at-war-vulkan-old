@@ -135,6 +135,7 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
             if (const uint32_t pt = skirmish_galaxy_planet(d.rules, spec_.skirmish_map, sk.land); pt != galactic::kNoIndex)
                 sk.planet_type = d.rules.types[pt].name;
         sk.no_forces = spec_.attract;  // q6 t02: the demo's forces are cleared below; a mod faction without a fleet must not fail it
+        sk.empty_slots_ok = skirmish_map_battle();  // modc t48: a slot may start with nothing (no opening hop needs a fleet)
         if (!make_skirmish_galaxy(d, sk, setup_, &err)) return fail(err);
         if (skirmish_map_battle()) {
             // skm1 t02: the options (unset = the MP_Default_* values); SKIRMISH_SETUP §2 step 3: every player starts with the

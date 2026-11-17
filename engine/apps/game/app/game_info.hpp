@@ -45,7 +45,9 @@ public:
     }
     void sample(const galactic::GalacticSim& g);
     // Conflict results (ConflictManager log) and the local plot set's story dialogs, newest first.
-    ui::DroidLogInfo droid_log(const GameSession& s, const GameData& d, const ui::TextDatabase& text) const;
+    // ui4 t11: the story dialog log, then `advisor_rows` (droid_log_rows of the advisor lines shown so far).
+    ui::DroidLogInfo droid_log(const GameSession& s, const GameData& d, const ui::TextDatabase& text,
+                               std::span<const std::u32string> advisor_rows) const;
     ui::DataChartInfo chart(const galactic::GalacticSim& g, const GameData& d, const ui::TextDatabase& text) const;
     // Tech tree of the player's faction (Underworld: the black-market tree): researched = Tech_Level <= the player's,
     // available = one above, locked = higher; types without a tech level are researched.

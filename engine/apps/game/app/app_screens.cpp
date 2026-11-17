@@ -1,6 +1,7 @@
 // alamo_game App: screens, panels, saves, battle prompts, holocron / encyclopedia, cursor (split from game_main.cpp).
 #include "game_app.hpp"
 #include "alamo/vfs/vfs.hpp"  // q6: the mod layer decides the buy list's [port interim rule]
+#include "alamo/sim/l1_loaders.hpp"  // modc t49: skirmish_option_defaults
 
 namespace alamo_game_app {
 
@@ -90,6 +91,16 @@ bool App::skirmish_map_is_land(const std::string& map) const {
 // default fleet. The list is the original dialog's (game::skirmish_buy_list: cost > 0, Affiliation, Available_In_Skirmish
 // or the map kind's build tab, not cinematic-only, named heroes hidden, most expensive first, no cap: the list box scrolls).
 void App::open_buy_units(const SessionSpec& spec) {
+    // modc t49: with the "free starting units" option off (Fall of the Republic sets MP_Default_Free_Starting_Units = no) the
+    // slots start without forces (SKIRMISH_SETUP §2 step 4) and the original allows no starting purchase (the flag's control
+    // is IDC_ALLOW_STARTING_UNIT_PURCHASE, §2.7): the screen is skipped, as a bought fleet would never reach the map.
+    const sim::BattleConfig::SkirmishOptions opts =
+        spec.skirmish_options.set ? spec.skirmish_options : sim::skirmish_option_defaults(data_.db.constants());
+    if (!opts.starting_units && !spec.attract && !spec.skirmish_hop) {
+        std::printf("skirmish buy screen skipped: free starting units off, the slots start without forces\n");
+        if (!start_session(spec)) open_main_menu();
+        return;
+    }
     pending_skirmish_ = spec;
     bought_.clear();
     buy_ = {};
@@ -232,6 +243,9 @@ void App::handle_screen_actions(const std::vector<ui::ScreenAction>& acts) {
             case K::StorySummaryGoal:  // GALACTIC_DIALOGS §2.2: a record chosen in the goal list -> refill with it
                 if (a.button >= 0 && static_cast<size_t>(a.button) < summary_rows_.size()) summary_entry_ = summary_rows_[static_cast<size_t>(a.button)];
                 open_story_summary();
+                break;
+            case K::InfoHintsToggled:  // ui4 t07 (HUD_GAPS §10.2): IDC_HINTS_CHECK switches every mode's advisor hints
+                story_present_.set_advisor_all(a.button == 1);
                 break;
             case K::StorySummaryFilter:
                 summary_completed_ = a.button == 1;
@@ -855,7 +869,9 @@ void App::show_campaign_end(bool victory) {
 void App::open_holocron(ui::InfoPage page) {
     const galactic::GalacticSim* g = galaxy();
     if (!g) return;
-    info_.set_droid_log(holo_.droid_log(*session_, data_, ui_.text));
+    ui::DroidLogInfo dl = holo_.droid_log(*session_, data_, ui_.text, droid_rows_);
+    dl.hints = story_present_.any_advisor();  // HUD_GAPS §10.2: checked when any mode's advisor hints are on
+    info_.set_droid_log(std::move(dl));
     info_.set_data_chart(holo_.chart(*g, data_, ui_.text));
     info_.set_tech_tree(holo_.tech_tree(*g, data_, ui_.hud_types, local_player(), false));
     info_.set_summary(holo_.summary(*g, data_, ui_.text, ui_.hud_types, local_player()));
@@ -959,6 +975,28 @@ void App::build_encyclopedia(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
                 object = id;
                 type = t;
             }
+    // ui4 t07 (HUD_GAPS §2.2): a hovered build pad or queue hologram shows its type's pop-up (keyed kEncyTypeKey | type: it
+    // has no object), an organiser / land-forces unit pad its unit's.
+    if (component < 0 && screen_ == Screen::Galactic && routed_.hover_component >= 0) {
+        constexpr uint32_t kEncyTypeKey = 0xE0000000u;  // [port] above every object id the sim hands out
+        ui::GalacticHud::PadSubject ps;
+        if (ui_.galactic_hud.pad_subject(routed_.hover_component, ps)) {
+            objects::TypeIndex t = objects::kNone;
+            if (ps.object != 0) {
+                if (const galactic::GalacticSim* g = galaxy()) {
+                    const objects::ObjectHandle hnd = g->store().find(static_cast<objects::ObjectId>(ps.object));
+                    if (hnd && g->store().alive(hnd)) t = g->store().type(hnd);
+                }
+            } else if (ps.type < data_.types.size()) {
+                t = static_cast<objects::TypeIndex>(ps.type);
+            }
+            if (t != objects::kNone && t < data_.types.size()) {
+                component = routed_.hover_component;
+                object = ps.object != 0 ? ps.object : (kEncyTypeKey | static_cast<uint32_t>(t));
+                type = t;
+            }
+        }
+    }
     ency_.update(component, object, now_s_);  // every frame: the countdown / fade run on the panel
     // Remember the hovered object's type so the pop-up of shown_object() still draws while it fades out; keep only the
     // shown and the hovered subjects.

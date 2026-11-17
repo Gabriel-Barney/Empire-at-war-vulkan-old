@@ -123,6 +123,10 @@ struct SkirmishSetup {
     // q6 t02 [port]: no starting forces and no "unknown unit" failure - the attract demo clears the forces anyway (every unit
     // comes from its map), and a mod's Underworld may have no default fleet (Thrawn's Revenge). Not saved (the demo is never).
     bool no_forces = false;
+    // modc t48: a slot whose forces name no known unit type starts empty instead of failing the setup. GameSession sets it
+    // for the skirmish map battle (no opening hop needs a fleet): retail starts a slot with nothing when its faction has no
+    // default forces (Age of Legends' land skirmish, modc t09 A4). Derived from the session kind, not saved.
+    bool empty_slots_ok = false;
     // ccpgt t02: the staging screen's Capture Control Points game type (4) on a land map: the battle's win condition is 0x15
     // CONTROL_POINT_DOMINATION (sim::BattleConfig::control_point_domination, SKIRMISH_SETUP §4.2). Saved.
     bool control_points = false;

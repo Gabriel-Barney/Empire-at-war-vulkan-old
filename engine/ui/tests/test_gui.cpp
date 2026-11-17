@@ -1343,6 +1343,9 @@ const char* kGalacticXml = R"(<?xml version="1.0"?>
   <CommandBarComponent Name="g_weather"><Type>Button</Type><No_Shell>True</No_Shell><Color>255 255 255 255</Color><Offset>-20 -31</Offset></CommandBarComponent>
   <CommandBarComponent Name="g_planet_ability"><Type>Button</Type><No_Shell>True</No_Shell><Color>255 255 255 255</Color><Offset>0 -34</Offset></CommandBarComponent>
   <CommandBarComponent Name="g_build"><Type>Button</Type><Icon_Texture_Name>i_icon_build.tga</Icon_Texture_Name><No_Shell>True</No_Shell></CommandBarComponent>
+  <CommandBarComponent Name="g_ground_level_pips"><Type>Button</Type><Icon_Alternate_Texture_Name>i_pip1.tga i_pip1.tga</Icon_Alternate_Texture_Name><No_Shell>True</No_Shell><Default_Offset>34 -26</Default_Offset></CommandBarComponent>
+  <CommandBarComponent Name="g_space_level_pips"><Type>Button</Type><Icon_Alternate_Texture_Name>i_pip2.tga i_pip2.tga</Icon_Alternate_Texture_Name><No_Shell>True</No_Shell><Default_Offset>34 -13</Default_Offset></CommandBarComponent>
+  <CommandBarComponent Name="Text_Land_Fleet"><Type>TextButton</Type><Font_Name>EmpireAtWar-Medium</Font_Name><Font_Point_Size>10</Font_Point_Size><Text_Offset2>0 -20</Text_Offset2></CommandBarComponent>
   <CommandBarComponent Name="g_corruption_icon"><Type>Button</Type><Icon_Texture_Name>i_icon_corrupted.tga</Icon_Texture_Name><No_Shell>True</No_Shell></CommandBarComponent>
   <CommandBarComponent Name="g_enemy_hero"><Type>Button</Type><Icon_ALternate_Texture_Name>i_icon_hero.tga i_icon_empire_hero.tga</Icon_ALternate_Texture_Name>
     <No_Shell>True</No_Shell></CommandBarComponent>
@@ -1387,11 +1390,22 @@ const char* kGalacticXml = R"(<?xml version="1.0"?>
     <Build_Texture_Name>i_button_build.tga</Build_Texture_Name></CommandBarComponent>
   <CommandBarComponent Name="b_Create_01"><Type>TextButton</Type><Blank_Texture_Name>i_button_units.tga</Blank_Texture_Name></CommandBarComponent>
   <CommandBarComponent Name="b_Create_02"><Type>TextButton</Type><Blank_Texture_Name>i_button_units.tga</Blank_Texture_Name></CommandBarComponent>
+  <CommandBarComponent Name="b_Create_03"><Type>TextButton</Type><Blank_Texture_Name>i_button_units.tga</Blank_Texture_Name></CommandBarComponent>
+  <CommandBarComponent Name="b_Create_04"><Type>TextButton</Type><Blank_Texture_Name>i_button_units.tga</Blank_Texture_Name></CommandBarComponent>
+  <CommandBarComponent Name="b_Create_05"><Type>TextButton</Type><Blank_Texture_Name>i_button_units.tga</Blank_Texture_Name></CommandBarComponent>
+  <CommandBarComponent Name="b_space_tab"><Type>Button</Type><Icon_Texture_Name>i_button_units.tga</Icon_Texture_Name><Group>Build_Tab</Group><Tab>True</Tab></CommandBarComponent>
+  <CommandBarComponent Name="b_planet_tab"><Type>Button</Type><Icon_Texture_Name>i_button_units.tga</Icon_Texture_Name><Group>Build_Tab</Group><Tab>True</Tab></CommandBarComponent>
+  <CommandBarComponent Name="b_dial"><Type>Button</Type><Icon_Alternate_Texture_Name>i_button_units.tga i_button_options.tga</Icon_Alternate_Texture_Name></CommandBarComponent>
   <CommandBarComponent Name="queue00"><Type>TextButton</Type><Blank_Texture_Name>i_button_hologram.tga</Blank_Texture_Name>
     <Build_Texture_Name>i_button_build.tga</Build_Texture_Name></CommandBarComponent>
   <CommandBarComponent Name="q1_0001"><Type>TextButton</Type><Blank_Texture_Name>i_button_unit_frame.tga</Blank_Texture_Name></CommandBarComponent>
   <CommandBarComponent Name="q1_0002"><Type>TextButton</Type><Blank_Texture_Name>i_button_unit_frame.tga</Blank_Texture_Name></CommandBarComponent>
-  <CommandBarComponent Name="land_fleet_00"><Type>TextButton</Type></CommandBarComponent>
+  <CommandBarComponent Name="land_fleet_00"><Type>TextButton</Type><Drag_And_Drop>True</Drag_And_Drop></CommandBarComponent>
+  <CommandBarComponent Name="map_window"><Type>Icon</Type><Size>512 512</Size><Scale>1.25</Scale><Color>200 200 200 255</Color></CommandBarComponent>
+  <CommandBarComponent Name="unit_pad00"><Type>TextButton</Type><Blank_Texture_Name>i_button_buildings.tga</Blank_Texture_Name>
+    <Drag_And_Drop>True</Drag_And_Drop></CommandBarComponent>
+  <CommandBarComponent Name="unit_cap_number"><Type>TextButton</Type></CommandBarComponent>
+  <CommandBarComponent Name="back_button"><Type>TextButton</Type><Icon_Texture_Name>back_button.tga</Icon_Texture_Name></CommandBarComponent>
   <CommandBarComponent Name="objective_back"><Type>TextButton</Type><Blank_Texture_Name>i_tooltip_back.tga</Blank_Texture_Name>
     <No_Shell>True</No_Shell><Base_Layer>3</Base_Layer><Color>255 255 255 80</Color><Size>266 14</Size>
     <Default_Offset>383 -180 </Default_Offset><Default_Offset_Widescreen>530 -350 </Default_Offset_Widescreen><Offset>5 2</Offset></CommandBarComponent>
@@ -1584,11 +1598,17 @@ void test_galactic_dialogs() {
         planets[0].name = U"Kuat";
         hud.build(f);
     }
-    // §5.1 pads: blue (index 1) for the space option, amber (0) for the ground one; cost not in text2 (drawn at the bottom).
+    // §5.1.1 pads: the land tab (the start) lists the ground option on an amber pad (index 0), the space tab the space one
+    // on a blue pad (1); cost not in text2 (drawn at the bottom).
     {
         const ButtonRuntime* c0 = state("b_Create_00");
-        const ButtonRuntime* c1 = state("b_Create_01");
-        CHECK(c0 && c1 && c0->alt == 1 && c1->alt == 0 && c0->text2.empty() && hud.stats().build_buttons == 2);
+        CHECK(c0 && c0->alt == 0 && c0->text2.empty() && hud.stats().build_buttons == 1);
+        hud.set_build_tab(true);
+        hud.build(f);
+        c0 = state("b_Create_00");
+        CHECK(c0 && c0->alt == 1 && hud.stats().build_buttons == 1);
+        hud.set_build_tab(false);
+        hud.build(f);
     }
     // §5.2 queue: space entries on queue00.., ground on queue05...
     CHECK(has_hit("queue00") && has_hit("queue01") && has_hit("queue05") && !has_hit("queue02") && !has_hit("queue06") &&
@@ -1828,6 +1848,22 @@ void test_galactic_hud() {
                 s.label_icons, s.buttons, s.build_buttons, s.queue_entries, s.fleet_slots, s.objectives, s.hit_boxes);
     CHECK(s.labels == 2 && s.label_icons == 1 && s.build_buttons == 1 && s.queue_entries == 1 && s.fleet_slots == 2 &&
           s.objectives == 2 && hud.selected_planet() == 1);
+    // ui4 t07 (HUD_GAPS §2.2): the encyclopedia subject of each pad - the build pad's and the queue hologram's type, the
+    // organiser unit pads' units; nothing for the other components.
+    {
+        uint32_t build_types = 0, queue_types = 0, units = 0, other = 0;
+        for (int32_t c = 0; c < static_cast<int32_t>(table.size()); ++c) {
+            GalacticHud::PadSubject ps;
+            if (!hud.pad_subject(c, ps)) continue;
+            if (ps.object == 0 && ps.type == 7) ++queue_types;
+            else if (ps.object == 0 && ps.type == planets[1].planet) ++build_types;
+            else if (ps.object == 901 || ps.object == 902) ++units;
+            else ++other;
+        }
+        CHECK(build_types == 1 && queue_types == 1 && units == 2 && other == 0);
+        GalacticHud::PadSubject ps;
+        CHECK(!hud.pad_subject(-1, ps));
+    }
     // t49: g_planet_ring round every visible planet, at its atlas size, selected or not, fogged too; g_planet_value only with
     // the b_filters0 toggle on.
     {
@@ -1847,18 +1883,26 @@ void test_galactic_hud() {
             hud.build(f);
         }
     }
-    // ui4 t03: the filters gate the base-level pips (b_filters1), the weather / ability icons (b_filters2) and the credit bar
-    // (b_filters0); filter_bits reports the toggles; the status icons and the corruption line need no filter.
+    // ui4 t03 / t10 (GALAXY_MAP_PRESENTATION §1.7): b_filters1 gates the level pip rows (one pip per level up to the max,
+    // full owner colour below the level, half above), b_filters2 the weather / ability icons and a corrupted planet's
+    // corruption icon, b_filters0 the "+N" value; no credit bar; the uncorrupted info icon, g_build and the corruption line
+    // need no filter; g_enemy_hero (multiplayer) is never drawn.
     {
         std::vector<GalacticPlanetInfo> fp = planets;
         for (GalacticPlanetInfo& p : fp) {
             p.ground_level = 1;
+            p.ground_max = 3;
+            p.space_level = 0;
+            p.space_max = 2;
+            p.owner_color = {200, 100, 50, 255};
             p.weather_icon = "i_pa_weather_rain.tga";
             p.ability_icon = "i_pa_galactic_production_boost.tga";
             p.credits = 40;
             p.credit_level = 2;
         }
         fp[0].building = fp[0].corrupted = true;
+        fp[0].corruption_icon = "i_icon_corrupted.tga";
+        fp[1].corruption_icon = "i_icon_build.tga";  // the uncorrupted info icon
         fp[0].enemy_hero = 1;
         fp[0].corruption_text = U"Corrupting: 40%";
         GalacticHudFrame ff = f;
@@ -1866,14 +1910,21 @@ void test_galactic_hud() {
         hud.build(ff);
         const uint32_t icons_off = hud.stats().label_icons;
         CHECK(hud.filter_bits() == 0 && hud.stats().level_pips == 0 && hud.stats().weather_icons == 0 && hud.stats().ability_icons == 0 &&
-              hud.stats().credit_bars == 0 && hud.stats().corruption_texts == 1);
+              hud.stats().credit_bars == 0 && hud.stats().corruption_texts == 1 && hud.stats().planet_values == 0);
         hud.build(f);
-        CHECK(icons_off == hud.stats().label_icons + 3);  // g_build, g_corruption_icon, g_enemy_hero on planet 0
+        CHECK(icons_off == hud.stats().label_icons + 2);  // g_build on planet 0, the info icon on planet 1
         const char* names[4] = {"b_filters0", "b_filters1", "b_filters2", "b_filters3"};
         for (const char* n : names) hud.buttons().state(static_cast<uint32_t>(table.find(n))).selected = true;
         hud.build(ff);
         CHECK(hud.filter_bits() == (kFilterCredit | kFilterBaseLevel | kFilterAbilityWeather | kFilterHero));
-        CHECK(hud.stats().level_pips == 2 && hud.stats().weather_icons == 2 && hud.stats().ability_icons == 2 && hud.stats().credit_bars == 2);
+        CHECK(hud.stats().level_pips == 10 && hud.stats().weather_icons == 2 && hud.stats().ability_icons == 2 &&
+              hud.stats().credit_bars == 0 && hud.stats().planet_values == 2 && hud.stats().label_icons == icons_off + 1);
+        uint32_t full = 0, half = 0;
+        for (const HudQuad& q : hud.draw_list().items(0, HudList::Alpha)) {
+            if (q.color.r == 200 && q.color.g == 100 && q.color.b == 50) ++full;
+            if (q.color.r == 100 && q.color.g == 50 && q.color.b == 25) ++half;
+        }
+        CHECK(full >= 2 && half == 8);  // per planet: ground pip 0 full, 1-2 half; space pips 0-1 half
         for (const char* n : names) hud.buttons().state(static_cast<uint32_t>(table.find(n))).selected = false;
         hud.build(f);
     }
@@ -2011,17 +2062,18 @@ void test_galactic_hud() {
             stack3 = stack3 || (std::fabs(w - 24.0f) < 0.01f && std::fabs(h - 12.0f) < 0.01f);
         }
         CHECK(stack3);
-        // §1.5: one medal per faction with a surface hero, none on a fogged planet.
+        // §1.5 / §1.7: one medal per faction with a hero the host reports (it applies the visibility gates; the HUD adds no
+        // fog gate of its own, ui4 t10).
         const uint32_t no_medal = h2.stats().label_icons;
         icons[0].hero_rebel = icons[0].hero_empire = true;
         icons[1].hero_empire = true;
         g.planets = icons;
         h2.build(g);
-        CHECK(h2.stats().label_icons == no_medal + 2);
+        CHECK(h2.stats().label_icons == no_medal + 3);
         size_t medals = 0;
         for (const HudQuad& q : h2.draw_list().items(0, HudList::Alpha))
             if (std::fabs(q.max.x - q.min.x - 14.0f) < 0.01f && std::fabs(q.max.y - q.min.y - 14.0f) < 0.01f) ++medals;
-        CHECK(medals == 2);
+        CHECK(medals == 3);
     }
     // Zoomed out (state 1 at z = 0.2): no labels.
     GalacticHudFrame f2 = f;
@@ -2060,7 +2112,7 @@ void test_galactic_hud() {
         bool any = false;
         for (const HudHitBox& h : hud.hit_boxes()) any = any || h.component == pi;
         CHECK(!any);
-        const auto ms = static_cast<uint32_t>(table.find("map_shell"));
+        const auto ms = static_cast<uint32_t>(table.find("i_main_commandbar"));  // any active shell bone (§5.4: not a fallback)
         ShellBone pb;
         pb.name = "planet_info";
         pb.x = 300.0f;
@@ -2071,10 +2123,112 @@ void test_galactic_hud() {
     }
     click_component("planet_info", cmds, acts);
     CHECK(acts.size() == 2 && acts[1].kind == HudAction::Kind::PlanetInfo && acts[1].unit == 101);
+    // ui4 t04 (GALACTIC_PLANET_MAP): the planet map. map_shell's bones (planetary_mode.alo); the command bar and organiser
+    // shells hide; pads sit over map_window at the marker position; an orbit stack dropped on the map lands its unit, a
+    // landed unit dropped on an orbit stack launches it into a new fleet.
+    {
+        auto state = [&](const char* n) { return hud.buttons().find_state(static_cast<uint32_t>(table.find(n))); };
+        auto has_hit = [&](const char* n) {
+            for (const HudHitBox& h : hud.hit_boxes())
+                if (h.component == table.find(n)) return true;
+            return false;
+        };
+        const auto ms = static_cast<uint32_t>(table.find("map_shell"));
+        auto bone = [](const char* n, float x, float y) {
+            ShellBone b;
+            b.name = n;
+            b.x = x;
+            b.y = y;
+            return b;
+        };
+        hud.layout().set_shell_bones(ms, {bone("map_window", 92.0f, 7.0f), bone("land_fleet_00", -459.0f, 255.0f),
+                                          bone("unit_pad00", 0.0f, 0.0f), bone("back_button", 164.0f, -360.0f),
+                                          bone("unit_cap_number", -295.0f, -71.0f)});
+        hud.resize(1024, 768);
+        GalacticHudFrame m = f;
+        m.advanced_map_open = true;
+        m.planet_map.planet = 101;
+        m.planet_map.units = 3;
+        m.planet_map.unit_cap = 10;
+        GalacticMapPad up;
+        up.unit_pad = true;
+        up.uv = {0.75f, 0.25f};
+        up.object = 555;
+        up.icon = "i_button_units.tga";
+        GalacticMapPad bp;
+        bp.uv = {0.5f, 0.5f};
+        bp.tag = 3;
+        bp.shield = 0.25f;
+        bp.alt = 1;  // §4.2: the build-pad alternate, whatever the player's faction
+        m.planet_map.pads = {up, bp};
+        m.planet_map.orbit = {{777, 50, 2, "i_button_units.tga"}};
+        hud.build(m);
+        CHECK(hud.stats().planet_map && hud.stats().map_pads == 2 && hud.stats().map_stacks == 1 && hud.stats().map_shields == 1);
+        bool bar_off = false, map_on = false;
+        for (const GalacticShellVisibility& v : hud.shell_visibility()) {
+            bar_off = bar_off || (v.component == static_cast<uint32_t>(table.find("i_main_commandbar")) && !v.visible);
+            map_on = map_on || (v.component == ms && v.visible);
+        }
+        CHECK(bar_off && map_on && !has_hit("b_Create_00") && !has_hit("queue00") && hud.stats().labels == 0);
+        // §4.3: map_window's centre + (320 (2 x 0.75 - 1), 320 (2 x 0.25 - 1)) = + (160, -160).
+        Vec2f pad_at{-1e9f, -1e9f};
+        for (const HudHitBox& h : hud.hit_boxes())
+            if (h.component == table.find("unit_pad00")) pad_at = {0.5f * (h.min.x + h.max.x), 0.5f * (h.min.y + h.max.y)};
+        const ComponentPlacement& wp = hud.layout().placement(static_cast<uint32_t>(table.find("map_window")));
+        CHECK(wp.from_bone && std::fabs(pad_at.x - wp.center.x - 160.0f) < 1e-3f && std::fabs(pad_at.y - wp.center.y + 160.0f) < 1e-3f);
+        const ButtonRuntime* uc = state("unit_cap_number");
+        CHECK(uc && uc->text == U"3/10" && state("land_fleet_00")->text == U"2" && !state("build_pad00")->hidden &&
+              state("build_pad00")->alt == 1);
+        auto map_drag = [&](const char* from, const char* to) {
+            const int32_t fc = table.find(from), tc = table.find(to);
+            Vec2f a{}, b{};
+            for (const HudHitBox& h : hud.hit_boxes()) {
+                if (h.component == fc) a = hud.canvas().canvas_to_pixel(0.5f * (h.min.x + h.max.x), 0.5f * (h.min.y + h.max.y));
+                if (h.component == tc) b = hud.canvas().canvas_to_pixel(0.5f * (h.min.x + h.max.x), 0.5f * (h.min.y + h.max.y));
+            }
+            std::vector<commands::EventData> out;
+            RoutedInput r;
+            r.world.mouse_x = static_cast<int32_t>(a.x);
+            r.world.mouse_y = static_cast<int32_t>(a.y);
+            r.hover_component = fc;
+            r.owner[static_cast<size_t>(Button::Left)] = PointerTarget::Hud;
+            r.hud = {{HudPointerEvent::Kind::Press, Button::Left, fc, r.world.mouse_x, r.world.mouse_y}};
+            hud.update_input(r, false, false, 1.0, out);
+            r.hud.clear();
+            r.world.mouse_x = static_cast<int32_t>(b.x);
+            r.world.mouse_y = static_cast<int32_t>(b.y);
+            r.hover_component = tc;
+            hud.update_input(r, false, false, 1.1, out);
+            const bool valid = hud.drag().active && hud.drag().valid;
+            r.owner = {};
+            r.hud = {{HudPointerEvent::Kind::Release, Button::Left, tc, r.world.mouse_x, r.world.mouse_y}};
+            hud.update_input(r, false, false, 1.2, out);
+            CHECK(valid == !out.empty());
+            hud.build(m);
+            return out;
+        };
+        std::vector<commands::EventData> o = map_drag("land_fleet_00", "map_window");
+        CHECK(o.size() == 1 && o[0] == commands::fleet_management_event(commands::kFleetLand, 101, 50, 777));
+        o = map_drag("land_fleet_00", "unit_pad00");  // lands, and the pad's occupant goes to orbit as a new fleet
+        CHECK(o.size() == 2 && o[1] == commands::fleet_management_event(commands::kFleetMoveNew, 101, commands::kNoObject, 555, 101));
+        o = map_drag("unit_pad00", "land_fleet_00");
+        CHECK(o.size() == 1 && o[0] == commands::fleet_management_event(commands::kFleetMoveNew, 101, commands::kNoObject, 555, 101));
+        m.planet_map.surface_full = true;  // §5: the stacks are disabled, no drag
+        hud.build(m);
+        CHECK(!hud.draggable(table.find("land_fleet_00")) && hud.draggable(table.find("unit_pad00")));
+        m.planet_map.foreign = true;  // §1.1 foreign view: nothing drags
+        hud.build(m);
+        CHECK(!hud.draggable(table.find("unit_pad00")));
+        hud.layout().set_shell_bones(ms, {});
+        hud.resize(1024, 768);
+        hud.build(f);
+        CHECK(!hud.stats().planet_map && state("unit_pad00")->hidden);
+        CHECK(!state("land_fleet_00")->disabled);  // closing after a full surface leaves the organiser's pads usable
+    }
     click_component("b_option_g", cmds, acts);
     CHECK(acts.size() == 3 && acts[2].kind == HudAction::Kind::Button && acts[2].name == "b_option_g");
-    // Production-disabled options (story DISABLE_BUILDABLE, REMAINING_GAPS §1.5): no pad by default; greyed and
-    // unclickable with show_production_disabled.
+    // Production-disabled options (story DISABLE_BUILDABLE, REMAINING_GAPS §1.5; GALACTIC_DIALOGS §5.1.1): listed greyed,
+    // clicks swallowed.
     GalacticHudFrame f3 = f;
     f3.providers.build_options = [](uint32_t, std::vector<GalacticBuildOption>& out) {
         GalacticBuildOption o;
@@ -2087,47 +2241,79 @@ void test_galactic_hud() {
         out.push_back(o);
     };
     hud.build(f3);
-    CHECK(hud.stats().build_buttons == 1);
-    cmds.clear();
-    click_component("b_Create_00", cmds, acts);  // the enabled option took the first pad
-    CHECK(cmds.size() == 1 && cmds[0] == commands::ev::production(41, 101));
-    f3.show_production_disabled = true;
-    hud.build(f3);
     CHECK(hud.stats().build_buttons == 2);
     cmds.clear();
     click_component("b_Create_00", cmds, acts);  // greyed: swallowed
-    click_component("b_Create_01", cmds, acts);
+    click_component("b_Create_02", cmds, acts);  // GUI_Row != 0: the upper row, every other pad
     CHECK(cmds.size() == 1 && cmds[0] == commands::ev::production(41, 101));
-    // QA D3: one grid. Structures first, units straight after them on the same pads, column by column; the unit pads
-    // of the old second grid stay empty, and every pad has its own spot.
-    GalacticHudFrame f4 = f;
-    f4.providers.build_options = [](uint32_t, std::vector<GalacticBuildOption>& out) {
-        GalacticBuildOption o;
-        o.icon = "i_button_units.tga";
-        o.type_index = 50;  // unit
-        out.push_back(o);
-        o.type_index = 51;
-        o.structure = true;
-        out.push_back(o);
-        o.type_index = 52;  // unit
-        o.structure = false;
-        out.push_back(o);
-    };
-    hud.build(f4);
-    CHECK(hud.stats().build_buttons == 3);
-    cmds.clear();
-    click_component("b_Create_00", cmds, acts);
-    click_component("b_Create_01", cmds, acts);
-    click_component("b_Create_02", cmds, acts);
-    CHECK(cmds.size() == 3 && cmds[0] == commands::ev::production(51, 101) && cmds[1] == commands::ev::production(50, 101) &&
-          cmds[2] == commands::ev::production(52, 101));
-    for (const HudHitBox& h : hud.hit_boxes()) CHECK(h.component != table.find("build_pad00") && h.component != table.find("build_pad01"));
+    // ui4 t12 (GALACTIC_DIALOGS §5.1.1): only the current tab's options (land at the start); GUI_Row 0 fills the odd pads
+    // (lower row), other rows the even pads (upper row), each from the left; a full row drops the rest. b_space_tab /
+    // b_planet_tab switch the tab (GUI_Dial_Switch_SFX on a change only); the pads take the tab's Blank texture; an
+    // inaccessible surface forces the space tab and disables b_planet_tab.
     {
-        const ComponentPlacement& c0 = hud.layout().placement(static_cast<uint32_t>(table.find("b_Create_00")));
-        const ComponentPlacement& c1 = hud.layout().placement(static_cast<uint32_t>(table.find("b_Create_01")));
-        const ComponentPlacement& c2 = hud.layout().placement(static_cast<uint32_t>(table.find("b_Create_02")));
-        CHECK(c0.center.x == c1.center.x && c0.center.y > c1.center.y && std::fabs(c2.center.x - c0.center.x - 54.0f) < 1e-3f &&
-              c2.center.y == c0.center.y);
+        std::vector<std::string> sfx;
+        hud.set_sfx_hook([&sfx](std::string_view e, int32_t) { sfx.emplace_back(e); });
+        GalacticHudFrame f4 = f;
+        f4.providers.build_options = [](uint32_t, std::vector<GalacticBuildOption>& out) {
+            GalacticBuildOption o;
+            o.icon = "i_button_units.tga";
+            o.type_index = 50;  // unit (GUI_Row 1)
+            out.push_back(o);
+            o.type_index = 51;  // structure (GUI_Row 0)
+            o.row = 0;
+            out.push_back(o);
+            o.type_index = 52;
+            o.row = 1;
+            out.push_back(o);
+            o.type_index = 53;
+            out.push_back(o);
+            o.type_index = 54;  // the upper row has three pads here: dropped
+            out.push_back(o);
+            o.type_index = 55;  // a space-tab option
+            o.space = true;
+            out.push_back(o);
+        };
+        hud.build(f4);
+        CHECK(!hud.build_space_tab() && hud.stats().build_buttons == 4);
+        cmds.clear();
+        for (const char* p : {"b_Create_00", "b_Create_01", "b_Create_02", "b_Create_04"}) click_component(p, cmds, acts);
+        CHECK(cmds.size() == 4 && cmds[0] == commands::ev::production(50, 101) && cmds[1] == commands::ev::production(51, 101) &&
+              cmds[2] == commands::ev::production(52, 101) && cmds[3] == commands::ev::production(53, 101));
+        CHECK(hud.buttons().state(static_cast<uint32_t>(table.find("b_Create_03"))).hidden);
+        CHECK(hud.buttons().state(static_cast<uint32_t>(table.find("b_Create_00"))).alt == 0);
+        CHECK(hud.buttons().state(static_cast<uint32_t>(table.find("b_planet_tab"))).selected);
+        CHECK(hud.buttons().state(static_cast<uint32_t>(table.find("b_dial"))).alt == 1);
+        cmds.clear();
+        click_component("b_planet_tab", cmds, acts);  // already the land tab: silent
+        CHECK(sfx.empty() && cmds.empty());
+        click_component("b_space_tab", cmds, acts);
+        CHECK(hud.build_space_tab() && sfx.size() == 1 && sfx[0] == "GUI_Dial_Switch_SFX");
+        hud.build(f4);
+        CHECK(hud.stats().build_buttons == 1 && hud.buttons().state(static_cast<uint32_t>(table.find("b_Create_00"))).alt == 1 &&
+              hud.buttons().state(static_cast<uint32_t>(table.find("b_space_tab"))).selected &&
+              hud.buttons().state(static_cast<uint32_t>(table.find("b_dial"))).alt == 0);
+        click_component("b_Create_00", cmds, acts);
+        CHECK(cmds.size() == 1 && cmds[0] == commands::ev::production(55, 101));
+        click_component("b_planet_tab", cmds, acts);
+        CHECK(!hud.build_space_tab() && sfx.size() == 2);
+        f4.land_tab_allowed = false;
+        hud.build(f4);
+        CHECK(hud.build_space_tab() && sfx.size() == 3 && hud.buttons().state(static_cast<uint32_t>(table.find("b_planet_tab"))).disabled);
+        hud.set_build_tab(true);
+        CHECK(sfx.size() == 3);
+        f4.land_tab_allowed = true;
+        hud.build(f4);
+        hud.set_build_tab(false);
+        CHECK(!hud.build_space_tab() && sfx.size() == 4);
+        hud.set_sfx_hook({});
+        {
+            const ComponentPlacement& c0 = hud.layout().placement(static_cast<uint32_t>(table.find("b_Create_00")));
+            const ComponentPlacement& c1 = hud.layout().placement(static_cast<uint32_t>(table.find("b_Create_01")));
+            const ComponentPlacement& c2 = hud.layout().placement(static_cast<uint32_t>(table.find("b_Create_02")));
+            CHECK(c0.center.x == c1.center.x && c0.center.y > c1.center.y && std::fabs(c2.center.x - c0.center.x - 54.0f) < 1e-3f &&
+                  c2.center.y == c0.center.y);
+        }
+        hud.build(f);
     }
     // ui4 t02: a blocked option (can_enqueue's reason) is greyed, its Tooltip_Text entry follows the reason, a left click
     // is BuildRefused (negative feedback) with no command; the queued count is the Text_Offset2 line.
@@ -2148,7 +2334,7 @@ void test_galactic_hud() {
     hud.build(f5);
     CHECK(hud.stats().build_buttons == 3);
     {
-        const char* pads[3] = {"b_Create_00", "b_Create_01", "b_Create_02"};
+        const char* pads[3] = {"b_Create_00", "b_Create_02", "b_Create_04"};
         const int32_t tips[3] = {0, 1, -1};
         for (int k = 0; k < 3; ++k) {
             const ButtonRuntime& r = hud.buttons().state(static_cast<uint32_t>(table.find(pads[k])));

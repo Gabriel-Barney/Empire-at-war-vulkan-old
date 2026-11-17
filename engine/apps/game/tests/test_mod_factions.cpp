@@ -259,6 +259,17 @@ void test_synthetic() {
         CHECK(game::skirmish_hyperspace_leader(d.rules, d.types, fac, {slow, d.rules.find_type("Y_C")}) == galactic::kNoIndex);
         CHECK(game::skirmish_hyperspace_leader(d.rules, d.types, fac, {}) == galactic::kNoIndex);
     }
+    // modc t48: a slot whose faction has no forces (Rebel here) fails the setup, unless the map battle lets it start empty.
+    {
+        game::SkirmishSetup e = s;
+        e.human_faction = "Rebel";
+        err.clear();
+        CHECK(!game::make_skirmish_galaxy(d, e, g, &err) && !err.empty());
+        e.empty_slots_ok = true;
+        err.clear();
+        CHECK(game::make_skirmish_galaxy(d, e, g, &err) && err.empty());
+        CHECK(forces_of(g, 0, game::kSkirmishHumanPlanet) == 0 && forces_of(g, 1, game::kSkirmishBattlePlanet) == 3);
+    }
     s.land = true;
     err.clear();
     CHECK(game::make_skirmish_galaxy(d, s, g, &err));

@@ -171,8 +171,10 @@ void Holocron::sample(const galactic::GalacticSim& g) {
     }
 }
 
-ui::DroidLogInfo Holocron::droid_log(const GameSession& s, const GameData& d, const ui::TextDatabase& text) const {
+ui::DroidLogInfo Holocron::droid_log(const GameSession& s, const GameData& d, const ui::TextDatabase& text,
+                                     std::span<const std::u32string> advisor_rows) const {
     ui::DroidLogInfo out;
+    (void)d;
     const galactic::GalacticSim* g = s.galaxy();
     if (!g) return out;
     std::vector<std::u32string> lines;
@@ -184,27 +186,11 @@ ui::DroidLogInfo Holocron::droid_log(const GameSession& s, const GameData& d, co
                 if (!e.dialog.empty()) lines.push_back(text_or(text, e.dialog));
         }
 #endif
-    // ui4 t05 [port]: a readable battle line (conflict_log_line) instead of the conflict log's debug text.
-    const auto planet_name = [g, &d, &text](PlanetIndex p) -> std::u32string {
-        if (p >= g->planets().size()) return U"?";
-        const uint32_t t = g->planets()[p].type;
-        if (t < d.types.size())
-            if (const std::string_view id = d.types.get_string(static_cast<objects::TypeIndex>(t), "Text_ID"); !id.empty())
-                if (const std::u16string* str = text.find(id)) return ui::utf16_to_utf32(*str);
-        return p < g->map().planets.name.size() ? u32(g->map().planets.name[p]) : std::u32string(U"?");
-    };
-    const auto faction_name = [g, &text](int32_t p) -> std::u32string {
-        if (p < 0 || static_cast<size_t>(p) >= g->players().size()) return U"?";
-        const uint32_t f = g->players()[static_cast<size_t>(p)].faction;
-        if (f >= g->rules().factions.size()) return U"?";
-        const galactic::FactionRules& fr = g->rules().factions[f];
-        if (!fr.text_id.empty())
-            if (const std::u16string* str = text.find(fr.text_id)) return ui::utf16_to_utf32(*str);
-        return u32(fr.name);
-    };
-    if (const sim::CampaignBattles* b = s.battles())
-        for (const galactic::ConflictLogEntry& c : b->conflicts().log()) lines.push_back(conflict_log_line(c, planet_name, faction_name));
-    for (auto it = lines.rbegin(); it != lines.rend() && out.entries.size() < 40; ++it) out.entries.push_back(*it);
+    // ui4 t11 (P4_SIM_SYSTEMS §2.7.2): then the rows of every advisor line shown in galactic mode ("Day N", the text, the
+    // separator), oldest first; retail has no battle entry of its own. [port] the last 120 rows.
+    const size_t first = advisor_rows.size() > 120 ? advisor_rows.size() - 120 : 0;
+    for (size_t i = first; i < advisor_rows.size(); ++i) lines.push_back(advisor_rows[i]);
+    out.entries = std::move(lines);
     return out;
 }
 
@@ -284,12 +270,15 @@ ui::SummaryInfo Holocron::summary(const galactic::GalacticSim& g, const GameData
             if (d.types.get_bool(st.type(h), "Is_Named_Hero") && pr.heroes.size() < 8) pr.heroes.push_back(icon_of(hud_types, st.type(h)));
         };
         for (const objects::ObjectHandle h : p.surface) hero(h);
+        const uint32_t land_units = units;
         ui::SummaryFleetRow fr;
         fr.icon = icon;
         fr.name = name;
+        uint32_t space_fleets = 0;
         for (const uint32_t fi : p.orbit) {
             const galactic::FleetState& f = g.fleets()[fi];
             if (!f.alive || f.owner != player) continue;
+            ++space_fleets;
             for (const objects::ObjectHandle h : f.contents) hero(h);
             if (!f.contents.empty() && fr.fleets.size() < 15) fr.fleets.push_back(icon_of(hud_types, st.type(f.contents.front())));
         }
@@ -312,6 +301,20 @@ ui::SummaryInfo Holocron::summary(const galactic::GalacticSim& g, const GameData
         er.trade = number(trade);
         er.mining = number(mining);
         er.total = number(base + trade + other);
+        // ui4 t07 (HUD_GAPS §10.2): the sort values of the planet's rows, by key. [port] 7 producing = space queue busy +
+        // ground queue busy; 8 upgrades = 0 (the record's upgrade list is not traced); 9 / 10 = own land units / own fleets.
+        std::array<double, ui::kSummarySortKeys> sv{};
+        sv[2] = base;
+        sv[3] = trade;
+        sv[4] = mining;
+        sv[5] = base + trade + other;
+        sv[6] = static_cast<double>(units);
+        sv[7] = (p.queue[1].empty() ? 0.0 : 1.0) + (p.queue[0].empty() ? 0.0 : 1.0);
+        sv[9] = static_cast<double>(land_units);
+        sv[10] = static_cast<double>(space_fleets);
+        s.production.back().sort = sv;
+        s.fleets.back().sort = sv;
+        er.sort = sv;
         s.economy.push_back(std::move(er));
         t_income += base + trade + other;
         t_base += base;

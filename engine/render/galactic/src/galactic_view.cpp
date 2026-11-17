@@ -41,6 +41,7 @@ size_t parse_float_list(std::string_view text, float* out, size_t n) {
 float len3(const Vec3& v) { return std::sqrt(v.x * v.x + v.y * v.y + v.z * v.z); }
 Vec3 sub(const Vec3& a, const Vec3& b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
 Vec3 add(const Vec3& a, const Vec3& b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
+constexpr float kDragLineWidth = 2.0f;  // 0x3da30: the width it passes to the line builder [H]
 Vec3 mul(const Vec3& a, float s) { return {a.x * s, a.y * s, a.z * s}; }
 Vec3 cross(const Vec3& a, const Vec3& b) { return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x}; }
 float dot(const Vec3& a, const Vec3& b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
@@ -956,6 +957,18 @@ void GalacticSceneBuilder::build(const GalacticFrame& frame, GalacticModelSource
             main.push_back(in);
             ++st.corruption_paths;
         }
+    }
+    // ui4 t06 fleet drag preview (GALAXY_MAP_PRESENTATION §2.2): grey ribbons, tinted like the corruption paths.
+    for (const GalacticDragLine& l : drag_lines_) {
+        const GpuModel* m = models.line(opt_.corruption_path.texture, rgba8(l.grey, l.grey, l.grey, 255));
+        if (!m) continue;
+        Instance in;
+        in.model = m;
+        const float c = static_cast<float>(l.grey) / 255.0f;
+        in.light_scale = {c, c, c, 1.0f};
+        in.transform = ribbon_transform(l.a, l.b, kDragLineWidth * opt_.corruption_width_scale);
+        main.push_back(in);
+        ++st.drag_lines;
     }
     // Selection model round the selected planet (§3).
     if (opt_.selection && overlay > 0.0f && sel_.planet != objects::kNoObjectId && !opt_.selection_model.empty()) {

@@ -37,6 +37,7 @@
 #include "alamo/game/hud_feeds.hpp"
 #include "alamo/game/mod_check.hpp"
 #include "alamo/game/mod_picker.hpp"
+#include "alamo/game/planet_map.hpp"
 #include "alamo/game/radar_feed.hpp"
 #include "alamo/game/save_games.hpp"
 #include "alamo/game/story_camera.hpp"
@@ -371,6 +372,7 @@ public:
     // bindings in game_options.txt (game_display.hpp OptionsProfile; live play only, app_options.cpp).
     ui::GameplaySettings gameplay_;
     ui::AudioVolumes audio_opts_;
+    ui::SkirmishProfile skirmish_profile_;  // modc t47: the local skirmish slot's faction / colour (the staging dialog's start)
     std::string options_path_;
     std::vector<uint32_t> autofire_seen_;  // ui1 t02: local objects already given their default autofire (sorted)
     void load_game_options();
@@ -425,6 +427,9 @@ public:
     uint32_t last_fleet_sel_ = 0;  // galactic: the fleet selection of the last frame (organiser planet)
     uint32_t selected_planet_ = 0;        // galactic planet selection (object id, 0 = none)
     bool fleet_drag_active_ = false;      // galactic HUD fleet drag of the last frame (drag / drop sounds)
+    std::vector<std::u32string> droid_rows_;  // ui4 t11: Droid Log rows of the advisor lines shown in galactic mode
+    uint32_t drag_route_fleet_ = 0, drag_route_target_ = 0;  // ui4 t06: the cached route's fleet / target planet ids
+    std::vector<PlanetIndex> drag_route_;                    // ui4 t06: its planets (fleet_drag_route)
     bool battle_end_open_ = false;        // battle-end screen shown: ticks held until Continue (presentation only)
     std::u32string battle_place_;         // the running battle's localized place (the battle-end screen's title line)
     uint32_t invade_planet_ = 0;          // ui3 t05: planet object the battle-end "Invade System" button invades (0 = none)
@@ -573,6 +578,23 @@ public:
     void open_linked_banner(const galactic::GalacticSim& g, const sim::CampaignBattles::LinkedRecord& r);  // story t13
     std::string representative_icon(std::span<const objects::ObjectHandle> units, bool hero_filter = false) const;
     void planet_status(const galactic::GalacticSim& g, PlanetIndex row, ui::GalacticPlanetInfo& out) const;  // ui4 t03
+    bool local_benefits_from_corruption(const galactic::GalacticSim& g) const;  // ui4 t10: the local faction's flag
+    // ui4 t04 (GALACTIC_PLANET_MAP): the planet map. planet_map_allowed = the open rules of §1.1 for the selected planet
+    // (`foreign` = the foreign-view flag); set_planet_map opens / closes it; planet_map_feed fills the HUD's map data.
+    bool planet_map_allowed(bool& foreign) const;
+    void set_planet_map(bool open);
+    void planet_map_feed(ui::GalacticPlanetMap& m);
+    // §3.2 the UI markers and world width of a planet type's land map, read on the first open [port: retail reads every
+    // planet's at boot] and kept for the session.
+    struct PlanetMapMarkers {
+        std::vector<game::PlanetMapMarker> markers;
+        float world_width = 0.0f;
+    };
+    const PlanetMapMarkers& planet_map_markers(objects::TypeIndex planet_type);
+    std::map<objects::TypeIndex, PlanetMapMarkers> planet_map_markers_;
+    uint32_t planet_map_planet_ = 0;  // the planet the map was opened for (another selection closes it)
+    mutable std::vector<std::string> corruption_planet_icons_;  // ui4 t10: GameConstants Corruption_Planet_Icon
+    mutable bool corruption_icons_loaded_ = false;
     bool hero_filter_ = false;  // ui4 t03: b_filters3 on (GalacticHud::filter_bits, last build)
     void answer_battle_prompt(bool auto_resolve);
     void auto_resolve_result(const galactic::GalacticSim& g, const galactic::ConflictLogEntry& e);
@@ -675,7 +697,8 @@ public:
     void galactic_message(std::string_view id);  // ui4 t05: a message-callback text as a white screen-text line
     void announcer_feedback();                   // ui4 t08
     uint64_t announcements_ = 0;                 // ui4 t08: announcer events played
-    bool credits_capped_ = false;                // ui4 t08: the credits were at the cap last tick
+    int32_t prev_pop_used_ = 0;                  // ui4 t11: population used at the last tick (pop-cap announcer)
+    double last_approach_s_ = -1e9;              // ui4 t11: wall clock of the last enemy-approach announcement
     uint64_t build_refusals_ = 0;  // ui4 t02: clicks on greyed galactic build pads (negative feedback)
     bool activate_special_here(uint32_t hero_id);
     std::vector<objects::ObjectHandle> special_units(const galactic::GalacticSim& g, PlanetIndex pi) const;
@@ -856,6 +879,8 @@ public:
     void post_tick();
     void step_sim();
     void galactic_input();
+    // ui4 t06 (GALAXY_MAP_PRESENTATION §2.2): the grey route / cursor line while a fleet is dragged on the galaxy.
+    void fleet_drag_preview(const ui::View& view, const std::vector<ui::PickSphere>& fleets);
     void battle_input();
     // refixf t08: the world pick tests over the top tactical mode (null outside a battle). Valid until the next tick.
     const ui::WorldPickTests* world_pick_tests();

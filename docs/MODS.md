@@ -489,11 +489,24 @@ which has nothing to buy (**t41**).
 pre-battle buy screen in retail (SKIRMISH_SETUP §2.7: single-player skirmish never had one; the port's is a kept [port]
 feature). The Remake's Single Player button and one-click menu match the port after t34. The slot factions come from the
 player profile (SKIRMISH_SETUP §2.8: player = the saved index, 0 on a fresh profile; AI = that index XOR 1), so the port's
-row 0 / row 1 default is retail's fresh-profile default and Age of Legends' header row is a legal retail choice; the port
-does not keep the last faction (**t47**). Age of Legends' "Space Skirmish" plays a land battle (no type list: Land) with no
-own units in retail too. The kit asked for Ctrl+Y (the port's key); retail's Select All is Ctrl+A, so its selection
-readings are void. Retail greys the Remake station's ship buttons for the first 3 minutes (only upgrades buildable,
-population 0/150): **t50** checks the port does the same.
+row 0 / row 1 default is retail's fresh-profile default and Age of Legends' header row is a legal retail choice; since
+t47 the port keeps the last faction and colour too. Age of Legends' "Space Skirmish" plays a land battle (no type list:
+Land) with no own units in retail too (the port starts it empty since t48). The kit asked for Ctrl+Y (the port's key);
+retail's Select All is Ctrl+A, so its selection readings are void. Retail greys the Remake station's ship buttons (only
+upgrades buildable, population 0/150).
+
+Retail run `modc_t45` (2026-11-17, screenshots in the kit's `out\`, not committed):
+- Fall of the Republic's progressive campaign (`CloneWars_Medium_Republic`) works in retail. It opens on a one-planet
+  loader galaxy (empty radar, "Initializing Galactic Conquest"), and a Lua year popup (22 / 21 / 20 / 19 BBY) appears.
+  The choice calls `StoryUtil.LoadCampaign` (the `Template_Load_Campaign` event's `LOAD_CAMPAIGN` reward, campaign
+  `<PLANET>_Era_<n>_<FACTION>`). About 30 s later the full galaxy (about 100 planets, pop 66/826) replaces it, with no
+  game end. The port's one-planet start is that loader. What the port lacks is the load: nothing takes the queued
+  `LOAD_CAMPAIGN` request (**t45**). `GCProgressiveStateMachine.lua` (the missing `FotRProgressiveStates`) is a leftover
+  that no campaign uses.
+- EAW-Remake: the station's ship buttons stay grey and unbuildable at station level 2 too (clicking TIE does nothing);
+  no timer unlock at 3.5 min. The tooltips name no missing requirement. TIE and Arquitens carry
+  `Required_Star_Base_Level 2` and `Required_Special_Structures E_Shipyard_1`, so retail's tactical check reads more than
+  `Tactical_Build_Prerequisites` (**t50**: which field, from the binary).
 
 **General gaps found and fixed** (none names a mod; base-FoC goldens unchanged):
 
@@ -577,7 +590,7 @@ port skips them, the skirmish host says `not loaded (empty file)`), so the maps 
 | Item | Thrawn's Revenge | Fall of the Republic | EAW-Remake | Age of Legends |
 |---|---|---|---|---|
 | 1 Load | OK, 0 errors, 216 warnings | OK, 0 errors, 103 warnings; the one effect issue is `_TERRAINRENDERBUMP.fx`, an unused leftover (t42 below) | OK, 0 errors, 187 warnings | OK, 0 errors, 1474 warnings (877 skipped campaign rows, 97 non-compiling scripts: §9) |
-| 2 Front end (smoke) | not rerun (q6 t02 / t13 passed) | main menu, staging, buy (affordable-row pick), a running space skirmish, select all, control groups and (after t43's re-aim) the encyclopedia; stops at 'move routed': only the mod's two static `Defense_Station_Level_Static` are selectable; the 13 bought ships never reach the map and the AI side retreats (**t49**) | **passes** (91 / 91 steps) after t43: the arriving ships were left Lua-hidden (`Hide(true)` then `Cinematic_Hyperspace_In`), and the smoke now clicks the enemy where its hull is (a shield-gate ring has a hole at its centre) | main menu, staging (no game-type list), the buy screen passed with nothing to buy (header faction as on a fresh retail profile, or New Republic with `ALAMO_SMOKE_SKIRMISH_FACTION=1`: also an empty land list); the session refuses a skirmish with no human units (**t48**; retail starts it empty, t09 A4) |
+| 2 Front end (smoke) | not rerun (q6 t02 / t13 passed) | **passes** (91 / 91 steps) after t49: free starting units are off in the mod, so no buy screen; the battle starts with the pre-built bases only (select all finds only static stations: the unit steps are skipped) | **passes** (91 / 91 steps) after t43: the arriving ships were left Lua-hidden (`Hide(true)` then `Cinematic_Hyperspace_In`), and the smoke now clicks the enemy where its hull is (a shield-gate ring has a hole at its centre) | main menu, staging (no game-type list), the buy screen passed with nothing to buy (header faction as on a fresh retail profile, or New Republic with `ALAMO_SMOKE_SKIRMISH_FACTION=1`: also an empty land list); **passes** (land, 52 / 52 steps) after t48: the skirmish starts with no own units, as in retail (t09 A4), and runs to the battle end |
 | 3 Space skirmish 3000 ticks | `_MP_SPACE_FIERY`: 833 orders, 1070 decisions, 0 Lua errors | `_MP_SPACE_TRANSITORY_TWISTS`: 724 orders, 860 decisions, 2 Lua errors AI vs AI; with `--human Rebel` 385 orders, 0 Lua errors (t44 below) | `_MP_SPACE_GEONOSIS`: 95 orders, 139 decisions, 0 Lua errors; 189 s (t33, speed not in the checklist) | `_MP_SPACE_GEONOSIS`: 13 orders, 45 decisions, 0 Lua errors |
 | 3 Land skirmish 3000 ticks | `_MP_LAND_BLOOD_GULCH`: 120 orders, 200 decisions, 0 Lua errors | `_MP_LAND_HOTH_ECHO_BASE`: 181 orders, 213 decisions, 2 Lua errors AI vs AI; with `--human Rebel` 68 orders, 0 Lua errors (t44 below) | `_MP_LAND_UTAPAU`: 62 orders, 32 decisions, 0 Lua errors | `_MP_LAND_UTAPAU`: 374 orders, 445 decisions, 0 Lua errors |
 | 4 Galactic 9000 ticks | `Thrawn_Empire`: 4338 decisions, 1267 orders, 3 owner changes, 0 Lua errors (after t45; before: 4384 / 1281 / 4) | `Sandbox_Rimward_Republic`: starts after the missing-plot fix, 400 story events; 0 AI orders headless by the mod's design (t45 below), 0 story Lua errors after t45 (was 1) | `GC_Mini_Web_Way_Imperial`: 456 decisions, 137 orders, 11 owner changes, 0 Lua errors | `Sandbox_Balance_New_Republic`: starts after the player-cap fix (50 players), 533 decisions, 298 orders, 0 Lua errors |
@@ -608,8 +621,13 @@ Explained without a port change (2026-11-17):
   keyed by upper-case planet type names. The port gave story and AI scripts the type name as written (`Trandosha`); the
   original stores every type name upper-cased (OBJECT_TYPES §3.1), so `Get_Type().Get_Name()` is now upper-case in every
   Lua VM, not only in object scripts. No golden moved; Thrawn's Revenge's AI changed slightly (numbers in the table).
-  Still open in t45: `CloneWars_Medium_Republic` requires `eawx-gc-states/FotRProgressiveStates`, which the mod does not
-  ship (only `config.meg`'s `GCProgressiveStateMachine.lua` names it), so it needs a retail check.
+  Still open in t45: `CloneWars_Medium_Republic` is a loader campaign whose year choice loads the era campaign through
+  `LOAD_CAMPAIGN` (retail run modc_t45, §9); the port never takes that request.
+- **t49** (fixed) Fall of the Republic sets `MP_Default_Free_Starting_Units` to no: the slots start without forces, so the
+  port's buy screen is skipped (a bought fleet would never reach the map; SKIRMISH_SETUP §2.7). Space smoke 91 / 91.
+- **t48** (fixed) a map-battle slot whose faction has no forces starts empty (`SkirmishSetup::empty_slots_ok`); Age of
+  Legends' land smoke plays to the battle end (52 / 52).
+- **t47** (done) the staging dialog keeps the last faction and colour (`game_options.txt`) and applies the AI slot rule.
 
-**Not passed yet:** t48, t49 (front-end smoke stops), t45's progressive GC (retail check); one skirmish played to a
-result in the game needs a person. The retail comparison (t09) ran on 2026-11-17 (§9).
+**Not passed yet:** t45 (`LOAD_CAMPAIGN` load), t50 (Remake tactical build locks); one skirmish played to a result in the
+game needs a person. The retail comparison (t09) ran on 2026-11-17 (§9).

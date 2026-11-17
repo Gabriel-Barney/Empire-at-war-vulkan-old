@@ -171,6 +171,12 @@ public:
     // Lua presentation calls (presentation.hpp).
     void remove_all_text();                                     // Remove_All_Text
     void game_message(std::string_view text_id);                // Game_Message: front of the hint queue, white
+    // ui4 t11 (P4_SIM_SYSTEMS §2.7.1): the message callback 0x140b313c0 - an urgent advisor line (front of the queue, the
+    // Urgent sound) in `color`.
+    void urgent_message(std::u32string text, StoryColor color);
+    // ui4 t11 (HUD_GAPS §10.2): the Droid Log's IDC_HINTS_CHECK writes all three modes' advisor-hint flags.
+    void set_advisor_all(bool on) { advisor_ = {on, on, on}; }
+    bool any_advisor() const { return advisor_[0] || advisor_[1] || advisor_[2]; }
     void lua_highlight(int32_t object, bool on, bool small, float z_offset);  // GameObjectWrapper.Highlight(_Small)
 
     // Per frame: expires lines, pointers and flashes; shows the next hint when `hints_blocked` is false (retail: no Bink

@@ -545,6 +545,9 @@ bool load_options_profile(const std::string& path, OptionsProfile& p) {
     if (const std::string* v = find("tactical_fov_set")) p.tactical_fov_set = flag(*v);
     if (const std::string* v = find("queue_mods")) p.camera.queue_mods = static_cast<uint8_t>(std::strtoul(v->c_str(), nullptr, 10) & 0xFFu);
     if (const std::string* v = find("show_path_lines")) p.camera.show_path_lines = flag(*v);
+    if (const std::string* v = find("skirmish_faction")) p.skirmish.faction = *v;
+    if (const std::string* v = find("skirmish_colour"))
+        p.skirmish.colour = std::clamp(static_cast<int32_t>(std::strtol(v->c_str(), nullptr, 10)), -1, 8);
     for (const auto& [k, v] : kv)
         if (k.size() > kKeyPrefix.size() && std::string_view(k).substr(0, kKeyPrefix.size()) == kKeyPrefix && !v.empty())
             p.keys[k.substr(kKeyPrefix.size())] = static_cast<int32_t>(std::strtol(v.c_str(), nullptr, 10));
@@ -567,6 +570,8 @@ bool save_options_profile(const std::string& path, const OptionsProfile& p) {
     f << "tactical_fov_set=" << (p.tactical_fov_set ? 1 : 0) << "\n";
     f << "queue_mods=" << static_cast<unsigned>(p.camera.queue_mods) << "\n";
     f << "show_path_lines=" << (p.camera.show_path_lines ? 1 : 0) << "\n";
+    if (!p.skirmish.faction.empty()) f << "skirmish_faction=" << p.skirmish.faction << "\n";
+    if (p.skirmish.colour >= 0) f << "skirmish_colour=" << p.skirmish.colour << "\n";
     for (const auto& [k, v] : p.keys) f << kKeyPrefix << k << "=" << v << "\n";
     return static_cast<bool>(f);
 }

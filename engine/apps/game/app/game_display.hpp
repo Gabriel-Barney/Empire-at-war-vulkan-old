@@ -78,6 +78,7 @@ struct OptionsProfile {
     ui::CameraSettings camera;
     bool tactical_fov_set = false;
     ui::HotkeyProfile keys;  // empty: the bindings were never stored
+    ui::SkirmishProfile skirmish;  // modc t47: the local skirmish slot's faction and colour (keys skirmish_faction / _colour)
 };
 std::string default_options_profile_path();  // "" when %LOCALAPPDATA% is unset
 bool load_options_profile(const std::string& path, OptionsProfile& p);

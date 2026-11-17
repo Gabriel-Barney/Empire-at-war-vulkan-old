@@ -254,6 +254,13 @@ struct GalacticSelection {
     Vec3 eye{0, 0, 1}, target{0, 0, 0}, up{0, 1, 0};  // default: looking straight down, screen up = +Y
 };
 
+// ui4 t06 (GALAXY_MAP_PRESENTATION §2.2, 0x3da30 [H]): one segment of the fleet drag preview, world positions. grey =
+// the line colour's r = g = b (128 along the route, 50 for the direct line to the cursor), alpha 255.
+struct GalacticDragLine {
+    Vec3 a{}, b{};
+    uint8_t grey = 128;
+};
+
 struct GalacticViewStats {
     uint32_t planets = 0, background = 0, starbases = 0, rings = 0, routes = 0, fleets = 0, fleet_lines = 0, route_sparks = 0;
     uint32_t no_model = 0, animated = 0, fogged = 0, fogged_fleets = 0, hidden_routes = 0;
@@ -261,6 +268,7 @@ struct GalacticViewStats {
     uint32_t stealth_fleets = 0;   // drawn with ALT1
     uint32_t selection = 0;        // selection model instances (0 or 1)
     uint32_t corruption_paths = 0; // corruption path line instances (§3.2)
+    uint32_t drag_lines = 0;       // fleet drag preview segments (GALAXY_MAP_PRESENTATION §2.2)
 };
 
 class GalacticSceneBuilder {
@@ -278,6 +286,11 @@ public:
     // Host input for the next build(): the camera zoom factor f of FIXPASS_GALACTIC §3.1 (route colour blend; sparkles
     // off at f == 1). Kept until changed; default 0 (zoomed out).
     void set_route_zoom(float f) { route_zoom_ = f; }
+    // ui4 t06: the fleet drag preview segments of the next build() (kept until changed; empty = no drag). Drawn as
+    // CorruptionPathSettings::texture (GameConstants Fleet_Hyperspace_Band_Texture_Name, the +0x70 texture the preview
+    // reads) ribbons of width 2.0 x corruption_width_scale [port: the original passes 2.0 to the same line builder as the
+    // corruption paths' Corruption_Path_Width, so the same unit scale]; no zoom fade (the drag runs on the galaxy view).
+    void set_drag_lines(std::vector<GalacticDragLine> lines) { drag_lines_ = std::move(lines); }
     // [port] (QA D6) galaxy-layer overlays (ownership rings, route sparkles, fleet lines, selection model) are world-space
     // and huge from the close-up camera: 1 at f == 0, 0 from f >= 0.25 on. Sparks and lines also narrow with it (their
     // primitives are opaque), the rest fades or is dropped at 0. Routes and corruption paths stay (FIXPASS_GALACTIC §3).
@@ -321,6 +334,7 @@ private:
     GalacticSelection sel_;
     float route_zoom_ = 0.0f;
     std::vector<CorruptionPathLine> paths_;
+    std::vector<GalacticDragLine> drag_lines_;
 };
 
 // Underworld corruption smoke (STRATEGIC_GAPS §6.1 scenes [H data]): GameConstants Corruption_Particle_Name (FoC

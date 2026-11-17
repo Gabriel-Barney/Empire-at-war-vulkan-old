@@ -40,3 +40,22 @@ have. Prediction: the buttons stay grey until the station upgrade to level 2 (`E
 
 Results go to the lane-modc session (the coordinator relays them); the lane files them on modc t45 / t50, in
 `docs/MODS.md` §9 / §10.4 and in the spec the answer belongs to (`docs/re/SKIRMISH_SETUP.md` §3 for R).
+
+## Results (retail run 2026-11-17, run by the coordinator; 18 screenshots in `out\retail-2026-11-17\`, not committed)
+
+Both predictions were wrong.
+- F1: the campaign is listed. The GC menu has a faction combo (default "Republic-Aligned Sector Forces") and sections
+  ERA-PROGRESSIVE / REGIONAL CONFLICTS (empty) / HISTORIC CONFLICTS / INFINITIES. The Clone Wars - Medium says "Planets:
+  95". Start Game is greyed until the faction is Galactic Republic.
+- F2: the galaxy opens empty (pop 0/0, 15,002 credits, "Initializing Galactic Conquest"). A Lua "YEAR SELECTOR" popup
+  offers 22 / 21 / 20 / 19 BBY. After 22 BBY the full galaxy appears within about 30 s (about 100 planets, pop 66/826,
+  10,000 credits, income 8250) with no game end. The mod's loader (`eawx-plugins/ui/gc-loader`) calls
+  `StoryUtil.LoadCampaign("<PLANET>_Era_<n>_<FACTION>")`, a `LOAD_CAMPAIGN` reward.
+- F3: after 2 more minutes the "Story - Campaign Overview" objectives popup opens by itself; the era text reads "22 BBY
+  MONTH 6 (ERA 2)".
+- R1: station level 1. The build bar's upgrades are coloured; TIE 480, 1080 and Arquitens 1200 (top row) and 448 / 2200
+  (bottom row) are grey.
+- R2: the TIE and Arquitens tooltips are only the unit text plus a population number. No requirement is named.
+- R4: ships are still grey at about 3.5 min without an upgrade. Pop 0/150; credits rise about 140/s.
+- R3: the level-2 upgrade builds in about 1 min, and the station becomes the large ring. The ship buttons stay grey;
+  clicking TIE queues nothing and takes no credits. The Level 3 upgrade (5000) is then offered; level 3 was not tried.
