@@ -1098,7 +1098,7 @@ private:
         uint32_t start_frame = 0;
         float formation_speed = 3.0e38f;
         float cohesion_speed = 3.0e38f;  // [port] fleet cohesion: the space plan speed cap of this move (saved, version 32)
-        // mov1 t02 / t05 (BKR1_RE_ANSWERS Q3 [H]; save version 34, not hashed, like form_id): form_rank = the formation's
+        // mov1 t02 / t05 (BKR1_RE_ANSWERS Q3 [H]; save version 34; [port] not hashed - they act through positions): form_rank = the formation's
         // +0x23c rank written by the destination check 0x439360 (descending goal projection on the order axis, fastest
         // first with flag 0x80; 0 when it did not rank: the overtake's same-coordinator test); form_first = the id of the
         // formation's member-vector index 0 (composition order, seed first: the head-on tie-break); coord_id = the

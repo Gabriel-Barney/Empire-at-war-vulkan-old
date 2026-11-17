@@ -982,6 +982,14 @@ void test_mov1_overtake_rank() {
                 static_cast<int>(decided), master);
     CHECK(v1.form_rank == 1 && v2.form_rank == 0);
     CHECK(decided == CollisionState::MovingWithSpeed && master == 2);
+    // a queued order adds a block to the existing formations [M]: each unit keeps its coordinator, rank and member 0
+    MoveOrder q;
+    q.units = {1, 2};
+    q.destination = at + V2{2000.0f, 400.0f};
+    q.flags = kMoveFlagQueue;
+    sys.move(q, rng, 900);
+    const UnitView q1 = sys.view(1), q2 = sys.view(2);
+    CHECK(q1.coord_id == v1.coord_id && q2.coord_id == v2.coord_id && q1.form_rank == 1 && q2.form_rank == 0);
 }
 
 // mov1 t06 (b0189, BKR2_RE_ANSWERS Q3 [H]): MovingVsStopped step 10's 0x685490. A corridor five cells wide is closed by

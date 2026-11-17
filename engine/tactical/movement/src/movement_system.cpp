@@ -978,10 +978,13 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
                 if (atk_keep[s.member]) continue;  // s78n t26 review round 3: G 5
                 Unit& u = units_[idx[s.member]];
                 // mov1 t02 / t05 (BKR1_RE_ANSWERS Q3 [H]): the formation's rank (0x439360), its member-vector index 0 (seed
-                // first, 0x43e5b0) and the order's coordinator (an attack re-plan keeps the order's)
-                u.form_rank = lf.rank;
-                u.form_first = units_[idx[f[0]]].d.id;
-                if (!replan) u.coord_id = coord;
+                // first, 0x43e5b0) and the order's coordinator (an attack re-plan keeps the order's). A queued order adds a
+                // block to the existing formations [M]: a unit that has a coordinator keeps it, its rank and member 0
+                if (!queued || u.coord_id == 0) {
+                    u.form_rank = lf.rank;
+                    u.form_first = units_[idx[f[0]]].d.id;
+                    if (!replan) u.coord_id = coord;
+                }
                 const V2 exact = slot_world(lf.centre, fwd, s);
                 V2 target = exact;
                 // s78n t20 F5 (MOVEMENT §4.3.1: the block goal := the accepted centre): the cell snap only for slots the

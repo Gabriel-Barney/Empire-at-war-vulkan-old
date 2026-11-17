@@ -1166,7 +1166,8 @@ void MovementSystem::mvs_decide(CollisionObject& c, Unit& a, Unit& b, uint32_t f
     // 10. (mov1 t06, b0189, BKR2_RE_ANSWERS Q3 [H]) only with alt: a pair with a class above Bike takes a second Path
     // Around (0x685920(a, b, 1): standing friends are no obstacles), else 0x685490 - a hostile unit on a probe detour
     // gives a's formation an attack block on it (state 8: max speed, ended at the next service; [port] Resolved at once,
-    // one frame early). Nothing lets the mover walk through b.
+    // one frame early). The step-3 walk-through stand-in is gone; [port] the host does not issue the attack block yet
+    // (formation_attacks() has no consumer), so until it does the hostile case resolves with no hold.
     if (alt && (ca > kUccBike || cb > kUccBike)) {
         if (mvs_path_around(c, a, b, 1, frame)) {
             c.state = S::PathAround;
