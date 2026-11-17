@@ -9,6 +9,7 @@ engine/objects/src/field_schema_table.inc; class = the row's segment owner), wit
   consumed  engine code reads it: a string literal naming the tag in engine source outside the descriptor tables,
             tests, tools and the load report (every typed read goes through an accessor taking the tag name:
             GameObjectTypes::get_*(t, "Tag"), GameConstants::get*("Tag"), XmlNode::child*("Tag"), CampaignDef::raw_value),
+            a name the code builds from such literals ("Corruption_" + n + "_Type": built_tag_reads),
             or an annotation "// ledger: consumes <Class>.<Tag>" next to an indirect read (a column filled from the
             tag, a struct member set by a loader)
   verified  consumed, and a test carries "// ledger: verifies <Class>.<Tag>" (a test that checks the tag's effect
@@ -95,9 +96,12 @@ def schema_rows():
     return out
 
 
-def scan_source(text):
+def scan_source(text, concat=None):
     """(literals, comments, code_lines): string literals (not raw strings), comment texts with their line, and the
-    set of line numbers that hold code outside comments."""
+    set of line numbers that hold code outside comments. `concat` (optional list) gets (literal, after '+', before '+')
+    for every literal, for tag names the code builds by concatenation (built_tag_reads)."""
+    if concat is None:
+        concat = []
     lits, comments, code_lines = [], [], set()
     i, n, line = 0, len(text), 1
     while i < n:
@@ -130,6 +134,13 @@ def scan_source(text):
                 j += 2 if text[j] == "\\" else 1
             if c == '"':
                 lits.append((line, text[i + 1:j]))
+                k = i - 1
+                while k >= 0 and text[k] in " \t\r\n":
+                    k -= 1
+                m = j + 1
+                while m < n and text[m] in " \t\r\n":
+                    m += 1
+                concat.append((text[i + 1:j], k >= 0 and text[k] == "+", m < n and text[m] == "+"))
             code_lines.add(line)
             i = j + 1
         else:
@@ -137,6 +148,36 @@ def scan_source(text):
                 code_lines.add(line)
             i += 1
     return lits, comments, code_lines
+
+
+def built_tag_reads(concat, by_tag):
+    """Tags (lower case) a file reads under a name it builds: "Corruption_" + n + "_Type", "Starting_Spawned_Units_Tech_"
+    + n, faction + "_Victory_Conditions". A tag counts when it starts with a literal followed by '+' (4+ characters) and
+    the rest is digits or ends with a literal of the file preceded by '+'; or ends with a literal preceded by '+' that
+    starts with '_' and has 11+ characters; or is exactly a literal of the file followed by such a suffix literal
+    (read("Tractor_Beam") ... p + "_Texture")."""
+    prefixes = {s.lower() for s, _, after in concat if after and len(s) >= 4}
+    suffixes = {s.lower() for s, before, _ in concat if before and len(s) >= 3}
+    long_suffixes = {x for x in suffixes if x.startswith("_") and len(x) >= 11}
+    if not prefixes and not suffixes:
+        return set()
+    out = set()
+    words = {s.lower() for s, _, _ in concat if len(s) >= 4}
+    for w in words:
+        for x in suffixes:
+            if x.startswith("_") and w + x in by_tag:
+                out.add(w + x)
+    for tag in by_tag:
+        for p in prefixes:
+            if tag.startswith(p) and len(tag) > len(p):
+                rest = tag[len(p):]
+                if rest.isdigit() or any(tag.endswith(x) and len(tag) >= len(p) + len(x) for x in suffixes):
+                    out.add(tag)
+                    break
+        else:
+            if any(tag.endswith(x) and len(tag) > len(x) for x in long_suffixes):
+                out.add(tag)
+    return out
 
 
 def engine_sources():
@@ -163,11 +204,15 @@ def find_consumers(rows):
             text = f.read()
         if "ledger:" not in text and excluded:
             continue
-        lits, comments, code_lines = scan_source(text)
+        concat = []
+        lits, comments, code_lines = scan_source(text, concat)
         if not excluded:
             for _, s in lits:
                 for cls in by_tag.get(s.lower(), ()):
                     consumers.setdefault((cls, s.lower()), set()).add(r)
+            for tag in built_tag_reads(concat, by_tag):
+                for cls in by_tag[tag]:
+                    consumers.setdefault((cls, tag), set()).add(r)
         for ln, body in comments:
             for m in ANNOTATION.finditer(body):
                 kind, cls, tag = m.group(1), m.group(2), m.group(3)

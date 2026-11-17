@@ -1210,9 +1210,11 @@ void check_token_coverage(const GameData& d, ModCheckReport& r) {
                     if (!key.empty()) key += '.';
                     key += normalize_name(set.tokens().name(t));
                 }
-                a.unregistered = !registered;
-                a.implemented = registered && (ai::GalacticSimTokenResolver::path_registered(n.root, key) ||
-                                               ai::tactical::TacticalTokenResolver::path_implemented(n.root, path, set.tokens()));
+                // The port evaluates it: fine whatever the token table says. Not evaluated and a name the token table does
+                // not know: retail fails the equation too (retail-equivalent). Else a port gap.
+                a.implemented = ai::GalacticSimTokenResolver::path_registered(n.root, key) ||
+                                ai::tactical::TacticalTokenResolver::path_implemented(n.root, path, set.tokens());
+                a.unregistered = !a.implemented && !registered;
             }
             int8_t& im = file_in_mod[e.file];
             if (im == 0) im = static_cast<int8_t>(d.vfs && in_mod_layer(*d.vfs, e.file) ? 1 : -1);
