@@ -12,6 +12,7 @@ add_library(alamo_tactical_garrison STATIC
   src/capture.cpp
   src/garrison_types.cpp
   src/garrison_save.cpp  # N1 stage 2: GarrisonSystem / CapturePointSystem write + read
+  src/cash_point.cpp     # mcx4 t05: CASH_POINT service
 )
 add_library(alamo::tactical_garrison ALIAS alamo_tactical_garrison)
 target_include_directories(alamo_tactical_garrison PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

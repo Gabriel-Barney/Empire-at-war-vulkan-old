@@ -143,7 +143,7 @@ void CombatSystem::service_surface_fx(uint32_t frame) {
             continue;
         }
         const uint32_t s = surface_.surface(units_[k].pos.x, units_[k].pos.y);
-        const auto n = static_cast<uint32_t>(d.surface_fx.size() < kMaxUnitSurfaceFx ? d.surface_fx.size() : kMaxUnitSurfaceFx);
+        const auto n = static_cast<uint32_t>(d.surface_fx.size());  // mcx4 t17: every instance
         for (uint32_t i = 0; i < n && !(units_[k].flags & kUnitDead); ++i) surface_fx_step(units_[k], d.surface_fx[i], i, s, frame);
     }
 }
@@ -151,7 +151,14 @@ void CombatSystem::service_surface_fx(uint32_t frame) {
 void CombatSystem::surface_fx_step(Unit& u, uint16_t def_index, uint32_t slot, uint32_t s, uint32_t frame) {
     if (def_index >= data_->surface_fx.size() || s >= kSurfaceTypeCount) return;
     const SurfaceFxDef& def = data_->surface_fx[def_index];
-    const auto prev = static_cast<uint32_t>(u.sfx_prev[slot]);
+    // mcx4 t17: instances past the fixed slots live in sfx_prev_more, grown on first use (0, as the fixed slots start)
+    const auto more_slot = [&u](uint32_t i) -> uint8_t& {
+        const size_t k = i - kSurfaceFxFixedSlots;
+        if (u.sfx_prev_more.size() <= k) u.sfx_prev_more.resize(k + 1, 0);
+        return u.sfx_prev_more[k];
+    };
+    uint8_t& prev_slot = slot < kSurfaceFxFixedSlots ? u.sfx_prev[slot] : more_slot(slot);
+    const auto prev = static_cast<uint32_t>(prev_slot);
     const bool keep_timer = s < 16 && ((kTimerKeepMask >> s) & 1u) != 0;
     if (prev == s) {
         if (is_damage_surface(s) && u.terrain_damage > 0.0f && u.terrain_next <= frame) {
@@ -197,7 +204,7 @@ void CombatSystem::surface_fx_step(Unit& u, uint16_t def_index, uint32_t slot, u
         u.terrain_next = static_cast<uint32_t>(static_cast<int32_t>(static_cast<float>(cfg_.fps) * in.terrain_damage_delay)) + frame;
         u.terrain_delay = in.terrain_damage_delay;
     }
-    u.sfx_prev[slot] = static_cast<uint8_t>(s);
+    prev_slot = static_cast<uint8_t>(s);
 }
 
 }  // namespace alamo::tactical::combat

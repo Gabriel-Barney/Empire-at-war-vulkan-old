@@ -261,6 +261,20 @@ void CombatSystem::fire_unit_weapon(Unit& u, uint32_t frame, SimRng& rng) {
     }
     spawn(u, pd, static_cast<uint32_t>(proj), pd.damage * dscale, pd.damage_type, muzzle, aim, tp, thp, range, frame,
           lob ? &sol : nullptr, q);
+    // mcx4 t03 (LOB_SOLVER §5.3): with Fires_Forward the aim 0x54a270 yields the shooter's own orientation as the facing F,
+    // so the shot leaves along the unit's facing (a grenade keeps the solver's pitch and speed on that heading); the aim
+    // point above still sets FireAtPosition and the travel limit. [port] Units have no pitch or roll: the facing is level.
+    // Spline rockets keep their planned path (spawn's rocket branch). Hardpoint fire (Fire_At) never reads the flag.
+    if (ud.fires_forward && !projectiles_.empty() && !projectiles_.back().rocket) {
+        Projectile& np = projectiles_.back();
+        const Vec3 fwd = lob_forward(u.facing, 0.0f);  // the level unit facing (+x when zero)
+        if (np.lob) {
+            np.lob_dir = lob_forward(fwd, sol.angle);
+            np.dir = np.lob_dir;
+        } else {
+            np.dir = fwd;
+        }
+    }
     if (ground) {  // S8 t26: a successful spawn clears the order (TD +0x3c / +0x3d / +0x30..+0x38 := 0)
         u.lob_pending = 0;
         u.lob_charged = 0;
@@ -603,6 +617,25 @@ CombatSystem::SweepHit CombatSystem::sweep_segment(const Projectile& p, Vec3 del
     return best;
 }
 
+Vec3 CombatSystem::straight_delta(const Projectile& p, uint32_t frame) const {
+    // mcx4 t18 (MCX4_RE_ANSWERS_TACTICAL §12, service 0x4ce6a0 [H]): a BOMB (2) / CLUSTER_BOMB (9) shot moves by speed along
+    // its direction, then its z drops by the fall speed f, and f grows by Projectile_Bomb_Fall_Accel_Rate after each move
+    // (f starts at 0, no cap, land and space alike). [port] f is not stored: a straight shot moves once on every frame after
+    // its spawn frame, so on frame F it has made F - spawn_frame - 1 moves and f = rate x that count (no new save state).
+    Vec3 d = p.dir * p.speed;
+    const float drop = bomb_drop(p, frame);
+    if (drop != 0.0f) d.z -= drop;
+    return d;
+}
+
+float CombatSystem::bomb_drop(const Projectile& p, uint32_t frame) const {
+    const ProjectileDesc& pd = data_->projectiles[p.desc];
+    using PC = ProjectileCategory;
+    if ((pd.category != PC::Bomb && pd.category != PC::ClusterBomb) || pd.bomb_fall_accel == 0.0f || frame <= p.spawn_frame + 1)
+        return 0.0f;
+    return pd.bomb_fall_accel * static_cast<float>(frame - p.spawn_frame - 1);
+}
+
 int32_t CombatSystem::hardpoint_by_mesh(const Unit& v, const std::string& mesh) const {
     // 0x394d40 (§2.9 Q1 step 4): the first hardpoint in HardPoints order whose Collision_Mesh equals the name (_stricmp;
     // both sides are upper case); -1 when none.
@@ -636,7 +669,7 @@ void CombatSystem::sweep(uint32_t pi, QueryContext& ctx) {
                 best = sweep_segment(p, n - p.pos, ctx);
             }
         } else {
-            const Vec3 delta = p.dir * p.speed;
+            const Vec3 delta = straight_delta(p, frame_);
             best = sweep_segment(p, delta, ctx);
             // A1j t03: Sweep 0x4c97a0 step 1, the land ground test 0x4d0630 of the same segment (TACTICAL_COMBAT §3.4).
             if (straight_ground_test(p, delta)) best.ground = ground_hit(p.pos, p.pos + delta, best.gh);
@@ -960,11 +993,15 @@ void CombatSystem::area_damage(const Projectile& p, Vec3 center, ObjectId direct
             if (!live(v)) continue;
             if (v->id == direct && v->hp_count == 0) continue;
             float d = distance_xy(center, v->pos);
-            if (pd.blast_dropoff) {  // cut to the victim's surface [M: segment collision point]
+            // mcx4 t03 (0x4c7f70 [H], TACTICAL_COMBAT §3.5 steps 4-5): only with Projectile_Blast_Area_Dropoff (and R > 0)
+            // is d cut to the victim and the tiered factor applied; without it every victim takes the full blast damage.
+            float factor = 1.0f;
+            if (pd.blast_dropoff) {  // cut to the victim's surface [M: retail's segment collision point / 0 inside]
                 d = d - desc_of(*v).radius;
                 if (d < 0.0f) d = 0.0f;
+                factor = area_falloff(d, R, pd.blast_dropoff_tiers);
             }
-            const float amount = area_falloff(d, R, pd.blast_dropoff_tiers) * pd.blast_area_damage;
+            const float amount = factor * pd.blast_area_damage;
             DamageRequest r;
             r.victim = v->id;
             r.damage_type = p.damage_type;
@@ -2399,7 +2436,8 @@ void CombatSystem::tick(uint32_t frame, const TreeSet& trees, SimRng& rng, const
             Unit* v = unit(hit.id);
             projectiles_[i].alive = 0;
             Projectile pc = projectiles_[i];
-            process_hit(pc, *v, hit.t, frame, rng, nullptr, hit.mesh_hp);
+            const Vec3 seg = straight_delta(pc, frame);  // mcx4 t18: a falling bomb's impact lies on its bent segment
+            process_hit(pc, *v, hit.t, frame, rng, bomb_drop(pc, frame) != 0.0f ? &seg : nullptr, hit.mesh_hp);
             continue;
         }
         if (hit.ground) {
@@ -2422,6 +2460,10 @@ void CombatSystem::tick(uint32_t frame, const TreeSet& trees, SimRng& rng, const
         if ((pd.homing || cat == PC::Missile) && !jammed) {
             const Unit* t = unit(p.target);
             if (live(t)) homing_target = t;
+            // mcx4 t03 (TACTICAL_COMBAT §3.3 "Lost targets"): a homing shot whose target is gone scans for a new one within
+            // Projectile_Max_Scan_Range, but retail's scan starts its best distance at 0 and so never picks a candidate:
+            // the shot flies on straight whatever the range. The port keeps that by not scanning at all.
+            // ledger: consumes GameObjectType.Projectile_Max_Scan_Range
         }
         bool steer = false;
         Vec3 goal;
@@ -2435,7 +2477,7 @@ void CombatSystem::tick(uint32_t frame, const TreeSet& trees, SimRng& rng, const
             steer = true;
         }
         if (steer) p.dir = turn_toward(p.dir, goal, projectile_turn_rate(pd));
-        p.pos = p.pos + p.dir * p.speed;
+        p.pos = p.pos + straight_delta(p, frame);
         p.travelled = p.travelled + p.speed;
         bool expire;
         if (p.fuse >= 0.0f) {  // OI abilities: armed bomb timer (S8 t06: the BOMB arm's frame rounding, §6.4)

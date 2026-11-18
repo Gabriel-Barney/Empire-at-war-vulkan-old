@@ -724,6 +724,106 @@ void test_story_trigger_token() {
     pw.world->attach_story(nullptr, nullptr);
 }
 
+// mcx8 t07 (AI_GALACTIC_TOKENS §1 / §4, STORYB_T10_TRIGGER_AI §3.2): the three galactic tokens base FoC equations use that
+// the resolver did not evaluate. Expected values from the retail leaves 0x65eb10, 0x65c4e0 and 0x6e1fb0.
+void test_mcx8_t07_tokens() {
+    auto evaluator = [](ParityWorld& pw) {
+        return [&pw](const std::string& text, int32_t self, int32_t target, bool& ok) {
+            EquationSet e;
+            e.add("T", text);
+            e.link();
+            EvalContext c;
+            c.self = self;
+            c.enemy = 1 - self;
+            c.human = 1;
+            c.target = target;
+            const EvalResult r = evaluate(e, e.find("T"), c, pw.world->resolver());
+            ok = r.ok;
+            return r.value;
+        };
+    };
+    bool ok = false;
+    {  // Target.StoryTrigger (0x65eb10): the flag keyed by (player, name, the planet's object); never cleared.
+        ParityWorld pw(false, {"HeroAttach"});
+        pw.run(2);
+        auto token = evaluator(pw);
+        const std::string q = "Variable_Target.StoryTrigger {Parameter_Name = \"TRAP_01\"}";
+        const auto planet_id = [&pw](size_t p) { return static_cast<int32_t>(pw.store->id(pw.sim->planets()[p].object)); };
+        lua::StoryModel model;
+        CHECK(token(q, 0, 3, ok) == 0.0 && ok);  // no story attached
+        pw.world->attach_story(nullptr, &model);
+        model.raise_ai_flag(0, "TRAP_01", planet_id(3));
+        model.raise_ai_flag(0, "TRAP_02", -1);  // a flag without a target is not a planet's
+        CHECK(token(q, 0, 3, ok) == 1.0 && ok);
+        CHECK(token(q, 0, 3, ok) == 1.0 && ok);  // not cleared
+        CHECK(model.check_ai_flag(0, "TRAP_01", planet_id(3), false));
+        CHECK(token(q, 0, 4, ok) == 0.0 && ok);  // another planet
+        CHECK(token(q, 1, 3, ok) == 0.0 && ok);  // another player
+        CHECK(token("Variable_Target.StoryTrigger {Parameter_Name = \"TRAP_02\"}", 0, 3, ok) == 0.0 && ok);
+        CHECK(token("Variable_Self.StoryTrigger {Parameter_Name = \"TRAP_01\"}", 0, 3, ok) == 0.0 && ok);  // player root: none
+        CHECK(token("Variable_Self.StoryTrigger {Parameter_Name = \"TRAP_02\"}", 0, 3, ok) == 1.0 && ok);
+        token("Variable_Target.StoryTrigger", 0, 3, ok);
+        CHECK(!ok);  // no Parameter_Name: the token fails
+        pw.world->attach_story(nullptr, nullptr);
+    }
+    {  // Target.HasIndigenousUnits (0x65c4e0) over the planet type's Potential_Indigenous_Power list.
+        ParityWorld pw(false, {"HeroAttach"}, {}, {}, {}, [](std::vector<GalacticAiTypeInfo>& t) {
+            t[tPlanet].indigenous_power = {{tInfantry, 1600}, {tCorvette, 25}};  // P2 (SynPlanetRestricted) has none
+        });
+        pw.run(2);
+        auto token = evaluator(pw);
+        const std::string inf = pw.rules.types[tInfantry].name, cor = pw.rules.types[tCorvette].name,
+                          fri = pw.rules.types[tFrigate].name;
+        const auto has = [](const std::string& a, const std::string& b) {
+            std::string s = "Variable_Target.HasIndigenousUnits {Parameter_Type = \"" + a + "\"";
+            if (!b.empty()) s += ", Parameter_Type = \"" + b + "\"";
+            return s + "}";
+        };
+        CHECK(token(has(inf, ""), 0, 0, ok) == 1.0 && ok);
+        CHECK(token(has(fri, cor), 0, 0, ok) == 1.0 && ok);  // any listed type
+        CHECK(token(has(fri, ""), 0, 0, ok) == 0.0 && ok);
+        CHECK(token(has("No_Such_Type", ""), 0, 0, ok) == 0.0 && ok);  // an unknown name matches nothing
+        CHECK(token(has(inf, ""), 0, 2, ok) == 0.0 && ok);             // the planet type without a list
+        CHECK(token("Variable_Target.HasIndigenousUnits", 0, 0, ok) == 1.0 && ok);  // no Parameter_Type: list not empty
+        CHECK(token("Variable_Target.HasIndigenousUnits", 0, 2, ok) == 0.0 && ok);
+        CHECK(token(has(inf, ""), 1, 1, ok) == 1.0 && ok);  // no owner or side test
+    }
+    {  // Game.InterventionsEnabled (0x6e1fb0): 1.0 by default; 0.0 with changed game options and random events off.
+        for (const bool enabled : {true, false}) {
+            ParityWorld pw(false, {"HeroAttach"}, {}, {}, {}, {},
+                           [enabled](GalacticAiConfig& c) { c.interventions_enabled = enabled; });
+            pw.run(2);
+            auto token = evaluator(pw);
+            CHECK(token("Game.InterventionsEnabled", 0, 0, ok) == (enabled ? 1.0 : 0.0) && ok);
+            CHECK(token("Game.InterventionsEnabled == 0.0", 0, 0, ok) == (enabled ? 0.0 : 1.0) && ok);  // Are_Interventions_Disabled
+        }
+    }
+    {  // Potential_Indigenous_Power reaches the AI type info: "Type, power" entries, repeated tags appended, unknown types
+       // skipped.
+        MemoryFiles mf;
+        mf.add("Data\\XML\\GameObjectFiles.xml", "<L><File>Mod_Units.xml</File></L>");
+        mf.add("Data\\XML\\Mod_Units.xml",
+               "<R>\n <GroundInfantry Name=\"Mod_Ewok\"></GroundInfantry>\n <GroundInfantry Name=\"Mod_Gungan\"></GroundInfantry>\n"
+               " <Planet Name=\"Mod_Endor\"><Potential_Indigenous_Power>Mod_Ewok, 1600</Potential_Indigenous_Power>\n"
+               "  <Potential_Indigenous_Power>No_Such_Unit, 5</Potential_Indigenous_Power>\n"
+               "  <Potential_Indigenous_Power>Mod_Gungan, 25</Potential_Indigenous_Power></Planet>\n</R>\n");
+        objects::ObjectTypeDatabase raw;
+        objects::GameObjectTypes types;
+        std::vector<std::string> diag;
+        CHECK(raw.load(mf, &diag) && types.build(raw, &mf, &diag));
+        const objects::TypeIndex endor = raw.find("Mod_Endor"), ewok = raw.find("Mod_Ewok"), gungan = raw.find("Mod_Gungan");
+        CHECK(endor != objects::kNone && ewok != objects::kNone && gungan != objects::kNone);
+        if (endor == objects::kNone || ewok == objects::kNone || gungan == objects::kNone) return;
+        const std::vector<GalacticAiTypeInfo> ti = make_galactic_ai_type_info(types);
+        const std::vector<SpawnMember>& l = ti[static_cast<size_t>(endor)].indigenous_power;
+        CHECK(l.size() == 2);
+        if (l.size() == 2)
+            CHECK(l[0].type == static_cast<uint32_t>(ewok) && l[0].count == 1600 && l[1].type == static_cast<uint32_t>(gungan) &&
+                  l[1].count == 25);
+        CHECK(ti[static_cast<size_t>(ewok)].indigenous_power.empty());
+    }
+}
+
 // q6 t03 (AI_GALACTIC_TOKENS §8.3): Variable_Self.BudgetAllocation{Parameter_Category}: the normalised weight of the
 // category key (AIGoalCategoryType value, low 32 bits) in Self's budget; 0.0 for a key the budget does not hold or no
 // parameter (-1); fails on any root but Self.

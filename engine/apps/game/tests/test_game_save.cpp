@@ -544,6 +544,7 @@ int main(int argc, char** argv) {
         SaveFile f;
         game::SessionSpec s;
         CHECK(SaveFile::read_file(path, f, &err) && game::GameSession::spec_from_save(f, s, &err));
+        CHECK(s.interventions_enabled());  // mcx8 t07: default options, no spec.interventions_off key
         s.seed += 1;
         game::GameSession r(data, js, s);
         const bool ok = r.start_from_save(f, &err);

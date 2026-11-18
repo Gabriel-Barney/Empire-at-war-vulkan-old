@@ -110,6 +110,11 @@ struct TypeInfo {
     int32_t limit_lifetime = -1;            // Build_Limit_Lifetime_Per_Player (-1 unlimited, 0 never)
     int32_t limit_current = -1;             // Build_Limit_Current_Per_Player (-1 unlimited, 0 never)
     bool requires_initial_placement = false;  // Build_Requires_Initial_Placement (+0xC3)
+    // mcx4 t05 (MCX4_RE_ANSWERS_GALACTIC Q5.1): the per-unit route toll a corruption faction pays at a planet it does not
+    // hold in orbit: Cheap_Bribe_Cost (+0x2350) when the planet owner's faction is Easily_Bribed, else Expensive_Bribe_Cost
+    // (+0x2354). Both default 1 (type ctor 0x367250).
+    int32_t cheap_bribe_cost = 1;
+    int32_t expensive_bribe_cost = 1;
     // Planet types.
     int32_t max_space_base = 5;             // Max_Space_Base (type +0x668)
     int32_t ground_structure_slots = -1;    // Special_Structures_Land (+0x92C), -1 = unlimited

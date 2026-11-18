@@ -200,7 +200,7 @@ flag (retail order not read here [L]).
   (Get_Story_Plot, the event setters, plot.Activate, Check_Story_Flag / Wait_On_Flag on the shared flag table).
 - Item 2 done earlier (t10 first part): TRIGGER_AI with no Param3 stores -1, as the nil reader looks it up.
 - Item 3 done for the player root: `Hooks::story_flag` reads the attached model's AI flag with target none and does not
-  clear it (`test_story_trigger_token`). [port] The planet-root `StoryTrigger` (target = the planet) still reads target
-  none: the hook has no target argument yet (no shipped equation uses the planet root outside one trap notification).
+  clear it (`test_story_trigger_token`). The planet-root `StoryTrigger` (target = the planet's object id) reads its own
+  key since mcx8 t07 (the hook takes the location; `test_mcx8_t07_tokens`).
 - Not checked yet: an Intervention plan running end to end in a sandbox campaign (the headless smoke runs tried
   could not load those campaigns), and the Lua save of a plan VM that holds story wrappers.

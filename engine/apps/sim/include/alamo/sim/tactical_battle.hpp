@@ -94,6 +94,7 @@
 #endif
 #include "alamo/tactical/fog/fog_of_war.hpp"  // fog of war hookup (owner: fog agent)
 #include "alamo/tactical/garrison/capture.hpp"   // S4 garrisons + structure capture (owner: S4 agent)
+#include "alamo/tactical/garrison/cash_point.hpp"  // mcx4 t05: CASH_POINT markers
 #include "alamo/tactical/garrison/garrison.hpp"
 
 namespace alamo::anim {
@@ -1176,9 +1177,10 @@ public:
     commands::RejectReason tactical_build(TacticalMode& mode, uint8_t player, objects::ObjectId pad, objects::TypeIndex type, SimRng& rng,
                                           bool ai);
     commands::RejectReason tactical_sell(TacticalMode& mode, uint8_t player, objects::ObjectId object);
-    // Pad price 0x3744e0 (campaign): Tactical_Build_Cost_Campaign, else Tactical_Build_Cost_Multiplayer when <= 0
-    // [port: the corruption planet factor 0x33e440 is not applied].
-    float build_cost(objects::TypeIndex uc_type) const;
+    // Pad price 0x3744e0 (campaign): Tactical_Build_Cost_Campaign, else Tactical_Build_Cost_Multiplayer when <= 0, then
+    // for `player` (>= 0) at a corrupted battle planet (int)((float)cost x the faction's
+    // Corruption_Tactical_Build_Pad_Price_Multipliers entry 1) (mcx4 t07, MCX4_RE_ANSWERS_GALACTIC Q7.2). Skirmish: no factor.
+    float build_cost(objects::TypeIndex uc_type, int32_t player = -1) const;
     // t50: the land skirmish rules. A land skirmish (BattleConfig::skirmish, land map) prices pads from
     // Tactical_Build_Cost_Multiplayer and lists their buildable types from Tactical_Buildable_Objects_Multiplayer
     // (L1_S4_REMAINING §3.6: "skirmish ... Multiplayer", else Campaign), and gets the skirmish base (bt_skirmish_base).
@@ -1405,8 +1407,9 @@ public:
     void set_garrison_spawn(objects::ObjectId id, bool on);
     // The tactical buy bar of `builder` for `player` (the HUD's Build_NN buttons): every type of the builder's faction
     // row in list order with its price, its open orders at this builder and why a Production would be refused now
-    // (block: 0 buyable, 3 Funds, 4 Prerequisite, 5 Limit = ui HudBuildOption::Block; [port] no queue-size or population
-    // check, so 1 QueueFull / 2 PopCap never occur). Empty when the builder is not an own production builder.
+    // (block: 0 buyable, 1 QueueFull (mcx4 t04: a human's queue holds Max_Build_Queue entries), 3 Funds, 4 Prerequisite,
+    // 5 Limit = ui HudBuildOption::Block; [port] no population check, so 2 PopCap never occurs). Empty when the builder is
+    // not an own production builder.
     struct BuildOptionInfo {
         int32_t type = -1;
         int32_t cost = 0;
@@ -1777,6 +1780,9 @@ private:
     void sp_planet_spawn(const TacticalMode& mode, SimRng& rng);
     void sp_service(TacticalMode& mode, SimRng& rng, size_t index);
     objects::ObjectHandle sp_spawn_one(TacticalMode& mode, SimRng& rng, objects::ObjectHandle spawner, const Vec3* centre);
+    // mcx4 t05: the owner of a spawned indigenous unit - `owner` (the spawner's), or on a Corrupt_Militia planet the first
+    // Benefits_From_Corruption player for an Is_Indigenous_Unit_Corruptible type (0x5314f0).
+    int32_t sp_corrupt_owner(objects::TypeIndex unit_type, int32_t owner) const;
     int32_t sp_place(TacticalMode& mode, objects::ObjectHandle h, Vec3 p);  // 0 placed, 1 blocked, 2 no place
     void sp_debris_expire(TacticalMode& mode, SimRng& rng, const DebrisPiece& d);
     // --- story t06: victory monitor (tactical_battle_victory.cpp) ---
@@ -2261,6 +2267,9 @@ private:
     void s4_hash(StateHasher& h) const;
     tactical::garrison::GarrisonSystem garrison_;
     std::unique_ptr<tactical::garrison::CapturePointSystem> captures_;
+    // mcx4 t05 (MCX4_RE_ANSWERS_TACTICAL §5): the CASH_POINT objects; made with captures_ (s4_init). Hashed and saved
+    // only once a point exists (battle part version 3), so battles without cash points keep their CRCs.
+    std::unique_ptr<tactical::garrison::CashPointSystem> cashes_;
     bool s4_used_ = false;  // some garrison / capture state exists (CRC section on from then)
     objects::ObjectStore* s4_store_ = nullptr;  // the battle mode's primary store (capture rule b)
     // SP5: Influences_Capture_Point per type (-1 not looked up yet), filled on first use by the serial capture pass;
@@ -2640,6 +2649,11 @@ private:
     void hg_setup(TacticalMode& mode);           // setup(): HangarSystem (after combat / abilities)
     void hg_ability_host(tactical::abilities::AbilityHost& h);  // oi_install(): DEPLOY_SQUAD hooks
     int32_t hg_tech(int32_t player) const;
+    void hg_raise_tech(int32_t player);  // mcx4 t04: Tactical_Build_Increments_Tech_Level (0x498170)
+    // mcx4 t04: the build manager queue of a type (Tactical_Production_Queue - 2: 0 units, 1 upgrades; -1 not buildable
+    // in a battle) and whether `player` (a human) already holds Max_Build_Queue entries in that queue.
+    int32_t hg_queue_of(objects::TypeIndex type) const;
+    bool hg_queue_full(int32_t player, objects::TypeIndex type) const;
     bool hg_engine_unit(const Unit& u) const;    // SimpleSpace engine-loop unit
     bool hg_walk_engine_unit(const Unit& u) const;  // cu8g t01: land Walk-locomotor engine-loop unit
     void hg_adopt(const Unit& u, SimRng& rng);   // after add_unit: holster attach, engine mode enter, add_carrier

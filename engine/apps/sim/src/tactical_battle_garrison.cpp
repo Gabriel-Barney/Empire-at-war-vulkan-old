@@ -68,6 +68,8 @@ void TacticalBattle::s4_init() {
     // skai: L1_S4_REMAINING §4.2 start gate: the countdown is 0 in skirmish (a skirmish map battle: skirmish_map).
     const float secs = skirmish_map() ? 0.0f : gc_secs >= 0.0f ? gc_secs : space_ ? cfg_.space_capture_countdown : cfg_.land_capture_countdown;
     captures_ = std::make_unique<tg::CapturePointSystem>(neutral, 4u, secs > 0.0f ? static_cast<uint32_t>(30.0f * secs + 0.5f) : 0u);
+    cashes_ = std::make_unique<tg::CashPointSystem>(30u);  // mcx4 t05
+    cashes_->set_neutral_faction([this](int32_t o) { return bt_owner_neutral(o); });  // faction +0x108 Is_Neutral: no payout
     captures_->set_allied(allied);
     captures_->set_neutral_owner([this](int32_t o) { return bt_owner_neutral(o); });  // REMAINING_GAPS §3.3
     // q6 t19 rule (a) (AI_GALACTIC_TOKENS §9.11): a pad holding a UC or a child is never captured (keeps its owner).
@@ -178,9 +180,11 @@ bool TacticalBattle::s4_placement(TacticalMode& mode, objects::TypeIndex t, cons
     const objects::GameObjectTypes& types = catalog_->types();
     tg::CapturePointDesc cd;
     tg::HolderDesc hd;
+    tg::CashPointDesc kd;
     const bool capture = tg::capture_desc_from_type(types, t, cd);
     const bool holder = tg::holder_desc_from_type(types, t, hd);
-    if (!capture && !holder) return false;
+    const bool cash = tg::cash_point_desc_from_type(types, static_cast<uint32_t>(t), kd);  // mcx4 t05
+    if (!capture && !holder && !cash) return false;
     s4_store_ = &mode.primary();
     s4_init();
     const objects::SpawnParams& p = sp;  // REMAINING_GAPS §3.3: the map owner (mini 02) is kept
@@ -189,6 +193,7 @@ bool TacticalBattle::s4_placement(TacticalMode& mode, objects::TypeIndex t, cons
     if (spawned) *spawned = h;
     const objects::ObjectId id = mode.primary().id(h);
     if (capture) captures_->add_point(id, p.owner, p.position, cd, frame_);
+    if (cash && cashes_) cashes_->add_point(id, p.owner, p.position, kd);
     if (holder) {
         hd.extent_len = s4_extent_len(mode, h);  // s78n t20 batch 2: the exit distance fallback
         s4_holder_bones(t, hd);  // s78n t20 batch 2
@@ -289,6 +294,7 @@ void TacticalBattle::s4_set_owner(TacticalMode& mode, objects::ObjectId id, int3
         fog_owner_changed(mode, h, old);  // a1h t01: REVEAL vf18 of a non-unit point (FOG_OF_WAR §3.2)
     }
     if (captures_ && captures_->is_point(id) && captures_->owner(id) != owner) captures_->set_owner(id, owner);
+    if (cashes_ && cashes_->is_point(id)) cashes_->set_owner(id, owner);
 }
 
 void TacticalBattle::s4_leave(TacticalMode& mode, objects::ObjectId unit, Vec3 at, objects::ObjectId holder) {
@@ -654,6 +660,27 @@ void TacticalBattle::s4_tick(TacticalMode& mode, SimRng& rng) {
         bt_capture_anims(rng, tick_.global_frame);
         s4_apply(mode);
     }
+    // 4. mcx4 t05: cash points (CASH_POINT service 0x621370, every frame). Influencers: live, non-retreated, non-garrisoned
+    //    battle units with an owner whose type has Influences_Cash_Point (default true) [port: battle units stand in for
+    //    the player tree's objects].
+    if (cashes_ && cashes_->point_count() > 0) {
+        const objects::GameObjectTypes& types = catalog_->types();
+        std::vector<tg::Influencer> inf;
+        for (const Unit& u : units_) {
+            if (!u.alive || u.retreated || garrison_.garrisoned(u.id) || !store.alive(u.h)) continue;
+            const int32_t owner = store.owner(u.h);
+            if (owner < 0 || u.type >= types.size() || !types.get_bool(static_cast<objects::TypeIndex>(u.type), "Influences_Cash_Point")) continue;
+            inf.push_back({u.id, owner, store.position(u.h)});
+        }
+        std::vector<int32_t> players;
+        for (size_t p = 0; p < galaxy_->players().size(); ++p) players.push_back(static_cast<int32_t>(p));
+        cashes_->service(players, inf, 1u);
+        const std::vector<tg::CashOwnerChange> changes(cashes_->changes().begin(), cashes_->changes().end());
+        for (const tg::CashOwnerChange& c : changes) s4_set_owner(mode, c.point, c.new_owner);  // Change_Owner 0x38e5a0
+        for (const tg::CashPayout& c : cashes_->payouts())
+            if (credits_add_) credits_add_(c.player, c.credits);
+        if (!changes.empty()) s4_apply(mode);
+    }
 }
 
 void TacticalBattle::bt_capture_anims(SimRng& rng, uint64_t gframe) {
@@ -732,6 +759,7 @@ void TacticalBattle::s4_hash(StateHasher& h) const {
     garrison_.hash(h);
     h.boolean(captures_ != nullptr);
     if (captures_) captures_->hash(h);
+    if (cashes_ && cashes_->point_count() > 0) cashes_->hash(h);  // mcx4 t05: only with cash points
 }
 
 bool TacticalBattle::can_garrison(objects::ObjectId unit, objects::ObjectId holder) const {

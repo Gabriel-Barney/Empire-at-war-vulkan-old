@@ -242,8 +242,8 @@ Vec3 turn_toward(Vec3 dir, Vec3 goal, float max_degrees) {
 
 float area_falloff(float d, float R, int32_t tiers) {
     if (!(R > 0.0f)) return 1.0f;
-    const float k = std::floor(d * static_cast<float>(tiers) / R);
-    float f = 1.0f - k / static_cast<float>(tiers + 1);
+    const float k = std::floor(d * (static_cast<float>(tiers) / R));
+    float f = 1.0f - k * (1.0f / static_cast<float>(tiers + 1));
     if (f < 0.0f) f = 0.0f;
     if (f > 1.0f) f = 1.0f;
     return f;

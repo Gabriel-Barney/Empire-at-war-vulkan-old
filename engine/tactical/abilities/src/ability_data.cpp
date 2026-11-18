@@ -180,6 +180,9 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
     s.toss_anim = s_or(e, "Grenade_Toss_Anim");
     if (s.toss_anim.empty()) s.toss_anim = s_or(e, "Toss_Anim");
     s.spawn_bone = s_or(e, "Spawn_Bone");  // S8 t06: Remote_Bomb toss bone (LOB_SOLVER §3.5)
+    if (s.spawn_bone.empty()) s.spawn_bone = s_or(e, "Spawn_Bone_Name");  // mcx4 t06: Spawn_Ability +0x198 (§14)
+    s.recharge_time_in_seconds = f_or(e, "Recharge_Time_In_Seconds", 1.0f);  // mcx4 t06: Spawn_Ability +0x194 (§14)
+    if (s.recharge_time_in_seconds < 0.0f) s.recharge_time_in_seconds = 0.0f;
     s.fuse_time = f_any(e, {"Grenade_Explode_Timer_In_Secs", "Detonation_Time_In_Secs"}, 0.0f);
     s.requires_direct_command = b_or(e, "Requires_Direct_Player_Command", false);
     s.max_targets = i_or(e, "Lightning_Max_Targets", i_or(e, "Max_Drain_Victims", i_or(e, "Max_Targets", 0)));
@@ -448,6 +451,10 @@ SpecialAbilityDesc parse_special_ability(const data::XmlNode& e, const AbilityRe
     s.block_chance = f_or(e, "Block_Chance", 0.0f);
     s.reaction_arc_deg = f_or(e, "Reaction_Arc_In_Degrees", 360.0f);
     s.absorb_chance = f_or(e, "Absorb_Chance", 0.0f);
+    s.damage_absorb_percentage = f_or(e, "Damage_Absorb_Percentage", 0.0f);  // mcx4 t06
+    if (s.damage_absorb_percentage < 0.0f || s.damage_absorb_percentage > 1.0f) s.damage_absorb_percentage = 0.0f;
+    s.damage_absorb_amount = f_or(e, "Damage_Absorb_Amount", 0.0f);
+    if (s.damage_absorb_amount < 0.0f) s.damage_absorb_amount = 0.0f;
     parse_class_fields(e, s, r);  // OI abilities (service_interval stays -1: per class)
     // R5 jamming visual (presentation only): Blob_* / Owner_Particle_* of Sensor_Jamming_Ability.
     if (s.cls == SpecialClass::SensorJamming) {

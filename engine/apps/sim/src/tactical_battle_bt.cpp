@@ -275,7 +275,7 @@ void TacticalBattle::bt_pad_health() {
     bt_ramps_.resize(w);
 }
 
-float TacticalBattle::build_cost(objects::TypeIndex uc_type) const {
+float TacticalBattle::build_cost(objects::TypeIndex uc_type, int32_t player) const {
     const objects::GameObjectTypes& types = catalog_->types();
     if (uc_type >= types.size()) return 0.0f;
     // Both are int fields (the float view of an int field is 0).
@@ -284,7 +284,13 @@ float TacticalBattle::build_cost(objects::TypeIndex uc_type) const {
     if (cfg_.skirmish) return static_cast<float>(std::max(0, types.get_int(uc_type, "Tactical_Build_Cost_Multiplayer")));
     int32_t c = types.get_int(uc_type, "Tactical_Build_Cost_Campaign");
     if (c <= 0) c = types.get_int(uc_type, "Tactical_Build_Cost_Multiplayer");
-    return static_cast<float>(std::max(0, c));
+    c = std::max(0, c);
+    if (player >= 0 && galaxy_) {  // mcx4 t07 (Q7.2): the corrupted battle planet's pad price factor, truncated
+        const float m = galaxy_->tactical_corruption_multiplier(req_.info.planet, player,
+                                                                galactic::GalacticSim::TacticalCorruption::PadPrice);
+        if (m != 1.0f) c = static_cast<int32_t>(static_cast<float>(c) * m);
+    }
+    return static_cast<float>(c);
 }
 
 cmd::RejectReason TacticalBattle::tactical_build(TacticalMode& mode, uint8_t player, objects::ObjectId pad, objects::TypeIndex type,
@@ -311,7 +317,7 @@ cmd::RejectReason TacticalBattle::tactical_build(TacticalMode& mode, uint8_t pla
     // [port] Campaign land battles keep the free AI pad builds (L1_S4 3.6): no retail trace of an AI pad build there yet.
     // skai t17: a space skirmish AI pays too (retail Geonosis: the Rebel balance drops by the extractors it starts).
     if (!ai || cfg_.skirmish) {
-        const float cost = build_cost(type);
+        const float cost = build_cost(type, static_cast<int32_t>(player));
         const float have = credits_get_ ? credits_get_(static_cast<int32_t>(player)) : 0.0f;
         if (cost > have) return R::CannotAfford;
         if (cost > 0.0f && credits_add_) credits_add_(static_cast<int32_t>(player), -cost);  // execute 0x5d78a0: charge 1

@@ -24,6 +24,7 @@ int main() {
         CHECK(find_tag_ledger(r.cls, r.tag) != nullptr);
         if (r.state == LedgerState::Consumed || r.state == LedgerState::Verified) CHECK(r.consumers > 0 && !r.consumer.empty());
         if (r.state == LedgerState::Unread || r.state == LedgerState::Stored) CHECK(r.consumers == 0);
+        if (r.state == LedgerState::RetailUnused) CHECK(r.consumers == 0 && r.spec.starts_with("docs/re/"));
     }
     CHECK(missing == 0);
     // Case-insensitive lookup; class matters.
@@ -33,5 +34,7 @@ int main() {
     CHECK(find_tag_ledger("GameObjectType", "No_Such_Tag") == nullptr);
     CHECK(is_honour_gap(LedgerState::Stored) && is_honour_gap(LedgerState::Unread) && !is_honour_gap(LedgerState::Consumed));
     CHECK(std::string_view(to_string(LedgerState::Verified)) == "verified");
+    CHECK(std::string_view(to_string(LedgerState::RetailUnused)) == "retail_unused" &&
+          !is_honour_gap(LedgerState::RetailUnused));
     return ::alamo::test::report("alamo_objects_tag_ledger_tests");
 }

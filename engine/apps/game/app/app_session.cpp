@@ -600,6 +600,7 @@ void App::load_story_campaign(const sim::StoryLoadCampaign& lc) {
     s.max_tech = old.max_tech;
     s.auto_resolve_option = old.auto_resolve_option;
     s.random_events = old.random_events;
+    s.interventions_off = old.interventions_off;  // mcx8 t07
     s.seed = old.seed;
     s.battle_max_frames = old.battle_max_frames;
     s.battle_end_hold_frames = old.battle_end_hold_frames;

@@ -90,7 +90,8 @@ const char* kTypes = R"(<T>
  <GroundInfantry Name="T_Ewok"><Tactical_Health>40</Tactical_Health><Max_Speed>1.0</Max_Speed><CategoryMask>Infantry</CategoryMask>
   <MovementClass>Infantry</MovementClass><Behavior>SELECTABLE</Behavior><LandBehavior>WALK_LOCOMOTOR, INDIGENOUS_UNIT</LandBehavior>
   <Custom_Hard_XExtent>4</Custom_Hard_XExtent><Custom_Hard_YExtent>4</Custom_Hard_YExtent></GroundInfantry>
- <GroundInfantry Name="T_Ewok_B"><Variant_Of_Existing_Type>T_Ewok</Variant_Of_Existing_Type></GroundInfantry>
+ <GroundInfantry Name="T_Ewok_B"><Variant_Of_Existing_Type>T_Ewok</Variant_Of_Existing_Type>
+  <Is_Indigenous_Unit_Corruptible>False</Is_Indigenous_Unit_Corruptible></GroundInfantry>
  <GroundCompany Name="T_Ewok_Pack"><Company_Units>T_Ewok, T_Ewok, T_Ewok</Company_Units><Create_Team_Type>T_Ewok_Team</Create_Team_Type></GroundCompany>
  <Team Name="T_Ewok_Team"><Behavior>TEAM</Behavior></Team>
  <GroundStructure Name="T_Hut"><Tactical_Health>500</Tactical_Health><LandBehavior>SPAWN_INDIGENOUS_UNITS</LandBehavior>
@@ -107,7 +108,8 @@ const char* kTypes = R"(<T>
 const char* kFactions = R"(<Factions>
  <Faction Name="Empire"><Is_Playable>Yes</Is_Playable><Can_Control_Planets>Yes</Can_Control_Planets><Space_Tactical_Unit_Cap>20</Space_Tactical_Unit_Cap>
   <Space_Retreat_Unit_Increment_Wait_Frames>3</Space_Retreat_Unit_Increment_Wait_Frames><Space_Retreat_Flight_Move_Increment>500.0</Space_Retreat_Flight_Move_Increment></Faction>
- <Faction Name="Underworld"><Is_Playable>Yes</Is_Playable><Can_Control_Planets>Yes</Can_Control_Planets><Space_Tactical_Unit_Cap>20</Space_Tactical_Unit_Cap></Faction>
+ <Faction Name="Underworld"><Is_Playable>Yes</Is_Playable><Can_Control_Planets>Yes</Can_Control_Planets><Space_Tactical_Unit_Cap>20</Space_Tactical_Unit_Cap>
+  <Benefits_From_Corruption>Yes</Benefits_From_Corruption></Faction>
  <Faction Name="Neutral"><Is_Neutral>Yes</Is_Neutral></Faction>
  <Faction Name="Hostile"><Is_Playable>No</Is_Playable></Faction>
 </Factions>
@@ -470,6 +472,10 @@ struct LandRun {
     // variant 3: T_Hut on after SET_SPAWN 0.3 and then 1.0; the other battle rewards through the battle host
     int32_t on_low = -1, on_full = -1;
     bool health_half = false, retreat_logged = false, invalid_logged = false, not_shield_silent = false;
+    // variant 4 (mcx4 t05): spawned units of the active T_Hut on a Corrupt_Militia planet: T_Ewok (corruptible) owned by
+    // the Underworld, T_Ewok_B (Is_Indigenous_Unit_Corruptible False) by the hut's owner; variant 5: a Kidnapping planet,
+    // every unit kept
+    uint32_t corrupt_converted = 0, corrupt_kept = 0, corrupt_wrong = 0;
 };
 
 // variant 0: the TRU1 run; 1: SET_SPAWN "T_HUT" 1.0 at frame 5 through the battle host's story reward (both T_Hut on;
@@ -504,6 +510,8 @@ LandRun run_land(const Data& d, int32_t workers, int variant = 0) {
                             },
                             opt);
     CHECK(battles.attach());
+    if (variant == 4) gs->set_corruption(1, 4, 1);  // the battle planet: Corruption_Corrupt_Militia by the Underworld
+    if (variant == 5) gs->set_corruption(1, 2, 1);  // Corruption_Kidnapping: no conversion
     if (variant == 2) {
         galactic::StoryGates g;
         galactic::StoryGates::PlanetSpawn e;
@@ -589,6 +597,16 @@ LandRun run_land(const Data& d, int32_t workers, int variant = 0) {
                 active += b->indigenous_spawner_state(i) == 1 ? 1 : 0;
                 if (b->indigenous_spawner_state(i) == 1) {
                     out.single_count = sp.size();
+                    if ((variant == 4 || variant == 5) && f == 399) {
+                        const uint32_t ewok = type_of(d, "T_Ewok");
+                        for (const objects::ObjectId id : sp) {
+                            const objects::ObjectHandle uh = st.find(id);
+                            const bool corruptible = variant == 4 && static_cast<uint32_t>(st.type(uh)) == ewok;
+                            if (corruptible && st.owner(uh) == 1 && b->combat().has_unit(id)) ++out.corrupt_converted;
+                            else if (!corruptible && st.owner(uh) == st.owner(sh)) ++out.corrupt_kept;
+                            else ++out.corrupt_wrong;
+                        }
+                    }
                     for (const objects::ObjectId id : sp) {
                         const objects::ObjectHandle uh = st.find(id);
                         const Vec3 p = st.position(uh), q = st.position(sh);
@@ -624,7 +642,7 @@ LandRun run_land(const Data& d, int32_t workers, int variant = 0) {
         out.active = active;
         out.decided = decided;
         if (f == 1000) out.saved = state_round_trip(*b);  // live spawners with spawned units: save / load
-        if (f > 1600 || (variant != 0 && f >= 20)) break;
+        if (f > 1600 || (variant != 0 && variant < 4 && f >= 20) || (variant >= 4 && f >= 400)) break;
     }
     out.crc = host.crc_log();
     return out;
@@ -659,6 +677,14 @@ void test_land(const Data& d) {
     CHECK(s3.fought && s3.on_low == 3 && s3.on_full == 10 && s3.decided == 10);
     CHECK(s3.health_half && s3.not_shield_silent && s3.invalid_logged && s3.retreat_logged);
     CHECK(!first_divergence(s3.crc, s3w.crc).diverged);
+    // mcx4 t05 (MCX4_RE_ANSWERS_TACTICAL §6, 0x5314f0): Is_Indigenous_Unit_Corruptible on a Corrupt_Militia planet
+    // ledger: verifies GameObjectType.Is_Indigenous_Unit_Corruptible
+    const LandRun c4 = run_land(d, 0, 4);
+    std::printf("  mcx4 Corrupt_Militia: %u T_Ewok to the Underworld, %u T_Ewok_B kept, %u wrong\n", c4.corrupt_converted, c4.corrupt_kept,
+                c4.corrupt_wrong);
+    CHECK(c4.fought && c4.corrupt_converted + c4.corrupt_kept == 3 && c4.corrupt_converted > 0 && c4.corrupt_wrong == 0);
+    const LandRun c5 = run_land(d, 0, 5);  // another corruption type: every unit stays with the hut's owner
+    CHECK(c5.fought && c5.corrupt_kept == 3 && c5.corrupt_converted == 0 && c5.corrupt_wrong == 0);
 }
 
 }  // namespace

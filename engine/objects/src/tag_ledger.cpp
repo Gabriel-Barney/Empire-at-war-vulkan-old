@@ -42,6 +42,7 @@ const char* to_string(LedgerState s) {
         case LedgerState::Stored: return "stored";
         case LedgerState::Consumed: return "consumed";
         case LedgerState::Verified: return "verified";
+        case LedgerState::RetailUnused: return "retail_unused";
     }
     return "?";
 }

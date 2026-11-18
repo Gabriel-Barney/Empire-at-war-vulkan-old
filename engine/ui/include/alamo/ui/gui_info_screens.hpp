@@ -47,6 +47,7 @@ struct BuyUnitEntry {
     uint32_t owned = 0;
     std::string icon;
     bool can_buy = true;
+    uint32_t type_index = 0;  // mcx4 t04: the host's type index (buy limits, game::skirmish_buy_allowed)
 };
 struct BuyUnitsState {
     int64_t credits = 0;

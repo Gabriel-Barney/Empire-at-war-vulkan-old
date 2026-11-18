@@ -104,11 +104,16 @@ struct SessionSpec {
     bool attract = false;
     // ui1 t06: the campaign's advanced game options (ui::GameOptionsSetup; game_options false = the campaign's own
     // Starting_Credits / tech levels). Credits, start and max tech apply to every player the campaign names; the
-    // auto-resolve option (0 always / 1 never / 2 ask / 3 overwhelming odds) is the host's battle prompt rule; random
-    // events are carried for the rule that reads them (backlog). Not saved [port]: a loaded game asks again.
+    // auto-resolve option (0 always / 1 never / 2 ask / 3 overwhelming odds) is the host's battle prompt rule; game_options
+    // with random events off makes the galactic AI's Game.InterventionsEnabled 0.0 (mcx8 t07). Not saved [port]: a loaded
+    // game asks again.
     bool game_options = false;
     int32_t start_credits = 6000, start_tech = 1, max_tech = 5, auto_resolve_option = 2;
     bool random_events = false;
+    // mcx8 t07: Game.InterventionsEnabled was off in the saved game (save key spec.interventions_off; the options above are
+    // not saved). interventions_enabled() = the galactic AI's Game.InterventionsEnabled.
+    bool interventions_off = false;
+    bool interventions_enabled() const { return !interventions_off && (!game_options || random_events); }
     // [port] fleet groups (docs/DECISIONS.md "Fleet groups: exception to the current focus"): off = retail. Copied into
     // CampaignBattleOptions::fleet_groups; the HUD hotkeys send fleet group commands only while it is on.
     bool fleet_groups = false;

@@ -185,8 +185,11 @@ struct ProjectileDesc {
     // as name_crc of the trimmed faction name, 0 = unset. Set: the blast visits every player (own, allied, neutral)
     // except those whose faction it names; unset: enemies only.
     uint32_t blast_immune_faction = 0;
-    bool blast_dropoff = false;            // Dropoff
-    int32_t blast_dropoff_tiers = 0;
+    bool blast_dropoff = false;            // Projectile_Blast_Area_Dropoff (+0xaa): the tiered falloff below applies
+    int32_t blast_dropoff_tiers = 5;       // Projectile_Blast_Area_Dropoff_Tiers (+0x488); type ctor 0x367250 default 5
+    // mcx4 t18 (Projectile_Bomb_Fall_Accel_Rate +0x1e88, MCX4_RE_ANSWERS_TACTICAL §12): a BOMB / CLUSTER_BOMB shot's fall
+    // speed grows by this many units per frame each move (units per frame squared; 0 = straight flight).
+    float bomb_fall_accel = 0.0f;
     float damage_delay_secs = 0.0f;        // Projectile_Damage_Delay_Secs
     bool damages_random_hardpoints = false;  // Projectile_Damages_Random_Hard_Points
     // ---- S9 ----
@@ -522,6 +525,9 @@ struct UnitDesc {
     // TURRET unit that cannot aim at this type (beyond its rotate extent) turns its body instead of dropping it.
     bool hold_fire_for_special_ability = false;
     bool limited_turrets_turn = false;
+    // mcx4 t03 (LOB_SOLVER §5.3, aim 0x54a270): Fires_Forward (+0x44) - the unit's own weapon shots leave along the
+    // shooter's facing instead of toward the led, inaccurate aim point (FireAtPosition and the travel limit still use it).
+    bool fires_forward = false;
     float max_dist_walk_while_deployed = 0.0f;    // Max_Dist_Walk_While_Deployed (+0x23b0): > 0 keeps an out-of-range target
     // s78n t26.1 (MOVEMENT §3.2.1 item 6): Shielded_Only_When_Deployed - the shield absorb 0x549ac0 runs only while the unit
     // is deployed (0x39a390: state 0x19, walking deployed included); not while deploying, undeploying or rolling.
@@ -539,14 +545,17 @@ struct UnitDesc {
     // t01: Surface_Type_Cover_Damage_Shield (+0x1e48): Get_Damage_Multiplier's factor on cover cells (surface 9-11), land.
     float cover_damage_shield = 1.0f;
     // t02: the SURFACE_FX instances of a type with the SURFACE_FX behaviour in the battle's mode: CombatData::surface_fx
-    // indices of its SurfaceFX_Name entries that have a sim term (list order, at most kMaxUnitSurfaceFx).
+    // indices of its SurfaceFX_Name entries that have a sim term (list order; mcx4 t17: every entry, as retail builds one
+    // instance per entry, TRN1_TERRAIN_GAMEPLAY §2).
     std::vector<uint16_t> surface_fx;
     // t05: On_Fire_Speed_Modifier (+0x2040): the speed factor while burning (obj +0x3a1 bit 2); 1 when unset.
     float on_fire_speed = 1.0f;
     // t04: Destroy_When_Stunned_Over_Water (+0xe6; FoC: MAL_Rocket_Vehicle): ABILITIES_HARDPOINTS §4.12 RE reading.
     bool destroy_when_stunned_over_water = false;
 };
-inline constexpr uint32_t kMaxUnitSurfaceFx = 4;
+// mcx4 t17: the per-instance surface memory keeps its first kSurfaceFxFixedSlots slots in a fixed array (the save / hash
+// layout from trn1 t02; base FoC types have at most 3 entries); later instances (mod types) use Unit::sfx_prev_more.
+inline constexpr uint32_t kSurfaceFxFixedSlots = 4;
 
 struct CombatData {
     DamageArmorTable damage;
@@ -1838,7 +1847,8 @@ private:
         ObjectId bshield_in = kNoObject;  // AFFECTED_BY_SHIELD pack +0x18: the straddled shield
         // ---- trn1 t02 (SurfaceFX terrain modifiers; saved, hashed under tag 0x5B when not at the spawn values) ----
         uint8_t sfx_ready = 0;  // the instances exist (first update done); evaluated from the next update
-        std::array<uint8_t, kMaxUnitSurfaceFx> sfx_prev{};  // per instance the surface of its last update (+0xc)
+        std::array<uint8_t, kSurfaceFxFixedSlots> sfx_prev{};  // per instance the surface of its last update (+0xc)
+        std::vector<uint8_t> sfx_prev_more;  // mcx4 t17: instances kSurfaceFxFixedSlots.. (saved / hashed only when present)
         float terrain_damage = 0.0f;  // data pack +0x188: Terrain_Damage of the surface being stood on
         uint32_t terrain_next = 0;    // +0x18c: frame of the next terrain damage
         float terrain_delay = 0.0f;   // +0x190: Terrain_Damage_Delay (seconds)
@@ -1986,6 +1996,9 @@ private:
     Vec3 lob_next(const Projectile& p, uint32_t frame) const;
     bool ground_hit(Vec3 a, Vec3 b, GroundHit& out) const;  // S8 t06: 0x135840 (rocket.hpp ground_segment)
     bool straight_ground_test(const Projectile& p, Vec3 delta) const;  // A1j t03: 0x4d0630's mode / category / target gate
+    // The straight step's move P -> P + delta for a move made on `frame` (mcx4 t18: a falling bomb's drop included).
+    Vec3 straight_delta(const Projectile& p, uint32_t frame) const;
+    float bomb_drop(const Projectile& p, uint32_t frame) const;  // mcx4 t18: that move's fall (0 = none)
     Vec3 stuck_local(const Unit& v, Vec3 world) const;     // S8 t06: world point -> v's frame (inverse local_to_world)
     uint32_t bomb_frame(float seconds, uint32_t armed_frame) const;  // S8 t06: BOMB arm 0x58f030 detonation frame
     void lob_step(uint32_t i, uint32_t frame, SimRng& rng);
