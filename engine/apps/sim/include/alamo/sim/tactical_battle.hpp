@@ -1177,9 +1177,10 @@ public:
     commands::RejectReason tactical_build(TacticalMode& mode, uint8_t player, objects::ObjectId pad, objects::TypeIndex type, SimRng& rng,
                                           bool ai);
     commands::RejectReason tactical_sell(TacticalMode& mode, uint8_t player, objects::ObjectId object);
-    // Pad price 0x3744e0 (campaign): Tactical_Build_Cost_Campaign, else Tactical_Build_Cost_Multiplayer when <= 0
-    // [port: the corruption planet factor 0x33e440 is not applied].
-    float build_cost(objects::TypeIndex uc_type) const;
+    // Pad price 0x3744e0 (campaign): Tactical_Build_Cost_Campaign, else Tactical_Build_Cost_Multiplayer when <= 0, then
+    // for `player` (>= 0) at a corrupted battle planet (int)((float)cost x the faction's
+    // Corruption_Tactical_Build_Pad_Price_Multipliers entry 1) (mcx4 t07, MCX4_RE_ANSWERS_GALACTIC Q7.2). Skirmish: no factor.
+    float build_cost(objects::TypeIndex uc_type, int32_t player = -1) const;
     // t50: the land skirmish rules. A land skirmish (BattleConfig::skirmish, land map) prices pads from
     // Tactical_Build_Cost_Multiplayer and lists their buildable types from Tactical_Buildable_Objects_Multiplayer
     // (L1_S4_REMAINING §3.6: "skirmish ... Multiplayer", else Campaign), and gets the skirmish base (bt_skirmish_base).

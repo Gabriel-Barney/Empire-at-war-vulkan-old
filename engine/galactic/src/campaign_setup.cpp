@@ -14,6 +14,52 @@ namespace {
 
 }  // namespace
 
+// mcx4 t01 / t07: the campaign rule fields MCX4_RE_ANSWERS_GALACTIC Q1 / Q7.4 / Q7.6 settle (campaign.hpp).
+void read_campaign_rule_fields(const data::CampaignDef& c, const GalacticRules& rules, GalacticSetup& s,
+                               std::vector<std::string>* diagnostics) {
+    // mcx4 t01 (MCX4_RE_ANSWERS_GALACTIC Q1): Special_Case_Production "Faction, Planet, Type"; the faction is not read.
+    for (std::string_view v : c.raw_values("Special_Case_Production")) {
+        const std::vector<std::string_view> fields = data::split_fields(v);
+        if (fields.size() < 3) continue;
+        const uint32_t pt = rules.find_type(data::trim(fields[1])), t = rules.find_type(data::trim(fields[2]));
+        if (pt == kNoIndex || t == kNoIndex) {
+            if (diagnostics) diagnostics->push_back("galactic: special case production skipped: " + std::string(v));
+            continue;
+        }
+        s.special_case_production.emplace_back(pt, t);
+    }
+    // mcx4 t07 (MCX4_RE_ANSWERS_GALACTIC Q7.4): Corruption_Level_Override "planet, int" pairs (code 0x2B, several pairs
+    // per element), file order.
+    for (std::string_view v : c.raw_values("Corruption_Level_Override")) {
+        const std::vector<std::string_view> fields = data::split_fields(v);
+        for (size_t i = 0; i + 1 < fields.size(); i += 2) {
+            const uint32_t pt = rules.find_type(data::trim(fields[i]));
+            if (pt == kNoIndex) {
+                if (diagnostics) diagnostics->push_back("galactic: corruption level override skipped: " + std::string(fields[i]));
+                continue;
+            }
+            s.corruption_level_override.emplace_back(pt, data::xml_values::int_or(data::trim(fields[i + 1]), 0));
+        }
+    }
+    // mcx4 t07 (Q7.6 / Q7.4): the auto-resolve fields. Bools are code 0x0 (to_bool), the last occurrence wins;
+    // Autoresolve_Exclusion_Locations is a string list read as (planet, land | space) pairs, every element appends.
+    for (std::string_view v : c.raw_values("Is_Autoresolve_Allowed")) s.autoresolve_allowed = data::xml_values::to_bool(v);
+    for (std::string_view v : c.raw_values("Is_Story_Campaign")) s.story_campaign = data::xml_values::to_bool(v);
+    for (std::string_view v : c.raw_values("Autoresolve_Exclusion_Locations")) {
+        const std::vector<std::string_view> fields = data::split_fields(v);
+        for (size_t i = 0; i + 1 < fields.size(); i += 2) {
+            const uint32_t pt = rules.find_type(data::trim(fields[i]));
+            const std::string_view kind = data::trim(fields[i + 1]);
+            const bool land = ascii_iequals(kind, "land");
+            if (pt == kNoIndex || (!land && !ascii_iequals(kind, "space"))) {  // 0x4471b0 matches only "land" / "space"
+                if (diagnostics) diagnostics->push_back("galactic: autoresolve exclusion skipped: " + std::string(fields[i]));
+                continue;
+            }
+            s.autoresolve_exclusions.emplace_back(pt, land);
+        }
+    }
+}
+
 GalacticSetup build_campaign_setup(const data::GameDatabase& db, const GalacticRules& rules, std::string_view campaign,
                                    const CampaignOptions& options, std::vector<std::string>* diagnostics) {
     GalacticSetup s;
@@ -124,6 +170,7 @@ GalacticSetup build_campaign_setup(const data::GameDatabase& db, const GalacticR
         }
         s.forces.push_back({player_of[f], p, t});
     }
+    read_campaign_rule_fields(*c, rules, s, diagnostics);  // mcx4 t01 / t07
     // q6 t22: the victory conditions; the Human_ list goes to the human's faction (Starting_Active_Player, or the
     // faction the player picked).
     s.victory = load_victory_rules(db, campaign, s.map, nullptr, human);  // diagnostics: not collected (as before)

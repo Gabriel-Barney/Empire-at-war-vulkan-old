@@ -86,7 +86,7 @@ read from the r8b setup at each site [H]; "what it is" is [H] where an existing 
 | 0x61b9f0 | Death Star hack | − |
 | 0x616740 | hero neutralize (bounty-hunter path) cost | − |
 | 0x6147d0 | `Release_Credits_For_Tactical` (tactical allowance during a battle) | + |
-| 0x3c4460 (2) | raid fleet move (mover −, per-player +) [M] | − / + |
+| 0x3c4460 (2) | `MoveThroughObjects` route bribe toll (mover −, planet owners +; `MCX4_RE_ANSWERS_GALACTIC.md` Q5.1) [H] | − / + |
 | 0x42dbd0, 0x496a20, 0x498170 | tactical build start / enqueue / PAYG service charges | − |
 | 0x5248b0 | tactical sell | + |
 | 0x387170 | repair service cost | − |

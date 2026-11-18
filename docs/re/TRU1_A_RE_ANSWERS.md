@@ -210,7 +210,7 @@ re-created). The end-of-frame state is the same as staying inside; only presenta
 
 ### Penetration SFX and other effects
 
-- `SFXEvent_HUD_Base_Shield_Penetrated` / `..._Enemy_...` (faction +0x23d8 / +0x23e8): **no reader** besides the
+- `SFXEvent_HUD_Base_Shield_Penetrated` / `..._Enemy_...` (`SFXEvent_HUD_Enemy_Base_Shield_Penetrated`; faction +0x23d8 / +0x23e8): **no reader** besides the
   faction loader and ctor (0x33a580, 0x33c160) in a byte scan of the image [M: never played].
 - `Base_Shield_Penetration_Particle`: only the creation / update above (0x502770; the only reader of type
   +0x2200 that touches this field) [H].

@@ -878,8 +878,17 @@ void test_queue_phases() {
         // no galab state, which is this session's state, so it writes back as the v8 bytes.
         const size_t galab = 4 * s.players().size() + 12 * s.planets().size() + 4;
         // map1 t06: v9 adds the structure marker memory after them (u32 count 0 here); a v8 image reads as none.
-        CHECK(bytes.size() >= galab + 16 && bytes[0] == 9 && bytes[bytes.size() - 1] == 0);
-        std::vector<uint8_t> v8(bytes.begin(), bytes.end() - 4);
+        // mcx4 t01 / t07: v10 adds per planet the initial-placement list (u32 count + types), then the campaign's
+        // auto-resolve rules (2 bools, u32 count, 5 bytes per pair) last; a v9 image keeps the start() values, which are
+        // this session's, so it writes back as the v10 bytes.
+        size_t placement = 2 + 4 + 5 * s.autoresolve_exclusions().size();
+        for (const PlanetState& pl : s.planets()) placement += 4 + 4 * pl.initial_placement.size();
+        CHECK(bytes.size() >= galab + 16 + placement && bytes[0] == 10 && bytes[bytes.size() - 1] == 0);
+        std::vector<uint8_t> v9(bytes.begin(), bytes.end() - static_cast<std::ptrdiff_t>(placement));
+        v9[0] = 9;
+        ByteReader r9(v9);
+        CHECK(o.read(r9) && sim_bytes(o) == bytes);
+        std::vector<uint8_t> v8(v9.begin(), v9.end() - 4);
         v8[0] = 8;
         ByteReader r8(v8);
         CHECK(o.read(r8) && o.structure_slots().empty() && sim_bytes(o) == bytes);

@@ -74,6 +74,8 @@ void extract_oi_fields(const objects::GameObjectTypes& types, objects::TypeIndex
     i.named_hero = types.get_bool(t, "Is_Named_Hero");
     i.generic_hero = types.get_bool(t, "Is_Generic_Hero");
     i.requires_initial_placement = types.get_bool(t, "Build_Requires_Initial_Placement");
+    i.cheap_bribe_cost = int_or(types, t, "Cheap_Bribe_Cost", 1);          // mcx4 t05 (Q5.1): ctor default 1
+    i.expensive_bribe_cost = int_or(types, t, "Expensive_Bribe_Cost", 1);
     // Required_Special_Structures: the parser keeps '|' as a token (0x53 OR markers): `A | B, C` = (A or B) and C.
     bool join = false;
     for (std::string_view tok : types.get_list(t, "Required_Special_Structures")) {
@@ -276,6 +278,16 @@ std::vector<FactionRules> load_factions(const FileProvider& provider, std::vecto
             r.can_control_planets = xv::bool_or(n, "Can_Control_Planets", false);
             r.is_playable = xv::bool_or(n, "Is_Playable", false);
             r.benefits_from_corruption = xv::bool_or(n, "Benefits_From_Corruption", false);
+            r.easily_bribed = xv::bool_or(n, "Easily_Bribed", false);  // mcx4 t05 (MCX4_RE_ANSWERS_GALACTIC Q5.1)
+            // mcx4 t07 (Q7.2): code 0x13 float lists (every element appends, MCX1 Q1).
+            const auto floats = [&n](std::string_view tag) {
+                std::vector<float> out;
+                for (std::string_view f : xv::list(n, tag)) out.push_back(xv::to_float(f));
+                return out;
+            };
+            r.corruption_tactical_production_price_mult = floats("Corruption_Tactical_Production_Price_Multipliers");
+            r.corruption_tactical_production_time_mult = floats("Corruption_Tactical_Production_Time_Multipliers");
+            r.corruption_tactical_pad_price_mult = floats("Corruption_Tactical_Build_Pad_Price_Multipliers");
             r.debug_switchable = xv::bool_or(n, "Is_Debug_Switchable_To", false);  // mcx6 SWITCH_SIDES
             r.basic_ai = std::string(text("Basic_AI"));
             r.text_id = std::string(text("Text_ID"));
@@ -329,6 +341,7 @@ std::vector<DifficultyRules> load_difficulties(const FileProvider& provider, std
         d.damage_multiplier = atof_or(data::xml_values::text(n, "Damage_Multiplier"), 1.0f);
         d.health_multiplier = atof_or(data::xml_values::text(n, "Health_Multiplier"), 1.0f);
         d.shield_multiplier = atof_or(data::xml_values::text(n, "Shield_Multiplier"), 1.0f);
+        d.bribe_cost_multiplier = atof_or(data::xml_values::text(n, "Bribe_Cost_Multiplier"), 1.0f);  // mcx4 t05 (Q5.1)
         out.push_back(std::move(d));
     }
     return out;

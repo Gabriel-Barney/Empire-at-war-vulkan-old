@@ -85,6 +85,9 @@ struct GalacticAiConfig {
     std::vector<GalacticAiPlayerConfig> players;
     std::vector<GalacticAiDifficulty> difficulties;  // by DifficultyAdjustments name (lookup by player type's names)
     bool story_campaign = false;    // Game.IsStoryCampaign
+    // mcx8 t07 Game.InterventionsEnabled (AI_GALACTIC_TOKENS §4): false only when the campaign started with changed advanced
+    // game options and random events off (retail settings flags 0x20 set, 0x10 clear).
+    bool interventions_enabled = true;
     uint32_t solver_max_picks = 200; // PotentialPlan solver iteration guard [port]
     bool log_decisions = true;      // keep the decision log (decision_log())
     // The AI contrast table (PGAICommands EnemyContrastTypes / FriendlyContrastTypes; S10 ConflictRules::contrast).
