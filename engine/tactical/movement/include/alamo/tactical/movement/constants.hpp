@@ -90,6 +90,18 @@ struct MovementConstants {
     float base_land_targeting_arc_angle_coefficient = 0.2f;
     float solo_attack_range = 60.0f;
     float short_range_attack_formation_coefficient = 1.6f;
+    // mcx4 t11 (MOVEMENT §4.4, 0x41dbb0 [H]): the formation side-error pull (e -+ min) / max, 0 when |e| <= min.
+    float formation_minimum_side_error = 0.1f;
+    float formation_maximum_side_error = 30.0f;
+    // mcx4 t11 (BKR1_RE_ANSWERS Q5 [H], MOVEMENT §1.6): ApproximationForwardDistance (GC +0x14d8), the longest straight
+    // step of the path approximation 0x505fe0 - the spacing of the moving-vs-stopped sweep's points (foot_path_contact).
+    float approximation_forward_distance = 2.0f;
+    // mcx4 t11 (BKR2_RE_ANSWERS Q8 [H], MOVEMENT §4.2 step 2 item 7 test 3): ShouldInfantryTeamsSplitAcrossFormations
+    // (GC +0x149d); set, a seed with a parent team recruits nobody (its team splits across formations).
+    bool should_infantry_teams_split_across_formations = true;
+    // mcx4 t11 (MOVEMENT §2.2 obstacle test item 1): SpaceStaticObstacleAvoidanceBonusDistance (GC +0x1414, int), added
+    // to the clearance of the space planner's static-map test ([port] read as a radius margin).
+    float space_static_obstacle_avoidance_bonus_distance = 0.0f;
 
     static MovementConstants from_game_constants(const data::GameConstants& gc);
 };

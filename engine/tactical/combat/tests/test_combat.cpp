@@ -116,6 +116,11 @@ int main(int argc, char** argv) {
     test_hero_clash_foc_data();
     test_area_immune_faction();  // tru1 t04
     test_fires_forward();         // mcx4 t03
+    test_mode_weapon_delay();     // mcx4 t10
+    test_deployed_attack_distance();
+    test_depleted_shield_increment();
+    test_out_of_combat_defense();
+    test_projectile_appearance_delay();
     test_lost_target_no_rescan(); // mcx4 t03
     test_blast_dropoff();         // mcx4 t03
     test_bomb_fall();             // mcx4 t18

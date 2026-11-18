@@ -1062,7 +1062,9 @@ bool MovementSystem::mvs_hostile_in_way(const CollisionObject& c, Unit& a, const
     for (const uint32_t ci : cand) {
         const Unit& o = units_[ci];
         if (o.d.id == a.d.id || !hostile(a.d.owner, o.d.owner)) continue;
-        if (foot_path_contact(probe[0], probe, 1, foot_half(a), foot_of(o), 3.0e38f) < 0.0f) continue;
+        if (foot_path_contact(probe[0], probe, 1, foot_half(a), foot_of(o), 3.0e38f, kNoFacing,
+                              cfg_.constants.approximation_forward_distance) < 0.0f)  // mcx4 t11
+            continue;
         if (a.form_id == 0) return false;  // no formation (pack +0x1f0 null)
         formation_attacks_.push_back({a.d.id, o.d.id});
         return true;
@@ -2288,6 +2290,8 @@ void MovementSystem::tick_land(uint32_t frame, SimRng& rng, const ParallelFor& p
         if (u.wt.on) x.wt = &u.wt;  // s78n t26 closing review: Walk_Transition (MOVEMENT §3.4, §3.5.2 F)
         x.lane = u.has_goal;
         x.directions = u.d.movement_directions;
+        x.side_error_min = cfg_.constants.formation_minimum_side_error;  // mcx4 t11
+        x.side_error_max = cfg_.constants.formation_maximum_side_error;
         if (order_rec) {
             x.formation_path = u.in_formation;
             if (u.in_formation) x.jiggle = u.jiggle;  // OI tactical: formation members

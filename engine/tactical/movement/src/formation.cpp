@@ -105,7 +105,10 @@ std::vector<std::vector<uint32_t>> split_into_formations(std::span<const Formati
                 for (size_t i = 0; i < remaining.size();) {
                     const uint32_t cand = remaining[i];
                     const FormationMember& o = m[cand];
-                    bool ok = !s.short_range_attack || o.type_name == s.type_name;
+                    // mcx4 t11 (BKR2_RE_ANSWERS Q8 [H]): test 3's team clause - a seed with a parent team (a squad member)
+                    // recruits nobody while ShouldInfantryTeamsSplitAcrossFormations is set (FoC: true)
+                    bool ok = (!s.team_member || !k.should_infantry_teams_split_across_formations) &&
+                              (!s.short_range_attack || o.type_name == s.type_name);
                     if (!ok) {
                         ++i;
                         continue;

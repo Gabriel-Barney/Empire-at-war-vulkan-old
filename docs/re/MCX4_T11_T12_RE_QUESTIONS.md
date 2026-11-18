@@ -24,16 +24,16 @@ A11. **`Attack_Action`** (8 fields, 10-20 FoC uses each, plus `Attack_Animation_
    (+0xe8), `Attack_Number_Of_Shots` (+0xe4), `Attack_Projectile_Type`, `Attack_Animation_Type`. Which class parses the
    `Attack_Action` entries (hero clash `HERO_CLASH.md` has `MoveActionClass` vf5 0x5e9ce0 for `Move_Action`: is
    `Attack_Action` its sibling?), who runs it, and what each field does. Is any field parsed but never read?
-A12. Redirect_Blaster `Max_Projectile_Redirection_Angle_In_Degrees` (ability +0x184, 52) and `Turn_To_Face_Unblockable_Shots`
-   (+0x188, 52): the scan lists hits in 0x6f0000..0x713000 not yet judged. Reader and effect (the angle test against the
-   incoming shot's direction? the turn?).
+A12. (answered by REA: MCX4_T10_RE_ANSWERS §12; only confirm the operand order of the turn and which record
+   +0x2e (`param_1[0x2e]`) is the redirect target.)
 A13. Ability_Base `Terminate_Effect_On_Move_Command` (+0x42, 9): one type-based byte read each in 0x29f810 and 0x2b5ad0 may
    be a different field. Who reads the ability-data byte, and does a move order end the ability's effect?
 A14. Arc_Sweep_Attack_Ability `Aggressiveness` (+0x0?, 7) and `Focus` (7). Note: the field table gives offsets 0x0 / 0x4,
    which look wrong; take the parser's offsets.
-A15. - Battlefield_Modifier_Ability `Disable_Reinforcement_Vulnerability` (+0x194, 3): is it the gate around
-     `Apply_Elevated_Vulnerability` 0x3a8550 (§16 callers 0x29e960, 0x2a00b0, 0x2bf2d0, 0x644330)? Which players' arrivals
-     does it cover (owner, allies, everyone)?
+A15. - Battlefield_Modifier_Ability `Disable_Reinforcement_Vulnerability` (+0x194, 3): §16a (already in the answers
+     file, REA) found the transport-unload gate `0x527f00(player)` = BitwiseAnd over the player's bool modifier map at
+     player +0x2c8. Confirm this ability writes that map (apply / remove), which players it covers, and what the 9th
+     argument of 0x29e960 and the 0x2a00b0 call mean (which arrivals get the vulnerability).
    - Tractor_Beam_Attack_Ability `Damage_Application_Time_In_Secs` (+0x184, 3), `Inaccuracy_Radius` (+0x188, 1).
    - Buzz_Droids_Ability `Chase_Radius` (+0x188), `Own_Damage_Per_Second` (+0x18c), `Enemy_Damage_Per_Second` (+0x190), 2 each
      (ints).

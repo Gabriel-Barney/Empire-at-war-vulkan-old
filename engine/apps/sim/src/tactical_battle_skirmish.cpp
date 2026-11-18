@@ -12,6 +12,7 @@
 #include "alamo/core/ascii.hpp"
 #include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/game_object_types.hpp"
+#include "alamo/objects/type_fields.hpp"
 #include "alamo/sim/l1_loaders.hpp"
 #include "alamo/sim/tactical_battle.hpp"
 
@@ -133,8 +134,9 @@ const TacticalBattle::SkIncome& TacticalBattle::sk_income_of(uint32_t type) {
         const std::string_view tag = raw.tag_name(f);
         const bool stream = ascii_iequals(tag, "Income_Stream_Ability"), mod = ascii_iequals(tag, "Income_Stream_Mod_Ability");
         if (!stream && !mod) continue;
-        float value = 0.0f, interval = 0.0f, additive = 0.0f, multiplier = 1.0f;
-        bool enabled = true, own = false;
+        float value = 0.0f, interval = 0.0f, additive = 0.0f, multiplier = 1.0f, owner_pct = 0.0f;
+        bool enabled = true, own = false, split = false, favors = false, full = false;
+        auto yes = [](std::string_view v) { return objects::parse_type_bool(ascii_trim(v)); };
         for (objects::FieldIndex c = f + 1; c < fc.size() && fc.depth[c] > fc.depth[f]; ++c) {
             if (fc.parent[c] != f) continue;
             const std::string_view k = raw.tag_name(c);
@@ -144,10 +146,27 @@ const TacticalBattle::SkIncome& TacticalBattle::sk_income_of(uint32_t type) {
             else if (ascii_iequals(k, "Income_Multiplier")) multiplier = to_f(fc.text[c]);
             else if (ascii_iequals(k, "Initially_Enabled")) enabled = !ascii_iequals(ascii_trim(fc.text[c]), "No") && !ascii_iequals(ascii_trim(fc.text[c]), "False");
             else if (ascii_iequals(k, "Target_Stream_Source")) own = ascii_iequals(ascii_trim(fc.text[c]), self);
+            else if (ascii_iequals(k, "Split_Income_With_Allies")) split = yes(fc.text[c]);
+            else if (ascii_iequals(k, "Split_Favors_Owner")) favors = yes(fc.text[c]);
+            else if (ascii_iequals(k, "Full_Amount_To_Everyone")) full = yes(fc.text[c]);
+            else if (ascii_iequals(k, "Owner_Income_Percentage")) owner_pct = to_f(fc.text[c]);
         }
         if (stream) {
             in.value = value;
             in.interval = interval;
+            // MCX4_T09_RE_ANSWERS Q10 [H]: the validator 0x703d00 clears Split_Favors_Owner and Full_Amount_To_Everyone when
+            // both are set, and Split_Favors_Owner with Owner_Income_Percentage when Split_Income_With_Allies is off; with
+            // split on it clamps the percentage (< 0 -> 0, >= 1 -> 0.99). The create 0x703990 sets the mode (1 favors,
+            // 2 full, else 0) and copies the percentage only when it is in [0, 1] (0x695420).
+            if (favors && full) favors = full = false;
+            if (favors && !split) {
+                favors = false;
+                owner_pct = 0.0f;
+            }
+            if (split) owner_pct = owner_pct < 0.0f ? 0.0f : (owner_pct >= 1.0f ? 0.99f : owner_pct);
+            in.split = split;
+            in.mode = favors ? uint8_t{1} : (full ? uint8_t{2} : uint8_t{0});
+            in.owner_share = owner_pct >= 0.0f && owner_pct <= 1.0f ? owner_pct : 0.0f;
         } else if (own) {
             // [M] a mod on the object's own stream (the skirmish stations' Supply Dock bonus, Initially_Enabled No, switched on
             // by the station's supply-dock hard point): counted while the object lives. The retail trace pays the Empire
@@ -169,6 +188,7 @@ void TacticalBattle::sk_income(const TacticalMode& mode) {
     // give exactly 300 / 600 / 900; the 0.3 shortfall per 1800 frames is the float rounding of a 1/6 credit add near 6000).
     if (!skirmish_map() || !credits_add_) return;
     const objects::ObjectStore& st = mode.primary();
+    std::vector<int32_t> recipients;
     for (const Unit& u : units_) {
         if (!u.alive || u.retreated || !st.alive(u.h)) continue;
         const int32_t owner = st.owner(u.h);
@@ -176,7 +196,36 @@ void TacticalBattle::sk_income(const TacticalMode& mode) {
         const SkIncome& in = sk_income_of(u.type);
         if (in.value <= 0.0f || in.interval <= 0.0f) continue;
         const float per_interval = in.value * in.multiplier + in.additive;
-        credits_add_(owner, per_interval / in.interval * kFrameSeconds);
+        const float pay = per_interval / in.interval * kFrameSeconds;
+        if (!in.split || !galaxy_) {  // the owner only: every mode pays it the whole amount
+            credits_add_(owner, pay);
+            continue;
+        }
+        // MCX4_T09_RE_ANSWERS Q10 [H] (0x7038b0): with Split_Income_With_Allies the recipients are the players allied with
+        // the owner (the owner included [M]) whose faction Is_Playable, paid in ascending player id. [port] the set is
+        // rebuilt every frame (skirmish alliances do not change during a battle).
+        recipients.clear();
+        const int32_t np = static_cast<int32_t>(galaxy_->players().size());
+        for (int32_t q = 0; q < np; ++q)
+            if (bt_allied(owner, q) && vm_player_playable(q)) recipients.push_back(q);
+        if (recipients.empty()) continue;
+        const float n = static_cast<float>(recipients.size());
+        if (in.mode == 2) {  // Full_Amount_To_Everyone: every recipient gets the whole pay
+            for (const int32_t q : recipients) credits_add_(q, pay);
+        } else if (in.mode == 1) {
+            // Split_Favors_Owner (0x694e90): owner s = clamp(pay x pct, 0, pay); every other recipient (pay - s) / N with N
+            // counting the owner, so one share is never paid (retail quirk); shares <= 0 are skipped.
+            float sh = pay * in.owner_share;
+            sh = sh < 0.0f ? 0.0f : (sh > pay ? pay : sh);
+            const float other = (pay - sh) / n;
+            for (const int32_t q : recipients) {
+                const float amount = q == owner ? sh : other;
+                if (amount > 0.0f) credits_add_(q, amount);
+            }
+        } else {  // equal split (0x694ba0): pay / N each
+            const float share = pay / n;
+            for (const int32_t q : recipients) credits_add_(q, share);
+        }
     }
 }
 

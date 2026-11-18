@@ -1201,6 +1201,11 @@ void test_hero_clash_fire_refused();
 void test_hero_clash_foc_data();
 void test_area_immune_faction();  // tru1 t04 (test_combat_tru1.cpp)
 void test_fires_forward();           // mcx4 t03 (test_combat_mcx4.cpp)
+void test_mode_weapon_delay();        // mcx4 t10 (test_combat_mcx4.cpp)
+void test_deployed_attack_distance();
+void test_depleted_shield_increment();
+void test_out_of_combat_defense();
+void test_projectile_appearance_delay();
 void test_lost_target_no_rescan();   // mcx4 t03
 void test_blast_dropoff();           // mcx4 t03
 void test_bomb_fall();               // mcx4 t18

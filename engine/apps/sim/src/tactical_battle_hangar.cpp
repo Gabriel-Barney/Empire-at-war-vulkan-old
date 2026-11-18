@@ -839,12 +839,14 @@ commands::RejectReason TacticalBattle::hg_production_command(TacticalMode& mode,
         if (credits_add_) credits_add_(p, -cost);
     }
     // 0x496f00: Tactical_Build_Time_Seconds x (skm1 t04) the AI difficulty multiplier for a non-human AI player (Space_ /
-    // Land_Build_Time_Multiplier, set by BattleAi). [port] GC Tactical_Build_Time_Multiplier (shipped 1.0) and the
-    // build-time modifiers (list 10) are not applied. mcx4 t07 (Q7.2): in a campaign battle the faction's
+    // Land_Build_Time_Multiplier, set by BattleAi), in the order of SKIRMISH_SETUP §3 [H]: seconds x GC
+    // Tactical_Build_Time_Multiplier (mcx4 t10; shipped 1.0) x the AI multiplier. [port] The build-time modifiers (list 10)
+    // are not applied. mcx4 t07 (Q7.2): in a campaign battle the faction's
     // Corruption_Tactical_Production_Time_Multipliers entry (planet corrupted ? 1 : 0) multiplies the time; production only
     // runs in skirmish here (production_enabled), where retail's factor is 1.0. The price factor (0x496d80) applies only
     // while a tactical price modifier is active for the type; the port has no such modifier map, so it is not applied.
     float seconds = static_cast<float>(types.get_int(type, "Tactical_Build_Time_Seconds"));  // int field
+    seconds = seconds * catalog_->tactical_build_time_multiplier();
     if (static_cast<size_t>(p) < ai_build_time_mult_.size()) seconds *= ai_build_time_mult_[static_cast<size_t>(p)];
     if (!cfg_.skirmish && galaxy_)
         seconds *= galaxy_->tactical_corruption_multiplier(req_.info.planet, p, galactic::GalacticSim::TacticalCorruption::ProductionTime);

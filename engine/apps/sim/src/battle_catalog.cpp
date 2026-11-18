@@ -82,6 +82,7 @@ BattleCatalog::BattleCatalog(const objects::GameObjectTypes& types, const FilePr
         control_point_victory_seconds_ =
             constants->get_float("Control_Point_Domination_Victory_Time_In_Secs", control_point_victory_seconds_);  // ccpgt t02
         garrisoned_range_mult_ = constants->get_float("Garrisoned_Max_Attack_Distance_Multiplier", garrisoned_range_mult_);
+        tactical_build_time_mult_ = constants->get_float("Tactical_Build_Time_Multiplier", tactical_build_time_mult_);
         use_reinforcement_points_ = constants->get_bool("Use_Reinforcement_Points", use_reinforcement_points_);  // a1h t06
         threat_decay_step_ = constants->get_float("AI_SpaceThreatDecayStep", threat_decay_step_);
         engines_disabled_speed_ = constants->get_float("Engines_Disabled_Speed_Modifier", engines_disabled_speed_);
@@ -423,6 +424,8 @@ int32_t BattleCatalog::hardpoint(std::string_view name, BuildState& s) const {
     h.pulse_count = static_cast<int32_t>(num("FIRE_PULSE_COUNT", 1.0f));
     h.pulse_delay = num("FIRE_PULSE_DELAY_SECONDS", 0.0f);
     h.fire_range = num("FIRE_RANGE_DISTANCE", 0.0f);
+    // mcx4 t10 (MCX4_T10_RE_ANSWERS §3): the launch hold of the hardpoint's shots (int field, ctor 0)
+    h.projectile_appearance_delay_frames = static_cast<int32_t>(num("PROJECTILE_APPEARANCE_DELAY_FRAMES", 0.0f));
     h.fire_min_range = num("FIRE_MIN_RANGE_DISTANCE", 0.0f);
     h.fighter_bay_flyout_distance = num("FIGHTER_BAY_FLYOUT_DISTANCE", 0.0f);  // STATION_HANGARS_SOUND §2.5 (hangar module)
     for (const auto& [n, v] : tags) {
@@ -457,10 +460,32 @@ int32_t BattleCatalog::hardpoint(std::string_view name, BuildState& s) const {
             continue;
         const std::string_view mode = nv.substr(kPre.size(), nv.size() - kPre.size() - kSuf.size());
         if (mode == "ROCKET_ATTACK" || mode == "NORMAL_ATTACK") continue;  // the dedicated bytes above
+        // ledger: consumes HardPoint.Fire_When_In_Power_To_Weapons_Mode (MCX4_T10_RE_ANSWERS §10: the +0x384 + 0x1d byte)
         const uint8_t m = ta::ability_type_from_name(mode);
         if (m >= 1 && m <= 0x4c && !objects::parse_type_bool(v) &&
             std::find(h.no_fire_modes.begin(), h.no_fire_modes.end(), m) == h.no_fire_modes.end())
             h.no_fire_modes.push_back(m);
+    }
+    // mcx4 t10 (MCX4_T10_RE_ANSWERS §9 [H]): Allow_Opportunity_Fire_When_Idle (+0x3d5) / _When_Targeting (+0x3d6), ctor
+    // default true; read by CombatSystem::opportunity_allowed (0x385620 / 0x387400).
+    h.allow_opportunity_fire_when_idle = flag("ALLOW_OPPORTUNITY_FIRE_WHEN_IDLE", true);
+    h.allow_opportunity_fire_when_targeting = flag("ALLOW_OPPORTUNITY_FIRE_WHEN_TARGETING", true);
+    // mcx4 t10 (MCX4_T10_RE_ANSWERS §10 [H]): the per-mode recharge table +0x250 + 4 m (default 1.0). Tags are
+    // <MODE>_Mode_Weapon_Delay_Multiplier, or <MODE>_Weapon_Delay_Multiplier (Full_Salvo); m = the UnitAbilityType of
+    // <MODE>. A tag set twice keeps the last value (one table slot).
+    for (const auto& [n, v] : tags) {
+        constexpr std::string_view kSuf = "_WEAPON_DELAY_MULTIPLIER", kMode = "_MODE";
+        std::string_view mode = n;
+        if (mode.size() <= kSuf.size() || mode.substr(mode.size() - kSuf.size()) != kSuf) continue;
+        mode.remove_suffix(kSuf.size());
+        if (mode.size() > kMode.size() && mode.substr(mode.size() - kMode.size()) == kMode) mode.remove_suffix(kMode.size());
+        const uint8_t m = ta::ability_type_from_name(mode);  // ledger: consumes HardPoint.Defend_Mode_Weapon_Delay_Multiplier
+        if (m < 1 || m > 0x4c) continue;  // ledger: consumes HardPoint.Power_To_Weapons_Mode_Weapon_Delay_Multiplier
+        const float f = static_cast<float>(objects::c_atof(ascii_trim(v)));  // ledger: consumes HardPoint.Full_Salvo_Weapon_Delay_Multiplier
+        auto slot = std::find_if(h.weapon_delay.begin(), h.weapon_delay.end(),
+                                 [m](const tc::WeaponDelayEntry& e) { return e.ability_type == m; });
+        if (slot != h.weapon_delay.end()) slot->factor = f;
+        else h.weapon_delay.push_back({m, f});
     }
     if (s.full) {
         // S10-int: S9 hardpoint fields. Fire bones: B present only when named (Percent(50) pick without
@@ -492,6 +517,13 @@ tc::UnitDesc BattleCatalog::unit_desc(uint32_t t, BuildState& s) const {
     u.shield_armor_type = damage_.armor_index(ascii_trim(ty.get_string(t, "Shield_Armor_Type")));
     u.radius = tactical::movement::unit_desc_from_type(ty, t).radius;
     u.max_attack_distance = ty.columns().targeting_max_attack_distance[t];
+    // mcx4 t10 (MCX4_T10_RE_ANSWERS §8 [H]): Deployed_Max_Attack_Distance_Multiplier (ctor 1.0 when the tag is absent).
+    if (!ty.get_string(t, "Deployed_Max_Attack_Distance_Multiplier").empty())
+        u.deployed_max_attack_distance_multiplier = ty.get_float(t, "Deployed_Max_Attack_Distance_Multiplier");
+    // mcx4 t10 (MCX4_T10_RE_ANSWERS §2 [H], Take_Damage 0x3a9e30 at 0x3aa1db): Immune_To_Damage (+0xa3, default false).
+    u.immune_to_damage = ty.get_bool(t, "Immune_To_Damage");
+    // mcx4 t10 (MCX4_T10_RE_ANSWERS §6 / §18): the fighter states' defence entry (TacticalBattle::combat_sync).
+    u.out_of_combat_defense_adjustment = ty.get_float(t, "Out_Of_Combat_Defense_Adjustment");
     // --- OI tactical: targeting slots 44 / 45 (TACTICAL_GAPS 3.1) ---
     u.min_attack_distance = ty.get_float(t, "Targeting_Min_Attack_Distance");
     {
@@ -613,6 +645,8 @@ tc::UnitDesc BattleCatalog::unit_desc(uint32_t t, BuildState& s) const {
         u.turret_rotate_speed = ty.get_float(t, "Turret_Rotate_Speed");
         if (tagged("Turret_Rotate_Extent_Degrees")) u.turret_extent = ty.get_float(t, "Turret_Rotate_Extent_Degrees");
         if (tagged("Turret_Elevate_Extent_Degrees")) u.turret_elevate_extent = ty.get_float(t, "Turret_Elevate_Extent_Degrees");
+        if (tagged("Deployed_Turret_Elevate_Extent_Degrees"))  // mcx4 t10 (MCX4_T10_RE_ANSWERS §8, ctor 180)
+            u.deployed_turret_elevate_extent = ty.get_float(t, "Deployed_Turret_Elevate_Extent_Degrees");
         u.turret_xy_only = ty.get_bool(t, "Turret_XY_Only");
         const std::array<float, 4> r = ty.get_vec(t, "Turret_Rest_Angle");
         u.turret_rest_pitch = r[1];

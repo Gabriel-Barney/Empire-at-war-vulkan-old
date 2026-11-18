@@ -102,6 +102,10 @@ add_executable(alamo_tactical_movement_bkm_tests tests/test_movement_bkm.cpp)
 target_link_libraries(alamo_tactical_movement_bkm_tests PRIVATE alamo_tactical_movement Threads::Threads alamo_test_support)
 add_test(NAME alamo_tactical_movement_bkm_tests COMMAND alamo_tactical_movement_bkm_tests)
 set_tests_properties(alamo_tactical_movement_bkm_tests PROPERTIES TIMEOUT 300)
+# mcx4 t11 (Stage 9): movement / formation / animation tags of the tag ledger
+add_executable(alamo_tactical_movement_mcx4_tests tests/test_movement_mcx4.cpp)
+target_link_libraries(alamo_tactical_movement_mcx4_tests PRIVATE alamo_tactical_movement alamo_data alamo_test_support)
+add_test(NAME alamo_tactical_movement_mcx4_tests COMMAND alamo_tactical_movement_mcx4_tests)
 # s78n t26.1: walking while deployed (MOVEMENT 3.2.1), the move order's skip of deployed manual deployers (6.2).
 add_executable(alamo_tactical_movement_t26_tests tests/test_movement_t26.cpp)
 target_link_libraries(alamo_tactical_movement_t26_tests PRIVATE alamo_tactical_movement alamo_test_support)

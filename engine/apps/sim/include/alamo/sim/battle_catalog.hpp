@@ -88,6 +88,8 @@ public:
     // ccpgt t02 (SKIRMISH_SETUP §4.2): GameConstants Control_Point_Domination_Victory_Time_In_Secs (GC+0x11b30; 30 when unset).
     float control_point_victory_seconds() const { return control_point_victory_seconds_; }
     float garrisoned_range_multiplier() const { return garrisoned_range_mult_; }
+    // mcx4 t10 (SKIRMISH_SETUP §3, build time 0x496f00 [H]): GC Tactical_Build_Time_Multiplier (FoC 1.0).
+    float tactical_build_time_multiplier() const { return tactical_build_time_mult_; }
     bool use_reinforcement_points() const { return use_reinforcement_points_; }  // Use_Reinforcement_Points (GC +0x118a0; land drops)
     float threat_decay_step() const { return threat_decay_step_; }  // AI_SpaceThreatDecayStep (DAMAGE_TRACKING)
     // S10-int constants.
@@ -232,6 +234,7 @@ private:
     float space_health_mult_ = 1.5f, land_health_mult_ = 1.0f;
     float space_idle_speed_ = 0.0f;
     float land_capture_countdown_ = -1.0f, space_capture_countdown_ = -1.0f, garrisoned_range_mult_ = -1.0f;
+    float tactical_build_time_mult_ = 1.0f;
     float control_point_victory_seconds_ = 30.0f;
     bool use_reinforcement_points_ = true;
     float threat_decay_step_ = 0.05f;

@@ -156,6 +156,55 @@ Issue_Auto_Target 0x38d730; the copy 0x472560 copies both.
   +0x47c / +0x480 (the test that blocks the next manual assignment) was not traced [L]. Other +0x54 reads through a
   +0x20 pointer (0x1d3320, 0x49a1d0, 0x7ba280, 0x7c30c0) are other classes [M].
 
+### 6a. Addendum (lane mcx4-tac2, 2026-11-18, REA decompile) [H]
+- The fighter locomotor vf6 0x5cb830 dispatches state 0x1B to 0x5ce010, 0x1C to 0x5cd8e0, **0x1D and 0x1E both to
+  0x5cc220** (Directed_Combat), 0x1F to 0x5cbea0.
+- 0x5ce010 / 0x5cd8e0 / 0x5cbea0 call `ModifierList_Set_By_Source` with the value `Out_Of_Combat_Defense_Adjustment`;
+  **0x5cc220 makes the same call with the value 0.0**. Same list, key (0x1408a618c), category pointer (0x1407ff8a8) and
+  source (0x4ad4c0(object, −1)) in all four. The duration constant 0x140891814 is **−1.0** (permanent for this insert,
+  ABILITIES_HARDPOINTS §6.3).
+- So the entry exists from the first fighter-state frame on, holds the adjustment while the fighter is in Moving, Idle or
+  Dead_Stop, and holds 0 while it is in Idle_Combat or Directed_Combat; other states (hyperspace, launch) leave it as it
+  was. Port: `CombatSystem::set_out_of_combat`, called by `TacticalBattle::combat_sync` each tick.
+
+### 16a. Apply_Elevated_Vulnerability callers (lane mcx4-tac2, 2026-11-18, REA decompile) [H unless tagged]
+- 0x3a8550(object): land pair (`Elevated_Vulnerability_Duration` / `_Factor`, GC +0x1177c / +0x11780), space pair when
+  the game mode's vf+0xe0 returns 2; with modifier sources (+0xf0) it **appends** (0x38c850, not by source) an entry
+  named "Elevated_Vulnerability", value = factor, category 0, for the duration. FoC: land −2.0 for 3 s, space −3.0 for
+  5 s, so an arriving unit takes 3× / 4× damage (defence list, 1 − r) for that time.
+- **Transport unload step 0x644330** (TransportLanding): for each unloaded unit, applied only when the transport owner's
+  player (mode vf+0x220(owner id)) is null or `0x527f00(player)` is true, i.e. the BitwiseAnd fold of the player's bool
+  modifier map at player +0x2c8 is false [M: that map holds `Disable_Reinforcement_Vulnerability`]. A second call at
+  the end of the same function (the single-object branch) is **not** gated.
+- **0x2bf2d0** (space reinforcement / hyperspace arrival placement, AI_TACTICAL §… step 6): applied to the arriving
+  object, or to every member when it is a team container; not gated.
+- **0x29e960**: applied to the object created by 0x2b3be0 when its 9th argument (a bool) is set [M: the caller's
+  meaning not read].
+
+## 12. Redirect_Blaster `Max_Projectile_Redirection_Angle_In_Degrees` / `Turn_To_Face_Unblockable_Shots` (lane mcx4-tac2, REA decompile) [H unless tagged]
+`RedirectBlasterAbilityClass` Take_Damage listener vf30 0x709c90 (ABILITIES_HARDPOINTS §6 "Redirect_Blaster"):
+- **Arc test on yaws, not positions:** d = wrap(victim yaw (+0x8c) − projectile yaw (+0x8c)); the shot counts as
+  "outside the reaction arc" when −h < d < h with h = (360 − `Reaction_Arc_In_Degrees` (+0x180)) / 2, i.e. the
+  projectile flies the same way the victim faces (it comes from behind).
+- **Outside the arc:** nothing is blocked. When **`Turn_To_Face_Unblockable_Shots` (+0x188)** is set and the victim's clip is
+  idle-like (0x27b5e0), the victim's locomotor (behaviour 1, vf +0x218) gets a facing order to the arc edge overshot by
+  1.01: yaw' = yaw ∓ (h − |d|) × 1.01 (sign of d) [M: the exact operand order of the decompiler's expression]; then
+  "not handled" (the damage lands).
+- **Inside the arc:** redirect roll (synced draw, < projectile `Projectile_Redirect_Chance_Modifier` (+0x4f8) ×
+  `Redirect_Chance`) → `0x4cca10(projectile, victim, target T)` with T = the ability's redirect target record; else the
+  block roll (< `Projectile_Block_Chance_Modifier` (+0x4f4) × `Block_Chance`) → `0x4cca10(projectile, victim, none,
+  angle = Max_Projectile_Redirection_Angle_In_Degrees (+0x184))`.
+- **0x4cca10 spawns a new shot** of the projectile's own type at the projectile's position, owned by the victim's player
+  (0x29f810(type, victim owner, pos, orientation)): with a target T, aimed at T's position led by distance / (FPS ×
+  speed); without one (block), **yaw = projectile yaw + 180 + U(±angle)** (0x532480 = a draw on the game LCG
+  0x140a13e24, U(a, b) = a + (b − a) × r) and, when a second draw < 0.5, the pitch gets a U(±angle) offset too. The new
+  shot's pack copies the old one's damage fields, takes speed 0x370f00, and has flags 0x10; categories 4 / 10 [M] get a
+  point 300 ahead as their goal. Then the original shot is consumed (the listener returns "handled").
+- So `Max_Projectile_Redirection_Angle_In_Degrees` is the spread of a **blocked** shot sent back at its shooter's side;
+  a redirect aims at a target and ignores it. FoC: 52 entries.
+- Port status (2026-11-18): `AbilitySystem::damage_listener` tests the arc on the source's position and only cancels the
+  damage; it spawns no redirected / blocked shot. Roadmap task (mcx4) to implement this section.
+
 ## 16. GameConstants [H unless tagged] (absolute references to 0x140b15800 + offset)
 - **`Elevated_Vulnerability_Duration` / `_Factor` (+0x1177c / +0x11780) and the `Space_` pair (+0x11784 / +0x11788):**
   only reader `Apply_Elevated_Vulnerability` 0x3a8550(object): takes the land pair, or the space pair when the game

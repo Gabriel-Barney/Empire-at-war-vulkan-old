@@ -88,6 +88,13 @@ MovementConstants MovementConstants::from_game_constants(const data::GameConstan
     c.solo_attack_range = gc.get_float("Solo_Attack_Range", c.solo_attack_range);
     c.short_range_attack_formation_coefficient =
         gc.get_float("Short_Range_Attack_Formation_Coefficient", c.short_range_attack_formation_coefficient);
+    c.formation_minimum_side_error = gc.get_float("FormationMinimumSideError", c.formation_minimum_side_error);  // mcx4 t11
+    c.formation_maximum_side_error = gc.get_float("FormationMaximumSideError", c.formation_maximum_side_error);
+    c.approximation_forward_distance = gc.get_float("ApproximationForwardDistance", c.approximation_forward_distance);
+    c.should_infantry_teams_split_across_formations =
+        gc.get_bool("ShouldInfantryTeamsSplitAcrossFormations", c.should_infantry_teams_split_across_formations);
+    c.space_static_obstacle_avoidance_bonus_distance = static_cast<float>(gc.get_int(
+        "SpaceStaticObstacleAvoidanceBonusDistance", static_cast<int32_t>(c.space_static_obstacle_avoidance_bonus_distance)));
     return c;
 }
 

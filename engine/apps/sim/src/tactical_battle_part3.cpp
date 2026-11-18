@@ -1071,6 +1071,10 @@ void TacticalBattle::combat_sync(const objects::ObjectStore& store) {
             const bool air = mvv.locomotor == mv::LocomotorKind::Flying || mvv.locomotor == mv::LocomotorKind::Jetpack ||
                              mvv.locomotor == mv::LocomotorKind::LandBomber;
             combat_->set_flag(u.id, tc::kUnitFighterIdle, mvv.loco_state == mv::LocoState::FighterIdle);
+            // mcx4 t10 (MCX4_T10_RE_ANSWERS §6 / §18): the fighter states write the out-of-combat defence entry (the
+            // type's Out_Of_Combat_Defense_Adjustment in Moving / Idle / Dead_Stop, 0 in Idle_Combat / Directed_Combat).
+            if (const mv::LocoState ls = mvv.loco_state; ls >= mv::LocoState::FighterMoving && ls <= mv::LocoState::FighterDeadStop)
+                combat_->set_out_of_combat(u.id, ls != mv::LocoState::FighterIdleCombat && ls != mv::LocoState::FighterDirectedCombat);
             combat_->set_flag(u.id, tc::kUnitHoverRest, air && mvv.loco_state == mv::LocoState::WalkStopped);
             // s78n t20 batch 2 (MOVEMENT §5.3 "Hover in full"): a Hover_Height unit raised (state 1) - melee attackers refuse it
             combat_->set_flag(u.id, tc::kUnitHoverRaised, movement_->hover_state(u.id) == 1);

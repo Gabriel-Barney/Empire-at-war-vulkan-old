@@ -86,6 +86,8 @@ void apply_game_constants(CombatConfig& c, const data::GameConstants& gc) {
     c.under_construction_damage_multiplier = gc.get_float("Under_Construction_Damage_Multiplier", c.under_construction_damage_multiplier);
     c.depleted_shield_regen_cap = gc.get_float("Depleted_Shield_Regen_Cap", c.depleted_shield_regen_cap);
     c.depleted_shield_disable_time = gc.get_float("Depleted_Shield_Disable_Time", c.depleted_shield_disable_time);
+    c.depleted_shield_damage_increment =
+        gc.get_float("Depleted_Shield_Damage_Increment", c.depleted_shield_damage_increment);  // MCX4_T10_RE_ANSWERS §16
     c.shield_recharge_interval_secs = gc.get_float("ShieldRechargeIntervalInSecs", c.shield_recharge_interval_secs);
     c.energy_recharge_interval_secs = gc.get_float("EnergyRechargeIntervalInSecs", c.energy_recharge_interval_secs);
     c.energy_to_shield_exchange_rate = gc.get_float("EnergyToShieldExchangeRate", c.energy_to_shield_exchange_rate);
@@ -578,6 +580,20 @@ void CombatSystem::set_shield(ObjectId id, float s) {
     if (Unit* u = unit(id)) u->shield = s;
 }
 
+void CombatSystem::set_out_of_combat(ObjectId id, bool out_of_combat) {
+    Unit* u = unit(id);
+    if (!u) return;
+    const float adj = desc_of(*u).out_of_combat_defense_adjustment;
+    if (adj == 0.0f) return;
+    const float v = out_of_combat ? adj : 0.0f;
+    const uint32_t src = name_crc("Out_Of_Combat_Defense_Adjustment");  // [port] the source key
+    for (const ModifierEntry& e : u->mods.entries())  // unchanged: no write (keeps the set's version, so no cache refresh)
+        if (e.source_id == static_cast<int32_t>(id) && e.source_crc == src && e.list == static_cast<uint8_t>(ModList::Defense))
+            if (e.value == v) return;
+    u->mods.set_by_source(ModList::Defense, 0, v, kPermanent, src, static_cast<int32_t>(id));
+    ensure_cache(*u);  // the reduced lists as they are now (writes only this unit; reads the player sets)
+}
+
 // ================================================================================================
 // modifiers
 // ================================================================================================
@@ -805,7 +821,11 @@ float CombatSystem::base_attack_range(const Unit& u) const {
     // 0x3749d0 step 2 (LOB_SOLVER §4): a grenade weapon's range is Max_Speed^2 / (lob mod x gravity) [port: 0 for G <= 0];
     // Targeting_Max_Attack_Distance is not read. Scan box / approach only - acceptance is the solver (slot 44).
     if (const ProjectileDesc* gw = grenade_weapon(u)) return lob_range(gw->max_speed, gw->grenade_gravity, gw->lob_mod);
-    // Deployed / garrisoned multipliers and the transport contribution are not modelled [M].
+    // mcx4 t10 (MCX4_T10_RE_ANSWERS §8 [H]): garrisoned -> the host's FireRange entry (Garrisoned_Max_Attack_Distance_
+    // Multiplier, tactical_battle_garrison); else deployed (0x39a390) -> x Deployed_Max_Attack_Distance_Multiplier. The
+    // per-object +0xc40 entry and the transport contribution are not modelled [M].
+    if ((u.flags & kUnitGarrisoned) == 0 && deployed_or_deploying(u))
+        return ud.max_attack_distance * ud.deployed_max_attack_distance_multiplier;
     return ud.max_attack_distance;
 }
 
@@ -1677,21 +1697,20 @@ int32_t CombatSystem::choose_target_hardpoint(const Unit& a, const Unit& t) cons
 // ================================================================================================
 
 float CombatSystem::weapon_delay(const Unit& u, const HardpointDesc* hd) const {
-    // W = product over the active unit-ability slots of the hardpoint type's per-mode delay table,
-    // x the unit-ability WEAPON_DELAY multiplier (kind 1).
-    float w = 1.0f;
-    if (hd) {
-        for (int s = 0; s < 2; ++s) {
-            const UnitAbilityDesc* a = ability(u, s);
-            if (!a || !u.ability_active[static_cast<size_t>(s)]) continue;
-            for (const WeaponDelayEntry& e : hd->weapon_delay)
-                if (e.ability_type == a->ability_type) {
-                    w = w * e.factor;
-                    break;
-                }
-        }
-    }
-    return w * mult(u, ModKind::WeaponDelay);
+    // MCX4_T10_RE_ANSWERS §10 [H] (Fire_At 0x3825b0): W = [slot-0 entry] x (unit-ability WEAPON_DELAY multiplier, kind 1)
+    // x [slot-1 entry], in that order (float32); an entry is the hardpoint type's per-mode delay table at the slot's
+    // ability type, applied only while that ability is active.
+    auto entry = [&](int s) {
+        if (!hd) return 1.0f;
+        const UnitAbilityDesc* a = ability(u, s);
+        if (!a || !u.ability_active[static_cast<size_t>(s)]) return 1.0f;
+        for (const WeaponDelayEntry& e : hd->weapon_delay)
+            if (e.ability_type == a->ability_type) return e.factor;
+        return 1.0f;
+    };
+    float w = entry(0);
+    w = w * mult(u, ModKind::WeaponDelay);
+    return w * entry(1);
 }
 
 float CombatSystem::fire_rate(const Unit& u) const {
