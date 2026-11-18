@@ -1417,7 +1417,12 @@ void App::make_script() {
         return;
     }
     s.push_back(step_shot("game_main_menu.png"));
-    if (opt_.smoke == "skirmish") {
+    // mcx7: with a mod mounted the picker's active row is that mod, and its background check (minutes for a large mod)
+    // never gives the base game report the steps below wait for; the no-mod smoke (and its golden) covers the picker.
+    const bool no_mod_mounted = std::none_of(opt_.game_args.begin(), opt_.game_args.end(), [](const std::string& a) { return game::is_mod_arg(a); });
+    if (opt_.smoke == "skirmish" && !no_mod_mounted)
+        std::printf("script: mod picker steps left out (a mod is mounted: the picker would check it in the background)\n");
+    if (opt_.smoke == "skirmish" && no_mod_mounted) {
         // modc t08: the mod picker from the main menu's Mods button: the rows (base game first, then whatever mods this
         // machine has), the base game's load report once its check finished, PNG, Back. Never launches anything; the
         // skirmish session (and its golden) starts afresh later.
@@ -1440,6 +1445,8 @@ void App::make_script() {
             const ui::GuiDialog* d = a.ui_.gui.top();
             return d && ascii_iequals(d->name(), "IDD_MAIN_MENU_DIALOG");
         }, 120));
+    }
+    if (opt_.smoke == "skirmish") {
         // OI host: the attract demo behind the main menu (MAIN_MENU_BACKGROUND.md; started here as the menu-open path would,
         // scripted runs never start it on their own): its battle world is drawn under the menu (world draws > 0, no
         // tactical HUD) and keeps ticking under the menu and its sub-dialogs (input never stops it); the skirmish's start

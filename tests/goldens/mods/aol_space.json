@@ -1,0 +1,17 @@
+{
+  "name": "Star Wars: Age of Legends",
+  "mod": "2858787558",
+  "stack": [
+    "STEAMMOD=2858787558"
+  ],
+  "args": [
+    "--skirmish-ai",
+    "skirmish",
+    "--map",
+    "_MP_SPACE_GEONOSIS",
+    "--ticks",
+    "600",
+    "--quiet"
+  ],
+  "fingerprint": "8da7e1a13e29ddd7"
+}

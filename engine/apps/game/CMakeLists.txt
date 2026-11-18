@@ -207,6 +207,16 @@ add_test(NAME alamo_game_conformance_stacks_tests
          COMMAND alamo_game_conformance_stacks_tests ${CMAKE_CURRENT_SOURCE_DIR}/testdata/conformance/stacks)
 set_tests_properties(alamo_game_conformance_stacks_tests PROPERTIES TIMEOUT 120)
 
+# mcx7 t02 / t03: the corpus runner (tools/modcorpus) without game data: grade.py's rules, check-stage sweeps of the
+# conformance mods `stacks` and of mod_fixture (alamo_mod_check --list-mods / --resolve), and a deliberately broken copy
+# of FixtureMod that must drop a grade and make the runner exit 1. Writes only below its own binary-dir folder.
+if(ALAMO_GOLDEN_PYTHON)
+  add_test(NAME alamo_modcorpus_tests
+           COMMAND ${ALAMO_GOLDEN_PYTHON} -I ${PROJECT_SOURCE_DIR}/tools/modcorpus/test_corpus.py
+                   --bin $<TARGET_FILE_DIR:alamo_mod_check> --work ${CMAKE_CURRENT_BINARY_DIR}/modcorpus_tests)
+  set_tests_properties(alamo_modcorpus_tests PROPERTIES TIMEOUT 300)
+endif()
+
 # modc t08: the mod picker's data side (mod_picker.hpp) on the same read-only fixture; its modinfo.json decoding cases write
 # to their own temp folder (%TEMP%\alamo_mod_picker_tests, no other test uses it).
 add_executable(alamo_game_mod_picker_tests tests/test_mod_picker.cpp)

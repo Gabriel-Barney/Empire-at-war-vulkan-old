@@ -1,0 +1,17 @@
+{
+  "name": "EAW-Remake",
+  "mod": "1770851727",
+  "stack": [
+    "STEAMMOD=1770851727"
+  ],
+  "args": [
+    "--skirmish-ai",
+    "skirmish",
+    "--map",
+    "_MP_SPACE_GEONOSIS",
+    "--ticks",
+    "600",
+    "--quiet"
+  ],
+  "fingerprint": "45886ef0aa34fc24"
+}

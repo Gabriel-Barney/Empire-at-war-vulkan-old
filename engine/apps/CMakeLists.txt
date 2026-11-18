@@ -817,6 +817,21 @@ if(ALAMO_GOLDEN_PYTHON)
   set_tests_properties(alamo_goldens_convert_selftest PROPERTIES TIMEOUT 60)
 endif()
 
+# mcx7 t04: mod goldens (docs/MOD_COMPAT_DESIGN.md 13.3): one short headless skirmish per reference mod, its checkpoint log in
+# tests/goldens/mods/<name>.crc, the run in <name>.json. tools/goldens/mod_golden.py skips when ALAMO_FOC_DATA is unset, the
+# workshop item is not installed or its data changed since the golden; regenerate with tools\regen_goldens.cmd --mods.
+if(ALAMO_GOLDEN_PYTHON AND TARGET alamo_ai_tactical_world)
+  file(GLOB _alamo_mod_goldens CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/tests/goldens/mods/*.json)
+  foreach(_spec ${_alamo_mod_goldens})
+    get_filename_component(_mg ${_spec} NAME_WE)
+    add_test(NAME alamo_headless_mod_golden_${_mg}
+             COMMAND ${ALAMO_GOLDEN_PYTHON} -I ${CMAKE_SOURCE_DIR}/tools/goldens/mod_golden.py --spec ${_spec}
+                     --exe $<TARGET_FILE:alamo_headless> --golden ${CMAKE_SOURCE_DIR}/tests/goldens/mods/${_mg}.crc)
+    set_tests_properties(alamo_headless_mod_golden_${_mg} PROPERTIES TIMEOUT 1200)
+    alamo_label_slow(alamo_headless_mod_golden_${_mg})
+  endforeach()
+endif()
+
 # Slow tier (label "slow", see engine/CMakeLists.txt): the long headless runs; ctest -LE slow skips them. The land-outcome
 # worker-count tests and the golden checks stay labelled together with the run whose CRC log they need (fixtures).
 get_directory_property(_alamo_apps_tests TESTS)

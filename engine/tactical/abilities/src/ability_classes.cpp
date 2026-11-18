@@ -20,6 +20,7 @@
 #include <cmath>
 
 #include "alamo/core/dmath.hpp"
+#include "alamo/tactical/abilities/x86_int.hpp"
 #include "alamo/tactical/abilities/ability_system.hpp"
 
 namespace alamo::tactical::abilities {
@@ -48,7 +49,7 @@ constexpr int32_t kAnimFtkAttack = 0x21, kAnimFtkRelease = 0x23;  // Telekinesis
 constexpr int32_t kAnimFbAttack = 0x25, kAnimFbRelease = 0x27;    // Earthquake
 constexpr int32_t kAnimFlAttack = 0x28;                           // Force_Lightning (Force_Sight's: ability_system.cpp)
 
-int32_t frames_of(float secs, uint32_t fps) { return static_cast<int32_t>(static_cast<float>(fps) * secs); }
+int32_t frames_of(float secs, uint32_t fps) { return trunc_i32(static_cast<float>(fps) * secs); }
 
 // cu8f t06 (CU8F_T04_T06_RE §3.4): 0x20acd0 - the yaw of an XY direction in degrees, [0, 360); 0 when it is null.
 float yaw_deg_of(float dx, float dy) {
@@ -792,7 +793,7 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             const float e = r ? r->expiration_seconds : 0.0f;
             float f = 1.0f + player_reduce(o.owner, static_cast<uint8_t>(PlayerList::StealthDuration));
             if (f <= 0.0f) f = 1.0f;
-            o.stealth_frames = static_cast<int32_t>(static_cast<float>(fps) * f * e);
+            o.stealth_frames = trunc_i32(static_cast<float>(fps) * f * e);
             o.stealthed = 1;
             o.last_detected = 0;
             if (o.combat_unit) combat_->clear_targets(o.id);
@@ -1134,7 +1135,7 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
         }
 
         case C::Berserker: {  // 2.3.2 update
-            sp.counter -= 1;
+            sp.counter = dec_wrap(sp.counter);
             if (sp.counter < 1) {
                 remove_special(o, sp, frame);
                 return;
@@ -1307,7 +1308,7 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
                     if (alive_unit(v)) queue_play(v, kAnimFwAttack, kDrawVariant, false, 0.0f, 1.0f, frame);
                 } else if (s.cls == C::StunWave) {
                     // vis1 t06 (ABILITY_PARTICLES §4): each victim the apply stunned gets Stunned_Effect.
-                    if (combat_->stun_unit(v, static_cast<int32_t>(s.wave_time * 30.0f), frame) && !s.stunned_effect.empty())  // literal 30.0
+                    if (combat_->stun_unit(v, trunc_i32(s.wave_time * 30.0f), frame) && !s.stunned_effect.empty())  // literal 30.0
                         visual(AbilityVisualKind::StunnedEffect, frame, o.id, v, sp.desc);
                 } else if (Obj* vo = obj(v)) {
                     confuse(*vo, s.wave_time, frame);  // 2 synced draws per victim
@@ -1436,7 +1437,8 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
             // Fire_Continuation (vf13 0x7151c0, the target link dropped [M: the target is gone]): SAP +0x308 := NOW +
             // int(FPS x Fire_Continuation). [port] taken when the update finds the target dead.
             if (sp.frames < 0 && !alive_unit(sp.target)) {
-                sp.frames = static_cast<int32_t>(frame) + std::max(0, frames_of(s.fire_continuation, fps));
+                // mcx7: the add wraps like the machine's (no signed overflow for a huge Fire_Continuation)
+                sp.frames = static_cast<int32_t>(frame + static_cast<uint32_t>(std::max(0, frames_of(s.fire_continuation, fps))));
                 sp.counter = 0;  // the TSW target no longer resolves: no more turning
             }
             if (sp.frames >= 0) {
@@ -1487,7 +1489,7 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
         }
 
         case C::DrainLife: {  // per frame each victim takes DPS / FPS; Should_Heal heals the owner by the same
-            sp.counter -= 1;
+            sp.counter = dec_wrap(sp.counter);
             const float per = s.damage_per_second / static_cast<float>(fps);
             bool any = false;
             for (ObjectId v : sp.victims) {
@@ -1514,7 +1516,7 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
         }
 
         case C::LeechShields: {  // vf4 0x717d60: shield drained by SDPS / FPS while Can_Activate(58), in range, accepted
-            sp.counter -= 1;
+            sp.counter = dec_wrap(sp.counter);
             if (!can(o, kLeechShields, false, true, frame) || !alive_unit(sp.target) || !range_ok(o, s, sp.target) ||
                 !accepts(o, s, sp.target, frame) || sp.counter <= 0) {
                 remove_special(o, sp, frame);
@@ -1529,7 +1531,7 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
 
         case C::Blast: {
             if (sp.phase == 0) {
-                sp.counter -= 1;
+                sp.counter = dec_wrap(sp.counter);
                 if (sp.counter > 0) return;
                 // update 0x71c190 at 0: charging particle destroyed, "charged" mesh + particle, counter := -K (K = the
                 // WEAPON_SPECIAL hard points, 0x397c10). Fire_At then lets only those fire, x Damage_Multiplier, each
@@ -1547,7 +1549,7 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
                 sp.applied = 0;
                 return;
             }
-            o.stealth_frames -= 1;
+            o.stealth_frames = dec_wrap(o.stealth_frames);
             if (o.stealth_frames <= 0) {
                 remove_special(o, sp, frame);
                 return;
@@ -1625,14 +1627,14 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
                 return;
             }
             if (sp.phase == kCableParalyzed) {  // state 5: -1 per service; below 1 unlock and end
-                sp.counter -= 1;
+                sp.counter = dec_wrap(sp.counter);
                 if (sp.counter < 1) remove_special(o, sp, frame);
             }
             return;
         }
 
         case C::CorruptSystems: {  // the victim's CORRUPT_SYSTEMS behaviour: shield drain per second, expiry
-            sp.counter -= 1;
+            sp.counter = dec_wrap(sp.counter);
             if (alive_unit(sp.target)) {
                 const float sh = combat_->shield(sp.target) - s.damage_per_second / static_cast<float>(fps);
                 combat_->set_shield(sp.target, sh > 0.0f ? sh : 0.0f);
@@ -1725,7 +1727,7 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
             // loop, blend 0.2, speed 1; nothing is played at the end (the release 0x7060e0 only unholds). [port] at the first
             // flame update (retail: once the turn toward the target is within 0.1 rad).
             if (sp.counter == std::max(1, frames_of(s.duration_secs, fps))) queue_play(o.id, kAnimFlameAttack, 0, true, 0.2f, 1.0f, frame);
-            sp.counter -= 1;
+            sp.counter = dec_wrap(sp.counter);
             const Vec3 f = o.combat_unit ? combat_->facing(o.id) : Vec3{1.0f, 0.0f, 0.0f};
             const float per = s.damage_amount / static_cast<float>(std::max(1, frames_of(s.duration_secs, fps)));
             for (size_t i = 0; i < combat_->unit_count(); ++i) {
@@ -1973,7 +1975,7 @@ void AbilitySystem::heal_pass(Obj& o, const SpecialAbilityDesc& s, uint32_t fram
     if (!o.combat_unit || o.dead) return;
     if (combat_->flags(o.id) & combat::kUnitGarrisoned) return;
     if (frame < o.heal_due) return;
-    o.heal_due = frame + static_cast<uint32_t>(static_cast<int32_t>(static_cast<float>(cfg_.fps) * s.heal_interval + 0.5f));
+    o.heal_due = frame + static_cast<uint32_t>(trunc_i32(static_cast<float>(cfg_.fps) * s.heal_interval + 0.5f));
     const bool heal = s.heal_amount > 0.0f || s.heal_percent > 0.0f;
     const bool harm = s.heal_amount < 0.0f && s.heal_percent <= 0.0f;
     if (!heal && !harm) return;
