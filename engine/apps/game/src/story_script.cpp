@@ -175,6 +175,12 @@ bool StoryDialogCache::chapter(std::string_view name, int32_t chapter, StoryScri
     return parse_story_script(it->second, chapter, out);
 }
 
+bool completed_tab_shown(std::string_view show_completed_tab, bool have_campaign) {
+    const std::string_view v = ascii_trim(show_completed_tab);
+    if (!have_campaign || v.empty()) return true;
+    return ascii_iequals(v, "yes") || ascii_iequals(v, "true") || v == "1";
+}
+
 HolocronSummaryFill fill_holocron_summary(const StoryDialogCache& cache, const std::vector<HolocronRecord>& records, bool completed_tab,
                                           uint64_t selected_id) {
     HolocronSummaryFill f;

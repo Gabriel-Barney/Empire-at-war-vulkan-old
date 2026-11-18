@@ -988,6 +988,14 @@ void story_script_test() {
 
 // q6 t14 (GALACTIC_DIALOGS §2.8): the dialog script cache (exact names, rejected files not cached) and the summary fill
 // (rows = the tab's records, label = the chapter's first TEXT, colour / dim, selection, EXTRA_TEXT lines as stored).
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "Campaign.Show_Completed_Tab"): False hides the Completed tab.
+// ledger: verifies Campaign.Show_Completed_Tab
+void completed_tab_shown_test() {
+    CHECK(!game::completed_tab_shown("False", true) && !game::completed_tab_shown(" no ", true));  // Show_Completed_Tab False
+    CHECK(game::completed_tab_shown("True", true) && game::completed_tab_shown("yes", true));
+    CHECK(game::completed_tab_shown("", true) && game::completed_tab_shown("False", false));  // [port] defaults
+}
+
 void holocron_summary_test() {
     struct Files final : FileProvider {
         std::map<std::string, std::string> f;
@@ -2977,6 +2985,7 @@ int main() {
     linked_overlay_test();
     story_script_test();
     holocron_summary_test();  // q6 t14
+    completed_tab_shown_test();  // mcx4 t14
     story_scripts_real_test();
     game::GameData data;
     std::string err;

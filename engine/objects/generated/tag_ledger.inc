@@ -1843,7 +1843,7 @@
 {"Campaign", "AI_Victory_Faction_Names", 0x1b, LedgerState::Consumed, 1, "engine/galactic/src/victory.cpp", "", 0, 1},
 {"Campaign", "AI_Victory_Leader_Names", 0x1b, LedgerState::Stored, 0, "", "", 0, 1},
 {"Campaign", "Is_Autoresolve_Allowed", 0x0, LedgerState::Verified, 1, "engine/galactic/src/campaign_setup.cpp", "docs/re/BATTLE_TRANSITIONS.md", 3, 1},
-{"Campaign", "Show_Completed_Tab", 0x0, LedgerState::Stored, 0, "", "docs/re/MCX4_RE_ANSWERS_GALACTIC.md", 51, 1},
+{"Campaign", "Show_Completed_Tab", 0x0, LedgerState::Verified, 1, "engine/apps/game/app/app_screens.cpp", "docs/re/MCX4_RE_ANSWERS_GALACTIC.md", 51, 1},
 {"Campaign", "Is_Story_Campaign", 0x0, LedgerState::Consumed, 1, "engine/galactic/src/campaign_setup.cpp", "docs/re/MCX4_RE_ANSWERS_GALACTIC.md", 3, 1},
 {"Campaign", "Autoresolve_Exclusion_Locations", 0x2a, LedgerState::Verified, 1, "engine/galactic/src/campaign_setup.cpp", "docs/re/BATTLE_TRANSITIONS.md", 1, 1},
 {"Campaign", "Corruption_Level_Override", 0x2b, LedgerState::Verified, 1, "engine/galactic/src/campaign_setup.cpp", "docs/re/MCX4_GAL2_RE_ANSWERS.md", 0, 1},
