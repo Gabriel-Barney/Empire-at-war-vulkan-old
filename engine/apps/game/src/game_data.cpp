@@ -170,10 +170,14 @@ const data::CampaignDef* load_campaign_target(const GameData& data, std::string_
 }
 
 SkirmishSetup resolve_skirmish_factions(const galactic::GalacticRules& rules, SkirmishSetup s) {
-    if (s.human_faction.empty()) s.human_faction = default_skirmish_faction(rules, false);
-    if (s.ai_faction.empty()) s.ai_faction = default_skirmish_faction(rules, true, s.human_faction);
+    // mcx1 t08 (MCX1_RE_ANSWERS Q6.3, SKIRMISH_SETUP §2.8): a slot faction the data does not have falls back like an empty
+    // slot (retail keeps the slot's faction as an index and its AI slot falls back to index 0 when the index has no
+    // faction); GameSession::start reports the substitution.
+    const auto known = [&rules](const std::string& f) { return !f.empty() && rules.find_faction(f) != galactic::kNoIndex; };
+    if (!known(s.human_faction)) s.human_faction = default_skirmish_faction(rules, false);
+    if (!known(s.ai_faction)) s.ai_faction = default_skirmish_faction(rules, true, s.human_faction);
     for (SkirmishSetup::ExtraSlot& x : s.extra_slots)  // skm2 t02: an AI slot's default
-        if (x.faction.empty()) x.faction = default_skirmish_faction(rules, true, s.human_faction);
+        if (!known(x.faction)) x.faction = default_skirmish_faction(rules, true, s.human_faction);
     return s;
 }
 
@@ -203,7 +207,10 @@ bool make_skirmish_galaxy(const GameData& data, const SkirmishSetup& setup, gala
     if (s.land) human.credits = ai.credits = static_cast<float>(std::max(0, data.db.constants().get_int("MP_Default_Credits", 0)));
     neutral.faction = neutral_faction(rules);
     if (human.faction == galactic::kNoIndex || ai.faction == galactic::kNoIndex) {
-        if (err) *err = "skirmish: faction " + (human.faction == galactic::kNoIndex ? s.human_faction : s.ai_faction) + " unknown";
+        // mcx1 t08 (MCX1_RE_ANSWERS Q6.2): with no playable faction left for a slot the original's skirmish faction lists
+        // are empty and no skirmish can start; the port refuses the same way, saying why.
+        if (err) *err = "skirmish: the data has no playable, non-neutral faction for the " +
+                        std::string(human.faction == galactic::kNoIndex ? "human" : "AI") + " slot";
         return false;
     }
     // skm2 t02: the extra slots' AI players (slot k = player k), as the AI slot.

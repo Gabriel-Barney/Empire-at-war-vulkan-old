@@ -192,8 +192,10 @@ const XmlDocument* GameDatabase::load_file(const FileProvider& provider, const F
     const FileProvider* used = &provider;
     if (!provider.read(path, bytes)) {
         if (!fallback || !fallback->read(path, bytes)) {
+            // mcx1 t08 (MCX1_RE_ANSWERS Q6.1): GameConstants.xml and the core list files are fatal in the original too
+            // (its init fails and the process ends); the port refuses the load and says so.
             warn(std::string(required ? "error: " : "") + "unable to open XML file '" + std::string(path) + "'" +
-                 (required ? "" : " (skipped)"));
+                 (required ? " (the original game does not start without it either)" : " (skipped)"));
             return nullptr;
         }
         used = fallback;

@@ -124,6 +124,12 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
                 p.tech_level = std::clamp(spec_.start_tech, 1, p.max_tech_level);
             }
         if (setup_.map.planets.size() == 0) return fail("campaign '" + spec_.campaign + "' has no planets");
+        // mcx1 t08 (MCX1_RE_ANSWERS Q6.2): the original reads the neutral player without a null check when it creates the
+        // galaxy, so a campaign start with no Is_Neutral faction crashes there; the port starts it (unowned planets have
+        // no owner player) and says so.
+        if (d.rules.neutral_faction() == galactic::kNoIndex && diag)
+            diag->push_back("campaign '" + spec_.campaign +
+                            "': no faction has Is_Neutral (the original game crashes starting this campaign)");
     } else {
         std::string err;
         if (spec_.skirmish_map_data) skirmish_map_ = *spec_.skirmish_map_data;
@@ -132,6 +138,17 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
         spec_.skirmish.land = !skirmish_map_.is_space();  // the map decides: space battle or land invasion
         if (spec_.attract && spec_.skirmish.land) return fail("attract demo: " + spec_.skirmish_map + " is not a space map");
         SkirmishSetup sk = spec_.skirmish;
+        // mcx1 t08: a slot faction the data does not have falls back to the first playable one (resolve_skirmish_factions).
+        if (diag) {
+            const SkirmishSetup resolved = resolve_skirmish_factions(d.rules, sk);
+            const auto report = [&](const std::string& asked, const std::string& used, const char* slot) {
+                if (!asked.empty() && d.rules.find_faction(asked) == galactic::kNoIndex)
+                    diag->push_back(std::string("skirmish: ") + slot + " faction '" + asked + "' is not in the data; using '" +
+                                    used + "'");
+            };
+            report(sk.human_faction, resolved.human_faction, "human");
+            report(sk.ai_faction, resolved.ai_faction, "AI");
+        }
         // modc t19 [port]: the galaxy's planet is the map's own planet type when the data has it and it forbids no unit,
         // else the first such PLANET type (skirmish_galaxy_planet); never a planet by name.
         if (sk.planet_type.empty())
