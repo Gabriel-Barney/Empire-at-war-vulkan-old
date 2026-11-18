@@ -1,6 +1,7 @@
 // alamo_game App: special systems, sim stepping, command routing, HUD / galactic / battle / menu input (split from game_main.cpp).
 #include "game_app.hpp"
 #include "alamo/data/values.hpp"  // mcx4 t14: data::trim
+#include "alamo/galactic/economy.hpp"  // mcx4 t13: build countdown speech
 #ifdef ALAMO_SIM_HAVE_ANIM
 #include "alamo/sim/sim_anim.hpp"  // aud1 t03
 #endif
@@ -197,6 +198,28 @@ void App::announcer_feedback() {
             audio_.fleet_departure(e.player == me, sees);
         }
     }
+    // mcx4 t13 (MCX4_T09_RE_ANSWERS Q7, production speech 0x401e50): a queue head whose type has Build_Countdown_Timer and
+    // a Build_Speech_Countdowns prefix speaks the countdown (econ::build_countdown_speech) as its remaining time crosses
+    // the minute / ten-second / second steps; every player hears it (no owner test). [port] the subtitle line retail
+    // shows with subtitles on is not drawn; a newly seen head speaks from its next change on.
+    for (uint32_t pi = 0; pi < g->planets().size(); ++pi)
+        for (uint32_t qi = 0; qi < 2; ++qi) {
+            const auto key = std::make_pair(pi, qi);
+            const auto& q = g->planets()[pi].queue[qi];
+            const galactic::TypeInfo* ti = !q.empty() && q.front().type < g->rules().types.size() ? &g->rules().types[q.front().type] : nullptr;
+            if (!ti || !ti->build_countdown_timer || ti->build_speech_countdowns.empty()) {
+                countdown_speech_seen_.erase(key);
+                continue;
+            }
+            const galactic::BuildEntry& e = q.front();
+            const float rem = galactic::econ::timer_remaining_seconds(e.start, e.duration, g->frame());
+            const auto [it, fresh] = countdown_speech_seen_.try_emplace(key, e.start, rem);
+            if (!fresh && it->second.first == e.start) {
+                const std::string ev = galactic::econ::build_countdown_speech(ti->build_speech_countdowns, it->second.second, rem);
+                if (!ev.empty()) audio_.speech(ev);
+            }
+            it->second = {e.start, rem};
+        }
     // ui4 t11 (§2.7.3, player tick 0x287e70): SFXEvent_Strategic_Pop_Cap_Reached when the population used rises above a
     // previous value > 0 and reaches the capacity. Retail never plays SFXEvent_Max_Credits_Limit_Reached or
     // _Build_Impossible_Location_Blockaded (no reader of either field).
