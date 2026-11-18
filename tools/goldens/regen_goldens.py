@@ -130,7 +130,7 @@ def headless_jobs(build_dir: str, checkpoint: int, files: list[str] | None = Non
 
 def run(cmd, cwd, env, log):
     print("  $ " + " ".join(cmd), flush=True)
-    r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True)
+    r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, errors="replace")  # mods print Latin-1
     log.append((cmd, r.stdout + r.stderr))
     return r
 
