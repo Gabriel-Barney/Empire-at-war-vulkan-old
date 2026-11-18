@@ -62,7 +62,7 @@ bool CommandPipeline::read(ByteReader& r) {
     return ok && r.ok();
 }
 
-SubmitResult CommandPipeline::submit(uint8_t player, CommandSource source, CommandPayload payload) {
+SubmitResult CommandPipeline::submit(uint16_t player, CommandSource source, CommandPayload payload) {
     if (replay_) {
         SubmitResult r;
         r.status = RejectReason::NotAllowed;
@@ -71,7 +71,8 @@ SubmitResult CommandPipeline::submit(uint8_t player, CommandSource source, Comma
     return sched_.submit(player, source, std::move(payload));
 }
 
-RejectReason CommandPipeline::execute_direct(uint64_t tick, uint8_t player, CommandSource source, const EventData& event) {
+RejectReason CommandPipeline::execute_direct(uint64_t tick, uint16_t player, CommandSource source, const EventData& event) {
+    if (player >= kMaxPlayerSlots) return RejectReason::InvalidPlayer;  // mcx5: not encodable (13-bit ids); nothing posted
     Command c;
     c.header.player = player;
     c.header.source = source;

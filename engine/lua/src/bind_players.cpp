@@ -1340,6 +1340,7 @@ int m_invade(Call& c) {
         return 0;
     }
     const int32_t issuer = w->local_player();
+    // limit: retail A1_READINGS §31.2 (0x4903c0 copies at most 127 unit ids)
     constexpr size_t kMaxInvadeUnits = 127;  // 0x4903c0 copies at most 127 unit ids
     bool any_ground = false;
     std::vector<uint32_t> ids;
@@ -1360,13 +1361,14 @@ int m_invade(Call& c) {
     if (!b->pipeline) return 0;
     commands::EventData e(commands::EventType::Invade);
     e.set("planet", static_cast<uint32_t>(sim->store().id(planet.object))).set_ids("units", std::move(ids));
-    b->pipeline->execute_direct(c.vm->frame, static_cast<uint8_t>(issuer), commands::CommandSource::Script, e);
+    b->pipeline->execute_direct(c.vm->frame, static_cast<uint16_t>(issuer), commands::CommandSource::Script, e);
 #endif
     return 0;
 }
 
 // WaitForStarbase / WaitForGroundbase(planet, level): a BlockingStatus finished once the planet's starbase
 // (ground base) level is >= level. Level range [inferred] 0..5.
+// limit: retail MCX5_RE_ANSWERS Q1.7 (0x69a6f0 / 0x69a8b0: 0.0..5.0, read-only double 0x1408b8570)
 constexpr int32_t kMaxBaseLevel = 5;
 int wait_for_base(Call& c, bool starbase) {
     const char* who = starbase ? "WaitForStarbase" : "WaitForGroundbase";

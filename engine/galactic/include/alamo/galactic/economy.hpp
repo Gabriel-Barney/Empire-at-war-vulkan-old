@@ -60,6 +60,14 @@ struct EconomyConstants {
     // (d = 1 -> _0, d >= 5 -> _4; A2K_T01_BUILD_COST_RE 2.1).
     std::array<float, 5> base_vs_tech{1.0f, 0.90f, 0.75f, 0.55f, 0.45f};
     int32_t max_ground_forces_on_planet = 10;      // Max_Ground_Forces_On_Planet (+0x10c8)
+    // mcx5 t02 (AI_GALACTIC_TOKENS §4 table, MCX4_RE_ANSWERS_GALACTIC Q2.1): the level maxima, read by the galactic AI
+    // only (token normalisers, potential income). GC +0xF0 / +0xF4 / +0xF8 / +0xFC; FoC XML 5 each (the defaults here, for
+    // hand-built rules). Data without the tag: the GameConstants defaults (0x2c91c0) write 1 for each (MCX5_RE_ANSWERS
+    // Q1.9 [H]; load_economy_constants).
+    int32_t max_political_control = 5;             // MaximumPoliticalControl (+0xF0); limit: data GameConstants
+    int32_t max_starbase_level = 5;                // MaximumStarbaseLevel (+0xF4); limit: data GameConstants
+    int32_t max_groundbase_level = 5;              // MaximumGroundbaseLevel (+0xF8); limit: data GameConstants
+    int32_t max_special_structures = 5;            // MaximumSpecialStructures (+0xFC); limit: data GameConstants
     // a2l t03 (A2L_T03_RE_ANSWERS Q4.1): Health_Low_Percent_Threshold (+0x11b38; FoC 0.33, Thrawn's Revenge 0.50), the
     // galactic free-store Setup A health floor.
     float health_low_percent_threshold = 0.33f;

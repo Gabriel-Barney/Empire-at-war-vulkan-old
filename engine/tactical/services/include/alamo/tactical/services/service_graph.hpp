@@ -33,6 +33,7 @@
 namespace alamo::tactical::services {
 
 using ComponentSet = uint64_t;
+// limit: guard code-defined service components (u64 mask), not data
 inline constexpr uint32_t kMaxComponents = 64;
 inline constexpr ComponentSet kEverything = ~ComponentSet{0};
 constexpr ComponentSet component(uint32_t c) { return ComponentSet{1} << c; }

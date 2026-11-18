@@ -396,6 +396,7 @@ BuildStatus decal_impl(const Terrain& t, const TerrainDecal& d, DecalGeometry& o
     return out.mesh.empty() ? BuildStatus::Empty : BuildStatus::Built;
 }
 
+// limit: dynamic log budget per map build; the rest is summarised
 constexpr size_t kMaxBudgetLogs = 8;  // per map builder call; the rest is summarised
 
 }  // namespace

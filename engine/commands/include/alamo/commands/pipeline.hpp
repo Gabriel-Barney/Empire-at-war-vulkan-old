@@ -71,10 +71,10 @@ public:
     size_t replay_already_queued() const noexcept { return replayer_ ? replayer_->already_queued() : 0; }
 
     // Local human orders (and tools that record streams). Refused with NotAllowed while replaying.
-    SubmitResult submit(uint8_t player, CommandSource source, CommandPayload payload);
+    SubmitResult submit(uint16_t player, CommandSource source, CommandPayload payload);
     // AI / Lua direct path: runs the handler now for `tick` (the current tick). Returns the handler's
     // reason; non-scheduled types return NotScheduled without running.
-    RejectReason execute_direct(uint64_t tick, uint8_t player, CommandSource source, const EventData& event);
+    RejectReason execute_direct(uint64_t tick, uint16_t player, CommandSource source, const EventData& event);
 
     // Steps 1-5 above. Returns the drained batch (valid until the next begin_tick).
     const CommandBatch& begin_tick(uint64_t tick);

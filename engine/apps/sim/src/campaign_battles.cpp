@@ -345,6 +345,7 @@ namespace {
 constexpr uint32_t kBattlesSaveVersion = 4;  // 2: + the battle in flight (stage 2); 3: + the linked-battle state (story t07);
                                              // 4: the pad records moved to the planets (galactic save v2, q6)
 constexpr uint32_t kBattleLevelVersion = 1;
+// limit: guard save decode: counts, refuses
 constexpr uint32_t kMaxBattlesCount = 1u << 24;
 
 uint32_t read_count(ByteReader& r) {

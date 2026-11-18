@@ -337,6 +337,7 @@ std::vector<float> corner_fractions(const std::vector<V2>& poly, const CornerPas
 // unit(A - P_j), n its normal toward the incoming direction; it stops before a p_k past the aim line (cross(A - last, p_k -
 // last) x s < 0), then A is appended. `out` starts with P_j. s78o (b0088) [port]: N is at most kCornerArcProbeMaxPoints
 // (also for a non-finite N), so custom data cannot make the pass hang or the cast overflow.
+// limit: guard arc probe point count (hang / cast overflow on custom data)
 inline constexpr uint32_t kCornerArcProbeMaxPoints = 16384;
 void corner_arc_probe(V2 pj, V2 a, float v, float omega, float theta_s, float seg, std::vector<V2>& out);
 

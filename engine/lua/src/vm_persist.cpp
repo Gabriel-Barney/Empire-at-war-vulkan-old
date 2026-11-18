@@ -77,8 +77,11 @@ enum : uint8_t { kLightVm = 0, kLightAttachment = 1 };
 enum : uint8_t { kUdRaw = 0, kUdEngine = 1 };
 
 // Plausibility caps for sizes that are not backed by saved bytes (husks): no real script heap comes near them.
+// limit: guard save decode: husk heap size not backed by bytes
 constexpr uint64_t kMaxHeapBytes = 1ull << 31;
+// limit: guard save decode: ltable.c MAXBITS (vendored Lua 5.0.2)
 constexpr int kMaxTableBits = 24;  // ltable.c MAXBITS (int >= 32 bits)
+// limit: guard save decode: Lua stack size not backed by bytes
 constexpr int32_t kMaxStack = 1 << 24;
 
 // ltable.c / lfunc.c size formulas (sizeCclosure / sizeLclosure live in lfunc.c).

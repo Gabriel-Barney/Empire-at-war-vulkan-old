@@ -21,6 +21,7 @@ inline constexpr uint32_t kDefaultSpeedIndex = 2;
 inline constexpr uint32_t kFastModeRate = 120;
 inline constexpr uint32_t kCinematicRate = 30;
 inline constexpr uint32_t kSimTicksPerSecond = 30;  // sim step 1/30 s, independent of the pacing rate
+// limit: data FPSCAP= option default (render-rate cap, >= 15)
 inline constexpr uint32_t kDefaultFpsCap = 200;     // FPSCAP= default (render-rate cap, >= 15)
 
 class FrameSynchronizer {

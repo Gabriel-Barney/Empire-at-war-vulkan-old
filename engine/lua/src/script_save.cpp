@@ -13,6 +13,7 @@ namespace {
 
 constexpr uint8_t kOptMath = 1u << 0;
 constexpr uint8_t kOptUpperTypes = 1u << 1;
+// limit: guard save decode: Lua thread count, refuses
 constexpr uint32_t kMaxThreads = 1u << 20;
 
 bool fail(std::string* err, const char* why) {

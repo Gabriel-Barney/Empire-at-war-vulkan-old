@@ -72,7 +72,9 @@ struct FleetUnitInfo {
 
 class FleetGroups {
 public:
+    // limit: guard [port] fleet groups design cap (no retail feature), refuses
     static constexpr size_t kMaxGroupsPerPlayer = 20;
+    // limit: guard [port] fleet groups design cap (no retail feature)
     static constexpr size_t kMaxMembers = 40;
     using InfoFn = std::function<FleetUnitInfo(objects::ObjectId)>;
 

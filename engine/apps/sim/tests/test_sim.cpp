@@ -512,6 +512,21 @@ static void test_save_session(const World& w) {
     ByteReader dr(dw.bytes());
     CHECK(e.read(dr) && dr.done());
     CHECK(SessionDescriptor::mismatch(d, e).empty() && e.option("a") == "1" && e.option("zz", "x") == "x");
+    {
+        // mcx5 t01: a version-1 descriptor (written before the 64-slot cap went: u8 scheduler max_players) still reads.
+        // Layout: u32 version | 3 str | u32 n + str data_args | u32 seed | u32 players | u32 delay | max_players | ...
+        std::vector<uint8_t> v1(dw.bytes().begin(), dw.bytes().end());
+        size_t at = 4;
+        for (int i = 0; i < 3; ++i) at += 4 + v1[at];  // kind, campaign, data_root (short strings)
+        at += 4 + 4 + v1[at + 4];                       // data_args: count 1 + one string
+        at += 4 + 4 + 4;                                // seed, players, delay
+        CHECK(v1[0] == SessionDescriptor::kVersion && v1[at] == 8 && v1[at + 1] == 0);
+        v1[0] = 1;
+        v1.erase(v1.begin() + static_cast<std::ptrdiff_t>(at) + 1);
+        SessionDescriptor old;
+        ByteReader vr(v1);
+        CHECK(old.read(vr) && vr.done() && SessionDescriptor::mismatch(d, old).empty() && old.scheduler == d.scheduler);
+    }
     SessionDescriptor f = e;
     f.data_root = "D:/elsewhere";
     f.writer = "other";
@@ -998,7 +1013,7 @@ static Run run(const World& w, const FileProvider& files, int32_t workers, uint6
 // size (those players would get no controller), starts it sized with session_players, and every player has a controller
 // slot; <Story_Name> "Faction, file" pairs give plot sets to factions without a <Faction>_Story_Name.
 static void test_many_players(const World& w) {
-    CHECK(session_players(3) == 8 && session_players(22) == 22 && session_players(100) == kMaxPlayers);
+    CHECK(session_players(3) == 8 && session_players(22) == 22 && session_players(100) == 100 && session_players(300) == kMaxPlayers);  // mcx5 t01: no 64 cap
     GalacticRules r = rules();
     GalacticSetup s = setup();
     for (uint32_t i = 0; i < 17; ++i) {  // 3 + 17 = 20 players: Mod_0..Mod_16 (planet-less AI factions)
@@ -1029,6 +1044,30 @@ static void test_many_players(const World& w) {
     host.set_controller(19, [&last_frame](SimHost&, uint8_t, uint64_t frame) { last_frame = frame; });
     host.run_fast(5);
     CHECK(last_frame > 0);  // the last player's controller runs
+    {
+        // mcx5 t01: no 64-player cap (retail keeps a vector): 100 players start, the last one's controller runs.
+        GalacticRules r100 = r;
+        GalacticSetup s100 = s;
+        for (uint32_t i = 17; i < 97; ++i) {
+            FactionRules f;
+            f.name = "Mod_" + std::to_string(i);
+            f.can_control_planets = f.is_playable = true;
+            r100.factions.push_back(f);
+            PlayerSetup p;
+            p.faction = static_cast<uint32_t>(r100.factions.size() - 1);
+            p.ai = true;
+            s100.players.push_back(p);
+        }
+        SimConfig c100;
+        c100.players = session_players(s100.players.size());
+        SimHost h100(w.types, js, c100);
+        CHECK(h100.start_galactic(r100, s100) != nullptr && h100.players() == 100);
+        uint64_t last100 = 0;
+        h100.set_controller(99, [&last100](SimHost&, uint8_t, uint64_t frame) { last100 = frame; });
+        CHECK(h100.submit(99, commands::EventData(commands::EventType::StopMovement)).ok());
+        h100.run_fast(3);
+        CHECK(last100 > 0);
+    }
 
     data::CampaignDef c;
     c.raw = {{"Empire_Story_Name", "Story_Plots_E.xml"},

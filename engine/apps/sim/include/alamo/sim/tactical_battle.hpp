@@ -1204,6 +1204,7 @@ public:
     bool skirmish_team_game() const { return cfg_.skirmish_team_game && !cfg_.skirmish_slots.empty(); }
     // skm2 t02: the battle's sides. Side 0 is the defender, 1 the attacker; a skirmish map battle's slot k >= 2 is side k
     // (start anchor, facing records, formation slots). kMaxSides bounds the slots.
+    // limit: retail MCX5_RE_ANSWERS Q4.1 (staging seats at most 8 slots, 0x1013f0 [M]; battle players are dynamic)
     static constexpr uint8_t kMaxSides = 8;  // BattleStats' per-side arrays are sized 8 (static_assert below the class)
     uint8_t side_count() const;
     // t50: Land_Skirmish_Unit_Cap_By_Player_Count of the player's faction at the battle's player count [M: linear

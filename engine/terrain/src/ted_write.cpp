@@ -164,7 +164,7 @@ void write_terrain(ChunkWriter& w, const Terrain& t) {
         m.push_back(mk_u32(0x00, t.width));
         m.push_back(mk_u32(0x01, t.height));
         m.push_back(mk_u32(0x04, t.width * t.height));
-        m.push_back(mk_u32(0x05, kMaterialSlots));
+        m.push_back(mk_u32(0x05, static_cast<uint32_t>(kMaterialSlots + t.extra_materials.size())));
         m.push_back(mk_f32(0x0F, h.cloud_scale));
         m.push_back(mk_f32x3(0x10, h.cloud_velocity));
         m.push_back(mk_string(0x0E, h.cloud_texture));
@@ -200,6 +200,7 @@ void write_terrain(ChunkWriter& w, const Terrain& t) {
     }
     w.begin(2);
     for (const TerrainMaterial& m : t.materials) write_material(w, m);
+    for (const TerrainMaterial& m : t.extra_materials) write_material(w, m);  // mcx5 t03
     w.end();
     if (!t.decals.empty()) {
         w.begin(6);

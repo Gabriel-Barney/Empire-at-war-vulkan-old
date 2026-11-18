@@ -962,14 +962,14 @@ void StorySession::invade_planet_reward(int32_t plot_player, PlanetIndex planet,
                 continue;
             }
             const int32_t issuer = sim_->local_player();
-            if (issuer < 0 || issuer >= commands::kMaxPlayerSlots) return;
+            if (issuer < 0 || issuer > 0xFF) return;  // mcx5: the galactic sim's player ids are uint8_t (refuse, never truncate)
             commands::EventData ev(commands::EventType::Invade);
             ev.set("planet", static_cast<uint32_t>(store.id(ps.object)));
             ev.set_ids("units", {static_cast<uint32_t>(store.id(u))});
             gates_.script_invade = true;  // STY1: the story's own invasion is not refused by its invasion locks
             sync_gates();
             if (lua_->bridge.pipeline)
-                lua_->bridge.pipeline->execute_direct(frame_, static_cast<uint8_t>(issuer), commands::CommandSource::Script, ev);
+                lua_->bridge.pipeline->execute_direct(frame_, static_cast<uint16_t>(issuer), commands::CommandSource::Script, ev);
             else
                 sim_->execute(static_cast<uint8_t>(issuer), ev);
             gates_.script_invade = false;
@@ -2407,6 +2407,7 @@ constexpr uint32_t kStorySaveVersion = 8;  // 8 (mcx6 review): each definition e
 // "story.lua" (write_scripts): 1 galactic sets, 2 + the tactical set, 3 = 2 (it followed kStorySaveVersion), 4 (q6 t19):
 // each script's Lua state is a script block (alamo/lua/script_save.hpp, LUA_SAVE.md §2) instead of a bare LuaVm image.
 constexpr uint32_t kStoryScriptsVersion = 4;
+// limit: guard save decode: counts, refuses
 constexpr uint32_t kMaxSaveCount = 1u << 24;
 
 uint32_t read_count(ByteReader& r) {

@@ -758,6 +758,7 @@ void test_ended_production_cancel();
 void test_no_units_remaining_counted_entries();
 void test_production_disabled_and_delivery();
 void test_ground_structure_slots();
+void test_fleet_distance_tokens();
 void test_structure_eta_queue_wait();
 void test_queue_slot_lifetime();
 void test_budget_fraction_before_init();

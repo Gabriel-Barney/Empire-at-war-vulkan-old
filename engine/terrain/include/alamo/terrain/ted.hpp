@@ -33,8 +33,14 @@ constexpr float kVertexSpacing = 20.0f;         // world units between grid vert
 constexpr float kHeightScale = 0.048828125f;    // raw s16 height -> world units (1/20.48)
 constexpr uint32_t kPatchQuads = 31;            // quads per patch side
 constexpr uint32_t kPatchVerts = 32;            // vertices per patch side
+// mcx5 t03 (MCX5_RE_ANSWERS Q2.3 [H]): retail's material table grows with the records; its only 64 is the
+// renderer's per-patch array (0x1b62a0), which ids >= 64 overrun. The port keeps 64 slots and clamps ids.
+// limit: retail MCX5_RE_ANSWERS Q2.3 (render per-patch array, 0x1b62a0)
 constexpr uint32_t kMaterialSlots = 64;
-constexpr uint32_t kMaxGridVerts = 31 * 64 + 1; // reader cap (vanilla max 373); larger -> error
+// mcx5 t03 (MCX5_RE_ANSWERS Q2.1 [H]): retail bounds neither side (heap-sized buffers; a side >= 65536 hangs its
+// u16 cell fill). The port allocates from the vertex payload, so this only keeps size products in signed 32 bits.
+// limit: guard 31 * 256 + 1 = 7937 per side (vanilla max 373; w * h * 16 < 2^31); larger -> error
+constexpr uint32_t kMaxGridVerts = 31 * 256 + 1;
 
 // Cell passability bits (CellPassabilityType, 1.5).
 enum PassabilityBits : uint32_t {
@@ -237,6 +243,15 @@ struct Terrain {
     std::vector<uint8_t> brightness;        // used only when header.use_vertex_brightness
     bool legacy_vertices = false;           // came from child 1 (brightness forced 0xFF)
     std::array<TerrainMaterial, kMaterialSlots> materials{};
+    // mcx5 t03 (MCX5_RE_ANSWERS Q2.3 [H]): material records past slot 63, in file order. Retail's table grows to hold
+    // every record and its sim reads (surface type, 0x38e0c0) index it by the raw byte; only the renderer stops at 64.
+    // cell_surface_type reads these; the render / mesh paths keep the 64 slots.
+    std::vector<TerrainMaterial> extra_materials;
+    // The material record of id m (slot or extra), null past the table.
+    const TerrainMaterial* material_record(uint32_t m) const {
+        if (m < kMaterialSlots) return &materials[m];
+        return m - kMaterialSlots < extra_materials.size() ? &extra_materials[m - kMaterialSlots] : nullptr;
+    }
     WaterScroll water_scroll[2];            // child 7, child 8
     std::vector<TerrainDecal> decals;       // child 6 (DECORATIONS.md 4.1; only UM11 in vanilla)
     std::vector<TerrainTrack> tracks;       // child 9 (DECORATIONS.md 5.1; 23 FoC maps)

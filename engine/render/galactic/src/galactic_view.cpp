@@ -632,7 +632,9 @@ CorruptionPathSettings load_corruption_path_settings(const data::XmlNode& root) 
     if (parse_float_list(root.child_text("Corruption_Path_Offset"), v, 3) == 3 && std::isfinite(v[0]) && std::isfinite(v[1]) &&
         std::isfinite(v[2]))
         s.offset = {v[0], v[1], v[2]};
-    if (parse_float_list(root.child_text("MaximumFleetMovementDistance"), v, 1) == 1 && std::isfinite(v[0]) && v[0] >= 0.0f)
+    // mcx5: a GameConstants without the tag has the GameConstants default 1.0 (0x2c91c0, MCX5_RE_ANSWERS Q1.9), as the sim.
+    if (root.child_text("MaximumFleetMovementDistance").empty()) s.neighbour_distance = 1.0f;
+    else if (parse_float_list(root.child_text("MaximumFleetMovementDistance"), v, 1) == 1 && std::isfinite(v[0]) && v[0] >= 0.0f)
         s.neighbour_distance = v[0];
     return s;
 }

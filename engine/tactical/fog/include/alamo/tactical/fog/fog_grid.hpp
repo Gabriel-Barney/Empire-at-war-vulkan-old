@@ -31,10 +31,12 @@ class StateHasher;
 
 namespace alamo::tactical::fog {
 
-inline constexpr int32_t kMaxCellsPerAxis = 512;
+// FOWGrid W / H are each clamped to [0, 512] (ctor 0x4c0890); a larger map gets coarser cells, never a refusal.
+inline constexpr int32_t kMaxCellsPerAxis = 512;  // limit: retail FOG_OF_WAR §1.1-§1.2 (0x4c0890)
 inline constexpr uint8_t kStateFogged = 0;
 inline constexpr uint8_t kStateFirstReveal = 0xEF;  // 239: a never-seen / regrown cell when first counted
 inline constexpr uint8_t kStateRevealed = 0xFF;
+// limit: retail FOG_OF_WAR §1.1 (+0x08 u16 reveal count saturates)
 inline constexpr uint16_t kCountMax = 0xFFFF;
 inline constexpr float kNoModelFootprint = 10.0f;  // footprint radius without a model; also the min sight radius
 

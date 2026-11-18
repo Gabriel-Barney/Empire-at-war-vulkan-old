@@ -5,7 +5,8 @@ The step-exit, test-total and skips patterns come from build_summary.py. The war
 than build_summary's (compiler / linker "warning:" lines only): build_summary also counts error-like lines anywhere in the
 log, including the output of passing tests, which would fail the gate on test output.
 Then runs the source lints that need no build (modc t04: check_mod_names.py and its self-test, docs/status/modc-audit.md;
-mcx0 t03: check_tag_ledger.py and its self-test, docs/MOD_COMPAT_DESIGN.md §7.2) and
+mcx0 t03: check_tag_ledger.py and its self-test, docs/MOD_COMPAT_DESIGN.md §7.2; mcx5 t05: check_limits.py and its
+self-test, §8) and
 prints one line for them; a lint failure fails the gate too. (The same lints also run as ctest entries in every build.)
 Usage: gate_summary.py <logs dir>
 """
@@ -17,7 +18,8 @@ from pathlib import Path
 from build_summary import SKIPS, STEP_EXIT, TESTS_TOTAL
 
 LINTS = [('mod names', ['check_mod_names.py']), ('mod names selftest', ['check_mod_names.py', '--selftest']),
-         ('ledgers', ['check_tag_ledger.py']), ('ledgers selftest', ['check_tag_ledger.py', '--selftest'])]
+         ('ledgers', ['check_tag_ledger.py']), ('ledgers selftest', ['check_tag_ledger.py', '--selftest']),
+         ('limits', ['check_limits.py']), ('limits selftest', ['check_limits.py', '--selftest'])]
 
 
 def run_lints():

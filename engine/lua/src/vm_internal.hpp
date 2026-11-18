@@ -371,11 +371,14 @@ inline constexpr int32_t kParentStoreTag = 1;
 // on the company object [port]. Views are cached in the object cache under object_cache_key (negative keys).
 inline constexpr int32_t kStoreTagMask = 0xff;
 inline constexpr int32_t kMemberViewFlag = 0x100;
-inline constexpr uint32_t kMaxMemberViews = 256;  // Company_Units entries past this get no view
+// mcx5 t04: member views are made on demand for any Company_Units entry (the original keeps one object per entry, no
+// cap); the index has 16 bits in Ud::reserved, so entries from 65536 on get no view (nil) - far above any company.
+inline constexpr uint32_t kMaxMemberViews = 65536;  // limit: guard (16-bit index in Ud::reserved)
 inline int32_t store_tag_of(const Ud& ud) { return ud.reserved & kStoreTagMask; }
 inline bool is_member_view(const Ud& ud) { return (ud.reserved & kMemberViewFlag) != 0; }
 inline uint32_t member_index(const Ud& ud) { return static_cast<uint32_t>(ud.reserved) >> 16; }
-// The object-cache key of a GameObjectWrapper: its id, or -(id * 256 + index + 1) for a member view.
+// The object-cache key of a GameObjectWrapper: its id, or for a member view -(id * 256 + index + 1) (index < 256, the
+// keys used before mcx5) or -(2^40 + id * 65536 + index) (index >= 256): disjoint ranges, exact in a lua_Number.
 lua_Number object_cache_key(const Ud& ud);
 // Pushes the cached member view of company object `h`, Company_Units entry `index` (nil for a missing object).
 void push_member_view(lua_State* L, LuaVm::Impl& vm, objects::ObjectHandle h, uint32_t index);

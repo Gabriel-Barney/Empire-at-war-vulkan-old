@@ -10,6 +10,7 @@
 namespace alamo {
 namespace {
 constexpr uint8_t kBodyStored = 0, kBodyLz = 1;
+// limit: guard save decode: unpacked body size (allocation), refuses
 constexpr uint32_t kMaxBodyBytes = 1u << 30;  // a plausibility cap on the unpacked size (allocation)
 
 bool fail(std::string* err, std::string msg) {

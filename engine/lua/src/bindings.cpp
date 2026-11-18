@@ -730,7 +730,10 @@ objects::ObjectStore* parent_store(LuaVm::Impl& vm) { return parent_store_of(vm)
 // refix t04: company member views (vm_internal.hpp).
 lua_Number object_cache_key(const Ud& ud) {
     if (!is_member_view(ud)) return static_cast<lua_Number>(ud.id);
-    return -(static_cast<lua_Number>(ud.id) * static_cast<lua_Number>(kMaxMemberViews) + static_cast<lua_Number>(member_index(ud)) + 1.0);
+    const auto id = static_cast<lua_Number>(ud.id);  // < 2^32
+    const auto index = static_cast<lua_Number>(member_index(ud));
+    if (member_index(ud) < 256u) return -(id * 256.0 + index + 1.0);  // < 2^40 + 256
+    return -(1099511627776.0 + id * 65536.0 + index);                 // 2^40 + ... < 2^49: exact
 }
 
 void push_member_view(lua_State* L, LuaVm::Impl& vm, objects::ObjectHandle h, uint32_t index) {

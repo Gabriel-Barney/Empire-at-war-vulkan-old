@@ -205,6 +205,11 @@ EconomyConstants load_economy_constants(const data::GameDatabase& db) {
         c.base_vs_tech[static_cast<size_t>(i)] = g.get_float(
             "Production_Speed_Mod_Base_Vs_Tech_" + std::to_string(i), c.base_vs_tech[static_cast<size_t>(i)]);
     c.max_ground_forces_on_planet = g.get_int("Max_Ground_Forces_On_Planet", c.max_ground_forces_on_planet);
+    // mcx5 t02: absent tags take the GameConstants defaults, 1 each (0x2c91c0, MCX5_RE_ANSWERS Q1.9 [H]).
+    c.max_political_control = g.get_int("MaximumPoliticalControl", 1);
+    c.max_starbase_level = g.get_int("MaximumStarbaseLevel", 1);
+    c.max_groundbase_level = g.get_int("MaximumGroundbaseLevel", 1);
+    c.max_special_structures = g.get_int("MaximumSpecialStructures", 1);
     c.health_low_percent_threshold = g.get_float("Health_Low_Percent_Threshold", c.health_low_percent_threshold);  // a2l t03
     {  // a2m t05: Low_ / Medium_ / High_Threat_Reachability_Tolerance (A2M_T04_RE_ANSWERS Q3)
         static constexpr const char* kTol[3] = {"Low_Threat_Reachability_Tolerance", "Medium_Threat_Reachability_Tolerance",

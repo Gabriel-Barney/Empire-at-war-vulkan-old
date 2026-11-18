@@ -71,6 +71,7 @@ void SimAnimation::attach(SimHost& host, bool crc) {
 // ------------------------------------------------------------------------------------ N1 save / load
 namespace {
 constexpr uint32_t kAnimChunkVersion = 3;  // 2: refix t01 pending clone death kinds; 3: refixf t04 pending clone plans
+// limit: guard save decode: counts, refuses
 constexpr uint32_t kMaxAnimCount = 1u << 24;
 
 void write_id_list(ByteWriter& w, const std::vector<ObjectId>& ids) {

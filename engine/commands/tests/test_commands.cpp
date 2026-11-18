@@ -172,7 +172,7 @@ void test_round_trip() {
     Rng r(1);
     for (int i = 0; i < 3000; ++i) {
         Command c;
-        c.header.player = static_cast<uint8_t>(r.below(kMaxPlayerSlots));
+        c.header.player = static_cast<uint16_t>(r.below(i % 2 ? 256u : kMaxPlayerSlots));  // mcx5 t01: 13-bit ids
         c.header.source = static_cast<CommandSource>(r.below(4));
         c.header.sequence = static_cast<uint32_t>(r.next());
         c.header.issue_tick = r.next();
@@ -272,10 +272,12 @@ void test_queued_flag() {
     CHECK(decode_command(q, pos, d) == DecodeError::None && d == c && d.payload.queued() && d.header.source == CommandSource::AI);
     pos = 0;
     CHECK(decode_command(plain, pos, d) == DecodeError::None && !d.payload.queued());
-    auto bad = q;
-    bad[3] = static_cast<uint8_t>(kCommandQueuedBit | 0x05);  // source 5 is still out of range
+    // mcx5 t01: source byte bits 2-6 are player id bits 8-12 (0x05 = source AI, player 256 + 2).
+    auto high = q;
+    high[3] = static_cast<uint8_t>(kCommandQueuedBit | 0x05);
     pos = 0;
-    CHECK(decode_command(bad, pos, d) == DecodeError::BadField);
+    CHECK(decode_command(high, pos, d) == DecodeError::None && d.header.player == 258 && d.header.source == CommandSource::AI &&
+          d.payload.queued() && encode_command(d) == high);
     // Round trip through a recording (replays keep the flag).
     CommandRecording rec;
     rec.end_tick = 102;
@@ -455,7 +457,7 @@ struct ToySim {
     // Original-style execution: ids resolved now; a missing target is a silent no-op (diagnostic only).
     RejectReason apply(uint64_t tick, const Command& c) {
         const EventData& e = c.payload;
-        const uint8_t p = c.header.player;
+        const uint16_t p = c.header.player;
         if (e.type() == EventType::Select) {
             selection[p & 3] = e.ids("ids");
         } else if (e.type() == EventType::Attack && e.u("target") % 7 == 0) {
@@ -780,9 +782,9 @@ void test_pipeline_save() {
             ByteReader r(bad);
             return !x.read(r) && pipeline_bytes(x) == before;
         };
-        // pipeline version | scheduler version | delay | max_players (0, 33) | retired late / mode / turn / max_ahead
-        CHECK(refuses(0, 9) && refuses(4, 9) && refuses(8, 0) && refuses(12, 0) && refuses(12, 33));
-        CHECK(refuses(13, 1) && refuses(14, 1) && refuses(15, 5) && refuses(19, 3));
+        // pipeline version | scheduler version | delay | u16 max_players (0, 33, 260) | retired late / mode / turn / max_ahead
+        CHECK(refuses(0, 9) && refuses(4, 9) && refuses(8, 0) && refuses(12, 0) && refuses(12, 33) && refuses(13, 1));
+        CHECK(refuses(14, 1) && refuses(15, 1) && refuses(16, 5) && refuses(20, 3));
         // A bad event kind after a valid scheduler part: the scheduler is not loaded either.
         const size_t first_kind = 4 + sched_bytes + 8;
         CHECK((saved[first_kind] == 0 || saved[first_kind] == 1) && refuses(first_kind, 7));
@@ -818,6 +820,71 @@ void test_old_streams() {
 
 }  // namespace
 
+// mcx5 t01: more than 255 players (no 64-slot cap): the scheduler, the stream header, the EventBus save; the version-1
+// scheduler save (u8 max_players) still reads.
+void test_wide_players() {
+    SchedulerConfig cfg;
+    cfg.max_players = 300;
+    CommandScheduler s(cfg);
+    CHECK(s.submit(299, CommandSource::Player, ev::stop()).ok());
+    CHECK(s.submit(300, CommandSource::Player, ev::stop()).status == RejectReason::InvalidPlayer);
+    CHECK(s.submit(7, CommandSource::Player, ev::stop()).ok());
+    s.drain(0);
+    const CommandBatch b = s.drain(1);
+    CHECK(b.commands.size() == 2 && b.commands[0].header.player == 7 && b.commands[1].header.player == 299);
+    CommandRecording rec;
+    rec.config = cfg;
+    rec.end_tick = 2;
+    rec.batches.push_back(b);
+    const auto bytes = rec.to_bytes();
+    CHECK(bytes[12] == (300 & 0xFF) && bytes[15] == (300 >> 8));  // max_players low byte, then the formerly reserved byte
+    CommandRecording back;
+    std::string err;
+    CHECK(CommandRecording::from_bytes(bytes, back, &err) && back == rec && back.config.max_players == 300);
+    {
+        bool threw = false;
+        SchedulerConfig over;
+        over.max_players = static_cast<uint16_t>(kMaxPlayerSlots + 1);
+        try {
+            CommandScheduler bad(over);
+        } catch (const std::invalid_argument&) {
+            threw = true;
+        }
+        CHECK(threw);
+    }
+    // EventBus save: the player's high bits ride in the source byte.
+    EventBus bus;
+    CommandResult cr;
+    cr.tick = 9;
+    cr.header = CommandHeader{4000, CommandSource::Script, 3, 8, 9};
+    cr.type = 1;
+    bus.post(cr);
+    ByteWriter w;
+    bus.write(w);
+    EventBus bus2;
+    ByteReader r(w.bytes());
+    CHECK(bus2.read(r) && r.done() && bus2.pending().size() == 1 && std::get<CommandResult>(bus2.pending()[0]) == cr);
+    // Scheduler save v2 -> the same state written as v1 (u8 max_players): reads, and writes v2 again byte for byte.
+    SchedulerConfig small;
+    small.max_players = 4;
+    small.delay = 3;
+    CommandScheduler s4(small);
+    CHECK(s4.submit(2, CommandSource::Player, ev::stop()).ok());
+    ByteWriter w2;
+    s4.write(w2);
+    std::vector<uint8_t> v2(w2.bytes().begin(), w2.bytes().end());
+    CHECK(v2[0] == CommandScheduler::kSaveVersion && v2[8] == 4 && v2[9] == 0);
+    std::vector<uint8_t> v1 = v2;
+    v1[0] = 1;
+    v1.erase(v1.begin() + 9);  // u32 version | u32 delay | u8 max_players
+    CommandScheduler loaded;
+    ByteReader r1(v1);
+    CHECK(loaded.read(r1) && r1.done() && loaded.config().max_players == 4 && loaded.pending() == 1);
+    ByteWriter w3;
+    loaded.write(w3);
+    CHECK(std::vector<uint8_t>(w3.bytes().begin(), w3.bytes().end()) == v2);
+}
+
 int main() {
     test_catalogue();
     test_quantizers();
@@ -831,6 +898,7 @@ int main() {
     test_pipeline_replay();
     test_pipeline_save();
     test_old_streams();
+    test_wide_players();
     if (g_fail) {
         std::printf("%d check(s) failed\n", g_fail);
         return 1;

@@ -69,6 +69,7 @@ namespace alamo::tactical::hangar {
 using combat::kNoObject;
 using combat::ObjectId;
 
+// limit: retail A2F_RE_READS §2.1 (Tech_0..5 lists, type +0xAD0 / +0xB60)
 inline constexpr uint32_t kTechSlots = 6;  // Starting / Reserve_Spawned_Units_Tech_0..5
 
 // One (type, count) pair of a Starting_ / Reserve_Spawned_Units_Tech_N list.

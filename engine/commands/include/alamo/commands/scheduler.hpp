@@ -42,11 +42,12 @@ namespace alamo::commands {
 inline constexpr uint8_t kSchedLateByte = 0;        // late policy: reject
 inline constexpr uint8_t kSchedModeByte = 0;        // mode: single player
 inline constexpr uint32_t kSchedTurn = 1;           // command-turn length
+// limit: guard not a limit: retired lockstep MaxAhead config byte (always 2)
 inline constexpr uint32_t kSchedMaxAhead = 2;       // MaxAhead
 
 struct SchedulerConfig {
     uint32_t delay = 1;            // ticks between issue and application (>= 1)
-    uint8_t max_players = 8;       // valid ids 0..max_players-1 (<= kMaxPlayerSlots)
+    uint16_t max_players = 8;      // valid ids 0..max_players-1 (<= kMaxPlayerSlots)
     uint64_t first_tick = 0;       // first tick that will be drained
 
     static SchedulerConfig single_player() { return {}; }
@@ -77,7 +78,7 @@ public:
 
     const SchedulerConfig& config() const noexcept { return cfg_; }
 
-    SubmitResult submit(uint8_t player, CommandSource source, CommandPayload payload);
+    SubmitResult submit(uint16_t player, CommandSource source, CommandPayload payload);
     SubmitResult insert(Command cmd);  // replay: full header kept
 
     // Removes and returns every command scheduled for `tick`, in canonical order.
@@ -97,14 +98,15 @@ public:
     // bytes), per player the next sequence and the drained-sequence set. read() restores all of it,
     // config included (max_players may differ from the constructor's); false and nothing changed on a
     // bad version / config / command or an inconsistent queue.
-    static constexpr uint32_t kSaveVersion = 1;
+    // 2 (mcx5 t01): max_players is a u16 (the 64-slot cap is gone); version 1 (u8) still reads.
+    static constexpr uint32_t kSaveVersion = 2;
     void write(ByteWriter& w) const;
     bool read(ByteReader& r);
 
 private:
     SubmitResult check_and_queue(Command&& cmd, bool local);
-    bool was_drained(uint8_t player, uint32_t seq) const;
-    void mark_drained(uint8_t player, uint32_t seq);
+    bool was_drained(uint16_t player, uint32_t seq) const;
+    void mark_drained(uint16_t player, uint32_t seq);
 
     mutable std::mutex mu_;
     SchedulerConfig cfg_;

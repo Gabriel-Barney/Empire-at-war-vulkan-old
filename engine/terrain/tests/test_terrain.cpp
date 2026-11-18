@@ -362,6 +362,20 @@ void test_surface_types() {
     CHECK(t.surface_type_at(40.0f, 60.0f) == 4);
     t.header.water_type = WaterType::Ice;
     CHECK(t.surface_type_at(40.0f, 60.0f) == 7);
+    // mcx5 t03 (MCX5_RE_ANSWERS Q2.3): material ids past slot 63 read the extra records (retail's table holds every
+    // record), and the .ted round trip keeps them; an id past the table reads 0.
+    t.header.water_type = WaterType::None;
+    t.extra_materials.resize(3);
+    t.extra_materials[2].surface_type = 9;  // id 66
+    t.material[3 * 32 + 2] = 66;
+    CHECK(t.cell_surface_type(40.0f, 60.0f) == 9);
+    t.material[3 * 32 + 2] = 70;
+    CHECK(t.cell_surface_type(40.0f, 60.0f) == 0 && t.material_record(70) == nullptr);
+    MapData md = make_map(1, 2);
+    md.terrain.extra_materials = t.extra_materials;
+    MapData back;
+    CHECK(parse_ted(write_ted(md), back) && back.terrain.extra_materials.size() == 3 &&
+          back.terrain.extra_materials[2].surface_type == 9);
 }
 
 void test_mesh_blend_rules() {
@@ -693,6 +707,14 @@ void test_hardening() {
     std::string err;
     CHECK(!parse_ted(b, r, &err) && r.terrain.heights.empty() && r.passability.empty());
     std::printf("48-byte 1985^2 map rejected: %s\n", err.c_str());
+    // mcx5 t03: a side above the kMaxGridVerts guard is refused by the header check (retail bounds neither side,
+    // MCX5_RE_ANSWERS Q2.1; the guard keeps size products in 32 bits).
+    for (size_t i = 0; i < 2; ++i) {
+        const size_t at = 24 + 6 * i + 2;  // mini 00 / 01 values
+        const uint32_t v = kMaxGridVerts + 1;
+        for (size_t k = 0; k < 4; ++k) b[at + k] = static_cast<uint8_t>(v >> (8 * k));
+    }
+    CHECK(!parse_ted(b, r, &err) && err.find("kMaxGridVerts") != std::string::npos);
 
     // Truncated vertex data and short passability are rejected.
     const MapData m = make_map(1, 11);
@@ -810,15 +832,15 @@ void test_fuzz() {
         for (auto& x : b) x = static_cast<uint8_t>(rng.next());
         fuzz_one(b, parsed);
     }
-    // Malformed headers that must fail cleanly.
+    // A grid above the pre-mcx5 cap loads; an empty file fails cleanly (the kMaxGridVerts guard: test_hardening).
     MapData big = make_map(1, 2);
-    big.terrain.width = big.terrain.height = 2101;  // > kMaxGridVerts
+    big.terrain.width = big.terrain.height = 2101;  // above the pre-mcx5 cap 1985: loads now (retail has none, Q2.1)
     big.passability_present = false;
     big.terrain.heights.clear();
     big.terrain.material.clear();
     big.terrain.brightness.clear();
     MapData r;
-    CHECK(!parse_ted(write_ted(big), r));
+    CHECK(parse_ted(write_ted(big), r) && r.terrain.width >= 2101);
     CHECK(!parse_ted({}, r));
     std::printf("fuzz: %u inputs, %u parsed without error, no crash\n", iters + 2000, parsed);
 }

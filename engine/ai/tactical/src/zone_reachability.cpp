@@ -11,6 +11,7 @@ namespace alamo::ai::tactical {
 
 namespace {
 
+// limit: retail A1_READINGS §3.3 (0x691250: entries summed, not a refusal)
 constexpr size_t kMaxPathEntries = 1000;  // A1_READINGS §3.3: entries summed (not a path-length refusal)
 
 }  // namespace

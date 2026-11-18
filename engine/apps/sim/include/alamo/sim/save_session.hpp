@@ -108,7 +108,8 @@ struct SaveMod {
 };
 
 struct SessionDescriptor {
-    static constexpr uint32_t kVersion = 1;
+    // 2 (mcx5 t01): the scheduler's max_players is a u16 (no 64-player cap); version 1 still reads.
+    static constexpr uint32_t kVersion = 2;
 
     // What to build: "galactic" = a data-driven campaign / galactic conquest; hosts may define their own kinds
     // (alamo_headless "synthetic").

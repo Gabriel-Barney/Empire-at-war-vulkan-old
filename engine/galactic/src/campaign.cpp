@@ -1732,7 +1732,8 @@ void GalacticSim::update() {
 // ---- commands -----------------------------------------------------------------------------------------------
 
 RejectReason GalacticSim::handle_command(uint64_t /*tick*/, const commands::Command& cmd) {
-    return execute(cmd.header.player, cmd.payload);
+    if (cmd.header.player > 0xFFu) return RejectReason::InvalidPlayer;  // mcx5 t01: galactic player ids are uint8_t (sim guard)
+    return execute(static_cast<uint8_t>(cmd.header.player), cmd.payload);
 }
 
 RejectReason GalacticSim::execute(uint8_t player_id, const commands::EventData& ev) {

@@ -331,6 +331,7 @@ bool convert_value(Call& c, int i, std::string& out) {
     return false;
 }
 
+// limit: guard Set_Event_Parameter index; above retail's Event_Param1..7
 constexpr int32_t kMaxParamIndex = 64;  // [port] the parameter slots the port keeps (Event_Param1..64)
 
 StoryParam* param_slot(std::vector<StoryParam>& v, int32_t index) {

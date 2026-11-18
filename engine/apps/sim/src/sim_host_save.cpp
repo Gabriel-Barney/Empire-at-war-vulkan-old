@@ -21,6 +21,7 @@ constexpr uint32_t kChunkVersion = 1;  // envelope version of every host chunk (
 // "frame" chunk version (chunk header and its leading u32). 2 (cu9f t01): GalacticMode::write_state no longer carries the
 // pre-S3 income cadence (u32 interval, u64 next income frame, u64 income events); a version-1 save is refused.
 constexpr uint32_t kFrameChunkVersion = 2;
+// limit: guard save decode: counts, refuses
 constexpr uint32_t kMaxCount = 1u << 24;
 
 // Host chunk names in save / load order (a story session adds its four after "globals").
@@ -225,8 +226,8 @@ void SimHost::write_players(ByteWriter& w) const {
 bool SimHost::read_players(ByteReader& r) {
     if (r.u32() != kChunkVersion) return false;
     if (r.u32() != cfg_.players || !r.ok()) return false;
-    std::array<std::vector<ObjectId>, kMaxPlayers> sel;
-    std::array<std::array<std::vector<ObjectId>, 10>, kMaxPlayers> groups;
+    std::vector<std::vector<ObjectId>> sel(cfg_.players);
+    std::vector<std::array<std::vector<ObjectId>, 10>> groups(cfg_.players);
     for (uint32_t p = 0; p < cfg_.players; ++p)
         if (!read_ids(r, sel[p])) return false;
     const bool used = r.boolean();

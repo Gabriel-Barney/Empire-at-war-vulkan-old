@@ -340,7 +340,7 @@ struct ModCheckReport {
     std::vector<BindingGapCall> binding_gaps;      // most call sites first
     StoryCheck story;
     TokenCoverage token_coverage;
-    std::vector<LimitHit> limits;                  // filled by the limit checks (mcx5); empty until then
+    std::vector<LimitHit> limits;                  // mcx5 t05: data that reaches a guard (factions > sim::kMaxPlayers)
     AssetAudit assets;                             // mcx2 t01: the `assets` section (ran = false when not checked)
     CompatGrade grade;
 
