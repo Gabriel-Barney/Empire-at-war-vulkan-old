@@ -2404,6 +2404,7 @@ constexpr uint32_t kStorySaveVersion = 8;  // 8 (mcx6 review): each definition e
 // "story.lua" (write_scripts): 1 galactic sets, 2 + the tactical set, 3 = 2 (it followed kStorySaveVersion), 4 (q6 t19):
 // each script's Lua state is a script block (alamo/lua/script_save.hpp, LUA_SAVE.md §2) instead of a bare LuaVm image.
 constexpr uint32_t kStoryScriptsVersion = 4;
+// limit: guard save decode: counts, refuses
 constexpr uint32_t kMaxSaveCount = 1u << 24;
 
 uint32_t read_count(ByteReader& r) {

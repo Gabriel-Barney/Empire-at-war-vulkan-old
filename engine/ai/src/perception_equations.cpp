@@ -548,6 +548,7 @@ private:
 
 // ---- evaluation ----
 
+// limit: guard equation eval recursion depth, fails EvalError::Recursion
 constexpr uint32_t kMaxDepth = 64;
 
 struct Evaluator {

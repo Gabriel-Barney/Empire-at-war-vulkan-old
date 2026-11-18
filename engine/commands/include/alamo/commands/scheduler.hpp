@@ -42,6 +42,7 @@ namespace alamo::commands {
 inline constexpr uint8_t kSchedLateByte = 0;        // late policy: reject
 inline constexpr uint8_t kSchedModeByte = 0;        // mode: single player
 inline constexpr uint32_t kSchedTurn = 1;           // command-turn length
+// limit: guard not a limit: retired lockstep MaxAhead config byte (always 2)
 inline constexpr uint32_t kSchedMaxAhead = 2;       // MaxAhead
 
 struct SchedulerConfig {

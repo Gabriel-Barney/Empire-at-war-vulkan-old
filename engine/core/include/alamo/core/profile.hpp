@@ -18,8 +18,11 @@
 
 namespace alamo::profile {
 
+// limit: guard profiler zone registry (code-defined zones; extra -> kNoZone)
 inline constexpr uint32_t kMaxZones = 192;  // sp0 (2026-11-14): 96 -> 192 for the perception / services step zones
+// limit: dynamic profiler accumulators; more threads share slots, never refuses
 inline constexpr uint32_t kMaxThreads = 32;     // accumulator slots; more threads share slots (still correct)
+// limit: dynamic profiler busy slots; higher job slots fold into the last
 inline constexpr uint32_t kMaxBusySlots = 32;   // job-system slots; slot 0 is the sim thread helping while it waits
 using ZoneId = uint16_t;
 inline constexpr ZoneId kNoZone = 0xFFFF;

@@ -15,6 +15,7 @@ namespace {
 constexpr float kTwoPiDraw = 6.2831855f;     // Get_Float upper bound of the jitter angle (§2.4.5)
 constexpr float kDegToRad = 0.017453292f;    // FIGHTER_FLYING §1.1
 constexpr float kRadToDeg = 57.295776f;      // FIGHTER_FLYING §1.2
+// limit: guard adaptive length recursion (never reached on finite data)
 constexpr int kLengthMaxDepth = 40;          // [port] cap of the adaptive length recursion (never reached on finite data)
 
 float abs_f(float v) { return v < 0.0f ? -v : v; }

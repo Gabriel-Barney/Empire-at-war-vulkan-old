@@ -114,6 +114,7 @@ private:
 // The shake trackers of the cinematic controller (+0x278).
 class CameraShake {
 public:
+    // limit: guard [port] camera shake trackers (memory bound; retail drops none: S3 backlog)
     static constexpr size_t kMaxTrackers = 256;  // [port] memory bound; the original never drops one before the cinematic ends
     void start(const ShakeEffect& e, int32_t start_clock, int32_t duration_frames = kCinematicFps);
     struct Sample {

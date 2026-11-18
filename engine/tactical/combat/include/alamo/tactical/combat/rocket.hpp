@@ -162,6 +162,7 @@ bool rocket_replan_space(RocketSpline& path, Vec3 P, Vec3 E, Vec3 last_velocity,
 // The arc subdivision 0x4cc780 (§2.4.6 step 6): appends to `out`, in order, sub(a, mid), mid, sub(mid, b) while
 // acos(a . b) x r > thr. [port] The dot is clamped to [-1, 1] (a dot just above 1 is NaN in retail and never stops) and
 // the recursion depth is capped at kRocketArcMaxDepth.
+// limit: guard arc subdivision recursion (S9_DEATH_CLONE_SHIELDS §2.4.6)
 inline constexpr int kRocketArcMaxDepth = 12;
 void rocket_arc_subdivide(Vec3 a, Vec3 b, float r, float thr, std::vector<Vec3>& out, int depth = 0);
 

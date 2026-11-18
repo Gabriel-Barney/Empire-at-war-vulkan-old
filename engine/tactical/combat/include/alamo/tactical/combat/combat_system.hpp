@@ -546,6 +546,7 @@ struct UnitDesc {
     // t04: Destroy_When_Stunned_Over_Water (+0xe6; FoC: MAL_Rocket_Vehicle): ABILITIES_HARDPOINTS §4.12 RE reading.
     bool destroy_when_stunned_over_water = false;
 };
+// limit: guard [below retail: SurfaceFX_Name entries past 4 dropped; S2 task for mcx4]
 inline constexpr uint32_t kMaxUnitSurfaceFx = 4;
 
 struct CombatData {

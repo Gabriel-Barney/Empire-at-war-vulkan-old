@@ -59,6 +59,7 @@ constexpr int32_t kFreeStoreScriptBase = 1000000;  // free-store script ids: bas
 constexpr int32_t kSlotBits = 20;                    // AITarget id = (player << 20) | slot [port]
 constexpr int32_t kSlotMask = (1 << kSlotBits) - 1;
 constexpr uint32_t kNoWireObject = 0x3FFFFFu;        // commands::kNoObject
+// limit: guard task-force group order ids (payload < 16 KiB)
 constexpr size_t kTfGroupOrderMaxUnits = 4096;       // [port] ids in one group order (payload < 16 KiB, header)
 
 int32_t target_id(int32_t player, int32_t slot) { return (player << kSlotBits) | slot; }
@@ -2382,6 +2383,7 @@ void TacticalAiWorld::Impl::tf_release_reinforcements(int32_t tf) {
 namespace {
 constexpr uint32_t kAttackPositionFrames = 150;  // 0x4f6470: +0x34 := now + 150 (5 s at 30 fps) [H]
 constexpr float kAttackPositionPullStep = 30.0f;  // 0x4f48a0: 30 units per step [M]
+// limit: guard pull-back walk steps (loop bound)
 constexpr int kAttackPositionMaxSteps = 4096;     // [port] a bound for the pull-back walks
 
 // One step of `s` from p toward `to` (2-D, z kept); false when p reached `to` (it is set to `to`).
@@ -4609,6 +4611,7 @@ constexpr uint32_t kTacticalAiSaveVersion = 18;  // 18: mcx6 t06 attack position
                                                  // the pending slot-10 solves (plans + results); 11: q6 object
                                                  // Attack_Move block (target owner, arrived unit count); 12: q6 t19
                                                  // 0x5680b0 fact, hero-clash byte, block pending list
+// limit: guard save decode: nested AI global value depth, refuses
 constexpr int kMaxGlobalDepth = 32;
 // Lower bounds of one record (count checks only).
 constexpr size_t kFactBytes = 12 + 5 + 13 + 17 + 4 + 6;

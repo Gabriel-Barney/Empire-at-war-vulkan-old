@@ -18,7 +18,9 @@ namespace alamo::sim {
 
 namespace {
 
+// limit: retail STORY_REWARDS_GALACTIC §1.15 (0x4bec90); count: MCX5_RE_QUESTIONS Q4
 constexpr int32_t kMaxTries = 100;    // the retail retry count (CONSTRUCT_LEVEL)
+// limit: guard [port] trigger rebuilds (retail would not end)
 constexpr int32_t kMaxRebuilds = 64;  // [port] guard
 
 std::string escape(std::string_view s) {

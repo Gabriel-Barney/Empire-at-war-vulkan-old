@@ -1340,6 +1340,7 @@ int m_invade(Call& c) {
         return 0;
     }
     const int32_t issuer = w->local_player();
+    // limit: retail A1_READINGS §31.2 (0x4903c0 copies at most 127 unit ids)
     constexpr size_t kMaxInvadeUnits = 127;  // 0x4903c0 copies at most 127 unit ids
     bool any_ground = false;
     std::vector<uint32_t> ids;
@@ -1367,6 +1368,7 @@ int m_invade(Call& c) {
 
 // WaitForStarbase / WaitForGroundbase(planet, level): a BlockingStatus finished once the planet's starbase
 // (ground base) level is >= level. Level range [inferred] 0..5.
+// limit: guard WaitFor*base level bound; retail bound: MCX5_RE_QUESTIONS Q1.7 (t02)
 constexpr int32_t kMaxBaseLevel = 5;
 int wait_for_base(Call& c, bool starbase) {
     const char* who = starbase ? "WaitForStarbase" : "WaitForGroundbase";

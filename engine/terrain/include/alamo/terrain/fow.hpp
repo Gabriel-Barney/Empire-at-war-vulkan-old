@@ -33,6 +33,7 @@ namespace alamo::terrain {
 
 constexpr float kLandFowCellSize = 15.0f;    // GameConstants DesiredLandFOWCellSize (vanilla)
 constexpr float kSpaceFowCellSize = 100.0f;  // DesiredSpaceFOWCellSize
+// limit: retail FOG_OF_WAR §1.1-§1.2 (0x4c0890)
 constexpr uint32_t kMaxFowCells = 512;       // per side
 constexpr float kSpaceFowHeight = -80.0f;    // SpaceFOWHeight
 constexpr uint32_t kSpaceFowEdgeFadeCells = 4;  // [port] fade_texel_edges ramp of the space plane (400 world units)

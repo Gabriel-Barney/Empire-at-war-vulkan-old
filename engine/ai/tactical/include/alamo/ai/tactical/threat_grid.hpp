@@ -74,6 +74,7 @@ namespace alamo::ai::tactical {
 inline constexpr uint32_t kReprojectionFrames = 300;  // 10 s gate [H]
 inline constexpr int32_t kUnitAiCheckSpread = 300;     // data pack +0x20: F + Get_Int(0, 300) - 300 [H]
 inline constexpr int32_t kUnitAiSecondSpread = 150;    // data pack +0x34: F + Get_Int(0, 150) - 150 [H]
+// limit: retail FOG_OF_WAR §1.1-§1.2 (0x4c0890)
 inline constexpr int32_t kMaxFowCellsPerAxis = 512;
 inline constexpr int32_t kFirstGridHardPointType = 5, kLastGridHardPointType = 10;
 // Point-danger scale squares (0x653ff0): 4000^2 space, 800^2 land [H].

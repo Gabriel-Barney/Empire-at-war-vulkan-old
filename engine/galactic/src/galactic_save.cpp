@@ -55,6 +55,7 @@ namespace {
 // v6 / v7 read them as the session's start() values (home) and none. v9 (map1 t06): + the structure marker memory
 // {i32 object, i32 slot, i32 marker}, object-id-ascending, live objects only; v6 - v8 read it as none.
 constexpr uint32_t kGalacticSaveVersion = 9;
+// limit: guard not a limit: save format version 8 (before the marker slots)
 constexpr uint32_t kGalacticSaveVersionNoSlots = 8;
 constexpr uint32_t kGalacticSaveVersionNoGalab = 7;
 constexpr uint32_t kGalacticSaveVersionNoNames = 6;

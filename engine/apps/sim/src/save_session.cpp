@@ -14,6 +14,7 @@ namespace alamo::sim {
 
 namespace {
 
+// limit: guard save decode: counts, refuses
 constexpr uint32_t kMaxCount = 1u << 20;  // sanity bound for counts read from a save
 
 void write_scheduler(ByteWriter& w, const commands::SchedulerConfig& c) {

@@ -26,7 +26,9 @@ namespace {
 
 constexpr uint32_t kNone = 0xFFFFFFFFu;
 constexpr size_t kNpos = static_cast<size_t>(-1);
+// limit: guard [port] cascade / TRIGGER_EVENT recursion depth
 constexpr uint32_t kMaxFireDepth = 256;  // cascade / TRIGGER_EVENT recursion guard [port]
+// limit: retail STORY §4.5 (0x140b3073c, RESET_BRANCH depth 3)
 constexpr uint32_t kMaxResetDepth = 3;   // RESET_BRANCH (0x140b3073c, Â§4.5)
 constexpr double kSpeechDoneTimeout = 60.0;
 
@@ -1554,6 +1556,7 @@ void StoryModel::hash(StateHasher& h) const {
 
 namespace {
 constexpr uint32_t kSaveVersion = 2;  // 2 (q6 t03): + Story_Dialog of a Lua-edited event (Set_Dialog); 1 still read
+// limit: guard save decode: counts / string lengths, refuses
 constexpr uint32_t kSaveMaxCount = 1u << 24;  // sanity bound for counts / string lengths
 
 void put_str(ByteWriter& w, std::string_view s) {

@@ -542,6 +542,7 @@ void ObjectScriptHost::service(GameMode& mode) {
 // INSTANCE: u8 in use, u8 fresh, u8 poolable, i32 store its LuaHost points to (stores index, -1 none on the stack),
 // u32 length + the lua::write_script_block bytes.
 namespace {
+// limit: guard save decode: counts, refuses
 [[maybe_unused]] constexpr uint32_t kMaxSavedCount = 1u << 20;
 #ifdef ALAMO_SIM_HAVE_STORY
 struct SavedInstance {

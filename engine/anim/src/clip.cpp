@@ -144,6 +144,7 @@ bool parse_clip(std::span<const uint8_t> bytes, std::string_view name, Clip& out
         c.bone_count = a.num_bones;
         const size_t nf = a.num_frames;
         const size_t vis_bytes = (nf + 7) / 8;
+        // limit: guard ALA decode: raw block element count, refuses
         constexpr size_t kMaxRawElements = size_t(64) << 20;  // guard against absurd block indexing
         c.tracks.reserve(a.bones.size());
         for (size_t i = 0; i < a.bones.size(); ++i) {

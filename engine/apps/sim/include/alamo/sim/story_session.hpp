@@ -388,6 +388,7 @@ struct StoryLoadCampaign {
 
 class StorySession {
 public:
+    // limit: guard [port] T9 drain rounds per service; the rest waits a service (Q4)
     static constexpr int kMaxRounds = 8;
 
     // `store` = the galactic mode's primary store (scripts' object handles); all references must outlive

@@ -33,7 +33,9 @@ constexpr float kVertexSpacing = 20.0f;         // world units between grid vert
 constexpr float kHeightScale = 0.048828125f;    // raw s16 height -> world units (1/20.48)
 constexpr uint32_t kPatchQuads = 31;            // quads per patch side
 constexpr uint32_t kPatchVerts = 32;            // vertices per patch side
+// limit: retail TERRAIN_WATER_POST §1.3 (mini 05 = 64); loader cap: MCX5_RE_QUESTIONS Q2
 constexpr uint32_t kMaterialSlots = 64;
+// limit: guard reader cap (vanilla max 373); retail bound: MCX5_RE_QUESTIONS Q2 (t03)
 constexpr uint32_t kMaxGridVerts = 31 * 64 + 1; // reader cap (vanilla max 373); larger -> error
 
 // Cell passability bits (CellPassabilityType, 1.5).

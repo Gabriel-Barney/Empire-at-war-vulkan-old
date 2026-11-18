@@ -451,6 +451,7 @@ constexpr FoggedLeaf kForceFogged[] = {
     {"HASGROUNDUNITSBITFIELD", 0x80, "HASGROUNDUNITSBITFIELD"},
 };
 constexpr uint32_t kFoggedBits = 0x200u | 0x80u | 0x20u | 0x10u | 0x8u;  // every M above (single bits)
+// limit: retail AI_GALACTIC_TOKENS §9.9 (0x65ac40: +0xA8 < 0x65)
 constexpr size_t kRecomputeMaxEntries = 100;                              // node +0xA8 < 0x65
 double b2d(bool b) { return b ? 1.0 : 0.0; }
 // Normalisation rule of the suffix leaves [H]: num 0 -> 0; num <= den -> num/den (>= 0); else 1.

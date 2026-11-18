@@ -63,6 +63,7 @@ struct SpawnMember {
     uint32_t type = 0;
     int32_t count = 0;
 };
+// limit: retail A2F_RE_READS §2.1 (Starting_Spawned_Units_Tech_0..5, +0xAD0)
 inline constexpr size_t kSpawnTechSlots = 6;  // Starting_Spawned_Units_Tech_0..5
 
 // Per object type facts the galactic AI needs beyond galactic::TypeInfo (index = TypeIndex).

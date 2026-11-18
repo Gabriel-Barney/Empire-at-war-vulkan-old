@@ -140,6 +140,7 @@ uint32_t SpaceOccupancy::query_static(V2 a, V2 b, float radius) const {
 // margin covers the float rounding of the per-entry tests by orders of magnitude, so a skipped entry could not pass.
 constexpr float kCullMargin = 16.0f;
 constexpr float kMinIndexCell = 256.0f;
+// limit: dynamic spatial index cells per axis; cell size grows with the extent
 constexpr int32_t kMaxIndexCells = 64;  // per axis
 
 void SpaceOccupancy::index_cells(V2 lo, V2 hi, int32_t& x0, int32_t& y0, int32_t& x1, int32_t& y1) const {

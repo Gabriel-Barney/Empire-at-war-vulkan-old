@@ -135,6 +135,7 @@ inline constexpr std::string_view kContinueTutorial = "Continue_Tutorial";
 inline constexpr double kTypewriterCharsPerSecond = 40.0;  // [port] retail's rate (0x140b15ab4) not read
 inline constexpr double kFlashSeconds = 0.5;               // §3.1
 inline constexpr int kFlashCount = 3;
+// limit: retail STORY_PRESENTATION_REWARDS §3.2 (10 slots, HUD +0x2288)
 inline constexpr size_t kArrowSlots = 10;                  // §3.2
 inline constexpr double kHintFadeSeconds = 0.5;
 

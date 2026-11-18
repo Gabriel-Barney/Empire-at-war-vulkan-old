@@ -27,7 +27,9 @@
 
 namespace alamo::commands {
 
+// limit: retail COMMANDS §1.2 (highest event type id 0x3A)
 inline constexpr uint8_t kMaxOriginalEventType = 58;
+// limit: retail COMMANDS §1.2 (6-bit type field; 63 = port extension)
 inline constexpr uint8_t kMaxEventType = 63;  // 6-bit ids; 59..62 unused, 63 = port extension
 inline constexpr uint32_t kNoObject = 0x3FFFFF;
 

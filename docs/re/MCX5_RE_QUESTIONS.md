@@ -38,6 +38,9 @@ The port's .ted reader refuses a map whose vertex grid is larger than 31 * 64 + 
 1. Does retail's terrain loader (map info chunk / height-map chunk reader) bound the grid width / height? If so, what
    value and what happens above it (refuse the map, clamp, crash)?
 2. Any other fixed per-map array in the loader that bounds the size (patch count, material slots, passability grid)?
+3. The `.ted` material slots: the port keeps 64 (`ted.hpp` `kMaterialSlots`, the map-info mini 05 count is 64 in every
+   vanilla map), drops material records past 64 and clamps material ids >= 64 to 63. Does retail's loader (0x132a30)
+   read the slot count from the file and size its table from it, or is 64 fixed?
 
 ## Q3. Game-spec tech range (t03)
 
@@ -47,3 +50,14 @@ level to 1..5.
    and are they clamped (range, literal or data)?
 2. Does any data (faction XML, GameConstants, campaign XML) set the top tech level, or is 5 a literal across the code
    (tech upgrade, `Set_Tech_Level`, the tech research path)?
+
+## Q4. Citations for limits the lint tagged retail without an address (t05)
+
+1. Tactical battle sides: the port's per-side battle statistics hold 8 sides (`tactical_battle.hpp` `kMaxSides`,
+   SKIRMISH_SETUP §1 "8 skirmish slots"). Where does retail bound the number of sides / players in a tactical battle
+   (skirmish lobby slots, map player count, the battle's player array), and is it 8?
+2. RANDOM_STORY CONSTRUCT_LEVEL retries (STORY_REWARDS_GALACTIC §1.15, 0x4bec90): the port tries 100 times
+   (`story_random_story.cpp` `kMaxTries`, "the retail retry count"). Confirm the count and its address.
+3. Story event cascades within one frame: the port drains reward-to-event chains in at most 8 rounds per story
+   service (`story_session.hpp` `kMaxRounds`) and defers the rest one service. Does retail's story service loop until
+   no event is pending (no cap), or does it have a round / depth bound?

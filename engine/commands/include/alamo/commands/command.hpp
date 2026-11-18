@@ -39,6 +39,7 @@ inline constexpr size_t kCommandHeaderBytes = 28;
 inline constexpr uint16_t kMaxPlayerSlots = 8192;  // limit: guard (13-bit wire id)
 inline constexpr uint8_t kSourceMask = 0x03;          // source byte bits 0-1: CommandSource
 inline constexpr uint8_t kPlayerHighShift = 2;        // source byte bits 2-6: player id bits 8-12
+// limit: guard command decode: payload bytes, refuses (TooLarge)
 inline constexpr uint32_t kMaxPayloadBytes = 1u << 20;  // decode guard
 
 // Who produced the order. Player goes through the scheduler (Network: the original's peer source, kept as a
@@ -180,7 +181,9 @@ EventData fleet_management_event(FleetOp op, ObjectId target, ObjectId fleet, Ob
 // PortExtension event, subtype kRenameSubtype, data = u32 object id (little-endian) + the name's UTF-8 bytes. An empty
 // name (after normalisation) clears the name: the object shows its default name again. GalacticSim::execute applies it.
 inline constexpr uint16_t kRenameSubtype = 0x524E;   // "RN"
+// limit: guard [port] fleet / ship name length (retail has no names)
 inline constexpr size_t kMaxObjectNameChars = 32;    // code points after normalisation
+// limit: guard rename wire: 32 code points are at most 128 UTF-8 bytes
 inline constexpr size_t kMaxObjectNameBytes = 128;   // wire guard (32 code points are at most 128 UTF-8 bytes)
 // The name as it is stored: leading / trailing spaces dropped, runs of spaces kept. False when `raw` is not well-formed
 // UTF-8, holds a control character (U+0000..U+001F, U+007F..U+009F), or has more than kMaxObjectNameChars code points

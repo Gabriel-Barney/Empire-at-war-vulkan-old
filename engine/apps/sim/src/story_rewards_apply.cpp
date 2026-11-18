@@ -491,6 +491,7 @@ void StorySession::write_sty1(ByteWriter& w) const {
 }
 
 bool StorySession::read_sty1(ByteReader& r, Sty1Save& out, uint32_t version) {
+    // limit: guard save decode: STY1 gate list counts, refuses
     constexpr uint32_t kMax = 1u << 20;
     uint32_t n = r.u32();
     if (n > kMax) r.fail();

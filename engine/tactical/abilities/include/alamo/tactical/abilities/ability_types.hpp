@@ -11,7 +11,9 @@ namespace alamo::tactical::abilities {
 using combat::GameMode;
 
 // Per-object arrays are indexed by type 0..0x4c (the info table has 0x4d entries; 0 and 76 unused).
+// limit: retail ABILITIES_HARDPOINTS §2.1 (info table 0x4d entries)
 inline constexpr uint32_t kAbilitySlots = 0x4d;
+// limit: retail ABILITIES_HARDPOINTS §2.1 (UnitAbilityType 0x5dea20)
 inline constexpr uint8_t kMaxAbilityType = 75;
 
 // UnitAbilityType (0x5dea20) [H]; LURE = 10 and STUN = 49 per the icon strings (2.1).
