@@ -602,6 +602,45 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
         }
         self_destruct_lines(counting);
     }
+    // Super weapon approach (MCX4_T13_RE_ANSWERS "Faction.SpeechEvent_Super_Weapon_Moving_Range_60_Seconds family"): while
+    // a TSW arms (state 3) its ETA crossing 60 / 30 / 15 / 5 s plays the highest crossed threshold once; reaching its
+    // attack distance (state 4 after 3) plays the moved-into-range line once. The local faction's speech, the _Enemy_
+    // form when the local player is hostile to the TSW owner. [M] the first service's ETA is the baseline (no line).
+    if (local_player >= 0 && local_player < static_cast<int32_t>(player_factions_.size()))
+        if (const audio::FactionAudio* lf = game_data_->find_faction(player_factions_[static_cast<size_t>(local_player)]))
+            for (const objects::ObjectId id : battle.movement().unit_ids()) {
+                const int32_t s = battle.tsw_state(id);
+                if (s < 0) continue;
+                const objects::ObjectHandle h = store.find(id);
+                if (!store.alive(h)) continue;
+                const int32_t o = store.owner(h);
+                const bool enemy = o != local_player && o >= 0 && cs.is_enemy(local_player, o);
+                TswApproach& a = tsw_approach_[static_cast<int64_t>(id)];
+                std::string_view tag;
+                if (s == 3) {
+                    const Vec3 tp = store.position(h);
+                    const float eta = battle.special_weapons().tsw_eta_seconds(static_cast<tactical::abilities::ObjectId>(id),
+                                                                               tactical::Vec3{tp.x, tp.y, tp.z});
+                    if (a.arming) {
+                        const int32_t t = tsw_threshold_crossed(a.eta, eta);
+                        const uint8_t bit = t == 60 ? 1u : t == 30 ? 2u : t == 15 ? 4u : t == 5 ? 8u : 0u;
+                        if (bit != 0 && (a.said & bit) == 0) {
+                            a.said = static_cast<uint8_t>(a.said | bit);
+                            tag = tsw_speech_tag(t, enemy);
+                        }
+                    }
+                    a.arming = true;
+                    a.eta = eta;
+                } else if (s == 4 && a.arming && !a.in_range) {
+                    a.in_range = true;
+                    tag = tsw_speech_tag(0, enemy);
+                }
+                if (!tag.empty())
+                    if (const std::string_view ev = lf->get(tag); !ev.empty()) {
+                        speech(ev);
+                        ++stats_.strike_lines;
+                    }
+            }
     // Land strikes started (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Bombard_Available family" / "GameObjectType.
     // SFXEvent_Bombard_Incoming family"): a bombing run whose owner is the local player or not hostile to it plays the
     // owner's faction crosstalk attached to the first bomber; the local player's bombardment plays the ship type's
@@ -1481,6 +1520,7 @@ void GameAudioHost::battle_reset() {
     pad_loops_.clear();          // mcx4 t13 batch P
     spun_.clear();               // mcx4 t13 batch Q
     self_destructs_.clear();
+    tsw_approach_.clear();       // mcx4 t13 batch S
     prod_built_.clear();
     intro_decided_ = false;   // aud1 t07: a new battle decides its intro again
     object_events_reset();    // aud1 t05

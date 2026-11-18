@@ -245,6 +245,11 @@ public:
     // The instant target / area abilities whose activation 0x3a3e20 plays the record's SFXEvent_Target_Ability
     // (types 19, 23..26, 28, 35, 36, 42 and SELF_DESTRUCT 39).
     static bool plays_target_ability_line(uint8_t ability_type);
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.SpeechEvent_Super_Weapon_Moving_Range_60_Seconds family", 0x42b560): the
+    // highest of 60 / 30 / 15 / 5 s that the TSW's ETA crossed between two services (prev > t >= now), 0 for none; and
+    // the local faction's speech tag for a threshold (0 = moved into range), the _Enemy_ form for an enemy TSW.
+    static int32_t tsw_threshold_crossed(float prev_eta, float eta);
+    static std::string_view tsw_speech_tag(int32_t threshold, bool enemy);
     // The faction toggle list tag for a SetUnitAbilityMode toggle (0x430270): on / off, the local player hostile to the
     // issuer -> the _Enemy_ variant.
     static std::string_view toggle_line_tag(bool on, bool local_hostile);
@@ -506,6 +511,12 @@ private:
     std::map<int64_t, std::string> pad_loops_;                // mcx4 t13 batch P: UC object -> its building loop event
     std::set<uint64_t> spun_;                                 // mcx4 t13 batch Q: spin-away deaths already voiced
     std::map<int64_t, std::string> self_destructs_;           // mcx4 t13 batch Q: counting-down unit -> its started event
+    struct TswApproach {
+        float eta = 0.0f;
+        uint8_t said = 0;   // bit 0..3: 60 / 30 / 15 / 5 s announced
+        bool arming = false, in_range = false;
+    };
+    std::map<int64_t, TswApproach> tsw_approach_;             // mcx4 t13 batch S: TSW -> approach state (lookup only)
     // mcx4 t13 batch B: the local player's tactical build orders last tick (order id -> type) and built counts (type ->
     // TacticalProduction::built_count), to tell a completed order from a cancelled one.
     std::map<uint32_t, int32_t> prod_orders_;

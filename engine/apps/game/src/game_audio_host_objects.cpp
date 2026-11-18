@@ -85,6 +85,32 @@ bool GameAudioHost::plays_target_ability_line(uint8_t a) {
     return a == 19 || (a >= 23 && a <= 26) || a == 28 || a == 35 || a == 36 || a == 42 || a == 39;
 }
 
+int32_t GameAudioHost::tsw_threshold_crossed(float prev_eta, float eta) {
+    for (const int32_t t : {60, 30, 15, 5})
+        if (prev_eta > static_cast<float>(t) && eta <= static_cast<float>(t)) return t;
+    return 0;
+}
+
+std::string_view GameAudioHost::tsw_speech_tag(int32_t threshold, bool enemy) {
+    switch (threshold) {
+        case 60:
+            if (enemy) return "SpeechEvent_Super_Weapon_Enemy_Moving_Range_60_Seconds";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Enemy_Moving_Range_60_Seconds
+            return "SpeechEvent_Super_Weapon_Moving_Range_60_Seconds";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Moving_Range_60_Seconds
+        case 30:
+            if (enemy) return "SpeechEvent_Super_Weapon_Enemy_Moving_Range_30_Seconds";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Enemy_Moving_Range_30_Seconds
+            return "SpeechEvent_Super_Weapon_Moving_Range_30_Seconds";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Moving_Range_30_Seconds
+        case 15:
+            if (enemy) return "SpeechEvent_Super_Weapon_Enemy_Moving_Range_15_Seconds";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Enemy_Moving_Range_15_Seconds
+            return "SpeechEvent_Super_Weapon_Moving_Range_15_Seconds";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Moving_Range_15_Seconds
+        case 5:
+            if (enemy) return "SpeechEvent_Super_Weapon_Enemy_Moving_Range_05_Seconds";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Enemy_Moving_Range_05_Seconds
+            return "SpeechEvent_Super_Weapon_Moving_Range_05_Seconds";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Moving_Range_05_Seconds
+        default:
+            if (enemy) return "SpeechEvent_Super_Weapon_Enemy_Moved_Into_Range";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Enemy_Moved_Into_Range
+            return "SpeechEvent_Super_Weapon_Moved_Into_Range";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Moved_Into_Range
+    }
+}
+
 std::string_view GameAudioHost::toggle_line_tag(bool on, bool local_hostile) {
     // ledger: consumes Faction.SFXEvent_GUI_Toggle_Non_Hero_Ability_On
     // ledger: consumes Faction.SFXEvent_GUI_Toggle_Non_Hero_Ability_Off

@@ -243,6 +243,12 @@ ui::HudBuildOption::Block galactic_build_block(commands::RejectReason why) {
     return B::Prerequisite;
 }
 
+int32_t movie_frame_cue(std::span<const int64_t> frames, int64_t prev, int64_t now) {
+    for (size_t i = 0; i < frames.size(); ++i)
+        if (frames[i] > prev && frames[i] <= now) return static_cast<int32_t>(i);
+    return -1;
+}
+
 std::string_view win_lose_banner_text(bool local_side_won, bool corruption_mission) {
     if (local_side_won) return corruption_mission ? "TEXT_WIN_CORRUPTION_MISSION" : "TEXT_WIN_TACTICAL";
     return corruption_mission ? "TEXT_LOSE_CORRUPTION_MISSION" : "TEXT_LOSE_TACTICAL";

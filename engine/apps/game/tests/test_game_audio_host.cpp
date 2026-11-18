@@ -383,6 +383,35 @@ void test_strike_available_tags() {
 // ledger: verifies Faction.SFXEvent_Tactical_Object_Building_Complete
 // ledger: verifies Faction.SFXEvent_Tactical_Object_Sold
 // ledger: verifies GameObjectType.SFXEvent_Sold_Tactical
+// mcx4 t13 batch S (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SpeechEvent_Super_Weapon_Moving_Range_60_Seconds family"):
+// the highest threshold crossed in a step, and the own / enemy speech tags.
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Moving_Range_60_Seconds
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Moving_Range_30_Seconds
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Moving_Range_15_Seconds
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Moving_Range_05_Seconds
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Enemy_Moving_Range_60_Seconds
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Enemy_Moving_Range_30_Seconds
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Enemy_Moving_Range_15_Seconds
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Enemy_Moving_Range_05_Seconds
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Moved_Into_Range
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Enemy_Moved_Into_Range
+void test_tsw_approach() {
+    using H = GameAudioHost;
+    CHECK(H::tsw_threshold_crossed(61.0f, 59.0f) == 60 && H::tsw_threshold_crossed(31.0f, 29.5f) == 30);
+    CHECK(H::tsw_threshold_crossed(70.0f, 10.0f) == 60);  // several in one step: the highest
+    CHECK(H::tsw_threshold_crossed(5.5f, 4.0f) == 5 && H::tsw_threshold_crossed(59.0f, 40.0f) == 0);
+    CHECK(H::tsw_speech_tag(60, false) == "SpeechEvent_Super_Weapon_Moving_Range_60_Seconds");
+    CHECK(H::tsw_speech_tag(30, false) == "SpeechEvent_Super_Weapon_Moving_Range_30_Seconds");
+    CHECK(H::tsw_speech_tag(15, false) == "SpeechEvent_Super_Weapon_Moving_Range_15_Seconds");
+    CHECK(H::tsw_speech_tag(5, false) == "SpeechEvent_Super_Weapon_Moving_Range_05_Seconds");
+    CHECK(H::tsw_speech_tag(60, true) == "SpeechEvent_Super_Weapon_Enemy_Moving_Range_60_Seconds");
+    CHECK(H::tsw_speech_tag(30, true) == "SpeechEvent_Super_Weapon_Enemy_Moving_Range_30_Seconds");
+    CHECK(H::tsw_speech_tag(15, true) == "SpeechEvent_Super_Weapon_Enemy_Moving_Range_15_Seconds");
+    CHECK(H::tsw_speech_tag(5, true) == "SpeechEvent_Super_Weapon_Enemy_Moving_Range_05_Seconds");
+    CHECK(H::tsw_speech_tag(0, false) == "SpeechEvent_Super_Weapon_Moved_Into_Range");
+    CHECK(H::tsw_speech_tag(0, true) == "SpeechEvent_Super_Weapon_Enemy_Moved_Into_Range");
+}
+
 void test_pad_lines() {
     using H = GameAudioHost;
     const H::PadLines s = H::pad_lines(H::PadLine::Started, true);
@@ -1095,6 +1124,7 @@ int main() {
     test_strike_available_tags();       // mcx4 t13 batch M
     test_land_damage_stage();           // mcx4 t13 batch O
     test_pad_lines();                   // mcx4 t13 batch P
+    test_tsw_approach();                // mcx4 t13 batch S
     test_intro_speech_t07();
     test_aud2();
     test_spin_and_self_destruct();  // mcx4 t13 batch Q

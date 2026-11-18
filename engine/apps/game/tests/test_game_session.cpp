@@ -878,6 +878,17 @@ void skirmish_win_condition_test() {
 // mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "GameObjectType.MP_Encyclopedia_Text"): skirmish battles use the MP text
 // when the type has one.
 // ledger: verifies GameObjectType.MP_Encyclopedia_Text
+// mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "Movie.SFXEvent_Frame family"): Movie SFXEvent_Frame / SpeechEvent_Frame cues
+// fire on the step whose frame range (prev, now] holds them, the first in list order only.
+// ledger: verifies Movie.SFXEvent_Frame
+// ledger: verifies Movie.SpeechEvent_Frame
+void movie_frame_cue_test() {
+    const std::vector<int64_t> frames = {60, 30, 60, 90};
+    CHECK(game::movie_frame_cue(frames, 59, 60) == 0);  // two cues on frame 60: the first in list order
+    CHECK(game::movie_frame_cue(frames, 29, 30) == 1 && game::movie_frame_cue(frames, 60, 61) == -1);
+    CHECK(game::movie_frame_cue(frames, 0, 1) == -1 && game::movie_frame_cue(frames, 89, 95) == 3);
+}
+
 void win_lose_banner_text_test() {  // mcx4 t14: docs/re/MCX4_T14_RE_ANSWERS.md "GameConstants.Win_Lose_Message_Font"
     CHECK(game::win_lose_banner_text(true, false) == "TEXT_WIN_TACTICAL" && game::win_lose_banner_text(false, false) == "TEXT_LOSE_TACTICAL");
     CHECK(game::win_lose_banner_text(true, true) == "TEXT_WIN_CORRUPTION_MISSION");
@@ -2988,6 +2999,7 @@ int main() {
     galactic_build_listed_test();   // mcx4 t14
     encyclopedia_text_tag_test();   // mcx4 t14
     win_lose_banner_text_test();    // mcx4 t14
+    movie_frame_cue_test();         // mcx4 t13
     story_ui_test();
     linked_overlay_test();
     story_script_test();

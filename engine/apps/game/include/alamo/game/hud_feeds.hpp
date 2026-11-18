@@ -142,6 +142,10 @@ std::string_view encyclopedia_text_tag(bool skirmish_battle, bool has_mp_text);
 // local player is the winner or not hostile to it -> TEXT_WIN_TACTICAL, else TEXT_LOSE_TACTICAL; in a corruption
 // mission the _CORRUPTION_MISSION texts.
 std::string_view win_lose_banner_text(bool local_side_won, bool corruption_mission);
+// mcx4 t13 (MCX4_T13_RE_ANSWERS "Movie.SFXEvent_Frame family", Bink tick 0x44dea0 [H]): the movie cue list entry that
+// fires in a step from Bink frame `prev` to `now`: the first entry in XML order whose frame lies in (prev, now], -1 when
+// none (one cue per list per step).
+int32_t movie_frame_cue(std::span<const int64_t> frames, int64_t prev, int64_t now);
 // `icon(type)` = the type's Icon_Name.
 std::vector<ui::GalacticBuildOption> galactic_build_options(const galactic::GalacticSim& g, int32_t player, PlanetIndex planet,
                                                             const std::function<std::string(uint32_t type)>& icon);
