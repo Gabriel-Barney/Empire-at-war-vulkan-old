@@ -40,3 +40,13 @@ object, player, planet or manager field), what it refuses (missing params, unkno
     `_LOADED[name]` before or after the chunk runs (stock 5.0.2 sets it after a successful run)?
 13. Skirmish GameScoring: which player / world object the skirmish scoring script gets (GAME_SCORING.md), and when the
     engine raises `Player_Quit_Event` (callers 0x499420 / 0x4994c0, roles [M]).
+
+## Part C: battle composition (answer into docs/re/STORY.md, the WIN/LOSE_BATTLES row and a note below the table)
+
+14. WIN_BATTLES / LOSE_BATTLES (0x13 / 0x14, match 0x455a50 / 0x466f40) test Param3 (FRIENDLY / ENEMY (_ONLY) _CONTAINS
+    + CLASS_* list) against a composition the dispatch carries. After an **auto-resolved** battle (no tactical battle),
+    what composition does the dispatch carry: the forces of each side as they were before the auto-resolve (from the
+    conflict record), the survivors, or none (so a Param3 test never matches)? Name the dispatch site(s) and the list
+    they pass. The port passes empty sides after auto-resolve (engine/apps/sim/src/story_session.cpp, BattleWon /
+    BattleLost case). Also: for the Enter family (ENTER, LAND_ON, ...), what Param5 and Param7 mean (STORY.md marks
+    them [L]).
