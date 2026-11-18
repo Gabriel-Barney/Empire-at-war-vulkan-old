@@ -11,6 +11,7 @@
 #include <array>
 
 #include "alamo/core/dmath.hpp"
+#include "alamo/tactical/abilities/x86_int.hpp"
 #include "alamo/tactical/abilities/ability_system.hpp"
 #include "alamo/tactical/category_reduce.hpp"
 
@@ -1085,7 +1086,7 @@ void AbilitySystem::lure_service(Obj& o, uint32_t frame) {
     if (!r || frame < o.lure_next) return;
     if (o.lure_pulses < r->max_pulses) {
         o.lure_pulses += 1;
-        const auto step = static_cast<int32_t>(static_cast<float>(cfg_.fps) * r->pulse_frequency_secs);  // truncation
+        const auto step = trunc_i32(static_cast<float>(cfg_.fps) * r->pulse_frequency_secs);  // truncation
         o.lure_next = frame + static_cast<uint32_t>(std::max(0, step));
         lure_pulse(o, *r, frame);
     } else {
@@ -1383,7 +1384,7 @@ void AbilitySystem::confuse(Obj& v, float secs, uint32_t frame) {
     const float y = draw_float(cy - hy, cy + hy);
     const Vec3 p{x, y, position(v).z};
     v.confused = 1;
-    v.confuse_end = frame + static_cast<uint32_t>(static_cast<int32_t>(static_cast<float>(cfg_.fps) * secs));
+    v.confuse_end = frame + static_cast<uint32_t>(trunc_i32(static_cast<float>(cfg_.fps) * secs));
     // The move first, then the lock of the unit and its TEAM container (A1_READINGS §28.9): the locked unit keeps this
     // move; new orders are refused until the expiry releases it.
     if (v.container != kNoObject) {

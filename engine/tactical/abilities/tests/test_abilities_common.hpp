@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <functional>
 #include <map>
 #include <memory>
@@ -25,6 +26,7 @@
 
 #include "alamo/core/bytes.hpp"
 #include "alamo/core/dmath.hpp"
+#include "alamo/tactical/abilities/x86_int.hpp"
 #include "alamo/core/hash.hpp"
 #include "alamo/core/log.hpp"
 #include "alamo/core/sim_crc.hpp"
@@ -126,6 +128,7 @@ UnitAbilityRecord rec(uint8_t type, float exp, float rech);
 uint32_t add_special(AbilityData& ad, SpecialAbilityDesc s);
 void test_info_table();
 void test_countdown();
+void test_x86_timers();
 void test_parse();
 
 // ================================================================================================
@@ -338,7 +341,8 @@ void test_opportunity_fire();
 struct SpecialWorld : World {
     uint32_t sd = 0, corvette = 0, frigate = 0, ywing = 0, ysq = 0, xwing = 0, jammer = 0, ld = 0, rb = 0;
     uint32_t tractor_sp = 0, ion_sp = 0, lucky_sp = 0, cf_sp = 0, ew_sp = 0, st_sp = 0, jam_sp = 0, ld_sp = 0, rb_sp = 0;
-    SpecialWorld() {
+    // ld_secs: the laser defense special's Defense_Duration_In_Secs (mcx7: Age of Legends uses 99999999999 for "forever").
+    explicit SpecialWorld(float ld_secs = 10.0f) {
         ProjectileDesc laser;
         laser.name = "Laser";
         laser.max_speed = 60.0f;
@@ -415,7 +419,7 @@ struct SpecialWorld : World {
         s.style = ActivationStyle::UserInput;
         s.name = "LaserDef";
         s.cls = SpecialClass::LaserDefense;
-        s.defense_duration = 10.0f;
+        s.defense_duration = ld_secs;
         s.protection_radius = 400.0f;
         s.zap_recharge = 0.25f;
         s.dist_travelled = 40.0f;

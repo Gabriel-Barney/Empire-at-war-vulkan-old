@@ -20,6 +20,7 @@
 #include <cmath>
 
 #include "alamo/core/dmath.hpp"
+#include "alamo/tactical/abilities/x86_int.hpp"
 #include "alamo/tactical/abilities/ability_system.hpp"
 
 namespace alamo::tactical::abilities {
@@ -48,7 +49,7 @@ constexpr int32_t kAnimFtkAttack = 0x21, kAnimFtkRelease = 0x23;  // Telekinesis
 constexpr int32_t kAnimFbAttack = 0x25, kAnimFbRelease = 0x27;    // Earthquake
 constexpr int32_t kAnimFlAttack = 0x28;                           // Force_Lightning (Force_Sight's: ability_system.cpp)
 
-int32_t frames_of(float secs, uint32_t fps) { return static_cast<int32_t>(static_cast<float>(fps) * secs); }
+int32_t frames_of(float secs, uint32_t fps) { return trunc_i32(static_cast<float>(fps) * secs); }
 
 // cu8f t06 (CU8F_T04_T06_RE §3.4): 0x20acd0 - the yaw of an XY direction in degrees, [0, 360); 0 when it is null.
 float yaw_deg_of(float dx, float dy) {
@@ -790,7 +791,7 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             const float e = r ? r->expiration_seconds : 0.0f;
             float f = 1.0f + player_reduce(o.owner, static_cast<uint8_t>(PlayerList::StealthDuration));
             if (f <= 0.0f) f = 1.0f;
-            o.stealth_frames = static_cast<int32_t>(static_cast<float>(fps) * f * e);
+            o.stealth_frames = trunc_i32(static_cast<float>(fps) * f * e);
             o.stealthed = 1;
             o.last_detected = 0;
             if (o.combat_unit) combat_->clear_targets(o.id);
@@ -1520,7 +1521,7 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
                 sp.applied = 0;
                 return;
             }
-            o.stealth_frames -= 1;
+            o.stealth_frames = dec_wrap(o.stealth_frames);
             if (o.stealth_frames <= 0) {
                 remove_special(o, sp, frame);
                 return;
@@ -1846,7 +1847,7 @@ void AbilitySystem::heal_pass(Obj& o, const SpecialAbilityDesc& s, uint32_t fram
     if (!o.combat_unit || o.dead) return;
     if (combat_->flags(o.id) & combat::kUnitGarrisoned) return;
     if (frame < o.heal_due) return;
-    o.heal_due = frame + static_cast<uint32_t>(static_cast<int32_t>(static_cast<float>(cfg_.fps) * s.heal_interval + 0.5f));
+    o.heal_due = frame + static_cast<uint32_t>(trunc_i32(static_cast<float>(cfg_.fps) * s.heal_interval + 0.5f));
     const bool heal = s.heal_amount > 0.0f || s.heal_percent > 0.0f;
     const bool harm = s.heal_amount < 0.0f && s.heal_percent <= 0.0f;
     if (!heal && !harm) return;

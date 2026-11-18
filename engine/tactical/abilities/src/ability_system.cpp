@@ -1,4 +1,5 @@
 #include "alamo/tactical/abilities/ability_system.hpp"
+#include "alamo/tactical/abilities/x86_int.hpp"
 
 #include <algorithm>
 
@@ -1123,7 +1124,7 @@ bool AbilitySystem::apply(Obj& o, SpecialState& sp, ObjectId target, int32_t hp,
             // its only writer, §2.3.11)
             float f = 1.0f + player_reduce(o.owner, static_cast<uint8_t>(PlayerList::StealthDuration));
             if (f <= 0.0f) f = 1.0f;
-            o.stealth_frames = static_cast<int32_t>(static_cast<float>(cfg_.fps) * f * e);
+            o.stealth_frames = trunc_i32(static_cast<float>(cfg_.fps) * f * e);
             o.stealthed = 1;
             o.last_detected = 0;
             combat_->clear_targets(o.id);
@@ -1135,8 +1136,8 @@ bool AbilitySystem::apply(Obj& o, SpecialState& sp, ObjectId target, int32_t hp,
         }
         case SpecialClass::SensorJamming: {  // 0x719000 [H]
             const UnitAbilityRecord* r63 = own_record(o, kSensorJamming);
-            sp.frames = r63 ? static_cast<int32_t>(static_cast<float>(cfg_.fps) * r63->expiration_seconds)
-                            : static_cast<int32_t>(static_cast<float>(cfg_.fps) * s.duration_secs);
+            sp.frames = r63 ? trunc_i32(static_cast<float>(cfg_.fps) * r63->expiration_seconds)
+                            : trunc_i32(static_cast<float>(cfg_.fps) * s.duration_secs);
             sp.applied = 1;
             sp.target = o.id;
             if (o.combat_unit) combat_->add_emitter_entry(o.id);  // OI abilities: Add_Emitter on every apply (§1.7)
@@ -1146,7 +1147,7 @@ bool AbilitySystem::apply(Obj& o, SpecialState& sp, ObjectId target, int32_t hp,
         }
         case SpecialClass::LaserDefense: {  // 0x7161b0 [H]
             start_recharge(o, kLaserDefense);  // "recharge bookkeeping" [M]
-            sp.frames = static_cast<int32_t>(static_cast<float>(cfg_.fps) * s.defense_duration);
+            sp.frames = trunc_i32(static_cast<float>(cfg_.fps) * s.defense_duration);
             sp.cooldown = 0;
             sp.applied = 1;
             sp.target = o.id;
@@ -1169,7 +1170,7 @@ bool AbilitySystem::apply(Obj& o, SpecialState& sp, ObjectId target, int32_t hp,
             // stop-and-hold 0x3a9880 (MOVEMENT §4.7.2): one ctor draw.
             stop_order(o.id, frame, kStopHold);
             play_anim(o, kAnimRevealBegin, {}, kDrawVariant, false, 1.0f, kAnimHoldLoop, frame);  // §4.14: Begin, then the Loop
-            sp.frames = static_cast<int32_t>(static_cast<float>(cfg_.fps) * s.force_sight_duration);
+            sp.frames = trunc_i32(static_cast<float>(cfg_.fps) * s.force_sight_duration);
             sp.applied = 1;
             sp.target = o.id;
             sp.player = o.owner;
@@ -1332,7 +1333,7 @@ void AbilitySystem::update_special(Obj& o, SpecialState& sp, uint32_t frame) {
                 sp.applied = 0;
                 return;
             }
-            o.stealth_frames -= 1;
+            o.stealth_frames = dec_wrap(o.stealth_frames);
             if (o.stealth_frames <= 0) {
                 remove_special(o, sp, frame);
                 return;
@@ -1349,7 +1350,7 @@ void AbilitySystem::update_special(Obj& o, SpecialState& sp, uint32_t frame) {
             float r = combat_->data().units[combat_->desc_index(o.id)].passive_missile_shield_radius;
             if (const UnitAbilityRecord* r63 = own_record(o, kSensorJamming)) r = r63->effective_radius;
             if (o.combat_unit) combat_->apply_jamming(o.owner, position(o), r, frame);
-            sp.frames -= 1;
+            sp.frames = dec_wrap(sp.frames);
             if (sp.frames <= 0) remove_special(o, sp, frame);
             return;
         }
@@ -1369,16 +1370,16 @@ void AbilitySystem::update_special(Obj& o, SpecialState& sp, uint32_t frame) {
                     event(AbilityEventKind::Zap, kLaserDefense, o.id, v.shooter, frame);
                     break;
                 }
-                sp.cooldown = static_cast<int32_t>(static_cast<float>(cfg_.fps) * s.zap_recharge);
+                sp.cooldown = trunc_i32(static_cast<float>(cfg_.fps) * s.zap_recharge);
             } else {
-                sp.cooldown -= 1;
+                sp.cooldown = dec_wrap(sp.cooldown);
             }
-            sp.frames -= 1;
+            sp.frames = dec_wrap(sp.frames);
             if (sp.frames <= 0) remove_special(o, sp, frame);
             return;
         }
         case SpecialClass::ForceSight:  // fog follow-up: channelling countdown
-            sp.frames -= 1;
+            sp.frames = dec_wrap(sp.frames);
             if (sp.frames <= 0) remove_special(o, sp, frame);
             return;
         default: class_update(o, sp, frame); return;  // OI abilities
@@ -1450,7 +1451,7 @@ void AbilitySystem::apply_automatic(Obj& o, uint32_t frame) {
 
 bool AbilitySystem::stealthed_now(const Obj& o, uint32_t frame) const {
     if (!o.stealthed) return false;
-    const auto d = static_cast<uint32_t>(static_cast<int32_t>(static_cast<float>(cfg_.fps) * cfg_.stealth_detection_time));
+    const auto d = static_cast<uint32_t>(trunc_i32(static_cast<float>(cfg_.fps) * cfg_.stealth_detection_time));
     return o.last_detected + d < frame;
 }
 

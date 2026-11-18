@@ -1,11 +1,12 @@
 #include "alamo/tactical/abilities/countdown.hpp"
+#include "alamo/tactical/abilities/x86_int.hpp"
 
 #include "alamo/core/sim_crc.hpp"
 
 namespace alamo::tactical::abilities {
 
 void Countdown::set_duration(uint32_t t, float seconds, uint32_t fps) {
-    const auto frames = static_cast<int32_t>(static_cast<float>(fps) * seconds);
+    const auto frames = trunc_i32(static_cast<float>(fps) * seconds);
     counter[t] = frames;
     maximum[t] = frames;
 }

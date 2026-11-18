@@ -24,6 +24,7 @@ int main(int argc, char** argv) {
     }
     test_info_table();
     test_countdown();
+    test_x86_timers();
     test_parse();
     test_modes();
     test_gates();
