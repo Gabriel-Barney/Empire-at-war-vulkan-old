@@ -100,8 +100,8 @@ A generic by-name field read through the descriptor table (none is known) would 
 
 ## 9. `Respawn_Whole_Team_When_Killed` (Q5.3, partial) [M, ref]
 Reader: the hero-respawn scheduler 0x48eb10 (P4 6.2; port `GalacticSim::schedule_hero_respawn`), never in a skirmish
-(0x28afb0). For a dying object D (type +0x2008 set: a team whose other members of D's owner must not outnumber the
-live ones; else `Is_Named_Hero` +0x13 required) whose parent (obj +0x2b0) is a squadron or a transport:
+(0x28afb0). For a dying object D (type +0x2008 set, which is the resolved `Respawn_Tied_To_Structure` (MCX4_T10_RE_ANSWERS
+§8; corrected 2026-11-18): the structure count test there; else `Is_Named_Hero` +0x13 required) whose parent (obj +0x2b0) is a squadron or a transport:
 - with `Respawn_Whole_Team_When_Killed` (type +0x16): every other active member of the squadron (flags +0x3a0 & 0x42
   clear), or every object in the transport and then the transport itself, is killed with 0x391310(·, 1); the respawn
   then proceeds;
@@ -171,7 +171,7 @@ Slot bytes: obj +0x332 + behaviour id, −1 = absent (A2M_T04 §0): +0x336 FLEET
 0x140a2b990), not FLEET.
 
 **Order inside 0x48eb10(D, planet, time, skip):**
-1. Nothing in a skirmish; the type +0x2008 count test (§9).
+1. Nothing in a skirmish; the type +0x2008 test (§9: `Respawn_Tied_To_Structure`, MCX4_T10_RE_ANSWERS §8).
 2. Respawn type: a type with +0x2a (company member, AI_GALACTIC_3) schedules the first type of the global type list
    whose `Company_Units` (+0x958, count +0x960) holds D's type; a type with +0x29 (squadron member) the first whose
    `Squadron_Units` (+0x978, count +0x980) holds it; otherwise 0x396380(D). So Droid_R2D2 / Droid_C3P0 respawn as their
