@@ -704,7 +704,7 @@ On the parent GOM, for the head record:
 
 - If GMM+0x1f4 ≠ −1 (a super-weapon result pending [L]): planet-destroyed / weapon-fired story events
   (0x326f20 / 0x326f50) and the special planet update 0x3f6810, then skip the rest.
-- **Land** (kind 1): 0x2b5360, 0x2b3e90 (release the conflict) [M]; if R ≠ −1 (and not "local player
+- **Land** (kind 1): 0x2b5360, 0x2b3e90 (the surface company re-optimiser: merge / refill / disband, `MCX4_T11_T12_RE_ANSWERS.md` C4 Round 4 [H]); if R ≠ −1 (and not "local player
   with GOM+0x61c set"), **0x2ba850 retreats R's ground units**: every surface unit of R (planet data
   +0xe0 list) is loaded into a new fleet (0x29e740), logged `%s: Retreating %s from surface.`, the fleet
   enters orbit (0x4338d0 with slot −2) and is ordered to move (MoveObjectToObjectEvent) to the first

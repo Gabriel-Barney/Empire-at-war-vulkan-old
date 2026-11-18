@@ -204,6 +204,95 @@ Issue_Auto_Target 0x38d730; the copy 0x472560 copies both.
   +0x47c / +0x480 (the test that blocks the next manual assignment) was not traced [L]. Other +0x54 reads through a
   +0x20 pointer (0x1d3320, 0x49a1d0, 0x7ba280, 0x7c30c0) are other classes [M].
 
+**Round 4: manual hardpoint targeting (lane mcx4-tac2, 2026-11-18; decompile export, retail disassembly with
+llvm-objdump; ReVa was not exposed to this session) [H unless tagged].** Questions: `MCX4_TAC2_ROUND4_RE_QUESTIONS.md`
+1-5. Behaviour slots on the object: SPECIAL_WEAPON 0x2f (+0x361), LOBBING_SUPERWEAPON 0x37 (+0x369), DUMMY_STAR_BASE
+0x5c (+0x38e).
+1. **The two callers of the setter 0x3822e0.**
+   - **0x40a3b0 is the Execute slot of `SpecialWeaponFireEventClass`** (vtable 0x1408697d0, ctor 0x40a130, event
+     type 0x19 = network command 25 `SpecialWeaponFire`, COMMANDS.md). Its fields (builder 0x40a650): firing object
+     id +0x48, target object id +0x4c (0x3fffff = none), player id +0x50 (−1 at build becomes the object's owner),
+     position +0x54..+0x5c, "at position" byte +0x60.
+   - Branch on the firing object's slots. **The station branch is taken when the object has DUMMY_STAR_BASE and no
+     LOBBING_SUPERWEAPON** (SPECIAL_WEAPON present or not). Every branch except "lobbing only" first needs the event's
+     player to exist in the mode (vf +0x220) and to pass `SpecialWeaponsAllowed` 0x527620 (SCRIPT_GAPS §1.1).
+   - Station branch: hp = the object's first hardpoint whose type has `Requires_Manual_Target_Assignment` (0x394e60).
+     It needs hp and a target object; a position alone does nothing. Then 0x3822e0(hp, target, event player).
+     There is no readiness test on this branch (the special-weapon branch needs pack readiness ≥ 0.99). Every branch
+     ends with the destroy-after sweep (behaviour 0x67) for the firing object's owner.
+   - **Who queues the event:** the tactical cursor-action switch 0x41f70 (HUD_GAPS; P1_DOUBLE_CLICK_MOVE §1.4),
+     cursor actions 0xc and 0xd.
+     1. First it tries the selected units whose special-weapon pack is armed (pack +0x28).
+     2. If none fired and the mode is space, and the local player's faction has `Benefits_From_Corruption` (faction
+        +0x10b, the Underworld): it takes the first DUMMY_STAR_BASE object that 0x39a2c0 matches to the local player
+        (relation-table entry 0 [M: own or allied]) and that object's manual hardpoint.
+     3. The hardpoint must be alive (not destroyable and dead), not disabled (+0x6e) and **armed** (hp +0xd0; 0x385ac0
+        returns it only for a manual-flag hardpoint).
+     4. Then it queues the event (station, clicked object, local player id), plays a HUD sound and disarms the
+        hardpoint (+0xd0 := 0, 0x387d20).
+   - **Arming and the cursor.**
+     - The HUD functions 0x31f760 (from 0x346a80, space only) and 0x2e0570 (from 0x346ea0, button id 0x2f) set
+       hp +0xd0 := 1. They do this for a station object that has neither SPECIAL_WEAPON nor LOBBING_SUPERWEAPON.
+       0x36da0 clears it again (cancel).
+     - The cursor-action resolver 0x2ad280 returns 0xc over an object when the armed hardpoint has no pending manual
+       target (+0xc0 empty), its own recharge readiness 0x385c00 is ≥ 1, and the can-fire test 0x386220 passes.
+       0x386220 is the setter's acceptance tests without the flag and empty-slot checks. Otherwise it returns 0xf
+       [M: the "cannot fire" cursor].
+     - 0x35f7b0 reports whether the local player's station is armed.
+   - **0x576220 is Lua `GameObjectWrapper.Fire_Special_Weapon(target, player)`** (SCRIPT_GAPS §1.1 item 5). Its
+     station branch needs readiness 0x385c00 ≥ 1, `SpecialWeaponsAllowed` and 0x386220, then calls 0x3822e0 with the
+     Lua player's id.
+2. **No manual target, no shot.**
+   - `Update_Weapon` 0x387400 on a manual-flag hardpoint: after the common early returns and the cooldown count-down,
+     it **returns when +0xc0 is empty**. So there is no `Fire_At` on +0x40 and no opportunity fire.
+   - The weapon-state gate 0x384850 is called with +0xc0 as the target, not +0x40.
+   - After its shot attempts, a manual-flag hardpoint returns before the opportunity step, so **opportunity fire
+     (§2.6) never applies to it**.
+   - +0x40 *is* set on it. None of the `HP_Set_Target` (0x387b70) callers tests the flag (0x38d730, 0x633ae0,
+     0x634810, 0x406370), and neither does 0x387b70 itself. `Fire_At` 0x3825b0 has no manual-flag test either.
+3. **With a manual target.**
+   - Once the gate passes, the same update runs the ordinary +0x40 branch first. When +0x40 is set and its usual
+     tests allow it (the idle-opportunity rule 0x385620, which is true for the vanilla cannon:
+     `Allow_Opportunity_Fire_When_Idle` defaults to true), it calls `Fire_At(+0x40, +0x48)`. Then it calls
+     `Fire_At(+0xc0, no hardpoint)`.
+   - When that +0x40 branch returns early (TARGETING lock clear and the formation's attack target is not +0x40; or
+     the owner +0xf0 → +0x148 test), the whole update returns and the manual shot is skipped for that frame too [M:
+     field names].
+   - So the hardpoint can also shoot the station's ordinary target, but only while it holds a manual target, and in
+     the same frame [M: in play only a +0x40 near the manual target's bearing gets through. The turret aims at +0xc0
+     only (TACTICAL_COMBAT turret slew), and `Fire_At`'s turret pre-check needs the target inside `Fire_Cone_Width`
+     of the turret's X axis].
+   - **+0xc0 is cleared in three ways:**
+     1. a manual `Fire_At` that returns true releases it at once: one assignment gives one shot (one pulse burst);
+     2. the hardpoint's signal handler 0x386a90 on signal 0x28 from the target (object removed [M]). Signal 1
+        (replacement) moves +0x40 / +0x50 to the replacement, but not +0xc0;
+     3. while the gate refuses (dead or death-clone target, mode bytes, deploy state) and **now > +0xcc + 300**,
+        counted from the assignment frame: it releases +0xc0, sets +0xc8 := −1 and +0xcc := 0, and plays the HUD sound
+        0x140b301c8 when +0xc8 is the local player.
+   - While the gate passes but `Fire_At` fails (range, cone, turret still turning, fog), the target is kept with no
+     time limit. This corrects TACTICAL_COMBAT `Update_Weapon` step 3, which says "300 frames after the weapon state
+     stops allowing fire".
+   - **The setter 0x3822e0 refuses while +0xc0 holds a target** (its first test). So a hardpoint has at most one
+     pending manual target, and a new assignment waits for one of the three cases above.
+4. **Cooldown readers (confirms §18).**
+   - The only reader of player +0x47c / +0x480 is 0x2814e0, called from the HUD 0x317d00. The HUD greys the station
+     weapon button while the fraction is < 1.
+   - No sim path reads them: not 0x3822e0, 0x40a3b0, 0x576220, the cursor switch 0x41f70, the resolver 0x2ad280,
+     nor the arming functions 0x31f760 / 0x2e0570. So nothing in the sim refuses a manual assignment during the
+     cooldown. Only the HUD does [M: that a greyed button cannot be clicked; the GUI dispatch was not read].
+   - `Fire_At` stamps the cooldown only on its full-recharge branch (pulses left 0), for the player at +0xc8. A shot at
+     +0x40 that comes first in the frame stamps it too.
+5. **AI.**
+   - No C++ AI code calls 0x3822e0; its only callers are the two above. The AI reaches it through Lua.
+   - `BusyTacticalFreeStore.lua` is the `SpaceFreeStoreScript` of every FoC AI player (AI_PLAYER_UNDERWORLD,
+     AI_PLAYER_UNDERWORLDSTORYOPPONENT, BASICEMPIREPLAYER, BASICREBELPLAYER, PLAYER_NONE). On each free-store pass it
+     takes `PlayerObject.Get_Space_Station()` and orders `space_station.Attack_Target(FindDeadlyEnemy(station))`.
+     For a target found with perception `Needs_Hypervelocity_Shot` ("Enemy_Unit", within 1500 of the station) it
+     calls `space_station.Fire_Special_Weapon(target, PlayerObject)`.
+   - So an AI Underworld L3 station assigns its cannon a manual target whenever the cannon's own recharge is ready
+     and 0x386220 passes. The 120 s player cooldown does not stop it (point 4) [H for the script and the exe path; M:
+     the pass rate, ServiceRate 20 in the script].
+
 ### 6a. Addendum (lane mcx4-tac2, 2026-11-18, REA decompile) [H]
 - The fighter locomotor vf6 0x5cb830 dispatches state 0x1B to 0x5ce010, 0x1C to 0x5cd8e0, **0x1D and 0x1E both to
   0x5cc220** (Directed_Combat), 0x1F to 0x5cbea0.

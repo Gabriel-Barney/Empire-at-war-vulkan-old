@@ -911,8 +911,8 @@ must not refuse an AI `Attack_Move` whose goal is neutral-owned; the move goes t
 1. Return early when weapons are globally disabled, the hardpoint is disabled (+0x6e) or destroyed, or an owner
    state gate applies (deploy transition; after the cooldown, `Does_Weapon_State_Allow_Firing_At` `0x384850`: §3.1.1).
 2. Subtract the elapsed frames from the cooldown. Return while it is still above 0.
-3. A manual-target hardpoint drops its manual target (+0xc0) 300 frames after the weapon state stops allowing
-   fire [M].
+3. A manual-target hardpoint drops its manual target (+0xc0) when the weapon state refuses more than 300 frames
+   after the assignment (+0xcc); with no manual target it returns here (`MCX4_T10_RE_ANSWERS.md` §10 Round 4 [H]).
 4. Try `Fire_At` the primary target (+0x40) with its target hardpoint (+0x48).
 5. If that did not fire, try opportunity fire (§2.6).
 

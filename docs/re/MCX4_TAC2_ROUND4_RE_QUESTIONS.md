@@ -37,3 +37,34 @@ Answers go into the named section of `MCX4_T11_T12_RE_ANSWERS.md` as a "Round 4"
    starts the formation's own path (all members arrived, a timeout), and is there a frame limit?
 10. **`GameObjectType.Max_Distance_From_Spawner`** (INDIGENOUS_UNIT wander 0x621d80, §B2): the bounds of the last
     random draw marked [M] there.
+
+**Answered 2026-11-18 (decompile export, REA was unusable and ReVa was not exposed to this session: retail disassembly
+with `toolchain\llvm\bin\llvm-objdump.exe` and a PE reader stood in), each in the "Round 4" paragraph of the named
+section.**
+1. 0x40a3b0 is `SpecialWeaponFireEventClass` Execute (command 25), queued by the cursor-action switch 0x41f70 for an
+   armed Underworld station; its station branch needs DUMMY_STAR_BASE without LOBBING_SUPERWEAPON. 0x576220 is Lua
+   `Fire_Special_Weapon` [H].
+2. Never without a manual target: `Update_Weapon` returns when +0xc0 is empty, and opportunity fire never applies.
+   +0x40 is still set by the normal targeting [H].
+3. It fires at +0xc0, and also tries +0x40 first in the same update. +0xc0 is cleared by the shot, by the target's
+   removal (signal 0x28), or 300 frames after the assignment while the gate refuses. The setter refuses while +0xc0 is
+   held [H].
+4. Only the HUD reads the player cooldown. No sim path refuses an assignment during it [H; M for the greyed button].
+5. Yes, through Lua: `BusyTacticalFreeStore.lua` fires every AI player's station weapon, which the cooldown does not
+   stop [H; M for the pass rate].
+6. 0x370e60 is the type's AI combat power. Harass goes to the strongest enemy's range edge on its map-centre side.
+   Avoid side-steps at 45° away from the enemy and resumes its old destination. Both run every 30 frames while the
+   unit stands. Four types list HARASS (one with a range); none lists AVOID_DANGER [H; M where tagged].
+7. The re-optimiser runs after a land battle or a land invasion, on the conflict planet's surface carriers. Partial
+   homogeneous companies merge, refill at ≥ 50 % (`Transport_Refill_Threshold`) and are disbanded below. The field
+   takes its type out and makes m units of it again [H; M where tagged].
+8. 0x5672b0 = slot 43 in max range, 0x568340 = slot 45 inside min range. 0x5d4730 re-issues timed position moves to
+   the attack slots for the one-ship formations [H tests; M re-plan details].
+9. With the constant false, each member's formation path is started by formation state 1 once its own lead-in path is
+   done. There is no wait for the others and no form-up frame limit [H; M for the path pop].
+10. The last draw is `Get_Float(50, 400)`, or (60, 150) while burning; the leash draw uses √(D² − dx²) [H].
+
+Spec lines these answers contradict (not edited here): TACTICAL_COMBAT `Update_Weapon` step 3 (the 300 frames count
+from the assignment), BATTLE_TRANSITIONS §3.3 ("0x2b3e90 (release the conflict) [M]" is the company re-optimiser),
+and the C4 harass destination and `Ignore_For_Reoptimization` bullets of `MCX4_T11_T12_RE_ANSWERS.md` (superseded by
+its Round 4 paragraphs).

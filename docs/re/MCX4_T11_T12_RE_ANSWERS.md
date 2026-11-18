@@ -180,6 +180,24 @@ Notes on the longer rows:
   - **Wider loads.** The T11 type tag found none at +0x30 / +0x38 [M]. The ctor and copy move the block with wide
     stores. Port: parse and ignore.
 
+**Round 4: the last draws of the INDIGENOUS_UNIT wander 0x621d80 (lane mcx4-tac2, 2026-11-18, retail disassembly
+with llvm-objdump; question 10 of `MCX4_TAC2_ROUND4_RE_QUESTIONS.md`) [H].** This settles the two [M] tags of
+`Max_Distance_From_Spawner` step 4 and step 5 above.
+- **Step 4, the leash draw.** dx = synced `Get_Float(−D, D)`, then dy = synced `Get_Float(−s, s)` with
+  s = √(D² − dx²): the code squares D, subtracts dx², and takes the root. So the point is uniform in x and then
+  uniform in y inside the circle of radius D around home. The draw order is x first, then y. The map-rectangle branch
+  also draws x first, then y.
+- **Step 5, the step draw.** It runs only when d is outside the bounds. Its two arguments are the same bounds the test
+  used, still in the registers: t = synced `Get_Float(min, max)`, with (min, max) = (50, 400), or (60, 150) while
+  burning. The four .data floats at 0x140a442c8..0x140a442d4 read 400, 50, 150, 60.
+- Then point = position + (point − position) × t / d. The direction of the first draw is kept, and the step length
+  becomes a uniform distance between the bounds. A point already 50 to 400 away (60 to 150 burning) is used as drawn,
+  with no extra draw.
+- FoC values (spawner type `Max_Distance_From_Spawner`): 150 for most spawn houses; 170 `Temperate_Civilian_Spawn_House`;
+  180 `Urban_Civilian_Spawn_House` and `Destroyer_Spawn_House`; 200 `Imperial_Guard_Spawner`; 220
+  `Geonosian_Spawn_House`; 0 (no leash, map-rectangle branch) `Desert_Sketto_Spawn`, `Bird_Spawn_Dark` /
+  `_Light`.
+
 ## B3. Hero-clash `Move_Action` and the two ability tags
 **`Move_Action` (`MoveActionClass`, vtable 0x8a8460, 0xf8 bytes).** It is picked and run like `Attack_Action`
 (`MCX4_T10_RE_ANSWERS.md` §11) with a 6-frame service interval. Unreachable with shipped data (HERO_CLASH §4) [H unless
@@ -388,6 +406,75 @@ the placement of the space HUD's per-squadron elements [L: the fighter "gripper"
   claim it [M: which return value of 0x4ad350 means "expired"].
 - **Scope.** Galactic only: the market belongs to the planets' production behaviour. Nothing in tactical reads it.
 
+**Round 4: `MovementReevaluationFrameCount`, the space re-plan 0x5d55f0 (lane mcx4-tac2, 2026-11-18, decompile
+export; question 8 of `MCX4_TAC2_ROUND4_RE_QUESTIONS.md`) [H unless tagged].** This replaces the "[M: those tests not
+read]" of the B4 row.
+1. **Input.** 0x5d55f0(coordinator, role list) needs a non-empty list and the mode's space time-slot grid (mode
+   vf +0x238 [M: name]). It walks the formations in list order. A formation whose top block (0x41af10) has flag 0x40
+   is skipped [L: what the flag means].
+2. **Per formation.** u = the first member (0x41b450(F, 0)), B = the top block (0x41b600), P1 = B's goal point
+   (0x5835c0), P2 = B's current goal point (0x583150), o = B's object (+0x28).
+   - **The whole re-plan is abandoned** (return, no formation re-planned) when: o is null; o ≠ the coordinator's
+     target (+0x68) while the coordinator state (+0x64) ≠ 3; o is fog-hidden for u's owner (0x35f470, force 1); or
+     the coordinator target sits in a team container whose current target (0x397a40) passes 0x4f72e0 [M].
+   - It needs u's slot point S in the grid (0x538830 by u's id, −1 = the current slot). A formation without one does
+     not count.
+   - **Ordinary block (no guard flag 2).** 0x5672b0 = u's TARGETING slot 43 (vf +0x158, 0x5673b0, `In_Max_Range` from a
+     given point; BKT1_ATTACK_RE §3.2) against the coordinator target and its hardpoint (+0x68 / +0x70). It is tried
+     from S first, then from u's position.
+     - **Neither in range: re-plan.**
+     - One in range: re-plan when 0x568340 holds. 0x568340 = slot 45 (vf +0x168, 0x5688c0, `Inside_Min_Range`): the
+       target is inside u's `Targeting_Min_Attack_Distance`.
+   - **Guard block (flag 2).** r = min(the max attack range of u's type 0x3749d0, `Space_Guard_Range` 750). Re-plan
+     when |P2 − u| > r and |P1 − S| > r (2-D).
+3. **The re-plan 0x5d4730(coordinator, list, order block = coordinator +0x40, p4 = 0x41b440(first formation) [M:
+   p4 is a float, probably a distance]).**
+   1. It keeps only the one-member formations (0x41b470 = 1) without top flag 0x40. Formations with more members are
+      left as they are.
+   2. In state 3 (attacking) it builds the attack approach from the order block (0x5cff60, 0x5d2060); otherwise it
+      uses 0x5d2a60. Either way the result is one normalised approach direction (kept in 0x140b39638..40).
+   3. It sorts the formations (comparator 0x5d0740) and gives each a start frame. The start is now; when the order
+      block's byte +0x63 is set, the k-th formation starts at now + k × `SpacePathfindFrameDelayDelta` (GC +0x13fc).
+      A formation starting now has its stack reset at once (0x554480); the others are scheduled in the grid
+      (0x538170).
+   4. Formations that the approach lists as stopping get a reset, a grid release (0x539470 / 0x53acf0) and a
+      formation step.
+   5. Each sorted formation then gets a speed (0x4205a0), unless coordinator +0x9d is set. The speed is the lead's
+      max speed (0x370f00); when p4 > 0 it is scaled by clamp(0x5d05c0(lead, order block) / p4, 0, 1) and floored at
+      `SpaceIdleMovementSpeed` (GC +0x1554) [M: what 0x5d05c0 measures]. So the formations are slowed so that they
+      arrive together [M]. Next it gets a timed path between the lead's grid time slots (0x538790 / 0x538830
+      → 0x420a40), and a new kind-1 position block to its slot point (facings 1e18, mask 0x3f, +0x60 = 0x1000101; set
+      by 0x420a00 [M: set or push]). Then the formation steps (0x422b70).
+   6. coordinator +0xb0 := max(+0xb0, now + the total stagger). So 0x5d51e0 does not re-evaluate before the last
+      staggered start.
+   - So it issues new timed position moves to the attack slots (a re-composition of the one-ship formations). It is
+     not a new attack order and not a formation re-form [M for the insides of 0x5d2060 / 0x5d2a60 and the grid].
+
+**Round 4: `ShouldSkipLandFormup` = false (lane mcx4-tac2, 2026-11-18, decompile export; question 9) [H unless
+tagged].** This replaces the "[M: what starts the formation path afterwards is not read]" of the B4 row.
+1. **When the branch runs.** The plan member loop (0x41c1a0) takes the form-up branch for a member of a land formation
+   with more than one member when the constant is false, or when F +0x9c is set. In FoC the constant is true, so only
+   F +0x9c leads here; 0x417520 sets it for a block with flag 0x20 (MOVEMENT §3.2.1) [M].
+2. **The plan.** After the stack reset and the push of the formation path, it pushes a lead-in path on top (vf +0x190)
+   and starts it (vf +0x148(0)). The lead-in runs to the member's form-up point (pack +0x120); it is path kind 2,
+   built by the pathfinder 0x5a2830 from the member's position, or a straight two-point path when the top block has
+   flag 0x20. A failed path-find runs vf +0x138(0) and leaves the member without a lead-in. The formation path
+   underneath stays unstarted (+0x6d clear).
+3. **What starts the formation path.** After the plan the formation is in state 1 (0x422b70 → 0x423760). On every
+   formation update, for each member in list order, when the locomotor's can-start test vf +0x1a0 holds, it calls
+   vf +0x148(0) (start). vf +0x1a0 is true when there is a top path that is not started, or the unit stands in
+   0x16 / 0x19 / 0x25 (MOVEMENT §3.5.2).
+   - So once a member has finished its lead-in path and it has been popped [M: the Walk step pop, as for detours],
+     the formation path is the top again. It is started on the member's next formation update. The Walk 0x16 handler
+     also starts an unstarted top path by itself.
+4. **No wait and no frame limit.**
+   - State 1 has no "all members at their form-up points" test. `Formation_Formup_Wait_Style` and
+     `MaxLandFormationFormupFrames` (240) still have no reader (MOVEMENT §4.4). Each member goes on as soon as it has
+     reached its own form-up point.
+   - The only clock in state 1 is the block deadline: when the top block has byte +0x61 set and now ≥ block +0x58,
+     every member's stack is reset. It is not specific to form-up.
+   - State 1 ends (→ 3) once every member reports idle [M: the vf +0x150 / +0x1c0 tests].
+
 ## C2. Saliency weights [H for the caller; M for the feature names]
 - **Callers.** 0x520df0 is called only by 0x2cd0d0, whose only caller is 0x2cd930. 0x2cd930 prints
   "Start_Interesting_Object_Cinematic: Type %s" and is called from 0x2cc080, 0x2cca80, 0x2cda20 and 0x4aaf00, the
@@ -441,6 +528,98 @@ the placement of the space HUD's per-squadron elements [L: the fighter "gripper"
   - FoC: `Rebel_Artillery_Brigade` (MPTL ×2, MPTL_Spotter ×2) ignores MPTL_Spotter, so the spotters are made again, one
     per MPTL slot of the definition.
   - The other +0x22e0 hits (0x330450, 0x33e840, 0x33a580, 0x33c160) are another class's vector.
+
+**Round 4: HARASS and AVOID_DANGER (lane mcx4-tac2, 2026-11-18, decompile export and retail disassembly; question 6
+of `MCX4_TAC2_ROUND4_RE_QUESTIONS.md`) [H unless tagged].** This corrects the harass destination above and answers
+the avoid move.
+- **0x370e60 is the type's AI combat power** (A1_READINGS: type +0xdf0, scaled by `Max_Squad_Size` / company count
+  for a team company in tactical). Both services search the square of half-size R around the unit (grid query
+  0x2ab640 → 0x20e780) and pick the enemy (0x39a450 against the unit's owner) whose **type** has the largest power.
+  The compare is strict, so on a tie the first in the query's list order stays; an enemy of power ≤ 0 is never
+  picked.
+- **Schedule.** `HarassBehaviorClass` (0x8a29b8) and `AvoidDangerBehaviorClass` (0x8a2af0) both have slot 4 = true
+  and slot 5 = 30 (0x436050). So they are serviced every 30 frames (1 s), with the first due frame drawn as in
+  OBJECT_RUNTIME §4.4 item 7. Each service returns at once while the unit is moving (0x39ade0; on land a team member
+  tests its container 0x4ec820). So a re-plan happens at most once a second, and only while the unit stands.
+- **Harass 0x58dd10, destination.** This replaces "unit + (unit − enemy)" above.
+  1. B = the mode's playable box (vf +0x208: centre c, half extents h).
+  2. dir = normalise((c − u) + (u − e)) = normalise(c − e), in 3-D: from the enemy toward the map centre.
+  3. point = e + dir × the max attack range of the enemy's type (0x3749d0). x and y are clamped to the box.
+  4. With the threat grid (0x140b31900), the point is snapped. On land: in the cell under the point (mode vf +0x180)
+     by 0x6552a0; no cell → no snap. In space: by 0x655070 in a square of `AI_SpaceEvaluatorRegionSize` around the
+     point.
+  5. The move: the movement coordinator (mode vf +0x228) and the unit's formation (0x4261d0). The unit is detached
+     into its own formation (0x424850) and a move block to the point is pushed (0x41fd30; facings 1e18, mask 0x3f,
+     +0x60 = 0x1000001, like the other AI blocks) [M: block field names].
+  - So the unit stands off at the edge of the strongest enemy's weapon range, on that enemy's map-centre side.
+- **Avoid 0x58e8e0.** It makes the same pick, with R = `Avoid_Enemy_Exclusion_Range`, and it needs the coordinator
+  and the unit's formation (none → nothing).
+  1. g = the formation's current destination (the point of its first block, 0x41a580). v = the unit vector from u to
+     g, D = |g − u|.
+  2. p = v turned 90° to the side away from the enemy. The side comes from the sign of the area of the triangle
+     (u, e, g): with the enemy right of u → g, p is the left turn; otherwise the right turn.
+  3. dir = normalise(v + p) in x / y, so 45° between "toward the goal" and "sideways, away from the enemy".
+  4. point = u + (range(e) − D) × dir, where range = the max attack range of the enemy's type (0x3749d0). When the
+     goal is farther than the enemy's range, the factor is negative and the point lies on the other side of u [M: as
+     read, not seen in play].
+  5. The point is clamped to the box and snapped as for harass. Here a land point without a cell keeps its unsnapped
+     value and the move still goes out.
+  6. The move: the unit is detached into its own formation, and that formation's first block is copied. A move
+     block to the point is pushed (0x41fd30), then the copied block is appended again (0x423c10, no clear) [M: so the
+     unit resumes its old destination after the side step].
+- **FoC users.**
+  - The HARASS behaviour is listed by `Sand_Person_Sniper_A`, `Pyngani_Warrior`, `Dathomir_Night_Sister`
+    (GROUNDINDIGENOUS.XML) and `Pyngani_Slave` (CORRUPTION_SPECIAL_UNITS.XML). Only `Sand_Person_Sniper_A` also
+    sets `Harass_Enemy_Exclusion_Range` (100). The other three keep 0, so their service returns at once.
+    `Imperial_Elite_Guard` sets 100 without the behaviour, which has no effect. The range is set on 2 types, not 4.
+  - **No FoC type lists AVOID_DANGER.** `TIE_Scout` sets `Avoid_Enemy_Exclusion_Range` 500 without the behaviour, so
+    the avoid service never runs in vanilla [H for the data].
+  - HARASS (11) and AVOID_DANGER (12) are also unit-ability enum names (registration 0x5dea20; toggle sounds in
+    FACTIONS.XML / EXPANSION_FACTIONS.XML). No FoC unit has those abilities, and neither service tests an ability.
+
+**Round 4: the company re-optimiser 0x2b3e90 (lane mcx4-tac2, 2026-11-18, decompile export and retail disassembly;
+question 7) [H unless tagged].** This replaces the `Ignore_For_Reoptimization` bullets above, which were partly wrong.
+1. **When.** The re-optimiser runs on the galactic object manager in two places:
+   - the land battle write-back 0x28bf10, kind 1 (a tactical land battle returning to galactic), after 0x2b5360 and
+     before the loser's retreat 0x2ba850. The "0x2b3e90 (release the conflict) [M]" of BATTLE_TRANSITIONS §3.3 is
+     this re-optimiser;
+   - the land-conflict service 0x2b76a0, after an invasion resolved without a tactical battle (after the
+     InvasionResult signal) [M: which branches of 0x2b76a0 reach the call].
+   - It is not called for space battles.
+2. **Scope.** The surface objects (0x397120, planet data +0xd8, in list order) of the planet of the land-queue head
+   (GOM +0x488 record +0x00). Only objects with the TRANSPORT behaviour (5) count; these are the galactic company
+   carriers. For each: C = the carrier's company type (transport pack +0xc8 → +0x48), k = the units it carries,
+   n = the `Company_Units` count of C (+0x960).
+3. **A company without `Ignore_For_Reoptimization`** that is `Is_Homogeneous` (type +0x28; default **true**, written
+   by the flag-block ctor 0x367100) is handled when k ≠ 0 and k ≠ n:
+   1. **Merge.** Each later carrier in the list with the same owner (+0x58), the same company type, k2 ≠ 0 and
+      k2 ≠ n gives units one at a time, from the end of its list, until k = n. A donor left empty is deleted by the remove
+      call 0x4f3fd0.
+   2. **Still short.** If k / n ≥ `Transport_Refill_Threshold` (GC +0x11718; the ctor default is 0.5 and FoC's XML
+      does not set it): n − k units are created (0x29f810, the carrier's owner, position and facing) of the types of
+      the first n − k `Company_Units` entries, and put in. **Otherwise every carried unit is killed** (0x4f3a20 →
+      0x391310 with flag 1; a hero goes through hero death 0x3a01f0 first), so the company is disbanded.
+   - A non-homogeneous company without the field is not touched. FoC sets `Is_Homogeneous` No on
+     `Rebel_Artillery_Brigade`, `Rebel_Prisoner_Team`, `Field_Com_Rebel_Team`, `Field_Com_Empire_Team` and
+     `Han_Solo_Team`.
+4. **A company with the field** (I = the resolved type, +0x22e0) is handled once per company type, by 0x2aea10 on all
+   carriers of C together. 0x2aea10 removes those carriers from the working list, so the caller reads the same index
+   again.
+   1. The carriers of C are collected, scanning the list from the end.
+   2. Every unit of type I is taken out of each carrier (0x4f3fd0). It is not killed here [M: what becomes of the
+      loose unit was not traced].
+   3. m = the number of `Company_Units` entries of C whose type is not I. T = the last such type.
+   4. **Merge, one pass.** For each carrier (in collected order) with 0 < k < m, each later carrier with k2 < m gives
+      its first unit. A donor gives one unit per receiver, and the receiver can end above m [H as read].
+   5. k / m ≥ the threshold → m − k units of type T are created; otherwise every unit is killed, as in 3.2.
+   6. Every carrier that still has units gets m new units of type I.
+   - FoC: `Rebel_Artillery_Brigade` (`Company_Units` MPTL, MPTL, MPTL_Spotter, MPTL_Spotter; field MPTL_Spotter):
+     m = 2 and T = MPTL. After each land battle on its planet, its spotters are replaced by 2 new ones, and its MPTLs
+     are merged, refilled or disbanded by the same 50 % rule.
+5. **Effect.** It changes the galactic ground forces on that planet, both the company contents and the unit count:
+   partial companies of one owner and type merge, a company at half strength or more is refilled to full, and one
+   below half is disbanded. The field keeps the I units out of the count and the merge and then makes them again, so
+   lost spotters never make the brigade "short".
 
 ## Not reached (re-analyst batch)
 - B2: what `Formation_Priority` orders (the receivers of combatant slot 33); the parameter-based +0x38 byte readers for
