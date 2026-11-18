@@ -60,6 +60,9 @@ namespace alamo::ui {
 struct CampaignChoice {
     std::string campaign;  // CampaignDef name (the one to start)
     std::string faction;   // Starting_Active_Player
+    // mcx4 t19 (MCX5_RE_ANSWERS Q3.1 [H]): Min_ / Max_Custom_Tech_Level (campaign +0x22C / +0x230; ctor 1 / 5), the
+    // advanced options' tech slider bounds before the faction's Displayed_Tech_Level_Adjustment shift.
+    int32_t min_custom_tech = 1, max_custom_tech = 5;
 };
 struct CampaignSetInfo {
     std::string set;                 // Campaign_Set
@@ -293,8 +296,17 @@ struct GameplaySettings {
 // +4 start tech, +8 max tech, +0xc auto-resolve 0 always / 1 never / 2 ask / 3 overwhelming odds (BATTLE_TRANSITIONS §1.6),
 // flag 0x10 random events); defaults GameConstants MP_Default_Credits / _Start_Tech_Level / _Max_Tech_Level /
 // _Allow_Auto_Resolve / _Allow_Random_Events. [port] the credits slider runs Min_Skirmish_Credits..Max_Skirmish_Credits
-// in steps of 1000 (the original's range is not recovered); the tech sliders 1..5, max tech >= start tech.
+// in steps of 1000 (the original's range is not recovered); max tech >= start tech. mcx4 t19 (MCX5_RE_ANSWERS Q3.1 [H],
+// readers 0xed4b0 / 0xed610): the tech sliders span the campaign's [Min_Custom_Tech_Level - adj, Max_Custom_Tech_Level -
+// adj], adj = the selected faction's Displayed_Tech_Level_Adjustment (TechSliderRange).
 inline constexpr int32_t kAutoResolveAlways = 0, kAutoResolveNever = 1, kAutoResolveAsk = 2, kAutoResolveOdds = 3;
+struct TechSliderRange {
+    int32_t lo = 1, hi = 5;  // slider bounds (already shifted by the adjustment)
+    int32_t adjustment = 0;  // the faction's Displayed_Tech_Level_Adjustment
+    friend bool operator==(const TechSliderRange&, const TechSliderRange&) = default;
+};
+// The range for a campaign choice and its faction's adjustment (hi never below lo).
+TechSliderRange tech_slider_range(const CampaignChoice& c, int32_t adjustment);
 struct GameOptionsSetup {
     int32_t credits = 6000, start_tech = 1, max_tech = 5, auto_resolve = kAutoResolveAsk;
     bool random_events = false;
@@ -447,6 +459,8 @@ struct MenuProviders {
     // non-neutral factions in FactionFiles.xml order, each with its Text_ID); empty = the combos stay empty and the
     // StartSkirmish action names no faction (the host's default_skirmish_faction).
     std::vector<SkirmishFaction> skirmish_factions;
+    // mcx4 t19: a faction's Displayed_Tech_Level_Adjustment (Factions.xml, +0x2FB0) by name; null = 0 for every faction.
+    std::function<int32_t(std::string_view faction)> tech_adjustment;
     // modc t08: the mod picker's rows; null = no Mods button on the main menu.
     std::function<std::vector<ModPickerEntry>()> mods;
     bool demo = false;               // show IDC_MAIN_MENU_PLAY_DEMO instead of Single Player
@@ -587,7 +601,8 @@ private:
     int32_t local_faction_row_ = 0;  // modc t47: the profile's faction row for slot 0 (0 = none stored or not in the list)
     SkirmishOptionsSetup skirmish_options_;   // skm1 t02: the skirmish options accepted last (set = false until then)
     std::vector<int32_t> skirmish_win_rows_;  // skm1 t02: the win condition of each IDC_WIN_CONDITION_COMBO row
-    GameOptionsSetup game_options_;  // ui1 t06: the advanced options accepted last (set = false until then)  // skirmish list: the game type selected last (UI.md 9.7)
+    GameOptionsSetup game_options_;  // ui1 t06: the advanced options accepted last (set = false until then)
+    TechSliderRange tech_range_;     // mcx4 t19: the open advanced dialog's tech slider range (custom staging selection)  // skirmish list: the game type selected last (UI.md 9.7)
     std::vector<int32_t> game_type_rows_;    // IDC_GAME_TYPE_LIST rows -> game type (sorted by row text)
     // The map selected last [0 land, 1 space] ("" = none yet; UI.md 9.5 / 9.7: retail keeps one land key for types 2 and 4).
     std::string last_map_[2];

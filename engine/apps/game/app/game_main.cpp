@@ -322,6 +322,11 @@ bool App::init() {
     // modc t20: the staging faction list from the data (Is_Playable, non-neutral, FactionFiles.xml order), not built-in names.
     for (const galactic::FactionRules& f : data_.rules.factions)
         if (f.is_playable && !f.is_neutral) mp.skirmish_factions.push_back({f.name, f.text_id});
+    // mcx4 t19: the advanced options' tech slider range is shifted by the selected faction's adjustment.
+    mp.tech_adjustment = [this](std::string_view faction) {
+        const uint32_t f = data_.rules.find_faction(faction);
+        return f < data_.rules.factions.size() ? data_.rules.factions[f].displayed_tech_level_adjustment : 0;
+    };
     if (!ui_.init(gpu_, data_, std::move(mp), &err)) {
         std::fprintf(stderr, "UI: %s\n", err.c_str());
         return false;

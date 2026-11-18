@@ -9,6 +9,8 @@
 // map memory shared with Land, game type 4 in StartSkirmish). Data-free.
 #include "test_gui_screens_common.hpp"
 
+#include "alamo/data/game_database.hpp"  // mcx4 t19: CampaignDef
+
 namespace test_gui_screens_t {
 
 namespace {
@@ -557,6 +559,121 @@ void test_skirmish_options() {
     rig.click(kStaging, "IDC_SELECT_OPTIONS");
     o = rig.env.gui.find(kSkirmishOptions);
     CHECK(o && opts(o, "IDC_WIN_CONDITION_COMBO")->items == (std::vector<std::u32string>{U"Control"}));
+}
+
+// mcx4 t19 (docs/re/MCX5_RE_ANSWERS.md Q3.1 [H], readers 0xed4b0 / 0xed610): the advanced game options' tech sliders
+// span the selected campaign's [Min_Custom_Tech_Level - adj, Max_Custom_Tech_Level - adj], adj = the selected faction's
+// Displayed_Tech_Level_Adjustment; the campaign ctor's 1 / 5 when the campaign sets neither.
+// ledger: verifies Campaign.Min_Custom_Tech_Level
+// ledger: verifies Campaign.Max_Custom_Tech_Level
+void test_custom_tech_range() {
+    // The campaign fields reach the menu choice (ctor defaults when absent).
+    data::CampaignDef plain, custom;
+    plain.name = "GC_Plain";
+    plain.campaign_set = "Set_Plain";
+    plain.starting_active_player = "Empire";
+    plain.raw.emplace_back("Supports_Custom_Settings", "True");
+    custom = plain;
+    custom.name = "GC_Custom";
+    custom.campaign_set = "Set_Custom";
+    custom.starting_active_player = "Rebel";
+    custom.raw.emplace_back("Min_Custom_Tech_Level", " 2 ");
+    custom.raw.emplace_back("Max_Custom_Tech_Level", "4");
+    const data::CampaignDef* defs[] = {&plain, &custom};
+    const CampaignMenu built = build_campaign_menu(std::span<const data::CampaignDef* const>(defs));
+    CHECK(built.custom.size() == 2u);
+    if (built.custom.size() == 2u) {
+        const CampaignChoice& a = built.custom[0].factions.at(0);
+        const CampaignChoice& b = built.custom[1].factions.at(0);
+        CHECK(a.min_custom_tech == 1 && a.max_custom_tech == 5 && b.min_custom_tech == 2 && b.max_custom_tech == 4);
+    }
+    // The range: shifted by the adjustment, hi never below lo.
+    CampaignChoice c{"GC", "Rebel", 1, 5};
+    CHECK(tech_slider_range(c, 0) == (TechSliderRange{1, 5, 0}));
+    CHECK(tech_slider_range(c, 1) == (TechSliderRange{0, 4, 1}));
+    CHECK(tech_slider_range(CampaignChoice{"GC", "Rebel", 4, 2}, 0) == (TechSliderRange{4, 4, 0}));
+
+    // Through the dialogs: custom staging -> Select Options for each faction of one set.
+    constexpr const char* kTechRc = R"RC(
+IDD_CUSTOM_CAMPAIGN_STAGING_DIALOG DIALOGEX 0, 0, 620, 441
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP
+CAPTION "Dialog"
+FONT 8, "Arial", 400, 0, 0x0
+BEGIN
+    PUSHBUTTON      "x",IDC_CANCEL_BUTTON,19,398,190,24
+    PUSHBUTTON      "x",IDC_PLAY_BUTTON,405,398,190,24
+    PUSHBUTTON      "x",IDC_SELECT_OPTIONS,240,398,150,24
+    LISTBOX         IDC_STAGING_MAP_LIST,18,68,380,327,LBS_NOINTEGRALHEIGHT | WS_VSCROLL | WS_TABSTOP
+    COMBOBOX        IDC_FACTION_COMBO,410,68,150,128,CBS_DROPDOWNLIST | WS_TABSTOP
+END
+
+IDD_CAMPAIGN_ADVANCED_OPTIONS_DIALOG DIALOGEX 0, 0, 400, 300
+STYLE DS_SETFONT | DS_MODALFRAME | DS_CENTER | WS_POPUP
+CAPTION "Dialog"
+FONT 8, "Arial", 400, 0, 0x0
+BEGIN
+    CONTROL         "",IDC_SKIRMISH_CREDITS_SLIDER,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,10,10,300,14
+    LTEXT           "0",IDC_SKIRMISH_CREDITS_VALUE,320,10,60,14
+    CONTROL         "",IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,10,40,300,14
+    LTEXT           "0",IDC_SKIRMISH_STARTING_TECH_LEVEL_VALUE,320,40,60,14
+    CONTROL         "",IDC_SKIRMISH_MAX_TECH_LEVEL_SLIDER,"msctls_trackbar32",TBS_BOTH | TBS_NOTICKS | WS_TABSTOP,10,70,300,14
+    LTEXT           "0",IDC_SKIRMISH_MAX_TECH_LEVEL_VALUE,320,70,60,14
+    COMBOBOX        IDC_ALLOW_AUTORESOLVE_COMBO,10,100,200,95,CBS_DROPDOWN | WS_VSCROLL | WS_TABSTOP
+    CONTROL         "x",IDC_ALLOW_RANDOM_EVENTS,"Button",BS_AUTOCHECKBOX | WS_TABSTOP,10,130,200,16
+    PUSHBUTTON      "x",IDC_BUTTON_ACCEPT,10,260,100,24
+    PUSHBUTTON      "x",IDC_CANCEL_BUTTON,120,260,100,24
+    PUSHBUTTON      "x",IDC_DEFAULTS_BUTTON,230,260,100,24
+END
+)RC";
+    constexpr const char* kCustom = "IDD_CUSTOM_CAMPAIGN_STAGING_DIALOG";
+    constexpr const char* kOptions = "IDD_CAMPAIGN_ADVANCED_OPTIONS_DIALOG";
+    Env env;
+    env.script.merge(kTechRc);
+    for (int32_t n = 1; n <= 5; ++n)
+        env.text.add("TEXT_TECH_LEVEL_" + std::to_string(n), u"Tech " + std::u16string(1, static_cast<char16_t>(u'0' + n)));
+    CampaignMenu menu;
+    CampaignSetInfo set;
+    set.set = "Set_Custom";
+    set.custom = true;
+    set.factions = {{"GC_Empire", "Empire", 1, 5}, {"GC_Rebel", "Rebel", 1, 5}};
+    menu.custom.push_back(set);
+    MenuProviders p;
+    p.tech_adjustment = [](std::string_view f) { return f == "Rebel" ? 1 : 0; };  // FoC: Rebel +1
+    p.game_option_defaults.start_tech = 1;
+    p.game_option_defaults.max_tech = 5;
+    FrontEnd fe;
+    fe.init(env.gui, menu, p);
+    std::vector<MenuAction> acts;
+    const auto click = [&](const char* dialog, const char* control) {
+        fe.update(std::vector<GuiEvent>{event(GuiEvent::Kind::Clicked, dialog, control)}, InputFrame{}, acts);
+    };
+    env.gui.open(kCustom);
+    GuiDialog* staging = env.gui.find(kCustom);
+    CHECK(staging != nullptr);
+    if (!staging) return;
+    staging->set_items("IDC_STAGING_MAP_LIST", {U"Set_Custom"}, 0);
+    staging->set_items("IDC_FACTION_COMBO", {U"Empire", U"Rebel"}, 0);
+    const auto slider = [&](const char* id) { return env.gui.find(kOptions) ? env.gui.find(kOptions)->get(id) : nullptr; };
+    // Empire (adjustment 0): 1..5, the defaults as they are.
+    click(kCustom, "IDC_SELECT_OPTIONS");
+    const GuiControl* st = slider("IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER");
+    const GuiControl* mx = slider("IDC_SKIRMISH_MAX_TECH_LEVEL_SLIDER");
+    CHECK(st && mx && st->range_min == 1 && st->range_max == 5 && st->value == 1 && mx->value == 5);
+    click(kOptions, "IDC_CANCEL_BUTTON");
+    // Rebel (adjustment +1): 0..4; the default max 5 is clamped to 4; the label shows the displayed level (value + 1).
+    staging->set_selected("IDC_FACTION_COMBO", 1);
+    click(kCustom, "IDC_SELECT_OPTIONS");
+    st = slider("IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER");
+    mx = slider("IDC_SKIRMISH_MAX_TECH_LEVEL_SLIDER");
+    CHECK(st && mx && st->range_min == 0 && st->range_max == 4 && st->value == 1 && mx->value == 4);
+    const GuiControl* label = slider("IDC_SKIRMISH_MAX_TECH_LEVEL_VALUE");
+    CHECK(label && label->text == U"Tech 5");
+    env.gui.find(kOptions)->set_value("IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER", 0);
+    click(kOptions, "IDC_BUTTON_ACCEPT");
+    acts.clear();
+    click(kCustom, "IDC_PLAY_BUTTON");
+    CHECK(acts.size() == 1u && acts[0].faction == "Rebel" && acts[0].game_options.set && acts[0].game_options.start_tech == 0 &&
+          acts[0].game_options.max_tech == 4);
 }
 
 }  // namespace test_gui_screens_t

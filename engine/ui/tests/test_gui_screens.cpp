@@ -577,6 +577,7 @@ void test_skirmish_preview();  // p4uim t03 / t04
 void test_skirmish_colours();  // p4uia t01 / t02
 void test_skirmish_slot_defaults();  // modc t47
 void test_skirmish_control_points();  // ccpgt t02
+void test_custom_tech_range();  // mcx4 t19
 }
 
 int main() {
@@ -586,6 +587,7 @@ int main() {
     test_skirmish_colours();
     test_skirmish_slot_defaults();
     test_skirmish_control_points();
+    test_custom_tech_range();
     test_screens();
     test_advanced_video();
     test_video_vsync_mode();
