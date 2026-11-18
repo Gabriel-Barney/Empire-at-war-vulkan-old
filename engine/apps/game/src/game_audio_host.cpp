@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "alamo/core/ascii.hpp"
+#include "alamo/data/values.hpp"
 #include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/sim/tactical_battle.hpp"
@@ -81,6 +82,16 @@ std::string_view GameAudioHost::hardpoint_lost_tag(uint8_t kind, bool local_pare
     if (!local_parent || parent_dying) return {};
     if (kind >= 5 && kind <= 10 && !weapons_left) return "SFXEvent_Hardpoint_All_Weapons_Destroyed";
     return last_of_kind ? std::string_view("SFXEvent_Hardpoint_Destroyed") : std::string_view();
+}
+
+GameAudioHost::ControlLines GameAudioHost::control_lines(bool friendly_old, bool friendly_new, bool hostile_old, bool hostile_new,
+                                                         bool old_neutral, bool new_neutral) {
+    ControlLines c;
+    if (friendly_old || friendly_new)
+        c.friendly = friendly_old ? "SFXEvent_Tactical_Lose_Friendly_Control" : "SFXEvent_Tactical_Gain_Friendly_Control";
+    if (!old_neutral && hostile_old) c.enemy = "SFXEvent_Tactical_Lose_Enemy_Control";
+    else if (!new_neutral && hostile_new) c.enemy = "SFXEvent_Tactical_Gain_Enemy_Control";
+    return c;
 }
 
 std::string_view GameAudioHost::hardpoint_kind_event(std::span<const std::string_view> tokens, uint8_t kind) {
@@ -645,6 +656,35 @@ void GameAudioHost::cue_lines(const sim::TacticalBattle& battle, const objects::
             }
         }
         prod_orders_ = std::move(now);
+    }
+    // Capture point owner changes (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Tactical_Gain_Friendly_Control family"): the
+    // local faction's lists, first entry whose object type is the point's type; 2D. [port] the faction's Is_Neutral is
+    // read from its Factions.xml entry.
+    if (local_player >= 0 && local_player < static_cast<int32_t>(player_factions_.size())) {
+        const audio::FactionAudio* lf = game_data_->find_faction(player_factions_[static_cast<size_t>(local_player)]);
+        const auto neutral = [&](int32_t p) {
+            if (p < 0 || p >= static_cast<int32_t>(player_factions_.size())) return true;  // no owner: as neutral
+            const audio::FactionAudio* f = game_data_->find_faction(player_factions_[static_cast<size_t>(p)]);
+            return f && data::parse_bool_or(f->get("Is_Neutral"), false);
+        };
+        const auto rel_friendly = [&](int32_t p) { return p >= 0 && (p == local_player || !cs.is_enemy(local_player, p)); };
+        const auto rel_hostile = [&](int32_t p) { return p >= 0 && p != local_player && cs.is_enemy(local_player, p); };
+        for (const sim::TacticalBattle::StoryCaptureEvent& e : battle.story_captured()) {
+            if (!lf) break;
+            const objects::TypeIndex t = type_of(static_cast<int64_t>(e.object));
+            if (t == objects::kNone) continue;
+            const ControlLines cl = control_lines(rel_friendly(e.old_owner), rel_friendly(e.new_owner), rel_hostile(e.old_owner),
+                                                  rel_hostile(e.new_owner), neutral(e.old_owner), neutral(e.new_owner));
+            // ledger: consumes Faction.SFXEvent_Tactical_Gain_Friendly_Control
+            // ledger: consumes Faction.SFXEvent_Tactical_Lose_Friendly_Control
+            for (const std::string_view tag : {cl.friendly, cl.enemy}) {
+                // ledger: consumes Faction.SFXEvent_Tactical_Gain_Enemy_Control
+                // ledger: consumes Faction.SFXEvent_Tactical_Lose_Enemy_Control
+                if (tag.empty()) continue;
+                const std::vector<std::string> ev = lf->pair_values(tag, types.raw().types().name[t]);
+                if (!ev.empty() && !ev.front().empty() && game_->gui_sfx(ev.front())) ++stats_.control_lines;
+            }
+        }
     }
     // Hard point losses (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Hardpoint_Destroyed family", 0x386660).
     for (const tcb::HardpointEvent& e : cs.hardpoint_events()) {

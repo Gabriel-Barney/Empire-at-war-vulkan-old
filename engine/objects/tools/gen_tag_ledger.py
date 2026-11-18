@@ -83,6 +83,7 @@ RETAIL_UNUSED = {
     ("Faction", "Corruption_Tactical_Build_Pad_Time_Multipliers"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.2 [H]",
     ("Faction", "Credits_Accumulation_Factor"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.1 [M]",
     ("Faction", "Land_Skirmish_Unit_Buy_Credits"): "docs/re/MCX4_T10_RE_ANSWERS.md §17 [M]",
+    ("Faction", "SFXEvent_HUD_Advisor_Urgent"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SFXEvent_HUD_Advisor_Urgent [M]",
     ("Faction", "Land_Surrender_SFXEvent"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.Land_Surrender_SFXEvent family [H]",
     ("Faction", "Music_Event_Strategic_Lose"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.Music_Event_Strategic_Win family [H]",
     ("Faction", "Music_Event_Strategic_Win"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.Music_Event_Strategic_Win family [H]",
@@ -173,6 +174,7 @@ OUT_OF_SCOPE = {
     ("Campaign", "Is_Quickmatch_Allowed"): _MP,
     ("Faction", "Debug_Ground_Structures"): _DBG,
     ("Faction", "Multiplayer_Beacon_Type"): _MP,
+    ("Faction", "SFXEvent_HUD_Tactical_Victory_Near"): _MP,  # MCX4_T13_RE_ANSWERS: overrun reveal, game types 1 / 2 / 4 only
     ("Faction", "Multiplayer_Campaign_Heroes"): _MP,
     ("Faction", "Multiplayer_Map_Preview_Icon"): _MP,
     ("Faction", "SFXEvent_Player_Taunt"): _MP,

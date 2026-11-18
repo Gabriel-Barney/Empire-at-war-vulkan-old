@@ -73,12 +73,18 @@ std::string_view conditional(GameAudioHost::FactionFieldList fields, std::string
 std::string GameAudioHost::intro_speech_pick(FactionFieldList fields, const IntroSpeechFacts& f,
                                              const std::function<bool(std::string_view)>& present) {
     const std::string side = f.attacker ? "Attacker" : "Defender";
+    // ledger: consumes Faction.SpeechEvent_Tactical_Intro_Land_Attacker
+    // ledger: consumes Faction.SpeechEvent_Tactical_Intro_Land_Defender
     const std::string base = std::string("SpeechEvent_Tactical_Intro_") + (f.land ? "Land_" : "Space_") + side;
+    // ledger: consumes Faction.SpeechEvent_Tactical_Intro_Space_Attacker
+    // ledger: consumes Faction.SpeechEvent_Tactical_Intro_Space_Defender
     if (const std::string_view e = conditional(fields, base + "_Conditional_Or", false, present); !e.empty()) return std::string(e);
     if (const std::string_view e = conditional(fields, base + "_Conditional_And", true, present); !e.empty()) return std::string(e);
     if (f.land && f.last_location) {
         if (const std::string_view e = single_field(fields, base + "_Last_Location"); !e.empty()) return std::string(e);
     }
+    // ledger: consumes Faction.SpeechEvent_Tactical_Intro_Land_Raid_Attacker
+    // ledger: consumes Faction.SpeechEvent_Tactical_Intro_Land_Raid_Defender
     if (f.land && f.raid) {
         if (const std::string_view e = single_field(fields, "SpeechEvent_Tactical_Intro_Land_Raid_" + side); !e.empty())
             return std::string(e);

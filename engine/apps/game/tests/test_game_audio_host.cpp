@@ -211,6 +211,34 @@ void test_health_and_hardpoint_lines() {
     CHECK(H::hardpoint_kind_event(toks, 6).empty() && H::hardpoint_kind_event(toks, 1).empty() && H::hardpoint_kind_event(toks, 13).empty());
 }
 
+// mcx4 t13 batch C (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_Tactical_Gain_Friendly_Control family", capture
+// complete 0x500e30; both builds): which halves a capture point owner change plays for the local player.
+// ledger: verifies Faction.SFXEvent_Tactical_Gain_Friendly_Control
+// ledger: verifies Faction.SFXEvent_Tactical_Lose_Friendly_Control
+// ledger: verifies Faction.SFXEvent_Tactical_Gain_Enemy_Control
+// ledger: verifies Faction.SFXEvent_Tactical_Lose_Enemy_Control
+void test_control_lines() {
+    using H = GameAudioHost;
+    // Args: friendly_old, friendly_new, hostile_old, hostile_new, old_neutral, new_neutral.
+    // Neutral -> local: gain friendly, no enemy half (old owner neutral; new owner not hostile).
+    H::ControlLines c = H::control_lines(false, true, false, false, true, false);
+    CHECK(c.friendly == "SFXEvent_Tactical_Gain_Friendly_Control" && c.enemy.empty());
+    // Enemy -> local: gain friendly and lose enemy.
+    c = H::control_lines(false, true, true, false, false, false);
+    CHECK(c.friendly == "SFXEvent_Tactical_Gain_Friendly_Control" && c.enemy == "SFXEvent_Tactical_Lose_Enemy_Control");
+    // Local -> enemy: lose friendly (friendly to the old owner wins) and gain enemy.
+    c = H::control_lines(true, false, false, true, false, false);
+    CHECK(c.friendly == "SFXEvent_Tactical_Lose_Friendly_Control" && c.enemy == "SFXEvent_Tactical_Gain_Enemy_Control");
+    // Enemy -> neutral (no owner): no friendly half, lose enemy.
+    c = H::control_lines(false, false, true, false, false, true);
+    CHECK(c.friendly.empty() && c.enemy == "SFXEvent_Tactical_Lose_Enemy_Control");
+    // Neutral -> enemy: gain enemy only; a neutral new owner gives no gain-enemy line.
+    c = H::control_lines(false, false, false, true, true, false);
+    CHECK(c.friendly.empty() && c.enemy == "SFXEvent_Tactical_Gain_Enemy_Control");
+    c = H::control_lines(false, false, false, true, true, true);
+    CHECK(c.friendly.empty() && c.enemy.empty());
+}
+
 // aud4 b0289 / b0300: garrison entry line and the hero clash win speech (both builds; presentation rules only).
 void test_garrison_and_clash_lines() {
     using H = GameAudioHost;
@@ -268,6 +296,12 @@ void test_control_point_lines() {
 }
 
 // aud1 t07 (AUDIO.md §9.7): the tactical intro speech pick, its gate, and (with engine/audio) one queued line.
+// ledger: verifies Faction.SpeechEvent_Tactical_Intro_Land_Attacker
+// ledger: verifies Faction.SpeechEvent_Tactical_Intro_Land_Defender
+// ledger: verifies Faction.SpeechEvent_Tactical_Intro_Space_Attacker
+// ledger: verifies Faction.SpeechEvent_Tactical_Intro_Space_Defender
+// ledger: verifies Faction.SpeechEvent_Tactical_Intro_Land_Raid_Attacker
+// ledger: verifies Faction.SpeechEvent_Tactical_Intro_Land_Raid_Defender
 void test_intro_speech_t07() {
     using H = GameAudioHost;
     using P = std::pair<std::string, std::string>;
@@ -808,6 +842,7 @@ int main() {
     test_control_point_lines();
     test_garrison_and_clash_lines();
     test_health_and_hardpoint_lines();  // mcx4 t13
+    test_control_lines();               // mcx4 t13 batch C
     test_intro_speech_t07();
     test_aud2();
 #ifdef ALAMO_GAME_HAVE_AUDIO

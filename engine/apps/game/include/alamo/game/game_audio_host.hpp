@@ -77,6 +77,7 @@ struct GameAudioStats {
     uint64_t planet_reveals = 0, production_sfx = 0, build_music = 0;    // aud2 t01 / t03
     uint64_t fleet_jumps = 0, campaign_end_music = 0, deactivations = 0;  // aud2 t07 / t08 / t04
     uint64_t health_warnings = 0, hardpoint_lines = 0, hardpoint_explosions = 0;  // mcx4 t13 batch A
+    uint64_t control_lines = 0;                                                    // mcx4 t13 batch C
 };
 
 class GameAudioHost {
@@ -282,6 +283,17 @@ public:
     // The event for hard point kind `kind` in a per-kind list (SFXEvent_Hardpoint_Destroyed / SFXEvent_Attack_Hardpoint
     // lines "HARD_POINT_WEAPON_LASER, Event"; the 13 HARD_POINT_* names in HardpointKind order); "" when the kind has none.
     static std::string_view hardpoint_kind_event(std::span<const std::string_view> tokens, uint8_t kind);
+    // "Faction.SFXEvent_Tactical_Gain_Friendly_Control family" (capture complete 0x500e30 [H]): the local faction's per-type
+    // list tags a capture point owner change plays, {friendly half, enemy half} ("" = none). Friendly half when the local
+    // player is friendly (relation 0, self included) to the old or the new owner: _Lose_Friendly_Control if friendly to
+    // the old owner, else _Gain_Friendly_Control. Enemy half: _Lose_Enemy_Control when the old owner's faction is not
+    // Is_Neutral and the local player is hostile to it; else none when the new owner's faction is neutral; else
+    // _Gain_Enemy_Control when hostile to the new owner. `friendly_old` / `hostile_old` false for no owner (-1).
+    struct ControlLines {
+        std::string_view friendly, enemy;
+    };
+    static ControlLines control_lines(bool friendly_old, bool friendly_new, bool hostile_old, bool hostile_new, bool old_neutral,
+                                      bool new_neutral);
     // HERO_CLASH §3.8 (b0300): the clash winner's speech event, First_Hero_Win_Speech when hero 1 (First_Hero_Type) won,
     // else Second_Hero_Win_Speech; "" for an unknown entry. (Attack_SFXEvent belongs to Clash_Actions, i.e. the
     // action-driven clash that shipped data never reaches, HERO_CLASH §4.)
