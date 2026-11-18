@@ -875,6 +875,15 @@ void skirmish_win_condition_test() {
 // ledger: verifies GameObjectType.Build_Tab_Heroes
 // ledger: verifies GameObjectType.Build_Tab_Outpost
 // ledger: verifies GameObjectType.Build_Tab_Space_Station
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "GameObjectType.MP_Encyclopedia_Text"): skirmish battles use the MP text
+// when the type has one.
+// ledger: verifies GameObjectType.MP_Encyclopedia_Text
+void encyclopedia_text_tag_test() {
+    CHECK(game::encyclopedia_text_tag(true, true) == "MP_Encyclopedia_Text");
+    CHECK(game::encyclopedia_text_tag(true, false) == "Encyclopedia_Text");
+    CHECK(game::encyclopedia_text_tag(false, true) == "Encyclopedia_Text");
+}
+
 void galactic_build_listed_test() {
     for (const char* tag : {"Build_Tab_Land_Units", "Build_Tab_Space_Units", "Build_Tab_Special_Structures", "Build_Tab_Heroes",
                             "Build_Tab_Outpost", "Build_Tab_Space_Station"})
@@ -2963,6 +2972,7 @@ int main() {
     custom_tech_offset_test();  // mcx4 t19
     skirmish_win_condition_test();  // mcx4 t14
     galactic_build_listed_test();   // mcx4 t14
+    encyclopedia_text_tag_test();   // mcx4 t14
     story_ui_test();
     linked_overlay_test();
     story_script_test();

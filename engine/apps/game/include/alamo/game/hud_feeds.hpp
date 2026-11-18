@@ -133,6 +133,10 @@ std::vector<PlanetIndex> fleet_drag_route(const galactic::GalacticSim& g, int32_
 // its Build_Tab_Land_Units / _Space_Units / _Special_Structures / _Heroes / _Outpost / _Space_Station flags is set
 // (`flag(tag)` = the type's boolean); the flag does not choose the tab.
 bool galactic_build_listed(const std::function<bool(std::string_view)>& flag);
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "GameObjectType.MP_Encyclopedia_Text", 0x2de200 [H]): the type tag whose text ids fill
+// the encyclopedia description. In a tactical game without a galactic parent (skirmish) a type with a non-empty
+// MP_Encyclopedia_Text uses it in place of Encyclopedia_Text; campaign battles and the galactic map keep the latter.
+std::string_view encyclopedia_text_tag(bool skirmish_battle, bool has_mp_text);
 // `icon(type)` = the type's Icon_Name.
 std::vector<ui::GalacticBuildOption> galactic_build_options(const galactic::GalacticSim& g, int32_t player, PlanetIndex planet,
                                                             const std::function<std::string(uint32_t type)>& icon);

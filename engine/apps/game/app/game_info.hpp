@@ -28,9 +28,10 @@ std::u32string type_label(const GameData& d, const ui::TextDatabase& text, objec
 // Encyclopedia entry from the type data (t40, HUD_GAPS §2.2): header = name, icon = the HUD icon, cost = Build_Cost_Credits,
 // population = Population_Value, unit_class = Encyclopedia_Unit_Class, abilities = the Unit_Abilities_Data button art,
 // strong / weak = the HUD icons of the Encyclopedia_Good_Against / _Vulnerable_To type lists, description = the
-// Encyclopedia_Text ids (MasterTextFile) joined. A planet has one row instead, its income [port].
+// Encyclopedia_Text ids (MasterTextFile) joined (`skirmish_battle`: game::encyclopedia_text_tag picks the MP text). A
+// planet has one row instead, its income [port].
 ui::EncyclopediaEntry encyclopedia_entry(const GameData& d, const ui::TextDatabase& text, std::span<const ui::HudTypeInfo> hud_types,
-                                         objects::TypeIndex t);
+                                         objects::TypeIndex t, bool skirmish_battle = false);
 
 // Holocron pages from the galactic sim. The data chart needs a history: sample() once per frame on the galactic map
 // (one sample per galactic day per non-neutral player: credits, combat power, planets owned).

@@ -1076,7 +1076,8 @@ void App::build_encyclopedia(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
     for (const auto& [id, t] : ency_types_)
         if (id == shown) shown_type = t;
     if (shown_type == objects::kNone) return;
-    ui::EncyclopediaEntry e = encyclopedia_entry(data_, ui_.text, ui_.hud_types, shown_type);
+    const bool skirmish_battle = screen_ == Screen::Battle && session_ && session_->spec().kind == SessionKind::Skirmish;  // mcx4 t14
+    ui::EncyclopediaEntry e = encyclopedia_entry(data_, ui_.text, ui_.hud_types, shown_type, skirmish_battle);
     // GRC 2 / REMAINING_GAPS §6.3: a planet's income row only with the local player's CreditIncome visibility.
     if (screen_ == Screen::Galactic)
         if (const galactic::GalacticSim* g = galaxy())
