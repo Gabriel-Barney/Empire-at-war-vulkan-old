@@ -5,6 +5,8 @@
 // Override_Bounty_SP when it is >= 0 (0 stays 0), else (absent or negative) the LARGEST GameConstants
 // Default_Bounty_By_Category_SP amount over the category bits of the type's CategoryMask, floored at 0. The result is
 // rounded half away from zero (0x22f9c0), as the bounty payment rounds it per object.
+// mcx4 t09 (A2M_R2_RE_B §2.2 [H]): in a skirmish (0x28afb0 true) the same rule reads Override_Bounty_MP and
+// Default_Bounty_By_Category_MP instead (`skirmish` arguments below).
 #pragma once
 #include <cstdint>
 #include <vector>
@@ -26,9 +28,11 @@ struct BountyTable {
     std::vector<Entry> entries;
 };
 
-BountyTable load_bounty_table(const data::GameConstants& constants, const objects::GameObjectTypes& types);
+BountyTable load_bounty_table(const data::GameConstants& constants, const objects::GameObjectTypes& types,
+                              bool skirmish = false);
 // Bounty of one object of type `t` (rule above), rounded; never negative.
-int64_t type_bounty(const BountyTable& table, const objects::GameObjectTypes& types, objects::TypeIndex t);
+int64_t type_bounty(const BountyTable& table, const objects::GameObjectTypes& types, objects::TypeIndex t,
+                    bool skirmish = false);
 // Same rule from already-extracted values (tests, hosts without a type database).
 int64_t bounty_of(const BountyTable& table, bool has_override, float override_amount, uint64_t categories);
 

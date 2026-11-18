@@ -138,6 +138,9 @@ inline constexpr uint16_t kAiDifficultySubtype = 0x4144;  // "AD"
 commands::EventData ai_difficulty_event(int32_t difficulty);
 // Difficulty 0..2 -> DifficultyAdjustments name ([port] Easy_Default / Normal_Default / Hard_Default).
 const char* difficulty_name(int32_t difficulty);
+// mcx4 t19 (MCX5_RE_ANSWERS Q3.1, 0x292590 [H]): the custom game options' start / max tech get -1 for a player whose
+// faction has a non-zero Displayed_Tech_Level_Adjustment, else 0 (also 0 for no faction).
+int32_t custom_tech_offset(const galactic::GalacticRules& rules, uint32_t faction);
 
 struct BattleOrderStats {
     uint64_t routed = 0, rejected = 0, moves = 0, attacks = 0, stops = 0, reinforcements = 0;

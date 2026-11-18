@@ -107,6 +107,19 @@ void test_data(const char* foc) {
             found_infantry = true;
         }
     CHECK(found_infantry);
+    {  // mcx4 t09 (docs/re/A2M_R2_RE_B.md §2.2): a skirmish reads Default_Bounty_By_Category_MP and Override_Bounty_MP.
+       // FoC sets them like the _SP fields, except that Exploding_Container has an SP override (0) and no MP one.
+       // ledger: verifies GameConstants.Default_Bounty_By_Category_MP
+       // ledger: verifies GameObjectType.Override_Bounty_MP
+        const game::BountyTable mp = game::load_bounty_table(data.db.constants(), data.types, true);
+        CHECK(mp.entries.size() == 11 && (mp.entries.size() < 9 || mp.entries[8].amount == 500));
+        const objects::TypeIndex pf = data.types.resolve_name("Pirate_Frigate"), ec = data.types.resolve_name("Exploding_Container");
+        CHECK(pf != objects::kNone && game::type_bounty(mp, data.types, pf, true) == 1800);
+        if (ec != objects::kNone) CHECK(game::type_bounty(table, data.types, ec) == 0);  // SP override 0: no category fallback
+        // A type with neither override: the MP category default, as for SP (the tables are equal in FoC).
+        CHECK(game::type_bounty(mp, data.types, data.types.resolve_name("Star_Destroyer"), true) ==
+              game::type_bounty(table, data.types, data.types.resolve_name("Star_Destroyer")));
+    }
     std::printf("battle_summary data: %zu bounty rows, %u types with a bounty (max %lld), %u overrides\n", table.entries.size(),
                 positive, static_cast<long long>(max_bounty), with_override);
 }

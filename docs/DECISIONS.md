@@ -307,6 +307,30 @@ re-paths / 6 early arrivals / 4 terrain records, retail order 1955 / 25 / 4 / 3)
 retail `0x3639d0` as a cycle: tracker snapshot -> collision services -> detection -> plans -> answer fold -> walk. A new
 record waits one tick in state 0. Every land golden moved. Design note and measurements: `docs/PHASE4.md`, mov1 entry.
 
+## Out-of-scope tag-ledger rows (mcx4 t16, Gabriel, 2026-11-18)
+
+Gabriel, 2026-11-18, up-front answer for the Stage 9 run: the tag ledger gets a third settled table, `OUT_OF_SCOPE` in
+`engine/objects/tools/gen_tag_ledger.py`, next to `RETAIL_UNUSED`. Its rows get state `out_of_scope`, are shown like
+retail-unused rows (`docs/status/tag-ledger.md`, "Out-of-scope rows") and are not honour gaps: the mcx4 exit test and
+`alamo_mod_check` do not count them. Each row names one of the reasons below, and `tools/lint/check_tag_ledger.py` checks
+that the reason is labelled here, that nothing in the engine reads the row, and that it is not also retail-unused.
+
+- **multiplayer**: online-only and MP-only data (lobby, quickmatch, message of the day, network sync, auto-resolve votes,
+  taunts, credit sharing, MP campaign heroes / beacons / preview icons). Follows "Platform, compilers and scope" and
+  "Multiplayer leftovers". Retail runs skirmish as a multiplayer game type, so a `_MP` row a skirmish or single-player game
+  reads (`Override_Bounty_MP`, `Default_Bounty_By_Category_MP`, `Create_Player_In_Multiplayer_Games`,
+  `Campaign.Is_Multiplayer`, which filters the campaign lists) is **not** out of scope and stays a gap until consumed.
+- **hardware detection**: `HardwareConfiguration` (CPU speed, texture memory, shader versions, vendor / device ids, fill
+  rates, default detail level). The port picks its settings from its own Video options ("Graphics and display").
+  Three rows `docs/re/xml_field_tables.md` files under that class (`Type`, `Apply_To_All_Allies`,
+  `Additional_Garrison_Units`, offsets of an ability's fields) are not hardware fields and stay gaps.
+- **graphic detail levels**: `GraphicDetailLevel` presets (resolution, AA, mip level, shader / water / shadow / particle /
+  mesh / environment detail, bloom, heat distortion, dynamic lighting). The port's renderer has its own settings.
+- **debug keys**: debug hot keys and debug displays (`Debug_Hot_Key_*`, `ShouldDisplay*Path*`, `ShowUnitAIPlanAttachment`,
+  `Debug_Ground_Structures`, `SFXEvent_Debug_Test_Loop`).
+- **localised splash / credits**: per-language splash screens and menu overlays (`Localized_*`), the Japanese subtitle
+  line setting and the credits-screen logos (`Credits_Logo_*`).
+
 ## Base-EaW mod heuristic stays a warning; StackTop covers the three-level AOW stack (mcx3 t11, Gabriel, 2026-11-18)
 
 Gabriel, 2026-11-18, up-front answers for the Stage 9 coordinator run (st9-coord), roadmap mcx3 t11:

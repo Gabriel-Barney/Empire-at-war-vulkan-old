@@ -1505,6 +1505,7 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
     // stands for type 4 (ccpgu t03). It gates Hold_Position, Secure_Victory_Control_Point and May_Lose_Land_Control_Game
     // (which, when 1, holds back the opening unit builds).
     w.land_control = b_->cfg_.skirmish && b_->cfg_.control_point_domination && !b_->space_;
+    w.interventions_enabled = b_->cfg_.interventions_enabled;  // mcx8 t09 Game.InterventionsEnabled (game settings flags)
     if (!w.parent_rep_type) {
         // The parent-mode (galactic) object by id (0x28aa50), not found -> -1; its type [M: 0x3973b0 on the galactic
         // object; the port's galactic units / companies are their own representative type, no TRANSPORT carried type].

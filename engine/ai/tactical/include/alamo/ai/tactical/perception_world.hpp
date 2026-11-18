@@ -159,6 +159,10 @@ struct PerceptionWorld {
     bool land_control = false;       // IsLandControlGame [L]
     bool setup_phase = false;        // 0x35f790 [M]
     bool story_campaign = false;
+    // mcx8 t09 Game.InterventionsEnabled (0x6e1fb0, registered by the base Game evaluator, so battles have it too;
+    // AI_GALACTIC_TOKENS §4 [H]): the game-settings flags, 1.0 unless an option was changed with random events off.
+    // Refreshed from the battle config every update (not saved).
+    bool interventions_enabled = true;
     // A1_READINGS §30.3 [H; M 3 = local skirmish]: GMM mode set, GMM +0x20 != 1 and game type (+0x18) in {1, 2, 3, 4}
     // (networked 1 / 2 / 4, skirmish 3). Gates the TRANSPORT_LANDING sums' parent-object resolution.
     bool skirmish_or_mp = false;
