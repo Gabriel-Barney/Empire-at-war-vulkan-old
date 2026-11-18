@@ -573,6 +573,9 @@ void App::handle_hud_actions(const std::vector<ui::HudAction>& acts) {
                     break;
                 }
                 reinforce_unit_ = a.unit;
+                // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.Reinforcements_Selection_SFXEvent family", 0xdc200): a unit picked
+                // for the drop plays the local faction's line, 2D.
+                audio_.faction_sfx("Reinforcements_Pick_Landing_Zone_SFXEvent");  // ledger: consumes Faction.Reinforcements_Pick_Landing_Zone_SFXEvent
                 targeting_.cancel();  // one modal pick at a time
                 bombing_end(false);
                 beacon_pick_ = false;
@@ -1023,9 +1026,20 @@ void App::battle_input() {
         if (input_.button(ui::Button::Right).click && !input_.button(ui::Button::Right).in_double_press) {
             reinforce_unit_ = 0;
             drop_click = true;
+            audio_.faction_sfx("Reinforcements_Cancelled_SFXEvent");  // mcx4 t13: the user's placement cancel (0x343e0, argument 1)
         } else if (input_.button(ui::Button::Left).click) {
             drop_click = true;
             if (valid) {
+                // mcx4 t13 (0x36300): the drop click queues the reinforcement: the pending unit's type SFXEvent_Fleet_Move
+                // when set, else the local faction's Reinforcements_Enroute_SFXEvent; 2D.
+                std::string_view moved;
+                for (const sim::TacticalBattle::Reserve& r : rb->reserves(me_p))
+                    if (r.galactic_id == key && r.type < data_.types.size()) {
+                        moved = data_.types.get_string(static_cast<objects::TypeIndex>(r.type), "SFXEvent_Fleet_Move");
+                        break;
+                    }
+                if (!moved.empty()) audio_.ui(moved);
+                else audio_.faction_sfx("Reinforcements_Enroute_SFXEvent");  // ledger: consumes Faction.Reinforcements_Enroute_SFXEvent
                 cmds.push_back(ui::reinforce_event(reinforce_unit_, {p.x, p.y, p.z}));
                 ++reinforce_drops_;
                 reinforce_unit_ = 0;

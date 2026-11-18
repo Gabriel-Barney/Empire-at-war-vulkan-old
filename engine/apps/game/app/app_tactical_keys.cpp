@@ -23,6 +23,7 @@ bool App::begin_first_reinforcement() {
     if (reinforce_unit_ != 0) {
         reinforce_unit_ = 0;
         reinforce_blob_.reset();
+        audio_.faction_sfx("Reinforcements_Cancelled_SFXEvent");  // ledger: consumes Faction.Reinforcements_Cancelled_SFXEvent
         return true;
     }
     const sim::TacticalBattle* b = battle();
