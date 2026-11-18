@@ -2,14 +2,20 @@
 // resolution (mod_registry.hpp) on a synthetic install in its own temp folder. The modinfo shapes come from installed
 // workshop mods: variant files with one dependency each (subA / subB), a file with a missing comma before "tags", a
 // layout string first in "dependencies", a submod without any modinfo whose parent only the data shows.
+#include <algorithm>
+#include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <memory>
 #include <filesystem>
 #include <optional>
 #include <string>
 #include <vector>
 
 #include "alamo/core/host_fs.hpp"
+#include "alamo/meg/meg.h"
 #include "alamo/vfs/mod_registry.hpp"
+#include "alamo/vfs/vfs.hpp"
 #include "alamo/test/support.hpp"
 
 namespace fs = std::filesystem;
@@ -243,10 +249,171 @@ void test_resolve(const Fixture& f) {
     CHECK(has(av::resolve_stack(r, bad).errors, "not a mod this install has: STEAMMOD=31337"));
 }
 
+// ---- mcx3 t04: MEG tables as the game reads them (meg::Archive::lookup, docs/re/MCX3_MEG_LOOKUP.md) ----
+
+struct Rec {
+    uint32_t crc, index, name_index;
+};
+
+void put_u16(std::string& s, uint32_t v) {
+    s.push_back(static_cast<char>(v & 0xFFu));
+    s.push_back(static_cast<char>((v >> 8) & 0xFFu));
+}
+void put_u32(std::string& s, uint32_t v) {
+    for (int i = 0; i < 4; ++i) s.push_back(static_cast<char>((v >> (8 * i)) & 0xFFu));
+}
+
+// A V1 MEG with the record table exactly as given (any order, any CRC, any index field). Record i's data is "R<i>".
+std::string meg_bytes(const std::vector<std::string>& names, const std::vector<Rec>& recs) {
+    std::string head;
+    put_u32(head, static_cast<uint32_t>(names.size()));
+    put_u32(head, static_cast<uint32_t>(recs.size()));
+    for (const std::string& n : names) {
+        put_u16(head, static_cast<uint32_t>(n.size()));
+        head += n;
+    }
+    uint32_t offset = static_cast<uint32_t>(head.size() + 20 * recs.size());
+    std::string table, data;
+    for (size_t i = 0; i < recs.size(); ++i) {
+        const std::string payload = "R" + std::to_string(i);
+        put_u32(table, recs[i].crc);
+        put_u32(table, recs[i].index);
+        put_u32(table, static_cast<uint32_t>(payload.size()));
+        put_u32(table, offset);
+        put_u32(table, recs[i].name_index);
+        offset += static_cast<uint32_t>(payload.size());
+        data += payload;
+    }
+    return head + table + data;
+}
+
+std::unique_ptr<alamo::meg::Archive> archive(const std::string& bytes) {
+    return alamo::meg::Archive::open(alamo::meg::Source::from_memory(std::vector<uint8_t>(bytes.begin(), bytes.end())));
+}
+
+std::string data_of(const alamo::meg::Archive& a, const alamo::meg::Entry* e) {
+    std::vector<uint8_t> b;
+    if (!e || !a.read(*e, b)) return "<none>";
+    return std::string(b.begin(), b.end());
+}
+
+// The independent oracle: the C runtime's own bsearch (the retail exe calls the same UCRT routine) over the stored
+// CRCs, compared unsigned as the game's comparator does.
+int crc_compare(const void* key, const void* rec) {
+    const uint32_t k = *static_cast<const uint32_t*>(key), r = *static_cast<const uint32_t*>(rec);
+    return k > r ? 1 : (k < r ? -1 : 0);
+}
+size_t crt_probe(const std::vector<Rec>& recs, uint32_t crc) {
+    const void* hit = std::bsearch(&crc, recs.data(), recs.size(), sizeof(Rec), crc_compare);
+    return hit ? static_cast<size_t>(static_cast<const Rec*>(hit) - recs.data()) : SIZE_MAX;
+}
+
+void test_meg() {
+    alamo::test::section("meg lookup");
+    using alamo::meg::name_crc;
+    std::vector<std::string> names;
+    for (int i = 0; i < 9; ++i) names.push_back("DATA\\XML\\F" + std::to_string(i) + ".XML");
+    std::vector<Rec> sorted;
+    for (uint32_t i = 0; i < names.size(); ++i) sorted.push_back({name_crc(names[i]), 0, i});
+    std::sort(sorted.begin(), sorted.end(), [](const Rec& a, const Rec& b) { return a.crc < b.crc; });
+    for (uint32_t i = 0; i < sorted.size(); ++i) sorted[i].index = i;
+
+    // Well formed: lookup is find, no issue.
+    const auto good = archive(meg_bytes(names, sorted));
+    CHECK(good && !good->table_issues().any());
+    if (good)
+        for (const std::string& n : names) CHECK(good->lookup(n) == good->find(n) && good->lookup(n) != nullptr);
+    if (good) CHECK(good->lookup("data/xml/f3.xml") == good->find("DATA\\XML\\F3.XML"));  // case and '/' as the game
+
+    // Unsorted (reversed): every CRC probed as the CRT's bsearch probes; the records it cannot reach are lost.
+    std::vector<Rec> rev(sorted.rbegin(), sorted.rend());
+    for (uint32_t i = 0; i < rev.size(); ++i) rev[i].index = i;
+    const auto un = archive(meg_bytes(names, rev));
+    CHECK(un != nullptr);
+    if (un) {
+        uint32_t lost = 0;
+        for (size_t i = 0; i < rev.size(); ++i) {
+            const size_t want = crt_probe(rev, rev[i].crc);
+            CHECK(un->probe(rev[i].crc) == want);
+            CHECK(data_of(*un, un->lookup(names[rev[i].name_index])) == (want == SIZE_MAX ? "<none>" : "R" + std::to_string(want)));
+            lost += want == SIZE_MAX ? 1u : 0u;
+        }
+        const alamo::meg::Archive::TableIssues t = un->table_issues();
+        CHECK(t.unsorted && t.unreachable == lost && lost > 0);
+        std::printf("  reversed table of %zu: %u lost\n", rev.size(), lost);
+        CHECK(!un->verify().empty());
+    }
+
+    // Duplicate CRCs: three records with F4's CRC; the probe order picks the one bsearch stops at.
+    std::vector<Rec> dup = sorted;
+    const uint32_t c4 = name_crc(names[4]);
+    size_t at4 = 0;
+    for (size_t i = 0; i < dup.size(); ++i)
+        if (dup[i].crc == c4) at4 = i;
+    dup.insert(dup.begin() + static_cast<std::ptrdiff_t>(at4), 2, dup[at4]);
+    for (uint32_t i = 0; i < dup.size(); ++i) dup[i].index = i;
+    const auto du = archive(meg_bytes(names, dup));
+    CHECK(du != nullptr);
+    if (du) {
+        CHECK(data_of(*du, du->lookup(names[4])) == "R" + std::to_string(crt_probe(dup, c4)));
+        CHECK(du->table_issues().duplicate == 2 && !du->table_issues().unsorted);
+    }
+
+    // A stored CRC that is not its name's: found by CRC only (the name is never compared).
+    std::vector<Rec> mis = sorted;
+    std::vector<std::string> mis_names = names;
+    for (Rec& r : mis)
+        if (r.name_index == 2) mis_names[2] = "DATA\\XML\\RENAMED.XML";  // keeps F2's CRC
+    const auto mi = archive(meg_bytes(mis_names, mis));
+    CHECK(mi != nullptr);
+    if (mi) {
+        CHECK(mi->lookup(names[2]) != nullptr && mi->lookup(names[2])->name == "DATA\\XML\\RENAMED.XML");
+        CHECK(mi->lookup("DATA\\XML\\RENAMED.XML") == nullptr);
+        CHECK(mi->find(names[2]) == nullptr);  // the tools' exact-name find
+        CHECK(mi->table_issues().name_mismatch == 1);
+    }
+
+    // An index field that is not the record's position: the data is the record it names; out of range: not found.
+    std::vector<Rec> red = sorted;
+    red[0].index = 1;
+    red[2].index = 99;
+    const auto re = archive(meg_bytes(names, red));
+    CHECK(re != nullptr);
+    if (re) {
+        CHECK(data_of(*re, re->lookup_crc(red[0].crc)) == "R1");
+        CHECK(re->lookup_crc(red[2].crc) == nullptr);
+        CHECK(re->table_issues().index_redirect == 2);
+    }
+
+    // Mounted: the VFS reads through the same rule and records each finding (warnings and meg_issues).
+    alamo::test::section("meg mount (conformance meg_unsorted)");
+    const fs::path T = fs::temp_directory_path() / "alamo_vfs_registry_tests_meg";
+    std::error_code ec;
+    fs::remove_all(T, ec);
+    write_file(T / "Data" / "MegaFiles.xml", "<Mega_Files><File>Data\\Unsorted.meg</File></Mega_Files>");
+    write_file(T / "Data" / "Unsorted.meg", meg_bytes(names, rev));
+    alamo::vfs::VfsConfig cfg;
+    cfg.foc_root = u8(T);
+    cfg.eaw_root = std::string();
+    const auto v = alamo::vfs::Vfs::create(cfg);
+    CHECK(v != nullptr);
+    if (v) {
+        size_t readable = 0;
+        std::vector<uint8_t> b;
+        for (const std::string& n : names) readable += v->read(n, b) ? 1u : 0u;
+        CHECK(v->meg_issues().size() == 1 && v->meg_issues()[0].kind == "meg_unsorted");
+        CHECK(!v->meg_issues().empty() && readable + v->meg_issues()[0].count == names.size());
+        CHECK(has(v->warnings(), "meg_unsorted: MEG '"));
+        std::printf("  mounted: %zu of %zu readable; %s\n", readable, names.size(), v->warnings().empty() ? "" : v->warnings().back().c_str());
+    }
+    fs::remove_all(T, ec);
+}
+
 }  // namespace
 
 int main() {
     test_parse();
+    test_meg();
     const Fixture f = make_fixture();
     test_registry(f);
     test_resolve(f);

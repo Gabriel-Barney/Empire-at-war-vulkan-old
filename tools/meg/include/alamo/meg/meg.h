@@ -70,6 +70,29 @@ public:
     // record table, then confirm by case-insensitive name compare (handles collisions).
     const Entry* find(std::string_view name) const;
 
+    // The game's lookup (docs/re/MCX3_MEG_LOOKUP.md): the probe sequence of the CRT's bsearch over the record table as
+    // stored, comparing the unsigned CRC of the normalised name with each record's stored CRC, no name compare; the
+    // record found names the record that holds the data through its index field. Same as find() on a well-formed
+    // table; on a malformed one it reproduces the game: entries an unsorted table hides are not found, one of
+    // several records with the same CRC wins by probe order, a record is found by its stored CRC whatever its name.
+    // nullptr when nothing matches or the index field is outside the table (the game reads past it; [port]).
+    const Entry* lookup(std::string_view name) const;
+    const Entry* lookup_crc(uint32_t crc) const;
+    // Position of the record the probe sequence stops at for `crc` (before the index field), or SIZE_MAX.
+    size_t probe(uint32_t crc) const;
+
+    // What lookup() makes of a malformed table (mcx3 t04), counted over the records; first_* name one example each.
+    struct TableIssues {
+        bool unsorted = false;         // some stored CRC is below the one before it
+        uint32_t unreachable = 0;      // records lookup_crc(own CRC) never reaches (an unsorted table): lost
+        uint32_t duplicate = 0;        // records with the CRC of another record that the probe stops at: shadowed
+        uint32_t name_mismatch = 0;    // stored CRC is not name_crc(stored name): reachable by CRC only
+        uint32_t index_redirect = 0;   // index field differs from the record's position (the data is the other record's)
+        std::string first_unreachable, first_duplicate, first_name_mismatch, first_index_redirect;
+        bool any() const { return unsorted || unreachable || duplicate || name_mismatch || index_redirect; }
+    };
+    TableIssues table_issues() const;
+
     // Copies entry bytes. False if encrypted or out of bounds.
     bool read(const Entry& e, std::vector<uint8_t>& out) const;
     // Zero-copy view (only for mapped sources); empty span otherwise.

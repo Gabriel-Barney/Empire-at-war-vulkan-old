@@ -288,6 +288,7 @@ struct Vfs::Impl {
     std::vector<std::unique_ptr<meg::Archive>> archives;  // mount order
     std::vector<Mount> mounts;
     std::vector<std::string> warnings;
+    std::vector<Vfs::MegIssue> meg_issues;  // mcx3 t04
 
     void warn(std::string msg) {
         log::warnf(kLogChannel, "%s", msg.c_str());
@@ -316,7 +317,7 @@ struct Vfs::Impl {
                 if (take(Hit{Resolution::Base, 0, h, nullptr, nullptr})) return true;
         }
         for (size_t i = archives.size(); i-- > 0;)
-            if (const meg::Entry* e = archives[i]->find(norm))
+            if (const meg::Entry* e = archives[i]->lookup(norm))
                 if (take(Hit{Resolution::Meg, static_cast<int>(i), nullptr, archives[i].get(), e})) return true;
         if (data)
             for (size_t i = 0; i < fallbacks.size(); ++i)
@@ -328,7 +329,7 @@ struct Vfs::Impl {
     // Newest-first over the first `count` mounted archives.
     bool find_meg(const std::string& norm, size_t count, Hit& out) const {
         for (size_t i = count; i-- > 0;) {
-            if (const meg::Entry* e = archives[i]->find(norm)) {
+            if (const meg::Entry* e = archives[i]->lookup(norm)) {
                 out = Hit{Resolution::Meg, static_cast<int>(i), nullptr, archives[i].get(), e};
                 return true;
             }
@@ -368,6 +369,29 @@ struct Vfs::Impl {
             return;
         }
         if (a->encrypted()) warn("MEG '" + host + "' is encrypted; its entries are not visible");
+        if (const meg::Archive::TableIssues t = a->table_issues(); t.any()) {  // mcx3 t04
+            const auto add = [&](const char* kind, uint32_t count, const std::string& first, const std::string& what) {
+                meg_issues.push_back(Vfs::MegIssue{kind, host, count, first});
+                warn(std::string(kind) + ": MEG '" + host + "': " + what);
+            };
+            if (t.unsorted)
+                add("meg_unsorted", t.unreachable, t.first_unreachable,
+                    "record table not sorted by CRC; " + std::to_string(t.unreachable) +
+                        " record(s) the game's binary search cannot reach" +
+                        (t.unreachable ? " (first " + t.first_unreachable + ")" : std::string()));
+            if (t.duplicate)
+                add("meg_duplicate", t.duplicate, t.first_duplicate,
+                    std::to_string(t.duplicate) + " record(s) share a CRC with another; the search's probe order picks one (first shadowed " +
+                        t.first_duplicate + ")");
+            if (t.name_mismatch)
+                add("meg_name_mismatch", t.name_mismatch, t.first_name_mismatch,
+                    std::to_string(t.name_mismatch) + " record(s) whose stored CRC is not their name's: found by CRC only (first " +
+                        t.first_name_mismatch + ")");
+            if (t.index_redirect)
+                add("meg_index", t.index_redirect, t.first_index_redirect,
+                    std::to_string(t.index_redirect) + " record(s) whose index field is not their position: the data read is the record it names (first " +
+                        t.first_index_redirect + ")");
+        }
         archives.push_back(std::move(a));
         mounts.push_back(Mount{host, std::move(reason)});
     }
@@ -621,6 +645,7 @@ std::string Vfs::describe() const {
 const std::vector<Vfs::Mount>& Vfs::mounts() const { return impl_->mounts; }
 const std::vector<std::string>& Vfs::mod_dirs() const { return impl_->mod_dirs; }
 const std::vector<std::string>& Vfs::warnings() const { return impl_->warnings; }
+const std::vector<Vfs::MegIssue>& Vfs::meg_issues() const { return impl_->meg_issues; }
 const std::string& Vfs::eaw_root() const { return impl_->eaw_root; }
 const std::string& Vfs::foc_root() const { return impl_->foc_root; }
 

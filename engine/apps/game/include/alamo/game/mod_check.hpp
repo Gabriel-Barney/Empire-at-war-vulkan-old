@@ -51,6 +51,7 @@
 #include "alamo/core/compat_issue.hpp"
 #include "alamo/game/asset_audit.hpp"
 #include "alamo/game/game_data.hpp"
+#include "alamo/vfs/vfs.hpp"
 
 namespace alamo::game {
 
@@ -307,6 +308,7 @@ struct ModCheckReport {
     // resolve_mod_stack (alamo_mod_check --resolve), that resolution (resolved = true): its errors count as errors, its
     // warnings as warnings.
     std::vector<vfs::ModDescriptor> mods;
+    std::vector<vfs::Vfs::MegIssue> meg_issues;  // mcx3 t04: malformed MEG tables (also in vfs_warnings)
     bool resolved = false;
     vfs::ResolvedStack stack;
     bool base_eaw = false;         // D1: a mounted mod is tagged EAW and not FOC: refused before loading (error, G0)

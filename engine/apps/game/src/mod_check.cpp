@@ -1402,6 +1402,17 @@ void compat_issues_and_grade(ModCheckReport& r) {
                      e.family + ": " + e.rule, e.retail_equivalent, uint16_t{0});
     for (const AssetEntry& e : r.assets.salvaged)
         r.issues.add(IssueKind::AssetSalvaged, IssueSeverity::Info, e.path, e.path, e.family + ": " + e.rule, false, uint16_t{0});
+    // mcx3 t04: the port reads a malformed MEG as the game does (meg::Archive::lookup): retail-equivalent findings.
+    for (const vfs::Vfs::MegIssue& m : r.meg_issues) {
+        const IssueKind k = m.kind == "meg_unsorted"   ? IssueKind::MegUnsorted
+                            : m.kind == "meg_duplicate" ? IssueKind::MegDuplicate
+                                                        : IssueKind::MegNameMismatch;  // meg_name_mismatch, meg_index
+        bool in_mod = false;
+        for (const std::string& dir : r.mod_dirs)
+            in_mod = in_mod || alamo::normalize_name(m.archive).rfind(alamo::normalize_name(dir), 0) == 0;
+        r.issues.add(k, IssueSeverity::Info, m.archive, m.archive, m.kind + ": " + std::to_string(m.count) + " record(s), first " + m.first,
+                     true, layer(in_mod));
+    }
     r.grade.grade = r.error_count() ? "G0" : "G1";
     for (const alamo::CompatIssue& i : r.issues.issues())
         if (!i.retail_equivalent && i.layer != alamo::kBaseLayer &&
@@ -1488,6 +1499,7 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
         r.vfs_layers = d.vfs->describe();
         r.vfs_warnings = d.vfs->warnings();
         r.mod_dirs = d.vfs->mod_dirs();
+        r.meg_issues = d.vfs->meg_issues();
         list_mod_files(*d.vfs, r);
     }
     r.mods = d.mods;

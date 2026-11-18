@@ -139,6 +139,15 @@ public:
     // (unresolved STEAMMOD ids dropped). Resolution::layer_index indexes this.
     const std::vector<std::string>& mod_dirs() const;
     const std::vector<std::string>& warnings() const;
+    // mcx3 t04: malformed MEG tables found at mount (meg::Archive::table_issues); lookups follow the game's rule
+    // (meg::Archive::lookup), so what the game loses is lost here too, and each finding is also a warnings() line.
+    struct MegIssue {
+        std::string kind;     // "meg_unsorted", "meg_duplicate", "meg_name_mismatch", "meg_index"
+        std::string archive;  // host path of the .meg
+        uint32_t count = 0;   // records concerned (meg_unsorted: records the lookup cannot reach, 0 when none is lost)
+        std::string first;    // one record's stored name
+    };
+    const std::vector<MegIssue>& meg_issues() const;
     const std::string& eaw_root() const;                // "" if none
     const std::string& foc_root() const;                // host path of the FoC folder (the Base layer's root)
 
