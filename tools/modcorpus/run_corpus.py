@@ -379,7 +379,9 @@ class Runner:
                 res["error"] = last_line(r["text"], r"skip")
             else:
                 res["status"] = "failed"
-                res["error"] = (f"step {mt.group(2)} of {mt.group(3)}; " if mt else "") + last_line(r["text"])
+                notes = [l[6:].strip() for l in r["text"].splitlines() if l.startswith("note: ")]  # the smoke's reasons
+                why = "; ".join(notes)[:300] if notes else last_line(r["text"])
+                res["error"] = (f"step {mt.group(2)} of {mt.group(3)}; " if mt else "") + why
             out["smoke_" + kind] = res
         return out
 
