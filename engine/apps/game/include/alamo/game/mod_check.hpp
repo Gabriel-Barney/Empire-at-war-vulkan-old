@@ -289,11 +289,20 @@ struct ModCheckReport {
         size_t official_maps = 0, custom_maps = 0;
         bool ai = false;  // AI data loaded
     } counts;
+    // mcx7 t01: the Official tab's skirmish rows (skirmish_map_rows, menu order) for the corpus runner's map pick.
+    struct SkirmishMap {
+        std::string map;      // SkirmishMapEntry::map
+        bool land = false;    // kind 1 (else space)
+        uint32_t players = 0;
+        bool in_mod = false;  // the .ted resolves to a mod folder
+    };
+    std::vector<SkirmishMap> skirmish_maps;
     size_t campaigns_checked = 0;
     // No Locations / no planet resolves. Retail lists such a campaign in the Galactic Conquest menu (a header or notice
     // row; docs/re/MODC_LOADER.md section 4), so it is a warning: a menu entry that cannot be started. An error only
     // when no checked campaign has planets (no_startable_campaign()).
     std::vector<std::string> campaigns_without_planets;
+    std::vector<std::string> campaigns_startable;  // mcx7 t01: the checked campaigns with planets, database order
     std::vector<std::string> campaign_warnings;  // build_galaxy_map diagnostics, one line per message with its campaigns
     size_t campaign_warning_count = 0;           // the diagnostics behind campaign_warnings (per campaign)
     std::vector<MissingFile> missing_files;      // sorted by path
@@ -351,6 +360,10 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
 // with files and submod only, the other checks off). The game itself never resolves: an explicit command line is
 // mounted as written.
 vfs::ResolvedStack resolve_mod_stack(const std::string& root, const std::vector<std::string>& picked, const ModCheckOptions& options);
+// mcx7 t01 (alamo_mod_check --list-mods): the installed mods (scan_installed_mods) as JSON, one object per descriptor
+// in registry order: key, arg, kind, id, variant, root, name, version, has_data, game_tag, content_hash (16 hex digits),
+// dependencies [{modtype, identifier}]. Schema "alamo.mod_list", version 1.
+std::string format_mod_list_json(const vfs::ModRegistry& registry);
 // Human-readable report (sections in the order of the file comment). verbose: every diagnostic, else the first 20 of each
 // step and campaign / Lua list.
 std::string format_mod_report(const ModCheckReport& report, bool verbose = false);

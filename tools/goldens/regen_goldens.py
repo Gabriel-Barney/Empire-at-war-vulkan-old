@@ -13,6 +13,10 @@ Run it through tools\\regen_goldens.cmd (sets the toolchain PATH and the game-da
 3. Game smoke goldens (engine/apps/game/testdata/game_smoke_*.crc / .rec): runs the smoke tests
    alamo_game_smoke_{skirmish,campaign,land} of the tree (they need a GPU and the game data; --only headless skips them),
    converts the dumped full CRC log to a checkpoint file and copies the .rec.
+3a. Mod goldens (tests/goldens/mods/<name>.crc, mcx7 t04; part of --only headless / all, alone with --mods, left out with
+   --no-mods): found like the headless goldens (the ctest entry that passes --golden <file>, through
+   tools/goldens/mod_golden.py), run the same way; a mod that is not installed is reported as skipped, not failed. After
+   a run the spec's `fingerprint` (<name>.json) is set to the installed mod's data, so the test stops skipping it.
 4. Benchmark scenarios (tests/benchmark/*.abench, BM1; part of --only headless / all, skipped by --no-bench, alone with --only bench):
    a scenario carries an expected per-tick CRC fingerprint, so an intended sim behaviour change makes it stale. Each scenario is
    checked with `alamo_headless --bench X --runs 1 --warmup 0 --quiet` (exit 3 = "scenario changed, not comparable" = stale);
@@ -22,7 +26,7 @@ Run it through tools\\regen_goldens.cmd (sets the toolchain PATH and the game-da
    differ, the window of ticks it lies in), how many checkpoints changed. State the intended behaviour change from that in
    the PR. The exact tick: run the old and the new build with --crc-out full.crc and `alamo_headless --compare`.
 
-Options: --bench-check (only report stale scenarios, exit 4 when one is stale; implies --only bench), --no-bench, --build-dir DIR (default build-msvc; the fast MSVC tree, Release, already built), --only headless|game|all
+Options: --mods (only the mod goldens), --no-mods, --bench-check (only report stale scenarios, exit 4 when one is stale; implies --only bench), --no-bench, --build-dir DIR (default build-msvc; the fast MSVC tree, Release, already built), --only headless|game|all
 (default headless), --match REGEX (only headless goldens whose file name matches), --checkpoint N, --force, --dry-run (run
 everything, change nothing), --list (what would run).
 Exit: 0 ok, 1 a run failed, 3 refused (dirty tree), 2 usage / missing tree, 4 --bench-check found a stale scenario.
@@ -42,6 +46,7 @@ sys.path.insert(0, HERE)
 import convert_goldens as cg  # noqa: E402
 
 HEADLESS_DIR = "engine/apps/headless/testdata"
+MODS_DIR = "tests/goldens/mods"
 GAME_DIR = "engine/apps/game/testdata"
 SMOKES = ("skirmish", "campaign", "land")
 
@@ -89,10 +94,18 @@ def strip_options(cmd: list[str]) -> list[str]:
     return out
 
 
-def headless_jobs(build_dir: str, checkpoint: int) -> list[dict]:
-    """One job per checked-in headless golden: the first ctest entry (by name) that passes --golden <that file>."""
-    want = {norm(os.path.join(ROOT, p)): p for p in sorted(
-        f"{HEADLESS_DIR}/{n}" for n in os.listdir(os.path.join(ROOT, HEADLESS_DIR)) if n.endswith(".crc"))}
+def mod_golden_files() -> list[str]:
+    """tests/goldens/mods/<name>.crc of every spec <name>.json (the golden may not exist yet)."""
+    d = os.path.join(ROOT, MODS_DIR)
+    return sorted(f"{MODS_DIR}/{n[:-5]}.crc" for n in os.listdir(d) if n.endswith(".json")) if os.path.isdir(d) else []
+
+
+def headless_jobs(build_dir: str, checkpoint: int, files: list[str] | None = None) -> list[dict]:
+    """One job per checked-in headless golden (or per entry of `files`): the first ctest entry (by name) that passes
+    --golden <that file>."""
+    if files is None:
+        files = sorted(f"{HEADLESS_DIR}/{n}" for n in os.listdir(os.path.join(ROOT, HEADLESS_DIR)) if n.endswith(".crc"))
+    want = {norm(os.path.join(ROOT, p)): p for p in files}
     jobs: dict[str, dict] = {}
     for t in sorted(ctest_json(build_dir), key=lambda t: t["name"]):
         cmd = t.get("command") or []
@@ -164,6 +177,63 @@ def summarize(rel: str, old_text: str | None, new_text: str) -> tuple[str, str]:
     if old.comments != new.comments:
         lines.append("    comments: " + " | ".join(old.comments) + "  ->  " + " | ".join(new.comments))
     return "changed", "\n".join(lines)
+
+
+def mods_step(build_dir: str, args, env, logs, summaries, tmp: str) -> int:
+    """The mod goldens: regenerate each from its ctest entry; a mod that is not installed is skipped. Returns failed runs."""
+    jobs, missing = headless_jobs(build_dir, args.checkpoint, mod_golden_files())
+    if args.match:
+        jobs = [j for j in jobs if re.search(args.match, os.path.basename(j["golden"]))]
+        missing = []
+    for rel in missing:
+        print(f"regen_goldens: no ctest entry with --golden {rel} (reconfigure the tree after adding a spec): left alone", file=sys.stderr)
+    print(f"mod goldens ({len(jobs)}):")
+    for j in jobs:
+        print(f"  {j['golden']}  <- ctest {j['test']}, checkpoint {j['every']}")
+    if args.list:
+        return 0
+    failed = 0
+    for j in jobs:
+        out = os.path.join(tmp, "mod_" + os.path.basename(j["golden"]))
+        if os.path.exists(out):
+            os.remove(out)
+        cmd = list(j["cmd"])
+        if "--workers" not in cmd:
+            cmd += ["--workers", "0"]
+        cmd += ["--crc-out", out, "--crc-checkpoint", str(j["every"])]
+        if j["keep"]:
+            cmd += ["--crc-keep", ",".join(map(str, j["keep"]))]
+        print(f"{j['golden']}:")
+        r = run(cmd, j["cwd"], env, logs)
+        text = r.stdout + r.stderr
+        if r.returncode == 0 and not os.path.isfile(out) and "skipped" in text:
+            summaries.append(("unchanged", f"{j['golden']}: skipped ({next((l for l in text.splitlines() if 'skipped' in l), '').strip()})"))
+            continue
+        if r.returncode != 0 or not os.path.isfile(out):
+            failed += 1
+            print(f"  FAILED: exit {r.returncode}\n" + "\n".join("    " + l for l in text.strip().splitlines()[-8:]))
+            continue
+        new_text = open(out, encoding="utf-8", newline="").read()
+        path = os.path.join(ROOT, j["golden"])
+        old_text = open(path, encoding="utf-8", newline="").read() if os.path.isfile(path) else None
+        status, line = summarize(j["golden"], old_text, new_text)
+        summaries.append((status, line))
+        if args.dry_run:
+            continue
+        if status != "unchanged":
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(new_text)
+        spec_path = path[:-4] + ".json"
+        spec_cmd = [c for c in j["cmd"][:j["cmd"].index("--spec") + 2]] + ["--fingerprint"] if "--spec" in j["cmd"] else None
+        fp = run(spec_cmd, j["cwd"], env, logs).stdout.strip().splitlines() if spec_cmd else []
+        if fp and os.path.isfile(spec_path):
+            spec = json.load(open(spec_path, encoding="utf-8"))
+            if spec.get("fingerprint") != fp[-1]:
+                spec["fingerprint"] = fp[-1]
+                with open(spec_path, "w", encoding="utf-8", newline="\n") as f:
+                    f.write(json.dumps(spec, indent=2) + "\n")
+                summaries.append(("changed", f"{MODS_DIR}/{os.path.basename(spec_path)}: fingerprint set to {fp[-1]}"))
+    return failed
 
 
 BENCH_DIR = "tests/benchmark"
@@ -254,7 +324,9 @@ def bench_step(build_dir: str, build_arg: str, check_only: bool, listing: bool, 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--build-dir", default="build-msvc")
-    ap.add_argument("--only", choices=("headless", "game", "all", "bench"), default="headless")
+    ap.add_argument("--only", choices=("headless", "game", "all", "bench", "mods"), default="headless")
+    ap.add_argument("--mods", action="store_true", help="only the mod goldens (tests/goldens/mods; same as --only mods)")
+    ap.add_argument("--no-mods", action="store_true", help="leave the mod goldens alone in --only headless / all")
     ap.add_argument("--bench-check", action="store_true", help="only report stale benchmark scenarios (implies --only bench; exit 4 when stale)")
     ap.add_argument("--no-bench", action="store_true", help="leave the benchmark scenarios (tests/benchmark) alone")
     ap.add_argument("--checkpoint", type=int, default=cg.DEFAULT_CHECKPOINT)
@@ -265,6 +337,8 @@ def main() -> int:
     args = ap.parse_args()
     if args.bench_check:
         args.only = "bench"
+    if args.mods:
+        args.only = "mods"
 
     dirty = tracked_changes()
     if dirty and not args.force and not args.list:
@@ -325,6 +399,9 @@ def main() -> int:
                 if status != "unchanged" and not args.dry_run:
                     with open(path, "w", encoding="utf-8", newline="") as f:
                         f.write(new_text)
+
+    if args.only == "mods" or (args.only in ("headless", "all") and not args.no_mods):
+        failed += mods_step(build_dir, args, env, logs, summaries, tmp)
 
     if args.only in ("game", "all"):
         have_game = any(t["name"] == "alamo_game_smoke_skirmish" for t in ctest_json(build_dir))

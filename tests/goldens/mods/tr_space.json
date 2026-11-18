@@ -1,0 +1,17 @@
+{
+  "name": "Thrawn's Revenge",
+  "mod": "1125571106",
+  "stack": [
+    "STEAMMOD=1125571106"
+  ],
+  "args": [
+    "--skirmish-ai",
+    "skirmish",
+    "--map",
+    "_MP_SPACE_FIERY",
+    "--ticks",
+    "600",
+    "--quiet"
+  ],
+  "fingerprint": ""
+}

@@ -16,6 +16,8 @@
 //   mcx3 t02: --resolve treats the mod arguments as the picked mods and checks the stack resolve_mod_stack builds from
 //   them (declared modinfo dependencies, the submod hint's likely parent, cycle / base-EaW errors, conflict warnings);
 //   --resolve-only prints the stack and stops (exit 1 on a stack error).
+//   mcx7 t01: --list-mods writes the installed mods (the registry: workshop items, then <game>\Mods folders, one entry
+//   per modinfo variant) as alamo.mod_list JSON to --json FILE|- (default stdout) and stops: the corpus runner's discovery.
 //   Exit 0: no errors (warnings allowed), 1: errors, 2: usage.
 //   Example (a Steam workshop mod):
 //     alamo_mod_check --game "...\corruption" STEAMMOD=1125571106 --json report.json
@@ -34,7 +36,7 @@ int usage() {
                  "usage: alamo_mod_check [--game DIR] [MODPATH=..] [STEAMMOD=..] [FALLBACKPATH=..] [--out FILE] [--json FILE|-]\n"
                  "                       [--verbose] [--no-campaigns] [--no-lua] [--no-lua-run] [--no-files] [--no-xml-tags]\n"
                  "                       [--no-submod] [--no-shaders] [--no-dxc] [--no-fx-prebuild] [--no-assets] [--strict]\n"
-                 "                       [--corpus-cache DIR] [--resolve | --resolve-only]\n");
+                 "                       [--corpus-cache DIR] [--resolve | --resolve-only] [--list-mods]\n");
     return 2;
 }
 
@@ -55,7 +57,7 @@ int main(int argc, char** argv) {
     alamo::vfs::install_steam_workshop_lookup();  // modc t10: STEAMMOD= from the Steam library folders
     std::string game, out, json;
     std::vector<std::string> args;
-    bool verbose = false, resolve = false, resolve_only = false;
+    bool verbose = false, resolve = false, resolve_only = false, list_mods = false;
     alamo::game::ModCheckOptions opt;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -65,6 +67,7 @@ int main(int argc, char** argv) {
         else if (a == "--verbose") verbose = true;
         else if (a == "--resolve") resolve = true;
         else if (a == "--resolve-only") resolve = resolve_only = true;
+        else if (a == "--list-mods") list_mods = true;
         else if (a == "--no-campaigns") opt.campaigns = false;
         else if (a == "--no-lua") opt.lua = false;
         else if (a == "--no-lua-run") opt.lua_run = false;
@@ -83,6 +86,13 @@ int main(int argc, char** argv) {
     if (game.empty())
         if (const char* env = std::getenv("ALAMO_FOC_DATA")) game = env;
     if (game.empty()) return usage();
+    if (list_mods) {
+        const auto libraries = alamo::vfs::find_steam_libraries(game, alamo::vfs::default_steam_roots());
+        const std::string js = alamo::game::format_mod_list_json(alamo::vfs::scan_installed_mods(game, libraries, true));
+        if (json.empty() || json == "-") std::fputs(js.c_str(), stdout);
+        else if (!write_file(json, js)) return 1;
+        return 0;
+    }
     if (opt.submod || resolve) opt.workshop_libraries = alamo::vfs::find_steam_libraries(game, alamo::vfs::default_steam_roots());
 
     alamo::vfs::ResolvedStack stack;
