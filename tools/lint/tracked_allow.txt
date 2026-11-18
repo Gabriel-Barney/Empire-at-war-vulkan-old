@@ -26,3 +26,5 @@ engine/render/third_party/smaa/AreaTex.h
 # app.rs include_bytes! icon.png for the window icon. Source assets, not build output.
 launcher/assets/icon.ico
 launcher/assets/icon.png
+# mcx3 t07: an empty stand-in so the VFS detects the conformance fixture's EaW install (<foc>\..\GameData\sweaw.exe); 0 bytes, never run
+engine/apps/game/testdata/conformance/stacks/GameData/sweaw.exe
