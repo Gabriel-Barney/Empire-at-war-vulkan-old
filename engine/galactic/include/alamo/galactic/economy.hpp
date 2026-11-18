@@ -68,6 +68,15 @@ struct EconomyConstants {
     int32_t max_starbase_level = 5;                // MaximumStarbaseLevel (+0xF4); limit: data GameConstants
     int32_t max_groundbase_level = 5;              // MaximumGroundbaseLevel (+0xF8); limit: data GameConstants
     int32_t max_special_structures = 5;            // MaximumSpecialStructures (+0xFC); limit: data GameConstants
+    // mcx4 t02 (MCX4_GAL2_RE_ANSWERS Q1): TradeRouteMovementFactor (+0x10C; FoC 0.5), the divisor of a trade-route edge
+    // in the AI connectivity graph 0x662b30 (its only reader). [port] the absent-tag default was not read.
+    float trade_route_movement_factor = 0.5f;
+    // mcx4 t09 (MCX4_GAL2_RE_ANSWERS Q3, presentation): Bribery_Fleet_Reveal_Range (+0x11F7C; FoC 75), the reveal range
+    // of a Bribery planet in the fleet visibility vote. [port] the absent-tag default was not read.
+    float bribery_fleet_reveal_range = 0.0f;
+    // mcx4 t09 (MCX4_GAL2_RE_ANSWERS Q5): Indigenous_Spawn_Destruction_Reward (FoC 500), the CREDITS reward of a campaign
+    // land battle's sandbox objective for destroying every spawner of one hostile type (sim::StorySession).
+    int32_t indigenous_spawn_destruction_reward = 0;
     // a2l t03 (A2L_T03_RE_ANSWERS Q4.1): Health_Low_Percent_Threshold (+0x11b38; FoC 0.33, Thrawn's Revenge 0.50), the
     // galactic free-store Setup A health floor.
     float health_low_percent_threshold = 0.33f;

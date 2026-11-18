@@ -556,10 +556,18 @@ void test_hero_respawn_after_battle() {
         const uint32_t fc = w.fleet(rC, pUnder);
         CHECK(fc != kNoFleet && w.sim.fleets()[fc].contents.size() == 1);
         const ObjectHandle hero = fc != kNoFleet ? w.sim.fleets()[fc].contents[0] : ObjectHandle{};
+        const auto hero_id = static_cast<int32_t>(w.store.id(hero));
+        w.sim.set_emit_events(true);
         const int32_t f0 = w.sim.frame();
         w.arrive_at_b();
         CHECK(w.cm->log().size() == 1 && w.cm->log()[0].winner == pEmpire);
         CHECK(!w.store.alive(hero));
+        // MCX4_GAL2_RE_ANSWERS Q4: an auto-resolve kill takes Die's own respawn, not "hero defeated" 0x3a01f0, so its
+        // ObjectDestroyed carries value 1 (the story raises no STORY_DEFEAT_HERO for it).
+        int32_t kill_value = -1;
+        for (const GalacticEvent& e : w.sim.events())
+            if (e.kind == GalacticEventKind::ObjectDestroyed && e.object == hero_id) kill_value = e.value;
+        CHECK(kill_value == 1);
         const auto pending = w.sim.respawns_pending(rB);
         CHECK(pending.size() == 1 && pending[0].type == tCorvette && pending[0].owner == pUnder);
         CHECK(pending.empty() || (pending[0].due > f0 + 30 * 40 - 60 && pending[0].due <= w.sim.frame() + 30 * 40));
@@ -579,8 +587,14 @@ void test_hero_respawn_after_battle() {
         BattleResult res;
         res.winner = pEmpire;
         res.destroyed = {hero};
+        const auto hero_id = static_cast<int32_t>(w.store.id(hero));
+        w.sim.set_emit_events(true);
         w.cm->finish_battle(res);
         CHECK(!w.store.alive(hero) && w.sim.respawns_pending(rB).size() == 1);
+        int32_t kill_value = -1;  // a fought battle's loss goes through 0x2b5360 -> 0x3a01f0: STORY_DEFEAT_HERO stays
+        for (const GalacticEvent& e : w.sim.events())
+            if (e.kind == GalacticEventKind::ObjectDestroyed && e.object == hero_id) kill_value = e.value;
+        CHECK(kill_value == 0);
     }
     {  // Respawn_Whole_Team_When_Killed (§9 / §13 TRANSPORT branch): a company with a dead flagged member is lost whole;
        // an unflagged member's death or a squadron holder (TEAM branch) keeps it.

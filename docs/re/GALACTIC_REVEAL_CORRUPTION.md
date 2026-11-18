@@ -143,6 +143,9 @@ Every other owned planet is revealed by the first pre-step (§1.3 step 1).
 | SET_PLANET_VISIBILITY_LEVEL (0x51) | P1 planet, P2 faction, P3 level name or "none", P4 key, P5 optional seconds | modifies the visibility modifier list, not the byte (§2.3) |
 
 ### 1.6 `Hyperspace_Fleet_Reveal_Range` (type +0x64C) — a reader, not a writer [H mechanism, M details]
+Superseded by `MCX4_GAL2_RE_ANSWERS.md` Q3 (2026-11-18), which has the full vote: +0xC0 is the fleet data pack (the
+vote also runs in orbit), a `Super` content makes the fleet visible, the AI test is on the fleet's owner, and the
+result is presentation only (`GalacticSim::fleet_visible_to_local`). The list below is the earlier reading.
 - Objects whose type has +0x64C > 0 are registered at creation (0x29f810 / 0x2b5ad0) in a GOM revealer list
   (+0x210).
 - 0x433090 is a fleet behaviour's visibility vote for the local player. A moving fleet (+0xC0 set, not

@@ -780,6 +780,9 @@ Read with REA (mcx6, 2026-11-17).
   four filter GUI components 0x3f..0x42 and zeroes the GUI's field +0x21c4. Pure UI state, not saved. [H]
 
 ### 2.7 SET_SANDBOX_OBJECTIVES (0x65) [L]
+The spawner part of the 0x32bd10 body is decoded in `MCX4_GAL2_RE_ANSWERS.md` Q5 [H]; the `Sandbox_Objective_1..4`
+part is still open.
+
 
 - No parameters. Runs 0x32bd10 on the plot's story-mode object (`plot player +0x630`). It needs that object's sub-plot
   (+0xd8); without it logs "Unable to set sandbox objectives due to missing subplot" and stops. The function is 9.5 KB;

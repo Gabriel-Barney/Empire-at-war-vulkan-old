@@ -577,6 +577,8 @@ public:
     RejectReason invade(int32_t player, PlanetIndex planet, std::span<const ObjectHandle> units);
     // Removes a unit, structure, starbase or fleet (battle outcome / story stand-in).
     bool destroy_object(ObjectHandle object);
+    // mcx4 Q4 (MCX4_GAL2_RE_ANSWERS): an auto-resolve kill - the same removal, with ObjectDestroyed value 1.
+    bool destroy_object_auto_resolve(ObjectHandle object);
     float add_credits(int32_t player, float amount, bool notify_ai = true);  // A2K_T10_CREDIT_NOTIFY_RE Q3 table for the flag
     float player_income(int32_t player, bool consume);
     float planet_income(PlanetIndex planet, bool gross);
@@ -607,6 +609,11 @@ public:
     // The raw byte D +0x2c9: the human hop gate, trade-route visibility, the hyperspace fleet test.
     bool planet_revealed_raw(PlanetIndex planet) const;
     void set_planet_revealed(PlanetIndex planet, bool revealed);
+    // mcx4 t09 (MCX4_GAL2_RE_ANSWERS Q3, the fleet visibility vote 0x433090) [H]: whether the local player's client shows
+    // `fleet` (its map icon, tooltip count, radar) and plays its Galactic_Fleet_Hyperspace departure SFX. Presentation
+    // only: reads sim state, writes nothing, outside the CRC. True for the local player's own fleets and with no local
+    // player; false for a dead fleet.
+    bool fleet_visible_to_local(uint32_t fleet) const;
     bool planet_auto_reveal() const { return auto_reveal_; }
     void set_planet_auto_reveal(bool on) { auto_reveal_ = on; }  // story ENABLE_GALACTIC_REVEAL (0x44)
     // Story rewards (GRC 1.5): REVEAL_PLANET (0x33) on every planet of a type (`on` = atoi(Param2) != 0) and
@@ -1368,6 +1375,7 @@ private:
     void victory_tests(std::initializer_list<VictoryCondition> types);
     // ownership
     void apply_ownership(PlanetIndex planet, int32_t derived);
+    void first_political_corruption(PlanetIndex planet);  // mcx4 t21: 0x3fb040's first-call type-3 block
     void on_owner_change(PlanetIndex planet, int32_t old_owner);
     // production
     int32_t queue_kind_of(const TypeInfo& t) const;  // -1 = not producible
@@ -1520,6 +1528,7 @@ private:
     InstallmentHook installment_hook_;
     // OI galactic (hashed in the "OIG1" tail once non-default)
     std::vector<int32_t> stealthed_;      // ObjectIds with the galactic stealth byte set, ascending
+    bool destroy_auto_resolve_ = false;   // mcx4 Q4: set only inside destroy_object_auto_resolve (not state)
     std::vector<int32_t> ground_shy_;     // cu8f t04b: ObjectIds with Prefer_Ground_Over_Space false, ascending
     std::vector<VictoryClaim> claims_;    // declaration order
     int32_t victory_hold_ = 0;            // story t11: galactic monitor hold (+0x5c)

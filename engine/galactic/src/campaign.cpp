@@ -356,14 +356,19 @@ bool GalacticSim::start(const GalacticSetup& setup, std::vector<std::string>* di
     // timer, and runs the change effects (0x3f9690 with P = the planet owner: the unlock and the success credit bonus,
     // MCX4_T09_RE_ANSWERS Q1). [port] The faction / planet-type per-type upgrade records of 0x3f9690 are not applied
     // (base FoC uses the override only in the Underworld exec demo campaign).
+    // mcx4 t21 (MCX4_GAL2_RE_ANSWERS Q2) [H]: the override does not test the current type, so a value >= 1 pays the
+    // type-3 bonus on every run.
     for (const auto& [planet_type, value] : setup.corruption_level_override)
         for (PlanetIndex i = 0; i < n; ++i)
             if (planets_[i].is_planet && planets_[i].type == planet_type) {
-                const int8_t before = planets_[i].corruption;
                 set_corruption(i, value >= 1 ? kCorruptionRacketeering : kCorruptionNone, planets_[i].owner);
-                if (planets_[i].corruption != before) pay_corruption_bonus(i, planets_[i].corruption, planets_[i].owner);
+                if (value >= 1) pay_corruption_bonus(i, kCorruptionRacketeering, planets_[i].owner);
                 break;
             }
+    // mcx4 t21 (Q2) [H]: then each planet's first political update (tick 1 in retail, 0x3fb040 via the planet service
+    // 0x3fe1b0; [port] run here at the end of start(), where nothing else happens between the two).
+    for (PlanetIndex i = 0; i < n; ++i)
+        if (planets_[i].is_planet) first_political_corruption(i);
     // q2f t02 [H]: the mode's frame-0 fiscal cycle runs before the galaxy is built (Q2 traces: no objects at mode frame
     // 0, F fields last 0 / next 1350 / cycle 1 there, credits unchanged until mode frame 1351), so it pays nobody, feeds
     // no AI income tick and rerolls no black-market planet. Only its bookkeeping (GE 1.2 steps 2-4) is left.
@@ -713,13 +718,8 @@ void GalacticSim::apply_ownership(PlanetIndex planet, int32_t derived) {
         p.initialised = true;
         p.owner = derived;
         p.control = p.target_control;
-        if (benefits(derived) && p.corruption == kCorruptionNone) {  // starts corrupted, type 3 [H]
-            p.corruption = kCorruptionRacketeering;
-            p.corrupting_player = derived;
-            corruption_unlocks(planet, kCorruptionNone, kNoPlayer);  // campaign start 0x28dbe0
-            pay_corruption_bonus(planet, kCorruptionRacketeering, derived);  // 0x3fb040 site 0x3fbeda (T09 Q1)
-            rebuild_corruption_pairs(planet);                         // GRC 4.3: instant, then 0x3ff230
-        }
+        // The Benefits_From_Corruption type-3 start is first_political_corruption, run by start() after the
+        // Corruption_Level_Override loop (mcx4 t21, MCX4_GAL2_RE_ANSWERS Q2).
         return;
     }
     // galab t07 (GA §6.1): an adverse update (a new owner, or a target below the current control; tested before the
@@ -747,6 +747,22 @@ void GalacticSim::apply_ownership(PlanetIndex planet, int32_t derived) {
     // GE 4.2: dropping from >= 1 to < 1 calls 0x403490 for both queues ([M] "re-checks the head"): no
     // observable effect is modelled yet.
     (void)before;
+}
+
+void GalacticSim::first_political_corruption(PlanetIndex planet) {
+    // 0x3fb040's first-call block [H] (MCX4_GAL2_RE_ANSWERS Q2): an owner with Benefits_From_Corruption makes the planet
+    // type 3 whatever its current type (an override below 1 does not keep it clean), with no transition timer, then the
+    // type-3 completion effects with P = that owner: the unlock add (idempotent, 0x27f860), the success credit bonus
+    // (paid again after an override >= 1, T09 Q1 site 0x3fbeda) and the visuals 0x3ff230 (GRC 4.3).
+    PlanetState& p = planets_[planet];
+    if (!benefits(p.owner)) return;
+    const int8_t old = p.corruption;
+    const int32_t old_player = p.corrupting_player;
+    p.corruption = kCorruptionRacketeering;
+    p.corrupting_player = p.owner;
+    if (old != kCorruptionRacketeering || old_player != p.owner) corruption_unlocks(planet, old, old_player);
+    pay_corruption_bonus(planet, kCorruptionRacketeering, p.owner);
+    rebuild_corruption_pairs(planet);
 }
 
 void GalacticSim::on_owner_change(PlanetIndex planet, int32_t old_owner) {
@@ -1271,6 +1287,13 @@ void GalacticSim::emit_production(GalacticEventKind kind, PlanetIndex planet, ui
     emit(ev);
 }
 
+bool GalacticSim::destroy_object_auto_resolve(ObjectHandle object) {
+    destroy_auto_resolve_ = true;
+    const bool ok = destroy_object(object);
+    destroy_auto_resolve_ = false;
+    return ok;
+}
+
 bool GalacticSim::destroy_object(ObjectHandle object) {
     if (!store_->alive(object)) return false;
     auto destroyed = [this](ObjectHandle h, PlanetIndex at, bool fleet) {
@@ -1282,6 +1305,7 @@ bool GalacticSim::destroy_object(ObjectHandle object) {
         ev.type = fleet ? kNoIndex : static_cast<uint32_t>(store_->type(h));
         ev.player = store_->owner(h);
         ev.planet = at;
+        ev.value = destroy_auto_resolve_ ? 1 : 0;
         emit(ev);
     };
     const uint32_t fl = fleet_of(object);

@@ -773,6 +773,7 @@ private:
     void service_script_in(Set& s, uint32_t number, Script& sc, uint64_t frame, double seconds);
     void start_threads_at_load(Set& s, uint32_t number, Script& sc, double seconds);  // q6: the first resume (header comment)
     void service_tactical(uint64_t frame);
+    void service_sandbox(uint64_t frame);  // mcx4 t09: the sandbox spawner objectives (MCX4_GAL2_RE_ANSWERS Q5)
     void route_tactical(uint64_t frame);
     void poll_tactical();
     // number_override: the set number of a resumed battle (N1 stage 2); default = after the galactic sets and headers.

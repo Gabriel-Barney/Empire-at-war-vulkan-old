@@ -197,7 +197,15 @@ static fs::path make_root(const char* name, std::unique_ptr<DirectoryProvider>& 
     std::error_code ec;
     remove_all_long(root, ec);
     write_file(root / "Data/XML/GameObjectFiles.xml", "<GameObjectFiles><File>S.xml</File></GameObjectFiles>\n");
-    write_file(root / "Data/XML/S.xml", "<S><SpaceUnit Name=\"Sim_Dummy\"><Tactical_Health>10</Tactical_Health></SpaceUnit></S>\n");
+    write_file(root / "Data/XML/S.xml",
+               "<S><SpaceUnit Name=\"Sim_Dummy\"><Tactical_Health>10</Tactical_Health></SpaceUnit>\n"
+               // mcx4 t09: indigenous spawners for the sandbox objectives (test_sandbox_spawner_reward)
+               "<GroundStructure Name=\"Sim_Hut\"><LandBehavior>SPAWN_INDIGENOUS_UNITS</LandBehavior>"
+               "<Enemy_Spawn_Text>TEXT_SIM_HUT</Enemy_Spawn_Text></GroundStructure>\n"
+               "<GroundStructure Name=\"Sim_Den\"><LandBehavior>SPAWN_INDIGENOUS_UNITS</LandBehavior>"
+               "<Enemy_Spawn_Text>TEXT_SIM_DEN</Enemy_Spawn_Text></GroundStructure>\n"
+               "<GroundStructure Name=\"Sim_Mute\"><LandBehavior>SPAWN_INDIGENOUS_UNITS</LandBehavior></GroundStructure>\n"
+               "</S>\n");
     write_file(root / "Data/XML/Story_Plots_Sty1.xml", kPlotsFile);
     write_file(root / "Data/XML/Story_Sty1.xml", sty1_plot());
     files = std::make_unique<DirectoryProvider>(path_to_utf8(root));
@@ -773,6 +781,93 @@ static void test_story_ledger() {
     std::printf("  story ledger: %zu retail rewards, %zu missing; %zu event types\n", retail, missing, story_event_table().size());
 }
 
+static objects::ObjectHandle spawn_at(objects::ObjectStore& st, objects::TypeIndex type, int32_t owner, Vec3 p) {
+    objects::SpawnParams sp;
+    sp.type = type;
+    sp.owner = owner;
+    sp.position = p;
+    sp.facing = {1.0f, 0.0f, 0.0f};
+    return st.create(sp);
+}
+
+// mcx4 t09 (docs/re/MCX4_GAL2_RE_ANSWERS.md Q5): the sandbox plot's spawner objectives in a campaign land battle. At story
+// time 2 s each spawner type hostile to the local player with an Enemy_Spawn_Text gets its CHECK_DESTROYED /
+// STORY_TRIGGER pair; once no live spawner of the type is left, Indigenous_Spawn_Destruction_Reward goes to the local
+// player, once per type. A type without the text and every space battle pay nothing.
+// ledger: verifies GameConstants.Indigenous_Spawn_Destruction_Reward
+static void test_sandbox_spawner_reward() {
+    std::unique_ptr<DirectoryProvider> files;
+    TypesWorld w;
+    const fs::path root = make_root("alamo_sim_story_rewards_sandbox", files, w);
+    jobs::JobSystem js(jobs::JobSystemConfig{0});
+    SimConfig cfg;
+    cfg.seed = 7;
+    GalacticRules r = rules();
+    r.constants.indigenous_spawn_destruction_reward = 500;
+    StoryStart st;
+    st.files = files.get();
+    st.plot_sets = {{pEmpire, "Story_Plots_Sty1.xml"}};
+    const objects::TypeIndex hut = w.types.resolve_name("Sim_Hut"), den = w.types.resolve_name("Sim_Den"),
+                             mute = w.types.resolve_name("Sim_Mute");
+    CHECK(hut != objects::kNone && den != objects::kNone && mute != objects::kNone);
+    for (const bool space : {false, true}) {
+        SimHost host(w.types, js, cfg);
+        GalacticSetup su = setup();
+        su.players[0].credits = 100.0f;
+        GalacticSim* gs = host.start_galactic(r, su);
+        CHECK(gs != nullptr);
+        if (!gs) return;
+        host.tick_once();
+        CHECK(host.start_story(st, nullptr) && host.story());
+        StorySession* ss = host.story();
+        if (!ss) return;
+        BattleRequest req;
+        req.info.kind = space ? ConflictKind::Space : ConflictKind::Land;
+        req.info.planet = rD;
+        req.info.attacker = pEmpire;
+        req.info.defender = pUnder;
+        GameMode& mode = host.start_game(space ? ModeKind::Space : ModeKind::Land);
+        objects::ObjectStore& ts = mode.primary();
+        const objects::ObjectHandle h1 = spawn_at(ts, hut, pUnder, {0, 0, 0}), h2 = spawn_at(ts, hut, pUnder, {50, 0, 0});
+        const objects::ObjectHandle d1 = spawn_at(ts, den, pUnder, {100, 0, 0}), m1 = spawn_at(ts, mute, pUnder, {150, 0, 0});
+        StoryBattleStart bs;
+        bs.request = &req;
+        bs.store = &ts;
+        bs.local_player = pEmpire;
+        std::vector<std::string> diag;
+        ss->begin_battle(bs, host.frame(), &diag);
+        const auto run = [&host](int n) {
+            for (int i = 0; i < n; ++i) host.tick_once();
+        };
+        const auto credits = [gs] { return static_cast<double>(gs->credits(pEmpire)); };
+        run(70);  // past story time 2 s: the objectives exist
+        const double c0 = credits();
+        ts.destroy(h1);
+        run(3);
+        const double c1 = credits();  // one Sim_Hut lives on
+        ts.destroy(h2);
+        run(3);
+        const double c2 = credits();
+        ts.destroy(d1);
+        run(3);
+        const double c3 = credits();
+        ts.destroy(m1);
+        run(3);
+        const double c4 = credits();
+        std::printf("  mcx4 sandbox spawners (%s): +%.0f +%.0f +%.0f +%.0f\n", space ? "space" : "land", c1 - c0, c2 - c1, c3 - c2,
+                    c4 - c3);
+        if (space) {
+            CHECK(c4 == c0);
+        } else {
+            CHECK(c1 == c0 && c2 - c1 == 500.0 && c3 - c2 == 500.0 && c4 == c3);  // once per type; Sim_Mute has no text
+        }
+        ss->end_battle(pEmpire, host.frame());
+        CHECK(host.end_game_mode());
+    }
+    std::error_code ec;
+    remove_all_long(root, ec);
+}
+
 }  // namespace story_test
 
 int main() {
@@ -783,6 +878,7 @@ int main() {
     story_test::test_session_rows_have_handlers();
     story_test::test_mcx6_rewards();
     story_test::test_mcx6_tactical_edits();
+    story_test::test_sandbox_spawner_reward();
     story_test::test_coverage();
     story_test::test_story_ledger();
     if (g_fail) std::printf("FAILED\n");

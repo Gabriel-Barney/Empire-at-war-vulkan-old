@@ -838,7 +838,7 @@ void ConflictManager::auto_finish(const ConflictInfo& head) {
                 // mcx4 t05 (MCX4_RE_ANSWERS_TACTICAL §13): an auto-resolve kill runs Die 0x39bdb0 in galactic mode, whose
                 // step 6 schedules the hero's respawn (0x48eb10, default time, the hero's planet).
                 sim_->hero_defeated(h, planet);
-                sim_->destroy_object(h);
+                sim_->destroy_object_auto_resolve(h);  // Q4: no "hero defeated" 0x3a01f0, so no STORY_DEFEAT_HERO
             }
         } else if (is_starbase && sim_->store().alive(h) && r.starbase_type[i] != static_cast<uint32_t>(sim_->store().type(h))) {
             sim_->replace_starbase(planet, r.starbase_type[i]);
@@ -852,7 +852,7 @@ void ConflictManager::auto_finish(const ConflictInfo& head) {
         if (!r.cargo_survives[i]) {
             (ar_in_.cargo[i].owner == head.attacker ? e.attacker_losses : e.defender_losses)++;
             sim_->hero_defeated(ar_cargo_[i], planet);  // mcx4 t05
-            sim_->destroy_object(ar_cargo_[i]);
+            sim_->destroy_object_auto_resolve(ar_cargo_[i]);
         }
     // AI_GALACTIC_TOKENS §9.4: a land auto-resolve keeps only the winner's persisted built objects (0x60b930; on an attacker
     // win 0x2b76a0 site B filters again by the attacker, the same result). [port] no winner: the records stay.

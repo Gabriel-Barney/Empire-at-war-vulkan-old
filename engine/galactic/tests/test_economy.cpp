@@ -1041,6 +1041,49 @@ void test_a2gal_steal_order() {
     CHECK(s.representative_type(ObjectHandle{}) == kNoIndex);
 }
 
+// mcx4 t09 (docs/re/MCX4_GAL2_RE_ANSWERS.md Q3): the fleet visibility vote 0x433090 for the local (Empire) player. An
+// Underworld (AI) fleet orbits B (60 from the Empire's A). It shows when a revealer of the local player (a type with
+// Hyperspace_Fleet_Reveal_Range, here planet A at 150) or a Bribery planet (Bribery_Fleet_Reveal_Range, any owner, while a
+// Benefits_From_Corruption player exists) is within range, strict, and the AI owner's destination planet is revealed. An
+// Intimidation-corrupted revealer is skipped; a hidden fleet never shows unless it carries a Super unit.
+// ledger: verifies GameObjectType.Hyperspace_Fleet_Reveal_Range
+// ledger: verifies GameConstants.Bribery_Fleet_Reveal_Range
+void test_fleet_reveal_vote() {
+    std::printf("  mcx4: fleet visibility vote (Hyperspace_ / Bribery_Fleet_Reveal_Range)\n");
+    World w({{pEmpire, rA, tSB1}, {pUnder, rE, tSB1}});
+    GalacticSim& s = w.sim;
+    const ObjectHandle foe = s.spawn_unit(pUnder, rB, tCorvette);
+    const uint32_t f = w.fleet(rB, pUnder);
+    CHECK(f != kNoFleet && s.local_player() == pEmpire);
+    CHECK(!s.fleet_visible_to_local(f));  // no revealer, no Bribery planet
+    w.rules.types[tPlanetA].fleet_reveal_range = 150.0f;
+    CHECK(s.fleet_visible_to_local(f));
+    w.rules.types[tPlanetA].fleet_reveal_range = 60.0f;  // strict: 60 apart is out of range
+    CHECK(!s.fleet_visible_to_local(f));
+    w.rules.types[tPlanetA].fleet_reveal_range = 150.0f;
+    s.set_planet_revealed(rB, false);  // the AI owner's destination (its orbit planet) is not revealed
+    CHECK(!s.fleet_visible_to_local(f));
+    s.set_planet_revealed(rB, true);
+    s.set_corruption(rA, 0, pUnder);  // Intimidation: the "!= 0" filter skips the revealer
+    CHECK(!s.fleet_visible_to_local(f));
+    s.set_corruption(rA, kCorruptionNone, kNoPlayer);
+    s.set_galactic_stealth(foe, true);  // hidden
+    CHECK(!s.fleet_visible_to_local(f));
+    w.rules.types[tCorvette].super = true;  // a Super member shows anyway
+    CHECK(s.fleet_visible_to_local(f));
+    w.rules.types[tCorvette].super = false;
+    s.set_galactic_stealth(foe, false);
+    w.rules.types[tPlanetA].fleet_reveal_range = 0.0f;
+    // A Bribery planet reveals whoever owns it: B itself (distance 0), with the Bribery range.
+    s.set_corruption(rB, 5, pUnder);
+    w.rules.constants.bribery_fleet_reveal_range = 75.0f;
+    CHECK(s.fleet_visible_to_local(f));
+    w.rules.constants.bribery_fleet_reveal_range = 0.0f;
+    CHECK(!s.fleet_visible_to_local(f));
+    CHECK(s.fleet_visible_to_local(w.fleet(rA, pEmpire)) || w.fleet(rA, pEmpire) == kNoFleet);  // own fleets: always
+    CHECK(!s.fleet_visible_to_local(static_cast<uint32_t>(s.fleets().size())));
+}
+
 void test_a2gal_ai_blockade() {
     // §4: the first visible orbit fleet decides, relative to the planet owner; no combat filter, neutrals blockade.
     World w({{pEmpire, rA, tSB1}, {pEmpire, rA, tBarracks}, {pEmpire, rB, tBarracks}, {pUnder, rE, tSB1}});
@@ -1955,6 +1998,31 @@ void test_corruption_level_override() {
     const auto [e0, u0] = start_credits(0.0f);
     const auto [e1, u1] = start_credits(400.0f);
     CHECK(e1 - e0 == 400.0f && u1 - u0 == 240.0f);  // the Underworld is a Hard AI: Add_Credits x Credit_Multiplier 1.2
+    // mcx4 t21 (docs/re/MCX4_GAL2_RE_ANSWERS.md Q2): the override runs first (load, L14), then the planet's first political
+    // update (tick 1); neither tests the current type. On an Underworld planet an override >= 1 pays the bonus twice, and
+    // an override below 1 does not keep it clean.
+    const auto under_override = [](int32_t value, float bonus) {
+        GalacticRules r = make_oi_rules(1.0f);
+        CorruptionChoiceDef c;
+        c.slot = 1;
+        c.type = kCorruptionRacketeering;
+        c.success_credit_bonus = bonus;
+        r.special.types[tPlanetB].corruption = {c};
+        objects::GameObjectTypes ty;
+        objects::IdCounter id;
+        objects::ObjectStore st{objects::ModeKind::Galactic, objects::StoreKind::Primary, ty, &id};
+        SimRng g{0x5151u};
+        GalacticSim sim(r, st, g);
+        GalacticSetup su = make_setup({{pEmpire, rA, tSB1}, {pUnder, rB, tBarracks}});
+        su.corruption_level_override = {{tPlanetB, value}};
+        for (auto& pl : su.players) pl.credits = 100.0f;
+        CHECK(sim.start(std::move(su)));
+        CHECK(sim.planets()[rB].corruption == kCorruptionRacketeering && sim.planets()[rB].corrupting_player == pUnder);
+        return sim.credits(pUnder);
+    };
+    const float base = under_override(1, 0.0f);
+    CHECK(under_override(1, 100.0f) - base == 240.0f);  // 2 x 100 x 1.2
+    CHECK(under_override(0, 100.0f) - base == 120.0f);  // only the first political update pays
 }
 
 // mcx4 t07 (docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.4 / Q7.6): the campaign's auto-resolve rules on the sim.
@@ -3453,6 +3521,7 @@ int main(int argc, char** argv) {
         test_a2gal_population();
         test_a2gal_steal_order();
         test_a2gal_ai_blockade();
+        test_fleet_reveal_vote();
         test_a2_victory();
         test_a2_prerequisites_and_market_hook();
         test_diplomacy_and_build_locks();
