@@ -110,6 +110,19 @@ std::vector<std::string_view> category_names(std::string_view text) {
 }
 }  // namespace
 
+GameAudioHost::SpawnLine GameAudioHost::spawn_line(uint8_t ability) {
+    namespace ta = tactical::abilities;
+    switch (ability) {
+        // the field table files it under Tractor_Beam_Attack_Ability; the XML parent is Summon_Ability (SummonAbility 0x71cff0)
+        case ta::kSummon: return {"Summon_Ability", "SFXEvent_Unit_Summoned", false};  // ledger: consumes Tractor_Beam_Attack_Ability.SFXEvent_Unit_Summoned
+        case ta::kRadioactiveContaminate:  // slot 4 0x7128a0, attached to the spawned object
+            return {"Radioactive_Contaminate_Ability", "SFXEvent_Radioactive", false};  // ledger: consumes Radioactive_Contaminate_Ability.SFXEvent_Radioactive
+        // [M] BuzzDroidsBehavior 0x6379a0 plays it on the droid object; the port at its creation
+        case ta::kBuzzDroids: return {"Buzz_Droids_Ability", "Activate_SFX", true};  // ledger: consumes Buzz_Droids_Ability.Activate_SFX
+        default: return {};
+    }
+}
+
 std::vector<std::string> GameAudioHost::command_rankings(std::string_view text) {
     std::vector<std::string> out;
     for (const std::string_view n : category_names(text)) out.emplace_back(n);

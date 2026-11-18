@@ -262,6 +262,14 @@ public:
     // Unit_Command_Rankings_By_Category list (names split on ',', '|' and blanks); a type's rank is the index of the
     // first entry its CategoryMask text names (case-insensitive), rankings.size() when none.
     static std::vector<std::string> command_rankings(std::string_view text);
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "Tractor_Beam_Attack_Ability.SFXEvent_Unit_Summoned" / "Radioactive_Contaminate_Ability.
+    // SFXEvent_Radioactive" / "Buzz_Droids_Ability.Activate_SFX"): the ability element and field whose line plays on an
+    // object the ability `ability` created; `local_only` for Buzz_Droids (the droid owner's line). Empty element: none.
+    struct SpawnLine {
+        std::string_view element, field;
+        bool local_only = false;
+    };
+    static SpawnLine spawn_line(uint8_t ability);
     static size_t command_rank(std::span<const std::string> rankings, std::string_view category_mask);
     // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Reinforcement_Point_Contested", 0x501980): a local player's
     // REINFORCEMENT_POINT whose capture progress starts from 0 with a pending controller other than its owner (an owned

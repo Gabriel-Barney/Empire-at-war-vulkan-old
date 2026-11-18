@@ -605,6 +605,9 @@ void TacticalBattle::oi_events(TacticalMode& mode) {
             case ta::SpawnPurpose::Summon: {
                 const objects::ObjectId id = oi_spawn_unit(mode, q.object_type, oi_sv(q.position), oi_sv(q.facing), q.owner);
                 if (q.purpose == ta::SpawnPurpose::Mine && id != objects::kNoObjectId) abilities_->bind_spawn(q.serial, id);
+                // mcx4 t13: the summon / contamination / buzz-droid line hangs off the new object (presentation feed)
+                if (q.purpose == ta::SpawnPurpose::Summon && id != objects::kNoObjectId)
+                    summon_spawns_.push_back({id, q.source, q.owner, q.ability_type});
                 break;
             }
             case ta::SpawnPurpose::Bomber: {  // mcx4 t06 (Spawn_Ability, MCX4_RE_ANSWERS_TACTICAL §14)

@@ -798,6 +798,9 @@ void test_battle_hookups_aud1() {
 #endif
 
 // ledger: verifies Laser_Defense_Ability.Zap_SFXEvent
+// ledger: verifies Tractor_Beam_Attack_Ability.SFXEvent_Unit_Summoned
+// ledger: verifies Radioactive_Contaminate_Ability.SFXEvent_Radioactive
+// ledger: verifies Buzz_Droids_Ability.Activate_SFX
 // ledger: verifies Tactical_Bribe_Ability.SFXEvent_Success
 // ledger: verifies Tactical_Bribe_Ability.SFXEvent_Fail
 // ledger: verifies Unit_Ability.SFXEvent_GUI_Unit_Ability_Activated
@@ -828,6 +831,9 @@ void test_object_sfx_t05() {
       <Laser_Defense_Ability Name="Zapper"><Zap_SFXEvent> Laser_Zap </Zap_SFXEvent></Laser_Defense_Ability>
       <Tactical_Bribe_Ability Name="Bribe"><SFXEvent_Success>Bribe_Yes</SFXEvent_Success><SFXEvent_Fail>Bribe_No</SFXEvent_Fail>
       </Tactical_Bribe_Ability>
+      <Summon_Ability Name="Sum"><SFXEvent_Unit_Summoned>Summon_Line</SFXEvent_Unit_Summoned></Summon_Ability>
+      <Radioactive_Contaminate_Ability Name="Rad"><SFXEvent_Radioactive>Rad_Line</SFXEvent_Radioactive></Radioactive_Contaminate_Ability>
+      <Buzz_Droids_Ability Name="Buzz"><Activate_SFX>Buzz_Line</Activate_SFX></Buzz_Droids_Ability>
     </Abilities>
   </SpaceUnit>
   <SpaceUnit Name="Healer">
@@ -866,6 +872,16 @@ void test_object_sfx_t05() {
     CHECK(H::special_line(types, hero, "Tactical_Bribe_Ability", "SFXEvent_Success") == "Bribe_Yes");
     CHECK(H::special_line(types, hero, "Tactical_Bribe_Ability", "SFXEvent_Fail") == "Bribe_No");
     CHECK(H::special_line(types, healer, "Laser_Defense_Ability", "Zap_SFXEvent").empty());
+    // Summon_Ability SFXEvent_Unit_Summoned (filed as Tractor_Beam_Attack_Ability), Radioactive_Contaminate_Ability
+    // SFXEvent_Radioactive, Buzz_Droids_Ability Activate_SFX (local owner only): the spawned object's line.
+    {
+        const H::SpawnLine sum = H::spawn_line(ta::kSummon), rad = H::spawn_line(ta::kRadioactiveContaminate),
+                           buzz = H::spawn_line(ta::kBuzzDroids);
+        CHECK(H::special_line(types, hero, sum.element, sum.field) == "Summon_Line" && !sum.local_only);
+        CHECK(H::special_line(types, hero, rad.element, rad.field) == "Rad_Line" && !rad.local_only);
+        CHECK(H::special_line(types, hero, buzz.element, buzz.field) == "Buzz_Line" && buzz.local_only);
+        CHECK(H::spawn_line(ta::kStealth).element.empty());
+    }
     // "Faction.SFXEvent_GUI_Toggle_Non_Hero_Ability_On family": own / ally issuer -> the plain line, hostile -> _Enemy_.
     CHECK(H::toggle_line_tag(true, false) == "SFXEvent_GUI_Toggle_Non_Hero_Ability_On");
     CHECK(H::toggle_line_tag(false, false) == "SFXEvent_GUI_Toggle_Non_Hero_Ability_Off");

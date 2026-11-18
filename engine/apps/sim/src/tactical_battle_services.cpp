@@ -159,6 +159,8 @@ void TacticalBattle::build_service_graph() {
         ability_toggles_mark_ = 0;
         strike_starts_.erase(strike_starts_.begin(), strike_starts_.begin() + static_cast<std::ptrdiff_t>(strike_starts_mark_));
         strike_starts_mark_ = 0;
+        summon_spawns_.erase(summon_spawns_.begin(), summon_spawns_.begin() + static_cast<std::ptrdiff_t>(summon_spawns_mark_));
+        summon_spawns_mark_ = 0;
     });
     // S8 t17 (FIGHTER_FLYING §4.10 B): squadron of the shared team target, before this tick's orders
     g.add("share_groups", kAll, kAll, [this] { share_groups_sync(); });
@@ -378,6 +380,7 @@ void TacticalBattle::tick(TacticalMode& mode, SimRng& rng, const ParallelFor& pf
     pad_events_mark_ = pad_events_.size();
     ability_toggles_mark_ = ability_toggles_.size();
     strike_starts_mark_ = strike_starts_.size();
+    summon_spawns_mark_ = summon_spawns_.size();
 }
 
 }  // namespace alamo::sim

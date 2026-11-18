@@ -635,6 +635,17 @@ public:
         objects::TypeIndex ship_type = objects::kNone;
     };
     std::span<const StrikeEvent> strike_starts() const { return strike_starts_; }
+    // mcx4 t13 (presentation; MCX4_T13_RE_ANSWERS "Tractor_Beam_Attack_Ability.SFXEvent_Unit_Summoned",
+    // "Radioactive_Contaminate_Ability.SFXEvent_Radioactive", "Buzz_Droids_Ability.Activate_SFX"): objects a Summon /
+    // Radioactive_Contaminate / Buzz_Droids ability created since the last tick, request order. `ability` = the unit
+    // ability type (kSummon / kRadioactiveContaminate / kBuzzDroids), `source` = the user. Not saved or hashed.
+    struct SummonSpawn {
+        objects::ObjectId spawned = objects::kNoObjectId;
+        objects::ObjectId source = objects::kNoObjectId;
+        int32_t owner = -1;
+        uint8_t ability = 0;
+    };
+    std::span<const SummonSpawn> summon_spawns() const { return summon_spawns_; }
     // Garrison API for the Lua bindings (Can_Garrison / Garrison / Leave_Garrison / Eject_Garrison / Can_Garrison_Fire /
     // Is_In_Garrison / Get_Garrisoned_Units). Orders: `player` = the units' owner (script orders pass the unit's owner);
     // units must be live battle units of that player. can_garrison = the Lua Can_Garrison rule (L1_S4_REMAINING.md §2.5:
@@ -2295,6 +2306,8 @@ private:
     std::vector<AbilityToggleEvent> ability_toggles_;  // mcx4 t13: presentation only (not saved / hashed)
     std::vector<StrikeEvent> strike_starts_;           // mcx4 t13: presentation only (not saved / hashed)
     size_t strike_starts_mark_ = 0;
+    std::vector<SummonSpawn> summon_spawns_;           // mcx4 t13: presentation only (not saved / hashed)
+    size_t summon_spawns_mark_ = 0;
     size_t ability_toggles_mark_ = 0;
     size_t story_vacated_mark_ = 0;                  // entries the last tick reported
     std::vector<PadEvent> pad_events_;               // mcx4 t13: presentation only (not saved / hashed)

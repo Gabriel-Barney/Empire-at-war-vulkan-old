@@ -82,6 +82,8 @@ TIER_OVERRIDES = {}  # (class, tag) -> tier, for rows that are distribution-leve
 # spelled as in docs/re/xml_field_tables.md (matched case-insensitively). Keep the list sorted by class, then tag.
 RETAIL_UNUSED = {
     ("Attack_Action", "Attack_Accuracy_Modifier"): "docs/re/MCX4_T10_RE_ANSWERS.md §11 [H]",
+    # read only by Action_Driven clashes, which never start in shipped data (HERO_CLASH.md §4: Clash_Range 0.0)
+    ("Attack_Action", "Attack_SFXEvent"): "docs/re/MCX4_T10_RE_ANSWERS.md §11 [H]",
     ("Cable_Ability", "Cable_Fadeout_Time"): "docs/re/MCX4_T15_RE_ANSWERS.md Cable_Ability.Cable_Width family [H]",
     ("Campaign", "Camera_Distance"): "docs/re/MCX4_T15_RE_ANSWERS.md Campaign.Camera_Distance family [M]",
     ("Campaign", "Camera_Shift_X"): "docs/re/MCX4_T15_RE_ANSWERS.md Campaign.Camera_Distance family [M]",
@@ -223,6 +225,8 @@ OUT_OF_SCOPE = {
     ("Campaign", "Is_Quickmatch_Allowed"): _MP,
     ("Faction", "Debug_Ground_Structures"): _DBG,
     ("Faction", "Multiplayer_Beacon_Type"): _MP,
+    # MCX4_T13_RE_ANSWERS "SFXEvent_Beacon_Placed": only the R_ / E_Multiplayer_Beacon types (Faction.Multiplayer_Beacon_Type) carry it
+    ("GameObjectType", "SFXEvent_Beacon_Placed"): _MP,
     ("Faction", "SFXEvent_HUD_Tactical_Victory_Near"): _MP,  # MCX4_T13_RE_ANSWERS: overrun reveal, game types 1 / 2 / 4 only
     ("Faction", "Multiplayer_Campaign_Heroes"): _MP,
     ("Faction", "Multiplayer_Map_Preview_Icon"): _MP,

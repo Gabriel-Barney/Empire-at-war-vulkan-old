@@ -662,6 +662,19 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
             if (!ev.empty() && game_->object_sfx(static_cast<uint64_t>(e.first_bomber), ev, position_of(static_cast<uint64_t>(e.first_bomber))))
                 ++stats_.strike_lines;
         }
+    // Summoned / contamination / buzz-droid objects (MCX4_T13_RE_ANSWERS "Tractor_Beam_Attack_Ability.SFXEvent_Unit_Summoned"
+    // family): the user's ability element line, attached to the new object (2D when the event is Is_2D). Any owner except
+    // Buzz_Droids (the local droid owner only). Once per spawn.
+    for (const sim::TacticalBattle::SummonSpawn& e : battle.summon_spawns()) {
+        const SpawnLine sl = spawn_line(e.ability);
+        if (sl.element.empty() || (sl.local_only && (local_player < 0 || e.owner != local_player))) continue;
+        const objects::ObjectHandle src = store.find(static_cast<objects::ObjectId>(e.source));
+        if (!store.alive(src)) continue;  // [port] a user gone before the spawn: no line
+        const objects::TypeIndex st = store.type(src);
+        const std::string_view ev = special_line(types, st, sl.element, sl.field);
+        if (!ev.empty() && game_->object_sfx(static_cast<uint64_t>(e.spawned), ev, position_of(static_cast<uint64_t>(e.spawned))) != 0)
+            ++stats_.ability_lines;
+    }
     // Ability toggles (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_GUI_Toggle_Non_Hero_Ability_On family", 0x430270): the
     // issuer's faction list entry for the ability (`ABILITY, SFXEvent` lines), the _Enemy_ variant when the local player
     // is hostile to the issuer; 2D. [M] the auto-deactivation reader 0x42f460 is not modelled.
