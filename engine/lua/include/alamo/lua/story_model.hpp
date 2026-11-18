@@ -75,12 +75,19 @@ enum class StoryObjectiveState : uint8_t { Active, Complete, Failed };
 struct StoryObjective {
     std::string text;  // text id (TEXT_OBJECTIVE_...)
     StoryObjectiveState state = StoryObjectiveState::Active;
-    bool from_lua = false;  // added by Lua Add_Objective
+    // mcx8 t12 (docs/re/MCX8_BINDINGS_PLAYERS_STORY.md "Add_Objective") [H]: the objectives panel section - true = a
+    // "battle info" line (TEXT_TEST_BATTLE_INFO_HEADER; Lua Add_Objective(text, true), the planetary-bonus lines), false =
+    // a numbered objective (TEXT_TEST_OBJECTIVE_HEADER; Add_Objective(text, false), the ADD_OBJECTIVE reward).
+    bool battle_info = false;
 };
 
+// A radar blip (Add_Radar_Blip). Tactical: `name` is the script's name; the blip follows `object_id` when it is >= 0,
+// else it stays at (x, y, z) (an AI target, task force or position argument; mcx8 t12). Galactic: `name` is empty and
+// `object_id` is the planet whose highlight is on (MCX8_BINDINGS_PLAYERS_STORY.md "Add_Radar_Blip").
 struct StoryBlip {
     std::string name;
     int32_t object_id = -1;
+    float x = 0.0f, y = 0.0f, z = 0.0f;
 };
 
 struct StoryHighlight {
@@ -428,14 +435,20 @@ public:
         if (!name.empty()) dialog_loads_.emplace_back(name);
     }
     const std::vector<StoryObjective>& objectives() const { return objectives_; }
-    void add_objective(std::string_view text, bool from_lua);
+    void add_objective(std::string_view text, bool battle_info);
     const std::vector<StoryBlip>& blips() const { return blips_; }
-    void add_blip(std::string_view name, int32_t object_id);  // same name replaces
+    // Appends a blip (the same name twice gives two blips, 0x2de700). remove_blip removes the first (oldest) one of that
+    // name (0x2ff240). The planet forms are the galactic Add / Remove_Radar_Blip(planet): highlight on (once) / off.
+    void add_blip(const StoryBlip& blip);
+    void add_blip(std::string_view name, int32_t object_id) { add_blip(StoryBlip{std::string(name), object_id}); }
     bool remove_blip(std::string_view name);
+    void add_planet_blip(int32_t planet_object_id);
+    bool remove_planet_blip(int32_t planet_object_id);
     const std::vector<StoryHighlight>& highlights() const { return highlights_; }
     void add_highlight(std::string_view name, int32_t object_id);
     bool remove_highlight(std::string_view name);
-    // AI story flags (Check_Story_Flag(player, name, location, reset)) [inferred: raised by the host].
+    // AI story flags (Check_Story_Flag(player, name, location, reset)), raised by the host (TRIGGER_AI). Keyed by
+    // (player, name as given - case kept, location object id or -1); MCX8_BINDINGS_PLAYERS_STORY.md "Check_Story_Flag".
     void raise_ai_flag(int32_t player, std::string_view name, int32_t location_id);
     bool check_ai_flag(int32_t player, std::string_view name, int32_t location_id, bool reset);
 

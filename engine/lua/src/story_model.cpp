@@ -715,12 +715,12 @@ StoryObjective* StoryModel::find_objective(std::string_view text) {
     return nullptr;
 }
 
-void StoryModel::add_objective(std::string_view text, bool from_lua) {
+void StoryModel::add_objective(std::string_view text, bool battle_info) {
     if (StoryObjective* o = find_objective(text)) {
         o->state = StoryObjectiveState::Active;  // [inferred] re-adding re-activates, no duplicate
         return;
     }
-    objectives_.push_back(StoryObjective{std::string(text), StoryObjectiveState::Active, from_lua});
+    objectives_.push_back(StoryObjective{std::string(text), StoryObjectiveState::Active, battle_info});
 }
 
 // Reward application (0x456970), Â§6.
@@ -1401,18 +1401,29 @@ bool StoryModel::has_flag(std::string_view name) const { return flags_->count(as
 
 void StoryModel::set_flag(std::string_view name, int32_t value) { (*flags_)[ascii_upper(ascii_trim(name))] = value; }
 
-void StoryModel::add_blip(std::string_view name, int32_t object_id) {
-    for (StoryBlip& b : blips_)
-        if (ascii_iequals(b.name, name)) {
-            b.object_id = object_id;
-            return;
-        }
-    blips_.push_back(StoryBlip{std::string(name), object_id});
-}
+// mcx8 t12 (MCX8_BINDINGS_PLAYERS_STORY.md "Add_Radar_Blip") [H]: the add always appends (no lookup of the name); the
+// remove takes the first (oldest) blip with that name.
+void StoryModel::add_blip(const StoryBlip& blip) { blips_.push_back(blip); }
 
 bool StoryModel::remove_blip(std::string_view name) {
     for (size_t i = 0; i < blips_.size(); ++i)
-        if (ascii_iequals(blips_[i].name, name)) {
+        if (!blips_[i].name.empty() && ascii_iequals(blips_[i].name, name)) {
+            blips_.erase(blips_.begin() + static_cast<std::ptrdiff_t>(i));
+            return true;
+        }
+    return false;
+}
+
+// Galactic Add_Radar_Blip(planet): the planet's highlight switch (on twice = on).
+void StoryModel::add_planet_blip(int32_t planet_object_id) {
+    for (const StoryBlip& b : blips_)
+        if (b.name.empty() && b.object_id == planet_object_id) return;
+    blips_.push_back(StoryBlip{std::string(), planet_object_id});
+}
+
+bool StoryModel::remove_planet_blip(int32_t planet_object_id) {
+    for (size_t i = 0; i < blips_.size(); ++i)
+        if (blips_[i].name.empty() && blips_[i].object_id == planet_object_id) {
             blips_.erase(blips_.begin() + static_cast<std::ptrdiff_t>(i));
             return true;
         }
@@ -1439,7 +1450,8 @@ bool StoryModel::remove_highlight(std::string_view name) {
 
 namespace {
 std::string ai_flag_key(int32_t player, std::string_view name, int32_t location) {
-    return std::to_string(player) + "|" + ascii_upper(ascii_trim(name)) + "|" + std::to_string(location);
+    // mcx8 t12 (MCX8_BINDINGS_PLAYERS_STORY.md "Check_Story_Flag") [H]: the name as given, case kept.
+    return std::to_string(player) + "|" + std::string(name) + "|" + std::to_string(location);
 }
 }  // namespace
 
@@ -1532,12 +1544,17 @@ void StoryModel::hash(StateHasher& h) const {
     for (const StoryObjective& o : objectives_) {
         h.str(o.text);
         h.u8(static_cast<uint8_t>(o.state));
-        h.boolean(o.from_lua);
+        h.boolean(o.battle_info);
     }
     h.u32(static_cast<uint32_t>(blips_.size()));
     for (const StoryBlip& b : blips_) {
         h.str(b.name);
         h.i32(b.object_id);
+        if (b.object_id < 0) {  // mcx8 t12: a fixed-position blip (object blips hash as before)
+            h.f32(b.x);
+            h.f32(b.y);
+            h.f32(b.z);
+        }
     }
     h.u32(static_cast<uint32_t>(highlights_.size()));
     for (const StoryHighlight& b : highlights_) {
@@ -1555,7 +1572,8 @@ void StoryModel::hash(StateHasher& h) const {
 // ------------------------------------------------------------------------------------------ save / load (OI lua)
 
 namespace {
-constexpr uint32_t kSaveVersion = 2;  // 2 (q6 t03): + Story_Dialog of a Lua-edited event (Set_Dialog); 1 still read
+constexpr uint32_t kSaveVersion = 3;  // 2 (q6 t03): + Story_Dialog of a Lua-edited event (Set_Dialog); 3 (mcx8 t12): + blip
+                                       // position; 1 and 2 still read
 // limit: guard save decode: counts / string lengths, refuses
 constexpr uint32_t kSaveMaxCount = 1u << 24;  // sanity bound for counts / string lengths
 
@@ -1631,12 +1649,13 @@ void StoryModel::write(ByteWriter& w) const {
     for (const StoryObjective& o : objectives_) {
         put_str(w, o.text);
         w.u8(static_cast<uint8_t>(o.state));
-        w.u8(o.from_lua ? 1 : 0);
+        w.u8(o.battle_info ? 1 : 0);
     }
     w.u32(static_cast<uint32_t>(blips_.size()));
     for (const StoryBlip& b : blips_) {
         put_str(w, b.name);
         w.i32(b.object_id);
+        w.f32(b.x).f32(b.y).f32(b.z);  // v3
     }
     w.u32(static_cast<uint32_t>(highlights_.size()));
     for (const StoryHighlight& b : highlights_) {
@@ -1720,7 +1739,7 @@ bool StoryModel::read(ByteReader& r) {
         const uint8_t s = r.u8();
         if (s > static_cast<uint8_t>(StoryObjectiveState::Failed)) return false;
         o.state = static_cast<StoryObjectiveState>(s);
-        o.from_lua = get_bool(r);
+        o.battle_info = get_bool(r);
         objectives.push_back(std::move(o));
     }
     std::vector<StoryBlip> blips;
@@ -1729,6 +1748,11 @@ bool StoryModel::read(ByteReader& r) {
         StoryBlip b;
         if (!get_str(r, b.name)) return false;
         b.object_id = r.i32();
+        if (version >= 3) {
+            b.x = r.f32();
+            b.y = r.f32();
+            b.z = r.f32();
+        }
         blips.push_back(std::move(b));
     }
     std::vector<StoryHighlight> highlights;

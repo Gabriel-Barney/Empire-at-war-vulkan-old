@@ -9,6 +9,7 @@
 #include "alamo/lua/object_bridge.hpp"
 #include "alamo/core/ascii.hpp"
 #include "alamo/lua/story_model.hpp"
+#include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/object_store.hpp"
 #include "vm_internal.hpp"
@@ -185,22 +186,41 @@ int g_get_story_plot(Call& c) {
     return 0;
 }
 
-// Check_Story_Flag(player, flag_name, location, reset) -> boolean. [inferred] AI story flags are
-// raised by the host (StoryModel::raise_ai_flag) per (player, name, location); reset clears on read.
+// Check_Story_Flag(player, flag_name, target, reset) -> boolean (docs/re/MCX8_BINDINGS_PLAYERS_STORY.md
+// "Check_Story_Flag") [H]. AI story flags are raised by the host (StoryModel::raise_ai_flag, TRIGGER_AI) per (player,
+// name as given, target object id or -1). Argument 3: a live game object, an AI target's game object, or anything else
+// (nil) = no target; argument 4 must be a boolean; a set flag read with reset true is cleared.
+// [port] the flags live on the story model (one per plot set), not on the player's AI context of the current mode.
 int g_check_story_flag(Call& c) {
     if (c.nargs != 4)
         return c.script_error_stop("Check_AI_Story_Flag -- invalid number of parameters. Expected between 4, got %d.", c.nargs);
     const detail::Ud* player = c.userdata(1, detail::cls_player());
     if (!player) return c.script_error_stop("Check_AI_Story_Flag -- invalid type for parameter 1. Expected player");
     if (!c.is_string(2)) return c.script_error_stop("Check_AI_Story_Flag -- invalid type for parameter 2. Expected string");
-    const detail::Ud* loc = c.userdata(3, detail::cls_game_object());
+    int32_t loc = -1;
+    if (const detail::Ud* o = c.userdata(3, detail::cls_game_object())) {
+        if (!detail::object_alive(*c.vm, *o))
+            return c.script_error_stop("Check_AI_Story_Flag -- target specified is dead; unable to check flag.");
+        loc = o->id;
+    } else if (const detail::AiTargetArg t = detail::ai_target_arg(c, 3); t.is_target) {
+        if (t.dead) return c.script_error_stop("Check_AI_Story_Flag -- target specified is dead; unable to check flag.");
+        if (!t.object) {
+            const std::string id = std::to_string(c.userdata(3, detail::cls_target())->id);  // [port] no target names
+            return c.script_error_stop("Check_AI_Story_Flag -- target %s is not a game object; unable to check story flag.",
+                                       id.c_str());
+        }
+        loc = static_cast<int32_t>(c.vm->host.store->id(t.object));
+    }
+    if (lua_type(c.L, c.idx(4)) != LUA_TBOOLEAN)
+        return c.script_error_stop("Check_AI_Story_Flag -- invalid type for parameter 4; expected boolean.");
     const bool reset = lua_toboolean(c.L, c.idx(4)) != 0;
     StoryModel* m = story(c);
     if (!m) return push_bool(c, false);
-    return push_bool(c, m->check_ai_flag(player->id, c.string(2), loc ? loc->id : -1, reset));
+    return push_bool(c, m->check_ai_flag(player->id, c.string(2), loc, reset));
 }
 
-// Add_Objective(text_id, boolean). [inferred] the boolean is not modelled.
+// Add_Objective(text_id, battle_info) (MCX8_BINDINGS_PLAYERS_STORY.md "Add_Objective") [H]: true = a battle info line,
+// false = a numbered objective (StoryObjective::battle_info).
 int g_add_objective(Call& c) {
     if (c.nargs != 2) return c.script_error_stop("Add_Objective -- invalid number of parameters. Expected 2, got %d.", c.nargs);
     if (!c.is_string(1)) return c.script_error_stop("Add_Objective -- invalid type for parameter 1. Expected string.");
@@ -211,23 +231,77 @@ int g_add_objective(Call& c) {
         no_story(c, "Add_Objective");
         return 0;
     }
-    m->add_objective(c.string(1), true);
+    m->add_objective(c.string(1), lua_toboolean(c.L, c.idx(2)) != 0);
     return 0;
 }
 
-// Add_Radar_Blip(object, name). [inferred] a blip of the same name is replaced.
+bool galactic_mode(const Call& c) { return c.vm->host.store && c.vm->host.store->mode() == objects::ModeKind::Galactic; }
+
+// A live planet object at argument i of a galactic script (the planet type has the PLANET behaviour).
+const detail::Ud* planet_arg(Call& c, int i) {
+    const detail::Ud* o = c.userdata(i, detail::cls_game_object());
+    if (!o || !detail::object_alive(*c.vm, *o)) return nullptr;
+    if (!c.vm->host.store->has_behavior(detail::object_handle(*o), objects::beh::Planet)) return nullptr;
+    return o;
+}
+
+// Position of argument 1 (0x4990b0): a live game object (also followed: `object`), a PositionWrapper, an AI target (its
+// object, else its host position) or a task force (its first live unit [port]).
+bool blip_position(Call& c, StoryBlip& out) {
+    if (const detail::Ud* o = c.userdata(1, detail::cls_game_object())) {
+        if (!detail::object_alive(*c.vm, *o)) return false;
+        const Vec3 p = c.vm->host.store->position(detail::object_handle(*o));
+        out.object_id = o->id;
+        out.x = p.x;
+        out.y = p.y;
+        out.z = p.z;
+        return true;
+    }
+    Vec3 p{};
+    if (const detail::Ud* w = c.userdata(1, detail::cls_position())) {
+        p = detail::position_of(*w);
+    } else {
+        objects::ObjectHandle h{};
+        if (!detail::ai_wrapper_object(c, 1, h)) return false;
+        if (h) p = c.vm->host.store->position(h);
+        else if (!detail::ai_target_position(c, 1, p)) return false;
+    }
+    out.x = p.x;
+    out.y = p.y;
+    out.z = p.z;
+    return true;
+}
+
+// Add_Radar_Blip (MCX8_BINDINGS_PLAYERS_STORY.md "Add_Radar_Blip") [H]. Galactic: Add_Radar_Blip(planet) turns the
+// planet's highlight on. Tactical: Add_Radar_Blip(position source, name) appends a blip (the same name twice: two blips).
 int g_add_radar_blip(Call& c) {
+    if (galactic_mode(c)) {
+        if (c.nargs != 1) return c.script_error_stop("Add_Radar_Blip -- invalid number of parameters.  Expected 1, got %d.", c.nargs);
+        const detail::Ud* planet = planet_arg(c, 1);
+        if (!planet) return c.script_error_stop("Add_Radar_Blip -- invalid type for parameter 1.  Expected planet.");
+        if (StoryModel* m = story(c)) m->add_planet_blip(planet->id);
+        return 0;
+    }
     if (c.nargs != 2) return c.script_error_stop("Add_Radar_Blip -- invalid number of parameters. Expected 2, got %d.", c.nargs);
-    const detail::Ud* o = c.userdata(1, detail::cls_game_object());
-    if (!o || !detail::object_alive(*c.vm, *o))
+    StoryBlip b;
+    if (!c.vm->host.store || !blip_position(c, b))
         return c.script_error_stop("Add_Radar_Blip -- could not deduce a position from parameter 1.");
-    if (!c.is_string(2)) return c.script_error_stop("Add_Radar_Blip -- invalid type for parameter 2. Expected string.");
-    if (StoryModel* m = story(c)) m->add_blip(c.string(2), o->id);
+    if (!c.is_string(2)) return c.script_error_stop("Add_Radar_Blip -- invalid type for parameter 2. Expected strng.");
+    b.name = std::string(c.string(2));
+    if (StoryModel* m = story(c)) m->add_blip(b);
     return 0;
 }
 
+// Remove_Radar_Blip: galactic (planet) turns the planet's highlight off; tactical (name) removes the oldest blip of
+// that name.
 int g_remove_radar_blip(Call& c) {
     if (c.nargs != 1) return c.script_error_stop("Remove_Radar_Blip -- invalid number of parameters. Expected 1, got %d.", c.nargs);
+    if (galactic_mode(c)) {
+        const detail::Ud* planet = planet_arg(c, 1);
+        if (!planet) return c.script_error_stop("Remove_Radar_Blip -- invalid type for parameter 1.  Expected planet.");
+        if (StoryModel* m = story(c)) m->remove_planet_blip(planet->id);
+        return 0;
+    }
     if (!c.is_string(1)) return c.script_error_stop("Remove_Radar_Blip -- invalid type for parameter 1. Expected strng.");
     if (StoryModel* m = story(c)) m->remove_blip(c.string(1));
     return 0;

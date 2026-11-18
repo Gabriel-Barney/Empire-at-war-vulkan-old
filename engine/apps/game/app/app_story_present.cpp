@@ -483,6 +483,13 @@ void App::build_story_pointers(ui::HudDrawList& dl, const ui::HudCanvas& canvas)
                     if (story_object_position(hl.object_id, p) && story_project(canvas, p.x, p.y, p.z, at))
                         draw_highlight(dl, at, 30.0f, now_s_, kHighlightColor);
                 }
+                // mcx8 t12: the galactic Add_Radar_Blip(planet) turns the planet's highlight on (an unnamed blip).
+                for (const lua::StoryBlip& b : story->model(set).blips()) {
+                    ui::Vec3 p;
+                    ui::Vec2f at;
+                    if (b.name.empty() && story_object_position(b.object_id, p) && story_project(canvas, p.x, p.y, p.z, at))
+                        draw_highlight(dl, at, 30.0f, now_s_, kHighlightColor);
+                }
             }
 #endif
 }

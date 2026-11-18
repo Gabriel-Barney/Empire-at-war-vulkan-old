@@ -462,7 +462,7 @@ static void test_bindings() {
     std::error_code ec;
     fs::remove_all(root, ec);
     write_file(root / "Data/XML/GameObjectFiles.xml", "<L><File>S.xml</File></L>");
-    write_file(root / "Data/XML/S.xml", "<R><Planet Name=\"Kuat\"></Planet><Prop Name=\"Rock\"></Prop></R>");
+    write_file(root / "Data/XML/S.xml", "<R><Planet Name=\"Kuat\"><Behavior>PLANET</Behavior></Planet><Prop Name=\"Rock\"></Prop></R>");
     DirectoryProvider dp(root.string());
     objects::ObjectTypeDatabase raw;
     CHECK(raw.load(dp));
@@ -474,7 +474,7 @@ static void test_bindings() {
     sp.type = raw.find("Kuat");
     const objects::ObjectHandle planet = store.create(sp);
     sp.type = raw.find("Rock");
-    store.create(sp);
+    const objects::ObjectHandle rock_object = store.create(sp);
 
     LuaHost host;
     host.store = &store;
@@ -509,7 +509,7 @@ static void test_bindings() {
                   "ev.Set_Reward_Type('screen_text')\n"
                   "ev.Add_Dialog_Text('TEXT_A', Object) ev.Clear_Dialog_Text() ev.Add_Dialog_Text('TEXT_B', 3)\n"
                   "Add_Objective('TEXT_LUA_OBJ', true)\n"
-                  "Add_Radar_Blip(Object, 'blip_1') Add_Radar_Blip(Object, 'blip_2') Remove_Radar_Blip('blip_1')\n"
+                  "Add_Radar_Blip(Object) Add_Radar_Blip(Object)\n"
                   "Add_Planet_Highlight(Object, '0') Remove_Planet_Highlight('0') Add_Planet_Highlight(Object, '1')") == "");
     CHECK(gstr(vm, "v") == "true" && gstr(vm, "eq") == "true" && gstr(vm, "ev_valid") == "true");
     CHECK(!vm.exit_requested());
@@ -526,10 +526,21 @@ static void test_bindings() {
     CHECK(def.reward_params.size() == 2 && def.reward_params[1].text == "7" && def.reward_type == "SCREEN_TEXT");
     // q6 t03: Add_Dialog_Text appends the formatted line (no text table: ids show as themselves).
     CHECK(def.dialog.size() == 1 && def.dialog[0] == "TEXT_B");
-    CHECK(m.blips().size() == 1 && m.blips()[0].name == "blip_2" && m.blips()[0].object_id == planet_id);
+    // mcx8 t12 (MCX8_BINDINGS_PLAYERS_STORY.md "Add_Radar_Blip"): galactic Add_Radar_Blip(planet) = the planet's
+    // highlight on (twice = once); Remove_Radar_Blip(planet) turns it off; a non-planet or the tactical form is an error.
+    CHECK(m.blips().size() == 1 && m.blips()[0].name.empty() && m.blips()[0].object_id == planet_id);
+    vm.set_object_global("Rock", rock_object);
+    CHECK(run(vm, "Add_Radar_Blip(Rock)") == "" && vm.exit_requested() && m.blips().size() == 1 &&
+          vm.messages().back().find("Add_Radar_Blip -- invalid type for parameter 1.  Expected planet.") != std::string::npos);
+    reset_script_threads(vm);
+    CHECK(run(vm, "Add_Radar_Blip(Object, 'n')") == "" && vm.exit_requested() && m.blips().size() == 1 &&
+          vm.messages().back().find("Add_Radar_Blip -- invalid number of parameters.  Expected 1, got 2.") != std::string::npos);
+    reset_script_threads(vm);
+    CHECK(run(vm, "Remove_Radar_Blip(Object)") == "" && m.blips().empty() && !vm.exit_requested());
+    CHECK(run(vm, "Add_Radar_Blip(Object)") == "" && m.blips().size() == 1);
     CHECK(m.highlights().size() == 1 && m.highlights()[0].name == "1");
     bool lua_obj = false;
-    for (const StoryObjective& o : m.objectives()) lua_obj = lua_obj || (o.text == "TEXT_LUA_OBJ" && o.from_lua);
+    for (const StoryObjective& o : m.objectives()) lua_obj = lua_obj || (o.text == "TEXT_LUA_OBJ" && o.battle_info);
     CHECK(lua_obj);
 
     // The Lua-set planet goes through the ENTER rule (planet name list): the old Param1 no longer matches, the planet does.
@@ -555,7 +566,7 @@ static void test_bindings() {
     CHECK(run(vm, "Story_Event(3)") == "" && vm.exit_requested() && last_msg_has("Expected string"));
     CHECK(run(vm, "Get_Story_Plot()") == "" && vm.exit_requested() && last_msg_has("Get_Story_Plot -- invalid number of parameters"));
     CHECK(run(vm, "Add_Objective('x')") == "" && vm.exit_requested() && last_msg_has("Expected 2, got 1"));
-    CHECK(run(vm, "Add_Radar_Blip(5, 'n')") == "" && vm.exit_requested() && last_msg_has("could not deduce a position"));
+    CHECK(run(vm, "Add_Radar_Blip(5)") == "" && vm.exit_requested() && last_msg_has("Expected planet."));
     CHECK(run(vm, "Get_Story_Plot('Story_Test.xml').Get_Event('Enter').Set_Reward_Parameter('a', 1)") == "" &&
           last_msg_has("Set_Reward_Parameter -- invalid type for parameter 1. Expected number."));
     CHECK(run(vm, "Get_Story_Plot('Story_Test.xml').Get_Event('Enter').Set_Reward_Parameter(1, {})") == "" &&
@@ -934,10 +945,77 @@ static void test_ai_flags() {
     attach_story(vm, &m);
     m.raise_ai_flag(2, "Attack_Here", -1);
     // PlayerWrapper userdata come from the players family; use the C++ API for the flag itself.
-    CHECK(!m.check_ai_flag(1, "attack_here", -1, false));
-    CHECK(m.check_ai_flag(2, "ATTACK_HERE", -1, false));
-    CHECK(m.check_ai_flag(2, "attack_here", -1, true));
-    CHECK(!m.check_ai_flag(2, "attack_here", -1, true));
+    // mcx8 t12 (MCX8_BINDINGS_PLAYERS_STORY.md "Check_Story_Flag"): the name is compared exactly (case kept).
+    CHECK(!m.check_ai_flag(1, "Attack_Here", -1, false));
+    CHECK(!m.check_ai_flag(2, "ATTACK_HERE", -1, false) && !m.check_ai_flag(2, "attack_here", -1, true));
+    CHECK(m.check_ai_flag(2, "Attack_Here", -1, false));
+    CHECK(m.check_ai_flag(2, "Attack_Here", -1, true));
+    CHECK(!m.check_ai_flag(2, "Attack_Here", -1, true));
+}
+
+// mcx8 t12 (docs/re/MCX8_BINDINGS_PLAYERS_STORY.md "Add_Radar_Blip", "Add_Objective"): the tactical Add_Radar_Blip appends
+// (the same name twice = two blips), takes any position source (a PositionWrapper gives a fixed blip) and
+// Remove_Radar_Blip(name) removes the oldest blip of that name; Add_Objective keeps its section boolean.
+static void test_mcx8_t12_tactical() {
+    const fs::path root = fs::temp_directory_path() / "alamo_lua_story_mcx8_t12";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    write_file(root / "Data/XML/GameObjectFiles.xml", "<L><File>S.xml</File></L>");
+    write_file(root / "Data/XML/S.xml", "<R><Prop Name=\"Rock\"></Prop></R>");
+    DirectoryProvider dp(root.string());
+    objects::ObjectTypeDatabase raw;
+    CHECK(raw.load(dp));
+    objects::GameObjectTypes types;
+    CHECK(types.build(raw));
+    objects::IdCounter ids;
+    objects::ObjectStore store(objects::ModeKind::Land, objects::StoreKind::Primary, types, &ids);
+    objects::SpawnParams sp;
+    sp.type = raw.find("Rock");
+    sp.position = Vec3{10.0f, 20.0f, 0.0f};
+    const objects::ObjectHandle rock = store.create(sp);
+    const objects::ObjectHandle gone = store.create(sp);
+    StoryModel m;
+    LuaHost host;
+    host.store = &store;
+    host.types = &types;
+    LuaVm vm(host);
+    attach_story(vm, &m);
+    vm.set_object_global("Rock", rock);
+    vm.set_object_global("Gone", gone);
+    CHECK(store.destroy(gone));
+    CHECK(run(vm, "Add_Radar_Blip(Rock, 'b') Add_Radar_Blip(Create_Position(1, 2, 3), 'b') Add_Radar_Blip(Rock, 'c')") == "");
+    const int32_t rock_id = static_cast<int32_t>(store.id(rock));
+    CHECK(m.blips().size() == 3 && m.blips()[0].name == "b" && m.blips()[0].object_id == rock_id && m.blips()[1].name == "b" &&
+          m.blips()[1].object_id == -1 && m.blips()[1].x == 1.0f && m.blips()[1].y == 2.0f && m.blips()[1].z == 3.0f);
+    CHECK(run(vm, "Remove_Radar_Blip('b')") == "" && m.blips().size() == 2 && m.blips()[0].object_id == -1 &&
+          m.blips()[1].name == "c");
+    CHECK(run(vm, "Add_Radar_Blip(Gone, 'd')") == "" && vm.exit_requested() && m.blips().size() == 2 &&
+          vm.messages().back().find("Add_Radar_Blip -- could not deduce a position from parameter 1.") != std::string::npos);
+    reset_script_threads(vm);
+    CHECK(run(vm, "Add_Radar_Blip(Rock)") == "" && vm.exit_requested() &&
+          vm.messages().back().find("Expected 2, got 1.") != std::string::npos);
+    reset_script_threads(vm);
+    CHECK(run(vm, "Add_Radar_Blip(Rock, 5)") == "" && vm.exit_requested() &&
+          vm.messages().back().find("Add_Radar_Blip -- invalid type for parameter 2. Expected strng.") != std::string::npos);
+    reset_script_threads(vm);
+    // A fixed blip moves the story hash (an object blip hashes as before).
+    StoryModel a, b;
+    a.add_blip(StoryBlip{"x", -1, 1.0f, 0.0f, 0.0f});
+    b.add_blip(StoryBlip{"x", -1, 2.0f, 0.0f, 0.0f});
+    StateHasher ha, hb;
+    a.hash(ha);
+    b.hash(hb);
+    CHECK(ha.digest() != hb.digest());
+    // Save keeps the blip position (story save v3).
+    ByteWriter w;
+    m.write(w);
+    StoryModel back;
+    ByteReader r(w.bytes());
+    CHECK(back.read(r) && back.blips().size() == 2 && back.blips()[0].x == 1.0f && back.blips()[0].z == 3.0f);
+
+    // Add_Objective: the boolean picks the panel section (true = battle info, false = numbered objective).
+    CHECK(run(vm, "Add_Objective('TEXT_INFO', true) Add_Objective('TEXT_GOAL', false)") == "" && m.objectives().size() == 2 &&
+          m.objectives()[0].battle_info && !m.objectives()[1].battle_info);
 }
 
 // ------------------------------------------------------------------------------------------
@@ -1528,6 +1606,7 @@ int main() {
     test_plots_file();
     test_bindings();
     test_ai_flags();
+    test_mcx8_t12_tactical();
     test_story_table();      // q6 t03
     test_dialog_setters();   // q6 t03
     test_holocron();         // q6 t14

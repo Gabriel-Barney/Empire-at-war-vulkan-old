@@ -76,18 +76,23 @@ int m_object_get_owner(Call& c) {
     const objects::ObjectHandle self = self_object(c);
     int32_t owner = c.vm->host.store->owner(self);
 #if defined(ALAMO_LUA_PLAYERS)
-    // q6 [inferred]: a galactic planet object reports the planet's owner (GalacticSim PlanetState::owner, the owner every
-    // galactic system reads). The port's planet objects are created without a store owner (campaign.cpp: "planets
-    // report their owner from the data pack"), so the store alone said -1 for every planet; mod scripts read
-    // FindPlanet(x).Get_Owner().Get_Faction_Name() for every planet at start (Thrawn's Revenge GalacticConquest,
-    // RandomSpawnManager). Only with a player world attached to the galactic sim whose store this VM reads.
+    // q6 (docs/re/MCX8_BINDINGS_PLAYERS_STORY.md "Get_Owner") [H]: a galactic planet object reports the planet's owner
+    // (GalacticSim PlanetState::owner; retail reads the planet's political control record). The port's planet objects are
+    // created without a store owner (campaign.cpp: "planets report their owner from the data pack"), so the store alone
+    // said -1 for every planet; mod scripts read FindPlanet(x).Get_Owner().Get_Faction_Name() for every planet at start
+    // (Thrawn's Revenge GalacticConquest, RandomSpawnManager). Only with a player world attached to the galactic sim
+    // whose store this VM reads. mcx8 t12: an owner id that is no player of the world gives nil (retail's player-list
+    // lookup finds nothing).
     if (c.vm->owner)
-        if (const LuaPlayerWorld* w = player_world(*c.vm->owner))
+        if (const LuaPlayerWorld* w = player_world(*c.vm->owner)) {
             if (const galactic::GalacticSim* sim = w->galactic(); sim && c.vm->host.store == &sim->store()) {
                 const PlanetIndex p = sim->planet_of(self);
                 if (p != kInvalidPlanet && static_cast<size_t>(p) < sim->planets().size()) owner = sim->planets()[p].owner;
             }
+            if (!w->valid(owner)) return push_nil(c);
+        }
 #endif
+    if (owner < 0) return push_nil(c);  // mcx8 t12: no player has a negative id
     detail::push_player(c.L, *c.vm, owner);
     return 1;
 }
@@ -446,10 +451,11 @@ int g_get_game_mode(Call& c) {
     return 1;
 }
 
-// StringCompare(a, b) [inferred]: true when the two strings are equal ignoring ASCII case, else false
-// (GameScoring.lua tests it with `if`, so it is a boolean, not a strcmp-style number); non-strings: false.
+// StringCompare(a, b, ...) (docs/re/MCX8_BINDINGS_PLAYERS_STORY.md "StringCompare") [H]: true when the first two
+// arguments are Lua strings equal ignoring ASCII case, else false (a boolean; GameScoring.lua tests it with `if`). Fewer
+// than 2 arguments or a non-string (a number is not converted): false; arguments past the second are ignored.
 int g_string_compare(Call& c) {
-    if (c.nargs != 2 || !c.is_string(1) || !c.is_string(2)) return push_bool(c, false);
+    if (c.nargs < 2 || !c.is_string(1) || !c.is_string(2)) return push_bool(c, false);
     return push_bool(c, ascii_iequals(c.string(1), c.string(2)));
 }
 
