@@ -102,6 +102,16 @@ struct MovementConstants {
     // mcx4 t11 (MOVEMENT §2.2 obstacle test item 1): SpaceStaticObstacleAvoidanceBonusDistance (GC +0x1414, int), added
     // to the clearance of the space planner's static-map test ([port] read as a radius margin).
     float space_static_obstacle_avoidance_bonus_distance = 0.0f;
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2 / §B4): SpaceLocomotorFacingLookaheadAcc (GC +0x144c), the LANDBOMBER facing
+    // lookahead's growth per step (capped by the type's MaxFacingLookAheadFrames).
+    float space_locomotor_facing_lookahead_acc = 1.0f;
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4, MOVEMENT §4.4): the final-facing rotation of a land formation (0x411980,
+    // final_formation_facing): FinalFormationFacingMinimumAngle (GC +0x14fc, degrees) and ...DeltaCoefficient (+0x1500); and
+    // Rotate_Formation_Facing_Moves (+0x1550): the destination check 0x439360 orients its rectangles by the ordered facing
+    // instead of the path's last segment.
+    float final_formation_facing_minimum_angle = 10.0f;
+    float final_formation_facing_delta_coefficient = 0.5f;
+    bool rotate_formation_facing_moves = true;
 
     static MovementConstants from_game_constants(const data::GameConstants& gc);
 };

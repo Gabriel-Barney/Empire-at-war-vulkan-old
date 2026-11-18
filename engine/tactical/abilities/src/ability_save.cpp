@@ -16,7 +16,8 @@
 //   (only kAbilitySaveVersion is read, cu6)
 //   u32 + spawn requests (v4: + i32 trooper squad), mines, Battlefield_Modifier player entries (cu8f t06: the Enable_*
 //   gate lists use list numbers 4..6, same layout), interdict / retreat / weatherproof entries,
-//   remote bombs, events, v7 (r3h): queued animation plays (i32 id, i32 type, u32 variant, u8 loop / direct /
+//   remote bombs, v8 (mcx4): u32 + buzz-droid clouds (u32 serial, i32 id, u32 made / end, f32 chase / radius / own /
+//   enemy, vec3 point), events, v7 (r3h): queued animation plays (i32 id, i32 type, u32 variant, u8 loop / direct /
 //   only-from-idle, f32 blend, f32 speed, u32 frame), player overrides, type overrides; u32 + per-player black-market lists (not hashed, but read
 //   by the gates)
 // Rebuilt / not saved: the query scratch lists, the host query table (AbilityHost), the bound RNG, the fog callback.
@@ -48,7 +49,7 @@ namespace {
 // DEPLOY_TROOPERS machine and the rope landing, r3g t04 the cable hold count; 7: r3h the queued animation plays (a
 // play queued after the host drained the queue - AI / Lua activations, damage listeners, deaths - waits for the next
 // tick). Only the current version is read (cu6).
-constexpr uint32_t kAbilitySaveVersion = 7;
+constexpr uint32_t kAbilitySaveVersion = 8;  // mcx4: + buzz-droid clouds
 constexpr uint32_t kSpecialWeaponSaveVersion = 1;
 constexpr uint32_t kSpaceFieldSaveVersion = 1;
 
@@ -140,6 +141,11 @@ void AbilitySystem::write(ByteWriter& w) const {
     for (const SourceEntry& e : source_entries_) w.i32(e.player).i32(e.source).u32(e.crc).u8(e.kind);
     w.u32(static_cast<uint32_t>(remote_bombs_.size()));
     for (const RemoteBomb& b : remote_bombs_) w.i32(b.player).u32(b.serial);
+    w.u32(static_cast<uint32_t>(buzz_.size()));  // mcx4 (version 8)
+    for (const BuzzCloud& c : buzz_) {
+        w.u32(c.serial).i32(c.id).u32(c.made).u32(c.end).f32(c.chase).f32(c.radius).f32(c.own).f32(c.enemy);
+        put_vec3(w, c.point);
+    }
     w.u32(static_cast<uint32_t>(events_.size()));
     for (const AbilityEvent& e : events_) {
         w.u8(static_cast<uint8_t>(e.kind)).u8(e.type).i32(e.id).i32(e.target).u32(e.frame);
@@ -359,6 +365,19 @@ bool AbilitySystem::read(ByteReader& r) {
         b.player = r.i32();
         b.serial = r.u32();
     }
+    if (!r.count(n, 44)) return false;  // mcx4 (version 8)
+    std::vector<BuzzCloud> buzz(n);
+    for (BuzzCloud& c : buzz) {
+        c.serial = r.u32();
+        c.id = r.i32();
+        c.made = r.u32();
+        c.end = r.u32();
+        c.chase = r.f32();
+        c.radius = r.f32();
+        c.own = r.f32();
+        c.enemy = r.f32();
+        c.point = get_vec3<Vec3>(r);
+    }
     if (!r.count(n, 30)) return false;
     std::vector<AbilityEvent> events(n);
     for (AbilityEvent& e : events) {
@@ -419,6 +438,7 @@ bool AbilitySystem::read(ByteReader& r) {
     player_entries_ = std::move(player_entries);
     source_entries_ = std::move(source_entries);
     remote_bombs_ = std::move(remote_bombs);
+    buzz_ = std::move(buzz);
     events_ = std::move(events);
     anim_plays_ = std::move(anim_plays);  // r3h
     visuals_.clear();  // vis1 t06: presentation only, not saved (the serial keeps counting)

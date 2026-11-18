@@ -147,10 +147,10 @@ public:
         return true;
     }
     // refix t03: the infantry corpse path - the dying unit's row becomes the clone type's corpse (no clone object).
-    bool anim_corpse_clone(objects::ObjectId dying, int32_t clone_type, uint8_t kind) {
+    bool anim_corpse_clone(objects::ObjectId dying, int32_t clone_type, uint8_t kind, const float* persistence_override = nullptr) {
         if (!anim_ || !mode_ || !rng_ || clone_type < 0) return false;
-        return anim_->corpse_clone(*mode_, dying, static_cast<objects::TypeIndex>(clone_type), *rng_, gframe_, kind) !=
-               anim::DeathResult::NoRow;
+        return anim_->corpse_clone(*mode_, dying, static_cast<objects::TypeIndex>(clone_type), *rng_, gframe_, kind,
+                                   persistence_override) != anim::DeathResult::NoRow;
     }
     // --- end R3 anim ---
 #endif
@@ -253,11 +253,21 @@ public:
     float lucky_shot(tc::ObjectId source, tc::ObjectId victim, int32_t& hardpoint, tactical::Vec3 impact, bool has_impact) override {
         return a_->lucky_shot(source, victim, hardpoint, impact, has_impact);
     }
-    bool damage_listener(tc::ObjectId victim, tc::ObjectId source, int32_t projectile_desc, uint32_t frame, SimRng* rng) override {
+    bool damage_listener(tc::ObjectId victim, tc::ObjectId source, const tc::ListenerShot& shot, uint32_t frame, SimRng* rng) override {
         // s78n t26.1 (MOVEMENT §3.2.1 item 3, Take_Damage 0x3a9e30): a hit deploys an idle Walk unit with
         // Max_Dist_Walk_While_Deployed > 0 (the Destroyer Droid)
         if (b_->movement_ && b_->movement_->has_unit(victim)) b_->movement_->damage_deploy(victim, frame);
-        return a_->damage_listener(victim, source, projectile_desc, frame, rng);
+        return a_->damage_listener(victim, source, shot, frame, rng);
+    }
+    bool corrupt_inaccuracy(tc::ObjectId id, float& radius) const override { return a_->corrupt_inaccuracy(id, radius); }
+    // mcx4 (MCX4_T11_T12_RE_ANSWERS §B4, 0x54d090): the primary clip is the crouched move (0x43).
+    bool crouch_moving(tc::ObjectId id) const override {
+#ifdef ALAMO_SIM_HAVE_ANIM
+        return world_ && world_->contains(id) && world_->current_type(id) == anim::kAnimCrouchMove;
+#else
+        (void)id;
+        return false;
+#endif
     }
     // HARDPOINT_DISABLED.md §9: Set_System_Online offline (destroyed or disabled) / online (repaired to max).
     void hardpoint_offline(tc::ObjectId owner, uint32_t index, tc::HardpointKind kind, bool last_of_kind, bool destroyed,

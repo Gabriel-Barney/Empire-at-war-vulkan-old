@@ -1309,7 +1309,10 @@ inline void test_land_death_clone_obstacle() {
     }
     std::printf("  land death clone obstacle: registered %d at the death spot %d, idle %d, removed after %u frame(s)\n",
                 registered ? 1 : 0, still ? 1 : 0, idle ? 1 : 0, gone_frame - kill_frame);
-    CHECK(registered && still && idle && gone_frame > kill_frame + 60 && gone_frame <= kill_frame + 80);
+    // mcx4 tac2 (MCX4_T10_RE_ANSWERS §18, 0x29f270 [H]): the dying trooper is Infantry, so its wreck persists for
+    // GameConstants Override_Death_Persistence_Duration (ctor 0; the fixture sets none), not its own 2 s: removed after the
+    // 0.5 s fade, int(30 x 0.5) = 15 frames.
+    CHECK(registered && still && idle && gone_frame >= kill_frame + 15 && gone_frame <= kill_frame + 20);
 }
 
 inline void test_land_attack_blocks() {

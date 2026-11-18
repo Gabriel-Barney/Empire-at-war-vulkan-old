@@ -195,6 +195,15 @@ struct LaneShape {
     std::span<const float> entry_left;  // the unit's offset in each entry's pack F +0xe0[k] (+ = left; entry 0 unused)
     // L0 at arc length s: shift[k] + the unit's offset in row k's pack (`left` for the full-width entry 0).
     float offset(float s) const;
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4, 0x421cc0 / 0x559350 [H]): the formation's final-facing rotation r(s)
+    // (rot_start + rot_rate s, never past rot_full; radians) turns the member's slot offset (depth, L0) in the pack: the
+    // lateral at arc s is depth sin r + L0 cos r (lateral_at; = offset(s) without a rotation). depth = the slot's depth
+    // (retail: the front row 0, rear rows negative: -back).
+    float depth = 0.0f;
+    float rot_full = 0.0f, rot_start = 0.0f, rot_rate = 0.0f;
+    bool rotated() const { return rot_full != 0.0f || rot_start != 0.0f || rot_rate != 0.0f; }
+    float rotation_at(float s) const;
+    float lateral_at(float s) const;
 };
 V2 lane_dir(std::span<const V2> fpath, size_t i);
 std::vector<V2> formation_lane(const PassabilityGrid& grid, std::span<const V2> fpath, const LaneShape& shape, uint32_t mask);

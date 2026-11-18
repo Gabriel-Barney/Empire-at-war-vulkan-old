@@ -338,6 +338,24 @@ int32_t TacticalBattle::presence_pick(const objects::ObjectStore& st, int32_t un
 #endif
 }
 
+void TacticalBattle::set_animation(SimAnimation* anim) {
+    anim_ = anim;
+#ifdef ALAMO_SIM_HAVE_ANIM
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 "Blend times"): the GameConstants locomotor blends; the idle behaviour's
+    // global (idle_blend_seconds) stays the service's own.
+    if (!anim_ || !catalog_) return;
+    const BattleCatalog::LocomotorBlends& b = catalog_->locomotor_blends();
+    anim::AnimTunables t = anim_->tunables();
+    t.move_blend_seconds = b.move;
+    t.idle_walk_blend_seconds = b.idle_walk;
+    t.crouch_idle_walk_blend_seconds = b.crouch_idle_walk;
+    t.team_move_blend_seconds = b.team_move;
+    t.team_crouch_move_blend_seconds = b.team_crouch_move;
+    t.infantry_turn_blend_seconds = b.infantry_turn;
+    anim_->set_tunables(t);
+#endif
+}
+
 void TacticalBattle::play_turn_clip_events(SimRng& rng, uint64_t gframe) {
     std::vector<mv::MovementSystem::TurnClipEvent> ev = movement_->take_turn_clip_events();
 #ifdef ALAMO_SIM_HAVE_ANIM
@@ -534,6 +552,9 @@ void TacticalBattle::drive_animation(objects::ObjectStore& store, SimRng& rng, u
             in.speed = v.speed;
             in.max_speed = v.max_speed;
             in.yaw_deg = v.yaw;
+            // mcx4 t11: a land team member on the Default locomotor is a LandTeamInfantry member (team clip blends). [port M]
+            // the turn error / rate stay unknown here (turn_rate_deg 0): its turn clip blends InfantryTurnBlendTime.
+            in.team_member = team_of(u) != 0xFFFFFFFFu;
             // s78l t02: the arrival turn plays its own clips (play_turn_clip_events), also on the frame it ends. The IDLE gate
             // does not count that frame as moving: the path pops inside the locomotor (behaviour 1) before the IDLE service
             // (behaviour 7) of the same frame (MOVEMENT 3.5.1 step 6).
@@ -543,7 +564,9 @@ void TacticalBattle::drive_animation(objects::ObjectStore& store, SimRng& rng, u
             in.wt_pos = v.wt_pos;
             in.wt_rate = v.wt_rate;
         }
-        stats_.anim_plays += anim_->service_locomotor(*gm, u.id, in, cfg_.walk_speed_ratio, cfg_.min_move_anim_ratio, rng, gframe, &presence);
+        // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §S): the WALKMOVE cutoff is GameConstants WalkAnimationCutoff (0x140b16d04)
+        stats_.anim_plays += anim_->service_locomotor(*gm, u.id, in, catalog_->walk_animation_cutoff(), cfg_.min_move_anim_ratio, rng,
+                                                      gframe, &presence);
     }
 #else
     (void)store, (void)rng, (void)gframe;
@@ -808,6 +831,10 @@ void TacticalBattle::process_death(TacticalMode& mode, const tc::DeathEvent& d, 
         // infantry corpse path takes no object (death_clone_corpse_path).
         objects::ObjectHandle ch{};
         bool corpse_path = false;
+        // mcx4 tac2 (MCX4_T10_RE_ANSWERS §16 / §18, 0x29f270 [H]): a dying Infantry type's clone (either path) persists for
+        // Override_Death_Persistence_Duration (the clone's DEATH data +0x30), not the clone type's own duration.
+        const float override_persist = catalog_->override_death_persistence();  // ledger: consumes GameConstants.Override_Death_Persistence_Duration
+        const float* persist = infantry_type(u->type) ? &override_persist : nullptr;
         if (d.death_clone >= 0) {
             corpse_path = death_clone_corpse_path(u->type, d.death_clone, d.clone_key);
             if (!corpse_path) ch = spawn_death_clone(mode, d.death_clone, at, face, owner);
@@ -817,11 +844,11 @@ void TacticalBattle::process_death(TacticalMode& mode, const tc::DeathEvent& d, 
         // here from data and the battle removes the clone object at the planned frame - identical with and without the
         // animation service, which only plays the planned clip (schedule_death_clone).
         const bool carried_by_clone = static_cast<bool>(ch);
-        if (ch) schedule_death_clone(mode, ch, d.death_clone, d.kind, rng);
+        if (ch) schedule_death_clone(mode, ch, d.death_clone, d.kind, rng, persist);
 #ifdef ALAMO_SIM_HAVE_ANIM
         {  // R3 anim: death clip / corpse of the unit (unless a clone carries it), or the infantry corpse path
             bool carried = carried_by_clone || silent;  // s78n t12 review: a silent removal plays no death clip
-            if (!ch && corpse_path) carried = hooks_->anim_corpse_clone(u->id, d.death_clone, d.kind);
+            if (!ch && corpse_path) carried = hooks_->anim_corpse_clone(u->id, d.death_clone, d.kind, persist);
             hooks_->anim_death(u->id, carried, d.kind);
         }
 #else
@@ -894,7 +921,18 @@ void TacticalBattle::oi_apply_crush(uint32_t frame) {
 // without the animation service; the service plays the planned clip and draws nothing more for the clone. [port] The
 // original runs this in the clone's DEATH behaviour (0x58cdb0 / 0x58d430) and removes the object there; the port keeps
 // the removal frame with the battle so a headless run removes the same objects on the same frame as alamo_game.
-void TacticalBattle::schedule_death_clone(TacticalMode& mode, objects::ObjectHandle clone, int32_t clone_type, uint8_t kind, SimRng& rng) {
+bool TacticalBattle::infantry_type(uint32_t type) const {
+    const objects::GameObjectTypes& types = catalog_->types();
+    if (type >= types.size()) return false;
+    if (!infantry_category_) {
+        const auto m = types.enums().get(objects::EnumId::GameObjectCategory).lookup("Infantry");
+        infantry_category_ = m ? static_cast<uint64_t>(*m) : ~uint64_t{0};
+    }
+    return *infantry_category_ != ~uint64_t{0} && (types.get_mask(type, "CategoryMask") & *infantry_category_) != 0;
+}
+
+void TacticalBattle::schedule_death_clone(TacticalMode& mode, objects::ObjectHandle clone, int32_t clone_type, uint8_t kind, SimRng& rng,
+                                          const float* persistence_override) {
     const auto t = static_cast<objects::TypeIndex>(clone_type);
 #ifdef ALAMO_SIM_HAVE_ANIM
     SimAnimation* src = anim_ ? anim_ : clone_models_;
@@ -902,9 +940,10 @@ void TacticalBattle::schedule_death_clone(TacticalMode& mode, objects::ObjectHan
         if (!own_clone_models_) own_clone_models_ = std::make_unique<SimAnimation>(catalog_->types(), *catalog_->files());
         src = own_clone_models_.get();
     }
-    const anim::DeathPlan plan = src ? src->plan_clone_death(t, mode.kind(), kind, rng)
-                                     : anim::plan_death(nullptr, anim::death_params(anim::type_anim_params(catalog_->types(), t, mode.kind())),
-                                                        kind, rng);
+    anim::DeathParams dp = anim::death_params(anim::type_anim_params(catalog_->types(), t, mode.kind()));
+    if (persistence_override) dp.persistence_seconds = *persistence_override;  // mcx4 tac2: 0x29f270 Infantry override
+    const anim::DeathPlan plan = src ? src->plan_clone_death(t, mode.kind(), kind, rng, persistence_override)
+                                     : anim::plan_death(nullptr, dp, kind, rng);
     const bool remove_now = plan.remove_now, forever = plan.forever;
     const uint64_t lifetime = plan.lifetime;
 #else
@@ -917,7 +956,7 @@ void TacticalBattle::schedule_death_clone(TacticalMode& mode, objects::ObjectHan
     };
     const auto frames = [](float s) { return s > 0.0f ? static_cast<uint64_t>(s * 30.0f) : uint64_t{0}; };
     const bool remove_now = types.get_bool(t, "Remove_Upon_Death");
-    const float persist = seconds("Death_Persistence_Duration", -1.0f);
+    const float persist = persistence_override ? *persistence_override : seconds("Death_Persistence_Duration", -1.0f);
     const bool forever = !remove_now && persist < 0.0f;
     const uint64_t lifetime = frames(persist) + frames(seconds("Death_Fade_Time", 0.25f));
 #endif

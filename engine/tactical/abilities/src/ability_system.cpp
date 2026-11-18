@@ -367,6 +367,20 @@ bool AbilitySystem::can(const Obj& o, uint32_t t, bool check_recharge, bool chec
         case kShieldFlare:
             if (o.combat_unit && !(combat_->shield_fraction(id) > 0.0f)) return false;
             break;
+        case kPlaceRemoteBomb: {  // mcx4 (ABILITIES_HARDPOINTS §2.4): the owner's live remote bombs < the cap
+            // ledger: consumes GameConstants.Max_Remote_Bombs_Per_Player
+            int32_t n = 0;
+            for (const RemoteBomb& b : remote_bombs_) {
+                if (b.player != o.owner) continue;
+                for (size_t i = 0; i < combat_->projectile_count(); ++i)  // [M] only bombs still in the world count
+                    if (combat_->projectile(i).serial == b.serial && combat_->projectile(i).alive) {
+                        ++n;
+                        break;
+                    }
+            }
+            if (n >= cfg_.max_remote_bombs_per_player) return false;
+            break;
+        }
         case kDeploySquad:  // the SPAWN_SQUADRON state is 4 (host query, STATION_HANGARS_SOUND §2.5) and >= 1 live bay
             if (o.combat_unit && combat_->live_hardpoints(id, HardpointKind::FighterBay) == 0) return false;
             if (host_.squadron_deploy_ready && !host_.squadron_deploy_ready(id)) return false;
@@ -1936,6 +1950,7 @@ void AbilitySystem::begin_tick(uint32_t frame) {
 void AbilitySystem::before_units(uint32_t frame, SimRng& rng) {
     rng_ = &rng;
     mines_update(frame);  // OI abilities: mine objects' ProximityMineBehavior [port: serviced before the units]
+    buzz_update(frame);   // mcx4 (§15): buzz-droid clouds' BuzzDroidsBehavior [port: after the mines]
     for (size_t i = objs_.size(); i-- > 0;) {  // team containers, newest first [port]
         if (!objs_[i].is_container) continue;
         const ObjectId id = objs_[i].id;
@@ -2079,8 +2094,47 @@ float AbilitySystem::lucky_shot(ObjectId source, ObjectId victim, int32_t& hardp
     return m;
 }
 
-bool AbilitySystem::damage_listener(ObjectId victim, ObjectId source, int32_t projectile_desc, uint32_t frame, SimRng* rng) {
+namespace {
+// (-180, 180] (0x20b6d0) [port: own form]
+float wrap_deg(float a) {
+    while (a > 180.0f) a = a - 360.0f;
+    while (a <= -180.0f) a = a + 360.0f;
+    return a;
+}
+float yaw_deg(Vec3 v) { return dmath::atan2(v.y, v.x) * (180.0f / dmath::kPiF); }
+}  // namespace
+
+bool AbilitySystem::redirect_shot(ObjectId victim, ObjectId target, const combat::ListenerShot& shot, float angle,
+                                  uint32_t frame, SimRng& rng) {
+    // 0x4cca10 (MCX4_T10_RE_ANSWERS §12): a new shot of the projectile's own type at the projectile's position, owned by
+    // the victim's player, with the old shot's damage. With a target it is aimed at the target (led: launch_projectile);
+    // without one (a block) its heading is the projectile's yaw + 180 + U(-angle, angle), level, and when a second draw
+    // < 0.5 its pitch is U(-angle, angle) [port: dir.z = sin(pitch); the offset is symmetric, so the sign convention does
+    // not matter]. The draws are synced (retail: game LCG for U, its own LCG for the 0.5 test).
+    combat::ProjectileLaunch l;
+    l.shooter = victim;
+    l.owner = combat_->owner(victim);
+    l.projectile = static_cast<uint32_t>(shot.projectile_desc);
+    l.from = shot.pos;
+    l.damage = shot.damage;
+    l.sent_on = true;
+    if (target != kNoObject) {
+        l.target = target;
+    } else {
+        const float yaw = (yaw_deg(shot.dir) + 180.0f + rng.range_float(-angle, angle)) * kDegToRad;
+        float pitch = 0.0f;
+        if (rng.range_float(0.0f, 1.0f) < 0.5f) pitch = rng.range_float(-angle, angle) * kDegToRad;
+        const float cp = dmath::cos(pitch);
+        l.dir = Vec3{cp * dmath::cos(yaw), cp * dmath::sin(yaw), dmath::sin(pitch)};
+        l.point = shot.pos;
+    }
+    return combat_->launch_projectile(l, frame);
+}
+
+bool AbilitySystem::damage_listener(ObjectId victim, ObjectId source, const combat::ListenerShot& shot, uint32_t frame,
+                                    SimRng* rng) {
     // 4.6: style Take_Damage abilities of the victim, list order; the first that applies cancels.
+    const int32_t projectile_desc = shot.projectile_desc;
     Obj* o = obj(victim);
     if (!o || o->sap_disabled || o->specials.empty() || projectile_desc < 0 || !rng) return false;  // cu8f t01: SAP +0x28
     const combat::ProjectileDesc& pd = combat_->data().projectiles[static_cast<size_t>(projectile_desc)];
@@ -2090,27 +2144,49 @@ bool AbilitySystem::damage_listener(ObjectId victim, ObjectId source, int32_t pr
         if (s.cls != SpecialClass::RedirectBlaster && s.cls != SpecialClass::AbsorbBlaster) continue;
         if (alive_unit(source) && !target_filter(s, source)) continue;  // shots from these categories / types
         if (s.cls == SpecialClass::RedirectBlaster) {
-            // TACTICAL 3.8: categories 0, 5, 7 inside Reaction_Arc; redirect roll, then block roll.
+            // mcx4 t23 (vf30 0x709c90, MCX4_T10_RE_ANSWERS §12 / §12a) [H]: the redirect target is the shooter (the record
+            // Take_Damage builds from the projectile pack's shooter id, 0x37d160): without one, or one the target filter
+            // refuses, nothing happens. Categories 0, 5, 7 only (1, 2, 3, 4, 6, 8, 9 are ignored).
+            if (!alive_unit(source)) continue;
             const ProjectileCategory c = pd.category;
             if (c != ProjectileCategory::Default && c != ProjectileCategory::StaticBomb && c != ProjectileCategory::Laser) continue;
-            if (s.reaction_arc_deg < 360.0f && alive_unit(source)) {
-                const Vec3 f = combat_->facing(victim);
-                const Vec3 d = combat_->position(source) - combat_->position(victim);
-                const float lf = dmath::sqrt(f.x * f.x + f.y * f.y), ld = dmath::sqrt(d.x * d.x + d.y * d.y);
-                if (lf > 0.0f && ld > 0.0f) {
-                    const float cosang = (f.x * d.x + f.y * d.y) / (lf * ld);
-                    if (cosang < dmath::cos(s.reaction_arc_deg * 0.5f * kDegToRad)) continue;
+            // Arc test on yaws: d = wrap(victim yaw - projectile yaw); -h < d < h with h = (360 - Reaction_Arc) / 2 means the
+            // shot flies the way the victim faces (from behind): not blocked. [port] A hit without flight data (a queued
+            // Damage_Delay hit) skips the arc test and sends no shot on.
+            if (shot.flight) {
+                const float d = wrap_deg(wrap_deg(yaw_deg(combat_->facing(victim))) - wrap_deg(yaw_deg(shot.dir)));
+                const float h = (360.0f - s.reaction_arc_deg) / 2.0f;
+                if (-h < d && d < h) {
+                    // Turn_To_Face_Unblockable_Shots: a facing order to the arc edge overshot by 1.01 (the host gives it
+                    // only while the victim's clip is idle-like, 0x27b5e0); the damage lands.
+                    if (s.turn_to_face_unblockable && host_.face_direction) {
+                        const float vy = wrap_deg(yaw_deg(combat_->facing(victim)));
+                        const float ad = d < 0.0f ? -d : d;
+                        const float ty = (d > 0.0f ? vy + (h - ad) * 1.01f : vy - (h - ad) * 1.01f) * kDegToRad;
+                        host_.face_direction(victim, Vec3{dmath::cos(ty), dmath::sin(ty), 0.0f});
+                    }
+                    continue;
                 }
             }
-            // r3h t06 (RedirectBlaster vf30 0x709c90): a redirect or block plays Idle_Blockblaster (0x1e), 0xFFFF, one-shot,
-            // blend 0.1, speed 2 when the primary clip is idle-like or a finished Idle_Blockblaster (the host tests that).
-            if (rng->range_float(0.0f, 1.0f) < pd.redirect_chance_modifier * s.redirect_chance) {
+            // Redirect roll (< Projectile_Redirect_Chance_Modifier x Redirect_Chance): a new shot at the shooter; when the
+            // roll fails or the shot cannot be made, the block roll: a new shot sent back with the
+            // Max_Projectile_Redirection_Angle_In_Degrees spread. Either way the original shot is consumed.
+            // r3h t06: a redirect or block plays Idle_Blockblaster (0x1e), 0xFFFF, one-shot, blend 0.1, speed 2 when the
+            // primary clip is idle-like or a finished Idle_Blockblaster (the host tests that). A victim whose current clip
+            // is Move (2) ends the listener "not handled" after the shot was sent on: the damage lands too.
+            const bool moving_clip = host_.primary_clip && host_.primary_clip(victim) == 2;
+            if (rng->range_float(0.0f, 1.0f) < pd.redirect_chance_modifier * s.redirect_chance &&
+                (!shot.flight || redirect_shot(victim, source, shot, 0.0f, frame, *rng))) {
                 event(AbilityEventKind::Redirected, 0, victim, source, frame);
+                if (moving_clip) return false;
                 queue_play(victim, kAnimIdleBlockBlaster, kDrawVariant, false, 0.1f, 2.0f, frame, true);
                 return true;
             }
-            if (rng->range_float(0.0f, 1.0f) < pd.block_chance_modifier * s.block_chance) {
+            // ledger: consumes Redirect_Blaster_Ability.Max_Projectile_Redirection_Angle_In_Degrees
+            if (rng->range_float(0.0f, 1.0f) < pd.block_chance_modifier * s.block_chance &&
+                (!shot.flight || redirect_shot(victim, kNoObject, shot, s.max_redirect_angle_deg, frame, *rng))) {
                 event(AbilityEventKind::Blocked, 0, victim, source, frame);
+                if (moving_clip) return false;
                 queue_play(victim, kAnimIdleBlockBlaster, kDrawVariant, false, 0.1f, 2.0f, frame, true);
                 return true;
             }
@@ -2132,6 +2208,39 @@ bool AbilitySystem::damage_listener(ObjectId victim, ObjectId source, int32_t pr
         }
     }
     return false;
+}
+
+// ledger: consumes Tractor_Beam_Attack_Ability.Inaccuracy_Radius
+bool AbilitySystem::corrupt_inaccuracy(ObjectId shooter, float& radius) const {
+    // MCX4_T10_RE_ANSWERS §15: Corrupt_Systems' apply 0x71d4a0 copies Inaccuracy_Radius into the victim's pack +0x14; the
+    // own-weapon inaccuracy 0x549f80 reads it while the victim is corrupted. [port] The pack is the applied
+    // SpecialState of the corrupting user; with several, the lowest user id (retail keeps the last apply's pack).
+    const Obj* v = obj(shooter);
+    if (!v || !v->corrupted) return false;
+    for (const Obj& o : objs_)
+        for (const SpecialState& sp : o.specials) {
+            const SpecialAbilityDesc& s = data_->specials[sp.desc];
+            if (s.cls == SpecialClass::CorruptSystems && sp.applied && sp.target == shooter) {
+                radius = s.inaccuracy_radius;
+                return true;
+            }
+        }
+    return false;
+}
+
+void AbilitySystem::move_ordered(ObjectId id, uint32_t frame) {
+    // MCX4_T10_RE_ANSWERS §13 [H]: a new move order (0x4f6b60 -> 0x37ca30 -> slot 22 0x48e3c0) ends at once the applied
+    // effects of every special ability of the mover that is enabled for its owner and has Terminate_Effect_On_Move_Command
+    // (slot 15 with reason 3: the remove step of each effect whose target still exists). FoC: Earthquake, Force_Telekinesis,
+    // Cable.
+    for (size_t i = 0;; ++i) {
+        Obj* o = obj(id);
+        if (!o || o->dead || i >= o->specials.size()) return;
+        SpecialState& sp = o->specials[i];
+        const SpecialAbilityDesc& s = data_->specials[sp.desc];
+        if (!s.terminate_on_move || !sp.applied || !enabled(*o, s)) continue;
+        remove_special(*o, sp, frame);
+    }
 }
 
 void AbilitySystem::set_type_special_enabled(int32_t player, uint32_t desc, uint32_t crc, bool on) {
@@ -2390,6 +2499,17 @@ void AbilitySystem::hash(StateHasher& h) const {
         h.f32(m.pos.z);
         h.f32(m.trigger);
         h.u32(m.arm);
+    }
+    if (!buzz_.empty()) {  // mcx4: hashed only while a cloud lives, so battles without one keep their CRCs
+        h.u32(static_cast<uint32_t>(buzz_.size()));
+        for (const BuzzCloud& c : buzz_) {
+            h.u32(c.serial);
+            h.i32(c.id);
+            h.u32(c.end);
+            h.f32(c.point.x);
+            h.f32(c.point.y);
+            h.f32(c.point.z);
+        }
     }
     h.u32(static_cast<uint32_t>(player_entries_.size()));
     for (const PlayerEntry& e : player_entries_) {

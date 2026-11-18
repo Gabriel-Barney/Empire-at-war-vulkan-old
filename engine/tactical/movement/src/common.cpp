@@ -95,6 +95,13 @@ MovementConstants MovementConstants::from_game_constants(const data::GameConstan
         gc.get_bool("ShouldInfantryTeamsSplitAcrossFormations", c.should_infantry_teams_split_across_formations);
     c.space_static_obstacle_avoidance_bonus_distance = static_cast<float>(gc.get_int(
         "SpaceStaticObstacleAvoidanceBonusDistance", static_cast<int32_t>(c.space_static_obstacle_avoidance_bonus_distance)));
+    c.space_locomotor_facing_lookahead_acc =
+        gc.get_float("SpaceLocomotorFacingLookaheadAcc", c.space_locomotor_facing_lookahead_acc);
+    c.final_formation_facing_minimum_angle =
+        gc.get_float("FinalFormationFacingMinimumAngle", c.final_formation_facing_minimum_angle);
+    c.final_formation_facing_delta_coefficient =
+        gc.get_float("FinalFormationFacingDeltaCoefficient", c.final_formation_facing_delta_coefficient);
+    c.rotate_formation_facing_moves = gc.get_bool("Rotate_Formation_Facing_Moves", c.rotate_formation_facing_moves);
     return c;
 }
 

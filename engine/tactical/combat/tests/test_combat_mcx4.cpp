@@ -411,6 +411,93 @@ void test_projectile_appearance_delay() {
     CHECK(HardpointDesc{}.projectile_appearance_delay_frames == 0);
 }
 
+void test_weapon_delay_order() {
+    // MCX4_T10_RE_ANSWERS §10 (Fire_At 0x3825b0) [H]: W = [slot-0 entry] x (unit-ability WEAPON_DELAY multiplier) x
+    // [slot-1 entry], float32, in that order. Factors 0.1 / 0.3 / 0.7 give different bits for the other two orders.
+    const float e0 = 0.1f, m = 0.3f, e1 = 0.7f;
+    const float want = (e0 * m) * e1;
+    CHECK(want != e0 * (m * e1) && want != (e0 * e1) * m);  // the order is visible in the bits
+    World w;
+    ProjectileDesc p;
+    p.max_speed = 50.0f;
+    p.damage = 1.0f;
+    w.data.projectiles.push_back(p);
+    HardpointDesc hd;
+    hd.kind = HardpointKind::WeaponLaser;
+    hd.health = 100.0f;
+    hd.projectile = 0;
+    hd.min_recharge = hd.max_recharge = 1.0f;
+    hd.fire_range = 1000.0f;
+    hd.weapon_delay = {{kAbilityPowerToWeapons, e0}, {kAbilityDefend, e1}};
+    w.data.hardpoints.push_back(hd);
+    UnitAbilityDesc ptw;  // slot 0, carries the WEAPON_DELAY multiplier
+    ptw.ability_type = kAbilityPowerToWeapons;
+    ptw.mult[static_cast<size_t>(ModKind::WeaponDelay) - 1] = m;
+    UnitAbilityDesc def;  // slot 1
+    def.ability_type = kAbilityDefend;
+    w.data.abilities = {ptw, def};
+    UnitDesc sh;
+    sh.tactical_health = 100.0f;
+    sh.hardpoints = {0};
+    sh.abilities = {0, 1};
+    const uint32_t ds = push_unit(w.data, sh);
+    w.make();
+    w.add(1, ds, 0, Vec3{0, 0, 0});
+    CHECK(w.sys->weapon_delay_factor(1, 0) == 1.0f);
+    w.sys->set_ability_active(1, 0, true);
+    w.sys->set_ability_active(1, 1, true);
+    const float got = w.sys->weapon_delay_factor(1, 0);
+    CHECK(got == want);
+    w.sys->set_ability_active(1, 1, false);  // slot 1 off: its entry drops out
+    CHECK(w.sys->weapon_delay_factor(1, 0) == e0 * m);
+}
+
+// ledger: verifies GameConstants.Crouch_Move_Fire_Angle_Cutoff
+void test_crouch_move_fire_cone() {
+    // MCX4_T11_T12_RE_ANSWERS §B4 (WeaponBehavior 0x54d090): in the crouched-move clip (0x43) with a fire target, the own
+    // weapon does not fire while |yaw to the target - facing yaw| > Crouch_Move_Fire_Angle_Cutoff (FoC 20). A moving unit
+    // keeps its facing (targeting state 4 without a turn), so the cone is what gates it.
+    struct Hooks final : CombatHooks {
+        bool crouch = true;
+        bool crouch_moving(ObjectId) const override { return crouch; }
+    };
+    auto shots = [](bool crouch, Vec3 target) {
+        Hooks hk;
+        hk.crouch = crouch;
+        World w;
+        ProjectileDesc p;
+        p.max_speed = 10.0f;
+        p.damage = 1.0f;
+        w.data.projectiles.push_back(p);
+        UnitDesc s;
+        s.tactical_health = 100.0f;
+        s.max_attack_distance = 1000.0f;
+        s.weapon_projectile = 0;
+        s.weapon_recharge = 1.0f;
+        UnitDesc t;
+        t.tactical_health = 1e6f;
+        t.radius = 10.0f;
+        t.category_mask = kCatCapital;
+        const uint32_t ds = push_unit(w.data, s), dt = push_unit(w.data, t);
+        CombatConfig cfg;
+        cfg.mode = GameMode::Land;
+        cfg.inaccuracy_enabled = false;
+        w.make(cfg);
+        w.sys->set_hooks(&hk);
+        w.add(1, ds, 0, Vec3{0, 0, 0}, Vec3{1, 0, 0});
+        w.add(2, dt, 1, target);
+        w.sys->set_flag(1, kUnitMoving, true);
+        w.sys->order_attack(1, 2);
+        for (int i = 0; i < 60; ++i) w.tick();
+        w.sys->set_hooks(nullptr);
+        return w.sys->stats().shots;
+    };
+    CHECK(shots(true, Vec3{0, 300, 0}) == 0);  // 90 degrees off: no shot
+    CHECK(shots(false, Vec3{0, 300, 0}) > 0);  // not crouch-moving: fires
+    CHECK(shots(true, Vec3{300, 52, 0}) > 0);  // about 9.8 degrees off: inside the cone
+    CHECK_F(CombatConfig{}.crouch_move_fire_angle_cutoff, 20.0f);
+}
+
 void test_out_of_range_mod_values() {
     // mcx8 t11 (docs/MOD_COMPAT_DESIGN.md §13.3): mod values whose frame count is out of int32 range convert the x86 way
     // (cvttss2si: INT32_MIN), so the MSVC and clang builds give the same result (both run this test). A mod's 99999999999 s

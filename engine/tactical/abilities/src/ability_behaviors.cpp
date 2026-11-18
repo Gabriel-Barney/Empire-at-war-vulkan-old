@@ -82,6 +82,11 @@ bool AbilitySystem::bind_spawn(uint32_t serial, ObjectId id) {
             m.id = id;
             return true;
         }
+    for (BuzzCloud& c : buzz_)  // mcx4 (§15): the Buzz_Droids cloud object
+        if (c.serial == serial && c.id == kNoObject) {
+            c.id = id;
+            return true;
+        }
     // REMAINING_GAPS §5.2: a DEPLOY_TROOPERS trooper joins its owner's trooper list (+0x10), spawn order.
     for (const SpawnRequest& r : spawns_)
         if (r.serial == serial && r.purpose == SpawnPurpose::Troopers) {
@@ -1317,7 +1322,11 @@ void AbilitySystem::behaviors_service(Obj& o, uint32_t frame) {
 }
 
 void AbilitySystem::hunt_decide(Obj& o, uint32_t frame) {
-    // Destination 0x627d40 (§2.2) [H flow, M bounds]. Type flag +0x15 is taken as clear for every type [port: unknown].
+    // Destination 0x627d40 (§2.2) [H flow, M bounds]. mcx4 (MCX4_T10_RE_ANSWERS §5, read 2026-11-18 [H]): the hunter's
+    // own Is_Force_Sensitive (type +0x15) skips step 1 (the draw is still made), makes step 2 pick among the
+    // force-sensitive objects first, and drops the final jitter (0x628b40), so force users hunt each other to the spot.
+    // ledger: consumes GameObjectType.Is_Force_Sensitive
+    const bool fs = desc(o).force_sensitive;
     Vec3 lo, hi;
     if (!map_rect(lo, hi)) return;  // zero rectangle = stay
     const Vec3 me = position(o);
@@ -1325,7 +1334,7 @@ void AbilitySystem::hunt_decide(Obj& o, uint32_t frame) {
     bool found = false;
     // 1. u > 0.5: 99 random points (2 Get_Float each), keep the fogged ones (FOW_Point_Test force 0), Get_Int pick.
     const float u = draw_float(0.0f, 1.0f);
-    if (u > 0.5f) {
+    if (!fs && u > 0.5f) {
         std::array<Vec3, 99> pts{};
         int32_t n = 0;
         for (int i = 0; i < 99; ++i) {
@@ -1341,12 +1350,21 @@ void AbilitySystem::hunt_decide(Obj& o, uint32_t frame) {
     }
     if (!found) {
         // 2. all objects (0x2a9ff0 mode 1): those hidden from the owner (FOW_Object_Hidden force 0); pick hidden, else any.
+        //    mcx4: a force-sensitive hunter picks among the force-sensitive objects first (one Get_Int either way).
         scratch_.clear();
-        for (size_t i = 0; i < combat_->unit_count(); ++i) {
-            const ObjectId id = combat_->unit_id_at(i);
-            if (id == o.id || !alive_unit(id)) continue;
-            if (host_.object_hidden && host_.object_hidden(o.owner, id, false)) scratch_.push_back(id);
-        }
+        if (fs)
+            for (size_t i = 0; i < combat_->unit_count(); ++i) {
+                const ObjectId id = combat_->unit_id_at(i);
+                if (id == o.id || !alive_unit(id) || (combat_->flags(id) & combat::kUnitSkipTargeting)) continue;
+                const Obj* t = obj(id);
+                if (t && desc(*t).force_sensitive) scratch_.push_back(id);
+            }
+        if (scratch_.empty())
+            for (size_t i = 0; i < combat_->unit_count(); ++i) {
+                const ObjectId id = combat_->unit_id_at(i);
+                if (id == o.id || !alive_unit(id)) continue;
+                if (host_.object_hidden && host_.object_hidden(o.owner, id, false)) scratch_.push_back(id);
+            }
         if (scratch_.empty())
             for (size_t i = 0; i < combat_->unit_count(); ++i) {
                 const ObjectId id = combat_->unit_id_at(i);
@@ -1370,9 +1388,11 @@ void AbilitySystem::hunt_decide(Obj& o, uint32_t frame) {
         dest.x = std::clamp(dest.x, lo.x, hi.x);
         dest.y = std::clamp(dest.y, lo.y, hi.y);
     }
-    // Jitter (type +0x15 clear): 2 more Get_Float(30, 400) on x and y [M].
-    dest.x = dest.x + draw_float(30.0f, 400.0f);
-    dest.y = dest.y + draw_float(30.0f, 400.0f);
+    // Jitter (the hunter's type +0x15 clear): 2 more Get_Float(30, 400) on x and y [M].
+    if (!fs) {
+        dest.x = dest.x + draw_float(30.0f, 400.0f);
+        dest.y = dest.y + draw_float(30.0f, 400.0f);
+    }
     // Order: a move for the unit or its whole team (0x628820 -> 0x2a7b80).
     if (o.container != kNoObject) {
         if (const Obj* c = obj(o.container)) {
@@ -1452,6 +1472,83 @@ void AbilitySystem::mines_update(uint32_t frame) {
         }
     }
     mines_.erase(std::remove_if(mines_.begin(), mines_.end(), [](const Mine& m) { return m.dead != 0; }), mines_.end());
+}
+
+void AbilitySystem::buzz_update(uint32_t frame) {
+    // mcx4 (MCX4_T10_RE_ANSWERS §15, BuzzDroidsBehavior vf6 0x6379a0 and its finder 0x637540) [H unless tagged]. Each frame
+    // from the pack's end frame on, a cloud C:
+    // 1. damages itself by Own_Damage_Per_Second / FPS (kind 1, source C);
+    // 2. for each enemy player of C's owner, each object X of that player within Chase_Radius of the pack's target
+    //    position whose CategoryMask meets C's type Special_Weapon_Valid_Targets: p = the point of X's hardpoint closest to
+    //    C (0x394a80), else X's position; |C - p| < Damage_Radius: X takes Enemy_Damage_Per_Second / FPS (kind 1, source C,
+    //    that hardpoint) and the cloud stays; otherwise, while no X was in the damage radius, the nearest such X is the
+    //    chase target;
+    // 3. with a chase target and none damaged, C moves its Max_Speed toward the target's position (0x3a8f90).
+    // [port] The finder's object-byte tests (+0x333, +0x33a, +0x3a0 bits) are not modelled; enemies in player index
+    // order, objects in unit order (retail: the spatial query's order).
+    const float fps = static_cast<float>(cfg_.fps);
+    for (BuzzCloud& c : buzz_) {
+        if (c.id == kNoObject) continue;
+        if (!alive_unit(c.id) || frame < c.end) continue;
+        combat::DamageRequest self;
+        self.victim = c.id;
+        self.amount = c.own / fps;
+        self.kind = combat::kKindNormal;
+        self.source = c.id;
+        combat_->take_damage(self, frame);
+        if (!alive_unit(c.id)) continue;
+        const int32_t owner = combat_->owner(c.id);
+        const Obj* co = obj(c.id);
+        const uint64_t valid = co ? desc(*co).special_weapon_valid_targets : 0u;
+        const Vec3 cp = combat_->position(c.id);
+        bool damaged = false;
+        ObjectId chase = kNoObject;
+        float best = 1e18f;
+        for (int32_t p = 0; p < static_cast<int32_t>(combat_->player_count()); ++p) {
+            if (!enemy(owner, p)) continue;
+            for (size_t i = 0; i < combat_->unit_count(); ++i) {
+                const ObjectId x = combat_->unit_id_at(i);
+                if (x == c.id || !alive_unit(x) || combat_->owner(x) != p) continue;
+                if ((combat_->data().units[combat_->desc_index(x)].category_mask & valid) == 0) continue;
+                if (combat::distance3(combat_->position(x), c.point) > c.chase) continue;
+                Vec3 at = combat_->position(x);
+                const int32_t hp = combat_->closest_hardpoint(x, cp, false);
+                if (hp >= 0) (void)combat_->hardpoint_world(x, hp, at);
+                const Vec3 d = cp - at;
+                const float d2 = d.x * d.x + d.y * d.y + d.z * d.z;
+                if (d2 < c.radius * c.radius) {
+                    damaged = true;
+                    combat::DamageRequest r;
+                    r.victim = x;
+                    r.amount = c.enemy / fps;
+                    r.kind = combat::kKindNormal;
+                    r.source = c.id;
+                    r.hardpoint = hp;
+                    combat_->take_damage(r, frame);
+                    if (!alive_unit(c.id)) break;
+                    continue;
+                }
+                if (!damaged && d2 < best) {
+                    best = d2;
+                    chase = x;
+                }
+            }
+            if (!alive_unit(c.id)) break;
+        }
+        if (damaged || chase == kNoObject || !alive_unit(c.id) || !co) continue;
+        const Vec3 tp = combat_->position(chase);
+        Vec3 dir = tp - cp;
+        const float len = dmath::sqrt(dir.x * dir.x + dir.y * dir.y + dir.z * dir.z);
+        if (len > 0.0f) dir = dir * (1.0f / len);
+        const Vec3 np = cp + dir * desc(*co).max_speed;
+        combat_->set_position(c.id, np);
+        if (host_.place) host_.place(c.id, np);
+    }
+    buzz_.erase(std::remove_if(buzz_.begin(), buzz_.end(),
+                               [this, frame](const BuzzCloud& c) {
+                                   return c.id == kNoObject ? frame > c.made : !combat_->has_unit(c.id) || !alive_unit(c.id);
+                               }),
+                buzz_.end());
 }
 
 // ================================================================================================

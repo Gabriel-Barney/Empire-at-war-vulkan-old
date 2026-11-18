@@ -215,6 +215,20 @@ bool AbilitySystem::ability_clip_running(ObjectId id, uint32_t frame) const {
     return v.type >= 0 && !v.finished;
 }
 
+// ledger: consumes Hack_Ability.Team_Member_With_Ability
+ObjectId AbilitySystem::acting_member(const Obj& o, const SpecialAbilityDesc& s) const {
+    // MCX4_T10_RE_ANSWERS §15: slot 10 gives the resolved Team_Member_With_Ability type only for a user in a team; slot 11
+    // the first member of that type in the team container's list. [port] A container user looks in its own list.
+    if (s.team_member_type < 0) return o.id;
+    const Obj* team = o.is_container ? &o : (o.container != kNoObject ? obj(o.container) : nullptr);
+    if (!team) return o.id;
+    for (ObjectId m : team->members) {
+        const Obj* mo = obj(m);
+        if (mo && !mo->dead && desc(*mo).object_type == s.team_member_type) return m;
+    }
+    return o.id;
+}
+
 void AbilitySystem::observe_clip(ObjectId id, int32_t type, uint32_t frame) {
     const Obj* o = obj(id);
     if (!o || o->anim_type < 0 || o->anim_then == kAnimWeaponShot) return;
@@ -839,11 +853,15 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             // blend taken as Repair's) and the timing reads the drawn variant.
             uint32_t len = 0;
             if (s.cls != C::TacticalBribe) {
+                // mcx4 (MCX4_T10_RE_ANSWERS §15, Hack / Repair slots 10 / 11 0x701ab0 / 0x701ad0): with
+                // Team_Member_With_Ability the first member of that type in the user's team acts (the clip and its timing
+                // are its own); a user outside a team, or a team without such a member, acts itself.
+                const ObjectId actor = acting_member(o, s);
                 const int32_t at = s.cls == C::Repair ? kAnimRepairing : kAnimHacking;
-                const uint32_t v = variant_count(o.id, at) > 0 ? resolve_variant(o.id, at, kDrawVariant) : 0u;
-                const ClipTiming ct = clip_timing(o.id, at, {}, v);
+                const uint32_t v = variant_count(actor, at) > 0 ? resolve_variant(actor, at, kDrawVariant) : 0u;
+                const ClipTiming ct = clip_timing(actor, at, {}, v);
                 len = ct.count > 0.0f ? static_cast<uint32_t>(std::ceil(ct.end / ct.rate)) : static_cast<uint32_t>(kHackFrames);
-                if (ct.count > 0.0f) queue_play(o.id, at, v, false, 0.1f, 1.0f, frame);
+                if (ct.count > 0.0f) queue_play(actor, at, v, false, 0.1f, 1.0f, frame);
             }
             sp.next = frame + len;
             start_recharge(o, s.cls == C::Hack ? kTargetedHack : (s.cls == C::Repair ? kTargetedRepair : kTacticalBribe));
@@ -933,9 +951,40 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             return true;
         }
 
-        case C::BuzzDroids:
+        case C::BuzzDroids: {
+            // mcx4 (MCX4_T10_RE_ANSWERS §15, apply 0x71c430): the cloud (Object_Type) is created at once at the target's
+            // position; its pack: active from now + int(FPS x Activation_Time_In_Seconds), Chase_Radius, Damage_Radius,
+            // Own_ / Enemy_Damage_Per_Second and the target position (buzz_update runs it).
+            if (target != kNoObject && combat_->has_unit(target) && !range_ok(o, s, target)) return false;
+            stop_order(o.id, frame, kStopHold);  // cu8l t02 (CU8K_T02_T06_RE §2 row 0x71c4b2)
+            const Vec3 at = (target != kNoObject && combat_->has_unit(target)) ? combat_->position(target) : me;
+            if (s.spawn_type >= 0) {
+                SpawnRequest q;
+                q.purpose = SpawnPurpose::Summon;
+                q.object_type = s.spawn_type;
+                q.position = at;
+                q.facing = o.combat_unit ? combat_->facing(o.id) : Vec3{1.0f, 0.0f, 0.0f};
+                q.owner = o.owner;
+                q.source = o.id;
+                q.ability_type = kBuzzDroids;
+                BuzzCloud c;
+                c.serial = request_spawn(q);
+                c.made = frame;
+                c.end = frame + static_cast<uint32_t>(std::max(0, frames_of(s.activation_time, fps)));
+                c.chase = s.chase_radius;
+                c.radius = s.damage_range;
+                c.own = s.own_damage_per_second;
+                c.enemy = s.enemy_damage_per_second;
+                c.point = at;
+                buzz_.push_back(c);
+            }
+            start_recharge(o, kBuzzDroids);
+            event(AbilityEventKind::EffectOn, kBuzzDroids, o.id, target, frame);
+            return true;
+        }
+
         case C::Summon:
-        case C::Radioactive: {  // create Object_Type (one id) after Creation_Delay / Spray_Time / Activation_Time
+        case C::Radioactive: {  // create Object_Type (one id) after Creation_Delay / Spray_Time
             if (target != kNoObject && combat_->has_unit(target) && !range_ok(o, s, target)) return false;
             // cu8l t02 (CU8K_T02_T06_RE §2 rows 0x71c4b2 / 0x71ce72 / 0x712727): Buzz_Droids, Summon and Radioactive_
             // Contaminate stop and hold the user (one draw when not a squad member). [port] Radioactive's hold is at the
@@ -946,9 +995,8 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             if (s.cls == C::Radioactive) queue_play(o.id, kAnimContaminate, kDrawVariant, false, 0.0f, 1.0f, frame);
             sp.applied = 1;
             sp.point = (target != kNoObject && combat_->has_unit(target)) ? combat_->position(target) : me;
-            const float delay = s.cls == C::BuzzDroids ? s.activation_time : s.creation_delay;
-            sp.next = frame + static_cast<uint32_t>(std::max(0, frames_of(delay, fps)));
-            const uint8_t t = s.cls == C::BuzzDroids ? kBuzzDroids : (s.cls == C::Radioactive ? kRadioactiveContaminate : kSummon);
+            sp.next = frame + static_cast<uint32_t>(std::max(0, frames_of(s.creation_delay, fps)));
+            const uint8_t t = s.cls == C::Radioactive ? kRadioactiveContaminate : kSummon;
             start_recharge(o, t);
             event(AbilityEventKind::EffectOn, t, o.id, target, frame);
             return true;
@@ -1729,10 +1777,19 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
             if (sp.counter == std::max(1, frames_of(s.duration_secs, fps))) queue_play(o.id, kAnimFlameAttack, 0, true, 0.2f, 1.0f, frame);
             sp.counter = dec_wrap(sp.counter);
             const Vec3 f = o.combat_unit ? combat_->facing(o.id) : Vec3{1.0f, 0.0f, 0.0f};
-            const float per = s.damage_amount / static_cast<float>(std::max(1, frames_of(s.duration_secs, fps)));
+            // mcx4 (MCX4_T10_RE_ANSWERS §15, damage helper 0x705590): elapsed = Fire_Time_In_Secs - frames left / FPS; the
+            // ability's own target is hit only once elapsed > Damage_Delay_In_Secs, other objects in the cone every frame;
+            // per frame Damage_Amount / ((Fire_Time_In_Secs - Damage_Delay_In_Secs) x FPS). [port] A delay >= the fire
+            // time spreads the amount over the fire time instead of dividing by <= 0.
+            const float elapsed = s.duration_secs - static_cast<float>(sp.counter) / static_cast<float>(fps);
+            const float span = s.duration_secs - s.flame_damage_delay;
+            const float per = span > 0.0f ? s.damage_amount / (span * static_cast<float>(fps))
+                                          : s.damage_amount / static_cast<float>(std::max(1, frames_of(s.duration_secs, fps)));
+            const bool target_due = elapsed > s.flame_damage_delay;
             for (size_t i = 0; i < combat_->unit_count(); ++i) {
                 const ObjectId u = combat_->unit_id_at(i);
                 if (!alive_unit(u) || !enemy(o.owner, combat_->owner(u))) continue;
+                if (u == sp.target && !target_due) continue;
                 const Vec3 up = combat_->position(u);
                 if (combat::distance_xy(me, up) > s.max_range) continue;
                 if (!facing_within(f, me, up, 0.5f * s.damage_arc)) continue;

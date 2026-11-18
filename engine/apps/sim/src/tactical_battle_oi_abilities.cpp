@@ -207,6 +207,31 @@ void TacticalBattle::oi_install(TacticalMode& mode, SimRng& rng) {
     h.snap_yaw = [this](tc::ObjectId id, float yaw_deg) {
         if (movement_) movement_->snap_yaw(id, yaw_deg);
     };
+    // mcx4 t23 (MCX4_T10_RE_ANSWERS §12a): Redirect_Blaster's Turn_To_Face_Unblockable_Shots facing order, given only while
+    // the victim's primary clip is idle-like (0x27b5e0). [port] The movement system has no rate-limited facing order, so
+    // the yaw is snapped; the victim's current clip (Move: the damage lands) is reported by primary_clip.
+    h.face_direction = [this](tc::ObjectId id, tactical::Vec3 dir) {
+        if (!movement_ || !movement_->has_unit(id)) return;
+#ifdef ALAMO_SIM_HAVE_ANIM
+        if (anim::AnimWorld* w = anim_world_now(); w && w->contains(id)) {
+            const int32_t cur = w->current_type(id);
+            if (cur != anim::kNoAnimType && !anim::is_idle_like(cur)) return;
+        }
+#endif
+        movement_->snap_yaw(id, dmath::atan2(dir.y, dir.x) * (180.0f / dmath::kPiF));
+    };
+    // mcx4 (MCX4_T10_RE_ANSWERS §15, 0x3a8f90): a buzz-droid cloud's chase step puts it at the new point (yaw kept).
+    h.place = [this](tc::ObjectId id, tactical::Vec3 p) {
+        if (!movement_ || !movement_->has_unit(id)) return;
+        (void)movement_->teleport(id, mv::V2{p.x, p.y}, p.z, movement_->view(id).yaw, frame_);
+    };
+    h.primary_clip = [this](tc::ObjectId id) -> int32_t {
+#ifdef ALAMO_SIM_HAVE_ANIM
+        if (anim::AnimWorld* w = anim_world_now(); w && w->contains(id)) return w->current_type(id);
+#endif
+        (void)this, (void)id;
+        return -1;
+    };
     // s78l t05 (TACTICAL_COMBAT §5.4.1): Tactical_Bribe pays from the player's credits (the battle's credit hooks: the
     // galactic account in campaign battles; unset hooks = 0 credits, so a bribe with a cost fails) and reads the battle
     // planet's corruption (GalacticSim::corrupted of the request's planet; no planet = uncorrupted).
@@ -604,7 +629,8 @@ void TacticalBattle::oi_events(TacticalMode& mode) {
             case ta::SpawnPurpose::Mine:
             case ta::SpawnPurpose::Summon: {
                 const objects::ObjectId id = oi_spawn_unit(mode, q.object_type, oi_sv(q.position), oi_sv(q.facing), q.owner);
-                if (q.purpose == ta::SpawnPurpose::Mine && id != objects::kNoObjectId) abilities_->bind_spawn(q.serial, id);
+                // mcx4 (MCX4_T10_RE_ANSWERS §15): a Buzz_Droids cloud is bound too (the ability system runs its pack)
+                if (id != objects::kNoObjectId) (void)abilities_->bind_spawn(q.serial, id);
                 break;
             }
             case ta::SpawnPurpose::Bomber: {  // mcx4 t06 (Spawn_Ability, MCX4_RE_ANSWERS_TACTICAL §14)

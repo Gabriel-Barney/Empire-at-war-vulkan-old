@@ -102,6 +102,19 @@ struct SpecialAbilityDesc {
     uint32_t targeted_categories = 0;  // bit (1 << ProjectileCategory)
     // redirect / absorb blaster
     float redirect_chance = 0.0f, block_chance = 0.0f, reaction_arc_deg = 360.0f, absorb_chance = 0.0f;
+    // mcx4 t23 (Redirect_Blaster +0x184 / +0x188, MCX4_T10_RE_ANSWERS §12): the spread (degrees) of a blocked shot sent
+    // back, and whether an idle victim turns toward a shot from outside the reaction arc. Ctor defaults not read [M: 0].
+    float max_redirect_angle_deg = 0.0f;
+    bool turn_to_face_unblockable = false;
+    // mcx4 (Ability_Base +0x42, MCX4_T10_RE_ANSWERS §13): a move order of the owner ends this ability's effects at once.
+    bool terminate_on_move = false;
+    // mcx4 (MCX4_T10_RE_ANSWERS §15): Hack / Repair Team_Member_With_Ability (host TypeIndex, -1 none): the team member
+    // of that type acts for a user inside a team. Personal_Flame_Thrower Damage_Delay_In_Secs (ctor 0.2): the target is
+    // hit only after that much of Fire_Time_In_Secs. Buzz_Droids Chase_Radius / Own_ / Enemy_Damage_Per_Second.
+    int32_t team_member_type = -1;
+    float flame_damage_delay = 0.2f;
+    float chase_radius = 0.0f, own_damage_per_second = 0.0f, enemy_damage_per_second = 0.0f;
+    float inaccuracy_radius = 0.0f;  // Corrupt_Systems Inaccuracy_Radius (+0x188)
     // mcx4 t06 (Absorb_Blaster_Ability +0x17c / +0x180, MCX4_RE_ANSWERS_TACTICAL §7): the heal of an absorbed shot =
     // Projectile_Damage x percentage + amount. Load checks: a percentage outside [0, 1] and a negative amount read as 0.
     float damage_absorb_percentage = 0.0f, damage_absorb_amount = 0.0f;
@@ -272,6 +285,12 @@ struct AbilityObjectDesc {
     float gravity_field_slow_fraction = 0.0f;   // Gravity_Control_Field_Slow_Fraction (+0x1f9c); 0 = the field does nothing
     std::string gravity_field_effect;           // Gravity_Control_Field_Effect (presentation, per slowed unit)
     bool affected_by_gravity_field = false;     // Is_Affected_By_Gravity_Control_Field
+    // mcx4 (MCX4_T10_RE_ANSWERS §15): a Buzz_Droids object type's victim filter (Special_Weapon_Valid_Targets, type
+    // +0x1df0, against the candidate's CategoryMask) and its chase step per frame (Max_Speed, 0x370f00 [M: no mode factor]).
+    uint64_t special_weapon_valid_targets = 0;
+    float max_speed = 0.0f;
+    // mcx4 (§5): Is_Force_Sensitive (type +0x15): HUNT prefers force-sensitive objects and goes to their exact position.
+    bool force_sensitive = false;
 };
 
 struct AbilityData {

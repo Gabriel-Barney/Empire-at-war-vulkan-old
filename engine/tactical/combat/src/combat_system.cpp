@@ -93,6 +93,7 @@ void apply_game_constants(CombatConfig& c, const data::GameConstants& gc) {
     c.energy_to_shield_exchange_rate = gc.get_float("EnergyToShieldExchangeRate", c.energy_to_shield_exchange_rate);
     c.sensor_jamming_time = gc.get_float("Sensor_Jamming_Time", c.sensor_jamming_time);
     c.max_secs_for_ae_delayed_damage = gc.get_float("Max_Secs_For_AE_Delayed_Damage", c.max_secs_for_ae_delayed_damage);
+    c.crouch_move_fire_angle_cutoff = gc.get_float("Crouch_Move_Fire_Angle_Cutoff", c.crouch_move_fire_angle_cutoff);  // mcx4
     if (const auto v = gc.get("Diminishing_Firepower")) {
         std::vector<float> nums;
         std::string_view s = *v;
@@ -1711,6 +1712,24 @@ float CombatSystem::weapon_delay(const Unit& u, const HardpointDesc* hd) const {
     float w = entry(0);
     w = w * mult(u, ModKind::WeaponDelay);
     return w * entry(1);
+}
+
+float CombatSystem::weapon_delay_factor(ObjectId id, uint32_t hardpoint) const {
+    const Unit* u = unit(id);
+    if (!u) return 1.0f;
+    const HardpointDesc* hd = hardpoint < u->hp_count ? &data_->hardpoints[hps_[u->hp_begin + hardpoint].desc] : nullptr;
+    return weapon_delay(*u, hd);
+}
+
+// ledger: consumes GameConstants.Crouch_Move_Fire_Angle_Cutoff
+bool CombatSystem::crouch_fire_cone(const Unit& u, Vec3 target) const {
+    // 0x54d090 (MCX4_T11_T12_RE_ANSWERS §B4): the yaw from the unit to the target (0x20acd0) against the unit's own
+    // orientation (0x20b100); |difference| > the cutoff refuses the shot. A target at the unit's own position passes.
+    const float dx = target.x - u.pos.x, dy = target.y - u.pos.y;
+    if (dx == 0.0f && dy == 0.0f) return true;
+    const float to = dmath::atan2(dy, dx) * kRadToDeg;
+    const float yaw = dmath::atan2(u.facing.y, u.facing.x) * kRadToDeg;
+    return abs_f(wrap_deg(to - yaw)) <= cfg_.crouch_move_fire_angle_cutoff;
 }
 
 float CombatSystem::fire_rate(const Unit& u) const {

@@ -2391,6 +2391,7 @@ cmd::RejectReason BattleAi::execute_order(uint8_t player, const cmd::EventData& 
             if (o.units.empty()) return R::None;
             o.destination = {std::clamp(x, bb.min.x, bb.max.x), std::clamp(y, bb.min.y, bb.max.y)};
             follow_drop(o.units);
+            for (const objects::ObjectId mid : o.units) if (b_->abilities_) b_->abilities_->move_ordered(mid, b_->frame_);  // mcx4: Terminate_Effect_On_Move_Command (MCX4_T10_RE_ANSWERS §13)
             b_->movement_->move(o, host_->random().synced(), b_->frame_);
             for (const objects::ObjectId id : o.units) {
                 b_->combat_->clear_order(id);
@@ -2424,6 +2425,7 @@ cmd::RejectReason BattleAi::execute_order(uint8_t player, const cmd::EventData& 
             for (const objects::ObjectId id : o.units) b_->combat_->set_attack_goal(id, tc::kNoObject);  // refixf t06: kind 1
             b_->fighter_order(o.units, 0, tp);  // S7 t22: a position snapshot (kind 1)
             follow_drop(o.units);
+            for (const objects::ObjectId mid : o.units) if (b_->abilities_) b_->abilities_->move_ordered(mid, b_->frame_);  // mcx4: Terminate_Effect_On_Move_Command (MCX4_T10_RE_ANSWERS §13)
             if (o.units.size() == 1) {
                 b_->combat_->clear_order(o.units.front());
                 return move_unit(o.units.front(), tp.x, tp.y) ? R::None : R::InvalidUnit;
@@ -2681,6 +2683,9 @@ cmd::RejectReason BattleAi::execute_order(uint8_t player, const cmd::EventData& 
             // coordinator for all its units, so the formation slots and the destination reservations (§2.4 step 4) give each
             // unit its own spot. The tactical AI now sends that as one group order (the ids above); the t02 stand-in that
             // merged one frame's per-unit orders here is gone. An object's own Lua order stays a one-unit move.
+            // mcx4 (MCX4_T10_RE_ANSWERS §13): a Lua Move_To / Attack_Move is a move order (0x4f6b60): Terminate_Effect_On_Move_Command
+            for (const objects::ObjectId mid : group.units)
+                if (b_->abilities_) b_->abilities_->move_ordered(mid, b_->frame_);
             if (group.units.size() == 1) {  // a single unit: unchanged path
                 if (order != lua::LuaOrder::AttackMove) b_->combat_->clear_order(u->id);
                 if (!b_->movement_locked(u->id)) b_->fighter_order(group.units, fflags, Vec3{x, y, 0.0f}, fobj);

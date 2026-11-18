@@ -6,6 +6,7 @@
 
 #include "alamo/tactical/movement/formation.hpp"
 #include "alamo/tactical/movement/land_path.hpp"
+#include "alamo/tactical/movement/special_locomotors.hpp"  // mcx4 t11: bike_lateral_step / bike_travel_dir
 
 namespace alamo::tactical::movement {
 
@@ -476,6 +477,25 @@ WalkResult walk_step(LandMotion& m, const LocomotorParams& p, float speed_cap, c
                     }
                 }
             }
+        }
+        // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2, BIKE 0x63abe0 [H]): the sideways speed L steps toward the left component of
+        // the steering vector 0x509810 of the wanted direction (0x639550: capped at length 1), at most LateralAcceleration,
+        // clamped to +-v / vmax; the bike travels along normalise(facing + L x left)
+        if (x && x->lateral && !team) {
+            V2 av{};
+            if (x->avoid) {
+                WalkExtras nx = *x;
+                nx.avoid = nullptr;
+                V2 base;
+                if (walk_wanted_dir(m, &nx, base) && length_sq(base) > 0.0f) {
+                    av = x->avoid(x->avoid_ctx, base);
+                    const float al = length(av);
+                    if (al > 1.0f) av = av * (1.0f / al);
+                }
+            }
+            *x->lateral = bike_lateral_step(*x->lateral, dot(av, perp_left(dir_from_deg(m.yaw))), x->lateral_accel, m.speed,
+                                            p.max_speed);
+            t = bike_travel_dir(m.yaw, *x->lateral);
         }
         // C.8: a degenerate segment (with d normalised exactly: along the line, or perpendicular to its normal) is skipped
         const V2 seg = m.path[m.next] - m.path[m.next - 1];

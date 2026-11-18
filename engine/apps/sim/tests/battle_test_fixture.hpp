@@ -62,6 +62,8 @@ inline const char* g_temp_prefix = "alamo_sim_battle_tests";
 inline std::string (*g_types_patch)(std::string) = nullptr;
 // SP5 t03: the same for the fighter data's S10BayHardPoints.xml (null: none).
 inline std::string (*g_bay_patch)(std::string) = nullptr;
+// mcx4 tac2: extra GameConstants children make_data inserts before </GameConstants> (null: none).
+inline const char* g_constants_extra = nullptr;
 
 namespace battle_fixture {
 
@@ -831,7 +833,7 @@ inline std::unique_ptr<Data> make_data(bool fog = false, bool anim = false, bool
                    std::string(fog_setup ? " <SetupPhaseEnabled>True</SetupPhaseEnabled>\n"  // FOWF t05: a mod's land setup phase
                                            " <SetupPhaseCountdownSeconds>3</SetupPhaseCountdownSeconds>\n"
                                          : "") +
-                   "</GameConstants>\n");
+                   std::string(g_constants_extra ? g_constants_extra : "") + "</GameConstants>\n");
     write_file(d->root / "Data/Scripts/Library/PGAICommands.lua", kLua);
     d->files = std::make_unique<DirectoryProvider>(path_to_utf8(d->root));
     std::vector<std::string> diag;

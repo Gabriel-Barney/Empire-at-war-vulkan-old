@@ -1,6 +1,7 @@
 #include "alamo/anim/anim_behaviors.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/sim_rng.hpp"
@@ -222,6 +223,16 @@ bool is_move_family(int32_t t) {
 
 bool is_walk_transition_clip(int32_t t) { return t >= 16 && t <= 20; }
 
+float infantry_turn_blend(float err_deg, float rate_deg_per_frame, float cap) {
+    // ledger: consumes GameConstants.InfantryTurnBlendTime (the cap: AnimTunables::infantry_turn_blend_seconds)
+    if (!(rate_deg_per_frame > 0.0f)) return cap;
+    float d = err_deg;  // 0x20b100: into [0, 360)
+    if (d >= 360.0f) d -= 360.0f;
+    else if (d < 0.0f) d += 360.0f;
+    const float t = (std::fabs(d) / rate_deg_per_frame) * 0.03333f;
+    return cap <= t ? cap : t;
+}
+
 int32_t default_idle_type(const AnimModel* m, const LocomotorInput& in, const IdleParams& idle) {
     // 0x395920: Idle Crouch when crouched, else the container's mapping when garrisoned, else the idle. [port] a
     // type without clips falls back to the plain idle.
@@ -246,8 +257,17 @@ uint32_t AnimBehaviors::service_locomotor(AnimWorld& w, ObjectId id, const Locom
     e.last_yaw = in.yaw_deg;
     e.have_yaw = true;
     e.last_crouch = in.crouched;
-    const float move_blend = w.tunables().move_blend_seconds, idle_blend = w.tunables().idle_blend_seconds;
+    const AnimTunables& tn = w.tunables();
+    const float move_blend = tn.move_blend_seconds, idle_blend = tn.idle_blend_seconds;
     const int32_t cur = w.current_type(id);
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 "Blend times" [H]): a team member's blend into `next` (0x62c420): from an idle-
+    // or turn-like clip TeamMoveBlendTime (TeamCrouchMoveBlendTime into a crouch clip); else into an idle-like clip
+    // IdleWalkBlendTime (CrouchIdleWalkBlendTime into a crouch idle); else 0.2 s, 0.4 s when the CROUCHMOVE state changes.
+    const auto team_blend = [&](int32_t next) -> float {
+        if (is_idle_like(cur) || is_turn(cur)) return is_crouch(next) ? tn.team_crouch_move_blend_seconds : tn.team_move_blend_seconds;
+        if (is_idle_like(next)) return is_crouch(next) ? tn.crouch_idle_walk_blend_seconds : tn.idle_walk_blend_seconds;
+        return (cur == kAnimCrouchMove) == (next == kAnimCrouchMove) ? kTeamClipSwitchBlendSeconds : kTeamCrouchSwitchBlendSeconds;
+    };
     const bool moving = in.movable && in.speed > 0.0f;
     IdleParams ip = p.idle;
     ip.idle_type = default_idle_type(m, in, p.idle);
@@ -303,15 +323,18 @@ uint32_t AnimBehaviors::service_locomotor(AnimWorld& w, ObjectId id, const Locom
             w.set_speed(id, speed);
             return then_idle(0);
         }
+        // mcx4 t11 (0x61f840 [H]): the walker's move clips blend MoveBlendTime, except a Walk_Transition unit's (blend 0:
+        // its MOVE continues the MOVESTART pose); a team member's: team_blend.
+        const float blend = in.team_member ? team_blend(want) : (in.wt_clip == kAnimMove ? 0.0f : move_blend);
         if (is_move_family(cur)) {
-            w.switch_preserving_phase(id, want, 0, true, move_blend, speed, frame);
+            w.switch_preserving_phase(id, want, 0, true, blend, speed, frame);
             return then_idle(1);
         }
         PlayRequest r;
         r.type = want;
         r.index = 0;
         r.loop = true;
-        r.blend_seconds = move_blend;
+        r.blend_seconds = blend;
         r.speed = speed;
         const ClipRef* c = m->clip(want, 0);
         const uint32_t count = c && c->clip ? c->clip->frame_count : 0u;
@@ -330,7 +353,8 @@ uint32_t AnimBehaviors::service_locomotor(AnimWorld& w, ObjectId id, const Locom
             r.type = turn;
             r.index = 0;
             r.loop = false;
-            r.blend_seconds = move_blend;
+            // mcx4 t11 (0x620190 / 0x62bef0 [H]): min(time to turn, InfantryTurnBlendTime)
+            r.blend_seconds = infantry_turn_blend(in.turn_error_deg, in.turn_rate_deg, tn.infantry_turn_blend_seconds);
             r.speed = 1.0f;
             return then_idle(w.play(id, r, &rng, frame) == PlayResult::Played ? 1u : 0u);
         }
@@ -339,7 +363,10 @@ uint32_t AnimBehaviors::service_locomotor(AnimWorld& w, ObjectId id, const Locom
         PlayRequest r;  // stopped: back to the idle (then the idle behaviour); the records before this frame's aging
         r.type = presence_idle_type(m, id, ip, e.records);
         r.loop = p.idle.loop_idle;
-        r.blend_seconds = idle_blend;
+        // mcx4 t11 (0x61f510 / 0x62c420 [H]): from a move clip the walker's idle blends IdleWalkBlendTime, a team member's
+        // team_blend; after a Walk_Transition end clip (state 0x15, 0x61fc30) the .bss global 0x140b39908 ([port] the idle
+        // blend). [port M] the idle starts when the speed reaches 0, not the retail lead time before arrival.
+        r.blend_seconds = in.team_member ? team_blend(r.type) : (is_move_family(cur) ? tn.idle_walk_blend_seconds : idle_blend);
         r.speed = p.idle.idle_rate;
         w.play(id, r, &rng, frame);
         return then_idle(1);

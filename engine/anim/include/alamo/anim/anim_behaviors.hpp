@@ -115,7 +115,9 @@ enum class IdleTarget : uint8_t { None = 0, NoTarget = 1, Target = 2 };
 struct LocomotorParams {
     float movement_anim_speed = 1.0f;       // Movement_Animation_Speed (+0x370)
     float deployed_walk_anim_speed = 1.0f;  // Deployed_Walk_Anim_Speed
-    float walk_speed_ratio = 0.5f;          // global 0x140b16d04 x max speed: WALKMOVE below it [port value]
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §S): 0x140b16d04 = GameConstants WalkAnimationCutoff (GC +0x1504, FoC 0.6): WALKMOVE
+    // while speed < this x max speed. The host passes the loaded value (BattleCatalog::walk_animation_cutoff).
+    float walk_speed_ratio = 0.6f;
     float min_move_ratio = 0.1f;            // [port] floor of the current / max speed factor
     IdleParams idle;
 };
@@ -144,7 +146,24 @@ struct LocomotorInput {
     // frame and rate (clip frames per sim frame = fps / 30 x rate) start the clip.
     int32_t wt_clip = -1;
     float wt_pos = 0.0f, wt_rate = 0.0f;
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 "Blend times"): a land team member (LandTeamInfantryLocomotor 0x62ca10, the
+    // host's Default-locomotor member of a team container) takes the team blends of its clip choice 0x62c420; any
+    // other unit the WalkLocomotor ones (0x61f840 / 0x61f510).
+    bool team_member = false;
+    // mcx4 t11 (0x620190 / 0x62bef0): the stationary turn clip's blend is min(time to turn, InfantryTurnBlendTime), time =
+    // the yaw error to turn (wanted - facing, degrees) / the turn rate (degrees per frame) x 0.03333. turn_rate_deg <= 0:
+    // the host does not know them ([port M]: the blend is the cap).
+    float turn_error_deg = 0.0f, turn_rate_deg = 0.0f;
 };
+
+// mcx4 t11 (0x620190 / 0x62bef0 / 0x642740 [H read, M angle]): the TURNL / TURNR blend. Retail takes the absolute value of
+// the error wrapped into [0, 360) (0x20b100), not into (-180, 180]: a right turn of e degrees counts 360 - |e|. Rate <= 0:
+// `cap`.
+float infantry_turn_blend(float err_deg, float rate_deg_per_frame, float cap);
+// mcx4 t11 (0x62c420 third branch [H], .data 0x140a44300 / 0x140a44308): a team member's clip change that is neither from
+// an idle- / turn-like clip nor into an idle-like one blends 0.2 s, or 0.4 s when exactly one of the two clips is
+// CROUCHMOVE (67).
+inline constexpr float kTeamClipSwitchBlendSeconds = 0.2f, kTeamCrouchSwitchBlendSeconds = 0.4f;
 
 // Locomotor / default-idle rules, exposed for tests.
 inline constexpr int32_t kAnimFireDie = 62, kAnimDeployedDie = 60, kAnimCaDie = 58, kAnimDeployedCaDie = 59;
@@ -259,8 +278,11 @@ public:
     // Move 2; a missing clip falls back to Move), loop, speed = (Deployed_Walk_Anim_Speed for 115, else
     // Movement_Animation_Speed) x max(speed / max, min); restarted only on a type change: inside the family the
     // phase is kept (switch_preserving_phase), from outside a synced random start frame. Stopped: a Move-family
-    // clip goes back to the default idle (loop Loop_Idle_Anim_00, idle blend); a stationary yaw change plays
-    // TURNL / TURNR (CROUCHTURNL / R when crouched; one-shot, index 0, move blend, speed 1 [port]) while turning;
+    // clip goes back to the default idle (loop Loop_Idle_Anim_00); a stationary yaw change plays
+    // TURNL / TURNR (CROUCHTURNL / R when crouched; one-shot, index 0, speed 1 [port]) while turning;
+    // mcx4 t11 blends (AnimTunables, GameConstants): walker - MoveBlendTime for a move clip (0 for a Walk_Transition
+    // unit's MOVE, 0x61f840), IdleWalkBlendTime for the stop; team member - Team(Crouch)MoveBlendTime from an idle / turn
+    // clip, (Crouch)IdleWalkBlendTime into an idle, else kTeam(Crouch)SwitchBlendSeconds; turns infantry_turn_blend;
     // then (s78k t02) the idle service on every call while not moving (in.target; also while moving with
     // in.allow_idle_when_moving), after the locomotor's own play (crouch change forces the idle clip). Returns the
     // number of plays started (0 - 2).

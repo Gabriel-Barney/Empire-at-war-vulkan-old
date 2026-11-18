@@ -1102,7 +1102,7 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
                 lf.slots = layout_formation(mem, lf.members, fwd0, k);
                 for (const Slot& s : lf.slots) units_[idx[s.member]].form_slot = {-s.back, s.lateral};
             }
-            set_lanes(idx, lf, fpath, atk_keep, mem);
+            set_lanes(idx, lf, fpath, atk_keep, mem, 0.0f, lf.fresh ? kNoFacing : order.facing_deg);  // mcx4 t11: the facing
         }
     // s78n t25.2 (MOVEMENT §4.3.2 items 2 and 6 - 7): the attack slots of a new order (0x438c10; not at a re-plan;
     // s78n t25.4: guard blocks too, by the guard L rule), then the attack plan of every formation (the "every member can
@@ -1233,7 +1233,10 @@ void MovementSystem::destination_check(const MoveOrder& order, const std::vector
     const V2 d1 = normalize_retail(test.points[np - 1] - test.points[np - 2]);
     if (!(length_sq(d1) > 0.0f)) return;
     const V2 axis = order.facing_deg != kNoFacing && !rf.fresh ? dir_from_deg(order.facing_deg) : d1;
-    const float cphi = length_sq(d0) > 0.0f ? dot(d0, d1) : 1.0f, sphi = length_sq(d0) > 0.0f ? cross(d0, d1) : 0.0f;
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4, 0x439360 [H]): with Rotate_Formation_Facing_Moves (FoC true) and a facing, phi
+    // is measured from the first segment to the facing; without the flag, to the path's last segment
+    const V2 dl = order.facing_deg != kNoFacing && !rf.fresh && cfg_.constants.rotate_formation_facing_moves ? axis : d1;
+    const float cphi = length_sq(d0) > 0.0f ? dot(d0, dl) : 1.0f, sphi = length_sq(d0) > 0.0f ? cross(d0, dl) : 0.0f;
     const bool several = ord.size() > 1;
     constexpr float kC = 0.70710678f;
     static constexpr V2 kRing[8] = {{1.0f, 0.0f}, {kC, kC}, {0.0f, 1.0f}, {-kC, kC}, {-1.0f, 0.0f}, {-kC, -kC}, {0.0f, -1.0f}, {kC, -kC}};

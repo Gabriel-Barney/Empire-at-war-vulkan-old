@@ -85,12 +85,29 @@ BattleCatalog::BattleCatalog(const objects::GameObjectTypes& types, const FilePr
         garrisoned_range_mult_ = constants->get_float("Garrisoned_Max_Attack_Distance_Multiplier", garrisoned_range_mult_);
         tactical_build_time_mult_ = constants->get_float("Tactical_Build_Time_Multiplier", tactical_build_time_mult_);
         use_reinforcement_points_ = constants->get_bool("Use_Reinforcement_Points", use_reinforcement_points_);  // a1h t06
+        // mcx4 tac2 (MCX4_T10_RE_ANSWERS §16, §19, §18)
+        elev_vuln_secs_ = constants->get_float("Elevated_Vulnerability_Duration", elev_vuln_secs_);
+        elev_vuln_factor_ = constants->get_float("Elevated_Vulnerability_Factor", elev_vuln_factor_);
+        space_elev_vuln_secs_ = constants->get_float("Space_Elevated_Vulnerability_Duration", space_elev_vuln_secs_);
+        space_elev_vuln_factor_ = constants->get_float("Space_Elevated_Vulnerability_Factor", space_elev_vuln_factor_);
+        skirmish_reinforce_delay_ = constants->get_int("Skirmish_Reinforcement_Delay_Frames", skirmish_reinforce_delay_);
+        override_death_persistence_ = constants->get_float("Override_Death_Persistence_Duration", override_death_persistence_);
         threat_decay_step_ = constants->get_float("AI_SpaceThreatDecayStep", threat_decay_step_);
         engines_disabled_speed_ = constants->get_float("Engines_Disabled_Speed_Modifier", engines_disabled_speed_);
         nebula_ability_disable_ = constants->get_float("Nebula_Ability_Disable_Time", nebula_ability_disable_);
         force_ability_disable_ = constants->get_float("Force_Ability_Disable_Time", force_ability_disable_);
         ion_storm_shield_disable_ = constants->get_float("Ion_Storm_Shield_Disable_Time", ion_storm_shield_disable_);
+        max_remote_bombs_ = constants->get_int("Max_Remote_Bombs_Per_Player", max_remote_bombs_);  // mcx4 (PLACE_REMOTE_BOMB gate)
         tc::apply_game_constants(combat_config_, *constants);  // OI tactical (TACTICAL_GAPS 3.2 / 3.3)
+        movement_constants_ = tactical::movement::MovementConstants::from_game_constants(*constants);  // mcx4 t11
+        walk_animation_cutoff_ = constants->get_float("WalkAnimationCutoff", walk_animation_cutoff_);
+        LocomotorBlends& lb = locomotor_blends_;  // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 "Blend times")
+        lb.idle_walk = constants->get_float("IdleWalkBlendTime", lb.idle_walk);
+        lb.crouch_idle_walk = constants->get_float("CrouchIdleWalkBlendTime", lb.crouch_idle_walk);
+        lb.move = constants->get_float("MoveBlendTime", lb.move);
+        lb.team_move = constants->get_float("TeamMoveBlendTime", lb.team_move);
+        lb.team_crouch_move = constants->get_float("TeamCrouchMoveBlendTime", lb.team_crouch_move);
+        lb.infantry_turn = constants->get_float("InfantryTurnBlendTime", lb.infantry_turn);
         // --- battle host: transition constants (TACTICAL_GAPS §4.2 raid / lead, §4.9 retreat attrition) ---
         TransitionConstants& k = transition_;
         k.space_retreat_attrition = constants->get_float("Space_Retreat_Attrition_Factor", k.space_retreat_attrition);
@@ -150,6 +167,7 @@ ta::AbilityConfig BattleCatalog::ability_config(bool space, bool skirmish) const
     c.nebula_ability_disable_time = nebula_ability_disable_;
     c.force_ability_disable_time = force_ability_disable_;
     c.ion_storm_shield_disable_time = ion_storm_shield_disable_;
+    c.max_remote_bombs_per_player = max_remote_bombs_;
     const auto corvette = types_->enums().get(objects::EnumId::GameObjectCategory).lookup("Corvette");
     c.corvette_category = corvette ? static_cast<uint64_t>(*corvette) : 0;
     return c;
@@ -883,6 +901,10 @@ ta::AbilityObjectDesc BattleCatalog::ability_desc(uint32_t t, BuildState& s) con
     d.gravity_field_slow_fraction = ty.get_float(t, "Gravity_Control_Field_Slow_Fraction");
     d.gravity_field_effect = std::string(ascii_trim(ty.get_string(t, "Gravity_Control_Field_Effect")));
     d.affected_by_gravity_field = ty.get_bool(t, "Is_Affected_By_Gravity_Control_Field");
+    // mcx4 (MCX4_T10_RE_ANSWERS §15 / §5): buzz-droid cloud filter and speed, HUNT's force-sensitive rule
+    d.special_weapon_valid_targets = ty.get_mask(t, "Special_Weapon_Valid_Targets");
+    d.max_speed = ty.get_float(t, "Max_Speed");
+    d.force_sensitive = ty.get_bool(t, "Is_Force_Sensitive");
     // 0x3979d0 [port: the mode's FOW reveal range column; land for land battles is not distinguished here]
     if (ty.get_bool(t, "Target_Stealth_Units")) d.stealth_detection_range = ty.columns().space_fow_reveal_range[t];
     ta::AbilityResolvers r;
@@ -927,6 +949,9 @@ ta::AbilityObjectDesc BattleCatalog::ability_desc(uint32_t t, BuildState& s) con
         if (!field_node(f, e)) continue;
         d.specials.push_back(static_cast<uint32_t>(s.full->abilities.specials.size()));
         s.full->abilities.specials.push_back(ta::parse_special_ability(e, r, diag));
+        // mcx4 tac2 (MCX4_T10_RE_ANSWERS §15 [H]): host-side read (the abilities module does not keep the field)
+        s.full->special_disable_reinforcement_vulnerability.push_back(
+            data::xml_values::bool_or(e, "Disable_Reinforcement_Vulnerability", false, data::xml_values::kAbility) ? 1 : 0);
     }
     return d;
 }

@@ -90,10 +90,10 @@ Tags: [H] read, [M] one step inferred, [L] inferred.
 | `CanCellStack` (+0x3a, bool) | **none found** | no type-tagged access at +0x3a, or at +0x38 / +0x30 for a wider load. All 51 byte accesses at +0x3a in the image are other classes: UI colour bytes in 0x3078c0, 0x309f10, 0x349230, 0x34b090; tables; the CRT. The type ctor / copy move the byte block with wide stores | wide store [M] | M |
 | `Space_Full_Stop_Command` (+0x38, bool) | **none found among type reads** | none of the 244 accesses at +0x38 is type-tagged. Parameter-based byte readers not judged one by one: 0x24a870, 0x92940, 0x3c360, 0x67b310, 0x67b4c0, 0x67b730, 0x69aa80, 0x7293e0 | wide store [M] | L |
 | `Attach_To_Flagship_During_Space_Battle` (+0x2c, bool) | 0x2a00b0 (battle arrival placement, from 0x2a1eb0) | see the note below the table | false [M] | H |
-| `Begin_Turn_Towards_Distance` (+0x3a8, float) | 0x622b80 (from 0x6236b0; in the walk-locomotor range 0x61f..0x624) | see the note below the table | not read | H read, M effect |
-| `MaxFacingLookAheadFrames` (+0x3b8, float) | 0x645370 (space locomotor step, from 0x646800) | each step the facing lookahead (object +0xa8 pack +0x1e8) grows by GC `SpaceLocomotorFacingLookaheadAcc` and is capped at this value [M: a lookahead in frames; its own reader not traced] | 30.0 (qword store at 0x36758b, which also writes +0x3bc = 0) | H |
+| `Begin_Turn_Towards_Distance` (+0x3a8, float) | 0x622b80 (from 0x6236b0 = `StarshipLocomotorBehaviorClass` vf6, mcx4 t11 [H: renames.csv / RTTI]) | see the note below the table. The class is the `STARSHIP_LOCOMOTOR`, which no FoC or EaW type lists (MOVEMENT §2.5 "legacy"); the 32 FoC users are `FIGHTER_LOCOMOTOR` fighters and `FLYING_LOCOMOTOR` birds, whose locomotors do not read it | not read | H read, M effect |
+| `MaxFacingLookAheadFrames` (+0x3b8, float) | 0x645370 = the **LANDBOMBER** step (vf6 0x646800 is `LandBomberLocomotorBehaviorClass`, mcx4 t11 [H]) | each step the facing lookahead (pack +0x1e8, 0 at the pack ctor 0x553f00) grows by GC `SpaceLocomotorFacingLookaheadAcc` after the facing is set, capped at this value. The facing getter vf +0x1e8 0x645a70 looks up the position reserved for the object int(lookahead) frames from now (0x538830; no reservation then: the object's own, just-moved position) and, when it differs from the position, faces toward it (yaw / pitch of the direction, roll kept); otherwise the path orientation the step has just set stays [H]. FoC: bombing runs 30, Snowspeeder / birds 5 | 30.0 (qword store at 0x36758b, which also writes +0x3bc = 0) | H |
 | `Exit_Door_Angle_Degrees` (+0x1a8c), `Exit_Door_Distance` (+0x1a90) | 0x2a00b0 (land placement of a carrier's contents), 0x2b3be0 (creation of a container's contents) | each unloaded unit is placed at carrier position + `Exit_Door_Distance` × (cos, sin)(carrier facing + `Exit_Door_Angle_Degrees`) and handed, with the angle − 45°, to the free-spot search 0x2a9670 [M: search radius 2500] | 0 (qword store of a zero register) [M] | H |
-| `LateralAcceleration` (+0x3bc, float) | 0x63abe0 (locomotor step, 3 calls from 0x639e90) | the unit's sideways speed (pack +0x1fc) moves toward the wanted lateral speed by at most this much per step, then is clamped to ± pack +0xec / max speed (0x370f00). With the default 0 the sideways speed never changes [M] | 0 | H read, M class |
+| `LateralAcceleration` (+0x3bc, float) | 0x63abe0 = the **BIKE** move step (0x639e90 = `BIKE_LOCOMOTOR` vf6, BKR2 Q2 (d)) | per move-step pass, after the turn: want = the left component (−sin yaw, cos yaw) of the steering vector 0x509810 of the path direction (0x639550, capped at length 1; 0 without a path); the sideways speed L (pack +0x1fc) moves toward want by at most this value, then is clamped to ± v / vmax (pack +0xec / 0x370f00); the travel direction is normalise((cos yaw, sin yaw) + L (−sin yaw, cos yaw)) (exact sqrt) [H]. With the default 0, L stays 0. FoC: `Scout_Trooper` 0.15 | 0 | H |
 | `Snap_Movement_Orders_To_Center` (+0x8d, bool) | 0x2a7b80 (the land move-order builder, 37 callers) | see the note below the table | false [M] | H |
 
 Notes on the longer rows:
@@ -119,6 +119,66 @@ Notes on the longer rows:
   has the flag and whose distance to the order point is ≤ 0x397780(object) [M: the object's selection / footprint
   radius], and the order point becomes that object's centre. MOVEMENT §6 should say "any object", not "a selected
   object".
+  - mcx4 t11 [H]: the test is gated by order kind 1 (event +0x24) and mode vf +0xe0 = 1 (land). The distance is 3-D
+    (the order point's z included). A later object replaces the pick only when strictly nearer (ties keep the first in
+    list order). 0x397780 = Scale_Factor × the soft footprint radius 0x373b30 for an object that is not a land team
+    container (BKT1_ATTACK_RE §1.3); FoC's only user `Prop_Good_Ground_Area` has no soft radius and no
+    `Space_Obstacle_Radius`, so its model's larger half extent decides.
+- **`Max_Distance_From_Spawner`** (+0x2134, int; mcx4 t11 read of the INDIGENOUS_UNIT wander service 0x621d80, the
+  leash written by TRU1_C_RE §1.3) [H unless tagged]:
+  1. Return at once when 0x39b000(behaviour) holds, or the unit is moving (0x39ade0), has a target (0x397a40) or is
+     not in an idle clip (0x3956a0 → 0x27b5e0). A burning unit (+0x3a1 bit 2) first takes `Burning_Damage_Per_Second`
+     / FPS (0x3a9e30 kind 7) and, still burning and moving, returns.
+  2. With `Can_Indigenous_Unit_Stop` (type +0x84): r = synced float(0, 1); while the behaviour's +0x34 < now and
+     r > 0.1, return (stay).
+  3. No map rectangle (mode vf +0x1f8 all zero): return.
+  4. Home (pack +0x28..+0x30, not (−1, −1, −1)) and leash D (pack +0x34) > 0: dx = synced float(−D, D), then
+     dy = synced float(−√(D² − dx²), +√(D² − dx²)) [M: the sqrt argument], point = home + (dx, dy, 0). Else point =
+     (synced float(cx − hx, cx + hx), synced float(cy − hy, cy + hy), 0) over the map rectangle.
+  5. d = |point − position| (3-D). The step bounds are the .data constants (max, min) = (400, 50), or (150, 60) while
+     burning (0x140a442c8 / cc, 0x140a442d0 / d4, read from the exe). If d > max or d < min: t = one more synced float
+     [M: between the two bounds; the arguments were not kept by the decompiler], point = position + (point −
+     position) × t / d.
+  6. A group move there (0x6218f0).
+  Not ported: the port has no INDIGENOUS_UNIT service (TRU1_C_RE §1.4).
+
+**Round 3 (lane mcx4-tac2, 2026-11-18, ReVa scripts; method in `MCX4_T10_RE_ANSWERS.md` §1 Round 3).**
+- **`Formation_Priority` (+0x654) [H]: never read, no effect in retail.**
+  - The image has 5 accesses at +0x654: the ctor 0x367250, the copy 0x36c000, a store of −1 in 0x43fab0 (another
+    class), and the two getters 0x638710 / 0x6cbb80.
+  - There are 24 indirect calls through +0x108 (22 `call`, 2 `jmp`); 0x23c8a0 / 0x23c910 also call a function
+    pointer kept at struct +0x108, which is not a vtable slot. No receiver is a combatant:
+    - the targeting behaviour on itself. Slot 33 is 0x566b40 in both `TargetingBehaviorClass` (0x8b0d88) and
+      `TeamTargetingBehaviorClass` (0x8afd90): 0x5662b0, 0x567110, 0x568e60, 0x62eeb0, 0x633ae0 and 0x634810 (from
+      the two slot-6 services 0x633a30 / 0x62ee00), and 0x387400 through Get_Behavior(9);
+    - a game mode: 0x397680 and 0x3a6b80 (object +0x2b8 → +0x20), and 0x362c60;
+    - 0x2b6aa0, whose +0x108 result is used as an object pointer;
+    - 0x30c3b0, a list entry whose +0xf8 returns a string;
+    - `ForceHealingAbilityClass` on itself (0x6fbb20);
+    - 0x23ccc0, a function-pointer field;
+    - the Lua vcall thunk 0x5f95a4, bound as the method `Set_Targeting_Stickiness_Time_Threshold`.
+  - So the value orders nothing. Port: parse and ignore.
+- **`Space_Full_Stop_Command` (+0x38) [H for each reader judged; M for the whole]: no reader, no effect in retail.**
+  The image has 35 byte reads at +0x38 off a non-stack register (`mcx4_r3_disp.py`). With each base traced through
+  the decompiler, none is a GameObjectType:
+  - **The 8 parameter-based readers.**
+    - 0x24a870 is a one-line getter that eight `LuaMemberFunctionWrapper<…>` vtables share (COMDAT-folded, slot 17).
+      It has no direct call, so no non-virtual type getter folded into it is called either.
+    - 0x92940 is `LoadingThreadClass` slot 1.
+    - 0x3c360 is called from the camera step 0x2ee40 [M: a camera member].
+    - 0x67b310 / 0x67b4c0 / 0x67b730 copy byte 14 of argument 2, a path-query block of floats, to 0x140a443c8.
+    - 0x69aa80 is `BaseBlockStatus` slot 19.
+    - 0x7293e0 is the copy constructor of a 0x50-byte struct.
+  - **The other 26 reads.**
+    - UI colour bytes: 0x3078c0, 0x309f10, 0x349230, 0x34b090.
+    - Object +0xb0 → +0x38 [M: the pack whose +8 is the selected flag, B0173]: 0x3912c0, 0x39b070, 0x3a0c20,
+      0x3a6b30, 0x3a6b80, 0x57c3e0.
+    - Behaviour owner +0x108 → +0x38: 0x4f5780, 0x4f6070.
+    - Class members: 0x187b30, 0x57f7e0.
+    - List and hash entries: 0x2ffcb0, 0x3552fc, 0x4dd530, 0x582b00, 0x72ac70.
+    - The CRT: 0x77e6f8, 0x794b6c, 0x7990e4, 0x79d150.
+  - **Wider loads.** The T11 type tag found none at +0x30 / +0x38 [M]. The ctor and copy move the block with wide
+    stores. Port: parse and ignore.
 
 ## B3. Hero-clash `Move_Action` and the two ability tags
 **`Move_Action` (`MoveActionClass`, vtable 0x8a8460, 0xf8 bytes).** It is picked and run like `Attack_Action`
@@ -153,8 +213,9 @@ restarts.
 - **End** (slot 9, 0x5ea820). Clear the animation override (if `Move_Animation_Override`) and the speed override (if
   `Move_Speed` > 0), unlock, and swap the jetpack back.
 - **Post-parse** (slot 12, 0x5eaca0). Subindex < 0 → 0xFFFF.
-- **Defaults** [M: values written by the slot-0 reset 0x5e9bb0, not the allocating constructor]: `Move_Speed` 0 (no
-  override), subindex 0xFFFF, speedup 0.0, min / max 0, every bool false.
+- **Defaults** (the constructor 0x5e9b50; lane mcx4-tac2, 2026-11-18) [H]: `Move_Type` 0, `Move_Speed` −1.0 (no
+  override), animation type −1, subindex −1 (0xFFFF after the post-parse), speedup 1.0, min / max 0, every bool false.
+  0x5e9bb0 is the scalar deleting destructor, so its values (speed 0, speedup 0) are not defaults.
 - `Move_Type` is read as the int 1 / 2 at +0xc8. `Move_Animation_Type` is the clip type passed to 0x3a8e20. All asked
   `Move_Action` fields have readers.
 
@@ -166,6 +227,28 @@ restarts.
 - The update 0x71f5a0 runs every 3 frames, subtracts 3 from +0xec and ends the action when +0xec < 1.
 - So the value is how long the clash keeps the actor busy with that action (FoC Boba Fett flamethrower 1.5 s), not the
   ability's own recharge [H].
+
+**Details (lane mcx4-tac2, 2026-11-18, REA and the decompile export) [H unless tagged].**
+- `Move_Type` names (0x5ea440): `Invalid` 0, `Move_To_Target` 1, `Move_Past_Target` 2, `Dodge_Shot_From_Target` 3.
+  The begin handles only 1 and 2, so 0 and 3 fail to start (the clone is deleted).
+- Begin 0x5e9ce0 in order: fails when 0x39ad40(actor) is true (a positive count at object +0x3a8, or the locomotor's
+  vf +0x1d0, or the same for the team container) [M: a "busy" test]; +0xe8 := the locomotor's suspended state; with
+  `Move_Use_Jetpack` the jet-pack swap; then the type's destination and start. On success a suspended locomotor is
+  resumed (vf +0x208). On failure, and only with `Move_Use_Jetpack`, the swap is undone and the locomotor suspended
+  again when it was.
+- The waiting branch of 0x5e9ed0 counts as a successful start [M: the return value is the jump test's byte].
+- 0x139800 normalises the direction in place and returns the length; the type 2 turn 0x2bab90 is x' = c·x − s·y,
+  y' = c·y + s·x with the angle U(−1.0472, +1.0472) radians.
+- Update type 1, moving: d² <= +0xec + 10 → +0xec := d²; else, with fewer than 3 restarts, +0xec := 0, unlock, both
+  overrides cleared, 0x5e9ed0 again (its result ignored), restarts + 1; else finished. No locomotor → finished. While
+  waiting: the target still jumping → face it; else waiting off, a destination (fail → finished) and the start (fail →
+  finished).
+- Start 0x5ea910 fails without the actor's coordinator (0x397260); the move order carries the goal and the default
+  order fields.
+- `Special_Ability_Action`: the frame count is 0x22f9c0(FPS × seconds), round half away from zero (FoC 1.5 s: 45 frames,
+  so 15 services of 3 frames); the start needs the actor's ability set (+0x100); there is no end of its own.
+- Port: `engine/tactical/combat/src/hero_clash.cpp` (`HeroClashManager` begin / service / end of the three classes),
+  tests `engine/tactical/combat/tests/test_combat_clash_actions.cpp`; see `MCX4_T10_RE_ANSWERS.md` §11a.
 
 **`Eat_Attack_Ability.Needs_To_Rotate` (+0x1d4): no reader [M].** The Eat class (0x6f7b10..0x6f8970, vtable 0x8c6ac0) has
 no access at +0x1d4 at all. The 73 image-wide +0x1d4 hits are dword / float fields of other classes, plus one byte
@@ -181,10 +264,65 @@ plays no clip from this field. FoC: `BOMBTOSS`, 1 use.
 | `Crouch_Move_Fire_Angle_Cutoff` (20) | `WeaponBehaviorClass` fire check 0x54d090 | when the unit is in current clip type 0x43 [M: the crouched-move clip] and has a fire target, the yaw difference between its facing and the target direction is computed (0x20b100). When \|difference\| > cutoff (degrees) the weapon does not fire on that check | sim | H read, M state |
 | `GripperCombatGridSnapDistance` (35) | 0x405480(behaviour) | true when the distance between two points of the owner's team container (object +0x110: +0xa4..+0xac and +0xb0..+0xb8) exceeds the value; caller not traced [L] | sim [M] | H |
 | `IdleMovementFrames` (30) | 0x553f00, 0x413100, 0x423070 | 0x553f00 (a locomotor data-pack ctor) stores int(value) at pack +0x2ac, the idle timer start. 0x413100 returns int(factor × value) when its member list is empty, else uses the first member's pack +0x2ac. 0x423070 reads it next to `ShouldUseSpaceIdleMovement` (not read) [M: frames between space idle-drift moves] | sim | H |
-| `SpaceLocomotorFacingLookaheadAcc` (1.0) | 0x645370 | added each step to the facing lookahead, capped by type `MaxFacingLookAheadFrames` (B2) | sim [M] | H |
+| `SpaceLocomotorFacingLookaheadAcc` (1.0) | 0x645370 (LANDBOMBER, B2) | added each step to the facing lookahead, capped by type `MaxFacingLookAheadFrames` (B2) | sim [M] | H |
+| `WalkAnimationCutoff` (0.6) | 0x61f840 | WALKMOVE (0x42) is chosen while speed < cutoff × max speed (or when forced), else MOVE (2) | presentation (clip choice) | H |
+| `FinalFormationFacingMinimumAngle` (10), `FinalFormationFacingDeltaCoefficient` (0.5) | 0x411980 (from the layout 0x40eb90; F = FormationClass, offsets below are FormationClass ones) | see "Final facing" below | sim | H |
+| `Rotate_Formation_Facing_Moves` (true) | 0x439360 (destination check) | with an ordered facing (block +0x5c, angle +0x44): the final direction of the check, from which the signed angle φ to the first path segment is taken, is (cos f, sin f) when this is set, else the path's last segment. The rectangle axis is the facing either way | sim | H |
+| `MovementReevaluationFrameCount` (10) | 0x5d51e0 (space coordinator vf5) | runs only when coordinator id (+0xac) % N = frame % N, frame ≥ +0xb0 and the coordinator state +0x64 = 3: (re)binds the attack target (0x394610 → 0x420930 per formation), splits the formations by role (0x397900: 1, 2, 4, 0x20) and hands each role list to 0x5d55f0, which re-plans the role group (0x5d4730) when a member's goal block no longer holds (target range / 0x5672b0 / 0x568340 tests) [M: those tests not read] | sim | H gate, M rest |
+| `LandObjectTrackingInterval` (20), `LandObjectTrackingTreeCount` (25) | 0x5d8140 (tracking layer rebuild) | in land mode (vf +0xe0 = 1) a ring layer gets slice length = Interval frames and Count trees (a static / current layer, +0x30 / +0x31: one tree); space uses `SpaceObjectTrackingInterval` / `…TreeCount` (+0x1464 / +0x1468) the same way. Slice k covers [base + Interval × k, + Interval) (0x6b4810) | sim | H |
+| `ShouldSkipLandFormup` (true) | 0x41c1a0 (plan, member loop) | set (and F +0x9c clear) → every member's record is started at once (+0x6d := 1 when 0x410170). Clear → a member of a formation with more than one member gets a form-up path to its form-up point (pack +0x120, the layout box at the path start) first [M: what starts the formation path afterwards is not read] | sim | H gate |
+| `ShouldUseSpaceIdleMovement` (false), `IdleMovementFrames` (30) | 0x423070 (formation state 3), 0x420a40, 0x413100, 0x59c170 / 0x597dc0 / 0x59e700 (SimpleSpace), 0x553f00 | space idle drift: in space with the flag, an arrived one-block formation whose lead is idle issues a drift move (0x420a40) after int(IdleMovementFrames + synced float(0, IdleMovementFrames / 2) + 0.5) frames to lead + facing × 0x413100's distance, inside the map less 300; the SimpleSpace speed getters return `SpaceIdleMovementSpeed` (GC +0x1554) as the minimum speed instead of 0. Without the flag none of it runs; IdleMovementFrames is still the pack's idle-timer start (+0x2ac, ctor) and 0x413100's fallback | sim | H read, M meaning |
+| `ApproximationSmoothCosAngle` (0.9962) | 0x505fe0 | (1) the approximation's per-step turn is at least acos(value) × (180/π) / 2 degrees; (2) after the simulation, the points are thinned: from each kept point the next point whose direction from it bends from the first step's direction by dot < value is kept (the one before it is emitted); the last point is always kept. So straight runs keep only their ends | sim | H |
+| `GripperCombatGridSnapDistance` (35) | 0x405480 ← 0x306d00 ← 0x4fadb0 | 0x4fadb0 walks a grid of cells (0x48-byte entries) and 0x306d00 shows / hides objects (vf +0x110) by 0x405480's answer [L: a display grid, presentation] | not settled | M |
 | `IdleWalkBlendTime`, `CrouchIdleWalkBlendTime`, `MoveBlendTime`, `TeamMoveBlendTime`, `TeamCrouchMoveBlendTime`, `InfantryTurnBlendTime` | the §S readers | passed as the blend-seconds argument of Play_Animation 0x3a92f0 (§S rows; `MoveBlendTime` in 0x61f840 is the MOVE clip's blend). Per ANIM_PARTICLES (0x265560), the new clip starts at frame 0 at its full speed whatever the blend; the blend only sets the crossfade weight of the previous pose (1 − remaining / duration). So no frame count, clip type or timer that game logic reads depends on it | presentation [M: each of the 7 call sites passes it as the blend argument, checked only through §S; a bone-pose read during a fade (fire bones) is the only possible sim contact, L] | M |
 
-## C1. `AI_BuildTaskReservationSeconds` (GC +0x1100, FoC 15.0) [H read; M effect]
+**Final facing** (mcx4 t11, 0x411980 / 0x421cc0 / 0x559350 / 0x41c1a0 [H unless tagged]; port:
+`final_formation_facing`, `LaneShape::lateral_at`, `lane_end`):
+1. 0x411980 clears F +0x248 / +0x24c / +0x250. It runs only when the formation path has ≥ 2 points and the top block has a
+   facing (+0x5c; angle +0x44 in degrees).
+2. ψ = the facing (wrapped into (−180, 180]) minus the yaw of the path's last segment, wrapped into [0, 360) (0x20b100),
+   then into (−180, 180] (0x20b6d0). |ψ| < `FinalFormationFacingMinimumAngle` → nothing more (all 0).
+3. F +0x24c := ψ in radians (the full rotation). R = √2 × (0x41a740 × 0.5 × 20) (0x41a740 = the layout half-width in
+   cells). L = the path length (3-D), v = 0x41b2a0 (the slowest member's speed). When L ≠ 0 and v > 0:
+   budget = ((`FinalFormationFacingDeltaCoefficient` × v) / R) × (L / v); budget < |ψ| → F +0x248 := sign(ψ) × (|ψ| −
+   budget) (applied at once), else 0; F +0x250 := ((F +0x24c − F +0x248) / L) × 1.2 (radians per unit of arc).
+4. Each frame 0x41dbb0 → 0x421cc0 sets the member's pack +0x150 := F +0x250 × s + F +0x248, never past F +0x24c (min for a
+   rate ≥ 0, max below), s = the member's arc position on the path (to its waypoint plus its projection on the segment).
+5. 0x559350 turns the member's slot offset (depth, lateral) by pack +0x150 before the slot getters 0x5566a0 (the lane
+   term's lateral target) and 0x556710 (the end shift's L'_m) return it: lateral' = sin r × depth + cos r × lateral.
+6. The plan's end shift (0x41c1a0) is +0x68 = cos(F +0x24c) × D − sin(F +0x24c) × L (confirms MOVEMENT §4.3.3 item 2).
+   With a facing at least 10° off the last segment, the slot pattern therefore ends turned by ψ: its front faces the
+   ordered facing. (Corrects MOVEMENT §4.3.3 item 4's [M]: the lateral target is the rotated slot lateral.)
+
+**Round 3: `GripperCombatGridSnapDistance` (lane mcx4-tac2, 2026-11-18, ReVa) [H unless tagged]: presentation only,
+the placement of the space HUD's per-squadron elements [L: the fighter "gripper" icons]. This replaces both B4 rows.**
+1. **Call chain.** 0x405480 has one caller, the command bar (HUD 0x140b27f60) method 0x306d00. That method has one
+   caller, 0x4fadb0. `SpaceModeClass` slot 23 (0x4d9110) calls 0x4fadb0 on each pass, with the fighter cell-grid
+   singleton 0x404950 (FIGHTER_FLYING §5).
+2. **Per cell (0x4fadb0).** It walks the dogfight grid G_D. For each cell that holds objects it computes the cell
+   centre: rows are staggered, as in `centre()`, and z is the first object's type `Layer_Z_Adjust` (+0xdfc). Then it
+   calls 0x306d00(HUD, cell, centre).
+3. **Layout (0x306d00).** Skipped while HUD +0x2699 is set.
+   - n = the cell's count, columns = ceil(√n). The centre is projected to the screen. Slots are 30 px apart, centred
+     on that point (the first x is the centre's x − min(n, columns) × 30 / 2). After `columns` slots, x restarts
+     and y moves by −30 in the HUD's coordinates.
+   - Objects are taken in cell-list order. An object counts only when it has an entry in the HUD's map at
+     +0x1ff8 (two HUD elements) and has behaviour 0x16; only those use up a slot.
+   - The slot's pixel point, shifted in y by 0.048 × the screen height, is unprojected to a ray, and the ray is
+     cut with the plane z = the object's z (object +0x80). The point is stored in the team data (object +0x110)
+     +0xa4..+0xac.
+4. **The test.** 0x405480(behaviour 0x16) = |the new point − team +0xb0..+0xb8| > the value (35).
+   - Not beyond 35, or team +0xbd set: both HUD elements move to the slot's screen point (0x352650), and the first
+     gets vf +0x110(1, 0, 0) [M: show]. Then team +0xbd := 1 and +0xb0..+0xb8 := the new point.
+   - Beyond 35 with +0xbd clear: the elements stay where they were.
+5. **Who else touches these fields.** Team +0xbd is cleared only by `FighterLocomotorBehaviorClass` slot 6 (0x5cb830),
+   when the container's state (0x4ec820 → +0xa8 → +0x48) is not 0x1e [M: the state's meaning]. The sim writers
+   0x2a5a60, 0x3abb80, 0x3c0020, 0x3c0800 and 0x5aec70 reset +0xa4 and +0xb0 to the team position; 0x5cd8e0 resets
+   +0xa4 alone.
+6. **Readers.** A scan of every read of team +0xa4 / +0xb0 / +0xbd whose base was loaded from +0x110 within 16
+   instructions finds only 0x405480 and 0x306d00 [M: a reader that holds the team pointer longer is not covered].
+   So no rule reads the result: presentation. The first B4 row's "sim [M]" is wrong.
+ (GC +0x1100, FoC 15.0) [H read; M effect]
 - **Timer start.** 0x695a10 starts the build task's reservation timer at PBT +0x4c: start = now, length = FPS × value.
   Its only caller is the galactic build market 0x53cd60, step 3 (A2J_RE_BUILD_MARKET), when a planet queue claims the
   task.
@@ -252,6 +390,6 @@ plays no clip from this field. FoC: `BOMBTOSS`, 1 use.
 
 ## Not reached (re-analyst batch)
 - B2: what `Formation_Priority` orders (the receivers of combatant slot 33); the parameter-based +0x38 byte readers for
-  `Space_Full_Stop_Command`.
+  `Space_Full_Stop_Command`. Answered in round 3 (B2): neither is read.
 - C4: the rest of the avoid behaviour 0x58e8e0 (its move).
-- B4: the caller of 0x405480 (`GripperCombatGridSnapDistance`).
+- B4: the caller of 0x405480 (`GripperCombatGridSnapDistance`). Answered in round 3 (B4): the HUD, presentation only.

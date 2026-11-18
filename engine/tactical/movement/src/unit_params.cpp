@@ -20,6 +20,11 @@ UnitDesc unit_desc_from_type(const objects::GameObjectTypes& t, uint32_t ti) {
         d.overall_width = t.get_float(ti, "Overall_Width") * sc;
     }
     d.close_enough_angle = t.get_float(ti, "Close_Enough_Angle_For_Move_Start");
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2): the LANDBOMBER facing lookahead cap (unset: the type ctor's 30) and the BIKE
+    // lateral acceleration (unset 0: the sideways speed never changes)
+    if (t.value(ti, objects::find_type_field("MaxFacingLookAheadFrames")) != nullptr)
+        d.max_facing_lookahead = t.get_float(ti, "MaxFacingLookAheadFrames");
+    d.lateral_accel = t.get_float(ti, "LateralAcceleration");
     d.movement_class = t.get_enum(ti, "MovementClass");
     d.collision_class = t.get_enum(ti, "UnitCollisionClass");
     d.formation_spacing = t.get_float(ti, "FormationSpacing");

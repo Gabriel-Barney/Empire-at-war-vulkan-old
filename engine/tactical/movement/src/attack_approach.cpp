@@ -728,7 +728,7 @@ bool MovementSystem::attack_plan(const MoveOrder& order, const std::vector<uint3
 }
 
 void MovementSystem::set_lanes(const std::vector<uint32_t>& idx, const LandForm& f, std::span<const V2> fpath,
-                               const std::vector<uint8_t>& kept, std::span<const FormationMember> mem, float fz) {
+                               const std::vector<uint8_t>& kept, std::span<const FormationMember> mem, float fz, float facing_deg) {
     const float d = path_length_3d(fpath, 0.0f, fz);
     // The corridor squeeze 0x412210 of the formation on its path (land formations: type 1, the clearance probe [M]): W = 2 x
     // the layout's half-width +0x254 (x 20), D = the slots' depth in cells ([port] for 2 x +0x250 / 20), the formation's
@@ -749,6 +749,14 @@ void MovementSystem::set_lanes(const std::vector<uint32_t>& idx, const LandForm&
     const CorridorSqueeze sq = squeeze_corridor(grid_, fpath, cp);
     V2 fwd0 = lane_dir(fpath, 0);
     if (length_sq(fwd0) == 0.0f) fwd0 = f.fwd;
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4, 0x411980 from the layout 0x40eb90): the final-facing rotation of the slots,
+    // with the formation speed 0x41b2a0 = the slowest member's max speed
+    float vmin = -1.0f;
+    for (const Slot& s : f.slots) {
+        const float v = units_[idx[s.member]].lp.max_speed;
+        if (vmin == -1.0f || v < vmin) vmin = v;
+    }
+    const FinalFacing ff = final_formation_facing(fpath, facing_deg, hw, vmin, cfg_.constants);
     // packs[e][n]: slot n's member's offset (+ = left) in entry e's pack
     std::vector<std::vector<float>> packs(sq.table.size());
     for (size_t e = 1; e < sq.table.size(); ++e) {
@@ -770,6 +778,12 @@ void MovementSystem::set_lanes(const std::vector<uint32_t>& idx, const LandForm&
         sh.shift = sq.shift;
         sh.entry = sq.entry;
         sh.entry_left = el;
+        if (ff.on()) {  // mcx4 t11: the slot offset (depth, lateral) turns by r(s)
+            sh.depth = -(s.back - b0);
+            sh.rot_full = ff.full;
+            sh.rot_start = ff.start;
+            sh.rot_rate = ff.rate;
+        }
         // bkm1 t02 (b0096, MOVEMENT §4.3.3 item 2): the depth behind the front row (retail's front row is depth 0, the
         // port's layout centres its rows)
         x.lane = member_lane(grid_, fpath, sh, s.back - b0, x.lp.mask, x.m.pos);

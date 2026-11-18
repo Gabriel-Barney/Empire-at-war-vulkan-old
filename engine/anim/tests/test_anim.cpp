@@ -1086,6 +1086,27 @@ void test_events_and_locomotor() {
         CHECK(same);
     }
     {
+        // ledger: verifies GameConstants.WalkAnimationCutoff
+        // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §S, 0x61f840 [H]): WALKMOVE while speed < WalkAnimationCutoff (GC +0x1504 =
+        // 0x140b16d04, FoC 0.6) x max speed, else MOVE. At 0.55 x max: WALKMOVE with the FoC value, MOVE with a mod's 0.5.
+        AnimWorld w;
+        AnimBehaviors b;
+        SimRng rng(4);
+        LocomotorParams lp;
+        CHECK(lp.walk_speed_ratio == 0.6f);
+        for (ObjectId id = 1; id <= 2; ++id) w.create(id, m.get(), {}, nullptr, 0);
+        LocomotorInput in;
+        in.speed = 0.55f;
+        in.max_speed = 1.0f;
+        CHECK(b.service_locomotor(w, 1, lp, in, rng, 1) == 1 && w.current_type(1) == kAnimWalkMove);
+        lp.walk_speed_ratio = 0.5f;  // a mod's WalkAnimationCutoff
+        CHECK(b.service_locomotor(w, 2, lp, in, rng, 1) == 1 && w.current_type(2) == kAnimMove);
+        in.speed = 0.6f;  // exactly at the cutoff: not below it -> MOVE
+        lp.walk_speed_ratio = 0.6f;
+        b.service_locomotor(w, 2, lp, in, rng, 2);
+        CHECK(w.current_type(2) == kAnimMove);
+    }
+    {
         // Locomotor selection.
         AnimWorld w;
         AnimBehaviors b;

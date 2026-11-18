@@ -221,6 +221,14 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
         if (!n.empty() && s.ability_name_crc == 0) s.ability_name_crc = name_crc(n);
     }
     s.weapon_index = i_or(e, "Weapon_Index", 0);
+    // mcx4 (MCX4_T10_RE_ANSWERS §15): Hack / Repair acting member, flame-thrower damage delay, Buzz_Droids pack values
+    // (negative ones read as 0, post-parse 0x71c670), Corrupt_Systems scatter radius.
+    s.team_member_type = object_of(e, "Team_Member_With_Ability", r);
+    s.flame_damage_delay = f_or(e, "Damage_Delay_In_Secs", 0.2f);
+    s.chase_radius = std::max(0.0f, f_or(e, "Chase_Radius", 0.0f));
+    s.own_damage_per_second = std::max(0.0f, f_or(e, "Own_Damage_Per_Second", 0.0f));
+    s.enemy_damage_per_second = std::max(0.0f, f_or(e, "Enemy_Damage_Per_Second", 0.0f));
+    s.inaccuracy_radius = f_or(e, "Inaccuracy_Radius", 0.0f);
     // Durations: the classes spell them Duration_In_Secs / Duration_In_Seconds / Fire_Time_In_Secs.
     if (s.duration_secs == 0.0f) s.duration_secs = f_any(e, {"Duration_In_Seconds", "Fire_Time_In_Secs", "Duration_Of_Infection"}, 0.0f);
 }
@@ -450,12 +458,20 @@ SpecialAbilityDesc parse_special_ability(const data::XmlNode& e, const AbilityRe
     s.redirect_chance = f_or(e, "Redirect_Chance", 0.0f);
     s.block_chance = f_or(e, "Block_Chance", 0.0f);
     s.reaction_arc_deg = f_or(e, "Reaction_Arc_In_Degrees", 360.0f);
+    s.max_redirect_angle_deg = f_or(e, "Max_Projectile_Redirection_Angle_In_Degrees", 0.0f);  // mcx4 t23
+    s.turn_to_face_unblockable = b_or(e, "Turn_To_Face_Unblockable_Shots", false);
+    s.terminate_on_move = b_or(e, "Terminate_Effect_On_Move_Command", false);  // mcx4 (§13)
     s.absorb_chance = f_or(e, "Absorb_Chance", 0.0f);
     s.damage_absorb_percentage = f_or(e, "Damage_Absorb_Percentage", 0.0f);  // mcx4 t06
     if (s.damage_absorb_percentage < 0.0f || s.damage_absorb_percentage > 1.0f) s.damage_absorb_percentage = 0.0f;
     s.damage_absorb_amount = f_or(e, "Damage_Absorb_Amount", 0.0f);
     if (s.damage_absorb_amount < 0.0f) s.damage_absorb_amount = 0.0f;
     parse_class_fields(e, s, r);  // OI abilities (service_interval stays -1: per class)
+    // mcx4 (MCX4_T10_RE_ANSWERS §15, post-parse 0x71c670): Damage_Radius >= Chase_Radius is reported and the two swapped.
+    if (s.cls == SpecialClass::BuzzDroids && s.damage_range >= s.chase_radius) {
+        note(diag, e, "Buzz_Droids_Ability '" + s.name + "': Damage_Radius must be less than Chase_Radius (swapped)");
+        std::swap(s.damage_range, s.chase_radius);
+    }
     // R5 jamming visual (presentation only): Blob_* / Owner_Particle_* of Sensor_Jamming_Ability.
     if (s.cls == SpecialClass::SensorJamming) {
         s.blob_material = s_or(e, "Blob_Material_Name");
