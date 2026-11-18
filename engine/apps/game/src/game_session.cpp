@@ -132,7 +132,7 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
                 // setter first, so it is clamped to [0, the player's max before this write] (the campaign's
                 // Max_Tech_Level, else the player ctor's 5); the max is then written unclamped. The 1..5 range is the
                 // dialog's (campaign Min / Max_Custom_Tech_Level, data); no clamp to it here. [port] The faction's
-                // Displayed_Tech_Level_Adjustment shift is not applied (open: mcx5 follow-up).
+                // Displayed_Tech_Level_Adjustment shift is not applied (open: mcx4 t19).
                 p.tech_level = std::clamp(spec_.start_tech, 0, std::max(0, p.max_tech_level));
                 p.max_tech_level = spec_.max_tech;
             }

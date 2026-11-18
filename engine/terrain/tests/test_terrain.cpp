@@ -818,7 +818,7 @@ void test_fuzz() {
         for (auto& x : b) x = static_cast<uint8_t>(rng.next());
         fuzz_one(b, parsed);
     }
-    // Malformed headers that must fail cleanly.
+    // A grid above the pre-mcx5 cap loads; an empty file fails cleanly (the kMaxGridVerts guard: test_hardening).
     MapData big = make_map(1, 2);
     big.terrain.width = big.terrain.height = 2101;  // above the pre-mcx5 cap 1985: loads now (retail has none, Q2.1)
     big.passability_present = false;

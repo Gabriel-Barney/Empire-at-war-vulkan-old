@@ -39,7 +39,10 @@ def is_limit_name(name):
 
 
 def strip_strings(line):
-    return re.sub(r'"(?:\\.|[^"\\])*"', '""', line)
+    """Blank raw strings, string literals and char literals, so a '//' or tag text inside them is not a comment."""
+    line = re.sub(r'(?:u8|u|U|L)?R"([^()\\ \t]{0,16})\(.*?\)\1"', 'R""', line)
+    line = re.sub(r'"(?:\\.|[^"\\])*"', '""', line)
+    return re.sub(r"'(?:\\.|[^'\\])+'", "''", line)
 
 
 def comment_of(line):
@@ -153,13 +156,14 @@ constexpr uint32_t kFpsCap = 200;        // limit: data FPSCAP=
 constexpr uint32_t kCapture = 1;         // "Cap" inside a word: not a limit
 /* constexpr int kMaxJ = 1; */
 const char* s = "constexpr int kMaxK = 1;";
+constexpr int kMaxL = 2; auto r = R"(// limit: guard fake)";
 '''
 
 
 def selftest():
     got = [(line, name, err is None) for line, name, _, _, err in scan_text(SELFTEST)]
     want = [(1, 'kMaxA', True), (4, 'kMaxB', True), (5, 'kSlotsC', False), (7, 'kMaxE', False), (8, 'kMaxF', False),
-            (9, 'ALAMO_MAX_G', False), (10, 'ALAMO_MAX_H', True), (12, 'kFpsCap', True)]
+            (9, 'ALAMO_MAX_G', False), (10, 'ALAMO_MAX_H', True), (12, 'kFpsCap', True), (16, 'kMaxL', False)]
     if got != want:
         print('check_limits selftest: FAILED')
         print('  want', want)
