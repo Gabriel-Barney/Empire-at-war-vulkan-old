@@ -137,6 +137,15 @@ std::string_view GameAudioHost::nth_field(std::span<const std::pair<std::string,
     return {};
 }
 
+std::string_view GameAudioHost::base_shield_line(bool online, bool friendly) {
+    // ledger: consumes Faction.SFXEvent_HUD_Base_Shield_Online
+    // ledger: consumes Faction.SFXEvent_HUD_Enemy_Base_Shield_Online
+    if (online) return friendly ? "SFXEvent_HUD_Base_Shield_Online" : "SFXEvent_HUD_Enemy_Base_Shield_Online";
+    // ledger: consumes Faction.SFXEvent_HUD_Base_Shield_Offline
+    // ledger: consumes Faction.SFXEvent_HUD_Enemy_Base_Shield_Offline
+    return friendly ? "SFXEvent_HUD_Base_Shield_Offline" : "SFXEvent_HUD_Enemy_Base_Shield_Offline";
+}
+
 GameAudioHost::ControlLines GameAudioHost::control_lines(bool friendly_old, bool friendly_new, bool hostile_old, bool hostile_new,
                                                          bool old_neutral, bool new_neutral) {
     ControlLines c;
@@ -794,6 +803,19 @@ void GameAudioHost::cue_lines(const sim::TacticalBattle& battle, const objects::
                     ev = nth_field(lf->fields, special_weapon_tag(fired, own), types.get_int(t, "Special_Weapon_Target_Action_Index"));
                 if (!ev.empty() && game_->gui_sfx(ev)) ++stats_.special_weapon_lines;
             }
+    // Base shields (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Base_Shield_Online family"; TRU1_A_RE_ANSWERS Set_State
+    // 0x56b540 step 2): a generator's Set_State that changed its on / off state plays the local faction's line, 2D. The
+    // previous state is the host's (the first report is the 0 -> 1 / 0 -> 2 evaluation: silent).
+    for (const tcb::CombatSystem::BaseShieldSetState& e : cs.base_shield_set_states()) {
+        uint8_t& prev = base_shield_state_[static_cast<int64_t>(e.id)];
+        const uint8_t was = prev, now = e.on ? 1 : 2;
+        prev = now;
+        if (local_player < 0 || was == 0 || was == now) continue;
+        const int32_t o = owner_of(static_cast<int64_t>(e.id));
+        if (o < 0) continue;
+        faction_sfx(base_shield_line(now == 1, o == local_player || !cs.is_enemy(local_player, o)));
+        ++stats_.base_shield_lines;
+    }
     // Retreat begin (MCX4_T13_RE_ANSWERS "Faction.Land_Retreat_Begin_SFXEvent family"): on the tick a retreat countdown
     // starts; 2D. A local retreater first tries its retreating units' SFXEvent_Retreat_Start ([port] the retreater's
     // battle units in id order stand for the coordinator's list). Cancel / not-allowed lines: no port path yet.
@@ -1181,6 +1203,7 @@ void GameAudioHost::battle_reset() {
     prod_orders_.clear();     // mcx4 t13: per-battle production tracking
     victory_seen_ = false;    // mcx4 t13 batch D
     last_retreater_ = -1;     // mcx4 t13 batch E
+    base_shield_state_.clear();  // mcx4 t13 batch I
     prod_built_.clear();
     intro_decided_ = false;   // aud1 t07: a new battle decides its intro again
     object_events_reset();    // aud1 t05

@@ -320,6 +320,19 @@ void test_move_into_field() {
     CHECK(H::move_into_field_tag(0u).empty() && H::move_into_field_tag(2u).empty() && H::move_into_field_tag(8u).empty());
 }
 
+// mcx4 t13 batch I (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_HUD_Base_Shield_Online family"; both builds).
+// ledger: verifies Faction.SFXEvent_HUD_Base_Shield_Online
+// ledger: verifies Faction.SFXEvent_HUD_Base_Shield_Offline
+// ledger: verifies Faction.SFXEvent_HUD_Enemy_Base_Shield_Online
+// ledger: verifies Faction.SFXEvent_HUD_Enemy_Base_Shield_Offline
+void test_base_shield_lines() {
+    using H = GameAudioHost;
+    CHECK(H::base_shield_line(true, true) == "SFXEvent_HUD_Base_Shield_Online");
+    CHECK(H::base_shield_line(false, true) == "SFXEvent_HUD_Base_Shield_Offline");
+    CHECK(H::base_shield_line(true, false) == "SFXEvent_HUD_Enemy_Base_Shield_Online");
+    CHECK(H::base_shield_line(false, false) == "SFXEvent_HUD_Enemy_Base_Shield_Offline");
+}
+
 // aud4 b0289 / b0300: garrison entry line and the hero clash win speech (both builds; presentation rules only).
 void test_garrison_and_clash_lines() {
     using H = GameAudioHost;
@@ -928,6 +941,7 @@ int main() {
     test_retreat_begin_lines();         // mcx4 t13 batch E
     test_special_weapon_lines();        // mcx4 t13 batch G
     test_move_into_field();             // mcx4 t13 batch G
+    test_base_shield_lines();           // mcx4 t13 batch I
     test_intro_speech_t07();
     test_aud2();
 #ifdef ALAMO_GAME_HAVE_AUDIO

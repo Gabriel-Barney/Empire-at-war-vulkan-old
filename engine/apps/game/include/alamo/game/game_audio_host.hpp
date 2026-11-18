@@ -81,6 +81,7 @@ struct GameAudioStats {
     uint64_t battle_result_lines = 0;                                              // mcx4 t13 batch D
     uint64_t retreat_lines = 0;                                                    // mcx4 t13 batch E
     uint64_t special_weapon_lines = 0;                                             // mcx4 t13 batch G
+    uint64_t base_shield_lines = 0;                                                // mcx4 t13 batch I
 };
 
 class GameAudioHost {
@@ -319,6 +320,10 @@ public:
     // tag in `fields` ("" when absent or out of range).
     static std::string_view special_weapon_tag(bool fired, bool own);
     static std::string_view nth_field(std::span<const std::pair<std::string, std::string>> fields, std::string_view tag, int32_t index);
+    // "Faction.SFXEvent_HUD_Base_Shield_Online family" (Set_State 0x56b540 step 2 [H]): the local faction's line for a
+    // base shield going back online (2 -> 1) or offline (1 -> 2), by the owner's relation (own / friendly vs hostile).
+    // The first evaluation (0 -> 1 / 0 -> 2) plays nothing.
+    static std::string_view base_shield_line(bool online, bool friendly);
     struct ControlLines {
         std::string_view friendly, enemy;
     };
@@ -416,6 +421,7 @@ private:
     float health_low_ = 0.33f, health_critical_ = 0.10f;  // GameConstants Health_Low / _Critical_Percent_Threshold
     bool corruption_mission_ = false, victory_seen_ = false;  // mcx4 t13 batch D: set_corruption_mission; declare latch
     int32_t last_retreater_ = -1;                             // mcx4 t13 batch E: retreating_player() last tick
+    std::map<int64_t, uint8_t> base_shield_state_;            // mcx4 t13 batch I: generator -> 1 on / 2 off (lookup only)
     // mcx4 t13 batch B: the local player's tactical build orders last tick (order id -> type) and built counts (type ->
     // TacticalProduction::built_count), to tell a completed order from a cancelled one.
     std::map<uint32_t, int32_t> prod_orders_;
