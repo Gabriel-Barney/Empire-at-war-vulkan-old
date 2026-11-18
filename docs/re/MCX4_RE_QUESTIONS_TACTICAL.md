@@ -42,3 +42,11 @@ the tag is then "retail-unused" and the port keeps ignoring it).
   bomber, which is the only base type with `Yes`): does it also skip the facing turn / the in-cone test?
 - B6 `Projectile_Max_Scan_Range` (+0x4c4): confirm the lost-target scan (TACTICAL_COMBAT §3.3) is the only reader and that
   it can never pick a candidate; any other reader (homing start, missile spawn)?
+- B7 `Disallows_Hyperspace_Retreat` (type +0x39 bool; base: one `No`, Merchant_Freighter): BATTLE_TRANSITIONS §3.4 names
+  the retreat-permission test 0x282750 as its reader, but that function's full order (CU8F_T01_T02_T07_RE §3.2: game
+  types, interdict list, TACTICAL_SUPER_WEAPON query) reads no type field. Who reads +0x39 (the retreatable-units list
+  vf8 of the space / land retreat coordinators, the HUD retreat button, galactic fleet retreat?) and what it does (the
+  unit stays behind? the whole request is refused?).
+- B8 `Projectile_Bomb_Fall_Accel_Rate` (type +0x1e88, TACTICAL_COMBAT §3.3 categories 2 / 5 / 9 "ballistic"): the flight
+  step that reads it (per-frame z speed += rate? capped? the initial z speed?). The port flies bombs straight, so a
+  `Fires_Forward` bomber (Y-Wing_Bombing_Run) would drop level bombs.
