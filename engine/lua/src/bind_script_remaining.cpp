@@ -1674,7 +1674,7 @@ int m_script_call_function(Call& c) {
         return c.script_error_stop("LuaScriptWrapper::Call_Function -- %s is not a function", std::string(c.string(1)).c_str());
     }
     for (int i = 2; i <= c.nargs; ++i) copy_value(c.L, *c.vm, c.idx(i), T, *ti, 0);
-    if (lua_pcall(T, c.nargs - 1, LUA_MULTRET, 0) != 0) {
+    if (vm->protected_call(T, c.nargs - 1, LUA_MULTRET) != 0) {  // mcx6 t08: runaway guard
         const std::string msg = lua_tostring(T, -1) ? lua_tostring(T, -1) : "error";
         lua_settop(T, top);
         return c.script_error_stop("LuaScriptWrapper::Call_Function -- %s", msg.c_str());

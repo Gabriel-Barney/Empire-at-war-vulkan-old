@@ -2941,7 +2941,7 @@ int m_service_wrapper(Call& c) {
                 lua_rawgeti(L, rec, 2);
                 detail::push_object(L, *c.vm, self);
                 detail::push_object(L, *c.vm, h);
-                if (lua_pcall(L, 2, 0, 0) != 0) {
+                if (c.vm->owner->protected_call(L, 2, 0) != 0) {  // mcx6 t08: runaway guard
                     failure = lua_isstring(L, -1) ? lua_tostring(L, -1) : "error in a proximity callback";
                     lua_pop(L, 1);
                     break;

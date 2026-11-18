@@ -76,6 +76,11 @@ struct LuaVmOptions {
     // OBJECT_TYPES §3.1) in every VM: object scripts (q6), story and AI scripts (modc t45: FotR's PlanetTable keys are
     // upper-case planet type names). Off only for tests that need the name as written.
     bool upper_type_names = true;
+    // mcx6 t08 (docs/MOD_COMPAT_DESIGN.md §10, P6) [port]: Lua instructions one resume of a script thread, or one host
+    // call into the VM (a chunk run, a global call, an AI or story event), may run before the script is stopped with
+    // a "script_runaway" error. Retail hangs on a script that never yields; far above any normal script, and a pure
+    // count, so deterministic. 0 = no limit.
+    int script_budget = 50'000'000;
 };
 
 struct UnboundHit {
@@ -169,6 +174,11 @@ public:
     // ---- diagnostics ----
     const std::vector<std::string>& messages() const;  // _ScriptMessage / _OuputDebug / print lines
     const std::vector<std::string>& errors() const;    // thread errors
+    // mcx6 t08: scripts stopped by LuaVmOptions::script_budget (their errors() / error text says "script_runaway").
+    uint32_t runaway_count() const;
+    // lua_pcall(L, nargs, nresults, 0) on this VM's state or one of its threads, under the runaway guard (the host's
+    // calls into Lua outside run / call / require / service_threads: AI events, story triggers, callbacks).
+    int protected_call(lua_State* L, int nargs, int nresults);
     std::vector<UnboundHit> unbound_hits() const;      // names sorted, counts > 0 only
     uint64_t unbound_total() const;
     // How a method resolves on a wrapper of class `cls`: 1 implemented, 0 unbound stub, -1 missing.

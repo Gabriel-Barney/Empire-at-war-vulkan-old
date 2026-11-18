@@ -603,7 +603,7 @@ void StoryModel::call_script(uint32_t p, const std::string& name) {
     lua_rawget(T, LUA_GLOBALSINDEX);
     if (lua_type(T, -1) == LUA_TFUNCTION) {
         lua_pushlstring(T, name.data(), name.size());
-        if (lua_pcall(T, 1, 0, 0) != 0) {
+        if (vm->protected_call(T, 1, 0) != 0) {  // mcx6 t08: runaway guard
             const char* m = lua_tostring(T, -1);
             script_errors_.push_back("Story_Event_Trigger(" + name + "): " + (m ? m : "error"));
             lua_pop(T, 1);
@@ -1361,7 +1361,7 @@ size_t StoryModel::deliver_script_triggers(uint32_t plot, LuaVm& vm, std::string
             continue;
         }
         lua_pushlstring(L, name.data(), name.size());
-        if (lua_pcall(L, 1, 0, 0) != 0) {
+        if (vm.protected_call(L, 1, 0) != 0) {  // mcx6 t08: runaway guard
             if (err) {
                 const char* m = lua_tostring(L, -1);
                 *err += std::string("Story_Event_Trigger(") + name + "): " + (m ? m : "error") + "\n";

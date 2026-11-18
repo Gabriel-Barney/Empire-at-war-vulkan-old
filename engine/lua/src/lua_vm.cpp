@@ -206,6 +206,25 @@ void gc_hook(lua_State*, int end) {
 
 }  // namespace
 
+namespace detail {
+
+namespace {
+void runaway_hook(lua_State* L, lua_Debug* ar) {
+    if (ar->event == LUA_HOOKCOUNT)
+        luaL_error(L, "%s: the script ran its instruction budget without yielding and was stopped", kRunawayTag.data());
+}
+}  // namespace
+
+BudgetSave arm_script_budget(lua_State* L, int budget) {
+    BudgetSave saved{lua_gethook(L), lua_gethookmask(L), lua_gethookcount(L)};
+    if (budget > 0) lua_sethook(L, runaway_hook, LUA_MASKCOUNT, budget);
+    return saved;
+}
+
+void restore_script_budget(lua_State* L, const BudgetSave& saved) { lua_sethook(L, saved.hook, saved.mask, saved.count); }
+
+}  // namespace detail
+
 // ---------------------------------------------------------------- Impl
 
 void LuaVm::Impl::message(std::string line) { messages.push_back(std::move(line)); }
@@ -332,9 +351,15 @@ bool LuaVm::run(std::string_view chunk, std::string_view chunk_name, std::string
     std::string_view data = chunk;
     const std::string name = "@" + std::string(chunk_name);
     int st = lua_load(L, reader_chunk, &data, name.c_str());
-    if (st == 0) st = lua_pcall(L, 0, 0, 0);
+    if (st == 0) {
+        const detail::BudgetSave saved = detail::arm_script_budget(L, impl_->options.script_budget);
+        st = lua_pcall(L, 0, 0, 0);
+        detail::restore_script_budget(L, saved);
+    }
     if (st != 0) {
-        if (err) *err = lua_tostring(L, -1) ? lua_tostring(L, -1) : "error";
+        const char* m = lua_tostring(L, -1);
+        if (m && detail::is_runaway_error(m)) ++impl_->runaways;
+        if (err) *err = m ? m : "error";
         lua_pop(L, 1);
         return false;
     }
@@ -349,8 +374,13 @@ bool LuaVm::require(std::string_view name, std::string* err) {
     lua_pushstring(L, "require");
     lua_rawget(L, LUA_GLOBALSINDEX);
     lua_pushlstring(L, name.data(), name.size());
-    if (lua_pcall(L, 1, 0, 0) != 0) {
-        if (err) *err = lua_tostring(L, -1) ? lua_tostring(L, -1) : "error";
+    const detail::BudgetSave saved = detail::arm_script_budget(L, impl_->options.script_budget);
+    const int st = lua_pcall(L, 1, 0, 0);
+    detail::restore_script_budget(L, saved);
+    if (st != 0) {
+        const char* m = lua_tostring(L, -1);
+        if (m && detail::is_runaway_error(m)) ++impl_->runaways;
+        if (err) *err = m ? m : "error";
         lua_pop(L, 1);
         return false;
     }
@@ -369,8 +399,13 @@ bool LuaVm::call(std::string_view global_function, std::string* err) {
         if (err) *err = std::string(global_function) + " is not a global function";
         return false;
     }
-    if (lua_pcall(L, 0, 0, 0) != 0) {
-        if (err) *err = lua_tostring(L, -1) ? lua_tostring(L, -1) : "error";
+    const detail::BudgetSave saved = detail::arm_script_budget(L, impl_->options.script_budget);
+    const int st = lua_pcall(L, 0, 0, 0);
+    detail::restore_script_budget(L, saved);
+    if (st != 0) {
+        const char* m = lua_tostring(L, -1);
+        if (m && detail::is_runaway_error(m)) ++impl_->runaways;
+        if (err) *err = m ? m : "error";
         lua_pop(L, 1);
         return false;
     }
@@ -435,10 +470,13 @@ size_t LuaVm::service_threads() {
         const int nargs = t.started ? 0 : t.nargs;
         t.started = true;
         vm.current_thread = id;
+        const detail::BudgetSave saved = detail::arm_script_budget(t.co, vm.options.script_budget);  // per resume
         const int st = lua_resume(t.co, nargs);
+        detail::restore_script_budget(t.co, saved);
         vm.current_thread = -1;
         if (st != 0) {
             const char* m = lua_tostring(t.co, -1);
+            if (m && detail::is_runaway_error(m)) ++vm.runaways;
             vm.errors.push_back("thread " + std::to_string(id) + " (" + t.function + "): " + (m ? m : "error"));
             log::write(log::Level::Warn, "lua", vm.errors.back());
             t.killed = true;
@@ -561,6 +599,23 @@ const std::vector<std::string>& LuaVm::messages() const {
 const std::vector<std::string>& LuaVm::errors() const {
     check_owner();
     return impl_->errors;
+}
+
+uint32_t LuaVm::runaway_count() const {
+    check_owner();
+    return impl_->runaways;
+}
+
+int LuaVm::protected_call(lua_State* L, int nargs, int nresults) {
+    check_owner();
+    const detail::BudgetSave saved = detail::arm_script_budget(L, impl_->options.script_budget);
+    const int st = lua_pcall(L, nargs, nresults, 0);
+    detail::restore_script_budget(L, saved);
+    if (st != 0) {
+        const char* m = lua_tostring(L, -1);
+        if (m && detail::is_runaway_error(m)) ++impl_->runaways;
+    }
+    return st;
 }
 
 std::vector<UnboundHit> LuaVm::unbound_hits() const {

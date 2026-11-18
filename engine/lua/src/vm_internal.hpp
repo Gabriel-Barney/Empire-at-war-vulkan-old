@@ -58,6 +58,20 @@ private:
     profile::Scope scope_;
 };
 
+// mcx6 t08: the runaway-script guard (LuaVmOptions::script_budget). A count hook armed on the lua_State that is about
+// to run raises a Lua error tagged kRunawayTag after `budget` VM instructions; the error unwinds to the resume / pcall
+// that started the run (only Lua's own frames: the hook fires inside luaV_execute). Armed around each entry and put
+// back afterwards, so no hook is left on a state between runs (a saved state may not carry one, vm_persist.cpp).
+inline constexpr std::string_view kRunawayTag = "script_runaway";
+struct BudgetSave {
+    lua_Hook hook = nullptr;
+    int mask = 0;
+    int count = 0;
+};
+BudgetSave arm_script_budget(lua_State* L, int budget);  // budget <= 0: nothing armed
+void restore_script_budget(lua_State* L, const BudgetSave& saved);
+inline bool is_runaway_error(std::string_view message) { return message.find(kRunawayTag) != std::string_view::npos; }
+
 inline constexpr uint32_t kNoBinding = 0xFFFFFFFFu;
 inline constexpr uint32_t kNoClass = 0xFFFFFFFFu;
 
@@ -203,6 +217,7 @@ struct LuaVm::Impl {
     double time = 0.0;
     uint32_t frame = 0;
     std::vector<std::string> messages, errors;
+    uint32_t runaways = 0;          // mcx6 t08: runs stopped by options.script_budget
     std::vector<uint32_t> unbound;  // per binding row (binding_table())
     uint64_t unbound_total = 0;
     std::map<int32_t, ThreadRec> threads;  // id order = service order
