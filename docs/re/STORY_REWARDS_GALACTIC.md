@@ -416,8 +416,9 @@ searched. Each section ends with **Port**, the existing port system the reward t
 - **Port:** the TRU1 t05 activation in apps/sim `tactical_battle_spawners.cpp`. Expose the per-type re-balance with an
   explicit chance, match on the upper-case name CRC, and use synced draws.
 - **Implemented (mcx6):** `TacticalBattle::reward_set_spawn` / `sp_rebalance` (the TRU1 activation with an explicit
-  chance, synced draws). [port] The key is compared as text with the upper-cased type name (the same test as the CRC
-  compare, without the CRC); in the galactic mode only the incomplete-parameters log.
+  chance, synced draws; the reward counts every spawner of the type, N = on + off, so the ones already off can come on
+  again, while the first-service activation keeps TRU1's pools). [port] The key is compared as text with the upper-cased
+  type name (the same test as the CRC compare, without the CRC); in the galactic mode only the incomplete-parameters log.
 
 ### 1.14 SET_WEATHER (0x4b, inline in 0x456970) [H]
 
@@ -474,13 +475,17 @@ searched. Each section ends with **Port**, the existing port system the reward t
   - Whether the new plot starts active was not traced [L].
 - **Port:** a plot built from code (not XML) in the story session, plus the story-dialog offer. Draw from a non-sim
   RNG (retail's is unsynced). Low priority: no data uses it.
-- **Implemented (mcx6):** `build_random_story` (apps/sim `story_random_story.cpp`) on `GameRandom::free()`, the plot
-  added to the local player's plot set; the plot and the counter are saved (story save v6) and replayed on load.
+- **Implemented (mcx6):** `build_random_story` (apps/sim `story_random_story.cpp`), the plot added to the local player's
+  plot set; the plot and the counter are saved (story save v6) and replayed on load.
+  [port] Retail draws its unsynced RNG; the port's plots are hashed, saved sim state, so they draw a stream of the story
+  session's own (seeded from the synced RNG's state at the first RANDOM_STORY, no synced draw; saved, story save v8, and
+  hashed), and a run after a load builds the same plots.
   [port] The story-dialog offer is not shown (no Cancel: the plot stays, as after Accept); retail's buildable "used"
   marks are not kept; a draw from an empty pool rebuilds the trigger and a trigger that cannot be built after 64
   rebuilds is left without parameters; the follow-up REMOVE_STORY_GOAL event names the trigger as its tag [L]; a plot
-  added while a battle is attached goes to the tactical plot set and is not replayed after a mid-battle load. The side
-  lists are the Rebel ones for the `Good_Side_Name` faction, else the Empire ones [M].
+  added while a battle is attached goes to the tactical plot set (a tactical edit: saved, replayed when a load rebuilds
+  the battle, dropped at the battle's end). DEPLOY and MOVE draw one revealed planet of another owner (no owner test).
+  The side lists are the Rebel ones for the `Good_Side_Name` faction, else the Empire ones [M].
 
 ### 1.16 PICK_PLANET (0x12, handler 0x460b30) [H unless tagged]
 
@@ -515,9 +520,11 @@ searched. Each section ends with **Port**, the existing port system the reward t
 - **Port:** a parameter substitution in the story session across all plots, using the local player's friend / enemy
   relations. It takes the first planet in object order, so the port's planet order must match retail's.
 - **Implemented (mcx6):** `StorySession::pick_planet` + `lua::StoryModel::replace_placeholder`, kept as a definition
-  edit (story save v6) and replayed on load. [port] Planets are walked in row order (stands in for the mode's object
-  order); event parameters equal to the placeholder are replaced in every event class [M]; a substitution in a tactical
-  plot set is not replayed after a mid-battle load.
+  edit (story save v6) and replayed on load, with the "EVENT %s, replacing %s with %s" / "EVENT %s, Param %d,
+  replacing %s with %s" lines. [port] Planets are walked in row order (stands in for the mode's object order); every
+  entry of an event parameter's name list (whitespace and comma separators, kept) that equals the placeholder is
+  replaced, in every event class [M]; a substitution while a battle is attached changes the tactical plot set (a
+  tactical edit: replayed when a load rebuilds the battle). A load replaces the session's edits with the save's.
 
 ### 1.17 STATISTIC_CHANGE (0x08, inline in 0x456970) [H write, M readers]
 

@@ -213,7 +213,7 @@ terrain::MapData space_map(bool with_marker) {
     return m;
 }
 
-terrain::MapData land_map(const Data& d) {
+terrain::MapData land_map(const Data& d, int32_t extra_huts = 0) {
     terrain::MapData m;
     m.terrain.present = true;
     m.terrain.width = m.terrain.height = 63;
@@ -231,6 +231,7 @@ terrain::MapData land_map(const Data& d) {
     hut("T_Hut", 400.0f, 400.0f);
     hut("T_Hut", 800.0f, 400.0f);
     hut("T_Pack_Hut", 600.0f, 900.0f);
+    for (int32_t i = 0; i < extra_huts; ++i) hut("T_Hut", 200.0f + 100.0f * static_cast<float>(i), 1400.0f);
     return m;
 }
 
@@ -465,11 +466,16 @@ struct LandRun {
     bool kept_three = true, refilled = false, refill_delay_ok = false, pack_once = true, pack_refilled = false;
     bool near_hut = true, adopted = false, saved = false;
     uint32_t kill_frame = 0, refill_frame = 0;
+    // variant 3: T_Hut on after SET_SPAWN 0.3 and then 1.0; the other battle rewards through the battle host
+    int32_t on_low = -1, on_full = -1;
+    bool health_half = false, retreat_logged = false, invalid_logged = false, not_shield_silent = false;
 };
 
-// variant 0: the TRU1 run; 1: SET_SPAWN "T_HUT" 1.0 at frame 5 (both T_Hut on; "t_hut" matches nothing); 2: a
-// SET_PLANET_SPAWN entry (battle planet, "T_HUT", 0.0) in the story gates before the battle (both T_Hut off at the first
-// scan). Variants stop at frame 20.
+// variant 0: the TRU1 run; 1: SET_SPAWN "T_HUT" 1.0 at frame 5 through the battle host's story reward (both T_Hut on;
+// "t_hut" matches nothing); 2: a SET_PLANET_SPAWN entry (battle planet, "T_HUT", 0.0) in the story gates before the battle
+// (both T_Hut off at the first scan); 3: eight T_Hut more, at frame 5 SET_SPAWN 0.3 (3 of 10 on, 7 off) then 1.0 (every one on:
+// N = on + off, STORY_REWARDS_GALACTIC §1.13), and SET_HEALTH / DISABLE_SPECIAL_STRUCTURE / FORCE_RETREAT through
+// CampaignBattles::story_tactical_reward. Variants stop at frame 20.
 LandRun run_land(const Data& d, int32_t workers, int variant = 0) {
     LandRun out;
     jobs::JobSystem js(jobs::JobSystemConfig{workers});
@@ -490,9 +496,9 @@ LandRun run_land(const Data& d, int32_t workers, int variant = 0) {
     opt.battle.fog = false;
     const Data* dp = &d;
     CampaignBattles battles(host, d.crules, *d.catalog,
-                            [dp](const std::string& name, terrain::MapData& m) {
+                            [dp, variant](const std::string& name, terrain::MapData& m) {
                                 if (name != "T_Land_B") return false;
-                                m = land_map(*dp);
+                                m = land_map(*dp, variant == 3 ? 8 : 0);
                                 return true;
                             },
                             opt);
@@ -533,9 +539,43 @@ LandRun run_land(const Data& d, int32_t workers, int variant = 0) {
         out.fought = true;
         objects::ObjectStore& st = tm->primary();
         const uint32_t f = b->frame();
+        auto huts_on = [&] {
+            int32_t on = 0;
+            for (size_t i = 0; i < b->indigenous_spawner_count(); ++i)
+                if (static_cast<uint32_t>(st.type(st.find(b->indigenous_spawner_id(i)))) == hut && b->indigenous_spawner_state(i) == 1) ++on;
+            return on;
+        };
+        auto logged = [&battles](const std::string& what) {
+            for (const std::string& l : battles.log())
+                if (l.find(what) != std::string::npos) return true;
+            return false;
+        };
         if (variant == 1 && f == 5) {
             CHECK(b->reward_set_spawn(*tm, host.random().synced(), "t_hut", 1.0f) == 0);  // the CRC of the upper-case name only
-            CHECK(b->reward_set_spawn(*tm, host.random().synced(), "T_HUT", 1.0f) == 2);
+            battles.story_tactical_reward("SET_SPAWN", {"T_HUT", "1.0"});
+        }
+        if (variant == 3 && f == 5) {
+            battles.story_tactical_reward("SET_SPAWN", {"T_HUT", "0.3"});
+            out.on_low = huts_on();
+            battles.story_tactical_reward("SET_SPAWN", {"T_HUT", "1.0"});
+            out.on_full = huts_on();
+            // SET_HEALTH: the first T_Hut (creation order) at half health.
+            battles.story_tactical_reward("SET_HEALTH", {"T_Hut", "50"});
+            objects::ObjectId first = objects::kNoObjectId;
+            for (const objects::ObjectHandle o : st.all_objects())
+                if (st.alive(o) && static_cast<uint32_t>(st.type(o)) == hut && (first == objects::kNoObjectId || st.id(o) < first)) first = st.id(o);
+            if (first != objects::kNoObjectId)  // a combat unit's health, else the store's (Tactical_Health 500)
+                out.health_half = b->combat().has_unit(first) ? b->combat().health(first) == b->combat().max_health(first) * 0.5f
+                                                              : st.health(st.find(first)) == 250.0f;
+            // DISABLE_SPECIAL_STRUCTURE: an unknown type is logged; a type without BASE_SHIELD is silently left alone.
+            const size_t before = battles.log().size();
+            battles.story_tactical_reward("DISABLE_SPECIAL_STRUCTURE", {"T_Hut", "1"});
+            out.not_shield_silent = battles.log().size() == before;
+            battles.story_tactical_reward("DISABLE_SPECIAL_STRUCTURE", {"No_Such_Structure", "1"});
+            out.invalid_logged = logged("Invalid structure No_Such_Structure in DISABLE_SPECIAL_STRUCTURE");
+            // FORCE_RETREAT of the Underworld (player 1, not the local player): the request is made and logged.
+            battles.story_tactical_reward("FORCE_RETREAT", {"Underworld"});
+            out.retreat_logged = logged("Force retreat of player Underworld");
         }
         out.spawners = b->indigenous_spawner_count();
         int32_t active = 0, decided = 0;
@@ -611,6 +651,13 @@ void test_land(const Data& d) {
     CHECK(s1.fought && s1.decided == 2 && s1.active == 2);
     CHECK(s2.fought && s2.decided == 2 && s2.active == 0);
     CHECK(!first_divergence(s1.crc, s1w.crc).diverged);
+    const LandRun s3 = run_land(d, 0, 3), s3w = run_land(d, 4, 3);
+    std::printf("  mcx6 SET_SPAWN on 10 T_Hut: 0.3 -> %d on, then 1.0 -> %d on; SET_HEALTH %d, DISABLE_SPECIAL_STRUCTURE silent %d "
+                "logged %d, FORCE_RETREAT logged %d\n",
+                s3.on_low, s3.on_full, s3.health_half, s3.not_shield_silent, s3.invalid_logged, s3.retreat_logged);
+    CHECK(s3.fought && s3.on_low == 3 && s3.on_full == 10 && s3.decided == 10);
+    CHECK(s3.health_half && s3.not_shield_silent && s3.invalid_logged && s3.retreat_logged);
+    CHECK(!first_divergence(s3.crc, s3w.crc).diverged);
 }
 
 }  // namespace

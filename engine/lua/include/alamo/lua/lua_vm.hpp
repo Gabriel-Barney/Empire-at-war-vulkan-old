@@ -180,8 +180,9 @@ public:
     const std::vector<std::string>& errors() const;    // thread errors
     // mcx6 t08: scripts stopped by LuaVmOptions::script_budget (their errors() / error text says "script_runaway").
     uint32_t runaway_count() const;
-    // lua_pcall(L, nargs, nresults, 0) on this VM's state or one of its threads, under the runaway guard (the host's
-    // calls into Lua outside run / call / require / service_threads: AI events, story triggers, callbacks).
+    // lua_pcall(L, nargs, nresults, 0) on this VM's state or one of its threads, under the runaway guard: run / call /
+    // require and the host's other calls into Lua (AI events, story triggers, callbacks) go through it. A call made from
+    // inside a script running on the same state counts against that run's budget (it does not start a new one).
     int protected_call(lua_State* L, int nargs, int nresults);
     std::vector<UnboundHit> unbound_hits() const;      // names sorted, counts > 0 only
     uint64_t unbound_total() const;

@@ -475,6 +475,7 @@ public:
     // The ObjectBridge attached to every AI VM (pipeline = the AI pipeline). The host fills its hooks
     // (abilities, objects_in_range, is_enemy, ...) before start().
     lua::ObjectBridge& object_bridge();
+    const lua::ObjectBridge& object_bridge() const;
     lua::LuaPlayerWorld& player_world();
     // Int-final: the session-wide GlobalValue table (L1_S4_REMAINING §1.5) for GlobalValue.Get / Set of every AI VM;
     // null (default) = the world's own map (hashed in its CRC section). Hosted battles attach SimHost::global_values().

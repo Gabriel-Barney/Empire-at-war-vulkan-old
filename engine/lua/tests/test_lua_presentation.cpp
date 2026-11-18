@@ -272,6 +272,15 @@ static void test_promote_to_space_cinematic_layer() {
     CHECK(contains(run(vm, "Promote_To_Space_Cinematic_Layer(5)"), "LuaPromoteToSpaceCinematicLayer -- Invalid parameter 1, expected a game object"));
     CHECK(moved.size() == 1 && log.events().size() == 2);
     attach_object_bridge(vm, nullptr);
+    // Outside a tactical mode: retail's mode gate (a script error before the argument checks), nothing recorded or moved.
+    objects::ObjectStore galactic(objects::ModeKind::Galactic, objects::StoreKind::Primary, w.types, &w.ids);
+    LuaHost gh = w.host();
+    gh.store = &galactic;
+    LuaVm gvm(gh);
+    PresentationLog glog;
+    attach_presentation(gvm, &glog);
+    CHECK(contains(run(gvm, "Promote_To_Space_Cinematic_Layer(5)"), "Command only valid in a tactical game."));
+    CHECK(glog.events().empty());
 }
 
 // mcx6 (MCX6_T05_CINEMATIC_BINDINGS §2, 0x541e20 -> 0x38ed10): Do_End_Cinematic_Cleanup in a tactical mode (a bridge with

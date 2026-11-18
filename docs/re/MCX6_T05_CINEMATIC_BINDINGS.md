@@ -38,11 +38,11 @@ Spec: L1_S4_REMAINING §3.4 "Hyperspace in" [H]; sound: AUDIO.md §9.6 [H].
   (TACTICAL_GAPS §7.2.)
 - Vanilla use: the story end cinematics mark their actors (`han.In_End_Cinematic(true)`, ...) and then clean up, so every
   other unit leaves the shot.
-- Port: alamo_game hides the cleaned-up objects for the rest of the battle (`end_cinematic_cleanup_set`: locomotor
-  objects of the battle store not owned by `GalacticSim::neutral_player()`, not marked in
-  `lua::PresentationState::in_end_cinematic`). The sim part is the binding's (`bind_presentation.cpp`, mcx6): in a
-  tactical mode the same objects get `ScriptObjectState::end_cinematic_suspended` and move to (1, 1, 0) through
-  `TacticalScriptHooks::teleport`; the battle host reads the flag every tick. [port] The suspension is the port's per-tick
+- Port: the binding (`bind_presentation.cpp`, mcx6): in a tactical mode the locomotor objects of the battle store not
+  owned by the neutral player and not marked in `lua::PresentationState::in_end_cinematic` get
+  `ScriptObjectState::end_cinematic_suspended` (saved with the bridge) and move to (1, 1, 0) through
+  `TacticalScriptHooks::teleport`; the battle host reads the flag every tick. alamo_game hides the objects with the flag
+  for the rest of the battle (`CampaignBattles::end_cinematic_hidden`), so the hide survives a load. [port] The suspension is the port's per-tick
   unit controls (the locomotor does not run, the weapons do not fire), standing for every behaviour's suspend virtual.
 
 ## 3. `Promote_To_Space_Cinematic_Layer(object)` (0x5433f0)
@@ -54,7 +54,8 @@ Spec: L1_S4_REMAINING §3.4 "Hyperspace in" [H]; sound: AUDIO.md §9.6 [H].
   cinematic markers (`space_cinematic_center`, `intro_camera_marker`, `cinematic_lua_shuttle_pos`), so the camera keys
   and the transports spawned there work far above the battlefield. [H]
 - Port: the binding itself moves the object (`TacticalScriptHooks::teleport`, the store without a host); ledger state
-  `full`. [port] The two mode refusals are not raised.
+  `full`. Outside a tactical mode (a galactic store) "Command only valid in a tactical game." is a script error.
+  [port] The land-or-space refusal has no port case (every port tactical store is land or space).
 
 ## 4. `GameObjectWrapper.Show_Emitter(name, bool)` (0x581120)
 

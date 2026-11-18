@@ -197,6 +197,22 @@ void test_base_shield_state() {
         s.ticks(20);
         CHECK(!s.on());
     }
+    {  // mcx6 (STORY_REWARDS_GALACTIC §1.20): DISABLE_SPECIAL_STRUCTURE's story bit turns the shield off at its next
+       // service; cleared, it comes back Base_Shield_Delay_Time after the last off service (like power)
+        ShieldWorld s;
+        s.ticks(1);
+        CHECK(s.on());
+        s.w.sys->set_flag(1, kUnitShieldStoryOff, true);
+        s.ticks(15);
+        CHECK(!s.on() && (s.w.sys->flags(1) & kUnitShieldStoryOff) != 0);
+        s.w.sys->set_flag(1, kUnitShieldStoryOff, false);
+        int frames = 0;
+        while (!s.on() && frames < 400) {
+            s.ticks(1);
+            ++frames;
+        }
+        CHECK(s.on() && frames > 285 && frames <= 315);
+    }
     {  // a dead generator's shield is off
         ShieldWorld s;
         s.ticks(1);

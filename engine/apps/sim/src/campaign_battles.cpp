@@ -14,6 +14,9 @@
 #include "alamo/lua/players.hpp"  // a1j t07: TacticalGalacticContext
 #endif
 #include "save_io.hpp"  // N1 stage 2
+#if defined(ALAMO_SIM_HAVE_STORY) || defined(ALAMO_SIM_HAVE_TACTICAL_AI)
+#include "alamo/lua/object_bridge.hpp"  // mcx6: script_bridges
+#endif
 
 namespace alamo::sim {
 
@@ -114,15 +117,42 @@ bool CampaignBattles::script_hidden(objects::ObjectId id) const {
 #endif
 }
 
-std::span<const std::string> CampaignBattles::hidden_sub_objects(objects::ObjectId id) const {
+// The battle's Lua object bridges the presentation reads: the script bridge (story VMs and object scripts), then the
+// tactical AI's when it is another one. Empty without a battle.
+std::vector<const lua::ObjectBridge*> CampaignBattles::script_bridges() const {
+    std::vector<const lua::ObjectBridge*> out;
+    if (!battle_) return out;
 #ifdef ALAMO_SIM_HAVE_STORY
-    if (!battle_ || !story_bridge_) return {};
-    const lua::ScriptObjectState* s = story_bridge_->find_state(id);
-    if (!s) return {};
-    return s->hidden_sub_objects;
+    if (story_bridge_) out.push_back(story_bridge_.get());
+#endif
+#ifdef ALAMO_SIM_HAVE_TACTICAL_AI
+    if (ai_) {
+        const lua::ObjectBridge* ab = &ai_->world().object_bridge();
+        if (std::find(out.begin(), out.end(), ab) == out.end()) out.push_back(ab);
+    }
+#endif
+    return out;
+}
+
+std::span<const std::string> CampaignBattles::hidden_sub_objects(objects::ObjectId id) const {
+#if defined(ALAMO_SIM_HAVE_STORY) || defined(ALAMO_SIM_HAVE_TACTICAL_AI)
+    for (const lua::ObjectBridge* b : script_bridges())
+        if (const std::span<const std::string> v = b->hidden_sub_objects(id); !v.empty()) return v;
 #else
     (void)id;
+#endif
     return {};
+}
+
+bool CampaignBattles::end_cinematic_hidden(objects::ObjectId id) const {
+#ifdef ALAMO_SIM_HAVE_STORY
+    // The bridge whose unit control applies the suspension (story_bridge_begin), so the hide is what the sim suspended.
+    if (!battle_ || !story_bridge_) return false;
+    const lua::ScriptObjectState* s = story_bridge_->find_state(id);
+    return s && s->end_cinematic_suspended;
+#else
+    (void)id;
+    return false;
 #endif
 }
 
@@ -1516,13 +1546,25 @@ void CampaignBattles::story_bridge_begin(SimHost& host, GameMode& mode) {
     };
     story_hooks_.transports = &story_transports_;
     b.tactical = &story_hooks_;
-    // mcx6 (MCX6_T05_CINEMATIC_BINDINGS §2): Do_End_Cinematic_Cleanup's suspension reaches the battle's tick in every session
-    // with this bridge (the STY1 t01 setters below only with object scripts): no locomotor run, no weapon fire.
+    // The bridge's per-tick unit control: mcx6 (MCX6_T05_CINEMATIC_BINDINGS §2) Do_End_Cinematic_Cleanup's suspension in every
+    // session with this bridge (no locomotor run, no weapon fire); STY1 t01's Prevent_All_Fire / Suspend_Locomotor /
+    // Set_Cannot_Be_Killed / Override_Max_Speed / Set_In_Limbo / capture switch only with object scripts (their hooks below).
     {
-        const lua::ObjectBridge* cb = &b;
-        battle_->set_script_unit_control(&story_hooks_, [cb](objects::ObjectId id) {
+        const lua::ObjectBridge* sb = &b;
+        const bool sty1 = scripts != nullptr;
+        battle_->set_script_unit_control(sb, [sb, sty1](objects::ObjectId id) {
             TacticalBattle::ScriptUnitControl c;
-            if (const lua::ScriptObjectState* st = cb->find_state(id); st && st->end_cinematic_suspended) c.loco_suspended = c.no_fire = true;
+            if (const lua::ScriptObjectState* s = sb->find_state(id)) {
+                if (sty1) {
+                    c.no_fire = s->prevent_all_fire;
+                    c.loco_suspended = s->locomotor_suspended;
+                    c.cannot_die = s->cannot_be_killed;
+                    c.max_speed = s->max_speed_override;
+                    c.limbo = s->in_limbo;
+                    c.capture_disabled = s->capture_disabled;
+                }
+                if (s->end_cinematic_suspended) c.loco_suspended = c.no_fire = true;
+            }
             return c;
         });
     }
@@ -1671,21 +1713,7 @@ void CampaignBattles::story_bridge_begin(SimHost& host, GameMode& mode) {
             if (battle_ && tm && tm->primary().alive(u)) battle_->script_opportunity_fire(tm->primary().id(u), on);
         };
         // STY1 t01: Prevent_All_Fire / Suspend_Locomotor / Set_Cannot_Be_Killed / Override_Max_Speed -> the battle's tick
-        if (battle_) {
-            const lua::ObjectBridge* sb = &b;
-            battle_->set_script_unit_control(sb, [sb](objects::ObjectId id) {
-                TacticalBattle::ScriptUnitControl c;
-                if (const lua::ScriptObjectState* s = sb->find_state(id)) {
-                    c.no_fire = s->prevent_all_fire;
-                    c.loco_suspended = s->locomotor_suspended;
-                    c.cannot_die = s->cannot_be_killed;
-                    c.max_speed = s->max_speed_override;
-                    c.limbo = s->in_limbo;
-                    c.capture_disabled = s->capture_disabled;
-                }
-                return c;
-            });
-        }
+        // through the bridge's unit control installed above.
 #ifdef ALAMO_SIM_HAVE_TACTICAL_AI
         b.prevent_ai_usage = [this, h](objects::ObjectHandle u, bool on) {
             TacticalMode* tm = h->tactical();

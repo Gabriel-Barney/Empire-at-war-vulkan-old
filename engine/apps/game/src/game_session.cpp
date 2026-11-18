@@ -80,10 +80,12 @@ const galactic::GalacticSim* GameSession::galaxy() const {
     return g ? g->sim() : nullptr;
 }
 
+// binding-consumer: GameObjectWrapper.In_End_Cinematic (the cleanup's exemption, obj +0x3c9: the sim binding skips a marked
+// object, so end_cinematic_hidden leaves it drawn)
 bool GameSession::script_hidden(objects::ObjectId id) const {
-    if (battles_ && battles_->script_hidden(id)) return true;
+    if (battles_ && (battles_->script_hidden(id) || battles_->end_cinematic_hidden(id))) return true;  // mcx6 t05: cleanup
     const sim::TacticalBattle* b = battle();
-    return b && cinematics_.hidden(id, b->frame());  // mcx6 t05: a cinematic arrival before it shows, an end-cinematic cleanup
+    return b && cinematics_.hidden(id, b->frame());  // mcx6 t05: a cinematic arrival before it shows
 }
 
 bool GameSession::take_reveal_sfx() {

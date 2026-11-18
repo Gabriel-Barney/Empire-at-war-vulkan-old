@@ -1,6 +1,6 @@
 // mcx6 t05: the story script's cinematic object calls, host side (script_cinematics.hpp), data-free. Expected values from
-// docs/re/MCX6_T05_CINEMATIC_BINDINGS.md (0x5c9a80 timer 25 - delay, shown at 35, sound at 45; 0x541e20 / 0x38ed10
-// object set; the ModelEmitterType table 0x2641c0).
+// docs/re/MCX6_T05_CINEMATIC_BINDINGS.md (0x5c9a80 timer 25 - delay, shown at 35, sound at 45; the ModelEmitterType table
+// 0x2641c0). Do_End_Cinematic_Cleanup's object set is the sim binding's (engine/lua tests, test_lua_presentation.cpp).
 #include <cstdio>
 #include <vector>
 
@@ -37,23 +37,6 @@ void arrival_test() {
     CHECK(s.arrivals() == 0 && !s.hidden(9, 0));
 }
 
-void cleanup_test() {
-    alamo::test::section("Do_End_Cinematic_Cleanup: locomotor objects not neutral and not In_End_Cinematic are hidden");
-    const std::vector<CleanupCandidate> c = {
-        {1, 0, true},   // player 0 unit: hidden
-        {2, 0, true},   // marked In_End_Cinematic(true): kept
-        {3, 5, true},   // the neutral player's: kept
-        {4, 1, false},  // no locomotor (a structure, a marker): kept
-        {5, 1, true},   // player 1 unit: hidden
-    };
-    const auto ids = end_cinematic_cleanup_set(c, 5, [](ObjectId id) { return id == 2; });
-    CHECK(ids == std::vector<ObjectId>({1, 5}));
-    ScriptCinematics s;
-    s.end_cinematic_cleanup(ids);
-    CHECK(s.hidden(1, 0) && s.hidden(5, 1000000) && !s.hidden(2, 0) && !s.hidden(3, 0) && s.cleaned() == 2);
-    CHECK(end_cinematic_cleanup_set(c, 5, {}).size() == 3);  // no marks: object 2 goes too
-}
-
 void emitter_test() {
     alamo::test::section("Show_Emitter: ModelEmitterType names -> particle prefix groups");
     CHECK(model_emitter_type("Engines") == 0 && model_emitter_type("TURBO_ENGINES") == 1 && model_emitter_type("ion_stun") == 2);
@@ -72,7 +55,6 @@ void emitter_test() {
 
 int main() {
     arrival_test();
-    cleanup_test();
     emitter_test();
     return alamo::test::report("script_cinematics");
 }

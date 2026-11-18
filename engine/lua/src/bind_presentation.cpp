@@ -385,8 +385,10 @@ int g_set_new_environment(Call& c) {
 // mcx6 t05 (docs/re/MCX6_T05_CINEMATIC_BINDINGS.md §3, 0x5433f0): the object moves to its own position raised by 20000 on z
 // (the cinematic layer above the battlefield) through the reposition 0x3abb80, which Teleport uses too: the tactical host's
 // TacticalScriptHooks::teleport (store, movement, combat, trees), the facing kept; without one the store position. Its
-// cinematic camera keys and the scripts' Get_Position then see the raised object. [port] Retail's "Command only valid in
-// a (land or space) tactical game." refusals are not raised (no galactic script calls it).
+// cinematic camera keys and the scripts' Get_Position then see the raised object. Outside a tactical mode retail's
+// "Command only valid in a tactical game." is a script error: the dispatcher's mode gate (bindings.cpp kTacticalGlobals /
+// kGateTexts, before the argument checks). [port] Its "... only valid in a land or space tactical game." for another
+// tactical kind has no port case (every port tactical store is land or space).
 // binding-effect: Promote_To_Space_Cinematic_Layer full z + 20000 through TacticalScriptHooks::teleport (docs/re/MCX6_T05_CINEMATIC_BINDINGS.md §3)
 int g_promote_to_space_cinematic_layer(Call& c) {
     if (!c.has(1)) return c.script_error_stop("LuaPromoteToSpaceCinematicLayer -- Expected gameobject parameter 1");
@@ -617,14 +619,9 @@ int g_hide_sub_object(Call& c) {
     const std::string mesh = ascii_upper(c.string(3));
     const bool hide = c.number(2) != 0.0;
     state(c).hidden_sub_objects[std::to_string(id) + "|" + mesh] = hide;
-    // mcx6 t04: the object's own state, which the renderer reads (CampaignBattles::hidden_sub_objects).
-    if (ObjectBridge* b = c.vm->owner ? attached_object_bridge(*c.vm->owner) : nullptr) {
-        std::vector<std::string>& v = b->state(id).hidden_sub_objects;
-        const auto it = std::lower_bound(v.begin(), v.end(), mesh);
-        const bool listed = it != v.end() && *it == mesh;
-        if (hide && !listed) v.insert(it, mesh);
-        else if (!hide && listed) v.erase(it);
-    }
+    // mcx6 t04: the bridge's hidden-mesh map, which the renderer reads (CampaignBattles::hidden_sub_objects). Not a
+    // per-object script state: presentation only, so the bridge's state hash does not change.
+    if (ObjectBridge* b = c.vm->owner ? attached_object_bridge(*c.vm->owner) : nullptr) b->set_sub_object_hidden(id, mesh, hide);
     return 0;
 }
 

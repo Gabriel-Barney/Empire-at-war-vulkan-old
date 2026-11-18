@@ -2037,7 +2037,8 @@ REA from:
   root in registration order (Library, GameObject, FreeStore, Miscellaneous, Story, AI, AI\SpaceMode, AI\LandMode,
   AI\StoryArc, Interventions, Evaluators). [port] A name with a `.lua` / `.lc` extension is tried as given.
 - Discovery: the plan scan lists `*.lua` only (`list_plan_files`), evaluators load `Evaluators\<name>.lua`, so a
-  `.lc`-only plan or evaluator is never found, as retail. [port] The plan, evaluator and free-store loaders read the
-  discovered or named `.lua` file itself, not through `LUA_PATH` (no shadowing by an earlier root; a `.lc`-only free
-  store is not found). [port] A script's own file loaded that way gets no `_LOADED` entry (GameScoring, loaded with
+  `.lc`-only plan or evaluator is never found, as retail. [port] The plan and evaluator loaders read the discovered
+  `.lua` file itself, not through `LUA_PATH` (no shadowing by an earlier root). Names from XML go through `LUA_PATH`
+  (`read_script`): the free store (`start_free_store_vm`, a `.lc`-only one is found, an earlier root's file of the same
+  name wins), and the story, object and GameScoring scripts (`require`). [port] A script's own file loaded that way gets no `_LOADED` entry (GameScoring, loaded with
   `require`, does).

@@ -1318,6 +1318,38 @@ void test_plan_load_parallel() {
     }
 }
 
+// mcx6 t07 (LUA_API.md "Script lookup and require"): a free store named by XML loads whichever LUA_PATH entry exists
+// first, .lc included: a .lc-only free store is found; an earlier root's file of the same name shadows it; none: one
+// "not found" diagnostic.
+void test_free_store_lc() {
+    MemoryFiles files;
+    files.add("Data\\Scripts\\FreeStore\\SynLcStore.lc", "function Base_Definitions() lc_store = 1 end function main() end");
+    files.add("Data\\Scripts\\FreeStore\\SynShadowed.lua", "function Base_Definitions() shadow = 1 end function main() end");
+    files.add("Data\\Scripts\\Library\\SynShadowed.lc", "function Base_Definitions() shadow = 2 end function main() end");
+    objects::GameObjectTypes types;
+    objects::ObjectStore store(objects::ModeKind::Galactic, objects::StoreKind::Primary, types);
+    GameRandom rng(1u, 2u);
+    PlanScriptRuntime::VmSetup setup;
+    setup.host = [&] {
+        lua::LuaHost h;
+        h.store = &store;
+        h.types = &types;
+        h.rng = &rng;
+        h.files = &files;
+        return h;
+    };
+    PlanScriptRuntime rt(std::move(setup));
+    std::vector<std::string> diag;
+    double v = 0.0;
+    const std::unique_ptr<lua::LuaVm> lc = start_free_store_vm(rt, files, "SynLcStore", nullptr, 1, true, 0, {}, &diag);
+    CHECK(lc && lc->get_number("lc_store", v) && v == 1.0);
+    const std::unique_ptr<lua::LuaVm> sh = start_free_store_vm(rt, files, "SynShadowed", nullptr, 2, true, 0, {}, &diag);
+    CHECK(sh && sh->get_number("shadow", v) && v == 2.0);  // Library comes before FreeStore on LUA_PATH
+    CHECK(diag.empty());
+    CHECK(!start_free_store_vm(rt, files, "SynNoStore", nullptr, 3, true, 0, {}, &diag));
+    CHECK(diag.size() == 1 && diag[0] == "Data\\Scripts\\FreeStore\\SynNoStore.lua: not found");
+}
+
 void test_synthetic_campaign() {
     const int32_t frames = 30 * 900;  // 15 minutes of galactic time
     const CampaignResult base = run_synthetic(1, frames);

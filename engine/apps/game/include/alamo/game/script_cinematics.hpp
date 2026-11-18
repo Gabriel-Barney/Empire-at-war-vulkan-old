@@ -6,18 +6,17 @@
 //                                   at 25 - delay and counts one per frame; the model is hidden until 35 and the owner
 //                                   faction's SFXEvent_Arrive_From_Hyperspace plays at 45 (AUDIO.md §9.6), so the ship
 //                                   shows delay + 10 frames and is heard delay + 20 frames after the call.
-//   Do_End_Cinematic_Cleanup()      (§2, 0x541e20 -> 0x38ed10): every object with a locomotor not owned by the neutral
-//                                   player (the first Is_Neutral faction's) and not marked by In_End_Cinematic(true) has
-//                                   its model hidden (end_cinematic_cleanup_set picks them). They stay hidden for the rest
-//                                   of the battle (retail: nothing shows them again).
+//   Do_End_Cinematic_Cleanup()      (§2, 0x541e20 -> 0x38ed10): not here. The sim binding suspends the objects (saved
+//                                   ScriptObjectState::end_cinematic_suspended) and GameSession::script_hidden hides them
+//                                   from that flag (CampaignBattles::end_cinematic_hidden), so a load keeps the hide.
 //   Show_Emitter(name, on)          (§4, 0x581120): the ModelEmitterType name of one of the model's particle prefix groups
 //                                   (model_emitter_type); emitter_overrides turns the binding's state into per-object
 //                                   shown / hidden group bits for the renderer (render::SimInstanceBuilder emitter source).
 //
 // Presentation only (rule 3): nothing here is read by the sim, hashed or saved. [port] The game sees a call when it drains
 // the presentation log after the tick that made it, so `now` is the battle frame at that drain (at most the ticks of one
-// render frame later than the call); a loaded save starts with no arrival or cleanup state (the emitters come back from
-// the saved lua::PresentationState).
+// render frame later than the call); a loaded save starts with no arrival state (the emitters come back from the saved
+// lua::PresentationState).
 #pragma once
 #include <cstdint>
 #include <functional>
@@ -41,15 +40,12 @@ public:
     // Cinematic_Hyperspace_In on `object` seen at battle frame `now`. A negative delay counts as 0 [port: retail's timer
     // would start above 25 and show the model at once, which a delay of 0 does after 10 frames].
     void hyperspace_in(objects::ObjectId object, int32_t delay_frames, uint32_t now);
-    // Do_End_Cinematic_Cleanup: the objects it hides (end_cinematic_cleanup_set).
-    void end_cinematic_cleanup(std::span<const objects::ObjectId> ids);
-    // Drawn hidden at battle frame `now`: an arrival before its show frame, or cleaned up.
+    // Drawn hidden at battle frame `now`: an arrival before its show frame.
     bool hidden(objects::ObjectId id, uint32_t now) const;
     // The arrivals whose sound is due at `now` (sound frame <= now), each once, in call order.
     void take_arrival_sfx(uint32_t now, std::vector<objects::ObjectId>& out);
     void reset();  // a new battle
     size_t arrivals() const { return arrivals_.size(); }
-    size_t cleaned() const { return cleaned_.size(); }
 
 private:
     struct Arrival {
@@ -57,20 +53,8 @@ private:
         uint32_t show = 0, sfx = 0;
         bool sfx_done = false;
     };
-    std::vector<Arrival> arrivals_;      // call order; a second call on the same object replaces its entry
-    std::set<objects::ObjectId> cleaned_;
+    std::vector<Arrival> arrivals_;  // call order; a second call on the same object replaces its entry
 };
-
-// One object of the battle store as Do_End_Cinematic_Cleanup's query sees it (0x2a9ff0 with behaviour 1 = LOCOMOTOR).
-struct CleanupCandidate {
-    objects::ObjectId id = objects::kNoObjectId;
-    int32_t owner = -1;
-    bool locomotor = false;
-};
-// The objects the cleanup hides: locomotor objects whose owner is not `neutral_player` and that In_End_Cinematic(true) did
-// not mark, in candidate order.
-std::vector<objects::ObjectId> end_cinematic_cleanup_set(std::span<const CleanupCandidate> candidates, int32_t neutral_player,
-                                                         const std::function<bool(objects::ObjectId)>& in_end_cinematic);
 
 // Show_Emitter's ModelEmitterType names (the enum table 0x2641c0): Engines 0, Turbo_Engines 1, Ion_Stun 2,
 // Sprint_Ability_Effect 4, Power_To_Weapons_Effect 5, Missile_Shield 7 (the particle prefix group index of

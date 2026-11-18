@@ -35,7 +35,8 @@ struct RandomStoryPlot {
     std::string dialog;            // the story-dialog text ([CHAPTER i], TITLE, IMAGE, DIALOG, TEXT): presentation only
 };
 
-// Every draw is on `free_rng` (retail's unsynced RNG 0x140a13e20), in the order the retail builder makes them.
-RandomStoryPlot build_random_story(uint32_t k, const RandomStoryInput& in, SimRng& free_rng);
+// Every draw is on `rng`, in the order the retail builder makes them on its unsynced RNG 0x140a13e20 ([port] the caller
+// passes the story session's saved RANDOM_STORY stream).
+RandomStoryPlot build_random_story(uint32_t k, const RandomStoryInput& in, SimRng& rng);
 
 }  // namespace alamo::sim

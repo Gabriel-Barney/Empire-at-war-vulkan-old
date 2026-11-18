@@ -238,7 +238,7 @@ void App::lua_presentation() {
     for (const lua::PresentationEvent& e : log->events()) {
         if (e.seq < lua_seq_) continue;
         lua_seq_ = e.seq + 1;
-        script_cinematic_event(e, *log);  // mcx6 t05
+        script_cinematic_event(e);  // mcx6 t05
         if (e.op == lua::PresentationOp::PlayBinkMovie && !e.args.empty()) {
             const std::string& name = e.args.front().text;
             const std::string up = ascii_upper(name);
@@ -314,11 +314,11 @@ void App::script_cinematic_frame() {
 //                                   arrival sound at delay + 20 (lua_presentation, take_arrival_sfx). [port] The ship is
 //                                   not moved in from its hyperspace start point (the port's reinforcement arrivals are
 //                                   not either), and the locomotor checks of 0x574e50 are not made.
-//   Do_End_Cinematic_Cleanup()      the locomotor objects of every player but the neutral one, unless In_End_Cinematic(true)
-//                                   marked them, are hidden for the rest of the battle (0x541e20 / 0x38ed10). Their
-//                                   suspension and the move to (1, 1, 0) are the sim's (the binding, bind_presentation.cpp).
+//   Do_End_Cinematic_Cleanup()      nothing here: the objects the sim suspended (the binding, bind_presentation.cpp; the
+//                                   saved ScriptObjectState::end_cinematic_suspended) are hidden for the rest of the battle
+//                                   by GameSession::script_hidden (CampaignBattles::end_cinematic_hidden), across a load too.
 //   Play_Cinematic_Engine_Flyby()   the type's SFXEvent_Ambient_Moving attached to the object (0x57ea50).
-void App::script_cinematic_event(const lua::PresentationEvent& e, const lua::PresentationLog& log) {
+void App::script_cinematic_event(const lua::PresentationEvent& e) {
     using Op = lua::PresentationOp;
     using Kind = lua::PresentationArg::Kind;
     const sim::TacticalBattle* b = battle();
@@ -331,21 +331,6 @@ void App::script_cinematic_event(const lua::PresentationEvent& e, const lua::Pre
             if (b->is_space() && e.args.size() >= 2 && e.args[0].kind == Kind::Object && e.args[1].kind == Kind::Number)
                 sc.hyperspace_in(e.args[0].id, static_cast<int32_t>(e.args[1].number), b->frame());
             break;
-        case Op::DoEndCinematicCleanup: {
-            // binding-consumer: GameObjectWrapper.In_End_Cinematic (the cleanup's exemption: obj +0x3c9, PresentationState::in_end_cinematic)
-            std::vector<game::CleanupCandidate> cands;
-            for (const objects::ObjectHandle h : st.all_objects())
-                if (st.alive(h)) cands.push_back({st.id(h), st.owner(h), st.has_behavior(h, objects::beh::Locomotor)});
-            const galactic::GalacticSim* g = galaxy();
-            const std::map<int32_t, bool>& marks = log.state().in_end_cinematic;
-            const std::vector<objects::ObjectId> gone =
-                game::end_cinematic_cleanup_set(cands, g ? g->neutral_player() : -1, [&marks](objects::ObjectId id) {
-                    const auto it = marks.find(id);
-                    return it != marks.end() && it->second;
-                });
-            sc.end_cinematic_cleanup(gone);
-            break;
-        }
         case Op::ObjectPlayCinematicEngineFlyby: {
             if (e.args.empty() || e.args[0].kind != Kind::Object) break;
             const objects::ObjectHandle h = st.find(e.args[0].id);

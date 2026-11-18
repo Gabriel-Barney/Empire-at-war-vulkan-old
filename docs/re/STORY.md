@@ -464,7 +464,8 @@ and 0x140a29c40.
     the exe, so that event reads **GROUND** and counts only land battles lost at MonCalimari [H for the parse; M that
     the event's plot is reachable in FoC].
 - **Port** (mcx6 t03). `ConflictManager::on_space_decide` (the space decide state, local player involved) calls
-  `StorySession::record_battle_composition`, which keeps the two orbit `Ship_Class` lists (saved, story save version 7)
+  `StorySession::record_battle_composition`, which keeps the two orbit `Ship_Class` lists (saved, story save version 7;
+  hashed while not empty)
   until the next record; WIN/LOSE_BATTLES read them for fought and auto-resolved battles alike and test space battles
   only (`story_model.cpp` `battle_counts`). [port] the port's orbit list holds fleets only. With shipped data the test is
   never on, so it shows only with mods.

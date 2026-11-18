@@ -1280,6 +1280,9 @@ void StorySession::apply_reward(Set& s, const std::string& type, const std::vect
 }
 
 // --- mcx6: PICK_PLANET and RANDOM_STORY (docs/re/STORY_REWARDS_GALACTIC.md §1.15, §1.16) ---
+namespace {
+constexpr uint32_t kRandomStorySalt = 0x52414e44u;  // "RAND": the RANDOM_STORY stream's seed = synced state ^ this
+}  // namespace
 void StorySession::pick_planet(const std::vector<std::string>& params) {
     // P1 FILTER name (exact; unknown = FILTER_NONE), P2 placeholder; both required (silent). The first planet in row order
     // that passes the filter against the LOCAL player [port: row order stands in for the mode's planet object order].
@@ -1317,34 +1320,92 @@ void StorySession::pick_planet(const std::vector<std::string>& params) {
     e.a = ascii_upper(p2);
     e.b = planet_type_name(pick);
     note("Replacing all instances of " + e.a + " with planet " + e.b);
-    // The current mode's story manager: the attached battle's tactical plot set, else every galactic plot set.
+    // The current mode's story manager: the attached battle's tactical plot set, else every galactic plot set. Each
+    // replacement logs its "EVENT ..." line (0x45db20 / the list overrides).
     if (tactical_ && tactical_->set) {
-        tactical_->set->model.replace_placeholder(e.a, e.b);  // [port] not replayed after a mid-battle load
-        return;
+        e.tactical = true;
+        e.set = tactical_->set->number;
     }
-    apply_definition_edit(e);
-    def_edits_.push_back(std::move(e));
+    std::vector<std::string> lines;
+    add_definition_edit(std::move(e), &lines);
+    for (const std::string& l : lines) note(l);
 }
 
-bool StorySession::apply_definition_edit(const DefinitionEdit& e) {
+void StorySession::add_definition_edit(DefinitionEdit e, std::vector<std::string>* log) {
+    std::vector<EditChange> undo;
+    if (!apply_definition_edit(e, &undo, log)) return;
+    if (e.tactical) ++tactical_applied_;
+    def_edits_.push_back(std::move(e));
+    def_undo_.push_back(std::move(undo));
+}
+
+bool StorySession::apply_definition_edit(const DefinitionEdit& e, std::vector<EditChange>* undo, std::vector<std::string>* log) {
+    Set* tac = tactical_ && tactical_->set && tactical_->set->number == e.set ? tactical_->set.get() : nullptr;
+    if (e.tactical && !tac) return false;
     if (e.kind == 1) {
-        for (const auto& sp : sets_) sp->model.replace_placeholder(e.a, e.b);
+        auto replace = [&](lua::StoryModel& m, uint32_t model) {
+            std::vector<lua::StoryModel::ParamChange> changes;
+            m.replace_placeholder(e.a, e.b, log, &changes);
+            if (undo)
+                for (lua::StoryModel::ParamChange& c : changes)
+                    undo->push_back({model, c.plot, c.event, c.index, c.reward, std::move(c.before)});
+        };
+        if (e.tactical) {
+            replace(tac->model, kTacticalModel);
+        } else {
+            for (size_t i = 0; i < sets_.size(); ++i) replace(sets_[i]->model, static_cast<uint32_t>(i));
+        }
         return true;
     }
     if (e.kind != 0) return false;
-    Set* target = nullptr;
-    for (const auto& sp : sets_)
-        if (sp->number == e.set) target = sp.get();
+    Set* target = e.tactical ? tac : nullptr;
+    if (!e.tactical)
+        for (const auto& sp : sets_)
+            if (sp->number == e.set) target = sp.get();
     if (!target) return false;
     std::string err;
     if (target->model.add_plot(e.a, e.b, true, {}, &err) == UINT32_MAX) {
         note("RANDOM_STORY: " + err);
         return false;
     }
-    std::vector<lua::StoryModel*> models;  // the new plot joins the galactic plot table (q6 t03)
+    if (!e.tactical) {
+        std::vector<lua::StoryModel*> models;  // the new plot joins the galactic plot table (q6 t03)
+        for (const auto& sp : sets_) models.push_back(&sp->model);
+        lua_->table.assign(std::move(models));
+    }
+    return true;
+}
+
+void StorySession::undo_definition_edit(const DefinitionEdit& e, const std::vector<EditChange>& undo) {
+    Set* tac = tactical_ && tactical_->set ? tactical_->set.get() : nullptr;
+    if (e.kind == 1) {
+        for (auto it = undo.rbegin(); it != undo.rend(); ++it) {
+            lua::StoryModel* m = nullptr;
+            if (it->model == kTacticalModel) m = tac ? &tac->model : nullptr;
+            else if (it->model < sets_.size()) m = &sets_[it->model]->model;
+            if (m) m->undo_changes({lua::StoryModel::ParamChange{it->plot, it->event, it->reward, it->index, it->before}});
+        }
+        return;
+    }
+    if (e.kind != 0) return;
+    if (e.tactical) {
+        if (tac) tac->model.remove_last_plot();
+        return;
+    }
+    for (const auto& sp : sets_)
+        if (sp->number == e.set) sp->model.remove_last_plot();
+    std::vector<lua::StoryModel*> models;
     for (const auto& sp : sets_) models.push_back(&sp->model);
     lua_->table.assign(std::move(models));
-    return true;
+}
+
+void StorySession::drop_tactical_edits() {
+    for (size_t i = def_edits_.size(); i-- > 0;)
+        if (def_edits_[i].tactical) {
+            def_edits_.erase(def_edits_.begin() + static_cast<std::ptrdiff_t>(i));
+            def_undo_.erase(def_undo_.begin() + static_cast<std::ptrdiff_t>(i));
+        }
+    tactical_applied_ = 0;
 }
 
 void StorySession::random_story(Set& s) {
@@ -1390,27 +1451,29 @@ void StorySession::random_story(Set& s) {
         else in.enemy_heroes.push_back(rules.types[t].name);
     }
     const uint32_t k = ++random_story_count_;
-    const RandomStoryPlot plot = build_random_story(k, in, rng_->free());
+    // [port] The session's own RANDOM_STORY stream (retail: the free RNG), seeded at the first one from the synced state.
+    if (k == 1) random_story_rng_.seed(rng_->synced().state() ^ kRandomStorySalt);
+    const RandomStoryPlot plot = build_random_story(k, in, random_story_rng_);
     for (const std::string& line : plot.log) note(line);
     // Plot player := the local player: the plot joins that player's set (the current mode's story manager); a running
-    // battle's tactical set takes it while a battle is attached [port: not replayed after a mid-battle load].
-    if (tactical_ && tactical_->set) {
-        std::string err;
-        if (tactical_->set->model.add_plot(plot.name, plot.xml, true, {}, &err) == UINT32_MAX) note("RANDOM_STORY: " + err);
-        return;
-    }
-    Set* target = &s;
-    for (const auto& sp : sets_)
-        if (sp->player == local) {
-            target = sp.get();
-            break;
-        }
+    // battle's tactical set takes it while a battle is attached (a tactical edit: replayed when a load rebuilds the battle).
     DefinitionEdit e;
     e.kind = 0;
-    e.set = target->number;
     e.a = plot.name;
     e.b = plot.xml;
-    if (apply_definition_edit(e)) def_edits_.push_back(std::move(e));
+    if (tactical_ && tactical_->set) {
+        e.tactical = true;
+        e.set = tactical_->set->number;
+    } else {
+        Set* target = &s;
+        for (const auto& sp : sets_)
+            if (sp->player == local) {
+                target = sp.get();
+                break;
+            }
+        e.set = target->number;
+    }
+    add_definition_edit(std::move(e));
 }
 // --- end mcx6 ---
 
@@ -1710,6 +1773,15 @@ void StorySession::hash(StateHasher& h) const {
             h.u32(e.set);
             h.str(e.a);
             h.str(e.b);
+            if (e.tactical) h.u32(0x54414331u);  // "TAC1"
+        }
+        if (random_story_count_ != 0) random_story_rng_.hash(h);
+    }
+    if (!comp_local_.empty() || !comp_other_.empty()) {  // mcx6 t03: the orbit record (absent while empty)
+        h.u32(0x434f4d50u);  // "COMP"
+        for (const std::vector<int32_t>* v : {&comp_local_, &comp_other_}) {
+            h.u32(static_cast<uint32_t>(v->size()));
+            for (const int32_t c : *v) h.i32(c);
         }
     }
 }
@@ -1775,6 +1847,7 @@ lua::StoryModel* StorySession::tactical_model() { return tactical_ && tactical_-
 bool StorySession::begin_battle(const StoryBattleStart& s, uint64_t frame, std::vector<std::string>* diagnostics) {
     if (tactical_) end_battle(-1, frame);
     frame_ = frame;
+    tactical_applied_ = 0;  // a new tactical set: a resumed battle's edits are applied by read() pass 2
     auto note = [diagnostics](std::string m) {
         if (diagnostics) diagnostics->push_back(std::move(m));
     };
@@ -2024,6 +2097,7 @@ void StorySession::end_battle(int32_t winner, uint64_t frame) {
     route_corruption_mission(winner, frame);  // wave 2b
     // The tactical plots go: holocron records of their events keep a copy of their dialog lines [port].
     if (tactical_->set) tactical_->set->model.holocron().detach(&tactical_->set->model);
+    drop_tactical_edits();  // mcx6: the battle's PICK_PLANET / RANDOM_STORY edits go with its plot set
     tactical_.reset();
 }
 
@@ -2326,7 +2400,7 @@ namespace {
 
 // 2 (stage 2): + the attached tactical story; 3 (q6 t14): + the holocron list (GALACTIC_DIALOGS §2.8). 1 and 2 still load
 // (with an empty holocron); 3 loads with default STY1 state.
-constexpr uint32_t kStorySaveVersion = 7;  // 7 (mcx6 t03): the battle snapshot without its CategoryMask list / base flag, + the orbit record's Ship_Class lists after the STY1 block; 6 (mcx6): + the definition edits after the clock, the mcx6 story gates at the end of the STY1 block; 5 (ui2 t06): + the DISABLE_RETREAT switches at the end of the STY1 block; 4 (STY1 lane B): + the story rule gates / tutorial state / reinforcement switches
+constexpr uint32_t kStorySaveVersion = 8;  // 8 (mcx6 review): each definition edit's tactical flag, the RANDOM_STORY stream after the edits; 7 (mcx6 t03): the battle snapshot without its CategoryMask list / base flag, + the orbit record's Ship_Class lists after the STY1 block; 6 (mcx6): + the definition edits after the clock, the mcx6 story gates at the end of the STY1 block; 5 (ui2 t06): + the DISABLE_RETREAT switches at the end of the STY1 block; 4 (STY1 lane B): + the story rule gates / tutorial state / reinforcement switches
 // "story.lua" (write_scripts): 1 galactic sets, 2 + the tactical set, 3 = 2 (it followed kStorySaveVersion), 4 (q6 t19):
 // each script's Lua state is a script block (alamo/lua/script_save.hpp, LUA_SAVE.md §2) instead of a bare LuaVm image.
 constexpr uint32_t kStoryScriptsVersion = 4;
@@ -2418,9 +2492,11 @@ std::string StorySession::save_blocker() const {
 void StorySession::write(ByteWriter& w) const {
     w.u32(kStorySaveVersion);
     w.u64(frame_).f64(seconds_);
-    // v6 (mcx6): the RANDOM_STORY counter and the plot definition edits, replayed before the plot sets are checked.
+    // v6 (mcx6): the RANDOM_STORY counter and the plot definition edits (v8: + each one's tactical flag, then the
+    // RANDOM_STORY stream), applied by read() once the save passed its checks.
     w.u32(random_story_count_).u32(static_cast<uint32_t>(def_edits_.size()));
-    for (const DefinitionEdit& e : def_edits_) w.u8(e.kind).u32(e.set).str(e.a).str(e.b);
+    for (const DefinitionEdit& e : def_edits_) w.u8(e.kind).u32(e.set).str(e.a).str(e.b).boolean(e.tactical);
+    random_story_rng_.write(w);
     // Plot sets: identity (checked on read), poll state, fired-log cursor, the StoryModel.
     w.u32(static_cast<uint32_t>(sets_.size()));
     for (const auto& sp : sets_) {
@@ -2511,7 +2587,8 @@ bool StorySession::read(ByteReader& r) {
     const double seconds = r.f64();
     uint32_t random_story_count = 0;
     std::vector<DefinitionEdit> def_edits;
-    if (version >= 6) {  // mcx6: replay the definition edits on the freshly started sets (they add plots: counts below)
+    SimRng random_story_rng;
+    if (version >= 6) {  // mcx6: the definition edits, applied below once every check passed (they add plots: counts)
         random_story_count = r.u32();
         const uint32_t n = read_count(r);
         for (uint32_t i = 0; i < n && r.ok(); ++i) {
@@ -2520,15 +2597,58 @@ bool StorySession::read(ByteReader& r) {
             e.set = r.u32();
             e.a = r.str();
             e.b = r.str();
+            if (version >= 8) e.tactical = r.boolean();
+            if (e.kind > 1) r.fail();
             def_edits.push_back(std::move(e));
         }
+        if (version >= 8) {
+            if (!random_story_rng.read(r)) return false;
+        } else if (random_story_count != 0) {
+            random_story_rng.seed(kRandomStorySalt ^ random_story_count);  // [port] older saves drew the free RNG
+        }
         if (!r.ok()) return false;
-        // A session whose definitions already hold these edits (the save was read into the session that wrote it)
-        // keeps them; a freshly started one replays them in order.
-        if (def_edits_ != def_edits) {
-            if (!def_edits_.empty()) return false;
-            for (const DefinitionEdit& e : def_edits)
-                if (!apply_definition_edit(e)) return false;
+    }
+    // The edits to undo and to apply: the session's current ones are replaced by the save's. Galactic and tactical edits
+    // change different plot sets, so each group keeps its own order. Tactical ones apply only to an attached tactical set
+    // (pass 2 of a battle load; pass 1 keeps them for it).
+    std::vector<size_t> cur_g, cur_t, sav_g, sav_t;
+    for (size_t i = 0; i < def_edits_.size(); ++i) (def_edits_[i].tactical ? cur_t : cur_g).push_back(i);
+    for (size_t i = 0; i < def_edits.size(); ++i) (def_edits[i].tactical ? sav_t : sav_g).push_back(i);
+    const bool tac_attached = tactical_ && tactical_->set;
+    const size_t applied_t = tac_attached ? std::min(tactical_applied_, cur_t.size()) : 0;
+    size_t keep_g = 0, keep_t = 0;  // common prefixes (already applied, kept)
+    while (keep_g < cur_g.size() && keep_g < sav_g.size() && def_edits_[cur_g[keep_g]] == def_edits[sav_g[keep_g]]) ++keep_g;
+    while (keep_t < applied_t && keep_t < sav_t.size() && def_edits_[cur_t[keep_t]] == def_edits[sav_t[keep_t]]) ++keep_t;
+    std::vector<std::pair<uint32_t, int64_t>> plot_delta;  // plot set number -> plots added (set order of first use)
+    auto add_delta = [&plot_delta](uint32_t set, int64_t d) {
+        for (auto& [num, v] : plot_delta)
+            if (num == set) {
+                v += d;
+                return;
+            }
+        plot_delta.emplace_back(set, d);
+    };
+    auto delta_of = [&plot_delta](uint32_t set) {
+        for (const auto& [num, v] : plot_delta)
+            if (num == set) return v;
+        return int64_t{0};
+    };
+    for (size_t i = keep_g; i < cur_g.size(); ++i)
+        if (def_edits_[cur_g[i]].kind == 0) add_delta(def_edits_[cur_g[i]].set, -1);
+    for (size_t i = keep_g; i < sav_g.size(); ++i) {
+        const DefinitionEdit& e = def_edits[sav_g[i]];
+        if (e.kind != 0) continue;
+        bool known = false;
+        for (const auto& sp : sets_) known = known || sp->number == e.set;
+        if (!known) return false;  // a RANDOM_STORY plot of a set this session does not have
+        add_delta(e.set, 1);
+    }
+    int64_t tac_delta = 0;
+    if (tac_attached) {
+        for (size_t i = keep_t; i < applied_t; ++i) tac_delta -= def_edits_[cur_t[i]].kind == 0 ? 1 : 0;
+        for (size_t i = keep_t; i < sav_t.size(); ++i) {
+            if (def_edits[sav_t[i]].set != tactical_->set->number) return false;
+            tac_delta += def_edits[sav_t[i]].kind == 0 ? 1 : 0;
         }
     }
     struct SetIn {
@@ -2551,7 +2671,8 @@ bool StorySession::read(ByteReader& r) {
         sets[i].fired_seen = r.u64();
         const uint32_t len = r.u32();
         sets[i].model = r.raw(len);
-        if (!r.ok() || player != s.player || number != s.number || file != s.file || plots != s.model.plot_count() ||
+        if (!r.ok() || player != s.player || number != s.number || file != s.file ||
+            static_cast<int64_t>(plots) != static_cast<int64_t>(s.model.plot_count()) + delta_of(s.number) ||
             scripts != s.scripts.size())
             return false;
     }
@@ -2652,7 +2773,8 @@ bool StorySession::read(ByteReader& r) {
             if (tactical_) {  // pass 2: the rebuilt battle's tactical set must be the saved one
                 const Set* s = tactical_->set.get();
                 if (!s || s->player != tac_id.player || s->number != tac_id.number || s->file != tac_id.file ||
-                    plots != s->model.plot_count() || scripts != s->scripts.size())
+                    static_cast<int64_t>(plots) != static_cast<int64_t>(s->model.plot_count()) + tac_delta ||
+                    scripts != s->scripts.size())
                     return false;
             }
         }
@@ -2677,6 +2799,26 @@ bool StorySession::read(ByteReader& r) {
     if (!r.ok() || !r.done()) return false;
     if (tactical_ && (!has_tac || has_set != (tactical_->set != nullptr) || has_own != (tactical_->own_bridge != nullptr)))
         return false;  // a battle the save does not have, or another tactical story
+    // mcx6: every check passed - the session's definition edits become the save's (the differing ones undone newest first,
+    // then the save's applied in order), before the models read their state.
+    {
+        std::vector<std::vector<EditChange>> undo(def_edits.size());
+        if (tac_attached)
+            for (size_t i = applied_t; i-- > keep_t;) undo_definition_edit(def_edits_[cur_t[i]], def_undo_[cur_t[i]]);
+        for (size_t i = cur_g.size(); i-- > keep_g;) undo_definition_edit(def_edits_[cur_g[i]], def_undo_[cur_g[i]]);
+        for (size_t i = 0; i < keep_g; ++i) undo[sav_g[i]] = std::move(def_undo_[cur_g[i]]);
+        for (size_t i = 0; i < keep_t; ++i) undo[sav_t[i]] = std::move(def_undo_[cur_t[i]]);
+        bool ok = true;
+        for (size_t i = keep_g; i < sav_g.size() && ok; ++i) ok = apply_definition_edit(def_edits[sav_g[i]], &undo[sav_g[i]]);
+        if (tac_attached)
+            for (size_t i = keep_t; i < sav_t.size() && ok; ++i) ok = apply_definition_edit(def_edits[sav_t[i]], &undo[sav_t[i]]);
+        def_edits_ = std::move(def_edits);
+        def_undo_ = std::move(undo);
+        tactical_applied_ = tac_attached ? sav_t.size() : 0;
+        random_story_count_ = random_story_count;
+        random_story_rng_ = random_story_rng;
+        if (!ok) return false;  // the save was written by this build: an edit that does not apply again is corrupt data
+    }
     // The models last (each StoryModel::read is all-or-nothing; a later model refusing its data leaves the earlier ones
     // loaded - SimHost::load then fails and the session is discarded).
     for (uint32_t i = 0; i < nsets; ++i) {
@@ -2747,8 +2889,6 @@ bool StorySession::read(ByteReader& r) {
     autoresolve_planets_ = std::move(autoresolve_planets);
     comp_local_ = std::move(comp[0]);  // mcx6 t03
     comp_other_ = std::move(comp[1]);
-    random_story_count_ = random_story_count;  // mcx6
-    def_edits_ = std::move(def_edits);
     gates_ = std::move(sty1.gates);  // STY1 lane B (defaults for a version-3 save)
     tutorial_ = std::move(sty1.tutorial);
     reinforce_off_ = std::move(sty1.reinforce_off);

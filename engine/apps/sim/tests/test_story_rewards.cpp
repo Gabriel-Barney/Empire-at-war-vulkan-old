@@ -22,6 +22,7 @@
 #include "alamo/core/host_fs.hpp"
 #include "alamo/core/log.hpp"
 #include "alamo/galactic/campaign.hpp"
+#include "alamo/galactic/conflicts.hpp"
 #include "alamo/galactic/galactic_rules.hpp"
 #include "alamo/jobs/job_system.hpp"
 #include "alamo/objects/game_object_types.hpp"
@@ -395,6 +396,10 @@ static std::string mcx6_plot() {
     p += ev("Pick", "PICK_PLANET", {"FILTER_ENEMY_ONLY", "placeholder_x"});
     p += ev("Use_Pick", "STATISTIC_CHANGE", {"CREDIT_VALUE", "77", "Placeholder_X"}, "Pick");
     p += ev("Pick_None", "PICK_PLANET", {"FILTER_ENEMY_ONLY"});  // P2 missing: silent
+    // mcx6 review (§1.16): a matching ENTRY of an event's planet-name list is replaced too (separators kept).
+    p += " <Event Name=\"Far\"><Event_Type>STORY_ELAPSED</Event_Type><Event_Param1>99999</Event_Param1></Event>\n";
+    p += " <Event Name=\"List_Target\"><Event_Type>STORY_ENTER</Event_Type><Event_Param1>PlanetA, placeholder_x PlanetB</Event_Param1>"
+         "<Prereq>Far</Prereq></Event>\n";
     // STATISTIC_CHANGE: political control and max starbase level of PlanetA; no planet at all: logged.
     p += ev("Pol_A", "STATISTIC_CHANGE", {"POLITICAL_CONTROL", "3", "PlanetA"});
     p += ev("Sb_A", "STATISTIC_CHANGE", {"MAX_STARBASE_LEVEL", "2", "PlanetA"});
@@ -458,6 +463,16 @@ static void test_mcx6_rewards() {
         };
         // PICK_PLANET + STATISTIC_CHANGE CREDIT_VALUE through the substituted placeholder.
         CHECK(logged("Replacing all instances of PLACEHOLDER_X with planet PlanetD") == 1);
+        // ... with retail's per-replacement lines (the list entry first, then the base's Reward_Param).
+        CHECK(logged("EVENT List_Target, replacing placeholder_x with PlanetD") == 1);
+        CHECK(logged("EVENT Use_Pick, Param 3, replacing Placeholder_X with PlanetD") == 1);
+        {
+            bool listed = false;
+            for (uint32_t pi = 0; pi < ss->model(0).plot_count(); ++pi)
+                for (const lua::StoryEventDef& e : ss->model(0).plot(pi).events)
+                    if (e.name == "List_Target") listed = !e.event_params.empty() && e.event_params[0].text == "PlanetA, PlanetD PlanetB";
+            CHECK(listed);
+        }
         CHECK(gs->planets()[rD].base_value == 77);
         CHECK(ss->definition_edits().size() >= 1 && ss->definition_edits()[0].kind == 1 && ss->definition_edits()[0].b == "PlanetD");
         // STATISTIC_CHANGE POLITICAL_CONTROL / MAX_STARBASE_LEVEL; none: logged.
@@ -534,9 +549,113 @@ static void test_mcx6_rewards() {
                 for (const lua::StoryEventDef& e : s2->model(0).plot(p).events)
                     if (e.name == "Use_Pick") substituted = e.reward_params.size() > 2 && e.reward_params[2].text == "PlanetD";
             CHECK(substituted);
+            // mcx6 review: the RANDOM_STORY stream is saved state - the next generated plot is the same in the writer and in
+            // the loaded session (it drew the free RNG before, which a load does not restore).
+            CHECK(ss->model(0).trigger_event_by_name("Random") == 1 && s2->model(0).trigger_event_by_name("Random") == 1);
+            CHECK(ss->random_story_count() == 2 && s2->random_story_count() == 2);
+            CHECK(ss->definition_edits().size() == 3 && s2->definition_edits() == ss->definition_edits());
+            // A read replaces the session's edits with the save's: the writer, one RANDOM_STORY plot further on, reads its
+            // earlier save - the second plot is undone and the state hashes as when it was saved.
+            ByteReader back(w1.bytes());
+            CHECK(ss->read(back));
+            CHECK(ss->model(0).plot_count() == plots_before + 1 && ss->random_story_count() == 1 && ss->definition_edits().size() == 2);
+            StateHasher h3;
+            ss->hash(h3);
+            CHECK(h3.digest() == h1.digest());
         }
         std::printf("  mcx6 rewards: workers %d ok, story hash %s\n", workers, buf);
     }
+    std::error_code ec;
+    remove_all_long(root, ec);
+}
+
+// mcx6 review: RANDOM_STORY and PICK_PLANET while a battle is attached change the tactical plot set; the edits are saved
+// with the battle, so a save taken then loads (pass 1 keeps them, the rebuilt battle's pass 2 applies them), and they go
+// with the battle's plot set at its end.
+static void test_mcx6_tactical_edits() {
+    std::unique_ptr<DirectoryProvider> files;
+    TypesWorld w;
+    const fs::path root = make_root("alamo_sim_story_rewards_mcx6_tac", files, w);
+    write_file(root / "Data/XML/Story_Plots_Mcx6_Tac.xml", "<Story_Mode_Plots><Active_Plot>Story_Mcx6_Tac.xml</Active_Plot></Story_Mode_Plots>\n");
+    std::string tac = "<Story>\n <Event Name=\"Begin\"><Event_Type>STORY_ELAPSED</Event_Type><Event_Param1>99999</Event_Param1></Event>\n";
+    tac += ev("Tac_Random", "RANDOM_STORY", {});
+    tac += ev("Tac_Pick", "PICK_PLANET", {"FILTER_ENEMY_ONLY", "tac_place"});
+    tac += ev("Tac_Use", "STATISTIC_CHANGE", {"CREDIT_VALUE", "5", "TAC_PLACE"});
+    write_file(root / "Data/XML/Story_Mcx6_Tac.xml", tac + "</Story>\n");
+    files = std::make_unique<DirectoryProvider>(path_to_utf8(root));  // the provider lists the folder when made
+    jobs::JobSystem js(jobs::JobSystemConfig{0});
+    SimConfig cfg;
+    cfg.seed = 7;
+    cfg.story_crc = true;
+    const GalacticRules rules_keep = rules();
+    StoryStart st;
+    st.files = files.get();
+    st.plot_sets = {{pEmpire, "Story_Plots_Sty1.xml"}};
+    BattleRequest req;
+    req.info.kind = ConflictKind::Space;
+    req.info.planet = rA;
+    req.info.attacker = pEmpire;
+    req.info.defender = pUnder;
+    auto battle_start = [&](objects::ObjectStore& ts) {
+        StoryBattleStart bs;
+        bs.request = &req;
+        bs.store = &ts;
+        bs.local_player = pEmpire;
+        bs.plots_file = "Story_Plots_Mcx6_Tac.xml";
+        return bs;
+    };
+    SimHost host(w.types, js, cfg);
+    GalacticSim* gs = host.start_galactic(rules_keep, setup());
+    CHECK(gs != nullptr);
+    if (!gs) return;
+    host.tick_once();
+    CHECK(host.start_story(st, nullptr) && host.story());
+    StorySession* ss = host.story();
+    if (!ss) return;
+    GameMode& mode = host.start_game(ModeKind::Space);
+    std::vector<std::string> diag;
+    const bool began = ss->begin_battle(battle_start(mode.primary()), host.frame(), &diag);
+    for (const std::string& d : diag) std::printf("  mcx6 tactical diag: %s\n", d.c_str());
+    CHECK(began && ss->tactical_model());
+    if (!ss->tactical_model()) return;
+    lua::StoryModel& tm = *ss->tactical_model();
+    const size_t tac_plots = tm.plot_count(), gal_plots = ss->model(0).plot_count();
+    CHECK(tm.trigger_event_by_name("Tac_Random") == 1 && tm.trigger_event_by_name("Tac_Pick") == 1);
+    CHECK(tm.plot_count() == tac_plots + 1 && ss->model(0).plot_count() == gal_plots && ss->random_story_count() == 1);
+    CHECK(ss->definition_edits().size() == 2);
+    for (const StorySession::DefinitionEdit& e : ss->definition_edits()) CHECK(e.tactical);
+    ByteWriter wr;
+    ss->write(wr);
+    StateHasher h1;
+    ss->hash(h1);
+    {  // a fresh session: pass 1 (no battle yet), the battle rebuilt (resume), pass 2
+        SimHost host2(w.types, js, cfg);
+        GalacticSim* gs2 = host2.start_galactic(rules_keep, setup());
+        CHECK(gs2 != nullptr);
+        if (!gs2) return;
+        host2.tick_once();
+        CHECK(host2.start_story(st, nullptr) && host2.story());
+        StorySession* s2 = host2.story();
+        if (!s2) return;
+        ByteReader pass1(wr.bytes());
+        CHECK(s2->read(pass1) && s2->definition_edits() == ss->definition_edits());
+        GameMode& mode2 = host2.start_game(ModeKind::Space);
+        CHECK(s2->begin_battle(battle_start(mode2.primary()), host2.frame(), &diag) && s2->tactical_model());
+        ByteReader pass2(wr.bytes());
+        CHECK(s2->read(pass2));
+        const lua::StoryModel* t2 = s2->tactical_model();
+        CHECK(t2 && t2->plot_count() == tac_plots + 1 && s2->model(0).plot_count() == gal_plots);
+        bool substituted = false;
+        if (t2)
+            for (uint32_t p = 0; p < t2->plot_count(); ++p)
+                for (const lua::StoryEventDef& e : t2->plot(p).events)
+                    if (e.name == "Tac_Use") substituted = e.reward_params.size() > 2 && e.reward_params[2].text == "PlanetD";
+        CHECK(substituted);
+    }
+    // The battle ends: its tactical edits go with its plot set (the counter stays).
+    ss->end_battle(pEmpire, host.frame());
+    CHECK(ss->definition_edits().empty() && ss->random_story_count() == 1);
+    CHECK(host.end_game_mode());
     std::error_code ec;
     remove_all_long(root, ec);
 }
@@ -663,6 +782,7 @@ int main() {
     story_test::test_sty1_rewards();
     story_test::test_session_rows_have_handlers();
     story_test::test_mcx6_rewards();
+    story_test::test_mcx6_tactical_edits();
     story_test::test_coverage();
     story_test::test_story_ledger();
     if (g_fail) std::printf("FAILED\n");

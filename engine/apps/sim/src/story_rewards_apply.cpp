@@ -124,7 +124,8 @@ bool StorySession::apply_sty1_reward(int32_t plot_player, bool tactical, const s
 
     // ---- galactic (§1) ----
     if (type == "SET_PLANET_RESTRICTED") {
-        // §1.1: P1 planet and P2 flag required; the optional ability-list / look flags (P3, P4) have no port effect [port].
+        // §1.1: P1 planet and P2 flag required; the optional P3 (the all-abilities list) is written below; P4 (the second
+        // planet flag, the "restricted" look) has no port effect [port].
         if (p1.empty() || !given2) {
             note("SET_PLANET_RESTRICTED failed due to incomplete parameters");
             return true;

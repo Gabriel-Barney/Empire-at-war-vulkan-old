@@ -57,6 +57,9 @@ struct ModCheckOptions {
     bool campaigns = true;  // build every campaign's galaxy map
     bool lua = true;        // compile every script and scan it for unbound engine calls
     bool lua_run = true;    // with lua: run each compiling script's main chunk in its own VM
+    // with lua_run: the instruction budget of each main chunk run (lua::LuaVmOptions::script_budget); < 0 = the VM's
+    // default. A chunk stopped by it is a run error and (with compat) a ScriptRunaway issue.
+    int lua_script_budget = -1;
     bool files = true;      // missing files named by list files and object type model tags
     bool xml_tags = true;   // unknown XML tags of the object types and the other databases
     bool submod = true;     // look for the parent of a mod whose own data names missing files

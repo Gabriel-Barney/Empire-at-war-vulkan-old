@@ -67,6 +67,7 @@ constexpr std::pair<std::string_view, ModeGate> kMethodGates[] = {
 // only supported in ..." text. Keyed by the global or method name.
 constexpr std::pair<std::string_view, const char*> kGateTexts[] = {
     {"Find_Nearest", "Find_Nearest - this function may only be used in tactical modes."},
+    {"Promote_To_Space_Cinematic_Layer", "Command only valid in a tactical game."},  // mcx6 (MCX6_T05_CINEMATIC_BINDINGS §3)
     {"Find_Nearest_Space_Field", "Find_Nearest_Space_Field -- may only be used in space mode"},
     {"Are_On_Opposite_Sides_Of_Shield", "Are_On_Opposite_Sides_Of_Shield -- only valid in land mode"},
     {"Spawn_Special_Weapon", "Spawn_Special_Weapon -- only available in space tactical mode"},

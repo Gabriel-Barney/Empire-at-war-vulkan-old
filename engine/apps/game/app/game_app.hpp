@@ -686,7 +686,7 @@ public:
     void story_script_event(const lua::PresentationEvent& e);
     // mcx6 t05 (app_session.cpp; script_cinematics.hpp): the story script's cinematic object calls of the running battle ->
     // GameSession::script_cinematics (hides) and the audio host (arrival / engine fly-by sounds); reset per battle.
-    void script_cinematic_event(const lua::PresentationEvent& e, const lua::PresentationLog& log);
+    void script_cinematic_event(const lua::PresentationEvent& e);
     void script_cinematic_frame();
     const void* cine_battle_ = nullptr;
     uint32_t cine_frame_ = 0;

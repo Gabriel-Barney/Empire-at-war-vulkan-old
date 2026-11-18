@@ -356,10 +356,23 @@ public:
     const StoryNotification* firing_notification() const { return firing_; }
     // mcx6 PICK_PLANET (§1.16, 0x32ae50 -> event vf+0x30): in every plot of this model (active or not, in_table or not),
     // every event whose own reward is not PICK_PLANET gets each of Reward_Param1..3 whose upper-cased text equals
-    // `placeholder_upper` replaced by `planet`; event parameters equal to it (upper-cased) are replaced first [M: retail
-    // does this for the event classes with a planet-name list]. Returns the number of replaced parameters; `log` gets one
-    // line per replacement ("EVENT <name>, Param <i>, replacing <old> with <new>").
-    uint32_t replace_placeholder(std::string_view placeholder_upper, std::string_view planet, std::vector<std::string>* log = nullptr);
+    // `placeholder_upper` replaced by `planet`; first, every entry of its event parameters' name lists (the list parser's
+    // separators: whitespace and commas) that equals it (upper-cased) is replaced in place [M: retail does this for the
+    // event classes with a planet-name list]. Returns the number of replaced entries / parameters; `log` gets one line
+    // per replacement ("EVENT <name>, replacing <old> with <new>" for a list entry, "EVENT <name>, Param <i>, replacing
+    // <old> with <new>" for a reward parameter); `changes` gets each changed parameter's previous text (undo_changes).
+    struct ParamChange {
+        uint32_t plot = 0, event = 0;
+        bool reward = false;  // Reward_Param (else Event_Param)
+        uint32_t index = 0;   // 0-based
+        std::string before;
+    };
+    uint32_t replace_placeholder(std::string_view placeholder_upper, std::string_view planet, std::vector<std::string>* log = nullptr,
+                                 std::vector<ParamChange>* changes = nullptr);
+    // Puts back the parameters `changes` recorded (newest first). Definitions only: no state is touched.
+    void undo_changes(const std::vector<ParamChange>& changes);
+    // Drops the last plot (a plot add_plot appended, mcx6 RANDOM_STORY undone on a load). False when there is none.
+    bool remove_last_plot();
     // L1/S4 wave 2b: player -> faction index (FILTER_* compare factions, SCRIPT_GAPS.md §4.5); unset or < 0 = compare
     // players. objects_within(type name, x, y, z, range): some live object of that type in the mode is strictly
     // within `range` (3D) of the point (COMMAND_UNIT §4.3); unset = the notification's target / distance stand in.

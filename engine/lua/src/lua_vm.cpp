@@ -235,18 +235,29 @@ namespace detail {
 
 namespace {
 void runaway_hook(lua_State* L, lua_Debug* ar) {
-    if (ar->event == LUA_HOOKCOUNT)
-        luaL_error(L, "%s: the script ran its instruction budget without yielding and was stopped", kRunawayTag.data());
+    if (ar->event != LUA_HOOKCOUNT) return;
+    // Spent budgets stay spent: from now on every instruction of this state raises again, until the entry that armed the
+    // budget puts the hook back. So a Lua pcall, or a host call nested in the run that catches the error, cannot keep
+    // an endless loop going.
+    lua_sethook(L, runaway_hook, LUA_MASKCOUNT, 1);
+    luaL_error(L, "%s: the script ran its instruction budget without yielding and was stopped", kRunawayTag.data());
 }
 }  // namespace
 
 BudgetSave arm_script_budget(lua_State* L, int budget) {
-    BudgetSave saved{lua_gethook(L), lua_gethookmask(L), lua_gethookcount(L)};
-    if (budget > 0) lua_sethook(L, runaway_hook, LUA_MASKCOUNT, budget);
+    BudgetSave saved{lua_gethook(L), lua_gethookmask(L), lua_gethookcount(L), false};
+    // A nested entry on a state whose budget is already armed (a host call made from inside a running script) counts
+    // against the outer budget: re-arming would give the outer run a fresh budget after every nested call.
+    if (budget > 0 && saved.hook != runaway_hook) {
+        lua_sethook(L, runaway_hook, LUA_MASKCOUNT, budget);
+        saved.armed = true;
+    }
     return saved;
 }
 
-void restore_script_budget(lua_State* L, const BudgetSave& saved) { lua_sethook(L, saved.hook, saved.mask, saved.count); }
+void restore_script_budget(lua_State* L, const BudgetSave& saved) {
+    if (saved.armed) lua_sethook(L, saved.hook, saved.mask, saved.count);
+}
 
 }  // namespace detail
 
@@ -376,14 +387,9 @@ bool LuaVm::run(std::string_view chunk, std::string_view chunk_name, std::string
     std::string_view data = chunk;
     const std::string name = "@" + std::string(chunk_name);
     int st = lua_load(L, reader_chunk, &data, name.c_str());
-    if (st == 0) {
-        const detail::BudgetSave saved = detail::arm_script_budget(L, impl_->options.script_budget);
-        st = lua_pcall(L, 0, 0, 0);
-        detail::restore_script_budget(L, saved);
-    }
+    if (st == 0) st = protected_call(L, 0, 0);
     if (st != 0) {
         const char* m = lua_tostring(L, -1);
-        if (m && detail::is_runaway_error(m)) ++impl_->runaways;
         if (err) *err = m ? m : "error";
         lua_pop(L, 1);
         return false;
@@ -399,12 +405,9 @@ bool LuaVm::require(std::string_view name, std::string* err) {
     lua_pushstring(L, "require");
     lua_rawget(L, LUA_GLOBALSINDEX);
     lua_pushlstring(L, name.data(), name.size());
-    const detail::BudgetSave saved = detail::arm_script_budget(L, impl_->options.script_budget);
-    const int st = lua_pcall(L, 1, 0, 0);
-    detail::restore_script_budget(L, saved);
+    const int st = protected_call(L, 1, 0);
     if (st != 0) {
         const char* m = lua_tostring(L, -1);
-        if (m && detail::is_runaway_error(m)) ++impl_->runaways;
         if (err) *err = m ? m : "error";
         lua_pop(L, 1);
         return false;
@@ -424,12 +427,9 @@ bool LuaVm::call(std::string_view global_function, std::string* err) {
         if (err) *err = std::string(global_function) + " is not a global function";
         return false;
     }
-    const detail::BudgetSave saved = detail::arm_script_budget(L, impl_->options.script_budget);
-    const int st = lua_pcall(L, 0, 0, 0);
-    detail::restore_script_budget(L, saved);
+    const int st = protected_call(L, 0, 0);
     if (st != 0) {
         const char* m = lua_tostring(L, -1);
-        if (m && detail::is_runaway_error(m)) ++impl_->runaways;
         if (err) *err = m ? m : "error";
         lua_pop(L, 1);
         return false;

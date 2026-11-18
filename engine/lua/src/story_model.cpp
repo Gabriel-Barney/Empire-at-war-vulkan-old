@@ -1094,25 +1094,70 @@ void StoryModel::dispatch_in(uint32_t p, const std::string& type, const StoryNot
     }
 }
 
-uint32_t StoryModel::replace_placeholder(std::string_view placeholder_upper, std::string_view planet, std::vector<std::string>* log) {
+uint32_t StoryModel::replace_placeholder(std::string_view placeholder_upper, std::string_view planet, std::vector<std::string>* log,
+                                         std::vector<ParamChange>* changes) {
     uint32_t n = 0;
-    auto replace = [&](const StoryEventDef& ev, StoryParam& prm, int32_t index) {
-        if (prm.text.empty() || ascii_upper(prm.text) != placeholder_upper) return;
-        if (log) {
-            log->push_back(index < 0 ? "EVENT " + ev.name + ", replacing " + prm.text + " with " + std::string(planet)
-                                     : "EVENT " + ev.name + ", Param " + std::to_string(index) + ", replacing " + prm.text +
-                                           " with " + std::string(planet));
-        }
-        prm.text = std::string(planet);
-        ++n;
-    };
-    for (StoryPlot& plot : plots_)
-        for (StoryEventDef& ev : plot.events) {
+    const std::string with(planet);
+    for (uint32_t p = 0; p < plots_.size(); ++p)
+        for (uint32_t e = 0; e < plots_[p].events.size(); ++e) {
+            StoryEventDef& ev = plots_[p].events[e];
             if (ev.reward_type == "PICK_PLANET") continue;
-            for (StoryParam& prm : ev.event_params) replace(ev, prm, -1);
-            for (size_t i = 0; i < ev.reward_params.size() && i < 3; ++i) replace(ev, ev.reward_params[i], static_cast<int32_t>(i + 1));
+            // The planet-name lists (0x45def0 / 0x45e230 / 0x45e360): each matching entry, separators kept.
+            for (uint32_t i = 0; i < ev.event_params.size(); ++i) {
+                std::string& text = ev.event_params[i].text;
+                const std::string before = text;
+                std::string out;
+                size_t k = 0;
+                while (k < before.size()) {
+                    if (is_sep(before[k])) {
+                        out += before[k++];
+                        continue;
+                    }
+                    size_t end = k;
+                    while (end < before.size() && !is_sep(before[end])) ++end;
+                    const std::string_view entry = std::string_view(before).substr(k, end - k);
+                    if (ascii_upper(entry) == placeholder_upper) {
+                        if (log) log->push_back("EVENT " + ev.name + ", replacing " + std::string(entry) + " with " + with);
+                        out += with;
+                        ++n;
+                    } else {
+                        out += entry;
+                    }
+                    k = end;
+                }
+                if (out == before) continue;
+                if (changes) changes->push_back({p, e, false, i, before});
+                text = std::move(out);
+            }
+            // The base 0x45db20: Reward_Param1..3, whole text.
+            for (uint32_t i = 0; i < ev.reward_params.size() && i < 3; ++i) {
+                StoryParam& prm = ev.reward_params[i];
+                if (prm.text.empty() || ascii_upper(prm.text) != placeholder_upper) continue;
+                if (log) log->push_back("EVENT " + ev.name + ", Param " + std::to_string(i + 1) + ", replacing " + prm.text + " with " + with);
+                if (changes) changes->push_back({p, e, true, i, prm.text});
+                prm.text = with;
+                ++n;
+            }
         }
     return n;
+}
+
+void StoryModel::undo_changes(const std::vector<ParamChange>& changes) {
+    for (auto it = changes.rbegin(); it != changes.rend(); ++it) {
+        if (it->plot >= plots_.size() || it->event >= plots_[it->plot].events.size()) continue;
+        StoryEventDef& ev = plots_[it->plot].events[it->event];
+        std::vector<StoryParam>& list = it->reward ? ev.reward_params : ev.event_params;
+        if (it->index < list.size()) list[it->index].text = it->before;
+    }
+}
+
+bool StoryModel::remove_last_plot() {
+    if (plots_.empty()) return false;
+    plots_.pop_back();
+    if (script_vms_.size() > plots_.size()) script_vms_.resize(plots_.size());
+    if (table_replaced_.size() > plots_.size()) table_replaced_.resize(plots_.size());
+    build_plot_order();
+    return true;
 }
 
 uint32_t StoryModel::dispatch(std::string_view type_in, const StoryNotification& n) {

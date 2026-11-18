@@ -297,6 +297,23 @@ void test_fake_install() {
         CHECK(!alamo::game::check_mod_data(foc.string(), args, off).shaders.fx_prebuild.ran);
         CHECK(!alamo::game::check_mod_data(foc.string(), {}, o).shaders.fx_prebuild.ran);  // no mod: no prebuild
     }
+    {  // mcx6 t08: a main chunk that never ends is stopped by the runaway guard: a run error and a ScriptRunaway issue
+        const fs::path mod4 = root / "Mods" / "MC4";
+        write_file(mod4 / "Data/Scripts/Story/MC4_Spin.lua", "mc4_spins = 0\nwhile true do mc4_spins = mc4_spins + 1 end\n");
+        alamo::game::ModCheckOptions o;
+        o.campaigns = o.files = o.xml_tags = o.submod = o.shaders = false;
+        o.lua_script_budget = 100000;
+        const ModCheckReport r = alamo::game::check_mod_data(foc.string(), {"MODPATH=" + mod4.string()}, o);
+        CHECK(r.loaded && has(r.lua_run_errors, "MC4_SPIN.LUA") && has(r.lua_run_errors, "script_runaway"));
+        size_t runaways = 0;
+        for (const alamo::CompatIssue& i : r.issues.issues())
+            if (i.kind == alamo::IssueKind::ScriptRunaway) {
+                ++runaways;
+                CHECK(upper(i.subject).find("MC4_SPIN.LUA") != std::string::npos && i.layer == 0 &&
+                      i.severity == alamo::IssueSeverity::Warning);
+            }
+        CHECK(runaways == 1 && r.issues.count(alamo::IssueKind::ScriptRunaway) == 1);
+    }
     {  // not a folder: load fails, reported as one error
         const ModCheckReport r = alamo::game::check_mod_data((root / "no_such_dir").string(), {});
         CHECK(!r.loaded && !r.error.empty() && r.error_count() == 1);

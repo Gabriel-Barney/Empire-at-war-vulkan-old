@@ -199,12 +199,14 @@ void TacticalBattle::sp_debris_expire(TacticalMode& mode, SimRng& rng, const Deb
 
 void TacticalBattle::sp_activate(const TacticalMode& mode, SimRng& rng, size_t index) {
     const objects::ObjectStore& st = mode.primary();
-    sp_rebalance(mode, rng, st.type(st.find(sp_spawners_[index].id)), -1.0f);
+    sp_rebalance(mode, rng, st.type(st.find(sp_spawners_[index].id)), -1.0f, false);
 }
 
-uint32_t TacticalBattle::sp_rebalance(const TacticalMode& mode, SimRng& rng, objects::TypeIndex type, float chance) {
+uint32_t TacticalBattle::sp_rebalance(const TacticalMode& mode, SimRng& rng, objects::TypeIndex type, float chance, bool include_off) {
     // 0x5310b0: decide every spawner of this type at once. Undecided ones become off (pool U), active ones form pool A;
-    // T = int(N x chance) (chance > 1 = percent); draws pick the ones that change.
+    // T = int(N x chance) (chance > 1 = percent); draws pick the ones that change. SET_SPAWN (include_off) also puts the
+    // spawners already off into U (§1.13: N = on + off), so a higher chance switches them on again; the first-service
+    // activation keeps TRU1's pools (a spawner switched off stays out).
     const objects::ObjectStore& st = mode.primary();
     const objects::GameObjectTypes& types = catalog_->types();
     std::vector<size_t> undecided, active;
@@ -213,6 +215,8 @@ uint32_t TacticalBattle::sp_rebalance(const TacticalMode& mode, SimRng& rng, obj
         if (!st.alive(h) || st.type(h) != type) continue;
         if (sp_spawners_[i].state == -1) {
             sp_spawners_[i].state = 0;
+            undecided.push_back(i);
+        } else if (sp_spawners_[i].state == 0 && include_off) {
             undecided.push_back(i);
         } else if (sp_spawners_[i].state == 1) {
             active.push_back(i);
@@ -241,7 +245,7 @@ uint32_t TacticalBattle::reward_set_spawn(const TacticalMode& mode, SimRng& rng,
     const objects::GameObjectTypes& types = catalog_->types();
     const objects::TypeIndex t = types.resolve_name(key);
     if (t == objects::kNone || t >= types.size() || ascii_upper(types.raw().types().name[t]) != key) return 0;
-    return sp_rebalance(mode, rng, t, chance);
+    return sp_rebalance(mode, rng, t, chance, true);
 }
 
 void TacticalBattle::sp_planet_spawn(const TacticalMode& mode, SimRng& rng) {

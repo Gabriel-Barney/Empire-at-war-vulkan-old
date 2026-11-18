@@ -3685,13 +3685,10 @@ void ObjectBridge::write(ByteWriter& w) const {
     w.u32(static_cast<uint32_t>(ability_signals_.size()));
     for (const auto& [id, n] : ability_signals_) w.i32(id).u32(n);
     // Version 3: the objects with hidden sub-objects (Hide_Sub_Object), id order.
-    uint32_t with_hidden = 0;
-    for (const auto& [id, s] : states_) with_hidden += s.hidden_sub_objects.empty() ? 0u : 1u;
-    w.u32(with_hidden);
-    for (const auto& [id, s] : states_) {
-        if (s.hidden_sub_objects.empty()) continue;
-        w.i32(id).u32(static_cast<uint32_t>(s.hidden_sub_objects.size()));
-        for (const std::string& m : s.hidden_sub_objects) w.str(m);
+    w.u32(static_cast<uint32_t>(hidden_sub_objects_.size()));
+    for (const auto& [id, meshes] : hidden_sub_objects_) {
+        w.i32(id).u32(static_cast<uint32_t>(meshes.size()));
+        for (const std::string& m : meshes) w.str(m);
     }
     // Version 4: the objects Do_End_Cinematic_Cleanup suspended, id order.
     uint32_t suspended = 0;
@@ -3784,7 +3781,9 @@ bool ObjectBridge::read(ByteReader& r) {
         if (!r.ok() || (!ability_signals.empty() && id <= ability_signals.rbegin()->first)) return false;
         ability_signals.emplace(id, k);
     }
-    if (version >= 3) {  // mcx6 t04: hidden sub-objects
+    std::map<ObjectId, std::vector<std::string>> hidden_sub_objects;
+    if (version >= 3) {  // mcx6 t04: hidden sub-objects (their own map; a save written before they moved out of the
+                         // per-object states has the same layout)
         n = r.u32();
         if (!r.ok() || n > r.remaining() / 8) return false;
         ObjectId last = 0;
@@ -3793,7 +3792,7 @@ bool ObjectBridge::read(ByteReader& r) {
             const uint32_t nm = r.u32();
             if (!r.ok() || (i > 0 && id <= last) || nm == 0 || nm > r.remaining() / 4) return false;
             last = id;
-            std::vector<std::string>& v = states[id].hidden_sub_objects;
+            std::vector<std::string>& v = hidden_sub_objects[id];
             for (uint32_t k = 0; k < nm; ++k) v.push_back(r.str());
         }
     }
@@ -3815,7 +3814,22 @@ bool ObjectBridge::read(ByteReader& r) {
     remaining_states_ = std::move(remaining_states);
     reinforcements_ = std::move(reinforcements);
     next_reinforcement_ = next;
+    hidden_sub_objects_ = std::move(hidden_sub_objects);
     return true;
+}
+
+void ObjectBridge::set_sub_object_hidden(ObjectId id, const std::string& mesh_upper, bool hide) {
+    const auto found = hidden_sub_objects_.find(id);
+    if (found == hidden_sub_objects_.end()) {
+        if (hide) hidden_sub_objects_[id].push_back(mesh_upper);
+        return;
+    }
+    std::vector<std::string>& v = found->second;
+    const auto it = std::lower_bound(v.begin(), v.end(), mesh_upper);
+    const bool listed = it != v.end() && *it == mesh_upper;
+    if (hide && !listed) v.insert(it, mesh_upper);
+    else if (!hide && listed) v.erase(it);
+    if (v.empty()) hidden_sub_objects_.erase(found);
 }
 
 bool detail::object_activate_ability(Call& c, ObjectHandle unit, int first, int nargs) {

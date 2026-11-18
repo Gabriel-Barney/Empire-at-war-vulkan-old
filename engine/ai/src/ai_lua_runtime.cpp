@@ -7,6 +7,7 @@
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/lua/ai_bridge.hpp"
+#include "alamo/lua/script_loader.hpp"
 
 namespace alamo::ai {
 
@@ -404,12 +405,15 @@ std::unique_ptr<lua::LuaVm> start_free_store_vm(PlanScriptRuntime& runtime, cons
                                                 lua::AiScriptHost* host, int32_t script_id, bool galactic, int32_t player,
                                                 const std::function<void(lua::LuaVm&)>& before_thread,
                                                 std::vector<std::string>* diagnostics) {
-    const std::string path = "Data\\Scripts\\FreeStore\\" + script + ".lua";
+    // mcx6 t07 (LUA_API.md "Script lookup and require"): a name from XML loads whichever LUA_PATH entry exists first
+    // (NAME.lua then NAME.lc in the install folder, then in each script root in order), .lc included.
+    std::vector<uint8_t> bytes;
+    const std::string path = lua::read_script(files, script, bytes);
     std::string err;
-    bool found = false;
-    std::unique_ptr<lua::LuaVm> vm = runtime.make_vm_from_file(files, script, path, &err, &found);
+    std::unique_ptr<lua::LuaVm> vm =
+        path.empty() ? nullptr : runtime.make_vm(script, std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size()), path, &err);
     if (!vm) {
-        if (diagnostics) diagnostics->push_back(found ? err : path + ": not found");
+        if (diagnostics) diagnostics->push_back(!path.empty() ? err : "Data\\Scripts\\FreeStore\\" + script + ".lua: not found");
         return nullptr;
     }
     lua::attach_ai_host(*vm, host, script_id);

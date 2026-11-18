@@ -61,12 +61,15 @@ private:
 // mcx6 t08: the runaway-script guard (LuaVmOptions::script_budget). A count hook armed on the lua_State that is about
 // to run raises a Lua error tagged kRunawayTag after `budget` VM instructions; the error unwinds to the resume / pcall
 // that started the run (only Lua's own frames: the hook fires inside luaV_execute). Armed around each entry and put
-// back afterwards, so no hook is left on a state between runs (a saved state may not carry one, vm_persist.cpp).
+// back afterwards, so no hook is left on a state between runs (a saved state may not carry one, vm_persist.cpp). An entry
+// nested in a run on the same state (its budget already armed) does not re-arm: it counts against the outer budget. Once
+// a budget is spent the hook raises on every further instruction of that state until the arming entry restores it.
 inline constexpr std::string_view kRunawayTag = "script_runaway";
 struct BudgetSave {
     lua_Hook hook = nullptr;
     int mask = 0;
     int count = 0;
+    bool armed = false;  // this entry armed the budget (restore puts the saved hook back)
 };
 BudgetSave arm_script_budget(lua_State* L, int budget);  // budget <= 0: nothing armed
 void restore_script_budget(lua_State* L, const BudgetSave& saved);

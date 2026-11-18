@@ -635,7 +635,17 @@ static void test_bridges() {
         a.watch_ability(4);
         a.ability_finished(9);
         a.ability_finished(9);
-        a.state(2).hidden_sub_objects = {"GUN", "NEWGUN"};  // mcx6 t04 (bridge save version 3)
+        {  // mcx6 t04 (bridge save version 3): presentation only - no script state entry, no change to the state hash
+            StateHasher before, after;
+            a.hash(before);
+            const size_t states = a.state_count();
+            a.set_sub_object_hidden(2, "NEWGUN", true);
+            a.set_sub_object_hidden(2, "GUN", true);
+            a.set_sub_object_hidden(11, "AXE", true);
+            a.set_sub_object_hidden(11, "AXE", false);  // shown again: no entry left
+            a.hash(after);
+            CHECK(before.digest() == after.digest() && a.state_count() == states && a.hidden_sub_objects(11).empty());
+        }
         a.state(5).end_cinematic_suspended = true;          // mcx6 Do_End_Cinematic_Cleanup (bridge save version 4)
         ByteWriter w;
         a.write(w);
@@ -643,8 +653,11 @@ static void test_bridges() {
         ByteReader r(w.bytes());
         CHECK(b.read(r) && r.done());
         CHECK(b.ability_signals(9) == 2 && b.ability_signals(4) == 0 && b.watch_ability(4) == 0);
-        CHECK(b.find_state(2) && b.find_state(2)->hidden_sub_objects == std::vector<std::string>({"GUN", "NEWGUN"}));
-        CHECK(b.find_state(7) == nullptr || b.find_state(7)->hidden_sub_objects.empty());
+        {
+            const std::span<const std::string> h = b.hidden_sub_objects(2);
+            CHECK(std::vector<std::string>(h.begin(), h.end()) == std::vector<std::string>({"GUN", "NEWGUN"}));
+            CHECK(b.hidden_sub_objects(7).empty() && b.find_state(11) == nullptr);
+        }
         CHECK(b.find_state(5) && b.find_state(5)->end_cinematic_suspended && !b.find_state(2)->end_cinematic_suspended);
         StateHasher ha, hb;
         a.hash(ha);

@@ -1,5 +1,7 @@
 // mcx6 RANDOM_STORY plot builder (docs/re/STORY_REWARDS_GALACTIC.md §1.15; retail builder 0x4bfdc0, trigger 0x4bec90,
-// final event 0x4be420 on the generator object 0x140a2aba0). Every draw is on the free (unsynced) RNG, as in retail.
+// final event 0x4be420 on the generator object 0x140a2aba0). Retail draws every value from its free (unsynced) RNG; the
+// port passes the story session's own saved RANDOM_STORY stream (StorySession::random_story_rng_), so a plot - sim state -
+// comes out the same after a load.
 // [port] choices (listed next to the reward in STORY_REWARDS_GALACTIC.md):
 //   - a draw from an empty pool, or a trigger whose retries all fail, rebuilds the trigger (retail indexes the empty
 //     list / recurses); after kMaxRebuilds rebuilds the trigger is left without parameters (retail would not end);
@@ -16,7 +18,7 @@ namespace alamo::sim {
 
 namespace {
 
-constexpr int32_t kMaxTries = 100;    // the retail retry count (CONSTRUCT_LEVEL, DEPLOY / MOVE)
+constexpr int32_t kMaxTries = 100;    // the retail retry count (CONSTRUCT_LEVEL)
 constexpr int32_t kMaxRebuilds = 64;  // [port] guard
 
 std::string escape(std::string_view s) {
@@ -91,16 +93,9 @@ bool build_trigger(const RandomStoryInput& in, SimRng& rng, Event& ev, std::vect
     } else if (type == "STORY_DESTROY_BASE") {
         ev.params = {rng.range_int(0, 1) == 0 ? "GROUND" : "SPACE"};
     } else if (type == "STORY_DEPLOY" || type == "STORY_MOVE") {
-        // An own hero, then a revealed planet of another owner; DEPLOY wants one the local player owns (100 tries).
+        // An own hero, then a revealed planet of another owner (§1.15: no further owner test for either type).
         if (!pick(in.own_heroes, p1) || in.other_planets.empty()) return false;
-        bool found = false;
-        for (int32_t k = 0; k < kMaxTries && !found; ++k) {
-            const RandomStoryInput::Planet& p = in.other_planets[static_cast<size_t>(draw_index(rng, in.other_planets.size()))];
-            if (type == "STORY_DEPLOY" && p.owner != in.local_player) continue;
-            p2 = p.name;
-            found = true;
-        }
-        if (!found) return false;
+        p2 = in.other_planets[static_cast<size_t>(draw_index(rng, in.other_planets.size()))].name;
         ev.params = {p1, p2};
     } else if (type == "STORY_ACCUMULATE") {
         // The local player's credits (int) + 1000 x Get_Int(10, 30).
@@ -170,7 +165,7 @@ RandomStoryPlot build_random_story(uint32_t k, const RandomStoryInput& in, SimRn
             fin.reward = reward;
             fin.reward_params = {std::to_string(n * 10000)};
         } else {
-            out.log.push_back("Warning! Random story reward " + reward + " unsupported!");
+            out.log.push_back("Random story reward " + reward + " is unknown!");
         }
         if (!fin.reward.empty()) out.log.push_back("Reward type " + fin.reward + ", Param1 " + fin.reward_params.front());
     }

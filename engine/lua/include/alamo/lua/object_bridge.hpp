@@ -208,10 +208,6 @@ struct ScriptObjectState {
     std::string animation;            // Play_Animation (name, loop, index): for the presentation side
     bool animation_loop = false;
     int32_t animation_index = -1;
-    // mcx6 t04: Hide_Sub_Object (STORYB_T17_HIDDEN_UNITS.md §1.1: the named sub-mesh of this object is hidden): the
-    // hidden mesh names, upper case, sorted. Presentation only: drawn by the renderer (render, shadow and selection
-    // passes), saved with the bridge, not in the state hash.
-    std::vector<std::string> hidden_sub_objects;
     std::map<uint8_t, AbilityState> abilities;  // by UnitAbilityType id (OBJECT_TYPES.md §9.1.4)
 };
 
@@ -437,8 +433,19 @@ public:
             it = store.find(it->first) ? std::next(it) : remaining_states_.erase(it);
         for (auto it = ability_signals_.begin(); it != ability_signals_.end();)
             it = store.find(it->first) ? std::next(it) : ability_signals_.erase(it);
+        for (auto it = hidden_sub_objects_.begin(); it != hidden_sub_objects_.end();)
+            it = store.find(it->first) ? std::next(it) : hidden_sub_objects_.erase(it);
     }
     size_t state_count() const { return states_.size(); }
+    // mcx6 t04: Hide_Sub_Object (STORYB_T17_HIDDEN_UNITS.md §1.1: the named sub-mesh of an object is hidden): per object
+    // the hidden mesh names, upper case, sorted. Presentation only: drawn by the renderer (render, shadow and selection
+    // passes), saved with the bridge (version 3 and up), kept apart from the per-object script states so it is not in the
+    // state hash (it adds no ScriptObjectState entry). Empty span: nothing hidden.
+    void set_sub_object_hidden(objects::ObjectId id, const std::string& mesh_upper, bool hide);
+    std::span<const std::string> hidden_sub_objects(objects::ObjectId id) const {
+        const auto it = hidden_sub_objects_.find(id);
+        return it == hidden_sub_objects_.end() ? std::span<const std::string>() : std::span<const std::string>(it->second);
+    }
     // sp3: every object with a script lock or a Divert (ascending id; struct ScriptLockFact below).
     std::vector<ScriptLockFact> script_lock_facts() const;
 
@@ -464,6 +471,7 @@ private:
     std::map<uint32_t, ReinforceState> reinforcements_;
     uint32_t next_reinforcement_ = 1;
     std::map<objects::ObjectId, uint32_t> ability_signals_;  // S7 t15 A1: watched units' signal 0x29 counts
+    std::map<objects::ObjectId, std::vector<std::string>> hidden_sub_objects_;  // mcx6 t04: never empty lists
 };
 
 // sp3 (AI lane): script_movement_locked's inputs for one object - Lock_Current_Orders, and a Divert with its goal. A host

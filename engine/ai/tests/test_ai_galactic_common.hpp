@@ -333,6 +333,7 @@ struct CampaignResult {
 CampaignResult run_synthetic(unsigned threads, int32_t frames);
 std::string golden_text(const CampaignResult& r);
 void test_plan_load_parallel();
+void test_free_store_lc();
 void test_synthetic_campaign();
 std::vector<uint64_t> run_path_world(unsigned threads, int32_t frames, lua::LuaPlayerWorld* story = nullptr);
 void test_path_finder_world();

@@ -5,7 +5,10 @@
 //     is per resume, not per thread;
 //   * a chunk whose main part never ends (run), a global call (call) and a host call through protected_call stop the
 //     same way; budget 0 is no limit;
-//   * no hook is left on the state afterwards: the VM still saves (vm_persist refuses a state with a debug hook).
+//   * no hook is left on the state afterwards: the VM still saves (vm_persist refuses a state with a debug hook);
+//   * a host callback called through protected_call from inside a running script counts against that run's budget, so
+//     an endless loop calling a well-behaved guarded callback stops; a Lua pcall around the spent budget does not keep
+//     the loop going either.
 #include <cstdint>
 #include <cstdio>
 #include <memory>
@@ -103,11 +106,55 @@ void test_host_calls() {
     CHECK(number(*open, "n") == 300000 && open->runaway_count() == 0);
 }
 
+LuaVm* g_nested_vm = nullptr;
+int g_nested_calls = 0;
+int g_nested_failures = 0;
+
+// A host binding that calls back into Lua (Fine) under the guard and swallows an error, as the AI / story hooks do.
+int guarded_callback(lua_State* L) {
+    lua_pushstring(L, "Fine");
+    lua_rawget(L, LUA_GLOBALSINDEX);
+    ++g_nested_calls;
+    if (g_nested_vm->protected_call(L, 0, 0) != 0) {
+        ++g_nested_failures;
+        lua_pop(L, 1);
+    }
+    return 0;
+}
+
+void test_nested() {
+    auto vm = make_vm(100'000);
+    g_nested_vm = vm.get();
+    lua_State* L = vm->state();
+    lua_register(L, "Guarded_Callback", guarded_callback);
+    CHECK(vm->run("fine = 0 function Fine() for i = 1, 10 do fine = fine + 1 end end function Spin() while true do end end",
+                  "nested_defs"));
+    // One callback from a short chunk: it runs and the chunk ends normally.
+    CHECK(vm->run("Guarded_Callback()", "nested_once") && number(*vm, "fine") == 10);
+    // An endless loop calling the guarded callback: the nested calls share the outer budget, so the loop is stopped.
+    std::string err;
+    CHECK(!vm->run("while true do Guarded_Callback() end", "nested_loop", &err) && contains(err, "script_runaway"));
+    CHECK(g_nested_calls > 1 && g_nested_calls < 100'000);
+    // An endless loop around a Lua pcall of a runaway function: the spent budget raises again outside the pcall.
+    err.clear();
+    CHECK(!vm->run("while true do pcall(Spin) end", "pcall_loop", &err) && contains(err, "script_runaway"));
+    // No hook left behind, and the VM still runs scripts afterwards (and saves once the test's C function is gone).
+    CHECK(lua_gethook(L) == nullptr && vm->run("after = 1", "after_runaway") && number(*vm, "after") == 1);
+    lua_pushstring(L, "Guarded_Callback");
+    lua_pushnil(L);
+    lua_rawset(L, LUA_GLOBALSINDEX);
+    alamo::ByteWriter w;
+    vm->write(w);
+    CHECK(vm->save_error().empty());
+    g_nested_vm = nullptr;
+}
+
 }  // namespace
 
 int main() {
     test_threads();
     test_host_calls();
+    test_nested();
     std::printf(g_fail ? "alamo_lua_runaway_tests: %d FAILED\n" : "alamo_lua_runaway_tests: OK\n", g_fail);
     return g_fail ? 1 : 0;
 }

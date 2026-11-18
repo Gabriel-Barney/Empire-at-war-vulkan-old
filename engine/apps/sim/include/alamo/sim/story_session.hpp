@@ -140,6 +140,7 @@
 #include <vector>
 
 #include "alamo/core/parallel.hpp"
+#include "alamo/core/sim_rng.hpp"  // mcx6 RANDOM_STORY stream
 #include "alamo/galactic/campaign.hpp"  // StoryGates (STY1)
 #include "alamo/galactic/galactic_events.hpp"
 
@@ -555,11 +556,15 @@ public:
     // DISABLE_SPECIAL_STRUCTURE act on the current mode: while a battle is attached they go to the same hook (any plot
     // set), after the session checked their required parameters.
     // mcx6 PICK_PLANET / RANDOM_STORY change plot definitions; the session keeps the changes in order (saved, hashed once
-    // any exists) and replays them on load: definition_edits().
+    // any exists) and replays them on load: definition_edits(). One made while a battle is attached changes the battle's
+    // tactical plot set only (`tactical`); it is replayed when a load rebuilds that battle and dropped when the battle
+    // ends. A load replaces the session's edits with the save's (the ones that differ are undone, then the save's
+    // applied), after every other check of the save passed.
     struct DefinitionEdit {
         uint8_t kind = 0;      // 0 = a RANDOM_STORY plot (set, name a, xml b); 1 = a PICK_PLANET substitution (a -> b)
-        uint32_t set = 0;      // plot set number (kind 0)
+        uint32_t set = 0;      // plot set number (kind 0; the tactical set's for a tactical edit)
         std::string a, b;
+        bool tactical = false;  // made while a battle was attached: the tactical plot set's (story save v8)
         friend bool operator==(const DefinitionEdit&, const DefinitionEdit&) = default;
     };
     const std::vector<DefinitionEdit>& definition_edits() const { return def_edits_; }
@@ -713,10 +718,29 @@ private:
     // apply_reward for each reward; definition edits (PICK_PLANET, RANDOM_STORY) and the RANDOM_STORY plot counter.
     std::string reward_firing_planet_;
     std::vector<DefinitionEdit> def_edits_;
+    // What each applied edit changed (parallel to def_edits_; not saved: a load rebuilds it as it applies): a PICK_PLANET
+    // substitution's previous parameter texts, model = the galactic set's index in sets_ or kTacticalModel.
+    struct EditChange {
+        uint32_t model = 0, plot = 0, event = 0, index = 0;
+        bool reward = false;
+        std::string before;
+    };
+    static constexpr uint32_t kTacticalModel = 0xFFFFFFFFu;
+    std::vector<std::vector<EditChange>> def_undo_;
+    size_t tactical_applied_ = 0;  // the tactical edits of def_edits_ (in order) applied to the attached tactical set
     uint32_t random_story_count_ = 0;
+    // mcx6 RANDOM_STORY's own stream (STORY_REWARDS_GALACTIC §1.15 [port]): retail draws its unsynced RNG; the port's
+    // generated plots are sim state (hashed, saved), so they draw from this generator, seeded from the synced RNG's state
+    // (no draw) at the first RANDOM_STORY, saved (story save v8) and hashed with the edits. Unused (and absent from the
+    // hash) until a RANDOM_STORY fires.
+    SimRng random_story_rng_;
     void pick_planet(const std::vector<std::string>& params);
     void random_story(Set& s);
-    bool apply_definition_edit(const DefinitionEdit& e);  // galactic plot sets; false = cannot be applied
+    // Applies one edit (`undo` gets what it changed, `log` PICK_PLANET's "EVENT ..." lines); false = cannot be applied.
+    bool apply_definition_edit(const DefinitionEdit& e, std::vector<EditChange>* undo, std::vector<std::string>* log = nullptr);
+    void undo_definition_edit(const DefinitionEdit& e, const std::vector<EditChange>& undo);
+    void add_definition_edit(DefinitionEdit e, std::vector<std::string>* log = nullptr);  // applied, then kept
+    void drop_tactical_edits();  // the battle's tactical plot set goes
     void sync_gates() { sim_->set_story_gates(gates_); }
     PlanetIndex reward_planet(const std::string& type_name) const;  // first row whose planet type is named so, else invalid
     // One reward of the STY1 families (galactic, tutorial, Underworld rules, tactical); false = not one of them. `tactical`:

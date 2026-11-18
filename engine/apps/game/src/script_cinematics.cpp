@@ -20,12 +20,7 @@ void ScriptCinematics::hyperspace_in(objects::ObjectId object, int32_t delay_fra
     arrivals_.push_back(a);
 }
 
-void ScriptCinematics::end_cinematic_cleanup(std::span<const objects::ObjectId> ids) {
-    cleaned_.insert(ids.begin(), ids.end());
-}
-
 bool ScriptCinematics::hidden(objects::ObjectId id, uint32_t now) const {
-    if (cleaned_.count(id) != 0) return true;
     for (const Arrival& a : arrivals_)
         if (a.id == id) return now < a.show;
     return false;
@@ -42,21 +37,7 @@ void ScriptCinematics::take_arrival_sfx(uint32_t now, std::vector<objects::Objec
                     arrivals_.end());
 }
 
-void ScriptCinematics::reset() {
-    arrivals_.clear();
-    cleaned_.clear();
-}
-
-std::vector<objects::ObjectId> end_cinematic_cleanup_set(std::span<const CleanupCandidate> candidates, int32_t neutral_player,
-                                                         const std::function<bool(objects::ObjectId)>& in_end_cinematic) {
-    std::vector<objects::ObjectId> out;
-    for (const CleanupCandidate& c : candidates) {
-        if (!c.locomotor || c.owner == neutral_player) continue;
-        if (in_end_cinematic && in_end_cinematic(c.id)) continue;  // obj +0x3c9 set: 0x38ed10 leaves it alone
-        out.push_back(c.id);
-    }
-    return out;
-}
+void ScriptCinematics::reset() { arrivals_.clear(); }
 
 int32_t model_emitter_type(std::string_view name) {
     struct Entry {

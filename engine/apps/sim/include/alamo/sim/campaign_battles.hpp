@@ -52,6 +52,10 @@
 #include "alamo/sim/battle_ai.hpp"  // A1 stage 2 tactical AI hookup
 #endif
 
+namespace alamo::lua {
+class ObjectBridge;
+}  // namespace alamo::lua
+
 namespace alamo::sim {
 
 struct CampaignBattleOptions {
@@ -151,9 +155,21 @@ public:
     // by the story and the object scripts: ScriptObjectState::hidden). A const read for the presentation side (model,
     // sound, radar, fog ghost, surface FX, mouse pick); no sim system reads it. False without a battle or a bridge.
     bool script_hidden(objects::ObjectId id) const;
-    // mcx6 t04: the sub-meshes Lua Hide_Sub_Object hid on an object of the running battle (ScriptObjectState::
-    // hidden_sub_objects, upper case). Presentation only; empty without a battle, a bridge or a hidden mesh.
+    // mcx6 t04: the sub-meshes Lua Hide_Sub_Object hid on an object of the running battle (ObjectBridge::
+    // hidden_sub_objects, upper case): the battle's script bridge (story and object scripts), else the tactical AI's
+    // (its plan / free-store VMs) [port: the first bridge with an entry; a mesh hidden by both is listed once].
+    // Presentation only; empty without a battle, a bridge or a hidden mesh.
     std::span<const std::string> hidden_sub_objects(objects::ObjectId id) const;
+    // STY1 t06 / mcx6: the battle rewards of the story (StorySession::set_tactical_reward_hook calls it; public for tests):
+    // CHANGE_OWNER / DESTROY_OBJECT / BOMBARD_DELAY of the tactical plot set and FORCE_RETREAT / SET_HEALTH / SET_SPAWN /
+    // DISABLE_SPECIAL_STRUCTURE of any plot set, on the running battle, Reward_Param1..N as text (the story session checked
+    // the required ones); refusals go to log(). No battle running: nothing.
+    void story_tactical_reward(const std::string& type, const std::vector<std::string>& params);
+    // mcx6 t05: Do_End_Cinematic_Cleanup suspended this object of the running battle (ScriptObjectState::
+    // end_cinematic_suspended of the battle's script bridge, whose unit control applies it): the game hides it for the rest
+    // of the battle. The flag is sim state, saved with the bridge, so the hide survives a load and matches what the sim
+    // suspended. False without a battle or a bridge.
+    bool end_cinematic_hidden(objects::ObjectId id) const;
     const std::vector<std::string>& log() const { return log_; }  // one summary per tactical battle / refusal
     // Playtest QA D1 / V1: TacticalBattle::unit_losses() of the last tactical battle that ended (presentation, not saved).
     std::span<const TacticalBattle::RemovalRecord> last_battle_losses() const { return last_losses_; }
@@ -385,6 +401,9 @@ private:
     // then a SET_TACTICAL_MAP slot of that kind (StorySession::take_tactical_map) replaces the request's map.
     void story_load_map(galactic::BattleRequest& r);
     // --- end S4 ---
+    // mcx6: the battle's Lua object bridges the presentation reads (hidden_sub_objects): the script bridge, then the
+    // tactical AI's when it is another one. Empty without a battle.
+    std::vector<const lua::ObjectBridge*> script_bridges() const;
 #ifdef ALAMO_SIM_HAVE_STORY
     // --- L1/S4 wave 2a story hookup (owner: L1/S4 agent; keep other hooks separate) ---
     // The battle's Lua ObjectBridge for the tactical story VMs (StorySession::begin_battle): abilities = the
@@ -432,10 +451,7 @@ private:
     // No battle running: nothing.
     void story_victory_enable(bool has_param, int32_t value);
     void story_victory(const std::string& faction, bool short_silent);
-    // STY1 t06: the tactical plot set's CHANGE_OWNER / DESTROY_OBJECT / BOMBARD_DELAY rewards (StorySession::
-    // set_tactical_reward_hook, installed with the hooks above) on the running battle; story_sync_switches copies the story's
-    // DISABLE_REINFORCEMENTS switches into the battle every hook. No battle running: nothing.
-    void story_tactical_reward(const std::string& type, const std::vector<std::string>& params);
+    // story_sync_switches copies the story's DISABLE_REINFORCEMENTS switches into the battle every hook.
     void story_sync_switches(const StorySession& s);
 #ifdef ALAMO_LUA_HAVE_FOG
     lua::FogScriptHooks story_fog_;

@@ -1769,7 +1769,9 @@ private:
     void sp_activate(const TacticalMode& mode, SimRng& rng, size_t index);
     // 0x5310b0 for one spawner type: every live spawner of `type` decided, T = int(N x chance) of them on (chance < 0 = the
     // type's Spawn_Indigenous_Units_Chance; > 1 = percent). Returns N. (sp_activate, SET_SPAWN, SET_PLANET_SPAWN.)
-    uint32_t sp_rebalance(const TacticalMode& mode, SimRng& rng, objects::TypeIndex type, float chance);
+    // `include_off`: SET_SPAWN's re-balance (STORY_REWARDS_GALACTIC §1.13: N = on + off, every spawner of the type, the ones
+    // already off join the off pool); false: the first-service activation (TRU1_C_RE §1.2: pool U = the undecided ones).
+    uint32_t sp_rebalance(const TacticalMode& mode, SimRng& rng, objects::TypeIndex type, float chance, bool include_off);
     // mcx6 SET_PLANET_SPAWN reader 0x4b71c0 (§1.8): at the first spawner scan of the battle, each spawn-map entry of the
     // battle planet (ascending key CRC) re-balances the spawner type its key names, before any spawner's first service.
     void sp_planet_spawn(const TacticalMode& mode, SimRng& rng);

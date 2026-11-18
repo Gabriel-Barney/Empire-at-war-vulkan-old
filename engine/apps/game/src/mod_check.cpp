@@ -899,7 +899,7 @@ void binding_findings(const BindingCallMap& globals, const BindingCallMap& metho
 }
 #endif
 
-void check_lua(const GameData& d, ModCheckReport& r, bool run_chunks) {
+void check_lua(const GameData& d, ModCheckReport& r, bool run_chunks, int script_budget) {
 #ifdef ALAMO_GAME_HAVE_LUA_VM
     if (!d.vfs) return;
     lua::LuaHost host;
@@ -944,6 +944,7 @@ void check_lua(const GameData& d, ModCheckReport& r, bool run_chunks) {
         // What loading the script runs: its main chunk (requires, definitions, top-level calls), in a VM of its own as
         // the original gives every script (lua_vm.hpp). No objects, players or session values exist here.
         lua::LuaVmOptions opt;
+        if (script_budget >= 0) opt.script_budget = script_budget;
         const size_t slash = path.rfind('\\');
         opt.script_name = path.substr(slash == std::string::npos ? 0 : slash + 1);
         lua::LuaVm vm(host, opt);
@@ -981,6 +982,7 @@ void check_lua(const GameData& d, ModCheckReport& r, bool run_chunks) {
     (void)d;
     (void)r;
     (void)run_chunks;
+    (void)script_budget;
 #endif
 }
 
@@ -1336,6 +1338,11 @@ void compat_issues_and_grade(ModCheckReport& r) {
         r.issues.add(IssueKind::RewardMissing, IssueSeverity::Info, u.name, u.first_file, u.note, false, layer(u.in_mod));
     for (const TokenGap& t : r.token_coverage.missing)
         r.issues.add(IssueKind::TokenMissing, IssueSeverity::Info, t.token, t.first_file, t.first_equation, false, layer(t.in_mod));
+    // mcx6 t08: a main chunk the runaway guard stopped (LuaVmOptions::script_budget; its error says script_runaway).
+    for (const std::vector<LuaIssue>* list : {&r.lua_run_errors, &r.lua_session_errors})
+        for (const LuaIssue& e : *list)
+            if (e.error.find("script_runaway") != std::string::npos)
+                r.issues.add(IssueKind::ScriptRunaway, IssueSeverity::Warning, e.path, e.path, e.error, false, layer(e.in_mod));
     std::stable_sort(r.retail_equivalent.begin(), r.retail_equivalent.end(),
                      [](const RetailEquivalentFinding& a, const RetailEquivalentFinding& b) {
                          if (a.kind != b.kind) return a.kind < b.kind;
@@ -1445,7 +1452,7 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
     if (options.campaigns) guarded("campaigns", [&] { check_campaigns(d, r); });
     if (options.files) guarded("files", [&] { check_files(d, r); });
     if (options.xml_tags) guarded("xml tags", [&] { check_xml_tags(d, r); });
-    if (options.lua) guarded("lua", [&] { check_lua(d, r, options.lua_run); });
+    if (options.lua) guarded("lua", [&] { check_lua(d, r, options.lua_run, options.lua_script_budget); });
     if (options.shaders && options.fx_prebuild)
         guarded("fx prebuild", [&] { r.shaders.fx_prebuild = prebuild_mod_effects(d, options.fx_cache_dir); });
     if (options.shaders) guarded("shaders", [&] { check_shaders(d, r, options.shader_compile, options.fx_cache_dir); });

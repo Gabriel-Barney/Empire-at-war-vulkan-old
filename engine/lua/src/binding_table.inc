@@ -264,7 +264,7 @@
 {BindingKind::Method, "GameObjectWrapper", "Highlight", 249, BindingEffect::Recorded, "engine/apps/game/app/app_session.cpp"},
 {BindingKind::Method, "GameObjectWrapper", "Highlight_Small", 9, BindingEffect::Recorded, "engine/apps/game/app/app_session.cpp"},
 {BindingKind::Method, "GameObjectWrapper", "Hyperspace_Away", 24, BindingEffect::Full, ""},
-{BindingKind::Method, "GameObjectWrapper", "In_End_Cinematic", 44, BindingEffect::Recorded, "engine/apps/game/app/app_session.cpp"},
+{BindingKind::Method, "GameObjectWrapper", "In_End_Cinematic", 44, BindingEffect::Recorded, "engine/apps/game/src/game_session.cpp"},
 {BindingKind::Method, "GameObjectWrapper", "Invade", 4, BindingEffect::Full, ""},
 {BindingKind::Method, "GameObjectWrapper", "Is_Ability_Active", 44, BindingEffect::Full, ""},
 {BindingKind::Method, "GameObjectWrapper", "Is_Ability_Autofire", 84, BindingEffect::Full, ""},

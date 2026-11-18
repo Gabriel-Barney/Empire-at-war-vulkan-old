@@ -21,6 +21,7 @@ int main(int argc, char** argv) {
     test_budget_membership();  // q6 contrast/budget (§9.5)
     test_contrast_rules();     // q6 contrast/budget (§9.8)
     test_plan_load_parallel();
+    test_free_store_lc();
     test_synthetic_campaign();
     test_path_finder_world();
     test_galactic_clock_phase();  // a2m r4

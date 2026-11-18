@@ -4079,6 +4079,7 @@ std::function<void()> TacticalAiWorld::release_scripts() {
 }
 
 lua::ObjectBridge& TacticalAiWorld::object_bridge() { return impl_->bridge; }
+const lua::ObjectBridge& TacticalAiWorld::object_bridge() const { return impl_->bridge; }
 void TacticalAiWorld::set_global_values(lua::GlobalValueStore* store) { impl_->gv_store = store; }  // Int-final
 void TacticalAiWorld::set_lane_global_overlay(std::vector<GlobalWrite> overlay) { impl_->gv_overlay = std::move(overlay); }
 std::vector<TacticalAiWorld::GlobalWrite> TacticalAiWorld::take_lane_global_writes() {

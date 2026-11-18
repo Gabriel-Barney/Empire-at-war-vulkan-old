@@ -7,8 +7,9 @@
 // (signature "\033Lua"); retail 32-bit bytecode is rejected by a 64-bit VM's header check, which is why the x64 patch
 // ships plain sources (every FoC script in 64Patch.meg / extracted/foc_data_text.zip is text).
 // The AI plan / evaluator discovery lists *.lua only (ai_lua_runtime.hpp), so a plan or evaluator that exists only as .lc
-// is never found. [port] The plan, evaluator and free-store loaders read the discovered / named .lua file itself instead of
-// going through LUA_PATH (retail's require: a same-named file in an earlier directory would shadow it; none in FoC / EaW).
+// is never found. [port] The plan and evaluator loaders read the discovered .lua file itself instead of going through
+// LUA_PATH (retail's require: a same-named file in an earlier directory would shadow it; none in FoC / EaW). Names from XML
+// (the AI free store, story / object / scoring scripts) go through read_script, .lc included.
 #pragma once
 #include <cstdint>
 #include <map>
