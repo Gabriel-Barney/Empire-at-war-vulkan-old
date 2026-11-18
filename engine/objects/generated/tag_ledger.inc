@@ -2502,7 +2502,7 @@
 {"Movie", "Overlay", 0x0, LedgerState::Unread, 0, "", "docs/re/MCX4_PRES_RE_ANSWERS_3.md", 9, 1},
 {"Movie", "Alpha", 0x0, LedgerState::Consumed, 2, "engine/terrain/src/decorations.cpp", "docs/re/DECORATIONS.md", 48, 1},
 {"Movie", "Commandbar_Offset", 0xf, LedgerState::Consumed, 1, "engine/video/src/movie_db.cpp", "docs/re/STRATEGIC_GAPS.md", 1, 1},
-{"Movie", "Pause_Game_While_Playing", 0x0, LedgerState::Unread, 0, "", "docs/re/MCX4_PRES_RE_ANSWERS_3.md", 5, 1},
+{"Movie", "Pause_Game_While_Playing", 0x0, LedgerState::Consumed, 1, "engine/apps/game/app/game_movies.cpp", "docs/re/MCX4_PRES_RE_ANSWERS_3.md", 5, 1},
 {"Movie", "Halt_Game_Music", 0x0, LedgerState::Consumed, 1, "engine/apps/game/app/game_movies.cpp", "docs/re/xml_tags.md", 8, 1},
 {"Movie", "Cannot_Skip", 0x0, LedgerState::Consumed, 1, "engine/video/src/movie_db.cpp", "docs/re/STRATEGIC_GAPS.md", 4, 1},
 {"Priority_Set", "Attack_Priorities", 0x44, LedgerState::Consumed, 1, "engine/tactical/combat/src/tables.cpp", "docs/re/TACTICAL_COMBAT.md", 47, 1},

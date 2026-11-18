@@ -13,7 +13,7 @@ the field belongs to another class that the port reads, `docs/re/XML_FIELD_TABLE
 `stored` tag that a mod sets is an
 honour gap in `alamo_mod_check` report v4. Work order (§7.2): tier 1 with the most corpus mods, then base FoC uses.
 
-Totals: 2866 rows; unread 97, stored 329, consumed 1959, verified 264, retail-unused 141, out-of-scope 70, misfiled 6.
+Totals: 2866 rows; unread 96, stored 329, consumed 1960, verified 264, retail-unused 141, out-of-scope 70, misfiled 6.
 
 ## Per class
 
@@ -40,7 +40,7 @@ Totals: 2866 rows; unread 97, stored 329, consumed 1959, verified 264, retail-un
 | LightningEffect | 19 | 3 | 0 | 16 | 0 | 0 | 0 | 0 |
 | MousePointer | 18 | 3 | 0 | 11 | 0 | 0 | 0 | 4 |
 | TradeRoute | 18 | 5 | 0 | 13 | 0 | 0 | 0 | 0 |
-| Movie | 17 | 3 | 0 | 12 | 2 | 0 | 0 | 0 |
+| Movie | 17 | 2 | 0 | 13 | 2 | 0 | 0 | 0 |
 | Difficulty_Adjustment | 15 | 1 | 0 | 13 | 1 | 0 | 0 | 0 |
 | GraphicDetailLevel | 15 | 0 | 0 | 1 | 0 | 0 | 14 | 0 |
 | HardwareConfiguration | 15 | 1 | 0 | 0 | 0 | 0 | 12 | 2 |
@@ -213,7 +213,6 @@ base-FoC parity gaps as well as mod gaps (`mcx4`).
 | GameObjectType | Dynamic_Transform_Seconds | 0x8 | stored | 5 | docs/re/MCX4_T15_RE_ANSWERS.md |
 | GameObjectType | Dynamic_Transform_Start_Color | 0x11 | stored | 5 | docs/re/MCX4_T15_RE_ANSWERS.md |
 | GameObjectType | Dynamic_Transform_Start_Scale | 0x8 | stored | 5 | docs/re/MCX4_T15_RE_ANSWERS.md |
-| Movie | Pause_Game_While_Playing | 0x0 | unread | 5 | docs/re/MCX4_PRES_RE_ANSWERS_3.md |
 | Tractor_Beam_Attack_Ability | Lightning_Effect_Name | 0x17 | stored | 5 | docs/re/ABILITY_PARTICLES.md |
 | CommandBarComponent | Cross_Fade | 0x50 | unread | 4 | docs/re/MCX4_T14_RE_ANSWERS.md |
 | GameObjectType | Reinforcement_Region_Blob_Name | 0x17 | stored | 4 | docs/re/MCX4_T15_RE_ANSWERS.md |
@@ -717,7 +716,7 @@ Per class: `Tag` (state, consumer files; x = retail-unused, o = out-of-scope, f 
 - **LightningEffect**: `Texture_Repeat` (u), `Texture_Scroll` (u), `Width_Max` (c 1), `Width_Min` (c 1), `Displace` (c 1), `Detail` (c 2), `Color_Start` (c 1), `Color_End` (c 1), `Fadeout_Time_Max` (c 1), `Fadeout_Time_Min` (c 1), `Number_Bolts` (c 1), `Bolt_Creation_Interval_Min` (c 1), `Bolt_Creation_Interval_Max` (c 1), `Radius` (c 1), `Cycles_Per_Distance` (c 1), `Rotations_Per_Second` (c 1), `Update_All` (c 1), `Replace_Faded` (u), `texture_name` (c 1)
 - **MousePointer**: `Base_Texture` (c 1), `Hot_X` (c 1), `Hot_Y` (c 1), `Anim_Frame_Delay` (c 1), `Ability_Name` (f), `Affects_All_Allies` (f), `Space_Upgrade_Type` (c 1), `Land_Upgrade_Type` (c 1), `Apply_To_All_Allies` (f), `Stealth_Color` (c 1), `Stealth_Transition_Time` (c 2), `Required_Corruption_Level` (u), `Transition_Time_In_Secs` (u), `Num_Corruption_Levels_To_Remove` (u), `Corruption_Removal_Cost_Multiplier` (c 1), `Corruption_Removal_Time_In_Secs` (c 1), `Name` (c 42), `Icon_Name` (f)
 - **Move_Action**: `Move_Type` (s), `Move_Speed` (s), `Wait_For_Finish_If_Target_Using_Jetpack` (s), `Move_Animation_Override` (s), `Move_Animation_Type` (s), `Move_Animation_Subindex` (s), `Move_Animation_Speedup` (s), `Move_Min_Distance` (s), `Move_Max_Distance` (s), `Move_Use_Jetpack` (s), `Ability_Name` (c 1), `Ability_Cooldown_Time_In_Secs` (s)
-- **Movie**: `Movie_File` (c 1), `Movie_Start_Frame` (u), `Caption_Frame` (c 1), `Caption_Duration` (c 1), `SFXEvent_Frame` (v 1), `SpeechEvent_Frame` (v 1), `MusicEvent_Frame` (c 1), `Text_Crawl_Name` (c 1), `Text_Crawl_Start_Frame` (c 1), `Text_Crawl_End_Frame` (c 1), `Has_Credits` (c 1), `Overlay` (u), `Alpha` (c 2), `Commandbar_Offset` (c 1), `Pause_Game_While_Playing` (u), `Halt_Game_Music` (c 1), `Cannot_Skip` (c 1)
+- **Movie**: `Movie_File` (c 1), `Movie_Start_Frame` (u), `Caption_Frame` (c 1), `Caption_Duration` (c 1), `SFXEvent_Frame` (v 1), `SpeechEvent_Frame` (v 1), `MusicEvent_Frame` (c 1), `Text_Crawl_Name` (c 1), `Text_Crawl_Start_Frame` (c 1), `Text_Crawl_End_Frame` (c 1), `Has_Credits` (c 1), `Overlay` (u), `Alpha` (c 2), `Commandbar_Offset` (c 1), `Pause_Game_While_Playing` (c 1), `Halt_Game_Music` (c 1), `Cannot_Skip` (c 1)
 - **MusicEvent**: `Fade_In_Seconds` (c 1), `Fade_Out_Previous_Seconds` (c 1), `Loop` (c 3), `MSS_Internal_Loop` (c 1), `Files` (c 1), `Text_ID` (c 1), `Volume_Percent` (c 1)
 - **Neutralize_Hero_Ability**: `Cost_Mod_By_Base_Level` (c 1), `Cost_Mod_By_Previous_Neutralizations` (c 1), `Cost_Mod_By_Planetary_Corruption_Level` (c 1), `General_Minor_Hero_Cost_Mod` (c 1), `General_Major_Hero_Cost_Mod` (c 1), `Owner_Respawn_Time_In_Secs` (c 1), `Target_Respawn_Time_In_Secs` (c 1), `Can_Neutralize_Minor_Heroes` (c 1), `Can_Neutralize_Major_Heroes` (c 1), `Neutralization_Cost_Multiplier` (c 1)
 - **Passability_Color_Settings**: `Color` (c 1)
