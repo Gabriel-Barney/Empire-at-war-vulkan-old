@@ -101,6 +101,9 @@ struct TypeInfo {
     bool planet_destruction = false;     // has a Planet_Destruction_Ability (the galactic super weapon, SG 1.4) [port]
     bool named_hero = false;             // Is_Named_Hero (+0x13)
     bool generic_hero = false;           // Is_Generic_Hero (+0x14)
+    bool prevents_story_autoresolve = false;  // Prevents_Story_Campaign_Autoresolve (+0xA1; MCX4_T09_RE_ANSWERS Q5)
+    bool build_countdown_timer = false;       // Build_Countdown_Timer (+0xC7; Q7, presentation: econ::build_countdown_*)
+    std::string build_speech_countdowns;      // Build_Speech_Countdowns (+0x15C8): the countdown speech event prefix
     // Required_Special_Structures as OR chains (SG 1.3 step 14): `A | B, C` = {{A, B}, {C}}; kNoIndex = an unresolvable
     // name (passes its chain). `required_special_structures` above keeps the flat resolved list (factory count).
     std::vector<std::vector<uint32_t>> required_special_groups;

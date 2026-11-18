@@ -45,6 +45,7 @@
 #pragma once
 #include <cstdint>
 #include <functional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -71,6 +72,12 @@ struct ConflictTypeInfo {
     bool hero = false;                        // Is_Named_Hero
     bool super_killer = false;                // Is_Super_Weapon_Killer [L field name]
     bool prevents_story_autoresolve = false;  // Prevents_Story_Campaign_Autoresolve (MCX4_T09_RE_ANSWERS Q5)
+    std::vector<std::pair<uint8_t, float>> strength_bonus;  // Unit_Strength_* pairs of <Abilities> (Q9; ArCombatant)
+    // mcx4 t05 (MCX4_RE_ANSWERS_TACTICAL §9 / §13): Respawn_Whole_Team_When_Killed (type +0x16) on a company member: its
+    // death kills the whole company (the TRANSPORT branch of 0x48eb10), which then respawns. `company`: the type lists
+    // Company_Units (a galactic transport; Squadron_Units holders take the TEAM branch, which does not read the flag).
+    bool respawn_whole_team = false;
+    bool company = false;
     std::vector<std::pair<uint32_t, int32_t>> members;  // Squadron_Units / Company_Units: (type, count), first-seen order
     int32_t bounty = 0;                       // a2m r2: the type's own bounty, rounded (bounty.hpp type_bounty)
     uint32_t lower_starbase = kNoIndex;       // next lower starbase level type (last name digit - 1) [M]
@@ -135,6 +142,12 @@ bool load_conflict_rules(const FileProvider& provider, const data::GameDatabase&
 // The auto-resolve combatant of one object of type `type` owned by `owner` (BT §4.3): its Squadron_Units / Company_Units
 // members first (count x AI_Combat_Power each), then its own piece unless it is a container in a space battle. Used by
 // ConflictManager::auto_setup and the auto-resolve parity check (bkc1 t08, tests/autoresolve_parity.cpp).
+// mcx4 t05 (docs/re/MCX4_RE_ANSWERS_TACTICAL.md §9 / §13): a company (Company_Units holder: the TRANSPORT branch of
+// 0x48eb10) that survived a battle is lost as a whole when one of its dead members has Respawn_Whole_Team_When_Killed;
+// the battle end then removes it and schedules its respawn. Only a hero member counts (0x3a01f0); squadron holders
+// (TEAM branch) never are.
+bool company_team_lost(const ConflictRules& rules, uint32_t company_type, std::span<const uint32_t> dead_member_types);
+
 ArCombatant make_ar_combatant(const GalacticRules& galactic, const ConflictRules& rules, uint32_t type, int32_t owner,
                               bool space);
 

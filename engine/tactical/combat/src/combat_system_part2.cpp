@@ -1,5 +1,6 @@
 // combat_system: part 2 (bo3 t03 split; shared code in combat_system_internal.hpp).
 #include "alamo/core/profile.hpp"
+#include "alamo/core/x86_int.hpp"
 #include "combat_system_internal.hpp"
 
 namespace alamo::tactical::combat {
@@ -103,6 +104,10 @@ bool CombatSystem::fire_hardpoint(Unit& u, Hardpoint& h, uint32_t frame, SimRng&
     const float damage = (hd.projectile_damage > 0.0f ? hd.projectile_damage : pd.damage) * dscale;
     const uint16_t dtype = hd.damage_type != kNoTypeId ? hd.damage_type : pd.damage_type;
     spawn(u, pd, static_cast<uint32_t>(proj), damage, dtype, muzzle, aim, &t, thp, range, frame);
+    // mcx4 t10 (MCX4_T10_RE_ANSWERS §3): Projectile_Appearance_Delay_Frames holds the new shot until frame + delay (the
+    // projectile service and the sweep skip a projectile while its launch frame >= the frame).
+    if (hd.projectile_appearance_delay_frames > 0)
+        projectiles_.back().spawn_frame = frame + static_cast<uint32_t>(hd.projectile_appearance_delay_frames);
     if (pd.energy_per_shot > 0.0f && has_energy_pool(u)) {
         u.energy = u.energy - pd.energy_per_shot;
         if (u.energy < 0.0f) u.energy = 0.0f;
@@ -342,7 +347,9 @@ bool CombatSystem::lob_turret_aim(Unit& u) {
         pitch = -s.angle * kRadToDeg;
     }
     if (abs_f(yaw) > ud.turret_extent) return false;
-    if (!ud.turret_xy_only && abs_f(pitch) > ud.turret_elevate_extent) return false;
+    // mcx4 t10 (MCX4_T10_RE_ANSWERS §8): the deployed elevation limit while deployed (0x39a390).
+    const float elev = deployed_or_deploying(u) ? ud.deployed_turret_elevate_extent : ud.turret_elevate_extent;
+    if (!ud.turret_xy_only && abs_f(pitch) > elev) return false;
     const float sp = ud.turret_rotate_speed;
     if (!(sp > 0.0f)) {
         u.lob_tpitch = pitch;
@@ -953,7 +960,7 @@ void CombatSystem::detonation_effects(const Projectile& p, Vec3 center, ObjectId
 bool CombatSystem::ion_stun_unit(Unit& v, uint32_t pdesc, uint32_t frame) {
     // IonStunEffect::Apply (0x62b920) [H].
     const ProjectileDesc& pd = data_->projectiles[pdesc];
-    const auto frames = static_cast<int32_t>(static_cast<float>(cfg_.fps) * pd.ion_stun_duration);
+    const auto frames = trunc_i32(static_cast<float>(cfg_.fps) * pd.ion_stun_duration);  // mcx8 t11
     if (frames <= 0 || (v.flags & kUnitLocomotorBusy)) return false;
     float secs = pd.ion_stun_duration;
     if (!pd.ion_stun_stack_duration || v.ion_stun_end <= frame) {
@@ -1182,7 +1189,7 @@ void CombatSystem::death_spawns(Unit& v, uint32_t frame) {
         e.position = v.pos;
         e.facing = v.facing;
         e.respawn = true;
-        e.due_frame = frame + static_cast<uint32_t>(static_cast<float>(cfg_.fps) * vd.tactical_respawn_secs);
+        e.due_frame = frame + static_cast<uint32_t>(trunc_i32(static_cast<float>(cfg_.fps) * vd.tactical_respawn_secs));  // mcx8 t11
         survivor_events_.push_back(e);
     }
     if (vd.destruction_survivors.empty()) return;
@@ -1456,9 +1463,19 @@ DamageResult CombatSystem::take_damage_inner(const DamageRequest& r, uint32_t fr
     // s78n t26.1 (MOVEMENT §3.2.1 item 6): Shielded_Only_When_Deployed gates the absorb on D (0x39a390)
     if (k != kKindBypassShield && (!vd.shielded_only_when_deployed || deployed_or_deploying(v))) {
         const bool can = !r.source_is_projectile || (pd && pd->does_shield_damage);
-        const bool lockout = (v.shield_depleted &&
-                              shield_lockout_active(frame, v.shield_depleted_frame, cfg_.fps, cfg_.depleted_shield_disable_time)) ||
-                             (hooks_ && hooks_->ion_storm_shields_down(v.id, frame));  // L1 systems: ion storm
+        const bool depleted_lockout =
+            v.shield_depleted && shield_lockout_active(frame, v.shield_depleted_frame, cfg_.fps, cfg_.depleted_shield_disable_time);
+        const bool lockout = depleted_lockout || (hooks_ && hooks_->ion_storm_shields_down(v.id, frame));  // L1: ion storm
+        // mcx4 t10 (MCX4_T10_RE_ANSWERS §16, Shield::Absorb 0x549ac0): a hit with damage > 0 on a depleted shield extends
+        // the lockout by int(FPS x Depleted_Shield_Damage_Increment) frames when that is > 0 [M: +0x108 is the lockout
+        // counter; the port moves the depletion frame], clamped at 0.
+        if (can && depleted_lockout && sx > 0.0f) {
+            const int32_t add = trunc_i32(static_cast<float>(cfg_.fps) * cfg_.depleted_shield_damage_increment);
+            if (add > 0) {
+                const int64_t f = static_cast<int64_t>(v.shield_depleted_frame) + add;
+                v.shield_depleted_frame = static_cast<uint32_t>(f < 0 ? 0 : (f > 0xffffffffLL ? 0xffffffffLL : f));
+            }
+        }
         if (can && !lockout && v.shield > 0.0f && sx > 0.0f) {
             absorbed = v.shield < sx ? v.shield : sx;  // min(shield, x)
             v.shield = v.shield - absorbed;
@@ -1666,8 +1683,8 @@ void CombatSystem::infect(Unit& v, int32_t desc, int32_t player, ObjectId source
     v.infect_source = source;
     v.infect_left = 0;
     if (v.infect_desc >= 0)
-        v.infect_left = static_cast<int32_t>(static_cast<float>(cfg_.fps) *
-                                             data_->units[static_cast<size_t>(v.infect_desc)].infection.duration_secs);
+        v.infect_left = trunc_i32(static_cast<float>(cfg_.fps) *
+                                  data_->units[static_cast<size_t>(v.infect_desc)].infection.duration_secs);
     if (v.infect_suspend == 0) v.flags |= kUnitInfected;
 }
 

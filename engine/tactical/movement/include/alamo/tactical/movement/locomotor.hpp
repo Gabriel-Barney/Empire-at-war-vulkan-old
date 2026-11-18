@@ -236,6 +236,8 @@ struct WalkExtras {
     bool container = false;           // s78n t26.5
     std::vector<V2>* relay = nullptr;  // s78n t26.5
     const WalkTransition* wt = nullptr;  // s78n t26 closing review: Walk_Transition clip data (null / !on: none)
+    // mcx4 t11 (MOVEMENT §4.4, 0x41dbb0): FormationMinimumSideError (GC +0x14cc) / FormationMaximumSideError (+0x14d0)
+    float side_error_min = 0.1f, side_error_max = 30.0f;
 };
 
 // s78n t26.4 (MOVEMENT §5.4.1 "How Walk combines" items 1 - 3, 0x61d570): the wanted direction on the top record m - false

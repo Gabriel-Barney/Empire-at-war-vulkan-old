@@ -2561,6 +2561,11 @@ private:
     struct SkIncome {
         bool parsed = false;
         float value = 0.0f, interval = 0.0f, multiplier = 1.0f, additive = 0.0f;
+        // mcx4 t10 (MCX4_T09_RE_ANSWERS Q10 [H]): recipients (Split_Income_With_Allies) and the share mode (0 equal,
+        // 1 Split_Favors_Owner with owner_share = Owner_Income_Percentage, 2 Full_Amount_To_Everyone).
+        bool split = false;
+        uint8_t mode = 0;
+        float owner_share = 0.0f;
     };
     std::vector<SkIncome> sk_income_;
     const SkIncome& sk_income_of(uint32_t type);

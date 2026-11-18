@@ -17,9 +17,12 @@
 //                     dies.
 //   fire (§4.4.1)     each side fires once at a COPY of the other side's vector: per piece p, target j
 //                     maximising (1 - ((R_j - p c_j) / max(R_j, p c_j))^2) x c_j (double, first max wins)
-//                     over categories with R_j > 0 and c_j = contrast(piece type, row j) > 0; d = p c_j x
-//                     bonus (bonus = 1: the planet modifier table 0x374010 is open item 7); a = min(d, R_j);
-//                     R_j -= a; total -= a + (1 - a/d) p. No target: total -= p.
+//                     over categories with R_j > 0 and c_j = contrast(piece type, row j) > 0. Unit strength
+//                     bonus (MCX4_T09_RE_ANSWERS Q9): per firing side a 32-float table, cleared, entry k =
+//                     max(0, factor - 1) over the side's combatants' (bit, factor) pairs; walking the piece's
+//                     own CategoryMask bits upward, b := table[k] + 1 whenever table[k] > b (running compare,
+//                     retail quirk); b != 0 -> p' = b p. d = p' c_j; a = min(d, R_j); R_j -= a; total -= a +
+//                     (1 - a/d) p (p before the bonus). No target: total -= p'.
 //   winner (§4.4.2)   a side facing an unanswerable Super retreats; a retreat flag -> the other side wins;
 //                     else S = sum of the positive entries of each remaining vector; both > 0 and both AI:
 //                     a non-Is_Playable side loses outright; else side 1 wins iff S0 <= S1, an exact tie
@@ -44,6 +47,7 @@
 #include <functional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "alamo/core/sim_crc_fwd.hpp"
@@ -121,6 +125,9 @@ struct ArCombatant {
     bool super = false;           // first member / own type in category "Super"
     bool super_killer = false;    // a member type flagged as Super-weapon killer
     std::vector<ArStarbaseLevel> starbase;  // non-empty: the planet's starbase (space)
+    // Unit_Strength_Category / Unit_Strength_Factor of the representative type's <Abilities> (0x374010): one
+    // (category bit 0..31, factor) pair per set low bit of an ability whose mask and factor are both non-zero.
+    std::vector<std::pair<uint8_t, float>> strength_bonus;
 };
 
 struct ArSideInfo {

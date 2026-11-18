@@ -84,9 +84,11 @@ inline constexpr float kFootApproxStep = 2.0f;  // ApproximationForwardDistance:
 // direction; half extents ha = (hx, hy)) against the stopped rectangle `b`. Per segment the contact radius is rho(mover,
 // cos to the segment direction) + rho(b, cos to b's facing) at both ends, linear in between. Returns the path length to the
 // first contact when that is < max_dist, else -1. `turn_yaw` != kNoFacing: the mover turns in place - one zero-length
-// segment at `pos` with the forward axis dir(turn_yaw) (the caller swells ha toward a square).
+// segment at `pos` with the forward axis dir(turn_yaw) (the caller swells ha toward a square). mcx4 t11: `step` = the
+// approximation's point spacing, GameConstants ApproximationForwardDistance (BKR1_RE_ANSWERS Q5: straight steps of at
+// most that length, at least 0.1).
 float foot_path_contact(V2 pos, std::span<const V2> path, uint32_t next, V2 ha, const FootRect& b, float max_dist,
-                        float turn_yaw = kNoFacing);
+                        float turn_yaw = kNoFacing, float step = kFootApproxStep);
 // MovingVsMoving predictor 0x442540: both movers walked along their polylines in step at their assumed speeds (the
 // effective max speed when facing toward the other party, else the current speed), directional radii with the lane rule,
 // whole frames; true when they touch before `frames` (45; 90 for a crusher pair). With neither moving at the start: the

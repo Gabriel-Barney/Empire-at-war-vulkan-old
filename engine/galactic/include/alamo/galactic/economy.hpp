@@ -291,5 +291,18 @@ float influence_alignment_factor(ForceSide owner, ForceSide planet, float streng
 // Moves control toward target by delta, clamped at the target.
 float political_ramp(float control, float target, float delta);
 
+// ---- build countdown (mcx4 t09, docs/re/MCX4_T09_RE_ANSWERS.md Q7) -------------------------------------------------
+// Presentation of a queue entry whose type has Build_Countdown_Timer (FoC: Death_Star); the build itself runs on the
+// normal production timer. Speech 0x401e50: with r = (int)remaining (truncation) and the Build_Speech_Countdowns
+// prefix, when the remaining time moved from `previous` to `remaining` seconds:
+//   remaining >= 60   when (int)r / 60 + 1 changed: prefix + ((int)r / 60 + 1) + "_Minutes";
+//   10 <= rem < 60    when (int)r / 10 changed:     prefix + (r + 1) + "_Seconds";
+//   below 10          when r changed:               prefix + (r + 1) + "_Seconds".
+// "" = no event this frame (or no prefix). HUD 0x3d2b0 text: (r + 1) / 60 ":" (r + 1) mod 60 (the label and colour are
+// Build_Countdown_Text_ID / _RGBA). [M] the exact compare of the previous value; [port] the seconds are zero-padded
+// to two digits (the format string was not read).
+std::string build_countdown_speech(std::string_view prefix, float previous, float remaining);
+std::string build_countdown_text(float remaining);
+
 }  // namespace econ
 }  // namespace alamo::galactic

@@ -227,6 +227,13 @@ struct TypeSpecial {
     // all its cargo is).
     bool galactic_stealth = false;
     float detection_chance = -1.0f;  // DetectHeroAbility-style Detection_Chance (ability +0x17C), -1 = no detector
+    // mcx4 t06 (MCX4_T09_RE_ANSWERS Q11): the Galactic_Stealth_Ability's Evade_Detection_Chance (+0x178), clamped to
+    // [0, 1] as the activation stores it (0x3a86d0). A team without its own stealth entry takes its first member's
+    // [port, as for the abilities]. FoC: 0.0 everywhere.
+    float evade_detection_chance = 0.0f;
+    // mcx4 t09 (Q6): the Name of every <Abilities> entry, list order (a team without its own: its first member's), for
+    // the Activated_*_Ability_Names match of the galaxy-map ability button.
+    std::vector<std::string> ability_entry_names;
     // GRC 2.3: OR of the spy masks of this type's Initially_Enabled Galactic_Automatic System_Spy_Ability entries (the
     // always-on spies: smugglers, bounty hunters, OLRS, palaces, Bothawui). Derived at load from `abilities`.
     uint32_t auto_spy_mask = 0;
@@ -255,6 +262,19 @@ struct TypeSpecial {
     bool prevents_minor_siphons = false;   // Prevents_Minor_Credit_Siphons (T +0x63; no FoC type sets it)
 };
 
+// mcx4 t09 (docs/re/MCX4_T09_RE_ANSWERS.md Q6): the galaxy-map ability button kind of a type. The kinds are tested in
+// the order 6, 1, 9, 2, 3, 4, 5, 7, 8, 10; the first whose Activated_*_Ability_Names list names one of the type's
+// <Abilities> entries (TypeSpecial::ability_entry_names, case-insensitive) wins: 1 Slice, 2 Sabotage, 3 System_Spy,
+// 4 Neutralize_Hero, 5 Siphon_Credits, 6 Destroy_Planet, 7 Corrupt_Planet, 8 Remove_Corruption, 9 Black_Market,
+// 10 Hack_Super_Weapon. kind -1 = no button; `label` = the text key ("" where it was not traced). Presentation only: no
+// rule or AI reads it. [port] "applies to the planet" (0x2e6fe0 -> 0x37c430) is the name match alone.
+struct ActivatedAbilitySlot {
+    int32_t kind = -1;
+    const char* label = "";
+};
+struct SpecialRules;
+ActivatedAbilitySlot activated_ability_slot_of(const SpecialRules& rules, uint32_t type);
+
 struct SpecialRules {
     std::vector<SpecialAbilityDef> abilities;  // every galactic-relevant <Abilities> entry, type order then list order
     std::vector<SpecialAbilityDef> production; // Reduce_Production_Price / _Time entries (ReducePrice / ReduceTime)
@@ -269,6 +289,10 @@ struct SpecialRules {
     std::string hack_particle;                 // Hack_Super_Weapon_Particle_Effect (presentation)
     std::string sabotage_particle;             // Sabotage_Particle_Effect (presentation)
     std::vector<std::string> activated_black_market, activated_sabotage, activated_corrupt, activated_hack;
+    // mcx4 t09 (MCX4_T09_RE_ANSWERS Q6): the other six Activated_*_Ability_Names lists, read only by the galaxy-map
+    // ability button (GalacticSim::activated_ability_slot).
+    std::vector<std::string> activated_slice, activated_neutralize_hero, activated_siphon_credits, activated_system_spy,
+        activated_destroy_planet, activated_remove_corruption;
 
     const TypeSpecial& type(uint32_t t) const;  // a static default for unknown / missing types
     uint32_t find_item(uint32_t name_crc) const;  // table index (first match), 0xFFFFFFFF if absent (0x48f550)

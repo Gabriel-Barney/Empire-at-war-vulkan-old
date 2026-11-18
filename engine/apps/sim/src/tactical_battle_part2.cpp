@@ -1599,8 +1599,20 @@ void TacticalBattle::finish(int32_t winner, uint8_t victory, int32_t retreated) 
     result_.retreated = retreated;
     result_.destroyed.clear();
     result_.starbase_destroyed = false;
-    for (const Participant& p : parts_) {
-        if (p.built || !p.deployed || p.spawned == 0 || p.alive > 0) continue;  // battle host: pad objects have no galactic object
+    for (uint32_t pi = 0; pi < parts_.size(); ++pi) {
+        const Participant& p = parts_[pi];
+        if (p.built || !p.deployed || p.spawned == 0) continue;  // battle host: pad objects have no galactic object
+        if (p.alive > 0) {
+            // mcx4 t05 (docs/re/MCX4_RE_ANSWERS_TACTICAL.md §9 / §13): a company whose dead members include one with
+            // Respawn_Whole_Team_When_Killed loses the whole team at the battle end (0x48eb10's TRANSPORT branch kills
+            // every active content, then the company), so the galaxy removes it and schedules its respawn.
+            if (p.starbase) continue;
+            std::vector<uint32_t> dead;
+            for (const Unit& u : units_)
+                if (u.participant == pi && !u.alive && !u.retreated) dead.push_back(u.type);
+            if (galactic::company_team_lost(*rules_, p.type, dead)) result_.destroyed.push_back(p.galactic);
+            continue;
+        }
         if (p.starbase) result_.starbase_destroyed = true;
         else result_.destroyed.push_back(p.galactic);
     }

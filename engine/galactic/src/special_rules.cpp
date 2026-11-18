@@ -530,6 +530,12 @@ void load_special_rules(const FileProvider& provider, const data::GameDatabase& 
     if (auto t = g.get("Activated_Sabotage_Ability_Names")) s.activated_sabotage = name_list(*t);
     if (auto t = g.get("Activated_Corrupt_Planet_Ability_Names")) s.activated_corrupt = name_list(*t);
     if (auto t = g.get("Activated_Hack_Super_Weapon_Ability_Names")) s.activated_hack = name_list(*t);
+    if (auto t = g.get("Activated_Slice_Ability_Names")) s.activated_slice = name_list(*t);  // mcx4 t09 (Q6)
+    if (auto t = g.get("Activated_Neutralize_Hero_Ability_Names")) s.activated_neutralize_hero = name_list(*t);
+    if (auto t = g.get("Activated_Siphon_Credits_Ability_Names")) s.activated_siphon_credits = name_list(*t);
+    if (auto t = g.get("Activated_System_Spy_Ability_Names")) s.activated_system_spy = name_list(*t);
+    if (auto t = g.get("Activated_Destroy_Planet_Ability_Names")) s.activated_destroy_planet = name_list(*t);
+    if (auto t = g.get("Activated_Remove_Corruption_Ability_Names")) s.activated_remove_corruption = name_list(*t);
     load_items(provider, out, diagnostics);
 
     // Per-type fields and abilities (type index order; each sub-object element parsed once).
@@ -542,8 +548,19 @@ void load_special_rules(const FileProvider& provider, const data::GameDatabase& 
         for (objects::FieldIndex f : types.get_sub_objects(t, "Abilities")) {
             // OI galactic (STRATEGIC_GAPS 1.4 / 2.2): the galactic stealth / detection / planet destruction entries.
             const std::string_view tag = raw.tag_name(f);
+            {  // mcx4 t09: every entry's Name (Q6)
+                const objects::FieldColumns& fa = raw.fields();
+                for (uint32_t i = 0; i < fa.attr_count[f]; ++i) {
+                    const objects::XmlAttr& at = raw.attributes()[fa.attr_begin[f] + i];
+                    if (ascii_iequals(at.name, "Name")) ts.ability_entry_names.emplace_back(ascii_trim(at.value));
+                }
+            }
             if (ascii_iequals(tag, "Galactic_Stealth_Ability")) {
                 if (parse_ability(raw, f, nullptr).initially_enabled) ts.galactic_stealth = true;
+                const objects::FieldColumns& fc = raw.fields();
+                for (objects::FieldIndex c = f + 1; c < fc.size() && fc.depth[c] > fc.depth[f]; ++c)
+                    if (fc.parent[c] == f && ascii_iequals(raw.tag_name(c), "Evade_Detection_Chance"))
+                        ts.evade_detection_chance = std::clamp(to_f(fc.text[c]), 0.0f, 1.0f);  // Q11: 0x3a86d0 clamps
             } else if (ascii_iequals(tag, "Planet_Destruction_Ability")) {
                 if (t < out.types.size()) out.types[t].planet_destruction = true;
             } else if (ascii_iequals(tag, "Detect_Hero_Ability") || ascii_iequals(tag, "Hero_Detection_Ability")) {  // [M] tag name
@@ -670,7 +687,11 @@ void load_special_rules(const FileProvider& provider, const data::GameDatabase& 
             bool all = true;
             for (uint32_t mt : ts.members) all = all && s.types[mt].galactic_stealth;
             ts.galactic_stealth = all;
+            if (all) ts.evade_detection_chance = s.types[ts.members.front()].evade_detection_chance;  // [port] first member's
         }
+        if (ts.ability_entry_names.empty())  // Q6: 0x2e6fe0 also asks the contained units (member order)
+            for (uint32_t mt : ts.members)
+                for (const std::string& nm : s.types[mt].ability_entry_names) ts.ability_entry_names.push_back(nm);
         const TypeSpecial& m = s.types[ts.members.front()];
         if (ts.abilities.empty() && ts.galab.empty()) {
             ts.abilities = m.abilities;

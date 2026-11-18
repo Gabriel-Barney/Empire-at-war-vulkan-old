@@ -857,6 +857,8 @@ WalkResult MovementSystem::team_walk(Unit& u, uint32_t frame) const {
     WalkExtras x;
     x.container = true;
     x.lane = u.has_goal;
+    x.side_error_min = cfg_.constants.formation_minimum_side_error;  // mcx4 t11
+    x.side_error_max = cfg_.constants.formation_maximum_side_error;
     x.formation_path = form;
     if (form) x.jiggle = u.jiggle;
     if (order_rec && u.formation_speed < 3.0e38f) x.formation = u.formation_speed;

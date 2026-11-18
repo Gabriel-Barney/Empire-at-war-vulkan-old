@@ -304,7 +304,9 @@ void App::show_battle_end(bool dialog) {
     // player's enemies lost: TEXT_SUMMARY_BOUNTY_COLLECTED), each side's lost credit value, the efficiency and the lost
     // named heroes' portraits (5 per side), by the auto-resolve screen's rules (battle_summary.hpp); types costing 0 are
     // not listed (§3.1).
-    const game::BountyTable bounty_table = game::load_bounty_table(data_.db.constants(), data_.types);
+    // mcx4 t09 (A2M_R2_RE_B §2.2): a skirmish battle values its losses by the _MP bounty fields.
+    const bool skirmish = session_ && !session_->spec().skirmish_map.empty();
+    const game::BountyTable bounty_table = game::load_bounty_table(data_.db.constants(), data_.types, skirmish);
     std::vector<game::ArUnitRecord> records;
     game::BattleLosses lost;
     for (const game::BattleLossRecord& d : dead) {
@@ -313,7 +315,7 @@ void App::show_battle_end(bool dialog) {
         r.owner = d.owner;
         r.destroyed = true;
         r.cost = d.type < data_.rules.types.size() ? static_cast<int64_t>(data_.rules.types[d.type].build_cost) : 0;
-        r.bounty = game::type_bounty(bounty_table, data_.types, static_cast<objects::TypeIndex>(d.type));
+        r.bounty = game::type_bounty(bounty_table, data_.types, static_cast<objects::TypeIndex>(d.type), skirmish);
         records.push_back(r);
         if (g && is_named_hero(*g, d.type)) {
             std::vector<std::string>& heroes = d.owner == me ? info.your_heroes : info.enemy_heroes;

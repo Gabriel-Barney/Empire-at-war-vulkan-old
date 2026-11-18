@@ -128,9 +128,10 @@ public:
     void clear_track(ObjectId id);
 
     // OR of the bits of every entry the circle (radius) swept a -> b over absolute frames [t0, t1]
-    // touches. `layer`: tracks of that layer are tested; statics are tested when `with_static`.
+    // touches. `layer`: tracks of that layer are tested; statics are tested when `with_static`, with the circle's radius
+    // grown by `static_bonus` (mcx4 t11: SpaceStaticObstacleAvoidanceBonusDistance in the planner, MOVEMENT §2.2).
     uint32_t query_segment(V2 a, V2 b, float t0, float t1, float radius, uint32_t layer, ObjectId self, bool with_static,
-                           uint32_t now) const;
+                           uint32_t now, float static_bonus = 0.0f) const;
     uint32_t query_point(V2 p, float t, float radius, uint32_t layer, ObjectId self, uint32_t now) const {
         return query_segment(p, p, t, t, radius, layer, self, true, now);
     }

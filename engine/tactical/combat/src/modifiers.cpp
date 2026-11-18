@@ -1,4 +1,5 @@
 #include "alamo/tactical/combat/modifiers.hpp"
+#include "alamo/core/x86_int.hpp"
 
 #include <cmath>
 
@@ -95,7 +96,7 @@ const std::array<ListClamp, kModListCount>& default_list_clamps() { return kDefa
 
 uint32_t expiry_frame(uint32_t now, float seconds, uint32_t fps) {
     if (!(seconds > 0.0f)) return 0;
-    return now + static_cast<uint32_t>(static_cast<int32_t>(static_cast<float>(fps) * seconds + 0.5f));
+    return now + static_cast<uint32_t>(trunc_i32(static_cast<float>(fps) * seconds + 0.5f));
 }
 
 void ModifierSet::insert(ModList list, int32_t category, float value, uint32_t expiry, uint32_t source_crc,

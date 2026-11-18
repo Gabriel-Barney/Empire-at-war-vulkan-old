@@ -372,6 +372,9 @@ std::vector<TypeInfo> extract_type_info(const objects::GameObjectTypes& types, c
         i.piracy_value = types.get_float(t, "Piracy_Value_Credits");
         i.maintenance_cost = types.get_float(t, "Maintenance_Cost");
         i.ai_combat_power = types.columns().ai_combat_power[t];
+        i.prevents_story_autoresolve = types.get_bool(t, "Prevents_Story_Campaign_Autoresolve");  // mcx4 t20
+        i.build_countdown_timer = types.get_bool(t, "Build_Countdown_Timer");  // mcx4 t09 (Q7)
+        i.build_speech_countdowns = std::string(ascii_trim(types.get_string(t, "Build_Speech_Countdowns")));
         i.reduced_by_factories = types.get_bool(t, "Build_Time_Reduced_By_Multiple_Factories");
         i.build_initially_locked = types.get_bool(t, "Build_Initially_Locked");
         i.sliceable = types.get_bool(t, "Build_Can_Be_Unlocked_By_Slicer");

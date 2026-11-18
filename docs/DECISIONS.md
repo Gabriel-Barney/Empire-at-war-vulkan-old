@@ -330,3 +330,13 @@ that the reason is labelled here, that nothing in the engine reads the row, and 
   `Debug_Ground_Structures`, `SFXEvent_Debug_Test_Loop`).
 - **localised splash / credits**: per-language splash screens and menu overlays (`Localized_*`), the Japanese subtitle
   line setting and the credits-screen logos (`Credits_Logo_*`).
+
+## Base-EaW mod heuristic stays a warning; StackTop covers the three-level AOW stack (mcx3 t11, Gabriel, 2026-11-18)
+
+Gabriel, 2026-11-18, up-front answers for the Stage 9 coordinator run (st9-coord), roadmap mcx3 t11:
+- **(a) Keep the `base_eaw_suspect` warning; do not refuse.** Design §5.4 says to refuse a mod whose GameObjectFiles.xml
+  names no FoC-only file and whose scripts call no FoC-only binding. The port refuses only on the hard signs (steamdata
+  tag EAW, t03) and only warns on that heuristic, so a real FoC mod is never refused on a guess.
+- **(b) Conformance mod `StackTop` counts as coverage** for the three-level AOW_Thrawns_Legacy_Compatibility ->
+  Thrawns_Legacy_HD -> 1125571106 clause of the mcx3 exit test, together with the real AOW -> TR stack that resolves on
+  this machine (Thrawns_Legacy_HD is not installed here). No rerun with it installed is needed.

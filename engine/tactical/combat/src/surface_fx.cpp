@@ -12,6 +12,7 @@
 // for land battles only (space: no terrain, surface 0 - the update would only take entries off); instances whose
 // SurfaceFX has no sim term are not kept (they would only repeat the timer zeroing at the same frame).
 #include "alamo/tactical/combat/surface_fx.hpp"
+#include "alamo/core/x86_int.hpp"
 
 #include <cstdlib>
 #include <initializer_list>
@@ -162,7 +163,7 @@ void CombatSystem::surface_fx_step(Unit& u, uint16_t def_index, uint32_t slot, u
     const bool keep_timer = s < 16 && ((kTimerKeepMask >> s) & 1u) != 0;
     if (prev == s) {
         if (is_damage_surface(s) && u.terrain_damage > 0.0f && u.terrain_next <= frame) {
-            u.terrain_next = static_cast<uint32_t>(static_cast<int32_t>(static_cast<float>(cfg_.fps) * u.terrain_delay)) +
+            u.terrain_next = static_cast<uint32_t>(trunc_i32(static_cast<float>(cfg_.fps) * u.terrain_delay)) +
                              u.terrain_next;
             ensure_cache(u);  // the victim's defense / modifiers as they are now (phase A runs after this service)
             DamageRequest r;
@@ -201,7 +202,7 @@ void CombatSystem::surface_fx_step(Unit& u, uint16_t def_index, uint32_t slot, u
         }
     } else if (is_damage_surface(s) && in.terrain_damage > 0.0f) {
         u.terrain_damage = in.terrain_damage;
-        u.terrain_next = static_cast<uint32_t>(static_cast<int32_t>(static_cast<float>(cfg_.fps) * in.terrain_damage_delay)) + frame;
+        u.terrain_next = static_cast<uint32_t>(trunc_i32(static_cast<float>(cfg_.fps) * in.terrain_damage_delay)) + frame;
         u.terrain_delay = in.terrain_damage_delay;
     }
     prev_slot = static_cast<uint8_t>(s);

@@ -1922,6 +1922,26 @@ void test_force_members() {
     // and the orbital pod's members (200) are not walked (A2I_TOKENS_RE §2.2).
     CHECK(galactic_ai_planet_force(sim, ti, 7, 0, true, false, kAllCategories) == 800.0);
     CHECK(galactic_ai_planet_force(sim, ti, 7, 0, true, false, inf) == 800.0);
+    {
+        // mcx8 t08 (docs/re/AI_GALACTIC_TOKENS.md §2 GroundTotalUnnormalized, §7 item 4): the Enemy ground leaf adds, when
+        // its total is > 0, the Potential_Indigenous_Power entries of the planet type whose unit type is affiliated with a
+        // player hostile to Self (here the infantry; the corvette is affiliated with Self's faction only); no category
+        // mask on that term, and the Friendly side never adds it.
+        std::vector<GalacticAiTypeInfo> t3 = tinfo;
+        const uint32_t pt = p7.type;
+        CHECK(pt < t3.size());
+        if (pt < t3.size()) {
+            t3[pt].indigenous_power = {{tInfantry, 1600}, {tCorvette, 25}};
+            const std::vector<uint32_t> corv_aff = rules.types[tCorvette].affiliation;
+            rules.types[tCorvette].affiliation = {sim.players()[0].faction};
+            CHECK(galactic_ai_planet_force(sim, t3, 7, 0, true, false, kAllCategories) == 2400.0);
+            CHECK(galactic_ai_planet_force(sim, t3, 7, 0, true, false, inf) == 2400.0);
+            CHECK(galactic_ai_planet_force(sim, t3, 7, 0, true, false, frig) == 0.0);  // total 0: nothing added
+            CHECK(galactic_ai_planet_force(sim, t3, 7, 1, false, false, kAllCategories) == 800.0);  // Friendly side
+            rules.types[tCorvette].affiliation = corv_aff;
+            CHECK(galactic_ai_planet_force(sim, t3, 7, 0, true, false, kAllCategories) == 2425.0);  // empty list: any
+        }
+    }
     // 0x5f2430: + the starbase's own 600 (space) / the ground structures' own 300 + 1200 (ground; the orbital pod is not
     // a ground structure). The untyped row adds every one; a typed row those whose CategoryMask meets the row (a2i t03 D1,
     // A2F_RE_READS §3.1): the Capital row gets the Capital starbase's 600, the Structure row the barracks and SB2.

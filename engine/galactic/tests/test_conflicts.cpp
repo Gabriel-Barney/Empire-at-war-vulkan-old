@@ -161,6 +161,60 @@ void test_auto_resolve_basic() {
     CHECK(h1.digest() == h2.digest());
 }
 
+std::pair<uint8_t, float> sb(int bit, float factor) { return {static_cast<uint8_t>(bit), factor}; }
+
+// mcx4 t06: the auto-resolve unit strength bonus (docs/re/MCX4_T09_RE_ANSWERS.md Q9).
+// ledger: verifies Ability_Base.Unit_Strength_Category
+// ledger: verifies Ability_Base.Unit_Strength_Factor
+// ArCombatant::strength_bonus holds the (Unit_Strength_Category bit, Unit_Strength_Factor) pairs of the type's abilities.
+void test_auto_resolve_unit_strength() {
+    const ContrastTable ct = make_contrast();
+    AutoResolveConstants k;
+    {  // table entry = max(factor - 1) per bit and side; the firing piece's own CategoryMask picks the entry.
+        AutoResolveInput in;
+        in.space = true;
+        in.attacker = 1;
+        ArCombatant cap = unit(0, 1000.0f, kCatCapital, "Cap");
+        cap.strength_bonus = {sb(1, 1.2f), sb(1, 1.5f), sb(1, 0.5f)};  // bit 1 = Capital: entry 0.5 (factor <= 1 changes nothing)
+        ArCombatant fig = unit(0, 100.0f, kCatFighter, "Fig");  // bit 0: entry 0, no bonus
+        ArCombatant enemy = unit(1, 2000.0f, kCatCapital, "Enemy");
+        enemy.strength_bonus = {sb(0, 3.0f)};  // the other side's pairs do not reach side 0's table
+        in.combatants = {cap, fig, enemy};
+        in.players = {{0, true, true}, {1, true, true}};
+        SimRng rng(7u);
+        const AutoResolveResult r = auto_resolve(in, ct, k, rng);
+        // Cap: p' = 1.5 x 1000 = 1500 at Capital 2000 (c 1): a = 1500, p_left = (1 - 1500/1500) x 1000 = 0.
+        // Fig: no bonus, 100 at the remaining 500 Capital. Totals: 2000 - 1500 - 100.
+        CHECK(r.rem[1][3] == 400.0 && r.rem[1][1] == 400.0);
+    }
+    {  // running compare quirk: entries 0.5 (Fighter) and 1.2 (Infantry); b = 1.5 after bit 0, and 1.2 > 1.5 fails,
+       // so the bonus is 1.5, not 2.2.
+        AutoResolveInput in;
+        in.space = true;
+        in.attacker = 1;
+        ArCombatant a = unit(0, 100.0f, kCatFighter | kCatInfantry, "Mixed");
+        a.strength_bonus = {sb(0, 1.5f), sb(2, 2.2f)};
+        in.combatants = {a, unit(1, 1000.0f, kCatFighter, "Enemy")};
+        in.players = {{0, true, true}, {1, true, true}};
+        SimRng rng(7u);
+        const AutoResolveResult r = auto_resolve(in, ct, k, rng);
+        CHECK(r.rem[1][2] == 850.0 && r.rem[1][1] == 850.0);
+    }
+    {  // no target: the total drops by p' (bonus included). A Structure piece finds no category with R > 0.
+        AutoResolveInput in;
+        in.space = true;
+        in.attacker = 1;
+        ArCombatant a = unit(0, 100.0f, kCatStructure, "Pad");
+        a.strength_bonus = {sb(3, 2.0f)};
+        in.combatants = {a, unit(1, 1000.0f, kCatFighter, "Enemy")};
+        in.players = {{0, true, true}, {1, true, true}};
+        SimRng rng(7u);
+        const AutoResolveResult r = auto_resolve(in, ct, k, rng);
+        CHECK(r.rem[1][2] == 1000.0 && r.rem[1][1] == 800.0);
+    }
+    std::printf("auto-resolve unit strength: per-side max(factor - 1), firer's own categories, running-compare quirk\n");
+}
+
 void test_auto_resolve_rules() {
     const ContrastTable ct = make_contrast();
     AutoResolveConstants k;
@@ -487,6 +541,61 @@ void test_ai_auto_resolve() {
     CHECK(w.digest() == w2.digest());
 }
 
+// mcx4 t05 (docs/re/MCX4_RE_ANSWERS_TACTICAL.md §13): a named hero killed by an auto-resolve or in a fought battle
+// schedules its respawn (Default_Hero_Respawn_Time) at the conflict planet; Respawn_Whole_Team_When_Killed is read into
+// the conflict type info for the tactical battle end.
+void test_hero_respawn_after_battle() {
+    std::printf("  mcx4 t05: hero respawn after battle deaths\n");
+    {  // auto-resolve: four Empire frigates and a starbase crush the Underworld's lone hero corvette.
+        World w({{pEmpire, rB, tFrigate}, {pEmpire, rB, tFrigate}, {pEmpire, rB, tFrigate}, {pEmpire, rB, tFrigate},
+                 {pEmpire, rB, tSB1}, {pUnder, rC, tCorvette}},
+                false);
+        w.rules.special.types.resize(tTypeCount);
+        w.rules.special.types[tCorvette].named_hero = true;
+        w.rules.special.default_hero_respawn_time = 40.0f;
+        const uint32_t fc = w.fleet(rC, pUnder);
+        CHECK(fc != kNoFleet && w.sim.fleets()[fc].contents.size() == 1);
+        const ObjectHandle hero = fc != kNoFleet ? w.sim.fleets()[fc].contents[0] : ObjectHandle{};
+        const int32_t f0 = w.sim.frame();
+        w.arrive_at_b();
+        CHECK(w.cm->log().size() == 1 && w.cm->log()[0].winner == pEmpire);
+        CHECK(!w.store.alive(hero));
+        const auto pending = w.sim.respawns_pending(rB);
+        CHECK(pending.size() == 1 && pending[0].type == tCorvette && pending[0].owner == pUnder);
+        CHECK(pending.empty() || (pending[0].due > f0 + 30 * 40 - 60 && pending[0].due <= w.sim.frame() + 30 * 40));
+    }
+    {  // a fought battle's result: the hero in BattleResult::destroyed respawns at the conflict planet.
+        World w({{pEmpire, rB, tFrigate}, {pUnder, rC, tCorvette}, {pUnder, rC, tFrigate}}, true);
+        w.rules.special.types.resize(tTypeCount);
+        w.rules.special.types[tCorvette].named_hero = true;
+        w.cm->config().human_choice = BattleChoice::Fight;
+        w.cm->start_battle = [](const BattleRequest&) { return true; };
+        const uint32_t fc = w.fleet(rC, pUnder);
+        ObjectHandle hero{};
+        for (ObjectHandle m : w.sim.fleets()[fc].contents)
+            if (w.store.type(m) == static_cast<objects::TypeIndex>(tCorvette)) hero = m;
+        w.arrive_at_b();
+        CHECK(w.cm->battle_active());
+        BattleResult res;
+        res.winner = pEmpire;
+        res.destroyed = {hero};
+        w.cm->finish_battle(res);
+        CHECK(!w.store.alive(hero) && w.sim.respawns_pending(rB).size() == 1);
+    }
+    {  // Respawn_Whole_Team_When_Killed (§9 / §13 TRANSPORT branch): a company with a dead flagged member is lost whole;
+       // an unflagged member's death or a squadron holder (TEAM branch) keeps it.
+       // ledger: verifies GameObjectType.Respawn_Whole_Team_When_Killed
+        ConflictRules cr = make_conflict_rules();
+        cr.types[tInfantry].company = true;  // Droids_Team: Droid_R2D2 (flagged), Droid_C3P0
+        cr.types[tCorvette].respawn_whole_team = true;
+        const uint32_t flagged[] = {tCorvette}, plain[] = {tFrigate};
+        CHECK(!company_team_lost(cr, tInfantry, flagged));  // not a hero: never reaches 0x3a01f0
+        cr.types[tCorvette].hero = true;
+        CHECK(company_team_lost(cr, tInfantry, flagged) && !company_team_lost(cr, tInfantry, plain));
+        CHECK(!company_team_lost(cr, tInfantry, {}) && !company_team_lost(cr, tFighters, flagged));
+    }
+}
+
 // BT §4.4 "Loss records for carried units": a space auto-resolve records one loss per carried unit killed by the
 // transport roll (the port's one-unit transports, ar_cargo_), plus one per combatant killed by the survival roll.
 void test_cargo_losses() {
@@ -710,6 +819,25 @@ void test_autoresolve_bypass_rules() {
         w.crules.always_bypass_autoresolve = true;
         CHECK(w.cm->autoresolve_locked(sp) && w.cm->autoresolve_locked(lp));
         CHECK(!w.cm->story_locked(sp) && !w.cm->story_locked(lp));
+        w.crules.always_bypass_autoresolve = false;
+        // mcx4 t20 (docs/re/MCX4_T09_RE_ANSWERS.md Q5, fleet data +0x95): a flagged unit that joins the defender's fleet
+        // sets the fleet's lock; the lock stays after the unit is gone (the frigate's fleet still holds the lock).
+        w.rules.types[tCorvette].prevents_story_autoresolve = true;
+        const uint32_t fb = w.fleet(rB, pEmpire);
+        CHECK(fb != kNoFleet && !w.sim.fleets()[fb].story_autoresolve_lock);
+        const ObjectHandle joined = w.sim.spawn_unit(pEmpire, rB, tCorvette);
+        CHECK(w.sim.fleet_containing(joined) == fb && w.sim.fleets()[fb].story_autoresolve_lock);
+        CHECK(w.sim.destroy_object(joined) && w.sim.fleets()[fb].alive);
+        w.rules.types[tCorvette].prevents_story_autoresolve = false;
+        CHECK(w.cm->story_autoresolve_unit(sp) && w.cm->autoresolve_locked(sp) == story);
+        ByteWriter bw;
+        w.sim.write(bw);
+        const std::vector<uint8_t> bytes = bw.bytes();
+        World w2({{pEmpire, rB, tFrigate}, {pUnder, rC, tCorvette}}, true, true, story);
+        w2.store = w.store;  // ObjectStore::read stand-in (test_save.cpp)
+        w2.ids.set_next(w.ids.next());
+        ByteReader br(bytes);
+        CHECK(w2.sim.read(br) && w2.sim.fleets()[fb].story_autoresolve_lock);  // saved (galactic v11)
     }
 }
 
@@ -1446,6 +1574,8 @@ int main() {
     test_contrast_parse();
     std::printf("auto-resolve\n");
     test_auto_resolve_basic();
+    test_auto_resolve_unit_strength();
+    test_hero_respawn_after_battle();
     test_auto_resolve_rules();
     std::printf("force split\n");
     test_force_split();

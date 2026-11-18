@@ -325,6 +325,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
             for (size_t i = 0; i < moved.size(); ++i) {
                 fleets_[dst].contents.push_back(moved[i]);
                 fleets_[dst].carried.push_back(carried[i]);
+                fleet_member_joined(dst, moved[i]);
             }
             return RejectReason::None;
         }
@@ -332,6 +333,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         planets_[p].surface.erase(std::remove(planets_[p].surface.begin(), planets_[p].surface.end(), unit), planets_[p].surface.end());
         fleets_[dst].contents.push_back(unit);
         fleets_[dst].carried.push_back(0);
+        fleet_member_joined(dst, unit);
         return RejectReason::None;
     }
     case kFleetMoveNew:
@@ -356,6 +358,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         }
         const uint32_t nf = create_fleet(player, p);
         fleets_[nf].contents = std::move(moved);
+        for (const ObjectHandle u : fleets_[nf].contents) fleet_member_joined(nf, u);  // mcx4 t20
         fleets_[nf].carried = std::move(carried);
         // ui4 t13: a launch from the surface is retail's op 4 (launch: the reveal, REMAINING_GAPS 6.1) then op 0 (a new
         // fleet: the space conflict in a hostile orbit), as kFleetLaunch runs them (GALACTIC_PLANET_MAP §6.2 rules 2 / 4).
@@ -403,6 +406,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         for (size_t i = 0; i < moved.size(); ++i) {
             fleets_[occupant].contents.push_back(moved[i]);
             fleets_[occupant].carried.push_back(carried[i]);
+            fleet_member_joined(occupant, moved[i]);
         }
         return RejectReason::None;
     }
@@ -420,6 +424,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         for (size_t i = 0; i < moved.size(); ++i) {
             fleets_[dst].contents.push_back(moved[i]);
             fleets_[dst].carried.push_back(carried[i]);
+            fleet_member_joined(dst, moved[i]);
         }
         return RejectReason::None;
     }
@@ -437,6 +442,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
             take(from, unit, moved, carried);
             const uint32_t nf = create_fleet(player, p);
             fleets_[nf].contents = std::move(moved);
+            for (const ObjectHandle u : fleets_[nf].contents) fleet_member_joined(nf, u);  // mcx4 t20
             fleets_[nf].carried = std::move(carried);
             slot_new_fleet(nf);
             new_fleet_conflict(p);  // OI galactic: a new fleet in a hostile orbit starts a space conflict (SG 1.7 op 0)
@@ -450,6 +456,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         for (size_t i = 0; i < moved.size(); ++i) {
             fleets_[src].contents.push_back(moved[i]);
             fleets_[src].carried.push_back(carried[i]);
+            fleet_member_joined(src, moved[i]);
         }
         return RejectReason::None;
     }
@@ -467,6 +474,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         take(from, unit, moved, carried);
         const uint32_t nf = create_fleet(player, p);
         fleets_[nf].contents = std::move(moved);
+        for (const ObjectHandle u : fleets_[nf].contents) fleet_member_joined(nf, u);  // mcx4 t20
         fleets_[nf].carried = std::move(carried);
         slot_new_fleet(nf);
         return RejectReason::None;
@@ -504,6 +512,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         planets_[p].surface.erase(std::remove(planets_[p].surface.begin(), planets_[p].surface.end(), unit), planets_[p].surface.end());
         fleets_[dst].contents.push_back(unit);
         fleets_[dst].carried.push_back(0);
+        fleet_member_joined(dst, unit);
         launch_reveal(p, unit);  // REMAINING_GAPS 6.1
         if (fleets_.size() != fleets_before) {
             slot_new_fleet(dst);

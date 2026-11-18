@@ -197,4 +197,62 @@ void test_mcx4_redirect_chance_modifiers() {
     CHECK(run(0.0f, 0.0f) == (std::pair<bool, int>{false, 0}));  // neither
 }
 
+// ledger: verifies HardPoint.Allow_Opportunity_Fire_When_Idle
+// ledger: verifies HardPoint.Allow_Opportunity_Fire_When_Targeting
+void test_mcx4_opportunity_flags() {
+    // MCX4_T10_RE_ANSWERS §9 (HardPoint ctor 0x53e3b0 writes 1 at +0x3d5 / +0x3d6) and ABILITIES_HARDPOINTS §4.2 (0x385620,
+    // 0x387400): Allow_Opportunity_Fire_When_Targeting lets a hardpoint shoot a nearby enemy while its owner pursues
+    // another target; Allow_Opportunity_Fire_When_Idle lets an idle owner's hardpoint whose Fire_Max_Recharge_Seconds is
+    // above Hardpoint_Recharge_Cutoff_For_Opportunity_Fire fire at all. Both default true.
+    CHECK(HardpointDesc{}.allow_opportunity_fire_when_idle && HardpointDesc{}.allow_opportunity_fire_when_targeting);
+    auto shots = [](bool idle_flag) {
+        World w;
+        ProjectileDesc p;
+        p.name = "P";
+        p.max_speed = 40.0f;
+        p.damage = 1.0f;
+        w.cd.projectiles = {p};
+        HardpointDesc t;
+        t.name = "HP_T";
+        t.kind = HardpointKind::WeaponLaser;
+        t.health = 100.0f;
+        t.projectile = 0;
+        t.min_recharge = 1.0f;
+        t.max_recharge = 9.0f;  // above the 3.0 cutoff: only the idle flag allows it
+        t.fire_range = 800.0f;
+        t.allow_opportunity_fire_when_targeting = false;
+        t.allow_opportunity_fire_when_idle = idle_flag;
+        w.cd.hardpoints = {t};
+        UnitDesc c;
+        c.name = "C";
+        c.tactical_health = 1e6f;
+        c.radius = 20.0f;
+        c.hardpoints = {0};
+        c.max_attack_distance = 100.0f;  // the owner's own scan does not reach the enemy at 300: it stays idle
+        const uint32_t ci = push(w.cd, w.ad, c, AbilityObjectDesc{});
+        UnitDesc f;
+        f.name = "F";
+        f.tactical_health = 1e6f;
+        f.radius = 5.0f;
+        f.is_valid_target = true;
+        const uint32_t fi = push(w.cd, w.ad, f, AbilityObjectDesc{});
+        CombatConfig cfg;
+        cfg.inaccuracy_enabled = false;
+        cfg.opportunity_recharge_cutoff = 3.0f;
+        w.make(cfg);
+        w.add(1, ci, 0, {0, 0, 0});
+        w.add(2, fi, 1, {300, 0, 0});
+        for (int i = 0; i < 400; ++i) w.tick();  // no order: the owner is idle
+        CHECK(w.sys->current_target(1) == kNoObject);
+        return w.sys->stats().shots;
+    };
+    CHECK(shots(false) == 0);
+    CHECK(shots(true) > 0);
+    // MCX4_T10_RE_ANSWERS §10: the mode numbers the <Mode>_Mode_Weapon_Delay_Multiplier / Fire_When_In_<Mode>_Mode tags map to.
+    CHECK(ability_type_from_name("POWER_TO_WEAPONS") == 0x1d);
+    CHECK(ability_type_from_name("DEFEND") == 1);
+    CHECK(ability_type_from_name("TURBO") == 9);
+    CHECK(ability_type_from_name("FULL_SALVO") == 0x3e);
+}
+
 }  // namespace bo3split

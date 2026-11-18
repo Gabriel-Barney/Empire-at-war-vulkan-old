@@ -14,11 +14,12 @@
 
 namespace alamo::galactic {
 
-BountyTable load_bounty_table(const data::GameConstants& constants, const objects::GameObjectTypes& types) {
+BountyTable load_bounty_table(const data::GameConstants& constants, const objects::GameObjectTypes& types, bool skirmish) {
     BountyTable t;
     const objects::EnumConverter& cat = types.enums().get(objects::EnumId::GameObjectCategory);
+    const std::string_view want = skirmish ? "Default_Bounty_By_Category_MP" : "Default_Bounty_By_Category_SP";
     for (const auto& [tag, text] : constants.fields) {
-        if (!ascii_iequals(tag, "Default_Bounty_By_Category_SP")) continue;
+        if (!ascii_iequals(tag, want)) continue;
         // "<Category>, <credits>"
         const std::string_view s = text;
         const size_t comma = s.find(',');
@@ -44,14 +45,14 @@ int64_t bounty_of(const BountyTable& table, bool has_override, float override_am
     return static_cast<int64_t>(std::round(b));
 }
 
-int64_t type_bounty(const BountyTable& table, const objects::GameObjectTypes& types, objects::TypeIndex t) {
+int64_t type_bounty(const BountyTable& table, const objects::GameObjectTypes& types, objects::TypeIndex t, bool skirmish) {
     if (t >= types.size()) return 0;
-    // Override_Bounty_SP is a float field (parser kind 0x8, A2M_R2_RE_B section 2.2), read through the typed view
+    // Override_Bounty_SP / _MP are float fields (parser kind 0x8, A2M_R2_RE_B section 2.2), read through the typed view
     // (bkc1 t07 fixed get_int / get_float for float-parsed fields). Absent = negative = category default.
-    const objects::FieldId f = objects::find_type_field("Override_Bounty_SP");
+    const std::string_view tag = skirmish ? "Override_Bounty_MP" : "Override_Bounty_SP";
+    const objects::FieldId f = objects::find_type_field(tag);
     const bool has_override = types.value(t, f) != nullptr;
-    return bounty_of(table, has_override, has_override ? types.get_float(t, "Override_Bounty_SP") : -1.0f,
-                     types.get_mask(t, "CategoryMask"));
+    return bounty_of(table, has_override, has_override ? types.get_float(t, tag) : -1.0f, types.get_mask(t, "CategoryMask"));
 }
 
 }  // namespace alamo::galactic

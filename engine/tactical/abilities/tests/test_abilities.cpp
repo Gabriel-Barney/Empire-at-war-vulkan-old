@@ -104,6 +104,7 @@ int main(int argc, char** argv) {
     test_mcx4_absorb_blaster();
     test_mcx4_spawn_ability();  // mcx4 t06
     test_mcx4_redirect_chance_modifiers();  // mcx4 t10
+    test_mcx4_opportunity_flags();          // mcx4 t10
     test_battle(golden, write_golden);
     test_allocations();
     test_save_load_battle();  // N1 stage 2

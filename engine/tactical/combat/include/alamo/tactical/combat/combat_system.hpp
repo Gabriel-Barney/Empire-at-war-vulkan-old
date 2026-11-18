@@ -304,6 +304,10 @@ struct HardpointDesc {
     int32_t pulse_count = 1;                          // Fire_Pulse_Count
     float pulse_delay = 0.0f;                         // Fire_Pulse_Delay_Seconds
     float fire_range = 0.0f, fire_min_range = 0.0f;   // Fire_Range_Distance / Fire_Min_Range_Distance
+    // mcx4 t10 (MCX4_T10_RE_ANSWERS §3 [H], Fire_At 0x3825b0): Projectile_Appearance_Delay_Frames (+0x4a4, int, ctor 0).
+    // > 0: the shot is created at once but held still (no move, no sweep) until frame + delay (pack +0x60), then flies;
+    // the recharge is unchanged. [port] the deferred fire sound and the hidden model are presentation (not modelled).
+    int32_t projectile_appearance_delay_frames = 0;
     std::vector<InaccuracyEntry> inaccuracy;          // first entry whose mask hits the target wins
     uint64_t fire_category_restrictions = 0;
     std::vector<WeaponDelayEntry> weapon_delay;
@@ -385,6 +389,9 @@ struct UnitDesc {
     uint16_t armor_type = kNoTypeId, shield_armor_type = kNoTypeId;
     float radius = 1.0f;  // target radius used by the range gates and max travel
     float max_attack_distance = 0.0f;           // Targeting_Max_Attack_Distance
+    // mcx4 t10 (MCX4_T10_RE_ANSWERS §8 [H], getter 0x3749d0): Deployed_Max_Attack_Distance_Multiplier (+0x23f8, ctor 1.0),
+    // the factor on max_attack_distance while deployed (0x39a390) and not garrisoned.
+    float deployed_max_attack_distance_multiplier = 1.0f;
     // OI tactical (TACTICAL_GAPS 3.1): Targeting_Min_Attack_Distance (slot 45) and Custom_Hard_X/YExtent x Scale_Factor
     // (slot 43 footprint E; 0 = the radius).
     float min_attack_distance = 0.0f;
@@ -417,6 +424,9 @@ struct UnitDesc {
     bool target_test_type = true;
     bool destroy_when_all_hardpoints_destroyed = false;  // type +0xa8
     bool immune_to_damage = false;
+    // mcx4 t10 (MCX4_T10_RE_ANSWERS §6 / §18, FIGHTER_FLYING §4.1): Out_Of_Combat_Defense_Adjustment (type +0xde0, FoC -1.0
+    // on fighters): the defence entry (list 0, used as 1 - r) a fighter keeps while it flies out of combat.
+    float out_of_combat_defense_adjustment = 0.0f;
     bool redirect_damage_to_teammates = false, share_damage_with_teammates = false;
     std::vector<uint32_t> hardpoints;  // HardpointDesc indices, HardPoints list order
     // Non-hardpoint weapon (WeaponBehavior): Projectile_Types / Projectile_Fire_* fields.
@@ -539,6 +549,9 @@ struct UnitDesc {
     float turret_rotate_speed = 0.0f;
     float turret_extent = 180.0f;
     float turret_elevate_extent = 90.0f;
+    // mcx4 t10 (MCX4_T10_RE_ANSWERS §8 [H], 0x631a00 / 0x631210 / 0x54c2f0): Deployed_Turret_Elevate_Extent_Degrees
+    // (+0x5d4, ctor 180.0), the elevation limit instead of turret_elevate_extent while deployed (0x39a390).
+    float deployed_turret_elevate_extent = 180.0f;
     bool turret_xy_only = false;
     float turret_rest_pitch = 0.0f, turret_rest_yaw = 0.0f;
     // ---- trn1 (docs/re/TRN1_TERRAIN_GAMEPLAY.md) ----
@@ -618,6 +631,7 @@ struct CombatConfig {
     float hull_vs_hardpoints_constraint = 0.2f;    // Hull_Vs_Hard_Points_Health_Constraint
     float depleted_shield_regen_cap = 0.25f;       // GameConstants +0x1183c (absolute points)
     float depleted_shield_disable_time = 5.0f;     // Depleted_Shield_Disable_Time
+    float depleted_shield_damage_increment = 0.0f;  // mcx4 t10: Depleted_Shield_Damage_Increment (GC +0x11838)
     float shield_recharge_interval_secs = 3.0f;    // ShieldRechargeIntervalInSecs
     float under_construction_damage_multiplier = 2.0f;  // Under_Construction_Damage_Multiplier
     float base_shield_vulnerability = 1.0f;        // Base_Shield_Vulnerability_Modifier (FoC 2.0)
@@ -1709,6 +1723,12 @@ public:
     float attack_range(ObjectId id);  // Get_Max_Attack_Range
     void set_health(ObjectId id, float h);
     void set_shield(ObjectId id, float s);
+    // mcx4 t10 (MCX4_T10_RE_ANSWERS §6 / §18): the fighter locomotor's per-frame write of the out-of-combat defence entry
+    // (ModifierList_Set_By_Source 0x3fe810, the object as source, duration -1 = permanent): the type's
+    // Out_Of_Combat_Defense_Adjustment in the states Moving 0x1B, Idle 0x1C and Dead_Stop 0x1F (out_of_combat), 0.0 in
+    // Idle_Combat 0x1D / Directed_Combat 0x1E. [port] Types with adjustment 0 keep no entry (a 0 entry changes no sum).
+    // The host calls it once per tick per fighter, before the combat tick; safe in parallel over distinct ids.
+    void set_out_of_combat(ObjectId id, bool out_of_combat);
 
     // Q1: ordered digests (units by id, projectiles by serial). register_crc adds "<p>.units",
     // "<p>.projectiles", "<p>.modifiers", "<p>.delayed".

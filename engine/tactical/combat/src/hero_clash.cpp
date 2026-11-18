@@ -1,5 +1,6 @@
 // s78n t06 - hero clashes: HEROCLASH.XML and the land mode's HeroClashManager (docs/re/HERO_CLASH.md §1-§6).
 #include "alamo/tactical/combat/hero_clash.hpp"
+#include "alamo/core/x86_int.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -353,7 +354,7 @@ void HeroClashManager::begin_snap(Clash& c, uint32_t frame, HeroClashHost& host)
     err_ang = std::clamp(err_ang, 0.0f, 180.0f);
     const float t = std::max(0.1f + 0.4f * err_pos / 3.0f, 0.1f + 0.9f * err_ang / 180.0f);
     c.snap_start = frame;
-    c.snap_end = frame + static_cast<uint32_t>(static_cast<int32_t>(30.0f * t));
+    c.snap_end = frame + static_cast<uint32_t>(trunc_i32(30.0f * t));
 }
 
 void HeroClashManager::fight(Clash& c, HeroClashHost& host) {
