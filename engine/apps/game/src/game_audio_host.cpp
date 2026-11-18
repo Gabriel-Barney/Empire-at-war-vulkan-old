@@ -803,6 +803,16 @@ void GameAudioHost::cue_lines(const sim::TacticalBattle& battle, const objects::
                     ev = nth_field(lf->fields, special_weapon_tag(fired, own), types.get_int(t, "Special_Weapon_Target_Action_Index"));
                 if (!ev.empty() && game_->gui_sfx(ev)) ++stats_.special_weapon_lines;
             }
+    // Tactical pop cap (P4_SIM_SYSTEMS §2.7.3, MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Tactical_Unit_Cap_Reached family"):
+    // once each time the local player's room for one more unit turns false; the local faction's line, 2D.
+    if (local_player >= 0) {
+        const bool room = unit_room(battle.population_used(local_player), battle.population_cap(local_player));
+        if (unit_room_ && !room) {
+            faction_sfx("SFXEvent_Tactical_Pop_Cap_Reached");  // ledger: consumes Faction.SFXEvent_Tactical_Pop_Cap_Reached
+            ++stats_.pop_cap_lines;
+        }
+        unit_room_ = room;
+    }
     // Base shields (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Base_Shield_Online family"; TRU1_A_RE_ANSWERS Set_State
     // 0x56b540 step 2): a generator's Set_State that changed its on / off state plays the local faction's line, 2D. The
     // previous state is the host's (the first report is the 0 -> 1 / 0 -> 2 evaluation: silent).
@@ -1204,6 +1214,7 @@ void GameAudioHost::battle_reset() {
     victory_seen_ = false;    // mcx4 t13 batch D
     last_retreater_ = -1;     // mcx4 t13 batch E
     base_shield_state_.clear();  // mcx4 t13 batch I
+    unit_room_ = true;           // mcx4 t13 batch J
     prod_built_.clear();
     intro_decided_ = false;   // aud1 t07: a new battle decides its intro again
     object_events_reset();    // aud1 t05

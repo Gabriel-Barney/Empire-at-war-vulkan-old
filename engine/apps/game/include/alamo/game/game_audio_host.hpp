@@ -82,6 +82,7 @@ struct GameAudioStats {
     uint64_t retreat_lines = 0;                                                    // mcx4 t13 batch E
     uint64_t special_weapon_lines = 0;                                             // mcx4 t13 batch G
     uint64_t base_shield_lines = 0;                                                // mcx4 t13 batch I
+    uint64_t pop_cap_lines = 0;                                                    // mcx4 t13 batch J
 };
 
 class GameAudioHost {
@@ -324,6 +325,9 @@ public:
     // base shield going back online (2 -> 1) or offline (1 -> 2), by the owner's relation (own / friendly vs hostile).
     // The first evaluation (0 -> 1 / 0 -> 2) plays nothing.
     static std::string_view base_shield_line(bool online, bool friendly);
+    // P4_SIM_SYSTEMS §2.7.3 (player tick 0x287e70, tactical): "room for one unit" (0x2b03e0) = no cap (< 0) or the
+    // population used below the cap; SFXEvent_Tactical_Pop_Cap_Reached plays when it turns false.
+    static bool unit_room(float used, float cap) { return cap < 0.0f || used < cap; }
     struct ControlLines {
         std::string_view friendly, enemy;
     };
@@ -422,6 +426,7 @@ private:
     bool corruption_mission_ = false, victory_seen_ = false;  // mcx4 t13 batch D: set_corruption_mission; declare latch
     int32_t last_retreater_ = -1;                             // mcx4 t13 batch E: retreating_player() last tick
     std::map<int64_t, uint8_t> base_shield_state_;            // mcx4 t13 batch I: generator -> 1 on / 2 off (lookup only)
+    bool unit_room_ = true;                                   // mcx4 t13 batch J: last tick's unit_room [M: starts true]
     // mcx4 t13 batch B: the local player's tactical build orders last tick (order id -> type) and built counts (type ->
     // TacticalProduction::built_count), to tell a completed order from a cancelled one.
     std::map<uint32_t, int32_t> prod_orders_;

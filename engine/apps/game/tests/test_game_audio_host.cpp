@@ -333,6 +333,14 @@ void test_base_shield_lines() {
     CHECK(H::base_shield_line(false, false) == "SFXEvent_HUD_Enemy_Base_Shield_Offline");
 }
 
+// mcx4 t13 batch J (docs/re/P4_SIM_SYSTEMS.md §2.7.3; MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_Tactical_Unit_Cap_Reached
+// family"): SFXEvent_Tactical_Pop_Cap_Reached plays when the room for one unit turns false.
+// ledger: verifies Faction.SFXEvent_Tactical_Pop_Cap_Reached
+void test_unit_room() {
+    using H = GameAudioHost;
+    CHECK(H::unit_room(3.0f, -1.0f) && H::unit_room(9.0f, 10.0f) && !H::unit_room(10.0f, 10.0f) && !H::unit_room(11.0f, 10.0f));
+}
+
 // aud4 b0289 / b0300: garrison entry line and the hero clash win speech (both builds; presentation rules only).
 void test_garrison_and_clash_lines() {
     using H = GameAudioHost;
@@ -942,6 +950,7 @@ int main() {
     test_special_weapon_lines();        // mcx4 t13 batch G
     test_move_into_field();             // mcx4 t13 batch G
     test_base_shield_lines();           // mcx4 t13 batch I
+    test_unit_room();                   // mcx4 t13 batch J
     test_intro_speech_t07();
     test_aud2();
 #ifdef ALAMO_GAME_HAVE_AUDIO

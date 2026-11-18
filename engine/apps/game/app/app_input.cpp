@@ -561,7 +561,15 @@ void App::handle_hud_actions(const std::vector<ui::HudAction>& acts) {
             }
             case ui::HudAction::Kind::BeginReinforcement:  // the drop point is the next left click in the world
                 if (!reinforce_available(static_cast<objects::ObjectId>(a.unit))) {  // ui3 t04: cap / retreat / locked
-                    audio_.negative_feedback();
+                    // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Tactical_Unit_Cap_Reached family", ReinforceEvent
+                    // Execute 0x403cb0): a drop refused for room plays the local faction's line. [port] the port refuses
+                    // at the pad click, before a drop point is picked.
+                    const sim::TacticalBattle* rb = battle();
+                    if (rb && !story_controls_locked() &&
+                        rb->reinforce_block(local_player(), static_cast<objects::ObjectId>(a.unit)) == commands::RejectReason::QueueFull)
+                        audio_.faction_sfx("SFXEvent_Tactical_Unit_Cap_Reached");  // ledger: consumes Faction.SFXEvent_Tactical_Unit_Cap_Reached
+                    else
+                        audio_.negative_feedback();
                     break;
                 }
                 reinforce_unit_ = a.unit;
