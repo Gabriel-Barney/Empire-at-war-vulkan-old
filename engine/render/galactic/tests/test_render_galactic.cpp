@@ -824,6 +824,18 @@ static void test_fleets_and_selection(const render::GalacticWorld& w) {
     // QA D6: rings, selection and fleet lines are gone from f = 0.25 on (planets and fleets stay), half at f = 0.125. t39:
     // the route stays to f = 1 (FIXPASS_GALACTIC §3.1) in Color_Zoomed_In; only its sparkle goes.
     {
+        {  // mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md): GUI_Cycle_Speed / GUI_Darken_Level colour cycle, mode 4
+            // ledger: verifies GameConstants.GUI_Cycle_Speed
+            // ledger: verifies GameConstants.GUI_Darken_Level
+            using B = render::GalacticSceneBuilder;
+            const materials::float4 one{1, 1, 1, 1};
+            const materials::float4 cyc_a = B::cycle_light_scale(one, Vec3{6, 0, 0}, 0.0f, 0.5f);  // factor 0.5
+            CHECK(near(cyc_a.x, 4.0f) && cyc_a.y == 1.0f && cyc_a.z == 1.0f && cyc_a.w == 1.0f);
+            const materials::float4 cyc_b = B::cycle_light_scale(one, Vec3{6, 0, 0}, -1.5707963f, 0.5f);  // factor 0
+            CHECK(near(cyc_b.x, 1.0f));
+            const materials::float4 cyc_c = B::cycle_light_scale(one, Vec3{1, -1, -1}, 1.5707963f, 0.5f);  // factor 1
+            CHECK(near(cyc_c.x, 2.0f) && near(cyc_c.y, 0.0f) && near(cyc_c.z, 0.0f));
+        }
         CHECK(render::GalacticSceneBuilder::overlay_fade(0.0f) == 1.0f && near(render::GalacticSceneBuilder::overlay_fade(0.125f), 0.5f) &&
               render::GalacticSceneBuilder::overlay_fade(0.25f) == 0.0f && render::GalacticSceneBuilder::overlay_fade(1.0f) == 0.0f);
         render::GalacticFrame fr = frame;

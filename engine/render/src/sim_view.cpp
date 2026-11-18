@@ -239,6 +239,10 @@ void SimInstanceBuilder::build(const InterpolatedFrame& frame, SimModelSource& m
                 ++st.stealth_tinted;
             }
         }
+        if (o.id == hover_ && hover_ != objects::kNoObjectId) {  // mcx4 t14: Mouse_Over_Highlight_Scale
+            const float k = hover_brighten(hover_scale_, 1.0f);
+            in.light_scale = {in.light_scale.x * k, in.light_scale.y * k, in.light_scale.z * k, in.light_scale.w};
+        }
         in.no_shadow = s.stealth.shadow_dropped();  // R5: the model's stencil-shadow bit is cleared while stealthed
         st.stealth_no_shadow += in.no_shadow ? 1u : 0u;
         // vis1 t02: a blob-shadow type at this detail has its stencil shadow off (the terrain blob replaces it).

@@ -2142,6 +2142,11 @@ static void test_blob_shadows() {
         const objects::TypeIndex rock = real.find("Prop_Rock_Cluster_02");
         CHECK(rock != objects::kNone && real[rock].no_distance_fade && !real[scout].no_distance_fade);
     }
+    {  // mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md): Mouse_Over_Highlight_Scale 1.5 -> a hovered object up to 1.5x brighter
+        // ledger: verifies GameConstants.Mouse_Over_Highlight_Scale
+        CHECK(render::SimInstanceBuilder::hover_brighten(1.5f, 1.0f) == 1.5f && render::SimInstanceBuilder::hover_brighten(1.5f, 0.0f) == 1.0f);
+        CHECK(render::SimInstanceBuilder::hover_brighten(1.5f, 0.5f) == 1.25f);
+    }
     uint32_t with_blob = 0, blob_at_on = 0;
     for (objects::TypeIndex t = 0; t < real.size(); ++t) {
         if (real[t].blob_material.empty()) continue;

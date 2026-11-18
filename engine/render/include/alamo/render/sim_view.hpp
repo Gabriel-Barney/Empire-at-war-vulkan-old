@@ -139,6 +139,14 @@ public:
     // type in blob mode at that detail (0 < detail < Blob_Shadow_Below_Detail_Level) draws without its shadow volume
     // (Instance::no_shadow), as retail turns the model's stencil shadow off when it creates the blob. < 0 (default): off.
     void set_blob_shadow_detail(int32_t detail) { blob_detail_ = detail; }
+    // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameConstants.Mouse_Over_Highlight_Scale", 0x3c26c0 from the colour callback
+    // 0x3a0c20): the object under the cursor draws with LIGHT_SCALE.rgb x hover_brighten(scale, amount). [port] the
+    // amount (object +0x44, 0..1) is 1 while hovered; kNoObjectId = none.
+    void set_hover(objects::ObjectId id, float scale) {
+        hover_ = id;
+        hover_scale_ = scale;
+    }
+    static float hover_brighten(float scale, float amount) { return 1.0f + (scale - 1.0f) * amount; }
     float fog_alpha(objects::ObjectId id) const;  // 1 when unknown
     // R5 stealth presentation (ABILITY_VISUALS 1.1-1.3): per object a critically damped spring 0 -> 1 over the type's
     // Stealth_Transition_Time (or SnapshotObject::stealth_time) towards the fade target (kSnapStealthMeshes: 1, else 0),
@@ -207,6 +215,8 @@ private:
     EmitterSource emitters_;          // mcx6 t05
     float fog_smooth_time_ = kFogSpringTime;  // R5
     int32_t blob_detail_ = -1;                 // vis1 t02
+    objects::ObjectId hover_ = objects::kNoObjectId;  // mcx4 t14: set_hover
+    float hover_scale_ = 1.5f;
     AttachmentPoseSource attach_pose_;  // R3 T6
     bool ghosts_enabled_ = true;        // R5
     std::map<objects::ObjectId, Ghost> ghosts_;  // R5, ordered by id

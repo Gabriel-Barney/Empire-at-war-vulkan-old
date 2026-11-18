@@ -1167,6 +1167,7 @@ void App::fill_cursor_hover(ui::CursorContext& c) {
         return;
     }
     const auto target = static_cast<tactical::combat::ObjectId>(hit->id);
+    bview_.set_hover(static_cast<uint32_t>(hit->id));  // mcx4 t14: Mouse_Over_Highlight_Scale
     const int32_t owner = cb.owner(target);
     const int32_t me = local_player();
     if (owner == me) c.hover = H::Own;
@@ -1226,6 +1227,7 @@ void App::update_cursor(ui::HudDrawList& dl) {
         c.scrolling = bview_.camera().drag() == ui::TacticalCameraController::Drag::Pan;
         // ui1 t01: the hovered object decides the plain cursor (ATTACK / out of range / CANT_ATTACK, SELECT, GARRISON_IN,
         // MOVE / CANT_MOVE). [port] rules (docs/PHASE4.md "UI1 cursor"): see fill_cursor_hover.
+        bview_.set_hover(0);  // mcx4 t14: fill_cursor_hover sets the object under the cursor
         if (!c.over_ui && bview_.active()) fill_cursor_hover(c);
         // A running pick: the targeted-ability cursor (valid on a hit object / any ground point) or the landing-point one.
         if (!c.over_ui && bview_.active()) {

@@ -146,6 +146,9 @@ private:
     std::vector<render::FactionColor> colors_;
     render::RouteLineStyle style_;
     render::CorruptionPathSettings corruption_path_;  // FIXPASS_GALACTIC §3.2 (GameConstants)
+    float cycle_speed_ = 5.0f, cycle_darken_ = 0.5f;   // mcx4 t14: GUI_Cycle_Speed / GUI_Darken_Level
+    uint32_t cycle_planet_ = 0;                        // the selection the cycle started for
+    double cycle_t0_ = 0.0;
     ui::GalacticCameraController camera_;
     GpuCore* gpu_ = nullptr;
     int32_t local_ = -1;  // fog viewpoint (attach)
@@ -222,6 +225,8 @@ public:
     // vis1 t08: the local player's selected object ids (ascending; empty in a cinematic / outside the battle screen): the
     // Force_Healing range blob is drawn under a selected owner (also while an ability target is picked). Set before prepare().
     void set_heal_selection(std::vector<uint32_t> ids) { heal_sel_ = std::move(ids); }
+    // mcx4 t14: the object under the cursor (0 = none), brightened by Mouse_Over_Highlight_Scale. Set before prepare().
+    void set_hover(uint32_t id) { hover_ = id; }
     // cu9g t03: the bombing-run targeting blob of this frame (HUD_GAPS §9.5; nullopt = none). Set before prepare().
     void set_bombing_blob(const std::optional<render::JamBlob>& blob) { bombing_blob_ = blob; }
     // ui2 t08 (STORY_PRESENTATION_LUA.md 4.1 / 4.2): the story script's Play_Lightning_Effect bolts of this frame (extra beams
@@ -288,6 +293,8 @@ private:
     render::InterpolatedFrame frame_;
     std::vector<render::SimWorldEffect> world_fx_;  // vis1 t08: decoration effects + the frame's (shield penetration)
     std::vector<uint32_t> heal_sel_;                  // vis1 t08: set_heal_selection
+    uint32_t hover_ = 0;                              // mcx4 t14: set_hover
+    float hover_scale_ = 1.5f;                        // GameConstants Mouse_Over_Highlight_Scale
     std::vector<render::Instance> bg_;
     render::SimInstanceStats istats_;
     ui::TacticalCameraController camera_;

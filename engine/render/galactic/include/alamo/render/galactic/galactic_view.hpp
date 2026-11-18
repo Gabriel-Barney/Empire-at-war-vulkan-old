@@ -252,6 +252,10 @@ struct GalacticViewOptions {
 struct GalacticSelection {
     objects::ObjectId planet = objects::kNoObjectId;
     Vec3 eye{0, 0, 1}, target{0, 0, 0}, up{0, 1, 0};  // default: looking straight down, screen up = +Y
+    // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameConstants.GUI_Cycle_Speed family", planet selection 0x3ca480): the selected
+    // planet's colour cycle (mode 4, colour 6, 0, 0): phase = seconds since the selection x GUI_Cycle_Speed, darken =
+    // GUI_Darken_Level (0 = off).
+    float cycle_phase = 0.0f, cycle_darken = 0.0f;
 };
 
 // ui4 t06 (GALAXY_MAP_PRESENTATION §2.2, 0x3da30 [H]): one segment of the fleet drag preview, world positions. grey =
@@ -295,6 +299,8 @@ public:
     // and huge from the close-up camera: 1 at f == 0, 0 from f >= 0.25 on. Sparks and lines also narrow with it (their
     // primitives are opaque), the rest fades or is dropped at 0. Routes and corruption paths stay (FIXPASS_GALACTIC §3).
     static float overlay_fade(float zoom);
+    // mcx4 t14 (colour callback 0x3a0c20, mode 4): LIGHT_SCALE.rgb x (1 + cycle x (sin(phase) x darken + darken)).
+    static materials::float4 cycle_light_scale(materials::float4 base, const Vec3& cycle, float phase, float darken);
     const GalacticSelection& selection() const { return sel_; }
 
     // Geometry (tests / picking).
