@@ -1393,8 +1393,11 @@ void test_foc() {
             uint32_t timers = 0;
             for (const TypeInfo& ti : rules.types) timers += ti.build_countdown_timer ? 1u : 0u;
             const uint32_t ds = rules.find_type("Death_Star");
-            CHECK(timers == 1 && ds != kNoIndex && rules.types[ds].build_countdown_timer &&
-                  rules.types[ds].build_speech_countdowns == "Speech_Death_Star_Build_");
+            const uint32_t isd = rules.find_type("Star_Destroyer");
+            CHECK(timers >= 1 && ds != kNoIndex && rules.types[ds].build_countdown_timer &&  // >= 1: variants inherit it
+                  rules.types[ds].build_speech_countdowns == "Speech_Death_Star_Build_" && isd != kNoIndex &&
+                  !rules.types[isd].build_countdown_timer);
+            std::printf("build countdown: %u types with Build_Countdown_Timer\n", timers);
             const std::string& pre = rules.types[ds].build_speech_countdowns;
             CHECK(econ::build_countdown_speech(pre, 120.0f, 119.5f) == "Speech_Death_Star_Build_2_Minutes");
             CHECK(econ::build_countdown_speech(pre, 61.0f, 60.5f).empty());
@@ -1405,11 +1408,12 @@ void test_foc() {
             CHECK(econ::build_countdown_speech("", 5.2f, 4.9f).empty());
             CHECK(econ::build_countdown_text(119.5f) == "2:00" && econ::build_countdown_text(5.2f) == "0:06");
         }
-        // mcx4 t05 (MCX4_RE_ANSWERS_TACTICAL §9): FoC's Respawn_Whole_Team_When_Killed members; Droids_Team is a company.
+        // mcx4 t05 (MCX4_RE_ANSWERS_TACTICAL §9): FoC's Respawn_Whole_Team_When_Killed members (both droids, Luke_XWing);
+        // Droids_Team is a company.
         const auto whole = [&](const char* n) { return cr.type(static_cast<uint32_t>(types.resolve_name(n))).respawn_whole_team; };
         CHECK(whole("Droid_R2D2"));
         CHECK(whole("Luke_XWing"));
-        CHECK(!whole("Droid_C3P0"));
+        CHECK(whole("Droid_C3P0") && !whole("Star_Destroyer"));  // both droids carry the flag
         CHECK(cr.type(static_cast<uint32_t>(types.resolve_name("Droids_Team"))).company &&
               !cr.type(static_cast<uint32_t>(types.resolve_name("Red_Squadron"))).company);
     }
