@@ -21,6 +21,7 @@
 #include "alamo/lua/bindings.hpp"
 #include "alamo/lua/lua_vm.hpp"
 #include "alamo/test/support.hpp"
+#include "alamo/test/galactic_dummies.hpp"
 
 #if defined(ALAMO_LUA_PLAYERS)
 #include "alamo/ai/ai_path_finder.hpp"
@@ -159,7 +160,7 @@ struct Galaxy {
     explicit Galaxy(std::vector<std::tuple<int32_t, PlanetIndex, const char*>> extra = {},
                     const std::function<void(galactic::GalacticRules&, const objects::ObjectTypeDatabase&)>& tune = {}) {
         files.add("Data\\XML\\GameObjectFiles.xml", "<L><File>Units.xml</File></L>");
-        files.add("Data\\XML\\Units.xml",
+        files.add("Data\\XML\\Units.xml", ::alamo::test::with_galactic_dummies(  // mcx1 t05: DUMMY_* roles
                   "<R>\n"
                   "<Planet Name=\"Planet_A\"><Planet_Credit_Value>10</Planet_Credit_Value></Planet>\n"
                   "<Planet Name=\"Planet_B\"><Planet_Credit_Value>20</Planet_Credit_Value></Planet>\n"
@@ -194,7 +195,7 @@ struct Galaxy {
                   // cu8f t04b: a unit with UNIT_AI (Set_Prefer_Ground_Over_Space refuses objects without it).
                   "<GroundInfantry Name=\"Ai_Trooper_T\"><Behavior>UNIT_AI</Behavior><CategoryMask>Infantry</CategoryMask>"
                   "</GroundInfantry>\n"
-                  "</R>");
+                  "</R>"));
         CHECK(raw.load(files));
         CHECK(types.build(raw));
         galactic::FactionRules emp, und, neu;

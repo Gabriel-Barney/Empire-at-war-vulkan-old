@@ -44,6 +44,7 @@
 #include "alamo/vfs/vfs.hpp"
 #include "alamo/tactical/garrison/garrison_types.hpp"  // S4
 #include "alamo/test/support.hpp"
+#include "alamo/test/galactic_dummies.hpp"
 #ifdef ALAMO_SIM_HAVE_ANIM
 #include "alamo/sim/sim_anim.hpp"
 #endif
@@ -748,7 +749,10 @@ inline std::unique_ptr<Data> make_data(bool fog = false, bool anim = false, bool
     remove_all_long(d->root, ec);
     const fs::path x = d->root / "Data/XML";
     write_file(x / "GameObjectFiles.xml", "<GameObjectFiles><File>S10Types.xml</File></GameObjectFiles>\n");
-    const auto patched = [](std::string t) { return g_types_patch ? g_types_patch(std::move(t)) : t; };
+    // mcx1 t05: the fixture's types carry the DUMMY_* behaviours real FoC types have (galactic roles come only from them).
+    const auto patched = [](std::string t) {
+        return ::alamo::test::with_galactic_dummies(g_types_patch ? g_types_patch(std::move(t)) : std::move(t));
+    };
     write_file(x / "S10Types.xml", patched(squad || squad_garrison ? squad_types(squad_garrison)  // s78n t03 / t09, s78n review
                                    : gate ? gate_types()  // cu8g t05
                                    : presence ? presence_types()  // s78l t03

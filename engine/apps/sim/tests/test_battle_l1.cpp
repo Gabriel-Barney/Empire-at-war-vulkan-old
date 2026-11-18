@@ -39,6 +39,7 @@
 #endif
 #include "alamo/vfs/vfs.hpp"
 #include "alamo/test/support.hpp"
+#include "alamo/test/galactic_dummies.hpp"
 
 using namespace alamo;
 using namespace alamo::sim;
@@ -182,7 +183,7 @@ std::unique_ptr<Data> make_data(const char* folder = "alamo_sim_l1_tests", const
     write_file(x / "GameObjectFiles.xml", "<GameObjectFiles><File>L1Types.xml</File></GameObjectFiles>\n");
     std::string types = kTypes;
     if (extra) types.insert(types.rfind("</L1>"), extra);
-    write_file(x / "L1Types.xml", types);
+    write_file(x / "L1Types.xml", ::alamo::test::with_galactic_dummies(types));
     write_file(x / "HardPointDataFiles.xml", "<Hard_Point_Files><File>L1HardPoints.xml</File></Hard_Point_Files>\n");
     write_file(x / "L1HardPoints.xml", kHardpoints);
     write_file(x / "FactionFiles.xml", "<FactionFiles><File>L1Factions.xml</File></FactionFiles>\n");

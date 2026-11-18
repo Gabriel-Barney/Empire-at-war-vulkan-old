@@ -20,6 +20,7 @@
 #include "alamo/core/ascii.hpp"
 #include "alamo/game/game_data.hpp"
 #include "alamo/test/support.hpp"
+#include "alamo/test/galactic_dummies.hpp"
 
 using namespace alamo;
 namespace fs = std::filesystem;
@@ -125,7 +126,7 @@ fs::path make_data() {
     fs::remove_all(root, ec);
     const fs::path x = root / "Data/XML";
     write_file(x / "GameObjectFiles.xml", "<GameObjectFiles><File>MFTypes.xml</File></GameObjectFiles>\n");
-    write_file(x / "MFTypes.xml", make_types());
+    write_file(x / "MFTypes.xml", ::alamo::test::with_galactic_dummies(make_types()));
     write_file(x / "FactionFiles.xml", "<FactionFiles><File>MFFactions.xml</File><File>MFFactions2.xml</File></FactionFiles>\n");
     write_file(x / "MFFactions.xml", kFactions);
     write_file(x / "MFFactions2.xml", kFactions2);

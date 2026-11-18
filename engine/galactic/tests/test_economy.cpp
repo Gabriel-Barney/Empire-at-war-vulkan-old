@@ -3024,7 +3024,9 @@ void test_oi_thrawns_revenge() {
                 std::printf("    %s: %s\n", name, m.c_str());
             }
         std::printf("  q6 TR %s: %zu starting forces, %d without a galactic role\n", name, setup.forces.size(), dropped);
-        CHECK(!setup.forces.empty() && dropped == 0);
+        // mcx1 t05: a starting force whose type has no DUMMY_* behaviour is dropped, as retail creates nothing for it
+        // ("Unknown type", MCX1_RE_ANSWERS Q7.2); the count is printed above, not pinned.
+        CHECK(!setup.forces.empty() && dropped < static_cast<int32_t>(setup.forces.size()));
     }
 #endif
 }
