@@ -93,6 +93,11 @@ void test_bytes() {
     CHECK(alamo::game::audit_asset_bytes("texture", tga(), false, &rule, &eq) == 0);
     CHECK(alamo::game::audit_asset_bytes("texture", Bytes{'D', 'D', 'S', ' ', 1}, false, &rule, &eq) == 2 && !eq);
     CHECK(alamo::game::audit_asset_bytes("texture", Bytes{'8', 'B', 'P', 'S', 0, 1}, false, &rule, &eq) == 2 && eq);
+    // Salvage rules retail's behaviour backs (docs/re 3-4) versus the rest.
+    CHECK(alamo::game::asset_salvage_confirmed("ala_block_stride") && alamo::game::asset_salvage_confirmed("alo_trailing_junk;alo_skin_index_clamped"));
+    CHECK(alamo::game::asset_salvage_confirmed("texture: volume texture: slice 0 of 2 used"));
+    CHECK(!alamo::game::asset_salvage_confirmed("texture: partial cubemap: 3 faces present, the others are black"));
+    CHECK(!alamo::game::asset_salvage_confirmed("text_salvaged: DAT record 3 does not fit the file; kept 3 of 9 entries"));
     CHECK(alamo::game::audit_asset_bytes("animation", Bytes{}, false, &rule, &eq) == 2 && eq && rule.find("empty") != std::string::npos);
 }
 
@@ -126,6 +131,7 @@ void test_mod_folder() {
     write(mod / "Data/Art/Models/AA_OK.ALO", model(true));
     write(mod / "Data/Art/Models/AA_NOCONN.ALO", model(false));
     write(mod / "Data/Art/Models/AA_EMPTY.ALA", Bytes{});
+    write(mod / "Data/Art/Textures/MT_CommandBar.mtd", Bytes{9, 9, 9});  // broken GUI atlas: gui_fallback
     write(mod / "Data/Art/Textures/.tool_meta/AA_META.DDS", Bytes{'x', 'y'});  // tool metadata: not audited
     write(mod / "Data/Art/Maps/AA_TEST_ONLY.TED", Bytes{1, 2, 3});            // broken, named by nothing: never loaded
     write(mod / "Data/Art/Maps/_MP_LAND_AA_BAD.TED", Bytes{1, 2, 3});         // broken skirmish map: a real rejection
@@ -140,14 +146,16 @@ void test_mod_folder() {
     alamo::game::AssetAuditOptions opt;
     opt.cache_dir = cache.string();
     const auto a = alamo::game::audit_mod_assets(*v, opt);
-    CHECK(a.ran && a.checked == 8);
-    CHECK(a.decoded == 3 && a.salvaged_count == 0 && a.rejected_count == 5 && a.retail_equivalent == 3);
+    CHECK(a.ran && a.checked == 9);
+    CHECK(a.decoded == 3 && a.salvaged_count == 0 && a.rejected_count == 6 && a.retail_equivalent == 3);
+    const auto* gui = find(a.rejected, "MT_COMMANDBAR.MTD");
+    CHECK(gui && gui->family == "gui" && gui->rule.find("gui_fallback") != std::string::npos && !gui->retail_equivalent);
     const auto* unref = find(a.rejected, "AA_TEST_ONLY.TED");
     CHECK(unref && unref->retail_equivalent);
     const auto* mp = find(a.rejected, "_MP_LAND_AA_BAD.TED");
     CHECK(mp && !mp->retail_equivalent);
     CHECK(find(a.rejected, "AA_META") == nullptr);
-    CHECK(a.cache_hits == 0);
+    CHECK(a.cache_hits == 2);  // within the run: the second copy of the same TGA bytes and of the same broken TED
     const auto* noconn = find(a.rejected, "AA_NOCONN.ALO");
     CHECK(noconn && noconn->family == "model" && noconn->retail_equivalent);
     const auto* bad = find(a.rejected, "SUB\\AA_BAD.DDS");
@@ -159,7 +167,7 @@ void test_mod_folder() {
 
     // Second run: everything from the cache, same result.
     const auto b = alamo::game::audit_mod_assets(*v, opt);
-    CHECK(b.cache_hits == 8 && b.checked == a.checked && b.rejected_count == a.rejected_count);
+    CHECK(b.cache_hits == 9 && b.checked == a.checked && b.rejected_count == a.rejected_count);
     CHECK(b.decoded == a.decoded && b.retail_equivalent == a.retail_equivalent && b.rejected.size() == a.rejected.size());
     for (size_t i = 0; i < a.rejected.size() && i < b.rejected.size(); ++i)
         CHECK(a.rejected[i].path == b.rejected[i].path && a.rejected[i].rule == b.rejected[i].rule);
@@ -170,12 +178,12 @@ void test_mod_folder() {
         alamo::game::ModCheckOptions mo;
         mo.campaigns = mo.lua = mo.files = mo.xml_tags = mo.submod = mo.shaders = false;
         const auto r = alamo::game::check_mod_data(foc.string(), args, mo);
-        CHECK(r.assets.ran && r.assets.checked == 8 && r.assets.rejected_count == 5);
+        CHECK(r.assets.ran && r.assets.checked == 9 && r.assets.rejected_count == 6);
         size_t blocking = 0;
         for (const auto& blk : r.grade.blocking) blocking += blk.find("asset_rejected") != std::string::npos ? 1u : 0u;
-        CHECK(blocking == 2);  // AA_BAD.DDS and _MP_LAND_AA_BAD.TED
+        CHECK(blocking == 3);  // AA_BAD.DDS, _MP_LAND_AA_BAD.TED and MT_CommandBar.mtd
         const std::string js = alamo::game::format_mod_report_json(r);
-        CHECK(js.find("\"assets\": {") != std::string::npos && js.find("\"rejected_count\": 5") != std::string::npos);
+        CHECK(js.find("\"assets\": {") != std::string::npos && js.find("\"rejected_count\": 6") != std::string::npos);
         CHECK(js.find("\"retail_equivalent\": true") != std::string::npos && js.find("\"by_family\"") != std::string::npos);
         mo.assets = false;
         CHECK(!alamo::game::check_mod_data(foc.string(), args, mo).assets.ran);

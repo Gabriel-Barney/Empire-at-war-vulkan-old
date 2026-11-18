@@ -30,6 +30,11 @@
 #if ALAMO_GAME_HAVE_VIDEO
 #include "alamo/video/bink_header.hpp"
 #endif
+#if ALAMO_GAME_HAVE_CONTROLS
+#include "alamo/data/xml.hpp"
+#include "alamo/ui/gui_resource.hpp"
+#include "alamo/ui/hud_components.hpp"
+#endif
 
 namespace alamo::game {
 namespace {
@@ -47,6 +52,10 @@ constexpr FamilyGlob kGlobs[] = {
     {"texture", "Data\\Art\\Textures\\**.BMP"}, {"map", "Data\\Art\\Maps\\**.TED"},
     {"sound", "Data\\Audio\\**.WAV"},           {"sound", "Data\\Audio\\**.MP3"},
     {"movie", "Data\\Art\\Movies\\**.BIK"},
+    {"text", "Data\\Text\\*.DAT"},
+    {"gui", "Data\\Resources\\GUIDialog\\GUIDialogs.rc"},
+    {"gui", "Data\\XML\\GUIDialogs.xml"},
+    {"gui", "Data\\Art\\Textures\\MT_CommandBar.mtd"},
 };
 
 // Rejections retail shares: the reason text (substring) and the docs/re finding that says retail does not show the
@@ -102,6 +111,7 @@ uint64_t fnv1a(const std::vector<uint8_t>& b) {
 // ---- per family ----
 
 int audit_animation(const std::vector<uint8_t>& b, bool strict, std::string* rule) {
+    int state = kDecoded;
     try {
         (void)ala::parse(b);
     } catch (const std::exception& e) {
@@ -117,25 +127,17 @@ int audit_animation(const std::vector<uint8_t>& b, bool strict, std::string* rul
             return kRejected;
         }
         *rule = notes.empty() ? std::string("ala_salvage") : join_notes(notes);
-#if ALAMO_GAME_HAVE_MATERIALS
-        assets::AnimationClip clip;
-        std::string err;
-        if (!assets::build_animation(b, "AUDIT.ALA", clip, &err)) {
-            *rule = err;
-            return kRejected;
-        }
-#endif
-        return kSalvaged;
+        state = kSalvaged;
     }
 #if ALAMO_GAME_HAVE_MATERIALS
-    assets::AnimationClip clip;
+    assets::AnimationClip clip;  // the runtime clip builder (salvage mode) on top of the parse
     std::string err;
     if (!assets::build_animation(b, "AUDIT.ALA", clip, &err)) {
         *rule = err;
         return kRejected;
     }
 #endif
-    return kDecoded;
+    return state;
 }
 
 int audit_alo(const std::vector<uint8_t>& b, bool strict, std::string* family, std::string* rule) {
@@ -250,6 +252,59 @@ int audit_movie(const std::vector<uint8_t>& b, std::string* rule) {
 #endif
 }
 
+int audit_text(const std::vector<uint8_t>& b, bool strict, std::string* rule) {
+#if ALAMO_GAME_HAVE_CONTROLS
+    ui::TextDatabase t;
+    std::string err;
+    if (!t.parse(b, &err)) {
+        *rule = err.empty() ? std::string("text database does not parse") : err;
+        return kRejected;
+    }
+    if (!err.empty()) {  // "text_salvaged: ..." (hud_components.hpp)
+        *rule = err;
+        return strict ? kRejected : kSalvaged;
+    }
+#else
+    (void)b;
+    (void)strict;
+    (void)rule;
+#endif
+    return kDecoded;
+}
+
+int audit_gui(const std::string& path, const std::vector<uint8_t>& b, std::string* rule) {
+#if ALAMO_GAME_HAVE_CONTROLS
+    std::string err;
+    bool ok = true;
+    const auto ends = [&](const char* ext) {
+        const size_t n = std::char_traits<char>::length(ext);
+        return path.size() >= n && path.compare(path.size() - n, n, ext) == 0;
+    };
+    if (ends(".RC")) {
+        ui::GuiData g;
+        ok = g.script.parse(std::string_view(reinterpret_cast<const char*>(b.data()), b.size()), &err);
+    } else if (ends(".XML")) {
+        const data::XmlDocument doc = data::XmlDocument::parse(b, path);
+        ui::GuiData g;
+        ok = doc.ok() && g.skin.parse(doc.root());
+        if (!ok) err = "GUIDialogs.xml unparsable";
+    } else {
+        ui::TextureAtlas atlas;
+        ok = atlas.parse(b, &err);
+    }
+    if (!ok) {
+        *rule = "gui_fallback: " + (err.empty() ? std::string("does not parse") : err) +
+                "; the game uses the next layer's copy";
+        return kRejected;
+    }
+#else
+    (void)path;
+    (void)b;
+    (void)rule;
+#endif
+    return kDecoded;
+}
+
 // ---- cache ----
 
 struct CacheKey {
@@ -271,7 +326,24 @@ using Cache = std::unordered_map<CacheKey, CacheValue, CacheKeyHash>;  // looked
 
 // The second number is the rules version: bump it whenever a decoder, salvage rule or retail-equivalent entry changes
 // what a file's verdict is, so a cache written by an older build is ignored.
-constexpr const char* kCacheHeader = "alamo asset audit cache v1 rules 5";
+// The decoders this build has are part of the header too: a build without the assets, audio or video module checks less,
+// so its verdicts are not reused by one that has them (and the other way round).
+#ifndef ALAMO_GAME_HAVE_MATERIALS
+#define ALAMO_AUDIT_M "0"
+#else
+#define ALAMO_AUDIT_M "1"
+#endif
+#ifndef ALAMO_GAME_HAVE_AUDIO
+#define ALAMO_AUDIT_A "0"
+#else
+#define ALAMO_AUDIT_A "1"
+#endif
+#ifndef ALAMO_GAME_HAVE_VIDEO
+#define ALAMO_AUDIT_V "0"
+#else
+#define ALAMO_AUDIT_V "1"
+#endif
+constexpr const char* kCacheHeader = "alamo asset audit cache v1 rules 7 decoders m" ALAMO_AUDIT_M " a" ALAMO_AUDIT_A " v" ALAMO_AUDIT_V;
 
 std::string cache_file(const std::string& dir) { return dir + "\\asset_audit_v1.txt"; }
 
@@ -391,14 +463,41 @@ bool map_unreferenced(const std::string& path, const std::set<std::string>& ids)
 
 }  // namespace
 
+bool asset_salvage_confirmed(const std::string& rule) {
+    // Texture warnings: only the volume slice is backed (d3dx9_43 loads slice 0 into a 2D texture, docs/re 4).
+    if (rule.rfind("texture: ", 0) == 0) {
+        size_t at = 9;
+        while (at < rule.size()) {
+            const size_t end = rule.find("; ", at);
+            if (rule.compare(at, 24, "volume texture: slice 0 ") != 0) return false;
+            if (end == std::string::npos) break;
+            at = end + 2;
+        }
+        return true;
+    }
+    // ala_block_stride: retail's reader (docs/re 2) and the ANZ / ANG slots; the ALO rules: run 3 (docs/re 3).
+    static constexpr const char* kConfirmed[] = {"ala_block_stride", "alo_trailing_junk", "alo_collision_dropped",
+                                                 "alo_skin_index_clamped"};
+    size_t at = 0;
+    while (at <= rule.size()) {
+        const size_t end = std::min(rule.find(';', at), rule.size());
+        const std::string one = rule.substr(at, end - at);
+        bool known = false;
+        for (const char* c : kConfirmed) known = known || one == c;
+        if (!known) return false;
+        at = end + 1;
+    }
+    return true;
+}
+
 int audit_asset_bytes(const std::string& family_in, const std::vector<uint8_t>& bytes, bool strict, std::string* rule_out,
                       bool* retail_equivalent_out) {
     std::string family = family_in, rule;
     int state = kDecoded;
     if (bytes.empty()) {
         // A 0-byte file: mods blank a base file this way (Thrawn's Revenge empties 50 base maps to drop them). There is
-        // nothing to decode, for retail either.
-        if (rule_out) *rule_out = "empty file (0 bytes) [retail-equivalent: nothing to decode, for retail either]";
+        // nothing to decode, for retail either; the EMPTY probe slot: retail draws nothing and runs on (docs/re 3).
+        if (rule_out) *rule_out = "empty file (0 bytes) [retail-equivalent: nothing to decode; retail shows nothing (docs/re/MCX2_T02_ASSET_SALVAGE.md 3, EMPTY)]";
         if (retail_equivalent_out) *retail_equivalent_out = true;
         return kRejected;
     }
@@ -408,6 +507,7 @@ int audit_asset_bytes(const std::string& family_in, const std::vector<uint8_t>& 
     else if (family == "map") state = audit_map(bytes, &rule);
     else if (family == "sound") state = audit_sound(bytes, &rule);
     else if (family == "movie") state = audit_movie(bytes, &rule);
+    else if (family == "text") state = audit_text(bytes, strict, &rule);
     bool equivalent = false;
     if (state == kRejected) {
         std::string citation;
@@ -457,7 +557,10 @@ AssetAudit audit_mod_assets(const vfs::Vfs& v, const AssetAuditOptions& opt) {
                 ++a.cache_hits;
             } else {
                 val.family = family0;
-                val.state = audit_asset_bytes(family0, bytes, opt.strict, &val.rule, &val.retail_equivalent);
+                if (std::string(family0) == "gui" && !bytes.empty())
+                    val.state = audit_gui(path, bytes, &val.rule);
+                else
+                    val.state = audit_asset_bytes(family0, bytes, opt.strict, &val.rule, &val.retail_equivalent);
                 if (std::string(family0) == "model" && bytes.size() >= 4 && bytes[0] == 0 && bytes[1] == 9 && bytes[2] == 0 &&
                     bytes[3] == 0)
                     val.family = "particle";

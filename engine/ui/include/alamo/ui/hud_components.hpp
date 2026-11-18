@@ -185,7 +185,7 @@ std::u16string pseudo_localize(std::u16string_view s);
 // Data\Text\MasterTextFile_<LANGUAGE>.DAT, falling back to ENGLISH (UI.md §3.5). False if neither exists.
 bool load_master_text(const FileProvider& files, std::string_view language, TextDatabase& out, std::string* log = nullptr);
 std::string master_text_path(std::string_view language);
-// Retail's text language for a Windows LANGID (UI.md 3.5, mcx2 t06): GERMAN, FRENCH, SPANISH, ITALIAN, POLISH or
+// Retail's text language for a Windows LANGID (docs/re/MCX2_T02_ASSET_SALVAGE.md 5, mcx2 t06): GERMAN, FRENCH, SPANISH, ITALIAN, POLISH or
 // RUSSIAN for the LANGIDs retail's table lists, else ENGLISH (Japanese, Korean, Chinese and Thai are overridden to
 // English, as retail does).
 std::string retail_language_for_langid(uint16_t langid);

@@ -99,3 +99,27 @@ through `Spawn_Unit`. Verdicts from the shots (each slot's caption names it; the
   text metadata named `.dds`) are tool files no data names, and are not audited. A broken map that is not a skirmish
   map (`_MP_LAND_` / `_MP_SPACE_`, the list's prefixes) and that no XML or Lua file names is never loaded, by retail
   or the port (Ascendancy of the Lost's `A_SIZE_TEST.TED`): retail-equivalent. [M]
+- **Volume DDS in a 2D slot: slice 0.** Loaded with `D3DXCreateTextureFromFileInMemoryEx` into a 2D A8R8G8B8 texture
+  (D3D9 HAL device, the system's `d3dx9_43.dll`, 2026-11-17), EaW-Remake's `W_blu_clouds_bump.dds` (1024 x 1024 x 2
+  slices) comes out 1024 x 1024 with texel (0, 0) = slice 0's (BGRA 246, 126, 124, 0; slice 1 holds 60, 174, 206, 0).
+  The port's rule (slice 0, a warning) is the same. [H] for D3DX; that retail's loader reaches D3DX with a 2D target for
+  material textures is [M]. Partial cubemaps and truncated mip chains have no such check: their salvage keeps G3 open
+  ("salvage unconfirmed").
+- **Empty files.** A 0-byte file has nothing to decode; the `EMPTY` probe slot (a 0-byte `.ALO`) drew nothing and the
+  game ran on (section 3), so a 0-byte asset of any family is retail-equivalent. Thrawn's Revenge and Fall of the
+  Republic blank 50 base maps each this way. [H] for models, [M] for the other families.
+- **Fonts and GUI files.** Fonts are not audited (see above: retail opens no font file). `GUIDialogs.rc`,
+  `GUIDialogs.xml` and `MT_CommandBar.mtd` are audited as family `gui`; one that fails is `gui_fallback` (the port uses
+  the next layer's copy, mcx2 t07, [port]). `MasterTextFile_*.DAT` is family `text`; a bad record is `text_salvaged`
+  (the port keeps the entries before it [port]; retail's reader trusts the counts, GALACTIC_DIALOGS 2.7).
+
+## 5. Text language (t06, read from the exe 2026-11-17)
+
+At boot (0x200090) retail calls `GetUserDefaultLangID` and looks the LANGID up in a table of (LANGID, language index)
+pairs at RVA 0xa14450. The language names by index are ENGLISH, GERMAN, FRENCH, SPANISH, ITALIAN, JAPANESE, KOREAN,
+CHINESE, RUSSIAN, POLISH, THAI; indices 5, 6, 7 (Japanese, Korean, Chinese) and 10 (Thai) are then replaced by English,
+and a LANGID not in the table is English. The table's entries, by primary language: German 0x07 sublanguages 1-5,
+French 0x0C 1-6, Spanish 0x0A 1-20, Italian 0x10 1-2, Polish 0x415, Russian 0x419 (and the East-Asian and Thai ones
+that end as English). The text file is `Data\Text\MasterTextFile_<LANGUAGE>.DAT`, English when that file is missing
+(UI.md 3.5). Port: `ui::retail_language_for_langid` (engine/ui), used by `alamo_game`. [H] for the table and the
+overrides; the registry / options value design 10.3 mentions is not read by this path.

@@ -61,7 +61,7 @@ inline constexpr std::uint64_t kMaxDecodedTextureBytes = std::uint64_t(256) << 2
 //   BGRA8      -> VK_FORMAT_B8G8R8A8_UNORM         (mandatory sampled format in Vulkan)
 //   R8         -> VK_FORMAT_R8_UNORM               (L8, A8; see swizzle)
 //   R8G8       -> VK_FORMAT_R8G8_UNORM             (A8L8: r = L, g = A; see swizzle)
-//   R8G8_SNORM -> VK_FORMAT_R8G8_SNORM             (DX10 R8G8_SNORM)
+//   R8G8_SNORM -> VK_FORMAT_R8G8_SNORM             (no producer since t11 refuses DX10 DDS; kept for the upload path)
 //   RGBA8_SNORM-> VK_FORMAT_R8G8B8A8_SNORM         (V8U8, Q8W8V8U8, CxV8U8)
 //   RGBA16F    -> VK_FORMAT_R16G16B16A16_SFLOAT    (16-bit float DDS)
 //   RGBA32F    -> VK_FORMAT_R32G32B32A32_SFLOAT    (32-bit float DDS)

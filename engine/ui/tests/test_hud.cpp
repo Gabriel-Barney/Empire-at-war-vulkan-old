@@ -326,7 +326,7 @@ void test_atlas_text() {
         TextDatabase ok;
         CHECK(ok.parse(make_dat(three)) && !ok.salvaged() && ok.size() == 3);
     }
-    // Retail's language from the Windows LANGID (UI.md 3.5)
+    // Retail's language from the Windows LANGID (docs/re/MCX2_T02_ASSET_SALVAGE.md 5)
     CHECK(retail_language_for_langid(0x0407) == "GERMAN" && retail_language_for_langid(0x0807) == "GERMAN");
     CHECK(retail_language_for_langid(0x040C) == "FRENCH" && retail_language_for_langid(0x2C0A) == "SPANISH");
     CHECK(retail_language_for_langid(0x0419) == "RUSSIAN" && retail_language_for_langid(0x0415) == "POLISH");

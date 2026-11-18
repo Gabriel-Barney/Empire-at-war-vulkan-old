@@ -11,6 +11,11 @@
 //   map       Data\Art\Maps\*.TED                                   terrain::parse_ted (when linked)
 //   sound     Data\Audio\**\*.WAV / .MP3                            audio::probe_audio + decode_audio (when linked)
 //   movie     Data\Art\Movies\**\*.BIK                              video::probe_bink_header (when linked)
+//   text      Data\Text\*.DAT (MasterTextFile_<LANGUAGE>)            ui::TextDatabase::parse (salvage: text_salvaged)
+//   gui       GUIDialogs.rc / GUIDialogs.xml / MT_CommandBar.mtd       the ui readers; a failure is `gui_fallback` (the game
+//                                                                    uses the next layer's copy, mcx2 t07)
+// Not audited: fonts (retail registers only the TrueType fonts embedded in its exe and never opens a font file,
+// docs/re/MCX2_T02_ASSET_SALVAGE.md 4), files in folders whose name starts with '.' (tool metadata).
 // A rejection retail shares (a docs/re citation says retail does not show it either) is marked retail_equivalent and
 // does not lower the grade (12.2). Files the base game ships are not audited (retail's own data; the tests cover them).
 //
@@ -37,7 +42,7 @@ struct AssetAuditOptions {
 
 struct AssetEntry {
     std::string path;    // game path, upper case ("DATA\ART\MODELS\X.ALO")
-    std::string family;  // model, particle, animation, texture, map, sound, movie
+    std::string family;  // model, particle, animation, texture, map, sound, movie, text, gui
     std::string rule;    // salvaged: the salvage rule id(s), ';'-joined; rejected: the reason
     bool retail_equivalent = false;  // rejected, and retail does not show it either (cite in `rule`)
 };
@@ -56,6 +61,10 @@ struct AssetAudit {
 
 // Audits the files `v` serves from its mod layers (Vfs::mod_dirs()).
 AssetAudit audit_mod_assets(const vfs::Vfs& v, const AssetAuditOptions& opt = {});
+// A salvage rule (AssetEntry::rule of a salvaged entry) that retail's behaviour backs: a compat_assets probe verdict or
+// a test of retail's own loader (docs/re/MCX2_T02_ASSET_SALVAGE.md 3-4). Any other salvage keeps G3 open as
+// "salvage unconfirmed" (design 12.2).
+bool asset_salvage_confirmed(const std::string& rule);
 // Decodes one file as `family` (exposed for tests and the corpus runner). state: 0 decoded, 1 salvaged, 2 rejected.
 int audit_asset_bytes(const std::string& family, const std::vector<uint8_t>& bytes, bool strict, std::string* rule,
                       bool* retail_equivalent);

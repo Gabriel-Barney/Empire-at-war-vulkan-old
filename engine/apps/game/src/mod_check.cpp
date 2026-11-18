@@ -1357,6 +1357,8 @@ void compat_issues_and_grade(ModCheckReport& r) {
             (i.kind == IssueKind::HonourGap || i.kind == IssueKind::BindingUnconsumed || i.kind == IssueKind::RewardMissing ||
              i.kind == IssueKind::TokenMissing || i.kind == IssueKind::AssetRejected))
             r.grade.blocking.push_back(std::string(alamo::issue_kind_name(i.kind)) + " " + i.subject);
+    for (const AssetEntry& e : r.assets.salvaged)  // design 12.2: a salvage no retail verdict backs keeps G3 open
+        if (!asset_salvage_confirmed(e.rule)) r.grade.blocking.push_back("asset_salvaged " + e.path + " (salvage unconfirmed)");
     r.grade.g3_static = r.grade.grade != "G0" && r.grade.blocking.empty() && r.grade.check_errors.empty();
 }
 
