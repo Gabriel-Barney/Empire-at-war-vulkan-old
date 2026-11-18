@@ -347,6 +347,11 @@ float ConflictManager::unit_power(ObjectHandle h) const {
     const uint32_t t = static_cast<uint32_t>(sim_->store().type(h));
     const auto& ti = sim_->rules().types;
     float p = t < ti.size() ? ti[t].ai_combat_power : 0.0f;
+    if (sim_->company_survivors(h)) {  // mcx4 t22: a company that lost members
+        for (const uint32_t mt : *sim_->company_survivors(h))
+            if (mt < ti.size()) p += ti[mt].ai_combat_power;
+        return p;
+    }
     for (const auto& [mt, n] : rules_->type(t).members)
         if (mt < ti.size()) p += static_cast<float>(n) * ti[mt].ai_combat_power;
     return p;
@@ -400,6 +405,11 @@ bool ConflictManager::has_hero(const std::vector<ObjectHandle>& units) const {
     for (ObjectHandle h : units) {
         const uint32_t t = static_cast<uint32_t>(sim_->store().type(h));
         if (rules_->type(t).hero) return true;
+        if (const std::vector<uint32_t>* s = sim_->company_survivors(h)) {  // mcx4 t22
+            for (const uint32_t mt : *s)
+                if (rules_->type(mt).hero) return true;
+            continue;
+        }
         for (const auto& [mt, n] : rules_->type(t).members)
             if (rules_->type(mt).hero) return true;
     }
@@ -718,7 +728,7 @@ bool company_team_lost(const ConflictRules& rules, uint32_t company_type, std::s
 }
 
 ArCombatant make_ar_combatant(const GalacticRules& galactic, const ConflictRules& rules, uint32_t t, int32_t owner,
-                              bool space) {
+                              bool space, const std::vector<uint32_t>* survivors) {
     const auto& ti = galactic.types;
     const ConflictTypeInfo& ct = rules.type(t);
     ArCombatant c;
@@ -729,7 +739,16 @@ ArCombatant make_ar_combatant(const GalacticRules& galactic, const ConflictRules
     c.strength_bonus = ct.strength_bonus;  // Q9: the representative type's pairs (0x60c710)
     uint64_t first_cats = ct.categories;
     bool first = true;
-    for (const auto& [mt, n] : ct.members) {
+    // mcx4 t22: a company that lost members fights with its survivors (one piece per surviving member type, in order).
+    std::vector<std::pair<uint32_t, int32_t>> members = ct.members;
+    if (survivors) {
+        members.clear();
+        for (const uint32_t m : *survivors) {
+            if (!members.empty() && members.back().first == m) ++members.back().second;
+            else members.emplace_back(m, 1);
+        }
+    }
+    for (const auto& [mt, n] : members) {
         const ConflictTypeInfo& mi = rules.type(mt);
         ArPiece p;
         p.type = mt;
@@ -756,7 +775,8 @@ ArCombatant make_ar_combatant(const GalacticRules& galactic, const ConflictRules
 
 ArCombatant ConflictManager::combatant_of(ObjectHandle h, bool space) const {
     const auto& store = sim_->store();
-    return make_ar_combatant(sim_->rules(), *rules_, static_cast<uint32_t>(store.type(h)), store.owner(h), space);
+    return make_ar_combatant(sim_->rules(), *rules_, static_cast<uint32_t>(store.type(h)), store.owner(h), space,
+                             sim_->company_survivors(h));
 }
 
 void ConflictManager::auto_setup(const ConflictInfo& head) {
@@ -1312,11 +1332,8 @@ void ConflictManager::finish_battle(const BattleResult& result, LinkedResolution
             sim_->destroy_object(h);
         }
     }
-    // mcx4 t22 (MCX4_RE_ANSWERS_TACTICAL §13): a surviving company loses its dead members. [port] a hero member lost this
-    // way gets no respawn (0x48eb10's TRANSPORT test refuses while a teammate lives) and no STORY_DEFEAT_HERO (the port's
-    // members are not galactic objects).
-    for (const auto& [h, members] : result.survivors)
-        if (store.alive(h)) sim_->set_company_survivors(h, members);
+    // mcx4 t22 (MCX4_RE_ANSWERS_TACTICAL §13): a surviving company loses its dead members (GalacticSim::lose_company_members).
+    for (const auto& [h, members] : result.survivors) sim_->lose_company_members(h, members, planet);
     if (result.starbase_destroyed && store.alive(sim_->planets()[planet].starbase)) {
         (sim_->planets()[planet].starbase_owner == A ? e.attacker_losses : e.defender_losses)++;
         sim_->replace_starbase(planet, kNoIndex);
@@ -1448,6 +1465,7 @@ void ConflictManager::finish_corruption_mission(const BattleResult& result) {
             sim_->destroy_object(h);
         }
     }
+    for (const auto& [h, members] : result.survivors) sim_->lose_company_members(h, members, head.planet);  // mcx4 t22
     log_.push_back(std::move(e));
     pop_head(head.kind);
 }
@@ -1478,6 +1496,7 @@ int32_t ConflictManager::resolve_battle(const BattleResult& so_far) {
         }
     }
     if (so_far.starbase_destroyed && store.alive(sim_->planets()[head.planet].starbase)) sim_->replace_starbase(head.planet, kNoIndex);
+    for (const auto& [h, members] : so_far.survivors) sim_->lose_company_members(h, members, head.planet);  // mcx4 t22
     auto_setup(head);
     ar_in_.from_tactical = true;  // +0x3e
     force_ = true;

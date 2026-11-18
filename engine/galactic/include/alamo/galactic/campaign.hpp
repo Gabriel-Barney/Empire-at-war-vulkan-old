@@ -585,6 +585,13 @@ public:
     // list clears the record. Saved (galactic v12), hashed once one exists; dropped when the object is destroyed.
     void set_company_survivors(ObjectHandle company, std::vector<uint32_t> member_types);
     const std::vector<uint32_t>* company_survivors(ObjectHandle company) const;  // nullptr = the full company
+    // The company's current members: its survivor record, else its type's Company_Units (empty for a plain unit).
+    std::vector<uint32_t> company_members(ObjectHandle company) const;
+    // mcx4 t22 (§13 / Q4 step 3): the battle end removes a surviving company's lost members - each one is reported as
+    // ObjectDestroyed value 2 (the story's STORY_DESTROY, and STORY_DEFEAT_HERO for a hero member, as 0x2b5360 runs
+    // them through 0x3a01f0 / 0x327070), then the record becomes `survivors`. No respawn: 0x48eb10's TRANSPORT test
+    // refuses while a teammate lives.
+    void lose_company_members(ObjectHandle company, std::vector<uint32_t> survivors, PlanetIndex planet);
     float add_credits(int32_t player, float amount, bool notify_ai = true);  // A2K_T10_CREDIT_NOTIFY_RE Q3 table for the flag
     float player_income(int32_t player, bool consume);
     float planet_income(PlanetIndex planet, bool gross);

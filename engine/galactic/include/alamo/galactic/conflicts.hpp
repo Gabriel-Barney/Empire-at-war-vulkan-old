@@ -148,8 +148,9 @@ bool load_conflict_rules(const FileProvider& provider, const data::GameDatabase&
 // (TEAM branch) never are.
 bool company_team_lost(const ConflictRules& rules, uint32_t company_type, std::span<const uint32_t> dead_member_types);
 
+// survivors: a company's survivor record (mcx4 t22), nullptr = its full Company_Units.
 ArCombatant make_ar_combatant(const GalacticRules& galactic, const ConflictRules& rules, uint32_t type, int32_t owner,
-                              bool space);
+                              bool space, const std::vector<uint32_t>* survivors = nullptr);
 
 // ---- records ---------------------------------------------------------------------------------------------------
 enum class ConflictKind : uint8_t { Land = 1, Space = 2 };

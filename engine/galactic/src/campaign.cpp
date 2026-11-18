@@ -233,6 +233,7 @@ bool GalacticSim::start(const GalacticSetup& setup, std::vector<std::string>* di
     relations_.clear();
     planets_.assign(n, PlanetState{});
     fleets_.clear();
+    company_survivors_.clear();  // mcx4 t22
     fleet_by_slot_.clear();
     planet_by_slot_.clear();
     stealthed_.clear();  // OI galactic
@@ -1312,6 +1313,32 @@ const std::vector<uint32_t>* GalacticSim::company_survivors(ObjectHandle company
     const auto it = std::lower_bound(company_survivors_.begin(), company_survivors_.end(), id,
                                      [](const std::pair<int32_t, std::vector<uint32_t>>& e, int32_t v) { return e.first < v; });
     return it != company_survivors_.end() && it->first == id ? &it->second : nullptr;
+}
+
+std::vector<uint32_t> GalacticSim::company_members(ObjectHandle company) const {
+    if (const std::vector<uint32_t>* s = company_survivors(company)) return *s;
+    if (!store_->exists(company)) return {};
+    const auto t = static_cast<uint32_t>(store_->type(company));
+    return t < rules_->types.size() ? rules_->types[t].company_units : std::vector<uint32_t>{};
+}
+
+void GalacticSim::lose_company_members(ObjectHandle company, std::vector<uint32_t> survivors, PlanetIndex planet) {
+    if (!store_->alive(company)) return;
+    std::vector<uint32_t> lost = company_members(company);
+    for (const uint32_t m : survivors)
+        if (const auto it = std::find(lost.begin(), lost.end(), m); it != lost.end()) lost.erase(it);
+    if (emit_events_)
+        for (const uint32_t m : lost) {
+            GalacticEvent ev;
+            ev.kind = GalacticEventKind::ObjectDestroyed;
+            ev.object = static_cast<int32_t>(store_->id(company));
+            ev.type = m;
+            ev.player = store_->owner(company);
+            ev.planet = planet;
+            ev.value = 2;
+            emit(ev);
+        }
+    set_company_survivors(company, std::move(survivors));
 }
 
 bool GalacticSim::destroy_object_auto_resolve(ObjectHandle object) {

@@ -876,6 +876,16 @@ void test_company_survivors() {
     w.cm->finish_battle(res);
     const std::vector<uint32_t>* left = w.sim.company_survivors(co);
     CHECK(left && *left == (std::vector<uint32_t>{tFrigate, tCorvette}));
+    // The lost member is reported (ObjectDestroyed value 2, its type, the company's id): the story's STORY_DESTROY /
+    // STORY_DEFEAT_HERO, as 0x2b5360 runs it through 0x3a01f0.
+    uint32_t lost_events = 0;
+    for (const GalacticEvent& e : w.sim.events())
+        if (e.kind == GalacticEventKind::ObjectDestroyed && e.value == 2)
+            lost_events += e.type == tFrigate && e.object == static_cast<int32_t>(w.store.id(co)) ? 1u : 100u;
+    CHECK(lost_events == 1);
+    const ArCombatant ac = make_ar_combatant(w.rules, w.crules, tInfantry, pEmpire, false, left);  // auto-resolve: survivors
+    CHECK(ac.pieces.size() == 3 && ac.pieces[0].type == tFrigate && ac.pieces[1].type == tCorvette);
+    CHECK(w.sim.company_members(co) == *left);
     ByteWriter bw;
     w.sim.write(bw);
     World w2({{pEmpire, rB, tFrigate}, {pUnder, rC, tCorvette}, {pUnder, rC, tFrigate}}, true);
@@ -904,7 +914,8 @@ void test_respawn_tied_to_structure() {
     w.rules.types[tCorvette].respawn_tied_to_structure = tBarracks;
     const ObjectHandle hero = w.sim.spawn_unit(pEmpire, rB, tCorvette);
     CHECK(w.store.alive(hero));
-    CHECK(!w.sim.schedule_hero_respawn(hero, rB, 10.0f));  // 1 Barracks, 1 Corvette: refused
+    CHECK(w.store.alive(w.sim.spawn_unit(pEmpire, rB, tCorvette)));  // a second Corvette (the dying one is not counted)
+    CHECK(!w.sim.schedule_hero_respawn(hero, rB, 10.0f));  // 1 Barracks, 1 other Corvette: refused
     CHECK(w.sim.respawns_pending(rB).empty());
     CHECK(w.store.alive(w.sim.spawn_unit(pEmpire, rB, tBarracks)));
     CHECK(w.sim.schedule_hero_respawn(hero, rB, 10.0f) && w.sim.respawns_pending(rB).size() == 1);  // 2 > 1

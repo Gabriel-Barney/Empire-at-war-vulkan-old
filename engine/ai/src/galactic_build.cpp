@@ -455,7 +455,8 @@ void GalacticAiWorld::Impl::market_planet(PlanetIndex p) {
                 // counts as expired once its length has passed].
                 const bool expired =
                     b.claimed >= 0 &&
-                    now - b.claimed >= static_cast<int64_t>(static_cast<float>(kAiFps) * sim.rules().constants.ai_build_task_reservation_seconds);
+                    now - b.claimed >= static_cast<int64_t>(static_cast<float>(kAiFps) *
+                                         std::clamp(sim.rules().constants.ai_build_task_reservation_seconds, 0.0f, 1.0e9f));
                 if (!expired && delivery_reachable(owner, b, p) && ft >= queue_time && buildable_here(b)) {  // 0x6955a0
                     queue_time += queue_term(b, ft);
                     continue;
