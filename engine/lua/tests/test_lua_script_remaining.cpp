@@ -455,7 +455,8 @@ static void test_object_methods(const Db& db) {
     CHECK(run(vm, "Ship.Get_AI_Power_Vs_Unit(4)") == "" && last_message_has(vm, "Expected object or ai target."));
     CHECK(run(vm, "Ship.Get_Build_Pad_Contents()") == "" && last_message_has(vm, "is not a build pad"));
     // Build on a pad (no host): rules off -> the UC object is created and becomes the contents; rules on -> refused.
-    CHECK(run(vm, "Ship.Build('Fighter')") == "" && last_message_has(vm, "is not a valid build location"));
+    CHECK(run(vm, "Ship.Build('Fighter')") == "" && last_message_has(vm, "-- Object ") &&
+          last_message_has(vm, "is not a valid build location."));  // mcx8 t01: retail's text (0x5739c0)
     CHECK(run(vm, "Pad.Build('No_Such_Type')") == "" && last_message_has(vm, "unknown game object type No_Such_Type"));
     CHECK(run(vm, "r = Pad.Build('Fighter', true)") == "" && !gtrue(vm, "r") && !gnil(vm, "r") && last_message_has(vm, "game rules prevent"));
     CHECK(run(vm, "Pad.Build('Fighter', 1)") == "" && last_message_has(vm, "Expected boolean."));

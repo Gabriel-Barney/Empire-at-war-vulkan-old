@@ -671,33 +671,36 @@ bool pad_rule(Call& c, ObjectHandle pad) {
 // Build(type [, check_rules]) on a build pad (§2.2).
 int m_build(Call& c) {
     constexpr const char* kName = "GameObjectWrapper::Build";
-    if (c.nargs != 1 && c.nargs != 2) return c.script_error_stop("%s -- invalid number of parameters. Expected 1 or 2, got %d.", kName, c.nargs);
+    // mcx8 t01: the message texts are retail's (0x5739c0's strings, two spaces after a full stop, "invaid" sic).
+    if (c.nargs != 1 && c.nargs != 2) return c.script_error_stop("%s -- invaid number of parameters.  Expected 1 or 2, got %d.", kName, c.nargs);
     std::string name;
     const TypeIndex t = type_arg(c, 1, name);
     if (!valid_type(c, t)) {
-        if (c.is_string(1)) return c.script_error_stop("%s -- unknown game object type %s", kName, name.c_str());
-        return c.script_error_stop("%s -- invalid type for parameter 1. Expected game object type.", kName);
+        if (c.is_string(1)) return c.script_error_stop("%s -- unknown game object type %s.", kName, name.c_str());
+        return c.script_error_stop("%s -- invalid type for parameter 1.  Expected type or type name.", kName);
     }
     const ObjectHandle pad = self_object(c);
-    if (!has_beh(c, pad, "TACTICAL_BUILD_OBJECTS")) return c.script_error_stop("%s -- %s is not a valid build location", kName, object_name(c, pad).c_str());
-    if (pad_contents(c, pad)) return c.script_error_stop("%s -- %s already has something built on it", kName, object_name(c, pad).c_str());
+    if (!has_beh(c, pad, "TACTICAL_BUILD_OBJECTS")) return c.script_error_stop("%s -- Object %s is not a valid build location.", kName, object_name(c, pad).c_str());
+    if (pad_contents(c, pad)) return c.script_error_stop("%s -- Object %s already has something built on it.", kName, object_name(c, pad).c_str());
     bool check = false;
     if (c.nargs == 2) {
-        if (!is_bool(c, 2)) return c.script_error_stop("%s -- invalid type for parameter 2. Expected boolean.", kName);
+        if (!is_bool(c, 2)) return c.script_error_stop("%s -- invalid type for parameter 2.  Expected boolean.", kName);
         check = to_bool(c, 2);
     }
     objects::ObjectStore* st = store(c);
     if (RemainingScriptHooks* hk = hooks(c); hk && hk->build) {
         const int r = hk->build(pad, t, check);
         if (r == 0) {
-            c.script_warning("%s -- game rules prevent building %s at %s", kName, name.c_str(), object_name(c, pad).c_str());
+            c.script_warning("%s -- game rules prevent building %s at %s.", kName, name.c_str(), object_name(c, pad).c_str());
             return push_bool(c, false);
         }
-        if (r < 0) return c.script_error_stop("%s -- unknown error starting build of %s", kName, name.c_str());
+        if (r < 0)
+            return c.script_error_stop("%s -- unknown error starting build of %s at %s.  Perhaps there are some asserts to offer a clue?",
+                                       kName, name.c_str(), object_name(c, pad).c_str());
         return push_bool(c, true);
     }
     if (check && !(pad_lists(c, st->type(pad), faction_of(c, st->owner(pad)), t) && pad_rule(c, pad))) {
-        c.script_warning("%s -- game rules prevent building %s at %s", kName, name.c_str(), object_name(c, pad).c_str());
+        c.script_warning("%s -- game rules prevent building %s at %s.", kName, name.c_str(), object_name(c, pad).c_str());
         return push_bool(c, false);
     }
     // Start build 0x42dbd0 (charge 0, sfx 0) [port]: the type at the pad position with the pad's facing, owned by the
@@ -710,7 +713,9 @@ int m_build(Call& c) {
     ObjectBridge* b = bridge(c);
     TacticalScriptHooks* th = b ? b->tactical : nullptr;
     const ObjectHandle uc = (th && th->spawn) ? th->spawn(sp) : st->create(sp);
-    if (!uc || !st->alive(uc)) return c.script_error_stop("%s -- unknown error starting build of %s", kName, name.c_str());
+    if (!uc || !st->alive(uc))
+        return c.script_error_stop("%s -- unknown error starting build of %s at %s.  Perhaps there are some asserts to offer a clue?", kName,
+                                   name.c_str(), object_name(c, pad).c_str());
     if (RemainingObjectState* s = edit_state(c, st->id(pad))) s->pad_uc = st->id(uc);
     return push_bool(c, true);
 }
