@@ -110,6 +110,26 @@ std::vector<std::string_view> category_names(std::string_view text) {
 }
 }  // namespace
 
+std::string_view GameAudioHost::retreat_refusal_tag(bool land, int32_t code) {
+    switch (code) {
+        case 1:
+        case 2:
+        case 5:
+            if (land) return "Land_Retreat_Not_Allowed_SFXEvent";  // ledger: consumes Faction.Land_Retreat_Not_Allowed_SFXEvent
+            return "Space_Retreat_Not_Allowed_SFXEvent";           // ledger: consumes Faction.Space_Retreat_Not_Allowed_SFXEvent
+        case 3:
+            if (land) return "Land_Retreat_Not_Allowed_Reason_1_SFXEvent";  // ledger: consumes Faction.Land_Retreat_Not_Allowed_Reason_1_SFXEvent
+            return "Space_Retreat_Not_Allowed_Reason_1_SFXEvent";           // ledger: consumes Faction.Space_Retreat_Not_Allowed_Reason_1_SFXEvent
+        case 4:
+            if (land) return "Land_Retreat_Not_Allowed_Reason_2_SFXEvent";  // ledger: consumes Faction.Land_Retreat_Not_Allowed_Reason_2_SFXEvent
+            return "Space_Retreat_Not_Allowed_Reason_2_SFXEvent";           // ledger: consumes Faction.Space_Retreat_Not_Allowed_Reason_2_SFXEvent
+        case 6:
+            if (land) return "Land_Retreat_Not_Allowed_Reason_3_SFXEvent";  // ledger: consumes Faction.Land_Retreat_Not_Allowed_Reason_3_SFXEvent
+            return "Space_Retreat_Not_Allowed_Reason_3_SFXEvent";           // ledger: consumes Faction.Space_Retreat_Not_Allowed_Reason_3_SFXEvent
+        default: return {};
+    }
+}
+
 bool GameAudioHost::turret_turning(bool seen, float prev_yaw, float prev_elevation, float yaw, float elevation) {
     return seen && (yaw != prev_yaw || elevation != prev_elevation);
 }

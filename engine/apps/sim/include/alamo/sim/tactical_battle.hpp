@@ -1500,6 +1500,10 @@ public:
     // 1 not a participant / battle over; 2 the retreat-allowed countdown still runs; 5 a retreat already runs; 6 [port]
     // prevented (retreat_prevented: interdict, Retreat_Prevention, a super weapon in space).
     int32_t retreat_block(int32_t player) const;
+    // mcx4 t13 (presentation read; MCX4_PRES_RE_ANSWERS_2 Q4, 0x340920): retail's refusal code for the HUD line: as
+    // retreat_block, with its 6 split into 3 (an interdict entry), 4 (a Retreat_Prevention entry), 1 (the story's
+    // DISABLE_RETREAT) and 6 (a super weapon in space).
+    int32_t retreat_refusal(int32_t player) const;
     // ui3 t03: 0..1 progress of the retreat-allowed countdown (1 = allowed) and of the running retreat countdown (-1 when
     // none runs), for the b_retreat Build_Texture_Name dial.
     float retreat_allowed_progress() const;

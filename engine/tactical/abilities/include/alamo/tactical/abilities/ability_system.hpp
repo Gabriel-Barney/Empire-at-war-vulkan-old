@@ -614,6 +614,9 @@ public:
     // player (the original returns the entry's reason code +0x38 [M]). cu8 t01: TacticalBattle refuses the player's
     // retreat (and the auto-resolve stop) while it holds.
     bool retreat_blocked(int32_t player) const;
+    // mcx4 t13 (presentation read; MCX4_PRES_RE_ANSWERS_2 Q4): the kind of the first list entry that blocks `player`'s
+    // retreat: 0 interdict (refusal code 3), 1 Retreat_Prevention (code 4), -1 none.
+    int32_t retreat_block_kind(int32_t player) const;
     // Command 45 RepairHardpointEvent (§1.12): adds `player` as a repairer of the hardpoint (CombatSystem).
     bool repair_hardpoint(ObjectId id, uint32_t hp, int32_t player);
     // Lua Set_Targeting_Priorities(name) on a unit or container (members follow their head): the named

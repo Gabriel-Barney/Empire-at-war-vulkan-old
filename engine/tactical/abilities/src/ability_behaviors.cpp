@@ -309,6 +309,12 @@ bool AbilitySystem::retreat_blocked(int32_t player) const {
     return false;
 }
 
+int32_t AbilitySystem::retreat_block_kind(int32_t player) const {
+    for (const SourceEntry& e : source_entries_)
+        if (e.player == player && e.kind <= 1) return e.kind;
+    return -1;
+}
+
 bool AbilitySystem::repair_hardpoint(ObjectId id, uint32_t hp, int32_t player) {
     return combat_->add_hardpoint_repairer(id, hp, player);
 }

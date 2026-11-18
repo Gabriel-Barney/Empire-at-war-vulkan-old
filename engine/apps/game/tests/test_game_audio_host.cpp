@@ -403,6 +403,34 @@ void test_strike_available_tags() {
 // mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "GameObjectType.SFXEvent_Turret_Rotating_Loop"): the motor loop runs while
 // the turret pose changes from tick to tick.
 // ledger: verifies GameObjectType.SFXEvent_Turret_Rotating_Loop
+// mcx4 t13 (docs/re/MCX4_PRES_RE_ANSWERS_2.md Q4): refusal codes 1 / 2 / 5 -> Land_Retreat_Not_Allowed_SFXEvent /
+// Space_Retreat_Not_Allowed_SFXEvent; 3 / 4 / 6 -> Land_Retreat_Not_Allowed_Reason_1_SFXEvent,
+// Land_Retreat_Not_Allowed_Reason_2_SFXEvent, Land_Retreat_Not_Allowed_Reason_3_SFXEvent and the space
+// Space_Retreat_Not_Allowed_Reason_1_SFXEvent, Space_Retreat_Not_Allowed_Reason_2_SFXEvent,
+// Space_Retreat_Not_Allowed_Reason_3_SFXEvent.
+// ledger: verifies Faction.Land_Retreat_Not_Allowed_SFXEvent
+// ledger: verifies Faction.Space_Retreat_Not_Allowed_SFXEvent
+// ledger: verifies Faction.Land_Retreat_Not_Allowed_Reason_1_SFXEvent
+// ledger: verifies Faction.Land_Retreat_Not_Allowed_Reason_2_SFXEvent
+// ledger: verifies Faction.Land_Retreat_Not_Allowed_Reason_3_SFXEvent
+// ledger: verifies Faction.Space_Retreat_Not_Allowed_Reason_1_SFXEvent
+// ledger: verifies Faction.Space_Retreat_Not_Allowed_Reason_2_SFXEvent
+// ledger: verifies Faction.Space_Retreat_Not_Allowed_Reason_3_SFXEvent
+void test_retreat_refusal_tag() {
+    using H = GameAudioHost;
+    CHECK(H::retreat_refusal_tag(true, 0).empty() && H::retreat_refusal_tag(false, 7).empty());
+    for (const int32_t c : {1, 2, 5}) {
+        CHECK(H::retreat_refusal_tag(true, c) == "Land_Retreat_Not_Allowed_SFXEvent");
+        CHECK(H::retreat_refusal_tag(false, c) == "Space_Retreat_Not_Allowed_SFXEvent");
+    }
+    CHECK(H::retreat_refusal_tag(false, 3) == "Space_Retreat_Not_Allowed_Reason_1_SFXEvent");
+    CHECK(H::retreat_refusal_tag(false, 4) == "Space_Retreat_Not_Allowed_Reason_2_SFXEvent");
+    CHECK(H::retreat_refusal_tag(false, 6) == "Space_Retreat_Not_Allowed_Reason_3_SFXEvent");
+    CHECK(H::retreat_refusal_tag(true, 3) == "Land_Retreat_Not_Allowed_Reason_1_SFXEvent");
+    CHECK(H::retreat_refusal_tag(true, 4) == "Land_Retreat_Not_Allowed_Reason_2_SFXEvent");
+    CHECK(H::retreat_refusal_tag(true, 6) == "Land_Retreat_Not_Allowed_Reason_3_SFXEvent");
+}
+
 void test_turret_turning() {
     using H = GameAudioHost;
     CHECK(!H::turret_turning(false, 0.0f, 0.0f, 10.0f, 0.0f));  // first tick seen: no baseline
@@ -1191,6 +1219,7 @@ int main() {
     test_point_contested();             // mcx4 t13 batch U
     test_command_rank();                // mcx4 tac2 handover
     test_turret_turning();              // mcx4 t13
+    test_retreat_refusal_tag();         // mcx4 t13
     test_intro_speech_t07();
     test_aud2();
     test_spin_and_self_destruct();  // mcx4 t13 batch Q

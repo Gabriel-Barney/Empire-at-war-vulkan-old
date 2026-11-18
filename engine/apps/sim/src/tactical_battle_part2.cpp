@@ -1501,6 +1501,18 @@ int32_t TacticalBattle::retreat_block(int32_t player) const {
     return 0;
 }
 
+int32_t TacticalBattle::retreat_refusal(int32_t player) const {
+    const int32_t b = retreat_block(player);
+    if (b != 6) return b;
+    if (abilities_) {  // retreat_prevented's order: the ability list, DISABLE_RETREAT, then the super weapon
+        const int32_t k = abilities_->retreat_block_kind(player);
+        if (k == 0) return 3;
+        if (k == 1) return 4;
+    }
+    if (retreat_off(player)) return 1;
+    return 6;
+}
+
 float TacticalBattle::retreat_allowed_progress() const {
     if (retreat_allowed_frame_ == 0 || frame_ >= retreat_allowed_frame_) return 1.0f;
     return static_cast<float>(frame_) / static_cast<float>(retreat_allowed_frame_);

@@ -270,6 +270,11 @@ public:
         bool local_only = false;
     };
     static SpawnLine spawn_line(uint8_t ability);
+    // mcx4 t13 (MCX4_PRES_RE_ANSWERS_2 Q4, HUD retreat buttons 0x30d5d0 / 0x30e1b0): the local faction's line for a
+    // refused retreat request with retail code `code` (TacticalBattle::retreat_refusal): 1 / 2 / 5 the plain
+    // *_Retreat_Not_Allowed_SFXEvent, 3 / 4 / 6 its _Reason_1 / _2 / _3 (an unset reason line stays silent: no
+    // fall-back); "" for 0.
+    static std::string_view retreat_refusal_tag(bool land, int32_t code);
     // mcx4 t13 (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Turret_Rotating_Loop", 0x3a8080 from the turret update
     // 0x632270): the turret is turning on a tick whose pose differs from the last tick's (the first tick seen: not).
     static bool turret_turning(bool seen, float prev_yaw, float prev_elevation, float yaw, float elevation);
