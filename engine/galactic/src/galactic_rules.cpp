@@ -213,6 +213,8 @@ EconomyConstants load_economy_constants(const data::GameDatabase& db) {
     c.trade_route_movement_factor = g.get_float("TradeRouteMovementFactor", c.trade_route_movement_factor);  // mcx4 t02
     c.bribery_fleet_reveal_range = g.get_float("Bribery_Fleet_Reveal_Range", c.bribery_fleet_reveal_range);  // mcx4 t09
     c.indigenous_spawn_destruction_reward = g.get_int("Indigenous_Spawn_Destruction_Reward", 0);  // mcx4 t09 (Q5)
+    c.ai_build_task_reservation_seconds =
+        g.get_float("AI_BuildTaskReservationSeconds", c.ai_build_task_reservation_seconds);  // mcx4 t05 (C1)
     c.health_low_percent_threshold = g.get_float("Health_Low_Percent_Threshold", c.health_low_percent_threshold);  // a2l t03
     {  // a2m t05: Low_ / Medium_ / High_Threat_Reachability_Tolerance (A2M_T04_RE_ANSWERS Q3)
         static constexpr const char* kTol[3] = {"Low_Threat_Reachability_Tolerance", "Medium_Threat_Reachability_Tolerance",
@@ -377,6 +379,8 @@ std::vector<TypeInfo> extract_type_info(const objects::GameObjectTypes& types, c
         i.ai_combat_power = types.columns().ai_combat_power[t];
         i.prevents_story_autoresolve = types.get_bool(t, "Prevents_Story_Campaign_Autoresolve");  // mcx4 t20
         i.fleet_reveal_range = types.get_float(t, "Hyperspace_Fleet_Reveal_Range");  // mcx4 t09 (Q3)
+        if (const objects::TypeIndex st = types.get_type_ref(t, "Respawn_Tied_To_Structure"); st != objects::kNone)
+            i.respawn_tied_to_structure = static_cast<uint32_t>(st);  // mcx4 t05 (T10 §8)
         i.build_countdown_timer = types.get_bool(t, "Build_Countdown_Timer");  // mcx4 t09 (Q7)
         i.build_speech_countdowns = std::string(ascii_trim(types.get_string(t, "Build_Speech_Countdowns")));
         i.reduced_by_factories = types.get_bool(t, "Build_Time_Reduced_By_Multiple_Factories");

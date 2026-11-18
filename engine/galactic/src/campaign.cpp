@@ -1287,6 +1287,33 @@ void GalacticSim::emit_production(GalacticEventKind kind, PlanetIndex planet, ui
     emit(ev);
 }
 
+void GalacticSim::set_company_survivors(ObjectHandle company, std::vector<uint32_t> member_types) {
+    if (!store_->exists(company)) return;
+    const int32_t id = static_cast<int32_t>(store_->id(company));
+    auto it = std::lower_bound(company_survivors_.begin(), company_survivors_.end(), id,
+                               [](const std::pair<int32_t, std::vector<uint32_t>>& e, int32_t v) { return e.first < v; });
+    const auto t = static_cast<uint32_t>(store_->type(company));
+    bool full = member_types.empty();
+    if (!full && t < rules_->types.size()) {
+        std::vector<uint32_t> all = rules_->types[t].company_units;
+        full = all == member_types;
+    }
+    if (full) {
+        if (it != company_survivors_.end() && it->first == id) company_survivors_.erase(it);
+        return;
+    }
+    if (it != company_survivors_.end() && it->first == id) it->second = std::move(member_types);
+    else company_survivors_.insert(it, {id, std::move(member_types)});
+}
+
+const std::vector<uint32_t>* GalacticSim::company_survivors(ObjectHandle company) const {
+    if (company_survivors_.empty() || !store_->exists(company)) return nullptr;
+    const int32_t id = static_cast<int32_t>(store_->id(company));
+    const auto it = std::lower_bound(company_survivors_.begin(), company_survivors_.end(), id,
+                                     [](const std::pair<int32_t, std::vector<uint32_t>>& e, int32_t v) { return e.first < v; });
+    return it != company_survivors_.end() && it->first == id ? &it->second : nullptr;
+}
+
 bool GalacticSim::destroy_object_auto_resolve(ObjectHandle object) {
     destroy_auto_resolve_ = true;
     const bool ok = destroy_object(object);
@@ -1298,6 +1325,10 @@ bool GalacticSim::destroy_object(ObjectHandle object) {
     if (!store_->alive(object)) return false;
     auto destroyed = [this](ObjectHandle h, PlanetIndex at, bool fleet) {
         if (!fleet && scoring_hooks_.destroyed && store_->alive(h)) scoring_hooks_.destroyed(h);  // storyb t14
+        if (!company_survivors_.empty() && store_->exists(h)) {  // mcx4 t22
+            const int32_t id = static_cast<int32_t>(store_->id(h));
+            std::erase_if(company_survivors_, [id](const std::pair<int32_t, std::vector<uint32_t>>& e) { return e.first == id; });
+        }
         if (!emit_events_ || !store_->alive(h)) return;
         GalacticEvent ev;
         ev.kind = GalacticEventKind::ObjectDestroyed;
@@ -2337,6 +2368,15 @@ void GalacticSim::hash_state(StateHasher& h) const {
         h.f32(f.facing.z);
         h.boolean(f.moving);
         if (f.story_autoresolve_lock) h.u8(0x95);  // mcx4 t20: hashed only once set
+    }
+    if (!company_survivors_.empty()) {  // mcx4 t22: hashed only once a company lost members
+        h.u32(0x43535631u);  // "CSV1"
+        h.u32(static_cast<uint32_t>(company_survivors_.size()));
+        for (const auto& [id, members] : company_survivors_) {
+            h.i32(id);
+            h.u32(static_cast<uint32_t>(members.size()));
+            for (const uint32_t m : members) h.u32(m);
+        }
     }
     if (!special_state_default()) hash_special(h);  // P4 sim (order: special_systems.hpp "CRC")
     if (!diplomacy_state_default()) hash_diplomacy(h);  // relation table + unlocked lists, once touched

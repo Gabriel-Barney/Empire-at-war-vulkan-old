@@ -855,6 +855,61 @@ void test_autoresolve_bypass_rules() {
     }
 }
 
+// mcx4 t22 (docs/re/MCX4_RE_ANSWERS_TACTICAL.md §13, the battle end 0x2b5360 removes the members marked lost): a
+// company that survives a fought battle with members dead keeps only its survivors (BattleResult::survivors -> the
+// galaxy's record, saved in galactic v12, hashed once set, dropped when the company dies; the full list clears it).
+void test_company_survivors() {
+    std::printf("  mcx4 t22: company survivors after a fought battle\n");
+    World w({{pEmpire, rB, tFrigate}, {pUnder, rC, tCorvette}, {pUnder, rC, tFrigate}}, true);
+    w.rules.types[tInfantry].company_units = {tFrigate, tFrigate, tCorvette};  // a stand-in company type
+    w.cm->config().human_choice = BattleChoice::Fight;
+    w.cm->start_battle = [](const BattleRequest&) { return true; };
+    const ObjectHandle co = w.sim.spawn_unit(pEmpire, rB, tInfantry);
+    CHECK(w.store.alive(co) && w.sim.company_survivors(co) == nullptr);
+    StateHasher h0;
+    w.sim.hash_state(h0);
+    w.arrive_at_b();
+    CHECK(w.cm->battle_active());
+    BattleResult res;
+    res.winner = pEmpire;
+    res.survivors = {{co, {tFrigate, tCorvette}}};
+    w.cm->finish_battle(res);
+    const std::vector<uint32_t>* left = w.sim.company_survivors(co);
+    CHECK(left && *left == (std::vector<uint32_t>{tFrigate, tCorvette}));
+    ByteWriter bw;
+    w.sim.write(bw);
+    World w2({{pEmpire, rB, tFrigate}, {pUnder, rC, tCorvette}, {pUnder, rC, tFrigate}}, true);
+    w2.store = w.store;  // ObjectStore::read stand-in (test_save.cpp)
+    w2.ids.set_next(w.ids.next());
+    ByteReader br(bw.bytes());
+    CHECK(w2.sim.read(br));
+    const std::vector<uint32_t>* back = w2.sim.company_survivors(co);
+    CHECK(back && *back == *left);  // saved (galactic v12)
+    StateHasher h1, h2;
+    w.sim.hash_state(h1);
+    w2.sim.hash_state(h2);
+    CHECK(h1.digest() == h2.digest() && h1.digest() != h0.digest());
+    w.sim.set_company_survivors(co, {tFrigate, tFrigate, tCorvette});  // the full list: the record goes
+    CHECK(w.sim.company_survivors(co) == nullptr);
+    w.sim.set_company_survivors(co, {tCorvette});
+    CHECK(w.sim.destroy_object(co) && w.sim.company_survivors(co) == nullptr);
+}
+
+// mcx4 t05 (docs/re/MCX4_T10_RE_ANSWERS.md §8, 0x48eb10 step 1): a type with Respawn_Tied_To_Structure respawns only
+// while its owner has more live objects of that structure type than of its own type.
+// ledger: verifies GameObjectType.Respawn_Tied_To_Structure
+void test_respawn_tied_to_structure() {
+    std::printf("  mcx4 t05: Respawn_Tied_To_Structure\n");
+    World w({{pEmpire, rB, tFrigate}, {pEmpire, rB, tBarracks}, {pUnder, rC, tCorvette}}, true);
+    w.rules.types[tCorvette].respawn_tied_to_structure = tBarracks;
+    const ObjectHandle hero = w.sim.spawn_unit(pEmpire, rB, tCorvette);
+    CHECK(w.store.alive(hero));
+    CHECK(!w.sim.schedule_hero_respawn(hero, rB, 10.0f));  // 1 Barracks, 1 Corvette: refused
+    CHECK(w.sim.respawns_pending(rB).empty());
+    CHECK(w.store.alive(w.sim.spawn_unit(pEmpire, rB, tBarracks)));
+    CHECK(w.sim.schedule_hero_respawn(hero, rB, 10.0f) && w.sim.respawns_pending(rB).size() == 1);  // 2 > 1
+}
+
 void test_human_fight() {
     World w({{pEmpire, rA, tFrigate}, {pEmpire, rB, tFrigate}, {pEmpire, rB, tCorvette}, {pUnder, rC, tFrigate}}, true);
     w.cm->config().human_choice = BattleChoice::Fight;
@@ -1590,6 +1645,8 @@ int main() {
     test_auto_resolve_basic();
     test_auto_resolve_unit_strength();
     test_hero_respawn_after_battle();
+    test_company_survivors();
+    test_respawn_tied_to_structure();
     test_auto_resolve_rules();
     std::printf("force split\n");
     test_force_split();

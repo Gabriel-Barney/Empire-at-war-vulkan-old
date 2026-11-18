@@ -58,7 +58,8 @@ namespace {
 // auto-resolve rules {bool disabled, bool story campaign, u32 count, {u32 planet type, bool land}...}; v6 - v9 keep the
 // session's start() values. v11 (mcx4 t20): + last, the fleets holding the sticky story auto-resolve lock {u32 count,
 // u32 fleet index...} ascending; v10 and older derive it from each fleet's current contents.
-constexpr uint32_t kGalacticSaveVersion = 11;
+constexpr uint32_t kGalacticSaveVersion = 12;  // 12 (mcx4 t22): + the company survivor records after the locks
+constexpr uint32_t kGalacticSaveVersionNoSurvivors = 11;
 constexpr uint32_t kGalacticSaveVersionNoLocks = 10;
 constexpr uint32_t kGalacticSaveVersionNoPlacement = 9;
 // limit: guard not a limit: save format version 8 (before the marker slots)
@@ -275,12 +276,17 @@ void GalacticSim::write(ByteWriter& w) const {
     w.u32(locked);
     for (uint32_t i = 0; i < fleets_.size(); ++i)
         if (fleets_[i].story_autoresolve_lock) w.u32(i);
+    w.u32(static_cast<uint32_t>(company_survivors_.size()));  // mcx4 t22 (v12), ascending ObjectId
+    for (const auto& [id, members] : company_survivors_) {
+        w.i32(id).u32(static_cast<uint32_t>(members.size()));
+        for (const uint32_t m : members) w.u32(m);
+    }
 }
 
 bool GalacticSim::read(ByteReader& r) {
     const objects::ObjectStore& st = *store_;
     const uint32_t version = r.u32();
-    if ((version != kGalacticSaveVersion && version != kGalacticSaveVersionNoLocks && version != kGalacticSaveVersionNoPlacement && version != kGalacticSaveVersionNoSlots && version != kGalacticSaveVersionNoGalab &&
+    if ((version != kGalacticSaveVersion && version != kGalacticSaveVersionNoSurvivors && version != kGalacticSaveVersionNoLocks && version != kGalacticSaveVersionNoPlacement && version != kGalacticSaveVersionNoSlots && version != kGalacticSaveVersionNoGalab &&
          version != kGalacticSaveVersionNoNames) ||
         !r.ok())
         return false;
@@ -667,6 +673,22 @@ bool GalacticSim::read(ByteReader& r) {
                 if (t < rules_->types.size() && rules_->types[t].prevents_story_autoresolve) f.story_autoresolve_lock = true;
             }
     }
+    std::vector<std::pair<int32_t, std::vector<uint32_t>>> survivors;  // mcx4 t22 (v12)
+    if (version >= 12) {
+        uint32_t n_surv = 0;
+        if (!r.count(n_surv, 8)) return false;
+        survivors.resize(n_surv);
+        for (uint32_t k = 0; k < n_surv; ++k) {
+            survivors[k].first = r.i32();
+            uint32_t n_m = 0;
+            if (!r.count(n_m, 4) || (k > 0 && survivors[k].first <= survivors[k - 1].first)) return false;
+            survivors[k].second.resize(n_m);
+            for (uint32_t& m : survivors[k].second) {
+                m = r.u32();
+                if (!r.ok() || m >= rules_->types.size()) return false;
+            }
+        }
+    }
     if (!r.ok() || !r.done()) return false;
 
     // ---- commit ----
@@ -690,6 +712,7 @@ bool GalacticSim::read(ByteReader& r) {
     relations_ = std::move(relations);
     planets_ = std::move(planets);
     fleets_ = std::move(fleets);
+    company_survivors_ = std::move(survivors);
     stealthed_ = std::move(stealthed);
     ground_shy_ = std::move(ground_shy);
     claims_ = std::move(claims);

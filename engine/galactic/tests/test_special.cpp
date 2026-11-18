@@ -1416,6 +1416,10 @@ void test_foc() {
         CHECK(whole("Droid_C3P0") && !whole("Star_Destroyer"));  // both droids carry the flag
         CHECK(cr.type(static_cast<uint32_t>(types.resolve_name("Droids_Team"))).company &&
               !cr.type(static_cast<uint32_t>(types.resolve_name("Red_Squadron"))).company);
+        // mcx4 t05 (MCX4_T10_RE_ANSWERS §8): FoC's two Respawn_Tied_To_Structure lines (the generic bounty hunters) sit
+        // inside an XML comment, so no FoC type has the tag; only a mod's does.
+        const auto tied = [&](const char* n) { return rules.types[static_cast<uint32_t>(types.resolve_name(n))].respawn_tied_to_structure; };
+        CHECK(tied("Generic_Bounty_Hunter_E") == kNoIndex && tied("Generic_Bounty_Hunter_R") == kNoIndex);
     }
     CHECK(s.items[0].name == "Buzz_Droid_Tech" && s.items[0].ability_crcs[0] == special_name_crc("Buzz_Droids_Viper") &&
           s.find_item(special_name_crc("Buzz_Droid_Tech")) == 0);

@@ -579,6 +579,12 @@ public:
     bool destroy_object(ObjectHandle object);
     // mcx4 Q4 (MCX4_GAL2_RE_ANSWERS): an auto-resolve kill - the same removal, with ObjectDestroyed value 1.
     bool destroy_object_auto_resolve(ObjectHandle object);
+    // mcx4 t22 (MCX4_RE_ANSWERS_TACTICAL §13 / MCX4_GAL2_RE_ANSWERS Q4: the battle end 0x2b5360 removes the members
+    // marked lost): a company (Company_Units) that survives a fought battle with members dead keeps only its survivors,
+    // as member types in Company_Units order; the next tactical spawn makes those. An empty list or the full member
+    // list clears the record. Saved (galactic v12), hashed once one exists; dropped when the object is destroyed.
+    void set_company_survivors(ObjectHandle company, std::vector<uint32_t> member_types);
+    const std::vector<uint32_t>* company_survivors(ObjectHandle company) const;  // nullptr = the full company
     float add_credits(int32_t player, float amount, bool notify_ai = true);  // A2K_T10_CREDIT_NOTIFY_RE Q3 table for the flag
     float player_income(int32_t player, bool consume);
     float planet_income(PlanetIndex planet, bool gross);
@@ -1516,6 +1522,7 @@ private:
     bool emit_events_ = false;
     // mcx4 Q4: true only inside destroy_object_auto_resolve (not state, not hashed or saved): tags ObjectDestroyed.
     bool destroy_auto_resolve_ = false;
+    std::vector<std::pair<int32_t, std::vector<uint32_t>>> company_survivors_;  // mcx4 t22: (ObjectId, members), ascending id
     ScoringHooks scoring_hooks_;  // storyb t14
     ObjectHandle last_spawn_;  // newest object made by spawn() (event payloads only, never hashed)
     std::vector<GalacticEvent> events_;  // S4 stream (not hashed)

@@ -202,6 +202,8 @@ struct BattleResult {
     uint8_t victory = kVictoryAllDestroyed;
     int32_t retreated = kNoPlayer;      // the player the retreat coordinator reports
     std::vector<ObjectHandle> destroyed;  // galactic objects whose tactical counterparts all died
+    // mcx4 t22: companies that came out with members lost - (galactic object, the surviving member types)
+    std::vector<std::pair<ObjectHandle, std::vector<uint32_t>>> survivors;
     bool starbase_destroyed = false;
 };
 

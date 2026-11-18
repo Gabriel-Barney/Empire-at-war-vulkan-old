@@ -1312,6 +1312,11 @@ void ConflictManager::finish_battle(const BattleResult& result, LinkedResolution
             sim_->destroy_object(h);
         }
     }
+    // mcx4 t22 (MCX4_RE_ANSWERS_TACTICAL §13): a surviving company loses its dead members. [port] a hero member lost this
+    // way gets no respawn (0x48eb10's TRANSPORT test refuses while a teammate lives) and no STORY_DEFEAT_HERO (the port's
+    // members are not galactic objects).
+    for (const auto& [h, members] : result.survivors)
+        if (store.alive(h)) sim_->set_company_survivors(h, members);
     if (result.starbase_destroyed && store.alive(sim_->planets()[planet].starbase)) {
         (sim_->planets()[planet].starbase_owner == A ? e.attacker_losses : e.defender_losses)++;
         sim_->replace_starbase(planet, kNoIndex);
