@@ -2111,9 +2111,21 @@ bool AbilitySystem::damage_listener(ObjectId victim, ObjectId source, int32_t pr
                 queue_play(victim, kAnimIdleBlockBlaster, kDrawVariant, false, 0.1f, 2.0f, frame, true);
                 return true;
             }
-        } else if (rng->range_float(0.0f, 1.0f) < s.absorb_chance) {  // [L] one Absorb_Chance roll
-            event(AbilityEventKind::Blocked, 0, victim, source, frame);
-            return true;
+        } else {
+            // mcx4 t06 (Absorb_Blaster 0x6ee840 [H], MCX4_RE_ANSWERS_TACTICAL §7): never a MISSILE (1) or GRENADE (3) shot;
+            // one roll < Absorb_Chance absorbs it and sets the victim's health to health + Projectile_Damage x
+            // Damage_Absorb_Percentage + Damage_Absorb_Amount, clamped to [0, max] (0x3a89d0). [port] the roll is a synced draw
+            // (retail draws from its own LCG 0x5324d0).
+            if (pd.category == ProjectileCategory::Missile || pd.category == ProjectileCategory::Grenade) continue;
+            if (rng->range_float(0.0f, 1.0f) < s.absorb_chance) {
+                float h = combat_->health(victim) + pd.damage * s.damage_absorb_percentage + s.damage_absorb_amount;
+                const float mx = combat_->max_health(victim);
+                if (h > mx) h = mx;
+                if (h < 0.0f) h = 0.0f;
+                combat_->set_health(victim, h);
+                event(AbilityEventKind::Blocked, 0, victim, source, frame);
+                return true;
+            }
         }
     }
     return false;

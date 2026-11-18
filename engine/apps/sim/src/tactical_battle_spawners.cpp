@@ -265,22 +265,27 @@ void TacticalBattle::sp_service(TacticalMode& mode, SimRng& rng, size_t index) {
     const uint32_t mf = st.mode_frame();
     if (sp_spawners_[index].state != 1 || mf < sp_spawners_[index].next) return;
     const int32_t quantity = types.get_int(t, "Spawned_Indigenous_Units_Quantity");
-    const int32_t owner = st.owner(sh);
-    const bool adopt = !bt_owner_neutral(owner);  // a map unit of a non-Is_Neutral owner is a battle unit (bt_map_load)
+    const int32_t spawner_owner = st.owner(sh);
     if (!types.get_bool(t, "Spawn_Indigenous_Units_In_Packs")) {
         const auto have = static_cast<int32_t>(sp_spawners_[index].spawned.size());
         if (quantity <= have) return;  // full: the next spawn frame stays
         for (int32_t k = quantity - have; k > 0; --k) {
             const objects::ObjectHandle u = sp_spawn_one(mode, rng, sh, nullptr);
             if (!st.alive(u)) continue;
+            const int32_t owner = sp_corrupt_owner(st.type(u), spawner_owner);  // mcx4 t05
+            if (owner != spawner_owner) st.set_owner(u, owner);
             sp_spawners_[index].spawned.push_back(st.id(u));
-            if (adopt) (void)bt_adopt_built(mode, u, owner, 1.0f, &rng, true);
+            // a map unit of a non-Is_Neutral owner is a battle unit (bt_map_load)
+            if (!bt_owner_neutral(owner)) (void)bt_adopt_built(mode, u, owner, 1.0f, &rng, true);
         }
     } else {
         if (!sp_spawners_[index].spawned.empty()) return;  // a pack respawns only when it is all gone
         std::vector<objects::ObjectHandle> members;
         const objects::ObjectHandle first = sp_spawn_one(mode, rng, sh, nullptr);
         if (st.alive(first)) {
+            // mcx4 t05 [port]: a pack follows its first member (one owner for the pack and its team container)
+            const int32_t owner = sp_corrupt_owner(st.type(first), spawner_owner);
+            const bool adopt = !bt_owner_neutral(owner);
             members.push_back(first);
             const Vec3 at = st.position(first);
             for (int32_t k = 1; k < quantity; ++k) {
@@ -316,12 +321,31 @@ void TacticalBattle::sp_service(TacticalMode& mode, SimRng& rng, size_t index) {
                 }
             }
             for (const objects::ObjectHandle u : members) {
+                if (owner != spawner_owner) st.set_owner(u, owner);
                 sp_spawners_[index].spawned.push_back(st.id(u));
                 if (adopt) (void)bt_adopt_built(mode, u, owner, 1.0f, &rng, true, ci);
             }
         }
     }
     sp_spawners_[index].next = mf + static_cast<uint32_t>(30.0f * std::max(0.0f, types.get_float(t, "Spawned_Indigenous_Units_Delay_Seconds")));
+}
+
+int32_t TacticalBattle::sp_corrupt_owner(objects::TypeIndex unit_type, int32_t owner) const {
+    // mcx4 t05 (MCX4_RE_ANSWERS_TACTICAL §6, SpawnIndigenousUnitsBehaviorClass 0x5314f0 [H]; [M] that it runs for each unit
+    // the spawner makes): a unit whose type has Is_Indigenous_Unit_Corruptible (default true; FoC sets False on the
+    // animals, bird / sketto spawners and the Imperial guards), spawned while the battle planet's corruption is
+    // Corruption_Corrupt_Militia (4), changes owner to the first player (list order) whose faction has
+    // Benefits_From_Corruption.
+    const objects::GameObjectTypes& types = catalog_->types();
+    if (unit_type == objects::kNone || unit_type >= types.size() || !types.get_bool(unit_type, "Is_Indigenous_Unit_Corruptible")) return owner;
+    const auto planet = static_cast<size_t>(req_.info.planet);
+    if (planet >= galaxy_->planets().size() || galaxy_->planets()[planet].corruption != 4) return owner;
+    const auto& factions = galaxy_->rules().factions;
+    for (size_t p = 0; p < galaxy_->players().size(); ++p) {
+        const uint32_t f = galaxy_->players()[p].faction;
+        if (f < factions.size() && factions[f].benefits_from_corruption) return static_cast<int32_t>(p);
+    }
+    return owner;
 }
 
 objects::ObjectHandle TacticalBattle::sp_spawn_one(TacticalMode& mode, SimRng& rng, objects::ObjectHandle spawner, const Vec3* centre) {

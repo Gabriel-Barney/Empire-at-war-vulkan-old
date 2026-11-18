@@ -13,7 +13,8 @@ namespace alamo::sim {
 namespace {
 
 constexpr uint32_t kBattleStateVersion = 19;  // 19: cmb2 t03 / t04 AttackBlock::retry / hp; 18: cmb1 t01 land formation records; 17: skm2 t02 skirmish sides 2..7 (anchors, facings, records); 16: r3g t01 landing Land / Takeoff clip timing; 15: skm1 t07 skirmish garrison re-delivery; 14: TRU1 t06 retreat flight, t05 / t07 spawners and debris; 13: [port] fleet cohesion per player; 2: S7 t22 fighter formations; 3: S7 t24 formation follow_next / a1i t04 landing objects (two branches); 4: S7 t37 follow_next dropped (the follow is in the movement layer); 5: both merged (formations + landing objects); 6: story t06 victory monitor (replaces the end-hold fields); 7: q6 attacks on TEAM containers / s78f t02 FighterFormationRecord::pushed dropped (the auto blocks are in the movement save) (two branches); 8: both merged; 9: ccpgt t02 domination timer; 10: cu8k t01 Saber_Throw thrower machines; 11: cu8l t03 start fleet arrivals; 12: s78n t20 land attack blocks (exact: older versions are refused)
-constexpr uint32_t kBattlePartVersion = 2;  // 2: s78n t06 running hero clashes in the Combat part (1 still read: none)
+constexpr uint32_t kBattlePartVersion = 3;  // 3: mcx4 t05 cash points in the Garrison part; 2: s78n t06 running hero clashes in
+                                            // the Combat part (1 and 2 still read: none of the later state)
 
 // One module system in a part: presence flag + a section with its own write.
 template <class T>
@@ -184,6 +185,7 @@ void TacticalBattle::write_part(SavePart p, ByteWriter& w) const {
             w.boolean(true);
             put_system(w, &garrison_);
             put_system(w, captures_.get());
+            put_system(w, cashes_ && cashes_->point_count() > 0 ? cashes_.get() : nullptr);  // mcx4 t05 (part version 3)
             break;
         case SavePart::Hangar:
             put_system(w, hangars_.get());
@@ -228,7 +230,7 @@ bool TacticalBattle::read_types(ByteReader& r) {
 bool TacticalBattle::read_part(SavePart p, ByteReader& r) {
     const uint32_t version = r.u32();
     if (!r.ok()) return false;
-    if (p == SavePart::State ? version != kBattleStateVersion : (version != kBattlePartVersion && version != 1u))
+    if (p == SavePart::State ? version != kBattleStateVersion : (version < 1u || version > kBattlePartVersion))
         return false;
     switch (p) {
         case SavePart::State: {
@@ -318,6 +320,11 @@ bool TacticalBattle::read_part(SavePart p, ByteReader& r) {
             if (has_captures && !captures_) s4_init();
             if (has_captures != (captures_ != nullptr)) return false;
             if (captures_ && !get_section(r, [this](ByteReader& sub) { return read_system(*captures_, sub); })) return false;
+            if (version >= 3u) {  // mcx4 t05: the cash points (an older battle had none)
+                const bool has_cash = r.boolean();
+                if (!r.ok() || (has_cash && !cashes_)) return false;
+                if (has_cash && !get_section(r, [this](ByteReader& sub) { return read_system(*cashes_, sub); })) return false;
+            }
             if (!r.done()) return false;
             feed_pair_gates();
             return true;

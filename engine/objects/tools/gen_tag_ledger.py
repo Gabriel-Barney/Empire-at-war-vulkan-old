@@ -71,6 +71,15 @@ TIER_OVERRIDES = {}  # (class, tag) -> tier, for rows that are distribution-leve
 # answer found no reader, as "docs/re/<FILE>.md <section>". The file must exist and name the tag. Class and tag are
 # spelled as in docs/re/xml_field_tables.md (matched case-insensitively). Keep the list sorted by class, then tag.
 RETAIL_UNUSED = {
+    ("GameObjectType", "Air_Vehicle_Turret_Target"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("GameObjectType", "Ground_Infantry_Turret_Target"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("GameObjectType", "Ground_Vehicle_Turret_Target"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("GameObjectType", "Required_Timeline"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("GameObjectType", "Size_Value"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("GameObjectType", "Turret_Targets_Air_Vehicles"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("GameObjectType", "Turret_Targets_Anything_Else"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("GameObjectType", "Turret_Targets_Ground_Infantry"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("GameObjectType", "Turret_Targets_Ground_Vehicles"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
 }
 
 # Source files that name tags without reading them for the game: the descriptor tables themselves, reports, tests,

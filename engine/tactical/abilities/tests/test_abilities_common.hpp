@@ -857,6 +857,7 @@ void test_foc_data();
 void test_hero_clash_accepts();
 void test_tru1_lobbing_gate();  // TRU1 t01 (test_tru1.cpp)
 void test_tru1_gravity_field();  // TRU1 t03
+void test_mcx4_absorb_blaster();  // mcx4 t06 (test_mcx4.cpp)
 
 }  // namespace
 using namespace bo3split;

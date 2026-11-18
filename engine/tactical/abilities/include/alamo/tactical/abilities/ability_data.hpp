@@ -102,6 +102,9 @@ struct SpecialAbilityDesc {
     uint32_t targeted_categories = 0;  // bit (1 << ProjectileCategory)
     // redirect / absorb blaster
     float redirect_chance = 0.0f, block_chance = 0.0f, reaction_arc_deg = 360.0f, absorb_chance = 0.0f;
+    // mcx4 t06 (Absorb_Blaster_Ability +0x17c / +0x180, MCX4_RE_ANSWERS_TACTICAL §7): the heal of an absorbed shot =
+    // Projectile_Damage x percentage + amount. Load checks: a percentage outside [0, 1] and a negative amount read as 0.
+    float damage_absorb_percentage = 0.0f, damage_absorb_amount = 0.0f;
     // force sight (fog follow-up)
     float force_sight_duration = 0.0f;  // Force_Sight_Duration_In_Secs
     // Service interval of the class's per-frame update (vfunc +0x18). OI abilities: -1 (the default, and what the parser

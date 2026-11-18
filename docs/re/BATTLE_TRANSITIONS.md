@@ -782,8 +782,9 @@ it sets the auto-resolve retreat instead) and AI task forces (0x5fdd50).
   +0x15b4, vanilla 30) × 30 frames from battle start (vf3). While it runs, requests get reason 2.
 - **Request check** (vf9): reason 1 if the player is not attacker/defender of the current conflict or
   the game type forbids it; 2 while not yet allowed; 5 if another player is already retreating;
-  otherwise for playable factions a story/ability check (0x282750: `Disallows_Hyperspace_Retreat`,
-  `RetreatPreventionAbility`) gives the reason; 0 = allowed.
+  otherwise for playable factions a story/ability check (0x282750: the interdict / `RetreatPreventionAbility` list, then
+  the TACTICAL_SUPER_WEAPON query; it reads no type field, so not `Disallows_Hyperspace_Retreat`: MCX4_RE_ANSWERS_TACTICAL
+  §4) gives the reason; 0 = allowed.
 - **Countdown** (vf14): faction `Space_Retreat_Countdown_Seconds` (+0x20b0) / `Land_...` (+0x2190)
   × 30 frames; plays `Space_Retreat_Begin_SFXEvent` (own) or `..._Enemy_Begin_...`. The retreating
   units list is built by vf8 (`Adding %s to retreatable units list`). Cancel: vf15.

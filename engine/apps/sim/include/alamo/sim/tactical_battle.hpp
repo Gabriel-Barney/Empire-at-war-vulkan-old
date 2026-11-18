@@ -94,6 +94,7 @@
 #endif
 #include "alamo/tactical/fog/fog_of_war.hpp"  // fog of war hookup (owner: fog agent)
 #include "alamo/tactical/garrison/capture.hpp"   // S4 garrisons + structure capture (owner: S4 agent)
+#include "alamo/tactical/garrison/cash_point.hpp"  // mcx4 t05: CASH_POINT markers
 #include "alamo/tactical/garrison/garrison.hpp"
 
 namespace alamo::anim {
@@ -1778,6 +1779,9 @@ private:
     void sp_planet_spawn(const TacticalMode& mode, SimRng& rng);
     void sp_service(TacticalMode& mode, SimRng& rng, size_t index);
     objects::ObjectHandle sp_spawn_one(TacticalMode& mode, SimRng& rng, objects::ObjectHandle spawner, const Vec3* centre);
+    // mcx4 t05: the owner of a spawned indigenous unit - `owner` (the spawner's), or on a Corrupt_Militia planet the first
+    // Benefits_From_Corruption player for an Is_Indigenous_Unit_Corruptible type (0x5314f0).
+    int32_t sp_corrupt_owner(objects::TypeIndex unit_type, int32_t owner) const;
     int32_t sp_place(TacticalMode& mode, objects::ObjectHandle h, Vec3 p);  // 0 placed, 1 blocked, 2 no place
     void sp_debris_expire(TacticalMode& mode, SimRng& rng, const DebrisPiece& d);
     // --- story t06: victory monitor (tactical_battle_victory.cpp) ---
@@ -2262,6 +2266,9 @@ private:
     void s4_hash(StateHasher& h) const;
     tactical::garrison::GarrisonSystem garrison_;
     std::unique_ptr<tactical::garrison::CapturePointSystem> captures_;
+    // mcx4 t05 (MCX4_RE_ANSWERS_TACTICAL §5): the CASH_POINT objects; made with captures_ (s4_init). Hashed and saved
+    // only once a point exists (battle part version 3), so battles without cash points keep their CRCs.
+    std::unique_ptr<tactical::garrison::CashPointSystem> cashes_;
     bool s4_used_ = false;  // some garrison / capture state exists (CRC section on from then)
     objects::ObjectStore* s4_store_ = nullptr;  // the battle mode's primary store (capture rule b)
     // SP5: Influences_Capture_Point per type (-1 not looked up yet), filled on first use by the serial capture pass;

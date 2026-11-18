@@ -448,6 +448,10 @@ SpecialAbilityDesc parse_special_ability(const data::XmlNode& e, const AbilityRe
     s.block_chance = f_or(e, "Block_Chance", 0.0f);
     s.reaction_arc_deg = f_or(e, "Reaction_Arc_In_Degrees", 360.0f);
     s.absorb_chance = f_or(e, "Absorb_Chance", 0.0f);
+    s.damage_absorb_percentage = f_or(e, "Damage_Absorb_Percentage", 0.0f);  // mcx4 t06
+    if (s.damage_absorb_percentage < 0.0f || s.damage_absorb_percentage > 1.0f) s.damage_absorb_percentage = 0.0f;
+    s.damage_absorb_amount = f_or(e, "Damage_Absorb_Amount", 0.0f);
+    if (s.damage_absorb_amount < 0.0f) s.damage_absorb_amount = 0.0f;
     parse_class_fields(e, s, r);  // OI abilities (service_interval stays -1: per class)
     // R5 jamming visual (presentation only): Blob_* / Owner_Particle_* of Sensor_Jamming_Ability.
     if (s.cls == SpecialClass::SensorJamming) {

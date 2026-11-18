@@ -20,6 +20,7 @@
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/object_types.hpp"
 #include "alamo/tactical/garrison/capture.hpp"
+#include "alamo/tactical/garrison/cash_point.hpp"
 #include "alamo/tactical/garrison/garrison.hpp"
 #include "alamo/tactical/garrison/garrison_types.hpp"
 #include "alamo/test/support.hpp"
@@ -692,6 +693,75 @@ void test_capture_save() {
 
 using ::alamo::test::write_file;
 
+// mcx4 t05 (MCX4_RE_ANSWERS_TACTICAL §5, CASH_POINT service 0x621370): capture by draining the owner's progress, refill to
+// 1, payout of Cash_Point_Credits_Per_Second / 30 per frame, a contested point keeps its capturer (and keeps paying), a
+// lone enemy drains and takes it, no payout to an Is_Neutral owner, XY radius, save round trip.
+// ledger: verifies GameObjectType.Cash_Point_Credits_Per_Second
+// ledger: verifies GameObjectType.Cash_Point_Radius
+// ledger: verifies GameObjectType.Cash_Point_Transition_Time_Seconds
+void test_cash_point() {
+    CashPointSystem cs(30);
+    cs.set_neutral_faction([](int32_t p) { return p == 9; });
+    CashPointDesc d;
+    d.credits_per_second = 300.0f;  // Cash_Point_Credits_Per_Second
+    d.radius = 50.0f;               // Cash_Point_Radius (XY)
+    d.transition_seconds = 1.0f;    // Cash_Point_Transition_Time_Seconds
+    CHECK(cs.add_point(100, 9, Vec3{0, 0, 0}, d) && !cs.add_point(100, 9, Vec3{}, d));
+    const int32_t players[] = {0, 1, 9};
+    const float step = 1.0f / 1.0f / 30.0f * 1.0f;
+    std::vector<Influencer> inf = {{1, 0, Vec3{30, 0, 500}}};  // player 0 inside (z ignored)
+    // frame 1: capturer 0; the neutral owner's progress 0 - step <= 0: owner -> 0, progress 0, no payout yet
+    cs.service(players, inf);
+    CHECK(cs.changes().size() == 1 && cs.changes()[0].old_owner == 9 && cs.changes()[0].new_owner == 0);
+    CHECK(cs.owner(100) == 0 && cs.capturer(100) == 0 && cs.progress(100) == 0.0f && cs.payouts().empty());
+    // refill: progress += step per frame (min 1); the payout starts on the frame progress reaches 1
+    float want = 0.0f;
+    int frames = 0;
+    while (cs.payouts().empty() && frames < 40) {
+        cs.service(players, inf);
+        want = std::min(step + want, 1.0f);
+        ++frames;
+        CHECK(cs.progress(100) == want);
+    }
+    CHECK(want >= 1.0f && frames >= 30 && frames <= 31);
+    CHECK(cs.payouts().size() == 1 && cs.payouts()[0].player == 0 && cs.payouts()[0].credits == 300.0f / 30.0f);
+    // contested (players 0 and 1): the capturer stays 0 and the point keeps paying
+    inf.push_back({2, 1, Vec3{0, 40, 0}});
+    cs.service(players, inf);
+    CHECK(cs.capturer(100) == 0 && cs.owner(100) == 0 && cs.payouts().size() == 1);
+    // player 1 alone: capturer 1, the progress drains; at <= 0 the owner becomes 1
+    inf.erase(inf.begin());
+    int drain = 0;
+    while (cs.owner(100) == 0 && drain < 40) {
+        cs.service(players, inf);
+        ++drain;
+        if (cs.owner(100) == 0) CHECK(cs.payouts().empty());  // capturer != owner: no payout while draining
+    }
+    CHECK(cs.owner(100) == 1 && drain >= 30 && drain <= 31 && cs.progress(100) == 0.0f);
+    // outside the radius (XY 51): counts for nobody; the capturer (1) refills its own progress
+    inf = {{3, 0, Vec3{51, 0, 0}}};
+    cs.service(players, inf);
+    CHECK(cs.capturer(100) == 1 && cs.progress(100) == step);
+    // save round trip, then identical continuation
+    ByteWriter w;
+    cs.write(w);
+    CashPointSystem cs2(30);
+    cs2.set_neutral_faction([](int32_t p) { return p == 9; });
+    ByteReader r(w.bytes());
+    CHECK(cs2.read(r) && cs2.owner(100) == 1 && cs2.capturer(100) == 1 && cs2.progress(100) == step);
+    StateHasher h1, h2;
+    cs.hash(h1);
+    cs2.hash(h2);
+    CHECK(h1.digest() == h2.digest());
+    // an Is_Neutral owner is never paid
+    CashPointSystem n(30);
+    n.set_neutral_faction([](int32_t p) { return p == 9; });
+    CHECK(n.add_point(7, 9, Vec3{}, d));
+    const std::vector<Influencer> nine = {{4, 9, Vec3{1, 1, 0}}};
+    for (int i = 0; i < 40; ++i) n.service(players, nine);
+    CHECK(n.capturer(7) == -1 && n.payouts().empty());  // the owner alone never becomes the capturer
+}
+
 void test_types() {
     const fs::path root = fs::temp_directory_path() / "alamo_tactical_garrison_tests";
     std::error_code ec;
@@ -717,6 +787,8 @@ void test_types() {
                "<Capture_Point_Radius>200.0</Capture_Point_Radius></SecondaryStructure>\n"
                "<Marker Name=\"RP\"><Behavior> CAPTURE_POINT, REVEAL, REINFORCEMENT_POINT </Behavior>"
                "<Capture_Point_Radius>100.0</Capture_Point_Radius></Marker>\n"
+               "<Marker Name=\"Cash\"><Behavior>CASH_POINT</Behavior><Cash_Point_Credits_Per_Second>200</Cash_Point_Credits_Per_Second>"
+               "<Cash_Point_Radius>40</Cash_Point_Radius></Marker>\n"
                "</R>");
     DirectoryProvider dp(path_to_utf8(root));
     objects::ObjectTypeDatabase raw;
@@ -740,6 +812,11 @@ void test_types() {
     CHECK(capture_desc_from_type(types, rp, cp) && cp.sticky);
     CHECK(!capture_desc_from_type(types, plain, cp));
     CHECK(influences_capture(types, plain) && !influences_capture(types, dt1));
+    // mcx4 t05: a CASH_POINT type; an absent Cash_Point_Transition_Time_Seconds keeps the type ctor's 2 (0x367250)
+    CashPointDesc kd;
+    CHECK(cash_point_desc_from_type(types, raw.find("Cash"), kd) && kd.credits_per_second == 200.0f && kd.radius == 40.0f &&
+          kd.transition_seconds == 2.0f);
+    CHECK(!cash_point_desc_from_type(types, tower, kd));
     remove_all_long(root, ec);
 }
 
@@ -1160,6 +1237,7 @@ int main() {
     test_capture_suspended();  // STY1 t01
     test_owner_change();  // A1 t08
     test_types();
+    test_cash_point();  // mcx4 t05
     test_garrison_save();  // N1 stage 2
     test_vehicle_thief_holder();  // s78n t12 review
     test_groups();  // s78n t18
