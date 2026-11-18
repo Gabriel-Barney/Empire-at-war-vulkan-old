@@ -216,6 +216,8 @@ struct Instance {
     // R5 stealth (ABILITY_VISUALS §1.3): the model's stencil-shadow bit is cleared - the instance's shadow-volume submeshes
     // (Shadow bucket) are not drawn. Everything else draws as before.
     bool no_shadow = false;
+    // mcx4 t15 (Exclude_From_Distance_Fade, SnapshotTypeInfo::no_distance_fade): not culled beyond Object_Fade_End.
+    bool no_distance_fade = false;
     // FF inputs hook (FfDrawHook); null = the renderer's per-draw records. Must outlive the frame's build.
     const FfDrawHook* ff_hook = nullptr;
     // [port] TAA object motion (taa.hpp): the key this object keeps from frame to frame (motion_key), so the renderer can

@@ -167,6 +167,8 @@ void SnapshotTypeTable::build(const GameObjectTypes& types, objects::ModeKind mo
             if (parse_float(type_text(types, t, "Blob_Shadow_Intensity"), v)) ti.blob_intensity = v;
             ti.blob_below_detail = leading_int(type_text(types, t, "Blob_Shadow_Below_Detail_Level"));
             ti.blob_bone = type_text(types, t, "Blob_Shadow_Bone_Name");
+            // ledger: consumes GameObjectType.Exclude_From_Distance_Fade
+            ti.no_distance_fade = types.get_bool(t, "Exclude_From_Distance_Fade") || yes_text(type_text(types, t, "Exclude_From_Distance_Fade"));
         }
         {  // projectile laser bolts (Projectile_Custom_Render / _Width / _Length)
             float v = 0.0f;

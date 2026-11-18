@@ -2137,6 +2137,11 @@ static void test_blob_shadows() {
           real[bush].blob_size[1] == 30.0f);
     CHECK(real[scout].blob_material == "Generic_Shadow" && real[scout].blob_below_detail == 3 && real[scout].blob_size[0] == 18.0f &&
           real[scout].blob_size[1] == 7.0f && real[scout].blob_bone == "B_Chest");
+    {  // mcx4 t15 (docs/re/MCX4_T15_RE_ANSWERS.md): Exclude_From_Distance_Fade (Prop_Rock_Cluster_02 true) -> no fade cull
+        // ledger: verifies GameObjectType.Exclude_From_Distance_Fade
+        const objects::TypeIndex rock = real.find("Prop_Rock_Cluster_02");
+        CHECK(rock != objects::kNone && real[rock].no_distance_fade && !real[scout].no_distance_fade);
+    }
     uint32_t with_blob = 0, blob_at_on = 0;
     for (objects::TypeIndex t = 0; t < real.size(); ++t) {
         if (real[t].blob_material.empty()) continue;

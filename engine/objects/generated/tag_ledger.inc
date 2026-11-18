@@ -666,7 +666,7 @@
 {"GameObjectType", "Terrain_Texture_Modifier_Material", 0x2, LedgerState::Stored, 0, "", "docs/re/MCX4_T15_RE_ANSWERS.md", 92, 1},
 {"GameObjectType", "Terrain_Texture_Modifier_Join_Distance", 0x8, LedgerState::Stored, 0, "", "docs/re/MCX4_T15_RE_ANSWERS.md", 92, 1},
 {"GameObjectType", "Terrain_Texture_Modifier_Square", 0x0, LedgerState::Consumed, 1, "engine/objects/src/game_object_types.cpp", "docs/re/OBJECT_TYPES.md", 104, 1},
-{"GameObjectType", "Exclude_From_Distance_Fade", 0x0, LedgerState::Stored, 0, "", "docs/re/MCX4_T15_RE_ANSWERS.md", 391, 1},
+{"GameObjectType", "Exclude_From_Distance_Fade", 0x0, LedgerState::Verified, 1, "engine/render/src/sim_snapshot.cpp", "docs/re/MCX4_T15_RE_ANSWERS.md", 391, 1},
 {"GameObjectType", "TSW_Start_Distance_From_Target", 0x8, LedgerState::Consumed, 1, "engine/apps/sim/src/tactical_battle_l1.cpp", "", 1, 1},
 {"GameObjectType", "TSW_Start_Pos_Match_Targets_Z", 0x0, LedgerState::Consumed, 2, "engine/apps/sim/src/tactical_battle_l1.cpp", "docs/re/OBJECT_TYPES.md", 1, 1},
 {"GameObjectType", "TSW_Attack_Distance_From_Target", 0x8, LedgerState::Consumed, 1, "engine/apps/sim/src/tactical_battle_l1.cpp", "docs/re/MCX4_T13_RE_ANSWERS.md", 1, 1},

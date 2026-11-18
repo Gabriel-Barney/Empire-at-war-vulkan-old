@@ -243,6 +243,7 @@ void SimInstanceBuilder::build(const InterpolatedFrame& frame, SimModelSource& m
         st.stealth_no_shadow += in.no_shadow ? 1u : 0u;
         // vis1 t02: a blob-shadow type at this detail has its stencil shadow off (the terrain blob replaces it).
         if (blob_detail_ > 0 && tinfo && blob_detail_ < tinfo->blob_below_detail) in.no_shadow = true;
+        in.no_distance_fade = tinfo && tinfo->no_distance_fade;  // mcx4 t15
         in.team_color_override = true;
         in.team_color = o.team_color;
         in.lod_bias = o.lod_bias;
