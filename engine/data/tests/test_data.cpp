@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -21,6 +22,7 @@
 #include "alamo/data/values.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/data/xml_list.hpp"
+#include "alamo/data/xml_values.hpp"
 #include "alamo/test/support.hpp"
 #ifdef ALAMO_DATA_HAVE_VFS
 #include "alamo/vfs/vfs.hpp"
@@ -36,6 +38,62 @@ static bool has_warning(const XmlDocument& d, uint32_t line, std::string_view ne
     for (const auto& w : d.diagnostics())
         if (w.line == line && w.message.find(needle) != std::string::npos) return true;
     return false;
+}
+
+// mcx1 t02: retail value kinds (docs/re/OBJECT_TYPES.md §4.5 type codes; §4.4 repeated tags; §6.3 TBD).
+static void test_xml_values() {
+    namespace xv = alamo::data::xml_values;
+    // code 0x0: "1" or a first character Y / y / T / t; everything else false.
+    CHECK(xv::to_bool("1") && xv::to_bool("Yes") && xv::to_bool("yes") && xv::to_bool("True") && xv::to_bool("t"));
+    CHECK(xv::to_bool(" \n\tYes ") && xv::to_bool("Ynot") && xv::to_bool("Tx"));
+    CHECK(!xv::to_bool("10") && !xv::to_bool("On") && !xv::to_bool("No") && !xv::to_bool("0") && !xv::to_bool("False"));
+    CHECK(!xv::to_bool("") && !xv::to_bool("Nos") && !xv::to_bool("np") && !xv::to_bool("2"));
+    // codes 0x1 / 0x5 / 0x6: atoi prefix, garbage 0, clamp on overflow.
+    CHECK(xv::to_int(" 18 ") == 18 && xv::to_int("2.9") == 2 && xv::to_int("12abc") == 12 && xv::to_int("-7x") == -7);
+    CHECK(xv::to_int("abc") == 0 && xv::to_int("") == 0 && xv::to_int("+5") == 5);
+    CHECK(xv::to_int("99999999999") == 2147483647 && xv::to_int("-99999999999") == -2147483647 - 1);
+    // code 0x8: atof prefix.
+    CHECK(xv::to_float("5.0f") == 5.0f && xv::to_float(" 0.25 ") == 0.25f && xv::to_float("x") == 0.0f);
+    CHECK(xv::to_float("3") == 3.0f && xv::to_float("-1.5e1") == -15.0f);
+    // lists: space, comma, tab, CR, LF; masks also '|'.
+    const auto l = xv::to_list("A, B\tC\r\nD,,E");
+    CHECK(l.size() == 5 && l[0] == "A" && l[4] == "E");
+    const auto m = xv::to_mask("Fighter | Bomber|Corvette");
+    CHECK(m.size() == 3 && m[1] == "Bomber" && m[2] == "Corvette");
+    CHECK(xv::to_list("A|B").size() == 1);
+    // TBD / empty skipped; repeated scalar: last non-skipped occurrence wins.
+    CHECK(xv::skipped("TBD") && xv::skipped("  ") && !xv::skipped("tbd") && !xv::skipped("0"));
+    const auto d = XmlDocument::parse("<E><A>1</A><A>7</A><A>TBD</A><B>Yes</B><B>No</B><C> </C><F>1.5</F></E>");
+    CHECK(d.ok());
+    const XmlNode e = d.root();
+    CHECK(xv::int_or(e, "A", -1) == 7 && xv::int_or(e, "a", -1) == 7);
+    CHECK(!xv::bool_or(e, "B", true));
+    CHECK(xv::int_or(e, "C", 3) == 3 && xv::int_or(e, "Missing", 4) == 4);
+    CHECK(xv::float_or(e, "F", 0.0f) == 1.5f);
+    CHECK(xv::last_child(e, "A").text_trimmed() == "TBD" && xv::text(e, "A") == "7");
+    CHECK(xv::bool_or(std::string_view("TBD"), true) && !xv::bool_or(std::string_view("On"), true));
+    // MCX1_RE_ANSWERS Q1: data classes descend into nested elements and skip TBD; abilities read direct children only and
+    // convert TBD like any value (a TBD bool is true there, Q2). Lists append every occurrence.
+    const auto n = XmlDocument::parse("<E><Group><X>3</X><L>a, b</L></Group><X>TBD</X><L>c</L><Y>TBD</Y><X></X></E>");
+    CHECK(n.ok());
+    const XmlNode ne = n.root();
+    CHECK(xv::int_or(ne, "X", -1) == 3);                         // nested 3; TBD and empty change nothing
+    CHECK(xv::int_or(ne, "X", -1, xv::kAbility) == 0);           // direct TBD only: atoi("TBD") = 0
+    CHECK(xv::bool_or(ne, "Y", false, xv::kAbility) && !xv::bool_or(ne, "Y", false));
+    CHECK(xv::list(ne, "L").size() == 3 && xv::list(ne, "L", xv::kAbility).size() == 1);
+    CHECK(xv::texts(ne, "X").size() == 1 && xv::fields(ne).size() == 3);
+    // OBJECT_TYPES.md §4.2: for object types a SubObjectList="Yes" container holds sub-objects, not fields; any other
+    // container is a group. Q1: the other data classes have no SubObjectList branch and descend into it too.
+    const auto so = XmlDocument::parse(
+        "<E><Other SubObjectList=\"yes\"><X>4</X></Other><Abilities SubObjectList=\"Yes\"><A><X>9</X></A></Abilities></E>");
+    CHECK(so.ok());
+    CHECK(xv::int_or(so.root(), "X", -1, xv::kObject) == 4);
+    CHECK(xv::int_or(so.root(), "X", -1) == 9);
+    // mcx1 t14: UCRT atof edge cases - "-nan" keeps its sign, a hex overflow is inf and a hex underflow 0.
+    CHECK(std::isnan(xv::c_atof("-nan")) && std::signbit(xv::c_atof("-nan")) && !std::signbit(xv::c_atof("nan")));
+    CHECK(xv::c_atof("0x1p99999") == std::numeric_limits<double>::infinity());
+    CHECK(xv::c_atof("-0x1p99999") == -std::numeric_limits<double>::infinity());
+    CHECK(xv::c_atof("0x1p-99999") == 0.0 && xv::c_atof("0x1p4") == 16.0);
 }
 
 static void test_xml_basic() {
@@ -581,7 +639,8 @@ static void test_database_install_layout() {
         write_file(x / "Objs.xml", "<Objs><Planet/><Planet Name=\"\"/><Planet Name=\"P\"><Galactic_Position>x</Galactic_Position>"
                                    "<Behavior>,,</Behavior></Planet><Unit Name=\"P\"/></Objs>");
         write_file(x / "TradeRouteFiles.xml", "just text, no element");
-        write_file(x / "CampaignFiles.xml", "<C><File>Camp.xml</File><File>Camp.xml</File></C>");
+        write_file(x / "CampaignFiles.xml", "<C><File>Camp.xml</File><File>Camp.xml</File><File>BadCamp.xml</File></C>");
+        write_file(x / "BadCamp.xml", std::string("\xFF\xFE<\0C\0>\0", 8));  // UTF-16: does not parse
         write_file(x / "Camp.xml",
                    "<Campaigns><Campaign Name=\"G\"><Locations>,,P,,P</Locations><Trade_Routes>R,,R</Trade_Routes>"
                    "<Home_Location>,</Home_Location><Sort_Order>zz</Sort_Order></Campaign><Campaign/>"
@@ -596,6 +655,8 @@ static void test_database_install_layout() {
         CHECK(db.game_objects().size() == 2 && db.game_objects()[1].duplicate);
         CHECK(db.campaigns().size() == 1 && db.campaigns()[0].definitions == 2 && db.campaigns()[0].name == "g");
         CHECK(!has(diag, "hint:"));  // loose XML exists, so no MEG hint
+        // mcx1 t08 (MCX1_RE_ANSWERS Q6.1): a listed campaign file that opens but does not parse is fatal, as in the original.
+        CHECK(has(diag, "BadCamp.xml' does not parse"));
         std::vector<std::string> gd;
         GalaxyMap g = build_galaxy_map(db, "G", &gd);
         CHECK(g.planets.size() == 1 && g.routes.size() == 0 && g.validate().empty());
@@ -873,6 +934,7 @@ int main() {
     test_xml_recovery();
     test_xml_robustness();
     test_values();
+    test_xml_values();
     test_database_synthetic();
     test_planet_variants();
     test_database_install_layout();

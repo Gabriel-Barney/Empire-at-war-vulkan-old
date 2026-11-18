@@ -6,6 +6,7 @@
 #include "alamo/core/log.hpp"
 #include "alamo/data/values.hpp"
 #include "alamo/data/xml_list.hpp"
+#include "alamo/data/xml_values.hpp"
 
 namespace alamo::objects {
 
@@ -293,19 +294,24 @@ std::optional<std::string_view> ObjectTypeDatabase::get_text(TypeIndex t, std::s
     return fields_.text[f];
 }
 
+// mcx1 t02 (MCX1_RE_ANSWERS Q2, OBJECT_TYPES.md §4.5): retail's converters. A bool is "1" or a first letter Y / T, anything
+// else false; ints are C atoi (prefix, clamped), floats C atof (prefix, no number = 0). An empty or TBD value is no value.
 std::optional<bool> ObjectTypeDatabase::get_bool(TypeIndex t, std::string_view tag) const {
     const auto v = get_text(t, tag);
-    return v ? data::parse_bool(*v) : std::nullopt;
+    if (!v || data::xml_values::skipped(*v)) return std::nullopt;
+    return data::xml_values::to_bool(*v);
 }
 
 std::optional<int32_t> ObjectTypeDatabase::get_int(TypeIndex t, std::string_view tag) const {
     const auto v = get_text(t, tag);
-    return v ? data::parse_int(*v) : std::nullopt;
+    if (!v || data::xml_values::skipped(*v)) return std::nullopt;
+    return data::xml_values::to_int(*v);
 }
 
 std::optional<float> ObjectTypeDatabase::get_float(TypeIndex t, std::string_view tag) const {
     const auto v = get_text(t, tag);
-    return v ? data::parse_float(*v) : std::nullopt;
+    if (!v || data::xml_values::skipped(*v)) return std::nullopt;
+    return data::xml_values::to_float(*v);
 }
 
 std::vector<std::string_view> ObjectTypeDatabase::get_list(TypeIndex t, std::string_view tag) const {

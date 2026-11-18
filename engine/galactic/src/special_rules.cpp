@@ -7,6 +7,7 @@
 #include "alamo/core/ascii.hpp"
 #include "alamo/data/game_database.hpp"
 #include "alamo/data/xml.hpp"
+#include "alamo/data/xml_values.hpp"
 #include "alamo/galactic/galactic_rules.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/type_fields.hpp"
@@ -20,6 +21,16 @@ float to_f(std::string_view s) { return static_cast<float>(objects::c_atof(ascii
 std::vector<float> float_list(std::string_view s) {
     std::vector<float> out;
     for (std::string_view t : objects::split_type_list(s)) out.push_back(static_cast<float>(objects::c_atof(t)));
+    return out;
+}
+
+// mcx1 t03: the shared data-class rule for a list field: every occurrence appends (TBD / empty skipped).
+std::string joined(data::XmlNode n, std::string_view tag) {
+    std::string out;
+    for (std::string_view v : data::xml_values::texts(n, tag)) {
+        if (!out.empty()) out += ',';
+        out += v;
+    }
     return out;
 }
 
@@ -443,25 +454,25 @@ void load_items(const FileProvider& provider, GalacticRules& out, std::vector<st
         d.name = std::string(ascii_trim(n.attribute("Name")));
         d.name_crc = special_name_crc(d.name);
         auto f = [&](std::string_view tag, float fallback) {
-            const std::string_view v = n.child_text(tag);
+            const std::string_view v = data::xml_values::text(n, tag);
             return v.empty() ? fallback : to_f(v);
         };
         d.uncommon_price_multiplier = f("Uncommon_Price_Multiplier", 0.0f);
-        const std::string_view fac = n.child_text("Faction");
+        const std::string_view fac = data::xml_values::text(n, "Faction");
         if (!fac.empty()) {
             d.faction = out.find_faction(ascii_trim(fac));
             if (d.faction == kNoIndex) note(diag, "galactic: black market item " + d.name + ": unknown faction " + std::string(fac));
         }
         d.tech_level = static_cast<int32_t>(f("Tech_Level", 1.0f));
-        d.ability_names = name_list(n.child_text("Ability_Names"));
+        d.ability_names = name_list(joined(n, "Ability_Names"));
         for (const std::string& a : d.ability_names) d.ability_crcs.push_back(special_name_crc(a));  // no upper-casing [H]
         d.base_cost = static_cast<int32_t>(f("Base_Cost_Credits", 0.0f));
         d.tutorial_tech_level = static_cast<int32_t>(f("Tutorial_Tech_Level", 0.0f));
         d.tutorial_base_cost = static_cast<int32_t>(f("Tutorial_Base_Cost_Credits", 0.0f));
-        d.icon = std::string(n.child_text("Icon_Name"));
-        d.localized_name = std::string(n.child_text("Localized_Name"));
-        d.localized_description = std::string(n.child_text("Localized_Description"));
-        for (const std::string& u : name_list(n.child_text("Used_By_Units"))) d.used_by_units.push_back(u);
+        d.icon = std::string(data::xml_values::text(n, "Icon_Name"));
+        d.localized_name = std::string(data::xml_values::text(n, "Localized_Name"));
+        d.localized_description = std::string(data::xml_values::text(n, "Localized_Description"));
+        for (const std::string& u : name_list(joined(n, "Used_By_Units"))) d.used_by_units.push_back(u);
         out.special.items.push_back(std::move(d));
     }
 }

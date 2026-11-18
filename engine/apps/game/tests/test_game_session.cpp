@@ -50,6 +50,7 @@
 #include "alamo/sim/tactical_battle.hpp"
 #include "alamo/vfs/vfs.hpp"
 #include "alamo/test/support.hpp"
+#include "alamo/test/galactic_dummies.hpp"
 
 using namespace alamo;
 namespace fs = std::filesystem;
@@ -158,7 +159,7 @@ std::string make_data() {
     remove_all_long(root, ec);
     const fs::path x = root / "Data/XML";
     write_file(x / "GameObjectFiles.xml", "<GameObjectFiles><File>GSTypes.xml</File></GameObjectFiles>\n");
-    write_file(x / "GSTypes.xml", kTypes);
+    write_file(x / "GSTypes.xml", ::alamo::test::with_galactic_dummies(kTypes));
     write_file(root / "Data/Scripts/GameObject/Demo_Attract_Controller.lua", kDemoControllerLua);
     write_file(x / "HardPointDataFiles.xml", "<Hard_Point_Files><File>GSHardPoints.xml</File></Hard_Point_Files>\n");
     write_file(x / "GSHardPoints.xml", kHardpoints);

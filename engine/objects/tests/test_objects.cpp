@@ -209,7 +209,7 @@ static void test_loader_synthetic() {
     CHECK(db.get_float(0, "max_speed") == 3.5f);
     CHECK(db.fields_of(0, "Max_Speed").size() == 2);
     CHECK(db.get_list(0, "Behavior") == (std::vector<std::string_view>{"A", "B", "C"}));
-    CHECK(!db.get_bool(0, "Is_Dummy").has_value());
+    CHECK(db.get_bool(0, "Is_Dummy") == false);  // mcx1 t02 (Q2): "maybe" is neither "1" nor a first Y / T -> false
     CHECK(db.get_text(0, "My_Unknown_Tag") == std::string_view("hello"));
     CHECK(!db.get_text(0, "Stacking_Category").has_value());  // nested, not a direct child
     // Nested sub-object: schema chosen by the enclosing element, attributes kept.
@@ -422,12 +422,10 @@ static bool same_types(const GameObjectTypes& a, const GameObjectTypes& b) {
 // ------------------------------------------------------------------------------------------
 // OBJECT_TYPES.md §9 / OBJECT_RUNTIME.md §9 rules
 
-// [port: Gabriel, 2026-11-13] Every fighter / bomber squadron has GameObjectTypes::kPortSquadronSize (12) members: a
-// one-type Fighter or Bomber Squadron_Units list is rewritten and its prices / power scaled by 12 / the list's count (each
-// type's own final values: a variant overriding a price is scaled once, a hero variant with a mixed list keeps the
-// inherited price), mixed lists and hero members keep the XML list, other categories are untouched;
-// set_squadron_size(0) keeps the retail lists and prices.
-static void test_squadron_size() {
+// mcx1 t06 (D2, Gabriel 2026-11-17; DECISIONS.md "Mod compatibility system decisions"): squadrons are retail's. Every
+// Squadron_Units list keeps its members as written (OBJECT_TYPES.md §4.4: repeated list tags append) and the prices stay the
+// XML's (or the members' derived sum), for one-type fighter / bomber squadrons too; the 2026-11-13 resize to 12 is gone.
+static void test_retail_squadrons() {
     const fs::path root = fs::temp_directory_path() / "alamo_objects_squad_size_test";
     std::error_code ec;
     remove_all_long(root, ec);
@@ -454,44 +452,16 @@ static void test_squadron_size() {
     ObjectTypeDatabase raw;
     CHECK(raw.load(dp));
     GameObjectTypes ty;
-    CHECK(ty.squadron_size() == GameObjectTypes::kPortSquadronSize && GameObjectTypes::kPortSquadronSize == 12u);
     CHECK(ty.build(raw, &dp));
     auto members = [&](const char* n) { return ty.get_list(raw.find(n), "Squadron_Units").size(); };
-    CHECK(members("Fsq") == 12u);
-    CHECK(members("Bsq") == 12u);
-    CHECK(members("Fsq_V") == 12u);
-    CHECK(members("Mixed") == 2u);
-    CHECK(members("Hero") == 2u);
-    CHECK(members("Corv") == 3u);
-    CHECK(members("Bsq_V") == 12u && members("Bsq_Hero") == 2u);
-    auto cost = [&](const char* n, const char* tag) { return ty.get_int(raw.find(n), tag); };
-    CHECK(cost("Fsq", "Build_Cost_Credits") == 120);                  // derived 4 x 10, scaled to 12 x 10
-    CHECK(cost("Fsq_V", "Build_Cost_Credits") == 120);
-    CHECK(cost("Bsq", "Build_Cost_Credits") == 900);                  // 150 for 2 -> 900 for 12
-    CHECK(cost("Bsq", "Tactical_Build_Cost_Multiplayer") == 3300);    // 550 x 6
-    CHECK(cost("Bsq", "Score_Cost_Credits") == 370);                  // not a price: as written
-    CHECK(cost("Bsq_V", "Build_Cost_Credits") == 900);                // inherited, scaled once
-    CHECK(cost("Bsq_V", "Tactical_Build_Cost_Multiplayer") == 2100);  // own override 350 x 6
-    CHECK(cost("Bsq_Hero", "Build_Cost_Credits") == 150);             // mixed list: the inherited retail price
-    CHECK(cost("Bsq", "Tactical_Build_Cost_Campaign") == -1);         // default -1 untouched
-    CHECK(ty.get_float(raw.find("Fsq"), "AI_Combat_Power") == 24.0f);  // members' power summed, scaled
-    CHECK(ty.stats().squadrons_resized > 0);
-    ty.set_squadron_size(0);  // retail: the lists as written, kept across build()
-    CHECK(ty.build(raw, &dp));
     CHECK(members("Fsq") == 4u && members("Bsq") == 2u && members("Fsq_V") == 4u);
-    CHECK(cost("Fsq", "Build_Cost_Credits") == 40 && cost("Bsq", "Build_Cost_Credits") == 150);
-    CHECK(cost("Bsq", "Tactical_Build_Cost_Multiplayer") == 550 && cost("Bsq_V", "Tactical_Build_Cost_Multiplayer") == 350);
-    // b0319: the host-wide default (alamo_headless --squadron-size 0) is what a new database starts with.
-    CHECK(GameObjectTypes::default_squadron_size() == GameObjectTypes::kPortSquadronSize);
-    GameObjectTypes::set_default_squadron_size(0);
-    {
-        GameObjectTypes retail;
-        CHECK(retail.squadron_size() == 0u);
-        CHECK(retail.build(raw, &dp));
-        CHECK(retail.get_list(raw.find("Fsq"), "Squadron_Units").size() == 4u);
-    }
-    GameObjectTypes::set_default_squadron_size(GameObjectTypes::kPortSquadronSize);
-    CHECK(GameObjectTypes().squadron_size() == GameObjectTypes::kPortSquadronSize);
+    CHECK(members("Mixed") == 2u && members("Hero") == 2u && members("Corv") == 3u);
+    CHECK(members("Bsq_V") == 2u && members("Bsq_Hero") == 2u);
+    auto cost = [&](const char* n, const char* tag) { return ty.get_int(raw.find(n), tag); };
+    CHECK(cost("Fsq", "Build_Cost_Credits") == 40);  // derived: 4 members x 10
+    CHECK(cost("Bsq", "Build_Cost_Credits") == 150 && cost("Bsq", "Tactical_Build_Cost_Multiplayer") == 550);
+    CHECK(cost("Bsq_V", "Build_Cost_Credits") == 150 && cost("Bsq_V", "Tactical_Build_Cost_Multiplayer") == 350);
+    CHECK(ty.get_float(raw.find("Fsq"), "AI_Combat_Power") == 8.0f);  // the members' power summed, not scaled
     remove_all_long(root, ec);
 }
 
@@ -1834,7 +1804,7 @@ int main() {
     test_loader_synthetic();
     test_converters();
     test_types_synthetic();
-    test_squadron_size();
+    test_retail_squadrons();
     test_enum_converters();
     test_s1_rules();
     test_s1_registries();

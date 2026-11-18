@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Campaigns>
+  <Values_Conquest Name="Values_GC">
+    <Locations>Values_Gamma</Locations>
+    <Locations>Base_Alpha</Locations>
+    <Sort_Order>5</Sort_Order>
+    <Sort_Order>7x</Sort_Order>
+    <Planet_Auto_Reveal>On</Planet_Auto_Reveal>
+    <Starting_Active_Player>Values_Rebels</Starting_Active_Player>
+    <Home_Location>Values_Rebels, Values_Gamma</Home_Location>
+    <Starting_Forces>Values_Rebels, Values_Gamma, Values_Cruiser</Starting_Forces>
+    <Starting_Forces>Values_Rebels, Values_Gamma, Values_Plain_Ship</Starting_Forces>
+  </Values_Conquest>
+</Campaigns>

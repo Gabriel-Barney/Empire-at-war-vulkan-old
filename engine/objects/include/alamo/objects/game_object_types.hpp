@@ -83,7 +83,6 @@ struct TypeLoadStats {
     uint32_t types = 0, variants = 0, resolved_pass0 = 0, resolved_later = 0, unresolved = 0, passes = 0;
     uint32_t tags_applied = 0, tags_ignored = 0, tbd = 0, empty = 0, clamped = 0, long_lists_ignored = 0;
     uint32_t subobject_lists = 0, subobject_unprocessed = 0;
-    uint32_t squadrons_resized = 0;  // [port: Gabriel] fighter / bomber squadrons resized (prices scaled)
     uint32_t companies = 0, squadrons = 0, cost_derived = 0, base_level_normalised = 0, min_range_raised = 0;
     uint32_t hardpoints_dropped = 0, factions_dropped = 0;
     // §9 (counted over every parse, variant re-parses included).
@@ -117,20 +116,6 @@ public:
     // FactionFiles.xml and TargetingPrioritySetFiles.xml for hardpoint / faction / priority-set name
     // resolution; without it those names are kept but not resolved, and Targeting_Min_Attack_Distance
     // is not raised. `anim_types` (optional) converts the ModelAnimType fields.
-    // [port: Gabriel, 2026-11-13] Members of every fighter / bomber squadron (a Squadron_Units list naming one
-    // non-hero Fighter / Bomber type; mixed hero squadrons keep their XML list): kPortSquadronSize by default, with its
-    // prices (Build_Cost_Credits, Tactical_Build_Cost_Multiplayer / _Campaign) and AI_Combat_Power scaled to match; 0 =
-    // retail (the XML list and prices as written). Kept across build(); set it before build().
-    static constexpr uint32_t kPortSquadronSize = 12;
-    void set_squadron_size(uint32_t members) { squadron_size_ = members; }
-    uint32_t squadron_size() const { return squadron_size_; }
-    // [port: Gabriel, 2026-11-14] The squadron size a new GameObjectTypes starts with (kPortSquadronSize unless changed).
-    // A host sets it once at start-up, before it builds any type database: alamo_headless --squadron-size 0 gives the
-    // retail lists and prices, which the parity harness and the retail-outcome tests run with (b0319). Never changed
-    // while a session runs.
-    static void set_default_squadron_size(uint32_t members) { default_squadron_size_ = members; }
-    static uint32_t default_squadron_size() { return default_squadron_size_; }
-
     bool build(const ObjectTypeDatabase& raw, const FileProvider* provider = nullptr,
                std::vector<std::string>* diagnostics = nullptr, AnimTypeLookup anim_types = nullptr);
 
@@ -223,7 +208,6 @@ private:
     bool try_resolve(TypeIndex t, uint8_t pass);
     void after_pass();
     void derive(TypeIndex t);
-    void resize_squadrons();
     void load_registries(const FileProvider& provider);
     void warn(std::string message);
 
@@ -239,8 +223,6 @@ private:
     std::vector<std::string_view> priority_set_name_;
     std::vector<std::unique_ptr<data::XmlDocument>> registry_docs_;
     AnimTypeLookup anim_lookup_ = nullptr;
-    inline static uint32_t default_squadron_size_ = kPortSquadronSize;
-    uint32_t squadron_size_ = default_squadron_size_;
     EnumRegistry enums_;
     uint32_t default_faction_ = kNone;
     std::unique_ptr<std::string> default_faction_name_;  // heap: stable for the written-back Affiliation views

@@ -9,6 +9,7 @@
 #include "alamo/core/hash.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/data/xml_list.hpp"
+#include "alamo/data/xml_values.hpp"
 #include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/enums.hpp"
 #include "alamo/objects/game_object_types.hpp"
@@ -21,12 +22,6 @@ namespace {
 float atof_or(std::string_view text, float fallback) {
     for (char c : text)
         if (c != ' ' && c != '\t' && c != '\r' && c != '\n') return static_cast<float>(objects::c_atof(text));
-    return fallback;
-}
-
-std::array<float, 2> pair_or(std::string_view text, std::array<float, 2> fallback) {
-    const std::vector<std::string_view> tok = objects::split_type_list(text);
-    for (size_t i = 0; i < tok.size() && i < 2; ++i) fallback[i] = static_cast<float>(objects::c_atof(tok[i]));
     return fallback;
 }
 
@@ -65,11 +60,7 @@ uint32_t resolve_or_none(const objects::GameObjectTypes& types, std::string_view
 // OI galactic (STRATEGIC_GAPS 1.2 / 1.3 / 1.7): dummy behaviour, company transport, buildability fields.
 void extract_oi_fields(const objects::GameObjectTypes& types, objects::TypeIndex t, TypeInfo& i) {
     i.data_rules = true;
-    for (uint8_t id = kDummyGroundBase; id <= kDummyStarship; ++id)
-        if (types.has_behavior(t, objects::BehaviorSet::Union, id)) {
-            i.dummy = id;
-            break;
-        }
+    i.dummy = galactic_dummy(types, static_cast<uint32_t>(t));  // mcx1 t05: generic Behavior, retail order (Q7.2)
     i.transport_behavior = types.has_behavior(t, objects::BehaviorSet::Union, objects::beh::Transport);
     for (objects::TypeIndex r : types.get_type_refs(t, "Company_Transport_Unit")) {
         if (r != objects::kNone) i.company_transport = r;
@@ -117,28 +108,28 @@ void extract_oi_fields(const objects::GameObjectTypes& types, objects::TypeIndex
 
 }  // namespace
 
-// q6 t03. The port's element-tag table (unchanged since S3).
-UnitKind unit_kind_from_element(std::string_view el, bool hyperspace) {
-    if (ascii_iequals(el, "StarBase")) return UnitKind::StarBase;
-    if (ascii_iequals(el, "GroundStructure") || ascii_iequals(el, "GroundBase") || ascii_iequals(el, "SpecialStructure"))
-        return UnitKind::GroundStructure;
-    if (ascii_iequals(el, "Squadron")) return UnitKind::Squadron;
-    if (ascii_iequals(el, "SpaceUnit")) return UnitKind::SpaceUnit;
-    if (ascii_iequals(el, "GroundCompany") || ascii_iequals(el, "GroundInfantry") || ascii_iequals(el, "GroundVehicle") ||
-        ascii_iequals(el, "HeroCompany"))
-        return UnitKind::GroundUnit;
-    if (ascii_iequals(el, "HeroUnit") || ascii_iequals(el, "UniqueUnit"))
-        return hyperspace ? UnitKind::SpaceUnit : UnitKind::GroundUnit;  // [M]
-    if (ascii_iequals(el, "Planet")) return UnitKind::Planet;
-    return UnitKind::Other;
+uint8_t galactic_dummy(const objects::GameObjectTypes& types, uint32_t type) {
+    static constexpr uint8_t kOrder[] = {kDummyGroundBase,      kDummyStarBase,      kDummyGroundStructure, kDummyOrbitalStructure,
+                                         kDummyGroundCompany,   kDummyFighterSquadron, kDummyStarship};
+    for (const uint8_t id : kOrder)
+        if (types.has_behavior(static_cast<objects::TypeIndex>(type), objects::BehaviorSet::Generic, id)) return id;
+    return 0;
+}
+
+bool has_planet_behavior(const objects::GameObjectTypes& types, uint32_t type) {
+    const auto t = static_cast<objects::TypeIndex>(type);
+    return types.has_behavior(t, objects::BehaviorSet::Generic, objects::beh::Planet) ||
+           types.has_behavior(t, objects::BehaviorSet::Galactic, objects::beh::Planet);
 }
 
 // The behaviour ids 0x5B..0x61 (SG 1.2). Orbital structures share GroundStructure: the port keeps one structure list
-// per planet, and the vanilla SpecialStructure orbital types already mapped there through the tag table.
+// per planet.
 UnitKind unit_kind_from_dummy(uint8_t dummy) {
     switch (dummy) {
     case kDummyStarBase: return UnitKind::StarBase;
-    case kDummyGroundBase:
+    // mcx1 t11 (A2K_T07_STORY_LOAD_RE §2, MCX1_RE_ANSWERS Q7.2 [H]): a ground base (0x5B) is never created at a planet -
+    // Starting_Forces, production, story and Lua spawns make nothing; the planet's ground level is its structure count.
+    case kDummyGroundBase: return UnitKind::Other;
     case kDummyGroundStructure:
     case kDummyOrbitalStructure: return UnitKind::GroundStructure;
     case kDummyGroundCompany: return UnitKind::GroundUnit;
@@ -148,26 +139,7 @@ UnitKind unit_kind_from_dummy(uint8_t dummy) {
     }
 }
 
-// Vanilla FoC / EaW element tags outside the tag table whose types carry a role behaviour (FoC: 11 GroundBuildable,
-// 10 SecondaryStructure, 1 SpaceBuildable, 8 SlaveCompany, 1 Marker, 38 Props_Story, 2 MOV_Cinematic, 5 CIN_SpaceUnit,
-// 8 CIN_SpaceProp; EaW a subset). The port always left them Other; they stay so, so base-game behaviour does not
-// change [port: the original would give them their behaviour's role; open, needs a decision].
-bool is_vanilla_unclassified_element(std::string_view el) {
-    static constexpr std::string_view kTags[] = {"GroundBuildable", "SecondaryStructure", "SpaceBuildable",
-                                                 "SlaveCompany",    "Marker",             "Props_Story",
-                                                 "MOV_Cinematic",   "CIN_SpaceUnit",      "CIN_SpaceProp"};
-    for (const std::string_view t : kTags)
-        if (ascii_iequals(el, t)) return true;
-    return false;
-}
-
-UnitKind galactic_unit_kind(std::string_view el, bool hyperspace, uint8_t dummy) {
-    const UnitKind by_tag = unit_kind_from_element(el, hyperspace);
-    const UnitKind by_behavior = unit_kind_from_dummy(dummy);
-    if (by_tag == UnitKind::Planet) return by_tag;
-    if (by_tag != UnitKind::Other) return by_behavior != UnitKind::Other ? by_behavior : by_tag;
-    return is_vanilla_unclassified_element(el) ? UnitKind::Other : by_behavior;
-}
+UnitKind galactic_unit_kind(uint8_t dummy, bool planet) { return planet ? UnitKind::Planet : unit_kind_from_dummy(dummy); }
 
 uint32_t GalacticRules::find_faction(std::string_view name) const {
     for (size_t i = 0; i < factions.size(); ++i)
@@ -273,57 +245,52 @@ std::vector<FactionRules> load_factions(const FileProvider& provider, std::vecto
             note(diagnostics, (file.doc ? "galactic: unparsable " : "galactic: unable to open ") + file.entry.path);
             return;
         }
-        for (data::XmlNode n : file.doc->root().children("Faction")) {
+        // mcx1 t03 (MCX1_RE_ANSWERS Q1): every top-level child of a faction file is a faction, whatever its tag; its fields
+        // are read by the data rule (every child, nested elements descended into, empty / TBD change nothing): a repeated
+        // scalar takes its last occurrence, a repeated list appends. Values convert by type code (xml_field_tables.md
+        // Faction segment; t02): bools 0x0, ints 0x6 atoi, floats 0x8 atof, float lists 0x13, name lists 0x2a / 0x1e.
+        for (data::XmlNode n = file.doc->root().first_child(); n; n = n.next_sibling()) {
+            namespace xv = data::xml_values;
+            const auto text = [&n](std::string_view tag) { return xv::text(n, tag); };
             FactionRules r;
             r.name = std::string(n.attribute("Name"));
-            for (data::XmlNode c : n.children()) r.xml_fields.emplace_back(c.name(), c.text_trimmed());
-            r.is_neutral = objects::parse_type_bool(n.child_text("Is_Neutral"));
-            r.can_control_planets = objects::parse_type_bool(n.child_text("Can_Control_Planets"));
-            r.is_playable = objects::parse_type_bool(n.child_text("Is_Playable"));
-            r.benefits_from_corruption = objects::parse_type_bool(n.child_text("Benefits_From_Corruption"));
-            r.basic_ai = std::string(ascii_trim(n.child_text("Basic_AI")));
-            r.text_id = std::string(ascii_trim(n.child_text("Text_ID")));
-            r.tech_tree_dialog = std::string(ascii_trim(n.child_text("Tech_Tree_Dialog_Name")));
-            r.tech_level_icon = std::string(ascii_trim(n.child_text("Tech_Level_Icon_Name")));
-            r.icon = std::string(ascii_trim(n.child_text("Icon_Name")));
-            if (r.icon.empty()) r.icon = std::string(ascii_trim(n.child_text("Alternate_Icon_Name")));
-            r.land_selection_blob = std::string(ascii_trim(n.child_text("Land_Mode_Selection_Blob_Material_Name")));
-            r.space_selection_blob = std::string(ascii_trim(n.child_text("Space_Mode_Selection_Blob_Material_Name")));
-            r.hyperspace_speed_factor = atof_or(n.child_text("Hyperspace_Speed_Factor"), r.hyperspace_speed_factor);
-            r.maintenance_cost = atof_or(n.child_text("Maintenance_Cost"), r.maintenance_cost);
-            r.force_alignment = parse_force_side(n.child_text("Force_Alignment"));
-            r.corruption_time_mult = pair_or(n.child_text("Corruption_Galactic_Production_Time_Multipliers"),
-                                             r.corruption_time_mult);
-            r.corruption_price_mult = pair_or(n.child_text("Corruption_Galactic_Production_Price_Multipliers"),
-                                              r.corruption_price_mult);
-            // a2m r2: the corruption upgrades by corruption type (resolved in load_galactic_rules).
-            for (std::string_view u : objects::split_type_list(n.child_text("Automatic_Planetary_Corruption_Upgrade_Type")))
-                r.automatic_corruption_upgrade_names.emplace_back(u);
-            r.base_population_capacity = static_cast<int32_t>(atof_or(n.child_text("Base_Population_Capacity"), 0.0f));
-            r.displayed_tech_level_adjustment =  // P4 sim ("+1" parses as 1)
-                static_cast<int32_t>(atof_or(n.child_text("Displayed_Tech_Level_Adjustment"), 0.0f));
-            // OI galactic: victory monitor inputs (resolved in load_galactic_rules).
-            r.home_planet = std::string(ascii_trim(n.child_text("Home_Planet")));
-            r.leader_name = std::string(ascii_trim(n.child_text("Faction_Leader")));
-            r.leader_company_name = std::string(ascii_trim(n.child_text("Faction_Leader_Company")));
-            r.primary_enemy_name = std::string(ascii_trim(n.child_text("Primary_Enemy")));
-            // S7 t30 (TACTICAL_COMBAT §2.10): the relation lists.
-            const auto names = [](std::string_view s) {
-                std::vector<std::string> v;
-                std::string cur;
-                for (const char ch : s) {
-                    if (ch == ',' || ch == ' ' || ch == '\t' || ch == '\r' || ch == '\n') {
-                        if (!cur.empty()) v.push_back(std::move(cur));
-                        cur.clear();
-                    } else {
-                        cur.push_back(ch);
-                    }
-                }
-                if (!cur.empty()) v.push_back(std::move(cur));
-                return v;
+            for (const auto& [tag, value] : xv::fields(n)) r.xml_fields.emplace_back(tag, value);
+            r.is_neutral = xv::bool_or(n, "Is_Neutral", false);
+            r.can_control_planets = xv::bool_or(n, "Can_Control_Planets", false);
+            r.is_playable = xv::bool_or(n, "Is_Playable", false);
+            r.benefits_from_corruption = xv::bool_or(n, "Benefits_From_Corruption", false);
+            r.basic_ai = std::string(text("Basic_AI"));
+            r.text_id = std::string(text("Text_ID"));
+            r.tech_tree_dialog = std::string(text("Tech_Tree_Dialog_Name"));
+            r.tech_level_icon = std::string(text("Tech_Level_Icon_Name"));
+            r.icon = std::string(text("Icon_Name"));
+            if (r.icon.empty()) r.icon = std::string(text("Alternate_Icon_Name"));
+            r.land_selection_blob = std::string(text("Land_Mode_Selection_Blob_Material_Name"));
+            r.space_selection_blob = std::string(text("Space_Mode_Selection_Blob_Material_Name"));
+            r.hyperspace_speed_factor = xv::float_or(n, "Hyperspace_Speed_Factor", r.hyperspace_speed_factor);
+            r.maintenance_cost = xv::float_or(n, "Maintenance_Cost", r.maintenance_cost);
+            r.force_alignment = parse_force_side(text("Force_Alignment"));
+            // Code 0x13 float lists append; the pair is the first two values of the appended list.
+            const auto pair_list = [&n](std::string_view tag, std::array<float, 2> fallback) {
+                const std::vector<std::string_view> tok = xv::list(n, tag);
+                for (size_t i = 0; i < tok.size() && i < 2; ++i) fallback[i] = xv::to_float(tok[i]);
+                return fallback;
             };
-            r.allies = names(n.child_text("Allies"));
-            r.enemies = names(n.child_text("Enemies"));
+            r.corruption_time_mult = pair_list("Corruption_Galactic_Production_Time_Multipliers", r.corruption_time_mult);
+            r.corruption_price_mult = pair_list("Corruption_Galactic_Production_Price_Multipliers", r.corruption_price_mult);
+            // a2m r2: the corruption upgrades by corruption type (resolved in load_galactic_rules).
+            for (std::string_view u : xv::list(n, "Automatic_Planetary_Corruption_Upgrade_Type"))
+                r.automatic_corruption_upgrade_names.emplace_back(u);
+            r.base_population_capacity = xv::int_or(n, "Base_Population_Capacity", 0);         // code 0x6
+            r.displayed_tech_level_adjustment = xv::int_or(n, "Displayed_Tech_Level_Adjustment", 0);  // code 0x6 ("+1" = 1)
+            // OI galactic: victory monitor inputs (resolved in load_galactic_rules).
+            r.home_planet = std::string(text("Home_Planet"));
+            r.leader_name = std::string(text("Faction_Leader"));
+            r.leader_company_name = std::string(text("Faction_Leader_Company"));
+            r.primary_enemy_name = std::string(text("Primary_Enemy"));
+            // S7 t30 (TACTICAL_COMBAT §2.10): the relation lists (code 0x2a: every occurrence appends).
+            for (std::string_view a : xv::list(n, "Allies")) r.allies.emplace_back(a);
+            for (std::string_view e : xv::list(n, "Enemies")) r.enemies.emplace_back(e);
             out.push_back(std::move(r));
         }
     }, opt);
@@ -337,13 +304,13 @@ std::vector<DifficultyRules> load_difficulties(const FileProvider& provider, std
     auto doc = read_xml(provider, "Data\\XML\\DifficultyAdjustments.xml", diagnostics);
     if (!doc) return out;
     for (data::XmlNode n : doc->root().children("Difficulty_Adjustment")) {
-        DifficultyRules d;
+        DifficultyRules d;  // mcx1 t03: the shared data-class rule (last occurrence wins, TBD / empty skipped)
         d.name = std::string(n.attribute("Name"));
-        d.credit_multiplier = atof_or(n.child_text("Credit_Multiplier"), 1.0f);
-        d.galactic_build_time_multiplier = atof_or(n.child_text("Galactic_Build_Time_Multiplier"), 1.0f);
-        d.damage_multiplier = atof_or(n.child_text("Damage_Multiplier"), 1.0f);
-        d.health_multiplier = atof_or(n.child_text("Health_Multiplier"), 1.0f);
-        d.shield_multiplier = atof_or(n.child_text("Shield_Multiplier"), 1.0f);
+        d.credit_multiplier = atof_or(data::xml_values::text(n, "Credit_Multiplier"), 1.0f);
+        d.galactic_build_time_multiplier = atof_or(data::xml_values::text(n, "Galactic_Build_Time_Multiplier"), 1.0f);
+        d.damage_multiplier = atof_or(data::xml_values::text(n, "Damage_Multiplier"), 1.0f);
+        d.health_multiplier = atof_or(data::xml_values::text(n, "Health_Multiplier"), 1.0f);
+        d.shield_multiplier = atof_or(data::xml_values::text(n, "Shield_Multiplier"), 1.0f);
         out.push_back(std::move(d));
     }
     return out;
@@ -432,7 +399,7 @@ std::vector<TypeInfo> extract_type_info(const objects::GameObjectTypes& types, c
         for (objects::TypeIndex r : types.get_type_refs(t, "Planet_Restricted_Unit_Types"))
             if (r != objects::kNone) i.restricted_types.push_back(r);
         extract_oi_fields(types, t, i);  // OI galactic (STRATEGIC_GAPS 1.2 / 1.3 / 1.7)
-        i.kind = galactic_unit_kind(types.raw().element_name(t), i.hyperspace, i.dummy);  // q6 t03: needs i.dummy
+        i.kind = galactic_unit_kind(i.dummy, has_planet_behavior(types, static_cast<uint32_t>(t)));  // mcx1 t05 (D4)
     }
     // Company / squadron membership flags (type derivation 0x377500: +0x2A / +0x29 on every listed member).
     for (objects::TypeIndex t = 0; t < types.size(); ++t) {

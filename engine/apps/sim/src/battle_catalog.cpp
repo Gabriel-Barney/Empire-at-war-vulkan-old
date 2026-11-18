@@ -16,6 +16,7 @@
 #include "alamo/data/game_database.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/data/xml_list.hpp"
+#include "alamo/data/xml_values.hpp"
 #include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/type_fields.hpp"
@@ -154,21 +155,26 @@ ta::AbilityConfig BattleCatalog::ability_config(bool space, bool skirmish) const
 
 void BattleCatalog::load_hardpoints(const FileProvider& files, std::vector<std::string>* diag) {
     const data::ListStatus st = data::for_each_listed_xml(files, "Data\\XML\\HardPointDataFiles.xml", [&](data::ListedXmlFile& file) {
-        if (!file.doc || !file.doc->ok()) {
+        if (!file.doc) {
             note(diag, "battle: " + file.entry.path + " not found");
+            return;
+        }
+        if (!file.doc->ok()) {  // MCX1_RE_ANSWERS Q6.1: the original's init fails on a listed hardpoint file that does not parse
+            note(diag, "battle: error: " + file.entry.path + " does not parse (the original game does not start with it either)");
             return;
         }
         for (data::XmlNode hp : file.doc->root().children("HardPoint")) {
             Tags tags;
-            const std::string_view variant = hp.child_text("Variant_Of_Existing_Type");
+            const std::string_view variant = data::xml_values::text(hp, "Variant_Of_Existing_Type");
             if (!variant.empty()) {
                 const auto it = hardpoints_.find(ascii_upper(variant));
                 if (it != hardpoints_.end()) tags = it->second;
             }
-            for (data::XmlNode c = hp.first_child(); c; c = c.next_sibling()) {
-                const std::string tag = ascii_upper(c.name());
-                const std::string_view text = c.text_trimmed();
-                // Repeated list tags (Fire_Inaccuracy_Distance) append; other tags replace.
+            // mcx1 t12 (MCX1_RE_ANSWERS Q1, HardPoint 0x5401d0): every child in document order, nested elements descended
+            // into, empty and TBD values change nothing; a repeated list tag (Fire_Inaccuracy_Distance) appends, any other
+            // tag replaces (the last occurrence wins).
+            for (const auto& [name, text] : data::xml_values::fields(hp, data::xml_values::kData)) {
+                const std::string tag = ascii_upper(name);
                 bool replaced = false;
                 if (tag != "FIRE_INACCURACY_DISTANCE")
                     for (auto& [t, v] : tags)

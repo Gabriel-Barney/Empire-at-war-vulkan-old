@@ -721,7 +721,7 @@ namespace bo3split {
 #ifdef ALAMO_SIM_HAVE_TACTICAL_AI
 
 // a2h t05: load_tactical_ai_data, the battle hosts' loader (alamo_headless --skirmish-ai / galactic --battles, alamo_game),
-// fills TacticalAiSetup::constants from GameConstants; a missing tag, a bad value or no GameConstants keeps the default.
+// fills TacticalAiSetup::constants from GameConstants; a missing tag or no GameConstants keeps the default (mcx1 t02: a bad value converts as retail does, atof -> 0).
 void test_tactical_ai_constants_load() {
     const fs::path root = fs::temp_directory_path() / "alamo_sim_tactical_ai_constants";
     std::error_code ec;
@@ -750,7 +750,8 @@ void test_tactical_ai_constants_load() {
                 c.ai_uses_fow_land ? 1 : 0, c.use_reinforcement_points ? 1 : 0, static_cast<double>(c.health_low_percent_threshold));
     CHECK(c.production_speed_factor == 2.5f && c.max_ground_forces_on_planet == 7 && c.land_region_size == 1500.0f);
     CHECK(c.ai_uses_fow_land && !c.use_reinforcement_points);
-    CHECK(c.health_low_percent_threshold == def.health_low_percent_threshold);  // unparsable: the default
+    // mcx1 t02 (MCX1_RE_ANSWERS Q1 / OBJECT_TYPES §4.5): a stored value always converts; atof("not a number") is 0.
+    CHECK(c.health_low_percent_threshold == 0.0f);
     CHECK(c.space_region_size == def.space_region_size && c.high_threat_tolerance == def.high_threat_tolerance &&
           c.ai_uses_fow_space == def.ai_uses_fow_space);  // missing tags: the defaults
     CHECK(s.land_plans.size() == 1 && s.space_plans.empty());

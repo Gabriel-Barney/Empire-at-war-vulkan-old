@@ -13,6 +13,7 @@
 #include "alamo/core/profile.hpp"
 
 #include "alamo/data/xml.hpp"
+#include "alamo/data/xml_values.hpp"
 #include "alamo/lua/gc_schedule.hpp"  // OPT2 t04
 #include "galactic_ai_impl.hpp"
 
@@ -3141,8 +3142,9 @@ std::vector<GalacticAiDifficulty> load_ai_difficulties(const FileProvider& files
         GalacticAiDifficulty d;
         d.name = std::string(n.attribute("Name", n.name()));
         float v = 0.0f;
-        if (ai_parse_float(n.child_text("Galactic_AI_Contrast_Multiplier"), v)) d.galactic_contrast = v;
-        if (ai_parse_float(n.child_text("Galactic_AI_Goal_Cycle_Sleep_Duration"), v)) d.galactic_goal_sleep = v;
+        // mcx1 t03: the shared data-class rule (last occurrence wins, TBD / empty skipped).
+        if (ai_parse_float(data::xml_values::text(n, "Galactic_AI_Contrast_Multiplier"), v)) d.galactic_contrast = v;
+        if (ai_parse_float(data::xml_values::text(n, "Galactic_AI_Goal_Cycle_Sleep_Duration"), v)) d.galactic_goal_sleep = v;
         out.push_back(std::move(d));
     }
     return out;

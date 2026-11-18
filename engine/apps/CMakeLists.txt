@@ -536,8 +536,8 @@ if(_alamo_sim)
     # (9120-14073), 2 / 6 / 8 reach the cap; the test moves to seed 1 (Rebel, all retreated, 9120). In-game check: §1.5 probe.
     # s78n t08f (2026-11-09, range extent from the model's collision bound, TACTICAL_COMBAT §5.4.5): seeds 2-8 end
     # (10201-13407), 1 reaches the cap; the test moves to seed 8 (Rebel, all destroyed, 10201).
-    # b0319 (2026-11-14): with the port's squadrons of 12 (bdb9cd57) seed 8 no longer ends in time; this test checks the
-    # retail battle outcome, so it runs with the retail squadrons (--squadron-size 0), as the parity harness does.
+    # b0319 (2026-11-14): ran with --squadron-size 0 (retail squadrons) while the port resized squadrons to 12; mcx1 t06
+    # (2026-11-17, D2) removed the resize and the flag, so every run has the retail squadrons.
     # b0421 (2026-11-14, categories resolve in descending budget weight): seeds 1-7 end (Rebel, 9402-13446), seed 8 reaches the
     # cap; the test moves to seed 6 (Rebel, all destroyed, 9402).
     # skai t17 (2026-11-16, space skirmish build economy and Resolve re-accepting old candidates): seeds 1, 3-5, 7, 8 end
@@ -546,8 +546,7 @@ if(_alamo_sim)
     # end (Rebel, all destroyed, 8496-9347); 1, 2, 4, 8 reach the cap as slow sieges (213-243 AI orders, 0 Lua errors, 4-7
     # reinforcements, 56-67 deaths, the Rebel AI attacks to the end); the test moves to seed 7 (8496).
     add_test(NAME alamo_headless_skirmish_ai_foc_station
-             COMMAND alamo_headless --skirmish-ai foc-station --seed 7 --ticks 20000 --workers 4 --quiet --expect-battle-end
-                     --squadron-size 0)
+             COMMAND alamo_headless --skirmish-ai foc-station --seed 7 --ticks 20000 --workers 4 --quiet --expect-battle-end)
     # t48: the default seed reaches QuickReinforce's anti-idle; 0 Lua errors (it may run to the frame limit: half the seeds do, the
     # station holds). refixf t02 (2026-10-31): back on the default seed. It had stacked the rebel ships on the station's centre
     # (3300,0,0) - Project_By_Unit_Range nil, Move_To failed (also seed 4): the station is now a space static entry and a task

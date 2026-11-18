@@ -184,6 +184,14 @@ set_tests_properties(alamo_mod_check_fixture PROPERTIES TIMEOUT 120
                      PASS_REGULAR_EXPRESSION "\"result\": \"ok\",[^{]*\"errors\": 0,"
                      FAIL_REGULAR_EXPRESSION "\"run_errors\": \\[[^]]")
 
+# mcx1 t07: the conformance mod `values` (testdata/conformance/values: retail value kinds, repeated tags per class, element-tag
+# independence, several roots, UTF-16) through the real MODPATH= route, no game data; read only (its own fixture folder).
+add_executable(alamo_game_conformance_values_tests tests/test_conformance_values.cpp)
+target_link_libraries(alamo_game_conformance_values_tests PRIVATE alamo_core alamo_game_core alamo_test_support)
+add_test(NAME alamo_game_conformance_values_tests
+         COMMAND alamo_game_conformance_values_tests ${CMAKE_CURRENT_SOURCE_DIR}/testdata/conformance/values)
+set_tests_properties(alamo_game_conformance_values_tests PROPERTIES TIMEOUT 120)
+
 # modc t08: the mod picker's data side (mod_picker.hpp) on the same read-only fixture; its modinfo.json decoding cases write
 # to their own temp folder (%TEMP%\alamo_mod_picker_tests, no other test uses it).
 add_executable(alamo_game_mod_picker_tests tests/test_mod_picker.cpp)

@@ -110,9 +110,9 @@ std::vector<TacticalBattle::L1Faction> load_l1_factions(const galactic::Galactic
         TacticalBattle::L1Faction& f = out[fi];
         f.playable = n.is_playable;
         f.skirmish_land_bomber = std::string(n.xml_text("Skirmish_Land_Bomber"));
-        if (auto v = n.xml_text("Bombardment_Required_Orbital_Ships"); !v.empty()) f.bombard_ships = split_names(v);
-        if (auto v = n.xml_text("Bombardment_Projectile"); !v.empty()) f.bombard_projectiles = split_names(v);
-        if (auto v = n.xml_text("Bombardment_Particle"); !v.empty()) f.bombard_particles = split_names(v);
+        if (const std::string v = n.xml_list("Bombardment_Required_Orbital_Ships"); !v.empty()) f.bombard_ships = split_names(v);
+        if (const std::string v = n.xml_list("Bombardment_Projectile"); !v.empty()) f.bombard_projectiles = split_names(v);
+        if (const std::string v = n.xml_list("Bombardment_Particle"); !v.empty()) f.bombard_particles = split_names(v);
         if (auto v = n.xml_text("Bombardment_Number_Of_Salvos"); !v.empty()) f.salvos = objects::c_atoi(v);
         if (auto v = n.xml_text("Bombardment_Shots_Per_Salvo"); !v.empty()) f.shots_per_salvo = objects::c_atoi(v);
         if (auto v = n.xml_text("Bombardment_Shot_Delay"); !v.empty()) f.shot_delay = static_cast<float>(objects::c_atof(v));

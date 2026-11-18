@@ -9,6 +9,7 @@
 #include "alamo/core/hash.hpp"
 #include "alamo/core/log.hpp"
 #include "alamo/data/values.hpp"
+#include "alamo/data/xml_values.hpp"
 
 namespace alamo::data {
 
@@ -103,19 +104,21 @@ std::optional<std::string_view> GameConstants::get(std::string_view tag) const {
     return fields[it->second].second;
 }
 
+// mcx1 t02: retail's converters (MCX1_RE_ANSWERS Q1 / Q2, OBJECT_TYPES §4.5): a stored value always converts (atoi / atof
+// prefix, garbage 0; bool "1" or a first Y / T); only an absent tag gives the fallback (fields holds no empty or TBD values).
 float GameConstants::get_float(std::string_view tag, float fallback) const {
     const auto v = get(tag);
-    return v ? parse_float_or(*v, fallback) : fallback;
+    return v ? xml_values::to_float(*v) : fallback;
 }
 
 int32_t GameConstants::get_int(std::string_view tag, int32_t fallback) const {
     const auto v = get(tag);
-    return v ? parse_int_or(*v, fallback) : fallback;
+    return v ? xml_values::to_int(*v) : fallback;
 }
 
 bool GameConstants::get_bool(std::string_view tag, bool fallback) const {
     const auto v = get(tag);
-    return v ? parse_bool_or(*v, fallback) : fallback;
+    return v ? xml_values::to_bool(*v) : fallback;
 }
 
 uint32_t PlanetTypes::find(std::string_view planet_name) const {
@@ -123,8 +126,9 @@ uint32_t PlanetTypes::find(std::string_view planet_name) const {
 }
 
 std::string_view CampaignDef::raw_value(std::string_view tag) const {
-    for (const auto& [k, v] : raw)
-        if (iequals(k, tag)) return v;
+    // mcx1 t03 (MCX1_RE_ANSWERS Q1): a repeated scalar tag takes its last occurrence (`raw` holds no empty / TBD value).
+    for (auto it = raw.rbegin(); it != raw.rend(); ++it)
+        if (iequals(it->first, tag)) return it->second;
     return {};
 }
 
@@ -189,8 +193,10 @@ const XmlDocument* GameDatabase::load_file(const FileProvider& provider, const F
     const FileProvider* used = &provider;
     if (!provider.read(path, bytes)) {
         if (!fallback || !fallback->read(path, bytes)) {
+            // mcx1 t08 (MCX1_RE_ANSWERS Q6.1): GameConstants.xml and the core list files are fatal in the original too
+            // (its init fails and the process ends); the port refuses the load and says so.
             warn(std::string(required ? "error: " : "") + "unable to open XML file '" + std::string(path) + "'" +
-                 (required ? "" : " (skipped)"));
+                 (required ? " (the original game does not start without it either)" : " (skipped)"));
             return nullptr;
         }
         used = fallback;
@@ -204,6 +210,16 @@ const XmlDocument* GameDatabase::load_file(const FileProvider& provider, const F
     file_index_.emplace(key, static_cast<uint32_t>(files_.size()));
     files_.push_back(std::move(f));
     return doc->ok() ? doc : nullptr;
+}
+
+// mcx1 t08 (MCX1_RE_ANSWERS Q6.1): a listed trade-route or campaign file that opens but does not parse ends the original's
+// init (the process exits); the port refuses the load and says why. A listed file that does not open is skipped there too.
+bool GameDatabase::listed_file_unparsable(std::string_view path, const char* what) {
+    const auto it = file_index_.find(normalize_path(path));
+    if (it == file_index_.end() || files_[it->second].doc->ok()) return false;
+    warn(std::string("error: listed ") + what + " file '" + std::string(path) +
+         "' does not parse (the original game does not start with it either)");
+    return true;
 }
 
 // Every <File> entry in list order (duplicates kept; GameObjectFiles.xml parses them twice).
@@ -224,14 +240,14 @@ void GameDatabase::load_constants(const FileProvider& provider, bool& ok) {
     }
     GameConstants& c = constants_;
     c.element = doc->root();
-    for (XmlNode n : c.element.children()) {
-        c.index_[normalize_name(n.name())] = static_cast<uint32_t>(c.fields.size());
-        c.fields.emplace_back(n.name(), n.text_trimmed());
+    // mcx1 t03 (MCX1_RE_ANSWERS Q1): every element of the file, nested ones descended into; an empty or TBD value changes
+    // nothing; a repeated tag: the last one wins.
+    for (const auto& [tag, value] : xml_values::fields(c.element, xml_values::kData)) {
+        c.index_[normalize_name(tag)] = static_cast<uint32_t>(c.fields.size());
+        c.fields.emplace_back(tag, value);
     }
-    if (const auto v = c.get("MaximumFleetMovementDistance")) {
-        if (const auto f = parse_float(*v)) c.max_fleet_move_distance = *f;
-        else warn("GameConstants: bad MaximumFleetMovementDistance '" + std::string(*v) + "'");
-    }
+    // Retail atof, like get_float: an unreadable value gives 0 (mcx1 t02).
+    if (const auto v = c.get("MaximumFleetMovementDistance")) c.max_fleet_move_distance = xml_values::to_float(*v);
 }
 
 void GameDatabase::load_game_objects(const FileProvider& provider, bool& ok) {
@@ -256,29 +272,15 @@ void GameDatabase::load_game_objects(const FileProvider& provider, bool& ok) {
                      "' (kept; name lookup returns the first definition)");
             bucket.push_back(static_cast<uint32_t>(objects_.size()));
             objects_.push_back({e.name(), name, crc, e, dup});
-
-            if (!iequals(e.name(), "Planet")) continue;
-            PlanetTypes& p = planets_;
-            const uint32_t row = static_cast<uint32_t>(p.name.size());
-            p.name.emplace_back(name);
-            p.name_crc.push_back(crc);
-            p.by_crc_[crc].push_back(row);  // find() returns the first matching row
-            p.element.push_back(e);
-            p.duplicate.push_back(dup ? uint8_t{1} : uint8_t{0});
         }
     }
 
-    // The planet columns, after every file is read: a <Variant_Of_Existing_Type> planet takes each field it does not
-    // set from its resolved parent (OBJECT_TYPES.md §3.3: scalars from the child when it has the tag; a variant's
-    // <Behavior> replaces the parent's list, its last occurrence wins; an empty tag is a no-op). The parent is the first
-    // definition of the name, in any file (§3.4); a missing parent or a cycle leaves the element's own tags only.
-    // modc t06: a mod defines every planet as a variant of one template planet; before, none of them was a planet.
-    // Base FoC / EaW define no planet variant.
-    PlanetTypes& p = planets_;
-    for (uint32_t row = 0; row < p.name.size(); ++row) {
-        std::vector<XmlNode> chain{p.element[row]};  // the element, then its parents
+    // The variant chain of an object element: the element, then its parents (first definition of each name, in any file;
+    // §3.4); a missing parent or a cycle leaves the element alone.
+    auto variant_chain = [this](XmlNode e) {
+        std::vector<XmlNode> chain{e};
         for (int depth = 0; depth < 16; ++depth) {
-            const std::string_view parent = trim(chain.back().child_text("Variant_Of_Existing_Type"));
+            const std::string_view parent = trim(xml_values::text(chain.back(), "Variant_Of_Existing_Type", xml_values::kObject));
             if (parent.empty()) break;
             const GameObjectRecord* rec = find_game_object(parent);
             if (!rec || std::find(chain.begin(), chain.end(), rec->element) != chain.end()) {
@@ -287,49 +289,84 @@ void GameDatabase::load_game_objects(const FileProvider& provider, bool& ok) {
             }
             chain.push_back(rec->element);
         }
-        // The nearest element of the chain with a non-empty <tag>.
-        auto field = [&](std::string_view tag) -> XmlNode {
-            for (const XmlNode& n : chain)
-                for (XmlNode c : n.children(tag))
-                    if (!c.text_trimmed().empty()) return c;
-            return XmlNode{};
-        };
-        Vec3 pos{};
-        if (XmlNode gp = field("Galactic_Position")) {
-            if (const auto v = parse_vec3(gp.text())) pos = *v;
-            else warn(where(gp) + ": planet '" + p.name[row] + "' has a bad Galactic_Position");
-        }
-        p.position.push_back(pos);
-        auto text = [&](std::string_view tag) {
-            const XmlNode n = field(tag);
-            return n ? n.text_trimmed() : std::string_view{};
-        };
-        uint32_t flags = 0;
-        if (parse_bool_or(text("In_Background"), false)) flags |= kPlanetInBackground;
-        if (parse_bool_or(text("Always_Instantiate_Galactic"), false)) flags |= kPlanetAlwaysInstantiate;
-        // Q1: graph membership is "has a PLANET behaviour slot", from <Behavior>. A plain type appends every occurrence
-        // (§4.4); in a variant the last non-empty one replaces the parent's list.
-        std::vector<std::string> beh;
+        return chain;
+    };
+    // A behaviour list along the chain: a plain type appends every occurrence (§4.4); in a variant the last non-empty one
+    // replaces the parent's list.
+    auto behavior_list = [](const std::vector<XmlNode>& chain, std::string_view tag) {
+        std::vector<std::string> out;
         for (const XmlNode& n : chain) {
-            const bool variant = !trim(n.child_text("Variant_Of_Existing_Type")).empty() && chain.size() > 1;
+            const bool variant = !trim(xml_values::text(n, "Variant_Of_Existing_Type", xml_values::kObject)).empty() && chain.size() > 1;
+            // kData walk (OBJECT_TYPES §4.2 / §4.4): nested groups descended into, empty and TBD occurrences skipped.
             std::vector<std::string> own;
-            for (XmlNode bn : n.children("Behavior")) {
-                if (bn.text_trimmed().empty()) continue;
+            for (std::string_view v : xml_values::texts(n, tag, xml_values::kObject)) {
                 if (variant) own.clear();
-                for (std::string_view tok : split_list(bn.text())) own.emplace_back(tok);
+                for (std::string_view tok : split_list(v)) own.emplace_back(tok);
             }
             if (!own.empty()) {
-                beh = std::move(own);
+                out = std::move(own);
                 break;
             }
         }
-        for (const std::string& tok : beh)
-            if (iequals(tok, "PLANET")) flags |= kPlanetHasPlanetBehavior;
-        p.behaviors.push_back(std::move(beh));
+        return out;
+    };
+    auto has_planet = [](const std::vector<std::string>& toks) {
+        for (const std::string& t : toks)
+            if (iequals(t, "PLANET")) return true;
+        return false;
+    };
+
+    // mcx1 t05 (D4; MCX1_RE_ANSWERS Q7.3, OBJECT_TYPES §0 rule 2): the element tag carries no behaviour. A planet type is
+    // any type whose resolved Behavior or GalacticBehavior list holds PLANET, whatever element it is written in. A <Planet>
+    // element without PLANET keeps its row without kPlanetHasPlanetBehavior, as before (it is not a planet either way).
+    PlanetTypes& p = planets_;
+    std::vector<std::vector<XmlNode>> chains;
+    std::vector<std::vector<std::string>> behaviors;
+    std::vector<uint8_t> planet_behavior;
+    for (const GameObjectRecord& o : objects_) {
+        std::vector<XmlNode> chain = variant_chain(o.element);
+        std::vector<std::string> beh = behavior_list(chain, "Behavior");
+        const bool is_planet = has_planet(beh) || has_planet(behavior_list(chain, "GalacticBehavior"));
+        if (!is_planet && !iequals(o.type, "Planet")) continue;
+        const uint32_t row = static_cast<uint32_t>(p.name.size());
+        p.name.emplace_back(o.name);
+        p.name_crc.push_back(o.name_crc);
+        p.by_crc_[o.name_crc].push_back(row);  // find() returns the first matching row
+        p.element.push_back(o.element);
+        p.duplicate.push_back(o.duplicate ? uint8_t{1} : uint8_t{0});
+        chains.push_back(std::move(chain));
+        behaviors.push_back(std::move(beh));
+        planet_behavior.push_back(is_planet ? uint8_t{1} : uint8_t{0});
+    }
+
+    // The planet columns, after every file is read: a <Variant_Of_Existing_Type> planet takes each field it does not
+    // set from its resolved parent (OBJECT_TYPES.md §3.3: scalars from the child when it has the tag). Within one element
+    // a repeated scalar tag takes its last occurrence and an empty or TBD value changes nothing (mcx1 t03, §4.4); values
+    // convert by their type codes (mcx1 t02: In_Background / Always_Instantiate_Galactic bool 0x0, the ints atoi).
+    // modc t06: a mod defines every planet as a variant of one template planet; base FoC / EaW define no planet variant.
+    for (uint32_t row = 0; row < p.name.size(); ++row) {
+        const std::vector<XmlNode>& chain = chains[row];
+        // The nearest element of the chain that sets <tag>; its last occurrence.
+        auto text = [&](std::string_view tag) -> std::string_view {
+            for (const XmlNode& n : chain)
+                if (const std::string_view v = xml_values::text(n, tag, xml_values::kObject); !v.empty()) return v;
+            return {};
+        };
+        Vec3 pos{};
+        if (const std::string_view gp = text("Galactic_Position"); !gp.empty()) {
+            if (const auto v = parse_vec3(gp)) pos = *v;
+            else warn(where(p.element[row]) + ": planet '" + p.name[row] + "' has a bad Galactic_Position");
+        }
+        p.position.push_back(pos);
+        uint32_t flags = 0;
+        if (xml_values::bool_or(text("In_Background"), false)) flags |= kPlanetInBackground;
+        if (xml_values::bool_or(text("Always_Instantiate_Galactic"), false)) flags |= kPlanetAlwaysInstantiate;
+        if (planet_behavior[row] != 0) flags |= kPlanetHasPlanetBehavior;
+        p.behaviors.push_back(std::move(behaviors[row]));
         p.flags.push_back(flags);
-        p.credit_value.push_back(parse_int_or(text("Planet_Credit_Value"), 0));
-        p.max_space_base.push_back(parse_int_or(text("Max_Space_Base"), 0));
-        p.max_ground_base.push_back(parse_int_or(text("Max_Ground_Base"), 0));
+        p.credit_value.push_back(xml_values::int_or(text("Planet_Credit_Value"), 0));
+        p.max_space_base.push_back(xml_values::int_or(text("Max_Space_Base"), 0));
+        p.max_ground_base.push_back(xml_values::int_or(text("Max_Ground_Base"), 0));
     }
 }
 
@@ -342,7 +379,10 @@ void GameDatabase::load_trade_routes(const FileProvider& provider, bool& ok) {
     for (const auto& [key, oe] : ordered) {
         const ListedXmlEntry& en = oe.list;
         const XmlDocument* doc = load_file(provider, nullptr, en.path, false);
-        if (!doc) continue;
+        if (!doc) {
+            if (listed_file_unparsable(en.path, "trade-route")) ok = false;
+            continue;
+        }
         for (XmlNode e : doc->root().children("TradeRoute")) {
             const std::string_view name = trim(e.attribute("Name"));
             if (name.empty()) {
@@ -354,18 +394,15 @@ void GameDatabase::load_trade_routes(const FileProvider& provider, bool& ok) {
             r.name_crc = name_crc(name);
             r.file = en.path;
             r.element = e;
-            for (XmlNode f : e.children()) {
-                const std::string_view tag = f.name();
-                const std::string_view v = f.text_trimmed();
-                auto num = [&](float& out) {
-                    if (const auto x = parse_float(v)) out = *x;
-                    else warn(where(f) + ": bad number '" + std::string(v) + "' in <" + std::string(tag) + ">");
-                };
+            // mcx1 t02 / t03 (MCX1_RE_ANSWERS Q1): every field (nested elements descended into, empty / TBD change nothing),
+            // the last occurrence wins; the numbers are atof (0x8) / atoi (Political_Control_Gain 0x5), garbage 0.
+            for (const auto& [tag, v] : xml_values::fields(e, xml_values::kData)) {
                 if (iequals(tag, "Point_A")) r.point_a = std::string(v);
                 else if (iequals(tag, "Point_B")) r.point_b = std::string(v);
-                else if (iequals(tag, "HS_Speed_Factor")) num(r.hs_speed_factor);
-                else if (iequals(tag, "Political_Control_Gain")) num(r.political_control_gain);
-                else if (iequals(tag, "Credit_Gain_Factor")) num(r.credit_gain_factor);
+                else if (iequals(tag, "HS_Speed_Factor")) r.hs_speed_factor = xml_values::to_float(v);
+                else if (iequals(tag, "Political_Control_Gain"))
+                    r.political_control_gain = static_cast<float>(xml_values::to_int(v));
+                else if (iequals(tag, "Credit_Gain_Factor")) r.credit_gain_factor = xml_values::to_float(v);
                 else if (iequals(tag, "Visible_Line_Name")) r.visible_line_name = std::string(v);
             }
             upsert_last_wins(routes_, route_by_crc_, std::move(r), e, "trade route", warn_fn);
@@ -403,11 +440,15 @@ void GameDatabase::load_campaigns(const FileProvider& provider, const LoadOption
 
     for (const auto& [key, en] : ordered) {
         const XmlDocument* doc = load_file(provider, en.fallback, en.list.path, false);
-        if (!doc) continue;
-        for (XmlNode e : doc->root().children("Campaign")) {
+        if (!doc) {
+            if (listed_file_unparsable(en.list.path, "campaign")) ok = false;
+            continue;
+        }
+        // mcx1 t05 (D4; MCX1_RE_ANSWERS Q1): every top-level child of a campaign file is a campaign, whatever its tag.
+        for (XmlNode e = doc->root().first_child(); e; e = e.next_sibling()) {
             const std::string_view name = trim(e.attribute("Name"));
             if (name.empty()) {
-                warn(where(e) + ": <Campaign> without a Name ignored");
+                warn(where(e) + ": <" + std::string(e.name()) + "> without a Name ignored (campaign file)");
                 continue;
             }
             CampaignDef c;  // a whole new object: defaults + this element's XML
@@ -415,24 +456,22 @@ void GameDatabase::load_campaigns(const FileProvider& provider, const LoadOption
             c.name_crc = name_crc(name);
             c.file = en.list.path;
             c.element = e;
-            for (XmlNode f : e.children()) {
-                const std::string_view tag = f.name();
-                const std::string_view v = f.text_trimmed();
+            // mcx1 t03 (MCX1_RE_ANSWERS Q1): every field in document order, nested elements descended into, empty and TBD
+            // values change nothing; a repeated scalar takes the last occurrence, a repeated list appends.
+            for (const auto& [tag, v] : xml_values::fields(e, xml_values::kData)) {
                 c.raw.emplace_back(tag, v);
                 if (iequals(tag, "Campaign_Set")) c.campaign_set = std::string(v);
                 else if (iequals(tag, "Text_ID")) c.text_id = std::string(v);
                 else if (iequals(tag, "Description_Text")) c.description_text = std::string(v);
                 else if (iequals(tag, "Starting_Active_Player")) c.starting_active_player = std::string(v);
-                else if (iequals(tag, "Sort_Order")) {
-                    if (const auto x = parse_int(v)) c.sort_order = *x;
-                    else warn(where(f) + ": bad Sort_Order '" + std::string(v) + "'");
-                } else if (iequals(tag, "Locations")) {
+                else if (iequals(tag, "Sort_Order")) c.sort_order = xml_values::to_int(v);  // code 0x5: atoi
+                else if (iequals(tag, "Locations")) {
                     for (std::string_view s : split_list(v)) c.locations.emplace_back(s);
                 } else if (iequals(tag, "Trade_Routes")) {
                     for (std::string_view s : split_list(v)) c.trade_routes.emplace_back(s);
                 } else if (iequals(tag, "Home_Location")) {
                     if (const auto pr = parse_pair(v)) c.home_locations.emplace_back(pr->first, pr->second);
-                    else warn(where(f) + ": bad Home_Location '" + std::string(v) + "'");
+                    else warn(where(e) + ": campaign '" + c.name + "': bad Home_Location '" + std::string(v) + "'");
                 } else if (iequals(tag, "AI_Player_Control")) c.ai_player_control.emplace_back(v);
                 else if (iequals(tag, "Starting_Forces")) c.starting_forces.emplace_back(v);
                 else if (iequals(tag, "Starting_Credits")) c.starting_credits.emplace_back(v);

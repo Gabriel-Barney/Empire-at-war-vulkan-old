@@ -149,7 +149,10 @@ public:
             p_ += 3;
         else if (n >= 2 && ((static_cast<unsigned char>(p_[0]) == 0xFF && static_cast<unsigned char>(p_[1]) == 0xFE) ||
                             (static_cast<unsigned char>(p_[0]) == 0xFE && static_cast<unsigned char>(p_[1]) == 0xFF))) {
-            fatal(0, "UTF-16 text is not supported");
+            // mcx1 t04 (MCX1_RE_ANSWERS Q5): the original never decodes UTF-16 either; it fails the file's XML header
+            // check and drops the file. The port drops it the same way (each loader then handles a failed file as the
+            // original does), with a message that says how to fix it.
+            fatal(0, "UTF-16 text is not read (the original game drops UTF-16 XML files too); save the file as UTF-8 or ANSI");
             return;
         }
         doc_.nodes_.reserve(buf.size() / 48 + 8);
@@ -189,7 +192,13 @@ public:
         }
         uint32_t roots = 0;
         for (uint32_t c = doc_.nodes_[0].first_child; c; c = doc_.nodes_[c].next_sibling) ++roots;
-        if (roots > 1) warn(begin_ + doc_.nodes_[doc_.nodes_[0].last_child].offset, "more than one top-level element");
+        // mcx1 t04 (xml_extra_root; MCX1_RE_ANSWERS Q4): the original shows "file has multiple root nodes" and drops the
+        // whole file; the port keeps the first root and reports the rest (docs/MOD_COMPAT_DESIGN.md §7.1, [port]
+        // docs/PHASE4.md "mcx1").
+        if (roots > 1)
+            warn(begin_ + doc_.nodes_[doc_.nodes_[doc_.nodes_[0].first_child].next_sibling].offset,
+                 "more than one top-level element (xml_extra_root): only the first is read; the original game drops the "
+                 "whole file");
         doc_.ok_ = true;
     }
 
