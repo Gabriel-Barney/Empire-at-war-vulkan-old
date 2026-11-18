@@ -230,6 +230,10 @@ enum class SpawnPurpose : uint8_t {
     // `object_type` -1 (the host resolves record(source, LURE)->particle_effect); bind_spawn() records the object, and
     // the LURE deactivation (or the owner's death [port]) raises RemoveSilently for it.
     LureEffect,
+    // mcx4 t06 (Spawn_Ability update 0x71e290, MCX4_RE_ANSWERS_TACTICAL §14): the bomber `object_type` for the owner at
+    // `position` (the user's Spawn_Bone_Name, or its position), facing the user's; the host calls bind_spawn, and the
+    // ability then orders it to move to and attack `target`, and detonates it when it stops.
+    Bomber,
 };
 struct SpawnRequest {
     uint32_t serial = 0;
@@ -996,6 +1000,9 @@ private:
     bool class_apply(Obj& o, SpecialState& sp, ObjectId target, int32_t hp, uint32_t frame);
     void class_update(Obj& o, SpecialState& sp, uint32_t frame);
     void class_remove(Obj& o, SpecialState& sp, uint32_t frame);
+    // mcx4 t06 (Spawn_Ability, §14): the detonation 0x71dff0 (also the remove) and the object-removed notice 0x71de50.
+    void spawn_detonate(Obj& o, SpecialState& sp, uint32_t frame);
+    void spawn_object_removed(ObjectId id);
     // S8 t06 (LOB_SOLVER §3.5): Remote_Bomb range object (the target's garrison host when garrisoned), the toss 0x71a200
     // (true = a bomb spawned) and its launch point (garrison gun bones within 60°, Spawn_Bone, else position + z adjust).
     ObjectId remote_bomb_range_target(ObjectId target) const;

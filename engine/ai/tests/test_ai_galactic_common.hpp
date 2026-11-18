@@ -645,12 +645,13 @@ struct ParityWorld {
 
     // only: the plan files to load (by base name), empty = all. rules_tweak: applied to the rules before the sim starts;
     // eq_first: equations added before the synthetic ones (a name added here wins: the first definition is kept);
-    // tinfo_tweak: applied to the AI type info before the world is built.
+    // tinfo_tweak: applied to the AI type info before the world is built; cfg_tweak: to the AI config.
     ParityWorld(bool pop_cap, const std::vector<std::string>& only,
                 const std::function<void(gal::GalacticSetup&)>& tweak = {},
                 const std::function<void(gal::GalacticRules&)>& rules_tweak = {},
                 const std::function<void(EquationSet&)>& eq_first = {},
-                const std::function<void(std::vector<GalacticAiTypeInfo>&)>& tinfo_tweak = {}) {
+                const std::function<void(std::vector<GalacticAiTypeInfo>&)>& tinfo_tweak = {},
+                const std::function<void(GalacticAiConfig&)>& cfg_tweak = {}) {
         if (eq_first) eq_first(eqs);
         syn_data(files, defs, eqs, plan_files);
         files.add("Data\\Scripts\\AI\\HeroAttach.lua", kPlanHeroAttach);
@@ -722,6 +723,7 @@ struct ParityWorld {
         GalacticAiConfig cfg;
         cfg.players = {{0, "SynEmpire", 1}};
         cfg.difficulties = {{"Normal_Default", 1.1f, 0.0f}};
+        if (cfg_tweak) cfg_tweak(cfg);
         world = std::make_unique<GalacticAiWorld>(
             *sim, *store, &types, &files, *rng, defs, eqs, tinfo,
             [this](uint8_t p, const commands::EventData& ev) {
@@ -1185,6 +1187,7 @@ void test_planet_type_is_type();
 void test_player_conflict_tokens();
 void test_budget_allocation_token();
 void test_story_trigger_token();
+void test_mcx8_t07_tokens();
 void test_loaded_category_enum();
 void test_ai_type_switch();
 

@@ -126,7 +126,8 @@ Vec3 lob_forward(Vec3 heading, float angle);
 Vec3 turn_toward(Vec3 dir, Vec3 goal, float max_degrees);
 
 // ---- area damage (section 3.5) [H] --------------------------------------------------------------
-// factor = clamp(1 - floor(d x tiers / R) / (tiers + 1), 0, 1); R <= 0 -> 1.
+// factor = clamp(1 - floor(d x (tiers / R)) x (1 / (tiers + 1)), 0, 1); R <= 0 -> 1. mcx4 t03 (0x4c7f70 [H]): retail's
+// operation order (tiers / R first, then x d; the reciprocal of tiers + 1), used only with Projectile_Blast_Area_Dropoff.
 float area_falloff(float d, float R, int32_t tiers);
 // delay = d / R x Max_Secs_For_AE_Delayed_Damage when d >= 1, else 0.
 float area_delay_seconds(float d, float R, float max_secs);

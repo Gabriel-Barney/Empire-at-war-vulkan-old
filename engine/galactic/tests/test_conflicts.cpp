@@ -12,6 +12,7 @@
 #include <memory>
 #include <span>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "alamo/galactic/auto_resolve.hpp"
@@ -646,11 +647,14 @@ void test_overrun_strength() {
     CHECK(w.cm->overrun_strength(bad, true, true) == 0.0f);
     // Decide: with Overrun_Auto_Resolve_Multiple (synthetic 3; vanilla 0 = off) a human defender's battle against a much
     // weaker attacker is auto-resolved (BT §1.6); without it the human's Fight choice starts the battle.
-    for (const float multiple : {0.0f, 3.0f}) {
+    // mcx4 t07 (MCX4_RE_ANSWERS_GALACTIC Q7.6): the auto-resolve lock (story_lock: the story's +0x41 / RESTRICT list,
+    // or the campaign's Is_Autoresolve_Allowed false) suppresses the overrun check, so the human fights.
+    for (const auto& [multiple, locked] : {std::pair{0.0f, false}, std::pair{3.0f, false}, std::pair{3.0f, true}}) {
         World h({{pEmpire, rB, tSB1}, {pEmpire, rB, tFrigate}, {pEmpire, rB, tFrigate}, {pEmpire, rB, tFrigate},
                  {pUnder, rC, tCorvette}},
                 true);
         h.crules.overrun_multiple = multiple;
+        if (locked) h.cm->story_lock = [](const ConflictInfo&) { return true; };
         h.cm->config().human_choice = BattleChoice::Fight;
         int started = 0;
         h.cm->start_battle = [&started](const BattleRequest&) {
@@ -658,7 +662,7 @@ void test_overrun_strength() {
             return true;
         };
         h.arrive_at_b();  // 3300 vs 400
-        if (multiple == 0.0f) {
+        if (multiple == 0.0f || locked) {
             CHECK(started == 1 && h.cm->battle_active());
         } else {
             CHECK(started == 0 && !h.cm->battle_active());

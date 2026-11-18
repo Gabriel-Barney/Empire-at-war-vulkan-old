@@ -116,6 +116,7 @@ struct FactionRules {
     bool can_control_planets = false;       // Can_Control_Planets (+0x109)
     bool is_playable = false;               // Is_Playable (+0x20a8)
     bool benefits_from_corruption = false;  // Benefits_From_Corruption (+0x10b)
+    bool easily_bribed = false;             // Easily_Bribed (+0x10c): its planets charge Cheap_Bribe_Cost (mcx4 t05, Q5.1)
     bool debug_switchable = false;          // Is_Debug_Switchable_To (+0x10a): story SWITCH_SIDES steps to it (mcx6)
     // modc t03: Basic_AI (+0x378, xml_field_tables.md), trimmed as written; the AIPlayerType a skirmish slot of this
     // faction plays (AI_GALACTIC.md §1.2, SKIRMISH_SETUP.md §2.1). "" = none; the shipped "None" is kept as written.
@@ -125,6 +126,11 @@ struct FactionRules {
     ForceSide force_alignment = ForceSide::Neutral;  // Force_Alignment (+0x110)
     std::array<float, 2> corruption_time_mult{1.0f, 1.0f};   // Corruption_Galactic_Production_Time_Multipliers
     std::array<float, 2> corruption_price_mult{1.0f, 1.0f};  // Corruption_Galactic_Production_Price_Multipliers
+    // mcx4 t07 (MCX4_RE_ANSWERS_GALACTIC Q7.2): the tactical float lists, entry 0 = battle planet not corrupted, 1 =
+    // corrupted, as written (any length; an index past the end reads 1.0). Build_Pad_Time has no reader in retail.
+    std::vector<float> corruption_tactical_production_price_mult;  // Corruption_Tactical_Production_Price_Multipliers
+    std::vector<float> corruption_tactical_production_time_mult;   // Corruption_Tactical_Production_Time_Multipliers
+    std::vector<float> corruption_tactical_pad_price_mult;         // Corruption_Tactical_Build_Pad_Price_Multipliers
     // a2m r2: Automatic_Planetary_Corruption_Upgrade_Type (faction +0x3068): the upgrade type a planet corrupted by this
     // faction gets, index = corruption type 0..7 (list order); 0xFFFFFFFF = none / unresolved. Resolved by
     // load_galactic_rules; the names are kept as written in `automatic_corruption_upgrade_names`.
@@ -190,6 +196,7 @@ struct DifficultyRules {
     float damage_multiplier = 1.0f;
     float health_multiplier = 1.0f;
     float shield_multiplier = 1.0f;
+    float bribe_cost_multiplier = 1.0f;  // Bribe_Cost_Multiplier (+0x4C): scales an AI mover's route toll (mcx4 t05, Q5.1)
 };
 
 namespace econ {

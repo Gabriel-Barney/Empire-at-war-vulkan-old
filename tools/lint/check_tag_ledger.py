@@ -7,17 +7,24 @@ Checks that the generated ledgers match the code, without writing anything:
                   - no consumed / verified row without a consumer;
                   - no row moves from consumed / verified to stored / unread (a reader was removed);
                   - every "// ledger: consumes|verifies <Class>.<Tag>" annotation names a row and sits next to code
-                    (consumes) or in a test that names the tag (verifies).
+                    (consumes) or in a test that names the tag (verifies);
+                  - every RETAIL_UNUSED entry (roadmap mcx4) names a row nothing reads and cites an existing docs/re
+                    page that names the tag; such a row is retail_unused, settled like a consumed one.
   binding ledger  engine/lua/src/binding_table.inc (engine/lua/tools/gen_bindings.py): the effect and consumer
                   columns are what the code gives now.
 A failure prints what differs and the command that regenerates the ledger. Runs in build_agent.cmd (before the build),
 in build_gate.cmd (tools/lint/gate_summary.py) and as the ctest entry alamo_objects_tag_ledger_lint.
 
-Usage: check_tag_ledger.py [--selftest]
+Usage: check_tag_ledger.py [--selftest | --gaps [--group NAME] [--counts]]
+  --gaps    list the base-FoC honour gaps still open (tier 1, base_uses > 0, state unread / stored: the mcx4 exit test
+            needs none) from the committed ledger, and exit 1 when there are any
+  --group   only the rows of one work group (GAP_GROUPS below: the mcx4 task that owns them)
+  --counts  one line per work group instead of the rows
 Exit: 0 in step, 1 differences or annotation errors, 2 a ledger file is missing.
 """
 import importlib.util
 import os
+import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -68,6 +75,108 @@ def check_tags(gen):
     return 0
 
 
+# mcx4 t08: the open gap rows split into work groups, one roadmap task each (first match on "Class.Tag" wins; the
+# task text names the group: "rows: check_tag_ledger.py --gaps --group render"). A row that moves out of the gaps
+# (consumed, verified, retail_unused) leaves its group by itself; a new row lands in the first group that matches.
+GAP_GROUPS = [
+    # t01-t07: the named tags of the group's first tasks.
+    ("named", r"^Campaign\.(Special_Case_Production|Is_Listed|Is_Autoresolve_Allowed|Autoresolve_Exclusion_Locations"
+              r"|Corruption_Level_Override)$"
+              r"|^GameConstants\.(MaximumSpecialStructures\w*|MaximumStarbaseLevel|MaximumGroundbaseLevel|Progressive_Taxation"
+              r"|Income_Redistribution|TradeRouteMovementFactor|Skirmish_Buy_Credits|Max_Remote_Bombs_Per_Player"
+              r"|First_Strike_Extra_Damage_Percent)$"
+              r"|^Faction\.(Credits_Accumulation_Factor|Corruption_Tactical_\w+_Multipliers)$"
+              r"|^GameObjectType\.(Turret_Targets_\w+|\w+_Turret_Target|Fires_Forward|Projectile_Max_Scan_Range"
+              r"|Projectile_Blast_Area_Dropoff(_Tiers)?|Size_Value|Tactical_Production_Queue|Required_Timeline|Can_Be_Only_One"
+              r"|Build_Limit_Lifetime_For_All_Allies|Tactical_Build_Increments_Tech_Level"
+              r"|Tactical_Destruction_Decrements_Tech_Level|Cheap_Bribe_Cost|Expensive_Bribe_Cost|Cash_Point_\w+"
+              r"|Disallows_Hyperspace_Retreat|Respawn_Whole_Team_When_Killed|Is_Indigenous_Unit_Corruptible)$"
+              r"|^(Income_Stream_Mod_Ability\.(Affects_All_Allied_Sources|Interval_Multiplier)|Absorb_Blaster_Ability\."
+              r"Damage_Absorb_\w+|Ability_Base\.Unit_Strength_Category|Siphon_Credits_Ability\.Evade_Detection_Chance"
+              r"|Income_Stream_Ability\.Split_Income_With_Allies|Spawn_Ability\.Recharge_Time_In_Seconds)$"),
+    # Out of the port's scope (docs/DECISIONS.md: no multiplayer; hardware detection, debug keys, localisation screens).
+    ("scope", r"(^|\.)(MP_|Multiplayer|Quickmatch|Debug_|Message_Of_The_Day|Create_Player_In_Multiplayer|Is_Multiplayer"
+              r"|Is_Quickmatch|Default_Bounty_By_Category_MP|Override_Bounty_MP|MP_Encyclopedia|AutoResolveVote"
+              r"|Distribute_Credit_Quantum|SyncedFrameInterval|ShouldDisplay|ShowUnitAIPlanAttachment|SFXEvent_Debug"
+              r"|Japanese_|Localized_|Credits_Logo)|Player_Taunt$|^HardwareConfiguration\.|^GraphicDetailLevel\."),
+    ("ai", r"^GameConstants\.(AI_|Saliency_)|Unit_Command_Rankings|^GameObjectType\.(Harass_Enemy_Exclusion_Range"
+           r"|Avoid_Enemy_Exclusion_Range|Ignore_For_Reoptimization)$"),
+    ("galactic", r"^GameConstants\.(Fleet_Maintenance_Update_Delay_Seconds|MaximumPoliticalControl"
+                 r"|Indigenous_Spawn_Destruction_Reward|Bribery_Fleet_Reveal_Range|AutomaticAutoResolve|AlwaysBypassAutoResolve"
+                 r"|Battle_Pending_Timeout_Seconds|Activated_\w+)$|^GameObjectType\.(Hyperspace_Fleet_Reveal_Range"
+                 r"|Corruption_\d_Success_Credit_Bonus|Prevents_Story_Campaign_Autoresolve|SpaceAutoResolve\w+"
+                 r"|Build_Countdown_Timer)$|^Difficulty_Adjustment\.Bribe_Cost_Multiplier$"),
+    ("audio", r"SFX|Speech|Music_Event|^DynamicTrack\.|_Cough_"),
+    ("render", r"^(Decal|Flare|LightSource|LightningEffect|TacticalCamera|Cable_Ability)\.|^TradeRoute\.(Color|Render_Mode"
+               r"|Texture_Name|Width)$|Reflection|Refraction|Distance_Fade|Silhouette|Terrain_Texture|Wind_Disturbance"
+               r"|Dynamic_Transform|Light_Effect|Lighting|Pre_Lit|Camera_Aligned|_Effect(_Small)?$|Effect_Z_Offset"
+               r"|_Particle$|Particle_Attach|Bone_Name|Bone_Translation|Spawn_Bone|Tread_Scroll|Shield_\w*Color"
+               r"|Shield_Sub_Mesh|Water_|Nebula_Effect|Earthquake_(Shake|Transition)|Death_Explosions_End|Explosion"
+               r"|Model_Name|Blob|Telekinesis|Cinematic_Anim|Glory_Cinematics|Pause_During_Cinematic|In_Mid(fore)?ground"
+               r"|Terrain_Resurface|Zoomed_Terrain|Land_Terrain_Model|Texture|Color|RGBA|Render|Flame_Emitter"
+               r"|Should_Death_Clone_Play_Idle|Apply_\w_Turret_Rotate|Grid_Cull|SpaceFOWHeight|Camera_|Rotation_Base"
+               r"|Start_Lightning_Frame"),
+    ("movement", r"Blend|Crouch|Walk|Idle|Formation|Formup|^Move_Action\.|[Pp]ush|Obstacle|Locomotor|Facing|Reevaluation"
+                 r"|CanCellStack|LateralAcceleration|Begin_Turn_Towards|Full_Stop|Snap_Movement|Gripper|Approximation"
+                 r"|LandObjectTracking|LinearCollision|Animation|Needs_To_Rotate|Exit_Door|Max_Distance_From_Spawner"
+                 r"|Attach_To_Flagship|Shoot_Anim"),
+    ("ui", r"^(CommandBarComponent|MousePointer|RadarMapSettings|Movie)\.|^TradeRoute\.\w+_Position_LeftTop$"
+           r"|^Campaign\.(Markup_Filename|Show_Completed_Tab|Is_Story_Campaign)$|Icon|Font|GUI_|Encyclopedia|Text|Tooltip"
+           r"|Health_?[Bb]ar|Radar_|Highlight|Message|Name$|Name_Adjust|Show_|Coin_Stack|Queue_Tint|Splash|Overlay|Image"
+           r"|Win_Lose|Countdown|Flash|Hilite|Darken|Cycle|Map_Preview|Include_In_UI|Describe_Wildlife|Build_Tab_"
+           r"|Beacon|Planet_Ability|Zoom|Tint|Mouse_Over|Min_Accuracy_For_Icon|Min_Sight_Range|Briefing|Hologram"
+           r"|Corruption_(Choice|Line)|Num_Structures_For|Battle_Load_Planet|Not_Really_Selectable|Waypoint|SetupPhase"
+           r"|Secondary_Objective|Alternate_|GMC_|Animate_During|Display_Bink|Destroyed_Space_Tactical_Map"
+           r"|Minimum_Visible_Base_Level|Use_Neutral_UI|Auto_Rotate_For_Space_Targeting|Tactical_Camera_Locked"
+           r"|Hero_Ability$|Visible_To_Enemies_When_Empty|Hides_When_Built_On|Tactical_Build_Start_Lower_Z"
+           r"|Use_Special_Submit_Rules|User_Bound|Easily_Bribed|Standalone_Space_Maps|Space_Retreat_Off_Map"
+           r"|Health_Critical|Fade_|Transition_Time_In_Secs|Required_Corruption_Level|Apply_To_All_Allies"
+           r"|Affects_All_Allies|Shield_Flash|TSW_|ReinforceFeedback|Reveal_Rate|Movie"),
+    # Everything else: tactical rules (combat, abilities, actions, hard points, spawning).
+    ("tactical", r"."),
+]
+GAP_GROUPS = [(name, re.compile(rx)) for name, rx in GAP_GROUPS]
+
+
+def gap_group(cls, tag):
+    name = f"{cls}.{tag}"
+    return next(g for g, rx in GAP_GROUPS if rx.search(name))
+
+
+def gaps(gen, group=None, counts=False):
+    """The mcx4 exit test's open rows, from the committed ledger (tag_ledger.inc carries tier and base uses)."""
+    if not os.path.isfile(gen.OUT_INC):
+        print("tag ledger: tag_ledger.inc is missing")
+        return 2
+    row = re.compile(
+        r'\{"([^"]*)", "([^"]*)", 0x[0-9a-f]+, LedgerState::(\w+), \d+, "[^"]*", "([^"]*)", (\d+), (\d+)\}')
+    open_rows = []
+    with open(gen.OUT_INC, encoding="utf-8") as f:
+        for line in f:
+            m = row.match(line)
+            if m and m.group(3) in ("Unread", "Stored") and int(m.group(5)) > 0 and m.group(6) == "1":
+                open_rows.append((-int(m.group(5)), m.group(1), m.group(2), m.group(3).lower(), m.group(4)))
+    if group is not None:
+        if group not in {g for g, _ in GAP_GROUPS}:
+            print(f"tag ledger: no gap group '{group}' (groups: {', '.join(g for g, _ in GAP_GROUPS)})")
+            return 2
+        open_rows = [r for r in open_rows if gap_group(r[1], r[2]) == group]
+    if counts:
+        per = {g: [0, 0] for g, _ in GAP_GROUPS}
+        for uses, cls, tag, _, _ in open_rows:
+            c = per[gap_group(cls, tag)]
+            c[0] += 1
+            c[1] -= uses
+        for g, (n, u) in per.items():
+            print(f"group {g}: {n} rows, {u} base uses")
+    else:
+        for uses, cls, tag, state, spec in sorted(open_rows):
+            print(f"gap: {cls}.{tag} ({state}, base uses {-uses}, group {gap_group(cls, tag)}, spec {spec or '-'})")
+    print(f"tag ledger: {len(open_rows)} base-FoC honour gaps open (tier 1, base_uses > 0, unread / stored)"
+          + (f" in group {group}" if group else ""))
+    return 1 if open_rows else 0
+
+
 def check_bindings(gen):
     if not hasattr(gen, "render"):
         return 0
@@ -111,6 +220,33 @@ def selftest(gen):
     if gen.regressions(old, [{"class": "GameObjectType", "tag": "Mass", "state": "stored"}], {"gameobjecttype.mass"}):
         print("selftest: --allow-regress ignored")
         bad += 1
+    # RETAIL_UNUSED (mcx4): a listed row nothing reads becomes retail_unused; a read one, an unknown row or a citation
+    # that is no docs/re page naming the tag is an error.
+    rows = [("GameConstants", "Progressive_Taxation", 0), ("GameConstants", "Income_Redistribution", 0)]
+    page = "docs/re/GALACTIC_ECONOMY.md"
+    st = gen.compute_states(rows, {}, {}, {("GameConstants", "progressive_taxation"): page})
+    if st.get(("GameConstants", "progressive_taxation")) != "retail_unused" or \
+            st.get(("GameConstants", "income_redistribution")) != "stored":
+        print("selftest: retail_unused state", st)
+        bad += 1
+    if gen.retail_unused_problems(rows, {}, {("GameConstants", "Progressive_Taxation"): page + " Q2.2"}):
+        print("selftest: a good RETAIL_UNUSED entry was refused")
+        bad += 1
+    probs = gen.retail_unused_problems(rows, {("GameConstants", "income_redistribution"): {"engine/x.cpp"}}, {
+        ("GameConstants", "Income_Redistribution"): page,
+        ("GameConstants", "No_Such_Tag"): page,
+        ("GameConstants", "Progressive_Taxation"): "docs/re/NO_SUCH_PAGE.md",
+    })
+    if len(probs) != 3:
+        print("selftest: RETAIL_UNUSED problems", probs)
+        bad += 1
+    for (cls, tag), want in {("Campaign", "Special_Case_Production"): "named", ("GameConstants", "MP_Default_Game_Timer"):
+                             "scope", ("Faction", "SFXEvent_Player_Taunt"): "scope", ("Decal", "Category"): "render",
+                             ("GameObjectType", "SFXEvent_Attack_Hardpoint"): "audio", ("GameObjectType", "Is_Escort"):
+                             "tactical", ("CommandBarComponent", "Stackable"): "ui"}.items():
+        if gap_group(cls, tag) != want:
+            print(f"selftest: {cls}.{tag} in gap group {gap_group(cls, tag)}, want {want}")
+            bad += 1
     print("selftest:", "ok" if not bad else f"{bad} failed")
     return 1 if bad else 0
 
@@ -119,6 +255,15 @@ def main(argv):
     gen = load(GEN_TAGS, "gen_tag_ledger")
     if "--selftest" in argv:
         return selftest(gen)
+    if "--gaps" in argv:
+        group = None
+        if "--group" in argv:
+            k = argv.index("--group") + 1
+            if k >= len(argv) or argv[k].startswith("--"):
+                print("tag ledger: --group needs a group name (" + ", ".join(g for g, _ in GAP_GROUPS) + ")")
+                return 2
+            group = argv[k]
+        return gaps(gen, group, "--counts" in argv)
     rc = check_tags(gen)
     rc_b = check_bindings(load(GEN_BINDINGS, "gen_bindings"))
     return max(rc, rc_b)

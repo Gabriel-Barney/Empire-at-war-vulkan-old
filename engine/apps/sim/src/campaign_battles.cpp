@@ -196,12 +196,17 @@ bool CampaignBattles::attach(std::vector<std::string>* diag) {
     g->sim()->set_conflict_hooks(gate_.get());
     // BT §1.6 story lock: a locked human-involved conflict is fought. Source: the running story
     // (StorySession::autoresolve_locked); unlocked = the ConflictConfig answer (same as no decide callback).
-    cm_->decide = [this](const galactic::ConflictInfo& c) {
-        bool locked = false;
+    // mcx4 t07 (MCX4_RE_ANSWERS_GALACTIC Q7.4 / Q7.6): the story lock when a story runs, else the campaign's
+    // Is_Autoresolve_Allowed; ConflictManager::autoresolve_locked adds the story campaign's exclusion pairs.
+    cm_->story_lock = [this](const galactic::ConflictInfo& c) {
 #ifdef ALAMO_SIM_HAVE_STORY
-        if (const StorySession* s = host_->story()) locked = s->autoresolve_locked(c.planet);
+        if (const StorySession* s = host_->story()) return s->autoresolve_locked(c.planet);
 #endif
-        return locked ? galactic::BattleChoice::Fight : cm_->config().human_choice;
+        const GalacticMode* gm = host_->galactic_mode();
+        return gm && gm->sim() && gm->sim()->campaign_autoresolve_disabled();
+    };
+    cm_->decide = [this](const galactic::ConflictInfo& c) {
+        return cm_->autoresolve_locked(c) ? galactic::BattleChoice::Fight : cm_->config().human_choice;
     };
 #ifdef ALAMO_SIM_HAVE_STORY
     // mcx6 t03 (STORY.md §5 "Battle composition"): the space decide state of a conflict the local player takes part in

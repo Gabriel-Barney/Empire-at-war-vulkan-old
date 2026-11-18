@@ -100,6 +100,9 @@ int main(int argc, char** argv) {
     test_hero_clash_accepts();  // s78n t06
     test_tru1_lobbing_gate();
     test_tru1_gravity_field();
+    test_mcx4_absorb_blaster();
+    test_mcx4_spawn_ability();  // mcx4 t06
+    test_mcx4_redirect_chance_modifiers();  // mcx4 t10
     test_battle(golden, write_golden);
     test_allocations();
     test_save_load_battle();  // N1 stage 2

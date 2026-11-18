@@ -51,9 +51,11 @@ GalacticSimTokenResolver::Hooks GalacticAiWorld::Impl::make_hooks() {
     GalacticSimTokenResolver::Hooks h;
     h.story_campaign = cfg.story_campaign;
     // storyb t10 (STORYB_T10_TRIGGER_AI.md): StoryTrigger reads an AI story flag without clearing it.
-    h.story_flag = [this](int32_t p, std::string_view name) {
-        return story_model != nullptr && story_model->check_ai_flag(p, name, -1, false);
+    // mcx8 t07: the planet root passes the planet's object id as the flag's target (-1 = none on a player root).
+    h.story_flag = [this](int32_t p, std::string_view name, int32_t location) {
+        return story_model != nullptr && story_model->check_ai_flag(p, name, location, false);
     };
+    h.interventions_enabled = cfg.interventions_enabled;  // mcx8 t07 Game.InterventionsEnabled
     h.active_goals = [this](int32_t p, std::string_view cat, int32_t& n) { return active_goals(p, cat, n); };
     h.markup = [this](int32_t p, int32_t planet) {
         const auto it = markup.find({p, planet});
@@ -3212,28 +3214,31 @@ std::vector<GalacticAiTypeInfo> make_galactic_ai_type_info(const objects::GameOb
             if (m != objects::kNone && static_cast<size_t>(m) < out.size()) out[static_cast<size_t>(m)].squadron_member = true;
     }
     // Starting_Spawned_Units_Tech_0..5: (type, count) lists, repeated tags appended (the hangar / tactical reading).
+    // mcx8 t07: Potential_Indigenous_Power has the same converter (code 0x46, OBJECT_TYPES §3): (type, power) entries.
+    const auto type_count_list = [&types, &out](objects::TypeIndex ti, const std::string& tag, std::vector<SpawnMember>& dst) {
+        const std::span<const std::string_view> toks = types.get_list(ti, tag);
+        for (size_t i = 0; i < toks.size(); ++i) {
+            std::string_view name = ai_trim(toks[i]);
+            int32_t count = 0;
+            const size_t cut = name.find(',') != std::string_view::npos ? name.find(',') : name.find_last_of(" \t");
+            bool ok = false;
+            if (cut != std::string_view::npos) {  // "Type, N" in one token
+                ok = parse_count(name.substr(cut + 1), count);
+                name = ai_trim(name.substr(0, cut));
+            } else if (i + 1 < toks.size()) {  // "Type" "N" as two tokens
+                ok = parse_count(toks[i + 1], count);
+                if (ok) ++i;
+            }
+            if (!ok || name.empty()) continue;
+            const objects::TypeIndex m = types.resolve_name(name);
+            if (m != objects::kNone && static_cast<size_t>(m) < out.size()) dst.push_back({static_cast<uint32_t>(m), count});
+        }
+    };
     for (size_t t = 0; t < out.size(); ++t) {
         const auto ti = static_cast<objects::TypeIndex>(t);
-        for (size_t n = 0; n < kSpawnTechSlots; ++n) {
-            const std::span<const std::string_view> toks = types.get_list(ti, "Starting_Spawned_Units_Tech_" + std::to_string(n));
-            for (size_t i = 0; i < toks.size(); ++i) {
-                std::string_view name = ai_trim(toks[i]);
-                int32_t count = 0;
-                const size_t cut = name.find(',') != std::string_view::npos ? name.find(',') : name.find_last_of(" \t");
-                bool ok = false;
-                if (cut != std::string_view::npos) {  // "Type, N" in one token
-                    ok = parse_count(name.substr(cut + 1), count);
-                    name = ai_trim(name.substr(0, cut));
-                } else if (i + 1 < toks.size()) {  // "Type" "N" as two tokens
-                    ok = parse_count(toks[i + 1], count);
-                    if (ok) ++i;
-                }
-                if (!ok || name.empty()) continue;
-                const objects::TypeIndex m = types.resolve_name(name);
-                if (m != objects::kNone && static_cast<size_t>(m) < out.size())
-                    out[t].spawn_tech[n].push_back({static_cast<uint32_t>(m), count});
-            }
-        }
+        for (size_t n = 0; n < kSpawnTechSlots; ++n)
+            type_count_list(ti, "Starting_Spawned_Units_Tech_" + std::to_string(n), out[t].spawn_tech[n]);
+        type_count_list(ti, "Potential_Indigenous_Power", out[t].indigenous_power);
     }
     fill_category_masks(out, &types.enums().get(objects::EnumId::GameObjectCategory));  // q6 t03: the loaded enum
     return out;

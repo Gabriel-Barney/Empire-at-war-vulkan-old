@@ -1844,6 +1844,219 @@ void test_oi_base_info() {
     CHECK(h0.digest() == h1.digest());
 }
 
+// mcx4 t01 (docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q1): Special_Case_Production fills the planet's initial-placement list
+// (PD +0x110) at start, keeping only Build_Requires_Initial_Placement types, file order, no duplicates; can-build step 24
+// passes a flagged type only on a listed planet. The list is saved (v10); a v9 save keeps the session's start() list.
+// ledger: verifies Campaign.Special_Case_Production
+void test_special_case_production() {
+    std::printf("  mcx4: Special_Case_Production initial placement\n");
+    for (const bool listed : {false, true}) {
+        GalacticRules rules = make_oi_rules(1.0f);
+        rules.types[tBarracks].requires_initial_placement = true;
+        objects::GameObjectTypes types;
+        objects::IdCounter ids;
+        objects::ObjectStore store{objects::ModeKind::Galactic, objects::StoreKind::Primary, types, &ids};
+        SimRng rng{0x5151u};
+        GalacticSim s(rules, store, rng);
+        GalacticSetup setup = make_setup({{pEmpire, rA, tSB1}, {pEmpire, rA, tBarracks}, {pEmpire, rB, tBarracks}});
+        const uint32_t ta = setup.planet_type[rA];
+        if (listed)  // the faction column is not read: Special_Case_Production rows reach the setup without it
+            setup.special_case_production = {{ta, tFrigate}, {ta, tBarracks}, {ta, tBarracks}};
+        CHECK(s.start(std::move(setup)));
+        s.reveal_all_planets();
+        s.add_credits(pEmpire, 50000.0f);
+        const BuildCheck a = s.build_check(pEmpire, rA, tBarracks), b = s.build_check(pEmpire, rB, tBarracks);
+        CHECK(!b.ok && b.step == 24);  // never listed for B
+        if (!listed) {
+            CHECK(s.planets()[rA].initial_placement.empty() && !a.ok && a.step == 24);
+            continue;
+        }
+        // tFrigate lacks the flag (dropped), the second tBarracks entry is a duplicate.
+        CHECK(s.planets()[rA].initial_placement == std::vector<uint32_t>{tBarracks} && s.planets()[rB].initial_placement.empty());
+        CHECK(a.ok && s.buildable(rA, pEmpire, tBarracks));
+        ByteWriter w;
+        s.write(w);
+        std::vector<uint8_t> bytes = w.bytes();
+        {
+            ByteReader r(bytes);
+            CHECK(s.read(r) && s.planets()[rA].initial_placement == std::vector<uint32_t>{tBarracks});
+        }
+        // v9: no list section (the last one: per planet u32 count + types); the start() lists stay.
+        size_t tail = 2 + 4 + 5 * s.autoresolve_exclusions().size();  // then the auto-resolve rules (t07)
+        for (const PlanetState& pl : s.planets()) tail += 4 + 4 * pl.initial_placement.size();
+        std::vector<uint8_t> v9(bytes.begin(), bytes.end() - static_cast<std::ptrdiff_t>(tail));
+        v9[0] = 9;
+        v9[1] = v9[2] = v9[3] = 0;
+        ByteReader r9(v9);
+        CHECK(s.read(r9) && s.planets()[rA].initial_placement == std::vector<uint32_t>{tBarracks});
+    }
+}
+
+// mcx4 t07 (docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.4): Corruption_Level_Override corrupts the first planet of the
+// named type with Racketeering at campaign start when the value is >= 1 (no transition timer); a value below 1 leaves it.
+// ledger: verifies Campaign.Corruption_Level_Override
+void test_corruption_level_override() {
+    std::printf("  mcx4: Corruption_Level_Override\n");
+    GalacticRules rules = make_oi_rules(1.0f);
+    objects::GameObjectTypes types;
+    objects::IdCounter ids;
+    objects::ObjectStore store{objects::ModeKind::Galactic, objects::StoreKind::Primary, types, &ids};
+    SimRng rng{0x5151u};
+    GalacticSim s(rules, store, rng);
+    GalacticSetup setup = make_setup({{pEmpire, rA, tSB1}, {pEmpire, rB, tBarracks}});
+    setup.corruption_level_override = {{tPlanetA, 5}, {tPlanetB, 0}};
+    CHECK(s.start(std::move(setup)));
+    const PlanetState& a = s.planets()[rA];
+    CHECK(a.corruption == kCorruptionRacketeering && a.corrupting_player == a.owner && a.owner == pEmpire);
+    CHECK(!a.corruption_protected && !a.corruption_removing && a.corruption_end == 0u);
+    CHECK(s.planets()[rB].corruption == kCorruptionNone);
+}
+
+// mcx4 t07 (docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.4 / Q7.6): the campaign's auto-resolve rules on the sim.
+// Is_Autoresolve_Allowed false starts the global lock; Autoresolve_Exclusion_Locations pairs lock (planet, land / space)
+// only in an Is_Story_Campaign campaign and leave the list when the local player wins a fought battle there. Saved (v10).
+// ledger: verifies Campaign.Is_Autoresolve_Allowed
+// ledger: verifies Campaign.Autoresolve_Exclusion_Locations
+void test_campaign_autoresolve_rules() {
+    std::printf("  mcx4: Is_Autoresolve_Allowed / Autoresolve_Exclusion_Locations\n");
+    for (const bool story : {false, true}) {
+        GalacticRules rules = make_oi_rules(1.0f);
+        objects::GameObjectTypes types;
+        objects::IdCounter ids;
+        objects::ObjectStore store{objects::ModeKind::Galactic, objects::StoreKind::Primary, types, &ids};
+        SimRng rng{0x5151u};
+        GalacticSim s(rules, store, rng);
+        GalacticSetup setup = make_setup({{pEmpire, rA, tSB1}, {pUnder, rB, tCorvette}});
+        setup.autoresolve_allowed = story;  // the two flags vary together here
+        setup.story_campaign = story;
+        setup.autoresolve_exclusions = {{tPlanetB, true}, {tPlanetB, false}, {tPlanetB, true}};
+        CHECK(s.start(std::move(setup)));
+        CHECK(s.campaign_autoresolve_disabled() == !story && s.story_campaign() == story);
+        CHECK(s.autoresolve_excluded(rB, true) == story && s.autoresolve_excluded(rB, false) == story);
+        CHECK(!s.autoresolve_excluded(rA, true) && !s.autoresolve_excluded(kInvalidPlanet, true));
+        s.autoresolve_exclusion_won(rB, true);  // one matching pair leaves
+        CHECK(s.autoresolve_exclusions().size() == 2u && s.autoresolve_excluded(rB, true) == story);
+        s.autoresolve_exclusion_won(rB, true);
+        CHECK(!s.autoresolve_excluded(rB, true) && s.autoresolve_excluded(rB, false) == story);
+        ByteWriter w;
+        s.write(w);
+        const std::vector<uint8_t> bytes = w.bytes();
+        ByteReader r(bytes);
+        CHECK(s.read(r) && s.autoresolve_exclusions().size() == 1u && s.campaign_autoresolve_disabled() == !story);
+    }
+}
+
+// mcx4 t05 (docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q5.1, MoveThroughObjects 0x3c4460 -> 0x4313e0): a Benefits_From_Corruption
+// mover pays, at every intermediate planet whose orbit controller is not the mover, Cheap_Bribe_Cost per unit when the
+// planet owner's faction is Easily_Bribed, else Expensive_Bribe_Cost; an AI mover's planet sum is scaled by its
+// difficulty's Bribe_Cost_Multiplier, truncated. The planet owner receives the toll; a toll above the credits drops the move.
+// ledger: verifies GameObjectType.Cheap_Bribe_Cost
+// ledger: verifies GameObjectType.Expensive_Bribe_Cost
+// ledger: verifies Faction.Easily_Bribed
+// ledger: verifies Difficulty_Adjustment.Bribe_Cost_Multiplier
+void test_route_bribe_toll() {
+    std::printf("  mcx4: route bribe toll (Cheap_ / Expensive_Bribe_Cost)\n");
+    for (const bool easily : {false, true}) {
+        GalacticRules rules = make_oi_rules(1.0f);
+        rules.types[tCorvette].cheap_bribe_cost = 3;
+        rules.types[tCorvette].expensive_bribe_cost = 7;
+        rules.difficulties[1].bribe_cost_multiplier = 0.75f;  // the Underworld AI's adjustment (vanilla 0.25)
+        rules.factions[0].easily_bribed = easily;              // the Empire owns B
+        objects::GameObjectTypes types;
+        objects::IdCounter ids;
+        objects::ObjectStore store{objects::ModeKind::Galactic, objects::StoreKind::Primary, types, &ids};
+        SimRng rng{0x5151u};
+        GalacticSim s(rules, store, rng);
+        CHECK(s.start(make_setup({{pEmpire, rB, tSB1}, {pUnder, rA, tCorvette}, {pUnder, rA, tCorvette}, {pUnder, rA, tCorvette}})));
+        s.reveal_all_planets();
+        const uint32_t f = s.fleets_at(rA, pUnder)[0];
+        const std::vector<PlanetIndex> path{rA, rB, rC};
+        std::vector<std::pair<int32_t, int32_t>> payees;
+        const int32_t per = easily ? 3 : 7, want = static_cast<int32_t>(static_cast<float>(3 * per) * 0.75f);  // 6 / 15
+        CHECK(s.orbit_controller(rB) == pEmpire && s.route_toll(pUnder, f, path, &payees) == want);
+        CHECK(payees.size() == 1u && payees[0] == std::make_pair(pEmpire, want));
+        CHECK(s.route_toll(pEmpire, f, path) == 0);                   // the Empire does not benefit from corruption
+        CHECK(s.route_toll(pUnder, f, std::vector<PlanetIndex>{rA, rB}) == 0);  // no intermediate planet
+        const float u0 = s.players()[pUnder].account.credits, e0 = s.players()[pEmpire].account.credits;
+        commands::EventData mto(commands::EventType::MoveThroughObjects);
+        const uint32_t fid = static_cast<uint32_t>(store.id(s.fleets()[f].object));
+        mto.set("object", fid).set_ids("waypoints", {static_cast<uint32_t>(store.id(s.planets()[rB].object)),
+                                                     static_cast<uint32_t>(store.id(s.planets()[rC].object))});
+        if (!easily) {  // a toll above the mover's credits (5000) drops the move
+            rules.types[tCorvette].expensive_bribe_cost = 10000;
+            CHECK(s.execute(static_cast<uint8_t>(pUnder), mto) == RejectReason::CannotAfford && !s.fleets()[f].moving);
+            CHECK(s.players()[pUnder].account.credits == u0 && s.players()[pEmpire].account.credits == e0);
+            continue;
+        }
+        CHECK(s.execute(static_cast<uint8_t>(pUnder), mto) == RejectReason::None && s.fleets()[f].moving);
+        CHECK(s.players()[pUnder].account.credits == u0 - static_cast<float>(want));
+        CHECK(s.players()[pEmpire].account.credits == e0 + static_cast<float>(want));
+    }
+}
+
+// mcx4 t01 / t07: the XML-to-setup step of the campaign rule fields (read_campaign_rule_fields), from a hand-built
+// campaign definition: value shapes, pair order, land / space matching, unresolved names dropped, last bool wins.
+void test_campaign_rule_fields_parse() {
+    std::printf("  mcx4: campaign rule fields parse\n");
+    const GalacticRules rules = make_oi_rules(1.0f);
+    data::CampaignDef c;
+    c.name = "Synthetic";
+    c.raw = {{"Special_Case_Production", "Empire, PlanetA, Barracks"},
+             {"Special_Case_Production", "Rebel, NoSuchPlanet, Barracks"},
+             {"Special_Case_Production", "Empire, PlanetB"},
+             {"Corruption_Level_Override", " PlanetB, 1, NoSuchPlanet, 3, PlanetA, 0 "},
+             {"Is_Autoresolve_Allowed", "True"},
+             {"Is_Autoresolve_Allowed", "False"},
+             {"Is_Story_Campaign", "yes"},
+             {"Autoresolve_Exclusion_Locations", "PlanetA, land, PlanetB, SPACE, PlanetC, orbit"},
+             {"Autoresolve_Exclusion_Locations", "PlanetC, Land"}};
+    GalacticSetup s;
+    std::vector<std::string> diag;
+    read_campaign_rule_fields(c, rules, s, &diag);
+    CHECK(s.special_case_production == (std::vector<std::pair<uint32_t, uint32_t>>{{tPlanetA, tBarracks}}));
+    CHECK(s.corruption_level_override == (std::vector<std::pair<uint32_t, int32_t>>{{tPlanetB, 1}, {tPlanetA, 0}}));
+    CHECK(!s.autoresolve_allowed && s.story_campaign);
+    CHECK(s.autoresolve_exclusions ==
+          (std::vector<std::pair<uint32_t, bool>>{{tPlanetA, true}, {tPlanetB, false}, {tPlanetC, true}}));
+    CHECK(diag.size() == 3u);  // the unknown planet twice and the "orbit" kind; a short entry is skipped silently
+    GalacticSetup d;            // defaults: allowed, not a story campaign, nothing listed
+    read_campaign_rule_fields(data::CampaignDef{}, rules, d);
+    CHECK(d.autoresolve_allowed && !d.story_campaign && d.special_case_production.empty() && d.autoresolve_exclusions.empty());
+}
+
+// mcx4 t07 (docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.2): the faction's tactical corruption factors for a campaign battle at a
+// planet - pad price: entry 1 only, when corrupted (entry 0 never read); production price / time: entry (corrupted ? 1 : 0);
+// an index past the list's end reads 1.0. The battle host multiplies the pad price (truncated) and the production time.
+// Lists: Corruption_Tactical_Build_Pad_Price_Multipliers, Corruption_Tactical_Production_Price_Multipliers,
+// Corruption_Tactical_Production_Time_Multipliers.
+// ledger: verifies Faction.Corruption_Tactical_Build_Pad_Price_Multipliers
+// ledger: verifies Faction.Corruption_Tactical_Production_Price_Multipliers
+// ledger: verifies Faction.Corruption_Tactical_Production_Time_Multipliers
+void test_tactical_corruption_multipliers() {
+    std::printf("  mcx4: Corruption_Tactical_* multipliers\n");
+    GalacticRules rules = make_oi_rules(1.0f);
+    rules.factions[0].corruption_tactical_pad_price_mult = {0.5f, 2.0f};
+    rules.factions[0].corruption_tactical_production_price_mult = {0.8f, 1.25f};
+    rules.factions[0].corruption_tactical_production_time_mult = {0.75f};
+    objects::GameObjectTypes types;
+    objects::IdCounter ids;
+    objects::ObjectStore store{objects::ModeKind::Galactic, objects::StoreKind::Primary, types, &ids};
+    SimRng rng{0x5151u};
+    GalacticSim s(rules, store, rng);
+    CHECK(s.start(make_setup({{pEmpire, rA, tSB1}, {pEmpire, rB, tSB1}})));
+    using K = GalacticSim::TacticalCorruption;
+    CHECK(s.tactical_corruption_multiplier(rB, pEmpire, K::PadPrice) == 1.0f);  // not corrupted: entry 0 is never read
+    CHECK(s.tactical_corruption_multiplier(rB, pEmpire, K::ProductionPrice) == 0.8f);
+    CHECK(s.tactical_corruption_multiplier(rB, pEmpire, K::ProductionTime) == 0.75f);
+    s.set_corruption(rA, kCorruptionRacketeering, pUnder);
+    CHECK(s.tactical_corruption_multiplier(rA, pEmpire, K::PadPrice) == 2.0f);
+    CHECK(s.tactical_corruption_multiplier(rA, pEmpire, K::ProductionPrice) == 1.25f);
+    CHECK(s.tactical_corruption_multiplier(rA, pEmpire, K::ProductionTime) == 1.0f);  // past the end
+    CHECK(s.tactical_corruption_multiplier(rA, pUnder, K::PadPrice) == 1.0f);  // the Underworld lists are empty
+    CHECK(s.tactical_corruption_multiplier(kInvalidPlanet, pEmpire, K::PadPrice) == 1.0f &&
+          s.tactical_corruption_multiplier(rA, 9, K::PadPrice) == 1.0f);
+}
+
 // SG 1.3: buildability order and reason codes.
 void test_oi_buildability() {
     std::printf("  oi: buildability\n");
@@ -2914,6 +3127,40 @@ void test_foc_hotm_political_target(const FocData& d) {
     }
 }
 
+// mcx4 t01 / t07: the campaign fields from FoC's own files (MCX4_RE_ANSWERS_GALACTIC Q1, Q7.4).
+void test_foc_campaign_fields(const FocData& d) {
+    std::printf("  FoC campaign fields (mcx4 t01 / t07)\n");
+    const GalacticSetup hotm = build_campaign_setup(d.db, d.rules, "Sandbox_Heart_Of_The_Maw_Empire");
+    const uint32_t nal = d.rules.find_type("NalHutta"), cantina = d.rules.find_type("Ground_Cantina_E");
+    CHECK(hotm.special_case_production.size() == 8u && nal != kNoIndex && cantina != kNoIndex);
+    CHECK(!hotm.special_case_production.empty() && hotm.special_case_production[0] == std::make_pair(nal, cantina));
+    objects::IdCounter ids;
+    objects::ObjectStore store(objects::ModeKind::Galactic, objects::StoreKind::Primary, d.types, &ids);
+    SimRng rng(1u);
+    GalacticSim s(d.rules, store, rng);
+    CHECK(s.start(hotm));
+    const PlanetIndex np = s.map().planets.find("NalHutta");
+    CHECK(np != kInvalidPlanet && s.planets()[np].initial_placement.size() == 4u);  // E / R cantinas and palaces
+    // FoC's CampaignFiles.xml loads neither Campaigns_Alpha.xml (the exclusion list) nor the exec demo (the corruption
+    // override): the loaded story campaign has the flags only.
+    const GalacticSetup uw = build_campaign_setup(d.db, d.rules, "Full_Story_Campaign_Underworld");
+    CHECK(uw.story_campaign && uw.autoresolve_allowed && uw.autoresolve_exclusions.empty() && uw.corruption_level_override.empty());
+    CHECK(!hotm.story_campaign && hotm.autoresolve_allowed);
+    // t07 (Q7.2): FoC's tactical corruption lists are "1.0, 1.0" on the Empire, Rebel and Underworld factions.
+    {
+        const FactionRules& ef = d.rules.factions[d.rules.find_faction("Empire")];
+        CHECK(ef.corruption_tactical_pad_price_mult == (std::vector<float>{1.0f, 1.0f}) &&
+              ef.corruption_tactical_production_time_mult == (std::vector<float>{1.0f, 1.0f}));
+    }
+    // t05 (Q5.1): the bribe fields from FoC's own files.
+    for (const DifficultyRules& dr : d.rules.difficulties) CHECK(dr.bribe_cost_multiplier == 0.25f);
+    const uint32_t reb_f = d.rules.find_faction("Rebel"), emp_f = d.rules.find_faction("Empire");
+    CHECK(emp_f != kNoIndex && d.rules.factions[emp_f].easily_bribed && reb_f != kNoIndex && !d.rules.factions[reb_f].easily_bribed);
+    const uint32_t krayt = d.rules.find_type("Krayt_Class_Destroyer"), sb_e = d.rules.find_type("Empire_Star_Base_1");
+    CHECK(krayt != kNoIndex && d.rules.types[krayt].cheap_bribe_cost == 700 && d.rules.types[krayt].expensive_bribe_cost == 1000);
+    CHECK(sb_e != kNoIndex && d.rules.types[sb_e].cheap_bribe_cost == 1 && d.rules.types[sb_e].expensive_bribe_cost == 1);  // ctor 1
+}
+
 void test_foc_hotm_hop_route(const FocData& d) {
     std::printf("  FoC HotM hop factor route (bkg3 b0115)\n");
     // HotM lists NalHutta_Kashyyyk (HS 5); the table also holds Kashyyyk_NalHutta (HS 6, CRC 765897670 < 3159653329), which
@@ -3105,6 +3352,7 @@ void test_foc_campaign() {
     test_foc_corellia_kuat_hop(d);  // G1
     test_foc_hotm_rebel_income(d);  // a2j t03
     test_foc_hotm_political_target(d);  // bkg2 b0125
+    test_foc_campaign_fields(d);         // mcx4 t01 / t07
     test_foc_hotm_hop_route(d);         // bkg3 b0115
     test_foc_hotm_build_cost(d);    // a2k t01
     const int32_t days = 10;
@@ -3168,6 +3416,12 @@ int main(int argc, char** argv) {
         test_oi_stealth();
         test_oi_base_info();
         test_oi_buildability();
+        test_campaign_rule_fields_parse();
+        test_special_case_production();
+        test_corruption_level_override();
+        test_campaign_autoresolve_rules();
+        test_route_bribe_toll();
+        test_tactical_corruption_multipliers();
         test_unit_roles();  // q6 t03
         test_oi_victory();
         test_tsw_planet_destroy();

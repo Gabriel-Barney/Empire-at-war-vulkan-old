@@ -607,6 +607,11 @@ void TacticalBattle::oi_events(TacticalMode& mode) {
                 if (q.purpose == ta::SpawnPurpose::Mine && id != objects::kNoObjectId) abilities_->bind_spawn(q.serial, id);
                 break;
             }
+            case ta::SpawnPurpose::Bomber: {  // mcx4 t06 (Spawn_Ability, MCX4_RE_ANSWERS_TACTICAL §14)
+                const objects::ObjectId id = oi_spawn_unit(mode, q.object_type, oi_sv(q.position), oi_sv(q.facing), q.owner);
+                if (id != objects::kNoObjectId) abilities_->bind_spawn(q.serial, id);
+                break;
+            }
             case ta::SpawnPurpose::Troopers: {
                 // Â§5.2: member type q.object_type at the bone, the owner's facing; anim 0x5f (none when the model lacks
                 // it), attached at bone q.bone of q.source (0x38d320), +0x3a2 |= 2, then the trooper list (bind_spawn).

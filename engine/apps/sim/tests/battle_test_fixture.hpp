@@ -582,7 +582,8 @@ inline const char* const kBmItems = R"(<BlackMarketItems>
 )";
 // --- end P4 tactical ---
 
-// Skirmish station production test data: the Empire star base lists S10_Base_Upgrade (DUMMY_UPGRADE with a
+// Skirmish station production test data (mcx4 t04: S10_Tech_Upgrade / S10_No_Queue_Upgrade too, see below): the
+// Empire star base lists S10_Base_Upgrade (DUMMY_UPGRADE with a
 // Skirmish_Automatic Starbase_Upgrade_Ability, prerequisite S10_Star_Base_1, limit 1 for all allies) in its Empire row of
 // Tactical_Buildable_Objects_Multiplayer, and upgrades to S10_Star_Base_2. s78n t20 step 5: S10_Trooper (a land unit of
 // both sides) lists S10_Land_Upgrade (DUMMY_UPGRADE, no ability) in its Empire row, for the land production signal test.
@@ -594,7 +595,7 @@ inline std::string prod_types() {
     const std::string at = "<StarBase Name=\"S10_Star_Base_1\">";
     const size_t p = t.find(at);
     if (p != std::string::npos)
-        t.insert(p + at.size(), "<SpaceBehavior>DUMMY_STAR_BASE</SpaceBehavior><Tactical_Buildable_Objects_Multiplayer> Empire, S10_Base_Upgrade </Tactical_Buildable_Objects_Multiplayer>"
+        t.insert(p + at.size(), "<SpaceBehavior>DUMMY_STAR_BASE</SpaceBehavior><Tactical_Buildable_Objects_Multiplayer> Empire, S10_Base_Upgrade, S10_Tech_Upgrade, S10_No_Queue_Upgrade </Tactical_Buildable_Objects_Multiplayer>"
                                 "<Next_Level_Base>S10_Star_Base_2</Next_Level_Base>");
     const size_t end = t.find("</S10>");
     if (end != std::string::npos)
@@ -604,12 +605,25 @@ inline std::string prod_types() {
                       "<Collidable_By_Projectile_Living>Yes</Collidable_By_Projectile_Living><SpaceBehavior>DUMMY_STAR_BASE</SpaceBehavior></StarBase>\n"
                       " <UpgradeObject Name=\"S10_Base_Upgrade\"><Behavior>DUMMY_UPGRADE</Behavior><Affiliation>Empire</Affiliation>"
                       "<Tactical_Build_Cost_Multiplayer>100</Tactical_Build_Cost_Multiplayer><Tactical_Build_Time_Seconds>1</Tactical_Build_Time_Seconds>"
+                      "<Tactical_Production_Queue>Tactical_Units</Tactical_Production_Queue>"
                       "<Tactical_Build_Prerequisites> S10_Star_Base_1 </Tactical_Build_Prerequisites>"
                       "<Build_Limit_Current_For_All_Allies>1</Build_Limit_Current_For_All_Allies>"
                       "<Abilities SubObjectList=\"Yes\"><Starbase_Upgrade_Ability Name=\"S10_Base_Upgrade_Effect\">"
                       "<Activation_Style>Skirmish_Automatic</Activation_Style></Starbase_Upgrade_Ability></Abilities></UpgradeObject>\n"
                       " <UpgradeObject Name=\"S10_Land_Upgrade\"><Behavior>DUMMY_UPGRADE</Behavior><Affiliation>Empire</Affiliation>"
                       "<Tactical_Build_Cost_Multiplayer>100</Tactical_Build_Cost_Multiplayer><Tactical_Build_Time_Seconds>1</Tactical_Build_Time_Seconds>"
+                      "<Tactical_Production_Queue>Tactical_Upgrades</Tactical_Production_Queue></UpgradeObject>\n"
+                      // mcx4 t04: a skirmish tech upgrade like FoC's EC_Level_Two_Tech_Upgrade (both tech flags, the upgrades queue), at
+                      // most one built in a battle by the Empire and its allies
+                      " <UpgradeObject Name=\"S10_Tech_Upgrade\"><Behavior>DUMMY_UPGRADE</Behavior><Affiliation>Empire</Affiliation>"
+                      "<Tactical_Build_Cost_Multiplayer>10</Tactical_Build_Cost_Multiplayer><Tactical_Build_Time_Seconds>2</Tactical_Build_Time_Seconds>"
+                      "<Tactical_Production_Queue>Tactical_Upgrades</Tactical_Production_Queue>"
+                      "<Tactical_Build_Increments_Tech_Level>Yes</Tactical_Build_Increments_Tech_Level>"
+                      "<Tactical_Destruction_Decrements_Tech_Level>Yes</Tactical_Destruction_Decrements_Tech_Level>"
+                      "<Build_Limit_Lifetime_For_All_Allies>1</Build_Limit_Lifetime_For_All_Allies></UpgradeObject>\n"
+                      // and one without a Tactical_Production_Queue (default -1): never built in a battle
+                      " <UpgradeObject Name=\"S10_No_Queue_Upgrade\"><Behavior>DUMMY_UPGRADE</Behavior><Affiliation>Empire</Affiliation>"
+                      "<Tactical_Build_Cost_Multiplayer>10</Tactical_Build_Cost_Multiplayer><Tactical_Build_Time_Seconds>1</Tactical_Build_Time_Seconds>"
                       "</UpgradeObject>\n");
     return t;
 }

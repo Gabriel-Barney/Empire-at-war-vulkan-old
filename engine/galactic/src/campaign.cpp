@@ -248,6 +248,9 @@ bool GalacticSim::start(const GalacticSetup& setup, std::vector<std::string>* di
     local_player_ = kNoPlayer;  // GRC: pinned below
     auto_reveal_ = setup.planet_auto_reveal;
     reveal_sfx_ = false;
+    autoresolve_disabled_ = !setup.autoresolve_allowed;  // mcx4 t07 (Q7.6 / Q7.4, L14)
+    story_campaign_ = setup.story_campaign;
+    autoresolve_exclusions_ = setup.autoresolve_exclusions;
 
     for (const PlayerSetup& ps : setup.players) {
         PlayerState p;
@@ -302,6 +305,12 @@ bool GalacticSim::start(const GalacticSetup& setup, std::vector<std::string>* di
         // AIPlanetBuildQueue 0 then 1, each drawing its last-run frame as synced Get_Int(1, (int)(FPS + 0.5)).
         constexpr int32_t kPhaseHi = static_cast<int32_t>(static_cast<float>(econ::kFramesPerSecond) + 0.5f);
         for (int32_t& phase : p.queue_phase) phase = rng_->range_int(1, kPhaseHi);
+        // mcx4 t01 (Q1, 0x3fae10, L8 pass 2 before the starting forces): the campaign's Special_Case_Production entries for
+        // this planet's type whose object type has Build_Requires_Initial_Placement, file order, no duplicates.
+        for (const auto& [planet_type, type] : setup.special_case_production)
+            if (planet_type == t && type < rules_->types.size() && rules_->types[type].requires_initial_placement &&
+                std::find(p.initial_placement.begin(), p.initial_placement.end(), type) == p.initial_placement.end())
+                p.initial_placement.push_back(type);
         if (planet_by_slot_.size() <= p.object.slot()) planet_by_slot_.resize(p.object.slot() + 1, kInvalidPlanet);
         planet_by_slot_[p.object.slot()] = static_cast<PlanetIndex>(i);
     }
@@ -342,6 +351,17 @@ bool GalacticSim::start(const GalacticSetup& setup, std::vector<std::string>* di
         const PlanetIndex home = setup.players[static_cast<size_t>(local_player_)].home;
         if (valid_planet(home) && planets_[home].is_planet) planets_[home].revealed = true;
     }
+    // mcx4 t07 (MCX4_RE_ANSWERS_GALACTIC Q7.4, 0x28dbe0 at L14, after the owners are set): Corruption_Level_Override puts
+    // the first planet of the named type into Racketeering at once (value >= 1; below 1: no corruption), no transition
+    // timer, and runs the change effects (0x3f9690: the unlock for the planet owner). [port] The faction / planet-type
+    // per-type records and the owner's success credit bonus of 0x3f9690 are not applied (Corruption_N_Success_Credit_Bonus
+    // is mcx4 t09; base FoC uses the override only in the Underworld exec demo campaign).
+    for (const auto& [planet_type, value] : setup.corruption_level_override)
+        for (PlanetIndex i = 0; i < n; ++i)
+            if (planets_[i].is_planet && planets_[i].type == planet_type) {
+                set_corruption(i, value >= 1 ? kCorruptionRacketeering : kCorruptionNone, planets_[i].owner);
+                break;
+            }
     // q2f t02 [H]: the mode's frame-0 fiscal cycle runs before the galaxy is built (Q2 traces: no objects at mode frame
     // 0, F fields last 0 / next 1350 / cycle 1 there, credits unchanged until mode frame 1351), so it pays nobody, feeds
     // no AI income tick and rerolls no black-market planet. Only its bookkeeping (GE 1.2 steps 2-4) is left.
@@ -1774,7 +1794,28 @@ RejectReason GalacticSim::execute(uint8_t player_id, const commands::EventData& 
             if (p == kInvalidPlanet) return RejectReason::InvalidTarget;
             path.push_back(p);
         }
-        return move_fleet_path(player, f, path);
+        // mcx4 t05 (MCX4_RE_ANSWERS_GALACTIC Q5.1, 0x3c4460): the route toll of a corruption faction's multi-hop move.
+        // More than the mover's credits (float compare): the move is dropped (retail posts a refusal message). Else the
+        // mover pays the total and each planet owner receives its share (Add_Credits, notify 0). [port] the toll is taken
+        // only once the move is accepted (retail's charge before an invalid path was not traced); the payees are paid
+        // in ascending player order (retail's per-player tally order was not recorded).
+        std::vector<PlanetIndex> full = path;
+        if (full.empty() || full.front() != fleets_[f].planet) full.insert(full.begin(), fleets_[f].planet);
+        std::vector<std::pair<int32_t, int32_t>> payees;
+        const int32_t toll = route_toll(player, f, full, &payees);
+        if (toll > 0 && static_cast<float>(toll) > players_[static_cast<size_t>(player)].account.credits) return RejectReason::CannotAfford;
+        const RejectReason moved = move_fleet_path(player, f, path);
+        if (moved != RejectReason::None || toll <= 0) return moved;
+        add_credits(player, -static_cast<float>(toll), false);
+        std::sort(payees.begin(), payees.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        for (size_t i = 0; i < payees.size();) {
+            int32_t sum = 0;
+            size_t j = i;
+            for (; j < payees.size() && payees[j].first == payees[i].first; ++j) sum += payees[j].second;
+            if (valid_player(payees[i].first) && sum != 0) add_credits(payees[i].first, static_cast<float>(sum), false);
+            i = j;
+        }
+        return moved;
     }
     case EventType::Production: {
         const PlanetIndex p = planet_by_id(ev.u("location"));
@@ -1849,6 +1890,73 @@ void GalacticSim::set_corruption(PlanetIndex planet, int8_t type, int32_t corrup
         ev.other_player = old;
         emit(ev);
     }
+}
+float GalacticSim::tactical_corruption_multiplier(PlanetIndex planet, int32_t player, TacticalCorruption kind) const {
+    if (!valid_planet(planet) || !valid_player(player)) return 1.0f;
+    const uint32_t f = players_[static_cast<size_t>(player)].faction;
+    if (f >= rules_->factions.size()) return 1.0f;
+    const FactionRules& fr = rules_->factions[f];
+    const bool corrupted = planets_[planet].corruption != kCorruptionNone;  // 0x3a0910
+    const auto entry = [](const std::vector<float>& v, size_t i) { return i < v.size() ? v[i] : 1.0f; };
+    switch (kind) {
+        case TacticalCorruption::PadPrice: return corrupted ? entry(fr.corruption_tactical_pad_price_mult, 1) : 1.0f;
+        case TacticalCorruption::ProductionPrice: return entry(fr.corruption_tactical_production_price_mult, corrupted ? 1u : 0u);
+        case TacticalCorruption::ProductionTime: return entry(fr.corruption_tactical_production_time_mult, corrupted ? 1u : 0u);
+    }
+    return 1.0f;
+}
+
+int32_t GalacticSim::orbit_controller(PlanetIndex planet) const {
+    if (!valid_planet(planet)) return kNoPlayer;
+    const PlanetState& p = planets_[planet];
+    if (p.starbase_level > 0) return p.starbase_owner;
+    int32_t first_hidden = kNoPlayer;
+    for (uint32_t f : p.orbit) {
+        if (f >= fleets_.size() || !fleets_[f].alive) continue;
+        if (!hidden(fleets_[f].object)) return fleets_[f].owner;
+        if (first_hidden == kNoPlayer) first_hidden = fleets_[f].owner;
+    }
+    return first_hidden;
+}
+
+int32_t GalacticSim::route_toll(int32_t player, uint32_t fleet, std::span<const PlanetIndex> path,
+                                std::vector<std::pair<int32_t, int32_t>>* payees) const {
+    if (!valid_player(player) || fleet >= fleets_.size() || !fleets_[fleet].alive || path.size() < 3) return 0;
+    const PlayerState& mover = players_[static_cast<size_t>(player)];
+    if (mover.faction >= rules_->factions.size() || !rules_->factions[mover.faction].benefits_from_corruption) return 0;
+    const DifficultyRules* ai = ai_difficulty(player);  // an AI player's adjustment (none: the all-1.0 one, no scaling)
+    int32_t total = 0;
+    for (size_t i = 1; i + 1 < path.size(); ++i) {
+        const PlanetIndex pl = path[i];
+        if (!valid_planet(pl) || orbit_controller(pl) == player) continue;
+        const int32_t owner = planets_[pl].owner;
+        const bool cheap = valid_player(owner) && players_[static_cast<size_t>(owner)].faction < rules_->factions.size() &&
+                           rules_->factions[players_[static_cast<size_t>(owner)].faction].easily_bribed;
+        int32_t sum = 0;
+        for (ObjectHandle m : fleets_[fleet].contents) {  // [port] fleet members: transports are single objects here
+            if (!store_->alive(m)) continue;
+            const uint32_t t = static_cast<uint32_t>(store_->type(m));
+            if (t < rules_->types.size()) sum += cheap ? rules_->types[t].cheap_bribe_cost : rules_->types[t].expensive_bribe_cost;
+        }
+        if (ai) sum = static_cast<int32_t>(static_cast<float>(sum) * ai->bribe_cost_multiplier);
+        total += sum;
+        if (payees) payees->emplace_back(owner, sum);
+    }
+    return total;
+}
+
+bool GalacticSim::autoresolve_excluded(PlanetIndex planet, bool land) const {
+    if (!story_campaign_ || !valid_planet(planet)) return false;  // 0x3ca480 / 0x30d710 / 0x30e2f0 test only story campaigns
+    const uint32_t t = planets_[planet].type;
+    return std::any_of(autoresolve_exclusions_.begin(), autoresolve_exclusions_.end(),
+                       [t, land](const std::pair<uint32_t, bool>& e) { return e.first == t && e.second == land; });
+}
+void GalacticSim::autoresolve_exclusion_won(PlanetIndex planet, bool land) {
+    if (!valid_planet(planet)) return;
+    const uint32_t t = planets_[planet].type;
+    const auto it = std::find_if(autoresolve_exclusions_.begin(), autoresolve_exclusions_.end(),
+                                 [t, land](const std::pair<uint32_t, bool>& e) { return e.first == t && e.second == land; });
+    if (it != autoresolve_exclusions_.end()) autoresolve_exclusions_.erase(it);
 }
 void GalacticSim::set_black_market_influence(PlanetIndex planet, bool on) {
     if (valid_planet(planet)) planets_[planet].black_market_influences = on;

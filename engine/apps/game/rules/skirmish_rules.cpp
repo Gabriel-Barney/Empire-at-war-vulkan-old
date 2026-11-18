@@ -192,6 +192,15 @@ std::vector<uint32_t> skirmish_buy_list(const galactic::GalacticRules& rules, co
     return out;
 }
 
+bool skirmish_buy_allowed(const galactic::GalacticRules& rules, const objects::GameObjectTypes& types, uint32_t type, uint32_t bought,
+                          int64_t budget) {
+    // SKIRMISH_SETUP §2.7 "Buy limits 0xf0920", the pre-game branch: cost <= budget, and a Can_Be_Only_One (+0x78) type
+    // already in the bought list is refused.
+    if (type >= rules.types.size() || type >= types.size()) return false;
+    if (static_cast<int64_t>(rules.types[type].build_cost) > budget) return false;
+    return !(bought > 0 && types.get_bool(type, "Can_Be_Only_One"));
+}
+
 std::string skirmish_map_planet_type(const galactic::GalacticRules& rules, std::string_view map) {
     std::string stem(map);
     if (const size_t s = stem.find_last_of("\\/"); s != std::string::npos) stem = stem.substr(s + 1);

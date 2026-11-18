@@ -53,8 +53,12 @@ namespace {
 // and v6 (no names: read as none), so saves from before the names still load. v8 (galab): + per player the home planet,
 // per planet the siphon source type / object and the bonus holder, then the neutralized counts {player, type, count};
 // v6 / v7 read them as the session's start() values (home) and none. v9 (map1 t06): + the structure marker memory
-// {i32 object, i32 slot, i32 marker}, object-id-ascending, live objects only; v6 - v8 read it as none.
-constexpr uint32_t kGalacticSaveVersion = 9;
+// {i32 object, i32 slot, i32 marker}, object-id-ascending, live objects only; v6 - v8 read it as none. v10 (mcx4 t01):
+// + per planet the initial-placement list {u32 count, u32 type...} (Special_Case_Production), then the campaign's
+// auto-resolve rules {bool disabled, bool story campaign, u32 count, {u32 planet type, bool land}...}; v6 - v9 keep the
+// session's start() values.
+constexpr uint32_t kGalacticSaveVersion = 10;
+constexpr uint32_t kGalacticSaveVersionNoPlacement = 9;
 // limit: guard not a limit: save format version 8 (before the marker slots)
 constexpr uint32_t kGalacticSaveVersionNoSlots = 8;
 constexpr uint32_t kGalacticSaveVersionNoGalab = 7;
@@ -257,12 +261,19 @@ void GalacticSim::write(ByteWriter& w) const {
     w.u32(live_slots);
     for (const StructureSlot& e : structure_slots_)
         if (st.alive(st.find(e.object))) w.i32(e.object).i32(e.slot).i32(e.marker);
+    for (const PlanetState& p : planets_) {  // mcx4 t01 (v10)
+        w.u32(static_cast<uint32_t>(p.initial_placement.size()));
+        for (uint32_t t : p.initial_placement) w.u32(t);
+    }
+    w.boolean(autoresolve_disabled_).boolean(story_campaign_);  // mcx4 t07 (v10)
+    w.u32(static_cast<uint32_t>(autoresolve_exclusions_.size()));
+    for (const auto& [t, land] : autoresolve_exclusions_) w.u32(t).boolean(land);
 }
 
 bool GalacticSim::read(ByteReader& r) {
     const objects::ObjectStore& st = *store_;
     const uint32_t version = r.u32();
-    if ((version != kGalacticSaveVersion && version != kGalacticSaveVersionNoSlots && version != kGalacticSaveVersionNoGalab &&
+    if ((version != kGalacticSaveVersion && version != kGalacticSaveVersionNoPlacement && version != kGalacticSaveVersionNoSlots && version != kGalacticSaveVersionNoGalab &&
          version != kGalacticSaveVersionNoNames) ||
         !r.ok())
         return false;
@@ -607,6 +618,31 @@ bool GalacticSim::read(ByteReader& r) {
             if (i > 0 && slots[i].object <= slots[i - 1].object) return false;  // ascending, unique
         }
     }
+    if (version >= 10) {  // mcx4 t01; older saves keep the session's start() lists (planets is a copy of planets_)
+        for (PlanetState& p : planets) {
+            uint32_t nt = 0;
+            if (!r.count(nt, 4)) return false;
+            p.initial_placement.resize(nt);
+            for (uint32_t& t : p.initial_placement) {
+                t = r.u32();
+                if (!r.ok() || t >= types) return false;
+            }
+        }
+    }
+    bool ar_disabled = autoresolve_disabled_, ar_story = story_campaign_;  // mcx4 t07; older saves: start()'s values
+    std::vector<std::pair<uint32_t, bool>> ar_excl = autoresolve_exclusions_;
+    if (version >= 10) {
+        ar_disabled = r.boolean();
+        ar_story = r.boolean();
+        uint32_t n_excl = 0;
+        if (!r.count(n_excl, 5)) return false;
+        ar_excl.resize(n_excl);
+        for (auto& [t, land] : ar_excl) {
+            t = r.u32();
+            land = r.boolean();
+            if (!r.ok() || t >= types) return false;
+        }
+    }
     if (!r.ok() || !r.done()) return false;
 
     // ---- commit ----
@@ -619,6 +655,9 @@ bool GalacticSim::read(ByteReader& r) {
     neutral_player_ = neutral;
     local_player_ = local;
     auto_reveal_ = auto_reveal;
+    autoresolve_disabled_ = ar_disabled;
+    story_campaign_ = ar_story;
+    autoresolve_exclusions_ = std::move(ar_excl);
     reveal_sfx_ = reveal_sfx;
     emit_events_ = emit;
     slot_choices_ = slot_choices;

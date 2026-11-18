@@ -259,7 +259,8 @@ rounding exactly. With vanilla data every term is a multiple of 0.5 × integer, 
 | multiplayer `Distribute_Credit_Quantum` (1000) | 0x498cd0 | gifting between teammates |
 
 **Taxes.** `Progressive_Taxation` (+0x150) and `Income_Redistribution` (+0x178) have **no reader on the galactic
-income path**. The only reference to their neighbourhood is the field table. Treat them as unused. [M]
+income path**. The only reference to their neighbourhood is the field table. Treat them as unused. [M] → no reader
+anywhere in the binary [H] (`MCX4_RE_ANSWERS_GALACTIC.md` Q2.2; `Credits_Accumulation_Factor` Q7.1).
 `Political_Income_Curve` is the only one of the three that is used.
 
 **Maintenance.** `Fleet_Maintenance_Update_Delay_Seconds` (+0x110) and the perception tokens `Maintenance*` exist.

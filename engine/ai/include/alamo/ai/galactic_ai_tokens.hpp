@@ -102,6 +102,9 @@ struct GalacticAiTypeInfo {
     // Starting_Spawned_Units_Tech_0..5 (list order, repeated tags appended): the "per-tech members" a fleet unit, starbase or
     // ground structure adds to the force totals (AI_GALACTIC_TOKENS §2; 0x373f40 / 0x373e30 / 0x373d30).
     std::array<std::vector<SpawnMember>, kSpawnTechSlots> spawn_tech;
+    // mcx8 t07: planet types' Potential_Indigenous_Power ("Type, power" entries, repeated tags appended; type +0x20C8, 0x18-byte
+    // entries: type +8, power +0x10), read by Target.HasIndigenousUnits (AI_GALACTIC_TOKENS §1). `count` = the power.
+    std::vector<SpawnMember> indigenous_power;
     // (terrain, restrictions, population: GalacticSim's A2 galactic queries / TypeInfo)
     bool has_category(std::string_view c) const;
 };
@@ -277,8 +280,13 @@ public:
         std::function<int32_t(int32_t player)> difficulty;
         // Script_<name>.Evaluate (AI_GALACTIC_2 §4.4); null = fails.
         std::function<bool(const EvalContext&, std::string_view name, std::span<const Param>, double&)> script;
-        // Variable_Self.StoryTrigger{Parameter_Name} (story flag); null = 0.
-        std::function<bool(int32_t player, std::string_view name)> story_flag;
+        // StoryTrigger{Parameter_Name}: the AI story flag of (`player`, name, `location`), never cleared; null = 0.
+        // `location` = -1 (target none) on a player root (0x6e08e0), the planet's game object id on a planet root
+        // (0x65eb10; STORYB_T10_TRIGGER_AI §3.2).
+        std::function<bool(int32_t player, std::string_view name, int32_t location)> story_flag;
+        // mcx8 t07 Game.InterventionsEnabled (0x6e1fb0, AI_GALACTIC_TOKENS §4): 1.0 unless the campaign started with
+        // changed advanced game options (settings flag 0x20) and random events off (flag 0x10).
+        bool interventions_enabled = true;
         // q6 t03 BudgetAllocation (AI_GALACTIC_TOKENS §8.3): the normalised weight (+0x3C) of `player`'s budget category
         // `key` (an AIGoalCategoryType value), 0.0 for a key the budget does not hold; false = no goal system (fails).
         std::function<bool(int32_t player, int32_t key, double& out)> budget_weight;

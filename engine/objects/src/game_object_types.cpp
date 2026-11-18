@@ -51,7 +51,7 @@ const Def kDefaults[] = {
     {"Dense_FOW_Reveal_Range_Multiplier", "0.5"},
     // Enums whose constructor value is -1 ("none"); kept as FieldValue::i = -1 with no name.
     {"MovementClass", "-1"}, {"Ship_Class", "-1"}, {"OccupationStyle", "-1"}, {"UnitCollisionClass", "-1"},
-    {"Weather_Category", "-1"}, {"Tactical_Production_Queue", "-1"}, {"Projectile_Category", "-1"},
+    {"Weather_Category", "-1"}, {"Tactical_Production_Queue", "-1"}, {"Projectile_Blast_Area_Dropoff_Tiers", "5"}, {"Projectile_Category", "-1"},
 };
 
 const FieldId kNoField = 0xFFFFFFFFu;

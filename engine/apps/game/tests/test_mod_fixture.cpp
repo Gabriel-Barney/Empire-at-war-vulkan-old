@@ -99,16 +99,16 @@ void test_mod(const std::string& foc) {
                               "\"limits\":", "\"grade\":"})
             CHECK(contains(js, k));
         CHECK(r.grade.grade == "G1");
-        // ModObjects.xml sets Size_Value (a stored tag, ledger) to 3: an honour gap from the mod's file that blocks G3's
+        // ModObjects.xml sets Shield_Sub_Mesh (a stored tag, ledger; mcx4 marked Size_Value retail-unused): an honour gap from the mod's file that blocks G3's
         // static part; Fires_Forward = No is the default, so it is no gap.
         const auto gap = std::find_if(r.honour_gaps.begin(), r.honour_gaps.end(),
-                                      [](const alamo::game::HonourGap& g) { return g.cls == "GameObjectType" && g.tag == "Size_Value"; });
+                                      [](const alamo::game::HonourGap& g) { return g.cls == "GameObjectType" && g.tag == "Shield_Sub_Mesh"; });
         CHECK(gap != r.honour_gaps.end() && gap->in_mod && gap->uses == 1 && gap->state == "stored");
         CHECK(gap != r.honour_gaps.end() && icontains(gap->first_file, "ModObjects.xml"));
         CHECK(std::none_of(r.honour_gaps.begin(), r.honour_gaps.end(),
                            [](const alamo::game::HonourGap& g) { return g.tag == "Fires_Forward"; }));
         CHECK(!r.grade.g3_static && !r.grade.blocking.empty());
-        CHECK(r.issues.find(alamo::IssueKind::HonourGap, "GameObjectType.Size_Value", gap != r.honour_gaps.end() ? gap->first_file : "") != nullptr);
+        CHECK(r.issues.find(alamo::IssueKind::HonourGap, "GameObjectType.Shield_Sub_Mesh", gap != r.honour_gaps.end() ? gap->first_file : "") != nullptr);
         CHECK(contains(js, "\"result\": \"ok\""));
         CHECK(contains(js, "\"errors\": 0"));
         CHECK(contains(js, "\"added\": 5"));

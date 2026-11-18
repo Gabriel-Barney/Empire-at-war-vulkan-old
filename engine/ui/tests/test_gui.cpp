@@ -8,6 +8,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -905,6 +906,29 @@ void test_widgets_ui5() {
         const GuiRect huge = env.gui.tooltip_box({0.0f, 0.0f}, {cv.width + 50.0f, 10.0f});  // wider than the screen: left edge
         CHECK(std::fabs(huge.min.x + hw) < 1e-3f);
     }
+}
+
+// mcx4 t07 (docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.3): Is_Listed false hides a custom (conquest) campaign from the
+// setup list; story and tutorial entries stay (retail starts story campaigns by name, its tutorial list ignores the flag).
+// ledger: verifies Campaign.Is_Listed
+void test_campaign_menu_is_listed() {
+    auto def = [](const char* name, const char* set, bool custom, const char* listed) {
+        data::CampaignDef c;
+        c.name = name;
+        c.campaign_set = set;
+        c.starting_active_player = "Rebel";
+        c.raw.emplace_back("Supports_Custom_Settings", custom ? "True" : "False");
+        if (listed) c.raw.emplace_back("Is_Listed", listed);
+        return c;
+    };
+    const data::CampaignDef defs[] = {def("GC_Shown", "Set_Shown", true, nullptr), def("GC_Hidden", "Set_Hidden", true, "False"),
+                                      def("GC_Yes", "Set_Yes", true, "yes"), def("Story_Hidden", "Story", false, "False"),
+                                      def("Tutorial_Hidden", "Tutorial_One", true, "false")};
+    std::vector<const data::CampaignDef*> sorted;
+    for (const data::CampaignDef& c : defs) sorted.push_back(&c);
+    const CampaignMenu m = build_campaign_menu(std::span<const data::CampaignDef* const>(sorted));
+    CHECK(m.custom.size() == 2u && m.custom[0].set == "Set_Shown" && m.custom[1].set == "Set_Yes");
+    CHECK(m.story.size() == 1u && m.tutorials.size() == 1u);
 }
 
 void test_menus() {
@@ -2566,6 +2590,7 @@ int main() {
     test_placement();
     test_routing_and_controls();
     test_widgets_ui5();
+    test_campaign_menu_is_listed();
     test_menus();
     test_load_screen();
     test_galactic_hud();

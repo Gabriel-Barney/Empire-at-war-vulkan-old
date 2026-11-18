@@ -2548,6 +2548,109 @@ void test_station_production(float build_mult = 1.0f) {
     CHECK(bought && held && upgraded);
     CHECK(after == before - 100.0f);
 }
+
+// mcx4 t04: the S10 space skirmish battle again. At frame 2 the Empire orders S10_Base_Upgrade (Tactical_Units queue, 30
+// frames) and S10_Tech_Upgrade (Tactical_Upgrades queue, 60 frames) at its star base; S10_No_Queue_Upgrade (no
+// Tactical_Production_Queue) is refused. SKIRMISH_SETUP §3 service 0x498170 [H]: the head of each queue counts down, so the
+// tech upgrade finishes about 60 frames after the order (one list per builder would make it wait for the base upgrade: 90).
+// REMAINING_GAPS §1.4: the finished tech upgrade (Tactical_Build_Increments_Tech_Level) sets the Empire's tech to its
+// tech + 1; the star base holding it dies (Kill kills the contents, STATION_HANGARS_SOUND §2.9) and its
+// Tactical_Destruction_Decrements_Tech_Level lowers the owner's tech by 1. SKIRMISH_SETUP §7 (check 0x497140): with
+// Build_Limit_Lifetime_For_All_Allies 1 a second tech upgrade is refused once one was built, though no current limit is set.
+// ledger: verifies GameObjectType.Build_Limit_Lifetime_For_All_Allies
+// ledger: verifies GameObjectType.Tactical_Production_Queue
+// ledger: verifies GameObjectType.Tactical_Build_Increments_Tech_Level
+// ledger: verifies GameObjectType.Tactical_Destruction_Decrements_Tech_Level
+void test_tactical_tech_upgrade() {
+    auto d = make_data(false, false, false, false, true);
+    jobs::JobSystem js(jobs::JobSystemConfig{0});
+    SimConfig cfg;
+    cfg.seed = 2026;
+    cfg.players = 4;
+    SimHost host(d->types, js, cfg);
+    galactic::GalacticSim* gs = host.start_galactic(d->rules, make_setup(*d, false));
+    CHECK(gs != nullptr);
+    if (!gs) return;
+    gs->add_credits(0, 1000.0f, false);
+    CampaignBattleOptions opt;
+    opt.conflict.human_choice = galactic::BattleChoice::Fight;
+    opt.battle.max_frames = 600;
+    opt.battle.skirmish = true;
+    CampaignBattles battles(host, d->crules, *d->catalog,
+                            [](const std::string& name, terrain::MapData& m) {
+                                if (name != "S10_Space_B") return false;
+                                m = space_map();
+                                return true;
+                            },
+                            opt);
+    CHECK(battles.attach(nullptr));
+    const std::vector<uint32_t> uf = gs->fleets_at(2, 1);
+    CHECK(!uf.empty());
+    if (!uf.empty()) CHECK(gs->move_fleet(1, uf[0], 1) == commands::RejectReason::None);
+    const uint32_t base1 = type_of(*d, "S10_Star_Base_1"), base_up = type_of(*d, "S10_Base_Upgrade");
+    const uint32_t tech_up = type_of(*d, "S10_Tech_Upgrade"), no_queue = type_of(*d, "S10_No_Queue_Upgrade");
+    bool ordered = false, built = false, killed = false, dropped = false;
+    uint32_t built_at = 0, killed_at = 0;
+    int32_t tech_before = 0, tech_built = 0, tech_killed = 0;
+    objects::ObjectId holder = objects::kNoObjectId;
+    for (uint64_t t = 0; t < 3000 && !dropped; ++t) {
+        host.tick_once();
+        TacticalBattle* b = battles.battle();
+        TacticalMode* tm = host.tactical();
+        if (!b || !tm) continue;
+        const objects::ObjectStore& st = tm->primary();
+        if (!ordered && b->frame() == 2) {
+            objects::ObjectId station = objects::kNoObjectId;
+            for (const objects::ObjectHandle h : st.owned_by(0))
+                if (st.alive(h) && st.type(h) == base1) station = st.id(h);
+            CHECK(station != objects::kNoObjectId);
+            auto order = [&](uint32_t type) {
+                commands::EventData ev(commands::EventType::Production);
+                ev.set("type_index", type).set("location", static_cast<uint32_t>(station));
+                return host.execute_direct(0, commands::CommandSource::Player, ev);
+            };
+            CHECK(order(no_queue) == commands::RejectReason::NotAllowed);  // 0x497140: queue -1 is never built
+            CHECK(order(base_up) == commands::RejectReason::None);
+            CHECK(order(tech_up) == commands::RejectReason::None);
+            CHECK(b->production() && b->production()->queue(0).size() == 2);
+            CHECK(b->production()->count_queue(0, 0) == 1 && b->production()->count_queue(0, 1) == 1);
+            ordered = true;
+            continue;
+        }
+        if (!ordered) continue;
+        // The tech upgrade object, wherever it is held (the base upgrade may have replaced the station by then).
+        objects::ObjectId obj = objects::kNoObjectId;
+        for (const objects::ObjectHandle h : st.owned_by(0))
+            if (st.alive(h) && st.type(h) == tech_up) obj = st.id(h);
+        if (!built && obj == objects::kNoObjectId) tech_before = b->battle_tech_level(0);  // the level before the build finished
+        if (!built && obj != objects::kNoObjectId) {
+            built = true;
+            built_at = b->frame();
+            tech_built = b->battle_tech_level(0);
+            holder = b->contents() ? b->contents()->container_of(obj) : objects::kNoObjectId;
+            std::printf("  frame %u: tech upgrade built (ordered at 2), tech %d -> %d, held by %d\n", built_at, tech_before, tech_built, holder);
+            commands::EventData again(commands::EventType::Production);
+            again.set("type_index", tech_up).set("location", static_cast<uint32_t>(holder));
+            CHECK(host.execute_direct(0, commands::CommandSource::Player, again) == commands::RejectReason::NotAllowed);  // lifetime 1
+            continue;
+        }
+        if (built && !killed && b->frame() >= built_at + 5 && holder != objects::kNoObjectId) {
+            (void)b->script_damage(*tm, holder, 1.0e9f, false);
+            killed = true;
+            killed_at = b->frame();
+            continue;
+        }
+        if (killed && b->frame() >= killed_at + 3) {
+            tech_killed = b->battle_tech_level(0);
+            std::printf("  frame %u: holder %d killed at %u, tech %d\n", b->frame(), holder, killed_at, tech_killed);
+            dropped = true;
+        }
+    }
+    CHECK(ordered && built && killed && dropped);
+    CHECK(built_at >= 2 + 60 && built_at <= 2 + 60 + 3);  // its own queue: not behind the 30-frame base upgrade
+    CHECK(tech_built == tech_before + 1);
+    CHECK(tech_killed == tech_built - 1);
+}
 // --- end hangars ---
 
 // cu8g t05 (CU8F_T04_T06_RE §3.3 [H]): TacticalBattle::player_gate_allows / special_weapons_allowed on the S10 space
@@ -3360,6 +3463,8 @@ int main(int argc, char** argv) {
     std::printf("skirmish station production: Production at the star base, upgrade object, station upgrade\n");
     test_station_production();
     test_station_production(1.5f);  // skm1 t04: Easy AI build time
+    std::printf("mcx4 t04: tactical production queues and the skirmish tech upgrade\n");
+    test_tactical_tech_upgrade();
     test_skirmish_redelivery();      // skm1 t07
     test_land_upgrade_production_done();  // s78n t20 step 5
     std::printf("cu8g t05: Battlefield_Modifier gates at the battle (skirmish vs campaign, empty list, apply / remove / reverse)\n");

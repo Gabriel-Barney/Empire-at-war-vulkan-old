@@ -212,6 +212,9 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
         gcfg.difficulties = d.ai->difficulties;
         gcfg.contrast = &d.crules.contrast;
         gcfg.story_campaign = spec_.kind == SessionKind::Campaign && spec_.story;
+        // mcx8 t07 Game.InterventionsEnabled (AI_GALACTIC_TOKENS §4): the advanced game options set the "options changed"
+        // settings flag; with random events off the token is 0.0 and Disable_Interventions_Template turns interventions off.
+        gcfg.interventions_enabled = spec_.interventions_enabled();
         gcfg.ai_uses_fog_galactic = d.db.constants().get_bool("AIUsesFogOfWarGalactic", gcfg.ai_uses_fog_galactic);  // shipped False
         const uint32_t diff = d.rules.find_difficulty(difficulty_name(spec_.difficulty));
         // q6 t08: the type from the data (resolve_ai_type): campaigns read the campaign's AI_Player_Control pairs, a
@@ -1163,6 +1166,8 @@ void GameSession::describe_session() {
     d.set_option("spec.story", flag(spec_.story));
     d.set_option("spec.ask_battle_choice", flag(spec_.ask_battle_choice));
     if (spec_.fleet_groups) d.set_option("spec.fleet_groups", flag(true));  // [port] fleet groups: written only when on
+    // mcx8 t07: the advanced options are not saved, so keep Game.InterventionsEnabled's off state (written only when off).
+    if (!spec_.interventions_enabled()) d.set_option("spec.interventions_off", flag(true));
     if (!campaign) {
         const SkirmishSetup& s = spec_.skirmish;
         d.set_option("skirmish.human_faction", s.human_faction);
@@ -1360,6 +1365,7 @@ bool GameSession::spec_from_save(const SaveFile& save, SessionSpec& out, std::st
     s.story = o.boolean("spec.story");
     s.ask_battle_choice = o.boolean("spec.ask_battle_choice");
     s.fleet_groups = o.has("spec.fleet_groups") && o.boolean("spec.fleet_groups");  // [port] absent = off
+    s.interventions_off = o.has("spec.interventions_off") && o.boolean("spec.interventions_off");  // mcx8 t07, absent = on
     if (s.kind == SessionKind::Skirmish) {
         s.skirmish.human_faction = std::string(o.text("skirmish.human_faction"));
         s.skirmish.ai_faction = std::string(o.text("skirmish.ai_faction"));

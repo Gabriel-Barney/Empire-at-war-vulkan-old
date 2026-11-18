@@ -73,6 +73,7 @@ int main(int argc, char** argv) {
     test_player_conflict_tokens();   // q6 t03
     test_budget_allocation_token();  // q6 t03
     test_story_trigger_token();      // storyb t10
+    test_mcx8_t07_tokens();          // mcx8 t07
     test_loaded_category_enum();     // q6 t03
     test_ai_type_switch();
 #ifdef ALAMO_AI_HAVE_VFS
