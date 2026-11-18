@@ -71,14 +71,18 @@ TIER_OVERRIDES = {}  # (class, tag) -> tier, for rows that are distribution-leve
 # answer found no reader, as "docs/re/<FILE>.md <section>". The file must exist and name the tag. Class and tag are
 # spelled as in docs/re/xml_field_tables.md (matched case-insensitively). Keep the list sorted by class, then tag.
 RETAIL_UNUSED = {
+    ("Attack_Action", "Attack_Accuracy_Modifier"): "docs/re/MCX4_T10_RE_ANSWERS.md §11 [H]",
+    ("Eat_Attack_Ability", "Needs_To_Rotate"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §B3 [M]",
     ("Faction", "Can_Win_By_Destroying_Super_Weapon"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.5 [H]",
     ("Faction", "Corruption_Tactical_Build_Pad_Time_Multipliers"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.2 [H]",
     ("Faction", "Credits_Accumulation_Factor"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.1 [M]",
+    ("Faction", "Land_Skirmish_Unit_Buy_Credits"): "docs/re/MCX4_T10_RE_ANSWERS.md §17 [M]",
     ("Faction", "SFXEvent_Build_Impossible_Location_Blockaded"): "docs/re/P4_SIM_SYSTEMS.md §2.7.3 [M: byte scan]",
     ("Faction", "SFXEvent_HUD_Base_Shield_Penetrated"): "docs/re/TRU1_A_RE_ANSWERS.md Penetration SFX [M: byte scan]",
     ("Faction", "SFXEvent_HUD_Enemy_Base_Shield_Penetrated"): "docs/re/TRU1_A_RE_ANSWERS.md Penetration SFX [M: byte scan]",
     ("Faction", "SFXEvent_Max_Credits_Limit_Reached"): "docs/re/P4_SIM_SYSTEMS.md §2.7.3 [M: byte scan]",
     ("Faction", "Space_Retreat_Off_Map_Dest_Pos"): "docs/re/TRU1_C_RE.md §2.1 [H]",
+    ("Faction", "Space_Skirmish_Unit_Buy_Credits"): "docs/re/MCX4_T10_RE_ANSWERS.md §17 [M]",
     ("GameConstants", "AI_LandThreatDistanceFactor"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §S [M: export scan]",
     ("GameConstants", "AI_LandThreatTurnRateFactor"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §S [M: export scan]",
     ("GameConstants", "AI_SpaceThreatDistanceFactor"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §S [M: export scan]",
@@ -114,6 +118,7 @@ RETAIL_UNUSED = {
     ("GameObjectType", "Build_Speech_Completed"): "docs/re/MCX4_T09_RE_ANSWERS.md Q7 Build_Speech_Completed [H]",
     ("GameObjectType", "Build_Speech_Stopped"): "docs/re/MCX4_T09_RE_ANSWERS.md Q7 Build_Speech_Stopped [H]",
     ("GameObjectType", "Build_Speech_Underway"): "docs/re/MCX4_T09_RE_ANSWERS.md Q7 Build_Speech_Underway [H]",
+    ("GameObjectType", "CanCellStack"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §B2 [M]",
     ("GameObjectType", "Disallows_Hyperspace_Retreat"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §11 [H]",
     ("GameObjectType", "Ground_Infantry_Turret_Target"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
     ("GameObjectType", "Ground_Vehicle_Turret_Target"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
@@ -127,7 +132,9 @@ RETAIL_UNUSED = {
     ("GameObjectType", "Turret_Targets_Anything_Else"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
     ("GameObjectType", "Turret_Targets_Ground_Infantry"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
     ("GameObjectType", "Turret_Targets_Ground_Vehicles"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("Infection_Ability", "Shoot_Anim"): "docs/re/MCX4_T11_T12_RE_ANSWERS.md §B3 [M]",
     ("Spawn_Ability", "Self_Destruct_Radius"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §14 [H: only the load check reads it]",
+    ("Tractor_Beam_Attack_Ability", "Damage_Application_Time_In_Secs"): "docs/re/MCX4_T10_RE_ANSWERS.md §15 [M: only the post-parse clamp reads it]",
 }
 
 # Source files that name tags without reading them for the game: the descriptor tables themselves, reports, tests,
