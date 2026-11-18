@@ -38,6 +38,7 @@
 #include "alamo/lua/ai_bridge.hpp"
 #include "alamo/lua/object_bridge.hpp"
 #include "alamo/lua/players.hpp"
+#include "alamo/lua/story_model.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/object_store.hpp"
 #include "alamo/objects/object_types.hpp"
@@ -103,6 +104,7 @@ bool gtrue(LuaVm& vm, const char* name) {
     return b;
 }
 bool same_bits(double a, double b) { return std::memcmp(&a, &b, sizeof a) == 0; }
+bool last_message_has(LuaVm& vm, const char* what);  // below
 
 class MemProvider final : public FileProvider {
 public:
@@ -451,7 +453,7 @@ void test_players() {
     CHECK(run(vm, "Suspend_AI(0)") == "" && !g.world.ai_suspended());
     CHECK(run(vm, "Suspend_AI()").find("LuaSuspendAI -- Expected float parameter 1") != std::string::npos);
     CHECK(run(vm, "Purge_Goals(und); r = GiveDesireBonus(und, 'Build_Initial_Starbase_Only', Target, 15, 5); "
-                  "Declare_Goal_Type(); PlayerObject = und; Budget.Flush_Category('MajorItem')") == "");
+                  "PlayerObject = und; Budget.Flush_Category('MajorItem')") == "");
     CHECK(gnil(vm, "r") && g.world.purge_goal_requests == std::vector<int32_t>{1});
     CHECK(g.world.desire_bonuses.size() == 1 && g.world.desire_bonuses[0].goal == "Build_Initial_Starbase_Only" &&
           g.world.desire_bonuses[0].target == g.store->id(g.planet(0)) && g.world.desire_bonuses[0].bonus == 15.0 &&
@@ -461,18 +463,13 @@ void test_players() {
     CHECK(run(vm, "Purge_Goals(1)").find("Purge_Goals -- invalid type for parameter 1. Expected a player.") !=
           std::string::npos);
 
-    // WeightedTypeList + EvaluateTypeList: planet A holds the Empire frigate (orbit) and trooper (surface).
-    CHECK(run(vm, "names = {'Frigate', 'Infantry', 'Corvette', 'Trooper_T', 'All'}; "
-                  "wl = WeightedTypeList.Create(); wl.Parse(names, {1, 2, 3, 4, 5}); "
-                  "found = EvaluateTypeList(und, Target, wl); "
-                  "f1 = found[1]; f2 = found[2]; f3 = found[3]; f4 = found[4]; f5 = found[5]; fn = table.getn(found); "
-                  "Target2 = Find_All_Objects_Of_Type('Planet_B')[1]; "
-                  "g2 = EvaluateTypeList(und, Target2, wl); g1 = g2[1]; g5 = g2[5]") == "");
-    CHECK(gtrue(vm, "f1") && gtrue(vm, "f2") && !gtrue(vm, "f3") && gtrue(vm, "f4") && gtrue(vm, "f5") &&
-          gnum(vm, "fn") == 5.0);
-    CHECK(!gtrue(vm, "g1") && gtrue(vm, "g5"));  // B: only the planet itself
+    // WeightedTypeList + EvaluateTypeList (more in test_mcx8_t12): a game object target gives nothing, silently.
+    CHECK(run(vm, "names = {'Frigate', 'Infantry', 'Corvette', 'Trooper_T'}; "
+                  "wl = WeightedTypeList.Create(); wl.Parse(names, {1, 2, 3, 4}); "
+                  "found = EvaluateTypeList(und, Target, wl)") == "" && gnil(vm, "found"));
     CHECK(run(vm, "EvaluateTypeList(und, Target)").find("Expected 3, got 2.") != std::string::npos);
-    CHECK(run(vm, "EvaluateTypeList(und, Target, Target)").find("Expected weighted type list.") != std::string::npos);
+    set_ai_target_global(vm, "TargetA", 0);  // no AI host: a defunct AI target
+    CHECK(run(vm, "EvaluateTypeList(und, TargetA, Target)").find("AI target location is defunct.") != std::string::npos);
     CHECK(run(vm, "WeightedTypeList.Parse({}, {})").find("WeightedTypeListClass -- Invalid parameters") != std::string::npos);
 
     // DiscreteDistribution: one synced float draw over the positive weights.
@@ -549,7 +546,7 @@ void test_perception() {
     CHECK(r2.ok && same_bits(gnum(vm, "v2"), r2.value));
     CHECK(r3.ok && same_bits(gnum(vm, "v3"), r3.value) && before == g.rng.synced());
     CHECK(gnil(vm, "v4") && gnil(vm, "v5"));
-    CHECK(gnum(vm, "w1") == 6.0 && gnil(vm, "w2"));  // no target in galactic context
+    CHECK(gnil(vm, "w1") && gnil(vm, "w2"));  // mcx8 t12: no parent galaxy -> warning, no value (also in a galactic game)
 
     // EvaluatePerception in the galactic context itself: Underworld (AI) sees the Empire frigate at A.
     g.world.set_perception({&geq, &gres}, {&geq, &gres});
@@ -560,7 +557,8 @@ void test_perception() {
     CHECK(run(vm, "EvaluatePerception('X')").find("Evaluate_Perception: Invalid number of parameters. Expected 2 or 3, got 1.") !=
           std::string::npos);
     CHECK(run(vm, "EvaluatePerception('X', 3)").find("Expected player object.") != std::string::npos);
-    CHECK(run(vm, "Evaluate_In_Galactic_Context(1, und)").find("parameter 1. Expected string.") != std::string::npos);
+    CHECK(run(vm, "Evaluate_In_Galactic_Context(1, und)") == "" &&
+          last_message_has(vm, "Evaluate_In_Galactic_Context: This function may only be used in tactical games spawned from campaign mode."));
 
     // a1j t07 (A1_READINGS §38): a campaign land battle's galactic context. Evaluate_In_Galactic_Context runs in the
     // galactic world with the battle's planet as target (0x69e1b0); Release_Credits_For_Tactical goes to the host
@@ -973,9 +971,11 @@ void test_galactic_ops() {
     CHECK(run(vm, "GetNextStarbaseType()").find("GetNextStarbaseType : invalid number of parameters. Expected 1, got 0.") !=
           std::string::npos);
     sim.set_hidden(1, true);
-    CHECK(run(vm, "u1 = PA.Get_Is_Planet_AI_Usable() u2 = PB.Get_Is_Planet_AI_Usable() u3 = F1.Get_Is_Planet_AI_Usable() "
+    CHECK(run(vm, "u1 = PA.Get_Is_Planet_AI_Usable() u2 = PB.Get_Is_Planet_AI_Usable() "
                   "c1 = UTr.Can_Land_On_Planet(PA) c2 = F1.Can_Land_On_Planet(PA) c3 = UTr.Can_Land_On_Planet(PB)") == "");
-    CHECK(gtrue(vm, "u1") && !gtrue(vm, "u2") && !gtrue(vm, "u3") && gtrue(vm, "c1") && !gtrue(vm, "c2") && !gtrue(vm, "c3"));
+    // mcx8 t12: Can_Land_On_Planet has no hidden test (c3); a non-planet's Get_Is_Planet_AI_Usable is an error.
+    CHECK(gtrue(vm, "u1") && !gtrue(vm, "u2") && gtrue(vm, "c1") && !gtrue(vm, "c2") && gtrue(vm, "c3"));
+    CHECK(run(vm, "u3 = F1.Get_Is_Planet_AI_Usable()").find("is not a planet.") != std::string::npos);
     CHECK(run(vm, "UTr.Can_Land_On_Planet(1)").find("GameObjectWrapper::Can_Land_On_Planet -- invalid type for parameter 1. Expected game object.") !=
           std::string::npos);
     CHECK(run(vm, "s1 = StringCompare('Galactic', 'GALACTIC') s2 = StringCompare('Land', 'Galactic') s3 = StringCompare(1, 1)") == "");
@@ -1424,10 +1424,230 @@ void test_spawn_assemble() {
     CHECK(hl.digest() == hd.digest());
 }
 
+// mcx8 t12 (docs/re/MCX8_BINDINGS_PLAYERS_STORY.md): an AI host with fixed targets (id -> object; a valid target without
+// an object stands for a region target) and a fixed stage answer for _FindStageArea.
+class T12Ai final : public AiScriptHost {
+public:
+    std::map<int32_t, objects::ObjectHandle> targets;
+    int32_t stage = -1;
+    bool take_bonus = false;  // give_desire_bonus: status 42 (unfinished) when true
+    std::vector<std::pair<std::string, double>> bonuses;
+    int32_t give_desire_bonus(int32_t, int32_t, std::string_view goal, objects::ObjectHandle, double, double seconds) override {
+        if (!take_bonus) return -1;
+        bonuses.emplace_back(std::string(goal), seconds);
+        return 42;
+    }
+    bool tf_valid(int32_t) override { return false; }
+    int32_t tf_force_count(int32_t) override { return 0; }
+    void tf_set_flag(int32_t, AiTfFlag, bool) override {}
+    int32_t tf_produce_force(int32_t, const AiArg&, bool) override { return -1; }
+    int32_t tf_get_stage(int32_t) override { return -1; }
+    bool tf_all_on_free_store(int32_t) override { return false; }
+    int32_t tf_order(int32_t, AiTfOrder, const AiArg&) override { return -1; }
+    bool tf_is_raid_capable(int32_t) override { return false; }
+    void tf_release_forces(int32_t, double) override {}
+    void tf_release_unit(int32_t, objects::ObjectHandle) override {}
+    std::vector<objects::ObjectHandle> tf_units(int32_t) override { return {}; }
+    std::string tf_goal_type_name(int32_t) override { return {}; }
+    bool tf_collect_free_units(int32_t, uint64_t) override { return false; }
+    bool status_finished(int32_t s) override { return s != 42; }
+    AiStatusResult status_result(int32_t s) override { return s == 42 ? AiStatusResult::Nil : AiStatusResult::True; }
+    bool target_valid(int32_t t) override { return targets.count(t) != 0; }
+    objects::ObjectHandle target_object(int32_t t) override {
+        const auto it = targets.find(t);
+        return it == targets.end() ? objects::ObjectHandle{} : it->second;
+    }
+    double target_distance(int32_t, const AiArg&) override { return -1.0; }
+    double budget_op(int32_t, AiBudgetOp, double, std::string_view) override { return 0.0; }
+    int32_t budget_wait(int32_t, AiBudgetOp, double) override { return -1; }
+    int32_t free_store_count(int32_t, int) override { return 0; }
+    bool free_store_has(int32_t, objects::ObjectHandle) override { return false; }
+    bool unit_in_transit(objects::ObjectHandle) override { return false; }
+    bool unit_safe(objects::ObjectHandle) override { return true; }
+    bool free_store_move(int32_t, objects::ObjectHandle, const AiArg&) override { return false; }
+    int32_t find_target(int32_t, const AiFindTargetRequest&) override { return -1; }
+    int32_t find_stage_area(int32_t, const AiArg&, const AiArg&, const AiArg&) override { return stage; }
+    AiGlobalValue global_value(std::string_view) override { return {}; }
+    void set_global_value(std::string_view, const AiGlobalValue&) override {}
+};
+
+// mcx8 t12: the player / story / AI bindings whose port behaviour was guessed, each against the retail behaviour of
+// docs/re/MCX8_BINDINGS_PLAYERS_STORY.md (one block per section).
+void test_mcx8_t12() {
+    Galaxy g;
+    galactic::GalacticSim& sim = *g.sim;
+    LuaVm vm(g.host());
+    attach_player_world(vm, &g.world);
+    T12Ai ai;
+    attach_ai_host(vm, &ai, 1);
+    const objects::ObjectHandle frigate = sim.planets()[0].orbit.empty() ? objects::ObjectHandle{}
+                                                                          : sim.fleets()[sim.planets()[0].orbit[0]].contents[0];
+    CHECK(static_cast<bool>(frigate));
+    ai.targets = {{5, g.planet(0)}, {6, objects::ObjectHandle{}}, {7, frigate}};
+    set_ai_target_global(vm, "T5", 5);  // planet A
+    set_ai_target_global(vm, "T6", 6);  // a target without a game object
+    set_ai_target_global(vm, "T7", 7);  // the Empire frigate (not a planet)
+    set_ai_target_global(vm, "T9", 9);  // not a valid target (defunct)
+    vm.set_object_global("PA", g.planet(0));
+    vm.set_object_global("PB", g.planet(1));
+    vm.set_object_global("Frig", frigate);
+    CHECK(run(vm, "emp = Find_Player('Empire') und = Find_Player('Underworld')") == "");
+
+    // Get_Owner: an owner id that is no player of the world, or none, gives nil.
+    {
+        objects::SpawnParams sp;
+        sp.type = g.raw.find("Trooper_T");
+        sp.owner = 7;
+        vm.set_object_global("Stray", g.store->create(sp));
+        sp.owner = -1;
+        vm.set_object_global("Unowned", g.store->create(sp));
+        CHECK(run(vm, "o1 = Stray.Get_Owner() o2 = Unowned.Get_Owner() o3 = Frig.Get_Owner().Get_ID()") == "");
+        CHECK(gnil(vm, "o1") && gnil(vm, "o2") && gnum(vm, "o3") == 0.0);
+    }
+
+    // StringCompare: the first two arguments; more are ignored.
+    CHECK(run(vm, "s1 = StringCompare('Land', 'LAND', 5) s2 = StringCompare('Land') s3 = StringCompare('1', 1)") == "");
+    CHECK(gtrue(vm, "s1") && !gtrue(vm, "s2") && !gnil(vm, "s2") && !gtrue(vm, "s3"));
+
+    // Check_Story_Flag: an AI target gives its game object; the name is kept as given; argument 4 must be a boolean.
+    {
+        StoryModel model;
+        attach_story(vm, &model);
+        model.raise_ai_flag(1, "Trap_Here", static_cast<int32_t>(g.store->id(g.planet(0))));
+        CHECK(run(vm, "k1 = Check_Story_Flag(und, 'TRAP_HERE', T5, false) k2 = Check_Story_Flag(und, 'Trap_Here', T5, false) "
+                      "k3 = Check_Story_Flag(und, 'Trap_Here', PA, true) k4 = Check_Story_Flag(und, 'Trap_Here', PA, true) "
+                      "k5 = Check_Story_Flag(und, 'Trap_Here', nil, false)") == "");
+        CHECK(!gtrue(vm, "k1") && gtrue(vm, "k2") && gtrue(vm, "k3") && !gtrue(vm, "k4") && !gtrue(vm, "k5"));
+        CHECK(run(vm, "Check_Story_Flag(und, 'Trap_Here', PA, 1)").find("Check_AI_Story_Flag -- invalid type for parameter 4; expected boolean.") !=
+              std::string::npos);
+        CHECK(run(vm, "Check_Story_Flag(und, 'Trap_Here', T9, false)").find("Check_AI_Story_Flag -- target specified is dead; unable to check flag.") !=
+              std::string::npos);
+        CHECK(run(vm, "Check_Story_Flag(und, 'Trap_Here', T6, false)").find("Check_AI_Story_Flag -- target 6 is not a game object; unable to check story flag.") !=
+              std::string::npos);
+        attach_story(vm, nullptr);
+    }
+
+    // WeightedTypeList.Parse: stop at the first missing weight, skip a non-number weight, an unknown name stays (error).
+    {
+        const std::string e = run(vm, "wl = WeightedTypeList.Create() wl.Parse({'Frigate', 'Trooper_T', 'Nope', 'Infantry'}, {1, 'x', 3})");
+        CHECK(e.find("WeightedTypeListClass -- Invalid Entry: 1, for Weight list.!") != std::string::npos);
+        CHECK(e.find("WeightedTypeListClass -- Unable to find type or category: Nope!") != std::string::npos);
+        CHECK(e.find("WeightedTypeListClass -- Types and Weights are mismatched!") != std::string::npos);
+        CHECK(run(vm, "r = EvaluateTypeList(und, T5, wl) rn = table.getn(r) r1 = r[1] r2 = r[2]") == "");
+        CHECK(gnum(vm, "rn") == 2.0 && gtrue(vm, "r1") && !gtrue(vm, "r2"));  // Frigate, Nope
+        CHECK(run(vm, "wl.Parse({'Corvette'}, {2}) r = EvaluateTypeList(und, T5, wl) rn = table.getn(r) r1 = r[1]") == "" &&
+              gnum(vm, "rn") == 1.0 && !gtrue(vm, "r1"));  // cleared, then refilled
+    }
+
+    // EvaluateTypeList: an AI target only (a game object: nothing, silently); enemy units of argument 1 at the planet.
+    {
+        CHECK(run(vm, "wl = WeightedTypeList.Create() wl.Parse({'Frigate', 'Infantry', 'Corvette', 'Trooper_T'}, {1, 2, 3, 4}) "
+                      "a = EvaluateTypeList(und, T5, wl) a1 = a[1] a2 = a[2] a3 = a[3] a4 = a[4] "
+                      "b = EvaluateTypeList(emp, T5, wl) b1 = b[1] b2 = b[2] b4 = b[4]") == "");
+        CHECK(gtrue(vm, "a1") && gtrue(vm, "a2") && !gtrue(vm, "a3") && gtrue(vm, "a4"));
+        CHECK(!gtrue(vm, "b1") && !gtrue(vm, "b2") && !gtrue(vm, "b4"));  // the Empire's own units are no enemies
+        const size_t m0 = vm.messages().size();
+        CHECK(run(vm, "c = EvaluateTypeList(und, PA, wl)") == "" && gnil(vm, "c") && vm.messages().size() == m0);
+        CHECK(run(vm, "EvaluateTypeList(und, T9, wl)").find("Evaluate_Type_List: AI target location is defunct.") != std::string::npos);
+        CHECK(run(vm, "EvaluateTypeList(und, T7, wl)").find("Evaluate_Type_List: parameter 2 should be a planet target.") !=
+              std::string::npos);
+    }
+
+    // EvaluatePerception argument 3: an AI target binds its planet; present but neither a live object nor a target: error.
+    {
+        ai::EquationSet eq;
+        eq.add("Target_Score", "Variable_Target.Other.Token");
+        eq.link();
+        TestResolver tr;
+        g.world.set_perception({&eq, &tr}, {&eq, &tr});
+        CHECK(run(vm, "v1 = EvaluatePerception('Target_Score', und, T5) v2 = EvaluatePerception('Target_Score', und, PA) "
+                      "v3 = EvaluatePerception('Target_Score', und)") == "");
+        CHECK(gnum(vm, "v1") == gnum(vm, "v2") && gnum(vm, "v1") != gnum(vm, "v3"));
+        CHECK(run(vm, "EvaluatePerception('Target_Score', und, nil)").find("Evaluate_Perception: Invalid parameter type for parameter 3.") !=
+              std::string::npos);
+        CHECK(run(vm, "EvaluatePerception('Target_Score', und, T9)").find("Evaluate_Perception: Invalid parameter type for parameter 3.") !=
+              std::string::npos);
+        // Evaluate_In_Galactic_Context in a galactic game: the warning, no value.
+        CHECK(run(vm, "w1 = Evaluate_In_Galactic_Context('Target_Score', und)") == "" && gnil(vm, "w1") &&
+              last_message_has(vm, "Evaluate_In_Galactic_Context: This function may only be used in tactical games spawned from campaign mode."));
+    }
+
+    // Get_Is_Planet_AI_Usable: Is_Planet_Revealed; a non-planet is an error.
+    sim.set_hidden(1, true);
+    CHECK(run(vm, "u1 = PA.Get_Is_Planet_AI_Usable() u2 = PB.Get_Is_Planet_AI_Usable()") == "" && gtrue(vm, "u1") && !gtrue(vm, "u2"));
+    CHECK(run(vm, "Frig.Get_Is_Planet_AI_Usable()").find("GameObjectWrapper::Get_Is_Planet_AI_Usable -- object") != std::string::npos);
+    sim.set_hidden(1, false);
+
+    // Galactic_Time: (float)frame x (float)(1/30), widened; nothing without a galactic mode.
+    for (int i = 0; i < 150; ++i) sim.update();
+    CHECK(sim.frame() == 150);
+    CHECK(run(vm, "gt = GetCurrentTime.Galactic_Time()") == "" &&
+          same_bits(gnum(vm, "gt"), static_cast<double>(150.0f * (1.0f / 30.0f))) && gnum(vm, "gt") != 5.0);
+    {
+        LuaVm bare(g.host());
+        CHECK(run(bare, "gt = GetCurrentTime.Galactic_Time()") == "" && gnil(bare, "gt"));
+    }
+
+    // _FindStageArea: an AI target argument gives an AI target, a game object argument the stage's game object.
+    ai.stage = 5;
+    CHECK(run(vm, "sa = _FindStageArea(und, T5) so = _FindStageArea(und, PA) "
+                  "s1 = (sa.Get_Game_Object() == PA) s2 = (so == PA) s3 = (sa == PA)") == "");
+    CHECK(gtrue(vm, "s1") && gtrue(vm, "s2") && !gtrue(vm, "s3"));
+    CHECK(run(vm, "_FindStageArea(PA, T5)").find("FindStageAreaClass -- Expected a player object for parameter 1") != std::string::npos);
+    CHECK(run(vm, "_FindStageArea(und, 5)").find("FindStageAreaClass -- Expected a AITargetLocationWrapper/GameObjectWrapper for parameter 2") !=
+          std::string::npos);
+
+    // GiveDesireBonus: an AI target argument; unknown goal types and the parameter numbering of the original.
+    g.world.goal_type_known = [](std::string_view n) { return n == "Conquer"; };
+    g.world.goal_category_known = [](std::string_view n) { return n == "MajorItem"; };
+    g.world.desire_bonuses.clear();
+    CHECK(run(vm, "GiveDesireBonus(und, 'Conquer', T5, 2, 3)") == "" && g.world.desire_bonuses.size() == 1 &&
+          g.world.desire_bonuses[0].target == static_cast<int32_t>(g.store->id(g.planet(0))));
+    CHECK(run(vm, "GiveDesireBonus(und, 'Nope', T5, 2, 3)").find("Give_Desire_Bonus : unrecognised goal type Nope.") != std::string::npos);
+    CHECK(run(vm, "GiveDesireBonus(und, 'Conquer', 5, 2, 3)").find("invalid type for parameter 2. Expected AI target location or game object.") !=
+          std::string::npos);
+    CHECK(run(vm, "GiveDesireBonus(und, 'Conquer', T5, 'x', 3)").find("invalid type for parameter 3. Expected number.") != std::string::npos);
+    CHECK(g.world.desire_bonuses.size() == 1);
+    // A host that takes the bonus returns its blocking status (BlockOnCommand waits on it); nothing is queued.
+    ai.take_bonus = true;
+    CHECK(run(vm, "bs = GiveDesireBonus(und, 'Conquer', PA, 15, 5) bf = bs.IsFinished()") == "" && !gtrue(vm, "bf") &&
+          !gnil(vm, "bs") && ai.bonuses.size() == 1 && ai.bonuses[0].first == "Conquer" && ai.bonuses[0].second == 5.0 &&
+          g.world.desire_bonuses.size() == 1);
+    ai.take_bonus = false;
+    // Budget.Flush_Category: an unknown goal category is an error (nothing queued).
+    g.world.budget_flushes.clear();
+    CHECK(run(vm, "PlayerObject = und Budget.Flush_Category('MajorItem')") == "" && g.world.budget_flushes.size() == 1);
+    CHECK(run(vm, "Budget.Flush_Category('Nope')").find("BudgetWrapper::Flush_Category -- unrecognized goal category Nope.") !=
+          std::string::npos);
+    CHECK(g.world.budget_flushes.size() == 1);
+    // Declare_Goal_Type: not registered by the exe (nil).
+    CHECK(run(vm, "dg = Declare_Goal_Type") == "" && gnil(vm, "dg"));
+}
+
+// mcx8 t12: Can_Land_On_Planet's ground cap (Max_Ground_Forces_On_Planet, any owner) and the land-unit-itself rule.
+void test_mcx8_t12_can_land() {
+    std::vector<std::tuple<int32_t, PlanetIndex, const char*>> extra;
+    for (int i = 0; i < 9; ++i) extra.emplace_back(0, 0, "Trooper_T");  // planet A: 10 ground units with the default one
+    Galaxy g(extra);
+    galactic::GalacticSim& sim = *g.sim;
+    CHECK(sim.surface_forces(0) == sim.rules().constants.max_ground_forces_on_planet);
+    LuaVm vm(g.host());
+    attach_player_world(vm, &g.world);
+    vm.set_object_global("PA", g.planet(0));
+    vm.set_object_global("PB", g.planet(1));
+    vm.set_object_global("UTr", sim.planets()[2].surface[0]);
+    vm.set_object_global("UFleet", sim.fleets()[sim.planets()[0].orbit[0]].object);
+    sim.set_hidden(1, true);
+    CHECK(run(vm, "c1 = UTr.Can_Land_On_Planet(PA) c2 = UTr.Can_Land_On_Planet(PB) c3 = UFleet.Can_Land_On_Planet(PB)") == "");
+    CHECK(!gtrue(vm, "c1") && gtrue(vm, "c2") && !gtrue(vm, "c3"));  // A full; B hidden but not tested; a fleet: false
+}
+
 }  // namespace
 
 int main() {
     test_players();
+    test_mcx8_t12();
+    test_mcx8_t12_can_land();
     test_spawn_assemble();  // a1g t06
     test_special_systems();
     test_company_member_views();  // refix t04

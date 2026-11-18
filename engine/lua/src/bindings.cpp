@@ -203,9 +203,13 @@ bool is_host_value_global(std::string_view name) {
     return std::find(std::begin(kHostValues), std::end(kHostValues), name) != std::end(kHostValues);
 }
 
+// binding-effect: Declare_Goal_Type noop-retail not registered by the exe, so the global stays nil (docs/re/MCX8_BINDINGS_PLAYERS_STORY.md "Declare_Goal_Type") [H]
+bool is_unregistered_global(std::string_view name) { return name == "Declare_Goal_Type"; }
+
 bool binding_implemented(const BindingInfo& b) {
     const Registry& r = reg();
     if (b.kind == BindingKind::Global) {
+        if (is_unregistered_global(b.name)) return true;  // nil, as retail
         const auto it = r.global_rows.find(std::string_view(b.name));
         return it != r.global_rows.end() && r.global_fn[it->second] != nullptr;
     }
@@ -622,6 +626,7 @@ void install_globals(lua_State* L, LuaVm::Impl& /*vm*/, bool with_script) {
     for (uint32_t row = 0; row < table.size(); ++row) {
         const BindingInfo& b = table[row];
         if (b.kind != BindingKind::Global || is_host_value_global(b.name)) continue;
+        if (is_unregistered_global(b.name)) continue;
         Ud ud;
         ud.cls = *b.cls ? class_id(b.cls) : cls_user_var();
         for (const auto& [name, cls] : kPortGlobalClasses)

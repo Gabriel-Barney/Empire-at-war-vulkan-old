@@ -28,6 +28,7 @@
 #include "alamo/galactic/fleet_path.hpp"
 #include "alamo/galactic/special_data.hpp"  // P4 lua: special_name_crc
 #include "alamo/lua/players.hpp"
+#include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/game_object_types.hpp"
 
 namespace alamo::lua {
@@ -819,8 +820,10 @@ int g_purge_goals(Call& c) {
     return 0;
 }
 
-// GiveDesireBonus(player, goal, target, bonus[, duration]) - the order PGTaskForce.lua uses. Returns nil
-// (no blocking status: BlockOnCommand returns at once) [inferred].
+// GiveDesireBonus(player, goal, target, bonus, seconds) (MCX8_BINDINGS_PLAYERS_STORY.md "GiveDesireBonus") [H]: returns
+// the blocking status of the bonus (finished true when the bonus was added to a matching proposal, false at its deadline
+// NOW + (int)(FPS x seconds)) through the attached AI host (AiScriptHost::give_desire_bonus), so BlockOnCommand waits.
+// [port] without an AI host that takes it (story VMs, tests) the request is queued on the player world, returns nil.
 int g_give_desire_bonus(Call& c) {
     // q6 t11 (LUA_API.md "Count messages that are stale"): the code takes exactly 5 (the message says 4).
     if (c.nargs != 5)
@@ -829,11 +832,20 @@ int g_give_desire_bonus(Call& c) {
     const int32_t p = player_arg(c, 1, w);
     if (p < 0) return c.script_error_stop("Give_Desire_Bonus : invalid type for parameter 1. Expected player.");
     if (!c.is_string(2)) return c.script_error_stop("Give_Desire_Bonus : invalid type for parameter 2. Expected string.");
-    const objects::ObjectHandle h = object_arg(c, 3);
-    if (!h) return c.script_error_stop("Give_Desire_Bonus : invalid type for parameter 3. Expected AI target location or game object.");
-    if (!c.is_number(4)) return c.script_error_stop("Give_Desire_Bonus : invalid type for parameter 4. Expected number.");
+    // mcx8 t12 (MCX8_BINDINGS_PLAYERS_STORY.md "GiveDesireBonus") [H]: argument 3 is a game object or an AI target (its
+    // game object here [port]); the last three type errors say parameters 2 / 3 / 4, as the original's.
+    objects::ObjectHandle h = object_arg(c, 3);
+    if (!h)
+        if (const detail::AiTargetArg t = detail::ai_target_arg(c, 3); t.is_target && !t.dead) h = t.object;
+    if (!h) return c.script_error_stop("Give_Desire_Bonus : invalid type for parameter 2. Expected AI target location or game object.");
+    if (!c.is_number(4)) return c.script_error_stop("Give_Desire_Bonus : invalid type for parameter 3. Expected number.");
     if (!c.is_number(5))
-        return c.script_error_stop("Give_Desire_Bonus : invalid type for parameter 5. Expected number.");
+        return c.script_error_stop("Give_Desire_Bonus : invalid type for parameter 4. Expected number.");
+    if (w->goal_type_known && !w->goal_type_known(c.string(2))) {
+        const std::string goal(c.string(2));
+        return c.script_error_stop("Give_Desire_Bonus : unrecognised goal type %s.", goal.c_str());
+    }
+    if (detail::ai_give_desire_bonus(c, p, c.string(2), h, c.number(4), c.number(5))) return 1;
     DesireBonusRequest d;
     d.player = p;
     d.goal = std::string(c.string(2));
@@ -844,17 +856,23 @@ int g_give_desire_bonus(Call& c) {
     return push_nil(c);
 }
 
-// Not an exe binding (LUA_API.md: EmmyLua-only); PGInterventions.lua calls it only `if Declare_Goal_Type`.
-// The original has no such global, so the guarded call never happens there: a no-op here [inferred].
-int g_declare_goal_type(Call&) { return 0; }
+// Declare_Goal_Type: not registered (MCX8_BINDINGS_PLAYERS_STORY.md "Declare_Goal_Type") [H]. The exe has no such global,
+// so `if Declare_Goal_Type then` in PGInterventions.lua is false; the port leaves the global nil too
+// (bindings.cpp is_unregistered_global).
 
-// Budget.Flush_Category(category): queued for the AI budget of the script's PlayerObject [inferred].
+// Budget.Flush_Category(category) (MCX8_BINDINGS_PLAYERS_STORY.md "Flush_Category") [H]: the category's available
+// credits of the owning AI's budget go to 0. [port] queued for the AI budget of the script's PlayerObject (drained after
+// the plan's service, galactic_ai.cpp); a category name the AI definitions do not know is a script error.
 int m_budget_flush_category(Call& c) {
     if (c.nargs != 1)
         return c.script_error_stop("BudgetWrapper::Flush_Category -- Invalid number of parameters. Expected 1, got %d.", c.nargs);
     if (!c.is_string(1)) return c.script_error_stop("BudgetWrapper::Flush_Category -- invalid type for parameter 1. Expected string");
     LuaPlayerWorld* w = world_of(c.L);
     if (!w) return 0;
+    if (w->goal_category_known && !w->goal_category_known(c.string(1))) {
+        const std::string cat(c.string(1));
+        return c.script_error_stop("BudgetWrapper::Flush_Category -- unrecognized goal category %s.", cat.c_str());
+    }
     lua_pushstring(c.L, "PlayerObject");
     lua_rawget(c.L, LUA_GLOBALSINDEX);
     int32_t p = -1;
@@ -869,16 +887,28 @@ int m_budget_flush_category(Call& c) {
 
 // ---------------------------------------------------------------- perception
 
-// Target binding of a perception evaluation [inferred]: a planet object of the galactic sim -> its planet
-// row; any other live object -> its object id; anything else -> -1 (unbound).
-int32_t perception_target(Call& c, const LuaPlayerWorld* w, int i) {
-    const objects::ObjectHandle h = object_arg(c, i);
-    if (!h) return -1;
+// Target binding of a perception evaluation (MCX8_BINDINGS_PLAYERS_STORY.md "Perception Target binding") [H]: argument
+// i must be a live game object or an AI target (its game object [port]); a planet object of the galactic sim binds its
+// planet row, any other object its object id. False (the caller's script error) for a dead or wrong-type argument.
+// [port] an AI target without a game object (a region / marker target) binds nothing (-1).
+bool perception_target(Call& c, const LuaPlayerWorld* w, int i, int32_t& out) {
+    out = -1;
+    objects::ObjectHandle h = object_arg(c, i);
+    if (!h) {
+        const detail::AiTargetArg t = detail::ai_target_arg(c, i);
+        if (!t.is_target || t.dead) return false;
+        if (!t.object) return true;
+        h = t.object;
+    }
     if (const galactic::GalacticSim* sim = galactic_of(c, w)) {
         const PlanetIndex p = sim->planet_of(h);
-        if (p != kInvalidPlanet) return static_cast<int32_t>(p);
+        if (p != kInvalidPlanet) {
+            out = static_cast<int32_t>(p);
+            return true;
+        }
     }
-    return c.vm->host.store->id(h);
+    out = static_cast<int32_t>(c.vm->host.store->id(h));
+    return true;
 }
 
 // Evaluates equation `name` for (self, target); nil when the source, the equation or a token is missing.
@@ -916,7 +946,10 @@ int g_evaluate_perception(Call& c) {
     const LuaPlayerWorld* w = world_of(c.L);
     const int32_t p = player_arg(c, 2, w);
     if (p < 0) return c.script_error_stop("Evaluate_Perception: Invalid parameter type for parameter 2. Expected player object.");
-    return evaluate_perception(c, w, w->perception(), c.string(1), p, c.nargs == 3 ? perception_target(c, w, 3) : -1);
+    int32_t target = -1;
+    if (c.nargs == 3 && !perception_target(c, w, 3, target))
+        return c.script_error_stop("Evaluate_Perception: Invalid parameter type for parameter 3. Expected AI target or game object.");
+    return evaluate_perception(c, w, w->perception(), c.string(1), p, target);
 }
 
 // a1j t07: 0x69e1b0 in a tactical mode with a parent galaxy (players.hpp TacticalGalacticContext, A1_READINGS §38).
@@ -947,30 +980,48 @@ int evaluate_in_parent_galaxy(Call& c, const LuaPlayerWorld* w, const TacticalGa
     return push_num(c, r.value);
 }
 
-// Galactic perceptions from any mode (EvaluateInGalacticContext.lua): no target [inferred]. With a parent galaxy set by the
-// battle host: evaluate_in_parent_galaxy.
+// Evaluate_In_Galactic_Context (MCX8_BINDINGS_PLAYERS_STORY.md "Evaluate_In_Galactic_Context") [H]: only a tactical mode
+// spawned from a campaign (a parent galaxy, set by the battle host: evaluate_in_parent_galaxy) evaluates; without one -
+// every plain galactic game included - the original warns and returns nothing, before any argument check.
 int g_evaluate_in_galactic_context(Call& c) {
     if (const LuaPlayerWorld* tw = world_of(c.L); tw && tw->tactical_galactic()) return evaluate_in_parent_galaxy(c, tw, *tw->tactical_galactic());
-    // q6 t11 (LUA_API.md "Mode gates"): without a parent galaxy the original warns and returns nothing. [port] A world
-    // without the parent context outside a galactic mode is that case; the galactic-mode evaluation below is kept.
-    if (const objects::ObjectStore* st = c.vm->host.store; st && st->mode() != objects::ModeKind::Galactic)
-        return c.script_warning("Evaluate_In_Galactic_Context -- only valid in tactical games spawned from a campaign.");
-    if (c.nargs != 2)
-        return c.script_error_stop("Evaluate_In_Galactic_Context: Invalid number of parameters. Expected 2, got %d.", c.nargs);
-    if (!c.is_string(1))
-        return c.script_error_stop("Evaluate_In_Galactic_Context: Invalid parameter type for parameter 1. Expected string.");
-    const LuaPlayerWorld* w = world_of(c.L);
-    const int32_t p = player_arg(c, 2, w);
-    if (p < 0)
-        return c.script_error_stop("Evaluate_In_Galactic_Context: Invalid parameter type for parameter 2. Expected player object.");
-    return evaluate_perception(c, w, w->galactic_perception(), c.string(1), p, -1);
+    return c.script_warning("Evaluate_In_Galactic_Context: This function may only be used in tactical games spawned from campaign mode.");
 }
 
 // ---------------------------------------------------------------- WeightedTypeList / EvaluateTypeList
 
 int m_list_create(Call& c) { return new_instance(c, cls_weighted_list()); }
 
-// Parse(names, weights): replaces the list with names[i] / weights[i] (missing weight = 0) [inferred].
+// A WeightedTypeList entry name resolved as the original's Parse does (MCX8_BINDINGS_PLAYERS_STORY.md
+// "WeightedTypeListClass.Parse") [H]: a GameObjectCategoryType mask, else a GameObjectPropertiesType mask (the second
+// enum, 0x140b31068 [M]), else an object type name; None when nothing takes it. The list keeps the name; EvaluateTypeList
+// resolves it again by the same rule.
+struct ListEntry {
+    enum class Kind : uint8_t { None, Category, Properties, Type } kind = Kind::None;
+    uint64_t mask = 0;
+    objects::TypeIndex type = objects::kNone;
+};
+ListEntry resolve_list_entry(const objects::GameObjectTypes* ty, std::string_view s) {
+    ListEntry e;
+    if (!ty) return e;
+    if (const auto m = ty->enums().get(objects::EnumId::GameObjectCategory).convert(s)) {
+        e.kind = ListEntry::Kind::Category;
+        e.mask = static_cast<uint64_t>(*m);
+    } else if (const auto p = ty->enums().get(objects::EnumId::GameObjectProperties).convert(s)) {
+        e.kind = ListEntry::Kind::Properties;
+        e.mask = static_cast<uint64_t>(*p);
+    } else if (const objects::TypeIndex t = ty->raw().find(s); t != objects::kNone) {
+        e.kind = ListEntry::Kind::Type;
+        e.type = t;
+    }
+    return e;
+}
+
+// Parse(names, weights) (MCX8_BINDINGS_PLAYERS_STORY.md "WeightedTypeListClass.Parse") [H]: clears the list, then per
+// names[i]: no weights[i] -> "Types and Weights are mismatched!" and stop (the entries added so far stay); a weight that
+// is not a number -> an error naming the 0-based index, the entry skipped; else the entry is appended and its name
+// resolved (resolve_list_entry), an unknown name an error (the entry stays). A non-string name is taken as the empty
+// string (a category mask of 0) [M]. Errors are script errors (the script ends after its pass); Parse returns nothing.
 int m_list_parse(Call& c) {
     if (!is_instance(c.self, cls_weighted_list())) return c.script_error_stop("WeightedTypeListClass -- Invalid parameters");
     if (c.nargs < 2) return c.script_error_stop("WeightedTypeListClass -- Not enough parameters");
@@ -978,12 +1029,7 @@ int m_list_parse(Call& c) {
     lua_State* L = c.L;
     const int names = c.idx(1), weights = c.idx(2);
     const int n = array_length(L, names);
-    for (int i = 1; i <= n; ++i) {
-        lua_rawgeti(L, names, i);
-        const bool ok = lua_type(L, -1) == LUA_TSTRING;
-        lua_pop(L, 1);
-        if (!ok) return c.script_error_stop("WeightedTypeListClass -- Invalid parameters");
-    }
+    const int nw = array_length(L, weights);
     if (!push_instance_field(L, c.self->value, "items")) return c.script_error_stop("WeightedTypeListClass -- Invalid parameters");
     const int items = lua_gettop(L);
     if (!push_instance_field(L, c.self->value, "weights")) {
@@ -991,88 +1037,107 @@ int m_list_parse(Call& c) {
         return c.script_error_stop("WeightedTypeListClass -- Invalid parameters");
     }
     const int ws = lua_gettop(L);
-    const int old = array_length(L, items);
-    for (int i = 1; i <= n || i <= old; ++i) {
-        if (i <= n) {
-            lua_rawgeti(L, names, i);
-            lua_rawgeti(L, weights, i);
-            const double wv = lua_type(L, -1) == LUA_TNUMBER ? lua_tonumber(L, -1) : 0.0;
-            lua_pop(L, 1);
-            lua_pushnumber(L, wv);
-        } else {
-            lua_pushnil(L);
-            lua_pushnil(L);
-        }
-        lua_rawseti(L, ws, i);
+    for (int i = array_length(L, items); i >= 1; --i) {  // clear
+        lua_pushnil(L);
         lua_rawseti(L, items, i);
+        lua_pushnil(L);
+        lua_rawseti(L, ws, i);
+    }
+    int k = 0;
+    for (int i = 1; i <= n; ++i) {
+        if (i > nw) {
+            c.script_error_stop("WeightedTypeListClass -- Types and Weights are mismatched!");
+            break;
+        }
+        lua_rawgeti(L, weights, i);
+        const bool number = lua_type(L, -1) == LUA_TNUMBER;
+        const double wv = number ? lua_tonumber(L, -1) : 0.0;
+        lua_pop(L, 1);
+        if (!number) {
+            c.script_error_stop("WeightedTypeListClass -- Invalid Entry: %d, for Weight list.!", i - 1);
+            continue;
+        }
+        lua_rawgeti(L, names, i);
+        const std::string name = lua_type(L, -1) == LUA_TSTRING ? std::string(lua_tostring(L, -1)) : std::string();
+        lua_pop(L, 1);
+        ++k;
+        lua_pushlstring(L, name.data(), name.size());
+        lua_rawseti(L, items, k);
+        lua_pushnumber(L, wv);
+        lua_rawseti(L, ws, k);
+        if (resolve_list_entry(c.vm->host.types, name).kind == ListEntry::Kind::None)
+            c.script_error_stop("WeightedTypeListClass -- Unable to find type or category: %s!", name.c_str());
     }
     lua_pop(L, 2);
     return 0;
 }
 
-// EvaluateTypeList(player, target, list) -> {bool, ...}: per list entry, whether the target holds an object
-// whose type name or CategoryMask token matches it ("All" = any object) [inferred]. The target's objects:
-// itself; in the galaxy also a fleet's members, or a planet's starbase, structures, surface units and
-// orbiting fleets' members. nil for a dead / missing target.
+// EvaluateTypeList(player, target, list) -> {bool, ...} (MCX8_BINDINGS_PLAYERS_STORY.md "EvaluateTypeList") [H for the
+// flow, M for the leaves]. Argument 2 must be an AI target: anything else (a game object included) returns nothing with
+// no message, a defunct target is an error. Per list entry (resolve_list_entry, list order): whether an ENEMY unit of
+// argument 1 at the target matches it - a type entry by its type, a category / properties entry by any bit of the
+// type's CategoryMask / Property_Flags. Galactic: the target must be a planet (else an error); the units are its surface
+// units (Target.EnemyForce.HasGroundUnitsBitfield) and its orbiting fleets' members (HasSpaceUnitsBitfield) [M: which
+// planet lists the leaves walk].
+// Tactical [inferred]: the port has no Target.Location.EnemyUnitsBitfield leaf, so only the target's own game object is
+// tested (when it is an enemy unit).
 int g_evaluate_type_list(Call& c) {
     if (c.nargs != 3) return c.script_error_stop("Evaluate_Type_List: Invalid number of parameters. Expected 3, got %d.", c.nargs);
     const LuaPlayerWorld* w = world_of(c.L);
-    if (player_arg(c, 1, w) < 0)
+    const int32_t self = player_arg(c, 1, w);
+    if (self < 0)
         return c.script_error_stop("Evaluate_Type_List: Invalid parameter type for parameter 1. Expected Player Wrapper.");
+    const detail::AiTargetArg target = detail::ai_target_arg(c, 2);
+    if (!target.is_target) return 0;
+    if (target.dead) return c.script_error_stop("Evaluate_Type_List: AI target location is defunct.");
     const Ud* list = c.userdata(3, cls_weighted_list());
     if (!is_instance(list, cls_weighted_list()))
         return c.script_error_stop("Evaluate_Type_List: Invalid parameter type for parameter 3. Expected weighted type list.");
-    const objects::ObjectHandle target = object_arg(c, 2);
-    if (!target) return push_nil(c);
 
     const objects::ObjectStore& st = *c.vm->host.store;
-    std::vector<objects::ObjectHandle> objs{target};
+    std::vector<objects::ObjectHandle> objs;
     if (const galactic::GalacticSim* sim = galactic_of(c, w)) {
-        auto add_fleet = [&](uint32_t f) {
+        const PlanetIndex p = target.object ? sim->planet_of(target.object) : kInvalidPlanet;
+        if (p == kInvalidPlanet || static_cast<size_t>(p) >= sim->planets().size())
+            return c.script_error_stop("Evaluate_Type_List: parameter 2 should be a planet target.");
+        const galactic::PlanetState& ps = sim->planets()[p];
+        for (const objects::ObjectHandle u : ps.surface) objs.push_back(u);
+        for (const uint32_t f : ps.orbit)
             if (f < sim->fleets().size() && sim->fleets()[f].alive)
                 for (const objects::ObjectHandle m : sim->fleets()[f].contents) objs.push_back(m);
-        };
-        add_fleet(sim->fleet_of(target));
-        const PlanetIndex p = sim->planet_of(target);
-        if (p != kInvalidPlanet) {
-            const galactic::PlanetState& ps = sim->planets()[p];
-            objs.push_back(ps.starbase);
-            for (const objects::ObjectHandle s : ps.structures) objs.push_back(s);
-            for (const objects::ObjectHandle u : ps.surface) objs.push_back(u);
-            for (const uint32_t f : ps.orbit) add_fleet(f);
-        }
+    } else if (target.object) {
+        objs.push_back(target.object);
     }
 
-    std::vector<std::string> items;
+    const objects::GameObjectTypes* types = c.vm->host.types;
+    std::vector<ListEntry> entries;
     if (!push_instance_field(c.L, list->value, "items")) return push_nil(c);
     const int items_index = lua_gettop(c.L);
     const int n = array_length(c.L, items_index);
     for (int i = 1; i <= n; ++i) {
         lua_rawgeti(c.L, items_index, i);
-        items.emplace_back(lua_tostring(c.L, -1) ? lua_tostring(c.L, -1) : "");
+        const char* s = lua_type(c.L, -1) == LUA_TSTRING ? lua_tostring(c.L, -1) : "";
+        entries.push_back(resolve_list_entry(types, s));
         lua_pop(c.L, 1);
     }
     lua_pop(c.L, 1);
 
-    const objects::GameObjectTypes* types = c.vm->host.types;
-    std::vector<uint8_t> found(items.size(), 0);
+    std::vector<uint8_t> found(entries.size(), 0);
     for (const objects::ObjectHandle h : objs) {
         if (!h || !st.alive(h)) continue;
+        const int32_t owner = st.owner(h);
+        if (!w->valid(owner) || w->relation(self, owner) != PlayerRelation::Enemy) continue;
         const objects::TypeIndex t = st.type(h);
-        const bool known = types && t < types->raw().type_count();
-        for (size_t i = 0; i < items.size(); ++i) {
+        if (!types || t >= types->raw().type_count()) continue;
+        for (size_t i = 0; i < entries.size(); ++i) {
+            const ListEntry& e = entries[i];
             if (found[i]) continue;
-            if (ascii_iequals(items[i], "All")) {
-                found[i] = 1;
-                continue;
+            switch (e.kind) {
+                case ListEntry::Kind::Type: found[i] = t == e.type ? 1 : 0; break;
+                case ListEntry::Kind::Category: found[i] = (e.mask & types->get_mask(t, "CategoryMask")) != 0 ? 1 : 0; break;
+                case ListEntry::Kind::Properties: found[i] = (e.mask & types->get_mask(t, "Property_Flags")) != 0 ? 1 : 0; break;
+                case ListEntry::Kind::None: break;
             }
-            if (!known) continue;
-            if (ascii_iequals(types->raw().types().name[t], items[i])) {
-                found[i] = 1;
-                continue;
-            }
-            for (const std::string_view tok : types->get_list(t, "CategoryMask"))
-                if (ascii_iequals(tok, items[i])) found[i] = 1;
         }
     }
     lua_newtable(c.L);
@@ -1243,12 +1308,13 @@ int g_find_path(Call& c) {
     return 1;
 }
 
-// GetCurrentTime.Galactic_Time(): galactic mode time (mode frame / 30) [inferred]; the VM's time
-// without a galactic sim.
+// GetCurrentTime.Galactic_Time() (MCX8_BINDINGS_PLAYERS_STORY.md "LuaGetTime.Galactic_Time") [H]: the galactic mode's
+// frame x the float seconds-per-frame (1/30), multiplied in float and widened; nothing without a galactic mode.
 int m_galactic_time(Call& c) {
     const LuaPlayerWorld* w = world_of(c.L);
     const galactic::GalacticSim* sim = w ? w->galactic() : nullptr;
-    return push_num(c, sim ? static_cast<double>(sim->frame()) / 30.0 : c.vm->time);
+    if (!sim) return 0;
+    return push_num(c, static_cast<double>(static_cast<float>(sim->frame()) * (1.0f / 30.0f)));
 }
 
 // Planet facts (GameObjectWrapper on a galactic planet object): starbase level, corruption, destroyed.
@@ -1428,14 +1494,27 @@ int g_get_next_starbase_type(Call& c) { return g_get_next_base_type(c, true); }
 int g_get_next_groundbase_type(Call& c) { return g_get_next_base_type(c, false); }
 int m_get_next_starbase_type(Call& c) { return next_base_type(c, detail::object_handle(*c.self), true); }
 
-// Get_Is_Planet_AI_Usable() [inferred]: a galactic planet that is neither hidden (inaccessible) nor destroyed.
+// Get_Is_Planet_AI_Usable() (MCX8_BINDINGS_PLAYERS_STORY.md "Get_Is_Planet_AI_Usable") [H]: Is_Planet_Revealed of the
+// planet (GalacticSim::is_planet_revealed, 0x3fa420: takes no player - the local human's reveal state, also for the AI;
+// destroyed is not tested). An object that is not a planet is a script error (its type name), no value; a PLANET object
+// without galactic planet data is false.
 int m_get_is_planet_ai_usable(Call& c) {
-    const galactic::PlanetState* p = self_planet(c);
-    return push_bool(c, p && !p->hidden && !p->destroyed);
+    const galactic::GalacticSim* sim = galactic_of(c, world_of(c.L));
+    const objects::ObjectHandle self = detail::object_handle(*c.self);
+    const PlanetIndex row = planet_row(sim, self);
+    if (row != kInvalidPlanet) return push_bool(c, sim->is_planet_revealed(row));
+    if (c.vm->host.store->has_behavior(self, objects::beh::Planet)) return push_bool(c, false);
+    const objects::GameObjectTypes* types = c.vm->host.types;
+    const objects::TypeIndex t = c.vm->host.store->type(self);
+    const std::string name(types && t < types->raw().type_count() ? types->raw().types().name[t] : std::string_view());
+    return c.script_error_stop("GameObjectWrapper::Get_Is_Planet_AI_Usable -- object %s is not a planet.", name.c_str());
 }
 
-// Can_Land_On_Planet(planet) [inferred]: this object (or, for a fleet, one of its members) is a ground unit
-// and the planet's surface is accessible, not hidden and not destroyed.
+// Can_Land_On_Planet(planet) (MCX8_BINDINGS_PLAYERS_STORY.md "Can_Land_On_Planet") [H]: true when the argument is a live
+// planet, this object is a galactic land unit itself (the TRANSPORT slot: a ground unit or company, not a fleet), the
+// planet's surface is accessible, its terrain does not forbid this unit's type (planet_restricts) and the planet holds
+// fewer than Max_Ground_Forces_On_Planet ground units (surface_forces, any owner). No hidden / destroyed test
+// (GalacticFreeStore pairs it with Get_Is_Planet_AI_Usable).
 int m_can_land_on_planet(Call& c) {
     if (c.nargs != 1)
         return c.script_error_stop("GameObjectWrapper::Can_Land_On_Planet -- invalid number of parameters. Expected 1, got %d.", c.nargs);
@@ -1445,19 +1524,12 @@ int m_can_land_on_planet(Call& c) {
     const PlanetIndex row = planet_row(sim, object_arg(c, 1));
     if (row == kInvalidPlanet) return push_bool(c, false);
     const galactic::PlanetState& p = sim->planets()[row];
-    if (p.hidden || p.destroyed || p.type >= sim->rules().types.size() || !sim->rules().types[p.type].surface_accessible)
-        return push_bool(c, false);
     const objects::ObjectHandle self = detail::object_handle(*c.self);
-    auto ground = [sim](objects::ObjectHandle h) {
-        return sim->store().alive(h) && sim->store().type(h) < sim->rules().types.size() &&
-               sim->rules().types[sim->store().type(h)].kind == galactic::UnitKind::GroundUnit;
-    };
-    if (ground(self)) return push_bool(c, true);
-    const uint32_t f = sim->fleet_of(self);
-    if (f != galactic::kNoFleet)
-        for (const objects::ObjectHandle m : sim->fleets()[f].contents)
-            if (ground(m)) return push_bool(c, true);
-    return push_bool(c, false);
+    const objects::TypeIndex t = sim->store().alive(self) ? sim->store().type(self) : objects::kNone;
+    if (t >= sim->rules().types.size() || sim->rules().types[t].kind != galactic::UnitKind::GroundUnit) return push_bool(c, false);
+    if (p.type >= sim->rules().types.size() || !sim->rules().types[p.type].surface_accessible) return push_bool(c, false);
+    if (sim->planet_restricts(row, sim->representative_type(self))) return push_bool(c, false);
+    return push_bool(c, sim->surface_forces(row) < sim->rules().constants.max_ground_forces_on_planet);
 }
 
 constexpr BindingKind G = BindingKind::Global;
@@ -1490,7 +1562,6 @@ constexpr detail::ImplEntry kImpl[] = {
     {G, "", "EvaluateTypeList", g_evaluate_type_list},
     {G, "", "Purge_Goals", g_purge_goals},
     {G, "", "GiveDesireBonus", g_give_desire_bonus},
-    {G, "", "Declare_Goal_Type", g_declare_goal_type},
     // PlayerWrapper
     {M, "PlayerWrapper", "Get_Faction_Name", m_get_faction_name},
     {M, "PlayerWrapper", "Get_Name", m_get_name},

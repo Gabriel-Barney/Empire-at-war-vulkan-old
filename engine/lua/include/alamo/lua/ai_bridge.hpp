@@ -130,6 +130,14 @@ public:
     virtual objects::ObjectHandle find_target_object(int32_t /*target*/) { return {}; }
     // _FindStageArea(player, target, taskforce) -> target id (-1 = nil).
     virtual int32_t find_stage_area(int32_t script, const AiArg& player, const AiArg& target, const AiArg& tf) = 0;
+    // mcx8 t12 (docs/re/MCX8_BINDINGS_PLAYERS_STORY.md "GiveDesireBonus") [H]: GiveDesireBonus(player, goal, target,
+    // bonus, seconds) taken by the host - the bonus waits for a matching proposal until NOW + (int)(FPS x seconds) - and
+    // its blocking status id (finished true when the bonus was added, false at the deadline). -1 (the default): not taken;
+    // the binding queues the request on the player world and returns nil.
+    virtual int32_t give_desire_bonus(int32_t /*script*/, int32_t /*player*/, std::string_view /*goal*/,
+                                      objects::ObjectHandle /*target*/, double /*bonus*/, double /*seconds*/) {
+        return -1;
+    }
     virtual AiGlobalValue global_value(std::string_view name) = 0;
     virtual void set_global_value(std::string_view name, const AiGlobalValue& value) = 0;
 

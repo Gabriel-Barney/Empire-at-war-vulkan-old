@@ -144,7 +144,7 @@ static void test_registry() {
             lua_rawget(L, LUA_GLOBALSINDEX);
             const int t = lua_type(L, -1);
             lua_pop(L, 1);
-            const bool ok = is_host_value_global(b.name) ? t == LUA_TNIL : t == LUA_TUSERDATA;
+            const bool ok = (is_host_value_global(b.name) || is_unregistered_global(b.name)) ? t == LUA_TNIL : t == LUA_TUSERDATA;
             if (!ok) {
                 std::printf("  global not registered: %s\n", b.name);
                 ++missing;

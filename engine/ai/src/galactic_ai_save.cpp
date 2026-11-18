@@ -53,7 +53,8 @@ namespace {
 // removed (galactic blocked() reads the per-target lists), the task force's stage area (TF +0x100) after its stage;
 // 7 (q2f t09): the task force's sync gather state after its stage area; 8 (a2m t02): the task force's FleetObject (TF
 // +0x120) after its sync state, the MoveTo status's fleet after its mode.
-constexpr uint32_t kWorldVersion = 9;  // 9 (mcx4 t05): + each build task's claim frame
+// 9 (mcx4 t05): + each build task's claim frame; 10 (mcx8 t12): + each pending desire bonus's blocking status.
+constexpr uint32_t kWorldVersion = 10;
 // 2: logic frame, player conflict stamps, conflict observer (q6 t03); 3: leaf cache keyed by (leaf, instance, system player,
 // parameter set) with each entry's parameters, the 0xE visible flags and the last seen surface units (q6 t18)
 constexpr uint32_t kResolverVersion = 3;
@@ -529,6 +530,7 @@ void GalacticAiWorld::write(ByteWriter& w) const {
             w.i32(b.target);
             w.f32(b.bonus);
             w.i64(b.deadline);
+            w.i32(b.status);  // v10
         }
         p.paths.write(w);
         for (const PlayerAi::SourceList& s : p.sources) {
@@ -843,6 +845,7 @@ bool GalacticAiWorld::read(ByteReader& r) {
             b.target = r.i32();
             b.bonus = r.f32();
             b.deadline = r.i64();
+            if (version >= 10) b.status = r.i32();  // older saves: no blocking status
             if (b.goal_type >= goal_types) r.fail();
         }
         if (!r.ok() || !sp.paths.read(r, m.sim.graph(), m.cfg.path_pf)) return false;
@@ -974,7 +977,7 @@ bool GalacticAiWorld::read(ByteReader& r) {
             s.started = r.i64();
             const uint8_t op = r.u8();
             s.amount = r.f64();
-            if (kind > static_cast<uint8_t>(StatusKind::BudgetWait) || result > static_cast<uint8_t>(lua::AiStatusResult::False) ||
+            if (kind > static_cast<uint8_t>(StatusKind::DesireBonus) || result > static_cast<uint8_t>(lua::AiStatusResult::False) ||
                 op > static_cast<uint8_t>(lua::AiBudgetOp::WaitUnallocated) || s.mode > 5 || !valid_planet_or_none(s.dest, planets))
                 r.fail();
             s.kind = static_cast<StatusKind>(kind);

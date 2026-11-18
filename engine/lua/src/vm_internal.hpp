@@ -158,6 +158,10 @@ struct AiTargetArg {
 AiTargetArg ai_target_arg(Call& c, int i);
 // A task force at argument i (any TaskForceClass kind): true and its live units in host order (empty without a host).
 bool ai_task_force_units(Call& c, int i, std::vector<objects::ObjectHandle>& out);
+// mcx8 t12, bind_ai.cpp: GiveDesireBonus through the attached AI host (AiScriptHost::give_desire_bonus). Pushes the
+// blocking status and returns 1 when the host took it; 0 (nothing pushed) without a host or when it declined.
+int ai_give_desire_bonus(Call& c, int32_t player, std::string_view goal, objects::ObjectHandle target, double bonus,
+                         double seconds);
 // bind_ai_tactical.cpp: EvaluatePerception(name, player [, target at target_index; 0 = none]) through the attached
 // tactical AI host (AI targets and task forces accepted). Pushes the result and returns 1; -2 = no tactical host.
 int tactical_evaluate_perception(Call& c, std::string_view name, int32_t player, int target_index);

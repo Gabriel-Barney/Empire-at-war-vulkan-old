@@ -459,12 +459,22 @@ int m_reachable_target(Call& c) {
     push_target(c.L, h ? h->find_target(script_of(c.L), r) : -1);
     return 1;
 }
-// _FindStageArea(player, target, taskforce) -> the staging PLANET object (PGTaskForce / PathBonus pass it
-// to Find_Path, which takes planets) [inferred].
+// _FindStageArea(player, target [, taskforce]) (docs/re/MCX8_BINDINGS_PLAYERS_STORY.md "_FindStageArea") [H]: the first
+// stage of the target's reachability list (host find_stage_area). An AI target argument returns the stage as an AI
+// target; a game object argument returns the stage's game object (PGTaskForce / PathBonus pass it to Find_Path).
+// [port] the host's "no parent planet" case returns nil without the original's error text.
 int g_find_stage_area(Call& c) {
+    const AiArg player = arg(c, 1), target = arg(c, 2);
+    if (player.player < 0) return c.script_error_stop("FindStageAreaClass -- Expected a player object for parameter 1");
+    if (!target.object && target.target < 0)
+        return c.script_error_stop("FindStageAreaClass -- Expected a AITargetLocationWrapper/GameObjectWrapper for parameter 2");
     AiScriptHost* h = host_of(c.L);
-    const int32_t t = h ? h->find_stage_area(script_of(c.L), arg(c, 1), arg(c, 2), arg(c, 3)) : -1;
+    const int32_t t = h ? h->find_stage_area(script_of(c.L), player, target, arg(c, 3)) : -1;
     if (t < 0) return push_nil(c);
+    if (target.target >= 0) {
+        push_target(c.L, t);
+        return 1;
+    }
     detail::push_object(c.L, *c.vm, h->target_object(t));
     return 1;
 }
@@ -699,6 +709,14 @@ detail::AiTargetArg detail::ai_target_arg(Call& c, int i) {
     }
     a.has_position = h->target_position(ud->id, a.position);
     return a;
+}
+
+int detail::ai_give_desire_bonus(Call& c, int32_t player, std::string_view goal, objects::ObjectHandle target, double bonus,
+                                 double seconds) {
+    AiScriptHost* h = host_of(c.L);
+    const int32_t status = h ? h->give_desire_bonus(script_of(c.L), player, goal, target, bonus, seconds) : -1;
+    if (status < 0) return 0;
+    return push_status(c, status);
 }
 
 bool detail::ai_task_force_units(Call& c, int i, std::vector<objects::ObjectHandle>& out) {

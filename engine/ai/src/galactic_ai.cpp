@@ -990,10 +990,18 @@ void PlayerAi::execution_service(int64_t) {
     w->auto_land_free_units(player);  // unit hook step 2 (AI_GALACTIC §2.8)
     w->service_free_store(player);
     for (size_t i = 0; i < bonuses.size();) {
-        if (ctx.goals.give_desire_bonus(bonuses[i].goal_type, bonuses[i].target, bonuses[i].bonus) || bonuses[i].deadline <= w->now)
+        const bool added = ctx.goals.give_desire_bonus(bonuses[i].goal_type, bonuses[i].target, bonuses[i].bonus);
+        if (added || bonuses[i].deadline <= w->now) {
+            // mcx8 t12 (MCX8_BINDINGS_PLAYERS_STORY.md "GiveDesireBonus", poll 0x699eb0) [H]: the blocking status
+            // finishes true when the bonus was added, false at the deadline.
+            if (const auto st = w->statuses.find(bonuses[i].status); st != w->statuses.end()) {
+                st->second.finished = true;
+                st->second.result = added ? lua::AiStatusResult::True : lua::AiStatusResult::False;
+            }
             bonuses.erase(bonuses.begin() + static_cast<std::ptrdiff_t>(i));
-        else
+        } else {
             ++i;
+        }
     }
 }
 
@@ -1151,6 +1159,26 @@ void GalacticAiWorld::Impl::tf_event(const TaskForceRec& tf, PlanEvent event, co
     if (!lua::dispatch_task_force_event(*it->second.vm, tf.id, lua::AiTaskForceKind::Galactic, tf.name, name, args, queued, &err) &&
         !err.empty())
         errors.push_back(library.plans[it->second.plan].name + " " + std::string(name) + ": " + err);
+}
+
+// mcx8 t12 (MCX8_BINDINGS_PLAYERS_STORY.md "GiveDesireBonus") [H]: a plan script's GiveDesireBonus becomes a pending
+// bonus with a blocking status (StatusKind::DesireBonus) at once; the same target and deadline rules as the queued
+// requests below. An unknown player or goal type is not taken (the binding queues it; the drain drops it).
+int32_t GalacticAiWorld::Impl::give_desire_bonus(int32_t script, int32_t player, std::string_view goal, ObjectHandle h,
+                                                 double bonus, double seconds) {
+    PlayerAi* t = player_ai(player);
+    const uint32_t g = defs.find_goal(goal);
+    if (!t || g == kAiNone) return -1;
+    PlanetIndex p = h ? sim.planet_of(h) : kInvalidPlanet;
+    if (p == kInvalidPlanet && h) p = planet_of_unit(h);
+    PendingBonus b;
+    b.goal_type = g;
+    b.target = p == kInvalidPlanet ? -1 : static_cast<int32_t>(p);
+    b.bonus = static_cast<float>(bonus);
+    b.deadline = now + static_cast<int32_t>(static_cast<float>(kAiFps) * static_cast<float>(seconds < 0.0 ? 0.0 : seconds));
+    b.status = new_status(script, -1, StatusKind::DesireBonus);
+    t->bonuses.push_back(b);
+    return b.status;
 }
 
 void GalacticAiWorld::Impl::drain_world_requests(lua::LuaPlayerWorld& w, int32_t player, int32_t plan) {
@@ -1571,6 +1599,7 @@ bool GalacticAiWorld::Impl::step_status(StatusRec& s) {
     const auto tit = tfs.find(s.tf);
     switch (s.kind) {
         case StatusKind::Done: return finish(true);
+        case StatusKind::DesireBonus: return false;  // finished by the bonus loop (PlayerAi::execution_service)
         case StatusKind::BudgetWait: {
             const double v = budget_op(s.plan, s.op == lua::AiBudgetOp::WaitSpendable ? lua::AiBudgetOp::Spendable : lua::AiBudgetOp::Unallocated,
                                        0.0, {});
@@ -2456,6 +2485,9 @@ GalacticAiWorld::GalacticAiWorld(gal::GalacticSim& sim, objects::ObjectStore& st
     w.world.attach_galactic(&sim);
     w.world.attach_ai_paths(&w);  // Lua Find_Path from the AI's own scripts answers from the AI path finders
     w.world.set_perception({&equations, &w.res}, {&equations, &w.res});
+    // mcx8 t12: Budget.Flush_Category / GiveDesireBonus name checks against the AI definitions.
+    w.world.goal_category_known = [&w](std::string_view n) { return w.defs.find_category(n) >= 0; };
+    w.world.goal_type_known = [&w](std::string_view n) { return w.defs.find_goal(n) != kAiNone; };
     PlanScriptRuntime::VmSetup setup;
     setup.host = [&w] {
         lua::LuaHost h;

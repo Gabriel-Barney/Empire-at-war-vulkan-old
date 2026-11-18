@@ -49,6 +49,9 @@ std::span<const BindingInfo> binding_table();
 
 // Host-set value globals (see above).
 bool is_host_value_global(std::string_view name);
+// mcx8 t12: table globals the exe does not register (lua_api.json "registered": false; Declare_Goal_Type). The VM
+// leaves them nil, as retail; their row counts as implemented (the retail behaviour - nil - is what the port does).
+bool is_unregistered_global(std::string_view name);
 // True when the port implements this binding (the rest are "unbound" stubs).
 bool binding_implemented(const BindingInfo& b);
 

@@ -140,7 +140,8 @@ struct PlanetBuildQueue {
     std::vector<QueueReservation> reservations;
 };
 
-enum class StatusKind : uint8_t { Done, ProduceForce, MoveTo, Invade, BudgetWait };
+// DesireBonus (mcx8 t12): a Lua GiveDesireBonus; finished by PlayerAi::execution_service's bonus loop (PendingBonus::status).
+enum class StatusKind : uint8_t { Done, ProduceForce, MoveTo, Invade, BudgetWait, DesireBonus };
 
 struct StatusRec {
     int32_t id = -1;
@@ -206,6 +207,7 @@ struct PendingBonus {
     int32_t target = -1;
     float bonus = 0.0f;
     int64_t deadline = 0;
+    int32_t status = -1;  // mcx8 t12: the GiveDesireBonus blocking status (-1: none, a story request)
 };
 
 // A pending free-store Move_Object (AI_GALACTIC §2.8): the unit's own fleet moves hop by hop toward dest.
@@ -603,6 +605,8 @@ struct GalacticAiWorld::Impl final : lua::AiScriptHost, lua::ScriptMarkupHost, A
     }
     double target_distance(int32_t target, const lua::AiArg& other) override;
     double budget_op(int32_t script, lua::AiBudgetOp op, double amount, std::string_view goal_type) override;
+    int32_t give_desire_bonus(int32_t script, int32_t player, std::string_view goal, ObjectHandle target, double bonus,
+                              double seconds) override;
     int32_t budget_wait(int32_t script, lua::AiBudgetOp op, double amount) override {
         const int32_t id = new_status(script, -1, StatusKind::BudgetWait);
         statuses[id].op = op;
