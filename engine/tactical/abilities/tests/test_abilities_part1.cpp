@@ -1048,6 +1048,15 @@ void test_fog_abilities() {
     const SpecialAbilityDesc ps = parse_special_ability(doc.root(), AbilityResolvers{}, nullptr);
     CHECK(ps.cls == SpecialClass::ForceSight && ps.force_sight_duration == 10.0f && ps.style == ActivationStyle::UserInput);
     CHECK(std::strcmp(special_class_name(SpecialClass::ForceSight), "Force_Sight_Ability") == 0);
+    // mcx1 t10 (MCX1_RE_ANSWERS Q1, 0x48d340): without a Name attribute no field is read, and the load says so.
+    const data::XmlDocument unnamed = data::XmlDocument::parse(
+        "<Force_Sight_Ability><Activation_Style>User_Input</Activation_Style>"
+        "<Force_Sight_Duration_In_Secs>10.0</Force_Sight_Duration_In_Secs></Force_Sight_Ability>",
+        "fs_unnamed.xml");
+    std::vector<std::string> un_diag;
+    const SpecialAbilityDesc un = parse_special_ability(unnamed.root(), AbilityResolvers{}, &un_diag);
+    CHECK(un.cls == SpecialClass::ForceSight && un.style == ActivationStyle::None && un.force_sight_duration != 10.0f);
+    CHECK(un_diag.size() == 1 && un_diag[0].find("has no Name attribute") != std::string::npos);
 }
 }  // namespace bo3split
 

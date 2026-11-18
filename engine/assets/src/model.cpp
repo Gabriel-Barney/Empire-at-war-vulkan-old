@@ -318,7 +318,7 @@ bool build_model(std::span<const std::uint8_t> bytes, std::string_view name, Mod
             if (error) *error = "particle system ALO, not a model";
             return false;
         }
-        const alo::AloFile file = alo::parse(bytes);
+        const alo::AloFile file = alo::parse(bytes, alamo::ParseOptions{true, nullptr});  // mcx2 t03: retail-equivalent salvage (alo.hpp)
         if (file.kind != alo::AloFile::Kind::Model) {
             if (error) *error = "particle system ALO, not a model";
             return false;

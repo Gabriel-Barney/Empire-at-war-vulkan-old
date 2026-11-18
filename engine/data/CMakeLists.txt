@@ -2,6 +2,7 @@ add_library(alamo_data STATIC
   src/xml.cpp
   src/xml_list.cpp
   src/values.cpp
+  src/xml_values.cpp
   src/game_database.cpp
 )
 add_library(alamo::data ALIAS alamo_data)

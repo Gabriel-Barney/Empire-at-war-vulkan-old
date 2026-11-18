@@ -36,6 +36,7 @@
 #include "alamo/sim/campaign_battles.hpp"
 #include "alamo/sim/sim_host.hpp"
 #include "alamo/test/support.hpp"
+#include "alamo/test/galactic_dummies.hpp"
 
 using namespace alamo;
 using namespace alamo::sim;
@@ -130,7 +131,7 @@ std::unique_ptr<Data> make_data() {
     fs::remove_all(d->root, ec);
     const fs::path x = d->root / "Data/XML";
     write_file(x / "GameObjectFiles.xml", "<GameObjectFiles><File>TTypes.xml</File></GameObjectFiles>\n");
-    write_file(x / "TTypes.xml", kTypes);
+    write_file(x / "TTypes.xml", ::alamo::test::with_galactic_dummies(kTypes));
     write_file(x / "HardPointDataFiles.xml", "<Hard_Point_Files></Hard_Point_Files>\n");
     write_file(x / "FactionFiles.xml", "<FactionFiles><File>TFactions.xml</File></FactionFiles>\n");
     write_file(x / "TFactions.xml", kFactions);

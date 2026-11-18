@@ -64,6 +64,21 @@ alamo_lua_patch(ltable.c
 alamo_lua_patch(ltable.c
   "      return hashpointer(t, gcvalue(key));\n"
   "      return hashmod(t, cast(lu_hash, gcvalue(key)->gch.alamo_serial));  /* alamo: serial, not address */\n")
+# Robustness (mcx2 t08, found by alamo_fuzz_smoke; not a semantic change for any chunk stock 5.0.2 loads safely): a
+# precompiled chunk (.lc in a mod) is read without bounds. lu_mem is 32-bit on Win64, so a string length or vector count
+# from the file whose byte size passes 4 GB wraps the allocation, and the read then writes past it (stock 5.0.2 and so
+# retail's Lua crash on such a file). Lengths above MAX_INT and counts whose vector does not fit lu_mem or an int read
+# are refused with a load error, like every other malformed chunk.
+alamo_lua_patch(lundump.c
+  " size_t size=LoadSize(S);\n if (size==0)\n"
+  " size_t size=LoadSize(S);\n if (size>(size_t)MAX_INT) luaG_runerror(S->L,\"bad string size in %s\",S->name);  /* alamo */\n if (size==0)\n")
+alamo_lua_patch(lundump.c
+  "static void LoadCode (LoadState* S, Proto* f)\n{\n int size=LoadInt(S);\n"
+  "/* alamo: a count whose vector fits lu_mem and one int-sized read */\nstatic int LoadCount (LoadState* S, size_t elem)\n{\n int n=LoadInt(S);\n if ((lu_mem)n > MAX_LUMEM/elem || (size_t)n > (size_t)MAX_INT/elem)\n  luaG_runerror(S->L,\"bad count in %s\",S->name);\n return n;\n}\n\nstatic void LoadCode (LoadState* S, Proto* f)\n{\n int size=LoadCount(S,sizeof(Instruction));\n")
+alamo_lua_patch(lundump.c " n=LoadInt(S);\n f->locvars=" " n=LoadCount(S,sizeof(LocVar));\n f->locvars=")
+alamo_lua_patch(lundump.c " int size=LoadInt(S);\n f->lineinfo=" " int size=LoadCount(S,sizeof(int));\n f->lineinfo=")
+alamo_lua_patch(lundump.c " n=LoadInt(S);\n f->k=" " n=LoadCount(S,sizeof(TObject));\n f->k=")
+alamo_lua_patch(lundump.c " n=LoadInt(S);\n f->p=" " n=LoadCount(S,sizeof(Proto*));\n f->p=")
 # OI lua (L1 determinism, [port]): tostring() of a table / function / full userdata / thread prints the value's
 # creation serial (8 hex digits) instead of its address, so printed / concatenated / compared names are the same
 # on every run, worker count and compiler. alamo_lua_serial is the C API for the serial (0 for non-collectables).

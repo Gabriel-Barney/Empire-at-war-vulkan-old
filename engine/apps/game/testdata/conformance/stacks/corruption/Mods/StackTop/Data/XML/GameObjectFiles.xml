@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<GameObjectFiles>
+  <File>BaseObjects.xml</File>
+  <File>FocObjects.xml</File>
+  <File>ParentObjects.xml</File>
+  <File>ParentShips.xml</File>
+  <File>HintedObjects.xml</File>
+  <File>HintedShips.xml</File>
+  <File>HintedExtra.xml</File>
+  <File>TopObjects.xml</File>
+</GameObjectFiles>

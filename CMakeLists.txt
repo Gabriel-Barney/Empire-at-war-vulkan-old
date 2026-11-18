@@ -75,9 +75,8 @@ add_subdirectory(engine)
 # alamo_headless is built.
 add_subdirectory(tools/parity)
 
-# libFuzzer targets for the mod-file readers (tools/fuzz, docs/BUILD.md "Fuzzing"). Only build_fuzz.cmd turns this on: it
-# configures a clang tree with ASan + fuzzer instrumentation; normal trees never see these targets.
+# Fuzzing of the mod-file readers (tools/fuzz, docs/BUILD.md "Fuzzing"): the seeded mutation harness alamo_fuzz_smoke is
+# in every tree (a slow ctest entry, mcx2 t08); the libFuzzer targets only with ALAMO_FUZZ, which build_fuzz.cmd turns on
+# in a clang tree with ASan + fuzzer instrumentation.
 option(ALAMO_FUZZ "Configure the libFuzzer targets in tools/fuzz (clang only, build_fuzz.cmd)" OFF)
-if(ALAMO_FUZZ)
-  add_subdirectory(tools/fuzz)
-endif()
+add_subdirectory(tools/fuzz)

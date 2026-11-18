@@ -3050,21 +3050,46 @@ int g_spawn_from_reinforcement_pool(Call& c) {
     return 1;
 }
 
-// PlayerWrapper.Get_Space_Station(): the player's newest live object whose type is a <StarBase>
-// element [inferred: no contract; the FreeStore script uses it for the tactical space station].
+// PlayerWrapper.Get_Space_Station() (mcx1 t09, D4; docs/re/MCX1_RE_ANSWERS.md "Get_Space_Station", 0x6021c0): space mode
+// only (else nil); over the players allied with this one (itself included) in player order, the first live object that
+// has the DUMMY_STAR_BASE behaviour attached and not CAPTURE_POINT - never the element tag. [port] "player order" is the
+// ascending owner id, and within one player the newest object first (the original walks its per-player object list; that
+// order was not read).
 int m_get_space_station(Call& c) {
     const objects::ObjectStore* st = store(c);
-    const objects::GameObjectTypes* ty = types(c);
-    if (!st || !ty) return push_nil(c);
-    for (const ObjectHandle h : detail::script_objects_newest_first(*st)) {
-        if (!st->active(h) || st->owner(h) != c.self->id) continue;
-        const TypeIndex t = st->type(h);
-        if (t < ty->raw().type_count() && ascii_iequals(ty->raw().element_name(t), "StarBase")) {
-            detail::push_object(c.L, *c.vm, h);
-            return 1;
-        }
+    if (!st) return push_nil(c);
+    if (st->mode() != objects::ModeKind::Space) {
+        c.script_warning("PlayerWrapper::Get_Space_Station -- this command may only be used in space mode.");
+        return push_nil(c);
     }
-    return push_nil(c);
+    static const objects::BehaviorTypeId kStarBase = objects::behavior_type_id("DUMMY_STAR_BASE");
+    static const objects::BehaviorTypeId kCapturePoint = objects::behavior_type_id("CAPTURE_POINT");
+    const int32_t player = c.self->id;
+#if ALAMO_LUA_PLAYERS
+    const LuaPlayerWorld* world = c.vm->owner ? player_world(*c.vm->owner) : nullptr;
+#endif
+    auto allied = [&](int32_t owner) {
+        if (owner == player) return true;
+#if ALAMO_LUA_PLAYERS
+        if (world) {
+            const PlayerRelation r = world->relation(player, owner);
+            return r == PlayerRelation::Self || r == PlayerRelation::Ally;
+        }
+#endif
+        return false;
+    };
+    ObjectHandle best{};
+    int32_t best_owner = 0;
+    for (const ObjectHandle h : detail::script_objects_newest_first(*st)) {
+        if (!st->active(h) || !st->has_behavior(h, kStarBase) || st->has_behavior(h, kCapturePoint)) continue;
+        const int32_t owner = st->owner(h);
+        if (!allied(owner) || (best && owner >= best_owner)) continue;
+        best = h;
+        best_owner = owner;
+    }
+    if (!best) return push_nil(c);
+    detail::push_object(c.L, *c.vm, best);
+    return 1;
 }
 
 // ---------------------------------------------------------------- GameObjectTypeWrapper

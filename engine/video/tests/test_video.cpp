@@ -16,6 +16,7 @@
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/hash.hpp"
 #include "alamo/video/video.hpp"
+#include "alamo/video/bink_header.hpp"
 #if defined(ALAMO_VIDEO_HAVE_VFS)
 #include "alamo/vfs/vfs.hpp"
 #endif
@@ -624,8 +625,30 @@ void test_real_data() {
 
 }  // namespace
 
+// mcx2 t05 / t08: the port's own Bink header probe (no FFmpeg).
+void test_bink_header() {
+    std::vector<uint8_t> h(alamo::video::kBinkHeaderBytes, 0);
+    h[0] = 'B'; h[1] = 'I'; h[2] = 'K'; h[3] = 'i';
+    h[20] = 0x80; h[21] = 2;  // width 640
+    h[24] = 0xE0; h[25] = 1;  // height 480
+    h[8] = 25;
+    auto b = alamo::video::probe_bink_header(h);
+    check(b && !b->bink2 && b->revision == 'i' && b->width == 640 && b->height == 480 && b->frames == 25, "b && !b->bink2 && b->revision == 'i' && b->width == 640 && b->height == 480 && b->frames =");
+    check(b && alamo::video::bink_unsupported_reason(*b).empty(), "b && alamo::video::bink_unsupported_reason(*b).empty()");
+    h[0] = 'K'; h[1] = 'B'; h[2] = '2'; h[3] = 'j';
+    b = alamo::video::probe_bink_header(h);
+    check(b && b->bink2 && alamo::video::bink_unsupported_reason(*b).find("Bink 2") != std::string::npos, "b && b->bink2 && alamo::video::bink_unsupported_reason(*b).find('Bink 2') != std::string::");
+    std::string err;
+    check(!alamo::video::BinkDecoder::open_memory(h, {}, &err) && err.find("KB2j") != std::string::npos, "!alamo::video::BinkDecoder::open_memory(h, {}, &err) && err.find('KB2j') != std::string::n");
+    h.resize(10);
+    check(!alamo::video::probe_bink_header(h), "!alamo::video::probe_bink_header(h)");
+    h.assign(64, 'x');
+    check(!alamo::video::probe_bink_header(h), "!alamo::video::probe_bink_header(h)");
+}
+
 int main() {
     test_yuv();
+    test_bink_header();
     test_captions();
     if (test_runtime()) {
 #if defined(ALAMO_VIDEO_HAVE_VFS)

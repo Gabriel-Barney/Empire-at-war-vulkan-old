@@ -674,19 +674,22 @@ std::string_view GuiSkin::tooltip(std::string_view control) const {
     return it == tooltips_.end() ? std::string_view() : std::string_view(it->second);
 }
 
-bool load_gui_data(const FileProvider& files, GuiData& out, std::string* error) {
+bool load_gui_data(const FileProvider& files, GuiData& out, std::string* error, uint32_t* failed) {
     std::string err;
     std::vector<uint8_t> bytes;
     bool ok = true;
+    uint32_t bad = 0;
     if (files.read(kGuiDialogsRcPath, bytes)) {
         std::string e;
         if (!out.script.parse(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()), &e)) {
             err += e + "; ";
             ok = false;
+            bad |= kGuiRcFailed;
         }
     } else {
         err += std::string(kGuiDialogsRcPath) + " missing; ";
         ok = false;
+        bad |= kGuiRcFailed;
     }
     bytes.clear();
     if (files.read(kGuiResourceHPath, bytes))
@@ -699,12 +702,15 @@ bool load_gui_data(const FileProvider& files, GuiData& out, std::string* error) 
         if (!doc.ok() || !out.skin.parse(doc.root())) {
             err += "GUIDialogs.xml unparsable; ";
             ok = false;
+            bad |= kGuiXmlFailed;
         }
     } else {
         err += std::string(kGuiDialogsXmlPath) + " missing; ";
         ok = false;
+        bad |= kGuiXmlFailed;
     }
     if (error) *error = err;
+    if (failed) *failed = bad;
     return ok;
 }
 

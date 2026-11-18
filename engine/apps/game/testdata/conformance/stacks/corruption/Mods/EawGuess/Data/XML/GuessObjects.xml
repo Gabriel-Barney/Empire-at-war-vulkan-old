@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<GuessObjects>
+  <Planet Name="Guess_Theta"><Behavior>PLANET</Behavior><Galactic_Position>700, 0, 0</Galactic_Position></Planet>
+</GuessObjects>

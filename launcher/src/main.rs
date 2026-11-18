@@ -18,6 +18,7 @@ mod profile_io;
 mod runner;
 mod saves;
 mod shortcut;
+mod stack;
 mod steam;
 mod theme;
 mod unitdb;

@@ -141,6 +141,9 @@ struct Db {
                    "<GalacticFleet Name=\"Fleet\"><Behavior>FLEET</Behavior></GalacticFleet>\n"
                    "<HardPoint Name=\"HP_Gun\"><Tactical_Health>30</Tactical_Health></HardPoint>\n"
                    "<StarBase Name=\"Station\"><Tactical_Health>5000</Tactical_Health></StarBase>\n"
+                   // mcx1 t09: Get_Space_Station goes by DUMMY_STAR_BASE (without CAPTURE_POINT), not the element tag.
+                   "<Orbital_Thing Name=\"Odd_Station\"><Behavior>DUMMY_STAR_BASE</Behavior></Orbital_Thing>\n"
+                   "<Orbital_Thing Name=\"Capture_Station\"><Behavior>DUMMY_STAR_BASE, CAPTURE_POINT</Behavior></Orbital_Thing>\n"
                    "<GroundStructure Name=\"Bunker\"><Behavior>GARRISON_STRUCTURE</Behavior>"
                    "<Garrison_Category>Infantry</Garrison_Category></GroundStructure>\n"
                    // refixf t03 finder tests (test_find_filters).
@@ -448,10 +451,20 @@ static void test_stage3(const Db& db) {
     CHECK(run(vm, "sn2 = table.getn(Spawn_From_Reinforcement_Pool('Tank', tank, p1))") == "" && gnum(vm, "sn2") == 0.0);
     s.bridge.spawn_from_pool = nullptr;
     CHECK(contains(run_stop(vm, "Spawn_From_Reinforcement_Pool('Tank', tank)"), "Expected 3, got 2"));
-    // Get_Space_Station: the player's newest StarBase.
-    const objects::ObjectHandle station = make(s.store, db.t("Station"), 2, {0, 50, 0});
-    CHECK(run(vm, "ss = p2.Get_Space_Station().Get_Object_ID() ss1 = tostring(p1.Get_Space_Station())") == "");
-    CHECK(gnum(vm, "ss") == static_cast<double>(s.store.id(station)) && gstr(vm, "ss1") == "nil");
+    // Get_Space_Station (mcx1 t09, docs/re/MCX1_RE_ANSWERS.md "Get_Space_Station"): nil outside space mode.
+    CHECK(run(vm, "ssl = tostring(p2.Get_Space_Station())") == "" && gstr(vm, "ssl") == "nil");
+    {
+        // In space: an allied object with DUMMY_STAR_BASE and not CAPTURE_POINT, whatever its element; a <StarBase> element
+        // without the behaviour is not a station.
+        Scene sp(db, objects::ModeKind::Space);
+        LuaVm& svm = *sp.vm;
+        make(sp.store, db.t("Station"), 2, {0, 50, 0});
+        make(sp.store, db.t("Capture_Station"), 2, {0, 60, 0});
+        CHECK(run(svm, "ss0 = tostring(p2.Get_Space_Station())") == "" && gstr(svm, "ss0") == "nil");
+        const objects::ObjectHandle station = make(sp.store, db.t("Odd_Station"), 2, {0, 70, 0});
+        CHECK(run(svm, "ss = p2.Get_Space_Station().Get_Object_ID() ss1 = tostring(p1.Get_Space_Station())") == "");
+        CHECK(gnum(svm, "ss") == static_cast<double>(sp.store.id(station)) && gstr(svm, "ss1") == "nil");
+    }
     // Bridge digest reflects the reinforcement records.
     StateHasher h1;
     s.bridge.hash(h1);

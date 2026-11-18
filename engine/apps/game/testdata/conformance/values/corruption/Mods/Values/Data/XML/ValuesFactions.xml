@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Factions>
+  <Faction Name="Values_Rebels">
+    <Is_Playable>No</Is_Playable>
+    <Is_Playable>True</Is_Playable>
+    <Is_Neutral>On</Is_Neutral>
+    <Hyperspace_Speed_Factor>2.0</Hyperspace_Speed_Factor>
+    <Hyperspace_Speed_Factor>TBD</Hyperspace_Speed_Factor>
+    <Allies>Base_Empire</Allies>
+    <Allies>Values_Pirates</Allies>
+    <Economy>
+      <Maintenance_Cost>0.5</Maintenance_Cost>
+    </Economy>
+    <Displayed_Tech_Level_Adjustment>+1x</Displayed_Tech_Level_Adjustment>
+    <Basic_AI>First_AI</Basic_AI>
+    <Basic_AI>Second_AI</Basic_AI>
+  </Faction>
+  <Pirate_Faction Name="Values_Pirates"><Is_Playable>1</Is_Playable></Pirate_Faction>
+</Factions>

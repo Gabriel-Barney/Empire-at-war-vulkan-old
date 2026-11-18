@@ -132,6 +132,12 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
                 p.tech_level = std::clamp(spec_.start_tech, 1, p.max_tech_level);
             }
         if (setup_.map.planets.size() == 0) return fail("campaign '" + spec_.campaign + "' has no planets");
+        // mcx1 t08 (MCX1_RE_ANSWERS Q6.2): the original reads the neutral player without a null check when it creates the
+        // galaxy, so a campaign start with no Is_Neutral faction crashes there; the port starts it (unowned planets have
+        // no owner player) and says so.
+        if (d.rules.neutral_faction() == galactic::kNoIndex && diag)
+            diag->push_back("campaign '" + spec_.campaign +
+                            "': no faction has Is_Neutral (the original game crashes starting this campaign)");
     } else {
         std::string err;
         if (spec_.skirmish_map_data) skirmish_map_ = *spec_.skirmish_map_data;
@@ -140,6 +146,19 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
         spec_.skirmish.land = !skirmish_map_.is_space();  // the map decides: space battle or land invasion
         if (spec_.attract && spec_.skirmish.land) return fail("attract demo: " + spec_.skirmish_map + " is not a space map");
         SkirmishSetup sk = spec_.skirmish;
+        // mcx1 t08: a slot faction the data does not have falls back to the first playable one (resolve_skirmish_factions).
+        if (diag) {
+            const SkirmishSetup resolved = resolve_skirmish_factions(d.rules, sk);
+            const auto report = [&](const std::string& asked, const std::string& used, const char* slot) {
+                if (!asked.empty() && d.rules.find_faction(asked) == galactic::kNoIndex)
+                    diag->push_back(std::string("skirmish: ") + slot + " faction '" + asked + "' is not in the data; using '" +
+                                    used + "'");
+            };
+            report(sk.human_faction, resolved.human_faction, "human");
+            report(sk.ai_faction, resolved.ai_faction, "AI");
+            for (size_t k = 0; k < sk.extra_slots.size() && k < resolved.extra_slots.size(); ++k)
+                report(sk.extra_slots[k].faction, resolved.extra_slots[k].faction, ("slot " + std::to_string(k + 2)).c_str());
+        }
         // modc t19 [port]: the galaxy's planet is the map's own planet type when the data has it and it forbids no unit,
         // else the first such PLANET type (skirmish_galaxy_planet); never a planet by name.
         if (sk.planet_type.empty())
@@ -1193,6 +1212,7 @@ void GameSession::describe_session() {
     for (const std::string& t : ai_types_) h.str(t);
     d.data_fingerprint = sim::combine_fingerprints({dd.types_fingerprint(), sim::fingerprint_galactic(dd.rules, setup_), h.digest()});
     d.writer = "alamo_game (N1 t09)";
+    d.mods = save_mods(dd.mods);  // mcx3 t05: the stack, for a readable refusal (empty without mods: v1 bytes)
     host_->set_session(std::move(d));
 }
 
@@ -1389,6 +1409,7 @@ bool GameSession::start_from_save(const SaveFile& save, std::string* err, const 
     if (!built) return fail("rebuild: " + (diag.empty() ? std::string("the session did not start") : diag.back()));
     std::string e;
     load_report_ = {};
+    host_->set_allow_different_data(allow_different_data_);  // mcx3 t05
     if (!host_->load(save, &e, &load_report_)) {
         if (e.empty()) e = load_report_.text();
         if (load_report_.descriptor_error.empty())
@@ -1434,8 +1455,16 @@ bool save_game(GameSession& session, const std::string& dir, std::string_view na
     return true;
 }
 
+std::vector<sim::SaveMod> save_mods(const std::vector<vfs::ModDescriptor>& mods) {
+    std::vector<sim::SaveMod> out;
+    for (const vfs::ModDescriptor& m : mods) out.push_back(sim::SaveMod{m.key(), m.name, m.version, m.content_hash});
+    return out;
+}
+
 std::unique_ptr<GameSession> load_game(const GameData& data, jobs::JobSystem& js, const std::string& path, std::string* err,
-                                       const commands::CommandRecording* replay, commands::CommandRecording* record, SaveFile* file_out) {
+                                       const commands::CommandRecording* replay, commands::CommandRecording* record, SaveFile* file_out,
+                                       bool allow_different_data, bool* different_data) {
+    if (different_data) *different_data = false;
     SaveFile f;
     std::string e;
     if (!read_save_file(path, f, &e)) {  // ui5 t13: a UTF-8 path (save_games.hpp PATHS)
@@ -1448,8 +1477,10 @@ std::unique_ptr<GameSession> load_game(const GameData& data, jobs::JobSystem& js
         return nullptr;
     }
     auto s = std::make_unique<GameSession>(data, js, std::move(spec));
+    s->set_allow_different_data(allow_different_data);
     if (!s->start_from_save(f, &e, replay, record)) {
-        if (err) *err = e;
+        if (different_data) *different_data = s->load_report().different_data && !s->load_report().loaded_with_different_data;
+        if (err) *err = s->load_report().different_data && !s->load_report().loaded_with_different_data ? s->load_report().descriptor_error : e;
         return nullptr;  // the half-loaded session is discarded here
     }
     if (SaveMeta m; decode_description(f.description, m)) s->set_playthrough(std::move(m.playthrough), m.playthrough_started);

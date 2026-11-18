@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ValuesObjects>
+  <Moon Name="Values_Gamma">
+    <GalacticBehavior>PLANET</GalacticBehavior>
+    <Galactic_Position>50, 50, 0</Galactic_Position>
+    <Planet_Credit_Value>10</Planet_Credit_Value>
+    <Planet_Credit_Value>25</Planet_Credit_Value>
+    <In_Background>On</In_Background>
+  </Moon>
+  <Planet Name="Values_Not_A_Planet"><Behavior>SELECTABLE</Behavior><Galactic_Position>0, 50, 0</Galactic_Position></Planet>
+  <Custom_Ship Name="Values_Cruiser">
+    <Behavior>SELECTABLE</Behavior>
+    <Behavior>DUMMY_STARSHIP</Behavior>
+    <Affiliation>Values_Rebels</Affiliation>
+    <Tactical_Health>300</Tactical_Health>
+    <Unit_Abilities_Data SubObjectList="Yes">
+      <Unit_Ability>
+        <Type>POWER_TO_WEAPONS</Type>
+        <Active_By_Default>No</Active_By_Default>
+        <Active_By_Default>TBD</Active_By_Default>
+        <Recharge_Seconds>5</Recharge_Seconds>
+        <Recharge_Seconds>9</Recharge_Seconds>
+        <Nested><Expiration_Seconds>4</Expiration_Seconds></Nested>
+      </Unit_Ability>
+    </Unit_Abilities_Data>
+  </Custom_Ship>
+  <SpaceUnit Name="Values_Plain_Ship"><Affiliation>Values_Rebels</Affiliation><Tactical_Health>100</Tactical_Health></SpaceUnit>
+</ValuesObjects>

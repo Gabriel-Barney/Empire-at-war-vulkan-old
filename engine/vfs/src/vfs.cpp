@@ -288,42 +288,48 @@ struct Vfs::Impl {
     std::vector<std::unique_ptr<meg::Archive>> archives;  // mount order
     std::vector<Mount> mounts;
     std::vector<std::string> warnings;
+    std::vector<Vfs::MegIssue> meg_issues;  // mcx3 t04
 
     void warn(std::string msg) {
         log::warnf(kLogChannel, "%s", msg.c_str());
         warnings.push_back(std::move(msg));
     }
 
-    bool find(const std::string& norm, Hit& out) const {
+    bool find(const std::string& norm, Hit& out) const { return find_nth(norm, 0, out); }
+
+    // The n-th copy of `norm` in resolution order (0 = what find() returns): the same walk, counting the layers that
+    // hold the file instead of stopping at the first.
+    bool find_nth(const std::string& norm, size_t n, Hit& out) const {
         const bool data = is_data_path(norm);
-        if (data) {
-            for (size_t i = 0; i < mods.size(); ++i) {
-                if (const std::string* h = mods[i].find(norm)) {
-                    out = Hit{Resolution::Mod, static_cast<int>(i), h, nullptr, nullptr};
-                    return true;
-                }
-            }
-            if (const std::string* h = base.find(norm)) {
-                out = Hit{Resolution::Base, 0, h, nullptr, nullptr};
+        const auto take = [&](const Hit& h) {
+            if (n == 0) {
+                out = h;
                 return true;
             }
-        }
-        if (find_meg(norm, archives.size(), out)) return true;
+            --n;
+            return false;
+        };
         if (data) {
-            for (size_t i = 0; i < fallbacks.size(); ++i) {
-                if (const std::string* h = fallbacks[i].find(norm)) {
-                    out = Hit{Resolution::Fallback, static_cast<int>(i), h, nullptr, nullptr};
-                    return true;
-                }
-            }
+            for (size_t i = 0; i < mods.size(); ++i)
+                if (const std::string* h = mods[i].find(norm))
+                    if (take(Hit{Resolution::Mod, static_cast<int>(i), h, nullptr, nullptr})) return true;
+            if (const std::string* h = base.find(norm))
+                if (take(Hit{Resolution::Base, 0, h, nullptr, nullptr})) return true;
         }
+        for (size_t i = archives.size(); i-- > 0;)
+            if (const meg::Entry* e = archives[i]->lookup(norm))
+                if (take(Hit{Resolution::Meg, static_cast<int>(i), nullptr, archives[i].get(), e})) return true;
+        if (data)
+            for (size_t i = 0; i < fallbacks.size(); ++i)
+                if (const std::string* h = fallbacks[i].find(norm))
+                    if (take(Hit{Resolution::Fallback, static_cast<int>(i), h, nullptr, nullptr})) return true;
         return false;
     }
 
     // Newest-first over the first `count` mounted archives.
     bool find_meg(const std::string& norm, size_t count, Hit& out) const {
         for (size_t i = count; i-- > 0;) {
-            if (const meg::Entry* e = archives[i]->find(norm)) {
+            if (const meg::Entry* e = archives[i]->lookup(norm)) {
                 out = Hit{Resolution::Meg, static_cast<int>(i), nullptr, archives[i].get(), e};
                 return true;
             }
@@ -363,6 +369,30 @@ struct Vfs::Impl {
             return;
         }
         if (a->encrypted()) warn("MEG '" + host + "' is encrypted; its entries are not visible");
+        if (const meg::Archive::TableIssues t = a->table_issues(); t.any()) {  // mcx3 t04
+            using K = Vfs::MegIssue::Kind;
+            const auto add = [&](K kind, uint32_t count, const std::string& first, const std::string& what) {
+                meg_issues.push_back(Vfs::MegIssue{kind, host, count, first});
+                warn(std::string(Vfs::MegIssue::kind_name(kind)) + ": MEG '" + host + "': " + what);
+            };
+            if (t.unsorted)
+                add(K::Unsorted, t.unreachable, t.first_unreachable,
+                    "record table not sorted by CRC; " + std::to_string(t.unreachable) +
+                        " record(s) the game's binary search cannot reach" +
+                        (t.unreachable ? " (first " + t.first_unreachable + ")" : std::string()));
+            if (t.duplicate)
+                add(K::Duplicate, t.duplicate, t.first_duplicate,
+                    std::to_string(t.duplicate) + " record(s) share a CRC with another; the search's probe order picks one (first shadowed " +
+                        t.first_duplicate + ")");
+            if (t.name_mismatch)
+                add(K::NameMismatch, t.name_mismatch, t.first_name_mismatch,
+                    std::to_string(t.name_mismatch) + " record(s) whose stored CRC is not their name's: found by CRC only (first " +
+                        t.first_name_mismatch + ")");
+            if (t.index_redirect)
+                add(K::Index, t.index_redirect, t.first_index_redirect,
+                    std::to_string(t.index_redirect) + " record(s) whose index field is not their position: the data read is the record it names (first " +
+                        t.first_index_redirect + ")");
+        }
         archives.push_back(std::move(a));
         mounts.push_back(Mount{host, std::move(reason)});
     }
@@ -530,6 +560,23 @@ bool Vfs::read(std::string_view path, std::vector<uint8_t>& out) const {
     return ok;
 }
 
+bool Vfs::read_nth(std::string_view path, size_t n, std::vector<uint8_t>& out, Resolution* where) const {
+    out.clear();
+    Hit h;
+    if (!impl_->find_nth(normalize_path(path), n, h)) return false;
+    const bool ok = h.archive ? h.archive->read(*h.entry, out) : read_host_file(*h.host, out);
+    if (!ok) {
+        out.clear();
+        return false;
+    }
+    if (where) {
+        where->layer = h.layer;
+        where->layer_index = h.index;
+        where->location = h.archive ? impl_->mounts[static_cast<size_t>(h.index)].path + "#" + h.entry->name : *h.host;
+    }
+    return true;
+}
+
 bool Vfs::exists(std::string_view path) const {
     Hit h;
     return impl_->find(normalize_path(path), h);
@@ -599,6 +646,16 @@ std::string Vfs::describe() const {
 const std::vector<Vfs::Mount>& Vfs::mounts() const { return impl_->mounts; }
 const std::vector<std::string>& Vfs::mod_dirs() const { return impl_->mod_dirs; }
 const std::vector<std::string>& Vfs::warnings() const { return impl_->warnings; }
+const std::vector<Vfs::MegIssue>& Vfs::meg_issues() const { return impl_->meg_issues; }
+const char* Vfs::MegIssue::kind_name(Kind k) {
+    switch (k) {
+        case Kind::Unsorted: return "meg_unsorted";
+        case Kind::Duplicate: return "meg_duplicate";
+        case Kind::NameMismatch: return "meg_name_mismatch";
+        case Kind::Index: return "meg_index";
+    }
+    return "meg_unknown";
+}
 const std::string& Vfs::eaw_root() const { return impl_->eaw_root; }
 const std::string& Vfs::foc_root() const { return impl_->foc_root; }
 

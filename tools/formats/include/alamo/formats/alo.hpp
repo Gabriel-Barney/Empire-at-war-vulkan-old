@@ -200,8 +200,12 @@ struct AloFile {
     particle::ParticleSystem particles;             // valid when kind == ParticleSystem
 };
 
-// Parse an in-memory .alo. Throws FormatError.
-AloFile parse(Bytes data);
+// Parse an in-memory .alo. Throws FormatError. With opt.salvage (the runtime loaders; tools stay strict) the defects
+// retail draws anyway load instead (compat_assets runs 1-3, docs/re/MCX2_T02_ASSET_SALVAGE.md 3), each noted in
+// opt.notes: "alo_trailing_junk" (a top-level chunk overrunning the file after the skeleton and connections ends the
+// model), "alo_collision_dropped" (a broken collision tree is dropped), "alo_skin_index_clamped" (a skin influence
+// outside the bone map goes to entry 0). Everything else stays an error, as retail does not show it either or hangs.
+AloFile parse(Bytes data, const ParseOptions& opt = {});
 AloFile load(const std::filesystem::path& path);
 
 }  // namespace alamo::alo

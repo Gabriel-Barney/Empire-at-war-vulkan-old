@@ -70,7 +70,15 @@ void App::check_mod(const std::string& id) {
     o.shader_compile = false;  // the effect audit without the runtime DXC compile: lighter inside the running game
     const std::string root = game_root_;
     std::printf("mods: checking %s\n", id.empty() ? "the base game" : id.c_str());
-    mod_check_ = std::async(std::launch::async, [root, args, o] { return game::check_mod_data(root, args, o); });
+    // mcx3 t06: resolve the row's stack first (declared and likely parents, submod first), then check that stack.
+    mod_check_ = std::async(std::launch::async, [root, args, o] {
+        if (args.empty()) return game::check_mod_data(root, args, o);
+        vfs::ResolvedStack stack = game::resolve_mod_stack(root, args, o);
+        game::ModCheckReport r = game::check_mod_data(root, stack.errors.empty() ? stack.args : args, o);
+        r.resolved = true;
+        r.stack = std::move(stack);
+        return r;
+    });
 }
 
 void App::poll_mod_check() {
@@ -81,12 +89,16 @@ void App::poll_mod_check() {
     if (!id.empty()) {
         for (const game::InstalledMod& m : installed_mods_)
             if (m.arg == id) launch = game::mod_launch_args(m, &r);
-        if (launch.empty()) launch.push_back(id);
+        if (launch.empty() && !r.base_eaw && !(r.resolved && r.stack.base_eaw)) launch.push_back(id);
     }
     mod_launch_[id] = launch;
     std::vector<std::u32string> lines;
     for (const std::string& l : game::mod_report_summary(r)) lines.push_back(ui::utf8_to_utf32(l));
-    if (!id.empty()) {
+    for (const std::string& l : game::mod_language_warnings(r, ui_.text.language)) lines.push_back(ui::utf8_to_utf32(l));
+    if (!id.empty() && launch.empty()) {  // D1: a refused base-EaW mod has no launch
+        mod_refused_.insert(id);
+    } else if (!id.empty()) {
+        mod_refused_.erase(id);
         std::string args;
         for (const std::string& a : launch) args += (args.empty() ? "" : " ") + a;
         lines.push_back(ui::utf8_to_utf32("Starts with: " + args));
@@ -100,6 +112,10 @@ void App::poll_mod_check() {
 }
 
 void App::launch_mod(const std::string& id) {
+    if (mod_refused_.count(id)) {  // D1: the report said why; nothing starts
+        std::printf("mods: %s refused (base-EaW mod)\n", id.c_str());
+        return;
+    }
     const auto it = mod_launch_.find(id);
     const std::vector<std::string> mod_args = it != mod_launch_.end() ? it->second : (id.empty() ? std::vector<std::string>{}
                                                                                                     : std::vector<std::string>{id});

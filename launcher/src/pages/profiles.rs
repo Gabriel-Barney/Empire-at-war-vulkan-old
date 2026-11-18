@@ -29,6 +29,8 @@ pub struct State {
     /// A profile file that was opened and is waiting in the review dialog.
     import: Option<Import>,
     presets: Option<PresetCache>,
+    /// mcx3 t06: the resolved stack of the active profile's mods (alamo_mod_check --resolve).
+    resolver: crate::stack::Resolver,
 }
 
 struct Import {
@@ -1152,6 +1154,10 @@ enum Act {
     OpenSteam(u64),
     Recheck,
     Copied(usize),
+    /// Run alamo_mod_check --resolve on the profile's mods.
+    Resolve,
+    /// Replace the profile's mods with the resolved stack (launch order).
+    UseStack(Vec<PathBuf>),
 }
 
 /// The id of the Workshop item a folder in Steam's Workshop content folder belongs to.
@@ -1258,6 +1264,20 @@ fn mods_card(app: &mut App, st: &mut State, ui: &mut egui::Ui, report: Option<&R
     let checking = report.is_none();
     let check_error = st.conflicts.error.clone();
     let mut act: Option<Act> = None;
+    // mcx3 t06: the resolved stack, when it is for the mods the profile has now.
+    let resolving = st.resolver.poll();
+    let profile_mods = app.cfg.active().mods.clone();
+    let foc = mods::foc_dir(&app.steam, &app.cfg.settings);
+    let game_exe = app.cfg.settings.game_exe.clone();
+    let resolved = st.resolver.result.clone().filter(|_| st.resolver.for_mods == profile_mods);
+    let stack_paths: Option<Vec<PathBuf>> = match (&resolved, &foc) {
+        (Some(Ok(r)), Some(foc)) if r.errors.is_empty() && !r.base_eaw => {
+            let paths: Vec<PathBuf> =
+                r.mods.iter().filter_map(|m| crate::stack::arg_path(&m.arg, foc, workshop_dir.as_deref())).collect();
+            (paths.len() == r.mods.len() && paths != profile_mods).then_some(paths)
+        }
+        _ => None,
+    };
     let tex = &mut app.tex;
 
     theme::card(ui, |ui| {
@@ -1275,6 +1295,53 @@ fn mods_card(app: &mut App, st: &mut State, ui: &mut egui::Ui, report: Option<&R
         ui.label(theme::faint(
             "Passed to the game as MODPATH= in this order. The first mod wins when two mods change the same file — list a submod above its parent.",
         ));
+        // mcx3 t06: the stack the port resolves from these mods (declared and likely parents, submod first).
+        ui.horizontal(|ui| {
+            let can = n > 0 && foc.is_some() && game_exe.is_some() && !resolving;
+            if ui
+                .add_enabled(can, egui::Button::new("Resolve stack"))
+                .on_hover_text("Ask the port's mod check which parents these mods need and in which order (alamo_mod_check --resolve)")
+                .clicked()
+            {
+                act = Some(Act::Resolve);
+            }
+            if resolving {
+                ui.add(egui::Spinner::new().size(14.0));
+                ui.label(theme::faint("Resolving… (loads the data once per parent it looks for)"));
+            }
+            if let Some(paths) = &stack_paths {
+                if ui.button("Use this order").on_hover_text("Replace the profile's mods with the resolved stack").clicked() {
+                    act = Some(Act::UseStack(paths.clone()));
+                }
+            }
+        });
+        match &resolved {
+            Some(Ok(r)) => {
+                if r.base_eaw {
+                    ui.label(RichText::new("Refused: a base-EaW mod (retail runs it with sweaw.exe; the port supports FoC mods only)").color(theme::BAD));
+                }
+                if !r.mods.is_empty() {
+                    let chain: Vec<String> = r.mods.iter().map(|m| m.name.clone()).collect();
+                    ui.label(theme::muted(format!("Stack: {}", chain.join(" > "))));
+                    for m in r.mods.iter().filter(|m| m.reason != "picked") {
+                        ui.label(theme::faint(format!("{} — {}", m.name, m.reason)));
+                    }
+                }
+                for e in &r.errors {
+                    ui.label(RichText::new(e.clone()).color(theme::BAD).size(12.0));
+                }
+                for w in &r.warnings {
+                    ui.label(RichText::new(w.clone()).color(theme::WARN).size(12.0));
+                }
+                if let Some(b) = r.badge() {
+                    ui.label(RichText::new(format!("Grade {b}")).color(if r.g3_static { theme::GOOD } else { theme::ACCENT_HI }).strong());
+                }
+            }
+            Some(Err(e)) => {
+                ui.label(RichText::new(e.clone()).color(theme::WARN).size(12.0));
+            }
+            None => {}
+        }
         ui.add_space(2.0);
 
         if rows.is_empty() {
@@ -1488,6 +1555,17 @@ fn mods_card(app: &mut App, st: &mut State, ui: &mut egui::Ui, report: Option<&R
         Some(Act::Copied(count)) => {
             app.ok(format!("Copied {}", plural(count, "path", "paths")));
             false
+        }
+        Some(Act::Resolve) => {
+            if let (Some(exe), Some(foc)) = (game_exe, foc) {
+                st.resolver.start(crate::stack::mod_check_exe(&exe), foc, mods.clone(), ui.ctx().clone());
+            }
+            false
+        }
+        Some(Act::UseStack(paths)) => {
+            st.resolver.for_mods = paths.clone();  // the result stays shown: it is this order's stack
+            *mods = paths;
+            true
         }
         _ => false,
     }

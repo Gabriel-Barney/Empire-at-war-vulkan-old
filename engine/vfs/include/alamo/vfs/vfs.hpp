@@ -108,6 +108,11 @@ public:
     std::string origin(std::string_view path) const override;  // Resolution::location or ""
 
     std::optional<Resolution> resolve(std::string_view path) const;
+    // The n-th copy of `path` in resolution order (mcx2 t07): n = 0 is what read() returns, n = 1 the copy the next
+    // layer down holds (a mod's file -> the base game's), and so on. False (out empty) when fewer copies exist or the
+    // read fails. `where`, when given, receives the copy's layer and location. For a fallback when a mod's copy of a
+    // file fails to load; normal reads never use it.
+    bool read_nth(std::string_view path, size_t n, std::vector<uint8_t>& out, Resolution* where = nullptr) const;
 
     // Union of all logical paths matching `glob` over every layer, each once, normalised
     // (upper-case, '\\'), sorted by byte order. Glob: '*' and '?' do not cross '\\'; '**' does.
@@ -134,6 +139,18 @@ public:
     // (unresolved STEAMMOD ids dropped). Resolution::layer_index indexes this.
     const std::vector<std::string>& mod_dirs() const;
     const std::vector<std::string>& warnings() const;
+    // mcx3 t04: malformed MEG tables found at mount (meg::Archive::table_issues); lookups follow the game's rule
+    // (meg::Archive::lookup), so what the game loses is lost here too, and each finding is also a warnings() line.
+    struct MegIssue {
+        enum class Kind : uint8_t { Unsorted, Duplicate, NameMismatch, Index };
+        Kind kind = Kind::Unsorted;
+        // "meg_unsorted", "meg_duplicate", "meg_name_mismatch", "meg_index"
+        static const char* kind_name(Kind k);
+        std::string archive;  // host path of the .meg
+        uint32_t count = 0;   // records concerned (meg_unsorted: records the lookup cannot reach, 0 when none is lost)
+        std::string first;    // one record's stored name
+    };
+    const std::vector<MegIssue>& meg_issues() const;
     const std::string& eaw_root() const;                // "" if none
     const std::string& foc_root() const;                // host path of the FoC folder (the Base layer's root)
 

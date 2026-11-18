@@ -49,17 +49,13 @@ struct ForceType {
 };
 using ForceTypeLookup = std::function<ForceType(std::string_view type_name)>;
 
-// From the typed object database (engine/objects). Layer: SpaceUnit / Squadron / StarBase /
-// SpaceProp -> space; GroundCompany / GroundInfantry / GroundVehicle / structures -> ground;
-// HeroCompany / UniqueUnit and others -> space if the type (or a HeroCompany's first Company_Units
-// member) has a CategoryMask token among Fighter, Bomber, Corvette, Frigate, Capital, SpaceHero,
-// else ground. PROVISIONAL classification. `types` must outlive the lookup.
-// q6: a type takes the galactic role rule (galactic::galactic_unit_kind: DUMMY_* behaviour first, then the tag table)
-// unless its tag is one where the seed's table above and the galactic tag table disagree (GroundBase, HeroCompany,
-// HeroUnit, UniqueUnit, SpaceProp: the rule above, so vanilla seeds do not change); mod tags take their behaviour's role.
+// From the typed object database (engine/objects): the galactic role rule (mcx1 t05, D4; galactic::galactic_dummy, the
+// first DUMMY_* behaviour of the generic Behavior list in retail's order; MCX1_RE_ANSWERS Q7.2), never the element tag.
+// StarBase -> starbase (space), structures -> ground, starships and squadrons -> space, companies -> ground; a type with
+// no DUMMY_* behaviour is not a valid starting force. `types` must outlive the lookup.
 ForceTypeLookup make_force_type_lookup(const objects::GameObjectTypes& types);
-// One type (index into `types`; invalid for an out-of-range index). legacy = the seed's tag rule alone (tests).
-ForceType force_type_of(const objects::GameObjectTypes& types, uint32_t type, bool legacy = false);
+// One type (index into `types`; invalid for an out-of-range index or a type with no galactic role, mcx1 t05).
+ForceType force_type_of(const objects::GameObjectTypes& types, uint32_t type);
 
 // modc t03: the faction facts come from the data (seed_options_from_factions), never from faction names. Unset
 // functions = no faction is neutral / benefits from corruption.

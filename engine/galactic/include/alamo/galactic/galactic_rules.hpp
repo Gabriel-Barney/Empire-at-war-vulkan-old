@@ -25,11 +25,8 @@ namespace alamo::galactic {
 
 inline constexpr uint32_t kNoIndex = 0xFFFFFFFFu;
 
-// How a type takes part in the galaxy. The original classifies by category flags (GE 2.1 / 2.5:
-// 0x5c starbase, 0x5e/0x60/4/0x61 starbase upgrade families, 0x5f ground structure) [M]; the port
-// derives them from the XML element kind (StarBase, GroundStructure/GroundBase/SpecialStructure,
-// Squadron, ground companies/infantry/vehicles) and, since q6 t03, from the DUMMY_* behaviours those
-// flags turned out to be (galactic_unit_kind below).
+// How a type takes part in the galaxy: from its DUMMY_* behaviours and PLANET, never from its XML element tag
+// (mcx1 t05, D4; MCX1_RE_ANSWERS.md Q7; galactic_unit_kind below).
 enum class UnitKind : uint8_t {
     Other = 0,
     SpaceUnit = 1,        // ships, space heroes: live in fleets
@@ -132,20 +129,20 @@ inline bool is_star_base_type(const TypeInfo& t) {
     return t.dummy != 0 ? t.dummy == kDummyStarBase : t.kind == UnitKind::StarBase;
 }
 
-// Galactic role (q6 t03). The element tag carries no behaviour in the original (OBJECT_TYPES §2); galactic code tests
-// the DUMMY_* behaviours (SG 1.2, AI_GALACTIC_TOKENS). The port's older element-tag table stays for the vanilla tags.
-//   unit_kind_from_element: the tag table alone (Other for a tag outside it).
-//   unit_kind_from_dummy:   DUMMY_STAR_BASE -> StarBase, DUMMY_GROUND_BASE / _GROUND_STRUCTURE / _ORBITAL_STRUCTURE ->
-//                           GroundStructure, DUMMY_GROUND_COMPANY -> GroundUnit, DUMMY_SPACE_FIGHTER_SQUADRON ->
-//                           Squadron, DUMMY_STARSHIP -> SpaceUnit; Other for 0.
-//   galactic_unit_kind:     a tag in the table takes the behaviour's role when it has one, else the table's (no vanilla
-//                           FoC / EaW type has a behaviour that disagrees with its tag); a tag outside the table takes
-//                           the behaviour's role, except the vanilla tags whose vanilla types the port always left Other
-//                           (is_vanilla_unclassified_element), so vanilla data maps exactly as before.
-UnitKind unit_kind_from_element(std::string_view element, bool hyperspace);
+// Galactic role (q6 t03; mcx1 t05, D4). The element tag carries no behaviour (OBJECT_TYPES §0 rule 2; MCX1_RE_ANSWERS
+// Q7.1: no galactic reader of it). Retail's create-at-planet routine (Q7.2, 0x400b40) tests the DUMMY_* ids of the type's
+// generic <Behavior> list (not Galactic / Land / SpaceBehavior) in the fixed order 0x5B, 0x5C, 0x5F, 0x60, 0x5D, 0x5E,
+// 0x61, the first match wins; a type with none of them is not created. A planet is any type with PLANET (id 3) in its
+// Behavior or GalacticBehavior list (Q7.3).
+//   galactic_dummy:       that first DUMMY_* id, 0 = none.
+//   unit_kind_from_dummy: DUMMY_STAR_BASE -> StarBase, DUMMY_GROUND_BASE / _GROUND_STRUCTURE / _ORBITAL_STRUCTURE ->
+//                         GroundStructure, DUMMY_GROUND_COMPANY -> GroundUnit, DUMMY_SPACE_FIGHTER_SQUADRON ->
+//                         Squadron, DUMMY_STARSHIP -> SpaceUnit; Other for 0.
+//   galactic_unit_kind:   Planet when `planet`, else unit_kind_from_dummy(dummy).
+uint8_t galactic_dummy(const objects::GameObjectTypes& types, uint32_t type);
+bool has_planet_behavior(const objects::GameObjectTypes& types, uint32_t type);
 UnitKind unit_kind_from_dummy(uint8_t dummy);
-bool is_vanilla_unclassified_element(std::string_view element);
-UnitKind galactic_unit_kind(std::string_view element, bool hyperspace, uint8_t dummy);
+UnitKind galactic_unit_kind(uint8_t dummy, bool planet);
 
 // Terrain enum (AI_GALACTIC_3 Â§6.1, BATTLE_TRANSITIONS map picker order): Temperate 0 .. Urban 6, Space 7.
 inline constexpr const char* kTerrainNames[] = {"Temperate", "Arctic", "Desert", "Forest", "Swamp", "Volcanic", "Urban", "Space"};

@@ -881,13 +881,16 @@ public:
     std::string mod_check_id_, mod_check_next_;      // its row id; the row asked for while it ran
     bool mod_check_queued_ = false;
     std::map<std::string, std::vector<std::string>> mod_launch_;  // checked rows: the arguments that start them
+    std::set<std::string> mod_refused_;
+    std::string pending_different_data_;  // mcx3 t05: the save the "Load anyway" box is about  // mcx3 t03: checked rows refused as base-EaW mods (D1): Launch does nothing
     bool start_session(const SessionSpec& spec);
     void session_started(const std::vector<std::string>& diag);  // the UI / presentation reset for a new session_
     void end_session();
     // N1 / t09: the Save / Load / Delete requests of the menus.
     void save_game_as(const std::string& typed);
     bool load_saved_game(const std::string& name);
-    bool load_save_file(const std::string& path, const commands::CommandRecording* replay = nullptr);  // BM2a: load_saved_game by path (bm2: with a replay)
+    // BM2a: load_saved_game by path (bm2: with a replay); mcx3 t05: allow_different_data = the "Load anyway" answer.
+    bool load_save_file(const std::string& path, const commands::CommandRecording* replay = nullptr, bool allow_different_data = false);
     void delete_saved_game(const std::string& name);
     void save_message(std::u32string caption, const std::string& detail);
     std::string session_title() const;  // the campaign's display name / the skirmish map (save descriptions)

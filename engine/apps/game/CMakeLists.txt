@@ -29,6 +29,7 @@ add_library(alamo_game_core STATIC
   src/script_cinematics.cpp
   src/save_games.cpp
   src/mod_check.cpp
+  src/asset_audit.cpp
   src/mod_picker.cpp
   src/benchmark.cpp
   src/benchmark_scenario.cpp
@@ -66,6 +67,12 @@ endif()
 if(TARGET alamo_audio)
   target_link_libraries(alamo_game_core PUBLIC alamo_audio)
   target_compile_definitions(alamo_game_core PUBLIC ALAMO_GAME_HAVE_AUDIO=1)
+endif()
+# mcx2 t01 asset audit (asset_audit.hpp): ALO / ALA parse through tools/formats; Bink header probe for movies.
+target_link_libraries(alamo_game_core PRIVATE alamo_formats)
+if(TARGET alamo_video)
+  target_link_libraries(alamo_game_core PRIVATE alamo_video)
+  target_compile_definitions(alamo_game_core PRIVATE ALAMO_GAME_HAVE_VIDEO=1)
 endif()
 
 # Data-free: synthetic skirmish through GameSession (human orders routed into the battle, battle end, record/replay CRC).
@@ -167,6 +174,10 @@ add_executable(alamo_game_mod_check_tests tests/test_mod_check.cpp)
 target_link_libraries(alamo_game_mod_check_tests PRIVATE alamo_core alamo_game_core alamo_test_support)
 add_test(NAME alamo_game_mod_check_tests COMMAND alamo_game_mod_check_tests)
 set_tests_properties(alamo_game_mod_check_tests PROPERTIES TIMEOUT 300)
+# mcx2 t01: the mod asset audit (asset_audit.hpp) on a fake install with a mod folder in its own temp folder; data-free.
+add_executable(alamo_game_asset_audit_tests tests/test_asset_audit.cpp)
+target_link_libraries(alamo_game_asset_audit_tests PRIVATE alamo_core alamo_game_core alamo_vfs alamo_test_support)
+add_test(NAME alamo_game_asset_audit_tests COMMAND alamo_game_asset_audit_tests)
 # modc t07: the synthetic mod of testdata/mod_fixture (a new faction, unit, planet, campaign and a Lua override) through
 # the real MODPATH= route, no game data; read only (no fixture path shared with any other test). The second entry runs the
 # exe itself and checks its JSON summary (docs/MODS.md section 5.1).
@@ -179,6 +190,22 @@ add_test(NAME alamo_mod_check_fixture
 set_tests_properties(alamo_mod_check_fixture PROPERTIES TIMEOUT 120
                      PASS_REGULAR_EXPRESSION "\"result\": \"ok\",[^{]*\"errors\": 0,"
                      FAIL_REGULAR_EXPRESSION "\"run_errors\": \\[[^]]")
+
+# mcx1 t07: the conformance mod `values` (testdata/conformance/values: retail value kinds, repeated tags per class, element-tag
+# independence, several roots, UTF-16) through the real MODPATH= route, no game data; read only (its own fixture folder).
+add_executable(alamo_game_conformance_values_tests tests/test_conformance_values.cpp)
+target_link_libraries(alamo_game_conformance_values_tests PRIVATE alamo_core alamo_game_core alamo_test_support)
+add_test(NAME alamo_game_conformance_values_tests
+         COMMAND alamo_game_conformance_values_tests ${CMAKE_CURRENT_SOURCE_DIR}/testdata/conformance/values)
+set_tests_properties(alamo_game_conformance_values_tests PROPERTIES TIMEOUT 120)
+
+# mcx3 t07: the conformance mods stack_dep, stack_cycle and eaw_only (testdata/conformance/stacks: declared and hinted
+# parents, a cycle, two total conversions, a base-EaW tag and the base-EaW heuristic); read only (its own fixture folder).
+add_executable(alamo_game_conformance_stacks_tests tests/test_conformance_stacks.cpp)
+target_link_libraries(alamo_game_conformance_stacks_tests PRIVATE alamo_core alamo_game_core alamo_test_support)
+add_test(NAME alamo_game_conformance_stacks_tests
+         COMMAND alamo_game_conformance_stacks_tests ${CMAKE_CURRENT_SOURCE_DIR}/testdata/conformance/stacks)
+set_tests_properties(alamo_game_conformance_stacks_tests PROPERTIES TIMEOUT 120)
 
 # modc t08: the mod picker's data side (mod_picker.hpp) on the same read-only fixture; its modinfo.json decoding cases write
 # to their own temp folder (%TEMP%\alamo_mod_picker_tests, no other test uses it).

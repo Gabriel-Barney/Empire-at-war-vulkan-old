@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FocObjects>
+  <Planet Name="Foc_Gamma"><Behavior>PLANET</Behavior><Galactic_Position>200, 0, 0</Galactic_Position></Planet>
+</FocObjects>

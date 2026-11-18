@@ -6,8 +6,10 @@
 //                         the load report's submod search). Display name: modinfo.json "name", else the folder name.
 //   mod_report_summary    a few lines of the load report (mod_check.hpp, the alamo.mod_report figures) to show before
 //                         launch: result, errors / warnings, content counts, Lua, missing files, the submod hint
-//   mod_launch_args       the VFS arguments that start a mod: its own MODPATH= / STEAMMOD=, or for a likely submod
-//                         (SubmodHint::likely) the report's stacked arguments (the submod, then its parent)
+//   mod_launch_args       the VFS arguments that start a mod: the report's resolved stack (mcx3 t06: declared and
+//                         likely parents, submod first), else for a likely submod (SubmodHint::likely) the report's
+//                         stacked arguments, else its own MODPATH= / STEAMMOD=; none for a refused base-EaW mod (D1)
+//   mod_language_warnings mcx3 t09: the mods of the stack whose modinfo.json lists no text in the game's language
 //   relaunch_args         a command line with its mod arguments replaced (alamo_game restarts itself: the data, the
 //                         text database and the GUI are loaded once per process, as in the original, which takes mods
 //                         only on its command line)
@@ -51,6 +53,13 @@ std::vector<std::string> relaunch_args(std::span<const std::string> args, std::s
 std::vector<std::string> mod_launch_args(const InstalledMod& mod, const ModCheckReport* report);
 // The picker's report lines (UTF-8, at most about a dozen, the most important first).
 std::vector<std::string> mod_report_summary(const ModCheckReport& report);
+// ISO 639-1 code of one of retail's text languages ("GERMAN" -> "de", ui::retail_language_for_langid's names); "" for
+// another name.
+std::string language_code(std::string_view retail_language);
+// One line per mod of the report's stack (the resolved stack, else the mounted mods) that has a modinfo.json and lists
+// no text support (support bit 1) for `retail_language` (the language the game picked, e.g. "GERMAN"); a modinfo.json
+// without "languages" means English (the eaw.modinfo spec). Mods without modinfo.json say nothing either way.
+std::vector<std::string> mod_language_warnings(const ModCheckReport& report, std::string_view retail_language);
 // One Windows command line from `args` (quoted for CommandLineToArgvW / the CRT: spaces, tabs and quotes; backslashes
 // before a quote doubled).
 std::string windows_command_line(std::span<const std::string> args);

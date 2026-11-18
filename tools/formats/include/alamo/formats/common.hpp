@@ -13,6 +13,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 static_assert(std::endian::native == std::endian::little,
@@ -54,6 +55,22 @@ public:
     std::size_t offset() const noexcept { return offset_; }
 private:
     std::size_t offset_;
+};
+
+// Salvage mode (mcx2 t03, docs/MOD_COMPAT_DESIGN.md 10.2, decision D5: draw what retail draws). The runtime decoders
+// accept the defects retail accepts and say which rule applied; the tools (formats_validate, alamo_mod_check --strict)
+// keep strict mode, where every defect is a FormatError. Each rule is documented where it applies and in
+// docs/re/MCX2_T02_ASSET_SALVAGE.md.
+struct SalvageNote {
+    std::string rule;    // short id, e.g. "ala_block_stride" (the report's salvaged[].rule)
+    std::string detail;  // what was found and what was kept
+};
+struct ParseOptions {
+    bool salvage = false;
+    std::vector<SalvageNote>* notes = nullptr;  // receives one entry per salvage applied (may be null)
+    void note(std::string rule, std::string detail) const {
+        if (notes) notes->push_back({std::move(rule), std::move(detail)});
+    }
 };
 
 // Bounds-checked sequential reader over a byte span. `base` is the absolute offset of data[0]

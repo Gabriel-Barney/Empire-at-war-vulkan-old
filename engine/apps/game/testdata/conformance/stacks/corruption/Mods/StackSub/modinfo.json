@@ -1,0 +1,8 @@
+{
+  // a submod of StackParent, declared
+  "name": "Stack Sub",
+  "version": "1.1",
+  "dependencies": [
+    {"modtype": 0, "identifier": "Mods\\StackParent", "name": "Stack Parent"},
+  ],
+}

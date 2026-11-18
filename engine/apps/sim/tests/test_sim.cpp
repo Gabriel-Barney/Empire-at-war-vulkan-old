@@ -529,6 +529,52 @@ static void test_save_session(const World& w) {
     f = e;
     f.set_option("a", "2");
     CHECK(!SessionDescriptor::mismatch(d, f).empty());
+    CHECK(!SessionDescriptor::only_data_differs(d, f));  // an option is not data
+    // mcx3 t05: the stack. Without mods the bytes are the version 1 layout; with mods a trailing block round-trips.
+    {
+        SessionDescriptor m = d;
+        m.mods = {{"StackSub", "Stack Sub", "1.0", 0x10}, {"StackParent", "Stack Parent", "2.0", 0x20}};
+        ByteWriter mw;
+        m.write(mw);
+        CHECK(mw.size() > dw.size() && std::equal(dw.bytes().begin(), dw.bytes().end(), mw.bytes().begin()));
+        SessionDescriptor back;
+        ByteReader mr(mw.bytes());
+        CHECK(back.read(mr) && back.mods == m.mods);
+        // Only the data differs: the mods and both versions are named; the stack is never compared by itself.
+        SessionDescriptor now = back;
+        now.data_fingerprint = 0x5678;
+        now.mods[0].version = "1.1";
+        now.mods[1].content_hash = 0x21;
+        now.mods.push_back({"Extra", "Extra Mod", "", 0x30});
+        CHECK(SessionDescriptor::only_data_differs(m, now));
+        CHECK(SessionDescriptor::mismatch(m, now) ==
+              "Stack Sub updated since this save (version 1.0 -> 1.1); Stack Parent changed since this save (version 2.0); "
+              "Extra Mod is loaded now and was not in this save");
+        now = back;
+        now.mods.clear();
+        CHECK(SessionDescriptor::mismatch(m, now).empty());  // equal fingerprint: the stack alone never refuses
+        now.data_args = {};
+        CHECK(SessionDescriptor::mismatch(m, now) ==
+              "Stack Sub was in this save and is not loaded now; Stack Parent was in this save and is not loaded now");
+        CHECK(SessionDescriptor::only_data_differs(m, now));
+        now.seed = 9;
+        CHECK(!SessionDescriptor::only_data_differs(m, now));
+        CHECK(!SessionDescriptor::only_data_differs(m, m));  // equal: nothing to load anyway
+        // A save from before mcx3: mod arguments, no mods block. The mods are unknown, not "none".
+        SessionDescriptor old = d;  // data_args {MODPATH=Mods/X}, no mods
+        SessionDescriptor cur = d;
+        cur.data_fingerprint = 0x777;
+        cur.mods = {{"X", "Mod X", "1.1", 0x40}};
+        CHECK(SessionDescriptor::mismatch(old, cur).find("game data differs (fingerprint") == 0);
+        CHECK(SessionDescriptor::mod_changes(old, cur).empty());
+        // A mod named like the generic text still gets its own line.
+        SessionDescriptor fm = m;
+        fm.mods[0].name = "Fingerprint Overhaul";
+        SessionDescriptor fc = fm;
+        fc.data_args = {"MODPATH=Mods/Y"};
+        fc.mods.erase(fc.mods.begin());
+        CHECK(SessionDescriptor::mismatch(fm, fc) == "Fingerprint Overhaul was in this save and is not loaded now");
+    }
     SessionDescriptor g;
     g.kind = "keep";
     ByteReader shortr(std::span<const uint8_t>(dw.bytes()).first(dw.size() - 3));

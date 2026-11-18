@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<GameConstants>
+  <Damage_Types>Damage_Default</Damage_Types>
+  <AIUsesFogOfWarGalactic>On</AIUsesFogOfWarGalactic>
+  <AI_Uses_Galactic_Pop_Cap>Yes please</AI_Uses_Galactic_Pop_Cap>
+  <MP_Default_Credits>1000</MP_Default_Credits>
+  <MP_Default_Credits>2500abc</MP_Default_Credits>
+  <Production_Settings>
+    <Production_Speed_Factor>2.5f</Production_Speed_Factor>
+  </Production_Settings>
+  <Planet_Reveal_Delay_Time>TBD</Planet_Reveal_Delay_Time>
+  <Max_Ground_Forces_On_Planet>99999999999</Max_Ground_Forces_On_Planet>
+  <Health_Low_Percent_Threshold>not a number</Health_Low_Percent_Threshold>
+  <MaximumFleetMovementDistance>3</MaximumFleetMovementDistance>
+  <MaximumFleetMovementDistance>4.5 parsecs</MaximumFleetMovementDistance>
+  <MaximumFleetMovementDistance></MaximumFleetMovementDistance>
+</GameConstants>

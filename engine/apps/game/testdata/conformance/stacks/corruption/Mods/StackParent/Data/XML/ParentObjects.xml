@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ParentObjects>
+  <Planet Name="Parent_Delta"><Behavior>PLANET</Behavior><Galactic_Position>300, 0, 0</Galactic_Position></Planet>
+</ParentObjects>

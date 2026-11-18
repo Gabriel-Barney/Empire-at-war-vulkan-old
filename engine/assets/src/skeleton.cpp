@@ -202,7 +202,7 @@ constexpr std::uint64_t kMaxDecodedAnimationBytes = std::uint64_t(256) << 20;
 bool build_animation(std::span<const std::uint8_t> bytes, std::string_view name, AnimationClip& out,
                      std::string* error) {
     try {
-        const ala::Animation a = ala::parse(bytes);
+        const ala::Animation a = ala::parse(bytes, alamo::ParseOptions{true, nullptr});  // mcx2 t03: retail-equivalent salvage (ala.hpp)
         validate_tracks(a);  // defence in depth: every accessor call below stays in bounds
         validate_floats(a);
         AnimationClip c;

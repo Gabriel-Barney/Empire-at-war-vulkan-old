@@ -83,6 +83,38 @@ Where mods are found, for tools that list them (**modc t08** mod picker):
   (`;`-separated; when set, nothing else), else the registry's `SteamPath` / `InstallPath` (read only), else
   `C:\Program Files (x86)\Steam`. An id that is not all digits is never found.
 
+### 3.1.1 Mod registry and stacks (mcx3)
+
+The game itself never reorders or completes a command line: it mounts the `MODPATH=` / `STEAMMOD=` list as written. The
+tools that build a command line resolve a **stack** first (`engine/vfs/include/alamo/vfs/mod_registry.hpp`,
+`docs/MOD_COMPAT_DESIGN.md` §5):
+
+- **Registry.** One `ModDescriptor` per installed mod (the folders of §3.1): `kind` (workshop / `Mods\` / path), `id`
+  (workshop id or folder name), `name`, `version`, `summary`, `icon`, `languages`, `dependencies`, the Steam game tag
+  and a content hash (sorted relative path, size and write time of every file under `Data`, FNV-1a 64). `modinfo.json`
+  follows the AlamoEngine-Tools `eaw.modinfo` spec and is read leniently: `//` and `/* */` comments, trailing commas, a
+  missing comma between members (a warning; 2498889654's `sub-modinfo.json` has one), `<variant>-modinfo.json` files
+  (one descriptor each, the main file's values as defaults; 2083545253 has only `subA` / `subB`). Missing `languages`
+  means English. Nothing in gameplay reads a descriptor (retail never opens `modinfo.json`).
+- **Resolution** (`vfs::resolve_stack`, `alamo_mod_check --resolve`, the launcher, the mod picker): the picked mods,
+  then each one's declared dependencies (breadth-first, the spec's layouts `ResolveRecursive` / `ResolveLastItem` /
+  `FullResolved`), and for a mod that declares none the submod hint's likely parent (§5). A cycle is an error naming it;
+  a parent that is not installed is a warning; two total conversions (each with its own `GameObjectFiles.xml` and
+  `FactionFiles.xml`, neither depending on the other) are a warning. Launch order: every mod before the mods it depends
+  on (submod first), ties in the order found. The stack fingerprint is FNV-1a 64 over the ordered content hashes.
+  `alamo_mod_check --resolve <mod args>` checks the resolved stack (the report's `stack` section); `--resolve-only`
+  prints it and stops. The Command Center's profile page has **Resolve stack** (`launcher/src/stack.rs`: runs
+  `alamo_mod_check --resolve` on the profile's mods, shows the stack, its errors and warnings and the grade badge) and
+  **Use this order** (the profile's mods become the resolved stack).
+- **Base-EaW mods (D1).** A mod whose `modinfo.json` Steam tags say `EAW` and not `FOC` is refused before anything
+  loads: "<name> (<id>): base-EaW mod: retail runs it with sweaw.exe" (`load_game_data`: `alamo_game` does not start
+  it; the report's `base_eaw`, grade G0; the picker shows "Refused" and has no Launch). [port] A mod without tags whose
+  own `GameObjectFiles.xml` names none of the files FoC's list has and EaW's lacks is only a warning
+  (`base_eaw_suspect`, `docs/MOD_COMPAT_DESIGN.md` §5.4; scripts are not looked at).
+
+Conformance mods: `engine/apps/game/testdata/conformance/stacks` (`stack_dep`, `stack_cycle`, `eaw_only`;
+`alamo_game_conformance_stacks_tests`) and the `meg_unsorted` case of `alamo_vfs_registry_tests`.
+
 ### 3.2 File resolution order
 
 Unchanged from Phase 2 (`docs/PHASE2.md` "Data\ resolution order", `docs/re/SUBSYSTEMS.md` "File lookup priority",
@@ -104,15 +136,32 @@ Consequences for mods (all **main**):
   `MegaFiles.xml` replaces FoC's list and the MEGs it names are mounted in place of the base ones; a mod MEG with the same
   name as a base MEG (e.g. `Data\Config.meg`) is mounted *instead* of it. EaW-side archives always come from EaW.
 - **Paths** are ASCII case-insensitive and `/` equals `\`.
+- **Inside one MEG** the game binary-searches the record table by the CRC of the normalised name with the C runtime's
+  `bsearch` and never compares the stored name; the record found names the data record through its index field
+  (`docs/re/MCX3_MEG_LOOKUP.md`). The port reads the same way (`meg::Archive::lookup`), so a malformed mod MEG loses
+  what retail loses: entries an unsorted table hides, all but one of several records with one CRC (the probe order
+  picks), a record under its stored name when its CRC is another name's. Each finding is a VFS warning and a
+  retail-equivalent report issue (`meg_unsorted`, `meg_duplicate`, `meg_name_mismatch`, `meg_index`; mcx3 t04).
 - **Directory scans are not lookups.** Listings (skirmish maps, AI plan folders, scripts) follow the rules of the spec that
   defines them (`docs/re/UI.md` §9.2: mod-folder maps go to the *custom* map list; `PHASE2.md` note on `Vfs::list(glob, layers)`).
 
 ### 3.3 What a save remembers
 
-A save stores the VFS command line it was made with (`SessionDescriptor::data_args`) and a fingerprint of the loaded
-definitions (`data_fingerprint`). Loading a save rebuilds the session from those arguments; a save made with different data
-(another mod, another mod version, no mod) is refused with the first difference (`SessionDescriptor::mismatch`,
-`engine/apps/sim/include/alamo/sim/save_session.hpp`; **main**). Saves of the original game are out of scope (DECISIONS.md).
+A save stores the VFS command line it was made with (`SessionDescriptor::data_args`), a fingerprint of the loaded
+definitions (`data_fingerprint`) and (mcx3 t05) the mods of the stack (`SessionDescriptor::mods`: key, name, version,
+content hash; written only when a mod is loaded, so a base-game save keeps its earlier bytes; a build from before
+mcx3 refuses a save that has the block as unreadable). Loading a save rebuilds
+the session from those arguments; a save made with different data (another mod, another mod version, no mod) is refused
+with the first difference (`SessionDescriptor::mismatch`, `engine/apps/sim/include/alamo/sim/save_session.hpp`; **main**).
+A data difference is named per mod: "<name> updated since this save (version a -> b)", "changed since this save",
+"was in this save and is not loaded now", "is loaded now and was not in this save".
+
+**Load anyway (D3).** When only the data differs, `alamo_game` offers "Load anyway" and says that continuing an outdated
+save on a newer mod version is not supported. Loaded anyway, every chunk must still read: the object store refuses
+another object type list (names and order), the rebuild needs the save's factions and campaign, the story its plot
+scripts; a failure discards the session as before. The session is marked "loaded with different data"
+(`GameSession::loaded_with_different_data`, a log line and a screen line); bugs in such a session are not port bugs.
+Saves of the original game are out of scope (DECISIONS.md).
 
 ## 4. Mechanisms a mod may use
 
@@ -326,9 +375,10 @@ whose workshop id appears in the mod's `modinfo.json` (e.g. "Requires Thrawns Re
 items, then by id. Models are not counted: full mods miss art too (TR: 27 models, 0 list entries), only a mod whose
 database lists another mod's files is a submod. The hint gives the arguments to check it stacked (the mod's own, then
 the parent's: `STEAMMOD=<sub> STEAMMOD=<parent>`, the order of Thrawn's Legacy's own launcher). Nothing is taken from a
-mod's name. On the workshop mods installed here (2026-11-06): 3643661236, 3803967503 (Thrawn's Legacy) and 3806968867
-come out as submods of 1125571106 (241 / 259 / 212 missing list entries, 241 / 259 / 207 of them in TR), and load
-with 0 errors stacked on it; 2858787558's 18 missing list entries are in no installed mod.
+mod's name. On the workshop mods installed here (2026-11-18), 2858787558's 18 missing list entries are in no installed
+mod. The compatibility patch `AOW_Thrawns_Legacy_Compatibility` (no declared dependencies) resolves from its folder
+alone to itself, then Thrawn's Revenge 1125571106 (Thrawn's Legacy HD is not installed here, so the chain stops at TR;
+the conformance mod `StackTop` covers the full three-level shape).
 
 ### 5.1 The machine-readable summary (`alamo.mod_report`, version 4)
 
@@ -359,6 +409,7 @@ removed or changed in meaning without raising `version`. Paths are game-relative
 | `story` | object | (v4) `files` (Data\XML files with story events), `rewards_used`, `rewards_missing` [{`name`, `uses`, `first_file`, `in_mod`, `note`}] (retail rewards the port lacks), `events_used`, `events_partial` [same shape] (event types the port dispatches with a documented gap) |
 | `ai` | object | (v4) `token_coverage`: {`checked` (AI data loaded), `equations`, `leaves` (distinct token paths), `missing` [{`token` (as written: `Variable_Target.EnemyForce.X`), `equations`, `first_equation`, `first_file`, `in_mod`}]}: paths the resolver of the equation's mode does not evaluate (the galactic resolver's registry, the tactical leaf tables; retail loads one equation set and the caller picks the mode: the template mode for template triggers and budgets, followed through equations that name others; goal proposal functions and equations only Lua plans name count with either resolver), so the equation fails (retail's rule for an unknown leaf, `AI_GALACTIC_TOKENS.md` §9.1) |
 | `limits` | [object] | (v4) `limit`, `value`, `needed`: data that hits a guard or a cited retail limit (filled by `mcx5`; empty until then) |
+| `assets` | object | (v4, mcx2 t01; only with a mod mounted and the data loaded; `--no-assets` leaves it out) every model, particle, animation, texture, map, sound and movie a mod layer serves (loose or in the mod's MEGs; not in `.`-folders), decoded with the runtime decoders: `checked`, `decoded`, `salvaged_count`, `rejected_count`, `retail_equivalent`, `salvaged` [{`path`, `family`, `rule`}], `rejected` [{`path`, `family`, `reason`, `retail_equivalent`}], `by_family` {name: {`checked`, `decoded`, `salvaged`, `rejected`}}. A rejection retail shares (`docs/re/MCX2_T02_ASSET_SALVAGE.md`) never blocks G3; `--strict` counts every salvage as a rejection; `--corpus-cache DIR` caches verdicts by content hash |
 | `grade` | object | (v4) `grade` (`"G0"` errors, `"G1"` loads; G2 and up need runs), `g3_static` (bool: no honour gap, binding gap, missing reward or missing token from the mod's own files; the gaps base FoC content has are the tag ledger's and mcx4's, not the mod's, so they do not count here), `blocking` [`"<issue kind> <subject>"`], `check_errors` [string] (a version 4 check that threw; not counted in `errors`) |
 
 `in_mod` is true when the file the finding comes from resolves to a mod folder. The synthetic mods of
@@ -375,7 +426,7 @@ counted). Readers of version 2 keys need no change. `unknown_xml_tags` also cove
 `"radar map"` (modc t25).
 
 Version 4 (mcx0 t06, 2026-11-17; `docs/MOD_COMPAT_DESIGN.md` §12.1): `honour_gaps`, `retail_equivalent`, `bindings`,
-`story`, `ai`, `limits` and `grade` are new, after `check_errors`. None of their entries counts as an error or warning,
+`story`, `ai`, `limits`, `assets` (mcx2 t01) and `grade` are new, after `check_errors`. None of their entries counts as an error or warning,
 so `result`, `errors` and `warnings` are unchanged for the same data. Readers of version 3 keys need no change. The
 findings are also core `alamo::CompatIssue` records (`ModCheckReport::issues`, `engine/core/include/alamo/core/compat_issue.hpp`).
 
@@ -406,9 +457,13 @@ host side `engine/apps/game/app/app_mods.cpp`, data side `alamo/game/mod_picker.
   compile / main-chunk counts, unbound engine calls, the shader audit (effects, issues; [port] without the runtime DXC
   compile, `ModCheckOptions::shader_compile` off, to keep the check light in the running game), the submod hint (parent, how many missing files it has, named in
   modinfo.json) and the arguments it starts with. Reports are kept per row for the rest of the run.
+- **Stack** (mcx3 t06): the row's stack is resolved first (§3.1.1) and the report is of that stack; the pane shows
+  "Stack: A > B > C", stack errors and warnings, the grade badge (report v4), the base-EaW refusal or guess, and (t09)
+  a line per mod whose `modinfo.json` lists no text in the game's language (the language retail picks from the Windows
+  user language, `ui::retail_language_for_langid`; a `modinfo.json` without `languages` is English).
 - **Launch** (enabled once the selected row has a report and is not the running one): this executable starts again with
-  the same arguments, its `MODPATH=` / `STEAMMOD=` arguments replaced by the row's (a likely submod stacked on its parent:
-  `submod.stacked_args`), and this process quits. [port] The data, text and GUI load once per process, and the original
+  the same arguments, its `MODPATH=` / `STEAMMOD=` arguments replaced by the row's resolved stack (else, a likely submod
+  stacked on its parent: `submod.stacked_args`), and this process quits; a refused base-EaW mod has no launch. [port] The data, text and GUI load once per process, and the original
   takes mods only on its command line, so switching needs a new process.
 
 Tests: `alamo_game_mod_picker_tests` (rows, modinfo names, arguments, the summary on `testdata/mod_fixture`),

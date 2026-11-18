@@ -73,8 +73,8 @@ SkirmishForceTable load_skirmish_forces(const std::vector<galactic::FactionRules
     for (const galactic::FactionRules& f : factions) {
         const std::string key = ascii_upper(ascii_trim(f.name));
         if (key.empty()) continue;
-        std::vector<std::string> space = split_names(f.xml_text("Space_Skirmish_AI_Default_Forces"));
-        std::vector<std::string> land = split_names(f.xml_text("Land_Skirmish_AI_Default_Forces"));
+        std::vector<std::string> space = split_names(f.xml_list("Space_Skirmish_AI_Default_Forces"));
+        std::vector<std::string> land = split_names(f.xml_list("Land_Skirmish_AI_Default_Forces"));
         if (space.empty() && land.empty()) continue;
         SkirmishForces& e = out[key];
         if (!space.empty()) e.space = std::move(space);

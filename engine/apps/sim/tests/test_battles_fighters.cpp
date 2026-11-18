@@ -4,6 +4,7 @@
 #include "battle_test_fixture.hpp"
 #include "alamo/core/host_fs.hpp"
 #include "alamo/core/sim_crc.hpp"
+#include "alamo/test/galactic_dummies.hpp"
 #include "alamo/tactical/services/stream_rng.hpp"  // SP5 t03
 
 
@@ -1031,14 +1032,13 @@ void test_fleet_placement_campaign() {
         CHECK(p != std::string::npos);
         if (p != std::string::npos) t.replace(p, from.size(), "<SpaceBehavior>SIMPLE_SPACE_LOCOMOTOR</SpaceBehavior>");
     }
-    write_file(d0->root / "Data/XML/S10Types.xml", t);
+    write_file(d0->root / "Data/XML/S10Types.xml", ::alamo::test::with_galactic_dummies(t));
     auto d = std::make_unique<Data>();
     d->root = d0->root;
     d->files = std::make_unique<DirectoryProvider>(path_to_utf8(d->root));
     std::vector<std::string> diag;
     CHECK(d->db.load(*d->files, {}, &diag));
     CHECK(d->raw.load(*d->files));
-    d->types.set_squadron_size(g_squadron_size);
     CHECK(d->types.build(d->raw, d->files.get(), &diag));
     CHECK(galactic::load_galactic_rules(*d->files, d->db, d->types, d->rules, &diag));
     CHECK(galactic::load_conflict_rules(*d->files, d->db, d->types, d->rules, d->crules, &diag));
@@ -1240,7 +1240,6 @@ void test_hangar_streams() {
 int main(int argc, char** argv) {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     g_temp_prefix = "alamo_sim_battle_fighter_tests";
-    g_squadron_size = 0;  // [port: Gabriel] these trace retail fighter mechanics on the authored 3-fighter squadron
     for (int i = 1; i < argc; ++i)
         if (std::string(argv[i]) == "--regen") g_regen = true;
     std::printf("S7 t12: a fighter squadron moved past an enemy keeps its move order (formation attack target)\n");

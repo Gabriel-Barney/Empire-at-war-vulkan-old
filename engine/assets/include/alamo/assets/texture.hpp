@@ -2,11 +2,24 @@
 //
 // Supported DDS: DXT1 (BC1), DXT2/DXT3 (BC2), DXT4/DXT5 (BC3), uncompressed 32-bit BGRA/BGRX/RGBA,
 // 24-bit RGB, 16-bit 565/1555/4444/X1555/X4444 (expanded to BGRA8), L8, A8, A8L8 (kept as R8 / R8G8
-// with a component swizzle), legacy D3DFMT FourCC codes for those, DX10 headers for the same
-// formats, full mip chains (truncated chains are cut to the levels present, with a warning), and
-// cubemaps (6 faces; partial cubemaps are rejected). Volume textures are rejected.
+// with a component swizzle), legacy D3DFMT FourCC codes for those, full mip chains (truncated chains are cut to the levels present, with a warning), and
+// cubemaps (a partial cubemap keeps the faces it has, the others black, with a warning).
+// Mod formats (mcx2 t04, docs/MOD_COMPAT_DESIGN.md 10.3), converted on load:
+// DX10-header DDS files are refused (mcx2 t11): retail's d3dx9_43 cannot read them, so retail shows them as missing.
+//   ATI1 / BC4U -> R8 (R,0,0,1); ATI2 / BC5U -> R8G8 (R,G,0,1) (software decode; identity
+//   mapping, Vulkan fills the missing components); V8U8 -> RGBA8_SNORM (U,V,1,1); Q8W8V8U8 -> RGBA8_SNORM;
+//   CxV8U8 -> RGBA8_SNORM (U,V,sqrt(1-U^2-V^2),1):
+//   the signed values D3D9 gave the effects that sample them;
+//   A16B16G16R16 -> RGBA8; G16R16 -> RGBA8 (R,G,1,1); L16, A2B10G10R10, A2R10G10B10 -> RGBA8;
+//   R16F / G16R16F / A16B16G16R16F -> RGBA16F, R32F / G32R32F / A32B32G32R32F
+//   -> RGBA32F, missing components 1.0 (the D3D9 rule), no generated mips;
+//   P8 (FourCC 41 or the PALETTEINDEXED8 flag; 256 PALETTEENTRYs after the header, flags = alpha, all-zero
+//   flags = opaque) and A8P8 -> RGBA8;
+//   volume textures -> slice 0 as a 2D texture [port], with a warning.
 // Supported TGA: types 2/10 (true colour 15/16/24/32-bit, RLE or not) -> BGRA8, types 3/11
-// (8-bit grey) -> R8 + luminance swizzle; bottom-up/right-to-left origins are flipped to top-left.
+// (8-bit grey) -> R8 + luminance swizzle, types 1/9 (colour-mapped, 8- or 16-bit indices into a
+// 15/16/24/32-bit map, RLE or not) -> BGRA8 (an index outside the map is opaque black [port]);
+// bottom-up/right-to-left origins are flipped to top-left.
 // Supported BMP: BITMAPCOREHEADER and BITMAPINFOHEADER..V5, uncompressed 16/24/32-bit BI_RGB and
 // 16/32-bit BI_BITFIELDS / BI_ALPHABITFIELDS, bottom-up or top-down -> BGRA8. A 32-bit BI_RGB file
 // keeps its fourth byte as alpha unless that byte is 0 everywhere (then opaque). Palettized and
@@ -48,8 +61,14 @@ inline constexpr std::uint64_t kMaxDecodedTextureBytes = std::uint64_t(256) << 2
 //   BGRA8      -> VK_FORMAT_B8G8R8A8_UNORM         (mandatory sampled format in Vulkan)
 //   R8         -> VK_FORMAT_R8_UNORM               (L8, A8; see swizzle)
 //   R8G8       -> VK_FORMAT_R8G8_UNORM             (A8L8: r = L, g = A; see swizzle)
+//   R8G8_SNORM -> VK_FORMAT_R8G8_SNORM             (no producer since t11 refuses DX10 DDS; kept for the upload path)
+//   RGBA8_SNORM-> VK_FORMAT_R8G8B8A8_SNORM         (V8U8, Q8W8V8U8, CxV8U8)
+//   RGBA16F    -> VK_FORMAT_R16G16B16A16_SFLOAT    (16-bit float DDS)
+//   RGBA32F    -> VK_FORMAT_R32G32B32A32_SFLOAT    (32-bit float DDS)
 // DXT2/DXT4 (premultiplied) are uploaded as BC2/BC3; `premultiplied` is set.
-enum class TextureFormat : std::uint8_t { Unknown = 0, BC1_RGBA, BC2, BC3, RGBA8, BGRA8, R8, R8G8 };
+enum class TextureFormat : std::uint8_t {
+    Unknown = 0, BC1_RGBA, BC2, BC3, RGBA8, BGRA8, R8, R8G8, R8G8_SNORM, RGBA8_SNORM, RGBA16F, RGBA32F
+};
 
 // Swizzle -> VkComponentSwizzle: R/G/B/A -> VK_COMPONENT_SWIZZLE_R/G/B/A, Zero -> _ZERO,
 // One -> _ONE. Identity for colour formats; L8 = (R,R,R,One), A8 = (Zero,Zero,Zero,R),
@@ -100,17 +119,21 @@ bool decode_bmp(std::vector<std::uint8_t> file, TextureAsset& out, std::string* 
 // The format comes from the file's content, never its extension (the original loads image files by
 // content: Thrawn's Revenge ships a BMP named MT_Commandbar.tga): "DDS " -> DDS, "BM" -> BMP, else
 // TGA (which has no magic; a TGA's second byte, the colour-map type, is 0 or 1, never 'M').
-enum class TextureFileKind : std::uint8_t { Dds, Bmp, Tga };
+// PNG (mcx2): retail loads textures through D3DX, which picks the decoder by content, so a PNG named .tga or .dds draws
+// (Thrawn's Revenge icons). Decoded to BGRA8 with a generated mip chain, like BMP.
+bool decode_png(std::vector<std::uint8_t> file, TextureAsset& out, std::string* error = nullptr);
+enum class TextureFileKind : std::uint8_t { Dds, Bmp, Tga, Png };
 TextureFileKind sniff_texture_file(std::span<const std::uint8_t> bytes);
 bool decode_texture(std::vector<std::uint8_t> file, TextureAsset& out, std::string* error = nullptr);
 
-// Box-filter mip chain for an uncompressed texture (RGBA8 / BGRA8 / R8 / R8G8) that has exactly
+// Box-filter mip chain for an 8-bit texture (RGBA8 / BGRA8 / R8 / R8G8, and the SNORM pair with a signed
+// mean rounded half away from zero) that has exactly
 // one level per layer: levels down to 1x1, each texel of level k+1 the rounded integer mean
 // ((sum + n/2) / n, per channel, alpha not weighted) of the 2x2 texels of level k it covers;
 // a 1-wide / 1-high level averages 2 texels, and an odd dimension drops its last row/column
 // (dst = max(1, src >> 1)). Integer-only, so bit-identical everywhere. This approximates D3D9
 // D3DX / D3DUSAGE_AUTOGENMIPMAP box filtering; the original's exact filter is not recovered.
-// Returns false (texture untouched) for block-compressed formats or when mips already exist.
+// Returns false (texture untouched) for block-compressed and float formats or when mips already exist.
 bool generate_mips(TextureAsset& t);
 
 // Texture lookup (docs/re/SPACE_AND_OPEN.md B.2, alGraphicsDriver::Load_Texture). On the

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FirstRoot>
+  <Custom_Ship Name="Values_First_Root_Ship"><Behavior>DUMMY_STARSHIP</Behavior></Custom_Ship>
+</FirstRoot>
+<SecondRoot>
+  <Custom_Ship Name="Values_Second_Root_Ship"><Behavior>DUMMY_STARSHIP</Behavior></Custom_Ship>
+</SecondRoot>

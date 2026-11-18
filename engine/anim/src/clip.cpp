@@ -133,7 +133,7 @@ bool Clip::visible(uint32_t track, uint32_t frame) const {
 
 bool parse_clip(std::span<const uint8_t> bytes, std::string_view name, Clip& out, std::string* error) {
     try {
-        const ala::Animation a = ala::parse(bytes);
+        const ala::Animation a = ala::parse(bytes, alamo::ParseOptions{true, nullptr});  // mcx2 t03: retail-equivalent salvage (ala.hpp)
         if (!(a.fps == a.fps)) throw std::runtime_error("fps is NaN");
         const std::vector<std::array<int16_t, 4>> defaults = default_rotations(bytes);
         Clip c;

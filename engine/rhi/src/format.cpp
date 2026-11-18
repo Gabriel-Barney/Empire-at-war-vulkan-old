@@ -24,6 +24,8 @@ constexpr FormatInfo kFormats[] = {
     {"RGBA32F", VK_FORMAT_R32G32B32A32_SFLOAT, 1, 1, 16, false, false, false},
     {"B4G4R4A4", VK_FORMAT_B4G4R4A4_UNORM_PACK16, 1, 1, 2, false, false, false},
     {"R4G4B4A4", VK_FORMAT_R4G4B4A4_UNORM_PACK16, 1, 1, 2, false, false, false},
+    {"RG8_SNORM", VK_FORMAT_R8G8_SNORM, 1, 1, 2, false, false, false},
+    {"RGBA8_SNORM", VK_FORMAT_R8G8B8A8_SNORM, 1, 1, 4, false, false, false},
     {"D16", VK_FORMAT_D16_UNORM, 1, 1, 2, false, true, false},
     {"D24S8", VK_FORMAT_D24_UNORM_S8_UINT, 1, 1, 4, false, true, true},
     {"D32F", VK_FORMAT_D32_SFLOAT, 1, 1, 4, false, true, false},
