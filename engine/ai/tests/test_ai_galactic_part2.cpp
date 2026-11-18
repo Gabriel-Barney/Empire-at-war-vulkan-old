@@ -347,6 +347,57 @@ void test_fleet_distance_tokens() {
     std::printf("fleet distance tokens: IsConnectedTo follows MaximumFleetMovementDistance (P1 72.1, P2 120)\n");
 }
 
+// mcx4 t02 (docs/re/MCX4_GAL2_RE_ANSWERS.md Q1): the four connectivity tokens over the AI connectivity graph 0x662c90.
+// The synthetic chain P0..P7 (60 apart in x, 72.1 per hop, a trade route per hop). Edge = distance / GameConstants
+// TradeRouteMovementFactor on a trade route, else the distance when <= MaximumFleetMovementDistance; value = how often the
+// planet lies strictly inside the shortest path of a pair, over the largest count.
+// ledger: verifies GameConstants.TradeRouteMovementFactor
+void test_connectivity_tokens() {
+    const auto token = [](ParityWorld& pw, const std::string& t, uint32_t planet, int32_t self) {
+        EquationSet e;
+        e.add("T", "Variable_Target." + t);
+        e.link();
+        EvalContext c;
+        c.self = self;
+        c.target = static_cast<int32_t>(planet);
+        const EvalResult r = evaluate(e, e.find("T"), c, pw.world->resolver());
+        CHECK(r.ok);
+        return r.value;
+    };
+    const auto near = [](double a, double b) { return std::fabs(a - b) < 1e-9; };
+    {
+        // Routes only (free hops need <= 50): the Empire holds P0..P4, the Rebels P6 / P7.
+        ParityWorld pw(false, {"BuildBarracks"}, [](gal::GalacticSetup& s) {
+            s.map.max_fleet_move_distance = 50.0f;
+            for (const PlanetIndex p : {2u, 3u, 4u}) s.forces.push_back({0, p, tInfantry});
+        });
+        pw.run(2);
+        // Internal (u < v, both ends held): P1 on 3 paths, P2 on 4, P3 on 3.
+        CHECK(near(token(pw, "FriendlyInternalConnectivity", 1, 0), 0.75) && near(token(pw, "FriendlyInternalConnectivity", 2, 0), 1.0));
+        CHECK(near(token(pw, "FriendlyInternalConnectivity", 3, 0), 0.75) && token(pw, "FriendlyInternalConnectivity", 0, 0) == 0.0);
+        // External (ordered pairs from a held planet; P5 is reached, P6 / P7 have no edge): P1 7, P2 10, P3 9, P4 4.
+        CHECK(near(token(pw, "FriendlyExternalConnectivity", 1, 0), 0.7) && near(token(pw, "FriendlyExternalConnectivity", 2, 0), 1.0));
+        CHECK(near(token(pw, "FriendlyExternalConnectivity", 3, 0), 0.9) && near(token(pw, "FriendlyExternalConnectivity", 4, 0), 0.4));
+        CHECK(token(pw, "FriendlyExternalConnectivity", 6, 0) == 0.0);  // no value: 0
+        // The Rebels' view: Enemy* is the largest value of a player not friendly to Self; their own two planets give 0.
+        CHECK(near(token(pw, "EnemyInternalConnectivity", 2, 1), 1.0) && near(token(pw, "EnemyExternalConnectivity", 3, 1), 0.9));
+        CHECK(token(pw, "FriendlyInternalConnectivity", 6, 1) == 0.0 && token(pw, "EnemyInternalConnectivity", 2, 0) == 0.0);
+        std::printf("connectivity tokens: chain P0..P4 internal 0/.75/1/.75/0, external .7/1/.9/.4\n");
+    }
+    // Free hops up to 130 (P0 -> P2 = 120 direct): with TradeRouteMovementFactor 0.5 (FoC) a route hop counts 144.2, so
+    // P0 -> P2 goes direct and P1 is on no path; with 2.0 a hop counts 36.1 and P1 carries P0 -> P2.
+    for (const float factor : {0.5f, 2.0f}) {
+        ParityWorld pw(false, {"BuildBarracks"}, [](gal::GalacticSetup& s) {
+            s.map.max_fleet_move_distance = 130.0f;
+            s.forces.push_back({0, 2u, tInfantry});
+        }, [factor](gal::GalacticRules& r) { r.constants.trade_route_movement_factor = factor; });
+        pw.run(2);
+        const double v = token(pw, "FriendlyInternalConnectivity", 1, 0);
+        std::printf("connectivity tokens: TradeRouteMovementFactor %.1f -> P1 internal %.2f\n", static_cast<double>(factor), v);
+        CHECK(v == (factor > 1.0f ? 1.0 : 0.0));
+    }
+}
+
 void test_ground_structure_slots() {
     const std::vector<std::string> only = {"BuildBarracks"};
     const auto map_ground = [](int32_t v) {

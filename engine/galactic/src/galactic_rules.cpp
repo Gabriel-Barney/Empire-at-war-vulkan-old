@@ -210,6 +210,9 @@ EconomyConstants load_economy_constants(const data::GameDatabase& db) {
     c.max_starbase_level = g.get_int("MaximumStarbaseLevel", 1);
     c.max_groundbase_level = g.get_int("MaximumGroundbaseLevel", 1);
     c.max_special_structures = g.get_int("MaximumSpecialStructures", 1);
+    c.trade_route_movement_factor = g.get_float("TradeRouteMovementFactor", c.trade_route_movement_factor);  // mcx4 t02
+    c.bribery_fleet_reveal_range = g.get_float("Bribery_Fleet_Reveal_Range", c.bribery_fleet_reveal_range);  // mcx4 t09
+    c.indigenous_spawn_destruction_reward = g.get_int("Indigenous_Spawn_Destruction_Reward", 0);  // mcx4 t09 (Q5)
     c.health_low_percent_threshold = g.get_float("Health_Low_Percent_Threshold", c.health_low_percent_threshold);  // a2l t03
     {  // a2m t05: Low_ / Medium_ / High_Threat_Reachability_Tolerance (A2M_T04_RE_ANSWERS Q3)
         static constexpr const char* kTol[3] = {"Low_Threat_Reachability_Tolerance", "Medium_Threat_Reachability_Tolerance",
@@ -373,6 +376,7 @@ std::vector<TypeInfo> extract_type_info(const objects::GameObjectTypes& types, c
         i.maintenance_cost = types.get_float(t, "Maintenance_Cost");
         i.ai_combat_power = types.columns().ai_combat_power[t];
         i.prevents_story_autoresolve = types.get_bool(t, "Prevents_Story_Campaign_Autoresolve");  // mcx4 t20
+        i.fleet_reveal_range = types.get_float(t, "Hyperspace_Fleet_Reveal_Range");  // mcx4 t09 (Q3)
         i.build_countdown_timer = types.get_bool(t, "Build_Countdown_Timer");  // mcx4 t09 (Q7)
         i.build_speech_countdowns = std::string(ascii_trim(types.get_string(t, "Build_Speech_Countdowns")));
         i.reduced_by_factories = types.get_bool(t, "Build_Time_Reduced_By_Multiple_Factories");
@@ -424,6 +428,8 @@ std::vector<TypeInfo> extract_type_info(const objects::GameObjectTypes& types, c
         i.population = types.columns().population_value[t];
         i.population_capacity = types.get_int(t, "Additional_Population_Capacity");
         i.categories = types.get_mask(t, "CategoryMask");
+        if (const auto sup = types.enums().get(objects::EnumId::GameObjectCategory).lookup("Super"))
+            i.super = (i.categories & static_cast<uint64_t>(*sup)) != 0;  // mcx4 t09 (Q3, 0x375270)
         i.movement_class = types.get_enum(t, "MovementClass");
         for (std::string_view m : types.get_list(t, "Company_Units")) {  // a company: its first member's class
             const objects::TypeIndex mt = types.resolve_name(ascii_trim(m));

@@ -50,6 +50,7 @@ int main(int argc, char** argv) {
     test_production_disabled_and_delivery();
     test_ground_structure_slots();
     test_fleet_distance_tokens();
+    test_connectivity_tokens();
     test_budget_fraction_before_init();
     test_production_unbuildable();
     test_goal_time_drop();

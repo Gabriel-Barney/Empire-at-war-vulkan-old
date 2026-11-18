@@ -773,6 +773,7 @@ private:
     void service_script_in(Set& s, uint32_t number, Script& sc, uint64_t frame, double seconds);
     void start_threads_at_load(Set& s, uint32_t number, Script& sc, double seconds);  // q6: the first resume (header comment)
     void service_tactical(uint64_t frame);
+    void service_sandbox(uint64_t frame);  // mcx4 t09: the sandbox spawner objectives (MCX4_GAL2_RE_ANSWERS Q5)
     void route_tactical(uint64_t frame);
     void poll_tactical();
     // number_override: the set number of a resumed battle (N1 stage 2); default = after the galactic sets and headers.
@@ -784,6 +785,11 @@ private:
         int32_t player = -1;
         uint32_t number = 0;
         std::string file;
+        // v9 (mcx4 t09): the sandbox spawner objectives (Tactical::sandbox*); has_sandbox false = an older save
+        bool has_sandbox = false, sandbox = false, sandbox_built = false;
+        int32_t sandbox_player = -1;
+        std::vector<uint32_t> sandbox_types;
+        std::vector<uint8_t> sandbox_paid;
     };
     std::unique_ptr<TacticalResume> resume_tactical_;
     void attach_tactical(const StoryBattleStart& s, uint64_t frame);  // tactical_ for a battle (begin_battle)

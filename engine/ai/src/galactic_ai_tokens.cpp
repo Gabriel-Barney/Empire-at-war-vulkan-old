@@ -317,7 +317,8 @@ constexpr std::string_view kPlayerPaths[] = {
 constexpr std::string_view kTargetPaths[] = {
     "ACTIVETRADEROUTES", "BASEINCOME", "BASEINCOMENBTP", "BLACKMARKETABILITIESAVAILABLE",
     "BLACKMARKETMINIMUMABILITYPRICE", "BLACKMARKETPRICEMODIFIER", "CONNECTSISOLATEDPLANETSBYFORCE",
-    "CONNECTSISOLATEDPLANETSBYLENGTH", "CONNECTSLARGESTISLANDS", "GROUNDBASELEVEL", "GROUNDBASELEVELUNNORMALIZED",
+    "CONNECTSISOLATEDPLANETSBYLENGTH", "CONNECTSLARGESTISLANDS", "ENEMYEXTERNALCONNECTIVITY", "ENEMYINTERNALCONNECTIVITY", "FRIENDLYEXTERNALCONNECTIVITY",
+    "FRIENDLYINTERNALCONNECTIVITY", "GROUNDBASELEVEL", "GROUNDBASELEVELUNNORMALIZED",
     "HASCREDITSIPHON", "HASGROUNDBASEOFLEVEL", "HASINDIGENOUSUNITS", "HASSTARBASEOFLEVEL", "HASSTRUCTURE", "HINTS.CHOKEPOINT",
     "HINTS.OFFENSEDELAYGROUND", "HINTS.OFFENSEDELAYSPACE", "HINTS.PRIORITYTARGET", "INCOMEUNNORMALIZED",
     "ISCONNECTEDTO", "ISCONNECTEDTOCORRUPTION", "ISCORRUPTED", "ISCORRUPTIONTRANSITIONACTIVE", "ISFACTION",
@@ -1025,6 +1026,88 @@ struct GalacticSimTokenResolver::Impl {
             if (g.neighbour(e) == b) return true;
         return false;
     }
+    // ---- mcx4 t02: the AI connectivity graph (MCX4_GAL2_RE_ANSWERS Q1, 0x662b30 / 0x662c90 / 0x662140) [H] ----
+    bool friendly_to(int32_t a, int32_t b) const {  // relation table entry 0: self or ally; an invalid id fails
+        if (!valid_player(a) || !valid_player(b)) return false;
+        const gal::Relation rel = sim.relation(a, b);
+        return rel == gal::Relation::Self || rel == gal::Relation::Ally;
+    }
+    bool trade_linked(size_t a, size_t b) const {  // 0x3f7b30: a campaign trade route joins the pair
+        const GalaxyMap& m = sim.map();
+        for (const uint32_t rt : planets[a].links)
+            if (rt < m.routes.size() && ((m.routes.point_a[rt] == a && m.routes.point_b[rt] == b) ||
+                                         (m.routes.point_b[rt] == a && m.routes.point_a[rt] == b)))
+                return true;
+        return false;
+    }
+    // 0x662b30: the edge length for `player`'s internal (both ends held) or external (the start held) graph; -1 = no edge.
+    // A planet is held when its political control is > 0 and its controller is `player` or an ally.
+    float connectivity_edge(int32_t player, bool internal, size_t a, size_t b) const {
+        if (a == b) return 0.0f;
+        const auto held = [&](size_t i) { return planets[i].control > 0.0f && friendly_to(player, planets[i].owner); };
+        if (!held(a) || (internal && !held(b))) return -1.0f;
+        const float dx = planets[a].position.x - planets[b].position.x, dy = planets[a].position.y - planets[b].position.y,
+                    dz = planets[a].position.z - planets[b].position.z;
+        const float d = std::sqrt(dx * dx + dy * dy + dz * dz);
+        if (trade_linked(a, b))  // no length limit; the divide is in double [M: the matrix element width]
+            return static_cast<float>(static_cast<double>(d) / static_cast<double>(rules.constants.trade_route_movement_factor));
+        return d <= sim.map().max_fleet_move_distance ? d : -1.0f;  // inclusive
+    }
+    // 0x662c90: the value of every planet for `player` (-1 = the planet has none). Planets in index order (the GOM order),
+    // kept when they have an edge either way with another one; all-pairs shortest paths (k outermost, an entry replaced
+    // when still -1 or strictly shorter, so ties keep the first path); every planet strictly inside the shortest path of
+    // an ordered pair (internal: u < v only) counts 1; value = count / the largest count (0 when that is 0).
+    // [port] computed when a leaf asks (cache life 15 s) instead of on each derived-owner change: retail keeps the
+    // values of the last owner change, so the two differ when a planet's control crosses 0 without one.
+    std::vector<double> connectivity(int32_t player, bool internal) const {
+        const size_t n = planets.size();
+        std::vector<double> value(n, -1.0);
+        std::vector<size_t> all, nodes;
+        for (size_t i = 0; i < n; ++i)
+            if (planets[i].is_planet) all.push_back(i);
+        for (const size_t a : all) {
+            bool keep = false;
+            for (size_t j = 0; j < all.size() && !keep; ++j)
+                keep = all[j] != a && (connectivity_edge(player, internal, a, all[j]) >= 0.0f ||
+                                       connectivity_edge(player, internal, all[j], a) >= 0.0f);
+            if (keep) nodes.push_back(a);
+        }
+        const size_t m = nodes.size();
+        std::vector<float> dist(m * m);
+        std::vector<int32_t> pred(m * m, -1);
+        for (size_t i = 0; i < m; ++i)
+            for (size_t j = 0; j < m; ++j)
+                dist[i * m + j] = internal && i > j ? dist[j * m + i] : connectivity_edge(player, internal, nodes[i], nodes[j]);
+        for (size_t i = 0; i < m; ++i)
+            for (size_t j = 0; j < m; ++j)
+                if (dist[i * m + j] > 0.0f) pred[i * m + j] = static_cast<int32_t>(i);  // -1 (none) and 0 are no edge
+        for (size_t k = 0; k < m; ++k)
+            for (size_t i = 0; i < m; ++i) {
+                if (!(dist[i * m + k] > 0.0f)) continue;
+                for (size_t j = 0; j < m; ++j) {
+                    if (!(dist[k * m + j] > 0.0f)) continue;
+                    const float sum = dist[i * m + k] + dist[k * m + j];
+                    float& e = dist[i * m + j];
+                    if (e == -1.0f || sum < e) {
+                        e = sum;
+                        pred[i * m + j] = pred[k * m + j];
+                    }
+                }
+            }
+        std::vector<uint32_t> count(m, 0);
+        for (size_t u = 0; u < m; ++u)
+            for (size_t v = internal ? u + 1 : 0; v < m; ++v) {
+                if (u == v || !(dist[u * m + v] > 0.0f)) continue;
+                for (int32_t x = pred[u * m + v]; x >= 0 && static_cast<size_t>(x) != u; x = pred[u * m + static_cast<size_t>(x)])
+                    ++count[static_cast<size_t>(x)];
+            }
+        uint32_t most = 0;
+        for (const uint32_t c : count) most = std::max(most, c);
+        for (size_t i = 0; i < m; ++i)
+            value[nodes[i]] = most == 0 ? 0.0 : static_cast<double>(count[i]) / static_cast<double>(most);
+        return value;
+    }
+
     // Planet income, read-only (Planet_Income(P, gross = 0) 0x3f68b0 without the side effects) [port].
     double planet_income(size_t i) const { return static_cast<double>(sim.planet_income_preview(static_cast<PlanetIndex>(i))); }
 
@@ -1545,6 +1628,23 @@ struct GalacticSimTokenResolver::Impl {
             out = b2d(k == "CONNECTSLARGESTISLANDS" ? is.largest[p] != 0 : is.connects[p] != 0);
             return true;
         }
+        // mcx4 t02 (MCX4_GAL2_RE_ANSWERS Q1 token table) [H]: leaves 0x65c160 / 0x65c120 (Self's value, 0 when none) and
+        // 0x65c040 / 0x65bf70 (the largest value over every player not friendly to Self, neutrals too; players without a
+        // value skipped; from 0). Cache life 15 s; no leaf fails. No shipped equation uses them (mods only).
+        if (k == "FRIENDLYINTERNALCONNECTIVITY" || k == "FRIENDLYEXTERNALCONNECTIVITY" || k == "ENEMYINTERNALCONNECTIVITY" ||
+            k == "ENEMYEXTERNALCONNECTIVITY")
+            return leaf(std::string("T:") + std::string(k), ip, 15, params, [&](double& v) {
+                const bool internal = k.find("INTERNAL") != std::string_view::npos;
+                v = 0.0;
+                if (k[0] == 'F') {
+                    v = std::max(0.0, connectivity(ctx.self, internal)[p]);
+                    return true;
+                }
+                for (size_t q = 0; q < players.size(); ++q)
+                    if (!friendly_to(ctx.self, static_cast<int32_t>(q)))
+                        v = std::max(v, connectivity(static_cast<int32_t>(q), internal)[p]);
+                return true;
+            }, out);
         if (k == "ISCONNECTEDTO")
             return leaf("T:ISCONNECTEDTO", ip, 5, params, [&](double& v) {
                 const std::vector<std::string_view> types = param_texts(params, "Parameter_Type");

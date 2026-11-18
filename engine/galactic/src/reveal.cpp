@@ -263,6 +263,72 @@ void GalacticSim::rebuild_corruption_pairs(PlanetIndex planet) {
                           level_value(c.particle_energy_per_level, cur),     level_value(c.particle_energy_per_level, eff)};
 }
 
+// ---- mcx4 t09: the fleet visibility vote (MCX4_GAL2_RE_ANSWERS Q3, 0x433090) [H] ---------------------------------------
+// Presentation only: no rule reads it. Steps 1-10 of Q3 with the local player L, owner O.
+bool GalacticSim::fleet_visible_to_local(uint32_t fleet) const {
+    if (local_player_ == kNoPlayer) return true;  // 1. the vote only means something for L
+    if (fleet >= fleets_.size() || !fleets_[fleet].alive) return false;  // 2. [port] no fleet data / contained fleet
+    const FleetState& f = fleets_[fleet];
+    // 3. [port] the player +0x368 "sees everything" flag is 0 in a fresh game and is not modelled.
+    if (f.owner == local_player_) return true;
+    const auto type_of = [this](ObjectHandle h) -> const TypeInfo* {
+        if (!store_->exists(h)) return nullptr;
+        const auto t = static_cast<uint32_t>(store_->type(h));
+        return t < rules_->types.size() ? &rules_->types[t] : nullptr;
+    };
+    const bool fleet_hidden = hidden(f.object);
+    // 4. the current hop's destination (0x4329c0, path[index + 1]) [M] held by L.
+    if (!fleet_hidden && !f.path.empty() && valid_planet(f.to) && planets_[f.to].owner == local_player_) return true;
+    // 5. a Super content ([port] one level: fleet members, not a transport's cargo).
+    for (const ObjectHandle u : f.contents)
+        if (const TypeInfo* ti = type_of(u); ti && ti->super) return true;
+    if (fleet_hidden) return false;  // 6. (7. the mode is galactic here)
+    // The match condition of step 9. An AI owner: the fleet data's destination planet (+0x50; the path's end, the orbit
+    // planet without a path) [M] is revealed. Otherwise: the path planet at the hop's start or the one before it.
+    const auto revealed_at = [this](PlanetIndex p) { return valid_planet(p) && planets_[p].revealed; };
+    bool match = false;
+    if (valid_player(f.owner) && players_[static_cast<size_t>(f.owner)].ai) {
+        match = revealed_at(f.path.empty() ? f.planet : f.path.back());
+    } else if (!f.path.empty() && f.path_index >= 1 && f.path_index - 1 < f.path.size()) {
+        const uint32_t i = f.path_index - 1;  // the port's index is the hop target's
+        match = revealed_at(f.path[i]) || (i > 0 && revealed_at(f.path[i - 1]));
+    }
+    if (!match) return false;  // every candidate in range would only "go on"
+    // 8 / 9. the candidates: L's revealers (types with Hyperspace_Fleet_Reveal_Range > 0), then, with a
+    // Benefits_From_Corruption player, every Bribery planet whoever owns it. A candidate whose corruption type is 0
+    // (Intimidation) is skipped (the "!= 0" test); a non-planet has none (-1). Range: Bribery_Fleet_Reveal_Range for a
+    // type-5 planet, else the type's own; squared float distance, strict. [port] a unit stands at its fleet's or
+    // planet's position.
+    constexpr int8_t kIntimidation = 0, kBribery = 5;
+    const auto in_range = [&f](const Vec3& c, float r) {
+        const float dx = f.position.x - c.x, dy = f.position.y - c.y, dz = f.position.z - c.z;
+        return dx * dx + dy * dy + dz * dz < r * r;
+    };
+    const float bribery_r = rules_->constants.bribery_fleet_reveal_range;
+    const auto unit_reveals = [&](ObjectHandle u, const Vec3& at) {
+        const TypeInfo* ti = type_of(u);
+        return ti && store_->owner(u) == local_player_ && ti->fleet_reveal_range > 0.0f && in_range(at, ti->fleet_reveal_range);
+    };
+    for (const FleetState& g : fleets_)
+        if (g.alive && g.owner == local_player_)
+            for (const ObjectHandle u : g.contents)
+                if (unit_reveals(u, g.position)) return true;
+    for (const PlanetState& p : planets_) {
+        if (!p.is_planet) continue;
+        if (p.owner == local_player_ && p.type < rules_->types.size() && rules_->types[p.type].fleet_reveal_range > 0.0f &&
+            p.corruption != kIntimidation)
+            if (in_range(p.position, p.corruption == kBribery ? bribery_r : rules_->types[p.type].fleet_reveal_range)) return true;
+        for (const ObjectHandle u : p.surface)
+            if (unit_reveals(u, p.position)) return true;
+        for (const ObjectHandle u : p.structures)
+            if (unit_reveals(u, p.position)) return true;
+    }
+    if (first_corruption_player() != kNoPlayer)
+        for (const PlanetState& p : planets_)
+            if (p.is_planet && p.corruption == kBribery && in_range(p.position, bribery_r)) return true;
+    return false;
+}
+
 // ---- CRC ---------------------------------------------------------------------------------------------------------------
 
 bool GalacticSim::reveal_state_default() const {

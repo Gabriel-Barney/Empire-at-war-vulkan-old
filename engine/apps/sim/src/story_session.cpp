@@ -182,6 +182,13 @@ struct StorySession::Tactical {
     std::function<bool(int32_t, double, double, double)> fog_point_visible;  // wave 2b hooks (fog agent)
     std::function<bool(int32_t, int32_t)> fog_object_visible;
     std::vector<Pending> pending;
+    // mcx4 t09 (MCX4_GAL2_RE_ANSWERS Q5): the sandbox plot's spawner objectives (SET_SANDBOX_OBJECTIVES builder 0x32bd10)
+    // of a campaign land battle, run here without the sandbox plot files: armed by begin_battle, built at story time
+    // 2 s, one entry per hostile spawner type. Saved with the tactical story (v9).
+    bool sandbox = false, sandbox_built = false;
+    int32_t sandbox_player = -1;
+    std::vector<objects::TypeIndex> sandbox_types;
+    std::vector<uint8_t> sandbox_paid;
 };
 
 std::string StoryTrigger::text() const {
@@ -814,8 +821,9 @@ std::vector<std::pair<std::string, lua::StoryNotification>> StorySession::notifi
                 d.planet_owner_neutral = d.planet_owner >= 0 && d.planet_owner == sim_->neutral_player();
                 out.emplace_back("STORY_DESTROY", d);
             }
-            // wave 1: a named hero (or a team carrying one) -> STORY_DEFEAT_HERO per hero type name.
-            if (same_type(*types_, sim_->rules(), e.type)) {
+            // wave 1: a named hero (or a team carrying one) -> STORY_DEFEAT_HERO per hero type name; not for an
+            // auto-resolve kill (value 1: retail's Die skips 0x3a01f0, MCX4_GAL2_RE_ANSWERS Q4).
+            if (e.value != 1 && same_type(*types_, sim_->rules(), e.type)) {
                 std::vector<std::string> heroes;
                 auto hero = [this](objects::TypeIndex ty) { return types_->get_bool(ty, "Is_Named_Hero"); };
                 if (hero(static_cast<objects::TypeIndex>(e.type))) heroes.push_back(t.type);
@@ -1723,6 +1731,7 @@ void StorySession::service(uint64_t frame, double mode_seconds) {
     lua_->bridge.prune(*store_);
     // Wave 2a: the tactical story's T9, then the planet owners for the next INVASION_BOUNCED test.
     if (tactical_ && tactical_->set) service_tactical(frame);
+    if (tactical_) service_sandbox(frame);  // mcx4 t09: with or without tactical plots
     const auto planets = sim_->planets();
     owner_seen_.resize(planets.size(), -1);
     for (size_t i = 0; i < planets.size(); ++i) owner_seen_[i] = planets[i].owner;
@@ -1861,6 +1870,18 @@ bool StorySession::begin_battle(const StoryBattleStart& s, uint64_t frame, std::
         const TacticalResume res = std::move(*resume_tactical_);
         resume_tactical_.reset();
         attach_tactical(s, frame);
+        // mcx4 t09: the saved sandbox state (v9); an older save: from the saved battle's kind ([port] a LINK_TACTICAL
+        // battle of a v8 save is not recognised).
+        if (res.has_sandbox) {
+            tactical_->sandbox = res.sandbox;
+            tactical_->sandbox_built = res.sandbox_built;
+            tactical_->sandbox_player = res.sandbox_player;
+            tactical_->sandbox_types.assign(res.sandbox_types.begin(), res.sandbox_types.end());
+            tactical_->sandbox_paid = res.sandbox_paid;
+        } else {
+            tactical_->sandbox = battle_ && battle_->kind != static_cast<int32_t>(galactic::ConflictKind::Space) && !s.multiplayer;
+            tactical_->sandbox_player = sim_->local_player();
+        }
         if (!res.has_set) return false;
         if (!s.store || !files_) {
             note("story: the resumed battle's tactical plots " + res.file + " cannot load (no store / file provider)");
@@ -1919,6 +1940,7 @@ bool StorySession::begin_battle(const StoryBattleStart& s, uint64_t frame, std::
     std::string plots = s.plots_file;
     int32_t owner = s.local_player;
     int32_t named_by = -1;
+    bool linked = false;  // mcx4 t09: the plots came from a LINK_TACTICAL reward (the story's linked battle, state 9)
     if (s.request) {
         lua::StoryNotification n;
         n.planet = planet_type_name(b->planet);
@@ -1951,6 +1973,7 @@ bool StorySession::begin_battle(const StoryBattleStart& s, uint64_t frame, std::
                 if (!kind_ok || !(ascii_iequals(where, n.planet) || ascii_iequals(where, t.planet))) continue;
                 plots = std::string(ascii_trim(l.params[6]));
                 l.used = true;
+                linked = true;
                 if (l.plot_set >= 0 && static_cast<size_t>(l.plot_set) < sets_.size()) named_by = sets_[static_cast<size_t>(l.plot_set)]->player;
                 break;
             }
@@ -1965,6 +1988,11 @@ bool StorySession::begin_battle(const StoryBattleStart& s, uint64_t frame, std::
     if (owner < 0) owner = b->attacker;
     battle_ = std::move(b);
     attach_tactical(s, frame);
+    // mcx4 t09 (Q5, battle start 0x28fda0) [H]: the sandbox plot loads in a single-player campaign battle unless the
+    // conflict is the story's linked battle; its spawner objectives act in land battles only. [port] the local player's
+    // tutorial flag (+0x3C0) is not modelled.
+    tactical_->sandbox = s.request != nullptr && !space && !linked && !s.multiplayer;
+    tactical_->sandbox_player = sim_->local_player();
     if (plots.empty() || !s.store) return false;
     if (!files_) {
         note("story: no file provider for the tactical plots " + plots);
@@ -2278,6 +2306,47 @@ void StorySession::service_tactical(uint64_t frame) {
     if (tac.own_bridge && tac.store) tac.own_bridge->prune(*tac.store);
 }
 
+// mcx4 t09 (MCX4_GAL2_RE_ANSWERS Q5) [H]: the sandbox plot's Sandbox_Set_Sandbox_Objectives fires at STORY_ELAPSED 2 s;
+// SET_SANDBOX_OBJECTIVES (0x32bd10) keeps the first spawner of each type in the spawner list (0x5315e0) and, for each one
+// hostile to the local player (relation enemy) whose type has an Enemy_Spawn_Text, adds <T>_00 CHECK_DESTROYED
+// DESTROY_ALL_INDIGENOUS_SPAWNERS T and <T>_01 STORY_TRIGGER with the CREDITS reward Indigenous_Spawn_Destruction_Reward.
+// Each T9 the pair fires once no live spawner of type T is left (whoever destroyed them) and pays the plot's player,
+// the local player, Add_Credits with notify on - once per type. [M] the new events are polled from the next T9.
+void StorySession::service_sandbox(uint64_t frame) {
+    Tactical& tac = *tactical_;
+    if (!tac.sandbox || !tac.store || tac.sandbox_player < 0) return;
+    const objects::ObjectStore& st = *tac.store;
+    static const objects::BehaviorTypeId kSpawner = objects::behavior_type_id("SPAWN_INDIGENOUS_UNITS");
+    if (!tac.sandbox_built) {
+        if (lua::StoryModel::t9_seconds(frame - tac.start_frame, static_cast<float>(tac.spf)) < 2.0) return;
+        tac.sandbox_built = true;
+        std::vector<objects::TypeIndex> seen;
+        for (const objects::ObjectHandle h : st.all_objects()) {
+            if (!st.alive(h) || !st.has_behavior(h, kSpawner)) continue;
+            const objects::TypeIndex t = st.type(h);
+            if (std::find(seen.begin(), seen.end(), t) != seen.end()) continue;
+            seen.push_back(t);
+            if (sim_->relation(tac.sandbox_player, st.owner(h)) != galactic::Relation::Enemy) continue;
+            if (t >= types_->raw().type_count() || ascii_trim(types_->get_string(t, "Enemy_Spawn_Text")).empty()) continue;
+            tac.sandbox_types.push_back(t);
+        }
+        tac.sandbox_paid.assign(tac.sandbox_types.size(), 0);
+        return;
+    }
+    for (size_t i = 0; i < tac.sandbox_types.size(); ++i) {
+        if (tac.sandbox_paid[i]) continue;
+        bool live = false;
+        for (const objects::ObjectHandle h : st.all_objects())
+            if (st.alive(h) && st.type(h) == tac.sandbox_types[i] && st.has_behavior(h, kSpawner)) {
+                live = true;
+                break;
+            }
+        if (live) continue;
+        tac.sandbox_paid[i] = 1;
+        sim_->add_credits(tac.sandbox_player, static_cast<float>(sim_->rules().constants.indigenous_spawn_destruction_reward), true);
+    }
+}
+
 // UNIT_PROXIMITY (STORY.md 4.1 step 4) and CHECK_DESTROYED (step 5) polls - wave 2b: the original rules
 // (SCRIPT_GAPS.md §4.8), see the comments inside.
 void StorySession::poll_tactical() {
@@ -2403,7 +2472,7 @@ namespace {
 
 // 2 (stage 2): + the attached tactical story; 3 (q6 t14): + the holocron list (GALACTIC_DIALOGS §2.8). 1 and 2 still load
 // (with an empty holocron); 3 loads with default STY1 state.
-constexpr uint32_t kStorySaveVersion = 8;  // 8 (mcx6 review): each definition edit's tactical flag, the RANDOM_STORY stream after the edits; 7 (mcx6 t03): the battle snapshot without its CategoryMask list / base flag, + the orbit record's Ship_Class lists after the STY1 block; 6 (mcx6): + the definition edits after the clock, the mcx6 story gates at the end of the STY1 block; 5 (ui2 t06): + the DISABLE_RETREAT switches at the end of the STY1 block; 4 (STY1 lane B): + the story rule gates / tutorial state / reinforcement switches
+constexpr uint32_t kStorySaveVersion = 9;  // 9 (mcx4 t09): the tactical story's sandbox spawner objectives after its bridge; 8 (mcx6 review): each definition edit's tactical flag, the RANDOM_STORY stream after the edits; 7 (mcx6 t03): the battle snapshot without its CategoryMask list / base flag, + the orbit record's Ship_Class lists after the STY1 block; 6 (mcx6): + the definition edits after the clock, the mcx6 story gates at the end of the STY1 block; 5 (ui2 t06): + the DISABLE_RETREAT switches at the end of the STY1 block; 4 (STY1 lane B): + the story rule gates / tutorial state / reinforcement switches
 // "story.lua" (write_scripts): 1 galactic sets, 2 + the tactical set, 3 = 2 (it followed kStorySaveVersion), 4 (q6 t19):
 // each script's Lua state is a script block (alamo/lua/script_save.hpp, LUA_SAVE.md §2) instead of a bare LuaVm image.
 constexpr uint32_t kStoryScriptsVersion = 4;
@@ -2582,6 +2651,10 @@ void StorySession::write(ByteWriter& w) const {
     }
     w.boolean(t.own_bridge != nullptr);
     if (t.own_bridge) put_section(w, [&t](ByteWriter& sub) { write_system(*t.own_bridge, sub); });
+    // v9 (mcx4 t09): the sandbox spawner objectives.
+    w.boolean(t.sandbox).boolean(t.sandbox_built).i32(t.sandbox_player).u32(static_cast<uint32_t>(t.sandbox_types.size()));
+    for (size_t i = 0; i < t.sandbox_types.size(); ++i)
+        w.u32(static_cast<uint32_t>(t.sandbox_types[i])).u8(i < t.sandbox_paid.size() ? t.sandbox_paid[i] : uint8_t{0});
 }
 
 bool StorySession::read(ByteReader& r) {
@@ -2799,6 +2872,17 @@ bool StorySession::read(ByteReader& r) {
         }
         has_own = r.boolean();
         if (has_own) own_bridge = r.raw(r.u32());
+        if (version >= 9) {  // mcx4 t09
+            tac_id.has_sandbox = true;
+            tac_id.sandbox = r.boolean();
+            tac_id.sandbox_built = r.boolean();
+            tac_id.sandbox_player = r.i32();
+            const uint32_t n = read_count(r);
+            for (uint32_t i = 0; i < n && r.ok(); ++i) {
+                tac_id.sandbox_types.push_back(r.u32());
+                tac_id.sandbox_paid.push_back(r.u8());
+            }
+        }
     }
     if (!r.ok() || !r.done()) return false;
     if (tactical_ && (!has_tac || has_set != (tactical_->set != nullptr) || has_own != (tactical_->own_bridge != nullptr)))
@@ -2856,6 +2940,13 @@ bool StorySession::read(ByteReader& r) {
         tactical_->start_frame = tac_start;
         tactical_->spf = tac_spf;
         tactical_->pending = std::move(pending);
+        if (tac_id.has_sandbox) {  // mcx4 t09 (v9)
+            tactical_->sandbox = tac_id.sandbox;
+            tactical_->sandbox_built = tac_id.sandbox_built;
+            tactical_->sandbox_player = tac_id.sandbox_player;
+            tactical_->sandbox_types.assign(tac_id.sandbox_types.begin(), tac_id.sandbox_types.end());
+            tactical_->sandbox_paid = tac_id.sandbox_paid;
+        }
         if (Set* s = tactical_->set.get()) {
             s->credits_seen = tac_set.credits_seen;
             s->last_credits = tac_set.last_credits;

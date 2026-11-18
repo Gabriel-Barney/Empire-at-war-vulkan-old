@@ -66,6 +66,9 @@ Read only by the **tactical sandbox objectives** builder (0x32bd10, strings `San
 type on the map it adds a story event `<name>_00` (`DESTROY_ALL_INDIGENOUS_SPAWNERS`, param 3 = the spawner type,
 text `TEXT_TACTICAL_PLANETARY_CREDIT_BONUS`) and a follow-up `<name>_01` whose reward (type 4, credits) is this value.
 It is not read by the spawner behaviour. The sandbox objectives belong to the story system (not ported by TRU1).
+Corrected by `MCX4_GAL2_RE_ANSWERS.md` Q5 (2026-11-18): `<name>_00`'s text is the spawner type's `Enemy_Spawn_Text`
+(`TEXT_TACTICAL_PLANETARY_CREDIT_BONUS` is a separate objective); the pair is made per hostile spawner type, in land
+battles only, and pays the local player. Ported in `sim::StorySession::service_sandbox`.
 
 ## 2. t06: space retreat jump-out (`SpaceRetreatCoordinatorClass`, vtable 0x890fe8; update vf5 0x5337c0)
 
