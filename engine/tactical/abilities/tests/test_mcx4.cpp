@@ -2,6 +2,8 @@
 // docs/re/MCX4_RE_ANSWERS_TACTICAL.md.
 #include "test_abilities_common.hpp"
 
+#include <utility>
+
 namespace bo3split {
 
 // ledger: verifies Absorb_Blaster_Ability.Damage_Absorb_Percentage
@@ -148,6 +150,51 @@ void test_mcx4_spawn_ability() {
     w.ab->remove(51);  // the bomber is removed before it stops: no explosion (notice 0x71de50)
     for (int i = 0; i < 4; ++i) step();
     CHECK(w.sys->health(2) == hp && !w.ab->special_applied(1, crc));
+}
+
+// ledger: verifies GameObjectType.Projectile_Redirect_Chance_Modifier
+// ledger: verifies GameObjectType.Projectile_Block_Chance_Modifier
+void test_mcx4_redirect_chance_modifiers() {
+    // TACTICAL_COMBAT §3.8 (Redirect_Blaster 0x709c90): redirect when a draw < Projectile_Redirect_Chance_Modifier x the
+    // redirect chance, else block when a second draw < Projectile_Block_Chance_Modifier x the block chance (type ctor
+    // 0x367250: both 1.0). A shot whose modifiers are 0 is neither redirected nor blocked even at chance 1.
+    auto run = [](float redirect_mod, float block_mod) {
+        World w;
+        ProjectileDesc laser;
+        laser.name = "Laser";
+        laser.damage = 20.0f;
+        laser.category = ProjectileCategory::Laser;
+        laser.redirect_chance_modifier = redirect_mod;
+        laser.block_chance_modifier = block_mod;
+        w.cd.projectiles = {laser};
+        SpecialAbilityDesc s;
+        s.style = ActivationStyle::TakeDamage;
+        s.applicable_categories = ~uint64_t{0};
+        s.name = "Deflect";
+        s.cls = SpecialClass::RedirectBlaster;
+        s.redirect_chance = 1.0f;
+        s.block_chance = 1.0f;
+        const uint32_t sd = add_special(w.ad, s);
+        UnitDesc jedi;
+        jedi.name = "Jedi";
+        jedi.tactical_health = 100.0f;
+        AbilityObjectDesc ja;
+        ja.specials = {sd};
+        const uint32_t jd = push(w.cd, w.ad, jedi, ja);
+        UnitDesc trooper;
+        trooper.name = "Trooper";
+        trooper.tactical_health = 100.0f;
+        trooper.category_mask = 0x1;
+        const uint32_t td = push(w.cd, w.ad, trooper, AbilityObjectDesc{});
+        w.make();
+        w.add(1, jd, 0, Vec3{0, 0, 0});
+        w.add(2, td, 1, Vec3{100, 0, 0});
+        const bool caught = w.ab->damage_listener(1, 2, 0, w.frame, &w.rng);
+        return std::pair<bool, int>{caught, w.has_event(AbilityEventKind::Redirected, 1) ? 1 : (w.has_event(AbilityEventKind::Blocked, 1) ? 2 : 0)};
+    };
+    CHECK(run(1.0f, 1.0f) == (std::pair<bool, int>{true, 1}));   // redirected
+    CHECK(run(0.0f, 1.0f) == (std::pair<bool, int>{true, 2}));   // no redirect: blocked
+    CHECK(run(0.0f, 0.0f) == (std::pair<bool, int>{false, 0}));  // neither
 }
 
 }  // namespace bo3split

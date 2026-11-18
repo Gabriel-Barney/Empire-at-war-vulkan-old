@@ -545,14 +545,17 @@ struct UnitDesc {
     // t01: Surface_Type_Cover_Damage_Shield (+0x1e48): Get_Damage_Multiplier's factor on cover cells (surface 9-11), land.
     float cover_damage_shield = 1.0f;
     // t02: the SURFACE_FX instances of a type with the SURFACE_FX behaviour in the battle's mode: CombatData::surface_fx
-    // indices of its SurfaceFX_Name entries that have a sim term (list order, at most kMaxUnitSurfaceFx).
+    // indices of its SurfaceFX_Name entries that have a sim term (list order; mcx4 t17: every entry, as retail builds one
+    // instance per entry, TRN1_TERRAIN_GAMEPLAY §2).
     std::vector<uint16_t> surface_fx;
     // t05: On_Fire_Speed_Modifier (+0x2040): the speed factor while burning (obj +0x3a1 bit 2); 1 when unset.
     float on_fire_speed = 1.0f;
     // t04: Destroy_When_Stunned_Over_Water (+0xe6; FoC: MAL_Rocket_Vehicle): ABILITIES_HARDPOINTS §4.12 RE reading.
     bool destroy_when_stunned_over_water = false;
 };
-inline constexpr uint32_t kMaxUnitSurfaceFx = 4;
+// mcx4 t17: the per-instance surface memory keeps its first kSurfaceFxFixedSlots slots in a fixed array (the save / hash
+// layout from trn1 t02; base FoC types have at most 3 entries); later instances (mod types) use Unit::sfx_prev_more.
+inline constexpr uint32_t kSurfaceFxFixedSlots = 4;
 
 struct CombatData {
     DamageArmorTable damage;
@@ -1844,7 +1847,8 @@ private:
         ObjectId bshield_in = kNoObject;  // AFFECTED_BY_SHIELD pack +0x18: the straddled shield
         // ---- trn1 t02 (SurfaceFX terrain modifiers; saved, hashed under tag 0x5B when not at the spawn values) ----
         uint8_t sfx_ready = 0;  // the instances exist (first update done); evaluated from the next update
-        std::array<uint8_t, kMaxUnitSurfaceFx> sfx_prev{};  // per instance the surface of its last update (+0xc)
+        std::array<uint8_t, kSurfaceFxFixedSlots> sfx_prev{};  // per instance the surface of its last update (+0xc)
+        std::vector<uint8_t> sfx_prev_more;  // mcx4 t17: instances kSurfaceFxFixedSlots.. (saved / hashed only when present)
         float terrain_damage = 0.0f;  // data pack +0x188: Terrain_Damage of the surface being stood on
         uint32_t terrain_next = 0;    // +0x18c: frame of the next terrain damage
         float terrain_delay = 0.0f;   // +0x190: Terrain_Damage_Delay (seconds)

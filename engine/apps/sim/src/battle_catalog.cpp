@@ -263,6 +263,9 @@ int32_t BattleCatalog::projectile(uint32_t t, BuildState& s) const {
     p.blast_dropoff = ty.get_bool(t, "Projectile_Blast_Area_Dropoff");  // mcx4 t03 (TACTICAL_COMBAT §3.5)
     p.blast_dropoff_tiers = ty.get_int(t, "Projectile_Blast_Area_Dropoff_Tiers");
     p.bomb_fall_accel = ty.get_float(t, "Projectile_Bomb_Fall_Accel_Rate");  // mcx4 t18 (MCX4_RE_ANSWERS_TACTICAL §12)
+    // mcx4 t10 (TACTICAL_COMBAT §3.8; type ctor 0x367250 sets both to 1.0 [H]): the Redirect_Blaster roll factors
+    if (!ty.get_string(t, "Projectile_Redirect_Chance_Modifier").empty()) p.redirect_chance_modifier = ty.get_float(t, "Projectile_Redirect_Chance_Modifier");
+    if (!ty.get_string(t, "Projectile_Block_Chance_Modifier").empty()) p.block_chance_modifier = ty.get_float(t, "Projectile_Block_Chance_Modifier");
     if (const std::string_view f = ascii_trim(ty.get_string(t, "Projectile_Blast_Area_Immune_Faction")); !f.empty())
         p.blast_immune_faction = name_crc(f);  // tru1 t04
     p.damages_random_hardpoints = ty.get_bool(t, "Projectile_Damages_Random_Hard_Points");
@@ -657,7 +660,7 @@ tc::UnitDesc BattleCatalog::unit_desc(uint32_t t, BuildState& s) const {
         if (has)
             for (const std::string_view item : ty.get_list(t, "SurfaceFX_Name")) {
                 size_t at = 0;
-                while (at <= item.size() && u.surface_fx.size() < tc::kMaxUnitSurfaceFx) {  // "A, B" in one item: split
+                while (at <= item.size()) {  // "A, B" in one item: split (mcx4 t17: every entry, no cap)
                     const size_t comma = item.find(',', at);
                     const std::string_view name = ascii_trim(item.substr(at, comma == std::string_view::npos ? std::string_view::npos : comma - at));
                     const int32_t k = name.empty() ? -1 : tc::find_surface_fx(surface_fx_, name);
