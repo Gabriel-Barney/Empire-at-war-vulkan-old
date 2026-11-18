@@ -118,6 +118,11 @@ struct FactionRules {
     ForceSide force_alignment = ForceSide::Neutral;  // Force_Alignment (+0x110)
     std::array<float, 2> corruption_time_mult{1.0f, 1.0f};   // Corruption_Galactic_Production_Time_Multipliers
     std::array<float, 2> corruption_price_mult{1.0f, 1.0f};  // Corruption_Galactic_Production_Price_Multipliers
+    // mcx4 t07 (MCX4_RE_ANSWERS_GALACTIC Q7.2): the tactical float lists, entry 0 = battle planet not corrupted, 1 =
+    // corrupted, as written (any length; an index past the end reads 1.0). Build_Pad_Time has no reader in retail.
+    std::vector<float> corruption_tactical_production_price_mult;  // Corruption_Tactical_Production_Price_Multipliers
+    std::vector<float> corruption_tactical_production_time_mult;   // Corruption_Tactical_Production_Time_Multipliers
+    std::vector<float> corruption_tactical_pad_price_mult;         // Corruption_Tactical_Build_Pad_Price_Multipliers
     // a2m r2: Automatic_Planetary_Corruption_Upgrade_Type (faction +0x3068): the upgrade type a planet corrupted by this
     // faction gets, index = corruption type 0..7 (list order); 0xFFFFFFFF = none / unresolved. Resolved by
     // load_galactic_rules; the names are kept as written in `automatic_corruption_upgrade_names`.

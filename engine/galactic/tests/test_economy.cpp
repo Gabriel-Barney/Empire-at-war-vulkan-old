@@ -2024,6 +2024,39 @@ void test_campaign_rule_fields_parse() {
     CHECK(d.autoresolve_allowed && !d.story_campaign && d.special_case_production.empty() && d.autoresolve_exclusions.empty());
 }
 
+// mcx4 t07 (docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.2): the faction's tactical corruption factors for a campaign battle at a
+// planet - pad price: entry 1 only, when corrupted (entry 0 never read); production price / time: entry (corrupted ? 1 : 0);
+// an index past the list's end reads 1.0. The battle host multiplies the pad price (truncated) and the production time.
+// Lists: Corruption_Tactical_Build_Pad_Price_Multipliers, Corruption_Tactical_Production_Price_Multipliers,
+// Corruption_Tactical_Production_Time_Multipliers.
+// ledger: verifies Faction.Corruption_Tactical_Build_Pad_Price_Multipliers
+// ledger: verifies Faction.Corruption_Tactical_Production_Price_Multipliers
+// ledger: verifies Faction.Corruption_Tactical_Production_Time_Multipliers
+void test_tactical_corruption_multipliers() {
+    std::printf("  mcx4: Corruption_Tactical_* multipliers\n");
+    GalacticRules rules = make_oi_rules(1.0f);
+    rules.factions[0].corruption_tactical_pad_price_mult = {0.5f, 2.0f};
+    rules.factions[0].corruption_tactical_production_price_mult = {0.8f, 1.25f};
+    rules.factions[0].corruption_tactical_production_time_mult = {0.75f};
+    objects::GameObjectTypes types;
+    objects::IdCounter ids;
+    objects::ObjectStore store{objects::ModeKind::Galactic, objects::StoreKind::Primary, types, &ids};
+    SimRng rng{0x5151u};
+    GalacticSim s(rules, store, rng);
+    CHECK(s.start(make_setup({{pEmpire, rA, tSB1}, {pEmpire, rB, tSB1}})));
+    using K = GalacticSim::TacticalCorruption;
+    CHECK(s.tactical_corruption_multiplier(rB, pEmpire, K::PadPrice) == 1.0f);  // not corrupted: entry 0 is never read
+    CHECK(s.tactical_corruption_multiplier(rB, pEmpire, K::ProductionPrice) == 0.8f);
+    CHECK(s.tactical_corruption_multiplier(rB, pEmpire, K::ProductionTime) == 0.75f);
+    s.set_corruption(rA, kCorruptionRacketeering, pUnder);
+    CHECK(s.tactical_corruption_multiplier(rA, pEmpire, K::PadPrice) == 2.0f);
+    CHECK(s.tactical_corruption_multiplier(rA, pEmpire, K::ProductionPrice) == 1.25f);
+    CHECK(s.tactical_corruption_multiplier(rA, pEmpire, K::ProductionTime) == 1.0f);  // past the end
+    CHECK(s.tactical_corruption_multiplier(rA, pUnder, K::PadPrice) == 1.0f);  // the Underworld lists are empty
+    CHECK(s.tactical_corruption_multiplier(kInvalidPlanet, pEmpire, K::PadPrice) == 1.0f &&
+          s.tactical_corruption_multiplier(rA, 9, K::PadPrice) == 1.0f);
+}
+
 // SG 1.3: buildability order and reason codes.
 void test_oi_buildability() {
     std::printf("  oi: buildability\n");
@@ -3113,6 +3146,12 @@ void test_foc_campaign_fields(const FocData& d) {
     const GalacticSetup uw = build_campaign_setup(d.db, d.rules, "Full_Story_Campaign_Underworld");
     CHECK(uw.story_campaign && uw.autoresolve_allowed && uw.autoresolve_exclusions.empty() && uw.corruption_level_override.empty());
     CHECK(!hotm.story_campaign && hotm.autoresolve_allowed);
+    // t07 (Q7.2): FoC's tactical corruption lists are "1.0, 1.0" on the Empire, Rebel and Underworld factions.
+    {
+        const FactionRules& ef = d.rules.factions[d.rules.find_faction("Empire")];
+        CHECK(ef.corruption_tactical_pad_price_mult == (std::vector<float>{1.0f, 1.0f}) &&
+              ef.corruption_tactical_production_time_mult == (std::vector<float>{1.0f, 1.0f}));
+    }
     // t05 (Q5.1): the bribe fields from FoC's own files.
     for (const DifficultyRules& dr : d.rules.difficulties) CHECK(dr.bribe_cost_multiplier == 0.25f);
     const uint32_t reb_f = d.rules.find_faction("Rebel"), emp_f = d.rules.find_faction("Empire");
@@ -3380,6 +3419,7 @@ int main(int argc, char** argv) {
         test_corruption_level_override();
         test_campaign_autoresolve_rules();
         test_route_bribe_toll();
+        test_tactical_corruption_multipliers();
         test_unit_roles();  // q6 t03
         test_oi_victory();
         test_tsw_planet_destroy();

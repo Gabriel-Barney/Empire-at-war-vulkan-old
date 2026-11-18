@@ -279,6 +279,15 @@ std::vector<FactionRules> load_factions(const FileProvider& provider, std::vecto
             r.is_playable = xv::bool_or(n, "Is_Playable", false);
             r.benefits_from_corruption = xv::bool_or(n, "Benefits_From_Corruption", false);
             r.easily_bribed = xv::bool_or(n, "Easily_Bribed", false);  // mcx4 t05 (MCX4_RE_ANSWERS_GALACTIC Q5.1)
+            // mcx4 t07 (Q7.2): code 0x13 float lists (every element appends, MCX1 Q1).
+            const auto floats = [&n](std::string_view tag) {
+                std::vector<float> out;
+                for (std::string_view f : xv::list(n, tag)) out.push_back(xv::to_float(f));
+                return out;
+            };
+            r.corruption_tactical_production_price_mult = floats("Corruption_Tactical_Production_Price_Multipliers");
+            r.corruption_tactical_production_time_mult = floats("Corruption_Tactical_Production_Time_Multipliers");
+            r.corruption_tactical_pad_price_mult = floats("Corruption_Tactical_Build_Pad_Price_Multipliers");
             r.debug_switchable = xv::bool_or(n, "Is_Debug_Switchable_To", false);  // mcx6 SWITCH_SIDES
             r.basic_ai = std::string(text("Basic_AI"));
             r.text_id = std::string(text("Text_ID"));

@@ -48,3 +48,20 @@ Reader: is it a rule (a build that completes after a countdown) or presentation 
 ## Q8 Difficulty_Adjustment Bribe_Cost_Multiplier, second reader
 `MCX4_RE_ANSWERS_GALACTIC.md` Q5.1 found 0x4313e0 and 0x434720. The AI per-hop payment 0x434720 (fleet locomotor
 0x56a1e0): what is fleet data byte +0x96 (set by whom), and does the human ever reach it?
+
+## t06 rows handed over by lane mcx4-tac (galactic side; RVAs from `mcx4-tac` notes)
+
+## Q9 Ability base Unit_Strength_Category (+0x48) / Unit_Strength_Factor (+0x50)
+`TACTICAL_GAPS.md` §4.7 [H]: in the auto-resolve exchange of fire 0x60d2a0, per combatant whose type has an ability
+(0x374da0), each set category bit raises a 32-float table entry to max(entry, factor − 1) (initial value assumed 0 [M]).
+How does that table enter the side's strength or the damage dealt (which combatants, multiplied as 1 + b?), and is the
+table per side or per battle? Port: `engine/galactic/src/auto_resolve.cpp` (bonus 1).
+
+## Q10 Income_Stream_Ability Split_Income_With_Allies (+0x184), Full_Amount_To_Everyone, Split_Favors_Owner, Owner_Income_Percentage; Income_Stream_Mod_Ability Interval_Multiplier (+0x180), Affects_All_Allied_Sources (+0x198)
+Methods around 0x702790 / 0x702f20 / 0x7038b0 / 0x703d00 / 0x7046e0 / 0x704880. Where does the stream pay (tactical
+skirmish only, or galactic too), how is the amount split among allies (equal shares, rounding, the owner's share), and
+how does the mod change other streams' interval (which streams, `Interval_Multiplier` outside (0, 1] read as 0)?
+
+## Q11 Siphon_Credits_Ability Evade_Detection_Chance (+0x178)
+Methods 0x70bc30 / 0x70be20 / 0x70c260 / 0x70e2b0: when the detection roll runs, which random stream and how many draws,
+and what detection does (ends the siphon, reveals the hero, refunds?).

@@ -1890,6 +1890,21 @@ void GalacticSim::set_corruption(PlanetIndex planet, int8_t type, int32_t corrup
         emit(ev);
     }
 }
+float GalacticSim::tactical_corruption_multiplier(PlanetIndex planet, int32_t player, TacticalCorruption kind) const {
+    if (!valid_planet(planet) || !valid_player(player)) return 1.0f;
+    const uint32_t f = players_[static_cast<size_t>(player)].faction;
+    if (f >= rules_->factions.size()) return 1.0f;
+    const FactionRules& fr = rules_->factions[f];
+    const bool corrupted = planets_[planet].corruption != kCorruptionNone;  // 0x3a0910
+    const auto entry = [](const std::vector<float>& v, size_t i) { return i < v.size() ? v[i] : 1.0f; };
+    switch (kind) {
+        case TacticalCorruption::PadPrice: return corrupted ? entry(fr.corruption_tactical_pad_price_mult, 1) : 1.0f;
+        case TacticalCorruption::ProductionPrice: return entry(fr.corruption_tactical_production_price_mult, corrupted ? 1u : 0u);
+        case TacticalCorruption::ProductionTime: return entry(fr.corruption_tactical_production_time_mult, corrupted ? 1u : 0u);
+    }
+    return 1.0f;
+}
+
 int32_t GalacticSim::orbit_controller(PlanetIndex planet) const {
     if (!valid_planet(planet)) return kNoPlayer;
     const PlanetState& p = planets_[planet];

@@ -1252,6 +1252,15 @@ public:
     // `payees` gets (planet owner, amount) per planet in path order; the result is the total.
     int32_t route_toll(int32_t player, uint32_t fleet, std::span<const PlanetIndex> path,
                        std::vector<std::pair<int32_t, int32_t>>* payees = nullptr) const;
+    // mcx4 t07 (docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.2): the corruption factor a campaign battle at `planet` applies to
+    // `player`'s tactical prices and times (faction getters 0x33e440 / 0x33e470 / 0x33e4a0, 1.0 past the list's end):
+    //   pad price 0x3744e0: Corruption_Tactical_Build_Pad_Price_Multipliers entry 1 when the planet is corrupted, else 1.0
+    //                       (entry 0 is never read);
+    //   production price 0x496d80 / time 0x496f00: the Production_Price / _Time list at index (planet corrupted ? 1 : 0).
+    // 1.0 for an invalid planet or a player without a faction. The callers apply it only in a campaign battle (a galactic
+    // parent mode); the price factor only while a tactical price modifier is active for the type (0x496d80).
+    enum class TacticalCorruption : uint8_t { PadPrice, ProductionPrice, ProductionTime };
+    float tactical_corruption_multiplier(PlanetIndex planet, int32_t player, TacticalCorruption kind) const;
     // 0x3f9270 as Q5.1 reads it: the starbase owner while the starbase level is > 0, else the owner of the first fleet in
     // orbit that is not hidden (0x3a9760), else of the first hidden one, else kNoPlayer.
     int32_t orbit_controller(PlanetIndex planet) const;
