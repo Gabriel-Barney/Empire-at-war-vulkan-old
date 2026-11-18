@@ -142,7 +142,10 @@ public:
     // mcx3 t04: malformed MEG tables found at mount (meg::Archive::table_issues); lookups follow the game's rule
     // (meg::Archive::lookup), so what the game loses is lost here too, and each finding is also a warnings() line.
     struct MegIssue {
-        std::string kind;     // "meg_unsorted", "meg_duplicate", "meg_name_mismatch", "meg_index"
+        enum class Kind : uint8_t { Unsorted, Duplicate, NameMismatch, Index };
+        Kind kind = Kind::Unsorted;
+        // "meg_unsorted", "meg_duplicate", "meg_name_mismatch", "meg_index"
+        static const char* kind_name(Kind k);
         std::string archive;  // host path of the .meg
         uint32_t count = 0;   // records concerned (meg_unsorted: records the lookup cannot reach, 0 when none is lost)
         std::string first;    // one record's stored name

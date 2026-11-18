@@ -76,6 +76,7 @@ void test_stack_dep(const std::string& root) {
     // Picked in the wrong order: resolution puts the submod first...
     const vfs::ResolvedStack w = game::resolve_mod_stack(root, {"MODPATH=Mods\\StackParent", "MODPATH=Mods\\StackSub"}, o);
     CHECK(joined(w.args) == "MODPATH=Mods\\StackSub | MODPATH=Mods\\StackParent");
+    CHECK(has(w.warnings, "StackParent is picked above its submod StackSub"));
     // ...but an explicit command line is mounted as written (earliest wins, MODS.md 3.1).
     const game::ModCheckReport e = game::check_mod_data(root, {"MODPATH=Mods\\StackParent", "MODPATH=Mods\\StackSub"}, o);
     CHECK(e.mods.size() == 2 && e.mods[0].name == "Stack Parent" && e.mods[1].name == "Stack Sub");

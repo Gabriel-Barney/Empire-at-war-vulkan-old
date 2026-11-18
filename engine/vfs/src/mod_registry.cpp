@@ -203,7 +203,8 @@ private:
             ++e;
         if (e == p_) return false;
         v.t = JValue::T::Num;
-        v.n = std::strtod(std::string(t_.substr(p_, e - p_)).c_str(), nullptr);
+        v.s = std::string(t_.substr(p_, e - p_));  // as written: a version 1.10 stays "1.10"
+        v.n = std::strtod(v.s.c_str(), nullptr);
         p_ = e;
         return true;
     }
@@ -216,7 +217,7 @@ private:
 std::string str_of(const JValue* v) {
     if (!v) return {};
     if (v->t == JValue::T::Str) return v->s;
-    if (v->t == JValue::T::Num) return std::to_string(static_cast<long long>(v->n));
+    if (v->t == JValue::T::Num) return v->s;
     return {};
 }
 
@@ -572,7 +573,7 @@ bool mod_provides(const std::string& root, std::string_view path) {
         if (!it->is_regular_file(ec) || lower(path_to_utf8(it->path().extension())) != ".meg") continue;
         std::string err;
         const auto a = meg::Archive::open(path_to_utf8(it->path()), meg::Source::Mode::Stream, &err);
-        if (a && a->find(path)) return true;
+        if (a && a->lookup(path)) return true;  // the game's rule (docs/re/MCX3_MEG_LOOKUP.md)
     }
     return false;
 }
@@ -594,13 +595,21 @@ ResolvedStack resolve_stack(const ModRegistry& registry, std::span<const std::st
         return found.size() - 1;
     };
     std::vector<size_t> queue;
+    std::vector<bool> queued;  // a found mod whose own dependencies are (to be) expanded
+    const auto enqueue = [&](size_t j) {
+        if (queued.size() <= j) queued.resize(j + 1, false);
+        if (!queued[j]) {
+            queued[j] = true;
+            queue.push_back(j);
+        }
+    };
     for (const std::string& a : picked_args) {
         const ModDescriptor* m = registry.find_arg(a, scratch);
         if (!m) {
             r.errors.push_back("not a mod this install has: " + a);
             continue;
         }
-        queue.push_back(add(*m, "picked"));
+        enqueue(add(*m, "picked"));
     }
     // Breadth-first over declared dependencies (nearest ancestor first), the hint for a mod that declares none.
     for (size_t q = 0; q < queue.size(); ++q) {
@@ -616,12 +625,11 @@ ResolvedStack resolve_stack(const ModRegistry& registry, std::span<const std::st
                                          (d.name.empty() ? std::string() : " (" + d.name + ")") + " is not installed");
                     continue;
                 }
-                const bool fresh = index_of.find(key_of(*p)) == index_of.end();
                 const size_t j = add(*p, "dependency of " + me_key);
                 if (std::find(deps[i].begin(), deps[i].end(), j) == deps[i].end()) deps[i].push_back(j);
                 const bool recurse = me.layout == DependencyLayout::ResolveRecursive ||
                                      (me.layout == DependencyLayout::ResolveLastItem && k + 1 == me.dependencies.size());
-                if (fresh && recurse) queue.push_back(j);
+                if (recurse) enqueue(j);
             }
         } else if (hint) {
             std::vector<std::string> stack_args{me.arg()};
@@ -629,10 +637,9 @@ ResolvedStack resolve_stack(const ModRegistry& registry, std::span<const std::st
                 if (k != i) stack_args.push_back(found[k].mod.arg());
             if (const auto parent = hint(stack_args)) {
                 if (const ModDescriptor* p = registry.find_arg(*parent, scratch)) {
-                    const bool fresh = index_of.find(key_of(*p)) == index_of.end();
                     const size_t j = add(*p, "likely parent of " + me_key);
                     if (j != i && std::find(deps[i].begin(), deps[i].end(), j) == deps[i].end()) deps[i].push_back(j);
-                    if (fresh) queue.push_back(j);
+                    enqueue(j);
                 }
             }
         }
@@ -681,6 +688,21 @@ ResolvedStack resolve_stack(const ModRegistry& registry, std::span<const std::st
             r.mods.push_back(found[pick]);
         }
     }
+    // The command line as picked: a mod listed above a mod that depends on it (design 15, "a submod above its parent").
+    for (size_t v = 0; v < picked_args.size(); ++v)
+        for (size_t w = v + 1; w < picked_args.size(); ++w) {
+            const ModDescriptor* pv = registry.find_arg(picked_args[v], scratch);
+            const ModDescriptor* pw = registry.find_arg(picked_args[w], scratch);
+            if (!pv || !pw) continue;
+            const auto iv = index_of.find(key_of(*pv)), iw = index_of.find(key_of(*pw));
+            if (iv == index_of.end() || iw == index_of.end()) continue;
+            const std::vector<size_t>& dw = deps[iw->second];
+            if (std::find(dw.begin(), dw.end(), iv->second) != dw.end())
+                r.warnings.push_back(pv->key() + " is picked above its submod " + pw->key() +
+                                     "; the earlier mod wins, so the stack puts " + pw->key() + " first");
+        }
+    for (StackMod& s : r.mods)
+        if (s.mod.content_hash == 0 && s.mod.has_data) s.mod.content_hash = mod_content_hash(s.mod.root);
     r.fingerprint = kFnvBasis;
     for (const StackMod& s : r.mods) {
         r.args.push_back(s.mod.arg());

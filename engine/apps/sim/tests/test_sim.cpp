@@ -560,6 +560,20 @@ static void test_save_session(const World& w) {
         now.seed = 9;
         CHECK(!SessionDescriptor::only_data_differs(m, now));
         CHECK(!SessionDescriptor::only_data_differs(m, m));  // equal: nothing to load anyway
+        // A save from before mcx3: mod arguments, no mods block. The mods are unknown, not "none".
+        SessionDescriptor old = d;  // data_args {MODPATH=Mods/X}, no mods
+        SessionDescriptor cur = d;
+        cur.data_fingerprint = 0x777;
+        cur.mods = {{"X", "Mod X", "1.1", 0x40}};
+        CHECK(SessionDescriptor::mismatch(old, cur).find("game data differs (fingerprint") == 0);
+        CHECK(SessionDescriptor::mod_changes(old, cur).empty());
+        // A mod named like the generic text still gets its own line.
+        SessionDescriptor fm = m;
+        fm.mods[0].name = "Fingerprint Overhaul";
+        SessionDescriptor fc = fm;
+        fc.data_args = {"MODPATH=Mods/Y"};
+        fc.mods.erase(fc.mods.begin());
+        CHECK(SessionDescriptor::mismatch(fm, fc) == "Fingerprint Overhaul was in this save and is not loaded now");
     }
     SessionDescriptor g;
     g.kind = "keep";

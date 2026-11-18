@@ -150,6 +150,10 @@ struct SessionDescriptor {
     // changed since this save (version a)", "<name> was in this save and is not loaded now", "<name> is loaded now and
     // was not in this save"; "game data differs (fingerprint ...)" when the mods do not say. "" when the data is equal.
     static std::string data_change(const SessionDescriptor& saved, const SessionDescriptor& current);
+    // The per-mod lines of data_change; empty when the mods say nothing (equal, or a side with mod arguments and no
+    // mods block: a save from before mcx3).
+    static std::vector<std::string> mod_changes(const SessionDescriptor& saved, const SessionDescriptor& current);
+    static std::string join_changes(const std::vector<std::string>& lines);
 };
 
 // The descriptor of a save, without loading anything (what the application needs to rebuild the session).

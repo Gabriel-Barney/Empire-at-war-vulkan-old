@@ -149,7 +149,8 @@ Consequences for mods (all **main**):
 
 A save stores the VFS command line it was made with (`SessionDescriptor::data_args`), a fingerprint of the loaded
 definitions (`data_fingerprint`) and (mcx3 t05) the mods of the stack (`SessionDescriptor::mods`: key, name, version,
-content hash; written only when a mod is loaded, so a base-game save keeps its earlier bytes). Loading a save rebuilds
+content hash; written only when a mod is loaded, so a base-game save keeps its earlier bytes; a build from before
+mcx3 refuses a save that has the block as unreadable). Loading a save rebuilds
 the session from those arguments; a save made with different data (another mod, another mod version, no mod) is refused
 with the first difference (`SessionDescriptor::mismatch`, `engine/apps/sim/include/alamo/sim/save_session.hpp`; **main**).
 A data difference is named per mod: "<name> updated since this save (version a -> b)", "changed since this save",

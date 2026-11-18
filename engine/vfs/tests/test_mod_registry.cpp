@@ -78,6 +78,8 @@ void test_parse() {
     // No name: a warning; not an object: nullopt; truncated: nullopt.
     w.clear();
     CHECK(av::parse_modinfo("{\"version\": \"1\"}", &w).has_value() && has(w, "no \"name\""));
+    const auto num = av::parse_modinfo("{\"name\": \"N\", \"version\": 1.10}");
+    CHECK(num.has_value() && num->version == "1.10");  // a number keeps its text
     CHECK(!av::parse_modinfo("[1, 2]").has_value());
     CHECK(!av::parse_modinfo("{\"name\": \"x").has_value());
     CHECK(!av::parse_modinfo("").has_value());
@@ -247,6 +249,32 @@ void test_resolve(const Fixture& f) {
     // Unknown argument.
     const std::vector<std::string> bad{"STEAMMOD=31337"};
     CHECK(has(av::resolve_stack(r, bad).errors, "not a mod this install has: STEAMMOD=31337"));
+
+    // In memory: A (FullResolved, deps [B]) and D (ResolveRecursive, deps [B]); B depends on E. B is expanded once,
+    // whichever mod reached it first, so E is in the stack.
+    av::ModRegistry m;
+    const auto mod = [&](const char* id, std::vector<const char*> deps, av::DependencyLayout layout) {
+        av::ModDescriptor d;
+        d.kind = av::ModKind::Workshop;
+        d.id = d.name = id;
+        d.layout = layout;
+        for (const char* x : deps) d.dependencies.push_back({1u, x, ""});
+        m.mods.push_back(d);
+    };
+    mod("1", {"2"}, av::DependencyLayout::FullResolved);
+    mod("4", {"2"}, av::DependencyLayout::ResolveRecursive);
+    mod("2", {"5"}, av::DependencyLayout::ResolveRecursive);
+    mod("5", {}, av::DependencyLayout::ResolveRecursive);
+    const std::vector<std::string> ad{"STEAMMOD=1", "STEAMMOD=4"};
+    const av::ResolvedStack x = av::resolve_stack(m, ad);
+    CHECK(joined(x.args) == "STEAMMOD=1 | STEAMMOD=4 | STEAMMOD=2 | STEAMMOD=5");
+    std::printf("  expansion: %s\n", joined(x.args).c_str());
+    // A parent picked above its submod: reordered, and said.
+    const std::vector<std::string> up{"STEAMMOD=2", "STEAMMOD=4"};
+    const av::ResolvedStack u = av::resolve_stack(m, up);
+    CHECK(joined(u.args) == "STEAMMOD=4 | STEAMMOD=2 | STEAMMOD=5");
+    CHECK(has(u.warnings, "2 is picked above its submod 4"));
+    CHECK(!has(x.warnings, "is picked above"));
 }
 
 // ---- mcx3 t04: MEG tables as the game reads them (meg::Archive::lookup, docs/re/MCX3_MEG_LOOKUP.md) ----
@@ -385,6 +413,40 @@ void test_meg() {
         CHECK(re->table_issues().index_redirect == 2);
     }
 
+    // Sweep: table sizes 1..40, shuffled stored orders with repeated CRCs (a fixed LCG), every stored CRC and some
+    // absent ones probed the way the CRT probes.
+    {
+        uint32_t seed = 12345u;
+        const auto next = [&seed] {
+            seed = seed * 1664525u + 1013904223u;
+            return seed;
+        };
+        size_t mismatches = 0, probes = 0;
+        for (uint32_t n = 1; n <= 40; ++n)
+            for (int round = 0; round < 4; ++round) {
+                std::vector<std::string> nn;
+                std::vector<Rec> rr;
+                for (uint32_t i = 0; i < n; ++i) {
+                    nn.push_back("N" + std::to_string(i));
+                    rr.push_back({(next() >> 8) % (2 * n + 1), i, i});  // small range: repeats and gaps
+                }
+                if (round % 2 == 0)
+                    std::sort(rr.begin(), rr.end(), [](const Rec& a, const Rec& b) { return a.crc < b.crc; });
+                for (uint32_t i = 0; i < n; ++i) rr[i].index = i;
+                const auto ar = archive(meg_bytes(nn, rr));
+                if (!ar) {
+                    ++mismatches;
+                    continue;
+                }
+                for (uint32_t key = 0; key <= 2 * n + 1; ++key) {
+                    ++probes;
+                    mismatches += ar->probe(key) == crt_probe(rr, key) ? 0u : 1u;
+                }
+            }
+        CHECK(mismatches == 0);
+        std::printf("  probe sweep: %zu probes, %zu differ from the CRT's bsearch\n", probes, mismatches);
+    }
+
     // Mounted: the VFS reads through the same rule and records each finding (warnings and meg_issues).
     alamo::test::section("meg mount (conformance meg_unsorted)");
     const fs::path T = fs::temp_directory_path() / "alamo_vfs_registry_tests_meg";
@@ -401,7 +463,7 @@ void test_meg() {
         size_t readable = 0;
         std::vector<uint8_t> b;
         for (const std::string& n : names) readable += v->read(n, b) ? 1u : 0u;
-        CHECK(v->meg_issues().size() == 1 && v->meg_issues()[0].kind == "meg_unsorted");
+        CHECK(v->meg_issues().size() == 1 && v->meg_issues()[0].kind == alamo::vfs::Vfs::MegIssue::Kind::Unsorted);
         CHECK(!v->meg_issues().empty() && readable + v->meg_issues()[0].count == names.size());
         CHECK(has(v->warnings(), "meg_unsorted: MEG '"));
         std::printf("  mounted: %zu of %zu readable; %s\n", readable, names.size(), v->warnings().empty() ? "" : v->warnings().back().c_str());

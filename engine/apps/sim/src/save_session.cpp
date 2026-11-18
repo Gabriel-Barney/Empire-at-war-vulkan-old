@@ -3,6 +3,7 @@
 
 #include <algorithm>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/galactic/campaign.hpp"
 #include "alamo/galactic/galactic_rules.hpp"
@@ -153,8 +154,8 @@ std::string SessionDescriptor::mismatch(const SessionDescriptor& s, const Sessio
     if (s.kind != c.kind) return "session kind '" + s.kind + "' != '" + c.kind + "'";
     if (s.campaign != c.campaign) return "campaign '" + s.campaign + "' != '" + c.campaign + "'";
     if (s.data_args != c.data_args) {
-        const std::string change = data_change(s, c);
-        return change.find("fingerprint") == std::string::npos ? change : "data arguments (mod path) differ";
+        const std::vector<std::string> lines = mod_changes(s, c);
+        return lines.empty() ? std::string("data arguments (mod path) differ") : join_changes(lines);
     }
     if (s.seed != c.seed) return "session seed " + std::to_string(s.seed) + " != " + std::to_string(c.seed);
     if (s.players != c.players) return "player slots " + std::to_string(s.players) + " != " + std::to_string(c.players);
@@ -187,9 +188,19 @@ bool SessionDescriptor::only_data_differs(const SessionDescriptor& s, const Sess
     return mismatch(same, c).empty();
 }
 
-std::string SessionDescriptor::data_change(const SessionDescriptor& s, const SessionDescriptor& c) {
-    std::string out;
-    const auto add = [&out](const std::string& line) { out += (out.empty() ? "" : "; ") + line; };
+std::vector<std::string> SessionDescriptor::mod_changes(const SessionDescriptor& s, const SessionDescriptor& c) {
+    std::vector<std::string> out;
+    // A side with mod arguments but no mods block (a save from before mcx3) does not say which mods it had.
+    const auto known = [](const SessionDescriptor& d) {
+        if (!d.mods.empty()) return true;
+        for (const std::string& a : d.data_args) {
+            const std::string up = ascii_upper(std::string_view(a).substr(0, 9));
+            if (up.rfind("MODPATH=", 0) == 0 || up.rfind("STEAMMOD=", 0) == 0) return false;
+        }
+        return true;
+    };
+    if (!known(s) || !known(c)) return out;
+    const auto add = [&out](const std::string& line) { out.push_back(line); };
     const auto find = [](const std::vector<SaveMod>& v, const std::string& key) -> const SaveMod* {
         for (const SaveMod& m : v)
             if (m.key == key) return &m;
@@ -206,9 +217,21 @@ std::string SessionDescriptor::data_change(const SessionDescriptor& s, const Ses
     }
     for (const SaveMod& m : c.mods)
         if (!find(s.mods, m.key)) add(m.name + " is loaded now and was not in this save");
-    if (out.empty() && (s.data_fingerprint != c.data_fingerprint || s.data_args != c.data_args))
-        out = "game data differs (fingerprint " + hex64(s.data_fingerprint) + " != " + hex64(c.data_fingerprint) + ")";
     return out;
+}
+
+std::string SessionDescriptor::join_changes(const std::vector<std::string>& lines) {
+    std::string out;
+    for (const std::string& l : lines) out += (out.empty() ? "" : "; ") + l;
+    return out;
+}
+
+std::string SessionDescriptor::data_change(const SessionDescriptor& s, const SessionDescriptor& c) {
+    const std::vector<std::string> lines = mod_changes(s, c);
+    if (!lines.empty()) return join_changes(lines);
+    if (s.data_fingerprint != c.data_fingerprint || s.data_args != c.data_args)
+        return "game data differs (fingerprint " + hex64(s.data_fingerprint) + " != " + hex64(c.data_fingerprint) + ")";
+    return {};
 }
 
 bool read_session(const SaveFile& save, SessionDescriptor& out, std::string* err) {

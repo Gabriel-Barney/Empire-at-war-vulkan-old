@@ -1404,13 +1404,20 @@ void compat_issues_and_grade(ModCheckReport& r) {
         r.issues.add(IssueKind::AssetSalvaged, IssueSeverity::Info, e.path, e.path, e.family + ": " + e.rule, false, uint16_t{0});
     // mcx3 t04: the port reads a malformed MEG as the game does (meg::Archive::lookup): retail-equivalent findings.
     for (const vfs::Vfs::MegIssue& m : r.meg_issues) {
-        const IssueKind k = m.kind == "meg_unsorted"   ? IssueKind::MegUnsorted
-                            : m.kind == "meg_duplicate" ? IssueKind::MegDuplicate
-                                                        : IssueKind::MegNameMismatch;  // meg_name_mismatch, meg_index
+        using MK = vfs::Vfs::MegIssue::Kind;
+        if (m.kind == MK::Index) continue;  // no issue kind of its own: a VFS warning only
+        const IssueKind k = m.kind == MK::Unsorted    ? IssueKind::MegUnsorted
+                            : m.kind == MK::Duplicate ? IssueKind::MegDuplicate
+                                                      : IssueKind::MegNameMismatch;
+        const std::string archive = alamo::normalize_name(m.archive);
         bool in_mod = false;
-        for (const std::string& dir : r.mod_dirs)
-            in_mod = in_mod || alamo::normalize_name(m.archive).rfind(alamo::normalize_name(dir), 0) == 0;
-        r.issues.add(k, IssueSeverity::Info, m.archive, m.archive, m.kind + ": " + std::to_string(m.count) + " record(s), first " + m.first,
+        for (const std::string& dir : r.mod_dirs) {
+            std::string d = alamo::normalize_name(dir);
+            if (!d.empty() && d.back() != '\\') d.push_back('\\');  // a folder, not a name prefix (Mods\Foo vs Mods\FooBar)
+            in_mod = in_mod || archive.rfind(d, 0) == 0;
+        }
+        r.issues.add(k, IssueSeverity::Info, m.archive, m.archive,
+                     std::string(vfs::Vfs::MegIssue::kind_name(m.kind)) + ": " + std::to_string(m.count) + " record(s), first " + m.first,
                      true, layer(in_mod));
     }
     r.grade.grade = r.error_count() ? "G0" : "G1";
@@ -1560,7 +1567,7 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
 }
 
 vfs::ResolvedStack resolve_mod_stack(const std::string& root, const std::vector<std::string>& picked, const ModCheckOptions& options) {
-    const vfs::ModRegistry registry = vfs::scan_installed_mods(root, options.workshop_libraries);
+    const vfs::ModRegistry registry = vfs::scan_installed_mods(root, options.workshop_libraries, false);  // the stack's mods get hashed
     ModCheckOptions light;
     light.campaigns = light.lua = light.lua_run = light.xml_tags = light.shaders = light.compat = light.assets = false;
     light.fx_prebuild = light.shader_compile = false;

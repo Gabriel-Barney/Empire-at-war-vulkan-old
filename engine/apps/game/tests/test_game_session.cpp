@@ -2841,26 +2841,27 @@ static void different_data_save_test(const std::string& data_dir, game::SessionS
     CHECK(!ec);
     const fs::path types = cur_dir / "Data" / "XML" / "GSTypes.xml";
     std::string t = ::alamo::test::read_file(types);
-    const size_t at = t.find("<Tactical_Health>900</Tactical_Health>");
+    const std::string before = "<Tactical_Health>900</Tactical_Health>", after = "<Tactical_Health>950</Tactical_Health>";
+    const size_t at = t.find(before);
     CHECK(at != std::string::npos);
     if (at == std::string::npos) return;
-    t.replace(at, 38, "<Tactical_Health>950</Tactical_Health>");
+    t.replace(at, before.size(), after);
     write_file(types, t);
 
-    const auto stack = [](const char* version) {
+    const auto stack = [](const char* version, uint64_t content_hash) {
         vfs::ModDescriptor m;
         m.kind = vfs::ModKind::LocalMods;
         m.id = "StackSub";
         m.name = "Stack Sub";
         m.version = version;
-        m.content_hash = version[2] == '0' ? 0x10u : 0x11u;
+        m.content_hash = content_hash;
         return std::vector<vfs::ModDescriptor>{m};
     };
     game::GameData old_data, cur_data;
     std::string err;
     CHECK(game::load_game_data_dir(data_dir, old_data, &err) && game::load_game_data_dir(path_to_utf8(cur_dir), cur_data, &err));
-    old_data.mods = stack("1.0");
-    cur_data.mods = stack("1.1");
+    old_data.mods = stack("1.0", 0x10);
+    cur_data.mods = stack("1.1", 0x11);
     jobs::JobSystem js(jobs::JobSystemConfig{2});
     std::string path;
     {

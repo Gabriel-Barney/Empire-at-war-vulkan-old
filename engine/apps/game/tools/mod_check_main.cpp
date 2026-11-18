@@ -96,7 +96,9 @@ int main(int argc, char** argv) {
             r.resolved = true;
             r.stack = stack;
             const std::string s = alamo::game::format_mod_report(r, verbose);
-            if (json != "-") std::fputs(s.substr(0, s.find("== files")).c_str(), stdout);
+            const std::string stack_text = s.substr(0, s.find("== files"));
+            if (json != "-") std::fputs(stack_text.c_str(), stdout);
+            if (!out.empty() && !write_file(out, stack_text)) return 1;
             if (!json.empty()) {
                 const std::string js = alamo::game::format_mod_report_json(r);
                 if (json == "-") std::fputs(js.c_str(), stdout);

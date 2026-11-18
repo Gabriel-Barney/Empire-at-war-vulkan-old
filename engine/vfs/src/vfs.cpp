@@ -370,25 +370,26 @@ struct Vfs::Impl {
         }
         if (a->encrypted()) warn("MEG '" + host + "' is encrypted; its entries are not visible");
         if (const meg::Archive::TableIssues t = a->table_issues(); t.any()) {  // mcx3 t04
-            const auto add = [&](const char* kind, uint32_t count, const std::string& first, const std::string& what) {
+            using K = Vfs::MegIssue::Kind;
+            const auto add = [&](K kind, uint32_t count, const std::string& first, const std::string& what) {
                 meg_issues.push_back(Vfs::MegIssue{kind, host, count, first});
-                warn(std::string(kind) + ": MEG '" + host + "': " + what);
+                warn(std::string(Vfs::MegIssue::kind_name(kind)) + ": MEG '" + host + "': " + what);
             };
             if (t.unsorted)
-                add("meg_unsorted", t.unreachable, t.first_unreachable,
+                add(K::Unsorted, t.unreachable, t.first_unreachable,
                     "record table not sorted by CRC; " + std::to_string(t.unreachable) +
                         " record(s) the game's binary search cannot reach" +
                         (t.unreachable ? " (first " + t.first_unreachable + ")" : std::string()));
             if (t.duplicate)
-                add("meg_duplicate", t.duplicate, t.first_duplicate,
+                add(K::Duplicate, t.duplicate, t.first_duplicate,
                     std::to_string(t.duplicate) + " record(s) share a CRC with another; the search's probe order picks one (first shadowed " +
                         t.first_duplicate + ")");
             if (t.name_mismatch)
-                add("meg_name_mismatch", t.name_mismatch, t.first_name_mismatch,
+                add(K::NameMismatch, t.name_mismatch, t.first_name_mismatch,
                     std::to_string(t.name_mismatch) + " record(s) whose stored CRC is not their name's: found by CRC only (first " +
                         t.first_name_mismatch + ")");
             if (t.index_redirect)
-                add("meg_index", t.index_redirect, t.first_index_redirect,
+                add(K::Index, t.index_redirect, t.first_index_redirect,
                     std::to_string(t.index_redirect) + " record(s) whose index field is not their position: the data read is the record it names (first " +
                         t.first_index_redirect + ")");
         }
@@ -646,6 +647,15 @@ const std::vector<Vfs::Mount>& Vfs::mounts() const { return impl_->mounts; }
 const std::vector<std::string>& Vfs::mod_dirs() const { return impl_->mod_dirs; }
 const std::vector<std::string>& Vfs::warnings() const { return impl_->warnings; }
 const std::vector<Vfs::MegIssue>& Vfs::meg_issues() const { return impl_->meg_issues; }
+const char* Vfs::MegIssue::kind_name(Kind k) {
+    switch (k) {
+        case Kind::Unsorted: return "meg_unsorted";
+        case Kind::Duplicate: return "meg_duplicate";
+        case Kind::NameMismatch: return "meg_name_mismatch";
+        case Kind::Index: return "meg_index";
+    }
+    return "meg_unknown";
+}
 const std::string& Vfs::eaw_root() const { return impl_->eaw_root; }
 const std::string& Vfs::foc_root() const { return impl_->foc_root; }
 

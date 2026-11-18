@@ -536,6 +536,7 @@ bool SimHost::load(const SaveFile& in, std::string* err, LoadReport* report) {
         if (report) *report = rep;
         return ok;
     };
+    loaded_with_different_data_ = false;  // mcx3 t05: set again below only when this load goes ahead that way
     if (modes_.empty()) {
         rep.descriptor_error = "no session to load into (rebuild the saved session first)";
         return finish(false);
@@ -551,7 +552,6 @@ bool SimHost::load(const SaveFile& in, std::string* err, LoadReport* report) {
         return finish(false);
     }
     rep.descriptor_error = SessionDescriptor::mismatch(saved, session());
-    loaded_with_different_data_ = false;
     if (!rep.descriptor_error.empty()) {
         rep.different_data = SessionDescriptor::only_data_differs(saved, session());
         if (!rep.different_data || !allow_different_data_) return finish(false);

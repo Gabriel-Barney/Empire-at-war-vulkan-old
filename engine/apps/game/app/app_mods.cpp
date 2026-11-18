@@ -98,6 +98,7 @@ void App::poll_mod_check() {
     if (!id.empty() && launch.empty()) {  // D1: a refused base-EaW mod has no launch
         mod_refused_.insert(id);
     } else if (!id.empty()) {
+        mod_refused_.erase(id);
         std::string args;
         for (const std::string& a : launch) args += (args.empty() ? "" : " ") + a;
         lines.push_back(ui::utf8_to_utf32("Starts with: " + args));
