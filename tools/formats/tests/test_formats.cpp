@@ -302,6 +302,42 @@ void test_anim_salvage() {
     CHECK(notes.empty() && a.rotation_block == 4);
 }
 
+// mcx2 t03: ALO salvage (alo.hpp) for the defects retail draws (compat_assets run 3).
+void test_alo_salvage() {
+    std::vector<SalvageNote> notes;
+    const ParseOptions salvage{true, &notes};
+    // Skin influence outside the bone map: strict error, salvage clamps it to entry 0.
+    const auto skin = vertex_model(0x10007, 144, "alD3dVertB4I4NU2", true, {0, 0});
+    CHECK(!parses(skin));
+    auto f = alo::parse(skin, salvage);
+    CHECK(f.model.meshes[0].submeshes[0].vertices.bone_index[2][0] == 0);
+    CHECK(!notes.empty() && notes[0].rule == "alo_skin_index_clamped");
+    // Defiler shape: empty chunks and one chunk claiming more bytes than the file holds, after a complete model.
+    notes.clear();
+    auto trail = vertex_model(0x10007, 144, "alD3dVertNU2", false, {});
+    for (int i = 0; i < 3; ++i) trail = cat({trail, chunk(0, {}, false)});
+    auto big = chunk(0x1000000, std::vector<std::uint8_t>(16, 7), false);
+    big[4] = 0xFF;  // size field: far past the end
+    big[5] = 0xFF;
+    trail = cat({trail, big});
+    CHECK(!parses(trail));
+    f = alo::parse(trail, salvage);
+    CHECK(f.model.meshes.size() == 1 && notes.size() == 1 && notes[0].rule == "alo_trailing_junk");
+    // Junk before the connections chunk is still an error (retail: no connections = not drawn).
+    notes.clear();
+    bool threw = false;
+    try {
+        (void)alo::parse(cat({big}), salvage);
+    } catch (const FormatError&) {
+        threw = true;
+    }
+    CHECK(threw);
+    // A valid model notes nothing.
+    notes.clear();
+    (void)alo::parse(vertex_model(0x10007, 144, "alD3dVertNU2", false, {}), salvage);
+    CHECK(notes.empty());
+}
+
 int main() {
     test_emitter_desc();
     test_chunks();
@@ -309,6 +345,7 @@ int main() {
     test_vertex_layouts();
     test_anim();
     test_anim_salvage();
+    test_alo_salvage();
     test_text();
     if (g_fail) { std::printf("%d failures\n", g_fail); return 1; }
     std::printf("all tests passed\n");

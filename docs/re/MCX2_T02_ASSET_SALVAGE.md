@@ -26,7 +26,7 @@ probe copies:
   chunk's own length. The reader returns success in every case. So (a) and (b) above load: with block size 0, a frame's
   rotation is read at `0 x frame + index`, i.e. the first frame's value on every frame; with no data and every index
   0xFFFF, nothing is read and every bone keeps its default value.
-- Model, collision, skin and particle readers: not yet read; the probe answers them.
+- Model, collision, skin and particle readers: not read; the probe answered what retail shows (section 3).
 
 ## 3. Probe results
 
@@ -47,24 +47,28 @@ at slot 3's spawn in both runs, and slot 3 was a mesh without its info chunk bot
 z-95 shape of the same defect). Run 3 (`--skip NOINFO,SPILL,OVR,ANS`) puts the intact-parsing `COLL` in the same third
 spawn and position, to rule out a kit cause before "retail hangs" is recorded for that defect.
 
-Per slot, from `out\<run>\report.txt` and the screenshots:
+**Run 3 (2026-11-17, `out\20261117-191739`, `--skip NOINFO,SPILL,OVR,ANS`).** Complete: 73 records, every slot alive
+at spawn and at its `HOLD_END`, the credits rising throughout (6,135 to 7,505), the closing overview shown. `COLL`, the
+third spawn at the same place where `NOINFO` and `SPILL` froze, went through, so the kit is ruled out: **retail freezes
+when it creates a model whose mesh has no info chunk 0x402** (both shapes; run 1's freeze, left about 4 minutes, ended in
+the bugcheck). Spawn paths: `NOCONN`, `PCTRL`, `PBAD` and `EMPTY` only through `Create_Generic_Object`, the rest
+through `Spawn_Unit`. Verdicts from the shots (each slot's caption names it; the camera centres on the slot):
 
 | Slot | Retail | Port rule (t03) |
 |---|---|---|
-| `CTRL` / `SKCTRL` / `PCTRL` | | controls |
-| `NOCONN` | **not drawn**, object alive, game runs on (run 2; `Spawn_Unit` fails, `Create_Generic_Object` works) | do not draw it, `asset_rejected` marked retail-equivalent |
-| `NOINFO` | froze retail at its spawn (run 1, with a bugcheck); kit cause not yet ruled out (run 3) | |
-| `SPILL` | froze retail at its spawn (run 2); kit cause not yet ruled out (run 3) | |
-| `COLL` | | |
-| `TRAIL` | | |
-| `BORDER` | | |
-| `ANZ` | | |
-| `ANG` | | |
-| `SKIN` | | |
-| `PBAD` | | |
-| `ANS` | unprobed (left out after run 1) | |
-| `OVR` | unprobed (left out after run 1) | |
-| `EMPTY` | | |
+| `CTRL` / `SKCTRL` | drawn (AT-ST walk pose / stormtrooper) | controls |
+| `PCTRL` | the intact fire particle is not visible at its spot either (the site is next to a burning map structure), so the particle slots are inconclusive | control |
+| `NOCONN` | **not drawn**, object alive, game runs on (runs 2, 3) | rejected, retail-equivalent |
+| `NOINFO`, `SPILL` | **retail freezes** at the spawn (runs 1, 2; kit ruled out by run 3) | rejected, retail-equivalent (the port shows nothing and keeps running) |
+| `COLL` | drawn like `CTRL` (run 3, shot 13) | `alo_collision_dropped`: the broken collision tree is dropped [port] |
+| `TRAIL` | drawn like `CTRL` (shot 18) | `alo_trailing_junk`: after the skeleton and connections, an overrunning top-level chunk ends the model |
+| `BORDER` | drawn, **broken**: body and legs displaced (shot 22) | still rejected [port]: the bone hierarchy code needs parents first; no reference mod has the defect (dropped as mcx2 t12) |
+| `ANZ` | drawn as a whole AT-ST (shot 27) | `ala_block_stride` (section 2) |
+| `ANG` | drawn as a whole AT-ST (shot 31) | `ala_block_stride` (bones keep their defaults) |
+| `SKIN` | drawn like `SKCTRL` (shot 40, one bad vertex not visible) | `alo_skin_index_clamped`: the influence goes to bone-map entry 0 [port] |
+| `PBAD` | inconclusive (see `PCTRL`) | still rejected (strict particle reader) |
+| `EMPTY` | nothing drawn, object alive, game runs on (shot 55) | rejected, retail-equivalent |
+| `ANS`, `OVR` | unprobed guesses (left out after run 1, Gabriel) | `ANS` salvaged by `ala_block_stride`; `OVR` still rejected |
 
 ## 4. Texture, font and movie lookups (t05, read with REA 2026-11-17)
 

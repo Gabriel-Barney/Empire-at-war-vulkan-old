@@ -60,6 +60,7 @@ struct RetailEquivalent {
 constexpr RetailEquivalent kRetailEquivalent[] = {
     {"no connections chunk 0x600", "retail does not draw a model without its connections chunk (docs/re/MCX2_T02_ASSET_SALVAGE.md 3, run 2)"},
     {"DX10-header DDS", "retail's d3dx9_43 reads no DX10-header DDS (docs/re/MCX2_T02_ASSET_SALVAGE.md 4)"},
+    {"mesh without info chunk 0x402", "retail freezes when it creates a model whose mesh has no info chunk (docs/re/MCX2_T02_ASSET_SALVAGE.md 3, runs 1-3)"},
     {"Photoshop PSD content", "retail's d3dx9_43 reads no PSD (docs/re/MCX2_T02_ASSET_SALVAGE.md 4)"},
 };
 
@@ -138,11 +139,13 @@ int audit_animation(const std::vector<uint8_t>& b, bool strict, std::string* rul
     return kDecoded;
 }
 
-int audit_alo(const std::vector<uint8_t>& b, std::string* family, std::string* rule) {
+int audit_alo(const std::vector<uint8_t>& b, bool strict, std::string* family, std::string* rule) {
     const bool particle = b.size() >= 4 && b[0] == 0x00 && b[1] == 0x09 && b[2] == 0x00 && b[3] == 0x00;
     *family = particle ? "particle" : "model";
+    std::vector<SalvageNote> notes;
     try {
-        const alo::AloFile f = alo::parse(b);
+        // Particles load strictly at run time (no salvage rule is confirmed for them); models salvage (alo.hpp).
+        const alo::AloFile f = alo::parse(b, ParseOptions{!particle && !strict, &notes});
         if (particle != (f.kind == alo::AloFile::Kind::ParticleSystem)) {
             *rule = "ALO kind does not match its first chunk";
             return kRejected;
@@ -161,6 +164,10 @@ int audit_alo(const std::vector<uint8_t>& b, std::string* family, std::string* r
         }
     }
 #endif
+    if (!notes.empty()) {
+        *rule = join_notes(notes);
+        return kSalvaged;
+    }
     return kDecoded;
 }
 
@@ -265,7 +272,7 @@ using Cache = std::unordered_map<CacheKey, CacheValue, CacheKeyHash>;  // looked
 
 // The second number is the rules version: bump it whenever a decoder, salvage rule or retail-equivalent entry changes
 // what a file's verdict is, so a cache written by an older build is ignored.
-constexpr const char* kCacheHeader = "alamo asset audit cache v1 rules 4";
+constexpr const char* kCacheHeader = "alamo asset audit cache v1 rules 5";
 
 std::string cache_file(const std::string& dir) { return dir + "\\asset_audit_v1.txt"; }
 
@@ -388,7 +395,7 @@ int audit_asset_bytes(const std::string& family_in, const std::vector<uint8_t>& 
         if (retail_equivalent_out) *retail_equivalent_out = true;
         return kRejected;
     }
-    if (family == "model" || family == "particle") state = audit_alo(bytes, &family, &rule);
+    if (family == "model" || family == "particle") state = audit_alo(bytes, strict, &family, &rule);
     else if (family == "animation") state = audit_animation(bytes, strict, &rule);
     else if (family == "texture") state = audit_texture(bytes, strict, &rule);
     else if (family == "map") state = audit_map(bytes, &rule);
