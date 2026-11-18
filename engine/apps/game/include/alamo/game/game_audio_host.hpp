@@ -270,6 +270,9 @@ public:
         bool local_only = false;
     };
     static SpawnLine spawn_line(uint8_t ability);
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Turret_Rotating_Loop", 0x3a8080 from the turret update
+    // 0x632270): the turret is turning on a tick whose pose differs from the last tick's (the first tick seen: not).
+    static bool turret_turning(bool seen, float prev_yaw, float prev_elevation, float yaw, float elevation);
     static size_t command_rank(std::span<const std::string> rankings, std::string_view category_mask);
     // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Reinforcement_Point_Contested", 0x501980): a local player's
     // REINFORCEMENT_POINT whose capture progress starts from 0 with a pending controller other than its owner (an owned
@@ -541,6 +544,11 @@ private:
     };
     std::map<int64_t, TswApproach> tsw_approach_;             // mcx4 t13 batch S: TSW -> approach state (lookup only)
     std::map<int64_t, float> point_progress_;                 // mcx4 t13 batch U: capture point -> last progress
+    struct TurretTurn {
+        float yaw = 0.0f, elevation = 0.0f;
+        bool playing = false;
+    };
+    std::map<int64_t, TurretTurn> turret_turn_;               // mcx4 t13: unit -> last turret pose (lookup only)
     // mcx4 t13 batch B: the local player's tactical build orders last tick (order id -> type) and built counts (type ->
     // TacticalProduction::built_count), to tell a completed order from a cancelled one.
     std::map<uint32_t, int32_t> prod_orders_;

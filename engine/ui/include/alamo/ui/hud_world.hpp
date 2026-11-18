@@ -61,10 +61,14 @@ struct HudTypeInfo {
     std::string icon_name;                // Icon_Name (selection panel portrait)
     // Radar (UI.md §1.7 per-type tags): Radar_Icon_Name (atlas texture, "" = the radar_blip dot), Radar_Icon_Size (x y in
     // the radar's logical space, -1..1 across the radar: canvas size = size x radar size / 2 [port]), Is_Visible_On_Radar /
-    // Is_Visible_On_Enemy_Radar (absent = Yes [port]). Radar_Icon_Scale_Land / _Space (vanilla 1 .. 200) and
-    // Radar_Rotate_Icon / Radar_Show_Facing are not applied (no reader documented; HudUnit has no facing) [port].
+    // Is_Visible_On_Enemy_Radar (absent = Yes [port]). Radar_Rotate_Icon / Radar_Show_Facing are not applied (HudUnit has
+    // no facing) [port].
     std::string radar_icon;
     Vec2f radar_icon_size{0.0f, 0.0f};
+    // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameObjectType.Radar_Icon_Scale_Land family", blip builders 0x35b4d0 / 0x35c000):
+    // the blip icon size multiplier in land / space mode (absent = 1). [port] applied to Radar_Icon_Name icons; the
+    // vanilla 80 / 200 values sit on team / fleet containers, which the port's radar does not draw.
+    float radar_scale_land = 1.0f, radar_scale_space = 1.0f;
     bool visible_on_radar = true, visible_on_enemy_radar = true;
     // q6 t19 (OBJECT_SCRIPTS §10.3, radar filter 0x35b4d0): Visible_On_Radar_When_Fogged - a Lua-hidden unit keeps its blip.
     bool visible_on_radar_when_fogged = false;

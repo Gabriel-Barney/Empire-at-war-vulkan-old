@@ -400,6 +400,16 @@ void test_strike_available_tags() {
 // ledger: verifies Faction.SFXEvent_HUD_Reinforcement_Point_Contested
 // mcx4 (docs/re/MCX4_T11_T12_RE_ANSWERS.md §C3): GameConstants Unit_Command_Rankings_By_Category picks the speaking unit.
 // ledger: verifies GameConstants.Unit_Command_Rankings_By_Category
+// mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "GameObjectType.SFXEvent_Turret_Rotating_Loop"): the motor loop runs while
+// the turret pose changes from tick to tick.
+// ledger: verifies GameObjectType.SFXEvent_Turret_Rotating_Loop
+void test_turret_turning() {
+    using H = GameAudioHost;
+    CHECK(!H::turret_turning(false, 0.0f, 0.0f, 10.0f, 0.0f));  // first tick seen: no baseline
+    CHECK(H::turret_turning(true, 0.0f, 0.0f, 2.0f, 0.0f) && H::turret_turning(true, 0.0f, 0.0f, 0.0f, -1.0f));
+    CHECK(!H::turret_turning(true, 5.0f, 1.0f, 5.0f, 1.0f));     // held: stopped
+}
+
 void test_command_rank() {
     using H = GameAudioHost;
     const std::vector<std::string> r =
@@ -1180,6 +1190,7 @@ int main() {
     test_tsw_approach();                // mcx4 t13 batch S
     test_point_contested();             // mcx4 t13 batch U
     test_command_rank();                // mcx4 tac2 handover
+    test_turret_turning();              // mcx4 t13
     test_intro_speech_t07();
     test_aud2();
     test_spin_and_self_destruct();  // mcx4 t13 batch Q

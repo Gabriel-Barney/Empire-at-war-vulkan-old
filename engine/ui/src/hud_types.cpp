@@ -31,6 +31,10 @@ std::vector<HudTypeInfo> build_hud_type_table(const objects::GameObjectTypes& ty
         h.radar_icon = std::string(data::trim(types.get_string(t, "Radar_Icon_Name")));
         float rs[2] = {0.0f, 0.0f};
         if (data::parse_floats(types.get_string(t, "Radar_Icon_Size"), rs, 2) == 2) h.radar_icon_size = {rs[0], rs[1]};
+        // ledger: consumes GameObjectType.Radar_Icon_Scale_Land
+        h.radar_scale_land = data::parse_float_or(data::trim(types.get_string(t, "Radar_Icon_Scale_Land")), 1.0f);
+        // ledger: consumes GameObjectType.Radar_Icon_Scale_Space
+        h.radar_scale_space = data::parse_float_or(data::trim(types.get_string(t, "Radar_Icon_Scale_Space")), 1.0f);
         auto flag = [&](std::string_view tag) {  // absent = Yes [port]
             const std::string_view v = data::trim(types.get_string(t, tag));
             if (v.empty()) return true;

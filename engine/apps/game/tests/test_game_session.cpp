@@ -889,6 +889,14 @@ void movie_frame_cue_test() {
     CHECK(game::movie_frame_cue(frames, 0, 1) == -1 && game::movie_frame_cue(frames, 89, 95) == 3);
 }
 
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "GameObjectType.Show_Hero_Head family"): Show_Hero_Head puts a non-hero
+// type (Generic_Field_Commander, Underworld_Saboteur) in the battle hero roster.
+// ledger: verifies GameObjectType.Show_Hero_Head
+void shows_hero_head_test() {
+    static_assert(game::shows_hero_head(true, false) && game::shows_hero_head(false, true) && game::shows_hero_head(true, true));
+    static_assert(!game::shows_hero_head(false, false));
+}
+
 void win_lose_banner_text_test() {  // mcx4 t14: docs/re/MCX4_T14_RE_ANSWERS.md "GameConstants.Win_Lose_Message_Font"
     CHECK(game::win_lose_banner_text(true, false) == "TEXT_WIN_TACTICAL" && game::win_lose_banner_text(false, false) == "TEXT_LOSE_TACTICAL");
     CHECK(game::win_lose_banner_text(true, true) == "TEXT_WIN_CORRUPTION_MISSION");
@@ -3029,6 +3037,7 @@ int main() {
     galactic_build_listed_test();   // mcx4 t14
     encyclopedia_text_tag_test();   // mcx4 t14
     win_lose_banner_text_test();    // mcx4 t14
+    shows_hero_head_test();         // mcx4 t14
     movie_frame_cue_test();         // mcx4 t13
     story_ui_test();
     linked_overlay_test();

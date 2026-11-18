@@ -1249,12 +1249,14 @@ void App::build_panels(std::vector<ui::HudDrawList>& lists) {
         f.time = now_s_;
         f.cursor_px = cur;
     };
-    // Hero roster (battle): the local player's named heroes on the map.
+    // Hero roster (battle): the local player's named heroes on the map, and the types with Show_Hero_Head (mcx4 t14).
     std::vector<ui::HeroEntry> heroes;
     hero_types_.clear();
     if (screen_ == Screen::Battle && bview_.active())
         for (const render::SnapshotObject& o : bview_.frame().objects)
-            if (o.owner == local_player() && o.type < data_.types.size() && data_.types.get_bool(o.type, "Is_Named_Hero") && heroes.size() < 11) {
+            if (o.owner == local_player() && o.type < data_.types.size() && heroes.size() < 11 &&
+                game::shows_hero_head(data_.types.get_bool(o.type, "Is_Named_Hero"),
+                                      data_.types.get_bool(o.type, "Show_Hero_Head"))) {  // ledger: consumes GameObjectType.Show_Hero_Head
                 ui::HeroEntry e;
                 e.object = static_cast<uint32_t>(o.id);
                 e.icon = type_icon(o.type);

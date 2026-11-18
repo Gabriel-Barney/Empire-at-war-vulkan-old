@@ -1294,6 +1294,25 @@ void test_tactical_stage2() {
             for (const HudQuad& q : hud.draw_list().items(l, HudList::Alpha))
                 icon_sized = icon_sized || near2(q.max.x - q.min.x, 0.05f * hud.radar_view().size.x, 0.01f);
         CHECK2(icon_sized);
+        {  // mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md): Radar_Icon_Scale_Land / Radar_Icon_Scale_Space multiply the icon
+           // size in that mode.
+            // ledger: verifies GameObjectType.Radar_Icon_Scale_Land
+            // ledger: verifies GameObjectType.Radar_Icon_Scale_Space
+            std::vector<HudTypeInfo> scaled_types = rt;
+            scaled_types[1].radar_scale_space = 2.0f;
+            scaled_types[1].radar_scale_land = 3.0f;
+            for (const bool land : {false, true}) {
+                TacticalHudFrame f3 = f2;
+                f3.world.land = land;
+                hud.build(f3, ru, scaled_types);
+                bool scaled = false;  // 0.1 x radar size / 2 x the mode's scale
+                const float want = 0.05f * hud.radar_view().size.x * (land ? 3.0f : 2.0f);
+                for (uint32_t l = 0; l < kHudLayers; ++l)
+                    for (const HudQuad& q : hud.draw_list().items(l, HudList::Alpha)) scaled = scaled || near2(q.max.x - q.min.x, want, 0.01f);
+                CHECK2(scaled);
+            }
+            hud.build(f2, ru, rt);
+        }
         {  // R5 sensor jamming (ABILITY_VISUALS 3): hostile jammed units drop off the radar; own / allied jammed ones stay
             std::vector<HudUnit> ju = units;
             ju[0].owner = 1;

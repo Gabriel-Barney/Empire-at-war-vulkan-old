@@ -662,6 +662,26 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
             if (!ev.empty() && game_->object_sfx(static_cast<uint64_t>(e.first_bomber), ev, position_of(static_cast<uint64_t>(e.first_bomber))))
                 ++stats_.strike_lines;
         }
+    // Turret motor loop (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Turret_Rotating_Loop"): attached, any owner, started
+    // when the turret begins to turn and stopped when it stops. [port] the turrets the movement system models
+    // (UnitDesc::turret, the Deploys units); a turret pose that changed this tick = turning.
+    for (const objects::ObjectId id : battle.movement().unit_ids()) {
+        const tactical::movement::UnitView v = battle.movement().view(id);
+        const auto [it, fresh] = turret_turn_.try_emplace(static_cast<int64_t>(id));
+        TurretTurn& tt = it->second;
+        const bool turning = turret_turning(!fresh, tt.yaw, tt.elevation, v.turret_yaw, v.turret_elevation);
+        tt.yaw = v.turret_yaw;
+        tt.elevation = v.turret_elevation;
+        if (turning == tt.playing) continue;
+        tt.playing = turning;
+        const objects::ObjectHandle h = store.find(static_cast<objects::ObjectId>(id));
+        if (!store.alive(h)) continue;
+        // ledger: consumes GameObjectType.SFXEvent_Turret_Rotating_Loop
+        const std::string_view loop = types.get_string(store.type(h), "SFXEvent_Turret_Rotating_Loop");
+        if (loop.empty()) continue;
+        if (turning) game_->object_sfx(static_cast<uint64_t>(id), loop, store.position(h));
+        else game_->stop_object_sfx(static_cast<uint64_t>(id), loop);
+    }
     // Summoned / contamination / buzz-droid objects (MCX4_T13_RE_ANSWERS "Tractor_Beam_Attack_Ability.SFXEvent_Unit_Summoned"
     // family): the user's ability element line, attached to the new object (2D when the event is Is_2D). Any owner except
     // Buzz_Droids (the local droid owner only). Once per spawn.
@@ -1579,6 +1599,7 @@ void GameAudioHost::battle_reset() {
     self_destructs_.clear();
     tsw_approach_.clear();       // mcx4 t13 batch S
     point_progress_.clear();     // mcx4 t13 batch U
+    turret_turn_.clear();        // mcx4 t13
     prod_built_.clear();
     intro_decided_ = false;   // aud1 t07: a new battle decides its intro again
     object_events_reset();    // aud1 t05

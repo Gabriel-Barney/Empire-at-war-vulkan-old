@@ -110,6 +110,10 @@ std::vector<std::string_view> category_names(std::string_view text) {
 }
 }  // namespace
 
+bool GameAudioHost::turret_turning(bool seen, float prev_yaw, float prev_elevation, float yaw, float elevation) {
+    return seen && (yaw != prev_yaw || elevation != prev_elevation);
+}
+
 GameAudioHost::SpawnLine GameAudioHost::spawn_line(uint8_t ability) {
     namespace ta = tactical::abilities;
     switch (ability) {

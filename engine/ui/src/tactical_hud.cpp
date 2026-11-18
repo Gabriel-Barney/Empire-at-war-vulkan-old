@@ -668,8 +668,9 @@ void TacticalHud::build_radar(const TacticalHudFrame& f, std::span<const HudUnit
         col.a = 255;
         bool drawn = false;
         if (t && !t->radar_icon.empty()) {
+            const float k = f.world.land ? t->radar_scale_land : t->radar_scale_space;  // mcx4 t14: Radar_Icon_Scale_*
             const Vec2f sz = t->radar_icon_size.x > 0.0f && t->radar_icon_size.y > 0.0f
-                                 ? Vec2f{t->radar_icon_size.x * 0.5f * radar_view_.size.x, t->radar_icon_size.y * 0.5f * radar_view_.size.y}
+                                 ? Vec2f{t->radar_icon_size.x * 0.5f * radar_view_.size.x * k, t->radar_icon_size.y * 0.5f * radar_view_.size.y * k}
                                  : Vec2f{};
             drawn = add_atlas_quad(dl_, blayer, HudList::Alpha, *atlas_, t->radar_icon, c, sz, 1.0f, col);
             if (drawn) ++stats_.radar_icons;

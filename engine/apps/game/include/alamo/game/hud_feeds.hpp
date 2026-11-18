@@ -142,6 +142,9 @@ std::string_view encyclopedia_text_tag(bool skirmish_battle, bool has_mp_text);
 // local player is the winner or not hostile to it -> TEXT_WIN_TACTICAL, else TEXT_LOSE_TACTICAL; in a corruption
 // mission the _CORRUPTION_MISSION texts.
 std::string_view win_lose_banner_text(bool local_side_won, bool corruption_mission);
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "GameObjectType.Show_Hero_Head family", tactical HUD 0x318720): an object qualifies for
+// the battle hero roster (hero head) when its type is a named hero or has Show_Hero_Head.
+constexpr bool shows_hero_head(bool named_hero, bool show_hero_head) { return named_hero || show_hero_head; }
 // mcx4 t13 (MCX4_T13_RE_ANSWERS "Movie.SFXEvent_Frame family", Bink tick 0x44dea0 [H]): the movie cue list entry that
 // fires in a step from Bink frame `prev` to `now`: the first entry in XML order whose frame lies in (prev, now], -1 when
 // none (one cue per list per step).
