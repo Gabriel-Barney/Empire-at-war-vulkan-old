@@ -289,12 +289,14 @@ struct ModCheckReport {
         size_t official_maps = 0, custom_maps = 0;
         bool ai = false;  // AI data loaded
     } counts;
-    // mcx7 t01: the Official tab's skirmish rows (skirmish_map_rows, menu order) for the corpus runner's map pick.
+    // mcx7 t01: the skirmish rows (skirmish_map_rows, menu order: the Official tab, then the Custom tab) for the corpus
+    // runner's map pick.
     struct SkirmishMap {
         std::string map;      // SkirmishMapEntry::map
         bool land = false;    // kind 1 (else space)
         uint32_t players = 0;
         bool in_mod = false;  // the .ted resolves to a mod folder
+        bool custom = false;  // a Custom tab row
     };
     std::vector<SkirmishMap> skirmish_maps;
     size_t campaigns_checked = 0;

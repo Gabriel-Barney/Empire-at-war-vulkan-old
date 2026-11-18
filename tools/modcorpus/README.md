@@ -30,7 +30,7 @@ tools\modcorpus\run_corpus.cmd --write-md             also replace the generated
    A workshop folder without `Data` is not listed (nothing to mount).
 2. **check**: `alamo_mod_check --resolve --json` (report v4, asset cache in `logs/modcorpus/asset_cache`).
 3. **runs** (skipped for a G0 setup): space and land skirmish on the mod's map (corpus.json's pick, else the first
-   Official-tab map the mod itself ships, else the first listed), 3000 ticks at workers 0 and 4, CRC logs compared with
+   Official-tab map the mod itself ships, else the first listed, then the same on the Custom tab), 3000 ticks at workers 0 and 4, CRC logs compared with
    `alamo_headless --compare`; one galactic campaign, 9000 ticks, `--economy --galactic-ai --story --scoring
    --object-scripts`, workers 4 (corpus.json's pick, else the first campaign with planets in database order). `[port]`
    choice: the design's "first the menu lists" is read as database order, since the report does not sort by menu.

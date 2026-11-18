@@ -96,13 +96,14 @@ void count_content(const GameData& d, ModCheckReport& r) {
 #endif
     if (d.vfs) {
         const SkirmishMapCatalog cat = build_skirmish_map_catalog(*d.vfs);
-        const std::vector<SkirmishMapEntry> rows = skirmish_map_rows(cat, false);
+        const std::vector<SkirmishMapEntry> rows = skirmish_map_rows(cat, false), custom = skirmish_map_rows(cat, true);
         r.counts.official_maps = rows.size();
-        r.counts.custom_maps = skirmish_map_rows(cat, true).size();
-        for (const SkirmishMapEntry& e : rows) {
-            const auto res = d.vfs->resolve(e.path);
-            r.skirmish_maps.push_back({e.map, e.kind == 1, e.players, res && res->layer == vfs::Vfs::Resolution::Mod});
-        }
+        r.counts.custom_maps = custom.size();
+        for (const auto* tab : {&rows, &custom})
+            for (const SkirmishMapEntry& e : *tab) {
+                const auto res = d.vfs->resolve(e.path);
+                r.skirmish_maps.push_back({e.map, e.kind == 1, e.players, res && res->layer == vfs::Vfs::Resolution::Mod, tab == &custom});
+            }
     }
 }
 
@@ -2097,6 +2098,8 @@ std::string format_mod_report_json(const ModCheckReport& r) {
         count(j, "players", m.players);
         j.key("in_mod");
         j.boolean(m.in_mod);
+        j.key("custom");
+        j.boolean(m.custom);
         j.close('}');
     }
     j.close(']');

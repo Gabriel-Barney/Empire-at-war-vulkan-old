@@ -329,8 +329,12 @@ class Runner:
         maps = [m for m in (rep.get("content") or {}).get("skirmish_maps", []) if m.get("kind") == kind]
         if want and any(m["map"].upper() == want.upper() for m in maps):
             return want
-        own = [m for m in maps if m.get("in_mod")]
-        return (own or maps or [{}])[0].get("map")
+        # the Official tab first (the mod's own maps, then any), then the Custom tab (same order)
+        for pool in ([m for m in maps if not m.get("custom")], [m for m in maps if m.get("custom")]):
+            own = [m for m in pool if m.get("in_mod")]
+            if own or pool:
+                return (own or pool)[0].get("map")
+        return None
 
     @staticmethod
     def pick_campaign(rep: dict, want: str | None) -> str | None:
