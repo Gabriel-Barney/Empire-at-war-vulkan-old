@@ -121,6 +121,7 @@ int main(int argc, char** argv) {
     test_depleted_shield_increment();
     test_out_of_combat_defense();
     test_projectile_appearance_delay();
+    test_out_of_range_mod_values();  // mcx8 t11
     test_lost_target_no_rescan(); // mcx4 t03
     test_blast_dropoff();         // mcx4 t03
     test_bomb_fall();             // mcx4 t18

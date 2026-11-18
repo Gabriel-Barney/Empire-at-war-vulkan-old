@@ -1,4 +1,5 @@
 #include "alamo/sim/battle_catalog.hpp"
+#include "alamo/core/x86_int.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -421,11 +422,11 @@ int32_t BattleCatalog::hardpoint(std::string_view name, BuildState& s) const {
     if (!dt.empty()) h.damage_type = damage_.damage_index(dt);
     h.min_recharge = num("FIRE_MIN_RECHARGE_SECONDS", 0.0f);
     h.max_recharge = num("FIRE_MAX_RECHARGE_SECONDS", h.min_recharge);
-    h.pulse_count = static_cast<int32_t>(num("FIRE_PULSE_COUNT", 1.0f));
+    h.pulse_count = trunc_i32(num("FIRE_PULSE_COUNT", 1.0f));  // mcx8 t11
     h.pulse_delay = num("FIRE_PULSE_DELAY_SECONDS", 0.0f);
     h.fire_range = num("FIRE_RANGE_DISTANCE", 0.0f);
     // mcx4 t10 (MCX4_T10_RE_ANSWERS §3): the launch hold of the hardpoint's shots (int field, ctor 0)
-    h.projectile_appearance_delay_frames = static_cast<int32_t>(num("PROJECTILE_APPEARANCE_DELAY_FRAMES", 0.0f));
+    h.projectile_appearance_delay_frames = trunc_i32(num("PROJECTILE_APPEARANCE_DELAY_FRAMES", 0.0f));
     h.fire_min_range = num("FIRE_MIN_RANGE_DISTANCE", 0.0f);
     h.fighter_bay_flyout_distance = num("FIGHTER_BAY_FLYOUT_DISTANCE", 0.0f);  // STATION_HANGARS_SOUND §2.5 (hangar module)
     for (const auto& [n, v] : tags) {

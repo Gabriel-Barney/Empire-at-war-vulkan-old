@@ -16,6 +16,7 @@
 #include "alamo/core/hash.hpp"
 #include "alamo/core/parallel.hpp"
 #include "alamo/test/support.hpp"
+#include "alamo/core/x86_int.hpp"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -135,7 +136,29 @@ static void test_remove_all_long_safety(const std::filesystem::path& tmp) {
     CHECK(alamo::remove_all_long(outside, ec) == 4 && !ec);  // outside, inner, keep.txt, keep2.txt
 }
 
+// mcx8 t11 (docs/MOD_COMPAT_DESIGN.md §13.3): the x86 conversion / decrement results, identical on MSVC and clang.
+// volatile inputs keep the checks at run time (the compiler cannot fold an out-of-range cast it might treat as UB).
+void test_x86_int() {
+    static_assert(alamo::trunc_i32(2.9f) == 2 && alamo::trunc_i32(-2.9f) == -2);
+    static_assert(alamo::trunc_i32(99999999999.0f) == INT32_MIN && alamo::dec_wrap(INT32_MIN) == INT32_MAX);
+    volatile float big = 99999999999.0f, neg = -3.0e10f, edge = 2147483648.0f, low = -2147483648.0f, zero = 0.0f;
+    const float q = zero;
+    volatile float nanv = q / q;
+    CHECK(alamo::trunc_i32(big * 30.0f) == INT32_MIN);  // Age of Legends' Defense_Duration_In_Secs x FPS
+    CHECK(alamo::trunc_i32(neg) == INT32_MIN);
+    CHECK(alamo::trunc_i32(edge) == INT32_MIN);          // 2^31 is out of range
+    CHECK(alamo::trunc_i32(low) == INT32_MIN);           // -2^31 is in range
+    CHECK(alamo::trunc_i32(nanv) == INT32_MIN);
+    CHECK(alamo::trunc_i32(2147483520.0f) == 2147483520);  // the largest float below 2^31
+    volatile double bigd = 1.0e12;
+    CHECK(alamo::trunc_i32(bigd) == INT32_MIN && alamo::trunc_i32(-7.9) == -7);
+    volatile int32_t m = INT32_MIN;
+    CHECK(alamo::dec_wrap(m) == INT32_MAX && alamo::dec_wrap(0) == -1);
+    CHECK(alamo::add_wrap(INT32_MAX, 1) == INT32_MIN);
+}
+
 int main() {
+    test_x86_int();
     // CRC-32/IEEE check value.
     CHECK(alamo::crc32("123456789", 9) == 0xCBF43926u);
     CHECK(alamo::name_crc("data/xml/planets.xml") == alamo::name_crc("DATA\\XML\\PLANETS.XML"));

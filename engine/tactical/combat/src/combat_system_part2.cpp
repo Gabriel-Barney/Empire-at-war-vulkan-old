@@ -1,5 +1,6 @@
 // combat_system: part 2 (bo3 t03 split; shared code in combat_system_internal.hpp).
 #include "alamo/core/profile.hpp"
+#include "alamo/core/x86_int.hpp"
 #include "combat_system_internal.hpp"
 
 namespace alamo::tactical::combat {
@@ -959,7 +960,7 @@ void CombatSystem::detonation_effects(const Projectile& p, Vec3 center, ObjectId
 bool CombatSystem::ion_stun_unit(Unit& v, uint32_t pdesc, uint32_t frame) {
     // IonStunEffect::Apply (0x62b920) [H].
     const ProjectileDesc& pd = data_->projectiles[pdesc];
-    const auto frames = static_cast<int32_t>(static_cast<float>(cfg_.fps) * pd.ion_stun_duration);
+    const auto frames = trunc_i32(static_cast<float>(cfg_.fps) * pd.ion_stun_duration);  // mcx8 t11
     if (frames <= 0 || (v.flags & kUnitLocomotorBusy)) return false;
     float secs = pd.ion_stun_duration;
     if (!pd.ion_stun_stack_duration || v.ion_stun_end <= frame) {
@@ -1188,7 +1189,7 @@ void CombatSystem::death_spawns(Unit& v, uint32_t frame) {
         e.position = v.pos;
         e.facing = v.facing;
         e.respawn = true;
-        e.due_frame = frame + static_cast<uint32_t>(static_cast<float>(cfg_.fps) * vd.tactical_respawn_secs);
+        e.due_frame = frame + static_cast<uint32_t>(trunc_i32(static_cast<float>(cfg_.fps) * vd.tactical_respawn_secs));  // mcx8 t11
         survivor_events_.push_back(e);
     }
     if (vd.destruction_survivors.empty()) return;
@@ -1469,7 +1470,7 @@ DamageResult CombatSystem::take_damage_inner(const DamageRequest& r, uint32_t fr
         // the lockout by int(FPS x Depleted_Shield_Damage_Increment) frames when that is > 0 [M: +0x108 is the lockout
         // counter; the port moves the depletion frame], clamped at 0.
         if (can && depleted_lockout && sx > 0.0f) {
-            const int32_t add = static_cast<int32_t>(static_cast<float>(cfg_.fps) * cfg_.depleted_shield_damage_increment);
+            const int32_t add = trunc_i32(static_cast<float>(cfg_.fps) * cfg_.depleted_shield_damage_increment);
             if (add > 0) {
                 const int64_t f = static_cast<int64_t>(v.shield_depleted_frame) + add;
                 v.shield_depleted_frame = static_cast<uint32_t>(f < 0 ? 0 : (f > 0xffffffffLL ? 0xffffffffLL : f));
@@ -1682,7 +1683,7 @@ void CombatSystem::infect(Unit& v, int32_t desc, int32_t player, ObjectId source
     v.infect_source = source;
     v.infect_left = 0;
     if (v.infect_desc >= 0)
-        v.infect_left = static_cast<int32_t>(static_cast<float>(cfg_.fps) *
+        v.infect_left = trunc_i32(static_cast<float>(cfg_.fps) *
                                              data_->units[static_cast<size_t>(v.infect_desc)].infection.duration_secs);
     if (v.infect_suspend == 0) v.flags |= kUnitInfected;
 }

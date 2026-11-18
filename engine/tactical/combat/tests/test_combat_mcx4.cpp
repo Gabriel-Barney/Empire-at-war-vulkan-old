@@ -408,5 +408,17 @@ void test_projectile_appearance_delay() {
     CHECK(HardpointDesc{}.projectile_appearance_delay_frames == 0);
 }
 
+void test_out_of_range_mod_values() {
+    // mcx8 t11 (docs/MOD_COMPAT_DESIGN.md §13.3): mod values whose frame count is out of int32 range convert the x86 way
+    // (cvttss2si: INT32_MIN), so the MSVC and clang builds give the same result (both run this test). A mod's 99999999999 s
+    // pulse delay, stun or modifier duration: before mcx8 t11 a static_cast here was undefined behaviour.
+    CHECK(weapon_pulse_delay(99999999999.0f, 1.0f, 30) == INT32_MIN);
+    CHECK(expiry_frame(100u, 99999999999.0f, 30) == 100u + 0x80000000u);
+    const Recharge p = hp_pulse_recharge(99999999999.0f, 3, 1.0f, 1.0f, 30);
+    CHECK(p.frames == INT32_MIN);
+    SimRng r(7u);
+    CHECK(hp_first_cooldown(-99999999999.0f, 30, r) <= 0);  // Get_Int(0, INT32_MIN): the draw's own rule, no UB
+}
+
 }  // namespace bo3split
 

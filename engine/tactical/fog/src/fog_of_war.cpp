@@ -1,4 +1,5 @@
 #include "alamo/tactical/fog/fog_of_war.hpp"
+#include "alamo/core/x86_int.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -523,7 +524,7 @@ void FogOfWar::setup_player_ready(int32_t player) {
     if (player >= 0 && static_cast<size_t>(player) < setup_ready_.size()) setup_ready_[static_cast<size_t>(player)] = 1;
     if (!setup_armed_) {  // 0x4ad3a0: start frame, (int)(FPS x seconds)
         setup_count_start_ = frame_;
-        setup_count_frames_ = static_cast<int32_t>(k_.fps * k_.setup_countdown_seconds);
+        setup_count_frames_ = trunc_i32(k_.fps * k_.setup_countdown_seconds);
         setup_armed_ = true;
     }
     bool all = true;
