@@ -2427,10 +2427,13 @@ void test_a2_fleet_management() {
     CHECK(run(kFleetForm, pa, id(w.fl(f1).object), id(frigate)) == RejectReason::None && !w.fl(f0).alive);  // emptied: dies
     CHECK(run(kFleetForm, pa, none, 999999u) == RejectReason::InvalidUnit);
     CHECK(run(kFleetForm, id(w.planet(rB).object), none, id(c1)) == RejectReason::InvalidUnit);  // not orbiting B
-    // Detach, merge (one unit, then the whole fleet).
+    // Detach, merge (one unit, then the whole fleet). mcx4 t20 (MCX4_T09_RE_ANSWERS Q5): a detached flagged unit locks the
+    // new fleet (the add-member functions set +0x95 for every joining unit).
+    w.rules.types[tFrigate].prevents_story_autoresolve = true;
     CHECK(run(kFleetDetach, pa, none, id(frigate)) == RejectReason::None && s.fleets_at(rA, pEmpire).size() == 2);
     const uint32_t f2 = s.fleets_at(rA, pEmpire)[1];
-    CHECK(w.fl(f2).contents.size() == 1 && w.fl(f2).contents[0] == frigate);
+    CHECK(w.fl(f2).contents.size() == 1 && w.fl(f2).contents[0] == frigate && w.fl(f2).story_autoresolve_lock);
+    w.rules.types[tFrigate].prevents_story_autoresolve = false;
     CHECK(run(kFleetMerge, id(w.fl(f2).object), id(w.fl(f1).object), id(c1)) == RejectReason::None);
     CHECK(w.fl(f2).contents.size() == 2 && w.fl(f1).contents.size() == 1);
     CHECK(run(kFleetMerge, id(w.fl(f2).object), id(w.fl(f1).object), none) == RejectReason::None && !w.fl(f1).alive);

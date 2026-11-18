@@ -134,7 +134,7 @@ double galactic_ai_planet_force(const gal::GalacticSim& sim, std::span<const Gal
             if (st.alive(u) && side(st.owner(u)) && (type_mask(static_cast<uint32_t>(st.type(u))) & mask) != 0)
                 sum += power(static_cast<uint32_t>(st.type(u)));
         // The per-tech members of every ground structure (D +0x158 only: orbital structures are skipped) with the tech of
-        // the structure's own owner (S +0x58), not their own power and no structure mask (A2I_TOKENS_RE §2.2) [H]. The
+        // the structure's own owner (S +0x58), not their own power and no structure mask (A2I_TOKENS_RE §2.2) [H].
         if (side(ps.owner))
             for (const ObjectHandle s : ps.structures) {
                 if (!st.alive(s)) continue;

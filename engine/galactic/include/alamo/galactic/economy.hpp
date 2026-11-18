@@ -299,7 +299,8 @@ float political_ramp(float control, float target, float delta);
 //   10 <= rem < 60    when (int)r / 10 changed:     prefix + (r + 1) + "_Seconds";
 //   below 10          when r changed:               prefix + (r + 1) + "_Seconds".
 // "" = no event this frame (or no prefix). HUD 0x3d2b0 text: (r + 1) / 60 ":" (r + 1) mod 60 (the label and colour are
-// Build_Countdown_Text_ID / _RGBA). [M] the exact compare of the previous value.
+// Build_Countdown_Text_ID / _RGBA). [M] the exact compare of the previous value; [port] the seconds are zero-padded
+// to two digits (the format string was not read).
 std::string build_countdown_speech(std::string_view prefix, float previous, float remaining);
 std::string build_countdown_text(float remaining);
 

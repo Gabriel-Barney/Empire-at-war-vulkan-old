@@ -589,6 +589,8 @@ void test_hero_respawn_after_battle() {
         cr.types[tInfantry].company = true;  // Droids_Team: Droid_R2D2 (flagged), Droid_C3P0
         cr.types[tCorvette].respawn_whole_team = true;
         const uint32_t flagged[] = {tCorvette}, plain[] = {tFrigate};
+        CHECK(!company_team_lost(cr, tInfantry, flagged));  // not a hero: never reaches 0x3a01f0
+        cr.types[tCorvette].hero = true;
         CHECK(company_team_lost(cr, tInfantry, flagged) && !company_team_lost(cr, tInfantry, plain));
         CHECK(!company_team_lost(cr, tInfantry, {}) && !company_team_lost(cr, tFighters, flagged));
     }

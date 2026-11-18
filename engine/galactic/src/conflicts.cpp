@@ -710,8 +710,10 @@ void ConflictManager::run(ConflictKind kind) {
 
 bool company_team_lost(const ConflictRules& rules, uint32_t company_type, std::span<const uint32_t> dead_member_types) {
     if (!rules.type(company_type).company) return false;
+    // §13: the kill branch is reached through "hero defeated" 0x3a01f0, so only a hero member's death counts [port:
+    // Is_Named_Hero; FoC's flagged members are all named heroes].
     for (const uint32_t t : dead_member_types)
-        if (rules.type(t).respawn_whole_team) return true;
+        if (rules.type(t).respawn_whole_team && rules.type(t).hero) return true;
     return false;
 }
 

@@ -144,7 +144,8 @@ bool load_conflict_rules(const FileProvider& provider, const data::GameDatabase&
 // ConflictManager::auto_setup and the auto-resolve parity check (bkc1 t08, tests/autoresolve_parity.cpp).
 // mcx4 t05 (docs/re/MCX4_RE_ANSWERS_TACTICAL.md §9 / §13): a company (Company_Units holder: the TRANSPORT branch of
 // 0x48eb10) that survived a battle is lost as a whole when one of its dead members has Respawn_Whole_Team_When_Killed;
-// the battle end then removes it and schedules its respawn. Squadron holders (TEAM branch) never are.
+// the battle end then removes it and schedules its respawn. Only a hero member counts (0x3a01f0); squadron holders
+// (TEAM branch) never are.
 bool company_team_lost(const ConflictRules& rules, uint32_t company_type, std::span<const uint32_t> dead_member_types);
 
 ArCombatant make_ar_combatant(const GalacticRules& galactic, const ConflictRules& rules, uint32_t type, int32_t owner,
