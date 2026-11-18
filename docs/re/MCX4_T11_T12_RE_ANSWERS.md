@@ -274,7 +274,61 @@ plays no clip from this field. FoC: `BOMBTOSS`, 1 use.
 | `ShouldUseSpaceIdleMovement` (false), `IdleMovementFrames` (30) | 0x423070 (formation state 3), 0x420a40, 0x413100, 0x59c170 / 0x597dc0 / 0x59e700 (SimpleSpace), 0x553f00 | space idle drift: in space with the flag, an arrived one-block formation whose lead is idle issues a drift move (0x420a40) after int(IdleMovementFrames + synced float(0, IdleMovementFrames / 2) + 0.5) frames to lead + facing × 0x413100's distance, inside the map less 300; the SimpleSpace speed getters return `SpaceIdleMovementSpeed` (GC +0x1554) as the minimum speed instead of 0. Without the flag none of it runs; IdleMovementFrames is still the pack's idle-timer start (+0x2ac, ctor) and 0x413100's fallback | sim | H read, M meaning |
 | `ApproximationSmoothCosAngle` (0.9962) | 0x505fe0 | (1) the approximation's per-step turn is at least acos(value) × (180/π) / 2 degrees; (2) after the simulation, the points are thinned: from each kept point the next point whose direction from it bends from the first step's direction by dot < value is kept (the one before it is emitted); the last point is always kept. So straight runs keep only their ends | sim | H |
 | `GripperCombatGridSnapDistance` (35) | 0x405480 ← 0x306d00 ← 0x4fadb0 | 0x4fadb0 walks a grid of cells (0x48-byte entries) and 0x306d00 shows / hides objects (vf +0x110) by 0x405480's answer [L: a display grid, presentation] | not settled | M |
-| `IdleWalkBlendTime`, `CrouchIdleWalkBlendTime`, `MoveBlendTime`, `TeamMoveBlendTime`, `TeamCrouchMoveBlendTime`, `InfantryTurnBlendTime` | the §S readers | passed as the blend-seconds argument of Play_Animation 0x3a92f0 (§S rows; `MoveBlendTime` in 0x61f840 is the MOVE clip's blend). Per ANIM_PARTICLES (0x265560), the new clip starts at frame 0 at its full speed whatever the blend; the blend only sets the crossfade weight of the previous pose (1 − remaining / duration). So no frame count, clip type or timer that game logic reads depends on it | presentation [M: each of the 7 call sites passes it as the blend argument, checked only through §S; a bone-pose read during a fade (fire bones) is the only possible sim contact, L] | M |
+| `IdleWalkBlendTime`, `CrouchIdleWalkBlendTime`, `MoveBlendTime`, `TeamMoveBlendTime`, `TeamCrouchMoveBlendTime`, `InfantryTurnBlendTime` | the §S readers | passed as the blend-seconds argument of Play_Animation 0x3a92f0 (§S rows; `MoveBlendTime` in 0x61f840 is the MOVE clip's blend). Per ANIM_PARTICLES (0x265560), the new clip starts at frame 0 at its full speed whatever the blend; the blend only sets the crossfade weight of the previous pose (1 − remaining / duration). So no frame count, clip type or timer that game logic reads depends on it | presentation [each call site passes it as the blend argument: read through in "Blend times" below, H; a bone-pose read during a fade (fire bones) is the only possible sim contact, L] | M |
+
+**Blend times (lane mcx4-tac2, REA and the decompile export, 2026-11-18) [H unless tagged].** FoC values from
+`GAMECONSTANTS.XML` (EaW the same): `IdleWalkBlendTime` 0.5, `CrouchIdleWalkBlendTime` 0.5, `MoveBlendTime` 0.5,
+`TeamMoveBlendTime` 0.2, `TeamCrouchMoveBlendTime` 0.5, `InfantryTurnBlendTime` 0.2. Clip classes used below:
+idle-like 0x27b5e0 = {0, 1, 71, 77-82}; turn-like 0x27b670 = {3, 4, 21-24, 72, 73}; crouch 0x27b570 = {67, 71, 72, 73}.
+- **WalkLocomotor (`WalkLocomotorBehaviorClass`).**
+  - Move clip 0x61f840 (state 0x13): every clip it plays (MOVE, WALKMOVE, CROUCHMOVE, FIRE_MOVE, the idle at speed 0)
+    blends `MoveBlendTime`, with two exceptions that blend 0: a `Walk_Transition` unit (type +0x35; its MOVE starts at
+    the carried frame), and the walking-deployed clip 115 (pack +0x2b3). MOVE ↔ WALKMOVE keeps the phase.
+  - End Move 0x61f510 (state 0x14, no `Walk_Transition`): let a = the locomotor's vf +0x2e0, the per-frame
+    deceleration [M: the state leaves for 0x15 once the speed (pack +0xec) is ≤ a, MOVEMENT §3.5]. When 0 < a and
+    (speed / a) × 0.03333 (the seconds left until the unit stops) < the .bss global 0x140b39908, the current clip is not idle-like, the unit does not burn (+0x3a1 bit 2) and pack
+    +0x2b3 is clear, the default idle (0x395920; loop = type +0x30 `Loop_Idle_Anim_00`) plays with blend
+    `IdleWalkBlendTime`. State 0x15 (0x61fc30) plays the same idle with blend 0x140b39908 when the clip is still not
+    idle-like. Which of the two fires first depends on the unknown 0x140b39908 [M].
+  - Turn 0x620190 (state 0x10, no `Has_Pre_Turn_Anim`, model has TURNL): TURNL (3) when the wrapped error ≥ 0, else
+    TURNR (4); random variant (0xFFFF), one-shot, speed 1, blend = min(D / rate × 0.03333, `InfantryTurnBlendTime`).
+    rate = pack +0xe8 when > 0, else the type's turn rate (0x61d520). D = |wanted yaw − facing yaw| with the
+    difference wrapped into [0, 360) by 0x20b100, **not** into (−180, 180]: a right turn of e degrees counts 360 − |e|
+    and so nearly always takes the cap [M: read from the decompiler; 0x20b6d0 is applied only for the sign].
+- **`LandTeamInfantryLocomotorBehaviorClass` (vf6 0x62ca10, the squad members).** The clip choice 0x62c420 (called by
+  0x62cf90 in states 0x13 / 0x14) returns the wanted clip and its blend; 0x62cf90's preset `MoveBlendTime` is always
+  overwritten, so it never reaches a play.
+  - Wanted clip: the default idle at speed 0 without a WALKMOVE clip, or in state 0x14 when (speed / a) × 0.03333 <
+    `IdleWalkBlendTime` (a as above: the idle starts that many seconds before the member stops, so the blend ends as
+    it stands), or in recovery 0x2A when the distance to its slot < v² / (2a) (its braking distance); else CROUCHMOVE when crouched, WALKMOVE below `WalkAnimationCutoff` × max speed, else MOVE.
+  - From an idle- or turn-like current clip: blend `TeamMoveBlendTime`, or `TeamCrouchMoveBlendTime` when the new clip
+    is a crouch clip; random variant; start frame = synced Get_Int(0, count − 1).
+  - Else into an idle-like clip: blend `IdleWalkBlendTime`, or `CrouchIdleWalkBlendTime` into a crouch clip (Idle
+    Crouch 71); variant 0, frame 0.
+  - Else (move → move, or from another clip): blend 0.2 (.data 0x140a44300), or 0.4 (0x140a44308) when exactly one of
+    the two clips is CROUCHMOVE (67); MOVE ↔ WALKMOVE keeps the variant; frame = old frame / old count × new count.
+  - State 0 (team stopped) with a member still in MOVE / WALKMOVE / CROUCHMOVE: the default idle, random variant,
+    blend `TeamMoveBlendTime`.
+  - Turn 0x62bef0 (states 0x10 and recovery 0x29), only when the current clip is not turn-like: TURNL / TURNR, or
+    CROUCHTURNL / R (72 / 73) at speed 0.5 (.data 0x140a44304) when crouched; random variant; **loop**; blend =
+    min(D / rate × 0.03333, `InfantryTurnBlendTime`), D as above, rate = the type's turn rate × `Fleeing_Infantry_Speed_Bonus`
+    while fleeing.
+- **`JetPackLocomotorBehaviorClass` 0x642740** (take-off turn 0x10): TURNL / TURNR with the same blend rule (rate
+  0x640af0).
+- **What the blend does.** Each value is only the blend-seconds argument of 0x3a92f0, i.e. the crossfade weight of the
+  previous pose (§B4 table row). No game-logic read depends on it.
+- **Port** (mcx4 tac2): `anim::AnimTunables` carries the six values; `BattleCatalog::locomotor_blends()` reads them and
+  `TacticalBattle::set_animation` hands them to `SimAnimation::set_tunables`. `AnimBehaviors::service_locomotor` uses
+  them per the rules above (`LocomotorInput::team_member` = a Default-locomotor member of a land team container);
+  `infantry_turn_blend` is the turn rule; `MovementConstants::infantry_turn_blend_time` caps the Walk arrival turn.
+  Tests: `engine/anim/tests/test_anim.cpp`. [port] choices:
+  - The idle starts when the speed reaches 0, not the retail lead time before arrival [port M].
+  - The host does not pass the turn error / rate of a stationary turn outside the Walk arrival turn, so that turn
+    blends the cap [port M].
+  - Variant 0 instead of the random variant for the turn clips, and the crouch turn at speed 1 instead of 0.5 and
+    one-shot instead of looped for team members: unchanged (they would add draws or change frame timing).
+  - The walker's idle at speed 0 inside state 0x13 (blend `MoveBlendTime` in retail) is the port's stop path
+    (`IdleWalkBlendTime`).
 
 **Final facing** (mcx4 t11, 0x411980 / 0x421cc0 / 0x559350 / 0x41c1a0 [H unless tagged]; port:
 `final_formation_facing`, `LaneShape::lateral_at`, `lane_end`):

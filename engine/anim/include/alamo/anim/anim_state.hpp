@@ -157,6 +157,7 @@ public:
     SlotMode current_mode(ObjectId id) const { return slot(id).mode; }  // 0x395660
     bool crossfading(ObjectId id) const;
     float crossfade_weight(ObjectId id) const;  // 1 when no fade
+    float crossfade_duration(ObjectId id) const;  // the running fade's blend seconds; 0 when no fade
     bool near_end(ObjectId id) const;           // object +0x74 bit 3 is CLEAR once frame >= count - 2.5
     bool locked(ObjectId id) const;
     // Frame count / fps of the current clip (0 when none).

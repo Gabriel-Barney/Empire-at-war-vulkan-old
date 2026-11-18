@@ -112,6 +112,9 @@ struct MovementConstants {
     float final_formation_facing_minimum_angle = 10.0f;
     float final_formation_facing_delta_coefficient = 0.5f;
     bool rotate_formation_facing_moves = true;
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 "Blend times", 0x620190 [H]): InfantryTurnBlendTime (GC +0x1528 = 0x140b16d28,
+    // FoC 0.2), the cap of the Walk arrival turn's TURNL / TURNR blend (seconds).
+    float infantry_turn_blend_time = 0.2f;
 
     static MovementConstants from_game_constants(const data::GameConstants& gc);
 };

@@ -323,9 +323,10 @@ uint32_t AnimBehaviors::service_locomotor(AnimWorld& w, ObjectId id, const Locom
             w.set_speed(id, speed);
             return then_idle(0);
         }
-        // mcx4 t11 (0x61f840 [H]): the walker's move clips blend MoveBlendTime, except a Walk_Transition unit's (blend 0:
-        // its MOVE continues the MOVESTART pose); a team member's: team_blend.
-        const float blend = in.team_member ? team_blend(want) : (in.wt_clip == kAnimMove ? 0.0f : move_blend);
+        // mcx4 t11 (0x61f840 [H]): the walker's move clips blend MoveBlendTime, except a Walk_Transition unit's (its MOVE
+        // continues the MOVESTART pose) and Deployed_Walk (pack +0x2b3): blend 0; a team member's: team_blend.
+        const bool cut = in.wt_clip == kAnimMove || want == kAnimDeployedWalk;
+        const float blend = in.team_member ? team_blend(want) : (cut ? 0.0f : move_blend);
         if (is_move_family(cur)) {
             w.switch_preserving_phase(id, want, 0, true, blend, speed, frame);
             return then_idle(1);

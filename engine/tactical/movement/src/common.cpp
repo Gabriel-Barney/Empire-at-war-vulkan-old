@@ -102,6 +102,7 @@ MovementConstants MovementConstants::from_game_constants(const data::GameConstan
     c.final_formation_facing_delta_coefficient =
         gc.get_float("FinalFormationFacingDeltaCoefficient", c.final_formation_facing_delta_coefficient);
     c.rotate_formation_facing_moves = gc.get_bool("Rotate_Formation_Facing_Moves", c.rotate_formation_facing_moves);
+    c.infantry_turn_blend_time = gc.get_float("InfantryTurnBlendTime", c.infantry_turn_blend_time);  // mcx4 t11
     return c;
 }
 

@@ -154,8 +154,9 @@ TurnAnim arrival_turn_band(float err_deg, float stopped_rate, float threshold, i
 // End clip 0x61d810 of the clip `anim` that ended the turn: {3, 12, 13, 21, 22} -> TURNL_END 13, {4, 14, 15, 23, 24} ->
 // TURNR_END 15, else kAnimNone.
 int32_t arrival_turn_end_clip(int32_t anim);
-// The TURNL / TURNR blend cap of a unit without Has_Pre_Turn_Anim (GameConstants global 0x140b16d28, value not read):
-// [port] 0.2 seconds. Blend = min(|e0| / r x 0.03333, cap).
+// The TURNL / TURNR blend cap of a unit without Has_Pre_Turn_Anim: GameConstants InfantryTurnBlendTime (0x140b16d28 = GC
+// +0x1528; MovementConstants::infantry_turn_blend_time, this is its default and FoC value). Blend = min(D / r x 0.03333,
+// cap), D = e0 wrapped into [0, 360) (mcx4 t11, 0x620190 [M]: a right turn counts 360 - |e0|).
 inline constexpr float kArrivalTurnBlendCapPort = 0.2f;
 
 // Jetpack altitude (0x6404e0). `track(i)` = the unit's position i frames ahead (path playback, or position +

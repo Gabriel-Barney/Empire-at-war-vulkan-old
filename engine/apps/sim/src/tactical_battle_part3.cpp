@@ -361,7 +361,7 @@ void TacticalBattle::play_turn_clip_events(SimRng& rng, uint64_t gframe) {
 #ifdef ALAMO_SIM_HAVE_ANIM
     // s78l t02 (MOVEMENT §3.5.1 "Arrival turn, details"), in the movement's order (ascending id): a clip event plays
     // `anim` with index 0xFFFF (synced variant draw only when the clip has >= 2 variants), loop 0, at ev.speed, blend
-    // ev.blend when >= 0 (the locomotor caps it with its [port] constant for GC 0x140b16d28), else the clip's global ([port] the move blend tunable: the
+    // ev.blend when >= 0 (the locomotor caps it with GC InfantryTurnBlendTime 0x140b16d28, mcx4 t11), else the clip's global ([port] the move blend tunable: the
     // globals 0x140b398fc / 0x140b39900 are unread); an idle event plays the default idle type (slot 47: index 0,
     // Loop_Idle_Anim_00, [port] the idle blend for 0x140b39908, speed 1) unless the unit burns.
     anim::AnimWorld* w = hooks_ ? hooks_->world() : nullptr;

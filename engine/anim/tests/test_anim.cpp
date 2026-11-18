@@ -1107,6 +1107,95 @@ void test_events_and_locomotor() {
         CHECK(w.current_type(2) == kAnimMove);
     }
     {
+        // ledger: verifies GameConstants.MoveBlendTime
+        // ledger: verifies GameConstants.IdleWalkBlendTime
+        // ledger: verifies GameConstants.CrouchIdleWalkBlendTime
+        // ledger: verifies GameConstants.TeamMoveBlendTime
+        // ledger: verifies GameConstants.TeamCrouchMoveBlendTime
+        // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 "Blend times" [H]): the blend seconds each locomotor play passes.
+        // Walker (0x61f840 / 0x61f510): MOVE from the idle blends MoveBlendTime (a Walk_Transition unit's MOVE 0), the
+        // stop back to the idle IdleWalkBlendTime. Team member (0x62c420): idle -> MOVE TeamMoveBlendTime, idle ->
+        // CROUCHMOVE TeamCrouchMoveBlendTime, MOVE -> CROUCHMOVE 0.4 s (.data 0x140a44308), MOVE -> idle
+        // IdleWalkBlendTime, CROUCHMOVE -> Idle Crouch CrouchIdleWalkBlendTime. Distinct values tell the fields apart.
+        AnimTunables tn;
+        tn.idle_blend_seconds = 0.7f;  // the idle behaviour's global: none of these plays uses it
+        tn.move_blend_seconds = 0.5f;
+        tn.idle_walk_blend_seconds = 0.3f;
+        tn.crouch_idle_walk_blend_seconds = 0.45f;
+        tn.team_move_blend_seconds = 0.2f;
+        tn.team_crouch_move_blend_seconds = 0.55f;
+        AnimWorld w(tn);
+        AnimBehaviors b;
+        SimRng rng(6);
+        LocomotorParams lp;
+        PlayRequest idle;  // a current clip to fade from (hard cut)
+        for (ObjectId id = 1; id <= 4; ++id) {
+            w.create(id, m.get(), {}, nullptr, 0);
+            w.play(id, idle, nullptr, 0);
+        }
+        LocomotorInput mv;
+        mv.speed = 1.0f;
+        mv.max_speed = 1.0f;
+        CHECK(b.service_locomotor(w, 1, lp, mv, rng, 1) == 1 && w.current_type(1) == kAnimMove && w.crossfade_duration(1) == 0.5f);
+        LocomotorInput wt = mv;  // Walk_Transition unit: MOVE after MOVESTART, no blend (0x61f840 type +0x35)
+        wt.wt_clip = kAnimMove;
+        wt.wt_rate = 1.0f;
+        CHECK(b.service_locomotor(w, 2, lp, wt, rng, 1) == 1 && w.current_type(2) == kAnimMove && !w.crossfading(2));
+        LocomotorInput tm = mv;
+        tm.team_member = true;
+        CHECK(b.service_locomotor(w, 3, lp, tm, rng, 1) == 1 && w.current_type(3) == kAnimMove && w.crossfade_duration(3) == 0.2f);
+        LocomotorInput tc = tm;
+        tc.crouched = true;
+        CHECK(b.service_locomotor(w, 4, lp, tc, rng, 1) == 1 && w.current_type(4) == kAnimCrouchMove && w.crossfade_duration(4) == 0.55f);
+        w.advance(30);  // every fade done
+        CHECK(!w.crossfading(1) && !w.crossfading(3));
+        LocomotorInput stop;
+        b.service_locomotor(w, 1, lp, stop, rng, 31);
+        CHECK(w.current_type(1) == kAnimIdle && w.crossfade_duration(1) == 0.3f);
+        LocomotorInput tstop;
+        tstop.team_member = true;
+        b.service_locomotor(w, 3, lp, tc, rng, 31);  // MOVE -> CROUCHMOVE: the crouch state changes
+        CHECK(w.current_type(3) == kAnimCrouchMove && w.crossfade_duration(3) == kTeamCrouchSwitchBlendSeconds);
+        w.advance(60);
+        b.service_locomotor(w, 3, lp, tstop, rng, 61);
+        CHECK(w.current_type(3) == kAnimIdle && w.crossfade_duration(3) == 0.3f);
+        tstop.crouched = true;
+        b.service_locomotor(w, 4, lp, tstop, rng, 61);
+        CHECK(w.current_type(4) == kAnimIdleCrouch && w.crossfade_duration(4) == 0.45f);
+    }
+    {
+        // ledger: verifies GameConstants.InfantryTurnBlendTime
+        // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 "Blend times", 0x620190 / 0x62bef0 [H read, M angle]): the TURNL / TURNR
+        // blend = min(D / rate x 0.03333, InfantryTurnBlendTime), D = the error wrapped into [0, 360).
+        CHECK(infantry_turn_blend(30.0f, 10.0f, 0.2f) == (30.0f / 10.0f) * 0.03333f);  // 0.1 s < the cap
+        CHECK(infantry_turn_blend(90.0f, 10.0f, 0.2f) == 0.2f);                       // 0.3 s: capped
+        CHECK(infantry_turn_blend(-3.0f, 10.0f, 0.2f) == 0.2f);                       // right: D = 357 -> capped
+        CHECK(infantry_turn_blend(-3.0f, 10.0f, 2.0f) == (357.0f / 10.0f) * 0.03333f);
+        CHECK(infantry_turn_blend(30.0f, 0.0f, 0.2f) == 0.2f);                        // rate unknown: the cap
+        AnimTunables tn;
+        tn.move_blend_seconds = 0.5f;
+        tn.infantry_turn_blend_seconds = 0.25f;
+        AnimWorld w(tn);
+        AnimBehaviors b;
+        SimRng rng(7);
+        LocomotorParams lp;
+        PlayRequest idle;
+        for (ObjectId id = 1; id <= 2; ++id) {
+            w.create(id, m.get(), {}, nullptr, 0);
+            w.play(id, idle, nullptr, 0);
+        }
+        LocomotorInput t;
+        t.yaw_deg = 10.0f;
+        b.service_locomotor(w, 1, lp, t, rng, 1);  // records the yaw
+        b.service_locomotor(w, 2, lp, t, rng, 1);
+        t.yaw_deg = 14.0f;  // host gives no error / rate: the cap
+        CHECK(b.service_locomotor(w, 1, lp, t, rng, 2) == 1 && w.current_type(1) == kAnimTurnLeft && w.crossfade_duration(1) == 0.25f);
+        t.turn_error_deg = 15.0f;  // 15 deg left at 5 deg / frame: 3 frames
+        t.turn_rate_deg = 5.0f;
+        CHECK(b.service_locomotor(w, 2, lp, t, rng, 2) == 1 && w.current_type(2) == kAnimTurnLeft &&
+              w.crossfade_duration(2) == (15.0f / 5.0f) * 0.03333f);
+    }
+    {
         // Locomotor selection.
         AnimWorld w;
         AnimBehaviors b;
