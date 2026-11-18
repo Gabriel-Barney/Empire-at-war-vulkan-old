@@ -262,9 +262,12 @@ public:
     // Local faction announcement by its Faction tag (e.g. "SFXEvent_Planet_Gained_Control",
     // "Reinforcements_Enroute_SFXEvent"): 2D; HUD VO rules apply (refused while speech plays, §1.2 test 5).
     uint32_t faction_sfx(std::string_view faction_tag);
-    // Enemy spotted (faction SFXEvent_Unit_Type_Spotted for the type, else SFXEvent_Enemy_Spotted); gated by
-    // Lua SFXManager.Allow_Enemy_Sighted_VO [inferred].
-    uint32_t enemy_spotted(std::string_view object_type_name);
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "GameObjectType.Play_SFXEvent_On_Sighting", 0x361470 / 0x3613a0): a sighted type
+    // with Play_SFXEvent_On_Sighting plays the local faction's SFXEvent_Unit_Type_Spotted entry for the type, else
+    // SFXEvent_Generic_Unit_Spotted; enemy_spotted plays SFXEvent_Enemy_Spotted. 2D. Both gated by Lua
+    // SFXManager.Allow_Enemy_Sighted_VO [inferred]; the once-per-type / once-per-battle limits are the host's.
+    uint32_t unit_type_spotted(std::string_view object_type_name);
+    uint32_t enemy_spotted();
     void allow_enemy_sighted_vo(bool on) { enemy_sighted_vo_ = on; }
 
     // ---------------- speech

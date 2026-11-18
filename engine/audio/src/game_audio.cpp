@@ -497,12 +497,19 @@ uint32_t GameAudio::faction_sfx(std::string_view faction_tag) {
     return f ? play_2d(f->get(faction_tag)) : 0u;
 }
 
-uint32_t GameAudio::enemy_spotted(std::string_view object_type_name) {
+uint32_t GameAudio::unit_type_spotted(std::string_view object_type_name) {
     if (!enemy_sighted_vo_) return 0;
     const FactionAudio* f = data_->find_faction(faction_);
     if (!f) return 0;
     const std::vector<std::string> v = f->pair_values("SFXEvent_Unit_Type_Spotted", object_type_name);
-    return play_2d(v.empty() ? f->get("SFXEvent_Enemy_Spotted") : std::string_view(v.front()));
+    // ledger: consumes Faction.SFXEvent_Generic_Unit_Spotted
+    return play_2d(v.empty() ? f->get("SFXEvent_Generic_Unit_Spotted") : std::string_view(v.front()));
+}
+
+uint32_t GameAudio::enemy_spotted() {
+    if (!enemy_sighted_vo_) return 0;
+    const FactionAudio* f = data_->find_faction(faction_);
+    return f ? play_2d(f->get("SFXEvent_Enemy_Spotted")) : 0u;
 }
 
 }  // namespace alamo::audio

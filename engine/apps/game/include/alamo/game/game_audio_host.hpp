@@ -85,6 +85,7 @@ struct GameAudioStats {
     uint64_t pop_cap_lines = 0;                                                    // mcx4 t13 batch J
     uint64_t gravity_lines = 0;                                                    // mcx4 t13 batch K
     uint64_t strike_lines = 0;                                                     // mcx4 t13 batch M
+    uint64_t sighting_lines = 0;                                                   // mcx4 t13 batch N
 };
 
 class GameAudioHost {
@@ -434,6 +435,9 @@ private:
     std::map<int64_t, uint8_t> base_shield_state_;            // mcx4 t13 batch I: generator -> 1 on / 2 off (lookup only)
     bool unit_room_ = true;                                   // mcx4 t13 batch J: last tick's unit_room [M: starts true]
     std::vector<uint8_t> strike_avail_;                       // mcx4 t13 batch M: per player bit 0 bombard, bit 1 bombing run
+    std::set<int64_t> sighted_;                               // mcx4 t13 batch N: units seen by the local player (lookup only)
+    std::set<int32_t> spotted_types_;                         // types whose Unit_Type_Spotted line played
+    bool enemy_spotted_done_ = false;                         // SFXEvent_Enemy_Spotted played this battle
     // mcx4 t13 batch B: the local player's tactical build orders last tick (order id -> type) and built counts (type ->
     // TacticalProduction::built_count), to tell a completed order from a cancelled one.
     std::map<uint32_t, int32_t> prod_orders_;

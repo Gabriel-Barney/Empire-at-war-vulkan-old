@@ -814,6 +814,26 @@ void GameAudioHost::cue_lines(const sim::TacticalBattle& battle, const objects::
                     ev = nth_field(lf->fields, special_weapon_tag(fired, own), types.get_int(t, "Special_Weapon_Target_Action_Index"));
                 if (!ev.empty() && game_->gui_sfx(ev)) ++stats_.special_weapon_lines;
             }
+    // Sightings (MCX4_T13_RE_ANSWERS "GameObjectType.Play_SFXEvent_On_Sighting", HideWhenFogged 0x53ddc0): the first tick
+    // a unit of another player is visible to the local player. A Play_SFXEvent_On_Sighting type not yet announced this
+    // battle plays the unit-type line; otherwise an enemy's sighting plays SFXEvent_Enemy_Spotted, once per battle.
+    // [M] own units are never "sighted"; the +0x33a slot and attacker / defender tests are not modelled.
+    if (local_player >= 0)
+        for (const objects::ObjectId id : battle.movement().unit_ids()) {
+            const objects::ObjectHandle h = store.find(id);
+            if (!store.alive(h)) continue;
+            const int32_t o = store.owner(h);
+            if (o < 0 || o == local_player || battle.fog_object_hidden(local_player, id, false)) continue;
+            if (!sighted_.insert(static_cast<int64_t>(id)).second) continue;
+            const objects::TypeIndex t = store.type(h);
+            // ledger: consumes GameObjectType.Play_SFXEvent_On_Sighting
+            if (types.get_bool(t, "Play_SFXEvent_On_Sighting") && spotted_types_.insert(static_cast<int32_t>(t)).second) {
+                if (game_->unit_type_spotted(types.raw().types().name[t])) ++stats_.sighting_lines;
+            } else if (!enemy_spotted_done_ && cs.is_enemy(local_player, o)) {
+                enemy_spotted_done_ = true;
+                if (game_->enemy_spotted()) ++stats_.sighting_lines;
+            }
+        }
     // Strike availability (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Bombard_Available family"): per manager, every player's
     // available flag is tracked; the first player (index order) whose flag went 0 -> 1 this tick is announced in that
     // player's faction voice, 2D; frame > 0. [port] the flag = bombardment_available / bombing_run_available (gate included).
@@ -1258,6 +1278,9 @@ void GameAudioHost::battle_reset() {
     base_shield_state_.clear();  // mcx4 t13 batch I
     unit_room_ = true;           // mcx4 t13 batch J
     strike_avail_.clear();       // mcx4 t13 batch M
+    sighted_.clear();            // mcx4 t13 batch N
+    spotted_types_.clear();
+    enemy_spotted_done_ = false;
     prod_built_.clear();
     intro_decided_ = false;   // aud1 t07: a new battle decides its intro again
     object_events_reset();    // aud1 t05
