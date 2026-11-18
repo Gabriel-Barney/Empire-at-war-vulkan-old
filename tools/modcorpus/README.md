@@ -65,6 +65,12 @@ Exit 2: no game folder or a tool missing.
 and `ref`; they are listed in the matrix and do not lower the grade. An entry of a mod applies to every setup whose stack
 contains it. Add one only with the explanation recorded where its `ref` points (`docs/MODS.md` §10.4, a `docs/re` page).
 
+## Not installed
+
+`corpus.json` `not_installed` names corpus mods that are not installed now (`docs/DECISIONS.md`, "Corpus graded on
+installed mods only"): the matrix lists them under the table, ungraded. When one is installed again it is graded as
+usual and the runner says the entry can go.
+
 ## Limits
 
 - G1's "every warning is retail-equivalent or a filed gap" (design §1.3) is not checked automatically: G1 needs 0 errors.

@@ -524,6 +524,10 @@ def matrix_md(matrix: dict) -> str:
     if acc:
         lines += ["", "Accepted blockers (corpus.json, not counted):"]
         lines += [f"- `{k}` {a['blocker']}: {a['why']} ({a['ref']})" for k, a in acc]
+    ni = matrix.get("not_installed") or {}
+    if ni:
+        lines += ["", "Not installed, so not graded (corpus.json `not_installed`):"]
+        lines += [f"- {md_escape(v.get('name', k))} (`{k}`): {md_escape(v.get('why', 'not installed'))}" for k, v in sorted(ni.items())]
     return "\n".join(lines) + "\n"
 
 
@@ -646,6 +650,13 @@ def main(argv=None) -> int:
     if only and os.path.isfile(day_matrix):  # a partial rerun keeps the day's other setups (each with its build)
         with open(day_matrix, encoding="utf-8") as f:
             matrix["mods"] = dict(json.load(f).get("mods", {}))
+    # mcx8 (DECISIONS "Corpus graded on installed mods only"): corpus.json names corpus mods that are not installed now;
+    # they are listed under the matrix, not graded. One that is installed again is graded as usual.
+    listed_ni = corpus.get("not_installed", {})
+    installed = {k.split(":")[0] for k in registry}
+    matrix["not_installed"] = {k: v for k, v in listed_ni.items() if not k.startswith("_") and k not in installed}
+    for k in sorted(k for k in listed_ni if k in installed):
+        log(f"run_corpus: {k} is listed as not installed in corpus.json but is installed: graded (remove the entry)")
     t0 = time.monotonic()
     for m in mods:
         log(f"{m['key']} ({m.get('name')}):")

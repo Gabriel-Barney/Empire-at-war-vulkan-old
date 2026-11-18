@@ -319,7 +319,8 @@ end
 enum SynType : uint32_t { tPlanet, tSB1, tSB2, tFrigate, tCorvette, tInfantry, tBarracks, tTypes };
 gal::GalacticRules syn_rules();
 gal::GalacticSetup syn_setup();
-void syn_data(MemoryFiles& files, AiDefinitions& defs, EquationSet& eqs, std::vector<std::string>& plan_files);
+void syn_data(MemoryFiles& files, AiDefinitions& defs, EquationSet& eqs, std::vector<std::string>& plan_files,
+              bool script_target = false);
 ParallelFor thread_pf(unsigned threads);
 
 struct CampaignResult {
@@ -330,11 +331,12 @@ struct CampaignResult {
     std::vector<int32_t> owned;
     uint64_t orders = 0, rejected = 0, conflicts = 0;
 };
-CampaignResult run_synthetic(unsigned threads, int32_t frames);
+CampaignResult run_synthetic(unsigned threads, int32_t frames, bool script_target = false);
 std::string golden_text(const CampaignResult& r);
 void test_plan_load_parallel();
 void test_free_store_lc();
 void test_synthetic_campaign();
+void test_script_evaluator_ai_target();
 std::vector<uint64_t> run_path_world(unsigned threads, int32_t frames, lua::LuaPlayerWorld* story = nullptr);
 void test_path_finder_world();
 std::vector<std::array<int64_t, 4>> run_clock_phase(bool stagger, int32_t frames);

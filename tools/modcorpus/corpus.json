@@ -46,5 +46,12 @@
     "1397421866": {"name": "AotR 2.11 (patch notes in the item)"},
     "3387971722": {"name": "AotCW 1.2.1 (patch notes in the item)"}
   },
-  "accept_all": []
+  "accept_all": [],
+  "not_installed": {
+    "_comment": "Corpus mods not installed now (DECISIONS 'Corpus graded on installed mods only', Gabriel 2026-11-18): listed under the matrix, not graded; an entry whose mod is installed again is ignored (the runner says so).",
+    "3622043265": {"name": "Thrawn's Revenge (second copy)", "why": "not installed (2026-11-18); mcx8 t06 dropped, reopen on reinstall"},
+    "Thrawns_Legacy_HD": {"name": "Thrawn's Legacy HD (local submod of 1125571106)", "why": "not installed: corruption\\Mods is empty (2026-11-18)"},
+    "Legeds_ships_transfer": {"name": "Legends ships transfer (local submod of 1125571106)", "why": "not installed: corruption\\Mods is empty (2026-11-18)"},
+    "AOW_Thrawns_Legacy_Compatibility": {"name": "AOW Thrawn's Legacy compatibility (local submod stack on Thrawns_Legacy_HD)", "why": "not installed: corruption\\Mods is empty (2026-11-18)"}
+  }
 }

@@ -1119,7 +1119,24 @@ gal::GalacticSetup syn_setup() {
     return s;
 }
 
-void syn_data(MemoryFiles& files, AiDefinitions& defs, EquationSet& eqs, std::vector<std::string>& plan_files) {
+// mcx8 t01 (AI_GALACTIC_2 §4.4, retail 0x652040): a galactic Script_ evaluator gets Target as an AI target
+// (AITargetLocationWrapper), as in tactical. Returns 1 only when Target.Get_Game_Object() is a live planet at distance 0
+// from the target; any other shape is an error or a non-positive value (no upgrade goal is wanted then).
+const char* kEvalSynTarget = R"(
+function Evaluate()
+  if Target == nil then return -1 end
+  local o = Target.Get_Game_Object()
+  if o == nil then return -2 end
+  if Target.Get_Distance(o) ~= 0 then return -3 end
+  return 1
+end
+function Evaluator_Clean_Up()
+  Target = nil
+end
+)";
+
+void syn_data(MemoryFiles& files, AiDefinitions& defs, EquationSet& eqs, std::vector<std::string>& plan_files,
+              bool script_target) {
     files.add("Data\\Scripts\\Library\\SynBase.lua", kSynBase);
     files.add("Data\\Scripts\\Library\\SynAICommands.lua", kSynAICommands);
     files.add("Data\\Scripts\\AI\\BuildSpace.lua", kPlanBuildSpace);
@@ -1142,8 +1159,15 @@ void syn_data(MemoryFiles& files, AiDefinitions& defs, EquationSet& eqs, std::ve
     eqs.add("Conquer_Desire",
             "(3 + 2 * (Variable_Target.EnemyForce.HasSpaceForce == 0) + Variable_Target.BaseIncome) * "
             "(Variable_Self.SpaceTotalUnnormalized >= 1000)");  // the starting frigate (a2h: starbases no longer count)
-    eqs.add("Needs_Starbase_Upgrade",
-            "(Variable_Target.StarbaseLevel < Variable_Target.MaxStarbaseLevel) * (Variable_Self.CreditsUnnormalized >= 1000) * 4");
+    if (script_target) {  // mcx8 t01: the same desire, times an evaluator that reads Target as an AI target
+        files.add("Data\\Scripts\\Evaluators\\SynTarget.lua", kEvalSynTarget);
+        eqs.add("Needs_Starbase_Upgrade",
+                "(Variable_Target.StarbaseLevel < Variable_Target.MaxStarbaseLevel) * (Variable_Self.CreditsUnnormalized >= 1000) * 4 * "
+                "Script_SynTarget.Evaluate");
+    } else {
+        eqs.add("Needs_Starbase_Upgrade",
+                "(Variable_Target.StarbaseLevel < Variable_Target.MaxStarbaseLevel) * (Variable_Self.CreditsUnnormalized >= 1000) * 4");
+    }
     eqs.add("Offensive_Budget", "5 + 10 * Variable_Self.PlanetsControlled");
     eqs.add("Infra_Budget", "3");
     eqs.link();
@@ -1174,13 +1198,13 @@ ParallelFor thread_pf(unsigned threads) {
     };
 }
 
-CampaignResult run_synthetic(unsigned threads, int32_t frames) {
+CampaignResult run_synthetic(unsigned threads, int32_t frames, bool script_target) {
     CampaignResult out;
     MemoryFiles files;
     AiDefinitions defs;
     EquationSet eqs;
     std::vector<std::string> plan_files;
-    syn_data(files, defs, eqs, plan_files);
+    syn_data(files, defs, eqs, plan_files, script_target);
     const gal::GalacticRules rules = syn_rules();
     objects::GameObjectTypes types;
     objects::IdCounter ids;
@@ -1388,6 +1412,20 @@ void test_synthetic_campaign() {
         }
         CHECK(same);
     }
+}
+
+// mcx8 t01: the synthetic campaign with the starbase-upgrade desire multiplied by a Script_ evaluator that calls
+// Target.Get_Game_Object() / Target.Get_Distance() (Fall of the Republic's GetSmugglingLevel shape). With Target as a
+// plain game object (before) every call raised "attempt to call field `Get_Game_Object'" and no upgrade was wanted.
+void test_script_evaluator_ai_target() {
+    const int32_t frames = 30 * 60;
+    const CampaignResult r = run_synthetic(1, frames, true);
+    for (size_t i = 0; i < r.errors.size() && i < 5; ++i) std::printf("  lua error: %s\n", r.errors[i].c_str());
+    CHECK(r.errors.empty());
+    size_t upgrades = 0;
+    for (const std::string& d : r.decisions) upgrades += d.find("for Upgrade_Starbase") != std::string::npos ? 1 : 0;
+    std::printf("script evaluator Target as AI target: %zu upgrade plans in %d frames\n", upgrades, frames);
+    CHECK(upgrades > 0);
 }
 
 // AI execution path finder in the world (GALACTIC.md §4, ai_path_finder.hpp): lazy creation by a query before the

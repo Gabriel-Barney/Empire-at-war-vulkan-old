@@ -209,6 +209,10 @@ bool GalacticAiWorld::Impl::evaluate_id(int32_t self, int32_t opponent, uint32_t
 // Script_<File>.Evaluate (AI_GALACTIC_2 Â§4.4) [H]: Data/Scripts/Evaluators/<File>.lua loaded once as ONE shared
 // instance; no cache; PlayerObject = Self, Target = the context target; Evaluate(strings..., number); then
 // Evaluator_Clean_Up(). Only a Lua number succeeds. Script globals persist across calls and players.
+// mcx8 t01: Target is the context target as an AI target (AITargetLocationWrapper: Get_Game_Object = the planet,
+// Get_Distance), the same wrapper the tactical evaluators get, since retail's evaluator (0x652040) is one function for
+// both modes; it is set only when there is a target (a goal without one leaves the global as the script left it).
+// Fall of the Republic's GetSmugglingLevel calls Target.Get_Game_Object().
 bool GalacticAiWorld::Impl::script_evaluate(const EvalContext& c, std::string_view name, std::span<const Param> params,
                                             double& out) {
     if (!files || !runtime) return false;
@@ -217,8 +221,7 @@ bool GalacticAiWorld::Impl::script_evaluate(const EvalContext& c, std::string_vi
     vm->set_time(now_seconds(sim));
     vm->set_frame(static_cast<uint32_t>(sim.frame()));
     lua::set_player_global(*vm, "PlayerObject", c.self);
-    if (c.target >= 0 && valid_planet(static_cast<PlanetIndex>(c.target)))
-        vm->set_object_global("Target", sim.planets()[static_cast<size_t>(c.target)].object);
+    if (c.target >= 0 && valid_planet(static_cast<PlanetIndex>(c.target))) lua::set_ai_target_global(*vm, "Target", c.target);
     return ScriptEvaluators::evaluate(*vm, name, params, out, errors);
 }
 

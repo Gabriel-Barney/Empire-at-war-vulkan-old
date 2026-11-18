@@ -634,6 +634,9 @@ Source: leaf-by-leaf read of the galactic registrations (Planet 0x65f7b0, Galact
 - Every `Data/Scripts/Evaluators/*.lua` is loaded once (0x5e8220 / 0x5e7cb0) as a **single shared Lua instance** behind the root token `Script_<File>` (ScriptPerceptualEvaluator, vt 0x8b43e0).
 - **Evaluate** 0x652040, with **no cache**:
   - set `PlayerObject` = Self, and `Target` = the context target if any;
+    - `Target` is the context target wrapped as an AI target (`AITargetLocationWrapper`, made by 0x60e0a0: `Get_Game_Object`,
+      `Get_Distance`), in galactic as in tactical (one function serves both); with no target the global is not touched, so it
+      keeps whatever the script left (mcx8 t01; Fall of the Republic's `GetSmugglingLevel` calls `Target.Get_Game_Object()`) [H];
   - call `Evaluate(<Parameter_Script_String values…>, <Parameter_Script_Number>)`;
   - then `Evaluator_Clean_Up()`.
 - The result must be a Lua number; anything else fails. Script globals persist across calls and players.

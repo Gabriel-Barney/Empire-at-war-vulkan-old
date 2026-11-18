@@ -23,6 +23,7 @@ int main(int argc, char** argv) {
     test_plan_load_parallel();
     test_free_store_lc();
     test_synthetic_campaign();
+    test_script_evaluator_ai_target();
     test_path_finder_world();
     test_galactic_clock_phase();  // a2m r4
     test_sim_hooks();
