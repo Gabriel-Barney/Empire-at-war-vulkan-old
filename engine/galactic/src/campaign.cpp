@@ -1802,7 +1802,7 @@ RejectReason GalacticSim::execute(uint8_t player_id, const commands::EventData& 
         if (full.empty() || full.front() != fleets_[f].planet) full.insert(full.begin(), fleets_[f].planet);
         std::vector<std::pair<int32_t, int32_t>> payees;
         const int32_t toll = route_toll(player, f, full, &payees);
-        if (toll > 0 && static_cast<float>(toll) > players_[player].account.credits) return RejectReason::CannotAfford;
+        if (toll > 0 && static_cast<float>(toll) > players_[static_cast<size_t>(player)].account.credits) return RejectReason::CannotAfford;
         const RejectReason moved = move_fleet_path(player, f, path);
         if (moved != RejectReason::None || toll <= 0) return moved;
         add_credits(player, -static_cast<float>(toll), false);
