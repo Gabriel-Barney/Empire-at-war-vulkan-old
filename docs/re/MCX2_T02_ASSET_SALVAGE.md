@@ -77,7 +77,7 @@ Per slot, from `out\<run>\report.txt` and the screenshots:
 - **Content decides the image format.** The texture object loads through D3DX, which detects the file type from its
   bytes; Thrawn's Revenge ships 32 PNG files named `.TGA` (`Data\Art\Textures\Icons\I_BUTTON_*.TGA`, `89 50 4E 47`
   header), so retail draws PNGs whatever the extension. Port: `decode_texture` sniffs PNG and decodes it
-  (`engine/assets/src/png_decode.cpp`). [M] (D3DX's documented behaviour; not traced in the binary)
+  (`engine/assets/src/png_decode.cpp`). [H] (D3DX9 test below)
 - **Fonts are not looked up through the file system.** The only font-registration name in the binary is the string
   `AddFontMemResourceEx` (resolved at run time); there is no `.ttf` / `.otf` string. Retail registers the TrueType
   fonts embedded in its exe from memory and otherwise uses installed system fonts; a font file in a mod's MEG or Data
@@ -87,7 +87,10 @@ Per slot, from `out\<run>\report.txt` and the screenshots:
 - **Formats D3DX9 cannot read either.** Retail links `d3dx9_43.dll` (the import name is in the exe). D3DX9 has no
   reader for DDS files with the DX10 extended header (EaW-Remake ships nine BC7 `I_HIGHLIGHT_*.DDS`, DXGI 99) and none
   for Photoshop files (Ascendancy of the Lost's `I_UL_WIN.DDS` is a PSD, `8BPS`), so retail cannot show them; the
-  asset audit marks those rejections retail-equivalent. [M] (D3DX9's documented format list)
+  asset audit marks those rejections retail-equivalent, and since t11 the port refuses DX10-header DDS at run time
+  too (`decode_dds`). [H] (tested 2026-11-17: the system's `d3dx9_43.dll`, `D3DXGetImageInfoFromFileInMemory`, returns
+  D3DXERR_INVALIDDATA for `I_HIGHLIGHT_ARTY.DDS`, `I_UL_WIN.DDS` and the `.alg_meta` files, and reads Thrawn's Revenge's
+  PNG-content `I_BUTTON_NOVA.TGA` as a 50 x 50 image)
 - **Audit scope.** Files in a folder whose name starts with `.` (EaW-Remake's `Textures\.alg_meta\`, an editor's
   text metadata named `.dds`) are tool files no data names, and are not audited. A broken map that is not a skirmish
   map (`_MP_LAND_` / `_MP_SPACE_`, the list's prefixes) and that no XML or Lua file names is never loaded, by retail

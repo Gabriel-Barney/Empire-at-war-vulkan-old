@@ -767,7 +767,7 @@ void test_dds_mod_formats() {
         x.put(83u).put(3u).put(0u).put(1u).put(0u);
         dx10.insert(dx10.end(), x.b.begin(), x.b.end());
         dx10.insert(dx10.end(), g.begin() + 128, g.end());
-        CHECK(decode_dds(dx10, t, &err) && t.format == TextureFormat::R8G8 && t.data[1] == 255);
+        CHECK(!decode_dds(dx10, t, &err) && err.find("DX10") != std::string::npos);  // t11: retail's D3DX9 reads no DX10 header
     }
     {  // V8U8 (D3DFMT 60): (U, V, 1, 1) signed; 2x1 -> RGBA8_SNORM with a signed generated mip
         Bytes f = dds_header(2, 1, 1, 0x4, 60, 0, 0, 0, 0, 0);

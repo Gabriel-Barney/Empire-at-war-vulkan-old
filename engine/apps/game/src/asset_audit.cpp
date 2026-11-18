@@ -59,7 +59,7 @@ struct RetailEquivalent {
 };
 constexpr RetailEquivalent kRetailEquivalent[] = {
     {"no connections chunk 0x600", "retail does not draw a model without its connections chunk (docs/re/MCX2_T02_ASSET_SALVAGE.md 3, run 2)"},
-    {"unsupported DXGI format", "retail's d3dx9_43 reads no DX10-header DDS (docs/re/MCX2_T02_ASSET_SALVAGE.md 4)"},
+    {"DX10-header DDS", "retail's d3dx9_43 reads no DX10-header DDS (docs/re/MCX2_T02_ASSET_SALVAGE.md 4)"},
     {"Photoshop PSD content", "retail's d3dx9_43 reads no PSD (docs/re/MCX2_T02_ASSET_SALVAGE.md 4)"},
 };
 
@@ -265,7 +265,7 @@ using Cache = std::unordered_map<CacheKey, CacheValue, CacheKeyHash>;  // looked
 
 // The second number is the rules version: bump it whenever a decoder, salvage rule or retail-equivalent entry changes
 // what a file's verdict is, so a cache written by an older build is ignored.
-constexpr const char* kCacheHeader = "alamo asset audit cache v1 rules 3";
+constexpr const char* kCacheHeader = "alamo asset audit cache v1 rules 4";
 
 std::string cache_file(const std::string& dir) { return dir + "\\asset_audit_v1.txt"; }
 

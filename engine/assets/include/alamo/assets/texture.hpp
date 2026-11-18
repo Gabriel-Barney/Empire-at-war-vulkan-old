@@ -2,16 +2,16 @@
 //
 // Supported DDS: DXT1 (BC1), DXT2/DXT3 (BC2), DXT4/DXT5 (BC3), uncompressed 32-bit BGRA/BGRX/RGBA,
 // 24-bit RGB, 16-bit 565/1555/4444/X1555/X4444 (expanded to BGRA8), L8, A8, A8L8 (kept as R8 / R8G8
-// with a component swizzle), legacy D3DFMT FourCC codes for those, DX10 headers for the same
-// formats, full mip chains (truncated chains are cut to the levels present, with a warning), and
+// with a component swizzle), legacy D3DFMT FourCC codes for those, full mip chains (truncated chains are cut to the levels present, with a warning), and
 // cubemaps (a partial cubemap keeps the faces it has, the others black, with a warning).
 // Mod formats (mcx2 t04, docs/MOD_COMPAT_DESIGN.md 10.3), converted on load:
-//   ATI1 / BC4U / DXGI 80 -> R8 (R,0,0,1); ATI2 / BC5U / DXGI 83 -> R8G8 (R,G,0,1) (software decode; identity
+// DX10-header DDS files are refused (mcx2 t11): retail's d3dx9_43 cannot read them, so retail shows them as missing.
+//   ATI1 / BC4U -> R8 (R,0,0,1); ATI2 / BC5U -> R8G8 (R,G,0,1) (software decode; identity
 //   mapping, Vulkan fills the missing components); V8U8 -> RGBA8_SNORM (U,V,1,1); Q8W8V8U8 -> RGBA8_SNORM;
-//   CxV8U8 -> RGBA8_SNORM (U,V,sqrt(1-U^2-V^2),1); DXGI 51 -> R8G8_SNORM:
+//   CxV8U8 -> RGBA8_SNORM (U,V,sqrt(1-U^2-V^2),1):
 //   the signed values D3D9 gave the effects that sample them;
-//   A16B16G16R16 / DXGI 11 -> RGBA8; G16R16 -> RGBA8 (R,G,1,1); L16, A2B10G10R10, A2R10G10B10 -> RGBA8;
-//   R16F / G16R16F / A16B16G16R16F (DXGI 54/34/10) -> RGBA16F, R32F / G32R32F / A32B32G32R32F (DXGI 41/16/2)
+//   A16B16G16R16 -> RGBA8; G16R16 -> RGBA8 (R,G,1,1); L16, A2B10G10R10, A2R10G10B10 -> RGBA8;
+//   R16F / G16R16F / A16B16G16R16F -> RGBA16F, R32F / G32R32F / A32B32G32R32F
 //   -> RGBA32F, missing components 1.0 (the D3D9 rule), no generated mips;
 //   P8 (FourCC 41 or the PALETTEINDEXED8 flag; 256 PALETTEENTRYs after the header, flags = alpha, all-zero
 //   flags = opaque) and A8P8 -> RGBA8;

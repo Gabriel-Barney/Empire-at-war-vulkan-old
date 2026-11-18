@@ -449,41 +449,11 @@ bool decode_dds(std::vector<std::uint8_t> file, TextureAsset& out, std::string* 
             case 116: use(Source::Float, TextureFormat::RGBA32F, 4); break;    // A32B32G32R32F
             case 40: use(Source::A8P8, TextureFormat::RGBA8); break;           // A8P8
             case 41: use(Source::P8, TextureFormat::RGBA8); break;             // P8
-            case fourcc('D', 'X', '1', '0'): {
-                if (file.size() < 148) return fail(error, "truncated DX10 header");
-                const std::uint32_t dxgi = rd32(file, 128), misc = rd32(file, 136), array = rd32(file, 140);
-                data_off = 148;
-                if (array > 1) return fail(error, "DDS texture arrays are not supported");
-                if (misc & 0x4u) {
-                    layers = faces_in_file = 6;
-                    face_mask = 0x3Fu;
-                    t.cubemap = true;
-                }
-                switch (dxgi) {
-                    case 71: case 72: fmt = TextureFormat::BC1_RGBA; break;
-                    case 74: case 75: fmt = TextureFormat::BC2; break;
-                    case 77: case 78: fmt = TextureFormat::BC3; break;
-                    case 28: case 29: fmt = TextureFormat::RGBA8; break;
-                    case 87: case 91: fmt = TextureFormat::BGRA8; break;
-                    case 88: case 93: fmt = TextureFormat::BGRA8; sw.a = Swizzle::One; break;
-                    case 61: fmt = TextureFormat::R8; sw = {Swizzle::R, Swizzle::R, Swizzle::R, Swizzle::One}; break;
-                    case 65: fmt = TextureFormat::R8; sw = {Swizzle::Zero, Swizzle::Zero, Swizzle::Zero, Swizzle::R}; break;
-                    case 49: fmt = TextureFormat::R8G8; sw = {Swizzle::R, Swizzle::G, Swizzle::Zero, Swizzle::One}; break;
-                    case 80: use(Source::BC4, TextureFormat::R8); break;
-                    case 83: use(Source::BC5, TextureFormat::R8G8); break;
-                    case 51: fmt = TextureFormat::R8G8_SNORM; break;
-                    case 31: fmt = TextureFormat::RGBA8_SNORM; break;
-                    case 11: use(Source::Unorm16x4, TextureFormat::RGBA8); break;
-                    case 10: use(Source::Half, TextureFormat::RGBA16F, 4); break;
-                    case 34: use(Source::Half, TextureFormat::RGBA16F, 2); break;
-                    case 54: use(Source::Half, TextureFormat::RGBA16F, 1); break;
-                    case 2: use(Source::Float, TextureFormat::RGBA32F, 4); break;
-                    case 16: use(Source::Float, TextureFormat::RGBA32F, 2); break;
-                    case 41: use(Source::Float, TextureFormat::RGBA32F, 1); break;
-                    default: return fail(error, "unsupported DXGI format " + std::to_string(dxgi));
-                }
-                break;
-            }
+            case fourcc('D', 'X', '1', '0'):
+                // mcx2 t11: retail loads textures through d3dx9_43, which has no reader for the DX10 extended header
+                // (D3DXGetImageInfoFromFileInMemory: D3DXERR_INVALIDDATA, docs/re/MCX2_T02_ASSET_SALVAGE.md 4), so
+                // retail shows such a texture as missing; the port does the same.
+                return fail(error, "DX10-header DDS: retail's D3DX9 cannot read it (the texture is missing in retail too)");
             default:
                 if (!d3dfmt_masks(pf_fourcc, mf)) return fail(error, "unsupported DDS FourCC " + std::to_string(pf_fourcc));
                 break;
