@@ -99,6 +99,20 @@ bool AbilitySystem::bind_spawn(uint32_t serial, ObjectId id) {
                 }
             return true;
         }
+    // mcx4 t06 (Spawn_Ability, MCX4_RE_ANSWERS_TACTICAL §14): the bomber of a user still waiting for it becomes the
+    // tracked bomber (+0x39c); the orders follow at the user's next update.
+    for (const SpawnRequest& r : spawns_)
+        if (r.serial == serial && r.purpose == SpawnPurpose::Bomber) {
+            Obj* o = obj(r.source);
+            if (!o || o->dead) return false;
+            for (SpecialState& sp : o->specials)
+                if (data_->specials[sp.desc].cls == SpecialClass::Spawn && sp.phase == 2) {
+                    sp.victims.assign(1, id);
+                    sp.phase = 3;
+                    return true;
+                }
+            return false;
+        }
     // cu8f t06 (CU8F_T04_T06_RE §3.1): the LURE Particle_Effect object (LureDataPack +0x18). cu8g t05: false (not bound:
     // the host removes it silently) when the lure was deactivated since the request, or its owner is gone.
     for (const SpawnRequest& r : spawns_)

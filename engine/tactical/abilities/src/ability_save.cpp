@@ -319,7 +319,7 @@ bool AbilitySystem::read(ByteReader& r) {
         s.fuse_seconds = r.f32();
         s.bone = r.i32();
         s.squad = r.i32();
-        if (!r.ok() || purpose > static_cast<uint8_t>(SpawnPurpose::LureEffect)) return false;
+        if (!r.ok() || purpose > static_cast<uint8_t>(SpawnPurpose::Bomber)) return false;  // mcx4 t06: + Bomber (older saves hold none)
         s.purpose = static_cast<SpawnPurpose>(purpose);
     }
     if (!r.count(n, 38)) return false;

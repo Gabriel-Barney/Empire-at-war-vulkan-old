@@ -209,6 +209,7 @@ bool AbilitySystem::set_owner(ObjectId id, int32_t owner) {
 }
 
 void AbilitySystem::remove(ObjectId id) {
+    spawn_object_removed(id);  // mcx4 t06: a Spawn_Ability's bomber or target (the removal broadcast)
     const int32_t i = find(id);
     if (i < 0) return;
     Obj& o = objs_[static_cast<size_t>(i)];

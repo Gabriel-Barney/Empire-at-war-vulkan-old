@@ -408,10 +408,12 @@ bool AbilitySystem::class_accepts(const Obj& o, const SpecialAbilityDesc& s, Obj
         }
         // 0x712770 (Proximity_Mines, Buzz_Droids, Corrupt_Systems, Summon, Radioactive): the MARKER dummy point object
         // [port: or a live target / none - positions come with the command-57 dummy].
+        // mcx4 t06 (Spawn_Ability accepts-target 0x71e1d0, §14): a live object hostile to the user's owner. [port] "not a
+        // projectile, not dying, has a model" = a live combat unit.
+        case C::Spawn: return live && enemy(o.owner, combat_->owner(target));
         case C::ProximityMines:
         case C::BuzzDroids:
         case C::Summon:
-        case C::Spawn:
         case C::Radioactive:
         case C::RemoteBomb:
         case C::CorruptSystems: return target == kNoObject || dummy || live;
@@ -904,15 +906,40 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             return true;
         }
 
+        case C::Spawn: {
+            // mcx4 t06 (Spawn_Ability apply 0x71db50 [H], MCX4_RE_ANSWERS_TACTICAL §14). State in the SpecialState [port]:
+            // phase 0 idle / 1 creation countdown (`next` = the creation frame) / 2 bomber requested / 3 bomber bound /
+            // 4 bomber ordered (`next` = that frame); `cooldown` = the frame the recharge ends; `frames` = the last
+            // release frame (+0x3b4); `victims` = {the tracked bomber}.
+            if (!alive_unit(target) || !enemy(o.owner, combat_->owner(target)) || !range_ok(o, s, target)) return false;
+            if (s.spawn_type < 0) return false;  // [port] no Object_Type: nothing could be created
+            if (sp.phase != 0 || !sp.victims.empty()) return false;         // a bomber is pending or tracked
+            if (static_cast<int64_t>(frame) < sp.cooldown) return false;    // the recharge countdown is > 0
+            if (sp.frames > 0 && frame < static_cast<uint32_t>(sp.frames) + fps) return false;  // < 1 s since the last release
+            // 1. hold the user ([port] the stop-and-hold), Attack (5) blend 0.1 speed 1, the yaw snapped to the target
+            stop_order(o.id, frame, kStopHold);
+            queue_play(o.id, kAnimAttack, kDrawVariant, false, 0.1f, 1.0f, frame);
+            snap_face(o, target);
+            // 2. creation countdown max(1, int(FPS x delay)); recharge int(FPS x Recharge_Time_In_Seconds) from now.
+            // [port] the creation runs on frame + countdown (retail counts it down in the per-frame update).
+            sp.next = frame + static_cast<uint32_t>(std::max(1, frames_of(s.creation_delay, fps)));
+            sp.cooldown = static_cast<int32_t>(frame) + std::max(0, frames_of(s.recharge_time_in_seconds, fps));
+            // 3. [port] the Target_Particle_Effect at the bone is presentation: not created.
+            sp.applied = 1;
+            sp.phase = 1;
+            sp.target = target;
+            event(AbilityEventKind::EffectOn, sp.trigger, o.id, target, frame);
+            return true;
+        }
+
         case C::BuzzDroids:
         case C::Summon:
-        case C::Spawn:
         case C::Radioactive: {  // create Object_Type (one id) after Creation_Delay / Spray_Time / Activation_Time
             if (target != kNoObject && combat_->has_unit(target) && !range_ok(o, s, target)) return false;
             // cu8l t02 (CU8K_T02_T06_RE §2 rows 0x71c4b2 / 0x71ce72 / 0x712727): Buzz_Droids, Summon and Radioactive_
             // Contaminate stop and hold the user (one draw when not a squad member). [port] Radioactive's hold is at the
-            // apply (retail: when the throw starts, anim 0x70); the generic Spawn class has none.
-            if (s.cls != C::Spawn) stop_order(o.id, frame, kStopHold);
+            // apply (retail: when the throw starts, anim 0x70).
+            stop_order(o.id, frame, kStopHold);
             // r3h t01 (CU8K_T02_T06_RE §2 row 0x712727): Radioactive_Contaminate's throw plays Contaminate_Attack (0x70) on
             // the user. [port] at the apply, 0xFFFF, blend 0, one-shot; the IDLE behaviour follows.
             if (s.cls == C::Radioactive) queue_play(o.id, kAnimContaminate, kDrawVariant, false, 0.0f, 1.0f, frame);
@@ -1614,9 +1641,67 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
             return;
         }
 
+        case C::Spawn: {  // mcx4 t06 (Spawn_Ability update 0x71e290 [H], §14; phases at the apply above)
+            const ObjectId bomber = sp.victims.empty() ? kNoObject : sp.victims.front();
+            if (sp.phase == 1) {
+                if (frame < sp.next) return;
+                if (!alive_unit(sp.target)) {  // the target is gone: nothing is spawned; the release stamp
+                    sp.frames = static_cast<int32_t>(frame);
+                    sp.phase = 0;
+                    remove_special(o, sp, frame);
+                    return;
+                }
+                SpawnRequest q;
+                q.purpose = SpawnPurpose::Bomber;
+                q.object_type = s.spawn_type;
+                q.position = me;
+                if (!s.spawn_bone.empty() && host_.bone_position) {
+                    Vec3 bp;
+                    if (host_.bone_position(o.id, s.spawn_bone, bp) >= 0) q.position = bp;
+                }
+                q.facing = o.combat_unit ? combat_->facing(o.id) : Vec3{1.0f, 0.0f, 0.0f};
+                q.owner = o.owner;
+                q.source = o.id;
+                q.target = sp.target;
+                q.ability_type = sp.trigger;
+                request_spawn(q);
+                sp.phase = 2;
+                return;
+            }
+            if (sp.phase == 2) {  // [port] the host binds the bomber in the frame of the request: none came, so no bomber
+                sp.frames = static_cast<int32_t>(frame);
+                sp.phase = 0;
+                remove_special(o, sp, frame);
+                return;
+            }
+            if (!alive_unit(bomber)) {  // [L] a bomber killed before it stopped: no explosion (spawn_object_removed clears it)
+                sp.victims.clear();
+                sp.frames = static_cast<int32_t>(frame);
+                sp.phase = 0;
+                remove_special(o, sp, frame);
+                return;
+            }
+            if (sp.phase == 3) {
+                // Issue_Auto_Target at the target and a coordinator Move_To it. [port] issued one update after the creation
+                // (the bomber exists only after this tick's host pass); a gone target leaves the bomber standing, so it
+                // detonates at the next stop test.
+                if (alive_unit(sp.target)) {
+                    combat_->order_attack(bomber, sp.target);
+                    move_order(bomber, combat_->position(sp.target), frame, sp.trigger);
+                }
+                sp.phase = 4;
+                sp.next = frame;
+                return;
+            }
+            // phase 4: the bomber detonates once it has stopped moving. [port] not before 2 frames after the orders (the
+            // move starts with the host's movement pass).
+            const bool bomber_moving = host_.moving ? host_.moving(bomber) : combat_->moved(bomber);
+            if (frame > sp.next + 1 && !bomber_moving) remove_special(o, sp, frame);
+            return;
+        }
+
         case C::BuzzDroids:
         case C::Summon:
-        case C::Spawn:
         case C::Radioactive: {
             if (frame < sp.next) return;
             if (s.spawn_type >= 0) {
@@ -1689,9 +1774,51 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
 // remove (vf31)
 // ================================================================================================
 
+void AbilitySystem::spawn_detonate(Obj& o, SpecialState& sp, uint32_t frame) {
+    // mcx4 t06 (Spawn_Ability detonation 0x71dff0 [H], §14; also the remove): a tracked, existing bomber -> Explosion_Type
+    // for the user's owner at the bomber's aim point (position + Ranged_Target_Z_Adjust), shot by the bomber; then the
+    // bomber takes 9999 damage of kind 9 and dies the normal way. Bomber := none, release stamp := now.
+    const SpecialAbilityDesc& s = data_->specials[sp.desc];
+    const ObjectId bomber = sp.victims.empty() ? kNoObject : sp.victims.front();
+    if (alive_unit(bomber)) {
+        if (s.projectile >= 0) {
+            combat::ProjectileLaunch l;
+            l.shooter = bomber;
+            l.owner = o.owner;
+            l.projectile = static_cast<uint32_t>(s.projectile);
+            l.from = combat_->target_point(bomber);
+            l.point = l.from;
+            l.fuse_seconds = 0.0f;  // [port] the explosion object detonates where it is created
+            (void)combat_->launch_projectile(l, frame);
+        }
+        combat::DamageRequest r;
+        r.victim = bomber;
+        r.amount = 9999.0f;
+        r.kind = 9;
+        r.source = bomber;
+        (void)combat_->take_damage(r, frame);
+    }
+    sp.victims.clear();
+    sp.frames = static_cast<int32_t>(frame);
+    sp.phase = 0;
+}
+
+void AbilitySystem::spawn_object_removed(ObjectId id) {
+    // mcx4 t06 (Spawn_Ability object-removed notice 0x71de50, §14): the removed object is a tracked bomber -> none (no
+    // explosion, no release stamp); it is the registered target -> the target is dropped. [port] the stop of a removed
+    // target is not issued (it is gone).
+    for (Obj& u : objs_)
+        for (SpecialState& sp : u.specials) {
+            if (data_->specials[sp.desc].cls != C::Spawn) continue;
+            if (!sp.victims.empty() && sp.victims.front() == id) sp.victims.clear();
+            if (sp.target == id) sp.target = kNoObject;
+        }
+}
+
 void AbilitySystem::class_remove(Obj& o, SpecialState& sp, uint32_t frame) {
     const SpecialAbilityDesc& s = data_->specials[sp.desc];
     switch (s.cls) {
+        case C::Spawn: spawn_detonate(o, sp, frame); return;
         case C::EnhanceDefense: return;  // s78n t04 (§5.4.4 item 3c): never removed (0x6fae20 is unreachable)
         case C::CombatBonus:
         case C::BattlefieldModifier:

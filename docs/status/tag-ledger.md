@@ -10,7 +10,7 @@ reads it), **verified** (consumed, and a test checks its effect), **retail-unuse
 either, by an RE answer cited below). An `unread` or `stored` tag that a mod sets is an
 honour gap in `alamo_mod_check` report v4. Work order (§7.2): tier 1 with the most corpus mods, then base FoC uses.
 
-Totals: 2866 rows; unread 286, stored 626, consumed 1892, verified 28, retail-unused 34.
+Totals: 2866 rows; unread 286, stored 623, consumed 1892, verified 30, retail-unused 35.
 
 ## Per class
 
@@ -86,7 +86,7 @@ Totals: 2866 rows; unread 286, stored 626, consumed 1892, verified 28, retail-un
 | Force_Confuse_Ability | 4 | 0 | 1 | 3 | 0 | 0 |
 | Planet_Income_Bonus_Ability | 4 | 0 | 0 | 4 | 0 | 0 |
 | Radioactive_Contaminate_Ability | 4 | 0 | 1 | 3 | 0 | 0 |
-| Spawn_Ability | 4 | 0 | 3 | 1 | 0 | 0 |
+| Spawn_Ability | 4 | 0 | 0 | 1 | 2 | 1 |
 | Stun_Ability | 4 | 0 | 0 | 4 | 0 | 0 |
 | Remote_Bomb_Ability | 3 | 0 | 0 | 3 | 0 | 0 |
 | WeatherAudio | 3 | 0 | 0 | 3 | 0 | 0 |
@@ -891,9 +891,6 @@ base-FoC parity gaps as well as mod gaps (`mcx4`).
 | RadarMapSettings | Space_Position_LeftTop | 0xf | unread | 1 | - |
 | RadarMapSettings | Use_Event_System | 0x0 | unread | 1 | - |
 | Radioactive_Contaminate_Ability | SFXEvent_Radioactive | 0x1f | stored | 1 | - |
-| Spawn_Ability | Recharge_Time_In_Seconds | 0x8 | stored | 1 | docs/re/MCX4_RE_ANSWERS_TACTICAL.md |
-| Spawn_Ability | Self_Destruct_Radius | 0x8 | stored | 1 | docs/re/MCX4_RE_ANSWERS_TACTICAL.md |
-| Spawn_Ability | Spawn_Bone_Name | 0x17 | stored | 1 | docs/re/MCX4_RE_ANSWERS_TACTICAL.md |
 | Tactical_Bribe_Ability | Bribed_Effect | 0x1d | stored | 1 | docs/re/xml_tags.md |
 | Tactical_Bribe_Ability | Bribed_Effect_Small | 0x1d | stored | 1 | docs/re/xml_tags.md |
 | Tactical_Bribe_Ability | Effect_Z_Offset | 0x8 | stored | 1 | docs/re/xml_tags.md |
@@ -946,6 +943,7 @@ ignores them too.
 | GameObjectType | Turret_Targets_Anything_Else | 21 | docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H] |
 | GameObjectType | Turret_Targets_Ground_Infantry | 21 | docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H] |
 | GameObjectType | Turret_Targets_Ground_Vehicles | 18 | docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H] |
+| Spawn_Ability | Self_Destruct_Radius | 1 | docs/re/MCX4_RE_ANSWERS_TACTICAL.md §14 [H: only the load check reads it] |
 
 ## Every row
 
@@ -1016,7 +1014,7 @@ Per class: `Tag` (state, consumer files; x = retail-unused).
 - **Siphon_Credits_Ability**: `Min_Respawn_Time` (c 1), `Max_Respawn_Time` (c 1), `Must_Be_Bought_On_Black_Market` (c 3), `Min_Siphon_Percentage` (c 1), `Max_Siphon_Percentage` (c 1), `Siphon_Duration_In_Cycles` (c 1), `Evade_Detection_Chance` (s), `Detect_Interval_In_Seconds` (s), `Detection_Chance` (c 1), `Detect_Credit_Siphon_Effects` (s), `Political_Change` (s), `Change_Duration_In_Seconds` (s)
 - **Slicer_Ability**: `Min_Respawn_Time_Per_Tech_Level` (c 1), `Max_Respawn_Time_Per_Tech_Level` (c 1), `Chance_Modifier_By_Base_Level` (c 1), `Chance_Modifier_By_Planet_Difficulty` (c 1), `Cost_Multiplier_By_Planet_Tech_Availability` (c 1), `Chance_Affinity_Modifier` (c 1), `Cost_Affinity_Modifier` (c 1)
 - **SpaceProp**: `Debris_Movement_Vector` (c 1), `Debris_Facing_Rotate_Vector` (c 1), `Debris_Min_Lifetime_Seconds` (c 1), `Debris_Max_Lifetime_Seconds` (c 1), `Debris_Attached_Particle` (c 1), `Is_Asteroid_Field` (c 4), `Is_Ion_Storm` (c 4), `Is_Nebula` (c 4)
-- **Spawn_Ability**: `Recharge_Time_In_Seconds` (s), `Spawn_Bone_Name` (s), `Self_Destruct_Radius` (s), `Explosion_Type` (c 1)
+- **Spawn_Ability**: `Recharge_Time_In_Seconds` (v 1), `Spawn_Bone_Name` (v 1), `Self_Destruct_Radius` (x), `Explosion_Type` (c 1)
 - **Stun_Ability**: `Stun_Time_In_Secs` (c 1), `Stun_Range` (c 1), `Stun_Travel_Time_In_Secs` (c 1), `Stunned_Effect` (c 1)
 - **Super_Laser_Ability**: `Fire_Frame` (c 1), `Attack_Anim_Sub_Index` (c 1), `Beam_Texture_Name` (c 1), `Num_Anim_Frames` (c 1), `Line_Width` (c 1), `Line_Color` (c 1), `Face_Target` (c 1), `Turn_Rate` (c 1), `Firing_Cone` (c 1), `Fire_Delay` (c 1), `Fire_Continuation` (c 2)
 - **System_Spy_Ability**: `Duration_In_Secs` (c 2), `See_Base_Levels` (c 1), `See_Credit_Income` (c 1), `See_Credit_Income_Breakdown` (c 1), `See_Num_Fleets` (c 1), `See_Most_Powerful_Ship` (c 1), `See_Fleet_Contents` (c 1), `See_Num_Ground_Companies` (c 1), `See_Ground_Company_Contents` (c 1), `See_Special_Structures` (c 1), `See_Political_Control` (c 1), `See_Political_Control_Breakdown` (c 1), `See_Current_Production` (c 1), `See_Minor_Stealth_Heroes` (c 1), `See_Major_Stealth_Heroes` (c 1), `See_Force_Sensitive_Heroes` (c 1), `See_Super_Weapons` (c 1), `Blob_Color` (c 1), `Blob_Material_Name` (c 1), `Show_Blob_To_Enemies` (c 1), `Bomb_Type` (c 1)
