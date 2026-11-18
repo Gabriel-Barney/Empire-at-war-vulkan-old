@@ -34,7 +34,44 @@ BattleConfig::SkirmishOptions skirmish_option_defaults(const data::GameConstants
     o.starting_units = gc.get_bool("MP_Default_Free_Starting_Units", o.starting_units);
     o.super_weapons = gc.get_bool("MP_Default_Allow_SuperWeapons", o.super_weapons);
     o.prebuilt_base = gc.get_bool("MP_Default_Pre_Built_Base", o.prebuilt_base);
+    if (const auto v = gc.get("MP_Default_Land_Tactical_Win_Condition"))
+        if (const int32_t w = parse_skirmish_victory_type(*v); w >= 0) o.land_default_win = static_cast<uint8_t>(w);
+    if (const auto v = gc.get("MP_Default_Space_Tactical_Win_Condition"))
+        if (const int32_t w = parse_skirmish_victory_type(*v); w >= 0) o.space_default_win = static_cast<uint8_t>(w);
     return o;
+}
+
+int32_t parse_skirmish_victory_type(std::string_view text) {
+    std::string_view s = text;
+    const auto is_space = [](char c) { return c == 0x20 || c == 0x09 || c == 0x0d || c == 0x0a; };
+    while (!s.empty() && is_space(s.front())) s.remove_prefix(1);
+    while (!s.empty() && is_space(s.back())) s.remove_suffix(1);
+    if (s.empty()) return -1;
+    if (s.front() >= '0' && s.front() <= '9') {
+        int32_t v = 0;
+        for (const char c : s) {
+            if (c < '0' || c > '9' || v > 0xff) return -1;
+            v = v * 10 + (c - '0');
+        }
+        return v <= 0xff ? v : -1;
+    }
+    if (s.size() > 9 && ascii_iequals(s.substr(0, 9), "SKIRMISH_")) s.remove_prefix(9);
+    static constexpr std::pair<std::string_view, int32_t> kNames[] = {
+        {"ALL_ENEMY_UNITS_DESTROYED", 0x12}, {"ALL_ENEMY_BASE_COMPONENTS_DESTROYED", 0x13}, {"ENEMY_COMMAND_HQ_DESTROYED", 0x14},
+        {"CONTROL_POINT_DOMINATION", 0x15}, {"SPACE_ENEMY_STARBASE_DESTROYED", 0x16}};
+    for (const auto& [name, v] : kNames)
+        if (ascii_iequals(s, name)) return v;
+    return -1;
+}
+
+uint8_t skirmish_win_condition(uint8_t want, bool space, uint8_t land_default, uint8_t space_default) {
+    const auto valid = [space](uint8_t w) { return space ? (w == 0x12 || w == 0x16) : (w >= 0x12 && w <= 0x14); };
+    if (valid(want)) return want;
+    const uint8_t d = space ? space_default : land_default;
+    if (valid(d)) return d;
+    for (int w = d + 1; w <= 0x16; ++w)
+        if (valid(static_cast<uint8_t>(w))) return static_cast<uint8_t>(w);
+    return 0x12;  // the lowest of both sets
 }
 
 void TacticalBattle::refresh_ai_difficulty(int32_t player) {

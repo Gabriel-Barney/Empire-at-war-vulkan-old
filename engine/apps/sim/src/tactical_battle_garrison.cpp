@@ -541,6 +541,7 @@ void TacticalBattle::s4_apply(TacticalMode& mode) {
             case tg::GarrisonEventKind::Exited:
             case tg::GarrisonEventKind::Ejected:
                 s4_leave(mode, e.unit, s4_squad_leave(mode, e, outs, events), e.holder);  // s78n t14: a squad leaves as one
+                story_vacated_.push_back({e.unit, e.holder});
                 if (abilities_->has_object(e.holder))
                     abilities_->set_garrison_count(e.holder, static_cast<int32_t>(garrison_.occupants(e.holder).size()));
                 break;

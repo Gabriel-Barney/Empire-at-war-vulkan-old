@@ -854,6 +854,8 @@ void test_type_resolution() {
           "<Unit Name=\"No_Model\"/>"
           "</Objects>");
     write(x / "Later.xml", "<Objects><Unit Name=\"BASE\"><Land_Model_Name>duplicate.alo</Land_Model_Name></Unit></Objects>");
+    write(x / "GameConstants.xml", "<GameConstants><Water_Render_Target_Resolution>256</Water_Render_Target_Resolution>"
+                                   "<Water_Clip_Plane_Offset>1.5</Water_Clip_Plane_Offset></GameConstants>");
     {
         DirectoryProvider dp(path_to_utf8(tmp));
         data::GameDatabase db;
@@ -877,6 +879,12 @@ void test_type_resolution() {
         CHECK(!r.resolve(alamo::name_crc("Unknown_Type"), false, t) && r.resolve(alamo::name_crc("No_Model"), false, t));
         CHECK(scale("Base") == 2.0f && scale("Var_Space") == 1.0f && scale("Var_Land") == 2.0f && scale("Var_Var") == 1.0f);
         CHECK(scale("Gal_Only") == 1.0f);  // invalid Scale_Factor -> 1
+        // mcx4 t15 (docs/re/TERRAIN_WATER_POST.md, the reflection pass): the water render target and clip plane come from
+        // GameConstants.
+        // ledger: verifies GameConstants.Water_Render_Target_Resolution
+        // ledger: verifies GameConstants.Water_Clip_Plane_Offset
+        const terrain::WaterOptions wo = r.water_options();
+        CHECK(wo.render_target_resolution == 256 && wo.clip_plane_offset == 1.5f);
         std::printf("type resolution: Var_Space land %s / space %s, Var_Land space %s, duplicate BASE -> %s\n",
                     model("Var_Space", false).c_str(), model("Var_Space", true).c_str(), model("Var_Land", true).c_str(),
                     model("Base", false).c_str());

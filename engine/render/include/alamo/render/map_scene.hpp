@@ -79,6 +79,9 @@ public:
     const HardpointDef* hardpoint(std::string_view name) const;
     // GameConstants MP_Color_* (doc values for absent tags).
     MpPalette palette() const;
+    // mcx4 t15: GameConstants Water_Render_Target_Resolution / Water_Clip_Plane_Offset (TERRAIN_WATER_POST.md, the
+    // reflection pass; an absent resolution keeps 512, an absent clip plane offset is the record default 10).
+    terrain::WaterOptions water_options() const;
     // Factions in FactionFiles.xml order. A map placement's owner (0x4B0 mini 02) is read as an index into
     // this list [inferred from the data: vanilla land maps own ~99% of their objects - props, trees - by 3 =
     // Neutral and a few by 4 = Hostile, in the order Rebel, Empire, Pirates, Neutral, Hostile, ...].

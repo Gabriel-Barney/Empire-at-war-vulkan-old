@@ -157,6 +157,9 @@ struct HudConstants {
     bool radar_colorize_selected = true;           // Radar_Colorize_Selected_Units (UI.md §1.7)
     Rgba8 radar_selected_color{209, 255, 209, 255};  // Radar_Selected_Units_Color
     Rgba8 battle_pending_color{255, 32, 32, 240};  // Battle_Pending_Message_Color (GALACTIC_DIALOGS §1.3)
+    // mcx4 t14 (P4_SIM_SYSTEMS §2.7.2): the Droid Log's "Day N" and separator rows.
+    Rgba8 droid_date_color{255, 0, 0, 255};         // Droid_Date_Color
+    Rgba8 droid_separator_color{128, 128, 128, 255};  // Droid_Seperator_Color (retail spelling)
 };
 HudConstants hud_constants_from(const data::XmlNode& game_constants_root);
 // "r g b [a]" / "r, g, b[, a]" bytes (alpha 255 when absent); false (out unchanged) with fewer than three numbers.

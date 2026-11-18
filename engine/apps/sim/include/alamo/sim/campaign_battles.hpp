@@ -207,6 +207,8 @@ public:
     // decoded by attach()'s galactic command hook into start_corruption. The defiler must be a live galactic object of the
     // issuing player (step 1; [port] owner test); Refused -> NotAllowed, unknown planet -> InvalidTarget.
     CorruptionStart last_corruption_start() const { return last_corruption_; }
+    // mcx4 t13 (presentation read): the running battle's corruption mission player, -1 when it is not one.
+    int32_t active_corruption_player() const { return corruption_active_.player; }
     // --- P4 sim (owner: galactic agent): the tactical retreat dialog's Autoresolve for `player` (BT §4.5,
     // P4_SIM_SYSTEMS §9.3; retail: a direct GUI call, the port keeps it as the host's port command so replays reproduce
     // it). Gate = the retreat coordinator's can-retreat check for the player (TacticalBattle::stop_for_auto_resolve).

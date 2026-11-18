@@ -929,7 +929,7 @@ void App::show_campaign_end(bool victory) {
 void App::open_holocron(ui::InfoPage page) {
     const galactic::GalacticSim* g = galaxy();
     if (!g) return;
-    ui::DroidLogInfo dl = holo_.droid_log(*session_, data_, ui_.text, droid_rows_);
+    ui::DroidLogInfo dl = holo_.droid_log(*session_, data_, ui_.text, droid_rows_, droid_row_colors_);
     dl.hints = story_present_.any_advisor();  // HUD_GAPS §10.2: checked when any mode's advisor hints are on
     info_.set_droid_log(std::move(dl));
     info_.set_data_chart(holo_.chart(*g, data_, ui_.text));

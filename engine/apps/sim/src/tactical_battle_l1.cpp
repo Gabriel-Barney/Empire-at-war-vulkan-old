@@ -148,6 +148,7 @@ void TacticalBattle::l1_fields(uint32_t frame, SimRng& rng) {
                 r.amount = l1_k_.asteroid_field_damage;
                 r.damage_type = asteroid_damage_type;
                 combat_->take_damage(r, frame);
+                l1_asteroid_hits_.push_back(u.id);  // mcx4 t13: presentation feed
                 // One Asteroid_Damage_Hit_Particles entry (synced int); [port] no skeleton: the model centre + 90 z,
                 // no bone draw.
                 const auto list = types.get_list(st.type(h), "Asteroid_Damage_Hit_Particles");

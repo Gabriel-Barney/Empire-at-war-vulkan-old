@@ -429,6 +429,7 @@ public:
     uint32_t selected_planet_ = 0;        // galactic planet selection (object id, 0 = none)
     bool fleet_drag_active_ = false;      // galactic HUD fleet drag of the last frame (drag / drop sounds)
     std::vector<std::u32string> droid_rows_;  // ui4 t11: Droid Log rows of the advisor lines shown in galactic mode
+    std::vector<ui::Rgba8> droid_row_colors_;  // mcx4 t14: their colours (Droid_Date_Color, the line's, Droid_Seperator_Color)
     uint32_t drag_route_fleet_ = 0, drag_route_target_ = 0;  // ui4 t06: the cached route's fleet / target planet ids
     std::vector<PlanetIndex> drag_route_;                    // ui4 t06: its planets (fleet_drag_route)
     bool battle_end_open_ = false;        // battle-end screen shown: ticks held until Continue (presentation only)

@@ -159,6 +159,10 @@ struct BattleConfig {
         // option flags +0x20: 0x1 heroes (named heroes buildable), 0x2 free starting units (the host places the start
         // forces), 0x4 super weapons (Is_Skirmish_Tactical_Super_Weapon buildable, bombing runs), 0x8 pre-built bases.
         bool heroes = true, starting_units = true, super_weapons = true, prebuilt_base = true;
+        // mcx4 t14 (SKIRMISH_SETUP §0, 0x4acf00): GameConstants MP_Default_Land_ / _Space_Tactical_Win_Condition, the
+        // condition a land / space game type takes when none is chosen (shipped 0x13 / 0x16); skirmish_win_condition
+        // steps an invalid one into the type's set.
+        uint8_t land_default_win = 0x13, space_default_win = 0x16;
         friend bool operator==(const SkirmishOptions&, const SkirmishOptions&) = default;
     };
     SkirmishOptions skirmish_options;
@@ -589,6 +593,9 @@ public:
     };
     std::span<const StoryGarrisonEvent> story_garrisoned() const { return story_garrisoned_; }
     std::span<const StoryCaptureEvent> story_captured() const { return story_captured_; }
+    // mcx4 t13 (presentation feed): units that left a garrison (Exited / Ejected) in this tick or in the command phase
+    // before it, in event order.
+    std::span<const StoryGarrisonEvent> story_vacated() const { return story_vacated_; }
     // Garrison API for the Lua bindings (Can_Garrison / Garrison / Leave_Garrison / Eject_Garrison / Can_Garrison_Fire /
     // Is_In_Garrison / Get_Garrisoned_Units). Orders: `player` = the units' owner (script orders pass the unit's owner);
     // units must be live battle units of that player. can_garrison = the Lua Can_Garrison rule (L1_S4_REMAINING.md §2.5:
@@ -995,6 +1002,9 @@ public:
     // containers: the bindings OR over the members (rule 1).
     int32_t object_in_field(objects::ObjectId id, uint32_t kind) const;
     const tactical::abilities::SpaceFieldIndex& space_fields() const { return l1_fields_; }
+    // mcx4 t13 (presentation feed, this tick, cleared at the start of tick()): the victim of every asteroid field damage
+    // hit, in service order (SFXEvent_Damaged_By_Asteroid, 0x436920).
+    std::span<const objects::ObjectId> asteroid_hits() const { return l1_asteroid_hits_; }
     // Field effects (L1_S4_REMAINING §3.3), serviced at the start of the combat object pass (phase D, ascending id):
     // NEBULA objects - entry cancels every active ability, lockout stamp (Nebula_Ability_Disable_Time); SHIELDED
     // objects - ion-storm stamp (shields down, DEFEND blocked for Ion_Storm_Shield_Disable_Time); ASTEROID_FIELD_DAMAGE
@@ -2235,6 +2245,8 @@ private:
     // --- S4 garrisons / capture (owner: S4 agent; tactical_battle_garrison.cpp; no-ops without the garrison lib) ---
     std::vector<StoryGarrisonEvent> story_garrisoned_;
     std::vector<StoryCaptureEvent> story_captured_;
+    std::vector<StoryGarrisonEvent> story_vacated_;  // mcx4 t13: presentation only (not saved / hashed)
+    size_t story_vacated_mark_ = 0;                  // entries the last tick reported
     void s4_owner_changed(TacticalMode& mode, objects::ObjectId id, int32_t old_owner, int32_t owner);  // change_owner()
     // s78j t04: one object's script owner change (change_owner(), else store + trees + fog / garrison hooks), and the
     // team spread of script_change_owner (TACTICAL_COMBAT §3.5 step 4): the container, then the other live members.
@@ -2366,6 +2378,7 @@ private:
     tactical::abilities::SpaceFieldIndex l1_fields_;
     L1Constants l1_k_;
     std::vector<objects::ObjectId> l1_in_asteroid_;  // ASTEROID_FIELD_DAMAGE stamps set (ascending id)
+    std::vector<objects::ObjectId> l1_asteroid_hits_;  // mcx4 t13: presentation only (not saved / hashed)
     void l1_fields(uint32_t frame, SimRng& rng);  // BattleHooks::before_units (combat phase D start)
     // --- OI tactical: crush (MOVEMENT.md 5.5): the movement tick's CrushEvents, applied as Take_Damage at combat phase
     //     D start (BattleHooks::before_units) so the deaths are reported by this tick's combat. ---

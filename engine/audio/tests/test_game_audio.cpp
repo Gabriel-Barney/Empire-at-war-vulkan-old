@@ -571,6 +571,9 @@ void test_music_modes() {
     CHECK(a.music_mode() == music_mode::kTacticalBattle);
     g.sim_tick();
     CHECK(a.music_mode() == music_mode::kTacticalAmbient);
+    // ledger: verifies Faction.Music_Event_Tactical_Win
+    // ledger: verifies Faction.Music_Event_Tactical_Lose
+    // (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.Music_Event_Tactical_Win family": Music_Event_Tactical_Win / _Lose.)
     // Victory against the Empire: the _Vs_Faction row. aud1 (AUDIO.md §9.2): mode 16 is not excluded from the battle
     // switch, so combat afterwards switches to battle music.
     g.battle_end({true, "Empire", false});

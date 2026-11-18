@@ -129,6 +129,10 @@ ui::HudBuildOption::Block galactic_build_block(commands::RejectReason why);
 const char* galactic_announcement(const galactic::GalacticSim& g, const galactic::GalacticEvent& e, int32_t local_player);
 std::vector<std::u32string> droid_log_rows(std::u32string_view day_text, int32_t cycle, std::u32string_view text, std::u32string_view separator);
 std::vector<PlanetIndex> fleet_drag_route(const galactic::GalacticSim& g, int32_t local_player, uint32_t fleet_id, PlanetIndex target);
+// mcx4 t14 (GALACTIC_DIALOGS §5.1.1, 0x3145c0 step 1 [H]): a type is listed on the galactic build bar only when one of
+// its Build_Tab_Land_Units / _Space_Units / _Special_Structures / _Heroes / _Outpost / _Space_Station flags is set
+// (`flag(tag)` = the type's boolean); the flag does not choose the tab.
+bool galactic_build_listed(const std::function<bool(std::string_view)>& flag);
 // `icon(type)` = the type's Icon_Name.
 std::vector<ui::GalacticBuildOption> galactic_build_options(const galactic::GalacticSim& g, int32_t player, PlanetIndex planet,
                                                             const std::function<std::string(uint32_t type)>& icon);

@@ -15,6 +15,7 @@
 //   listener      set_camera from the active camera (AUDIO.md 1.8).
 // Unit sounds come from the typed object view (GameObjectTypes::get_string), cached per type.
 #pragma once
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -75,6 +76,11 @@ struct GameAudioStats {
     uint64_t anim_sounds = 0;                                           // aud1 t03: AnimationSFXMaps SOUND rows started
     uint64_t planet_reveals = 0, production_sfx = 0, build_music = 0;    // aud2 t01 / t03
     uint64_t fleet_jumps = 0, campaign_end_music = 0, deactivations = 0;  // aud2 t07 / t08 / t04
+    uint64_t health_warnings = 0, hardpoint_lines = 0, hardpoint_explosions = 0;  // mcx4 t13 batch A
+    uint64_t control_lines = 0;                                                    // mcx4 t13 batch C
+    uint64_t battle_result_lines = 0;                                              // mcx4 t13 batch D
+    uint64_t retreat_lines = 0;                                                    // mcx4 t13 batch E
+    uint64_t special_weapon_lines = 0;                                             // mcx4 t13 batch G
 };
 
 class GameAudioHost {
@@ -104,8 +110,13 @@ public:
     void negative_feedback();
     // owner = the unit's player (-1 unknown): units of the battle's retreating player give no response (the mode's
     // "excluded set" = the retreat coordinator's retreating units, STRATEGIC_GAPS §7.4 [M]; stats().excluded).
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Move_Into_Asteroid_Field family" [H]): `dest_fields` = the
+    // space field kinds (tactical::abilities kField* bits) at a local unit's space move destination; the type's
+    // move_into_field_tag line, when set, replaces the move response.
     void unit_response(const objects::GameObjectTypes& types, objects::TypeIndex type, uint64_t object, UnitResponse kind,
-                       bool group = false, int32_t owner = -1);
+                       bool group = false, int32_t owner = -1, uint32_t dest_fields = 0);
+    // Asteroid field (bit 1) first, then nebula (bit 4); "" for neither.
+    static std::string_view move_into_field_tag(uint32_t dest_fields);
     // Battle-end dialog opened: the local faction's win / lose music (Music_Event_Tactical_<Win/Lose>[_Vs_Faction]),
     // music mode 16 (STRATEGIC_GAPS §7.4).
     void battle_end(bool won, std::string_view enemy_faction = {});
@@ -155,6 +166,9 @@ public:
     uint32_t weapon_fired(uint64_t shooter, std::string_view hardpoint_fire, std::string_view shooter_fire, const Vec3& position);
     // aud1 t05: each battle player's Faction name (index = player), read by battle_tick's object_events; set at battle start.
     void set_player_factions(std::vector<std::string> factions) { player_factions_ = std::move(factions); }
+    // mcx4 t13 batch D: the running battle is a tactical corruption mission (0x28ae30; picks the _Tactical_Corruption_
+    // Mission HUD result lines).
+    void set_corruption_mission(bool on) { corruption_mission_ = on; }
     void weather(std::string_view type, float intensity, bool local_affected = true);  // local_affected: no Weatherproof
     void combat(bool local_involved, bool local_base_attacked);
     // --- aud1 t05 (object SFX: abilities, shields, hyperspace; src/game_audio_host_objects.cpp) ---
@@ -264,6 +278,52 @@ public:
     // L1_S4_REMAINING §4.1 (b0289): a unit that actually entered a garrison -> the local faction's SFXEvent_Bunker_Garrisoned
     // [M: for the local player's own units only], else "". SFXEvent_Bunker_Vacated has no traced trigger (backlog).
     static std::string_view garrison_line(int32_t unit_owner, int32_t local_player);
+    // mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md; battle_tick's rules, public for the tests):
+    // "GameObjectType.SFXEvent_Health_Low_Warning family" (Take_Damage 0x3a9e30 [H]): the type tag a hit plays when it takes
+    // the victim's health fraction from `before` to `after` across a threshold, the critical one tested first
+    // (GameConstants Health_Critical_Percent_Threshold / Health_Low_Percent_Threshold): the victim type's
+    // SFXEvent_Health_Critical_Warning / _Low_Warning when the local player owns the victim, else the attacker type's
+    // SFXEvent_Enemy_Damaged_Health_Critical_Warning / _Low_Warning when the local player owns the attacker; "" otherwise.
+    static std::string_view health_warning_tag(float before, float after, float low, float critical, bool local_victim,
+                                               bool local_attacker);
+    // "GameObjectType.SFXEvent_Hardpoint_Destroyed family" (0x386660 [H]): the parent type's tag when the local player's live
+    // parent loses a hard point of `kind` (HardpointKind order): SFXEvent_Hardpoint_All_Weapons_Destroyed for a weapon kind
+    // (5..10) when no weapon hard point is left, else SFXEvent_Hardpoint_Destroyed when none of that kind is left; "" otherwise.
+    static std::string_view hardpoint_lost_tag(uint8_t kind, bool local_parent, bool parent_dying, bool last_of_kind,
+                                               bool weapons_left);
+    // The event for hard point kind `kind` in a per-kind list (SFXEvent_Hardpoint_Destroyed / SFXEvent_Attack_Hardpoint
+    // lines "HARD_POINT_WEAPON_LASER, Event"; the 13 HARD_POINT_* names in HardpointKind order); "" when the kind has none.
+    static std::string_view hardpoint_kind_event(std::span<const std::string_view> tokens, uint8_t kind);
+    // "Faction.SFXEvent_Tactical_Gain_Friendly_Control family" (capture complete 0x500e30 [H]): the local faction's per-type
+    // list tags a capture point owner change plays, {friendly half, enemy half} ("" = none). Friendly half when the local
+    // player is friendly (relation 0, self included) to the old or the new owner: _Lose_Friendly_Control if friendly to
+    // the old owner, else _Gain_Friendly_Control. Enemy half: _Lose_Enemy_Control when the old owner's faction is not
+    // Is_Neutral and the local player is hostile to it; else none when the new owner's faction is neutral; else
+    // _Gain_Enemy_Control when hostile to the new owner. `friendly_old` / `hostile_old` false for no owner (-1).
+    // "Faction.SFXEvent_HUD_Won_Land_Battle family" (0x343810 from the victory declare 0x343b90 [H]): the local faction's
+    // HUD line for a declared victory ("" = none). `local_won`: the winner is the local player; `local_hostile`: the
+    // local player is hostile to the winner (an ally of the winner hears nothing). `enemy_tsw`: an enemy of the local
+    // player owns a TACTICAL_SUPER_WEAPON object; `own_killer`: the local player owns a live Is_Super_Weapon_Killer object.
+    // A space win against a TSW without a killer plays Space_Forced_Retreat_Due_To_Superweapon.
+    static std::string_view battle_result_line(bool local_won, bool local_hostile, bool space, bool enemy_tsw, bool own_killer,
+                                               bool corruption);
+    // The 0x343b90 gate: victory types 0xb..0x16 that are not silent.
+    static bool battle_result_gate(uint8_t victory_type, bool silent) { return victory_type >= 0x0b && victory_type <= 0x16 && !silent; }
+    // "Faction.Land_Retreat_Begin_SFXEvent family" (begin: land 0x5350d0, space 0x533080 [H]): the local faction's line
+    // when a retreat starts ("" = none): the retreater is local -> _Retreat_Begin_SFXEvent (after the retreating units'
+    // own SFXEvent_Retreat_Start, which replaces it); the local player is hostile to the retreater -> _Enemy_Begin_.
+    static std::string_view retreat_begin_tag(bool local_retreats, bool local_hostile, bool space);
+    // "Faction.SFXEvent_HUD_Special_Weapon_Ready family" [H]: each faction tag is a list (one event per XML occurrence),
+    // indexed by the weapon type's Special_Weapon_Target_Action_Index. special_weapon_tag gives the faction tag for a
+    // ready (or fired) weapon whose owner is local / friendly (`own`) or hostile; nth_field the index-th occurrence of a
+    // tag in `fields` ("" when absent or out of range).
+    static std::string_view special_weapon_tag(bool fired, bool own);
+    static std::string_view nth_field(std::span<const std::pair<std::string, std::string>> fields, std::string_view tag, int32_t index);
+    struct ControlLines {
+        std::string_view friendly, enemy;
+    };
+    static ControlLines control_lines(bool friendly_old, bool friendly_new, bool hostile_old, bool hostile_new, bool old_neutral,
+                                      bool new_neutral);
     // HERO_CLASH §3.8 (b0300): the clash winner's speech event, First_Hero_Win_Speech when hero 1 (First_Hero_Type) won,
     // else Second_Hero_Win_Speech; "" for an unknown entry. (Attack_SFXEvent belongs to Clash_Actions, i.e. the
     // action-driven clash that shipped data never reaches, HERO_CLASH §4.)
@@ -323,9 +383,14 @@ public:
     // event's data says: the HUD voice lines use Preset_GUI-style 2D presets); a completion also starts the type's
     // Build_Music_Completed as music mode 4 (STRATEGIC_GAPS §7.4; [port] for the local player's own production only).
     // Returns the SFX instance id (0 = no tag / refused).
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Tactical_Build_Started family": queue add 0x496a20, complete
+    // 0x498170 / 0x402840, cancel 0x498820 [H]): the type's Build_Speech_Underway / _Completed / _Stopped speech, when set,
+    // replaces the SFX line; else in a battle (`tactical`) SFXEvent_Tactical_Build_Started / _Complete / _Cancelled, else
+    // the plain SFXEvent_Build_* line. production_tags gives that order (speech tag first; tactical tag "" in galactic).
     enum class Production : uint8_t { Begin, Cancel, Complete };
     static std::string_view production_tag(Production kind);
-    uint32_t production(const objects::GameObjectTypes& types, objects::TypeIndex type, Production kind);
+    static std::array<std::string_view, 3> production_tags(Production kind, bool tactical);
+    uint32_t production(const objects::GameObjectTypes& types, objects::TypeIndex type, Production kind, bool tactical = false);
     // t07 (BATTLE_TRANSITIONS, departure 0x431c80): a fleet left a planet's orbit. Galactic_Fleet_Hyperspace (2D, GUI
     // preset) when the local player owns the fleet or sees it (`local_sees`: the host's visibility test). Returns the
     // instance id (0 = not heard / refused).
@@ -345,6 +410,16 @@ public:
 private:
     const audio::UnitSounds& sounds(const objects::GameObjectTypes& types, objects::TypeIndex t);
     Vec3 position_of(uint64_t id) const;
+    // mcx4 t13 batch A: health warnings, hard point lost lines and hard point death explosions of this tick.
+    void cue_lines(const sim::TacticalBattle& battle, const objects::ObjectStore& store, const objects::GameObjectTypes& types,
+                   int32_t local_player);
+    float health_low_ = 0.33f, health_critical_ = 0.10f;  // GameConstants Health_Low / _Critical_Percent_Threshold
+    bool corruption_mission_ = false, victory_seen_ = false;  // mcx4 t13 batch D: set_corruption_mission; declare latch
+    int32_t last_retreater_ = -1;                             // mcx4 t13 batch E: retreating_player() last tick
+    // mcx4 t13 batch B: the local player's tactical build orders last tick (order id -> type) and built counts (type ->
+    // TacticalProduction::built_count), to tell a completed order from a cancelled one.
+    std::map<uint32_t, int32_t> prod_orders_;
+    std::map<int32_t, uint32_t> prod_built_;
     // aud1 t04: Fire_SFXEvent of a CombatData::hardpoints entry (resolved by its HardPoint type name, cached; "" none).
     const std::string& hardpoint_fire_sfx(const objects::GameObjectTypes& types, const tactical::combat::CombatSystem& cs, int32_t hardpoint);
 

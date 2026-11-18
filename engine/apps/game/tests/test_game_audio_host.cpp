@@ -179,6 +179,147 @@ void test_super_weapon_music() {
 }
 #endif
 
+// mcx4 t13 batch A (docs/re/MCX4_T13_RE_ANSWERS.md, both builds): the health warning and hard point lost line rules.
+// "GameObjectType.SFXEvent_Health_Low_Warning family" (Take_Damage 0x3a9e30) and "GameObjectType.SFXEvent_Hardpoint_Destroyed
+// family" (0x386660).
+// ledger: verifies GameObjectType.SFXEvent_Health_Low_Warning
+// ledger: verifies GameObjectType.SFXEvent_Health_Critical_Warning
+// ledger: verifies GameObjectType.SFXEvent_Enemy_Damaged_Health_Low_Warning
+// ledger: verifies GameObjectType.SFXEvent_Enemy_Damaged_Health_Critical_Warning
+// ledger: verifies GameObjectType.SFXEvent_Hardpoint_Destroyed
+// ledger: verifies GameObjectType.SFXEvent_Hardpoint_All_Weapons_Destroyed
+void test_health_and_hardpoint_lines() {
+    using H = GameAudioHost;
+    // Thresholds 0.33 / 0.10 (FoC); critical tested first; one crossing per hit.
+    CHECK(H::health_warning_tag(0.5f, 0.3f, 0.33f, 0.10f, true, false) == "SFXEvent_Health_Low_Warning");
+    CHECK(H::health_warning_tag(0.5f, 0.05f, 0.33f, 0.10f, true, false) == "SFXEvent_Health_Critical_Warning");  // skips low
+    CHECK(H::health_warning_tag(0.3f, 0.2f, 0.33f, 0.10f, true, false).empty());   // already below low
+    CHECK(H::health_warning_tag(0.5f, 0.3f, 0.33f, 0.10f, false, true) == "SFXEvent_Enemy_Damaged_Health_Low_Warning");
+    CHECK(H::health_warning_tag(0.2f, 0.1f, 0.33f, 0.10f, false, true) == "SFXEvent_Enemy_Damaged_Health_Critical_Warning");
+    CHECK(H::health_warning_tag(0.5f, 0.3f, 0.33f, 0.10f, false, false).empty());  // neither side local
+    CHECK(H::health_warning_tag(0.5f, 0.3f, 0.33f, 0.10f, true, true) == "SFXEvent_Health_Low_Warning");  // victim first
+    // Hard point lost: local live parent only; a weapon kind with no weapon left -> all weapons; else last of the kind.
+    CHECK(H::hardpoint_lost_tag(5, true, false, true, false) == "SFXEvent_Hardpoint_All_Weapons_Destroyed");
+    CHECK(H::hardpoint_lost_tag(5, true, false, true, true) == "SFXEvent_Hardpoint_Destroyed");
+    CHECK(H::hardpoint_lost_tag(5, true, false, false, true).empty());  // one of that kind still up
+    CHECK(H::hardpoint_lost_tag(1, true, false, true, false) == "SFXEvent_Hardpoint_Destroyed");  // shield generator
+    CHECK(H::hardpoint_lost_tag(5, false, false, true, false).empty() && H::hardpoint_lost_tag(5, true, true, true, false).empty());
+    // The per-kind list: "HARD_POINT_WEAPON_LASER, Ev" lines; an empty event keeps the list aligned; a later line wins.
+    const std::vector<std::string_view> toks = {"HARD_POINT_WEAPON_LASER", "Lost_Laser", "HARD_POINT_WEAPON_MISSILE",
+                                                "HARD_POINT_ENGINE", "Lost_Engine", "HARD_POINT_WEAPON_LASER", "Lost_Laser_2"};
+    CHECK(H::hardpoint_kind_event(toks, 5) == "Lost_Laser_2" && H::hardpoint_kind_event(toks, 0) == "Lost_Engine");
+    CHECK(H::hardpoint_kind_event(toks, 6).empty() && H::hardpoint_kind_event(toks, 1).empty() && H::hardpoint_kind_event(toks, 13).empty());
+}
+
+// mcx4 t13 batch C (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_Tactical_Gain_Friendly_Control family", capture
+// complete 0x500e30; both builds): which halves a capture point owner change plays for the local player.
+// ledger: verifies Faction.SFXEvent_Tactical_Gain_Friendly_Control
+// ledger: verifies Faction.SFXEvent_Tactical_Lose_Friendly_Control
+// ledger: verifies Faction.SFXEvent_Tactical_Gain_Enemy_Control
+// ledger: verifies Faction.SFXEvent_Tactical_Lose_Enemy_Control
+void test_control_lines() {
+    using H = GameAudioHost;
+    // Args: friendly_old, friendly_new, hostile_old, hostile_new, old_neutral, new_neutral.
+    // Neutral -> local: gain friendly, no enemy half (old owner neutral; new owner not hostile).
+    H::ControlLines c = H::control_lines(false, true, false, false, true, false);
+    CHECK(c.friendly == "SFXEvent_Tactical_Gain_Friendly_Control" && c.enemy.empty());
+    // Enemy -> local: gain friendly and lose enemy.
+    c = H::control_lines(false, true, true, false, false, false);
+    CHECK(c.friendly == "SFXEvent_Tactical_Gain_Friendly_Control" && c.enemy == "SFXEvent_Tactical_Lose_Enemy_Control");
+    // Local -> enemy: lose friendly (friendly to the old owner wins) and gain enemy.
+    c = H::control_lines(true, false, false, true, false, false);
+    CHECK(c.friendly == "SFXEvent_Tactical_Lose_Friendly_Control" && c.enemy == "SFXEvent_Tactical_Gain_Enemy_Control");
+    // Enemy -> neutral (no owner): no friendly half, lose enemy.
+    c = H::control_lines(false, false, true, false, false, true);
+    CHECK(c.friendly.empty() && c.enemy == "SFXEvent_Tactical_Lose_Enemy_Control");
+    // Neutral -> enemy: gain enemy only; a neutral new owner gives no gain-enemy line.
+    c = H::control_lines(false, false, false, true, true, false);
+    CHECK(c.friendly.empty() && c.enemy == "SFXEvent_Tactical_Gain_Enemy_Control");
+    c = H::control_lines(false, false, false, true, true, true);
+    CHECK(c.friendly.empty() && c.enemy.empty());
+}
+
+// mcx4 t13 batch D (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_HUD_Won_Land_Battle family", 0x343810 from the
+// victory declare 0x343b90; both builds): the local faction's HUD line for a declared victory.
+// ledger: verifies Faction.SFXEvent_HUD_Won_Land_Battle
+// ledger: verifies Faction.SFXEvent_HUD_Lost_Land_Battle
+// ledger: verifies Faction.SFXEvent_HUD_Won_Space_Battle
+// ledger: verifies Faction.SFXEvent_HUD_Lost_Space_Battle
+// ledger: verifies Faction.SFXEvent_HUD_Won_Tactical_Corruption_Mission
+// ledger: verifies Faction.SFXEvent_HUD_Lost_Tactical_Corruption_Mission
+// ledger: verifies Faction.SFXEvent_HUD_Won_Land_Battle_Enemy_TSW_Present
+// ledger: verifies Faction.SFXEvent_HUD_Lost_Land_Battle_Enemy_TSW_Present
+// ledger: verifies Faction.SFXEvent_HUD_Won_Space_Battle_Enemy_TSW_Present
+// ledger: verifies Faction.SFXEvent_HUD_Lost_Space_Battle_Enemy_TSW_Present
+// ledger: verifies Faction.Space_Forced_Retreat_Due_To_Superweapon
+void test_battle_result_lines() {
+    using H = GameAudioHost;
+    // Args: local_won, local_hostile, space, enemy_tsw, own_killer, corruption.
+    CHECK(H::battle_result_line(true, false, false, false, false, false) == "SFXEvent_HUD_Won_Land_Battle");
+    CHECK(H::battle_result_line(true, false, false, true, false, true) == "SFXEvent_HUD_Won_Land_Battle_Enemy_TSW_Present");
+    CHECK(H::battle_result_line(true, false, false, false, false, true) == "SFXEvent_HUD_Won_Tactical_Corruption_Mission");
+    CHECK(H::battle_result_line(true, false, true, false, false, false) == "SFXEvent_HUD_Won_Space_Battle");
+    CHECK(H::battle_result_line(true, false, true, true, true, false) == "SFXEvent_HUD_Won_Space_Battle_Enemy_TSW_Present");
+    CHECK(H::battle_result_line(true, false, true, true, false, false) == "Space_Forced_Retreat_Due_To_Superweapon");
+    CHECK(H::battle_result_line(true, false, true, false, false, true) == "SFXEvent_HUD_Won_Tactical_Corruption_Mission");
+    CHECK(H::battle_result_line(false, true, false, false, false, false) == "SFXEvent_HUD_Lost_Land_Battle");
+    CHECK(H::battle_result_line(false, true, true, false, false, false) == "SFXEvent_HUD_Lost_Space_Battle");
+    CHECK(H::battle_result_line(false, true, false, true, false, false) == "SFXEvent_HUD_Lost_Land_Battle_Enemy_TSW_Present");
+    CHECK(H::battle_result_line(false, true, true, true, true, false) == "SFXEvent_HUD_Lost_Space_Battle_Enemy_TSW_Present");
+    CHECK(H::battle_result_line(false, true, true, false, false, true) == "SFXEvent_HUD_Lost_Tactical_Corruption_Mission");
+    CHECK(H::battle_result_line(false, false, false, false, false, false).empty());  // an ally of the winner hears nothing
+    // The declare gate: victory types 0xb..0x16, not silent.
+    CHECK(H::battle_result_gate(0x0b, false) && H::battle_result_gate(0x16, false) && H::battle_result_gate(0x13, false));
+    CHECK(!H::battle_result_gate(0x0a, false) && !H::battle_result_gate(0x17, false) && !H::battle_result_gate(0x10, true));
+}
+
+// mcx4 t13 batch E (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.Land_Retreat_Begin_SFXEvent family"; both builds).
+// ledger: verifies Faction.Land_Retreat_Begin_SFXEvent
+// ledger: verifies Faction.Space_Retreat_Begin_SFXEvent
+// ledger: verifies Faction.Land_Retreat_Enemy_Begin_SFXEvent
+// ledger: verifies Faction.Space_Retreat_Enemy_Begin_SFXEvent
+void test_retreat_begin_lines() {
+    using H = GameAudioHost;
+    CHECK(H::retreat_begin_tag(true, false, false) == "Land_Retreat_Begin_SFXEvent");
+    CHECK(H::retreat_begin_tag(true, false, true) == "Space_Retreat_Begin_SFXEvent");
+    CHECK(H::retreat_begin_tag(false, true, false) == "Land_Retreat_Enemy_Begin_SFXEvent");
+    CHECK(H::retreat_begin_tag(false, true, true) == "Space_Retreat_Enemy_Begin_SFXEvent");
+    CHECK(H::retreat_begin_tag(false, false, true).empty());  // an ally of the retreater hears nothing
+}
+
+// mcx4 t13 batch G (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_HUD_Special_Weapon_Ready family"; both builds).
+// ledger: verifies Faction.SFXEvent_HUD_Special_Weapon_Ready
+// ledger: verifies Faction.SFXEvent_HUD_Enemy_Special_Weapon_Ready
+// ledger: verifies Faction.SFXEvent_HUD_Special_Weapon_Firing
+// ledger: verifies Faction.SFXEvent_HUD_Enemy_Special_Weapon_Firing
+void test_special_weapon_lines() {
+    using H = GameAudioHost;
+    CHECK(H::special_weapon_tag(false, true) == "SFXEvent_HUD_Special_Weapon_Ready");
+    CHECK(H::special_weapon_tag(false, false) == "SFXEvent_HUD_Enemy_Special_Weapon_Ready");
+    CHECK(H::special_weapon_tag(true, true) == "SFXEvent_HUD_Special_Weapon_Firing");
+    CHECK(H::special_weapon_tag(true, false) == "SFXEvent_HUD_Enemy_Special_Weapon_Firing");
+    // FoC lists: one event per occurrence (hypervelocity gun, ion cannon, an empty third), picked by the target action index.
+    const std::vector<std::pair<std::string, std::string>> f = {{"SFXEvent_HUD_Special_Weapon_Ready", "HV_Ready"},
+                                                                {"SFXEvent_HUD_Enemy_Special_Weapon_Ready", "E_HV"},
+                                                                {"sfxevent_hud_special_weapon_ready", "Ion_Ready"},
+                                                                {"SFXEvent_HUD_Special_Weapon_Ready", ""}};
+    CHECK(H::nth_field(f, "SFXEvent_HUD_Special_Weapon_Ready", 0) == "HV_Ready");
+    CHECK(H::nth_field(f, "SFXEvent_HUD_Special_Weapon_Ready", 1) == "Ion_Ready");
+    CHECK(H::nth_field(f, "SFXEvent_HUD_Special_Weapon_Ready", 2).empty() && H::nth_field(f, "SFXEvent_HUD_Special_Weapon_Ready", 3).empty());
+    CHECK(H::nth_field(f, "SFXEvent_HUD_Enemy_Special_Weapon_Ready", 0) == "E_HV" && H::nth_field(f, "X", -1).empty());
+}
+
+// mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "GameObjectType.SFXEvent_Move_Into_Asteroid_Field family"; both builds).
+// ledger: verifies GameObjectType.SFXEvent_Move_Into_Asteroid_Field
+// ledger: verifies GameObjectType.SFXEvent_Move_Into_Nebula
+void test_move_into_field() {
+    using H = GameAudioHost;
+    CHECK(H::move_into_field_tag(1u) == "SFXEvent_Move_Into_Asteroid_Field");
+    CHECK(H::move_into_field_tag(4u) == "SFXEvent_Move_Into_Nebula");
+    CHECK(H::move_into_field_tag(5u) == "SFXEvent_Move_Into_Asteroid_Field");  // asteroid tested first
+    CHECK(H::move_into_field_tag(0u).empty() && H::move_into_field_tag(2u).empty() && H::move_into_field_tag(8u).empty());
+}
+
 // aud4 b0289 / b0300: garrison entry line and the hero clash win speech (both builds; presentation rules only).
 void test_garrison_and_clash_lines() {
     using H = GameAudioHost;
@@ -236,6 +377,12 @@ void test_control_point_lines() {
 }
 
 // aud1 t07 (AUDIO.md §9.7): the tactical intro speech pick, its gate, and (with engine/audio) one queued line.
+// ledger: verifies Faction.SpeechEvent_Tactical_Intro_Land_Attacker
+// ledger: verifies Faction.SpeechEvent_Tactical_Intro_Land_Defender
+// ledger: verifies Faction.SpeechEvent_Tactical_Intro_Space_Attacker
+// ledger: verifies Faction.SpeechEvent_Tactical_Intro_Space_Defender
+// ledger: verifies Faction.SpeechEvent_Tactical_Intro_Land_Raid_Attacker
+// ledger: verifies Faction.SpeechEvent_Tactical_Intro_Land_Raid_Defender
 void test_intro_speech_t07() {
     using H = GameAudioHost;
     using P = std::pair<std::string, std::string>;
@@ -624,6 +771,21 @@ void test_aud2() {
     CHECK(H::production_tag(H::Production::Begin) == "SFXEvent_Build_Started");
     CHECK(H::production_tag(H::Production::Cancel) == "SFXEvent_Build_Cancelled");
     CHECK(H::production_tag(H::Production::Complete) == "SFXEvent_Build_Complete");
+    // mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "GameObjectType.SFXEvent_Tactical_Build_Started family"): the speech first,
+    // then the tactical line in a battle, then the plain one.
+    // ledger: verifies GameObjectType.SFXEvent_Tactical_Build_Started
+    // ledger: verifies GameObjectType.SFXEvent_Tactical_Build_Complete
+    // ledger: verifies GameObjectType.SFXEvent_Tactical_Build_Cancelled
+    // ledger: verifies GameObjectType.Build_Speech_Underway
+    // ledger: verifies GameObjectType.Build_Speech_Completed
+    // ledger: verifies GameObjectType.Build_Speech_Stopped
+    {
+        using A = std::array<std::string_view, 3>;
+        CHECK((H::production_tags(H::Production::Begin, true) == A{"Build_Speech_Underway", "SFXEvent_Tactical_Build_Started", "SFXEvent_Build_Started"}));
+        CHECK((H::production_tags(H::Production::Complete, true) == A{"Build_Speech_Completed", "SFXEvent_Tactical_Build_Complete", "SFXEvent_Build_Complete"}));
+        CHECK((H::production_tags(H::Production::Cancel, true) == A{"Build_Speech_Stopped", "SFXEvent_Tactical_Build_Cancelled", "SFXEvent_Build_Cancelled"}));
+        CHECK((H::production_tags(H::Production::Begin, false) == A{"Build_Speech_Underway", "", "SFXEvent_Build_Started"}));
+    }
     MemoryProvider files;
     files.add("Data\\XML\\GameObjectFiles.xml", "<L><File>Aud2.xml</File></L>");
     files.add("Data\\XML\\Aud2.xml", R"(<?xml version="1.0"?>
@@ -760,6 +922,12 @@ int main() {
     test_inactive();
     test_control_point_lines();
     test_garrison_and_clash_lines();
+    test_health_and_hardpoint_lines();  // mcx4 t13
+    test_control_lines();               // mcx4 t13 batch C
+    test_battle_result_lines();         // mcx4 t13 batch D
+    test_retreat_begin_lines();         // mcx4 t13 batch E
+    test_special_weapon_lines();        // mcx4 t13 batch G
+    test_move_into_field();             // mcx4 t13 batch G
     test_intro_speech_t07();
     test_aud2();
 #ifdef ALAMO_GAME_HAVE_AUDIO

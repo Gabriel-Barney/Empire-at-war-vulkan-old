@@ -327,6 +327,7 @@ struct GameOptionsSetup {
 struct SkirmishOptionsSetup {
     int32_t credits = 6000;
     int32_t win_condition = 0;  // 0 = the game type's default (MP_Default_Land / Space_Tactical_Win_Condition: 0x13 / 0x16)
+    int32_t land_default_win = 0x13, space_default_win = 0x16;  // mcx4 t14: those defaults (host: GameConstants)
     bool heroes = true, starting_units = true, super_weapons = true, prebuilt_base = true;
     int32_t min_credits = 2000, max_credits = 8000;  // the slider range (host: Min_ / Max_Skirmish_Credits)
     bool set = false;  // Accept was pressed (else the host's defaults)

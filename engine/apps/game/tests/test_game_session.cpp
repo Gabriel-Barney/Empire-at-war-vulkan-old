@@ -851,6 +851,37 @@ bool special_run(const game::GameData& data, const game::SessionSpec& spec, comm
 // but still draws the scripts' letterbox.
 // mcx4 t19 (docs/re/MCX5_RE_ANSWERS.md Q3.1, 0x292590 [H]): the custom options' start / max tech get -1 for a faction
 // with a non-zero Displayed_Tech_Level_Adjustment (FoC Rebel +1), 0 otherwise or without a faction.
+// mcx4 t14 (docs/re/SKIRMISH_SETUP.md §0, 0x4acf00 / 0x4ad000): a chosen condition the kind's set holds is kept; else the
+// kind's default (MP_Default_Land_Tactical_Win_Condition / MP_Default_Space_Tactical_Win_Condition), stepped to the next
+// valid value (wrapping to 0x12) when it is not valid.
+// ledger: verifies GameConstants.MP_Default_Land_Tactical_Win_Condition
+// ledger: verifies GameConstants.MP_Default_Space_Tactical_Win_Condition
+void skirmish_win_condition_test() {
+    CHECK(sim::skirmish_win_condition(0x14, false, 0x13, 0x16) == 0x14 && sim::skirmish_win_condition(0x12, true, 0x13, 0x16) == 0x12);
+    CHECK(sim::skirmish_win_condition(0, false, 0x13, 0x16) == 0x13 && sim::skirmish_win_condition(0, true, 0x13, 0x16) == 0x16);
+    CHECK(sim::skirmish_win_condition(0x16, false, 0x12, 0x16) == 0x12);  // a space condition in a land battle: the land default
+    CHECK(sim::skirmish_win_condition(0, true, 0x13, 0x13) == 0x16);      // invalid space default 0x13 steps to 0x16
+    CHECK(sim::skirmish_win_condition(0, false, 0x13, 0x16) == 0x13 && sim::skirmish_win_condition(0, false, 0x15, 0x16) == 0x12);
+    // GameConstants writes the enum names (FoC: SKIRMISH_ALL_ENEMY_BASE_COMPONENTS_DESTROYED / SKIRMISH_SPACE_ENEMY_STARBASE_
+    // DESTROYED), with or without the SKIRMISH_ prefix, or a number.
+    CHECK(sim::parse_skirmish_victory_type("  SKIRMISH_ALL_ENEMY_BASE_COMPONENTS_DESTROYED\t") == 0x13);
+    CHECK(sim::parse_skirmish_victory_type("space_enemy_starbase_destroyed") == 0x16 && sim::parse_skirmish_victory_type("19") == 0x13);
+    CHECK(sim::parse_skirmish_victory_type("CONTROL_POINT_DOMINATION") == 0x15 && sim::parse_skirmish_victory_type("NOPE") == -1 &&
+          sim::parse_skirmish_victory_type("") == -1 && sim::parse_skirmish_victory_type("999") == -1);
+}
+
+// mcx4 t14 (docs/re/GALACTIC_DIALOGS.md §5.1.1, 0x3145c0 step 1): any one Build_Tab_* flag lists a type; none hides it.
+// ledger: verifies GameObjectType.Build_Tab_Special_Structures
+// ledger: verifies GameObjectType.Build_Tab_Heroes
+// ledger: verifies GameObjectType.Build_Tab_Outpost
+// ledger: verifies GameObjectType.Build_Tab_Space_Station
+void galactic_build_listed_test() {
+    for (const char* tag : {"Build_Tab_Land_Units", "Build_Tab_Space_Units", "Build_Tab_Special_Structures", "Build_Tab_Heroes",
+                            "Build_Tab_Outpost", "Build_Tab_Space_Station"})
+        CHECK(game::galactic_build_listed([tag](std::string_view t) { return t == tag; }));
+    CHECK(!game::galactic_build_listed([](std::string_view) { return false; }));
+}
+
 void custom_tech_offset_test() {
     galactic::GalacticRules rules;
     rules.factions.resize(3);
@@ -1595,6 +1626,9 @@ void skirmish_map_real_test() {
         spec.skirmish.ai_faction = "Rebel";
         spec.seed = 3;
         spec.skirmish_options = sim::skirmish_option_defaults(data.db.constants());
+        // mcx4 t14 (docs/re/SKIRMISH_SETUP.md §0, 0x4acf00): the kinds' default conditions are GameConstants
+        // MP_Default_Land_Tactical_Win_Condition / _Space_ (FoC 0x13 base components, 0x16 star base).
+        CHECK(spec.skirmish_options.land_default_win == 0x13 && spec.skirmish_options.space_default_win == 0x16);
         spec.skirmish_options.credits = 4000;
         spec.skirmish_options.win_condition = land ? 0x14 : 0x12;
         if (land) spec.skirmish_options.prebuilt_base = false;
@@ -2927,6 +2961,8 @@ int main() {
     radar_feed_test();
 #endif
     custom_tech_offset_test();  // mcx4 t19
+    skirmish_win_condition_test();  // mcx4 t14
+    galactic_build_listed_test();   // mcx4 t14
     story_ui_test();
     linked_overlay_test();
     story_script_test();

@@ -25,6 +25,7 @@
 
 #include "alamo/game/save_export.hpp"
 #include "alamo/render/galactic/galactic_snapshot.hpp"
+#include "alamo/sim/l1_loaders.hpp"  // mcx4 t14: skirmish_option_defaults
 
 namespace alamo_game_app {
 
@@ -224,6 +225,9 @@ bool App::init() {
         k.starting_units = gc.get_bool("MP_Default_Free_Starting_Units", k.starting_units);
         k.super_weapons = gc.get_bool("MP_Default_Allow_SuperWeapons", k.super_weapons);
         k.prebuilt_base = gc.get_bool("MP_Default_Pre_Built_Base", k.prebuilt_base);
+        const sim::BattleConfig::SkirmishOptions skd = sim::skirmish_option_defaults(gc);  // mcx4 t14: the kinds' default
+        k.land_default_win = skd.land_default_win;                                         // conditions (enum names)
+        k.space_default_win = skd.space_default_win;
     }
     // Video options: the primary display's modes (the current window size selected, else the largest mode under it); the
     // display mode list picks fullscreen (exclusive when the driver offers it) / borderless / windowed; v-sync = a FIFO or Mailbox present mode (the port's

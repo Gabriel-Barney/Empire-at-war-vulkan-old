@@ -1649,6 +1649,9 @@ void test_land_squad_garrison() {
             walked = std::sqrt((wp.x - walker_at.x) * (wp.x - walker_at.x) + (wp.y - walker_at.y) * (wp.y - walker_at.y));
             const objects::ObjectId one_m[] = {members.front()};  // one member's leave takes the whole squad out
             CHECK(b->order_leave_garrison(*tm, 0, one_m) == commands::RejectReason::None);
+            // mcx4 t13: the presentation feed of units leaving a garrison (SFXEvent_Bunker_Vacated reads it) keeps an exit
+            // ordered between ticks for the next tick's readers.
+            CHECK(!b->story_vacated().empty() && b->story_vacated().back().holder == walker);
             exit_x = b->garrison().exit_point(walker, wp, st.facing(st.find(walker)));
             rejoined = in_slots.size() == members.size();
             const mv::V2 kp = ms.view(team_id).pos;

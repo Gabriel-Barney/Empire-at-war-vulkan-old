@@ -182,7 +182,13 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
         if (skirmish_map_battle()) {
             // skm1 t02: the options (unset = the MP_Default_* values); SKIRMISH_SETUP §2 step 3: every player starts with the
             // option credits (the battle sets them again when it starts, after the scaffold galaxy's first income).
-            if (!spec_.skirmish_options.set) spec_.skirmish_options = sim::skirmish_option_defaults(d.db.constants());
+            if (!spec_.skirmish_options.set) {
+                spec_.skirmish_options = sim::skirmish_option_defaults(d.db.constants());
+            } else {  // mcx4 t14: a chosen / loaded option set still takes the kinds' default conditions from GameConstants
+                const sim::BattleConfig::SkirmishOptions def = sim::skirmish_option_defaults(d.db.constants());
+                spec_.skirmish_options.land_default_win = def.land_default_win;
+                spec_.skirmish_options.space_default_win = def.space_default_win;
+            }
             for (galactic::PlayerSetup& p : setup_.players) p.credits = static_cast<float>(std::max(0, spec_.skirmish_options.credits));
         }
         // GALAXY_MAP_PRESENTATION §6: the attract demo is a plain tactical space battle on the map. The map's object owners

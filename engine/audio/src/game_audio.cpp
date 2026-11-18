@@ -208,6 +208,8 @@ void GameAudio::battle_end(const BattleResult& result) {
     battle_over_ = true;
     const FactionAudio* f = data_->find_faction(faction_);
     if (!f) return;
+    // ledger: consumes Faction.Music_Event_Tactical_Win
+    // ledger: consumes Faction.Music_Event_Tactical_Lose
     const std::string base = std::string(result.strategic ? "Music_Event_Strategic_" : "Music_Event_Tactical_") +
                              (result.won ? "Win" : "Lose");
     std::string music;

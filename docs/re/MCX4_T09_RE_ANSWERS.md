@@ -37,7 +37,7 @@ The tag strings have no code xref (`docs/re/ghidra/strings_xrefs.csv`); only the
 | Type `Build_Countdown_Timer` (+0xC7) | 0x401e50 (speech), 0x3d2b0 (HUD text) | countdown speech and on-screen timer only; no build rule | UI | H |
 | Type `Build_Countdown_Text_ID` (+0x8D8 → +0x8F8) / `_RGBA` (+0x918) | 0x3782a0 (resolve), 0x3d2b0 | the timer's label and colour | UI | H |
 | Type `Build_Speech_Countdowns` (+0x15C8) | 0x401e50 | prefix of the countdown speech events | UI | H |
-| Type `Build_Speech_Underway` / `_Completed` / `_Stopped` (+0x1550 / +0x1578 / +0x15A0) | **retail-unused** | none | | H |
+| Type `Build_Speech_Underway` / `_Completed` / `_Stopped` (+0x1550 / +0x1578 / +0x15A0) | ~~retail-unused~~ read through +0x1570 / +0x1598 / +0x15c0 (MCX4_T13, superseded) | | | H |
 | Fleet data byte +0x96 (`Bribe_Cost_Multiplier` second reader) | set by AI 0x6aedc0, read by 0x56a1e0 → 0x434720, cleared 0x56a76a | AI-only per-hop toll; a human never reaches it | rules (AI-only path) | H |
 | Ability `Unit_Strength_Category` (+0x48) / `Unit_Strength_Factor` (+0x50, float) | 0x48d320 ← 0x374010 ← 0x60d2a0 → 0x60ad90 | auto-resolve fire bonus by the firing unit's category; **inert in shipped data** (factor never set, default 0) | rules | H |
 | `Income_Stream_Ability` `Split_Income_With_Allies` (+0x184), `Split_Favors_Owner` (+0x185), `Full_Amount_To_Everyone` (+0x186), `Owner_Income_Percentage` (+0x180) | 0x703d00 (validate), 0x703990 / 0x7038b0 (create), 0x694ba0 / 0x694e90 (pay) | recipients and share rules of a skirmish income stream | rules (skirmish) | H |
@@ -332,6 +332,11 @@ Type string +0x15C8. Read only by 0x401e50, as the prefix of the countdown event
 UI (audio).
 
 ### Q7 Build_Speech_Underway
+
+**Superseded (2026-11-18, `MCX4_T13_RE_ANSWERS.md` "GameObjectType.SFXEvent_Tactical_Build_Started family" [H]):** the three
+`Build_Speech_*` rows below are read. They are speech references (parser type 0x20): the string sits at the offset and the
+resolved event pointer at offset + 0x20 (+0x1570 / +0x1598 / +0x15c0), which this search did not cover. Readers: queue add
+0x496a20, complete 0x498170 / 0x402840, cancel 0x498820; a set speech replaces the build SFX line.
 
 Type string +0x1550: **retail-unused** [H]. Only the ctor 0x367250, dtor 0x36a070 and copy 0x36c000 address it; the
 other +0x1550 hit is the GC defaults chunk 0x2c92d6.
