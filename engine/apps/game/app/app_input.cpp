@@ -268,6 +268,20 @@ void App::post_tick() {
                 }
 #endif
             audio_.set_corruption_mission(session_->battles() && session_->battles()->active_corruption_player() >= 0);  // mcx4 t13
+            // mcx4 t14 (victory declare 0x343b90): the win / lose banner, once, local winner or allied -> win colour,
+            // hostile -> lose colour (GameAudioHost::battle_result_gate: types 0x0b..0x16, not silent).
+            if (!win_banner_set_ && b->victory_declared()) {
+                win_banner_set_ = true;
+                const int32_t me = local_player(), winner = b->victory_declared_player();
+                if (me >= 0 && winner >= 0 &&
+                    game::GameAudioHost::battle_result_gate(b->victory_declared_type(), b->victory_declared_silent())) {
+                    const bool won = winner == me || !b->combat().is_enemy(me, winner);
+                    const bool corrupt = session_->battles() && session_->battles()->active_corruption_player() >= 0;
+                    win_banner_ = txt(game::win_lose_banner_text(won, corrupt), U"");
+                    // ledger: consumes GameConstants.Win_Message_Color
+                    win_banner_color_ = won ? hud_consts_.win_message_color : hud_consts_.lose_message_color;  // ledger: consumes GameConstants.Lose_Message_Color
+                }
+            }
             audio_.battle_tick(*b, st, data_.types, local_player(),
                                [gs](objects::ObjectId id) { return gs->script_hidden(id); });  // q6 t19 §10.3
             {  // aud1 t07 (AUDIO.md §9.7): the tactical intro speech, campaign battles only, not story-linked ones.

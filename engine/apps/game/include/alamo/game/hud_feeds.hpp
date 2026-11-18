@@ -137,6 +137,11 @@ bool galactic_build_listed(const std::function<bool(std::string_view)>& flag);
 // the encyclopedia description. In a tactical game without a galactic parent (skirmish) a type with a non-empty
 // MP_Encyclopedia_Text uses it in place of Encyclopedia_Text; campaign battles and the galactic map keep the latter.
 std::string_view encyclopedia_text_tag(bool skirmish_battle, bool has_mp_text);
+// mcx4 t14 (victory declare 0x343b90 -> banner 0x365150; MCX4_T14_RE_ANSWERS "GameConstants.Win_Lose_Message_Font"):
+// the banner's text id when a tactical victory of type 0x0b..0x16 is declared (not silent): `local_side_won` = the
+// local player is the winner or not hostile to it -> TEXT_WIN_TACTICAL, else TEXT_LOSE_TACTICAL; in a corruption
+// mission the _CORRUPTION_MISSION texts.
+std::string_view win_lose_banner_text(bool local_side_won, bool corruption_mission);
 // `icon(type)` = the type's Icon_Name.
 std::vector<ui::GalacticBuildOption> galactic_build_options(const galactic::GalacticSim& g, int32_t player, PlanetIndex planet,
                                                             const std::function<std::string(uint32_t type)>& icon);

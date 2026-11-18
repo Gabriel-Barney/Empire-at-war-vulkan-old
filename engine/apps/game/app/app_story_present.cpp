@@ -484,7 +484,26 @@ void App::build_story_pointers(ui::HudDrawList& dl, const ui::HudCanvas& canvas)
 #endif
 }
 
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "GameConstants.Win_Lose_Message_Font", 0x365150): the banner text centred horizontally,
+// its top at 0.4 of the screen height, in Win_Lose_Message_Font at Win_Lose_Message_Font_Size.
+void App::build_win_banner(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
+    if (screen_ != Screen::Battle || win_banner_.empty() || !ui_.fonts) return;
+    // ledger: consumes GameConstants.Win_Lose_Message_Font
+    // ledger: consumes GameConstants.Win_Lose_Message_Font_Size
+    const int32_t font = ui_.fonts->font(hud_consts_.win_lose_font, hud_consts_.win_lose_font_size, canvas.font_height());
+    if (font < 0) return;
+    ui::HudTextStyle st;
+    st.font = font;
+    st.outline = true;
+    st.align = ui::TextAlign::Center;
+    st.color = win_banner_color_;
+    const float width = canvas.width;
+    const float top = 0.5f * canvas.height - 0.4f * canvas.height;
+    ui::add_text_block(dl, kTextLayer, ui::HudList::Text, *ui_.fonts, canvas, win_banner_, {0.0f, top}, width, st);
+}
+
 void App::build_story_overlay(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
+    build_win_banner(dl, canvas);
     build_story_text(dl, canvas);
     build_story_pointers(dl, canvas);
     build_story_hint(dl, canvas);

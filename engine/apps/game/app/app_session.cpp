@@ -715,6 +715,8 @@ void App::end_session() {
 void App::begin_battle(bool from_save) {
     const sim::TacticalBattle* b = session_->battle();
     ++battles_seen_;
+    win_banner_set_ = false;  // mcx4 t14: a new battle has no banner yet
+    win_banner_.clear();
     reinforce_unit_ = 0;  // no drop point pending from an earlier battle
     bombing_targeting_ = false;  // nor a bombing-run pick
     autofire_seen_.clear();  // ui1 t02: the default autofire is sent for this battle's objects

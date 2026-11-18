@@ -368,6 +368,10 @@ public:
     // hovered object (the pop-up keeps drawing its shown_object() while fading out after the hover is lost).
     ui::TooltipConfig ency_cfg_;
     ui::HudConstants hud_consts_;  // mcx4 t14 / t15: GameConstants HUD values (hud_constants_from)
+    // mcx4 t14 (banner 0x365150): set once at the battle's victory declare, shown until the battle ends.
+    bool win_banner_set_ = false;
+    std::u32string win_banner_;
+    ui::Rgba8 win_banner_color_{};
     std::vector<std::pair<uint32_t, objects::TypeIndex>> ency_types_;
     // Gameplay options (IDD gameplay dialog). ui1 t02: kept between runs with the audio volumes, camera settings and key
     // bindings in game_options.txt (game_display.hpp OptionsProfile; live play only, app_options.cpp).
@@ -665,6 +669,7 @@ public:
     std::shared_ptr<struct TextCrawlCache> text_crawls_;
     void build_story_text(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
     void build_story_hint(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
+    void build_win_banner(ui::HudDrawList& dl, const ui::HudCanvas& canvas);  // mcx4 t14: the tactical win / lose banner
     void build_story_pointers(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
     void story_component_flash(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
     void story_forced_clicks();  // FORCE_CLICK_GUI: queued clicks ahead of the HUD's input (app_input.cpp)

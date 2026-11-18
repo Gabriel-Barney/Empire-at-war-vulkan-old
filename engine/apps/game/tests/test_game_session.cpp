@@ -878,6 +878,12 @@ void skirmish_win_condition_test() {
 // mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "GameObjectType.MP_Encyclopedia_Text"): skirmish battles use the MP text
 // when the type has one.
 // ledger: verifies GameObjectType.MP_Encyclopedia_Text
+void win_lose_banner_text_test() {  // mcx4 t14: docs/re/MCX4_T14_RE_ANSWERS.md "GameConstants.Win_Lose_Message_Font"
+    CHECK(game::win_lose_banner_text(true, false) == "TEXT_WIN_TACTICAL" && game::win_lose_banner_text(false, false) == "TEXT_LOSE_TACTICAL");
+    CHECK(game::win_lose_banner_text(true, true) == "TEXT_WIN_CORRUPTION_MISSION");
+    CHECK(game::win_lose_banner_text(false, true) == "TEXT_LOSE_CORRUPTION_MISSION");
+}
+
 void encyclopedia_text_tag_test() {
     CHECK(game::encyclopedia_text_tag(true, true) == "MP_Encyclopedia_Text");
     CHECK(game::encyclopedia_text_tag(true, false) == "Encyclopedia_Text");
@@ -2981,6 +2987,7 @@ int main() {
     skirmish_win_condition_test();  // mcx4 t14
     galactic_build_listed_test();   // mcx4 t14
     encyclopedia_text_tag_test();   // mcx4 t14
+    win_lose_banner_text_test();    // mcx4 t14
     story_ui_test();
     linked_overlay_test();
     story_script_test();

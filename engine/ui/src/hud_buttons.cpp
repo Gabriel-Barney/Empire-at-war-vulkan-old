@@ -5,6 +5,7 @@
 
 #include "alamo/data/values.hpp"
 #include "alamo/data/xml.hpp"
+#include "alamo/data/xml_values.hpp"
 #include "alamo/ui/hud_font.hpp"
 #include "ui_strings.hpp"
 
@@ -331,6 +332,15 @@ HudConstants hud_constants_from(const data::XmlNode& root) {
     parse_rgba8(root.child_text("Battle_Pending_Message_Color"), c.battle_pending_color);
     parse_rgba8(root.child_text("Droid_Date_Color"), c.droid_date_color);
     parse_rgba8(root.child_text("Droid_Seperator_Color"), c.droid_separator_color);
+    const auto last = [&root](std::string_view tag) {
+        const data::XmlNode n = data::xml_values::last_child(root, tag);
+        return n ? n.text_trimmed() : std::string_view();
+    };
+    if (const std::string_view t = last("Win_Lose_Message_Font"); !t.empty()) c.win_lose_font = std::string(t);
+    if (const std::string_view t = last("Win_Lose_Message_Font_Size"); !t.empty())
+        c.win_lose_font_size = data::parse_float_or(t, c.win_lose_font_size);
+    parse_rgba8(last("Win_Message_Color"), c.win_message_color);
+    parse_rgba8(last("Lose_Message_Color"), c.lose_message_color);
     return c;
 }
 
