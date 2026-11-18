@@ -220,16 +220,19 @@ void SpaceOccupancy::build_index() {
 }
 
 uint32_t SpaceOccupancy::query_segment(V2 a, V2 b, float t0, float t1, float radius, uint32_t layer, ObjectId self, bool with_static,
-                                       uint32_t now) const {
+                                       uint32_t now, float static_bonus) const {
     uint32_t bits = 0;
     const V2 qlo{std::min(a.x, b.x), std::min(a.y, b.y)}, qhi{std::max(a.x, b.x), std::max(a.y, b.y)};
     // OPT3 t12: with the index only the entries whose box shares a cell with the query box (segment box +- radius) are
     // tested, each once: in the cell (max(entry first x, query first x), max(entry first y, query first y)), which both cell
     // ranges contain. Without it (or for a non-finite query) every entry is tested. Same tests, OR of bits: same result.
     const bool indexed = index_.valid && std::isfinite(qlo.x) && std::isfinite(qlo.y) && std::isfinite(qhi.x) &&
-                         std::isfinite(qhi.y) && std::isfinite(radius);
+                         std::isfinite(qhi.y) && std::isfinite(radius) && std::isfinite(static_bonus);
     int32_t cx0 = 0, cy0 = 0, cx1 = -1, cy1 = -1;
-    if (indexed) index_cells({qlo.x - radius, qlo.y - radius}, {qhi.x + radius, qhi.y + radius}, cx0, cy0, cx1, cy1);
+    // mcx4 t11: a positive static bonus widens the candidate box (a larger box visits the same entries plus more; the
+    // per-entry tests decide)
+    const float qr = with_static && static_bonus > 0.0f ? radius + static_bonus : radius;
+    if (indexed) index_cells({qlo.x - qr, qlo.y - qr}, {qhi.x + qr, qhi.y + qr}, cx0, cy0, cx1, cy1);
     // Calls f(entry index) for the candidate entries of one kind.
     auto visit = [&](size_t count, const std::vector<uint32_t>& start, const std::vector<uint32_t>& items, const std::vector<int32_t>& c0,
                      auto&& f) {
@@ -250,7 +253,7 @@ uint32_t SpaceOccupancy::query_segment(V2 a, V2 b, float t0, float t1, float rad
         visit(statics_.size(), index_.s_start, index_.s_items, index_.s_c0, [&](size_t e) {
             const auto& [id, s] = statics_[e];
             if (id == self) return;
-            const float rr = radius + s.r;
+            const float rr = radius + static_bonus + s.r;  // mcx4 t11: + SpaceStaticObstacleAvoidanceBonusDistance
             if (seg_point_dist_sq(a, b, s.c) < rr * rr) bits |= s.bits;
         });
     }
@@ -450,8 +453,10 @@ struct Search {
     float motion_factor_r(V2 a, V2 b, float t0, float t1, uint8_t op, float inflate) const {
         float f = 1.0f;
         const bool use_static = (tp.mask & 0x3Eu) != 0;
+        // mcx4 t11 (MOVEMENT §2.2 obstacle test item 1): the static test is offset by SpaceStaticObstacleAvoidanceBonusDistance
         uint32_t bits = occ.query_segment(a, b, static_cast<float>(req.now) + t0, static_cast<float>(req.now) + t1,
-                                          req.radius + inflate, req.layer, req.self, use_static, req.now);
+                                          req.radius + inflate, req.layer, req.self, use_static, req.now,
+                                          k.space_static_obstacle_avoidance_bonus_distance);
         bits &= tp.mask;
         if (bits != 0) {
             const bool far = distance(b, req.start) > far_from_start;

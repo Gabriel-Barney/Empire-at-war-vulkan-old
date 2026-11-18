@@ -162,7 +162,7 @@ double foot_swept_contact(V2 m, V2 d, float r0, float r1) {
 }
 
 float foot_path_contact(V2 pos, std::span<const V2> path, uint32_t next, V2 ha, const FootRect& b, float max_dist,
-                        float turn_yaw) {
+                        float turn_yaw, float step) {
     const auto radius = [&](V2 e, V2 t) {
         const V2 u = normalize_retail(b.c - e);
         return foot_rho(ha.x, ha.y, std::fabs(dot(u, t))) + foot_rho(b.hx, b.hy, std::fabs(dot(u, b.a)));
@@ -171,6 +171,8 @@ float foot_path_contact(V2 pos, std::span<const V2> path, uint32_t next, V2 ha, 
         const float r = radius(pos, dir_from_deg(turn_yaw));
         return max_dist > 0.0f && foot_swept_contact(pos - b.c, V2{}, r, r) >= 0.0 ? 0.0f : -1.0f;
     }
+    // mcx4 t11 (BKR1_RE_ANSWERS Q5): the straight steps are clamped below at 0.1 (a mod's 0 or negative spacing)
+    if (!(step >= 0.1f)) step = 0.1f;
     float acc = 0.0f;
     V2 s = pos;
     for (size_t i = next; i < path.size() && acc < max_dist; ++i) {
@@ -178,12 +180,12 @@ float foot_path_contact(V2 pos, std::span<const V2> path, uint32_t next, V2 ha, 
         const float len = length(d);
         if (!(len > 0.0f)) continue;
         const V2 t = normalize_retail(d);
-        // the approximation's points lie kFootApproxStep apart along the segment
-        const uint32_t n = static_cast<uint32_t>(len / kFootApproxStep) + 1u;
+        // the approximation's points lie `step` (ApproximationForwardDistance) apart along the segment
+        const uint32_t n = static_cast<uint32_t>(len / step) + 1u;
         V2 p0 = s;
         float r0 = radius(p0, t);
         for (uint32_t k = 1; k <= n && acc < max_dist; ++k) {
-            const V2 p1 = k == n ? path[i] : s + d * (static_cast<float>(k) * kFootApproxStep / len);
+            const V2 p1 = k == n ? path[i] : s + d * (static_cast<float>(k) * step / len);
             const float piece = distance(p0, p1);
             const float r1 = radius(p1, t);
             const double hit = foot_swept_contact(p0 - b.c, p1 - p0, r0, r1);

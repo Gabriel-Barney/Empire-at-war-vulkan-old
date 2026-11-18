@@ -1,4 +1,5 @@
 #include "alamo/tactical/combat/formulas.hpp"
+#include "alamo/core/x86_int.hpp"
 
 #include <cmath>
 
@@ -13,10 +14,10 @@ uint32_t next_scan_frame(uint32_t now, uint32_t fps, SimRng& rng) {
 
 Recharge hp_pulse_recharge(float pulse_delay_seconds, int32_t pulses_left, float W, float F, uint32_t fps) {
     Recharge r;
-    int32_t frames = static_cast<int32_t>(static_cast<float>(fps) * pulse_delay_seconds);
-    frames = static_cast<int32_t>(static_cast<float>(frames) * W + 0.5f);  // W unconditional on this branch
+    int32_t frames = trunc_i32(static_cast<float>(fps) * pulse_delay_seconds);
+    frames = trunc_i32(static_cast<float>(frames) * W + 0.5f);  // W unconditional on this branch
     if (F <= 0.0f) return r;                                                 // frames and pulses become 0
-    r.frames = static_cast<int32_t>(static_cast<float>(frames) / F + 0.5f);
+    r.frames = trunc_i32(static_cast<float>(frames) / F + 0.5f);
     r.pulses = pulses_left;
     return r;
 }
@@ -27,33 +28,33 @@ Recharge hp_full_recharge(float min_seconds, float max_seconds, int32_t pulse_co
     const int32_t lo = static_cast<int32_t>(min_seconds * 100.0f);  // cvttss2si: truncated, not rounded
     const int32_t hi = static_cast<int32_t>(max_seconds * 100.0f);
     const int32_t v = rng.range_int(lo, hi);
-    const auto product = static_cast<int32_t>(static_cast<float>(v) * static_cast<float>(fps));
+    const auto product = trunc_i32(static_cast<float>(v) * static_cast<float>(fps));
     int32_t frames = static_cast<int32_t>(static_cast<uint32_t>(product) / 100u);  // unsigned divide
-    if (W < 1.0f) frames = static_cast<int32_t>(static_cast<float>(frames) * W + 0.5f);  // only shortens
-    if (F > 0.0f && F < 1.0f) frames = static_cast<int32_t>(static_cast<float>(frames) / F + 0.5f);
+    if (W < 1.0f) frames = trunc_i32(static_cast<float>(frames) * W + 0.5f);  // only shortens
+    if (F > 0.0f && F < 1.0f) frames = trunc_i32(static_cast<float>(frames) / F + 0.5f);
     r.frames = frames;
-    r.pulses = static_cast<int32_t>(static_cast<float>(pulse_count) * (F > 0.0f ? F : 0.0f) + 0.5f);
+    r.pulses = trunc_i32(static_cast<float>(pulse_count) * (F > 0.0f ? F : 0.0f) + 0.5f);
     return r;
 }
 
 int32_t hp_first_cooldown(float max_seconds, uint32_t fps, SimRng& rng) {
-    return rng.range_int(0, static_cast<int32_t>(static_cast<float>(fps) * max_seconds));
+    return rng.range_int(0, trunc_i32(static_cast<float>(fps) * max_seconds));
 }
 
 Recharge weapon_reset(float recharge_seconds, int32_t pulse_count, float W, float F, uint32_t fps, SimRng& rng) {
     Recharge r;
-    int32_t frames = static_cast<int32_t>(recharge_seconds * static_cast<float>(fps)) + rng.range_int(0, 10);
-    if (W < 1.0f) frames = static_cast<int32_t>(static_cast<float>(frames) * W + 0.5f);
+    int32_t frames = trunc_i32(recharge_seconds * static_cast<float>(fps)) + rng.range_int(0, 10);
+    if (W < 1.0f) frames = trunc_i32(static_cast<float>(frames) * W + 0.5f);
     if (F <= 0.0f) return r;  // [L]
-    r.frames = static_cast<int32_t>(static_cast<float>(frames) / F);          // no +0.5
+    r.frames = trunc_i32(static_cast<float>(frames) / F);          // no +0.5
     r.pulses = static_cast<int32_t>(F * static_cast<float>(pulse_count));     // no +0.5
     return r;
 }
 
 int32_t weapon_pulse_delay(float pulse_delay_seconds, float F, uint32_t fps) {
-    const int32_t frames = static_cast<int32_t>(static_cast<float>(fps) * pulse_delay_seconds);
+    const int32_t frames = trunc_i32(static_cast<float>(fps) * pulse_delay_seconds);
     if (F <= 0.0f) return frames;
-    return static_cast<int32_t>(static_cast<float>(frames) / F);
+    return trunc_i32(static_cast<float>(frames) / F);
 }
 
 float inaccuracy_f(GameMode mode, float ai_accuracy) {
@@ -255,15 +256,18 @@ float area_delay_seconds(float d, float R, float max_secs) {
 }
 
 int32_t delay_frames(float delay_seconds, uint32_t fps) {
-    const int32_t f = static_cast<int32_t>(static_cast<float>(fps) * delay_seconds);
+    const int32_t f = trunc_i32(static_cast<float>(fps) * delay_seconds);
     return f < 1 ? 1 : f;
 }
 
 int32_t shield_regen_interval_frames(uint32_t fps, float regen_interval_mult, float recharge_interval_secs) {
-    return static_cast<int32_t>(static_cast<float>(fps) * regen_interval_mult * recharge_interval_secs + 0.5f);
+    return trunc_i32(static_cast<float>(fps) * regen_interval_mult * recharge_interval_secs + 0.5f);
 }
 
 bool shield_lockout_active(uint32_t frame, uint32_t depletion_frame, uint32_t fps, float disable_time) {
+    // mcx4 t10: Depleted_Shield_Damage_Increment moves the depletion frame past the current frame (an extended
+    // lockout, MCX4_T10_RE_ANSWERS §16): still locked, not a wrapped elapsed time.
+    if (frame < depletion_frame) return true;
     const float elapsed = static_cast<float>(frame - depletion_frame) / static_cast<float>(fps);
     return elapsed < disable_time;
 }

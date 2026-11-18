@@ -876,6 +876,8 @@ void test_incognito_targeting() {
         t.w.sys->take_damage(r, t.w.frame);
         CHECK(!inc(t, 1));
     }
+    // ledger: verifies GameObjectType.Immune_To_Damage
+    // MCX4_T10_RE_ANSWERS §2 (Take_Damage 0x3a9e30 at 0x3aa1db): a victim whose type has Immune_To_Damage returns at once.
     {  // the gates in front of the clears: nothing cleared, nothing applied, no damage
         TargetWorld t;
         UnitDesc im = t.w.data.units[t.capital];
