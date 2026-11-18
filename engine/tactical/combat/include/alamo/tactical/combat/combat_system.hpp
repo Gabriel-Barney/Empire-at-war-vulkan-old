@@ -187,6 +187,9 @@ struct ProjectileDesc {
     uint32_t blast_immune_faction = 0;
     bool blast_dropoff = false;            // Projectile_Blast_Area_Dropoff (+0xaa): the tiered falloff below applies
     int32_t blast_dropoff_tiers = 5;       // Projectile_Blast_Area_Dropoff_Tiers (+0x488); type ctor 0x367250 default 5
+    // mcx4 t18 (Projectile_Bomb_Fall_Accel_Rate +0x1e88, MCX4_RE_ANSWERS_TACTICAL §12): a BOMB / CLUSTER_BOMB shot's fall
+    // speed grows by this many units per frame each move (units per frame squared; 0 = straight flight).
+    float bomb_fall_accel = 0.0f;
     float damage_delay_secs = 0.0f;        // Projectile_Damage_Delay_Secs
     bool damages_random_hardpoints = false;  // Projectile_Damages_Random_Hard_Points
     // ---- S9 ----
@@ -1989,6 +1992,9 @@ private:
     Vec3 lob_next(const Projectile& p, uint32_t frame) const;
     bool ground_hit(Vec3 a, Vec3 b, GroundHit& out) const;  // S8 t06: 0x135840 (rocket.hpp ground_segment)
     bool straight_ground_test(const Projectile& p, Vec3 delta) const;  // A1j t03: 0x4d0630's mode / category / target gate
+    // The straight step's move P -> P + delta for a move made on `frame` (mcx4 t18: a falling bomb's drop included).
+    Vec3 straight_delta(const Projectile& p, uint32_t frame) const;
+    float bomb_drop(const Projectile& p, uint32_t frame) const;  // mcx4 t18: that move's fall (0 = none)
     Vec3 stuck_local(const Unit& v, Vec3 world) const;     // S8 t06: world point -> v's frame (inverse local_to_world)
     uint32_t bomb_frame(float seconds, uint32_t armed_frame) const;  // S8 t06: BOMB arm 0x58f030 detonation frame
     void lob_step(uint32_t i, uint32_t frame, SimRng& rng);

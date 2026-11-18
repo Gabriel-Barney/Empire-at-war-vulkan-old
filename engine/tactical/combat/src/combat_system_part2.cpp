@@ -617,6 +617,25 @@ CombatSystem::SweepHit CombatSystem::sweep_segment(const Projectile& p, Vec3 del
     return best;
 }
 
+Vec3 CombatSystem::straight_delta(const Projectile& p, uint32_t frame) const {
+    // mcx4 t18 (MCX4_RE_ANSWERS_TACTICAL §12, service 0x4ce6a0 [H]): a BOMB (2) / CLUSTER_BOMB (9) shot moves by speed along
+    // its direction, then its z drops by the fall speed f, and f grows by Projectile_Bomb_Fall_Accel_Rate after each move
+    // (f starts at 0, no cap, land and space alike). [port] f is not stored: a straight shot moves once on every frame after
+    // its spawn frame, so on frame F it has made F - spawn_frame - 1 moves and f = rate x that count (no new save state).
+    Vec3 d = p.dir * p.speed;
+    const float drop = bomb_drop(p, frame);
+    if (drop != 0.0f) d.z -= drop;
+    return d;
+}
+
+float CombatSystem::bomb_drop(const Projectile& p, uint32_t frame) const {
+    const ProjectileDesc& pd = data_->projectiles[p.desc];
+    using PC = ProjectileCategory;
+    if ((pd.category != PC::Bomb && pd.category != PC::ClusterBomb) || pd.bomb_fall_accel == 0.0f || frame <= p.spawn_frame + 1)
+        return 0.0f;
+    return pd.bomb_fall_accel * static_cast<float>(frame - p.spawn_frame - 1);
+}
+
 int32_t CombatSystem::hardpoint_by_mesh(const Unit& v, const std::string& mesh) const {
     // 0x394d40 (§2.9 Q1 step 4): the first hardpoint in HardPoints order whose Collision_Mesh equals the name (_stricmp;
     // both sides are upper case); -1 when none.
@@ -650,7 +669,7 @@ void CombatSystem::sweep(uint32_t pi, QueryContext& ctx) {
                 best = sweep_segment(p, n - p.pos, ctx);
             }
         } else {
-            const Vec3 delta = p.dir * p.speed;
+            const Vec3 delta = straight_delta(p, frame_);
             best = sweep_segment(p, delta, ctx);
             // A1j t03: Sweep 0x4c97a0 step 1, the land ground test 0x4d0630 of the same segment (TACTICAL_COMBAT §3.4).
             if (straight_ground_test(p, delta)) best.ground = ground_hit(p.pos, p.pos + delta, best.gh);
@@ -2417,7 +2436,8 @@ void CombatSystem::tick(uint32_t frame, const TreeSet& trees, SimRng& rng, const
             Unit* v = unit(hit.id);
             projectiles_[i].alive = 0;
             Projectile pc = projectiles_[i];
-            process_hit(pc, *v, hit.t, frame, rng, nullptr, hit.mesh_hp);
+            const Vec3 seg = straight_delta(pc, frame);  // mcx4 t18: a falling bomb's impact lies on its bent segment
+            process_hit(pc, *v, hit.t, frame, rng, bomb_drop(pc, frame) != 0.0f ? &seg : nullptr, hit.mesh_hp);
             continue;
         }
         if (hit.ground) {
@@ -2457,7 +2477,7 @@ void CombatSystem::tick(uint32_t frame, const TreeSet& trees, SimRng& rng, const
             steer = true;
         }
         if (steer) p.dir = turn_toward(p.dir, goal, projectile_turn_rate(pd));
-        p.pos = p.pos + p.dir * p.speed;
+        p.pos = p.pos + straight_delta(p, frame);
         p.travelled = p.travelled + p.speed;
         bool expire;
         if (p.fuse >= 0.0f) {  // OI abilities: armed bomb timer (S8 t06: the BOMB arm's frame rounding, §6.4)

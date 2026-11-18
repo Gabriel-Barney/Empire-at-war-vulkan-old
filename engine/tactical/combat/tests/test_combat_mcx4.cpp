@@ -164,4 +164,49 @@ void test_blast_dropoff() {
     CHECK(ProjectileDesc{}.blast_dropoff_tiers == 5);  // type ctor 0x367250 default
 }
 
+// ledger: verifies GameObjectType.Projectile_Bomb_Fall_Accel_Rate
+void test_bomb_fall() {
+    // MCX4_RE_ANSWERS_TACTICAL §12 (projectile service 0x4ce6a0): a BOMB / CLUSTER_BOMB shot moves by speed along its
+    // direction, then drops by its fall speed f; f starts at 0 and grows by Projectile_Bomb_Fall_Accel_Rate after each
+    // move, so the n-th move drops rate x (n - 1). Other categories ignore the rate. FoC bombing-run bomb: speed 4, rate 0.2.
+    auto run = [](ProjectileCategory cat, float out_dz[6]) {
+        World w;
+        ProjectileDesc b;
+        b.max_speed = 4.0f;
+        b.category = cat;
+        b.bomb_fall_accel = 0.2f;
+        b.max_flight_distance = 5000.0f;
+        w.data.projectiles.push_back(b);
+        CombatConfig cfg;
+        cfg.mode = GameMode::Space;  // no ground: no mode test in retail, and no ground hit here
+        w.make(cfg);
+        ProjectileLaunch l;
+        l.owner = 0;
+        l.projectile = 0;
+        l.from = Vec3{0, 0, 0};
+        l.point = Vec3{4000, 0, 0};
+        CHECK(w.sys->launch_projectile(l, w.frame));
+        float z = 0.0f;
+        int moves = 0;
+        for (int i = 0; i < 20 && moves < 6; ++i) {
+            w.tick();
+            CHECK(w.sys->projectile_count() == 1);
+            const ProjectileView v = w.sys->projectile(0);
+            if (v.pos.x == 0.0f) continue;  // not moved yet (spawn frame)
+            out_dz[moves++] = v.pos.z - z;
+            z = v.pos.z;
+        }
+        CHECK(moves == 6);
+    };
+    float bomb[6], cluster[6], laser[6];
+    run(ProjectileCategory::Bomb, bomb);
+    run(ProjectileCategory::ClusterBomb, cluster);
+    run(ProjectileCategory::Laser, laser);
+    for (int n = 0; n < 6; ++n) {
+        CHECK(std::fabs(bomb[n] + 0.2f * static_cast<float>(n)) < 1e-4f);  // move n + 1 drops rate x n (z differences round)
+        CHECK(std::fabs(cluster[n] + 0.2f * static_cast<float>(n)) < 1e-4f);
+        CHECK_F(laser[n], 0.0f);
+    }
+}
+
 }  // namespace bo3split

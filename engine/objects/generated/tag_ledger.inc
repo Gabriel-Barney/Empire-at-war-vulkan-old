@@ -317,7 +317,7 @@
 {"GameObjectType", "Projectile_Grenade_Gravity_Lob_Mod", 0x8, LedgerState::Consumed, 1, "engine/apps/sim/src/battle_catalog.cpp", "docs/re/LOB_SOLVER.md", 12, 1},
 {"GameObjectType", "Projectile_Grenade_Can_Lob_Slower", 0x0, LedgerState::Consumed, 1, "engine/apps/sim/src/battle_catalog.cpp", "docs/re/LOB_SOLVER.md", 11, 1},
 {"GameObjectType", "Projectile_Grenade_Sticks_On_Collision", 0x0, LedgerState::Consumed, 1, "engine/apps/sim/src/battle_catalog.cpp", "docs/re/LOB_SOLVER.md", 4, 1},
-{"GameObjectType", "Projectile_Bomb_Fall_Accel_Rate", 0x8, LedgerState::Stored, 0, "", "docs/re/MCX4_RE_ANSWERS_TACTICAL.md", 4, 1},
+{"GameObjectType", "Projectile_Bomb_Fall_Accel_Rate", 0x8, LedgerState::Verified, 2, "engine/apps/sim/src/battle_catalog.cpp", "docs/re/MCX4_RE_ANSWERS_TACTICAL.md", 4, 1},
 {"GameObjectType", "Projectile_SFXEvent_Detonate", 0x1f, LedgerState::Consumed, 2, "engine/apps/game/src/game_audio_host.cpp", "docs/re/AUDIO.md", 87, 1},
 {"GameObjectType", "Projectile_SFXEvent_Detonate_Reduced_By_Armor", 0x1f, LedgerState::Consumed, 1, "engine/apps/game/src/game_audio_host.cpp", "", 62, 1},
 {"GameObjectType", "Projectile_Energy_Per_Shot", 0x8, LedgerState::Consumed, 1, "engine/apps/sim/src/battle_catalog.cpp", "docs/re/ABILITIES_HARDPOINTS.md", 126, 1},
