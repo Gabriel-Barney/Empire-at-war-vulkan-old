@@ -57,40 +57,32 @@ A18. Leftovers of §1-§16:
 A19. GameConstants `Skirmish_Reinforcement_Delay_Frames` (+0x117e8; BKG1_RE_ANSWERS says it is not on the quick-reinforce
    path [M]): its reader and effect.
 
-## B. t11 movement, formation, animation (new MCX4_T11_T12_RE_ANSWERS.md)
+## B. t11 movement, formation, animation (new MCX4_T11_T12_RE_ANSWERS.md, already started: its §S lists the GC readers
+found by an export scan and the GC rows with no reader, so B1, C1 and the no-reader part of B4 are settled)
 
-MOVEMENT.md already gives readers for ApproximationSmoothCosAngle / ApproximationForwardDistance, FinalFormationFacing*,
-FormationMinimum / MaximumSideError, MovementReevaluationFrameCount, Rotate_Formation_Facing_Moves,
-ShouldInfantryTeamsSplitAcrossFormations, ShouldSkipLandFormup, ShouldUseSpaceIdleMovement,
-SpaceStaticObstacleAvoidanceBonusDistance, LandObjectTracking*, Snap_Movement_Orders_To_Center, Move_Use_Jetpack;
-TRU1_C_RE gives Max_Distance_From_Spawner. Those need no answer.
-
-B1. **MOVEMENT §3.9 "no runtime reader found"**: confirm [H] no reader (absolute GC references) for `MaxObstacleCostSpace`
-   (+0x141c), `ObstacleAreaOverlapForMaxSpace` (+0x1420), `UseLinearCollisionChecks` (+0x1438), `MaxObstacleCostLand`
-   (+0x1478), `MaxLandFormationFormupFrames` (+0x1460).
 B2. GameObjectType: `Formation_Priority` (+0x654, int, 195), `CanCellStack` (+0x3a, 88), `Attach_To_Flagship_During_Space_Battle`
    (+0x2c, 51), `Begin_Turn_Towards_Distance` (+0x3a8, 33), `Space_Full_Stop_Command` (+0x38, 29), `MaxFacingLookAheadFrames`
-   (+0x3b8, 12), `Exit_Door_Angle_Degrees` (+0x1a8c, 9), `Exit_Door_Distance` (+0x1a90, 9), `LateralAcceleration` (+0x3bc, 1).
+   (+0x3b8, 12), `Exit_Door_Angle_Degrees` (+0x1a8c, 9), `Exit_Door_Distance` (+0x1a90, 9), `LateralAcceleration` (+0x3bc, 1),
+   `Snap_Movement_Orders_To_Center` (+0x8d, 1; MOVEMENT §6 says "a selected object", but its only FoC user is a prop:
+   which objects are scanned, which radius).
 B3. `Move_Action` (hero clash, `MoveActionClass` 0x5e9ce0 / 0x5e9ed0 / 0x5e9f30 / 0x5ea820): `Move_Speed` (+0xcc),
    `Move_Animation_Subindex` (+0xd4), `Move_Animation_Speedup` (+0xd8), `Move_Min_Distance` (+0xdc), `Move_Max_Distance`
    (+0xe0), `Move_Animation_Override` (+0xe5), `Wait_For_Finish_If_Target_Using_Jetpack` (+0xe6), `Ability_Cooldown_Time_In_Secs`
    (+0xe8), `Move_Type`, `Move_Animation_Type`. Plus `Eat_Attack_Ability.Needs_To_Rotate` (+0x1d4) and
    `Infection_Ability.Shoot_Anim`.
-B4. GameConstants (absolute references): `CrouchIdleWalkBlendTime` (+0x1514), `CrouchMoveBlendTime` (+0x151c),
-   `Crouch_Move_Fire_Angle_Cutoff` (+0x1534), `GripperCombatGridSnapDistance` (+0x15b8), `IdleMovementFrames` (+0x155c),
-   `IdleWalkBlendTime` (+0x1510), `InfantryTurnBlendTime` (+0x1528), `MoveBlendTime` (+0x1518), `SpaceIdlePathCullCoefficient`
-   (+0x1558), `SpaceLocomotorFacingLookaheadAcc` (+0x144c; MOVEMENT §2.7 "reader not traced"), `TeamCrouchMoveBlendTime`
-   (+0x1524), `TeamMoveBlendTime` (+0x1520), `WalkAnimationCutoff` (+0x1504). For the blend times: is the value a sim input
-   (it changes a frame count, a state or a timer that game logic reads) or only the animation blend the renderer shows?
+B4. GC readers known (§S table): say what each does, briefly: `Crouch_Move_Fire_Angle_Cutoff` (0x54d090),
+   `GripperCombatGridSnapDistance` (0x405480), `IdleMovementFrames` (0x413100, 0x423070, 0x553f00),
+   `SpaceLocomotorFacingLookaheadAcc` (0x645370), and the blend times (`IdleWalkBlendTime`, `CrouchIdleWalkBlendTime`,
+   `MoveBlendTime`, `TeamMoveBlendTime`, `TeamCrouchMoveBlendTime`, `InfantryTurnBlendTime`: 0x61f510, 0x61f840, 0x620190,
+   0x62bef0, 0x62ca10, 0x62cf90, 0x642740): is any of them a sim input (a frame count, a state or a timer game logic
+   reads), or only the clip blend the renderer shows?
 
 ## C. t12 AI tuning constants (MCX4_T11_T12_RE_ANSWERS.md)
 
-C1. GameConstants: `AI_SpaceThreatDistanceFactor` (+0x10d8), `AI_LandThreatDistanceFactor` (+0x10dc),
-   `AI_SpaceThreatTurnRateFactor` (+0x10e0), `AI_LandThreatTurnRateFactor` (+0x10e4), `AI_BuildTaskReservationSeconds`
-   (+0x1100): reader and formula (threat of a unit vs its distance and turn rate? where the AI uses it).
-C2. GameConstants `Saliency_Size` (+0x11864), `Saliency_Power` (+0x11868), `Saliency_X` (+0x1186c), `Saliency_Y` (+0x11870),
-   `Saliency_Health` (+0x11874), `Saliency_Targets` (+0x11878), `Saliency_Speed` (+0x1187c): the saliency score (camera /
-   cinematic or AI?), its formula and who reads it.
+C1. (settled: the four AI_*Threat* factors have no reader, §S.) `AI_BuildTaskReservationSeconds`: its reader 0x695a10
+   (A2J_RE_BUILD_MARKET step 1, the PBT +0x4c timer): what the timer gates (tactical too?).
+C2. Saliency (`Saliency_Size`, `_Power`, `_X`, `_Y`, `_Health`, `_Targets`, `_Speed`): only reader 0x520df0, a min/max
+   normalised score over a list of objects. Its callers (camera / cinematic, selection, AI target pick?) and the formula.
 C3. GameConstants `Unit_Command_Rankings_By_Category` (offset from the GC parser): reader and effect.
 C4. GameObjectType `Harass_Enemy_Exclusion_Range` (+0x204c), `Avoid_Enemy_Exclusion_Range` (+0x2050),
    `Ignore_For_Reoptimization` (offset from the type parser): readers (AI harass / avoid behaviour, the plan reoptimiser?).
