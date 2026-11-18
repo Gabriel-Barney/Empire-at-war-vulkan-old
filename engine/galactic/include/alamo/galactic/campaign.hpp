@@ -581,6 +581,12 @@ public:
     // force-alignment term (when kept), the political term (owner not the neutral player), trade routes (neighbour a
     // planet held by the owner); then the min / max clamp, no siphon. 0 for a non-planet, an unknown type or a halt.
     float planet_income_preview(PlanetIndex planet) const;
+    // mcx4 t09 (MCX4_T09_RE_ANSWERS Q1, getter 0x3716b0): the Corruption_N_Success_Credit_Bonus of the planet type's first
+    // choice slot whose type is `type` (0 when none or `type` is none). first_corruption_player (0x2948d0): the first
+    // player whose faction has Benefits_From_Corruption (kNoPlayer when none), who is paid on a normal completion.
+    float corruption_credit_bonus(PlanetIndex planet, int8_t type) const;
+    int32_t first_corruption_player() const;
+
     void recompute_credit_caps();
 
     // Instant corruption change (story / Lua / host stand-ins): cancels a running transition (0x4b6c50), sets the
@@ -1356,6 +1362,9 @@ private:
     // replaced type's Success_Unlock_Unit_Type leaves the old player's unlocked list (even when another planet still
     // grants it), the current type's joins the corrupting player's when its planet build cost (0x3711c0) > 0.
     void corruption_unlocks(PlanetIndex planet, int8_t old_type, int32_t old_player);
+    // pay_corruption_bonus (MCX4_T09_RE_ANSWERS Q1): corruption_credit_bonus(planet, type) added to `player` as a float,
+    // notify 0, when > 0 (0x3f9690 step 2 and the first-owner path 0x3fb040).
+    void pay_corruption_bonus(PlanetIndex planet, int8_t type, int32_t player);
     // enqueue()'s checks; *cost = the build cost when None (A2 galactic: shared with can_enqueue).
     RejectReason check_enqueue(int32_t player, PlanetIndex planet, uint32_t type, int32_t* cost) const;
     void restart_head(BuildEntry& e) const;

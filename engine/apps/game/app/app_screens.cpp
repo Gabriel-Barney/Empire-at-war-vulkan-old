@@ -620,7 +620,7 @@ void App::open_battle_prompt(const galactic::GalacticSim& g, const galactic::Con
     prompt_ = {};
     prompt_.planet = c.planet;
     prompt_.land = c.kind == galactic::ConflictKind::Land;
-    prompt_.story_pending = session_->autoresolve_locked(c.planet);
+    prompt_.story_pending = session_->autoresolve_locked(c.planet, prompt_.land);
     const int32_t me = local_player();
     const int32_t enemy = c.attacker == me ? c.defender : c.attacker;
     auto icon = [this](uint32_t t) { return type_icon(t); };

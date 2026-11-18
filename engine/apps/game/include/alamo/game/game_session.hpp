@@ -248,9 +248,11 @@ public:
     // dialog is multiplayer-only in retail).
     bool local_in_head_conflict() const;
     bool choose_battle(galactic::BattleChoice choice);
-    // GALACTIC_DIALOGS §1.4: the story lock (DISABLE / RESTRICT_AUTORESOLVE, StorySession::autoresolve_locked) forbids
-    // auto-resolving a battle at `planet`: the prompt offers Begin only. False without a running story.
-    bool autoresolve_locked(PlanetIndex planet) const;
+    // GALACTIC_DIALOGS §1.4: the banner's one-button test forbids auto-resolving a battle at `planet`: the prompt offers
+    // Begin only. The head conflict at `planet` of that kind (`land`): ConflictManager::autoresolve_locked (story lock, AlwaysBypassAutoResolve,
+    // exclusions, Prevents_Story_Campaign_Autoresolve); otherwise the story lock (StorySession::autoresolve_locked), false
+    // without a running story.
+    bool autoresolve_locked(PlanetIndex planet, bool land) const;
     // story t13 (BT §2.9.3 step 2): the one-button pending banner (story_pending_battle_shell) of a LINK_TACTICAL record with
     // P13 = 1 (CampaignBattles::linked_banner_up, the galaxy paused): its record, and Begin = ResumeGame 51 (a command; the
     // record starts at the next hook). False / null when no banner is up or the Begin is already in flight.

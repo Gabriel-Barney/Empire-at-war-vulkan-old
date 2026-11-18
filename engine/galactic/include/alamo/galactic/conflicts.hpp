@@ -70,6 +70,7 @@ struct ConflictTypeInfo {
     int32_t space_population_override = -1;   // Space_Override_Population_Value (-1 = not set)
     bool hero = false;                        // Is_Named_Hero
     bool super_killer = false;                // Is_Super_Weapon_Killer [L field name]
+    bool prevents_story_autoresolve = false;  // Prevents_Story_Campaign_Autoresolve (MCX4_T09_RE_ANSWERS Q5)
     std::vector<std::pair<uint32_t, int32_t>> members;  // Squadron_Units / Company_Units: (type, count), first-seen order
     int32_t bounty = 0;                       // a2m r2: the type's own bounty, rounded (bounty.hpp type_bounty)
     uint32_t lower_starbase = kNoIndex;       // next lower starbase level type (last name digit - 1) [M]
@@ -104,6 +105,7 @@ struct ConflictRules {
     ContrastTable contrast;
     float overrun_multiple = 0.0f;            // Overrun_Auto_Resolve_Multiple (vanilla commented out: 0 = off)
     bool queue_tactical_battles = true;       // Strategic_Queue_Tactical_Battles
+    bool always_bypass_autoresolve = false;   // AlwaysBypassAutoResolve (MCX4_T09_RE_ANSWERS Q3: the banner only)
     float space_auto_resolve_delay = 0.01f;   // Space_Auto_Resolve_Delay_Seconds
     float land_auto_resolve_delay = 0.01f;    // Land_Auto_Resolve_Delay_Seconds
     float space_retreat_allowed = 30.0f;      // Space_Retreat_Allowed_Countdown_Seconds
@@ -257,10 +259,16 @@ public:
     // The story lock 0x4472a0 of a conflict: story_lock, or the campaign flag. It suppresses the overrun check (single
     // player: 0x2b92e0 / 0x2b76a0; AI vs AI still auto-resolves).
     bool story_locked(const ConflictInfo& c) const;
-    // The human's auto-resolve lock: story_locked() or, in a story campaign, the conflict's (planet, land / space) pair in
-    // Autoresolve_Exclusion_Locations (Q7.4: 0x4471b0, read only by the banner and the HUD, so the exclusion list does not
-    // touch the overrun check). The host makes the human fight a locked conflict.
+    // The human's auto-resolve lock, the one-button test of the battle-pending banner 0x3ca480: story_locked(); or
+    // AlwaysBypassAutoResolve (MCX4_T09_RE_ANSWERS Q3); or, in a story campaign, the conflict's (planet, land / space) pair
+    // in Autoresolve_Exclusion_Locations (Q7.4: 0x4471b0) or a space conflict with a Prevents_Story_Campaign_Autoresolve
+    // unit (Q5, story_autoresolve_unit). Only story_locked() touches the overrun check. The host makes the human fight a
+    // locked conflict.
     bool autoresolve_locked(const ConflictInfo& c) const;
+    // Q5 (0x2affb0): a unit of either side in orbit of the conflict planet (fleet contents and their squadron members)
+    // whose type has Prevents_Story_Campaign_Autoresolve. [port] Retail also keeps a sticky fleet flag (fleet data +0x95,
+    // set when such a unit joins, never cleared): not modelled, the test reads the fleets' current contents.
+    bool story_autoresolve_unit(const ConflictInfo& c) const;
 
     // ---- ConflictHooks ----
     void on_space_conflict(PlanetIndex planet, int32_t attacker) override;

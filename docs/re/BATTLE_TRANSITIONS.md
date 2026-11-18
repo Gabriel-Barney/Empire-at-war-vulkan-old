@@ -968,7 +968,11 @@ progress; runs vf1/vf2 → vf8 0x609270 (gathers combatants from the current tac
 persistent lists, sets +0x3e = "from tactical") → vf4 → vf6(force)), and Lua/story triggers. Story can
 forbid it per planet (`DISABLE_AUTORESOLVE`, `RESTRICT_AUTORESOLVE`, `HIDE_AUTORESOLVE`,
 `Prevents_Story_Campaign_Autoresolve` on types, campaign `Is_Autoresolve_Allowed` /
-`Autoresolve_Exclusion_Locations`) [M for the field wiring].
+`Autoresolve_Exclusion_Locations`) [M for the field wiring]. The wiring is [H] in
+`MCX4_RE_ANSWERS_GALACTIC.md` Q7.4 / Q7.6 and `MCX4_T09_RE_ANSWERS.md` Q3 / Q5: the banner's one-button test also takes
+GameConstants `AlwaysBypassAutoResolve` (banner only), and `Prevents_Story_Campaign_Autoresolve` counts only in a story
+campaign, only for a space conflict, and only for the human's choice (sticky fleet flag +0x95). The fire bonus of §4.4
+step 1 is looked up by the **firing** unit's `CategoryMask` and is 1 in shipped data (`MCX4_T09_RE_ANSWERS.md` Q9).
 
 ### 4.6 Retreat from the pending dialog / Lua [H]
 

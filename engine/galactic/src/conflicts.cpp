@@ -88,6 +88,7 @@ bool load_conflict_rules(const FileProvider& provider, const data::GameDatabase&
     a.display_time = g.get_float("AutoResolveDisplayTime", a.display_time);
     out.overrun_multiple = g.get_float("Overrun_Auto_Resolve_Multiple", 0.0f);
     out.queue_tactical_battles = g.get_bool("Strategic_Queue_Tactical_Battles", true);
+    out.always_bypass_autoresolve = g.get_bool("AlwaysBypassAutoResolve", false);
     out.space_auto_resolve_delay = g.get_float("Space_Auto_Resolve_Delay_Seconds", out.space_auto_resolve_delay);
     out.land_auto_resolve_delay = g.get_float("Land_Auto_Resolve_Delay_Seconds", out.land_auto_resolve_delay);
     out.space_retreat_allowed = g.get_float("Space_Retreat_Allowed_Countdown_Seconds", out.space_retreat_allowed);
@@ -142,6 +143,7 @@ bool load_conflict_rules(const FileProvider& provider, const data::GameDatabase&
             i.space_population_override = types.get_int(t, "Space_Override_Population_Value");
         i.hero = types.get_bool(t, "Is_Named_Hero");
         i.super_killer = types.get_bool(t, "Is_Super_Weapon_Killer");
+        i.prevents_story_autoresolve = types.get_bool(t, "Prevents_Story_Campaign_Autoresolve");
         for (const char* tag : {"Squadron_Units", "Company_Units"})
             for (std::string_view m : types.get_list(t, tag)) {
                 const objects::TypeIndex mt = types.resolve_name(trimmed(m));
@@ -1199,7 +1201,27 @@ bool ConflictManager::story_locked(const ConflictInfo& c) const {
 }
 
 bool ConflictManager::autoresolve_locked(const ConflictInfo& c) const {
-    return story_locked(c) || sim_->autoresolve_excluded(c.planet, c.kind == ConflictKind::Land);
+    if (rules_->always_bypass_autoresolve || story_locked(c)) return true;
+    if (sim_->autoresolve_excluded(c.planet, c.kind == ConflictKind::Land)) return true;
+    return sim_->story_campaign() && c.kind == ConflictKind::Space && story_autoresolve_unit(c);
+}
+
+bool ConflictManager::story_autoresolve_unit(const ConflictInfo& c) const {
+    if (c.planet >= sim_->planets().size()) return false;
+    const auto& store = sim_->store();
+    const auto flagged = [this](uint32_t t) {
+        if (rules_->type(t).prevents_story_autoresolve) return true;
+        for (const auto& [mt, n] : rules_->type(t).members)
+            if (rules_->type(mt).prevents_story_autoresolve) return true;
+        return false;
+    };
+    for (uint32_t fi : sim_->planets()[c.planet].orbit) {
+        const FleetState& f = sim_->fleets()[fi];
+        if (!f.alive || f.moving || (f.owner != c.attacker && f.owner != c.defender)) continue;
+        for (ObjectHandle m : f.contents)
+            if (store.alive(m) && flagged(static_cast<uint32_t>(store.type(m)))) return true;
+    }
+    return false;
 }
 
 void ConflictManager::finish_battle(const BattleResult& result, LinkedResolution resolution) {

@@ -1910,6 +1910,34 @@ void test_corruption_level_override() {
     CHECK(a.corruption == kCorruptionRacketeering && a.corrupting_player == a.owner && a.owner == pEmpire);
     CHECK(!a.corruption_protected && !a.corruption_removing && a.corruption_end == 0u);
     CHECK(s.planets()[rB].corruption == kCorruptionNone);
+    // mcx4 t09 (docs/re/MCX4_T09_RE_ANSWERS.md Q1): both campaign-start paths pay the type-3 slot's
+    // Corruption_1_Success_Credit_Bonus to the planet owner - the override (an Empire owner) and the first-owner instant
+    // path 0x3fb040 (an Underworld start planet, Benefits_From_Corruption).
+    const auto start_credits = [](float bonus) {
+        GalacticRules r = make_oi_rules(1.0f);
+        CorruptionChoiceDef c;
+        c.slot = 1;
+        c.type = kCorruptionRacketeering;
+        c.success_credit_bonus = bonus;
+        r.special.types[tPlanetA].corruption = {c};
+        c.success_credit_bonus = bonus * 0.5f;
+        r.special.types[tPlanetB].corruption = {c};
+        objects::GameObjectTypes ty;
+        objects::IdCounter id;
+        objects::ObjectStore st{objects::ModeKind::Galactic, objects::StoreKind::Primary, ty, &id};
+        SimRng g{0x5151u};
+        GalacticSim sim(r, st, g);
+        GalacticSetup su = make_setup({{pEmpire, rA, tSB1}, {pUnder, rB, tBarracks}});
+        su.corruption_level_override = {{tPlanetA, 1}};
+        for (auto& pl : su.players) pl.credits = 100.0f;  // below the credit cap
+        CHECK(sim.start(std::move(su)));
+        CHECK(sim.planets()[rA].corruption == kCorruptionRacketeering && sim.planets()[rB].corruption == kCorruptionRacketeering &&
+              sim.planets()[rB].owner == pUnder);
+        return std::pair{sim.credits(pEmpire), sim.credits(pUnder)};
+    };
+    const auto [e0, u0] = start_credits(0.0f);
+    const auto [e1, u1] = start_credits(400.0f);
+    CHECK(e1 - e0 == 400.0f && u1 - u0 == 240.0f);  // the Underworld is a Hard AI: Add_Credits x Credit_Multiplier 1.2
 }
 
 // mcx4 t07 (docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.4 / Q7.6): the campaign's auto-resolve rules on the sim.

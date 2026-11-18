@@ -237,6 +237,9 @@ void GalacticSim::complete_corruption(PlanetIndex planet) {
     rebuild_corruption_pairs(planet);  // 2.
     if (old != p.corruption) {          // 3. corruption-changed notification, 5. 0x3f9690 (unlocks)
         corruption_unlocks(planet, old, old_player);
+        // mcx4 t09 (MCX4_T09_RE_ANSWERS Q1): 0x3f9690's credit bonus goes to P = the first Benefits_From_Corruption
+        // player (0x2948d0), not the planet owner; a removal (new none) pays nothing.
+        pay_corruption_bonus(planet, p.corruption, first_corruption_player());
         GalacticEvent ev;
         ev.kind = GalacticEventKind::CorruptionChanged;
         ev.planet = planet;

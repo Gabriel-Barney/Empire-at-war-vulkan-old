@@ -398,9 +398,11 @@ struct World {
     SimRng rng{0x5150u};
     GalacticSim sim{rules, store, rng};
     std::unique_ptr<ConflictManager> cm;
-    World(std::vector<StartingForce> forces, bool empire_human, bool route_bc = true) {
+    World(std::vector<StartingForce> forces, bool empire_human, bool route_bc = true, bool story_campaign = false) {
         std::vector<std::string> diag;
-        CHECK(sim.start(make_setup(std::move(forces), empire_human, route_bc), &diag));
+        GalacticSetup setup = make_setup(std::move(forces), empire_human, route_bc);
+        setup.story_campaign = story_campaign;
+        CHECK(sim.start(setup, &diag));
         sim.set_emit_events(true);
         cm = std::make_unique<ConflictManager>(sim, crules, rng);
         cm->attach();
@@ -671,6 +673,44 @@ void test_overrun_strength() {
     }
     std::printf("overrun strength: space 1300 / 0, ground defender 300 -> 400 with records, attacker cargo 100, overrun "
                 "multiple 3 auto-resolves a human battle\n");
+}
+
+// mcx4 t09 (docs/re/MCX4_T09_RE_ANSWERS.md Q3, Q5): the banner's one-button test 0x3ca480. AlwaysBypassAutoResolve locks
+// every conflict, land and space, in any campaign; Prevents_Story_Campaign_Autoresolve on a unit of either side in orbit
+// (or a squadron member of one) locks only a space conflict and only in an Is_Story_Campaign campaign. Neither is the
+// story lock, so neither suppresses the overrun check.
+// ledger: verifies GameConstants.AlwaysBypassAutoResolve
+// ledger: verifies GameObjectType.Prevents_Story_Campaign_Autoresolve
+void test_autoresolve_bypass_rules() {
+    std::printf("  mcx4: AlwaysBypassAutoResolve / Prevents_Story_Campaign_Autoresolve\n");
+    for (const bool story : {false, true}) {
+        World w({{pEmpire, rB, tFrigate}, {pUnder, rC, tCorvette}}, true, true, story);
+        ConflictInfo sp;
+        sp.kind = ConflictKind::Space;
+        sp.planet = rB;
+        sp.attacker = pUnder;
+        sp.defender = pEmpire;
+        ConflictInfo lp = sp;
+        lp.kind = ConflictKind::Land;
+        CHECK(!w.cm->autoresolve_locked(sp) && !w.cm->autoresolve_locked(lp) && !w.cm->story_autoresolve_unit(sp));
+        w.crules.types[tCorvette].prevents_story_autoresolve = true;  // at C, not in the conflict
+        CHECK(!w.cm->story_autoresolve_unit(sp));
+        w.crules.types[tFrigate].members = {{tCorvette, 2}};  // a squadron member of the defender's frigate at B
+        CHECK(w.cm->story_autoresolve_unit(sp));
+        w.crules.types[tFrigate].members.clear();
+        w.crules.types[tCorvette].prevents_story_autoresolve = false;
+        CHECK(!w.cm->story_autoresolve_unit(sp));
+        w.crules.types[tFrigate].prevents_story_autoresolve = true;   // the defender's frigate at B
+        CHECK(w.cm->story_autoresolve_unit(sp));
+        CHECK(w.cm->autoresolve_locked(sp) == story && !w.cm->autoresolve_locked(lp));
+        ConflictInfo other = sp;  // a third player's conflict at B: the Empire's frigate is not a side's unit
+        other.defender = pNeutral;
+        CHECK(!w.cm->story_autoresolve_unit(other));
+        w.crules.types[tFrigate].prevents_story_autoresolve = false;
+        w.crules.always_bypass_autoresolve = true;
+        CHECK(w.cm->autoresolve_locked(sp) && w.cm->autoresolve_locked(lp));
+        CHECK(!w.cm->story_locked(sp) && !w.cm->story_locked(lp));
+    }
 }
 
 void test_human_fight() {
@@ -1413,6 +1453,7 @@ int main() {
     test_ai_auto_resolve();
     std::printf("human fight\n");
     test_overrun_strength();
+    test_autoresolve_bypass_rules();
     test_human_fight();
     test_map_picker_store();
     test_human_retreat_after_battle();

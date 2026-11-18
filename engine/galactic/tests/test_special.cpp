@@ -10,6 +10,7 @@
 //   4. FoC data (ALAMO_FOC_DATA = folder with loose Data\XML; skipped when unset): the tables and a palace / mining
 //      income check on Sandbox_Heart_Of_The_Maw_Underworld.
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -805,6 +806,65 @@ void test_tech_unlocks() {
         w.run(301);
         CHECK(w.planet(rB).corruption == kCorruptionNone && !s.type_unlocked(pUnd, tMerc));
     }
+    // mcx4 t09 (docs/re/MCX4_T09_RE_ANSWERS.md Q1): Corruption_1_Success_Credit_Bonus, Corruption_2_Success_Credit_Bonus,
+    // Corruption_3_Success_Credit_Bonus. The bonus of the first choice slot whose type is the completed type is paid as a
+    // float (notify 0) to the first Benefits_From_Corruption player on a normal completion (not the planet owner, not the
+    // player that started it); a removal pays nothing; the capture path pays the type-3 slot at completion.
+    // ledger: verifies GameObjectType.Corruption_1_Success_Credit_Bonus
+    // ledger: verifies GameObjectType.Corruption_2_Success_Credit_Bonus
+    // ledger: verifies GameObjectType.Corruption_3_Success_Credit_Bonus
+    {
+        const auto run_gain = [](bool bonus, int32_t starter) {
+            World w;
+            GalacticSim& s = w.sim;
+            std::vector<CorruptionChoiceDef>& ch = w.rules.special.types[tPB].corruption;
+            if (bonus) {
+                ch[0].success_credit_bonus = 500.0f;  // slot 1, Piracy
+                ch[1].success_credit_bonus = 77.0f;   // slot 2, Intimidation
+            }
+            CorruptionChoiceDef dup = ch[0];  // a repeated Piracy slot: slot 1's value is paid
+            dup.slot = 4;
+            dup.success_credit_bonus = bonus ? 9000.0f : 0.0f;
+            ch.push_back(dup);
+            CHECK(s.corruption_credit_bonus(rB, 1) == (bonus ? 500.0f : 0.0f) && s.corruption_credit_bonus(rB, 5) == 0.0f &&
+                  s.corruption_credit_bonus(rB, kCorruptionNone) == 0.0f);
+            CHECK(s.first_corruption_player() == pUnd);
+            CHECK(s.begin_corruption_gain(rB, 1, starter, 5.0f));
+            const float before[3] = {s.credits(pEmp), s.credits(pReb), s.credits(pUnd)};
+            w.run(160);
+            CHECK(w.planet(rB).corruption == 1);
+            const float mid[3] = {s.credits(pEmp), s.credits(pReb), s.credits(pUnd)};
+            CHECK(s.begin_corruption_removal(rB, 5.0f));
+            w.run(160);
+            CHECK(w.planet(rB).corruption == kCorruptionNone);
+            return std::array<float, 9>{before[0], before[1], before[2], mid[0], mid[1], mid[2],
+                                        s.credits(pEmp), s.credits(pReb), s.credits(pUnd)};
+        };
+        for (const int32_t starter : {pUnd, pReb}) {
+            const std::array<float, 9> a = run_gain(false, starter), b = run_gain(true, starter);
+            for (size_t i = 0; i < 3; ++i) CHECK(a[i] == b[i]);
+            CHECK(a[3] == b[3] && a[4] == b[4] && std::fabs((b[5] - a[5]) - 500.0f) < 0.01f);  // Underworld only
+            CHECK(a[6] == b[6] && a[7] == b[7] && std::fabs((b[8] - a[8]) - 500.0f) < 0.01f);  // removal: nothing more
+        }
+        // Capture path 0x3fb040 (GRC 4.3): the Underworld taking a clean planet is paid the type-3 slot's bonus at the
+        // completion 10 s later, not at the capture.
+        const auto capture = [](bool bonus) {
+            World w;
+            GalacticSim& s = w.sim;
+            CorruptionChoiceDef c3;
+            c3.slot = 4;
+            c3.type = kCorruptionRacketeering;
+            c3.success_credit_bonus = bonus ? 300.0f : 0.0f;
+            w.rules.special.types[tPB].corruption.push_back(c3);
+            CHECK(s.change_owner(w.planet(rB).object, pUnd));
+            const float at_capture = s.credits(pUnd);
+            w.run(301);
+            CHECK(w.planet(rB).corruption == kCorruptionRacketeering);
+            return std::array<float, 2>{at_capture, s.credits(pUnd)};
+        };
+        const std::array<float, 2> c0 = capture(false), c1 = capture(true);
+        CHECK(c0[0] == c1[0] && std::fabs((c1[1] - c0[1]) - 300.0f) < 0.01f);
+    }
 }
 
 // ---- 2e1. Rebel tech theft: Slicer_Ability (docs/re/REMAINING_GAPS.md 1.1-1.3) --------------------------------------
@@ -1246,6 +1306,14 @@ void test_foc() {
         CHECK(i.uncommon_price_multiplier == 5.5f && i.tech_level >= 1 && i.tech_level <= 5 && !i.ability_crcs.empty());
     }
     CHECK(s.items.size() == 10 && emp == 5 && reb == 5 && mn == 1000 && mx == 4800);
+    {  // mcx4 t09 (MCX4_T09_RE_ANSWERS Q1): FoC's Corruption_1_Success_Credit_Bonus, a Kidnapping slot on nine planets.
+        const auto bonus1 = [&](const char* planet) {
+            const uint32_t t = rules.find_type(planet);
+            const std::vector<CorruptionChoiceDef>& ch = s.type(t).corruption;
+            return t != kNoIndex && !ch.empty() && ch[0].slot == 1 && ch[0].type == 2 ? ch[0].success_credit_bonus : -1.0f;
+        };
+        CHECK(bonus1("Bestine") == 10000.0f && bonus1("Thyferra") == 7500.0f && bonus1("NalHutta") == 8000.0f);
+    }
     {  // a2m r2: the Underworld's Racketeering upgrade carries the salvage bounty; conflict-rule bounty values of the traced
        // battles (docs/re/A2M_R2_UW_BOUNTY_TRACE.md §1).
         const uint32_t uw = rules.find_faction("Underworld");
@@ -1288,6 +1356,11 @@ void test_foc() {
         std::printf("bounty: Sundered_Heart %d, X-wing squadron %d, infantry squad %d\n", bounty("Sundered_Heart"),
                     bounty("Rebel_X-Wing_Squadron"), bounty("Rebel_Infantry_Squad"));
         CHECK(cr.nalhutta_types.size() == 2);  // NalHutta, NalHutta_Story (§2.3 case B)
+        // mcx4 t09 (MCX4_T09_RE_ANSWERS Q3 / Q5): AlwaysBypassAutoResolve is No; Prevents_Story_Campaign_Autoresolve on the
+        // Death Star and three named Star Destroyers.
+        const auto prevents = [&](const char* n) { return cr.type(static_cast<uint32_t>(types.resolve_name(n))).prevents_story_autoresolve; };
+        CHECK(!cr.always_bypass_autoresolve && prevents("Death_Star") && prevents("Accuser_Star_Destroyer") &&
+              !prevents("Star_Destroyer"));
     }
     CHECK(s.items[0].name == "Buzz_Droid_Tech" && s.items[0].ability_crcs[0] == special_name_crc("Buzz_Droids_Viper") &&
           s.find_item(special_name_crc("Buzz_Droid_Tech")) == 0);

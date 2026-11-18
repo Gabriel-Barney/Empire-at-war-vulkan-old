@@ -623,7 +623,12 @@ bool GameSession::begin_linked() {
     return banner_sent_;
 }
 
-bool GameSession::autoresolve_locked(PlanetIndex planet) const {
+bool GameSession::autoresolve_locked(PlanetIndex planet, bool land) const {
+    // mcx4 t09: the head conflict at `planet` takes the banner's whole one-button test (ConflictManager::autoresolve_locked:
+    // the story lock, AlwaysBypassAutoResolve, the exclusion list, Prevents_Story_Campaign_Autoresolve).
+    if (const galactic::ConflictInfo* c = conflict_head();
+        c && c->planet == planet && (c->kind == galactic::ConflictKind::Land) == land)
+        return battles_->conflicts().autoresolve_locked(*c);
 #ifdef ALAMO_SIM_HAVE_STORY
     if (const sim::StorySession* s = host_ ? host_->story() : nullptr) return s->autoresolve_locked(planet);
 #else

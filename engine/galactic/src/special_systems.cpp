@@ -847,6 +847,27 @@ uint32_t GalacticSim::corruption_unlock(PlanetIndex planet, int8_t type) const {
     return kNoIndex;
 }
 
+float GalacticSim::corruption_credit_bonus(PlanetIndex planet, int8_t type) const {
+    if (!valid_planet(planet) || type == kCorruptionNone) return 0.0f;
+    const uint32_t pt = planets_[planet].type;
+    if (pt >= special().types.size()) return 0.0f;
+    for (const CorruptionChoiceDef& c : special().types[pt].corruption)
+        if (c.type == type) return c.success_credit_bonus;  // slot 1, 2, 3: the first match (a repeated type pays slot 1)
+    return 0.0f;
+}
+
+void GalacticSim::pay_corruption_bonus(PlanetIndex planet, int8_t type, int32_t player) {
+    if (!valid_player(player)) return;
+    const float bonus = corruption_credit_bonus(planet, type);
+    if (bonus > 0.0f) add_credits(player, bonus, false);
+}
+
+int32_t GalacticSim::first_corruption_player() const {
+    for (size_t i = 0; i < players_.size(); ++i)
+        if (benefits(static_cast<int32_t>(i))) return static_cast<int32_t>(i);
+    return kNoPlayer;
+}
+
 void GalacticSim::corruption_unlocks(PlanetIndex planet, int8_t old_type, int32_t old_player) {
     if (!valid_planet(planet)) return;
     const uint32_t old_unlock = corruption_unlock(planet, old_type);

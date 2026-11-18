@@ -353,13 +353,15 @@ bool GalacticSim::start(const GalacticSetup& setup, std::vector<std::string>* di
     }
     // mcx4 t07 (MCX4_RE_ANSWERS_GALACTIC Q7.4, 0x28dbe0 at L14, after the owners are set): Corruption_Level_Override puts
     // the first planet of the named type into Racketeering at once (value >= 1; below 1: no corruption), no transition
-    // timer, and runs the change effects (0x3f9690: the unlock for the planet owner). [port] The faction / planet-type
-    // per-type records and the owner's success credit bonus of 0x3f9690 are not applied (Corruption_N_Success_Credit_Bonus
-    // is mcx4 t09; base FoC uses the override only in the Underworld exec demo campaign).
+    // timer, and runs the change effects (0x3f9690 with P = the planet owner: the unlock and the success credit bonus,
+    // MCX4_T09_RE_ANSWERS Q1). [port] The faction / planet-type per-type upgrade records of 0x3f9690 are not applied
+    // (base FoC uses the override only in the Underworld exec demo campaign).
     for (const auto& [planet_type, value] : setup.corruption_level_override)
         for (PlanetIndex i = 0; i < n; ++i)
             if (planets_[i].is_planet && planets_[i].type == planet_type) {
+                const int8_t before = planets_[i].corruption;
                 set_corruption(i, value >= 1 ? kCorruptionRacketeering : kCorruptionNone, planets_[i].owner);
+                if (planets_[i].corruption != before) pay_corruption_bonus(i, planets_[i].corruption, planets_[i].owner);
                 break;
             }
     // q2f t02 [H]: the mode's frame-0 fiscal cycle runs before the galaxy is built (Q2 traces: no objects at mode frame
@@ -715,6 +717,7 @@ void GalacticSim::apply_ownership(PlanetIndex planet, int32_t derived) {
             p.corruption = kCorruptionRacketeering;
             p.corrupting_player = derived;
             corruption_unlocks(planet, kCorruptionNone, kNoPlayer);  // campaign start 0x28dbe0
+            pay_corruption_bonus(planet, kCorruptionRacketeering, derived);  // 0x3fb040 site 0x3fbeda (T09 Q1)
             rebuild_corruption_pairs(planet);                         // GRC 4.3: instant, then 0x3ff230
         }
         return;
