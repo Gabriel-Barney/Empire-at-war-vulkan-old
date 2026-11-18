@@ -341,6 +341,23 @@ void test_unit_room() {
     CHECK(H::unit_room(3.0f, -1.0f) && H::unit_room(9.0f, 10.0f) && !H::unit_room(10.0f, 10.0f) && !H::unit_room(11.0f, 10.0f));
 }
 
+// mcx4 t13 batch M (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_Bombard_Available family"; both builds).
+// ledger: verifies Faction.SFXEvent_Bombard_Available
+// ledger: verifies Faction.SFXEvent_Bombard_Ally_Available
+// ledger: verifies Faction.SFXEvent_Bombard_Enemy_Available
+// ledger: verifies Faction.SFXEvent_Bombing_Run_Available
+// ledger: verifies Faction.SFXEvent_Bombing_Run_Ally_Available
+// ledger: verifies Faction.SFXEvent_Bombing_Run_Enemy_Available
+void test_strike_available_tags() {
+    using H = GameAudioHost;
+    CHECK(H::strike_available_tag(true, true, true) == "SFXEvent_Bombard_Available");
+    CHECK(H::strike_available_tag(true, false, true) == "SFXEvent_Bombard_Ally_Available");
+    CHECK(H::strike_available_tag(true, false, false) == "SFXEvent_Bombard_Enemy_Available");
+    CHECK(H::strike_available_tag(false, true, false) == "SFXEvent_Bombing_Run_Available");  // local wins over relation
+    CHECK(H::strike_available_tag(false, false, true) == "SFXEvent_Bombing_Run_Ally_Available");
+    CHECK(H::strike_available_tag(false, false, false) == "SFXEvent_Bombing_Run_Enemy_Available");
+}
+
 // aud4 b0289 / b0300: garrison entry line and the hero clash win speech (both builds; presentation rules only).
 void test_garrison_and_clash_lines() {
     using H = GameAudioHost;
@@ -951,6 +968,7 @@ int main() {
     test_move_into_field();             // mcx4 t13 batch G
     test_base_shield_lines();           // mcx4 t13 batch I
     test_unit_room();                   // mcx4 t13 batch J
+    test_strike_available_tags();       // mcx4 t13 batch M
     test_intro_speech_t07();
     test_aud2();
 #ifdef ALAMO_GAME_HAVE_AUDIO

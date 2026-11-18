@@ -84,6 +84,7 @@ struct GameAudioStats {
     uint64_t base_shield_lines = 0;                                                // mcx4 t13 batch I
     uint64_t pop_cap_lines = 0;                                                    // mcx4 t13 batch J
     uint64_t gravity_lines = 0;                                                    // mcx4 t13 batch K
+    uint64_t strike_lines = 0;                                                     // mcx4 t13 batch M
 };
 
 class GameAudioHost {
@@ -329,6 +330,10 @@ public:
     // P4_SIM_SYSTEMS §2.7.3 (player tick 0x287e70, tactical): "room for one unit" (0x2b03e0) = no cap (< 0) or the
     // population used below the cap; SFXEvent_Tactical_Pop_Cap_Reached plays when it turns false.
     static bool unit_room(float used, float cap) { return cap < 0.0f || used < cap; }
+    // "Faction.SFXEvent_Bombard_Available family" (PlanetaryBombardManager 0x52a110 / BombingRunManager 0x495dd0 [H]): the
+    // tag of player P's faction that announces P's bombardment (`bombard`) or bombing run becoming available: P is the
+    // local player -> _Available, the local player friendly to P -> _Ally_Available, hostile -> _Enemy_Available.
+    static std::string_view strike_available_tag(bool bombard, bool local, bool friendly);
     struct ControlLines {
         std::string_view friendly, enemy;
     };
@@ -428,6 +433,7 @@ private:
     int32_t last_retreater_ = -1;                             // mcx4 t13 batch E: retreating_player() last tick
     std::map<int64_t, uint8_t> base_shield_state_;            // mcx4 t13 batch I: generator -> 1 on / 2 off (lookup only)
     bool unit_room_ = true;                                   // mcx4 t13 batch J: last tick's unit_room [M: starts true]
+    std::vector<uint8_t> strike_avail_;                       // mcx4 t13 batch M: per player bit 0 bombard, bit 1 bombing run
     // mcx4 t13 batch B: the local player's tactical build orders last tick (order id -> type) and built counts (type ->
     // TacticalProduction::built_count), to tell a completed order from a cancelled one.
     std::map<uint32_t, int32_t> prod_orders_;

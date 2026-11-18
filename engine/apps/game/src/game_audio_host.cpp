@@ -146,6 +146,17 @@ std::string_view GameAudioHost::base_shield_line(bool online, bool friendly) {
     return friendly ? "SFXEvent_HUD_Base_Shield_Offline" : "SFXEvent_HUD_Enemy_Base_Shield_Offline";
 }
 
+std::string_view GameAudioHost::strike_available_tag(bool bombard, bool local, bool friendly) {
+    // ledger: consumes Faction.SFXEvent_Bombard_Available
+    // ledger: consumes Faction.SFXEvent_Bombard_Ally_Available
+    if (bombard) return local ? "SFXEvent_Bombard_Available" : friendly ? "SFXEvent_Bombard_Ally_Available" : "SFXEvent_Bombard_Enemy_Available";
+    // ledger: consumes Faction.SFXEvent_Bombard_Enemy_Available
+    // ledger: consumes Faction.SFXEvent_Bombing_Run_Available
+    return local ? "SFXEvent_Bombing_Run_Available"  // ledger: consumes Faction.SFXEvent_Bombing_Run_Ally_Available
+                 : friendly ? "SFXEvent_Bombing_Run_Ally_Available"
+                            : "SFXEvent_Bombing_Run_Enemy_Available";  // ledger: consumes Faction.SFXEvent_Bombing_Run_Enemy_Available
+}
+
 GameAudioHost::ControlLines GameAudioHost::control_lines(bool friendly_old, bool friendly_new, bool hostile_old, bool hostile_new,
                                                          bool old_neutral, bool new_neutral) {
     ControlLines c;
@@ -803,6 +814,29 @@ void GameAudioHost::cue_lines(const sim::TacticalBattle& battle, const objects::
                     ev = nth_field(lf->fields, special_weapon_tag(fired, own), types.get_int(t, "Special_Weapon_Target_Action_Index"));
                 if (!ev.empty() && game_->gui_sfx(ev)) ++stats_.special_weapon_lines;
             }
+    // Strike availability (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Bombard_Available family"): per manager, every player's
+    // available flag is tracked; the first player (index order) whose flag went 0 -> 1 this tick is announced in that
+    // player's faction voice, 2D; frame > 0. [port] the flag = bombardment_available / bombing_run_available (gate included).
+    if (local_player >= 0 && battle.frame() > 0) {
+        const size_t players = player_factions_.size();
+        if (strike_avail_.size() < players) strike_avail_.resize(players, 0);
+        for (const bool bombard : {true, false}) {
+            const uint8_t bit = static_cast<uint8_t>(bombard ? 1u : 2u);
+            bool announced = false;
+            for (size_t p = 0; p < players; ++p) {
+                const int32_t pi = static_cast<int32_t>(p);
+                const bool now = bombard ? battle.bombardment_available(pi) : battle.bombing_run_available(pi);
+                const bool was = (strike_avail_[p] & bit) != 0;
+                strike_avail_[p] = static_cast<uint8_t>(now ? (strike_avail_[p] | bit) : (strike_avail_[p] & ~bit));
+                if (!now || was || announced) continue;
+                announced = true;
+                const audio::FactionAudio* pf = game_data_->find_faction(player_factions_[p]);
+                const std::string_view ev =
+                    pf ? pf->get(strike_available_tag(bombard, pi == local_player, !cs.is_enemy(local_player, pi))) : std::string_view();
+                if (!ev.empty() && game_->gui_sfx(ev)) ++stats_.strike_lines;
+            }
+        }
+    }
     // Gravity control (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Gravity_Control_Generator_On family", TRU1_GRAVITY_FIELD.md
     // §1.2): a generator's power change plays the local faction's line, 2D, whoever owns the generator.
     for (const sim::TacticalBattle::GravityPowerEvent& e : battle.gravity_power_changes()) {
@@ -1223,6 +1257,7 @@ void GameAudioHost::battle_reset() {
     last_retreater_ = -1;     // mcx4 t13 batch E
     base_shield_state_.clear();  // mcx4 t13 batch I
     unit_room_ = true;           // mcx4 t13 batch J
+    strike_avail_.clear();       // mcx4 t13 batch M
     prod_built_.clear();
     intro_decided_ = false;   // aud1 t07: a new battle decides its intro again
     object_events_reset();    // aud1 t05
