@@ -10,6 +10,9 @@ Checks that the generated ledgers match the code, without writing anything:
                     (consumes) or in a test that names the tag (verifies);
                   - every RETAIL_UNUSED entry (roadmap mcx4) names a row nothing reads and cites an existing docs/re
                     page that names the tag; such a row is retail_unused, settled like a consumed one.
+                  - every OUT_OF_SCOPE entry (mcx4 t16) names a row nothing reads, is not also RETAIL_UNUSED and gives a
+                    scope reason labelled in docs/DECISIONS.md "Out-of-scope tag-ledger rows"; such a row is out_of_scope,
+                    not a gap.
   binding ledger  engine/lua/src/binding_table.inc (engine/lua/tools/gen_bindings.py): the effect and consumer
                   columns are what the code gives now.
 A failure prints what differs and the command that regenerates the ledger. Runs in build_agent.cmd (before the build),
@@ -94,7 +97,17 @@ GAP_GROUPS = [
               r"|^(Income_Stream_Mod_Ability\.(Affects_All_Allied_Sources|Interval_Multiplier)|Absorb_Blaster_Ability\."
               r"Damage_Absorb_\w+|Ability_Base\.Unit_Strength_Category|Siphon_Credits_Ability\.Evade_Detection_Chance"
               r"|Income_Stream_Ability\.Split_Income_With_Allies|Spawn_Ability\.Recharge_Time_In_Seconds)$"),
-    # Out of the port's scope (docs/DECISIONS.md: no multiplayer; hardware detection, debug keys, localisation screens).
+    # Multiplayer-named rows that a skirmish or single player reads in retail (mcx4 t16: retail runs skirmish as a
+    # multiplayer game type), and three rows docs/re/xml_field_tables.md files under HardwareConfiguration that are an
+    # ability's fields (offsets 0x18 / 0x178 / 0x180): not out of scope, so they stay with the group that reads them.
+    ("galactic", r"^(GameConstants\.Default_Bounty_By_Category_MP|GameObjectType\.Override_Bounty_MP)$"),
+    ("tactical", r"^(Faction\.Create_Player_In_Multiplayer_Games"
+                 r"|HardwareConfiguration\.(Type|Apply_To_All_Allies|Additional_Garrison_Units))$"),
+    ("ui", r"^(Campaign\.Is_Multiplayer|GameObjectType\.MP_Encyclopedia_Text"
+           r"|GameConstants\.(MP_Default_\w+|Multiplayer_Losing_Team_Bonus_Credit_Percentage))$"),
+    # Out of the port's scope: the rows of OUT_OF_SCOPE in gen_tag_ledger.py (docs/DECISIONS.md "Out-of-scope tag-ledger
+    # rows": multiplayer, hardware detection, graphic detail levels, debug keys, localised splash / credits). Rows in
+    # that table are out_of_scope, not gaps; a new row matching here is a candidate for it.
     ("scope", r"(^|\.)(MP_|Multiplayer|Quickmatch|Debug_|Message_Of_The_Day|Create_Player_In_Multiplayer|Is_Multiplayer"
               r"|Is_Quickmatch|Default_Bounty_By_Category_MP|Override_Bounty_MP|MP_Encyclopedia|AutoResolveVote"
               r"|Distribute_Credit_Quantum|SyncedFrameInterval|ShouldDisplay|ShowUnitAIPlanAttachment|SFXEvent_Debug"
@@ -162,7 +175,7 @@ def gaps(gen, group=None, counts=False):
             return 2
         open_rows = [r for r in open_rows if gap_group(r[1], r[2]) == group]
     if counts:
-        per = {g: [0, 0] for g, _ in GAP_GROUPS}
+        per = {g: [0, 0] for g, _ in GAP_GROUPS}  # a name listed twice (an exception above a pattern) counts once
         for uses, cls, tag, _, _ in open_rows:
             c = per[gap_group(cls, tag)]
             c[0] += 1
@@ -240,10 +253,34 @@ def selftest(gen):
     if len(probs) != 3:
         print("selftest: RETAIL_UNUSED problems", probs)
         bad += 1
-    for (cls, tag), want in {("Campaign", "Special_Case_Production"): "named", ("GameConstants", "MP_Default_Game_Timer"):
+    # OUT_OF_SCOPE (mcx4 t16): a listed row nothing reads becomes out_of_scope; a read row, an unknown row, a row also
+    # in RETAIL_UNUSED, a reason not in SCOPE_REASONS or one the record does not label is an error.
+    record = "## " + gen.SCOPE_SECTION + " (Gabriel)\n- **multiplayer**: x\n## Next\n- **debug keys**: y\n"
+    scope = {("GameConstants", "Income_Redistribution"): "multiplayer"}
+    st = gen.compute_states(rows, {}, {}, {}, scope)
+    if st.get(("GameConstants", "income_redistribution")) != "out_of_scope":
+        print("selftest: out_of_scope state", st)
+        bad += 1
+    if gen.out_of_scope_problems(rows, {}, scope, {}, record):
+        print("selftest: a good OUT_OF_SCOPE entry was refused")
+        bad += 1
+    probs = gen.out_of_scope_problems(rows, {("GameConstants", "income_redistribution"): {"engine/x.cpp"}}, {
+        ("GameConstants", "Income_Redistribution"): "multiplayer",
+        ("GameConstants", "No_Such_Tag"): "multiplayer",
+        ("GameConstants", "Progressive_Taxation"): "debug keys",
+    }, {("GameConstants", "Progressive_Taxation"): page}, record)
+    if len(probs) != 4:  # read; no row; also retail-unused; "debug keys" labelled only outside the section
+        print("selftest: OUT_OF_SCOPE problems", probs)
+        bad += 1
+    if len(gen.out_of_scope_problems(rows, {}, scope, {}, "no section\n")) != 1:
+        print("selftest: a missing scope section was not reported")
+        bad += 1
+    for (cls, tag), want in {("Campaign", "Special_Case_Production"): "named", ("GameConstants", "Message_Of_The_Day_URL"):
                              "scope", ("Faction", "SFXEvent_Player_Taunt"): "scope", ("Decal", "Category"): "render",
                              ("GameObjectType", "SFXEvent_Attack_Hardpoint"): "audio", ("GameObjectType", "Is_Escort"):
-                             "tactical", ("CommandBarComponent", "Stackable"): "ui"}.items():
+                             "tactical", ("CommandBarComponent", "Stackable"): "ui",
+                             ("GameObjectType", "Override_Bounty_MP"): "galactic", ("Campaign", "Is_Multiplayer"): "ui",
+                             ("HardwareConfiguration", "CPUSpeed"): "scope"}.items():
         if gap_group(cls, tag) != want:
             print(f"selftest: {cls}.{tag} in gap group {gap_group(cls, tag)}, want {want}")
             bad += 1

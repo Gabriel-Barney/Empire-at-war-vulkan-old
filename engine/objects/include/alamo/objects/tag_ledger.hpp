@@ -15,9 +15,12 @@ enum class LedgerState : uint8_t {
     Consumed,  // engine code reads it
     Verified,  // consumed, and a test checks its effect against a docs/re spec or probe
     RetailUnused,  // nothing reads it, and an RE answer (spec) found no reader in retail either (roadmap mcx4)
+    OutOfScope,    // nothing reads it on purpose: a scope reason (spec) of docs/DECISIONS.md "Out-of-scope tag-ledger rows"
 };
-const char* to_string(LedgerState s);  // "unread", "stored", "consumed", "verified", "retail_unused"
-// A tag the port does not act on although retail may: Unread or Stored (not RetailUnused: retail ignores it too).
+// "unread", "stored", "consumed", "verified", "retail_unused", "out_of_scope"
+const char* to_string(LedgerState s);
+// A tag the port does not act on although retail may: Unread or Stored (not RetailUnused: retail ignores it too; not
+// OutOfScope: the port leaves it out on purpose, mcx4 t16).
 inline bool is_honour_gap(LedgerState s) { return s == LedgerState::Unread || s == LedgerState::Stored; }
 
 struct TagLedgerRow {
@@ -27,7 +30,8 @@ struct TagLedgerRow {
     LedgerState state = LedgerState::Unread;
     uint32_t consumers = 0;     // engine source files that read it
     std::string_view consumer;  // the first of them ("" when none)
-    std::string_view spec;      // the first docs/re page naming the tag ("" when none); RetailUnused: the RE answer
+    std::string_view spec;      // the first docs/re page naming the tag ("" when none); RetailUnused: the RE answer;
+                                // OutOfScope: the DECISIONS.md record and reason
     uint32_t base_uses = 0;     // elements of that name in base FoC's XML (any class)
     uint8_t tier = 1;           // parity tier a gap here belongs to
 };

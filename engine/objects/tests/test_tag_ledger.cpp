@@ -25,6 +25,7 @@ int main() {
         if (r.state == LedgerState::Consumed || r.state == LedgerState::Verified) CHECK(r.consumers > 0 && !r.consumer.empty());
         if (r.state == LedgerState::Unread || r.state == LedgerState::Stored) CHECK(r.consumers == 0);
         if (r.state == LedgerState::RetailUnused) CHECK(r.consumers == 0 && r.spec.starts_with("docs/re/"));
+        if (r.state == LedgerState::OutOfScope) CHECK(r.consumers == 0 && r.spec.starts_with("docs/DECISIONS.md"));
     }
     CHECK(missing == 0);
     // Case-insensitive lookup; class matters.
@@ -36,5 +37,9 @@ int main() {
     CHECK(std::string_view(to_string(LedgerState::Verified)) == "verified");
     CHECK(std::string_view(to_string(LedgerState::RetailUnused)) == "retail_unused" &&
           !is_honour_gap(LedgerState::RetailUnused));
+    // mcx4 t16: out-of-scope rows (hardware detection here) are settled, not honour gaps.
+    const TagLedgerRow* cpu = find_tag_ledger("HardwareConfiguration", "CPUSpeed");
+    CHECK(cpu != nullptr && cpu->state == LedgerState::OutOfScope && !is_honour_gap(cpu->state));
+    CHECK(std::string_view(to_string(LedgerState::OutOfScope)) == "out_of_scope");
     return ::alamo::test::report("alamo_objects_tag_ledger_tests");
 }
