@@ -275,8 +275,10 @@ constexpr double kNever = 1.0e18;              // TimeSince* of an event that ne
 // mcx5 t02: the GameConstants the tokens normalise by are read from the data (AI_GALACTIC_TOKENS §2 neighbour lists and
 // the §4 / §5 tables [H]): MaximumFleetMovementDistance GC+0x108 (the galaxy map's copy), MaximumPoliticalControl +0xF0,
 // MaximumStarbaseLevel +0xF4, MaximumGroundbaseLevel +0xF8, MaximumSpecialStructures +0xFC (EconomyConstants). A
-// divisor of 0 divides as retail does (double; only MaxStructureSlots fails, its §4 row).
-double fleet_distance(const gal::GalacticSim& s) { return static_cast<double>(s.map().max_fleet_move_distance); }
+// divisor of 0 divides as retail does (double; only MaxStructureSlots fails, its §4 row), except the fleet distance:
+// [port] a radius of 0 divides by 1e-30, so the planet's own d = 0 term is 0 instead of retail's 0/0 NaN (a NaN score
+// would reach the AI's sorts, where it is undefined behaviour).
+double fleet_distance(const gal::GalacticSim& s) { return std::max(static_cast<double>(s.map().max_fleet_move_distance), 1e-30); }
 double gc_int(int32_t v) { return static_cast<double>(v); }
 constexpr int32_t kLifeForever = -1;
 

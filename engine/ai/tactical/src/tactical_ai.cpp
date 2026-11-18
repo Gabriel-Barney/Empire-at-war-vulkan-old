@@ -3998,7 +3998,8 @@ TacticalAiWorld::TacticalAiWorld(objects::ObjectStore& store, const objects::Gam
     w.world.set_players(w.cfg.lua_players);
     w.pipeline.set_handler([&w](uint64_t, const cmd::Command& c) {
         w.pp_slice.clear();  // OPT2 t10: an order may change what the host answers
-        const auto player = static_cast<uint8_t>(c.header.player);  // submitted as uint8_t ids: lossless
+        if (c.header.player > 0xFFu) return cmd::RejectReason::InvalidPlayer;  // mcx5: uint8_t sim ids; refuse, never truncate
+        const auto player = static_cast<uint8_t>(c.header.player);
         const cmd::RejectReason r = w.host.execute(player, c.payload);
         ++w.orders;
         if (r != cmd::RejectReason::None) ++w.rejected;

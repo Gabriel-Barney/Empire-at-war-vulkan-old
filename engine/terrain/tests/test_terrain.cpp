@@ -362,6 +362,20 @@ void test_surface_types() {
     CHECK(t.surface_type_at(40.0f, 60.0f) == 4);
     t.header.water_type = WaterType::Ice;
     CHECK(t.surface_type_at(40.0f, 60.0f) == 7);
+    // mcx5 t03 (MCX5_RE_ANSWERS Q2.3): material ids past slot 63 read the extra records (retail's table holds every
+    // record), and the .ted round trip keeps them; an id past the table reads 0.
+    t.header.water_type = WaterType::None;
+    t.extra_materials.resize(3);
+    t.extra_materials[2].surface_type = 9;  // id 66
+    t.material[3 * 32 + 2] = 66;
+    CHECK(t.cell_surface_type(40.0f, 60.0f) == 9);
+    t.material[3 * 32 + 2] = 70;
+    CHECK(t.cell_surface_type(40.0f, 60.0f) == 0 && t.material_record(70) == nullptr);
+    MapData md = make_map(1, 2);
+    md.terrain.extra_materials = t.extra_materials;
+    MapData back;
+    CHECK(parse_ted(write_ted(md), back) && back.terrain.extra_materials.size() == 3 &&
+          back.terrain.extra_materials[2].surface_type == 9);
 }
 
 void test_mesh_blend_rules() {

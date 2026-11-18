@@ -169,8 +169,8 @@ uint32_t Terrain::cell_surface_type(float wx, float wy) const {
         const auto top = static_cast<float>(n - 1);
         return static_cast<int64_t>(f < top ? f : top);
     };
-    const uint8_t m = material_at(index(wx, width), index(wy, height));
-    return m < materials.size() ? materials[m].surface_type : 0u;
+    const TerrainMaterial* r = material_record(material_at(index(wx, width), index(wy, height)));
+    return r ? r->surface_type : 0u;  // past the table: 0 [port] (retail reads past its end, Q2.3 [M])
 }
 bool Terrain::under_water(float wx, float wy) const {
     if (header.water_type == WaterType::None) return false;
@@ -586,10 +586,11 @@ bool parse_terrain(std::span<const uint8_t> node, Terrain& t, Ctx& c) {
             uint32_t slot = 0;
             for (const ChunkView& r : sub) {
                 if (r.id != 3 || r.has_children) continue;
-                if (slot >= kMaterialSlots) break;
                 TerrainMaterial m;
                 if (!decode_terrain_material(r.payload, m)) return c.fail("malformed TEM material record");
-                t.materials[slot++] = std::move(m);
+                if (slot < kMaterialSlots) t.materials[slot] = std::move(m);
+                else t.extra_materials.push_back(std::move(m));  // mcx5 t03: retail keeps every record (Q2.3)
+                ++slot;
             }
             break;
         }

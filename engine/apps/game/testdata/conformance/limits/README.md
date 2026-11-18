@@ -3,8 +3,8 @@
 The limits policy's conformance mods (`docs/MOD_COMPAT_DESIGN.md` §8: no port limit below retail). Both layer on the
 FoC install (`MODPATH=`), so they need `ALAMO_FOC_DATA`. `tools/conformance/limit_mods.py build --out DIR` writes them
 under `DIR/Mods`; `run` also plays the G2 headless runs (space and land skirmish 3000 ticks, galactic Heart of the Maw
-9000 ticks, CRC logs compared on 0 / 4 workers, and across two exes with `--exe2`). ctest:
-`alamo_headless_conformance_limits` (slow).
+9000 ticks, CRC logs compared on 0 / 4 workers, and across two exes with `--exe2`). ctest (slow): one entry per mod, run
+and worker count, `alamo_headless_limits_<mod>_<run>` (workers 0, writes the CRC log) and `..._w4` (compares).
 
 | Mod | Files | Mechanism |
 |---|---|---|

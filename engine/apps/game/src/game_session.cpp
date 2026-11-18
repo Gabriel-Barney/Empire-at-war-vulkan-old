@@ -129,11 +129,12 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
                 if (!p.named) continue;
                 p.credits = static_cast<float>(std::max(0, spec_.start_credits));
                 // mcx5 t03 (MCX5_RE_ANSWERS Q3.1, 0x292590 / setter 0x288980 [H]): the start tech goes through the
-                // setter first, so it is clamped to [0, the player's max before this write] (the campaign's
-                // Max_Tech_Level, else the player ctor's 5); the max is then written unclamped. The 1..5 range is the
-                // dialog's (campaign Min / Max_Custom_Tech_Level, data); no clamp to it here. [port] The faction's
-                // Displayed_Tech_Level_Adjustment shift is not applied (open: mcx4 t19).
-                p.tech_level = std::clamp(spec_.start_tech, 0, std::max(0, p.max_tech_level));
+                // setter first, so it is clamped to [0, the max before this write]: the custom path replaces the default
+                // one, so that is the player ctor's 5, not the campaign's Max_Tech_Level. The max is then written
+                // unclamped. The 1..5 range is the dialog's (campaign Min / Max_Custom_Tech_Level, data); no clamp to it
+                // here. [port] The faction's Displayed_Tech_Level_Adjustment shift is not applied (open: mcx4 t19).
+                constexpr int32_t kPlayerCtorMaxTech = 5;  // limit: retail MCX5_RE_ANSWERS Q3.1 (0x27e04a)
+                p.tech_level = std::clamp(spec_.start_tech, 0, kPlayerCtorMaxTech);
                 p.max_tech_level = spec_.max_tech;
             }
         if (setup_.map.planets.size() == 0) return fail("campaign '" + spec_.campaign + "' has no planets");

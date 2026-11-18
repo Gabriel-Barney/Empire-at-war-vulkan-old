@@ -827,7 +827,7 @@ std::vector<ObjectHandle> SimHost::owned_units(uint8_t player, const std::vector
 }
 
 cmd::RejectReason SimHost::handle(uint64_t tick, const cmd::Command& c) {
-    // mcx5 t01: the wire carries 13-bit ids; the sim's are uint8_t (kMaxPlayers guard), so a larger id is refused here.
+    // mcx5 t01: the wire carries 13-bit ids; the sim's are uint8_t (kMaxPlayers guard, 0..255): a larger id is refused here.
     if (c.header.player >= kMaxPlayers) {
         ++rejected_;
         return cmd::RejectReason::InvalidPlayer;

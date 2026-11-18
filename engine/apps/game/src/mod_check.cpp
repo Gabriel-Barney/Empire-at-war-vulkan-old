@@ -22,6 +22,7 @@
 #include "alamo/objects/field_schema.hpp"
 #include "alamo/objects/tag_ledger.hpp"
 #include "alamo/objects/type_fields.hpp"
+#include "alamo/sim/game_modes.hpp"  // sim::kMaxPlayers (mcx5 limit checks)
 #include "alamo/sim/story_rewards.hpp"
 #include "alamo/game/mod_picker.hpp"  // mod_folders, workshop_content_dir (cu9 t03)
 #include "alamo/vfs/vfs.hpp"
@@ -82,6 +83,10 @@ void count_content(const GameData& d, ModCheckReport& r) {
     r.counts.trade_routes = d.db.trade_routes().size();
     r.counts.object_types = d.types.size();
     r.counts.factions = d.rules.factions.size();
+    // mcx5 t05 (MOD_COMPAT_DESIGN §8): data that reaches a guard. A campaign makes one player per faction (BKC1_RE_ANSWERS
+    // Q2), and the sim's player ids stop at sim::kMaxPlayers (start_galactic refuses more).
+    if (r.counts.factions > sim::kMaxPlayers)
+        r.limits.push_back({"sim::kMaxPlayers (one player per faction)", sim::kMaxPlayers, r.counts.factions});
 #ifdef ALAMO_GAME_HAVE_GALACTIC_AI
     if (d.ai) {
         r.counts.ai = true;
@@ -1387,6 +1392,9 @@ void compat_issues_and_grade(ModCheckReport& r) {
         r.issues.add(IssueKind::BindingUnconsumed, IssueSeverity::Info, b.name, b.first_script, b.effect, false, layer(b.in_mod));
     for (const StoryUse& u : r.story.rewards_missing)
         r.issues.add(IssueKind::RewardMissing, IssueSeverity::Info, u.name, u.first_file, u.note, false, layer(u.in_mod));
+    for (const LimitHit& l : r.limits)  // mcx5 t05: a guard the data reaches (the session refuses it)
+        r.issues.add(IssueKind::LimitHit, IssueSeverity::Error, l.limit, "", "value " + std::to_string(l.value) + ", needed " +
+                     std::to_string(l.needed), false, alamo::kNoLayer);
     for (const TokenGap& t : r.token_coverage.missing)
         r.issues.add(IssueKind::TokenMissing, IssueSeverity::Info, t.token, t.first_file, t.first_equation, false, layer(t.in_mod));
     // mcx6 t08: a main chunk the runaway guard stopped (LuaVmOptions::script_budget; its error says script_runaway).

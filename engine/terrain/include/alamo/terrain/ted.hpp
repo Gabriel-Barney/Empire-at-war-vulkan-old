@@ -243,6 +243,15 @@ struct Terrain {
     std::vector<uint8_t> brightness;        // used only when header.use_vertex_brightness
     bool legacy_vertices = false;           // came from child 1 (brightness forced 0xFF)
     std::array<TerrainMaterial, kMaterialSlots> materials{};
+    // mcx5 t03 (MCX5_RE_ANSWERS Q2.3 [H]): material records past slot 63, in file order. Retail's table grows to hold
+    // every record and its sim reads (surface type, 0x38e0c0) index it by the raw byte; only the renderer stops at 64.
+    // cell_surface_type reads these; the render / mesh paths keep the 64 slots.
+    std::vector<TerrainMaterial> extra_materials;
+    // The material record of id m (slot or extra), null past the table.
+    const TerrainMaterial* material_record(uint32_t m) const {
+        if (m < kMaterialSlots) return &materials[m];
+        return m - kMaterialSlots < extra_materials.size() ? &extra_materials[m - kMaterialSlots] : nullptr;
+    }
     WaterScroll water_scroll[2];            // child 7, child 8
     std::vector<TerrainDecal> decals;       // child 6 (DECORATIONS.md 4.1; only UM11 in vanilla)
     std::vector<TerrainTrack> tracks;       // child 9 (DECORATIONS.md 5.1; 23 FoC maps)
