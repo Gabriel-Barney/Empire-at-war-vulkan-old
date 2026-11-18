@@ -262,6 +262,36 @@ std::string_view first_word(std::string_view s) {
 }
 }  // namespace
 
+namespace {
+std::vector<std::string> list_words(std::string_view s) {
+    std::vector<std::string> out;
+    size_t i = 0;
+    const auto sep = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == ','; };
+    while (i < s.size()) {
+        while (i < s.size() && sep(s[i])) ++i;
+        size_t j = i;
+        while (j < s.size() && !sep(s[j])) ++j;
+        if (j > i) out.emplace_back(s.substr(i, j - i));
+        i = j;
+    }
+    return out;
+}
+}  // namespace
+
+CorruptionChoiceArt CorruptionChoiceArt::from(std::string_view icon, std::string_view name, std::string_view benefit,
+                                              std::string_view requirement_icon) {
+    CorruptionChoiceArt a;
+    a.icon = list_words(icon);
+    a.name = list_words(name);
+    a.benefit = list_words(benefit);
+    a.requirement_icon = list_words(requirement_icon);
+    return a;
+}
+
+std::string_view CorruptionChoiceArt::at(const std::vector<std::string>& list, int32_t type) {
+    return type >= 0 && static_cast<size_t>(type) < list.size() ? std::string_view(list[static_cast<size_t>(type)]) : std::string_view();
+}
+
 WeatherLines planet_weather_lines(std::string_view name_field, std::string_view info_field) {
     return {first_word(name_field), first_word(info_field)};
 }

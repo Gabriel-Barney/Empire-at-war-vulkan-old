@@ -941,6 +941,23 @@ void commander_icon_test() {
     CHECK(s.icon == "i_hero.tga");  // no faction icon: unchanged
 }
 
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "GameConstants.Corruption_Choice_Name family"): Corruption_Choice_Icon_Name,
+// Corruption_Choice_Name, Corruption_Choice_Benefit and Corruption_Mission_Requirement_Icon_Name are lists indexed by
+// corruption type.
+// ledger: verifies GameConstants.Corruption_Choice_Icon_Name
+// ledger: verifies GameConstants.Corruption_Choice_Name
+// ledger: verifies GameConstants.Corruption_Choice_Benefit
+// ledger: verifies GameConstants.Corruption_Mission_Requirement_Icon_Name
+void corruption_choice_art_test() {
+    const game::CorruptionChoiceArt a = game::CorruptionChoiceArt::from(
+        "\r\n\t\ti_button_corruption_assassination_a.tga\r\n\t\ti_button_corruption_piracy_a.tga\r\n",
+        " TEXT_CORRUPTION_ASSASSINATION, TEXT_CORRUPTION_PIRACY ", "TEXT_CORRUPTION_ASSASSINATION_BENEFIT", "");
+    using A = game::CorruptionChoiceArt;
+    CHECK(A::at(a.icon, 1) == "i_button_corruption_piracy_a.tga" && A::at(a.name, 0) == "TEXT_CORRUPTION_ASSASSINATION");
+    CHECK(A::at(a.benefit, 0) == "TEXT_CORRUPTION_ASSASSINATION_BENEFIT" && A::at(a.benefit, 1).empty());
+    CHECK(A::at(a.requirement_icon, 0).empty() && A::at(a.icon, -1).empty() && A::at(a.icon, 2).empty());
+}
+
 void shows_hero_head_test() {
     static_assert(game::shows_hero_head(true, false) && game::shows_hero_head(false, true) && game::shows_hero_head(true, true));
     static_assert(!game::shows_hero_head(false, false));
@@ -3090,6 +3107,7 @@ int main() {
     game_over_art_test();           // mcx4 t14
     planet_weather_lines_test();    // mcx4 t14
     commander_icon_test();          // mcx4 t14
+    corruption_choice_art_test();   // mcx4 t14
     movie_frame_cue_test();         // mcx4 t13
     story_ui_test();
     linked_overlay_test();

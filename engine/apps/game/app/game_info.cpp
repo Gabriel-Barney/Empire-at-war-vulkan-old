@@ -608,12 +608,30 @@ SpecialPanelData special_panel(const galactic::GalacticSim& g, const GameData& d
             break;
         case galactic::kSpecialCorruption: {
             out.title = U"Corruption";
+            // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameConstants.Corruption_Choice_Name family"): per choice the icon, name,
+            // benefit text and mission requirement icon from the GameConstants lists.
+            const data::GameConstants& gc = d.db.constants();
+            const auto gcv = [&gc](std::string_view tag) {
+                const auto v = gc.get(tag);
+                return v ? *v : std::string_view();
+            };
+            const CorruptionChoiceArt art = CorruptionChoiceArt::from(
+                gcv("Corruption_Choice_Icon_Name"),                // ledger: consumes GameConstants.Corruption_Choice_Icon_Name
+                gcv("Corruption_Choice_Name"),                     // ledger: consumes GameConstants.Corruption_Choice_Name
+                gcv("Corruption_Choice_Benefit"),                  // ledger: consumes GameConstants.Corruption_Choice_Benefit
+                gcv("Corruption_Mission_Requirement_Icon_Name"));  // ledger: consumes GameConstants.Corruption_Mission_Requirement_Icon_Name
             for (const galactic::CorruptionChoiceDef& c : g.corruption_choices(planet)) {
                 if (out.corruption.size() >= 3) break;
                 const galactic::CorruptionRequirements r = g.corruption_requirements(player, planet, c);
                 ui::CorruptionOption o;
                 o.corruption_type = c.type;
                 o.title = u32(corruption_name(c.type));
+                if (const std::string_view id = CorruptionChoiceArt::at(art.name, c.type); !id.empty() && text.find(id)) o.title = text_or(text, id);
+                o.icon = std::string(CorruptionChoiceArt::at(art.icon, c.type));
+                if (const std::string_view id = CorruptionChoiceArt::at(art.benefit, c.type); !id.empty() && text.find(id))
+                    o.lines.push_back(text_or(text, id));
+                if (const std::string_view ic = CorruptionChoiceArt::at(art.requirement_icon, c.type); !ic.empty())
+                    o.requirements.emplace_back(ic);
                 o.cost = static_cast<int32_t>(std::lround(c.credit_cost));
                 if (r.mission_need > 0) o.lines.push_back(fraction("Missions ", r.mission_have, r.mission_need));
                 if (r.units_need > 0) o.lines.push_back(fraction("Units ", r.units_have, r.units_need));

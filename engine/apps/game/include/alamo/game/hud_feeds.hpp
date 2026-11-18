@@ -162,6 +162,15 @@ struct WeatherLines {
     std::string_view name, info;
 };
 WeatherLines planet_weather_lines(std::string_view name_field, std::string_view info_field);
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "GameConstants.Corruption_Choice_Name family", choice menu 0x3c6eb0, getters
+// 0x2c7c30 / 0x2c7c50 / 0x2c7bf0 / 0x2c7c70): the GameConstants lists indexed by corruption type (whitespace / comma
+// separated): the choice button icon, the name and benefit text ids and the mission requirement icon.
+struct CorruptionChoiceArt {
+    std::vector<std::string> icon, name, benefit, requirement_icon;
+    static CorruptionChoiceArt from(std::string_view icon, std::string_view name, std::string_view benefit,
+                                    std::string_view requirement_icon);
+    static std::string_view at(const std::vector<std::string>& list, int32_t type);  // "" past the list (as the getters)
+};
 struct GameOverArt {
     std::string_view text_key, image;
 };
