@@ -2628,7 +2628,7 @@
 {"Unit_Ability", "SFXEvent_Target_Ability", 0x1f, LedgerState::Verified, 1, "engine/apps/game/src/game_audio_host_objects.cpp", "docs/re/AUDIO.md", 58, 1},
 {"Unit_Ability", "SFXEvent_GUI_Unit_Ability_Activated", 0x1f, LedgerState::Verified, 1, "engine/apps/game/src/game_audio_host_objects.cpp", "docs/re/AUDIO.md", 100, 1},
 {"Unit_Ability", "SFXEvent_GUI_Unit_Ability_Deactivated", 0x1f, LedgerState::Verified, 1, "engine/apps/game/src/game_audio_host_objects.cpp", "docs/re/MCX4_T13_RE_ANSWERS.md", 36, 1},
-{"Unit_Ability", "SFXEvent_Special_Ability_Loop", 0x1f, LedgerState::Stored, 0, "", "docs/re/AUDIO.md", 12, 1},
+{"Unit_Ability", "SFXEvent_Special_Ability_Loop", 0x1f, LedgerState::Verified, 1, "engine/apps/game/src/game_audio_host.cpp", "docs/re/AUDIO.md", 12, 1},
 {"Unit_Ability", "Friendly_Ability", 0x0, LedgerState::Consumed, 1, "engine/tactical/abilities/src/ability_data.cpp", "docs/re/ABILITIES_HARDPOINTS.md", 5, 1},
 {"Unit_Ability", "Targeting_Fire_Inaccuracy_Fixed_Radius_Override", 0x8, LedgerState::Consumed, 1, "engine/tactical/abilities/src/ability_data.cpp", "docs/re/ABILITIES_HARDPOINTS.md", 4, 1},
 {"Unit_Ability", "Target_Position_Z_Offset", 0x8, LedgerState::Consumed, 1, "engine/tactical/abilities/src/ability_data.cpp", "docs/re/ABILITIES_HARDPOINTS.md", 4, 1},

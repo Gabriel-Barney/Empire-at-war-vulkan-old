@@ -242,6 +242,15 @@ public:
     // second. "" when the type has no record of that ability.
     static std::string_view unit_ability_line(const objects::GameObjectTypes& types, objects::TypeIndex t, uint8_t ability_type,
                                               std::string_view tag);
+    // mcx4 t13 (MCX4_PRES_RE_ANSWERS_2 Q3, record getter 0x397d90): `tag` of the type's own Unit_Ability record of
+    // `ability_type` (not the 0x374b90 #0 / #1 pick); "" when the type has none.
+    static std::string_view ability_record_line(const objects::GameObjectTypes& types, objects::TypeIndex t, uint8_t ability_type,
+                                                std::string_view tag);
+    // Q3: the abilities that run the record's SFXEvent_Special_Ability_Loop in the object's loop slot while active
+    // (TRACTOR_BEAM 30, ENERGY_WEAPON 31, RADIOACTIVE_CONTAMINATE 50, FORCE_SIGHT 52, SUPER_LASER 55, LEECH_SHIELDS 58), and
+    // the ones that also start it on the target (31, 55).
+    static bool special_ability_loop_user(uint8_t ability_type);
+    static bool special_ability_loop_on_target(uint8_t ability_type);
     // The instant target / area abilities whose activation 0x3a3e20 plays the record's SFXEvent_Target_Ability
     // (types 19, 23..26, 28, 35, 36, 42 and SELF_DESTRUCT 39).
     static bool plays_target_ability_line(uint8_t ability_type);
@@ -554,6 +563,11 @@ private:
         bool playing = false;
     };
     std::map<int64_t, TurretTurn> turret_turn_;               // mcx4 t13: unit -> last turret pose (lookup only)
+    struct AbilityLoop {
+        std::string event;
+        uint64_t target = 0;  // the target the loop also runs on (0 none)
+    };
+    std::map<std::pair<int64_t, uint8_t>, AbilityLoop> ability_loop_;  // mcx4 t13: (user, ability) -> running loop (lookup only)
     // mcx4 t13 batch B: the local player's tactical build orders last tick (order id -> type) and built counts (type ->
     // TacticalProduction::built_count), to tell a completed order from a cancelled one.
     std::map<uint32_t, int32_t> prod_orders_;

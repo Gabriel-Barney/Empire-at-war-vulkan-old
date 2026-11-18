@@ -81,6 +81,33 @@ std::string_view GameAudioHost::unit_ability_line(const objects::GameObjectTypes
     return {};
 }
 
+std::string_view GameAudioHost::ability_record_line(const objects::GameObjectTypes& types, objects::TypeIndex t, uint8_t ability_type,
+                                                    std::string_view tag) {
+    if (t >= types.size() || ability_type == 0) return {};
+    const objects::ObjectTypeDatabase& db = types.raw();
+    for (const objects::FieldIndex r : types.get_sub_objects(t, "Unit_Abilities_Data"))
+        if (tactical::abilities::ability_type_from_name(ascii_trim(child_text(db, r, "Type"))) == ability_type)
+            return ascii_trim(child_text(db, r, tag));
+    return {};
+}
+
+bool GameAudioHost::special_ability_loop_user(uint8_t ability_type) {
+    namespace ta = tactical::abilities;
+    switch (ability_type) {
+        case ta::kTractorBeam:
+        case ta::kEnergyWeapon:
+        case ta::kRadioactiveContaminate:
+        case ta::kForceSight:
+        case ta::kSuperLaser:
+        case ta::kLeechShields: return true;
+        default: return false;
+    }
+}
+
+bool GameAudioHost::special_ability_loop_on_target(uint8_t ability_type) {
+    return ability_type == tactical::abilities::kEnergyWeapon || ability_type == tactical::abilities::kSuperLaser;
+}
+
 std::string_view GameAudioHost::special_line(const objects::GameObjectTypes& types, objects::TypeIndex t, std::string_view element,
                                              std::string_view field) {
     if (t >= types.size()) return {};

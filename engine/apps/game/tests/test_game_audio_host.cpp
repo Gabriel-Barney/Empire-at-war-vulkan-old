@@ -862,6 +862,7 @@ void test_object_sfx_t05() {
         <SFXEvent_GUI_Unit_Ability_Activated> Gui_Stealth_On </SFXEvent_GUI_Unit_Ability_Activated></Unit_Ability>
       <Unit_Ability><Type>SPRINT</Type><SFXEvent_GUI_Unit_Ability_Deactivated>Gui_Sprint_Off</SFXEvent_GUI_Unit_Ability_Deactivated>
         <SFXEvent_Target_Ability>Sprint_Target</SFXEvent_Target_Ability></Unit_Ability>
+      <Unit_Ability><Type>ENERGY_WEAPON</Type><SFXEvent_Special_Ability_Loop> Beam_Loop </SFXEvent_Special_Ability_Loop></Unit_Ability>
     </Unit_Abilities_Data>
     <Abilities SubObjectList="Yes">
       <Stealth_Ability Name="Hide"><SFXEvent_Activate> Unit_Stealth_On </SFXEvent_Activate></Stealth_Ability>
@@ -905,6 +906,16 @@ void test_object_sfx_t05() {
     CHECK(H::unit_ability_line(types, hero, ta::kSprint, "SFXEvent_Target_Ability") == "Sprint_Target");
     CHECK(H::unit_ability_line(types, healer, ta::kStealth, "SFXEvent_GUI_Unit_Ability_Activated").empty());
     CHECK(H::plays_target_ability_line(19) && H::plays_target_ability_line(39) && !H::plays_target_ability_line(ta::kStealth));
+    // mcx4 t13 (docs/re/MCX4_PRES_RE_ANSWERS_2.md Q3): SFXEvent_Special_Ability_Loop from the ability's own record (the
+    // third record here; the #0 / #1 pick would read the SPRINT record), on the six loop abilities, on the target for 31 / 55.
+    // ledger: verifies Unit_Ability.SFXEvent_Special_Ability_Loop
+    CHECK(H::ability_record_line(types, hero, ta::kEnergyWeapon, "SFXEvent_Special_Ability_Loop") == "Beam_Loop");
+    CHECK(H::unit_ability_line(types, hero, ta::kEnergyWeapon, "SFXEvent_Special_Ability_Loop").empty());
+    CHECK(H::ability_record_line(types, healer, ta::kEnergyWeapon, "SFXEvent_Special_Ability_Loop").empty());
+    CHECK(H::special_ability_loop_user(ta::kTractorBeam) && H::special_ability_loop_user(ta::kLeechShields) &&
+          H::special_ability_loop_user(ta::kForceSight) && !H::special_ability_loop_user(ta::kStealth));
+    CHECK(H::special_ability_loop_on_target(ta::kEnergyWeapon) && H::special_ability_loop_on_target(ta::kSuperLaser) &&
+          !H::special_ability_loop_on_target(ta::kTractorBeam));
     // "Laser_Defense_Ability.Zap_SFXEvent" / "Tactical_Bribe_Ability.SFXEvent_Success family": the ability element's field.
     CHECK(H::special_line(types, hero, "Laser_Defense_Ability", "Zap_SFXEvent") == "Laser_Zap");
     CHECK(H::special_line(types, hero, "Tactical_Bribe_Ability", "SFXEvent_Success") == "Bribe_Yes");

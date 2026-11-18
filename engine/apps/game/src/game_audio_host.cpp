@@ -12,6 +12,7 @@
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/type_fields.hpp"  // c_atof
 #include "alamo/sim/tactical_battle.hpp"
+#include "alamo/tactical/abilities/ability_system.hpp"
 #include "alamo/tactical/hangar/contents.hpp"
 #ifdef ALAMO_GAME_HAVE_AUDIO
 #include "alamo/audio/audio_db.hpp"
@@ -681,6 +682,46 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
         if (loop.empty()) continue;
         if (turning) game_->object_sfx(static_cast<uint64_t>(id), loop, store.position(h));
         else game_->stop_object_sfx(static_cast<uint64_t>(id), loop);
+    }
+    // Ability loops (MCX4_PRES_RE_ANSWERS_2 Q3): while one of the six loop abilities is active, the record's
+    // SFXEvent_Special_Ability_Loop runs attached to the user (and to its target for ENERGY_WEAPON / SUPER_LASER, the
+    // target the special holds when the loop starts); stopped when the ability ends or the user is gone. Any owner.
+    // [port] the event's Play_Count < 0 gate is not checked (every shipped loop event has -1).
+    {
+        namespace ta = tactical::abilities;
+        static constexpr uint8_t kLoopKinds[] = {ta::kTractorBeam, ta::kEnergyWeapon, ta::kRadioactiveContaminate,
+                                                 ta::kForceSight, ta::kSuperLaser, ta::kLeechShields};
+        const ta::AbilitySystem& abs = battle.abilities();
+        for (auto it = ability_loop_.begin(); it != ability_loop_.end();) {  // ends first
+            const auto id = static_cast<objects::ObjectId>(it->first.first);
+            if (store.alive(store.find(id)) && abs.is_active(id, it->first.second)) {
+                ++it;
+                continue;
+            }
+            game_->stop_object_sfx(static_cast<uint64_t>(id), it->second.event);
+            if (it->second.target != 0) game_->stop_object_sfx(it->second.target, it->second.event);
+            it = ability_loop_.erase(it);
+        }
+        for (const objects::ObjectId id : battle.movement().unit_ids())
+            for (const uint8_t k : kLoopKinds) {
+                if (!abs.is_active(id, k) || ability_loop_.count({static_cast<int64_t>(id), k})) continue;
+                const objects::ObjectHandle h = store.find(id);
+                if (!store.alive(h)) continue;
+                // ledger: consumes Unit_Ability.SFXEvent_Special_Ability_Loop
+                const std::string_view ev = ability_record_line(types, store.type(h), k, "SFXEvent_Special_Ability_Loop");
+                if (ev.empty() || !special_ability_loop_user(k)) continue;
+                AbilityLoop& l = ability_loop_[{static_cast<int64_t>(id), k}];
+                l.event = std::string(ev);
+                game_->object_sfx(static_cast<uint64_t>(id), ev, store.position(h));
+                if (!special_ability_loop_on_target(k)) continue;
+                const ta::UnitAbilityRecord* rec = abs.record(id, k);
+                const ta::ObjectId tg = rec ? abs.special_target(id, rec->gui_name_crc) : ta::kNoObject;
+                if (tg == ta::kNoObject) continue;
+                const objects::ObjectHandle th = store.find(static_cast<objects::ObjectId>(tg));
+                if (!store.alive(th)) continue;
+                l.target = static_cast<uint64_t>(tg);
+                game_->object_sfx(l.target, ev, store.position(th));
+            }
     }
     // Summoned / contamination / buzz-droid objects (MCX4_T13_RE_ANSWERS "Tractor_Beam_Attack_Ability.SFXEvent_Unit_Summoned"
     // family): the user's ability element line, attached to the new object (2D when the event is Is_2D). Any owner except
@@ -1600,6 +1641,7 @@ void GameAudioHost::battle_reset() {
     tsw_approach_.clear();       // mcx4 t13 batch S
     point_progress_.clear();     // mcx4 t13 batch U
     turret_turn_.clear();        // mcx4 t13
+    ability_loop_.clear();       // mcx4 t13 (the battle's objects and their sounds go with it)
     prod_built_.clear();
     intro_decided_ = false;   // aud1 t07: a new battle decides its intro again
     object_events_reset();    // aud1 t05
