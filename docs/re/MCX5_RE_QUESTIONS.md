@@ -7,6 +7,11 @@ the base-level maxima (`MCX4_RE_QUESTIONS.md` Q2.1: build / upgrade / HUD caps);
 
 ## Q1. GameConstants maxima in the galactic AI (t02)
 
+**Settled without Ghidra (2026-11-18, applied in t02):** Q1.1, Q1.3 and Q1.4 are answered by `AI_GALACTIC_TOKENS.md`
+(§2 neighbour lists, the §4 target-token table, the §5 player-token table, all [H]) and `MCX4_RE_ANSWERS_GALACTIC.md`
+Q2.1 (every RIP-relative read of GC +0xF0..+0x10F; +0xF0 0x3f8483 is inside potential income 0x3f83b0): each divisor is
+the live GC field, and only MaxStructureSlots fails on 0. Still open: Q1.2, Q1.5-Q1.9.
+
 GC field offsets (AI_GALACTIC_TOKENS.md, field_schema_table): +0xF0 `MaximumPoliticalControl`, +0xF4
 `MaximumStarbaseLevel`, +0xF8 `MaximumGroundbaseLevel`, +0xFC `MaximumSpecialStructures`, +0x108
 `MaximumFleetMovementDistance` (all 5 / 5 / 5 / 5 / 100.0 in stock FoC).
@@ -30,6 +35,8 @@ GC field offsets (AI_GALACTIC_TOKENS.md, field_schema_table): +0xF0 `MaximumPoli
 7. Lua `WaitForStarbase` / `WaitForGroundbase`: the "Must be between %d and %d" bounds - literals or the GC maxima?
 8. MagicPlan spawnable test (`tech_level > 5`, AI_GALACTIC_3 §4.1) and the galactic AI tech cap: literal 5 or a
    faction / GC value?
+9. The GameConstants defaults (0x2c91c0, used when a mod's GameConstants.xml has no tag): which values does it write
+   for +0xF0, +0xF4, +0xF8 and +0x108? (+0xFC is 1, MCX4_RE_ANSWERS_GALACTIC Q2.1.)
 
 ## Q2. Terrain grid limit (t03)
 

@@ -364,6 +364,30 @@ void test_ground_structure_slots() {
         CHECK(token(pw, "Variable_Target.MaxStructureSlotsUnnormalized") == 3.0);
         CHECK(token(pw, "Variable_Target.OpenStructureSlotsUnnormalized") == 2.0);
         CHECK(token(pw, "Variable_Target.MaxGroundbaseLevelUnnormalized") == 3.0);
+        CHECK(token(pw, "Variable_Target.MaxStructureSlots") == 3.0 / 5.0);
+    }
+    {
+        // mcx5 t02 (AI_GALACTIC_TOKENS §4 [H]): the normalisers are the GameConstants maxima, not a port 5 (levels_10).
+        ParityWorld pw(false, only, map_ground(0), [](gal::GalacticRules& r) {
+            r.types[tPlanet].ground_structure_slots = 3;
+            r.constants.max_special_structures = 10;
+            r.constants.max_starbase_level = 10;
+            r.constants.max_groundbase_level = 4;
+        });
+        solve(pw, ok);
+        CHECK(token(pw, "Variable_Target.MaxStructureSlots") == 3.0 / 10.0);
+        CHECK(token(pw, "Variable_Target.StarbaseLevel") == token(pw, "Variable_Target.StarbaseLevelUnnormalized") / 10.0);
+        CHECK(token(pw, "Variable_Target.MaxGroundbaseLevel") == 3.0 / 4.0);
+        // MaxStructureSlots fails with MaximumSpecialStructures 0 (0x65e540); the unnormalised form does not.
+        ParityWorld zero(false, only, map_ground(0), [](gal::GalacticRules& r) { r.constants.max_special_structures = 0; });
+        solve(zero, ok);
+        EquationSet e;
+        e.add("T", "Variable_Target.MaxStructureSlots");
+        e.link();
+        EvalContext c;
+        c.self = 0;
+        c.target = 0;
+        CHECK(!evaluate(e, e.find("T"), c, zero.world->resolver()).ok);
     }
     {
         // 1 slot, already used by the Barracks: vetoed although <Max_Ground_Base> is 5.
@@ -1279,7 +1303,8 @@ void test_force_maintenance_tokens() {
         const gal::PlanetState& p = sim.planets()[i];
         float s = gal::econ::income_base(p.base_value, p.black_market);
         if (p.owner != sim.neutral_player())
-            s += gal::econ::income_political(p.base_value, 5.0f, sim.rules().constants.political_income_curve);
+            s += gal::econ::income_political(p.base_value, static_cast<float>(sim.rules().constants.max_political_control),
+                                             sim.rules().constants.political_income_curve);  // GC+0xF0 (mcx5 t02)
         float gain = 0.0f;
         if (p.owner >= 0)
             for (const uint32_t rt : p.links) gain += std::max(0.0f, sim.map().routes.credit_gain_factor[rt]);

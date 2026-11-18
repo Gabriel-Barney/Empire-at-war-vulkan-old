@@ -3059,6 +3059,8 @@ void test_foc_campaign() {
     CHECK(d.rules.constants.fiscal_cycle_seconds == 45.0f && d.rules.constants.credit_cap_per_planet == 40000.0f);
     CHECK(d.rules.constants.corruption_income_pct[3] == 4.5f && d.rules.constants.corruption_hyperspace_bonus == 1.5f);
     CHECK(d.rules.constants.political_income_curve.eval(0.5f) == 0.5f);
+    CHECK(d.rules.constants.max_political_control == 5 && d.rules.constants.max_starbase_level == 5 &&
+          d.rules.constants.max_groundbase_level == 5 && d.rules.constants.max_special_structures == 5);  // mcx5 t02
     const uint32_t uw = d.rules.find_faction("Underworld");
     CHECK(uw != kNoIndex && d.rules.factions[uw].benefits_from_corruption && d.rules.factions[uw].hyperspace_speed_factor == 0.07f);
     const uint32_t emp = d.rules.find_faction("Empire");
