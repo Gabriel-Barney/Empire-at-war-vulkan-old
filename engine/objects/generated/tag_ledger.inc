@@ -2097,7 +2097,7 @@
 {"Faction", "SFXEvent_HUD_Reinforcement_Point_Enemy_Owned_30_Seconds", 0x1f, LedgerState::Consumed, 1, "engine/apps/game/src/game_audio_host.cpp", "", 3, 1},
 {"Faction", "SFXEvent_HUD_Reinforcement_Point_Enemy_Owned_15_Seconds", 0x1f, LedgerState::Consumed, 1, "engine/apps/game/src/game_audio_host.cpp", "", 3, 1},
 {"Faction", "SFXEvent_HUD_Reinforcement_Point_Enemy_Owned_05_Seconds", 0x1f, LedgerState::Consumed, 1, "engine/apps/game/src/game_audio_host.cpp", "", 3, 1},
-{"Faction", "SFXEvent_HUD_Reinforcement_Point_Contested", 0x1f, LedgerState::Unread, 0, "", "docs/re/L1_S4_REMAINING.md", 3, 1},
+{"Faction", "SFXEvent_HUD_Reinforcement_Point_Contested", 0x1f, LedgerState::Verified, 1, "engine/apps/game/src/game_audio_host.cpp", "docs/re/L1_S4_REMAINING.md", 3, 1},
 {"Faction", "SFXEvent_Tactical_Object_Building_Started", 0x1f, LedgerState::Verified, 1, "engine/apps/game/src/game_audio_host.cpp", "docs/re/MCX4_T13_RE_ANSWERS.md", 3, 1},
 {"Faction", "SFXEvent_Tactical_Object_Building_Loop", 0x1f, LedgerState::Verified, 1, "engine/apps/game/src/game_audio_host.cpp", "docs/re/MCX4_T13_RE_ANSWERS.md", 3, 1},
 {"Faction", "SFXEvent_Tactical_Object_Building_Complete", 0x1f, LedgerState::Verified, 1, "engine/apps/game/src/game_audio_host.cpp", "docs/re/MCX4_T13_RE_ANSWERS.md", 3, 1},

@@ -1131,6 +1131,24 @@ void GameAudioHost::cue_lines(const sim::TacticalBattle& battle, const objects::
         faction_sfx(base_shield_line(now == 1, o == local_player || !cs.is_enemy(local_player, o)));
         ++stats_.base_shield_lines;
     }
+    // Reinforcement point contested (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Reinforcement_Point_Contested"): local
+    // faction, 2D, once per capture attempt (progress restarting from 0).
+    if (const tactical::garrison::CapturePointSystem* cps = battle.captures()) {
+        static const objects::BehaviorTypeId kPoint = objects::behavior_type_id("REINFORCEMENT_POINT");
+        for (size_t i = 0; i < cps->point_count(); ++i) {
+            const auto pid = cps->point_at(i);
+            const float prog = cps->progress(pid);
+            float& prev = point_progress_[static_cast<int64_t>(pid)];
+            const float was = prev;
+            prev = prog;
+            const objects::ObjectHandle h = store.find(static_cast<objects::ObjectId>(pid));
+            const bool rp = store.alive(h) && kPoint != objects::kNoBehavior && store.has_behavior(h, kPoint);
+            if (point_contested(rp, cps->owner(pid), local_player, was, prog, cps->pending(pid))) {
+                faction_sfx("SFXEvent_HUD_Reinforcement_Point_Contested");  // ledger: consumes Faction.SFXEvent_HUD_Reinforcement_Point_Contested
+                ++stats_.control_lines;
+            }
+        }
+    }
     // Base shield absorb (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Base_Shield_Online family", 0x56ba20): a hit the dome
     // absorbed plays the shield owner's faction line, 3D at the hit ([port] the source's position when it still exists,
     // else the generator's). Any owner.
@@ -1547,6 +1565,7 @@ void GameAudioHost::battle_reset() {
     spun_.clear();               // mcx4 t13 batch Q
     self_destructs_.clear();
     tsw_approach_.clear();       // mcx4 t13 batch S
+    point_progress_.clear();     // mcx4 t13 batch U
     prod_built_.clear();
     intro_decided_ = false;   // aud1 t07: a new battle decides its intro again
     object_events_reset();    // aud1 t05

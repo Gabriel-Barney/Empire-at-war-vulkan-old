@@ -90,6 +90,12 @@ std::string_view GameAudioHost::special_line(const objects::GameObjectTypes& typ
     return {};
 }
 
+bool GameAudioHost::point_contested(bool reinforcement_point, int32_t owner, int32_t local, float prev_progress, float progress,
+                                    int32_t pending) {
+    return reinforcement_point && local >= 0 && owner == local && !(prev_progress > 0.0f) && progress > 0.0f && pending >= 0 &&
+           pending != owner;
+}
+
 bool GameAudioHost::plays_target_ability_line(uint8_t a) {
     return a == 19 || (a >= 23 && a <= 26) || a == 28 || a == 35 || a == 36 || a == 42 || a == 39;
 }

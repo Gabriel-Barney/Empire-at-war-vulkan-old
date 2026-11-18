@@ -257,6 +257,11 @@ public:
     // The faction toggle list tag for a SetUnitAbilityMode toggle (0x430270): on / off, the local player hostile to the
     // issuer -> the _Enemy_ variant.
     static std::string_view toggle_line_tag(bool on, bool local_hostile);
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Reinforcement_Point_Contested", 0x501980): a local player's
+    // REINFORCEMENT_POINT whose capture progress starts from 0 with a pending controller other than its owner (an owned
+    // point is first neutralised) is being contested. [M] "pending != owner" stands for "pending = the neutral player".
+    static bool point_contested(bool reinforcement_point, int32_t owner, int32_t local, float prev_progress, float progress,
+                                int32_t pending);
     // The HUD ability button click (0x307190, local player): the first user's record line, _Activated for an activate
     // click (a targeted ability: at targeting start), _Deactivated for a deactivate click. 2D.
     void ability_button_line(const objects::GameObjectTypes& types, objects::TypeIndex t, uint8_t ability_type, bool activate);
@@ -521,6 +526,7 @@ private:
         bool arming = false, in_range = false;
     };
     std::map<int64_t, TswApproach> tsw_approach_;             // mcx4 t13 batch S: TSW -> approach state (lookup only)
+    std::map<int64_t, float> point_progress_;                 // mcx4 t13 batch U: capture point -> last progress
     // mcx4 t13 batch B: the local player's tactical build orders last tick (order id -> type) and built counts (type ->
     // TacticalProduction::built_count), to tell a completed order from a cancelled one.
     std::map<uint32_t, int32_t> prod_orders_;

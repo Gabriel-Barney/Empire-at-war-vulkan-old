@@ -395,6 +395,18 @@ void test_strike_available_tags() {
 // ledger: verifies Faction.SpeechEvent_Super_Weapon_Enemy_Moving_Range_05_Seconds
 // ledger: verifies Faction.SpeechEvent_Super_Weapon_Moved_Into_Range
 // ledger: verifies Faction.SpeechEvent_Super_Weapon_Enemy_Moved_Into_Range
+// mcx4 t13 batch U (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_HUD_Reinforcement_Point_Contested"): the local
+// player's reinforcement point starting to be neutralised.
+// ledger: verifies Faction.SFXEvent_HUD_Reinforcement_Point_Contested
+void test_point_contested() {
+    using H = GameAudioHost;
+    CHECK(H::point_contested(true, 0, 0, 0.0f, 0.1f, 2));    // own point, progress starts, pending neutral
+    CHECK(!H::point_contested(false, 0, 0, 0.0f, 0.1f, 2));  // not a REINFORCEMENT_POINT
+    CHECK(!H::point_contested(true, 1, 0, 0.0f, 0.1f, 2));   // not the local player's
+    CHECK(!H::point_contested(true, 0, 0, 0.2f, 0.3f, 2));   // already running: once per attempt
+    CHECK(!H::point_contested(true, 0, 0, 0.0f, 0.1f, -1) && !H::point_contested(true, 0, 0, 0.0f, 0.1f, 0));
+}
+
 void test_tsw_approach() {
     using H = GameAudioHost;
     CHECK(H::tsw_threshold_crossed(61.0f, 59.0f) == 60 && H::tsw_threshold_crossed(31.0f, 29.5f) == 30);
@@ -1136,6 +1148,7 @@ int main() {
     test_land_damage_stage();           // mcx4 t13 batch O
     test_pad_lines();                   // mcx4 t13 batch P
     test_tsw_approach();                // mcx4 t13 batch S
+    test_point_contested();             // mcx4 t13 batch U
     test_intro_speech_t07();
     test_aud2();
     test_spin_and_self_destruct();  // mcx4 t13 batch Q
