@@ -438,7 +438,7 @@
 {"GameObjectType", "SFXEvent_Beacon_Placed", 0x1f, LedgerState::Stored, 0, "", "docs/re/MCX4_T13_RE_ANSWERS.md", 1, 1},
 {"GameObjectType", "SFXEvent_Move_Into_Asteroid_Field", 0x1f, LedgerState::Verified, 1, "engine/apps/game/src/game_audio_host.cpp", "docs/re/MCX4_T13_RE_ANSWERS.md", 32, 1},
 {"GameObjectType", "SFXEvent_Move_Into_Nebula", 0x1f, LedgerState::Verified, 1, "engine/apps/game/src/game_audio_host.cpp", "docs/re/MCX4_T13_RE_ANSWERS.md", 49, 1},
-{"GameObjectType", "SFXEvent_Damaged_By_Asteroid", 0x1f, LedgerState::Stored, 0, "", "docs/re/L1_S4_REMAINING.md", 17, 1},
+{"GameObjectType", "SFXEvent_Damaged_By_Asteroid", 0x1f, LedgerState::Consumed, 1, "engine/apps/game/src/game_audio_host.cpp", "docs/re/L1_S4_REMAINING.md", 17, 1},
 {"GameObjectType", "SFXEvent_Debug_Test_Loop", 0x1f, LedgerState::OutOfScope, 0, "", "docs/DECISIONS.md \"Out-of-scope tag-ledger rows\": debug keys", 1, 1},
 {"GameObjectType", "SFXEvent_Ambient_Loop", 0x1f, LedgerState::Consumed, 2, "engine/apps/game/src/game_audio_host.cpp", "docs/re/STATION_HANGARS_SOUND.md", 90, 1},
 {"GameObjectType", "SFXEvent_Engine_Idle_Loop", 0x1f, LedgerState::Consumed, 2, "engine/apps/game/src/game_audio_host.cpp", "docs/re/STATION_HANGARS_SOUND.md", 84, 1},

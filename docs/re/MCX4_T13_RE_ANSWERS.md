@@ -855,3 +855,8 @@ The registration list 0x515ee0 gives each descriptor table's start and size, whi
   Death Star II fire abilities, which use the shipped loop values. If no read exists, the row becomes retail-unused.
 - Optional checks of [M] points: the meaning of the destroy-reason values −1 / 6 in 0x386660; the land retreat cancel
   argument in 0x534f40; refusal codes 3 / 4 in 0x340920; the corruption hologram flag +0x2e4 in 0x28bf10.
+- `Faction.Music_Event_Tactical_Win family`, for the port's change to modes 9 / 10 (mcx4-pres, 2026-11-18): in
+  0x28f250(GMM, winner, loser) on a loss, which faction keys the winner's `Music_Event_Tactical_Lose_Vs_Faction`
+  lookup, the winner's own or the loser's? (Shipped Rebel / Empire records carry self-keyed rows, e.g. Rebel
+  `Rebel, Lose_To_Rebel_Event`.) Also confirm that the battle-end dialog call (0x88fe0) is skipped once the declare has
+  set mode 9 / 10, and that the summary-screen music (mode 16) is not played after a tactical battle.

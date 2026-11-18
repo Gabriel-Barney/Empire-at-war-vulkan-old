@@ -765,6 +765,15 @@ void GameAudioHost::cue_lines(const sim::TacticalBattle& battle, const objects::
             }
         }
     }
+    // Asteroid damage (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Damaged_By_Asteroid", 0x436920): every hit, any owner,
+    // the damaged object's type line attached to it (3D at its position).
+    for (const objects::ObjectId id : battle.asteroid_hits()) {
+        const objects::TypeIndex t = type_of(static_cast<int64_t>(id));
+        if (t == objects::kNone) continue;
+        // ledger: consumes GameObjectType.SFXEvent_Damaged_By_Asteroid
+        const std::string_view ev = types.get_string(t, "SFXEvent_Damaged_By_Asteroid");
+        if (!ev.empty() && game_->impact(ev, position_of(static_cast<uint64_t>(id)))) ++stats_.hits;
+    }
     // Special weapons (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Special_Weapon_Ready family"): ready 0x492010 (only while
     // SpecialWeaponsAllowed holds for the owner; an own / friendly weapon's type SFXEvent_Special_Weapon_Ready replaces
     // the faction line) and firing 0x491cd0; the local faction's list entry [Special_Weapon_Target_Action_Index]; 2D.
