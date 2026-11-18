@@ -1338,6 +1338,8 @@ cmd::RejectReason TacticalBattle::handle_ability(TacticalMode& mode, uint8_t pla
             ++stats_.ability_commands;
             const uint32_t n = abilities_->set_unit_ability_mode(ids, static_cast<uint8_t>(ev.u("ability")), ev.u("on") != 0, frame_,
                                                                  object_of(ev.u("object")));
+            if (n > 0 && ev.u("play_response") != 0)  // mcx4 t13: presentation feed (the toggle lines)
+                ability_toggles_.push_back({static_cast<int32_t>(player), static_cast<uint8_t>(ev.u("ability")), ev.u("on") != 0});
             return n > 0 ? R::None : R::AbilityNotReady;
         }
         case T::TacticalSpecialAbility: {  // 40

@@ -576,6 +576,7 @@ struct LandRun {
     bool fought = false, weather_on = false, weather_advanced = false, forced = false, rain_sight = false;
     bool bombard_started = false, bombard_hit = false, bombard_reset = false;
     bool run_started = false, bombers_flew = false, run_done = false, refused_unavailable = false;
+    bool bombard_fed = false, run_fed = false;  // mcx4 t13: the strike_starts presentation feed
     // cu9 t17: the HUD cooldown query (bombing_run_frames_until_available, 0x4950f0) when the run starts / ends.
     uint32_t run_wait_at_start = 1, run_wait_after = 0;
     // cu9g t02: the dial fraction (bombing_run_cooldown_fraction, 0x495250) and command 28 outcomes.
@@ -681,6 +682,8 @@ LandRun run_land(const Data& d, int32_t workers, bool via_command = false) {
         if (!out.bombard_started && b->bombardment_available(1)) {
             hp0 = b->combat().health(victim);
             out.bombard_started = b->start_bombardment(*tm, 1, target, host.random().synced());
+            out.bombard_fed = out.bombard_started && !b->strike_starts().empty() && b->strike_starts().back().bombard &&
+                              b->strike_starts().back().player == 1;
         }
         if (out.bombard_started && !out.bombard_hit && b->combat().has_unit(victim) && b->combat().health(victim) < hp0) out.bombard_hit = true;
         if (out.bombard_hit && !out.bombard_reset && !b->bombardment_available(1) && bombard_end_ready == 0) bombard_end_ready = f;
@@ -700,6 +703,8 @@ LandRun run_land(const Data& d, int32_t workers, bool via_command = false) {
                 out.run_started = b->start_bombing_run(*tm, 1, wire);
             }
             out.dial_at_start = b->bombing_run_cooldown_fraction(1);
+            out.run_fed = out.run_started && !b->strike_starts().empty() && !b->strike_starts().back().bombard &&
+                          b->strike_starts().back().first_bomber != objects::kNoObjectId;
         }
         if (out.run_started && !out.run_done) {
             const float dial = b->bombing_run_cooldown_fraction(1);
@@ -791,6 +796,7 @@ void test_land(const Data& d) {
     CHECK(a.fought && a.weather_on && a.weather_advanced && a.forced && a.rain_sight);
     CHECK(a.refused_unavailable && a.bombard_started && a.bombard_hit && a.bombard_reset);
     CHECK(a.run_started && a.bombers_flew && a.run_done);
+    CHECK(a.bombard_fed && a.run_fed);  // mcx4 t13: strike_starts names the bombardment and the run's first bomber
     // Available = no wait; a finished run waits its interval again (ready := end frame + interval).
     std::printf("  bombing run wait: %u at start, %u after the run\n", a.run_wait_at_start, a.run_wait_after);
     CHECK(a.run_wait_at_start == 0 && a.run_wait_after > 0);

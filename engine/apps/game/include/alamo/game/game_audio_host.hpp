@@ -88,6 +88,7 @@ struct GameAudioStats {
     uint64_t sighting_lines = 0;                                                   // mcx4 t13 batch N
     uint64_t land_damage_sfx = 0;                                                  // mcx4 t13 batch O
     uint64_t pad_lines = 0;                                                        // mcx4 t13 batch P
+    uint64_t ability_lines = 0;                                                    // mcx4 t13 batch R
 };
 
 class GameAudioHost {
@@ -236,6 +237,20 @@ public:
     // <Abilities> entry of that Name gives the tags. [port] No Unit_Ability of that Type (auto-style specials): the type's
     // only <Abilities> entry, if it has exactly one. Data-free tests drive it through objects::GameObjectTypes.
     static AbilitySfx ability_sfx(const objects::GameObjectTypes& types, objects::TypeIndex t, uint8_t ability_type);
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "Unit_Ability.SFXEvent_GUI_Unit_Ability_Activated family", 0x374b90): `tag` of the
+    // type's Unit_Ability record for `ability_type`: the first record when the ability is the type's ability #0, else the
+    // second. "" when the type has no record of that ability.
+    static std::string_view unit_ability_line(const objects::GameObjectTypes& types, objects::TypeIndex t, uint8_t ability_type,
+                                              std::string_view tag);
+    // The instant target / area abilities whose activation 0x3a3e20 plays the record's SFXEvent_Target_Ability
+    // (types 19, 23..26, 28, 35, 36, 42 and SELF_DESTRUCT 39).
+    static bool plays_target_ability_line(uint8_t ability_type);
+    // The faction toggle list tag for a SetUnitAbilityMode toggle (0x430270): on / off, the local player hostile to the
+    // issuer -> the _Enemy_ variant.
+    static std::string_view toggle_line_tag(bool on, bool local_hostile);
+    // The HUD ability button click (0x307190, local player): the first user's record line, _Activated for an activate
+    // click (a targeted ability: at targeting start), _Deactivated for a deactivate click. 2D.
+    void ability_button_line(const objects::GameObjectTypes& types, objects::TypeIndex t, uint8_t ability_type, bool activate);
     // Departure tag pick: the type's SFXEvent_Retreat_Engines_Jump when set, else the faction's SFXEvent_Exit_Into_Hyperspace.
     static std::string_view departure_sfx(std::string_view type_retreat_jump, std::string_view faction_exit);
     // Shield transition: 1 = went down (up -> 0 points), 2 = back up (down -> > 0), 0 = none. `was_up` < 0 = first sight.

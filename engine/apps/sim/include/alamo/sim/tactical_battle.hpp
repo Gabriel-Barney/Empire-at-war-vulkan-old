@@ -615,6 +615,26 @@ public:
     // mcx4 t13 (presentation feed; MCX4_T13_RE_ANSWERS "Faction.Reinforcements_Selection_SFXEvent family", Player::Update
     // 0x287e70): players whose skirmish start-force re-delivery timer expired this tick, slot order.
     std::span<const int32_t> garrison_redelivered() const { return sk_redelivered_; }
+    // mcx4 t13 (presentation feed; MCX4_T13_RE_ANSWERS "Faction.SFXEvent_GUI_Toggle_Non_Hero_Ability_On family",
+    // SetUnitAbilityModeEvent 0x430270): a SetUnitAbilityMode with its sound flag that toggled at least one unit, in this
+    // tick or in the command phase before it, in event order.
+    struct AbilityToggleEvent {
+        int32_t player = -1;
+        uint8_t ability = 0;
+        bool on = false;
+    };
+    std::span<const AbilityToggleEvent> ability_toggles() const { return ability_toggles_; }
+    // mcx4 t13 (presentation feed; MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Bombard_Available family" and
+    // "GameObjectType.SFXEvent_Bombard_Incoming family"): land strikes started in this tick or in the command phase
+    // before it. A bombing run names its first bomber (0x492d60); a bombardment names the first of the faction's
+    // Bombardment_Required_Orbital_Ships types that resolves [M: retail reads the bombarding ship].
+    struct StrikeEvent {
+        int32_t player = -1;
+        bool bombard = false;
+        objects::ObjectId first_bomber = objects::kNoObjectId;
+        objects::TypeIndex ship_type = objects::kNone;
+    };
+    std::span<const StrikeEvent> strike_starts() const { return strike_starts_; }
     // Garrison API for the Lua bindings (Can_Garrison / Garrison / Leave_Garrison / Eject_Garrison / Can_Garrison_Fire /
     // Is_In_Garrison / Get_Garrisoned_Units). Orders: `player` = the units' owner (script orders pass the unit's owner);
     // units must be live battle units of that player. can_garrison = the Lua Can_Garrison rule (L1_S4_REMAINING.md §2.5:
@@ -2272,6 +2292,10 @@ private:
     std::vector<StoryGarrisonEvent> story_garrisoned_;
     std::vector<StoryCaptureEvent> story_captured_;
     std::vector<StoryGarrisonEvent> story_vacated_;  // mcx4 t13: presentation only (not saved / hashed)
+    std::vector<AbilityToggleEvent> ability_toggles_;  // mcx4 t13: presentation only (not saved / hashed)
+    std::vector<StrikeEvent> strike_starts_;           // mcx4 t13: presentation only (not saved / hashed)
+    size_t strike_starts_mark_ = 0;
+    size_t ability_toggles_mark_ = 0;
     size_t story_vacated_mark_ = 0;                  // entries the last tick reported
     std::vector<PadEvent> pad_events_;               // mcx4 t13: presentation only (not saved / hashed)
     size_t pad_events_mark_ = 0;

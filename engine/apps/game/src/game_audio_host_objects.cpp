@@ -68,6 +68,32 @@ GameAudioHost::AbilitySfx GameAudioHost::ability_sfx(const objects::GameObjectTy
     return out;
 }
 
+std::string_view GameAudioHost::unit_ability_line(const objects::GameObjectTypes& types, objects::TypeIndex t, uint8_t ability_type,
+                                                  std::string_view tag) {
+    if (t >= types.size() || ability_type == 0) return {};
+    const objects::ObjectTypeDatabase& db = types.raw();
+    const std::span<const objects::FieldIndex> recs = types.get_sub_objects(t, "Unit_Abilities_Data");
+    for (size_t i = 0; i < recs.size(); ++i) {
+        if (tactical::abilities::ability_type_from_name(ascii_trim(child_text(db, recs[i], "Type"))) != ability_type) continue;
+        const size_t pick = i == 0 ? 0 : 1;  // 0x374b90(type, 0 or 1): ability #0 -> record 0, any other -> record 1
+        return pick < recs.size() ? ascii_trim(child_text(db, recs[pick], tag)) : std::string_view();
+    }
+    return {};
+}
+
+bool GameAudioHost::plays_target_ability_line(uint8_t a) {
+    return a == 19 || (a >= 23 && a <= 26) || a == 28 || a == 35 || a == 36 || a == 42 || a == 39;
+}
+
+std::string_view GameAudioHost::toggle_line_tag(bool on, bool local_hostile) {
+    // ledger: consumes Faction.SFXEvent_GUI_Toggle_Non_Hero_Ability_On
+    // ledger: consumes Faction.SFXEvent_GUI_Toggle_Non_Hero_Ability_Off
+    if (on) return local_hostile ? "SFXEvent_GUI_Enemy_Toggle_Non_Hero_Ability_On" : "SFXEvent_GUI_Toggle_Non_Hero_Ability_On";
+    // ledger: consumes Faction.SFXEvent_GUI_Enemy_Toggle_Non_Hero_Ability_On
+    // ledger: consumes Faction.SFXEvent_GUI_Enemy_Toggle_Non_Hero_Ability_Off
+    return local_hostile ? "SFXEvent_GUI_Enemy_Toggle_Non_Hero_Ability_Off" : "SFXEvent_GUI_Toggle_Non_Hero_Ability_Off";
+}
+
 std::string_view GameAudioHost::departure_sfx(std::string_view type_retreat_jump, std::string_view faction_exit) {
     return !type_retreat_jump.empty() ? type_retreat_jump : faction_exit;
 }
@@ -141,7 +167,21 @@ void GameAudioHost::ability_activations(std::span<const tactical::abilities::Abi
             }
         }
         ability_effect(types, store.type(h), e.type, static_cast<uint64_t>(e.id), store.position(h), target, tp);
+        // mcx4 t13 (MCX4_T13_RE_ANSWERS "Unit_Ability.SFXEvent_Target_Ability", 0x3a3e20): attached to the unit, any owner.
+        if (plays_target_ability_line(e.type))
+            // ledger: consumes Unit_Ability.SFXEvent_Target_Ability
+            if (const std::string_view ev = unit_ability_line(types, store.type(h), e.type, "SFXEvent_Target_Ability"); !ev.empty())
+                if (game_->object_sfx(static_cast<uint64_t>(e.id), ev, store.position(h)) != 0) ++stats_.ability_lines;
     }
+}
+
+void GameAudioHost::ability_button_line(const objects::GameObjectTypes& types, objects::TypeIndex t, uint8_t ability_type, bool activate) {
+    if (!game_) return;
+    // ledger: consumes Unit_Ability.SFXEvent_GUI_Unit_Ability_Activated
+    // ledger: consumes Unit_Ability.SFXEvent_GUI_Unit_Ability_Deactivated
+    const std::string_view ev =
+        unit_ability_line(types, t, ability_type, activate ? "SFXEvent_GUI_Unit_Ability_Activated" : "SFXEvent_GUI_Unit_Ability_Deactivated");
+    if (!ev.empty() && game_->gui_sfx(ev) != 0) ++stats_.ability_lines;
 }
 
 void GameAudioHost::object_events(const sim::TacticalBattle& battle, const objects::ObjectStore& store,
@@ -206,6 +246,7 @@ void GameAudioHost::ability_effect(const objects::GameObjectTypes&, objects::Typ
                                    const Vec3&) {}
 void GameAudioHost::ability_activations(std::span<const tactical::abilities::AbilityActivation>, const objects::ObjectStore&,
                                         const objects::GameObjectTypes&) {}
+void GameAudioHost::ability_button_line(const objects::GameObjectTypes&, objects::TypeIndex, uint8_t, bool) {}
 void GameAudioHost::object_events(const sim::TacticalBattle&, const objects::ObjectStore&, const objects::GameObjectTypes&,
                                   std::span<const std::string>) {}
 uint32_t GameAudioHost::hyperspace_arrival(uint64_t, std::string_view, const Vec3&) { return 0; }

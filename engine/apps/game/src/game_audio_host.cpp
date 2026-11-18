@@ -1,4 +1,5 @@
 #include "alamo/game/game_audio_host.hpp"
+#include "alamo/tactical/abilities/ability_types.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -601,6 +602,40 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
         }
         self_destruct_lines(counting);
     }
+    // Land strikes started (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Bombard_Available family" / "GameObjectType.
+    // SFXEvent_Bombard_Incoming family"): a bombing run whose owner is the local player or not hostile to it plays the
+    // owner's faction crosstalk attached to the first bomber; the local player's bombardment plays the ship type's
+    // SFXEvent_Bombard_Incoming, 2D.
+    if (local_player >= 0)
+        for (const sim::TacticalBattle::StrikeEvent& e : battle.strike_starts()) {
+            if (e.bombard) {
+                if (e.player != local_player || e.ship_type == objects::kNone || e.ship_type >= types.size()) continue;
+                // ledger: consumes GameObjectType.SFXEvent_Bombard_Incoming
+                if (const std::string_view ev = types.get_string(e.ship_type, "SFXEvent_Bombard_Incoming"); !ev.empty() && game_->gui_sfx(ev))
+                    ++stats_.strike_lines;
+                continue;
+            }
+            if (e.player < 0 || static_cast<size_t>(e.player) >= player_factions_.size() || e.first_bomber == objects::kNoObjectId) continue;
+            if (e.player != local_player && cs.is_enemy(local_player, e.player)) continue;
+            const audio::FactionAudio* f = game_data_->find_faction(player_factions_[static_cast<size_t>(e.player)]);
+            // ledger: consumes Faction.SFXEvent_Bombing_Run_Begin_Crosstalk
+            const std::string_view ev = f ? f->get("SFXEvent_Bombing_Run_Begin_Crosstalk") : std::string_view();
+            if (!ev.empty() && game_->object_sfx(static_cast<uint64_t>(e.first_bomber), ev, position_of(static_cast<uint64_t>(e.first_bomber))))
+                ++stats_.strike_lines;
+        }
+    // Ability toggles (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_GUI_Toggle_Non_Hero_Ability_On family", 0x430270): the
+    // issuer's faction list entry for the ability (`ABILITY, SFXEvent` lines), the _Enemy_ variant when the local player
+    // is hostile to the issuer; 2D. [M] the auto-deactivation reader 0x42f460 is not modelled.
+    if (local_player >= 0)
+        for (const sim::TacticalBattle::AbilityToggleEvent& e : battle.ability_toggles()) {
+            if (e.player < 0 || static_cast<size_t>(e.player) >= player_factions_.size()) continue;
+            const audio::FactionAudio* f = game_data_->find_faction(player_factions_[static_cast<size_t>(e.player)]);
+            if (!f) continue;
+            const bool hostile = e.player != local_player && cs.is_enemy(local_player, e.player);
+            const std::vector<std::string> v =
+                f->pair_values(toggle_line_tag(e.on, hostile), tactical::abilities::ability_type_info(e.ability).name);
+            if (!v.empty() && !v.front().empty() && game_->gui_sfx(v.front())) ++stats_.ability_lines;
+        }
     // Start-force re-delivery (MCX4_T13_RE_ANSWERS "Faction.Reinforcements_Selection_SFXEvent family", 0x287e70): the local
     // player's timer expired -> the local faction's line, 2D.
     for (const int32_t p : battle.garrison_redelivered())

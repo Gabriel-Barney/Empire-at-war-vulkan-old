@@ -742,6 +742,13 @@ void test_battle_hookups_aud1() {
 }
 #endif
 
+// ledger: verifies Unit_Ability.SFXEvent_GUI_Unit_Ability_Activated
+// ledger: verifies Unit_Ability.SFXEvent_GUI_Unit_Ability_Deactivated
+// ledger: verifies Unit_Ability.SFXEvent_Target_Ability
+// ledger: verifies Faction.SFXEvent_GUI_Toggle_Non_Hero_Ability_On
+// ledger: verifies Faction.SFXEvent_GUI_Toggle_Non_Hero_Ability_Off
+// ledger: verifies Faction.SFXEvent_GUI_Enemy_Toggle_Non_Hero_Ability_On
+// ledger: verifies Faction.SFXEvent_GUI_Enemy_Toggle_Non_Hero_Ability_Off
 // aud1 t05 (AUDIO.md §9.6): the ability tag pick through the type's Unit_Ability -> <Abilities> entry, the departure tag
 // pick, the shield transitions, and (with engine/audio) the activation playing on the user and the target.
 void test_object_sfx_t05() {
@@ -752,8 +759,10 @@ void test_object_sfx_t05() {
 <SpaceUnits>
   <SpaceUnit Name="Hero_Ship">
     <Unit_Abilities_Data SubObjectList="Yes">
-      <Unit_Ability><Type>STEALTH</Type><GUI_Activated_Ability_Name> Hide </GUI_Activated_Ability_Name></Unit_Ability>
-      <Unit_Ability><Type>SPRINT</Type></Unit_Ability>
+      <Unit_Ability><Type>STEALTH</Type><GUI_Activated_Ability_Name> Hide </GUI_Activated_Ability_Name>
+        <SFXEvent_GUI_Unit_Ability_Activated> Gui_Stealth_On </SFXEvent_GUI_Unit_Ability_Activated></Unit_Ability>
+      <Unit_Ability><Type>SPRINT</Type><SFXEvent_GUI_Unit_Ability_Deactivated>Gui_Sprint_Off</SFXEvent_GUI_Unit_Ability_Deactivated>
+        <SFXEvent_Target_Ability>Sprint_Target</SFXEvent_Target_Ability></Unit_Ability>
     </Unit_Abilities_Data>
     <Abilities SubObjectList="Yes">
       <Stealth_Ability Name="Hide"><SFXEvent_Activate> Unit_Stealth_On </SFXEvent_Activate></Stealth_Ability>
@@ -783,6 +792,19 @@ void test_object_sfx_t05() {
     s = H::ability_sfx(types, healer, ta::kAreaEffectHeal);            // [port] the only entry
     CHECK(s.activate == "Heal_On" && s.target_affected == "Heal_Target");
     CHECK(H::ability_sfx(types, objects::kNone, ta::kStealth).activate.empty());
+
+    // mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "Unit_Ability.SFXEvent_GUI_Unit_Ability_Activated family" and
+    // "Unit_Ability.SFXEvent_Target_Ability"): the record of the clicked ability (#0 -> record 0, else record 1).
+    CHECK(H::unit_ability_line(types, hero, ta::kStealth, "SFXEvent_GUI_Unit_Ability_Activated") == "Gui_Stealth_On");
+    CHECK(H::unit_ability_line(types, hero, ta::kSprint, "SFXEvent_GUI_Unit_Ability_Deactivated") == "Gui_Sprint_Off");
+    CHECK(H::unit_ability_line(types, hero, ta::kSprint, "SFXEvent_Target_Ability") == "Sprint_Target");
+    CHECK(H::unit_ability_line(types, healer, ta::kStealth, "SFXEvent_GUI_Unit_Ability_Activated").empty());
+    CHECK(H::plays_target_ability_line(19) && H::plays_target_ability_line(39) && !H::plays_target_ability_line(ta::kStealth));
+    // "Faction.SFXEvent_GUI_Toggle_Non_Hero_Ability_On family": own / ally issuer -> the plain line, hostile -> _Enemy_.
+    CHECK(H::toggle_line_tag(true, false) == "SFXEvent_GUI_Toggle_Non_Hero_Ability_On");
+    CHECK(H::toggle_line_tag(false, false) == "SFXEvent_GUI_Toggle_Non_Hero_Ability_Off");
+    CHECK(H::toggle_line_tag(true, true) == "SFXEvent_GUI_Enemy_Toggle_Non_Hero_Ability_On");
+    CHECK(H::toggle_line_tag(false, true) == "SFXEvent_GUI_Enemy_Toggle_Non_Hero_Ability_Off");
 
     CHECK(H::departure_sfx("Type_Jump", "Faction_Exit") == "Type_Jump");
     CHECK(H::departure_sfx("", "Faction_Exit") == "Faction_Exit");

@@ -1302,7 +1302,25 @@ void App::battle_input() {
         else if (e.slot == ui::hk::kFleetCohesion && bview_.space()) session_->toggle_fleet_cohesion();  // [port] fleet cohesion
     }
     story_forced_clicks();  // ui2 t02: FORCE_CLICK_GUI
+    const size_t cmds_before = cmds.size(), acts_before = acts.size();
     ui_.tactical_hud.update_input(routed_, input_.shift(), input_.ctrl(), now_s_, cmds, &acts);
+    {  // mcx4 t13 (MCX4_T13_RE_ANSWERS "Unit_Ability.SFXEvent_GUI_Unit_Ability_Activated family", 0x307190): the HUD
+       // ability button's line, by the first user's record: a toggle click -> _Activated / _Deactivated, a targeted
+       // ability -> _Activated when targeting starts.
+        const sim::GameMode* tt = session_ ? session_->host().modes().top_tactical() : nullptr;
+        const objects::ObjectStore* ab_store = tt ? &tt->primary() : nullptr;
+        auto type_of = [&](uint32_t id) {
+            const objects::ObjectHandle h = ab_store ? ab_store->find(static_cast<objects::ObjectId>(id)) : objects::ObjectHandle{};
+            return ab_store && ab_store->alive(h) ? ab_store->type(h) : objects::kNone;
+        };
+        for (size_t i = cmds_before; i < cmds.size(); ++i)
+            if (cmds[i].type() == commands::EventType::SetUnitAbilityMode && cmds[i].u("play_response") != 0)
+                if (const std::vector<uint32_t> u = cmds[i].ids("units"); !u.empty())
+                    audio_.ability_button_line(data_.types, type_of(u.front()), static_cast<uint8_t>(cmds[i].u("ability")), cmds[i].u("on") != 0);
+        for (size_t i = acts_before; i < acts.size(); ++i)
+            if (acts[i].kind == ui::HudAction::Kind::BeginAbilityTargeting && !acts[i].ids.empty())
+                audio_.ability_button_line(data_.types, type_of(acts[i].ids.front()), acts[i].ability_type, true);
+    }
     // L1/S4 wave 1 (tactical): STORY_CLICK_GUI to the tactical plot set - the galactic rule (left click on a component that
     // is not disabled, name = its CommandBarComponents name: b_reinforcement, b_special_weapon, ...) on the tactical HUD.
     story_ui_.set_battle(tactical_story());
