@@ -638,7 +638,9 @@ int32_t GalacticSim::target_political_control(PlanetIndex planet, int32_t derive
     if (s >= 0) presence = std::max(presence, std::min(s, 1));  // CAPITAL_SHIPS
     // group 0 leaning
     if (pt) {
-        const int32_t v = std::clamp(pt->political_control, 0, 5);
+        // mcx6 STATISTIC_CHANGE POLITICAL_CONTROL (§1.17): the planet's written value (+0x22c, 0x3734d0) replaces the type's.
+        const int32_t written = story_gates_.stat(story_gates_.political_control, planet);
+        const int32_t v = std::clamp(written != StoryGates::kUnsetStat ? written : pt->political_control, 0, 5);
         if (v > 0) {
             const bool other = valid_player(physical) && players_[static_cast<size_t>(physical)].faction != pt->political_faction;
             sum += other ? -v : v;

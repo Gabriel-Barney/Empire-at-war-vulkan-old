@@ -193,6 +193,13 @@ public:
     // One hyperspace arrival (public for the scripted tests): the owner faction's SFXEvent_Arrive_From_Hyperspace attached
     // to the arriving object. Returns the instance id (0 = none / refused).
     uint32_t hyperspace_arrival(uint64_t object, std::string_view owner_faction, const Vec3& position);
+    // mcx6 t05 (docs/re/MCX6_T05_CINEMATIC_BINDINGS.md): Lua Cinematic_Hyperspace_In's arrival sound (state 0x2c timer 45):
+    // hyperspace_arrival with player `owner`'s faction (set_player_factions; none: nothing plays).
+    uint32_t cinematic_arrival(uint64_t object, int32_t owner, const Vec3& position);
+    // Lua Play_Cinematic_Engine_Flyby (0x57ea50): the object type's SFXEvent_Ambient_Moving (type +0x1520) attached to the
+    // object (0x2d5320). Returns the instance id (0 = no tag / refused).
+    uint32_t cinematic_engine_flyby(const objects::GameObjectTypes& types, objects::TypeIndex type, uint64_t object,
+                                    const Vec3& position);
     uint64_t ability_sfx_played() const { return ability_sfx_played_; }
     uint64_t hyperspace_sfx_played() const { return hyperspace_sfx_played_; }
     uint64_t shield_sfx_played() const { return shield_sfx_played_; }

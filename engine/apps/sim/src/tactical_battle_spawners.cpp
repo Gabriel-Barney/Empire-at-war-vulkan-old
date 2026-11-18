@@ -80,6 +80,7 @@ void TacticalBattle::sp_tick(TacticalMode& mode, SimRng& rng) {
         top = std::max(top, id);
         if (st.has_behavior(h, kSpawnerBehavior) || st.has_behavior(h, kDebrisBehavior)) fresh.push_back(h);
     }
+    const bool first_scan = sp_scanned_ == 0;
     sp_scanned_ = top;
     std::sort(fresh.begin(), fresh.end(), [&st](objects::ObjectHandle a, objects::ObjectHandle b) { return st.id(a) < st.id(b); });
     const uint32_t mf = st.mode_frame();
@@ -117,6 +118,8 @@ void TacticalBattle::sp_tick(TacticalMode& mode, SimRng& rng) {
     std::erase_if(sp_spawners_, [&st](const IndigenousSpawner& s) { return !st.alive(st.find(s.id)); });
     for (IndigenousSpawner& s : sp_spawners_)
         std::erase_if(s.spawned, [&st](objects::ObjectId id) { return !st.alive(st.find(id)); });
+    // mcx6 SET_PLANET_SPAWN (0x4b71c0 at the battle start, after the map's objects): the battle planet's spawn map, once.
+    if (first_scan && !sp_spawners_.empty()) sp_planet_spawn(mode, rng);
     // 3. DEBRIS services (every frame, 0x62ad30): move, turn, expire.
     for (size_t i = 0; i < sp_debris_.size();) {
         DebrisPiece& d = sp_debris_[i];
@@ -195,11 +198,15 @@ void TacticalBattle::sp_debris_expire(TacticalMode& mode, SimRng& rng, const Deb
 }
 
 void TacticalBattle::sp_activate(const TacticalMode& mode, SimRng& rng, size_t index) {
+    const objects::ObjectStore& st = mode.primary();
+    sp_rebalance(mode, rng, st.type(st.find(sp_spawners_[index].id)), -1.0f);
+}
+
+uint32_t TacticalBattle::sp_rebalance(const TacticalMode& mode, SimRng& rng, objects::TypeIndex type, float chance) {
     // 0x5310b0: decide every spawner of this type at once. Undecided ones become off (pool U), active ones form pool A;
     // T = int(N x chance) (chance > 1 = percent); draws pick the ones that change.
     const objects::ObjectStore& st = mode.primary();
     const objects::GameObjectTypes& types = catalog_->types();
-    const objects::TypeIndex type = st.type(st.find(sp_spawners_[index].id));
     std::vector<size_t> undecided, active;
     for (size_t i = 0; i < sp_spawners_.size(); ++i) {
         const objects::ObjectHandle h = st.find(sp_spawners_[i].id);
@@ -212,8 +219,8 @@ void TacticalBattle::sp_activate(const TacticalMode& mode, SimRng& rng, size_t i
         }
     }
     const int32_t n = static_cast<int32_t>(undecided.size() + active.size());
-    if (n == 0) return;
-    float c = std::max(0.0f, types.get_float(type, "Spawn_Indigenous_Units_Chance"));
+    if (n == 0) return 0;
+    float c = std::max(0.0f, chance < 0.0f ? types.get_float(type, "Spawn_Indigenous_Units_Chance") : chance);
     if (c > 1.0f) c = std::clamp(c * 0.01f, 0.0f, 1.0f);
     const auto target = static_cast<int32_t>(static_cast<float>(n) * c);
     const auto have = static_cast<int32_t>(active.size());
@@ -224,6 +231,24 @@ void TacticalBattle::sp_activate(const TacticalMode& mode, SimRng& rng, size_t i
         sp_spawners_[pool[static_cast<size_t>(pick)]].state = to;
         pool.erase(pool.begin() + pick);
     }
+    return static_cast<uint32_t>(n);
+}
+
+uint32_t TacticalBattle::reward_set_spawn(const TacticalMode& mode, SimRng& rng, std::string_view key, float chance) {
+    // 0x531070: the key is the CRC of Reward_Param1 as written; a spawner type matches with the CRC of its upper-cased
+    // name, so only the upper-case spelling matches [port: compared as text, the same test without the CRC].
+    if (key.empty()) return 0;
+    const objects::GameObjectTypes& types = catalog_->types();
+    const objects::TypeIndex t = types.resolve_name(key);
+    if (t == objects::kNone || t >= types.size() || ascii_upper(types.raw().types().name[t]) != key) return 0;
+    return sp_rebalance(mode, rng, t, chance);
+}
+
+void TacticalBattle::sp_planet_spawn(const TacticalMode& mode, SimRng& rng) {
+    if (!galaxy_) return;
+    const PlanetIndex planet = req_.info.planet;
+    for (const galactic::StoryGates::PlanetSpawn& e : galaxy_->story_gates().planet_spawn)
+        if (e.planet == planet) reward_set_spawn(mode, rng, e.key, e.chance);  // vector order = ascending CRC per planet
 }
 
 void TacticalBattle::sp_service(TacticalMode& mode, SimRng& rng, size_t index) {

@@ -78,6 +78,7 @@ struct SimInstanceStats {
     uint32_t ghosts = 0;            // R5: last-seen ghosts drawn this frame
     uint32_t muzzle_meshes = 0;     // R3: sub-objects shown by muzzle state
     uint32_t engine_glow_changed = 0;  // bkx1 t05: instances whose engine glow proxies changed visibility
+    uint32_t script_emitters = 0;      // mcx6 t05: instances whose particle proxies a Show_Emitter override changed
     uint32_t attachment_posed = 0;  // R3 T6: Model_To_Attach instances posed by the scene-model source
     uint32_t stealthed = 0;         // R5: drawn with the stealth mesh swap (kSnapStealthMeshes)
     uint32_t stealth_tinted = 0;    // R5: drawn with the Stealth_Color multiply (spring value > 0.01)
@@ -118,6 +119,16 @@ public:
     // passes, which share the instance's mesh mask, leave it out. Empty span = none. Same call rules as the pose source.
     using HiddenMeshSource = std::function<std::span<const std::string>(objects::ObjectId id)>;
     void set_hidden_mesh_source(HiddenMeshSource fn) { hidden_meshes_ = std::move(fn); }
+    // mcx6 t05: Lua Show_Emitter (0x581120 -> 0x265ae0, BKX1_RENDER_RE §1.1): per object, the particle prefix groups
+    // (particle_emitter_groups bits) a script showed / hid. Every particle proxy of the drawn model in a hidden group is
+    // hidden, else in a shown group shown, on top of the hardpoint / bone mask (a hide wins when a proxy is in both). On a
+    // SimpleSpace engine-glow unit the pe / pte groups are left to the glow rule, which retail's locomotor service
+    // re-applies every service [M]. {0, 0} = none. Same call rules as the pose source.
+    struct EmitterOverride {
+        uint8_t show = 0, hide = 0;
+    };
+    using EmitterSource = std::function<EmitterOverride(objects::ObjectId id)>;
+    void set_emitter_source(EmitterSource fn) { emitters_ = std::move(fn); }
     // R5 HideWhenFogged presentation (ABILITY_VISUALS 1.4, 0x53ddc0): kSnapFogHidden objects fade out with the critically
     // damped spring of smooth time kFogSpringTime (0.25 s: omega 8 / s), stepped once per new sim tick at dt = 1/30, and
     // are not drawn once their alpha is below kFogHideAlpha (0.025). Types with Last_State_Visible_Under_FOW (type +0x88)
@@ -193,6 +204,7 @@ private:
     PoseSource pose_;  // R3
     VisibilitySource visibility_;  // R3
     HiddenMeshSource hidden_meshes_;  // mcx6 t04
+    EmitterSource emitters_;          // mcx6 t05
     float fog_smooth_time_ = kFogSpringTime;  // R5
     int32_t blob_detail_ = -1;                 // vis1 t02
     AttachmentPoseSource attach_pose_;  // R3 T6

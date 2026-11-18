@@ -1135,6 +1135,14 @@ static void test_scoring_service(const World& w) {
            "function Game_Mode_Starting_Event(mode, map) local p = Find_Player(\"Empire\") Log(\"N:\" .. p.Get_Name()) end\n"
            "function main() while true do n = n + 1 if n <= 2 then Log(\"F:\" .. Find_Player(\"Underworld\").Get_Faction_Name()) end "
            "coroutine.yield(true) end end\n");
+    // mcx6 t07 (GAME_SCORING.md §9.1): a skirmish - Base_Definitions runs while the session has no players, every later
+    // call sees them, and the map battle's scaffold galaxy never reaches the script (no Galactic start / end / events).
+    script("Scoring_Skirmish",
+           "function Base_Definitions() ServiceRate = 0 Log(\"B:\" .. tostring(Find_Player(\"Empire\") == nil)) end\n"
+           "function Game_Mode_Starting_Event(mode, map) Log(\"S:\" .. mode .. \":\" .. tostring(map) .. \":\" .. "
+           "tostring(Find_Player(\"Empire\") ~= nil)) end\n"
+           "function Galactic_Unit_Destroyed_Event(object, killer) Log(\"UD\") end\n"
+           "function main() while true do coroutine.yield(true) end end\n");
     DirectoryProvider files(path_to_utf8(root));
     jobs::JobSystem js(jobs::JobSystemConfig{0});
     const GalacticRules r = rules();
@@ -1220,6 +1228,29 @@ static void test_scoring_service(const World& w) {
         CHECK(s.log() == "N:Empire;F:UNDERWORLD;F:UNDERWORLD;");
         CHECK(s.host->scoring_vm() != nullptr && s.host->scoring_releases() == 0);
         CHECK(s.host->end_game_mode() && s.host->scoring_vm() == nullptr);
+    }
+    {  // mcx6 t07: a skirmish map battle (CampaignBattles::start_map_battle -> SimHost::scoring_map_battle) over its galaxy.
+        Session s = start("Scoring_Skirmish");
+        CHECK(s.log() == "B:true;" && !s.host->scoring_scaffold());
+        s.host->scoring_map_battle();
+        CHECK(s.host->scoring_scaffold());
+        GalacticSim* gs = s.host->galactic_mode() ? s.host->galactic_mode()->sim() : nullptr;
+        CHECK(gs != nullptr);
+        if (gs && !gs->planets()[rD].surface.empty()) CHECK(gs->destroy_object(gs->planets()[rD].surface[0]));
+        s.host->run_fast(2);
+        s.host->start_game(ModeKind::Land);
+        s.host->scoring_mode_started(ModeKind::Land, "Skirmish_Map");
+        s.host->run_fast(3);
+        CHECK(s.host->end_game_mode());  // the battle
+        CHECK(s.host->end_game_mode());  // the scaffold galaxy: no Game_Mode_Ending_Event
+        dump(s);
+        CHECK(s.log() == "B:true;S:Land:Skirmish_Map:true;E:Land;");
+        CHECK(s.host->scoring_releases() == 0);
+        // the next session is not a skirmish until it says so
+        CHECK(s.host->start_galactic(r, su) != nullptr && !s.host->scoring_scaffold());
+        s.host->run_fast(1);
+        CHECK(s.log().find("S:Galactic:Scoring_Campaign:true;") != std::string::npos);
+        CHECK(s.host->end_game_mode());
     }
 #endif
     {  // GameRandom.Free_Random (ranged) draws from the free stream: the synced RNG and the frame CRCs are unchanged.

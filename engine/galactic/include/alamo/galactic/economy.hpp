@@ -91,6 +91,14 @@ struct EconomyConstants {
     // modc t20: Evil_Side_Name ("EMPIRE" in FoC), read for presentation only (route sides FIXPASS_GALACTIC 3.1, the HUD
     // shell alternate); no sim code reads it. "" = none.
     std::string evil_side_name;
+    // mcx6 RANDOM_STORY (STORY_REWARDS_GALACTIC §1.15): GameConstants Random_Story_Triggers (+0x600), Random_Story_Max_Triggers
+    // (+0x618), Random_Story_Rewards, and per side ([0] Rebel = the Good_Side_Name side, [1] Empire) the
+    // Random_Story_<side>_Construction / _Destroy and Random_Story_Reward_<side>_Buildable / _Unit lists, as written
+    // (space separated). Empty without the tags (the reward then builds nothing).
+    std::vector<std::string> random_story_triggers, random_story_rewards;
+    int32_t random_story_max_triggers = 0;
+    std::array<std::vector<std::string>, 2> random_story_construction, random_story_destroy, random_story_buildable,
+        random_story_unit;
 };
 
 // Faction fields read by S3 (FactionFiles.xml).
@@ -100,6 +108,7 @@ struct FactionRules {
     bool can_control_planets = false;       // Can_Control_Planets (+0x109)
     bool is_playable = false;               // Is_Playable (+0x20a8)
     bool benefits_from_corruption = false;  // Benefits_From_Corruption (+0x10b)
+    bool debug_switchable = false;          // Is_Debug_Switchable_To (+0x10a): story SWITCH_SIDES steps to it (mcx6)
     // modc t03: Basic_AI (+0x378, xml_field_tables.md), trimmed as written; the AIPlayerType a skirmish slot of this
     // faction plays (AI_GALACTIC.md §1.2, SKIRMISH_SETUP.md §2.1). "" = none; the shipped "None" is kept as written.
     std::string basic_ai;

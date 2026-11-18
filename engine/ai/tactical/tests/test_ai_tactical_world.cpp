@@ -606,6 +606,29 @@ function MainForce_Thread()
   Report(string.format("AMRESULT player=%d res=%s valid=%s", PlayerObject.Get_ID(), tostring(res), tostring(TestValid(Target))))
 end
 )";
+// mcx6 t06 (LUA_API.md "Task force: Enable_Attack_Positioning", variant 11, land): the land task force sets the UnitAI
+// attack-positioning flag on its members, then attack-moves on the target; Release_Reinforcements on the accepted plan.
+const char* kPlanAttackPos = R"(
+require("SynAICommands")
+function Report(m) error(m) end
+ScriptPoolCount = 1
+function Definitions()
+  Category = "Syn_Destroy_Unit"
+  TaskForce = { { "MainForce", "Frigate | Corvette = 2,3" } }
+end
+function MainForce_Thread()
+  if Reported then
+    while true do Sleep(10) end
+  end
+  MainForce.Release_Reinforcements()
+  BlockOnCommand(MainForce.Produce_Force())
+  if not TestValid(Target) then ScriptExit() end
+  local on = MainForce.Enable_Attack_Positioning(true)
+  local res = BlockOnCommand(MainForce.Attack_Move(Target), 90)
+  Reported = true
+  Report(string.format("ATTACKPOS player=%d on=%s", PlayerObject.Get_ID(), tostring(on)))
+end
+)";
 const char* kFreeStore = R"(
 require("SynBase")
 function Base_Definitions()
@@ -653,6 +676,8 @@ struct MockUnit {
     int32_t target = -1;   // current target
     float hp = 0.0f, max_hp = 1.0f;
     int32_t reprojection_stamp = 0;  // UnitAI data pack +0x20, drawn at creation (A1_READINGS §14)
+    int32_t attack_position_stamp = 0;  // mcx6 t06: +0x34, the second draw of the same pack
+    int32_t goal_object = -1;           // mcx6 t06: the formation attack target (Attack, AttackMove on an object)
 };
 
 // S7 t33: run the same plans as a land battle (Land store and mode; the SpaceMode plans copied to LandMode; the objects
@@ -716,7 +741,11 @@ public:
         u.pos = {x, y, 0.0f};
         u.max_hp = u.hp = type == tFrigate ? 900.0f : type == tCorvette ? 400.0f : type == tStation ? 4000.0f : 1.0e9f;
         // cu12 t06: the UnitAI data pack's two synced draws at creation, like the battle host (battle_ai.cpp).
-        if (type != tPad) u.reprojection_stamp = draw_unit_ai_stamps(rng_->synced(), build_frame_).reprojection_check;
+        if (type != tPad) {
+            const UnitAiStamps s = draw_unit_ai_stamps(rng_->synced(), build_frame_);
+            u.reprojection_stamp = s.reprojection_check;
+            u.attack_position_stamp = s.second;  // mcx6 t06
+        }
         units_.push_back(u);
         if (type != tPad) dt_.enable(u.id, u.max_hp, 0.0f);
         return u.id;
@@ -872,6 +901,12 @@ public:
             a.attack_target = u.target;
             a.damage_tracking = u.type != tPad;
             a.reprojection_stamp = u.reprojection_stamp;
+            a.attack_position_stamp = u.attack_position_stamp;  // mcx6 t06
+            if (const MockUnit* g = u.goal_object >= 0 ? unit(u.goal_object) : nullptr) {
+                a.formation_target = g->id;
+                a.formation_target_point = g->pos;
+                a.formation_target_extent = 40.0f;
+            }
             f.push_back(a);
         }
         w.players[0].pop_used = static_cast<int32_t>(population_used(0));
@@ -894,6 +929,7 @@ public:
                         u->goal = {ev.f("x"), ev.f("y"), 0.0f};
                         u->has_goal = true;
                         u->ordered = -1;
+                        u->goal_object = -1;  // mcx6 t06: a position block
                         ++n;
                     }
                 r = n ? R::None : R::InvalidUnit;
@@ -909,6 +945,7 @@ public:
                 for (const uint32_t id : ev.ids("attackers"))
                     if (MockUnit* u = own(id)) {
                         u->ordered = t->id;
+                        u->goal_object = t->id;  // mcx6 t06
                         u->goal = t->pos;
                         u->has_goal = speed_of(u->type) > 0.0f;
                         ++n;
@@ -940,6 +977,7 @@ public:
                 for (MockUnit* u : movers) {
                     u->goal = t ? t->pos : Vec3f{std::bit_cast<float>(u32(8)), std::bit_cast<float>(u32(12)), 0.0f};
                     u->has_goal = true;
+                    u->goal_object = t && ev.u("subtype") - 0x4C00u == 2u ? t->id : -1;  // mcx6 t06: attack-move
                 }
                 line += " sub " + std::to_string(ev.u("subtype") - 0x4C00u) + " units " + std::to_string(movers.size());
                 break;
@@ -1344,6 +1382,7 @@ RunResult run(int32_t frames, int32_t difficulty0, int variant = 0, std::vector<
     }
     if (variant == 7) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", kPlanAbility);
     if (variant == 10) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", kPlanAttackResult);  // q6 t19
+    if (variant == 11) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", kPlanAttackPos);     // mcx6 t06
     if (variant == 8) files.add("Data\\Scripts\\AI\\LandMode\\SynLandOnly.lua", kPlanLanding);  // replaces kPlanLandOnly
     if (variant == 9) {  // a1k t01
         files.add("Data\\Scripts\\AI\\SpaceMode\\SynSweep.lua", kPlanCollect);
@@ -2343,6 +2382,7 @@ struct SaveSession {
         if (variant == 5) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", quiet(kPlanEmptyTf));
         if (variant == 6) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", quiet(kPlanAmbush));
         if (variant == 8) files.add("Data\\Scripts\\AI\\LandMode\\SynLandOnly.lua", quiet(kPlanLanding));  // a1j t01 (g_land)
+        if (variant == 11) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", quiet(kPlanAttackPos));  // mcx6 t06 (g_land)
         if (variant >= 5) files.add("Data\\Scripts\\AI\\SpaceMode\\SynEscort.lua", kPlanEscortOff);
         if (variant == 1) {
             files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", kPlanMagic);
@@ -2438,9 +2478,9 @@ uint32_t first_u32(const std::vector<uint8_t>& b) {
                                    (static_cast<uint32_t>(b[3]) << 24);
 }
 
-// sp3 (TacticalAiConfig::ai_lane): an AI-lane world draws from its own stream, not the session's, and saves it (version 17
-// since skai t15) so a load continues identically; a lane-off save (version 16) loads into a lane-on world; a lane-on save
-// does not load into a lane-off world; the lane-off bytes keep version 16.
+// sp3 (TacticalAiConfig::ai_lane): an AI-lane world draws from its own stream, not the session's, and saves it (version 19
+// since mcx6 t06, 17 since skai t15) so a load continues identically; a lane-off save (version 18) loads into a lane-on
+// world; a lane-on save does not load into a lane-off world; the lane-off bytes keep version 18.
 void test_ai_lane_save() {
     const int32_t save_at = 30 * 35;
     g_ai_lane = false;
@@ -2452,13 +2492,13 @@ void test_ai_lane_save() {
         off_image = a.ai_bytes();
         off_session_draws = a.rng.synced().draws();
     }
-    CHECK(first_u32(off_image) == 16u);
+    CHECK(first_u32(off_image) == 18u);
     g_ai_lane = true;
     test_save_load(1, 30 * 30, 30 * 60);  // round trip and continuation with the lane on (variant 0's corruption offsets are v12's)
     SaveSession a(0);
     for (int32_t f = 1; f <= save_at; ++f) a.step(f);
     const std::vector<uint8_t> on_image = a.ai_bytes();
-    CHECK(first_u32(on_image) == 17u);
+    CHECK(first_u32(on_image) == 19u);
     // The AI's own draws left the session stream (what remains are the host's).
     CHECK(a.rng.synced().draws() < off_session_draws);
     {
@@ -2467,7 +2507,7 @@ void test_ai_lane_save() {
         SaveSession from(0);
         for (int32_t f = 1; f <= save_at; ++f) from.step(f);
         CHECK(b.restore_host(from) && b.load_ai(off_image));
-        CHECK(first_u32(b.ai_bytes()) == 17u);
+        CHECK(first_u32(b.ai_bytes()) == 19u);
     }
     {
         g_ai_lane = false;
@@ -3317,6 +3357,139 @@ void test_outside_owner_lists() {
     CHECK(in_lists > 0.0f && outside == in_lists);
 }
 
+// mcx6 t06 (LUA_API.md "Task force: Enable_Attack_Positioning and Release_Reinforcements"), variant 11 (land): the task
+// force's members get the UnitAI attack-positioning flag. A flagged member whose formation attacks an object computes,
+// when its +0x34 stamp is due (at once: the drawn stamp lies in the past), the centre of the lowest-threat 40 x 40 square at
+// the target (the target's extent 40 < half the unit's range) and, being at least its max attack range from that point,
+// walks there alone (a move of that unit only). Only flagged units move so; the run is deterministic.
+void test_attack_positioning() {
+    struct Move {
+        int32_t frame = -1, unit = -1, target = -1;
+        double x = 0.0, y = 0.0;
+        bool flagged = false, moved = false, at_target = false, out_of_range = false;
+    };
+    std::vector<Move> moves;
+    size_t seen = 0;
+    g_land = true;
+    const RunResult r = run(30 * 60, 1, 11, nullptr, false, [&](int32_t f, MockHost& host, TacticalAiWorld& world) {
+        const std::vector<TacticalAiDecision>& dl = world.decision_log();
+        for (; seen < dl.size(); ++seen) {
+            const size_t at = dl[seen].text.find("attack position unit ");
+            if (at == std::string::npos) continue;
+            Move m;
+            m.frame = f;
+            if (std::sscanf(dl[seen].text.c_str() + at, "attack position unit %d target %d -> (%lf, %lf)", &m.unit, &m.target, &m.x,
+                            &m.y) != 4)
+                continue;
+            m.flagged = world.attack_positioning(m.unit);
+            const MockUnit* u = host.unit(m.unit);
+            const MockUnit* t = host.unit(m.target);
+            m.moved = dl[seen].text.find(" rejected ") == std::string::npos;  // the host executed the unit's move
+            m.at_target = t && std::fabs(std::fabs(m.x - t->pos.x) - 20.0) < 0.06 && std::fabs(std::fabs(m.y - t->pos.y) - 20.0) < 0.06;
+            if (u) {
+                const double dx = m.x - u->pos.x, dy = m.y - u->pos.y;
+                m.out_of_range = std::sqrt(dx * dx + dy * dy) >= static_cast<double>(MockHost::range_of(u->type));
+            }
+            moves.push_back(m);
+        }
+    });
+    const RunResult again = run(30 * 60, 1, 11);
+    g_land = false;
+    const size_t on = count_decisions(r, "attack positioning on"), released = count_decisions(r, "release reinforcements");
+    size_t ok = 0;
+    std::map<int32_t, int32_t> last;
+    bool spaced = true;
+    for (const Move& m : moves) {
+        ok += m.flagged && m.moved && m.at_target && m.out_of_range ? 1u : 0u;
+        if (const auto it = last.find(m.unit); it != last.end()) spaced = spaced && m.frame - it->second >= 150;
+        last[m.unit] = m.frame;
+    }
+    std::string rep;
+    for (const std::string& e : r.errors)
+        if (rep.empty() && e.find("ATTACKPOS player=") != std::string::npos) rep = e;
+    std::printf("attack positioning: %zu flag call(s), %zu release call(s), %zu attack-position move(s), %zu as specified, %zu "
+                "unit(s); %s\n", on, released, moves.size(), ok, last.size(), rep.empty() ? "(no report)" : rep.c_str());
+    CHECK(on >= 1 && released >= 1);
+    CHECK(!moves.empty() && ok == moves.size() && spaced);
+    CHECK(rep.empty() || rep.find("on=nil") != std::string::npos);  // no return value
+    CHECK(again.crc == r.crc && again.decisions == r.decisions);
+}
+
+// mcx6 t06: a land battle saved right after an attack-position move (the flags set, the +0x34 stamps advanced) loads into
+// a rebuilt session with the same CRC and bytes, keeps the flags, and continues identically.
+void test_attack_positioning_save() {
+    g_land = true;
+    SaveSession a(11);
+    int32_t save_at = -1, unit = -1;
+    size_t seen = 0;
+    for (int32_t f = 1; f <= 30 * 120 && save_at < 0; ++f) {
+        a.step(f);
+        const std::vector<TacticalAiDecision>& dl = a.world->decision_log();
+        for (; seen < dl.size() && save_at < 0; ++seen)
+            if (const size_t at = dl[seen].text.find("attack position unit "); at != std::string::npos) {
+                save_at = f;
+                unit = std::atoi(dl[seen].text.c_str() + at + 21);
+            }
+    }
+    CHECK(save_at > 0 && a.world->attack_positioning(unit));
+    // Release_Reinforcements before Produce_Force (the session has reinforcement pools): the accepted plan's pool slots are
+    // freed (Produce_Force then gathers its picks all the same, so nothing is taken back at a later Commit here).
+    size_t freed = 0;
+    for (const TacticalAiDecision& d : a.world->decision_log())
+        if (const size_t at = d.text.find("release reinforcements: pp "); at != std::string::npos) {
+            const size_t fr = d.text.find(" frees ", at);
+            if (fr != std::string::npos && std::atoi(d.text.c_str() + fr + 7) > 0) ++freed;
+        }
+    CHECK(freed >= 1);
+    if (save_at < 0) {
+        g_land = false;
+        return;
+    }
+    const std::vector<uint8_t> image = a.ai_bytes();
+    SaveSession b(11);
+    CHECK(b.restore_host(a) && b.load_ai(image));
+    CHECK(b.crc() == a.crc() && b.ai_bytes() == image && b.world->attack_positioning(unit));
+    const size_t dec_a = a.world->decision_log().size(), dec_b = b.world->decision_log().size();
+    int32_t first_diff = -1;
+    for (int32_t f = save_at + 1; f <= save_at + 30 * 30; ++f) {
+        a.step(f);
+        b.step(f);
+        if (first_diff < 0 && a.crc() != b.crc()) first_diff = f;
+    }
+    std::vector<std::string> da, db;
+    for (size_t i = dec_a; i < a.world->decision_log().size(); ++i) da.push_back(decision_line(a.world->decision_log()[i]));
+    for (size_t i = dec_b; i < b.world->decision_log().size(); ++i) db.push_back(decision_line(b.world->decision_log()[i]));
+    std::printf("attack positioning save: saved at frame %d after unit %d's move; %zu decisions after the load %s\n", save_at, unit,
+                da.size(), first_diff < 0 && da == db ? "identical" : "DIVERGED");
+    CHECK(first_diff < 0 && da == db && b.ai_bytes() == a.ai_bytes());
+    g_land = false;
+}
+
+// mcx6 t07 (LUA_API.md "Discovery scans list *.lua only"): the plan discovery asks every plan folder for *.lua only, so a
+// plan that exists only as .lc is never found (a VFS-like lister: the folder prefix and the pattern's extension).
+void test_plan_discovery_lua_only() {
+    const std::vector<std::string> files = {"Data\\Scripts\\AI\\A.lua", "Data\\Scripts\\AI\\B.lc", "Data\\Scripts\\AI\\LandMode\\C.lc",
+                                            "Data\\Scripts\\AI\\LandMode\\D.lua", "Data\\Scripts\\AI\\SpaceMode\\E.lc"};
+    std::vector<std::string> globs;
+    const auto lister = [&](std::string_view glob) {
+        globs.emplace_back(glob);
+        const std::string g(glob);
+        const std::string dir = g.substr(0, g.find('*')), ext = g.substr(g.find('*') + 1);
+        std::vector<std::string> out;
+        for (const std::string& f : files)
+            if (f.rfind(dir, 0) == 0 && f.size() >= ext.size() && f.compare(f.size() - ext.size(), ext.size(), ext) == 0) out.push_back(f);
+        return out;
+    };
+    const std::vector<std::string> got = tactical_plan_files(TacticalMode::Land, lister);
+    bool lua_only = !globs.empty();
+    for (const std::string& g : globs) lua_only = lua_only && g.size() > 5 && g.compare(g.size() - 5, 5, "*.lua") == 0;
+    size_t lc = 0;
+    for (const std::string& f : got)
+        lc += f.size() > 3 && (f.compare(f.size() - 3, 3, ".lc") == 0 || f.compare(f.size() - 3, 3, ".LC") == 0) ? 1u : 0u;
+    std::printf("plan discovery: %zu folder pattern(s), %zu plan file(s) found\n", globs.size(), got.size());
+    CHECK(lua_only && lc == 0 && got.size() == 2);
+}
+
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i)
         if (std::strcmp(argv[i], "--write-golden") == 0) g_write_golden = true;
@@ -3357,6 +3530,9 @@ int main(int argc, char** argv) {
     test_plan_retest();  // skai t15
     test_outside_owner_lists();  // skai t22
     test_attack_move_result();            // q6 t19
+    test_attack_positioning();            // mcx6 t06
+    test_attack_positioning_save();       // mcx6 t06
+    test_plan_discovery_lua_only();       // mcx6 t07
     std::printf(g_fail ? "alamo_ai_tactical_world_tests: %d FAILED\n" : "alamo_ai_tactical_world_tests: OK\n", g_fail);
     return g_fail ? 1 : 0;
 }

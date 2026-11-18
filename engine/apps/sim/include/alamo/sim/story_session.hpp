@@ -536,6 +536,19 @@ public:
     void set_tactical_reward_hook(std::function<void(const std::string& type, const std::vector<std::string>& params)> fn) {
         tactical_reward_ = std::move(fn);
     }
+    // mcx6 (docs/re/STORY_REWARDS_GALACTIC.md §1.11 - §1.13, §1.20): FORCE_RETREAT, SET_HEALTH, SET_SPAWN and
+    // DISABLE_SPECIAL_STRUCTURE act on the current mode: while a battle is attached they go to the same hook (any plot
+    // set), after the session checked their required parameters.
+    // mcx6 PICK_PLANET / RANDOM_STORY change plot definitions; the session keeps the changes in order (saved, hashed once
+    // any exists) and replays them on load: definition_edits().
+    struct DefinitionEdit {
+        uint8_t kind = 0;      // 0 = a RANDOM_STORY plot (set, name a, xml b); 1 = a PICK_PLANET substitution (a -> b)
+        uint32_t set = 0;      // plot set number (kind 0)
+        std::string a, b;
+        friend bool operator==(const DefinitionEdit&, const DefinitionEdit&) = default;
+    };
+    const std::vector<DefinitionEdit>& definition_edits() const { return def_edits_; }
+    uint32_t random_story_count() const { return random_story_count_; }
     // --- end STY1 lane B ---
     // --- end OI galactic ---
 
@@ -681,6 +694,14 @@ private:
     std::vector<uint8_t> retreat_off_;    // per player: DISABLE_RETREAT (1 = cannot retreat), ui2 t06 (save v5); sized on first write
     std::optional<StoryLoadCampaign> load_campaign_;
     std::function<void(const std::string&, const std::vector<std::string>&)> tactical_reward_;
+    // mcx6: the planet (type name) of the notification firing the rewarded event (STATISTIC_CHANGE without P3), set by
+    // apply_reward for each reward; definition edits (PICK_PLANET, RANDOM_STORY) and the RANDOM_STORY plot counter.
+    std::string reward_firing_planet_;
+    std::vector<DefinitionEdit> def_edits_;
+    uint32_t random_story_count_ = 0;
+    void pick_planet(const std::vector<std::string>& params);
+    void random_story(Set& s);
+    bool apply_definition_edit(const DefinitionEdit& e);  // galactic plot sets; false = cannot be applied
     void sync_gates() { sim_->set_story_gates(gates_); }
     PlanetIndex reward_planet(const std::string& type_name) const;  // first row whose planet type is named so, else invalid
     // One reward of the STY1 families (galactic, tutorial, Underworld rules, tactical); false = not one of them. `tactical`:

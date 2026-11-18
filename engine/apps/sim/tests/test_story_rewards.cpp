@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "alamo/core/bytes.hpp"
+#include "alamo/core/hash.hpp"
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/host_fs.hpp"
 #include "alamo/core/log.hpp"
@@ -58,7 +59,13 @@ static GalacticRules rules() {
     FactionRules neu;
     neu.name = "Neutral";
     neu.is_neutral = true;
+    emp.debug_switchable = und.debug_switchable = true;  // mcx6 SWITCH_SIDES (Is_Debug_Switchable_To)
     r.factions = {emp, und, neu};
+    // mcx6 RANDOM_STORY constants (GameConstants Random_Story_*): one trigger type, at most 2 triggers, a credits reward.
+    r.constants.random_story_triggers = {"STORY_CONSTRUCT"};
+    r.constants.random_story_max_triggers = 2;
+    r.constants.random_story_rewards = {"CREDITS"};
+    r.constants.random_story_construction = {std::vector<std::string>{"Corvette"}, std::vector<std::string>{"Corvette"}};
     r.difficulties = {{"Normal", 1.0f, 1.0f}};
     r.types.resize(tCount);
     const char* names[] = {"PlanetA", "PlanetB", "PlanetC", "PlanetD"};
@@ -378,6 +385,162 @@ static void test_session_rows_have_handlers() {
     remove_all_long(root, ec);
 }
 
+// mcx6 (docs/re/STORY_REWARDS_GALACTIC.md §1.10 - §1.21): the former Missing rewards in the galactic mode, their save (v6)
+// and hash, at 0 and 4 workers. The battle side (FORCE_RETREAT accepted / refused, SET_HEALTH, SET_SPAWN, SET_PLANET_SPAWN)
+// is in test_battle_tru1.cpp.
+static std::string mcx6_plot() {
+    std::string p = "<Story>\n <Event Name=\"Begin\"><Event_Type>STORY_ELAPSED</Event_Type><Event_Param1>0</Event_Param1></Event>\n";
+    // PICK_PLANET: the first planet (row order) hostile to the local player (Empire) is PlanetD (the Underworld's); the
+    // placeholder in a later event's Reward_Param3 becomes PlanetD (upper-case compare).
+    p += ev("Pick", "PICK_PLANET", {"FILTER_ENEMY_ONLY", "placeholder_x"});
+    p += ev("Use_Pick", "STATISTIC_CHANGE", {"CREDIT_VALUE", "77", "Placeholder_X"}, "Pick");
+    p += ev("Pick_None", "PICK_PLANET", {"FILTER_ENEMY_ONLY"});  // P2 missing: silent
+    // STATISTIC_CHANGE: political control and max starbase level of PlanetA; no planet at all: logged.
+    p += ev("Pol_A", "STATISTIC_CHANGE", {"POLITICAL_CONTROL", "3", "PlanetA"});
+    p += ev("Sb_A", "STATISTIC_CHANGE", {"MAX_STARBASE_LEVEL", "2", "PlanetA"});
+    p += ev("Stat_None", "STATISTIC_CHANGE", {"CREDIT_VALUE", "5"});
+    // Galactic-mode FORCE_RETREAT / SET_SPAWN / SET_HEALTH / SET_WEATHER: logs; SET_HEALTH writes galactic health.
+    p += ev("Retreat_Gal", "FORCE_RETREAT", {"Underworld"});
+    p += ev("Retreat_None", "FORCE_RETREAT", {});
+    p += ev("Retreat_Bad", "FORCE_RETREAT", {"Nobody"});
+    p += ev("Spawn_Gal", "SET_SPAWN", {"T_HUT"});
+    p += ev("Health_Gal", "SET_HEALTH", {"Corvette", "50"});
+    p += ev("Health_Bad", "SET_HEALTH", {"No_Such_Type", "50"});
+    p += ev("Weather", "SET_WEATHER", {});
+    p += ev("Weather_Ok", "SET_WEATHER", {"Rain"});
+    p += ev("Info", "INFORMATION", {"anything"});
+    p += ev("Sfx", "SFX", {"Unit_Select_SFX"});
+    // Story-manager flags and planet lists.
+    p += ev("No_Sabotage", "ENABLE_SABOTAGE", {"0"});
+    p += ev("No_Cine", "ENABLE_COMBAT_CINEMATIC", {"0"});
+    p += ev("No_Bm_B", "RESTRICT_BLACK_MARKET", {"PlanetB"});
+    p += ev("No_Ab_C", "RESTRICT_ALL_ABILITIES", {"PlanetC", "1"});
+    p += ev("Spawn_B1", "SET_PLANET_SPAWN", {"PlanetB", "T_HUT", "0.25"});
+    p += ev("Spawn_B2", "SET_PLANET_SPAWN", {"PlanetB", "T_HUT", "0.75"}, "Spawn_B1");  // the same key: overwritten
+    p += ev("Spawn_D", "SET_PLANET_SPAWN", {"PlanetD", "T_HUT", "1.0"});
+    p += ev("Random", "RANDOM_STORY", {});
+    // SWITCH_SIDES last: one step to the Underworld (an AI player: the human flags stay), then back to the Empire by name.
+    p += ev("Switch_1", "SWITCH_SIDES", {}, "Use_Pick");
+    p += ev("Switch_2", "SWITCH_SIDES", {"Empire"}, "Switch_1");
+    return p + "</Story>\n";
+}
+
+static void test_mcx6_rewards() {
+    std::unique_ptr<DirectoryProvider> files;
+    TypesWorld w;
+    const fs::path root = make_root("alamo_sim_story_rewards_mcx6", files, w);
+    write_file(root / "Data/XML/Story_Sty1.xml", mcx6_plot());
+    std::string first_hash;
+    for (int32_t workers : {0, 4}) {
+        jobs::JobSystem js(jobs::JobSystemConfig{workers});
+        SimConfig cfg;
+        cfg.seed = 7;
+        cfg.story_crc = true;
+        SimHost host(w.types, js, cfg);
+        const GalacticRules rules_keep = rules();
+        GalacticSim* gs = host.start_galactic(rules_keep, setup());
+        CHECK(gs != nullptr);
+        if (!gs) return;
+        CHECK(gs->local_player() == pEmpire);
+        StoryStart st;
+        st.files = files.get();
+        st.plot_sets = {{pEmpire, "Story_Plots_Sty1.xml"}};
+        host.tick_once();
+        CHECK(host.start_story(st, nullptr) && host.story());
+        StorySession* ss = host.story();
+        if (!ss) return;
+        const size_t plots_before = ss->model(0).plot_count();
+        for (int t = 0; t < 20; ++t) host.tick_once();
+        auto logged = [ss](std::string_view what) {
+            size_t n = 0;
+            for (const std::string& m : ss->lua_messages()) n += m.find(what) != std::string::npos ? 1u : 0u;
+            return n;
+        };
+        // PICK_PLANET + STATISTIC_CHANGE CREDIT_VALUE through the substituted placeholder.
+        CHECK(logged("Replacing all instances of PLACEHOLDER_X with planet PlanetD") == 1);
+        CHECK(gs->planets()[rD].base_value == 77);
+        CHECK(ss->definition_edits().size() >= 1 && ss->definition_edits()[0].kind == 1 && ss->definition_edits()[0].b == "PlanetD");
+        // STATISTIC_CHANGE POLITICAL_CONTROL / MAX_STARBASE_LEVEL; none: logged.
+        CHECK(gs->story_gates().stat(gs->story_gates().political_control, rA) == 3);
+        {  // PlanetB keeps the map's value (absent / negative -> 5)
+            const auto& msb = gs->map().planets.max_space_base;
+            CHECK(gs->max_starbase_level(rA) == 2 && gs->max_starbase_level(rB) == (rB < msb.size() && msb[rB] >= 0 ? msb[rB] : 5));
+        }
+        CHECK(logged("Reward Statistic Change - No planet specified") == 1);
+        // The galactic mode's FORCE_RETREAT / SET_SPAWN / SET_HEALTH / SET_WEATHER.
+        CHECK(logged("Force retreat failed due to no retreat coordinator") == 1);
+        CHECK(logged("Force retreat failed due to incomplete parameters") == 1);
+        CHECK(logged("Force retreat failed due to invalid faction Nobody") == 1);
+        CHECK(logged("Set spawn failed due to incomplete parameters") == 1);
+        CHECK(logged("Set health of CORVETTE, to 50 percent") == 1 && logged("Can't find type NO_SUCH_TYPE") == 1);
+        CHECK(logged("Set weather failed due to incomplete parameters") == 1);
+        CHECK(logged("not implemented") == 0);  // no reward of the plot is skipped
+        // Flags and planet lists (the sim's copy too).
+        const StoryGates& g = gs->story_gates();
+        CHECK(!g.sabotage_enabled && !g.combat_cinematic);
+        CHECK(g.has(rB, StoryGates::kNoBlackMarket) && g.has(rC, StoryGates::kNoAbilities) && !g.has(rB, StoryGates::kNoAbilities));
+        CHECK(g.planet_spawn.size() == 2);
+        if (g.planet_spawn.size() == 2) {
+            CHECK(g.planet_spawn[0].planet == rB && g.planet_spawn[0].key == "T_HUT" && g.planet_spawn[0].chance == 0.75f);
+            CHECK(g.planet_spawn[1].planet == rD && g.planet_spawn[1].crc == crc32("T_HUT", 5));
+        }
+        // ENABLE_SABOTAGE off: the human's sabotage is refused (the AI's path does not read it).
+        CHECK(gs->sabotage_execute_structure(pEmpire, rD, ObjectHandle{}, ObjectHandle{}, 0.0f, 0.0f) == RejectReason::NotAllowed);
+        // RANDOM_STORY: Random_Plot_1 joined the local player's plot set (1 or 2 STORY_CONSTRUCT triggers on Corvette).
+        CHECK(ss->random_story_count() == 1 && ss->model(0).plot_count() == plots_before + 1);
+        if (ss->model(0).plot_count() == plots_before + 1) {
+            const lua::StoryPlot& rp = ss->model(0).plot(static_cast<uint32_t>(plots_before));
+            CHECK(rp.name == "Random_Plot_1" && rp.active && rp.events.size() >= 3);
+            CHECK(!rp.events.empty() && rp.events[0].name == "RANDOM_TRIGGER_0" && rp.events[0].type == "STORY_CONSTRUCT");
+            CHECK(!rp.events.empty() && rp.events.back().reward_type == "CREDITS");
+        }
+        // SWITCH_SIDES: Underworld (has an AI: the human flags stay), then back to the Empire (no AI: the only human).
+        CHECK(logged("Switched to player index 1") == 1 && logged("Switched to player index 0") == 1);
+        CHECK(gs->local_player() == pEmpire && gs->players()[pEmpire].human && !gs->players()[pUnder].human);
+        // Save v6: a deterministic image; read back in place keeps the hash.
+        ByteWriter w1, w2;
+        ss->write(w1);
+        ss->write(w2);
+        CHECK(w1.bytes() == w2.bytes());
+        StateHasher h1;
+        ss->hash(h1);
+        char buf[64];
+        std::snprintf(buf, sizeof buf, "%016llx", static_cast<unsigned long long>(h1.digest()));
+        if (first_hash.empty()) first_hash = buf;
+        CHECK(first_hash == buf);
+        {
+            ByteReader rd(w1.bytes());
+            CHECK(ss->read(rd));
+            StateHasher h2;
+            ss->hash(h2);
+            CHECK(h2.digest() == h1.digest());
+            CHECK(!gs->story_gates().sabotage_enabled && gs->story_gates().planet_spawn.size() == 2);
+        }
+        {  // ... and into a freshly started session: the RANDOM_STORY plot and the substitution are replayed.
+            SimHost host2(w.types, js, cfg);
+            GalacticSim* gs2 = host2.start_galactic(rules_keep, setup());
+            CHECK(gs2 != nullptr);
+            if (!gs2) return;
+            host2.tick_once();
+            CHECK(host2.start_story(st, nullptr) && host2.story());
+            StorySession* s2 = host2.story();
+            if (!s2) return;
+            ByteReader rd(w1.bytes());
+            CHECK(s2->read(rd));
+            CHECK(s2->model(0).plot_count() == plots_before + 1 && s2->definition_edits() == ss->definition_edits());
+            CHECK(s2->random_story_count() == 1 && s2->gates().max_starbase == ss->gates().max_starbase);
+            bool substituted = false;
+            for (uint32_t p = 0; p < s2->model(0).plot_count(); ++p)
+                for (const lua::StoryEventDef& e : s2->model(0).plot(p).events)
+                    if (e.name == "Use_Pick") substituted = e.reward_params.size() > 2 && e.reward_params[2].text == "PlanetD";
+            CHECK(substituted);
+        }
+        std::printf("  mcx6 rewards: workers %d ok, story hash %s\n", workers, buf);
+    }
+    std::error_code ec;
+    remove_all_long(root, ec);
+}
+
 // ---------------------------------------------------------------------------------------------- coverage
 static void grab_tag(const std::string& t, const char* tag, std::set<std::string>& out) {
     const std::string open = std::string("<") + tag + ">", close = std::string("</") + tag + ">";
@@ -473,8 +636,11 @@ static void test_story_ledger() {
         if (row.owner == StoryRewardOwner::Missing) ++missing;
         if (row.owner != StoryRewardOwner::Retail) CHECK(find_retail_story_reward(row.name) != nullptr);
     }
-    CHECK(missing == 18);  // INFORMATION ... ENABLE_COMBAT_CINEMATIC (docs/MOD_COMPAT_DESIGN.md §9.3)
-    CHECK(find_story_reward("SWITCH_SIDES") && find_story_reward("SWITCH_SIDES")->owner == StoryRewardOwner::Missing);
+    CHECK(missing == 0);  // mcx6: every retail reward is implemented (the list started at 18, docs/MOD_COMPAT_DESIGN.md §9.3)
+    CHECK(find_story_reward("SWITCH_SIDES") && find_story_reward("SWITCH_SIDES")->owner == StoryRewardOwner::Session);
+    CHECK(find_story_reward("INFORMATION") && find_story_reward("INFORMATION")->owner == StoryRewardOwner::Retail);
+    for (const char* ui : {"SFX", "FLASH_TERRAIN", "FLASH_UNIT", "DUAL_FLASH"})
+        CHECK(find_story_reward(ui) && find_story_reward(ui)->owner == StoryRewardOwner::Ui);
     CHECK(find_story_reward("ENABLE_OVERWHELMING_ODDS") && find_story_reward("ENABLE_OVERWHELMING_ODDS")->owner == StoryRewardOwner::Retail);
     CHECK(find_retail_story_reward("no_such_reward") == nullptr && find_retail_story_reward("credits") != nullptr);
     std::set<uint8_t> codes;
@@ -495,6 +661,7 @@ int main() {
     story_test::test_sty1_gate_refusals();
     story_test::test_sty1_rewards();
     story_test::test_session_rows_have_handlers();
+    story_test::test_mcx6_rewards();
     story_test::test_coverage();
     story_test::test_story_ledger();
     if (g_fail) std::printf("FAILED\n");

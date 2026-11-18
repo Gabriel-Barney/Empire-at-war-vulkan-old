@@ -281,4 +281,51 @@ bool GalacticSim::ability_ready(const SpecialAbilityDef& a, int32_t owner, uint3
     return ready;
 }
 
+// ---- mcx6 story rewards (docs/re/STORY_REWARDS_GALACTIC.md §1.10, §1.17) ----------------------------------------------
+
+int32_t GalacticSim::max_starbase_level(PlanetIndex planet) const {
+    const int32_t written = story_gates_.stat(story_gates_.max_starbase, planet);
+    if (written != StoryGates::kUnsetStat) return written;
+    const auto& m = map_.planets.max_space_base;
+    return planet < m.size() && m[planet] >= 0 ? m[planet] : 5;
+}
+
+void GalacticSim::story_set_base_value(PlanetIndex planet, int32_t value) {
+    if (valid_planet(planet)) planets_[planet].base_value = value;
+}
+
+int32_t GalacticSim::story_switch_sides(std::string_view faction) {
+    if (!valid_player(local_player_) || players_.empty()) return kNoPlayer;
+    const auto n = static_cast<int32_t>(players_.size());
+    auto switchable = [this](int32_t i) {
+        const uint32_t f = players_[static_cast<size_t>(i)].faction;
+        return f < rules_->factions.size() && rules_->factions[f].debug_switchable;
+    };
+    // One step of 0x297e80: the next switchable index after the local one (wrapping); then the human flags.
+    auto step = [&]() {
+        int32_t i = local_player_;
+        for (int32_t k = 0; k < n; ++k) {
+            i = (i + 1) % n;
+            if (!switchable(i)) continue;
+            local_player_ = i;
+            if (!players_[static_cast<size_t>(i)].ai)  // no AI system: the new local player is the only human
+                for (int32_t p = 0; p < n; ++p) players_[static_cast<size_t>(p)].human = p == i;
+            return true;
+        }
+        return false;  // [port] no switchable player: retail's loop never ends
+    };
+    if (faction.empty()) {
+        step();
+        return local_player_;
+    }
+    const uint32_t f0 = players_[static_cast<size_t>(local_player_)].faction;
+    // [port] at most one round of n steps: retail loops forever when F0 is not switchable and P1 cannot be reached.
+    for (int32_t round = 0; round < n; ++round) {
+        if (!step()) break;
+        const uint32_t f = players_[static_cast<size_t>(local_player_)].faction;
+        if (f == f0 || f == rules_->find_faction(faction)) break;  // P1 looked up by name each round (0x3303d0)
+    }
+    return local_player_;
+}
+
 }  // namespace alamo::galactic

@@ -6,7 +6,8 @@
 // Bound here:
 //   LandTaskForceClass / SpaceTaskForceClass: Attack_Move, Attack_Target, Guard_Target, Explore_Area,
 //     Reinforce, Build_All, Build, Get_Reserved_Build_Pads, Fire_Special_Weapon, Prepare_Ambush,
-//     Get_Distance, Enable_Attack_Positioning, Release_Reinforcements;
+//     Get_Distance, Enable_Attack_Positioning (land: argument checks, then the host; space: retail's no-op),
+//     Release_Reinforcements;
 //   TaskForceClass: Get_Self_Threat_Max, Get_Self_Threat_Sum, Withdraw_Units, Set_Targeting_Priorities;
 //   globals: FindDeadlyEnemy, Get_Most_Defended_Position, Project_By_Unit_Range;
 //   GameObjectWrapper.Is_Good_Against, GameObjectWrapper.Should_Switch_Weapons (false: open item 6).
@@ -95,6 +96,15 @@ public:
                                       double /*threat*/, bool /*zone_path*/, std::string* /*name*/) {
         return -1;
     }
+
+    // ---- mcx6 t06 (docs/re/LUA_API.md "Task force: Enable_Attack_Positioning and Release_Reinforcements") ----
+    // LandTaskForceClass.Enable_Attack_Positioning(flag) (0x6eaa80), after the binding's argument checks: `on` becomes the
+    // UnitAI attack-positioning flag of every unit in the task force now (list order) that has UNIT_AI. Default: nothing.
+    // (The space method is retail's shared no-op 0x17d070 and never reaches the host.)
+    virtual void tf_enable_attack_positioning(int32_t /*tf*/, bool /*on*/) {}
+    // Release_Reinforcements() (0x6e8a70, land and space): the reinforcement-pool reservations of the task force's accepted
+    // tactical plan are freed until its next Commit. Default: nothing.
+    virtual void tf_release_reinforcements(int32_t /*tf*/) {}
 };
 
 // Makes `host` reachable from `vm`'s tactical bindings (nullptr detaches). Owner thread only.

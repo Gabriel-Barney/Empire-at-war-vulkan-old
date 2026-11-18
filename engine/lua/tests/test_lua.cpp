@@ -585,6 +585,71 @@ static void test_static_scan() {
 }
 
 // ------------------------------------------------------------------------------------------
+// mcx6 t07 (docs/re/LUA_API.md "Script lookup and require"): LUA_PATH order and stock 5.0.2 require.
+
+namespace {
+class MapFiles final : public FileProvider {
+public:
+    std::map<std::string, std::string> files;  // exact game-relative path -> text
+    mutable std::vector<std::string> reads;     // every read attempt, in order
+    bool read(std::string_view path, std::vector<uint8_t>& out) const override {
+        reads.emplace_back(path);
+        const auto it = files.find(std::string(path));
+        if (it == files.end()) return false;
+        out.assign(it->second.begin(), it->second.end());
+        return true;
+    }
+    bool exists(std::string_view path) const override { return files.count(std::string(path)) != 0; }
+    std::string origin(std::string_view) const override { return "test"; }
+};
+}  // namespace
+
+static void test_script_lookup_and_require() {
+    // Roots in registration order (boot init, AI scan, evaluator scan); the install folder first; .lua before .lc.
+    const std::vector<std::string_view> roots(script_roots().begin(), script_roots().end());
+    CHECK(roots.size() == 11 && roots.front() == "Data\\Scripts\\Library\\" && roots[4] == "Data\\Scripts\\Story\\" &&
+          roots[5] == "Data\\Scripts\\AI\\" && roots.back() == "Data\\Scripts\\Evaluators\\");
+    MapFiles f;
+    std::vector<uint8_t> bytes;
+    CHECK(read_script(f, "Nope", bytes).empty());
+    std::vector<std::string> want{"Nope.lua", "Nope.lc"};
+    for (const std::string_view r : roots) {
+        want.push_back(std::string(r) + "Nope.lua");
+        want.push_back(std::string(r) + "Nope.lc");
+    }
+    CHECK(f.reads == want);
+    f.files["Data\\Scripts\\AI\\Plan.lua"] = "x = 1";
+    f.files["Data\\Scripts\\Library\\Plan.lc"] = "x = 2";  // an earlier root shadows the plan's own file (.lc included)
+    CHECK(read_script(f, "Plan", bytes) == "Data\\Scripts\\Library\\Plan.lc");
+    f.files["Data\\Scripts\\Library\\Plan.lua"] = "x = 3";  // .lua before .lc in one directory
+    CHECK(read_script(f, "Plan", bytes) == "Data\\Scripts\\Library\\Plan.lua");
+    f.files["Plan.lc"] = "x = 4";  // the install folder ("./") before every root
+    CHECK(read_script(f, "Plan", bytes) == "Plan.lc");
+
+    // require: _LOADED[name] is set after a successful run to the chunk's result (nil -> true, false kept), a chunk that
+    // raises leaves no entry (a later require runs it again), _REQUIREDNAME is the name during the run and restored after.
+    f.files["Data\\Scripts\\Library\\ModA.lua"] =
+        "a_seen = _LOADED['ModA'] == nil; a_name = _REQUIREDNAME; require('ModB'); a_after = _REQUIREDNAME; a_runs = (a_runs or 0) + 1";
+    f.files["Data\\Scripts\\Library\\ModB.lua"] = "b_name = _REQUIREDNAME; return 'bee'";
+    f.files["Data\\Scripts\\Library\\ModF.lua"] = "return false";
+    f.files["Data\\Scripts\\Library\\Bad.lua"] = "bad_runs = (bad_runs or 0) + 1; if bad_runs == 1 then error('first') end";
+    LuaHost host;
+    host.files = &f;
+    LuaVm vm(host);
+    CHECK(run(vm, "_REQUIREDNAME = 'outer'; r = require('ModA'); r2 = require('ModA'); rb = require('ModB')") == "");
+    CHECK(run(vm, "assert(a_seen == true and a_name == 'ModA' and b_name == 'ModB' and a_after == 'ModA' and a_runs == 1)") == "");
+    CHECK(run(vm, "assert(r == true and r2 == true and rb == 'bee' and _LOADED.ModA == true and _LOADED.ModB == 'bee')") == "");
+    CHECK(gstr(vm, "_REQUIREDNAME") == "outer");
+    CHECK(run(vm, "f1 = require('ModF'); f2 = require('ModF'); assert(f1 == false and _LOADED.ModF == false)") == "");
+    CHECK(run(vm, "require('Bad')").find("first") != std::string::npos);
+    // (5.0.2 restores _REQUIREDNAME only after a successful run: the error left it at "Bad")
+    CHECK(run(vm, "assert(_LOADED.Bad == nil and _REQUIREDNAME == 'Bad'); require('Bad'); assert(bad_runs == 2 and _LOADED.Bad == true)") ==
+          "");
+    std::string err;
+    CHECK(vm.require("ModB", &err) && run(vm, "assert(_LOADED.ModB == 'bee')") == "");
+}
+
+// ------------------------------------------------------------------------------------------
 // Shipped scripts (ALAMO_FOC_DATA / ALAMO_EAW_DATA).
 
 using ::alamo::test::env_or_empty;
@@ -724,6 +789,7 @@ int main() {
     test_objects();
     test_owner_thread();
     test_static_scan();
+    test_script_lookup_and_require();
     test_shipped_scripts("ALAMO_FOC_DATA", "foc");
     test_shipped_scripts("ALAMO_EAW_DATA", "eaw");
     if (g_fail) {

@@ -5,6 +5,7 @@
 // writes sim state, draws random numbers or changes anything a sim CRC hashes.
 // Argument contracts and messages: docs/re/LUA_API.md "Binding map" (the original's own strings).
 // Behaviour the docs do not give is marked [inferred].
+// Exception (mcx6 t05): Promote_To_Space_Cinematic_Layer moves the object (TacticalScriptHooks::teleport).
 // Exception (story t12): Resume_Hyperspace_In also clears the host's reinforcement hold through
 // TacticalScriptHooks::resume_hyperspace_in (script_gaps.hpp) when a tactical host installed it; likewise (cu8g t03)
 // Set_New_Environment changes the mode's environment through TacticalScriptHooks::set_new_environment.
@@ -377,14 +378,31 @@ int g_set_new_environment(Call& c) {
     return 0;
 }
 
+// mcx6 t05 (docs/re/MCX6_T05_CINEMATIC_BINDINGS.md §3, 0x5433f0): the object moves to its own position raised by 20000 on z
+// (the cinematic layer above the battlefield) through the reposition 0x3abb80, which Teleport uses too: the tactical host's
+// TacticalScriptHooks::teleport (store, movement, combat, trees), the facing kept; without one the store position. Its
+// cinematic camera keys and the scripts' Get_Position then see the raised object. [port] Retail's "Command only valid in
+// a (land or space) tactical game." refusals are not raised (no galactic script calls it).
+// binding-effect: Promote_To_Space_Cinematic_Layer full z + 20000 through TacticalScriptHooks::teleport (docs/re/MCX6_T05_CINEMATIC_BINDINGS.md §3)
 int g_promote_to_space_cinematic_layer(Call& c) {
     if (!c.has(1)) return c.script_error_stop("LuaPromoteToSpaceCinematicLayer -- Expected gameobject parameter 1");
     if (!is_object(c, 1)) return c.script_error_stop("LuaPromoteToSpaceCinematicLayer -- Invalid parameter 1, expected a game object");
     record(c, PresentationOp::PromoteToSpaceCinematicLayer);
+    const detail::Ud* ud = engine_ud(c, 1);
+    objects::ObjectStore* st = c.vm->host.store;
+    if (!st || !detail::object_alive(*c.vm, *ud)) return 0;
+    const objects::ObjectHandle h = detail::object_handle(*ud);
+    Vec3 p = st->position(h);
+    p.z += 20000.0f;
+    if (ObjectBridge* b = c.vm->owner ? attached_object_bridge(*c.vm->owner) : nullptr; b && b->tactical && b->tactical->teleport)
+        b->tactical->teleport(h, p, st->facing(h));
+    else
+        st->set_position(h, p);
     return 0;
 }
 
-// [inferred] recorded only: what the original resets is not documented.
+// Do_End_Cinematic_Cleanup() (0x541e20; MCX6_T05_CINEMATIC_BINDINGS §2): recorded; the game host hides the objects it
+// cleans up (GameSession::script_cinematics). [port] The sim part (behaviours suspended, moved to (1, 1, 0)) is not done.
 int g_do_end_cinematic_cleanup(Call& c) {
     record(c, PresentationOp::DoEndCinematicCleanup);
     return 0;

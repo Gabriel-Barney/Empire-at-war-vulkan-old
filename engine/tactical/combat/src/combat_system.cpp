@@ -416,6 +416,19 @@ ObjectId CombatSystem::attack_goal(ObjectId id) const {
     return u ? u->goal_target : kNoObject;
 }
 
+int32_t CombatSystem::attack_goal_hardpoint(ObjectId id) const {
+    const Unit* u = unit(id);
+    return u && u->goal_target != kNoObject ? u->goal_hp : -1;
+}
+
+float CombatSystem::extent_2d(ObjectId id) const {
+    const Unit* u = unit(id);
+    if (!u) return 0.0f;
+    float ex = 0.0f, ey = 0.0f;
+    (void)footprint_extents(*u, ex, ey);
+    return dmath::sqrt(ex * ex + ey * ey);
+}
+
 ObjectId CombatSystem::weapon_aim(ObjectId id) const {
     const Unit* u = unit(id);
     return u ? u->aim_target : kNoObject;

@@ -306,6 +306,14 @@ uint8_t particle_glow_group(std::string_view n) {
     return g;
 }
 
+uint8_t particle_emitter_groups(std::string_view n) {
+    static constexpr std::string_view kPrefix[8] = {"pe", "pte", "pi", "pgw", "pas", "pptw", "pem", "prs"};
+    uint8_t g = 0;
+    for (uint32_t i = 0; i < 8; ++i)
+        if (ascii_istarts_with(n, kPrefix[i])) g = static_cast<uint8_t>(g | (1u << i));
+    return g;
+}
+
 float engine_glow_flicker(uint32_t timer_frames) {
     // n = a fixed value in [-1, 1] per lattice point x = 2 x frames left (murmur-style integer hash) [port]
     uint32_t x = timer_frames * 2u;

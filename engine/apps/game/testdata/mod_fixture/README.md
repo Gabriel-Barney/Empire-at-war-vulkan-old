@@ -14,7 +14,7 @@ Read only: the tests never write here.
   Locations next to one with planets (a menu entry, a warning: retail lists such campaigns); a scoring script that
   sets the GlobalValue `CHECKS_MOD_ID` only in `Base_Definitions`, a GameObject script whose main chunk fails on that
   unset value (session-dependent), and one whose main chunk fails on a key no script sets (a real run error).
-  mcx0 (report v4): `ChecksStory.xml`, a plot no campaign names, uses a reward the port lacks (`SWITCH_SIDES`), an event
+  mcx0 (report v4): `ChecksStory.xml`, a plot no campaign names, uses `SWITCH_SIDES` (a reward the port lacked until mcx6), an event
   type it dispatches partly (`STORY_WIN_BATTLES`), a reward retail does not know and a commented-out event; the scoring
   script calls `StringCompare` (a `partial` binding: the port guessed part of it) in a function nothing runs.
 - `FixtureSub` (t16) is a submod of `FixtureMod`: its lists name `ModObjects.xml` and `ModFactions.xml`, which only

@@ -258,6 +258,23 @@ EconomyConstants load_economy_constants(const data::GameDatabase& db) {
     float_list("Particle_Energy_Per_Corruption_Level", c.particle_energy_per_level);
     if (auto t = g.get("Good_Side_Name")) c.good_side_name = std::string(ascii_trim(*t));  // REMAINING_GAPS 1.5
     if (auto t = g.get("Evil_Side_Name")) c.evil_side_name = std::string(ascii_trim(*t));  // modc t20 (presentation)
+    {  // mcx6 RANDOM_STORY (STORY_REWARDS_GALACTIC §1.15)
+        const auto names = [&g](const std::string& tag, std::vector<std::string>& out) {
+            if (auto t = g.get(tag))
+                for (std::string_view tok : objects::split_type_list(*t)) out.emplace_back(ascii_trim(tok));
+        };
+        names("Random_Story_Triggers", c.random_story_triggers);
+        names("Random_Story_Rewards", c.random_story_rewards);
+        c.random_story_max_triggers = g.get_int("Random_Story_Max_Triggers", c.random_story_max_triggers);
+        const char* sides[2] = {"Rebel", "Empire"};  // [name-ok: parts of retail's GameConstants tag names Random_Story_<side>_*]
+        for (size_t s = 0; s < 2; ++s) {
+            const std::string side = sides[s];
+            names("Random_Story_" + side + "_Construction", c.random_story_construction[s]);
+            names("Random_Story_" + side + "_Destroy", c.random_story_destroy[s]);
+            names("Random_Story_Reward_" + side + "_Buildable", c.random_story_buildable[s]);
+            names("Random_Story_Reward_" + side + "_Unit", c.random_story_unit[s]);
+        }
+    }
     return c;
 }
 
@@ -281,6 +298,7 @@ std::vector<FactionRules> load_factions(const FileProvider& provider, std::vecto
             r.can_control_planets = objects::parse_type_bool(n.child_text("Can_Control_Planets"));
             r.is_playable = objects::parse_type_bool(n.child_text("Is_Playable"));
             r.benefits_from_corruption = objects::parse_type_bool(n.child_text("Benefits_From_Corruption"));
+            r.debug_switchable = objects::parse_type_bool(n.child_text("Is_Debug_Switchable_To"));  // mcx6 SWITCH_SIDES
             r.basic_ai = std::string(ascii_trim(n.child_text("Basic_AI")));
             r.text_id = std::string(ascii_trim(n.child_text("Text_ID")));
             r.tech_tree_dialog = std::string(ascii_trim(n.child_text("Tech_Tree_Dialog_Name")));

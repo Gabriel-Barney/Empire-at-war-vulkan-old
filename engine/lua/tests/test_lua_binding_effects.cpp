@@ -4,6 +4,7 @@
 //     gains a consumer must leave it (the test fails on a stale entry), and a new recorded binding needs a consumer;
 //   * NoopGap / NoopRetail / Partial rows cite their reason; binding_effect_gap() matches the rule.
 #include <algorithm>
+#include <array>
 #include <iterator>
 #include <string>
 #include <string_view>
@@ -16,18 +17,8 @@ using ::alamo::test::g_fail;
 
 namespace {
 
-constexpr std::string_view kUnconsumed[] = {
-    "Cancel_Fast_Forward",
-    "Do_End_Cinematic_Cleanup",
-    "GameObjectWrapper.Cinematic_Hyperspace_In",
-    "GameObjectWrapper.In_End_Cinematic",
-    "GameObjectWrapper.Play_Cinematic_Engine_Flyby",
-    "GameObjectWrapper.Show_Emitter",
-    "Promote_To_Space_Cinematic_Layer",
-    "Resume_Hyperspace_In",
-    "Set_Cinematic_Environment",
-    "Set_New_Environment",
-};
+// mcx6 t05 emptied it (the cinematic bindings, docs/re/MCX6_T05_CINEMATIC_BINDINGS.md); it stays as the ratchet.
+constexpr std::array<std::string_view, 0> kUnconsumed{};
 
 std::string key_of(const BindingInfo& b) {
     return b.kind == BindingKind::Global ? std::string(b.name) : std::string(b.cls) + "." + b.name;
@@ -39,7 +30,7 @@ int main() {
     size_t recorded = 0, gaps = 0, listed_seen = 0;
     for (const BindingInfo& b : binding_table()) {
         const std::string k = key_of(b);
-        const bool listed = std::find(std::begin(kUnconsumed), std::end(kUnconsumed), k) != std::end(kUnconsumed);
+        const bool listed = std::find(kUnconsumed.begin(), kUnconsumed.end(), k) != kUnconsumed.end();
         CHECK(b.consumer != nullptr);
         if (b.effect == BindingEffect::Recorded) {
             ++recorded;
@@ -58,7 +49,7 @@ int main() {
         CHECK(binding_effect_gap(b) == ((b.effect == BindingEffect::Recorded && b.consumer[0] == '\0') ||
                                         b.effect == BindingEffect::NoopGap || b.effect == BindingEffect::Partial));
     }
-    CHECK(listed_seen == std::size(kUnconsumed));
+    CHECK(listed_seen == kUnconsumed.size());
     CHECK(recorded >= 60);
     std::printf("bindings: %zu recorded, %zu with an effect gap\n", recorded, gaps);
     CHECK(std::string_view(to_string(BindingEffect::NoopRetail)) == "noop-retail");

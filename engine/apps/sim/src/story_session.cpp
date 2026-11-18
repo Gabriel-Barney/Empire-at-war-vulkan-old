@@ -1,5 +1,6 @@
 #include "alamo/sim/story_session.hpp"
 #include "alamo/sim/story_rewards.hpp"
+#include "story_random_story.hpp"  // mcx6 RANDOM_STORY
 
 #include <algorithm>
 #include <cstdio>
@@ -975,6 +976,10 @@ void StorySession::invade_planet_reward(int32_t plot_player, PlanetIndex planet,
 
 void StorySession::apply_reward(Set& s, const std::string& type, const std::vector<std::string>& params) {
     auto at = [&params](size_t i) { return i < params.size() ? params[i] : std::string(); };
+    {  // mcx6: the dispatcher's second argument (STATISTIC_CHANGE): the planet of the notification firing this event
+        const lua::StoryNotification* fn = s.model.firing_notification();
+        reward_firing_planet_ = fn ? fn->planet : std::string();
+    }
     if (type == "SET_TECH_LEVEL") {
         const int32_t player = sim_->player_of_faction(at(0));
         // REMAINING_GAPS 1.4 (0x461fc0): raises the max first when needed, then Set_Tech_Level with the sweep.
@@ -1254,6 +1259,11 @@ void StorySession::apply_reward(Set& s, const std::string& type, const std::vect
             }
         }
     }
+    else if (type == "PICK_PLANET") {
+        pick_planet(params);  // mcx6 (STORY_REWARDS_GALACTIC §1.16)
+    } else if (type == "RANDOM_STORY") {
+        random_story(s);  // mcx6 (§1.15)
+    }
     else if (apply_sty1_reward(s.player, tactical_ && tactical_->set.get() == &s, type, params)) {
     }  // STY1 lane B (src/story_rewards_apply.cpp)
     else if (const StoryRewardRow* row = find_story_reward(type); row && row->owner == StoryRewardOwner::Session) {
@@ -1266,6 +1276,141 @@ void StorySession::apply_reward(Set& s, const std::string& type, const std::vect
         note("reward " + type + " unknown (no row in the story reward table)");
     }
 }
+
+// --- mcx6: PICK_PLANET and RANDOM_STORY (docs/re/STORY_REWARDS_GALACTIC.md §1.15, §1.16) ---
+void StorySession::pick_planet(const std::vector<std::string>& params) {
+    // P1 FILTER name (exact; unknown = FILTER_NONE), P2 placeholder; both required (silent). The first planet in row order
+    // that passes the filter against the LOCAL player [port: row order stands in for the mode's planet object order].
+    const std::string p1 = params.size() > 0 ? std::string(ascii_trim(params[0])) : std::string();
+    const std::string p2 = params.size() > 1 ? std::string(ascii_trim(params[1])) : std::string();
+    if (p1.empty() || p2.empty()) return;
+    static constexpr std::string_view kFilters[] = {"FILTER_NONE",          "FILTER_FRIENDLY_ONLY",    "FILTER_NEUTRAL_ONLY",
+                                                    "FILTER_ENEMY_ONLY",    "FILTER_FRIENDLY_AND_NEUTRAL",
+                                                    "FILTER_ENEMY_AND_NEUTRAL", "FILTER_FRIENDLY_AND_ENEMY"};
+    int32_t filter = 0;
+    for (size_t i = 0; i < std::size(kFilters); ++i)
+        if (p1 == kFilters[i]) filter = static_cast<int32_t>(i);
+    const int32_t local = sim_->local_player();
+    PlanetIndex pick = kInvalidPlanet;
+    for (PlanetIndex i = 0; i < sim_->planets().size() && pick == kInvalidPlanet; ++i) {
+        const galactic::PlanetState& p = sim_->planets()[i];
+        if (!p.is_planet) continue;
+        const bool friendly = sim_->allied(local, p.owner);              // 0x39a230
+        const bool enemy = local >= 0 && sim_->relation(local, p.owner) == galactic::Relation::Enemy;  // 0x39a450
+        bool pass = true;
+        switch (filter) {
+        case 1: pass = friendly; break;
+        case 2: pass = !friendly && !enemy; break;
+        case 3: pass = enemy; break;
+        case 4: pass = !enemy; break;
+        case 5: pass = !friendly; break;
+        case 6: pass = friendly || enemy; break;
+        default: break;
+        }
+        if (pass) pick = i;
+    }
+    if (pick == kInvalidPlanet) return;  // no planet passes: nothing, no log
+    DefinitionEdit e;
+    e.kind = 1;
+    e.a = ascii_upper(p2);
+    e.b = planet_type_name(pick);
+    note("Replacing all instances of " + e.a + " with planet " + e.b);
+    // The current mode's story manager: the attached battle's tactical plot set, else every galactic plot set.
+    if (tactical_ && tactical_->set) {
+        tactical_->set->model.replace_placeholder(e.a, e.b);  // [port] not replayed after a mid-battle load
+        return;
+    }
+    apply_definition_edit(e);
+    def_edits_.push_back(std::move(e));
+}
+
+bool StorySession::apply_definition_edit(const DefinitionEdit& e) {
+    if (e.kind == 1) {
+        for (const auto& sp : sets_) sp->model.replace_placeholder(e.a, e.b);
+        return true;
+    }
+    if (e.kind != 0) return false;
+    Set* target = nullptr;
+    for (const auto& sp : sets_)
+        if (sp->number == e.set) target = sp.get();
+    if (!target) return false;
+    std::string err;
+    if (target->model.add_plot(e.a, e.b, true, {}, &err) == UINT32_MAX) {
+        note("RANDOM_STORY: " + err);
+        return false;
+    }
+    std::vector<lua::StoryModel*> models;  // the new plot joins the galactic plot table (q6 t03)
+    for (const auto& sp : sets_) models.push_back(&sp->model);
+    lua_->table.assign(std::move(models));
+    return true;
+}
+
+void StorySession::random_story(Set& s) {
+    // §1.15: pools from the current galaxy (the local player's view), plot Random_Plot_<k>, every draw on the free RNG.
+    const galactic::GalacticSim& g = *sim_;
+    const galactic::GalacticRules& rules = g.rules();
+    const int32_t local = g.local_player();
+    RandomStoryInput in;
+    in.local_player = local;
+    in.triggers = rules.constants.random_story_triggers;
+    in.rewards = rules.constants.random_story_rewards;
+    in.max_triggers = rules.constants.random_story_max_triggers;
+    // The side's lists: [0] Rebel for the Good_Side_Name faction, else [1] Empire [M].
+    size_t side = 1;
+    if (local >= 0 && static_cast<size_t>(local) < g.players().size()) {
+        const uint32_t f = g.players()[static_cast<size_t>(local)].faction;
+        if (f < rules.factions.size() && ascii_iequals(rules.factions[f].name, rules.constants.good_side_name)) side = 0;
+        in.local_credits = g.players()[static_cast<size_t>(local)].account.credits;
+    }
+    in.construction = rules.constants.random_story_construction[side];
+    in.destroy = rules.constants.random_story_destroy[side];
+    in.buildable = rules.constants.random_story_buildable[side];
+    in.unit = rules.constants.random_story_unit[side];
+    for (PlanetIndex i = 0; i < g.planets().size(); ++i) {
+        const galactic::PlanetState& p = g.planets()[i];
+        if (!p.is_planet || p.destroyed) continue;
+        RandomStoryInput::Planet rp;
+        rp.name = planet_type_name(i);
+        rp.owner = p.owner;
+        rp.ground_level = g.ground_base_level(i);
+        const int32_t slots = p.type < rules.types.size() ? rules.types[p.type].ground_structure_slots : -1;  // 0x372400 [M]
+        rp.ground_max = std::min(5, slots >= 0 ? slots : 5);
+        rp.space_level = p.starbase_level;
+        rp.space_max = g.max_starbase_level(i);
+        if (local >= 0 && p.owner == local) in.own_planets.push_back(std::move(rp));
+        else if (g.planet_revealed_raw(i)) in.other_planets.push_back(std::move(rp));
+    }
+    for (const objects::ObjectHandle h : g.store().all_objects()) {  // named heroes, object order
+        if (!g.store().alive(h)) continue;
+        const auto t = static_cast<uint32_t>(g.store().type(h));
+        if (t >= rules.types.size() || !rules.types[t].named_hero) continue;
+        if (g.store().owner(h) == local) in.own_heroes.push_back(rules.types[t].name);
+        else in.enemy_heroes.push_back(rules.types[t].name);
+    }
+    const uint32_t k = ++random_story_count_;
+    const RandomStoryPlot plot = build_random_story(k, in, rng_->free());
+    for (const std::string& line : plot.log) note(line);
+    // Plot player := the local player: the plot joins that player's set (the current mode's story manager); a running
+    // battle's tactical set takes it while a battle is attached [port: not replayed after a mid-battle load].
+    if (tactical_ && tactical_->set) {
+        std::string err;
+        if (tactical_->set->model.add_plot(plot.name, plot.xml, true, {}, &err) == UINT32_MAX) note("RANDOM_STORY: " + err);
+        return;
+    }
+    Set* target = &s;
+    for (const auto& sp : sets_)
+        if (sp->player == local) {
+            target = sp.get();
+            break;
+        }
+    DefinitionEdit e;
+    e.kind = 0;
+    e.set = target->number;
+    e.a = plot.name;
+    e.b = plot.xml;
+    if (apply_definition_edit(e)) def_edits_.push_back(std::move(e));
+}
+// --- end mcx6 ---
 
 // --- OI galactic (owner: galactic agent): story lock 0x4472a0 ---
 bool StorySession::autoresolve_locked(PlanetIndex planet) const {
@@ -1515,6 +1660,17 @@ void StorySession::hash(StateHasher& h) const {
         h.str(tactical_map_[1]);
     }
     hash_sty1(h);  // STY1 lane B: only once a rule reward changed something
+    if (!def_edits_.empty() || random_story_count_ != 0) {  // mcx6: PICK_PLANET / RANDOM_STORY (absent otherwise)
+        h.u32(0x4d435836u);  // "MCX6"
+        h.u32(random_story_count_);
+        h.u32(static_cast<uint32_t>(def_edits_.size()));
+        for (const DefinitionEdit& e : def_edits_) {
+            h.u32(e.kind);
+            h.u32(e.set);
+            h.str(e.a);
+            h.str(e.b);
+        }
+    }
 }
 
 // ============================================================================================ wave 2a
@@ -2133,7 +2289,7 @@ namespace {
 
 // 2 (stage 2): + the attached tactical story; 3 (q6 t14): + the holocron list (GALACTIC_DIALOGS §2.8). 1 and 2 still load
 // (with an empty holocron); 3 loads with default STY1 state.
-constexpr uint32_t kStorySaveVersion = 5;  // 5 (ui2 t06): + the DISABLE_RETREAT switches at the end of the STY1 block; 4 (STY1 lane B): + the story rule gates / tutorial state / reinforcement switches
+constexpr uint32_t kStorySaveVersion = 6;  // 6 (mcx6): + the definition edits after the clock, the mcx6 story gates at the end of the STY1 block; 5 (ui2 t06): + the DISABLE_RETREAT switches at the end of the STY1 block; 4 (STY1 lane B): + the story rule gates / tutorial state / reinforcement switches
 // "story.lua" (write_scripts): 1 galactic sets, 2 + the tactical set, 3 = 2 (it followed kStorySaveVersion), 4 (q6 t19):
 // each script's Lua state is a script block (alamo/lua/script_save.hpp, LUA_SAVE.md §2) instead of a bare LuaVm image.
 constexpr uint32_t kStoryScriptsVersion = 4;
@@ -2225,6 +2381,9 @@ std::string StorySession::save_blocker() const {
 void StorySession::write(ByteWriter& w) const {
     w.u32(kStorySaveVersion);
     w.u64(frame_).f64(seconds_);
+    // v6 (mcx6): the RANDOM_STORY counter and the plot definition edits, replayed before the plot sets are checked.
+    w.u32(random_story_count_).u32(static_cast<uint32_t>(def_edits_.size()));
+    for (const DefinitionEdit& e : def_edits_) w.u8(e.kind).u32(e.set).str(e.a).str(e.b);
     // Plot sets: identity (checked on read), poll state, fired-log cursor, the StoryModel.
     w.u32(static_cast<uint32_t>(sets_.size()));
     for (const auto& sp : sets_) {
@@ -2310,6 +2469,28 @@ bool StorySession::read(ByteReader& r) {
     if (version < 1 || version > kStorySaveVersion) return false;
     const uint64_t frame = r.u64();
     const double seconds = r.f64();
+    uint32_t random_story_count = 0;
+    std::vector<DefinitionEdit> def_edits;
+    if (version >= 6) {  // mcx6: replay the definition edits on the freshly started sets (they add plots: counts below)
+        random_story_count = r.u32();
+        const uint32_t n = read_count(r);
+        for (uint32_t i = 0; i < n && r.ok(); ++i) {
+            DefinitionEdit e;
+            e.kind = r.u8();
+            e.set = r.u32();
+            e.a = r.str();
+            e.b = r.str();
+            def_edits.push_back(std::move(e));
+        }
+        if (!r.ok()) return false;
+        // A session whose definitions already hold these edits (the save was read into the session that wrote it)
+        // keeps them; a freshly started one replays them in order.
+        if (def_edits_ != def_edits) {
+            if (!def_edits_.empty()) return false;
+            for (const DefinitionEdit& e : def_edits)
+                if (!apply_definition_edit(e)) return false;
+        }
+    }
     struct SetIn {
         bool credits_seen = false;
         float last_credits = 0.0f;
@@ -2517,6 +2698,8 @@ bool StorySession::read(ByteReader& r) {
     tactical_map_[1] = std::move(tactical_map1);
     autoresolve_disabled_ = autoresolve_disabled;
     autoresolve_planets_ = std::move(autoresolve_planets);
+    random_story_count_ = random_story_count;  // mcx6
+    def_edits_ = std::move(def_edits);
     gates_ = std::move(sty1.gates);  // STY1 lane B (defaults for a version-3 save)
     tutorial_ = std::move(sty1.tutorial);
     reinforce_off_ = std::move(sty1.reinforce_off);

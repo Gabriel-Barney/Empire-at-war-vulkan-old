@@ -80,6 +80,12 @@ const galactic::GalacticSim* GameSession::galaxy() const {
     return g ? g->sim() : nullptr;
 }
 
+bool GameSession::script_hidden(objects::ObjectId id) const {
+    if (battles_ && battles_->script_hidden(id)) return true;
+    const sim::TacticalBattle* b = battle();
+    return b && cinematics_.hidden(id, b->frame());  // mcx6 t05: a cinematic arrival before it shows, an end-cinematic cleanup
+}
+
 bool GameSession::take_reveal_sfx() {
     if (!host_) return false;
     sim::GameModeManager& m = host_->modes();
@@ -880,6 +886,9 @@ void GameSession::sync_rate_lock(sim::SimHost& h) {
         if (sim::StorySession* st = h.story())
             if (const lua::PresentationLog* log = st->presentation()) {
                 lock = log->state().cinematic_rate_lock();
+                // binding-consumer: Cancel_Fast_Forward (0x6aa1e0 -> HUD 0x2f4a80: fast mode back to normal speed, the
+                // fast-forward button reset; docs/re/MCX6_T05_CINEMATIC_BINDINGS.md §5). [port] The port's b_fast_forward has
+                // no pressed state to reset.
                 if (!log->state().fast_forward && h.pacing().fast()) h.pacing().set_fast(false);  // Lua Cancel_Fast_Forward
             }
 #endif

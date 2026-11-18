@@ -1098,6 +1098,7 @@ bool CampaignBattles::start_map_battle(galactic::BattleRequest r) {
     pending_map_ = std::move(map);
     pending_ = true;
     direct_ = true;
+    host_->scoring_map_battle();  // mcx6 t07 (GAME_SCORING.md §9.1): the scoring script sees no galactic mode
     return true;
 }
 
@@ -1896,8 +1897,34 @@ void CampaignBattles::story_tactical_reward(const std::string& type, const std::
     }
     const std::string p1 = text(0), p2 = text(1), p3 = text(2);
     if (p1.empty()) return;
+    // mcx6 (STORY_REWARDS_GALACTIC §1.11 - §1.13, §1.20); the story session checked the required parameters.
+    if (type == "FORCE_RETREAT") {
+        const int32_t player = g->sim()->player_of_faction(p1);
+        if (player < 0) return;
+        if (battle_->reward_force_retreat(player, g->sim()->local_player())) log_.push_back("Force retreat of player " + p1);
+        return;
+    }
+    if (type == "SET_SPAWN") {
+        battle_->reward_set_spawn(*tm, host_->random().synced(), p1, static_cast<float>(std::atof(p2.c_str())));
+        return;
+    }
     const objects::TypeIndex t = catalog_->types().resolve_name(p1);
-    if (t == objects::kNone) return;
+    if (t == objects::kNone) {
+        if (type == "SET_HEALTH") log_.push_back("Can't find type " + ascii_upper(p1));
+        else if (type == "DISABLE_SPECIAL_STRUCTURE") log_.push_back("Invalid structure " + p1 + " in DISABLE_SPECIAL_STRUCTURE");
+        return;
+    }
+    if (type == "SET_HEALTH") {
+        // P3 count: absent = 1, 0 = all, n = the first n, negative = 1.
+        const int32_t c = p3.empty() ? 1 : std::atoi(p3.c_str());
+        battle_->reward_set_health(*tm, t, std::atoi(p2.c_str()), c < 0 ? 1 : c);
+        return;
+    }
+    if (type == "DISABLE_SPECIAL_STRUCTURE") {
+        if (battle_->reward_disable_special_structure(*tm, t, std::atoi(p2.c_str()) != 0) == 0)
+            log_.push_back("Invalid structure " + p1 + " in DISABLE_SPECIAL_STRUCTURE");
+        return;
+    }
     if (type == "DESTROY_OBJECT") {
         if (!battle_->reward_destroy_object(*tm, t)) log_.push_back("Unable to find object " + p1 + " to destroy");
     } else if (type == "CHANGE_OWNER") {

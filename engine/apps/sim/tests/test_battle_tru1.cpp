@@ -9,6 +9,10 @@
 //   * spawners: two map huts of one type with Chance 0.5 -> exactly one is active; it keeps Quantity units alive and
 //     refills a killed one at the first service after Delay seconds; a pack hut makes its pack once and refills it only
 //     when the whole pack is gone.
+//   * mcx6 story rewards on the battle (STORY_REWARDS_GALACTIC §1.11 - §1.13): FORCE_RETREAT refuses the local player and
+//     starts the normal retreat for another, SET_HEALTH sets a percentage of the maximum (count 0 = all, n = the first n),
+//     SET_SPAWN re-balances a spawner type by its upper-case name, SET_PLANET_SPAWN's entry decides the battle planet's
+//     spawners at the first scan.
 // Each run is repeated at 4 workers: identical CRC logs.
 #include <algorithm>
 #include <cmath>
@@ -246,6 +250,9 @@ struct SpaceRun {
     int32_t pursue_checks = 0;
     bool pursue_ok = true;
     int64_t debris_life = -1;
+    // mcx6: FORCE_RETREAT of the local player refused (no retreat), of the defender accepted, a second one not made;
+    // SET_HEALTH 50 % of every frigate, then 100 % of the first only.
+    bool force_local_refused = false, force_again_refused = false, health_half = false, health_first_only = false;
 };
 
 SpaceRun run_space(const Data& d, int32_t workers) {
@@ -350,7 +357,31 @@ SpaceRun run_space(const Data& d, int32_t workers) {
                 if (running) ++out.pursue_checks;
                 if (std::fabs(fac - want) > 1e-6f) out.pursue_ok = false;
             }
-        if (!out.requested && b->retreat_block(0) == 0) out.requested = b->request_retreat(0);
+        if (f == 2) {  // mcx6 SET_HEALTH on the four S10_Frigate (T_Cruiser is another type)
+            const auto frig = static_cast<objects::TypeIndex>(type_of(d, "S10_Frigate"));
+            std::vector<objects::ObjectId> ids;  // creation order
+            for (const objects::ObjectHandle o : st.all_objects())
+                if (st.alive(o) && st.type(o) == frig && b->combat().has_unit(st.id(o))) ids.push_back(st.id(o));
+            std::sort(ids.begin(), ids.end());
+            bool full = !ids.empty();
+            for (const objects::ObjectId id : ids) full = full && b->combat().health(id) == b->combat().max_health(id);
+            out.health_half = full && b->reward_set_health(*tm, frig, 50, 0) == ids.size();
+            for (const objects::ObjectId id : ids)
+                out.health_half = out.health_half && b->combat().health(id) == b->combat().max_health(id) * 0.5f;
+            out.health_first_only = b->reward_set_health(*tm, frig, 150, 1) == 1 && !ids.empty() &&
+                                    b->combat().health(ids.front()) == b->combat().max_health(ids.front());
+            for (size_t i = 1; i < ids.size(); ++i)
+                out.health_first_only = out.health_first_only && b->combat().health(ids[i]) == b->combat().max_health(ids[i]) * 0.5f;
+            b->reward_set_health(*tm, frig, 100, 0);  // back to full: the rest of the run is unchanged
+        }
+        if (!out.requested && b->retreat_block(0) == 0) {
+            // mcx6 FORCE_RETREAT: player 0 is the local (human) player: refused, no retreat; with another local player the
+            // request is the normal one; a second reward while it runs makes no request.
+            bool accepted = true;
+            out.force_local_refused = b->reward_force_retreat(0, gs->local_player(), &accepted) && !accepted && b->retreating_player() < 0;
+            b->reward_force_retreat(0, 1, &out.requested);
+            out.force_again_refused = !b->reward_force_retreat(0, 1);
+        }
         // mid-flight save / load (units released and creeping, the debris piece alive)
         if (b->retreat_flight_state() == 2 && b->retreat_flight_counter() == 32) out.saved = state_round_trip(*b);
         if (b->retreat_flight_state() != 0) {
@@ -407,6 +438,9 @@ void test_space(const Data& d) {
     CHECK(a.release_counter.size() == 3 && a.release_counter[0] == 30 && a.release_counter[1] == 31 && a.release_counter[2] == 34);
     CHECK(a.completed && a.complete_frame_ok);
     CHECK(a.saved);
+    std::printf("  mcx6 FORCE_RETREAT: local refused %d, second refused %d; SET_HEALTH half %d, first only %d\n", a.force_local_refused,
+                a.force_again_refused, a.health_half, a.health_first_only);
+    CHECK(a.force_local_refused && a.force_again_refused && a.health_half && a.health_first_only);
     std::printf("  pursuit (trn1 t06): %d unit-frames checked during the countdown, ok %d\n", a.pursue_checks, a.pursue_ok);
     CHECK(a.pursue_checks > 0 && a.pursue_ok);
     std::printf("  debris: tracked %d (life %lld frames), moved %d, turned %d, particle followed %d, expired %d at %u (spawned %u), "
@@ -433,7 +467,10 @@ struct LandRun {
     uint32_t kill_frame = 0, refill_frame = 0;
 };
 
-LandRun run_land(const Data& d, int32_t workers) {
+// variant 0: the TRU1 run; 1: SET_SPAWN "T_HUT" 1.0 at frame 5 (both T_Hut on; "t_hut" matches nothing); 2: a
+// SET_PLANET_SPAWN entry (battle planet, "T_HUT", 0.0) in the story gates before the battle (both T_Hut off at the first
+// scan). Variants stop at frame 20.
+LandRun run_land(const Data& d, int32_t workers, int variant = 0) {
     LandRun out;
     jobs::JobSystem js(jobs::JobSystemConfig{workers});
     SimConfig cfg;
@@ -460,6 +497,16 @@ LandRun run_land(const Data& d, int32_t workers) {
                             },
                             opt);
     CHECK(battles.attach());
+    if (variant == 2) {
+        galactic::StoryGates g;
+        galactic::StoryGates::PlanetSpawn e;
+        e.planet = 1;
+        e.key = "T_HUT";
+        e.crc = crc32(e.key.data(), e.key.size());
+        e.chance = 0.0f;
+        g.planet_spawn.push_back(e);
+        gs->set_story_gates(g);
+    }
     std::vector<objects::ObjectHandle> up;
     for (objects::ObjectHandle h : gs->planets()[2].surface)
         if (gs->store().owner(h) == 1) up.push_back(h);
@@ -486,6 +533,10 @@ LandRun run_land(const Data& d, int32_t workers) {
         out.fought = true;
         objects::ObjectStore& st = tm->primary();
         const uint32_t f = b->frame();
+        if (variant == 1 && f == 5) {
+            CHECK(b->reward_set_spawn(*tm, host.random().synced(), "t_hut", 1.0f) == 0);  // the CRC of the upper-case name only
+            CHECK(b->reward_set_spawn(*tm, host.random().synced(), "T_HUT", 1.0f) == 2);
+        }
         out.spawners = b->indigenous_spawner_count();
         int32_t active = 0, decided = 0;
         for (size_t i = 0; i < b->indigenous_spawner_count(); ++i) {
@@ -532,7 +583,7 @@ LandRun run_land(const Data& d, int32_t workers) {
         out.active = active;
         out.decided = decided;
         if (f == 1000) out.saved = state_round_trip(*b);  // live spawners with spawned units: save / load
-        if (f > 1600) break;
+        if (f > 1600 || (variant != 0 && f >= 20)) break;
     }
     out.crc = host.crc_log();
     return out;
@@ -553,6 +604,13 @@ void test_land(const Data& d) {
     const auto dv = first_divergence(a.crc, w.crc);
     std::printf("  workers 4: %s\n", dv.message.c_str());
     CHECK(!dv.diverged);
+    // mcx6 SET_SPAWN / SET_PLANET_SPAWN
+    const LandRun s1 = run_land(d, 0, 1), s2 = run_land(d, 0, 2), s1w = run_land(d, 4, 1);
+    std::printf("  mcx6 SET_SPAWN 1.0: T_Hut decided %d active %d; SET_PLANET_SPAWN 0.0: decided %d active %d\n", s1.decided,
+                s1.active, s2.decided, s2.active);
+    CHECK(s1.fought && s1.decided == 2 && s1.active == 2);
+    CHECK(s2.fought && s2.decided == 2 && s2.active == 0);
+    CHECK(!first_divergence(s1.crc, s1w.crc).diverged);
 }
 
 }  // namespace

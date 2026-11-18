@@ -859,6 +859,15 @@ struct FakeTactical final : AiTacticalScriptHost {
     int32_t ambush = -1, ambush_calls = 0, ambush_target = -2, direction = -2;  // S7 t21 Prepare_Ambush
     double min_dist = 0.0, threat = 0.0;
     bool zone_path = false;
+    int32_t attack_pos_calls = 0, attack_pos_tf = -2;  // mcx6 t06
+    bool attack_pos_on = false;
+    std::vector<int32_t> released;
+    void tf_enable_attack_positioning(int32_t t, bool on) override {
+        ++attack_pos_calls;
+        attack_pos_tf = t;
+        attack_pos_on = on;
+    }
+    void tf_release_reinforcements(int32_t t) override { released.push_back(t); }
     int32_t tf_prepare_ambush(int32_t, const AiArg& t, int dir, double dist, double thr, bool zone, std::string* n) override {
         ++ambush_calls;
         ambush_target = t.target;
@@ -936,6 +945,30 @@ static void test_tactical_perception(const Db& db) {
     th.ambush = AiTacticalScriptHost::kAmbushTargetDead;
     CHECK(run(vm, "a7 = TF.Prepare_Ambush(AITarget, 'front', 250, 0.5)") == "" && gnil(vm, "a7") &&
           last_message_has(vm, "Target object is already dead") && th.direction == 0);
+    // mcx6 t06 (LUA_API.md "Task force: Enable_Attack_Positioning and Release_Reinforcements"): land 0x6eaa80 - exactly one
+    // argument (a nil counts), a boolean; the errors stop the script with retail's texts (two spaces after the full stop)
+    // and change nothing; no return value. The space method is retail's no-op 0x17d070 (no check, no message).
+    CHECK(run(vm, "e1 = TF.Enable_Attack_Positioning()") == "" && gnil(vm, "e1") && th.attack_pos_calls == 0 && vm.exit_requested() &&
+          last_message_has(vm, "SCRIPT ERROR: Enable_Attack_Positioning - Invalid number of parameters.  Expected 1, got 0"));
+    reset_script_threads(vm);
+    CHECK(run(vm, "TF.Enable_Attack_Positioning(true, true)") == "" && th.attack_pos_calls == 0 &&
+          last_message_has(vm, "Enable_Attack_Positioning - Invalid number of parameters.  Expected 1, got 2"));
+    CHECK(run(vm, "TF.Enable_Attack_Positioning(nil)") == "" && th.attack_pos_calls == 0 &&
+          last_message_has(vm, "SCRIPT ERROR: Enable_Attack_Positioning - Invalid type for parameter 1.  Expected boolean."));
+    const size_t typed = vm.messages().size();
+    CHECK(run(vm, "TF.Enable_Attack_Positioning(1)") == "" && th.attack_pos_calls == 0 && vm.messages().size() == typed + 1 &&
+          last_message_has(vm, "Invalid type for parameter 1.  Expected boolean."));
+    reset_script_threads(vm);
+    const size_t clean = vm.messages().size();
+    CHECK(run(vm, "e2 = TF.Enable_Attack_Positioning(true)") == "" && gnil(vm, "e2") && th.attack_pos_calls == 1 && th.attack_pos_tf == 3 &&
+          th.attack_pos_on && !vm.exit_requested() && vm.messages().size() == clean);
+    CHECK(run(vm, "TF.Enable_Attack_Positioning(false)") == "" && th.attack_pos_calls == 2 && !th.attack_pos_on);
+    set_task_force_global(vm, "STF", 4, AiTaskForceKind::Space);
+    CHECK(run(vm, "s1 = STF.Enable_Attack_Positioning(); STF.Enable_Attack_Positioning(1); STF.Enable_Attack_Positioning(true)") == "" &&
+          gnil(vm, "s1") && th.attack_pos_calls == 2 && !vm.exit_requested() && vm.messages().size() == clean);
+    // Release_Reinforcements (0x6e8a70, land and space): arguments ignored, no error path, nothing returned.
+    CHECK(run(vm, "r1 = TF.Release_Reinforcements(1, 'x'); STF.Release_Reinforcements()") == "" && gnil(vm, "r1") &&
+          th.released == (std::vector<int32_t>{3, 4}) && !vm.exit_requested() && vm.messages().size() == clean);
     attach_ai_tactical_host(vm, nullptr);
     const int32_t calls = th.calls;
     run(vm, "z = EvaluatePerception('Syn_Destroy_Desire', P, AITarget)");  // the players family's own path

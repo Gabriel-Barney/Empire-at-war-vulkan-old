@@ -1906,6 +1906,32 @@ size check still passes, and the spawn reads PP +0x120.
 - `Release_Reinforcements` is close to a no-op in retail, because the next Commit takes the slots back. A no-op in the
   port is a fair approximation unless the port models per-plan pool reservations [M].
 
+### Port status (mcx6 t06, 2026-11-17)
+
+- Bindings (`engine/lua/src/bind_ai_tactical.cpp`): land `Enable_Attack_Positioning` checks the count and the type with
+  the texts above (`script_error_stop`), then `AiTacticalScriptHost::tf_enable_attack_positioning`; the space method
+  stays the no-op (ledger `noop-retail`). `Release_Reinforcements` (land and space) calls
+  `tf_release_reinforcements`. [port] The count error prints the argument count where retail passes none to `%d`.
+- Flag and step (`engine/ai/tactical/src/tactical_ai.cpp`, `TacticalAiWorld::Impl::attack_pos`): the flag is set on the
+  task force's current members that have UNIT_AI; the record keeps +0x38, +0x34, +0x24 and the position, is saved
+  (tactical AI save 18 / 19) and hashed only once a record exists. +0x34 is the second UnitAI draw the battle host
+  already made (`BattleAi::unit_ai_second_`, battle.ai save 7 / 8; no new draw). The step runs in the AI update right
+  after the threat-grid service, for flagged objects in ascending id order [port: retail runs it in each object's own
+  service]. The formation attack target is `CombatSystem::attack_goal` (a TEAM container: its first member's); the
+  square choice is `attack_position_square` (`threat_grid.hpp`).
+- [port] The detach and the pushed position block are one `MoveToPositionFacing` order for the unit alone. The port has
+  no block stack, so the move replaces the formation's attack block (the unit then fires through its own targeting).
+- [port] Terrain check 0x4f48a0 [M]: while the land line test (`line_passable`, the unit's movement class) from the
+  position to T fails, the position moves 30 units toward T; then while the test from the unit to the position fails,
+  it moves 30 units back toward the unit (each walk ends at its end point). The step sizes and directions are guesses.
+- [port] The space Add_Force / removal clear of +0x38 has nothing to clear (a space world never sets the flag).
+- Re-path veto 0x4f5780: `BattleAi::follow_service` skips the object-follow re-path while members[0] (or its TEAM
+  container) has the flag. The fighter formation's re-path (space) needs no veto.
+- `Release_Reinforcements`: the port does model per-plan pool reservations (`pool_reserved`), so the call frees the
+  accepted plan's slots and the next Commit (`reserve_pp`) takes back those still free. [port] The port reserves a
+  plan's pool slots once (at accept) instead of at every Commit, so only the Lua-released keys are re-reserved.
+- Base FoC never calls the land method, so base-FoC goldens do not move.
+
 ## Script lookup and `require` (mcx6 Q12, 2026-11-17)
 
 Hand-written section (keep it when regenerating; it corrects the one-line "Script search path" at the top). Read with
@@ -2001,3 +2027,17 @@ REA from:
   0x245e30 makes a new one, so each script loads its modules itself.
 - 0x252160 reads `_LOADED`'s string keys only to hand them to the debug file-watcher callback 0x140b09d50 [L: whether
   the shipped build sets it].
+
+### Port status (mcx6 t07, 2026-11-17)
+
+- `require` (`engine/lua/src/lua_vm.cpp` `l_require`) is stock 5.0.2 as above: `_LOADED[name]` after a successful run,
+  `_REQUIREDNAME` saved / set / restored, nil -> true (false kept). Before, the port set `_LOADED[name] = true` before
+  the run. FoC and EaW have no require cycles and no duplicate script names (checked on the extracted text).
+- Lookup (`engine/lua/src/script_loader.cpp` `read_script`): `NAME.lua`, `NAME.lc` in the install folder, then in each
+  root in registration order (Library, GameObject, FreeStore, Miscellaneous, Story, AI, AI\SpaceMode, AI\LandMode,
+  AI\StoryArc, Interventions, Evaluators). [port] A name with a `.lua` / `.lc` extension is tried as given.
+- Discovery: the plan scan lists `*.lua` only (`list_plan_files`), evaluators load `Evaluators\<name>.lua`, so a
+  `.lc`-only plan or evaluator is never found, as retail. [port] The plan, evaluator and free-store loaders read the
+  discovered or named `.lua` file itself, not through `LUA_PATH` (no shadowing by an earlier root; a `.lc`-only free
+  store is not found). [port] A script's own file loaded that way gets no `_LOADED` entry (GameScoring, loaded with
+  `require`, does).

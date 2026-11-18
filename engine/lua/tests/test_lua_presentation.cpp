@@ -249,6 +249,31 @@ static void test_set_new_environment() {
     attach_object_bridge(vm, nullptr);
 }
 
+// mcx6 t05 (MCX6_T05_CINEMATIC_BINDINGS §3, 0x5433f0): Promote_To_Space_Cinematic_Layer moves the object to its own position
+// raised by 20000 - through the tactical teleport hook when one is installed, else the store position; recorded either way.
+static void test_promote_to_space_cinematic_layer() {
+    World w;
+    LuaHost h = w.host();
+    LuaVm vm(h);
+    PresentationLog log;
+    attach_presentation(vm, &log);
+    CHECK(run(vm, std::string(kFind) + "Promote_To_Space_Cinematic_Layer(marker)") == "");
+    const objects::ObjectHandle marker = w.store->find(1);
+    CHECK(w.store->position(marker).x == 10.0f && w.store->position(marker).y == 20.0f && w.store->position(marker).z == 20000.0f);
+    CHECK(log.events().size() == 1 && log.events()[0].op == PresentationOp::PromoteToSpaceCinematicLayer);
+    ObjectBridge bridge;
+    TacticalScriptHooks hooks;
+    std::vector<Vec3> moved;
+    hooks.teleport = [&moved](objects::ObjectHandle, Vec3 p, Vec3) { moved.push_back(p); };
+    bridge.tactical = &hooks;
+    attach_object_bridge(vm, &bridge);
+    CHECK(run(vm, "Promote_To_Space_Cinematic_Layer(trooper)") == "");
+    CHECK(moved.size() == 1 && moved[0].x == -5.0f && moved[0].y == 3.0f && moved[0].z == 20000.0f);
+    CHECK(contains(run(vm, "Promote_To_Space_Cinematic_Layer(5)"), "LuaPromoteToSpaceCinematicLayer -- Invalid parameter 1, expected a game object"));
+    CHECK(moved.size() == 1 && log.events().size() == 2);
+    attach_object_bridge(vm, nullptr);
+}
+
 static void test_argument_contracts() {
     World w;
     LuaHost h = w.host();
@@ -616,6 +641,7 @@ int main() {
     test_registry();
     test_argument_contracts();
     test_set_new_environment();
+    test_promote_to_space_cinematic_layer();
     test_object_effects();
     test_camera_positions();
     test_cinematic_sequence();

@@ -348,6 +348,36 @@ void SimInstanceBuilder::build(const InterpolatedFrame& frame, SimModelSource& m
                 }
             }
         }
+        // mcx6 t05: Show_Emitter's particle groups (set_emitter_source), before the glow rule, which owns pe / pte of its units.
+        if (emitters_ && m->asset && s.vis.layout()) {
+            EmitterOverride eo = emitters_(o.id);
+            if ((o.engine_flags & kEngineGlowUnit) != 0) {
+                eo.show = static_cast<uint8_t>(eo.show & ~0x03u);
+                eo.hide = static_cast<uint8_t>(eo.hide & ~0x03u);
+            }
+            if ((eo.show | eo.hide) != 0) {
+                const assets::ModelAsset& ma = *m->asset;
+                const HardpointLayout& lay = *s.vis.layout();
+                if (!s.use_combined) {
+                    const std::span<const uint8_t> base = s.vis.mask();
+                    s.combined.assign(base.begin(), base.end());
+                }
+                bool changed = false;
+                for (size_t p = 0; p < ma.proxies.size() && p < lay.proxies; ++p) {
+                    const size_t sub = lay.proxy_index(static_cast<uint32_t>(p));
+                    if (sub >= s.combined.size()) continue;
+                    const uint8_t g = particle_emitter_groups(ma.proxies[p].name);
+                    const uint8_t want = (g & eo.hide) != 0 ? uint8_t{1} : (g & eo.show) != 0 ? uint8_t{0} : s.combined[sub];
+                    if (want != s.combined[sub]) {
+                        s.combined[sub] = want;
+                        changed = true;
+                    }
+                }
+                s.use_combined = true;
+                in.mesh_hidden = s.combined;
+                st.script_emitters += changed ? 1u : 0u;
+            }
+        }
         // bkx1 t05 (b0019 / b0020, BKX1_RENDER_RE §1): the SimpleSpace engine glow - the engine particle proxies by name
         // prefix (pe / pte / pi) hidden or shown on top of the mask above (engine_glow: TURBO picks pte over pe, engines
         // off hide G, ion stun shows pi). Only pi is ever un-hidden here: pe / pte keep the mask above, so a destroyed engine

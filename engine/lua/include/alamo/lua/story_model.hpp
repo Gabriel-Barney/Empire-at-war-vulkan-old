@@ -338,6 +338,16 @@ public:
     // LINK_TACTICAL, ...), before the dependants of the firing event are checked.
     std::function<void(uint32_t plot, uint32_t event, const std::string& type, const std::vector<StoryParam>& params)>
         on_reward;
+    // mcx6 STATISTIC_CHANGE (STORY_REWARDS_GALACTIC §1.17): the notification whose dispatch is firing events right now
+    // (the dispatcher's second argument, e.g. the planet of an Enter-family event); nullptr outside a dispatch (explicit
+    // fires, TRIGGER_EVENT, Lua). Cascaded fires see the same notification [M]. Transient: not saved, not hashed.
+    const StoryNotification* firing_notification() const { return firing_; }
+    // mcx6 PICK_PLANET (§1.16, 0x32ae50 -> event vf+0x30): in every plot of this model (active or not, in_table or not),
+    // every event whose own reward is not PICK_PLANET gets each of Reward_Param1..3 whose upper-cased text equals
+    // `placeholder_upper` replaced by `planet`; event parameters equal to it (upper-cased) are replaced first [M: retail
+    // does this for the event classes with a planet-name list]. Returns the number of replaced parameters; `log` gets one
+    // line per replacement ("EVENT <name>, Param <i>, replacing <old> with <new>").
+    uint32_t replace_placeholder(std::string_view placeholder_upper, std::string_view planet, std::vector<std::string>* log = nullptr);
     // GameObjectCategoryType name -> CategoryMask bit(s) (WIN/LOSE_BATTLES CLASS_* composition tests); unset or
     // 0 = unknown class (never contained).
     std::function<uint64_t(std::string_view category)> category_mask;
@@ -471,6 +481,7 @@ private:
     double time_ = 0.0;
     bool paused_ = false;
     uint32_t fire_depth_ = 0;   // recursion guard (cascades, TRIGGER_EVENT)
+    const StoryNotification* firing_ = nullptr;  // mcx6: firing_notification()
     uint32_t reset_depth_ = 0;  // RESET_BRANCH depth limit 3 (§4.5)
 };
 

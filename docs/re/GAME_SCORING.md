@@ -281,6 +281,21 @@ campaign's list and script (§1.2).
   autosave in galactic mode, then leave). So **`Player_Quit_Event` is never raised outside multiplayer**. Multiplayer is
   out of scope for the port, so the port needs no source for it.
 
+### 9.3 Port status (mcx6 t07, 2026-11-17)
+
+- Players: the port's scoring VM gets a player world of its own over the session galaxy's players
+  (`SimHost::start_galactic`, or the story's world) [port: stands in for the global PlayerList]. `create_scoring` runs
+  `Base_Definitions()` at the new session's `start_game`, before the galaxy's players are set up and before any world
+  is attached, so `Find_Player` answers nil there; every later call sees the players. [port] Retail errors on an
+  unknown faction even then; the port without a world answers nil.
+- A skirmish map battle runs over a scaffold galaxy in the port. `CampaignBattles::start_map_battle` calls
+  `SimHost::scoring_map_battle()`: the galaxy's queued `Game_Mode_Starting_Event("Galactic", ...)` is dropped, and
+  neither its `Game_Mode_Ending_Event` nor its `Galactic_*` event calls reach the script, so the script sees only the
+  tactical mode, as in retail. [port] The skirmish galaxy's players are the slot players plus Neutral and Hostile
+  (`make_skirmish_galaxy`), not one player for every faction without a slot. [port] Object lookups of the scoring VM
+  still search the galaxy's store, not the current mode's.
+- `Player_Quit_Event`: nothing in the port raises it (multiplayer only, §9.2).
+
 ## Port notes
 
 Minimum for the `MOD_ID` case:

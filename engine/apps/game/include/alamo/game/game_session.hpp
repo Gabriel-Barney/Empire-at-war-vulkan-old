@@ -52,6 +52,7 @@
 #include "alamo/galactic/special_systems.hpp"
 #include "alamo/game/game_data.hpp"
 #include "alamo/game/save_games.hpp"
+#include "alamo/game/script_cinematics.hpp"
 #include "alamo/jobs/job_system.hpp"
 #include "alamo/sim/campaign_battles.hpp"
 #include "alamo/sim/sim_host.hpp"
@@ -211,8 +212,12 @@ public:
     bool in_battle() const { return battle() != nullptr && host_->modes().top_tactical() != nullptr; }
     // q6 t19 (OBJECT_SCRIPTS §10.3): Lua Hide(true) on an object of the running battle (CampaignBattles::script_hidden).
     // Presentation only: the model, its particles, surface FX and fog ghost, the object's sounds, its radar blip and the
-    // mouse pick skip it; nothing here feeds the sim.
-    bool script_hidden(objects::ObjectId id) const { return battles_ && battles_->script_hidden(id); }
+    // mouse pick skip it; nothing here feeds the sim. mcx6 t05: also the script cinematics' hides (script_cinematics()).
+    bool script_hidden(objects::ObjectId id) const;
+    // mcx6 t05 (script_cinematics.hpp): the drawn state of Cinematic_Hyperspace_In / Do_End_Cinematic_Cleanup, fed by the
+    // game app from the story's presentation log; reset per battle by the app. Presentation only.
+    ScriptCinematics& script_cinematics() { return cinematics_; }
+    const ScriptCinematics& script_cinematics() const { return cinematics_; }
     // mcx6 t04: Lua Hide_Sub_Object on an object of the running battle (CampaignBattles::hidden_sub_objects).
     std::span<const std::string> hidden_sub_objects(objects::ObjectId id) const {
         return battles_ ? battles_->hidden_sub_objects(id) : std::span<const std::string>();
@@ -414,6 +419,7 @@ private:
     bool submit_special(commands::EventData ev);
     uint64_t ticks_ = 0;
     BattleOrderStats order_stats_;
+    ScriptCinematics cinematics_;  // mcx6 t05
     // N1 / t09 save / load.
     bool loading_ = false;  // start() runs for start_from_save (no skirmish opening order)
     // skm1 t01: a skirmish started on its map (not the attract demo, not the tests' skirmish_hop)

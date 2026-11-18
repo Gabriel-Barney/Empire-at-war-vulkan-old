@@ -167,6 +167,10 @@ inline constexpr uint8_t kGlowPe = 1, kGlowPte = 2, kGlowPi = 4;
 // SnapshotObject::engine_flags: a SimpleSpace-locomotor unit / its engines off / ion-stunned (apply_battle_state)
 inline constexpr uint8_t kEngineGlowUnit = 1, kEngineGlowOff = 2, kEngineGlowIonStun = 4;
 uint8_t particle_glow_group(std::string_view proxy_name);
+// mcx6 t05 (BKX1_RENDER_RE §1.1, Lua Show_Emitter 0x581120 -> 0x265ae0): all 8 particle prefix groups of the model wrapper,
+// bit i = the proxy name starts with prefix i (pe, pte, pi, pgw, pas, pptw, pem, prs; case-insensitive, prefix length only,
+// so "pem*" is in groups 0 and 6).
+uint8_t particle_emitter_groups(std::string_view proxy_name);
 // The SimpleSpace locomotor's per-service glow rule (0x626420, §1.2 / §1.5) and the death / ion-stun switches (§1.3) for
 // one unit. Inputs: SnapshotObject engine flags (kEngineGlow*), the timed disable's frames left (0 = none), v / V and
 // TURBO active. G = pte while TURBO is active, else pe; the other group is hidden.

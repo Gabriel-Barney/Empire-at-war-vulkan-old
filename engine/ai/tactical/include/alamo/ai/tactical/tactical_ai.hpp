@@ -136,6 +136,16 @@ struct TacticalAiObject {
     // when the UNIT_AI object was created (draw_unit_ai_stamps). Every host draws it; the default 0 (a stamp at or
     // before the first service) makes the first check run at the object's first service, as a drawn stamp does.
     int32_t reprojection_stamp = 0;
+    // mcx6 t06 (docs/re/LUA_API.md "Task force: Enable_Attack_Positioning and Release_Reinforcements"): the UnitAI data pack's
+    // attack-positioning stamp (+0x34, UnitAiStamps::second as the host drew it at creation; the world takes its own copy
+    // when a task force first sets the object's flag), and the unit formation's attack target (0x41a2e0): object id (-1
+    // none; a TEAM container: its first member's, ascending id), the aimed point (the target's position, or the named hard
+    // point's world position) and the target's 2-D extent (0x3982b0). Not saved: every fill() sets them again before the
+    // attack-positioning step reads them.
+    int32_t attack_position_stamp = 0;
+    int32_t formation_target = -1;
+    Vec3f formation_target_point;
+    float formation_target_extent = 0.0f;
 };
 
 // One entry of a player's reinforcement pool (campaign: units in orbit = the battle's reserves; skirmish: the
@@ -335,6 +345,10 @@ public:
         int32_t type = -1;  // PerceptionWorld type index
     };
     virtual std::vector<ProductionCompleted> production_completed() { return {}; }
+    // mcx6 t06 (LUA_API.md "Attack position 0x4f5390", terrain check 0x4f48a0 [M]): the land terrain line test 0x5a4c10 for
+    // the movement class of `object_id` (a TEAM container: its first member's) from `a` to `b`, 2-D. Default: always clear
+    // (no pull-back).
+    virtual bool attack_position_line_clear(int32_t /*object_id*/, const Vec3f& /*a*/, const Vec3f& /*b*/) { return true; }
 };
 
 // OPT2 t10: frames from a proposal slice to the apply of its PotentialPlan solves (TacticalAiConfig::pp_latency).
@@ -550,6 +564,9 @@ public:
     // Threat-grid point danger for `player` at (x, y) (0x653ff0; REMAINING_GAPS §4.2 movement threat mode). Const;
     // safe between AI ticks (the battle's movement planning).
     float point_danger(int32_t player, float x, float y) const;
+    // mcx6 t06: the UnitAI attack-positioning flag (data pack +0x38) of object `object_id`, set by a land task force's
+    // Enable_Attack_Positioning (LUA_API.md). The formation re-path veto 0x4f5780 reads it (BattleAi::follow_service).
+    bool attack_positioning(int32_t object_id) const;
     // q6 land end (diagnostics only, never hashed): the value of perception equation `equation` for AI player `player`
     // with Variable_Target = that player's live unit target of object `target_object` (-1: no target), on the last
     // update's PerceptionWorld. The leaf cache is read, never written (LeafCacheReadOnly); no RNG (an equation that

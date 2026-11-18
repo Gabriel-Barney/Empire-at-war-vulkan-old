@@ -234,9 +234,11 @@ void App::lua_presentation() {
     sim::StorySession* story = session_ ? session_->host().story() : nullptr;
     lua::PresentationLog* log = story ? story->presentation() : nullptr;
     if (!log) return;
+    script_cinematic_frame();  // mcx6 t05: a new battle forgets the last one's cinematic state
     for (const lua::PresentationEvent& e : log->events()) {
         if (e.seq < lua_seq_) continue;
         lua_seq_ = e.seq + 1;
+        script_cinematic_event(e, *log);  // mcx6 t05
         if (e.op == lua::PresentationOp::PlayBinkMovie && !e.args.empty()) {
             const std::string& name = e.args.front().text;
             const std::string up = ascii_upper(name);
@@ -263,6 +265,19 @@ void App::lua_presentation() {
         }
     }
     audio_.apply_presentation(log->events(), &lua_audio_seq_);
+    {  // mcx6 t05: Cinematic_Hyperspace_In arrival sounds due this frame (0x5c9a80 timer 45: delay + 20 frames after the call)
+        const sim::TacticalBattle* b = battle();
+        const sim::TacticalMode* tm = session_->host().modes().top_tactical();
+        if (b && tm) {
+            std::vector<objects::ObjectId> due;
+            session_->script_cinematics().take_arrival_sfx(b->frame(), due);
+            const objects::ObjectStore& st = tm->primary();
+            for (const objects::ObjectId id : due) {
+                const objects::ObjectHandle h = st.find(id);
+                if (st.alive(h)) audio_.cinematic_arrival(static_cast<uint64_t>(id), st.owner(h), st.position(h));
+            }
+        }
+    }
 #ifdef ALAMO_UI_HAVE_LUA
     // HUD_GAPS §5.2: Lua GUI_Component_* (mods only; vanilla ships no GUI scripts) override the HUD's own state. The log
     // only grows within a story: the calls past the ones already applied go to the current screen's HUD.
@@ -283,6 +298,66 @@ void App::lua_presentation() {
 #endif
 #endif
 }
+#ifdef ALAMO_SIM_HAVE_STORY
+// mcx6 t05 (docs/re/MCX6_T05_CINEMATIC_BINDINGS.md): a new battle (another TacticalBattle, or its frame went back: a load)
+// starts with no cinematic arrival or cleanup state.
+void App::script_cinematic_frame() {
+    const sim::TacticalBattle* b = battle();
+    if (!b) return;
+    if (b != cine_battle_ || b->frame() < cine_frame_) session_->script_cinematics().reset();
+    cine_battle_ = b;
+    cine_frame_ = b->frame();
+}
+
+// mcx6 t05: one Lua presentation event of the running battle (read between ticks; presentation only, rule 3).
+//   Cinematic_Hyperspace_In(delay)  space battles (0x574e50 is space-only): the model hidden until delay + 10 frames, the
+//                                   arrival sound at delay + 20 (lua_presentation, take_arrival_sfx). [port] The ship is
+//                                   not moved in from its hyperspace start point (the port's reinforcement arrivals are
+//                                   not either), and the locomotor checks of 0x574e50 are not made.
+//   Do_End_Cinematic_Cleanup()      the locomotor objects of every player but the neutral one, unless In_End_Cinematic(true)
+//                                   marked them, are hidden for the rest of the battle (0x541e20 / 0x38ed10). [port] Their
+//                                   behaviours are not suspended and they are not moved to (1, 1, 0) (sim state).
+//   Play_Cinematic_Engine_Flyby()   the type's SFXEvent_Ambient_Moving attached to the object (0x57ea50).
+void App::script_cinematic_event(const lua::PresentationEvent& e, const lua::PresentationLog& log) {
+    using Op = lua::PresentationOp;
+    using Kind = lua::PresentationArg::Kind;
+    const sim::TacticalBattle* b = battle();
+    const sim::TacticalMode* tm = session_ ? session_->host().modes().top_tactical() : nullptr;
+    if (!b || !tm) return;
+    const objects::ObjectStore& st = tm->primary();
+    game::ScriptCinematics& sc = session_->script_cinematics();
+    switch (e.op) {
+        case Op::ObjectCinematicHyperspaceIn:
+            if (b->is_space() && e.args.size() >= 2 && e.args[0].kind == Kind::Object && e.args[1].kind == Kind::Number)
+                sc.hyperspace_in(e.args[0].id, static_cast<int32_t>(e.args[1].number), b->frame());
+            break;
+        case Op::DoEndCinematicCleanup: {
+            // binding-consumer: GameObjectWrapper.In_End_Cinematic (the cleanup's exemption: obj +0x3c9, PresentationState::in_end_cinematic)
+            std::vector<game::CleanupCandidate> cands;
+            for (const objects::ObjectHandle h : st.all_objects())
+                if (st.alive(h)) cands.push_back({st.id(h), st.owner(h), st.has_behavior(h, objects::beh::Locomotor)});
+            const galactic::GalacticSim* g = galaxy();
+            const std::map<int32_t, bool>& marks = log.state().in_end_cinematic;
+            const std::vector<objects::ObjectId> gone =
+                game::end_cinematic_cleanup_set(cands, g ? g->neutral_player() : -1, [&marks](objects::ObjectId id) {
+                    const auto it = marks.find(id);
+                    return it != marks.end() && it->second;
+                });
+            sc.end_cinematic_cleanup(gone);
+            break;
+        }
+        case Op::ObjectPlayCinematicEngineFlyby: {
+            if (e.args.empty() || e.args[0].kind != Kind::Object) break;
+            const objects::ObjectHandle h = st.find(e.args[0].id);
+            if (st.alive(h))
+                audio_.cinematic_engine_flyby(st.object_types(), st.type(h), static_cast<uint64_t>(e.args[0].id), st.position(h));
+            break;
+        }
+        default: break;
+    }
+}
+#endif
+
 // L1/S4 wave 1 (story_ui.hpp): this frame's UI notifications -> GameSession::notify_story_ui (a command; port_event hands
 // it to StorySession::notify_ui at the next command phase, so a replay sees the same story). Galactic screen: the
 // observed state (selection - a selected fleet with its member units [inferred: Param1 names unit types] -, selected

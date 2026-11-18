@@ -2147,6 +2147,66 @@ static void test_blob_shadows() {
     std::printf("blob shadows: %u types with Blob_Shadow_Material_Name, %u draw a blob at Shadow detail On\n", with_blob, blob_at_on);
 }
 
+// mcx6 t05: Lua Show_Emitter's particle prefix groups (BKX1_RENDER_RE §1.1) through the builder's emitter source.
+static void test_script_emitters() {
+    const std::string dir = (fs::temp_directory_path() / "alamo_render_r5_tests").string();
+    std::string err;
+    const auto w = render::make_synthetic_sim_world(dir, &err);
+    CHECK(w != nullptr);
+    if (!w) return;
+    CHECK(render::particle_emitter_groups("PE_Engine") == 0x01 && render::particle_emitter_groups("pte_x") == 0x02 &&
+          render::particle_emitter_groups("PEM_X") == 0x41 && render::particle_emitter_groups("pptw_glow") == 0x20 &&
+          render::particle_emitter_groups("prs") == 0x80 && render::particle_emitter_groups("pgw1") == 0x08 &&
+          render::particle_emitter_groups("pas") == 0x10 && render::particle_emitter_groups("p_smoke") == 0);
+    render::SnapshotTypeTable table;
+    table.build(w->types, objects::ModeKind::Land);
+    auto ma = std::make_shared<assets::ModelAsset>(*three_bone_model());
+    ma->name = "R5_EMITTERS.ALO";
+    ma->proxies.clear();
+    for (const char* n : {"PE_ENGINE", "PI_SPARK", "PEM_X"}) {  // proxy sub-objects 3, 4, 5 (after the 3 meshes)
+        assets::Proxy px;
+        px.name = n;
+        px.bone = 1;
+        px.hidden = std::string_view(n) == "PI_SPARK";  // the model hides the ion-stun sparks
+        ma->proxies.push_back(px);
+    }
+    render::GpuModel gm;
+    gm.asset = ma;
+    gm.max_alt = 1;
+    gm.mesh_hidden.assign(3, 0);
+    FakeModels models;
+    models.model = &gm;
+    render::SimInstanceBuilder b(table);
+    render::SimInstanceBuilder::EmitterOverride eo;
+    b.set_emitter_source([&](objects::ObjectId id) { return id == 9 ? eo : render::SimInstanceBuilder::EmitterOverride{}; });
+    render::InterpolatedFrame f;
+    f.tick = 1;
+    f.objects = {sobj(9, 0), sobj(10, 5)};
+    std::vector<render::Instance> main, bg;
+    render::SimInstanceStats st;
+    const auto hidden = [&](size_t i, size_t sub) { return main[i].mesh_hidden.size() > sub && main[i].mesh_hidden[sub] != 0; };
+    b.build(f, models, main, bg, &st);  // no override: the model's own flags
+    CHECK(main.size() == 2 && !hidden(0, 3) && hidden(0, 4) && !hidden(0, 5) && st.script_emitters == 0);
+    eo.hide = 0x01;  // Show_Emitter("Engines", false): pe* (PEM_X too, prefix length only), object 9 only
+    b.build(f, models, main, bg, &st);
+    CHECK(hidden(0, 3) && hidden(0, 4) && hidden(0, 5) && !hidden(1, 3) && st.script_emitters == 1);
+    eo.hide = 0;
+    eo.show = 0x05;  // Engines and Ion_Stun shown: the model-hidden sparks too
+    b.build(f, models, main, bg, &st);
+    CHECK(!hidden(0, 3) && !hidden(0, 4) && !hidden(0, 5) && hidden(1, 4) && st.script_emitters == 1);
+    eo.show = 0x01;
+    eo.hide = 0x40;  // a hide wins for a proxy in a shown and a hidden group (PEM_X: 0 and 6)
+    b.build(f, models, main, bg, &st);
+    CHECK(!hidden(0, 3) && hidden(0, 5));
+    // A SimpleSpace engine-glow unit: pe / pte are the glow rule's, the script's Engines hide does not apply.
+    eo.show = 0;
+    eo.hide = 0x01;
+    f.objects[0].engine_flags = render::kEngineGlowUnit;
+    f.objects[0].engine_speed_ratio = 1.0f;
+    b.build(f, models, main, bg, &st);
+    CHECK(!hidden(0, 3) && st.script_emitters == 0);
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     log::set_min_level(log::Level::Error);
@@ -2159,6 +2219,7 @@ int main() {
     test_snapshot_plumbing();
     test_oi_snapshot();
     test_builder();
+    test_script_emitters();
     test_oi_builder();
     test_stage2_builder();
     test_stealth_spring();

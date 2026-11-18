@@ -117,6 +117,20 @@ struct UnitAiStamps {
 // Makes the two draws (exactly two range_int calls on `rng`, the synchronized RNG, in the order above).
 UnitAiStamps draw_unit_ai_stamps(SimRng& rng, uint32_t frame);
 
+class TacticalPerceptionGrid;
+
+// mcx6 t06 (docs/re/LUA_API.md "Attack position 0x4f5390" [H for the flow]): the four d x d squares whose corners are
+// (x, y), (x - d, y), (x - d, y - d), (x, y - d) of the target point `t` (each square spans corner .. corner + d); the
+// enemy force of `self` in each (0x654290: the cells overlapping the square, cells_force with every category, enemy,
+// attenuator 0, no exclusion, no faction [M: these query parameters]); the lowest wins (strict <, so the first on a tie).
+// Result: that square's index (0..3), its force and its centre (corner + d / 2, z = 0). Const (no RNG).
+struct AttackSquare {
+    int index = 0;
+    float threat = 0.0f;
+    Vec3f centre;
+};
+AttackSquare attack_position_square(const TacticalPerceptionGrid& g, const PerceptionWorld& w, int32_t self, const Vec3f& t, float d);
+
 class TacticalPerceptionGrid {
 public:
     // Builds the grid (tactical mode start). `players` = player list size.

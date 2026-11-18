@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <span>
@@ -16,6 +17,7 @@
 #include "alamo/game/battle_fx.hpp"  // S8 t31: lobbing charge-up cues
 #include "alamo/game/game_data.hpp"
 #include "alamo/game/game_session.hpp"
+#include "alamo/game/script_cinematics.hpp"  // mcx6 t05
 #include "alamo/jobs/job_system.hpp"
 #include "alamo/render/fleet.hpp"
 #include "alamo/render/ability_fx.hpp"  // vis1 t06 ability target / status particles
@@ -257,6 +259,9 @@ private:
     // cu8g t03: the battle's active environment at the last capture (TacticalBattle::environment_index); prepare()
     // re-applies it on the scene (MapScene::set_environment) and the particle wind when it changed.
     uint32_t env_wanted_ = 0;
+    // mcx6 t05: the story's Show_Emitter state at the last capture (lua::PresentationState::emitters as particle group bits,
+    // game::emitter_overrides); the builder's emitter source reads it.
+    std::map<objects::ObjectId, game::EmitterGroups> emitter_groups_;
     std::vector<render::BeamInstance> script_beams_;  // ui2 t08
     bool fog_master_ = true, fog_distance_ = true;     // ui2 t08
     void apply_environment();

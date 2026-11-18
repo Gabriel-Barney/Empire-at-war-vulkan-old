@@ -222,6 +222,9 @@ struct TacPpRec {
     // byte PP +0x4c as the running-plan re-test leaves it (false once the contrast re-test failed).
     bool layer_space = false, layer_ground = false;
     bool contrast_failed = false;
+    // mcx6 t06 (LUA_API.md "Release_Reinforcements() (0x6e8a70)"): pool keys a Lua Release_Reinforcements freed from this
+    // reserved PP (ascending); its next Commit (reserve_pp, 0x6c2b20) takes back the ones still free, then the list empties.
+    std::vector<int32_t> lua_released;
 };
 // --- end A2 tactical ---
 
@@ -326,6 +329,19 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
     int32_t next_pp = 0;
     std::map<int32_t, int32_t> pool_reserved;  // reinforcement pool key -> PP handle
     std::map<int32_t, int32_t> pad_reserved;   // pad id -> PP handle
+    // mcx6 t06 (LUA_API.md "Task force: Enable_Attack_Positioning and Release_Reinforcements"): the UnitAI data pack's
+    // attack-positioning fields of the objects a land task force's Enable_Attack_Positioning reached (object id ->
+    // record; dropped when the object leaves the snapshot). Every other UNIT_AI object has the constructor's values (flag
+    // 0, the drawn +0x34 stamp, TacticalAiObject::attack_position_stamp), which nothing reads while the flag is 0.
+    struct AttackPositioning {
+        bool flag = false;     // +0x38
+        int32_t next = 0;      // +0x34: the frame of the next re-evaluation (wrapping, signed difference)
+        bool moving = false;   // +0x24: moving to the attack position
+        Vec3f pos;             // +0x28 / +0x2c / +0x30: the attack position
+    };
+    std::map<int32_t, AttackPositioning> attack_pos;
+    void attack_positioning_step();                                       // the UNIT_AI service part 0x4f6070 -> 0x4f6470
+    void attack_position(const PerceptionObject& o, const TacticalAiObject& f, Vec3f& pos);  // 0x4f5390 (+ 0x4f48a0)
     std::map<int32_t, uint32_t> handle_name_crc;  // perception handle -> CRC-32 of the target's name ('#' reseed) [M]
     // N1: read() kept a PerceptionWorld without types; relink() checks the host's against the saved count / digest.
     bool relink_types = false;
@@ -882,6 +898,9 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
     void tf_set_targeting_priorities(int32_t tf, std::string_view set) override {
         if (TfRec* t = tf_rec(tf)) t->priorities = std::string(set);  // [port] recorded; combat priority sets not switched
     }
+    // mcx6 t06 (LUA_API.md "Task force: Enable_Attack_Positioning and Release_Reinforcements").
+    void tf_enable_attack_positioning(int32_t tf, bool on) override;
+    void tf_release_reinforcements(int32_t tf) override;
     // S7 t21 Prepare_Ambush (AI_TACTICAL §7.3.1), after the binding's argument checks.
     int32_t tf_prepare_ambush(int32_t tf, const lua::AiArg& target, int direction, double min_dist, double threat, bool zone_path,
                               std::string* name) override;
@@ -1551,6 +1570,7 @@ void TacticalAiWorld::Impl::refresh(bool fill) {
     // removed (ascending id)
     for (const auto& [id, owner] : prev) {
         if (in(cur, id)) continue;
+        attack_pos.erase(id);  // mcx6 t06: the data pack goes with the object
         perc.grid().on_object_destroyed(id);
         perc.on_object_destroyed(id);
         for (auto& pa : ai)
@@ -1594,6 +1614,8 @@ void TacticalAiWorld::Impl::refresh(bool fill) {
     ALAMO_PROFILE_STEP(steps, "tac.perc.diff");
     // UNIT_AI service (every frame, registration order).
     perc.grid().service_all(w, mode_frame);
+    // mcx6 t06: the same service's attack-positioning step (0x4f6070 -> 0x4f6470) of the objects whose flag is set.
+    if (!attack_pos.empty()) attack_positioning_step();
     ALAMO_PROFILE_STEP(steps, "tac.perc.grid");
     // Order completion for the AI VMs' object states [port]: idle units lose Has_Active_Orders and the order lock;
     // Get_Attack_Target reads the combat target.
@@ -2202,6 +2224,15 @@ void TacticalAiWorld::Impl::reserve_pp(int32_t handle) {
         if (first && k.source == PpSource::Reinforcement) pool_reserved[k.ref] = handle;
         if (first && k.source == PpSource::Build) pad_reserved[k.ref] = handle;
     }
+    // mcx6 t06: the pool slots a Lua Release_Reinforcements freed are reserved again (vf +0xe0: a slot another PP took in
+    // between stays its; the result is ignored). [port] the port holds a PP's pool slots from its first reserve on rather
+    // than re-reserving PP +0x120 at every Commit, so only the Lua-released ones come back here.
+    if (it->second.lua_released.empty()) return;
+    uint32_t back = 0;
+    for (const int32_t key : it->second.lua_released) back += pool_reserved.emplace(key, handle).second ? 1u : 0u;
+    decide(it->second.player, "pp " + std::to_string(handle) + " takes back " + std::to_string(back) + " of " +
+                                  std::to_string(it->second.lua_released.size()) + " released pool slot(s)");
+    it->second.lua_released.clear();
 }
 
 // 0x6c0be0 at Commit start: the PP's +0x30 entries are cleared until 0x6c2d60 re-asserts them (§28.6 step 2).
@@ -2258,6 +2289,10 @@ void TacticalAiWorld::Impl::release_pp(int32_t handle, int32_t tf_def, bool free
         if (!m) continue;
         const auto r = m->find(k.ref);
         if (r != m->end() && r->second == handle) m->erase(r);
+        if (k.source == PpSource::Reinforcement) {  // mcx6 t06: released for good, not taken back at the next Commit
+            auto& lr = it->second.lua_released;
+            lr.erase(std::remove(lr.begin(), lr.end(), k.ref), lr.end());
+        }
     }
 }
 
@@ -2286,6 +2321,148 @@ void TacticalAiWorld::Impl::reinforce_joined(const TfRec& t, int32_t unit, int32
         decide(t.player, "pp " + std::to_string(handle) + ": reinforce unit " + std::to_string(unit) + " " + type_name(type) +
                              " fills a null slot");
     }
+}
+
+// ================================================================ mcx6 t06: attack positioning, Release_Reinforcements
+// docs/re/LUA_API.md "Task force: Enable_Attack_Positioning and Release_Reinforcements (mcx6 Q11)".
+
+// 0x6eaa80 after the binding's checks: the task force's unit list in list order; each object with UNIT_AI gets the flag
+// (0x4f6450, data pack +0x38). Land Add_Force / removal never touch it, so a later member does not get it and a released
+// one keeps it. [port] A space world never sets it (the space binding is retail's no-op 0x17d070), so the clear of the
+// space Add_Force / removal (0x6e4e30 / 0x6e8aa0) has nothing to clear and is not modelled. Retail does not null-check a
+// list entry's object; the port skips one that is gone.
+void TacticalAiWorld::Impl::tf_enable_attack_positioning(int32_t tf, bool on) {
+    TfRec* t = tf_rec(tf);
+    if (!t) return;
+    for (const ObjectHandle u : t->units) {
+        if (!store.alive(u)) continue;
+        const int32_t id = id_of(u);
+        const PerceptionObject* o = object(id);
+        if (!o || !o->has_unit_ai) continue;
+        auto it = attack_pos.find(id);
+        if (it == attack_pos.end()) {
+            if (!on) continue;  // the constructor's values already (flag 0)
+            AttackPositioning rec;
+            const TacticalAiObject* f = fact(id);
+            rec.next = f ? f->attack_position_stamp : 0;  // +0x34 as the host drew it at creation
+            it = attack_pos.emplace(id, rec).first;
+        }
+        it->second.flag = on;
+    }
+    decide(t->player, "tf " + t->name + (on ? " attack positioning on" : " attack positioning off"));
+}
+
+// 0x6e8a70 -> 0x6c24e0(PP): PP = the task force's plan's goal's PotentialPlan; only an accepted (PP +0x100, `reserved`)
+// tactical PP acts. Every reinforcement-pool slot that holds this PP is freed (free store vf +0xf0, store +0x88); the PP's
+// picks (+0x120) stay. The next Commit takes back the slots still free (reserve_pp), so another plan's solve can take
+// them only in between. Arguments ignored, nothing returned.
+void TacticalAiWorld::Impl::tf_release_reinforcements(int32_t tf) {
+    const TfRec* t = tf_rec(tf);
+    if (!t) return;
+    const auto pi = plans.find(t->plan);
+    if (pi == plans.end() || pi->second.pp < 0) return;
+    const int32_t handle = pi->second.pp;
+    const auto it = pps.find(handle);
+    if (it == pps.end() || !it->second.reserved) return;
+    std::vector<int32_t>& lr = it->second.lua_released;
+    uint32_t n = 0;
+    for (auto r = pool_reserved.begin(); r != pool_reserved.end();) {
+        if (r->second != handle) {
+            ++r;
+            continue;
+        }
+        if (!std::binary_search(lr.begin(), lr.end(), r->first)) lr.insert(std::upper_bound(lr.begin(), lr.end(), r->first), r->first);
+        r = pool_reserved.erase(r);
+        ++n;
+    }
+    decide(t->player, "tf " + t->name + " release reinforcements: pp " + std::to_string(handle) + " frees " + std::to_string(n) +
+                          " pool slot(s)");
+}
+
+namespace {
+constexpr uint32_t kAttackPositionFrames = 150;  // 0x4f6470: +0x34 := now + 150 (5 s at 30 fps) [H]
+constexpr float kAttackPositionPullStep = 30.0f;  // 0x4f48a0: 30 units per step [M]
+constexpr int kAttackPositionMaxSteps = 4096;     // [port] a bound for the pull-back walks
+
+// One step of `s` from p toward `to` (2-D, z kept); false when p reached `to` (it is set to `to`).
+bool step_toward(Vec3f& p, const Vec3f& to, float s) {
+    const float dx = to.x - p.x, dy = to.y - p.y;
+    const float len = std::sqrt(dx * dx + dy * dy);
+    if (!(len > s)) {
+        p.x = to.x;
+        p.y = to.y;
+        return false;
+    }
+    p.x += dx / len * s;
+    p.y += dy / len * s;
+    return true;
+}
+}  // namespace
+
+// 0x4f5390 (+ the land terrain check 0x4f48a0). T = the formation target point (the hard point's world position when the
+// attack names one); d = min(T's 2-D extent, half the unit's max attack range). Only with a threat grid (else `pos`
+// keeps its old value): pos = the centre of the lowest-threat d x d square around T (attack_position_square, threat_grid.hpp).
+// Land mode, [M] / [port] (LUA_API.md gives the shape, not the walk): while the terrain line test pos -> T fails, pos moves
+// 30 units toward T (at most to T); then while the line test unit -> pos fails, pos moves 30 units back toward the unit
+// (at most to the unit). Keep_Moving_In_Battle's corner variant is not modelled (unset in FoC).
+void TacticalAiWorld::Impl::attack_position(const PerceptionObject& o, const TacticalAiObject& f, Vec3f& pos) {
+    const TacticalPerceptionGrid& g = perc.grid();
+    if (!g.valid()) return;
+    const Vec3f tp = f.formation_target_point;
+    pos = attack_position_square(g, w, o.owner, tp, std::min(f.formation_target_extent, 0.5f * o.max_attack_range)).centre;
+    if (cfg.mode != TacticalMode::Land) return;
+    for (int i = 0; i < kAttackPositionMaxSteps && !host.attack_position_line_clear(o.id, pos, tp); ++i)
+        if (!step_toward(pos, tp, kAttackPositionPullStep)) break;
+    for (int i = 0; i < kAttackPositionMaxSteps && !host.attack_position_line_clear(o.id, o.position, pos); ++i)
+        if (!step_toward(pos, o.position, kAttackPositionPullStep)) break;
+    pos.z = 0.0f;
+}
+
+// The UNIT_AI service's attack-positioning part (0x4f6070 -> 0x4f6470), tactical modes, for every object whose flag is set
+// [port: ascending object id, after the threat-grid service of the same AI frame; retail runs it in each object's own
+// service]. Needs: a locomotor, a formation attack target, not both the unit and the target TEAM containers. Before frame
+// +0x34 nothing; when due: +0x24 := 0, +0x34 := now + 150, a new position (attack_position); when the unit is at least R
+// from it (2-D, R = the max attack range of the representative type, a TEAM container's lead member's) it leaves its
+// formation and walks there (+0x24 := 1). [port] The detach (0x424850) and the pushed position block (0x41fd30) are one
+// MoveToPositionFacing order for the unit alone through the AI pipeline (a TEAM container: its live members): the port has
+// no block stack, so the move replaces the formation's attack block instead of sitting above it; the unit then fires
+// through its own targeting (LUA_API.md "Net effect"). The +0x24 attack branch needs Keep_Moving_In_Battle (unset in FoC):
+// not modelled.
+void TacticalAiWorld::Impl::attack_positioning_step() {
+    struct Move {
+        int32_t id, owner, target;
+        Vec3f pos;
+    };
+    std::vector<Move> moves;
+    for (auto& [id, rec] : attack_pos) {
+        if (!rec.flag) continue;
+        const PerceptionObject* o = object(id);
+        const TacticalAiObject* f = fact(id);
+        if (!o || !f || !o->alive || !o->has_unit_ai || !o->mobile || f->formation_target < 0) continue;
+        const TacticalAiObject* tgt = fact(f->formation_target);
+        if (f->free_store.is_team && tgt && tgt->free_store.is_team) continue;
+        if (static_cast<int32_t>(mode_frame - static_cast<uint32_t>(rec.next)) < 0) continue;
+        rec.moving = false;
+        rec.next = static_cast<int32_t>(mode_frame + kAttackPositionFrames);
+        attack_position(*o, *f, rec.pos);
+        const float dx = rec.pos.x - o->position.x, dy = rec.pos.y - o->position.y;
+        if (!(std::sqrt(dx * dx + dy * dy) >= o->max_attack_range) || o->owner < 0) continue;
+        rec.moving = true;
+        moves.push_back({id, o->owner, f->formation_target, rec.pos});
+    }
+    for (const Move& m : moves) {  // after the walk: an order's callbacks never see the map half-updated
+        cmd::EventData ev(cmd::EventType::MoveToPositionFacing);
+        ev.set_f("x", m.pos.x).set_f("y", m.pos.y).set_f("z", m.pos.z).set_ids("units", std::vector<uint32_t>{static_cast<uint32_t>(m.id)});
+        char buf[128];
+        std::snprintf(buf, sizeof buf, "attack position unit %d target %d -> (%.1f, %.1f)", m.id, m.target, static_cast<double>(m.pos.x),
+                      static_cast<double>(m.pos.y));
+        order(m.owner, ev, buf);
+    }
+}
+
+bool TacticalAiWorld::attack_positioning(int32_t object_id) const {
+    const auto it = impl_->attack_pos.find(object_id);
+    return it != impl_->attack_pos.end() && it->second.flag;
 }
 
 // ================================================================ plans
@@ -4349,6 +4526,11 @@ void TacticalAiWorld::hash(StateHasher& h) const {
         // skai t15 sticky re-test result (the entries / layer flags follow from the solve). Hashed only when set, so a run
         // whose re-tests all pass keeps its CRC stream.
         if (pp.contrast_failed) h.u8(0xC7);
+        if (!pp.lua_released.empty()) {  // mcx6 t06: only after a Lua Release_Reinforcements (none in shipped scripts)
+            h.u8(0xC8);
+            h.u32(static_cast<uint32_t>(pp.lua_released.size()));
+            for (const int32_t k : pp.lua_released) h.i32(k);
+        }
         h.u32(static_cast<uint32_t>(pp.picks.size()));
         for (const TacticalPpPick& k : pp.picks) {
             h.i32(k.type);
@@ -4379,6 +4561,19 @@ void TacticalAiWorld::hash(StateHasher& h) const {
     w.bridge.hash(h);
     h.u64(w.orders);
     h.u64(w.rejected);
+    if (!w.attack_pos.empty()) {  // mcx6 t06: only once a land Enable_Attack_Positioning ran (base FoC never calls it)
+        h.u8(0xA7);
+        h.u32(static_cast<uint32_t>(w.attack_pos.size()));
+        for (const auto& [id, a] : w.attack_pos) {
+            h.i32(id);
+            h.boolean(a.flag);
+            h.i32(a.next);
+            h.boolean(a.moving);
+            h.f32(a.pos.x);
+            h.f32(a.pos.y);
+            h.f32(a.pos.z);
+        }
+    }
     if (w.cfg.ai_lane) {  // sp3: the AI-owned stream is AI state (both instances: the free one drives AI decisions too)
         h.u32(w.cfg.k_ai);
         w.own_rng.synced().hash(h);
@@ -4399,8 +4594,11 @@ namespace io = save_io;
 constexpr uint32_t kTacticalAiSaveVersionNoPad = 12, kTacticalAiLaneSaveVersionNoPad = 13;  // still loaded (b0416)
 // skai t15: 16 / 17 add the PP contrast entries, layer flags and re-test byte; 14 / 15 still load (re-test state empty).
 constexpr uint32_t kTacticalAiSaveVersionNoRetest = 14, kTacticalAiLaneSaveVersionNoRetest = 15;
-constexpr uint32_t kTacticalAiLaneSaveVersion = 17;  // sp3: kTacticalAiSaveVersion plus the AI-lane block (13 before b0416) (k_ai, the AI-owned GameRandom)
-constexpr uint32_t kTacticalAiSaveVersion = 16;  // 16: skai t15 PP re-test state; 14: b0416 pad_occupied fact (12 before); 2: six space free-store facts; 3: re-projection stamp; 4: flood sets;
+// mcx6 t06: 18 / 19 add the attack-positioning records and the PPs' Lua-released pool keys (the last block); 16 / 17 still
+// load (none of either).
+constexpr uint32_t kTacticalAiSaveVersionNoAttackPos = 16, kTacticalAiLaneSaveVersionNoAttackPos = 17;
+constexpr uint32_t kTacticalAiLaneSaveVersion = 19;  // sp3: kTacticalAiSaveVersion plus the AI-lane block (13 before b0416) (k_ai, the AI-owned GameRandom)
+constexpr uint32_t kTacticalAiSaveVersion = 18;  // 18: mcx6 t06 attack positioning; 16: skai t15 PP re-test state; 14: b0416 pad_occupied fact (12 before); 2: six space free-store facts; 3: re-projection stamp; 4: flood sets;
                                                  // 5: refixf t06 space reinforcement status fields; 6: a1g t01 PP+0x100,
                                                  // entry +0x30 moved into the free store; 7: S7 t20/t21/t15 A1 (no had_units /
                                                  // no_units_sent; ambush / ability status fields); 8: a1j t01 land
@@ -4860,6 +5058,23 @@ void TacticalAiWorld::write(ByteWriter& w) const {
     }
     io::put_count(w, m.scripts.missing().size());
     for (const std::string& s : m.scripts.missing()) w.str(s);
+    // ---- mcx6 t06 (version 18 / 19): attack-positioning records (ascending id), PPs with Lua-released pool keys ----
+    io::put_count(w, m.attack_pos.size());
+    for (const auto& [id, a] : m.attack_pos) {
+        w.i32(id);
+        w.boolean(a.flag);
+        w.i32(a.next);
+        w.boolean(a.moving);
+        io::put_vec3(w, a.pos);
+    }
+    uint32_t released = 0;
+    for (const auto& [id, pp] : m.pps) released += pp.lua_released.empty() ? 0u : 1u;
+    io::put_count(w, released);
+    for (const auto& [id, pp] : m.pps)
+        if (!pp.lua_released.empty()) {
+            w.i32(id);
+            io::put_vec(w, pp.lua_released);
+        }
 }
 
 bool TacticalAiWorld::read(ByteReader& r) {
@@ -4877,11 +5092,12 @@ bool TacticalAiWorld::read(ByteReader& r) {
     const uint32_t version = r.u32();
     // b0416: versions 12 / 13 (the same layout without the pad_occupied fact) still load: stored benchmark scenarios hold them.
     const bool lane_image = version == kTacticalAiLaneSaveVersion || version == kTacticalAiLaneSaveVersionNoPad ||
-                            version == kTacticalAiLaneSaveVersionNoRetest;
-    const bool has_retest = version == kTacticalAiSaveVersion || version == kTacticalAiLaneSaveVersion;
+                            version == kTacticalAiLaneSaveVersionNoRetest || version == kTacticalAiLaneSaveVersionNoAttackPos;
+    const bool has_attack_pos = version == kTacticalAiSaveVersion || version == kTacticalAiLaneSaveVersion;  // mcx6 t06
+    const bool has_retest = has_attack_pos || version == kTacticalAiSaveVersionNoAttackPos || version == kTacticalAiLaneSaveVersionNoAttackPos;
     const bool has_pad_fact = has_retest || version == kTacticalAiSaveVersionNoRetest || version == kTacticalAiLaneSaveVersionNoRetest;
     if (!r.ok() || !(version == kTacticalAiSaveVersion || version == kTacticalAiSaveVersionNoPad || version == kTacticalAiSaveVersionNoRetest ||
-                     (m.cfg.ai_lane && lane_image)))
+                     version == kTacticalAiSaveVersionNoAttackPos || (m.cfg.ai_lane && lane_image)))
         return io::bad(r);
     uint32_t saved_k_ai = m.cfg.k_ai;
     GameRandom saved_lane_rng = m.own_rng;
@@ -5247,6 +5463,35 @@ bool TacticalAiWorld::read(ByteReader& r) {
         }
     }
     if (!r.ok()) return false;
+    // ---- mcx6 t06: attack-positioning records, Lua-released pool keys (absent before version 18 / 19: none) ----
+    std::map<int32_t, Impl::AttackPositioning> new_attack_pos;
+    if (has_attack_pos) {
+        const uint32_t n = io::count(r, 4 + 1 + 4 + 1 + 12);
+        for (uint32_t i = 0; i < n && r.ok(); ++i) {
+            const int32_t id = r.i32();
+            Impl::AttackPositioning a;
+            a.flag = r.boolean();
+            a.next = r.i32();
+            a.moving = r.boolean();
+            a.pos = io::get_vec3(r);
+            if (!r.ok() || (!new_attack_pos.empty() && new_attack_pos.rbegin()->first >= id)) return io::bad(r);
+            new_attack_pos.emplace_hint(new_attack_pos.end(), id, a);
+        }
+        const uint32_t np = io::count(r, 8);
+        int32_t last = -1;
+        for (uint32_t i = 0; i < np && r.ok(); ++i) {
+            const int32_t id = r.i32();
+            std::vector<int32_t> keys;
+            if (!r.ok() || !io::get_vec(r, keys)) return false;
+            const auto pit = new_pps.find(id);
+            if (id <= last || pit == new_pps.end() || keys.empty() || !std::is_sorted(keys.begin(), keys.end()) ||
+                std::adjacent_find(keys.begin(), keys.end()) != keys.end())
+                return io::bad(r);
+            last = id;
+            pit->second.lua_released = std::move(keys);
+        }
+        if (!r.ok()) return false;
+    }
     // ---- the shared perception: validated on a probe built like the constructor's, then read in place ----
     {
         TacticalPerception probe;
@@ -5324,6 +5569,7 @@ bool TacticalAiWorld::read(ByteReader& r) {
     m.pps = std::move(new_pps);
     m.pool_reserved = std::move(new_pool_reserved);
     m.pad_reserved = std::move(new_pad_reserved);
+    m.attack_pos = std::move(new_attack_pos);  // mcx6 t06
     for (int32_t t = 0; t < std::max(old_next_tf, m.next_tf); ++t)  // the reader's own lists, then the saved ones
         if (const std::vector<int32_t>* s = m.opportunity_fire_subscriptions(t); s && !s->empty()) m.tf_opportunity_fire_subscription(t, 2, 0);
     for (const auto& [t, list] : new_subs)

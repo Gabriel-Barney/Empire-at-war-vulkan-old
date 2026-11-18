@@ -488,6 +488,24 @@ public:
     bool reward_destroy_object(TacticalMode& mode, objects::TypeIndex type);
     // BOMBARD_DELAY: seconds replacing the faction's Bombardment_Initial_Delay for strikes started from now on (<= 0 = none).
     void reward_bombard_delay(float seconds) { bombard_delay_override_ = seconds; }
+    // mcx6 (docs/re/STORY_REWARDS_GALACTIC.md §1.11 - §1.13, §1.20; tactical_battle_story_rewards.cpp):
+    // FORCE_RETREAT: a retreat already under way -> false, nothing; else the retreat request with the local-request flag 0:
+    // refused for `local_player` (the reward never retreats the human), otherwise request_retreat(player). True = the
+    // request was made (the reward logs "Force retreat of player %s" then, whatever the outcome; *accepted = its result).
+    bool reward_force_retreat(int32_t player, int32_t local_player, bool* accepted = nullptr);
+    // SET_HEALTH: instances of `type` in creation order, any owner; count 0 = all, n > 0 the first n. Each combat unit's
+    // health := clamp(max health x percent / 100, 0, max) (max = CombatSystem::max_health: Tactical_Health with the mode,
+    // difficulty and ability factors); an object without a combat entry gets its store health from Tactical_Health; a team
+    // container is skipped (its members keep theirs [M]). No damage, no death path. Returns the objects set.
+    uint32_t reward_set_health(TacticalMode& mode, objects::TypeIndex type, int32_t percent, int32_t count);
+    // SET_SPAWN: re-balances the indigenous spawners whose type name upper-cased equals `key` exactly (retail matches the CRC
+    // of Reward_Param1 as written with the CRC of the upper-cased type name) to `chance` (< 0: the type's
+    // Spawn_Indigenous_Units_Chance), synced draws as at a spawner's first service. Returns the spawners of that type.
+    uint32_t reward_set_spawn(const TacticalMode& mode, SimRng& rng, std::string_view key, float chance);
+    // DISABLE_SPECIAL_STRUCTURE: the first live instance of `type`; 0 = none (the reward logs "Invalid structure"), 1 = no
+    // BASE_SHIELD behaviour (silent), 2 = its story shield bit (obj +0x3a1 bit 0x04) := off; the base-shield service turns
+    // the shield off while it is set (CombatSystem kUnitShieldStoryOff).
+    int32_t reward_disable_special_structure(TacticalMode& mode, objects::TypeIndex type, bool off);
     // --- end STY1 t06 ---
     // STY1 t03: STORY_GENERIC names the battle raised this tick (start_hyperspace, start_bombard, activate_deployed_ability),
     // each with the acting player (-1 = every plot set).
@@ -1749,6 +1767,12 @@ private:
     void sp_add_types();                          // setup: the spawned types of the map's spawners join the tables
     void sp_tick(TacticalMode& mode, SimRng& rng);  // per tick: register new objects, debris services, spawner services
     void sp_activate(const TacticalMode& mode, SimRng& rng, size_t index);
+    // 0x5310b0 for one spawner type: every live spawner of `type` decided, T = int(N x chance) of them on (chance < 0 = the
+    // type's Spawn_Indigenous_Units_Chance; > 1 = percent). Returns N. (sp_activate, SET_SPAWN, SET_PLANET_SPAWN.)
+    uint32_t sp_rebalance(const TacticalMode& mode, SimRng& rng, objects::TypeIndex type, float chance);
+    // mcx6 SET_PLANET_SPAWN reader 0x4b71c0 (§1.8): at the first spawner scan of the battle, each spawn-map entry of the
+    // battle planet (ascending key CRC) re-balances the spawner type its key names, before any spawner's first service.
+    void sp_planet_spawn(const TacticalMode& mode, SimRng& rng);
     void sp_service(TacticalMode& mode, SimRng& rng, size_t index);
     objects::ObjectHandle sp_spawn_one(TacticalMode& mode, SimRng& rng, objects::ObjectHandle spawner, const Vec3* centre);
     int32_t sp_place(TacticalMode& mode, objects::ObjectHandle h, Vec3 p);  // 0 placed, 1 blocked, 2 no place

@@ -261,6 +261,23 @@ int m_set_targeting_priorities(Call& c) {
 }
 int m_noop(Call&) { return 0; }
 
+// mcx6 t06 (LUA_API.md "Task force: Enable_Attack_Positioning and Release_Reinforcements"): land 0x6eaa80. Exactly one
+// argument (a nil counts), a Lua boolean; both errors stop the script and change nothing (two spaces after the full stops,
+// as retail). [port] retail passes no count to the "%d" of the first text (it prints an unspecified number); the port
+// prints the argument count. Then the host writes the flag on the current members with UNIT_AI. No return value.
+int m_enable_attack_positioning(Call& c) {
+    if (c.nargs != 1)
+        return c.script_error_stop("Enable_Attack_Positioning - Invalid number of parameters.  Expected 1, got %d", c.nargs);
+    if (!is_bool(c, 1)) return c.script_error_stop("Enable_Attack_Positioning - Invalid type for parameter 1.  Expected boolean.");
+    if (AiTacticalScriptHost* h = host_of(c.L)) h->tf_enable_attack_positioning(c.self->id, lua_toboolean(c.L, c.idx(1)) != 0);
+    return 0;
+}
+// Release_Reinforcements() (0x6e8a70, land and space): arguments ignored, no error path, no return value.
+int m_release_reinforcements(Call& c) {
+    if (AiTacticalScriptHost* h = host_of(c.L)) h->tf_release_reinforcements(c.self->id);
+    return 0;
+}
+
 // ---------------------------------------------------------------- globals
 
 // FindDeadlyEnemy(object | unit AI target | task force) or FindDeadlyEnemy(AI target, radius, player) (§6.3).
@@ -344,11 +361,9 @@ int m_should_switch_weapons(Call& c) {
 constexpr BindingKind G = BindingKind::Global;
 constexpr BindingKind M = BindingKind::Method;
 
-// mcx0 t04 (binding effect ledger, engine/lua/tools/gen_bindings.py):
-// binding-effect: LandTaskForceClass.Enable_Attack_Positioning noop-gap retail 0x6eaa80 sets the unit AI attack-positioning flag (docs/re/SKAI_T19_MDU_DEPLOY_BLOCK.md)
-// binding-effect: SpaceTaskForceClass.Enable_Attack_Positioning noop-retail retail 0x17d070 is a shared no-op body (docs/re/A1_READINGS.md)
-// binding-effect: LandTaskForceClass.Release_Reinforcements noop-gap retail body 0x6e8a70 not read yet (docs/re/LUA_API.md)
-// binding-effect: SpaceTaskForceClass.Release_Reinforcements noop-gap retail body 0x6e8a70 not read yet (docs/re/LUA_API.md)
+// mcx0 t04 (binding effect ledger, engine/lua/tools/gen_bindings.py); mcx6 t06: the land Enable_Attack_Positioning and
+// both Release_Reinforcements act (full); the space Enable_Attack_Positioning stays retail's no-op.
+// binding-effect: SpaceTaskForceClass.Enable_Attack_Positioning noop-retail retail 0x17d070 is a shared no-op body (docs/re/LUA_API.md)
 #define ALAMO_TACTICAL_TF_METHODS(K)                                     \
     {M, K, "Move_To", m_move_to},                                        \
     {M, K, "Attack_Move", m_attack_move},                                \
@@ -362,12 +377,13 @@ constexpr BindingKind M = BindingKind::Method;
     {M, K, "Build", m_build},                                            \
     {M, K, "Get_Reserved_Build_Pads", m_reserved_pads},                  \
     {M, K, "Get_Distance", m_distance},                                  \
-    {M, K, "Enable_Attack_Positioning", m_noop},                         \
-    {M, K, "Release_Reinforcements", m_noop}
+    {M, K, "Release_Reinforcements", m_release_reinforcements}
 
 constexpr detail::ImplEntry kImpl[] = {
     ALAMO_TACTICAL_TF_METHODS("LandTaskForceClass"),
     ALAMO_TACTICAL_TF_METHODS("SpaceTaskForceClass"),
+    {M, "LandTaskForceClass", "Enable_Attack_Positioning", m_enable_attack_positioning},
+    {M, "SpaceTaskForceClass", "Enable_Attack_Positioning", m_noop},
     {M, "TaskForceClass", "Get_Self_Threat_Max", m_threat_max},
     {M, "TaskForceClass", "Get_Self_Threat_Sum", m_threat_sum},
     {M, "TaskForceClass", "Withdraw_Units", m_withdraw},

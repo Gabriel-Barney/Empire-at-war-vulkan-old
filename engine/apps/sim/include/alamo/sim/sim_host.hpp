@@ -187,6 +187,14 @@ public:
     void scoring_mode_started(ModeKind kind, std::string map_name);
     // q6 t09: Reset_Tactical_Stats() at auto-resolve begin (BATTLE_TRANSITIONS §"auto-resolve").
     void scoring_reset_tactical_stats();
+    // mcx6 t07 (GAME_SCORING.md §9.1): a skirmish map battle (CampaignBattles::start_map_battle) runs over the session's
+    // galaxy as scaffolding only [port]; retail's skirmish has no galactic mode, so its script sees only the tactical mode.
+    // From this call to the end of the session the galactic mode is hidden from the script: its queued
+    // Game_Mode_Starting_Event("Galactic", ...) is dropped, and neither its Game_Mode_Ending_Event nor the galaxy's
+    // Galactic_* event calls reach the script. The players stay those of the galaxy (the skirmish players: Base_Definitions
+    // ran while the session had none, every later call sees them). Not saved: a load's session setup calls it again.
+    void scoring_map_battle();
+    bool scoring_scaffold() const { return scoring_scaffold_; }
     // storyb t14 (GAME_SCORING.md §3, death signal 0x25 in a tactical mode): Tactical_Unit_Destroyed_Event(object,
     // killer player) for `object` of the battle's store `store`, called by the battle host before the object leaves the
     // store. killer < 0 (unknown) -> the neutral player of the galactic campaign under the battle (nil without one).
@@ -457,6 +465,7 @@ private:
     std::shared_ptr<lua::ObjectBridge> scoring_battle_bridge_;  // storyb t14: parent_store = the battle's store (shared: incomplete type here)
     int32_t scoring_neutral_player() const;                             // storyb t14
     bool scoring_failed_ = false;  // the original's exited flag: a Lua error in an event call / thread
+    bool scoring_scaffold_ = false;  // mcx6 t07: scoring_map_battle() ran this session
     size_t scoring_seen_messages_ = 0, scoring_seen_errors_ = 0;
     uint64_t scoring_services_ = 0, scoring_calls_ = 0, scoring_releases_ = 0;
     void service_scoring();

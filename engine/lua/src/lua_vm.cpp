@@ -72,8 +72,11 @@ bool load_script(lua_State* L, const LuaVm::Impl& vm, std::string_view name, boo
     }
 }
 
-// require(name) with 5.0 semantics (_LOADED table, _REQUIREDNAME), files through the FileProvider.
-// _LOADED[name] is set to true BEFORE the chunk runs (guards cyclic requires; 5.0 sets it after).
+// require(name), stock Lua 5.0.2 (mcx6 t07, LUA_API.md "require and _LOADED"), files through the FileProvider:
+// _LOADED[name] truthy -> that value, nothing loaded; else the file is found (read_script: LUA_PATH order) and compiled,
+// _REQUIREDNAME is saved, set to the name for the run and restored after it, a nil result becomes true, and only then
+// _LOADED[name] := the result. A chunk that raises leaves no entry (a later require tries again); a cycle loads the file
+// again (5.0.2 ends it with the C stack error).
 int l_require(lua_State* L) {
     char err[640];
     if (lua_type(L, 1) != LUA_TSTRING) return raise(L, "require: expected a script name");
@@ -93,18 +96,23 @@ int l_require(lua_State* L) {
     lua_pop(L, 1);
     if (!load_script(L, *vm_of(L), std::string_view(lua_tostring(L, 1), lua_strlen(L, 1)), false, err, sizeof err))
         return raise(L, err);
+    // stack: name, _LOADED, chunk
+    lua_pushstring(L, "_REQUIREDNAME");  // save the previous name below the chunk (lua_getglobal)
+    lua_gettable(L, LUA_GLOBALSINDEX);
+    lua_insert(L, -2);
+    lua_pushstring(L, "_REQUIREDNAME");  // set the new one (lua_setglobal)
     lua_pushvalue(L, 1);
-    lua_pushboolean(L, 1);
-    lua_rawset(L, 2);
-    lua_pushstring(L, "_REQUIREDNAME");
-    lua_pushvalue(L, 1);
-    lua_rawset(L, LUA_GLOBALSINDEX);
-    lua_call(L, 0, 1);
-    if (!lua_toboolean(L, -1)) {
+    lua_settable(L, LUA_GLOBALSINDEX);
+    lua_call(L, 0, 1);                   // name, _LOADED, previous, result
+    lua_insert(L, -2);                   // name, _LOADED, result, previous
+    lua_pushstring(L, "_REQUIREDNAME");  // restore the previous name
+    lua_insert(L, -2);
+    lua_settable(L, LUA_GLOBALSINDEX);
+    if (lua_isnil(L, -1)) {  // a nil (or no) result becomes true; false stays false
         lua_pop(L, 1);
         lua_pushboolean(L, 1);
     }
-    lua_pushvalue(L, 1);
+    lua_pushvalue(L, 1);  // mark it loaded, after the successful run
     lua_pushvalue(L, -2);
     lua_rawset(L, 2);
     return 1;

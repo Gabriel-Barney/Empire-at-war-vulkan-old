@@ -12,8 +12,7 @@
 // - the first evaluation of a new generator runs at its first tick (state 0, no on-delay), not inside add_unit, so a
 //   generator and its power source spawned in either order start the battle in the same state;
 // - the unit bound radius is the model's horizontal half extents (else Custom_Hard extents, else the radius);
-// - not modelled: the story disable bit (DISABLE_SPECIAL_STRUCTURE has no port reader), the penetration particle (a
-//   render particle at base_shield_contact, vis1 t08),
+// - not modelled: the penetration particle (a render particle at base_shield_contact, vis1 t08),
 //   the idle nudge (a move order: host), the SHIELD_ON / OFF animation and its variant draw, the HUD / loop SFX.
 #include "combat_system_internal.hpp"
 
@@ -67,11 +66,12 @@ float CombatSystem::base_shield_speed_factor(ObjectId id) const {
 
 void CombatSystem::evaluate_base_shield(Unit& s, uint32_t frame) {
     // Evaluate_State 0x56bb00 [H]: powered (base power when required), not dying, owner faction not neutral, not
-    // Always_Off. [port] the story disable bit is not modelled.
+    // Always_Off, and (mcx6) the story disable bit (obj +0x3a1 bit 0x04, DISABLE_SPECIAL_STRUCTURE) clear.
     const UnitDesc& sd = desc_of(s);
     bool on = !sd.base_shield_requires_power || has_base_power(s.owner);
     if ((s.flags & kUnitDead) || !(s.health > 0.0f)) on = false;
     if (!player(s.owner).active || sd.base_shield_always_off) on = false;  // PlayerInfo::active = faction not Is_Neutral
+    if (s.flags & kUnitShieldStoryOff) on = false;
     const bool upgraded = base_shield_upgraded(s.owner);
     if (!on) s.bshield_off_stamp = frame;  // every service that finds it off
     // Set_State 0x56b540 [H]: nothing changes -> nothing; off -> on waits FPS x Base_Shield_Delay_Time after the last off

@@ -6,15 +6,18 @@
 // Planet parameters are planet TYPE names (first instance, STORY_REWARDS_GALACTIC §0). Numbers are read with atoi.
 // Determinism: serial; vectors in write order; no RNG.
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <string>
 
 #include "alamo/core/ascii.hpp"
 #include "alamo/core/bytes.hpp"
+#include "alamo/core/hash.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/galactic/campaign.hpp"
 #include "alamo/galactic/galactic_rules.hpp"
 #include "alamo/galactic/special_data.hpp"
+#include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/object_store.hpp"
 #include "alamo/sim/story_session.hpp"
 
@@ -132,6 +135,8 @@ bool StorySession::apply_sty1_reward(int32_t plot_player, bool tactical, const s
             return true;
         }
         gates_.set(row, StoryGates::kRestricted, atoi_text(p2) != 0);
+        // mcx6 (§1.1, §1.21): P3 atoi != 0 puts the planet in the all-abilities list; absent or 0 takes it out.
+        gates_.set(row, StoryGates::kNoAbilities, !p3.empty() && atoi_text(p3) != 0);
         sync_gates();
     } else if (type == "PLANET_FACTION") {
         // §1.2: the planet's full Change_Owner (GalacticSim::change_owner, the Lua Change_Owner path).
@@ -200,8 +205,116 @@ bool StorySession::apply_sty1_reward(int32_t plot_player, bool tactical, const s
         gates_.direct_invasion_disabled = type == "DISABLE_DIRECT_INVASION";
         sync_gates();
     } else if (type == "SET_PLANET_SPAWN") {
-        // §1.8: P1, P2, P3 required; the planet's spawn-rate map has no reader in retail [L]; shipped data is a no-op.
-        if (p1.empty() || p2.empty() || p3.empty()) note("Set planet spawn failed due to incomplete parameters");
+        // §1.8: P1 planet, P2 spawner type key (as written), P3 chance; all required (shipped data gives only P3: a no-op).
+        // The entry is read at every later battle start at that planet (TacticalBattle::sp_planet_spawn).
+        if (p1.empty() || p2.empty() || p3.empty()) {
+            note("Set planet spawn failed due to incomplete parameters");
+            return true;
+        }
+        const PlanetIndex row = reward_planet(p1);
+        if (row == kInvalidPlanet) {
+            note("Set planet spawn failed due to non-existant planet " + p1);  // [port] retail's lookup message not read
+            return true;
+        }
+        StoryGates::PlanetSpawn e;
+        e.planet = row;
+        e.key = p2;
+        e.crc = crc32(p2.data(), p2.size());
+        e.chance = static_cast<float>(std::atof(p3.c_str()));
+        auto& v = gates_.planet_spawn;
+        const auto at = std::find_if(v.begin(), v.end(), [&e](const StoryGates::PlanetSpawn& x) {
+            return x.planet > e.planet || (x.planet == e.planet && x.crc >= e.crc);
+        });
+        if (at != v.end() && at->planet == e.planet && at->crc == e.crc) *at = std::move(e);  // an existing key is overwritten
+        else v.insert(at, std::move(e));
+        sync_gates();
+    } else if (type == "SET_WEATHER") {
+        // §1.14: a retail no-op; only an empty P1 is logged.
+        if (p1.empty()) note("Set weather failed due to incomplete parameters");
+    } else if (type == "SWITCH_SIDES") {
+        // §1.10: P1 optional faction. The port is single player (retail does nothing in a multiplayer game type).
+        const int32_t before = sim_->local_player();
+        const int32_t now = sim_->story_switch_sides(p1);
+        if (now >= 0 && now != before) note("PlayerListClass::Switch_Sides: Switched to player index " + std::to_string(now));
+    } else if (type == "STATISTIC_CHANGE") {
+        // §1.17: P1 statistic, P2 value (atoi), both required (silent); P3 planet type (first instance), else the planet of
+        // the notification that fired the event [M]; none: logged.
+        if (p1.empty() || p2.empty()) return true;
+        PlanetIndex row = p3.empty() ? kInvalidPlanet : reward_planet(p3);
+        if (row == kInvalidPlanet && !reward_firing_planet_.empty()) row = reward_planet(reward_firing_planet_);
+        if (row == kInvalidPlanet) {
+            note("Reward Statistic Change - No planet specified");
+            return true;
+        }
+        const int32_t value = atoi_text(p2);
+        // Statistic enum (table 0x00a29140), exact names; unknown = 0 (nothing).
+        if (p1 == "CREDIT_VALUE") {
+            sim_->story_set_base_value(row, value);  // + the owner's player byte +0x181 := 1: no reader found [L], not kept
+        } else if (p1 == "POLITICAL_CONTROL") {
+            gates_.set_stat(gates_.political_control, row, value);
+            sync_gates();
+        } else if (p1 == "MAX_STARBASE_LEVEL") {
+            gates_.set_stat(gates_.max_starbase, row, value);
+            sync_gates();
+        }  // MAX_SPECIAL_STRUCTS: nothing; MAX_GROUND_BASE_LEVEL: an empty function in retail
+    } else if (type == "FORCE_RETREAT" || type == "SET_HEALTH" || type == "SET_SPAWN" || type == "DISABLE_SPECIAL_STRUCTURE") {
+        // §1.11 - §1.13, §1.20: they act on the current mode. A running battle: the battle host applies them
+        // (CampaignBattles::story_tactical_reward); the galactic mode: as below.
+        if (type == "FORCE_RETREAT") {
+            if (p1.empty()) {
+                note("Force retreat failed due to incomplete parameters");
+                return true;
+            }
+            if (sim_->rules().find_faction(p1) == galactic::kNoIndex) {
+                note("Force retreat failed due to invalid faction " + p1);
+                return true;
+            }
+            if (sim_->player_of_faction(p1) < 0) {
+                note("Force retreat failed due to no player of faction " + p1);
+                return true;
+            }
+        } else if (type == "SET_SPAWN") {
+            if (p1.empty() || p2.empty()) {
+                note("Set spawn failed due to incomplete parameters");
+                return true;
+            }
+        } else if (p1.empty() || p2.empty()) {
+            return true;  // SET_HEALTH / DISABLE_SPECIAL_STRUCTURE: silent
+        }
+        if (tactical_) {
+            if (tactical_reward_) tactical_reward_(type, params);
+            return true;
+        }
+        if (type == "FORCE_RETREAT") {
+            note("Force retreat failed due to no retreat coordinator");  // the galactic mode has none
+        } else if (type == "SET_HEALTH") {
+            // Galactic objects: health := clamp(Tactical_Health x P2 / 100) [port: no mode / difficulty / ability factor
+            // in the galactic mode; nothing reads a galactic object's health].
+            note("Set health of " + ascii_upper(p1) + ", to " + std::to_string(atoi_text(p2)) + " percent");
+            const uint32_t ti = sim_->rules().find_type(p1);
+            if (ti == galactic::kNoIndex) {
+                note("Can't find type " + ascii_upper(p1));
+                return true;
+            }
+            const int32_t c = p3.empty() ? 1 : atoi_text(p3);
+            const size_t count = c == 0 ? SIZE_MAX : c < 0 ? 1u : static_cast<size_t>(c);
+            objects::ObjectStore& st = *store_;  // the galactic mode's primary store
+            const std::vector<objects::ObjectHandle> found = st.find_all_of_type(static_cast<objects::TypeIndex>(ti));
+            const float mx = ti < types_->size() ? types_->columns().tactical_health[ti] : 0.0f;
+            const float f = static_cast<float>(atoi_text(p2)) / 100.0f;
+            size_t n = 0;
+            for (auto it = found.rbegin(); it != found.rend() && n < count; ++it)  // creation order
+                if (st.alive(*it)) {
+                    st.set_health(*it, std::clamp(mx * f, 0.0f, mx));
+                    ++n;
+                }
+        } else if (type == "DISABLE_SPECIAL_STRUCTURE") {
+            // No base shield service runs in the galactic mode: the bit has no reader there [port: not stored].
+            const uint32_t ti = sim_->rules().find_type(p1);
+            const bool any = ti != galactic::kNoIndex &&
+                             !sim_->store().find_all_of_type(static_cast<objects::TypeIndex>(ti)).empty();
+            if (!any) note("Invalid structure " + p1 + " in DISABLE_SPECIAL_STRUCTURE");
+        }  // SET_SPAWN: the galactic mode has no spawner list
     }
     // ---- tutorial (§2) ----
     else if (type == "LOAD_CAMPAIGN") {
@@ -283,6 +396,14 @@ bool StorySession::apply_sty1_reward(int32_t plot_player, bool tactical, const s
         sync_gates();
     } else if (type == "ENABLE_CAMPAIGN_VICTORY_MOVIE") {
         global_flag(gates_.campaign_victory_movie);
+    } else if (type == "ENABLE_SABOTAGE") {
+        global_flag(gates_.sabotage_enabled);  // §1.21, §3.7: P1 default 1
+    } else if (type == "ENABLE_COMBAT_CINEMATIC") {
+        global_flag(gates_.combat_cinematic);  // §1.21, §3.7: P1 default 1; the game host's cinematic-view key reads it
+    } else if (type == "RESTRICT_BLACK_MARKET") {
+        planet_flag(StoryGates::kNoBlackMarket, false);  // §3.2, §1.21
+    } else if (type == "RESTRICT_ALL_ABILITIES") {
+        planet_flag(StoryGates::kNoAbilities, false);  // §3.2, §1.21
     }
     // ---- tactical (§4) ----
     else if (type == "DISABLE_REINFORCEMENTS") {
@@ -357,6 +478,15 @@ void StorySession::write_sty1(ByteWriter& w) const {
     w.boolean(t.skirmish_rules).u32(t.filter_resets).u32(t.sandbox_requests);
     w.u32(static_cast<uint32_t>(retreat_off_.size()));  // v5
     for (const uint8_t b : retreat_off_) w.u8(b);
+    // v6 (mcx6): sabotage / combat-cinematic flags, the planet spawn map, the written planet statistics. (The black-market
+    // and all-abilities planet bits ride in gates_.planet above.)
+    w.boolean(gates_.sabotage_enabled).boolean(gates_.combat_cinematic);
+    w.u32(static_cast<uint32_t>(gates_.planet_spawn.size()));
+    for (const StoryGates::PlanetSpawn& e : gates_.planet_spawn) w.u32(e.planet).u32(e.crc).str(e.key).f32(e.chance);
+    for (const std::vector<int32_t>* v : {&gates_.political_control, &gates_.max_starbase}) {
+        w.u32(static_cast<uint32_t>(v->size()));
+        for (const int32_t x : *v) w.i32(x);
+    }
 }
 
 bool StorySession::read_sty1(ByteReader& r, Sty1Save& out, uint32_t version) {
@@ -397,6 +527,25 @@ bool StorySession::read_sty1(ByteReader& r, Sty1Save& out, uint32_t version) {
         n = r.u32();
         if (n > kMax) r.fail();
         for (uint32_t i = 0; i < n && r.ok(); ++i) out.retreat_off.push_back(r.u8());
+    }
+    if (version >= 6) {  // mcx6
+        out.gates.sabotage_enabled = r.boolean();
+        out.gates.combat_cinematic = r.boolean();
+        n = r.u32();
+        if (n > kMax) r.fail();
+        for (uint32_t i = 0; i < n && r.ok(); ++i) {
+            StoryGates::PlanetSpawn e;
+            e.planet = r.u32();
+            e.crc = r.u32();
+            e.key = r.str();
+            e.chance = r.f32();
+            out.gates.planet_spawn.push_back(std::move(e));
+        }
+        for (std::vector<int32_t>* v : {&out.gates.political_control, &out.gates.max_starbase}) {
+            n = r.u32();
+            if (n > kMax) r.fail();
+            for (uint32_t i = 0; i < n && r.ok(); ++i) v->push_back(r.i32());
+        }
     }
     return r.ok();
 }
@@ -439,6 +588,22 @@ void StorySession::hash_sty1(StateHasher& h) const {
     h.boolean(tutorial_.skirmish_rules);
     h.u32(tutorial_.filter_resets);
     h.u32(tutorial_.sandbox_requests);
+    if (!gates_.mcx6_default()) {  // mcx6 (the planet bits are in the planet loop above); runs without them hash as before
+        h.u32(0x4d433647u);  // "MC6G"
+        h.boolean(gates_.sabotage_enabled);
+        h.boolean(gates_.combat_cinematic);
+        h.u32(static_cast<uint32_t>(gates_.planet_spawn.size()));
+        for (const StoryGates::PlanetSpawn& e : gates_.planet_spawn) {
+            h.u32(e.planet);
+            h.u32(e.crc);
+            h.str(e.key);
+            h.f32(e.chance);
+        }
+        for (const std::vector<int32_t>* v : {&gates_.political_control, &gates_.max_starbase}) {
+            h.u32(static_cast<uint32_t>(v->size()));
+            for (const int32_t x : *v) h.i32(x);
+        }
+    }
 }
 
 }  // namespace alamo::sim

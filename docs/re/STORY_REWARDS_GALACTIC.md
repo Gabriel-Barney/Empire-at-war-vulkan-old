@@ -249,6 +249,9 @@ outside it is ignored by retail's dispatcher (code 0, no case), so the load repo
   nothing. The question's "in no shipped XML" is wrong in this one respect.
 - **SET_SPAWN (0x42)** is a different reward: it re-balances the spawners of a type in the running battle at once;
   see §1.13.
+- **Implemented (mcx6):** the entry lives in `galactic::StoryGates::planet_spawn` (saved and hashed by the story
+  session); `TacticalBattle::sp_planet_spawn` runs it at the battle's first spawner scan. [port] The map order is
+  modelled as ascending key CRC per planet; an unknown planet logs "non-existant planet" (retail's message not read).
 
 ### 1.9 Other galactic rewards touched while reading (for completeness) [H]
 
@@ -308,6 +311,10 @@ searched. Each section ends with **Port**, the existing port system the reward t
 - **Port:** the local-player choice in apps/game (HUD, input, fog view) and the players' human flag. Skip it in
   multiplayer. It needs faction `Is_Debug_Switchable_To` (in the objects field schema). It makes no change to the sim
   AI. Re-run the fog / visibility view for the new local player.
+- **Implemented (mcx6):** `GalacticSim::story_switch_sides` (local player and human flags, faction
+  `Is_Debug_Switchable_To` loaded as `FactionRules::debug_switchable`). [port] The port is single player, so the
+  multiplayer test is not made; a stepping loop that would never end in retail stops after one round of the player list.
+  The HUD and fog view follow `GalacticSim::local_player()` (game host).
 
 ### 1.11 FORCE_RETREAT (0x4e, inline in 0x456970; request 0x340920) [H unless tagged]
 
@@ -341,6 +348,9 @@ searched. Each section ends with **Port**, the existing port system the reward t
 - **Save / random.** No state of its own. No draw in the reward (the retreat run has its own, BATTLE_TRANSITIONS).
 - **Port:** the tactical retreat request in apps/sim (the path the AI's Withdraw_Units uses), with "never the local
   player" semantics and every check above. In galactic mode, log only.
+- **Implemented (mcx6):** the session checks the parameters and logs; with a battle attached the battle host calls
+  `TacticalBattle::reward_force_retreat` (no request while a retreat runs, the local player refused, then
+  `request_retreat`), and logs "Force retreat of player %s"; in the galactic mode "no retreat coordinator".
 
 ### 1.12 SET_HEALTH (0x25, inline in 0x456970; setter 0x3a8ad0) [H unless tagged]
 
@@ -367,6 +377,10 @@ searched. Each section ends with **Port**, the existing port system the reward t
 - **Save.** Health is object state, saved with the object.
 - **Port:** the object health setter of objects / tactical, with max health from the port's max-health function
   (Tactical_Health, mode multipliers, difficulty, abilities).
+- **Implemented (mcx6):** battle: `TacticalBattle::reward_set_health` on the combat health (CombatSystem max health);
+  galactic: the galactic store health. [port] In the galactic mode the maximum is the type's `Tactical_Health` without
+  difficulty or ability factors (nothing reads a galactic object's health); obj +0x3a0 bit 0x01 [L] is not kept; a team
+  container's own field is not modelled (its members keep their health, as in retail).
 
 ### 1.13 SET_SPAWN (0x42, inline in 0x456970; 0x531070 → 0x5310b0) [H unless tagged]
 
@@ -401,6 +415,9 @@ searched. Each section ends with **Port**, the existing port system the reward t
   [L].
 - **Port:** the TRU1 t05 activation in apps/sim `tactical_battle_spawners.cpp`. Expose the per-type re-balance with an
   explicit chance, match on the upper-case name CRC, and use synced draws.
+- **Implemented (mcx6):** `TacticalBattle::reward_set_spawn` / `sp_rebalance` (the TRU1 activation with an explicit
+  chance, synced draws). [port] The key is compared as text with the upper-cased type name (the same test as the CRC
+  compare, without the CRC); in the galactic mode only the incomplete-parameters log.
 
 ### 1.14 SET_WEATHER (0x4b, inline in 0x456970) [H]
 
@@ -410,6 +427,7 @@ searched. Each section ends with **Port**, the existing port system the reward t
 - Nothing is stored, so the battle-environment pick (CU8G_T02_ENV_PICK_RE.md: the map's environment record and the
   weather bind 0x46a2f0) has nothing to read.
 - **Port:** a retail no-op (keep the error log for an empty P1).
+- **Implemented (mcx6):** as a no-op with the log.
 
 ### 1.15 RANDOM_STORY (0x3f, inline in 0x456970; builder 0x4bfdc0 on the generator object 0x140a2aba0) [H structure, M content]
 
@@ -456,6 +474,13 @@ searched. Each section ends with **Port**, the existing port system the reward t
   - Whether the new plot starts active was not traced [L].
 - **Port:** a plot built from code (not XML) in the story session, plus the story-dialog offer. Draw from a non-sim
   RNG (retail's is unsynced). Low priority: no data uses it.
+- **Implemented (mcx6):** `build_random_story` (apps/sim `story_random_story.cpp`) on `GameRandom::free()`, the plot
+  added to the local player's plot set; the plot and the counter are saved (story save v6) and replayed on load.
+  [port] The story-dialog offer is not shown (no Cancel: the plot stays, as after Accept); retail's buildable "used"
+  marks are not kept; a draw from an empty pool rebuilds the trigger and a trigger that cannot be built after 64
+  rebuilds is left without parameters; the follow-up REMOVE_STORY_GOAL event names the trigger as its tag [L]; a plot
+  added while a battle is attached goes to the tactical plot set and is not replayed after a mid-battle load. The side
+  lists are the Rebel ones for the `Good_Side_Name` faction, else the Empire ones [M].
 
 ### 1.16 PICK_PLANET (0x12, handler 0x460b30) [H unless tagged]
 
@@ -489,6 +514,10 @@ searched. Each section ends with **Port**, the existing port system the reward t
   [H for reward parameters; M for the lists].
 - **Port:** a parameter substitution in the story session across all plots, using the local player's friend / enemy
   relations. It takes the first planet in object order, so the port's planet order must match retail's.
+- **Implemented (mcx6):** `StorySession::pick_planet` + `lua::StoryModel::replace_placeholder`, kept as a definition
+  edit (story save v6) and replayed on load. [port] Planets are walked in row order (stands in for the mode's object
+  order); event parameters equal to the placeholder are replaced in every event class [M]; a substitution in a tactical
+  plot set is not replayed after a mid-battle load.
 
 ### 1.17 STATISTIC_CHANGE (0x08, inline in 0x456970) [H write, M readers]
 
@@ -513,11 +542,17 @@ searched. Each section ends with **Port**, the existing port system the reward t
 
 - **Port:** the galactic planet's runtime fields (income base, political control, max starbase level) in the galactic
   planet state.
+- **Implemented (mcx6):** CREDIT_VALUE writes `PlanetState::base_value`; POLITICAL_CONTROL and MAX_STARBASE_LEVEL are
+  kept in `galactic::StoryGates` (`political_control`, `max_starbase`) and read by `target_political_control` and
+  `GalacticSim::max_starbase_level` (the AI's MaxStarbaseLevel token and build check). The planet without P3 is the
+  firing notification's planet (`lua::StoryModel::firing_notification`). [port] The owner's player byte +0x181 [L] is not
+  kept; the planet statistics live in the story gates, not the planet save.
 
 ### 1.18 INFORMATION (0x06) [H]
 
 - The jump table sends 0x06 to the dispatcher's common exit (as for code 0): nothing happens and nothing is logged.
 - **Port:** a retail no-op.
+- **Implemented (mcx6):** ledger owner Retail (a no-op).
 
 ### 1.19 ENABLE_OVERWHELMING_ODDS (0x63) [H]
 
@@ -541,6 +576,9 @@ searched. Each section ends with **Port**, the existing port system the reward t
 - **Save.** +0x3a1 is in the object save chunk (0x3a5ad0 / 0x39ce40, HERO_CLASH.md) [M for this bit]. The object
   constructor clears it.
 - **Port:** the tactical base-shield evaluator in apps/sim, plus an object flag.
+- **Implemented (mcx6):** the battle host's `TacticalBattle::reward_disable_special_structure` sets the combat flag
+  `kUnitShieldStoryOff`, which `CombatSystem::evaluate_base_shield` reads. [port] In the galactic mode only the
+  "Invalid structure" log (no base-shield service runs there, the bit is not stored).
 
 ### 1.21 Readers of RESTRICT_BLACK_MARKET, RESTRICT_ALL_ABILITIES, ENABLE_SABOTAGE, ENABLE_COMBAT_CINEMATIC [H unless tagged]
 
@@ -583,6 +621,24 @@ All four readers act on the human player's galactic GUI or camera. None is read 
     / HUD code;
   - sabotage: a global flag in the story gates, read by the human sabotage slot and its dialog confirm;
   - combat cinematic: a flag read by the apps/game cinematic-camera key.
+- **Implemented (mcx6):** `galactic::StoryGates` bits `kNoBlackMarket` / `kNoAbilities` (SET_PLANET_RESTRICTED P3
+  writes `kNoAbilities` too) and the flags `sabotage_enabled` / `combat_cinematic`, saved and hashed by the story session.
+  ENABLE_SABOTAGE off refuses a human player's sabotage in `GalacticSim::apply_sabotage` and
+  `sabotage_execute_structure` [port: the slot test sits in the GUI; the sim refuses the use]. The ability-slot lists and
+  the cinematic-view flag have no sim reader: the game host reads `GalacticSim::story_gates()`.
+
+### 1.22 SFX (0x09, inline in 0x456970) [H handler, M player]
+
+Read with REA (mcx6, 2026-11-17).
+
+- **Parameters.** P1 SFX event name. P1 empty: nothing, no log.
+- **Effect.** P1 is copied and passed to the SFX manager (0x140b27e60) play-by-name 0x2d5010, with no object and no
+  position (a 2-D sound), default flags.
+  - 0x2d5010 looks the event up by name (0x2d4750); unknown: "WARNING: Unable to find SFX event data for event name
+    '%s'" and nothing plays.
+- No player test and no mode test (the local machine plays it, as SPEECH does). No sim state, no save, no draw.
+- **Implemented (mcx6):** ledger owner Ui: the game host plays the event from the fired reward (presentation).
+
 
 ## 2. Tutorial rewards
 

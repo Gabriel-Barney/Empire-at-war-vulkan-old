@@ -21,6 +21,7 @@
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/sim/sim_host.hpp"
 #include "alamo/sim/tactical_battle.hpp"
+#include "alamo/tactical/movement/land_path.hpp"    // mcx6 t06: line_passable (attack position terrain check)
 #include "alamo/tactical/movement/unit_params.hpp"  // refixf t06: space drop footprint
 #include "save_io.hpp"
 
@@ -1127,9 +1128,13 @@ void BattleAi::hash(StateHasher& h) const {
 // ---- N1 stage 2 save / load (owner: n2-host): chunk "battle.ai" ---------------------------------------------------
 namespace {
 // 2: UnitAI re-projection stamps; 3: a1h t02 object-goal follow records; 4: s78n t25.4 ObjectFollow::guard
-constexpr uint32_t kBattleAiSaveVersion = 4;
+// mcx6 t06: 7 (lane off) / 8 (lane on) = 4 / 6 + the UnitAI attack-positioning stamps (unit_ai_second_) after the follow
+// records; 4 / 5 / 6 still load (the second stamp then reads the first's value [port]).
+constexpr uint32_t kBattleAiSaveVersion4 = 4;
 constexpr uint32_t kBattleAiLaneSaveVersion5 = 5;  // sp3 t04: version 4 + the AI lane's queued orders (lane on only)
-constexpr uint32_t kBattleAiLaneSaveVersion = 6;   // sp3 slice 4e: version 5 + the movement-lock facts (published, job)
+constexpr uint32_t kBattleAiLaneSaveVersion6 = 6;  // sp3 slice 4e: version 5 + the movement-lock facts (published, job)
+constexpr uint32_t kBattleAiSaveVersion = 7;
+constexpr uint32_t kBattleAiLaneSaveVersion = 8;
 void put_locks(ByteWriter& w, const std::vector<lua::ScriptLockFact>& v) {
     w.u32(static_cast<uint32_t>(v.size()));
     for (const lua::ScriptLockFact& f : v) w.i32(f.id).u8(f.locked).u8(f.diverted).f32(f.goal.x).f32(f.goal.y).f32(f.goal.z);
@@ -1161,6 +1166,7 @@ void BattleAi::write(ByteWriter& w) const {
     save_io::Out o(w);
     o(ai_side_, stale_, executed_, opp_prev_, unit_ai_stamps_);
     o.seq(follows_, [](save_io::Out& a, const ObjectFollow& f) { follow_fields(a, f); });
+    o(unit_ai_second_);  // version 7 / 8
     if (!lane) return;
     // sp3: the host waited for the running job (lane_sync); a finished job not yet collected is saved as it is
     const auto put_batch = [&w](const std::vector<cmd::Command>& batch) {
@@ -1186,8 +1192,10 @@ bool BattleAi::read(ByteReader& r) {
     // sp3 t04: version 5 (lane block) only into an AI-lane world; version 4 into either (an AI-lane world then starts with
     // an empty batch)
     const uint32_t version = r.u32();
-    const bool lane_version = version == kBattleAiLaneSaveVersion5 || version == kBattleAiLaneSaveVersion;
-    if (!r.ok() || !(version == kBattleAiSaveVersion || (lane_version && world_->ai_lane()))) return false;
+    const bool lane_version = version == kBattleAiLaneSaveVersion5 || version == kBattleAiLaneSaveVersion6 || version == kBattleAiLaneSaveVersion;
+    const bool has_second = version == kBattleAiSaveVersion || version == kBattleAiLaneSaveVersion;  // mcx6 t06
+    if (!r.ok() || !(version == kBattleAiSaveVersion || version == kBattleAiSaveVersion4 || (lane_version && world_->ai_lane())))
+        return false;
     const std::span<const uint8_t> world = r.raw(r.u32());
     std::vector<uint8_t> side;
     uint32_t stale = 0;
@@ -1198,6 +1206,8 @@ bool BattleAi::read(ByteReader& r) {
     in(side, stale, executed, opp, stamps);
     std::vector<ObjectFollow> follows;
     in.seq(follows, [](save_io::In& a, ObjectFollow& f) { follow_fields(a, f); });
+    std::map<objects::ObjectId, int32_t> seconds;
+    if (has_second) in(seconds);
     uint32_t lane_seq = 0;
     uint64_t lane_digest = 0;
     std::vector<cmd::Command> lane_batch;
@@ -1223,20 +1233,26 @@ bool BattleAi::read(ByteReader& r) {
         job.frame = r.u64();
         job.digest = r.u64();
         if (!get_batch(job.batch)) return false;
-        if (version == kBattleAiLaneSaveVersion && (!get_locks(r, lane_locks) || !get_locks(r, job.locks))) return false;
+        const bool has_locks = version == kBattleAiLaneSaveVersion6 || version == kBattleAiLaneSaveVersion;
+        if (has_locks && (!get_locks(r, lane_locks) || !get_locks(r, job.locks))) return false;
     }
     if (!r.ok() || !r.done() || side != ai_side_) return false;  // the AI players are rebuilt by start()
-    const std::map<objects::ObjectId, int32_t> stamps_before = unit_ai_stamps_;
+    const std::map<objects::ObjectId, int32_t> stamps_before = unit_ai_stamps_, seconds_before = unit_ai_second_;
     unit_ai_stamps_ = std::move(stamps);  // before relink(): its fill() must find every listed object stamped (no draws)
+    unit_ai_second_ = std::move(seconds);
+    const auto restore_stamps = [&] {
+        unit_ai_stamps_ = stamps_before;
+        unit_ai_second_ = seconds_before;
+    };
     ByteReader wr(world);
     if (!read_system(*world_, wr) || !wr.ok() || !wr.done()) {
-        unit_ai_stamps_ = stamps_before;
+        restore_stamps();
         return false;
     }
     // battle.ai is the last battle chunk (CampaignBattles registers it after the battle parts): every other battle
     // system is restored, so the world takes its types / host callbacks now (tactical_ai.hpp relink).
     if (!world_->relink()) {
-        unit_ai_stamps_ = stamps_before;
+        restore_stamps();
         return false;
     }
     stale_ = stale;
@@ -1248,7 +1264,8 @@ bool BattleAi::read(ByteReader& r) {
     lane_digest_ = lane_digest;
     lane_job_ = std::move(job);
     // slice 4e: a version-5 save (no facts) takes the loaded bridge's (its world was saved after the job)
-    lane_locks_ = version == kBattleAiLaneSaveVersion ? std::move(lane_locks) : world_->object_bridge().script_lock_facts();
+    lane_locks_ = version == kBattleAiLaneSaveVersion6 || version == kBattleAiLaneSaveVersion ? std::move(lane_locks)
+                                                                                                : world_->object_bridge().script_lock_facts();
     view_.valid = false;  // sp3 t02: captured again at the next AI slot
     world_->object_bridge().lane_abilities = nullptr;  // sp3 slice 4b: likewise the ability records
     lane_unloaded_.clear();  // sp3 slice 4d: consumed within the tick of its apply
@@ -1739,6 +1756,39 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
                 if (a.attack_target < 0 && c.has_unit(mid) && c.current_target(mid) != tc::kNoObject) a.attack_target = c.current_target(mid);
             }
         }
+        // mcx6 t06 (LUA_API.md "Task force: Enable_Attack_Positioning", 0x4f6470): the formation attack target (0x41a2e0 =
+        // CombatSystem::attack_goal) of the unit, of a TEAM container its first member's that has one (ascending id) [port:
+        // the container has no combat entry]; the aimed point = the goal's hard point world position, else the target's
+        // position; the 2-D extent of the target, of a TEAM container target its first live member's [port].
+        {
+            objects::ObjectId holder = c.has_unit(id) ? id : objects::kNoObjectId;
+            if (holder == objects::kNoObjectId && !u && mt != members.end())
+                for (const int32_t m : mt->second)
+                    if (c.has_unit(m) && c.attack_goal(m) != tc::kNoObject) {
+                        holder = m;
+                        break;
+                    }
+            const tc::ObjectId goal = holder != objects::kNoObjectId ? c.attack_goal(holder) : tc::kNoObject;
+            if (goal != tc::kNoObject) {
+                a.formation_target = static_cast<int32_t>(goal);
+                tactical::Vec3 hv{};
+                const int32_t ghp = c.attack_goal_hardpoint(holder);
+                if (ghp >= 0 && c.hardpoint_world(goal, ghp, hv)) {
+                    a.formation_target_point = {hv.x, hv.y, hv.z};
+                } else if (const objects::ObjectHandle gh = st.find(static_cast<objects::ObjectId>(goal)); st.exists(gh)) {
+                    const Vec3 gp = st.position(gh);
+                    a.formation_target_point = {gp.x, gp.y, gp.z};
+                } else {
+                    hv = c.position(goal);
+                    a.formation_target_point = {hv.x, hv.y, hv.z};
+                }
+                tc::ObjectId ext = goal;
+                if (!c.has_unit(goal))
+                    if (const auto gm = members.find(static_cast<objects::ObjectId>(goal)); gm != members.end() && !gm->second.empty())
+                        ext = gm->second.front();
+                a.formation_target_extent = c.extent_2d(ext);
+            }
+        }
         a.damage_tracking = o.has_damage_tracking || st.has_behavior(h, kDamageTracking);
         // q6 t19 - 0x5680b0 (A1_READINGS §33.2.1): TEAM container or both type flags; not garrisoned / a hidden landing
         // (+0x3a7); not dead (listed objects are alive); not in a transport [port: battles model no carried units, the
@@ -1758,18 +1808,46 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
     // UnitAI data pack (A1_READINGS §14): two synced draws per UNIT_AI object, F + Get_Int(0, 300) - 300 then
     // F + Get_Int(0, 150) - 150. [port] drawn when fill() first lists the object (store order, after the battle tick
     // of its creation frame), not inside the object's construction.
-    std::map<objects::ObjectId, int32_t> stamps;
+    // mcx6 t06: the second draw (+0x34) is kept too (unit_ai_second_), for the attack-positioning step.
+    std::map<objects::ObjectId, int32_t> stamps, seconds;
     for (size_t i = 0; i < listed.size(); ++i) {
         if (!st.has_behavior(listed[i], kUnitAi)) continue;
         const objects::ObjectId id = w.objects[i].id;
         const auto it = unit_ai_stamps_.find(id);
-        const int32_t stamp = it != unit_ai_stamps_.end()
-                                  ? it->second
-                                  : at::draw_unit_ai_stamps(host_->random().synced(), b_->frame_).reprojection_check;
-        stamps.emplace(id, stamp);
-        out[i].reprojection_stamp = stamp;
+        at::UnitAiStamps s;
+        if (it != unit_ai_stamps_.end()) {
+            s.reprojection_check = it->second;
+            const auto sit = unit_ai_second_.find(id);
+            s.second = sit != unit_ai_second_.end() ? sit->second : it->second;  // [port] a pre-mcx6 save kept only the first
+        } else {
+            s = at::draw_unit_ai_stamps(host_->random().synced(), b_->frame_);
+        }
+        stamps.emplace(id, s.reprojection_check);
+        seconds.emplace(id, s.second);
+        out[i].reprojection_stamp = s.reprojection_check;
+        out[i].attack_position_stamp = s.second;
     }
     unit_ai_stamps_ = std::move(stamps);  // objects no longer listed drop out
+    unit_ai_second_ = std::move(seconds);
+}
+
+// mcx6 t06 (LUA_API.md attack position 0x4f5390, terrain check 0x4f48a0 [M]): the static line test 0x5a4c10 of the land
+// passability grid for the unit's movement class (a TEAM container: its first live member's, ascending id); space and units
+// without a movement entry: clear.
+bool BattleAi::attack_position_line_clear(int32_t object_id, const at::Vec3f& a, const at::Vec3f& b) {
+    if (b_->space_) return true;
+    auto mover = static_cast<objects::ObjectId>(object_id);
+    if (!b_->movement_->has_unit(mover)) {
+        mover = objects::kNoObjectId;
+        for (const TacticalBattle::Unit& u : b_->units_)
+            if (u.alive && !u.retreated && u.container != 0xFFFFFFFFu && b_->containers_[u.container].id == object_id &&
+                b_->movement_->has_unit(u.id)) {
+                mover = u.id;
+                break;
+            }
+        if (mover == objects::kNoObjectId) return true;
+    }
+    return mv::line_passable(b_->movement_->grid(), mv::V2{a.x, a.y}, mv::V2{b.x, b.y}, b_->movement_->mask_of(mover));
 }
 
 // ---- order execution ----------------------------------------------------------------------------------------------
@@ -1860,6 +1938,15 @@ void BattleAi::follow_service() {
         const Vec3 tp = st.position(th);
         const float dx = tp.x - f.gx, dy = tp.y - f.gy;
         if (dx * dx + dy * dy <= f.r * f.r) continue;
+        // mcx6 t06 (LUA_API.md "Readers of UnitAI +0x38" 2, FIGHTER_FLYING §4.11 E): members[0]'s UNIT_AI vetoes the
+        // re-path (0x4f5780) while its attack-positioning flag is set (Keep_Moving_In_Battle: unset in FoC, not read).
+        // [port] a TEAM member holds no UNIT_AI of its own here: its container's flag is read. Space never sets it.
+        if (!b_->space_) {
+            const objects::ObjectId lead = f.units.front();
+            const objects::ObjectHandle lh = st.find(lead);
+            const objects::ObjectHandle ch = st.exists(lh) ? st.container(lh) : objects::ObjectHandle{};
+            if (world_->attack_positioning(lead) || (st.exists(ch) && world_->attack_positioning(st.id(ch)))) continue;
+        }
         f.gx = tp.x;
         f.gy = tp.y;
         // s78n t20 fix (MOVEMENT 4.3.1 item 2): the follow stands for the formation's re-path of a kind-3 goal

@@ -37,7 +37,8 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
   # S4 story & campaign events: engine/lua's StoryModel + one LuaVm per plot script (lua.h for
   # ServiceRate / LastService). Without engine/lua the session never starts (story_session_none.cpp).
   if(TARGET alamo_lua AND TARGET alamo_lua_vm)
-    target_sources(alamo_sim_base PRIVATE sim/src/story_session.cpp sim/src/story_rewards.cpp sim/src/story_rewards_apply.cpp)
+    target_sources(alamo_sim_base PRIVATE sim/src/story_session.cpp sim/src/story_rewards.cpp sim/src/story_rewards_apply.cpp
+                                          sim/src/story_random_story.cpp)
     target_link_libraries(alamo_sim_base PUBLIC alamo_lua)
     target_compile_definitions(alamo_sim_config INTERFACE ALAMO_SIM_HAVE_STORY=1)
   else()

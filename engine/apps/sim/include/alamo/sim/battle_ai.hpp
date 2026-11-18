@@ -228,6 +228,9 @@ public:
     // reinforcements_unloaded = TacticalBattle::landings_unloaded() of the tick just run (owner, galactic id, units).
     bool reinforce_in_flight(int32_t player, int32_t key) override;
     std::vector<ai::tactical::ReinforcementsUnloaded> reinforcements_unloaded() override;
+    // mcx6 t06 (LUA_API.md "Attack position 0x4f5390", 0x4f48a0 [M]): the land passability grid's static line test
+    // (0x5a4c10, line_passable) for the movement class of `object_id` (a TEAM container: its first live member's).
+    bool attack_position_line_clear(int32_t object_id, const ai::tactical::Vec3f& a, const ai::tactical::Vec3f& b) override;
     // --- end battle host ---
 
 private:
@@ -448,6 +451,9 @@ private:
     // UnitAI data-pack re-projection stamps (A1_READINGS §14) of the listed UNIT_AI objects, drawn once per object
     // (draw_unit_ai_stamps, two synced draws) when fill() first lists it; ascending id.
     std::map<objects::ObjectId, int32_t> unit_ai_stamps_;
+    // mcx6 t06: the second draw of the same pack (+0x34, UnitAiStamps::second: the attack-positioning stamp), same keys.
+    // Not hashed (it is read only through the AI world's attack-positioning records, which are); saved (battle.ai 7 / 8).
+    std::map<objects::ObjectId, int32_t> unit_ai_second_;
     std::vector<objects::ObjectId> team_units(uint8_t player, uint32_t wire) const;  // battle host: unit or TEAM members
     // S7 t26: signal 0xb (a new order replaces the unit's order) on every unit an executed AI / script order took.
     void order_signals(uint8_t player, const commands::EventData& ev);

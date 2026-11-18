@@ -26,6 +26,7 @@ add_library(alamo_game_core STATIC
   src/story_ui.cpp
   src/story_present.cpp
   src/story_camera.cpp
+  src/script_cinematics.cpp
   src/save_games.cpp
   src/mod_check.cpp
   src/mod_picker.cpp
@@ -122,6 +123,12 @@ add_executable(alamo_game_story_camera_tests tests/test_story_camera.cpp)
 target_link_libraries(alamo_game_story_camera_tests PRIVATE alamo_core alamo_game_core alamo_test_support)
 add_test(NAME alamo_game_story_camera_tests COMMAND alamo_game_story_camera_tests)
 set_tests_properties(alamo_game_story_camera_tests PROPERTIES TIMEOUT 60)
+# mcx6 t05 data-free: the story script's cinematic object calls, host side (script_cinematics.hpp): arrival timing, the
+# end-cinematic cleanup set, Show_Emitter's emitter names.
+add_executable(alamo_game_script_cinematics_tests tests/test_script_cinematics.cpp)
+target_link_libraries(alamo_game_script_cinematics_tests PRIVATE alamo_core alamo_game_core alamo_test_support)
+add_test(NAME alamo_game_script_cinematics_tests COMMAND alamo_game_script_cinematics_tests)
+set_tests_properties(alamo_game_script_cinematics_tests PROPERTIES TIMEOUT 60)
 
 # Data-free: GameAudioHost movie music (modes 14 / 17, Halt_Game_Music) on a synthetic audio tree and the null backend.
 add_executable(alamo_game_audio_host_tests tests/test_game_audio_host.cpp)

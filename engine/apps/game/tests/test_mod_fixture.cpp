@@ -226,14 +226,10 @@ void test_compat_checks(const std::string& foc) {
     CHECK(r.loaded && r.error_count() == 0);
     CHECK(r.story.files == 1);
     CHECK(r.story.rewards_used == 2 && r.story.events_used == 2);  // the commented-out event is not counted
-    CHECK(r.story.rewards_missing.size() == 1);
-    if (r.story.rewards_missing.size() == 1) {
-        const alamo::game::StoryUse& u = r.story.rewards_missing[0];
-        CHECK(u.name == "SWITCH_SIDES" && u.uses == 1 && u.in_mod && icontains(u.first_file, "ChecksStory.xml"));
-    }
+    // mcx6 t01: SWITCH_SIDES is implemented now (the story ledger has no missing reward left).
+    CHECK(r.story.rewards_missing.empty());
     CHECK(r.story.events_partial.size() == 1 && r.story.events_partial[0].name == "STORY_WIN_BATTLES");
-    CHECK(std::none_of(r.story.rewards_missing.begin(), r.story.rewards_missing.end(),
-                       [](const alamo::game::StoryUse& u) { return u.name == "FORCE_RETREAT"; }));
+    CHECK(icontains(r.story.events_partial.empty() ? "" : r.story.events_partial[0].first_file, "ChecksStory.xml"));
     const auto* unknown = retail_eq(r, "unknown_reward", "CHECKS_NO_SUCH_REWARD");
     CHECK(unknown && unknown->in_mod);
     CHECK(retail_eq(r, "unread_tag", "factions: Checks_Unread_Faction_Tag") != nullptr);  // retail ignores it too
@@ -247,13 +243,11 @@ void test_compat_checks(const std::string& foc) {
     }
 
     // Each finding from the mod's files is an issue record with the mod's layer, and blocks G3's static part.
-    CHECK(r.issues.find(alamo::IssueKind::RewardMissing, "SWITCH_SIDES",
-                        r.story.rewards_missing.empty() ? "" : r.story.rewards_missing[0].first_file) != nullptr);
+    CHECK(r.issues.count(alamo::IssueKind::RewardMissing) == 0);
     CHECK(r.issues.count(alamo::IssueKind::BindingUnconsumed) >= 1);
     CHECK(r.issues.count(alamo::IssueKind::RetailEquivalent) == r.retail_equivalent.size());
     CHECK(r.grade.grade == "G1" && !r.grade.g3_static);
     const std::string js = alamo::game::format_mod_report_json(r);
-    CHECK(contains(js, "\"SWITCH_SIDES\""));
     CHECK(contains(js, "\"CHECKS_NO_SUCH_REWARD\""));
     if (g_fail) std::fputs(js.c_str(), stdout);
 

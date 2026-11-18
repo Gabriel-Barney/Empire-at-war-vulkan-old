@@ -203,11 +203,52 @@ struct StoryGates {
     static constexpr uint8_t kNoInvasion = 2;    // ENABLE_INVASION planet 0
     static constexpr uint8_t kNoSabotage = 4;    // RESTRICT_SABOTAGE planet 1
     static constexpr uint8_t kNoCorruption = 8;  // RESTRICT_CORRUPTION planet 1
+    // mcx6 (STORY_REWARDS_GALACTIC §1.21): the manager's black-market list (+0x2d0, RESTRICT_BLACK_MARKET) and its
+    // all-abilities list (+0x2a0, RESTRICT_ALL_ABILITIES and SET_PLANET_RESTRICTED P3). Retail reads both only in the
+    // human's galactic planet-ability slot (0x3d2020); the sim has no reader, the game host reads story_gates().
+    static constexpr uint8_t kNoBlackMarket = 16;
+    static constexpr uint8_t kNoAbilities = 32;
     std::vector<uint8_t> planet;
     bool direct_invasion_disabled = false;  // DISABLE_DIRECT_INVASION
     bool fleet_combine = true;              // ENABLE_FLEET_COMBINE
     bool bounty_collection = true;          // ENABLE / DISABLE_BOUNTY_COLLECTION
     bool campaign_victory_movie = false;    // ENABLE_CAMPAIGN_VICTORY_MOVIE
+    // mcx6 (§1.21): ENABLE_SABOTAGE (+0x29a, ctor 1): off = a human player's sabotage is refused (the AI's path reads
+    // neither this nor the lists). ENABLE_COMBAT_CINEMATIC (+0x29c, ctor 1): off = the game host's cinematic-view key
+    // does nothing (no sim reader).
+    bool sabotage_enabled = true;
+    bool combat_cinematic = true;
+    // mcx6 SET_PLANET_SPAWN (§1.8): the planet block's spawn map (+0x2d0), one entry per (planet, key); `key` = Reward_Param2
+    // as written (retail keys the map by its CRC: crc = alamo::crc32 of it), chance = atof(Reward_Param3). An existing key is
+    // overwritten; nothing removes one. Read at every tactical battle start at that planet (0x4b71c0, map order = ascending
+    // crc): TacticalBattle::apply_planet_spawn.
+    struct PlanetSpawn {
+        PlanetIndex planet = kInvalidPlanet;
+        uint32_t crc = 0;
+        std::string key;
+        float chance = 0.0f;
+        friend bool operator==(const PlanetSpawn&, const PlanetSpawn&) = default;
+    };
+    std::vector<PlanetSpawn> planet_spawn;  // sorted by (planet, crc)
+    // mcx6 STATISTIC_CHANGE (§1.17): per planet row, the planet block's political control (+0x22c, read instead of the
+    // planet type's Political_Control) and max starbase level (+0x238, the AI's MaxStarbaseLevel); kUnsetStat = not
+    // written (the type's / map's value). The income base (+0x228) is PlanetState::base_value.
+    static constexpr int32_t kUnsetStat = INT32_MIN;
+    std::vector<int32_t> political_control, max_starbase;
+    int32_t stat(const std::vector<int32_t>& v, PlanetIndex row) const { return row < v.size() ? v[row] : kUnsetStat; }
+    void set_stat(std::vector<int32_t>& v, PlanetIndex row, int32_t value) {
+        if (row >= v.size()) v.resize(static_cast<size_t>(row) + 1, kUnsetStat);
+        v[row] = value;
+    }
+    // The mcx6 fields above at their defaults (the story hash adds them only when not).
+    bool mcx6_default() const {
+        for (const uint8_t b : planet)
+            if ((b & (kNoBlackMarket | kNoAbilities)) != 0) return false;
+        for (const std::vector<int32_t>* v : {&political_control, &max_starbase})
+            for (const int32_t x : *v)
+                if (x != kUnsetStat) return false;
+        return sabotage_enabled && combat_cinematic && planet_spawn.empty();
+    }
     // NEW_POWER_FOR_ALL / REMOVE_POWER_FROM_ALL: the plot player's (type, ability name CRC) table, newest value wins.
     struct Power {
         int32_t player = -1;
@@ -231,7 +272,8 @@ struct StoryGates {
     bool is_default() const {
         for (const uint8_t b : planet)
             if (b != 0) return false;
-        return !direct_invasion_disabled && fleet_combine && bounty_collection && !campaign_victory_movie && powers.empty();
+        return !direct_invasion_disabled && fleet_combine && bounty_collection && !campaign_victory_movie && powers.empty() &&
+               mcx6_default();
     }
 };
 
@@ -1169,6 +1211,17 @@ public:
     // to the sim; not part of the sim's own save or hash. Default-constructed = nothing refused.
     void set_story_gates(const StoryGates& gates) { story_gates_ = gates; }
     const StoryGates& story_gates() const { return story_gates_; }
+    // mcx6: the planet's max starbase level 0x372780 (planet block +0x238): STATISTIC_CHANGE MAX_STARBASE_LEVEL's value when
+    // written, else the map's Max_Space_Base (absent -> 5 [port], as the AI readers had it).
+    int32_t max_starbase_level(PlanetIndex planet) const;
+    // mcx6 STATISTIC_CHANGE CREDIT_VALUE (§1.17): the planet's runtime income base (+0x228), not clamped.
+    void story_set_base_value(PlanetIndex planet, int32_t value);
+    // mcx6 SWITCH_SIDES (STORY_REWARDS_GALACTIC §1.10, 0x297e80): steps the local player to the next player whose faction is
+    // Is_Debug_Switchable_To (wrapping); `faction` given: steps until that faction's player or full circle (the original
+    // local faction). After each step whose new local player has no AI (PlayerState::ai false), that player becomes the
+    // only human. Returns the new local player (kNoPlayer: no local player, nothing changed). [port] a step that finds no
+    // switchable player stops after one full circle instead of looping forever.
+    int32_t story_switch_sides(std::string_view faction);
 
     // ---- q6 t21 / t22: the galactic victory monitor's records and event-driven tests (victory.cpp) ----------------
     // Records (setup 0x289a90, per player): none for an Is_Neutral faction; the Human_ list for the

@@ -422,6 +422,13 @@ bool BattleView::start(GpuCore& gpu, const GameData& data, const GameSession& se
 #endif
     // mcx6 t04 (binding-consumer: Hide_Sub_Object): the sub-meshes Lua hid on an object (the app's session outlives the view).
     builder_->set_hidden_mesh_source([s = &session](objects::ObjectId id) { return s->hidden_sub_objects(id); });
+    // mcx6 t05 (binding-consumer: GameObjectWrapper.Show_Emitter): the particle groups the story script showed / hid.
+    emitter_groups_.clear();
+    builder_->set_emitter_source([this](objects::ObjectId id) {
+        const auto it = emitter_groups_.find(id);
+        if (it == emitter_groups_.end()) return render::SimInstanceBuilder::EmitterOverride{};
+        return render::SimInstanceBuilder::EmitterOverride{it->second.show, it->second.hide};
+    });
 #ifdef ALAMO_PARTICLES_HAVE_SIM
     pworld_ = std::make_unique<render::particles::ParticleWorld>(1u << 21);
     plib_ = std::make_unique<render::particles::ParticleLibrary>(data.files.get());
@@ -656,7 +663,11 @@ void BattleView::capture(const GameSession& session) {
     if (const sim::TacticalBattle* b = session.battle()) {  // S8 t31: every tick's cues, also when no snapshot is made
         if (const sim::TacticalMode* tm = host.modes().top_tactical())
             track_lob_chargeups(lob_chargeups_, tsw_cues(b->special_weapon_events(), tm->primary()));
-        env_wanted_ = b->environment_index();  // cu8g t03: Set_New_Environment (applied by prepare)
+        // cu8g t03 / ui2 t08: the environment the script switched to (applied by prepare): the bindings change the battle's
+        // index through TacticalScriptHooks (CU8F_T03_T05_RE §2.2, CU8G_T02_ENV_PICK_RE §5).
+        // binding-consumer: Set_New_Environment
+        // binding-consumer: Set_Cinematic_Environment
+        env_wanted_ = b->environment_index();
         // vis1 t01 (WEATHER_VISUALS §1-§3): the land weather's presentation values. Without a running scenario the lightning
         // is the active environment's own (TEE 21); the emitter is the scenario of the active environment's Weather effect.
         render::WeatherView w;
@@ -700,6 +711,7 @@ void BattleView::capture(const GameSession& session) {
             if (const sim::TacticalMode* tm = host.modes().top_tactical())
                 // presentation() is a non-const getter; the log is only read here (between ticks).
                 if (const lua::PresentationLog* log = const_cast<sim::StorySession*>(story)->presentation()) {
+                    emitter_groups_ = game::emitter_overrides(log->state().emitters);  // mcx6 t05: Show_Emitter
                     const uint64_t since = host.frame() >= tm->frame() ? host.frame() - tm->frame() : 0;
                     const std::vector<render::SnapshotEffect> lua_fx = render::snapshot_lua_effects(log->particle_effects(), table_, since);
                     render::append_snapshot_effects(*snap, lua_fx);

@@ -993,9 +993,8 @@ struct GalacticSimTokenResolver::Impl {
         const int32_t m = galactic_ai_ground_slot_max(sim, static_cast<PlanetIndex>(p));
         return m >= 0 ? m : 5;
     }
-    int32_t max_space_base(size_t p) const {
-        const auto& m = sim.map().planets.max_space_base;
-        return p < m.size() && m[p] >= 0 ? m[p] : 5;
+    int32_t max_space_base(size_t p) const {  // 0x372780: the map's Max_Space_Base, or STATISTIC_CHANGE's value (mcx6)
+        return sim.max_starbase_level(static_cast<PlanetIndex>(p));
     }
     double distance(size_t a, size_t b) const {
         const double dx = static_cast<double>(planets[a].position.x) - planets[b].position.x;

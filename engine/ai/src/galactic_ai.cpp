@@ -436,8 +436,7 @@ uint32_t GalacticAiWorld::Impl::next_starbase_type(PlanetIndex p) const {
         cand = rules.types[sb].next_level_base;
     }
     if (cand >= rules.types.size()) return gal::kNoIndex;
-    const auto& msb = sim.map().planets.max_space_base;
-    const int32_t max_level = p < msb.size() && msb[p] >= 0 ? msb[p] : 5;  // 0x372780 (tag absent -> 5 [port])
+    const int32_t max_level = sim.max_starbase_level(static_cast<PlanetIndex>(p));  // 0x372780 (tag absent -> 5 [port]; mcx6 story value)
     bool queued = false;
     for (const auto& q : ps.queue)
         for (const gal::BuildEntry& e : q)

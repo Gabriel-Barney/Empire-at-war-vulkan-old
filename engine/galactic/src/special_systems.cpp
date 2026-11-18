@@ -628,6 +628,9 @@ bool GalacticSim::apply_sabotage(const SpecialAbilityDef& a, ObjectHandle sabote
     // vf30 0x5b1920 [H].
     const PlayerState& ps = players_[static_cast<size_t>(player)];
     if (!ps.human && !ps.ai) return false;  // 1. (a human is the local player in the port's SP model)
+    // mcx6 ENABLE_SABOTAGE off (STORY_REWARDS_GALACTIC §1.21, 0x2e6770): the human's sabotage slot is never offered, so
+    // a human sabotage does not start [port: the slot test sits in the GUI; the sim refuses the use]. The AI ignores it.
+    if (ps.human && !story_gates_.sabotage_enabled) return false;
     const std::vector<uint8_t> opts = sabotage_options_of(a, planet, player);
     if (opts.empty()) {  // 2.
         emit_special(GalacticEventKind::SpecialError, player, planet, saboteur, kNoIndex, 0, -1);
@@ -716,6 +719,8 @@ RejectReason GalacticSim::sabotage_execute_structure(int32_t player, PlanetIndex
     if (!valid_player(player)) return RejectReason::InvalidPlayer;
     if (!valid_planet(planet)) return RejectReason::InvalidTarget;
     if (story_gates_.has(planet, StoryGates::kNoSabotage)) return RejectReason::NotAllowed;  // RESTRICT_SABOTAGE (STY1)
+    // mcx6 ENABLE_SABOTAGE off: the dialog confirm 0x3cf2e0 queues no command for the human (§1.21).
+    if (players_[static_cast<size_t>(player)].human && !story_gates_.sabotage_enabled) return RejectReason::NotAllowed;
     if (!store_->alive(saboteur) || store_->owner(saboteur) != player) return RejectReason::InvalidUnit;
     const float c = commands::requantize(kQuantAmount, cost);
     const float r = commands::requantize(kQuantDuration, respawn_seconds);

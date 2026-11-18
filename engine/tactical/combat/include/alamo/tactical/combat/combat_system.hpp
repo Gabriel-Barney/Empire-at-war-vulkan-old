@@ -922,6 +922,10 @@ enum UnitFlag : uint32_t {
     // (garrisoned or limbo): no damage, not a candidate / valid target / attack order target, no collision, no infection. Set
     // by the host from the script bridge before every tick; saved and hashed with the other flags.
     kUnitInLimbo = 1u << 29,
+    // mcx6 (docs/re/STORY_REWARDS_GALACTIC.md §1.20): the story reward DISABLE_SPECIAL_STRUCTURE's bit (obj +0x3a1 bit 0x04).
+    // A BASE_SHIELD generator with it set is off at its next base-shield service (Evaluate_State 0x56bb00); cleared, it
+    // comes back after Base_Shield_Delay_Time. Saved and hashed with the other flags.
+    kUnitShieldStoryOff = 1u << 30,
 };
 inline constexpr uint32_t kUnitContained = kUnitGarrisoned | kUnitInLimbo;
 // Mirrors the host rewrites before every tick (left out of hash_units).
@@ -1232,6 +1236,10 @@ public:
     // is cleared (the formation goal became a position).
     void set_attack_goal(ObjectId unit, ObjectId target, int32_t hardpoint = -1);
     ObjectId attack_goal(ObjectId unit) const;
+    int32_t attack_goal_hardpoint(ObjectId unit) const;  // mcx6 t06: the goal's hard point index (-1 none)
+    // mcx6 t06 (LUA_API.md "Task force: Enable_Attack_Positioning", attack position 0x4f5390): the object's 2-D extent
+    // (0x3982b0) as the length of its XY footprint half-extents (footprint_extents) [M]; 0 for an unknown id.
+    float extent_2d(ObjectId id) const;
     // Order_Attack (0x38d730, §2.8 C) with ordered = 1, as a task-force movement block issues it at order time (path A).
     // False = refused (C step 1: target not an enemy of the unit's owner; stealthed and the unit lacks
     // Target_Stealth_Units; garrisoned or dead) - the caller drops the unit from the move. A unit without any weapon has

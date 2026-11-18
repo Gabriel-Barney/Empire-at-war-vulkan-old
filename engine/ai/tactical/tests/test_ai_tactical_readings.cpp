@@ -206,6 +206,47 @@ static void test_destroy_memory() {
     CHECK(g.memory_entries(0, c1).empty() && g.memory_entries(0, c2).empty());
 }
 
+// ---------------------------------------------------------------- mcx6 t06: the attack position's square (0x4f5390)
+// LUA_API.md "Attack position 0x4f5390": the four d x d squares around T, corners (x, y), (x - d, y), (x - d, y - d),
+// (x, y - d); the lowest enemy force of `self` wins, the first on a tie; the result is that square's centre (z = 0).
+static void test_attack_position_square() {
+    PerceptionWorld w = make_world();
+    w.objects.push_back(make_unit(1, 1, 700.0f, 690.0f));  // player 1's unit up and right of T: hostile to player 0
+    w.index();
+    TacticalPerceptionGrid g;
+    g.init(TacticalMode::Land, w.map, 2, land_cfg());
+    CHECK(g.register_object(w, 1, 0));
+    const Vec3f t{600.0f, 600.0f, 37.0f};
+    const float d = 60.0f;
+    // the squares' forces as the grid answers them, independently of the function
+    float force[4];
+    const float cx[4] = {600.0f, 540.0f, 540.0f, 600.0f}, cy[4] = {600.0f, 600.0f, 540.0f, 540.0f};
+    GridQuery q;
+    q.self = 0;
+    q.ally = false;
+    std::vector<uint32_t> cells;
+    for (int k = 0; k < 4; ++k) {
+        g.rect_cells({cx[k], cy[k], cx[k] + d, cy[k] + d}, cells);
+        force[k] = g.cells_force(w, cells, q);
+    }
+    int want = 0;
+    for (int k = 1; k < 4; ++k)
+        if (force[k] < force[want]) want = k;
+    const AttackSquare a = attack_position_square(g, w, 0, t, d);
+    std::printf("attack position square: forces %.2f %.2f %.2f %.2f -> %d (%.1f, %.1f)\n", static_cast<double>(force[0]),
+                static_cast<double>(force[1]), static_cast<double>(force[2]), static_cast<double>(force[3]), a.index,
+                static_cast<double>(a.centre.x), static_cast<double>(a.centre.y));
+    CHECK(force[0] > 0.0f && force[0] > force[2]);  // the enemy's footprint reaches the first square, not the third
+    CHECK(a.index == want && a.index != 0 && a.threat == force[want]);
+    CHECK(a.centre.x == cx[want] + 30.0f && a.centre.y == cy[want] + 30.0f && a.centre.z == 0.0f);
+    // the owner's own unit is no threat to it: every square 0, the first wins the tie
+    const AttackSquare own = attack_position_square(g, w, 1, t, d);
+    CHECK(own.index == 0 && own.threat == 0.0f && own.centre.x == 630.0f && own.centre.y == 630.0f);
+    // d = 0: four empty squares at T, the first wins
+    const AttackSquare zero = attack_position_square(g, w, 0, t, 0.0f);
+    CHECK(zero.centre.x == 600.0f && zero.centre.y == 600.0f);
+}
+
 // ---------------------------------------------------------------- 6 free-store admission
 static void test_admission() {
     // land: a TEAM with a locomotor owned by the AI
@@ -368,6 +409,7 @@ int main() {
     test_fow_rounding();
     test_unit_ai_stamps();
     test_destroy_memory();
+    test_attack_position_square();  // mcx6 t06
     test_admission();
     test_service_timing();
     if (g_fail) {

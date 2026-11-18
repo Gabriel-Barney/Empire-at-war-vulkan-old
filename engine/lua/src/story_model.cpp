@@ -1048,8 +1048,33 @@ void StoryModel::dispatch_in(uint32_t p, const std::string& type, const StoryNot
     const std::vector<uint32_t> walk = plots_[p].walk;
     for (const uint32_t e : walk) {
         if (plots_[p].events[e].type != type || !gated(p, e)) continue;
-        if (evaluate(p, e, type, n)) fire(p, e);
+        if (!evaluate(p, e, type, n)) continue;
+        const StoryNotification* outer = firing_;  // mcx6: firing_notification() for the rewards of this fire
+        firing_ = &n;
+        fire(p, e);
+        firing_ = outer;
     }
+}
+
+uint32_t StoryModel::replace_placeholder(std::string_view placeholder_upper, std::string_view planet, std::vector<std::string>* log) {
+    uint32_t n = 0;
+    auto replace = [&](const StoryEventDef& ev, StoryParam& prm, int32_t index) {
+        if (prm.text.empty() || ascii_upper(prm.text) != placeholder_upper) return;
+        if (log) {
+            log->push_back(index < 0 ? "EVENT " + ev.name + ", replacing " + prm.text + " with " + std::string(planet)
+                                     : "EVENT " + ev.name + ", Param " + std::to_string(index) + ", replacing " + prm.text +
+                                           " with " + std::string(planet));
+        }
+        prm.text = std::string(planet);
+        ++n;
+    };
+    for (StoryPlot& plot : plots_)
+        for (StoryEventDef& ev : plot.events) {
+            if (ev.reward_type == "PICK_PLANET") continue;
+            for (StoryParam& prm : ev.event_params) replace(ev, prm, -1);
+            for (size_t i = 0; i < ev.reward_params.size() && i < 3; ++i) replace(ev, ev.reward_params[i], static_cast<int32_t>(i + 1));
+        }
+    return n;
 }
 
 uint32_t StoryModel::dispatch(std::string_view type_in, const StoryNotification& n) {

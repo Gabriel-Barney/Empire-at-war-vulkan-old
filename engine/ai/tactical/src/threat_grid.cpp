@@ -51,6 +51,26 @@ UnitAiStamps draw_unit_ai_stamps(SimRng& rng, uint32_t frame) {
     return s;
 }
 
+AttackSquare attack_position_square(const TacticalPerceptionGrid& g, const PerceptionWorld& w, int32_t self, const Vec3f& t, float d) {
+    GridQuery q;
+    q.self = self;
+    q.ally = false;
+    const float cx[4] = {t.x, t.x - d, t.x - d, t.x};
+    const float cy[4] = {t.y, t.y, t.y - d, t.y - d};
+    std::vector<uint32_t> cells;
+    AttackSquare best;
+    for (int k = 0; k < 4; ++k) {
+        g.rect_cells({cx[k], cy[k], cx[k] + d, cy[k] + d}, cells);
+        const float threat = g.cells_force(w, cells, q);
+        if (k == 0 || threat < best.threat) {
+            best.index = k;
+            best.threat = threat;
+        }
+    }
+    best.centre = Vec3f{cx[best.index] + 0.5f * d, cy[best.index] + 0.5f * d, 0.0f};
+    return best;
+}
+
 ThreatGridConfig threat_grid_config(TacticalMode mode, const TacticalAiConstants& c) {
     ThreatGridConfig g;
     g.fog_cells_per_threat_cell = c.fog_cells_per_threat_cell;

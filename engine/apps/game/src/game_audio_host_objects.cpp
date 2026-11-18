@@ -111,6 +111,18 @@ uint32_t GameAudioHost::hyperspace_arrival(uint64_t object, std::string_view own
     return id;
 }
 
+uint32_t GameAudioHost::cinematic_arrival(uint64_t object, int32_t owner, const Vec3& position) {
+    if (owner < 0 || static_cast<size_t>(owner) >= player_factions_.size()) return 0;
+    return hyperspace_arrival(object, player_factions_[static_cast<size_t>(owner)], position);
+}
+
+uint32_t GameAudioHost::cinematic_engine_flyby(const objects::GameObjectTypes& types, objects::TypeIndex type, uint64_t object,
+                                               const Vec3& position) {
+    if (!game_ || type >= types.size()) return 0;
+    const std::string_view ev = ascii_trim(types.get_string(type, "SFXEvent_Ambient_Moving"));
+    return ev.empty() ? 0u : game_->object_sfx(object, ev, position);
+}
+
 void GameAudioHost::ability_activations(std::span<const tactical::abilities::AbilityActivation> log, const objects::ObjectStore& store,
                                         const objects::GameObjectTypes& types) {
     if (!log.empty() && log.back().serial < activation_seen_) activation_seen_ = 0;
@@ -143,7 +155,10 @@ void GameAudioHost::object_events(const sim::TacticalBattle& battle, const objec
     };
     // Abilities: EffectOn = the activation presentation (light, particle, sound), event order (aud1 t10: the kept copy).
     ability_activations(battle.abilities().activation_events(), store, types);
-    // Hyperspace: the battle's append-only log from our cursor (a shorter log = a new battle or a load).
+    // Hyperspace: the battle's append-only log from our cursor (a shorter log = a new battle or a load). An Arrive of a
+    // reinforcement held in hyperspace (LINK_TACTICAL Param9 = 2) is logged only after the script's Resume_Hyperspace_In
+    // clears the hold (TacticalBattle::arrival_held; L1_S4_REMAINING §3.4, 0x543570):
+    // binding-consumer: Resume_Hyperspace_In (docs/re/MCX6_T05_CINEMATIC_BINDINGS.md §6)
     const std::span<const sim::TacticalBattle::HyperspaceSfx> log = battle.hyperspace_sfx();
     if (log.size() < hyperspace_seen_) hyperspace_seen_ = 0;
     for (; hyperspace_seen_ < log.size(); ++hyperspace_seen_) {
@@ -194,6 +209,8 @@ void GameAudioHost::ability_activations(std::span<const tactical::abilities::Abi
 void GameAudioHost::object_events(const sim::TacticalBattle&, const objects::ObjectStore&, const objects::GameObjectTypes&,
                                   std::span<const std::string>) {}
 uint32_t GameAudioHost::hyperspace_arrival(uint64_t, std::string_view, const Vec3&) { return 0; }
+uint32_t GameAudioHost::cinematic_arrival(uint64_t, int32_t, const Vec3&) { return 0; }
+uint32_t GameAudioHost::cinematic_engine_flyby(const objects::GameObjectTypes&, objects::TypeIndex, uint64_t, const Vec3&) { return 0; }
 
 #endif
 

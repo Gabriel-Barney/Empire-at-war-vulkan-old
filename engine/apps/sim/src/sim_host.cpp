@@ -172,6 +172,7 @@ GameMode& SimHost::start_game(ModeKind kind) {
         pacing_.reset();
         random_.seed_session(cfg_.seed);
         modes_.reset_ids();
+        scoring_scaffold_ = false;  // mcx6 t07: scoring_map_battle marks the new session again
     }
     const bool new_session = modes_.empty();
     GameMode& m = modes_.push(kind);
@@ -370,6 +371,15 @@ void SimHost::scoring_reset_tactical_stats() {
 #endif
 }
 
+// mcx6 t07 (GAME_SCORING.md §9.1, sim_host.hpp): the skirmish's scaffold galaxy is hidden from the scoring script.
+void SimHost::scoring_map_battle() {
+    scoring_scaffold_ = true;
+    scoring_starts_.erase(std::remove_if(scoring_starts_.begin(), scoring_starts_.end(),
+                                         [](const std::pair<std::string, std::string>& s) { return s.first == "Galactic"; }),
+                          scoring_starts_.end());
+    scoring_events_.clear();
+}
+
 void SimHost::scoring_flush_starts() {
 #ifdef ALAMO_SIM_HAVE_STORY
     std::vector<std::pair<std::string, std::string>> starts;
@@ -450,6 +460,7 @@ void SimHost::scoring_tactical_production(uint32_t type, int32_t player) {
 // After T9: the galactic events the story drained this tick (stream order).
 void SimHost::scoring_deliver_events() {
 #ifdef ALAMO_SIM_HAVE_STORY
+    if (scoring_scaffold_) scoring_events_.clear();  // mcx6 t07: a skirmish's scaffold galaxy raises nothing
     if (scoring_events_.empty()) return;
     std::vector<galactic::GalacticEvent> events;
     events.swap(scoring_events_);
@@ -589,11 +600,12 @@ galactic::GalacticSim* SimHost::start_galactic(const galactic::GalacticRules& ru
 #ifdef ALAMO_SIM_HAVE_STORY
     {   // storyb t14 (GAME_SCORING.md §3): the death and neutralized signals reach the scoring script while the objects live.
         galactic::GalacticSim::ScoringHooks hooks;
-        hooks.destroyed = [this](objects::ObjectHandle h) {
-            if (scoring_vm_) scoring_call("Galactic_Unit_Destroyed_Event", {arg_object(h), arg_player(scoring_neutral_player())});
+        hooks.destroyed = [this](objects::ObjectHandle h) {  // mcx6 t07: not from a skirmish's scaffold galaxy
+            if (scoring_vm_ && !scoring_scaffold_)
+                scoring_call("Galactic_Unit_Destroyed_Event", {arg_object(h), arg_player(scoring_neutral_player())});
         };
         hooks.neutralized = [this](uint32_t hero_type, objects::ObjectHandle neutralizer) {
-            if (scoring_vm_) scoring_call("Galactic_Neutralized_Event", {arg_type(hero_type), arg_object(neutralizer)});
+            if (scoring_vm_ && !scoring_scaffold_) scoring_call("Galactic_Neutralized_Event", {arg_type(hero_type), arg_object(neutralizer)});
         };
         mode.sim()->set_scoring_hooks(std::move(hooks));
     }
@@ -626,7 +638,9 @@ bool SimHost::end_game_mode() {
 #ifdef ALAMO_SIM_HAVE_STORY
     if (scoring_vm_ && modes_.top()) {  // q6 t09: Game_Mode_Ending_Event before the mode's shutdown (§3, signal 0x24)
         scoring_flush_starts();          // a mode set up and ended within one frame still started first
-        scoring_call("Game_Mode_Ending_Event", {arg_string(scoring_mode_name(modes_.top()->kind()))});
+        // mcx6 t07: not for a skirmish's scaffold galaxy (scoring_map_battle)
+        if (!(scoring_scaffold_ && modes_.top()->kind() == ModeKind::Galactic))
+            scoring_call("Game_Mode_Ending_Event", {arg_string(scoring_mode_name(modes_.top()->kind()))});
     }
     if (modes_.depth() <= 1) {  // q6 t06: before the store its wrappers point into
         scoring_vm_.reset();
