@@ -1517,6 +1517,11 @@ void CampaignBattles::story_bridge_begin(SimHost& host, GameMode& mode) {
         TacticalMode* tm = host_->tactical();
         return (battle_ && tm && tm->primary().exists(o)) ? battle_->representative_type(tm->primary().id(o)) : objects::kNone;
     };
+    // mcx8 t12: Get_Game_Scoring_Type answers a TEAM container's company type.
+    b.team_company_type = [this](objects::ObjectHandle o) {
+        TacticalMode* tm = host_->tactical();
+        return (battle_ && tm && tm->primary().exists(o)) ? battle_->team_company_type(tm->primary().id(o)) : objects::kNone;
+    };
     // q6 t28 (TERRAIN_WATER_POST 1.6): Find_Hint / Get_Hint see the map objects' .ted hint names.
     b.map_hint = [this](objects::ObjectHandle o) {
         TacticalMode* tm = host_->tactical();

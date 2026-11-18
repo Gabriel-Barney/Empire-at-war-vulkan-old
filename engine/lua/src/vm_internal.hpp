@@ -187,6 +187,7 @@ enum class DeadRule : uint8_t {
     Error,        // script error "this object is already dead" (Call::script_error_stop)
     WarnNothing,  // warning "this object is dead!", returns nothing
     WarnZero,     // warning "this object is dead!", returns 0
+    SilentZero,   // no message, returns 0 (Get_Shield, docs/re/MCX8_BINDINGS_OBJECTS.md)
 };
 
 struct MethodSlot {

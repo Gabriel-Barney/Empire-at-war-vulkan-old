@@ -911,8 +911,8 @@ void test_galactic_ops() {
     CHECK(run(vm, "g1 = Tr.Is_In_Garrison() g2 = PA.Has_Garrison() gl = table.getn(PA.Get_Garrisoned_Units()) "
                   "cg = Tr.Can_Garrison(PA) Tr.Eject_Garrison()") == "");
     CHECK(!gtrue(vm, "g1") && !gtrue(vm, "g2") && gnum(vm, "gl") == 0.0 && !gtrue(vm, "cg"));
-    CHECK(run(vm, "Tr.Can_Garrison(5)").find("GameObjectWrapper::Can_Garrison -- invalid type for parameter 1. Expected game object or AI target.") !=
-          std::string::npos);
+    // mcx8 t12 (MCX8_BINDINGS_OBJECTS §Can_Garrison [H]): a unit without GARRISON_UNIT answers false before the argument checks.
+    CHECK(run(vm, "cg5 = tostring(Tr.Can_Garrison(5))") == "" && gstr(vm, "cg5") == "false");
 
     // Assemble_Fleet.
     CHECK(run(vm, "af = Assemble_Fleet({Hero}) a1 = (af ~= Fleet) a2 = af.Get_Contained_Object_Count() "

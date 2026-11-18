@@ -1167,7 +1167,7 @@ the step).
 | `Activate_Ability(name, arg)` 0x570580 | §2.9; executes the command directly (no queue) |
 | `Cancel_Ability(name)` 0x5745c0 | `SetUnitAbilityMode(t, off)` executed directly |
 | `Force_Ability_Recharge(name[, s])` 0x576b70 | without s: start recharge (§2.6); with s: counter = maximum = int(FPS × s) (phase unchanged) |
-| `Reset_Ability_Counter(name)` 0x57f430 | sets counter = maximum = 1 frame when 0x42f8e0 allows [M] |
+| `Reset_Ability_Counter()` 0x57f430 | no arguments read; for **every** ability id whose counter is **not** zero (0x42f8e0 false), counter = maximum = 1 frame (0x42fa70); idle counters untouched (MCX8_BINDINGS_OBJECTS §Reset_Ability_Counter) |
 | `Is_Ability_Autofire` / `Set_Single_Ability_Autofire` / `Set_All_Abilities_Autofire` | slot byte +9 (§2.10); the setters write it directly (0x3a78b0) |
 | `Is_Under_Effects_Of_Ability(name)` 0x57c600 | tests a behaviour's active state [L which behaviour] |
 | `Get_Hull()` 0x578c30 | §1.3 (tactical only, error elsewhere) |

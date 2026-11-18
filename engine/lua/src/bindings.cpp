@@ -56,6 +56,7 @@ using detail::ModeGate;
 // own gate (bind_objects.cpp).
 constexpr std::pair<std::string_view, ModeGate> kMethodGates[] = {
     {"GameObjectWrapper.Get_Energy", ModeGate::Tactical},     {"GameObjectWrapper.Get_Hull", ModeGate::Tactical},
+    {"GameObjectWrapper.Get_Health", ModeGate::Tactical},  // mcx8 t12: the same function as Get_Hull (MCX8_BINDINGS_OBJECTS)
     {"GameObjectWrapper.Get_Shield", ModeGate::Tactical},     {"GameObjectWrapper.Hyperspace_Away", ModeGate::Tactical},
     {"GameObjectWrapper.Make_Invulnerable", ModeGate::Tactical}, {"GameObjectWrapper.Stop", ModeGate::Tactical},
     {"GameObjectWrapper.Teleport", ModeGate::Tactical},       {"GameObjectWrapper.Teleport_And_Face", ModeGate::Tactical},
@@ -76,6 +77,12 @@ constexpr std::pair<std::string_view, const char*> kGateTexts[] = {
     {"Get_Energy", "GameObjectWrapper::Get_Energy -- only valid in tactical mode"},
     {"Hyperspace_Away", "GameObjectWrapper::Hyperspace_Away -- only valid in space mode"},
     {"Get_AI_Power_Vs_Unit", "Get_AI_Power_Vs_Unit -- only valid in tactical mode"},
+    // mcx8 t12 (docs/re/MCX8_BINDINGS_OBJECTS.md, Hide_Object / Get_Hull / Get_Shield) [H]: Hide_Object's copy-pasted
+    // prefix; Get_Health is registered to Get_Hull's function, so it prints "Get_Hull".
+    {"Hide_Object", "LuaTransitionCinematicTargetKey -- Command only valid in a tactical game."},
+    {"Get_Hull", "GameObjectWrapper::Get_Hull -- this command is only supported in tactical modes."},
+    {"Get_Health", "GameObjectWrapper::Get_Hull -- this command is only supported in tactical modes."},
+    {"Get_Shield", "GameObjectWrapper::Get_Shield -- this command is only supported in tactical modes."},
 };
 // LUA_API.md "Dead or null wrappers": GameObjectWrapper methods whose dead wrapper is not the silent default.
 constexpr std::pair<std::string_view, DeadRule> kDeadRules[] = {
@@ -93,9 +100,12 @@ constexpr std::pair<std::string_view, DeadRule> kDeadRules[] = {
     // warning "this object is dead!"
     {"Change_Owner", DeadRule::WarnNothing}, {"Despawn", DeadRule::WarnNothing},
     {"Mark_Parent_Mode_Object_For_Death", DeadRule::WarnNothing}, {"Set_Importance", DeadRule::WarnNothing},
-    {"Set_Selectable", DeadRule::WarnNothing}, {"Take_Damage", DeadRule::WarnNothing},
+    {"Set_Selectable", DeadRule::WarnNothing}, {"Take_Damage", DeadRule::Binding},  // warns after its count check
     {"Set_Targeting_Priorities", DeadRule::WarnNothing}, {"Set_Targeting_Stickiness_Time_Threshold", DeadRule::WarnNothing},
     {"Get_Rate_Of_Damage_Taken", DeadRule::WarnZero}, {"Get_Time_Till_Dead", DeadRule::WarnZero},
+    // mcx8 t12 (docs/re/MCX8_BINDINGS_OBJECTS.md) [H]: Take_Damage / Is_Ability_Ready test the argument count before the
+    // dead wrapper, Get_Name answers "" for a dead wrapper (the bindings test it); a dead Get_Shield is 0, no message.
+    {"Get_Name", DeadRule::Binding}, {"Is_Ability_Ready", DeadRule::Binding}, {"Get_Shield", DeadRule::SilentZero},
 };
 
 template <class List>
@@ -450,18 +460,21 @@ int invoke(lua_State* L, const Invocation& inv, char* err, size_t cap) noexcept 
         for (const auto& [name, text] : kGateTexts)
             if (name == inv.method) return c.script_error_stop("%s", text);
         const char* who = inv.object ? "GameObjectWrapper::" : "";
-        return c.script_error_stop(inv.gate == ModeGate::Tactical ? "%s%s -- this command is only supported in tactical modes"
+        return c.script_error_stop(inv.gate == ModeGate::Tactical ? "%s%s -- this command is only supported in tactical modes."
                                                                    : "%s%s -- this command is only supported in galactic mode",
                                    who, inv.method);
     }
     if (inv.object && inv.dead != DeadRule::Binding && !object_alive(*inv.vm, *inv.self)) {
         switch (inv.dead) {
             case DeadRule::Error:
-                return c.script_error_stop("GameObjectWrapper::%s -- this object is already dead", inv.method);
+                return c.script_error_stop("GameObjectWrapper::%s -- this object is already dead.", inv.method);
             case DeadRule::WarnNothing:
                 return c.script_warning("GameObjectWrapper::%s -- this object is dead!", inv.method);
             case DeadRule::WarnZero:
                 c.script_warning("GameObjectWrapper::%s -- this object is dead!", inv.method);
+                lua_pushnumber(L, 0);
+                return 1;
+            case DeadRule::SilentZero:
                 lua_pushnumber(L, 0);
                 return 1;
             default:
