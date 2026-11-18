@@ -36,6 +36,7 @@
 
 #include "alamo/ui/hud_components.hpp"
 #include "alamo/ui/hud_draw.hpp"
+#include "alamo/ui/hud_font.hpp"
 #include "alamo/ui/hud_input.hpp"
 
 namespace alamo::ui {
@@ -160,6 +161,23 @@ struct HudConstants {
     // mcx4 t14 (P4_SIM_SYSTEMS §2.7.2): the Droid Log's "Day N" and separator rows.
     Rgba8 droid_date_color{255, 0, 0, 255};         // Droid_Date_Color
     Rgba8 droid_separator_color{128, 128, 128, 255};  // Droid_Seperator_Color (retail spelling)
+    // mcx4 t14 / t15 (MCX4_T14_RE_ANSWERS "GameConstants.Win_Lose_Message_Font", banner 0x365150): the tactical win / lose
+    // banner's font (the last occurrence of each tag wins: FoC lists the size twice, 36 then 24) and colours.
+    std::string win_lose_font = "EmpireAtWar-Bold";   // Win_Lose_Message_Font
+    float win_lose_font_size = 24.0f;                 // Win_Lose_Message_Font_Size
+    Rgba8 win_message_color{223, 243, 255, 255};      // Win_Message_Color
+    Rgba8 lose_message_color{255, 244, 223, 255};     // Lose_Message_Color
+    int32_t cb_flash_count = 4;                       // mcx4 t14: CB_Flash_Count (b_reinforcement flashes on a pool add)
+    DefaultFonts fonts;                               // mcx4 t14: the GameConstants default fonts (FontCache::set_defaults)
+    float text_reveal_rate = 120.0f;                  // mcx4 t14: Text_Reveal_Rate (story text typewriter, chars / s)
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_2 Q1): the countdown timer column. One font for every timer (empty name: Arial; FoC
+    // writes Countdowns_Font_Name / _Size, tags the exe does not know, so the defaults stay); the top-left corner of the
+    // column as screen fractions (tactical: the retreat timer; strategic: the build timers, Spacing apart).
+    std::string countdown_font;                       // Game_Play_UI_Countdown_Font_Name
+    float countdown_font_size = 12.0f;                // Game_Play_UI_Countdown_Font_Size
+    float tactical_countdown_x = 0.005f, tactical_countdown_y = 0.10f;    // GUI_Tactical_Countdown_Timers_Screen_X / _Y
+    float strategic_countdown_x = 0.005f, strategic_countdown_y = 0.02f;  // GUI_Strategic_Countdown_Timers_Screen_X / _Y
+    float strategic_countdown_spacing = 0.05f;        // GUI_Strategic_Countdown_Timers_Screen_Spacing
 };
 HudConstants hud_constants_from(const data::XmlNode& game_constants_root);
 // "r g b [a]" / "r, g, b[, a]" bytes (alpha 255 when absent); false (out unchanged) with fewer than three numbers.

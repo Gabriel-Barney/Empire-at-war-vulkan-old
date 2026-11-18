@@ -111,6 +111,7 @@ struct BuildTask {
     int32_t category = -1;
     bool listed = false;                // on the global pending list
     bool reclaimed = false;             // +0xD9: taken by a PAYG reclaim (AI_GALACTIC_3 §8)
+    int64_t claimed = -1;               // PBT +0x4c: the frame a planet queue claimed it (market step 3), -1 none
 };
 
 // AIPlanetBuildQueue (per planet x queue index), §2.2-2.3.

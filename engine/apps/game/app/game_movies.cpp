@@ -1,5 +1,7 @@
 #include "game_movies.hpp"
 
+#include "alamo/game/hud_feeds.hpp"  // mcx4 t13: movie_frame_cue
+
 #include <cstdio>
 
 #ifdef ALAMO_GAME_HAVE_VIDEO
@@ -61,6 +63,8 @@ bool MovieSlot::open(const GameData& data, GameAudioHost& audio, std::string_vie
     bool have_entry = false;
     bool credits_flag = false, halt_flag = false;
     std::vector<Cue> cues;
+    std::vector<int64_t> sfx_frames, speech_frames;
+    std::vector<std::string> sfx_events, speech_events;
     {
         std::vector<uint8_t> xml;
         if (data.files->read("Data\\XML\\Movies.xml", xml)) {
@@ -76,6 +80,22 @@ bool MovieSlot::open(const GameData& data, GameAudioHost& audio, std::string_vie
                     halt_flag = data::parse_bool_or(n.child_text("Halt_Game_Music"), false);
                     cues.clear();
                     for (auto& [frame, ev] : parse_frame_list(n.child_text("MusicEvent_Frame"))) cues.push_back({frame, std::move(ev)});
+                    sfx_frames.clear();
+                    sfx_events.clear();
+                    speech_frames.clear();
+                    speech_events.clear();
+                    // ledger: consumes Movie.SFXEvent_Frame
+                    for (data::XmlNode c : n.children("SFXEvent_Frame"))
+                        for (auto& [frame, ev] : parse_frame_list(c.text_trimmed())) {
+                            sfx_frames.push_back(frame);
+                            sfx_events.push_back(std::move(ev));
+                        }
+                    // ledger: consumes Movie.SpeechEvent_Frame
+                    for (data::XmlNode c : n.children("SpeechEvent_Frame"))
+                        for (auto& [frame, ev] : parse_frame_list(c.text_trimmed())) {
+                            speech_frames.push_back(frame);
+                            speech_events.push_back(std::move(ev));
+                        }
                 }
             }
         }
@@ -118,6 +138,11 @@ bool MovieSlot::open(const GameData& data, GameAudioHost& audio, std::string_vie
     halt_music_ = halt_flag;
     cues_ = std::move(cues);
     next_cue_ = 0;
+    sfx_frames_ = std::move(sfx_frames);
+    sfx_events_ = std::move(sfx_events);
+    speech_frames_ = std::move(speech_frames);
+    speech_events_ = std::move(speech_events);
+    cue_frame_ = 0;
     captions_ = std::make_unique<video::CaptionTrack>();  // ui5 t12: Caption_Frame / Caption_Duration
     captions_->reset(entry.captions);
     caption_frame_ = 0;  // the first step covers (0, 1], so a caption on frame 1 shows
@@ -144,6 +169,11 @@ void MovieSlot::stop(GameAudioHost& audio) {
     audio_ = nullptr;
     cues_.clear();
     next_cue_ = 0;
+    sfx_frames_.clear();
+    sfx_events_.clear();
+    speech_frames_.clear();
+    speech_events_.clear();
+    cue_frame_ = 0;
     captions_.reset();
     has_credits_ = halt_music_ = false;
     has_frame_ = false;
@@ -168,6 +198,19 @@ bool MovieSlot::update(double dt, ui::HudRenderer& hud, uint16_t page) {
         const int64_t frame = static_cast<int64_t>(std::floor(player_->time_s() * fps_));
         if (next_cue_ > 0 && frame < cues_[next_cue_ - 1].frame) next_cue_ = 0;
         while (next_cue_ < cues_.size() && cues_[next_cue_].frame <= frame) audio_->movie_cue(cues_[next_cue_++].event);
+    }
+    if (audio_ && (!sfx_frames_.empty() || !speech_frames_.empty())) {  // mcx4 t13: Bink frame numbers count from 1
+        const int64_t frame = static_cast<int64_t>(std::floor(player_->time_s() * fps_)) + 1;
+        if (frame < cue_frame_) cue_frame_ = 0;  // a loop went back to the start
+        if (frame > cue_frame_) {
+            if (const int32_t i = movie_frame_cue(sfx_frames_, cue_frame_, frame); i >= 0)
+                audio_->ui(sfx_events_[static_cast<size_t>(i)]);  // 2D, not forced (0x5dbd60)
+            if (const int32_t i = movie_frame_cue(speech_frames_, cue_frame_, frame); i >= 0) {
+                if (audio::AudioSystem* sys = audio_->system()) sys->stop_all_speech();  // 0x5dbe70: the cue starts at once
+                audio_->speech(speech_events_[static_cast<size_t>(i)]);
+            }
+            cue_frame_ = frame;
+        }
     }
     if (captions_ && !captions_->empty()) {  // ui5 t12 (AUDIO.md §3.4): Bink frame numbers count from 1
         const int64_t frame = static_cast<int64_t>(std::floor(player_->time_s() * fps_)) + 1;

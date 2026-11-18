@@ -192,6 +192,8 @@ inline constexpr uint8_t kNone = 0, kDebugList = 0, kGalactic = 1, kBuildComplet
                          kSplash = 11, kLua = 12, kFrontEnd = 13, kMovie = 14, kLoadScreen = 15, kBattleEnd = 16,
                          kMovieCue = 17;
 inline constexpr uint8_t kLocked = kFrontEnd, kOnePass = kMovie;  // older names
+// mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.Music_Event_Tactical_Win family"): modes 9 / 10 are the tactical win / lose music.
+inline constexpr uint8_t kTacticalWin = kOwnObject, kTacticalLose = kEnemyObject;
 }
 
 enum class LogOp : uint8_t {

@@ -78,6 +78,11 @@ private:
         std::string event;
     };
     std::vector<Cue> cues_;                         // MusicEvent_Frame, in file order
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "Movie.SFXEvent_Frame family"): the SFX / speech cue lists (one XML line each, list
+    // order) and the last Bink frame number their check covered.
+    std::vector<int64_t> sfx_frames_, speech_frames_;
+    std::vector<std::string> sfx_events_, speech_events_;
+    int64_t cue_frame_ = 0;
     size_t next_cue_ = 0;
     double fps_ = 30.0;
     std::unique_ptr<video::CaptionTrack> captions_;  // ui5 t12

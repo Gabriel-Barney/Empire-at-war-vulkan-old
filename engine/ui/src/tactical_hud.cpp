@@ -598,8 +598,8 @@ void TacticalHud::build_skeleton(const TacticalHudFrame& f) {
         if (c && !c->icon_texture.empty())
             add_atlas_quad(dl_, layer, HudList::Alpha, *atlas_, c->icon_texture[0], {at.x + 14.0f, at.y}, {}, c->scale, Rgba8{});
         HudTextStyle st;
-        st.font = fonts_->font(c && !c->font_name.empty() ? c->font_name : std::string(kFallbackFontFace),
-                               c && c->font_point_size > 0 ? c->font_point_size : 7.0f, canvas_.font_height());
+        st.font = fonts_->component_font(c ? std::string_view(c->font_name) : std::string_view(), c ? c->font_point_size : 0.0f,
+                                         FontUse::Text, canvas_.font_height());
         st.color = c && c->has_text_color ? c->text_color : Rgba8{255, 212, 33, 255};
         st.outline = true;
         st.align = c && c->right_justified ? TextAlign::Right : TextAlign::Left;
@@ -667,14 +667,17 @@ void TacticalHud::build_radar(const TacticalHudFrame& f, std::span<const HudUnit
         Rgba8 col = u.selected && f.radar_colorize_selected ? f.radar_selected_color : u.team_color;
         col.a = 255;
         bool drawn = false;
+        // mcx4 t14: a Radar_Register_As_Foreground_Object blip one layer above the others
+        const uint32_t ulayer = t && t->radar_foreground && blayer + 1 < kHudLayers ? blayer + 1 : blayer;
         if (t && !t->radar_icon.empty()) {
+            const float k = f.world.land ? t->radar_scale_land : t->radar_scale_space;  // mcx4 t14: Radar_Icon_Scale_*
             const Vec2f sz = t->radar_icon_size.x > 0.0f && t->radar_icon_size.y > 0.0f
-                                 ? Vec2f{t->radar_icon_size.x * 0.5f * radar_view_.size.x, t->radar_icon_size.y * 0.5f * radar_view_.size.y}
+                                 ? Vec2f{t->radar_icon_size.x * 0.5f * radar_view_.size.x * k, t->radar_icon_size.y * 0.5f * radar_view_.size.y * k}
                                  : Vec2f{};
-            drawn = add_atlas_quad(dl_, blayer, HudList::Alpha, *atlas_, t->radar_icon, c, sz, 1.0f, col);
+            drawn = add_atlas_quad(dl_, ulayer, HudList::Alpha, *atlas_, t->radar_icon, c, sz, 1.0f, col);
             if (drawn) ++stats_.radar_icons;
         }
-        if (!drawn) dot(dl_, blayer, c, u.selected ? 2.5f : 1.5f, col);
+        if (!drawn) dot(dl_, ulayer, c, u.selected ? 2.5f : 1.5f, col);
         ++stats_.radar_blips;
     }
     // Pings: the event type's .alo (Event_Model_Name, UI.md §1.7) goes to radar_models() for the host's HudModelDrawer;
@@ -757,8 +760,7 @@ void TacticalHud::build_panel(const TacticalHudFrame& f, std::span<const HudType
                        Rgba8{220, 230, 255, 255});
         if (g.ids.size() > 1) {
             HudTextStyle st;
-            st.font = fonts_->font(c.font_name.empty() ? std::string(kFallbackFontFace) : c.font_name,
-                                   c.font_point_size > 0 ? c.font_point_size : 6.0f, canvas_.font_height());
+            st.font = fonts_->component_font(c.font_name, c.font_point_size, FontUse::Text, canvas_.font_height());
             st.color = c.has_text_color ? c.text_color : Rgba8{};
             st.outline = c.text_outline;
             st.align = TextAlign::Right;
@@ -1081,8 +1083,9 @@ void TacticalHud::build_buttons(const TacticalHudFrame& f) {
 
 int32_t TacticalHud::font_of(int32_t component, float fallback_points) const {
     const CommandBarComponent* c = component >= 0 ? &(*table_)[static_cast<size_t>(component)] : nullptr;
-    return fonts_->font(c && !c->font_name.empty() ? c->font_name : std::string(kFallbackFontFace),
-                        c && c->font_point_size > 0 ? c->font_point_size : fallback_points, canvas_.font_height());
+    // mcx4 t14: no component in the data: the port's size for this text
+    return fonts_->component_font(c ? std::string_view(c->font_name) : std::string_view(), c ? c->font_point_size : fallback_points,
+                                  FontUse::Text, canvas_.font_height());
 }
 
 namespace {

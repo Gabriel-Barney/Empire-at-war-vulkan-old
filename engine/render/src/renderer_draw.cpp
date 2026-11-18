@@ -529,7 +529,8 @@ bool Renderer::build(rhi::Frame& frame, const ViewMatrices& view, std::span<cons
                 continue;
             }
             // Culling frustum far plane = Object_Fade_End (RENDER.md 3.4 / camera +0x3c).
-            if (opts.frustum_cull && fade_end_ > 0.0f && box.valid() && beyond_depth(view.view, box, fade_end_)) {
+            // mcx4 t15: an Exclude_From_Distance_Fade type is never faded / culled by distance.
+            if (opts.frustum_cull && fade_end_ > 0.0f && !in.no_distance_fade && box.valid() && beyond_depth(view.view, box, fade_end_)) {
                 ++o.st.culled;
                 continue;
             }

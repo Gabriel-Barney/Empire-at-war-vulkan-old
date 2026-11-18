@@ -132,6 +132,9 @@ enum class AbilityEventKind : uint8_t {
     // Owner_Attachment_Bone (0x392160) and its LANDING behaviour starts (the rope slide down, Rope Land); the host drops
     // the bone attachment. The trooper stays movement-locked until its landing ends (`value` = that frame).
     TrooperReleased,
+    // mcx4 t13 (presentation; MCX4_T13_RE_ANSWERS "Tactical_Bribe_Ability.SFXEvent_Success family", 0x5b07c0): the bribe
+    // was paid for and the target `target` is converted; `id` the user.
+    BribeApplied,
 };
 
 // StopOrder `value` (cu8j t02, MOVEMENT §4.7.2 / §4.7.5): a plain stop; the stop-and-hold 0x3a9880 (leave every
@@ -166,6 +169,9 @@ struct AbilityActivation {
     ObjectId id = kNoObject;
     ObjectId target = kNoObject;
     uint32_t serial = 0;  // 1, 2, ... in event order (the host's cursor; restarts with a new system)
+    // mcx4 t15: the AbilityData::specials index of the user's special the unit ability forwarded to (its light
+    // effects); UINT32_MAX when none.
+    uint32_t special = 0xFFFFFFFFu;
 };
 // r3h t01 (ABILITIES_HARDPOINTS §4.15): a clip the ability system starts on an object's model (Play_Animation 0x3a92f0 /
 // ModelClass play 0x265560 calls of the special-ability classes), for the host's animation world. The variant is already
@@ -623,6 +629,9 @@ public:
     // player (the original returns the entry's reason code +0x38 [M]). cu8 t01: TacticalBattle refuses the player's
     // retreat (and the auto-resolve stop) while it holds.
     bool retreat_blocked(int32_t player) const;
+    // mcx4 t13 (presentation read; MCX4_PRES_RE_ANSWERS_2 Q4): the kind of the first list entry that blocks `player`'s
+    // retreat: 0 interdict (refusal code 3), 1 Retreat_Prevention (code 4), -1 none.
+    int32_t retreat_block_kind(int32_t player) const;
     // Command 45 RepairHardpointEvent (§1.12): adds `player` as a repairer of the hardpoint (CombatSystem).
     bool repair_hardpoint(ObjectId id, uint32_t hp, int32_t player);
     // Lua Set_Targeting_Priorities(name) on a unit or container (members follow their head): the named

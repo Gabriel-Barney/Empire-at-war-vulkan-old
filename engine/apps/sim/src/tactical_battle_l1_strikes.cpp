@@ -433,6 +433,17 @@ bool TacticalBattle::start_bombardment(TacticalMode& mode, int32_t player, Vec3 
             if (pt != objects::kNone) spawn_particle(*l1_mode_, static_cast<int32_t>(pt), target, player);
         }
         r.deferred = -1;
+        {  // mcx4 t13: presentation feed (SFXEvent_Bombard_Incoming)
+            StrikeEvent e;
+            e.player = player;
+            e.bombard = true;
+            for (const std::string& n : f.bombard_ships)
+                if (const objects::TypeIndex t = catalog_->types().resolve_name(n); t != objects::kNone) {
+                    e.ship_type = t;
+                    break;
+                }
+            strike_starts_.push_back(e);
+        }
         story_generics_.push_back({"start_bombard", player});  // STY1 t03 (0x528140): raised last, every player
         return true;
     }
@@ -486,6 +497,8 @@ bool TacticalBattle::start_bombing_run(TacticalMode& mode, int32_t player, Vec3 
             r.bombers.push_back(bm);
         }
         r.total = static_cast<uint32_t>(r.bombers.size());
+        // mcx4 t13: presentation feed (SFXEvent_Bombing_Run_Begin_Crosstalk on the first bomber)
+        strike_starts_.push_back({player, false, r.bombers.empty() ? objects::kNoObjectId : r.bombers.front().id, bt});
         return true;
     }
     return false;

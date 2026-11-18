@@ -98,7 +98,7 @@ std::u32string type_label(const GameData& d, const ui::TextDatabase& text, objec
 
 // ---- encyclopedia -----------------------------------------------------------------------------------------------
 ui::EncyclopediaEntry encyclopedia_entry(const GameData& d, const ui::TextDatabase& text, std::span<const ui::HudTypeInfo> hud_types,
-                                         objects::TypeIndex t) {
+                                         objects::TypeIndex t, bool skirmish_battle) {
     ui::EncyclopediaEntry e;
     if (t == objects::kNone || t >= d.types.size()) return e;
     e.header = type_label(d, text, t);
@@ -110,6 +110,17 @@ ui::EncyclopediaEntry encyclopedia_entry(const GameData& d, const ui::TextDataba
         income.left = U"Income";
         income.right = number(ti->credit_value);
         e.rows.push_back(std::move(income));
+        // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameObjectType.Encyclopedia_Weather_Name family"): the weather name and info
+        // lines. [M] as centred rows after the income.
+        const WeatherLines wl = planet_weather_lines(d.types.get_string(t, "Encyclopedia_Weather_Name"),   // ledger: consumes GameObjectType.Encyclopedia_Weather_Name
+                                                     d.types.get_string(t, "Encyclopedia_Weather_Info"));  // ledger: consumes GameObjectType.Encyclopedia_Weather_Info
+        for (const std::string_view id : {wl.name, wl.info})
+            if (!id.empty())
+                if (const std::u16string* s = text.find(std::string(id))) {
+                    ui::EncyclopediaRow r;
+                    r.center = ui::utf16_to_utf32(*s);
+                    e.rows.push_back(std::move(r));
+                }
     } else {
         // t40 (HUD_GAPS §2.2, captures C3_*tooltip*): class, ability icons and the Strong / Weak icon rows, no stat rows.
         e.population = static_cast<int32_t>(d.types.get_float(t, "Population_Value"));
@@ -128,7 +139,8 @@ ui::EncyclopediaEntry encyclopedia_entry(const GameData& d, const ui::TextDataba
         e.strong_label = text_or(text, "TEXT_GOOD_AGAINST");
         e.weak_label = text_or(text, "TEXT_VULNERABLE_TO");
     }
-    for (const std::string& id : words(d.types.get_string(t, "Encyclopedia_Text"))) {
+    const std::string_view text_tag = encyclopedia_text_tag(skirmish_battle, !words(d.types.get_string(t, "MP_Encyclopedia_Text")).empty());
+    for (const std::string& id : words(d.types.get_string(t, text_tag))) {
         if (!e.description.empty()) e.description += U"\n";
         e.description += text_or(text, id);
     }
@@ -195,6 +207,10 @@ ui::DroidLogInfo Holocron::droid_log(const GameSession& s, const GameData& d, co
         out.colors.push_back(i < advisor_colors.size() ? advisor_colors[i] : ui::Rgba8{0, 0, 0, 0});
     }
     out.entries = std::move(lines);
+    // mcx4 t14 (MCX4_T14_RE_ANSWERS "Faction.Helper_Icon_Name", droid log 0x9db60): the local faction's helper droid picture.
+    if (const int32_t me = s.local_player(); me >= 0 && static_cast<size_t>(me) < g->players().size())
+        if (const uint32_t f = g->players()[static_cast<size_t>(me)].faction; f < d.rules.factions.size())
+            out.picture = std::string(d.rules.factions[f].xml_text("Helper_Icon_Name"));  // ledger: consumes Faction.Helper_Icon_Name
     return out;
 }
 
@@ -592,12 +608,30 @@ SpecialPanelData special_panel(const galactic::GalacticSim& g, const GameData& d
             break;
         case galactic::kSpecialCorruption: {
             out.title = U"Corruption";
+            // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameConstants.Corruption_Choice_Name family"): per choice the icon, name,
+            // benefit text and mission requirement icon from the GameConstants lists.
+            const data::GameConstants& gc = d.db.constants();
+            const auto gcv = [&gc](std::string_view tag) {
+                const auto v = gc.get(tag);
+                return v ? *v : std::string_view();
+            };
+            const CorruptionChoiceArt art = CorruptionChoiceArt::from(
+                gcv("Corruption_Choice_Icon_Name"),                // ledger: consumes GameConstants.Corruption_Choice_Icon_Name
+                gcv("Corruption_Choice_Name"),                     // ledger: consumes GameConstants.Corruption_Choice_Name
+                gcv("Corruption_Choice_Benefit"),                  // ledger: consumes GameConstants.Corruption_Choice_Benefit
+                gcv("Corruption_Mission_Requirement_Icon_Name"));  // ledger: consumes GameConstants.Corruption_Mission_Requirement_Icon_Name
             for (const galactic::CorruptionChoiceDef& c : g.corruption_choices(planet)) {
                 if (out.corruption.size() >= 3) break;
                 const galactic::CorruptionRequirements r = g.corruption_requirements(player, planet, c);
                 ui::CorruptionOption o;
                 o.corruption_type = c.type;
                 o.title = u32(corruption_name(c.type));
+                if (const std::string_view id = CorruptionChoiceArt::at(art.name, c.type); !id.empty() && text.find(id)) o.title = text_or(text, id);
+                o.icon = std::string(CorruptionChoiceArt::at(art.icon, c.type));
+                if (const std::string_view id = CorruptionChoiceArt::at(art.benefit, c.type); !id.empty() && text.find(id))
+                    o.lines.push_back(text_or(text, id));
+                if (const std::string_view ic = CorruptionChoiceArt::at(art.requirement_icon, c.type); !ic.empty())
+                    o.requirements.emplace_back(ic);
                 o.cost = static_cast<int32_t>(std::lround(c.credit_cost));
                 if (r.mission_need > 0) o.lines.push_back(fraction("Missions ", r.mission_have, r.mission_need));
                 if (r.units_need > 0) o.lines.push_back(fraction("Units ", r.units_have, r.units_need));

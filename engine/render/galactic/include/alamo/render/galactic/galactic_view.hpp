@@ -252,6 +252,10 @@ struct GalacticViewOptions {
 struct GalacticSelection {
     objects::ObjectId planet = objects::kNoObjectId;
     Vec3 eye{0, 0, 1}, target{0, 0, 0}, up{0, 1, 0};  // default: looking straight down, screen up = +Y
+    // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameConstants.GUI_Cycle_Speed family", planet selection 0x3ca480): the selected
+    // planet's colour cycle (mode 4, colour 6, 0, 0): phase = seconds since the selection x GUI_Cycle_Speed, darken =
+    // GUI_Darken_Level (0 = off).
+    float cycle_phase = 0.0f, cycle_darken = 0.0f;
 };
 
 // ui4 t06 (GALAXY_MAP_PRESENTATION §2.2, 0x3da30 [H]): one segment of the fleet drag preview, world positions. grey =
@@ -265,6 +269,7 @@ struct GalacticViewStats {
     uint32_t planets = 0, background = 0, starbases = 0, rings = 0, routes = 0, fleets = 0, fleet_lines = 0, route_sparks = 0;
     uint32_t no_model = 0, animated = 0, fogged = 0, fogged_fleets = 0, hidden_routes = 0;
     uint32_t orbit_fleets = 0;     // in orbit, not drawn (§2.1); fogged_fleets are counted separately
+    uint32_t hidden_fleets = 0;    // mcx4 t14: in transit but kGalFleetHidden (the local visibility vote), not drawn
     uint32_t stealth_fleets = 0;   // drawn with ALT1
     uint32_t selection = 0;        // selection model instances (0 or 1)
     uint32_t corruption_paths = 0; // corruption path line instances (§3.2)
@@ -295,6 +300,8 @@ public:
     // and huge from the close-up camera: 1 at f == 0, 0 from f >= 0.25 on. Sparks and lines also narrow with it (their
     // primitives are opaque), the rest fades or is dropped at 0. Routes and corruption paths stay (FIXPASS_GALACTIC §3).
     static float overlay_fade(float zoom);
+    // mcx4 t14 (colour callback 0x3a0c20, mode 4): LIGHT_SCALE.rgb x (1 + cycle x (sin(phase) x darken + darken)).
+    static materials::float4 cycle_light_scale(materials::float4 base, const Vec3& cycle, float phase, float darken);
     const GalacticSelection& selection() const { return sel_; }
 
     // Geometry (tests / picking).

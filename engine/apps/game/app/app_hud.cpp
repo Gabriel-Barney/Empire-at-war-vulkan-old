@@ -871,6 +871,13 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
             r.hero = static_cast<uint32_t>(st.id(h));
             const objects::TypeIndex t = st.type(h);
             r.text = type_label(data_, ui_.text, t);
+            // mcx4 t14 (MCX4_T09_RE_ANSWERS Q6, 0x3d2020 / 0x3e8890): the activated-ability slot's label names the button
+            // (TEXT_ABILITY_SLOT_SLICE, ...); a kind without a label keeps the unit's name.
+            if (const galactic::ActivatedAbilitySlot slot = gs->activated_ability_slot(h, planet_index(*gs, planet));
+                slot.kind >= 0 && slot.label && slot.label[0] != '\0') {
+                r.text.clear();
+                r.text_key = slot.label;
+            }
             if (t < ui_.hud_types.size()) r.icon = ui_.hud_types[t].icon_name;
             out.push_back(std::move(r));
         }
@@ -966,6 +973,27 @@ void App::build_tactical_hud() {
         const auto it = std::lower_bound(objs.begin(), objs.end(), id, [](const render::SnapshotObject& x, objects::ObjectId v) { return x.id < v; });
         return it != objs.end() && it->id == id ? &*it : nullptr;
     };
+    // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameObjectType.End_Control_Transition_Radar_Event"): a capture point changing hands
+    // raises its type's radar event at the point when the local player is friendly to the old or the new owner.
+    if (const sim::TacticalBattle* b = battle())
+        if (const tactical::garrison::CapturePointSystem* cps = b->captures()) {
+            const auto& cs = b->combat();
+            const int32_t me = local_player();
+            const auto friendly = [&cs, me](int32_t o) { return me >= 0 && o >= 0 && (o == me || !cs.is_enemy(me, o)); };
+            for (size_t i = 0; i < cps->point_count(); ++i) {
+                const auto pid = cps->point_at(i);
+                const int32_t now = cps->owner(pid);
+                const auto [it, fresh] = capture_owner_seen_.try_emplace(static_cast<int64_t>(pid), now);
+                const int32_t was = it->second;
+                it->second = now;
+                if (fresh || !control_transition_ping(was, now, friendly(was), friendly(now))) continue;
+                const render::SnapshotObject* o = obj_of(static_cast<objects::ObjectId>(pid));
+                if (!o || o->type >= data_.types.size()) continue;
+                // ledger: consumes GameObjectType.End_Control_Transition_Radar_Event
+                const std::string_view ev = ascii_trim(data_.types.get_string(o->type, "End_Control_Transition_Radar_Event"));
+                if (!ev.empty()) radar_events_.add(radar_settings_, std::string(ev), o->position.x, o->position.y);
+            }
+        }
     if (const sim::TacticalBattle* b = battle())
         for (const uint32_t id : sel) {
             const auto q = b->queued_orders(static_cast<objects::ObjectId>(id));
@@ -1276,6 +1304,9 @@ bool App::reticle_orders(const ui::OrderContext& ctx, std::vector<commands::Even
         e.set("object", ref.ship).set("hardpoint", ref.index).set("player", static_cast<uint32_t>(local_player()));
         cmds.push_back(std::move(e));
         ++reticle_orders_;
+        // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Repairing", cursor action 0x41f70 [H]): the click that queues
+        // the repair plays the local faction's line, 2D, once.
+        audio_.faction_sfx("SFXEvent_HUD_Repairing");  // ledger: consumes Faction.SFXEvent_HUD_Repairing
         return true;
     }
     for (commands::EventData& e : cmds) {

@@ -2,6 +2,7 @@
 #ifdef ALAMO_GAME_HAVE_CONTROLS
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 #include "alamo/galactic/economy.hpp"
 #include "alamo/objects/type_fields.hpp"
@@ -229,6 +230,15 @@ BattleForceSummary battle_force_summary(const galactic::GalacticSim& g, std::spa
     return out;
 }
 
+std::string_view commander_icon_tag(bool land) {
+    if (land) return "Infantry_Icon_Name";  // ledger: consumes Faction.Infantry_Icon_Name
+    return "Fighter_Icon_Name";             // ledger: consumes Faction.Fighter_Icon_Name
+}
+
+void apply_commander_icon(BattleForceSummary& s, std::string_view faction_icon) {
+    if (!s.hero && !faction_icon.empty()) s.icon = std::string(faction_icon);
+}
+
 int32_t ar_result_magnitude(bool win, uint32_t n_own, uint32_t n_other) {
     const uint64_t a = win ? n_other : n_own, b = win ? n_own : n_other;
     return a > 3u * b ? 0 : a > b ? 1 : 2;
@@ -241,6 +251,76 @@ ui::HudBuildOption::Block galactic_build_block(commands::RejectReason why) {
     if (why == galactic::kRejectPopulationCap) return B::PopCap;
     if (why == commands::RejectReason::CannotAfford) return B::Funds;
     return B::Prerequisite;
+}
+
+namespace {
+std::string_view first_word(std::string_view s) {
+    size_t b = 0;
+    while (b < s.size() && (s[b] == ' ' || s[b] == '\t' || s[b] == '\r' || s[b] == '\n')) ++b;
+    size_t e = b;
+    while (e < s.size() && s[e] != ' ' && s[e] != '\t' && s[e] != '\r' && s[e] != '\n') ++e;
+    return s.substr(b, e - b);
+}
+}  // namespace
+
+namespace {
+std::vector<std::string> list_words(std::string_view s) {
+    std::vector<std::string> out;
+    size_t i = 0;
+    const auto sep = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == ','; };
+    while (i < s.size()) {
+        while (i < s.size() && sep(s[i])) ++i;
+        size_t j = i;
+        while (j < s.size() && !sep(s[j])) ++j;
+        if (j > i) out.emplace_back(s.substr(i, j - i));
+        i = j;
+    }
+    return out;
+}
+}  // namespace
+
+CorruptionChoiceArt CorruptionChoiceArt::from(std::string_view icon, std::string_view name, std::string_view benefit,
+                                              std::string_view requirement_icon) {
+    CorruptionChoiceArt a;
+    a.icon = list_words(icon);
+    a.name = list_words(name);
+    a.benefit = list_words(benefit);
+    a.requirement_icon = list_words(requirement_icon);
+    return a;
+}
+
+std::string_view CorruptionChoiceArt::at(const std::vector<std::string>& list, int32_t type) {
+    return type >= 0 && static_cast<size_t>(type) < list.size() ? std::string_view(list[static_cast<size_t>(type)]) : std::string_view();
+}
+
+WeatherLines planet_weather_lines(std::string_view name_field, std::string_view info_field) {
+    return {first_word(name_field), first_word(info_field)};
+}
+
+GameOverArt game_over_art(bool victory, bool pick_land, std::string_view victory_text, std::string_view defeat_text,
+                          std::string_view land_win, std::string_view space_win, std::string_view land_lose,
+                          std::string_view space_lose) {
+    GameOverArt a;
+    a.text_key = victory ? victory_text : defeat_text;
+    const std::string_view land = victory ? land_win : land_lose, space = victory ? space_win : space_lose;
+    a.image = pick_land ? (land.empty() ? space : land) : (space.empty() ? land : space);
+    return a;
+}
+
+int32_t movie_frame_cue(std::span<const int64_t> frames, int64_t prev, int64_t now) {
+    for (size_t i = 0; i < frames.size(); ++i)
+        if (frames[i] > prev && frames[i] <= now) return static_cast<int32_t>(i);
+    return -1;
+}
+
+std::string_view win_lose_banner_text(bool local_side_won, bool corruption_mission) {
+    if (local_side_won) return corruption_mission ? "TEXT_WIN_CORRUPTION_MISSION" : "TEXT_WIN_TACTICAL";
+    return corruption_mission ? "TEXT_LOSE_CORRUPTION_MISSION" : "TEXT_LOSE_TACTICAL";
+}
+
+std::string_view encyclopedia_text_tag(bool skirmish_battle, bool has_mp_text) {
+    // ledger: consumes GameObjectType.MP_Encyclopedia_Text
+    return skirmish_battle && has_mp_text ? "MP_Encyclopedia_Text" : "Encyclopedia_Text";
 }
 
 bool galactic_build_listed(const std::function<bool(std::string_view)>& flag) {
@@ -342,6 +422,22 @@ std::vector<PlanetIndex> fleet_drag_route(const galactic::GalacticSim& g, int32_
     galactic::PathScratch scratch;
     if (!galactic::find_fleet_path(g.graph(), g.player_view(me), req, scratch, path)) path.clear();
     return path;
+}
+
+std::string retreat_countdown_number(float seconds) {
+    const float s = seconds > 0.0f ? seconds : 0.0f;
+    const int32_t whole = static_cast<int32_t>(s);
+    const int32_t ms = static_cast<int32_t>((s - static_cast<float>(whole)) * 1000.0f);
+    char buf[32];
+    std::snprintf(buf, sizeof buf, " %03d.%03d", static_cast<int>(whole), static_cast<int>(ms));
+    return buf;
+}
+
+std::string build_countdown_clock(float remaining) {
+    const int32_t r = static_cast<int32_t>(remaining > 0.0f ? remaining : 0.0f) + 1;
+    char buf[32];
+    std::snprintf(buf, sizeof buf, " %02d:%02d", static_cast<int>(r / 60), static_cast<int>(r % 60));
+    return buf;
 }
 
 }  // namespace alamo::game

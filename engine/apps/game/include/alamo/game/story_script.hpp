@@ -115,6 +115,10 @@ struct HolocronSummaryFill {
     std::string title_id;           // the selected chapter's TITLE ("" = none)
     std::vector<HolocronRecapLine> recap;
 };
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "Campaign.Show_Completed_Tab", Load_Plots 0x28dbe0 -> 0x107280 [H]): whether the
+// objectives dialog shows its Completed tab, from the running campaign's Show_Completed_Tab text (FoC: single-player
+// campaigns False, Underworld GCs True). [port] no tag / no campaign: shown.
+bool completed_tab_shown(std::string_view show_completed_tab, bool have_campaign);
 HolocronSummaryFill fill_holocron_summary(const StoryDialogCache& cache, const std::vector<HolocronRecord>& records, bool completed_tab,
                                           uint64_t selected_id);
 // The TEXT command with a Story_Var (0x1089e0: swprintf(text, Story_Var)): the first %s / %S / %ls takes `var`, later ones

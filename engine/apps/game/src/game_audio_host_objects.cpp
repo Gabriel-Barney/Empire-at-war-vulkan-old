@@ -68,6 +68,171 @@ GameAudioHost::AbilitySfx GameAudioHost::ability_sfx(const objects::GameObjectTy
     return out;
 }
 
+std::string_view GameAudioHost::unit_ability_line(const objects::GameObjectTypes& types, objects::TypeIndex t, uint8_t ability_type,
+                                                  std::string_view tag) {
+    if (t >= types.size() || ability_type == 0) return {};
+    const objects::ObjectTypeDatabase& db = types.raw();
+    const std::span<const objects::FieldIndex> recs = types.get_sub_objects(t, "Unit_Abilities_Data");
+    for (size_t i = 0; i < recs.size(); ++i) {
+        if (tactical::abilities::ability_type_from_name(ascii_trim(child_text(db, recs[i], "Type"))) != ability_type) continue;
+        const size_t pick = i == 0 ? 0 : 1;  // 0x374b90(type, 0 or 1): ability #0 -> record 0, any other -> record 1
+        return pick < recs.size() ? ascii_trim(child_text(db, recs[pick], tag)) : std::string_view();
+    }
+    return {};
+}
+
+std::string_view GameAudioHost::ability_record_line(const objects::GameObjectTypes& types, objects::TypeIndex t, uint8_t ability_type,
+                                                    std::string_view tag) {
+    if (t >= types.size() || ability_type == 0) return {};
+    const objects::ObjectTypeDatabase& db = types.raw();
+    for (const objects::FieldIndex r : types.get_sub_objects(t, "Unit_Abilities_Data"))
+        if (tactical::abilities::ability_type_from_name(ascii_trim(child_text(db, r, "Type"))) == ability_type)
+            return ascii_trim(child_text(db, r, tag));
+    return {};
+}
+
+bool GameAudioHost::special_ability_loop_user(uint8_t ability_type) {
+    namespace ta = tactical::abilities;
+    switch (ability_type) {
+        case ta::kTractorBeam:
+        case ta::kEnergyWeapon:
+        case ta::kRadioactiveContaminate:
+        case ta::kForceSight:
+        case ta::kSuperLaser:
+        case ta::kLeechShields: return true;
+        default: return false;
+    }
+}
+
+bool GameAudioHost::special_ability_loop_on_target(uint8_t ability_type) {
+    return ability_type == tactical::abilities::kEnergyWeapon || ability_type == tactical::abilities::kSuperLaser;
+}
+
+std::string_view GameAudioHost::special_line(const objects::GameObjectTypes& types, objects::TypeIndex t, std::string_view element,
+                                             std::string_view field) {
+    if (t >= types.size()) return {};
+    const objects::ObjectTypeDatabase& db = types.raw();
+    for (const objects::FieldIndex f : types.get_sub_objects(t, "Abilities"))
+        if (ascii_iequals(db.tag_name(f), element)) return ascii_trim(child_text(db, f, field));
+    return {};
+}
+
+namespace {
+// The names of a category list ("Bomber | AntiCapital", "Hero, Super"), in order.
+std::vector<std::string_view> category_names(std::string_view text) {
+    std::vector<std::string_view> out;
+    size_t i = 0;
+    while (i < text.size()) {
+        while (i < text.size() && (text[i] == ',' || text[i] == '|' || text[i] == ' ' || text[i] == '\t' || text[i] == '\r' ||
+                                   text[i] == '\n'))
+            ++i;
+        size_t j = i;
+        while (j < text.size() && text[j] != ',' && text[j] != '|' && text[j] != ' ' && text[j] != '\t' && text[j] != '\r' &&
+               text[j] != '\n')
+            ++j;
+        if (j > i) out.push_back(text.substr(i, j - i));
+        i = j;
+    }
+    return out;
+}
+}  // namespace
+
+std::string_view GameAudioHost::retreat_refusal_tag(bool land, int32_t code) {
+    switch (code) {
+        case 1:
+        case 2:
+        case 5:
+            if (land) return "Land_Retreat_Not_Allowed_SFXEvent";  // ledger: consumes Faction.Land_Retreat_Not_Allowed_SFXEvent
+            return "Space_Retreat_Not_Allowed_SFXEvent";           // ledger: consumes Faction.Space_Retreat_Not_Allowed_SFXEvent
+        case 3:
+            if (land) return "Land_Retreat_Not_Allowed_Reason_1_SFXEvent";  // ledger: consumes Faction.Land_Retreat_Not_Allowed_Reason_1_SFXEvent
+            return "Space_Retreat_Not_Allowed_Reason_1_SFXEvent";           // ledger: consumes Faction.Space_Retreat_Not_Allowed_Reason_1_SFXEvent
+        case 4:
+            if (land) return "Land_Retreat_Not_Allowed_Reason_2_SFXEvent";  // ledger: consumes Faction.Land_Retreat_Not_Allowed_Reason_2_SFXEvent
+            return "Space_Retreat_Not_Allowed_Reason_2_SFXEvent";           // ledger: consumes Faction.Space_Retreat_Not_Allowed_Reason_2_SFXEvent
+        case 6:
+            if (land) return "Land_Retreat_Not_Allowed_Reason_3_SFXEvent";  // ledger: consumes Faction.Land_Retreat_Not_Allowed_Reason_3_SFXEvent
+            return "Space_Retreat_Not_Allowed_Reason_3_SFXEvent";           // ledger: consumes Faction.Space_Retreat_Not_Allowed_Reason_3_SFXEvent
+        default: return {};
+    }
+}
+
+bool GameAudioHost::turret_turning(bool seen, float prev_yaw, float prev_elevation, float yaw, float elevation) {
+    return seen && (yaw != prev_yaw || elevation != prev_elevation);
+}
+
+GameAudioHost::SpawnLine GameAudioHost::spawn_line(uint8_t ability) {
+    namespace ta = tactical::abilities;
+    switch (ability) {
+        // the field table files it under Tractor_Beam_Attack_Ability; the XML parent is Summon_Ability (SummonAbility 0x71cff0)
+        case ta::kSummon: return {"Summon_Ability", "SFXEvent_Unit_Summoned", false};  // ledger: consumes Tractor_Beam_Attack_Ability.SFXEvent_Unit_Summoned
+        case ta::kRadioactiveContaminate:  // slot 4 0x7128a0, attached to the spawned object
+            return {"Radioactive_Contaminate_Ability", "SFXEvent_Radioactive", false};  // ledger: consumes Radioactive_Contaminate_Ability.SFXEvent_Radioactive
+        // [M] BuzzDroidsBehavior 0x6379a0 plays it on the droid object; the port at its creation
+        case ta::kBuzzDroids: return {"Buzz_Droids_Ability", "Activate_SFX", true};  // ledger: consumes Buzz_Droids_Ability.Activate_SFX
+        default: return {};
+    }
+}
+
+std::vector<std::string> GameAudioHost::command_rankings(std::string_view text) {
+    std::vector<std::string> out;
+    for (const std::string_view n : category_names(text)) out.emplace_back(n);
+    return out;
+}
+
+size_t GameAudioHost::command_rank(std::span<const std::string> rankings, std::string_view category_mask) {
+    const std::vector<std::string_view> have = category_names(category_mask);
+    for (size_t r = 0; r < rankings.size(); ++r)
+        for (const std::string_view c : have)
+            if (ascii_iequals(c, rankings[r])) return r;
+    return rankings.size();
+}
+
+bool GameAudioHost::point_contested(bool reinforcement_point, int32_t owner, int32_t local, float prev_progress, float progress,
+                                    int32_t pending) {
+    return reinforcement_point && local >= 0 && owner == local && !(prev_progress > 0.0f) && progress > 0.0f && pending >= 0 &&
+           pending != owner;
+}
+
+bool GameAudioHost::plays_target_ability_line(uint8_t a) {
+    return a == 19 || (a >= 23 && a <= 26) || a == 28 || a == 35 || a == 36 || a == 42 || a == 39;
+}
+
+int32_t GameAudioHost::tsw_threshold_crossed(float prev_eta, float eta) {
+    for (const int32_t t : {60, 30, 15, 5})
+        if (prev_eta > static_cast<float>(t) && eta <= static_cast<float>(t)) return t;
+    return 0;
+}
+
+std::string_view GameAudioHost::tsw_speech_tag(int32_t threshold, bool enemy) {
+    switch (threshold) {
+        case 60:
+            if (enemy) return "SpeechEvent_Super_Weapon_Enemy_Moving_Range_60_Seconds";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Enemy_Moving_Range_60_Seconds
+            return "SpeechEvent_Super_Weapon_Moving_Range_60_Seconds";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Moving_Range_60_Seconds
+        case 30:
+            if (enemy) return "SpeechEvent_Super_Weapon_Enemy_Moving_Range_30_Seconds";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Enemy_Moving_Range_30_Seconds
+            return "SpeechEvent_Super_Weapon_Moving_Range_30_Seconds";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Moving_Range_30_Seconds
+        case 15:
+            if (enemy) return "SpeechEvent_Super_Weapon_Enemy_Moving_Range_15_Seconds";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Enemy_Moving_Range_15_Seconds
+            return "SpeechEvent_Super_Weapon_Moving_Range_15_Seconds";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Moving_Range_15_Seconds
+        case 5:
+            if (enemy) return "SpeechEvent_Super_Weapon_Enemy_Moving_Range_05_Seconds";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Enemy_Moving_Range_05_Seconds
+            return "SpeechEvent_Super_Weapon_Moving_Range_05_Seconds";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Moving_Range_05_Seconds
+        default:
+            if (enemy) return "SpeechEvent_Super_Weapon_Enemy_Moved_Into_Range";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Enemy_Moved_Into_Range
+            return "SpeechEvent_Super_Weapon_Moved_Into_Range";  // ledger: consumes Faction.SpeechEvent_Super_Weapon_Moved_Into_Range
+    }
+}
+
+std::string_view GameAudioHost::toggle_line_tag(bool on, bool local_hostile) {
+    // ledger: consumes Faction.SFXEvent_GUI_Toggle_Non_Hero_Ability_On
+    // ledger: consumes Faction.SFXEvent_GUI_Toggle_Non_Hero_Ability_Off
+    if (on) return local_hostile ? "SFXEvent_GUI_Enemy_Toggle_Non_Hero_Ability_On" : "SFXEvent_GUI_Toggle_Non_Hero_Ability_On";
+    // ledger: consumes Faction.SFXEvent_GUI_Enemy_Toggle_Non_Hero_Ability_On
+    // ledger: consumes Faction.SFXEvent_GUI_Enemy_Toggle_Non_Hero_Ability_Off
+    return local_hostile ? "SFXEvent_GUI_Enemy_Toggle_Non_Hero_Ability_Off" : "SFXEvent_GUI_Toggle_Non_Hero_Ability_Off";
+}
+
 std::string_view GameAudioHost::departure_sfx(std::string_view type_retreat_jump, std::string_view faction_exit) {
     return !type_retreat_jump.empty() ? type_retreat_jump : faction_exit;
 }
@@ -141,7 +306,21 @@ void GameAudioHost::ability_activations(std::span<const tactical::abilities::Abi
             }
         }
         ability_effect(types, store.type(h), e.type, static_cast<uint64_t>(e.id), store.position(h), target, tp);
+        // mcx4 t13 (MCX4_T13_RE_ANSWERS "Unit_Ability.SFXEvent_Target_Ability", 0x3a3e20): attached to the unit, any owner.
+        if (plays_target_ability_line(e.type))
+            // ledger: consumes Unit_Ability.SFXEvent_Target_Ability
+            if (const std::string_view ev = unit_ability_line(types, store.type(h), e.type, "SFXEvent_Target_Ability"); !ev.empty())
+                if (game_->object_sfx(static_cast<uint64_t>(e.id), ev, store.position(h)) != 0) ++stats_.ability_lines;
     }
+}
+
+void GameAudioHost::ability_button_line(const objects::GameObjectTypes& types, objects::TypeIndex t, uint8_t ability_type, bool activate) {
+    if (!game_) return;
+    // ledger: consumes Unit_Ability.SFXEvent_GUI_Unit_Ability_Activated
+    // ledger: consumes Unit_Ability.SFXEvent_GUI_Unit_Ability_Deactivated
+    const std::string_view ev =
+        unit_ability_line(types, t, ability_type, activate ? "SFXEvent_GUI_Unit_Ability_Activated" : "SFXEvent_GUI_Unit_Ability_Deactivated");
+    if (!ev.empty() && game_->gui_sfx(ev) != 0) ++stats_.ability_lines;
 }
 
 void GameAudioHost::object_events(const sim::TacticalBattle& battle, const objects::ObjectStore& store,
@@ -155,6 +334,28 @@ void GameAudioHost::object_events(const sim::TacticalBattle& battle, const objec
     };
     // Abilities: EffectOn = the activation presentation (light, particle, sound), event order (aud1 t10: the kept copy).
     ability_activations(battle.abilities().activation_events(), store, types);
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "Laser_Defense_Ability.Zap_SFXEvent", "Tactical_Bribe_Ability.SFXEvent_Success
+    // family"): a laser-defense zap, a refused bribe and a paid bribe play the ability's line attached to the user; any owner.
+    for (const tactical::abilities::AbilityEvent& e : battle.abilities().events()) {
+        using K = tactical::abilities::AbilityEventKind;
+        std::string_view element, field;
+        if (e.kind == K::Zap) {
+            element = "Laser_Defense_Ability";
+            field = "Zap_SFXEvent";  // ledger: consumes Laser_Defense_Ability.Zap_SFXEvent
+        } else if (e.kind == K::BribeRefused) {
+            element = "Tactical_Bribe_Ability";
+            field = "SFXEvent_Fail";  // ledger: consumes Tactical_Bribe_Ability.SFXEvent_Fail
+        } else if (e.kind == K::BribeApplied) {
+            element = "Tactical_Bribe_Ability";
+            field = "SFXEvent_Success";  // ledger: consumes Tactical_Bribe_Ability.SFXEvent_Success
+        } else {
+            continue;
+        }
+        const objects::ObjectHandle h = store.find(static_cast<objects::ObjectId>(e.id));
+        if (!store.alive(h)) continue;
+        const std::string_view ev = special_line(types, store.type(h), element, field);
+        if (!ev.empty() && game_->object_sfx(static_cast<uint64_t>(e.id), ev, store.position(h)) != 0) ++stats_.ability_lines;
+    }
     // Hyperspace: the battle's append-only log from our cursor (a shorter log = a new battle or a load). An Arrive of a
     // reinforcement held in hyperspace (LINK_TACTICAL Param9 = 2) is logged only after the script's Resume_Hyperspace_In
     // clears the hold (TacticalBattle::arrival_held; L1_S4_REMAINING §3.4, 0x543570):
@@ -206,6 +407,7 @@ void GameAudioHost::ability_effect(const objects::GameObjectTypes&, objects::Typ
                                    const Vec3&) {}
 void GameAudioHost::ability_activations(std::span<const tactical::abilities::AbilityActivation>, const objects::ObjectStore&,
                                         const objects::GameObjectTypes&) {}
+void GameAudioHost::ability_button_line(const objects::GameObjectTypes&, objects::TypeIndex, uint8_t, bool) {}
 void GameAudioHost::object_events(const sim::TacticalBattle&, const objects::ObjectStore&, const objects::GameObjectTypes&,
                                   std::span<const std::string>) {}
 uint32_t GameAudioHost::hyperspace_arrival(uint64_t, std::string_view, const Vec3&) { return 0; }

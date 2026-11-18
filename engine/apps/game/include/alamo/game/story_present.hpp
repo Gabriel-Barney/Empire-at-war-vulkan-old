@@ -43,6 +43,10 @@ struct StoryColor {
 // SCREEN_TEXT P7 (§1.1). Subtitle = empty / unknown: shown only when the movie-subtitles option is on.
 enum class StoryTextChannel : uint8_t { Subtitle, Hint, System, Task, AlienSpeech };
 
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "GameConstants.Text_Reveal_Rate", 0x31d750): the typewriter's characters per second,
+// GameConstants Text_Reveal_Rate (+0x2b4 = the 0x140b15ab4 global; FoC 120). The host passes the loaded value.
+inline constexpr double kTypewriterCharsPerSecond = 120.0;
+
 struct StoryTextLine {
     std::string id;       // the text id (P1): removal compares ids, not displayed text
     std::u32string text;  // resolved
@@ -52,9 +56,8 @@ struct StoryTextLine {
     double seconds = 5.0;  // lifetime from `start` (ignored when persistent)
     bool persistent = false;
     bool typewriter = true;
-    // Characters revealed at `now` (the whole text when not a typewriter line). [port] the retail rate (global
-    // 0x140b15ab4) was not read: kTypewriterCharsPerSecond.
-    size_t revealed(double now) const;
+    // Characters revealed at `now` at `chars_per_second` (the whole text when not a typewriter line).
+    size_t revealed(double now, double chars_per_second = kTypewriterCharsPerSecond) const;
 };
 
 // One of the ten tutorial arrow slots (§3.2).
@@ -133,7 +136,6 @@ struct StoryShownHint {
 };
 
 inline constexpr std::string_view kContinueTutorial = "Continue_Tutorial";
-inline constexpr double kTypewriterCharsPerSecond = 40.0;  // [port] retail's rate (0x140b15ab4) not read
 inline constexpr double kFlashSeconds = 0.5;               // §3.1
 inline constexpr int kFlashCount = 3;
 // limit: retail STORY_PRESENTATION_REWARDS §3.2 (10 slots, HUD +0x2288)
@@ -174,6 +176,9 @@ public:
     // Lua presentation calls (presentation.hpp).
     void remove_all_text();                                     // Remove_All_Text
     void game_message(std::string_view text_id);                // Game_Message: front of the hint queue, white
+    // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameConstants.CB_Flash_Count", command-bar flash 0x2f5440 with duration -1): a
+    // component flash run by count (`count` flashes of kFlashSeconds, no arrow), like FLASH_GUI's flash.
+    void flash_component(std::string_view component, int32_t count, double now);
     // ui4 t11 (P4_SIM_SYSTEMS §2.7.1): the message callback 0x140b313c0 - an urgent advisor line (front of the queue, the
     // Urgent sound) in `color`.
     void urgent_message(std::u32string text, StoryColor color);

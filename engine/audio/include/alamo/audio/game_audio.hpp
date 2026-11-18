@@ -95,7 +95,7 @@ struct CombatEvent {
 
 struct BattleResult {
     bool won = false;
-    std::string enemy_faction;  // picks Music_Event_<Tactical/Strategic>_<Win/Lose>_Vs_Faction first
+    std::string enemy_faction;  // the other side's faction: picks Music_Event_<Tactical/Strategic>_<Win/Lose>_Vs_Faction first
     bool strategic = false;     // campaign won/lost (Music_Event_Strategic_*) instead of a battle
 };
 
@@ -148,9 +148,14 @@ public:
     // otherwise the flag is read at the next mode switch, as retail reads it when it picks the event.
     void set_super_weapon_present(bool present, bool restart_music = false);
     bool super_weapon_present() const { return super_weapon_; }
-    // Battle / campaign end music (mode 16, forced). Combat afterwards still switches to battle music (§9.2: 16 is not
-    // excluded); battle_over_ only stops the super-weapon restart.
+    // Campaign end music (strategic: mode 16, forced). A tactical result (strategic false) is tactical_result_music.
+    // battle_over_ only stops the super-weapon restart.
     void battle_end(const BattleResult& result);
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.Music_Event_Tactical_Win family", 0x28f250 [H]): the local faction's
+    // Music_Event_Tactical_Win (local player = winner, mode 9) or _Lose (mode 10), its _Vs_Faction row for
+    // `other_faction` (the loser on a win, the winner on a loss) first; not forced, no resume, and nothing when the music
+    // is already in that mode (the battle-end dialog's second call). Combat afterwards still switches to battle music.
+    void tactical_result_music(bool local_is_winner, std::string_view other_faction);
     // Battle-end summary dialog: Audio.xml Music_Event_Battle_End_Summary_Screen_<Win/Lose> (mode 16).
     void battle_summary_screen(bool won);
     // Mode push/pop, load, quit (§1.5, §3.1): stops every SFX instance, kills speech and conversations,
@@ -262,9 +267,12 @@ public:
     // Local faction announcement by its Faction tag (e.g. "SFXEvent_Planet_Gained_Control",
     // "Reinforcements_Enroute_SFXEvent"): 2D; HUD VO rules apply (refused while speech plays, §1.2 test 5).
     uint32_t faction_sfx(std::string_view faction_tag);
-    // Enemy spotted (faction SFXEvent_Unit_Type_Spotted for the type, else SFXEvent_Enemy_Spotted); gated by
-    // Lua SFXManager.Allow_Enemy_Sighted_VO [inferred].
-    uint32_t enemy_spotted(std::string_view object_type_name);
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "GameObjectType.Play_SFXEvent_On_Sighting", 0x361470 / 0x3613a0): a sighted type
+    // with Play_SFXEvent_On_Sighting plays the local faction's SFXEvent_Unit_Type_Spotted entry for the type, else
+    // SFXEvent_Generic_Unit_Spotted; enemy_spotted plays SFXEvent_Enemy_Spotted. 2D. Both gated by Lua
+    // SFXManager.Allow_Enemy_Sighted_VO [inferred]; the once-per-type / once-per-battle limits are the host's.
+    uint32_t unit_type_spotted(std::string_view object_type_name);
+    uint32_t enemy_spotted();
     void allow_enemy_sighted_vo(bool on) { enemy_sighted_vo_ = on; }
 
     // ---------------- speech

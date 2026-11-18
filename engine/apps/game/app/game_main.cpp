@@ -341,6 +341,7 @@ bool App::init() {
     // controls dialog was accepted).
     sync_control_bindings(ui_.hotkeys, camera_, ui_.bindings);
     attract_.set_config(load_attract_config(data_.db.constants()));
+    saliency_ = game::load_saliency_weights(data_.db.constants());
     {  // P1 move acknowledgement constants (P1_DOUBLE_CLICK_MOVE.md §2.3 / §5)
         const data::GameConstants& gc = data_.db.constants();
         for (size_t i = 0; i < ack_fx_.size(); ++i)
@@ -353,6 +354,9 @@ bool App::init() {
         cine_.enabled = gc.get_bool("In_Game_Cinematics", true);
         cine_.letterbox_height = gc.get_float("Camera_FX_Manager_Letterbox_Height", 0.085f);
         beacon_delay_s_ = gc.get_float("BeaconPlaceDelay", 5000.0f) / 1000.0f;  // ui3 t03: ms between two beacons
+        // mcx4 (MCX4_T11_T12_RE_ANSWERS §C3): the unit-response speaker ranking.
+        if (const auto v = gc.get("Unit_Command_Rankings_By_Category"))  // ledger: consumes GameConstants.Unit_Command_Rankings_By_Category
+            command_rankings_ = GameAudioHost::command_rankings(*v);
         if (const auto v = gc.get("Object_Visual_Status_Particle_Attach_Bone_Names")) bview_.set_status_particle_bones(std::string(*v));  // vis1 t06
     }
     // The unsynced presentation generator (0x140a2ab18, seeded from the performance counter at boot); smoke runs fixed.
@@ -396,6 +400,7 @@ bool App::init() {
             reticles_.parse(gc);
             ency_cfg_ = ui::tooltip_config_from(gc);  // HUD_GAPS §2.2 delays / fade / min display / layout
             hud_consts_ = ui::hud_constants_from(gc);  // mcx4 t14 / t15: bar spacing, radar selection colour, prompt colour
+            if (ui_.fonts) ui_.fonts->set_defaults(hud_consts_.fonts);  // mcx4 t14: the GameConstants default fonts
         }
         hud_images_ = [this](std::string_view t) { return ui_.pages.resolve(t); };
         if (const char* dbg = std::getenv("ALAMO_HUD_HIT_DEBUG")) {

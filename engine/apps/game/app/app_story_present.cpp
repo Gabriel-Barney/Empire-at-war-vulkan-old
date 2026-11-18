@@ -6,7 +6,10 @@
 // Presentation only (rule 3): nothing here writes sim state. The presenter's clock is now_s_ (wall time).
 #include "game_app.hpp"
 
+#include "alamo/galactic/economy.hpp"
+#include "alamo/game/hud_feeds.hpp"
 #include "alamo/tactical/abilities/ability_types.hpp"
+#include "alamo/ui/hud_buttons.hpp"
 
 namespace alamo_game_app {
 
@@ -186,7 +189,7 @@ void App::build_story_text(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
     std::vector<Row> rows;
     for (const StoryTextLine& l : lines) {
         const std::vector<std::u32string> wrapped = ui::wrap_text(*ui_.fonts, font, l.text, wrap_px);
-        const size_t revealed = l.typewriter ? l.revealed(now_s_) : l.text.size();
+        const size_t revealed = l.typewriter ? l.revealed(now_s_, hud_consts_.text_reveal_rate) : l.text.size();  // mcx4 t14
         size_t pos = 0;
         for (const std::u32string& w : wrapped) {
             // a continuation row starts only after the row above has finished (§1.1): the characters are revealed in order
@@ -484,7 +487,87 @@ void App::build_story_pointers(ui::HudDrawList& dl, const ui::HudCanvas& canvas)
 #endif
 }
 
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "GameConstants.Win_Lose_Message_Font", 0x365150): the banner text centred horizontally,
+// its top at 0.4 of the screen height, in Win_Lose_Message_Font at Win_Lose_Message_Font_Size.
+void App::build_win_banner(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
+    if (screen_ != Screen::Battle || win_banner_.empty() || !ui_.fonts) return;
+    // ledger: consumes GameConstants.Win_Lose_Message_Font
+    // ledger: consumes GameConstants.Win_Lose_Message_Font_Size
+    const int32_t font = ui_.fonts->font(hud_consts_.win_lose_font, hud_consts_.win_lose_font_size, canvas.font_height());
+    if (font < 0) return;
+    ui::HudTextStyle st;
+    st.font = font;
+    st.outline = true;
+    st.align = ui::TextAlign::Center;
+    st.color = win_banner_color_;
+    const float width = canvas.width;
+    const float top = 0.4f * canvas.height;  // MCX4_PRES_RE_ANSWERS_2 Q2: Y = 0.4 is the top edge
+    ui::add_text_block(dl, kTextLayer, ui::HudList::Text, *ui_.fonts, canvas, win_banner_, {0.0f, top}, width, st);
+}
+
+// mcx4 t14 (MCX4_PRES_RE_ANSWERS_2 Q1): the countdown column, outlined text in the Game_Play_UI_Countdown font with its
+// top-left corner at the mode's screen fractions. Tactical (not during a cinematic shot): the retreat timer of whoever
+// retreats (every player sees it), in the retreating faction's label and colour. Galactic: every planet's queue-head
+// build with Build_Countdown_Timer (no owner filter), ground queue first, Spacing apart.
+void App::build_countdown_column(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
+    if (!ui_.fonts || (screen_ != Screen::Battle && screen_ != Screen::Galactic)) return;
+    const galactic::GalacticSim* g = galaxy();
+    if (!g) return;
+    const std::string_view fname = hud_consts_.countdown_font.empty() ? std::string_view("Arial") : std::string_view(hud_consts_.countdown_font);
+    int32_t font = ui_.fonts->font(fname, hud_consts_.countdown_font_size, canvas.font_height());
+    if (font < 0) font = ui_.fonts->font("Arial", hud_consts_.countdown_font_size, canvas.font_height());
+    if (font < 0) return;
+    ui::HudTextStyle st;
+    st.font = font;
+    st.outline = true;
+    const auto line = [&](std::u32string text, const ui::Rgba8& col, float x, float y) {
+        st.color = col;
+        ui::add_text_block(dl, kTextLayer, ui::HudList::Text, *ui_.fonts, canvas, text, {x * canvas.width, y * canvas.height},
+                           canvas.width, st);
+    };
+    const auto ascii32 = [](const std::string& s) { return std::u32string(s.begin(), s.end()); };
+    if (screen_ == Screen::Battle) {
+        const sim::TacticalBattle* b = battle();
+        if (!b || cine_.shot.active()) return;
+        const int32_t rp = b->retreating_player();
+        const float left = b->retreat_seconds_left();
+        if (rp < 0 || left < 0.0f || static_cast<size_t>(rp) >= g->players().size()) return;
+        const uint32_t fi = g->players()[static_cast<size_t>(rp)].faction;
+        if (fi >= g->rules().factions.size()) return;
+        const galactic::FactionRules& fr = g->rules().factions[fi];
+        const bool land = !b->is_space();
+        // ledger: consumes Faction.Land_Retreat_Countdown_Text_ID
+        // ledger: consumes Faction.Space_Retreat_Countdown_Text_ID
+        const std::string_view label = ascii_trim(fr.xml_text(land ? "Land_Retreat_Countdown_Text_ID" : "Space_Retreat_Countdown_Text_ID"));
+        ui::Rgba8 col{255, 255, 255, 255};
+        // ledger: consumes Faction.Land_Retreat_Countdown_Color_RGBA
+        // ledger: consumes Faction.Space_Retreat_Countdown_Color_RGBA
+        ui::parse_rgba8(fr.xml_text(land ? "Land_Retreat_Countdown_Color_RGBA" : "Space_Retreat_Countdown_Color_RGBA"), col);
+        line(txt(label, U"") + ascii32(game::retreat_countdown_number(left)), col, hud_consts_.tactical_countdown_x,
+             hud_consts_.tactical_countdown_y);
+        return;
+    }
+    float y = hud_consts_.strategic_countdown_y;
+    for (const galactic::PlanetState& p : g->planets())
+        for (const auto& q : p.queue) {
+            if (q.empty()) continue;
+            const galactic::BuildEntry& e = q.front();
+            if (e.type >= data_.types.size()) continue;
+            const auto t = static_cast<objects::TypeIndex>(e.type);
+            if (!data_.types.get_bool(t, "Build_Countdown_Timer")) continue;  // ledger: consumes GameObjectType.Build_Countdown_Timer
+            // ledger: consumes GameObjectType.Build_Countdown_Text_ID
+            const std::string_view label = ascii_trim(data_.types.get_string(t, "Build_Countdown_Text_ID"));
+            ui::Rgba8 col{255, 255, 255, 255};
+            ui::parse_rgba8(data_.types.get_string(t, "Build_Countdown_Text_RGBA"), col);  // ledger: consumes GameObjectType.Build_Countdown_Text_RGBA
+            const float rem = galactic::econ::timer_remaining_seconds(e.start, e.duration, g->frame());
+            line(txt(label, U"") + ascii32(game::build_countdown_clock(rem)), col, hud_consts_.strategic_countdown_x, y);
+            y += hud_consts_.strategic_countdown_spacing;
+        }
+}
+
 void App::build_story_overlay(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
+    build_win_banner(dl, canvas);
+    build_countdown_column(dl, canvas);
     build_story_text(dl, canvas);
     build_story_pointers(dl, canvas);
     build_story_hint(dl, canvas);

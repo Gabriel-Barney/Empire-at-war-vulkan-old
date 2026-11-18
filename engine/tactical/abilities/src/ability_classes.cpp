@@ -834,6 +834,7 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
                     event(AbilityEventKind::BribeRefused, sp.trigger, o.id, target, frame);
                     return true;
                 }
+                event(AbilityEventKind::BribeApplied, sp.trigger, o.id, target, frame);  // mcx4 t13: SFXEvent_Success
                 // 0x3a9880 on U and X [port: break_stealth only when stealthed, so no StealthBroken event otherwise]
                 if (o.stealthed) break_stealth(o, frame);
                 if (Obj* x = obj(target))

@@ -239,10 +239,21 @@ void SimInstanceBuilder::build(const InterpolatedFrame& frame, SimModelSource& m
                 ++st.stealth_tinted;
             }
         }
+        if (pulses_)  // mcx4 t15: a running light effect replaces the colour multiplier's RGB
+            if (const auto it = pulses_->find(static_cast<uint64_t>(o.id)); it != pulses_->end()) {
+                const float base[3] = {in.light_scale.x, in.light_scale.y, in.light_scale.z};
+                float rgb[3];
+                if (light_pulse_rgb(it->second, pulse_now_, base, rgb)) in.light_scale = {rgb[0], rgb[1], rgb[2], in.light_scale.w};
+            }
+        if (o.id == hover_ && hover_ != objects::kNoObjectId) {  // mcx4 t14: Mouse_Over_Highlight_Scale
+            const float k = hover_brighten(hover_scale_, 1.0f);
+            in.light_scale = {in.light_scale.x * k, in.light_scale.y * k, in.light_scale.z * k, in.light_scale.w};
+        }
         in.no_shadow = s.stealth.shadow_dropped();  // R5: the model's stencil-shadow bit is cleared while stealthed
         st.stealth_no_shadow += in.no_shadow ? 1u : 0u;
         // vis1 t02: a blob-shadow type at this detail has its stencil shadow off (the terrain blob replaces it).
         if (blob_detail_ > 0 && tinfo && blob_detail_ < tinfo->blob_below_detail) in.no_shadow = true;
+        in.no_distance_fade = tinfo && tinfo->no_distance_fade;  // mcx4 t15
         in.team_color_override = true;
         in.team_color = o.team_color;
         in.lod_bias = o.lod_bias;

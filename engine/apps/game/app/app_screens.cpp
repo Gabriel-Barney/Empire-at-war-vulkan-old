@@ -277,11 +277,12 @@ void App::show_battle_end(bool dialog) {
     const sim::CampaignBattles* cb = session_ ? session_->battles() : nullptr;
     const sim::CampaignBattles::LastBattleEnd end = cb ? cb->last_battle_end() : sim::CampaignBattles::LastBattleEnd{};
     const int32_t me = local_player();
-    std::string winner;  // the winner's faction name (the lost-battle music names it)
+    std::string winner;  // the music's key: the loser's faction on a win, the winner's on a loss (0x28f250)
     if (end.valid) {
         info.victory = end.winner == me;
-        if (g && end.winner >= 0 && static_cast<size_t>(end.winner) < g->players().size()) {
-            const uint32_t f = g->players()[static_cast<size_t>(end.winner)].faction;
+        const int32_t other = info.victory ? (end.winner == end.attacker ? end.defender : end.attacker) : end.winner;
+        if (g && other >= 0 && static_cast<size_t>(other) < g->players().size()) {
+            const uint32_t f = g->players()[static_cast<size_t>(other)].faction;
             if (f < g->rules().factions.size()) winner = g->rules().factions[f].name;
         }
     }
@@ -349,8 +350,8 @@ void App::show_battle_end(bool dialog) {
     }
     info.can_save_replay = false;  // N1
     if (!dialog) return;  // story t13: a linked battle's skip - the story and score bookkeeping above, no screen, no music
-    // Battle-end win / lose music, mode 16 (STRATEGIC_GAPS §7.4); a lost battle names the winner as the enemy faction.
-    audio_.battle_end(info.victory, info.victory ? std::string_view() : std::string_view(winner));
+    // mcx4 t13: the dialog's music call (modes 9 / 10; no change when the declare already set that mode).
+    audio_.battle_end(info.victory, winner);
     battle_end_open_ = screens_.show_battle_end(info);
 }
 
@@ -401,9 +402,10 @@ void App::show_auto_resolve_end(const galactic::ConflictLogEntry& e) {
     info.can_save_replay = false;
     // b0310 (AUDIO.md §2.3): a lost auto-resolve names the winner's faction, as the tactical battle end does, so the
     // faction's Music_Event_Tactical_Lose_Vs_Faction row is tried first.
+    // mcx4 t13: keyed by the loser on a win, by the winner on a loss (0x28f250).
     std::string winner;
-    if (!info.victory && e.winner >= 0 && static_cast<size_t>(e.winner) < g->players().size()) {
-        const uint32_t f = g->players()[static_cast<size_t>(e.winner)].faction;
+    if (const int32_t other = info.victory ? e.loser : e.winner; other >= 0 && static_cast<size_t>(other) < g->players().size()) {
+        const uint32_t f = g->players()[static_cast<size_t>(other)].faction;
         if (f < g->rules().factions.size()) winner = g->rules().factions[f].name;
     }
     audio_.battle_end(info.victory, winner);
@@ -631,6 +633,14 @@ void App::open_battle_prompt(const galactic::GalacticSim& g, const galactic::Con
     const std::vector<objects::ObjectHandle> mine = conflict_units(g, c, me), theirs = conflict_units(g, c, enemy);
     prompt_.left = battle_force_summary(g, mine, icon, per);
     prompt_.right = battle_force_summary(g, theirs, icon, per);
+    // mcx4 t14: a side without a hero portrait shows its faction's commander icon (land infantry / space fighter).
+    auto faction_icon = [&g, this](int32_t p) -> std::string_view {
+        if (p < 0 || static_cast<size_t>(p) >= g.players().size()) return {};
+        const uint32_t fi = g.players()[static_cast<size_t>(p)].faction;
+        return fi < g.rules().factions.size() ? g.rules().factions[fi].xml_text(commander_icon_tag(prompt_.land)) : std::string_view();
+    };
+    apply_commander_icon(prompt_.left, faction_icon(me));
+    apply_commander_icon(prompt_.right, faction_icon(enemy));
     prompt_.title = planet_label(data_, ui_.text, g, c.planet) +
                     (prompt_.land ? txt("TEXT_TACTICAL_LAND_BATTLE_IS_PENDING", U": PLANETARY BATTLE IMMINENT!")
                                   : txt("TEXT_TACTICAL_SPACE_BATTLE_IS_PENDING", U": SPACE BATTLE IMMINENT!"));
@@ -910,7 +920,29 @@ void App::show_campaign_end(bool victory) {
                    stat("IDC_KILL_EFFICIENCY_STATIC", stats.kill);
         if (stats.ok && host.scoring_game_stat(local_player(), "IDC_TITLE_STATIC", false, v, t, num) && !num) stats.title_key = t;
     }
-    if (!screens_.show_campaign_score(campaign_score(*session_, *g, ui_.text, victory, tally_, stats))) notes_.push_back("campaign score dialog missing");
+    ui::CampaignScoreInfo score = campaign_score(*session_, *g, ui_.text, victory, tally_, stats);
+    // mcx4 t14 (MCX4_T14_RE_ANSWERS "Faction.Victory_Text family"): the local faction's victory / defeat text (the list's
+    // first line [M: the control]) and win / lose image (land or space by the unsynced UI random).
+    if (const int32_t me = local_player(); me >= 0 && static_cast<size_t>(me) < g->players().size()) {
+        const uint32_t fi = g->players()[static_cast<size_t>(me)].faction;
+        if (fi < g->rules().factions.size()) {
+            const galactic::FactionRules& fr = g->rules().factions[fi];
+            const game::GameOverArt art = game::game_over_art(
+                victory, cine_.rng.range(0, 1) == 0,
+                fr.xml_text("Victory_Text"),       // ledger: consumes Faction.Victory_Text
+                fr.xml_text("Defeat_Text"),        // ledger: consumes Faction.Defeat_Text
+                fr.xml_text("Land_Win_Image"),     // ledger: consumes Faction.Land_Win_Image
+                fr.xml_text("Space_Win_Image"),    // ledger: consumes Faction.Space_Win_Image
+                fr.xml_text("Land_Lose_Image"),    // ledger: consumes Faction.Land_Lose_Image
+                fr.xml_text("Space_Lose_Image"));  // ledger: consumes Faction.Space_Lose_Image
+            if (!art.text_key.empty()) {
+                const std::u32string t = txt(art.text_key, U"");
+                if (!t.empty()) score.list.insert(score.list.begin(), t);
+            }
+            if (!art.image.empty()) score.image = std::string(art.image);
+        }
+    }
+    if (!screens_.show_campaign_score(score)) notes_.push_back("campaign score dialog missing");
     {  // aud2 t08: Music_Event_Strategic_Win / _Lose (mode 16); a lost campaign names the winner as the enemy faction, as
        // the battle end does (the _Vs_Faction row first).
         std::string winner;
@@ -946,6 +978,10 @@ void App::open_story_summary() {
     if (!session_) return;
     sync_story_scripts(*session_, data_, story_scripts_, story_loads_);
     HolocronSummaryView v = holocron_summary(*session_, story_scripts_, ui_.text, summary_completed_, summary_entry_);
+    {  // mcx4 t14: the running campaign's Show_Completed_Tab
+        const data::CampaignDef* c = data_.db.find_campaign(session_->spec().campaign);
+        v.info.show_completed_tab = completed_tab_shown(c ? c->raw_value("Show_Completed_Tab") : std::string_view(), c != nullptr);  // ledger: consumes Campaign.Show_Completed_Tab
+    }
     summary_rows_ = std::move(v.row_ids);
     if (v.info.selected >= 0 && static_cast<size_t>(v.info.selected) < summary_rows_.size())
         summary_entry_ = summary_rows_[static_cast<size_t>(v.info.selected)];
@@ -1076,7 +1112,8 @@ void App::build_encyclopedia(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
     for (const auto& [id, t] : ency_types_)
         if (id == shown) shown_type = t;
     if (shown_type == objects::kNone) return;
-    ui::EncyclopediaEntry e = encyclopedia_entry(data_, ui_.text, ui_.hud_types, shown_type);
+    const bool skirmish_battle = screen_ == Screen::Battle && session_ && session_->spec().kind == SessionKind::Skirmish;  // mcx4 t14
+    ui::EncyclopediaEntry e = encyclopedia_entry(data_, ui_.text, ui_.hud_types, shown_type, skirmish_battle);
     // GRC 2 / REMAINING_GAPS §6.3: a planet's income row only with the local player's CreditIncome visibility.
     if (screen_ == Screen::Galactic)
         if (const galactic::GalacticSim* g = galaxy())
@@ -1130,6 +1167,7 @@ void App::fill_cursor_hover(ui::CursorContext& c) {
         return;
     }
     const auto target = static_cast<tactical::combat::ObjectId>(hit->id);
+    bview_.set_hover(static_cast<uint32_t>(hit->id));  // mcx4 t14: Mouse_Over_Highlight_Scale
     const int32_t owner = cb.owner(target);
     const int32_t me = local_player();
     if (owner == me) c.hover = H::Own;
@@ -1189,6 +1227,7 @@ void App::update_cursor(ui::HudDrawList& dl) {
         c.scrolling = bview_.camera().drag() == ui::TacticalCameraController::Drag::Pan;
         // ui1 t01: the hovered object decides the plain cursor (ATTACK / out of range / CANT_ATTACK, SELECT, GARRISON_IN,
         // MOVE / CANT_MOVE). [port] rules (docs/PHASE4.md "UI1 cursor"): see fill_cursor_hover.
+        bview_.set_hover(0);  // mcx4 t14: fill_cursor_hover sets the object under the cursor
         if (!c.over_ui && bview_.active()) fill_cursor_hover(c);
         // A running pick: the targeted-ability cursor (valid on a hit object / any ground point) or the landing-point one.
         if (!c.over_ui && bview_.active()) {
@@ -1242,12 +1281,14 @@ void App::build_panels(std::vector<ui::HudDrawList>& lists) {
         f.time = now_s_;
         f.cursor_px = cur;
     };
-    // Hero roster (battle): the local player's named heroes on the map.
+    // Hero roster (battle): the local player's named heroes on the map, and the types with Show_Hero_Head (mcx4 t14).
     std::vector<ui::HeroEntry> heroes;
     hero_types_.clear();
     if (screen_ == Screen::Battle && bview_.active())
         for (const render::SnapshotObject& o : bview_.frame().objects)
-            if (o.owner == local_player() && o.type < data_.types.size() && data_.types.get_bool(o.type, "Is_Named_Hero") && heroes.size() < 11) {
+            if (o.owner == local_player() && o.type < data_.types.size() && heroes.size() < 11 &&
+                game::shows_hero_head(data_.types.get_bool(o.type, "Is_Named_Hero"),
+                                      data_.types.get_bool(o.type, "Show_Hero_Head"))) {  // ledger: consumes GameObjectType.Show_Hero_Head
                 ui::HeroEntry e;
                 e.object = static_cast<uint32_t>(o.id);
                 e.icon = type_icon(o.type);

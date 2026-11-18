@@ -147,10 +147,20 @@ void TacticalBattle::build_service_graph() {
         story_garrisoned_.clear();  // S4: this tick's garrison entries / structure captures
         story_captured_.clear();
         l1_asteroid_hits_.clear();  // mcx4 t13
+        gravity_power_.clear();
+        sk_redelivered_.clear();
         // mcx4 t13: drop only what the last tick already reported; exits ordered between ticks (Leave_Garrison, eject)
         // stay for this tick's readers.
         story_vacated_.erase(story_vacated_.begin(), story_vacated_.begin() + static_cast<std::ptrdiff_t>(story_vacated_mark_));
         story_vacated_mark_ = 0;
+        pad_events_.erase(pad_events_.begin(), pad_events_.begin() + static_cast<std::ptrdiff_t>(pad_events_mark_));
+        pad_events_mark_ = 0;
+        ability_toggles_.erase(ability_toggles_.begin(), ability_toggles_.begin() + static_cast<std::ptrdiff_t>(ability_toggles_mark_));
+        ability_toggles_mark_ = 0;
+        strike_starts_.erase(strike_starts_.begin(), strike_starts_.begin() + static_cast<std::ptrdiff_t>(strike_starts_mark_));
+        strike_starts_mark_ = 0;
+        summon_spawns_.erase(summon_spawns_.begin(), summon_spawns_.begin() + static_cast<std::ptrdiff_t>(summon_spawns_mark_));
+        summon_spawns_mark_ = 0;
     });
     // S8 t17 (FIGHTER_FLYING §4.10 B): squadron of the shared team target, before this tick's orders
     g.add("share_groups", kAll, kAll, [this] { share_groups_sync(); });
@@ -367,6 +377,10 @@ void TacticalBattle::tick(TacticalMode& mode, SimRng& rng, const ParallelFor& pf
     svc_graph_->run(pf, svc_mode_, svc_check_.get());
     tick_ = TickContext{};
     story_vacated_mark_ = story_vacated_.size();  // mcx4 t13: reported by this tick
+    pad_events_mark_ = pad_events_.size();
+    ability_toggles_mark_ = ability_toggles_.size();
+    strike_starts_mark_ = strike_starts_.size();
+    summon_spawns_mark_ = summon_spawns_.size();
 }
 
 }  // namespace alamo::sim

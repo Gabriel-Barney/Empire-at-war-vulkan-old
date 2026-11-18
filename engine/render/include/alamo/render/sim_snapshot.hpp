@@ -110,6 +110,9 @@ struct SnapshotTypeInfo {
     float blob_intensity = 1.0f;
     int32_t blob_below_detail = 0;
     std::string blob_bone;
+    // mcx4 t15 (MCX4_T15_RE_ANSWERS "GameObjectType.Exclude_From_Distance_Fade", render set-up 0x3a4820 [M]): the type is
+    // not faded out with camera distance (props, skydomes): no Object_Fade_End cull for its instances.
+    bool no_distance_fade = false;
 };
 
 // Current _ALT index for a health fraction (SnapshotObject::alt), TACTICAL_GAPS §6.3 (0x3ac290) [H]: walk EVERY

@@ -6,6 +6,7 @@
 
 #include "alamo/core/ascii.hpp"
 #include "alamo/core/host_fs.hpp"
+#include "alamo/data/values.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/game/mod_check.hpp"  // modc t36: prebuild_mod_effects
 #include "alamo/render/galactic/galactic_session.hpp"
@@ -164,6 +165,8 @@ void GalacticView::init(GpuCore& gpu, const GameData& data, std::vector<render::
     style_ = style;
     // FIXPASS_GALACTIC §3: the corruption path settings (GameConstants; the evil side name is in the galactic rules).
     corruption_path_ = render::load_corruption_path_settings(game_constants(data));
+    cycle_speed_ = data.db.constants().get_float("GUI_Cycle_Speed", cycle_speed_);     // ledger: consumes GameConstants.GUI_Cycle_Speed
+    cycle_darken_ = data.db.constants().get_float("GUI_Darken_Level", cycle_darken_);  // ledger: consumes GameConstants.GUI_Darken_Level
     types_.build(data.types);
     models_ = std::make_unique<render::GalacticModels>(gpu.renderer, gpu.streamer.get(), gpu.cache.get(), data.files.get());
     portrait_models_ = std::make_unique<render::GalacticModels>(gpu.renderer, gpu.streamer.get(), gpu.cache.get(), data.files.get());
@@ -241,6 +244,15 @@ void GalacticView::prepare(float alpha, double now_s, uint32_t selected_planet, 
         sel.eye = {cam->eye.x, cam->eye.y, cam->eye.z};
         sel.target = {cam->target.x, cam->target.y, cam->target.z};
         sel.up = {cam->up.x, cam->up.y, cam->up.z};
+    }
+    // mcx4 t14: the selected planet's colour cycle, its phase from the moment of the selection (wall time).
+    if (selected_planet != cycle_planet_) {
+        cycle_planet_ = selected_planet;
+        cycle_t0_ = now_s;
+    }
+    if (selected_planet && now_s >= 0.0) {
+        sel.cycle_phase = static_cast<float>((now_s - cycle_t0_) * static_cast<double>(cycle_speed_));
+        sel.cycle_darken = cycle_darken_;
     }
     builder_->set_selection(sel);
     builder_->set_route_zoom(camera_.zoom_blend());  // FIXPASS_GALACTIC §3.3: route tint blend with the zoom
@@ -369,6 +381,14 @@ bool GalacticView::settled() const { return models_ && models_->all_finished(); 
 bool BattleView::start(GpuCore& gpu, const GameData& data, const GameSession& session, uint32_t width, uint32_t height, std::string* err) {
     gpu_ = &gpu;
     types_ = &data.types;
+    // ledger: consumes GameConstants.Mouse_Over_Highlight_Scale
+    hover_scale_ = data.db.constants().get_float("Mouse_Over_Highlight_Scale", 1.5f);
+    pulses_.clear();  // mcx4 t15: shield hit flash (T14 "GameConstants.Shield_Flash_Duration family")
+    shield_flash_duration_ = data.db.constants().get_float("Shield_Flash_Duration", 0.1f);  // ledger: consumes GameConstants.Shield_Flash_Duration
+    if (const auto v = data.db.constants().get("Shield_Flash_Scale")) {  // ledger: consumes GameConstants.Shield_Flash_Scale
+        float c[3];
+        if (data::parse_floats(*v, c, 3) == 3) std::copy(c, c + 3, shield_flash_color_);
+    }
     lob_chargeups_.clear();
     ability_fx_.reset();  // vis1 t06
     local_ = session.local_player();
@@ -589,6 +609,15 @@ bool BattleView::kill_nearest_move_ack(ui::Vec3 p) {
 #endif
 }
 
+void BattleView::start_light_pulse(uint32_t id, render::LightPulse p, double now) {
+    if (p.type == 0 || id == 0) return;
+    const float one[3] = {1.0f, 1.0f, 1.0f};
+    float scratch[3];
+    if (const auto it = pulses_.find(id); it != pulses_.end() && render::light_pulse_rgb(it->second, now, one, scratch)) return;
+    p.start = now;
+    pulses_[id] = p;
+}
+
 void BattleView::stop(GpuCore& gpu) {
     acks_.clear();
     lob_chargeups_.clear();
@@ -771,6 +800,13 @@ void BattleView::prepare(GpuCore& gpu, float alpha) {
         models_->request(frame_);
         if (blocking_models_) gpu.streamer->finish_pending();
         builder_->set_blob_shadow_detail(space_ ? -1 : shadow_detail_);  // vis1 t02: blob types drop their shadow volume
+        builder_->set_hover(hover_ ? static_cast<objects::ObjectId>(hover_) : objects::kNoObjectId, hover_scale_);  // mcx4 t14
+        {  // mcx4 t15: drop the finished light effects, hand the rest to the builder
+            const float one[3] = {1.0f, 1.0f, 1.0f};
+            float scratch[3];
+            std::erase_if(pulses_, [&](const auto& kv) { return !render::light_pulse_rgb(kv.second, pulse_now_, one, scratch); });
+            builder_->set_light_pulses(pulses_.empty() ? nullptr : &pulses_, pulse_now_);
+        }
         builder_->build(frame_, *models_, main, bg_, &istats_);
         stats_.drawn = istats_.drawn;
         stats_.fog_hidden = istats_.fog_hidden;

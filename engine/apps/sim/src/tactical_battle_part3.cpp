@@ -783,6 +783,7 @@ void TacticalBattle::consume_events(TacticalMode& mode, SimRng& rng) {
         // S7 t15 A1 (ABILITIES_HARDPOINTS §2.6): every ability end raises signal 0x29, including the Remote_Bomb toss, which
         // ends at its Toss_Anim end (LOB_SOLVER §3.5 step 4, S8 t06).
         if (e.kind == ta::AbilityEventKind::Ended) ability_finished_.push_back(e.id);
+        if (e.kind == ta::AbilityEventKind::GravityFieldPower) gravity_power_.push_back({e.id, e.value != 0});  // mcx4 t13
         // S7 t26 (AI_TACTICAL §7.3.3 item 3): DEPLOY raises 0x29 when the deploy (anim 25 -> state 0x19) or undeploy (anim
         // 26 -> state 0) clip ends, at once on a blocked reverse: oi_deploy_sync raises it from the movement deploy events
         // (S8 t11), not the AbilitySystem Deployed event, which fires at the request.
@@ -1376,6 +1377,8 @@ cmd::RejectReason TacticalBattle::handle_ability(TacticalMode& mode, uint8_t pla
             ++stats_.ability_commands;
             const uint32_t n = abilities_->set_unit_ability_mode(ids, static_cast<uint8_t>(ev.u("ability")), ev.u("on") != 0, frame_,
                                                                  object_of(ev.u("object")));
+            if (n > 0 && ev.u("play_response") != 0)  // mcx4 t13: presentation feed (the toggle lines)
+                ability_toggles_.push_back({static_cast<int32_t>(player), static_cast<uint8_t>(ev.u("ability")), ev.u("on") != 0});
             return n > 0 ? R::None : R::AbilityNotReady;
         }
         case T::TacticalSpecialAbility: {  // 40

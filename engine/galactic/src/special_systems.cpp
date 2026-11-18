@@ -316,6 +316,22 @@ bool GalacticSim::schedule_hero_respawn(ObjectHandle hero, PlanetIndex planet, f
     const uint32_t type = static_cast<uint32_t>(store_->type(hero));
     const int32_t owner = store_->owner(hero);
     if (type >= rules_->types.size() || !valid_player(owner)) return false;  // 0x396380: the type must resolve
+    // mcx4 t05 (MCX4_T10_RE_ANSWERS §8, 0x48eb10 step 1) [H reader; M counts]: a structure-tied unit respawns only while
+    // its owner has more live objects of the structure type than of its own type, the dying one not counted [M: the
+    // spec's "one per structure"]; a company takes the tag of its first member that has one (retail tests the member).
+    uint32_t tied = rules_->types[type].respawn_tied_to_structure;
+    for (const uint32_t m : rules_->types[type].company_units)
+        if (tied == kNoIndex && m < rules_->types.size()) tied = rules_->types[m].respawn_tied_to_structure;
+    if (tied != kNoIndex) {
+        uint32_t structures = 0, units = 0;
+        for (const ObjectHandle h : store_->all_objects()) {
+            if (h == hero || !store_->alive(h) || store_->owner(h) != owner) continue;
+            const auto ht = static_cast<uint32_t>(store_->type(h));
+            structures += ht == tied ? 1u : 0u;
+            units += ht == type ? 1u : 0u;
+        }
+        if (structures <= units) return false;
+    }
     float t = seconds;
     if (t <= 0.0f) t = special().default_hero_respawn_time;
     // [H quirk, kept on purpose] 0x3fe0a0 tests 0 <= time: a negative time queues nothing, the caller still reports

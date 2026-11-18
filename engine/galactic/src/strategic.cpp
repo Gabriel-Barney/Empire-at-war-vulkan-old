@@ -136,7 +136,7 @@ int32_t GalacticSim::live_count(int32_t player, uint32_t type) const {
         if (!store_->alive(h) || store_->owner(h) != player) continue;
         const uint32_t t = static_cast<uint32_t>(store_->type(h));
         if (t == type) ++n;
-        else if (t < rules_->types.size() && contains(rules_->types[t].company_units, type)) ++n;
+        else if (t < rules_->types.size() && !rules_->types[t].company_units.empty() && contains(company_members(h), type)) ++n;  // mcx4 t22
     }
     return n;
 }

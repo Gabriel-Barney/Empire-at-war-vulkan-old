@@ -875,6 +875,122 @@ void skirmish_win_condition_test() {
 // ledger: verifies GameObjectType.Build_Tab_Heroes
 // ledger: verifies GameObjectType.Build_Tab_Outpost
 // ledger: verifies GameObjectType.Build_Tab_Space_Station
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "GameObjectType.MP_Encyclopedia_Text"): skirmish battles use the MP text
+// when the type has one.
+// ledger: verifies GameObjectType.MP_Encyclopedia_Text
+// mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "Movie.SFXEvent_Frame family"): Movie SFXEvent_Frame / SpeechEvent_Frame cues
+// fire on the step whose frame range (prev, now] holds them, the first in list order only.
+// ledger: verifies Movie.SFXEvent_Frame
+// ledger: verifies Movie.SpeechEvent_Frame
+void movie_frame_cue_test() {
+    const std::vector<int64_t> frames = {60, 30, 60, 90};
+    CHECK(game::movie_frame_cue(frames, 59, 60) == 0);  // two cues on frame 60: the first in list order
+    CHECK(game::movie_frame_cue(frames, 29, 30) == 1 && game::movie_frame_cue(frames, 60, 61) == -1);
+    CHECK(game::movie_frame_cue(frames, 0, 1) == -1 && game::movie_frame_cue(frames, 89, 95) == 3);
+}
+
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "GameObjectType.Show_Hero_Head family"): Show_Hero_Head puts a non-hero
+// type (Generic_Field_Commander, Underworld_Saboteur) in the battle hero roster.
+// ledger: verifies GameObjectType.Show_Hero_Head
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "Faction.Victory_Text family"): the game over screen's text and image from the
+// local faction: Victory_Text / Land_Win_Image / Space_Win_Image on a win, Defeat_Text / Land_Lose_Image /
+// Space_Lose_Image on a loss.
+// ledger: verifies Faction.Victory_Text
+// ledger: verifies Faction.Defeat_Text
+// ledger: verifies Faction.Land_Win_Image
+// ledger: verifies Faction.Space_Win_Image
+// ledger: verifies Faction.Land_Lose_Image
+// ledger: verifies Faction.Space_Lose_Image
+void game_over_art_test() {
+    const auto art = [](bool won, bool land) {
+        return game::game_over_art(won, land, "TEXT_REBEL_VICTORY", "TEXT_REBEL_DEFEAT", "i_rl_win.tga", "i_rs_win.tga",
+                                   "i_rl_lose.tga", "i_rs_lose.tga");
+    };
+    CHECK(art(true, true).text_key == "TEXT_REBEL_VICTORY" && art(true, true).image == "i_rl_win.tga");
+    CHECK(art(true, false).image == "i_rs_win.tga");
+    CHECK(art(false, true).text_key == "TEXT_REBEL_DEFEAT" && art(false, true).image == "i_rl_lose.tga");
+    CHECK(art(false, false).image == "i_rs_lose.tga");
+    CHECK(game::game_over_art(true, true, "", "", "", "s.tga", "", "").image == "s.tga");  // a missing land image: space
+}
+
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md): a planet's Encyclopedia_Weather_Name and Encyclopedia_Weather_Info text ids.
+// ledger: verifies GameObjectType.Encyclopedia_Weather_Name
+// ledger: verifies GameObjectType.Encyclopedia_Weather_Info
+void planet_weather_lines_test() {
+    const game::WeatherLines w = game::planet_weather_lines(" TEXT_WEATHER_NAME_RAIN ", "TEXT_TACTICAL_WEATHER_OBJECTIVE_RAIN\n");
+    CHECK(w.name == "TEXT_WEATHER_NAME_RAIN" && w.info == "TEXT_TACTICAL_WEATHER_OBJECTIVE_RAIN");
+    CHECK(game::planet_weather_lines("", "  ").name.empty() && game::planet_weather_lines("", "  ").info.empty());
+}
+
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "Faction.Infantry_Icon_Name family"): the battle pending side icon without a
+// hero is the faction's Infantry_Icon_Name (land) or Fighter_Icon_Name (space).
+// ledger: verifies Faction.Infantry_Icon_Name
+// ledger: verifies Faction.Fighter_Icon_Name
+void commander_icon_test() {
+    CHECK(game::commander_icon_tag(true) == "Infantry_Icon_Name" && game::commander_icon_tag(false) == "Fighter_Icon_Name");
+    game::BattleForceSummary s;
+    s.icon = "i_unit.tga";
+    game::apply_commander_icon(s, "i_rebel_infantry.tga");
+    CHECK(s.icon == "i_rebel_infantry.tga");
+    s.icon = "i_hero.tga";
+    s.hero = true;
+    game::apply_commander_icon(s, "i_rebel_infantry.tga");
+    CHECK(s.icon == "i_hero.tga");  // a hero portrait wins
+    s.hero = false;
+    game::apply_commander_icon(s, "");
+    CHECK(s.icon == "i_hero.tga");  // no faction icon: unchanged
+}
+
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "GameConstants.Corruption_Choice_Name family"): Corruption_Choice_Icon_Name,
+// Corruption_Choice_Name, Corruption_Choice_Benefit and Corruption_Mission_Requirement_Icon_Name are lists indexed by
+// corruption type.
+// ledger: verifies GameConstants.Corruption_Choice_Icon_Name
+// ledger: verifies GameConstants.Corruption_Choice_Name
+// ledger: verifies GameConstants.Corruption_Choice_Benefit
+// ledger: verifies GameConstants.Corruption_Mission_Requirement_Icon_Name
+void corruption_choice_art_test() {
+    const game::CorruptionChoiceArt a = game::CorruptionChoiceArt::from(
+        "\r\n\t\ti_button_corruption_assassination_a.tga\r\n\t\ti_button_corruption_piracy_a.tga\r\n",
+        " TEXT_CORRUPTION_ASSASSINATION, TEXT_CORRUPTION_PIRACY ", "TEXT_CORRUPTION_ASSASSINATION_BENEFIT", "");
+    using A = game::CorruptionChoiceArt;
+    CHECK(A::at(a.icon, 1) == "i_button_corruption_piracy_a.tga" && A::at(a.name, 0) == "TEXT_CORRUPTION_ASSASSINATION");
+    CHECK(A::at(a.benefit, 0) == "TEXT_CORRUPTION_ASSASSINATION_BENEFIT" && A::at(a.benefit, 1).empty());
+    CHECK(A::at(a.requirement_icon, 0).empty() && A::at(a.icon, -1).empty() && A::at(a.icon, 2).empty());
+}
+
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md): End_Control_Transition_Radar_Event on an owner change seen by a listener
+// friendly to either side.
+// ledger: verifies GameObjectType.End_Control_Transition_Radar_Event
+// mcx4 t14 (docs/re/MCX4_PRES_RE_ANSWERS_2.md Q1): "label 010.933" and "label 01:05".
+void countdown_numbers_test() {
+    CHECK(game::retreat_countdown_number(328.0f / 30.0f) == " 010.933");
+    CHECK(game::retreat_countdown_number(0.0f) == " 000.000" && game::retreat_countdown_number(-1.0f) == " 000.000");
+    CHECK(game::build_countdown_clock(64.5f) == " 01:05");   // r = 64, shown 65 s
+    CHECK(game::build_countdown_clock(0.0f) == " 00:01" && game::build_countdown_clock(119.9f) == " 02:00");
+}
+
+void control_transition_ping_test() {
+    static_assert(game::control_transition_ping(-1, 0, false, true) && game::control_transition_ping(0, 1, true, false));
+    static_assert(!game::control_transition_ping(1, 2, false, false) && !game::control_transition_ping(0, 0, true, true));
+}
+
+void shows_hero_head_test() {
+    static_assert(game::shows_hero_head(true, false) && game::shows_hero_head(false, true) && game::shows_hero_head(true, true));
+    static_assert(!game::shows_hero_head(false, false));
+}
+
+void win_lose_banner_text_test() {  // mcx4 t14: docs/re/MCX4_T14_RE_ANSWERS.md "GameConstants.Win_Lose_Message_Font"
+    CHECK(game::win_lose_banner_text(true, false) == "TEXT_WIN_TACTICAL" && game::win_lose_banner_text(false, false) == "TEXT_LOSE_TACTICAL");
+    CHECK(game::win_lose_banner_text(true, true) == "TEXT_WIN_CORRUPTION_MISSION");
+    CHECK(game::win_lose_banner_text(false, true) == "TEXT_LOSE_CORRUPTION_MISSION");
+}
+
+void encyclopedia_text_tag_test() {
+    CHECK(game::encyclopedia_text_tag(true, true) == "MP_Encyclopedia_Text");
+    CHECK(game::encyclopedia_text_tag(true, false) == "Encyclopedia_Text");
+    CHECK(game::encyclopedia_text_tag(false, true) == "Encyclopedia_Text");
+}
+
 void galactic_build_listed_test() {
     for (const char* tag : {"Build_Tab_Land_Units", "Build_Tab_Space_Units", "Build_Tab_Special_Structures", "Build_Tab_Heroes",
                             "Build_Tab_Outpost", "Build_Tab_Space_Station"})
@@ -979,6 +1095,14 @@ void story_script_test() {
 
 // q6 t14 (GALACTIC_DIALOGS §2.8): the dialog script cache (exact names, rejected files not cached) and the summary fill
 // (rows = the tab's records, label = the chapter's first TEXT, colour / dim, selection, EXTRA_TEXT lines as stored).
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "Campaign.Show_Completed_Tab"): False hides the Completed tab.
+// ledger: verifies Campaign.Show_Completed_Tab
+void completed_tab_shown_test() {
+    CHECK(!game::completed_tab_shown("False", true) && !game::completed_tab_shown(" no ", true));  // Show_Completed_Tab False
+    CHECK(game::completed_tab_shown("True", true) && game::completed_tab_shown("yes", true));
+    CHECK(game::completed_tab_shown("", true) && game::completed_tab_shown("False", false));  // [port] defaults
+}
+
 void holocron_summary_test() {
     struct Files final : FileProvider {
         std::map<std::string, std::string> f;
@@ -1311,6 +1435,36 @@ void attract_rec_test() {
 // at 4 degrees per second, so every hull was seen nose-on or tail-on (view within 30 degrees of its facing) for a third of
 // the time, in stretches of 15 s; the side-view camera keeps the view near broadside.
 void attract_camera_pure_test() {
+    {  // mcx4 (docs/re/MCX4_T11_T12_RE_ANSWERS.md §C2): GameConstants Saliency_Size, Saliency_Power, Saliency_X,
+       // Saliency_Y, Saliency_Health, Saliency_Targets and Saliency_Speed weight the min-max normalised features; the
+       // highest score is the interesting object.
+        // ledger: verifies GameConstants.Saliency_Size
+        // ledger: verifies GameConstants.Saliency_Power
+        // ledger: verifies GameConstants.Saliency_X
+        // ledger: verifies GameConstants.Saliency_Y
+        // ledger: verifies GameConstants.Saliency_Health
+        // ledger: verifies GameConstants.Saliency_Targets
+        // ledger: verifies GameConstants.Saliency_Speed
+        const game::SaliencyWeights w;  // FoC: 1, 1, 0.5, 0.5, 1, 1.5, 1
+        CHECK(w.targets == 1.5f && w.x == 0.5f && w.y == 0.5f && w.size == 1.0f);
+        std::vector<game::SaliencyFeatures> f(3);
+        CHECK(game::saliency_pick({}, w) == 0);
+        CHECK(game::saliency_pick(f, w) == 0);  // all equal: the first
+        f[1].targets = 3.0f;                     // 1.5
+        f[2].size = 100.0f;                      // 1.0
+        CHECK(game::saliency_pick(f, w) == 1);
+        f[2].speed = 5.0f;                       // 1.0 + 1.0 beats 1.5
+        CHECK(game::saliency_pick(f, w) == 2);
+        game::SaliencyWeights w2 = w;
+        w2.targets = 3.0f;
+        CHECK(game::saliency_pick(f, w2) == 1);
+        f[0].x = 10.0f;                          // x / y weigh 0.5 each
+        f[0].y = 10.0f;
+        f[1].targets = 0.0f;
+        f[2].size = 0.0f;
+        f[2].speed = 0.0f;
+        CHECK(game::saliency_pick(f, w) == 0);
+    }
     const float kNoseOn = 0.866f;  // cos 30 degrees
     const float kRad = 0.017453292519943295f;
     // Yaw convention: 0 looks north (+Y), clockwise from above; view = (sin yaw, cos yaw).
@@ -2963,10 +3117,21 @@ int main() {
     custom_tech_offset_test();  // mcx4 t19
     skirmish_win_condition_test();  // mcx4 t14
     galactic_build_listed_test();   // mcx4 t14
+    encyclopedia_text_tag_test();   // mcx4 t14
+    win_lose_banner_text_test();    // mcx4 t14
+    shows_hero_head_test();         // mcx4 t14
+    game_over_art_test();           // mcx4 t14
+    planet_weather_lines_test();    // mcx4 t14
+    commander_icon_test();          // mcx4 t14
+    corruption_choice_art_test();   // mcx4 t14
+    control_transition_ping_test(); // mcx4 t14
+    countdown_numbers_test();       // mcx4 t14
+    movie_frame_cue_test();         // mcx4 t13
     story_ui_test();
     linked_overlay_test();
     story_script_test();
     holocron_summary_test();  // q6 t14
+    completed_tab_shown_test();  // mcx4 t14
     story_scripts_real_test();
     game::GameData data;
     std::string err;

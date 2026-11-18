@@ -136,6 +136,7 @@ void TacticalBattle::sk_garrison_tick() {
         if (g.timer >= 0 && static_cast<int32_t>(frame_) >= g.timer) {
             // 0x287e70: on expiry with nothing pending, the start-force list is delivered again.
             g.timer = -1;
+            sk_redelivered_.push_back(g.player);  // mcx4 t13: Reinforcements_Ready_SFXEvent for a local player
             if (space_) {
                 g.pending = g.types;
             } else {

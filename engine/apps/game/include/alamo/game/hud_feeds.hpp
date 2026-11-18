@@ -123,6 +123,13 @@ struct BattleForceSummary {
 BattleForceSummary battle_force_summary(const galactic::GalacticSim& g, std::span<const objects::ObjectHandle> units,
                                         const std::function<std::string(uint32_t type)>& icon, uint32_t ships_per_stack);
 
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "Faction.Infantry_Icon_Name family", commander icons 0x3df8b0): the Faction field that
+// gives a battle-pending side without a hero portrait its icon: Infantry_Icon_Name in a land battle, Fighter_Icon_Name
+// in a space battle.
+std::string_view commander_icon_tag(bool land);
+// The side's icon: the hero's when `s.hero`, else the faction icon, else ([port]) the lead unit's.
+void apply_commander_icon(BattleForceSummary& s, std::string_view faction_icon);
+
 int32_t ar_result_magnitude(bool win, uint32_t n_own, uint32_t n_other);
 
 ui::HudBuildOption::Block galactic_build_block(commands::RejectReason why);
@@ -133,6 +140,58 @@ std::vector<PlanetIndex> fleet_drag_route(const galactic::GalacticSim& g, int32_
 // its Build_Tab_Land_Units / _Space_Units / _Special_Structures / _Heroes / _Outpost / _Space_Station flags is set
 // (`flag(tag)` = the type's boolean); the flag does not choose the tab.
 bool galactic_build_listed(const std::function<bool(std::string_view)>& flag);
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "GameObjectType.MP_Encyclopedia_Text", 0x2de200 [H]): the type tag whose text ids fill
+// the encyclopedia description. In a tactical game without a galactic parent (skirmish) a type with a non-empty
+// MP_Encyclopedia_Text uses it in place of Encyclopedia_Text; campaign battles and the galactic map keep the latter.
+std::string_view encyclopedia_text_tag(bool skirmish_battle, bool has_mp_text);
+// mcx4 t14 (victory declare 0x343b90 -> banner 0x365150; MCX4_T14_RE_ANSWERS "GameConstants.Win_Lose_Message_Font"):
+// the banner's text id when a tactical victory of type 0x0b..0x16 is declared (not silent): `local_side_won` = the
+// local player is the winner or not hostile to it -> TEXT_WIN_TACTICAL, else TEXT_LOSE_TACTICAL; in a corruption
+// mission the _CORRUPTION_MISSION texts.
+std::string_view win_lose_banner_text(bool local_side_won, bool corruption_mission);
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "GameObjectType.Show_Hero_Head family", tactical HUD 0x318720): an object qualifies for
+// the battle hero roster (hero head) when its type is a named hero or has Show_Hero_Head.
+constexpr bool shows_hero_head(bool named_hero, bool show_hero_head) { return named_hero || show_hero_head; }
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "Faction.Victory_Text family", game over screen 0x92bb0): the local faction's text key
+// (Victory_Text on a win, Defeat_Text on a loss) and image (Land_ / Space_Win_Image on a win, _Lose_Image on a loss; land
+// or space picked 50 / 50 by the UI random, `pick_land`). A missing land / space image falls back to the other one [port].
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "GameObjectType.Encyclopedia_Weather_Name family", 0x2f0af0 from the galactic tooltip
+// 0x2e0c20): the text ids of the planet pop-up's weather name and weather info lines (the first word of each field,
+// "" = no line).
+struct WeatherLines {
+    std::string_view name, info;
+};
+WeatherLines planet_weather_lines(std::string_view name_field, std::string_view info_field);
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "GameConstants.Corruption_Choice_Name family", choice menu 0x3c6eb0, getters
+// 0x2c7c30 / 0x2c7c50 / 0x2c7bf0 / 0x2c7c70): the GameConstants lists indexed by corruption type (whitespace / comma
+// separated): the choice button icon, the name and benefit text ids and the mission requirement icon.
+struct CorruptionChoiceArt {
+    std::vector<std::string> icon, name, benefit, requirement_icon;
+    static CorruptionChoiceArt from(std::string_view icon, std::string_view name, std::string_view benefit,
+                                    std::string_view requirement_icon);
+    static std::string_view at(const std::vector<std::string>& list, int32_t type);  // "" past the list (as the getters)
+};
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "GameObjectType.End_Control_Transition_Radar_Event", capture complete 0x500e30): a
+// capture point whose owner changed raises the type's radar event for a local listener friendly to the old or the new
+// owner.
+constexpr bool control_transition_ping(int32_t old_owner, int32_t new_owner, bool friendly_old, bool friendly_new) {
+    return old_owner != new_owner && (friendly_old || friendly_new);
+}
+// mcx4 t14 (MCX4_PRES_RE_ANSWERS_2 Q1.3 / Q1.4): the countdown column's numbers, written after the label. Retreat timer
+// 0x3ce60: " %03d.%03d" of the seconds left (whole seconds, then the fraction x 1000 truncated). Build timer 0x3d2b0:
+// " %02d:%02d" of (r + 1) / 60 and (r + 1) mod 60, r = (int)remaining seconds.
+std::string retreat_countdown_number(float seconds);
+std::string build_countdown_clock(float remaining);
+struct GameOverArt {
+    std::string_view text_key, image;
+};
+GameOverArt game_over_art(bool victory, bool pick_land, std::string_view victory_text, std::string_view defeat_text,
+                          std::string_view land_win, std::string_view space_win, std::string_view land_lose,
+                          std::string_view space_lose);
+// mcx4 t13 (MCX4_T13_RE_ANSWERS "Movie.SFXEvent_Frame family", Bink tick 0x44dea0 [H]): the movie cue list entry that
+// fires in a step from Bink frame `prev` to `now`: the first entry in XML order whose frame lies in (prev, now], -1 when
+// none (one cue per list per step).
+int32_t movie_frame_cue(std::span<const int64_t> frames, int64_t prev, int64_t now);
 // `icon(type)` = the type's Icon_Name.
 std::vector<ui::GalacticBuildOption> galactic_build_options(const galactic::GalacticSim& g, int32_t player, PlanetIndex planet,
                                                             const std::function<std::string(uint32_t type)>& icon);

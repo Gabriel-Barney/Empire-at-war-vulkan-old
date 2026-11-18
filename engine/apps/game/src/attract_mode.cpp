@@ -134,6 +134,54 @@ AttractController::Request AttractController::update(double now, bool input, Dia
     return Request::None;
 }
 
+SaliencyWeights load_saliency_weights(const data::GameConstants& gc) {
+    SaliencyWeights w;
+    w.size = gc.get_float("Saliency_Size", w.size);           // ledger: consumes GameConstants.Saliency_Size
+    w.power = gc.get_float("Saliency_Power", w.power);        // ledger: consumes GameConstants.Saliency_Power
+    w.x = gc.get_float("Saliency_X", w.x);                    // ledger: consumes GameConstants.Saliency_X
+    w.y = gc.get_float("Saliency_Y", w.y);                    // ledger: consumes GameConstants.Saliency_Y
+    w.health = gc.get_float("Saliency_Health", w.health);     // ledger: consumes GameConstants.Saliency_Health
+    w.targets = gc.get_float("Saliency_Targets", w.targets);  // ledger: consumes GameConstants.Saliency_Targets
+    w.speed = gc.get_float("Saliency_Speed", w.speed);        // ledger: consumes GameConstants.Saliency_Speed
+    return w;
+}
+
+size_t saliency_pick(std::span<const SaliencyFeatures> features, const SaliencyWeights& w) {
+    if (features.empty()) return 0;
+    constexpr size_t kFeatures = 7;
+    const auto get = [](const SaliencyFeatures& f, size_t k) -> float {
+        switch (k) {
+            case 0: return f.size;
+            case 1: return f.power;
+            case 2: return f.x;
+            case 3: return f.y;
+            case 4: return f.health;
+            case 5: return f.targets;
+            default: return f.speed;
+        }
+    };
+    const float weight[kFeatures] = {w.size, w.power, w.x, w.y, w.health, w.targets, w.speed};
+    float lo[kFeatures], hi[kFeatures];
+    for (size_t k = 0; k < kFeatures; ++k) lo[k] = hi[k] = get(features[0], k);
+    for (const SaliencyFeatures& f : features)
+        for (size_t k = 0; k < kFeatures; ++k) {
+            lo[k] = std::min(lo[k], get(f, k));
+            hi[k] = std::max(hi[k], get(f, k));
+        }
+    size_t best = 0;
+    float best_score = 0.0f;
+    for (size_t i = 0; i < features.size(); ++i) {
+        float score = 0.0f;
+        for (size_t k = 0; k < kFeatures; ++k)
+            if (hi[k] > lo[k]) score += weight[k] * ((get(features[i], k) - lo[k]) / (hi[k] - lo[k]));
+        if (i == 0 || score > best_score) {
+            best = i;
+            best_score = score;
+        }
+    }
+    return best;
+}
+
 float demo_wrap_deg(float deg) {
     deg = std::fmod(deg, 360.0f);
     if (deg > 180.0f) deg -= 360.0f;

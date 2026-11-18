@@ -340,6 +340,7 @@ void build_galactic_snapshot(const galactic::GalacticSim& sim, uint64_t tick, co
         if (f.moving) o.flags |= kGalFleetMoving;
         if (types.valid(o.model_type)) o.flags |= kGalFleetDrawable;
         if (ships > 0 && stealthed == ships) o.flags |= kGalFleetStealthed;
+        if (!sim.fleet_visible_to_local(fi)) o.flags |= kGalFleetHidden;  // mcx4 t14
         out.fleets.push_back(o);
     }
     std::sort(out.fleets.begin(), out.fleets.end(), [](const GalacticFleetSnap& a, const GalacticFleetSnap& b) { return a.id < b.id; });

@@ -194,6 +194,7 @@ int32_t TacticalBattle::pad_build(TacticalMode& mode, objects::ObjectId pad, obj
         bt_ramps_.insert(it, UcRamp{id, rate});
     }
     ++stats_.pad_builds;
+    pad_events_.push_back({PadEvent::Kind::Started, pad_build_sfx_, st.id(uc), objects::kNoObjectId, type, builder, st.position(uc)});
     play_battle_clip(pad, 0x74, false, 1.0f, 0.0f);  // r3h t05: Start build 0x42dbd0 plays Pad_Build on the pad (L1_S4 §3.6)
     return 1;
 }
@@ -276,6 +277,7 @@ void TacticalBattle::pads_tick(TacticalMode& mode) {
                 s.uc = objects::kNoObjectId;
                 s.builder = -1;
                 if (st.alive(bh)) {
+                    pad_events_.push_back({PadEvent::Kind::Completed, false, st.id(bh), st.id(uh), ut, st.owner(bh), st.position(bh)});
                     s.built = st.id(bh);
                     s.built_type = ft;
                     // §6.5 kill list (+0xa60): every object of exactly Previous_Upgrade_Level_Type (the built type's, else

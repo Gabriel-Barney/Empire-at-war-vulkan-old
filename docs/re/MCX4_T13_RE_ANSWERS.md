@@ -46,7 +46,7 @@ Counts: **136 tags have a reader, 15 are retail-unused, 1 is open** (`Unit_Abili
 | Faction `SFXEvent_HUD_Reinforcement_Point_Contested` | 0x501980 | local owner of a reinforcement point being neutralised; 2D | H |
 | Faction `SFXEvent_HUD_Landing_Zone_Captured`, `SFXEvent_HUD_Landing_Zone_Lost`, `SFXEvent_HUD_Last_Landing_Zone_Lost`, `SFXEvent_HUD_Build_Pad_Captured`, `SFXEvent_HUD_Build_Pad_Lost` | **retail-unused** | (the per-type control lists do this job) | H |
 | Faction `SFXEvent_HUD_Won_Land_Battle`, `SFXEvent_HUD_Won_Land_Battle_Enemy_TSW_Present`, `SFXEvent_HUD_Won_Space_Battle`, `SFXEvent_HUD_Won_Space_Battle_Enemy_TSW_Present`, `SFXEvent_HUD_Lost_Land_Battle`, `SFXEvent_HUD_Lost_Land_Battle_Enemy_TSW_Present`, `SFXEvent_HUD_Lost_Space_Battle`, `SFXEvent_HUD_Lost_Space_Battle_Enemy_TSW_Present`, `SFXEvent_HUD_Won_Tactical_Corruption_Mission`, `SFXEvent_HUD_Lost_Tactical_Corruption_Mission` | 0x343810 from the victory declare 0x343b90 | local winner / local enemy of the winner; 2D | H |
-| Faction `Music_Event_Tactical_Win`, `Music_Event_Tactical_Lose` | 0x28f250 (from 0x343b90 and dialog 0x88fe0) | local player; music modes 9 / 10 | H |
+| Faction `Music_Event_Tactical_Win`, `Music_Event_Tactical_Lose` | 0x28f250 (from 0x343b90 and dialog 0x88fe0) | local player's faction, keyed by the other side; music modes 9 / 10 | H |
 | Faction `Music_Event_Strategic_Win`, `Music_Event_Strategic_Lose` | **retail-unused** | | H |
 | Faction `Land_Retreat_Begin_SFXEvent`, `Land_Retreat_Enemy_Begin_SFXEvent`, `Space_Retreat_Begin_SFXEvent`, `Space_Retreat_Enemy_Begin_SFXEvent` | 0x5350d0 (land), 0x533080 (space) | local retreater / local enemy of the retreater; 2D | H |
 | Faction `Land_Retreat_Cancel_SFXEvent`, `Space_Retreat_Cancel_SFXEvent` | 0x534f40 (land), 0x532ee0 (space) | see section; space plays for any retreater | H |
@@ -194,8 +194,10 @@ pointer +0x548). [H]
 - Getters 0x33e5a0 (win) / 0x33e540 (lose). Both first try the `_Vs_Faction` lists (+0x5a8 / +0x5c0, entries keyed by
   the opposing faction), then the plain field.
 - Reader 0x28f250(GMM, winner, loser), called from the victory declare 0x343b90 and from the battle-end dialog 0x88fe0.
-  - Local player id equals the winner id → the winner's faction win music, music mode 9.
-  - Otherwise → the lose music of the **winner's** faction, mode 10.
+  - Local player id equals the winner id → the local (= winning) faction's win music, keyed by the loser's faction,
+    music mode 9.
+  - Otherwise → the **local** player's faction's lose music, keyed by the winner's faction, mode 10. (Corrected by
+    the Ghidra follow-up at the end of this file; an earlier version said "the winner's faction".)
   - Skipped when the music player is already in that mode. Not forced, no resume.
 - Quirk: an allied win (local player on the winning side but not the winner) gets lose music.
 - So music modes 9 / 10 are "tactical win / lose" (AUDIO §2.3 should say so).
@@ -821,7 +823,8 @@ The registration list 0x515ee0 gives each descriptor table's start and size, whi
 
 ## Corrections to other specs (for the lane to apply or file)
 
-- AUDIO.md §2.3: music modes 9 / 10 are tactical win / lose (0x28f250).
+- AUDIO.md §2.3: music modes 9 / 10 are tactical win / lose (0x28f250); both look in the local player's faction,
+  keyed by the other side's faction (follow-up at the end).
 - AUDIO.md §2.1: MusicEvent has no `Text_ID`; that field is SpeechEvent's.
 - AUDIO.md §9.6, unit-ability row:
   - `_Activated` / `_Deactivated` are settled (0x307190);
@@ -855,8 +858,39 @@ The registration list 0x515ee0 gives each descriptor table's start and size, whi
   Death Star II fire abilities, which use the shipped loop values. If no read exists, the row becomes retail-unused.
 - Optional checks of [M] points: the meaning of the destroy-reason values −1 / 6 in 0x386660; the land retreat cancel
   argument in 0x534f40; refusal codes 3 / 4 in 0x340920; the corruption hologram flag +0x2e4 in 0x28bf10.
-- `Faction.Music_Event_Tactical_Win family`, for the port's change to modes 9 / 10 (mcx4-pres, 2026-11-18): in
-  0x28f250(GMM, winner, loser) on a loss, which faction keys the winner's `Music_Event_Tactical_Lose_Vs_Faction`
-  lookup, the winner's own or the loser's? (Shipped Rebel / Empire records carry self-keyed rows, e.g. Rebel
-  `Rebel, Lose_To_Rebel_Event`.) Also confirm that the battle-end dialog call (0x88fe0) is skipped once the declare has
-  set mode 9 / 10, and that the summary-screen music (mode 16) is not played after a tactical battle.
+- Both bullets above were **not reached** in the 2026-11-18 Ghidra run (mcx4 t14 / t15 took the turn); they stay open.
+- The summary-screen music (mode 16) after a tactical battle: not re-read in the follow-up below.
+
+## Faction.Music_Event_Tactical_Win family: Ghidra follow-up (2026-11-18)
+
+Settles the "Needs Ghidra" question on `Music_Event_Tactical_Win` / `Music_Event_Tactical_Lose` (and their
+`_Vs_Faction` lists) for the port's change to music modes 9 / 10. ReVa decompiles of 0x28f250, 0x33e540, 0x343b90 and
+0x88fe0. [H unless marked]
+
+- **Whose record.** 0x28f250(GMM, winner, loser) does nothing unless both players are given and a local player with a
+  faction exists. It always looks in the **local** player's faction (local player 0x294a40 → +0x68), never in the
+  winner's:
+  - local player id = winner id: 0x33e5a0(local faction, **loser's** faction) → mode 9;
+  - otherwise: 0x33e540(local faction, **winner's** faction) → mode 10.
+- **Lookup.** 0x33e540 walks the local faction's `Music_Event_Tactical_Lose_Vs_Faction` list (data +0x5c0, count
+  +0x5c8, 0x50-byte entries): the first entry whose faction (+0x20) is the given faction gives its event (+0x48);
+  no match → the plain `Music_Event_Tactical_Lose` (+0x548). 0x33e5a0 is the same over the win list (+0x5a8) with
+  fallback +0x520.
+- **Answer to the question:** on a loss the key is the **winner's** faction, but in the **loser's (local) record**.
+  A self-keyed row (Rebel record `Rebel, Lose_To_Rebel_Event`) therefore fires only when a Rebel local player loses
+  to a Rebel winner (a mirror skirmish); an Empire-keyed row in the Rebel record fires when the Rebel player loses to
+  the Empire. The win side mirrors this: the local winner's record keyed by the loser's faction.
+- **Who counts as winning.** Only the player id equal to the winner gets the win music; anyone else (an ally of the
+  winner, a third side) gets the lose music keyed by the winner's faction (the quirk noted above).
+- **The declare call.** Victory declare 0x343b90 (latched once per declare record) calls 0x28f250 only for victory
+  types 11 .. 22 and only when the declaring mode is the current mode (0x140b15418). The loser passed is the other of
+  attacker (0x28a780) / defender (0x28a910) relative to the winner; if that id is −1 the loser is null and no music
+  plays at all. The music call comes **before** the silent-declare check (+0x15) that gates the win / lose SFX and
+  texts, so a silent declare still changes the music.
+- **The dialog call.** The battle-end dialog 0x88fe0 (from 0x87770) calls 0x28f250 unconditionally (0x140089589). The
+  call is not skipped, but it is a **no-op** while the music manager's current mode (0x140b27dcc) still equals the
+  target: 9 for the local winner, 10 otherwise, both tested before the lookup. So after the declare has set mode 9 /
+  10, the dialog does not restart or change the music [H for the guard; M that nothing changes the music mode between
+  the declare and the dialog].
+- **Port check.** Modes 9 / 10 with the lookup in the local faction's record, keyed by the other side's faction, and
+  one music change per battle end.

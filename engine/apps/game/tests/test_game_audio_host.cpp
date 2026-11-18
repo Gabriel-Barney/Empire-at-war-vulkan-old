@@ -188,6 +188,7 @@ void test_super_weapon_music() {
 // ledger: verifies GameObjectType.SFXEvent_Enemy_Damaged_Health_Critical_Warning
 // ledger: verifies GameObjectType.SFXEvent_Hardpoint_Destroyed
 // ledger: verifies GameObjectType.SFXEvent_Hardpoint_All_Weapons_Destroyed
+// ledger: verifies GameObjectType.SFXEvent_Attack_Hardpoint
 void test_health_and_hardpoint_lines() {
     using H = GameAudioHost;
     // Thresholds 0.33 / 0.10 (FoC); critical tested first; one crossing per hit.
@@ -209,6 +210,11 @@ void test_health_and_hardpoint_lines() {
                                                 "HARD_POINT_ENGINE", "Lost_Engine", "HARD_POINT_WEAPON_LASER", "Lost_Laser_2"};
     CHECK(H::hardpoint_kind_event(toks, 5) == "Lost_Laser_2" && H::hardpoint_kind_event(toks, 0) == "Lost_Engine");
     CHECK(H::hardpoint_kind_event(toks, 6).empty() && H::hardpoint_kind_event(toks, 1).empty() && H::hardpoint_kind_event(toks, 13).empty());
+    // The same list shape is the attack response by hard point kind ("GameObjectType.SFXEvent_Attack_Hardpoint": FoC
+    // "HARD_POINT_WEAPON_LASER, Unit_HP_LASER_Corvette" lines; unit_response takes the attack's kind).
+    const std::vector<std::string_view> atk = {"HARD_POINT_WEAPON_LASER", "Unit_HP_LASER_Corvette", "HARD_POINT_WEAPON_ION_CANNON",
+                                               "Unit_HP_ION_Corvette"};
+    CHECK(H::hardpoint_kind_event(atk, 5) == "Unit_HP_LASER_Corvette" && H::hardpoint_kind_event(atk, 0).empty());
 }
 
 // mcx4 t13 batch C (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_Tactical_Gain_Friendly_Control family", capture
@@ -254,6 +260,15 @@ void test_control_lines() {
 // ledger: verifies Faction.Space_Forced_Retreat_Due_To_Superweapon
 void test_battle_result_lines() {
     using H = GameAudioHost;
+    // mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.Music_Event_Tactical_Win family: Ghidra follow-up"): the declare's
+    // music keys. Args: local, winner, attacker, defender.
+    H::ResultMusic m = H::result_music(0, 0, 0, 1);  // local attacker wins: win music keyed by the defender
+    CHECK(m.play && m.won && m.other == 1);
+    m = H::result_music(0, 1, 0, 1);  // local attacker loses: lose music keyed by the winner
+    CHECK(m.play && !m.won && m.other == 1);
+    m = H::result_music(2, 1, 0, 1);  // an ally / third side: lose music keyed by the winner
+    CHECK(m.play && !m.won && m.other == 1);
+    CHECK(!H::result_music(0, 0, 0, -1).play && !H::result_music(-1, 0, 0, 1).play);  // no loser / no local player
     // Args: local_won, local_hostile, space, enemy_tsw, own_killer, corruption.
     CHECK(H::battle_result_line(true, false, false, false, false, false) == "SFXEvent_HUD_Won_Land_Battle");
     CHECK(H::battle_result_line(true, false, false, true, false, true) == "SFXEvent_HUD_Won_Land_Battle_Enemy_TSW_Present");
@@ -318,6 +333,171 @@ void test_move_into_field() {
     CHECK(H::move_into_field_tag(4u) == "SFXEvent_Move_Into_Nebula");
     CHECK(H::move_into_field_tag(5u) == "SFXEvent_Move_Into_Asteroid_Field");  // asteroid tested first
     CHECK(H::move_into_field_tag(0u).empty() && H::move_into_field_tag(2u).empty() && H::move_into_field_tag(8u).empty());
+}
+
+// mcx4 t13 batch I (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_HUD_Base_Shield_Online family"; both builds).
+// ledger: verifies Faction.SFXEvent_HUD_Base_Shield_Online
+// ledger: verifies Faction.SFXEvent_HUD_Base_Shield_Offline
+// ledger: verifies Faction.SFXEvent_HUD_Enemy_Base_Shield_Online
+// ledger: verifies Faction.SFXEvent_HUD_Enemy_Base_Shield_Offline
+void test_base_shield_lines() {
+    using H = GameAudioHost;
+    CHECK(H::base_shield_line(true, true) == "SFXEvent_HUD_Base_Shield_Online");
+    CHECK(H::base_shield_line(false, true) == "SFXEvent_HUD_Base_Shield_Offline");
+    CHECK(H::base_shield_line(true, false) == "SFXEvent_HUD_Enemy_Base_Shield_Online");
+    CHECK(H::base_shield_line(false, false) == "SFXEvent_HUD_Enemy_Base_Shield_Offline");
+}
+
+// mcx4 t13 batch J (docs/re/P4_SIM_SYSTEMS.md §2.7.3; MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_Tactical_Unit_Cap_Reached
+// family"): SFXEvent_Tactical_Pop_Cap_Reached plays when the room for one unit turns false.
+// ledger: verifies Faction.SFXEvent_Tactical_Pop_Cap_Reached
+void test_unit_room() {
+    using H = GameAudioHost;
+    CHECK(H::unit_room(3.0f, -1.0f) && H::unit_room(9.0f, 10.0f) && !H::unit_room(10.0f, 10.0f) && !H::unit_room(11.0f, 10.0f));
+}
+
+// mcx4 t13 batch M (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_Bombard_Available family"; both builds).
+// ledger: verifies Faction.SFXEvent_Bombard_Available
+// ledger: verifies Faction.SFXEvent_Bombard_Ally_Available
+// ledger: verifies Faction.SFXEvent_Bombard_Enemy_Available
+// ledger: verifies Faction.SFXEvent_Bombing_Run_Available
+// ledger: verifies Faction.SFXEvent_Bombing_Run_Ally_Available
+// ledger: verifies Faction.SFXEvent_Bombing_Run_Enemy_Available
+void test_strike_available_tags() {
+    using H = GameAudioHost;
+    CHECK(H::strike_available_tag(true, true, true) == "SFXEvent_Bombard_Available");
+    CHECK(H::strike_available_tag(true, false, true) == "SFXEvent_Bombard_Ally_Available");
+    CHECK(H::strike_available_tag(true, false, false) == "SFXEvent_Bombard_Enemy_Available");
+    CHECK(H::strike_available_tag(false, true, false) == "SFXEvent_Bombing_Run_Available");  // local wins over relation
+    CHECK(H::strike_available_tag(false, false, true) == "SFXEvent_Bombing_Run_Ally_Available");
+    CHECK(H::strike_available_tag(false, false, false) == "SFXEvent_Bombing_Run_Enemy_Available");
+}
+
+// mcx4 t13 batch O (docs/re/MCX4_T13_RE_ANSWERS.md "GameObjectType.Land_Damage_SFX"; both builds): the stage of a health
+// fraction is the last Land_Damage_Thresholds entry it is at or below.
+// ledger: verifies GameObjectType.Land_Damage_SFX
+// mcx4 t13 batch P (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_Tactical_Object_Building_Started family"; both
+// builds): a local builder / seller hears the type line; every owner gets the faction line, a start also the loop.
+// ledger: verifies Faction.SFXEvent_Tactical_Object_Building_Started
+// ledger: verifies Faction.SFXEvent_Tactical_Object_Building_Loop
+// ledger: verifies Faction.SFXEvent_Tactical_Object_Building_Complete
+// ledger: verifies Faction.SFXEvent_Tactical_Object_Sold
+// ledger: verifies GameObjectType.SFXEvent_Sold_Tactical
+// mcx4 t13 batch S (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SpeechEvent_Super_Weapon_Moving_Range_60_Seconds family"):
+// the highest threshold crossed in a step, and the own / enemy speech tags.
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Moving_Range_60_Seconds
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Moving_Range_30_Seconds
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Moving_Range_15_Seconds
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Moving_Range_05_Seconds
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Enemy_Moving_Range_60_Seconds
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Enemy_Moving_Range_30_Seconds
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Enemy_Moving_Range_15_Seconds
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Enemy_Moving_Range_05_Seconds
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Moved_Into_Range
+// ledger: verifies Faction.SpeechEvent_Super_Weapon_Enemy_Moved_Into_Range
+// mcx4 t13 batch U (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_HUD_Reinforcement_Point_Contested"): the local
+// player's reinforcement point starting to be neutralised.
+// ledger: verifies Faction.SFXEvent_HUD_Reinforcement_Point_Contested
+// mcx4 (docs/re/MCX4_T11_T12_RE_ANSWERS.md §C3): GameConstants Unit_Command_Rankings_By_Category picks the speaking unit.
+// ledger: verifies GameConstants.Unit_Command_Rankings_By_Category
+// mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "GameObjectType.SFXEvent_Turret_Rotating_Loop"): the motor loop runs while
+// the turret pose changes from tick to tick.
+// ledger: verifies GameObjectType.SFXEvent_Turret_Rotating_Loop
+// mcx4 t13 (docs/re/MCX4_PRES_RE_ANSWERS_2.md Q4): refusal codes 1 / 2 / 5 -> Land_Retreat_Not_Allowed_SFXEvent /
+// Space_Retreat_Not_Allowed_SFXEvent; 3 / 4 / 6 -> Land_Retreat_Not_Allowed_Reason_1_SFXEvent,
+// Land_Retreat_Not_Allowed_Reason_2_SFXEvent, Land_Retreat_Not_Allowed_Reason_3_SFXEvent and the space
+// Space_Retreat_Not_Allowed_Reason_1_SFXEvent, Space_Retreat_Not_Allowed_Reason_2_SFXEvent,
+// Space_Retreat_Not_Allowed_Reason_3_SFXEvent.
+// ledger: verifies Faction.Land_Retreat_Not_Allowed_SFXEvent
+// ledger: verifies Faction.Space_Retreat_Not_Allowed_SFXEvent
+// ledger: verifies Faction.Land_Retreat_Not_Allowed_Reason_1_SFXEvent
+// ledger: verifies Faction.Land_Retreat_Not_Allowed_Reason_2_SFXEvent
+// ledger: verifies Faction.Land_Retreat_Not_Allowed_Reason_3_SFXEvent
+// ledger: verifies Faction.Space_Retreat_Not_Allowed_Reason_1_SFXEvent
+// ledger: verifies Faction.Space_Retreat_Not_Allowed_Reason_2_SFXEvent
+// ledger: verifies Faction.Space_Retreat_Not_Allowed_Reason_3_SFXEvent
+void test_retreat_refusal_tag() {
+    using H = GameAudioHost;
+    CHECK(H::retreat_refusal_tag(true, 0).empty() && H::retreat_refusal_tag(false, 7).empty());
+    for (const int32_t c : {1, 2, 5}) {
+        CHECK(H::retreat_refusal_tag(true, c) == "Land_Retreat_Not_Allowed_SFXEvent");
+        CHECK(H::retreat_refusal_tag(false, c) == "Space_Retreat_Not_Allowed_SFXEvent");
+    }
+    CHECK(H::retreat_refusal_tag(false, 3) == "Space_Retreat_Not_Allowed_Reason_1_SFXEvent");
+    CHECK(H::retreat_refusal_tag(false, 4) == "Space_Retreat_Not_Allowed_Reason_2_SFXEvent");
+    CHECK(H::retreat_refusal_tag(false, 6) == "Space_Retreat_Not_Allowed_Reason_3_SFXEvent");
+    CHECK(H::retreat_refusal_tag(true, 3) == "Land_Retreat_Not_Allowed_Reason_1_SFXEvent");
+    CHECK(H::retreat_refusal_tag(true, 4) == "Land_Retreat_Not_Allowed_Reason_2_SFXEvent");
+    CHECK(H::retreat_refusal_tag(true, 6) == "Land_Retreat_Not_Allowed_Reason_3_SFXEvent");
+}
+
+void test_turret_turning() {
+    using H = GameAudioHost;
+    CHECK(!H::turret_turning(false, 0.0f, 0.0f, 10.0f, 0.0f));  // first tick seen: no baseline
+    CHECK(H::turret_turning(true, 0.0f, 0.0f, 2.0f, 0.0f) && H::turret_turning(true, 0.0f, 0.0f, 0.0f, -1.0f));
+    CHECK(!H::turret_turning(true, 5.0f, 1.0f, 5.0f, 1.0f));     // held: stopped
+}
+
+void test_command_rank() {
+    using H = GameAudioHost;
+    const std::vector<std::string> r =
+        H::command_rankings(" Hero, Super, Capital, Frigate, Corvette, Transport, Bomber, Fighter, Air, Vehicle, Infantry, Structure ");
+    CHECK(r.size() == 12 && r.front() == "Hero" && r.back() == "Structure");
+    CHECK(H::command_rank(r, " Bomber | AntiCapital") == 6);
+    CHECK(H::command_rank(r, " Fighter | AntiBomber") == 7);
+    CHECK(H::command_rank(r, "infantry|hero") == 0);  // the first ranked category it names, any case
+    CHECK(H::command_rank(r, "Unknown") == r.size() && H::command_rank(r, "") == r.size());
+    CHECK(H::command_rank({}, "Hero") == 0);
+}
+
+void test_point_contested() {
+    using H = GameAudioHost;
+    CHECK(H::point_contested(true, 0, 0, 0.0f, 0.1f, 2));    // own point, progress starts, pending neutral
+    CHECK(!H::point_contested(false, 0, 0, 0.0f, 0.1f, 2));  // not a REINFORCEMENT_POINT
+    CHECK(!H::point_contested(true, 1, 0, 0.0f, 0.1f, 2));   // not the local player's
+    CHECK(!H::point_contested(true, 0, 0, 0.2f, 0.3f, 2));   // already running: once per attempt
+    CHECK(!H::point_contested(true, 0, 0, 0.0f, 0.1f, -1) && !H::point_contested(true, 0, 0, 0.0f, 0.1f, 0));
+}
+
+void test_tsw_approach() {
+    using H = GameAudioHost;
+    CHECK(H::tsw_threshold_crossed(61.0f, 59.0f) == 60 && H::tsw_threshold_crossed(31.0f, 29.5f) == 30);
+    CHECK(H::tsw_threshold_crossed(70.0f, 10.0f) == 60);  // several in one step: the highest
+    CHECK(H::tsw_threshold_crossed(5.5f, 4.0f) == 5 && H::tsw_threshold_crossed(59.0f, 40.0f) == 0);
+    CHECK(H::tsw_speech_tag(60, false) == "SpeechEvent_Super_Weapon_Moving_Range_60_Seconds");
+    CHECK(H::tsw_speech_tag(30, false) == "SpeechEvent_Super_Weapon_Moving_Range_30_Seconds");
+    CHECK(H::tsw_speech_tag(15, false) == "SpeechEvent_Super_Weapon_Moving_Range_15_Seconds");
+    CHECK(H::tsw_speech_tag(5, false) == "SpeechEvent_Super_Weapon_Moving_Range_05_Seconds");
+    CHECK(H::tsw_speech_tag(60, true) == "SpeechEvent_Super_Weapon_Enemy_Moving_Range_60_Seconds");
+    CHECK(H::tsw_speech_tag(30, true) == "SpeechEvent_Super_Weapon_Enemy_Moving_Range_30_Seconds");
+    CHECK(H::tsw_speech_tag(15, true) == "SpeechEvent_Super_Weapon_Enemy_Moving_Range_15_Seconds");
+    CHECK(H::tsw_speech_tag(5, true) == "SpeechEvent_Super_Weapon_Enemy_Moving_Range_05_Seconds");
+    CHECK(H::tsw_speech_tag(0, false) == "SpeechEvent_Super_Weapon_Moved_Into_Range");
+    CHECK(H::tsw_speech_tag(0, true) == "SpeechEvent_Super_Weapon_Enemy_Moved_Into_Range");
+}
+
+void test_pad_lines() {
+    using H = GameAudioHost;
+    const H::PadLines s = H::pad_lines(H::PadLine::Started, true);
+    CHECK(s.type_tags[0] == "SFXEvent_Tactical_Build_Started" && s.type_tags[1] == "SFXEvent_Build_Started");
+    CHECK(s.faction_tag == "SFXEvent_Tactical_Object_Building_Started" && s.loop_tag == "SFXEvent_Tactical_Object_Building_Loop");
+    const H::PadLines r = H::pad_lines(H::PadLine::Started, false);  // another owner: faction lines only
+    CHECK(r.type_tags[0].empty() && r.faction_tag == "SFXEvent_Tactical_Object_Building_Started" && !r.loop_tag.empty());
+    const H::PadLines c = H::pad_lines(H::PadLine::Completed, true);
+    CHECK(c.type_tags[0] == "SFXEvent_Tactical_Build_Complete" && c.faction_tag == "SFXEvent_Tactical_Object_Building_Complete");
+    CHECK(c.loop_tag.empty());
+    const H::PadLines d = H::pad_lines(H::PadLine::Sold, true);
+    CHECK(d.type_tags[0] == "SFXEvent_Sold_Tactical" && d.type_tags[1].empty() && d.faction_tag == "SFXEvent_Tactical_Object_Sold");
+    CHECK(H::pad_lines(H::PadLine::Sold, false).type_tags[0].empty());
+}
+
+void test_land_damage_stage() {
+    using H = GameAudioHost;
+    const std::vector<std::string_view> th = {"0.75", " 0.5", "0.25 "};
+    CHECK(H::land_damage_stage(th, 1.0f) == -1 && H::land_damage_stage(th, 0.75f) == 0 && H::land_damage_stage(th, 0.6f) == 0);
+    CHECK(H::land_damage_stage(th, 0.5f) == 1 && H::land_damage_stage(th, 0.1f) == 2);
+    const std::vector<std::string_view> quirk = {"1"};  // thresholds "1": the stage holds at full health (TACTICAL_GAPS §6.3)
+    CHECK(H::land_damage_stage(quirk, 1.0f) == 0 && H::land_damage_stage({}, 0.1f) == -1);
 }
 
 // aud4 b0289 / b0300: garrison entry line and the hero clash win speech (both builds; presentation rules only).
@@ -655,6 +835,19 @@ void test_battle_hookups_aud1() {
 }
 #endif
 
+// ledger: verifies Laser_Defense_Ability.Zap_SFXEvent
+// ledger: verifies Tractor_Beam_Attack_Ability.SFXEvent_Unit_Summoned
+// ledger: verifies Radioactive_Contaminate_Ability.SFXEvent_Radioactive
+// ledger: verifies Buzz_Droids_Ability.Activate_SFX
+// ledger: verifies Tactical_Bribe_Ability.SFXEvent_Success
+// ledger: verifies Tactical_Bribe_Ability.SFXEvent_Fail
+// ledger: verifies Unit_Ability.SFXEvent_GUI_Unit_Ability_Activated
+// ledger: verifies Unit_Ability.SFXEvent_GUI_Unit_Ability_Deactivated
+// ledger: verifies Unit_Ability.SFXEvent_Target_Ability
+// ledger: verifies Faction.SFXEvent_GUI_Toggle_Non_Hero_Ability_On
+// ledger: verifies Faction.SFXEvent_GUI_Toggle_Non_Hero_Ability_Off
+// ledger: verifies Faction.SFXEvent_GUI_Enemy_Toggle_Non_Hero_Ability_On
+// ledger: verifies Faction.SFXEvent_GUI_Enemy_Toggle_Non_Hero_Ability_Off
 // aud1 t05 (AUDIO.md §9.6): the ability tag pick through the type's Unit_Ability -> <Abilities> entry, the departure tag
 // pick, the shield transitions, and (with engine/audio) the activation playing on the user and the target.
 void test_object_sfx_t05() {
@@ -665,12 +858,21 @@ void test_object_sfx_t05() {
 <SpaceUnits>
   <SpaceUnit Name="Hero_Ship">
     <Unit_Abilities_Data SubObjectList="Yes">
-      <Unit_Ability><Type>STEALTH</Type><GUI_Activated_Ability_Name> Hide </GUI_Activated_Ability_Name></Unit_Ability>
-      <Unit_Ability><Type>SPRINT</Type></Unit_Ability>
+      <Unit_Ability><Type>STEALTH</Type><GUI_Activated_Ability_Name> Hide </GUI_Activated_Ability_Name>
+        <SFXEvent_GUI_Unit_Ability_Activated> Gui_Stealth_On </SFXEvent_GUI_Unit_Ability_Activated></Unit_Ability>
+      <Unit_Ability><Type>SPRINT</Type><SFXEvent_GUI_Unit_Ability_Deactivated>Gui_Sprint_Off</SFXEvent_GUI_Unit_Ability_Deactivated>
+        <SFXEvent_Target_Ability>Sprint_Target</SFXEvent_Target_Ability></Unit_Ability>
+      <Unit_Ability><Type>ENERGY_WEAPON</Type><SFXEvent_Special_Ability_Loop> Beam_Loop </SFXEvent_Special_Ability_Loop></Unit_Ability>
     </Unit_Abilities_Data>
     <Abilities SubObjectList="Yes">
       <Stealth_Ability Name="Hide"><SFXEvent_Activate> Unit_Stealth_On </SFXEvent_Activate></Stealth_Ability>
       <Force_Healing_Ability Name="Heal2"><SFXEvent_Activate>Heal_On</SFXEvent_Activate></Force_Healing_Ability>
+      <Laser_Defense_Ability Name="Zapper"><Zap_SFXEvent> Laser_Zap </Zap_SFXEvent></Laser_Defense_Ability>
+      <Tactical_Bribe_Ability Name="Bribe"><SFXEvent_Success>Bribe_Yes</SFXEvent_Success><SFXEvent_Fail>Bribe_No</SFXEvent_Fail>
+      </Tactical_Bribe_Ability>
+      <Summon_Ability Name="Sum"><SFXEvent_Unit_Summoned>Summon_Line</SFXEvent_Unit_Summoned></Summon_Ability>
+      <Radioactive_Contaminate_Ability Name="Rad"><SFXEvent_Radioactive>Rad_Line</SFXEvent_Radioactive></Radioactive_Contaminate_Ability>
+      <Buzz_Droids_Ability Name="Buzz"><Activate_SFX>Buzz_Line</Activate_SFX></Buzz_Droids_Ability>
     </Abilities>
   </SpaceUnit>
   <SpaceUnit Name="Healer">
@@ -696,6 +898,44 @@ void test_object_sfx_t05() {
     s = H::ability_sfx(types, healer, ta::kAreaEffectHeal);            // [port] the only entry
     CHECK(s.activate == "Heal_On" && s.target_affected == "Heal_Target");
     CHECK(H::ability_sfx(types, objects::kNone, ta::kStealth).activate.empty());
+
+    // mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "Unit_Ability.SFXEvent_GUI_Unit_Ability_Activated family" and
+    // "Unit_Ability.SFXEvent_Target_Ability"): the record of the clicked ability (#0 -> record 0, else record 1).
+    CHECK(H::unit_ability_line(types, hero, ta::kStealth, "SFXEvent_GUI_Unit_Ability_Activated") == "Gui_Stealth_On");
+    CHECK(H::unit_ability_line(types, hero, ta::kSprint, "SFXEvent_GUI_Unit_Ability_Deactivated") == "Gui_Sprint_Off");
+    CHECK(H::unit_ability_line(types, hero, ta::kSprint, "SFXEvent_Target_Ability") == "Sprint_Target");
+    CHECK(H::unit_ability_line(types, healer, ta::kStealth, "SFXEvent_GUI_Unit_Ability_Activated").empty());
+    CHECK(H::plays_target_ability_line(19) && H::plays_target_ability_line(39) && !H::plays_target_ability_line(ta::kStealth));
+    // mcx4 t13 (docs/re/MCX4_PRES_RE_ANSWERS_2.md Q3): SFXEvent_Special_Ability_Loop from the ability's own record (the
+    // third record here; the #0 / #1 pick would read the SPRINT record), on the six loop abilities, on the target for 31 / 55.
+    // ledger: verifies Unit_Ability.SFXEvent_Special_Ability_Loop
+    CHECK(H::ability_record_line(types, hero, ta::kEnergyWeapon, "SFXEvent_Special_Ability_Loop") == "Beam_Loop");
+    CHECK(H::unit_ability_line(types, hero, ta::kEnergyWeapon, "SFXEvent_Special_Ability_Loop").empty());
+    CHECK(H::ability_record_line(types, healer, ta::kEnergyWeapon, "SFXEvent_Special_Ability_Loop").empty());
+    CHECK(H::special_ability_loop_user(ta::kTractorBeam) && H::special_ability_loop_user(ta::kLeechShields) &&
+          H::special_ability_loop_user(ta::kForceSight) && !H::special_ability_loop_user(ta::kStealth));
+    CHECK(H::special_ability_loop_on_target(ta::kEnergyWeapon) && H::special_ability_loop_on_target(ta::kSuperLaser) &&
+          !H::special_ability_loop_on_target(ta::kTractorBeam));
+    // "Laser_Defense_Ability.Zap_SFXEvent" / "Tactical_Bribe_Ability.SFXEvent_Success family": the ability element's field.
+    CHECK(H::special_line(types, hero, "Laser_Defense_Ability", "Zap_SFXEvent") == "Laser_Zap");
+    CHECK(H::special_line(types, hero, "Tactical_Bribe_Ability", "SFXEvent_Success") == "Bribe_Yes");
+    CHECK(H::special_line(types, hero, "Tactical_Bribe_Ability", "SFXEvent_Fail") == "Bribe_No");
+    CHECK(H::special_line(types, healer, "Laser_Defense_Ability", "Zap_SFXEvent").empty());
+    // Summon_Ability SFXEvent_Unit_Summoned (filed as Tractor_Beam_Attack_Ability), Radioactive_Contaminate_Ability
+    // SFXEvent_Radioactive, Buzz_Droids_Ability Activate_SFX (local owner only): the spawned object's line.
+    {
+        const H::SpawnLine sum = H::spawn_line(ta::kSummon), rad = H::spawn_line(ta::kRadioactiveContaminate),
+                           buzz = H::spawn_line(ta::kBuzzDroids);
+        CHECK(H::special_line(types, hero, sum.element, sum.field) == "Summon_Line" && !sum.local_only);
+        CHECK(H::special_line(types, hero, rad.element, rad.field) == "Rad_Line" && !rad.local_only);
+        CHECK(H::special_line(types, hero, buzz.element, buzz.field) == "Buzz_Line" && buzz.local_only);
+        CHECK(H::spawn_line(ta::kStealth).element.empty());
+    }
+    // "Faction.SFXEvent_GUI_Toggle_Non_Hero_Ability_On family": own / ally issuer -> the plain line, hostile -> _Enemy_.
+    CHECK(H::toggle_line_tag(true, false) == "SFXEvent_GUI_Toggle_Non_Hero_Ability_On");
+    CHECK(H::toggle_line_tag(false, false) == "SFXEvent_GUI_Toggle_Non_Hero_Ability_Off");
+    CHECK(H::toggle_line_tag(true, true) == "SFXEvent_GUI_Enemy_Toggle_Non_Hero_Ability_On");
+    CHECK(H::toggle_line_tag(false, true) == "SFXEvent_GUI_Enemy_Toggle_Non_Hero_Ability_Off");
 
     CHECK(H::departure_sfx("Type_Jump", "Faction_Exit") == "Type_Jump");
     CHECK(H::departure_sfx("", "Faction_Exit") == "Faction_Exit");
@@ -766,6 +1006,59 @@ void test_object_sfx_t05() {
 // backend - t01 planet reveal plays the Audio.xml constant's value, t02 Master_Volume_Restore returns to the profile's
 // master, t03 production begin / cancel / complete (+ Build_Music_Completed), t04 no updates and paused music while the
 // application is inactive, t07 the fleet departure line, t08 the strategic win / lose music.
+// mcx4 t13 batch Q (docs/re/MCX4_T13_RE_ANSWERS.md "GameObjectType.Spin_Away_On_Death_SFXEvent_Start_Die" and
+// "GameObjectType.Selt_Destruct_SFXEvent_Start_Die"): a spin-away corpse plays its type's line once; a self-destruct
+// countdown starts its line once and stops it when the unit leaves the counting list.
+// ledger: verifies GameObjectType.Spin_Away_On_Death_SFXEvent_Start_Die
+// ledger: verifies GameObjectType.Selt_Destruct_SFXEvent_Start_Die
+void test_spin_and_self_destruct() {
+    MemoryProvider files;
+    files.add("Data\\XML\\GameObjectFiles.xml", "<L><File>Q.xml</File></L>");
+    files.add("Data\\XML\\Q.xml", R"(<?xml version="1.0"?>
+<SpaceUnits>
+  <SpaceUnit Name="Spinner"><Spin_Away_On_Death_SFXEvent_Start_Die>Spin_Die</Spin_Away_On_Death_SFXEvent_Start_Die>
+    <Selt_Destruct_SFXEvent_Start_Die>SD_Count</Selt_Destruct_SFXEvent_Start_Die></SpaceUnit>
+  <SpaceUnit Name="Plain"></SpaceUnit>
+</SpaceUnits>
+)");
+    objects::ObjectTypeDatabase raw;
+    CHECK(raw.load(files));
+    objects::GameObjectTypes types;
+    CHECK(types.build(raw));
+    const objects::TypeIndex spinner = types.resolve_name("Spinner"), plain = types.resolve_name("Plain");
+    CHECK(spinner != objects::kNone && plain != objects::kNone);
+    CHECK(types.get_string(spinner, "Spin_Away_On_Death_SFXEvent_Start_Die") == "Spin_Die");
+    CHECK(types.get_string(spinner, "Selt_Destruct_SFXEvent_Start_Die") == "SD_Count");
+    GameAudioHost off;  // inactive host: nothing
+    const std::vector<GameAudioHost::SpinDeath> spins = {{7, spinner, Vec3{1, 0, 0}}, {8, plain, Vec3{}}};
+    CHECK(off.spin_away_deaths(spins, types) == 0);
+#ifdef ALAMO_GAME_HAVE_AUDIO
+    GameData data;
+    auto tree = make_tree(true);
+    tree->add("Data\\XML\\SFXEventsTest.xml", R"(<?xml version="1.0"?>
+<SFXEvents>
+  <SFXEvent Name="Spin_Die"><Is_3D>Yes</Is_3D><Samples>SPIN.WAV</Samples></SFXEvent>
+  <SFXEvent Name="SD_Count"><Is_3D>Yes</Is_3D><Samples>SD.WAV</Samples><Play_Count>-1</Play_Count></SFXEvent>
+</SFXEvents>
+)");
+    data.files = std::move(tree);
+    GameAudioHost h;
+    CHECK(h.init(data, AudioBackendKind::Null, 3));
+    if (!h.active()) return;
+    h.set_listener(Vec3{0, 0, 100}, Vec3{0, 0, 0});
+    CHECK(h.spin_away_deaths(spins, types) == 1);  // the plain type has no line
+    CHECK(h.spin_away_deaths(spins, types) == 0);  // once per death
+    CHECK(starts(h, "Spin_Die") == 1);
+    const std::vector<GameAudioHost::SelfDestructCue> counting = {{9, "SD_Count", Vec3{2, 0, 0}}};
+    CHECK(h.self_destruct_lines(counting) == 1 && h.self_destruct_lines(counting) == 0);  // started once
+    CHECK(starts(h, "SD_Count") == 1);
+    h.self_destruct_lines({});  // cancelled / blown up: stopped
+    int stops = 0;
+    for (const audio::LogEntry& e : h.system()->log()) stops += e.op == audio::LogOp::SfxStop && e.event == "SD_Count" ? 1 : 0;
+    CHECK(stops == 1);
+#endif
+}
+
 void test_aud2() {
     using H = GameAudioHost;
     CHECK(H::production_tag(H::Production::Begin) == "SFXEvent_Build_Started");
@@ -928,8 +1221,19 @@ int main() {
     test_retreat_begin_lines();         // mcx4 t13 batch E
     test_special_weapon_lines();        // mcx4 t13 batch G
     test_move_into_field();             // mcx4 t13 batch G
+    test_base_shield_lines();           // mcx4 t13 batch I
+    test_unit_room();                   // mcx4 t13 batch J
+    test_strike_available_tags();       // mcx4 t13 batch M
+    test_land_damage_stage();           // mcx4 t13 batch O
+    test_pad_lines();                   // mcx4 t13 batch P
+    test_tsw_approach();                // mcx4 t13 batch S
+    test_point_contested();             // mcx4 t13 batch U
+    test_command_rank();                // mcx4 tac2 handover
+    test_turret_turning();              // mcx4 t13
+    test_retreat_refusal_tag();         // mcx4 t13
     test_intro_speech_t07();
     test_aud2();
+    test_spin_and_self_destruct();  // mcx4 t13 batch Q
 #ifdef ALAMO_GAME_HAVE_AUDIO
     test_movie_music();
     test_missing_credits_event();

@@ -1,5 +1,7 @@
 // alamo_game App: special systems, sim stepping, command routing, HUD / galactic / battle / menu input (split from game_main.cpp).
 #include "game_app.hpp"
+#include "alamo/data/values.hpp"  // mcx4 t14: data::trim
+#include "alamo/galactic/economy.hpp"  // mcx4 t13: build countdown speech
 #ifdef ALAMO_SIM_HAVE_ANIM
 #include "alamo/sim/sim_anim.hpp"  // aud1 t03
 #endif
@@ -185,28 +187,39 @@ void App::announcer_feedback() {
             audio_.production(data_.types, static_cast<objects::TypeIndex>(e.type), kind);
         }
         // aud2 t07 (BATTLE_TRANSITIONS, departure 0x431c80): Galactic_Fleet_Hyperspace when the local player owns or sees
-        // the departing fleet. [port] "sees": the local player can see fleet presence at the origin planet
-        // (can_see_planet_info FleetPresence) and the fleet is not all stealthed (the announcer's hidden test). Only the
+        // the departing fleet. mcx4 t14 (MCX4_GAL2_RE_ANSWERS Q3): "sees" is the fleet visibility vote 0x433090
+        // (GalacticSim::fleet_visible_to_local). Only the
         // move order's departure plays it: a pass-through hop re-departs without 0x431c80, and GalacticSim emits that
         // departure right after the fleet's FleetArrived(kArrivePassThrough), so the stream order tells them apart.
         const bool pass_through_departure = e.kind == K::FleetDeparted && e.fleet == pass_through_fleet;
         pass_through_fleet = e.kind == K::FleetArrived && e.value == galactic::kArrivePassThrough ? e.fleet : kNoPassThrough;
         if (e.kind == K::FleetDeparted && me >= 0 && !pass_through_departure) {
-            bool sees = false;
-            if (e.player != me && e.planet < g->planets().size() &&
-                g->can_see_planet_info(me, e.planet, galactic::GalacticSim::PlanetInfo::FleetPresence)) {
-                sees = true;
-                if (e.fleet < g->fleets().size()) {
-                    const galactic::FleetState& fl = g->fleets()[e.fleet];
-                    bool all_hidden = !fl.contents.empty();
-                    for (const objects::ObjectHandle m : fl.contents)
-                        if (g->store().alive(m)) all_hidden = all_hidden && g->hidden(m);
-                    sees = !all_hidden;
-                }
-            }
+            const bool sees = e.player != me && g->fleet_visible_to_local(e.fleet);
             audio_.fleet_departure(e.player == me, sees);
         }
     }
+    // mcx4 t13 (MCX4_T09_RE_ANSWERS Q7, production speech 0x401e50): a queue head whose type has Build_Countdown_Timer and
+    // a Build_Speech_Countdowns prefix speaks the countdown (econ::build_countdown_speech) as its remaining time crosses
+    // the minute / ten-second / second steps; every player hears it (no owner test). [port] the subtitle line retail
+    // shows with subtitles on is not drawn; a newly seen head speaks from its next change on.
+    for (uint32_t pi = 0; pi < g->planets().size(); ++pi)
+        for (uint32_t qi = 0; qi < 2; ++qi) {
+            const auto key = std::make_pair(pi, qi);
+            const auto& q = g->planets()[pi].queue[qi];
+            const galactic::TypeInfo* ti = !q.empty() && q.front().type < g->rules().types.size() ? &g->rules().types[q.front().type] : nullptr;
+            if (!ti || !ti->build_countdown_timer || ti->build_speech_countdowns.empty()) {
+                countdown_speech_seen_.erase(key);
+                continue;
+            }
+            const galactic::BuildEntry& e = q.front();
+            const float rem = galactic::econ::timer_remaining_seconds(e.start, e.duration, g->frame());
+            const auto [it, fresh] = countdown_speech_seen_.try_emplace(key, e.start, rem);
+            if (!fresh && it->second.first == e.start) {
+                const std::string ev = galactic::econ::build_countdown_speech(ti->build_speech_countdowns, it->second.second, rem);
+                if (!ev.empty()) audio_.speech(ev);
+            }
+            it->second = {e.start, rem};
+        }
     // ui4 t11 (§2.7.3, player tick 0x287e70): SFXEvent_Strategic_Pop_Cap_Reached when the population used rises above a
     // previous value > 0 and reaches the capacity. Retail never plays SFXEvent_Max_Credits_Limit_Reached or
     // _Build_Impossible_Location_Blockaded (no reader of either field).
@@ -257,9 +270,66 @@ void App::post_tick() {
                         if (e.def && e.def->kind == anim::AnimEventDef::Kind::Sound)
                             snd.push_back({static_cast<uint64_t>(e.id), e.def->name, e.position});
                     audio_.animation_sounds(snd);
+                    // mcx4 t13: spin-away deaths (the host voices each corpse once).
+                    std::vector<GameAudioHost::SpinDeath> spins;
+                    for (const anim::Corpse& c : an->corpses(*top))
+                        if (c.spin_away)
+                            spins.push_back({static_cast<uint64_t>(c.id), static_cast<objects::TypeIndex>(c.info.object_type),
+                                             {c.info.position[0], c.info.position[1], c.info.position[2]}});
+                    if (!spins.empty()) audio_.spin_away_deaths(spins, data_.types);
                 }
 #endif
             audio_.set_corruption_mission(session_->battles() && session_->battles()->active_corruption_player() >= 0);  // mcx4 t13
+            // mcx4 t14 (victory declare 0x343b90): the win / lose banner, once, local winner or allied -> win colour,
+            // hostile -> lose colour (GameAudioHost::battle_result_gate: types 0x0b..0x16, not silent).
+            {  // mcx4 t14 (0x27fad0 / 0x287e70): a type added to the local player's pool flashes b_reinforcement by count.
+                const size_t n = local_player() >= 0 ? b->reserves(local_player()).size() : 0;
+                // ledger: consumes GameConstants.CB_Flash_Count
+                if (n > reserve_seen_) story_present_.flash_component("b_reinforcement", hud_consts_.cb_flash_count, now_s_);
+                reserve_seen_ = n;
+            }
+            if (!win_banner_set_ && b->victory_declared()) {
+                win_banner_set_ = true;
+                const int32_t me = local_player(), winner = b->victory_declared_player();
+                if (me >= 0 && winner >= 0 &&
+                    game::GameAudioHost::battle_result_gate(b->victory_declared_type(), b->victory_declared_silent())) {
+                    const bool won = winner == me || !b->combat().is_enemy(me, winner);
+                    const bool corrupt = session_->battles() && session_->battles()->active_corruption_player() >= 0;
+                    win_banner_ = txt(game::win_lose_banner_text(won, corrupt), U"");
+                    // ledger: consumes GameConstants.Win_Message_Color
+                    win_banner_color_ = won ? hud_consts_.win_message_color : hud_consts_.lose_message_color;  // ledger: consumes GameConstants.Lose_Message_Color
+                }
+            }
+            {  // mcx4 t15 (MCX4_PRES_RE_ANSWERS_2 Q7): object light effects - the ability's owner / target effect at its
+               // activation (0x48e4d0 / 0x48e880) and the shield hit flash (0x549ac0, a hit the shields absorbed).
+                const auto to_pulse = [](const tactical::abilities::LightEffectDesc& l) {
+                    render::LightPulse p;
+                    p.type = l.type;
+                    std::copy(l.color, l.color + 3, p.c1);
+                    std::copy(l.color2, l.color2 + 3, p.c2);
+                    p.duration = l.duration;
+                    p.pulses = l.pulses;
+                    return p;
+                };
+                const auto& ab = b->abilities();
+                for (const tactical::abilities::AbilityActivation& a : ab.activation_events()) {
+                    if (a.serial <= pulse_activation_seen_) continue;
+                    pulse_activation_seen_ = a.serial;
+                    const tactical::abilities::SpecialAbilityDesc* d = ab.special_desc(a.special);
+                    if (!d) continue;
+                    bview_.start_light_pulse(static_cast<uint32_t>(a.id), to_pulse(d->owner_light), now_s_);
+                    if (a.target != tactical::abilities::kNoObject)
+                        bview_.start_light_pulse(static_cast<uint32_t>(a.target), to_pulse(d->target_light), now_s_);
+                }
+                for (const tactical::combat::DamageEvent& dmg : b->combat().damage_events())
+                    if (dmg.absorbed > 0.0f && dmg.hardpoint != tactical::combat::kHardpointBaseShieldDome) {
+                        render::LightPulse p;
+                        p.type = 1;  // Color_Flash
+                        std::copy(bview_.shield_flash_color(), bview_.shield_flash_color() + 3, p.c1);
+                        p.duration = bview_.shield_flash_duration();
+                        bview_.start_light_pulse(static_cast<uint32_t>(dmg.victim), p, now_s_);
+                    }
+            }
             audio_.battle_tick(*b, st, data_.types, local_player(),
                                [gs](objects::ObjectId id) { return gs->script_hidden(id); });  // q6 t19 §10.3
             {  // aud1 t07 (AUDIO.md §9.7): the tactical intro speech, campaign battles only, not story-linked ones.
@@ -305,7 +375,24 @@ void App::post_tick() {
                     }
                     return false;
                 };
-                audio_.intro_speech_tick(b->frame(), eligible, presentation_cinematic() || cine_.shot.active(), facts, present);
+                const std::string intro =
+                    audio_.intro_speech_tick(b->frame(), eligible, presentation_cinematic() || cine_.shot.active(), facts, present);
+                // mcx4 t14 (AUDIO.md §9.7 step 5, 0x2fc7a0): with the line queued, the local faction's
+                // Tactical_Intro_Command_Bar_Movie_Name plays on the command bar's advisor slot. [port] looped until the
+                // line ends (retail times it from the speech event, [M]); a story movie on the slot keeps it.
+                if (!intro.empty() && !story_movie_)
+                    for (const data::GameObjectRecord* rec : data_.db.find_game_objects(local_faction()))
+                        if (rec->type == "Faction") {
+                            const std::string name(data::trim(rec->element.child_text("Tactical_Intro_Command_Bar_Movie_Name")));
+                            std::string err;
+                            if (!name.empty() && advisor_movie_.open(data_, audio_, name, true, &err)) {
+                                light_loop_ = false;
+                                intro_movie_line_ = intro;
+                            } else if (!name.empty()) {
+                                std::fprintf(stderr, "intro movie %s: %s\n", name.c_str(), err.c_str());
+                            }
+                            break;
+                        }
             }
             for (const TswCue& c : tsw_cues(b->special_weapon_events(), st)) {  // refixf t05: TSW_PLANET_DESTROY.md §11
                 if (c.kind == TswCue::Kind::Firing) tsw_shot_begin(c, *b, st);              // 0x2ccf30: the firing shot
@@ -395,10 +482,24 @@ void App::respond(const commands::EventData& ev) {
         default: return;
     }
     if (ids.empty()) return;
-    const uint32_t id = *std::min_element(ids.begin(), ids.end());
     const sim::GameMode* top = session_->host().modes().top();
     if (!top) return;
     const objects::ObjectStore& st = top->primary();
+    // mcx4 (MCX4_T11_T12_RE_ANSWERS §C3, 0x38290): the best-ranked unit of the selection by
+    // Unit_Command_Rankings_By_Category speaks. [port] equal ranks: the lowest id (the port's order before).
+    uint32_t id = *std::min_element(ids.begin(), ids.end());
+    if (ids.size() > 1 && !command_rankings_.empty()) {
+        size_t best = command_rankings_.size() + 1;
+        for (const uint32_t c : ids) {
+            const objects::ObjectHandle ch = st.find(static_cast<objects::ObjectId>(c));
+            if (!st.active(ch)) continue;
+            const size_t rank = GameAudioHost::command_rank(command_rankings_, data_.types.get_string(st.type(ch), "CategoryMask"));
+            if (rank < best || (rank == best && c < id)) {
+                best = rank;
+                id = c;
+            }
+        }
+    }
     objects::ObjectHandle h = st.find(static_cast<objects::ObjectId>(id));
     if (!st.active(h)) return;
     if (kind == UnitResponse::FleetMove || (!top->tactical() && kind == UnitResponse::Select)) {
@@ -422,8 +523,11 @@ void App::respond(const commands::EventData& ev) {
                 if (st.alive(th)) fields = b->space_fields().kinds_at(st.position(th).x, st.position(th).y);
             }
         }
+    // mcx4 t13: an attack on a hard point (ref2 = 1 + HardPointType, COMMANDS.md 2) names its kind for the response.
+    const uint32_t ref2 = ev.type() == T::Attack ? ev.u("ref2") : 0u;
+    const int32_t hp_kind = ref2 > 0 && ref2 <= 13 ? static_cast<int32_t>(ref2) - 1 : -1;
     audio_.unit_response(data_.types, st.type(h), static_cast<uint64_t>(st.id(h)), kind, false, top->tactical() ? st.owner(h) : -1,
-                         fields);
+                         fields, hp_kind);
 }
 
 void App::submit(commands::EventData ev, bool voice) {
@@ -470,6 +574,14 @@ void App::route_commands(std::vector<commands::EventData>& cmds, std::span<const
                 story_ui_.generic("drag_land_to_space");  // the drop of a land stack on a fleet pane (0x3cf7d0)
             }
         }
+        // mcx4 t13 (MCX4_PRES_RE_ANSWERS_2 Q4): a refused request plays the local faction's refusal line and opens nothing.
+        // [port] the local player's own running retreat: silent (retail's second click cancels; the port has no cancel).
+        if (e.type() == commands::EventType::Retreat && screen_ == Screen::Battle)
+            if (const sim::TacticalBattle* rb = battle(); rb && rb->retreating_player() != local_player())
+                if (const int32_t code = rb->retreat_refusal(local_player()); code != 0) {
+                    audio_.faction_sfx(GameAudioHost::retreat_refusal_tag(!rb->is_space(), code));
+                    continue;
+                }
         if (e.type() == commands::EventType::Retreat && screen_ == Screen::Battle && !ui_.gui.find(ui::dlg::kRetreat)) {
             screens_.show_retreat_confirm();
             continue;
@@ -543,10 +655,21 @@ void App::handle_hud_actions(const std::vector<ui::HudAction>& acts) {
             }
             case ui::HudAction::Kind::BeginReinforcement:  // the drop point is the next left click in the world
                 if (!reinforce_available(static_cast<objects::ObjectId>(a.unit))) {  // ui3 t04: cap / retreat / locked
-                    audio_.negative_feedback();
+                    // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Tactical_Unit_Cap_Reached family", ReinforceEvent
+                    // Execute 0x403cb0): a drop refused for room plays the local faction's line. [port] the port refuses
+                    // at the pad click, before a drop point is picked.
+                    const sim::TacticalBattle* rb = battle();
+                    if (rb && !story_controls_locked() &&
+                        rb->reinforce_block(local_player(), static_cast<objects::ObjectId>(a.unit)) == commands::RejectReason::QueueFull)
+                        audio_.faction_sfx("SFXEvent_Tactical_Unit_Cap_Reached");  // ledger: consumes Faction.SFXEvent_Tactical_Unit_Cap_Reached
+                    else
+                        audio_.negative_feedback();
                     break;
                 }
                 reinforce_unit_ = a.unit;
+                // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.Reinforcements_Selection_SFXEvent family", 0xdc200): a unit picked
+                // for the drop plays the local faction's line, 2D.
+                audio_.faction_sfx("Reinforcements_Pick_Landing_Zone_SFXEvent");  // ledger: consumes Faction.Reinforcements_Pick_Landing_Zone_SFXEvent
                 targeting_.cancel();  // one modal pick at a time
                 bombing_end(false);
                 beacon_pick_ = false;
@@ -997,9 +1120,20 @@ void App::battle_input() {
         if (input_.button(ui::Button::Right).click && !input_.button(ui::Button::Right).in_double_press) {
             reinforce_unit_ = 0;
             drop_click = true;
+            audio_.faction_sfx("Reinforcements_Cancelled_SFXEvent");  // mcx4 t13: the user's placement cancel (0x343e0, argument 1)
         } else if (input_.button(ui::Button::Left).click) {
             drop_click = true;
             if (valid) {
+                // mcx4 t13 (0x36300): the drop click queues the reinforcement: the pending unit's type SFXEvent_Fleet_Move
+                // when set, else the local faction's Reinforcements_Enroute_SFXEvent; 2D.
+                std::string_view moved;
+                for (const sim::TacticalBattle::Reserve& r : rb->reserves(me_p))
+                    if (r.galactic_id == key && r.type < data_.types.size()) {
+                        moved = data_.types.get_string(static_cast<objects::TypeIndex>(r.type), "SFXEvent_Fleet_Move");
+                        break;
+                    }
+                if (!moved.empty()) audio_.ui(moved);
+                else audio_.faction_sfx("Reinforcements_Enroute_SFXEvent");  // ledger: consumes Faction.Reinforcements_Enroute_SFXEvent
                 cmds.push_back(ui::reinforce_event(reinforce_unit_, {p.x, p.y, p.z}));
                 ++reinforce_drops_;
                 reinforce_unit_ = 0;
@@ -1232,7 +1366,25 @@ void App::battle_input() {
         else if (e.slot == ui::hk::kFleetCohesion && bview_.space()) session_->toggle_fleet_cohesion();  // [port] fleet cohesion
     }
     story_forced_clicks();  // ui2 t02: FORCE_CLICK_GUI
+    const size_t cmds_before = cmds.size(), acts_before = acts.size();
     ui_.tactical_hud.update_input(routed_, input_.shift(), input_.ctrl(), now_s_, cmds, &acts);
+    {  // mcx4 t13 (MCX4_T13_RE_ANSWERS "Unit_Ability.SFXEvent_GUI_Unit_Ability_Activated family", 0x307190): the HUD
+       // ability button's line, by the first user's record: a toggle click -> _Activated / _Deactivated, a targeted
+       // ability -> _Activated when targeting starts.
+        const sim::GameMode* tt = session_ ? session_->host().modes().top_tactical() : nullptr;
+        const objects::ObjectStore* ab_store = tt ? &tt->primary() : nullptr;
+        auto type_of = [&](uint32_t id) {
+            const objects::ObjectHandle h = ab_store ? ab_store->find(static_cast<objects::ObjectId>(id)) : objects::ObjectHandle{};
+            return ab_store && ab_store->alive(h) ? ab_store->type(h) : objects::kNone;
+        };
+        for (size_t i = cmds_before; i < cmds.size(); ++i)
+            if (cmds[i].type() == commands::EventType::SetUnitAbilityMode && cmds[i].u("play_response") != 0)
+                if (const std::vector<uint32_t> u = cmds[i].ids("units"); !u.empty())
+                    audio_.ability_button_line(data_.types, type_of(u.front()), static_cast<uint8_t>(cmds[i].u("ability")), cmds[i].u("on") != 0);
+        for (size_t i = acts_before; i < acts.size(); ++i)
+            if (acts[i].kind == ui::HudAction::Kind::BeginAbilityTargeting && !acts[i].ids.empty())
+                audio_.ability_button_line(data_.types, type_of(acts[i].ids.front()), acts[i].ability_type, true);
+    }
     // L1/S4 wave 1 (tactical): STORY_CLICK_GUI to the tactical plot set - the galactic rule (left click on a component that
     // is not disabled, name = its CommandBarComponents name: b_reinforcement, b_special_weapon, ...) on the tactical HUD.
     story_ui_.set_battle(tactical_story());
@@ -1504,6 +1656,15 @@ void App::handle_menu_actions(const std::vector<ui::MenuAction>& acts) {
             default: break;
         }
     }
+}
+
+// mcx4 t14: the intro line ended -> its command bar movie stops (the slot goes back to the advisor loop rules).
+void App::intro_movie_speech_done(const std::string& event) {
+    if (intro_movie_line_.empty() || !ascii_iequals(event, intro_movie_line_)) return;
+    intro_movie_line_.clear();
+    if (story_movie_ || !advisor_movie_.playing()) return;
+    advisor_movie_.stop(audio_);
+    gpu_.hud.clear_image_page(kAdvisorPage);
 }
 
 }  // namespace alamo_game_app

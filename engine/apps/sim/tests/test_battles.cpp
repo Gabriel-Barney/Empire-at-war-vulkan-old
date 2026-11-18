@@ -2439,6 +2439,7 @@ void test_skirmish_redelivery() {
     };
     uint32_t killed_at = 0, delivered_at = 0;
     size_t pool0 = 0, pool_before = 0;
+    bool fed = false;  // mcx4 t13: the presentation feed names the slot on the expiry tick
     for (uint64_t t = 0; t < 1200 && delivered_at == 0; ++t) {
         host.tick_once();
         TacticalBattle* b = battles.battle();
@@ -2457,8 +2458,12 @@ void test_skirmish_redelivery() {
             continue;
         }
         if (b->frame() == killed_at + 590) pool_before = pooled(*b);
-        if (pooled(*b) > pool0) delivered_at = b->frame();
+        if (pooled(*b) > pool0) {
+            delivered_at = b->frame();
+            fed = b->garrison_redelivered().size() == 1 && b->garrison_redelivered()[0] == 0;
+        }
     }
+    CHECK(fed);
     std::printf("  start force re-delivered at frame %u (killed at %u), pool %zu -> %zu (%zu just before the delay)\n", delivered_at, killed_at,
                 pool0, battles.battle() ? pooled(*battles.battle()) : size_t{0}, pool_before);
     CHECK(delivered_at >= killed_at + 600 && delivered_at <= killed_at + 602 && pool_before == pool0);

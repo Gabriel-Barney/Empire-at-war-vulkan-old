@@ -77,6 +77,9 @@ struct EconomyConstants {
     // mcx4 t09 (MCX4_GAL2_RE_ANSWERS Q5): Indigenous_Spawn_Destruction_Reward (FoC 500), the CREDITS reward of a campaign
     // land battle's sandbox objective for destroying every spawner of one hostile type (sim::StorySession).
     int32_t indigenous_spawn_destruction_reward = 0;
+    // mcx4 t05 (MCX4_T11_T12_RE_ANSWERS C1): AI_BuildTaskReservationSeconds (GC +0x1100, FoC 15), how long a planet
+    // queue holds a claimed AI build task that has not started before the market releases it (engine/ai).
+    float ai_build_task_reservation_seconds = 15.0f;
     // a2l t03 (A2L_T03_RE_ANSWERS Q4.1): Health_Low_Percent_Threshold (+0x11b38; FoC 0.33, Thrawn's Revenge 0.50), the
     // galactic free-store Setup A health floor.
     float health_low_percent_threshold = 0.33f;

@@ -213,6 +213,10 @@ public:
     // ---- tactical superweapon (§1.2) ----
     int32_t tsw_state(ObjectId id) const;  // < 0: not a TSW
     ObjectId tsw_target(ObjectId id) const;
+    // mcx4 t13 (presentation read; MCX4_T13_RE_ANSWERS "Faction.SpeechEvent_Super_Weapon_Moving_Range_60_Seconds
+    // family", 0x42b560): in state 3 (arming), the seconds until the TSW reaches its attack distance at `position`:
+    // remaining distance / Max_Speed / 30 - 2 (the port moves Max_Speed per frame); < -1e29 when not arming.
+    float tsw_eta_seconds(ObjectId id, Vec3 position) const;
     // 0x42a200 without the planet test (`planet_ok` = battle planet in the parent store, not destroyed and its type
     // Planet_Is_Destroyable_By_TSW: the host's): state 4 and a target -> 5. True = fired.
     bool tsw_fire(ObjectId id, bool planet_ok, uint32_t frame);

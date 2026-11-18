@@ -490,6 +490,21 @@ int32_t FontCache::measure(int32_t font, std::u32string_view text) {
     return w;
 }
 
+int32_t FontCache::component_font(std::string_view name, float size, FontUse use, uint32_t screen_height) {
+    const DefaultFonts& d = defaults_;
+    std::string_view face = d.text_face;
+    float pt = d.text_size;
+    switch (use) {
+        case FontUse::Text: break;
+        case FontUse::Button: face = d.button_face; pt = d.button_size; break;
+        case FontUse::World: face = d.world_face; pt = d.world_size; break;
+        case FontUse::Tooltip: face = d.tooltip_face; pt = d.tooltip_size; break;
+    }
+    if (!name.empty()) return font(name, size > 0.0f ? size : pt, screen_height);
+    if (size > 0.0f) return font(use == FontUse::Button ? std::string_view(d.text_face) : face, size, screen_height);
+    return font(face, pt, screen_height);
+}
+
 void FontCache::clear() {
     fonts_.clear();
     by_key_.clear();

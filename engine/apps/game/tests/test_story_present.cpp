@@ -49,6 +49,12 @@ void text_test() {
     CHECK(s.lines()[1].revealed(3.0) == s.lines()[1].text.size());
     CHECK(s.lines()[2].seconds == 5.0 && s.lines()[2].channel == game::StoryTextChannel::Subtitle);
     CHECK(s.lines()[2].revealed(3.0) == 0 && s.lines()[2].revealed(4.0) > 0);
+    {  // mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "GameConstants.Text_Reveal_Rate"): elapsed seconds x the rate
+        game::StoryTextLine tl;
+        tl.text = U"abcdefghijklmnopqrstuvwxyz";
+        tl.start = 10.0;
+        CHECK(tl.revealed(10.125, 80.0) == 10 && tl.revealed(10.125) == 15 && tl.revealed(20.0, 80.0) == 26);
+    }
     s.update(100.0, false);  // the persistent line stays, the timed ones go
     CHECK(s.lines().size() == 1 && s.lines()[0].id == "TEXT_B");
     // P4 given = remove every line with that id.
@@ -151,6 +157,16 @@ void pointer_test() {
 // ledger: verifies GameConstants.System_Text_Color
 // ledger: verifies GameConstants.Task_Text_Color
 // ledger: verifies GameConstants.Speech_Text_Color
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "GameConstants.CB_Flash_Count"): a flash run by count, no arrow.
+void count_flash_test() {
+    alamo::test::section("count-run component flash (CB_Flash_Count)");
+    game::StoryPresenter s = make();
+    s.flash_component("b_reinforcement", 4, 1.0);  // FoC CB_Flash_Count 4: 4 x 0.5 s
+    CHECK(s.arrows().empty() && s.component_flashing("b_reinforcement", 2.9) && !s.component_flashing("b_reinforcement", 3.0));
+    s.flash_component("b_reinforcement", 0, 5.0);
+    CHECK(!s.component_flashing("b_reinforcement", 5.0));
+}
+
 void colors_test() {
     alamo::test::section("text colours (1.1)");
     const data::XmlDocument doc = data::XmlDocument::parse(std::string_view(
@@ -342,6 +358,7 @@ int main() {
     text_test();
     pointer_test();
     colors_test();  // mcx4 t14 / t15
+    count_flash_test();  // mcx4 t14
     lock_test();
     advisor_test();
     hint_queue_test();

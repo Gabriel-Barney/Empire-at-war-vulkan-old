@@ -204,6 +204,17 @@ ObjectId SpecialWeaponSystem::tsw_target(ObjectId id) const {
     return p ? p->tsw_target : kNoObject;
 }
 
+float SpecialWeaponSystem::tsw_eta_seconds(ObjectId id, Vec3 position) const {
+    const Pack* p = pack(id);
+    if (!p || p->tsw != kTswArming || p->desc >= descs_.size()) return -1.0e30f;
+    const SpecialWeaponDesc& d = descs_[p->desc];
+    Vec3 dv = position - p->tsw_target_pos;
+    dv.z = 0.0f;
+    const float remaining = std::max(0.0f, length(dv) - d.tsw_attack_distance);
+    if (!(d.max_speed > 0.0f)) return -2.0f;
+    return remaining / d.max_speed / 30.0f - 2.0f;
+}
+
 void SpecialWeaponSystem::set_tsw_state(Pack& p, int32_t s, uint32_t frame) {
     if (p.tsw == s) return;
     p.tsw = s;

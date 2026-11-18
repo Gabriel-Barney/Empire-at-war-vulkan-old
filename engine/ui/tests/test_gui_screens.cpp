@@ -561,6 +561,19 @@ void test_targeting() {
         out.clear();
         abilities_from_s9(as, grp, 32, out);
         CHECK(!out.empty() && out[0].icon == "i_sa_strike.tga" && out.size() == 2 && out[1].icon == "i_sa_tractor_beam.tga");
+        // mcx4 t14 (docs/re/MCX4_PRES_RE_ANSWERS_2.md Q5): the record's Alternate_Name_Text / Alternate_Description_Text
+        // replace the TEXT_TOOLTIP_ABILITY_<type>_NAME / _DESCRIPTION keys, each on its own.
+        // ledger: verifies Unit_Ability.Alternate_Name_Text
+        // ledger: verifies Unit_Ability.Alternate_Description_Text
+        CHECK(out[0].tooltip_key == "TEXT_TOOLTIP_ABILITY_DEFEND_NAME TEXT_TOOLTIP_ABILITY_DEFEND_DESCRIPTION");
+        ad.objects[0].unit_abilities[0].alternate_name_text = "TEXT_ALT_NAME";
+        out.clear();
+        abilities_from_s9(as, grp, 32, out);
+        CHECK(!out.empty() && out[0].tooltip_key == "TEXT_ALT_NAME TEXT_TOOLTIP_ABILITY_DEFEND_DESCRIPTION");
+        ad.objects[0].unit_abilities[0].alternate_description_text = "TEXT_ALT_DESC";
+        out.clear();
+        abilities_from_s9(as, grp, 32, out);
+        CHECK(!out.empty() && out[0].tooltip_key == "TEXT_ALT_NAME TEXT_ALT_DESC");
         // QA D5: the i_sa_* art of MT_CommandBar, by mapping or by type name.
         CHECK(ability_icon(0).empty() && ability_icon(kDefend) == "i_sa_defend_mode.tga" &&
               ability_icon(kTractorBeam) == "i_sa_tractor_beam.tga" && ability_icon(kLure) == "i_sa_lure.tga" &&

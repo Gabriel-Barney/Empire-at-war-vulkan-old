@@ -813,6 +813,9 @@ void GalacticSceneBuilder::build(const GalacticFrame& frame, GalacticModelSource
         in.team_color = p.team_color;
         in.lod_bias = ti.lod_bias;
         in.alt = fog ? kFogPlanetAlt : 0;
+        // mcx4 t14: the selected planet pulses towards red (0x3ca480 overrides the cycle colour to 6, 0, 0).
+        if (p.id == sel_.planet && sel_.planet != objects::kNoObjectId && sel_.cycle_darken > 0.0f)
+            in.light_scale = cycle_light_scale(in.light_scale, Vec3{6.0f, 0.0f, 0.0f}, sel_.cycle_phase, sel_.cycle_darken);
         in.bone_world = pose(anims_[p.row], m, name, ti, frame.anim_frames, models);
         st.animated += in.bone_world.empty() ? 0u : 1u;
         st.fogged += fog ? 1u : 0u;
@@ -911,6 +914,10 @@ void GalacticSceneBuilder::build(const GalacticFrame& frame, GalacticModelSource
             else ++st.orbit_fleets;
             continue;
         }
+        if (f.flags & kGalFleetHidden) {  // mcx4 t14 (MCX4_GAL2_RE_ANSWERS Q3): the local client does not see it
+            ++st.hidden_fleets;
+            continue;
+        }
         const std::string name = fleet_model(f);
         const GpuModel* m = owner_model(models, name, f.team_color);
         if (!m) {
@@ -1003,6 +1010,11 @@ void GalacticSceneBuilder::build(const GalacticFrame& frame, GalacticModelSource
         }
     }
     if (stats) *stats = st;
+}
+
+materials::float4 GalacticSceneBuilder::cycle_light_scale(materials::float4 base, const Vec3& cycle, float phase, float darken) {
+    const float f = std::sin(phase) * darken + darken;
+    return {base.x * (1.0f + cycle.x * f), base.y * (1.0f + cycle.y * f), base.z * (1.0f + cycle.z * f), base.w};
 }
 
 float GalacticSceneBuilder::overlay_fade(float zoom) {

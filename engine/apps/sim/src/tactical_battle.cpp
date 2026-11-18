@@ -129,6 +129,9 @@ void TacticalBattle::add_participant(objects::ObjectHandle g, int32_t owner, uin
 std::vector<uint32_t> TacticalBattle::spawn_types(const Participant& p) const {
     std::vector<uint32_t> out;
     const galactic::ConflictTypeInfo& ti = rules_->type(p.type);
+    // mcx4 t22: a company that lost members in an earlier battle spawns its survivors only.
+    if (!ti.members.empty() && galaxy_ && p.galactic)
+        if (const std::vector<uint32_t>* s = galaxy_->company_survivors(p.galactic)) return *s;
     if (ti.members.empty()) {
         out.push_back(p.type);
     } else {

@@ -623,6 +623,81 @@ void test_buttons() {
         // P4_SIM_SYSTEMS §2.7.2: the Droid Log date / separator row colours (FoC 255 0 0 / 128 128 128).
         CHECK2((h0.droid_date_color == Rgba8{255, 0, 0, 255}) && (h0.droid_separator_color == Rgba8{128, 128, 128, 255}));
         CHECK2((h3.droid_date_color == Rgba8{10, 20, 30, 255}) && (h3.droid_separator_color == Rgba8{40, 50, 60, 70}));
+        // mcx4 t14 / t15 (docs/re/MCX4_T14_RE_ANSWERS.md "GameConstants.Win_Lose_Message_Font"): the banner font, the last
+        // Win_Lose_Message_Font_Size wins, and the Win_Message_Color / Lose_Message_Color pair.
+        // ledger: verifies GameConstants.Win_Lose_Message_Font
+        // ledger: verifies GameConstants.Win_Lose_Message_Font_Size
+        // ledger: verifies GameConstants.Win_Message_Color
+        // ledger: verifies GameConstants.Lose_Message_Color
+        CHECK2(h0.win_lose_font == "EmpireAtWar-Bold" && near2(h0.win_lose_font_size, 24.0f) &&
+               (h0.win_message_color == Rgba8{223, 243, 255, 255}) && (h0.lose_message_color == Rgba8{255, 244, 223, 255}));
+        const data::XmlDocument g4 = data::XmlDocument::parse(std::string_view(
+            "<GameConstants><Win_Lose_Message_Font>Arial</Win_Lose_Message_Font><Win_Lose_Message_Font_Size>36"
+            "</Win_Lose_Message_Font_Size><Win_Lose_Message_Font_Size>24</Win_Lose_Message_Font_Size><Win_Message_Color>1 2 3"
+            "</Win_Message_Color><Lose_Message_Color>4 5 6 7</Lose_Message_Color></GameConstants>"));
+        const HudConstants h4 = hud_constants_from(g4.root());
+        CHECK2(h4.win_lose_font == "Arial" && near2(h4.win_lose_font_size, 24.0f) && (h4.win_message_color == Rgba8{1, 2, 3, 255}) &&
+               (h4.lose_message_color == Rgba8{4, 5, 6, 7}));
+        // ledger: verifies GameConstants.CB_Flash_Count
+        const data::XmlDocument g5 = data::XmlDocument::parse(std::string_view("<GameConstants><CB_Flash_Count>7</CB_Flash_Count></GameConstants>"));
+        CHECK2(h0.cb_flash_count == 4 && hud_constants_from(g5.root()).cb_flash_count == 7);  // CB_Flash_Count (FoC 4)
+        // mcx4 t14 (docs/re/MCX4_PRES_RE_ANSWERS_2.md Q1): the countdown column - Game_Play_UI_Countdown_Font_Name (default
+        // empty), Game_Play_UI_Countdown_Font_Size (12), GUI_Tactical_Countdown_Timers_Screen_X / GUI_Tactical_Countdown_Timers_Screen_Y,
+        // GUI_Strategic_Countdown_Timers_Screen_X / GUI_Strategic_Countdown_Timers_Screen_Y and
+        // GUI_Strategic_Countdown_Timers_Screen_Spacing.
+        // ledger: verifies GameConstants.Game_Play_UI_Countdown_Font_Name
+        // ledger: verifies GameConstants.Game_Play_UI_Countdown_Font_Size
+        // ledger: verifies GameConstants.GUI_Tactical_Countdown_Timers_Screen_X
+        // ledger: verifies GameConstants.GUI_Tactical_Countdown_Timers_Screen_Y
+        // ledger: verifies GameConstants.GUI_Strategic_Countdown_Timers_Screen_X
+        // ledger: verifies GameConstants.GUI_Strategic_Countdown_Timers_Screen_Y
+        // ledger: verifies GameConstants.GUI_Strategic_Countdown_Timers_Screen_Spacing
+        CHECK2(h0.countdown_font.empty() && near2(h0.countdown_font_size, 12.0f));
+        const data::XmlDocument g6 = data::XmlDocument::parse(std::string_view(
+            "<GameConstants><Game_Play_UI_Countdown_Font_Name>Arial</Game_Play_UI_Countdown_Font_Name><Game_Play_UI_Countdown_Font_Size>"
+            "14</Game_Play_UI_Countdown_Font_Size><GUI_Tactical_Countdown_Timers_Screen_X> 0.25 </GUI_Tactical_Countdown_Timers_Screen_X>"
+            "<GUI_Tactical_Countdown_Timers_Screen_Y>0.5</GUI_Tactical_Countdown_Timers_Screen_Y><GUI_Strategic_Countdown_Timers_Screen_X>"
+            "0.125</GUI_Strategic_Countdown_Timers_Screen_X><GUI_Strategic_Countdown_Timers_Screen_Y>0.75</GUI_Strategic_Countdown_Timers_Screen_Y>"
+            "<GUI_Strategic_Countdown_Timers_Screen_Spacing>0.0625</GUI_Strategic_Countdown_Timers_Screen_Spacing></GameConstants>"));
+        const HudConstants h6 = hud_constants_from(g6.root());
+        {  // mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md font families): Command_Bar_Default_Font_Name / Command_Bar_Default_Font_Size,
+           // Text_Button_Default_Font_Name / Text_Button_Default_Font_Size, Game_Object_Name_Font_Name /
+           // Game_Object_Name_Font_Size, Tool_Tip_Font_Name / Tool_Tip_Font_Size; FoC EmpireAtWar-Medium 7 / Arial 7.
+            // ledger: verifies GameConstants.Command_Bar_Default_Font_Name
+            // ledger: verifies GameConstants.Command_Bar_Default_Font_Size
+            // ledger: verifies GameConstants.Text_Button_Default_Font_Name
+            // ledger: verifies GameConstants.Text_Button_Default_Font_Size
+            // ledger: verifies GameConstants.Game_Object_Name_Font_Name
+            // ledger: verifies GameConstants.Game_Object_Name_Font_Size
+            // ledger: verifies GameConstants.Tool_Tip_Font_Name
+            // ledger: verifies GameConstants.Tool_Tip_Font_Size
+            CHECK2(h0.fonts.text_face == "EmpireAtWar-Medium" && near2(h0.fonts.text_size, 7.0f) && h0.fonts.tooltip_face == "Arial");
+            // ledger: verifies GameConstants.Text_Reveal_Rate
+            CHECK2(near2(h0.text_reveal_rate, 120.0f));  // Text_Reveal_Rate (FoC 120)
+            const data::XmlDocument g8 = data::XmlDocument::parse(std::string_view("<GameConstants><Text_Reveal_Rate>60</Text_Reveal_Rate></GameConstants>"));
+            CHECK2(near2(hud_constants_from(g8.root()).text_reveal_rate, 60.0f));
+            const data::XmlDocument g7 = data::XmlDocument::parse(std::string_view(
+                "<GameConstants><Command_Bar_Default_Font_Name>Arial</Command_Bar_Default_Font_Name><Command_Bar_Default_Font_Size>8"
+                "</Command_Bar_Default_Font_Size><Text_Button_Default_Font_Name>EmpireAtWar-Bold</Text_Button_Default_Font_Name>"
+                "<Text_Button_Default_Font_Size>9</Text_Button_Default_Font_Size><Game_Object_Name_Font_Name>EmpireAtWar-light"
+                "</Game_Object_Name_Font_Name><Game_Object_Name_Font_Size>10</Game_Object_Name_Font_Size><Tool_Tip_Font_Name>"
+                "EmpireAtWar-Medium</Tool_Tip_Font_Name><Tool_Tip_Font_Size>11</Tool_Tip_Font_Size></GameConstants>"));
+            const DefaultFonts d7 = hud_constants_from(g7.root()).fonts;
+            CHECK2(d7.text_face == "Arial" && near2(d7.text_size, 8.0f) && d7.button_face == "EmpireAtWar-Bold" &&
+                   near2(d7.button_size, 9.0f) && d7.world_face == "EmpireAtWar-light" && near2(d7.world_size, 10.0f) &&
+                   d7.tooltip_face == "EmpireAtWar-Medium" && near2(d7.tooltip_size, 11.0f));
+            auto dbox = make_box_rasterizer();
+            FontCache dfc(*dbox);
+            dfc.set_defaults(d7);
+            CHECK2(dfc.component_font({}, 0.0f, FontUse::Tooltip, 768) == dfc.font("EmpireAtWar-Medium", 11.0f, 768));
+            CHECK2(dfc.component_font({}, 0.0f, FontUse::Button, 768) == dfc.font("EmpireAtWar-Bold", 9.0f, 768));
+            CHECK2(dfc.component_font({}, 0.0f, FontUse::World, 768) == dfc.font("EmpireAtWar-light", 10.0f, 768));
+            CHECK2(dfc.component_font({}, 12.0f, FontUse::Button, 768) == dfc.font("Arial", 12.0f, 768));  // size only: text face
+            CHECK2(dfc.component_font("EmpireAtWar-Bold", 0.0f, FontUse::Text, 768) == dfc.font("EmpireAtWar-Bold", 8.0f, 768));
+        }
+        CHECK2(h6.countdown_font == "Arial" && near2(h6.countdown_font_size, 14.0f) && near2(h6.tactical_countdown_x, 0.25f) &&
+               near2(h6.tactical_countdown_y, 0.5f) && near2(h6.strategic_countdown_x, 0.125f) &&
+               near2(h6.strategic_countdown_y, 0.75f) && near2(h6.strategic_countdown_spacing, 0.0625f));
     }
     const data::XmlDocument gd = data::XmlDocument::parse(std::string_view(
         "<GUIDialogs><Tooltips><IDC_COMBAT_EFF_TIP><TextID>TEXT_COMBAT_EFF_TOOLTIP</TextID></IDC_COMBAT_EFF_TIP></Tooltips></GUIDialogs>"));
@@ -1276,6 +1351,39 @@ void test_tactical_stage2() {
             for (const HudQuad& q : hud.draw_list().items(l, HudList::Alpha))
                 icon_sized = icon_sized || near2(q.max.x - q.min.x, 0.05f * hud.radar_view().size.x, 0.01f);
         CHECK2(icon_sized);
+        {  // mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md): Radar_Icon_Scale_Land / Radar_Icon_Scale_Space multiply the icon
+           // size in that mode.
+            // ledger: verifies GameObjectType.Radar_Icon_Scale_Land
+            // ledger: verifies GameObjectType.Radar_Icon_Scale_Space
+            std::vector<HudTypeInfo> scaled_types = rt;
+            scaled_types[1].radar_scale_space = 2.0f;
+            scaled_types[1].radar_scale_land = 3.0f;
+            for (const bool land : {false, true}) {
+                TacticalHudFrame f3 = f2;
+                f3.world.land = land;
+                hud.build(f3, ru, scaled_types);
+                bool scaled = false;  // 0.1 x radar size / 2 x the mode's scale
+                const float want = 0.05f * hud.radar_view().size.x * (land ? 3.0f : 2.0f);
+                for (uint32_t l = 0; l < kHudLayers; ++l)
+                    for (const HudQuad& q : hud.draw_list().items(l, HudList::Alpha)) scaled = scaled || near2(q.max.x - q.min.x, want, 0.01f);
+                CHECK2(scaled);
+            }
+            hud.build(f2, ru, rt);
+        }
+        {  // mcx4 t14: Radar_Register_As_Foreground_Object puts the blip one layer above the rest
+            // ledger: verifies GameObjectType.Radar_Register_As_Foreground_Object
+            std::vector<HudTypeInfo> fg_types = rt;
+            fg_types[1].radar_foreground = true;
+            std::vector<size_t> base_n(kHudLayers), fg_n(kHudLayers);
+            hud.build(f2, ru, rt);
+            for (uint32_t l = 0; l < kHudLayers; ++l) base_n[l] = hud.draw_list().items(l, HudList::Alpha).size();
+            hud.build(f2, ru, fg_types);
+            for (uint32_t l = 0; l < kHudLayers; ++l) fg_n[l] = hud.draw_list().items(l, HudList::Alpha).size();
+            bool moved_up = false;  // one quad left layer l - 1 for layer l
+            for (uint32_t l = 1; l < kHudLayers; ++l) moved_up = moved_up || (fg_n[l] == base_n[l] + 1 && fg_n[l - 1] + 1 == base_n[l - 1]);
+            CHECK2(moved_up);
+            hud.build(f2, ru, rt);
+        }
         {  // R5 sensor jamming (ABILITY_VISUALS 3): hostile jammed units drop off the radar; own / allied jammed ones stay
             std::vector<HudUnit> ju = units;
             ju[0].owner = 1;

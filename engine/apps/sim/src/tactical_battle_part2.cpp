@@ -1581,9 +1581,26 @@ int32_t TacticalBattle::retreat_block(int32_t player) const {
     return 0;
 }
 
+int32_t TacticalBattle::retreat_refusal(int32_t player) const {
+    const int32_t b = retreat_block(player);
+    if (b != 6) return b;
+    if (abilities_) {  // retreat_prevented's order: the ability list, DISABLE_RETREAT, then the super weapon
+        const int32_t k = abilities_->retreat_block_kind(player);
+        if (k == 0) return 3;
+        if (k == 1) return 4;
+    }
+    if (retreat_off(player)) return 1;
+    return 6;
+}
+
 float TacticalBattle::retreat_allowed_progress() const {
     if (retreat_allowed_frame_ == 0 || frame_ >= retreat_allowed_frame_) return 1.0f;
     return static_cast<float>(frame_) / static_cast<float>(retreat_allowed_frame_);
+}
+
+float TacticalBattle::retreat_seconds_left() const {
+    if (retreat_side_ < 0 || retreat_complete_) return -1.0f;
+    return frame_ < retreat_done_frame_ ? static_cast<float>(retreat_done_frame_ - frame_) / 30.0f : 0.0f;
 }
 
 float TacticalBattle::retreat_countdown_progress() const {
@@ -1678,6 +1695,7 @@ void TacticalBattle::finish(int32_t winner, uint8_t victory, int32_t retreated) 
     result_.victory = victory;
     result_.retreated = retreated;
     result_.destroyed.clear();
+    result_.survivors.clear();
     result_.starbase_destroyed = false;
     for (uint32_t pi = 0; pi < parts_.size(); ++pi) {
         const Participant& p = parts_[pi];
@@ -1690,7 +1708,18 @@ void TacticalBattle::finish(int32_t winner, uint8_t victory, int32_t retreated) 
             std::vector<uint32_t> dead;
             for (const Unit& u : units_)
                 if (u.participant == pi && !u.alive && !u.retreated) dead.push_back(u.type);
-            if (galactic::company_team_lost(*rules_, p.type, dead)) result_.destroyed.push_back(p.galactic);
+            if (galactic::company_team_lost(*rules_, p.type, dead)) {
+                result_.destroyed.push_back(p.galactic);
+            } else if (!dead.empty() && rules_->type(p.type).company) {
+                // mcx4 t22 (§13, the battle end 0x2b5360 removes the members marked lost): the survivors are the spawned
+                // member list less one entry per dead member. [port] a squadron (Squadron_Units) comes back whole: the
+                // space end 0x2b4660 refills it unless its alive share is below Squadron_Refill_Threshold, whose default
+                // was not read (MCX4_GAL2_RE_ANSWERS Q4).
+                std::vector<uint32_t> left = spawn_types(p);
+                for (const uint32_t t : dead)
+                    if (const auto it = std::find(left.begin(), left.end(), t); it != left.end()) left.erase(it);
+                result_.survivors.emplace_back(p.galactic, std::move(left));
+            }
             continue;
         }
         if (p.starbase) result_.starbase_destroyed = true;
