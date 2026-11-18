@@ -171,8 +171,8 @@ private:
     std::set<std::string> missing_;
 };
 
-// The plan files of every folder in load order: list(folder + "*.lua") per kPlanFolders entry, each folder
-// sorted with sort_plan_files.
+// The plan files of every folder in load order: list(folder + "*.lua") per kPlanFolders entry, in the lister's order
+// (mcx3 t13: a Vfs gives retail's find order, loose files then MEG records in stored order).
 std::vector<std::string> list_plan_files(const std::function<std::vector<std::string>(std::string_view)>& list);
 
 // S7 t27: the script errors of a plan / free-store VM for lua_errors() and the AI log: its thread errors (errors()) and

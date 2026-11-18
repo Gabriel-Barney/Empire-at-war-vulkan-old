@@ -437,7 +437,8 @@ std::vector<std::string> list_plan_files(const std::function<std::vector<std::st
         for (std::string& f : files)
             if (f.size() > n && f.find('\\', n) == std::string::npos && f.find('/', n) == std::string::npos)
                 direct.push_back(std::move(f));
-        sort_plan_files(direct);
+        // mcx3 t13 (MCX4_GAL2_RE_ANSWERS Q6 / UI.md §9.2): the plan scan 0x4e7e30 loads in the find's order, which the
+        // lister keeps (a Vfs lists loose files, then MEG records in stored order), so no re-sort here.
         for (std::string& f : direct) out.push_back(std::move(f));
     }
     return out;

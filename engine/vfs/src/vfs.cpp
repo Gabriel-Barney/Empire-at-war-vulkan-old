@@ -590,12 +590,24 @@ std::string Vfs::origin(std::string_view path) const {
 std::vector<std::string> Vfs::list(std::string_view glob) const { return list(glob, kLayerAll); }
 
 std::vector<std::string> Vfs::list(std::string_view glob, uint32_t layers) const {
+    // mcx3 t13 (MCX4_GAL2_RE_ANSWERS Q6, UI.md §9.2) [H]: the order of the MEG-aware find 0x217e80 / 0x218e40 - loose
+    // files first, then every mounted MEG in mount order (first mounted first), each archive's records in stored order,
+    // names through the record's name index, normalised; a path already returned is skipped (a per-search set), and
+    // nothing is filtered through the CRC lookup. A loose tree is listed in upper-case byte order, NTFS's directory
+    // order for ASCII names [M]. Callers that load files in listing order (AI plans, equations, the skirmish map table)
+    // therefore see retail's order.
     const std::string pat = normalize_path(glob);
-    std::set<std::string> names;
+    std::set<std::string> seen;
+    std::vector<std::string> out;
+    const auto take = [&](std::string n) {
+        if (seen.insert(n).second) out.push_back(std::move(n));
+    };
     const auto add_loose = [&](const LooseRoot& lr) {
-        for (const auto& kv : lr.index) {
-            if (glob_rec(pat, kv.first)) names.insert(kv.first);
-        }
+        std::vector<std::string> hits;
+        for (const auto& kv : lr.index)
+            if (glob_rec(pat, kv.first)) hits.push_back(kv.first);
+        std::sort(hits.begin(), hits.end());  // the index is unordered
+        for (std::string& n : hits) take(std::move(n));
     };
     if (layers & kLayerMod)
         for (const auto& m : impl_->mods) add_loose(m);
@@ -604,13 +616,13 @@ std::vector<std::string> Vfs::list(std::string_view glob, uint32_t layers) const
         for (const auto& a : impl_->archives) {
             for (const auto& e : a->entries()) {
                 std::string n = normalize_path(e.name);
-                if (glob_rec(pat, n)) names.insert(std::move(n));
+                if (glob_rec(pat, n)) take(std::move(n));
             }
         }
     }
     if (layers & kLayerFallback)
         for (const auto& f : impl_->fallbacks) add_loose(f);
-    return std::vector<std::string>(names.begin(), names.end());
+    return out;
 }
 
 std::string Vfs::describe() const {
