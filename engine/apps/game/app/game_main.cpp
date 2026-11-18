@@ -400,6 +400,7 @@ bool App::init() {
             reticles_.parse(gc);
             ency_cfg_ = ui::tooltip_config_from(gc);  // HUD_GAPS §2.2 delays / fade / min display / layout
             hud_consts_ = ui::hud_constants_from(gc);  // mcx4 t14 / t15: bar spacing, radar selection colour, prompt colour
+            if (ui_.fonts) ui_.fonts->set_defaults(hud_consts_.fonts);  // mcx4 t14: the GameConstants default fonts
         }
         hud_images_ = [this](std::string_view t) { return ui_.pages.resolve(t); };
         if (const char* dbg = std::getenv("ALAMO_HUD_HIT_DEBUG")) {

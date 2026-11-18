@@ -598,8 +598,8 @@ void TacticalHud::build_skeleton(const TacticalHudFrame& f) {
         if (c && !c->icon_texture.empty())
             add_atlas_quad(dl_, layer, HudList::Alpha, *atlas_, c->icon_texture[0], {at.x + 14.0f, at.y}, {}, c->scale, Rgba8{});
         HudTextStyle st;
-        st.font = fonts_->font(c && !c->font_name.empty() ? c->font_name : std::string(kFallbackFontFace),
-                               c && c->font_point_size > 0 ? c->font_point_size : 7.0f, canvas_.font_height());
+        st.font = fonts_->component_font(c ? std::string_view(c->font_name) : std::string_view(), c ? c->font_point_size : 0.0f,
+                                         FontUse::Text, canvas_.font_height());
         st.color = c && c->has_text_color ? c->text_color : Rgba8{255, 212, 33, 255};
         st.outline = true;
         st.align = c && c->right_justified ? TextAlign::Right : TextAlign::Left;
@@ -760,8 +760,7 @@ void TacticalHud::build_panel(const TacticalHudFrame& f, std::span<const HudType
                        Rgba8{220, 230, 255, 255});
         if (g.ids.size() > 1) {
             HudTextStyle st;
-            st.font = fonts_->font(c.font_name.empty() ? std::string(kFallbackFontFace) : c.font_name,
-                                   c.font_point_size > 0 ? c.font_point_size : 6.0f, canvas_.font_height());
+            st.font = fonts_->component_font(c.font_name, c.font_point_size, FontUse::Text, canvas_.font_height());
             st.color = c.has_text_color ? c.text_color : Rgba8{};
             st.outline = c.text_outline;
             st.align = TextAlign::Right;
@@ -1084,8 +1083,9 @@ void TacticalHud::build_buttons(const TacticalHudFrame& f) {
 
 int32_t TacticalHud::font_of(int32_t component, float fallback_points) const {
     const CommandBarComponent* c = component >= 0 ? &(*table_)[static_cast<size_t>(component)] : nullptr;
-    return fonts_->font(c && !c->font_name.empty() ? c->font_name : std::string(kFallbackFontFace),
-                        c && c->font_point_size > 0 ? c->font_point_size : fallback_points, canvas_.font_height());
+    // mcx4 t14: no component in the data: the port's size for this text
+    return fonts_->component_font(c ? std::string_view(c->font_name) : std::string_view(), c ? c->font_point_size : fallback_points,
+                                  FontUse::Text, canvas_.font_height());
 }
 
 namespace {

@@ -49,6 +49,12 @@ void text_test() {
     CHECK(s.lines()[1].revealed(3.0) == s.lines()[1].text.size());
     CHECK(s.lines()[2].seconds == 5.0 && s.lines()[2].channel == game::StoryTextChannel::Subtitle);
     CHECK(s.lines()[2].revealed(3.0) == 0 && s.lines()[2].revealed(4.0) > 0);
+    {  // mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "GameConstants.Text_Reveal_Rate"): elapsed seconds x the rate
+        game::StoryTextLine tl;
+        tl.text = U"abcdefghijklmnopqrstuvwxyz";
+        tl.start = 10.0;
+        CHECK(tl.revealed(10.125, 80.0) == 10 && tl.revealed(10.125) == 15 && tl.revealed(20.0, 80.0) == 26);
+    }
     s.update(100.0, false);  // the persistent line stays, the timed ones go
     CHECK(s.lines().size() == 1 && s.lines()[0].id == "TEXT_B");
     // P4 given = remove every line with that id.

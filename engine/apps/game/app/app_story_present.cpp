@@ -189,7 +189,7 @@ void App::build_story_text(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
     std::vector<Row> rows;
     for (const StoryTextLine& l : lines) {
         const std::vector<std::u32string> wrapped = ui::wrap_text(*ui_.fonts, font, l.text, wrap_px);
-        const size_t revealed = l.typewriter ? l.revealed(now_s_) : l.text.size();
+        const size_t revealed = l.typewriter ? l.revealed(now_s_, hud_consts_.text_reveal_rate) : l.text.size();  // mcx4 t14
         size_t pos = 0;
         for (const std::u32string& w : wrapped) {
             // a continuation row starts only after the row above has finished (§1.1): the characters are revealed in order

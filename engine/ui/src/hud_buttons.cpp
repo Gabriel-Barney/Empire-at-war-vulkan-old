@@ -239,8 +239,7 @@ Vec2f HudButtons::draw(HudDrawList& dl, const TextureAtlas& atlas, FontCache* fo
     // Text.
     if (fonts && (!r.text.empty() || !r.text2.empty())) {
         HudTextStyle st;
-        st.font = fonts->font(c.font_name.empty() ? std::string(kFallbackFontFace) : c.font_name,
-                              c.font_point_size > 0 ? c.font_point_size : 7.0f, canvas.font_height());
+        st.font = fonts->component_font(c.font_name, c.font_point_size, FontUse::Button, canvas.font_height());
         st.color = with_alpha(r.text_color_set ? r.text_color : c.has_text_color ? c.text_color : Rgba8{}, blink);
         st.outline = c.text_outline;
         st.emboss = c.text_emboss;
@@ -343,6 +342,22 @@ HudConstants hud_constants_from(const data::XmlNode& root) {
     parse_rgba8(last("Lose_Message_Color"), c.lose_message_color);
     if (const std::string_view t = last("CB_Flash_Count"); !t.empty())
         c.cb_flash_count = static_cast<int32_t>(data::parse_float_or(t, static_cast<float>(c.cb_flash_count)));
+    // mcx4 t14 (MCX4_T14_RE_ANSWERS font families): the default fonts
+    const auto face = [&last](std::string_view tag, std::string& v) {
+        if (const std::string_view t = last(tag); !t.empty()) v = std::string(t);
+    };
+    const auto pts = [&last](std::string_view tag, float& v) {
+        if (const std::string_view t = last(tag); !t.empty()) v = data::parse_float_or(t, v);
+    };
+    face("Command_Bar_Default_Font_Name", c.fonts.text_face);  // ledger: consumes GameConstants.Command_Bar_Default_Font_Name
+    pts("Command_Bar_Default_Font_Size", c.fonts.text_size);   // ledger: consumes GameConstants.Command_Bar_Default_Font_Size
+    face("Text_Button_Default_Font_Name", c.fonts.button_face);  // ledger: consumes GameConstants.Text_Button_Default_Font_Name
+    pts("Text_Button_Default_Font_Size", c.fonts.button_size);   // ledger: consumes GameConstants.Text_Button_Default_Font_Size
+    face("Game_Object_Name_Font_Name", c.fonts.world_face);  // ledger: consumes GameConstants.Game_Object_Name_Font_Name
+    pts("Game_Object_Name_Font_Size", c.fonts.world_size);   // ledger: consumes GameConstants.Game_Object_Name_Font_Size
+    face("Tool_Tip_Font_Name", c.fonts.tooltip_face);  // ledger: consumes GameConstants.Tool_Tip_Font_Name
+    pts("Tool_Tip_Font_Size", c.fonts.tooltip_size);   // ledger: consumes GameConstants.Tool_Tip_Font_Size
+    pts("Text_Reveal_Rate", c.text_reveal_rate);  // ledger: consumes GameConstants.Text_Reveal_Rate
     // mcx4 t14 (MCX4_PRES_RE_ANSWERS_2 Q1): the countdown timer column
     const auto num = [&last](std::string_view tag, float& v) {
         if (const std::string_view t = last(tag); !t.empty()) v = data::parse_float_or(t, v);
@@ -416,8 +431,8 @@ bool TooltipState::draw_text(HudDrawList& dl, const TextureAtlas& atlas, FontCac
     const CommandBarComponent* font_c = table.get("tooltip_left_text");
     const uint32_t layer = back ? static_cast<uint32_t>(back->base_layer) : 10u;
     HudTextStyle st;
-    st.font = fonts.font(font_c && !font_c->font_name.empty() ? font_c->font_name : std::string("Arial"),
-                         font_c && font_c->font_point_size > 0 ? font_c->font_point_size : 7.0f, canvas.font_height());
+    st.font = fonts.component_font(font_c ? std::string_view(font_c->font_name) : std::string_view(),
+                                   font_c ? font_c->font_point_size : 0.0f, FontUse::Tooltip, canvas.font_height());
     // [port] the tooltip text uses the frame's light colour: tooltip_left_text's Color is a dark blue meant for the
     // encyclopedia panel; white keeps it readable on i_tooltip_back.
     st.color = Rgba8{230, 230, 230, 255};

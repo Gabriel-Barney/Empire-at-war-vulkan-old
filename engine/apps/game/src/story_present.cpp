@@ -81,9 +81,9 @@ std::string upper(std::string_view s) { return ascii_upper(trim(s)); }
 
 }  // namespace
 
-size_t StoryTextLine::revealed(double now) const {
+size_t StoryTextLine::revealed(double now, double chars_per_second) const {
     if (!typewriter) return text.size();
-    const double n = std::max(0.0, now - start) * kTypewriterCharsPerSecond;
+    const double n = std::max(0.0, now - start) * std::max(0.0, chars_per_second);
     return n >= static_cast<double>(text.size()) ? text.size() : static_cast<size_t>(n);
 }
 
