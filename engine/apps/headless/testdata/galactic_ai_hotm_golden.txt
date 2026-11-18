@@ -1,13 +1,13 @@
 # galactic-ai campaign Sandbox_Heart_Of_The_Maw_Underworld battles auto seed 1 ticks 18000
-# galactic-ai Sandbox_Heart_Of_The_Maw_Underworld workers 4: 18000 ticks (2819.7 ms), galactic frame 18000, decisions 574, orders 188 (rejected 0), conflicts 32, battles 0, planet owner changes 0, running plans 6, Lua errors 0, planets: 0=4/1434 1=4/2467 2=0/0 3=0/0 4=0/0 5=0/0 6=4/3044 7=0/0, final CRC 2111e34802e4e870
+# galactic-ai Sandbox_Heart_Of_The_Maw_Underworld workers 4: 18000 ticks (2807.4 ms), galactic frame 18000, decisions 574, orders 188 (rejected 0), conflicts 32, battles 0, planet owner changes 0, running plans 6, Lua errors 0, planets: 0=4/1434 1=4/2467 2=0/0 3=0/0 4=0/0 5=0/0 6=4/3044 7=0/0, final CRC 2111e34802e4e870
 # t=60s planets 0=4 1=4 2=0 3=0 4=0 5=0 6=4 7=0 plans 11 conflicts 4 crc a30887bc230de584
-# t=120s planets 0=4 1=4 2=0 3=0 4=0 5=0 6=4 7=0 plans 8 conflicts 9 crc 959af7c799815def
+# t=120s planets 0=4 1=4 2=0 3=0 4=0 5=0 6=4 7=0 plans 8 conflicts 9 crc acff31593f8fd494
 # t=180s planets 0=4 1=4 2=0 3=0 4=0 5=0 6=4 7=0 plans 6 conflicts 12 crc c4202481f6e805bf
 # t=240s planets 0=4 1=4 2=0 3=0 4=0 5=0 6=4 7=0 plans 8 conflicts 16 crc e081b349836eb12e
 # t=300s planets 0=4 1=4 2=0 3=0 4=0 5=0 6=4 7=0 plans 5 conflicts 16 crc 980656e63fb9d3b8
 # t=360s planets 0=4 1=4 2=0 3=0 4=0 5=0 6=4 7=0 plans 7 conflicts 19 crc 997c9d3b0edd2976
 # t=420s planets 0=4 1=4 2=0 3=0 4=0 5=0 6=4 7=0 plans 7 conflicts 25 crc a8620d29bab70ef3
-# t=480s planets 0=4 1=4 2=0 3=0 4=0 5=0 6=4 7=0 plans 9 conflicts 28 crc 6ef425b8301efffd
+# t=480s planets 0=4 1=4 2=0 3=0 4=0 5=0 6=4 7=0 plans 9 conflicts 28 crc 64c63695ade863a2
 # t=540s planets 0=4 1=4 2=0 3=0 4=0 5=0 6=4 7=0 plans 6 conflicts 31 crc e578491ba51f3421
 # t=600s planets 0=4 1=4 2=0 3=0 4=0 5=0 6=4 7=0 plans 6 conflicts 32 crc 2111e34802e4e870
 1 p0 opponent 6
@@ -200,10 +200,10 @@
 2398 p6 plan 33 UPGRADESTARBASEPLAN ended success
 2458 p6 order move fleet 118 -> Tatooine
 2554 p1 plan 9 BUILDWEAPONSTRUCTUREPLAN ended success
-2565 p1 order build Imperial_Anti_Infantry_Brigade at Tatooine
 2572 p6 order move fleet 118 -> Corellia
+2596 p1 order build Imperial_Anti_Infantry_Brigade at Tatooine
 2605 p6 tf MainForce ability Underworld_Saboteur_Team 75 at Corellia not applied
-2800 p1 plan 40 BUILDBASECOMPONENTHEAVYVEHICLEFACTORY for Build_Base_Component_Heavy_Vehicle_Factory @Tatooine BaseForce(0+1) net 1000 gross 1000 eta 64.2
+2800 p1 plan 40 BUILDBASECOMPONENTHEAVYVEHICLEFACTORY for Build_Base_Component_Heavy_Vehicle_Factory @Tatooine BaseForce(0+1) net 1000 gross 1000 eta 65.2
 2802 p6 plan 41 UPGRADESTARBASEPLAN for Upgrade_Starbase @Shola BaseForce(0+1) net 3000 gross 3000 eta 28.8
 2802 p6 plan 39 AI_PLAN_UNDERWORLD_DEPLOYSABOTEUR ended failure (released)
 2803 p6 cancel ended build Underworld_Saboteur_Team at Shola (refund)
@@ -212,18 +212,18 @@
 2830 p1 build task 54 E_Ground_Heavy_Vehicle_Factory for BaseForce at Tatooine
 2878 p1 plan 40 BUILDBASECOMPONENTHEAVYVEHICLEFACTORY ended failure (released)
 2905 p6 plan 38 AI_PLAN_UNDERWORLD_DEPLOYSABOTEUR ended failure
-2963 p1 plan 42 BUILDBASECOMPONENTHEAVYVEHICLEFACTORY for Build_Base_Component_Heavy_Vehicle_Factory @Tatooine BaseForce(0+1) net 1000 gross 1000 eta 58.7
+2963 p1 plan 42 BUILDBASECOMPONENTHEAVYVEHICLEFACTORY for Build_Base_Component_Heavy_Vehicle_Factory @Tatooine BaseForce(0+1) net 1000 gross 1000 eta 59.8
 2995 p1 build task 55 E_Ground_Heavy_Vehicle_Factory for BaseForce at Tatooine
 3041 p1 plan 42 BUILDBASECOMPONENTHEAVYVEHICLEFACTORY ended failure (released)
-3126 p1 plan 43 BUILDBASECOMPONENTHEAVYVEHICLEFACTORY for Build_Base_Component_Heavy_Vehicle_Factory @Tatooine BaseForce(0+1) net 1000 gross 1000 eta 53.3
+3126 p1 plan 43 BUILDBASECOMPONENTHEAVYVEHICLEFACTORY for Build_Base_Component_Heavy_Vehicle_Factory @Tatooine BaseForce(0+1) net 1000 gross 1000 eta 54.3
 3157 p1 build task 56 E_Ground_Heavy_Vehicle_Factory for BaseForce at Tatooine
 3178 p6 plan 44 AI_PLAN_UNDERWORLD_DEPLOYSABOTEUR for Corrupt_Planet @Naboo MainForce(1+0) net 0 gross 1000 eta 0.0
 3178 p6 build task 57 Underworld_Saboteur_Team for MainForce
 3178 p6 order move fleet 118 -> Shola
 3204 p1 plan 43 BUILDBASECOMPONENTHEAVYVEHICLEFACTORY ended failure (released)
-3289 p1 plan 45 BUILDBASECOMPONENTHEAVYVEHICLEFACTORY for Build_Base_Component_Heavy_Vehicle_Factory @Tatooine BaseForce(0+1) net 1000 gross 1000 eta 48.0
-3292 p1 plan 32 BUILDGROUNDFORCESPLAN ended success
+3289 p1 plan 45 BUILDBASECOMPONENTHEAVYVEHICLEFACTORY for Build_Base_Component_Heavy_Vehicle_Factory @Tatooine BaseForce(0+1) net 1000 gross 1000 eta 48.9
 3319 p1 build task 58 E_Ground_Heavy_Vehicle_Factory for BaseForce at Tatooine
+3322 p1 plan 32 BUILDGROUNDFORCESPLAN ended success
 3340 p1 order build E_Ground_Heavy_Vehicle_Factory at Tatooine
 3418 p6 tf MainForce move to Naboo
 3418 p6 order move fleet 118 -> Naboo
