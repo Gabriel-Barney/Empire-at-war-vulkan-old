@@ -1518,6 +1518,11 @@ float TacticalBattle::retreat_allowed_progress() const {
     return static_cast<float>(frame_) / static_cast<float>(retreat_allowed_frame_);
 }
 
+float TacticalBattle::retreat_seconds_left() const {
+    if (retreat_side_ < 0 || retreat_complete_) return -1.0f;
+    return frame_ < retreat_done_frame_ ? static_cast<float>(retreat_done_frame_ - frame_) / 30.0f : 0.0f;
+}
+
 float TacticalBattle::retreat_countdown_progress() const {
     if (retreat_side_ < 0 || retreat_complete_) return -1.0f;
     const int32_t player = side_player(static_cast<uint8_t>(retreat_side_));

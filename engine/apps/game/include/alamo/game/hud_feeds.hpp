@@ -177,6 +177,11 @@ struct CorruptionChoiceArt {
 constexpr bool control_transition_ping(int32_t old_owner, int32_t new_owner, bool friendly_old, bool friendly_new) {
     return old_owner != new_owner && (friendly_old || friendly_new);
 }
+// mcx4 t14 (MCX4_PRES_RE_ANSWERS_2 Q1.3 / Q1.4): the countdown column's numbers, written after the label. Retreat timer
+// 0x3ce60: " %03d.%03d" of the seconds left (whole seconds, then the fraction x 1000 truncated). Build timer 0x3d2b0:
+// " %02d:%02d" of (r + 1) / 60 and (r + 1) mod 60, r = (int)remaining seconds.
+std::string retreat_countdown_number(float seconds);
+std::string build_countdown_clock(float remaining);
 struct GameOverArt {
     std::string_view text_key, image;
 };

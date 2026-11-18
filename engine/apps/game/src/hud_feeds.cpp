@@ -2,6 +2,7 @@
 #ifdef ALAMO_GAME_HAVE_CONTROLS
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 
 #include "alamo/galactic/economy.hpp"
 #include "alamo/objects/type_fields.hpp"
@@ -421,6 +422,22 @@ std::vector<PlanetIndex> fleet_drag_route(const galactic::GalacticSim& g, int32_
     galactic::PathScratch scratch;
     if (!galactic::find_fleet_path(g.graph(), g.player_view(me), req, scratch, path)) path.clear();
     return path;
+}
+
+std::string retreat_countdown_number(float seconds) {
+    const float s = seconds > 0.0f ? seconds : 0.0f;
+    const int32_t whole = static_cast<int32_t>(s);
+    const int32_t ms = static_cast<int32_t>((s - static_cast<float>(whole)) * 1000.0f);
+    char buf[32];
+    std::snprintf(buf, sizeof buf, " %03d.%03d", static_cast<int>(whole), static_cast<int>(ms));
+    return buf;
+}
+
+std::string build_countdown_clock(float remaining) {
+    const int32_t r = static_cast<int32_t>(remaining > 0.0f ? remaining : 0.0f) + 1;
+    char buf[32];
+    std::snprintf(buf, sizeof buf, " %02d:%02d", static_cast<int>(r / 60), static_cast<int>(r % 60));
+    return buf;
 }
 
 }  // namespace alamo::game

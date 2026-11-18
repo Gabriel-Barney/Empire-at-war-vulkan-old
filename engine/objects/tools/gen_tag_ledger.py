@@ -157,6 +157,7 @@ RETAIL_UNUSED = {
     ("GameConstants", "GUI_Hilite_Level"): "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.GUI_Cycle_Speed family [M: read, no effect]",
     ("GameConstants", "Galactic_Zoom_Acceleration"): "docs/re/P1_CAMERA_INPUT.md §0 item 6 [M: no reader]",
     ("GameConstants", "Galactic_Zoom_In_Station_Offset"): "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.Galactic_Zoom_In_Station_Rotation [H]",
+    ("GameConstants", "GUI_Tactical_Countdown_Timers_Screen_Spacing"): "docs/re/MCX4_PRES_RE_ANSWERS_2.md Q1.4 (read on a branch that cannot run) [H]",
     ("GameConstants", "Health_Bar_Scale"): "docs/re/STRATEGIC_GAPS.md §7.2 [H]",
     ("GameConstants", "In_Game_Message_Default_Font_Name"): "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.In_Game_Message_Default_Font_Name family [H: read, no effect]",
     ("GameConstants", "In_Game_Message_Default_Font_Size"): "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.In_Game_Message_Default_Font_Name family [H: read, no effect]",

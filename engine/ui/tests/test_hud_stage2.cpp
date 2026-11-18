@@ -641,6 +641,28 @@ void test_buttons() {
         // ledger: verifies GameConstants.CB_Flash_Count
         const data::XmlDocument g5 = data::XmlDocument::parse(std::string_view("<GameConstants><CB_Flash_Count>7</CB_Flash_Count></GameConstants>"));
         CHECK2(h0.cb_flash_count == 4 && hud_constants_from(g5.root()).cb_flash_count == 7);  // CB_Flash_Count (FoC 4)
+        // mcx4 t14 (docs/re/MCX4_PRES_RE_ANSWERS_2.md Q1): the countdown column - Game_Play_UI_Countdown_Font_Name (default
+        // empty), Game_Play_UI_Countdown_Font_Size (12), GUI_Tactical_Countdown_Timers_Screen_X / GUI_Tactical_Countdown_Timers_Screen_Y,
+        // GUI_Strategic_Countdown_Timers_Screen_X / GUI_Strategic_Countdown_Timers_Screen_Y and
+        // GUI_Strategic_Countdown_Timers_Screen_Spacing.
+        // ledger: verifies GameConstants.Game_Play_UI_Countdown_Font_Name
+        // ledger: verifies GameConstants.Game_Play_UI_Countdown_Font_Size
+        // ledger: verifies GameConstants.GUI_Tactical_Countdown_Timers_Screen_X
+        // ledger: verifies GameConstants.GUI_Tactical_Countdown_Timers_Screen_Y
+        // ledger: verifies GameConstants.GUI_Strategic_Countdown_Timers_Screen_X
+        // ledger: verifies GameConstants.GUI_Strategic_Countdown_Timers_Screen_Y
+        // ledger: verifies GameConstants.GUI_Strategic_Countdown_Timers_Screen_Spacing
+        CHECK2(h0.countdown_font.empty() && near2(h0.countdown_font_size, 12.0f));
+        const data::XmlDocument g6 = data::XmlDocument::parse(std::string_view(
+            "<GameConstants><Game_Play_UI_Countdown_Font_Name>Arial</Game_Play_UI_Countdown_Font_Name><Game_Play_UI_Countdown_Font_Size>"
+            "14</Game_Play_UI_Countdown_Font_Size><GUI_Tactical_Countdown_Timers_Screen_X> 0.25 </GUI_Tactical_Countdown_Timers_Screen_X>"
+            "<GUI_Tactical_Countdown_Timers_Screen_Y>0.5</GUI_Tactical_Countdown_Timers_Screen_Y><GUI_Strategic_Countdown_Timers_Screen_X>"
+            "0.125</GUI_Strategic_Countdown_Timers_Screen_X><GUI_Strategic_Countdown_Timers_Screen_Y>0.75</GUI_Strategic_Countdown_Timers_Screen_Y>"
+            "<GUI_Strategic_Countdown_Timers_Screen_Spacing>0.0625</GUI_Strategic_Countdown_Timers_Screen_Spacing></GameConstants>"));
+        const HudConstants h6 = hud_constants_from(g6.root());
+        CHECK2(h6.countdown_font == "Arial" && near2(h6.countdown_font_size, 14.0f) && near2(h6.tactical_countdown_x, 0.25f) &&
+               near2(h6.tactical_countdown_y, 0.5f) && near2(h6.strategic_countdown_x, 0.125f) &&
+               near2(h6.strategic_countdown_y, 0.75f) && near2(h6.strategic_countdown_spacing, 0.0625f));
     }
     const data::XmlDocument gd = data::XmlDocument::parse(std::string_view(
         "<GUIDialogs><Tooltips><IDC_COMBAT_EFF_TIP><TextID>TEXT_COMBAT_EFF_TOOLTIP</TextID></IDC_COMBAT_EFF_TIP></Tooltips></GUIDialogs>"));

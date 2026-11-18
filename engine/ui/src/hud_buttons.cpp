@@ -343,6 +343,19 @@ HudConstants hud_constants_from(const data::XmlNode& root) {
     parse_rgba8(last("Lose_Message_Color"), c.lose_message_color);
     if (const std::string_view t = last("CB_Flash_Count"); !t.empty())
         c.cb_flash_count = static_cast<int32_t>(data::parse_float_or(t, static_cast<float>(c.cb_flash_count)));
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_2 Q1): the countdown timer column
+    const auto num = [&last](std::string_view tag, float& v) {
+        if (const std::string_view t = last(tag); !t.empty()) v = data::parse_float_or(t, v);
+    };
+    // ledger: consumes GameConstants.Game_Play_UI_Countdown_Font_Name
+    if (const std::string_view t = last("Game_Play_UI_Countdown_Font_Name"); !t.empty()) c.countdown_font = std::string(t);
+    num("Game_Play_UI_Countdown_Font_Size", c.countdown_font_size);  // ledger: consumes GameConstants.Game_Play_UI_Countdown_Font_Size
+    num("GUI_Tactical_Countdown_Timers_Screen_X", c.tactical_countdown_x);  // ledger: consumes GameConstants.GUI_Tactical_Countdown_Timers_Screen_X
+    num("GUI_Tactical_Countdown_Timers_Screen_Y", c.tactical_countdown_y);  // ledger: consumes GameConstants.GUI_Tactical_Countdown_Timers_Screen_Y
+    num("GUI_Strategic_Countdown_Timers_Screen_X", c.strategic_countdown_x);  // ledger: consumes GameConstants.GUI_Strategic_Countdown_Timers_Screen_X
+    num("GUI_Strategic_Countdown_Timers_Screen_Y", c.strategic_countdown_y);  // ledger: consumes GameConstants.GUI_Strategic_Countdown_Timers_Screen_Y
+    // ledger: consumes GameConstants.GUI_Strategic_Countdown_Timers_Screen_Spacing
+    num("GUI_Strategic_Countdown_Timers_Screen_Spacing", c.strategic_countdown_spacing);
     return c;
 }
 

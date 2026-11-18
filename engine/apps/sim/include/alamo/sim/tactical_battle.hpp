@@ -1508,6 +1508,9 @@ public:
     // none runs), for the b_retreat Build_Texture_Name dial.
     float retreat_allowed_progress() const;
     float retreat_countdown_progress() const;
+    // mcx4 t14 (presentation read; MCX4_PRES_RE_ANSWERS_2 Q1.3, 0x340030): seconds left on the running retreat countdown
+    // (countdown frames / 30, 0 once it ran out); -1 when no retreat runs.
+    float retreat_seconds_left() const;
     // --- OI host: the retreating player while a retreat countdown runs (-1 none / done). The mode's unit-response
     // "excluded set" (AUDIO.md §3.3, STRATEGIC_GAPS §7.4 [M]): that player's units give no unit responses. ---
     int32_t retreating_player() const {

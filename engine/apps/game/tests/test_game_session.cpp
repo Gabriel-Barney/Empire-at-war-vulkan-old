@@ -961,6 +961,14 @@ void corruption_choice_art_test() {
 // mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md): End_Control_Transition_Radar_Event on an owner change seen by a listener
 // friendly to either side.
 // ledger: verifies GameObjectType.End_Control_Transition_Radar_Event
+// mcx4 t14 (docs/re/MCX4_PRES_RE_ANSWERS_2.md Q1): "label 010.933" and "label 01:05".
+void countdown_numbers_test() {
+    CHECK(game::retreat_countdown_number(328.0f / 30.0f) == " 010.933");
+    CHECK(game::retreat_countdown_number(0.0f) == " 000.000" && game::retreat_countdown_number(-1.0f) == " 000.000");
+    CHECK(game::build_countdown_clock(64.5f) == " 01:05");   // r = 64, shown 65 s
+    CHECK(game::build_countdown_clock(0.0f) == " 00:01" && game::build_countdown_clock(119.9f) == " 02:00");
+}
+
 void control_transition_ping_test() {
     static_assert(game::control_transition_ping(-1, 0, false, true) && game::control_transition_ping(0, 1, true, false));
     static_assert(!game::control_transition_ping(1, 2, false, false) && !game::control_transition_ping(0, 0, true, true));
@@ -3117,6 +3125,7 @@ int main() {
     commander_icon_test();          // mcx4 t14
     corruption_choice_art_test();   // mcx4 t14
     control_transition_ping_test(); // mcx4 t14
+    countdown_numbers_test();       // mcx4 t14
     movie_frame_cue_test();         // mcx4 t13
     story_ui_test();
     linked_overlay_test();

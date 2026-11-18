@@ -674,6 +674,7 @@ public:
     void build_story_text(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
     void build_story_hint(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
     void build_win_banner(ui::HudDrawList& dl, const ui::HudCanvas& canvas);  // mcx4 t14: the tactical win / lose banner
+    void build_countdown_column(ui::HudDrawList& dl, const ui::HudCanvas& canvas);  // mcx4 t14: retreat / build timers
     void build_story_pointers(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
     void story_component_flash(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
     void story_forced_clicks();  // FORCE_CLICK_GUI: queued clicks ahead of the HUD's input (app_input.cpp)
