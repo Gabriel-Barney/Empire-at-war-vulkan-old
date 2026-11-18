@@ -206,6 +206,9 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
         gcfg.difficulties = d.ai->difficulties;
         gcfg.contrast = &d.crules.contrast;
         gcfg.story_campaign = spec_.kind == SessionKind::Campaign && spec_.story;
+        // mcx8 t07 Game.InterventionsEnabled (AI_GALACTIC_TOKENS §4): the advanced game options set the "options changed"
+        // settings flag; with random events off the token is 0.0 and Disable_Interventions_Template turns interventions off.
+        gcfg.interventions_enabled = !spec_.game_options || spec_.random_events;
         gcfg.ai_uses_fog_galactic = d.db.constants().get_bool("AIUsesFogOfWarGalactic", gcfg.ai_uses_fog_galactic);  // shipped False
         const uint32_t diff = d.rules.find_difficulty(difficulty_name(spec_.difficulty));
         // q6 t08: the type from the data (resolve_ai_type): campaigns read the campaign's AI_Player_Control pairs, a

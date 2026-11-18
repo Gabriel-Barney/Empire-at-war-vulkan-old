@@ -303,7 +303,7 @@ constexpr std::string_view kTargetPaths[] = {
     "ACTIVETRADEROUTES", "BASEINCOME", "BASEINCOMENBTP", "BLACKMARKETABILITIESAVAILABLE",
     "BLACKMARKETMINIMUMABILITYPRICE", "BLACKMARKETPRICEMODIFIER", "CONNECTSISOLATEDPLANETSBYFORCE",
     "CONNECTSISOLATEDPLANETSBYLENGTH", "CONNECTSLARGESTISLANDS", "GROUNDBASELEVEL", "GROUNDBASELEVELUNNORMALIZED",
-    "HASCREDITSIPHON", "HASGROUNDBASEOFLEVEL", "HASSTARBASEOFLEVEL", "HASSTRUCTURE", "HINTS.CHOKEPOINT",
+    "HASCREDITSIPHON", "HASGROUNDBASEOFLEVEL", "HASINDIGENOUSUNITS", "HASSTARBASEOFLEVEL", "HASSTRUCTURE", "HINTS.CHOKEPOINT",
     "HINTS.OFFENSEDELAYGROUND", "HINTS.OFFENSEDELAYSPACE", "HINTS.PRIORITYTARGET", "INCOMEUNNORMALIZED",
     "ISCONNECTEDTO", "ISCONNECTEDTOCORRUPTION", "ISCORRUPTED", "ISCORRUPTIONTRANSITIONACTIVE", "ISFACTION",
     "ISHUMANCONTROLLED", "ISSURFACEACCESSIBLE", "MARKUP", "MAXGROUNDBASELEVEL", "MAXGROUNDBASELEVELUNNORMALIZED",
@@ -311,7 +311,7 @@ constexpr std::string_view kTargetPaths[] = {
     "OPENGROUNDCOMPANYSLOTS", "OPENSTRUCTURESLOTS", "OPENSTRUCTURESLOTSUNNORMALIZED", "OWNER.BUDGETALLOCATION",
     "OWNER.ISFACTION", "OWNER.TIMESINCEGROUNDATTACKER", "OWNER.TIMESINCEGROUNDDEFENDER",
     "OWNER.TIMESINCESPACEATTACKER", "OWNER.TIMESINCESPACEDEFENDER", "RETAINSRESIDUALINFLUENCE", "STARBASELEVEL",
-    "STARBASELEVELUNNORMALIZED", "STRUCTURECOUNT", "TARGETPLAYERID", "TARGETPOLITICALCONTROL", "TIMESINCECONVERSION",
+    "STARBASELEVELUNNORMALIZED", "STORYTRIGGER", "STRUCTURECOUNT", "TARGETPLAYERID", "TARGETPOLITICALCONTROL", "TIMESINCECONVERSION",
     "TIMESINCECORRUPTIONCHANGE", "TIMESINCEGROUNDCONFLICT", "TIMESINCESPACECONFLICT", "TRADEROUTES", "TYPE.ISTYPE",
     "TYPE.TOKEN",
 };
@@ -330,7 +330,7 @@ constexpr std::string_view kGamePaths[] = {
     "AGE", "ENEMYFORCE.GROUNDTOTALUNNORMALIZED", "ENEMYFORCE.PERTARGETMAXGROUNDFORCE",
     "ENEMYFORCE.PERTARGETMAXSPACEFORCE", "ENEMYFORCE.SPACETOTALUNNORMALIZED", "FRIENDLYFORCE.GROUNDTOTALUNNORMALIZED",
     "FRIENDLYFORCE.PERTARGETMAXGROUNDFORCE", "FRIENDLYFORCE.PERTARGETMAXSPACEFORCE",
-    "FRIENDLYFORCE.SPACETOTALUNNORMALIZED", "ISCAMPAIGNGAME", "ISLANDCONTROLGAME", "ISSETUPPHASE", "ISSTORYCAMPAIGN",
+    "FRIENDLYFORCE.SPACETOTALUNNORMALIZED", "INTERVENTIONSENABLED", "ISCAMPAIGNGAME", "ISLANDCONTROLGAME", "ISSETUPPHASE", "ISSTORYCAMPAIGN",
     "PLANETSCORRUPTED", "PLANETSCORRUPTEDUNNORMALIZED", "TIMELINE",
 };
 
@@ -1592,6 +1592,28 @@ struct GalacticSimTokenResolver::Impl {
             out = r.hooks_.markup ? r.hooks_.markup(ctx.self, ip) : 0.0;
             return true;
         }
+        // mcx8 t07 StoryTrigger on a planet (0x65eb10, lifetime 0; STORYB_T10_TRIGGER_AI §3.2) [H]: the player-root leaf with
+        // the planet's game object as the flag's target, so only a TRIGGER_AI that named this planet (Param3) is seen.
+        if (k == "STORYTRIGGER") {
+            const std::vector<std::string_view> n = param_texts(params, "Parameter_Name");
+            if (n.empty()) return false;
+            const auto loc = static_cast<int32_t>(sim.store().id(ps.object));
+            return out = b2d(r.hooks_.story_flag && r.hooks_.story_flag(ctx.self, n[0], loc)), true;
+        }
+        // mcx8 t07 HasIndigenousUnits (0x65c4e0, lifetime forever; AI_GALACTIC_TOKENS §1) [H]: over the planet type's
+        // Potential_Indigenous_Power entries. No Parameter_Type: 1.0 if the type has any entry; else 1.0 if an entry's type
+        // is one of the named types (an unknown name matches nothing). No owner, side or fog test; never fails on a planet.
+        // [port] not cached: the value depends only on type data, so a cached and a fresh read agree.
+        if (k == "HASINDIGENOUSUNITS") {
+            const std::vector<std::string_view> names = param_texts(params, "Parameter_Type");
+            const std::vector<SpawnMember>* list = ps.type < r.types_.size() ? &r.types_[ps.type].indigenous_power : nullptr;
+            bool hit = false;
+            if (list != nullptr) {
+                if (names.empty()) hit = !list->empty();
+                for (const SpawnMember& m : *list) hit = hit || (!names.empty() && type_named(m.type, names));
+            }
+            return out = b2d(hit), true;
+        }
         if (k.substr(0, 6) == "HINTS.") {
             for (const std::string_view h : kGalacticHints)
                 if (k.substr(6) == h) {
@@ -2065,7 +2087,7 @@ struct GalacticSimTokenResolver::Impl {
         if (k == "STORYTRIGGER") {
             const std::vector<std::string_view> n = param_texts(params, "Parameter_Name");
             if (n.empty()) return false;
-            return out = b2d(r.hooks_.story_flag && r.hooks_.story_flag(pl, n[0])), true;
+            return out = b2d(r.hooks_.story_flag && r.hooks_.story_flag(pl, n[0], -1)), true;  // 0x6e08e0: target none
         }
         // q6 t03 (AI_GALACTIC_TOKENS §8.2) [H]: leaves 0x66b950 / 0x66b900 / 0x66b8b0 / 0x66b860, lifetime 0, no parameters,
         // no Self check, never fail: (NOW - stamp) / FPS seconds (int subtraction, NOW = the global logic frame), or the
@@ -2104,6 +2126,10 @@ struct GalacticSimTokenResolver::Impl {
         if (k == "ISSETUPPHASE" || k == "ISLANDCONTROLGAME") return out = 0.0, true;
         if (k == "ISCAMPAIGNGAME") return out = 1.0, true;  // galactic mode
         if (k == "ISSTORYCAMPAIGN") return out = b2d(r.hooks_.story_campaign), true;
+        // mcx8 t07 InterventionsEnabled (0x6e1fb0, registered by the base Game evaluator 0x6e2170, lifetime 0) [H]: the
+        // global game-settings flags (0x140b154bc): flag 0x20 (advanced options changed) clear -> 1.0, else flag 0x10
+        // (random events) ? 1.0 : 0.0. Never fails. The host folds the two flags into the hook.
+        if (k == "INTERVENTIONSENABLED") return out = b2d(r.hooks_.interventions_enabled), true;
         if (k == "PLANETSCORRUPTED" || k == "PLANETSCORRUPTEDUNNORMALIZED")
             return leaf(std::string("G:") + std::string(k), -1, 7, params, [&](double& v) {
                 int32_t n = 0, total = 0;

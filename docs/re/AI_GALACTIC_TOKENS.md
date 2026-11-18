@@ -109,7 +109,9 @@ Every leaf fails when the evaluator has no planet object.
 | BlackMarketMinimumAbilityPrice | 0x65e5e0 | 6 | vis | min price of those abilities (×(+0x28) when above tech) + type float +0x800; none → 1e18 + modifier | as above |
 | BlackMarketPriceModifier | 0x65b7d0 | −1 | vis | type float +0x800 | — |
 | IsHumanControlled | 0x65e290 | 0 | vis | owner player (planet +0x58) human flag (+0x62) | — |
-| HasIndigenousUnits, StoryTrigger, DistanceToNearestFriendly, connectivity, BuildQueue*, IsBuilding | various | — | — | not used by shipped galactic eqs; not read | — |
+| HasIndigenousUnits | 0x65c4e0 | −1 | vis | over the planet type's `Potential_Indigenous_Power` list (type +0x20C8, 0x18-byte entries: unit type +8, power int +0x10; repeated tags appended). No `Parameter_Type`: 1.0 if the list has any entry, else 0.0. Otherwise each name is looked up as a type (0x407c00; an unknown name gives none and matches nothing) and the value is 1.0 if any entry's type is one of them. No owner, side or fog test [H, mcx8 t07] | fails only without a planet object |
+| StoryTrigger | 0x65eb10 | 0 | vis | as the player root (0x6e08e0, §3) with the planet's game object as the flag's target: 1.0 if 0x4dd530(system, `Parameter_Name`, planet) (a TRIGGER_AI that named this planet in Param3, STORYB_T10_TRIGGER_AI §3.2); never clears [H] | fails if `Parameter_Name` absent |
+| DistanceToNearestFriendly, connectivity, BuildQueue*, IsBuilding | various | — | — | not used by shipped galactic eqs; not read | — |
 | **Markup** | 0x64dc50 (base 0x64dc60, every evaluator) | 0 | vis | evaluator double +0x80, accumulated by Lua `Apply_Markup` (0x69d110, re-apply subtracts the old value) [H leaf, M writer]; default 0 | — |
 | **Hints.X** | sub-evaluator 0x6deca0 (HintPerceptualEvaluator, evaluate 0x6dee80) | none | — | value of hint X for this planet from the campaign's `Markup_Filename` file (Data/XML/AI/GalacticMarkup/*), else the hint-set default (`Galactic_Hints` in HintSets: Chokepoint, OffenseDelayGround/Space, PriorityTarget = 0.0) via 0x4dd6d0 | **fails** if X is in neither (e.g. `Hints.High_Ground` in galactic) |
 | Owner.X | sub 0x6df710 / 0x6df790 | — | — | Owner → the owning player's evaluator, rebound on 0x1A [M] | — |
@@ -189,6 +191,7 @@ nested evaluation that fails fails the token.
 | IsCampaignGame | 0x6e1ff0 | −1 | mode type 0 (galactic) → 1.0; else 1.0 if 0x28aa00 finds a parent campaign |
 | IsStoryCampaign | 0x6e20e0 | −1 | global byte 0x140b303c2 |
 | IsLandControlGame | 0x6e2060 | −1 | GameModeManager +0x20 == 4 |
+| InterventionsEnabled | 0x6e1fb0 | 0 | registered by the base Game evaluator 0x6e2170, so galactic and tactical Game roots both have it. Reads the global game-settings flags 0x140b154bc (copied from the campaign's advanced options at campaign start, 0x957a0): flag 0x20 clear → 1.0; flag 0x20 set → (flag 0x10 ? float 1.0 : 0.0). Never fails [H]. The flags come from the advanced options dialog (0xeb1c0): 1 `IDC_ALLOW_HEROES`, 2 `IDC_ALLOW_STARTING_UNIT_PURCHASE`, 4 `IDC_ALLOW_SUPER_WEAPONS`, 8 `IDC_PRE_BUILT_BASES`, 0x10 random events, 0x20 "an option was changed" (set by every checkbox / slider event, cleared by `IDC_DEFAULTS_BUTTON` and after the copy) [H]. In FoC the dialog clears 0x10 at open and greys `IDC_ALLOW_RANDOM_EVENTS` (no handler sets 0x10) [M: no other writer of 0x10 found by text search], so any changed option gives 0.0 and `Are_Interventions_Disabled` turns the Interventions goals off |
 | PlanetsCorruptedUnnormalized / PlanetsCorrupted | 0x66e2c0 / 0x66e220 | 7 | count of target-list planets with D+0x2F4 ≠ −1; normalised by the target-list size |
 | EnemyForce/FriendlyForce.{Ground,Space}TotalUnnormalized | 0x6e3680 / 0x6e3a00 → 0x6e3a10 | 30 | §0 (Σ planets, params dropped) |
 | …PerTargetMax{Ground,Space}Force | 0x6e39e0 / 0x6e39f0 → 0x6e36a0 | 30 | max over planets |
@@ -227,7 +230,8 @@ registered on planets.)
 - `Game.TIMELINE`, `ISCAMPAIGNGAME`, `ISLANDCONTROLGAME`, `ISSETUPPHASE`: real flags (§4). `Game.<side>.X` ignores params.
 - Caches: lifetimes above are part of the behaviour (e.g. force totals 15 s, Game totals 30 s).
 
-**Used by shipped equations but not evaluated by the port** (regenerated 2026-11-17, mcx0 t05, from
+**Used by shipped equations but not evaluated by the port** (regenerated 2026-11-17, mcx0 t05; all three implemented
+2026-11-18, mcx8 t07, see the end of this list) (from
 `alamo_mod_check` report v4 `ai.token_coverage` on base FoC; it replaces the hand list of 2026-10-30, whose paths are all
 evaluated now). The port's coverage is the token path registry next to the handlers (`engine/ai/src/galactic_ai_tokens.cpp`,
 `GalacticSimTokenResolver::path_registered`, checked against the handlers by `test_token_registry`) plus the tactical
@@ -242,8 +246,13 @@ template of that mode names, and what it names in turn; other equations count wi
 - `Variable_Target.StoryTrigger` (1 equation, `Helper_Trap_Land_Check_Galactic_Flags`,
   `Data\XML\AI\PerceptualEquations\SandboxEventEquations.xml`).
 
-Whether retail registers the last two on the planet root is not read yet (the player root has `StoryTrigger`); until then
-they count as port gaps. Rerun `alamo_mod_check --json` on base FoC to refresh this list.
+mcx8 t07 (2026-11-18) read all three [H] (§1, §4): retail registers `HasIndigenousUnits` and `StoryTrigger` on the planet
+evaluator 0x65f7b0 and `InterventionsEnabled` on the base Game evaluator 0x6e2170, so none is retail-equivalent; the port now
+evaluates them (`kTargetPaths` / `kGamePaths`, `test_mcx8_t07_tokens`). Port notes: `HasIndigenousUnits` is not cached
+(lifetime −1 over type data: same value); `InterventionsEnabled` is the host's `GalacticAiConfig::interventions_enabled` =
+not (advanced options accepted and random events off) [port: the port's flag is "the dialog was accepted", retail's 0x20 is
+"a control was changed"]; the tactical Game leaf still answers 0.0 (no shipped tactical equation reads it). Rerun
+`alamo_mod_check --json` on base FoC to refresh this list.
 
 ## 6. Extra questions
 
@@ -291,7 +300,8 @@ they count as port gaps. Rerun `alamo_mod_check --json` on base FoC to refresh t
 3. Bodies not read: GrossIncome sum tail (0x667fb0), NetIncome (0x66a420), 0x66a730, Maintenance (0x669110/0x669420),
    AverageStarbase/Groundbase (0x666df0), BaseIncomeNBTD/IncomeNBTD, bitfield/antistealth details, HomePlanet/Owner/Type
    sub-evaluators.
-4. Meaning of the planet-type list +0x20C8 added to enemy ground totals, and of 0x3a9760 in HasSpaceForce.
+4. ~~Meaning of the planet-type list +0x20C8 added to enemy ground totals~~: it is `Potential_Indigenous_Power` (mcx8 t07,
+   §1 HasIndigenousUnits; the port's enemy GroundTotalUnnormalized does not add it yet). Open: 0x3a9760 in HasSpaceForce.
 5. 0x6136b0 (AI CreditsUnnormalized) — total of budget pools vs player credits.
 6. ~~Cache key: 0x5f3e60 hashes the binding set; whether the hash includes Self (so Human-rooted and Self-rooted leaves
    share entries) is [M] (AI_TACTICAL_PERCEPTION §1.2).~~ Resolved (q6 t18, 2026-11-04): the key is the parameter
