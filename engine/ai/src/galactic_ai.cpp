@@ -445,7 +445,9 @@ uint32_t GalacticAiWorld::Impl::next_starbase_type(PlanetIndex p) const {
     int32_t allowed = 0;
     if (queued) allowed = 0;
     else if (ps.starbase_owner == gal::kNoPlayer) allowed = max_level != 0 ? 1 : 0;
-    else if (ps.starbase_level < 5) allowed = max_level < ps.starbase_level + 1 ? 0 : ps.starbase_level + 1;
+    // mcx5 (MCX5_RE_ANSWERS Q1.5, 0x3f8fd0 at 0x3f91c6 [H]): only a base at exactly level 5 (a literal) gets no upgrade;
+    // the planet's maximum (data) bounds the rest. MaximumStarbaseLevel is never read here.
+    else if (ps.starbase_level != 5) allowed = max_level < ps.starbase_level + 1 ? 0 : ps.starbase_level + 1;
     return rules.types[cand].base_level <= allowed ? cand : gal::kNoIndex;
 }
 
@@ -712,10 +714,14 @@ gal::Bitset GalacticAiWorld::Impl::ai_dangerous(int32_t player) const {
 
 // 0x665160 (AI_GALACTIC_3 Â§8) [H; M level flags]: recomputed when more than 10 x FPS frames old.
 const std::vector<PlanetIndex>& PlayerAi::source_planets(int level) {
-    SourceList& s = sources[static_cast<size_t>(std::clamp(level, 0, 5))];
+    // mcx5 (MCX5_RE_ANSWERS Q1.6 [H]): six slots, one per AIGoalReachabilityType 0..5 (a code enum); a level outside that
+    // range (unsigned compare) returns without work, no clamp.
+    static const std::vector<PlanetIndex> kNone;
+    if (level < 0 || level > 5) return kNone;
+    SourceList& s = sources[static_cast<size_t>(level)];
     if (s.frame < 0 || w->now - s.frame > static_cast<int64_t>(10 * kAiFps)) {
         s.frame = w->now;
-        s.planets = flood(std::clamp(level, 0, 5), nullptr);
+        s.planets = flood(level, nullptr);
     }
     return s.planets;
 }

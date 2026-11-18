@@ -1465,6 +1465,7 @@ struct GalacticSimTokenResolver::Impl {
         if (k == "GROUNDBASELEVELUNNORMALIZED") return out = sim.ground_base_level(static_cast<PlanetIndex>(p)), true;
         if (k == "MAXSTARBASELEVEL") return out = max_space_base(p) / gc_int(gc.max_starbase_level), true;
         if (k == "MAXSTARBASELEVELUNNORMALIZED") return out = max_space_base(p), true;
+        // min(5, ...): a literal in retail too (0x372400 / 0x4b7eb0, MCX5_RE_ANSWERS Q1.2 [H]); the divisor is GC+0xF8.
         if (k == "MAXGROUNDBASELEVEL") return out = std::min(5, max_ground_base(p)) / gc_int(gc.max_groundbase_level), true;
         if (k == "MAXGROUNDBASELEVELUNNORMALIZED") return out = std::min(5, max_ground_base(p)), true;
         // Structure slots: D+0x230 ground slots (Special_Structures_Land), used 0x3f8af0 (galactic_slots.hpp, A2 f t01)

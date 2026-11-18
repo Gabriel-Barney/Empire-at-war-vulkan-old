@@ -571,7 +571,7 @@ Source: leaf-by-leaf read of the galactic registrations (Planet 0x65f7b0, Galact
 | `BaseIncome`, `TradeRoutes` | value / max over **all** planets [H] |
 | `BaseIncomeNBTP` | / max over planets with the same TargetPlayerID [H] |
 | `ActiveTradeRoutes` | the fraction of the planet's routes that are friendly to the owner [H] |
-| `IsConnectedTo` | the neighbours are planets within `MaximumFleetMovementDistance` (GC+0x108; FoC XML 150) **or** route-connected. Match on planet-type name ∈ `Parameter_Type` or `Target(n).IsFaction`. Attenuator default 0 → 1.0 on the first match; else max(1 − d/GC+0x108·A) [H] |
+| `IsConnectedTo` | the neighbours are planets within `MaximumFleetMovementDistance` (GC+0x108; FoC XML 100) **or** route-connected. Match on planet-type name ∈ `Parameter_Type` or `Target(n).IsFaction`. Attenuator default 0 → 1.0 on the first match; else max(1 − d/GC+0x108·A) [H] |
 | `HasStarbaseOfLevel` | level ≥ (int)(`Parameter_Level` + 0.5); fails if ≤ 0 [H] |
 | `HasStructure` / `StructureCount` | structure lists + the current queue item (unless `Parameter_Only_Consider_Complete`); **no owner filter**; fails without `Parameter_Type` [H] |
 | `ConnectsIsolatedPlanetsBy{Force,Length}`, `ConnectsLargestIslands` | flags set by island analysis 0x4e4850 (force-cost / length paths between Self's islands) [H] |

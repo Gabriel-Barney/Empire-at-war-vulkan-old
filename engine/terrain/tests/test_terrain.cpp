@@ -693,6 +693,14 @@ void test_hardening() {
     std::string err;
     CHECK(!parse_ted(b, r, &err) && r.terrain.heights.empty() && r.passability.empty());
     std::printf("48-byte 1985^2 map rejected: %s\n", err.c_str());
+    // mcx5 t03: a side above the kMaxGridVerts guard is refused by the header check (retail bounds neither side,
+    // MCX5_RE_ANSWERS Q2.1; the guard keeps size products in 32 bits).
+    for (size_t i = 0; i < 2; ++i) {
+        const size_t at = 24 + 6 * i + 2;  // mini 00 / 01 values
+        const uint32_t v = kMaxGridVerts + 1;
+        for (size_t k = 0; k < 4; ++k) b[at + k] = static_cast<uint8_t>(v >> (8 * k));
+    }
+    CHECK(!parse_ted(b, r, &err) && err.find("kMaxGridVerts") != std::string::npos);
 
     // Truncated vertex data and short passability are rejected.
     const MapData m = make_map(1, 11);
@@ -812,13 +820,13 @@ void test_fuzz() {
     }
     // Malformed headers that must fail cleanly.
     MapData big = make_map(1, 2);
-    big.terrain.width = big.terrain.height = 2101;  // > kMaxGridVerts
+    big.terrain.width = big.terrain.height = 2101;  // above the pre-mcx5 cap 1985: loads now (retail has none, Q2.1)
     big.passability_present = false;
     big.terrain.heights.clear();
     big.terrain.material.clear();
     big.terrain.brightness.clear();
     MapData r;
-    CHECK(!parse_ted(write_ted(big), r));
+    CHECK(parse_ted(write_ted(big), r) && r.terrain.width >= 2101);
     CHECK(!parse_ted({}, r));
     std::printf("fuzz: %u inputs, %u parsed without error, no crash\n", iters + 2000, parsed);
 }

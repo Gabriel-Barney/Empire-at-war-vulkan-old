@@ -74,7 +74,7 @@ struct LoadedXmlFile {
 struct GameConstants {
     XmlNode element;  // the <GameConstants> root (null if the file was missing)
     std::vector<std::pair<std::string_view, std::string_view>> fields;  // document order, trimmed text
-    float max_fleet_move_distance = 100.0f;  // <MaximumFleetMovementDistance>
+    float max_fleet_move_distance = 100.0f;  // <MaximumFleetMovementDistance>; 1.0 when the file has no tag (0x2c91c0), 100 without a file
 
     std::optional<std::string_view> get(std::string_view tag) const;
     float get_float(std::string_view tag, float fallback) const;

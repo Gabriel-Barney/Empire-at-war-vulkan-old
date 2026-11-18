@@ -128,8 +128,13 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
             for (galactic::PlayerSetup& p : setup_.players) {
                 if (!p.named) continue;
                 p.credits = static_cast<float>(std::max(0, spec_.start_credits));
-                p.max_tech_level = std::clamp(spec_.max_tech, 1, 5);
-                p.tech_level = std::clamp(spec_.start_tech, 1, p.max_tech_level);
+                // mcx5 t03 (MCX5_RE_ANSWERS Q3.1, 0x292590 / setter 0x288980 [H]): the start tech goes through the
+                // setter first, so it is clamped to [0, the player's max before this write] (the campaign's
+                // Max_Tech_Level, else the player ctor's 5); the max is then written unclamped. The 1..5 range is the
+                // dialog's (campaign Min / Max_Custom_Tech_Level, data); no clamp to it here. [port] The faction's
+                // Displayed_Tech_Level_Adjustment shift is not applied (open: mcx5 follow-up).
+                p.tech_level = std::clamp(spec_.start_tech, 0, std::max(0, p.max_tech_level));
+                p.max_tech_level = spec_.max_tech;
             }
         if (setup_.map.planets.size() == 0) return fail("campaign '" + spec_.campaign + "' has no planets");
         // mcx1 t08 (MCX1_RE_ANSWERS Q6.2): the original reads the neutral player without a null check when it creates the

@@ -247,7 +247,9 @@ void GameDatabase::load_constants(const FileProvider& provider, bool& ok) {
         c.fields.emplace_back(tag, value);
     }
     // Retail atof, like get_float: an unreadable value gives 0 (mcx1 t02).
+    // mcx5 t02 (MCX5_RE_ANSWERS Q1.9, 0x2c91c0 [H]): a file without the tag keeps the GameConstants default 1.0.
     if (const auto v = c.get("MaximumFleetMovementDistance")) c.max_fleet_move_distance = xml_values::to_float(*v);
+    else c.max_fleet_move_distance = 1.0f;
 }
 
 void GameDatabase::load_game_objects(const FileProvider& provider, bool& ok) {

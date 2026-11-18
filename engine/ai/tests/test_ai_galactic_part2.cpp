@@ -320,7 +320,7 @@ void test_production_disabled_and_delivery() {
 // <Max_Ground_Base>; plus the per-planet cap Build_Max_Instances_Per_Planet (0x3f94f0). The same slot max feeds the
 // MaxStructureSlots / OpenStructureSlots tokens. P0 (the Empire's) holds SB1 + one Barracks.
 // mcx5 t02 (AI_GALACTIC_TOKENS §2 neighbour lists [H]): the token neighbour radius is GC+0x108
-// MaximumFleetMovementDistance (FoC and EaW XML 150.0), not a port 100. No trade routes; P0 (0,0), P1 (60,40) at 72.1,
+// MaximumFleetMovementDistance (FoC XML 100.0; a mod may set any value), not a port literal. No trade routes; P0 (0,0), P1 (60,40) at 72.1,
 // P2 (120,0) at 120: IsConnectedTo{type} on P0 matches P1 only once the radius reaches 72.1, P2 only with no P1.
 void test_fleet_distance_tokens() {
     auto value = [](float radius, bool drop_p1) {
@@ -343,7 +343,7 @@ void test_fleet_distance_tokens() {
     CHECK(value(60.0f, false) == 0.0 && value(72.0f, false) == 0.0 && value(73.0f, false) == 1.0);
     const double v119 = value(119.0f, true), v150 = value(150.0f, true);
     std::printf("fleet distance tokens: P1 moved away: R 119 %.3f, R 150 %.3f\n", v119, v150);
-    CHECK(v119 == 0.0 && v150 == 1.0);  // P2 at 120: inside FoC's 150, outside 100
+    CHECK(v119 == 0.0 && v150 == 1.0);  // P2 at 120: inside a mod's 150, outside 119
     std::printf("fleet distance tokens: IsConnectedTo follows MaximumFleetMovementDistance (P1 72.1, P2 120)\n");
 }
 

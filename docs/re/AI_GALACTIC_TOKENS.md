@@ -7,7 +7,7 @@ GALACTIC_ECONOMY §6 and is not repeated. Notation: D = planet data pack (planet
 system (bindings → context +0x50) [M]; "target list" = the system's one-PlanetAITargetLocation-per-planet list (system
 vf+0x40, AI_GALACTIC §2.2). GC fields by XML order [M]: +0xF0 `MaximumPoliticalControl`=5, +0xF4
 `MaximumStarbaseLevel`=5, +0xF8 `MaximumGroundbaseLevel`=5, +0xFC `MaximumSpecialStructures`=5, +0x108
-`MaximumFleetMovementDistance` (FoC / EaW XML 150.0; mcx5 review 2026-11-18, not 100.0), 0x140b168c8 `Max_Ground_Forces_On_Planet`=10. Behaviour ids decoded from the
+`MaximumFleetMovementDistance`=100.0, 0x140b168c8 `Max_Ground_Forces_On_Planet`=10. Behaviour ids decoded from the
 behaviour registry table at 0xa2b330 [H]: 0x5D DUMMY_GROUND_COMPANY, 0x5E DUMMY_SPACE_FIGHTER_SQUADRON, 0x5F
 DUMMY_GROUND_STRUCTURE, 0x60 DUMMY_ORBITAL_STRUCTURE, 0x61 DUMMY_STARSHIP, 4 FLEET, 5 TRANSPORT, 0x16 TEAM (type
 bitset +0x790 tested by 0x370320).

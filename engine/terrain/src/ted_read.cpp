@@ -556,7 +556,7 @@ bool parse_terrain(std::span<const uint8_t> node, Terrain& t, Ctx& c) {
         if (k.id == 0 && !k.has_children && !parse_terrain_header(k.payload, t.header, c)) return false;
     const TerrainHeader& h = t.header;
     if (h.width < 2 || h.height < 2) return c.fail("terrain header: grid smaller than 2x2");
-    if (h.width > kMaxGridVerts || h.height > kMaxGridVerts) return c.fail("terrain header: grid larger than 1985 vertices");
+    if (h.width > kMaxGridVerts || h.height > kMaxGridVerts) return c.fail("terrain header: grid larger than 7937 vertices (kMaxGridVerts guard)");
     // Allocation is driven by the payload, never by the header alone: the vertex data must hold
     // every header vertex before the grid is allocated (a 48-byte file must not allocate 30 MB).
     const uint64_t need = static_cast<uint64_t>(h.width) * h.height * 4;

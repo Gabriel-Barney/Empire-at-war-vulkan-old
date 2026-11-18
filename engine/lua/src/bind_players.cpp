@@ -1368,7 +1368,7 @@ int m_invade(Call& c) {
 
 // WaitForStarbase / WaitForGroundbase(planet, level): a BlockingStatus finished once the planet's starbase
 // (ground base) level is >= level. Level range [inferred] 0..5.
-// limit: guard WaitFor*base level bound; retail bound: MCX5_RE_QUESTIONS Q1.7 (t02)
+// limit: retail MCX5_RE_ANSWERS Q1.7 (0x69a6f0 / 0x69a8b0: 0.0..5.0, read-only double 0x1408b8570)
 constexpr int32_t kMaxBaseLevel = 5;
 int wait_for_base(Call& c, bool starbase) {
     const char* who = starbase ? "WaitForStarbase" : "WaitForGroundbase";

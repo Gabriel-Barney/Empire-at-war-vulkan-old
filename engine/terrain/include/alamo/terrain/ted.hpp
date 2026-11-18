@@ -33,10 +33,14 @@ constexpr float kVertexSpacing = 20.0f;         // world units between grid vert
 constexpr float kHeightScale = 0.048828125f;    // raw s16 height -> world units (1/20.48)
 constexpr uint32_t kPatchQuads = 31;            // quads per patch side
 constexpr uint32_t kPatchVerts = 32;            // vertices per patch side
-// limit: retail TERRAIN_WATER_POST §1.3 (mini 05 = 64); loader cap: MCX5_RE_QUESTIONS Q2
+// mcx5 t03 (MCX5_RE_ANSWERS Q2.3 [H]): retail's material table grows with the records; its only 64 is the
+// renderer's per-patch array (0x1b62a0), which ids >= 64 overrun. The port keeps 64 slots and clamps ids.
+// limit: retail MCX5_RE_ANSWERS Q2.3 (render per-patch array, 0x1b62a0)
 constexpr uint32_t kMaterialSlots = 64;
-// limit: guard reader cap (vanilla max 373); retail bound: MCX5_RE_QUESTIONS Q2 (t03)
-constexpr uint32_t kMaxGridVerts = 31 * 64 + 1; // reader cap (vanilla max 373); larger -> error
+// mcx5 t03 (MCX5_RE_ANSWERS Q2.1 [H]): retail bounds neither side (heap-sized buffers; a side >= 65536 hangs its
+// u16 cell fill). The port allocates from the vertex payload, so this only keeps size products in signed 32 bits.
+// limit: guard 31 * 256 + 1 = 7937 per side (vanilla max 373; w * h * 16 < 2^31); larger -> error
+constexpr uint32_t kMaxGridVerts = 31 * 256 + 1;
 
 // Cell passability bits (CellPassabilityType, 1.5).
 enum PassabilityBits : uint32_t {
