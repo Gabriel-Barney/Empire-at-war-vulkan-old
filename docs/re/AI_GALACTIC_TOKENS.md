@@ -249,9 +249,10 @@ template of that mode names, and what it names in turn; other equations count wi
 mcx8 t07 (2026-11-18) read all three [H] (§1, §4): retail registers `HasIndigenousUnits` and `StoryTrigger` on the planet
 evaluator 0x65f7b0 and `InterventionsEnabled` on the base Game evaluator 0x6e2170, so none is retail-equivalent; the port now
 evaluates them (`kTargetPaths` / `kGamePaths`, `test_mcx8_t07_tokens`). Port notes: `HasIndigenousUnits` is not cached
-(lifetime −1 over type data: same value); `InterventionsEnabled` is the host's `GalacticAiConfig::interventions_enabled` =
+(lifetime −1 over type data: same value), and list entries whose unit type does not resolve are dropped at load [M: whether
+retail's converter keeps them as null entries, which only the no-parameter form would see, is not read]; `InterventionsEnabled` is the host's `GalacticAiConfig::interventions_enabled` =
 not (advanced options accepted and random events off) [port: the port's flag is "the dialog was accepted", retail's 0x20 is
-"a control was changed"]; the tactical Game leaf still answers 0.0 (no shipped tactical equation reads it). Rerun
+"a control was changed"], kept across a save by the key `spec.interventions_off`; the tactical Game leaf still answers 0.0 (no shipped tactical equation reads it). Rerun
 `alamo_mod_check --json` on base FoC to refresh this list.
 
 ## 6. Extra questions

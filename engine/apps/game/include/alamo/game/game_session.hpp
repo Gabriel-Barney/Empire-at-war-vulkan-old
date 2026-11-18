@@ -110,6 +110,10 @@ struct SessionSpec {
     bool game_options = false;
     int32_t start_credits = 6000, start_tech = 1, max_tech = 5, auto_resolve_option = 2;
     bool random_events = false;
+    // mcx8 t07: Game.InterventionsEnabled was off in the saved game (save key spec.interventions_off; the options above are
+    // not saved). interventions_enabled() = the galactic AI's Game.InterventionsEnabled.
+    bool interventions_off = false;
+    bool interventions_enabled() const { return !interventions_off && (!game_options || random_events); }
     // [port] fleet groups (docs/DECISIONS.md "Fleet groups: exception to the current focus"): off = retail. Copied into
     // CampaignBattleOptions::fleet_groups; the HUD hotkeys send fleet group commands only while it is on.
     bool fleet_groups = false;

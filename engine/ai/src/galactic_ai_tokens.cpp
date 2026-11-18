@@ -1607,11 +1607,10 @@ struct GalacticSimTokenResolver::Impl {
         if (k == "HASINDIGENOUSUNITS") {
             const std::vector<std::string_view> names = param_texts(params, "Parameter_Type");
             const std::vector<SpawnMember>* list = ps.type < r.types_.size() ? &r.types_[ps.type].indigenous_power : nullptr;
-            bool hit = false;
-            if (list != nullptr) {
-                if (names.empty()) hit = !list->empty();
-                for (const SpawnMember& m : *list) hit = hit || (!names.empty() && type_named(m.type, names));
-            }
+            const bool hit = list != nullptr &&
+                             (names.empty() ? !list->empty()
+                                            : std::any_of(list->begin(), list->end(),
+                                                          [&](const SpawnMember& m) { return type_named(m.type, names); }));
             return out = b2d(hit), true;
         }
         if (k.substr(0, 6) == "HINTS.") {
