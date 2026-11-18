@@ -80,6 +80,9 @@ if(TARGET alamo_lua AND TARGET alamo_lua_vm AND TARGET alamo_galactic_sim)
     target_compile_definitions(alamo_ai_galactic_tests PRIVATE ALAMO_AI_HAVE_VFS=1)
   endif()
   add_test(NAME alamo_ai_galactic_tests COMMAND alamo_ai_galactic_tests)
+  # mcx0 t05: alamo_ai_tests' perception coverage also checks the in-game resolver's token registry.
+  target_link_libraries(alamo_ai_tests PRIVATE alamo_ai_galactic)
+  target_compile_definitions(alamo_ai_tests PRIVATE ALAMO_AI_HAVE_GALACTIC_AI=1)
   set_tests_properties(alamo_ai_galactic_tests PROPERTIES TIMEOUT 900)
   # N1 save size guard: the whole FoC story campaign save, about twice the 2026-10-30 sizes (50 KB file, 334 KB of chunks).
   # The same guard holds late in the game (N1f t08, below); mid-battle story saves: alamo_game_save_tests "Story battle".

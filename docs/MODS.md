@@ -266,8 +266,9 @@ campaign checks, missing files, unknown XML tags, Lua compile errors, main-chunk
 apart, and the unused-script leads), unbound engine calls, shader issues and the submod hint, then `== result: OK|ERRORS, N errors, M warnings`
 (**main**, `engine/apps/game/src/mod_check.cpp`; exit 0 without errors, 1 with, 2 usage). Each finding of the missing
 files, XML tags and Lua sections is marked `[mod]` when it comes from a file in a mod folder: base FoC itself has some (49
-missing cinematic models; 73 unread tags: 56 object type tags, 8 GameConstants, 3 hard point, 1 faction, 2 campaign, 1
-tactical camera, 2 command bar; none of them read by the original, modc t25), so a mod's own problems are the marked ones. `--json` writes the summary below (`-`: to stdout instead
+missing cinematic models; 71 unread tags: 54 object type tags, 8 GameConstants, 3 hard point, 1 faction, 2 campaign, 1
+tactical camera, 2 command bar; none of them read by the original, modc t25; mcx0 t07 took out `Base_Power_Ability` and
+`Bounty_On_Faction_Ability`, ability elements the original reads, `docs/re/MCX0_T07_UNLISTED_TAGS.md`), so a mod's own problems are the marked ones. `--json` writes the summary below (`-`: to stdout instead
 of the text). **modc t08** shows that summary in the game's mod picker.
 
 A main-chunk error is a lead, not proof: the script runs with no session (no players or objects). Session state another
@@ -329,7 +330,7 @@ mod's name. On the workshop mods installed here (2026-11-06): 3643661236, 380396
 come out as submods of 1125571106 (241 / 259 / 212 missing list entries, 241 / 259 / 207 of them in TR), and load
 with 0 errors stacked on it; 2858787558's 18 missing list entries are in no installed mod.
 
-### 5.1 The machine-readable summary (`alamo.mod_report`, version 3)
+### 5.1 The machine-readable summary (`alamo.mod_report`, version 4)
 
 One JSON object, UTF-8 (bytes of the data that are not UTF-8 are written as the Latin-1 character of that value), keys in
 the order below, every list complete. A new key may be added in a later version of the same number; a key is never
@@ -337,7 +338,7 @@ removed or changed in meaning without raising `version`. Paths are game-relative
 
 | Key | Type | Meaning |
 |---|---|---|
-| `schema`, `version` | string, number | `"alamo.mod_report"`, `3` |
+| `schema`, `version` | string, number | `"alamo.mod_report"`, `4` |
 | `result` | string | `"ok"` (no errors) or `"errors"` |
 | `errors`, `warnings` | number | as the text report's result line (levels in the table above) |
 | `game`, `args` | string, [string] | the FoC folder and the VFS command line as given |
@@ -352,6 +353,13 @@ removed or changed in meaning without raising `version`. Paths are game-relative
 | `shaders` | object | `checked` (bool: the effect audit ran), `effects`, `mod_effects`, `loaded`, `translated_passes`, `translated_ok`, `compiled` (bool: the runtime DXC compiled the passes), `fx_sources`, `fx_sources_compiled` (effects with a `.fx`, and of those loaded from the `alamo_fx_prebuild` cache) as `alamo.effect_audit` (§4.1), `fx_prebuild` (modc t36, added in version 3: {`ran` (bool: a mod is mounted and the prebuild ran), `fxc` (the fxc used, `""` when none was found), `sources` [{`path` (game path of the `.fx`, as found), `ok` (compiled now or before: the loader takes it), `cached` (the result was already in the cache), `error` (when not ok: the first fxc error line, or why nothing was compiled)}] by path}), `models_read` (object type models read for the cross-reference), `issues` [{`kind` (§4.1 issue kinds), `effect` (upper-case base name), `path`, `in_mod`, `detail`, `drawn_by` (`"models"`, `"terrain"`, `"engine"`), `models` (with `"models"`: object type models whose materials name the effect), `first_model`}] (warnings), by effect then kind |
 | `submod` | object | `likely` (bool: stack it on `parents[0]`), `missing_list_entries` (XML files the mod's own lists name that no layer has; 0: no hint), `parents` [{`id` (workshop id or `Mods` folder name), `kind` (`"workshop"` / `"local"`), `path` (host folder), `arg` (`"STEAMMOD=<id>"` / `"MODPATH=Mods\<name>"`), `provides` (of the missing list entries), `mentioned` (its id is in the mod's `modinfo.json`)}] (most `provides` first, at most 5), `stacked_args` [string] (when likely: `args` then the parent's `arg`) |
 | `check_errors` | [string] | a check that threw (errors) |
+| `honour_gaps` | [object] | (v4) tags of retail's descriptor tables that the data sets to a value other than empty, `TBD` or the class default, and that the tag ledger (`docs/status/tag-ledger.md`) says the port does not act on: `class` (descriptor segment owner), `tag`, `state` (`"unread"` / `"stored"`), `uses`, `entries` (distinct entries), `first_file`, `in_mod`, `tier`, `base_uses` (base FoC's uses, from the ledger), `spec` (the ledger's `docs/re` page, `""` when none); most uses first |
+| `retail_equivalent` | object | (v4) findings retail shares, which never lower the grade: `count`, `items` [{`kind` (`"unread_tag"`, `"script_error"`, `"unknown_reward"`, `"dropped_event"`, `"noop_binding"`, `"unregistered_token"`), `subject`, `uses`, `first_file`, `in_mod`, `detail` (why retail does the same)}] by kind, then most uses |
+| `bindings` | object | (v4) `called` (distinct engine bindings the scripts call), `unconsumed` [{`name` (`"Name"` or `"Class.Name"`), `effect` (binding ledger: `"recorded"` with no consumer in `alamo_game`, `"noop-gap"`, `"partial"`), `detail`, `call_sites`, `scripts`, `first_script`, `in_mod`}] (methods are matched by name), most call sites first |
+| `story` | object | (v4) `files` (Data\XML files with story events), `rewards_used`, `rewards_missing` [{`name`, `uses`, `first_file`, `in_mod`, `note`}] (retail rewards the port lacks), `events_used`, `events_partial` [same shape] (event types the port dispatches with a documented gap) |
+| `ai` | object | (v4) `token_coverage`: {`checked` (AI data loaded), `equations`, `leaves` (distinct token paths), `missing` [{`token` (as written: `Variable_Target.EnemyForce.X`), `equations`, `first_equation`, `first_file`, `in_mod`}]}: paths the resolver of the equation's mode does not evaluate (the galactic resolver's registry, the tactical leaf tables; retail loads one equation set and the caller picks the mode: the template mode for template triggers and budgets, followed through equations that name others; goal proposal functions and equations only Lua plans name count with either resolver), so the equation fails (retail's rule for an unknown leaf, `AI_GALACTIC_TOKENS.md` §9.1) |
+| `limits` | [object] | (v4) `limit`, `value`, `needed`: data that hits a guard or a cited retail limit (filled by `mcx5`; empty until then) |
+| `grade` | object | (v4) `grade` (`"G0"` errors, `"G1"` loads; G2 and up need runs), `g3_static` (bool: no honour gap, binding gap, missing reward or missing token from the mod's own files; the gaps base FoC content has are the tag ledger's and mcx4's, not the mod's, so they do not count here), `blocking` [`"<issue kind> <subject>"`], `check_errors` [string] (a version 4 check that threw; not counted in `errors`) |
 
 `in_mod` is true when the file the finding comes from resolves to a mod folder. The synthetic mods of
 `engine/apps/game/testdata/mod_fixture` (modc t07, t12, t15, t16; README there) are checked through this summary in ctest
@@ -365,6 +373,11 @@ Version 3 (modc t21, t24, 2026-11-07): `shaders` is new and its issues count as 
 `missing_require` and `named_by`, and the unused-script leads moved from `run_errors` to `lua.unused_scripts` (not
 counted). Readers of version 2 keys need no change. `unknown_xml_tags` also covers `"command bar components"` and
 `"radar map"` (modc t25).
+
+Version 4 (mcx0 t06, 2026-11-17; `docs/MOD_COMPAT_DESIGN.md` §12.1): `honour_gaps`, `retail_equivalent`, `bindings`,
+`story`, `ai`, `limits` and `grade` are new, after `check_errors`. None of their entries counts as an error or warning,
+so `result`, `errors` and `warnings` are unchanged for the same data. Readers of version 3 keys need no change. The
+findings are also core `alamo::CompatIssue` records (`ModCheckReport::issues`, `engine/core/include/alamo/core/compat_issue.hpp`).
 
 Installed mods, 2026-11-07 (base FoC at F:): with modc t22 (SM3 translated) the shader issues left are
 `AlamoEngine` `source_shadowed` (an engine effect: TR, its copy 3622043265, FotR) and `_TerrainRenderBump`

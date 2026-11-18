@@ -37,6 +37,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <utility>
 #include <vector>
 
 #include "alamo/ai/galactic_perception.hpp"
@@ -335,6 +336,15 @@ public:
 
     bool resolve(const EvalContext& ctx, const TokenRef& token, double& out) const override;
     bool implements(Root root, std::span<const TokenId> path, const TokenTable& tokens) const override;
+    // mcx0 t05 (docs/MOD_COMPAT_DESIGN.md §9.4): the token path registry. path_registered: the root-relative, upper-case
+    // path ("ENEMYFORCE.SPACETOTAL", "HOMEPLANET.TYPE.TOKEN") is one a handler evaluates on that root; implements() and
+    // the load report's ai.token_coverage use it (no sim needed). registered_paths: every listed path (player paths
+    // under Root::Self, target / force paths under Root::Target).
+    static bool path_registered(Root root, std::string_view path);
+    static std::vector<std::pair<Root, std::string>> registered_paths();
+    // Tests only: runs the handler chain for `path` (no parameters) and says whether some branch took it, whatever the
+    // value. It evaluates the token, so it may fill the leaf cache: never call it on a resolver a session uses.
+    bool dispatches(const EvalContext& ctx, Root root, std::string_view path) const;
     bool resolve_script(const EvalContext& ctx, std::string_view name, std::span<const Param> params,
                         double& out) const override;
 

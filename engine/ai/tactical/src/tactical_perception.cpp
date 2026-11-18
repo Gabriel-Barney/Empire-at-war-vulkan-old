@@ -1122,6 +1122,10 @@ bool TacticalTokenResolver::resolve_script(const EvalContext& ctx, std::string_v
 }
 
 bool TacticalTokenResolver::implements(Root root, std::span<const TokenId> path, const TokenTable& tokens) const {
+    return path_implemented(root, path, tokens);
+}
+
+bool TacticalTokenResolver::path_implemented(Root root, std::span<const TokenId> path, const TokenTable& tokens) {
     if (path.empty()) return false;
     std::vector<Ev> kinds;
     switch (root) {

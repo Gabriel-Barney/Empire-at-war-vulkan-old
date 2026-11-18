@@ -691,6 +691,7 @@ void BattleView::capture(const GameSession& session) {
         // --- OI render: space reinforcement overlay cells (TACTICAL_GAPS §5.5) while the overlay is shown; Lua
         // Attach_Particle_Effect requests of the story VMs (lua::PresentationLog::particle_effects, made since this
         // battle's first frame [port: the request frame is the VM's sim frame]) as attached effects ---
+        // binding-consumer: GameObjectWrapper.Attach_Particle_Effect (engine/lua/tools/gen_bindings.py effect ledger)
         if (space_ && fog_.space_reinforce()) render::apply_battle_fog_reinforce(*b, local_, *snap);
 #ifdef ALAMO_SIM_HAVE_STORY
         if (const sim::StorySession* story = host.story())

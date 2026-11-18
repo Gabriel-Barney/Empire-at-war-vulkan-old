@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<!-- mcx0: story ledger findings (test_mod_fixture.cpp test_compat_checks). No campaign names this plot: the report scans
+     every Data\XML file. -->
+<Story>
+  <Event Name="Checks_Switch">
+    <Event_Type>STORY_ELAPSED</Event_Type>
+    <Event_Param1>1</Event_Param1>
+    <Reward_Type>SWITCH_SIDES</Reward_Type>
+  </Event>
+  <Event Name="Checks_Battles">
+    <Event_Type>STORY_WIN_BATTLES</Event_Type>
+    <Event_Param1>2</Event_Param1>
+    <Reward_Type>CHECKS_NO_SUCH_REWARD</Reward_Type>
+  </Event>
+  <!--
+  <Event Name="Checks_Commented">
+    <Event_Type>STORY_ELAPSED</Event_Type>
+    <Reward_Type>FORCE_RETREAT</Reward_Type>
+  </Event>
+  -->
+</Story>

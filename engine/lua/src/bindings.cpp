@@ -182,6 +182,22 @@ const Registry& reg() {
 
 std::span<const BindingInfo> binding_table() { return kTable; }
 
+const char* to_string(BindingEffect e) {
+    switch (e) {
+        case BindingEffect::Full: return "full";
+        case BindingEffect::Recorded: return "recorded";
+        case BindingEffect::NoopRetail: return "noop-retail";
+        case BindingEffect::NoopGap: return "noop-gap";
+        case BindingEffect::Partial: return "partial";
+    }
+    return "?";
+}
+
+bool binding_effect_gap(const BindingInfo& b) {
+    if (b.effect == BindingEffect::NoopGap || b.effect == BindingEffect::Partial) return true;
+    return b.effect == BindingEffect::Recorded && (b.consumer == nullptr || b.consumer[0] == '\0');
+}
+
 bool is_host_value_global(std::string_view name) {
     return std::find(std::begin(kHostValues), std::end(kHostValues), name) != std::end(kHostValues);
 }

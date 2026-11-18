@@ -25,12 +25,24 @@ namespace alamo::lua {
 
 enum class BindingKind : uint8_t { Global, Method };
 
+// What a binding does in the port compared with retail (docs/MOD_COMPAT_DESIGN.md §9.1, roadmap mcx0 t04), found from
+// the code by gen_bindings.py: Recorded = appends a PresentationOp (BindingInfo::consumer = the alamo_game file that
+// handles it, "" = none, "invisible: <reason>" = nothing to show by design); NoopRetail / NoopGap / Partial = an
+// annotation "binding-effect:" in engine/lua/src (consumer = its spec or reason); Full = everything else.
+enum class BindingEffect : uint8_t { Full, Recorded, NoopRetail, NoopGap, Partial };
+const char* to_string(BindingEffect e);  // "full", "recorded", "noop-retail", "noop-gap", "partial"
+
 struct BindingInfo {
     BindingKind kind;
     const char* cls;   // Method: owner wrapper class. Global: implementing class ("" if unknown).
     const char* name;  // Lua name
     uint32_t calls;    // call sites in the RE corpora (vanilla FoC + TR 3.3), for prioritising
+    BindingEffect effect = BindingEffect::Full;
+    const char* consumer = "";  // see BindingEffect
 };
+// A binding whose call may not get retail's effect in alamo_game: Recorded with no consumer, NoopGap or Partial (the load
+// report's bindings.unconsumed, issue kind binding_unconsumed).
+bool binding_effect_gap(const BindingInfo& b);
 
 // The generated table: globals sorted by name, then methods sorted by (class, name).
 std::span<const BindingInfo> binding_table();

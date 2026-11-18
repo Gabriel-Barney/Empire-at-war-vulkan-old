@@ -279,57 +279,59 @@ constexpr int32_t kLifeForever = -1;
 // Galactic_Hints hint-set defaults [H].
 constexpr std::string_view kGalacticHints[] = {"CHOKEPOINT", "OFFENSEDELAYGROUND", "OFFENSEDELAYSPACE", "PRIORITYTARGET"};
 
-// Paths the port resolves (coverage report). Root-relative, upper-case.
-const std::string_view kKnownPaths[] = {
-    // player roots (Self / Human / Enemy)
-    "PLANETSCONTROLLED", "PLANETSCONTROLLEDUNNORMALIZED", "CREDITSUNNORMALIZED", "TECHLEVEL", "ISFACTION",
-    "ISDIFFICULTY", "HASSTRUCTURE", "NUMSTRUCTURE", "STRUCTURECOUNT", "HASUNIT", "HASSTARBASEOFLEVEL",
-    "NUMSTARBASEOFLEVEL", "HASGROUNDBASEOFLEVEL", "NUMGROUNDBASEOFLEVEL", "MAXEDSTARBASES", "MAXEDGROUNDBASES",
-    "MAXSTARBASELEVEL", "MAXSTARBASELEVELUNNORMALIZED", "MAXGROUNDBASELEVEL", "MAXGROUNDBASELEVELUNNORMALIZED",
-    "MAINTENANCE", "MAINTENANCEUNNORMALIZED", "SPACETOTALUNNORMALIZED", "GROUNDTOTALUNNORMALIZED", "ANYCURRENTTHREATS",
-    "AVERAGEAGEOFSPACEINTELLIGENCE", "AVERAGEAGEOFGROUNDINTELLIGENCE", "CANADVANCETECH", "BUDGETFRACTIONTOBUILD",
-    "NETINCOMEUNNORMALIZED", "NETINCOMENBPTM", "NETINCOMENBTF", "GROSSINCOMEUNNORMALIZED", "GROSSINCOMENBPTM",
-    "GROSSINCOMENBTF", "ACTIVEGOALS", "WORSTISLANDFRACTIONOFLARGEST", "HASTECHTOPRODUCE", "STORYTRIGGER",
-    "SPACEDEFENDEDPLANETS", "GROUNDDEFENDEDPLANETS", "BUDGETALLOCATION", "TIMESINCESPACEDEFENDER",
-    "TIMESINCESPACEATTACKER", "TIMESINCEGROUNDDEFENDER", "TIMESINCEGROUNDATTACKER", "MAXALLPLANETSINCOMEUNNORMALIZED",
-    "MAXOWNEDPLANETSINCOMEUNNORMALIZED", "HOMEPLANET.TYPE.TOKEN",
-    // target root (planets)
-    "ISHUMANCONTROLLED", "STARBASELEVEL", "STARBASELEVELUNNORMALIZED", "GROUNDBASELEVEL", "GROUNDBASELEVELUNNORMALIZED",
-    "MAXSTARBASELEVEL", "MAXSTARBASELEVELUNNORMALIZED", "MAXGROUNDBASELEVEL", "MAXGROUNDBASELEVELUNNORMALIZED",
-    "BASEINCOME", "BASEINCOMENBTP", "INCOMEUNNORMALIZED", "MAXSTRUCTURESLOTS", "MAXSTRUCTURESLOTSUNNORMALIZED",
-    "OPENSTRUCTURESLOTS", "OPENSTRUCTURESLOTSUNNORMALIZED", "OPENGROUNDCOMPANYSLOTS", "TRADEROUTES", "ACTIVETRADEROUTES",
-    "HINTS.CHOKEPOINT", "HINTS.PRIORITYTARGET", "HINTS.OFFENSEDELAYGROUND", "HINTS.OFFENSEDELAYSPACE", "MARKUP",
-    "CONNECTSISOLATEDPLANETSBYFORCE", "CONNECTSISOLATEDPLANETSBYLENGTH", "CONNECTSLARGESTISLANDS", "ISCONNECTEDTO",
-    "ISCORRUPTED", "ISCONNECTEDTOCORRUPTION", "ISCORRUPTIONTRANSITIONACTIVE", "RETAINSRESIDUALINFLUENCE",
-    "TIMESINCECORRUPTIONCHANGE", "ISSURFACEACCESSIBLE", "HASCREDITSIPHON", "TARGETPOLITICALCONTROL", "TARGETPLAYERID",
-    "TIMESINCESPACECONFLICT", "TIMESINCEGROUNDCONFLICT", "TIMESINCECONVERSION", "HASSTARBASEOFLEVEL",
-    "HASGROUNDBASEOFLEVEL", "HASSTRUCTURE", "STRUCTURECOUNT", "ISFACTION", "OWNER.ISFACTION", "TYPE.TOKEN", "TYPE.ISTYPE",
-    "BLACKMARKETABILITIESAVAILABLE", "BLACKMARKETMINIMUMABILITYPRICE", "BLACKMARKETPRICEMODIFIER",
-    "OWNER.BUDGETALLOCATION", "OWNER.TIMESINCESPACEDEFENDER", "OWNER.TIMESINCESPACEATTACKER",
-    "OWNER.TIMESINCEGROUNDDEFENDER", "OWNER.TIMESINCEGROUNDATTACKER",
-    // planet forces (EnemyForce. / FriendlyForce. prefixes)
-    "ENEMYFORCE.SPACETOTALUNNORMALIZED", "ENEMYFORCE.GROUNDTOTALUNNORMALIZED", "ENEMYFORCE.SPACETOTAL",
-    "ENEMYFORCE.GROUNDTOTAL", "ENEMYFORCE.SPACETOTALNBTD", "ENEMYFORCE.GROUNDTOTALNBTD", "ENEMYFORCE.SPACETOTALNBPTM",
-    "ENEMYFORCE.GROUNDTOTALNBPTM", "ENEMYFORCE.SPACETOTALNBTT", "ENEMYFORCE.GROUNDTOTALNBTT",
-    "ENEMYFORCE.NEARBYSPACETOTAL", "ENEMYFORCE.NEARBYGROUNDTOTAL", "ENEMYFORCE.HASSPACEFORCE",
-    "ENEMYFORCE.HASGROUNDFORCE", "ENEMYFORCE.HASNEARBYSPACEFORCE", "ENEMYFORCE.HASNEARBYGROUNDFORCE",
-    "ENEMYFORCE.STARBASETOTALUNNORMALIZED", "ENEMYFORCE.GROUNDBASETOTALUNNORMALIZED",
-    "ENEMYFORCE.HASSPACEUNITSBITFIELD", "ENEMYFORCE.HASGROUNDUNITSBITFIELD", "ENEMYFORCE.ANTISTEALTHEFFECTIVENESS",
-    "ENEMYFORCE.MAINTENANCEUNNORMALIZED", "ENEMYFORCE.MAINTENANCE", "FRIENDLYFORCE.MAINTENANCEUNNORMALIZED",
-    "FRIENDLYFORCE.MAINTENANCE",
-    "ENEMYFORCE.SPACETOTAL.TIMELASTSEEN", "ENEMYFORCE.SPACETOTAL.TIMELASTSEENUNNORMALIZED",
-    "ENEMYFORCE.GROUNDTOTAL.TIMELASTSEEN", "ENEMYFORCE.GROUNDTOTAL.TIMELASTSEENUNNORMALIZED",
-    "FRIENDLYFORCE.SPACETOTALUNNORMALIZED", "FRIENDLYFORCE.GROUNDTOTALUNNORMALIZED", "FRIENDLYFORCE.SPACETOTAL",
-    "FRIENDLYFORCE.GROUNDTOTAL", "FRIENDLYFORCE.SPACETOTALNBTD", "FRIENDLYFORCE.GROUNDTOTALNBTD",
-    "FRIENDLYFORCE.SPACETOTALNBPTM", "FRIENDLYFORCE.GROUNDTOTALNBPTM", "FRIENDLYFORCE.HASSPACEFORCE",
-    "FRIENDLYFORCE.HASGROUNDFORCE", "FRIENDLYFORCE.HASGROUNDUNITSBITFIELD", "FRIENDLYFORCE.NEARBYSPACETOTAL",
-    "FRIENDLYFORCE.NEARBYGROUNDTOTAL", "FRIENDLYFORCE.STARBASETOTALUNNORMALIZED",
-    // game root
-    "AGE", "TIMELINE", "ISSTORYCAMPAIGN", "ISCAMPAIGNGAME", "ISLANDCONTROLGAME", "ISSETUPPHASE", "PLANETSCORRUPTED",
-    "PLANETSCORRUPTEDUNNORMALIZED", "ENEMYFORCE.SPACETOTALUNNORMALIZED", "ENEMYFORCE.GROUNDTOTALUNNORMALIZED",
-    "FRIENDLYFORCE.SPACETOTALUNNORMALIZED", "FRIENDLYFORCE.GROUNDTOTALUNNORMALIZED",
-    "ENEMYFORCE.PERTARGETMAXSPACEFORCE", "ENEMYFORCE.PERTARGETMAXGROUNDFORCE", "FRIENDLYFORCE.PERTARGETMAXSPACEFORCE",
-    "FRIENDLYFORCE.PERTARGETMAXGROUNDFORCE",
+// mcx0 t05 (docs/MOD_COMPAT_DESIGN.md §9.4): the token path registry - every root-relative, upper-case path a resolve_*
+// handler below evaluates, grouped by the handler that owns it. implements() and the load report's ai.token_coverage read
+// it; GalacticSimTokenResolver::dispatches() runs the handlers themselves, and the registry test
+// (tests/test_ai_galactic_part1.cpp test_token_registry) checks the two agree path by path in both directions, so a
+// handler added without its path (or a path without a handler) fails there.
+// Self / Human / Enemy (resolve_player); "HOMEPLANET." + a target path delegates to resolve_target.
+constexpr std::string_view kPlayerPaths[] = {
+    "ACTIVEGOALS", "ANYCURRENTTHREATS", "AVERAGEAGEOFGROUNDINTELLIGENCE", "AVERAGEAGEOFSPACEINTELLIGENCE",
+    "BUDGETALLOCATION", "BUDGETFRACTIONTOBUILD", "CANADVANCETECH", "CREDITSUNNORMALIZED", "GROSSINCOMENBPTM",
+    "GROSSINCOMENBTF", "GROSSINCOMEUNNORMALIZED", "GROUNDDEFENDEDPLANETS", "GROUNDTOTALUNNORMALIZED",
+    "HASGROUNDBASEOFLEVEL", "HASSTARBASEOFLEVEL", "HASSTRUCTURE", "HASTECHTOPRODUCE", "HASUNIT", "ISDIFFICULTY",
+    "ISFACTION", "MAINTENANCE", "MAINTENANCEUNNORMALIZED", "MAXALLPLANETSINCOMEUNNORMALIZED", "MAXEDGROUNDBASES",
+    "MAXEDSTARBASES", "MAXGROUNDBASELEVEL", "MAXGROUNDBASELEVELUNNORMALIZED", "MAXOWNEDPLANETSINCOMEUNNORMALIZED",
+    "MAXSTARBASELEVEL", "MAXSTARBASELEVELUNNORMALIZED", "NETINCOMENBPTM", "NETINCOMENBTF", "NETINCOMEUNNORMALIZED",
+    "NUMGROUNDBASEOFLEVEL", "NUMSTARBASEOFLEVEL", "NUMSTRUCTURE", "PLANETSCONTROLLED",
+    "PLANETSCONTROLLEDUNNORMALIZED", "SPACEDEFENDEDPLANETS", "SPACETOTALUNNORMALIZED", "STORYTRIGGER",
+    "STRUCTURECOUNT", "TECHLEVEL", "TIMESINCEGROUNDATTACKER", "TIMESINCEGROUNDDEFENDER", "TIMESINCESPACEATTACKER",
+    "TIMESINCESPACEDEFENDER", "WORSTISLANDFRACTIONOFLARGEST",
+};
+// Target / Location (resolve_target); "ENEMYFORCE." / "FRIENDLYFORCE." + a force path delegates to resolve_force.
+constexpr std::string_view kTargetPaths[] = {
+    "ACTIVETRADEROUTES", "BASEINCOME", "BASEINCOMENBTP", "BLACKMARKETABILITIESAVAILABLE",
+    "BLACKMARKETMINIMUMABILITYPRICE", "BLACKMARKETPRICEMODIFIER", "CONNECTSISOLATEDPLANETSBYFORCE",
+    "CONNECTSISOLATEDPLANETSBYLENGTH", "CONNECTSLARGESTISLANDS", "GROUNDBASELEVEL", "GROUNDBASELEVELUNNORMALIZED",
+    "HASCREDITSIPHON", "HASGROUNDBASEOFLEVEL", "HASSTARBASEOFLEVEL", "HASSTRUCTURE", "HINTS.CHOKEPOINT",
+    "HINTS.OFFENSEDELAYGROUND", "HINTS.OFFENSEDELAYSPACE", "HINTS.PRIORITYTARGET", "INCOMEUNNORMALIZED",
+    "ISCONNECTEDTO", "ISCONNECTEDTOCORRUPTION", "ISCORRUPTED", "ISCORRUPTIONTRANSITIONACTIVE", "ISFACTION",
+    "ISHUMANCONTROLLED", "ISSURFACEACCESSIBLE", "MARKUP", "MAXGROUNDBASELEVEL", "MAXGROUNDBASELEVELUNNORMALIZED",
+    "MAXSTARBASELEVEL", "MAXSTARBASELEVELUNNORMALIZED", "MAXSTRUCTURESLOTS", "MAXSTRUCTURESLOTSUNNORMALIZED",
+    "OPENGROUNDCOMPANYSLOTS", "OPENSTRUCTURESLOTS", "OPENSTRUCTURESLOTSUNNORMALIZED", "OWNER.BUDGETALLOCATION",
+    "OWNER.ISFACTION", "OWNER.TIMESINCEGROUNDATTACKER", "OWNER.TIMESINCEGROUNDDEFENDER",
+    "OWNER.TIMESINCESPACEATTACKER", "OWNER.TIMESINCESPACEDEFENDER", "RETAINSRESIDUALINFLUENCE", "STARBASELEVEL",
+    "STARBASELEVELUNNORMALIZED", "STRUCTURECOUNT", "TARGETPLAYERID", "TARGETPOLITICALCONTROL", "TIMESINCECONVERSION",
+    "TIMESINCECORRUPTIONCHANGE", "TIMESINCEGROUNDCONFLICT", "TIMESINCESPACECONFLICT", "TRADEROUTES", "TYPE.ISTYPE",
+    "TYPE.TOKEN",
+};
+// Target.EnemyForce / Target.FriendlyForce (resolve_force, the same evaluator for both sides).
+constexpr std::string_view kForcePaths[] = {
+    "ANTISTEALTHEFFECTIVENESS", "GROUNDBASETOTALUNNORMALIZED", "GROUNDTOTAL", "GROUNDTOTAL.TIMELASTSEEN",
+    "GROUNDTOTAL.TIMELASTSEENUNNORMALIZED", "GROUNDTOTALNBPTM", "GROUNDTOTALNBTD", "GROUNDTOTALNBTT",
+    "GROUNDTOTALUNNORMALIZED", "HASGROUNDFORCE", "HASGROUNDUNITSBITFIELD", "HASNEARBYGROUNDFORCE",
+    "HASNEARBYSPACEFORCE", "HASSPACEFORCE", "HASSPACEUNITSBITFIELD", "MAINTENANCE", "MAINTENANCEUNNORMALIZED",
+    "NEARBYGROUNDTOTAL", "NEARBYSPACETOTAL", "SPACETOTAL", "SPACETOTAL.TIMELASTSEEN",
+    "SPACETOTAL.TIMELASTSEENUNNORMALIZED", "SPACETOTALNBPTM", "SPACETOTALNBTD", "SPACETOTALNBTT",
+    "SPACETOTALUNNORMALIZED", "STARBASETOTALUNNORMALIZED",
+};
+// Game (resolve_game).
+constexpr std::string_view kGamePaths[] = {
+    "AGE", "ENEMYFORCE.GROUNDTOTALUNNORMALIZED", "ENEMYFORCE.PERTARGETMAXGROUNDFORCE",
+    "ENEMYFORCE.PERTARGETMAXSPACEFORCE", "ENEMYFORCE.SPACETOTALUNNORMALIZED", "FRIENDLYFORCE.GROUNDTOTALUNNORMALIZED",
+    "FRIENDLYFORCE.PERTARGETMAXGROUNDFORCE", "FRIENDLYFORCE.PERTARGETMAXSPACEFORCE",
+    "FRIENDLYFORCE.SPACETOTALUNNORMALIZED", "ISCAMPAIGNGAME", "ISLANDCONTROLGAME", "ISSETUPPHASE", "ISSTORYCAMPAIGN",
+    "PLANETSCORRUPTED", "PLANETSCORRUPTEDUNNORMALIZED", "TIMELINE",
 };
 
 std::vector<std::string_view> param_texts(std::span<const Param> params, std::string_view name) {
@@ -850,16 +852,49 @@ void GalacticSimTokenResolver::observe_conflicts(const gal::ConflictManager& cm,
     }
 }
 
+namespace {
+bool listed(std::span<const std::string_view> list, std::string_view k) {
+    return std::find(list.begin(), list.end(), k) != list.end();
+}
+bool target_path_registered(std::string_view k) {
+    if (listed(kTargetPaths, k)) return true;
+    if (k.substr(0, 11) == "ENEMYFORCE.") return listed(kForcePaths, k.substr(11));
+    if (k.substr(0, 14) == "FRIENDLYFORCE.") return listed(kForcePaths, k.substr(14));
+    return false;
+}
+}  // namespace
+
+bool GalacticSimTokenResolver::path_registered(Root root, std::string_view k) {
+    switch (root) {
+        case Root::Self:
+        case Root::Human:
+        case Root::Enemy:
+            if (k.substr(0, 11) == "HOMEPLANET.") return target_path_registered(k.substr(11));
+            return listed(kPlayerPaths, k);
+        case Root::Target:
+        case Root::Location: return target_path_registered(k);
+        case Root::Game: return listed(kGamePaths, k);
+    }
+    return false;
+}
+
+std::vector<std::pair<Root, std::string>> GalacticSimTokenResolver::registered_paths() {
+    std::vector<std::pair<Root, std::string>> out;
+    for (const std::string_view p : kPlayerPaths) out.emplace_back(Root::Self, std::string(p));
+    for (const std::string_view p : kTargetPaths) out.emplace_back(Root::Target, std::string(p));
+    for (const std::string_view side : {std::string_view("ENEMYFORCE."), std::string_view("FRIENDLYFORCE.")})
+        for (const std::string_view p : kForcePaths) out.emplace_back(Root::Target, std::string(side) + std::string(p));
+    for (const std::string_view p : kGamePaths) out.emplace_back(Root::Game, std::string(p));
+    return out;
+}
+
 bool GalacticSimTokenResolver::implements(Root root, std::span<const TokenId> path, const TokenTable& tokens) const {
     std::string k;
     for (const TokenId id : path) {
         if (!k.empty()) k += '.';
         k += ai_upper_copy(tokens.name(id));
     }
-    (void)root;
-    for (const std::string_view p : kKnownPaths)
-        if (p == k) return true;
-    return false;
+    return path_registered(root, k);
 }
 
 bool GalacticSimTokenResolver::resolve_script(const EvalContext& ctx, std::string_view name, std::span<const Param> params,
@@ -878,9 +913,18 @@ struct GalacticSimTokenResolver::Impl {
     std::span<const gal::PlanetState> planets;
     std::span<const gal::PlayerState> players;
 
+    // mcx0 t05: set when a handler finds no branch for the path (dispatches(); nullptr in evaluation).
+    bool* unmatched = nullptr;
+
     Impl(const GalacticSimTokenResolver& res, const EvalContext& c)
         : r(res), ctx(c), sim(*res.sim_), rules(res.sim_->rules()), st(res.sim_->store()), planets(res.sim_->planets()),
           players(res.sim_->players()) {}
+
+    // The end of a handler's chain: the path is not one it evaluates (a failure, as before; the probe notes it).
+    bool no_path() const {
+        if (unmatched) *unmatched = true;
+        return false;
+    }
 
     // ---- the leaf cache (AI_GALACTIC_TOKENS §9.9 [H]) ----
     // The node = (leaf, evaluator instance, the system's player); the entry = the parameter set. `force_leaf` /
@@ -1235,7 +1279,7 @@ struct GalacticSimTokenResolver::Impl {
             out = 0.0;
             return true;
         }
-        return false;  // bare EnemyForce / FriendlyForce and unknown leaves are not registered
+        return no_path();  // bare EnemyForce / FriendlyForce and unknown leaves are not registered
     }
 
     // ---------------- target (planet) ----------------
@@ -1555,7 +1599,7 @@ struct GalacticSimTokenResolver::Impl {
                     out = 0.0;  // hint-set default [port: Markup_Filename values not read]
                     return true;
                 }
-            return false;
+            return no_path();
         }
         if (k == "TYPE.TOKEN") return out = static_cast<double>(ps.type), true;  // [L] the type evaluator's token
         // q6 t07: the planet's type evaluator is the global per-type evaluator the tactical side uses (A1_READINGS §23):
@@ -1584,7 +1628,7 @@ struct GalacticSimTokenResolver::Impl {
                 sub == "TIMESINCEGROUNDATTACKER" || sub == "BUDGETALLOCATION")
                 return resolve_player(ps.owner, sub, params, out);
         }
-        return false;  // IsContestable, HasBuiltObject, Force, TimeLastSeen*, ... are not registered
+        return no_path();  // IsContestable, HasBuiltObject, Force, TimeLastSeen*, ... are not registered
     }
 
     // ---------------- players ----------------
@@ -2051,7 +2095,7 @@ struct GalacticSimTokenResolver::Impl {
             if (h >= planets.size() || !valid_planet(static_cast<int32_t>(h))) return false;
             return resolve_target(static_cast<size_t>(h), k.substr(11), params, out);
         }
-        return false;  // other player tokens are not registered here
+        return no_path();  // other player tokens are not registered here
     }
 
     // ---------------- game ----------------
@@ -2081,9 +2125,9 @@ struct GalacticSimTokenResolver::Impl {
             if (leaf_name == "GROUNDTOTALUNNORMALIZED") return game_force(enemy, false, false, out);
             if (leaf_name == "PERTARGETMAXSPACEFORCE") return game_force(enemy, true, true, out);
             if (leaf_name == "PERTARGETMAXGROUNDFORCE") return game_force(enemy, false, true, out);
-            return false;
+            return no_path();
         }
-        return false;  // ForceVisibility is not registered on the galactic Game [H]
+        return no_path();  // ForceVisibility is not registered on the galactic Game [H]
     }
 };
 
@@ -2175,6 +2219,37 @@ void GalacticSimTokenResolver::visibility_event(PlanetIndex planet, int32_t play
         for (const FoggedLeaf& l : kForceFogged)
             if ((l.mask & recompute) != 0)
                 node(std::string(enemy ? "PF:E." : "PF:F.") + l.key, std::string(enemy ? "ENEMYFORCE." : "FRIENDLYFORCE.") + l.path);
+}
+
+bool GalacticSimTokenResolver::dispatches(const EvalContext& ctx, Root root, std::string_view path) const {
+    bool unmatched = false;
+    double out = 0.0;
+    switch (root) {
+        case Root::Self:
+        case Root::Human:
+        case Root::Enemy: {
+            Impl x(*this, ctx);
+            x.unmatched = &unmatched;
+            const int32_t p = root == Root::Self ? ctx.self : root == Root::Human ? ctx.human : ctx.enemy;
+            (void)x.resolve_player(p, path, {}, out);
+            break;
+        }
+        case Root::Target:
+        case Root::Location: {
+            Impl x(*this, ctx);
+            x.unmatched = &unmatched;
+            if (!x.valid_planet(ctx.target)) return false;
+            (void)x.resolve_target(static_cast<size_t>(ctx.target), path, {}, out);
+            break;
+        }
+        case Root::Game: {
+            Impl x(*this, ctx);
+            x.unmatched = &unmatched;
+            (void)x.resolve_game(path, {}, out);
+            break;
+        }
+    }
+    return !unmatched;
 }
 
 bool GalacticSimTokenResolver::resolve(const EvalContext& ctx, const TokenRef& token, double& out) const {

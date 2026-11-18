@@ -17,6 +17,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <set>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -33,6 +34,7 @@
 #include "alamo/ai/galactic_ai.hpp"
 #include "alamo/ai/perception_equations.hpp"
 #include "alamo/lua/story_model.hpp"  // storyb t10
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/bytes.hpp"
 #include "alamo/core/compress.hpp"
 #include "alamo/core/file_provider.hpp"
@@ -341,6 +343,7 @@ void test_starbase_force_split();
 void test_leaf_cache();
 void test_force_members();
 void test_home_planet();  // galab t06
+void test_token_registry();  // mcx0 t05
 
 // A2 galactic, AI_GALACTIC_3 rules: heroes never attach through their AI script (§2.4), the TerrainType veto (§6.3),
 // the galactic population cap when AI_Uses_Galactic_Pop_Cap is set (§3.5), MagicPlan spawns without production or

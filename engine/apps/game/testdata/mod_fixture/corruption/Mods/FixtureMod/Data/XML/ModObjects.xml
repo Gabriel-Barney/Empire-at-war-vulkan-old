@@ -5,5 +5,7 @@
     <Space_Model_Name>Mod_Corvette.alo</Space_Model_Name>
     <Tactical_Health>250</Tactical_Health>
     <Build_Cost_Credits>400</Build_Cost_Credits>
+    <Size_Value>3</Size_Value>
+    <Fires_Forward>No</Fires_Forward>
   </SpaceUnit>
 </ModObjects>
