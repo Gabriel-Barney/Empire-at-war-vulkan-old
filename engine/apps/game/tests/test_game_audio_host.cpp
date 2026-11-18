@@ -179,6 +179,38 @@ void test_super_weapon_music() {
 }
 #endif
 
+// mcx4 t13 batch A (docs/re/MCX4_T13_RE_ANSWERS.md, both builds): the health warning and hard point lost line rules.
+// "GameObjectType.SFXEvent_Health_Low_Warning family" (Take_Damage 0x3a9e30) and "GameObjectType.SFXEvent_Hardpoint_Destroyed
+// family" (0x386660).
+// ledger: verifies GameObjectType.SFXEvent_Health_Low_Warning
+// ledger: verifies GameObjectType.SFXEvent_Health_Critical_Warning
+// ledger: verifies GameObjectType.SFXEvent_Enemy_Damaged_Health_Low_Warning
+// ledger: verifies GameObjectType.SFXEvent_Enemy_Damaged_Health_Critical_Warning
+// ledger: verifies GameObjectType.SFXEvent_Hardpoint_Destroyed
+// ledger: verifies GameObjectType.SFXEvent_Hardpoint_All_Weapons_Destroyed
+void test_health_and_hardpoint_lines() {
+    using H = GameAudioHost;
+    // Thresholds 0.33 / 0.10 (FoC); critical tested first; one crossing per hit.
+    CHECK(H::health_warning_tag(0.5f, 0.3f, 0.33f, 0.10f, true, false) == "SFXEvent_Health_Low_Warning");
+    CHECK(H::health_warning_tag(0.5f, 0.05f, 0.33f, 0.10f, true, false) == "SFXEvent_Health_Critical_Warning");  // skips low
+    CHECK(H::health_warning_tag(0.3f, 0.2f, 0.33f, 0.10f, true, false).empty());   // already below low
+    CHECK(H::health_warning_tag(0.5f, 0.3f, 0.33f, 0.10f, false, true) == "SFXEvent_Enemy_Damaged_Health_Low_Warning");
+    CHECK(H::health_warning_tag(0.2f, 0.1f, 0.33f, 0.10f, false, true) == "SFXEvent_Enemy_Damaged_Health_Critical_Warning");
+    CHECK(H::health_warning_tag(0.5f, 0.3f, 0.33f, 0.10f, false, false).empty());  // neither side local
+    CHECK(H::health_warning_tag(0.5f, 0.3f, 0.33f, 0.10f, true, true) == "SFXEvent_Health_Low_Warning");  // victim first
+    // Hard point lost: local live parent only; a weapon kind with no weapon left -> all weapons; else last of the kind.
+    CHECK(H::hardpoint_lost_tag(5, true, false, true, false) == "SFXEvent_Hardpoint_All_Weapons_Destroyed");
+    CHECK(H::hardpoint_lost_tag(5, true, false, true, true) == "SFXEvent_Hardpoint_Destroyed");
+    CHECK(H::hardpoint_lost_tag(5, true, false, false, true).empty());  // one of that kind still up
+    CHECK(H::hardpoint_lost_tag(1, true, false, true, false) == "SFXEvent_Hardpoint_Destroyed");  // shield generator
+    CHECK(H::hardpoint_lost_tag(5, false, false, true, false).empty() && H::hardpoint_lost_tag(5, true, true, true, false).empty());
+    // The per-kind list: "HARD_POINT_WEAPON_LASER, Ev" lines; an empty event keeps the list aligned; a later line wins.
+    const std::vector<std::string_view> toks = {"HARD_POINT_WEAPON_LASER", "Lost_Laser", "HARD_POINT_WEAPON_MISSILE",
+                                                "HARD_POINT_ENGINE", "Lost_Engine", "HARD_POINT_WEAPON_LASER", "Lost_Laser_2"};
+    CHECK(H::hardpoint_kind_event(toks, 5) == "Lost_Laser_2" && H::hardpoint_kind_event(toks, 0) == "Lost_Engine");
+    CHECK(H::hardpoint_kind_event(toks, 6).empty() && H::hardpoint_kind_event(toks, 1).empty() && H::hardpoint_kind_event(toks, 13).empty());
+}
+
 // aud4 b0289 / b0300: garrison entry line and the hero clash win speech (both builds; presentation rules only).
 void test_garrison_and_clash_lines() {
     using H = GameAudioHost;
@@ -624,6 +656,21 @@ void test_aud2() {
     CHECK(H::production_tag(H::Production::Begin) == "SFXEvent_Build_Started");
     CHECK(H::production_tag(H::Production::Cancel) == "SFXEvent_Build_Cancelled");
     CHECK(H::production_tag(H::Production::Complete) == "SFXEvent_Build_Complete");
+    // mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "GameObjectType.SFXEvent_Tactical_Build_Started family"): the speech first,
+    // then the tactical line in a battle, then the plain one.
+    // ledger: verifies GameObjectType.SFXEvent_Tactical_Build_Started
+    // ledger: verifies GameObjectType.SFXEvent_Tactical_Build_Complete
+    // ledger: verifies GameObjectType.SFXEvent_Tactical_Build_Cancelled
+    // ledger: verifies GameObjectType.Build_Speech_Underway
+    // ledger: verifies GameObjectType.Build_Speech_Completed
+    // ledger: verifies GameObjectType.Build_Speech_Stopped
+    {
+        using A = std::array<std::string_view, 3>;
+        CHECK((H::production_tags(H::Production::Begin, true) == A{"Build_Speech_Underway", "SFXEvent_Tactical_Build_Started", "SFXEvent_Build_Started"}));
+        CHECK((H::production_tags(H::Production::Complete, true) == A{"Build_Speech_Completed", "SFXEvent_Tactical_Build_Complete", "SFXEvent_Build_Complete"}));
+        CHECK((H::production_tags(H::Production::Cancel, true) == A{"Build_Speech_Stopped", "SFXEvent_Tactical_Build_Cancelled", "SFXEvent_Build_Cancelled"}));
+        CHECK((H::production_tags(H::Production::Begin, false) == A{"Build_Speech_Underway", "", "SFXEvent_Build_Started"}));
+    }
     MemoryProvider files;
     files.add("Data\\XML\\GameObjectFiles.xml", "<L><File>Aud2.xml</File></L>");
     files.add("Data\\XML\\Aud2.xml", R"(<?xml version="1.0"?>
@@ -760,6 +807,7 @@ int main() {
     test_inactive();
     test_control_point_lines();
     test_garrison_and_clash_lines();
+    test_health_and_hardpoint_lines();  // mcx4 t13
     test_intro_speech_t07();
     test_aud2();
 #ifdef ALAMO_GAME_HAVE_AUDIO
