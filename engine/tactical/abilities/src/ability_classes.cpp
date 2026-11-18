@@ -1281,7 +1281,7 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
                     if (alive_unit(v)) queue_play(v, kAnimFwAttack, kDrawVariant, false, 0.0f, 1.0f, frame);
                 } else if (s.cls == C::StunWave) {
                     // vis1 t06 (ABILITY_PARTICLES §4): each victim the apply stunned gets Stunned_Effect.
-                    if (combat_->stun_unit(v, static_cast<int32_t>(s.wave_time * 30.0f), frame) && !s.stunned_effect.empty())  // literal 30.0
+                    if (combat_->stun_unit(v, trunc_i32(s.wave_time * 30.0f), frame) && !s.stunned_effect.empty())  // literal 30.0
                         visual(AbilityVisualKind::StunnedEffect, frame, o.id, v, sp.desc);
                 } else if (Obj* vo = obj(v)) {
                     confuse(*vo, s.wave_time, frame);  // 2 synced draws per victim
@@ -1410,7 +1410,8 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
             // Fire_Continuation (vf13 0x7151c0, the target link dropped [M: the target is gone]): SAP +0x308 := NOW +
             // int(FPS x Fire_Continuation). [port] taken when the update finds the target dead.
             if (sp.frames < 0 && !alive_unit(sp.target)) {
-                sp.frames = static_cast<int32_t>(frame) + std::max(0, frames_of(s.fire_continuation, fps));
+                // mcx7: the add wraps like the machine's (no signed overflow for a huge Fire_Continuation)
+                sp.frames = static_cast<int32_t>(frame + static_cast<uint32_t>(std::max(0, frames_of(s.fire_continuation, fps))));
                 sp.counter = 0;  // the TSW target no longer resolves: no more turning
             }
             if (sp.frames >= 0) {

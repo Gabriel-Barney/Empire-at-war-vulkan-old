@@ -50,9 +50,13 @@ is computed again with the current rules and `corpus.json` accepts. `--no-cache`
 
 `logs/modcorpus/<date>/`: `matrix.json` (schema `alamo.mod_corpus` 1: per setup the grade, blockers, accepted blockers,
 stack, runs, smokes), `matrix.md`, `<setup>.json` (the full result) and `<setup>/` (each command's output, the load
-report). The sweep compares with the last recorded one (the same date's matrix, else the newest earlier date, or
-`--baseline FILE`): a lower grade prints `GRADE DROP <key> (<name>): G2 -> G0, first new blocker: ...` and exits 1. A
-previous grade above what this sweep's stages can give is capped first (a `--stages check` sweep is never a drop).
+report). The sweep compares with the accepted baseline of its mode (`logs/modcorpus/baseline.json`, `baseline-asan.json`
+for `--asan`, or `--baseline FILE`): a lower grade prints `GRADE DROP <key> (<name>): G2 -> G0, first new blocker: ...`
+and exits 1. A previous grade above what this sweep's stages can give is capped first (a `--stages check` sweep is never
+a drop). A sweep without a drop updates the baseline (when it ran at least the baseline's stages); after a drop the
+baseline stays, so every later sweep fails again until the drop is fixed or recorded with `--accept-drops`. Results with
+a timeout, a skipped smoke or a tool failure are not cached. A workshop item without a `Data` folder is graded G0
+("nothing to mount"); a crash of `alamo_mod_check` itself is G0 too, with a `port:` blocker (a port failure).
 Exit 2: no game folder or a tool missing.
 
 ## Accepted blockers
@@ -60,3 +64,11 @@ Exit 2: no game folder or a tool missing.
 `corpus.json` `accept` lists blockers (regex) explained as the mod's own design or retail-equivalent, each with `why`
 and `ref`; they are listed in the matrix and do not lower the grade. An entry of a mod applies to every setup whose stack
 contains it. Add one only with the explanation recorded where its `ref` points (`docs/MODS.md` §10.4, a `docs/re` page).
+
+## Limits
+
+- G1's "every warning is retail-equivalent or a filed gap" (design §1.3) is not checked automatically: G1 needs 0 errors.
+- G2's "deterministic on both compilers": a sweep runs one build (MSVC); the clang side is checked by the mod goldens of
+  the reference set (`tests/goldens/mods`, ctest on both compilers), not per corpus mod.
+- The galactic campaign is the first one with planets in database order (`[port]`: the report does not sort campaigns as
+  the menu does), unless `corpus.json` names one.

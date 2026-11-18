@@ -15,8 +15,10 @@ Runs every installed mod (and its resolved stack) through the port's checks and 
    iv.  --asan  the runs of ii again (workers 4, no compare) with the ASan build's alamo_headless.
 3. Writes logs/modcorpus/<date>/<setup>.json (result + grade), matrix.json and matrix.md; --write-md replaces the
    generated table of docs/MODS.md §10.4.
-4. Compares the grades with the last recorded sweep (the same date's matrix when there is one, else the newest earlier
-   one, or --baseline): a lower grade is a regression, printed with the mod and its first new blocker, exit 1.
+4. Compares the grades with the accepted baseline of the mode (logs/modcorpus/baseline.json, baseline-asan.json for
+   --asan; or --baseline FILE): a lower grade is a regression, printed with the mod and its first new blocker, exit 1. A
+   sweep without a drop updates the baseline (only when it ran at least the baseline's stages); after a drop it stays,
+   so the next sweep fails again until the drop is fixed or accepted with --accept-drops.
 
 Each headless / game run holds one of the machine's test slots (tools/lint/test_slot.py) while it runs; the timeout
 counts from when it has the slot.
@@ -27,7 +29,7 @@ counts from when it has the slot.
 Options: --game DIR (default ALAMO_FOC_DATA), --build-dir DIR (default build-wt-msvc, else build-msvc), --out-root DIR
 (default logs/modcorpus), --date LABEL (default today), --only KEY[,KEY] (setup keys or substrings of names),
 --stages check,runs,smokes, --space-ticks N / --land-ticks N (3000), --galactic-ticks N (9000), --timeout S (1800 per
-run), --no-cache, --baseline MATRIX.json, --write-md, --asan [--asan-build-dir build-asan], --corpus FILE, --no-slot,
+run), --no-cache, --baseline FILE, --accept-drops, --write-md, --asan [--asan-build-dir build-asan], --corpus FILE, --no-slot,
 --steam-root DIR (sets ALAMO_STEAM_ROOT for the children), --keep-crc.
 Exit: 0 no grade dropped, 1 a grade dropped, 2 usage / a tool is missing.
 """
@@ -191,7 +193,18 @@ class Runner:
         if r["exit"] != 0 or not os.path.isfile(out):
             raise SystemExit(f"run_corpus: alamo_mod_check --list-mods failed (exit {r['exit']}): {last_line(r['text'])}")
         with open(out, encoding="utf-8") as f:
-            return [m for m in json.load(f)["mods"] if m.get("has_data")]
+            listed = json.load(f)["mods"]
+        mods = [m for m in listed if m.get("has_data")]
+        # Workshop items without a Data folder (an uploader's test item): the registry leaves them out, the corpus grades
+        # them G0 "nothing to mount" so every installed item has a grade (design 13.1).
+        content_dirs = sorted({os.path.dirname(m["root"]) for m in listed if m["kind"] == "workshop"})
+        known = {m["id"] for m in listed}
+        for cd in content_dirs:
+            for n in sorted(os.listdir(cd)):
+                if n.isdigit() and n not in known and os.path.isdir(os.path.join(cd, n)) and not os.path.isdir(os.path.join(cd, n, "Data")):
+                    mods.append({"key": n, "arg": "STEAMMOD=" + n, "kind": "workshop", "id": n, "variant": "", "root": os.path.join(cd, n),
+                                 "name": n, "has_data": False, "content_hash": "", "dependencies": []})
+        return mods
 
     @staticmethod
     def vfs_arg(m: dict) -> str | None:
@@ -406,6 +419,12 @@ class Runner:
                 return res
         t0 = time.monotonic()
         res: dict = {"key": key, "name": m.get("name", key), "stages": list(self.a.stages), "asan_mode": self.a.asan, "cached": False}
+        if not m.get("has_data", True):
+            res.update(report={"no_data": True}, stack=[key], args=[], fingerprint="", display_name=m.get("name", key))
+            res["grade"] = gr.grade(res, [])
+            res["seconds"] = 0.0
+            log(f"  {key}: no Data folder")
+            return res
         summary, rep = self.check(m, d)
         res["report"] = summary
         stack = (rep or {}).get("stack", {}) or {}
@@ -431,7 +450,9 @@ class Runner:
         res["grade"] = gr.grade(res, s["accept"])
         res["seconds"] = round(time.monotonic() - t0, 1)
         hashes = {k: registry[k]["content_hash"] for k in res["stack"] if k in registry}
-        if hashes and "tool_error" not in summary:
+        transient = [v for v in list((res.get("runs") or {}).values()) + list((res.get("smokes") or {}).values())
+                     if v.get("status") in ("timeout", "skipped")]
+        if hashes and "tool_error" not in summary and not transient:  # a timeout / skip / tool failure is run again next time
             os.makedirs(self.cache_dir, exist_ok=True)
             with open(cache_path, "w", encoding="utf-8") as f:
                 json.dump({"build": build, "options": okey, "hashes": hashes, "date": self.a.date, "result": res}, f, indent=1)
@@ -515,14 +536,26 @@ def write_md(md_path: str, table: str) -> bool:
     return True
 
 
-def find_baseline(out_root: str, date: str) -> str | None:
-    """The same date's matrix (a rerun), else the newest earlier one."""
-    same = os.path.join(out_root, date, "matrix.json")
-    if os.path.isfile(same):
-        return same
-    days = sorted(n for n in os.listdir(out_root) if n < date and os.path.isfile(os.path.join(out_root, n, "matrix.json"))) \
-        if os.path.isdir(out_root) else []
-    return os.path.join(out_root, days[-1], "matrix.json") if days else None
+def baseline_path_of(out_root: str, asan: bool) -> str:
+    """The accepted grades of one mode: what a sweep is compared with. A sweep without a drop (or --accept-drops) updates
+    it, so a drop keeps failing until it is fixed or accepted, and an ASan sweep (graded to G2 at most) never stands in
+    for a normal one."""
+    return os.path.join(out_root, "baseline-asan.json" if asan else "baseline.json")
+
+
+def update_baseline(path: str, baseline: dict | None, matrix: dict) -> bool:
+    """Merge this sweep's grades into the baseline. Only a sweep with at least the baseline's stages updates it (a quicker
+    sweep compares, but its lower cap would hide later drops)."""
+    if baseline and not set(baseline.get("stages", [])) <= set(matrix["stages"]):
+        return False
+    out = {"schema": "alamo.mod_corpus_baseline", "version": 1, "stages": matrix["stages"], "asan": matrix["asan"],
+           "mods": dict((baseline or {}).get("mods", {}))}
+    for key, e in matrix["mods"].items():
+        out["mods"][key] = {"grade": e["grade"]["grade"], "blocking": e["grade"]["blocking"], "date": matrix["date"],
+                            "build": e.get("build", matrix["build"])}
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(out, f, indent=1)
+    return True
 
 
 # ------------------------------------------------------------------------------------------------------------------ main
@@ -546,7 +579,8 @@ def parse_args(argv=None):
     ap.add_argument("--no-cache", action="store_true")
     ap.add_argument("--no-slot", action="store_true")
     ap.add_argument("--keep-crc", action="store_true")
-    ap.add_argument("--baseline", default=None)
+    ap.add_argument("--baseline", default=None, help="compare with this matrix / baseline file (it is not updated)")
+    ap.add_argument("--accept-drops", action="store_true", help="record this sweep's grades as the baseline even with drops")
     ap.add_argument("--write-md", action="store_true")
     ap.add_argument("--md", default=os.path.join(ROOT, "docs", "MODS.md"))
     ap.add_argument("--corpus", default=os.path.join(HERE, "corpus.json"))
@@ -596,16 +630,18 @@ def main(argv=None) -> int:
     if a.list:
         return 0
     build = rn.build_id()
-    baseline_path = a.baseline or find_baseline(a.out_root, a.date)
+    baseline_path = a.baseline or baseline_path_of(a.out_root, a.asan)
     baseline = None
-    if baseline_path:
+    if os.path.isfile(baseline_path):
         with open(baseline_path, encoding="utf-8") as f:
             baseline = json.load(f)
+    day_matrix = os.path.join(rn.day, "matrix.json")
     matrix = {"schema": "alamo.mod_corpus", "version": 1, "date": a.date, "build": build, "build_dir": rel(a.bin or a.build_dir),
               "stages": a.stages, "asan": a.asan, "game": a.game,
               "out": rel(rn.day), "mods": {}}
-    if only and baseline and baseline_path == os.path.join(rn.day, "matrix.json"):
-        matrix["mods"] = dict(baseline.get("mods", {}))  # a partial rerun keeps the day's other setups
+    if only and os.path.isfile(day_matrix):  # a partial rerun keeps the day's other setups (each with its build)
+        with open(day_matrix, encoding="utf-8") as f:
+            matrix["mods"] = dict(json.load(f).get("mods", {}))
     t0 = time.monotonic()
     for m in mods:
         log(f"{m['key']} ({m.get('name')}):")
@@ -639,6 +675,11 @@ def main(argv=None) -> int:
         rc = 1 if cmp_["drops"] else 0
     else:
         log("no earlier sweep to compare with (first recorded run)")
+    if a.baseline is None and (rc == 0 or a.accept_drops):
+        if update_baseline(baseline_path, baseline, matrix):
+            log(f"baseline {baseline_path} updated" + (" (drops accepted)" if rc else ""))
+    elif rc:
+        log(f"baseline {baseline_path} kept: fix the drop, or rerun with --accept-drops if the lower grade is right")
     log(f"run_corpus: {len(mods)} setup(s) in {time.monotonic() - t0:.0f} s, matrix {os.path.join(rn.day, 'matrix.json')}, exit {rc}")
     return rc
 

@@ -63,7 +63,9 @@ def _report_blockers(report: dict | None) -> list[str]:
         return ["mod_check: no report"]
     out: list[str] = []
     if report.get("tool_error"):
-        out.append("mod_check: " + report["tool_error"])
+        out.append("port: alamo_mod_check failed: " + report["tool_error"])  # a port failure, not the mod's (no load report)
+    if report.get("no_data"):
+        out.append("no Data folder: nothing to mount")
     for e in report.get("stack_errors", []):
         out.append("stack: " + e)
     if report.get("base_eaw"):
@@ -251,6 +253,9 @@ def selftest() -> int:
 
     check("full G3", grade(_full())["grade"], "G3")
     check("no report", grade({"stages": ["check"]})["grade"], "G0")
+    check("no Data", grade({"stages": ["check"], "report": {"no_data": True}})["blocking"], ["no Data folder: nothing to mount"])
+    check("tool crash is a port failure", grade({"stages": ["check"], "report": {"tool_error": "exit -1073741819"}})["blocking"],
+          ["port: alamo_mod_check failed: exit -1073741819"])
     r = grade(_full(report={"errors": 1, "loaded": False, "load_error": "GameConstants.xml unparsable"}))
     check("load error G0", (r["grade"], r["blocking"][0]), ("G0", "load: GameConstants.xml unparsable"))
     check("base-EaW G0", grade(_full(report={"errors": 1, "base_eaw": True}))["blocking"], ["base-EaW mod (D1)"])
