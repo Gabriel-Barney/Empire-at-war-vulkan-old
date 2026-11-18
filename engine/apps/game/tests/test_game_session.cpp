@@ -892,6 +892,27 @@ void movie_frame_cue_test() {
 // mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "GameObjectType.Show_Hero_Head family"): Show_Hero_Head puts a non-hero
 // type (Generic_Field_Commander, Underworld_Saboteur) in the battle hero roster.
 // ledger: verifies GameObjectType.Show_Hero_Head
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "Faction.Victory_Text family"): the game over screen's text and image from the
+// local faction: Victory_Text / Land_Win_Image / Space_Win_Image on a win, Defeat_Text / Land_Lose_Image /
+// Space_Lose_Image on a loss.
+// ledger: verifies Faction.Victory_Text
+// ledger: verifies Faction.Defeat_Text
+// ledger: verifies Faction.Land_Win_Image
+// ledger: verifies Faction.Space_Win_Image
+// ledger: verifies Faction.Land_Lose_Image
+// ledger: verifies Faction.Space_Lose_Image
+void game_over_art_test() {
+    const auto art = [](bool won, bool land) {
+        return game::game_over_art(won, land, "TEXT_REBEL_VICTORY", "TEXT_REBEL_DEFEAT", "i_rl_win.tga", "i_rs_win.tga",
+                                   "i_rl_lose.tga", "i_rs_lose.tga");
+    };
+    CHECK(art(true, true).text_key == "TEXT_REBEL_VICTORY" && art(true, true).image == "i_rl_win.tga");
+    CHECK(art(true, false).image == "i_rs_win.tga");
+    CHECK(art(false, true).text_key == "TEXT_REBEL_DEFEAT" && art(false, true).image == "i_rl_lose.tga");
+    CHECK(art(false, false).image == "i_rs_lose.tga");
+    CHECK(game::game_over_art(true, true, "", "", "", "s.tga", "", "").image == "s.tga");  // a missing land image: space
+}
+
 void shows_hero_head_test() {
     static_assert(game::shows_hero_head(true, false) && game::shows_hero_head(false, true) && game::shows_hero_head(true, true));
     static_assert(!game::shows_hero_head(false, false));
@@ -3038,6 +3059,7 @@ int main() {
     encyclopedia_text_tag_test();   // mcx4 t14
     win_lose_banner_text_test();    // mcx4 t14
     shows_hero_head_test();         // mcx4 t14
+    game_over_art_test();           // mcx4 t14
     movie_frame_cue_test();         // mcx4 t13
     story_ui_test();
     linked_overlay_test();

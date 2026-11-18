@@ -243,6 +243,16 @@ ui::HudBuildOption::Block galactic_build_block(commands::RejectReason why) {
     return B::Prerequisite;
 }
 
+GameOverArt game_over_art(bool victory, bool pick_land, std::string_view victory_text, std::string_view defeat_text,
+                          std::string_view land_win, std::string_view space_win, std::string_view land_lose,
+                          std::string_view space_lose) {
+    GameOverArt a;
+    a.text_key = victory ? victory_text : defeat_text;
+    const std::string_view land = victory ? land_win : land_lose, space = victory ? space_win : space_lose;
+    a.image = pick_land ? (land.empty() ? space : land) : (space.empty() ? land : space);
+    return a;
+}
+
 int32_t movie_frame_cue(std::span<const int64_t> frames, int64_t prev, int64_t now) {
     for (size_t i = 0; i < frames.size(); ++i)
         if (frames[i] > prev && frames[i] <= now) return static_cast<int32_t>(i);

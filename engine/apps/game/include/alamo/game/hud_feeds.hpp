@@ -145,6 +145,15 @@ std::string_view win_lose_banner_text(bool local_side_won, bool corruption_missi
 // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameObjectType.Show_Hero_Head family", tactical HUD 0x318720): an object qualifies for
 // the battle hero roster (hero head) when its type is a named hero or has Show_Hero_Head.
 constexpr bool shows_hero_head(bool named_hero, bool show_hero_head) { return named_hero || show_hero_head; }
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "Faction.Victory_Text family", game over screen 0x92bb0): the local faction's text key
+// (Victory_Text on a win, Defeat_Text on a loss) and image (Land_ / Space_Win_Image on a win, _Lose_Image on a loss; land
+// or space picked 50 / 50 by the UI random, `pick_land`). A missing land / space image falls back to the other one [port].
+struct GameOverArt {
+    std::string_view text_key, image;
+};
+GameOverArt game_over_art(bool victory, bool pick_land, std::string_view victory_text, std::string_view defeat_text,
+                          std::string_view land_win, std::string_view space_win, std::string_view land_lose,
+                          std::string_view space_lose);
 // mcx4 t13 (MCX4_T13_RE_ANSWERS "Movie.SFXEvent_Frame family", Bink tick 0x44dea0 [H]): the movie cue list entry that
 // fires in a step from Bink frame `prev` to `now`: the first entry in XML order whose frame lies in (prev, now], -1 when
 // none (one cue per list per step).

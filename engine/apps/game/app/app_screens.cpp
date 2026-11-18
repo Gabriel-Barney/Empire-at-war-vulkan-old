@@ -912,7 +912,29 @@ void App::show_campaign_end(bool victory) {
                    stat("IDC_KILL_EFFICIENCY_STATIC", stats.kill);
         if (stats.ok && host.scoring_game_stat(local_player(), "IDC_TITLE_STATIC", false, v, t, num) && !num) stats.title_key = t;
     }
-    if (!screens_.show_campaign_score(campaign_score(*session_, *g, ui_.text, victory, tally_, stats))) notes_.push_back("campaign score dialog missing");
+    ui::CampaignScoreInfo score = campaign_score(*session_, *g, ui_.text, victory, tally_, stats);
+    // mcx4 t14 (MCX4_T14_RE_ANSWERS "Faction.Victory_Text family"): the local faction's victory / defeat text (the list's
+    // first line [M: the control]) and win / lose image (land or space by the unsynced UI random).
+    if (const int32_t me = local_player(); me >= 0 && static_cast<size_t>(me) < g->players().size()) {
+        const uint32_t fi = g->players()[static_cast<size_t>(me)].faction;
+        if (fi < g->rules().factions.size()) {
+            const galactic::FactionRules& fr = g->rules().factions[fi];
+            const game::GameOverArt art = game::game_over_art(
+                victory, cine_.rng.range(0, 1) == 0,
+                fr.xml_text("Victory_Text"),       // ledger: consumes Faction.Victory_Text
+                fr.xml_text("Defeat_Text"),        // ledger: consumes Faction.Defeat_Text
+                fr.xml_text("Land_Win_Image"),     // ledger: consumes Faction.Land_Win_Image
+                fr.xml_text("Space_Win_Image"),    // ledger: consumes Faction.Space_Win_Image
+                fr.xml_text("Land_Lose_Image"),    // ledger: consumes Faction.Land_Lose_Image
+                fr.xml_text("Space_Lose_Image"));  // ledger: consumes Faction.Space_Lose_Image
+            if (!art.text_key.empty()) {
+                const std::u32string t = txt(art.text_key, U"");
+                if (!t.empty()) score.list.insert(score.list.begin(), t);
+            }
+            if (!art.image.empty()) score.image = std::string(art.image);
+        }
+    }
+    if (!screens_.show_campaign_score(score)) notes_.push_back("campaign score dialog missing");
     {  // aud2 t08: Music_Event_Strategic_Win / _Lose (mode 16); a lost campaign names the winner as the enemy faction, as
        // the battle end does (the _Vs_Faction row first).
         std::string winner;
