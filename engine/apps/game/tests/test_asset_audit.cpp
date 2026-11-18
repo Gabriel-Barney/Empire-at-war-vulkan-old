@@ -91,6 +91,7 @@ void test_bytes() {
     CHECK(rule.find("connections") != std::string::npos && rule.find("MCX2_T02") != std::string::npos);
     CHECK(alamo::game::audit_asset_bytes("texture", tga(), false, &rule, &eq) == 0);
     CHECK(alamo::game::audit_asset_bytes("texture", Bytes{'D', 'D', 'S', ' ', 1}, false, &rule, &eq) == 2 && !eq);
+    CHECK(alamo::game::audit_asset_bytes("texture", Bytes{'8', 'B', 'P', 'S', 0, 1}, false, &rule, &eq) == 2 && eq);
     CHECK(alamo::game::audit_asset_bytes("animation", Bytes{}, false, &rule, &eq) == 2 && eq && rule.find("empty") != std::string::npos);
 }
 
@@ -108,6 +109,9 @@ void test_mod_folder() {
     write(mod / "Data/Art/Models/AA_OK.ALO", model(true));
     write(mod / "Data/Art/Models/AA_NOCONN.ALO", model(false));
     write(mod / "Data/Art/Models/AA_EMPTY.ALA", Bytes{});
+    write(mod / "Data/Art/Textures/.tool_meta/AA_META.DDS", Bytes{'x', 'y'});  // tool metadata: not audited
+    write(mod / "Data/Art/Maps/AA_TEST_ONLY.TED", Bytes{1, 2, 3});            // broken, named by nothing: never loaded
+    write(mod / "Data/Art/Maps/_MP_LAND_AA_BAD.TED", Bytes{1, 2, 3});         // broken skirmish map: a real rejection
 
     std::string err;
     const std::vector<std::string> args{"MODPATH=" + mod.string()};
@@ -119,8 +123,13 @@ void test_mod_folder() {
     alamo::game::AssetAuditOptions opt;
     opt.cache_dir = cache.string();
     const auto a = alamo::game::audit_mod_assets(*v, opt);
-    CHECK(a.ran && a.checked == 6);
-    CHECK(a.decoded == 3 && a.salvaged_count == 0 && a.rejected_count == 3 && a.retail_equivalent == 2);
+    CHECK(a.ran && a.checked == 8);
+    CHECK(a.decoded == 3 && a.salvaged_count == 0 && a.rejected_count == 5 && a.retail_equivalent == 3);
+    const auto* unref = find(a.rejected, "AA_TEST_ONLY.TED");
+    CHECK(unref && unref->retail_equivalent);
+    const auto* mp = find(a.rejected, "_MP_LAND_AA_BAD.TED");
+    CHECK(mp && !mp->retail_equivalent);
+    CHECK(find(a.rejected, "AA_META") == nullptr);
     CHECK(a.cache_hits == 0);
     const auto* noconn = find(a.rejected, "AA_NOCONN.ALO");
     CHECK(noconn && noconn->family == "model" && noconn->retail_equivalent);
@@ -131,13 +140,13 @@ void test_mod_folder() {
     CHECK(a.by_family.at("texture").checked == 3 && a.by_family.at("texture").rejected == 1);
     CHECK(a.by_family.at("model").checked == 2);
     const std::string json = alamo::game::asset_audit_json(a);
-    CHECK(json.find("\"rejected_count\": 3") != std::string::npos);
+    CHECK(json.find("\"rejected_count\": 5") != std::string::npos);
     CHECK(json.find("\"retail_equivalent\": true") != std::string::npos);
     CHECK(json.find("\"by_family\"") != std::string::npos);
 
     // Second run: everything from the cache, same result.
     const auto b = alamo::game::audit_mod_assets(*v, opt);
-    CHECK(b.cache_hits == 6 && b.checked == a.checked && b.rejected_count == a.rejected_count);
+    CHECK(b.cache_hits == 8 && b.checked == a.checked && b.rejected_count == a.rejected_count);
     CHECK(alamo::game::asset_audit_json(b) == json);
 
     // Strict and no mod.

@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <exception>
 #include <fstream>
+#include <set>
 #include <sstream>
 #include <unordered_map>
 #include <utility>
@@ -58,6 +59,8 @@ struct RetailEquivalent {
 };
 constexpr RetailEquivalent kRetailEquivalent[] = {
     {"no connections chunk 0x600", "retail does not draw a model without its connections chunk (docs/re/MCX2_T02_ASSET_SALVAGE.md 3, run 2)"},
+    {"unsupported DXGI format", "retail's d3dx9_43 reads no DX10-header DDS (docs/re/MCX2_T02_ASSET_SALVAGE.md 4)"},
+    {"Photoshop PSD content", "retail's d3dx9_43 reads no PSD (docs/re/MCX2_T02_ASSET_SALVAGE.md 4)"},
 };
 
 bool retail_equivalent_reason(const std::string& reason, std::string* citation) {
@@ -162,6 +165,10 @@ int audit_alo(const std::vector<uint8_t>& b, std::string* family, std::string* r
 }
 
 int audit_texture(const std::vector<uint8_t>& b, bool strict, std::string* rule) {
+    if (b.size() >= 4 && b[0] == '8' && b[1] == 'B' && b[2] == 'P' && b[3] == 'S') {
+        *rule = "Photoshop PSD content (not a texture format)";
+        return kRejected;
+    }
 #if ALAMO_GAME_HAVE_MATERIALS
     assets::TextureAsset t;
     std::string err;
@@ -258,7 +265,7 @@ using Cache = std::unordered_map<CacheKey, CacheValue, CacheKeyHash>;  // looked
 
 // The second number is the rules version: bump it whenever a decoder, salvage rule or retail-equivalent entry changes
 // what a file's verdict is, so a cache written by an older build is ignored.
-constexpr const char* kCacheHeader = "alamo asset audit cache v1 rules 2";
+constexpr const char* kCacheHeader = "alamo asset audit cache v1 rules 3";
 
 std::string cache_file(const std::string& dir) { return dir + "\\asset_audit_v1.txt"; }
 
@@ -328,6 +335,46 @@ bool served_by_mod(const vfs::Vfs& v, const std::string& path) {
     return false;
 }
 
+// A path with a folder whose name starts with '.' (".alg_meta", ".git"): tool metadata, never named by game data.
+bool in_dot_folder(const std::string& path) {
+    for (size_t i = 0; i + 1 < path.size(); ++i)
+        if ((i == 0 || path[i - 1] == '\\') && path[i] == '.' && path.find('\\', i) != std::string::npos) return true;
+    return false;
+}
+
+// Upper-case identifiers ([A-Z0-9_]+) of every XML and Lua file the VFS serves: the names data can refer to.
+std::set<std::string> data_identifiers(const vfs::Vfs& v) {
+    std::set<std::string> ids;
+    std::vector<uint8_t> b;
+    for (const char* glob : {"Data\\XML\\**.XML", "Data\\Scripts\\**.LUA"}) {
+        for (const auto& p : v.list(glob)) {
+            if (!v.read(p, b)) continue;
+            std::string cur;
+            for (uint8_t c : b) {
+                const char u = static_cast<char>(std::toupper(c));
+                if ((u >= 'A' && u <= 'Z') || (u >= '0' && u <= '9') || u == '_') {
+                    cur.push_back(u);
+                } else if (!cur.empty()) {
+                    ids.insert(cur);
+                    cur.clear();
+                }
+            }
+            if (!cur.empty()) ids.insert(cur);
+        }
+    }
+    return ids;
+}
+
+// A map the game never loads: not a skirmish map (_MP_LAND_ / _MP_SPACE_, the list's prefixes) and named by no XML or
+// Lua file.
+bool map_unreferenced(const std::string& path, const std::set<std::string>& ids) {
+    const size_t slash = path.find_last_of('\\');
+    std::string base = path.substr(slash == std::string::npos ? 0 : slash + 1);
+    if (const size_t dot = base.find('.'); dot != std::string::npos) base.resize(dot);
+    if (base.rfind("_MP_LAND_", 0) == 0 || base.rfind("_MP_SPACE_", 0) == 0) return false;
+    return ids.find(base) == ids.end();
+}
+
 }  // namespace
 
 int audit_asset_bytes(const std::string& family_in, const std::vector<uint8_t>& bytes, bool strict, std::string* rule_out,
@@ -380,8 +427,10 @@ AssetAudit audit_mod_assets(const vfs::Vfs& v, const AssetAuditOptions& opt) {
     std::vector<std::pair<CacheKey, CacheValue>> seen;  // written back in path order
 
     std::vector<uint8_t> bytes;
+    bool have_ids = false;
+    std::set<std::string> ids;
     for (const auto& [path, family0] : files) {
-        if (!served_by_mod(v, path)) continue;
+        if (in_dot_folder(path) || !served_by_mod(v, path)) continue;
         bytes.clear();
         CacheKey key{family0, 0, opt.strict};
         CacheValue val;
@@ -401,6 +450,16 @@ AssetAudit audit_mod_assets(const vfs::Vfs& v, const AssetAuditOptions& opt) {
                     val.family = "particle";
             }
             seen.emplace_back(key, val);
+        }
+        if (val.state == kRejected && !val.retail_equivalent && val.family == "map") {
+            if (!have_ids) {
+                ids = data_identifiers(v);
+                have_ids = true;
+            }
+            if (map_unreferenced(path, ids)) {
+                val.retail_equivalent = true;
+                val.rule += " [retail-equivalent: never loaded - not a skirmish map and no XML or Lua names it]";
+            }
         }
         ++a.checked;
         AssetFamilyCount& fc = a.by_family[val.family];

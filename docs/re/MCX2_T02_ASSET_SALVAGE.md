@@ -84,3 +84,11 @@ Per slot, from `out\<run>\report.txt` and the screenshots:
   folder is not loaded. The port's extra loose-file lookup (`ui::register_game_fonts`) is a superset; nothing to add. [M]
 - **Bink 2:** retail x64 1.121 imports `bink2w64.dll` (shipped with the game) and plays KB2 movies; the port's FFmpeg
   path cannot (t09, honour gap until decided). [H]
+- **Formats D3DX9 cannot read either.** Retail links `d3dx9_43.dll` (the import name is in the exe). D3DX9 has no
+  reader for DDS files with the DX10 extended header (EaW-Remake ships nine BC7 `I_HIGHLIGHT_*.DDS`, DXGI 99) and none
+  for Photoshop files (Ascendancy of the Lost's `I_UL_WIN.DDS` is a PSD, `8BPS`), so retail cannot show them; the
+  asset audit marks those rejections retail-equivalent. [M] (D3DX9's documented format list)
+- **Audit scope.** Files in a folder whose name starts with `.` (EaW-Remake's `Textures\.alg_meta\`, an editor's
+  text metadata named `.dds`) are tool files no data names, and are not audited. A broken map that is not a skirmish
+  map (`_MP_LAND_` / `_MP_SPACE_`, the list's prefixes) and that no XML or Lua file names is never loaded, by retail
+  or the port (Ascendancy of the Lost's `A_SIZE_TEST.TED`): retail-equivalent. [M]
