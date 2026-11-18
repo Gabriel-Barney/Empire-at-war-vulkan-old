@@ -353,7 +353,7 @@ class Runner:
         env.update({k: str(v) for k, v in (s.get("smoke_env") or {}).items()})
         for kind in ("skirmish", "campaign"):
             png = os.path.join(d, f"smoke_{kind}_png")
-            cmd = [self.game_exe, "--smoke", kind, "--hidden", "--audio", "null", "--png-dir", png] + args
+            cmd = [self.game_exe, "--game", self.a.game, "--smoke", kind, "--hidden", "--audio", "null", "--png-dir", png] + args
             save_env, self.env = self.env, env
             r = run(cmd, os.path.join(d, f"smoke_{kind}.txt"), self.a.timeout, self.env, not self.a.no_slot)
             first_timeout = None
@@ -371,8 +371,11 @@ class Runner:
                 res.update(steps=int(mt.group(2)), of=int(mt.group(3)))
             if r["timed_out"]:
                 res["status"] = "timeout"
-            elif r["exit"] == 0 and (not mt or mt.group(2) == mt.group(3)):
+            elif r["exit"] == 0 and mt and mt.group(2) == mt.group(3):
                 res["status"] = "ok"
+            elif r["exit"] == 0 and not mt:  # the game skipped the smoke (no game data, no GPU): nothing was checked
+                res["status"] = "skipped"
+                res["error"] = last_line(r["text"], r"skip")
             else:
                 res["status"] = "failed"
                 res["error"] = (f"step {mt.group(2)} of {mt.group(3)}; " if mt else "") + last_line(r["text"])
