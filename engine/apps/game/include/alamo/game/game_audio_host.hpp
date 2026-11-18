@@ -87,6 +87,7 @@ struct GameAudioStats {
     uint64_t strike_lines = 0;                                                     // mcx4 t13 batch M
     uint64_t sighting_lines = 0;                                                   // mcx4 t13 batch N
     uint64_t land_damage_sfx = 0;                                                  // mcx4 t13 batch O
+    uint64_t pad_lines = 0;                                                        // mcx4 t13 batch P
 };
 
 class GameAudioHost {
@@ -343,6 +344,17 @@ public:
     // fraction = the last Land_Damage_Thresholds entry k (list order) with fraction <= t_k, -1 when none. When a hit
     // changes it, Land_Damage_SFX[k] plays attached to the object unless it is "NULL" [M on the compare].
     static int32_t land_damage_stage(std::span<const std::string_view> thresholds, float fraction);
+    // "Faction.SFXEvent_Tactical_Object_Building_Started family" (0x42dbd0 / 0x42e890 / 0x5248b0 [H]): the lines of a build
+    // pad start, completion or sale. `type_tags` = the event type's 2D line (first set entry wins), heard only by a local
+    // builder / seller (`local`; a start also needs its build command's sfx flag); `faction_tag` = the owner's faction
+    // line for any owner (start / complete attached to the object, sale 3D at its position); `loop_tag` = the start's
+    // attached loop, stopped on the under-construction object at completion.
+    enum class PadLine : uint8_t { Started, Completed, Sold };
+    struct PadLines {
+        std::array<std::string_view, 2> type_tags{};
+        std::string_view faction_tag, loop_tag;
+    };
+    static PadLines pad_lines(PadLine kind, bool local);
     struct ControlLines {
         std::string_view friendly, enemy;
     };
@@ -447,6 +459,7 @@ private:
     std::set<int32_t> spotted_types_;                         // types whose Unit_Type_Spotted line played
     bool enemy_spotted_done_ = false;                         // SFXEvent_Enemy_Spotted played this battle
     std::map<int64_t, int32_t> land_damage_stage_;            // mcx4 t13 batch O: object -> last stage (lookup only)
+    std::map<int64_t, std::string> pad_loops_;                // mcx4 t13 batch P: UC object -> its building loop event
     // mcx4 t13 batch B: the local player's tactical build orders last tick (order id -> type) and built counts (type ->
     // TacticalProduction::built_count), to tell a completed order from a cancelled one.
     std::map<uint32_t, int32_t> prod_orders_;

@@ -322,7 +322,10 @@ cmd::RejectReason TacticalBattle::tactical_build(TacticalMode& mode, uint8_t pla
         if (cost > have) return R::CannotAfford;
         if (cost > 0.0f && credits_add_) credits_add_(static_cast<int32_t>(player), -cost);  // execute 0x5d78a0: charge 1
     }
-    return pad_build(mode, pad, type, false, static_cast<int32_t>(player)) == 1 ? R::None : R::NotAllowed;
+    pad_build_sfx_ = true;  // mcx4 t13: a command start plays the builder's line (presentation feed only)
+    const int32_t started = pad_build(mode, pad, type, false, static_cast<int32_t>(player));
+    pad_build_sfx_ = false;
+    return started == 1 ? R::None : R::NotAllowed;
 }
 
 cmd::RejectReason TacticalBattle::tactical_sell(TacticalMode& mode, uint8_t player, objects::ObjectId object) {
@@ -360,6 +363,7 @@ cmd::RejectReason TacticalBattle::tactical_sell(TacticalMode& mode, uint8_t play
     // starts no cooldown: the pad keeps its owner until someone captures it (the capture rules of an empty pad).
     if (st.alive(ph)) pad_persist(st, ph, bt, st.position(h), false);  // §9.4: the sale removes the persistent record (the object's x, y)
     if (st.alive(ph)) play_battle_clip(s->pad, 0x75, false, 1.0f, 0.0f);  // r3h t05: release 0x42ecd0 plays Pad_Sell (L1_S4 §3.6)
+    pad_events_.push_back({PadEvent::Kind::Sold, false, object, objects::kNoObjectId, bt, static_cast<int32_t>(player), st.position(h)});
     if (Unit* u = unit_by_id(object); u && u->alive) {
         u->alive = false;
         --parts_[u->participant].alive;

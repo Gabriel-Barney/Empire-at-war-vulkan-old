@@ -367,6 +367,28 @@ void test_strike_available_tags() {
 // mcx4 t13 batch O (docs/re/MCX4_T13_RE_ANSWERS.md "GameObjectType.Land_Damage_SFX"; both builds): the stage of a health
 // fraction is the last Land_Damage_Thresholds entry it is at or below.
 // ledger: verifies GameObjectType.Land_Damage_SFX
+// mcx4 t13 batch P (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_Tactical_Object_Building_Started family"; both
+// builds): a local builder / seller hears the type line; every owner gets the faction line, a start also the loop.
+// ledger: verifies Faction.SFXEvent_Tactical_Object_Building_Started
+// ledger: verifies Faction.SFXEvent_Tactical_Object_Building_Loop
+// ledger: verifies Faction.SFXEvent_Tactical_Object_Building_Complete
+// ledger: verifies Faction.SFXEvent_Tactical_Object_Sold
+// ledger: verifies GameObjectType.SFXEvent_Sold_Tactical
+void test_pad_lines() {
+    using H = GameAudioHost;
+    const H::PadLines s = H::pad_lines(H::PadLine::Started, true);
+    CHECK(s.type_tags[0] == "SFXEvent_Tactical_Build_Started" && s.type_tags[1] == "SFXEvent_Build_Started");
+    CHECK(s.faction_tag == "SFXEvent_Tactical_Object_Building_Started" && s.loop_tag == "SFXEvent_Tactical_Object_Building_Loop");
+    const H::PadLines r = H::pad_lines(H::PadLine::Started, false);  // another owner: faction lines only
+    CHECK(r.type_tags[0].empty() && r.faction_tag == "SFXEvent_Tactical_Object_Building_Started" && !r.loop_tag.empty());
+    const H::PadLines c = H::pad_lines(H::PadLine::Completed, true);
+    CHECK(c.type_tags[0] == "SFXEvent_Tactical_Build_Complete" && c.faction_tag == "SFXEvent_Tactical_Object_Building_Complete");
+    CHECK(c.loop_tag.empty());
+    const H::PadLines d = H::pad_lines(H::PadLine::Sold, true);
+    CHECK(d.type_tags[0] == "SFXEvent_Sold_Tactical" && d.type_tags[1].empty() && d.faction_tag == "SFXEvent_Tactical_Object_Sold");
+    CHECK(H::pad_lines(H::PadLine::Sold, false).type_tags[0].empty());
+}
+
 void test_land_damage_stage() {
     using H = GameAudioHost;
     const std::vector<std::string_view> th = {"0.75", " 0.5", "0.25 "};
@@ -988,6 +1010,7 @@ int main() {
     test_unit_room();                   // mcx4 t13 batch J
     test_strike_available_tags();       // mcx4 t13 batch M
     test_land_damage_stage();           // mcx4 t13 batch O
+    test_pad_lines();                   // mcx4 t13 batch P
     test_intro_speech_t07();
     test_aud2();
 #ifdef ALAMO_GAME_HAVE_AUDIO
