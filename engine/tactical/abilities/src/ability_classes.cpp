@@ -1108,7 +1108,7 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
         }
 
         case C::Berserker: {  // 2.3.2 update
-            sp.counter -= 1;
+            sp.counter = dec_wrap(sp.counter);
             if (sp.counter < 1) {
                 remove_special(o, sp, frame);
                 return;
@@ -1461,7 +1461,7 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
         }
 
         case C::DrainLife: {  // per frame each victim takes DPS / FPS; Should_Heal heals the owner by the same
-            sp.counter -= 1;
+            sp.counter = dec_wrap(sp.counter);
             const float per = s.damage_per_second / static_cast<float>(fps);
             bool any = false;
             for (ObjectId v : sp.victims) {
@@ -1488,7 +1488,7 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
         }
 
         case C::LeechShields: {  // vf4 0x717d60: shield drained by SDPS / FPS while Can_Activate(58), in range, accepted
-            sp.counter -= 1;
+            sp.counter = dec_wrap(sp.counter);
             if (!can(o, kLeechShields, false, true, frame) || !alive_unit(sp.target) || !range_ok(o, s, sp.target) ||
                 !accepts(o, s, sp.target, frame) || sp.counter <= 0) {
                 remove_special(o, sp, frame);
@@ -1503,7 +1503,7 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
 
         case C::Blast: {
             if (sp.phase == 0) {
-                sp.counter -= 1;
+                sp.counter = dec_wrap(sp.counter);
                 if (sp.counter > 0) return;
                 // update 0x71c190 at 0: charging particle destroyed, "charged" mesh + particle, counter := -K (K = the
                 // WEAPON_SPECIAL hard points, 0x397c10). Fire_At then lets only those fire, x Damage_Multiplier, each
@@ -1599,14 +1599,14 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
                 return;
             }
             if (sp.phase == kCableParalyzed) {  // state 5: -1 per service; below 1 unlock and end
-                sp.counter -= 1;
+                sp.counter = dec_wrap(sp.counter);
                 if (sp.counter < 1) remove_special(o, sp, frame);
             }
             return;
         }
 
         case C::CorruptSystems: {  // the victim's CORRUPT_SYSTEMS behaviour: shield drain per second, expiry
-            sp.counter -= 1;
+            sp.counter = dec_wrap(sp.counter);
             if (alive_unit(sp.target)) {
                 const float sh = combat_->shield(sp.target) - s.damage_per_second / static_cast<float>(fps);
                 combat_->set_shield(sp.target, sh > 0.0f ? sh : 0.0f);
@@ -1641,7 +1641,7 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
             // loop, blend 0.2, speed 1; nothing is played at the end (the release 0x7060e0 only unholds). [port] at the first
             // flame update (retail: once the turn toward the target is within 0.1 rad).
             if (sp.counter == std::max(1, frames_of(s.duration_secs, fps))) queue_play(o.id, kAnimFlameAttack, 0, true, 0.2f, 1.0f, frame);
-            sp.counter -= 1;
+            sp.counter = dec_wrap(sp.counter);
             const Vec3 f = o.combat_unit ? combat_->facing(o.id) : Vec3{1.0f, 0.0f, 0.0f};
             const float per = s.damage_amount / static_cast<float>(std::max(1, frames_of(s.duration_secs, fps)));
             for (size_t i = 0; i < combat_->unit_count(); ++i) {

@@ -765,7 +765,8 @@ void AbilitySystem::update_countdown(Obj& o, uint32_t frame) {
                     event(AbilityEventKind::Ready, static_cast<uint8_t>(t), o.id, kNoObject, frame);
             }
         } else if (o.cd.counter[t] < o.cd.maximum[t]) {  // [port] expiry fires once (X = 0 types stay at max)
-            o.cd.counter[t] = std::min<int32_t>(o.cd.counter[t] + delta, o.cd.maximum[t]);
+            // mcx7: in 64 bits, so a maximum near INT32_MAX (a huge mod duration) cannot overflow before the clamp
+            o.cd.counter[t] = static_cast<int32_t>(std::min<int64_t>(int64_t{o.cd.counter[t]} + delta, o.cd.maximum[t]));
             if (o.cd.counter[t] == o.cd.maximum[t]) expire(o, t, frame);
             if (o.dead) return;
         }

@@ -197,7 +197,7 @@ class Runner:
     def vfs_arg(m: dict) -> str | None:
         if m["kind"] == "workshop":
             return "STEAMMOD=" + m["key"]  # STEAMMOD=<id>:<variant> names one variant (mod_registry.hpp find_arg)
-        return m["arg"] if not m.get("variant") else None  # a local variant has no argument that names it alone
+        return m["arg"]  # a local folder (a variant mounts the same folder: only its descriptor differs)
 
     # -- i. check
     def check(self, m: dict, d: str) -> tuple[dict, dict | None]:
@@ -612,6 +612,7 @@ def main(argv=None) -> int:
             json.dump(res, f, indent=1)
         matrix["mods"][m["key"]] = {k: res.get(k) for k in ("display_name", "name", "stack", "args", "fingerprint", "grade", "cached",
                                                              "runs", "smokes", "asan", "seconds")}
+        matrix["mods"][m["key"]]["build"] = build  # per entry: a partial rerun keeps the day's older entries with their build
         g = res["grade"]
         log(f"  => {g['grade']}" + (f", first blocker: {g['blocking'][0]}" if g["blocking"] else ""))
     with open(os.path.join(rn.day, "matrix.json"), "w", encoding="utf-8") as f:

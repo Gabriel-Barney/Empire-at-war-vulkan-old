@@ -36,7 +36,7 @@ bool Countdown::deactivate_early(uint32_t t, float recharge_seconds, float r9, u
                         ? 1.0f
                         : 1.0f - static_cast<float>(counter[t]) / static_cast<float>(maximum[t]);
     start_recharge(t, recharge_seconds, r9, fps);
-    const auto c = static_cast<int32_t>(static_cast<float>(maximum[t]) * (1.0f - f) + 0.5f);
+    const auto c = trunc_i32(static_cast<float>(maximum[t]) * (1.0f - f) + 0.5f);  // mcx7: x86-defined when out of range
     counter[t] = c > 0 ? c : 0;
     return maximum[t] == 0;
 }

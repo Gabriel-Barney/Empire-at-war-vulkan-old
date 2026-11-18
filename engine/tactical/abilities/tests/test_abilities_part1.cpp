@@ -100,6 +100,8 @@ void test_x86_timers() {
     volatile float huge = 30.0f * 99999999999.0f, neg = -3.0e9f, nan_ = std::numeric_limits<float>::quiet_NaN(), ok = 299.9f;
     CHECK(trunc_i32(huge) == INT32_MIN && trunc_i32(neg) == INT32_MIN && trunc_i32(nan_) == INT32_MIN);
     CHECK(trunc_i32(ok) == 299 && trunc_i32(-ok) == -299 && trunc_i32(2147483520.0f) == 2147483520);
+    volatile float two31 = 2147483648.0f, neg31 = -2147483648.0f, neg_zero = -0.0f;  // the range edges
+    CHECK(trunc_i32(two31) == INT32_MIN && trunc_i32(neg31) == INT32_MIN && trunc_i32(neg_zero) == 0);
     volatile int32_t lo = INT32_MIN, one = 1;
     CHECK(dec_wrap(lo) == INT32_MAX && dec_wrap(one) == 0);
     // Defense_Duration_In_Secs 99999999999: the laser defense special stays applied (2^31 frames); 10 s ends after 300.
