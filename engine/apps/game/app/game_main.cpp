@@ -341,6 +341,7 @@ bool App::init() {
     // controls dialog was accepted).
     sync_control_bindings(ui_.hotkeys, camera_, ui_.bindings);
     attract_.set_config(load_attract_config(data_.db.constants()));
+    saliency_ = game::load_saliency_weights(data_.db.constants());
     {  // P1 move acknowledgement constants (P1_DOUBLE_CLICK_MOVE.md §2.3 / §5)
         const data::GameConstants& gc = data_.db.constants();
         for (size_t i = 0; i < ack_fx_.size(); ++i)

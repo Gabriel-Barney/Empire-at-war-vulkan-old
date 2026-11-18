@@ -757,6 +757,7 @@ public:
     bool first_menu_ = true;
     double demo_shot_t0_ = -1.0;  // [port] demo camera: current shot start (wall s), shot counter, followed object
     uint32_t demo_shots_ = 0;
+    game::SaliencyWeights saliency_;  // mcx4: GameConstants Saliency_* (the demo camera's interesting-object pick)
     objects::ObjectId demo_target_ = 0;
     // Playtest 3 t14: the stand-in camera keeps a side view of the followed hull (attract_mode.hpp, demo_shot_yaw_deg).
     // demo_stats_ counts, per rendered demo frame, how often the followed hull / the hulls near the look-at point are seen

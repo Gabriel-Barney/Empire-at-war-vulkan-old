@@ -121,7 +121,29 @@ void App::demo_camera() {
             for (const render::SnapshotObject& o : objs)
                 if (o.owner >= 0 && b->combat().has_unit(o.id)) units.push_back(&o);
         if (units.empty()) return;
-        target = units[demo_shots_++ % units.size()];
+        // mcx4 (MCX4_T11_T12_RE_ANSWERS §C2): the interesting object by the Saliency_* score. [port] the shown target is
+        // left out while another candidate exists (variety between shots); size = the squared target radius, power =
+        // the type's AI_Combat_Power, speed = the current speed (per-tick distance).
+        std::vector<game::SaliencyFeatures> feats;
+        std::vector<const render::SnapshotObject*> cands;
+        for (const render::SnapshotObject* u : units) {
+            if (units.size() > 1 && u->id == demo_target_) continue;
+            game::SaliencyFeatures f;
+            const float r = b->combat().target_radius(u->id);
+            f.size = r * r;
+            f.power = data_.types.get_float(u->type, "AI_Combat_Power");
+            f.x = u->position.x;
+            f.y = u->position.y;
+            f.health = u->health;
+            for (const render::SnapshotObject* o : units)
+                if (o != u && b->combat().current_target(o->id) == u->id) f.targets += 1.0f;
+            f.speed = b->movement().view(u->id).speed;
+            feats.push_back(f);
+            cands.push_back(u);
+        }
+        const size_t pick = game::saliency_pick(feats, saliency_);
+        target = pick < cands.size() ? cands[pick] : units[demo_shots_ % units.size()];
+        ++demo_shots_;
         demo_target_ = target->id;
         demo_shot_t0_ = now_s_;
         demo_stats_.run = 0;

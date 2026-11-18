@@ -1345,6 +1345,36 @@ void attract_rec_test() {
 // at 4 degrees per second, so every hull was seen nose-on or tail-on (view within 30 degrees of its facing) for a third of
 // the time, in stretches of 15 s; the side-view camera keeps the view near broadside.
 void attract_camera_pure_test() {
+    {  // mcx4 (docs/re/MCX4_T11_T12_RE_ANSWERS.md §C2): GameConstants Saliency_Size, Saliency_Power, Saliency_X,
+       // Saliency_Y, Saliency_Health, Saliency_Targets and Saliency_Speed weight the min-max normalised features; the
+       // highest score is the interesting object.
+        // ledger: verifies GameConstants.Saliency_Size
+        // ledger: verifies GameConstants.Saliency_Power
+        // ledger: verifies GameConstants.Saliency_X
+        // ledger: verifies GameConstants.Saliency_Y
+        // ledger: verifies GameConstants.Saliency_Health
+        // ledger: verifies GameConstants.Saliency_Targets
+        // ledger: verifies GameConstants.Saliency_Speed
+        const game::SaliencyWeights w;  // FoC: 1, 1, 0.5, 0.5, 1, 1.5, 1
+        CHECK(w.targets == 1.5f && w.x == 0.5f && w.y == 0.5f && w.size == 1.0f);
+        std::vector<game::SaliencyFeatures> f(3);
+        CHECK(game::saliency_pick({}, w) == 0);
+        CHECK(game::saliency_pick(f, w) == 0);  // all equal: the first
+        f[1].targets = 3.0f;                     // 1.5
+        f[2].size = 100.0f;                      // 1.0
+        CHECK(game::saliency_pick(f, w) == 1);
+        f[2].speed = 5.0f;                       // 1.0 + 1.0 beats 1.5
+        CHECK(game::saliency_pick(f, w) == 2);
+        game::SaliencyWeights w2 = w;
+        w2.targets = 3.0f;
+        CHECK(game::saliency_pick(f, w2) == 1);
+        f[0].x = 10.0f;                          // x / y weigh 0.5 each
+        f[0].y = 10.0f;
+        f[1].targets = 0.0f;
+        f[2].size = 0.0f;
+        f[2].speed = 0.0f;
+        CHECK(game::saliency_pick(f, w) == 0);
+    }
     const float kNoseOn = 0.866f;  // cos 30 degrees
     const float kRad = 0.017453292519943295f;
     // Yaw convention: 0 looks north (+Y), clockwise from above; view = (sin yaw, cos yaw).
