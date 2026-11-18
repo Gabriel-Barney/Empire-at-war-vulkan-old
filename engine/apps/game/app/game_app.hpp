@@ -618,6 +618,10 @@ public:
     uint64_t choices_ = 0, auto_resolves_ = 0, story_dialogs_ = 0, ency_shown_ = 0, retry_boxes_ = 0, story_cues_ = 0;
     uint64_t tactical_auto_resolves_ = 0, auto_results_ = 0;
     bool story_movie_ = false;  // the advisor slot plays a story dialog's MOVIE
+    // mcx4 t14 (AUDIO.md §9.7 step 5): the intro speech line whose Tactical_Intro_Command_Bar_Movie_Name holds the
+    // advisor slot ("" none); intro_movie_speech_done ends the movie when that line ends.
+    std::string intro_movie_line_;
+    void intro_movie_speech_done(const std::string& event);
     // L1/S4 wave 1 (story_ui.hpp): the local player's UI notifications for the story (StorySession::notify_ui through the
     // command stream); zoom_planet_ = the planet of the last zoom_to_planet; battle_plots_ = the running battle's tactical
     // plots file (the STORY_MISSION_LOST name); story_ui_sent_ = notifications submitted.

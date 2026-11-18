@@ -484,7 +484,10 @@ bool App::tactical_story() const {
 
 void App::story_ui_step() {
     story_ui_.set_battle(tactical_story());
-    for (const std::string& e : audio_.take_speech_done()) story_ui_.speech_done(e);  // STORY_SPEECH_DONE
+    for (const std::string& e : audio_.take_speech_done()) {
+        story_ui_.speech_done(e);  // STORY_SPEECH_DONE
+        intro_movie_speech_done(e);
+    }
     if (!session_ || demo_session()) {
         (void)story_ui_.take();
         return;

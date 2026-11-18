@@ -1,5 +1,6 @@
 // alamo_game App: special systems, sim stepping, command routing, HUD / galactic / battle / menu input (split from game_main.cpp).
 #include "game_app.hpp"
+#include "alamo/data/values.hpp"  // mcx4 t14: data::trim
 #ifdef ALAMO_SIM_HAVE_ANIM
 #include "alamo/sim/sim_anim.hpp"  // aud1 t03
 #endif
@@ -305,7 +306,24 @@ void App::post_tick() {
                     }
                     return false;
                 };
-                audio_.intro_speech_tick(b->frame(), eligible, presentation_cinematic() || cine_.shot.active(), facts, present);
+                const std::string intro =
+                    audio_.intro_speech_tick(b->frame(), eligible, presentation_cinematic() || cine_.shot.active(), facts, present);
+                // mcx4 t14 (AUDIO.md §9.7 step 5, 0x2fc7a0): with the line queued, the local faction's
+                // Tactical_Intro_Command_Bar_Movie_Name plays on the command bar's advisor slot. [port] looped until the
+                // line ends (retail times it from the speech event, [M]); a story movie on the slot keeps it.
+                if (!intro.empty() && !story_movie_)
+                    for (const data::GameObjectRecord* rec : data_.db.find_game_objects(local_faction()))
+                        if (rec->type == "Faction") {
+                            const std::string name(data::trim(rec->element.child_text("Tactical_Intro_Command_Bar_Movie_Name")));
+                            std::string err;
+                            if (!name.empty() && advisor_movie_.open(data_, audio_, name, true, &err)) {
+                                light_loop_ = false;
+                                intro_movie_line_ = intro;
+                            } else if (!name.empty()) {
+                                std::fprintf(stderr, "intro movie %s: %s\n", name.c_str(), err.c_str());
+                            }
+                            break;
+                        }
             }
             for (const TswCue& c : tsw_cues(b->special_weapon_events(), st)) {  // refixf t05: TSW_PLANET_DESTROY.md §11
                 if (c.kind == TswCue::Kind::Firing) tsw_shot_begin(c, *b, st);              // 0x2ccf30: the firing shot
@@ -1504,6 +1522,15 @@ void App::handle_menu_actions(const std::vector<ui::MenuAction>& acts) {
             default: break;
         }
     }
+}
+
+// mcx4 t14: the intro line ended -> its command bar movie stops (the slot goes back to the advisor loop rules).
+void App::intro_movie_speech_done(const std::string& event) {
+    if (intro_movie_line_.empty() || !ascii_iequals(event, intro_movie_line_)) return;
+    intro_movie_line_.clear();
+    if (story_movie_ || !advisor_movie_.playing()) return;
+    advisor_movie_.stop(audio_);
+    gpu_.hud.clear_image_page(kAdvisorPage);
 }
 
 }  // namespace alamo_game_app
