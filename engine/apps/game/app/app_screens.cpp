@@ -633,6 +633,14 @@ void App::open_battle_prompt(const galactic::GalacticSim& g, const galactic::Con
     const std::vector<objects::ObjectHandle> mine = conflict_units(g, c, me), theirs = conflict_units(g, c, enemy);
     prompt_.left = battle_force_summary(g, mine, icon, per);
     prompt_.right = battle_force_summary(g, theirs, icon, per);
+    // mcx4 t14: a side without a hero portrait shows its faction's commander icon (land infantry / space fighter).
+    auto faction_icon = [&g, this](int32_t p) -> std::string_view {
+        if (p < 0 || static_cast<size_t>(p) >= g.players().size()) return {};
+        const uint32_t fi = g.players()[static_cast<size_t>(p)].faction;
+        return fi < g.rules().factions.size() ? g.rules().factions[fi].xml_text(commander_icon_tag(prompt_.land)) : std::string_view();
+    };
+    apply_commander_icon(prompt_.left, faction_icon(me));
+    apply_commander_icon(prompt_.right, faction_icon(enemy));
     prompt_.title = planet_label(data_, ui_.text, g, c.planet) +
                     (prompt_.land ? txt("TEXT_TACTICAL_LAND_BATTLE_IS_PENDING", U": PLANETARY BATTLE IMMINENT!")
                                   : txt("TEXT_TACTICAL_SPACE_BATTLE_IS_PENDING", U": SPACE BATTLE IMMINENT!"));

@@ -229,6 +229,15 @@ BattleForceSummary battle_force_summary(const galactic::GalacticSim& g, std::spa
     return out;
 }
 
+std::string_view commander_icon_tag(bool land) {
+    if (land) return "Infantry_Icon_Name";  // ledger: consumes Faction.Infantry_Icon_Name
+    return "Fighter_Icon_Name";             // ledger: consumes Faction.Fighter_Icon_Name
+}
+
+void apply_commander_icon(BattleForceSummary& s, std::string_view faction_icon) {
+    if (!s.hero && !faction_icon.empty()) s.icon = std::string(faction_icon);
+}
+
 int32_t ar_result_magnitude(bool win, uint32_t n_own, uint32_t n_other) {
     const uint64_t a = win ? n_other : n_own, b = win ? n_own : n_other;
     return a > 3u * b ? 0 : a > b ? 1 : 2;

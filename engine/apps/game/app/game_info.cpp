@@ -207,6 +207,10 @@ ui::DroidLogInfo Holocron::droid_log(const GameSession& s, const GameData& d, co
         out.colors.push_back(i < advisor_colors.size() ? advisor_colors[i] : ui::Rgba8{0, 0, 0, 0});
     }
     out.entries = std::move(lines);
+    // mcx4 t14 (MCX4_T14_RE_ANSWERS "Faction.Helper_Icon_Name", droid log 0x9db60): the local faction's helper droid picture.
+    if (const int32_t me = s.local_player(); me >= 0 && static_cast<size_t>(me) < g->players().size())
+        if (const uint32_t f = g->players()[static_cast<size_t>(me)].faction; f < d.rules.factions.size())
+            out.picture = std::string(d.rules.factions[f].xml_text("Helper_Icon_Name"));  // ledger: consumes Faction.Helper_Icon_Name
     return out;
 }
 

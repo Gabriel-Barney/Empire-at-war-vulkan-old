@@ -922,6 +922,25 @@ void planet_weather_lines_test() {
     CHECK(game::planet_weather_lines("", "  ").name.empty() && game::planet_weather_lines("", "  ").info.empty());
 }
 
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "Faction.Infantry_Icon_Name family"): the battle pending side icon without a
+// hero is the faction's Infantry_Icon_Name (land) or Fighter_Icon_Name (space).
+// ledger: verifies Faction.Infantry_Icon_Name
+// ledger: verifies Faction.Fighter_Icon_Name
+void commander_icon_test() {
+    CHECK(game::commander_icon_tag(true) == "Infantry_Icon_Name" && game::commander_icon_tag(false) == "Fighter_Icon_Name");
+    game::BattleForceSummary s;
+    s.icon = "i_unit.tga";
+    game::apply_commander_icon(s, "i_rebel_infantry.tga");
+    CHECK(s.icon == "i_rebel_infantry.tga");
+    s.icon = "i_hero.tga";
+    s.hero = true;
+    game::apply_commander_icon(s, "i_rebel_infantry.tga");
+    CHECK(s.icon == "i_hero.tga");  // a hero portrait wins
+    s.hero = false;
+    game::apply_commander_icon(s, "");
+    CHECK(s.icon == "i_hero.tga");  // no faction icon: unchanged
+}
+
 void shows_hero_head_test() {
     static_assert(game::shows_hero_head(true, false) && game::shows_hero_head(false, true) && game::shows_hero_head(true, true));
     static_assert(!game::shows_hero_head(false, false));
@@ -3070,6 +3089,7 @@ int main() {
     shows_hero_head_test();         // mcx4 t14
     game_over_art_test();           // mcx4 t14
     planet_weather_lines_test();    // mcx4 t14
+    commander_icon_test();          // mcx4 t14
     movie_frame_cue_test();         // mcx4 t13
     story_ui_test();
     linked_overlay_test();

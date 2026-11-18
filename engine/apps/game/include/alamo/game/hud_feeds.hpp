@@ -123,6 +123,13 @@ struct BattleForceSummary {
 BattleForceSummary battle_force_summary(const galactic::GalacticSim& g, std::span<const objects::ObjectHandle> units,
                                         const std::function<std::string(uint32_t type)>& icon, uint32_t ships_per_stack);
 
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "Faction.Infantry_Icon_Name family", commander icons 0x3df8b0): the Faction field that
+// gives a battle-pending side without a hero portrait its icon: Infantry_Icon_Name in a land battle, Fighter_Icon_Name
+// in a space battle.
+std::string_view commander_icon_tag(bool land);
+// The side's icon: the hero's when `s.hero`, else the faction icon, else ([port]) the lead unit's.
+void apply_commander_icon(BattleForceSummary& s, std::string_view faction_icon);
+
 int32_t ar_result_magnitude(bool win, uint32_t n_own, uint32_t n_other);
 
 ui::HudBuildOption::Block galactic_build_block(commands::RejectReason why);
