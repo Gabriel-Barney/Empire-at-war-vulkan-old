@@ -1276,6 +1276,9 @@ bool App::reticle_orders(const ui::OrderContext& ctx, std::vector<commands::Even
         e.set("object", ref.ship).set("hardpoint", ref.index).set("player", static_cast<uint32_t>(local_player()));
         cmds.push_back(std::move(e));
         ++reticle_orders_;
+        // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Repairing", cursor action 0x41f70 [H]): the click that queues
+        // the repair plays the local faction's line, 2D, once.
+        audio_.faction_sfx("SFXEvent_HUD_Repairing");  // ledger: consumes Faction.SFXEvent_HUD_Repairing
         return true;
     }
     for (commands::EventData& e : cmds) {

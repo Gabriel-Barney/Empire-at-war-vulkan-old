@@ -1005,6 +1005,13 @@ public:
     // mcx4 t13 (presentation feed, this tick, cleared at the start of tick()): the victim of every asteroid field damage
     // hit, in service order (SFXEvent_Damaged_By_Asteroid, 0x436920).
     std::span<const objects::ObjectId> asteroid_hits() const { return l1_asteroid_hits_; }
+    // mcx4 t13 (presentation feed, this tick): gravity control generators that came under base power (on) or lost it
+    // (AbilityEventKind::GravityFieldPower, TRU1_GRAVITY_FIELD.md §1.2), in event order.
+    struct GravityPowerEvent {
+        objects::ObjectId generator = objects::kNoObjectId;
+        bool on = false;
+    };
+    std::span<const GravityPowerEvent> gravity_power_changes() const { return gravity_power_; }
     // Field effects (L1_S4_REMAINING §3.3), serviced at the start of the combat object pass (phase D, ascending id):
     // NEBULA objects - entry cancels every active ability, lockout stamp (Nebula_Ability_Disable_Time); SHIELDED
     // objects - ion-storm stamp (shields down, DEFEND blocked for Ion_Storm_Shield_Disable_Time); ASTEROID_FIELD_DAMAGE
@@ -2379,6 +2386,7 @@ private:
     L1Constants l1_k_;
     std::vector<objects::ObjectId> l1_in_asteroid_;  // ASTEROID_FIELD_DAMAGE stamps set (ascending id)
     std::vector<objects::ObjectId> l1_asteroid_hits_;  // mcx4 t13: presentation only (not saved / hashed)
+    std::vector<GravityPowerEvent> gravity_power_;     // mcx4 t13: presentation only (not saved / hashed)
     void l1_fields(uint32_t frame, SimRng& rng);  // BattleHooks::before_units (combat phase D start)
     // --- OI tactical: crush (MOVEMENT.md 5.5): the movement tick's CrushEvents, applied as Take_Damage at combat phase
     //     D start (BattleHooks::before_units) so the deaths are reported by this tick's combat. ---

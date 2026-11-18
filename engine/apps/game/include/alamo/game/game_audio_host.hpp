@@ -83,6 +83,7 @@ struct GameAudioStats {
     uint64_t special_weapon_lines = 0;                                             // mcx4 t13 batch G
     uint64_t base_shield_lines = 0;                                                // mcx4 t13 batch I
     uint64_t pop_cap_lines = 0;                                                    // mcx4 t13 batch J
+    uint64_t gravity_lines = 0;                                                    // mcx4 t13 batch K
 };
 
 class GameAudioHost {

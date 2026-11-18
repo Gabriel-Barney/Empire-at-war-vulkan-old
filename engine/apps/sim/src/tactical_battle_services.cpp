@@ -147,6 +147,7 @@ void TacticalBattle::build_service_graph() {
         story_garrisoned_.clear();  // S4: this tick's garrison entries / structure captures
         story_captured_.clear();
         l1_asteroid_hits_.clear();  // mcx4 t13
+        gravity_power_.clear();
         // mcx4 t13: drop only what the last tick already reported; exits ordered between ticks (Leave_Garrison, eject)
         // stay for this tick's readers.
         story_vacated_.erase(story_vacated_.begin(), story_vacated_.begin() + static_cast<std::ptrdiff_t>(story_vacated_mark_));

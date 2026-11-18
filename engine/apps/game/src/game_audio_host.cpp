@@ -803,6 +803,14 @@ void GameAudioHost::cue_lines(const sim::TacticalBattle& battle, const objects::
                     ev = nth_field(lf->fields, special_weapon_tag(fired, own), types.get_int(t, "Special_Weapon_Target_Action_Index"));
                 if (!ev.empty() && game_->gui_sfx(ev)) ++stats_.special_weapon_lines;
             }
+    // Gravity control (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Gravity_Control_Generator_On family", TRU1_GRAVITY_FIELD.md
+    // §1.2): a generator's power change plays the local faction's line, 2D, whoever owns the generator.
+    for (const sim::TacticalBattle::GravityPowerEvent& e : battle.gravity_power_changes()) {
+        // ledger: consumes Faction.SFXEvent_HUD_Gravity_Control_Generator_On
+        // ledger: consumes Faction.SFXEvent_HUD_Gravity_Control_Generator_Off
+        faction_sfx(e.on ? "SFXEvent_HUD_Gravity_Control_Generator_On" : "SFXEvent_HUD_Gravity_Control_Generator_Off");
+        ++stats_.gravity_lines;
+    }
     // Tactical pop cap (P4_SIM_SYSTEMS §2.7.3, MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Tactical_Unit_Cap_Reached family"):
     // once each time the local player's room for one more unit turns false; the local faction's line, 2D.
     if (local_player >= 0) {
