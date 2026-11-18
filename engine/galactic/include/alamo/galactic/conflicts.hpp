@@ -254,9 +254,12 @@ public:
     // Absent: the campaign's Is_Autoresolve_Allowed false (GalacticSim::campaign_autoresolve_disabled), the value +0x41
     // starts with.
     std::function<bool(const ConflictInfo&)> story_lock;
-    // The auto-resolve lock of a conflict: story_lock (or the campaign flag) or, in a story campaign, its (planet, land /
-    // space) pair in Autoresolve_Exclusion_Locations (Q7.4). A locked conflict skips the overrun check (single player:
-    // 0x2b92e0 / 0x2b76a0; AI vs AI still auto-resolves), and the host makes the human fight it.
+    // The story lock 0x4472a0 of a conflict: story_lock, or the campaign flag. It suppresses the overrun check (single
+    // player: 0x2b92e0 / 0x2b76a0; AI vs AI still auto-resolves).
+    bool story_locked(const ConflictInfo& c) const;
+    // The human's auto-resolve lock: story_locked() or, in a story campaign, the conflict's (planet, land / space) pair in
+    // Autoresolve_Exclusion_Locations (Q7.4: 0x4471b0, read only by the banner and the HUD, so the exclusion list does not
+    // touch the overrun check). The host makes the human fight a locked conflict.
     bool autoresolve_locked(const ConflictInfo& c) const;
 
     // ---- ConflictHooks ----

@@ -56,6 +56,7 @@
 
 namespace alamo::data {
 class GameDatabase;
+struct CampaignDef;
 }
 
 namespace alamo::galactic {
@@ -127,6 +128,12 @@ struct CampaignOptions {
 // (Starting_Credits / Starting_Forces / Home_Location / AI_Player_Control / Starting_Active_Player)
 // plus the first Is_Neutral faction, in FactionFiles order [L: the original's player-list order is not
 // recovered]. AI = an AI_Player_Control entry other than "None".
+// mcx4 t01 / t07: reads into `s` the campaign rule fields of MCX4_RE_ANSWERS_GALACTIC Q1 / Q7.4 / Q7.6 -
+// Special_Case_Production, Corruption_Level_Override, Is_Autoresolve_Allowed, Is_Story_Campaign and
+// Autoresolve_Exclusion_Locations (names resolved through `rules`; unresolved entries are dropped with a diagnostic).
+// Called by build_campaign_setup.
+void read_campaign_rule_fields(const data::CampaignDef& c, const GalacticRules& rules, GalacticSetup& s,
+                               std::vector<std::string>* diagnostics = nullptr);
 GalacticSetup build_campaign_setup(const data::GameDatabase& db, const GalacticRules& rules, std::string_view campaign,
                                    const CampaignOptions& options = {}, std::vector<std::string>* diagnostics = nullptr);
 

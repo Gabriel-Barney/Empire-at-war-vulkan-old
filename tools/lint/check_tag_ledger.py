@@ -256,7 +256,13 @@ def main(argv):
     if "--selftest" in argv:
         return selftest(gen)
     if "--gaps" in argv:
-        group = argv[argv.index("--group") + 1] if "--group" in argv and argv.index("--group") + 1 < len(argv) else None
+        group = None
+        if "--group" in argv:
+            k = argv.index("--group") + 1
+            if k >= len(argv) or argv[k].startswith("--"):
+                print("tag ledger: --group needs a group name (" + ", ".join(g for g, _ in GAP_GROUPS) + ")")
+                return 2
+            group = argv[k]
         return gaps(gen, group, "--counts" in argv)
     rc = check_tags(gen)
     rc_b = check_bindings(load(GEN_BINDINGS, "gen_bindings"))

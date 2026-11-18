@@ -1908,7 +1908,7 @@ int32_t GalacticSim::route_toll(int32_t player, uint32_t fleet, std::span<const 
     if (!valid_player(player) || fleet >= fleets_.size() || !fleets_[fleet].alive || path.size() < 3) return 0;
     const PlayerState& mover = players_[static_cast<size_t>(player)];
     if (mover.faction >= rules_->factions.size() || !rules_->factions[mover.faction].benefits_from_corruption) return 0;
-    const bool ai = mover.ai && mover.difficulty < rules_->difficulties.size();
+    const DifficultyRules* ai = ai_difficulty(player);  // an AI player's adjustment (none: the all-1.0 one, no scaling)
     int32_t total = 0;
     for (size_t i = 1; i + 1 < path.size(); ++i) {
         const PlanetIndex pl = path[i];
@@ -1922,7 +1922,7 @@ int32_t GalacticSim::route_toll(int32_t player, uint32_t fleet, std::span<const 
             const uint32_t t = static_cast<uint32_t>(store_->type(m));
             if (t < rules_->types.size()) sum += cheap ? rules_->types[t].cheap_bribe_cost : rules_->types[t].expensive_bribe_cost;
         }
-        if (ai) sum = static_cast<int32_t>(static_cast<float>(sum) * rules_->difficulties[mover.difficulty].bribe_cost_multiplier);
+        if (ai) sum = static_cast<int32_t>(static_cast<float>(sum) * ai->bribe_cost_multiplier);
         total += sum;
         if (payees) payees->emplace_back(owner, sum);
     }

@@ -1994,6 +1994,36 @@ void test_route_bribe_toll() {
     }
 }
 
+// mcx4 t01 / t07: the XML-to-setup step of the campaign rule fields (read_campaign_rule_fields), from a hand-built
+// campaign definition: value shapes, pair order, land / space matching, unresolved names dropped, last bool wins.
+void test_campaign_rule_fields_parse() {
+    std::printf("  mcx4: campaign rule fields parse\n");
+    const GalacticRules rules = make_oi_rules(1.0f);
+    data::CampaignDef c;
+    c.name = "Synthetic";
+    c.raw = {{"Special_Case_Production", "Empire, PlanetA, Barracks"},
+             {"Special_Case_Production", "Rebel, NoSuchPlanet, Barracks"},
+             {"Special_Case_Production", "Empire, PlanetB"},
+             {"Corruption_Level_Override", " PlanetB, 1, NoSuchPlanet, 3, PlanetA, 0 "},
+             {"Is_Autoresolve_Allowed", "True"},
+             {"Is_Autoresolve_Allowed", "False"},
+             {"Is_Story_Campaign", "yes"},
+             {"Autoresolve_Exclusion_Locations", "PlanetA, land, PlanetB, SPACE, PlanetC, orbit"},
+             {"Autoresolve_Exclusion_Locations", "PlanetC, Land"}};
+    GalacticSetup s;
+    std::vector<std::string> diag;
+    read_campaign_rule_fields(c, rules, s, &diag);
+    CHECK(s.special_case_production == (std::vector<std::pair<uint32_t, uint32_t>>{{tPlanetA, tBarracks}}));
+    CHECK(s.corruption_level_override == (std::vector<std::pair<uint32_t, int32_t>>{{tPlanetB, 1}, {tPlanetA, 0}}));
+    CHECK(!s.autoresolve_allowed && s.story_campaign);
+    CHECK(s.autoresolve_exclusions ==
+          (std::vector<std::pair<uint32_t, bool>>{{tPlanetA, true}, {tPlanetB, false}, {tPlanetC, true}}));
+    CHECK(diag.size() == 3u);  // the unknown planet twice and the "orbit" kind; a short entry is skipped silently
+    GalacticSetup d;            // defaults: allowed, not a story campaign, nothing listed
+    read_campaign_rule_fields(data::CampaignDef{}, rules, d);
+    CHECK(d.autoresolve_allowed && !d.story_campaign && d.special_case_production.empty() && d.autoresolve_exclusions.empty());
+}
+
 // SG 1.3: buildability order and reason codes.
 void test_oi_buildability() {
     std::printf("  oi: buildability\n");
@@ -3083,6 +3113,13 @@ void test_foc_campaign_fields(const FocData& d) {
     const GalacticSetup uw = build_campaign_setup(d.db, d.rules, "Full_Story_Campaign_Underworld");
     CHECK(uw.story_campaign && uw.autoresolve_allowed && uw.autoresolve_exclusions.empty() && uw.corruption_level_override.empty());
     CHECK(!hotm.story_campaign && hotm.autoresolve_allowed);
+    // t05 (Q5.1): the bribe fields from FoC's own files.
+    for (const DifficultyRules& dr : d.rules.difficulties) CHECK(dr.bribe_cost_multiplier == 0.25f);
+    const uint32_t reb_f = d.rules.find_faction("Rebel"), emp_f = d.rules.find_faction("Empire");
+    CHECK(emp_f != kNoIndex && d.rules.factions[emp_f].easily_bribed && reb_f != kNoIndex && !d.rules.factions[reb_f].easily_bribed);
+    const uint32_t krayt = d.rules.find_type("Krayt_Class_Destroyer"), sb_e = d.rules.find_type("Empire_Star_Base_1");
+    CHECK(krayt != kNoIndex && d.rules.types[krayt].cheap_bribe_cost == 700 && d.rules.types[krayt].expensive_bribe_cost == 1000);
+    CHECK(sb_e != kNoIndex && d.rules.types[sb_e].cheap_bribe_cost == 1 && d.rules.types[sb_e].expensive_bribe_cost == 1);  // ctor 1
 }
 
 void test_foc_hotm_hop_route(const FocData& d) {
@@ -3338,6 +3375,7 @@ int main(int argc, char** argv) {
         test_oi_stealth();
         test_oi_base_info();
         test_oi_buildability();
+        test_campaign_rule_fields_parse();
         test_special_case_production();
         test_corruption_level_override();
         test_campaign_autoresolve_rules();

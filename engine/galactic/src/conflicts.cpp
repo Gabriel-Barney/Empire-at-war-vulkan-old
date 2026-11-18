@@ -602,8 +602,8 @@ void ConflictManager::run(ConflictKind kind) {
                 }
                 const bool hum = human(head.attacker) || human(head.defender);
                 int32_t overrun_loser = kNoPlayer;
-                // mcx4 t07 (Q7.6): the story / campaign auto-resolve lock suppresses the overrun check.
-                if (rules_->overrun_multiple != 0.0f && !autoresolve_locked(head)) {
+                // mcx4 t07 (Q7.6): the story / campaign auto-resolve lock suppresses the overrun check (not the exclusion list).
+                if (rules_->overrun_multiple != 0.0f && !story_locked(head)) {
                     // q6 t18: the side strengths of 0x2ab880 (overrun_strength, AI_GALACTIC_TOKENS §9.12).
                     const bool space = kind == ConflictKind::Space;
                     const float ap = overrun_strength(head, false, space), dp = overrun_strength(head, true, space);
@@ -1194,9 +1194,12 @@ bool ConflictManager::begin_battle(const ConflictInfo& head, Linked linked, uint
     return start_battle && start_battle(request_);
 }
 
+bool ConflictManager::story_locked(const ConflictInfo& c) const {
+    return story_lock ? story_lock(c) : sim_->campaign_autoresolve_disabled();
+}
+
 bool ConflictManager::autoresolve_locked(const ConflictInfo& c) const {
-    const bool lock = story_lock ? story_lock(c) : sim_->campaign_autoresolve_disabled();
-    return lock || sim_->autoresolve_excluded(c.planet, c.kind == ConflictKind::Land);
+    return story_locked(c) || sim_->autoresolve_excluded(c.planet, c.kind == ConflictKind::Land);
 }
 
 void ConflictManager::finish_battle(const BattleResult& result, LinkedResolution resolution) {
