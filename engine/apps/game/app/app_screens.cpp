@@ -1,5 +1,6 @@
 // alamo_game App: screens, panels, saves, battle prompts, holocron / encyclopedia, cursor (split from game_main.cpp).
 #include "game_app.hpp"
+#include "alamo/data/values.hpp"  // mcx4 t14: trim
 #include "alamo/vfs/vfs.hpp"  // q6: the mod layer decides the buy list's [port interim rule]
 #include "alamo/sim/l1_loaders.hpp"  // modc t49: skirmish_option_defaults
 
@@ -677,7 +678,7 @@ void App::open_linked_banner(const galactic::GalacticSim& g, const sim::Campaign
 
 // STORY.md §1.6 step 3 / GALACTIC_DIALOGS §2.1: a Story_Dialog event fired (its record is already in the sim's holocron
 // list). Popup false (every shipped event): b_story_arc_g flashes, the faction's Default_Transmission_Message
-// (TEXT_ENCYCLOPEDIA_HOLOCRON_UPDATED for every shipped faction [port: the port reads no faction field for it]) is a white
+// (TEXT_ENCYCLOPEDIA_HOLOCRON_UPDATED for every shipped faction; mcx4 t14: read from the local faction) is a white
 // screen-text line, and SFXEvent_Mission_Added plays only when the event has Story_Dialog_SFX (no shipped event does).
 // Popup true: the summary opens at this record instead.
 void App::add_holocron_chapter(const StoryDialogMeta& meta, size_t lines) {
@@ -698,7 +699,14 @@ void App::add_holocron_chapter(const StoryDialogMeta& meta, size_t lines) {
         return;
     }
     holocron_flash_ = true;
-    screen_line(txt("TEXT_ENCYCLOPEDIA_HOLOCRON_UPDATED", U"The mission holocron has been updated."), ui::Rgba8{255, 255, 255, 255});
+    std::string msg = "TEXT_ENCYCLOPEDIA_HOLOCRON_UPDATED";
+    for (const data::GameObjectRecord* rec : data_.db.find_game_objects(local_faction()))
+        if (rec->type == "Faction") {
+            const std::string_view t = data::trim(rec->element.child_text("Default_Transmission_Message"));
+            if (!t.empty()) msg = std::string(t);
+            break;
+        }
+    screen_line(txt(msg, U"The mission holocron has been updated."), ui::Rgba8{255, 255, 255, 255});
     if (meta.sfx) audio_.faction_sfx("SFXEvent_Mission_Added");
 }
 

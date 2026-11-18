@@ -367,6 +367,7 @@ public:
     // HUD_GAPS §2.2: the encyclopedia config (GameConstants) with the profile's IDC_DELAY_TOOLTIPS; the type of each recently
     // hovered object (the pop-up keeps drawing its shown_object() while fading out after the hover is lost).
     ui::TooltipConfig ency_cfg_;
+    ui::HudConstants hud_consts_;  // mcx4 t14 / t15: GameConstants HUD values (hud_constants_from)
     std::vector<std::pair<uint32_t, objects::TypeIndex>> ency_types_;
     // Gameplay options (IDD gameplay dialog). ui1 t02: kept between runs with the audio volumes, camera settings and key
     // bindings in game_options.txt (game_display.hpp OptionsProfile; live play only, app_options.cpp).

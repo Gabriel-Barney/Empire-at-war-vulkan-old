@@ -331,8 +331,9 @@ public:
     // instance id (0 = not heard / refused).
     static constexpr const char* kFleetHyperspaceEvent = "Galactic_Fleet_Hyperspace";
     uint32_t fleet_departure(bool local_owner, bool local_sees);
-    // t08 (GAME_SCORING, STRATEGIC_GAPS §7.4): the campaign-end dialog opened - the local faction's
-    // Music_Event_Strategic_<Win/Lose>[_Vs_Faction] (GameAudio::battle_end with strategic set), music mode 16.
+    // t08 (GAME_SCORING, STRATEGIC_GAPS §7.4): the campaign-end dialog opened - Audio.xml
+    // Music_Event_Battle_End_Summary_Screen_<Win/Lose>, music mode 16 (mcx4 t13: retail never reads the faction's
+    // Music_Event_Strategic_*; `enemy_faction` is unused).
     void campaign_end(bool won, std::string_view enemy_faction = {});
     // Lua presentation audio ops (Play_Music, Stop_All_Speech, SFX permissions, ...) of events with seq >= *next_seq
     // through GameAudio (audio::apply_presentation_audio); *next_seq advances. No-op without engine/lua.

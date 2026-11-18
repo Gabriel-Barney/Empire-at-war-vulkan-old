@@ -6,6 +6,8 @@
 
 #include "alamo/core/ascii.hpp"
 #include "alamo/data/game_database.hpp"
+#include "alamo/data/values.hpp"  // parse_floats
+#include "alamo/data/xml.hpp"
 
 namespace alamo::game {
 
@@ -196,7 +198,7 @@ bool StoryPresenter::on_reward(std::string_view type, const std::vector<std::str
             map_flashes_.push_back({std::string(param(p, 1)), now, now + kFlashSeconds * 6});
         }
     } else if (ty == "FLASH_PLANET" || ty == "FLASH_OBJECT") {
-        if (!param(p, 1).empty()) object_flashes_.push_back({std::string(param(p, 1)), now, now + 0.4 * 3});  // GUI_Flash_Duration
+        if (!param(p, 1).empty()) object_flashes_.push_back({std::string(param(p, 1)), now, now + config_.flash_duration * 3});  // GUI_Flash_Duration
     } else if (ty == "FORCE_CLICK_GUI") {
         if (!param(p, 1).empty()) forced_clicks_.push_back(std::string(param(p, 1)));
     } else if (ty == "HIDE_TUTORIAL_CURSOR") {
@@ -414,6 +416,21 @@ std::vector<std::string> split_story_ids(std::string_view list) {
 void load_story_advisor_config(const data::GameConstants& gc, StoryPresenter::Config& out) {
     out.advisor_hint_interval = std::max(0.0, static_cast<double>(gc.get_float("Advisor_Hint_Interval", static_cast<float>(out.advisor_hint_interval))));
     out.advisor_hint_duration = std::max(0.0, static_cast<double>(gc.get_float("Advisor_Hint_Duration", static_cast<float>(out.advisor_hint_duration))));
+    out.flash_duration = std::max(0.0, static_cast<double>(gc.get_float("GUI_Flash_Duration", static_cast<float>(out.flash_duration))));
+}
+
+void load_story_colors(const data::XmlNode& gc, StoryPresenter::Colors& out) {
+    const auto color = [&gc](std::string_view tag, StoryColor& c) {
+        const std::string_view t = gc.child_text(tag);
+        float v[4] = {0.0f, 0.0f, 0.0f, 255.0f};
+        if (t.empty() || data::parse_floats(t, v, 4) < 3) return;
+        const auto byte = [](float f) { return static_cast<uint8_t>(std::clamp(std::lround(f), 0L, 255L)); };
+        c = StoryColor{byte(v[0]), byte(v[1]), byte(v[2]), byte(v[3])};
+    };
+    color("Hint_Text_Color", out.hint);
+    color("System_Text_Color", out.system);
+    color("Task_Text_Color", out.task);
+    color("Speech_Text_Color", out.speech);
 }
 
 std::vector<std::string> faction_advisor_hints(const data::GameDatabase& db, std::string_view faction, uint8_t mode) {

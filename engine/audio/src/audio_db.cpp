@@ -137,14 +137,18 @@ const FieldTable<MusicEvent>& music_fields() {
         ALAMO_F("Fade_Out_Previous_Seconds", fade_out_previous_seconds),
         ALAMO_B("Loop", loop),
         ALAMO_B("MSS_Internal_Loop", mss_internal_loop),
+        // mcx4 t13 (MCX4_T13_RE_ANSWERS "DynamicTrack.Files family" [H]): xml_field_tables.md files the music parser's
+        // Files / Volume_Percent under DynamicTrack (DynamicTrackFX.xml has neither); the music update 0x2d2ab0 reads them.
+        // ledger: consumes DynamicTrack.Files
         ALAMO_L("Files", files),
         ALAMO_L("Text_ID", text_ids),
+        // ledger: consumes DynamicTrack.Volume_Percent
         ALAMO_I("Volume_Percent", volume_percent),
     };
     return t;
 }
 
-// SpeechEvent has no table in xml_field_tables.md; these are the tags the shipped files use.
+// SpeechEvent has no segment of its own in xml_field_tables.md; these are the tags the shipped files use.
 const FieldTable<SpeechEvent>& speech_fields() {
     static const FieldTable<SpeechEvent> t = {
         ALAMO_L("Files", files),

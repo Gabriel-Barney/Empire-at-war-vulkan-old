@@ -30,7 +30,7 @@ classes (the shared typed readers) and for the other classes the file names (lit
 
 Other columns: code (parser type code), consumers (how many files read it, and the first), spec (the first docs/re
 page that names the tag in backticks), base_uses (how often base FoC's XML in extracted/foc_data_text.zip writes an
-element of that name, any class), tier (1 for every row until a row says otherwise: TIER_OVERRIDES).
+element of that name, any class, outside XML comments), tier (1 for every row until a row says otherwise: TIER_OVERRIDES).
 corpus_uses / corpus_mods are filled by the corpus runner (mcx7), not here.
 
 Outputs (both generated, never edited by hand):
@@ -80,11 +80,25 @@ RETAIL_UNUSED = {
     ("Faction", "Can_Win_By_Destroying_Super_Weapon"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.5 [H]",
     ("Faction", "Corruption_Tactical_Build_Pad_Time_Multipliers"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.2 [H]",
     ("Faction", "Credits_Accumulation_Factor"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.1 [M]",
+    ("Faction", "Land_Surrender_SFXEvent"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.Land_Surrender_SFXEvent family [H]",
+    ("Faction", "Music_Event_Strategic_Lose"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.Music_Event_Strategic_Win family [H]",
+    ("Faction", "Music_Event_Strategic_Win"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.Music_Event_Strategic_Win family [H]",
+    ("Faction", "Reinforcements_Requesting_SFXEvent"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.Reinforcements_Selection_SFXEvent family [H]",
     ("Faction", "SFXEvent_Build_Impossible_Location_Blockaded"): "docs/re/P4_SIM_SYSTEMS.md §2.7.3 [M: byte scan]",
     ("Faction", "SFXEvent_HUD_Base_Shield_Penetrated"): "docs/re/TRU1_A_RE_ANSWERS.md Penetration SFX [M: byte scan]",
+    ("Faction", "SFXEvent_HUD_Build_Pad_Captured"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SFXEvent_HUD_Landing_Zone_Captured family [H]",
+    ("Faction", "SFXEvent_HUD_Build_Pad_Lost"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SFXEvent_HUD_Landing_Zone_Captured family [H]",
     ("Faction", "SFXEvent_HUD_Enemy_Base_Shield_Penetrated"): "docs/re/TRU1_A_RE_ANSWERS.md Penetration SFX [M: byte scan]",
+    ("Faction", "SFXEvent_HUD_Enemy_Special_Weapon_Charging"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SFXEvent_HUD_Special_Weapon_Ready family [H]",
+    ("Faction", "SFXEvent_HUD_Landing_Zone_Captured"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SFXEvent_HUD_Landing_Zone_Captured family [H]",
+    ("Faction", "SFXEvent_HUD_Landing_Zone_Lost"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SFXEvent_HUD_Landing_Zone_Captured family [H]",
+    ("Faction", "SFXEvent_HUD_Last_Landing_Zone_Lost"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SFXEvent_HUD_Landing_Zone_Captured family [H]",
+    ("Faction", "SFXEvent_HUD_Special_Weapon_Charging"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SFXEvent_HUD_Special_Weapon_Ready family [H]",
     ("Faction", "SFXEvent_Max_Credits_Limit_Reached"): "docs/re/P4_SIM_SYSTEMS.md §2.7.3 [M: byte scan]",
     ("Faction", "Space_Retreat_Off_Map_Dest_Pos"): "docs/re/TRU1_C_RE.md §2.1 [H]",
+    ("Faction", "Space_Surrender_SFXEvent"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.Land_Surrender_SFXEvent family [H]",
+    ("Faction", "SpeechEvent_Super_Weapon_Enemy_Moving_Into_Range"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SpeechEvent_Super_Weapon_Moving_Range_60_Seconds family [H]",
+    ("Faction", "SpeechEvent_Super_Weapon_Moving_Into_Range"): "docs/re/MCX4_T13_RE_ANSWERS.md Faction.SpeechEvent_Super_Weapon_Moving_Range_60_Seconds family [H]",
     ("GameConstants", "AutomaticAutoResolve"): "docs/re/MCX4_T09_RE_ANSWERS.md Q3 AutomaticAutoResolve [H]",
     ("GameConstants", "Camera_Stop_Left"): "docs/re/STRATEGIC_GAPS.md §7.1 [H]",
     ("GameConstants", "Camera_Stop_Right"): "docs/re/STRATEGIC_GAPS.md §7.1 [H]",
@@ -92,14 +106,18 @@ RETAIL_UNUSED = {
     ("GameConstants", "First_Strike_Extra_Damage_Percent"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.4 [H]",
     ("GameConstants", "First_Strike_Particle"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.4 [H]",
     ("GameConstants", "Fleet_Maintenance_Update_Delay_Seconds"): "docs/re/STRATEGIC_GAPS.md §2.3 [H]",
+    ("GameConstants", "Galactic_Zoom_Acceleration"): "docs/re/P1_CAMERA_INPUT.md §0 item 6 [M: no reader]",
     ("GameConstants", "Health_Bar_Scale"): "docs/re/STRATEGIC_GAPS.md §7.2 [H]",
     ("GameConstants", "Income_Redistribution"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.2 [H]",
     ("GameConstants", "Land_Health_Bar_Scale"): "docs/re/STRATEGIC_GAPS.md §7.2 [H]",
+    ("GameConstants", "Max_Galactic_Zoom_Distance"): "docs/re/P1_CAMERA_INPUT.md §0 item 6 [M: no reader]",
+    ("GameConstants", "Max_Galactic_Zoom_Speed"): "docs/re/P1_CAMERA_INPUT.md §0 item 6 [M: no reader]",
     ("GameConstants", "MaxCombatAccuracyAlignmentBonus"): "docs/re/MCX4_T10_RE_ANSWERS.md §16 [H]",
     ("GameConstants", "MaxCombatDamageAlignmentBonus"): "docs/re/MCX4_T10_RE_ANSWERS.md §16 [H]",
     ("GameConstants", "MaxCombatSensorRangeAlignmentBonus"): "docs/re/MCX4_T10_RE_ANSWERS.md §16 [H]",
     ("GameConstants", "MaximumSpecialStructuresLand"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.1 [H]",
     ("GameConstants", "MaximumSpecialStructuresSpace"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.1 [H]",
+    ("GameConstants", "Min_Galactic_Zoom_Speed"): "docs/re/P1_CAMERA_INPUT.md §0 item 6 [M: no reader]",
     ("GameConstants", "Min_Health_Bar_Scale"): "docs/re/STRATEGIC_GAPS.md §7.2 [H]",
     ("GameConstants", "Progressive_Taxation"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.2 [H]",
     ("GameConstants", "RepushDistance"): "docs/re/MOVEMENT.md §5.4 [H]",
@@ -108,12 +126,14 @@ RETAIL_UNUSED = {
     ("GameObjectType", "Build_Speech_Completed"): "docs/re/MCX4_T09_RE_ANSWERS.md Q7 Build_Speech_Completed [H]",
     ("GameObjectType", "Build_Speech_Stopped"): "docs/re/MCX4_T09_RE_ANSWERS.md Q7 Build_Speech_Stopped [H]",
     ("GameObjectType", "Build_Speech_Underway"): "docs/re/MCX4_T09_RE_ANSWERS.md Q7 Build_Speech_Underway [H]",
+    ("GameObjectType", "Destroyed_Space_Tactical_Map"): "docs/re/TACTICAL_GAPS.md §4.10 [M: ctor / dtor / copy only]",
     ("GameObjectType", "Disallows_Hyperspace_Retreat"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §11 [H]",
     ("GameObjectType", "Ground_Infantry_Turret_Target"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
     ("GameObjectType", "Ground_Vehicle_Turret_Target"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
     ("GameObjectType", "MinimumPushReturnDistance"): "docs/re/MOVEMENT.md §5.4 [H]",
     ("GameObjectType", "Projectile_Acceleration_Per_Frame"): "docs/re/MCX4_T10_RE_ANSWERS.md §8 [H]",
     ("GameObjectType", "Required_Timeline"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("GameObjectType", "SFXEvent_Bombard_Select_Target"): "docs/re/MCX4_T13_RE_ANSWERS.md GameObjectType.SFXEvent_Bombard_Incoming family [H]",
     ("GameObjectType", "Size_Value"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
     ("GameObjectType", "SpaceAutoResolveHitRate"): "docs/re/MCX4_T09_RE_ANSWERS.md Q4 [M: written, never read]",
     ("GameObjectType", "SpaceAutoResolveStunRate"): "docs/re/MCX4_T09_RE_ANSWERS.md Q4 [M: written, never read]",
@@ -520,11 +540,13 @@ def base_uses():
     if not os.path.isfile(FOC_ZIP):
         return counts
     el = re.compile(rb"<([A-Za-z_][A-Za-z0-9_]*)[\s>/]")
+    comment = re.compile(rb"<!--.*?-->", re.DOTALL)
     with zipfile.ZipFile(FOC_ZIP) as z:
         for name in sorted(z.namelist()):
             if not name.lower().endswith(".xml"):
                 continue
-            for m in el.finditer(z.read(name)):
+            # An element inside an XML comment is not a use (mcx4: RadarMap.xml's commented *_Position_LeftTop).
+            for m in el.finditer(comment.sub(b"", z.read(name))):
                 k = m.group(1).decode("ascii").lower()
                 counts[k] = counts.get(k, 0) + 1
     return counts

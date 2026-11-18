@@ -300,7 +300,36 @@ TooltipConfig tooltip_config_from(const data::XmlNode& root) {
     if (const std::string_view t = root.child_text("Encyclopedia_Min_Display_Time"); !t.empty())
         cfg.encyclopedia_min_display =
             static_cast<double>(data::parse_float_or(t, static_cast<float>(cfg.encyclopedia_min_display)));
+    // mcx4 t14: the encyclopedia pop-up layout (HUD_GAPS §2.2).
+    const auto num = [&root](std::string_view tag, float& out) {
+        if (const std::string_view t = root.child_text(tag); !t.empty()) out = data::parse_float_or(t, out);
+    };
+    num("Encyclopedia_Population_Offset", cfg.enc_population_x);
+    num("Encyclopedia_Name_Offset", cfg.enc_name_x);
+    num("Encyclopedia_Cost_Offset", cfg.enc_cost_x);
+    num("Encyclopedia_Icon_X_Offset", cfg.enc_icon_x);
+    num("Encyclopedia_Icon_Y_Offset", cfg.enc_icon_y);
+    num("Encyclopedia_Class_Y_Offset", cfg.enc_class_y);
     return cfg;
+}
+
+bool parse_rgba8(std::string_view text, Rgba8& out) {
+    float v[4] = {0.0f, 0.0f, 0.0f, 255.0f};
+    if (data::parse_floats(text, v, 4) < 3) return false;
+    const auto byte = [](float f) { return static_cast<uint8_t>(std::clamp(std::lround(f), 0L, 255L)); };
+    out = Rgba8{byte(v[0]), byte(v[1]), byte(v[2]), byte(v[3])};
+    return true;
+}
+
+HudConstants hud_constants_from(const data::XmlNode& root) {
+    HudConstants c;
+    if (const std::string_view t = root.child_text("Health_Bar_Spacing"); !t.empty())
+        c.health_bar_spacing = data::parse_float_or(t, c.health_bar_spacing);
+    if (const std::string_view t = root.child_text("Radar_Colorize_Selected_Units"); !t.empty())
+        c.radar_colorize_selected = data::parse_bool_or(t, c.radar_colorize_selected);
+    parse_rgba8(root.child_text("Radar_Selected_Units_Color"), c.radar_selected_color);
+    parse_rgba8(root.child_text("Battle_Pending_Message_Color"), c.battle_pending_color);
+    return c;
 }
 
 void TooltipState::update(const HudButtons& buttons, const ComponentTable& table, const TooltipConfig& cfg, double now) {

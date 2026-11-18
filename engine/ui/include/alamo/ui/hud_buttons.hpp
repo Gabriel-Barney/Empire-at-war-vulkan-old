@@ -140,11 +140,27 @@ struct TooltipConfig {
     bool delay_tooltips = false;
     float encyclopedia_fade_rate = 4.0f;       // Encyclopedia_Fade_Rate: alpha per second, in and out
     double encyclopedia_min_display = 1.0;     // Encyclopedia_Min_Display_Time (s): shown at least this long
+    // mcx4 t14 (HUD_GAPS §2.2): the pop-up layout, canvas units from the panel's top-left corner: GameConstants
+    // Encyclopedia_Population_Offset / _Name_Offset / _Cost_Offset (x of the band's columns), _Icon_X_Offset /
+    // _Icon_Y_Offset (the icon, +y up) and _Class_Y_Offset (the class line below the band). FoC 11 / 68 / 258 / 39 / -12 / 5.
+    float enc_population_x = 11.0f, enc_name_x = 68.0f, enc_cost_x = 258.0f, enc_icon_x = 39.0f, enc_icon_y = -12.0f,
+          enc_class_y = 5.0f;
     double encyclopedia_wait() const { return delay_tooltips ? long_encyclopedia_delay : encyclopedia_delay; }
 };
 // GameConstants Tooltip_Delay / Encyclopedia_Delay / Long_Encyclopedia_Delay (ms), Encyclopedia_Fade_Rate (/s) and
 // Encyclopedia_Min_Display_Time (s) from a parsed GameConstants root.
 TooltipConfig tooltip_config_from(const data::XmlNode& game_constants_root);
+
+// mcx4 t14 / t15: HUD values the host copies into the frames (GameConstants; defaults = FoC's values).
+struct HudConstants {
+    float health_bar_spacing = 2.0f;               // Health_Bar_Spacing (pixels between stacked bars, UI.md §1.2)
+    bool radar_colorize_selected = true;           // Radar_Colorize_Selected_Units (UI.md §1.7)
+    Rgba8 radar_selected_color{209, 255, 209, 255};  // Radar_Selected_Units_Color
+    Rgba8 battle_pending_color{255, 32, 32, 240};  // Battle_Pending_Message_Color (GALACTIC_DIALOGS §1.3)
+};
+HudConstants hud_constants_from(const data::XmlNode& game_constants_root);
+// "r g b [a]" / "r, g, b[, a]" bytes (alpha 255 when absent); false (out unchanged) with fewer than three numbers.
+bool parse_rgba8(std::string_view text, Rgba8& out);
 
 class TooltipState {
 public:

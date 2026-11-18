@@ -724,6 +724,7 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
     if (choice_open_) {
         f.battle.active = true;
         f.battle.single = prompt_.story_pending || prompt_.no_autoresolve;
+        f.battle.color = hud_consts_.battle_pending_color;  // mcx4 t15: Battle_Pending_Message_Color
         f.battle.space = !prompt_.land;
         f.battle.planet = prompt_.planet_name;
         f.battle.left = {prompt_.left.icon, prompt_.left.units, static_cast<int32_t>(prompt_.left.stacks)};
@@ -950,6 +951,8 @@ void App::build_tactical_hud() {
     if (!radar_.empty()) hf.radar_image = &radar_;
     hf.radar_events = &radar_events_;
     hf.radar_settings = &radar_settings_;
+    hf.radar_colorize_selected = hud_consts_.radar_colorize_selected;  // mcx4 t15: Radar_Colorize_Selected_Units
+    hf.radar_selected_color = hud_consts_.radar_selected_color;        // Radar_Selected_Units_Color
     hf.radar_event_models = ui_.radar_models_ok;  // the event .alo models go through ui_.radar_drawer (Models2 step)
     radar_events_.update(dt_);
     queues_.clear();
