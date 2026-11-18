@@ -170,6 +170,8 @@ struct HudConstants {
     int32_t cb_flash_count = 4;                       // mcx4 t14: CB_Flash_Count (b_reinforcement flashes on a pool add)
     DefaultFonts fonts;                               // mcx4 t14: the GameConstants default fonts (FontCache::set_defaults)
     float text_reveal_rate = 120.0f;                  // mcx4 t14: Text_Reveal_Rate (story text typewriter, chars / s)
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q2): Num_Structures_For_Medium_Planet_Name / _Large_ (planet_label_class)
+    int32_t medium_planet_structures = 3, large_planet_structures = 5;
     // mcx4 t14 (MCX4_PRES_RE_ANSWERS_2 Q1): the countdown timer column. One font for every timer (empty name: Arial; FoC
     // writes Countdowns_Font_Name / _Size, tags the exe does not know, so the defaults stay); the top-left corner of the
     // column as screen fractions (tactical: the retreat timer; strategic: the build timers, Spacing apart).

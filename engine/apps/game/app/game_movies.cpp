@@ -61,7 +61,7 @@ bool MovieSlot::open(const GameData& data, GameAudioHost& audio, std::string_vie
     // [port].
     video::MovieEntry entry;
     bool have_entry = false;
-    bool credits_flag = false, halt_flag = false;
+    bool credits_flag = false, halt_flag = false, pause_flag = false;
     std::vector<Cue> cues;
     std::vector<int64_t> sfx_frames, speech_frames;
     std::vector<std::string> sfx_events, speech_events;
@@ -78,6 +78,8 @@ bool MovieSlot::open(const GameData& data, GameAudioHost& audio, std::string_vie
                     if (!ascii_iequals(n.attribute("Name"), entry.name)) continue;
                     credits_flag = data::parse_bool_or(n.child_text("Has_Credits"), false);
                     halt_flag = data::parse_bool_or(n.child_text("Halt_Game_Music"), false);
+                    // ledger: consumes Movie.Pause_Game_While_Playing
+                    pause_flag = data::parse_bool_or(n.child_text("Pause_Game_While_Playing"), false);
                     cues.clear();
                     for (auto& [frame, ev] : parse_frame_list(n.child_text("MusicEvent_Frame"))) cues.push_back({frame, std::move(ev)});
                     sfx_frames.clear();
@@ -132,6 +134,7 @@ bool MovieSlot::open(const GameData& data, GameAudioHost& audio, std::string_vie
     has_frame_ = false;
     alpha_ = entry.alpha;
     cannot_skip_ = entry.cannot_skip;
+    pause_game_ = pause_flag;  // mcx4 t14
     crawl_name_ = entry.text_crawl_name;  // storyb t13
     crawl_start_ = entry.text_crawl_start_frame;
     has_credits_ = credits_flag;
@@ -178,6 +181,7 @@ void MovieSlot::stop(GameAudioHost& audio) {
     has_credits_ = halt_music_ = false;
     has_frame_ = false;
     cannot_skip_ = false;
+    pause_game_ = false;
     name_.clear();
     crawl_name_.clear();
     crawl_start_ = 0;

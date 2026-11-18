@@ -358,6 +358,13 @@ HudConstants hud_constants_from(const data::XmlNode& root) {
     face("Tool_Tip_Font_Name", c.fonts.tooltip_face);  // ledger: consumes GameConstants.Tool_Tip_Font_Name
     pts("Tool_Tip_Font_Size", c.fonts.tooltip_size);   // ledger: consumes GameConstants.Tool_Tip_Font_Size
     pts("Text_Reveal_Rate", c.text_reveal_rate);  // ledger: consumes GameConstants.Text_Reveal_Rate
+    const auto count = [&last](std::string_view tag, int32_t& v) {
+        if (const std::string_view t = last(tag); !t.empty()) v = data::parse_int_or(t, v);
+    };
+    // ledger: consumes GameConstants.Num_Structures_For_Medium_Planet_Name
+    count("Num_Structures_For_Medium_Planet_Name", c.medium_planet_structures);
+    // ledger: consumes GameConstants.Num_Structures_For_Large_Planet_Name
+    count("Num_Structures_For_Large_Planet_Name", c.large_planet_structures);
     // mcx4 t14 (MCX4_PRES_RE_ANSWERS_2 Q1): the countdown timer column
     const auto num = [&last](std::string_view tag, float& v) {
         if (const std::string_view t = last(tag); !t.empty()) v = data::parse_float_or(t, v);

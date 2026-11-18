@@ -45,6 +45,7 @@ inline void hud_units_from_frame(const render::InterpolatedFrame& frame, std::sp
         u.selected = std::binary_search(selection.begin(), selection.end(), oid);
         u.hovered = oid == hovered;
         u.team_color = {to8(o.team_color.x), to8(o.team_color.y), to8(o.team_color.z), 255};
+        u.yaw_deg = static_cast<float>(std::atan2(o.facing.y, o.facing.x) * 57.29577951308232);  // mcx4 t14: radar icon turn
         u.jammed = frame.jamming.is_jammed(o.id);  // R5: the radar drops hostile jammed blips (tactical_hud.cpp)
         u.stealthed = frame.jamming.is_stealthed(o.id);  // R5: ... and hostile stealthed ones
         u.script_hidden = o.script_hidden;  // q6 t19: ... and Lua-hidden ones

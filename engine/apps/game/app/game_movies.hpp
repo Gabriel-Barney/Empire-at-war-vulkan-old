@@ -49,6 +49,9 @@ public:
     // Movies.xml music flags of the open movie (STRATEGIC_GAPS §7.3 / §7.4): Has_Credits (+0xD0, the movie-music flag ->
     // music mode 14), Halt_Game_Music (+0xD4) and the MusicEvent_Frame cues (mode 17, fired by update()).
     bool has_credits() const { return has_credits_; }
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q6, Bink player 0x44d920 / 0x44f130): Pause_Game_While_Playing of the open movie -
+    // the game mode is paused from the movie's start to its stop.
+    bool pauses_game() const { return pause_game_; }
     bool halt_music() const { return halt_music_; }
     // ui5 t02 / t12 (AUDIO.md §3.4): the open movie's Movies.xml captions, stepped by update() on the movie's frame
     // clock. `shows` is the text check (false for a missing text or "[TBL]"; unset: every caption shows). caption() is the
@@ -71,6 +74,7 @@ private:
     bool alpha_ = false;
     bool cannot_skip_ = false;
     bool has_credits_ = false, halt_music_ = false;
+    bool pause_game_ = false;  // mcx4 t14: Pause_Game_While_Playing
     bool music_started_ = false;                    // this slot told the audio host a movie began (stop() ends it)
     GameAudioHost* audio_ = nullptr;                // valid between open() and stop()
     struct Cue {

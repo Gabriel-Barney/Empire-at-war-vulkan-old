@@ -419,6 +419,8 @@ void App::post_tick() {
 
 void App::step_sim() {
     if (!session_ || hold_sim_ || script_hold_ || paused_ || battle_end_open_ || story_summary_open_) return;
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q6): a Pause_Game_While_Playing movie holds the game mode while it plays.
+    if ((full_movie_.playing() && full_movie_.pauses_game()) || (advisor_movie_.playing() && advisor_movie_.pauses_game())) return;
     if (load_intro_frames_ > 0) return;  // QA t11: the load screen reaches the screen before the push's blocking load
     const bool demo = screen_ == Screen::Menu && demo_session();  // OI host: the attract demo behind the main menu
     if ((screen_ == Screen::Menu && !demo) || screen_ == Screen::BattleLoad || screen_ == Screen::Quit) return;
@@ -533,6 +535,10 @@ void App::respond(const commands::EventData& ev) {
 void App::submit(commands::EventData ev, bool voice) {
     if (!session_) return;
     if (voice) respond(ev);  // UiOrder::voice false: the double-click order replays no unit response (spec §1.4)
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q10, click path 0x37250): the selected objects flash (rapid GUI flash). [port] every
+    // local Select order in battle (click, double click, box); retail's box path was not traced.
+    if (ev.type() == commands::EventType::Select && screen_ == Screen::Battle)
+        for (const uint32_t id : ev.ids("ids")) bview_.rapid_flash(id, now_s_);
     const std::string name(ev.def().name);
     std::string detail;  // galactic moves: which fleet / planet / player (the reason alone hid the playtest failure)
     if (ev.type() == commands::EventType::MoveObjectToObject)
