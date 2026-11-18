@@ -290,6 +290,24 @@ Read [H] (galaxy creation 0x292050, object query 0x2a9ff0):
 Answer: yes. In galactic mode a planet is any object whose `Behavior` or `GalacticBehavior` list holds `PLANET`, whatever its
 element tag, and planets exist only when a campaign's `Locations` (or a spawn) creates them. [H]
 
+## Get_Space_Station (mcx1 t09, D4)
+
+Read by the mcx1 lane from the decompiled export (`re_reference/ghidra`, 0x6021c0, `PlayerWrapper.Get_Space_Station`,
+`LUA_API.md`); behaviour only.
+
+Read [H]:
+- Valid only in space tactical mode (game mode type 2); in any other mode it writes the script warning
+  `PlayerWrapper::Get_Space_Station -- this command may only be used in space mode.` and returns nil.
+- It walks the player list in order and keeps the players allied with the calling player (the alliance test 0x2823e0,
+  `AI_TACTICAL.md`), the caller included.
+- For each such player it walks that player's object list and returns the **first** object whose behaviour slot table
+  (`OBJECT_RUNTIME.md` §4, +0x332 + id) has **DUMMY_STAR_BASE (0x5C)** attached and **CAPTURE_POINT (0x3D)** not attached.
+  The type's element tag is never read.
+- No match: nil.
+
+Inferred [M]: the order inside one player's object list was not read (the port takes the newest object first, `[port]` in
+`engine/lua/src/bind_objects.cpp` `m_get_space_station`).
+
 ## Function index (RVAs)
 
 | RVA | Role |

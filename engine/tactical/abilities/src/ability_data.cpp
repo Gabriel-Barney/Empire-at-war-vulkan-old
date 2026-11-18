@@ -403,6 +403,12 @@ SpecialAbilityDesc parse_special_ability(const data::XmlNode& e, const AbilityRe
     s.cls = special_class_from_tag(e.name());
     s.name = std::string(e.attribute("Name"));
     s.name_crc = s.name.empty() ? 0u : name_crc(s.name);
+    // mcx1 t10 (MCX1_RE_ANSWERS Q1, 0x48d340): without a Name attribute the original logs an error and parses no field
+    // of the ability (the object is still created); every shipped ability has one.
+    if (s.name.empty()) {
+        note(diag, e, "special ability <" + s.class_tag + "> has no Name attribute: none of its fields is read");
+        return s;
+    }
     const std::string_view style = last_text(e, "Activation_Style");
     s.style = activation_style_from_name(style);
     if (!style.empty() && s.style == ActivationStyle::None) note(diag, e, "unknown Activation_Style '" + std::string(style) + "'");
