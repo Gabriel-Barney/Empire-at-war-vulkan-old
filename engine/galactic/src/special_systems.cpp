@@ -334,6 +334,63 @@ bool GalacticSim::schedule_hero_respawn(ObjectHandle hero, PlanetIndex planet, f
     return true;
 }
 
+ActivatedAbilitySlot GalacticSim::activated_ability_slot(ObjectHandle unit, PlanetIndex planet) const {
+    ActivatedAbilitySlot out;
+    if (!store_->alive(unit) || !valid_planet(planet)) return out;
+    if (planet < story_gates_.planet.size() && (story_gates_.planet[planet] & StoryGates::kNoAbilities) != 0) return out;
+    // 0x2e6fe0 recurses into a fleet of exactly one unit; a larger fleet never matches.
+    if (const uint32_t f = fleet_of(unit); f != kNoFleet) {
+        if (fleets_[f].contents.size() != 1) return out;
+        unit = fleets_[f].contents[0];
+        if (!store_->alive(unit)) return out;
+    }
+    return activated_ability_slot_of(special(), static_cast<uint32_t>(store_->type(unit)));
+}
+
+ActivatedAbilitySlot activated_ability_slot_of(const SpecialRules& sp, uint32_t type) {
+    ActivatedAbilitySlot out;
+    const TypeSpecial& ts = sp.type(type);
+    auto has = [&](const std::vector<std::string>& names) {
+        auto listed = [&](const std::string& n) {
+            for (const std::string& want : names)
+                if (iequals(want, n)) return true;
+            return false;
+        };
+        for (const std::string& n : ts.ability_entry_names)
+            if (listed(n)) return true;
+        return false;
+    };
+    struct Kind {
+        int32_t kind;
+        const std::vector<std::string>* names;
+        const char* label;
+    };
+    const Kind order[] = {
+        {6, &sp.activated_destroy_planet, "TEXT_TOOLTIP_ABILITY_DESTROY_PLANET_NAME"},
+        {1, &sp.activated_slice, "TEXT_ABILITY_SLOT_SLICE"},
+        {9, &sp.activated_black_market, ""},
+        {2, &sp.activated_sabotage, ""},
+        {3, &sp.activated_system_spy, "TEXT_ABILITY_SLOT_SPY"},
+        {4, &sp.activated_neutralize_hero, "TEXT_ABILITY_SLOT_NEUTRALIZE_HERO"},
+        {5, &sp.activated_siphon_credits, "TEXT_ABILITY_SLOT_SIPHON_CREDITS"},
+        {7, &sp.activated_corrupt, ""},
+        {8, &sp.activated_remove_corruption, "TEXT_ABILITY_SLOT_REMOVE_CORRUPTION"},
+        {10, &sp.activated_hack, ""},
+    };
+    for (const Kind& k : order)
+        if (has(*k.names)) {
+            out.kind = k.kind;
+            out.label = k.label;
+            return out;
+        }
+    return out;
+}
+
+bool GalacticSim::hero_defeated(ObjectHandle hero, PlanetIndex planet) {
+    if (!store_->alive(hero) || !is_hero_type(static_cast<uint32_t>(store_->type(hero)))) return false;
+    return schedule_hero_respawn(hero, planet, 0.0f);  // 0 -> Default_Hero_Respawn_Time
+}
+
 bool GalacticSim::hero_depart(ObjectHandle hero, PlanetIndex planet, float seconds) {
     if (!store_->exists(hero)) return false;
     const bool ok = schedule_hero_respawn(hero, planet, seconds);

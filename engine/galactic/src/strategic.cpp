@@ -3,7 +3,8 @@
 // stealth and detection (SG 2.2) and the event-driven victory claims (SG 1.4).
 //
 // Determinism: serial code; vectors walked in index order; the store's object list only for order-independent counts;
-// the only RNG consumer is detect_stealthed (one synced draw per qualifying candidate, candidate order).
+// the only RNG consumer is detect_stealthed (one synced draw per qualifying candidate, a second (evade, Q11) when the
+// first is below the chance; candidate order).
 #include <algorithm>
 #include <iterator>
 
@@ -90,6 +91,7 @@ bool GalacticSim::place_company(int32_t player, PlanetIndex planet, uint32_t typ
     const uint32_t f = create_fleet(player, planet);
     fleets_[f].contents.push_back(h);
     fleets_[f].carried.push_back(0);
+    fleet_member_joined(f, h);
     last_spawn_ = h;
     return true;
 }
@@ -340,7 +342,12 @@ int32_t GalacticSim::detect_stealthed(ObjectHandle detector, float chance) {
         if (allied(owner, store_->owner(c))) continue;
         const TypeSpecial& ct = special().type(static_cast<uint32_t>(store_->type(c)));
         if (dt.generic_hero && ct.named_hero) continue;
-        const bool discovered = (dt.named_hero && ct.generic_hero) || rng_->range_float(0.0f, 1.0f) < chance;
+        bool discovered = dt.named_hero && ct.generic_hero;  // no draw, no evade roll
+        if (!discovered && rng_->range_float(0.0f, 1.0f) < chance) {
+            // MCX4_T09_RE_ANSWERS Q11 (0x3a0b70): one more synced draw r2, made even at an evade chance of 0.0; r2 below
+            // the candidate's Evade_Detection_Chance cancels the detection ("has narrowly evaded detection").
+            discovered = !(rng_->range_float(0.0f, 1.0f) < ct.evade_detection_chance);
+        }
         if (!discovered) continue;
         set_galactic_stealth(c, false);
         ++found;

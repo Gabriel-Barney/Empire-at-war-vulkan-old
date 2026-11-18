@@ -306,3 +306,13 @@ if records, Starved or detour timing measurably differ. They did (`test_land_gro
 re-paths / 6 early arrivals / 4 terrain records, retail order 1955 / 25 / 4 / 3), so `MovementSystem::tick_land` now runs
 retail `0x3639d0` as a cycle: tracker snapshot -> collision services -> detection -> plans -> answer fold -> walk. A new
 record waits one tick in state 0. Every land golden moved. Design note and measurements: `docs/PHASE4.md`, mov1 entry.
+
+## Base-EaW mod heuristic stays a warning; StackTop covers the three-level AOW stack (mcx3 t11, Gabriel, 2026-11-18)
+
+Gabriel, 2026-11-18, up-front answers for the Stage 9 coordinator run (st9-coord), roadmap mcx3 t11:
+- **(a) Keep the `base_eaw_suspect` warning; do not refuse.** Design §5.4 says to refuse a mod whose GameObjectFiles.xml
+  names no FoC-only file and whose scripts call no FoC-only binding. The port refuses only on the hard signs (steamdata
+  tag EAW, t03) and only warns on that heuristic, so a real FoC mod is never refused on a guess.
+- **(b) Conformance mod `StackTop` counts as coverage** for the three-level AOW_Thrawns_Legacy_Compatibility ->
+  Thrawns_Legacy_HD -> 1125571106 clause of the mcx3 exit test, together with the real AOW -> TR stack that resolves on
+  this machine (Thrawns_Legacy_HD is not installed here). No rerun with it installed is needed.

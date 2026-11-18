@@ -217,6 +217,27 @@ float influence_alignment_factor(ForceSide owner, ForceSide planet, float streng
     return 1.0f + strength * penalty;
 }
 
+std::string build_countdown_speech(std::string_view prefix, float previous, float remaining) {
+    if (prefix.empty()) return {};
+    const int32_t r = static_cast<int32_t>(remaining), p = static_cast<int32_t>(previous);
+    const auto band = [](float t, int32_t v) {  // the value whose change fires the event, by band
+        if (t >= 60.0f) return v / 60 + 1;
+        if (t >= 10.0f) return 1000 + v / 10;
+        return 2000 + v;
+    };
+    if (band(remaining, r) == band(previous, p)) return {};
+    std::string out(prefix);
+    if (remaining >= 60.0f) out += std::to_string(r / 60 + 1) + "_Minutes";
+    else out += std::to_string(r + 1) + "_Seconds";
+    return out;
+}
+
+std::string build_countdown_text(float remaining) {
+    const int32_t r = static_cast<int32_t>(remaining) + 1;
+    const int32_t sec = r % 60;
+    return std::to_string(r / 60) + ":" + (sec < 10 ? "0" : "") + std::to_string(sec);
+}
+
 float political_ramp(float control, float target, float delta) {
     if (control < target) return std::min(target, control + delta);
     if (control > target) return std::max(target, control - delta);

@@ -1182,6 +1182,7 @@ bool GalacticSim::create_unit(int32_t player, PlanetIndex planet, uint32_t type)
         const ObjectHandle h = spawn(player, planet, type, {});
         fleets_[f].contents.push_back(h);
         fleets_[f].carried.push_back(0);
+        fleet_member_joined(f, h);
         return true;
     }
     default:
@@ -1209,6 +1210,15 @@ uint32_t GalacticSim::create_fleet(int32_t player, PlanetIndex planet) {
     planets_[planet].orbit.push_back(idx);
     settle_slots(planet);  // the owner's lowest free orbit slot
     return idx;
+}
+
+// mcx4 t20 (docs/re/MCX4_T09_RE_ANSWERS.md Q5): the fleet add-member functions 0x430d90 / 0x430f30 set fleet data +0x95
+// when the joining unit's type has Prevents_Story_Campaign_Autoresolve; nothing clears it, so the fleet keeps the lock
+// after the unit leaves.
+void GalacticSim::fleet_member_joined(uint32_t fleet, ObjectHandle unit) {
+    if (fleet >= fleets_.size() || !store_->exists(unit)) return;
+    const uint32_t t = static_cast<uint32_t>(store_->type(unit));
+    if (t < rules_->types.size() && rules_->types[t].prevents_story_autoresolve) fleets_[fleet].story_autoresolve_lock = true;
 }
 
 uint32_t GalacticSim::orbit_fleet(int32_t player, PlanetIndex planet) {
@@ -1328,6 +1338,7 @@ RejectReason GalacticSim::launch_units(int32_t player, PlanetIndex planet, std::
         erase_value(p.surface, u);
         fleets_[f].contents.push_back(u);
         fleets_[f].carried.push_back(0);
+        fleet_member_joined(f, u);
         launch_reveal(planet, u);
     }
     return RejectReason::None;
@@ -1477,6 +1488,7 @@ RejectReason GalacticSim::begin_move(uint32_t fleet, std::vector<PlanetIndex> pa
             for (ObjectHandle h : left) {
                 fleets_[nf].contents.push_back(h);
                 fleets_[nf].carried.push_back(0);
+                fleet_member_joined(nf, h);
             }
         }
     }
@@ -1570,6 +1582,7 @@ void GalacticSim::merge_fleet(uint32_t from, uint32_t into) {
     for (size_t i = 0; i < a.contents.size(); ++i) {
         b.contents.push_back(a.contents[i]);
         b.carried.push_back(0);
+        fleet_member_joined(into, a.contents[i]);
     }
     a.contents.clear();
     a.carried.clear();
@@ -1774,6 +1787,7 @@ RejectReason GalacticSim::execute(uint8_t player_id, const commands::EventData& 
             const uint32_t nf = create_fleet(player, origin);
             fleets_[nf].contents.push_back(unit);
             fleets_[nf].carried.push_back(carried);
+            fleet_member_joined(nf, unit);
             const RejectReason r = move_fleet(player, nf, p);
             if (r != RejectReason::None) {  // put it back where it was
                 fleets_[nf].contents.clear();
@@ -1781,6 +1795,7 @@ RejectReason GalacticSim::execute(uint8_t player_id, const commands::EventData& 
                 kill_fleet(nf);
                 fleets_[from].contents.insert(fleets_[from].contents.begin() + static_cast<std::ptrdiff_t>(at), unit);
                 fleets_[from].carried.insert(fleets_[from].carried.begin() + static_cast<std::ptrdiff_t>(at), carried);
+                fleet_member_joined(from, unit);
             }
             return r;
         }
@@ -2297,6 +2312,7 @@ void GalacticSim::hash_state(StateHasher& h) const {
         h.f32(f.facing.y);
         h.f32(f.facing.z);
         h.boolean(f.moving);
+        if (f.story_autoresolve_lock) h.u8(0x95);  // mcx4 t20: hashed only once set
     }
     if (!special_state_default()) hash_special(h);  // P4 sim (order: special_systems.hpp "CRC")
     if (!diplomacy_state_default()) hash_diplomacy(h);  // relation table + unlocked lists, once touched

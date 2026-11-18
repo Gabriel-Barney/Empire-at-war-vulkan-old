@@ -131,6 +131,7 @@ bool GalacticSim::change_owner(ObjectHandle object, int32_t player) {
         const uint32_t dst = orbit_fleet(player, at);  // may grow fleets_: no FleetState reference held
         fleets_[dst].contents.push_back(object);
         fleets_[dst].carried.push_back(0);
+        fleet_member_joined(dst, object);
         return true;
     }
     for (PlanetState& p : planets_)
@@ -185,6 +186,7 @@ uint32_t GalacticSim::assemble_fleet(std::span<const ObjectHandle> units) {
             surface.erase(std::find(surface.begin(), surface.end(), picked[i]));
             fleets_[out].contents.push_back(picked[i]);
             fleets_[out].carried.push_back(0);
+            fleet_member_joined(out, picked[i]);
             launch_reveal(at, picked[i]);
             continue;
         }
@@ -197,6 +199,7 @@ uint32_t GalacticSim::assemble_fleet(std::span<const ObjectHandle> units) {
             }
         fleets_[out].contents.push_back(picked[i]);
         fleets_[out].carried.push_back(0);
+        fleet_member_joined(out, picked[i]);
     }
     for (uint32_t s : source)
         if (s != kNoFleet && fleets_[s].alive && fleets_[s].contents.empty()) kill_fleet(s);

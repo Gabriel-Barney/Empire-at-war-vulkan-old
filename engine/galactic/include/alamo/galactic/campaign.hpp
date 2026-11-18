@@ -426,6 +426,9 @@ struct FleetState {
     int8_t slot = -1;
     PlanetIndex want_planet = kInvalidPlanet;
     int8_t want_slot = -1;
+    // mcx4 t20 (MCX4_T09_RE_ANSWERS Q5): fleet data +0x95, set when a unit whose type has
+    // Prevents_Story_Campaign_Autoresolve joins (GalacticSim::fleet_member_joined), never cleared. Saved (galactic v11).
+    bool story_autoresolve_lock = false;
 };
 
 // ---- A2 galactic: AI-facing hooks (docs/re/AI_GALACTIC_2.md §3.1, §5.4; COMMANDS.md id 8) -----------------------
@@ -1011,9 +1014,19 @@ public:
     // default-time respawn]; a named hero with a pending entry is not queued twice. planet invalid = the hero's
     // location. Due = mode frame + int(30 * time + 0.5). False only for a dead hero / no planet.
     bool schedule_hero_respawn(ObjectHandle hero, PlanetIndex planet, float seconds);
+    // mcx4 t05 (docs/re/MCX4_RE_ANSWERS_TACTICAL.md §13): a battle death in galactic mode. "Hero defeated" 0x3a01f0 for
+    // a type with Is_Named_Hero / Is_Generic_Hero (own or the first member's) schedules 0x48eb10(hero, planet,
+    // Default_Hero_Respawn_Time); called by the battle-end write-backs and the auto-resolve kills before the object is
+    // removed. The port's companies are single objects, so the parent (TRANSPORT / TEAM) tests have nothing to test.
+    // False when the object is no hero or nothing was scheduled.
+    bool hero_defeated(ObjectHandle hero, PlanetIndex planet);
     // schedule_hero_respawn then despawn (0x48cf20: removed without a death event).
     bool hero_depart(ObjectHandle hero, PlanetIndex planet, float seconds);
     std::span<const RespawnEntry> respawns_pending(PlanetIndex planet) const;
+    // mcx4 t09 (docs/re/MCX4_T09_RE_ANSWERS.md Q6, 0x3d2020): the galaxy-map ability button a unit shows over a planet
+    // (activated_ability_slot_of in special_data.hpp). A planet with the story kNoAbilities gate (0x4470b0) shows none;
+    // a fleet is looked through only when it holds exactly one unit.
+    ActivatedAbilitySlot activated_ability_slot(ObjectHandle unit, PlanetIndex planet) const;
     // Black market (P4 1).
     int32_t player_tech(int32_t player) const;
     std::vector<BlackMarketOffer> bm_offers(int32_t player, PlanetIndex planet, ObjectHandle hero = {}) const;
@@ -1171,7 +1184,9 @@ public:
     // DetectHeroAbility service (SG 2.2) for one detector: candidates = stealthed objects in the detector's planet orbit,
     // then its surface (list orders); a non-allied candidate is discovered when not (detector generic and candidate
     // named) and ((detector named and candidate generic) or one synced Get_Float(0,1) draw < chance). Discovery clears
-    // the byte [M: the discovery mark 0x3a0110]. Returns the number discovered. No FoC type has a detector ability.
+    // the byte [M: the discovery mark 0x3a0110]. A draw below the chance makes a second synced draw r2 (MCX4_T09_RE_ANSWERS
+    // Q11, also at evade 0.0): r2 < the candidate type's Evade_Detection_Chance cancels the detection. Returns the number
+    // discovered. No FoC type has a detector ability.
     int32_t detect_stealthed(ObjectHandle detector, float chance);
     // Planet-info display queries (REMAINING_GAPS 6.3 as corrected 2026-10-28; GUI and planet info only, no sim effect,
     // nothing written or hashed). "player can see X at planet":
@@ -1379,6 +1394,7 @@ private:
     ObjectHandle spawn(int32_t player, PlanetIndex planet, uint32_t type, ObjectHandle container);
     bool create_unit(int32_t player, PlanetIndex planet, uint32_t type);
     uint32_t create_fleet(int32_t player, PlanetIndex planet);
+    void fleet_member_joined(uint32_t fleet, ObjectHandle unit);  // mcx4 t20: the sticky story auto-resolve lock
     uint32_t orbit_fleet(int32_t player, PlanetIndex planet);  // find or create
     void kill_fleet(uint32_t fleet);
     void remove_from_orbit(PlanetIndex planet, uint32_t fleet);

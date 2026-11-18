@@ -1795,7 +1795,24 @@ void test_oi_stealth() {
     SimRng expect = before;
     expect.range_float(0.0f, 1.0f);
     CHECK(w.rng == expect);  // exactly one draw
-    CHECK(s.detect_stealthed(det, 1.5f) == 1);  // draw < chance
+    // mcx4 t06 (docs/re/MCX4_T09_RE_ANSWERS.md Q11): r1 < chance draws r2 even at evade 0.0; r2 < evade cancels.
+    // ledger: verifies Siphon_Credits_Ability.Evade_Detection_Chance
+    before = w.rng;
+    CHECK(s.detect_stealthed(det, 1.5f) == 1);  // draw < chance, r2 not below evade 0.0
+    expect = before;
+    expect.range_float(0.0f, 1.0f);
+    expect.range_float(0.0f, 1.0f);
+    CHECK(w.rng == expect);  // two draws
+    s.set_galactic_stealth(sm, true);
+    w.rules.special.types[tSmuggler].evade_detection_chance = 1.0f;
+    before = w.rng;
+    CHECK(s.detect_stealthed(det, 1.5f) == 0 && s.galactic_stealth(sm));  // narrowly evaded
+    expect = before;
+    expect.range_float(0.0f, 1.0f);
+    expect.range_float(0.0f, 1.0f);
+    CHECK(w.rng == expect);
+    w.rules.special.types[tSmuggler].evade_detection_chance = 0.0f;
+    CHECK(s.detect_stealthed(det, 1.5f) == 1);
     StateHasher h1;
     s.hash_state(h1);
     CHECK(h0.digest() != h1.digest());
@@ -1882,7 +1899,7 @@ void test_special_case_production() {
             CHECK(s.read(r) && s.planets()[rA].initial_placement == std::vector<uint32_t>{tBarracks});
         }
         // v9: no list section (the last one: per planet u32 count + types); the start() lists stay.
-        size_t tail = 2 + 4 + 5 * s.autoresolve_exclusions().size();  // then the auto-resolve rules (t07)
+        size_t tail = 4 + 2 + 4 + 5 * s.autoresolve_exclusions().size();  // then the auto-resolve rules (t07), the v11 lock list
         for (const PlanetState& pl : s.planets()) tail += 4 + 4 * pl.initial_placement.size();
         std::vector<uint8_t> v9(bytes.begin(), bytes.end() - static_cast<std::ptrdiff_t>(tail));
         v9[0] = 9;

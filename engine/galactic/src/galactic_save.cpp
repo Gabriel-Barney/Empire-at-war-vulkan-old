@@ -56,14 +56,16 @@ namespace {
 // {i32 object, i32 slot, i32 marker}, object-id-ascending, live objects only; v6 - v8 read it as none. v10 (mcx4 t01):
 // + per planet the initial-placement list {u32 count, u32 type...} (Special_Case_Production), then the campaign's
 // auto-resolve rules {bool disabled, bool story campaign, u32 count, {u32 planet type, bool land}...}; v6 - v9 keep the
-// session's start() values.
-constexpr uint32_t kGalacticSaveVersion = 10;
+// session's start() values. v11 (mcx4 t20): + last, the fleets holding the sticky story auto-resolve lock {u32 count,
+// u32 fleet index...} ascending; v10 and older derive it from each fleet's current contents.
+constexpr uint32_t kGalacticSaveVersion = 11;
+constexpr uint32_t kGalacticSaveVersionNoLocks = 10;
 constexpr uint32_t kGalacticSaveVersionNoPlacement = 9;
 // limit: guard not a limit: save format version 8 (before the marker slots)
 constexpr uint32_t kGalacticSaveVersionNoSlots = 8;
 constexpr uint32_t kGalacticSaveVersionNoGalab = 7;
 constexpr uint32_t kGalacticSaveVersionNoNames = 6;
-constexpr uint32_t kConflictSaveVersion = 3;  // v2: BattleRequest::linked (story t10); v3: BattleRequest::sandbox (q6)
+constexpr uint32_t kConflictSaveVersion = 4;  // v2: BattleRequest::linked (story t10); v3: BattleRequest::sandbox (q6); v4: ArCombatant::strength_bonus (mcx4 t06)
 
 void put_handle(ByteWriter& w, const objects::ObjectStore& s, ObjectHandle h) {
     if (s.exists(h)) {
@@ -268,12 +270,17 @@ void GalacticSim::write(ByteWriter& w) const {
     w.boolean(autoresolve_disabled_).boolean(story_campaign_);  // mcx4 t07 (v10)
     w.u32(static_cast<uint32_t>(autoresolve_exclusions_.size()));
     for (const auto& [t, land] : autoresolve_exclusions_) w.u32(t).boolean(land);
+    uint32_t locked = 0;  // mcx4 t20 (v11)
+    for (const FleetState& f : fleets_) locked += f.story_autoresolve_lock ? 1u : 0u;
+    w.u32(locked);
+    for (uint32_t i = 0; i < fleets_.size(); ++i)
+        if (fleets_[i].story_autoresolve_lock) w.u32(i);
 }
 
 bool GalacticSim::read(ByteReader& r) {
     const objects::ObjectStore& st = *store_;
     const uint32_t version = r.u32();
-    if ((version != kGalacticSaveVersion && version != kGalacticSaveVersionNoPlacement && version != kGalacticSaveVersionNoSlots && version != kGalacticSaveVersionNoGalab &&
+    if ((version != kGalacticSaveVersion && version != kGalacticSaveVersionNoLocks && version != kGalacticSaveVersionNoPlacement && version != kGalacticSaveVersionNoSlots && version != kGalacticSaveVersionNoGalab &&
          version != kGalacticSaveVersionNoNames) ||
         !r.ok())
         return false;
@@ -643,6 +650,23 @@ bool GalacticSim::read(ByteReader& r) {
             if (!r.ok() || t >= types) return false;
         }
     }
+    if (version >= 11) {  // mcx4 t20: the locked fleets, ascending
+        uint32_t n_locked = 0;
+        if (!r.count(n_locked, 4)) return false;
+        uint32_t prev = 0;
+        for (uint32_t k = 0; k < n_locked; ++k) {
+            const uint32_t i = r.u32();
+            if (!r.ok() || i >= fleets.size() || (k > 0 && i <= prev)) return false;
+            fleets[i].story_autoresolve_lock = true;
+            prev = i;
+        }
+    } else {  // v10 and older: each fleet's current contents
+        for (FleetState& f : fleets)
+            for (const ObjectHandle m : f.contents) {
+                const uint32_t t = st.exists(m) ? static_cast<uint32_t>(st.type(m)) : kNoIndex;
+                if (t < rules_->types.size() && rules_->types[t].prevents_story_autoresolve) f.story_autoresolve_lock = true;
+            }
+    }
     if (!r.ok() || !r.done()) return false;
 
     // ---- commit ----
@@ -780,6 +804,8 @@ void ConflictManager::write(ByteWriter& w) const {
         w.f32(c.own_power).boolean(c.hero).boolean(c.always_dies).boolean(c.super).boolean(c.super_killer);
         w.u32(static_cast<uint32_t>(c.starbase.size()));
         for (const ArStarbaseLevel& l : c.starbase) w.u32(l.type).f32(l.power);
+        w.u32(static_cast<uint32_t>(c.strength_bonus.size()));  // v4
+        for (const auto& [bit, factor] : c.strength_bonus) w.u8(bit).f32(factor);
     }
     w.u32(static_cast<uint32_t>(ar_in_.players.size()));
     for (const ArSideInfo& s : ar_in_.players) w.i32(s.player).boolean(s.ai).boolean(s.playable);
@@ -884,6 +910,15 @@ bool ConflictManager::read(ByteReader& r) {
         for (ArStarbaseLevel& l : c.starbase) {
             l.type = r.u32();
             l.power = r.f32();
+        }
+        if (version >= 4) {  // older saves: no pairs (base FoC sets no Unit_Strength_Factor)
+            uint32_t nb = 0;
+            if (!r.count(nb, 5)) return false;
+            c.strength_bonus.resize(nb);
+            for (auto& [bit, factor] : c.strength_bonus) {
+                bit = r.u8();
+                factor = r.f32();
+            }
         }
         if (!r.ok()) return false;
     }

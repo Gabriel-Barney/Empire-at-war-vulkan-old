@@ -1361,6 +1361,57 @@ void test_foc() {
         const auto prevents = [&](const char* n) { return cr.type(static_cast<uint32_t>(types.resolve_name(n))).prevents_story_autoresolve; };
         CHECK(!cr.always_bypass_autoresolve && prevents("Death_Star") && prevents("Accuser_Star_Destroyer") &&
               !prevents("Star_Destroyer"));
+        // mcx4 t06 (MCX4_T09_RE_ANSWERS Q9): FoC's Combat_Bonus abilities set Unit_Strength_Category but no file sets
+        // Unit_Strength_Factor, so no type gives an auto-resolve strength pair (the bonus is 1 in every vanilla battle).
+        size_t pairs = 0;
+        for (const ConflictTypeInfo& ti : cr.types) pairs += ti.strength_bonus.size();
+        CHECK(pairs == 0);
+        {  // mcx4 t09 (docs/re/MCX4_T09_RE_ANSWERS.md Q6): the galaxy-map ability button kind / label by FoC's lists.
+           // ledger: verifies GameConstants.Activated_Destroy_Planet_Ability_Names
+           // ledger: verifies GameConstants.Activated_Neutralize_Hero_Ability_Names
+           // ledger: verifies GameConstants.Activated_Remove_Corruption_Ability_Names
+           // ledger: verifies GameConstants.Activated_Siphon_Credits_Ability_Names
+           // ledger: verifies GameConstants.Activated_Slice_Ability_Names
+           // ledger: verifies GameConstants.Activated_System_Spy_Ability_Names
+            CHECK(s.activated_slice.size() == 2 && s.activated_destroy_planet.size() == 1 && s.activated_system_spy.size() == 1 &&
+                  s.activated_neutralize_hero.size() == 5 && s.activated_siphon_credits.size() == 2 &&
+                  s.activated_remove_corruption.size() == 7);
+            // Activated_Slice_Ability_Names, Activated_Destroy_Planet_Ability_Names, Activated_System_Spy_Ability_Names,
+            // Activated_Neutralize_Hero_Ability_Names, Activated_Siphon_Credits_Ability_Names,
+            // Activated_Remove_Corruption_Ability_Names (FoC GameConstants.xml).
+            const auto kind = [&](const char* n) { return activated_ability_slot_of(s, rules.find_type(n)).kind; };
+            const auto label = [&](const char* n) { return std::string(activated_ability_slot_of(s, rules.find_type(n)).label); };
+            CHECK(kind("Death_Star") == 6 && label("Death_Star") == "TEXT_TOOLTIP_ABILITY_DESTROY_PLANET_NAME");
+            CHECK(kind("Generic_Probe_Droid") == 3 && label("Generic_Probe_Droid") == "TEXT_ABILITY_SLOT_SPY");
+            CHECK(kind("Han_Solo") == 5 && kind("Mon_Mothma") == 8 && kind("Boba_Fett") == 4 && kind("Tyber_Zann") == 9);
+            CHECK(kind("IG-88") == 4);  // Neutralize (4) is tested before Hack_Super_Weapon (10)
+            CHECK(kind("Star_Destroyer") == -1);
+        }
+        {  // mcx4 t09 (docs/re/MCX4_T09_RE_ANSWERS.md Q7): Build_Countdown_Timer on the Death Star only, with its
+           // Build_Speech_Countdowns prefix; the speech events and the HUD timer text.
+           // ledger: verifies GameObjectType.Build_Countdown_Timer
+            uint32_t timers = 0;
+            for (const TypeInfo& ti : rules.types) timers += ti.build_countdown_timer ? 1u : 0u;
+            const uint32_t ds = rules.find_type("Death_Star");
+            CHECK(timers == 1 && ds != kNoIndex && rules.types[ds].build_countdown_timer &&
+                  rules.types[ds].build_speech_countdowns == "Speech_Death_Star_Build_");
+            const std::string& pre = rules.types[ds].build_speech_countdowns;
+            CHECK(econ::build_countdown_speech(pre, 120.0f, 119.5f) == "Speech_Death_Star_Build_2_Minutes");
+            CHECK(econ::build_countdown_speech(pre, 61.0f, 60.5f).empty());
+            CHECK(econ::build_countdown_speech(pre, 60.2f, 59.8f) == "Speech_Death_Star_Build_60_Seconds");
+            CHECK(econ::build_countdown_speech(pre, 35.0f, 34.9f).empty());
+            CHECK(econ::build_countdown_speech(pre, 30.1f, 29.9f) == "Speech_Death_Star_Build_30_Seconds");
+            CHECK(econ::build_countdown_speech(pre, 5.2f, 4.9f) == "Speech_Death_Star_Build_5_Seconds");
+            CHECK(econ::build_countdown_speech("", 5.2f, 4.9f).empty());
+            CHECK(econ::build_countdown_text(119.5f) == "2:00" && econ::build_countdown_text(5.2f) == "0:06");
+        }
+        // mcx4 t05 (MCX4_RE_ANSWERS_TACTICAL §9): FoC's Respawn_Whole_Team_When_Killed members; Droids_Team is a company.
+        const auto whole = [&](const char* n) { return cr.type(static_cast<uint32_t>(types.resolve_name(n))).respawn_whole_team; };
+        CHECK(whole("Droid_R2D2"));
+        CHECK(whole("Luke_XWing"));
+        CHECK(!whole("Droid_C3P0"));
+        CHECK(cr.type(static_cast<uint32_t>(types.resolve_name("Droids_Team"))).company &&
+              !cr.type(static_cast<uint32_t>(types.resolve_name("Red_Squadron"))).company);
     }
     CHECK(s.items[0].name == "Buzz_Droid_Tech" && s.items[0].ability_crcs[0] == special_name_crc("Buzz_Droids_Viper") &&
           s.find_item(special_name_crc("Buzz_Droid_Tech")) == 0);

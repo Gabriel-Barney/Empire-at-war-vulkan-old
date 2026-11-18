@@ -325,6 +325,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
             for (size_t i = 0; i < moved.size(); ++i) {
                 fleets_[dst].contents.push_back(moved[i]);
                 fleets_[dst].carried.push_back(carried[i]);
+                fleet_member_joined(dst, moved[i]);
             }
             return RejectReason::None;
         }
@@ -332,6 +333,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         planets_[p].surface.erase(std::remove(planets_[p].surface.begin(), planets_[p].surface.end(), unit), planets_[p].surface.end());
         fleets_[dst].contents.push_back(unit);
         fleets_[dst].carried.push_back(0);
+        fleet_member_joined(dst, unit);
         return RejectReason::None;
     }
     case kFleetMoveNew:
@@ -403,6 +405,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         for (size_t i = 0; i < moved.size(); ++i) {
             fleets_[occupant].contents.push_back(moved[i]);
             fleets_[occupant].carried.push_back(carried[i]);
+            fleet_member_joined(occupant, moved[i]);
         }
         return RejectReason::None;
     }
@@ -420,6 +423,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         for (size_t i = 0; i < moved.size(); ++i) {
             fleets_[dst].contents.push_back(moved[i]);
             fleets_[dst].carried.push_back(carried[i]);
+            fleet_member_joined(dst, moved[i]);
         }
         return RejectReason::None;
     }
@@ -450,6 +454,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         for (size_t i = 0; i < moved.size(); ++i) {
             fleets_[src].contents.push_back(moved[i]);
             fleets_[src].carried.push_back(carried[i]);
+            fleet_member_joined(src, moved[i]);
         }
         return RejectReason::None;
     }
@@ -504,6 +509,7 @@ RejectReason GalacticSim::fleet_management(int32_t player, const commands::Event
         planets_[p].surface.erase(std::remove(planets_[p].surface.begin(), planets_[p].surface.end(), unit), planets_[p].surface.end());
         fleets_[dst].contents.push_back(unit);
         fleets_[dst].carried.push_back(0);
+        fleet_member_joined(dst, unit);
         launch_reveal(p, unit);  // REMAINING_GAPS 6.1
         if (fleets_.size() != fleets_before) {
             slot_new_fleet(dst);

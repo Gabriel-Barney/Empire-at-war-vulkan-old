@@ -135,13 +135,22 @@ double galactic_ai_planet_force(const gal::GalacticSim& sim, std::span<const Gal
                 sum += power(static_cast<uint32_t>(st.type(u)));
         // The per-tech members of every ground structure (D +0x158 only: orbital structures are skipped) with the tech of
         // the structure's own owner (S +0x58), not their own power and no structure mask (A2I_TOKENS_RE §2.2) [H]. The
-        // Enemy planet-type list +0x20C8 [port: not modelled].
         if (side(ps.owner))
             for (const ObjectHandle s : ps.structures) {
                 if (!st.alive(s)) continue;
                 const uint32_t t = static_cast<uint32_t>(st.type(s));
                 if (t < rules.types.size() && gal::is_orbital_structure_type(rules.types[t])) continue;
                 sum += galactic_ai_member_force(sim, types, t, st.owner(s), mask);
+            }
+        // mcx8 t08 (AI_GALACTIC_TOKENS §2 row GroundTotalUnnormalized, §7 item 4) [H]: with side Enemy and a total > 0,
+        // + the power (int) of every Potential_Indigenous_Power entry of the planet's type (type +0x20C8, list order) whose
+        // unit type is affiliated (0x3751a0) with some player hostile to Self. No category mask or fog test.
+        if (enemy && sum > 0.0 && ps.type < types.size() && valid(self))
+            for (const SpawnMember& e : types[ps.type].indigenous_power) {
+                bool hostile = false;
+                for (int32_t q = 0; q < static_cast<int32_t>(players.size()) && !hostile; ++q)
+                    hostile = sim.is_hostile(self, q) && sim.type_affiliated(e.type, q);
+                if (hostile) sum += static_cast<double>(e.count);
             }
     }
     return sum;

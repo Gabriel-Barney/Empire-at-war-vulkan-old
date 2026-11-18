@@ -2,6 +2,7 @@
 #include "alamo/core/sim_crc.hpp"
 
 #include <algorithm>
+#include <iterator>
 
 #include "alamo/core/ascii.hpp"
 #include "alamo/objects/type_fields.hpp"
@@ -252,8 +253,22 @@ AutoResolveResult auto_resolve(const AutoResolveInput& in, const ContrastTable& 
     }
 
     // ---- exchange of fire (0x60d2a0), once per side ----
+    // Unit strength bonus table (MCX4_T09_RE_ANSWERS Q9) [H]: a static 32-float table cleared at each call (per firing
+    // side) and raised to max(entry, factor - 1) by every (bit, factor) pair of the side's combatants.
+    float strength_table[32] = {};
+    // Q9 apply step 1-2 (0x60ad90): the firing type's own CategoryMask bits, lowest first, with a running b that already
+    // includes the +1 (a later bit replaces b only when its entry exceeds b) [H].
+    auto strength_bonus = [&strength_table](uint64_t categories) {
+        float b = 0.0f;
+        for (uint32_t k = 0; k < 32; ++k)
+            if ((categories >> k) & 1u)
+                if (strength_table[k] > b) b = strength_table[k] + 1.0f;
+        return b;
+    };
     auto fire = [&](const ArPiece& p, std::vector<double>& R) {
         const float pw = p.power;
+        const float b = strength_bonus(p.categories);
+        const float pb = b != 0.0f ? b * pw : pw;
         int32_t best = -1;
         double best_score = 0.0;
         float best_c = 0.0f;
@@ -274,21 +289,28 @@ AutoResolveResult auto_resolve(const AutoResolveInput& in, const ContrastTable& 
             }
         }
         if (best < 0) {
-            R[tot] -= static_cast<double>(pw);
+            R[tot] -= static_cast<double>(pb);  // Q9 step 3: the bonus included
             return;
         }
-        const float bonus = 1.0f;  // planet modifier table (open item 7)
-        const float d = pw * best_c * bonus;
+        const float d = pb * best_c;  // Q9: d = c_j x p' (the 0x5f22c0 second factor is not modelled [L])
         double& Rj = R[2 + static_cast<size_t>(best)];
         const double a = std::min(static_cast<double>(d), Rj);
         Rj -= a;
         const double left = d > 0.0f ? (1.0 - a / static_cast<double>(d)) * static_cast<double>(pw) : static_cast<double>(pw);
         R[tot] -= a + left;
     };
-    for (int s = 0; s < 2; ++s)
+    for (int s = 0; s < 2; ++s) {
+        std::fill(std::begin(strength_table), std::end(strength_table), 0.0f);
+        for (size_t i = 0; i < n; ++i)
+            if (side_of[i] == s)
+                for (const auto& [bit, factor] : in.combatants[i].strength_bonus) {
+                    const float v = factor - 1.0f;
+                    if (bit < 32 && v > strength_table[bit]) strength_table[bit] = v;
+                }
         for (size_t i = 0; i < n; ++i)
             if (side_of[i] == s)
                 for (const ArPiece& p : in.combatants[i].pieces) fire(p, r.rem[1 - s]);
+    }
 
     // ---- winner (0x60c010) ----
     if (super[0] && !killer[1] && retreating < 0) retreating = r.side_player[1];

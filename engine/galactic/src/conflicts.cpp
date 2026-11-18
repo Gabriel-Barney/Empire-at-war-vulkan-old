@@ -144,6 +144,39 @@ bool load_conflict_rules(const FileProvider& provider, const data::GameDatabase&
         i.hero = types.get_bool(t, "Is_Named_Hero");
         i.super_killer = types.get_bool(t, "Is_Super_Weapon_Killer");
         i.prevents_story_autoresolve = types.get_bool(t, "Prevents_Story_Campaign_Autoresolve");
+        i.respawn_whole_team = types.get_bool(t, "Respawn_Whole_Team_When_Killed");  // mcx4 t05 (§9 / §13)
+        i.company = !types.get_list(t, "Company_Units").empty();
+        // MCX4_T09_RE_ANSWERS Q9 (0x374010 over the type's <Abilities>): an ability with a non-zero
+        // Unit_Strength_Category mask and a non-zero Unit_Strength_Factor gives one (bit, factor) pair per set low bit.
+        // Shipped data sets no factor, so every pair list is empty in base FoC.
+        for (const objects::FieldIndex f : types.get_sub_objects(t, "Abilities")) {
+            const objects::ObjectTypeDatabase& raw = types.raw();
+            const objects::FieldColumns& fc = raw.fields();
+            uint64_t m = 0;
+            float factor = 0.0f;
+            for (objects::FieldIndex c = f + 1; c < fc.size() && fc.depth[c] > fc.depth[f]; ++c) {
+                if (fc.parent[c] != f) continue;
+                const std::string_view tag = raw.tag_name(c);
+                if (ascii_iequals(tag, "Unit_Strength_Category")) {
+                    m = 0;  // "Capital | Corvette | ...": names split at '|', ',' and blanks (mask code 0x56)
+                    const std::string_view v = fc.text[c];
+                    size_t at = 0;
+                    while (at < v.size()) {
+                        size_t end = at;
+                        while (end < v.size() && v[end] != '|' && v[end] != ',' && v[end] != ' ' && v[end] != '\t' &&
+                               v[end] != '\r' && v[end] != '\n')
+                            ++end;
+                        if (end > at) m |= category_mask(v.substr(at, end - at));
+                        at = end + 1;
+                    }
+                } else if (ascii_iequals(tag, "Unit_Strength_Factor")) {
+                    factor = static_cast<float>(objects::c_atof(trimmed(fc.text[c])));
+                }
+            }
+            if (m == 0 || factor == 0.0f) continue;
+            for (uint8_t k = 0; k < 32; ++k)
+                if ((m >> k) & 1u) i.strength_bonus.emplace_back(k, factor);
+        }
         for (const char* tag : {"Squadron_Units", "Company_Units"})
             for (std::string_view m : types.get_list(t, tag)) {
                 const objects::TypeIndex mt = types.resolve_name(trimmed(m));
@@ -675,6 +708,13 @@ void ConflictManager::run(ConflictKind kind) {
 
 // ---- auto-resolve ----
 
+bool company_team_lost(const ConflictRules& rules, uint32_t company_type, std::span<const uint32_t> dead_member_types) {
+    if (!rules.type(company_type).company) return false;
+    for (const uint32_t t : dead_member_types)
+        if (rules.type(t).respawn_whole_team) return true;
+    return false;
+}
+
 ArCombatant make_ar_combatant(const GalacticRules& galactic, const ConflictRules& rules, uint32_t t, int32_t owner,
                               bool space) {
     const auto& ti = galactic.types;
@@ -684,6 +724,7 @@ ArCombatant make_ar_combatant(const GalacticRules& galactic, const ConflictRules
     c.own_power = t < ti.size() ? ti[t].ai_combat_power : 0.0f;
     c.hero = ct.hero;
     c.super_killer = ct.super_killer;
+    c.strength_bonus = ct.strength_bonus;  // Q9: the representative type's pairs (0x60c710)
     uint64_t first_cats = ct.categories;
     bool first = true;
     for (const auto& [mt, n] : ct.members) {
@@ -789,8 +830,14 @@ void ConflictManager::auto_finish(const ConflictInfo& head) {
         const bool is_starbase = !ar_in_.combatants[i].starbase.empty();
         if (!r.survives[i]) {
             (ar_in_.combatants[i].owner == head.attacker ? e.attacker_losses : e.defender_losses)++;
-            if (is_starbase) sim_->replace_starbase(planet, kNoIndex);
-            else sim_->destroy_object(h);
+            if (is_starbase) {
+                sim_->replace_starbase(planet, kNoIndex);
+            } else {
+                // mcx4 t05 (MCX4_RE_ANSWERS_TACTICAL §13): an auto-resolve kill runs Die 0x39bdb0 in galactic mode, whose
+                // step 6 schedules the hero's respawn (0x48eb10, default time, the hero's planet).
+                sim_->hero_defeated(h, planet);
+                sim_->destroy_object(h);
+            }
         } else if (is_starbase && sim_->store().alive(h) && r.starbase_type[i] != static_cast<uint32_t>(sim_->store().type(h))) {
             sim_->replace_starbase(planet, r.starbase_type[i]);
         }
@@ -802,6 +849,7 @@ void ConflictManager::auto_finish(const ConflictInfo& head) {
     for (size_t i = 0; i < ar_cargo_.size(); ++i)
         if (!r.cargo_survives[i]) {
             (ar_in_.cargo[i].owner == head.attacker ? e.attacker_losses : e.defender_losses)++;
+            sim_->hero_defeated(ar_cargo_[i], planet);  // mcx4 t05
             sim_->destroy_object(ar_cargo_[i]);
         }
     // AI_GALACTIC_TOKENS §9.4: a land auto-resolve keeps only the winner's persisted built objects (0x60b930; on an attacker
@@ -1218,6 +1266,7 @@ bool ConflictManager::story_autoresolve_unit(const ConflictInfo& c) const {
     for (uint32_t fi : sim_->planets()[c.planet].orbit) {
         const FleetState& f = sim_->fleets()[fi];
         if (!f.alive || f.moving || (f.owner != c.attacker && f.owner != c.defender)) continue;
+        if (f.story_autoresolve_lock) return true;  // mcx4 t20: a fleet that once held such a unit (+0x95)
         for (ObjectHandle m : f.contents)
             if (store.alive(m) && flagged(static_cast<uint32_t>(store.type(m)))) return true;
     }
@@ -1245,12 +1294,17 @@ void ConflictManager::finish_battle(const BattleResult& result, LinkedResolution
         const uint32_t f = sim_->players()[static_cast<size_t>(p)].faction;
         return f < sim_->rules().factions.size() ? &sim_->rules().factions[f] : nullptr;
     };
-    // Objects killed in the battle.
+    // Objects killed in the battle. mcx4 t05 (MCX4_RE_ANSWERS_TACTICAL §13): each hero lost in the battle goes through
+    // "hero defeated" (respawn at the conflict planet, default time) before it is removed.
     for (ObjectHandle h : result.destroyed) {
         if (!store.alive(h)) continue;
         (store.owner(h) == A ? e.attacker_losses : e.defender_losses)++;
-        if (h == sim_->planets()[planet].starbase) sim_->replace_starbase(planet, kNoIndex);
-        else sim_->destroy_object(h);
+        if (h == sim_->planets()[planet].starbase) {
+            sim_->replace_starbase(planet, kNoIndex);
+        } else {
+            sim_->hero_defeated(h, planet);
+            sim_->destroy_object(h);
+        }
     }
     if (result.starbase_destroyed && store.alive(sim_->planets()[planet].starbase)) {
         (sim_->planets()[planet].starbase_owner == A ? e.attacker_losses : e.defender_losses)++;
@@ -1328,12 +1382,21 @@ void ConflictManager::apply_resolution(const ConflictInfo& head, LinkedResolutio
                 const FleetState& f = sim_->fleets()[fi];
                 if (f.alive && !f.moving && f.owner != kNoPlayer && !human(f.owner)) fleets.push_back(f.object);
             }
-            for (ObjectHandle f : fleets) sim_->destroy_object(f);
+            for (ObjectHandle f : fleets) {
+                // mcx4 t05 (MCX4_RE_ANSWERS_TACTICAL §13: 0x2aa8e0 -> fleet / transport destroy -> 0x3a01f0 per hero)
+                const uint32_t fi = sim_->fleet_of(f);
+                if (fi != kNoFleet)
+                    for (ObjectHandle m : std::vector<ObjectHandle>(sim_->fleets()[fi].contents)) sim_->hero_defeated(m, planet);
+                sim_->destroy_object(f);
+            }
         } else {
             std::vector<ObjectHandle> kill;  // every AI-owned surface unit (surface order)
             for (ObjectHandle u : sim_->planets()[planet].surface)
                 if (store.alive(u) && store.owner(u) != kNoPlayer && !human(store.owner(u))) kill.push_back(u);
-            for (ObjectHandle u : kill) sim_->destroy_object(u);
+            for (ObjectHandle u : kill) {
+                sim_->hero_defeated(u, planet);  // mcx4 t05 (§13: 0x2aa510 -> 0x3a01f0 per hero)
+                sim_->destroy_object(u);
+            }
         }
     } else {
         for (int32_t side : {head.attacker, head.defender}) {
@@ -1367,8 +1430,12 @@ void ConflictManager::finish_corruption_mission(const BattleResult& result) {
     for (ObjectHandle h : result.destroyed) {  // [M] the battle's deaths still reach the galaxy
         if (!store.alive(h)) continue;
         (store.owner(h) == head.attacker ? e.attacker_losses : e.defender_losses)++;
-        if (h == sim_->planets()[head.planet].starbase) sim_->replace_starbase(head.planet, kNoIndex);
-        else sim_->destroy_object(h);
+        if (h == sim_->planets()[head.planet].starbase) {
+            sim_->replace_starbase(head.planet, kNoIndex);
+        } else {
+            sim_->hero_defeated(h, head.planet);  // mcx4 t05
+            sim_->destroy_object(h);
+        }
     }
     log_.push_back(std::move(e));
     pop_head(head.kind);
@@ -1392,8 +1459,12 @@ int32_t ConflictManager::resolve_battle(const BattleResult& so_far) {
     const auto& store = sim_->store();
     for (ObjectHandle h : so_far.destroyed) {  // the battle's deaths so far
         if (!store.alive(h)) continue;
-        if (h == sim_->planets()[head.planet].starbase) sim_->replace_starbase(head.planet, kNoIndex);
-        else sim_->destroy_object(h);
+        if (h == sim_->planets()[head.planet].starbase) {
+            sim_->replace_starbase(head.planet, kNoIndex);
+        } else {
+            sim_->hero_defeated(h, head.planet);  // mcx4 t05
+            sim_->destroy_object(h);
+        }
     }
     if (so_far.starbase_destroyed && store.alive(sim_->planets()[head.planet].starbase)) sim_->replace_starbase(head.planet, kNoIndex);
     auto_setup(head);
