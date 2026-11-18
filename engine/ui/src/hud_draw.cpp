@@ -1,6 +1,7 @@
 #include "alamo/ui/hud_draw.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 
@@ -220,6 +221,28 @@ bool atlas_quad(HudDrawList& dl, uint32_t layer, HudList list, const TextureAtla
 bool add_atlas_quad(HudDrawList& dl, uint32_t layer, HudList list, const TextureAtlas& atlas, std::string_view texture,
                     Vec2f center, Vec2f size, float scale, Rgba8 color, Vec2f fallback_size, float fill) {
     return atlas_quad(dl, layer, list, atlas, texture, center, size, scale, 1.0f, color, fallback_size, fill);
+}
+
+bool add_atlas_quad_turned(HudDrawList& dl, uint32_t layer, HudList list, const TextureAtlas& atlas, std::string_view texture,
+                           Vec2f center, Vec2f size, float scale, Rgba8 color, float radians, bool uv_quarter_cw,
+                           Vec2f fallback_size) {
+    HudDrawList one;
+    if (!atlas_quad(one, layer, list, atlas, texture, center, size, scale, 1.0f, color, fallback_size, 100.0f)) return false;
+    HudQuad q = one.items(layer, list).front();
+    const float c = std::cos(radians), s = std::sin(radians);
+    const auto turn = [&](float x, float y) {
+        const float dx = x - center.x, dy = y - center.y;
+        return Vec2f{center.x + c * dx - s * dy, center.y + s * dx + c * dy};
+    };
+    // Plain corner order: top-left, top-right, bottom-right, bottom-left (+Y up: top = max.y).
+    std::array<Vec2f, 4> p = {turn(q.min.x, q.max.y), turn(q.max.x, q.max.y), turn(q.max.x, q.min.y), turn(q.min.x, q.min.y)};
+    if (uv_quarter_cw) p = {p[1], p[2], p[3], p[0]};  // the texture's top-left corner at the quad's top-right
+    q.has_corners = true;
+    q.corners = p;
+    q.min = {std::min({p[0].x, p[1].x, p[2].x, p[3].x}), std::min({p[0].y, p[1].y, p[2].y, p[3].y})};
+    q.max = {std::max({p[0].x, p[1].x, p[2].x, p[3].x}), std::max({p[0].y, p[1].y, p[2].y, p[3].y})};
+    dl.add(layer, list, q);
+    return true;
 }
 
 bool add_atlas_quad_clipped(HudDrawList& dl, uint32_t layer, HudList list, const TextureAtlas& atlas,

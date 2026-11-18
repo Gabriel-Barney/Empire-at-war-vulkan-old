@@ -674,7 +674,15 @@ void TacticalHud::build_radar(const TacticalHudFrame& f, std::span<const HudUnit
             const Vec2f sz = t->radar_icon_size.x > 0.0f && t->radar_icon_size.y > 0.0f
                                  ? Vec2f{t->radar_icon_size.x * 0.5f * radar_view_.size.x * k, t->radar_icon_size.y * 0.5f * radar_view_.size.y * k}
                                  : Vec2f{};
-            drawn = add_atlas_quad(dl_, ulayer, HudList::Alpha, *atlas_, t->radar_icon, c, sz, 1.0f, col);
+            // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q12, 0x35b4d0 / 0x26ba90): with Radar_Show_Facing the quad turns by
+            // yaw - 90 degrees counter-clockwise (an angle of exactly 0 is not turned); Radar_Rotate_Icon shifts the UVs.
+            const float a = t->radar_show_facing ? u.yaw_deg : 0.0f;
+            if (a != 0.0f || t->radar_rotate) {
+                const float th = a != 0.0f ? a * 0.017453292519943295f - 1.5707963267948966f : 0.0f;
+                drawn = add_atlas_quad_turned(dl_, ulayer, HudList::Alpha, *atlas_, t->radar_icon, c, sz, 1.0f, col, th, t->radar_rotate);
+            } else {
+                drawn = add_atlas_quad(dl_, ulayer, HudList::Alpha, *atlas_, t->radar_icon, c, sz, 1.0f, col);
+            }
             if (drawn) ++stats_.radar_icons;
         }
         if (!drawn) dot(dl_, ulayer, c, u.selected ? 2.5f : 1.5f, col);

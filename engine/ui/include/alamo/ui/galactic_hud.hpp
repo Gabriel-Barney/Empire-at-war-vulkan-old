@@ -114,6 +114,10 @@ struct GalacticPlanetInfo {
     // stacks: fleet / land-force stacks under the name (orbiting heroes show only in their fleet slot, Gabriel 2026-10-29). Planet name drawn upper-case in owner_color (host: the owner faction's colour,
     // neutral grey).
     bool fogged = false;
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q2, labels 0x3ea1b0 / TextButton 0x350ed0): the name label's size class 0 / 1 / 2
+    // (planet_label_class; 0 when the local player cannot see the ground base info), the g_planet_name
+    // Alternate_Font_Name entry the name is drawn in.
+    int32_t label_class = 0;
     std::string garrison_icon;
     std::vector<GalacticPlanetStack> stacks;
     // ui4 t03 / t10 (GALAXY_MAP_PRESENTATION §1.7). b_filters2: the planet type's Encyclopedia_Weather_Icon on g_weather and
@@ -188,6 +192,15 @@ struct GalacticBuildOption {
 // offset to next ability"): a hero / unit at the planet with a usable galactic special ability. Clicking a row emits
 // HudAction{Button, name "g_special_ability", unit = hero, ids = {planet}, value = row} - the SpecialAbility activate
 // request the host turns into the command (activate_special_here).
+// mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q2): a planet's label class from its ground structure count: below
+// Num_Structures_For_Medium_Planet_Name 0, below Num_Structures_For_Large_Planet_Name 1, else 2.
+constexpr int32_t planet_label_class(size_t structures, int32_t medium, int32_t large) {
+    const auto n = static_cast<int64_t>(structures);
+    return n < medium ? 0 : n < large ? 1 : 2;
+}
+// Entry `index` of a component's Alternate_Font_Name list (split on spaces / commas, 0x51a280); "" when out of range.
+std::string alternate_font_entry(std::string_view list, int32_t index);
+
 struct GalacticSpecialAbility {
     uint32_t hero = 0;          // object id of the hero / unit that activates it
     std::u32string text;        // row text (e.g. the ability or hero name); "" = text_key
@@ -527,7 +540,7 @@ private:
     void hit(int32_t component, uint32_t layer, Vec2f center, Vec2f size);
     Vec2f component_size(uint32_t component, const ComponentPlacement& p) const;
     void text_at(int32_t component, std::u32string_view text, Vec2f anchor, uint32_t layer, uint8_t alpha = 255,
-                 const Rgba8* color = nullptr, bool second_color = false);
+                 const Rgba8* color = nullptr, bool second_color = false, int32_t font = -1);
     int32_t font_of(int32_t component) const;
 
     const ComponentTable* table_ = nullptr;

@@ -122,6 +122,13 @@ void App::planet_icons(const galactic::GalacticSim& g, PlanetIndex row, ui::Gala
         }
     }
     if (best_t != objects::kNone) out.garrison_icon = icon(best_t);
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q2): the name label's class from the live ground structures, when the local player
+    // sees the ground base info (0x50b840); else class 0.
+    if (g.can_see_groundbase_info(me, row)) {
+        size_t n = 0;
+        for (const objects::ObjectHandle h : ps.structures) n += st.alive(h) ? 1u : 0u;
+        out.label_class = ui::planet_label_class(n, hud_consts_.medium_planet_structures, hud_consts_.large_planet_structures);
+    }
     // GALAXY_MAP_PRESENTATION §1.3 / §1.4: one button per orbiting fleet - unit count, the representative unit's icon,
     // stealth (every unit galactic-stealthed) / raid (ConflictManager::raid_force) badges, enemy flag; the fleet's own
     // orbit slot comes from the sim (FleetState::slot, playtest 3 t07; -1 = first free; the ui moves enemy fleets to
