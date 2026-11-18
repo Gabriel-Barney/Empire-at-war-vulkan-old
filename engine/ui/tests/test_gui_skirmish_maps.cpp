@@ -669,11 +669,45 @@ END
     const GuiControl* label = slider("IDC_SKIRMISH_MAX_TECH_LEVEL_VALUE");
     CHECK(label && label->text == U"Tech 5");
     env.gui.find(kOptions)->set_value("IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER", 0);
+    fe.update(std::vector<GuiEvent>{event(GuiEvent::Kind::ValueChanged, kOptions, "IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER", 0)},
+              InputFrame{}, acts);
     click(kOptions, "IDC_BUTTON_ACCEPT");
     acts.clear();
     click(kCustom, "IDC_PLAY_BUTTON");
     CHECK(acts.size() == 1u && acts[0].faction == "Rebel" && acts[0].game_options.set && acts[0].game_options.start_tech == 0 &&
           acts[0].game_options.max_tech == 4);
+
+    // mcx8 t10 (docs/re/AI_GALACTIC_TOKENS.md §4 [H]): `set` is retail's flag 0x20 "an option was changed", not "accepted".
+    // The start above copied the options and cleared it: a second start in the same run uses the campaign's own values.
+    acts.clear();
+    click(kCustom, "IDC_PLAY_BUTTON");
+    CHECK(acts.size() == 1u && !acts[0].game_options.set && acts[0].game_options.start_tech == 0);
+    // Accepting without a change keeps it clear; the dialog shows the values accepted last; random events are cleared
+    // and greyed (FoC: flag 0x10 is never set).
+    click(kCustom, "IDC_SELECT_OPTIONS");
+    st = slider("IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER");
+    const GuiControl* random = slider("IDC_ALLOW_RANDOM_EVENTS");
+    CHECK(st && st->value == 0 && random && !random->checked && !random->enabled);
+    click(kOptions, "IDC_BUTTON_ACCEPT");
+    acts.clear();
+    click(kCustom, "IDC_PLAY_BUTTON");
+    CHECK(acts.size() == 1u && !acts[0].game_options.set);
+    // A slider event sets it, Defaults clears it again.
+    click(kCustom, "IDC_SELECT_OPTIONS");
+    fe.update(std::vector<GuiEvent>{event(GuiEvent::Kind::ValueChanged, kOptions, "IDC_SKIRMISH_MAX_TECH_LEVEL_SLIDER", 3)},
+              InputFrame{}, acts);
+    click(kOptions, "IDC_DEFAULTS_BUTTON");
+    click(kOptions, "IDC_BUTTON_ACCEPT");
+    acts.clear();
+    click(kCustom, "IDC_PLAY_BUTTON");
+    CHECK(acts.size() == 1u && !acts[0].game_options.set && !acts[0].game_options.random_events);
+    // Changed and accepted: set, random events off (Game.InterventionsEnabled 0.0 in the session).
+    click(kCustom, "IDC_SELECT_OPTIONS");
+    fe.update(std::vector<GuiEvent>{event(GuiEvent::Kind::ValueChanged, kOptions, "IDC_SKIRMISH_CREDITS_SLIDER", 4)}, InputFrame{}, acts);
+    click(kOptions, "IDC_BUTTON_ACCEPT");
+    acts.clear();
+    click(kCustom, "IDC_PLAY_BUTTON");
+    CHECK(acts.size() == 1u && acts[0].game_options.set && !acts[0].game_options.random_events);
 }
 
 }  // namespace test_gui_screens_t

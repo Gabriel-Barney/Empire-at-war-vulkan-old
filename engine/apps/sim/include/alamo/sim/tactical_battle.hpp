@@ -165,6 +165,8 @@ struct BattleConfig {
     // ccpgt t02 (SKIRMISH_SETUP §4.2): the Capture Control Points game type (4), land only: each player's win condition is 0x15
     // CONTROL_POINT_DOMINATION instead of the map kind's default. Off: unchanged rules.
     bool control_point_domination = false;
+    // mcx8 t09 (AI_GALACTIC_TOKENS §4): the tactical AI's Game.InterventionsEnabled (the session's game-settings flags).
+    bool interventions_enabled = true;
     // skm2 t02 (SKIRMISH_SETUP §1, §2.2, TACTICAL_COMBAT §2.10 "Skirmish with ... +0xb5"): the skirmish slots of a skirmish
     // map battle in slot order, each its player and team (IDC_PLAYER_TEAM_n, 0-based; -1 none). Set: the slots are these
     // players (up to kMaxSides; the first two must be the request's defender and attacker) and every slot gets its start

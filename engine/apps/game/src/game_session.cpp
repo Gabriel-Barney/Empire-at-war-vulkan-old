@@ -298,6 +298,9 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
     }
     // ccpgt t02: the Capture Control Points game type (land maps only; SKIRMISH_SETUP §4.2).
     bo.battle.control_point_domination = spec_.kind == SessionKind::Skirmish && spec_.skirmish.land && spec_.skirmish.control_points;
+    // mcx8 t09: the battles read the same settings flags as the galactic AI (AI_GALACTIC_TOKENS §4). [port] a skirmish has
+    // no advanced campaign options, so 1.0 there (whether the skirmish options dialog sets flag 0x20 is not traced).
+    bo.battle.interventions_enabled = spec_.interventions_enabled();
     bo.battle.skip_human_units = true;  // the human's units take orders only from commands (stand-ins skip them)
     sim::load_tactical_systems(*d.files, d.rules, &d.db.constants(), bo);  // Int-final: weather, retreat, strikes data
     if (d.vfs) {

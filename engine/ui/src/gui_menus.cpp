@@ -943,7 +943,11 @@ void FrontEnd::fill_game_options(GuiDialog& d, const GameOptionsSetup& o) {
     std::vector<std::u32string> rows;
     for (const char* k : kAutoKeys) rows.push_back(text(k));
     d.set_items("IDC_ALLOW_AUTORESOLVE_COMBO", std::move(rows), std::clamp(o.auto_resolve, 0, 3));
-    d.set_checked("IDC_ALLOW_RANDOM_EVENTS", o.random_events);
+    // mcx8 t10 (AI_GALACTIC_TOKENS §4 [M]): FoC clears random events (flag 0x10) when the dialog opens and greys the box;
+    // no handler sets it.
+    (void)o.random_events;
+    d.set_checked("IDC_ALLOW_RANDOM_EVENTS", false);
+    d.enable("IDC_ALLOW_RANDOM_EVENTS", false);
     show_game_option_values(d);
 }
 
@@ -955,8 +959,8 @@ GameOptionsSetup FrontEnd::read_game_options(const GuiDialog& d) const {
     if (const GuiControl* c = d.get("IDC_SKIRMISH_MAX_TECH_LEVEL_SLIDER")) o.max_tech = std::clamp(c->value, tlo, thi);
     o.max_tech = std::max(o.max_tech, o.start_tech);
     if (const GuiControl* c = d.get("IDC_ALLOW_AUTORESOLVE_COMBO"); c && c->selected >= 0) o.auto_resolve = std::clamp(c->selected, 0, 3);
-    if (const GuiControl* c = d.get("IDC_ALLOW_RANDOM_EVENTS")) o.random_events = c->checked;
-    o.set = true;
+    o.random_events = false;  // mcx8 t10: flag 0x10 is never set in FoC
+    o.set = options_changed_;  // mcx8 t10: flag 0x20, not "accepted"
     return o;
 }
 
@@ -1539,7 +1543,8 @@ void FrontEnd::setup(GuiDialog& d) {
     } else if (ascii_iequals(n, kSkirmish)) {
         fill_skirmish(d);
     } else if (ascii_iequals(n, kAdvanced)) {  // ui1 t06: the accepted values, else the defaults
-        fill_game_options(d, game_options_.set ? game_options_ : p_.game_option_defaults);
+        fill_game_options(d, game_options_stored_ ? game_options_ : p_.game_option_defaults);
+        options_changed_ = game_options_.set;  // mcx8 t10: flag 0x20 stays set until Defaults or a campaign start
     } else if (ascii_iequals(n, kSkirmishAdvanced)) {  // skm1 t02: the accepted values, else the defaults
         fill_skirmish_options(d, skirmish_options_.set ? skirmish_options_ : p_.skirmish_option_defaults);
     } else if (ascii_iequals(n, kTutorial)) {
@@ -1774,7 +1779,10 @@ void FrontEnd::on_change(const GuiEvent& e, std::vector<MenuAction>& out) {
             }
         }
     }
-    else if (ascii_iequals(n, kAdvanced) && e.kind == GuiEvent::Kind::ValueChanged) show_game_option_values(*d);  // ui1 t06
+    else if (ascii_iequals(n, kAdvanced) && e.kind == GuiEvent::Kind::ValueChanged) {  // ui1 t06
+        options_changed_ = true;  // mcx8 t10: every slider event sets flag 0x20
+        show_game_option_values(*d);
+    }
     else if (ascii_iequals(n, kSkirmishAdvanced) && (e.kind == GuiEvent::Kind::ValueChanged || e.kind == GuiEvent::Kind::SelectionChanged ||
                                                     e.kind == GuiEvent::Kind::Checked))
         skirmish_options_rules(*d);  // skm1 t02
@@ -1892,7 +1900,8 @@ void FrontEnd::on_click(const GuiEvent& e, std::vector<MenuAction>& out) {
                     a.campaign = s.factions[fi].campaign;
                     a.faction = s.factions[fi].faction;
                     a.difficulty = difficulty_of(*d);
-                    a.game_options = game_options_;  // ui1 t06: the accepted advanced options (set = false: the campaign's)
+                    a.game_options = game_options_;  // ui1 t06: the advanced options (set = false: the campaign's)
+                    game_options_.set = false;       // mcx8 t10: retail clears flag 0x20 after the campaign start's copy
                     out.push_back(std::move(a));
                 }
             }
@@ -1900,11 +1909,15 @@ void FrontEnd::on_click(const GuiEvent& e, std::vector<MenuAction>& out) {
     } else if (ascii_iequals(n, kAdvanced) && d) {  // ui1 t06
         if (is("IDC_BUTTON_ACCEPT")) {
             game_options_ = read_game_options(*d);
+            game_options_stored_ = true;
             pop();
         } else if (is("IDC_CANCEL_BUTTON")) {
             pop();
         } else if (is("IDC_DEFAULTS_BUTTON")) {
             fill_game_options(*d, p_.game_option_defaults);
+            options_changed_ = false;  // mcx8 t10: Defaults clears flag 0x20
+        } else if (is("IDC_ALLOW_RANDOM_EVENTS")) {
+            options_changed_ = true;  // mcx8 t10: a checkbox event sets flag 0x20 (the box is greyed in FoC)
         }
     } else if (ascii_iequals(n, kSkirmishAdvanced) && d) {  // skm1 t02
         if (is("IDC_BUTTON_ACCEPT")) {

@@ -311,7 +311,11 @@ struct GameOptionsSetup {
     int32_t credits = 6000, start_tech = 1, max_tech = 5, auto_resolve = kAutoResolveAsk;
     bool random_events = false;
     int32_t min_credits = 2000, max_credits = 8000;  // the slider range (host)
-    bool set = false;  // Accept was pressed: the game uses these (else the campaign's own values)
+    // mcx8 t10 (AI_GALACTIC_TOKENS §4, MCX5_RE_ANSWERS Q3.1 [H]): retail's settings flag 0x20 "an option was changed":
+    // set by every slider / checkbox event of the dialog, cleared by IDC_DEFAULTS_BUTTON and after a campaign start has
+    // copied the options. Set: the game uses these values (else the campaign's own) and Game.InterventionsEnabled is
+    // random_events. [port] the port keeps Accept / Cancel: a change counts once the dialog is accepted.
+    bool set = false;
     friend bool operator==(const GameOptionsSetup&, const GameOptionsSetup&) = default;
 };
 // skm1 t02: IDD_INTERNET_STAGING_DIALOG_ADVANCED_SKIRMISH_OPTIONS (opened by the skirmish staging screen's Select Options,
@@ -602,7 +606,9 @@ private:
     SkirmishOptionsSetup skirmish_options_;   // skm1 t02: the skirmish options accepted last (set = false until then)
     std::vector<int32_t> skirmish_win_rows_;  // skm1 t02: the win condition of each IDC_WIN_CONDITION_COMBO row
     GameOptionsSetup game_options_;  // ui1 t06: the advanced options accepted last (set = false until then)
-    TechSliderRange tech_range_;     // mcx4 t19: the open advanced dialog's tech slider range (custom staging selection)  // skirmish list: the game type selected last (UI.md 9.7)
+    TechSliderRange tech_range_;     // mcx4 t19: the open advanced dialog's tech slider range (custom staging selection)
+    bool game_options_stored_ = false;  // mcx8 t10: the dialog was accepted once (it then shows game_options_)
+    bool options_changed_ = false;      // mcx8 t10: the open advanced dialog's flag 0x20 (see GameOptionsSetup::set)  // skirmish list: the game type selected last (UI.md 9.7)
     std::vector<int32_t> game_type_rows_;    // IDC_GAME_TYPE_LIST rows -> game type (sorted by row text)
     // The map selected last [0 land, 1 space] ("" = none yet; UI.md 9.5 / 9.7: retail keeps one land key for types 2 and 4).
     std::string last_map_[2];
