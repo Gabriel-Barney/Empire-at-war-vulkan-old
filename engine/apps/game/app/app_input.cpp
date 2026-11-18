@@ -270,6 +270,12 @@ void App::post_tick() {
             audio_.set_corruption_mission(session_->battles() && session_->battles()->active_corruption_player() >= 0);  // mcx4 t13
             // mcx4 t14 (victory declare 0x343b90): the win / lose banner, once, local winner or allied -> win colour,
             // hostile -> lose colour (GameAudioHost::battle_result_gate: types 0x0b..0x16, not silent).
+            {  // mcx4 t14 (0x27fad0 / 0x287e70): a type added to the local player's pool flashes b_reinforcement by count.
+                const size_t n = local_player() >= 0 ? b->reserves(local_player()).size() : 0;
+                // ledger: consumes GameConstants.CB_Flash_Count
+                if (n > reserve_seen_) story_present_.flash_component("b_reinforcement", hud_consts_.cb_flash_count, now_s_);
+                reserve_seen_ = n;
+            }
             if (!win_banner_set_ && b->victory_declared()) {
                 win_banner_set_ = true;
                 const int32_t me = local_player(), winner = b->victory_declared_player();

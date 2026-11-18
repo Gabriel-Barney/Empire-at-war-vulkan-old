@@ -166,6 +166,7 @@ struct HudConstants {
     float win_lose_font_size = 24.0f;                 // Win_Lose_Message_Font_Size
     Rgba8 win_message_color{223, 243, 255, 255};      // Win_Message_Color
     Rgba8 lose_message_color{255, 244, 223, 255};     // Lose_Message_Color
+    int32_t cb_flash_count = 4;                       // mcx4 t14: CB_Flash_Count (b_reinforcement flashes on a pool add)
 };
 HudConstants hud_constants_from(const data::XmlNode& game_constants_root);
 // "r g b [a]" / "r, g, b[, a]" bytes (alpha 255 when absent); false (out unchanged) with fewer than three numbers.

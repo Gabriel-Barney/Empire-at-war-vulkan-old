@@ -1226,7 +1226,7 @@
 {"GameConstants", "GUI_Planet_Flash_Level", 0x8, LedgerState::Stored, 0, "", "docs/re/xml_tags.md", 1, 1},
 {"GameConstants", "GUI_Planet_Fade_Duration", 0x8, LedgerState::Stored, 0, "", "docs/re/GALACTIC_REVEAL_CORRUPTION.md", 1, 1},
 {"GameConstants", "CB_Flash_Duration", 0x8, LedgerState::RetailUnused, 0, "", "docs/re/MCX4_T14_RE_ANSWERS.md GameConstants.CB_Flash_Count [H]", 1, 1},
-{"GameConstants", "CB_Flash_Count", 0x6, LedgerState::Stored, 0, "", "docs/re/MCX4_T14_RE_ANSWERS.md", 1, 1},
+{"GameConstants", "CB_Flash_Count", 0x6, LedgerState::Verified, 2, "engine/apps/game/app/app_input.cpp", "docs/re/MCX4_T14_RE_ANSWERS.md", 1, 1},
 {"GameConstants", "Icons_Per_Column", 0x6, LedgerState::Stored, 0, "", "", 1, 1},
 {"GameConstants", "Hint_Text_Color", 0x16, LedgerState::Verified, 1, "engine/apps/game/src/story_present.cpp", "docs/re/xml_tags.md", 1, 1},
 {"GameConstants", "System_Text_Color", 0x16, LedgerState::Verified, 1, "engine/apps/game/src/story_present.cpp", "", 1, 1},

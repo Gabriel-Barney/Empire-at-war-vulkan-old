@@ -716,6 +716,7 @@ void App::begin_battle(bool from_save) {
     const sim::TacticalBattle* b = session_->battle();
     ++battles_seen_;
     win_banner_set_ = false;  // mcx4 t14: a new battle has no banner yet
+    reserve_seen_ = b ? b->reserves(local_player()).size() : 0;
     win_banner_.clear();
     reinforce_unit_ = 0;  // no drop point pending from an earlier battle
     bombing_targeting_ = false;  // nor a bombing-run pick
