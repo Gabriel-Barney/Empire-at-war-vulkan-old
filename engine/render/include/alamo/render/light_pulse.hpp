@@ -11,6 +11,9 @@ struct LightPulse {
     float c1[3] = {1.0f, 1.0f, 1.0f}, c2[3] = {1.0f, 1.0f, 1.0f};
     float duration = 0.0f;  // D, seconds
     int32_t pulses = 1;     // N
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q10, the object colour flash 0x392ba0): type 1 restarts this many times in a row
+    // (a GUI flash: count 1 or 3); total length D x repeats.
+    int32_t repeats = 1;
     double start = 0.0;
 };
 
@@ -21,8 +24,10 @@ inline bool light_pulse_rgb(const LightPulse& p, double now, const float base[3]
     constexpr double kPi = 3.14159265358979323846;
     for (int k = 0; k < 3; ++k) out[k] = base[k];
     if (p.type == 0 || !(p.duration > 0.0f)) return false;
-    const double e = now - p.start;
-    if (p.type != 5 && (e < 0.0 || e >= static_cast<double>(p.duration))) return false;
+    double e = now - p.start;
+    const double reps = p.type == 1 && p.repeats > 1 ? static_cast<double>(p.repeats) : 1.0;
+    if (p.type != 5 && (e < 0.0 || e >= static_cast<double>(p.duration) * reps)) return false;
+    if (reps > 1.0 && e >= 0.0) e = std::fmod(e, static_cast<double>(p.duration));
     if (e < 0.0) return true;
     const auto lerp = [](float a, float b, double t) { return static_cast<float>(static_cast<double>(a) + (static_cast<double>(b) - a) * t); };
     const double d = static_cast<double>(p.duration);

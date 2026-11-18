@@ -533,6 +533,10 @@ void App::respond(const commands::EventData& ev) {
 void App::submit(commands::EventData ev, bool voice) {
     if (!session_) return;
     if (voice) respond(ev);  // UiOrder::voice false: the double-click order replays no unit response (spec §1.4)
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q10, click path 0x37250): the selected objects flash (rapid GUI flash). [port] every
+    // local Select order in battle (click, double click, box); retail's box path was not traced.
+    if (ev.type() == commands::EventType::Select && screen_ == Screen::Battle)
+        for (const uint32_t id : ev.ids("ids")) bview_.rapid_flash(id, now_s_);
     const std::string name(ev.def().name);
     std::string detail;  // galactic moves: which fleet / planet / player (the reason alone hid the playtest failure)
     if (ev.type() == commands::EventType::MoveObjectToObject)

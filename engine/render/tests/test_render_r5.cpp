@@ -2172,6 +2172,23 @@ static void test_blob_shadows() {
         p.type = 5;  // Continuous_Smooth_Pulse never ends, starts at B
         CHECK(render::light_pulse_rgb(p, 10.0, base, o) && std::fabs(o[0] - 1.0f) < 1e-4f && render::light_pulse_rgb(p, 99.0, base, o));
     }
+    {  // mcx4 t14 (docs/re/MCX4_PRES_RE_ANSWERS_3.md Q10): the GUI flash - GUI_Flash_Level 3 -> 4x at the start, back to
+       // 1x over GUI_Rapid_Flash_Duration 0.1 s, three times in a row
+        // ledger: verifies GameConstants.GUI_Flash_Level
+        // ledger: verifies GameConstants.GUI_Rapid_Flash_Duration
+        const float base[3] = {1.0f, 1.0f, 1.0f};
+        float o[3];
+        render::LightPulse p;
+        p.type = 1;
+        p.c1[0] = p.c1[1] = p.c1[2] = 1.0f + 3.0f;
+        p.duration = 0.1f;
+        p.repeats = 3;
+        p.start = 0.0;
+        CHECK(render::light_pulse_rgb(p, 0.0, base, o) && std::fabs(o[0] - 4.0f) < 1e-4f);
+        CHECK(render::light_pulse_rgb(p, 0.15, base, o) && std::fabs(o[0] - 2.5f) < 1e-3f);   // the second flash, halfway
+        CHECK(render::light_pulse_rgb(p, 0.2125, base, o) && o[0] > 3.0f);                     // the third has started
+        CHECK(!render::light_pulse_rgb(p, 0.3125, base, o));
+    }
     {  // mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md): Mouse_Over_Highlight_Scale 1.5 -> a hovered object up to 1.5x brighter
         // ledger: verifies GameConstants.Mouse_Over_Highlight_Scale
         CHECK(render::SimInstanceBuilder::hover_brighten(1.5f, 1.0f) == 1.5f && render::SimInstanceBuilder::hover_brighten(1.5f, 0.0f) == 1.0f);
