@@ -105,6 +105,18 @@ struct GalacticSetup {
     // q6 t22: the campaign's victory conditions (load_victory_rules); start() builds the per-player records from them.
     // Empty for skirmish and hand-built setups (no records: only story claims can end the game).
     VictoryRules victory;
+    // mcx4 t01 (MCX4_RE_ANSWERS_GALACTIC Q1): the campaign's Special_Case_Production entries (Faction, Planet, Type) as
+    // (planet type, object type), file order; the faction column is never read. Entries whose names do not resolve are
+    // dropped here; start() keeps only types with Build_Requires_Initial_Placement (0x3fae10).
+    std::vector<std::pair<uint32_t, uint32_t>> special_case_production;
+    // mcx4 t07 (Q7.4): the campaign's Corruption_Level_Override pairs (planet type, int), file order; start() corrupts the
+    // first planet of that type with Racketeering when the int is >= 1 (0x28dbe0 at L14).
+    std::vector<std::pair<uint32_t, int32_t>> corruption_level_override;
+    // mcx4 t07 (Q7.4 / Q7.6, copied at L14 by 0x28dbe0): Is_Autoresolve_Allowed (ctor true), Is_Story_Campaign and the
+    // Autoresolve_Exclusion_Locations pairs (planet type, land) in file order.
+    bool autoresolve_allowed = true;
+    bool story_campaign = false;
+    std::vector<std::pair<uint32_t, bool>> autoresolve_exclusions;
 };
 
 struct CampaignOptions {
@@ -376,6 +388,10 @@ struct PlanetState {
     // fought, non-sandbox campaign land battles). Saved (galactic save v2); hashed by the battle host ("battle.state",
     // only planets with records) [port].
     std::vector<PersistedBuiltObject> built_objects;
+    // mcx4 t01 (MCX4_RE_ANSWERS_GALACTIC Q1): the initial-placement list PD +0x108 (data +0x110): the
+    // Build_Requires_Initial_Placement types this planet may build (can-build step 24), filled once at start() from the
+    // campaign's Special_Case_Production, file order, no duplicates. Saved (v10); not hashed (fixed after start()).
+    std::vector<uint32_t> initial_placement;
 };
 
 struct FleetState {
@@ -1211,6 +1227,29 @@ public:
     // to the sim; not part of the sim's own save or hash. Default-constructed = nothing refused.
     void set_story_gates(const StoryGates& gates) { story_gates_ = gates; }
     const StoryGates& story_gates() const { return story_gates_; }
+    // mcx4 t07 (docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.4 / Q7.6): the campaign's auto-resolve rules, read by the conflict
+    // manager. campaign_autoresolve_disabled() = the campaign's Is_Autoresolve_Allowed false, the start value of the story
+    // manager's global lock +0x41 (a running story session takes it over: sim::StorySession). autoresolve_excluded():
+    // the story-manager test 0x4471b0 - only in an Is_Story_Campaign campaign, the (planet type, land / space) pair is in
+    // the Autoresolve_Exclusion_Locations list. autoresolve_exclusion_won(): 0x448cb0, the local player won a fought
+    // battle there (land 0x32f4d0 / space 0x32f570): the first matching pair leaves the list. Saved (v10); not hashed (like
+    // the story lock).
+    bool campaign_autoresolve_disabled() const { return autoresolve_disabled_; }
+    bool story_campaign() const { return story_campaign_; }
+    bool autoresolve_excluded(PlanetIndex planet, bool land) const;
+    // mcx4 t05 (docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q5.1, 0x4313e0 for MoveThroughObjects 0x3c4460): the route toll of
+    // moving `fleet` along `path` (source first) for a mover whose faction has Benefits_From_Corruption; 0 otherwise.
+    // Every intermediate planet (path[1] .. path[n-2]) whose orbit controller (0x3f9270) is not the mover adds, per unit
+    // of the fleet, the unit type's Cheap_Bribe_Cost when the planet owner's faction is Easily_Bribed, else its
+    // Expensive_Bribe_Cost, as an int sum; an AI mover's planet sum is (int)((float)sum x Bribe_Cost_Multiplier).
+    // `payees` gets (planet owner, amount) per planet in path order; the result is the total.
+    int32_t route_toll(int32_t player, uint32_t fleet, std::span<const PlanetIndex> path,
+                       std::vector<std::pair<int32_t, int32_t>>* payees = nullptr) const;
+    // 0x3f9270 as Q5.1 reads it: the starbase owner while the starbase level is > 0, else the owner of the first fleet in
+    // orbit that is not hidden (0x3a9760), else of the first hidden one, else kNoPlayer.
+    int32_t orbit_controller(PlanetIndex planet) const;
+    void autoresolve_exclusion_won(PlanetIndex planet, bool land);
+    const std::vector<std::pair<uint32_t, bool>>& autoresolve_exclusions() const { return autoresolve_exclusions_; }
     // mcx6: the planet's max starbase level 0x372780 (planet block +0x238): STATISTIC_CHANGE MAX_STARBASE_LEVEL's value when
     // written, else the map's Max_Space_Base (absent -> 5 [port], as the AI readers had it).
     int32_t max_starbase_level(PlanetIndex planet) const;
@@ -1443,6 +1482,9 @@ private:
     std::vector<VictoryClaim> claims_;    // declaration order
     int32_t victory_hold_ = 0;            // story t11: galactic monitor hold (+0x5c)
     StoryGates story_gates_;              // STY1 lane B: set by the story session, never saved here
+    bool autoresolve_disabled_ = false;   // mcx4 t07: !Is_Autoresolve_Allowed (story manager +0x41 at L14)
+    bool story_campaign_ = false;         // mcx4 t07: Is_Story_Campaign (0x140b303c2)
+    std::vector<std::pair<uint32_t, bool>> autoresolve_exclusions_;  // mcx4 t07: story manager +0x268, (planet type, land)
     std::vector<std::pair<int32_t, uint8_t>> victory_deferred_;  // q6 t21: {player, type}, monitor +0x60
     std::vector<std::pair<int32_t, std::string>> names_;  // [port] fleet / ship names {ObjectId, name}, id-ascending (v7)
     std::vector<StructureSlot> structure_slots_;  // map1 t06: structure marker memory, object-id-ascending (v9)

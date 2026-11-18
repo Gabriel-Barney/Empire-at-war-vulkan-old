@@ -254,6 +254,9 @@ std::vector<StoryPlotSet> campaign_plot_sets(const data::CampaignDef& campaign, 
 StorySession::StorySession(galactic::GalacticSim& sim, objects::ObjectStore& store, const objects::GameObjectTypes& types,
                            GameRandom& rng)
     : sim_(&sim), store_(&store), types_(&types), rng_(&rng), lua_(std::make_unique<Families>()) {
+    // mcx4 t07 (MCX4_RE_ANSWERS_GALACTIC Q7.6): the global lock +0x41 starts as the campaign's Is_Autoresolve_Allowed false
+    // (0x28dbe0 at L14); DISABLE / ENABLE_AUTORESOLVE rewrite it later. A loaded story save restores its own value.
+    autoresolve_disabled_ = sim.campaign_autoresolve_disabled();
 #if defined(ALAMO_LUA_PLAYERS)
     lua_->players.attach_galactic(sim_);
     lua::LuaPlayerWorld* world = &lua_->players;

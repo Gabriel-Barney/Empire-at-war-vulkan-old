@@ -619,6 +619,16 @@ CampaignMenu build_campaign_menu(std::span<const data::CampaignDef* const> sorte
         const std::string set = trimmed(c->campaign_set).empty() ? c->name : trimmed(c->campaign_set);
         const std::string_view cs = c->raw_value("Supports_Custom_Settings");
         const bool custom = ascii_iequals(trimmed(cs), "true") || ascii_iequals(trimmed(cs), "yes") || trimmed(cs) == "1";
+        // mcx4 t07 (docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.3): Is_Listed (ctor true; bool code 0x0: "1" or a first Y / T)
+        // false hides the campaign from the setup-screen lists (0x478f90 with listed_only, 0xfb950) - here the custom
+        // (conquest) list. Retail's tutorial chooser does not filter on it, and its story campaigns (all Is_Listed false
+        // in FoC) are started by name, so the story and tutorial lists keep them.
+        bool listed = true;
+        for (std::string_view v : c->raw_values("Is_Listed")) {
+            const std::string t = trimmed(v);
+            listed = t == "1" || (!t.empty() && (t[0] == 'Y' || t[0] == 'y' || t[0] == 'T' || t[0] == 't'));
+        }
+        if (custom && !listed && !ascii_istarts_with(set, "Tutorial")) continue;
         if (ascii_istarts_with(set, "Tutorial")) add(m.tutorials, *c, set, faction, custom);
         else add(custom ? m.custom : m.story, *c, set, faction, custom);
     }

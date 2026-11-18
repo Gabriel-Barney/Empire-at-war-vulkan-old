@@ -249,6 +249,15 @@ public:
     // player]). Land conflicts never call it. A host callback, not a galactic event, so the event stream is unchanged.
     // Absent: nothing. It must not change the conflict queues.
     std::function<void(const ConflictInfo&)> on_space_decide;
+    // mcx4 t07 (MCX4_RE_ANSWERS_GALACTIC Q7.6): the story manager's global auto-resolve lock 0x4472a0 (flag +0x41 or the
+    // RESTRICT_AUTORESOLVE planet list) for the conflict's planet. The host wires it to the running story session.
+    // Absent: the campaign's Is_Autoresolve_Allowed false (GalacticSim::campaign_autoresolve_disabled), the value +0x41
+    // starts with.
+    std::function<bool(const ConflictInfo&)> story_lock;
+    // The auto-resolve lock of a conflict: story_lock (or the campaign flag) or, in a story campaign, its (planet, land /
+    // space) pair in Autoresolve_Exclusion_Locations (Q7.4). A locked conflict skips the overrun check (single player:
+    // 0x2b92e0 / 0x2b76a0; AI vs AI still auto-resolves), and the host makes the human fight it.
+    bool autoresolve_locked(const ConflictInfo& c) const;
 
     // ---- ConflictHooks ----
     void on_space_conflict(PlanetIndex planet, int32_t attacker) override;

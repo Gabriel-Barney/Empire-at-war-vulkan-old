@@ -126,7 +126,8 @@ by the GUI tooltip and Lua); steps without a code just fail.
     reason **6**. (−1 = unlimited for both.)
 24. Final: (planet surface accessible (0x375220: `Planet_Surface_Accessible`, overridden by planet data +0x2C8) **or** T is
     not 0x5B / 0x5D / 0x5F **or** `Is_Generic_Hero` (+0x14)) **and** (no planet data, or not
-    `Build_Requires_Initial_Placement` (+0xC3), or T is in planet data +0x110 list).
+    `Build_Requires_Initial_Placement` (+0xC3), or T is in planet data +0x110 list). The +0x110 list is filled at load
+    from the campaign's `Special_Case_Production` (`MCX4_RE_ANSWERS_GALACTIC.md` Q1).
 
 **0x375220 `Is_Surface_Accessible(type, obj)` and destroyed planets (2026-10-31).** The override is inside the function, not
 in callers: it returns false when obj ≠ null, obj +0xB8 (planet data) ≠ null and data +0x2C8 (destroyed) = 1; otherwise the

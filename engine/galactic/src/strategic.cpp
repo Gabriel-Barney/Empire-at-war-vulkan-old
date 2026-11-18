@@ -260,13 +260,16 @@ BuildCheck GalacticSim::build_check(int32_t player, PlanetIndex planet, uint32_t
     if (t.limit_lifetime == 0 || (t.limit_lifetime > 0 && built_count(player, type) >= t.limit_lifetime)) return fail(22);
     if (t.limit_current == 0) return fail(23);
     if (t.limit_current > 0 && live_count(player, type) + queued_count(player, type) >= t.limit_current) return fail(23, kBuildLimit);
-    // 24. surface access for ground bases / companies / ground structures (generic heroes excepted), initial placement
-    // (the planet's initial-placement list +0x110 is not modelled: such types are never buildable [port]).
+    // 24. surface access for ground bases / companies / ground structures (generic heroes excepted), initial placement:
+    // a Build_Requires_Initial_Placement type only on the planets the campaign's Special_Case_Production lists it for
+    // (PD +0x110, mcx4 t01, MCX4_RE_ANSWERS_GALACTIC Q1).
     const bool accessible = surface_accessible(planet);  // 0x375220 [H]: planet data +0x2C8 (destroyed) -> false
     const bool needs_surface = t.dummy != 0 ? (t.dummy == kDummyGroundBase || t.dummy == kDummyGroundCompany || t.dummy == kDummyGroundStructure)
                                             : (t.kind == UnitKind::GroundUnit || t.kind == UnitKind::GroundStructure);
     if (!(accessible || !needs_surface || t.generic_hero)) return fail(24);
-    if (t.requires_initial_placement) return fail(24);
+    if (t.requires_initial_placement &&
+        std::find(p.initial_placement.begin(), p.initial_placement.end(), type) == p.initial_placement.end())
+        return fail(24);
     r.ok = true;
     return r;
 }

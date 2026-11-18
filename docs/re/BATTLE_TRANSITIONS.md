@@ -517,7 +517,8 @@ vector), and three of them (UM01, UM11, Empire M02) are not sandbox at all.
    0x140b27d5e; reader of GMM+0x30 / +0x34 besides the save-load restore.
 2. 0x4bb1a0 / 0x27f370 in the resolutions (base cut and the per-type player call) — [M] only.
 3. GMM+0x1e3 reader 0x364b20 (one-shot check 10 s into the next tactical battle) and 0x140b30391 (no reader
-   found).
+   found). → 0x140b30391 (story manager +0x41) is read by the auto-resolve lock 0x4472a0 and set from the campaign's
+   `Is_Autoresolve_Allowed`: `MCX4_RE_ANSWERS_GALACTIC.md` Q7.6.
 4. Linked record arriving while a normal conflict's banner is up and the player picks auto-resolve
    (0x28c7e0 with param 1 → 0x29c020): when the record is then started was not traced.
 5. A link fired by STORY_ENTER / MOVE can coexist with a normal space conflict queued by the same fleet
