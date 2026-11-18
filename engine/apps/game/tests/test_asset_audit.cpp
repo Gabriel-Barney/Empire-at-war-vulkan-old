@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "alamo/game/asset_audit.hpp"
+#include "alamo/game/mod_check.hpp"
 #include "alamo/test/support.hpp"
 #include "alamo/vfs/vfs.hpp"
 
@@ -100,7 +101,23 @@ void test_mod_folder() {
     std::error_code ec;
     fs::remove_all(root, ec);
     const fs::path foc = root / "corruption", mod = root / "Mods" / "AA";
-    ::alamo::test::write_file(foc / "Data/XML/GameObjectFiles.xml", "<GameObjectFiles></GameObjectFiles>\n");
+    {  // a base install the loader accepts (as test_mod_check.cpp's): two planets, factions, one campaign
+        const fs::path x = foc / "Data/XML";
+        ::alamo::test::write_file(x / "GameObjectFiles.xml", "<GameObjectFiles><File>AAPlanets.xml</File></GameObjectFiles>\n");
+        ::alamo::test::write_file(x / "AAPlanets.xml",
+                                  "<Planets><Planet Name=\"AA_A\"><Galactic_Position>0, 0, 0</Galactic_Position></Planet>\n"
+                                  "<Planet Name=\"AA_B\"><Galactic_Position>100, 0, 0</Galactic_Position></Planet></Planets>\n");
+        ::alamo::test::write_file(x / "FactionFiles.xml", "<FactionFiles><File>AAFactions.xml</File></FactionFiles>\n");
+        ::alamo::test::write_file(x / "AAFactions.xml",
+                                  "<Factions><Faction Name=\"Empire\"><Is_Playable>Yes</Is_Playable></Faction>"
+                                  "<Faction Name=\"Neutral\"><Is_Neutral>Yes</Is_Neutral></Faction></Factions>\n");
+        ::alamo::test::write_file(x / "TradeRouteFiles.xml", "<TradeRouteFiles></TradeRouteFiles>\n");
+        ::alamo::test::write_file(x / "CampaignFiles.xml", "<CampaignFiles><File>AACampaigns.xml</File></CampaignFiles>\n");
+        ::alamo::test::write_file(x / "AACampaigns.xml",
+                                  "<Campaigns><Campaign Name=\"AA_GC\"><Locations>AA_A, AA_B</Locations></Campaign></Campaigns>\n");
+        ::alamo::test::write_file(x / "GameConstants.xml",
+                                  "<GameConstants><Damage_Types>Damage_Default</Damage_Types></GameConstants>\n");
+    }
     write(foc / "Data/Art/Textures/BASE_BROKEN.DDS", Bytes{'x'});  // base data: never audited
     write(foc / "Data/Art/Textures/SHARED.TGA", Bytes{'x'});
     write(mod / "Data/Art/Textures/SHARED.TGA", tga());  // the mod's copy wins and is audited
@@ -148,6 +165,22 @@ void test_mod_folder() {
     const auto b = alamo::game::audit_mod_assets(*v, opt);
     CHECK(b.cache_hits == 8 && b.checked == a.checked && b.rejected_count == a.rejected_count);
     CHECK(alamo::game::asset_audit_json(b) == json);
+
+    // Through the load report (version 4): the `assets` section, rejections as asset_rejected issues; only the
+    // non-retail-equivalent ones block G3.
+    {
+        alamo::game::ModCheckOptions mo;
+        mo.campaigns = mo.lua = mo.files = mo.xml_tags = mo.submod = mo.shaders = false;
+        const auto r = alamo::game::check_mod_data(foc.string(), args, mo);
+        CHECK(r.assets.ran && r.assets.checked == 8 && r.assets.rejected_count == 5);
+        size_t blocking = 0;
+        for (const auto& blk : r.grade.blocking) blocking += blk.find("asset_rejected") != std::string::npos ? 1u : 0u;
+        CHECK(blocking == 2);  // AA_BAD.DDS and _MP_LAND_AA_BAD.TED
+        const std::string js = alamo::game::format_mod_report_json(r);
+        CHECK(js.find("\"assets\": {") != std::string::npos && js.find("\"rejected_count\": 5") != std::string::npos);
+        mo.assets = false;
+        CHECK(!alamo::game::check_mod_data(foc.string(), args, mo).assets.ran);
+    }
 
     // Strict and no mod.
     auto base = alamo::vfs::mount_game(foc.string(), {}, &err);

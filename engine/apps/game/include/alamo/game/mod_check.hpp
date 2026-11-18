@@ -49,6 +49,7 @@
 #include <vector>
 
 #include "alamo/core/compat_issue.hpp"
+#include "alamo/game/asset_audit.hpp"
 #include "alamo/game/game_data.hpp"
 
 namespace alamo::game {
@@ -62,6 +63,9 @@ struct ModCheckOptions {
     bool submod = true;     // look for the parent of a mod whose own data names missing files
     bool shaders = true;    // audit every effect (materials::audit_effects; needs the materials module)
     bool compat = true;     // mcx0 t06: honour gaps, story ledger, perception token coverage, grade (report version 4)
+    bool assets = true;     // with compat: decode every asset the mod layers serve (mcx2 t01, asset_audit.hpp)
+    bool strict = false;    // --strict: an asset that loads only under a salvage rule counts as rejected (mod authors)
+    std::string asset_cache_dir;  // --corpus-cache: the asset audit's content-hash cache folder; "" = none
     bool shader_compile = true;  // with shaders: also compile each translated pass with the runtime DXC when it loads
     bool fx_prebuild = true;     // with shaders and a mod mounted: prebuild_mod_effects first (modc t36)
     std::string fx_cache_dir;    // the FxCache the prebuild and the audit use; empty = the default (tests set their own)
@@ -311,6 +315,7 @@ struct ModCheckReport {
     StoryCheck story;
     TokenCoverage token_coverage;
     std::vector<LimitHit> limits;                  // filled by the limit checks (mcx5); empty until then
+    AssetAudit assets;                             // mcx2 t01: the `assets` section (ran = false when not checked)
     CompatGrade grade;
 
     // Errors: the load failed or a step threw / failed, no campaign has planets (one error), a check threw. Warnings:

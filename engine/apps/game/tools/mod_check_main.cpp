@@ -11,6 +11,8 @@
 //   --no-shaders skips the effect audit (modc t21); --no-dxc keeps it to translation (no runtime DXC compile).
 //   With a mod mounted the audit first compiles the mod's .fx sources with fxc into the FxCache (modc t36);
 //   --no-fx-prebuild skips that (the audit then sees only what an earlier prebuild left in the cache).
+//   mcx2 t01: every asset the mod layers serve is decoded (the report's `assets`); --no-assets skips it, --strict counts
+//   salvaged assets as rejected, --corpus-cache DIR keeps a content-hash cache so a recheck decodes nothing new.
 //   Exit 0: no errors (warnings allowed), 1: errors, 2: usage.
 //   Example (a Steam workshop mod):
 //     alamo_mod_check --game "...\corruption" STEAMMOD=1125571106 --json report.json
@@ -28,7 +30,8 @@ int usage() {
     std::fprintf(stderr,
                  "usage: alamo_mod_check [--game DIR] [MODPATH=..] [STEAMMOD=..] [FALLBACKPATH=..] [--out FILE] [--json FILE|-]\n"
                  "                       [--verbose] [--no-campaigns] [--no-lua] [--no-lua-run] [--no-files] [--no-xml-tags]\n"
-                 "                       [--no-submod] [--no-shaders] [--no-dxc] [--no-fx-prebuild]\n");
+                 "                       [--no-submod] [--no-shaders] [--no-dxc] [--no-fx-prebuild] [--no-assets] [--strict]\n"
+                 "                       [--corpus-cache DIR]\n");
     return 2;
 }
 
@@ -66,6 +69,9 @@ int main(int argc, char** argv) {
         else if (a == "--no-shaders") opt.shaders = false;
         else if (a == "--no-dxc") opt.shader_compile = false;
         else if (a == "--no-fx-prebuild") opt.fx_prebuild = false;
+        else if (a == "--no-assets") opt.assets = false;
+        else if (a == "--strict") opt.strict = true;
+        else if (a == "--corpus-cache" && i + 1 < argc) opt.asset_cache_dir = argv[++i];
         else if (a.find('=') != std::string::npos) args.push_back(a);  // MODPATH= etc.
         else return usage();
     }

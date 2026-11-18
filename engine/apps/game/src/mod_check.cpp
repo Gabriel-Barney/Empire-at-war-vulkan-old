@@ -1345,6 +1345,12 @@ void compat_issues_and_grade(ModCheckReport& r) {
     for (const RetailEquivalentFinding& f : r.retail_equivalent)
         r.issues.add(IssueKind::RetailEquivalent, IssueSeverity::Info, f.kind + " " + f.subject, f.first_file, f.detail, true,
                      layer(f.in_mod));
+    // mcx2 t01: assets the mod layers serve (asset_audit.hpp). A retail-equivalent rejection never blocks G3.
+    for (const AssetEntry& e : r.assets.rejected)
+        r.issues.add(IssueKind::AssetRejected, e.retail_equivalent ? IssueSeverity::Info : IssueSeverity::Warning, e.path, e.path,
+                     e.family + ": " + e.rule, e.retail_equivalent, uint16_t{0});
+    for (const AssetEntry& e : r.assets.salvaged)
+        r.issues.add(IssueKind::AssetSalvaged, IssueSeverity::Info, e.path, e.path, e.family + ": " + e.rule, false, uint16_t{0});
     r.grade.grade = r.error_count() ? "G0" : "G1";
     for (const alamo::CompatIssue& i : r.issues.issues())
         if (!i.retail_equivalent && i.layer != alamo::kBaseLayer &&
@@ -1462,6 +1468,13 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
         compat_guarded("honour gaps", [&] { check_honour_gaps(d, r); });
         compat_guarded("story", [&] { check_story(d, r); });
         compat_guarded("token coverage", [&] { check_token_coverage(d, r); });
+        if (options.assets && d.vfs)
+            compat_guarded("assets", [&] {
+                AssetAuditOptions ao;
+                ao.strict = options.strict;
+                ao.cache_dir = options.asset_cache_dir;
+                r.assets = audit_mod_assets(*d.vfs, ao);
+            });
         retail_equivalent_from_checks(r);
         compat_issues_and_grade(r);
     } else {  // check_lua collects the binding findings with its scan; version 4 lists stay empty without compat
@@ -1652,6 +1665,14 @@ std::string format_mod_report(const ModCheckReport& r, bool verbose) {
                    t.in_mod ? " [mod]" : "");
         }
         append(s, "retail-equivalent findings (retail does the same; never lower the grade): %zu\n", r.retail_equivalent.size());
+        if (r.assets.ran) {
+            append(s, "assets: %zu checked, %zu decoded, %zu salvaged, %zu rejected (%zu retail-equivalent)\n", r.assets.checked,
+                   r.assets.decoded, r.assets.salvaged_count, r.assets.rejected_count, r.assets.retail_equivalent);
+            size_t shown = 0;
+            for (const AssetEntry& e : r.assets.rejected)
+                if (!e.retail_equivalent && shown++ < limit)
+                    append(s, "    rejected %s %s: %s\n", e.family.c_str(), e.path.c_str(), e.rule.c_str());
+        }
         for (size_t i = 0; i < r.grade.blocking.size() && i < limit; ++i)
             append(s, "    blocks G3: %s\n", r.grade.blocking[i].c_str());
     }
@@ -2126,6 +2147,57 @@ std::string format_mod_report_json(const ModCheckReport& r) {
         j.close('}');
     }
     j.close(']');
+    if (r.assets.ran) {  // mcx2 t01 (asset_audit.hpp, MODS.md 5.1)
+        const AssetAudit& a = r.assets;
+        j.key("assets");
+        j.open('{');
+        count(j, "checked", a.checked);
+        count(j, "decoded", a.decoded);
+        count(j, "salvaged_count", a.salvaged_count);
+        count(j, "rejected_count", a.rejected_count);
+        count(j, "retail_equivalent", a.retail_equivalent);
+        j.key("salvaged");
+        j.open('[');
+        for (const AssetEntry& e : a.salvaged) {
+            j.open('{');
+            j.key("path");
+            j.str(e.path);
+            j.key("family");
+            j.str(e.family);
+            j.key("rule");
+            j.str(e.rule);
+            j.close('}');
+        }
+        j.close(']');
+        j.key("rejected");
+        j.open('[');
+        for (const AssetEntry& e : a.rejected) {
+            j.open('{');
+            j.key("path");
+            j.str(e.path);
+            j.key("family");
+            j.str(e.family);
+            j.key("reason");
+            j.str(e.rule);
+            j.key("retail_equivalent");
+            j.boolean(e.retail_equivalent);
+            j.close('}');
+        }
+        j.close(']');
+        j.key("by_family");
+        j.open('{');
+        for (const auto& [fam, fc] : a.by_family) {
+            j.key(fam);
+            j.open('{');
+            count(j, "checked", fc.checked);
+            count(j, "decoded", fc.decoded);
+            count(j, "salvaged", fc.salvaged);
+            count(j, "rejected", fc.rejected);
+            j.close('}');
+        }
+        j.close('}');
+        j.close('}');
+    }
     j.key("grade");
     j.open('{');
     j.key("grade");
