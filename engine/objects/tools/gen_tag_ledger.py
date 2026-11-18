@@ -71,6 +71,20 @@ TIER_OVERRIDES = {}  # (class, tag) -> tier, for rows that are distribution-leve
 # answer found no reader, as "docs/re/<FILE>.md <section>". The file must exist and name the tag. Class and tag are
 # spelled as in docs/re/xml_field_tables.md (matched case-insensitively). Keep the list sorted by class, then tag.
 RETAIL_UNUSED = {
+    ("Faction", "SFXEvent_Build_Impossible_Location_Blockaded"): "docs/re/P4_SIM_SYSTEMS.md §2.7.3 [M: byte scan]",
+    ("Faction", "SFXEvent_HUD_Base_Shield_Penetrated"): "docs/re/TRU1_A_RE_ANSWERS.md Penetration SFX [M: byte scan]",
+    ("Faction", "SFXEvent_HUD_Enemy_Base_Shield_Penetrated"): "docs/re/TRU1_A_RE_ANSWERS.md Penetration SFX [M: byte scan]",
+    ("Faction", "SFXEvent_Max_Credits_Limit_Reached"): "docs/re/P4_SIM_SYSTEMS.md §2.7.3 [M: byte scan]",
+    ("Faction", "Space_Retreat_Off_Map_Dest_Pos"): "docs/re/TRU1_C_RE.md §2.1 [H]",
+    ("GameConstants", "Camera_Stop_Left"): "docs/re/STRATEGIC_GAPS.md §7.1 [H]",
+    ("GameConstants", "Camera_Stop_Right"): "docs/re/STRATEGIC_GAPS.md §7.1 [H]",
+    ("GameConstants", "Camera_Z_Position"): "docs/re/STRATEGIC_GAPS.md §7.1 [H]",
+    ("GameConstants", "Fleet_Maintenance_Update_Delay_Seconds"): "docs/re/STRATEGIC_GAPS.md §2.3 [H]",
+    ("GameConstants", "Health_Bar_Scale"): "docs/re/STRATEGIC_GAPS.md §7.2 [H]",
+    ("GameConstants", "Land_Health_Bar_Scale"): "docs/re/STRATEGIC_GAPS.md §7.2 [H]",
+    ("GameConstants", "Min_Health_Bar_Scale"): "docs/re/STRATEGIC_GAPS.md §7.2 [H]",
+    ("GameConstants", "RepushDistance"): "docs/re/MOVEMENT.md §5.4 [H]",
+    ("GameObjectType", "MinimumPushReturnDistance"): "docs/re/MOVEMENT.md §5.4 [H]",
 }
 
 # Source files that name tags without reading them for the game: the descriptor tables themselves, reports, tests,

@@ -474,7 +474,7 @@ Per input update (0x2ee40, called once per main-loop iteration — frame-rate de
   and |vy| < 0.1, v := 0.
 - Else: v += `Scroll_Acceleration_Factor` (0.08) × T per update, clamped per component so it never passes T (toward T's
   sign). The tactical camera (0x2d0820) or the galactic camera then scrolls by v.
-- **`Camera_Stop_Left` / `_Right`** are read only by 0x3c8d0 (clamp the space camera's x to [−50, 50]), which has **no
+- **`Camera_Stop_Left` / `_Right`** (`Camera_Stop_Right`) are read only by 0x3c8d0 (clamp the space camera's x to [−50, 50]), which has **no
   caller and no pointer** → unused. `Camera_Z_Position` has no reader. `Galactic_Scroll_Plane` (+0x1C8) is copied into
   the galactic camera (0x3c2c00, camera +8) [M: scroll plane height].
 - Answered in **P1_CAMERA_INPUT.md** (2026-10-28): the scroll plane is the look-at z, T is in speed × dt units with the
