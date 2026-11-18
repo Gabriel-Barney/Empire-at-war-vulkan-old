@@ -353,6 +353,9 @@ bool App::init() {
         cine_.enabled = gc.get_bool("In_Game_Cinematics", true);
         cine_.letterbox_height = gc.get_float("Camera_FX_Manager_Letterbox_Height", 0.085f);
         beacon_delay_s_ = gc.get_float("BeaconPlaceDelay", 5000.0f) / 1000.0f;  // ui3 t03: ms between two beacons
+        // mcx4 (MCX4_T11_T12_RE_ANSWERS §C3): the unit-response speaker ranking.
+        if (const auto v = gc.get("Unit_Command_Rankings_By_Category"))  // ledger: consumes GameConstants.Unit_Command_Rankings_By_Category
+            command_rankings_ = GameAudioHost::command_rankings(*v);
         if (const auto v = gc.get("Object_Visual_Status_Particle_Attach_Bone_Names")) bview_.set_status_particle_bones(std::string(*v));  // vis1 t06
     }
     // The unsynced presentation generator (0x140a2ab18, seeded from the performance counter at boot); smoke runs fixed.

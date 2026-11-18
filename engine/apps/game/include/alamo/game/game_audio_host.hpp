@@ -257,6 +257,12 @@ public:
     // The faction toggle list tag for a SetUnitAbilityMode toggle (0x430270): on / off, the local player hostile to the
     // issuer -> the _Enemy_ variant.
     static std::string_view toggle_line_tag(bool on, bool local_hostile);
+    // mcx4 (tac2 handover; MCX4_T11_T12_RE_ANSWERS §C3, GameConstants 0x2c79d0 / 0x2c7bb0, selection 0x38290): the unit of a
+    // multi-selection that speaks the unit response is the best-ranked one. `rankings` is the
+    // Unit_Command_Rankings_By_Category list (names split on ',', '|' and blanks); a type's rank is the index of the
+    // first entry its CategoryMask text names (case-insensitive), rankings.size() when none.
+    static std::vector<std::string> command_rankings(std::string_view text);
+    static size_t command_rank(std::span<const std::string> rankings, std::string_view category_mask);
     // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Reinforcement_Point_Contested", 0x501980): a local player's
     // REINFORCEMENT_POINT whose capture progress starts from 0 with a pending controller other than its owner (an owned
     // point is first neutralised) is being contested. [M] "pending != owner" stands for "pending = the neutral player".

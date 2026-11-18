@@ -90,6 +90,40 @@ std::string_view GameAudioHost::special_line(const objects::GameObjectTypes& typ
     return {};
 }
 
+namespace {
+// The names of a category list ("Bomber | AntiCapital", "Hero, Super"), in order.
+std::vector<std::string_view> category_names(std::string_view text) {
+    std::vector<std::string_view> out;
+    size_t i = 0;
+    while (i < text.size()) {
+        while (i < text.size() && (text[i] == ',' || text[i] == '|' || text[i] == ' ' || text[i] == '\t' || text[i] == '\r' ||
+                                   text[i] == '\n'))
+            ++i;
+        size_t j = i;
+        while (j < text.size() && text[j] != ',' && text[j] != '|' && text[j] != ' ' && text[j] != '\t' && text[j] != '\r' &&
+               text[j] != '\n')
+            ++j;
+        if (j > i) out.push_back(text.substr(i, j - i));
+        i = j;
+    }
+    return out;
+}
+}  // namespace
+
+std::vector<std::string> GameAudioHost::command_rankings(std::string_view text) {
+    std::vector<std::string> out;
+    for (const std::string_view n : category_names(text)) out.emplace_back(n);
+    return out;
+}
+
+size_t GameAudioHost::command_rank(std::span<const std::string> rankings, std::string_view category_mask) {
+    const std::vector<std::string_view> have = category_names(category_mask);
+    for (size_t r = 0; r < rankings.size(); ++r)
+        for (const std::string_view c : have)
+            if (ascii_iequals(c, rankings[r])) return r;
+    return rankings.size();
+}
+
 bool GameAudioHost::point_contested(bool reinforcement_point, int32_t owner, int32_t local, float prev_progress, float progress,
                                     int32_t pending) {
     return reinforcement_point && local >= 0 && owner == local && !(prev_progress > 0.0f) && progress > 0.0f && pending >= 0 &&

@@ -440,10 +440,24 @@ void App::respond(const commands::EventData& ev) {
         default: return;
     }
     if (ids.empty()) return;
-    const uint32_t id = *std::min_element(ids.begin(), ids.end());
     const sim::GameMode* top = session_->host().modes().top();
     if (!top) return;
     const objects::ObjectStore& st = top->primary();
+    // mcx4 (MCX4_T11_T12_RE_ANSWERS §C3, 0x38290): the best-ranked unit of the selection by
+    // Unit_Command_Rankings_By_Category speaks. [port] equal ranks: the lowest id (the port's order before).
+    uint32_t id = *std::min_element(ids.begin(), ids.end());
+    if (ids.size() > 1 && !command_rankings_.empty()) {
+        size_t best = command_rankings_.size() + 1;
+        for (const uint32_t c : ids) {
+            const objects::ObjectHandle ch = st.find(static_cast<objects::ObjectId>(c));
+            if (!st.active(ch)) continue;
+            const size_t rank = GameAudioHost::command_rank(command_rankings_, data_.types.get_string(st.type(ch), "CategoryMask"));
+            if (rank < best || (rank == best && c < id)) {
+                best = rank;
+                id = c;
+            }
+        }
+    }
     objects::ObjectHandle h = st.find(static_cast<objects::ObjectId>(id));
     if (!st.active(h)) return;
     if (kind == UnitResponse::FleetMove || (!top->tactical() && kind == UnitResponse::Select)) {

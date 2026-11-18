@@ -398,6 +398,20 @@ void test_strike_available_tags() {
 // mcx4 t13 batch U (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_HUD_Reinforcement_Point_Contested"): the local
 // player's reinforcement point starting to be neutralised.
 // ledger: verifies Faction.SFXEvent_HUD_Reinforcement_Point_Contested
+// mcx4 (docs/re/MCX4_T11_T12_RE_ANSWERS.md §C3): GameConstants Unit_Command_Rankings_By_Category picks the speaking unit.
+// ledger: verifies GameConstants.Unit_Command_Rankings_By_Category
+void test_command_rank() {
+    using H = GameAudioHost;
+    const std::vector<std::string> r =
+        H::command_rankings(" Hero, Super, Capital, Frigate, Corvette, Transport, Bomber, Fighter, Air, Vehicle, Infantry, Structure ");
+    CHECK(r.size() == 12 && r.front() == "Hero" && r.back() == "Structure");
+    CHECK(H::command_rank(r, " Bomber | AntiCapital") == 6);
+    CHECK(H::command_rank(r, " Fighter | AntiBomber") == 7);
+    CHECK(H::command_rank(r, "infantry|hero") == 0);  // the first ranked category it names, any case
+    CHECK(H::command_rank(r, "Unknown") == r.size() && H::command_rank(r, "") == r.size());
+    CHECK(H::command_rank({}, "Hero") == 0);
+}
+
 void test_point_contested() {
     using H = GameAudioHost;
     CHECK(H::point_contested(true, 0, 0, 0.0f, 0.1f, 2));    // own point, progress starts, pending neutral
@@ -1149,6 +1163,7 @@ int main() {
     test_pad_lines();                   // mcx4 t13 batch P
     test_tsw_approach();                // mcx4 t13 batch S
     test_point_contested();             // mcx4 t13 batch U
+    test_command_rank();                // mcx4 tac2 handover
     test_intro_speech_t07();
     test_aud2();
     test_spin_and_self_destruct();  // mcx4 t13 batch Q
