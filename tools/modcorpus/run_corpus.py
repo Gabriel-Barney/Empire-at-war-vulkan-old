@@ -353,6 +353,7 @@ class Runner:
         env.update({k: str(v) for k, v in (s.get("smoke_env") or {}).items()})
         for kind in ("skirmish", "campaign"):
             png = os.path.join(d, f"smoke_{kind}_png")
+            os.makedirs(png, exist_ok=True)  # alamo_game does not create it (every shot fails otherwise)
             cmd = [self.game_exe, "--game", self.a.game, "--smoke", kind, "--hidden", "--audio", "null", "--png-dir", png] + args
             save_env, self.env = self.env, env
             r = run(cmd, os.path.join(d, f"smoke_{kind}.txt"), self.a.timeout, self.env, not self.a.no_slot)
