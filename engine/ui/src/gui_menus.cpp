@@ -610,7 +610,16 @@ CampaignMenu build_campaign_menu(std::span<const data::CampaignDef* const> sorte
         }
         for (const CampaignChoice& f : s->factions)
             if (ascii_iequals(f.faction, faction)) return;  // first campaign of a faction wins
-        s->factions.push_back({c.name, faction});
+        // mcx4 t19 (MCX5_RE_ANSWERS Q3.1 [H]): int fields (code 0x6), the campaign ctor's 1 / 5 when absent (0x4ae307 /
+        // 0x4ae311); no FoC campaign sets them.
+        const auto int_field = [&c](std::string_view tag, int32_t fallback) {
+            const std::string t = trimmed(c.raw_value(tag));
+            if (t.empty()) return fallback;
+            char* end = nullptr;
+            const long v = std::strtol(t.c_str(), &end, 10);
+            return end == t.c_str() ? fallback : static_cast<int32_t>(v);
+        };
+        s->factions.push_back({c.name, faction, int_field("Min_Custom_Tech_Level", 1), int_field("Max_Custom_Tech_Level", 5)});
     };
     for (const data::CampaignDef* c : sorted) {
         if (!c) continue;
@@ -906,6 +915,14 @@ void FrontEnd::resolve_skirmish_colours(GuiDialog& d) {
 }
 
 // ---- ui1 t06: advanced game options ----
+TechSliderRange tech_slider_range(const CampaignChoice& c, int32_t adjustment) {
+    TechSliderRange r;
+    r.adjustment = adjustment;
+    r.lo = c.min_custom_tech - adjustment;
+    r.hi = std::max(r.lo, c.max_custom_tech - adjustment);
+    return r;
+}
+
 namespace {
 constexpr int32_t kCreditStep = 1000;  // [port]
 constexpr const char* kAutoKeys[4] = {"TEXT_ALLOW_AUTORESOLVE_ALWAYS", "TEXT_ALLOW_AUTORESOLVE_NEVER", "TEXT_ALLOW_AUTORESOLVE_ASK",
@@ -916,27 +933,34 @@ void FrontEnd::fill_game_options(GuiDialog& d, const GameOptionsSetup& o) {
     const int32_t lo = std::max(0, o.min_credits / kCreditStep), hi = std::max(lo, o.max_credits / kCreditStep);
     d.set_range("IDC_SKIRMISH_CREDITS_SLIDER", lo, hi);
     d.set_value("IDC_SKIRMISH_CREDITS_SLIDER", std::clamp(o.credits / kCreditStep, lo, hi));
-    d.set_range("IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER", 1, 5);
-    d.set_value("IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER", std::clamp(o.start_tech, 1, 5));
-    d.set_range("IDC_SKIRMISH_MAX_TECH_LEVEL_SLIDER", 1, 5);
-    d.set_value("IDC_SKIRMISH_MAX_TECH_LEVEL_SLIDER", std::clamp(o.max_tech, 1, 5));
+    // mcx4 t19: the campaign's custom tech bounds shifted by the faction's adjustment (tech_range_).
+    const int32_t tlo = tech_range_.lo, thi = tech_range_.hi;
+    d.set_range("IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER", tlo, thi);
+    d.set_value("IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER", std::clamp(o.start_tech, tlo, thi));
+    d.set_range("IDC_SKIRMISH_MAX_TECH_LEVEL_SLIDER", tlo, thi);
+    d.set_value("IDC_SKIRMISH_MAX_TECH_LEVEL_SLIDER", std::clamp(o.max_tech, tlo, thi));
     // CBS_SORT is not acted on by the gadget (UI.md 3.7.1 [M]): the rows stay in option order 0..3.
     std::vector<std::u32string> rows;
     for (const char* k : kAutoKeys) rows.push_back(text(k));
     d.set_items("IDC_ALLOW_AUTORESOLVE_COMBO", std::move(rows), std::clamp(o.auto_resolve, 0, 3));
-    d.set_checked("IDC_ALLOW_RANDOM_EVENTS", o.random_events);
+    // mcx8 t10 (AI_GALACTIC_TOKENS §4 [M]): FoC clears random events (flag 0x10) when the dialog opens and greys the box;
+    // no handler sets it.
+    (void)o.random_events;
+    d.set_checked("IDC_ALLOW_RANDOM_EVENTS", false);
+    d.enable("IDC_ALLOW_RANDOM_EVENTS", false);
     show_game_option_values(d);
 }
 
 GameOptionsSetup FrontEnd::read_game_options(const GuiDialog& d) const {
     GameOptionsSetup o = p_.game_option_defaults;
     if (const GuiControl* c = d.get("IDC_SKIRMISH_CREDITS_SLIDER")) o.credits = c->value * kCreditStep;
-    if (const GuiControl* c = d.get("IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER")) o.start_tech = std::clamp(c->value, 1, 5);
-    if (const GuiControl* c = d.get("IDC_SKIRMISH_MAX_TECH_LEVEL_SLIDER")) o.max_tech = std::clamp(c->value, 1, 5);
+    const int32_t tlo = tech_range_.lo, thi = tech_range_.hi;  // mcx4 t19
+    if (const GuiControl* c = d.get("IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER")) o.start_tech = std::clamp(c->value, tlo, thi);
+    if (const GuiControl* c = d.get("IDC_SKIRMISH_MAX_TECH_LEVEL_SLIDER")) o.max_tech = std::clamp(c->value, tlo, thi);
     o.max_tech = std::max(o.max_tech, o.start_tech);
     if (const GuiControl* c = d.get("IDC_ALLOW_AUTORESOLVE_COMBO"); c && c->selected >= 0) o.auto_resolve = std::clamp(c->selected, 0, 3);
-    if (const GuiControl* c = d.get("IDC_ALLOW_RANDOM_EVENTS")) o.random_events = c->checked;
-    o.set = true;
+    o.random_events = false;  // mcx8 t10: flag 0x10 is never set in FoC
+    o.set = options_changed_;  // mcx8 t10: flag 0x20, not "accepted"
     return o;
 }
 
@@ -1003,11 +1027,14 @@ SkirmishOptionsSetup FrontEnd::read_skirmish_options(const GuiDialog& d) const {
     return o;
 }
 
-// The value statics beside the sliders: the credits amount and "Tech n" (TEXT_TECH_LEVEL_n).
+// The value statics beside the sliders: the credits amount and "Tech n" (TEXT_TECH_LEVEL_n). mcx4 t19 [port]: n = the
+// slider value plus the faction's adjustment (the displayed level, so the label runs Min..Max_Custom_Tech_Level); which
+// number retail's label shows is not recovered.
 void FrontEnd::show_game_option_values(GuiDialog& d) const {
     if (const GuiControl* c = d.get("IDC_SKIRMISH_CREDITS_SLIDER")) d.set_text("IDC_SKIRMISH_CREDITS_VALUE", ascii32(std::to_string(c->value * kCreditStep)));
     auto tech = [&](const char* slider, const char* label) {
-        if (const GuiControl* c = d.get(slider)) d.set_text(label, text("TEXT_TECH_LEVEL_" + std::to_string(std::clamp(c->value, 1, 5))));
+        if (const GuiControl* c = d.get(slider))
+            d.set_text(label, text("TEXT_TECH_LEVEL_" + std::to_string(std::clamp(c->value + tech_range_.adjustment, 1, 5))));
     };
     tech("IDC_SKIRMISH_STARTING_TECH_LEVEL_SLIDER", "IDC_SKIRMISH_STARTING_TECH_LEVEL_VALUE");
     tech("IDC_SKIRMISH_MAX_TECH_LEVEL_SLIDER", "IDC_SKIRMISH_MAX_TECH_LEVEL_VALUE");
@@ -1516,7 +1543,8 @@ void FrontEnd::setup(GuiDialog& d) {
     } else if (ascii_iequals(n, kSkirmish)) {
         fill_skirmish(d);
     } else if (ascii_iequals(n, kAdvanced)) {  // ui1 t06: the accepted values, else the defaults
-        fill_game_options(d, game_options_.set ? game_options_ : p_.game_option_defaults);
+        fill_game_options(d, game_options_stored_ ? game_options_ : p_.game_option_defaults);
+        options_changed_ = game_options_.set;  // mcx8 t10: flag 0x20 stays set until Defaults or a campaign start
     } else if (ascii_iequals(n, kSkirmishAdvanced)) {  // skm1 t02: the accepted values, else the defaults
         fill_skirmish_options(d, skirmish_options_.set ? skirmish_options_ : p_.skirmish_option_defaults);
     } else if (ascii_iequals(n, kTutorial)) {
@@ -1751,7 +1779,10 @@ void FrontEnd::on_change(const GuiEvent& e, std::vector<MenuAction>& out) {
             }
         }
     }
-    else if (ascii_iequals(n, kAdvanced) && e.kind == GuiEvent::Kind::ValueChanged) show_game_option_values(*d);  // ui1 t06
+    else if (ascii_iequals(n, kAdvanced) && e.kind == GuiEvent::Kind::ValueChanged) {  // ui1 t06
+        options_changed_ = true;  // mcx8 t10: every slider event sets flag 0x20
+        show_game_option_values(*d);
+    }
     else if (ascii_iequals(n, kSkirmishAdvanced) && (e.kind == GuiEvent::Kind::ValueChanged || e.kind == GuiEvent::Kind::SelectionChanged ||
                                                     e.kind == GuiEvent::Kind::Checked))
         skirmish_options_rules(*d);  // skm1 t02
@@ -1846,8 +1877,19 @@ void FrontEnd::on_click(const GuiEvent& e, std::vector<MenuAction>& out) {
         }
     } else if (ascii_iequals(n, kCustomStaging) && d) {
         if (is("IDC_CANCEL_BUTTON")) go(kSingle);
-        else if (is("IDC_SELECT_OPTIONS")) push(kAdvanced);
-        else if (is("IDC_PLAY_BUTTON")) {
+        else if (is("IDC_SELECT_OPTIONS")) {
+            // mcx4 t19: the tech slider range of the selected campaign and faction (MCX5_RE_ANSWERS Q3.1).
+            tech_range_ = TechSliderRange{};
+            const GuiControl* list = d->get("IDC_STAGING_MAP_LIST");
+            const GuiControl* fc = d->get("IDC_FACTION_COMBO");
+            if (list && list->selected >= 0 && static_cast<size_t>(list->selected) < menu_.custom.size()) {
+                const CampaignSetInfo& s = menu_.custom[static_cast<size_t>(list->selected)];
+                const size_t fi = fc && fc->selected >= 0 ? static_cast<size_t>(fc->selected) : 0;
+                if (fi < s.factions.size())
+                    tech_range_ = tech_slider_range(s.factions[fi], p_.tech_adjustment ? p_.tech_adjustment(s.factions[fi].faction) : 0);
+            }
+            push(kAdvanced);
+        } else if (is("IDC_PLAY_BUTTON")) {
             const GuiControl* list = d->get("IDC_STAGING_MAP_LIST");
             const GuiControl* fc = d->get("IDC_FACTION_COMBO");
             if (list && list->selected >= 0 && static_cast<size_t>(list->selected) < menu_.custom.size()) {
@@ -1858,7 +1900,8 @@ void FrontEnd::on_click(const GuiEvent& e, std::vector<MenuAction>& out) {
                     a.campaign = s.factions[fi].campaign;
                     a.faction = s.factions[fi].faction;
                     a.difficulty = difficulty_of(*d);
-                    a.game_options = game_options_;  // ui1 t06: the accepted advanced options (set = false: the campaign's)
+                    a.game_options = game_options_;  // ui1 t06: the advanced options (set = false: the campaign's)
+                    game_options_.set = false;       // mcx8 t10: retail clears flag 0x20 after the campaign start's copy
                     out.push_back(std::move(a));
                 }
             }
@@ -1866,11 +1909,15 @@ void FrontEnd::on_click(const GuiEvent& e, std::vector<MenuAction>& out) {
     } else if (ascii_iequals(n, kAdvanced) && d) {  // ui1 t06
         if (is("IDC_BUTTON_ACCEPT")) {
             game_options_ = read_game_options(*d);
+            game_options_stored_ = true;
             pop();
         } else if (is("IDC_CANCEL_BUTTON")) {
             pop();
         } else if (is("IDC_DEFAULTS_BUTTON")) {
             fill_game_options(*d, p_.game_option_defaults);
+            options_changed_ = false;  // mcx8 t10: Defaults clears flag 0x20
+        } else if (is("IDC_ALLOW_RANDOM_EVENTS")) {
+            options_changed_ = true;  // mcx8 t10: a checkbox event sets flag 0x20 (the box is greyed in FoC)
         }
     } else if (ascii_iequals(n, kSkirmishAdvanced) && d) {  // skm1 t02
         if (is("IDC_BUTTON_ACCEPT")) {

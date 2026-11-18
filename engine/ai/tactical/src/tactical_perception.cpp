@@ -1079,7 +1079,8 @@ struct Eval {
                 out = static_cast<double>(visible / total);  // 0/0 -> NaN (vanilla)
                 return true;
             }
-            case Leaf::Timeline: case Leaf::InterventionsEnabled: case Leaf::TimeSinceStoryPopup: case Leaf::ActiveStoryGoalCount:
+            case Leaf::InterventionsEnabled: out = w.interventions_enabled ? 1.0 : 0.0; return true;  // mcx8 t09
+            case Leaf::Timeline: case Leaf::TimeSinceStoryPopup: case Leaf::ActiveStoryGoalCount:
                 out = 0.0;  // [L] story / galactic
                 return true;
             default: return false;

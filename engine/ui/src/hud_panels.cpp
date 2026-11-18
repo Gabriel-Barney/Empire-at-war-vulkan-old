@@ -55,11 +55,10 @@ HudTextStyle style_of(const CommandBarComponent* c, FontCache& fonts, const HudC
     return st;
 }
 
-// t40: the pop-up's layout, canvas units from the panel's top-left corner. GameConstants Encyclopedia_Population_Offset 11,
-// _Name_Offset 68, _Cost_Offset 258, _Icon_X/Y_Offset 39 / -12, _Class_Y_Offset 5 (all confirmed on the captures); the rest
-// measured on C3_tooltip_slot_h1_full.png [inferred].
-constexpr float kEncPopulationX = 11.0f, kEncNameX = 68.0f, kEncCostX = 258.0f, kEncIconX = 39.0f, kEncIconDown = 12.0f,
-                kEncClassDown = 5.0f;
+// t40: the pop-up's layout, canvas units from the panel's top-left corner. mcx4 t14: the GameConstants
+// Encyclopedia_*_Offset columns come from TooltipConfig (cfg_; FoC values confirmed on the captures: an icon Y offset of
+// -12 puts the icon 12 units down, a class Y offset of 5 the class line 5 units below the band); the rest measured on
+// C3_tooltip_slot_h1_full.png [inferred].
 constexpr float kEncBandH = 20.0f;         // e_topbar / e_topbar2
 constexpr float kEncAbilityBase = 32.0f;   // encyclopedia_icon Size.y (0.66) scales this: 21 units on the captures
 constexpr float kEncAbilityRight = 260.0f, kEncAbilityStep = 25.0f, kEncAbilityDown = 3.5f;  // below the band
@@ -202,19 +201,19 @@ Vec2f EncyclopediaPanel::build_at(HudDrawList& out, const HudCanvas& cv, const E
     // word wider than its column splits (wrap_text).
     constexpr float kColumnGap = 6.0f;  // [port] canvas units between the columns
     const float cost_w = e.cost.empty() ? 0.0f : measure_text_block(fonts, cv, e.cost, 0.0f, ks).width;
-    const float cost_right = std::min(kEncCostX, width - pad.x);
-    const float name_wrap = std::max((cost_w > 0.0f ? cost_right - cost_w - kColumnGap : width - pad.x) - kEncNameX, 1.0f);
+    const float cost_right = std::min(cfg_.enc_cost_x, width - pad.x);
+    const float name_wrap = std::max((cost_w > 0.0f ? cost_right - cost_w - kColumnGap : width - pad.x) - cfg_.enc_name_x, 1.0f);
     const TextBlock nb = measure_text_block(fonts, cv, e.header, name_wrap, hs);
     const float band_h = std::max(kEncBandH, nb.height + 2.0f);  // [port] a long name wraps and the band grows (QA U4)
     // Class + ability icons under the band, right of the unit icon.
     const size_t ability_n = std::min(e.abilities.size(), kEncMaxAbilities);
     const float ability_size = kEncAbilityBase * (ico && ico->has_size && ico->size.y > 0 ? ico->size.y : 0.66f);
     const float ability_left = kEncAbilityRight - static_cast<float>(ability_n) * kEncAbilityStep + (kEncAbilityStep - ability_size);
-    const float class_wrap = std::max((ability_n > 0 ? ability_left - kColumnGap : width - pad.x) - kEncNameX, 1.0f);
+    const float class_wrap = std::max((ability_n > 0 ? ability_left - kColumnGap : width - pad.x) - cfg_.enc_name_x, 1.0f);
     const TextBlock cb = measure_text_block(fonts, cv, e.unit_class, class_wrap, ts);
     const bool unit_head = ie || !e.unit_class.empty() || ability_n > 0;
-    const float head_h = unit_head ? std::max({band_h + kEncHeadH - kEncBandH, band_h + kEncClassDown + cb.height + 3.0f,
-                                               0.5f * band_h + kEncIconDown + 0.5f * icon_size.y + 1.0f,
+    const float head_h = unit_head ? std::max({band_h + kEncHeadH - kEncBandH, band_h + cfg_.enc_class_y + cb.height + 3.0f,
+                                               0.5f * band_h + (-cfg_.enc_icon_y) + 0.5f * icon_size.y + 1.0f,
                                                band_h + kEncAbilityDown + ability_size + 2.0f})
                                    : band_h;
     // Strong / Weak rows: the labels sit on their frames.
@@ -280,17 +279,17 @@ Vec2f EncyclopediaPanel::build_at(HudDrawList& out, const HudCanvas& cv, const E
     if (unit_head)
         add_atlas_quad(dl, layer, HudList::Alpha, *atlas_, "e_line.tga",
                        {tl.x + kEncLineX + 0.5f * kEncLineW, tl.y - head_h + 0.5f * kEncLineH}, {kEncLineW, kEncLineH}, 1.0f, Rgba8{});
-    if (ie) add_atlas_quad(dl, layer, HudList::Alpha, *atlas_, e.icon, {tl.x + kEncIconX, y - kEncIconDown}, icon_size, 1.0f, Rgba8{});
+    if (ie) add_atlas_quad(dl, layer, HudList::Alpha, *atlas_, e.icon, {tl.x + cfg_.enc_icon_x, y - (-cfg_.enc_icon_y)}, icon_size, 1.0f, Rgba8{});
     if (e.population > 0) {
         HudTextStyle ps = style_of(ico, fonts, cv, 6.0f, kEncPopulation, TextAlign::Center);
         ps.color = kEncPopulation;  // [inferred] capture h1_full
         ps.align = TextAlign::Center;
-        add_text(dl, layer, HudList::Text, fonts, cv, utf8_to_utf32(std::to_string(e.population)), {tl.x + kEncPopulationX, y}, ps);
+        add_text(dl, layer, HudList::Text, fonts, cv, utf8_to_utf32(std::to_string(e.population)), {tl.x + cfg_.enc_population_x, y}, ps);
     }
-    add_text_block(dl, layer, HudList::Text, fonts, cv, e.header, {tl.x + kEncNameX, y + 0.5f * nb.height}, name_wrap, hs);
+    add_text_block(dl, layer, HudList::Text, fonts, cv, e.header, {tl.x + cfg_.enc_name_x, y + 0.5f * nb.height}, name_wrap, hs);
     if (!e.cost.empty()) add_text(dl, layer, HudList::Text, fonts, cv, e.cost, {tl.x + cost_right, y}, ks);
     if (!e.unit_class.empty())
-        add_text_block(dl, layer, HudList::Text, fonts, cv, e.unit_class, {tl.x + kEncNameX, tl.y - band_h - kEncClassDown}, class_wrap, ts);
+        add_text_block(dl, layer, HudList::Text, fonts, cv, e.unit_class, {tl.x + cfg_.enc_name_x, tl.y - band_h - cfg_.enc_class_y}, class_wrap, ts);
     for (size_t i = 0; i < ability_n; ++i)
         add_atlas_quad(dl, layer, HudList::Alpha, *atlas_, e.abilities[i],
                        {tl.x + ability_left + static_cast<float>(i) * kEncAbilityStep + 0.5f * ability_size,

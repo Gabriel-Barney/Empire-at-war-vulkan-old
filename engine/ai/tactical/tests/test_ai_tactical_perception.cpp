@@ -501,6 +501,14 @@ static void test_tokens() {
     // ---- Game ----
     CHECK(f.val("Game.Age") == static_cast<double>(30.0f * (1.0f / 30.0f)));
     CHECK(f.val("Game.IsCampaignGame") == 0.0);
+    // mcx8 t09 (docs/re/AI_GALACTIC_TOKENS.md §4, 0x6e1fb0 on the base Game evaluator [H]): battles read the game
+    // settings flags too: 1.0 by default, 0.0 when an advanced option was changed with random events off.
+    CHECK(f.val("Game.InterventionsEnabled") == 1.0);
+    {
+        Fixture off;
+        off.w.interventions_enabled = false;
+        CHECK(off.val("Game.InterventionsEnabled") == 0.0);
+    }
     // Game.ForceUnnormalized: every player's grid objects, health-scaled: 100+10+0+300+100+10 = 520 (b0422 / skai t12: the
     // DUMMY_GROUND_STRUCTURE barracks 17 (50) is not in the per-player grid lists)
     CHECK(f.val("Game.ForceUnnormalized") == 520.0);

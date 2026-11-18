@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "alamo/data/xml.hpp"
 #include "alamo/game/story_present.hpp"
 #include "alamo/test/support.hpp"
 
@@ -141,6 +142,24 @@ void pointer_test() {
     CHECK(h.object_flashes().size() == 1 && h.map_flashes().size() == 1);
     h.update(10.0, false);
     CHECK(h.object_flashes().empty() && h.map_flashes().empty());
+}
+
+// mcx4 t14 / t15 (docs/re/STORY_PRESENTATION_REWARDS.md §1.1): the screen-text channel colours come from GameConstants
+// Hint_Text_Color / System_Text_Color / Task_Text_Color / Speech_Text_Color ("r g b", alpha 255); a short value keeps
+// the default.
+// ledger: verifies GameConstants.Hint_Text_Color
+// ledger: verifies GameConstants.System_Text_Color
+// ledger: verifies GameConstants.Task_Text_Color
+// ledger: verifies GameConstants.Speech_Text_Color
+void colors_test() {
+    alamo::test::section("text colours (1.1)");
+    const data::XmlDocument doc = data::XmlDocument::parse(std::string_view(
+        "<GameConstants><Hint_Text_Color>1 2 3</Hint_Text_Color><System_Text_Color>4, 5, 6, 7</System_Text_Color>"
+        "<Task_Text_Color>8 9</Task_Text_Color><Speech_Text_Color> 10 11 12 </Speech_Text_Color></GameConstants>"));
+    game::StoryPresenter::Colors c;
+    game::load_story_colors(doc.root(), c);
+    CHECK((c.hint == game::StoryColor{1, 2, 3, 255}) && (c.system == game::StoryColor{4, 5, 6, 7}));
+    CHECK((c.task == game::StoryColor{109, 247, 255, 255}) && (c.speech == game::StoryColor{10, 11, 12, 255}));
 }
 
 void lock_test() {
@@ -322,6 +341,7 @@ void hint_queue_test() {
 int main() {
     text_test();
     pointer_test();
+    colors_test();  // mcx4 t14 / t15
     lock_test();
     advisor_test();
     hint_queue_test();

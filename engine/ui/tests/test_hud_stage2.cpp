@@ -590,6 +590,34 @@ void test_buttons() {
     const TooltipConfig c2 = tooltip_config_from(gc.root());
     CHECK2(near2(static_cast<float>(c2.delay), 0.5f) && near2(static_cast<float>(c2.encyclopedia_delay), 0.9f) &&
            near2(static_cast<float>(c2.long_encyclopedia_delay), 4.0f));
+    // mcx4 t14 / t15: the encyclopedia layout (HUD_GAPS §2.2) and the HUD values (UI.md §1.2 / §1.7, GALACTIC_DIALOGS §1.3).
+    // ledger: verifies GameConstants.Encyclopedia_Population_Offset
+    // ledger: verifies GameConstants.Encyclopedia_Name_Offset
+    // ledger: verifies GameConstants.Encyclopedia_Cost_Offset
+    // ledger: verifies GameConstants.Encyclopedia_Icon_X_Offset
+    // ledger: verifies GameConstants.Encyclopedia_Icon_Y_Offset
+    // ledger: verifies GameConstants.Encyclopedia_Class_Y_Offset
+    // ledger: verifies GameConstants.Health_Bar_Spacing
+    // ledger: verifies GameConstants.Radar_Colorize_Selected_Units
+    // ledger: verifies GameConstants.Radar_Selected_Units_Color
+    // ledger: verifies GameConstants.Battle_Pending_Message_Color
+    {
+        CHECK2(near2(c2.enc_population_x, 11.0f) && near2(c2.enc_icon_y, -12.0f) && near2(c2.enc_class_y, 5.0f));  // FoC defaults
+        const data::XmlDocument g3 = data::XmlDocument::parse(std::string_view(
+            "<GameConstants><Encyclopedia_Population_Offset>1</Encyclopedia_Population_Offset><Encyclopedia_Name_Offset>2"
+            "</Encyclopedia_Name_Offset><Encyclopedia_Cost_Offset>3</Encyclopedia_Cost_Offset><Encyclopedia_Icon_X_Offset>4"
+            "</Encyclopedia_Icon_X_Offset><Encyclopedia_Icon_Y_Offset>-5</Encyclopedia_Icon_Y_Offset><Encyclopedia_Class_Y_Offset>6"
+            "</Encyclopedia_Class_Y_Offset><Health_Bar_Spacing>3.5</Health_Bar_Spacing><Radar_Colorize_Selected_Units>No"
+            "</Radar_Colorize_Selected_Units><Radar_Selected_Units_Color>1, 2, 3, 4</Radar_Selected_Units_Color>"
+            "<Battle_Pending_Message_Color> 9 8 7 </Battle_Pending_Message_Color></GameConstants>"));
+        const TooltipConfig c3 = tooltip_config_from(g3.root());
+        CHECK2(near2(c3.enc_population_x, 1.0f) && near2(c3.enc_name_x, 2.0f) && near2(c3.enc_cost_x, 3.0f) && near2(c3.enc_icon_x, 4.0f) &&
+               near2(c3.enc_icon_y, -5.0f) && near2(c3.enc_class_y, 6.0f));
+        const HudConstants h0 = hud_constants_from(gc.root()), h3 = hud_constants_from(g3.root());
+        CHECK2(near2(h0.health_bar_spacing, 2.0f) && h0.radar_colorize_selected && (h0.battle_pending_color == Rgba8{255, 32, 32, 240}));
+        CHECK2(near2(h3.health_bar_spacing, 3.5f) && !h3.radar_colorize_selected && (h3.radar_selected_color == Rgba8{1, 2, 3, 4}) &&
+               (h3.battle_pending_color == Rgba8{9, 8, 7, 255}));
+    }
     const data::XmlDocument gd = data::XmlDocument::parse(std::string_view(
         "<GUIDialogs><Tooltips><IDC_COMBAT_EFF_TIP><TextID>TEXT_COMBAT_EFF_TOOLTIP</TextID></IDC_COMBAT_EFF_TIP></Tooltips></GUIDialogs>"));
     const auto dt = parse_dialog_tooltips(gd.root());

@@ -525,15 +525,20 @@ RouteLineStyle load_route_line_style(const FileProvider& files) {
         if (parse_color_bytes(f.child_text("Color_Zoomed_Out"), c)) r.zoomed_out = c;
         if (parse_color_bytes(f.child_text("Color_Zoomed_In"), c)) r.zoomed_in = c;
         {
+            // mcx4 t15: the TradeRouteLines block fields (xml_field_tables files them under TradeRoute).
+            // ledger: consumes TradeRoute.Width
             const std::string w(f.child_text("Width"));
             const float v = std::strtof(w.c_str(), nullptr);
             if (std::isfinite(v) && v >= 0.0f) r.width = v;
         }
+        // ledger: consumes TradeRoute.Render_Mode
         const std::string mode(ascii_trim(f.child_text("Render_Mode")));
         if (!mode.empty()) r.render_mode = ascii_upper(mode);
-        const std::string tex(ascii_trim(f.child_text("Texture")));
+        // mcx4 t15: retail's tags are Texture_Name / Spark_Texture_Name (descriptor table; the port read <Texture> /
+        // <Spark_Texture>, which retail ignores). FoC writes neither, so its lines keep the parser defaults.
+        const std::string tex(ascii_trim(f.child_text("Texture_Name")));
         if (!tex.empty()) r.texture = tex;
-        const std::string spark(ascii_trim(f.child_text("Spark_Texture")));
+        const std::string spark(ascii_trim(f.child_text("Spark_Texture_Name")));
         if (!spark.empty()) r.spark = spark;
         s.settings[route_settings_index(f.attribute("Name"))] = r;
     }

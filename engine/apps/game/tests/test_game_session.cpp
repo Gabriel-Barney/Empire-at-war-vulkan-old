@@ -849,6 +849,17 @@ bool special_run(const game::GameData& data, const game::SessionSpec& spec, comm
 // story t13: the P10 bars are fully in from the first frame and stay until a script letterbox op (or the fallback); the
 // P11 block holds until a script control op (or the fallback), then follows the scripts' lock; a plain battle holds nothing
 // but still draws the scripts' letterbox.
+// mcx4 t19 (docs/re/MCX5_RE_ANSWERS.md Q3.1, 0x292590 [H]): the custom options' start / max tech get -1 for a faction
+// with a non-zero Displayed_Tech_Level_Adjustment (FoC Rebel +1), 0 otherwise or without a faction.
+void custom_tech_offset_test() {
+    galactic::GalacticRules rules;
+    rules.factions.resize(3);
+    rules.factions[1].displayed_tech_level_adjustment = 1;
+    rules.factions[2].displayed_tech_level_adjustment = -2;
+    CHECK(game::custom_tech_offset(rules, 0) == 0 && game::custom_tech_offset(rules, 1) == -1 &&
+          game::custom_tech_offset(rules, 2) == -1 && game::custom_tech_offset(rules, galactic::kNoIndex) == 0);
+}
+
 void linked_overlay_test() {
     using O = game::LinkedBattleOverlay;
     constexpr float kDt = 1.0f / 30.0f;
@@ -2915,6 +2926,7 @@ int main() {
 #ifdef ALAMO_GAME_HAVE_CONTROLS
     radar_feed_test();
 #endif
+    custom_tech_offset_test();  // mcx4 t19
     story_ui_test();
     linked_overlay_test();
     story_script_test();

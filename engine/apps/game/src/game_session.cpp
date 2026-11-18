@@ -38,6 +38,10 @@ const char* difficulty_name(int32_t difficulty) {
     return difficulty <= 0 ? "Easy_Default" : difficulty >= 2 ? "Hard_Default" : "Normal_Default";
 }
 
+int32_t custom_tech_offset(const galactic::GalacticRules& rules, uint32_t faction) {
+    return faction < rules.factions.size() && rules.factions[faction].displayed_tech_level_adjustment != 0 ? -1 : 0;
+}
+
 GameSession::GameSession(const GameData& data, jobs::JobSystem& js, SessionSpec spec) : data_(&data), js_(&js), spec_(std::move(spec)) {}
 
 GameSession::~GameSession() {
@@ -131,11 +135,13 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
                 // mcx5 t03 (MCX5_RE_ANSWERS Q3.1, 0x292590 / setter 0x288980 [H]): the start tech goes through the
                 // setter first, so it is clamped to [0, the max before this write]: the custom path replaces the default
                 // one, so that is the player ctor's 5, not the campaign's Max_Tech_Level. The max is then written
-                // unclamped. The 1..5 range is the dialog's (campaign Min / Max_Custom_Tech_Level, data); no clamp to it
-                // here. [port] The faction's Displayed_Tech_Level_Adjustment shift is not applied (open: mcx4 t19).
+                // unclamped. The range is the dialog's (campaign Min / Max_Custom_Tech_Level, data); no clamp to it
+                // here. mcx4 t19: both values get a = -1 when the player's faction has a non-zero
+                // Displayed_Tech_Level_Adjustment (+0x2FB0), else 0.
                 constexpr int32_t kPlayerCtorMaxTech = 5;  // limit: retail MCX5_RE_ANSWERS Q3.1 (0x27e04a)
-                p.tech_level = std::clamp(spec_.start_tech, 0, kPlayerCtorMaxTech);
-                p.max_tech_level = spec_.max_tech;
+                const int32_t a = custom_tech_offset(d.rules, p.faction);
+                p.tech_level = std::clamp(spec_.start_tech + a, 0, kPlayerCtorMaxTech);
+                p.max_tech_level = spec_.max_tech + a;
             }
         if (setup_.map.planets.size() == 0) return fail("campaign '" + spec_.campaign + "' has no planets");
         // mcx1 t08 (MCX1_RE_ANSWERS Q6.2): the original reads the neutral player without a null check when it creates the
@@ -292,6 +298,9 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
     }
     // ccpgt t02: the Capture Control Points game type (land maps only; SKIRMISH_SETUP §4.2).
     bo.battle.control_point_domination = spec_.kind == SessionKind::Skirmish && spec_.skirmish.land && spec_.skirmish.control_points;
+    // mcx8 t09: the battles read the same settings flags as the galactic AI (AI_GALACTIC_TOKENS §4). [port] a skirmish has
+    // no advanced campaign options, so 1.0 there (whether the skirmish options dialog sets flag 0x20 is not traced).
+    bo.battle.interventions_enabled = spec_.interventions_enabled();
     bo.battle.skip_human_units = true;  // the human's units take orders only from commands (stand-ins skip them)
     sim::load_tactical_systems(*d.files, d.rules, &d.db.constants(), bo);  // Int-final: weather, retreat, strikes data
     if (d.vfs) {
