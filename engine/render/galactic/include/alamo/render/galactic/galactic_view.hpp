@@ -269,6 +269,7 @@ struct GalacticViewStats {
     uint32_t planets = 0, background = 0, starbases = 0, rings = 0, routes = 0, fleets = 0, fleet_lines = 0, route_sparks = 0;
     uint32_t no_model = 0, animated = 0, fogged = 0, fogged_fleets = 0, hidden_routes = 0;
     uint32_t orbit_fleets = 0;     // in orbit, not drawn (§2.1); fogged_fleets are counted separately
+    uint32_t hidden_fleets = 0;    // mcx4 t14: in transit but kGalFleetHidden (the local visibility vote), not drawn
     uint32_t stealth_fleets = 0;   // drawn with ALT1
     uint32_t selection = 0;        // selection model instances (0 or 1)
     uint32_t corruption_paths = 0; // corruption path line instances (§3.2)

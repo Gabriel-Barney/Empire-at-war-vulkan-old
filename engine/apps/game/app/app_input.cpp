@@ -186,25 +186,14 @@ void App::announcer_feedback() {
             audio_.production(data_.types, static_cast<objects::TypeIndex>(e.type), kind);
         }
         // aud2 t07 (BATTLE_TRANSITIONS, departure 0x431c80): Galactic_Fleet_Hyperspace when the local player owns or sees
-        // the departing fleet. [port] "sees": the local player can see fleet presence at the origin planet
-        // (can_see_planet_info FleetPresence) and the fleet is not all stealthed (the announcer's hidden test). Only the
+        // the departing fleet. mcx4 t14 (MCX4_GAL2_RE_ANSWERS Q3): "sees" is the fleet visibility vote 0x433090
+        // (GalacticSim::fleet_visible_to_local). Only the
         // move order's departure plays it: a pass-through hop re-departs without 0x431c80, and GalacticSim emits that
         // departure right after the fleet's FleetArrived(kArrivePassThrough), so the stream order tells them apart.
         const bool pass_through_departure = e.kind == K::FleetDeparted && e.fleet == pass_through_fleet;
         pass_through_fleet = e.kind == K::FleetArrived && e.value == galactic::kArrivePassThrough ? e.fleet : kNoPassThrough;
         if (e.kind == K::FleetDeparted && me >= 0 && !pass_through_departure) {
-            bool sees = false;
-            if (e.player != me && e.planet < g->planets().size() &&
-                g->can_see_planet_info(me, e.planet, galactic::GalacticSim::PlanetInfo::FleetPresence)) {
-                sees = true;
-                if (e.fleet < g->fleets().size()) {
-                    const galactic::FleetState& fl = g->fleets()[e.fleet];
-                    bool all_hidden = !fl.contents.empty();
-                    for (const objects::ObjectHandle m : fl.contents)
-                        if (g->store().alive(m)) all_hidden = all_hidden && g->hidden(m);
-                    sees = !all_hidden;
-                }
-            }
+            const bool sees = e.player != me && g->fleet_visible_to_local(e.fleet);
             audio_.fleet_departure(e.player == me, sees);
         }
     }

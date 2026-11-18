@@ -871,6 +871,13 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
             r.hero = static_cast<uint32_t>(st.id(h));
             const objects::TypeIndex t = st.type(h);
             r.text = type_label(data_, ui_.text, t);
+            // mcx4 t14 (MCX4_T09_RE_ANSWERS Q6, 0x3d2020 / 0x3e8890): the activated-ability slot's label names the button
+            // (TEXT_ABILITY_SLOT_SLICE, ...); a kind without a label keeps the unit's name.
+            if (const galactic::ActivatedAbilitySlot slot = gs->activated_ability_slot(h, planet_index(*gs, planet));
+                slot.kind >= 0 && slot.label && slot.label[0] != '\0') {
+                r.text.clear();
+                r.text_key = slot.label;
+            }
             if (t < ui_.hud_types.size()) r.icon = ui_.hud_types[t].icon_name;
             out.push_back(std::move(r));
         }

@@ -181,6 +181,9 @@ enum GalacticFleetFlag : uint8_t {
     // byte set -> the fleet model shows _ALT1 (gold scrolling dot), else _ALT0. Members that are company transports
     // (GalacticSim::is_company_transport) are skipped; [port] a fleet with no non-transport member keeps ALT0.
     kGalFleetStealthed = 0x04,
+    // mcx4 t14 (MCX4_GAL2_RE_ANSWERS Q3, the fleet visibility vote 0x433090): GalacticSim::fleet_visible_to_local is
+    // false - the local client shows no map icon for the fleet.
+    kGalFleetHidden = 0x08,
 };
 
 struct GalacticFleetSnap {
