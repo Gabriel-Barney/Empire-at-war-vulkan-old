@@ -135,7 +135,7 @@ enum class LaneWriteOp : uint8_t {
     Targeted = 3,         // targeted_ability(ids, type, target, -1, frame)
     DummyAbility = 4,     // spawn_ability_target(p, owner), then on the dummy: mode on (jet = on) or targeted
     ForceRecharge = 5,    // force_recharge(ids[0], type, seconds)
-    ResetCounter = 6,     // reset_counter(ids[0], type)
+    ResetCounter = 6,     // reset_counters(ids[0]): every ability id (Reset_Ability_Counter; type unused)
     UnlockMovement = 7,   // lock_movement(ids[0], false, frame)
     PriorityOverride = 8, // CombatSystem::set_priority_override(ids[0], value)
     Stickiness = 9,       // CombatSystem::set_stickiness_override(id, seconds) for each combat unit of ids
@@ -336,6 +336,13 @@ public:
     // Get_Hint and Find_All_Objects_With_Hint read ScriptObjectState::hint when a script set one (Create_Cinematic_Transport),
     // else this. Unset or "": no map hint.
     std::function<std::string_view(objects::ObjectHandle)> map_hint;
+    // mcx8 t12 (docs/re/MCX8_BINDINGS_OBJECTS.md §Get_Name): the object's ship name as stored (SelectionDataPack +0x40: a
+    // random name from the GameConstants ShipNameTextFiles lists, or the parent-mode object's). Get_Name drops its first
+    // and last character when it is longer than 2. Unset or "": no ship name (Get_Name answers "").
+    std::function<std::string_view(objects::ObjectHandle)> ship_name;
+    // mcx8 t12 (§Get_Game_Scoring_Type): a TEAM container's company type (team data +0x58, e.g. Imperial_Stormtrooper_Squad
+    // for a Stormtrooper_Team container). Unset or kNone: the binding uses the representative type.
+    std::function<objects::TypeIndex(objects::ObjectHandle)> team_company_type;
 
     // ---- L1/S4 wave 2a: tactical systems (see the header comment) ----
     // S9 ability system of the battle (object ids = store ids). Used only in builds where engine/lua links

@@ -26,6 +26,7 @@
 #include "alamo/core/dmath.hpp"
 #include "alamo/core/ascii.hpp"
 #include "alamo/core/sim_crc.hpp"
+#include "alamo/core/sim_rng.hpp"
 #include "alamo/lua/object_bridge.hpp"
 #include "alamo/lua/players.hpp"
 #include "alamo/lua/presentation.hpp"
@@ -540,12 +541,12 @@ public:
         w.seconds = seconds;
         send(w);
     }
-    void reset_counter(ObjectId id, uint8_t t) const {
+    void reset_counters(ObjectId id) const {  // every ability id (Reset_Ability_Counter)
         if (live_) {
-            live_->reset_counter(id, t);
+            live_->reset_counters(id);
             return;
         }
-        send(make(LaneWriteOp::ResetCounter, std::span<const ObjectId>(&id, 1), t, false));
+        send(make(LaneWriteOp::ResetCounter, std::span<const ObjectId>(&id, 1), 0, false));
     }
     void unlock_movement(ObjectId id, uint32_t frame) const {
         if (live_) {
@@ -1069,18 +1070,33 @@ int g_find_nearest(Call& c) {
     return 1;
 }
 
-// Spawn_Unit(type, location, player): a table with the spawned unit (a company: its container). At a planet in a
-// galactic script: GalacticSim::spawn_unit (detail::galactic_spawn_unit), so Assemble_Fleet / Move_To / saves see it.
+// Spawn_Unit(type, location, player) (docs/re/MCX8_BINDINGS_OBJECTS.md §Spawn_Unit) [H]: a table with the spawned unit (a
+// company: its container). Checks in order: at least 3 arguments (more ignored), the player, the type (a
+// GameObjectTypeWrapper; no type name), the location. Tactical: any position (LuaSpawnUnitCommandClass texts). Galactic
+// (the Galactic_Spawn_Unit texts): the location must be a live game object with PRODUCTION, i.e. a planet [port: or with
+// PLANET, which the port's GalacticSim gives every planet]; GalacticSim::spawn_unit (detail::galactic_spawn_unit) places
+// it, so Assemble_Fleet / Move_To / saves see it.
 int g_spawn_unit(Call& c) {
-    if (c.nargs != 3) return c.script_error_stop("LuaSpawnUnitCommandClass -- Invalid number of parameters.");
-    const Ud* t = c.userdata(1, detail::cls_type());
-    if (!t) return c.script_error_stop("LuaSpawnUnitCommandClass -- Invalid parameter for type.");
+    const bool galactic = store(c) && store(c)->mode() == objects::ModeKind::Galactic;
+    const char* who = galactic ? "Galactic_Spawn_Unit" : "LuaSpawnUnitCommandClass";
+    if (c.nargs < 3) return c.script_error_stop("%s -- Invalid number of parameters.", who);
     const Ud* p = player_arg(c, 3);
-    if (!p) return c.script_error_stop("LuaSpawnUnitCommandClass -- Invalid parameter for player.");
+    if (!p) return c.script_error_stop("%s -- Invalid parameter for player.", who);
+    const Ud* t = c.userdata(1, detail::cls_type());
+    if (!t) return c.script_error_stop("%s -- Invalid parameter for type.", who);
     Vec3 pos{};
     ObjectHandle loc{};
-    if (position_arg(c, 2, pos, &loc) != PosArg::Ok)
-        return c.script_error_stop("LuaSpawnUnitCommandClass -- Invalid parameter for location.");  // [inferred]
+    if (galactic) {
+        const Ud* o = c.userdata(2, detail::cls_game_object());
+        const bool planet = o && detail::object_alive(*c.vm, *o) &&
+                            (store(c)->has_behavior(detail::object_handle(*o), objects::beh::Production) ||
+                             store(c)->has_behavior(detail::object_handle(*o), objects::beh::Planet));
+        if (!planet) return c.script_error_stop("Galactic_Spawn_Unit -- Invalid planet parameter.");
+        loc = detail::object_handle(*o);
+        pos = store(c)->position(loc);
+    } else if (position_arg(c, 2, pos, &loc) != PosArg::Ok) {
+        return c.script_error_stop("LuaSpawnUnitCommandClass -- Invalid position parameter.");
+    }
     lua_newtable(c.L);
     if (!store(c)) return 1;
     // a1g t06: at a planet of the galactic sim the unit is placed by the sim (fleet / surface / planet, one company
@@ -1096,33 +1112,40 @@ int g_spawn_unit(Call& c) {
     return 1;
 }
 
-// Create_Generic_Object(type or type name, position, player): one object, no company expansion
-// [inferred]; nil for an unknown type name [inferred]. Facing +X (yaw 0) in every mode, also when parameter 2 is an
-// object (it lends only its position; TACTICAL_COMBAT §3.1.1 "other spawns", s78i t02).
+// Create_Generic_Object(type or type name, position, player) (docs/re/MCX8_BINDINGS_OBJECTS.md §Create_Generic_Object)
+// [H]: one object, no company expansion. Checks in order: exactly 3 arguments, the player, the type (a type wrapper or a
+// known type name; anything else is the "unnown type name" error, never nil), the position. Facing +X (yaw 0) in every
+// mode, also when parameter 2 is an object (it lends only its position; TACTICAL_COMBAT §3.1.1 "other spawns", s78i t02;
+// retail passes a zero facing vector, what that yields is [L]).
 int g_create_generic_object(Call& c) {
     if (c.nargs != 3)
-        return c.script_error_stop("Create_Generic_Object -- Invalid number of parameters. Expected 3, got %d.", c.nargs);
+        return c.script_error_stop("Create_Generic_Object -- Invalid number of parameters.  Expected 3, got %d.", c.nargs);
+    const Ud* p = player_arg(c, 3);
+    if (!p) return c.script_error_stop("Create_Generic_Object -- Invalid type for parameter 3.  Expected player.");
     const TypeArg t = type_arg(c, 1);
-    if (!t.given) return c.script_error_stop("Create_Generic_Object -- Invalid type for parameter 1. Expected type or type name.");  // [inferred]
+    if (!t.given || t.index == objects::kNone || !types(c) || t.index >= types(c)->raw().type_count())
+        return c.script_error_stop("Create_Generic_Object -- Invalid type or unnown type name for parameter 1.");
     Vec3 pos{};
     ObjectHandle loc{};
     if (position_arg(c, 2, pos, &loc) != PosArg::Ok)
         return c.script_error_stop("Create_Generic_Object -- Could not deduce a creation position from parameter 2.");
-    const Ud* p = player_arg(c, 3);
-    if (!p) return c.script_error_stop("Create_Generic_Object -- Invalid type for parameter 3. Expected player.");
-    if (!store(c) || t.index == objects::kNone || !types(c) || t.index >= types(c)->raw().type_count())
-        return push_nil(c);
+    if (!store(c)) return push_nil(c);
     detail::push_object(c.L, *c.vm, spawn(c, t.index, p->id, pos, loc, false, SpawnFacing::Given, Vec3{1.0f, 0.0f, 0.0f}));
     return 1;
 }
 
-// Hide_Object(object, number): non-zero hides [inferred], like GameObjectWrapper.Hide.
+// Hide_Object(object, number) (docs/re/MCX8_BINDINGS_OBJECTS.md §Hide_Object) [H]: tactical only (the dispatcher's gate,
+// kGateTexts), at least 2 arguments (more ignored); hides when the number is > 0, shows otherwise. A non-number argument 2
+// is reported and the object is hidden anyway (the flag defaults to true). [port] A bad argument 1 stops here (retail
+// writes through a null object).
 int g_hide_object(Call& c) {
-    if (c.nargs != 2) return c.script_error_stop("LuaHideObject -- Expected gameobject pointer parameter 1, float parameter 2");
+    if (c.nargs < 2) return c.script_error_stop("LuaHideObject -- Expected gameobject pointer parameter 1, float parameter 2");
     const Ud* o = c.userdata(1, detail::cls_game_object());
     if (!o || !detail::object_alive(*c.vm, *o)) return c.script_error_stop("LuaHideObject -- Invalid parameter 1, expected a game object");
-    if (!c.is_number(2)) return c.script_error_stop("LuaHideObject -- Invalid parameter 2, expected a float");
-    if (ScriptObjectState* s = edit_state(c, o->id)) s->hidden = c.number(2) != 0.0;
+    bool hide = true;
+    if (c.is_number(2)) hide = c.number(2) > 0.0;
+    else c.script_error_stop("LuaHideObject -- Invalid parameter 2, expected a float");
+    if (ScriptObjectState* s = edit_state(c, o->id)) s->hidden = hide;
     return 0;
 }
 
@@ -1136,7 +1159,8 @@ int g_create_position(Call& c) {
 
 // ---------------------------------------------------------------- PositionWrapper / BlockingStatus
 
-int m_position_get_xyz(Call& c) {  // three numbers [inferred]
+// Get_XYZ(): x, y, z as three numbers, no arguments read (docs/re/MCX8_BINDINGS_OBJECTS.md §PositionWrapper.Get_XYZ) [H].
+int m_position_get_xyz(Call& c) {
     const Vec3 p = position_of(*c.self);
     lua_pushnumber(c.L, static_cast<double>(p.x));
     lua_pushnumber(c.L, static_cast<double>(p.y));
@@ -1213,11 +1237,21 @@ int m_get_distance(Call& c) {
     return push_num(c, distance(store(c)->position(self_object(c)), p));
 }
 
-int m_get_name(Call& c) { return push_str(c, object_type_name(c, self_object(c))); }  // [inferred] type name
+// Get_Name() (docs/re/MCX8_BINDINGS_OBJECTS.md §Get_Name) [H]: the object's ship name (ObjectBridge::ship_name) with its
+// first and last character dropped when it is longer than 2; "" without one and for a dead wrapper. Never the type name
+// (scripts that want it call Get_Type().Get_Name()).
+int m_get_name(Call& c) {
+    if (!detail::object_alive(*c.vm, *c.self)) return push_str(c, "");
+    const ObjectBridge* b = bridge(c);
+    std::string_view name = b && b->ship_name ? b->ship_name(self_object(c)) : std::string_view();
+    if (name.size() > 2) name = name.substr(1, name.size() - 2);
+    return push_str(c, name);
+}
 
-// Hull: health / Tactical_Health (1 when the type has no health) [inferred]; Get_Health the same.
-// Get_Hull: S9 Get_Min_Health_Fraction (CombatSystem::script_hull, ABILITIES_HARDPOINTS.md §1.3) for units of
-// the host's combat system (wave 2a); else store health / Tactical_Health [inferred].
+// Get_Hull() / Get_Health() (one function; docs/re/MCX8_BINDINGS_OBJECTS.md §Get_Hull and Get_Health) [H]: tactical only
+// (the dispatcher's gate and text), a dead wrapper returns nothing, else Get_Min_Health_Fraction: CombatSystem::script_hull
+// (ABILITIES_HARDPOINTS.md §1.3) for units of the host's combat system; [port] for other objects store health /
+// Tactical_Health (1 when the type has no health), an approximation of 0x396470.
 int m_get_hull(Call& c) {
 #if ALAMO_LUA_HAVE_ABILITIES
     if (float v = 0.0f; combat_value(c, c.self->id, false, v)) return push_num(c, static_cast<double>(v));
@@ -1230,8 +1264,10 @@ int m_get_hull(Call& c) {
     return push_num(c, static_cast<double>(store(c)->health(h)) / static_cast<double>(max));
 }
 
-// Shield fraction: CombatSystem::shield_fraction for combat units (§5: current / max clamped to [0, 1], 0
-// without shields; wave 2a); else script state, else full when the type has shields [inferred].
+// Get_Shield() (docs/re/MCX8_BINDINGS_OBJECTS.md §Get_Shield) [H]: tactical only (the dispatcher's gate and text), a dead
+// wrapper returns 0 (DeadRule::SilentZero), else the shield fraction: CombatSystem::shield_fraction for combat units
+// (current / max clamped to [0, 1], 0 without shields); [port] for other objects the script state, else full (1) when
+// the type has shields.
 int m_get_shield(Call& c) {
 #if ALAMO_LUA_HAVE_ABILITIES
     if (float v = 0.0f; combat_value(c, c.self->id, true, v)) return push_num(c, static_cast<double>(v));
@@ -1244,6 +1280,9 @@ int m_get_shield(Call& c) {
     return push_num(c, shields ? 1.0 : 0.0);
 }
 
+// Is_Category(name) (docs/re/MCX8_BINDINGS_OBJECTS.md §Is_Category) [H]: a GameObjectCategoryType name (or '|' list); an
+// unrecognized one is a script error (no value); else a hit in the representative type's CategoryMask (a team
+// container / transport answers for its company).
 int m_is_category(Call& c) {
     if (c.nargs != 1)
         return c.script_error_stop("GameObjectWrapper::Is_Category -- invalid number of parameters. Expected 1, got %d.", c.nargs);
@@ -1251,8 +1290,9 @@ int m_is_category(Call& c) {
     const objects::GameObjectTypes* ty = types(c);
     if (!ty) return push_bool(c, false);
     const auto m = ty->enums().get(objects::EnumId::GameObjectCategory).convert(c.string(1));
-    if (!m || *m == 0) return push_bool(c, false);  // unknown category: false [inferred]
-    return push_bool(c, (ty->get_mask(store(c)->type(self_object(c)), "CategoryMask") & static_cast<uint64_t>(*m)) != 0);
+    if (!m) return c.script_error_stop("GameObjectWrapper::Is_Category -- unrecognized category %s.", std::string(c.string(1)).c_str());
+    const TypeIndex rep = representative_type(c, bridge(c), self_object(c));
+    return push_bool(c, (ty->get_mask(rep, "CategoryMask") & static_cast<uint64_t>(*m)) != 0);
 }
 
 int m_has_property(Call& c) {
@@ -1266,8 +1306,26 @@ int m_has_property(Call& c) {
     return push_bool(c, (ty->get_mask(store(c)->type(self_object(c)), "Property_Flags") & static_cast<uint64_t>(*m)) != 0);
 }
 
-int m_get_game_scoring_type(Call& c) {  // [inferred] the object's own type
-    detail::push_type(c.L, *c.vm, store(c)->type(self_object(c)));
+// Get_Game_Scoring_Type() (docs/re/MCX8_BINDINGS_OBJECTS.md §Get_Game_Scoring_Type) [H], first hit: a TEAM container's
+// company type (ObjectBridge::team_company_type); a TRANSPORT's carried company type (ObjectStore::carried_type), else
+// its parent-mode counterpart's representative type (the parent store's type: the port's galactic representative type);
+// else the representative type.
+int m_get_game_scoring_type(Call& c) {
+    const objects::ObjectStore* st = store(c);
+    const ObjectHandle h = self_object(c);
+    const ObjectBridge* b = bridge(c);
+    TypeIndex t = objects::kNone;
+    if (st->has_behavior(h, objects::beh::Team) && b && b->team_company_type) t = b->team_company_type(h);
+    if (t == objects::kNone && st->has_behavior(h, objects::beh::Transport)) {
+        t = st->carried_type(h);
+        const objects::ObjectStore* ps = b ? b->parent_store : nullptr;
+        if (t == objects::kNone && ps && st->parent_mode_id(h) != objects::kNoObjectId) {
+            const ObjectHandle p = ps->find(st->parent_mode_id(h));
+            if (ps->exists(p)) t = ps->type(p);
+        }
+    }
+    if (t == objects::kNone) t = representative_type(c, b, h);
+    detail::push_type(c.L, *c.vm, t);
     return 1;
 }
 
@@ -1396,18 +1454,31 @@ const AbilityState* ability_state(Call& c, uint8_t id) {
     return it == s.abilities.end() ? nullptr : &it->second;
 }
 
-// S9: Can_Activate(obj, t, 1) or pending as a targeted ability (ABILITIES_HARDPOINTS.md §5). Without an
-// ability system: the type has it and it is not running [inferred].
+// Is_Ability_Ready(name) (docs/re/MCX8_BINDINGS_OBJECTS.md §Is_Ability_Ready) [H]: the argument count before the dead
+// wrapper (nothing), then the type and the UnitAbilityType name (unknown: a script error); an object without the ability
+// warns and answers false. S9: Can_Activate(obj, t, 1) or pending as a targeted ability (ABILITIES_HARDPOINTS.md §5,
+// AbilitySystem::is_ready); without an ability system [port]: the Black Market gate, then not running.
 int m_is_ability_ready(Call& c) {
     if (c.nargs != 1)
-        return c.script_error_stop("GameObjectWrapper::Is_Ability_Ready -- invalid number of parameters. Expected 1, got %d.", c.nargs);
-    if (!c.is_string(1)) return c.script_error_stop("GameObjectWrapper::Is_Ability_Ready -- invalid type for ability 1. Expected string.");
+        return c.script_error_stop("GameObjectWrapper::Is_Ability_Ready -- invalid number of parameters.  Expected 1, got %d.", c.nargs);
+    if (!detail::object_alive(*c.vm, *c.self)) return 0;
+    if (!c.is_string(1)) return c.script_error_stop("GameObjectWrapper::Is_Ability_Ready -- invalid type for ability 1.  Expected string.");
     const uint8_t id = ability_param(c, 1);
+    if (id == 0)
+        return c.script_error_stop("GameObjectWrapper::Is_Ability_Ready -- unknown ability %s.", std::string(c.string(1)).c_str());
+    auto lacks = [&c] {
+        const std::string type = ascii_upper(object_type_name(c, self_object(c)));
+        c.script_warning("GameObjectWrapper::Is_Ability_Ready -- Object %s does not have ability %s.", type.c_str(),
+                         std::string(c.string(1)).c_str());
+        return push_bool(c, false);
+    };
 #if ALAMO_LUA_HAVE_ABILITIES
-    if (const AbilityAccess a = ability_system(c, c.self->id))
-        return push_bool(c, id != 0 && a->is_ready(c.self->id, id, ability_frame(c)));
+    if (const AbilityAccess a = ability_system(c, c.self->id)) {
+        if (!a->has_ability(c.self->id, id)) return lacks();
+        return push_bool(c, a->is_ready(c.self->id, id, ability_frame(c)));
+    }
 #endif
-    if (id == 0 || !has_ability(c, self_object(c), id)) return push_bool(c, false);
+    if (!has_ability(c, self_object(c), id)) return lacks();
     if (!black_market_ok(c, self_object(c), id)) return push_bool(c, false);  // P4 lua (0x57b580)
     const AbilityState* a = ability_state(c, id);
     return push_bool(c, !(a && a->active));
@@ -1782,16 +1853,14 @@ int m_force_ability_recharge(Call& c) {
     return 0;
 }
 
-// Reset_Ability_Counter(name): counter = maximum = 1 frame when the counter is zero [M] (§5).
+// Reset_Ability_Counter() (docs/re/MCX8_BINDINGS_OBJECTS.md §Reset_Ability_Counter) [H]: the arguments are never read; for
+// every ability id whose counter is not zero, counter = maximum = 1 frame (AbilitySystem::reset_counters), so every
+// running recharge ends on the next frame. Without an ability system: nothing.
 int m_reset_ability_counter(Call& c) {
-    if (c.nargs != 1)  // [inferred] message format (the doc lists none)
-        return c.script_error_stop("GameObjectWrapper::Reset_Ability_Counter -- invalid number of parameters. Expected 1, got %d.", c.nargs);
-    if (!c.is_string(1)) return c.script_error_stop("GameObjectWrapper::Reset_Ability_Counter -- invalid type for parameter 1. Expected string.");
 #if ALAMO_LUA_HAVE_ABILITIES
-    if (const AbilityAccess a = ability_system(c, c.self->id)) {
-        const uint8_t id = ability_param(c, 1);
-        if (id != 0) a->reset_counter(c.self->id, id);
-    }
+    if (const AbilityAccess a = ability_system(c, c.self->id)) a->reset_counters(c.self->id);
+#else
+    (void)c;
 #endif
     return 0;
 }
@@ -1906,22 +1975,25 @@ int issue_each(Call& c, const std::vector<ObjectHandle>& units, const std::funct
     return push_block(c, first, first_serial);
 }
 
-// Galactic Move_To (0x57d8c0 in the original, not part of this spec): the stage-2 path. q6 t11: a dead caller is the
-// default dead-wrapper case (LUA_API.md "Dead or null wrappers": nothing, silently).
+// Galactic Move_To = Move_Galactic 0x57d8c0 (docs/re/MCX8_BINDINGS_OBJECTS.md §Move_To in galactic) [H]: a dead caller
+// does nothing; exactly 1 argument, a planet (a GameObjectWrapper or an AI target whose object has PLANET); the caller
+// must be a fleet. Then the fleet move to the planet (MoveObjectToObject) and its blocking status.
 int galactic_move_to(Call& c) {
     if (!detail::object_alive(*c.vm, *c.self)) return 0;
-    Vec3 p{};
-    ObjectHandle target{};
-    if (position_arg(c, 1, p, &target) != PosArg::Ok)
-        return c.script_error_stop("GameObjectWrapper::Move_To -- could not extract a position from parameter 1.");  // [inferred]
-    if (detail::movement_locked(c, c.self->id)) return locked_orders_warning(c);
-    if (c.is_number(2)) {
-        const ObjectId tid = target ? store(c)->id(target) : objects::kNoObjectId;
-        const float t = static_cast<float>(c.number(2));
-        return issue_and_block(c, lua_order(LuaOrder::MoveTo, c.self->id, tid, p, t != 0.0f ? std::bit_cast<uint32_t>(t) : 0u));
+    if (c.nargs != 1)
+        return c.script_error_stop("GameObjectWrapper::Move_Galactic -- invalid number of parameters.  Expected 1, got %d.", c.nargs);
+    const objects::ObjectStore* st = store(c);
+    ObjectHandle planet{};
+    if (const Ud* o = c.userdata(1, detail::cls_game_object())) {
+        if (detail::object_alive(*c.vm, *o)) planet = detail::object_handle(*o);
+    } else if (const detail::AiTargetArg a = detail::ai_target_arg(c, 1); a.is_target && !a.dead) {
+        planet = a.object;
     }
-    if (target) return issue_and_block(c, ev_move_to_object(store(c)->mode(), c.self->id, store(c)->id(target)));
-    return issue_and_block(c, lua_order(LuaOrder::MoveTo, c.self->id, objects::kNoObjectId, p, 0));
+    if (!planet || !st->has_behavior(planet, objects::beh::Planet))
+        return c.script_error_stop("GameObjectWrapper::Move_Galactic -- invalid type for parameter 1.  Expected planet.");
+    if (!st->has_behavior(self_object(c), objects::beh::Fleet))
+        return c.script_error_stop("GameObjectWrapper::Move_Galactic -- this function is only valid on fleets.");
+    return issue_and_block(c, ev_move_to_object(st->mode(), c.self->id, st->id(planet)));
 }
 
 enum MoveFlags : int { kMoveTo = 0, kAttackMove = 1, kGuardTarget = 2 };
@@ -2049,12 +2121,15 @@ int m_stop(Call& c) {
     return push_block(c, c.self->id, serial);
 }
 
+// Turn_To_Face(position source) (docs/re/MCX8_BINDINGS_OBJECTS.md §Turn_To_Face) [H]: a dead wrapper returns nothing (the
+// dispatcher), exactly 1 argument, a position from it; a Facing order and its blocking status. [port] The movement
+// coordinator (and its TEAM member expansion) is the host's.
 int m_turn_to_face(Call& c) {
     if (c.nargs != 1)
-        return c.script_error_stop("GameObjectWrapper::Turn_To_Face -- invalid number of parameters. Expected 1, got %d.", c.nargs);
+        return c.script_error_stop("GameObjectWrapper::Turn_To_Face -- invalid number of parameters.  Expected 1, got %d.", c.nargs);
     Vec3 p{};
     if (position_arg(c, 1, p) != PosArg::Ok)
-        return c.script_error_stop("GameObjectWrapper::Turn_To_Face -- could not extract a position from parameter 1.");  // [inferred]
+        return c.script_error_stop("GameObjectWrapper::Turn_To_Face -- could not deduce a position to face.");
     return issue_and_block(c, ev_facing(c.self->id, heading_deg(store(c)->position(self_object(c)), p)));
 }
 
@@ -2096,15 +2171,23 @@ int m_sell(Call& c) { return issue_and_block(c, ev_sell(store(c)->mode(), c.self
 
 // ---------------------------------------------------------------- direct state changes
 
-// Despawn: an object with a TEAM behaviour despawns its members (reverse member order) instead of
-// itself (OBJECT_RUNTIME.md §3); otherwise the object is destroyed (no death effects) [inferred].
+// The live members of a TEAM container (store container links, insertion order).
+std::vector<ObjectHandle> team_members(const objects::ObjectStore& st, ObjectHandle team) {
+    std::vector<ObjectHandle> members;
+    for (const ObjectHandle h : detail::script_objects(st))
+        if (st.alive(h) && st.container(h) == team) members.push_back(h);
+    return members;
+}
+
+// Despawn() (docs/re/MCX8_BINDINGS_OBJECTS.md §GameObjectWrapper.Despawn) [H]: a dead wrapper warns (the dispatcher); an
+// object with a TEAM behaviour despawns its members (last member first) instead of itself (OBJECT_RUNTIME.md §3);
+// otherwise the plain removal, no death effects. Retail first detaches the game-scoring manager so the removal is no loss
+// or kill; the port has no game-scoring system, so nothing counts it.
 int m_despawn(Call& c) {
     objects::ObjectStore* st = store(c);
     const ObjectHandle self = self_object(c);
     if (st->has_behavior(self, objects::beh::Team)) {
-        std::vector<ObjectHandle> members;
-        for (const ObjectHandle h : detail::script_objects(*st))
-            if (st->alive(h) && st->container(h) == self) members.push_back(h);
+        const std::vector<ObjectHandle> members = team_members(*st, self);
         for (auto it = members.rbegin(); it != members.rend(); ++it) st->destroy(*it);
         return 0;
     }
@@ -2112,41 +2195,26 @@ int m_despawn(Call& c) {
     return 0;
 }
 
-// Take_Damage(amount, [hardpoint type name]): damage kind 0 (OBJECT_SCRIPTS §6.1 step 4), which passes
-// invulnerability (TACTICAL_COMBAT §3.6 step 3), so Make_Invulnerable does not stop it (q6 t12). Without a name, a
-// host damage system (ObjectBridge::take_damage: a tactical battle's combat) takes it when it knows the object;
-// otherwise a direct health change [inferred]; Cannot_Be_Killed: health stops at min(current, 1); <= 0 destroys.
-// r1b t01 (R1_T01_HARDPOINT_RUN, retail 0x581710): a name is matched ASCII case-insensitively against the object type's
-// HardPoints type names; no match stops the script ("unknown hard point") with no damage; a match goes to the host's
-// hardpoint record (ObjectBridge::take_hardpoint_damage; none: no damage - hardpoints are records, not objects).
-int m_take_damage(Call& c) {
-    if (c.nargs < 1 || c.nargs > 2)
-        return c.script_error_stop("GameObjectWrapper::Take_Damage -- invalid number of parameters. Expected 1 or 2, got %d.", c.nargs);
-    if (!c.is_number(1)) return c.script_error_stop("GameObjectWrapper::Take_Damage -- invalid type for parameter 1. Expected number.");
-    if (c.nargs == 2 && !c.is_string(2))
-        return c.script_error_stop("GameObjectWrapper::Take_Damage -- invalid type for parameter 2. Expected string.");
+// Take_Damage(amount, [hardpoint type name]) (docs/re/MCX8_BINDINGS_OBJECTS.md §Take_Damage) [H]: the argument count is
+// tested before the dead wrapper (warning, nothing). Damage kind 0 (OBJECT_SCRIPTS §6.1 step 4), which passes
+// invulnerability (TACTICAL_COMBAT §3.6 step 3), so Make_Invulnerable does not stop it (q6 t12). A TEAM container passes
+// the full amount to each member, first to last, and takes none itself. Without a name, a host damage system
+// (ObjectBridge::take_damage: a tactical battle's combat) takes it when it knows the object; [port] otherwise a direct
+// health change; Cannot_Be_Killed: health stops at min(current, 1); <= 0 destroys. A name is looked up in the global
+// HardPoint type table (ASCII case-insensitive, R1_T01_HARDPOINT_RUN); not there: "unknown hard point" and no damage;
+// else it goes to the host's hardpoint record (ObjectBridge::take_hardpoint_damage; none: no damage - hardpoints are
+// records, not objects). [L] What retail does with a known name the victim does not carry is not read; the host decides.
+void damage_one(Call& c, ObjectHandle target, float amount, const std::string* hardpoint) {
     objects::ObjectStore* st = store(c);
-    const ObjectHandle target = self_object(c);
-    if (c.nargs == 2) {
-        const std::string name(c.string(2));
-        const objects::GameObjectTypes* hty = types(c);
-        const TypeIndex ht = st->type(target);
-        bool known = false;
-        if (hty && ht < hty->size())
-            for (const uint32_t id : hty->hardpoints(ht))
-                if (id < hty->hardpoint_names().size() && ascii_iequals(hty->hardpoint_names()[id], name)) known = true;
-        if (!known) return c.script_error_stop("GameObjectWrapper::Take_Damage -- unknown hard point %s.", name.c_str());
-        const ScriptObjectState& hs = state_of(c, st->id(target));
-        if (const ObjectBridge* b = bridge(c); b && b->take_hardpoint_damage)
-            (void)b->take_hardpoint_damage(target, static_cast<float>(c.number(1)), hs.cannot_be_killed, name);
-        return 0;
-    }
     const ScriptObjectState& s = state_of(c, st->id(target));
-    if (c.nargs == 1)
-        if (const ObjectBridge* b = bridge(c); b && b->take_damage && b->take_damage(target, static_cast<float>(c.number(1)), s.cannot_be_killed))
-            return 0;
+    const ObjectBridge* b = bridge(c);
+    if (hardpoint) {
+        if (b && b->take_hardpoint_damage) (void)b->take_hardpoint_damage(target, amount, s.cannot_be_killed, *hardpoint);
+        return;
+    }
+    if (b && b->take_damage && b->take_damage(target, amount, s.cannot_be_killed)) return;
     const float cur = st->health(target);
-    float next = cur - static_cast<float>(c.number(1));
+    float next = cur - amount;
     const objects::GameObjectTypes* ty = types(c);
     const TypeIndex t = st->type(target);
     const float max = (ty && t < ty->columns().tactical_health.size()) ? ty->columns().tactical_health[t] : 0.0f;
@@ -2154,13 +2222,44 @@ int m_take_damage(Call& c) {
     if (next <= 0.0f) {
         if (s.cannot_be_killed) {
             st->set_health(target, cur < 1.0f ? cur : 1.0f);
-            return 0;
+            return;
         }
         st->set_health(target, 0.0f);
         st->destroy(target);
-        return 0;
+        return;
     }
     st->set_health(target, next);
+}
+int m_take_damage(Call& c) {
+    if (c.nargs < 1 || c.nargs > 2)
+        return c.script_error_stop("GameObjectWrapper::Take_Damage -- invalid number of parameters.  Expected 1 or 2, got %d.", c.nargs);
+    if (!detail::object_alive(*c.vm, *c.self)) return c.script_warning("GameObjectWrapper::Take_Damage -- this object is dead!");
+    if (!c.is_number(1)) return c.script_error_stop("GameObjectWrapper::Take_Damage -- invalid type for parameter 1.  Expected number.");
+    if (c.nargs == 2 && !c.is_string(2))
+        return c.script_error_stop("GameObjectWrapper::Take_Damage -- invalid type for parameter 2.  Expected string.");
+    objects::ObjectStore* st = store(c);
+    const ObjectHandle self = self_object(c);
+    std::string name;
+    if (c.nargs == 2) {
+        const objects::GameObjectTypes* hty = types(c);
+        bool known = false;
+        if (hty)
+            for (const std::string_view n : hty->hardpoint_names())
+                if (ascii_iequals(n, c.string(2))) {
+                    name = std::string(n);  // the record's own name goes on as the hit name
+                    known = true;
+                    break;
+                }
+        if (!known) return c.script_error_stop("GameObjectWrapper::Take_Damage -- unknown hard point %s.", std::string(c.string(2)).c_str());
+    }
+    const float amount = static_cast<float>(c.number(1));
+    const std::string* hp = c.nargs == 2 ? &name : nullptr;
+    if (st->has_behavior(self, objects::beh::Team)) {
+        for (const ObjectHandle m : team_members(*st, self))
+            if (st->alive(m)) damage_one(c, m, amount, hp);
+        return 0;
+    }
+    damage_one(c, self, amount, hp);
     return 0;
 }
 
@@ -2401,11 +2500,14 @@ int highlight(Call& c, const char* method, bool small) {
 int m_highlight(Call& c) { return highlight(c, "Highlight", false); }
 int m_highlight_small(Call& c) { return highlight(c, "Highlight_Small", true); }
 
-// Override_Max_Speed(number | false): a speed override, false (or true) clears it [inferred].
+// Override_Max_Speed(number | false) (docs/re/MCX8_BINDINGS_OBJECTS.md §Override_Max_Speed) [H]: only a call without an
+// argument is an error; a number sets the override, false clears it, true and any other type do nothing (no message).
 int m_override_max_speed(Call& c) {
-    if (!c.is_number(1) && !is_bool(c, 1))
-        return c.script_error_stop("GameObjectWrapper::Override_Max_Speed -- Expected a number or boolean parameter.");
-    if (ScriptObjectState* s = edit_self(c)) s->max_speed_override = c.is_number(1) ? static_cast<float>(c.number(1)) : -1.0f;
+    if (c.nargs < 1) return c.script_error_stop("GameObjectWrapper::Override_Max_Speed -- Expected a number or boolean parameter.");
+    ScriptObjectState* s = edit_self(c);
+    if (!s) return 0;
+    if (c.is_number(1)) s->max_speed_override = static_cast<float>(c.number(1));
+    else if (is_bool(c, 1) && !to_bool(c, 1)) s->max_speed_override = -1.0f;
     return 0;
 }
 
@@ -3099,10 +3201,25 @@ const objects::GameObjectTypes* self_types(Call& c, TypeIndex& t) {
     const objects::GameObjectTypes* ty = types(c);
     return (ty && t < ty->size()) ? ty : nullptr;
 }
-int m_type_combat_rating(Call& c) {  // AI_Combat_Power [inferred]
+// Get_Combat_Rating() (docs/re/MCX8_BINDINGS_OBJECTS.md §GameObjectTypeWrapper.Get_Combat_Rating) [H]: AI_Combat_Power at
+// run time (0x370e60, A1_READINGS §29.3). In a tactical mode a type whose first Company_Units (else Squadron_Units) entry
+// has Create_Team is scaled by clamp(Max_Squad_Size / entry count, 0, 1) (the rule of battle_ai.cpp's perception types).
+int m_type_combat_rating(Call& c) {
     TypeIndex t = 0;
     const auto* ty = self_types(c, t);
-    return push_num(c, ty ? static_cast<double>(ty->columns().ai_combat_power[t]) : 0.0);
+    if (!ty) return push_num(c, 0.0);
+    float power = ty->columns().ai_combat_power[t];
+    if (store(c) && store(c)->mode() != objects::ModeKind::Galactic) {
+        std::vector<TypeIndex> list = ty->get_type_refs(t, "Company_Units");
+        if (list.empty()) list = ty->get_type_refs(t, "Squadron_Units");
+        const TypeIndex first = list.empty() ? objects::kNone : list.front();
+        if (first != objects::kNone && first < ty->size() && ty->get_bool(first, "Create_Team")) {
+            float r = static_cast<float>(ty->get_int(t, "Max_Squad_Size")) / static_cast<float>(list.size());
+            r = r < 0.0f ? 0.0f : (r > 1.0f ? 1.0f : r);
+            power = power * r;
+        }
+    }
+    return push_num(c, static_cast<double>(power));
 }
 int m_type_tech_level(Call& c) {
     TypeIndex t = 0;
@@ -3119,25 +3236,41 @@ int m_type_score_cost(Call& c) {
     const auto* ty = self_types(c, t);
     return push_num(c, ty ? ty->columns().score_cost_credits[t] : 0);
 }
-int m_type_tactical_build_cost(Call& c) {  // Tactical_Build_Cost_Multiplayer [inferred]
+// Get_Tactical_Build_Cost() (docs/re/MCX8_BINDINGS_OBJECTS.md §GameObjectTypeWrapper.Get_Tactical_Build_Cost) [H]: in
+// skirmish Tactical_Build_Cost_Multiplayer; otherwise Tactical_Build_Cost_Campaign, Multiplayer when Campaign < 1.
+// Skirmish = not a campaign game (LuaHost::campaign, as Is_Campaign_Game).
+int m_type_tactical_build_cost(Call& c) {
     TypeIndex t = 0;
     const auto* ty = self_types(c, t);
-    return push_num(c, ty ? ty->get_int(t, "Tactical_Build_Cost_Multiplayer") : 0);
+    if (!ty) return push_num(c, 0);
+    const int32_t mp = ty->get_int(t, "Tactical_Build_Cost_Multiplayer");
+    if (!c.vm->host.campaign) return push_num(c, mp);
+    const int32_t cp = ty->get_int(t, "Tactical_Build_Cost_Campaign");
+    return push_num(c, cp < 1 ? mp : cp);
 }
-int m_type_max_range(Call& c) {  // Targeting_Max_Attack_Distance [inferred]
+// Get_Max_Range() / Get_Min_Range() (docs/re/MCX8_BINDINGS_OBJECTS.md §GameObjectTypeWrapper.Get_Max_Range / Get_Min_Range)
+// [H]: the type's raw Targeting_Max_Attack_Distance / Targeting_Min_Attack_Distance, no deployed or ability factor.
+int m_type_max_range(Call& c) {
     TypeIndex t = 0;
     const auto* ty = self_types(c, t);
     return push_num(c, ty ? static_cast<double>(ty->columns().targeting_max_attack_distance[t]) : 0.0);
 }
-int m_type_min_range(Call& c) {  // Targeting_Min_Attack_Distance [inferred]
+int m_type_min_range(Call& c) {
     TypeIndex t = 0;
     const auto* ty = self_types(c, t);
     return push_num(c, ty ? static_cast<double>(ty->columns().targeting_min_attack_distance[t]) : 0.0);
 }
-int m_type_is_hero(Call& c) {  // Is_Named_Hero [inferred]
+// Is_Hero() (docs/re/MCX8_BINDINGS_OBJECTS.md §GameObjectTypeWrapper.Is_Hero) [H]: H = the type of the first Company_Units
+// entry, else of the first Squadron_Units entry, else the type itself; true when H has Is_Named_Hero or
+// Is_Special_Weapon_In_Space.
+int m_type_is_hero(Call& c) {
     TypeIndex t = 0;
     const auto* ty = self_types(c, t);
-    return push_bool(c, ty && ty->get_bool(t, "Is_Named_Hero"));
+    if (!ty) return push_bool(c, false);
+    std::vector<TypeIndex> list = ty->get_type_refs(t, "Company_Units");
+    if (list.empty()) list = ty->get_type_refs(t, "Squadron_Units");
+    const TypeIndex h = !list.empty() && list.front() != objects::kNone && list.front() < ty->size() ? list.front() : t;
+    return push_bool(c, ty->get_bool(h, "Is_Named_Hero") || ty->get_bool(h, "Is_Special_Weapon_In_Space"));
 }
 int m_type_base_level(Call& c) {
     TypeIndex t = 0;
@@ -3200,25 +3333,72 @@ int m_get_garrisoned_units(Call& c) {
     if (!garrison_holder(c, self_object(c))) return push_object_table(c, {});
     return push_object_table(c, contents_of(c, self_object(c)));
 }
-// Can_Garrison(target) [inferred]: the target holds garrisons, its Garrison_Category shares a bit with this
-// object's CategoryMask, and it is this object's owner's or empty. No capacity test (no garrison system).
-int m_can_garrison(Call& c) {
-    if (c.nargs != 1)
-        return c.script_error_stop("GameObjectWrapper::Can_Garrison -- invalid number of parameters. Expected 1, got %d.", c.nargs);
-    const Ud* t = c.userdata(1, detail::cls_game_object());
-    if (!t) return c.script_error_stop("GameObjectWrapper::Can_Garrison -- invalid type for parameter 1. Expected game object or AI target.");
-    if (!detail::object_alive(*c.vm, *t)) return push_bool(c, false);
-    const ObjectHandle target = detail::object_handle(*t), self = self_object(c);
+// A garrison host by behaviour only (GARRISON_VEHICLE 0x4F, GARRISON_STRUCTURE 0x50, GARRISON_HOVER 0x56): what
+// Can_Garrison and Eject_Garrison look up (MCX8_BINDINGS_OBJECTS.md; the CanContainGarrison property alone is not one).
+bool garrison_host_behavior(Call& c, ObjectHandle h) {
+    static const objects::BehaviorTypeId kHosts[] = {objects::behavior_type_id("GARRISON_VEHICLE"),
+                                                     objects::behavior_type_id("GARRISON_STRUCTURE"),
+                                                     objects::behavior_type_id("GARRISON_HOVER")};
     const objects::ObjectStore* st = store(c);
-    const objects::GameObjectTypes* ty = types(c);
-    if (target == self || !ty || !garrison_holder(c, target)) return push_bool(c, false);
-    if ((ty->get_mask(st->type(target), "Garrison_Category") & ty->get_mask(st->type(self), "CategoryMask")) == 0)
-        return push_bool(c, false);
-    return push_bool(c, st->owner(target) == st->owner(self) || contents_of(c, target).empty());
+    if (!h || !st->alive(h)) return false;
+    for (const objects::BehaviorTypeId b : kHosts)
+        if (b != objects::kNoBehavior && st->has_behavior(h, b)) return true;
+    return false;
 }
-// Eject_Garrison(): a Leave_Garrison order for every garrisoned unit (content order) [inferred].
+
+// Can_Garrison(target) (docs/re/MCX8_BINDINGS_OBJECTS.md §Can_Garrison, L1_S4_REMAINING §2.5 / §3.5) [H], in order: a
+// dead wrapper returns nothing (the dispatcher); false when this object has no GARRISON_UNIT or is already garrisoned /
+// in limbo (before the argument checks); exactly 1 argument; a game object or an AI target with an object (else the type
+// error and then the dead-target error); a dead target is that error. False when the target has none of the three host
+// behaviours; or its owner exists, is an enemy of this object's owner and its faction is not Is_Neutral; or both
+// Garrison_Category masks are non-zero and share no bit. Then the capacity: the target's Num_Garrison_Slots minus its
+// occupants' Garrison_Value (DUMMY_UPGRADE occupants skipped) minus this object's representative type Garrison_Value
+// must stay > 0. [port] No units walking in are reserved (the port's garrison orders have no reservation count);
+// "garrisoned / in limbo" (obj +0x3a7) = inside a garrison host, or Set_In_Limbo(true).
+int m_can_garrison(Call& c) {
+    static const objects::BehaviorTypeId kGarrisonUnit = objects::behavior_type_id("GARRISON_UNIT");
+    static const objects::BehaviorTypeId kDummyUpgrade = objects::behavior_type_id("DUMMY_UPGRADE");
+    const objects::ObjectStore* st = store(c);
+    const ObjectHandle self = self_object(c);
+    if (kGarrisonUnit == objects::kNoBehavior || !st->has_behavior(self, kGarrisonUnit)) return push_bool(c, false);
+    if (garrison_holder(c, container_of(c, self)) || state_of(c, c.self->id).in_limbo) return push_bool(c, false);
+    if (c.nargs != 1)
+        return c.script_error_stop("GameObjectWrapper::Can_Garrison -- invalid number of parameters.  Expected 1, got %d.", c.nargs);
+    static constexpr const char* kDeadTarget = "GameObjectWrapper;:Can_Garrison - target is already dead.";
+    ObjectHandle target{};
+    if (const Ud* t = c.userdata(1, detail::cls_game_object())) {
+        if (detail::object_alive(*c.vm, *t)) target = detail::object_handle(*t);
+    } else if (const detail::AiTargetArg a = detail::ai_target_arg(c, 1); a.is_target && (a.dead || a.object)) {
+        target = a.dead ? ObjectHandle{} : a.object;
+    } else {
+        c.script_error_stop("GameObjectWrapper::Can_Garrison -- invalid type for parameter 1.  Expected game object or AI target.");
+        return c.script_error_stop("%s", kDeadTarget);
+    }
+    if (!target) return c.script_error_stop("%s", kDeadTarget);
+    const objects::GameObjectTypes* ty = types(c);
+    if (!ty || !garrison_host_behavior(c, target)) return push_bool(c, false);
+    const int32_t host_owner = st->owner(target), owner = st->owner(self);
+    if (host_owner >= 0 && host_owner != owner && is_enemy(c, owner, host_owner)) {
+        bool neutral = false;
+#if ALAMO_LUA_PLAYERS
+        const LuaPlayerWorld* world = c.vm->owner ? player_world(*c.vm->owner) : nullptr;
+        neutral = world && world->is_neutral(host_owner);
+#endif
+        if (!neutral) return push_bool(c, false);
+    }
+    const uint64_t host_mask = ty->get_mask(st->type(target), "Garrison_Category");
+    const uint64_t unit_mask = ty->get_mask(st->type(self), "Garrison_Category");
+    if (host_mask != 0 && unit_mask != 0 && (host_mask & unit_mask) == 0) return push_bool(c, false);
+    int64_t slots = ty->get_int(st->type(target), "Num_Garrison_Slots");
+    for (const ObjectHandle o : contents_of(c, target))
+        if (kDummyUpgrade == objects::kNoBehavior || !st->has_behavior(o, kDummyUpgrade)) slots -= ty->get_int(st->type(o), "Garrison_Value");
+    slots -= ty->get_int(representative_type(c, bridge(c), self), "Garrison_Value");
+    return push_bool(c, slots > 0);
+}
+// Eject_Garrison() (docs/re/MCX8_BINDINGS_OBJECTS.md §Eject_Garrison) [H]: no arguments read; on a host with one of the
+// three garrison behaviours an eject request for every occupant (here a Leave_Garrison order each, content order).
 int m_eject_garrison(Call& c) {
-    if (!garrison_holder(c, self_object(c))) return 0;
+    if (!garrison_host_behavior(c, self_object(c))) return 0;
     for (const ObjectHandle u : contents_of(c, self_object(c))) issue(c, u, ev_garrison(store(c)->id(u), objects::kNoObjectId));
     return 0;
 }
@@ -3228,25 +3408,51 @@ int m_contains_hero(Call& c) {
     collect_heroes(c, self_object(c), heroes, 0);
     return push_bool(c, !heroes.empty());
 }
-int m_get_contained_heroes(Call& c) {  // walk order: contents, depth first [inferred]
+// Get_Contained_Heroes() (docs/re/MCX8_BINDINGS_OBJECTS.md §Get_Contained_Heroes) [H]: a dead wrapper is the dispatcher's
+// "already dead." error; one level only (no recursion, unlike Contains_Hero): the direct contents (the port's one list
+// holds the contained objects and the transport contents) whose own type has Is_Named_Hero, in content order.
+// [port] Dead entries are not listed (the port's contents hold live objects only).
+int m_get_contained_heroes(Call& c) {
     std::vector<ObjectHandle> heroes;
-    collect_heroes(c, self_object(c), heroes, 0);
+    const objects::GameObjectTypes* ty = types(c);
+    for (const ObjectHandle m : contents_of(c, self_object(c))) {
+        const TypeIndex t = store(c)->type(m);
+        if (ty && t < ty->raw().type_count() && ty->get_bool(t, "Is_Named_Hero")) heroes.push_back(m);
+    }
     return push_object_table(c, heroes);
 }
 
-// Destroy_Contained_Objects(fraction): destroys round(n x fraction) of the n contained objects, content
-// order, all of them at fraction >= 1 [inferred] (FleetEvents.lua passes 1.0).
+// Destroy_Contained_Objects(fraction) (docs/re/MCX8_BINDINGS_OBJECTS.md §Destroy_Contained_Objects) [H]: fleets only. With n
+// fleet units, keep = (int)((1 - f) * n + 0.5); nothing when keep > n (f < 0); else units are destroyed until
+// max(keep, 0) remain, each victim drawn uniformly from the remaining units with the synced RNG (GameRandom Get_Int(0,
+// n - 1)), taken out of the fleet and removed. [port] When every unit goes (keep <= 0, e.g. FleetEvents.lua's 1.0) no
+// draw is made and the units go in content order (the outcome does not depend on the draws; tier-2 draw order is the
+// port's); without a GameRandom the last remaining unit is the victim.
 int m_destroy_contained_objects(Call& c) {
     if (c.nargs != 1)
-        return c.script_error_stop("GameObjectWrapper::Destroy_Contained_Objects -- invalid number of parameters. Expected 1, got %d.", c.nargs);
+        return c.script_error_stop("GameObjectWrapper::Destroy_Contained_Objects -- invalid number of parameters.  Expected 1, got %d.", c.nargs);
     if (!c.is_number(1))
-        return c.script_error_stop("GameObjectWrapper::Destroy_Contained_Objects -- invalid type for parameter 1. Expected number.");
-    const std::vector<ObjectHandle> v = contents_of(c, self_object(c));
+        return c.script_error_stop("GameObjectWrapper::Destroy_Contained_Objects -- invalid type for parameter 1.  Expected number.");
+    if (!store(c)->has_behavior(self_object(c), objects::beh::Fleet))
+        return c.script_error_stop("GameObjectWrapper::Destroy_Contained_Objects -- this function may only be used on fleets.");
+    std::vector<ObjectHandle> v = contents_of(c, self_object(c));
     const double f = c.number(1);
-    size_t n = v.size();
-    if (!(f >= 1.0)) n = f > 0.0 ? static_cast<size_t>(static_cast<double>(v.size()) * f + 0.5) : 0;
-    for (size_t i = 0; i < n && i < v.size(); ++i)
-        if (store(c)->alive(v[i])) destroy_object(c, v[i]);
+    const int32_t n = static_cast<int32_t>(v.size());
+    const int32_t keep = detail::to_int((1.0 - f) * static_cast<double>(n) + 0.5);
+    if (keep > n) return 0;
+    if (keep <= 0) {  // every unit goes: content order, no draw
+        for (const ObjectHandle h : v)
+            if (store(c)->alive(h)) destroy_object(c, h);
+        return 0;
+    }
+    GameRandom* rng = c.vm->host.rng;
+    while (static_cast<int32_t>(v.size()) > keep) {
+        const int32_t last = static_cast<int32_t>(v.size()) - 1;
+        const int32_t pick = rng ? rng->synced().range_int(0, last) : last;
+        const ObjectHandle victim = v[static_cast<size_t>(pick)];
+        v.erase(v.begin() + pick);
+        if (store(c)->alive(victim)) destroy_object(c, victim);
+    }
     return 0;
 }
 
@@ -3531,7 +3737,7 @@ int32_t apply_lane_write(ab::AbilitySystem& a, uint32_t frame, const LaneWrite& 
                                              : a.targeted_ability(w.ids, w.type, dummy, -1, frame));
         }
         case LaneWriteOp::ForceRecharge: a.force_recharge(first, w.type, w.seconds); return -1;
-        case LaneWriteOp::ResetCounter: a.reset_counter(first, w.type); return -1;
+        case LaneWriteOp::ResetCounter: a.reset_counters(first); return -1;  // mcx8 t12: every ability id
         case LaneWriteOp::UnlockMovement: a.lock_movement(first, false, frame); return -1;
         case LaneWriteOp::PriorityOverride:
             if (cs.has_unit(first)) cs.set_priority_override(first, w.value);

@@ -359,6 +359,7 @@ private:
             objects::ObjectId id = objects::kNoObjectId;
             uint8_t removed = 0, target = 0;
             objects::TypeIndex rep_type = objects::kNone;  // slice 4e: TacticalBattle::representative_type
+            objects::TypeIndex company_type = objects::kNone;  // mcx8 t12: TacticalBattle::team_company_type
         };
         std::vector<Team> teams;
         std::vector<uint8_t> retreat_ok;

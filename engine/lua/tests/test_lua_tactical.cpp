@@ -227,7 +227,7 @@ static void test_no_systems(const Db& db) {
     CHECK(vm.messages().size() == msgs + 1 && vm.messages().back().find("not yet supported") != std::string::npos);
     CHECK(gnum(vm, "x") == 5.0 && gnum(vm, "y") == 6.0 && gnum(vm, "z") == 7.0);  // [port] no animation data: the position
     CHECK(run_stop(vm, "s.Force_Ability_Recharge()") != "" && run_stop(vm, "s.Force_Ability_Recharge('DEFEND', 'x')") != "" &&
-          run_stop(vm, "s.Reset_Ability_Counter()") != "" && run_stop(vm, "s.Get_Bone_Position(3)") != "" &&
+          run_stop(vm, "s.Reset_Ability_Counter()") == "" && run_stop(vm, "s.Get_Bone_Position(3)") != "" &&  // mcx8 t12: no args read
           run_stop(vm, "s.Is_Under_Effects_Of_Ability()") != "");
     // Cancel_Hyperspace: a Lua order on the direct path (counted even without a pipeline).
     const uint32_t before = bridge.orders_issued;
@@ -393,12 +393,20 @@ static void test_abilities(const Db& db) {
     CHECK(!gtrue(vm, "act2") && gtrue(vm, "rdy2") == a.is_ready(ship, ab::kDefend, w.frame) && !a.is_active(ship, ab::kDefend));
     CHECK(run(vm, "s.Force_Ability_Recharge('DEFEND', 2)") == "");
     CHECK(a.countdown_counter(ship, ab::kDefend) == 60 && a.countdown_maximum(ship, ab::kDefend) == 60);
-    // Reset_Ability_Counter: only with a zero counter (SPOILER_LOCK has no timers) -> counter = maximum = 1.
-    CHECK(run(vm, "s.Reset_Ability_Counter('DEFEND') s.Reset_Ability_Counter('SPOILER_LOCK')") == "");
-    CHECK(a.countdown_counter(ship, ab::kDefend) == 60 && a.countdown_counter(ship, ab::kSpoilerLock) == 1 &&
-          a.countdown_maximum(ship, ab::kSpoilerLock) == 1);
-    // Toggle with a bool argument.
-    CHECK(run(vm, "s.Reset_Ability_Counter('SPOILER_LOCK')") == "");
+    // mcx8 t12 (MCX8_BINDINGS_OBJECTS §Reset_Ability_Counter [H]): the arguments are not read; every ability whose
+    // counter is NOT zero gets counter = maximum = 1 (the running recharge ends next frame); a zero counter is untouched.
+    const int32_t spoiler_max = a.countdown_maximum(ship, ab::kSpoilerLock);
+    CHECK(a.countdown_counter(ship, ab::kSpoilerLock) == 0);
+    CHECK(run(vm, "s.Reset_Ability_Counter('SPOILER_LOCK')") == "" && !vm.exit_requested());
+    CHECK(a.countdown_counter(ship, ab::kDefend) == 1 && a.countdown_maximum(ship, ab::kDefend) == 1 &&
+          a.countdown_counter(ship, ab::kSpoilerLock) == 0 && a.countdown_maximum(ship, ab::kSpoilerLock) == spoiler_max);
+    CHECK(run(vm, "s.Force_Ability_Recharge('DEFEND', 2) s.Reset_Ability_Counter()") == "" && !vm.exit_requested());
+    CHECK(a.countdown_counter(ship, ab::kDefend) == 1 && a.countdown_maximum(ship, ab::kDefend) == 1);
+    // mcx8 t12 (§Is_Ability_Ready [H]): an ability the object lacks warns and answers false; an unknown name is an error.
+    CHECK(run(vm, "nt = s.Is_Ability_Ready('TURBO')") == "" && !vm.exit_requested() && !gtrue(vm, "nt") && !gnil(vm, "nt") &&
+          vm.messages().back() == "SCRIPT WARNING: GameObjectWrapper::Is_Ability_Ready -- Object SHIP does not have ability TURBO.");
+    CHECK(run_stop(vm, "nu = s.Is_Ability_Ready('NOPE')").find("GameObjectWrapper::Is_Ability_Ready -- unknown ability NOPE.") !=
+          std::string::npos);
     a.force_recharge(ship, ab::kSpoilerLock, 0.0f);  // counter 0 again
     CHECK(run(vm, "s.Activate_Ability('SPOILER_LOCK', true) on = s.Is_Ability_Active('SPOILER_LOCK') "
                   "s.Activate_Ability('SPOILER_LOCK', false) off = s.Is_Ability_Active('SPOILER_LOCK')") == "");

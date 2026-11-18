@@ -516,6 +516,14 @@ objects::TypeIndex TacticalBattle::representative_type(objects::ObjectId id) con
     return objects::kNone;
 }
 
+objects::TypeIndex TacticalBattle::team_company_type(objects::ObjectId id) const {
+    if (id == objects::kNoObjectId) return objects::kNone;
+    for (const Container& ct : containers_)  // container order; ids are unique
+        if (ct.id == id)
+            return ct.team && ct.squad_type != 0xFFFFFFFFu ? static_cast<objects::TypeIndex>(ct.squad_type) : objects::kNone;
+    return objects::kNone;
+}
+
 bool TacticalBattle::bt_team(uint32_t company_type, uint32_t first_member, uint32_t& object_type, uint32_t& behavior_type,
                              uint32_t& squad) const {
     const objects::GameObjectTypes& types = catalog_->types();

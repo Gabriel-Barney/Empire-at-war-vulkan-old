@@ -1611,6 +1611,9 @@ public:
     // else the company type). The battle has no tactical transport or fleet objects; anything else -> objects::kNone (the
     // binding then uses the store type).
     objects::TypeIndex representative_type(objects::ObjectId id) const;
+    // mcx8 t12 (docs/re/MCX8_BINDINGS_OBJECTS.md §Get_Game_Scoring_Type): a TEAM container's company / squadron type
+    // (Container::squad_type, team data +0x58) for lua::ObjectBridge::team_company_type; objects::kNone otherwise.
+    objects::TypeIndex team_company_type(objects::ObjectId id) const;
     // q6 t28 (TERRAIN_WATER_POST 1.6): the map hint name (.ted chunk 0x482) of an object the map load created for a
     // placement (lua::ObjectBridge::map_hint: Find_Hint / Get_Hint / Find_All_Objects_With_Hint); "" when it has none.
     std::string_view map_hint(objects::ObjectId id) const;

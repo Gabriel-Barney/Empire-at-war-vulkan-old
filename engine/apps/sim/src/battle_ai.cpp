@@ -179,6 +179,18 @@ BattleAi::BattleAi(TacticalBattle& battle, TacticalMode& mode, SimHost& host, co
         }
         return rep_store->exists(o) ? bt->representative_type(rep_store->id(o)) : objects::kNone;
     };
+    // mcx8 t12: Get_Game_Scoring_Type answers a TEAM container's company type (the lane: the captured view).
+    br.team_company_type = [this, bt, rep_store](objects::ObjectHandle o) {
+        if (lane_view()) {
+            const objects::ObjectStore& vs = world_->view_store();
+            if (!vs.exists(o)) return objects::kNone;
+            const objects::ObjectId id = vs.id(o);
+            for (const LaneView::Team& t : view_.teams)
+                if (t.id == id) return t.company_type;
+            return objects::kNone;
+        }
+        return rep_store->exists(o) ? bt->team_company_type(rep_store->id(o)) : objects::kNone;
+    };
     // q6 t28: Find_Hint / Get_Hint see the map objects' .ted hint names.
     br.map_hint = [bt, rep_store](objects::ObjectHandle o) {
         return rep_store->exists(o) ? bt->map_hint(rep_store->id(o)) : std::string_view();
@@ -960,7 +972,8 @@ void BattleAi::capture_lane_view() {
         for (size_t i = 0; i < b_->containers_.size(); ++i) {
             const TacticalBattle::Container& c = b_->containers_[i];
             view_.teams[i] = {c.id, static_cast<uint8_t>(c.removed ? 1 : 0), static_cast<uint8_t>(c.team && !c.removed && c.alive > 0 ? 1 : 0),
-                              c.team && c.type != 0xFFFFFFFFu ? static_cast<objects::TypeIndex>(c.type) : objects::kNone};
+                              c.team && c.type != 0xFFFFFFFFu ? static_cast<objects::TypeIndex>(c.type) : objects::kNone,
+                              c.team && c.squad_type != 0xFFFFFFFFu ? static_cast<objects::TypeIndex>(c.squad_type) : objects::kNone};
         }
         view_.retreat_ok.assign(np, 0);
         for (int32_t p = 0; p < players; ++p) view_.retreat_ok[static_cast<size_t>(p)] = b_->retreat_block(p) == 0 ? 1 : 0;

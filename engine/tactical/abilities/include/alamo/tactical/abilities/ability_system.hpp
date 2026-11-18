@@ -529,7 +529,10 @@ public:
 
     // ---- Lua helpers (5) ----
     bool force_recharge(ObjectId id, uint8_t type, float seconds = -1.0f);  // Force_Ability_Recharge
-    bool reset_counter(ObjectId id, uint8_t type);                          // Reset_Ability_Counter [M]
+    // Reset_Ability_Counter (docs/re/MCX8_BINDINGS_OBJECTS.md §Reset_Ability_Counter [H]): a counter that is NOT zero
+    // becomes counter = maximum = 1 frame (true); a zero counter is left alone (false). reset_counters: every ability id.
+    bool reset_counter(ObjectId id, uint8_t type);
+    void reset_counters(ObjectId id);
 
     // ---- host-fed state ----
     void set_nebula(ObjectId id, uint32_t frame);         // CD +0x104: last frame inside a nebula

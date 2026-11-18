@@ -1801,10 +1801,14 @@ bool AbilitySystem::force_recharge(ObjectId id, uint8_t type, float seconds) {
 
 bool AbilitySystem::reset_counter(ObjectId id, uint8_t type) {
     Obj* o = obj(id);
-    if (!o || type >= kAbilitySlots || !o->cd.counter_zero(type)) return false;
+    if (!o || type >= kAbilitySlots || o->cd.counter_zero(type)) return false;
     o->cd.counter[type] = 1;
     o->cd.maximum[type] = 1;
     return true;
+}
+
+void AbilitySystem::reset_counters(ObjectId id) {
+    for (uint32_t t = 1; t < kAbilitySlots; ++t) reset_counter(id, static_cast<uint8_t>(t));
 }
 
 void AbilitySystem::set_nebula(ObjectId id, uint32_t frame) {

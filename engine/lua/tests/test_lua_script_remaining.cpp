@@ -141,10 +141,13 @@ struct Db {
                    "<AI_Combat_Power>40</AI_Combat_Power><Projectile_Types>Laser_P</Projectile_Types>"
                    "<Energy_Capacity>250</Energy_Capacity><Tactical_Bribe_Cost>300</Tactical_Bribe_Cost></SpaceUnit>\n"
                    "<SpaceUnit Name=\"Fighter\"><CategoryMask>Fighter</CategoryMask><AI_Combat_Power>10</AI_Combat_Power></SpaceUnit>\n"
+                   // mcx8 t12: Can_Garrison needs a GARRISON_* host behaviour, a GARRISON_UNIT and free slots.
                    "<GroundStructure Name=\"Bunker\"><Garrison_Category>Infantry</Garrison_Category>"
+                   "<Behavior>GARRISON_STRUCTURE</Behavior><Num_Garrison_Slots>4</Num_Garrison_Slots>"
                    "<Property_Flags>CanContainGarrison | GarrisonCanFire</Property_Flags></GroundStructure>\n"
                    "<GroundStructure Name=\"Pad\"><Behavior>TACTICAL_BUILD_OBJECTS</Behavior></GroundStructure>\n"
-                   "<GroundInfantry Name=\"Trooper\"><Behavior>UNIT_AI</Behavior><CategoryMask>Infantry</CategoryMask>"
+                   "<GroundInfantry Name=\"Trooper\"><Behavior>UNIT_AI, GARRISON_UNIT</Behavior><Garrison_Value>1</Garrison_Value>"
+                   "<CategoryMask>Infantry</CategoryMask>"
                    "<Is_Valid_Target>Yes</Is_Valid_Target><Bribe_Modifier_On_Corrupted_Planets>1.5</Bribe_Modifier_On_Corrupted_Planets>"
                    "<Bribe_Modifier_On_Uncorrupted_Planets>0.5</Bribe_Modifier_On_Uncorrupted_Planets></GroundInfantry>\n"
                    "</R>");
