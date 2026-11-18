@@ -65,6 +65,7 @@ GALACTIC_RE = re.compile(r"galactic-ai (.+?) workers (\d+): (\d+) ticks \(([\d.]
                          r"\(rejected (\d+)\), conflicts (\d+), battles (\d+), planet owner changes (\d+), running plans (\d+), Lua errors (\d+)")
 STORY_RE = re.compile(r"galactic-ai: story: (\d+) events fired, (\d+) Lua notes")
 SMOKE_RE = re.compile(r"^smoke (\S+): (\d+) / (\d+) steps", re.M)
+STEP_TIMEOUT_RE = re.compile(r"^script: step '([^']*)' timed out", re.M)
 SANITIZER_RE = re.compile(r"ERROR: AddressSanitizer: (\S+)|runtime error: (.{0,120})")
 
 
@@ -355,8 +356,16 @@ class Runner:
             cmd = [self.game_exe, "--smoke", kind, "--hidden", "--audio", "null", "--png-dir", png] + args
             save_env, self.env = self.env, env
             r = run(cmd, os.path.join(d, f"smoke_{kind}.txt"), self.a.timeout, self.env, not self.a.no_slot)
+            first_timeout = None
+            if r["exit"] != 0 and not r["timed_out"] and STEP_TIMEOUT_RE.search(r["text"]):
+                # A step that waits in frames can run out under machine load (another lane's build): retry once and
+                # record it, so a timing flake is not taken for a mod gap; a second failure counts.
+                first_timeout = STEP_TIMEOUT_RE.search(r["text"]).group(1)
+                r = run(cmd, os.path.join(d, f"smoke_{kind}_retry.txt"), self.a.timeout, self.env, not self.a.no_slot)
             self.env = save_env
             res = {"exit": r["exit"], "seconds": r["seconds"]}
+            if first_timeout:
+                res["retried"] = f"first run: step '{first_timeout}' timed out"
             mt = SMOKE_RE.search(r["text"])
             if mt:
                 res.update(steps=int(mt.group(2)), of=int(mt.group(3)))
@@ -453,7 +462,7 @@ def cell_smokes(sm: dict | None) -> str:
     for k in ("smoke_skirmish", "smoke_campaign"):
         v = sm.get(k) or {}
         steps = f" {v.get('steps')}/{v.get('of')}" if "steps" in v else ""
-        out.append(f"{k[6:]} {v.get('status', '-')}{steps}")
+        out.append(f"{k[6:]} {v.get('status', '-')}{steps}" + (" (retried)" if v.get("retried") else ""))
     return ", ".join(out)
 
 

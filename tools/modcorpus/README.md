@@ -34,7 +34,9 @@ tools\modcorpus\run_corpus.cmd --write-md             also replace the generated
    `alamo_headless --compare`; one galactic campaign, 9000 ticks, `--economy --galactic-ai --story --scoring
    --object-scripts`, workers 4 (corpus.json's pick, else the first campaign with planets in database order). `[port]`
    choice: the design's "first the menu lists" is read as database order, since the report does not sort by menu.
-4. **smokes**: `alamo_game --smoke skirmish` and `--smoke campaign`, `--hidden --audio null` (needs a GPU).
+4. **smokes**: `alamo_game --smoke skirmish` and `--smoke campaign`, `--hidden --audio null` (needs a GPU). A smoke that
+   fails on a step timeout (steps wait in frames, which run out when another lane loads the machine) is run once more;
+   the matrix marks it `(retried)` and a second failure counts.
 5. **--asan**: the runs again with `build-asan\bin\alamo_headless.exe` (workers 4 only: the worker-count compare is the
    normal runs' job), `ASAN_OPTIONS=detect_container_overflow=0` (MSVC STL false positives, `docs/BUILD.md`), timeouts
    times 8. A sanitizer report keeps the setup below G2.
