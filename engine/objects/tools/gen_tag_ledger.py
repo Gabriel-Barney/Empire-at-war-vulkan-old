@@ -15,7 +15,8 @@ engine/objects/src/field_schema_table.inc; class = the row's segment owner), wit
   verified  consumed, and a test carries "// ledger: verifies <Class>.<Tag>" (a test that checks the tag's effect
             against a docs/re spec or a probe)
 
-A literal naming a tag that several classes list counts for each of them (72 of the 2,764 tag names).
+A literal naming a tag that several classes list (72 of the 2,764 tag names) counts for the object type and sub-object
+classes (the shared typed readers) and for the other classes the file names (literal_classes).
 
 Other columns: code (parser type code), consumers (how many files read it, and the first), spec (the first docs/re
 page that names the tag in backticks), base_uses (how often base FoC's XML in extracted/foc_data_text.zip writes an
@@ -189,6 +190,24 @@ def engine_sources():
                 yield os.path.join(dirpath, name)
 
 
+def shared_reader_class(cls):
+    """The classes the shared typed readers serve: the object type view and its sub-objects (abilities, actions)."""
+    return cls in GENERIC_STORE or bool(SUB_OBJECT_OWNER.search(cls))
+
+
+def literal_classes(classes, text):
+    """The classes a literal naming a tag counts for. One class lists the tag: that class. Several do (Type, Radius,
+    Damage_Amount, ...): the shared-reader classes, plus the others the file names, so a "Type" in a perception file
+    does not make CommandBarComponent.Type consumed. A standalone class read under a shared name without its class name
+    in the file needs a "// ledger: consumes" note."""
+    if len(classes) <= 1:
+        return classes
+    # The class name as a word in any case ("Faction", "factions", "faction_"), not inside a longer name.
+    named = [c for c in classes
+             if re.search(r"(?<![A-Za-z0-9])" + re.escape(c) + r"s?(?![A-Za-z0-9])", text, re.IGNORECASE)]
+    return [c for c in classes if c in named or shared_reader_class(c)]
+
+
 def find_consumers(rows):
     """Returns (consumers, verifiers, problems): consumers[(class, tag lower)] = set of files; verifiers likewise from
     test annotations; problems = annotation errors (unknown row, no code next to it)."""
@@ -209,10 +228,10 @@ def find_consumers(rows):
         lits, comments, code_lines = scan_source(text, concat)
         if not excluded:
             for _, s in lits:
-                for cls in by_tag.get(s.lower(), ()):
+                for cls in literal_classes(by_tag.get(s.lower(), ()), text):
                     consumers.setdefault((cls, s.lower()), set()).add(r)
             for tag in built_tag_reads(concat, by_tag):
-                for cls in by_tag[tag]:
+                for cls in literal_classes(by_tag[tag], text):
                     consumers.setdefault((cls, tag), set()).add(r)
         for ln, body in comments:
             for m in ANNOTATION.finditer(body):

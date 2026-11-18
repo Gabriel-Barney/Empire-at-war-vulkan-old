@@ -1980,6 +1980,26 @@ void test_token_registry() {
     cand.emplace_back(Root::Game, "FORCEVISIBILITY");
     cand.emplace_back(Root::Game, "ENEMYFORCE.NOSUCHLEAF");
     cand.emplace_back(Root::Self, "NOSUCHTOKEN");
+    // Every token name (retail's registry and every segment of a registered path) under every root, alone and below every
+    // proper prefix of a registered path ("ENEMYFORCE.", "LOCATION.", "HOMEPLANET.TYPE.", ...): a handler branch whose path
+    // is missing from the registry is found here even when no listed path names it. HOMEPLANET. paths are left out: with
+    // no home planet the root is unbound and every leaf is handled (returns no value), listed or not.
+    std::set<std::string> names, prefixes;
+    for (const std::string_view n : registry_token_names()) names.insert(ascii_upper(n));
+    for (const auto& [root, path] : reg) {
+        size_t start = 0;
+        for (size_t dot = path.find('.'); dot != std::string::npos; dot = path.find('.', dot + 1)) {
+            names.insert(path.substr(start, dot - start));
+            if (path.compare(0, 11, "HOMEPLANET.") != 0) prefixes.insert(path.substr(0, dot + 1));
+            start = dot + 1;
+        }
+        names.insert(path.substr(start));
+    }
+    for (const Root root : {Root::Self, Root::Target, Root::Game})
+        for (const std::string& n : names) {
+            cand.emplace_back(root, n);
+            for (const std::string& p : prefixes) cand.emplace_back(root, p + n);
+        }
     uint32_t taken = 0, mismatched = 0;
     for (const auto& [root, path] : cand) {
         const bool listed = GalacticSimTokenResolver::path_registered(root, path);

@@ -231,13 +231,18 @@ registered on planets.)
 `alamo_mod_check` report v4 `ai.token_coverage` on base FoC; it replaces the hand list of 2026-10-30, whose paths are all
 evaluated now). The port's coverage is the token path registry next to the handlers (`engine/ai/src/galactic_ai_tokens.cpp`,
 `GalacticSimTokenResolver::path_registered`, checked against the handlers by `test_token_registry`) plus the tactical
-leaf tables (`TacticalTokenResolver::path_implemented`). Base FoC, 381 equations, 187 distinct paths:
+leaf tables (`TacticalTokenResolver::path_implemented`), each for the equations that run in its mode (an equation a
+template of that mode names, and what it names in turn; other equations count with either). Base FoC, 381 equations,
+187 distinct paths:
+- `Game.InterventionsEnabled` (1 equation, `Are_Interventions_Disabled`, a galactic template's equation,
+  `Data\XML\AI\PerceptualEquations\InterventionEquations.xml`): the tactical leaf table has it, the galactic registry
+  does not;
 - `Variable_Target.HasIndigenousUnits` (1 equation, `Intervention_Trigger_Indigenous_Revolt`,
   `Data\XML\AI\PerceptualEquations\InterventionEquations.xml`);
 - `Variable_Target.StoryTrigger` (1 equation, `Helper_Trap_Land_Check_Galactic_Flags`,
   `Data\XML\AI\PerceptualEquations\SandboxEventEquations.xml`).
 
-Whether retail registers these two on the planet root is not read yet (the player root has `StoryTrigger`); until then
+Whether retail registers the last two on the planet root is not read yet (the player root has `StoryTrigger`); until then
 they count as port gaps. Rerun `alamo_mod_check --json` on base FoC to refresh this list.
 
 ## 6. Extra questions

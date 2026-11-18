@@ -266,8 +266,9 @@ campaign checks, missing files, unknown XML tags, Lua compile errors, main-chunk
 apart, and the unused-script leads), unbound engine calls, shader issues and the submod hint, then `== result: OK|ERRORS, N errors, M warnings`
 (**main**, `engine/apps/game/src/mod_check.cpp`; exit 0 without errors, 1 with, 2 usage). Each finding of the missing
 files, XML tags and Lua sections is marked `[mod]` when it comes from a file in a mod folder: base FoC itself has some (49
-missing cinematic models; 73 unread tags: 56 object type tags, 8 GameConstants, 3 hard point, 1 faction, 2 campaign, 1
-tactical camera, 2 command bar; none of them read by the original, modc t25), so a mod's own problems are the marked ones. `--json` writes the summary below (`-`: to stdout instead
+missing cinematic models; 71 unread tags: 54 object type tags, 8 GameConstants, 3 hard point, 1 faction, 2 campaign, 1
+tactical camera, 2 command bar; none of them read by the original, modc t25; mcx0 t07 took out `Base_Power_Ability` and
+`Bounty_On_Faction_Ability`, ability elements the original reads, `docs/re/MCX0_T07_UNLISTED_TAGS.md`), so a mod's own problems are the marked ones. `--json` writes the summary below (`-`: to stdout instead
 of the text). **modc t08** shows that summary in the game's mod picker.
 
 A main-chunk error is a lead, not proof: the script runs with no session (no players or objects). Session state another
@@ -356,9 +357,9 @@ removed or changed in meaning without raising `version`. Paths are game-relative
 | `retail_equivalent` | object | (v4) findings retail shares, which never lower the grade: `count`, `items` [{`kind` (`"unread_tag"`, `"script_error"`, `"unknown_reward"`, `"dropped_event"`, `"noop_binding"`, `"unregistered_token"`), `subject`, `uses`, `first_file`, `in_mod`, `detail` (why retail does the same)}] by kind, then most uses |
 | `bindings` | object | (v4) `called` (distinct engine bindings the scripts call), `unconsumed` [{`name` (`"Name"` or `"Class.Name"`), `effect` (binding ledger: `"recorded"` with no consumer in `alamo_game`, `"noop-gap"`, `"partial"`), `detail`, `call_sites`, `scripts`, `first_script`, `in_mod`}] (methods are matched by name), most call sites first |
 | `story` | object | (v4) `files` (Data\XML files with story events), `rewards_used`, `rewards_missing` [{`name`, `uses`, `first_file`, `in_mod`, `note`}] (retail rewards the port lacks), `events_used`, `events_partial` [same shape] (event types the port dispatches with a documented gap) |
-| `ai` | object | (v4) `token_coverage`: {`checked` (AI data loaded), `equations`, `leaves` (distinct token paths), `missing` [{`token` (as written: `Variable_Target.EnemyForce.X`), `equations`, `first_equation`, `first_file`, `in_mod`}]}: paths neither the galactic resolver's registry nor the tactical leaf tables evaluate, so the equation fails (retail's rule for an unknown leaf, `AI_GALACTIC_TOKENS.md` §9.1) |
+| `ai` | object | (v4) `token_coverage`: {`checked` (AI data loaded), `equations`, `leaves` (distinct token paths), `missing` [{`token` (as written: `Variable_Target.EnemyForce.X`), `equations`, `first_equation`, `first_file`, `in_mod`}]}: paths the resolver of the equation's mode does not evaluate (the galactic resolver's registry, the tactical leaf tables; retail loads one equation set and the caller picks the mode: the template mode for template triggers and budgets, followed through equations that name others; goal proposal functions and equations only Lua plans name count with either resolver), so the equation fails (retail's rule for an unknown leaf, `AI_GALACTIC_TOKENS.md` §9.1) |
 | `limits` | [object] | (v4) `limit`, `value`, `needed`: data that hits a guard or a cited retail limit (filled by `mcx5`; empty until then) |
-| `grade` | object | (v4) `grade` (`"G0"` errors, `"G1"` loads; G2 and up need runs), `g3_static` (bool: no honour gap, binding gap, missing reward or missing token from the mod's own files), `blocking` [`"<issue kind> <subject>"`], `check_errors` [string] (a version 4 check that threw; not counted in `errors`) |
+| `grade` | object | (v4) `grade` (`"G0"` errors, `"G1"` loads; G2 and up need runs), `g3_static` (bool: no honour gap, binding gap, missing reward or missing token from the mod's own files; the gaps base FoC content has are the tag ledger's and mcx4's, not the mod's, so they do not count here), `blocking` [`"<issue kind> <subject>"`], `check_errors` [string] (a version 4 check that threw; not counted in `errors`) |
 
 `in_mod` is true when the file the finding comes from resolves to a mod folder. The synthetic mods of
 `engine/apps/game/testdata/mod_fixture` (modc t07, t12, t15, t16; README there) are checked through this summary in ctest

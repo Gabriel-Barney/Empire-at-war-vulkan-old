@@ -17,6 +17,7 @@
 #include <fstream>
 #include <functional>
 #include <map>
+#include <set>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -33,6 +34,7 @@
 #include "alamo/ai/galactic_ai.hpp"
 #include "alamo/ai/perception_equations.hpp"
 #include "alamo/lua/story_model.hpp"  // storyb t10
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/bytes.hpp"
 #include "alamo/core/compress.hpp"
 #include "alamo/core/file_provider.hpp"

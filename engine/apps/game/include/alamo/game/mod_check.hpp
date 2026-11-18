@@ -190,6 +190,8 @@ struct ShaderCheck {
 
 // ---- mcx0 t06: report version 4 (docs/MOD_COMPAT_DESIGN.md §12.1). Not counted in errors / warnings: the findings
 // below are what the port does less than retail (or what retail refuses too), and feed the compatibility grade.
+// first_file / first_script of a finding with in_mod is the first file in a mod folder (a light mod's finding cites the
+// mod's file even when base FoC sets the tag earlier in load order); without in_mod, the first file.
 
 // A tag of retail's descriptor tables that the data sets (a value other than empty, TBD or the class default) but the
 // port does not act on (tag ledger state unread / stored, objects/tag_ledger.hpp).
