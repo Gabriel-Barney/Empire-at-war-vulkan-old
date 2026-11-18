@@ -681,6 +681,17 @@ Sweep `2026-11-18` (`tools/modcorpus/run_corpus.py`; build `ca841d8e7eac1f7c` fr
 Grades: G0 0, G1 5, G2 4, G3 0 (9 setups).
 <!-- modcorpus:end -->
 
+#### Corpus findings explained (mcx8 t01, 2026-11-18)
+
+- **Age of Legends land Lua errors (retail-equivalent, accepted in `corpus.json`).** The mod ships its own
+  `Data/Scripts/Library/PGCommands.lua`, which shadows FoC's and defines only `Try_Weapon_Switch_Ground`; its
+  `BusyTacticalFreeStore.lua` and `PGEvents.lua` still call `Try_Weapon_Switch`. Retail resolves `require("pgcommands")`
+  to the same mod file, so it raises the same nil-call error on every free-store unit service.
+- **Fall of the Republic galactic Lua errors (port gap, fixed).** Its `GetSmugglingLevel` evaluator calls
+  `Target.Get_Game_Object()`; the port handed galactic evaluators the planet object instead of an AI target
+  (`docs/re/AI_GALACTIC_2.md` §4.4).
+- **Not installed** (`docs/DECISIONS.md`, "Corpus graded on installed mods only"): listed under the table, not graded.
+
 #### Hand-written run of modc t39 (2026-11-17)
 
 The run before the runner existed, kept for its explanations (t42-t49 below).

@@ -41,7 +41,12 @@
       "reference": true,
       "space_map": "_MP_SPACE_GEONOSIS",
       "land_map": "_MP_LAND_UTAPAU",
-      "campaign": "Sandbox_Balance_New_Republic"
+      "campaign": "Sandbox_Balance_New_Republic",
+      "accept": [
+        {"blocker": "^land: 9 Lua error\\(s\\)$",
+         "why": "the mod's own Data/Scripts/Library/PGCommands.lua shadows FoC's and defines only Try_Weapon_Switch_Ground, while its BusyTacticalFreeStore.lua and PGEvents.lua still call Try_Weapon_Switch: retail resolves require('pgcommands') to the same mod file and raises the same nil-call error",
+         "ref": "docs/MODS.md 10.4, mcx8 t01"}
+      ]
     },
     "1397421866": {"name": "AotR 2.11 (patch notes in the item)"},
     "3387971722": {"name": "AotCW 1.2.1 (patch notes in the item)"}
