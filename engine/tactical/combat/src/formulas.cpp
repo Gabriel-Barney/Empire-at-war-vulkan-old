@@ -265,6 +265,9 @@ int32_t shield_regen_interval_frames(uint32_t fps, float regen_interval_mult, fl
 }
 
 bool shield_lockout_active(uint32_t frame, uint32_t depletion_frame, uint32_t fps, float disable_time) {
+    // mcx4 t10: Depleted_Shield_Damage_Increment moves the depletion frame past the current frame (an extended
+    // lockout, MCX4_T10_RE_ANSWERS §16): still locked, not a wrapped elapsed time.
+    if (frame < depletion_frame) return true;
     const float elapsed = static_cast<float>(frame - depletion_frame) / static_cast<float>(fps);
     return elapsed < disable_time;
 }

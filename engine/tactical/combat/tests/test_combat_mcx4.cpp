@@ -317,6 +317,9 @@ void test_depleted_shield_increment() {
         r.amount = 5.0f;
         CHECK_F(w.sys->take_damage(r, 1010).absorbed, 0.0f);    // in the lockout
         w.sys->set_shield(1, 50.0f);
+        // right after the extension the depletion frame lies ahead (1030 with 1.0 s): still locked, not wrapped around
+        CHECK_F(w.sys->take_damage(r, 1011).absorbed, 0.0f);
+        w.sys->set_shield(1, 50.0f);
         return w.sys->take_damage(r, 1070).absorbed;
     };
     CHECK_F(absorbed_at_70(0.0f), 5.0f);
