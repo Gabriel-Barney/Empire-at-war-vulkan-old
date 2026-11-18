@@ -53,7 +53,7 @@ namespace {
 // removed (galactic blocked() reads the per-target lists), the task force's stage area (TF +0x100) after its stage;
 // 7 (q2f t09): the task force's sync gather state after its stage area; 8 (a2m t02): the task force's FleetObject (TF
 // +0x120) after its sync state, the MoveTo status's fleet after its mode.
-constexpr uint32_t kWorldVersion = 8;
+constexpr uint32_t kWorldVersion = 9;  // 9 (mcx4 t05): + each build task's claim frame
 // 2: logic frame, player conflict stamps, conflict observer (q6 t03); 3: leaf cache keyed by (leaf, instance, system player,
 // parameter set) with each entry's parameters, the 0xE visible flags and the last seen surface units (q6 t18)
 constexpr uint32_t kResolverVersion = 3;
@@ -657,6 +657,7 @@ void GalacticAiWorld::write(ByteWriter& w) const {
         w.i32(b.category);
         w.boolean(b.listed);
         w.boolean(b.reclaimed);
+        w.i64(b.claimed);  // v9
     }
     put_vec(w, m.pending_builds);
     w.u32(static_cast<uint32_t>(m.planet_queues.size()));
@@ -1022,7 +1023,7 @@ bool GalacticAiWorld::read(ByteReader& r) {
     // ---- build tasks + market ----
     std::map<int32_t, BuildTask> builds;
     {
-        const uint32_t n = save::count(r, 71);
+        const uint32_t n = save::count(r, version >= 9 ? 79 : 71);
         for (uint32_t i = 0; i < n && r.ok(); ++i) {
             BuildTask b;
             b.id = r.i32();
@@ -1047,6 +1048,7 @@ bool GalacticAiWorld::read(ByteReader& r) {
             b.category = r.i32();
             b.listed = r.boolean();
             b.reclaimed = r.boolean();
+            if (version >= 9) b.claimed = r.i64();  // older saves: no timer running
             if (state > static_cast<uint8_t>(BuildState::Failed)) r.fail();
             b.state = static_cast<BuildState>(state);
             if (!r.ok() || !valid_ai(b.player) || b.queue > 1 || !valid_planet_or_none(b.dest, planets) ||

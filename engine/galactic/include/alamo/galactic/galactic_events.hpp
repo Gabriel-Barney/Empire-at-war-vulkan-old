@@ -47,7 +47,8 @@ enum class GalacticEventKind : uint8_t {
                              // other_player = the old starbase type, -1 none (storyb t14: Galactic_Starbase_Level_Change)
     ObjectDestroyed,         // object, type (kNoIndex for a fleet object), player = owner, planet (or invalid); value 1 =
                              // an auto-resolve kill (mcx4 Q4: Die schedules the respawn itself and skips the "hero
-                             // defeated" path 0x3a01f0, so no STORY_DEFEAT_HERO), else 0
+                             // defeated" path 0x3a01f0, so no STORY_DEFEAT_HERO); 2 = a member `type` of the
+                             // company `object` lost at a battle end (the company stays, mcx4 t22); else 0
     UnitsLanded,             // player, planet, value = units landed
     CorruptionChanged,       // planet, player = corrupting player, value = corruption type, other_player = old type
     TechLevelChanged,        // player, value = new level, other_player = old level

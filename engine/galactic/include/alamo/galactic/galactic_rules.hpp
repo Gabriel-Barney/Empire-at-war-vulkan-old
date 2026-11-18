@@ -105,6 +105,9 @@ struct TypeInfo {
     // mcx4 t09 (MCX4_GAL2_RE_ANSWERS Q3, presentation): Hyperspace_Fleet_Reveal_Range (+0x64C; a type with a value > 0 is
     // a revealer) and CategoryMask has Super (0x375270).
     float fleet_reveal_range = 0.0f;
+    // mcx4 t05 (MCX4_T10_RE_ANSWERS §8): Respawn_Tied_To_Structure (+0x2000, resolved +0x2008), the structure type a
+    // respawn needs; kNoIndex = none
+    uint32_t respawn_tied_to_structure = 0xFFFFFFFFu;
     bool super = false;
     bool build_countdown_timer = false;       // Build_Countdown_Timer (+0xC7; Q7, presentation: econ::build_countdown_*)
     std::string build_speech_countdowns;      // Build_Speech_Countdowns (+0x15C8): the countdown speech event prefix

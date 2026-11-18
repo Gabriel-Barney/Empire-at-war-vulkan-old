@@ -450,7 +450,14 @@ void GalacticAiWorld::Impl::market_planet(PlanetIndex p) {
                     else fail_build(b, "not buildable here");  // Production_Failed 0x5fdd90
                     continue;
                 }
-                if (delivery_reachable(owner, b, p) && ft >= queue_time && buildable_here(b)) {  // 0x6955a0
+                // mcx4 t05 (MCX4_T11_T12_RE_ANSWERS C1) [H read]: the reservation timer 0x695780 started at the claim
+                // (0x695a10, FPS x AI_BuildTaskReservationSeconds); an expired one releases the task [M: the timer
+                // counts as expired once its length has passed].
+                const bool expired =
+                    b.claimed >= 0 &&
+                    now - b.claimed >= static_cast<int64_t>(static_cast<float>(kAiFps) *
+                                         std::clamp(sim.rules().constants.ai_build_task_reservation_seconds, 0.0f, 1.0e9f));
+                if (!expired && delivery_reachable(owner, b, p) && ft >= queue_time && buildable_here(b)) {  // 0x6955a0
                     queue_time += queue_term(b, ft);
                     continue;
                 }
@@ -469,6 +476,7 @@ void GalacticAiWorld::Impl::market_planet(PlanetIndex p) {
                 BuildTask& b = builds[id];
                 if (b.bid_planet != p || b.queue != qi || b.player != owner || b.state != BuildState::Queued || !b.charged) continue;
                 Q.tasks.push_back(id);
+                b.claimed = now;  // 0x695a10: the reservation timer starts
                 queue_time += queue_term(b, funds_time(b));
                 remove_pending(id);
                 break;

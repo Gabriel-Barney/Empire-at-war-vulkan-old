@@ -883,9 +883,14 @@ void test_queue_phases() {
         // this session's, so it writes back as the v10 bytes.
         size_t placement = 2 + 4 + 5 * s.autoresolve_exclusions().size();
         for (const PlanetState& pl : s.planets()) placement += 4 + 4 * pl.initial_placement.size();
-        // mcx4 t20: v11 adds the locked fleets last (u32 count 0 here); a v10 image derives them from the contents (none).
-        CHECK(bytes.size() >= galab + 20 + placement && bytes[0] == 11 && bytes[bytes.size() - 1] == 0);
-        std::vector<uint8_t> v10(bytes.begin(), bytes.end() - 4);
+        // mcx4 t20: v11 adds the locked fleets (u32 count 0 here); a v10 image derives them from the contents (none).
+        // mcx4 t22: v12 adds the company survivor records last (u32 count 0 here); a v11 image has none.
+        CHECK(bytes.size() >= galab + 24 + placement && bytes[0] == 12 && bytes[bytes.size() - 1] == 0);
+        std::vector<uint8_t> v11(bytes.begin(), bytes.end() - 4);
+        v11[0] = 11;
+        ByteReader r11(v11);
+        CHECK(o.read(r11) && sim_bytes(o) == bytes);
+        std::vector<uint8_t> v10(v11.begin(), v11.end() - 4);
         v10[0] = 10;
         ByteReader r10(v10);
         CHECK(o.read(r10) && sim_bytes(o) == bytes);

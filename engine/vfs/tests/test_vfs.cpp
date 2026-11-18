@@ -262,16 +262,17 @@ int main() {
         CHECK(!v->read("Data\\XML\\Nope.xml", buf) && buf.empty());
     }
 
-    // list(): union, dedupe, sort, '*' does not cross '\\', '**' does.
+    // list(): union, dedupe, '*' does not cross '\\', '**' does. mcx3 t13 (MCX4_GAL2_RE_ANSWERS Q6, UI.md §9.2): retail's
+    // find order - the mod trees, the base tree, the MEGs (mount order, record order), the fallback trees.
     {
         const auto l = v->list("Data\\Scripts\\AI\\*.lua");
         const std::vector<std::string> want = {"DATA\\SCRIPTS\\AI\\A1.LUA", "DATA\\SCRIPTS\\AI\\BASE.LUA",
-                                               "DATA\\SCRIPTS\\AI\\FB.LUA", "DATA\\SCRIPTS\\AI\\MEG1.LUA"};
+                                               "DATA\\SCRIPTS\\AI\\MEG1.LUA", "DATA\\SCRIPTS\\AI\\FB.LUA"};
         CHECK(l == want);
         if (l != want)
             for (const auto& s : l) std::printf("  list: %s\n", s.c_str());
         const auto all = v->list("data/scripts/ai/**.LUA");
-        CHECK(all.size() == 5 && std::is_sorted(all.begin(), all.end()));
+        CHECK(all.size() == 5);
         CHECK(std::find(all.begin(), all.end(), "DATA\\SCRIPTS\\AI\\SPACEMODE\\SUB.LUA") != all.end());
         CHECK(read_str(*v, l[0]) == "MOD-A1");
         CHECK(read_str(*v, l[1]) == "BASE");  // loose base beats MEGBASE
@@ -576,12 +577,14 @@ int main() {
             CHECK(vx->mounts().size() == 1);
             CHECK(vx->list(g, Vfs::kLayerMod) == (L{p("MOD_ONLY"), p("MOD_OVER_BASE")}));
             CHECK(vx->list(g, Vfs::kLayerBase) == (L{p("BOTH"), p("LOOSE_ONLY"), p("MOD_OVER_BASE")}));
-            CHECK(vx->list(g, Vfs::kLayerMeg) == (L{p("BOTH"), p("MEG_ONLY")}));
+            // A MEG lists in record order (write_meg stores records by CRC, as real archives do).
+            const bool both_first = alamo::meg::name_crc(p("BOTH")) < alamo::meg::name_crc(p("MEG_ONLY"));
+            CHECK(vx->list(g, Vfs::kLayerMeg) == (both_first ? L{p("BOTH"), p("MEG_ONLY")} : L{p("MEG_ONLY"), p("BOTH")}));
             CHECK(vx->list(g, Vfs::kLayerFallback) == (L{p("FB_ONLY")}));
             // Base + MEG: BOTH is loose and in the MEG, listed once.
-            CHECK(vx->list(g, Vfs::kLayerBase | Vfs::kLayerMeg) == (L{p("BOTH"), p("LOOSE_ONLY"), p("MEG_ONLY"), p("MOD_OVER_BASE")}));
+            CHECK(vx->list(g, Vfs::kLayerBase | Vfs::kLayerMeg) == (L{p("BOTH"), p("LOOSE_ONLY"), p("MOD_OVER_BASE"), p("MEG_ONLY")}));
             // All layers = the plain list(); mask 0 and unknown bits select nothing.
-            const L everything = {p("BOTH"), p("FB_ONLY"), p("LOOSE_ONLY"), p("MEG_ONLY"), p("MOD_ONLY"), p("MOD_OVER_BASE")};
+            const L everything = {p("MOD_ONLY"), p("MOD_OVER_BASE"), p("BOTH"), p("LOOSE_ONLY"), p("MEG_ONLY"), p("FB_ONLY")};
             CHECK(vx->list(g) == everything);
             CHECK(vx->list(g, Vfs::kLayerAll) == everything);
             CHECK(vx->list(g, 0).empty());

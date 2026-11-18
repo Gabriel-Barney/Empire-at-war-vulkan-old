@@ -148,8 +148,9 @@ bool load_conflict_rules(const FileProvider& provider, const data::GameDatabase&
 // (TEAM branch) never are.
 bool company_team_lost(const ConflictRules& rules, uint32_t company_type, std::span<const uint32_t> dead_member_types);
 
+// survivors: a company's survivor record (mcx4 t22), nullptr = its full Company_Units.
 ArCombatant make_ar_combatant(const GalacticRules& galactic, const ConflictRules& rules, uint32_t type, int32_t owner,
-                              bool space);
+                              bool space, const std::vector<uint32_t>* survivors = nullptr);
 
 // ---- records ---------------------------------------------------------------------------------------------------
 enum class ConflictKind : uint8_t { Land = 1, Space = 2 };
@@ -202,6 +203,8 @@ struct BattleResult {
     uint8_t victory = kVictoryAllDestroyed;
     int32_t retreated = kNoPlayer;      // the player the retreat coordinator reports
     std::vector<ObjectHandle> destroyed;  // galactic objects whose tactical counterparts all died
+    // mcx4 t22: companies that came out with members lost - (galactic object, the surviving member types)
+    std::vector<std::pair<ObjectHandle, std::vector<uint32_t>>> survivors;
     bool starbase_destroyed = false;
 };
 
