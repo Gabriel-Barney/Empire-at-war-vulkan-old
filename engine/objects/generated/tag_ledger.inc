@@ -415,7 +415,7 @@
 {"GameObjectType", "SFXEvent_Assist_Attack", 0x1f, LedgerState::Consumed, 2, "engine/apps/game/src/game_audio_host.cpp", "docs/re/MCX4_T13_RE_ANSWERS.md", 110, 1},
 {"GameObjectType", "SFXEvent_Attack_Override", 0x22, LedgerState::Stored, 0, "", "docs/re/OBJECT_TYPES.md", 0, 1},
 {"GameObjectType", "SFXEvent_Hardpoint_All_Weapons_Destroyed", 0x1f, LedgerState::Verified, 1, "engine/apps/game/src/game_audio_host.cpp", "docs/re/MCX4_T13_RE_ANSWERS.md", 2, 1},
-{"GameObjectType", "SFXEvent_Attack_Hardpoint", 0x42, LedgerState::Stored, 0, "", "docs/re/MCX4_T13_RE_ANSWERS.md", 426, 1},
+{"GameObjectType", "SFXEvent_Attack_Hardpoint", 0x42, LedgerState::Verified, 1, "engine/apps/game/src/game_audio_host.cpp", "docs/re/MCX4_T13_RE_ANSWERS.md", 426, 1},
 {"GameObjectType", "SFXEvent_Hardpoint_Destroyed", 0x42, LedgerState::Verified, 1, "engine/apps/game/src/game_audio_host.cpp", "docs/re/MCX4_T13_RE_ANSWERS.md", 362, 1},
 {"GameObjectType", "SFXEvent_Unit_Under_Attack", 0x1f, LedgerState::Consumed, 2, "engine/apps/game/src/game_audio_host.cpp", "", 104, 1},
 {"GameObjectType", "SFXEvent_Unit_Lost", 0x1f, LedgerState::Consumed, 2, "engine/apps/game/src/game_audio_host.cpp", "docs/re/ABILITIES_HARDPOINTS.md", 123, 1},

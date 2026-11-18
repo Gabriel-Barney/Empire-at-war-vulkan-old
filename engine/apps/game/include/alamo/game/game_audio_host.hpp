@@ -118,8 +118,11 @@ public:
     // mcx4 t13 (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Move_Into_Asteroid_Field family" [H]): `dest_fields` = the
     // space field kinds (tactical::abilities kField* bits) at a local unit's space move destination; the type's
     // move_into_field_tag line, when set, replaces the move response.
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Attack_Hardpoint", 0x44590 / 0x44cd0 [H]): `hardpoint_kind` =
+    // the HardPointType of an attack order's targeted hard point (-1 none); the type's SFXEvent_Attack_Hardpoint entry
+    // for it ("HARD_POINT_*, Event" lines), when set, replaces the attack response.
     void unit_response(const objects::GameObjectTypes& types, objects::TypeIndex type, uint64_t object, UnitResponse kind,
-                       bool group = false, int32_t owner = -1, uint32_t dest_fields = 0);
+                       bool group = false, int32_t owner = -1, uint32_t dest_fields = 0, int32_t hardpoint_kind = -1);
     // Asteroid field (bit 1) first, then nebula (bit 4); "" for neither.
     static std::string_view move_into_field_tag(uint32_t dest_fields);
     // Battle-end dialog opened: the local faction's win / lose music (Music_Event_Tactical_<Win/Lose>[_Vs_Faction]),

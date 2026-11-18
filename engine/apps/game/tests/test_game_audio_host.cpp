@@ -188,6 +188,7 @@ void test_super_weapon_music() {
 // ledger: verifies GameObjectType.SFXEvent_Enemy_Damaged_Health_Critical_Warning
 // ledger: verifies GameObjectType.SFXEvent_Hardpoint_Destroyed
 // ledger: verifies GameObjectType.SFXEvent_Hardpoint_All_Weapons_Destroyed
+// ledger: verifies GameObjectType.SFXEvent_Attack_Hardpoint
 void test_health_and_hardpoint_lines() {
     using H = GameAudioHost;
     // Thresholds 0.33 / 0.10 (FoC); critical tested first; one crossing per hit.
@@ -209,6 +210,11 @@ void test_health_and_hardpoint_lines() {
                                                 "HARD_POINT_ENGINE", "Lost_Engine", "HARD_POINT_WEAPON_LASER", "Lost_Laser_2"};
     CHECK(H::hardpoint_kind_event(toks, 5) == "Lost_Laser_2" && H::hardpoint_kind_event(toks, 0) == "Lost_Engine");
     CHECK(H::hardpoint_kind_event(toks, 6).empty() && H::hardpoint_kind_event(toks, 1).empty() && H::hardpoint_kind_event(toks, 13).empty());
+    // The same list shape is the attack response by hard point kind ("GameObjectType.SFXEvent_Attack_Hardpoint": FoC
+    // "HARD_POINT_WEAPON_LASER, Unit_HP_LASER_Corvette" lines; unit_response takes the attack's kind).
+    const std::vector<std::string_view> atk = {"HARD_POINT_WEAPON_LASER", "Unit_HP_LASER_Corvette", "HARD_POINT_WEAPON_ION_CANNON",
+                                               "Unit_HP_ION_Corvette"};
+    CHECK(H::hardpoint_kind_event(atk, 5) == "Unit_HP_LASER_Corvette" && H::hardpoint_kind_event(atk, 0).empty());
 }
 
 // mcx4 t13 batch C (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_Tactical_Gain_Friendly_Control family", capture

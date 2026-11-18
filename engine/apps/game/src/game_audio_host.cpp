@@ -373,7 +373,7 @@ void GameAudioHost::negative_feedback() {
 }
 
 void GameAudioHost::unit_response(const objects::GameObjectTypes& types, objects::TypeIndex type, uint64_t object, UnitResponse kind,
-                                  bool group, int32_t owner, uint32_t dest_fields) {
+                                  bool group, int32_t owner, uint32_t dest_fields, int32_t hardpoint_kind) {
     if (!game_) return;
     // The mode's "excluded set" = the retreat coordinator's retreating units (STRATEGIC_GAPS §7.4 [M]): no response.
     if (owner >= 0 && owner == retreating_player_) {
@@ -381,6 +381,16 @@ void GameAudioHost::unit_response(const objects::GameObjectTypes& types, objects
         return;
     }
     const audio::UnitOrder order = order_of(kind, group);
+    // ledger: consumes GameObjectType.SFXEvent_Attack_Hardpoint
+    if (kind == UnitResponse::Attack && hardpoint_kind >= 0 && hardpoint_kind < 13 && type != objects::kNone && type < types.size())
+        if (const std::string_view ev = hardpoint_kind_event(types.get_list(type, "SFXEvent_Attack_Hardpoint"),
+                                                             static_cast<uint8_t>(hardpoint_kind));
+            !ev.empty()) {
+            audio::UnitSounds s = sounds(types, type);  // step 1 of the response chain: the hard point line first
+            s.response[static_cast<size_t>(order)] = std::string(ev);
+            if (game_->unit_response(object, s, order, position_of(object), group)) ++stats_.responses;
+            return;
+        }
     if (const std::string_view tag = kind == UnitResponse::Move ? move_into_field_tag(dest_fields) : std::string_view(); !tag.empty())
         if (const std::string_view ev = types.get_string(type, tag); !ev.empty()) {
             audio::UnitSounds s = sounds(types, type);  // the field line replaces the move response (0x3738b0)
@@ -1206,7 +1216,8 @@ void GameAudioHost::movie_started(bool movie_music, bool halt_music) {  // same 
 }
 void GameAudioHost::movie_cue(std::string_view) {}
 void GameAudioHost::movie_ended() { movie_music_on_ = movie_halted_ = false; }
-void GameAudioHost::unit_response(const objects::GameObjectTypes&, objects::TypeIndex, uint64_t, UnitResponse, bool, int32_t, uint32_t) {}
+void GameAudioHost::unit_response(const objects::GameObjectTypes&, objects::TypeIndex, uint64_t, UnitResponse, bool, int32_t, uint32_t,
+                                  int32_t) {}
 void GameAudioHost::battle_tick(const sim::TacticalBattle&, const objects::ObjectStore&, const objects::GameObjectTypes&, int32_t,
                                 const std::function<bool(objects::ObjectId)>&) {}
 void GameAudioHost::battle_end(bool, std::string_view) {}

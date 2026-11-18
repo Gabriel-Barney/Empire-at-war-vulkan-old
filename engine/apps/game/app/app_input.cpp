@@ -440,8 +440,11 @@ void App::respond(const commands::EventData& ev) {
                 if (st.alive(th)) fields = b->space_fields().kinds_at(st.position(th).x, st.position(th).y);
             }
         }
+    // mcx4 t13: an attack on a hard point (ref2 = 1 + HardPointType, COMMANDS.md 2) names its kind for the response.
+    const uint32_t ref2 = ev.type() == T::Attack ? ev.u("ref2") : 0u;
+    const int32_t hp_kind = ref2 > 0 && ref2 <= 13 ? static_cast<int32_t>(ref2) - 1 : -1;
     audio_.unit_response(data_.types, st.type(h), static_cast<uint64_t>(st.id(h)), kind, false, top->tactical() ? st.owner(h) : -1,
-                         fields);
+                         fields, hp_kind);
 }
 
 void App::submit(commands::EventData ev, bool voice) {
