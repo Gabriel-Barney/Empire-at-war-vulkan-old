@@ -96,8 +96,14 @@ void count_content(const GameData& d, ModCheckReport& r) {
 #endif
     if (d.vfs) {
         const SkirmishMapCatalog cat = build_skirmish_map_catalog(*d.vfs);
-        r.counts.official_maps = skirmish_map_rows(cat, false).size();
-        r.counts.custom_maps = skirmish_map_rows(cat, true).size();
+        const std::vector<SkirmishMapEntry> rows = skirmish_map_rows(cat, false), custom = skirmish_map_rows(cat, true);
+        r.counts.official_maps = rows.size();
+        r.counts.custom_maps = custom.size();
+        for (const auto* tab : {&rows, &custom})
+            for (const SkirmishMapEntry& e : *tab) {
+                const auto res = d.vfs->resolve(e.path);
+                r.skirmish_maps.push_back({e.map, e.kind == 1, e.players, res && res->layer == vfs::Vfs::Resolution::Mod, tab == &custom});
+            }
     }
 }
 
@@ -109,6 +115,7 @@ void check_campaigns(const GameData& d, ModCheckReport& r) {
         const auto map = data::build_galaxy_map(d.db, c.name, &diag);
         ++r.campaigns_checked;
         if (map.planets.size() == 0) r.campaigns_without_planets.push_back(c.name);
+        else r.campaigns_startable.push_back(c.name);
         const std::string prefix = c.name + ": ";
         for (std::string_view msg : diag) {
             if (msg.starts_with(prefix)) msg.remove_prefix(prefix.size());
@@ -1904,6 +1911,60 @@ void count(Json& j, std::string_view k, uint64_t v) {
 
 }  // namespace
 
+std::string format_mod_list_json(const vfs::ModRegistry& registry) {
+    Json j;
+    j.open('{');
+    j.key("schema");
+    j.str("alamo.mod_list");
+    count(j, "version", 1);
+    j.key("game");
+    j.str(registry.game);
+    j.key("mods");
+    j.open('[');
+    for (const vfs::ModDescriptor& m : registry.mods) {
+        j.open('{');
+        j.key("key");
+        j.str(m.key());
+        j.key("arg");
+        j.str(m.arg());
+        j.key("kind");
+        j.str(m.kind == vfs::ModKind::Workshop ? "workshop" : m.kind == vfs::ModKind::LocalMods ? "local" : "path");
+        j.key("id");
+        j.str(m.id);
+        j.key("variant");
+        j.str(m.variant);
+        j.key("root");
+        j.str(m.root);
+        j.key("name");
+        j.str(m.name);
+        j.key("version");
+        j.str(m.version);
+        j.key("has_data");
+        j.boolean(m.has_data);
+        j.key("game_tag");
+        j.str(m.game_tag == vfs::GameTag::Foc ? "FOC" : m.game_tag == vfs::GameTag::Eaw ? "EAW" : "");
+        char hex[24];
+        std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(m.content_hash));
+        j.key("content_hash");
+        j.str(hex);
+        j.key("dependencies");
+        j.open('[');
+        for (const vfs::ModDependency& dep : m.dependencies) {
+            j.open('{');
+            count(j, "modtype", dep.modtype);
+            j.key("identifier");
+            j.str(dep.identifier);
+            j.close('}');
+        }
+        j.close(']');
+        j.close('}');
+    }
+    j.close(']');
+    j.close('}');
+    j.out.push_back('\n');
+    return std::move(j.out);
+}
+
 std::string format_mod_report_json(const ModCheckReport& r) {
     Json j;
     j.open('{');
@@ -2026,12 +2087,29 @@ std::string format_mod_report_json(const ModCheckReport& r) {
     count(j, "tactical_land_plans", c.tactical_land_plans);
     count(j, "official_maps", c.official_maps);
     count(j, "custom_maps", c.custom_maps);
+    j.key("skirmish_maps");  // mcx7 t01
+    j.open('[');
+    for (const ModCheckReport::SkirmishMap& m : r.skirmish_maps) {
+        j.open('{');
+        j.key("map");
+        j.str(m.map);
+        j.key("kind");
+        j.str(m.land ? "land" : "space");
+        count(j, "players", m.players);
+        j.key("in_mod");
+        j.boolean(m.in_mod);
+        j.key("custom");
+        j.boolean(m.custom);
+        j.close('}');
+    }
+    j.close(']');
     j.close('}');
 
     j.key("campaigns");
     j.open('{');
     count(j, "checked", r.campaigns_checked);
     j.strings("without_planets", r.campaigns_without_planets);
+    j.strings("startable", r.campaigns_startable);  // mcx7 t01
     count(j, "skipped_rows", r.campaign_warning_count);
     j.strings("warnings", r.campaign_warnings);
     j.close('}');

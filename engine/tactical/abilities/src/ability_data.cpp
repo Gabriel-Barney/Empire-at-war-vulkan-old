@@ -180,6 +180,9 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
     s.toss_anim = s_or(e, "Grenade_Toss_Anim");
     if (s.toss_anim.empty()) s.toss_anim = s_or(e, "Toss_Anim");
     s.spawn_bone = s_or(e, "Spawn_Bone");  // S8 t06: Remote_Bomb toss bone (LOB_SOLVER §3.5)
+    if (s.spawn_bone.empty()) s.spawn_bone = s_or(e, "Spawn_Bone_Name");  // mcx4 t06: Spawn_Ability +0x198 (§14)
+    s.recharge_time_in_seconds = f_or(e, "Recharge_Time_In_Seconds", 1.0f);  // mcx4 t06: Spawn_Ability +0x194 (§14)
+    if (s.recharge_time_in_seconds < 0.0f) s.recharge_time_in_seconds = 0.0f;
     s.fuse_time = f_any(e, {"Grenade_Explode_Timer_In_Secs", "Detonation_Time_In_Secs"}, 0.0f);
     s.requires_direct_command = b_or(e, "Requires_Direct_Player_Command", false);
     s.max_targets = i_or(e, "Lightning_Max_Targets", i_or(e, "Max_Drain_Victims", i_or(e, "Max_Targets", 0)));

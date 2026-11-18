@@ -150,6 +150,13 @@ void CombatSystem::write(ByteWriter& w) const {
         w.u8(u.bshield_state).u8(u.bshield_upgraded).u32(u.bshield_off_stamp).u32(u.bshield_next).i32(u.bshield_in);  // v16
         w.u8(u.sfx_ready);  // v17 (trn1 t02)
         for (const uint8_t p : u.sfx_prev) w.u8(p);
+        {  // mcx4 t17: the instances past the fixed slots, only for a type that has them (the layout is unchanged otherwise)
+            const size_t nfx = data_->units[u.desc].surface_fx.size();
+            for (size_t k = kSurfaceFxFixedSlots; k < nfx; ++k) {
+                const size_t j = k - kSurfaceFxFixedSlots;
+                w.u8(j < u.sfx_prev_more.size() ? u.sfx_prev_more[j] : uint8_t{0});
+            }
+        }
         w.f32(u.terrain_damage).u32(u.terrain_next).f32(u.terrain_delay);
         u.mods.write(w);
         // caches
@@ -363,6 +370,14 @@ bool CombatSystem::read(ByteReader& r) {
         if (u.bshield_state > 2 || u.bshield_upgraded > 1) return false;
         u.sfx_ready = r.u8();  // trn1 t02 (v17)
         for (uint8_t& p : u.sfx_prev) p = r.u8();
+        u.sfx_prev_more.clear();
+        if (u.desc < unit_descs) {  // mcx4 t17: as written (the type's entries past the fixed slots)
+            const size_t nfx = data_->units[u.desc].surface_fx.size();
+            for (size_t k = kSurfaceFxFixedSlots; k < nfx; ++k) {
+                u.sfx_prev_more.push_back(r.u8());
+                if (u.sfx_prev_more.back() >= kSurfaceTypeCount) return false;
+            }
+        }
         u.terrain_damage = r.f32();
         u.terrain_next = r.u32();
         u.terrain_delay = r.f32();

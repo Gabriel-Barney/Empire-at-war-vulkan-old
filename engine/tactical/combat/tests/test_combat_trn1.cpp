@@ -38,7 +38,7 @@ constexpr const char* kSurfaceXml = R"(<?xml version="1.0"?>
 
 struct SurfaceWorld {
     World w;
-    uint32_t infantry = 0, plain = 0, both = 0;
+    uint32_t infantry = 0, plain = 0, both = 0, five = 0;
     explicit SurfaceWorld(GameMode mode = GameMode::Land) {
         const data::XmlDocument doc = data::XmlDocument::parse(std::string_view(kSurfaceXml), "SurfaceFX.xml");
         CHECK(doc.ok());
@@ -57,6 +57,8 @@ struct SurfaceWorld {
         plain = push_unit(w.data, p);
         u.surface_fx = {0, 1};  // Infantry_Terrain_Modifier + High_Ground (the one FoC type with both)
         both = push_unit(w.data, u);
+        u.surface_fx = {2, 2, 2, 2, 1};  // mcx4 t17: a mod type whose 5th SurfaceFX_Name entry is High_Ground
+        five = push_unit(w.data, u);
         CombatConfig cfg;
         cfg.mode = mode;
         w.make(cfg);
@@ -173,6 +175,28 @@ void test_surface_fx_two_instances() {
     s.w.sys->set_position(1, Vec3{50, 0, 0});
     s.w.tick();
     CHECK(s.w.sys->unit_modifiers(1)->entries().empty());
+}
+
+void test_surface_fx_fifth_instance() {
+    // mcx4 t17 (TRN1_TERRAIN_GAMEPLAY §2): retail builds one SURFACE_FX instance per SurfaceFX_Name entry, so a 5th entry
+    // works like the first four (the port capped the list at 4); its surface memory survives save / load.
+    SurfaceWorld s;
+    s.w.add(1, s.five, 1, Vec3{250, 0, 0});
+    s.w.tick();
+    s.w.tick();
+    CHECK_F(s.w.sys->modifier(1, ModList::FireRange), 0.25f);
+    ByteWriter bw;
+    s.w.sys->write(bw);
+    SurfaceWorld t;
+    t.w.add(1, t.five, 1, Vec3{250, 0, 0});
+    ByteReader br(bw.bytes());
+    CHECK(t.w.sys->read(br));
+    ByteWriter bw2;
+    t.w.sys->write(bw2);
+    CHECK(bw.bytes() == bw2.bytes());
+    s.w.sys->set_position(1, Vec3{50, 0, 0});
+    s.w.tick();
+    CHECK_F(s.w.sys->modifier(1, ModList::FireRange), 0.0f);  // the 5th instance takes its entry off again
 }
 
 void test_surface_fx_converted_and_save() {

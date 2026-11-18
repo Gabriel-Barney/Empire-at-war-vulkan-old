@@ -997,6 +997,7 @@ void CombatSystem::hash_extended(StateHasher& h) const {
             h.u8(0x5B);  // trn1 t02: SurfaceFX instances and the terrain damage timer (format unchanged at the spawn values)
             h.u8(u.sfx_ready);
             for (const uint8_t p : u.sfx_prev) h.u8(p);
+            for (const uint8_t p : u.sfx_prev_more) h.u8(p);  // mcx4 t17: empty for every base FoC type
             h.f32(u.terrain_damage);
             h.u32(u.terrain_next);
             h.f32(u.terrain_delay);

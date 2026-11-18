@@ -53,6 +53,12 @@ byte, `--compare`, the game smoke compare).
    the PR from it. Commit the goldens (a few lines each) and any remade `tests/benchmark/*` scenario files (the version bump shows in the PR; say "scenario regenerated" there).
 3. Clang must reproduce the MSVC goldens (`build_clang.cmd`).
 
+Mod goldens (mcx7 t04, `docs/MOD_COMPAT_DESIGN.md` §13.3): `tests/goldens/mods/<name>.crc`, a 600-tick space skirmish of each
+reference mod (the run in `<name>.json`), ctest `alamo_headless_mod_golden_<name>` (slow) through `tools/goldens/mod_golden.py`, which
+skips when the workshop item is not installed or its data changed since the golden (the spec's `fingerprint`). `tools\regen_goldens.cmd`
+remakes them with the headless goldens (`--no-mods` leaves them alone, `--mods` does only them) and sets the fingerprint; name every moved
+mod golden in the commit message as for a base golden.
+
 Goldens the regen script does not cover (the apps/sim goldens written by `alamo_sim_tests --regen`, the module goldens of combat / abilities /
 galactic written by their own `--write-golden` options) are still written as full logs; they compare as they are, and `convert_goldens.py
 --in-place --check <files>` thins them afterwards.

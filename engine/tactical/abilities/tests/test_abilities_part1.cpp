@@ -93,6 +93,31 @@ void test_info_table() {
 
 namespace bo3split {
 
+// mcx7: the ability timers follow x86 integer semantics on every compiler (x86_int.hpp). Inputs go through volatile so
+// no compiler folds them; before the fix the clang build ended a 99999999999 s laser defense after one frame while MSVC
+// (and retail) kept it, so Age of Legends' skirmish CRC differed between the compilers.
+void test_x86_timers() {
+    volatile float huge = 30.0f * 99999999999.0f, neg = -3.0e9f, nan_ = std::numeric_limits<float>::quiet_NaN(), ok = 299.9f;
+    CHECK(trunc_i32(huge) == INT32_MIN && trunc_i32(neg) == INT32_MIN && trunc_i32(nan_) == INT32_MIN);
+    CHECK(trunc_i32(ok) == 299 && trunc_i32(-ok) == -299 && trunc_i32(2147483520.0f) == 2147483520);
+    volatile float two31 = 2147483648.0f, neg31 = -2147483648.0f, neg_zero = -0.0f;  // the range edges
+    CHECK(trunc_i32(two31) == INT32_MIN && trunc_i32(neg31) == INT32_MIN && trunc_i32(neg_zero) == 0);
+    volatile int32_t lo = INT32_MIN, one = 1;
+    CHECK(dec_wrap(lo) == INT32_MAX && dec_wrap(one) == 0);
+    // Defense_Duration_In_Secs 99999999999: the laser defense special stays applied (2^31 frames); 10 s ends after 300.
+    for (const float secs : {99999999999.0f, 10.0f}) {
+        SpecialWorld w(secs);
+        w.add(1, w.corvette, 0, {0, 0, 0});
+        const ObjectId c[] = {1};
+        CHECK(w.ab->set_unit_ability_mode(c, kLaserDefense, true, w.frame) == 1);
+        for (int i = 0; i < 400; ++i) w.tick();
+        std::vector<AppliedSpecialView> on;
+        w.ab->applied_specials(1, on);
+        const bool ld_on = std::any_of(on.begin(), on.end(), [&](const AppliedSpecialView& v) { return v.special == w.ld_sp; });
+        CHECK(ld_on == (secs > 100.0f));
+    }
+}
+
 void test_countdown() {
     Countdown c;
     CHECK(c.start_active(1, 10.0f, 30));

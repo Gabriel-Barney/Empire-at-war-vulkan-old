@@ -2183,7 +2183,8 @@ shield-bypassing. The full numbering is not read (§8).
 
 ### 3.8 Lightsaber and deflection (0x709c90) [M]
 - Applies only to projectile categories 0, 5 and 7, and only inside `Reaction_Arc`.
-- Redirect when **synced** `Get_Float(0, 1)` < `Projectile_Redirect_Chance_Modifier` × redirect chance.
+- Redirect when **synced** `Get_Float(0, 1)` < `Projectile_Redirect_Chance_Modifier` × redirect chance (both modifiers
+  default to 1.0: type ctor 0x367250 writes +0x4f4 and +0x4f8 [H], mcx4 2026-11-18).
 - Otherwise a second draw: block when `Get_Float(0, 1)` < `Projectile_Block_Chance_Modifier` × block chance.
 
 ### 3.9 Death

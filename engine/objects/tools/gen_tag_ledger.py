@@ -89,6 +89,9 @@ RETAIL_UNUSED = {
     ("GameConstants", "Health_Bar_Scale"): "docs/re/STRATEGIC_GAPS.md §7.2 [H]",
     ("GameConstants", "Income_Redistribution"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.2 [H]",
     ("GameConstants", "Land_Health_Bar_Scale"): "docs/re/STRATEGIC_GAPS.md §7.2 [H]",
+    ("GameConstants", "MaxCombatAccuracyAlignmentBonus"): "docs/re/MCX4_T10_RE_ANSWERS.md §16 [H]",
+    ("GameConstants", "MaxCombatDamageAlignmentBonus"): "docs/re/MCX4_T10_RE_ANSWERS.md §16 [H]",
+    ("GameConstants", "MaxCombatSensorRangeAlignmentBonus"): "docs/re/MCX4_T10_RE_ANSWERS.md §16 [H]",
     ("GameConstants", "MaximumSpecialStructuresLand"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.1 [H]",
     ("GameConstants", "MaximumSpecialStructuresSpace"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.1 [H]",
     ("GameConstants", "Min_Health_Bar_Scale"): "docs/re/STRATEGIC_GAPS.md §7.2 [H]",
@@ -103,6 +106,7 @@ RETAIL_UNUSED = {
     ("GameObjectType", "Ground_Infantry_Turret_Target"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
     ("GameObjectType", "Ground_Vehicle_Turret_Target"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
     ("GameObjectType", "MinimumPushReturnDistance"): "docs/re/MOVEMENT.md §5.4 [H]",
+    ("GameObjectType", "Projectile_Acceleration_Per_Frame"): "docs/re/MCX4_T10_RE_ANSWERS.md §8 [H]",
     ("GameObjectType", "Required_Timeline"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
     ("GameObjectType", "Size_Value"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
     ("GameObjectType", "SpaceAutoResolveHitRate"): "docs/re/MCX4_T09_RE_ANSWERS.md Q4 [M: written, never read]",
@@ -111,6 +115,7 @@ RETAIL_UNUSED = {
     ("GameObjectType", "Turret_Targets_Anything_Else"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
     ("GameObjectType", "Turret_Targets_Ground_Infantry"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
     ("GameObjectType", "Turret_Targets_Ground_Vehicles"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("Spawn_Ability", "Self_Destruct_Radius"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §14 [H: only the load check reads it]",
 }
 
 # Source files that name tags without reading them for the game: the descriptor tables themselves, reports, tests,

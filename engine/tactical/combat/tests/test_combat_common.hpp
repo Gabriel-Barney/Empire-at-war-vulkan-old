@@ -1212,6 +1212,7 @@ void test_terrain_cover();  // trn1 t01 (test_combat_trn1.cpp)
 void test_surface_fx_terrain_modifiers();  // trn1 t02
 void test_surface_fx_converted_and_save();
 void test_surface_fx_two_instances();
+void test_surface_fx_fifth_instance();  // mcx4 t17
 void test_ion_stun_water_kill();  // trn1 t04 (test_combat_tru1.cpp)
 void test_stun_visuals();         // vis1 t08 (test_combat_tru1.cpp)
 void test_base_shield_contact();  // vis1 t08

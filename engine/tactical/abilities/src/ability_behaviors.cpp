@@ -11,6 +11,7 @@
 #include <array>
 
 #include "alamo/core/dmath.hpp"
+#include "alamo/tactical/abilities/x86_int.hpp"
 #include "alamo/tactical/abilities/ability_system.hpp"
 #include "alamo/tactical/category_reduce.hpp"
 
@@ -98,6 +99,20 @@ bool AbilitySystem::bind_spawn(uint32_t serial, ObjectId id) {
                     t->rope_owner = o->id;
                 }
             return true;
+        }
+    // mcx4 t06 (Spawn_Ability, MCX4_RE_ANSWERS_TACTICAL §14): the bomber of a user still waiting for it becomes the
+    // tracked bomber (+0x39c); the orders follow at the user's next update.
+    for (const SpawnRequest& r : spawns_)
+        if (r.serial == serial && r.purpose == SpawnPurpose::Bomber) {
+            Obj* o = obj(r.source);
+            if (!o || o->dead) return false;
+            for (SpecialState& sp : o->specials)
+                if (data_->specials[sp.desc].cls == SpecialClass::Spawn && sp.phase == 2) {
+                    sp.victims.assign(1, id);
+                    sp.phase = 3;
+                    return true;
+                }
+            return false;
         }
     // cu8f t06 (CU8F_T04_T06_RE §3.1): the LURE Particle_Effect object (LureDataPack +0x18). cu8g t05: false (not bound:
     // the host removes it silently) when the lure was deactivated since the request, or its owner is gone.
@@ -1085,7 +1100,7 @@ void AbilitySystem::lure_service(Obj& o, uint32_t frame) {
     if (!r || frame < o.lure_next) return;
     if (o.lure_pulses < r->max_pulses) {
         o.lure_pulses += 1;
-        const auto step = static_cast<int32_t>(static_cast<float>(cfg_.fps) * r->pulse_frequency_secs);  // truncation
+        const auto step = trunc_i32(static_cast<float>(cfg_.fps) * r->pulse_frequency_secs);  // truncation
         o.lure_next = frame + static_cast<uint32_t>(std::max(0, step));
         lure_pulse(o, *r, frame);
     } else {
@@ -1383,7 +1398,7 @@ void AbilitySystem::confuse(Obj& v, float secs, uint32_t frame) {
     const float y = draw_float(cy - hy, cy + hy);
     const Vec3 p{x, y, position(v).z};
     v.confused = 1;
-    v.confuse_end = frame + static_cast<uint32_t>(static_cast<int32_t>(static_cast<float>(cfg_.fps) * secs));
+    v.confuse_end = frame + static_cast<uint32_t>(trunc_i32(static_cast<float>(cfg_.fps) * secs));
     // The move first, then the lock of the unit and its TEAM container (A1_READINGS §28.9): the locked unit keeps this
     // move; new orders are refused until the expiry releases it.
     if (v.container != kNoObject) {

@@ -1,0 +1,17 @@
+{
+  "name": "Fall of the Republic",
+  "mod": "1976399102",
+  "stack": [
+    "STEAMMOD=1976399102"
+  ],
+  "args": [
+    "--skirmish-ai",
+    "skirmish",
+    "--map",
+    "_MP_SPACE_TRANSITORY_TWISTS",
+    "--ticks",
+    "600",
+    "--quiet"
+  ],
+  "fingerprint": "f2195901a3358af2"
+}

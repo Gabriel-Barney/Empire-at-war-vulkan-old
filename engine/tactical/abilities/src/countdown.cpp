@@ -1,11 +1,12 @@
 #include "alamo/tactical/abilities/countdown.hpp"
+#include "alamo/tactical/abilities/x86_int.hpp"
 
 #include "alamo/core/sim_crc.hpp"
 
 namespace alamo::tactical::abilities {
 
 void Countdown::set_duration(uint32_t t, float seconds, uint32_t fps) {
-    const auto frames = static_cast<int32_t>(static_cast<float>(fps) * seconds);
+    const auto frames = trunc_i32(static_cast<float>(fps) * seconds);
     counter[t] = frames;
     maximum[t] = frames;
 }
@@ -35,7 +36,7 @@ bool Countdown::deactivate_early(uint32_t t, float recharge_seconds, float r9, u
                         ? 1.0f
                         : 1.0f - static_cast<float>(counter[t]) / static_cast<float>(maximum[t]);
     start_recharge(t, recharge_seconds, r9, fps);
-    const auto c = static_cast<int32_t>(static_cast<float>(maximum[t]) * (1.0f - f) + 0.5f);
+    const auto c = trunc_i32(static_cast<float>(maximum[t]) * (1.0f - f) + 0.5f);  // mcx7: x86-defined when out of range
     counter[t] = c > 0 ? c : 0;
     return maximum[t] == 0;
 }

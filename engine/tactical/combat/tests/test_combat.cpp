@@ -127,6 +127,7 @@ int main(int argc, char** argv) {
     test_surface_fx_terrain_modifiers();  // trn1 t02
     test_surface_fx_converted_and_save();
     test_surface_fx_two_instances();
+    test_surface_fx_fifth_instance();  // mcx4 t17
     test_ion_stun_water_kill();  // trn1 t04
     test_stun_visuals();         // vis1 t08
     test_base_shield_contact();  // vis1 t08
