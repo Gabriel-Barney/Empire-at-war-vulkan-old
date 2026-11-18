@@ -848,6 +848,8 @@ static void test_sandbox_spawner_reward() {
         ts.destroy(h2);
         run(3);
         const double c2 = credits();
+        ByteWriter saved;  // mid-battle save: Sim_Hut paid, Sim_Den / Sim_Mute alive (story save v9 keeps the objectives)
+        ss->write(saved);
         ts.destroy(d1);
         run(3);
         const double c3 = credits();
@@ -863,6 +865,40 @@ static void test_sandbox_spawner_reward() {
         }
         ss->end_battle(pEmpire, host.frame());
         CHECK(host.end_game_mode());
+        if (space) continue;
+        // The save loads (pass 1, the battle rebuilt, pass 2): the restored objectives pay Sim_Den once and Sim_Hut never
+        // again.
+        SimHost host2(w.types, js, cfg);
+        GalacticSim* gs2 = host2.start_galactic(r, su);
+        CHECK(gs2 != nullptr);
+        if (!gs2) return;
+        host2.tick_once();
+        CHECK(host2.start_story(st, nullptr) && host2.story());
+        StorySession* s2 = host2.story();
+        if (!s2) return;
+        ByteReader pass1(saved.bytes());
+        CHECK(s2->read(pass1));
+        GameMode& mode2 = host2.start_game(ModeKind::Land);
+        objects::ObjectStore& ts2 = mode2.primary();
+        const objects::ObjectHandle d2 = spawn_at(ts2, den, pUnder, {100, 0, 0});
+        spawn_at(ts2, mute, pUnder, {150, 0, 0});
+        StoryBattleStart bs2 = bs;
+        bs2.store = &ts2;
+        s2->begin_battle(bs2, host2.frame(), &diag);
+        ByteReader pass2(saved.bytes());
+        CHECK(s2->read(pass2));
+        const auto run2 = [&host2](int n) {
+            for (int i = 0; i < n; ++i) host2.tick_once();
+        };
+        run2(3);
+        const double r0 = static_cast<double>(gs2->credits(pEmpire));
+        ts2.destroy(d2);
+        run2(3);
+        const double r1 = static_cast<double>(gs2->credits(pEmpire));
+        std::printf("  mcx4 sandbox spawners after load: +%.0f then +%.0f\n", r0 - 100.0, r1 - r0);
+        CHECK(r0 == 100.0 && r1 - r0 == 500.0);
+        s2->end_battle(pEmpire, host2.frame());
+        CHECK(host2.end_game_mode());
     }
     std::error_code ec;
     remove_all_long(root, ec);

@@ -1057,8 +1057,8 @@ struct GalacticSimTokenResolver::Impl {
     // kept when they have an edge either way with another one; all-pairs shortest paths (k outermost, an entry replaced
     // when still -1 or strictly shorter, so ties keep the first path); every planet strictly inside the shortest path of
     // an ordered pair (internal: u < v only) counts 1; value = count / the largest count (0 when that is 0).
-    // [port] computed when a leaf asks (cache life 15 s) instead of on each derived-owner change: the two differ only
-    // while a planet's political control is 0 (the frames right after a capture).
+    // [port] computed when a leaf asks (cache life 15 s) instead of on each derived-owner change: retail keeps the
+    // values of the last owner change, so the two differ when a planet's control crosses 0 without one.
     std::vector<double> connectivity(int32_t player, bool internal) const {
         const size_t n = planets.size();
         std::vector<double> value(n, -1.0);

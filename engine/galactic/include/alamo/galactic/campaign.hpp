@@ -1514,6 +1514,8 @@ private:
     PathScratch scratch_;
     std::vector<Derived> derived_;   // per planet row (parallel derivation output)
     bool emit_events_ = false;
+    // mcx4 Q4: true only inside destroy_object_auto_resolve (not state, not hashed or saved): tags ObjectDestroyed.
+    bool destroy_auto_resolve_ = false;
     ScoringHooks scoring_hooks_;  // storyb t14
     ObjectHandle last_spawn_;  // newest object made by spawn() (event payloads only, never hashed)
     std::vector<GalacticEvent> events_;  // S4 stream (not hashed)
@@ -1528,7 +1530,6 @@ private:
     InstallmentHook installment_hook_;
     // OI galactic (hashed in the "OIG1" tail once non-default)
     std::vector<int32_t> stealthed_;      // ObjectIds with the galactic stealth byte set, ascending
-    bool destroy_auto_resolve_ = false;   // mcx4 Q4: set only inside destroy_object_auto_resolve (not state)
     std::vector<int32_t> ground_shy_;     // cu8f t04b: ObjectIds with Prefer_Ground_Over_Space false, ascending
     std::vector<VictoryClaim> claims_;    // declaration order
     int32_t victory_hold_ = 0;            // story t11: galactic monitor hold (+0x5c)

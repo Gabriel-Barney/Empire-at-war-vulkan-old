@@ -785,6 +785,11 @@ private:
         int32_t player = -1;
         uint32_t number = 0;
         std::string file;
+        // v9 (mcx4 t09): the sandbox spawner objectives (Tactical::sandbox*); has_sandbox false = an older save
+        bool has_sandbox = false, sandbox = false, sandbox_built = false;
+        int32_t sandbox_player = -1;
+        std::vector<uint32_t> sandbox_types;
+        std::vector<uint8_t> sandbox_paid;
     };
     std::unique_ptr<TacticalResume> resume_tactical_;
     void attach_tactical(const StoryBattleStart& s, uint64_t frame);  // tactical_ for a battle (begin_battle)

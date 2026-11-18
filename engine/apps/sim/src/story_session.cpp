@@ -184,8 +184,7 @@ struct StorySession::Tactical {
     std::vector<Pending> pending;
     // mcx4 t09 (MCX4_GAL2_RE_ANSWERS Q5): the sandbox plot's spawner objectives (SET_SANDBOX_OBJECTIVES builder 0x32bd10)
     // of a campaign land battle, run here without the sandbox plot files: armed by begin_battle, built at story time
-    // 2 s, one entry per hostile spawner type. [port] not saved: a resumed battle builds the list again 2 s after the
-    // load from the live spawners (a type already paid has none left, so it is not paid twice).
+    // 2 s, one entry per hostile spawner type. Saved with the tactical story (v9).
     bool sandbox = false, sandbox_built = false;
     int32_t sandbox_player = -1;
     std::vector<objects::TypeIndex> sandbox_types;
@@ -1871,9 +1870,18 @@ bool StorySession::begin_battle(const StoryBattleStart& s, uint64_t frame, std::
         const TacticalResume res = std::move(*resume_tactical_);
         resume_tactical_.reset();
         attach_tactical(s, frame);
-        // mcx4 t09: the saved battle's kind; [port] whether it was a LINK_TACTICAL battle is not saved.
-        tactical_->sandbox = battle_ && battle_->kind != static_cast<int32_t>(galactic::ConflictKind::Space) && !s.multiplayer;
-        tactical_->sandbox_player = sim_->local_player();
+        // mcx4 t09: the saved sandbox state (v9); an older save: from the saved battle's kind ([port] a LINK_TACTICAL
+        // battle of a v8 save is not recognised).
+        if (res.has_sandbox) {
+            tactical_->sandbox = res.sandbox;
+            tactical_->sandbox_built = res.sandbox_built;
+            tactical_->sandbox_player = res.sandbox_player;
+            tactical_->sandbox_types.assign(res.sandbox_types.begin(), res.sandbox_types.end());
+            tactical_->sandbox_paid = res.sandbox_paid;
+        } else {
+            tactical_->sandbox = battle_ && battle_->kind != static_cast<int32_t>(galactic::ConflictKind::Space) && !s.multiplayer;
+            tactical_->sandbox_player = sim_->local_player();
+        }
         if (!res.has_set) return false;
         if (!s.store || !files_) {
             note("story: the resumed battle's tactical plots " + res.file + " cannot load (no store / file provider)");
@@ -2464,7 +2472,7 @@ namespace {
 
 // 2 (stage 2): + the attached tactical story; 3 (q6 t14): + the holocron list (GALACTIC_DIALOGS §2.8). 1 and 2 still load
 // (with an empty holocron); 3 loads with default STY1 state.
-constexpr uint32_t kStorySaveVersion = 8;  // 8 (mcx6 review): each definition edit's tactical flag, the RANDOM_STORY stream after the edits; 7 (mcx6 t03): the battle snapshot without its CategoryMask list / base flag, + the orbit record's Ship_Class lists after the STY1 block; 6 (mcx6): + the definition edits after the clock, the mcx6 story gates at the end of the STY1 block; 5 (ui2 t06): + the DISABLE_RETREAT switches at the end of the STY1 block; 4 (STY1 lane B): + the story rule gates / tutorial state / reinforcement switches
+constexpr uint32_t kStorySaveVersion = 9;  // 9 (mcx4 t09): the tactical story's sandbox spawner objectives after its bridge; 8 (mcx6 review): each definition edit's tactical flag, the RANDOM_STORY stream after the edits; 7 (mcx6 t03): the battle snapshot without its CategoryMask list / base flag, + the orbit record's Ship_Class lists after the STY1 block; 6 (mcx6): + the definition edits after the clock, the mcx6 story gates at the end of the STY1 block; 5 (ui2 t06): + the DISABLE_RETREAT switches at the end of the STY1 block; 4 (STY1 lane B): + the story rule gates / tutorial state / reinforcement switches
 // "story.lua" (write_scripts): 1 galactic sets, 2 + the tactical set, 3 = 2 (it followed kStorySaveVersion), 4 (q6 t19):
 // each script's Lua state is a script block (alamo/lua/script_save.hpp, LUA_SAVE.md §2) instead of a bare LuaVm image.
 constexpr uint32_t kStoryScriptsVersion = 4;
@@ -2643,6 +2651,10 @@ void StorySession::write(ByteWriter& w) const {
     }
     w.boolean(t.own_bridge != nullptr);
     if (t.own_bridge) put_section(w, [&t](ByteWriter& sub) { write_system(*t.own_bridge, sub); });
+    // v9 (mcx4 t09): the sandbox spawner objectives.
+    w.boolean(t.sandbox).boolean(t.sandbox_built).i32(t.sandbox_player).u32(static_cast<uint32_t>(t.sandbox_types.size()));
+    for (size_t i = 0; i < t.sandbox_types.size(); ++i)
+        w.u32(static_cast<uint32_t>(t.sandbox_types[i])).u8(i < t.sandbox_paid.size() ? t.sandbox_paid[i] : uint8_t{0});
 }
 
 bool StorySession::read(ByteReader& r) {
@@ -2860,6 +2872,17 @@ bool StorySession::read(ByteReader& r) {
         }
         has_own = r.boolean();
         if (has_own) own_bridge = r.raw(r.u32());
+        if (version >= 9) {  // mcx4 t09
+            tac_id.has_sandbox = true;
+            tac_id.sandbox = r.boolean();
+            tac_id.sandbox_built = r.boolean();
+            tac_id.sandbox_player = r.i32();
+            const uint32_t n = read_count(r);
+            for (uint32_t i = 0; i < n && r.ok(); ++i) {
+                tac_id.sandbox_types.push_back(r.u32());
+                tac_id.sandbox_paid.push_back(r.u8());
+            }
+        }
     }
     if (!r.ok() || !r.done()) return false;
     if (tactical_ && (!has_tac || has_set != (tactical_->set != nullptr) || has_own != (tactical_->own_bridge != nullptr)))
@@ -2917,6 +2940,13 @@ bool StorySession::read(ByteReader& r) {
         tactical_->start_frame = tac_start;
         tactical_->spf = tac_spf;
         tactical_->pending = std::move(pending);
+        if (tac_id.has_sandbox) {  // mcx4 t09 (v9)
+            tactical_->sandbox = tac_id.sandbox;
+            tactical_->sandbox_built = tac_id.sandbox_built;
+            tactical_->sandbox_player = tac_id.sandbox_player;
+            tactical_->sandbox_types.assign(tac_id.sandbox_types.begin(), tac_id.sandbox_types.end());
+            tactical_->sandbox_paid = tac_id.sandbox_paid;
+        }
         if (Set* s = tactical_->set.get()) {
             s->credits_seen = tac_set.credits_seen;
             s->last_credits = tac_set.last_credits;
