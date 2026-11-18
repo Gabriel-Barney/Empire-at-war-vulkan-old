@@ -418,6 +418,19 @@ static void test_builder() {
     vis = {1, 1, 1};
     b.build(h, models, main, bg, &st);
     CHECK(st.bone_hidden_meshes == 0 && (main[0].mesh_hidden.empty() || main[0].mesh_hidden[1] == 0));
+    // mcx6 t04 Hide_Sub_Object: the named mesh (any case) hidden on that object only; the mask the shadow and selection
+    // passes share. Shown again when the name is gone.
+    std::vector<std::string> hidden_names = {"flag"};
+    b.set_hidden_mesh_source([&](objects::ObjectId id) {
+        return id == 9 ? std::span<const std::string>(hidden_names) : std::span<const std::string>();
+    });
+    b.build(h, models, main, bg, &st);
+    CHECK(main.size() == 1 && main[0].mesh_hidden.size() >= 2 && main[0].mesh_hidden[0] == 0 && main[0].mesh_hidden[1] == 1);
+    CHECK(st.script_hidden_meshes == 1);
+    hidden_names.clear();
+    b.build(h, models, main, bg, &st);
+    CHECK(st.script_hidden_meshes == 0 && (main[0].mesh_hidden.empty() || main[0].mesh_hidden[1] == 0));
+    b.set_hidden_mesh_source({});
     // R4 ALT selection: every alternate uploaded (kAnyAlt), the default look keeps alt 0.
     const render::MeshSelection all = render::select_meshes_all_lods(*gm.asset, render::kAnyAlt, true, nullptr);
     CHECK(all.mesh_visible == std::vector<uint8_t>({1, 1, 1}) && all.alt == 0);

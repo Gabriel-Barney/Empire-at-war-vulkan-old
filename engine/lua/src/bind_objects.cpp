@@ -3647,7 +3647,7 @@ void ObjectBridge::hash(StateHasher& h) const {
 // ---- N1 save / load ----
 
 namespace {
-constexpr uint32_t kBridgeSaveVersion = 2;  // 2: S7 t15 A1 ability-signal counts
+constexpr uint32_t kBridgeSaveVersion = 3;  // 2: S7 t15 A1 ability-signal counts; 3: mcx6 t04 hidden sub-objects (2 still reads)
 // ScriptObjectState's flags in save order (shared by write and read).
 template <class S>
 auto bridge_flags(S& s) {
@@ -3683,10 +3683,20 @@ void ObjectBridge::write(ByteWriter& w) const {
     }
     w.u32(static_cast<uint32_t>(ability_signals_.size()));
     for (const auto& [id, n] : ability_signals_) w.i32(id).u32(n);
+    // Version 3: the objects with hidden sub-objects (Hide_Sub_Object), id order.
+    uint32_t with_hidden = 0;
+    for (const auto& [id, s] : states_) with_hidden += s.hidden_sub_objects.empty() ? 0u : 1u;
+    w.u32(with_hidden);
+    for (const auto& [id, s] : states_) {
+        if (s.hidden_sub_objects.empty()) continue;
+        w.i32(id).u32(static_cast<uint32_t>(s.hidden_sub_objects.size()));
+        for (const std::string& m : s.hidden_sub_objects) w.str(m);
+    }
 }
 
 bool ObjectBridge::read(ByteReader& r) {
-    if (r.u32() != kBridgeSaveVersion || !r.ok()) return false;
+    const uint32_t version = r.u32();
+    if ((version != kBridgeSaveVersion && version != 2) || !r.ok()) return false;
     const uint32_t orders = r.u32();
     uint32_t n = r.u32();
     if (!r.ok() || n > r.remaining() / 40) return false;
@@ -3766,6 +3776,19 @@ bool ObjectBridge::read(ByteReader& r) {
         const uint32_t k = r.u32();
         if (!r.ok() || (!ability_signals.empty() && id <= ability_signals.rbegin()->first)) return false;
         ability_signals.emplace(id, k);
+    }
+    if (version >= 3) {  // mcx6 t04: hidden sub-objects
+        n = r.u32();
+        if (!r.ok() || n > r.remaining() / 8) return false;
+        ObjectId last = 0;
+        for (uint32_t i = 0; i < n; ++i) {
+            const ObjectId id = r.i32();
+            const uint32_t nm = r.u32();
+            if (!r.ok() || (i > 0 && id <= last) || nm == 0 || nm > r.remaining() / 4) return false;
+            last = id;
+            std::vector<std::string>& v = states[id].hidden_sub_objects;
+            for (uint32_t k = 0; k < nm; ++k) v.push_back(r.str());
+        }
     }
     if (!r.ok()) return false;
     orders_issued = orders;

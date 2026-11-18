@@ -220,7 +220,7 @@ const alamo::game::RetailEquivalentFinding* retail_eq(const ModCheckReport& r, c
 
 // mcx0 t06: the report version 4 findings of FixtureChecks - ChecksStory.xml (a reward the port lacks, an event type it
 // dispatches partly, a reward retail does not know, a commented-out event) and Checks_Scoring.lua (a call to a binding
-// the port records without a consumer).
+// whose effect the port partly guessed).
 void test_compat_checks(const std::string& foc) {
     const ModCheckReport r = alamo::game::check_mod_data(foc, {"MODPATH=Mods\\FixtureChecks"});
     CHECK(r.loaded && r.error_count() == 0);
@@ -239,10 +239,10 @@ void test_compat_checks(const std::string& foc) {
     CHECK(retail_eq(r, "unread_tag", "factions: Checks_Unread_Faction_Tag") != nullptr);  // retail ignores it too
 
     const auto bg = std::find_if(r.binding_gaps.begin(), r.binding_gaps.end(),
-                                 [](const alamo::game::BindingGapCall& b) { return b.name == "Hide_Sub_Object"; });
+                                 [](const alamo::game::BindingGapCall& b) { return b.name == "StringCompare"; });
     CHECK(bg != r.binding_gaps.end());
     if (bg != r.binding_gaps.end()) {
-        CHECK(bg->effect == "recorded" && bg->call_sites == 1 && bg->in_mod);
+        CHECK(bg->effect == "partial" && bg->call_sites == 1 && bg->in_mod);
         CHECK(icontains(bg->first_script, "Checks_Scoring.lua"));  // the mod's file, not a base one
     }
 

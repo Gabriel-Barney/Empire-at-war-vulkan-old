@@ -151,6 +151,9 @@ public:
     // by the story and the object scripts: ScriptObjectState::hidden). A const read for the presentation side (model,
     // sound, radar, fog ghost, surface FX, mouse pick); no sim system reads it. False without a battle or a bridge.
     bool script_hidden(objects::ObjectId id) const;
+    // mcx6 t04: the sub-meshes Lua Hide_Sub_Object hid on an object of the running battle (ScriptObjectState::
+    // hidden_sub_objects, upper case). Presentation only; empty without a battle, a bridge or a hidden mesh.
+    std::span<const std::string> hidden_sub_objects(objects::ObjectId id) const;
     const std::vector<std::string>& log() const { return log_; }  // one summary per tactical battle / refusal
     // Playtest QA D1 / V1: TacticalBattle::unit_losses() of the last tactical battle that ended (presentation, not saved).
     std::span<const TacticalBattle::RemovalRecord> last_battle_losses() const { return last_losses_; }

@@ -261,7 +261,9 @@ void SimInstanceBuilder::build(const InterpolatedFrame& frame, SimModelSource& m
             bool own_muzzle = false;
             for (const SnapshotMuzzle& mzl : muzzles) own_muzzle = own_muzzle || mzl.hardpoint < 0;
             const bool stealth = (o.flags & kSnapStealthMeshes) != 0;  // R5: BASEMESH hidden, STEALTH shown (§3.7)
-            if (use_bv || own_muzzle || stealth) {
+            const std::span<const std::string> script_hidden =
+                hidden_meshes_ ? hidden_meshes_(o.id) : std::span<const std::string>();  // mcx6 t04
+            if (use_bv || own_muzzle || stealth || !script_hidden.empty()) {
                 const std::span<const uint8_t> base = s.vis.mask();
                 const size_t n = std::max(base.size(), ma.meshes.size());
                 s.combined.assign(n, 0);
@@ -327,6 +329,17 @@ void SimInstanceBuilder::build(const InterpolatedFrame& frame, SimModelSource& m
                         }
                     }
                     ++st.stealthed;
+                }
+                // mcx6 t04: Hide_Sub_Object hides the named sub-mesh of this object, whatever the masks above say.
+                for (size_t i = 0; i < ma.meshes.size() && !script_hidden.empty(); ++i) {
+                    if (s.combined[i] != 0) continue;
+                    for (const std::string& name : script_hidden)
+                        if (ascii_iequals(ma.meshes[i].name, name)) {
+                            s.combined[i] = 1;
+                            ++hidden;
+                            ++st.script_hidden_meshes;
+                            break;
+                        }
                 }
                 if (hidden || changed) {
                     s.use_combined = true;

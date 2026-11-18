@@ -635,12 +635,15 @@ static void test_bridges() {
         a.watch_ability(4);
         a.ability_finished(9);
         a.ability_finished(9);
+        a.state(2).hidden_sub_objects = {"GUN", "NEWGUN"};  // mcx6 t04 (bridge save version 3)
         ByteWriter w;
         a.write(w);
         ObjectBridge b;
         ByteReader r(w.bytes());
         CHECK(b.read(r) && r.done());
         CHECK(b.ability_signals(9) == 2 && b.ability_signals(4) == 0 && b.watch_ability(4) == 0);
+        CHECK(b.find_state(2) && b.find_state(2)->hidden_sub_objects == std::vector<std::string>({"GUN", "NEWGUN"}));
+        CHECK(b.find_state(7) == nullptr || b.find_state(7)->hidden_sub_objects.empty());
         StateHasher ha, hb;
         a.hash(ha);
         b.hash(hb);

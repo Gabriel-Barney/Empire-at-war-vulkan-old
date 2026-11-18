@@ -4,7 +4,7 @@ function Base_Definitions()
     GlobalValue.Set("CHECKS_MOD_ID", "Checks")
 end
 
--- mcx0: a call to a binding the port records without a consumer (binding ledger "recorded"); never run.
-function Checks_Hide(obj)
-    Hide_Sub_Object(obj, 1, "Checks_Part")
+-- mcx0: a call to a binding with an effect gap (binding ledger "partial": the port guessed part of it); never run.
+function Checks_Compare(a, b)
+    return StringCompare(a, b)
 end

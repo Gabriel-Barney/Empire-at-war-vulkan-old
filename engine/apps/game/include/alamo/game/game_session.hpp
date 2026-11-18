@@ -42,6 +42,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -212,6 +213,10 @@ public:
     // Presentation only: the model, its particles, surface FX and fog ghost, the object's sounds, its radar blip and the
     // mouse pick skip it; nothing here feeds the sim.
     bool script_hidden(objects::ObjectId id) const { return battles_ && battles_->script_hidden(id); }
+    // mcx6 t04: Lua Hide_Sub_Object on an object of the running battle (CampaignBattles::hidden_sub_objects).
+    std::span<const std::string> hidden_sub_objects(objects::ObjectId id) const {
+        return battles_ ? battles_->hidden_sub_objects(id) : std::span<const std::string>();
+    }
     int32_t local_player() const { return local_player_; }
     // Does the battle view draw the local player's FOW grid and the HideWhenFogged marks? Not in the attract demo: the
     // original films it with the in-game cinematic camera, and every cinematic shot start (0x49b1a0) clears the FOW render

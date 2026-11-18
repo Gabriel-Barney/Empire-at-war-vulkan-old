@@ -204,6 +204,10 @@ struct ScriptObjectState {
     std::string animation;            // Play_Animation (name, loop, index): for the presentation side
     bool animation_loop = false;
     int32_t animation_index = -1;
+    // mcx6 t04: Hide_Sub_Object (STORYB_T17_HIDDEN_UNITS.md §1.1: the named sub-mesh of this object is hidden): the
+    // hidden mesh names, upper case, sorted. Presentation only: drawn by the renderer (render, shadow and selection
+    // passes), saved with the bridge, not in the state hash.
+    std::vector<std::string> hidden_sub_objects;
     std::map<uint8_t, AbilityState> abilities;  // by UnitAbilityType id (OBJECT_TYPES.md §9.1.4)
 };
 

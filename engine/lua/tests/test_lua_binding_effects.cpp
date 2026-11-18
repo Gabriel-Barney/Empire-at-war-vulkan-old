@@ -23,7 +23,6 @@ constexpr std::string_view kUnconsumed[] = {
     "GameObjectWrapper.In_End_Cinematic",
     "GameObjectWrapper.Play_Cinematic_Engine_Flyby",
     "GameObjectWrapper.Show_Emitter",
-    "Hide_Sub_Object",
     "Promote_To_Space_Cinematic_Layer",
     "Resume_Hyperspace_In",
     "Set_Cinematic_Environment",

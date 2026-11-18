@@ -420,6 +420,8 @@ bool BattleView::start(GpuCore& gpu, const GameData& data, const GameSession& se
         return poses_.visibility(id, m.asset->skeleton.size());
     });
 #endif
+    // mcx6 t04 (binding-consumer: Hide_Sub_Object): the sub-meshes Lua hid on an object (the app's session outlives the view).
+    builder_->set_hidden_mesh_source([s = &session](objects::ObjectId id) { return s->hidden_sub_objects(id); });
 #ifdef ALAMO_PARTICLES_HAVE_SIM
     pworld_ = std::make_unique<render::particles::ParticleWorld>(1u << 21);
     plib_ = std::make_unique<render::particles::ParticleLibrary>(data.files.get());

@@ -74,7 +74,7 @@
 {BindingKind::Global, "GiveDesireBonusClass", "GiveDesireBonus", 5, BindingEffect::Partial, "[inferred] bind_players.cpp:823"},
 {BindingKind::Global, "", "GlobalValue", 0, BindingEffect::Full, ""},
 {BindingKind::Global, "LuaHideObject", "Hide_Object", 6, BindingEffect::Partial, "[inferred] bind_objects.cpp:1119"},
-{BindingKind::Global, "LuaHideSubObject", "Hide_Sub_Object", 279, BindingEffect::Recorded, ""},
+{BindingKind::Global, "LuaHideSubObject", "Hide_Sub_Object", 279, BindingEffect::Recorded, "engine/apps/game/app/game_render.cpp"},
 {BindingKind::Global, "IsCampaignGameClass", "Is_Campaign_Game", 0, BindingEffect::Full, ""},
 {BindingKind::Global, "LuaIsMultiplayerMode", "Is_Multiplayer_Mode", 2, BindingEffect::Full, ""},
 {BindingKind::Global, "IsPointInAsteroidFieldClass", "Is_Point_In_Asteroid_Field", 0, BindingEffect::Full, ""},

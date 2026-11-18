@@ -114,6 +114,18 @@ bool CampaignBattles::script_hidden(objects::ObjectId id) const {
 #endif
 }
 
+std::span<const std::string> CampaignBattles::hidden_sub_objects(objects::ObjectId id) const {
+#ifdef ALAMO_SIM_HAVE_STORY
+    if (!battle_ || !story_bridge_) return {};
+    const lua::ScriptObjectState* s = story_bridge_->find_state(id);
+    if (!s) return {};
+    return s->hidden_sub_objects;
+#else
+    (void)id;
+    return {};
+#endif
+}
+
 bool CampaignBattles::attach(std::vector<std::string>* diag) {
     GalacticMode* g = host_->galactic_mode();
     if (!g || !g->sim()) {

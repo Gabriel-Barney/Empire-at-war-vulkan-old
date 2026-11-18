@@ -71,6 +71,7 @@ struct SimInstanceStats {
     uint32_t fog_faded_out = 0;     // R5: not drawn because their fog alpha fell below kFogHideAlpha
     uint32_t alt_nonzero = 0;       // R4: drawn with a damage alternate (Instance::alt != 0)
     uint32_t bone_hidden_meshes = 0;  // R3: meshes hidden by the clip's per-bone visibility
+    uint32_t script_hidden_meshes = 0;  // mcx6 t04: meshes hidden by Hide_Sub_Object
     uint32_t hardpoint_events = 0;  // R5: hardpoint destructions applied from the frame's events
     uint32_t contained = 0;         // R3: kSnapContained objects (not drawn)
     uint32_t script_hidden = 0;     // q6 t19: Lua Hide(true) objects (SnapshotObject::script_hidden: not drawn, no ghost)
@@ -112,6 +113,11 @@ public:
     // visible. Same call rules as the pose source.
     using VisibilitySource = std::function<std::span<const uint8_t>(objects::ObjectId id, const GpuModel& model)>;
     void set_visibility_source(VisibilitySource fn) { visibility_ = std::move(fn); }
+    // mcx6 t04: Lua Hide_Sub_Object (STORYB_T17_HIDDEN_UNITS.md §1.1): the mesh names (upper case) hidden on one object;
+    // a mesh of the drawn model with one of those names (any case) is not drawn, so the render, shadow and selection
+    // passes, which share the instance's mesh mask, leave it out. Empty span = none. Same call rules as the pose source.
+    using HiddenMeshSource = std::function<std::span<const std::string>(objects::ObjectId id)>;
+    void set_hidden_mesh_source(HiddenMeshSource fn) { hidden_meshes_ = std::move(fn); }
     // R5 HideWhenFogged presentation (ABILITY_VISUALS 1.4, 0x53ddc0): kSnapFogHidden objects fade out with the critically
     // damped spring of smooth time kFogSpringTime (0.25 s: omega 8 / s), stepped once per new sim tick at dt = 1/30, and
     // are not drawn once their alpha is below kFogHideAlpha (0.025). Types with Last_State_Visible_Under_FOW (type +0x88)
@@ -186,6 +192,7 @@ private:
     bool show_damage_ = false;
     PoseSource pose_;  // R3
     VisibilitySource visibility_;  // R3
+    HiddenMeshSource hidden_meshes_;  // mcx6 t04
     float fog_smooth_time_ = kFogSpringTime;  // R5
     int32_t blob_detail_ = -1;                 // vis1 t02
     AttachmentPoseSource attach_pose_;  // R3 T6

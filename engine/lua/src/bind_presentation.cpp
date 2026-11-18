@@ -565,7 +565,17 @@ int g_hide_sub_object(Call& c) {
     if (!c.is_string(3)) return c.script_error_stop("LuaHideSubObject -- invalid type for parameter 3. Expected string.");
     record(c, PresentationOp::HideSubObject);
     const int32_t id = engine_ud(c, 1)->id;
-    state(c).hidden_sub_objects[std::to_string(id) + "|" + ascii_upper(c.string(3))] = c.number(2) != 0.0;
+    const std::string mesh = ascii_upper(c.string(3));
+    const bool hide = c.number(2) != 0.0;
+    state(c).hidden_sub_objects[std::to_string(id) + "|" + mesh] = hide;
+    // mcx6 t04: the object's own state, which the renderer reads (CampaignBattles::hidden_sub_objects).
+    if (ObjectBridge* b = c.vm->owner ? attached_object_bridge(*c.vm->owner) : nullptr) {
+        std::vector<std::string>& v = b->state(id).hidden_sub_objects;
+        const auto it = std::lower_bound(v.begin(), v.end(), mesh);
+        const bool listed = it != v.end() && *it == mesh;
+        if (hide && !listed) v.insert(it, mesh);
+        else if (!hide && listed) v.erase(it);
+    }
     return 0;
 }
 
