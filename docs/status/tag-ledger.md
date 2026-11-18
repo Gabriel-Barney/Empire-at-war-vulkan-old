@@ -13,7 +13,7 @@ the field belongs to another class that the port reads, `docs/re/XML_FIELD_TABLE
 `stored` tag that a mod sets is an
 honour gap in `alamo_mod_check` report v4. Work order (§7.2): tier 1 with the most corpus mods, then base FoC uses.
 
-Totals: 2866 rows; unread 97, stored 346, consumed 1959, verified 248, retail-unused 140, out-of-scope 70, misfiled 6.
+Totals: 2866 rows; unread 97, stored 344, consumed 1959, verified 250, retail-unused 140, out-of-scope 70, misfiled 6.
 
 ## Per class
 
@@ -29,7 +29,7 @@ Totals: 2866 rows; unread 97, stored 346, consumed 1959, verified 248, retail-un
 | Event | 39 | 3 | 0 | 36 | 0 | 0 | 0 | 0 |
 | Audio | 35 | 0 | 0 | 35 | 0 | 0 | 0 | 0 |
 | SFXEvent | 35 | 0 | 0 | 35 | 0 | 0 | 0 | 0 |
-| Unit_Ability | 35 | 0 | 2 | 29 | 4 | 0 | 0 | 0 |
+| Unit_Ability | 35 | 0 | 0 | 29 | 6 | 0 | 0 | 0 |
 | Combat_Bonus_Ability | 30 | 0 | 6 | 24 | 0 | 0 | 0 | 0 |
 | Arc_Sweep_Attack_Ability | 26 | 0 | 7 | 19 | 0 | 0 | 0 | 0 |
 | Force_Healing_Ability | 24 | 0 | 0 | 24 | 0 | 0 | 0 | 0 |
@@ -139,12 +139,10 @@ base-FoC parity gaps as well as mod gaps (`mcx4`).
 | GameObjectType | Hides_When_Built_On | 0x0 | stored | 35 | docs/re/L1_S4_REMAINING.md |
 | GameObjectType | Cinematic_Anim_Blend_Seconds | 0x8 | stored | 34 | docs/re/ANIM_PARTICLES.md |
 | GameObjectType | Cinematic_Anim_Speed | 0x8 | stored | 34 | docs/re/ANIM_PARTICLES.md |
-| Unit_Ability | Alternate_Description_Text | 0x17 | stored | 34 | docs/re/MCX4_PRES_RE_ANSWERS_2.md |
 | GameObjectType | Barrel_Bone_Name | 0x17 | stored | 33 | docs/re/MCX4_T15_RE_ANSWERS.md |
 | GameObjectType | Pause_During_Cinematic_Anim | 0x0 | stored | 33 | docs/re/MCX4_T15_RE_ANSWERS.md |
 | HardPoint | Barrel_Bone_Name | 0x17 | unread | 33 | docs/re/MCX4_T15_RE_ANSWERS.md |
 | GameObjectType | Begin_Turn_Towards_Distance | 0x8 | stored | 32 | docs/re/MCX4_T11_T12_RE_ANSWERS.md |
-| Unit_Ability | Alternate_Name_Text | 0x17 | stored | 31 | docs/re/MCX4_PRES_RE_ANSWERS_2.md |
 | GameObjectType | Corruption_1_Failure_Bink_Hologram_Name | 0x17 | stored | 30 | docs/re/MCX4_T14_RE_ANSWERS.md |
 | GameObjectType | Corruption_1_Failure_Speech_Event | 0x20 | stored | 30 | docs/re/MCX4_T13_RE_ANSWERS.md |
 | CommandBarComponent | Swap_Texture | 0x50 | unread | 29 | docs/re/MCX4_T14_RE_ANSWERS.md |
@@ -761,5 +759,5 @@ Per class: `Tag` (state, consumer files; x = retail-unused, o = out-of-scope, f 
 - **Tactical_Bribe_Ability**: `Bribed_Effect` (s), `Bribed_Effect_Small` (s), `Effect_Z_Offset` (s), `SFXEvent_Success` (v 1), `SFXEvent_Fail` (v 1), `Detonation_Time_In_Secs` (c 1), `Bomb_Type` (c 1), `Number_Of_Bombs` (c 1)
 - **Tractor_Beam_Attack_Ability**: `Target_Speed_Decrease_Percent` (c 1), `Stacking_Category` (c 2), `Target_Damage_Increase_Percent` (c 1), `Activation_Min_Range` (c 1), `Activation_Max_Range` (c 1), `Damage_Amount` (c 2), `Damage_Application_Time_In_Secs` (x), `Start_Lightning_Frame_Number` (s), `Lightning_Effect_Name` (s), `Catch_Dist` (c 1), `Saber_Name` (c 1), `Force_Cloak_Color` (c 1), `Force_Cloak_Transition_In_Secs` (c 1), `Bounty_Percentage_Amount` (c 1), `Duration_In_Secs` (c 2), `Object_Type` (c 1), `Creation_Delay_In_Seconds` (c 1), `SFXEvent_Unit_Summoned` (v 1), `Duration_In_Seconds` (c 1), `Shield_Drain_Per_Second` (c 1), `Inaccuracy_Radius` (s)
 - **TradeRoute**: `Point_A` (c 1), `Point_B` (c 1), `Political_Control_Gain` (c 1), `Credit_Gain_Factor` (c 1), `HS_Speed_Factor` (c 1), `Vessel_Speed` (u), `Visible_Line_Name` (c 1), `Width` (c 1), `Color_Zoomed_Out` (c 1), `Color_Zoomed_In` (c 1), `Render_Mode` (c 1), `Texture_Name` (c 1), `Spark_Texture_Name` (c 1), `Color` (c 1), `Space_Position_RightBottom` (u), `Space_Position_LeftTop` (u), `Land_Position_RightBottom` (u), `Land_Position_LeftTop` (u)
-- **Unit_Ability**: `Active_By_Default` (c 1), `Effective_Radius` (c 1), `Recharge_Seconds` (c 1), `Expiration_Seconds` (c 1), `Is_Pulsing` (c 1), `Pulse_Frequency_Secs` (c 1), `Target_Types` (c 1), `Max_Number_Of_Pulses` (c 1), `Particle_Effect` (c 1), `GUI_Activated_Ability_Name` (c 3), `Mod_Multiplier` (c 1), `Mod_Flag` (c 1), `Spawned_Object_Type` (c 1), `Max_Num_Spawned_Objects` (c 1), `Area_Effect_Decal_Distance` (c 1), `Bomb_Countdown_Seconds` (c 1), `Projectile_Types_Override` (c 1), `Targeting_Max_Attack_Distance` (c 3), `Owner_Attachment_Bone` (c 1), `Disable_Movement` (c 1), `Armor_Type` (c 3), `SFXEvent_Target_Ability` (v 1), `SFXEvent_GUI_Unit_Ability_Activated` (v 1), `SFXEvent_GUI_Unit_Ability_Deactivated` (v 1), `SFXEvent_Special_Ability_Loop` (v 1), `Friendly_Ability` (c 1), `Targeting_Fire_Inaccuracy_Fixed_Radius_Override` (c 1), `Target_Position_Z_Offset` (c 1), `Stop_When_Activated` (c 1), `Alternate_Name_Text` (s), `Alternate_Description_Text` (s), `Alternate_Icon_Name` (c 3), `Must_Be_Bought_On_Black_Market` (c 3), `Damage_Percent_When_Activated` (c 1), `Supports_Autofire` (c 1)
+- **Unit_Ability**: `Active_By_Default` (c 1), `Effective_Radius` (c 1), `Recharge_Seconds` (c 1), `Expiration_Seconds` (c 1), `Is_Pulsing` (c 1), `Pulse_Frequency_Secs` (c 1), `Target_Types` (c 1), `Max_Number_Of_Pulses` (c 1), `Particle_Effect` (c 1), `GUI_Activated_Ability_Name` (c 3), `Mod_Multiplier` (c 1), `Mod_Flag` (c 1), `Spawned_Object_Type` (c 1), `Max_Num_Spawned_Objects` (c 1), `Area_Effect_Decal_Distance` (c 1), `Bomb_Countdown_Seconds` (c 1), `Projectile_Types_Override` (c 1), `Targeting_Max_Attack_Distance` (c 3), `Owner_Attachment_Bone` (c 1), `Disable_Movement` (c 1), `Armor_Type` (c 3), `SFXEvent_Target_Ability` (v 1), `SFXEvent_GUI_Unit_Ability_Activated` (v 1), `SFXEvent_GUI_Unit_Ability_Deactivated` (v 1), `SFXEvent_Special_Ability_Loop` (v 1), `Friendly_Ability` (c 1), `Targeting_Fire_Inaccuracy_Fixed_Radius_Override` (c 1), `Target_Position_Z_Offset` (c 1), `Stop_When_Activated` (c 1), `Alternate_Name_Text` (v 2), `Alternate_Description_Text` (v 2), `Alternate_Icon_Name` (c 3), `Must_Be_Bought_On_Black_Market` (c 3), `Damage_Percent_When_Activated` (c 1), `Supports_Autofire` (c 1)
 - **WeatherAudio**: `Weather_SFXEvent_Loop` (c 1), `Weather_SFXEvent_Intermittent` (c 1), `Ambient_SFXEvent_Intermittent` (c 1)

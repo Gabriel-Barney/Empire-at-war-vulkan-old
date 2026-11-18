@@ -366,6 +366,8 @@ bool parse_unit_ability(const data::XmlNode& e, UnitAbilityRecord& out, const Ab
     out.pulse_frequency_secs = f_or(e, "Pulse_Frequency_Secs", 0.0f);
     out.max_pulses = i_or(e, "Max_Number_Of_Pulses", 0);
     out.alternate_icon_name = s_or(e, "Alternate_Icon_Name");
+    out.alternate_name_text = s_or(e, "Alternate_Name_Text");                // mcx4 t14 (GUI only)
+    out.alternate_description_text = s_or(e, "Alternate_Description_Text");  // mcx4 t14 (GUI only)
     out.gui_activated_ability_name = s_or(e, "GUI_Activated_Ability_Name");
     out.gui_name_crc = out.gui_activated_ability_name.empty() ? 0u : name_crc(out.gui_activated_ability_name);
     out.spawned_object_type = s_or(e, "Spawned_Object_Type");

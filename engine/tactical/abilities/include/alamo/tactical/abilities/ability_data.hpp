@@ -46,6 +46,9 @@ struct UnitAbilityRecord {
     float pulse_frequency_secs = 0.0f;  // Pulse_Frequency_Secs (+0x30)
     int32_t max_pulses = 0;             // Max_Number_Of_Pulses (+0x34)
     std::string alternate_icon_name;         // Alternate_Icon_Name: button art instead of the type's (GUI only, t42)
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_2 Q5, getters 0x43f340 / 0x43ec50; GUI only): the button tooltip's name / description
+    // text IDs instead of TEXT_TOOLTIP_ABILITY_<type>_NAME / _DESCRIPTION.
+    std::string alternate_name_text, alternate_description_text;  // Alternate_Name_Text / Alternate_Description_Text
     std::string gui_activated_ability_name;  // special ability this forwards to (2.5)
     uint32_t gui_name_crc = 0;               // name_crc of it (+0x88)
     std::string spawned_object_type;
