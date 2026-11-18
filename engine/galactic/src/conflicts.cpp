@@ -596,6 +596,10 @@ void ConflictManager::run(ConflictKind kind) {
                 state_ = ConflictState::Decide;
                 continue;
             case ConflictState::Decide: {
+                if (kind == ConflictKind::Space && on_space_decide) {  // mcx6 t03: the story manager's orbit record
+                    const int32_t local = sim_->local_player();
+                    if (local != kNoPlayer && (head.attacker == local || head.defender == local)) on_space_decide(head);
+                }
                 const bool hum = human(head.attacker) || human(head.defender);
                 int32_t overrun_loser = kNoPlayer;
                 if (rules_->overrun_multiple != 0.0f) {

@@ -243,6 +243,12 @@ public:
     // the company-leader substitution) and whether it survived. Absent: nothing. The host wires it to
     // GalacticAiWorld::record_auto_resolve_survival (engine/ai); it must not change the galactic sim.
     std::function<void(int32_t owner, uint32_t type, bool survived)> on_survival_roll;
+    // mcx6 t03 (STORY.md §5 "Battle composition", BT §1.6 step 1): the decide state (4) of a SPACE conflict whose attacker
+    // or defender is the local player calls this first, before the overrun check and the fight / auto-resolve / ask
+    // choice (retail 0x2b92e0 -> the story manager's orbit record 0x449f10, single player only [port: the port is single
+    // player]). Land conflicts never call it. A host callback, not a galactic event, so the event stream is unchanged.
+    // Absent: nothing. It must not change the conflict queues.
+    std::function<void(const ConflictInfo&)> on_space_decide;
 
     // ---- ConflictHooks ----
     void on_space_conflict(PlanetIndex planet, int32_t attacker) override;

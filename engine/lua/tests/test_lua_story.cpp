@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <memory>
 #include <string>
 #include <vector>
@@ -1399,11 +1400,131 @@ static void test_tr_campaign_plots() {
 #endif
 }
 
+// mcx6 t03: one event of `type` with Event_Param1.. (nullptr = absent) in a fresh model whose plot player is `player`;
+// the number of events one dispatch of `n` fires.
+static uint32_t one_event_fires(const char* type, std::initializer_list<const char*> params, const StoryNotification& n,
+                                int32_t player = 0) {
+    std::string xml = std::string("<Story><Event Name=\"E\"><Event_Type>") + type + "</Event_Type>";
+    int i = 1;
+    for (const char* p : params) {
+        if (p) xml += "<Event_Param" + std::to_string(i) + ">" + p + "</Event_Param" + std::to_string(i) + ">";
+        ++i;
+    }
+    xml += "</Event></Story>";
+    StoryModel m;
+    std::string err;
+    CHECK(m.add_plot("One.xml", xml, true, {}, &err) == 0);
+    m.set_player(player);
+    m.update(0, 0.0);
+    return m.dispatch(type, n);
+}
+
+// mcx6 t03 (docs/re/STORY.md §5 WIN/LOSE_BATTLES row and the note "Battle composition", mcx6 Q14): the location parse
+// and the space-only Ship_Class composition test of the retail match 0x455a50.
+static void test_battle_composition_rules() {
+    StoryNotification space;
+    space.planet = "KUAT";
+    space.location = 2;
+    space.local_player = 0;
+    space.local_classes = {3, 4, 0};  // corvette, frigate, fighter
+    space.other_classes = {5, -1};    // capital, a type without Ship_Class
+    StoryNotification land = space;
+    land.location = 1;
+    const char* W = "STORY_WIN_BATTLES";
+    const auto one = [](const char* type, std::initializer_list<const char*> p, const StoryNotification& n, int32_t player = 0) {
+        return one_event_fires(type, p, n, player);
+    };
+    // Param2: absent = EITHER; SPACE; EITHER; an unknown word reads GROUND ("Land" means land, BASE_SPACE reads GROUND).
+    CHECK(one(W, {"1"}, space) == 1 && one(W, {"1"}, land) == 1);
+    CHECK(one(W, {"1", "SPACE"}, space) == 1 && one(W, {"1", "SPACE"}, land) == 0);
+    CHECK(one(W, {"1", "EITHER"}, land) == 1 && one(W, {"1", "EITHER"}, space) == 1);
+    CHECK(one(W, {"1", "Land"}, land) == 1 && one(W, {"1", "Land"}, space) == 0);
+    CHECK(one(W, {"1", "BASE_SPACE"}, land) == 1 && one(W, {"1", "BASE_SPACE"}, space) == 0);
+    // Param3 with one value: no test (the shipped FILTER_FRIENDLY_ONLY).
+    CHECK(one(W, {"1", nullptr, "FILTER_FRIENDLY_ONLY"}, space) == 1 && one(W, {"1", nullptr, "ENEMY_CONTAINS"}, space) == 1);
+    // CONTAINS: every listed class in the side's list.
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_CONTAINS CLASS_CORVETTE CLASS_FRIGATE"}, space) == 1);
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_CONTAINS CLASS_CORVETTE CLASS_CAPITAL"}, space) == 0);
+    CHECK(one(W, {"1", nullptr, "ENEMY_CONTAINS CLASS_CAPITAL"}, space) == 1);
+    CHECK(one("STORY_LOSE_BATTLES", {"1", nullptr, "ENEMY_CONTAINS CLASS_SUPER"}, space) == 0);
+    // The keywords are exact: CLASS_Corvette is unknown and reads 0 (CLASS_FIGHTER); FILTER_FRIENDLY_ONLY (1) with a
+    // second value is FRIENDLY_CONTAINS.
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_CONTAINS CLASS_Corvette"}, space) == 1);
+    CHECK(one(W, {"1", nullptr, "ENEMY_CONTAINS CLASS_Corvette"}, space) == 0);
+    CHECK(one(W, {"1", nullptr, "FILTER_FRIENDLY_ONLY CLASS_SUPER"}, space) == 0);
+    // ONLY_CONTAINS: every entry of the side's list is listed; a -1 entry never is; an empty side passes (CONTAINS fails).
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_ONLY_CONTAINS CLASS_CORVETTE CLASS_FRIGATE CLASS_FIGHTER"}, space) == 1);
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_ONLY_CONTAINS CLASS_CORVETTE CLASS_FRIGATE"}, space) == 0);
+    CHECK(one(W, {"1", nullptr, "ENEMY_ONLY_CONTAINS CLASS_CAPITAL CLASS_SUPER"}, space) == 0);
+    StoryNotification empty = space;
+    empty.local_classes.clear();
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_ONLY_CONTAINS CLASS_FIGHTER"}, empty) == 1);
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_CONTAINS CLASS_FIGHTER"}, empty) == 0);
+    // A plot of another player: FRIENDLY_* reads the other list, ENEMY_* the local one.
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_CONTAINS CLASS_CAPITAL"}, space, 1) == 1);
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_CONTAINS CLASS_FRIGATE"}, space, 1) == 0);
+    CHECK(one(W, {"1", nullptr, "ENEMY_CONTAINS CLASS_FRIGATE"}, space, 1) == 1);
+    // Land battles never test the composition.
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_CONTAINS CLASS_SUPER"}, land) == 1);
+    // The test on and no planet: a space battle does not count; a test value outside 1..4 tests nothing else.
+    StoryNotification nowhere = space;
+    nowhere.planet.clear();
+    CHECK(one(W, {"1", nullptr, "FRIENDLY_CONTAINS CLASS_CORVETTE"}, nowhere) == 0 && one(W, {"1"}, nowhere) == 1);
+    CHECK(one(W, {"1", nullptr, "FILTER_FRIENDLY_AND_ENEMY CLASS_SUPER"}, space) == 1);
+    CHECK(one(W, {"1", nullptr, "FILTER_FRIENDLY_AND_ENEMY CLASS_SUPER"}, nowhere) == 0);
+}
+
+// mcx6 t03 (docs/re/STORY.md §5 Enter family row and the note "Enter family match"): P5 hidden fleets count too, P6
+// exact composition, P7 raid fleets only, P4 any unit in orbit, no planet = nothing, no P1 = only the hidden test.
+static void test_enter_family_rules() {
+    StoryNotification f;
+    f.planet = "KUAT";
+    f.owner = 0;
+    f.units = {"TIE", "ISD"};
+    f.fleet_direct = 2;
+    f.orbit_units = {"TIE", "ISD", "XWING"};
+    StoryNotification hid = f;
+    hid.fleet_hidden = true;
+    StoryNotification nf = hid;
+    nf.no_fleet = true;
+    StoryNotification raid = f;
+    raid.fleet_raid = true;
+    StoryNotification np = f;
+    np.planet.clear();
+    const char* E = "STORY_ENTER";
+    const auto one = [](const char* type, std::initializer_list<const char*> p, const StoryNotification& n) {
+        return one_event_fires(type, p, n);
+    };
+    CHECK(one(E, {}, np) == 0);  // no planet in the dispatch
+    // No P1 names: P2 / P3 / P4 are not tested, only "hidden fleets need P5".
+    CHECK(one(E, {nullptr, "FILTER_ENEMY_ONLY", "NOPE", "NOPE"}, f) == 1);
+    CHECK(one(E, {}, hid) == 0 && one(E, {nullptr, nullptr, nullptr, nullptr, "1"}, hid) == 1 && one(E, {}, nf) == 1);
+    // P1 without P3: a hidden fleet only with P5, which needs exactly one value.
+    CHECK(one(E, {"Kuat"}, f) == 1 && one(E, {"Kuat"}, hid) == 0);
+    CHECK(one(E, {"Kuat", nullptr, nullptr, nullptr, "1"}, hid) == 1 && one(E, {"Kuat", nullptr, nullptr, nullptr, "1 1"}, hid) == 0);
+    CHECK(one(E, {"Fondor"}, f) == 0);
+    // P3: a hidden fleet passes; P6 = the direct content count equals the P3 count; "True" reads 0.
+    CHECK(one(E, {"Kuat", nullptr, "Tie"}, hid) == 1 && one(E, {"Kuat", nullptr, "Tie Xwing"}, f) == 0);
+    CHECK(one(E, {"Kuat", nullptr, "Tie", nullptr, nullptr, "1"}, f) == 0);
+    CHECK(one(E, {"Kuat", nullptr, "Tie Isd", nullptr, nullptr, "1"}, f) == 1);
+    CHECK(one(E, {"Kuat", nullptr, "Tie", nullptr, nullptr, "True"}, f) == 1);
+    // P7: raid fleets only, in place of the P3 test.
+    CHECK(one(E, {"Kuat", nullptr, "Nope", nullptr, nullptr, nullptr, "1"}, f) == 0);
+    CHECK(one(E, {"Kuat", nullptr, "Nope", nullptr, nullptr, nullptr, "1"}, raid) == 1);
+    // P4: any one of the names among everything in orbit.
+    CHECK(one(E, {"Kuat", nullptr, nullptr, "Xwing"}, f) == 1 && one(E, {"Kuat", nullptr, nullptr, "Awing"}, f) == 0);
+    // No fleet: the filter, P3, P6 and P7 are not tested; P4 still is.
+    CHECK(one(E, {"Kuat", "FILTER_ENEMY_ONLY", "Nope", nullptr, nullptr, "1", "1"}, nf) == 1);
+    CHECK(one(E, {"Kuat", nullptr, nullptr, "Awing"}, nf) == 0);
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     log::set_min_level(log::Level::Warn);
     test_synthetic();
     test_story_rules();
+    test_battle_composition_rules();  // mcx6 t03
+    test_enter_family_rules();        // mcx6 t03
     test_plots_file();
     test_bindings();
     test_ai_flags();

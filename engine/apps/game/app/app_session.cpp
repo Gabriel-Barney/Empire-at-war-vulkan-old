@@ -315,8 +315,8 @@ void App::script_cinematic_frame() {
 //                                   not moved in from its hyperspace start point (the port's reinforcement arrivals are
 //                                   not either), and the locomotor checks of 0x574e50 are not made.
 //   Do_End_Cinematic_Cleanup()      the locomotor objects of every player but the neutral one, unless In_End_Cinematic(true)
-//                                   marked them, are hidden for the rest of the battle (0x541e20 / 0x38ed10). [port] Their
-//                                   behaviours are not suspended and they are not moved to (1, 1, 0) (sim state).
+//                                   marked them, are hidden for the rest of the battle (0x541e20 / 0x38ed10). Their
+//                                   suspension and the move to (1, 1, 0) are the sim's (the binding, bind_presentation.cpp).
 //   Play_Cinematic_Engine_Flyby()   the type's SFXEvent_Ambient_Moving attached to the object (0x57ea50).
 void App::script_cinematic_event(const lua::PresentationEvent& e, const lua::PresentationLog& log) {
     using Op = lua::PresentationOp;

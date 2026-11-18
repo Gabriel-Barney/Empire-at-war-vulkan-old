@@ -173,6 +173,13 @@ bool CampaignBattles::attach(std::vector<std::string>* diag) {
 #endif
         return locked ? galactic::BattleChoice::Fight : cm_->config().human_choice;
     };
+#ifdef ALAMO_SIM_HAVE_STORY
+    // mcx6 t03 (STORY.md §5 "Battle composition"): the space decide state of a conflict the local player takes part in
+    // records the orbit's Ship_Class lists for WIN/LOSE_BATTLES (retail 0x2b92e0 -> 0x449f10).
+    cm_->on_space_decide = [this](const galactic::ConflictInfo& c) {
+        if (StorySession* s = host_->story()) s->record_battle_composition(c.planet);
+    };
+#endif
     // BT §2.1 random map picker (CU8F_T03_T05_RE §1.3, cu8f t03): installed always, so the planet's stored pick is written
     // back as retail does; without a table (no source, no list) every pick is "".
     cm_->pick_map = [this](bool space, int32_t terrain, int32_t faction, int32_t base_level, const std::string& preferred) {
@@ -945,6 +952,9 @@ void CampaignBattles::hook(SimHost& host) {
         s->set_victory_hooks([this](bool has_param, int32_t value) { story_victory_enable(has_param, value); },  // story t09
                              [this](const std::string& faction, bool short_silent) { story_victory(faction, short_silent); });
         s->set_tactical_reward_hook([this](const std::string& type, const std::vector<std::string>& params) { story_tactical_reward(type, params); });
+        s->set_raid_test([this](int32_t player, const std::vector<objects::ObjectHandle>& units) {  // mcx6 t03: Enter Param7
+            return cm_->raid_force(player, units);
+        });
         story_fog_session_ = s;
     }
     if (battle_) {
@@ -1506,6 +1516,16 @@ void CampaignBattles::story_bridge_begin(SimHost& host, GameMode& mode) {
     };
     story_hooks_.transports = &story_transports_;
     b.tactical = &story_hooks_;
+    // mcx6 (MCX6_T05_CINEMATIC_BINDINGS §2): Do_End_Cinematic_Cleanup's suspension reaches the battle's tick in every session
+    // with this bridge (the STY1 t01 setters below only with object scripts): no locomotor run, no weapon fire.
+    {
+        const lua::ObjectBridge* cb = &b;
+        battle_->set_script_unit_control(&story_hooks_, [cb](objects::ObjectId id) {
+            TacticalBattle::ScriptUnitControl c;
+            if (const lua::ScriptObjectState* st = cb->find_state(id); st && st->end_cinematic_suspended) c.loco_suspended = c.no_fire = true;
+            return c;
+        });
+    }
     // --- L1 bindings (script_remaining.hpp): hooks the battle's systems answer today; the rest keep their
     //     documented "not available" / data-fallback answers (space fields: the type-data fallback) ---
     story_remaining_ = lua::RemainingScriptHooks{};

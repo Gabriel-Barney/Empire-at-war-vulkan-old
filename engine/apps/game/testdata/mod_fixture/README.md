@@ -15,7 +15,7 @@ Read only: the tests never write here.
   sets the GlobalValue `CHECKS_MOD_ID` only in `Base_Definitions`, a GameObject script whose main chunk fails on that
   unset value (session-dependent), and one whose main chunk fails on a key no script sets (a real run error).
   mcx0 (report v4): `ChecksStory.xml`, a plot no campaign names, uses `SWITCH_SIDES` (a reward the port lacked until mcx6), an event
-  type it dispatches partly (`STORY_WIN_BATTLES`), a reward retail does not know and a commented-out event; the scoring
+  type it dispatched partly until mcx6 t03 (`STORY_WIN_BATTLES`), a reward retail does not know and a commented-out event; the scoring
   script calls `StringCompare` (a `partial` binding: the port guessed part of it) in a function nothing runs.
 - `FixtureSub` (t16) is a submod of `FixtureMod`: its lists name `ModObjects.xml` and `ModFactions.xml`, which only
   `FixtureMod` ships. Its `modinfo.json` names workshop item `900000001` of the fake Steam library `steamlib/` (the

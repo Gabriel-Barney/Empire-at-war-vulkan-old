@@ -1123,14 +1123,19 @@ bool GalacticAiWorld::read(ByteReader& r) {
     std::vector<std::vector<std::unique_ptr<lua::LuaVm>>> pools;
     if (r.u32() != m.runtime->plan_count() || !r.ok()) return false;
     pools.resize(m.runtime->plan_count());
+    std::vector<std::unique_ptr<lua::LuaVm>> legacy(pools.size());  // pre-mcx6 pristine VMs (legacy_pristine)
     for (uint32_t p = 0; p < pools.size(); ++p) {
         const uint32_t n = save::count(r, 6);
         bool pristine_named = false;
         for (uint32_t k = 0; k < n && r.ok(); ++k) {
             if (r.boolean()) {  // this session's own pristine VM of the plan (restore_pools keeps it at this slot)
                 const uint64_t digest = r.u64();
-                if (!r.ok() || pristine_named || !m.runtime->pristine(p) || m.runtime->pristine_digest(p) != digest) return false;
+                if (!r.ok() || pristine_named || !m.runtime->pristine(p)) return false;
                 pristine_named = true;
+                if (m.runtime->pristine_digest(p) != digest) {  // a pre-mcx6 save: its pristine VM had the old require
+                    legacy[p] = m.runtime->legacy_pristine(p, m.defs, digest);
+                    if (!legacy[p]) return false;
+                }
                 pools[p].push_back(nullptr);
                 continue;
             }
@@ -1245,7 +1250,7 @@ bool GalacticAiWorld::read(ByteReader& r) {
     m.unit_reserved = std::move(unit_reserved);
     m.fs_moves = std::move(fs_moves);
     m.reclaim = std::move(reclaim);
-    m.runtime->restore_pools(std::move(pools), static_cast<size_t>(created));
+    m.runtime->restore_pools(std::move(pools), static_cast<size_t>(created), std::move(legacy));
     guard.committed = true;
     m.scripts.restore(std::move(evals), std::move(missing));
     return true;

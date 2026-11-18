@@ -647,7 +647,8 @@ static void test_story_ledger() {
     for (const StoryEventRow& e : story_event_table()) CHECK(codes.insert(e.code).second);
     CHECK(story_event_table().size() == 60);
     const StoryEventRow* win = find_story_event("story_win_battles");
-    CHECK(win && win->state == StoryEventState::Partial && !win->note.empty());
+    CHECK(win && win->state == StoryEventState::Full && win->note.empty());  // mcx6 t03: the orbit record
+    for (const StoryEventRow& e : story_event_table()) CHECK(e.state != StoryEventState::Partial);
     const StoryEventRow* inc = find_story_event("STORY_CORRUPTION_INCREASED");
     CHECK(inc && inc->state == StoryEventState::Retail);
     std::printf("  story ledger: %zu retail rewards, %zu missing; %zu event types\n", retail, missing, story_event_table().size());

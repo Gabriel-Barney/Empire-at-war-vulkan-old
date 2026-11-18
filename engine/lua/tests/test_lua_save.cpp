@@ -636,6 +636,7 @@ static void test_bridges() {
         a.ability_finished(9);
         a.ability_finished(9);
         a.state(2).hidden_sub_objects = {"GUN", "NEWGUN"};  // mcx6 t04 (bridge save version 3)
+        a.state(5).end_cinematic_suspended = true;          // mcx6 Do_End_Cinematic_Cleanup (bridge save version 4)
         ByteWriter w;
         a.write(w);
         ObjectBridge b;
@@ -644,6 +645,7 @@ static void test_bridges() {
         CHECK(b.ability_signals(9) == 2 && b.ability_signals(4) == 0 && b.watch_ability(4) == 0);
         CHECK(b.find_state(2) && b.find_state(2)->hidden_sub_objects == std::vector<std::string>({"GUN", "NEWGUN"}));
         CHECK(b.find_state(7) == nullptr || b.find_state(7)->hidden_sub_objects.empty());
+        CHECK(b.find_state(5) && b.find_state(5)->end_cinematic_suspended && !b.find_state(2)->end_cinematic_suspended);
         StateHasher ha, hb;
         a.hash(ha);
         b.hash(hb);

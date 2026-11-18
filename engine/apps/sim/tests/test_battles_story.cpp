@@ -65,6 +65,92 @@ StoryRun run_story_battle(const Data& d, const FileProvider& files, int32_t work
     return out;
 }
 
+// mcx6 t03 (docs/re/STORY.md §5 "Battle composition", mcx6 Q14): an AUTO-RESOLVED space conflict at S10_B. Its decide
+// state records the orbit's Ship_Class lists (ConflictManager::on_space_decide -> StorySession::record_battle_composition)
+// before the auto-resolve: the Empire's (local player) frigate + corvette, the Underworld fleet's units. The fixture's types
+// have no Ship_Class, so every entry is -1. The Empire plot's WIN/LOSE_BATTLES with FRIENDLY_ONLY_CONTAINS CLASS_FIGHTER
+// then never count (a -1 entry is never listed), while the plain SPACE ones do; with the old empty sides an ONLY test
+// passed. The lists survive a save / load of the session (version 7).
+struct CompositionRun {
+    std::string log;
+    std::vector<int32_t> local, other;
+    size_t empire_units = 0, under_units = 0;
+    uint32_t fought = 0;
+    bool reloaded = false;
+};
+CompositionRun run_story_composition(const Data& d, const FileProvider& files, int32_t workers) {
+    CompositionRun out;
+    jobs::JobSystem js(jobs::JobSystemConfig{workers});
+    SimConfig cfg;
+    cfg.seed = 2026;
+    cfg.players = 4;
+    cfg.story_crc = true;
+    SimHost host(d.types, js, cfg);
+    galactic::GalacticSim* gs = host.start_galactic(d.rules, make_setup(d, false));
+    CHECK(gs != nullptr);
+    if (!gs) return out;
+    StoryStart st;
+    st.files = &files;
+    st.plot_sets = {{0, "Story_Plots_Comp.xml"}};
+    CHECK(host.start_story(st));
+    CampaignBattleOptions opt;
+    opt.conflict.human_choice = galactic::BattleChoice::AutoResolve;
+    CampaignBattles battles(host, d.crules, *d.catalog, [](const std::string&, terrain::MapData&) { return false; }, opt);
+    CHECK(battles.attach());
+    for (const uint32_t f : gs->fleets_at(1, 0)) out.empire_units += gs->fleets()[f].contents.size();
+    const std::vector<uint32_t> uf = gs->fleets_at(2, 1);
+    CHECK(!uf.empty());
+    if (!uf.empty()) {
+        out.under_units = gs->fleets()[uf[0]].contents.size();
+        CHECK(gs->move_fleet(1, uf[0], 1) == commands::RejectReason::None);
+    }
+    for (uint64_t t = 0; t < 1500; ++t) host.tick_once();
+    StorySession* s = host.story();
+    CHECK(s != nullptr);
+    if (!s) return out;
+    out.fought = battles.battles_fought();
+    out.log = s->log_text("mcx6 t03 composition");
+    out.local = s->battle_composition(true);
+    out.other = s->battle_composition(false);
+    ByteWriter w;
+    s->write(w);
+    s->record_battle_composition(0);  // S10_A: nothing in orbit, both lists cleared
+    const bool cleared = s->battle_composition(true).empty() && s->battle_composition(false).empty();
+    ByteReader r(w.bytes());
+    out.reloaded = cleared && s->read(r) && s->battle_composition(true) == out.local && s->battle_composition(false) == out.other;
+    return out;
+}
+
+void test_story_composition(const Data& d) {
+    const fs::path x = d.root / "Data/XML";
+    write_file(x / "Story_Plots_Comp.xml", "<Story_Mode_Plots><Active_Plot>Story_Comp.xml</Active_Plot></Story_Mode_Plots>\n");
+    write_file(x / "Story_Comp.xml",
+               "<Story>\n"
+               " <Event Name=\"Won_Space\"><Event_Type>STORY_WIN_BATTLES</Event_Type><Event_Param1>1</Event_Param1><Event_Param2>SPACE</Event_Param2></Event>\n"
+               " <Event Name=\"Lost_Space\"><Event_Type>STORY_LOSE_BATTLES</Event_Type><Event_Param1>1</Event_Param1><Event_Param2>SPACE</Event_Param2></Event>\n"
+               " <Event Name=\"Won_Only_Never\"><Event_Type>STORY_WIN_BATTLES</Event_Type><Event_Param1>1</Event_Param1>"
+               "<Event_Param3>FRIENDLY_ONLY_CONTAINS CLASS_FIGHTER</Event_Param3></Event>\n"
+               " <Event Name=\"Lost_Only_Never\"><Event_Type>STORY_LOSE_BATTLES</Event_Type><Event_Param1>1</Event_Param1>"
+               "<Event_Param3>FRIENDLY_ONLY_CONTAINS CLASS_FIGHTER</Event_Param3></Event>\n"
+               " <Event Name=\"Lost_Land_Never\"><Event_Type>STORY_LOSE_BATTLES</Event_Type><Event_Param1>1</Event_Param1>"
+               "<Event_Param2>Land</Event_Param2></Event>\n"
+               "</Story>\n");
+    DirectoryProvider files(path_to_utf8(d.root));
+    const CompositionRun a = run_story_composition(d, files, 0);
+    const CompositionRun b = run_story_composition(d, files, 4);
+    auto fired = [&a](const char* ev) { return a.log.find(std::string(" ") + ev + " ") != std::string::npos; };
+    std::printf("  composition: local %zu / other %zu entries (Empire %zu, Underworld %zu units), fought %u, reloaded %s, "
+                "identical for 0 / 4 workers: %s\n",
+                a.local.size(), a.other.size(), a.empire_units, a.under_units, a.fought, a.reloaded ? "yes" : "NO",
+                a.log == b.log && a.local == b.local && a.other == b.other ? "yes" : "NO");
+    CHECK(a.fought == 0 && a.empire_units > 0 && a.under_units > 0);
+    CHECK(a.local == std::vector<int32_t>(a.empire_units, -1) && a.other == std::vector<int32_t>(a.under_units, -1));
+    CHECK(fired("Won_Space") != fired("Lost_Space"));  // the auto-resolve's one result for the Empire
+    CHECK(!fired("Won_Only_Never") && !fired("Lost_Only_Never") && !fired("Lost_Land_Never"));
+    CHECK(a.reloaded && b.reloaded);
+    CHECK(a.log == b.log && a.local == b.local && a.other == b.other);
+}
+
 // BT §2.9 / REMAINING_GAPS §6.4: a galactic plot's LINK_TACTICAL (STORY_ELAPSED 1 s) starts its battle at the battle
 // hook right after the reward (ConflictManager::start_linked: queued at the front, no validation / decide). The story flag
 // (GalacticSim::linked_battle_pending; paused() refuses FleetManagement while the local player is in a queued conflict)
@@ -1335,6 +1421,8 @@ int main(int argc, char** argv) {
 #ifdef ALAMO_SIM_HAVE_STORY
     std::printf("story battle (L1/S4 wave 2a)\n");
     test_story_battle(*d);
+    std::printf("mcx6 t03: WIN/LOSE_BATTLES composition recorded at an auto-resolved space conflict\n");
+    test_story_composition(*d);
     std::printf("linked battle flag (REMAINING_GAPS 6.4)\n");
     test_linked_battle(*d);
     test_linked_params(*d);  // story t07

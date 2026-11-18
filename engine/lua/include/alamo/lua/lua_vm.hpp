@@ -81,6 +81,10 @@ struct LuaVmOptions {
     // a "script_runaway" error. Retail hangs on a script that never yields; far above any normal script, and a pure
     // count, so deterministic. 0 = no limit.
     int script_budget = 50'000'000;
+    // [port] require as the port had it before mcx6 t07 (_LOADED[name] = true before the chunk runs, _REQUIREDNAME set
+    // raw and never restored, a false result becomes true). Only for rebuilding a pre-mcx6 save's pristine plan VM
+    // (PlanScriptRuntime::legacy_pristine), whose heap a save names by digest; every other VM uses stock 5.0.2.
+    bool legacy_require = false;
 };
 
 struct UnboundHit {

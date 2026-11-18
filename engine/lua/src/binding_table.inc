@@ -21,7 +21,7 @@
 {BindingKind::Global, "LuaCreateThread", "Create_Thread", 687, BindingEffect::Full, ""},
 {BindingKind::Global, "", "Declare_Goal_Type", 2, BindingEffect::Partial, "[inferred] bind_players.cpp:848"},
 {BindingKind::Global, "LuaDiscreteDistributionClass", "DiscreteDistribution", 0, BindingEffect::Full, ""},
-{BindingKind::Global, "LuaDoEndCinematicCleanup", "Do_End_Cinematic_Cleanup", 10, BindingEffect::Recorded, "engine/apps/game/app/app_session.cpp"},
+{BindingKind::Global, "LuaDoEndCinematicCleanup", "Do_End_Cinematic_Cleanup", 10, BindingEffect::Full, "locomotor objects suspended (no locomotor run, no fire) and moved to (1, 1, 0) through TacticalScriptHooks::teleport; alamo_game hides them (docs/re/MCX6_T05_CINEMATIC_BINDINGS.md §2)"},
 {BindingKind::Global, "DumpCallStack", "DumpCallStack", 2, BindingEffect::Full, ""},
 {BindingKind::Global, "EnableDistanceFogClass", "Enable_Distance_Fog", 4, BindingEffect::Recorded, "engine/apps/game/app/app_story_camera.cpp"},
 {BindingKind::Global, "LuaEnableFog", "Enable_Fog", 6, BindingEffect::Recorded, "engine/apps/game/app/app_story_camera.cpp"},

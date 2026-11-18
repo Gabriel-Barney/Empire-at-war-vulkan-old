@@ -190,6 +190,10 @@ struct ScriptObjectState {
     // STY1 t01), so the default state reads "checking" and a saved default stays all-zero.
     bool contested_check_off = false;
     bool capture_disabled = false;
+    // mcx6 (MCX6_T05_CINEMATIC_BINDINGS §2): Do_End_Cinematic_Cleanup suspended this object's behaviours (0x38ed10, every
+    // behaviour's suspend virtual); the battle host reads it every tick (no locomotor run, no weapon fire). Nothing clears
+    // it. Saved (bridge version 4), hashed only when set.
+    bool end_cinematic_suspended = false;
     bool orders_locked = false;
     bool has_orders = false;          // set by an issued order, cleared by Stop
     float max_speed_override = -1.0f; // Override_Max_Speed; < 0 = none

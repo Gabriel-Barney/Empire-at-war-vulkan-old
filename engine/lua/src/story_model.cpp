@@ -184,50 +184,69 @@ bool is_single_object_name(std::string_view t) {
 bool is_enter_family(std::string_view t) {
     return in(t, {"STORY_ENTER", "STORY_LAND_ON", "STORY_PLANET_DESTROYED", "STORY_FLEET_BOUNCED", "STORY_INVASION_BOUNCED"});
 }
-// WIN/LOSE_BATTLES Param2, the location enum ("2 = EITHER", STORY.md §5) [inferred by name - shipped data
-// writes SPACE, Land, BASE_SPACE]: empty / EITHER / 2 any battle; SPACE / LAND (GROUND) that kind
-// (n.location 2 / 1); BASE_SPACE / BASE_LAND (BASE_GROUND) that kind with a base taking part; anything else
-// (unknown name: the enum table gives 0) any battle. A notification without a location matches only "any".
-bool battle_location_ok(std::string_view p, const StoryNotification& n) {
-    const std::string s = ascii_upper(ascii_trim(p));
-    if (s.empty() || s == "EITHER" || s == "2") return true;
-    if (s == "SPACE") return n.location == 2;
-    if (s == "LAND" || s == "GROUND") return n.location == 1;
-    if (s == "BASE_SPACE") return n.location == 2 && n.base;
-    if (s == "BASE_LAND" || s == "BASE_GROUND") return n.location == 1 && n.base;
-    return true;
+// A list parameter as written (the generic list parser, not upper-cased): the story keyword values compare exactly.
+std::vector<std::string> raw_list(std::string_view s) {
+    std::vector<std::string> out;
+    while (!s.empty()) {
+        while (!s.empty() && is_sep(s.front())) s.remove_prefix(1);
+        size_t n = 0;
+        while (n < s.size() && !is_sep(s[n])) ++n;
+        if (n) out.emplace_back(s.substr(0, n));
+        s.remove_prefix(n);
+    }
+    return out;
 }
 
-// WIN/LOSE_BATTLES Param3 (STORY.md §5: first entry FRIENDLY/ENEMY(_ONLY)_CONTAINS, then CLASS_* names) [inferred
-// semantics]: *_CONTAINS = some unit of that side has a listed class; *_ONLY_CONTAINS = the side has units and
-// every one has a listed class. CLASS_<X> = GameObjectCategoryType X through `mask` (CLASS_ prefix optional).
-// Any other first entry (shipped data writes FILTER_FRIENDLY_ONLY: the dispatch is already player-scoped) or
-// an empty Param3: no composition test.
-bool battle_composition_ok(std::string_view p, const StoryNotification& n,
-                           const std::function<uint64_t(std::string_view)>& mask) {
-    const std::vector<std::string> list = name_list(p);
-    if (list.empty()) return true;
-    const std::string& op = list[0];
-    const bool friendly = op == "FRIENDLY_CONTAINS" || op == "FRIENDLY_ONLY_CONTAINS";
-    const bool enemy = op == "ENEMY_CONTAINS" || op == "ENEMY_ONLY_CONTAINS";
-    if (!friendly && !enemy) return true;
-    const bool only = op == "FRIENDLY_ONLY_CONTAINS" || op == "ENEMY_ONLY_CONTAINS";
-    uint64_t classes = 0;
-    for (size_t i = 1; i < list.size(); ++i) {
-        std::string_view c = list[i];
-        if (c.size() > 6 && c.substr(0, 6) == "CLASS_") c.remove_prefix(6);
-        if (mask) classes |= mask(c);
+// mcx6 t03: the story keyword map (0x140b30728; 0x45c3f0, and inline in the WIN/LOSE_BATTLES parse 0x466f40) for the
+// battle words, exact names (the map is keyed by the CRC of the text as written): location GROUND 0, SPACE 1, EITHER 2;
+// composition FRIENDLY_CONTAINS 1, FRIENDLY_ONLY_CONTAINS 2, ENEMY_CONTAINS 3, ENEMY_ONLY_CONTAINS 4; CLASS_FIGHTER 0 ..
+// CLASS_SUPER 6 (STORY.md §5). Any other word goes through enum_value (the map's other names; numbers as themselves
+// [port]); unknown -> 0.
+int32_t battle_keyword(std::string_view s) {
+    static constexpr std::pair<std::string_view, int32_t> kNames[] = {
+        {"GROUND", 0}, {"SPACE", 1}, {"EITHER", 2},
+        {"FRIENDLY_CONTAINS", 1}, {"FRIENDLY_ONLY_CONTAINS", 2}, {"ENEMY_CONTAINS", 3}, {"ENEMY_ONLY_CONTAINS", 4},
+        {"CLASS_FIGHTER", 0}, {"CLASS_BOMBER", 1}, {"CLASS_TRANSPORT", 2}, {"CLASS_CORVETTE", 3},
+        {"CLASS_FRIGATE", 4}, {"CLASS_CAPITAL", 5}, {"CLASS_SUPER", 6}};
+    s = ascii_trim(s);
+    for (const auto& [n, v] : kNames)
+        if (s == n) return v;
+    return enum_value(s);
+}
+
+// WIN/LOSE_BATTLES (STORY.md §5 row and its note "Battle composition", mcx6 Q14; match 0x455a50, parse 0x466f40): true =
+// the battle counts. Param2 = the location (absent: EITHER, the ctor default; an unknown word reads 0 = GROUND, so the
+// shipped "Land" means land and "BASE_SPACE" reads GROUND). Param3 = the composition test, on only with 2 or more values:
+// the first is the test (keyword), the rest Ship_Class values. Only a SPACE battle tests it: with the test on and no
+// planet the battle does not count; FRIENDLY_* reads the local list when the plot's player is the local player, else the
+// other list (ENEMY_* the opposite); CONTAINS = every listed class is in the side's list (an empty side fails),
+// ONLY_CONTAINS = every entry of the side's list is listed (an empty side passes; a -1 entry never is). A test value
+// outside 1..4 tests nothing. Then the battle counts when its location is Param2 or Param2 is EITHER.
+bool battle_counts(const std::vector<StoryParam>& ep, const StoryNotification& n, int32_t plot_player) {
+    const int32_t where = n.location == 1 ? 0 : n.location == 2 ? 1 : -1;  // the dispatched location: land 0, space 1
+    const std::vector<std::string> p3 = raw_list(text_at(ep, 2));
+    const int32_t op = p3.size() >= 2 ? battle_keyword(p3[0]) : 0;
+    if (where == 1 && op != 0) {
+        if (n.planet.empty()) return false;
+        if (op >= 1 && op <= 4) {
+            const bool friendly_test = op <= 2;
+            const bool plot_is_local = plot_player == n.local_player;
+            const std::vector<int32_t>& side = friendly_test == plot_is_local ? n.local_classes : n.other_classes;
+            std::vector<int32_t> classes;
+            for (size_t i = 1; i < p3.size(); ++i) classes.push_back(battle_keyword(p3[i]));
+            const auto has = [](const std::vector<int32_t>& v, int32_t c) { return std::find(v.begin(), v.end(), c) != v.end(); };
+            if (op == 1 || op == 3) {
+                for (const int32_t c : classes)
+                    if (!has(side, c)) return false;
+            } else {
+                for (const int32_t c : side)
+                    if (!has(classes, c)) return false;
+            }
+        }
     }
-    const std::vector<uint64_t>& side = friendly ? n.friendly : n.enemy;
-    if (only) {
-        if (side.empty()) return false;
-        for (const uint64_t m : side)
-            if ((m & classes) == 0) return false;
-        return true;
-    }
-    for (const uint64_t m : side)
-        if ((m & classes) != 0) return true;
-    return false;
+    const std::string_view p2 = ascii_trim(text_at(ep, 1));
+    const int32_t want = p2.empty() ? 2 : battle_keyword(p2);
+    return want == where || want == 2;
 }
 
 bool is_string_family(std::string_view t) {
@@ -860,28 +879,47 @@ bool StoryModel::evaluate(uint32_t p, uint32_t e, std::string_view type, const S
         return static_cast<uint32_t>(parse_int(text_at(ep, 1), 0)) <= static_cast<uint32_t>(static_cast<int32_t>(n.value));
     }
     if (is_enter_family(type)) {
+        // mcx6 t03 (STORY.md §5 "Enter family match", 0x454a90 / 0x465380 / 0x451e20 / 0x452170). P5 / P6 / P7 are
+        // atoi(value) != 0 ("True" reads 0): P5 only when it has exactly one value, P6 / P7 from the first value.
+        if (n.planet.empty()) return false;  // no planet in the dispatch
+        const std::vector<std::string> p5 = raw_list(text_at(ep, 4)), p6 = raw_list(text_at(ep, 5)), p7 = raw_list(text_at(ep, 6));
+        const bool hidden_ok = p5.size() == 1 && parse_int(p5[0], 0) != 0;
+        const bool exact = !p6.empty() && parse_int(p6[0], 0) != 0;
+        const bool raid_only = !p7.empty() && parse_int(p7[0], 0) != 0;
+        const bool visible = hidden_ok || n.no_fleet || !n.fleet_hidden;
         const std::vector<std::string> planets = name_list(text_at(ep, 0));
-        if (!planets.empty() && !list_has(planets, n.planet)) return false;
-        const std::string_view f = text_at(ep, 1);
-        if (!filter_ok(f.empty() ? 0 : enum_value(f), same_side(n.owner), n.owner_neutral)) return false;  // default NONE
-        for (const std::string& u : name_list(text_at(ep, 2)))
-            if (!list_has(n.units, u)) return false;  // all of Param3
-        const std::vector<std::string> any = name_list(text_at(ep, 3));
+        if (planets.empty()) return visible;  // "any planet": P2, P3, P4, P6 and P7 are not tested
+        if (!list_has(planets, n.planet)) return false;
+        if (!n.no_fleet) {
+            const std::string_view f = text_at(ep, 1);
+            if (!filter_ok(f.empty() ? 0 : enum_value(f), same_side(n.owner), n.owner_neutral)) return false;  // default NONE
+            const std::vector<std::string> all = name_list(text_at(ep, 2));
+            if (raid_only) {
+                if (!n.fleet_raid) return false;  // raid fleets only: P3, P5, P6 ignored
+            } else if (all.empty()) {
+                if (!visible) return false;
+            } else {
+                for (const std::string& u : all)
+                    if (!list_has(n.units, u)) return false;  // every P3 type in the fleet (hidden fleets pass)
+                if (exact && static_cast<size_t>(std::max(n.fleet_direct, 0)) != all.size()) return false;
+            }
+        }
+        const std::vector<std::string> any = name_list(text_at(ep, 3));  // P4: any one in orbit (any fleet, any owner)
         if (!any.empty()) {
             bool hit = false;
-            for (const std::string& u : any) hit = hit || list_has(n.units, u);
+            for (const std::string& u : any) hit = hit || list_has(n.orbit_units, u);
             if (!hit) return false;
         }
-        return true;  // Param5-7 [L] not modelled
+        return true;
     }
     if (type == "STORY_ACCUMULATE") {
         const int32_t op = enum_value(text_at(ep, 1));
         return compare(n.value, op == 0 ? 1 : op, parse_float(text_at(ep, 0), 0.0));
     }
     if (type == "STORY_WIN_BATTLES" || type == "STORY_LOSE_BATTLES") {
-        // A battle matches Param2 (location) and Param3 (composition); a matching battle counts even when
-        // the planet (Param4) does not match.
-        if (!battle_location_ok(text_at(ep, 1), n) || !battle_composition_ok(text_at(ep, 2), n, category_mask)) return false;
+        // A battle that passes Param3 (space composition) and Param2 (location) counts even when the planet (Param4) does
+        // not match.
+        if (!battle_counts(ep, n, player_)) return false;
         ++st.count;
         const std::vector<std::string> planets = name_list(text_at(ep, 3));
         return st.count >= parse_int(text_at(ep, 0), 1) && (planets.empty() || list_has(planets, n.planet));

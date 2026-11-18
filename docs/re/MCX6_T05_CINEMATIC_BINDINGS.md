@@ -40,8 +40,10 @@ Spec: L1_S4_REMAINING §3.4 "Hyperspace in" [H]; sound: AUDIO.md §9.6 [H].
   other unit leaves the shot.
 - Port: alamo_game hides the cleaned-up objects for the rest of the battle (`end_cinematic_cleanup_set`: locomotor
   objects of the battle store not owned by `GalacticSim::neutral_player()`, not marked in
-  `lua::PresentationState::in_end_cinematic`). [port] Behaviours are not suspended and the objects are not moved to
-  (1, 1, 0): those are sim effects (open, mcx6).
+  `lua::PresentationState::in_end_cinematic`). The sim part is the binding's (`bind_presentation.cpp`, mcx6): in a
+  tactical mode the same objects get `ScriptObjectState::end_cinematic_suspended` and move to (1, 1, 0) through
+  `TacticalScriptHooks::teleport`; the battle host reads the flag every tick. [port] The suspension is the port's per-tick
+  unit controls (the locomotor does not run, the weapons do not fire), standing for every behaviour's suspend virtual.
 
 ## 3. `Promote_To_Space_Cinematic_Layer(object)` (0x5433f0)
 

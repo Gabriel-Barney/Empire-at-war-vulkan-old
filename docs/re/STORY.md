@@ -463,14 +463,11 @@ and 0x140a29c40.
     `BASE_SPACE` in `STORY_REBEL_ACTIV_M11_GALACTIC.XML` (MonCalimari LOSE_BATTLES). No string `BASE_SPACE` exists in
     the exe, so that event reads **GROUND** and counts only land battles lost at MonCalimari [H for the parse; M that
     the event's plot is reachable in FoC].
-- **Port.** `story_session.cpp` passes empty sides after an auto-resolve. Under the retail rule that makes every SPACE
-  CONTAINS test false and every ONLY test true. Retail instead:
-  - records the two orbit `Ship_Class` lists at the space conflict decision (single player, local player involved);
-  - keeps them until the next record, and saves them;
-  - uses them for fought and auto-resolved battles alike;
-  - never tests land battles.
-
-  With shipped data the test is never on, so the difference shows only with mods.
+- **Port** (mcx6 t03). `ConflictManager::on_space_decide` (the space decide state, local player involved) calls
+  `StorySession::record_battle_composition`, which keeps the two orbit `Ship_Class` lists (saved, story save version 7)
+  until the next record; WIN/LOSE_BATTLES read them for fought and auto-resolved battles alike and test space battles
+  only (`story_model.cpp` `battle_counts`). [port] the port's orbit list holds fleets only. With shipped data the test is
+  never on, so it shows only with mods.
 
 **Enter family match (mcx6 Q14, 2026-11-17)** [H unless tagged]. Read with REA from 0x454a90, 0x465380, 0x451e20,
 0x452170, the hidden-fleet predicate 0x3a9760 (A2GAL_READINGS: a fleet is hidden when it has contents and all of them

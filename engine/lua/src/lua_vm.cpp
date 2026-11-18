@@ -96,6 +96,23 @@ int l_require(lua_State* L) {
     lua_pop(L, 1);
     if (!load_script(L, *vm_of(L), std::string_view(lua_tostring(L, 1), lua_strlen(L, 1)), false, err, sizeof err))
         return raise(L, err);
+    if (vm_of(L)->options.legacy_require) {  // pre-mcx6 (LuaVmOptions::legacy_require): only to rebuild old saves' VMs
+        lua_pushvalue(L, 1);
+        lua_pushboolean(L, 1);
+        lua_rawset(L, 2);
+        lua_pushstring(L, "_REQUIREDNAME");
+        lua_pushvalue(L, 1);
+        lua_rawset(L, LUA_GLOBALSINDEX);
+        lua_call(L, 0, 1);
+        if (!lua_toboolean(L, -1)) {
+            lua_pop(L, 1);
+            lua_pushboolean(L, 1);
+        }
+        lua_pushvalue(L, 1);
+        lua_pushvalue(L, -2);
+        lua_rawset(L, 2);
+        return 1;
+    }
     // stack: name, _LOADED, chunk
     lua_pushstring(L, "_REQUIREDNAME");  // save the previous name below the chunk (lua_getglobal)
     lua_gettable(L, LUA_GLOBALSINDEX);

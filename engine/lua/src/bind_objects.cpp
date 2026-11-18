@@ -3596,6 +3596,7 @@ void ObjectBridge::hash(StateHasher& h) const {
         h.str(s.targeting_priorities);
         h.str(s.animation);
         h.i32(s.animation_index);
+        if (s.end_cinematic_suspended) h.u32(0x45434c4eu);  // mcx6: Do_End_Cinematic_Cleanup (only when set: CRCs unchanged)
         h.u32(static_cast<uint32_t>(s.abilities.size()));
         for (const auto& [a, st] : s.abilities) {
             h.u8(a);
@@ -3647,7 +3648,7 @@ void ObjectBridge::hash(StateHasher& h) const {
 // ---- N1 save / load ----
 
 namespace {
-constexpr uint32_t kBridgeSaveVersion = 3;  // 2: S7 t15 A1 ability-signal counts; 3: mcx6 t04 hidden sub-objects (2 still reads)
+constexpr uint32_t kBridgeSaveVersion = 4;  // 2: S7 t15 A1 ability-signal counts; 3: mcx6 t04 hidden sub-objects; 4: mcx6 end-cinematic suspensions (2, 3 still read)
 // ScriptObjectState's flags in save order (shared by write and read).
 template <class S>
 auto bridge_flags(S& s) {
@@ -3692,11 +3693,17 @@ void ObjectBridge::write(ByteWriter& w) const {
         w.i32(id).u32(static_cast<uint32_t>(s.hidden_sub_objects.size()));
         for (const std::string& m : s.hidden_sub_objects) w.str(m);
     }
+    // Version 4: the objects Do_End_Cinematic_Cleanup suspended, id order.
+    uint32_t suspended = 0;
+    for (const auto& [id, s] : states_) suspended += s.end_cinematic_suspended ? 1u : 0u;
+    w.u32(suspended);
+    for (const auto& [id, s] : states_)
+        if (s.end_cinematic_suspended) w.i32(id);
 }
 
 bool ObjectBridge::read(ByteReader& r) {
     const uint32_t version = r.u32();
-    if ((version != kBridgeSaveVersion && version != 2) || !r.ok()) return false;
+    if (version < 2 || version > kBridgeSaveVersion || !r.ok()) return false;
     const uint32_t orders = r.u32();
     uint32_t n = r.u32();
     if (!r.ok() || n > r.remaining() / 40) return false;
@@ -3788,6 +3795,17 @@ bool ObjectBridge::read(ByteReader& r) {
             last = id;
             std::vector<std::string>& v = states[id].hidden_sub_objects;
             for (uint32_t k = 0; k < nm; ++k) v.push_back(r.str());
+        }
+    }
+    if (version >= 4) {  // mcx6: end-cinematic suspensions
+        n = r.u32();
+        if (!r.ok() || n > r.remaining() / 4) return false;
+        ObjectId last = 0;
+        for (uint32_t i = 0; i < n; ++i) {
+            const ObjectId id = r.i32();
+            if (!r.ok() || (i > 0 && id <= last)) return false;
+            last = id;
+            states[id].end_cinematic_suspended = true;
         }
     }
     if (!r.ok()) return false;

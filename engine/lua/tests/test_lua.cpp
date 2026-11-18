@@ -647,6 +647,16 @@ static void test_script_lookup_and_require() {
           "");
     std::string err;
     CHECK(vm.require("ModB", &err) && run(vm, "assert(_LOADED.ModB == 'bee')") == "");
+
+    // LuaVmOptions::legacy_require (pre-mcx6 saves' pristine plan VMs): _LOADED[name] = true before the run,
+    // _REQUIREDNAME left at the last name, a false result becomes true.
+    LuaVmOptions legacy;
+    legacy.legacy_require = true;
+    LuaVm old(host, legacy);
+    CHECK(run(old, "_REQUIREDNAME = 'outer'; r = require('ModA'); f1 = require('ModF')") == "");
+    CHECK(run(old, "assert(a_seen == false and a_name == 'ModA' and b_name == 'ModB' and a_after == 'ModB')") == "");
+    CHECK(run(old, "assert(r == true and _LOADED.ModB == 'bee' and f1 == true and _LOADED.ModF == true)") == "");
+    CHECK(gstr(old, "_REQUIREDNAME") == "ModF");
 }
 
 // ------------------------------------------------------------------------------------------

@@ -228,8 +228,8 @@ void test_compat_checks(const std::string& foc) {
     CHECK(r.story.rewards_used == 2 && r.story.events_used == 2);  // the commented-out event is not counted
     // mcx6 t01: SWITCH_SIDES is implemented now (the story ledger has no missing reward left).
     CHECK(r.story.rewards_missing.empty());
-    CHECK(r.story.events_partial.size() == 1 && r.story.events_partial[0].name == "STORY_WIN_BATTLES");
-    CHECK(icontains(r.story.events_partial.empty() ? "" : r.story.events_partial[0].first_file, "ChecksStory.xml"));
+    // mcx6 t03: WIN/LOSE_BATTLES' Param3 composition is retail's now (the orbit record): no event type is partial any more.
+    CHECK(r.story.events_partial.empty());
     const auto* unknown = retail_eq(r, "unknown_reward", "CHECKS_NO_SUCH_REWARD");
     CHECK(unknown && unknown->in_mod);
     CHECK(retail_eq(r, "unread_tag", "factions: Checks_Unread_Faction_Tag") != nullptr);  // retail ignores it too

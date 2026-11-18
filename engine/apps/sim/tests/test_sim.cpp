@@ -2980,11 +2980,11 @@ static const char* kGalactic =
     "<Event_Param1>Story_Plots_Wave2a_Tac.xml</Event_Param1><Event_Param2>PlanetC</Event_Param2></Event>\n"
     " <Event Name=\"Go_Land_Never\"><Event_Type>STORY_LAND_TACTICAL</Event_Type><Event_Param1>X.xml</Event_Param1></Event>\n"
     " <Event Name=\"Won_Space\"><Event_Type>STORY_WIN_BATTLES</Event_Type><Event_Param1>1</Event_Param1>"
-    "<Event_Param2>SPACE</Event_Param2><Event_Param3>FRIENDLY_CONTAINS CLASS_Corvette</Event_Param3></Event>\n"
+    "<Event_Param2>SPACE</Event_Param2><Event_Param3>FRIENDLY_CONTAINS CLASS_CORVETTE</Event_Param3></Event>\n"
     " <Event Name=\"Won_Land_Never\"><Event_Type>STORY_WIN_BATTLES</Event_Type><Event_Param1>1</Event_Param1>"
     "<Event_Param2>Land</Event_Param2></Event>\n"
     " <Event Name=\"Won_Fighters_Never\"><Event_Type>STORY_WIN_BATTLES</Event_Type><Event_Param1>1</Event_Param1>"
-    "<Event_Param3>FRIENDLY_CONTAINS CLASS_Fighter</Event_Param3></Event>\n"
+    "<Event_Param3>FRIENDLY_CONTAINS CLASS_FIGHTER</Event_Param3></Event>\n"
     " <Event Name=\"Bounced_D\"><Event_Type>STORY_INVASION_BOUNCED</Event_Type><Event_Param1>PlanetD</Event_Param1></Event>\n"
     // wave 2b: a pending corruption mission ends with the battle (SCRIPT_GAPS.md §4.7)
     " <Event Name=\"Corrupt_C\"><Event_Type>STORY_CORRUPTION_TACTICAL_COMPLETE</Event_Type><Event_Param1>PlanetC</Event_Param1>"
@@ -3062,7 +3062,7 @@ static std::unique_ptr<Types> make_types(const fs::path& root) {
                " <StarBase Name=\"SB1\"><Victory_Relevant>Yes</Victory_Relevant><Tactical_Health>500</Tactical_Health><CategoryMask>Structure</CategoryMask></StarBase>\n"
                // wave 2b: SELECTABLE (CHECK_DESTROYED counts live SELECTABLE objects, SCRIPT_GAPS.md §4.8)
                " <SpaceUnit Name=\"Corvette\"><Victory_Relevant>Yes</Victory_Relevant><Behavior>SELECTABLE</Behavior><Tactical_Health>100</Tactical_Health>"
-               "<CategoryMask>Corvette</CategoryMask></SpaceUnit>\n"
+               "<CategoryMask>Corvette</CategoryMask><Ship_Class>Corvette</Ship_Class></SpaceUnit>\n"
                " <GroundInfantry Name=\"Infantry\"><Victory_Relevant>Yes</Victory_Relevant><Tactical_Health>10</Tactical_Health><CategoryMask>Infantry</CategoryMask></GroundInfantry>\n"
                " <GroundStructure Name=\"Barracks\"><Victory_Relevant>Yes</Victory_Relevant><Tactical_Health>200</Tactical_Health><CategoryMask>Structure</CategoryMask></GroundStructure>\n"
                " <SpaceUnit Name=\"Fighters\"><Victory_Relevant>Yes</Victory_Relevant><CategoryMask>Fighter</CategoryMask></SpaceUnit>\n"
@@ -3182,8 +3182,11 @@ static Result run(const objects::GameObjectTypes& types, const FileProvider& fil
     story.notify_ui({StoryUiEvent::SelectUnit, pEmpire, static_cast<int32_t>(ts.id(mine)), "", true});  // no battle: dropped
     story.notify_ui({StoryUiEvent::ClickGui, pEmpire, 0, "b_reinforcement", true});
     CHECK(host.end_game_mode());
-    // S10 results: the Empire won the space battle at C (snapshot: its corvette), then lost a land battle at D,
-    // which Underworld owns (an invasion that bounced; no snapshot of that battle).
+    // S10 results: the Empire won the space battle at C, then lost a land battle at D, which Underworld owns (an invasion
+    // that bounced; no snapshot of that battle). mcx6 t03: the composition is the story manager's orbit record (the battle
+    // host's space decide state; here made by hand at A, where the Empire's corvette orbits): local [corvette 3].
+    story.record_battle_composition(story_test::rA);
+    CHECK(story.battle_composition(true) == std::vector<int32_t>{3} && story.battle_composition(false).empty());
     auto battle = [gs](GalacticEventKind k, int32_t player, int32_t other, PlanetIndex planet, int32_t value) {
         GalacticEvent e;
         e.kind = k;

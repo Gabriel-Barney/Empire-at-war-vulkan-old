@@ -5,16 +5,20 @@
 // writes sim state, draws random numbers or changes anything a sim CRC hashes.
 // Argument contracts and messages: docs/re/LUA_API.md "Binding map" (the original's own strings).
 // Behaviour the docs do not give is marked [inferred].
-// Exception (mcx6 t05): Promote_To_Space_Cinematic_Layer moves the object (TacticalScriptHooks::teleport).
+// Exception (mcx6 t05): Promote_To_Space_Cinematic_Layer moves the object (TacticalScriptHooks::teleport); likewise (mcx6)
+// Do_End_Cinematic_Cleanup suspends and moves the objects it cleans up (ObjectBridge state + the teleport hook).
 // Exception (story t12): Resume_Hyperspace_In also clears the host's reinforcement hold through
 // TacticalScriptHooks::resume_hyperspace_in (script_gaps.hpp) when a tactical host installed it; likewise (cu8g t03)
 // Set_New_Environment changes the mode's environment through TacticalScriptHooks::set_new_environment.
+#include <map>
 #include <string>
+#include <vector>
 
 #include "alamo/lua/object_bridge.hpp"
 #include "alamo/core/ascii.hpp"
 #include "alamo/lua/presentation.hpp"
 #include "alamo/lua/script_gaps.hpp"
+#include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "vm_internal.hpp"
 
@@ -401,10 +405,37 @@ int g_promote_to_space_cinematic_layer(Call& c) {
     return 0;
 }
 
-// Do_End_Cinematic_Cleanup() (0x541e20; MCX6_T05_CINEMATIC_BINDINGS §2): recorded; the game host hides the objects it
-// cleans up (GameSession::script_cinematics). [port] The sim part (behaviours suspended, moved to (1, 1, 0)) is not done.
+// Do_End_Cinematic_Cleanup() (0x541e20 -> 0x38ed10 per object; MCX6_T05_CINEMATIC_BINDINGS §2): recorded, and the game
+// host hides the objects it cleans up (GameSession::script_cinematics). The sim part (mcx6): only in a tactical mode (a
+// bridge with TacticalScriptHooks), every live object of the VM's store with a LOCOMOTOR behaviour, not owned by the
+// neutral player and not marked by In_End_Cinematic(true), in store order, has its behaviours suspended and is moved to
+// (1, 1, 0) through TacticalScriptHooks::teleport (store, movement, trees; the facing kept; without the hook the store
+// position). The suspension is ScriptObjectState::end_cinematic_suspended, which the battle host reads every tick; nothing
+// lifts it, as in retail. [port] It stands for retail's per-behaviour suspend virtual (+0xc0) as the port's per-tick unit
+// controls: the locomotor does not run and the weapons do not fire (Suspend_Locomotor + Prevent_All_Fire's effects).
+// binding-effect: Do_End_Cinematic_Cleanup full locomotor objects suspended (no locomotor run, no fire) and moved to (1, 1, 0) through TacticalScriptHooks::teleport; alamo_game hides them (docs/re/MCX6_T05_CINEMATIC_BINDINGS.md §2)
 int g_do_end_cinematic_cleanup(Call& c) {
     record(c, PresentationOp::DoEndCinematicCleanup);
+    ObjectBridge* b = c.vm->owner ? attached_object_bridge(*c.vm->owner) : nullptr;
+    objects::ObjectStore* st = c.vm->host.store;
+    if (!b || !b->tactical || !st) return 0;
+    const int32_t neutral = detail::neutral_player_id(c);
+    const std::map<int32_t, bool>& marks = state(c).in_end_cinematic;
+    std::vector<objects::ObjectHandle> gone;
+    for (const objects::ObjectHandle h : st->all_objects()) {
+        if (!st->alive(h) || !st->has_behavior(h, objects::beh::Locomotor) || st->owner(h) == neutral) continue;
+        const auto it = marks.find(st->id(h));
+        if (it != marks.end() && it->second) continue;  // obj +0x3c9 set: 0x38ed10 leaves it alone
+        gone.push_back(h);
+    }
+    for (const objects::ObjectHandle h : gone) {
+        b->state(st->id(h)).end_cinematic_suspended = true;
+        const Vec3 corner{1.0f, 1.0f, 0.0f};
+        if (b->tactical->teleport)
+            b->tactical->teleport(h, corner, st->facing(h));
+        else
+            st->set_position(h, corner);
+    }
     return 0;
 }
 

@@ -246,16 +246,28 @@ struct StoryNotification {
     bool has_object = false;         // an object came with it (filters / AI_NOTIFICATION Param1)
     int32_t owner = -1;              // owner of that object (FILTER_*)
     bool owner_neutral = false;      // that owner is the neutral player
-    std::string planet;              // planet (Enter family, CONSTRUCT_LEVEL, battles)
+    std::string planet;              // planet (Enter family, CONSTRUCT_LEVEL, battles); "" = no planet
     std::vector<std::string> units;  // fleet contents, unit type names (Enter family, MOVE)
+    // mcx6 t03, Enter family (STORY.md §5 "Enter family match"): the dispatched fleet. no_fleet = the dispatch carried none
+    // (P2 filter, P3 / P6 / P7 then not tested). fleet_hidden = 0x3a9760 (it has contents and all of them are hidden);
+    // fleet_raid = the Raid_Force_* test 0x432e20; fleet_direct = its direct content count (P6). orbit_units = the type
+    // names of every content of every fleet in orbit of the planet, any owner (P4).
+    bool no_fleet = false;
+    bool fleet_hidden = false;
+    bool fleet_raid = false;
+    int32_t fleet_direct = 0;
+    std::vector<std::string> orbit_units;
     double value = 0.0;              // level / credits / count
     int32_t category = -1;           // CONSTRUCT_LEVEL: 0 ground base (GROUND), 1 starbase (SPACE); value = its Base_Level
     std::vector<StoryParam> params;  // generic rule for types without a modelled evaluator
-    // L1/S4 wave 2a - battles (WIN/LOSE_BATTLES Param2 / Param3, STORY.md §5):
+    // Battles (WIN/LOSE_BATTLES Param2 / Param3, STORY.md §5 and its note "Battle composition", mcx6 t03):
     int32_t location = 0;            // 1 land, 2 space (the S10 battle event's value); 0 unknown
-    bool base = false;               // a starbase / ground base of the defender took part (BASE_SPACE / BASE_LAND)
-    std::vector<uint64_t> friendly;  // CategoryMask of every unit of the plot player's side in the battle
-    std::vector<uint64_t> enemy;     // ... of the other side(s)
+    // The two Ship_Class lists the story manager recorded at the last space conflict decision (-1 = a type without
+    // Ship_Class): the local player's side and everything else; local_player = the machine's local player (FRIENDLY_*
+    // tests local_classes when the plot's player is that player, else other_classes; ENEMY_* the opposite).
+    std::vector<int32_t> local_classes;
+    std::vector<int32_t> other_classes;
+    int32_t local_player = -1;
     // Tactical notifications (COMMAND_UNIT / GUARD_UNIT): the target / guarded object's type name, distance.
     std::string target;
     double distance = -1.0;          // < 0 unknown
@@ -348,9 +360,6 @@ public:
     // does this for the event classes with a planet-name list]. Returns the number of replaced parameters; `log` gets one
     // line per replacement ("EVENT <name>, Param <i>, replacing <old> with <new>").
     uint32_t replace_placeholder(std::string_view placeholder_upper, std::string_view planet, std::vector<std::string>* log = nullptr);
-    // GameObjectCategoryType name -> CategoryMask bit(s) (WIN/LOSE_BATTLES CLASS_* composition tests); unset or
-    // 0 = unknown class (never contained).
-    std::function<uint64_t(std::string_view category)> category_mask;
     // L1/S4 wave 2b: player -> faction index (FILTER_* compare factions, SCRIPT_GAPS.md §4.5); unset or < 0 = compare
     // players. objects_within(type name, x, y, z, range): some live object of that type in the mode is strictly
     // within `range` (3D) of the point (COMMAND_UNIT §4.3); unset = the notification's target / distance stand in.

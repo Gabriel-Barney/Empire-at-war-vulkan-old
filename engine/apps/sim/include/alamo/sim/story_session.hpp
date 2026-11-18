@@ -81,17 +81,16 @@
 // MISSION_LOST, BUY_BLACK_MARKET, GALACTIC_SABOTAGE, OPEN_CORRUPTION; queued and routed at the next T9
 // after the galactic stream and the host events, one "T ... Ui<Kind>" line each.
 //   BattleWon / BattleLost / BattleRetreat (S10)  STORY_WIN_BATTLES / STORY_LOSE_BATTLES / STORY_RETREAT,
-//                        player-scoped to the winner / loser / retreating player (Param2 location and Param3
-//                        composition of WIN/LOSE_BATTLES not modelled)
-//                        (wave 2a) with Param2 location = the event's value (1 land / 2 space) + "base" and
-//                        Param3 composition from the battle snapshot (begin_battle) when it is the same planet
+//                        player-scoped to the winner / loser / retreating player; WIN/LOSE_BATTLES carry the location
+//                        (the event's value, 1 land / 2 space) and (mcx6 t03) the orbit record's Ship_Class lists
+//                        (record_battle_composition) with the local player, for the Param3 test of space battles
 //   BattleLost (land)    (wave 2a) also STORY_INVASION_BOUNCED to the loser's plot sets when the loser was the
 //                        invader (the snapshot's attacker; without one: not the planet's owner at the previous
 //                        service) [inferred], Enter family: planet, owner = loser, units = the invader's types
 //
 // L1/S4 wave 2a - BATTLES AND THE TACTICAL STORY (the original keeps one story manager per game mode, STORY.md 0):
 //   begin_battle (battle host, at the tactical push): snapshot of the battle (planet, kind, attacker / defender,
-//     per-player unit categories and type names, base present) for the later WIN/LOSE_BATTLES / INVASION_BOUNCED
+//     per-player type names) for the later INVASION_BOUNCED
 //     routing; STORY_SPACE_TACTICAL / STORY_LAND_TACTICAL dispatched at once to the participants' galactic plot
 //     sets (STORY.md 4.1: these types are never queued; Param2 planet, StartTactical [inferred]); then the
 //     tactical plot set is loaded (one StoryModel + one LuaVm per scripted plot, on the battle's store and
@@ -516,6 +515,22 @@ public:
     // CampaignBattles' conflict decision through SimHost::story() (a locked human-involved conflict is fought).
     // No source is specified for the story-sequence-active flag (0x140b154d0), so none is offered. Not hashed. ---
     bool autoresolve_locked(PlanetIndex planet) const;
+    // mcx6 t03 (docs/re/STORY.md §5 "Battle composition", mcx6 Q14): the story manager's orbit record 0x449f10. The battle
+    // host calls it from the decide state of a space conflict the local player attacks or defends
+    // (galactic::ConflictManager::on_space_decide), before the fight / auto-resolve choice. Both lists are cleared, then
+    // every live fleet in orbit of `planet` (orbit order) adds the Ship_Class of each of its contents (-1 when the type
+    // has none) to the local list when the fleet's owner is the local player, else to the other list. The lists stay
+    // until the next record (AI-vs-AI conflicts record nothing, so they go stale), are saved (version 7) and are what
+    // WIN/LOSE_BATTLES' Param3 test reads for fought and auto-resolved space battles alike. Not hashed: they are derived
+    // from the hashed galactic state, and what they change (fired events) is hashed. [port] the port's orbit list holds
+    // fleets only (no starbase object in orbit).
+    void record_battle_composition(PlanetIndex planet);
+    const std::vector<int32_t>& battle_composition(bool local) const { return local ? comp_local_ : comp_other_; }
+    // mcx6 t03: the Raid_Force_* test (0x432e20, ConflictManager::raid_force) the Enter family's Param7 ("raid fleets
+    // only") asks about the dispatched fleet's contents. The battle host installs it. Unset: no fleet is raid capable.
+    void set_raid_test(std::function<bool(int32_t player, const std::vector<objects::ObjectHandle>& units)> fn) {
+        raid_test_ = std::move(fn);
+    }
     // --- STY1 lane B: story rewards that change campaign rules (docs/re/STORY_REWARDS_GALACTIC.md) ---
     // The rules the galactic rewards switch (planet restrictions, invasion / sabotage / corruption locks, fleet combining,
     // bounty collection, victory movie, power table, reinforcement switches). The session owns, saves and hashes them and
@@ -719,6 +734,12 @@ private:
     void note(const std::string& text) { lua_messages_.push_back(std::to_string(frame_) + " story: " + text); }
     bool autoresolve_disabled_ = false;              // OI galactic: story lock global flag (+0x41)
     std::vector<PlanetIndex> autoresolve_planets_;   // OI galactic: story lock planet list (+0x308), insertion order
+    std::vector<int32_t> comp_local_, comp_other_;   // mcx6 t03: the orbit record (+0x90 / +0xa8), Ship_Class values
+    std::function<bool(int32_t, const std::vector<objects::ObjectHandle>&)> raid_test_;  // mcx6 t03: Enter Param7
+    // mcx6 t03: the Enter-family fleet fields of a notification (STORY.md §5 "Enter family match") for `fleets` (the
+    // dispatched fleet, or the owner's fleets in orbit when it merged on arrival) and the P4 orbit names of `planet`.
+    void enter_fleet(lua::StoryNotification& n, const std::vector<uint32_t>& fleets, int32_t owner) const;
+    void orbit_names(PlanetIndex planet, std::vector<std::string>& out) const;
     void route_corruption_mission(int32_t winner, uint64_t frame);
     void collect_set(Set& s, uint32_t number, std::string_view via);  // + the other galactic sets (q6 t03)
     void collect_one(Set& s, uint32_t number, std::string_view via);

@@ -77,7 +77,10 @@ public:
     std::unique_ptr<lua::LuaVm> fresh(uint32_t plan, std::string* err = nullptr);
     // Replaces every pool (one vector per plan, plan order) and the created counter. A null entry stands for this
     // runtime's pristine(plan) VM, which is kept there (and stays pristine); every other VM of the old pools is destroyed.
-    void restore_pools(std::vector<std::vector<std::unique_ptr<lua::LuaVm>>> pools, size_t created);
+    // `pristine_from` (indexed by plan, may be shorter): a non-null VM there (legacy_pristine) becomes the plan's
+    // pristine VM in place of this runtime's own, at its null entry; the old one is destroyed.
+    void restore_pools(std::vector<std::vector<std::unique_ptr<lua::LuaVm>>> pools, size_t created,
+                       std::vector<std::unique_ptr<lua::LuaVm>> pristine_from = {});
     void set_vms_created(size_t created) { created_ = created; }  // undoes the count of VMs a failed load made
     // Teardown (OPT3 t11): moves every pooled VM to the end of `out` (plan order, pool order) and empties the pools.
     void take_vms(std::vector<std::unique_ptr<lua::LuaVm>>& out);
@@ -89,6 +92,12 @@ public:
     // StateHasher digest of pristine(plan)'s LuaVm::write image (0 without one): computed on first use, then cached
     // (the VM does not change while it stays pristine). Owner thread of the VMs only.
     uint64_t pristine_digest(uint32_t plan) const;
+    // mcx6 t07 [port]: a save written before mcx6 names a pristine VM that load() built with the old require
+    // (lua::LuaVmOptions::legacy_require), so its digest is not pristine_digest(plan). This rebuilds that VM the way
+    // load() made it then and returns it when its digest is `digest` (null otherwise: the save is refused as before).
+    // The reader hands it to restore_pools (pristine_from), so the restored session holds the same heap as the saved
+    // one and names it by the same digest when it saves again.
+    std::unique_ptr<lua::LuaVm> legacy_pristine(uint32_t plan, const AiDefinitions& defs, uint64_t digest) const;
 
 private:
     struct Entry {
@@ -101,7 +110,11 @@ private:
     };
     // make_vm without the count: safe on any thread while setup_ is (load's jobs).
     std::unique_ptr<lua::LuaVm> build_vm(const std::string& name, const std::string& chunk, const std::string& chunk_name,
-                                         std::string* err) const;
+                                         std::string* err, bool legacy_require = false) const;
+    // load()'s VM of one plan file: the chunk, PlanDefinitionLoad, Base_Definitions, the definition read (`def`, which
+    // carries name and file; `*def_ok`), the logs cleared on success. Null when the chunk or Base_Definitions failed.
+    std::unique_ptr<lua::LuaVm> build_load_vm(const std::string& source, const AiDefinitions& defs, PlanDefinition& def,
+                                              bool* def_ok, std::vector<std::string>* diag, bool legacy_require) const;
     VmSetup setup_;
     // OPT3 t11: the files the VMs' require / dofile / loadfile read (host.files), cached for every VM of this runtime:
     // one plan load requires the same libraries in every plan VM, each through up to 22 script-root lookups. Bytes

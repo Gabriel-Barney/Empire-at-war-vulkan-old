@@ -274,6 +274,89 @@ static void test_promote_to_space_cinematic_layer() {
     attach_object_bridge(vm, nullptr);
 }
 
+// mcx6 (MCX6_T05_CINEMATIC_BINDINGS §2, 0x541e20 -> 0x38ed10): Do_End_Cinematic_Cleanup in a tactical mode (a bridge with
+// TacticalScriptHooks) suspends every LOCOMOTOR object not owned by the neutral player (here unknown: -1, no player world)
+// and not marked In_End_Cinematic(true), and moves it to (1, 1, 0) through the teleport hook (else the store position).
+// Without a tactical bridge it is only recorded.
+static void test_end_cinematic_cleanup() {
+    const fs::path root = fs::temp_directory_path() / "alamo_lua_presentation_cleanup";
+    std::error_code ec;
+    fs::remove_all(root, ec);
+    fs::create_directories(root / "Data/XML");
+    std::ofstream(root / "Data/XML/GameObjectFiles.xml", std::ios::binary) << "<L><File>C.xml</File></L>";
+    std::ofstream(root / "Data/XML/C.xml", std::ios::binary)
+        << "<R><Prop Name=\"Rock\"></Prop><GroundInfantry Name=\"Walker\"><Tactical_Health>40</Tactical_Health>"
+           "<LandBehavior>WALK_LOCOMOTOR</LandBehavior></GroundInfantry></R>";
+    objects::ObjectTypeDatabase raw;
+    objects::GameObjectTypes types;
+    {
+        DirectoryProvider dp(root.string());
+        CHECK(raw.load(dp));
+        CHECK(types.build(raw));
+    }
+    objects::IdCounter ids;
+    objects::ObjectStore store(objects::ModeKind::Land, objects::StoreKind::Primary, types, &ids);
+    GameRandom rng{1234u, 99u};
+    const auto make = [&](const char* type, int32_t owner, float x) {
+        objects::SpawnParams sp;
+        sp.type = raw.find(type);
+        sp.owner = owner;
+        sp.position = {x, 50.0f, 0.0f};
+        return store.create(sp);
+    };
+    const objects::ObjectHandle mine = make("Walker", 0, 100.0f);      // cleaned up
+    const objects::ObjectHandle actor = make("Walker", 1, 200.0f);     // In_End_Cinematic(true): kept
+    const objects::ObjectHandle neutral = make("Walker", -1, 300.0f);  // the neutral player's: kept
+    const objects::ObjectHandle rock = make("Rock", 0, 400.0f);        // no locomotor: kept
+    const objects::ObjectHandle unmarked = make("Walker", 1, 500.0f);  // In_End_Cinematic(false): cleaned up
+    CHECK(store.has_behavior(mine, objects::beh::Locomotor) && !store.has_behavior(rock, objects::beh::Locomotor));
+    LuaHost h;
+    h.store = &store;
+    h.types = &types;
+    h.rng = &rng;
+    LuaVm vm(h);
+    PresentationLog log;
+    attach_presentation(vm, &log);
+    // In_End_Cinematic(b) writes PresentationState::in_end_cinematic (test_object_effects); set here directly.
+    log.mutable_state().in_end_cinematic[store.id(actor)] = true;
+    log.mutable_state().in_end_cinematic[store.id(unmarked)] = false;
+    CHECK(run(vm, "Do_End_Cinematic_Cleanup()") == "");  // no bridge: recorded only
+    CHECK(log.events().back().op == PresentationOp::DoEndCinematicCleanup && store.position(mine).x == 100.0f);
+    ObjectBridge bridge;
+    attach_object_bridge(vm, &bridge);
+    CHECK(run(vm, "Do_End_Cinematic_Cleanup()") == "" && store.position(mine).x == 100.0f && !bridge.find_state(store.id(mine)));
+    TacticalScriptHooks hooks;
+    std::vector<std::pair<objects::ObjectId, Vec3>> moved;
+    hooks.teleport = [&](objects::ObjectHandle o, Vec3 p, Vec3) { moved.emplace_back(store.id(o), p); };
+    bridge.tactical = &hooks;
+    CHECK(run(vm, "Do_End_Cinematic_Cleanup()") == "");
+    CHECK(moved.size() == 2 && moved[0].first == store.id(mine) && moved[1].first == store.id(unmarked));
+    CHECK(moved.size() == 2 && moved[0].second.x == 1.0f && moved[0].second.y == 1.0f && moved[0].second.z == 0.0f);
+    const auto suspended = [&bridge, &store](objects::ObjectHandle o) {
+        const ScriptObjectState* s = bridge.find_state(store.id(o));
+        return s && s->end_cinematic_suspended;
+    };
+    CHECK(suspended(mine) && suspended(unmarked) && !suspended(actor) && !suspended(neutral) && !suspended(rock));
+    // No teleport hook: the store position. The bridge state is saved (version 4) and hashed once set.
+    hooks.teleport = nullptr;
+    CHECK(run(vm, "Do_End_Cinematic_Cleanup()") == "");
+    CHECK(store.position(mine).x == 1.0f && store.position(mine).y == 1.0f && store.position(unmarked).x == 1.0f &&
+          store.position(actor).x == 200.0f && store.position(neutral).x == 300.0f && store.position(rock).x == 400.0f);
+    ByteWriter w;
+    bridge.write(w);
+    ObjectBridge back;
+    ByteReader r(w.bytes());
+    CHECK(back.read(r) && r.done());
+    const ScriptObjectState* bs = back.find_state(store.id(unmarked));
+    CHECK(bs && bs->end_cinematic_suspended && !(back.find_state(store.id(actor)) && back.find_state(store.id(actor))->end_cinematic_suspended));
+    StateHasher ha, hb;
+    bridge.hash(ha);
+    back.hash(hb);
+    CHECK(ha.digest() == hb.digest());
+    attach_object_bridge(vm, nullptr);
+    fs::remove_all(root, ec);
+}
+
 static void test_argument_contracts() {
     World w;
     LuaHost h = w.host();
@@ -642,6 +725,7 @@ int main() {
     test_argument_contracts();
     test_set_new_environment();
     test_promote_to_space_cinematic_layer();
+    test_end_cinematic_cleanup();  // mcx6
     test_object_effects();
     test_camera_positions();
     test_cinematic_sequence();
