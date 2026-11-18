@@ -37,7 +37,7 @@ How it is wired:
 | Launcher (Rust) | `build_launcher.cmd`; by hand `launcher\cargo.cmd <args>` |
 | Read a build result | `python tools\lint\build_summary.py <logs>` (the scripts print it) |
 | Which tests cover my change | `python -I tools\lint\changed_tests.py` |
-| Static checks | `python tools\lint\run_tidy.py` (clang-tidy), `check_mod_names.py`, `check_string_literals.py` (hook) |
+| Static checks | `python tools\lint\run_tidy.py` (clang-tidy), `check_mod_names.py`, `check_limits.py` (limit tags, §8), `check_string_literals.py` (hook) |
 | Goldens | `tools\regen_goldens.cmd` (skill `regen-goldens` first) |
 | Parity against retail baselines | `tools\parity\parity_harness.py` (`tools/parity/README.md`) |
 | Benchmarks, worker sweeps, build times | `tools\benchmark\` (`run_suite.cmd`, `worker_sweep.py`, `build_times.py`) |

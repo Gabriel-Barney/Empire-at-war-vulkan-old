@@ -90,13 +90,19 @@ def main(argv):
     a = ap.parse_args(argv)
     out = Path(a.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
+    if not FOC_TEXT.is_file():
+        print(f'limit_mods: {FOC_TEXT} not found (FoC GameConstants for levels_10), skipped')
+        return 0
     mods = build(out)
     if a.action == 'build':
         print('limit_mods: built ' + ', '.join(f'{k} -> {v}' for k, v in mods.items()))
         return 0
-    if not a.exe or not a.game:
-        print('limit_mods: run needs --exe and --game (or ALAMO_FOC_DATA)')
+    if not a.exe:
+        print('limit_mods: run needs --exe')
         return 2
+    if not a.game or not Path(a.game).is_dir():
+        print('limit_mods: ALAMO_FOC_DATA not set (or --game missing), skipped')
+        return 0
     exes = [('a', Path(a.exe))] + ([('b', Path(a.exe2))] if a.exe2 else [])
     results, ok = [], True
     for name in a.mods.split(','):

@@ -285,6 +285,17 @@ if(_alamo_sim)
              COMMAND alamo_headless --skirmish-ai skirmish --map _MP_SPACE_GEONOSIS --human Empire --seed 1103945700 --ticks 900 --workers 4 --quiet)
     set_tests_properties(alamo_headless_skirmish_ai_geonosis PROPERTIES TIMEOUT 1200)
     alamo_label_slow(alamo_headless_skirmish_ai_geonosis)
+    # mcx5 t06: the limits conformance mods factions_80 (80 factions / players, the stock ones at 72..79) and levels_10
+    # (GameConstants maxima 10) at G2: space and land skirmish 3000 ticks, galactic 9000 ticks, CRC logs identical on
+    # 0 / 4 workers (tools/conformance/limit_mods.py; the MSVC / clang comparison is that script with --exe2). Skipped
+    # without ALAMO_FOC_DATA.
+    if(ALAMO_LINT_PYTHON)
+      add_test(NAME alamo_headless_conformance_limits
+               COMMAND ${ALAMO_LINT_PYTHON} ${PROJECT_SOURCE_DIR}/tools/conformance/limit_mods.py run
+                       --exe $<TARGET_FILE:alamo_headless> --out ${CMAKE_CURRENT_BINARY_DIR}/conformance_limits)
+      set_tests_properties(alamo_headless_conformance_limits PROPERTIES TIMEOUT 1800 RESOURCE_LOCK conformance_limits)
+      alamo_label_slow(alamo_headless_conformance_limits)
+    endif()
     # q4hf t02: --trace-out on the skirmish host (headless/tactical_trace.hpp), the tactical Q2TRACE 1 trace the Q4 parity harness
     # reads for combat.damage_taken / combat.first_shot_frame. The synthetic battle with --check-workers against its golden (the
     # trace changes no CRC), then q2trace.py validate and the first-shot / damage records (headless/check_tactical_trace.cmake).
