@@ -1768,3 +1768,236 @@ Both are object scripts (run in every game session since q6 t23, 2026-11-13; bef
   plot scripts honour the flag after the pass. A story plot's VM stays attached: service_threads kills its threads,
   and `StoryModel::call_script` / `deliver_script_triggers` no longer call its `Story_Event_Trigger` (the events still
   fire; the flag is saved with the VM) [port: the exe's plot-script teardown is not traced].
+
+## Task force: Enable_Attack_Positioning and Release_Reinforcements (mcx6 Q11, 2026-11-17)
+
+Hand-written section (keep it when regenerating). Read with REA (Ghidra 12.1.4 analysis of Steam FoC x64) from the
+bindings 0x6eaa80, 0x6e8a70 and 0x17d070, the space task force registration 0x6e4810, the UNIT_AI functions 0x4f6450,
+0x4f6070, 0x4f6470, 0x4f5390, 0x4f48a0 and 0x4f5780, the UnitAI data pack constructor 0x550ed0, the task force unit
+hooks (land Add_Force 0x6e9240, land unit removal 0x6ee5e0, space Add_Force 0x6e4e30, space unit removal 0x6e8aa0),
+the PotentialPlan reservation functions 0x6c24e0, 0x6c2b20, 0x6c2320, 0x6c0be0 and 0x6bec20, and the free store
+virtuals vf +0xd8 0x245690, vf +0xe0 0x4d3040, vf +0xe8 0x4d3cf0 and vf +0xf0 0x4d3510. The four free store slots hold
+the same functions in the base, land, space and galactic vtables. Conventions as in "Binding error model": "error" =
+0x248190.
+
+### Which function a call reaches [H]
+
+- Land task force: `Enable_Attack_Positioning` runs 0x6eaa80; `Release_Reinforcements` runs 0x6e8a70.
+- Space task force: `Enable_Attack_Positioning` runs **0x17d070**. The space registration 0x6e4810 stores that address
+  as the method pointer. `Release_Reinforcements` runs the same 0x6e8a70 as land.
+- **0x17d070 is a no-op (confirmed).** It is two instructions: it clears the return register and returns.
+  - It checks no arguments, reports no error, writes no field and returns no Lua value.
+  - It is the shared "return nothing" function, also used as LandMovementBlockStatus vf20 (A1_READINGS §33.2.2).
+- Shipped scripts call `Enable_Attack_Positioning` only on space task forces. FoC and EaW have the same 10 calls, in
+  `AI\SpaceMode\` DestroyUnit, DestroyUnitMinimal, SystematicDisable, TurboAttack, TurboAttackLocation and FlankPlan.
+  So in the shipped game it never does anything.
+- No FoC, EaW or TR script calls `Release_Reinforcements`.
+
+### Enable_Attack_Positioning(flag) on a land task force (0x6eaa80) [H unless tagged]
+
+Argument checks (an error sets the script's stop flag +0x121, so the plan ends at the end of its service pass):
+
+| case | outcome |
+|---|---|
+| argument count ≠ 1 (a nil counts as present) | error `Enable_Attack_Positioning - Invalid number of parameters.  Expected 1, got %d` (two spaces after the full stop; the count is not passed to the format), nothing changed |
+| argument 1 not a Lua boolean (class chain does not reach 0x140a157b0) | error `Enable_Attack_Positioning - Invalid type for parameter 1.  Expected boolean.`, nothing changed |
+
+Effect:
+- The binding walks the task force's unit list (+0x78, the list the base `Add_Force` appends to) in list order.
+- For each entry it takes the object (0x5791e0). If the object has the UNIT_AI behaviour (slot 0x12), the binding writes
+  the flag to byte **+0x38 of the object's UnitAI data pack** (object +0x108; 0x4f6450). Objects without UNIT_AI are
+  skipped.
+- The object is not null-checked. A list entry whose object is gone would crash [M: dead units leave the list on their
+  death signal before this can happen].
+- Only the units in the task force at the moment of the call get the flag:
+  - land `Add_Force` 0x6e9240 and land unit removal 0x6ee5e0 (LandTaskForceClass vtable 0x8c36a8 slot 49) do not touch
+    +0x38;
+  - so a unit added later does not get the flag;
+  - a released unit keeps it, in the free store or in another task force, until another call clears it.
+- Space task forces do clear it: space `Add_Force` 0x6e4e30 and space unit removal 0x6e8aa0 (SpaceTaskForceClass
+  vtable 0x8c1b88 slot 49) write +0x38 = 0. The space binding is the no-op above, so a space unit's flag is always 0.
+- The pack constructor 0x550ed0 starts +0x38 at 0.
+- Return value: none (zero results), in every case.
+
+Readers of UnitAI +0x38:
+1. The UNIT_AI service **0x4f6070** runs on every UNIT_AI object's service, in tactical modes only (current mode vf
+   +0xf0). It runs the attack-positioning step 0x4f6470 when both hold:
+   - the object has a locomotor (slot byte +0x333 ≠ −1);
+   - +0x38 is set, or the representative type has `Keep_Moving_In_Battle` (type +0x6a; no FoC type sets it).
+2. The formation re-path veto **0x4f5780** (called from 0x419bae; FIGHTER_FLYING §4.11 E): members[0]'s UNIT_AI vetoes
+   the re-path when `Keep_Moving_In_Battle` or +0x38 is set.
+
+Attack-positioning step 0x4f6470 [H for the flow, M for the names]:
+- Required, else nothing:
+  - the unit's locomotor pack (+0xa8) has a formation (+0x1f0);
+  - the formation has an attack target (0x41a2e0, which also gives a hard point index);
+  - the unit and the target are not both team containers (TEAM slot byte +0x348 ≠ −1 on both).
+- UnitAI pack fields:
+  - +0x34: the frame of the next re-evaluation. The constructor sets it to F + Get_Int(0, 150) − 150
+    (A1_READINGS §14), so the first check is due at once;
+  - +0x24: "moving to the attack position";
+  - +0x28 / +0x2c / +0x30: the attack position.
+- Before frame +0x34 nothing happens. When it is due:
+  1. +0x24 := 0 and +0x34 := now + 150 (5 s at 30 fps).
+  2. A new attack position is computed (0x4f5390, below).
+  3. If the unit is at least R from the position (2-D, from the unit's own position; R = the max attack range
+     0x3749d0 of the representative type, taken from the lead member when the unit is a team container):
+     - the unit is detached into a formation of its own when its formation has more than one member (0x424850);
+     - +0x24 := 1;
+     - a position move block to the attack position is pushed on its formation (0x41fd30).
+
+     Otherwise nothing happens.
+- The function has a second branch: a unit near the position while +0x24 is set gets an attack block on the target,
+  and +0x24 := 0. Without `Keep_Moving_In_Battle` this branch can never run, because the due check always clears +0x24
+  first [H, from the control flow].
+- Net effect of the flag: every 5 s, a land unit with a locomotor whose formation attacks an object computes a
+  low-threat point near the target. When it is out of range of that point, it leaves its formation and walks there.
+  It then relies on its own targeting to fire.
+
+Attack position 0x4f5390 [H for the flow, M for naming the threat query]:
+- Target point = the target's position, or the hard point's world position when the attack names one.
+- d = min(the target's 2-D extent (0x3982b0), half the unit's max attack range).
+- The rest runs only when the threat grid exists (0x140b31900). Without it the position keeps its old value.
+- It measures the enemy threat for the unit's owner (0x654290; AI_TACTICAL_PERCEPTION §4) in four d × d squares. Their
+  corners are the target point and its steps, in this order: (x, y), (x − d, y), (x − d, y − d), (x, y − d).
+- It keeps the square with the lowest threat (strict <, so the first one wins a tie). The position is that square's
+  centre (corner + d/2), with z = 0.
+- In land mode (mode type 1) the position is then checked against the terrain (0x4f48a0) [M]:
+  - it is pulled toward the target point when the line test 0x5a4c10 between them fails;
+  - it is stepped back 30 units at a time until the line from the unit to it clears.
+- With `Keep_Moving_In_Battle` the corner is used instead of the centre (not reached in FoC).
+
+### Release_Reinforcements() (0x6e8a70, land and space) [H unless tagged]
+
+- Arguments are ignored: no count or type check, no error path. Return value: none.
+- PP = task force +0xf0 (plan) → +0x88 (goal) → +0x68 (the PotentialPlan). The plan and the goal are not null-checked.
+  A null PP → nothing.
+- 0x6c24e0(PP) acts only when PP +0x198 ≠ 0 (a tactical PP) and PP +0x100 ≠ 0 (accepted):
+  - the free store is PP +0x20 → +0x90 → +0x28 → +0x50 → +0x38, the same chain the reservation code uses;
+  - its vf +0xf0 (0x4d3510) nulls every slot of the **reinforcement reservation vector** (store +0x88, one slot per
+    reinforcement pool entry, AI_GALACTIC_3 §1.3) that holds this PP;
+  - PP +0x120 (the plan's pool indices) is not changed.
+
+Readers of store +0x88:
+- Reinforcement Setup A 0x727940 fills a pool entry only when its slot is free (vf +0xe8, 0x4d3cf0).
+- The reserve call (vf +0xe0, 0x4d3040) succeeds when the slot is free or already belongs to the caller.
+- `LandTaskForce.Reinforce`, campaign variant 0x6ed9f0, compares the vector's size (vf +0xd8 → store +0x88) with the
+  parent record count.
+
+The same release also runs without Lua:
+- 0x6c2320 (PP unreserve) clears the PP's pool slots (vf +0xf0), pads and units at the start of every goal Commit
+  (0x6c0be0) and in the PP destructor 0x6bec20.
+- 0x6c2b20 (from 0x6c2d60) reserves PP +0x120's pool slots again (vf +0xe0; the result is ignored) when the goal is
+  accepted, and for every kept goal at each Commit (A1_READINGS §28.4).
+
+So the Lua call frees the plan's pool slots only until its next Commit takes them back. In between, another plan's
+Reinforcement solve can take them [M: the practical window]. It does not stop the task force's own `Reinforce`: the
+size check still passes, and the spawn reads PP +0x120.
+
+### Port notes
+
+- The port's no-op is exact for the space `Enable_Attack_Positioning`, which is the only one the shipped AI calls.
+- Land `Enable_Attack_Positioning` matters only for mods that call it on land task forces:
+  - set the flag on the UNIT_AI data of each current member;
+  - keep it across release; land add and remove do not touch it;
+  - with the flag set, a unit whose formation attacks an object runs the 150-frame walk to a low-threat point above
+    (it needs the threat grid);
+  - argument errors are `script_error_stop`.
+- `Release_Reinforcements` is close to a no-op in retail, because the next Commit takes the slots back. A no-op in the
+  port is a fair approximation unless the port models per-plan pool reservations [M].
+
+## Script lookup and `require` (mcx6 Q12, 2026-11-17)
+
+Hand-written section (keep it when regenerating; it corrects the one-line "Script search path" at the top). Read with
+REA from:
+- the LUA_PATH builder 0x242f20 and the root registration 0x242cd0;
+- the LuaScriptClass constructor 0x2457f0;
+- the script load 0x245e30 → 0x245f80 and the pool get 0x244170;
+- `require` 0x7cfc60 and its path reader 0x7d03b0, luaL_loadfile 0x7ce5e0, lua_dostring 0x7ced80;
+- the Lua file hook 0x245a60;
+- the AI and Evaluator scans 0x4e7e30 / 0x5e8220;
+- the load error report 0x246ad0.
+
+### One loader for every named script [H]
+
+- Every script made from a name is loaded the same way. That covers AI plans (0x4e7170), free stores, evaluators
+  (0x5e7cb0), GameScoring, story plots and object scripts. All of them go through the pool get 0x244170, the only
+  caller of 0x245e30.
+- 0x245f80 builds the Lua source text `require("<name>")` plus a newline, with the name exactly as given, and runs it
+  with lua_dostring (0x7ced80, its only caller) in the script's own new lua_State.
+- So the AI plan, FreeStore and Evaluator loaders have **no extension logic of their own**. They find exactly what
+  `require` finds.
+- The script's stored name (+0x68, used in error texts) is the given name without its directory (the part after the
+  last `\` or `/`) and without its extension (0x2011a0). `require` gets the name as given.
+- A failed load:
+  - 0x246ad0 reports it only when the debug callback 0x140b09d40 is set; the shipped build does not set it ("General
+    rules" above).
+  - It then answers "no retry". The pool get releases the new script and returns none.
+  - So a missing file, or a compile or run error in the script's top level or in any module it requires, means no
+    script.
+
+### LUA_PATH [H]
+
+- 0x242f20 builds one global string:
+  - it starts with `./?.lua;./?.lc`;
+  - for each registered script root R, in registration order, it appends `;R?.lua;R?.lc`.
+- 0x242cd0 registers a root: it adds a trailing `/` when missing, skips an exact duplicate, and rebuilds the string.
+- Roots in registration order:
+  1. Boot init (the code at 0x4ba70, next to the memory-log setup): `Data/Scripts/Library/`, `Data/Scripts/GameObject/`,
+     `Data/Scripts/FreeStore/`, `Data/Scripts/Miscellaneous/`, `Data/Scripts/Story/`.
+  2. The AI plan scan 0x4e7e30: `Data/Scripts/AI/`, `Data/Scripts/AI/SpaceMode/`, `Data/Scripts/AI/LandMode/`,
+     `Data/Scripts/AI/StoryArc/`, `Data/Scripts/Interventions/`.
+  3. The evaluator scan 0x5e8220: `Data/Scripts/Evaluators/`.
+
+  [M: whether the AI scan or the evaluator scan runs first at data init; it changes only the order of those roots.]
+- Every new lua_State gets a copy of the string as its global `LUA_PATH` (constructor 0x2457f0). A state made before a
+  root was registered keeps the shorter path.
+- `require`'s path reader 0x7d03b0 is stock Lua 5.0.2: the global `LUA_PATH` if it is a string, else the environment
+  variable `LUA_PATH`, else `?;?.lua`. Every engine state has the global, so the other two are never used.
+- A lookup of NAME therefore tries, in this order:
+  - `./NAME.lua`, then `./NAME.lc`;
+  - then `Data/Scripts/Library/NAME.lua`, then `Data/Scripts/Library/NAME.lc`;
+  - then each later root the same way.
+
+  In every directory `.lua` comes before `.lc`, and `./` is the working directory (the install folder).
+- Only "file not found" moves the search to the next template. A file that opens but fails to compile ends the search
+  with an error (stock 5.0.2).
+- Files open through the engine's FileClass (the Lua file hook 0x245a60 → FileClass 0x213010 open), so the normal file
+  lookup applies: loose and mod files, then MEG archives (PHASE2_ANSWERS) [M: the mod-path step inside that open was
+  not re-read here].
+- A file whose first byte is neither printable nor a space is reopened in binary mode and loaded as a precompiled chunk
+  (stock luaL_loadfile). The x64 build needs 64-bit bytecode (SUBSYSTEMS.md, "Lua loading").
+
+### Discovery scans list `*.lua` only [H]
+
+- No XML names the plan scripts. 0x4e7e30 lists `*.lua` in `.\Data\Scripts\AI\`, `AI\SpaceMode\`, `AI\LandMode\`,
+  `AI\StoryArc\` and `Interventions\` (with the MEG-aware finder 0x217e80, UI.md §9.2). It strips the 4-character `.lua`
+  and loads each name (0x4e7170).
+- Evaluators are found the same way, in `.\Data\Scripts\Evaluators\*.lua` (0x5e8220).
+- Consequences:
+  - a plan or evaluator that exists only as `.lc` is never found;
+  - a name found by the scan is then loaded through `LUA_PATH`, so an earlier match wins. A `NAME.lua` or `NAME.lc` in
+    the install folder or in an earlier root shadows the scanned file: a `Library\` file with a plan's name loads
+    instead of the plan.
+- Names that come from XML have no scan, so they load whichever `LUA_PATH` entry exists first, `.lc` included. These
+  are GameScoring's `Game_Scoring_Script_Name`, the AI player's `*FreeStoreScript` tags, and the story and object
+  `Lua_Script` tags.
+
+### `require` and `_LOADED` [H unless tagged]
+
+- `require` (0x7cfc60) is **stock Lua 5.0.2**:
+  1. if `_LOADED[name]` is truthy, it returns that value and loads nothing;
+  2. otherwise it walks `LUA_PATH` as above;
+  3. it saves `_REQUIREDNAME`, sets it to the name, runs the chunk, and restores it;
+  4. it turns a nil result into `true`;
+  5. only then does it store `_LOADED[name]` = the result.
+- So `_LOADED[name]` is set **after** a successful run. A chunk that raises an error leaves no entry, and a later
+  `require` tries again.
+- The script's own file is loaded this way too. After the load, `_LOADED["<given name>"]` holds its result (`true` for
+  the shipped scripts, which return nothing).
+- A module that requires a file that is still loading (a cycle) loads it again, because its entry is not set yet [M:
+  the recursion ends in Lua's C stack limit error].
+- `_LOADED` belongs to one lua_State. Each LuaScriptClass has its own state (GAME_SCORING §1), and every load through
+  0x245e30 makes a new one, so each script loads its modules itself.
+- 0x252160 reads `_LOADED`'s string keys only to hand them to the debug file-watcher callback 0x140b09d50 [L: whether
+  the shipped build sets it].

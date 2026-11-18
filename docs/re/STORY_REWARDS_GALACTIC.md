@@ -230,21 +230,359 @@ outside it is ignored by retail's dispatcher (code 0, no case), so the load repo
   enemy planet" path, which reads the invasion-disabled list instead). **Open.** Shipped: DISABLE_DIRECT_INVASION in
   4 files, ENABLE_ in none.
 
-### 1.8 SET_PLANET_SPAWN (0x48, handler inline) and SET_SPAWN (0x42) [H code, L effect]
+### 1.8 SET_PLANET_SPAWN (0x48, handler inline) and SET_SPAWN (0x42) [H]
 
 - **SET_PLANET_SPAWN.** Needs P1, P2 and P3 all present, else "Set planet spawn failed due to incomplete parameters".
-  P1 planet name (first instance), P2 spawn name, P3 float (`atof`). It writes the float into a map in the planet block
-  (+0x2d0, keyed by the CRC of P2) through 0x4b6e00. The reader of that map was not found. [L for the meaning:
-  "indigenous spawn rate / chance per spawner name"]
+  - P1 planet name (first instance), P2 spawner type name, P3 chance (`atof`).
+  - It writes P3 into a map in the planet block (+0x2d0) through 0x4b6e00. The key is the CRC of P2 **as written**,
+    not upper-cased. An existing key is overwritten; nothing removes an entry.
+- **Reader (found 2026-11-17, mcx6)** [H]. 0x4b71c0 walks that map. Its one caller is the tactical battle start
+  0x28fda0, for the battle's planet, after the map and its objects are loaded. For each entry it runs 0x5310b0(key,
+  chance), the indigenous-spawner activation (§1.13; TRU1_C_RE.md §1.2).
+  - So the entry sets the share of active spawners of that type in **every later battle at that planet**, in place of
+    the type's `Spawn_Indigenous_Units_Chance`. The spawners are still undecided at that point, so their own first
+    service no longer re-decides [M for the timing].
+  - P2 must be the upper-case type name to match (§1.13).
+  - Whether the map is saved with the planet was not traced [L].
 - **Shipped use is a no-op.** `INTERVENTION_INDIGENOUS_REVOLT.XML` (both games, two events) sets **only
   Reward_Param3** (`1.0`, `0.0`): P1 and P2 are empty, so the handler logs the "incomplete parameters" error and does
   nothing. The question's "in no shipped XML" is wrong in this one respect.
-- **SET_SPAWN (0x42)** is a different reward: P1 and P2 required (P2 `atof`), then 0x531070(P1, value), not traced.
+- **SET_SPAWN (0x42)** is a different reward: it re-balances the spawners of a type in the running battle at once;
+  see §1.13.
 
 ### 1.9 Other galactic rewards touched while reading (for completeness) [H]
 
 - **CHANGE_OWNER (0x2d)** is in §4.1 (it is the same code in both modes).
 - REMOVE_CORRUPTION (0x7d) is in §3.
+
+### mcx6 Part A (2026-11-17): §1.10 to §1.21
+
+Answers `MCX6_RE_QUESTIONS.md` Part A. Read through REA and the Ghidra export (`re_reference/`), not ReVa. None of
+these rewards appears in shipped EaW / FoC XML or Lua. A search of the loose XML and Lua of the eight workshop mods
+on this machine (Thrawn's Revenge 1125571106, Fall of the Republic 1976399102 and six others) found only
+`Template_Switch_Sides` (§1.10). It found no FORCE_RETREAT, although MOD_AUDIT counts two; MEG-packed files were not
+searched. Each section ends with **Port**, the existing port system the reward touches.
+
+### 1.10 SWITCH_SIDES (0x13, inline in 0x456970; step 0x297e80 `PlayerListClass::Switch_Sides`) [H unless tagged]
+
+- **Multiplayer: nothing.** The case does nothing when the game type is a multiplayer one (0x28af60: GMM +0x18 in
+  {1, 2, 4}), and 0x297e80 repeats that test.
+- **Parameters.** P1 optional: faction name. Nothing else is read.
+- **One step (0x297e80).**
+  - The player list (0xa16fd0) keeps the local player's index at list +0x30. A step adds 1, wraps to 0 at the end,
+    and keeps adding while the player at that index has a faction with `Is_Debug_Switchable_To` (faction +0x10a)
+    false.
+  - Switchable in shipped data: FoC Rebel, Empire, Underworld; EaW Rebel, Empire, Pirates, Ewok. Not switchable:
+    Neutral, Hostile, Hutts, Sarlacc and FoC Pirates.
+  - If no player in the list is switchable, the loop never ends [H loop; M that the game then hangs].
+  - Then the human flags, under three conditions: the debug byte 0xb1574e is clear, the new index is valid, and the
+    new local player has **no AI system** (player +0x360 null, 0x2814d0; i.e. the campaign's `AI_Player_Control` gave
+    it `Human`). If all hold: new local player +0x62 (human) := 1, and every other player +0x62 := 0.
+  - If the new local player has an AI, the +0x62 flags are **not touched**. The local index moves (the HUD then acts
+    for that player [M]), its AI keeps playing it, and the old human player keeps +0x62 = 1 with no AI.
+  - Log "PlayerListClass::Switch_Sides: Switched to player index %d, faction %s".
+  - Last, for every LOBBING_SUPERWEAPON (behaviour 0x37) object of the current mode it calls a method that is empty
+    in this build (folded with the CFG stub 0x1fa90): no effect.
+- **P1 absent:** one step, to the next switchable player.
+- **P1 given:**
+  - Note the local player's faction F0, then step until the new local player's faction is F0 again (full circle) or
+    is P1's faction (looked up by name each round, 0x3303d0).
+  - An unknown P1, or no switchable player of that faction: it goes full circle and ends on a player of F0, normally
+    the original one.
+  - The human flags end as the **last step that reached an AI-less player** left them.
+  - If F0 is not switchable and P1 cannot be reached, the loop never ends [M].
+- **After the steps (both cases).** For every mode on the game-mode stack (GMM +0x48, count +0x50), the per-object
+  visibility refresh runs for the new local player over that mode's object manager: 0x2b59b0 calls 0x3a51e0 per
+  object (the "visible to the local player" byte +0x39f, then each behaviour's vf+0xa8, e.g. the planet presence
+  fold). It is the same refresh that runs after a battle (BATTLE_TRANSITIONS §3).
+- **Not touched** [H, by absence in 0x456970 and 0x297e80]:
+  - camera and GUI: no notification is sent; the HUD picks up the new player the next time it asks for the local
+    player (0x294a40) [M];
+  - AI systems: none is created, removed or re-seeded (+0x360 untouched);
+  - story plots (plot player +0x638), credits, ownership.
+  - No random draw.
+- **Save.** +0x62 is player state. Whether the local index (list +0x30) is saved was not traced [L].
+- **Mod use.** TR and FotR define `Template_Switch_Sides` in `Player_Agnostic_Plot.xml` and the tactical universal
+  story files. `StoryUtil.SwitchHumanFaction(old, new)` fills its P1 with the new faction name, but no Lua file in
+  either mod calls that function, so the reward is defined but never fired.
+- **Port:** the local-player choice in apps/game (HUD, input, fog view) and the players' human flag. Skip it in
+  multiplayer. It needs faction `Is_Debug_Switchable_To` (in the objects field schema). It makes no change to the sim
+  AI. Re-run the fog / visibility view for the new local player.
+
+### 1.11 FORCE_RETREAT (0x4e, inline in 0x456970; request 0x340920) [H unless tagged]
+
+- **Parameters.** P1 faction name, required (otherwise "Force retreat failed due to incomplete parameters").
+  - The faction is looked up by name (0x3303d0); unknown: "invalid faction %s".
+  - The player of that faction comes from 0x294d30; none: "no player of faction %s".
+- **Tactical only.**
+  - The reward needs the current mode's retreat coordinator (mode +0x30). Coordinators are created only by the
+    tactical mode init 0x35e560 and the tactical load 0x35f970 (space 0x532b70, land 0x534bd0).
+  - In galactic mode it therefore logs "no retreat coordinator" and does nothing [H creators; M that galactic +0x30
+    stays null].
+- **A retreat already under way** (coordinator +0x1c ≠ −1, 0x3400b0): silent return.
+- **The request.** Otherwise 0x340920(coordinator, player id (player +0x4c), local-request flag 0). The reward then
+  logs "Force retreat of player %s" whatever the outcome: the return code is ignored.
+- **What 0x340920 refuses, with flag 0** (same checks as the HUD button, P4_SIM_SYSTEMS "Retreat", BATTLE_TRANSITIONS
+  §3.4):
+  - the player **is the local player** (code 1). So FORCE_RETREAT never retreats the human;
+  - player id −1;
+  - the coordinator's request check vf+0x48: not attacker or defender, or a game type that forbids it (1); retreat
+    not yet allowed (2); another player retreating (5); faction / ability blocks such as
+    `Disallows_Hyperspace_Retreat` and `RetreatPreventionAbility` (0x282750);
+  - coordinator +0x28 > 0, the "retreat allowed" countdown (30 s from battle start in vanilla) still running (2);
+  - a retreat already flagged (+0x7e, +0x1c or +0x18) (5).
+
+  A refused request has no effect and is not retried.
+- **Accepted.** A RetreatEvent (command 22; 0x532570, filled by 0x532620(event, player, 0)) is queued on the event
+  queue 0xb2ed18. The HUD Retreat button and the AI's `Withdraw_Units` (AI_TACTICAL, RetreatPlan) queue the same
+  event. From there the **normal retreat** runs: countdown, the retreatable list of that player's units (vf8),
+  jump-out, destruction of what did not leave, victory type 0xc. It is not a direct move and not a galactic retreat.
+  The units are all the units of that player the coordinator accepts, not a chosen subset.
+- **Save / random.** No state of its own. No draw in the reward (the retreat run has its own, BATTLE_TRANSITIONS).
+- **Port:** the tactical retreat request in apps/sim (the path the AI's Withdraw_Units uses), with "never the local
+  player" semantics and every check above. In galactic mode, log only.
+
+### 1.12 SET_HEALTH (0x25, inline in 0x456970; setter 0x3a8ad0) [H unless tagged]
+
+- **Parameters.**
+  - P1 type name and P2 percent, both required; a missing one is a silent return.
+  - P1 is copied into a 192-byte buffer and upper-cased. P2 is `atoi`, an integer percent.
+  - P3 optional count (`atoi`): absent = 1 (the first instance), 0 = all, n = the first n; a negative n acts as 1.
+- **Log and refusals.** "Set health of %s, to %d percent". Unknown type: "Can't find type %s". No live instance:
+  nothing.
+- **Objects.** Instances of the type in the current mode's object manager, list order (0x2a87d0), any owner, any mode.
+- **Per object, 0x3a8ad0(obj, P2 / 100).**
+  - Health (obj +0x5c) := max × fraction, clamped to [0, max]. So P2 is a **percentage of the current maximum**:
+    above 100 gives max, 0 or less gives 0.
+  - max = 0x3727a0 = `Tactical_Health` (type +0xdcc), × `Object_Max_Health_Multiplier_Land` / `_Space` (GameConstants
+    +0x15cc / +0x15c8) in a land / space mode, × the owning AI player's difficulty health factor (AI_TACTICAL), × the
+    health-modifier abilities.
+  - When the value changed and obj +0x50 equals the global 0xa286f0, it sets obj +0x3a0 bit 0x01 [L meaning].
+  - Last, 0x396df0 re-clamps (it returns the hull fraction).
+- **Not done.**
+  - No damage, no death path, no events.
+  - At 0 % a live object is left at 0 health; whether anything later kills it was not traced [L].
+  - For a team type the instances are the team containers; writing a container's +0x5c leaves its members unchanged
+    (team health is the mean of the members, 0x405230) [M].
+- **Save.** Health is object state, saved with the object.
+- **Port:** the object health setter of objects / tactical, with max health from the port's max-health function
+  (Tactical_Health, mode multipliers, difficulty, abilities).
+
+### 1.13 SET_SPAWN (0x42, inline in 0x456970; 0x531070 → 0x5310b0) [H unless tagged]
+
+- **Parameters.** P1 spawner type name and P2 chance (`atof`), both required (otherwise "Set spawn failed due to
+  incomplete parameters").
+- **The key.** 0x531070 takes the CRC-32 (0x215a30) of P1 **as written**: length from the parameter's length field,
+  no upper-casing. It calls 0x5310b0(key, chance), the indigenous-spawner activation of TRU1_C_RE.md §1.2 (each
+  spawner's first service runs the same function with its type's `Spawn_Indigenous_Units_Chance`).
+- **Which spawners (0x5310b0).**
+  - It walks the global spawner list 0x140a43690: every SPAWN_INDIGENOUS_UNITS object attached in the current battle,
+    in attach order.
+  - It takes those whose type +0x11c equals the key. Type +0x11c is the CRC of the **upper-cased** type name, set at
+    type load (0x3782a0). So P1 must be the type name in upper case, or nothing matches [H for both CRCs; M that a
+    mixed-case P1 never matches].
+  - Undecided spawners (state −1) become 0 (off) and join the off pool; state 1 forms the on pool. N = on + off.
+    N = 0: return, nothing.
+- **Chance c.**
+  - P2 < 0: c = that type's `Spawn_Indigenous_Units_Chance` (+0xc1c), taken from the first off spawner, else the
+    first on one.
+  - Then c is clamped below at 0. Above 1 it is a percentage: c × 0.01, clamped to [0, 1].
+- **Re-balance.** Target T = int(N × c).
+  - T > on: random off spawners are switched on until on = T.
+  - T < on: random on spawners are switched off.
+  - Each pick is one synced draw `Get_Int(0, pool − 1)` (0x1ffb40 on the synced LCG 0x140a13e24). The pool is in list
+    order and the picked spawner is removed from it.
+- **Effect.**
+  - Only state-1 spawners spawn (service 0x531760 step 2). Switched off: no new spawns, its units already spawned
+    stay. Switched on: it spawns at its next due service.
+  - A spawner attached later (state −1) re-balances its type with the type's own chance at its first service.
+- **Mode.** It acts on the running battle. In galactic mode the list is empty and nothing happens [M].
+- **Save.** The state sits in the spawner's data pack (obj +0x120, +0x38); whether the pack is saved was not traced
+  [L].
+- **Port:** the TRU1 t05 activation in apps/sim `tactical_battle_spawners.cpp`. Expose the per-type re-balance with an
+  explicit chance, match on the upper-case name CRC, and use synced draws.
+
+### 1.14 SET_WEATHER (0x4b, inline in 0x456970) [H]
+
+- **A no-op.** The case only tests P1.
+  - P1 given: the jump table entry (0x14045885e) goes straight to the dispatcher's common exit.
+  - P1 empty: logs "Set weather failed due to incomplete parameters".
+- Nothing is stored, so the battle-environment pick (CU8G_T02_ENV_PICK_RE.md: the map's environment record and the
+  weather bind 0x46a2f0) has nothing to read.
+- **Port:** a retail no-op (keep the error log for an empty P1).
+
+### 1.15 RANDOM_STORY (0x3f, inline in 0x456970; builder 0x4bfdc0 on the generator object 0x140a2aba0) [H structure, M content]
+
+- **Parameters.** None: it reads no reward parameter. Logs "Generating random story". Needs a current mode.
+- **Candidate pools.** Rebuilt on each call from the current mode's SELECTABLE (behaviour 2) objects (0x2a9ff0):
+  - own heroes: objects of the **local** player (not the plot player) whose type is `Is_Named_Hero` (+0x13);
+  - own planets: planet objects of the local player;
+  - enemy heroes: named heroes of other owners;
+  - other planets: planets of other owners that are revealed (planet block +0x2c9).
+- **Plot.** The generator's counter (+0) goes up by 1, giving k, and a new plot `Random_Plot_<k>` is built (0x52d400).
+- **Random stream.** Trigger count n = Get_Int(1, `Random_Story_Max_Triggers`) (GameConstants +0x618, vanilla 3).
+  **Every draw of the generator uses the free (unsynced) RNG 0x140a13e20** (0x1ffb40 on it, in 0x4bfdc0, 0x4bec90,
+  0x4be420, 0x4bdf60 and 0x4c0620) [H].
+- **Trigger events** `RANDOM_TRIGGER_<i>`, i = 0..n−1 (0x4bec90). The type is a random entry of
+  `Random_Story_Triggers` (GameConstants +0x600); vanilla has 12: ENTER, LAND_ON, CONQUER, CONSTRUCT, CONSTRUCT_LEVEL,
+  DESTROY, DESTROY_BASE, DEPLOY, MOVE, ACCUMULATE, DEFEAT_HERO, WIN_BATTLES. Random parameters by type [M, from the
+  switch]:
+  - ENTER / LAND_ON / CONQUER: a revealed planet of another owner;
+  - CONSTRUCT: a name from the side's `Random_Story_<side>_Construction`;
+  - CONSTRUCT_LEVEL: an own planet, ground or space, and a level above the current one;
+  - DESTROY: a name from `Random_Story_<side>_Destroy` and a count 1..3;
+  - DESTROY_BASE: ground or space;
+  - DEPLOY / MOVE: an own hero and a revealed other planet;
+  - ACCUMULATE: a number 10..30 [L unit];
+  - DEFEAT_HERO: an enemy hero;
+  - WIN_BATTLES: a count 1..3, ground or space;
+  - any other type: "Random story trigger %s currently unsupported!".
+- **Around each trigger** [M]:
+  - each trigger after the first has the previous one as Prereq (0x4bdfa0);
+  - each gets a story-dialog chapter (0x4beb00: `[CHAPTER i]`, TITLE, IMAGE, `DIALOG <name><1..3>`, TEXT);
+  - each gets a STORY_TRIGGER follow-up event whose reward is REMOVE_STORY_GOAL (0x4be210).
+- **Final event** `RANDOM_TRIGGER_<n>` (0x4be420) [M]: a STORY_TRIGGER whose reward is a random entry of
+  `Random_Story_Rewards` (vanilla BUILDABLE_UNIT, UNIQUE_UNIT, CREDITS), with the side's
+  `Random_Story_Reward_<side>_Buildable` / `_Unit` name and a random own planet for a unit. An unknown name logs
+  "Random story reward %s is unknown!".
+- **Registration and offer.**
+  - Plot player := the local player. The events are put into their type buckets (0x530180), and the plot is added to
+    the current mode's story manager's plot map (mode +0x100, keyed by the CRC of its name) [M: that mode +0x100 is
+    the manager's plot map].
+  - The generated text is logged and, through 0x47d9c0 and 0x47e030, shown as the IDD_STORY_DIALOG offer
+    (GALACTIC_DIALOGS §2.4).
+  - Cancel (0x105270 → 0x4c0620) removes `Random_Plot_<k−1>` from the mode's story manager (0x32ab70) and its dialog.
+    Accept and Close only close the dialog (0x4bdf60 formats a string and discards it).
+  - Whether the new plot starts active was not traced [L].
+- **Port:** a plot built from code (not XML) in the story session, plus the story-dialog offer. Draw from a non-sim
+  RNG (retail's is unsynced). Low priority: no data uses it.
+
+### 1.16 PICK_PLANET (0x12, handler 0x460b30) [H unless tagged]
+
+- **Parameters.** P1 FILTER name and P2 placeholder name, both required (silent return).
+  - The filter is the CRC of P1 (as written) looked up in the story enum map 0xb30728; unknown gives 0 (FILTER_NONE).
+    Values as in §1.6.
+- **Which planet.** It walks the current mode's planets (PLANET behaviour 3, 0x2a9ff0, list order) and takes the
+  **first** planet that passes the filter against the **local player** (not the plot player). Friendly is 0x39a230,
+  enemy is 0x39a450. Not random.
+
+  | Filter | Planet passes when |
+  |---|---|
+  | NONE | always |
+  | FRIENDLY_ONLY | friendly |
+  | NEUTRAL_ONLY | neither friendly nor enemy |
+  | ENEMY_ONLY | enemy |
+  | FRIENDLY_AND_NEUTRAL | not enemy |
+  | ENEMY_AND_NEUTRAL | not friendly |
+  | FRIENDLY_AND_ENEMY | friendly or enemy |
+
+  No planet passes: nothing, no log.
+- **Replacement.** P2 is copied and upper-cased; log "Replacing all instances of %s with planet %s". Then 0x32ae50 on
+  the current mode's story manager walks every plot (every player's, active or not) and calls each event's vf+0x30:
+  - Base 0x45db20: for every event whose own reward is not PICK_PLANET, each of Reward_Param1..3 whose upper-cased text
+    equals the placeholder becomes the planet's type name (type +0xf8). Log "EVENT %s, Param %d, replacing %s with
+    %s".
+  - Event classes with a planet-name parameter list (overrides 0x45def0 on list +0x360; 0x45e230 and 0x45e360 on list
+    +0x368) first replace matching entries of that list ("EVENT %s, replacing %s with %s"), then call the base. [H for
+    the three overrides; M which event classes own them and how their compare treats case]
+- **Save.** The event save (vf9 0x462fd0) writes the reward parameter strings, so the substitution survives a save
+  [H for reward parameters; M for the lists].
+- **Port:** a parameter substitution in the story session across all plots, using the local player's friend / enemy
+  relations. It takes the first planet in object order, so the port's planet order must match retail's.
+
+### 1.17 STATISTIC_CHANGE (0x08, inline in 0x456970) [H write, M readers]
+
+- **Parameters.**
+  - P1 statistic name and P2 value (`atoi`), both required (silent return).
+  - P3 optional: planet type name (first instance).
+  - Without P3, or when P3 gives no instance, the planet is the dispatcher's second argument: the object the firing
+    event matched, which Fire passes through (e.g. the planet of an Enter-family event) [M]. None:
+    "Reward Statistic Change - No planet specified".
+  - There is no check that the object is a planet; the write goes through obj +0xb8 [M: a crash for a non-planet].
+- **Statistic enum** (table 0x00a29140): CREDIT_VALUE 1, POLITICAL_CONTROL 2, MAX_SPECIAL_STRUCTS 3,
+  MAX_STARBASE_LEVEL 4, MAX_GROUND_BASE_LEVEL 5; unknown 0.
+- **Writes** (planet data block, obj +0xb8; values not clamped):
+
+  | Statistic | Write | Reader |
+  |---|---|---|
+  | 1 CREDIT_VALUE | +0x228 := P2 (save id 33); and the planet owner's player byte +0x181 := 1 | +0x228: Planet_Income's base (GALACTIC_ECONOMY §1.4). +0x181: no byte reader found by a whole-image search; the presence signal 0xE handler 0x3fcd60 also sets it [L meaning] |
+  | 2 POLITICAL_CONTROL | +0x22c := P2 (save id 34) | 0x3734d0, instead of the type's `Political_Control` (+0x79c) |
+  | 3 MAX_SPECIAL_STRUCTS | nothing | — |
+  | 4 MAX_STARBASE_LEVEL | +0x238 := P2 (save id 37) | 0x372780, the AI token MaxStarbaseLevel (AI_GALACTIC_TOKENS) |
+  | 5 MAX_GROUND_BASE_LEVEL | nothing: it calls an empty function (folded with 0x1fa90) | — |
+
+- **Port:** the galactic planet's runtime fields (income base, political control, max starbase level) in the galactic
+  planet state.
+
+### 1.18 INFORMATION (0x06) [H]
+
+- The jump table sends 0x06 to the dispatcher's common exit (as for code 0): nothing happens and nothing is logged.
+- **Port:** a retail no-op.
+
+### 1.19 ENABLE_OVERWHELMING_ODDS (0x63) [H]
+
+- No case. The jump table sends 0x63 to the error path, as for 0x3b and 0x80: "STORY REWARD - ERROR! Reward for event
+  %s needs some code support!".
+- No field is written, so there is no reader. The only string in the exe is the enum name.
+- **Port:** the existing Retail no-op entry matches.
+
+### 1.20 DISABLE_SPECIAL_STRUCTURE (0x40, inline in 0x456970) [H unless tagged]
+
+- **Parameters.** P1 type name and P2, both required (silent return). P2 is `atoi`.
+- **Object.** The first live instance of P1 in the current mode (0x2a87d0). Unknown type or no instance: "Invalid
+  structure %s in DISABLE_SPECIAL_STRUCTURE".
+- **Write.** The object must have the BASE_SHIELD behaviour (0x39: slot byte +0x36b ≠ −1, fetched through vf+0x10);
+  otherwise a silent return. Then the owner object's byte +0x3a1 bit 0x04 := (P2 ≠ 0). The owner is the same object.
+- **Reader.** Only the base-shield service `Evaluate_State` 0x56bb00 (TRU1_A_RE_ANSWERS.md, its step 5).
+  - Bit set: the shield is off from its next service (every 15 frames), with the offline HUD SFX and the dome hidden.
+  - Bit cleared: the shield comes back after `Base_Shield_Delay_Time`.
+  - A whole-image byte search finds one test of bit 0x04 at +0x3a1 (in 0x56bb00) and one write (this reward).
+  - Despite the name, only base shield generators react.
+- **Save.** +0x3a1 is in the object save chunk (0x3a5ad0 / 0x39ce40, HERO_CLASH.md) [M for this bit]. The object
+  constructor clears it.
+- **Port:** the tactical base-shield evaluator in apps/sim, plus an object flag.
+
+### 1.21 Readers of RESTRICT_BLACK_MARKET, RESTRICT_ALL_ABILITIES, ENABLE_SABOTAGE, ENABLE_COMBAT_CINEMATIC [H unless tagged]
+
+All four readers act on the human player's galactic GUI or camera. None is read by the AI: the AI's sabotage path
+(P4_SIM_SYSTEMS §2.4, 0x5b32c0) reads neither the sabotage flag nor the lists.
+
+- **RESTRICT_BLACK_MARKET (0x87, setter 0x44ac60, list +0x2d0).**
+  - The jump table sends 0x86 to RESTRICT_CORRUPTION (0x44ad20) and 0x87 to this setter; Ghidra prints the two as one
+    case.
+  - Only reader: 0x4470e0, called only by 0x2e5740, the "can this unit use a black-market ability here" test. It is
+    false at once when the planet is in the list. Otherwise it is true when the unit holds an ability named in
+    GameConstants `Activated_Black_Market_Ability_Names` (+0xff0), on itself or on the members of a fleet or
+    transport it is [M: the member walk].
+  - 0x2e5740's only caller is the galactic planet-ability slot builder 0x3d2020. For the selected unit with the lowest
+    value of a GUI type field (+0x1660) [M: a sort order], the builder offers the first usable ability, in this order:
+    destroy planet, slice, black market, sabotage, spy, neutralize hero, siphon credits, corrupt, remove corruption,
+    hack super weapon.
+  - So at a restricted planet the black-market slot is not offered, and the unit's next usable ability is offered
+    instead.
+- **RESTRICT_ALL_ABILITIES (0x85, setter 0x44aae0, list +0x2a0; also SET_PLANET_RESTRICTED P3).**
+  - Only reader: 0x4470b0, the first test in 0x3d2020. A planet in the list gives −1: no ability slot at all.
+  - 0x3e8890 then hides the ability slot button (component 0x5f, vf+0x78(1)). 0x3eb200 is the builder's other caller
+    [M for what it does with −1].
+- **ENABLE_SABOTAGE (0x82, manager +0x29a, P1 default 1).** Two readers:
+  - 0x2e6770, the sabotage test in 0x3d2020. It needs the planet not in the RESTRICT_SABOTAGE list, the flag on,
+    0x3a0910(planet) true, and an ability from `Activated_Sabotage_Ability_Names` (+0x1008). With the flag off the
+    sabotage slot is never offered.
+  - 0x3cf2e0, reached only through a data pointer [M: the sabotage dialog's confirm callback]. When the GUI's
+    sabotage-dialog byte +0x2b08 is set and the flag is on, it queues the sabotage command (event 0x4b4210 filled as
+    kind 5 by 0x4b53b0: saboteur, planet, structure, cost) on 0xb2ed18 and closes the dialog (0x3ceb90). With the flag
+    off, the confirm does nothing and the dialog stays open.
+- **ENABLE_COMBAT_CINEMATIC (0x8a, manager +0x29c).**
+  - Only reader: 0x2cc080, the key-up handler of the cinematic / targeting controller 0x140b27a10 (BKC1_RE_ANSWERS).
+    It acts only for the key mapped to command 0x4e [M: the cinematic-view key, `TEXT_CINEMATIC_VIEW`].
+  - It returns "not handled" when the flag is 0, LOCK_CONTROLS (+0x42) is set, there is no mode, or a GUI dialog has
+    focus. Then the combat cinematic camera neither starts nor moves to the next target.
+  - Lua `Start_Cinematic_Camera` and the story cinematics do not read the flag.
+- **Port:**
+  - black market and all-abilities: the existing `galactic::StoryGates` planet sets, read by the galactic ability-slot
+    / HUD code;
+  - sabotage: a global flag in the story gates, read by the human sabotage slot and its dialog confirm;
+  - combat cinematic: a flag read by the apps/game cinematic-camera key.
 
 ## 2. Tutorial rewards
 
@@ -413,7 +751,8 @@ given P2 is `atoi != 0` (shipped: `Felucia 0`, `Shola 1`). Errors: "invalid plan
   possible-ability table and hides / refuses entries when the planet is in the list); all-abilities 0x3d2020 (the planet
   ability slot builder: restricted planet gets no slots). What each refuses: the corresponding **Underworld planet
   ability (sabotage, corrupt, black-market purchase) on that planet for the human player's GUI**. The AI side was not
-  traced. [M]
+  traced. [M] The black-market, all-abilities and sabotage readers were read in full on 2026-11-17: §1.21 [H]. All
+  three serve only the human GUI.
 - Shipped: RESTRICT_SABOTAGE and RESTRICT_CORRUPTION (Yavin, The_Maw, Shola, NalHutta_Story, Kessel).
 
 ### 3.3 RESTRICT_AUTORESOLVE (0x8b) [H write, M reader]
@@ -446,8 +785,10 @@ given P2 is `atoi != 0` (shipped: `Felucia 0`, `Shola 1`). Errors: "invalid plan
 
 ### 3.7 ENABLE_COMBAT_CINEMATIC (0x8a), ENABLE_SABOTAGE (0x82), ENABLE_GALACTIC_CORRUPTION_HOLOGRAM (0x8c) [H]
 
-- Combat cinematic: +0x29c (ctor 1), P1 default 1; reader 0x2cc080 (cinematic camera, event kind 0x4e, skip when 0).
-- ENABLE_SABOTAGE: +0x29a (ctor 1), P1 default 1; readers 0x2e6770 and 0x3cf2e0 (sabotage slot builder; needs the flag).
+- Combat cinematic: +0x29c (ctor 1), P1 default 1; reader 0x2cc080 (the cinematic-camera key-up handler, command
+  0x4e, skipped when 0; §1.21).
+- ENABLE_SABOTAGE: +0x29a (ctor 1), P1 default 1; readers 0x2e6770 (sabotage slot test) and 0x3cf2e0 (sabotage dialog
+  confirm); §1.21.
 - Corruption hologram: P1 planet, P2 default 1; sets planet block byte +0x2e4 (per planet, not the manager); reader not looked
   up.
 
@@ -554,9 +895,20 @@ polls with `Check_Story_Flag`. Enum code 0x1f (name string 0x86c358, table entry
 2. ~~What consumes the pending campaign (§2.1)~~ answered 2026-11-17 (modc t45): controller update 0x44a3f0. Still
    open: whether a loading screen is drawn during the switch, and the local-player assignment from the campaign.
 3. SET_SANDBOX_OBJECTIVES body (§2.7).
-4. SET_PLANET_SPAWN: reader of the planet spawn map (§1.8); shipped use is a no-op.
+4. ~~SET_PLANET_SPAWN: reader of the planet spawn map (§1.8)~~ answered 2026-11-17 (mcx6): 0x4b71c0 at tactical
+   battle start. Still open: whether the planet map and the spawner state (obj +0x120 +0x38) are saved.
 5. Power rewards: the unit-side state values of 0x37df00 and the reader of player +0x378 (§1.5).
 6. Exact refusals of the three GUI readers of player +0x39c and of the planet-restricted caller 0x3bd20 (§1.1, §4.2).
 7. Whether the conquest dispatch inside 0x3fb040 always fires for PLANET_FACTION (§1.2).
 8. Whether the manager flags are reset on a plain save-load (§3.8: reset call sites 0x3d3200 / 0x3027d0 are mode and GUI
    init, load-time order not checked).
+9. mcx6 Part A leftovers (2026-11-17):
+   - SWITCH_SIDES (§1.10): whether the local index (player list +0x30) is saved. The HUD's pick-up of the new local
+     player is inferred [M].
+   - SET_HEALTH (§1.12): whether an object left at 0 health is ever killed (a retail probe could show it; no shipped
+     or mod data uses the reward). The meaning of the obj +0x3a0 bit 0x01 write.
+   - RANDOM_STORY (§1.15): the per-trigger parameter details, and whether the new plot starts active, were read at
+     summary level only [M / L]. No data uses the reward.
+   - PICK_PLANET (§1.16): which event classes own the three list overrides, and their case rule.
+   - STATISTIC_CHANGE (§1.17): the reader of player +0x181 (no byte compare found).
+   - ENABLE_COMBAT_CINEMATIC (§1.21): the name of key command 0x4e.

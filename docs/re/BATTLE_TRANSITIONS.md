@@ -160,8 +160,9 @@ Inputs:
 
 Single-player rules (space; land 0x2b76a0 is the same with ground strengths):
 
-1. If the local player is attacker or defender, a story "battle pending at planet" notification is
-   posted (0x449f10) and the battle is *human-involved*.
+1. If the local player is attacker or defender, the battle is *human-involved*. In space the story manager also
+   records the orbit composition of both sides (0x449f10, read by WIN/LOSE_BATTLES; corrected mcx6 Q14, STORY.md §5
+   "Battle composition"). The land machine 0x2b76a0 does not call 0x449f10.
 2. Overrun check, only when the multiple ≠ 0 and the battle is not story-locked:
    - defender strength = 0x2ab880 (orbit units of the defender + starbase power; land: surface units + every
      D+0x158 structure + the persisted-record sum, AI_GALACTIC_TOKENS §9.12);

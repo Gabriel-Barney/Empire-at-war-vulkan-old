@@ -139,7 +139,7 @@ GameObjectTypeWrapper 0x6051b0.
 | `Galactic_Planet_Faction_Change(planet, new_player, old_player)` | planet signal 0xE (owner change data), only when new ≠ old; a missing player index → the neutral player |
 | `Galactic_Starbase_Level_Change(planet, old_type, new_type)` | planet signal 0x26; each type nil when absent [M which side is which] |
 | `Galactic_Neutralized_Event(hero_type, killer_object)` | object signal 0x27 (hero neutralized), and directly from the auto-resolve path 0x616740 (0x4879b0) |
-| `Player_Quit_Event(player)` | 0x488190, from `QuitGameEventClass` vf4 (0x499420, the quit-game event) and its neighbour 0x4994c0 [M roles]; nothing when the player is null |
+| `Player_Quit_Event(player)` | 0x488190, from `QuitGameEventClass` vf4 (0x499420, the quit-game event) and 0x4994c0 (kick, dropped connection, stale quit); **multiplayer only** (§9.2); nothing when the player is null |
 | `Reset_Tactical_Stats()` | AutoResolve vf4 Begin (0x60c9e0), BATTLE_TRANSITIONS §"auto-resolve" |
 | `Get_Game_Stat_For_Control_ID(player, control_id, for_tactical)` → value | battle-end dialog fill 0x88fe0 and the campaign-end path 0x92bb0 (UI.md, MAIN_LOOP T11) |
 | `Get_Neutralized_Count_For_Type(object_type, player)` → number | `NeutralizeHeroAbilityClass` (0x6171e0) |
@@ -210,7 +210,76 @@ What the saved state holds in vanilla: the stats tables (kill / build / conquest
 1. Retail check of §2: does GameScoring's `main` / `GameService` run in an unmodified install, and does an error in an
    event function stop all later events? A probe can wrap `GameService` and `Tactical_Unit_Destroyed_Event` with
    `pcall`-safe counters only (no other change), then read them after a skirmish.
-2. The meaning of the 0x2e type check in the death handler and the exact role of the `Player_Quit_Event` callers.
+2. The meaning of the 0x2e type check in the death handler. (The `Player_Quit_Event` callers are settled in §9.2.)
+
+## 9. Skirmish: what the script sees, and when Player_Quit_Event is raised (mcx6 Q13, 2026-11-17)
+
+Read with REA (no ReVa) from:
+- `Find_Player` 0x6a4820;
+- the PlayerList reset 0x297630 and Player_List_Reset 0x4868e0;
+- Send_Player_Quit_Event 0x488190;
+- QuitGameEventClass execute 0x499420 (vtable 0x875aa0, slot 4) and its constructors 0x4993a0 / 0x4993f0;
+- 0x4994c0 and its callers 0x9bba0, 0x9c7e0, 0x9c8d0 and 0xa3cb0;
+- the QuitGameEvent creators 0xa3cb0, 0xdcf50 and 0x124730;
+- the multiplayer test 0x28af60.
+
+### 9.1 Player and world [H]
+
+The scoring script gets **no player or world object of its own**. Its globals are the usual ones (`Script`,
+`GlobalValue`, the PGCommands set; §1). Every binding it calls reads process-wide state:
+- **Players:** `Find_Player` (0x6a4820) reads the global PlayerList 0x140a16fd0.
+  - `"local"` → the local player (0x294a40).
+  - Any other name → the faction (Factions table 0x140b310b8; an unknown faction is an error) → the first player with
+    that faction (0x294d30), or nil when there is none.
+  - PlayerWrapper methods act on that player object.
+- **Objects:** the finders search the current mode's object store (`Find_First_Object` walks 0x2a9570 on the current
+  mode's store; LUA_API.md, "Find_All_Objects_Of_Type and the sibling finders").
+- **Event arguments:** the manager wraps the live player or object for its own script (PlayerWrapper 0x6019f0,
+  GameObjectWrapper 0x5751d0).
+
+In a skirmish:
+- `Start_Game` with an empty mode stack builds the PlayerList with Create_Default_Players 0x293390: the slot players,
+  then one player for each faction no slot has (BKX1_CADENCE_RE.md).
+- Its first step is the list reset 0x297630. That reset releases the old players, empties the list, and then (flag 0)
+  calls Player_List_Reset 0x4868e0.
+- So GameScoring is re-created, and its `Base_Definitions()` runs, **while the PlayerList is empty**. A `Find_Player`
+  there returns nil for every known faction.
+- The players exist from the next step on, before the map loads. `Game_Mode_Starting_Event("Land"/"Space", map)` and
+  every later event therefore see the skirmish players.
+- The current mode is the skirmish's tactical mode (no parent galactic mode), so object lookups search the battle's
+  store.
+
+A new campaign is the same (the reset comes first there too). A tactical battle pushed from a campaign keeps the
+campaign's list and script (§1.2).
+
+### 9.2 When Player_Quit_Event is raised [H unless tagged]
+
+- Send_Player_Quit_Event 0x488190(manager, player):
+  - nothing when the player is null;
+  - otherwise it writes the debug log line `TheGameScoringManagerClass::Send_Player_Quit_Event -- PID: %d`, then calls
+    `Player_Quit_Event(PlayerWrapper)` on the current script;
+  - it does not test whether a script exists [M: a call with no script was not traced].
+- It has two callers. Both mark the player first and append its id to a global list of quit players (0x140a2aaf0;
+  read by the multiplayer code [L]):
+  - **QuitGameEventClass execute** 0x499420: the player is the event's player id (+0x24, the sender [M]); player byte
+    +0x63 := 1 first.
+  - **0x4994c0(player id)**: player byte +0x64 := 1 first. Its callers:
+    - the multiplayer disconnect dialog handler 0x9bba0: the kick buttons `IDC_BUTTON_KICK_PLAYER0`..`7`, the quit
+      button, and a vote kick ("Kicking player %ls from the game due to voting");
+    - the vote-kick check 0x9c7e0;
+    - the dropped-connection check 0x9c8d0: a remote human player whose connection state is lost or 7;
+    - the quit-to-menu confirmation 0xa3cb0, in multiplayer, when the last network activity is more than 30 s old
+      [M: what the timestamp measures]. When it is newer, 0xa3cb0 schedules a QuitGameEvent instead.
+- QuitGameEvent is created only by three quit confirmations, and each creates it only when the game is multiplayer
+  (0x28af60: game type 1, 2 or 4):
+  - 0xa3cb0, quit to menu;
+  - 0xdcf50, which reopens the Retry dialog on cancel, so it is the Retry dialog's Quit [M];
+  - 0x124730 [L: which dialog].
+
+  The event is scheduled (0x3b01f0), so it executes at the same frame on every peer.
+- In single player (campaign, or a skirmish against the AI) every quit path leaves without the event (0xa3cb0:
+  autosave in galactic mode, then leave). So **`Player_Quit_Event` is never raised outside multiplayer**. Multiplayer is
+  out of scope for the port, so the port needs no source for it.
 
 ## Port notes
 
@@ -293,12 +362,15 @@ Can wait / skip: Get_CRC (MP only), the debug file-watcher reload, the `from sav
     (`TacticalBattle::production_done`, after the battle tick), location nil (the build goes to the reinforcement pool).
 - Open:
   - `Player_Quit_Event`: no source. The retail callers are the quit-game event (0x499420) and its neighbour [M roles];
-    the single-player port has no quit-game command executor.
+    the single-player port has no quit-game command executor. (mcx6 Q13: retail raises it only in multiplayer, §9.2,
+    so nothing is missing.)
   - Galactic events only arrive with a story session (no story: nobody drains the stream at a fixed point).
   - (q6 t03, done for galactic sessions) Without a story session the scoring VM gets a player world of its own over the
     campaign's players (`SimHost::start_galactic`; the story's world replaces it in `start_story`). Before, Find_Player gave
     nil and `PlayerWrapper::Get_Name` failed ("no player world attached"), which released the script (TR: BootanaHutta.lua:15
     at the first `Game_Mode_Starting_Event`). Still open: tactical-only sessions (skirmish) give the scoring VM no player
-    world (the players live in the battle AI's world).
+    world (the players live in the battle AI's world). (mcx6 Q13: in retail the script resolves players through the
+    one global PlayerList, which in a skirmish holds the skirmish players, and objects through the current mode's
+    store, §9.1.)
   - The UI readers of §7, saving the script's own tables (§6: stats are empty after a load; a load re-creates the
     script, so `Game_Mode_Starting_Event("Galactic")` runs again at the first frame after it).

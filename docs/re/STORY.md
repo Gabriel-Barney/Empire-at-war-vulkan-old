@@ -395,16 +395,115 @@ stated otherwise).
 | CONSTRUCT dispatch | – | – | – | – | name = built type name; object = planet. If the type is a ground base (0x5B) / starbase (0x5C) it also dispatches CONSTRUCT_LEVEL (no level value); only starbases reach it, ground bases are never created (`A2K_T07_STORY_LOAD_RE.md` §2-3) | H (`0x326cd0`) |
 | CONQUER_COUNT | count | – | – | – | +1 per dispatched conquest, **no filter**; fires at ≥ Param1 | H (`0x454390`); who counts as conqueror: M |
 | CONSTRUCT_LEVEL | planet names | level | story enum GROUND = 0 (ground base), SPACE = 1 (starbase); other = any, absent [L] | – (Param4+ ignored) | planet in list, category matches, and Param2 ≤ the constructed type's `Base_Level` (unsigned; not the planet level). No owner filter. Raised only for starbase types in galactic play (corrected by `A2K_T07_STORY_LOAD_RE.md` §3, 2026-11-06) | H (`0x4543b0`, `0x464760`) |
-| Enter family: ENTER, LAND_ON, PLANET_DESTROYED, FLEET_BOUNCED, INVASION_BOUNCED | planet names (empty = any planet) | Event_Filter, **default FILTER_NONE** | unit type names that must **all** be in the fleet | P4 hero/unit names (any one in the fleet); P5 bool; P6 bool "exact composition" (fleet size = P3 count); P7 bool (alternate fleet test) | planet in list, filter, P3, P4 | H structure (`0x454a90`, `0x465380`, `0x451e20`, `0x452170`); P5/P7 meaning L |
+| Enter family: ENTER, LAND_ON, PLANET_DESTROYED, FLEET_BOUNCED, INVASION_BOUNCED | planet names (empty = any planet) | Event_Filter, **default FILTER_NONE** | unit type names that must **all** be in the fleet | P4 unit names: any one in **orbit** of the planet (any fleet, any owner); P5 bool "hidden fleets count too"; P6 bool "exact composition" (direct content count = P3 count); P7 bool "raid fleets only" (replaces the P3 test); P5 / P6 / P7 are `atoi` ≠ 0, so `True` reads as false | with P1 names: planet in list, filter, fleet test, P4; without: only the hidden test (note "Enter family match" below) | H (`0x454a90`, `0x465380`, `0x451e20`, `0x452170`, mcx6 Q14) |
 | ACCUMULATE | amount | comparison, **default 0 → behaves as GREATER_THAN** | – | – | dispatched credits `op` amount; player-scoped dispatch | H (`0x453f80`, `0x464150`) |
 | STORY_FLAG | flag names | value | comparison, **default EQUAL_TO** (ctor sets 3) | – | for each name: flag must be defined (undefined ⇒ skip), then `flag op value`. NOT_EQUAL_TO (4) has no case and never fires | H (`0x454c00`, `0x4659a0`, ctor) |
-| WIN/LOSE_BATTLES | count | location enum (2 = EITHER) | first entry FRIENDLY/ENEMY(_ONLY)_CONTAINS + CLASS_* list | P4 planet names | counter +1 per matching battle; fires at ≥ Param1 and (no planets, or battle planet in list). The counter increments even when the planet does not match | H (`0x455a50`, `0x466f40`) |
+| WIN/LOSE_BATTLES | count | location: GROUND 0, SPACE 1, EITHER 2; an unknown name → GROUND; **default EITHER** (ctor) | composition test, used only with 2 or more values: first FRIENDLY_CONTAINS 1, FRIENDLY_ONLY_CONTAINS 2, ENEMY_CONTAINS 3 or ENEMY_ONLY_CONTAINS 4, then CLASS_FIGHTER 0, BOMBER 1, TRANSPORT 2, CORVETTE 3, FRIGATE 4, CAPITAL 5, SUPER 6 (unknown class → 0); default off (ctor) | P4 planet names | dispatched with (player, location: land 0 / space 1, planet). **Space battles only:** when the composition test is on, it must pass (note "Battle composition" below), else the battle is not counted. Then, when location = Param2 or Param2 = EITHER: counter +1; fires at ≥ Param1 and (no planets, or battle planet in list). The counter increments even when the planet does not match | H (`0x455a50`, `0x466f40`, ctor `0x453310`, dispatch `0x32f4d0` / `0x32f570` / `0x32a340` / `0x32a3b0`, composition `0x449f10`, mcx6 Q14) |
 | BEGIN_ERA / TECH_LEVEL | level (−1 = "next") | – | – | – | level ≥ Param1; with −1, fires on the first change after the first observation | M (`0x454030`) |
 | STORY_AI_NOTIFICATION | planet names (object filter) | notification names | – | – | dispatched name in **Param2** (case-insensitive). If Story_Event passed an object, its type name must be in Param1. If no object, Param1 must be empty. Dispatched to the running mode's story, all players' active plots | H (`0x453e20`, `0x463ec0`, `0x69e040`) |
 | SPEECH_DONE | – | – | – | – | default Timeout 60 s when none is given | H (`0x4562a0`) |
 
 FILTER semantics (`0x455ce0`) [H]: 0 any; 1 owner is the plot's player; 2 owner is neutral; 3 owner is neither;
 4 friendly or neutral; 5 enemy or neutral; 6 not neutral.
+
+**Battle composition for WIN/LOSE_BATTLES (mcx6 Q14, 2026-11-17)** [H unless tagged]. Read with REA from the match
+0x455a50, the parameter parse 0x466f40, the event constructor 0x453310, the dispatch sites, the story manager methods
+0x447170, 0x449f10 and 0x448ed0, the space conflict state machine 0x2b92e0, and the story enum tables at 0x140a29a70
+and 0x140a29c40.
+- **Dispatch sites.** Won land 0x32f4d0, won space 0x32f570, lost land 0x32a340 and lost space 0x32a3b0. Each calls the
+  story dispatch 0x32e5f0 with:
+  - type 0x13 (WIN) or 0x14 (LOSE);
+  - the player (the winner, or the loser);
+  - a one-int data block holding the location: land 0, space 1;
+  - the planet object.
+
+  **No composition is passed.** A local-player win in single player also calls 0x448cb0(planet, land 1 / space 0) on
+  the story manager [L: purpose].
+- **Callers.** The same four functions are called with the same arguments by:
+  - the tactical battle end (0x3639d0 tail; BATTLE_TRANSITIONS §3.1 step 7);
+  - the auto-resolve completion inside the conflict state machines: space 0x2b92e0 (calls at 0x2ba0d9 / 0x2ba12d) and
+    land 0x2b76a0 (0x2b8cbe / 0x2b8d0e); BATTLE_TRANSITIONS §4.1 step 2.
+- **Where the composition comes from.** The match reads two lists of `Ship_Class` values kept by the story manager
+  (0x140b30350), through the getter 0x447170, whose only caller is the match:
+  - +0x90: the local player's side;
+  - +0xa8: everything else at the planet.
+- **The only writer** is 0x449f10(planet), apart from the story manager's save (chunks 0x14 / 0x15 in 0x448ed0) and its
+  load:
+  1. it clears both lists;
+  2. it walks the planet's orbit list (0x395900);
+  3. it expands each orbit object's nested contents (0x3965f0, expand on) into one side: the local list when the orbit
+     object's owner (+0x58) is the local player, else the other list;
+  4. for every content that is not itself a fleet (slot byte +0x336 = −1) it appends the type's `Ship_Class` (type
+     +0x650; −1 when unset).
+- 0x449f10 has **one caller**: the space conflict state machine 0x2b92e0, in its decide state (4), in single player,
+  when the local player is the attacker or the defender. It runs before the fight / auto-resolve / ask choice
+  (BATTLE_TRANSITIONS §1.6 step 1). The land state machine 0x2b76a0 never calls it.
+- **Answer.**
+  - After an **auto-resolved space battle**, the test sees the orbit forces of both sides **as they were when the
+    conflict was decided**, before the auto-resolve: the same lists a fought battle uses. Not the survivors, and not
+    empty.
+  - **Land battles**, fought or auto-resolved, skip the composition test: it runs only when the dispatched location is
+    SPACE. So Param3 never stops a land battle from counting.
+  - A space battle without the local player (AI vs AI), or any multiplayer battle, records nothing. The lists then hold
+    the last recorded conflict (stale, also across a save and load) [H for the absence of any other writer among the
+    story manager methods read; M that no code outside them writes the lists].
+- **Which side is tested.**
+  - FRIENDLY_*: the local list when the plot's player (event +0x228 → +0x638) is the local player, else the other list.
+  - ENEMY_*: the opposite.
+  - So for an AI player's plot, "friendly" is the non-local side.
+- **Test.**
+  - CONTAINS (1, 3): every listed class must be in the side's list. An empty side fails at once.
+  - ONLY_CONTAINS (2, 4): every entry of the side's list must be among the listed classes. An empty side passes. A unit
+    without `Ship_Class` (−1) can never be listed, so its presence fails the test.
+  - When the test is on and the dispatch has no planet, the match returns without counting.
+- **Shipped data never turns the test on.**
+  - Shipped WIN/LOSE_BATTLES events: FoC 13, EaW 12. Each has either no Param3 (one event) or the single Param3 value
+    `FILTER_FRIENDLY_ONLY`. One value leaves the test off, so the composition never matters for them.
+  - Shipped Param2 values: `SPACE` (known); `Land` (not a known name, so GROUND by default, which is what it means); and
+    `BASE_SPACE` in `STORY_REBEL_ACTIV_M11_GALACTIC.XML` (MonCalimari LOSE_BATTLES). No string `BASE_SPACE` exists in
+    the exe, so that event reads **GROUND** and counts only land battles lost at MonCalimari [H for the parse; M that
+    the event's plot is reachable in FoC].
+- **Port.** `story_session.cpp` passes empty sides after an auto-resolve. Under the retail rule that makes every SPACE
+  CONTAINS test false and every ONLY test true. Retail instead:
+  - records the two orbit `Ship_Class` lists at the space conflict decision (single player, local player involved);
+  - keeps them until the next record, and saves them;
+  - uses them for fought and auto-resolved battles alike;
+  - never tests land battles.
+
+  With shipped data the test is never on, so the difference shows only with mods.
+
+**Enter family match (mcx6 Q14, 2026-11-17)** [H unless tagged]. Read with REA from 0x454a90, 0x465380, 0x451e20,
+0x452170, the hidden-fleet predicate 0x3a9760 (A2GAL_READINGS: a fleet is hidden when it has contents and all of them
+are hidden) and the raid test 0x432e20 (TACTICAL_GAPS: the `Raid_Force_*` limits). The dispatch gives a planet and a
+fleet (or no fleet).
+- Parse: P1 planet names (upper-cased, checked against the type list) → +0x360; P2 filter → +0x3a8; P3 type names →
+  +0x378; P4 names → +0x390. P5 → byte +0x3ac, read only when it has exactly one value. P6 → +0x3ad and P7 → +0x3ae,
+  from the first value. P5, P6 and P7 are `atoi(value) ≠ 0`, so `True` reads as false: EaW Rebel Act III has P6 `True`.
+- **No planet in the dispatch** → nothing.
+- **No P1 names** ("Assuming any planet will trigger event") → fires when P5 is set, or no fleet was dispatched, or the
+  fleet is not hidden. P2, P3, P4, P6 and P7 are **not tested** in this case.
+- **With P1 names**, for each P1 name equal to the planet's type name, it fires when all hold:
+  - no fleet, or the P2 filter on the fleet's owner passes;
+  - the fleet test 0x451e20 passes;
+  - the P4 test 0x452170 passes.
+- **Fleet test 0x451e20**:
+  - no fleet → pass;
+  - P3 empty and P7 clear → pass when P5 is set or the fleet is not hidden. **P5 = "a hidden (stealthed) fleet triggers
+    too"**;
+  - **P7 set → pass only when the fleet is raid capable** (0x432e20 on its FLEET behaviour). P3, P5 and P6 are then
+    ignored. **P7 = "raid fleets only"**: FoC `STORY_TUTORIAL_II.XML`, `Tutorial_II_Reveal_Tatooine_05`, carries the
+    comment "Allow only raid fleets in";
+  - otherwise every P3 type must be the representative type (0x3973b0) of some nested content of the fleet. P5 is not
+    tested here, so hidden fleets pass. With P6, the number of direct contents (expand off) must also equal the number
+    of P3 names.
+- **P4 test 0x452170**:
+  - P4 empty or no planet → pass;
+  - otherwise it lists the planet's orbit fleets in slots 0, 1 and 2 (0x3f9370; every orbit fleet, any owner) and
+    expands each one (nested contents);
+  - it passes when any content's representative type name is in P4. So P4 looks at **everything in orbit**, not only
+    the entering fleet [H for the code; M that slots 0–2 cover every orbit fleet, A2K_T08 Q1.2].
+- Shipped uses of P5 = 1: FoC and EaW `INTERVENTION_SCOUT.XML` ENTER; FoC Underworld demo and tutorial FLEET_BOUNCED /
+  INVASION_BOUNCED. All of them have P1 names and no P3, so P5 lets hidden fleets count.
 
 ## 6. Branches and rewards (question 6)
 
@@ -458,7 +557,8 @@ only dialog / chapter tags shipped events use are `Story_Dialog`, `Story_Chapter
    no return values (STRATEGIC_GAPS §4) [H].
 3. ~~Exact T9 time argument~~ = (float)(mode frame) × seconds-per-frame 0x140b0a344; paused = galactic and counter
    0x140b1540c > 0 (STRATEGIC_GAPS §4) [H].
-4. Meaning of `0x140b153f8` values (Multiplayer gate), and of Enter-family Param5/Param7.
+4. Meaning of `0x140b153f8` values (Multiplayer gate). (Enter-family Param5 / Param7: settled in §5, "Enter family
+   match", mcx6 Q14: P5 = hidden fleets count too, P7 = raid fleets only [H].)
 5. CONQUER_COUNT: whether the conquest dispatch is raised for every faction or only the human player.
 6. ~~Whether `0x215a30` (CRC) is case-sensitive~~: it is (raw-byte CRC32, no case folding), so Get_Story_Plot and
    STORY_ELEMENT names must match the Story_Plots text byte for byte (§2.1) [H, q6 2026-11-03].
