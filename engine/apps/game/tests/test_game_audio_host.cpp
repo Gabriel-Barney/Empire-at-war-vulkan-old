@@ -273,6 +273,20 @@ void test_battle_result_lines() {
     CHECK(!H::battle_result_gate(0x0a, false) && !H::battle_result_gate(0x17, false) && !H::battle_result_gate(0x10, true));
 }
 
+// mcx4 t13 batch E (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.Land_Retreat_Begin_SFXEvent family"; both builds).
+// ledger: verifies Faction.Land_Retreat_Begin_SFXEvent
+// ledger: verifies Faction.Space_Retreat_Begin_SFXEvent
+// ledger: verifies Faction.Land_Retreat_Enemy_Begin_SFXEvent
+// ledger: verifies Faction.Space_Retreat_Enemy_Begin_SFXEvent
+void test_retreat_begin_lines() {
+    using H = GameAudioHost;
+    CHECK(H::retreat_begin_tag(true, false, false) == "Land_Retreat_Begin_SFXEvent");
+    CHECK(H::retreat_begin_tag(true, false, true) == "Space_Retreat_Begin_SFXEvent");
+    CHECK(H::retreat_begin_tag(false, true, false) == "Land_Retreat_Enemy_Begin_SFXEvent");
+    CHECK(H::retreat_begin_tag(false, true, true) == "Space_Retreat_Enemy_Begin_SFXEvent");
+    CHECK(H::retreat_begin_tag(false, false, true).empty());  // an ally of the retreater hears nothing
+}
+
 // aud4 b0289 / b0300: garrison entry line and the hero clash win speech (both builds; presentation rules only).
 void test_garrison_and_clash_lines() {
     using H = GameAudioHost;
@@ -878,6 +892,7 @@ int main() {
     test_health_and_hardpoint_lines();  // mcx4 t13
     test_control_lines();               // mcx4 t13 batch C
     test_battle_result_lines();         // mcx4 t13 batch D
+    test_retreat_begin_lines();         // mcx4 t13 batch E
     test_intro_speech_t07();
     test_aud2();
 #ifdef ALAMO_GAME_HAVE_AUDIO

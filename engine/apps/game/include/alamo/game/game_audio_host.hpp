@@ -79,6 +79,7 @@ struct GameAudioStats {
     uint64_t health_warnings = 0, hardpoint_lines = 0, hardpoint_explosions = 0;  // mcx4 t13 batch A
     uint64_t control_lines = 0;                                                    // mcx4 t13 batch C
     uint64_t battle_result_lines = 0;                                              // mcx4 t13 batch D
+    uint64_t retreat_lines = 0;                                                    // mcx4 t13 batch E
 };
 
 class GameAudioHost {
@@ -302,6 +303,10 @@ public:
                                                bool corruption);
     // The 0x343b90 gate: victory types 0xb..0x16 that are not silent.
     static bool battle_result_gate(uint8_t victory_type, bool silent) { return victory_type >= 0x0b && victory_type <= 0x16 && !silent; }
+    // "Faction.Land_Retreat_Begin_SFXEvent family" (begin: land 0x5350d0, space 0x533080 [H]): the local faction's line
+    // when a retreat starts ("" = none): the retreater is local -> _Retreat_Begin_SFXEvent (after the retreating units'
+    // own SFXEvent_Retreat_Start, which replaces it); the local player is hostile to the retreater -> _Enemy_Begin_.
+    static std::string_view retreat_begin_tag(bool local_retreats, bool local_hostile, bool space);
     struct ControlLines {
         std::string_view friendly, enemy;
     };
@@ -398,6 +403,7 @@ private:
                    int32_t local_player);
     float health_low_ = 0.33f, health_critical_ = 0.10f;  // GameConstants Health_Low / _Critical_Percent_Threshold
     bool corruption_mission_ = false, victory_seen_ = false;  // mcx4 t13 batch D: set_corruption_mission; declare latch
+    int32_t last_retreater_ = -1;                             // mcx4 t13 batch E: retreating_player() last tick
     // mcx4 t13 batch B: the local player's tactical build orders last tick (order id -> type) and built counts (type ->
     // TacticalProduction::built_count), to tell a completed order from a cancelled one.
     std::map<uint32_t, int32_t> prod_orders_;

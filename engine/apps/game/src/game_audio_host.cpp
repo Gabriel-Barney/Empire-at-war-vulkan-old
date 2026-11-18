@@ -100,6 +100,16 @@ std::string_view GameAudioHost::battle_result_line(bool local_won, bool local_ho
     return space ? "SFXEvent_HUD_Lost_Space_Battle" : "SFXEvent_HUD_Lost_Land_Battle";
 }
 
+std::string_view GameAudioHost::retreat_begin_tag(bool local_retreats, bool local_hostile, bool space) {
+    // ledger: consumes Faction.Land_Retreat_Begin_SFXEvent
+    // ledger: consumes Faction.Space_Retreat_Begin_SFXEvent
+    if (local_retreats) return space ? "Space_Retreat_Begin_SFXEvent" : "Land_Retreat_Begin_SFXEvent";
+    // ledger: consumes Faction.Land_Retreat_Enemy_Begin_SFXEvent
+    // ledger: consumes Faction.Space_Retreat_Enemy_Begin_SFXEvent
+    if (local_hostile) return space ? "Space_Retreat_Enemy_Begin_SFXEvent" : "Land_Retreat_Enemy_Begin_SFXEvent";
+    return {};
+}
+
 GameAudioHost::ControlLines GameAudioHost::control_lines(bool friendly_old, bool friendly_new, bool hostile_old, bool hostile_new,
                                                          bool old_neutral, bool new_neutral) {
     ControlLines c;
@@ -464,6 +474,16 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
         faction_sfx(line);
         ++stats_.garrison_lines;
     }
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Bunker_Vacated", garrison eject 0x444dd0): once per unit leaving a
+    // garrison, when its owner is the local player: the owner's faction line, attached to the unit (3D at its position).
+    if (local_player >= 0 && local_player < static_cast<int32_t>(player_factions_.size()))
+        if (const audio::FactionAudio* lf = game_data_->find_faction(player_factions_[static_cast<size_t>(local_player)]))
+            for (const sim::TacticalBattle::StoryGarrisonEvent& e : battle.story_vacated()) {
+                if (owner_of(e.unit) != local_player) continue;
+                // ledger: consumes Faction.SFXEvent_Bunker_Vacated
+                const std::string_view ev = lf->get("SFXEvent_Bunker_Vacated");
+                if (!ev.empty() && game_->impact(ev, position_of(static_cast<uint64_t>(e.unit)))) ++stats_.garrison_lines;
+            }
     // HERO_CLASH §3.8 (b0300): a clash end plays the winner's First_ / Second_Hero_Win_Speech (speech queue).
     {
         const auto& ends = battle.hero_clashes().ended();
@@ -708,6 +728,31 @@ void GameAudioHost::cue_lines(const sim::TacticalBattle& battle, const objects::
                 faction_sfx(line);
                 ++stats_.battle_result_lines;
             }
+        }
+    }
+    // Retreat begin (MCX4_T13_RE_ANSWERS "Faction.Land_Retreat_Begin_SFXEvent family"): on the tick a retreat countdown
+    // starts; 2D. A local retreater first tries its retreating units' SFXEvent_Retreat_Start ([port] the retreater's
+    // battle units in id order stand for the coordinator's list). Cancel / not-allowed lines: no port path yet.
+    if (const int32_t rp = battle.retreating_player(); rp != last_retreater_) {
+        last_retreater_ = rp;
+        if (rp >= 0 && local_player >= 0) {
+            const bool local = rp == local_player;
+            bool played = false;
+            if (local)
+                for (const objects::ObjectId id : battle.movement().unit_ids()) {
+                    const objects::ObjectHandle h = store.find(id);
+                    if (!store.alive(h) || store.owner(h) != rp) continue;
+                    const std::string_view ev = types.get_string(store.type(h), "SFXEvent_Retreat_Start");
+                    if (ev.empty()) continue;
+                    played = game_->gui_sfx(ev) != 0;
+                    break;
+                }
+            const std::string_view line = retreat_begin_tag(local, !local && cs.is_enemy(local_player, rp), battle.is_space());
+            if (!played && !line.empty()) {
+                faction_sfx(line);
+                played = true;
+            }
+            if (played) ++stats_.retreat_lines;
         }
     }
     // Capture point owner changes (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Tactical_Gain_Friendly_Control family"): the
@@ -1071,6 +1116,7 @@ void GameAudioHost::battle_reset() {
     hardpoint_fire_.clear();  // aud1 t04: hardpoint indices are per battle
     prod_orders_.clear();     // mcx4 t13: per-battle production tracking
     victory_seen_ = false;    // mcx4 t13 batch D
+    last_retreater_ = -1;     // mcx4 t13 batch E
     prod_built_.clear();
     intro_decided_ = false;   // aud1 t07: a new battle decides its intro again
     object_events_reset();    // aud1 t05

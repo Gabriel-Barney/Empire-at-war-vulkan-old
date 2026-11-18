@@ -589,6 +589,9 @@ public:
     };
     std::span<const StoryGarrisonEvent> story_garrisoned() const { return story_garrisoned_; }
     std::span<const StoryCaptureEvent> story_captured() const { return story_captured_; }
+    // mcx4 t13 (presentation feed): units that left a garrison (Exited / Ejected) in this tick or in the command phase
+    // before it, in event order.
+    std::span<const StoryGarrisonEvent> story_vacated() const { return story_vacated_; }
     // Garrison API for the Lua bindings (Can_Garrison / Garrison / Leave_Garrison / Eject_Garrison / Can_Garrison_Fire /
     // Is_In_Garrison / Get_Garrisoned_Units). Orders: `player` = the units' owner (script orders pass the unit's owner);
     // units must be live battle units of that player. can_garrison = the Lua Can_Garrison rule (L1_S4_REMAINING.md §2.5:
@@ -2235,6 +2238,8 @@ private:
     // --- S4 garrisons / capture (owner: S4 agent; tactical_battle_garrison.cpp; no-ops without the garrison lib) ---
     std::vector<StoryGarrisonEvent> story_garrisoned_;
     std::vector<StoryCaptureEvent> story_captured_;
+    std::vector<StoryGarrisonEvent> story_vacated_;  // mcx4 t13: presentation only (not saved / hashed)
+    size_t story_vacated_mark_ = 0;                  // entries the last tick reported
     void s4_owner_changed(TacticalMode& mode, objects::ObjectId id, int32_t old_owner, int32_t owner);  // change_owner()
     // s78j t04: one object's script owner change (change_owner(), else store + trees + fog / garrison hooks), and the
     // team spread of script_change_owner (TACTICAL_COMBAT §3.5 step 4): the container, then the other live members.
