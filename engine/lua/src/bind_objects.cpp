@@ -3052,11 +3052,16 @@ int g_spawn_from_reinforcement_pool(Call& c) {
 
 // PlayerWrapper.Get_Space_Station() (mcx1 t09, D4; docs/re/MCX1_RE_ANSWERS.md "Get_Space_Station", 0x6021c0): space mode
 // only (else nil); over the players allied with this one (itself included) in player order, the first live object that
-// has the DUMMY_STAR_BASE behaviour attached and not CAPTURE_POINT - never the element tag. [port] within one player the
-// newest object first (the original walks its per-player object list; that order was not read).
+// has the DUMMY_STAR_BASE behaviour attached and not CAPTURE_POINT - never the element tag. [port] "player order" is the
+// ascending owner id, and within one player the newest object first (the original walks its per-player object list; that
+// order was not read).
 int m_get_space_station(Call& c) {
     const objects::ObjectStore* st = store(c);
-    if (!st || st->mode() != objects::ModeKind::Space) return push_nil(c);
+    if (!st) return push_nil(c);
+    if (st->mode() != objects::ModeKind::Space) {
+        c.script_warning("PlayerWrapper::Get_Space_Station -- this command may only be used in space mode.");
+        return push_nil(c);
+    }
     static const objects::BehaviorTypeId kStarBase = objects::behavior_type_id("DUMMY_STAR_BASE");
     static const objects::BehaviorTypeId kCapturePoint = objects::behavior_type_id("CAPTURE_POINT");
     const int32_t player = c.self->id;

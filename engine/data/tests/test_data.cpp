@@ -81,6 +81,13 @@ static void test_xml_values() {
     CHECK(xv::bool_or(ne, "Y", false, xv::kAbility) && !xv::bool_or(ne, "Y", false));
     CHECK(xv::list(ne, "L").size() == 3 && xv::list(ne, "L", xv::kAbility).size() == 1);
     CHECK(xv::texts(ne, "X").size() == 1 && xv::fields(ne).size() == 3);
+    // OBJECT_TYPES.md §4.2: for object types a SubObjectList="Yes" container holds sub-objects, not fields; any other
+    // container is a group. Q1: the other data classes have no SubObjectList branch and descend into it too.
+    const auto so = XmlDocument::parse(
+        "<E><Other SubObjectList=\"yes\"><X>4</X></Other><Abilities SubObjectList=\"Yes\"><A><X>9</X></A></Abilities></E>");
+    CHECK(so.ok());
+    CHECK(xv::int_or(so.root(), "X", -1, xv::kObject) == 4);
+    CHECK(xv::int_or(so.root(), "X", -1) == 9);
 }
 
 static void test_xml_basic() {
@@ -626,7 +633,8 @@ static void test_database_install_layout() {
         write_file(x / "Objs.xml", "<Objs><Planet/><Planet Name=\"\"/><Planet Name=\"P\"><Galactic_Position>x</Galactic_Position>"
                                    "<Behavior>,,</Behavior></Planet><Unit Name=\"P\"/></Objs>");
         write_file(x / "TradeRouteFiles.xml", "just text, no element");
-        write_file(x / "CampaignFiles.xml", "<C><File>Camp.xml</File><File>Camp.xml</File></C>");
+        write_file(x / "CampaignFiles.xml", "<C><File>Camp.xml</File><File>Camp.xml</File><File>BadCamp.xml</File></C>");
+        write_file(x / "BadCamp.xml", std::string("\xFF\xFE<\0C\0>\0", 8));  // UTF-16: does not parse
         write_file(x / "Camp.xml",
                    "<Campaigns><Campaign Name=\"G\"><Locations>,,P,,P</Locations><Trade_Routes>R,,R</Trade_Routes>"
                    "<Home_Location>,</Home_Location><Sort_Order>zz</Sort_Order></Campaign><Campaign/>"
@@ -641,6 +649,8 @@ static void test_database_install_layout() {
         CHECK(db.game_objects().size() == 2 && db.game_objects()[1].duplicate);
         CHECK(db.campaigns().size() == 1 && db.campaigns()[0].definitions == 2 && db.campaigns()[0].name == "g");
         CHECK(!has(diag, "hint:"));  // loose XML exists, so no MEG hint
+        // mcx1 t08 (MCX1_RE_ANSWERS Q6.1): a listed campaign file that opens but does not parse is fatal, as in the original.
+        CHECK(has(diag, "BadCamp.xml' does not parse"));
         std::vector<std::string> gd;
         GalaxyMap g = build_galaxy_map(db, "G", &gd);
         CHECK(g.planets.size() == 1 && g.routes.size() == 0 && g.validate().empty());

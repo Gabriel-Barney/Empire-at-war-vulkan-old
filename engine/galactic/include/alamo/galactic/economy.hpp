@@ -151,6 +151,16 @@ struct FactionRules {
             if (ascii_iequals(k, tag)) out = v;
         return out;
     }
+    // Every field named `tag`, joined with ',': a list tag appends each occurrence (MCX1_RE_ANSWERS Q1).
+    std::string xml_list(std::string_view tag) const {
+        std::string out;
+        for (const auto& [k, v] : xml_fields)
+            if (ascii_iequals(k, tag)) {
+                if (!out.empty()) out += ',';
+                out += v;
+            }
+        return out;
+    }
 };
 
 // DifficultyAdjustments.xml entry (AI players only). No adjustment = the internal all-1.0 one [H].

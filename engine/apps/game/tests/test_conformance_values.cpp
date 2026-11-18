@@ -49,7 +49,7 @@ void test_constants(const alamo::game::GameData& d) {
     CHECK(!c.get("Planet_Reveal_Delay_Time"));                         // TBD: skipped, the field keeps its default
     CHECK(c.get_int("Max_Ground_Forces_On_Planet", 0) == std::numeric_limits<int32_t>::max());  // Q3: UCRT atoi clamps
     CHECK(c.get_float("Health_Low_Percent_Threshold", 9.0f) == 0.0f);  // atof of no number: 0
-    CHECK(c.max_fleet_move_distance == 3.0f);                          // the empty repeat changes nothing
+    CHECK(c.max_fleet_move_distance == 4.5f);                          // atof "4.5 parsecs"; the empty repeat changes nothing
 }
 
 // Factions (Q1: last wins, TBD skipped, lists append, nested fields; any top-level element is a faction).

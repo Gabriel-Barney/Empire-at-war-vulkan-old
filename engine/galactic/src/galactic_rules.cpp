@@ -302,13 +302,13 @@ std::vector<DifficultyRules> load_difficulties(const FileProvider& provider, std
     auto doc = read_xml(provider, "Data\\XML\\DifficultyAdjustments.xml", diagnostics);
     if (!doc) return out;
     for (data::XmlNode n : doc->root().children("Difficulty_Adjustment")) {
-        DifficultyRules d;
+        DifficultyRules d;  // mcx1 t03: the shared data-class rule (last occurrence wins, TBD / empty skipped)
         d.name = std::string(n.attribute("Name"));
-        d.credit_multiplier = atof_or(n.child_text("Credit_Multiplier"), 1.0f);
-        d.galactic_build_time_multiplier = atof_or(n.child_text("Galactic_Build_Time_Multiplier"), 1.0f);
-        d.damage_multiplier = atof_or(n.child_text("Damage_Multiplier"), 1.0f);
-        d.health_multiplier = atof_or(n.child_text("Health_Multiplier"), 1.0f);
-        d.shield_multiplier = atof_or(n.child_text("Shield_Multiplier"), 1.0f);
+        d.credit_multiplier = atof_or(data::xml_values::text(n, "Credit_Multiplier"), 1.0f);
+        d.galactic_build_time_multiplier = atof_or(data::xml_values::text(n, "Galactic_Build_Time_Multiplier"), 1.0f);
+        d.damage_multiplier = atof_or(data::xml_values::text(n, "Damage_Multiplier"), 1.0f);
+        d.health_multiplier = atof_or(data::xml_values::text(n, "Health_Multiplier"), 1.0f);
+        d.shield_multiplier = atof_or(data::xml_values::text(n, "Shield_Multiplier"), 1.0f);
         out.push_back(std::move(d));
     }
     return out;

@@ -45,16 +45,20 @@ std::vector<std::string_view> to_mask(std::string_view v);
 XmlNode last_child(XmlNode e, std::string_view tag);
 
 // How one class's entry parse walks its element (docs/re/MCX1_RE_ANSWERS.md Q1):
-// - kData: Faction, Campaign, GameConstants, TradeRoute, HardPoint (and GameObjectType): every child, a child with element
-//   children is descended into at any depth and its children are fields of the same entry; `TBD` skipped.
+// - kData: Faction, Campaign, GameConstants, TradeRoute, HardPoint: every child, a child with element children is
+//   descended into at any depth and its children are fields of the same entry; `TBD` skipped.
+// - kObject: GameObjectType: as kData, except that a container marked SubObjectList="Yes" (exactly) holds sub-objects, not
+//   fields, and is not descended into (OBJECT_TYPES.md §4.2; Q1: the other data classes have no such branch).
 // - kAbility: the `*_Ability` and `Unit_Ability` sub-objects: direct children only, `TBD` is a value like any other.
-// In both an empty value never changes a field.
+// In all of them an empty value never changes a field.
 struct EntryRule {
     bool descend = true;
     bool skip_tbd = true;
+    bool sub_object_lists = false;
 };
-inline constexpr EntryRule kData{true, true};
-inline constexpr EntryRule kAbility{false, false};
+inline constexpr EntryRule kData{true, true, false};
+inline constexpr EntryRule kObject{true, true, true};
+inline constexpr EntryRule kAbility{false, false, false};
 
 // Scalar reads of a field of entry `e` with retail's rules: the last occurrence that changes the field decides; a missing
 // tag, or only empty / skipped occurrences, gives `fallback` (the field keeps its default).

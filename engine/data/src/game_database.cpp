@@ -126,8 +126,9 @@ uint32_t PlanetTypes::find(std::string_view planet_name) const {
 }
 
 std::string_view CampaignDef::raw_value(std::string_view tag) const {
-    for (const auto& [k, v] : raw)
-        if (iequals(k, tag)) return v;
+    // mcx1 t03 (MCX1_RE_ANSWERS Q1): a repeated scalar tag takes its last occurrence (`raw` holds no empty / TBD value).
+    for (auto it = raw.rbegin(); it != raw.rend(); ++it)
+        if (iequals(it->first, tag)) return it->second;
     return {};
 }
 
@@ -211,6 +212,16 @@ const XmlDocument* GameDatabase::load_file(const FileProvider& provider, const F
     return doc->ok() ? doc : nullptr;
 }
 
+// mcx1 t08 (MCX1_RE_ANSWERS Q6.1): a listed trade-route or campaign file that opens but does not parse ends the original's
+// init (the process exits); the port refuses the load and says why. A listed file that does not open is skipped there too.
+bool GameDatabase::listed_file_unparsable(std::string_view path, const char* what) {
+    const auto it = file_index_.find(normalize_path(path));
+    if (it == file_index_.end() || files_[it->second].doc->ok()) return false;
+    warn(std::string("error: listed ") + what + " file '" + std::string(path) +
+         "' does not parse (the original game does not start with it either)");
+    return true;
+}
+
 // Every <File> entry in list order (duplicates kept; GameObjectFiles.xml parses them twice).
 std::vector<ListedXmlEntry> GameDatabase::read_list(const FileProvider& provider, std::string_view list_path, bool& ok) {
     const XmlDocument* doc = load_file(provider, nullptr, list_path, true);
@@ -235,10 +246,8 @@ void GameDatabase::load_constants(const FileProvider& provider, bool& ok) {
         c.index_[normalize_name(tag)] = static_cast<uint32_t>(c.fields.size());
         c.fields.emplace_back(tag, value);
     }
-    if (const auto v = c.get("MaximumFleetMovementDistance")) {
-        if (const auto f = parse_float(*v)) c.max_fleet_move_distance = *f;
-        else warn("GameConstants: bad MaximumFleetMovementDistance '" + std::string(*v) + "'");
-    }
+    // Retail atof, like get_float: an unreadable value gives 0 (mcx1 t02).
+    if (const auto v = c.get("MaximumFleetMovementDistance")) c.max_fleet_move_distance = xml_values::to_float(*v);
 }
 
 void GameDatabase::load_game_objects(const FileProvider& provider, bool& ok) {
@@ -271,7 +280,7 @@ void GameDatabase::load_game_objects(const FileProvider& provider, bool& ok) {
     auto variant_chain = [this](XmlNode e) {
         std::vector<XmlNode> chain{e};
         for (int depth = 0; depth < 16; ++depth) {
-            const std::string_view parent = trim(xml_values::text(chain.back(), "Variant_Of_Existing_Type"));
+            const std::string_view parent = trim(xml_values::text(chain.back(), "Variant_Of_Existing_Type", xml_values::kObject));
             if (parent.empty()) break;
             const GameObjectRecord* rec = find_game_object(parent);
             if (!rec || std::find(chain.begin(), chain.end(), rec->element) != chain.end()) {
@@ -287,12 +296,12 @@ void GameDatabase::load_game_objects(const FileProvider& provider, bool& ok) {
     auto behavior_list = [](const std::vector<XmlNode>& chain, std::string_view tag) {
         std::vector<std::string> out;
         for (const XmlNode& n : chain) {
-            const bool variant = !trim(n.child_text("Variant_Of_Existing_Type")).empty() && chain.size() > 1;
+            const bool variant = !trim(xml_values::text(n, "Variant_Of_Existing_Type", xml_values::kObject)).empty() && chain.size() > 1;
+            // kData walk (OBJECT_TYPES §4.2 / §4.4): nested groups descended into, empty and TBD occurrences skipped.
             std::vector<std::string> own;
-            for (XmlNode bn : n.children(tag)) {
-                if (bn.text_trimmed().empty()) continue;
+            for (std::string_view v : xml_values::texts(n, tag, xml_values::kObject)) {
                 if (variant) own.clear();
-                for (std::string_view tok : split_list(bn.text())) own.emplace_back(tok);
+                for (std::string_view tok : split_list(v)) own.emplace_back(tok);
             }
             if (!own.empty()) {
                 out = std::move(own);
@@ -340,7 +349,7 @@ void GameDatabase::load_game_objects(const FileProvider& provider, bool& ok) {
         // The nearest element of the chain that sets <tag>; its last occurrence.
         auto text = [&](std::string_view tag) -> std::string_view {
             for (const XmlNode& n : chain)
-                if (const std::string_view v = xml_values::text(n, tag); !v.empty()) return v;
+                if (const std::string_view v = xml_values::text(n, tag, xml_values::kObject); !v.empty()) return v;
             return {};
         };
         Vec3 pos{};
@@ -370,7 +379,10 @@ void GameDatabase::load_trade_routes(const FileProvider& provider, bool& ok) {
     for (const auto& [key, oe] : ordered) {
         const ListedXmlEntry& en = oe.list;
         const XmlDocument* doc = load_file(provider, nullptr, en.path, false);
-        if (!doc) continue;
+        if (!doc) {
+            if (listed_file_unparsable(en.path, "trade-route")) ok = false;
+            continue;
+        }
         for (XmlNode e : doc->root().children("TradeRoute")) {
             const std::string_view name = trim(e.attribute("Name"));
             if (name.empty()) {
@@ -428,7 +440,10 @@ void GameDatabase::load_campaigns(const FileProvider& provider, const LoadOption
 
     for (const auto& [key, en] : ordered) {
         const XmlDocument* doc = load_file(provider, en.fallback, en.list.path, false);
-        if (!doc) continue;
+        if (!doc) {
+            if (listed_file_unparsable(en.list.path, "campaign")) ok = false;
+            continue;
+        }
         // mcx1 t05 (D4; MCX1_RE_ANSWERS Q1): every top-level child of a campaign file is a campaign, whatever its tag.
         for (XmlNode e = doc->root().first_child(); e; e = e.next_sibling()) {
             const std::string_view name = trim(e.attribute("Name"));

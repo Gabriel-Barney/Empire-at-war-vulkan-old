@@ -58,6 +58,16 @@ bool b_or(const data::XmlNode& e, std::string_view tag, bool fallback) {
     return data::xml_values::bool_or(e, tag, fallback, data::xml_values::kAbility);
 }
 std::string s_or(const data::XmlNode& e, std::string_view tag) { return std::string(last_text(e, tag)); }
+// A list field (type or bone-name lists): every occurrence appends (MCX1_RE_ANSWERS Q1: repeated list = append), joined
+// with a comma for data::split_list.
+std::string list_text(const data::XmlNode& e, std::string_view tag) {
+    std::string out;
+    for (std::string_view v : data::xml_values::texts(e, tag, data::xml_values::kAbility)) {
+        if (!out.empty()) out += ',';
+        out += v;
+    }
+    return out;
+}
 
 std::vector<int32_t> type_list(std::string_view text, const AbilityResolvers& r) {
     std::vector<int32_t> out;
@@ -355,7 +365,7 @@ bool parse_unit_ability(const data::XmlNode& e, UnitAbilityRecord& out, const Ab
         out.spawned_type = r.object_type ? r.object_type(out.spawned_object_type) : -1;
         if (is_projectile_name(out.spawned_object_type, r) && r.projectile) out.spawned_projectile = r.projectile(out.spawned_object_type);
     }
-    out.target_types = type_list(last_text(e, "Target_Types"), r);
+    out.target_types = type_list(list_text(e, "Target_Types"), r);
     for (data::XmlNode c : e.children("Owner_Attachment_Bone"))  // REMAINING_GAPS §5.2
         for (std::string_view n : data::split_list(c.text_trimmed())) out.owner_attachment_bones.emplace_back(n);
     out.combat.range_override = f_or(e, "Targeting_Max_Attack_Distance", 0.0f);
@@ -414,8 +424,8 @@ SpecialAbilityDesc parse_special_ability(const data::XmlNode& e, const AbilityRe
     if (!style.empty() && s.style == ActivationStyle::None) note(diag, e, "unknown Activation_Style '" + std::string(style) + "'");
     s.initially_enabled = b_or(e, "Initially_Enabled", true);
     s.applicable_categories = parse_category_mask(last_text(e, "Applicable_Unit_Categories"), r, diag);
-    s.applicable_types = type_list(last_text(e, "Applicable_Unit_Types"), r);
-    s.excluded_types = type_list(last_text(e, "Excluded_Unit_Types"), r);
+    s.applicable_types = type_list(list_text(e, "Applicable_Unit_Types"), r);
+    s.excluded_types = type_list(list_text(e, "Excluded_Unit_Types"), r);
     s.min_range = f_or(e, "Activation_Min_Range", 0.0f);
     s.max_range = f_or(e, "Activation_Max_Range", 0.0f);
     s.cable_drop_phase = f_or(e, "Drop_Phase_Duration", 0.0f);  // r3g t04 (Cable_Ability)
@@ -447,12 +457,14 @@ SpecialAbilityDesc parse_special_ability(const data::XmlNode& e, const AbilityRe
             s.blob_color[k] = std::clamp(data::parse_float_or(bc[k], 255.0f) / 255.0f, 0.0f, 1.0f);
         s.show_blob_to_enemies = b_or(e, "Show_Blob_To_Enemies", false);
         s.owner_particle_effect = s_or(e, "Owner_Particle_Effect");
-        const std::vector<std::string_view> bones = data::split_list(last_text(e, "Owner_Particle_Bone_Name"));
+        const std::string owner_bones = list_text(e, "Owner_Particle_Bone_Name");
+        const std::vector<std::string_view> bones = data::split_list(owner_bones);
         if (!bones.empty()) s.owner_particle_bone = std::string(bones.front());
     }
     // vis1 t06 (presentation only): the target / status particle names.
     s.target_particle_effect = s_or(e, "Target_Particle_Effect");
-    for (std::string_view b : data::split_list(last_text(e, "Target_Particle_Bone_Name"))) s.target_particle_bones.emplace_back(b);
+    const std::string target_bones = list_text(e, "Target_Particle_Bone_Name");
+    for (std::string_view b : data::split_list(target_bones)) s.target_particle_bones.emplace_back(b);
     s.stunned_effect = s_or(e, "Stunned_Effect");
     s.infection_particle = s_or(e, "Infection_Particle");
     // vis1 t08 (presentation only): the Drain_Life lightning, the Force_Healing range blob.

@@ -125,12 +125,13 @@ XmlNode last_child(XmlNode e, std::string_view tag) {
 namespace {
 // Visits every field occurrence of entry `e` in document order with the rule's walk: (element, trimmed value) for each
 // occurrence that changes a field. A child with element children is a container (kData descends into it; its own text
-// is not a field value in practice and is ignored); kAbility looks at direct children only.
+// is not a field value in practice and is ignored); kAbility looks at direct children only. kObject skips a container
+// marked SubObjectList="Yes" (exactly): it holds sub-objects, not fields of this entry (OBJECT_TYPES.md §4.2).
 template <typename F>
 void walk(XmlNode e, EntryRule rule, F&& visit) {
     for (XmlNode c = e.first_child(); c; c = c.next_sibling()) {
         if (c.first_child()) {
-            if (rule.descend) walk(c, rule, visit);
+            if (rule.descend && !(rule.sub_object_lists && c.attribute("SubObjectList") == "Yes")) walk(c, rule, visit);
             continue;
         }
         const std::string_view v = c.text_trimmed();

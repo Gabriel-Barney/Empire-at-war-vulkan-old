@@ -209,7 +209,7 @@ static void test_loader_synthetic() {
     CHECK(db.get_float(0, "max_speed") == 3.5f);
     CHECK(db.fields_of(0, "Max_Speed").size() == 2);
     CHECK(db.get_list(0, "Behavior") == (std::vector<std::string_view>{"A", "B", "C"}));
-    CHECK(!db.get_bool(0, "Is_Dummy").has_value());
+    CHECK(db.get_bool(0, "Is_Dummy") == false);  // mcx1 t02 (Q2): "maybe" is neither "1" nor a first Y / T -> false
     CHECK(db.get_text(0, "My_Unknown_Tag") == std::string_view("hello"));
     CHECK(!db.get_text(0, "Stacking_Category").has_value());  // nested, not a direct child
     // Nested sub-object: schema chosen by the enclosing element, attributes kept.

@@ -148,6 +148,8 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
             };
             report(sk.human_faction, resolved.human_faction, "human");
             report(sk.ai_faction, resolved.ai_faction, "AI");
+            for (size_t k = 0; k < sk.extra_slots.size() && k < resolved.extra_slots.size(); ++k)
+                report(sk.extra_slots[k].faction, resolved.extra_slots[k].faction, ("slot " + std::to_string(k + 2)).c_str());
         }
         // modc t19 [port]: the galaxy's planet is the map's own planet type when the data has it and it forbids no unit,
         // else the first such PLANET type (skirmish_galaxy_planet); never a planet by name.

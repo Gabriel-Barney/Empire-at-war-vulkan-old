@@ -26,11 +26,12 @@ target_link_libraries(alamo_ai PUBLIC alamo_galactic alamo_data alamo_core alamo
 add_library(alamo_ai_save_io INTERFACE)
 target_include_directories(alamo_ai_save_io INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(alamo_ai_save_io INTERFACE alamo_galactic alamo_core)
-# q6: the galactic seed's force roles use galactic::galactic_unit_kind (galactic_rules.cpp, in alamo_galactic_sim, which
-# exists when data, objects and commands are configured; without it the seed keeps its own tag rule).
+# q6 / mcx1 t05: the galactic seed's force roles use galactic::galactic_dummy (galactic_rules.cpp, in alamo_galactic_sim,
+# which exists when data, objects and commands are configured, as in every full build); without it no type is a valid
+# starting force (there is no element-tag rule any more, D4).
 if(TARGET alamo_galactic_sim)
   target_link_libraries(alamo_ai PRIVATE alamo_galactic_sim)
-  target_compile_definitions(alamo_ai PRIVATE ALAMO_AI_HAVE_GALACTIC_SIM=1)
+  target_compile_definitions(alamo_ai PUBLIC ALAMO_AI_HAVE_GALACTIC_SIM=1)  # PUBLIC: the tests guard on it too
 endif()
 
 add_executable(alamo_ai_tests tests/test_ai.cpp)

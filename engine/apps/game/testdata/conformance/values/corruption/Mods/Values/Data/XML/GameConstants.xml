@@ -12,5 +12,6 @@
   <Max_Ground_Forces_On_Planet>99999999999</Max_Ground_Forces_On_Planet>
   <Health_Low_Percent_Threshold>not a number</Health_Low_Percent_Threshold>
   <MaximumFleetMovementDistance>3</MaximumFleetMovementDistance>
+  <MaximumFleetMovementDistance>4.5 parsecs</MaximumFleetMovementDistance>
   <MaximumFleetMovementDistance></MaximumFleetMovementDistance>
 </GameConstants>

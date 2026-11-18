@@ -86,21 +86,21 @@ GalacticSetup build_campaign_setup(const data::GameDatabase& db, const GalacticR
         if (fields.size() < 2) continue;
         const uint32_t f = rules.find_faction(fields[0]);
         if (f != kNoIndex && player_of[f] != kNoPlayer)
-            s.players[static_cast<size_t>(player_of[f])].credits = data::parse_float_or(fields[1], 0.0f);
+            s.players[static_cast<size_t>(player_of[f])].credits = data::xml_values::float_or(data::trim(fields[1]), 0.0f);  // atof (mcx1 t02)
     }
     for (const std::string& r : c->starting_tech_level) {
         const std::vector<std::string_view> fields = data::split_fields(r);
         if (fields.size() < 2) continue;
         const uint32_t f = rules.find_faction(fields[0]);
         if (f != kNoIndex && player_of[f] != kNoPlayer)
-            s.players[static_cast<size_t>(player_of[f])].tech_level = data::parse_int_or(fields[1], 1);
+            s.players[static_cast<size_t>(player_of[f])].tech_level = data::xml_values::int_or(data::trim(fields[1]), 1);  // atoi (mcx1 t02)
     }
     for (const std::string& r : c->max_tech_level) {  // REMAINING_GAPS 1.4 (0x4af2d0)
         const std::vector<std::string_view> fields = data::split_fields(r);
         if (fields.size() < 2) continue;
         const uint32_t f = rules.find_faction(fields[0]);
         if (f != kNoIndex && player_of[f] != kNoPlayer)
-            s.players[static_cast<size_t>(player_of[f])].max_tech_level = data::parse_int_or(fields[1], 5);
+            s.players[static_cast<size_t>(player_of[f])].max_tech_level = data::xml_values::int_or(data::trim(fields[1]), 5);
     }
     s.tech_sweep_at_start = true;
     for (const auto& hl : c->home_locations) {  // GRC 1.4: Home_Location (faction, planet); the first entry wins

@@ -1015,7 +1015,7 @@ using ::alamo::test::env_or;  // alamo/test/support.hpp
 // q6 / mcx1 t05 (D4; MCX1_RE_ANSWERS Q7.2): galactic seed roles come from the DUMMY_* behaviours alone, never the element
 // tag; a type without one is not a valid starting force (retail creates nothing: "Unknown type").
 
-static void test_seed_roles() {
+[[maybe_unused]] static void test_seed_roles() {
     MemFiles f;
     f.put("Data\\XML\\GameObjectFiles.xml", "<L><File>SeedTypes.xml</File></L>");
     f.put("Data\\XML\\SeedTypes.xml",
@@ -1273,7 +1273,9 @@ int main(int argc, char** argv) {
     test_ai_stage_flood();
     test_path_finder_determinism();
     test_path_finder_background();
+#ifdef ALAMO_AI_HAVE_GALACTIC_SIM  // without alamo_galactic_sim no type has a role (engine/ai/CMakeLists.txt)
     test_seed_roles();
+#endif
     real_data(env_or("ALAMO_FOC_DATA", "/home/claude/data/foc"), "FoC", true);
     real_data(env_or("ALAMO_EAW_DATA", "/home/claude/data/eaw"), "EaW", false);
     std::printf(g_fail ? "alamo_ai_tests: %d failure(s)\n" : "alamo_ai_tests: OK\n", g_fail);

@@ -148,7 +148,7 @@ struct CampaignDef {
     std::vector<std::pair<std::string_view, std::string_view>> raw;
     XmlNode element;
 
-    std::string_view raw_value(std::string_view tag) const;                  // first occurrence or ""
+    std::string_view raw_value(std::string_view tag) const;                  // last occurrence or ""
     std::vector<std::string_view> raw_values(std::string_view tag) const;    // every occurrence
 };
 
@@ -186,6 +186,8 @@ public:
 private:
     const XmlDocument* load_file(const FileProvider& provider, const FileProvider* fallback,
                                  std::string_view path, bool required);
+    // True (and an error logged) when `path` was opened by load_file but did not parse (mcx1 t08, Q6.1).
+    bool listed_file_unparsable(std::string_view path, const char* what);
     // <File> entries of a list file (xml_list.hpp: list order, duplicates kept, empty entries skipped).
     std::vector<ListedXmlEntry> read_list(const FileProvider& provider, std::string_view list_path, bool& ok);
     void load_constants(const FileProvider& provider, bool& ok);

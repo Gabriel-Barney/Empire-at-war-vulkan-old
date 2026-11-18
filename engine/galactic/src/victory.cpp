@@ -7,6 +7,7 @@
 #include "alamo/data/game_database.hpp"
 #include "alamo/core/ascii.hpp"
 #include "alamo/data/values.hpp"
+#include "alamo/data/xml_values.hpp"
 
 namespace alamo::galactic {
 
@@ -32,9 +33,10 @@ VictorySide load_side(const data::CampaignDef& c, std::string_view side, const G
     }
     for (std::string_view v : data::split_fields(c.raw_value(prefix + "_Victory_Faction_Names")))
         if (!data::trim(v).empty()) s.faction_names.emplace_back(data::trim(v));
-    s.cycle_limit = data::parse_int_or(c.raw_value(prefix + "_Victory_Cycle_Limit"), 0);
-    s.credit_target = data::parse_int_or(c.raw_value(prefix + "_Victory_Credit_Target"), 0);
-    s.galactic_control = data::parse_float_or(c.raw_value(prefix + "_Victory_Galactic_Control"), 0.0f);
+    // mcx1 t02 (OBJECT_TYPES §4.5): C atoi / atof, prefix read ("5000c" is 5000).
+    s.cycle_limit = data::xml_values::int_or(c.raw_value(prefix + "_Victory_Cycle_Limit"), 0);
+    s.credit_target = data::xml_values::int_or(c.raw_value(prefix + "_Victory_Credit_Target"), 0);
+    s.galactic_control = data::xml_values::float_or(c.raw_value(prefix + "_Victory_Galactic_Control"), 0.0f);
     return s;
 }
 

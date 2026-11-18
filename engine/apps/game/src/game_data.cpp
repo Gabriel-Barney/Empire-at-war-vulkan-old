@@ -170,9 +170,9 @@ const data::CampaignDef* load_campaign_target(const GameData& data, std::string_
 }
 
 SkirmishSetup resolve_skirmish_factions(const galactic::GalacticRules& rules, SkirmishSetup s) {
-    // mcx1 t08 (MCX1_RE_ANSWERS Q6.3, SKIRMISH_SETUP §2.8): a slot faction the data does not have falls back like an empty
-    // slot (retail keeps the slot's faction as an index and its AI slot falls back to index 0 when the index has no
-    // faction); GameSession::start reports the substitution.
+    // mcx1 t08 (MCX1_RE_ANSWERS Q6.3, SKIRMISH_SETUP §2.8) [port]: a slot faction the data does not have falls back like an
+    // empty slot, and GameSession::start reports the substitution. The original keeps a bad saved faction index unrepaired:
+    // the box shows nothing, Start refuses on a non-team map and may crash on a team map; the port keeps the game startable.
     const auto known = [&rules](const std::string& f) { return !f.empty() && rules.find_faction(f) != galactic::kNoIndex; };
     if (!known(s.human_faction)) s.human_faction = default_skirmish_faction(rules, false);
     if (!known(s.ai_faction)) s.ai_faction = default_skirmish_faction(rules, true, s.human_faction);

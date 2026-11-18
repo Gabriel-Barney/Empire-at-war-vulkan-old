@@ -18,7 +18,7 @@ append, trim 0x23a4b0, `TBD` skip), duplicate names (`OBJECT_TYPES.md` §0 rule 
 | Q3 | Integer / float overflow | `atoi` is the statically linked **UCRT** (VS 2019) one: clamps to INT_MAX / INT_MIN (`99999999999` → 2147483647, `-99999999999` → −2147483648, `2147483648` → 2147483647). int8 codes keep the low byte of the clamped value; code 0x4 clamps that **byte** (unsigned) to ≤ 100; code 0x7 compares the 32-bit value as **unsigned**, so negatives become 100. Float 0x8 stores `atof` as float with no check (`1e999` → +inf); 0x9 turns +inf into 1.0 (logged) and NaN into 0.0 (not logged). [H] (UCRT `atof` overflow result [M]) |
 | Q4 | Second top-level element | (c): the reader shows a **message box** `xml parse error - File <path>: file has multiple root nodes. Aborting!` (title `Expect Strange Bugs...`) and returns failure, so the **whole file** is dropped. What "dropped" costs depends on the loader (table in Q6). No loader ever sees a second root. [H] |
 | Q5 | UTF-16 | **Not decoded.** Any UTF-16 file (LE or BE, with or without BOM) fails the XML-declaration check: message box `... error reading xml header.`, file dropped. List files use the same reader. Also read: the `<?xml ...?>` declaration is **mandatory** for every XML file; bytes before the first `<` (a UTF-8 BOM, or anything else) are skipped. [H] |
-| Q6 | Fatal at load | Missing or unparsable `GameConstants.xml`, `GameObjectFiles.xml`, `TradeRouteFiles.xml`, `CampaignFiles.xml`, `HardPointDataFiles.xml`: init fails and the process **terminates silently** (exit 0, no dialog of its own). The same for a *listed* trade-route, campaign or hardpoint file that opens but does not parse. `FactionFiles.xml` is **not** fatal: its failure is ignored, the game runs with zero (or fewer) factions. Zero factions: start-up survives; starting a galactic campaign with any planet dereferences a null neutral player (crash) [H read, M crash]. Skirmish fallback for an unknown faction: open (Q6.3). |
+| Q6 | Fatal at load | Missing or unparsable `GameConstants.xml`, `GameObjectFiles.xml`, `TradeRouteFiles.xml`, `CampaignFiles.xml`, `HardPointDataFiles.xml`: init fails and the process **terminates silently** (exit 0, no dialog of its own). The same for a *listed* trade-route, campaign or hardpoint file that opens but does not parse. `FactionFiles.xml` is **not** fatal: its failure is ignored, the game runs with zero (or fewer) factions. Zero factions: start-up survives; starting a galactic campaign with any planet dereferences a null neutral player (crash) [H read, M crash]. Skirmish (Q6.3): a saved faction index past the end of the playable list is **not repaired** (box left blank, slot keeps the index; Start is refused on a non-team map, can crash on a team map [M]); a saved map missing from the list **falls back to the first listed map** and overwrites the saved name; an unknown map planet becomes `ALDERAAN` [H]. |
 | Q7 | Element tags and galactic roles | The element-tag CRC (type +0x118) has **no reader other than** the `MultiplayerStructureMarker` test 0x295cf0 (tactical map load), found by scanning every instruction of the exe [H]. Galactic role comes only from the **generic `Behavior` list** DUMMY_* ids, tested in the fixed order 0x5B, 0x5C, 0x5F, 0x60, 0x5D, 0x5E, 0x61 by the create-at-planet routine 0x400b40; a type with none of them is not created ("Unknown type") [H]. A planet is any object that has the PLANET behaviour (id 3) attached, whatever its element [H]. |
 
 ---
@@ -219,13 +219,84 @@ Inferred:
   and crashes (access violation) [M: the read is certain, nothing earlier was seen to block the start].
 - Skirmish start with zero factions: not traced [L].
 
-### Q6.3 Unknown skirmish faction or planet — open
-- Read [H] (`SKIRMISH_SETUP.md` §2.8): the profile keeps the local skirmish faction as an **index** into the playable-faction
-  list, not a name, so "a faction name that does not exist" cannot arise from the profile; the AI slot falls back to index
-  0 when its index has no faction.
-- Not traced: what the local slot does when the saved index is past the end of a shorter mod list, and what the map list
-  does with a saved or multiplayer map name that does not exist. [L] Needs a further read of the staging setup 0xf1230 /
-  0xfe7c0 and the map list, or the `modc_t09` probe kit.
+### Q6.3 Unknown skirmish faction or planet
+
+Read from the decompiled export (`re_reference/ghidra`, 2026-11-17, no Ghidra session); builds on `SKIRMISH_SETUP.md` §2.8.
+
+**Local faction index past the end of the list.** Read [H] (options load 0x2029d0, staging setup 0xf1230, faction combo
+fill 0xfa1c0, slot refresh 0xfe7c0, dialog handler 0xf2690):
+- The index is the registry value `Faction` (options record +0x6c, global 0x140a7c29c), read with `RegQueryValueExA`
+  (0x21f840) and **no range check**. 0xf1230 copies it unchanged into the local slot (+0x94).
+- 0xfa1c0 gives each `IDC_PLAYER_FACTION_n` combo one row per playable faction (faction list 0x140a172e0, count
+  0x140a172e8, list order, non-playable +0x20a8 skipped), keyed 0, 1, 2… (rank among the playable factions). The fill
+  selects no row.
+- 0xfe7c0 selects the row whose key equals the slot's +0x94 (0x1c1250 → 0x1e96e0). No row has that key: the combo is
+  **left unselected** and the slot keeps the out-of-range index. The slot colour is clamped there (0..9); the faction is
+  not.
+- So the local slot gets **neither index 0 nor an empty slot**: it keeps the bad index and its faction box shows no
+  faction [M: "blank" assumes the combo's initial text in the dialog file is empty]. Only picking a row (0xf2690, 0x1c1020)
+  writes a valid key to the slot and to the registry.
+- AI slot: local index XOR 1, tested as `faction_list[i]` null or not playable → 0, with **no bound check against the
+  count**, so for a bad local index it reads past the list's last entry.
+- The combo key is the playable rank, but this AI test and the Start test below index the **whole** faction list. They
+  agree only while the playable factions are the first entries of the faction list (true for FoC).
+
+**What Start then does** (`IDC_SKIRMISH_START_GAME_BUTTON` in 0xf2690), in order [H]:
+1. the map list must have rows (0x1c4270), else nothing happens;
+2. at least 2 slots, else message `TEXT_LAN_HOST_MIN_PLAYERS`;
+3. slot check 0xfddf0. On a map without the team flag (map record +0xb5) it passes only when some slot has index 0 and
+   some slot has index 1, else `TEXT_LAN_HOST_MISMATCHED_TEAMS`. On a team map it needs two or more teams and one faction
+   index per team (0x102320; `..._NOT_ENOUGH_TEAMS`, `..._MISMATCHED_FACTIONS`) and does not check the index range;
+4. the saved map name is non-empty and `faction_list[local index]` is non-null (again no bound check), else nothing
+   happens, with no message;
+5. 0xef700 → player creation 0x2926c0 looks each slot's faction up by **playable rank** (0x331d10, null when the rank is not
+   below the playable count) and reads that faction's name **without a null check**.
+
+Inferred [M]: on a non-team map a bad local index is refused at step 3 with the message box. On a team map, when the index
+names an existing non-playable faction (Neutral, say) or past-the-end memory that is not zero, it passes step 4 and
+**crashes** (access violation) at step 5. Past-the-end memory that is zero gives a silent no-start. The original never
+repairs the index; the player has to pick a faction.
+
+**Saved map that no longer exists.** Read [H] (map list fill 0xfb950, list handler in 0xf2690, preview 0xfacb0):
+- Registry keys: `LastInternetMapLand` / `LastInternetMapSpace` (options +0x98 / +0xb8); the single-player staging uses
+  them too (space for game type 3, land otherwise). `LastScenarioMap` / `LastInternetMapCampaign` are for the campaign
+  game type 1 (LAN / internet staging only). None is checked on load.
+- 0xfb950, land / space: the saved name is looked up case-insensitively over all map records (0x47be50); if not found the
+  name becomes empty. The list is then filled with the maps of that mode that have at least 2 player slots and match the
+  custom-maps toggle (0x47bf40), keyed 0, 1, … in map-manager order. The selected row is the first one whose name matches
+  the saved name, or row 0 when the name is empty; **when nothing matches, key 0 is selected anyway**.
+- 0xf1230 then reads the selected key and sends the list's selection message: 0xf2690 stores that map's name in the
+  registry key, saves the options, sets the preview, team flag and slot cap (0xfacb0) and refreshes the slots.
+- So a missing saved map (or one not in the current list) **falls back to the first listed map** and is overwritten in
+  the registry; no message, no refusal, no crash. The list is then sorted for display (0x104510: row data, then name); the
+  selection follows the key, so the selected map need not be the top row [M].
+- Empty list (no map of that mode): no row, no selection message; Start does nothing (step 1).
+- Campaign game type (same function, other branch): the saved campaign is looked up by name CRC (0x479210); not found →
+  the campaign manager's first entry (0x479750) and the saved name is cleared. That entry is selected only if the shown
+  list contains it (entries without flag +0x260); otherwise no row is selected [M on the flag].
+- Planet: 0xef700 takes the map record's planet name (+0x60; empty when the map record is not found) and looks the object
+  type up (0x407c00); when that fails it uses the type `ALDERAAN` (0x407e00). The multiplayer start 0xc7ca0 does the same.
+  [H]
+- Multiplayer [M]: a host map name missing from the client's map list makes the lobby start 0xc9e10 parse the map file of
+  that name directly (0x47b030, temporary record) and use it if found, else start it as a non-team map (owner remap
+  0x294fa0). Out of scope for the port.
+
+Open:
+- The faction combo's initial text (blank assumed).
+- 0xfddf0's non-team rule (indices 0 and 1 required) would also refuse, for example, Underworld (2) against Empire (0);
+  not checked against FoC.
+- What the past-the-end reads of the faction list return (crash or silent no-start). Retail check: registry `Faction` = 7
+  in FoC, open the skirmish staging, start on a team map (`modc_t09` kit).
+- A mod without an `ALDERAAN` type and a map whose planet is unknown (null planet into the map start 0x8d930): not traced.
+- How a client's lobby shows a missing host map (0xb6410, 0xcb330): not traced.
+
+Port: `FrontEnd::fill_skirmish` (modc t47) keeps the faction by name and opens a mod's list on row 0; that differs from
+retail (blank box, start refused or crash) and stays a [port] choice. The map fallback already matches: `FrontEnd`'s
+staging map list (`engine/ui/src/gui_menus.cpp`, UI.md 9.7) selects row 0 when the remembered map is not listed and
+remembers that map, with no message (mcx1 t08). Whether retail's key 0 is the first row shown or the map manager's first
+entry was not settled; the two differ only when the shown list is sorted differently from the manager.
+Game start (`alamo_game --skirmish-map` naming a map the data lacks) is not this path: the port refuses with a message
+there, as a command-line error.
 
 ## Q7. Element tags and galactic roles
 
@@ -328,5 +399,8 @@ Inferred [M]: the order inside one player's object list was not read (the port t
 | 0x292050, 0x2a9ff0 | galaxy creation, object query by behaviour |
 | 0x400b40, 0x370320 | create type at planet (DUMMY_* dispatch), behaviour-bit test |
 | 0x3712e0, 0x295cf0 | element-tag getter, its only caller |
+| 0xf1230, 0xfa1c0, 0xfe7c0, 0xf2690, 0xfddf0 | skirmish staging: open, faction combos, slot refresh, handler (Start), slot check |
+| 0xfb950, 0x47be50, 0x47bf40, 0xef700 | staging map list fill, map name lookup, map list filter, single-player map start (`ALDERAAN` fallback) |
+| 0x2029d0, 0x203330, 0x331d10 | options load / save (registry), faction by playable rank |
 
 ReVa plate comments were set on 0x2397d0, 0x5180d0, 0x48d340 and 0x5659c0.
