@@ -14,7 +14,7 @@ the live GC field, and only MaxStructureSlots fails on 0. Still open: Q1.2, Q1.5
 
 GC field offsets (AI_GALACTIC_TOKENS.md, field_schema_table): +0xF0 `MaximumPoliticalControl`, +0xF4
 `MaximumStarbaseLevel`, +0xF8 `MaximumGroundbaseLevel`, +0xFC `MaximumSpecialStructures`, +0x108
-`MaximumFleetMovementDistance` (all 5 / 5 / 5 / 5 / 100.0 in stock FoC).
+`MaximumFleetMovementDistance` (5 / 5 / 5 / 5 / 150.0 in stock FoC and EaW XML).
 
 1. Token normalizers. For each of these galactic AI tokens, which GC field (offset) is the divisor, and is it read from
    the live GameConstants object at evaluation time (so a mod's value applies), or is it a literal in the code?

@@ -319,6 +319,34 @@ void test_production_disabled_and_delivery() {
 // ground base) + queued < the planet type's Special_Structures_Land (0x372740, D+0x230), not the map's legacy
 // <Max_Ground_Base>; plus the per-planet cap Build_Max_Instances_Per_Planet (0x3f94f0). The same slot max feeds the
 // MaxStructureSlots / OpenStructureSlots tokens. P0 (the Empire's) holds SB1 + one Barracks.
+// mcx5 t02 (AI_GALACTIC_TOKENS §2 neighbour lists [H]): the token neighbour radius is GC+0x108
+// MaximumFleetMovementDistance (FoC and EaW XML 150.0), not a port 100. No trade routes; P0 (0,0), P1 (60,40) at 72.1,
+// P2 (120,0) at 120: IsConnectedTo{type} on P0 matches P1 only once the radius reaches 72.1, P2 only with no P1.
+void test_fleet_distance_tokens() {
+    auto value = [](float radius, bool drop_p1) {
+        ParityWorld pw(false, {"BuildBarracks"}, [radius, drop_p1](gal::GalacticSetup& s) {
+            s.map.routes = decltype(s.map.routes){};
+            s.map.max_fleet_move_distance = radius;
+            if (drop_p1) s.map.planets.position[1] = {0.0f, 140.0f, 0.0f};  // P1 at 140
+        });
+        pw.run(2);
+        EquationSet e;
+        e.add("T", "Variable_Target.IsConnectedTo {Parameter_Type = \"" + pw.rules.types[tPlanet].name + "\"}");
+        e.link();
+        EvalContext c;
+        c.self = 0;
+        c.target = 0;
+        const EvalResult r = evaluate(e, e.find("T"), c, pw.world->resolver());
+        CHECK(r.ok);
+        return r.value;
+    };
+    CHECK(value(60.0f, false) == 0.0 && value(72.0f, false) == 0.0 && value(73.0f, false) == 1.0);
+    const double v119 = value(119.0f, true), v150 = value(150.0f, true);
+    std::printf("fleet distance tokens: P1 moved away: R 119 %.3f, R 150 %.3f\n", v119, v150);
+    CHECK(v119 == 0.0 && v150 == 1.0);  // P2 at 120: inside FoC's 150, outside 100
+    std::printf("fleet distance tokens: IsConnectedTo follows MaximumFleetMovementDistance (P1 72.1, P2 120)\n");
+}
+
 void test_ground_structure_slots() {
     const std::vector<std::string> only = {"BuildBarracks"};
     const auto map_ground = [](int32_t v) {

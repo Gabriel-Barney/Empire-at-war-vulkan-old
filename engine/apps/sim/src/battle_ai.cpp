@@ -985,7 +985,7 @@ void BattleAi::capture_lane_abilities() {
 void BattleAi::queue_lane_write(const lua::LaneWrite& w) {
     cmd::Command c;
     // the batch's player (drain order; a decodable slot): the write's owner, else 0
-    c.header.player = static_cast<uint16_t>(w.owner >= 0 && w.owner < static_cast<int32_t>(cmd::kMaxPlayerSlots) ? w.owner : 0);
+    c.header.player = static_cast<uint16_t>(w.owner >= 0 && w.owner < static_cast<int32_t>(kMaxPlayers) ? w.owner : 0);  // uint8_t sim ids
     c.header.source = cmd::CommandSource::AI;
     c.header.sequence = lane_seq_++;
     c.header.issue_tick = host_->frame();

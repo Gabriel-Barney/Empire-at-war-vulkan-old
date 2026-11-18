@@ -959,7 +959,7 @@ void StorySession::invade_planet_reward(int32_t plot_player, PlanetIndex planet,
                 continue;
             }
             const int32_t issuer = sim_->local_player();
-            if (issuer < 0 || issuer >= commands::kMaxPlayerSlots) return;
+            if (issuer < 0 || issuer > 0xFF) return;  // mcx5: the galactic sim's player ids are uint8_t (refuse, never truncate)
             commands::EventData ev(commands::EventType::Invade);
             ev.set("planet", static_cast<uint32_t>(store.id(ps.object)));
             ev.set_ids("units", {static_cast<uint32_t>(store.id(u))});

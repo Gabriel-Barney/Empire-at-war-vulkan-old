@@ -1318,6 +1318,20 @@ void test_company_member_views() {
             std::printf("  member views: unexpected %s\n", m.c_str());
             ++g_fail;
         }
+    // mcx5 t04: member views past entry 255 (no 256 cap any more). The cache key keeps the old formula below 256 and
+    // uses a disjoint range from 256 on, so no two (company, entry) pairs share a key.
+    {
+        auto key = [](int32_t id, uint32_t index) {
+            detail::Ud u;
+            u.id = id;
+            u.reserved = detail::kMemberViewFlag | static_cast<int32_t>(index << 16);
+            return detail::object_cache_key(u);
+        };
+        CHECK(key(7, 3) == -(7.0 * 256.0 + 3.0 + 1.0) && detail::member_index(detail::Ud{0, 0, 0, 0, static_cast<int32_t>(300u << 16)}) == 300u);
+        CHECK(key(1, 256) != key(2, 0) && key(0, 256) < key(1000000, 255) && key(1, 300) != key(1, 301));
+        CHECK(key(5, 65535) != key(6, 256) && key(5, 65535) == -(1099511627776.0 + 5.0 * 65536.0 + 65535.0));
+        CHECK(detail::kMaxMemberViews == 65536u);
+    }
 }
 
 // a1g t06: Spawn_Unit at a galactic planet goes through GalacticSim::spawn_unit, so the units live in the sim like

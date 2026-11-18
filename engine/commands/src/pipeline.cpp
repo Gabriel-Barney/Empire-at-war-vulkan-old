@@ -72,6 +72,7 @@ SubmitResult CommandPipeline::submit(uint16_t player, CommandSource source, Comm
 }
 
 RejectReason CommandPipeline::execute_direct(uint64_t tick, uint16_t player, CommandSource source, const EventData& event) {
+    if (player >= kMaxPlayerSlots) return RejectReason::InvalidPlayer;  // mcx5: not encodable (13-bit ids); nothing posted
     Command c;
     c.header.player = player;
     c.header.source = source;
