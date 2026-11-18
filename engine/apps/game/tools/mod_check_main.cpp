@@ -13,6 +13,9 @@
 //   --no-fx-prebuild skips that (the audit then sees only what an earlier prebuild left in the cache).
 //   mcx2 t01: every asset the mod layers serve is decoded (the report's `assets`); --no-assets skips it, --strict counts
 //   salvaged assets as rejected, --corpus-cache DIR keeps a content-hash cache so a recheck decodes nothing new.
+//   mcx3 t02: --resolve treats the mod arguments as the picked mods and checks the stack resolve_mod_stack builds from
+//   them (declared modinfo dependencies, the submod hint's likely parent, cycle / base-EaW errors, conflict warnings);
+//   --resolve-only prints the stack and stops (exit 1 on a stack error).
 //   Exit 0: no errors (warnings allowed), 1: errors, 2: usage.
 //   Example (a Steam workshop mod):
 //     alamo_mod_check --game "...\corruption" STEAMMOD=1125571106 --json report.json
@@ -31,7 +34,7 @@ int usage() {
                  "usage: alamo_mod_check [--game DIR] [MODPATH=..] [STEAMMOD=..] [FALLBACKPATH=..] [--out FILE] [--json FILE|-]\n"
                  "                       [--verbose] [--no-campaigns] [--no-lua] [--no-lua-run] [--no-files] [--no-xml-tags]\n"
                  "                       [--no-submod] [--no-shaders] [--no-dxc] [--no-fx-prebuild] [--no-assets] [--strict]\n"
-                 "                       [--corpus-cache DIR]\n");
+                 "                       [--corpus-cache DIR] [--resolve | --resolve-only]\n");
     return 2;
 }
 
@@ -52,7 +55,7 @@ int main(int argc, char** argv) {
     alamo::vfs::install_steam_workshop_lookup();  // modc t10: STEAMMOD= from the Steam library folders
     std::string game, out, json;
     std::vector<std::string> args;
-    bool verbose = false;
+    bool verbose = false, resolve = false, resolve_only = false;
     alamo::game::ModCheckOptions opt;
     for (int i = 1; i < argc; ++i) {
         const std::string a = argv[i];
@@ -60,6 +63,8 @@ int main(int argc, char** argv) {
         else if (a == "--out" && i + 1 < argc) out = argv[++i];
         else if (a == "--json" && i + 1 < argc) json = argv[++i];
         else if (a == "--verbose") verbose = true;
+        else if (a == "--resolve") resolve = true;
+        else if (a == "--resolve-only") resolve = resolve_only = true;
         else if (a == "--no-campaigns") opt.campaigns = false;
         else if (a == "--no-lua") opt.lua = false;
         else if (a == "--no-lua-run") opt.lua_run = false;
@@ -78,9 +83,35 @@ int main(int argc, char** argv) {
     if (game.empty())
         if (const char* env = std::getenv("ALAMO_FOC_DATA")) game = env;
     if (game.empty()) return usage();
-    if (opt.submod) opt.workshop_libraries = alamo::vfs::find_steam_libraries(game, alamo::vfs::default_steam_roots());
+    if (opt.submod || resolve) opt.workshop_libraries = alamo::vfs::find_steam_libraries(game, alamo::vfs::default_steam_roots());
 
-    const alamo::game::ModCheckReport report = alamo::game::check_mod_data(game, args, opt);
+    alamo::vfs::ResolvedStack stack;
+    if (resolve) {
+        stack = alamo::game::resolve_mod_stack(game, args, opt);
+        if (resolve_only || !stack.errors.empty()) {
+            alamo::game::ModCheckReport r;
+            r.game = game;
+            r.args = stack.args;
+            r.loaded = true;
+            r.resolved = true;
+            r.stack = stack;
+            const std::string s = alamo::game::format_mod_report(r, verbose);
+            if (json != "-") std::fputs(s.substr(0, s.find("== files")).c_str(), stdout);
+            if (!json.empty()) {
+                const std::string js = alamo::game::format_mod_report_json(r);
+                if (json == "-") std::fputs(js.c_str(), stdout);
+                else if (!write_file(json, js)) return 1;
+            }
+            return stack.errors.empty() ? 0 : 1;
+        }
+        args = stack.args;
+    }
+
+    alamo::game::ModCheckReport report = alamo::game::check_mod_data(game, args, opt);
+    if (resolve) {
+        report.resolved = true;
+        report.stack = std::move(stack);
+    }
     const std::string text = alamo::game::format_mod_report(report, verbose);
     if (json != "-") std::fputs(text.c_str(), stdout);
     if (!out.empty() && !write_file(out, text)) return 1;

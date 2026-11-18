@@ -86,6 +86,11 @@ uint64_t mod_content_hash(const std::string& root);
 // order. Always at least one unless the folder has variant files only. `hash`: compute content_hash.
 std::vector<ModDescriptor> describe_mod_folder(const std::string& root, ModKind kind, const std::string& id, bool hash = true);
 
+// The descriptor of a mounted mod folder (Vfs::mod_dirs() entry): its main mod, else its first variant. The kind is
+// read from where the folder is: a digit-named folder under a workshop content\32470 folder is Workshop, a folder of
+// <game>\Mods is LocalMods, anything else Path.
+ModDescriptor describe_mounted_mod(const std::string& dir, const std::string& game, bool hash = true);
+
 struct ModRegistry {
     std::string game;                  // the FoC folder (Mods\ lives under it)
     std::vector<ModDescriptor> mods;   // workshop items by id (first library wins), then <game>\Mods folders by name

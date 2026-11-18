@@ -91,6 +91,12 @@ bool load_game_data(const std::string& root, const std::vector<std::string>& arg
     out.args = args;
     out.vfs = v.get();
     out.files = std::move(v);
+    for (const std::string& dir : out.vfs->mod_dirs()) out.mods.push_back(vfs::describe_mounted_mod(dir, root));
+    for (const vfs::ModDescriptor& m : out.mods)
+        if (m.game_tag == vfs::GameTag::Eaw) {  // D1: FoC mods only
+            if (err) *err = m.name + " (" + m.key() + "): " + vfs::kBaseEawRefusal;
+            return false;
+        }
     if (!load_common(out, err)) return false;
 #ifdef ALAMO_GAME_HAVE_GALACTIC_AI
     stage(out, "AI data", [&](std::vector<std::string>&) {  // as alamo_headless --galactic-ai: definitions, equations,

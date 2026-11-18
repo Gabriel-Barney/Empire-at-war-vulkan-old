@@ -586,6 +586,57 @@ void check_submod(const ModCheckReport& base, const ModCheckOptions& o, SubmodHi
     }
 }
 
+// ---- mcx3 t03: base-EaW heuristic (design 5.4) ----
+
+// The entries of `list`'s copies in the base layers: FoC's (FoC loose or a FoC MEG) and EaW's (an EaW MEG or the EaW
+// GameData fallback). A copy counts once per side, the highest one; false when either side has none.
+bool base_list_entries(const vfs::Vfs& v, std::string_view list, std::set<std::string>& foc, std::set<std::string>& eaw) {
+    bool have_foc = false, have_eaw = false;
+    std::vector<uint8_t> bytes;
+    vfs::Vfs::Resolution where{};
+    for (size_t n = 0; v.read_nth(list, n, bytes, &where); ++n) {
+        bool is_foc = where.layer == vfs::Vfs::Resolution::Base;
+        bool is_eaw = where.layer == vfs::Vfs::Resolution::Fallback;
+        if (where.layer == vfs::Vfs::Resolution::Meg && where.layer_index >= 0 &&
+            static_cast<size_t>(where.layer_index) < v.mounts().size()) {
+            const std::string& reason = v.mounts()[static_cast<size_t>(where.layer_index)].reason;
+            is_foc = reason.rfind("FoC", 0) == 0;
+            is_eaw = reason.rfind("EaW", 0) == 0;
+        }
+        if ((is_foc && have_foc) || (is_eaw && have_eaw) || (!is_foc && !is_eaw)) continue;
+        std::set<std::string>& out = is_foc ? foc : eaw;
+        const data::XmlDocument doc = data::XmlDocument::parse(bytes, std::string(list));
+        for (const data::ListedXmlEntry& en : data::listed_xml_entries(doc)) out.insert(normalize_name(en.path));
+        (is_foc ? have_foc : have_eaw) = true;
+    }
+    return have_foc && have_eaw;
+}
+
+void check_base_eaw_suspect(const GameData& d, ModCheckReport& r) {
+    static constexpr std::string_view kList = "Data\\XML\\GameObjectFiles.xml";
+    if (!d.vfs || d.mods.empty()) return;
+    const std::optional<vfs::Vfs::Resolution> top = d.vfs->resolve(kList);
+    if (!top || top->layer != vfs::Vfs::Resolution::Mod || top->layer_index < 0 ||
+        static_cast<size_t>(top->layer_index) >= d.mods.size())
+        return;  // the list is the base game's: nothing to judge
+    std::set<std::string> foc, eaw;
+    if (!base_list_entries(*d.vfs, kList, foc, eaw)) return;
+    std::vector<std::string> foc_only;
+    for (const std::string& e : foc)
+        if (!eaw.count(e)) foc_only.push_back(e);
+    if (foc_only.empty()) return;
+    std::vector<uint8_t> bytes;
+    if (!d.vfs->read(kList, bytes)) return;
+    const data::XmlDocument doc = data::XmlDocument::parse(bytes, std::string(kList));
+    if (!doc.ok()) return;
+    for (const data::ListedXmlEntry& en : data::listed_xml_entries(doc))
+        if (std::binary_search(foc_only.begin(), foc_only.end(), normalize_name(en.path))) return;
+    r.base_eaw_suspect = d.mods[static_cast<size_t>(top->layer_index)].key() +
+                         ": its GameObjectFiles.xml names none of the " + std::to_string(foc_only.size()) +
+                         " object files FoC adds to EaW's list (first: " + foc_only.front() +
+                         "); probably a base-EaW mod, which retail runs with sweaw.exe (a guess: not refused)";
+}
+
 #ifdef ALAMO_GAME_HAVE_LUA_VM
 // Engine bindings the port registers as "unbound" stubs, by name (globals and methods separately; a method name counts
 // as unbound only when no class implements it, as lua::scan_report does).
@@ -1380,13 +1431,15 @@ void append_list(std::string& s, const std::vector<std::string>& items, size_t f
 size_t ModCheckReport::error_count() const {
     size_t n = loaded ? 0 : 1;
     for (const auto& s : stages) n += s.ok ? 0 : 1;
+    if (resolved) n += stack.errors.size();
     return n + (no_startable_campaign() ? 1u : 0u) + check_errors.size();
 }
 
 size_t ModCheckReport::warning_count() const {
     const size_t menu_only = no_startable_campaign() ? 0 : campaigns_without_planets.size();
     return vfs_warnings.size() + diagnostics.size() + menu_only + campaign_warning_count + missing_files.size() +
-           unknown_xml_tags.size() + lua_errors.size() + lua_run_errors.size() + unbound_lua_calls.size() + shaders.issues.size();
+           unknown_xml_tags.size() + lua_errors.size() + lua_run_errors.size() + unbound_lua_calls.size() + shaders.issues.size() +
+           (resolved ? stack.warnings.size() : 0u) + (base_eaw_suspect.empty() ? 0u : 1u);
 }
 
 FxPrebuild prebuild_mod_effects(const GameData& d, const std::string& fx_cache_dir) {
@@ -1437,8 +1490,14 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
         r.mod_dirs = d.vfs->mod_dirs();
         list_mod_files(*d.vfs, r);
     }
+    r.mods = d.mods;
     if (!r.loaded) {
         r.grade.grade = "G0";  // version 4: the data does not load
+        for (const vfs::ModDescriptor& m : r.mods)
+            if (m.game_tag == vfs::GameTag::Eaw) {  // D1: refused before loading (load_game_data)
+                r.base_eaw = true;
+                r.grade.blocking.push_back(m.key() + ": " + vfs::kBaseEawRefusal);
+            }
         return r;
     }
     // The checks below read what loaded; a throw in one is reported as that check's error, the others still run.
@@ -1458,6 +1517,7 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
         guarded("fx prebuild", [&] { r.shaders.fx_prebuild = prebuild_mod_effects(d, options.fx_cache_dir); });
     if (options.shaders) guarded("shaders", [&] { check_shaders(d, r, options.shader_compile, options.fx_cache_dir); });
     if (options.files && options.submod) guarded("submod", [&] { check_submod(r, options, r.submod); });
+    if (options.files) guarded("base-EaW heuristic", [&] { check_base_eaw_suspect(d, r); });
     if (options.compat) {  // mcx0 t06: report version 4 (after the checks it reads)
         // A throw here is not a load error (version 4 never changes errors / warnings): grade.check_errors, G3 stays open.
         const auto compat_guarded = [&](const char* what, auto&& fn) {
@@ -1487,8 +1547,33 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
     return r;
 }
 
+vfs::ResolvedStack resolve_mod_stack(const std::string& root, const std::vector<std::string>& picked, const ModCheckOptions& options) {
+    const vfs::ModRegistry registry = vfs::scan_installed_mods(root, options.workshop_libraries);
+    ModCheckOptions light;
+    light.campaigns = light.lua = light.lua_run = light.xml_tags = light.shaders = light.compat = light.assets = false;
+    light.fx_prebuild = light.shader_compile = false;
+    light.files = light.submod = true;
+    light.workshop_libraries = options.workshop_libraries;
+    const vfs::ParentHint hint = [&](const std::vector<std::string>& stack_args) -> std::optional<std::string> {
+        const ModCheckReport r = check_mod_data(root, stack_args, light);
+        if (!r.submod.likely || r.submod.parents.empty()) return std::nullopt;
+        return r.submod.parents.front().arg;
+    };
+    return vfs::resolve_stack(registry, picked, hint);
+}
+
 std::string format_mod_report(const ModCheckReport& r, bool verbose) {
     std::string s;
+    if (r.resolved) {  // mcx3 t02
+        append(s, "== stack (resolved, launch order; fingerprint %016llx)\n", static_cast<unsigned long long>(r.stack.fingerprint));
+        for (const vfs::StackMod& m : r.stack.mods)
+            append(s, "    %-24s %-40s %s%s%s\n", m.mod.arg().c_str(), m.mod.name.c_str(), m.reason.c_str(),
+                   m.mod.version.empty() ? "" : ", version ", m.mod.version.c_str());
+        for (const std::string& e : r.stack.errors) append(s, "    error: %s\n", e.c_str());
+        for (const std::string& w : r.stack.warnings) append(s, "    warning: %s\n", w.c_str());
+    }
+    if (r.base_eaw) s += "== refused (D1): a base-EaW mod; retail FoC does not run it, the port supports FoC mods only\n";
+    if (!r.base_eaw_suspect.empty()) append(s, "== base-EaW heuristic (warning): %s\n", r.base_eaw_suspect.c_str());
     s += "== files\n";
     s += r.vfs_layers;
     if (!r.vfs_layers.empty() && r.vfs_layers.back() != '\n') s += '\n';
@@ -1810,6 +1895,59 @@ std::string format_mod_report_json(const ModCheckReport& r) {
     j.boolean(r.loaded);
     j.key("load_error");
     j.str(r.error);
+    // mcx3: the mounted mods' descriptors and, with --resolve, the stack resolution.
+    j.key("mods");
+    j.open('[');
+    for (const vfs::ModDescriptor& m : r.mods) {
+        j.open('{');
+        j.key("key");
+        j.str(m.key());
+        j.key("name");
+        j.str(m.name);
+        j.key("version");
+        j.str(m.version);
+        j.key("root");
+        j.str(m.root);
+        j.key("game_tag");
+        j.str(m.game_tag == vfs::GameTag::Eaw ? "EAW" : m.game_tag == vfs::GameTag::Foc ? "FOC" : "");
+        char hash[24];
+        std::snprintf(hash, sizeof hash, "%016llx", static_cast<unsigned long long>(m.content_hash));
+        j.key("content_hash");
+        j.str(hash);
+        j.close('}');
+    }
+    j.close(']');
+    j.key("base_eaw");
+    j.boolean(r.base_eaw);
+    j.key("base_eaw_suspect");
+    j.str(r.base_eaw_suspect);
+    j.key("stack");
+    j.open('{');
+    j.key("resolved");
+    j.boolean(r.resolved);
+    j.strings("args", r.resolved ? r.stack.args : std::vector<std::string>{});
+    j.key("mods");
+    j.open('[');
+    for (const vfs::StackMod& m : r.stack.mods) {
+        j.open('{');
+        j.key("key");
+        j.str(m.mod.key());
+        j.key("arg");
+        j.str(m.mod.arg());
+        j.key("name");
+        j.str(m.mod.name);
+        j.key("reason");
+        j.str(m.reason);
+        j.close('}');
+    }
+    j.close(']');
+    j.strings("errors", r.stack.errors);
+    j.strings("warnings", r.stack.warnings);
+    char fp[24];
+    std::snprintf(fp, sizeof fp, "%016llx", static_cast<unsigned long long>(r.stack.fingerprint));
+    j.key("fingerprint");
+    j.str(r.resolved ? fp : "");
+    j.close('}');
 
     j.key("files");
     j.open('{');

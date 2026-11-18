@@ -422,6 +422,26 @@ std::vector<ModDescriptor> describe_mod_folder(const std::string& root, ModKind 
     return out;
 }
 
+ModDescriptor describe_mounted_mod(const std::string& dir, const std::string& game, bool hash) {
+    const fs::path p = path_from_utf8(dir).lexically_normal();
+    fs::path leaf = p;
+    if (!leaf.has_filename()) leaf = leaf.parent_path();
+    const std::string id = path_to_utf8(leaf.filename());
+    const std::string parent = norm_path(path_to_utf8(leaf.parent_path()));
+    ModKind kind = ModKind::Path;
+    if (is_digits(id) && lower(path_to_utf8(leaf.parent_path().filename())) == "32470") kind = ModKind::Workshop;
+    else if (parent == norm_path(path_to_utf8((path_from_utf8(game) / "Mods").lexically_normal()))) kind = ModKind::LocalMods;
+    std::vector<ModDescriptor> ds = describe_mod_folder(path_to_utf8(leaf), kind, id, hash);
+    if (ds.empty()) {
+        ModDescriptor d;
+        d.kind = kind;
+        d.id = d.name = id;
+        d.root = path_to_utf8(leaf);
+        return d;
+    }
+    return std::move(ds.front());
+}
+
 const ModDescriptor* ModRegistry::find_key(std::string_view key) const {
     for (const ModDescriptor& m : mods)
         if (lower(m.key()) == lower(std::string(key))) return &m;

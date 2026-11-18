@@ -303,6 +303,16 @@ struct ModCheckReport {
     std::vector<UnboundLuaCall> unbound_lua_calls;  // most call sites first, then by name
     ShaderCheck shaders;                         // effect audit issues (warnings)
     SubmodHint submod;                           // empty unless the mod's own data names missing files
+    // mcx3 (docs/MOD_COMPAT_DESIGN.md 5): the mounted mods (GameData::mods, mod_dirs order) and, when `args` came from
+    // resolve_mod_stack (alamo_mod_check --resolve), that resolution (resolved = true): its errors count as errors, its
+    // warnings as warnings.
+    std::vector<vfs::ModDescriptor> mods;
+    bool resolved = false;
+    vfs::ResolvedStack stack;
+    bool base_eaw = false;         // D1: a mounted mod is tagged EAW and not FOC: refused before loading (error, G0)
+    // 5.4 heuristic [port], a warning only: "<key>: ..." when a mod's own GameObjectFiles.xml names none of the files
+    // FoC's list has and EaW's lacks (both lists read from the install; empty when either is missing).
+    std::string base_eaw_suspect;
     std::vector<std::string> check_errors;       // a check above that threw: "<check>: exception: <what>"
     // mcx0 t06 (version 4). `issues` holds every finding below as core CompatIssue records; the lists are its views for
     // the report. Layer: 0 = any mod folder (the report does not tell stacked mods apart yet: mcx3 provenance),
@@ -330,6 +340,12 @@ struct ModCheckReport {
 };
 
 ModCheckReport check_mod_data(const std::string& root, const std::vector<std::string>& args, const ModCheckOptions& options = {});
+// mcx3 t02: stack resolution with the data hint (design 5.2) for alamo_mod_check --resolve and the launcher. The
+// registry holds the installed mods (options.workshop_libraries, <root>\Mods); declared modinfo dependencies come
+// first, and a mod that declares none gets the likely parent of the submod check (check_mod_data on the stack so far
+// with files and submod only, the other checks off). The game itself never resolves: an explicit command line is
+// mounted as written.
+vfs::ResolvedStack resolve_mod_stack(const std::string& root, const std::vector<std::string>& picked, const ModCheckOptions& options);
 // Human-readable report (sections in the order of the file comment). verbose: every diagnostic, else the first 20 of each
 // step and campaign / Lua list.
 std::string format_mod_report(const ModCheckReport& report, bool verbose = false);
