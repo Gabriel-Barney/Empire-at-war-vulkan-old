@@ -97,8 +97,15 @@ void replay_channel(Animation& a, std::vector<T>& data, std::uint32_t& block, st
         fits = fits && nf > 0 && std::uint64_t(b.*index) + k <= block;
     }
     if (fits) return;
-    std::vector<T> out(static_cast<std::size_t>(nf) * tracks * k);
     const std::uint64_t new_block = std::uint64_t(tracks) * k;
+    // A garbage frame count must not size the replay: past the stored data every frame only repeats the last value, so
+    // more than a few million values means the header is not an animation's (shipped clips stay far below).
+    constexpr std::uint64_t kMaxReplayValues = std::uint64_t(1) << 24;
+    if (nf * new_block > kMaxReplayValues)
+        throw FormatError(std::string(channel) + ": " + std::to_string(nf) + " frames x " + std::to_string(tracks) +
+                              " tracks is too large to replay",
+                          0);
+    std::vector<T> out(static_cast<std::size_t>(nf * new_block));
     std::size_t slot = 0, repeated = 0, dropped = 0;
     for (auto& b : a.bones) {
         if (b.*index == 0xFFFF) continue;

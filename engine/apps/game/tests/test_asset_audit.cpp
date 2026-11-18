@@ -156,15 +156,13 @@ void test_mod_folder() {
     CHECK(find(a.rejected, "BASE_BROKEN") == nullptr);
     CHECK(a.by_family.at("texture").checked == 3 && a.by_family.at("texture").rejected == 1);
     CHECK(a.by_family.at("model").checked == 2);
-    const std::string json = alamo::game::asset_audit_json(a);
-    CHECK(json.find("\"rejected_count\": 5") != std::string::npos);
-    CHECK(json.find("\"retail_equivalent\": true") != std::string::npos);
-    CHECK(json.find("\"by_family\"") != std::string::npos);
 
     // Second run: everything from the cache, same result.
     const auto b = alamo::game::audit_mod_assets(*v, opt);
     CHECK(b.cache_hits == 8 && b.checked == a.checked && b.rejected_count == a.rejected_count);
-    CHECK(alamo::game::asset_audit_json(b) == json);
+    CHECK(b.decoded == a.decoded && b.retail_equivalent == a.retail_equivalent && b.rejected.size() == a.rejected.size());
+    for (size_t i = 0; i < a.rejected.size() && i < b.rejected.size(); ++i)
+        CHECK(a.rejected[i].path == b.rejected[i].path && a.rejected[i].rule == b.rejected[i].rule);
 
     // Through the load report (version 4): the `assets` section, rejections as asset_rejected issues; only the
     // non-retail-equivalent ones block G3.
@@ -178,6 +176,7 @@ void test_mod_folder() {
         CHECK(blocking == 2);  // AA_BAD.DDS and _MP_LAND_AA_BAD.TED
         const std::string js = alamo::game::format_mod_report_json(r);
         CHECK(js.find("\"assets\": {") != std::string::npos && js.find("\"rejected_count\": 5") != std::string::npos);
+        CHECK(js.find("\"retail_equivalent\": true") != std::string::npos && js.find("\"by_family\"") != std::string::npos);
         mo.assets = false;
         CHECK(!alamo::game::check_mod_data(foc.string(), args, mo).assets.ran);
     }

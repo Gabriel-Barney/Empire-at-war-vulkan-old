@@ -17,7 +17,6 @@
 #include "alamo/formats/alo.hpp"
 #include "alamo/formats/common.hpp"
 #include "alamo/vfs/vfs.hpp"
-#include "json_text.hpp"
 
 #if ALAMO_GAME_HAVE_MATERIALS
 #include "alamo/assets/model.hpp"
@@ -298,7 +297,15 @@ void load_cache(const std::string& dir, Cache& c) {
     }
 }
 
-void save_cache(const std::string& dir, const std::vector<std::pair<CacheKey, CacheValue>>& entries) {
+// Writes every entry of `c` (what was loaded plus this run's verdicts, so a cache shared by a corpus keeps every mod's
+// files), sorted by key so the file does not depend on hash-map order.
+void save_cache(const std::string& dir, const Cache& c) {
+    std::vector<std::pair<CacheKey, CacheValue>> entries(c.begin(), c.end());
+    std::sort(entries.begin(), entries.end(), [](const auto& x, const auto& y) {
+        if (x.first.family != y.first.family) return x.first.family < y.first.family;
+        if (x.first.hash != y.first.hash) return x.first.hash < y.first.hash;
+        return x.first.strict < y.first.strict;
+    });
     std::ofstream f(path_from_utf8(cache_file(dir)), std::ios::binary | std::ios::trunc);
     if (!f) return;
     f << kCacheHeader << '\n';
@@ -431,7 +438,6 @@ AssetAudit audit_mod_assets(const vfs::Vfs& v, const AssetAuditOptions& opt) {
 
     Cache cache;
     if (!opt.cache_dir.empty()) load_cache(opt.cache_dir, cache);
-    std::vector<std::pair<CacheKey, CacheValue>> seen;  // written back in path order
 
     std::vector<uint8_t> bytes;
     bool have_ids = false;
@@ -456,7 +462,7 @@ AssetAudit audit_mod_assets(const vfs::Vfs& v, const AssetAuditOptions& opt) {
                     bytes[3] == 0)
                     val.family = "particle";
             }
-            seen.emplace_back(key, val);
+            if (!opt.cache_dir.empty()) cache.insert_or_assign(key, val);
         }
         if (val.state == kRejected && !val.retail_equivalent && val.family == "map") {
             if (!have_ids) {
@@ -485,58 +491,8 @@ AssetAudit audit_mod_assets(const vfs::Vfs& v, const AssetAuditOptions& opt) {
             a.rejected.push_back(AssetEntry{path, val.family, val.rule, val.retail_equivalent});
         }
     }
-    if (!opt.cache_dir.empty()) save_cache(opt.cache_dir, seen);
+    if (!opt.cache_dir.empty()) save_cache(opt.cache_dir, cache);
     return a;
-}
-
-std::string asset_audit_json(const AssetAudit& a, int indent) {
-    using json_text::json_str;
-    const std::string pad(static_cast<size_t>(indent), ' '), pad2 = pad + "  ", pad3 = pad2 + "  ";
-    std::string o = "{\n";
-    o += pad2 + "\"checked\": " + std::to_string(a.checked) + ",\n";
-    o += pad2 + "\"decoded\": " + std::to_string(a.decoded) + ",\n";
-    o += pad2 + "\"salvaged_count\": " + std::to_string(a.salvaged_count) + ",\n";
-    o += pad2 + "\"rejected_count\": " + std::to_string(a.rejected_count) + ",\n";
-    o += pad2 + "\"retail_equivalent\": " + std::to_string(a.retail_equivalent) + ",\n";
-    o += pad2 + "\"salvaged\": [";
-    for (size_t i = 0; i < a.salvaged.size(); ++i) {
-        const auto& e = a.salvaged[i];
-        o += i ? ",\n" : "\n";
-        o += pad3 + "{\"path\": ";
-        json_str(o, e.path);
-        o += ", \"family\": ";
-        json_str(o, e.family);
-        o += ", \"rule\": ";
-        json_str(o, e.rule);
-        o += "}";
-    }
-    o += a.salvaged.empty() ? "],\n" : "\n" + pad2 + "],\n";
-    o += pad2 + "\"rejected\": [";
-    for (size_t i = 0; i < a.rejected.size(); ++i) {
-        const auto& e = a.rejected[i];
-        o += i ? ",\n" : "\n";
-        o += pad3 + "{\"path\": ";
-        json_str(o, e.path);
-        o += ", \"family\": ";
-        json_str(o, e.family);
-        o += ", \"reason\": ";
-        json_str(o, e.rule);
-        o += std::string(", \"retail_equivalent\": ") + (e.retail_equivalent ? "true" : "false") + "}";
-    }
-    o += a.rejected.empty() ? "],\n" : "\n" + pad2 + "],\n";
-    o += pad2 + "\"by_family\": {";
-    bool first = true;
-    for (const auto& [fam, c] : a.by_family) {  // std::map: sorted by name
-        o += first ? "\n" : ",\n";
-        first = false;
-        o += pad3;
-        json_str(o, fam);
-        o += ": {\"checked\": " + std::to_string(c.checked) + ", \"decoded\": " + std::to_string(c.decoded) +
-             ", \"salvaged\": " + std::to_string(c.salvaged) + ", \"rejected\": " + std::to_string(c.rejected) + "}";
-    }
-    o += first ? "}\n" : "\n" + pad2 + "}\n";
-    o += pad + "}";
-    return o;
 }
 
 }  // namespace alamo::game

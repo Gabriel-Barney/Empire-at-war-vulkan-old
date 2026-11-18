@@ -1,4 +1,5 @@
-// Asset audit for the mod load report (mcx2 t01, docs/MOD_COMPAT_DESIGN.md 12.1 `assets`): every art, audio, movie and
+// Asset audit for the mod load report (mcx2 t01, docs/MOD_COMPAT_DESIGN.md 12.1 `assets`; check_mod_data runs it and
+// format_mod_report_json writes the section, docs/MODS.md 5.1): every art, audio, movie and
 // map file a mod layer serves (its loose Data tree, or a MEG mounted from the mod's folder) is decoded headless with the
 // runtime decoders, by family, and sorted into decoded / salvaged (the rule that applied, D5) / rejected (the reason).
 //
@@ -58,8 +59,5 @@ AssetAudit audit_mod_assets(const vfs::Vfs& v, const AssetAuditOptions& opt = {}
 // Decodes one file as `family` (exposed for tests and the corpus runner). state: 0 decoded, 1 salvaged, 2 rejected.
 int audit_asset_bytes(const std::string& family, const std::vector<uint8_t>& bytes, bool strict, std::string* rule,
                       bool* retail_equivalent);
-// The `assets` value of the load report (MODS.md 5.1, version 4): {checked, decoded, salvaged:[{path, family, rule}],
-// rejected:[{path, family, reason, retail_equivalent}], by_family:{...}}.
-std::string asset_audit_json(const AssetAudit& a, int indent = 2);
 
 }  // namespace alamo::game

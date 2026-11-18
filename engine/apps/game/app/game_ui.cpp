@@ -87,7 +87,9 @@ bool GameUi::init(GpuCore& gpu, const GameData& data, ui::MenuProviders provider
     if (!gui_data.script.extend(ui::kPortDialogExtensionsRc, &e)) std::fprintf(stderr, "port dialog controls: %s\n", e.c_str());  // v-sync mode
     std::vector<uint8_t> mtd;
     constexpr const char* kMtd = "Data\\Art\\Textures\\MT_CommandBar.mtd";
-    while (!gui_files.read(kMtd, mtd) || !atlas.parse(mtd, &e)) {
+    while (true) {
+        if (!gui_files.read(kMtd, mtd)) e = "missing or unreadable";
+        else if (atlas.parse(mtd, &e)) break;
         std::string where;
         if (!gui_files.next(kMtd, &where)) {
             if (err) *err = std::string("MT_CommandBar.mtd: ") + e;
@@ -98,12 +100,14 @@ bool GameUi::init(GpuCore& gpu, const GameData& data, ui::MenuProviders provider
     }
     std::shared_ptr<const assets::TextureAsset> atlas_tex = gpu.cache->texture("MT_CommandBar.tga");
     if ((!atlas_tex || atlas_tex->is_fallback) && data.vfs) {
-        // The copy the cache found did not decode: the next copies of each lookup candidate, in lookup order.
+        // The copy the cache found did not decode: every copy of each lookup candidate, in lookup order (the cache stops
+        // at the first candidate that exists, so a later candidate's first copy, e.g. the base game's .dds behind a
+        // mod's broken .tga, was never tried; the copy that failed fails again and is passed over).
         for (const auto& c : assets::texture_lookup("MT_CommandBar.tga")) {
             std::vector<uint8_t> bytes;
             vfs::Vfs::Resolution where{};
             bool done = false;
-            for (size_t n = 1; !done && data.vfs->read_nth(c.path, n, bytes, &where); ++n) {
+            for (size_t n = 0; !done && data.vfs->read_nth(c.path, n, bytes, &where); ++n) {
                 auto t = std::make_shared<assets::TextureAsset>();
                 std::string why;
                 if (assets::decode_texture(std::move(bytes), *t, &why)) {

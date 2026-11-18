@@ -359,6 +359,7 @@ removed or changed in meaning without raising `version`. Paths are game-relative
 | `story` | object | (v4) `files` (Data\XML files with story events), `rewards_used`, `rewards_missing` [{`name`, `uses`, `first_file`, `in_mod`, `note`}] (retail rewards the port lacks), `events_used`, `events_partial` [same shape] (event types the port dispatches with a documented gap) |
 | `ai` | object | (v4) `token_coverage`: {`checked` (AI data loaded), `equations`, `leaves` (distinct token paths), `missing` [{`token` (as written: `Variable_Target.EnemyForce.X`), `equations`, `first_equation`, `first_file`, `in_mod`}]}: paths the resolver of the equation's mode does not evaluate (the galactic resolver's registry, the tactical leaf tables; retail loads one equation set and the caller picks the mode: the template mode for template triggers and budgets, followed through equations that name others; goal proposal functions and equations only Lua plans name count with either resolver), so the equation fails (retail's rule for an unknown leaf, `AI_GALACTIC_TOKENS.md` §9.1) |
 | `limits` | [object] | (v4) `limit`, `value`, `needed`: data that hits a guard or a cited retail limit (filled by `mcx5`; empty until then) |
+| `assets` | object | (v4, mcx2 t01; only with a mod mounted and the data loaded; `--no-assets` leaves it out) every model, particle, animation, texture, map, sound and movie a mod layer serves (loose or in the mod's MEGs; not in `.`-folders), decoded with the runtime decoders: `checked`, `decoded`, `salvaged_count`, `rejected_count`, `retail_equivalent`, `salvaged` [{`path`, `family`, `rule`}], `rejected` [{`path`, `family`, `reason`, `retail_equivalent`}], `by_family` {name: {`checked`, `decoded`, `salvaged`, `rejected`}}. A rejection retail shares (`docs/re/MCX2_T02_ASSET_SALVAGE.md`) never blocks G3; `--strict` counts every salvage as a rejection; `--corpus-cache DIR` caches verdicts by content hash |
 | `grade` | object | (v4) `grade` (`"G0"` errors, `"G1"` loads; G2 and up need runs), `g3_static` (bool: no honour gap, binding gap, missing reward or missing token from the mod's own files; the gaps base FoC content has are the tag ledger's and mcx4's, not the mod's, so they do not count here), `blocking` [`"<issue kind> <subject>"`], `check_errors` [string] (a version 4 check that threw; not counted in `errors`) |
 
 `in_mod` is true when the file the finding comes from resolves to a mod folder. The synthetic mods of
@@ -375,7 +376,7 @@ counted). Readers of version 2 keys need no change. `unknown_xml_tags` also cove
 `"radar map"` (modc t25).
 
 Version 4 (mcx0 t06, 2026-11-17; `docs/MOD_COMPAT_DESIGN.md` §12.1): `honour_gaps`, `retail_equivalent`, `bindings`,
-`story`, `ai`, `limits` and `grade` are new, after `check_errors`. None of their entries counts as an error or warning,
+`story`, `ai`, `limits`, `assets` (mcx2 t01) and `grade` are new, after `check_errors`. None of their entries counts as an error or warning,
 so `result`, `errors` and `warnings` are unchanged for the same data. Readers of version 3 keys need no change. The
 findings are also core `alamo::CompatIssue` records (`ModCheckReport::issues`, `engine/core/include/alamo/core/compat_issue.hpp`).
 

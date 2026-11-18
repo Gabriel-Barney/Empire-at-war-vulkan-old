@@ -167,10 +167,6 @@ add_executable(alamo_game_mod_check_tests tests/test_mod_check.cpp)
 target_link_libraries(alamo_game_mod_check_tests PRIVATE alamo_core alamo_game_core alamo_test_support)
 add_test(NAME alamo_game_mod_check_tests COMMAND alamo_game_mod_check_tests)
 set_tests_properties(alamo_game_mod_check_tests PROPERTIES TIMEOUT 300)
-# mcx2 t01: alamo_asset_audit prints the report's `assets` section for a mounted mod (the seam until the v4 report
-# calls audit_mod_assets itself).
-add_executable(alamo_asset_audit tools/asset_audit_main.cpp)
-target_link_libraries(alamo_asset_audit PRIVATE alamo_core alamo_game_core alamo_vfs)
 # mcx2 t01: the mod asset audit (asset_audit.hpp) on a fake install with a mod folder in its own temp folder; data-free.
 add_executable(alamo_game_asset_audit_tests tests/test_asset_audit.cpp)
 target_link_libraries(alamo_game_asset_audit_tests PRIVATE alamo_core alamo_game_core alamo_vfs alamo_test_support)
