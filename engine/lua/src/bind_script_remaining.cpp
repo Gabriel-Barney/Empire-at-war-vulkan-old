@@ -167,7 +167,11 @@ bool position_arg(Call& c, int i, Vec3& out, ObjectHandle* object = nullptr) {
         out = position_of(*ud);
         return true;
     } else if (ud->cls == cls_target()) {
-        if (AiScriptHost* a = ai(c)) h = a->target_object(ud->id);
+        AiScriptHost* a = ai(c);
+        if (a) h = a->target_object(ud->id);
+        // mcx8 t01 (AI_TACTICAL §3.2): a region target (an AI hint zone) has no game object but a position, its zone
+        // centre; AotCW's BusyTacticalFreeStore passes such a target to Are_On_Opposite_Sides_Of_Shield.
+        if (a && !(h && store(c)->alive(h)) && a->target_position(ud->id, out)) return true;
     } else if (is_task_force_class(ud->cls)) {
         const std::vector<ObjectHandle> units = tf_units(c, ud->id);
         if (!units.empty()) h = units.front();

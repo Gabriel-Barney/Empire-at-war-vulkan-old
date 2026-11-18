@@ -5,6 +5,7 @@ function Base_Definitions()
 end
 
 -- mcx0: a call to a binding with an effect gap (binding ledger "partial": the port guessed part of it); never run.
+-- mcx8 t12: StringCompare matches retail now; EvaluateTypeList is the binding still partial (its tactical leaf, mcx4).
 function Checks_Compare(a, b)
-    return StringCompare(a, b)
+    return EvaluateTypeList(a, b)
 end

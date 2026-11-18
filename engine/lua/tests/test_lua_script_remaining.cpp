@@ -380,6 +380,15 @@ static void test_fields(const Db& db) {
     CHECK(run(lv, "s = Are_On_Opposite_Sides_Of_Shield(Ship, Create_Position(5, 0, 0)); s4 = Are_On_Opposite_Sides_Of_Shield(Ship, Ship, P, true)") ==
           "");
     CHECK(gtrue(lv, "s") && gtrue(lv, "s4"));
+    // mcx8 t01: a region AI target (no game object) gives its position (AotCW's BusyTacticalFreeStore passes one).
+    {
+        FakeAi ai;
+        attach_ai_host(lv, &ai, 1);
+        set_ai_target_global(lv, "Region", 6);
+        CHECK(run(lv, "r = Are_On_Opposite_Sides_Of_Shield(Ship, Region)") == "" && gtrue(lv, "r") &&
+              !last_message_has(lv, "from parameter 2"));
+        attach_ai_host(lv, nullptr, -1);
+    }
     // Weather.
     CHECK(run(vm, "Force_Weather()") == "" && last_message_has(vm, "no weather system"));
     int forced = 0;

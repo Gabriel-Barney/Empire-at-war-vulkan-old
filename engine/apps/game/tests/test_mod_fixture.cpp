@@ -235,7 +235,8 @@ void test_compat_checks(const std::string& foc) {
     CHECK(retail_eq(r, "unread_tag", "factions: Checks_Unread_Faction_Tag") != nullptr);  // retail ignores it too
 
     const auto bg = std::find_if(r.binding_gaps.begin(), r.binding_gaps.end(),
-                                 [](const alamo::game::BindingGapCall& b) { return b.name == "StringCompare"; });
+                                 // mcx8 t12: StringCompare is Full now; EvaluateTypeList is the binding still Partial.
+                                 [](const alamo::game::BindingGapCall& b) { return b.name == "EvaluateTypeList"; });
     CHECK(bg != r.binding_gaps.end());
     if (bg != r.binding_gaps.end()) {
         CHECK(bg->effect == "partial" && bg->call_sites == 1 && bg->in_mod);
