@@ -181,6 +181,16 @@ public:
         Vec3 position{};
     };
     uint32_t spin_away_deaths(std::span<const SpinDeath> deaths, const objects::GameObjectTypes& types);
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "GameObjectType.Selt_Destruct_SFXEvent_Start_Die"): this tick's counting-down units
+    // (`event` = the type's Selt_Destruct_SFXEvent_Start_Die). A unit new to the list starts its event attached to it; a
+    // unit that left the list (cancelled, blown up) has it stopped. battle_tick builds the list from the SELF_DESTRUCT
+    // ability state. Returns the number started.
+    struct SelfDestructCue {
+        uint64_t object = 0;
+        std::string_view event;
+        Vec3 position{};
+    };
+    uint32_t self_destruct_lines(std::span<const SelfDestructCue> counting);
     // aud1 t04 (AUDIO.md §9.5): one shot's fire sound (fire_event(hardpoint_fire, shooter_fire)), 3D at the projectile's
     // spawn position. Returns the instance id (0 = none / refused).
     uint32_t weapon_fired(uint64_t shooter, std::string_view hardpoint_fire, std::string_view shooter_fire, const Vec3& position);

@@ -844,6 +844,59 @@ void test_object_sfx_t05() {
 // backend - t01 planet reveal plays the Audio.xml constant's value, t02 Master_Volume_Restore returns to the profile's
 // master, t03 production begin / cancel / complete (+ Build_Music_Completed), t04 no updates and paused music while the
 // application is inactive, t07 the fleet departure line, t08 the strategic win / lose music.
+// mcx4 t13 batch Q (docs/re/MCX4_T13_RE_ANSWERS.md "GameObjectType.Spin_Away_On_Death_SFXEvent_Start_Die" and
+// "GameObjectType.Selt_Destruct_SFXEvent_Start_Die"): a spin-away corpse plays its type's line once; a self-destruct
+// countdown starts its line once and stops it when the unit leaves the counting list.
+// ledger: verifies GameObjectType.Spin_Away_On_Death_SFXEvent_Start_Die
+// ledger: verifies GameObjectType.Selt_Destruct_SFXEvent_Start_Die
+void test_spin_and_self_destruct() {
+    MemoryProvider files;
+    files.add("Data\\XML\\GameObjectFiles.xml", "<L><File>Q.xml</File></L>");
+    files.add("Data\\XML\\Q.xml", R"(<?xml version="1.0"?>
+<SpaceUnits>
+  <SpaceUnit Name="Spinner"><Spin_Away_On_Death_SFXEvent_Start_Die>Spin_Die</Spin_Away_On_Death_SFXEvent_Start_Die>
+    <Selt_Destruct_SFXEvent_Start_Die>SD_Count</Selt_Destruct_SFXEvent_Start_Die></SpaceUnit>
+  <SpaceUnit Name="Plain"></SpaceUnit>
+</SpaceUnits>
+)");
+    objects::ObjectTypeDatabase raw;
+    CHECK(raw.load(files));
+    objects::GameObjectTypes types;
+    CHECK(types.build(raw));
+    const objects::TypeIndex spinner = types.resolve_name("Spinner"), plain = types.resolve_name("Plain");
+    CHECK(spinner != objects::kNone && plain != objects::kNone);
+    CHECK(types.get_string(spinner, "Spin_Away_On_Death_SFXEvent_Start_Die") == "Spin_Die");
+    CHECK(types.get_string(spinner, "Selt_Destruct_SFXEvent_Start_Die") == "SD_Count");
+    GameAudioHost off;  // inactive host: nothing
+    const std::vector<GameAudioHost::SpinDeath> spins = {{7, spinner, Vec3{1, 0, 0}}, {8, plain, Vec3{}}};
+    CHECK(off.spin_away_deaths(spins, types) == 0);
+#ifdef ALAMO_GAME_HAVE_AUDIO
+    GameData data;
+    auto tree = make_tree(true);
+    tree->add("Data\\XML\\SFXEventsTest.xml", R"(<?xml version="1.0"?>
+<SFXEvents>
+  <SFXEvent Name="Spin_Die"><Is_3D>Yes</Is_3D><Samples>SPIN.WAV</Samples></SFXEvent>
+  <SFXEvent Name="SD_Count"><Is_3D>Yes</Is_3D><Samples>SD.WAV</Samples><Play_Count>-1</Play_Count></SFXEvent>
+</SFXEvents>
+)");
+    data.files = std::move(tree);
+    GameAudioHost h;
+    CHECK(h.init(data, AudioBackendKind::Null, 3));
+    if (!h.active()) return;
+    h.set_listener(Vec3{0, 0, 100}, Vec3{0, 0, 0});
+    CHECK(h.spin_away_deaths(spins, types) == 1);  // the plain type has no line
+    CHECK(h.spin_away_deaths(spins, types) == 0);  // once per death
+    CHECK(starts(h, "Spin_Die") == 1);
+    const std::vector<GameAudioHost::SelfDestructCue> counting = {{9, "SD_Count", Vec3{2, 0, 0}}};
+    CHECK(h.self_destruct_lines(counting) == 1 && h.self_destruct_lines(counting) == 0);  // started once
+    CHECK(starts(h, "SD_Count") == 1);
+    h.self_destruct_lines({});  // cancelled / blown up: stopped
+    int stops = 0;
+    for (const audio::LogEntry& e : h.system()->log()) stops += e.op == audio::LogOp::SfxStop && e.event == "SD_Count" ? 1 : 0;
+    CHECK(stops == 1);
+#endif
+}
+
 void test_aud2() {
     using H = GameAudioHost;
     CHECK(H::production_tag(H::Production::Begin) == "SFXEvent_Build_Started");
@@ -1013,6 +1066,7 @@ int main() {
     test_pad_lines();                   // mcx4 t13 batch P
     test_intro_speech_t07();
     test_aud2();
+    test_spin_and_self_destruct();  // mcx4 t13 batch Q
 #ifdef ALAMO_GAME_HAVE_AUDIO
     test_movie_music();
     test_missing_credits_event();
