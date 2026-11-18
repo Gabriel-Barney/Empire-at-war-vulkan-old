@@ -577,6 +577,28 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
                 const std::string_view ev = lf->get("SFXEvent_Bunker_Vacated");
                 if (!ev.empty() && game_->impact(ev, position_of(static_cast<uint64_t>(e.unit)))) ++stats_.garrison_lines;
             }
+    // Self-destruct countdowns (MCX4_T13_RE_ANSWERS "GameObjectType.Selt_Destruct_SFXEvent_Start_Die", SelfDestructBehavior
+    // 0x630950 / 0x630840 / 0x6306f0): while a unit's SELF_DESTRUCT ability is active its type's line plays attached to
+    // it, any owner; it stops when the countdown is cancelled or the unit blows up (gone from the battle).
+    {
+        std::map<int64_t, std::string> now;
+        for (const objects::ObjectId id : battle.movement().unit_ids()) {
+            const objects::ObjectHandle h = store.find(id);
+            if (!store.alive(h)) continue;
+            const objects::TypeIndex t = store.type(h);
+            if (t == objects::kNone || t >= types.size()) continue;
+            // ledger: consumes GameObjectType.Selt_Destruct_SFXEvent_Start_Die
+            const std::string_view ev = types.get_string(t, "Selt_Destruct_SFXEvent_Start_Die");
+            if (ev.empty() || !battle.abilities().is_active(id, tactical::abilities::kSelfDestruct)) continue;
+            const int64_t key = static_cast<int64_t>(id);
+            if (self_destructs_.find(key) == self_destructs_.end() && game_->object_sfx(static_cast<uint64_t>(id), ev, position_of(static_cast<uint64_t>(id))))
+                ++stats_.anim_sounds;
+            now.emplace(key, std::string(ev));
+        }
+        for (const auto& [id, ev] : self_destructs_)
+            if (now.find(id) == now.end()) game_->stop_object_sfx(static_cast<uint64_t>(id), ev);
+        self_destructs_ = std::move(now);
+    }
     // Start-force re-delivery (MCX4_T13_RE_ANSWERS "Faction.Reinforcements_Selection_SFXEvent family", 0x287e70): the local
     // player's timer expired -> the local faction's line, 2D.
     for (const int32_t p : battle.garrison_redelivered())
@@ -733,6 +755,19 @@ uint32_t GameAudioHost::animation_sounds(std::span<const AnimSound> list) {
     uint32_t n = 0;
     for (const AnimSound& a : list)
         if (!a.event.empty() && game_->object_sfx(a.object, a.event, a.position) != 0) ++n;
+    stats_.anim_sounds += n;
+    return n;
+}
+
+uint32_t GameAudioHost::spin_away_deaths(std::span<const SpinDeath> deaths, const objects::GameObjectTypes& types) {
+    if (!game_) return 0;
+    uint32_t n = 0;
+    for (const SpinDeath& d : deaths) {
+        if (d.type == objects::kNone || d.type >= types.size() || !spun_.insert(d.object).second) continue;
+        // ledger: consumes GameObjectType.Spin_Away_On_Death_SFXEvent_Start_Die
+        const std::string_view ev = types.get_string(d.type, "Spin_Away_On_Death_SFXEvent_Start_Die");
+        if (!ev.empty() && game_->object_sfx(d.object, ev, d.position) != 0) ++n;
+    }
     stats_.anim_sounds += n;
     return n;
 }
@@ -1312,6 +1347,7 @@ void GameAudioHost::battle_end(bool, std::string_view) {}
 void GameAudioHost::tsw_audio(std::span<const TswCue>, const objects::GameObjectTypes&) {}
 void GameAudioHost::sim_tick() {}
 uint32_t GameAudioHost::animation_sounds(std::span<const AnimSound>) { return 0; }
+uint32_t GameAudioHost::spin_away_deaths(std::span<const SpinDeath>, const objects::GameObjectTypes&) { return 0; }
 uint32_t GameAudioHost::weapon_fired(uint64_t, std::string_view, std::string_view, const Vec3&) { return 0; }
 void GameAudioHost::weather(std::string_view, float, bool) {}
 void GameAudioHost::combat(bool, bool) {}
@@ -1382,6 +1418,8 @@ void GameAudioHost::battle_reset() {
     enemy_spotted_done_ = false;
     land_damage_stage_.clear();  // mcx4 t13 batch O
     pad_loops_.clear();          // mcx4 t13 batch P
+    spun_.clear();               // mcx4 t13 batch Q
+    self_destructs_.clear();
     prod_built_.clear();
     intro_decided_ = false;   // aud1 t07: a new battle decides its intro again
     object_events_reset();    // aud1 t05

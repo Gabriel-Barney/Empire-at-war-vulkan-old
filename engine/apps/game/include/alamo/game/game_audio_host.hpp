@@ -171,6 +171,16 @@ public:
         Vec3 position{};
     };
     uint32_t animation_sounds(std::span<const AnimSound> sounds);
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "GameObjectType.Spin_Away_On_Death_SFXEvent_Start_Die", DeathBehavior 0x58cf90): the
+    // battle's spin-away corpses (SimAnimation::corpses with spin_away; `object` = the corpse id, `event` unused); each
+    // new one plays its type's Spin_Away_On_Death_SFXEvent_Start_Die attached to it (3D when Is_3D, else 2D), any owner,
+    // once per death. Returns the number started.
+    struct SpinDeath {
+        uint64_t object = 0;
+        objects::TypeIndex type = objects::kNone;
+        Vec3 position{};
+    };
+    uint32_t spin_away_deaths(std::span<const SpinDeath> deaths, const objects::GameObjectTypes& types);
     // aud1 t04 (AUDIO.md §9.5): one shot's fire sound (fire_event(hardpoint_fire, shooter_fire)), 3D at the projectile's
     // spawn position. Returns the instance id (0 = none / refused).
     uint32_t weapon_fired(uint64_t shooter, std::string_view hardpoint_fire, std::string_view shooter_fire, const Vec3& position);
@@ -460,6 +470,8 @@ private:
     bool enemy_spotted_done_ = false;                         // SFXEvent_Enemy_Spotted played this battle
     std::map<int64_t, int32_t> land_damage_stage_;            // mcx4 t13 batch O: object -> last stage (lookup only)
     std::map<int64_t, std::string> pad_loops_;                // mcx4 t13 batch P: UC object -> its building loop event
+    std::set<uint64_t> spun_;                                 // mcx4 t13 batch Q: spin-away deaths already voiced
+    std::map<int64_t, std::string> self_destructs_;           // mcx4 t13 batch Q: counting-down unit -> its started event
     // mcx4 t13 batch B: the local player's tactical build orders last tick (order id -> type) and built counts (type ->
     // TacticalProduction::built_count), to tell a completed order from a cancelled one.
     std::map<uint32_t, int32_t> prod_orders_;

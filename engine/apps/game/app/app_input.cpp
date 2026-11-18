@@ -258,6 +258,13 @@ void App::post_tick() {
                         if (e.def && e.def->kind == anim::AnimEventDef::Kind::Sound)
                             snd.push_back({static_cast<uint64_t>(e.id), e.def->name, e.position});
                     audio_.animation_sounds(snd);
+                    // mcx4 t13: spin-away deaths (the host voices each corpse once).
+                    std::vector<GameAudioHost::SpinDeath> spins;
+                    for (const anim::Corpse& c : an->corpses(*top))
+                        if (c.spin_away)
+                            spins.push_back({static_cast<uint64_t>(c.id), static_cast<objects::TypeIndex>(c.info.object_type),
+                                             {c.info.position[0], c.info.position[1], c.info.position[2]}});
+                    if (!spins.empty()) audio_.spin_away_deaths(spins, data_.types);
                 }
 #endif
             audio_.set_corruption_mission(session_->battles() && session_->battles()->active_corruption_player() >= 0);  // mcx4 t13
