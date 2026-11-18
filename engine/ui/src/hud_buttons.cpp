@@ -329,6 +329,8 @@ HudConstants hud_constants_from(const data::XmlNode& root) {
         c.radar_colorize_selected = data::parse_bool_or(t, c.radar_colorize_selected);
     parse_rgba8(root.child_text("Radar_Selected_Units_Color"), c.radar_selected_color);
     parse_rgba8(root.child_text("Battle_Pending_Message_Color"), c.battle_pending_color);
+    parse_rgba8(root.child_text("Droid_Date_Color"), c.droid_date_color);
+    parse_rgba8(root.child_text("Droid_Seperator_Color"), c.droid_separator_color);
     return c;
 }
 

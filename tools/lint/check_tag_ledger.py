@@ -13,6 +13,9 @@ Checks that the generated ledgers match the code, without writing anything:
                   - every OUT_OF_SCOPE entry (mcx4 t16) names a row nothing reads, is not also RETAIL_UNUSED and gives a
                     scope reason labelled in docs/DECISIONS.md "Out-of-scope tag-ledger rows"; such a row is out_of_scope,
                     not a gap.
+                  - every MISFILED entry (mcx4) names a row nothing reads under its class, is named Class.Tag in
+                    docs/re/XML_FIELD_TABLE_SEGMENTS.md and gives an existing engine file that names the tag in a
+                    literal (the real owner's reader); such a row is misfiled, not a gap.
   binding ledger  engine/lua/src/binding_table.inc (engine/lua/tools/gen_bindings.py): the effect and consumer
                   columns are what the code gives now.
 A failure prints what differs and the command that regenerates the ledger. Runs in build_agent.cmd (before the build),
@@ -274,6 +277,30 @@ def selftest(gen):
         bad += 1
     if len(gen.out_of_scope_problems(rows, {}, scope, {}, "no section\n")) != 1:
         print("selftest: a missing scope section was not reported")
+        bad += 1
+    # MISFILED (mcx4): a listed row nothing reads becomes misfiled; a read row, an unknown row, a row also settled
+    # elsewhere, a page that does not name Class.Tag and a reader without the literal are errors.
+    mis = {("GameConstants", "Income_Redistribution"): ("x", "engine/a.cpp")}
+    seg_page = "GameConstants.Income_Redistribution GameConstants.Progressive_Taxation"
+    files = {"engine/a.cpp": 'get("Income_Redistribution")', "engine/b.cpp": "nothing"}
+    st = gen.compute_states(rows, {}, {}, {}, {}, mis)
+    if st.get(("GameConstants", "income_redistribution")) != "misfiled":
+        print("selftest: misfiled state", st)
+        bad += 1
+    if gen.misfiled_problems(rows, {}, mis, frozenset(), seg_page, files.get):
+        print("selftest: a good MISFILED entry was refused")
+        bad += 1
+    probs = gen.misfiled_problems(rows, {("GameConstants", "income_redistribution"): {"engine/x.cpp"}}, {
+        ("GameConstants", "Income_Redistribution"): ("x", "engine/a.cpp"),   # read under its class
+        ("GameConstants", "No_Such_Tag"): ("x", "engine/a.cpp"),            # no row
+        ("GameConstants", "Progressive_Taxation"): ("x", "engine/b.cpp"),   # settled elsewhere; reader lacks the literal
+    }, frozenset({("GameConstants", "progressive_taxation")}), seg_page, files.get)
+    if len(probs) != 4:
+        print("selftest: MISFILED problems", probs)
+        bad += 1
+    if len(gen.misfiled_problems(rows, {}, {("GameConstants", "Income_Redistribution"): ("x", "engine/none.cpp")},
+                                 frozenset(), "", files.get)) != 2:  # page does not name it; reader missing
+        print("selftest: MISFILED page / reader problems not reported")
         bad += 1
     for (cls, tag), want in {("Campaign", "Special_Case_Production"): "named", ("GameConstants", "Message_Of_The_Day_URL"):
                              "scope", ("Faction", "SFXEvent_Player_Taunt"): "scope", ("Decal", "Category"): "render",

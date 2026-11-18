@@ -44,6 +44,7 @@ const char* to_string(LedgerState s) {
         case LedgerState::Verified: return "verified";
         case LedgerState::RetailUnused: return "retail_unused";
         case LedgerState::OutOfScope: return "out_of_scope";
+        case LedgerState::Misfiled: return "misfiled";
     }
     return "?";
 }

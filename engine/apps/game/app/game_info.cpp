@@ -172,7 +172,7 @@ void Holocron::sample(const galactic::GalacticSim& g) {
 }
 
 ui::DroidLogInfo Holocron::droid_log(const GameSession& s, const GameData& d, const ui::TextDatabase& text,
-                                     std::span<const std::u32string> advisor_rows) const {
+                                     std::span<const std::u32string> advisor_rows, std::span<const ui::Rgba8> advisor_colors) const {
     ui::DroidLogInfo out;
     (void)d;
     const galactic::GalacticSim* g = s.galaxy();
@@ -189,7 +189,11 @@ ui::DroidLogInfo Holocron::droid_log(const GameSession& s, const GameData& d, co
     // ui4 t11 (P4_SIM_SYSTEMS §2.7.2): then the rows of every advisor line shown in galactic mode ("Day N", the text, the
     // separator), oldest first; retail has no battle entry of its own. [port] the last 120 rows.
     const size_t first = advisor_rows.size() > 120 ? advisor_rows.size() - 120 : 0;
-    for (size_t i = first; i < advisor_rows.size(); ++i) lines.push_back(advisor_rows[i]);
+    out.colors.assign(lines.size(), ui::Rgba8{0, 0, 0, 0});  // story dialog lines: the skin's colours
+    for (size_t i = first; i < advisor_rows.size(); ++i) {
+        lines.push_back(advisor_rows[i]);
+        out.colors.push_back(i < advisor_colors.size() ? advisor_colors[i] : ui::Rgba8{0, 0, 0, 0});
+    }
     out.entries = std::move(lines);
     return out;
 }

@@ -95,6 +95,7 @@ enum class InfoPage : uint8_t { DroidLog, DataChart, TechTree, SummaryProduction
 
 struct DroidLogInfo {
     std::vector<std::u32string> entries;
+    std::vector<Rgba8> colors;  // mcx4 t14: per-entry text colour (alpha 0 or missing: the skin's font colours)
     std::string picture;
     std::vector<std::pair<std::string, std::u32string>> legend;  // (icon, text) for IDC_PA_ICONn / IDC_PA_TEXTn, n = 0..24
     bool hints = true;

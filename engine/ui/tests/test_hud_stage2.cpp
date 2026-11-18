@@ -601,6 +601,8 @@ void test_buttons() {
     // ledger: verifies GameConstants.Radar_Colorize_Selected_Units
     // ledger: verifies GameConstants.Radar_Selected_Units_Color
     // ledger: verifies GameConstants.Battle_Pending_Message_Color
+    // ledger: verifies GameConstants.Droid_Date_Color
+    // ledger: verifies GameConstants.Droid_Seperator_Color
     {
         CHECK2(near2(c2.enc_population_x, 11.0f) && near2(c2.enc_icon_y, -12.0f) && near2(c2.enc_class_y, 5.0f));  // FoC defaults
         const data::XmlDocument g3 = data::XmlDocument::parse(std::string_view(
@@ -609,7 +611,8 @@ void test_buttons() {
             "</Encyclopedia_Icon_X_Offset><Encyclopedia_Icon_Y_Offset>-5</Encyclopedia_Icon_Y_Offset><Encyclopedia_Class_Y_Offset>6"
             "</Encyclopedia_Class_Y_Offset><Health_Bar_Spacing>3.5</Health_Bar_Spacing><Radar_Colorize_Selected_Units>No"
             "</Radar_Colorize_Selected_Units><Radar_Selected_Units_Color>1, 2, 3, 4</Radar_Selected_Units_Color>"
-            "<Battle_Pending_Message_Color> 9 8 7 </Battle_Pending_Message_Color></GameConstants>"));
+            "<Battle_Pending_Message_Color> 9 8 7 </Battle_Pending_Message_Color><Droid_Date_Color>10 20 30</Droid_Date_Color>"
+            "<Droid_Seperator_Color>40 50 60 70</Droid_Seperator_Color></GameConstants>"));
         const TooltipConfig c3 = tooltip_config_from(g3.root());
         CHECK2(near2(c3.enc_population_x, 1.0f) && near2(c3.enc_name_x, 2.0f) && near2(c3.enc_cost_x, 3.0f) && near2(c3.enc_icon_x, 4.0f) &&
                near2(c3.enc_icon_y, -5.0f) && near2(c3.enc_class_y, 6.0f));
@@ -617,6 +620,9 @@ void test_buttons() {
         CHECK2(near2(h0.health_bar_spacing, 2.0f) && h0.radar_colorize_selected && (h0.battle_pending_color == Rgba8{255, 32, 32, 240}));
         CHECK2(near2(h3.health_bar_spacing, 3.5f) && !h3.radar_colorize_selected && (h3.radar_selected_color == Rgba8{1, 2, 3, 4}) &&
                (h3.battle_pending_color == Rgba8{9, 8, 7, 255}));
+        // P4_SIM_SYSTEMS §2.7.2: the Droid Log date / separator row colours (FoC 255 0 0 / 128 128 128).
+        CHECK2((h0.droid_date_color == Rgba8{255, 0, 0, 255}) && (h0.droid_separator_color == Rgba8{128, 128, 128, 255}));
+        CHECK2((h3.droid_date_color == Rgba8{10, 20, 30, 255}) && (h3.droid_separator_color == Rgba8{40, 50, 60, 70}));
     }
     const data::XmlDocument gd = data::XmlDocument::parse(std::string_view(
         "<GUIDialogs><Tooltips><IDC_COMBAT_EFF_TIP><TextID>TEXT_COMBAT_EFF_TOOLTIP</TextID></IDC_COMBAT_EFF_TIP></Tooltips></GUIDialogs>"));

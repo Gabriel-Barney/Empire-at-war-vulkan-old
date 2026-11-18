@@ -220,6 +220,9 @@ void InfoScreens::fill_tabs(GuiDialog& d) {
 
 void InfoScreens::fill_droid(GuiDialog& d) {
     d.set_items("IDC_DROID_LIST", droid_.entries, -1);
+    if (GuiControl* c = d.get("IDC_DROID_LIST"))  // mcx4 t14 (P4_SIM_SYSTEMS §2.7.2): {text, colour} rows
+        c->item_text_colors.assign(droid_.colors.begin(),
+                                   droid_.colors.begin() + static_cast<std::ptrdiff_t>(std::min(droid_.entries.size(), droid_.colors.size())));
     image(d, "IDC_DROID_PICTURE_", droid_.picture);
     d.set_checked("IDC_HINTS_CHECK", droid_.hints);
     for (int32_t k = 0; k < 25; ++k) {

@@ -140,6 +140,11 @@ void App::story_present_frame() {
                                                               static_cast<int32_t>(g->galactic_day()), sh->hint.text,
                                                               sep ? ui::utf16_to_utf32(*sep) : std::u32string(U"________")))
                     droid_rows_.push_back(std::move(r));
+                // mcx4 t14 (P4_SIM_SYSTEMS §2.7.2): "Day N" in Droid_Date_Color, the text in the line's colour, the
+                // separator in Droid_Seperator_Color.
+                const StoryColor lc = sh->hint.color;
+                droid_row_colors_.insert(droid_row_colors_.end(), {hud_consts_.droid_date_color, ui::Rgba8{lc.r, lc.g, lc.b, lc.a},
+                                                                   hud_consts_.droid_separator_color});
             }
     }
 }

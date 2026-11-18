@@ -134,6 +134,15 @@ MpPalette default_mp_palette() {
 
 materials::float4 owner_team_color(uint32_t owner, const MpPalette& palette) { return palette.color[owner % kMpPaletteSize]; }
 
+terrain::WaterOptions GameTypeResolver::water_options() const {
+    terrain::WaterOptions o;
+    const data::GameConstants& gc = db_.constants();
+    o.render_target_resolution = gc.get_int("Water_Render_Target_Resolution", o.render_target_resolution);
+    // TERRAIN_WATER_POST.md reflection pass: the GameConstants record's default is 10 (an absent tag); FoC writes 0.0.
+    o.clip_plane_offset = gc.get_float("Water_Clip_Plane_Offset", 10.0f);
+    return o;
+}
+
 MpPalette GameTypeResolver::palette() const {
     MpPalette p = default_mp_palette();
     for (uint32_t i = 0; i < kMpPaletteSize; ++i)
@@ -374,7 +383,8 @@ bool MapScene::load_impl(const FileProvider& files, std::string_view map, const 
         stats_.mesh_ms = ms_since(t);
         stats_.mesh = mesh_.stats;
         t = clock::now();
-        if (!terrain::build_water(map_.terrain, water_, {}, parallel, &err)) return fail("water: " + err);
+        const terrain::WaterOptions wo = resolver_ ? resolver_->water_options() : terrain::WaterOptions{};
+        if (!terrain::build_water(map_.terrain, water_, wo, parallel, &err)) return fail("water: " + err);
         stats_.water_ms = ms_since(t);
         stats_.water_patches = static_cast<uint32_t>(water_.patches.size());
         stats_.water_triangles = water_.triangles;

@@ -24,6 +24,10 @@ engine/objects/src/field_schema_table.inc; class = the row's segment owner), wit
             the scope reasons of docs/DECISIONS.md "Out-of-scope tag-ledger rows" (multiplayer, hardware detection,
             graphic detail levels, debug keys, localised splash / credits; roadmap mcx4 t16). Not an honour gap; shown
             like retail_unused. A row a single-player or skirmish game reads in retail is never out of scope.
+  misfiled  no engine code reads it under this class, because the row is a segment error of xml_field_tables.md:
+            the descriptor belongs to another class (docs/re/XML_FIELD_TABLE_SEGMENTS.md names the real owner). The
+            row is in MISFILED with an engine file that reads the real owner's field; it settles only while that file
+            names the tag in a string literal. A misfiled row whose real owner the port does not read stays a gap.
 
 A literal naming a tag that several classes list (72 of the 2,764 tag names) counts for the object type and sub-object
 classes (the shared typed readers) and for the other classes the file names (literal_classes).
@@ -58,10 +62,10 @@ OUT_MD = os.path.join(ROOT, "docs", "status", "tag-ledger.md")
 DOCS_RE = os.path.join(ROOT, "docs", "re")
 FOC_ZIP = os.path.join(ROOT, "extracted", "foc_data_text.zip")
 
-STATES = ("unread", "stored", "consumed", "verified", "retail_unused", "out_of_scope")
+STATES = ("unread", "stored", "consumed", "verified", "retail_unused", "out_of_scope", "misfiled")
 STATE_ENUM = {"unread": "Unread", "stored": "Stored", "consumed": "Consumed", "verified": "Verified",
-              "retail_unused": "RetailUnused", "out_of_scope": "OutOfScope"}
-SETTLED_UNREAD = ("retail_unused", "out_of_scope")  # states of rows nothing reads that are not honour gaps
+              "retail_unused": "RetailUnused", "out_of_scope": "OutOfScope", "misfiled": "Misfiled"}
+SETTLED_UNREAD = ("retail_unused", "out_of_scope", "misfiled")  # states of rows nothing reads that are not honour gaps
 
 # Classes whose port loader keeps every tag of an entry, read or not (so an unread tag there is "stored"):
 #   * the typed object view keeps every descriptor field of GameObjectType / SpaceProp / HeroUnit, and the raw store
@@ -441,6 +445,66 @@ def find_consumers(rows, exact_only=frozenset()):
     return consumers, verifiers, problems
 
 
+# Segment errors of docs/re/xml_field_tables.md (mcx4, 2026-11-18): (listed class, tag) -> (real owner, engine file that
+# reads the real owner's field). The page below must name "Class.Tag"; the file must name the tag in a literal.
+SEGMENTS_PAGE = "docs/re/XML_FIELD_TABLE_SEGMENTS.md"
+MISFILED = {
+    ("HardwareConfiguration", "Apply_To_All_Allies"): ("Garrison_Upgrade_Ability and other abilities",
+                                                       "engine/tactical/abilities/src/ability_data.cpp"),
+    ("HardwareConfiguration", "Type"): ("the ability Type", "engine/tactical/abilities/src/ability_data.cpp"),
+    ("MousePointer", "Ability_Name"): ("Enable_Ability / Special_Ability_Action", "engine/tactical/abilities/src/ability_data.cpp"),
+    ("MousePointer", "Affects_All_Allies"): ("Enable_Radar_Ability / Enable_Ability", "engine/tactical/abilities/src/ability_data.cpp"),
+    ("MousePointer", "Apply_To_All_Allies"): ("ability fields", "engine/galactic/src/special_rules.cpp"),
+    ("MousePointer", "Icon_Name"): ("GameObjectType / Faction / special-ability Icon_Name", "engine/galactic/src/galactic_rules.cpp"),
+}
+
+
+def misfiled_keys(misfiled=None):
+    """{(class, tag lower): spec column} of MISFILED (or the given table)."""
+    table = MISFILED if misfiled is None else misfiled
+    return {(cls, tag.lower()): f"{SEGMENTS_PAGE}: really {owner} (read in {path})" for (cls, tag), (owner, path) in table.items()}
+
+
+def misfiled_problems(rows, consumers, misfiled=None, settled=frozenset(), page_text=None, read_file=None):
+    """Errors in the MISFILED table (or the given one): no such row, the code reads the row under its listed class, the
+    row is also RETAIL_UNUSED / OUT_OF_SCOPE (`settled`), SEGMENTS_PAGE does not name Class.Tag, or the reader file is
+    missing or names no "Tag" literal."""
+    table = MISFILED if misfiled is None else misfiled
+    known = {(cls, tag.lower()) for cls, tag, _ in rows}
+    if page_text is None:
+        path = os.path.join(ROOT, *SEGMENTS_PAGE.split("/"))
+        page_text = ""
+        if os.path.isfile(path):
+            with open(path, encoding="utf-8", errors="replace") as f:
+                page_text = f.read()
+    if read_file is None:
+        def read_file(rel_path):
+            p = os.path.join(ROOT, *rel_path.split("/"))
+            if not os.path.isfile(p):
+                return None
+            with open(p, encoding="utf-8", errors="replace") as f:
+                return f.read()
+    problems = []
+    for (cls, tag), (_, reader) in sorted(table.items()):
+        key = (cls, tag.lower())
+        name = f"MISFILED {cls}.{tag}"
+        if key not in known:
+            problems.append(f"{name}: names no ledger row")
+            continue
+        if key in consumers:
+            problems.append(f"{name}: engine code reads it as {cls} ({sorted(consumers[key])[0]}); drop the entry")
+        if key in settled:
+            problems.append(f"{name}: also in RETAIL_UNUSED / OUT_OF_SCOPE; keep one")
+        if f"{cls}.{tag}" not in page_text:
+            problems.append(f"{name}: {SEGMENTS_PAGE} does not name {cls}.{tag}")
+        text = read_file(reader)
+        if text is None:
+            problems.append(f"{name}: reader {reader} does not exist")
+        elif f'"{tag}"' not in text:
+            problems.append(f'{name}: reader {reader} names no "{tag}" literal (the real owner is no longer read: drop the entry)')
+    return problems
+
+
 def retail_unused_keys(retail_unused=None):
     """{(class, tag lower): citation} of RETAIL_UNUSED (or the given table)."""
     table = RETAIL_UNUSED if retail_unused is None else retail_unused
@@ -519,9 +583,10 @@ def out_of_scope_problems(rows, consumers, out_of_scope=None, retail_unused=None
     return problems
 
 
-def compute_states(rows, consumers, verifiers, retail_unused=None, out_of_scope=None):
+def compute_states(rows, consumers, verifiers, retail_unused=None, out_of_scope=None, misfiled=None):
     unused = retail_unused_keys(retail_unused)
     scope = out_of_scope_keys(out_of_scope)
+    mis = misfiled_keys(misfiled)
     out = {}
     for cls, tag, _ in rows:
         key = (cls, tag.lower())
@@ -531,6 +596,8 @@ def compute_states(rows, consumers, verifiers, retail_unused=None, out_of_scope=
             st = "retail_unused"
         elif key in scope:
             st = "out_of_scope"
+        elif key in mis:
+            st = "misfiled"
         elif cls in GENERIC_STORE or SUB_OBJECT_OWNER.search(cls):
             st = "stored"
         else:
@@ -576,8 +643,9 @@ def build(with_extras=True):
     consumers, verifiers, problems = find_consumers(rows, frozenset(retail_unused_keys()) | frozenset(out_of_scope_keys()))
     problems += retail_unused_problems(rows, consumers)
     problems += out_of_scope_problems(rows, consumers)
+    problems += misfiled_problems(rows, consumers, settled=frozenset(retail_unused_keys()) | frozenset(out_of_scope_keys()))
     states = compute_states(rows, consumers, verifiers)
-    unused = {**retail_unused_keys(), **out_of_scope_keys()}
+    unused = {**retail_unused_keys(), **out_of_scope_keys(), **misfiled_keys()}
     spec = spec_index() if with_extras else {}
     uses = base_uses() if with_extras else {}
     ledger = []
@@ -639,21 +707,24 @@ def render_md(ledger):
         "States: **unread** (the port does not keep it), **stored** (kept, nothing reads it), **consumed** (engine code",
         "reads it), **verified** (consumed, and a test checks its effect), **retail-unused** (retail never reads it",
         "either, by an RE answer cited below), **out-of-scope** (the port leaves it out on purpose, by a scope reason",
-        "of `docs/DECISIONS.md` \"Out-of-scope tag-ledger rows\"). An `unread` or `stored` tag that a mod sets is an",
+        "of `docs/DECISIONS.md` \"Out-of-scope tag-ledger rows\"), **misfiled** (a segment error of the descriptor tables:",
+        "the field belongs to another class that the port reads, `docs/re/XML_FIELD_TABLE_SEGMENTS.md`). An `unread` or",
+        "`stored` tag that a mod sets is an",
         "honour gap in `alamo_mod_check` report v4. Work order (§7.2): tier 1 with the most corpus mods, then base FoC uses.",
         "",
         f"Totals: {len(ledger)} rows; unread {tot['unread']}, stored {tot['stored']}, consumed {tot['consumed']}, "
-        f"verified {tot['verified']}, retail-unused {tot['retail_unused']}, out-of-scope {tot['out_of_scope']}.",
+        f"verified {tot['verified']}, retail-unused {tot['retail_unused']}, out-of-scope {tot['out_of_scope']}, "
+        f"misfiled {tot['misfiled']}.",
         "",
         "## Per class",
         "",
-        "| Class | Rows | Unread | Stored | Consumed | Verified | Retail-unused | Out-of-scope |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|",
+        "| Class | Rows | Unread | Stored | Consumed | Verified | Retail-unused | Out-of-scope | Misfiled |",
+        "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
     for cls in sorted(classes, key=lambda c: (-sum(classes[c].values()), c)):
         c = classes[cls]
         out.append(f"| {cls} | {sum(c.values())} | {c['unread']} | {c['stored']} | {c['consumed']} | {c['verified']} "
-                   f"| {c['retail_unused']} | {c['out_of_scope']} |")
+                   f"| {c['retail_unused']} | {c['out_of_scope']} | {c['misfiled']} |")
     gaps = [r for r in ledger if r["state"] in ("unread", "stored") and r["base_uses"] > 0]
     gaps.sort(key=lambda r: (-r["base_uses"], r["class"], r["tag"].lower()))
     out += [
@@ -696,9 +767,24 @@ def render_md(ledger):
         out += [f"| {r['class']} | {r['tag']} | {r['base_uses']} | {r['spec'].rsplit(': ', 1)[-1]} |" for r in scope_rows]
     else:
         out.append("None yet.")
-    out += ["", "## Every row", "", "Per class: `Tag` (state, consumer files; x = retail-unused, o = out-of-scope).", ""]
+    mis_rows = sorted((r for r in ledger if r["state"] == "misfiled"), key=lambda r: (r["class"], r["tag"].lower()))
+    out += [
+        "",
+        "## Misfiled rows",
+        "",
+        "Segment errors of `docs/re/xml_field_tables.md` (`MISFILED` in the generator): the field belongs to another",
+        "class, which the port reads in the file named. Not honour gaps.",
+        "",
+    ]
+    if mis_rows:
+        out += ["| Class | Tag | Base uses | Real owner |", "|---|---|---:|---|"]
+        out += [f"| {r['class']} | {r['tag']} | {r['base_uses']} | {r['spec'].split(': ', 1)[-1]} |" for r in mis_rows]
+    else:
+        out.append("None yet.")
+    out += ["", "## Every row", "",
+            "Per class: `Tag` (state, consumer files; x = retail-unused, o = out-of-scope, f = misfiled).", ""]
     for cls in sorted(classes):
-        items = [f"`{r['tag']}` ({ {'retail_unused': 'x', 'out_of_scope': 'o'}.get(r['state'], r['state'][0])}"
+        items = [f"`{r['tag']}` ({ {'retail_unused': 'x', 'out_of_scope': 'o', 'misfiled': 'f'}.get(r['state'], r['state'][0])}"
                  f"{'' if not r['consumers'] else ' ' + str(r['consumers'])})"
                  for r in ledger if r["class"] == cls]
         out.append(f"- **{cls}**: " + ", ".join(items))

@@ -26,6 +26,7 @@ int main() {
         if (r.state == LedgerState::Unread || r.state == LedgerState::Stored) CHECK(r.consumers == 0);
         if (r.state == LedgerState::RetailUnused) CHECK(r.consumers == 0 && r.spec.starts_with("docs/re/"));
         if (r.state == LedgerState::OutOfScope) CHECK(r.consumers == 0 && r.spec.starts_with("docs/DECISIONS.md"));
+        if (r.state == LedgerState::Misfiled) CHECK(r.consumers == 0 && r.spec.starts_with("docs/re/XML_FIELD_TABLE_SEGMENTS.md"));
     }
     CHECK(missing == 0);
     // Case-insensitive lookup; class matters.
@@ -41,5 +42,9 @@ int main() {
     const TagLedgerRow* cpu = find_tag_ledger("HardwareConfiguration", "CPUSpeed");
     CHECK(cpu != nullptr && cpu->state == LedgerState::OutOfScope && !is_honour_gap(cpu->state));
     CHECK(std::string_view(to_string(LedgerState::OutOfScope)) == "out_of_scope");
+    // mcx4: a segment error of the descriptor tables (MousePointer.Icon_Name is the object types' Icon_Name) is settled.
+    const TagLedgerRow* icon = find_tag_ledger("MousePointer", "Icon_Name");
+    CHECK(icon != nullptr && icon->state == LedgerState::Misfiled && !is_honour_gap(icon->state));
+    CHECK(std::string_view(to_string(LedgerState::Misfiled)) == "misfiled");
     return ::alamo::test::report("alamo_objects_tag_ledger_tests");
 }
