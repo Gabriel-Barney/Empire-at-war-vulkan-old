@@ -30,6 +30,10 @@ bool App::begin_first_reinforcement() {
     if (!b) return false;
     for (const sim::TacticalBattle::Reserve& r : b->reserves(local_player()))
         if (reinforce_available(r.galactic_id)) {
+            // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.Reinforcements_Selection_SFXEvent family", command bar 0x2e5580): the
+            // reinforcement selection opening plays the local faction's line. [port] the port opens no list: the press
+            // that starts the first entry's pick stands for the opening.
+            audio_.faction_sfx("Reinforcements_Selection_SFXEvent");  // ledger: consumes Faction.Reinforcements_Selection_SFXEvent
             ui::HudAction a;
             a.kind = ui::HudAction::Kind::BeginReinforcement;
             a.unit = static_cast<uint32_t>(r.galactic_id);

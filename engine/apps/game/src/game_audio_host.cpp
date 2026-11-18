@@ -1114,11 +1114,37 @@ void GameAudioHost::cue_lines(const sim::TacticalBattle& battle, const objects::
         uint8_t& prev = base_shield_state_[static_cast<int64_t>(e.id)];
         const uint8_t was = prev, now = e.on ? 1 : 2;
         prev = now;
+        // mcx4 t13 ("GameObjectType.SFXEvent_Powered_Active_Loop", 0x56ac00 / 0x56b540): the generator type's loop runs
+        // attached while the shield is on (any owner); started on, stopped off.
+        if (was != now)
+            if (const objects::TypeIndex gt = type_of(static_cast<int64_t>(e.id)); gt != objects::kNone) {
+                // ledger: consumes GameObjectType.SFXEvent_Powered_Active_Loop
+                const std::string_view loop = types.get_string(gt, "SFXEvent_Powered_Active_Loop");
+                if (!loop.empty()) {
+                    if (now == 1) game_->object_sfx(static_cast<uint64_t>(e.id), loop, position_of(static_cast<uint64_t>(e.id)));
+                    else game_->stop_object_sfx(static_cast<uint64_t>(e.id), loop);
+                }
+            }
         if (local_player < 0 || was == 0 || was == now) continue;
         const int32_t o = owner_of(static_cast<int64_t>(e.id));
         if (o < 0) continue;
         faction_sfx(base_shield_line(now == 1, o == local_player || !cs.is_enemy(local_player, o)));
         ++stats_.base_shield_lines;
+    }
+    // Base shield absorb (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Base_Shield_Online family", 0x56ba20): a hit the dome
+    // absorbed plays the shield owner's faction line, 3D at the hit ([port] the source's position when it still exists,
+    // else the generator's). Any owner.
+    for (const tcb::DamageEvent& d : cs.damage_events()) {
+        if (d.hardpoint != tcb::kHardpointBaseShieldDome || !(d.absorbed > 0.0f)) continue;
+        const int32_t o = owner_of(static_cast<int64_t>(d.victim));
+        if (o < 0 || static_cast<size_t>(o) >= player_factions_.size()) continue;
+        const audio::FactionAudio* f = game_data_->find_faction(player_factions_[static_cast<size_t>(o)]);
+        // ledger: consumes Faction.SFXEvent_Base_Shield_Absorb_Damage
+        const std::string_view ev = f ? f->get("SFXEvent_Base_Shield_Absorb_Damage") : std::string_view();
+        if (ev.empty()) continue;
+        const objects::ObjectHandle sh = store.find(static_cast<objects::ObjectId>(d.source));
+        const Vec3 at = store.alive(sh) ? store.position(sh) : position_of(static_cast<uint64_t>(d.victim));
+        if (game_->impact(ev, at)) ++stats_.base_shield_lines;
     }
     // Retreat begin (MCX4_T13_RE_ANSWERS "Faction.Land_Retreat_Begin_SFXEvent family"): on the tick a retreat countdown
     // starts; 2D. A local retreater first tries its retreating units' SFXEvent_Retreat_Start ([port] the retreater's
