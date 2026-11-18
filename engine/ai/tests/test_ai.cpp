@@ -24,9 +24,13 @@
 #include "alamo/ai/ai_free_store_path.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/ai/ai_path_finder.hpp"
+#ifdef ALAMO_AI_HAVE_GALACTIC_AI
+#include "alamo/ai/galactic_ai_tokens.hpp"  // mcx0 t05: the in-game resolver's registry
+#endif
 #include "alamo/ai/galactic_perception.hpp"
 #include "alamo/ai/galactic_seed.hpp"
 #include "alamo/ai/perception_equations.hpp"
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/bytes.hpp"
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/host_fs.hpp"
@@ -1109,6 +1113,38 @@ static void real_data(const std::string& root, const char* label, bool foc) {
             CHECK(c.registered && c.implemented);
     }
     std::printf("   token paths %u: registered %u, implemented %u -> %s\n", paths, registered, implemented, out.c_str());
+#ifdef ALAMO_AI_HAVE_GALACTIC_AI
+    // mcx0 t05: the same paths against the in-game resolver's registry (GalacticSimTokenResolver, the one alamo_game runs;
+    // docs/re/AI_GALACTIC_TOKENS.md §5 lists what it misses).
+    {
+        uint32_t in_game = 0;
+        std::vector<std::string> missing;
+        for (const CoverageEntry& c : cov) {
+            if (c.kind != CoverageEntry::Kind::Token) continue;
+            const size_t dot = c.path.find('.');
+            if (dot == std::string::npos) continue;
+            const std::string root_text = c.path.substr(0, dot);
+            bool known = false;
+            Root eq_root = Root::Game;
+            for (const Root r : {Root::Self, Root::Target, Root::Enemy, Root::Human, Root::Location, Root::Game})
+                if (iequals(root_text, root_name(r))) {
+                    eq_root = r;
+                    known = true;
+                }
+            if (!known) continue;
+            if (GalacticSimTokenResolver::path_registered(eq_root, ascii_upper(c.path.substr(dot + 1))))
+                ++in_game;
+            else if (c.registered)
+                missing.push_back(c.path);
+        }
+        CHECK(GalacticSimTokenResolver::path_registered(Root::Target, "FRIENDLYFORCE.HASSPACEUNITSBITFIELD"));
+        CHECK(GalacticSimTokenResolver::path_registered(Root::Target, "ENEMYFORCE.HASSPACEFORCE"));
+        CHECK(in_game > implemented);  // the in-game resolver evaluates more than the snapshot one
+        std::printf("   in-game resolver: %u paths evaluated, %zu registered names not evaluated:", in_game, missing.size());
+        for (const std::string& m : missing) std::printf(" %s", m.c_str());
+        std::printf("\n");
+    }
+#endif
     // Every equation evaluates without crashing (most fail on not-yet-implemented tokens).
     {
         for (PerceptionMemory& m : mem) m.reset(dummy.planet_count);

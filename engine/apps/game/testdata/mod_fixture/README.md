@@ -14,6 +14,9 @@ Read only: the tests never write here.
   Locations next to one with planets (a menu entry, a warning: retail lists such campaigns); a scoring script that
   sets the GlobalValue `CHECKS_MOD_ID` only in `Base_Definitions`, a GameObject script whose main chunk fails on that
   unset value (session-dependent), and one whose main chunk fails on a key no script sets (a real run error).
+  mcx0 (report v4): `ChecksStory.xml`, a plot no campaign names, uses a reward the port lacks (`SWITCH_SIDES`), an event
+  type it dispatches partly (`STORY_WIN_BATTLES`), a reward retail does not know and a commented-out event; the scoring
+  script calls `Hide_Sub_Object` (a binding recorded without a consumer) in a function nothing runs.
 - `FixtureSub` (t16) is a submod of `FixtureMod`: its lists name `ModObjects.xml` and `ModFactions.xml`, which only
   `FixtureMod` ships. Its `modinfo.json` names workshop item `900000001` of the fake Steam library `steamlib/` (the
   `<library>\steamapps\workshop\content\32470\<id>` layout), which has only `ModFactions.xml`: the report must rank

@@ -330,6 +330,8 @@ Before they are treated as dead:
   code path the table extraction missed, e.g. a hand-written `Parse_Database_Entry`.
 - Confirmed dead tags stay in the unread-tag report as **retail-equivalent** (§12.2) and do not count against the
   grade.
+- Answered (mcx0 t07, `docs/re/MCX0_T07_UNLISTED_TAGS.md`): none of the 30 most used is a field-table tag in the binary;
+  the extraction only missed three ability element names, now in the port's sub-object list.
 
 ### 7.4 Fatal-at-load cases
 

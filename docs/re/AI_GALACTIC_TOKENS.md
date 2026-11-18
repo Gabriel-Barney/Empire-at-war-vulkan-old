@@ -227,12 +227,23 @@ registered on planets.)
 - `Game.TIMELINE`, `ISCAMPAIGNGAME`, `ISLANDCONTROLGAME`, `ISSETUPPHASE`: real flags (§4). `Game.<side>.X` ignores params.
 - Caches: lifetimes above are part of the behaviour (e.g. force totals 15 s, Game totals 30 s).
 
-**Registered and used by shipped galactic eqs but missing in the port:** `Self.GrossIncomeNBPTM`,
-`Self.GrossIncomeNBTF`, `Self.MaxStarbaseLevelUnnormalized`, `Self.StoryTrigger`, `Self.HomePlanet.Type.Token`,
-`Human.SpaceDefendedPlanets`, `Human.GroundDefendedPlanets`, `Target.OpenGroundCompanySlots`,
-`Target.BlackMarketAbilitiesAvailable`, `Target.BlackMarketMinimumAbilityPrice`, `Target.BlackMarketPriceModifier`,
-`Target.EnemyForce.HasSpaceUnitsBitfield`, `Target.EnemyForce.HasGroundUnitsBitfield`,
-`Target.FriendlyForce.HasGroundUnitsBitfield`, `Target.EnemyForce.AntiStealthEffectiveness`, `Target.Type.Token`.
+**Used by shipped equations but not evaluated by the port** (regenerated 2026-11-17, mcx0 t05, from
+`alamo_mod_check` report v4 `ai.token_coverage` on base FoC; it replaces the hand list of 2026-10-30, whose paths are all
+evaluated now). The port's coverage is the token path registry next to the handlers (`engine/ai/src/galactic_ai_tokens.cpp`,
+`GalacticSimTokenResolver::path_registered`, checked against the handlers by `test_token_registry`) plus the tactical
+leaf tables (`TacticalTokenResolver::path_implemented`), each for the equations that run in its mode (an equation a
+template of that mode names, and what it names in turn; other equations count with either). Base FoC, 381 equations,
+187 distinct paths:
+- `Game.InterventionsEnabled` (1 equation, `Are_Interventions_Disabled`, a galactic template's equation,
+  `Data\XML\AI\PerceptualEquations\InterventionEquations.xml`): the tactical leaf table has it, the galactic registry
+  does not;
+- `Variable_Target.HasIndigenousUnits` (1 equation, `Intervention_Trigger_Indigenous_Revolt`,
+  `Data\XML\AI\PerceptualEquations\InterventionEquations.xml`);
+- `Variable_Target.StoryTrigger` (1 equation, `Helper_Trap_Land_Check_Galactic_Flags`,
+  `Data\XML\AI\PerceptualEquations\SandboxEventEquations.xml`).
+
+Whether retail registers the last two on the planet root is not read yet (the player root has `StoryTrigger`); until then
+they count as port gaps. Rerun `alamo_mod_check --json` on base FoC to refresh this list.
 
 ## 6. Extra questions
 

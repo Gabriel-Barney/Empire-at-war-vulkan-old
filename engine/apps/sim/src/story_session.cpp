@@ -1258,6 +1258,8 @@ void StorySession::apply_reward(Set& s, const std::string& type, const std::vect
     }  // STY1 lane B (src/story_rewards_apply.cpp)
     else if (const StoryRewardRow* row = find_story_reward(type); row && row->owner == StoryRewardOwner::Session) {
         note("reward " + type + " has no handler");  // the coverage table says the session owns it: a table / handler mismatch
+    } else if (row && row->owner == StoryRewardOwner::Missing) {
+        note("reward " + type + " not implemented (story ledger: missing)");  // mcx0 t05: retail acts, the port skips it
     } else if (!row) {
         // storyb t12: a Reward_Type the coverage table does not know (a mod's, or a typo) is logged instead of falling off
         // silently; nothing is applied [port: retail's dispatcher ignores an unknown type, 0x456970 default case [M]].

@@ -58,6 +58,9 @@ rem Cheap check first (2026-11-12): a string literal an edit split across lines 
 rem fails here in a second instead of in a build. Scans the C++ files changed against origin/dev.
 python -I tools\lint\check_string_literals.py --changed
 if errorlevel 1 (echo build_agent: fix the literal above first; nothing was built.& exit /b 1)
+rem mcx0 t03: the tag ledger and the Lua binding effect column match the code (tools\lint\check_tag_ledger.py, about a second).
+python -I tools\lint\check_tag_ledger.py
+if errorlevel 1 (echo build_agent: regenerate the ledger named above first; nothing was built.& exit /b 1)
 rem Which code this run builds (commit, worktree, source hash) for the build record; refuses an identical failing rerun.
 python -I tools\lint\build_state.py begin %B% --modules "!AMODS!" --tests "!ATESTS!" --refuse-repeat
 if errorlevel 3 exit /b 3

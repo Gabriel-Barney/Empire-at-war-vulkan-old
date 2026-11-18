@@ -6,10 +6,12 @@
 // session state and one that really fails, t12) and FixtureSub (a submod of FixtureMod, t16; fake Steam library under
 // testdata/mod_fixture/steamlib). Read only: nothing is written anywhere.
 //   alamo_game_mod_fixture_tests <testdata/mod_fixture>
+#include <algorithm>
 #include <cstdio>
 #include <string>
 #include <vector>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/hash.hpp"
 #include "alamo/game/game_data.hpp"
 #include "alamo/game/mod_check.hpp"
@@ -28,6 +30,9 @@ const alamo::game::ModFolderStats* folder(const ModCheckReport& r, const std::st
 }
 
 bool contains(const std::string& text, const std::string& needle) { return text.find(needle) != std::string::npos; }
+bool icontains(const std::string& text, const std::string& needle) {
+    return contains(alamo::ascii_lower(text), alamo::ascii_lower(needle));
+}
 
 // What every clean load of the fixture shares: no errors, nothing missing, no unknown tags, every script compiles and
 // every entry script's main chunk runs without an error.
@@ -88,7 +93,22 @@ void test_mod(const std::string& foc) {
         // The machine-readable summary.
         const std::string js = alamo::game::format_mod_report_json(r);
         CHECK(contains(js, "\"schema\": \"alamo.mod_report\""));
-        CHECK(contains(js, "\"version\": 3"));
+        CHECK(contains(js, "\"version\": 4"));
+        // mcx0 t06: the version 4 keys are there (FixtureChecks' story and binding findings: test_compat_checks).
+        for (const char* k : {"\"honour_gaps\":", "\"retail_equivalent\":", "\"bindings\":", "\"story\":", "\"token_coverage\":",
+                              "\"limits\":", "\"grade\":"})
+            CHECK(contains(js, k));
+        CHECK(r.grade.grade == "G1");
+        // ModObjects.xml sets Size_Value (a stored tag, ledger) to 3: an honour gap from the mod's file that blocks G3's
+        // static part; Fires_Forward = No is the default, so it is no gap.
+        const auto gap = std::find_if(r.honour_gaps.begin(), r.honour_gaps.end(),
+                                      [](const alamo::game::HonourGap& g) { return g.cls == "GameObjectType" && g.tag == "Size_Value"; });
+        CHECK(gap != r.honour_gaps.end() && gap->in_mod && gap->uses == 1 && gap->state == "stored");
+        CHECK(gap != r.honour_gaps.end() && icontains(gap->first_file, "ModObjects.xml"));
+        CHECK(std::none_of(r.honour_gaps.begin(), r.honour_gaps.end(),
+                           [](const alamo::game::HonourGap& g) { return g.tag == "Fires_Forward"; }));
+        CHECK(!r.grade.g3_static && !r.grade.blocking.empty());
+        CHECK(r.issues.find(alamo::IssueKind::HonourGap, "GameObjectType.Size_Value", gap != r.honour_gaps.end() ? gap->first_file : "") != nullptr);
         CHECK(contains(js, "\"result\": \"ok\""));
         CHECK(contains(js, "\"errors\": 0"));
         CHECK(contains(js, "\"added\": 5"));
@@ -192,6 +212,66 @@ void test_checks(const std::string& foc) {
     CHECK(again.lua_run_errors.size() == 1 && again.lua_session_errors.size() == 1);
 }
 
+const alamo::game::RetailEquivalentFinding* retail_eq(const ModCheckReport& r, const std::string& kind, const std::string& subject) {
+    for (const auto& f : r.retail_equivalent)
+        if (f.kind == kind && f.subject == subject) return &f;
+    return nullptr;
+}
+
+// mcx0 t06: the report version 4 findings of FixtureChecks - ChecksStory.xml (a reward the port lacks, an event type it
+// dispatches partly, a reward retail does not know, a commented-out event) and Checks_Scoring.lua (a call to a binding
+// the port records without a consumer).
+void test_compat_checks(const std::string& foc) {
+    const ModCheckReport r = alamo::game::check_mod_data(foc, {"MODPATH=Mods\\FixtureChecks"});
+    CHECK(r.loaded && r.error_count() == 0);
+    CHECK(r.story.files == 1);
+    CHECK(r.story.rewards_used == 2 && r.story.events_used == 2);  // the commented-out event is not counted
+    CHECK(r.story.rewards_missing.size() == 1);
+    if (r.story.rewards_missing.size() == 1) {
+        const alamo::game::StoryUse& u = r.story.rewards_missing[0];
+        CHECK(u.name == "SWITCH_SIDES" && u.uses == 1 && u.in_mod && icontains(u.first_file, "ChecksStory.xml"));
+    }
+    CHECK(r.story.events_partial.size() == 1 && r.story.events_partial[0].name == "STORY_WIN_BATTLES");
+    CHECK(std::none_of(r.story.rewards_missing.begin(), r.story.rewards_missing.end(),
+                       [](const alamo::game::StoryUse& u) { return u.name == "FORCE_RETREAT"; }));
+    const auto* unknown = retail_eq(r, "unknown_reward", "CHECKS_NO_SUCH_REWARD");
+    CHECK(unknown && unknown->in_mod);
+    CHECK(retail_eq(r, "unread_tag", "factions: Checks_Unread_Faction_Tag") != nullptr);  // retail ignores it too
+
+    const auto bg = std::find_if(r.binding_gaps.begin(), r.binding_gaps.end(),
+                                 [](const alamo::game::BindingGapCall& b) { return b.name == "Hide_Sub_Object"; });
+    CHECK(bg != r.binding_gaps.end());
+    if (bg != r.binding_gaps.end()) {
+        CHECK(bg->effect == "recorded" && bg->call_sites == 1 && bg->in_mod);
+        CHECK(icontains(bg->first_script, "Checks_Scoring.lua"));  // the mod's file, not a base one
+    }
+
+    // Each finding from the mod's files is an issue record with the mod's layer, and blocks G3's static part.
+    CHECK(r.issues.find(alamo::IssueKind::RewardMissing, "SWITCH_SIDES",
+                        r.story.rewards_missing.empty() ? "" : r.story.rewards_missing[0].first_file) != nullptr);
+    CHECK(r.issues.count(alamo::IssueKind::BindingUnconsumed) >= 1);
+    CHECK(r.issues.count(alamo::IssueKind::RetailEquivalent) == r.retail_equivalent.size());
+    CHECK(r.grade.grade == "G1" && !r.grade.g3_static);
+    const std::string js = alamo::game::format_mod_report_json(r);
+    CHECK(contains(js, "\"SWITCH_SIDES\""));
+    CHECK(contains(js, "\"CHECKS_NO_SUCH_REWARD\""));
+    if (g_fail) std::fputs(js.c_str(), stdout);
+
+    // compat off: none of the version 4 lists.
+    alamo::game::ModCheckOptions off;
+    off.compat = false;
+    const ModCheckReport quiet = alamo::game::check_mod_data(foc, {"MODPATH=Mods\\FixtureChecks"}, off);
+    CHECK(quiet.loaded && quiet.story.rewards_missing.empty() && quiet.binding_gaps.empty());
+    CHECK(quiet.retail_equivalent.empty() && quiet.honour_gaps.empty() && quiet.issues.empty());
+}
+
+// Data that does not load grades G0.
+void test_failed_load(const std::string& fixture) {
+    const ModCheckReport r = alamo::game::check_mod_data(fixture + "/no_such_game", {});
+    CHECK(!r.loaded);
+    CHECK(r.grade.grade == "G0");
+}
+
 // modc t16: FixtureSub's lists name ModObjects.xml and ModFactions.xml, which FixtureMod has; workshop item 900000001
 // (named in FixtureSub's modinfo.json) has ModFactions.xml only.
 void test_submod(const std::string& fixture, const std::string& foc) {
@@ -261,6 +341,8 @@ int main(int argc, char** argv) {
     test_base(foc);
     test_mod(foc);
     test_checks(foc);
+    test_compat_checks(foc);
+    test_failed_load(argv[1]);
     test_campaign_levels();
     test_submod(argv[1], foc);
     std::printf(g_fail ? "alamo_game_mod_fixture_tests: %d FAILED\n" : "alamo_game_mod_fixture_tests: OK\n", g_fail);

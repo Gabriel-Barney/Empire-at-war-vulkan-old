@@ -298,7 +298,7 @@ add_test(NAME alamo_lua_tests COMMAND alamo_lua_tests)
 set_tests_properties(alamo_lua_tests PROPERTIES TIMEOUT 120)
 
 # One test exe per binding family (L1 stage 2): tests/test_lua_<family>.cpp.
-foreach(_fam objects players story presentation tactical script_gaps fog script_remaining save gc script_save)
+foreach(_fam objects players story presentation tactical script_gaps fog script_remaining save gc script_save binding_effects)
   add_executable(alamo_lua_${_fam}_tests tests/test_lua_${_fam}.cpp)
   target_link_libraries(alamo_lua_${_fam}_tests PRIVATE alamo_lua alamo_lua_vm Threads::Threads alamo_test_support)
   target_include_directories(alamo_lua_${_fam}_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

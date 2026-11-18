@@ -446,6 +446,7 @@ static void test_coverage() {
             std::printf("    MISSING %s\n", r.c_str());
             continue;
         }
+        CHECK(row->owner != StoryRewardOwner::Missing);  // mcx0 t05: base data uses no reward the port lacks
         const std::string_view owner = story_reward_owner_name(row->owner);
         std::printf("    %-34s %-8.*s %.*s\n", r.c_str(), static_cast<int>(owner.size()), owner.data(),
                     static_cast<int>(row->note.size()), row->note.data());
@@ -454,6 +455,36 @@ static void test_coverage() {
     std::printf("    STORY_GENERIC names (raised by lane C / the UI):");
     for (const std::string& g : generics) std::printf(" %s", g.c_str());
     std::printf("\n");
+}
+
+// mcx0 t05: the story ledger. Every name of retail's Reward_Type enum has a row; every row is a retail name or a Retail
+// (ignored) one; the Missing rows are exactly the not-yet-implemented rewards (the list only shrinks: mcx6). Events: one
+// row per retail event type, codes unique.
+static void test_story_ledger() {
+    size_t retail = 0, missing = 0;
+    for (const RetailStoryReward& r : retail_story_rewards()) {
+        ++retail;
+        const StoryRewardRow* row = find_story_reward(r.name);
+        if (!row) std::printf("    retail reward without a ledger row: %.*s\n", static_cast<int>(r.name.size()), r.name.data());
+        CHECK(row != nullptr);
+    }
+    CHECK(retail == 140);
+    for (const StoryRewardRow& row : story_reward_table()) {
+        if (row.owner == StoryRewardOwner::Missing) ++missing;
+        if (row.owner != StoryRewardOwner::Retail) CHECK(find_retail_story_reward(row.name) != nullptr);
+    }
+    CHECK(missing == 18);  // INFORMATION ... ENABLE_COMBAT_CINEMATIC (docs/MOD_COMPAT_DESIGN.md §9.3)
+    CHECK(find_story_reward("SWITCH_SIDES") && find_story_reward("SWITCH_SIDES")->owner == StoryRewardOwner::Missing);
+    CHECK(find_story_reward("ENABLE_OVERWHELMING_ODDS") && find_story_reward("ENABLE_OVERWHELMING_ODDS")->owner == StoryRewardOwner::Retail);
+    CHECK(find_retail_story_reward("no_such_reward") == nullptr && find_retail_story_reward("credits") != nullptr);
+    std::set<uint8_t> codes;
+    for (const StoryEventRow& e : story_event_table()) CHECK(codes.insert(e.code).second);
+    CHECK(story_event_table().size() == 60);
+    const StoryEventRow* win = find_story_event("story_win_battles");
+    CHECK(win && win->state == StoryEventState::Partial && !win->note.empty());
+    const StoryEventRow* inc = find_story_event("STORY_CORRUPTION_INCREASED");
+    CHECK(inc && inc->state == StoryEventState::Retail);
+    std::printf("  story ledger: %zu retail rewards, %zu missing; %zu event types\n", retail, missing, story_event_table().size());
 }
 
 }  // namespace story_test
@@ -465,6 +496,7 @@ int main() {
     story_test::test_sty1_rewards();
     story_test::test_session_rows_have_handlers();
     story_test::test_coverage();
+    story_test::test_story_ledger();
     if (g_fail) std::printf("FAILED\n");
     else std::printf("story rewards tests passed\n");
     return g_fail ? 1 : 0;
