@@ -69,6 +69,9 @@ struct HudTypeInfo {
     // the blip icon size multiplier in land / space mode (absent = 1). [port] applied to Radar_Icon_Name icons; the
     // vanilla 80 / 200 values sit on team / fleet containers, which the port's radar does not draw.
     float radar_scale_land = 1.0f, radar_scale_space = 1.0f;
+    // mcx4 t14 (same answer, registration GameModeClass vf87 0x362580): Radar_Register_As_Foreground_Object - the blip
+    // goes on the radar's foreground layer, drawn above the other blips.
+    bool radar_foreground = false;
     bool visible_on_radar = true, visible_on_enemy_radar = true;
     // q6 t19 (OBJECT_SCRIPTS §10.3, radar filter 0x35b4d0): Visible_On_Radar_When_Fogged - a Lua-hidden unit keeps its blip.
     bool visible_on_radar_when_fogged = false;

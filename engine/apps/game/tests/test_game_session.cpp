@@ -958,6 +958,14 @@ void corruption_choice_art_test() {
     CHECK(A::at(a.requirement_icon, 0).empty() && A::at(a.icon, -1).empty() && A::at(a.icon, 2).empty());
 }
 
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md): End_Control_Transition_Radar_Event on an owner change seen by a listener
+// friendly to either side.
+// ledger: verifies GameObjectType.End_Control_Transition_Radar_Event
+void control_transition_ping_test() {
+    static_assert(game::control_transition_ping(-1, 0, false, true) && game::control_transition_ping(0, 1, true, false));
+    static_assert(!game::control_transition_ping(1, 2, false, false) && !game::control_transition_ping(0, 0, true, true));
+}
+
 void shows_hero_head_test() {
     static_assert(game::shows_hero_head(true, false) && game::shows_hero_head(false, true) && game::shows_hero_head(true, true));
     static_assert(!game::shows_hero_head(false, false));
@@ -3108,6 +3116,7 @@ int main() {
     planet_weather_lines_test();    // mcx4 t14
     commander_icon_test();          // mcx4 t14
     corruption_choice_art_test();   // mcx4 t14
+    control_transition_ping_test(); // mcx4 t14
     movie_frame_cue_test();         // mcx4 t13
     story_ui_test();
     linked_overlay_test();

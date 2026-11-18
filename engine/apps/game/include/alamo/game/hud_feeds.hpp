@@ -171,6 +171,12 @@ struct CorruptionChoiceArt {
                                     std::string_view requirement_icon);
     static std::string_view at(const std::vector<std::string>& list, int32_t type);  // "" past the list (as the getters)
 };
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "GameObjectType.End_Control_Transition_Radar_Event", capture complete 0x500e30): a
+// capture point whose owner changed raises the type's radar event for a local listener friendly to the old or the new
+// owner.
+constexpr bool control_transition_ping(int32_t old_owner, int32_t new_owner, bool friendly_old, bool friendly_new) {
+    return old_owner != new_owner && (friendly_old || friendly_new);
+}
 struct GameOverArt {
     std::string_view text_key, image;
 };

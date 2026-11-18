@@ -1313,6 +1313,20 @@ void test_tactical_stage2() {
             }
             hud.build(f2, ru, rt);
         }
+        {  // mcx4 t14: Radar_Register_As_Foreground_Object puts the blip one layer above the rest
+            // ledger: verifies GameObjectType.Radar_Register_As_Foreground_Object
+            std::vector<HudTypeInfo> fg_types = rt;
+            fg_types[1].radar_foreground = true;
+            std::vector<size_t> base_n(kHudLayers), fg_n(kHudLayers);
+            hud.build(f2, ru, rt);
+            for (uint32_t l = 0; l < kHudLayers; ++l) base_n[l] = hud.draw_list().items(l, HudList::Alpha).size();
+            hud.build(f2, ru, fg_types);
+            for (uint32_t l = 0; l < kHudLayers; ++l) fg_n[l] = hud.draw_list().items(l, HudList::Alpha).size();
+            bool moved_up = false;  // one quad left layer l - 1 for layer l
+            for (uint32_t l = 1; l < kHudLayers; ++l) moved_up = moved_up || (fg_n[l] == base_n[l] + 1 && fg_n[l - 1] + 1 == base_n[l - 1]);
+            CHECK2(moved_up);
+            hud.build(f2, ru, rt);
+        }
         {  // R5 sensor jamming (ABILITY_VISUALS 3): hostile jammed units drop off the radar; own / allied jammed ones stay
             std::vector<HudUnit> ju = units;
             ju[0].owner = 1;

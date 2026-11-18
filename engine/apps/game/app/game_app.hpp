@@ -371,6 +371,7 @@ public:
     // mcx4 t14 (banner 0x365150): set once at the battle's victory declare, shown until the battle ends.
     bool win_banner_set_ = false;
     size_t reserve_seen_ = 0;  // mcx4 t14: the local reinforcement pool's size last tick (CB_Flash_Count flash)
+    std::map<int64_t, int32_t> capture_owner_seen_;  // mcx4 t14: capture point -> owner last frame (radar event)
     std::u32string win_banner_;
     ui::Rgba8 win_banner_color_{};
     std::vector<std::pair<uint32_t, objects::TypeIndex>> ency_types_;

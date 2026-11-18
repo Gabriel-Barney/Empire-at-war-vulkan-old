@@ -35,6 +35,7 @@ std::vector<HudTypeInfo> build_hud_type_table(const objects::GameObjectTypes& ty
         h.radar_scale_land = data::parse_float_or(data::trim(types.get_string(t, "Radar_Icon_Scale_Land")), 1.0f);
         // ledger: consumes GameObjectType.Radar_Icon_Scale_Space
         h.radar_scale_space = data::parse_float_or(data::trim(types.get_string(t, "Radar_Icon_Scale_Space")), 1.0f);
+        h.radar_foreground = types.get_bool(t, "Radar_Register_As_Foreground_Object");  // ledger: consumes GameObjectType.Radar_Register_As_Foreground_Object
         auto flag = [&](std::string_view tag) {  // absent = Yes [port]
             const std::string_view v = data::trim(types.get_string(t, tag));
             if (v.empty()) return true;

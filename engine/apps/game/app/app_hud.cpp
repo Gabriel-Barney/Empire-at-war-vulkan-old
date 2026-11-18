@@ -966,6 +966,27 @@ void App::build_tactical_hud() {
         const auto it = std::lower_bound(objs.begin(), objs.end(), id, [](const render::SnapshotObject& x, objects::ObjectId v) { return x.id < v; });
         return it != objs.end() && it->id == id ? &*it : nullptr;
     };
+    // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameObjectType.End_Control_Transition_Radar_Event"): a capture point changing hands
+    // raises its type's radar event at the point when the local player is friendly to the old or the new owner.
+    if (const sim::TacticalBattle* b = battle())
+        if (const tactical::garrison::CapturePointSystem* cps = b->captures()) {
+            const auto& cs = b->combat();
+            const int32_t me = local_player();
+            const auto friendly = [&cs, me](int32_t o) { return me >= 0 && o >= 0 && (o == me || !cs.is_enemy(me, o)); };
+            for (size_t i = 0; i < cps->point_count(); ++i) {
+                const auto pid = cps->point_at(i);
+                const int32_t now = cps->owner(pid);
+                const auto [it, fresh] = capture_owner_seen_.try_emplace(static_cast<int64_t>(pid), now);
+                const int32_t was = it->second;
+                it->second = now;
+                if (fresh || !control_transition_ping(was, now, friendly(was), friendly(now))) continue;
+                const render::SnapshotObject* o = obj_of(static_cast<objects::ObjectId>(pid));
+                if (!o || o->type >= data_.types.size()) continue;
+                // ledger: consumes GameObjectType.End_Control_Transition_Radar_Event
+                const std::string_view ev = ascii_trim(data_.types.get_string(o->type, "End_Control_Transition_Radar_Event"));
+                if (!ev.empty()) radar_events_.add(radar_settings_, std::string(ev), o->position.x, o->position.y);
+            }
+        }
     if (const sim::TacticalBattle* b = battle())
         for (const uint32_t id : sel) {
             const auto q = b->queued_orders(static_cast<objects::ObjectId>(id));
