@@ -287,6 +287,39 @@ void test_retreat_begin_lines() {
     CHECK(H::retreat_begin_tag(false, false, true).empty());  // an ally of the retreater hears nothing
 }
 
+// mcx4 t13 batch G (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_HUD_Special_Weapon_Ready family"; both builds).
+// ledger: verifies Faction.SFXEvent_HUD_Special_Weapon_Ready
+// ledger: verifies Faction.SFXEvent_HUD_Enemy_Special_Weapon_Ready
+// ledger: verifies Faction.SFXEvent_HUD_Special_Weapon_Firing
+// ledger: verifies Faction.SFXEvent_HUD_Enemy_Special_Weapon_Firing
+void test_special_weapon_lines() {
+    using H = GameAudioHost;
+    CHECK(H::special_weapon_tag(false, true) == "SFXEvent_HUD_Special_Weapon_Ready");
+    CHECK(H::special_weapon_tag(false, false) == "SFXEvent_HUD_Enemy_Special_Weapon_Ready");
+    CHECK(H::special_weapon_tag(true, true) == "SFXEvent_HUD_Special_Weapon_Firing");
+    CHECK(H::special_weapon_tag(true, false) == "SFXEvent_HUD_Enemy_Special_Weapon_Firing");
+    // FoC lists: one event per occurrence (hypervelocity gun, ion cannon, an empty third), picked by the target action index.
+    const std::vector<std::pair<std::string, std::string>> f = {{"SFXEvent_HUD_Special_Weapon_Ready", "HV_Ready"},
+                                                                {"SFXEvent_HUD_Enemy_Special_Weapon_Ready", "E_HV"},
+                                                                {"sfxevent_hud_special_weapon_ready", "Ion_Ready"},
+                                                                {"SFXEvent_HUD_Special_Weapon_Ready", ""}};
+    CHECK(H::nth_field(f, "SFXEvent_HUD_Special_Weapon_Ready", 0) == "HV_Ready");
+    CHECK(H::nth_field(f, "SFXEvent_HUD_Special_Weapon_Ready", 1) == "Ion_Ready");
+    CHECK(H::nth_field(f, "SFXEvent_HUD_Special_Weapon_Ready", 2).empty() && H::nth_field(f, "SFXEvent_HUD_Special_Weapon_Ready", 3).empty());
+    CHECK(H::nth_field(f, "SFXEvent_HUD_Enemy_Special_Weapon_Ready", 0) == "E_HV" && H::nth_field(f, "X", -1).empty());
+}
+
+// mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "GameObjectType.SFXEvent_Move_Into_Asteroid_Field family"; both builds).
+// ledger: verifies GameObjectType.SFXEvent_Move_Into_Asteroid_Field
+// ledger: verifies GameObjectType.SFXEvent_Move_Into_Nebula
+void test_move_into_field() {
+    using H = GameAudioHost;
+    CHECK(H::move_into_field_tag(1u) == "SFXEvent_Move_Into_Asteroid_Field");
+    CHECK(H::move_into_field_tag(4u) == "SFXEvent_Move_Into_Nebula");
+    CHECK(H::move_into_field_tag(5u) == "SFXEvent_Move_Into_Asteroid_Field");  // asteroid tested first
+    CHECK(H::move_into_field_tag(0u).empty() && H::move_into_field_tag(2u).empty() && H::move_into_field_tag(8u).empty());
+}
+
 // aud4 b0289 / b0300: garrison entry line and the hero clash win speech (both builds; presentation rules only).
 void test_garrison_and_clash_lines() {
     using H = GameAudioHost;
@@ -893,6 +926,8 @@ int main() {
     test_control_lines();               // mcx4 t13 batch C
     test_battle_result_lines();         // mcx4 t13 batch D
     test_retreat_begin_lines();         // mcx4 t13 batch E
+    test_special_weapon_lines();        // mcx4 t13 batch G
+    test_move_into_field();             // mcx4 t13 batch G
     test_intro_speech_t07();
     test_aud2();
 #ifdef ALAMO_GAME_HAVE_AUDIO

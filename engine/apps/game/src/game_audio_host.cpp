@@ -110,6 +110,33 @@ std::string_view GameAudioHost::retreat_begin_tag(bool local_retreats, bool loca
     return {};
 }
 
+std::string_view GameAudioHost::move_into_field_tag(uint32_t dest_fields) {
+    // ledger: consumes GameObjectType.SFXEvent_Move_Into_Asteroid_Field
+    if ((dest_fields & 1u) != 0) return "SFXEvent_Move_Into_Asteroid_Field";  // tactical::abilities::kFieldAsteroid
+    // ledger: consumes GameObjectType.SFXEvent_Move_Into_Nebula
+    if ((dest_fields & 4u) != 0) return "SFXEvent_Move_Into_Nebula";  // kFieldNebula
+    return {};
+}
+
+std::string_view GameAudioHost::special_weapon_tag(bool fired, bool own) {
+    // ledger: consumes Faction.SFXEvent_HUD_Special_Weapon_Ready
+    // ledger: consumes Faction.SFXEvent_HUD_Enemy_Special_Weapon_Ready
+    if (!fired) return own ? "SFXEvent_HUD_Special_Weapon_Ready" : "SFXEvent_HUD_Enemy_Special_Weapon_Ready";
+    // ledger: consumes Faction.SFXEvent_HUD_Special_Weapon_Firing
+    // ledger: consumes Faction.SFXEvent_HUD_Enemy_Special_Weapon_Firing
+    return own ? "SFXEvent_HUD_Special_Weapon_Firing" : "SFXEvent_HUD_Enemy_Special_Weapon_Firing";
+}
+
+std::string_view GameAudioHost::nth_field(std::span<const std::pair<std::string, std::string>> fields, std::string_view tag,
+                                          int32_t index) {
+    int32_t n = 0;
+    for (const auto& [k, v] : fields) {
+        if (!ascii_iequals(k, tag)) continue;
+        if (n++ == index) return v;
+    }
+    return {};
+}
+
 GameAudioHost::ControlLines GameAudioHost::control_lines(bool friendly_old, bool friendly_new, bool hostile_old, bool hostile_new,
                                                          bool old_neutral, bool new_neutral) {
     ControlLines c;
@@ -326,14 +353,22 @@ void GameAudioHost::negative_feedback() {
 }
 
 void GameAudioHost::unit_response(const objects::GameObjectTypes& types, objects::TypeIndex type, uint64_t object, UnitResponse kind,
-                                  bool group, int32_t owner) {
+                                  bool group, int32_t owner, uint32_t dest_fields) {
     if (!game_) return;
     // The mode's "excluded set" = the retreat coordinator's retreating units (STRATEGIC_GAPS §7.4 [M]): no response.
     if (owner >= 0 && owner == retreating_player_) {
         ++stats_.excluded;
         return;
     }
-    if (game_->unit_response(object, sounds(types, type), order_of(kind, group), position_of(object), group)) ++stats_.responses;
+    const audio::UnitOrder order = order_of(kind, group);
+    if (const std::string_view tag = kind == UnitResponse::Move ? move_into_field_tag(dest_fields) : std::string_view(); !tag.empty())
+        if (const std::string_view ev = types.get_string(type, tag); !ev.empty()) {
+            audio::UnitSounds s = sounds(types, type);  // the field line replaces the move response (0x3738b0)
+            s.response[static_cast<size_t>(order)] = std::string(ev);
+            if (game_->unit_response(object, s, order, position_of(object), group)) ++stats_.responses;
+            return;
+        }
+    if (game_->unit_response(object, sounds(types, type), order, position_of(object), group)) ++stats_.responses;
 }
 
 void GameAudioHost::battle_end(bool won, std::string_view enemy_faction) {
@@ -730,6 +765,26 @@ void GameAudioHost::cue_lines(const sim::TacticalBattle& battle, const objects::
             }
         }
     }
+    // Special weapons (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Special_Weapon_Ready family"): ready 0x492010 (only while
+    // SpecialWeaponsAllowed holds for the owner; an own / friendly weapon's type SFXEvent_Special_Weapon_Ready replaces
+    // the faction line) and firing 0x491cd0; the local faction's list entry [Special_Weapon_Target_Action_Index]; 2D.
+    if (local_player >= 0 && local_player < static_cast<int32_t>(player_factions_.size()))
+        if (const audio::FactionAudio* lf = game_data_->find_faction(player_factions_[static_cast<size_t>(local_player)]))
+            for (const tactical::abilities::SpecialWeaponEvent& e : battle.special_weapon_events()) {
+                const bool fired = e.kind == tactical::abilities::SwEventKind::Fired;
+                if (!fired && e.kind != tactical::abilities::SwEventKind::Ready) continue;
+                const int32_t o = owner_of(static_cast<int64_t>(e.id));
+                const objects::TypeIndex t = type_of(static_cast<int64_t>(e.id));
+                if (o < 0 || t == objects::kNone) continue;
+                if (!fired && !battle.special_weapons_allowed(o)) continue;
+                const bool own = o == local_player || !cs.is_enemy(local_player, o);
+                std::string_view ev;
+                // ledger: consumes GameObjectType.SFXEvent_Special_Weapon_Ready
+                if (!fired && own) ev = types.get_string(t, "SFXEvent_Special_Weapon_Ready");
+                if (ev.empty())
+                    ev = nth_field(lf->fields, special_weapon_tag(fired, own), types.get_int(t, "Special_Weapon_Target_Action_Index"));
+                if (!ev.empty() && game_->gui_sfx(ev)) ++stats_.special_weapon_lines;
+            }
     // Retreat begin (MCX4_T13_RE_ANSWERS "Faction.Land_Retreat_Begin_SFXEvent family"): on the tick a retreat countdown
     // starts; 2D. A local retreater first tries its retreating units' SFXEvent_Retreat_Start ([port] the retreater's
     // battle units in id order stand for the coordinator's list). Cancel / not-allowed lines: no port path yet.
@@ -1048,7 +1103,7 @@ void GameAudioHost::movie_started(bool movie_music, bool halt_music) {  // same 
 }
 void GameAudioHost::movie_cue(std::string_view) {}
 void GameAudioHost::movie_ended() { movie_music_on_ = movie_halted_ = false; }
-void GameAudioHost::unit_response(const objects::GameObjectTypes&, objects::TypeIndex, uint64_t, UnitResponse, bool, int32_t) {}
+void GameAudioHost::unit_response(const objects::GameObjectTypes&, objects::TypeIndex, uint64_t, UnitResponse, bool, int32_t, uint32_t) {}
 void GameAudioHost::battle_tick(const sim::TacticalBattle&, const objects::ObjectStore&, const objects::GameObjectTypes&, int32_t,
                                 const std::function<bool(objects::ObjectId)>&) {}
 void GameAudioHost::battle_end(bool, std::string_view) {}

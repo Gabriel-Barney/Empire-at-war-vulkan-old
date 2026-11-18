@@ -80,6 +80,7 @@ struct GameAudioStats {
     uint64_t control_lines = 0;                                                    // mcx4 t13 batch C
     uint64_t battle_result_lines = 0;                                              // mcx4 t13 batch D
     uint64_t retreat_lines = 0;                                                    // mcx4 t13 batch E
+    uint64_t special_weapon_lines = 0;                                             // mcx4 t13 batch G
 };
 
 class GameAudioHost {
@@ -109,8 +110,13 @@ public:
     void negative_feedback();
     // owner = the unit's player (-1 unknown): units of the battle's retreating player give no response (the mode's
     // "excluded set" = the retreat coordinator's retreating units, STRATEGIC_GAPS §7.4 [M]; stats().excluded).
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Move_Into_Asteroid_Field family" [H]): `dest_fields` = the
+    // space field kinds (tactical::abilities kField* bits) at a local unit's space move destination; the type's
+    // move_into_field_tag line, when set, replaces the move response.
     void unit_response(const objects::GameObjectTypes& types, objects::TypeIndex type, uint64_t object, UnitResponse kind,
-                       bool group = false, int32_t owner = -1);
+                       bool group = false, int32_t owner = -1, uint32_t dest_fields = 0);
+    // Asteroid field (bit 1) first, then nebula (bit 4); "" for neither.
+    static std::string_view move_into_field_tag(uint32_t dest_fields);
     // Battle-end dialog opened: the local faction's win / lose music (Music_Event_Tactical_<Win/Lose>[_Vs_Faction]),
     // music mode 16 (STRATEGIC_GAPS §7.4).
     void battle_end(bool won, std::string_view enemy_faction = {});
@@ -307,6 +313,12 @@ public:
     // when a retreat starts ("" = none): the retreater is local -> _Retreat_Begin_SFXEvent (after the retreating units'
     // own SFXEvent_Retreat_Start, which replaces it); the local player is hostile to the retreater -> _Enemy_Begin_.
     static std::string_view retreat_begin_tag(bool local_retreats, bool local_hostile, bool space);
+    // "Faction.SFXEvent_HUD_Special_Weapon_Ready family" [H]: each faction tag is a list (one event per XML occurrence),
+    // indexed by the weapon type's Special_Weapon_Target_Action_Index. special_weapon_tag gives the faction tag for a
+    // ready (or fired) weapon whose owner is local / friendly (`own`) or hostile; nth_field the index-th occurrence of a
+    // tag in `fields` ("" when absent or out of range).
+    static std::string_view special_weapon_tag(bool fired, bool own);
+    static std::string_view nth_field(std::span<const std::pair<std::string, std::string>> fields, std::string_view tag, int32_t index);
     struct ControlLines {
         std::string_view friendly, enemy;
     };

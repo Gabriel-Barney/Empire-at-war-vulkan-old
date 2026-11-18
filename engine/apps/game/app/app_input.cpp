@@ -410,7 +410,20 @@ void App::respond(const commands::EventData& ev) {
                     break;
                 }
     }
-    audio_.unit_response(data_.types, st.type(h), static_cast<uint64_t>(st.id(h)), kind, false, top->tactical() ? st.owner(h) : -1);
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Move_Into_Asteroid_Field family"): a local unit's space move
+    // whose destination lies in an asteroid field / nebula. [port] point moves and object moves; ray moves read none.
+    uint32_t fields = 0;
+    if (kind == UnitResponse::Move && top->tactical() && st.owner(h) == local_player())
+        if (const sim::TacticalBattle* b = session_->battle(); b && b->is_space()) {
+            if (ev.type() == T::MoveToPosition || ev.type() == T::MoveToPositionFacing) {
+                fields = b->space_fields().kinds_at(ev.f("x"), ev.f("y"));
+            } else if (ev.type() == T::MoveToObject) {
+                const objects::ObjectHandle th = st.find(static_cast<objects::ObjectId>(ev.u("target")));
+                if (st.alive(th)) fields = b->space_fields().kinds_at(st.position(th).x, st.position(th).y);
+            }
+        }
+    audio_.unit_response(data_.types, st.type(h), static_cast<uint64_t>(st.id(h)), kind, false, top->tactical() ? st.owner(h) : -1,
+                         fields);
 }
 
 void App::submit(commands::EventData ev, bool voice) {
