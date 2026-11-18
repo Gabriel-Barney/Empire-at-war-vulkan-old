@@ -814,9 +814,14 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
         if (pi == kInvalidPlanet) return;
         out = galactic_build_options(*gs, s->local_player(), pi,
                                      [types](uint32_t t) { return t < types->size() ? (*types)[t].icon_name : std::string(); });
+        // mcx4 t14 (§5.1.1 step 1): a type with no Build_Tab_* flag is never listed.
+        std::erase_if(out, [otypes](const ui::GalacticBuildOption& o) {
+            const auto t = static_cast<objects::TypeIndex>(o.type_index);
+            return o.type_index >= otypes->size() ||
+                   !game::galactic_build_listed([otypes, t](std::string_view tag) { return otypes->get_bool(t, tag); });
+        });
         for (ui::GalacticBuildOption& o : out)
-            if (o.type_index < otypes->size())
-                o.row = otypes->get_int(static_cast<objects::TypeIndex>(o.type_index), "GUI_Row") == 0 ? 0 : 1;
+            o.row = otypes->get_int(static_cast<objects::TypeIndex>(o.type_index), "GUI_Row") == 0 ? 0 : 1;
     };
     // §5.1.1 (0x3e8a80): an inaccessible (or destroyed) surface forces the space tab.
     if (g && selected_planet_ != 0)

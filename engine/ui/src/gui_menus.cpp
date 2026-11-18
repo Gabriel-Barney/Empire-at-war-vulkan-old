@@ -990,12 +990,17 @@ void FrontEnd::fill_skirmish_options(GuiDialog& d, const SkirmishOptionsSetup& o
     skirmish_win_rows_ = game_type_ == kSkirmishGameControl ? std::vector<int32_t>{kWinControlPoints}
                          : game_type_ == kSkirmishGameSpace ? std::vector<int32_t>{kWinAllUnits, kWinStarbase}
                                                             : std::vector<int32_t>{kWinAllUnits, kWinAllStructures, kWinCommandHq};
-    const int32_t fallback = game_type_ == kSkirmishGameControl ? kWinControlPoints : game_type_ == kSkirmishGameSpace ? kWinStarbase : kWinAllStructures;
+    // mcx4 t14 (0x4acf00 / 0x4ad000): the type's default is MP_Default_Land / Space_Tactical_Win_Condition; one the rows
+    // lack steps to the next row above it, wrapping to the first [M: step order].
+    const int32_t fallback = game_type_ == kSkirmishGameControl ? kWinControlPoints : game_type_ == kSkirmishGameSpace ? o.space_default_win : o.land_default_win;
     int32_t sel = -1;
     for (size_t i = 0; i < skirmish_win_rows_.size(); ++i)
         if (skirmish_win_rows_[i] == o.win_condition) sel = static_cast<int32_t>(i);
     for (size_t i = 0; i < skirmish_win_rows_.size() && sel < 0; ++i)
         if (skirmish_win_rows_[i] == fallback) sel = static_cast<int32_t>(i);
+    for (size_t i = 0; i < skirmish_win_rows_.size() && sel < 0; ++i)
+        if (skirmish_win_rows_[i] > fallback) sel = static_cast<int32_t>(i);
+    if (sel < 0 && !skirmish_win_rows_.empty()) sel = 0;
     std::vector<std::u32string> rows;
     for (const int32_t w : skirmish_win_rows_) rows.push_back(text(win_condition_key(w)));
     d.set_items("IDC_WIN_CONDITION_COMBO", std::move(rows), sel);

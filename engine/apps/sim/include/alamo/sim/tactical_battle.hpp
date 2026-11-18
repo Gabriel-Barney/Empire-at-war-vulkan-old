@@ -159,6 +159,10 @@ struct BattleConfig {
         // option flags +0x20: 0x1 heroes (named heroes buildable), 0x2 free starting units (the host places the start
         // forces), 0x4 super weapons (Is_Skirmish_Tactical_Super_Weapon buildable, bombing runs), 0x8 pre-built bases.
         bool heroes = true, starting_units = true, super_weapons = true, prebuilt_base = true;
+        // mcx4 t14 (SKIRMISH_SETUP §0, 0x4acf00): GameConstants MP_Default_Land_ / _Space_Tactical_Win_Condition, the
+        // condition a land / space game type takes when none is chosen (shipped 0x13 / 0x16); skirmish_win_condition
+        // steps an invalid one into the type's set.
+        uint8_t land_default_win = 0x13, space_default_win = 0x16;
         friend bool operator==(const SkirmishOptions&, const SkirmishOptions&) = default;
     };
     SkirmishOptions skirmish_options;

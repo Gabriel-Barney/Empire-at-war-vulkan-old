@@ -7,6 +7,7 @@
 
 #include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/game_object_types.hpp"
+#include "alamo/sim/l1_loaders.hpp"
 #include "alamo/sim/tactical_battle.hpp"
 
 namespace alamo::sim {
@@ -45,10 +46,9 @@ void TacticalBattle::vm_setup(TacticalMode& mode) {
         // SKIRMISH_SETUP §2 step 4: one record per player with the option's win condition (skm1 t02: BattleConfig::skirmish_options;
         // 0x4ad000's valid sets: land 0x12..0x14, space 0x12 / 0x16; anything else = the kind's MP_Default_Land / Space_Tactical_
         // Win_Condition, 0x13 / 0x16) [port: only the slot players; skm2 t02: every slot].
-        const uint8_t want = cfg_.skirmish_options.set ? cfg_.skirmish_options.win_condition : 0;
-        const bool valid = space_ ? (want == kSkirmishAllUnits || want == kSkirmishStarbase)
-                                  : (want >= kSkirmishAllUnits && want <= kSkirmishCommandHq);
-        const uint8_t type = valid ? want : space_ ? kSkirmishStarbase : kSkirmishLandBase;
+        // mcx4 t14: the kind's default is GameConstants MP_Default_Land / Space_Tactical_Win_Condition (SkirmishOptions).
+        const BattleConfig::SkirmishOptions& so = cfg_.skirmish_options;
+        const uint8_t type = skirmish_win_condition(so.set ? so.win_condition : 0, space_, so.land_default_win, so.space_default_win);
         for (int32_t s = 0; s < skirmish_slot_count(); ++s)
             if (const int32_t p = skirmish_slot_player(s); p >= 0) vm_add_record(type, p, kRecordCountdown, false);
     } else {

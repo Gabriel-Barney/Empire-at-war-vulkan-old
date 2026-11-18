@@ -243,6 +243,15 @@ ui::HudBuildOption::Block galactic_build_block(commands::RejectReason why) {
     return B::Prerequisite;
 }
 
+bool galactic_build_listed(const std::function<bool(std::string_view)>& flag) {
+    // ledger: consumes GameObjectType.Build_Tab_Special_Structures
+    // ledger: consumes GameObjectType.Build_Tab_Heroes
+    for (const char* tag : {"Build_Tab_Land_Units", "Build_Tab_Space_Units", "Build_Tab_Special_Structures", "Build_Tab_Heroes",
+                            "Build_Tab_Outpost", "Build_Tab_Space_Station"})
+        if (flag(tag)) return true;  // ledger: consumes GameObjectType.Build_Tab_Outpost
+    return false;                    // ledger: consumes GameObjectType.Build_Tab_Space_Station
+}
+
 std::vector<ui::GalacticBuildOption> galactic_build_options(const galactic::GalacticSim& g, int32_t player, PlanetIndex planet,
                                                             const std::function<std::string(uint32_t type)>& icon) {
     std::vector<ui::GalacticBuildOption> out;
