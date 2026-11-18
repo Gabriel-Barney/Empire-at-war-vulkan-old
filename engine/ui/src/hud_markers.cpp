@@ -239,11 +239,20 @@ void ReticleTable::parse(const data::XmlNode& root) {
             friendly_screen_size = data::parse_float_or(n.text_trimmed(), friendly_screen_size);
             continue;
         }
+        // mcx4 t15 (HUD_GAPS §1.5): every HardPoint_Target_Reticle_<variant>_Texture row is read by this prefix / suffix
+        // match (the variants: Enemy, Enemy_Tracked, Friendly, Friendly_Tracked, Friendly_Disabled[_Tracked], _Repairing).
+        // ledger: consumes GameConstants.HardPoint_Target_Reticle_Enemy_Texture
+        // ledger: consumes GameConstants.HardPoint_Target_Reticle_Enemy_Tracked_Texture
         if (tag.size() <= kPrefix.size() + kSuffix.size() || tag.compare(0, kPrefix.size(), kPrefix) != 0 ||
             tag.compare(tag.size() - kSuffix.size(), kSuffix.size(), kSuffix) != 0)
             continue;
+        // ledger: consumes GameConstants.HardPoint_Target_Reticle_Friendly_Texture
+        // ledger: consumes GameConstants.HardPoint_Target_Reticle_Friendly_Tracked_Texture
         const std::string variant = tag.substr(kPrefix.size(), tag.size() - kPrefix.size() - kSuffix.size());
+        // ledger: consumes GameConstants.HardPoint_Target_Reticle_Friendly_Disabled_Texture
+        // ledger: consumes GameConstants.HardPoint_Target_Reticle_Friendly_Disabled_Tracked_Texture
         const auto pair = data::parse_pair(n.text_trimmed());
+        // ledger: consumes GameConstants.HardPoint_Target_Reticle_Friendly_Repairing_Texture
         if (!pair) continue;
         set(variant, pair->first, std::string(data::trim(pair->second)));
     }

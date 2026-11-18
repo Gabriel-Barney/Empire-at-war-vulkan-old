@@ -708,11 +708,11 @@ uint32_t GameAudioHost::fleet_departure(bool local_owner, bool local_sees) {
 
 void GameAudioHost::campaign_end(bool won, std::string_view enemy_faction) {
     if (!game_) return;
-    audio::BattleResult r;
-    r.won = won;
-    r.strategic = true;  // Music_Event_Strategic_* instead of _Tactical_*
-    r.enemy_faction = std::string(enemy_faction);
-    game_->battle_end(r);  // mode 16, forced
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.Music_Event_Strategic_Win family" [H]): retail never reads the faction's
+    // Music_Event_Strategic_Win / _Lose; the end dialogs play Audio.xml Music_Event_Battle_End_Summary_Screen_<Win/Lose>
+    // in music mode 16 (0x87770 / 0x88050). The winner's faction no longer picks a row.
+    (void)enemy_faction;
+    game_->battle_summary_screen(won);
     ++stats_.campaign_end_music;
 }
 

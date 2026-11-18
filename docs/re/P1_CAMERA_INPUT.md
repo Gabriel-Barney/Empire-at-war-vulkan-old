@@ -31,7 +31,7 @@ default key table), P1_DOUBLE_CLICK_MOVE.md (double-click move, not covered here
 5. **Land splines are always active** when `Use_Splines` is set. The spline fraction starts at 1.0 (zoomed out), so a
    land battle starts at pitch 55 / distance 460 from the splines, not at Pitch_Default 50. [H]
 6. **Galactic wheel = discrete planet zoom.** Wheel up zooms into the hovered or selected planet. Wheel down zooms back
-   out. There is no continuous galactic zoom range. `Max_Galactic_Zoom_Distance`, `Min/Max_Galactic_Zoom_Speed` and
+   out. There is no continuous galactic zoom range. `Max_Galactic_Zoom_Distance`, `Min_Galactic_Zoom_Speed` / `Max_Galactic_Zoom_Speed` and
    `Galactic_Zoom_Acceleration` have no reader. [H for the behaviour, M for "no reader"]
 7. **A plain left click on nothing deselects**: it submits a "set selection = empty" event. [H; M for which click
    classes count as "nothing"]

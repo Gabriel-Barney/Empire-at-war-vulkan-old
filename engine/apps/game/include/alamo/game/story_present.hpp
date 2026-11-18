@@ -30,6 +30,7 @@
 namespace alamo::data {
 struct GameConstants;
 class GameDatabase;
+class XmlNode;
 }  // namespace alamo::data
 
 namespace alamo::game {
@@ -153,6 +154,7 @@ public:
         double advisor_hint_interval = 300.0; // Advisor_Hint_Interval, seconds (ticks at kTicksPerSecond)
         uint32_t first_hint_tick = 90;        // §6.5: player +0x3e0 := 0x5a at mode start
         bool subtitles = true;                // IDC_USE_MOVIE_SUBTITLES
+        double flash_duration = 0.4;          // mcx4 t14: GameConstants GUI_Flash_Duration (one flash; FLASH_* x 3)
     };
     static constexpr uint32_t kTicksPerSecond = 30;
 
@@ -289,6 +291,9 @@ private:
 std::vector<std::string> split_story_ids(std::string_view list);
 // GameConstants Advisor_Hint_Interval (seconds, shipped 300) and Advisor_Hint_Duration (seconds per character, shipped 0.1).
 void load_story_advisor_config(const data::GameConstants& gc, StoryPresenter::Config& out);
+// mcx4 t14 / t15 (STORY_PRESENTATION_REWARDS §1.1): Hint_Text_Color / System_ / Task_ / Speech_Text_Color ("r g b", alpha
+// 255) from the <GameConstants> root; a value with fewer than three numbers keeps the default.
+void load_story_colors(const data::XmlNode& game_constants_root, StoryPresenter::Colors& out);
 // The faction's hint text ids for a game mode (0 galactic, 1 space, 2 land): Galactic_ / Space_ / Land_Advisor_Hints.
 std::vector<std::string> faction_advisor_hints(const data::GameDatabase& db, std::string_view faction, uint8_t mode);
 // q6 t36 (owner setter 0x3fb040 tail, Q6_T27 §1): TEXT_PLANET_CHANGED_HANDS ("%ls: Control changed from %ls to %ls") or,

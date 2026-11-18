@@ -381,6 +381,11 @@ void test_parse() {
     const MusicEvent& g = db.music()[db.find_music("Galactic")];
     CHECK(g.files.size() == 3 && g.files[1] == "G2.MP3" && g.loop && g.fade_in_seconds == 2.0f && g.volume_percent == 60);
     CHECK(db.speech()[db.find_speech("Line_2")].overlap_test == "Tut");
+    // mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "DynamicTrack.Files family" [H]): the music parser's Files (playlist) and
+    // Volume_Percent, which xml_field_tables.md files under DynamicTrack; checked on "Galactic" above (Files, Volume_Percent).
+    // ledger: verifies DynamicTrack.Files
+    // ledger: verifies DynamicTrack.Volume_Percent
+    CHECK(g.files.size() == 3 && g.volume_percent == 60);
     const AudioConstants& c = db.constants();
     CHECK(c.saturation_distance_mod[1] == 1.5f && c.rolloff_distance_mod[2] == 10.0f && c.listener_z_pullback[2] == 60.0f);
     CHECK(c.ambient_map_sounds.size() == 1 && c.ambient_map_sounds[0].second == "Ambient_Map_Sounds_Temperate");

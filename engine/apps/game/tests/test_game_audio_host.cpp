@@ -673,10 +673,14 @@ void test_aud2() {
   <MusicEvent Name="Strat_Win"><Files>W.MP3</Files></MusicEvent>
   <MusicEvent Name="Strat_Lose"><Files>L.MP3</Files></MusicEvent>
   <MusicEvent Name="Strat_Lose_Empire"><Files>LE.MP3</Files></MusicEvent>
+  <MusicEvent Name="Sum_Win"><Files>SW.MP3</Files></MusicEvent>
+  <MusicEvent Name="Sum_Lose"><Files>SL.MP3</Files></MusicEvent>
 </MusicEvents>
 )");
     tree->add("Data\\XML\\SpeechEvents.xml", "<SpeechEvents/>");
-    tree->add("Data\\XML\\Audio.xml", "<Audio><SFXEvent_Planet_Revealed> GUI_Planet_Mouse_Over </SFXEvent_Planet_Revealed></Audio>");
+    tree->add("Data\\XML\\Audio.xml", "<Audio><SFXEvent_Planet_Revealed> GUI_Planet_Mouse_Over </SFXEvent_Planet_Revealed>"
+              "<Music_Event_Battle_End_Summary_Screen_Win> Sum_Win </Music_Event_Battle_End_Summary_Screen_Win>"
+              "<Music_Event_Battle_End_Summary_Screen_Lose> Sum_Lose </Music_Event_Battle_End_Summary_Screen_Lose></Audio>");
     tree->add("Data\\XML\\FactionFiles.xml", "<Faction_Files><File>Factions.xml</File></Faction_Files>");
     tree->add("Data\\XML\\Factions.xml", R"(<?xml version="1.0" ?>
 <Factions>
@@ -739,13 +743,13 @@ void test_aud2() {
     h.update(0.0);
     CHECK(cur(h) == "Gal_Rebel");
 
-    // t08: campaign won / lost -> Music_Event_Strategic_Win / _Lose; the _Vs_Faction row first; mode 16.
+    // t08 / mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.Music_Event_Strategic_Win family"): campaign won / lost ->
+    // Audio.xml Music_Event_Battle_End_Summary_Screen_Win / _Lose in mode 16; the faction's Music_Event_Strategic_* rows
+    // (retail-unused) are not played.
     h.campaign_end(true);
-    CHECK(cur(h) == "Strat_Win" && mode(h) == audio::music_mode::kBattleEnd);
+    CHECK(cur(h) == "Sum_Win" && mode(h) == audio::music_mode::kBattleEnd);
     h.campaign_end(false, "Empire");
-    CHECK(cur(h) == "Strat_Lose_Empire" && mode(h) == audio::music_mode::kBattleEnd);
-    h.campaign_end(false, "Underworld");
-    CHECK(cur(h) == "Strat_Lose" && h.stats().campaign_end_music == 3);
+    CHECK(cur(h) == "Sum_Lose" && mode(h) == audio::music_mode::kBattleEnd && h.stats().campaign_end_music == 2);
 #endif
 }
 

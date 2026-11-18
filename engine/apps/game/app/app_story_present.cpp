@@ -28,6 +28,9 @@ void App::story_present_setup() {
     };
     StoryPresenter::Config& cfg = story_present_.config();  // ui2 t07: Advisor_Hint_Interval / Advisor_Hint_Duration
     load_story_advisor_config(data_.db.constants(), cfg);
+    StoryPresenter::Colors colors;  // mcx4 t14 / t15: the screen-text colours (STORY_PRESENTATION_REWARDS §1.1)
+    load_story_colors(data_.db.constants().element, colors);
+    story_present_.set_colors(colors);
     advisor_mode_ = 255;
     advisor_gal_s_ = 0.0;
     advisor_gal_started_ = false;
