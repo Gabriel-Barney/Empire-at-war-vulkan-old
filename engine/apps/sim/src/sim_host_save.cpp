@@ -551,7 +551,14 @@ bool SimHost::load(const SaveFile& in, std::string* err, LoadReport* report) {
         return finish(false);
     }
     rep.descriptor_error = SessionDescriptor::mismatch(saved, session());
-    if (!rep.descriptor_error.empty()) return finish(false);
+    loaded_with_different_data_ = false;
+    if (!rep.descriptor_error.empty()) {
+        rep.different_data = SessionDescriptor::only_data_differs(saved, session());
+        if (!rep.different_data || !allow_different_data_) return finish(false);
+        // D3: load anyway; the chunks below decide whether the state fits the current data.
+        rep.descriptor_error.clear();
+        rep.loaded_with_different_data = loaded_with_different_data_ = true;
+    }
 
     // Stage 2: a save taken during a battle has more modes than the rebuilt session (save_session.hpp "LOADING A SAVE
     // TAKEN DURING A BATTLE"): pass 1 restores the bottom modes and the systems' own state, the participants rebuild the

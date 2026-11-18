@@ -377,6 +377,12 @@ public:
     // DURING A BATTLE"). False: *err names the failing chunks and the session must be discarded (systems whose chunk
     // did read are loaded, the others keep their new-game state).
     bool load(const SaveFile& in, std::string* err = nullptr, LoadReport* report = nullptr);
+    // mcx3 t05 (D3): load() goes ahead when the save differs from the session only in its game data
+    // (SessionDescriptor::only_data_differs); every chunk still has to read (the object store refuses another type
+    // table, the story another plot set), else the load fails as any other. Off by default: such a save is refused
+    // with LoadReport::different_data set. loaded_with_different_data(): the last load went ahead that way.
+    void set_allow_different_data(bool allow) { allow_different_data_ = allow; }
+    bool loaded_with_different_data() const { return loaded_with_different_data_; }
     // Replays / records on top of a loaded session (commands/recording.hpp "REPLAY FROM A SAVE"): the loaded pipeline is
     // kept (record_to / replay_from would rebuild it). `at` = SavePoint{save.tick, save_digest(save.encode())}. Call after
     // load(), before the first tick. replay_after_load: false (+ *err, nothing changed) when `rec` does not continue the
@@ -386,6 +392,8 @@ public:
     // ---- end N1 ----
 
 private:
+    bool allow_different_data_ = false;       // mcx3 t05
+    bool loaded_with_different_data_ = false;  // mcx3 t05
     void make_pipeline(const commands::SchedulerConfig& cfg);
     commands::RejectReason handle(uint64_t tick, const commands::Command& cmd);
     commands::RejectReason apply(uint8_t player, const commands::EventData& ev);

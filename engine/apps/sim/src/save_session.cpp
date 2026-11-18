@@ -92,6 +92,10 @@ void SessionDescriptor::write(ByteWriter& w) const {
     for (const auto& [k, v] : opts) w.str(k).str(v);
     w.u64(data_fingerprint);
     w.str(writer);
+    if (!mods.empty()) {  // mcx3 t05: optional trailing block
+        w.u32(static_cast<uint32_t>(mods.size()));
+        for (const SaveMod& m : mods) w.str(m.key).str(m.name).str(m.version).u64(m.content_hash);
+    }
 }
 
 bool SessionDescriptor::read(ByteReader& r) {
@@ -128,6 +132,18 @@ bool SessionDescriptor::read(ByteReader& r) {
     }
     d.data_fingerprint = r.u64();
     d.writer = r.str();
+    if (r.ok() && !r.done()) {  // mcx3 t05: the mods block
+        const uint32_t nm = r.u32();
+        if (!r.ok() || nm > kMaxCount) return false;
+        for (uint32_t i = 0; i < nm && r.ok(); ++i) {
+            SaveMod m;
+            m.key = r.str();
+            m.name = r.str();
+            m.version = r.str();
+            m.content_hash = r.u64();
+            d.mods.push_back(std::move(m));
+        }
+    }
     if (!r.ok() || !r.done()) return false;
     *this = std::move(d);
     return true;
@@ -136,7 +152,10 @@ bool SessionDescriptor::read(ByteReader& r) {
 std::string SessionDescriptor::mismatch(const SessionDescriptor& s, const SessionDescriptor& c) {
     if (s.kind != c.kind) return "session kind '" + s.kind + "' != '" + c.kind + "'";
     if (s.campaign != c.campaign) return "campaign '" + s.campaign + "' != '" + c.campaign + "'";
-    if (s.data_args != c.data_args) return "data arguments (mod path) differ";
+    if (s.data_args != c.data_args) {
+        const std::string change = data_change(s, c);
+        return change.find("fingerprint") == std::string::npos ? change : "data arguments (mod path) differ";
+    }
     if (s.seed != c.seed) return "session seed " + std::to_string(s.seed) + " != " + std::to_string(c.seed);
     if (s.players != c.players) return "player slots " + std::to_string(s.players) + " != " + std::to_string(c.players);
     if (!same_scheduler(s.scheduler, c.scheduler)) return "command scheduler settings differ";
@@ -155,9 +174,41 @@ std::string SessionDescriptor::mismatch(const SessionDescriptor& s, const Sessio
         return sorted(std::move(v));
     };
     if (compared(s.options) != compared(c.options)) return "session options differ";
-    if (s.data_fingerprint != c.data_fingerprint)
-        return "game data differs (fingerprint " + hex64(s.data_fingerprint) + " != " + hex64(c.data_fingerprint) + ")";
+    if (s.data_fingerprint != c.data_fingerprint) return data_change(s, c);
     return {};
+}
+
+bool SessionDescriptor::only_data_differs(const SessionDescriptor& s, const SessionDescriptor& c) {
+    if (mismatch(s, c).empty()) return false;
+    SessionDescriptor same = s;
+    same.data_args = c.data_args;
+    same.data_fingerprint = c.data_fingerprint;
+    same.mods = c.mods;
+    return mismatch(same, c).empty();
+}
+
+std::string SessionDescriptor::data_change(const SessionDescriptor& s, const SessionDescriptor& c) {
+    std::string out;
+    const auto add = [&out](const std::string& line) { out += (out.empty() ? "" : "; ") + line; };
+    const auto find = [](const std::vector<SaveMod>& v, const std::string& key) -> const SaveMod* {
+        for (const SaveMod& m : v)
+            if (m.key == key) return &m;
+        return nullptr;
+    };
+    for (const SaveMod& m : s.mods) {
+        const SaveMod* now = find(c.mods, m.key);
+        if (!now) add(m.name + " was in this save and is not loaded now");
+        else if (now->version != m.version)
+            add(m.name + " updated since this save (version " + (m.version.empty() ? "?" : m.version) + " -> " +
+                (now->version.empty() ? "?" : now->version) + ")");
+        else if (now->content_hash != m.content_hash)
+            add(m.name + " changed since this save (version " + (m.version.empty() ? "?" : m.version) + ")");
+    }
+    for (const SaveMod& m : c.mods)
+        if (!find(s.mods, m.key)) add(m.name + " is loaded now and was not in this save");
+    if (out.empty() && (s.data_fingerprint != c.data_fingerprint || s.data_args != c.data_args))
+        out = "game data differs (fingerprint " + hex64(s.data_fingerprint) + " != " + hex64(c.data_fingerprint) + ")";
+    return out;
 }
 
 bool read_session(const SaveFile& save, SessionDescriptor& out, std::string* err) {

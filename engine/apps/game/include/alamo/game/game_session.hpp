@@ -354,6 +354,10 @@ public:
     // a stream continuing the save. False + *err (the LoadReport line): discard the session.
     bool start_from_save(const SaveFile& save, std::string* err = nullptr, const commands::CommandRecording* replay = nullptr,
                          commands::CommandRecording* record = nullptr);
+    // mcx3 t05 (D3): before start_from_save, let a save whose game data differs load anyway (sim::SimHost::
+    // set_allow_different_data); loaded_with_different_data(): it did ("loaded with different data": not supported).
+    void set_allow_different_data(bool allow) { allow_different_data_ = allow; }
+    bool loaded_with_different_data() const { return load_report_.loaded_with_different_data; }
     // Records the drained batches from now on (call before the first tick; a loaded session's stream continues its save).
     void record_to(commands::CommandRecording* rec);
     bool loaded() const { return loaded_; }
@@ -418,6 +422,7 @@ private:
     int64_t playthrough_started_ = 0;
     commands::SavePoint load_point_;
     sim::LoadReport load_report_;
+    bool allow_different_data_ = false;  // mcx3 t05
     std::vector<std::string> ai_types_;  // per player: the galactic AI type ("" = none), for the descriptor
 #ifdef ALAMO_SIM_HAVE_TACTICAL_AI
     // skm2 t01: the battles' tactical AI setup (shared with CampaignBattleOptions::tactical_ai; null without a tactical AI)
@@ -444,8 +449,14 @@ bool save_game(GameSession& session, const std::string& dir, std::string_view na
 // read_save_file(path) (UTF-8, save_games.hpp) -> spec_from_save -> a new GameSession -> start_from_save (replay / record as there). Null +
 // *err when the file is not a save of this game, belongs to other game data / options (SessionDescriptor::mismatch) or a
 // chunk does not load; the half-loaded session is discarded. `file_out` (optional) gets the save read.
+// mcx3 t05 (D3): `allow_different_data` loads a save whose game data differs anyway (GameSession::
+// set_allow_different_data); refused without it, *different_data (optional) says the refusal was only that, and *err is
+// SessionDescriptor::data_change (the mods and both versions).
 std::unique_ptr<GameSession> load_game(const GameData& data, jobs::JobSystem& js, const std::string& path, std::string* err = nullptr,
                                        const commands::CommandRecording* replay = nullptr, commands::CommandRecording* record = nullptr,
-                                       SaveFile* file_out = nullptr);
+                                       SaveFile* file_out = nullptr, bool allow_different_data = false,
+                                       bool* different_data = nullptr);
+// mcx3 t05: the save descriptor's mods of a stack (GameData::mods).
+std::vector<sim::SaveMod> save_mods(const std::vector<vfs::ModDescriptor>& mods);
 
 }  // namespace alamo::game

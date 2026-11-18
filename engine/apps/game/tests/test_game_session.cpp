@@ -2827,6 +2827,89 @@ void radar_feed_test() {
 }
 #endif
 
+// mcx3 t05 (D3, docs/MOD_COMPAT_DESIGN.md 15): a save from an older stack. The save is made on data whose stack says
+// "Stack Sub" 1.0; the current data has one value changed (the type list unchanged) and says 1.1. The load is refused
+// with the mod and both versions named and marked as a data difference; allowed, it loads and the session is marked.
+static void different_data_save_test(const std::string& data_dir, game::SessionSpec spec) {
+    spec.animation = false;
+    const fs::path cur_dir = fs::temp_directory_path() / "alamo_game_session_tests_v2";
+    const fs::path saves = fs::temp_directory_path() / "alamo_game_different_data_test";
+    std::error_code ec;
+    remove_all_long(cur_dir, ec);
+    remove_all_long(saves, ec);
+    fs::copy(path_from_utf8(data_dir), cur_dir, fs::copy_options::recursive, ec);
+    CHECK(!ec);
+    const fs::path types = cur_dir / "Data" / "XML" / "GSTypes.xml";
+    std::string t = ::alamo::test::read_file(types);
+    const size_t at = t.find("<Tactical_Health>900</Tactical_Health>");
+    CHECK(at != std::string::npos);
+    if (at == std::string::npos) return;
+    t.replace(at, 38, "<Tactical_Health>950</Tactical_Health>");
+    write_file(types, t);
+
+    const auto stack = [](const char* version) {
+        vfs::ModDescriptor m;
+        m.kind = vfs::ModKind::LocalMods;
+        m.id = "StackSub";
+        m.name = "Stack Sub";
+        m.version = version;
+        m.content_hash = version[2] == '0' ? 0x10u : 0x11u;
+        return std::vector<vfs::ModDescriptor>{m};
+    };
+    game::GameData old_data, cur_data;
+    std::string err;
+    CHECK(game::load_game_data_dir(data_dir, old_data, &err) && game::load_game_data_dir(path_to_utf8(cur_dir), cur_data, &err));
+    old_data.mods = stack("1.0");
+    cur_data.mods = stack("1.1");
+    jobs::JobSystem js(jobs::JobSystemConfig{2});
+    std::string path;
+    {
+        game::GameSession a(old_data, js, spec);
+        CHECK(a.start(nullptr, nullptr, nullptr));
+        if (!a.started()) return;
+        for (int i = 0; i < 20; ++i) a.tick();
+        CHECK(game::save_game(a, path_to_utf8(saves), "older stack", "", game::unix_now(), &path, &err));
+    }
+    // The descriptor carries the stack.
+    SaveFile f;
+    sim::SessionDescriptor sd;
+    CHECK(game::read_save_file(path, f, &err) && sim::read_session(f, sd, &err));
+    CHECK(sd.mods.size() == 1 && sd.mods[0].name == "Stack Sub" && sd.mods[0].version == "1.0" && sd.mods[0].key == "StackSub");
+    // Refused, readably, as a data difference (the in-memory map is set again, as the other save tests do).
+    game::SessionSpec back;
+    CHECK(game::GameSession::spec_from_save(f, back, &err));
+    back.skirmish_map_data = spec.skirmish_map_data;
+    {
+        game::GameSession r(cur_data, js, back);
+        CHECK(!r.start_from_save(f, &err));
+        std::printf("different data: refused: %s\n", r.load_report().descriptor_error.c_str());
+        CHECK(r.load_report().different_data && !r.loaded_with_different_data());
+        CHECK(r.load_report().descriptor_error == "Stack Sub updated since this save (version 1.0 -> 1.1)");
+    }
+    // Load anyway: the type list is unchanged, every chunk reads; the session is marked.
+    {
+        game::GameSession s(cur_data, js, back);
+        s.set_allow_different_data(true);
+        const bool ok = s.start_from_save(f, &err);
+        if (!ok) std::printf("  load anyway: %s\n", err.c_str());
+        CHECK(ok && s.loaded() && s.loaded_with_different_data());
+        if (ok) s.tick();
+    }
+    // Same data: loads as before, not marked.
+    {
+        game::GameSession s(old_data, js, back);
+        CHECK(s.start_from_save(f, &err) && !s.loaded_with_different_data() && !s.load_report().different_data);
+    }
+    // Another seed is not a data difference: no load anyway.
+    game::SessionSpec other = back;
+    other.seed = back.seed + 1;
+    game::GameSession o(cur_data, js, other);
+    o.set_allow_different_data(true);
+    CHECK(!o.start_from_save(f, &err) && !o.load_report().different_data);
+    remove_all_long(cur_dir, ec);
+    remove_all_long(saves, ec);
+}
+
 int main() {
 #ifdef ALAMO_GAME_HAVE_CONTROLS
     radar_feed_test();
@@ -2894,6 +2977,7 @@ int main() {
         // N1 / t09: saved games and GameSession save / load.
         save_files_test();
         save_load_test(data, spec);
+        different_data_save_test(dir, spec);  // mcx3 t05
 #ifdef ALAMO_GAME_HAVE_CONTROLS
         controls_test();
         hud_feeds_test(data, spec);

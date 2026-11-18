@@ -219,6 +219,10 @@ void App::handle_screen_actions(const std::vector<ui::ScreenAction>& acts) {
                         screen_ = Screen::Menu;
                         open_main_menu();
                     }
+                } else if (a.tag == "load_different_data") {  // mcx3 t05: Load anyway (button 0) / Cancel
+                    const std::string path = std::exchange(pending_different_data_, std::string());
+                    if (a.button == 0 && !path.empty() && load_save_file(path, nullptr, true))
+                        screen_line(U"Loaded with different data: continuing it is not supported", ui::Rgba8{255, 200, 64, 255});
                 } else if (a.tag == "battle_choice") {  // [port] a scripted message-box prompt: button 1 = Auto-Resolve
                     answer_battle_prompt(a.button == 1);
                 } else if (a.tag == "retry") {  // Lua Activate_Retry_Dialog: Retry restarts the session, Quit leaves it
@@ -497,12 +501,39 @@ void App::save_game_as(const std::string& typed) {
 // worked does it replace the running session (a failed load leaves the current game / menu as it was).
 bool App::load_saved_game(const std::string& name) { return load_save_file(save_path(saves_dir_, name)); }
 
-bool App::load_save_file(const std::string& path, const commands::CommandRecording* replay) {
+bool App::load_save_file(const std::string& path, const commands::CommandRecording* replay, bool allow_different_data) {
     std::string err;
-    std::unique_ptr<GameSession> s = path.empty() ? nullptr : load_game(data_, *js_, path, &err, replay);
+    bool different_data = false;
+    std::unique_ptr<GameSession> s =
+        path.empty() ? nullptr : load_game(data_, *js_, path, &err, replay, nullptr, nullptr, allow_different_data, &different_data);
+    if (!s && different_data && !replay) {
+        // mcx3 t05 (D3): the save is this game's but its data (a mod's version) differs: offer Load anyway, and say that
+        // continuing an outdated save on a newer mod version is not supported.
+        std::printf("saves: %s: data differs: %s\n", path.c_str(), err.c_str());
+        pending_different_data_ = path;
+        ui::MessageBoxSpec m;
+        m.tag = "load_different_data";
+        m.caption = U"This save was made with other mod data";
+        std::string first = err.size() > 120 ? err.substr(0, 117) + "..." : err;
+        const size_t cut = first.size() > 64 ? first.rfind(' ', 64) : std::string::npos;
+        if (cut != std::string::npos && cut > 0) {
+            m.lines.push_back(ui::utf8_to_utf32(first.substr(0, cut)));
+            m.lines.push_back(ui::utf8_to_utf32(first.substr(cut + 1)));
+        } else {
+            m.lines.push_back(ui::utf8_to_utf32(first));
+        }
+        m.lines.push_back(U"Continuing an outdated save on a newer mod version is not supported.");
+        m.buttons = {U"Load anyway", txt("TEXT_BUTTON_CANCEL", U"Cancel")};
+        screens_.show_message(m);
+        return false;
+    }
     if (!s) {
         save_message(U"The saved game could not be loaded", path.empty() ? std::string("no save name") : err);
         return false;
+    }
+    if (s->loaded_with_different_data()) {  // D3: the session is marked; bugs in it are not port bugs
+        std::printf("saves: %s loaded with different data (not supported)\n", path.c_str());
+        notes_.push_back("loaded with different data: " + path + " (continuing an outdated save on a newer mod version is not supported)");
     }
     attract_.stop();  // as start_session: a real game ends the attract demo
     end_session();

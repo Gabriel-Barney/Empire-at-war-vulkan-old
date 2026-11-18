@@ -1201,6 +1201,7 @@ void GameSession::describe_session() {
     for (const std::string& t : ai_types_) h.str(t);
     d.data_fingerprint = sim::combine_fingerprints({dd.types_fingerprint(), sim::fingerprint_galactic(dd.rules, setup_), h.digest()});
     d.writer = "alamo_game (N1 t09)";
+    d.mods = save_mods(dd.mods);  // mcx3 t05: the stack, for a readable refusal (empty without mods: v1 bytes)
     host_->set_session(std::move(d));
 }
 
@@ -1397,6 +1398,7 @@ bool GameSession::start_from_save(const SaveFile& save, std::string* err, const 
     if (!built) return fail("rebuild: " + (diag.empty() ? std::string("the session did not start") : diag.back()));
     std::string e;
     load_report_ = {};
+    host_->set_allow_different_data(allow_different_data_);  // mcx3 t05
     if (!host_->load(save, &e, &load_report_)) {
         if (e.empty()) e = load_report_.text();
         if (load_report_.descriptor_error.empty())
@@ -1442,8 +1444,16 @@ bool save_game(GameSession& session, const std::string& dir, std::string_view na
     return true;
 }
 
+std::vector<sim::SaveMod> save_mods(const std::vector<vfs::ModDescriptor>& mods) {
+    std::vector<sim::SaveMod> out;
+    for (const vfs::ModDescriptor& m : mods) out.push_back(sim::SaveMod{m.key(), m.name, m.version, m.content_hash});
+    return out;
+}
+
 std::unique_ptr<GameSession> load_game(const GameData& data, jobs::JobSystem& js, const std::string& path, std::string* err,
-                                       const commands::CommandRecording* replay, commands::CommandRecording* record, SaveFile* file_out) {
+                                       const commands::CommandRecording* replay, commands::CommandRecording* record, SaveFile* file_out,
+                                       bool allow_different_data, bool* different_data) {
+    if (different_data) *different_data = false;
     SaveFile f;
     std::string e;
     if (!read_save_file(path, f, &e)) {  // ui5 t13: a UTF-8 path (save_games.hpp PATHS)
@@ -1456,8 +1466,10 @@ std::unique_ptr<GameSession> load_game(const GameData& data, jobs::JobSystem& js
         return nullptr;
     }
     auto s = std::make_unique<GameSession>(data, js, std::move(spec));
+    s->set_allow_different_data(allow_different_data);
     if (!s->start_from_save(f, &e, replay, record)) {
-        if (err) *err = e;
+        if (different_data) *different_data = s->load_report().different_data && !s->load_report().loaded_with_different_data;
+        if (err) *err = s->load_report().different_data && !s->load_report().loaded_with_different_data ? s->load_report().descriptor_error : e;
         return nullptr;  // the half-loaded session is discarded here
     }
     if (SaveMeta m; decode_description(f.description, m)) s->set_playthrough(std::move(m.playthrough), m.playthrough_started);

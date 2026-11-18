@@ -99,6 +99,14 @@ struct SessionPlayer {
     friend bool operator==(const SessionPlayer&, const SessionPlayer&) = default;
 };
 
+// mcx3 t05: one mod of the stack a save was made with (vfs::ModDescriptor's identity; mod_registry.hpp). Shown when the
+// save's data differs; never compared for the refusal itself (data_fingerprint is).
+struct SaveMod {
+    std::string key, name, version;
+    uint64_t content_hash = 0;
+    bool operator==(const SaveMod&) const = default;
+};
+
 struct SessionDescriptor {
     static constexpr uint32_t kVersion = 1;
 
@@ -122,6 +130,9 @@ struct SessionDescriptor {
     // from different game data is refused.
     uint64_t data_fingerprint = 0;
     std::string writer;                   // engine build that wrote the save (informational)
+    // mcx3 t05: the mods the data was loaded with (VFS order). Written after `writer` only when not empty, so a save
+    // without mods keeps the version 1 bytes and an older reader's layout; a save without the block reads as no mods.
+    std::vector<SaveMod> mods;
 
     std::string option(std::string_view key, std::string_view fallback = {}) const;
     void set_option(std::string key, std::string value);  // replaces an existing key
@@ -130,7 +141,15 @@ struct SessionDescriptor {
     bool read(ByteReader& r);  // false (unchanged) on a version mismatch / truncated data
     // "" when a save written with `saved` can be loaded into a session described by `current`, else the first
     // difference (kind, campaign, data args, SimConfig, players, difficulty, options, data fingerprint).
+    // A data difference is named readably (data_change) when the mods tell what changed.
     static std::string mismatch(const SessionDescriptor& saved, const SessionDescriptor& current);
+    // mcx3 t05 (D3): true when the two differ and only in their game data (data_args, data_fingerprint, mods): the
+    // case a player may load anyway.
+    static bool only_data_differs(const SessionDescriptor& saved, const SessionDescriptor& current);
+    // What changed in the data, for the player: per mod "<name> updated since this save (version a -> b)", "<name>
+    // changed since this save (version a)", "<name> was in this save and is not loaded now", "<name> is loaded now and
+    // was not in this save"; "game data differs (fingerprint ...)" when the mods do not say. "" when the data is equal.
+    static std::string data_change(const SessionDescriptor& saved, const SessionDescriptor& current);
 };
 
 // The descriptor of a save, without loading anything (what the application needs to rebuild the session).
@@ -166,6 +185,11 @@ struct LoadReport {
     std::vector<std::string> missing;     // expected by the rebuilt session, absent from the save
     std::vector<std::string> unexpected;  // in the save, but the rebuilt session has no such system
     std::string descriptor_error;         // non-empty: the save does not belong to this session (nothing was read)
+    // mcx3 t05: descriptor_error is a data difference only (SessionDescriptor::only_data_differs): the save may be
+    // loaded anyway (SimHost::set_allow_different_data).
+    bool different_data = false;
+    // The load went ahead over a data difference (allowed): the session runs on other data than it was saved with.
+    bool loaded_with_different_data = false;
     bool ok() const { return descriptor_error.empty() && failed.empty() && missing.empty() && unexpected.empty(); }
     std::string text() const;             // one line
 };
