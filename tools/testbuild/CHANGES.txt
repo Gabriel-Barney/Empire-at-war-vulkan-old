@@ -1,4 +1,4 @@
-Alamo engine test build, 2026-11-13
+Alamo engine test build, 2026-11-18
 ====================================
 
 How to run
@@ -12,14 +12,15 @@ How to run
                    type a number      play that mod (Enter alone plays your last pick again)
                    C and a number     check a mod without playing: loads it the way the game does and
                                       opens a report (mod_check.txt): missing files, campaigns, scripts,
-                                      shaders. Run this first if a mod will not start.
+                                      shaders, assets, and an overall grade. Run this first if a mod
+                                      will not start.
                    a+b (e.g. 7+1)     play mod a on top of mod b (a submod on the mod it needs).
                                       Submods whose modinfo.json names the mod they need are stacked on
                                       their own; the menu shows "(on top of 1)".
                    F                  a mod folder somewhere else
                  Or drag a mod folder (the one holding its Data folder) onto Play_Mod.cmd.
-- command-center.exe   The Command Center launcher (new): profiles, mods and Steam Workshop
-                 items, saves, graphics options, unit data, the campaign map and diagnostics in one
+- command-center.exe   The Command Center launcher: profiles, mods and Steam Workshop items,
+                 saves, graphics options, unit data, the campaign map and diagnostics in one
                  window. It starts alamo_game.exe from this folder. Subscribing, unsubscribing and
                  updating open the item in the Steam client; searching the Workshop opens in Steam
                  too, unless you add your own Steam Web API key under Settings.
@@ -34,99 +35,88 @@ with its shader cache, its saves, log.txt and mod_check.txt, so mods never mix s
 that log.txt with any report. The first start of a mod builds its shader cache, so it is slower.
 The base game keeps its saves in %LOCALAPPDATA%\alamo\Saves.
 
+If the game crashes (new in this build), it writes a crash dump to %LOCALAPPDATA%\alamo\crashes
+(a .dmp and a .txt with the same name). Please send both with the log; they only help with this
+exact build.
+
 Built from: @BUILD@.
 
 What to try
 -----------
 NEW in this build (please check each one in game):
-- Command Center (command-center.exe): start the game from it with and without a mod, and check
-  that it finds alamo_game.exe here and your game folder on its own.
-- Options are now split into Display and Graphics pages. Display: a Display Mode list
-  (Fullscreen / Borderless fullscreen / Windowed) and a UI Scale (100 - 500 %) for big screens;
-  the galactic map keeps its height and shows more to the sides on wide screens. The Auto Detect
-  button is gone.
-- Graphics > Anti-Aliasing is now one list: Off, SMAA, TAA, MSAA 2x / 4x / 8x, and FSR (Native AA,
-  Quality 1.5x, Balanced 1.7x, Performance 2x, Ultra Performance 3x). FSR uses AMD's FSR runtime
-  (the two amd_fidelityfx_*.dll files next to the game); the log names the FSR version in use
-  ("FSR upscaling: ..."), and if FSR cannot start the game draws TAA instead and logs why.
-  Please compare the look and the frame rate of each mode, and check that the list shows all
-  11 rows. Older settings load as TAA.
-- Fighter and bomber squadrons have 12 ships (prices scaled to match). FIGHTERS / BOMBERS buttons
-  at the left edge of the space HUD, or F2 / F3, select a whole wing (Shift adds, a second press
-  centres the camera).
-- Fleet cohesion (space battles): O toggles Loose / Tight. Tight keeps your fleet together by
-  moving every ship at the slowest ship's speed; the HUD line shows the setting.
-- Camera and Controls > Show Unit Path Lines: dotted lines for your moving units (one per
-  squadron / company; cyan moves, red attacks). Off by default.
-- Galactic: name and rename your fleets and ships (double-click a pad in the fleet organiser;
-  the name shows as its tooltip).
-- Save / Load lists saves as a tree: map, faction (with emblem), playthrough, then each save with
-  its week and time.
+- Squadrons are back to the original sizes and prices (the 12-ship squadrons of the last build
+  are gone). The FIGHTERS / BOMBERS wing buttons and F2 / F3 stay.
+- Skirmish setup: more than two players, with teams and a separate AI difficulty per slot; the
+  advanced skirmish options (credits, win condition, heroes, super weapons, pre-built base,
+  starting units) now reach the battle. Empty slots and the profile's faction are handled as in
+  the original. Please try a 3- or 4-player land and space skirmish.
+- Land skirmish AI: Empire against Underworld no longer stalls ("not a valid destination for
+  TaskForce MainForce" should be gone); the AI now uses the original's rules for task forces,
+  build pads, start structures and target choice, in land and space.
+- Battles autosave at their start ([AutoSave] row in the Load list); Retry on the battle-end
+  screen loads it.
+- Story and tutorial: story text lines, advisor hints, tutorial pointers and highlights, script
+  fades, letterbox, cinematic and scripted camera moves, control locks; the text crawl over
+  full-screen movies; story rewards in galactic, tutorial, Underworld and tactical missions.
+  Please play the start of the tutorial and of a story campaign.
+- Space: hardpoint turrets now turn toward their target before they fire; a destroyed hardpoint
+  drops its attached model and breakoff debris; retreating ships fly their jump-out.
+- Land: indigenous spawners, the Magnepulse fire-at-position, gravity control fields.
+- Effects: weather visuals, blob shadows under units, selection circles that follow the ground
+  slope, ability and status particles, drain bolts, the heal range blob, stun and shield
+  penetration effects. Ability, base shield, build pad and capture point animations play.
+- Sound: battle sounds (weather, combat, ability activation), galactic sounds, super-weapon
+  and lose music, garrison sounds, clash speech; dialog sounds as in the original.
+- Galactic: the FoC base layout planet map; summary sort keys; the Hints check box turns every
+  advisor hint on or off; galactic messages show as advisor lines.
+- Menus: the Multiplayer button is gone from the main menu (multiplayer is out of scope); key
+  capture, movie captions and tooltip placement as in the original; save paths with non-English
+  characters work.
+- Smoother play: the 110-230 ms hitches every few seconds and the slow memory growth (about
+  half a GB per minute) are fixed; better frame times on many-core CPUs.
+- Mods: the Command Center and the mod picker play a mod together with the mods it needs
+  (its stack), refuse mods made for plain Empire at War, and warn about missing text languages.
+  Mods with damaged models, animations or textures that the original still draws now load too.
+  Fall of the Republic: its news plugin no longer stops at the first conquest.
+Still worth checking from earlier builds:
+- Command Center: starting the game from it with and without a mod.
+- Options: Display and Graphics pages, Display Mode, UI Scale, Render Scale, the anti-aliasing
+  list (Off, SMAA, TAA, MSAA 2x / 4x / 8x, five FSR modes; the log names the FSR version).
+- Fleet cohesion (O), unit path lines, fleet and ship names, the Save / Load tree.
 - Fleet groups (early, off unless started with --fleet-groups; e.g. set ALAMO_ARGS=--fleet-groups
   before Play_Mod.cmd, or add it after Play.cmd): N groups the selected ships, U ungroups, Y locks
   a group so it moves together. No on-screen frames yet.
-Still worth checking from earlier builds:
-- Render Scale (Graphics page, 50 - 100 %): the share of the window's pixels the 3D scene is
-  drawn with; the log prints the size after Apply.
-- Menus and options (from the 2026-11-13 builds): key rebinding (Delete / Backspace
-  clears, conflict and "Apply?" prompts), gameplay options kept between runs, drop-down lists,
-  scroll bars and text boxes (typing, selection, copy / paste).
-- The tactical HUD in land and space battles: order buttons and their hotkeys, retreat,
-  reinforcements, the space special-weapon button, tooltips, the battle-end screen and score /
-  retry dialog.
-- Galactic conquest screens: hero roster, build pad prices and why a build is blocked, map
-  filters, planet-label icons, on-screen messages, the announcer and the Droid Log.
-- Story missions and the tutorial: the Mission load dialogs, Esc in the tutorial, skipping
-  movies, the credits roll.
-- Thrawn's Revenge galactic conquest: winning and losing a campaign (victory conditions).
-- Land skirmish and galactic AI as in the 2026-11-12 build.
+- Tactical HUD, galactic conquest screens, key rebinding, dialog controls.
+- Thrawn's Revenge galactic conquest: winning and losing a campaign.
 
-Changes since the 2026-11-13 render scale build
------------------------------------------------
-- Options: Display and Graphics pages, display mode list, UI scale, galactic wide-screen view;
-  Auto Detect and the Widescreen check removed (the resolution list always shows every mode).
-- Anti-aliasing: one list with SMAA, TAA, MSAA 2x / 4x / 8x and five FSR modes.
-- Fighter / bomber squadrons of 12, wing select buttons and F2 / F3.
-- Fleet cohesion (O), unit path lines option, fleet and ship names, saved games tree.
-- Fleet groups, phase 1 (off by default, see What to try).
-- Command Center launcher (command-center.exe) is part of the zip.
-
-Changes in the earlier 2026-11-13 builds (since 2026-11-12)
------------------------------------------------------------
-- Render Scale option.
-- Options: Windowed off switches to full screen; Windowed and Widescreen are kept and applied;
-  the Hardware Mouse option is removed (the game always draws its own cursor); gameplay and advanced options are
-  applied and saved; key rebinding works like the original (Tab bindable, zoom keys listed).
-- Dialog controls: combo boxes, list scroll bars (drag, auto-repeat, Home / End), edit boxes with
-  caret, selection and the Windows clipboard.
-- Tactical HUD: order buttons, hotkeys, retreat and reinforcement controls, battle end, tooltips,
-  the space special-weapon button, score and retry dialog; the cursor reacts to what it is over.
-- Galactic: hero roster input, build pad prices and block reasons, map filters, planet-label
-  icons, on-screen messages and announcer events, readable Droid Log battle reports.
-- Story and tutorial: Mission load dialogs, tutorial start and Esc, movies skip on Esc / Space
-  only, credits roll, fleet hover triggers, skirmish staging rows.
-- Galactic victory is now checked the way the original does (event-driven), which fixes campaign
-  wins in mods such as Thrawn's Revenge; base-game objects run their own Lua scripts; map hint
-  names reach the scripts (Find_Hint and friends).
-- Galactic AI: build tasks with no target planet consider every planet, Underworld blockade
-  waits and free-store moves restored, planet conflict state set at battle end, trade-route
-  distance and "like" unit sets as the original.
-- Land skirmish AI: tactical goals run at the original's rate and limits; structures under
-  construction count toward its structure totals.
-- Saves: script-added battle types load correctly.
+Changes since the 2026-11-13 build
+----------------------------------
+- Original squadron sizes and prices again; --squadron-size removed.
+- Skirmish with more than two players, teams, per-slot AI difficulty and the advanced options.
+- Land and space skirmish AI on the original's task-force, build pad, start-structure and
+  target rules; Empire against Underworld land skirmish runs to its end.
+- Battle-start autosave and Retry.
+- Story presentation (text, hints, pointers, fades, letterbox, cameras, locks, movie crawl) and
+  story rewards; Lua object-state commands (Prevent_All_Fire, Suspend_Locomotor,
+  Set_Cannot_Be_Killed and others) now change the battle.
+- Hardpoint turret turning, hardpoint model removal and debris, retreat jump-out, indigenous
+  spawners, Magnepulse and gravity fields.
+- Weather, shadow, selection circle and ability effects; ability and structure animations.
+- Battle, galactic and music audio fixes.
+- Frame hitch and memory growth fix; crash dumps.
+- Mod stacks, base-EaW refusal, mod asset salvage, mod check report with grades.
 
 Known gaps
 ----------
-- Save / Load tree (new): the automated save-and-load check could not select a save row after
-  the tree change. If picking or loading a save in the dialog misbehaves, please say how.
-- Saves made with earlier test builds may not load (the save format changed). Start new games.
+- Saves made with earlier test builds may not load (the save format changed again). Start new
+  games.
 - Galactic AI is close to the original but not the same yet: the Underworld ends up with less
   money, and the Rebels attack Shola earlier than in the original.
-- Land skirmish AI: its economy runs ahead of the original's (it builds its Mineral Processor
-  sooner) and it rarely lands a hero, so its army mix differs.
-- Land skirmish Empire against Underworld: on some maps the AI's main force gets an invalid
-  destination ("not a valid destination for TaskForce MainForce" in the log) and the battle can
-  stall without ending. Known bug, being fixed.
+- Land skirmish AI: the Empire's battles still last a little shorter than in the original; in
+  space the Rebels take more damage than in the original.
+- Skirmish with more than two players is new and was tested with four slots; please report
+  anything odd with more.
+- Story presentation: the tutorial pointer is a plain 2D arrow for now.
 - EAW-Remake: Single Player in its main menu does nothing yet (its menu draws Single Player as a
   heading); its space skirmish on Geonosis runs slowly (huge asteroid fields).
 - Age of Legends: the skirmish setup's game-type list stops the skirmish start.

@@ -14,6 +14,11 @@ engine/objects/src/field_schema_table.inc; class = the row's segment owner), wit
             tag, a struct member set by a loader)
   verified  consumed, and a test carries "// ledger: verifies <Class>.<Tag>" (a test that checks the tag's effect
             against a docs/re spec or a probe)
+  retail_unused
+            no engine code reads it, and an RE answer found no reader in retail either: the row is in RETAIL_UNUSED
+            with the docs/re section that says so (roadmap mcx4). Not an honour gap; the lint counts it as settled.
+            A RETAIL_UNUSED row that the code does read, or whose citation is not a docs/re page naming the tag, is
+            an error.
 
 A literal naming a tag that several classes list (72 of the 2,764 tag names) counts for the object type and sub-object
 classes (the shared typed readers) and for the other classes the file names (literal_classes).
@@ -29,7 +34,8 @@ Outputs (both generated, never edited by hand):
 
     python engine/objects/tools/gen_tag_ledger.py            write both
     python engine/objects/tools/gen_tag_ledger.py --allow-regress Class.Tag ...
-                                                             write although a row moves consumed -> stored / unread
+                                                             write although a row moves consumed -> stored / unread /
+                                                             retail_unused
 tools/lint/check_tag_ledger.py imports this module and checks that the committed ledger matches the code.
 """
 import argparse
@@ -47,8 +53,9 @@ OUT_MD = os.path.join(ROOT, "docs", "status", "tag-ledger.md")
 DOCS_RE = os.path.join(ROOT, "docs", "re")
 FOC_ZIP = os.path.join(ROOT, "extracted", "foc_data_text.zip")
 
-STATES = ("unread", "stored", "consumed", "verified")
-STATE_ENUM = {"unread": "Unread", "stored": "Stored", "consumed": "Consumed", "verified": "Verified"}
+STATES = ("unread", "stored", "consumed", "verified", "retail_unused")
+STATE_ENUM = {"unread": "Unread", "stored": "Stored", "consumed": "Consumed", "verified": "Verified",
+              "retail_unused": "RetailUnused"}
 
 # Classes whose port loader keeps every tag of an entry, read or not (so an unread tag there is "stored"):
 #   * the typed object view keeps every descriptor field of GameObjectType / SpaceProp / HeroUnit, and the raw store
@@ -59,6 +66,12 @@ GENERIC_STORE = {"GameObjectType", "SpaceProp", "HeroUnit", "GameConstants", "Ca
 SUB_OBJECT_OWNER = re.compile(r"(_Ability|_Action)$|^(Unit_Ability|Hero_Clash|Destroy_Unit)$")
 
 TIER_OVERRIDES = {}  # (class, tag) -> tier, for rows that are distribution-level only (tier 2)
+
+# Rows retail parses but never reads (roadmap mcx4, Gabriel 2026-11-18): (class, tag) -> the docs/re section whose RE
+# answer found no reader, as "docs/re/<FILE>.md <section>". The file must exist and name the tag. Class and tag are
+# spelled as in docs/re/xml_field_tables.md (matched case-insensitively). Keep the list sorted by class, then tag.
+RETAIL_UNUSED = {
+}
 
 # Source files that name tags without reading them for the game: the descriptor tables themselves, reports, tests,
 # tools, generated tables, vendored code.
@@ -260,12 +273,46 @@ def find_consumers(rows):
     return consumers, verifiers, problems
 
 
-def compute_states(rows, consumers, verifiers):
+def retail_unused_keys(retail_unused=None):
+    """{(class, tag lower): citation} of RETAIL_UNUSED (or the given table)."""
+    table = RETAIL_UNUSED if retail_unused is None else retail_unused
+    return {(cls, tag.lower()): cite for (cls, tag), cite in table.items()}
+
+
+def retail_unused_problems(rows, consumers, retail_unused=None):
+    """Errors in the RETAIL_UNUSED table (or the given one): no such row, the code reads the row, or the citation is
+    not an existing docs/re page that names the tag."""
+    table = RETAIL_UNUSED if retail_unused is None else retail_unused
+    known = {(cls, tag.lower()) for cls, tag, _ in rows}
+    problems = []
+    for (cls, tag), cite in sorted(table.items()):
+        key = (cls, tag.lower())
+        name = f"RETAIL_UNUSED {cls}.{tag}"
+        if key not in known:
+            problems.append(f"{name}: names no ledger row")
+            continue
+        if key in consumers:
+            problems.append(f"{name}: engine code reads it ({sorted(consumers[key])[0]}); drop the entry or the reader")
+        page = cite.split()[0] if cite.split() else ""
+        path = os.path.join(ROOT, *page.split("/"))
+        if not page.startswith("docs/re/") or not page.endswith(".md") or not os.path.isfile(path):
+            problems.append(f"{name}: citation '{cite}' is not an existing docs/re/*.md page")
+            continue
+        with open(path, encoding="utf-8", errors="replace") as f:
+            if tag.lower() not in f.read().lower():
+                problems.append(f"{name}: {page} does not name {tag}")
+    return problems
+
+
+def compute_states(rows, consumers, verifiers, retail_unused=None):
+    unused = retail_unused_keys(retail_unused)
     out = {}
     for cls, tag, _ in rows:
         key = (cls, tag.lower())
         if key in consumers:
             st = "verified" if key in verifiers else "consumed"
+        elif key in unused:
+            st = "retail_unused"
         elif cls in GENERIC_STORE or SUB_OBJECT_OWNER.search(cls):
             st = "stored"
         else:
@@ -280,7 +327,8 @@ def spec_index():
         return idx
     tick = re.compile(r"`([A-Za-z][A-Za-z0-9_]*)`")
     for name in sorted(os.listdir(DOCS_RE)):
-        if not name.endswith(".md") or name == "xml_field_tables.md":
+        # Question batches (*_RE_QUESTIONS.md) name tags without settling them: not a spec.
+        if not name.endswith(".md") or name == "xml_field_tables.md" or name.endswith("_RE_QUESTIONS.md"):
             continue
         with open(os.path.join(DOCS_RE, name), encoding="utf-8", errors="replace") as f:
             for m in tick.finditer(f.read()):
@@ -306,7 +354,9 @@ def base_uses():
 def build(with_extras=True):
     rows = schema_rows()
     consumers, verifiers, problems = find_consumers(rows)
+    problems += retail_unused_problems(rows, consumers)
     states = compute_states(rows, consumers, verifiers)
+    unused = retail_unused_keys()
     spec = spec_index() if with_extras else {}
     uses = base_uses() if with_extras else {}
     ledger = []
@@ -315,7 +365,8 @@ def build(with_extras=True):
         files = sorted(consumers.get(key, ()))
         ledger.append({
             "class": cls, "tag": tag, "code": code, "state": states[key], "consumers": len(files),
-            "consumer": files[0] if files else "", "spec": spec.get(tag.lower(), ""),
+            "consumer": files[0] if files else "",
+            "spec": unused[key] if states[key] == "retail_unused" else spec.get(tag.lower(), ""),
             "base_uses": uses.get(tag.lower(), 0), "tier": TIER_OVERRIDES.get(key, 1),
         })
     return ledger, problems
@@ -365,20 +416,22 @@ def render_md(ledger):
         "`engine/objects/generated/tag_ledger.inc`; `tools/lint/check_tag_ledger.py` keeps both in step with the code.",
         "",
         "States: **unread** (the port does not keep it), **stored** (kept, nothing reads it), **consumed** (engine code",
-        "reads it), **verified** (consumed, and a test checks its effect). An `unread` or `stored` tag that a mod sets is an",
+        "reads it), **verified** (consumed, and a test checks its effect), **retail-unused** (retail never reads it",
+        "either, by an RE answer cited below). An `unread` or `stored` tag that a mod sets is an",
         "honour gap in `alamo_mod_check` report v4. Work order (§7.2): tier 1 with the most corpus mods, then base FoC uses.",
         "",
         f"Totals: {len(ledger)} rows; unread {tot['unread']}, stored {tot['stored']}, consumed {tot['consumed']}, "
-        f"verified {tot['verified']}.",
+        f"verified {tot['verified']}, retail-unused {tot['retail_unused']}.",
         "",
         "## Per class",
         "",
-        "| Class | Rows | Unread | Stored | Consumed | Verified |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| Class | Rows | Unread | Stored | Consumed | Verified | Retail-unused |",
+        "|---|---:|---:|---:|---:|---:|---:|",
     ]
     for cls in sorted(classes, key=lambda c: (-sum(classes[c].values()), c)):
         c = classes[cls]
-        out.append(f"| {cls} | {sum(c.values())} | {c['unread']} | {c['stored']} | {c['consumed']} | {c['verified']} |")
+        out.append(f"| {cls} | {sum(c.values())} | {c['unread']} | {c['stored']} | {c['consumed']} | {c['verified']} "
+                   f"| {c['retail_unused']} |")
     gaps = [r for r in ledger if r["state"] in ("unread", "stored") and r["base_uses"] > 0]
     gaps.sort(key=lambda r: (-r["base_uses"], r["class"], r["tag"].lower()))
     out += [
@@ -393,9 +446,24 @@ def render_md(ledger):
     ]
     for r in gaps:
         out.append(f"| {r['class']} | {r['tag']} | 0x{r['code']:x} | {r['state']} | {r['base_uses']} | {r['spec'] or '-'} |")
-    out += ["", "## Every row", "", "Per class: `Tag` (state, consumer files).", ""]
+    unused_rows = sorted((r for r in ledger if r["state"] == "retail_unused"), key=lambda r: (r["class"], r["tag"].lower()))
+    out += [
+        "",
+        "## Retail-unused rows",
+        "",
+        "Rows retail parses but never reads, by an RE answer (`RETAIL_UNUSED` in the generator, roadmap mcx4). The port",
+        "ignores them too.",
+        "",
+    ]
+    if unused_rows:
+        out += ["| Class | Tag | Base uses | RE answer |", "|---|---|---:|---|"]
+        out += [f"| {r['class']} | {r['tag']} | {r['base_uses']} | {r['spec']} |" for r in unused_rows]
+    else:
+        out.append("None yet.")
+    out += ["", "## Every row", "", "Per class: `Tag` (state, consumer files; x = retail-unused).", ""]
     for cls in sorted(classes):
-        items = [f"`{r['tag']}` ({r['state'][0]}{'' if not r['consumers'] else ' ' + str(r['consumers'])})"
+        items = [f"`{r['tag']}` ({'x' if r['state'] == 'retail_unused' else r['state'][0]}"
+                 f"{'' if not r['consumers'] else ' ' + str(r['consumers'])})"
                  for r in ledger if r["class"] == cls]
         out.append(f"- **{cls}**: " + ", ".join(items))
     return "\n".join(out) + "\n"
@@ -406,7 +474,7 @@ def regressions(old, ledger, allowed):
     for r in ledger:
         key = (r["class"], r["tag"].lower())
         prev = old.get(key)
-        if prev and prev[0] in ("consumed", "verified") and r["state"] in ("stored", "unread"):
+        if prev and prev[0] in ("consumed", "verified") and r["state"] in ("stored", "unread", "retail_unused"):
             if f"{r['class']}.{r['tag']}".lower() not in allowed:
                 bad.append(f"{r['class']}.{r['tag']}: {prev[0]} -> {r['state']} (was read in {prev[2]})")
     return bad
