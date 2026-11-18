@@ -243,6 +243,20 @@ ui::HudBuildOption::Block galactic_build_block(commands::RejectReason why) {
     return B::Prerequisite;
 }
 
+namespace {
+std::string_view first_word(std::string_view s) {
+    size_t b = 0;
+    while (b < s.size() && (s[b] == ' ' || s[b] == '\t' || s[b] == '\r' || s[b] == '\n')) ++b;
+    size_t e = b;
+    while (e < s.size() && s[e] != ' ' && s[e] != '\t' && s[e] != '\r' && s[e] != '\n') ++e;
+    return s.substr(b, e - b);
+}
+}  // namespace
+
+WeatherLines planet_weather_lines(std::string_view name_field, std::string_view info_field) {
+    return {first_word(name_field), first_word(info_field)};
+}
+
 GameOverArt game_over_art(bool victory, bool pick_land, std::string_view victory_text, std::string_view defeat_text,
                           std::string_view land_win, std::string_view space_win, std::string_view land_lose,
                           std::string_view space_lose) {

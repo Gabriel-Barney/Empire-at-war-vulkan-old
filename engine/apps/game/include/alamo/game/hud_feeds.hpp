@@ -148,6 +148,13 @@ constexpr bool shows_hero_head(bool named_hero, bool show_hero_head) { return na
 // mcx4 t14 (MCX4_T14_RE_ANSWERS "Faction.Victory_Text family", game over screen 0x92bb0): the local faction's text key
 // (Victory_Text on a win, Defeat_Text on a loss) and image (Land_ / Space_Win_Image on a win, _Lose_Image on a loss; land
 // or space picked 50 / 50 by the UI random, `pick_land`). A missing land / space image falls back to the other one [port].
+// mcx4 t14 (MCX4_T14_RE_ANSWERS "GameObjectType.Encyclopedia_Weather_Name family", 0x2f0af0 from the galactic tooltip
+// 0x2e0c20): the text ids of the planet pop-up's weather name and weather info lines (the first word of each field,
+// "" = no line).
+struct WeatherLines {
+    std::string_view name, info;
+};
+WeatherLines planet_weather_lines(std::string_view name_field, std::string_view info_field);
 struct GameOverArt {
     std::string_view text_key, image;
 };

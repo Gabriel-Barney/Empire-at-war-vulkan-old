@@ -110,6 +110,17 @@ ui::EncyclopediaEntry encyclopedia_entry(const GameData& d, const ui::TextDataba
         income.left = U"Income";
         income.right = number(ti->credit_value);
         e.rows.push_back(std::move(income));
+        // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameObjectType.Encyclopedia_Weather_Name family"): the weather name and info
+        // lines. [M] as centred rows after the income.
+        const WeatherLines wl = planet_weather_lines(d.types.get_string(t, "Encyclopedia_Weather_Name"),   // ledger: consumes GameObjectType.Encyclopedia_Weather_Name
+                                                     d.types.get_string(t, "Encyclopedia_Weather_Info"));  // ledger: consumes GameObjectType.Encyclopedia_Weather_Info
+        for (const std::string_view id : {wl.name, wl.info})
+            if (!id.empty())
+                if (const std::u16string* s = text.find(std::string(id))) {
+                    ui::EncyclopediaRow r;
+                    r.center = ui::utf16_to_utf32(*s);
+                    e.rows.push_back(std::move(r));
+                }
     } else {
         // t40 (HUD_GAPS §2.2, captures C3_*tooltip*): class, ability icons and the Strong / Weak icon rows, no stat rows.
         e.population = static_cast<int32_t>(d.types.get_float(t, "Population_Value"));

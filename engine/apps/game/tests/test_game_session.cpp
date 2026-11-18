@@ -913,6 +913,15 @@ void game_over_art_test() {
     CHECK(game::game_over_art(true, true, "", "", "", "s.tga", "", "").image == "s.tga");  // a missing land image: space
 }
 
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md): a planet's Encyclopedia_Weather_Name and Encyclopedia_Weather_Info text ids.
+// ledger: verifies GameObjectType.Encyclopedia_Weather_Name
+// ledger: verifies GameObjectType.Encyclopedia_Weather_Info
+void planet_weather_lines_test() {
+    const game::WeatherLines w = game::planet_weather_lines(" TEXT_WEATHER_NAME_RAIN ", "TEXT_TACTICAL_WEATHER_OBJECTIVE_RAIN\n");
+    CHECK(w.name == "TEXT_WEATHER_NAME_RAIN" && w.info == "TEXT_TACTICAL_WEATHER_OBJECTIVE_RAIN");
+    CHECK(game::planet_weather_lines("", "  ").name.empty() && game::planet_weather_lines("", "  ").info.empty());
+}
+
 void shows_hero_head_test() {
     static_assert(game::shows_hero_head(true, false) && game::shows_hero_head(false, true) && game::shows_hero_head(true, true));
     static_assert(!game::shows_hero_head(false, false));
@@ -3060,6 +3069,7 @@ int main() {
     win_lose_banner_text_test();    // mcx4 t14
     shows_hero_head_test();         // mcx4 t14
     game_over_art_test();           // mcx4 t14
+    planet_weather_lines_test();    // mcx4 t14
     movie_frame_cue_test();         // mcx4 t13
     story_ui_test();
     linked_overlay_test();
