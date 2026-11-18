@@ -596,6 +596,25 @@ public:
     // mcx4 t13 (presentation feed): units that left a garrison (Exited / Ejected) in this tick or in the command phase
     // before it, in event order.
     std::span<const StoryGarrisonEvent> story_vacated() const { return story_vacated_; }
+    // mcx4 t13 (presentation feed; MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Tactical_Object_Building_Started family"): build
+    // pad starts (0x42dbd0; `object` = the under-construction object, `type` its type), completions (0x42e890; `object` =
+    // the finished object, `uc` = the gone under-construction object, `type` the UC type) and sales (0x5248b0; `object` =
+    // the sold object, gone by now, `type` its type), in this tick or in the command phase before it, in event order.
+    // `owner` = the builder / the finished object's owner / the seller; `sfx` = the start came from a build command (the
+    // Lua pad.Build start passes sfx 0).
+    struct PadEvent {
+        enum class Kind : uint8_t { Started, Completed, Sold };
+        Kind kind = Kind::Started;
+        bool sfx = false;
+        objects::ObjectId object = objects::kNoObjectId, uc = objects::kNoObjectId;
+        objects::TypeIndex type = objects::kNone;
+        int32_t owner = -1;
+        Vec3 position{};
+    };
+    std::span<const PadEvent> pad_events() const { return pad_events_; }
+    // mcx4 t13 (presentation feed; MCX4_T13_RE_ANSWERS "Faction.Reinforcements_Selection_SFXEvent family", Player::Update
+    // 0x287e70): players whose skirmish start-force re-delivery timer expired this tick, slot order.
+    std::span<const int32_t> garrison_redelivered() const { return sk_redelivered_; }
     // Garrison API for the Lua bindings (Can_Garrison / Garrison / Leave_Garrison / Eject_Garrison / Can_Garrison_Fire /
     // Is_In_Garrison / Get_Garrisoned_Units). Orders: `player` = the units' owner (script orders pass the unit's owner);
     // units must be live battle units of that player. can_garrison = the Lua Can_Garrison rule (L1_S4_REMAINING.md §2.5:
@@ -1005,6 +1024,13 @@ public:
     // mcx4 t13 (presentation feed, this tick, cleared at the start of tick()): the victim of every asteroid field damage
     // hit, in service order (SFXEvent_Damaged_By_Asteroid, 0x436920).
     std::span<const objects::ObjectId> asteroid_hits() const { return l1_asteroid_hits_; }
+    // mcx4 t13 (presentation feed, this tick): gravity control generators that came under base power (on) or lost it
+    // (AbilityEventKind::GravityFieldPower, TRU1_GRAVITY_FIELD.md §1.2), in event order.
+    struct GravityPowerEvent {
+        objects::ObjectId generator = objects::kNoObjectId;
+        bool on = false;
+    };
+    std::span<const GravityPowerEvent> gravity_power_changes() const { return gravity_power_; }
     // Field effects (L1_S4_REMAINING §3.3), serviced at the start of the combat object pass (phase D, ascending id):
     // NEBULA objects - entry cancels every active ability, lockout stamp (Nebula_Ability_Disable_Time); SHIELDED
     // objects - ion-storm stamp (shields down, DEFEND blocked for Ion_Storm_Shield_Disable_Time); ASTEROID_FIELD_DAMAGE
@@ -2247,6 +2273,9 @@ private:
     std::vector<StoryCaptureEvent> story_captured_;
     std::vector<StoryGarrisonEvent> story_vacated_;  // mcx4 t13: presentation only (not saved / hashed)
     size_t story_vacated_mark_ = 0;                  // entries the last tick reported
+    std::vector<PadEvent> pad_events_;               // mcx4 t13: presentation only (not saved / hashed)
+    size_t pad_events_mark_ = 0;
+    bool pad_build_sfx_ = false;                     // set by tactical_build around its pad_build call
     void s4_owner_changed(TacticalMode& mode, objects::ObjectId id, int32_t old_owner, int32_t owner);  // change_owner()
     // s78j t04: one object's script owner change (change_owner(), else store + trees + fog / garrison hooks), and the
     // team spread of script_change_owner (TACTICAL_COMBAT §3.5 step 4): the container, then the other live members.
@@ -2379,6 +2408,7 @@ private:
     L1Constants l1_k_;
     std::vector<objects::ObjectId> l1_in_asteroid_;  // ASTEROID_FIELD_DAMAGE stamps set (ascending id)
     std::vector<objects::ObjectId> l1_asteroid_hits_;  // mcx4 t13: presentation only (not saved / hashed)
+    std::vector<GravityPowerEvent> gravity_power_;     // mcx4 t13: presentation only (not saved / hashed)
     void l1_fields(uint32_t frame, SimRng& rng);  // BattleHooks::before_units (combat phase D start)
     // --- OI tactical: crush (MOVEMENT.md 5.5): the movement tick's CrushEvents, applied as Take_Damage at combat phase
     //     D start (BattleHooks::before_units) so the deaths are reported by this tick's combat. ---
@@ -2785,6 +2815,7 @@ private:
         std::vector<uint32_t> pending;        // space: types not launched yet
     };
     std::vector<SkGarrison> sk_garrisons_;
+    std::vector<int32_t> sk_redelivered_;     // mcx4 t13: this tick's expiries (presentation only, not saved / hashed)
     void sk_garrison_setup();                 // setup, after the start forces are placed
     void sk_garrison_tick();                  // tick
     int32_t sk_pending_delivery(int32_t player, bool pop);  // HangarHost::pending_delivery

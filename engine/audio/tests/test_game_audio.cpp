@@ -113,6 +113,7 @@ const char* kSfx = R"(<?xml version="1.0"?>
   <SFXEvent Name="HUD_Base_Attack"><Use_Preset>Preset_HUD</Use_Preset><Samples>BA_ENG.WAV</Samples></SFXEvent>
   <SFXEvent Name="HUD_Rain_Begin"><Use_Preset>Preset_HUD</Use_Preset><Samples>RB_ENG.WAV</Samples></SFXEvent>
   <SFXEvent Name="HUD_Enemy_Spotted"><Use_Preset>Preset_HUD</Use_Preset><Samples>ES_ENG.WAV</Samples></SFXEvent>
+  <SFXEvent Name="HUD_Generic_Spotted"><Use_Preset>Preset_HUD</Use_Preset><Samples>GS_ENG.WAV</Samples></SFXEvent>
   <SFXEvent Name="HUD_Spot_Vader"><Use_Preset>Preset_HUD</Use_Preset><Samples>SV_ENG.WAV</Samples></SFXEvent>
   <SFXEvent Name="HUD_Pending"><Use_Preset>Preset_HUD</Use_Preset><Samples>PE_ENG.WAV</Samples></SFXEvent>
   <SFXEvent Name="GUI_Click"><Is_2D>Yes</Is_2D><Is_3D>No</Is_3D><Is_GUI>Yes</Is_GUI><Samples>CLICK.WAV</Samples><Max_Instances>4</Max_Instances></SFXEvent>
@@ -212,6 +213,7 @@ const char* kFactions = R"(<?xml version="1.0" ?>
     <SFXEvent_Land_Base_Under_Attack_Announcement> HUD_Base_Attack </SFXEvent_Land_Base_Under_Attack_Announcement>
     <SFXEvent_Unit_Type_Spotted> Darth_Vader, HUD_Spot_Vader </SFXEvent_Unit_Type_Spotted>
     <SFXEvent_Enemy_Spotted> HUD_Enemy_Spotted </SFXEvent_Enemy_Spotted>
+    <SFXEvent_Generic_Unit_Spotted> HUD_Generic_Spotted </SFXEvent_Generic_Unit_Spotted>
     <SFXEvent_Weather_Begin> RAIN, HUD_Rain_Begin </SFXEvent_Weather_Begin>
     <SFXEvent_Weather_End> RAIN, </SFXEvent_Weather_End>
     <Credits> 100 </Credits>
@@ -825,14 +827,19 @@ void test_hooks() {
     g.set_weather("RAIN", 0.6f, false);
     CHECK(count_op(a, LogOp::SfxStart, "HUD_Rain_Begin") == 2);
 
-    // Enemy spotted: per-type line, else the generic one; Lua flag off -> nothing.
+    // mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "GameObjectType.Play_SFXEvent_On_Sighting"): a flagged type sighted -> its
+    // SFXEvent_Unit_Type_Spotted entry, else SFXEvent_Generic_Unit_Spotted; an enemy -> SFXEvent_Enemy_Spotted; the Lua
+    // flag off -> nothing.
+    // ledger: verifies Faction.SFXEvent_Generic_Unit_Spotted
     settle();
-    CHECK(g.enemy_spotted("darth_vader") != 0 && last_op(a, LogOp::SfxStart)->event == "HUD_Spot_Vader");
+    CHECK(g.unit_type_spotted("darth_vader") != 0 && last_op(a, LogOp::SfxStart)->event == "HUD_Spot_Vader");
     settle();
-    CHECK(g.enemy_spotted("Boba_Fett") != 0 && last_op(a, LogOp::SfxStart)->event == "HUD_Enemy_Spotted");
+    CHECK(g.unit_type_spotted("Boba_Fett") != 0 && last_op(a, LogOp::SfxStart)->event == "HUD_Generic_Spotted");
+    settle();
+    CHECK(g.enemy_spotted() != 0 && last_op(a, LogOp::SfxStart)->event == "HUD_Enemy_Spotted");
     g.allow_enemy_sighted_vo(false);
     settle();
-    CHECK(g.enemy_spotted("Boba_Fett") == 0);
+    CHECK(g.unit_type_spotted("Boba_Fett") == 0 && g.enemy_spotted() == 0);
 
     // GUI: pumped once, so the click's voice exists before the next update.
     const size_t before_click = a.log().size();
@@ -1131,7 +1138,7 @@ void test_lua_game() {
     uint32_t next = 0;
     LuaAudioResult r = apply_presentation_audio(g, ev, &next);
     CHECK(r.applied == 3 && r.unhandled == 0 && r.bad_args == 1 && next == 4);
-    CHECK(g.ambience().paused() && g.enemy_spotted("Darth_Vader") == 0 && near(a.bus_level(AudioBus::Master), 0.8f));
+    CHECK(g.ambience().paused() && g.unit_type_spotted("Darth_Vader") == 0 && near(a.bus_level(AudioBus::Master), 0.8f));
     // The AudioSystem overload has no GameAudio: Weather_Audio_Pause x2 and Allow_Enemy_Sighted_VO unhandled.
     uint32_t n2 = 0;
     r = apply_presentation_audio(a, ev, &n2);

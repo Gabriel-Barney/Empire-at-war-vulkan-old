@@ -243,6 +243,16 @@ ui::HudBuildOption::Block galactic_build_block(commands::RejectReason why) {
     return B::Prerequisite;
 }
 
+std::string_view win_lose_banner_text(bool local_side_won, bool corruption_mission) {
+    if (local_side_won) return corruption_mission ? "TEXT_WIN_CORRUPTION_MISSION" : "TEXT_WIN_TACTICAL";
+    return corruption_mission ? "TEXT_LOSE_CORRUPTION_MISSION" : "TEXT_LOSE_TACTICAL";
+}
+
+std::string_view encyclopedia_text_tag(bool skirmish_battle, bool has_mp_text) {
+    // ledger: consumes GameObjectType.MP_Encyclopedia_Text
+    return skirmish_battle && has_mp_text ? "MP_Encyclopedia_Text" : "Encyclopedia_Text";
+}
+
 bool galactic_build_listed(const std::function<bool(std::string_view)>& flag) {
     // ledger: consumes GameObjectType.Build_Tab_Special_Structures
     // ledger: consumes GameObjectType.Build_Tab_Heroes

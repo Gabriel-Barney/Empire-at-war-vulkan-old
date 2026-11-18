@@ -623,6 +623,24 @@ void test_buttons() {
         // P4_SIM_SYSTEMS §2.7.2: the Droid Log date / separator row colours (FoC 255 0 0 / 128 128 128).
         CHECK2((h0.droid_date_color == Rgba8{255, 0, 0, 255}) && (h0.droid_separator_color == Rgba8{128, 128, 128, 255}));
         CHECK2((h3.droid_date_color == Rgba8{10, 20, 30, 255}) && (h3.droid_separator_color == Rgba8{40, 50, 60, 70}));
+        // mcx4 t14 / t15 (docs/re/MCX4_T14_RE_ANSWERS.md "GameConstants.Win_Lose_Message_Font"): the banner font, the last
+        // Win_Lose_Message_Font_Size wins, and the Win_Message_Color / Lose_Message_Color pair.
+        // ledger: verifies GameConstants.Win_Lose_Message_Font
+        // ledger: verifies GameConstants.Win_Lose_Message_Font_Size
+        // ledger: verifies GameConstants.Win_Message_Color
+        // ledger: verifies GameConstants.Lose_Message_Color
+        CHECK2(h0.win_lose_font == "EmpireAtWar-Bold" && near2(h0.win_lose_font_size, 24.0f) &&
+               (h0.win_message_color == Rgba8{223, 243, 255, 255}) && (h0.lose_message_color == Rgba8{255, 244, 223, 255}));
+        const data::XmlDocument g4 = data::XmlDocument::parse(std::string_view(
+            "<GameConstants><Win_Lose_Message_Font>Arial</Win_Lose_Message_Font><Win_Lose_Message_Font_Size>36"
+            "</Win_Lose_Message_Font_Size><Win_Lose_Message_Font_Size>24</Win_Lose_Message_Font_Size><Win_Message_Color>1 2 3"
+            "</Win_Message_Color><Lose_Message_Color>4 5 6 7</Lose_Message_Color></GameConstants>"));
+        const HudConstants h4 = hud_constants_from(g4.root());
+        CHECK2(h4.win_lose_font == "Arial" && near2(h4.win_lose_font_size, 24.0f) && (h4.win_message_color == Rgba8{1, 2, 3, 255}) &&
+               (h4.lose_message_color == Rgba8{4, 5, 6, 7}));
+        // ledger: verifies GameConstants.CB_Flash_Count
+        const data::XmlDocument g5 = data::XmlDocument::parse(std::string_view("<GameConstants><CB_Flash_Count>7</CB_Flash_Count></GameConstants>"));
+        CHECK2(h0.cb_flash_count == 4 && hud_constants_from(g5.root()).cb_flash_count == 7);  // CB_Flash_Count (FoC 4)
     }
     const data::XmlDocument gd = data::XmlDocument::parse(std::string_view(
         "<GUIDialogs><Tooltips><IDC_COMBAT_EFF_TIP><TextID>TEXT_COMBAT_EFF_TOOLTIP</TextID></IDC_COMBAT_EFF_TIP></Tooltips></GUIDialogs>"));

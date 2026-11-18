@@ -81,6 +81,13 @@ struct GameAudioStats {
     uint64_t battle_result_lines = 0;                                              // mcx4 t13 batch D
     uint64_t retreat_lines = 0;                                                    // mcx4 t13 batch E
     uint64_t special_weapon_lines = 0;                                             // mcx4 t13 batch G
+    uint64_t base_shield_lines = 0;                                                // mcx4 t13 batch I
+    uint64_t pop_cap_lines = 0;                                                    // mcx4 t13 batch J
+    uint64_t gravity_lines = 0;                                                    // mcx4 t13 batch K
+    uint64_t strike_lines = 0;                                                     // mcx4 t13 batch M
+    uint64_t sighting_lines = 0;                                                   // mcx4 t13 batch N
+    uint64_t land_damage_sfx = 0;                                                  // mcx4 t13 batch O
+    uint64_t pad_lines = 0;                                                        // mcx4 t13 batch P
 };
 
 class GameAudioHost {
@@ -113,8 +120,11 @@ public:
     // mcx4 t13 (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Move_Into_Asteroid_Field family" [H]): `dest_fields` = the
     // space field kinds (tactical::abilities kField* bits) at a local unit's space move destination; the type's
     // move_into_field_tag line, when set, replaces the move response.
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Attack_Hardpoint", 0x44590 / 0x44cd0 [H]): `hardpoint_kind` =
+    // the HardPointType of an attack order's targeted hard point (-1 none); the type's SFXEvent_Attack_Hardpoint entry
+    // for it ("HARD_POINT_*, Event" lines), when set, replaces the attack response.
     void unit_response(const objects::GameObjectTypes& types, objects::TypeIndex type, uint64_t object, UnitResponse kind,
-                       bool group = false, int32_t owner = -1, uint32_t dest_fields = 0);
+                       bool group = false, int32_t owner = -1, uint32_t dest_fields = 0, int32_t hardpoint_kind = -1);
     // Asteroid field (bit 1) first, then nebula (bit 4); "" for neither.
     static std::string_view move_into_field_tag(uint32_t dest_fields);
     // Battle-end dialog opened: the local faction's win / lose music (Music_Event_Tactical_<Win/Lose>[_Vs_Faction]),
@@ -161,6 +171,16 @@ public:
         Vec3 position{};
     };
     uint32_t animation_sounds(std::span<const AnimSound> sounds);
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "GameObjectType.Spin_Away_On_Death_SFXEvent_Start_Die", DeathBehavior 0x58cf90): the
+    // battle's spin-away corpses (SimAnimation::corpses with spin_away; `object` = the corpse id, `event` unused); each
+    // new one plays its type's Spin_Away_On_Death_SFXEvent_Start_Die attached to it (3D when Is_3D, else 2D), any owner,
+    // once per death. Returns the number started.
+    struct SpinDeath {
+        uint64_t object = 0;
+        objects::TypeIndex type = objects::kNone;
+        Vec3 position{};
+    };
+    uint32_t spin_away_deaths(std::span<const SpinDeath> deaths, const objects::GameObjectTypes& types);
     // aud1 t04 (AUDIO.md §9.5): one shot's fire sound (fire_event(hardpoint_fire, shooter_fire)), 3D at the projectile's
     // spawn position. Returns the instance id (0 = none / refused).
     uint32_t weapon_fired(uint64_t shooter, std::string_view hardpoint_fire, std::string_view shooter_fire, const Vec3& position);
@@ -319,6 +339,32 @@ public:
     // tag in `fields` ("" when absent or out of range).
     static std::string_view special_weapon_tag(bool fired, bool own);
     static std::string_view nth_field(std::span<const std::pair<std::string, std::string>> fields, std::string_view tag, int32_t index);
+    // "Faction.SFXEvent_HUD_Base_Shield_Online family" (Set_State 0x56b540 step 2 [H]): the local faction's line for a
+    // base shield going back online (2 -> 1) or offline (1 -> 2), by the owner's relation (own / friendly vs hostile).
+    // The first evaluation (0 -> 1 / 0 -> 2) plays nothing.
+    static std::string_view base_shield_line(bool online, bool friendly);
+    // P4_SIM_SYSTEMS §2.7.3 (player tick 0x287e70, tactical): "room for one unit" (0x2b03e0) = no cap (< 0) or the
+    // population used below the cap; SFXEvent_Tactical_Pop_Cap_Reached plays when it turns false.
+    static bool unit_room(float used, float cap) { return cap < 0.0f || used < cap; }
+    // "Faction.SFXEvent_Bombard_Available family" (PlanetaryBombardManager 0x52a110 / BombingRunManager 0x495dd0 [H]): the
+    // tag of player P's faction that announces P's bombardment (`bombard`) or bombing run becoming available: P is the
+    // local player -> _Available, the local player friendly to P -> _Ally_Available, hostile -> _Enemy_Available.
+    static std::string_view strike_available_tag(bool bombard, bool local, bool friendly);
+    // "GameObjectType.Land_Damage_SFX" (0x3ac290 [H]; stage rule TACTICAL_GAPS §6.3): the damage stage for a health
+    // fraction = the last Land_Damage_Thresholds entry k (list order) with fraction <= t_k, -1 when none. When a hit
+    // changes it, Land_Damage_SFX[k] plays attached to the object unless it is "NULL" [M on the compare].
+    static int32_t land_damage_stage(std::span<const std::string_view> thresholds, float fraction);
+    // "Faction.SFXEvent_Tactical_Object_Building_Started family" (0x42dbd0 / 0x42e890 / 0x5248b0 [H]): the lines of a build
+    // pad start, completion or sale. `type_tags` = the event type's 2D line (first set entry wins), heard only by a local
+    // builder / seller (`local`; a start also needs its build command's sfx flag); `faction_tag` = the owner's faction
+    // line for any owner (start / complete attached to the object, sale 3D at its position); `loop_tag` = the start's
+    // attached loop, stopped on the under-construction object at completion.
+    enum class PadLine : uint8_t { Started, Completed, Sold };
+    struct PadLines {
+        std::array<std::string_view, 2> type_tags{};
+        std::string_view faction_tag, loop_tag;
+    };
+    static PadLines pad_lines(PadLine kind, bool local);
     struct ControlLines {
         std::string_view friendly, enemy;
     };
@@ -416,6 +462,16 @@ private:
     float health_low_ = 0.33f, health_critical_ = 0.10f;  // GameConstants Health_Low / _Critical_Percent_Threshold
     bool corruption_mission_ = false, victory_seen_ = false;  // mcx4 t13 batch D: set_corruption_mission; declare latch
     int32_t last_retreater_ = -1;                             // mcx4 t13 batch E: retreating_player() last tick
+    std::map<int64_t, uint8_t> base_shield_state_;            // mcx4 t13 batch I: generator -> 1 on / 2 off (lookup only)
+    bool unit_room_ = true;                                   // mcx4 t13 batch J: last tick's unit_room [M: starts true]
+    std::vector<uint8_t> strike_avail_;                       // mcx4 t13 batch M: per player bit 0 bombard, bit 1 bombing run
+    std::set<int64_t> sighted_;                               // mcx4 t13 batch N: units seen by the local player (lookup only)
+    std::set<int32_t> spotted_types_;                         // types whose Unit_Type_Spotted line played
+    bool enemy_spotted_done_ = false;                         // SFXEvent_Enemy_Spotted played this battle
+    std::map<int64_t, int32_t> land_damage_stage_;            // mcx4 t13 batch O: object -> last stage (lookup only)
+    std::map<int64_t, std::string> pad_loops_;                // mcx4 t13 batch P: UC object -> its building loop event
+    std::set<uint64_t> spun_;                                 // mcx4 t13 batch Q: spin-away deaths already voiced
+    std::map<int64_t, std::string> self_destructs_;           // mcx4 t13 batch Q: counting-down unit -> its started event
     // mcx4 t13 batch B: the local player's tactical build orders last tick (order id -> type) and built counts (type ->
     // TacticalProduction::built_count), to tell a completed order from a cancelled one.
     std::map<uint32_t, int32_t> prod_orders_;

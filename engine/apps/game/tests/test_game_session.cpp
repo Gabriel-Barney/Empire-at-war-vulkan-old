@@ -875,6 +875,21 @@ void skirmish_win_condition_test() {
 // ledger: verifies GameObjectType.Build_Tab_Heroes
 // ledger: verifies GameObjectType.Build_Tab_Outpost
 // ledger: verifies GameObjectType.Build_Tab_Space_Station
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "GameObjectType.MP_Encyclopedia_Text"): skirmish battles use the MP text
+// when the type has one.
+// ledger: verifies GameObjectType.MP_Encyclopedia_Text
+void win_lose_banner_text_test() {  // mcx4 t14: docs/re/MCX4_T14_RE_ANSWERS.md "GameConstants.Win_Lose_Message_Font"
+    CHECK(game::win_lose_banner_text(true, false) == "TEXT_WIN_TACTICAL" && game::win_lose_banner_text(false, false) == "TEXT_LOSE_TACTICAL");
+    CHECK(game::win_lose_banner_text(true, true) == "TEXT_WIN_CORRUPTION_MISSION");
+    CHECK(game::win_lose_banner_text(false, true) == "TEXT_LOSE_CORRUPTION_MISSION");
+}
+
+void encyclopedia_text_tag_test() {
+    CHECK(game::encyclopedia_text_tag(true, true) == "MP_Encyclopedia_Text");
+    CHECK(game::encyclopedia_text_tag(true, false) == "Encyclopedia_Text");
+    CHECK(game::encyclopedia_text_tag(false, true) == "Encyclopedia_Text");
+}
+
 void galactic_build_listed_test() {
     for (const char* tag : {"Build_Tab_Land_Units", "Build_Tab_Space_Units", "Build_Tab_Special_Structures", "Build_Tab_Heroes",
                             "Build_Tab_Outpost", "Build_Tab_Space_Station"})
@@ -979,6 +994,14 @@ void story_script_test() {
 
 // q6 t14 (GALACTIC_DIALOGS §2.8): the dialog script cache (exact names, rejected files not cached) and the summary fill
 // (rows = the tab's records, label = the chapter's first TEXT, colour / dim, selection, EXTRA_TEXT lines as stored).
+// mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md "Campaign.Show_Completed_Tab"): False hides the Completed tab.
+// ledger: verifies Campaign.Show_Completed_Tab
+void completed_tab_shown_test() {
+    CHECK(!game::completed_tab_shown("False", true) && !game::completed_tab_shown(" no ", true));  // Show_Completed_Tab False
+    CHECK(game::completed_tab_shown("True", true) && game::completed_tab_shown("yes", true));
+    CHECK(game::completed_tab_shown("", true) && game::completed_tab_shown("False", false));  // [port] defaults
+}
+
 void holocron_summary_test() {
     struct Files final : FileProvider {
         std::map<std::string, std::string> f;
@@ -2963,10 +2986,13 @@ int main() {
     custom_tech_offset_test();  // mcx4 t19
     skirmish_win_condition_test();  // mcx4 t14
     galactic_build_listed_test();   // mcx4 t14
+    encyclopedia_text_tag_test();   // mcx4 t14
+    win_lose_banner_text_test();    // mcx4 t14
     story_ui_test();
     linked_overlay_test();
     story_script_test();
     holocron_summary_test();  // q6 t14
+    completed_tab_shown_test();  // mcx4 t14
     story_scripts_real_test();
     game::GameData data;
     std::string err;

@@ -292,6 +292,11 @@ bool StoryPresenter::on_reward(std::string_view type, const std::vector<std::str
 
 void StoryPresenter::remove_all_text() { lines_.clear(); }
 
+void StoryPresenter::flash_component(std::string_view component, int32_t count, double now) {
+    if (component.empty() || count <= 0) return;
+    flashes_.push_back({std::string(component), now, now + kFlashSeconds * static_cast<double>(count)});
+}
+
 void StoryPresenter::game_message(std::string_view text_id) {
     StoryHint h;
     h.text = resolve(text_id);

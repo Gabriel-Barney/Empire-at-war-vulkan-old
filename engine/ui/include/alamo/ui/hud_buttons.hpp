@@ -160,6 +160,13 @@ struct HudConstants {
     // mcx4 t14 (P4_SIM_SYSTEMS §2.7.2): the Droid Log's "Day N" and separator rows.
     Rgba8 droid_date_color{255, 0, 0, 255};         // Droid_Date_Color
     Rgba8 droid_separator_color{128, 128, 128, 255};  // Droid_Seperator_Color (retail spelling)
+    // mcx4 t14 / t15 (MCX4_T14_RE_ANSWERS "GameConstants.Win_Lose_Message_Font", banner 0x365150): the tactical win / lose
+    // banner's font (the last occurrence of each tag wins: FoC lists the size twice, 36 then 24) and colours.
+    std::string win_lose_font = "EmpireAtWar-Bold";   // Win_Lose_Message_Font
+    float win_lose_font_size = 24.0f;                 // Win_Lose_Message_Font_Size
+    Rgba8 win_message_color{223, 243, 255, 255};      // Win_Message_Color
+    Rgba8 lose_message_color{255, 244, 223, 255};     // Lose_Message_Color
+    int32_t cb_flash_count = 4;                       // mcx4 t14: CB_Flash_Count (b_reinforcement flashes on a pool add)
 };
 HudConstants hud_constants_from(const data::XmlNode& game_constants_root);
 // "r g b [a]" / "r, g, b[, a]" bytes (alpha 255 when absent); false (out unchanged) with fewer than three numbers.

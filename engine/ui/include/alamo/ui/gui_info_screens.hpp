@@ -89,6 +89,7 @@ struct StorySummaryInfo {
     std::vector<Rgba8> recap_colors;
     int32_t selected = -1;      // goal row preselected (-1 = the last row)
     bool has_completed = true;  // false: the Completed tab is disabled
+    bool show_completed_tab = true;  // mcx4 t14: false (Campaign Show_Completed_Tab False) hides IDC_RADIO_COMPLETED
 };
 
 enum class InfoPage : uint8_t { DroidLog, DataChart, TechTree, SummaryProduction, SummaryFleets, SummaryEconomy };

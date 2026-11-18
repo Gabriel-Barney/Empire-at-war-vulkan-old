@@ -98,7 +98,7 @@ std::u32string type_label(const GameData& d, const ui::TextDatabase& text, objec
 
 // ---- encyclopedia -----------------------------------------------------------------------------------------------
 ui::EncyclopediaEntry encyclopedia_entry(const GameData& d, const ui::TextDatabase& text, std::span<const ui::HudTypeInfo> hud_types,
-                                         objects::TypeIndex t) {
+                                         objects::TypeIndex t, bool skirmish_battle) {
     ui::EncyclopediaEntry e;
     if (t == objects::kNone || t >= d.types.size()) return e;
     e.header = type_label(d, text, t);
@@ -128,7 +128,8 @@ ui::EncyclopediaEntry encyclopedia_entry(const GameData& d, const ui::TextDataba
         e.strong_label = text_or(text, "TEXT_GOOD_AGAINST");
         e.weak_label = text_or(text, "TEXT_VULNERABLE_TO");
     }
-    for (const std::string& id : words(d.types.get_string(t, "Encyclopedia_Text"))) {
+    const std::string_view text_tag = encyclopedia_text_tag(skirmish_battle, !words(d.types.get_string(t, "MP_Encyclopedia_Text")).empty());
+    for (const std::string& id : words(d.types.get_string(t, text_tag))) {
         if (!e.description.empty()) e.description += U"\n";
         e.description += text_or(text, id);
     }

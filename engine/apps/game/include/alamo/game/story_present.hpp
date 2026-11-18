@@ -174,6 +174,9 @@ public:
     // Lua presentation calls (presentation.hpp).
     void remove_all_text();                                     // Remove_All_Text
     void game_message(std::string_view text_id);                // Game_Message: front of the hint queue, white
+    // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameConstants.CB_Flash_Count", command-bar flash 0x2f5440 with duration -1): a
+    // component flash run by count (`count` flashes of kFlashSeconds, no arrow), like FLASH_GUI's flash.
+    void flash_component(std::string_view component, int32_t count, double now);
     // ui4 t11 (P4_SIM_SYSTEMS §2.7.1): the message callback 0x140b313c0 - an urgent advisor line (front of the queue, the
     // Urgent sound) in `color`.
     void urgent_message(std::u32string text, StoryColor color);

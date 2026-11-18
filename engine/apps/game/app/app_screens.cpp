@@ -946,6 +946,10 @@ void App::open_story_summary() {
     if (!session_) return;
     sync_story_scripts(*session_, data_, story_scripts_, story_loads_);
     HolocronSummaryView v = holocron_summary(*session_, story_scripts_, ui_.text, summary_completed_, summary_entry_);
+    {  // mcx4 t14: the running campaign's Show_Completed_Tab
+        const data::CampaignDef* c = data_.db.find_campaign(session_->spec().campaign);
+        v.info.show_completed_tab = completed_tab_shown(c ? c->raw_value("Show_Completed_Tab") : std::string_view(), c != nullptr);  // ledger: consumes Campaign.Show_Completed_Tab
+    }
     summary_rows_ = std::move(v.row_ids);
     if (v.info.selected >= 0 && static_cast<size_t>(v.info.selected) < summary_rows_.size())
         summary_entry_ = summary_rows_[static_cast<size_t>(v.info.selected)];
@@ -1076,7 +1080,8 @@ void App::build_encyclopedia(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
     for (const auto& [id, t] : ency_types_)
         if (id == shown) shown_type = t;
     if (shown_type == objects::kNone) return;
-    ui::EncyclopediaEntry e = encyclopedia_entry(data_, ui_.text, ui_.hud_types, shown_type);
+    const bool skirmish_battle = screen_ == Screen::Battle && session_ && session_->spec().kind == SessionKind::Skirmish;  // mcx4 t14
+    ui::EncyclopediaEntry e = encyclopedia_entry(data_, ui_.text, ui_.hud_types, shown_type, skirmish_battle);
     // GRC 2 / REMAINING_GAPS §6.3: a planet's income row only with the local player's CreditIncome visibility.
     if (screen_ == Screen::Galactic)
         if (const galactic::GalacticSim* g = galaxy())

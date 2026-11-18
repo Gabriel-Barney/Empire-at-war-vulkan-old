@@ -484,7 +484,10 @@ bool App::tactical_story() const {
 
 void App::story_ui_step() {
     story_ui_.set_battle(tactical_story());
-    for (const std::string& e : audio_.take_speech_done()) story_ui_.speech_done(e);  // STORY_SPEECH_DONE
+    for (const std::string& e : audio_.take_speech_done()) {
+        story_ui_.speech_done(e);  // STORY_SPEECH_DONE
+        intro_movie_speech_done(e);
+    }
     if (!session_ || demo_session()) {
         (void)story_ui_.take();
         return;
@@ -712,6 +715,9 @@ void App::end_session() {
 void App::begin_battle(bool from_save) {
     const sim::TacticalBattle* b = session_->battle();
     ++battles_seen_;
+    win_banner_set_ = false;  // mcx4 t14: a new battle has no banner yet
+    reserve_seen_ = b ? b->reserves(local_player()).size() : 0;
+    win_banner_.clear();
     reinforce_unit_ = 0;  // no drop point pending from an earlier battle
     bombing_targeting_ = false;  // nor a bombing-run pick
     autofire_seen_.clear();  // ui1 t02: the default autofire is sent for this battle's objects

@@ -368,6 +368,11 @@ public:
     // hovered object (the pop-up keeps drawing its shown_object() while fading out after the hover is lost).
     ui::TooltipConfig ency_cfg_;
     ui::HudConstants hud_consts_;  // mcx4 t14 / t15: GameConstants HUD values (hud_constants_from)
+    // mcx4 t14 (banner 0x365150): set once at the battle's victory declare, shown until the battle ends.
+    bool win_banner_set_ = false;
+    size_t reserve_seen_ = 0;  // mcx4 t14: the local reinforcement pool's size last tick (CB_Flash_Count flash)
+    std::u32string win_banner_;
+    ui::Rgba8 win_banner_color_{};
     std::vector<std::pair<uint32_t, objects::TypeIndex>> ency_types_;
     // Gameplay options (IDD gameplay dialog). ui1 t02: kept between runs with the audio volumes, camera settings and key
     // bindings in game_options.txt (game_display.hpp OptionsProfile; live play only, app_options.cpp).
@@ -618,6 +623,10 @@ public:
     uint64_t choices_ = 0, auto_resolves_ = 0, story_dialogs_ = 0, ency_shown_ = 0, retry_boxes_ = 0, story_cues_ = 0;
     uint64_t tactical_auto_resolves_ = 0, auto_results_ = 0;
     bool story_movie_ = false;  // the advisor slot plays a story dialog's MOVIE
+    // mcx4 t14 (AUDIO.md §9.7 step 5): the intro speech line whose Tactical_Intro_Command_Bar_Movie_Name holds the
+    // advisor slot ("" none); intro_movie_speech_done ends the movie when that line ends.
+    std::string intro_movie_line_;
+    void intro_movie_speech_done(const std::string& event);
     // L1/S4 wave 1 (story_ui.hpp): the local player's UI notifications for the story (StorySession::notify_ui through the
     // command stream); zoom_planet_ = the planet of the last zoom_to_planet; battle_plots_ = the running battle's tactical
     // plots file (the STORY_MISSION_LOST name); story_ui_sent_ = notifications submitted.
@@ -661,6 +670,7 @@ public:
     std::shared_ptr<struct TextCrawlCache> text_crawls_;
     void build_story_text(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
     void build_story_hint(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
+    void build_win_banner(ui::HudDrawList& dl, const ui::HudCanvas& canvas);  // mcx4 t14: the tactical win / lose banner
     void build_story_pointers(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
     void story_component_flash(ui::HudDrawList& dl, const ui::HudCanvas& canvas);
     void story_forced_clicks();  // FORCE_CLICK_GUI: queued clicks ahead of the HUD's input (app_input.cpp)

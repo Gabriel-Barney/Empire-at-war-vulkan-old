@@ -188,6 +188,7 @@ bool InfoScreens::show_story_summary(const StorySummaryInfo& s) {
             }
         }
     d->enable("IDC_RADIO_COMPLETED", s.has_completed || s.completed);
+    d->show("IDC_RADIO_COMPLETED", s.show_completed_tab);  // mcx4 t14 (MCX4_T14_RE_ANSWERS "Campaign.Show_Completed_Tab")
     d->set_checked(s.completed ? "IDC_RADIO_COMPLETED" : "IDC_RADIO_ACTIVE", true);
     d->enable("IDC_SUMMARY_DIALOG_ABANDON", false);  // dead in retail (P4_SIM_SYSTEMS §9.1); 23.jpg shows none
     d->show("IDC_SUMMARY_DIALOG_ABANDON", false);

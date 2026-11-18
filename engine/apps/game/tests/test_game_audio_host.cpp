@@ -188,6 +188,7 @@ void test_super_weapon_music() {
 // ledger: verifies GameObjectType.SFXEvent_Enemy_Damaged_Health_Critical_Warning
 // ledger: verifies GameObjectType.SFXEvent_Hardpoint_Destroyed
 // ledger: verifies GameObjectType.SFXEvent_Hardpoint_All_Weapons_Destroyed
+// ledger: verifies GameObjectType.SFXEvent_Attack_Hardpoint
 void test_health_and_hardpoint_lines() {
     using H = GameAudioHost;
     // Thresholds 0.33 / 0.10 (FoC); critical tested first; one crossing per hit.
@@ -209,6 +210,11 @@ void test_health_and_hardpoint_lines() {
                                                 "HARD_POINT_ENGINE", "Lost_Engine", "HARD_POINT_WEAPON_LASER", "Lost_Laser_2"};
     CHECK(H::hardpoint_kind_event(toks, 5) == "Lost_Laser_2" && H::hardpoint_kind_event(toks, 0) == "Lost_Engine");
     CHECK(H::hardpoint_kind_event(toks, 6).empty() && H::hardpoint_kind_event(toks, 1).empty() && H::hardpoint_kind_event(toks, 13).empty());
+    // The same list shape is the attack response by hard point kind ("GameObjectType.SFXEvent_Attack_Hardpoint": FoC
+    // "HARD_POINT_WEAPON_LASER, Unit_HP_LASER_Corvette" lines; unit_response takes the attack's kind).
+    const std::vector<std::string_view> atk = {"HARD_POINT_WEAPON_LASER", "Unit_HP_LASER_Corvette", "HARD_POINT_WEAPON_ION_CANNON",
+                                               "Unit_HP_ION_Corvette"};
+    CHECK(H::hardpoint_kind_event(atk, 5) == "Unit_HP_LASER_Corvette" && H::hardpoint_kind_event(atk, 0).empty());
 }
 
 // mcx4 t13 batch C (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_Tactical_Gain_Friendly_Control family", capture
@@ -318,6 +324,78 @@ void test_move_into_field() {
     CHECK(H::move_into_field_tag(4u) == "SFXEvent_Move_Into_Nebula");
     CHECK(H::move_into_field_tag(5u) == "SFXEvent_Move_Into_Asteroid_Field");  // asteroid tested first
     CHECK(H::move_into_field_tag(0u).empty() && H::move_into_field_tag(2u).empty() && H::move_into_field_tag(8u).empty());
+}
+
+// mcx4 t13 batch I (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_HUD_Base_Shield_Online family"; both builds).
+// ledger: verifies Faction.SFXEvent_HUD_Base_Shield_Online
+// ledger: verifies Faction.SFXEvent_HUD_Base_Shield_Offline
+// ledger: verifies Faction.SFXEvent_HUD_Enemy_Base_Shield_Online
+// ledger: verifies Faction.SFXEvent_HUD_Enemy_Base_Shield_Offline
+void test_base_shield_lines() {
+    using H = GameAudioHost;
+    CHECK(H::base_shield_line(true, true) == "SFXEvent_HUD_Base_Shield_Online");
+    CHECK(H::base_shield_line(false, true) == "SFXEvent_HUD_Base_Shield_Offline");
+    CHECK(H::base_shield_line(true, false) == "SFXEvent_HUD_Enemy_Base_Shield_Online");
+    CHECK(H::base_shield_line(false, false) == "SFXEvent_HUD_Enemy_Base_Shield_Offline");
+}
+
+// mcx4 t13 batch J (docs/re/P4_SIM_SYSTEMS.md §2.7.3; MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_Tactical_Unit_Cap_Reached
+// family"): SFXEvent_Tactical_Pop_Cap_Reached plays when the room for one unit turns false.
+// ledger: verifies Faction.SFXEvent_Tactical_Pop_Cap_Reached
+void test_unit_room() {
+    using H = GameAudioHost;
+    CHECK(H::unit_room(3.0f, -1.0f) && H::unit_room(9.0f, 10.0f) && !H::unit_room(10.0f, 10.0f) && !H::unit_room(11.0f, 10.0f));
+}
+
+// mcx4 t13 batch M (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_Bombard_Available family"; both builds).
+// ledger: verifies Faction.SFXEvent_Bombard_Available
+// ledger: verifies Faction.SFXEvent_Bombard_Ally_Available
+// ledger: verifies Faction.SFXEvent_Bombard_Enemy_Available
+// ledger: verifies Faction.SFXEvent_Bombing_Run_Available
+// ledger: verifies Faction.SFXEvent_Bombing_Run_Ally_Available
+// ledger: verifies Faction.SFXEvent_Bombing_Run_Enemy_Available
+void test_strike_available_tags() {
+    using H = GameAudioHost;
+    CHECK(H::strike_available_tag(true, true, true) == "SFXEvent_Bombard_Available");
+    CHECK(H::strike_available_tag(true, false, true) == "SFXEvent_Bombard_Ally_Available");
+    CHECK(H::strike_available_tag(true, false, false) == "SFXEvent_Bombard_Enemy_Available");
+    CHECK(H::strike_available_tag(false, true, false) == "SFXEvent_Bombing_Run_Available");  // local wins over relation
+    CHECK(H::strike_available_tag(false, false, true) == "SFXEvent_Bombing_Run_Ally_Available");
+    CHECK(H::strike_available_tag(false, false, false) == "SFXEvent_Bombing_Run_Enemy_Available");
+}
+
+// mcx4 t13 batch O (docs/re/MCX4_T13_RE_ANSWERS.md "GameObjectType.Land_Damage_SFX"; both builds): the stage of a health
+// fraction is the last Land_Damage_Thresholds entry it is at or below.
+// ledger: verifies GameObjectType.Land_Damage_SFX
+// mcx4 t13 batch P (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_Tactical_Object_Building_Started family"; both
+// builds): a local builder / seller hears the type line; every owner gets the faction line, a start also the loop.
+// ledger: verifies Faction.SFXEvent_Tactical_Object_Building_Started
+// ledger: verifies Faction.SFXEvent_Tactical_Object_Building_Loop
+// ledger: verifies Faction.SFXEvent_Tactical_Object_Building_Complete
+// ledger: verifies Faction.SFXEvent_Tactical_Object_Sold
+// ledger: verifies GameObjectType.SFXEvent_Sold_Tactical
+void test_pad_lines() {
+    using H = GameAudioHost;
+    const H::PadLines s = H::pad_lines(H::PadLine::Started, true);
+    CHECK(s.type_tags[0] == "SFXEvent_Tactical_Build_Started" && s.type_tags[1] == "SFXEvent_Build_Started");
+    CHECK(s.faction_tag == "SFXEvent_Tactical_Object_Building_Started" && s.loop_tag == "SFXEvent_Tactical_Object_Building_Loop");
+    const H::PadLines r = H::pad_lines(H::PadLine::Started, false);  // another owner: faction lines only
+    CHECK(r.type_tags[0].empty() && r.faction_tag == "SFXEvent_Tactical_Object_Building_Started" && !r.loop_tag.empty());
+    const H::PadLines c = H::pad_lines(H::PadLine::Completed, true);
+    CHECK(c.type_tags[0] == "SFXEvent_Tactical_Build_Complete" && c.faction_tag == "SFXEvent_Tactical_Object_Building_Complete");
+    CHECK(c.loop_tag.empty());
+    const H::PadLines d = H::pad_lines(H::PadLine::Sold, true);
+    CHECK(d.type_tags[0] == "SFXEvent_Sold_Tactical" && d.type_tags[1].empty() && d.faction_tag == "SFXEvent_Tactical_Object_Sold");
+    CHECK(H::pad_lines(H::PadLine::Sold, false).type_tags[0].empty());
+}
+
+void test_land_damage_stage() {
+    using H = GameAudioHost;
+    const std::vector<std::string_view> th = {"0.75", " 0.5", "0.25 "};
+    CHECK(H::land_damage_stage(th, 1.0f) == -1 && H::land_damage_stage(th, 0.75f) == 0 && H::land_damage_stage(th, 0.6f) == 0);
+    CHECK(H::land_damage_stage(th, 0.5f) == 1 && H::land_damage_stage(th, 0.1f) == 2);
+    const std::vector<std::string_view> quirk = {"1"};  // thresholds "1": the stage holds at full health (TACTICAL_GAPS §6.3)
+    CHECK(H::land_damage_stage(quirk, 1.0f) == 0 && H::land_damage_stage({}, 0.1f) == -1);
 }
 
 // aud4 b0289 / b0300: garrison entry line and the hero clash win speech (both builds; presentation rules only).
@@ -928,6 +1006,11 @@ int main() {
     test_retreat_begin_lines();         // mcx4 t13 batch E
     test_special_weapon_lines();        // mcx4 t13 batch G
     test_move_into_field();             // mcx4 t13 batch G
+    test_base_shield_lines();           // mcx4 t13 batch I
+    test_unit_room();                   // mcx4 t13 batch J
+    test_strike_available_tags();       // mcx4 t13 batch M
+    test_land_damage_stage();           // mcx4 t13 batch O
+    test_pad_lines();                   // mcx4 t13 batch P
     test_intro_speech_t07();
     test_aud2();
 #ifdef ALAMO_GAME_HAVE_AUDIO
