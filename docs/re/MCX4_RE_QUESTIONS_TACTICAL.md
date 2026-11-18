@@ -50,3 +50,24 @@ the tag is then "retail-unused" and the port keeps ignoring it).
 - B8 `Projectile_Bomb_Fall_Accel_Rate` (type +0x1e88, TACTICAL_COMBAT §3.3 categories 2 / 5 / 9 "ballistic"): the flight
   step that reads it (per-frame z speed += rate? capped? the initial z speed?). The port flies bombs straight, so a
   `Fires_Forward` bomber (Y-Wing_Bombing_Run) would drop level bombs.
+
+## C. Still open after the lane's own reading (2026-11-18; `MCX4_RE_ANSWERS_TACTICAL.md` §1-§9 answer the rest)
+Answered from `re_reference/` by the lane: Q3.2 (§1), tactical tech level (§2), B2 (§3), Q5.2 (§5), B1 (§6), Q6.2 (§7),
+Q3.1 / Q4.1 / Q4.2 "no reader" (§8), Q5.3 in part (§9). For ReVa, only (all answered by the ReVa pass 2026-11-18):
+1. **Confirm §8 with cross-references**: no reader of type +0x5d8..+0x5e4, +0xb4..+0xb6, +0x898, +0xf08 besides the
+   ctor 0x367250 and the copy 0x36c000 (scalar-operand search of those offsets in code that has an object type in hand).
+   → **§10**: confirmed by a whole-image displacement scan, no reader of any of them [H].
+2. **B7** `Disallows_Hyperspace_Retreat` (+0x39): the reader and the effect. → **§11**: no reader anywhere,
+   retail-unused [H].
+3. **B8** `Projectile_Bomb_Fall_Accel_Rate` (+0x1e88): the BOMB flight step. → **§12**: 0x4ce6a0, BOMB / CLUSTER_BOMB
+   drop by a per-frame fall speed that starts at 0 and grows by the rate each frame, no cap; STATIC_BOMB does not move
+   [H].
+4. **§9 branch tests** of 0x48eb10: what obj +0x348 / +0x336 / +0x337 and the parent at +0x2b0 mean (squadron vs
+   transport), and where the battle death calls 0x48eb10 (the port's call site for `schedule_hero_respawn`).
+   → **§13**: TEAM / TRANSPORT / FLEET-in-FLEET parent tests; a tactical `Die` schedules nothing, the battle-end
+   write-back does it through 0x3a01f0 [H; the "lost" mark M].
+5. Spawn_Ability (0x71db50 activation): the whole ability (the port has none): trigger, spawn type +0x128, bone
+   `Spawn_Bone_Name`, +0x190, `Recharge_Time_In_Seconds` (+0x194) cooldown, `Self_Destruct_Radius`, `Explosion_Type`.
+   → **§14**: the full ability; +0x128 is the base `Target_Particle_Effect`, the bomber is `Object_Type` (+0x188),
+   +0x190 is `Creation_Delay_In_Seconds`, cooldown = int(FPS × value) frames from the activation,
+   `Self_Destruct_Radius` unused [H].

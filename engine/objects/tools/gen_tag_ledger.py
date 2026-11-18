@@ -72,6 +72,7 @@ TIER_OVERRIDES = {}  # (class, tag) -> tier, for rows that are distribution-leve
 # spelled as in docs/re/xml_field_tables.md (matched case-insensitively). Keep the list sorted by class, then tag.
 RETAIL_UNUSED = {
     ("GameObjectType", "Air_Vehicle_Turret_Target"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
+    ("GameObjectType", "Disallows_Hyperspace_Retreat"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §11 [H]",
     ("GameObjectType", "Ground_Infantry_Turret_Target"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
     ("GameObjectType", "Ground_Vehicle_Turret_Target"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
     ("GameObjectType", "Required_Timeline"): "docs/re/MCX4_RE_ANSWERS_TACTICAL.md §8 [H]",
