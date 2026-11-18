@@ -16,13 +16,24 @@ namespace {
 VictorySide load_side(const data::CampaignDef& c, std::string_view side, const GalaxyMap& map, std::vector<std::string>* diag) {
     VictorySide s;
     const std::string prefix(side);
-    for (std::string_view v : data::split_fields(c.raw_value(prefix + "_Victory_Conditions"))) {
+    // mcx1 t12 (MCX1_RE_ANSWERS Q1): a repeated list tag appends every occurrence.
+    const auto list = [&c](const std::string& tag) {
+        std::string out;
+        for (std::string_view v : c.raw_values(tag)) {
+            if (!out.empty()) out += ',';
+            out += v;
+        }
+        return out;
+    };
+    const std::string conditions = list(prefix + "_Victory_Conditions"), planets = list(prefix + "_Victory_Planet_Names"),
+                      factions = list(prefix + "_Victory_Faction_Names");
+    for (std::string_view v : data::split_fields(conditions)) {
         if (data::trim(v).empty()) continue;
         const VictoryCondition k = parse_victory_condition(data::trim(v));
         if (k == VictoryCondition::Unknown && diag) diag->push_back("galactic: unknown victory condition " + std::string(v));
         s.conditions.push_back(k);
     }
-    for (std::string_view v : data::split_fields(c.raw_value(prefix + "_Victory_Planet_Names"))) {
+    for (std::string_view v : data::split_fields(planets)) {
         if (data::trim(v).empty()) continue;
         const PlanetIndex p = map.planets.find(data::trim(v));
         if (p == kInvalidPlanet) {
@@ -31,7 +42,7 @@ VictorySide load_side(const data::CampaignDef& c, std::string_view side, const G
         }
         s.planets.push_back(p);
     }
-    for (std::string_view v : data::split_fields(c.raw_value(prefix + "_Victory_Faction_Names")))
+    for (std::string_view v : data::split_fields(factions))
         if (!data::trim(v).empty()) s.faction_names.emplace_back(data::trim(v));
     // mcx1 t02 (OBJECT_TYPES §4.5): C atoi / atof, prefix read ("5000c" is 5000).
     s.cycle_limit = data::xml_values::int_or(c.raw_value(prefix + "_Victory_Cycle_Limit"), 0);

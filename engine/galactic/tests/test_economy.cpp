@@ -1941,7 +1941,7 @@ private:
 void test_unit_roles() {
     std::printf("  q6: unit roles\n");
     CHECK(unit_kind_from_dummy(0) == UnitKind::Other && unit_kind_from_dummy(kDummyStarBase) == UnitKind::StarBase);
-    CHECK(unit_kind_from_dummy(kDummyGroundBase) == UnitKind::GroundStructure &&
+    CHECK(unit_kind_from_dummy(kDummyGroundBase) == UnitKind::Other &&  // mcx1 t11: never created at a planet
           unit_kind_from_dummy(kDummyGroundStructure) == UnitKind::GroundStructure &&
           unit_kind_from_dummy(kDummyOrbitalStructure) == UnitKind::GroundStructure);
     CHECK(unit_kind_from_dummy(kDummyGroundCompany) == UnitKind::GroundUnit &&
@@ -1966,6 +1966,7 @@ void test_unit_roles() {
   <Planet Name="Syn_Not_Planet"><Behavior>SELECTABLE</Behavior></Planet>
   <SpaceUnit Name="Syn_Two"><Behavior>DUMMY_STARSHIP, DUMMY_GROUND_COMPANY</Behavior></SpaceUnit>
   <SpaceUnit Name="Syn_Space_Only"><SpaceBehavior>DUMMY_ORBITAL_STRUCTURE</SpaceBehavior></SpaceUnit>
+  <GroundBase Name="Syn_Ground_Base"><Behavior>DUMMY_GROUND_BASE, DUMMY_GROUND_STRUCTURE</Behavior></GroundBase>
   <SlaveCompany Name="Syn_Slaves"><Behavior>DUMMY_GROUND_COMPANY</Behavior></SlaveCompany>
   <Props_TR Name="Syn_Prop"><Behavior>SELECTABLE</Behavior></Props_TR>
   <DummyStructure Name="Syn_Child"><Variant_Of_Existing_Type>Syn_Ship</Variant_Of_Existing_Type></DummyStructure>
@@ -1984,7 +1985,7 @@ void test_unit_roles() {
     CHECK(kind("Syn_Golan") == UnitKind::GroundStructure);
     CHECK(kind("Syn_Ship") == UnitKind::SpaceUnit);
     CHECK(kind("Syn_Company") == UnitKind::GroundUnit);
-    CHECK(kind("Syn_Base") == UnitKind::GroundStructure);
+    CHECK(kind("Syn_Base") == UnitKind::Other);           // DUMMY_GROUND_BASE: never created (mcx1 t11)
     CHECK(kind("Syn_Orbital") == UnitKind::GroundStructure);
     CHECK(kind("Syn_Hero_Squadron") == UnitKind::Squadron);
     CHECK(kind("Syn_Fighter") == UnitKind::Other);       // no DUMMY_*: no role, whatever the SpaceUnit tag
@@ -1993,6 +1994,8 @@ void test_unit_roles() {
     CHECK(kind("Syn_Not_Planet") == UnitKind::Other);    // a <Planet> element without PLANET
     CHECK(kind("Syn_Two") == UnitKind::GroundUnit);      // 0x5D comes before 0x61 in retail's order
     CHECK(kind("Syn_Space_Only") == UnitKind::Other);    // only the generic Behavior list counts
+    // A2K_T07_STORY_LOAD_RE §2 [H]: DUMMY_GROUND_BASE comes first and creates nothing (the level counts structures).
+    CHECK(kind("Syn_Ground_Base") == UnitKind::Other);
     CHECK(kind("Syn_Prop") == UnitKind::Other);
     CHECK(kind("Syn_Child") == UnitKind::SpaceUnit);  // the behaviour list is inherited from the variant's parent
 }
@@ -2661,6 +2664,13 @@ void test_oi_foc(const FocData& d) {
     }
     std::printf("  FoC galactic roles: %d types with a role, %d role-behaviour types without one\n", with_role, kept_other);
     CHECK(with_role > 0 && kept_other == 0);
+    // Pinned D4 role changes (MCX1_RE_ANSWERS Q7.2 [H], A2K_T07_STORY_LOAD_RE §2): a tactical build-pad satellite lists
+    // DUMMY_ORBITAL_STRUCTURE only under SpaceBehavior -> no galactic role; a ground base (DUMMY_GROUND_BASE) is never
+    // created at a planet (mcx1 t11); a starbase keeps its role.
+    for (const char* n : {"Empire_Defense_Satellite_Laser", "Empire_Mineral_Extractor", "Pirate_Ground_Base_1", "Rebel_Ground_Base_3"}) {
+        const uint32_t t = r.find_type(n);
+        CHECK(t != kNoIndex && r.types[t].kind == UnitKind::Other);
+    }
     // The saboteur team is created as a transport on Underworld's Shola, launches and jumps at the shuttle's speed x M.
     objects::IdCounter ids;
     objects::ObjectStore store(objects::ModeKind::Galactic, objects::StoreKind::Primary, d.types, &ids);

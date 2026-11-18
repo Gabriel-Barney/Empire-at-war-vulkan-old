@@ -120,6 +120,18 @@ void test_files(const alamo::game::GameData& d) {
     CHECK(any_diag(d, "UTF-16"));
 }
 
+// mcx1 t08 (MCX1_RE_ANSWERS Q6.3) [port]: a skirmish slot faction the data does not have falls back to a playable
+// faction, as an empty slot does; known factions are kept.
+void test_skirmish_fallback(const alamo::game::GameData& d) {
+    alamo::game::SkirmishSetup s;
+    s.human_faction = "No_Such_Faction";
+    s.ai_faction = "Values_Rebels";
+    const alamo::game::SkirmishSetup r = alamo::game::resolve_skirmish_factions(d.rules, s);
+    CHECK(r.ai_faction == "Values_Rebels");
+    CHECK(r.human_faction == alamo::game::default_skirmish_faction(d.rules, false));
+    CHECK(!r.human_faction.empty() && d.rules.find_faction(r.human_faction) != galactic::kNoIndex);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -138,6 +150,7 @@ int main(int argc, char** argv) {
     test_campaigns(d);
     test_objects(d);
     test_files(d);
+    test_skirmish_fallback(d);
     if (g_fail)
         for (const std::string& m : d.diagnostics) std::printf("  diag: %s\n", m.c_str());
     std::printf(g_fail ? "conformance values: %d check(s) FAILED\n" : "conformance values: all passed\n", g_fail);

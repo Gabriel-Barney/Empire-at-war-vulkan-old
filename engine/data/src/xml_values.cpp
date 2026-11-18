@@ -32,13 +32,19 @@ double c_atof(std::string_view s) {
     const std::string_view r = s.substr(i);
     const double sign = neg ? -1.0 : 1.0;
     if (starts_ci(r, "inf")) return sign * std::numeric_limits<double>::infinity();
-    if (starts_ci(r, "nan")) return std::numeric_limits<double>::quiet_NaN();
+    if (starts_ci(r, "nan")) return std::copysign(std::numeric_limits<double>::quiet_NaN(), sign);  // UCRT keeps "-nan"'s sign
     // Hex: "0x" followed by a hex digit (or '.' + hex digit).
     if (r.size() > 2 && r[0] == '0' && lower(r[1]) == 'x' &&
         (hexdigit(r[2]) || (r[2] == '.' && r.size() > 3 && hexdigit(r[3])))) {
         double v = 0;
         const auto res = std::from_chars(r.data() + 2, r.data() + r.size(), v, std::chars_format::hex);
-        if (res.ec == std::errc::result_out_of_range) return 0.0 * sign;  // rare; treated as underflow
+        if (res.ec == std::errc::result_out_of_range) {
+            // UCRT: overflow gives +-inf, underflow +-0. Underflow needs a negative binary exponent ("p-").
+            const std::string_view used(r.data() + 2, static_cast<size_t>(res.ptr - (r.data() + 2)));
+            const size_t pp = used.find_first_of("pP");
+            const bool under = pp != std::string_view::npos && pp + 1 < used.size() && used[pp + 1] == '-';
+            return under ? 0.0 * sign : sign * std::numeric_limits<double>::infinity();
+        }
         return res.ec == std::errc() ? sign * v : 0.0;
     }
     // Decimal prefix: digits [. digits] [e [+-] digits]; at least one mantissa digit.

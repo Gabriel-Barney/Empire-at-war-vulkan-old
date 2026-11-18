@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -88,6 +89,11 @@ static void test_xml_values() {
     CHECK(so.ok());
     CHECK(xv::int_or(so.root(), "X", -1, xv::kObject) == 4);
     CHECK(xv::int_or(so.root(), "X", -1) == 9);
+    // mcx1 t14: UCRT atof edge cases - "-nan" keeps its sign, a hex overflow is inf and a hex underflow 0.
+    CHECK(std::isnan(xv::c_atof("-nan")) && std::signbit(xv::c_atof("-nan")) && !std::signbit(xv::c_atof("nan")));
+    CHECK(xv::c_atof("0x1p99999") == std::numeric_limits<double>::infinity());
+    CHECK(xv::c_atof("-0x1p99999") == -std::numeric_limits<double>::infinity());
+    CHECK(xv::c_atof("0x1p-99999") == 0.0 && xv::c_atof("0x1p4") == 16.0);
 }
 
 static void test_xml_basic() {

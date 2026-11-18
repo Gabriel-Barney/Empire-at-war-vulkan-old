@@ -1047,7 +1047,7 @@ using ::alamo::test::env_or;  // alamo/test/support.hpp
     CHECK(company.valid && company.layer == UnitLayer::Ground && !company.structure);  // CategoryMask ignored
     CHECK(wing.valid && wing.layer == UnitLayer::Space);
     CHECK(!plain.valid && !frigate.valid);  // no DUMMY_* behaviour: no role, whatever the tag
-    CHECK(gbase.valid && gbase.structure && gbase.layer == UnitLayer::Ground);  // DUMMY_GROUND_BASE: a structure
+    CHECK(!gbase.valid);  // DUMMY_GROUND_BASE: never created at a planet (A2K_T07_STORY_LOAD_RE §2, mcx1 t11)
     CHECK(story.valid && story.layer == UnitLayer::Space);  // Props_Story with DUMMY_STARSHIP: a starship
     CHECK(!lookup("Missing").valid);
     std::printf("   seed roles (synthetic): by DUMMY_* behaviour only, element tags ignored\n");

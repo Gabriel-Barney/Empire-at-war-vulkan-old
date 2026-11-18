@@ -127,7 +127,9 @@ bool has_planet_behavior(const objects::GameObjectTypes& types, uint32_t type) {
 UnitKind unit_kind_from_dummy(uint8_t dummy) {
     switch (dummy) {
     case kDummyStarBase: return UnitKind::StarBase;
-    case kDummyGroundBase:
+    // mcx1 t11 (A2K_T07_STORY_LOAD_RE §2, MCX1_RE_ANSWERS Q7.2 [H]): a ground base (0x5B) is never created at a planet -
+    // Starting_Forces, production, story and Lua spawns make nothing; the planet's ground level is its structure count.
+    case kDummyGroundBase: return UnitKind::Other;
     case kDummyGroundStructure:
     case kDummyOrbitalStructure: return UnitKind::GroundStructure;
     case kDummyGroundCompany: return UnitKind::GroundUnit;
