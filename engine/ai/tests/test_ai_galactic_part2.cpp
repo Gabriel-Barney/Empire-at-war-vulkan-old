@@ -319,6 +319,34 @@ void test_production_disabled_and_delivery() {
 // ground base) + queued < the planet type's Special_Structures_Land (0x372740, D+0x230), not the map's legacy
 // <Max_Ground_Base>; plus the per-planet cap Build_Max_Instances_Per_Planet (0x3f94f0). The same slot max feeds the
 // MaxStructureSlots / OpenStructureSlots tokens. P0 (the Empire's) holds SB1 + one Barracks.
+// mcx5 t02 (AI_GALACTIC_TOKENS §2 neighbour lists [H]): the token neighbour radius is GC+0x108
+// MaximumFleetMovementDistance (FoC XML 100.0; a mod may set any value), not a port literal. No trade routes; P0 (0,0), P1 (60,40) at 72.1,
+// P2 (120,0) at 120: IsConnectedTo{type} on P0 matches P1 only once the radius reaches 72.1, P2 only with no P1.
+void test_fleet_distance_tokens() {
+    auto value = [](float radius, bool drop_p1) {
+        ParityWorld pw(false, {"BuildBarracks"}, [radius, drop_p1](gal::GalacticSetup& s) {
+            s.map.routes = decltype(s.map.routes){};
+            s.map.max_fleet_move_distance = radius;
+            if (drop_p1) s.map.planets.position[1] = {0.0f, 140.0f, 0.0f};  // P1 at 140
+        });
+        pw.run(2);
+        EquationSet e;
+        e.add("T", "Variable_Target.IsConnectedTo {Parameter_Type = \"" + pw.rules.types[tPlanet].name + "\"}");
+        e.link();
+        EvalContext c;
+        c.self = 0;
+        c.target = 0;
+        const EvalResult r = evaluate(e, e.find("T"), c, pw.world->resolver());
+        CHECK(r.ok);
+        return r.value;
+    };
+    CHECK(value(60.0f, false) == 0.0 && value(72.0f, false) == 0.0 && value(73.0f, false) == 1.0);
+    const double v119 = value(119.0f, true), v150 = value(150.0f, true);
+    std::printf("fleet distance tokens: P1 moved away: R 119 %.3f, R 150 %.3f\n", v119, v150);
+    CHECK(v119 == 0.0 && v150 == 1.0);  // P2 at 120: inside a mod's 150, outside 119
+    std::printf("fleet distance tokens: IsConnectedTo follows MaximumFleetMovementDistance (P1 72.1, P2 120)\n");
+}
+
 void test_ground_structure_slots() {
     const std::vector<std::string> only = {"BuildBarracks"};
     const auto map_ground = [](int32_t v) {
@@ -364,6 +392,30 @@ void test_ground_structure_slots() {
         CHECK(token(pw, "Variable_Target.MaxStructureSlotsUnnormalized") == 3.0);
         CHECK(token(pw, "Variable_Target.OpenStructureSlotsUnnormalized") == 2.0);
         CHECK(token(pw, "Variable_Target.MaxGroundbaseLevelUnnormalized") == 3.0);
+        CHECK(token(pw, "Variable_Target.MaxStructureSlots") == 3.0 / 5.0);
+    }
+    {
+        // mcx5 t02 (AI_GALACTIC_TOKENS §4 [H]): the normalisers are the GameConstants maxima, not a port 5 (levels_10).
+        ParityWorld pw(false, only, map_ground(0), [](gal::GalacticRules& r) {
+            r.types[tPlanet].ground_structure_slots = 3;
+            r.constants.max_special_structures = 10;
+            r.constants.max_starbase_level = 10;
+            r.constants.max_groundbase_level = 4;
+        });
+        solve(pw, ok);
+        CHECK(token(pw, "Variable_Target.MaxStructureSlots") == 3.0 / 10.0);
+        CHECK(token(pw, "Variable_Target.StarbaseLevel") == token(pw, "Variable_Target.StarbaseLevelUnnormalized") / 10.0);
+        CHECK(token(pw, "Variable_Target.MaxGroundbaseLevel") == 3.0 / 4.0);
+        // MaxStructureSlots fails with MaximumSpecialStructures 0 (0x65e540); the unnormalised form does not.
+        ParityWorld zero(false, only, map_ground(0), [](gal::GalacticRules& r) { r.constants.max_special_structures = 0; });
+        solve(zero, ok);
+        EquationSet e;
+        e.add("T", "Variable_Target.MaxStructureSlots");
+        e.link();
+        EvalContext c;
+        c.self = 0;
+        c.target = 0;
+        CHECK(!evaluate(e, e.find("T"), c, zero.world->resolver()).ok);
     }
     {
         // 1 slot, already used by the Barracks: vetoed although <Max_Ground_Base> is 5.
@@ -1279,7 +1331,8 @@ void test_force_maintenance_tokens() {
         const gal::PlanetState& p = sim.planets()[i];
         float s = gal::econ::income_base(p.base_value, p.black_market);
         if (p.owner != sim.neutral_player())
-            s += gal::econ::income_political(p.base_value, 5.0f, sim.rules().constants.political_income_curve);
+            s += gal::econ::income_political(p.base_value, static_cast<float>(sim.rules().constants.max_political_control),
+                                             sim.rules().constants.political_income_curve);  // GC+0xF0 (mcx5 t02)
         float gain = 0.0f;
         if (p.owner >= 0)
             for (const uint32_t rt : p.links) gain += std::max(0.0f, sim.map().routes.credit_gain_factor[rt]);

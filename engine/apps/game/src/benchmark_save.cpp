@@ -18,6 +18,7 @@ namespace alamo::game {
 
 namespace {
 
+// limit: guard --bench-scale option bound (benchmark only)
 constexpr uint32_t kMaxScale = 16;
 constexpr uint64_t kBattleWaitTicks = 6000;  // the battle must be on the mode stack within 200 s of game time
 

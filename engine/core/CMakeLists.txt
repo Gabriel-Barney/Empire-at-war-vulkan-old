@@ -80,6 +80,13 @@ if(ALAMO_LINT_PYTHON)
   add_test(NAME alamo_core_mod_names_lint_selftest
            COMMAND ${ALAMO_LINT_PYTHON} ${PROJECT_SOURCE_DIR}/tools/lint/check_mod_names.py --selftest)
   set_tests_properties(alamo_core_mod_names_lint alamo_core_mod_names_lint_selftest PROPERTIES TIMEOUT 120)
+  # mcx5 t05: every integer limit in sim code carries a // limit: retail|data|dynamic|guard tag (tools/lint/check_limits.py,
+  # docs/MOD_COMPAT_DESIGN.md §8).
+  add_test(NAME alamo_core_limits_lint
+           COMMAND ${ALAMO_LINT_PYTHON} ${PROJECT_SOURCE_DIR}/tools/lint/check_limits.py --engine ${PROJECT_SOURCE_DIR}/engine)
+  add_test(NAME alamo_core_limits_lint_selftest
+           COMMAND ${ALAMO_LINT_PYTHON} ${PROJECT_SOURCE_DIR}/tools/lint/check_limits.py --selftest)
+  set_tests_properties(alamo_core_limits_lint alamo_core_limits_lint_selftest PROPERTIES TIMEOUT 120)
 else()
   message(STATUS "python not found: alamo_core_mod_names_lint not registered (build_gate.cmd still runs it)")
 endif()

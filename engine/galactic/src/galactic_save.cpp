@@ -59,6 +59,7 @@ namespace {
 // session's start() values.
 constexpr uint32_t kGalacticSaveVersion = 10;
 constexpr uint32_t kGalacticSaveVersionNoPlacement = 9;
+// limit: guard not a limit: save format version 8 (before the marker slots)
 constexpr uint32_t kGalacticSaveVersionNoSlots = 8;
 constexpr uint32_t kGalacticSaveVersionNoGalab = 7;
 constexpr uint32_t kGalacticSaveVersionNoNames = 6;

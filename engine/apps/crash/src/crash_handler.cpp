@@ -40,6 +40,7 @@ std::string env_value(const char* name) {
 }
 
 #ifdef _WIN32
+// limit: guard crash dump directory path buffer (wchar_t)
 constexpr size_t kPathMax = 1024;
 wchar_t g_dir[kPathMax] = {};
 wchar_t g_app[64] = {};

@@ -60,7 +60,11 @@ using objects::ObjectHandle;
 using objects::ObjectId;
 using objects::kNoObjectId;
 
-inline constexpr uint32_t kMaxPlayers = 64;  // = commands::kMaxPlayerSlots
+// mcx5 t01: the session's PlayerList bound. The original keeps a vector with no fixed cap (MODS.md §10.4); the port's
+// per-player state is sized from SimConfig::players, and this guard (far above any mod: Age of Legends has 50) only
+// exists because the sim's player ids are uint8_t (host hooks, tactical battles, battle AI). The commands carry 13 bits
+// (commands::kMaxPlayerSlots). start_galactic refuses a setup above it; SimHost::handle refuses an id >= it.
+inline constexpr uint32_t kMaxPlayers = 256;  // limit: guard (uint8_t sim player ids 0..255)
 
 // Spatial category bits (TreeSet masks).
 inline constexpr uint32_t kCatUnit = 0x1;       // has a locomotor

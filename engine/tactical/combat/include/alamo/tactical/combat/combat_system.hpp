@@ -555,6 +555,7 @@ struct UnitDesc {
 };
 // mcx4 t17: the per-instance surface memory keeps its first kSurfaceFxFixedSlots slots in a fixed array (the save / hash
 // layout from trn1 t02; base FoC types have at most 3 entries); later instances (mod types) use Unit::sfx_prev_more.
+// limit: dynamic the first 4 instances in a fixed array, later ones in Unit::sfx_prev_more (mcx4 t17)
 inline constexpr uint32_t kSurfaceFxFixedSlots = 4;
 
 struct CombatData {

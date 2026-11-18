@@ -95,7 +95,8 @@ struct GalacticSetup;
 namespace alamo::sim {
 
 // Q6: SimConfig::players for a galactic session over a setup with `setup_players` players: at least 8 (the default, so
-// stock FoC sessions keep their CRC), at most kMaxPlayers (start_galactic refuses a setup with more players than this).
+// stock FoC sessions keep their CRC), else the setup's count (mcx5 t01: no 64 cap). Above the kMaxPlayers guard it stays
+// at the guard, and start_galactic refuses the setup.
 inline uint32_t session_players(size_t setup_players) {
     return static_cast<uint32_t>(setup_players < 8 ? 8 : setup_players > kMaxPlayers ? kMaxPlayers : setup_players);
 }
@@ -431,8 +432,8 @@ private:
     commands::CommandRecording* record_ = nullptr;
     uint64_t batch_crc_ = 0;
     uint64_t applied_ = 0, rejected_ = 0;
-    std::array<std::vector<ObjectId>, kMaxPlayers> selection_;
-    std::array<PlayerController, kMaxPlayers> controllers_;
+    std::vector<std::vector<ObjectId>> selection_;  // per player (cfg_.players), index order
+    std::vector<PlayerController> controllers_;     // per player (cfg_.players)
     CrcRegistry registry_;
     std::unique_ptr<jobs::CrcRecorder> recorder_;
     // cu9 t13: a fresh recorder (CRC hashers on the job system; the old parallel_crc switch was never off).
@@ -452,7 +453,7 @@ private:
     OrderHook order_hook_;              // P host
     SelectAllHook select_all_hook_;     // q6
     PortEventHook port_hook_;           // P host
-    std::array<std::array<std::vector<ObjectId>, 10>, kMaxPlayers> groups_;  // P host: control groups
+    std::vector<std::array<std::vector<ObjectId>, 10>> groups_;  // P host: control groups, per player (cfg_.players)
     bool groups_used_ = false;                                               // P host
     ModeUpdateHook before_story_;                                            // P4 host
     ModeUpdateHook after_story_;                                             // OI host

@@ -158,6 +158,7 @@ public:
     };
     const Stats& stats() const { return stats_; }
     // "<mode frame> <script> (id N): <text>"; at most kMaxMessages lines kept (the counts below are complete).
+    // limit: dynamic diagnostic message log budget; counts stay complete
     static constexpr size_t kMaxMessages = 4000;
     const std::vector<std::string>& messages() const { return messages_; }
     // Each distinct thread error / SCRIPT ERROR / load error text (the object id stripped) with its count.

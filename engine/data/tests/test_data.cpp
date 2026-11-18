@@ -927,10 +927,25 @@ static void test_listed_xml() {
     CHECK(for_each_listed_xml(p, "Data\\XML\\Empty.xml", [](ListedXmlFile&) { CHECK(false); }) == ListStatus::Unparsable);
 }
 
+// mcx5 t02 (MCX5_RE_ANSWERS Q1.9, 0x2c91c0 [H]): a GameConstants.xml without MaximumFleetMovementDistance keeps the
+// GameConstants default 1.0 (not the port's no-file 100). Own temp folder (ctest -j).
+static void test_constants_defaults() {
+    const fs::path tmp = fs::temp_directory_path() / "alamo_data_test_gc_defaults";
+    fs::remove_all(tmp);
+    write_file(tmp / "Data" / "XML" / "GAMECONSTANTS.XML", "<GameConstants><Foo>1</Foo></GameConstants>");
+    DirectoryProvider dp(path_to_utf8(tmp));
+    GameDatabase db;
+    std::vector<std::string> diag;
+    db.load(dp, {}, &diag);  // the other lists are missing: only the constants matter here
+    CHECK(db.constants().element && db.constants().max_fleet_move_distance == 1.0f);
+    fs::remove_all(tmp);
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);  // keep output if a check aborts the process
     log::set_min_level(log::Level::Error);  // loaders warn a lot by design; tests read diagnostics
     test_xml_basic();
+    test_constants_defaults();
     test_xml_recovery();
     test_xml_robustness();
     test_values();

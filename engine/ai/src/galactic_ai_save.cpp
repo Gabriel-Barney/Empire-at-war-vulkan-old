@@ -78,6 +78,7 @@ bool get_param(ByteReader& r, Param& p) {
     for (std::string& e : p.value.enum_values) e = r.str();
     return r.ok();
 }
+// limit: guard save decode: nested AI global value depth, refuses
 constexpr int kMaxValueDepth = 32;
 
 // ---- objects ----

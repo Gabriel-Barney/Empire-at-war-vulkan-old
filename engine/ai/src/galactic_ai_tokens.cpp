@@ -272,8 +272,14 @@ bool galactic_contrast_total_open(std::span<const GalacticContrastEntry> entries
 namespace {
 
 constexpr double kNever = 1.0e18;              // TimeSince* of an event that never happened [H]
-constexpr double kMaxFleetDistance = 100.0;    // GC+0x108 MaximumFleetMovementDistance
-constexpr double kMaxLevel = 5.0;              // GC+0xF4 / +0xF8 / +0xFC, MaximumPoliticalControl GC+0xF0
+// mcx5 t02: the GameConstants the tokens normalise by are read from the data (AI_GALACTIC_TOKENS §2 neighbour lists and
+// the §4 / §5 tables [H]): MaximumFleetMovementDistance GC+0x108 (the galaxy map's copy), MaximumPoliticalControl +0xF0,
+// MaximumStarbaseLevel +0xF4, MaximumGroundbaseLevel +0xF8, MaximumSpecialStructures +0xFC (EconomyConstants). A
+// divisor of 0 divides as retail does (double; only MaxStructureSlots fails, its §4 row), except the fleet distance:
+// [port] a radius of 0 divides by 1e-30, so the planet's own d = 0 term is 0 instead of retail's 0/0 NaN (a NaN score
+// would reach the AI's sorts, where it is undefined behaviour).
+double fleet_distance(const gal::GalacticSim& s) { return std::max(static_cast<double>(s.map().max_fleet_move_distance), 1e-30); }
+double gc_int(int32_t v) { return static_cast<double>(v); }
 constexpr int32_t kLifeForever = -1;
 
 // Galactic_Hints hint-set defaults [H].
@@ -451,6 +457,7 @@ constexpr FoggedLeaf kForceFogged[] = {
     {"HASGROUNDUNITSBITFIELD", 0x80, "HASGROUNDUNITSBITFIELD"},
 };
 constexpr uint32_t kFoggedBits = 0x200u | 0x80u | 0x20u | 0x10u | 0x8u;  // every M above (single bits)
+// limit: retail AI_GALACTIC_TOKENS §9.9 (0x65ac40: +0xA8 < 0x65)
 constexpr size_t kRecomputeMaxEntries = 100;                              // node +0xA8 < 0x65
 double b2d(bool b) { return b ? 1.0 : 0.0; }
 // Normalisation rule of the suffix leaves [H]: num 0 -> 0; num <= den -> num/den (>= 0); else 1.
@@ -646,7 +653,7 @@ void GalacticSimTokenResolver::build_neighbours() {
             const double dx = static_cast<double>(planets[i].position.x) - planets[j].position.x;
             const double dy = static_cast<double>(planets[i].position.y) - planets[j].position.y;
             const double dz = static_cast<double>(planets[i].position.z) - planets[j].position.z;
-            bool near = std::sqrt(dx * dx + dy * dy + dz * dz) <= kMaxFleetDistance;
+            bool near = std::sqrt(dx * dx + dy * dy + dz * dz) <= fleet_distance(*sim_);
             if (!near && g.included(static_cast<PlanetIndex>(i)))
                 for (uint32_t e = g.edge_begin(static_cast<PlanetIndex>(i)); e < g.edge_end(static_cast<PlanetIndex>(i)); ++e)
                     near = near || g.neighbour(e) == j;
@@ -1031,7 +1038,7 @@ struct GalacticSimTokenResolver::Impl {
                                                     c.credit_alignment_bonus, c.credit_alignment_penalty, &keep);
         if (keep) sum += force;
         if (p.owner != sim.neutral_player())
-            sum += gal::econ::income_political(b, static_cast<float>(kMaxLevel), c.political_income_curve);
+            sum += gal::econ::income_political(b, static_cast<float>(c.max_political_control), c.political_income_curve);  // 0x3f8483
         float gain = 0.0f;
         if (valid_player(p.owner)) {
             const GalaxyMap& m = sim.map();
@@ -1192,7 +1199,7 @@ struct GalacticSimTokenResolver::Impl {
                     auto add = [&](size_t n) {
                         double x = 0.0;
                         if (!force_unn(n, enemy, space, params, x)) return false;
-                        s += (1.0 - distance(p, n) / kMaxFleetDistance * (1.0 - a)) * x;
+                        s += (1.0 - distance(p, n) / fleet_distance(sim) * (1.0 - a)) * x;
                         return true;
                     };
                     if (!add(p)) return false;  // the force neighbour list includes the planet itself
@@ -1441,7 +1448,7 @@ struct GalacticSimTokenResolver::Impl {
         if (k.substr(0, 11) == "ENEMYFORCE.") return resolve_force(p, true, k.substr(11), params, out);
         if (k.substr(0, 14) == "FRIENDLYFORCE.") return resolve_force(p, false, k.substr(14), params, out);
         if (k == "TARGETPOLITICALCONTROL") {
-            const double v = static_cast<double>(static_cast<int32_t>(std::fabs(ps.control))) / kMaxLevel;
+            const double v = static_cast<double>(static_cast<int32_t>(std::fabs(ps.control))) / gc_int(rules.constants.max_political_control);
             out = political_player(p) != ctx.self ? -v : v;
             return true;
         }
@@ -1453,18 +1460,23 @@ struct GalacticSimTokenResolver::Impl {
             out = b2d(valid_player(ps.owner) && players[static_cast<size_t>(ps.owner)].human);
             return true;
         }
-        if (k == "STARBASELEVEL") return out = ps.starbase_level / kMaxLevel, true;
+        const gal::EconomyConstants& gc = rules.constants;
+        if (k == "STARBASELEVEL") return out = ps.starbase_level / gc_int(gc.max_starbase_level), true;
         if (k == "STARBASELEVELUNNORMALIZED") return out = ps.starbase_level, true;
-        if (k == "GROUNDBASELEVEL") return out = sim.ground_base_level(static_cast<PlanetIndex>(p)) / kMaxLevel, true;
+        if (k == "GROUNDBASELEVEL") return out = sim.ground_base_level(static_cast<PlanetIndex>(p)) / gc_int(gc.max_groundbase_level), true;
         if (k == "GROUNDBASELEVELUNNORMALIZED") return out = sim.ground_base_level(static_cast<PlanetIndex>(p)), true;
-        if (k == "MAXSTARBASELEVEL") return out = max_space_base(p) / kMaxLevel, true;
+        if (k == "MAXSTARBASELEVEL") return out = max_space_base(p) / gc_int(gc.max_starbase_level), true;
         if (k == "MAXSTARBASELEVELUNNORMALIZED") return out = max_space_base(p), true;
-        if (k == "MAXGROUNDBASELEVEL") return out = std::min(5, max_ground_base(p)) / kMaxLevel, true;
+        // min(5, ...): a literal in retail too (0x372400 / 0x4b7eb0, MCX5_RE_ANSWERS Q1.2 [H]); the divisor is GC+0xF8.
+        if (k == "MAXGROUNDBASELEVEL") return out = std::min(5, max_ground_base(p)) / gc_int(gc.max_groundbase_level), true;
         if (k == "MAXGROUNDBASELEVELUNNORMALIZED") return out = std::min(5, max_ground_base(p)), true;
         // Structure slots: D+0x230 ground slots (Special_Structures_Land), used 0x3f8af0 (galactic_slots.hpp, A2 f t01)
         // [port: no orbital (D+0x234) slots].
         const int32_t used_ground = galactic_ai_ground_slots_used(sim, static_cast<PlanetIndex>(p));
-        if (k == "MAXSTRUCTURESLOTS") return out = max_ground_base(p) / kMaxLevel, true;
+        if (k == "MAXSTRUCTURESLOTS") {  // 0x65e540: fails when GC+0xFC is 0 (MCX4_RE_ANSWERS_GALACTIC Q2.1)
+            if (gc.max_special_structures == 0) return false;
+            return out = max_ground_base(p) / gc_int(gc.max_special_structures), true;
+        }
         if (k == "MAXSTRUCTURESLOTSUNNORMALIZED") return out = max_ground_base(p), true;
         if (k == "OPENSTRUCTURESLOTS")
             return leaf("T:OPENSTRUCTURESLOTS", ip, 15, params, [&](double& v) {
@@ -1548,7 +1560,7 @@ struct GalacticSimTokenResolver::Impl {
                         return true;
                     }
                     const double d = routed(p, n) ? 0.0 : distance(p, n);
-                    best = std::max(best, 1.0 - d / kMaxFleetDistance * a);
+                    best = std::max(best, 1.0 - d / fleet_distance(sim) * a);
                 }
                 v = best;
                 return true;
@@ -1830,7 +1842,8 @@ struct GalacticSimTokenResolver::Impl {
                 int32_t mx = 0;
                 for (const size_t p : owned(pl))
                     mx = std::max(mx, ground ? sim.ground_base_level(static_cast<PlanetIndex>(p)) : planets[p].starbase_level);
-                v = k.find("UNNORMALIZED") != std::string_view::npos ? mx : mx / kMaxLevel;
+                const int32_t gmax = ground ? rules.constants.max_groundbase_level : rules.constants.max_starbase_level;
+                v = k.find("UNNORMALIZED") != std::string_view::npos ? mx : mx / gc_int(gmax);  // max of Target.<X>Level
                 return true;
             }, out);
         if (k == "NUMSTARBASEOFLEVEL" || k == "NUMGROUNDBASEOFLEVEL" || k == "NUMSTRUCTURE" || k == "HASSTARBASEOFLEVEL" ||

@@ -388,7 +388,10 @@ struct StoryLoadCampaign {
 
 class StorySession {
 public:
-    static constexpr int kMaxRounds = 8;
+    // mcx5 (MCX5_RE_ANSWERS Q4.3 [H]): retail fires a reward's dependants and the notifications it raises synchronously,
+    // with no round cap (only RESET_BRANCH nests at most 3); was 8 here. A cascade that never settles waits a service.
+    // limit: guard T9 drain rounds per service (retail: no cap; a runaway cascade is deferred, not dropped)
+    static constexpr int kMaxRounds = 1024;
 
     // `store` = the galactic mode's primary store (scripts' object handles); all references must outlive
     // the session.

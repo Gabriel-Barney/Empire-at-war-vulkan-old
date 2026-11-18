@@ -471,6 +471,7 @@ inline constexpr RejectReason kRejectPopulationCap = RejectReason::FirstCustom;
 //                  issued just before the move order; an occupied slot at arrival means merge into that fleet.
 //   Ops 0 / 2 / 4 / 6 / 7 (a new fleet) take the slot to give it in `b` (0..kOrbitSlots-1; kNoObject = the first free
 //   one; a taken slot is ignored). For ops 6 / 7 it is the slot at the destination `a`.
+// limit: retail GALAXY_MAP_PRESENTATION §1.2 (3 g_planet_fleet, 0x3d3790)
 inline constexpr int32_t kOrbitSlots = 3;  // fleet slots per owner above a planet (g_planet_fleet slot 0..2)
 // The op codes and the event builder live in engine/commands (event_types.hpp FleetOp, command.hpp
 // fleet_management_event), shared with the galactic HUD; re-exported here.

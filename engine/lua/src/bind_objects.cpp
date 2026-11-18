@@ -734,7 +734,7 @@ uint32_t issue(Call& c, ObjectHandle h, const Event& e) {
 #if ALAMO_LUA_HAVE_COMMANDS
     if (b->pipeline) {
         const int32_t owner = store(c)->owner(h);
-        const uint8_t player = (owner >= 0 && owner < commands::kMaxPlayerSlots) ? static_cast<uint8_t>(owner) : 0;
+        const uint16_t player = (owner >= 0 && owner < commands::kMaxPlayerSlots) ? static_cast<uint16_t>(owner) : uint16_t{0};
         b->pipeline->execute_direct(c.vm->frame, player, commands::CommandSource::Script, e);
     }
 #else

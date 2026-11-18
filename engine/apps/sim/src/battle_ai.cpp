@@ -985,7 +985,7 @@ void BattleAi::capture_lane_abilities() {
 void BattleAi::queue_lane_write(const lua::LaneWrite& w) {
     cmd::Command c;
     // the batch's player (drain order; a decodable slot): the write's owner, else 0
-    c.header.player = static_cast<uint8_t>(w.owner >= 0 && w.owner < static_cast<int32_t>(cmd::kMaxPlayerSlots) ? w.owner : 0);
+    c.header.player = static_cast<uint16_t>(w.owner >= 0 && w.owner < static_cast<int32_t>(kMaxPlayers) ? w.owner : 0);  // uint8_t sim ids
     c.header.source = cmd::CommandSource::AI;
     c.header.sequence = lane_seq_++;
     c.header.issue_tick = host_->frame();
@@ -2349,8 +2349,8 @@ void BattleAi::apply_lane_batch(uint64_t frame) {
         const bool reinforce = c.payload.type() == cmd::EventType::Reinforce;
         const auto player = static_cast<int32_t>(c.header.player);
         const size_t before = reinforce ? mode_->primary().owned_by(player).size() : 0;
-        const cmd::RejectReason r = execute_order(c.header.player, c.payload);
-        if (r == cmd::RejectReason::None) order_signals(c.header.player, c.payload);
+        const cmd::RejectReason r = execute_order(static_cast<uint8_t>(c.header.player), c.payload);  // uint8_t ids: lossless
+        if (r == cmd::RejectReason::None) order_signals(static_cast<uint8_t>(c.header.player), c.payload);
         else ++lane_mismatch_;  // queued only when predicted accepted
         count_executed(c.payload, r);
         if (reinforce) {  // slice 4d: the AI waits for an unload record of every lane drop

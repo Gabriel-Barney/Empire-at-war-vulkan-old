@@ -383,6 +383,7 @@ uint64_t one_shot_frames(uint32_t frame_count, float fps, float speed) {
     const float dt = static_cast<float>(1.0 / kSimTicksPerSecond);
     const float step = fps * dt * speed;
     float f = 0.0f;
+    // limit: guard one-shot finish search bound (~6 days of sim time = never)
     constexpr uint64_t kCap = 1ull << 24;  // ~6 days of sim time: treated as never
     for (uint64_t n = 1; n <= kCap; ++n) {
         bool finished = false;

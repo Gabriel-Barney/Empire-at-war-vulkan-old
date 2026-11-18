@@ -108,6 +108,7 @@ struct LobSolution {
     float angle = 0.0f;  // elevation above the horizontal, radians, [0, pi/2]
     float speed = 0.0f;  // launch speed per frame (Max_Speed x 0.8^k)
 };
+// limit: guard lob solver passes; never reached for G > 0 (LOB_SOLVER §2.4)
 inline constexpr int kLobMaxPasses = 256;
 bool lob_solve(Vec3 from, Vec3 to, float max_speed, float G, bool can_lob_slower, LobSolution& out);
 // Grenade flight position (LOB_SOLVER §6.1, 0x4ceea0) [H]: N(t) = L + s t f - 1/2 G t^2 z, t = frames since the

@@ -45,7 +45,7 @@ CommandScheduler::CommandScheduler(SchedulerConfig cfg) : cfg_(cfg) {
     queued_seq_.assign(cfg_.max_players, {});
 }
 
-SubmitResult CommandScheduler::submit(uint8_t player, CommandSource source, CommandPayload payload) {
+SubmitResult CommandScheduler::submit(uint16_t player, CommandSource source, CommandPayload payload) {
     Command c;
     c.header.player = player;
     c.header.source = source;
@@ -70,7 +70,7 @@ SubmitResult CommandScheduler::check_and_queue(Command&& c, bool local) {
         return res;
     }
     std::lock_guard lock(mu_);
-    const uint8_t p = c.header.player;
+    const uint16_t p = c.header.player;
     auto& qs = queued_seq_[p];
     if (local) {
         c.header.sequence = next_seq_[p]++;
@@ -108,7 +108,7 @@ CommandBatch CommandScheduler::drain(uint64_t tick) {
     std::sort(b.commands.begin(), b.commands.end(),
               [](const Command& a, const Command& c) { return drain_order_less(a.header, c.header); });
     for (const Command& c : b.commands) {
-        const uint8_t p = c.header.player;
+        const uint16_t p = c.header.player;
         auto& qs = queued_seq_[p];
         if (auto q = std::lower_bound(qs.begin(), qs.end(), c.header.sequence); q != qs.end() && *q == c.header.sequence)
             qs.erase(q);
@@ -119,12 +119,12 @@ CommandBatch CommandScheduler::drain(uint64_t tick) {
     return b;
 }
 
-bool CommandScheduler::was_drained(uint8_t p, uint32_t seq) const {
+bool CommandScheduler::was_drained(uint16_t p, uint32_t seq) const {
     const auto& above = drained_above_[p];
     return seq < drained_low_[p] || std::binary_search(above.begin(), above.end(), seq);
 }
 
-void CommandScheduler::mark_drained(uint8_t p, uint32_t seq) {
+void CommandScheduler::mark_drained(uint16_t p, uint32_t seq) {
     auto& low = drained_low_[p];
     auto& above = drained_above_[p];
     if (seq < low) return;
@@ -165,8 +165,8 @@ bool CommandScheduler::is_queued(const Command& c) const {
 
 // ---- N1 save / load ----------------------------------------------------------------------------------
 //
-// Layout (v1, ByteWriter):
-//   u32 version | u32 delay | u8 max_players | u8 late | u8 mode | u32 turn | u32 max_ahead | u64 first_tick
+// Layout (v2, ByteWriter; v1 = the same with a u8 max_players, still read):
+//   u32 version | u32 delay | u16 max_players | u8 late | u8 mode | u32 turn | u32 max_ahead | u64 first_tick
 //   (late / mode / turn / max_ahead: the retired lockstep bytes, always kSchedLateByte ... kSchedMaxAhead)
 //   | u64 now | u64 next drain tick
 //   per player (max_players): u32 next sequence | u32 drained watermark | u32 n + u32 drained above it
@@ -175,7 +175,7 @@ bool CommandScheduler::is_queued(const Command& c) const {
 // The per-player queued-sequence index is rebuilt from the queue.
 void CommandScheduler::write(ByteWriter& w) const {
     std::lock_guard lock(mu_);
-    w.u32(kSaveVersion).u32(cfg_.delay).u8(cfg_.max_players).u8(kSchedLateByte);
+    w.u32(kSaveVersion).u32(cfg_.delay).u16(cfg_.max_players).u8(kSchedLateByte);
     w.u8(kSchedModeByte).u32(kSchedTurn).u32(kSchedMaxAhead).u64(cfg_.first_tick);
     w.u64(now_).u64(next_tick_);
     for (size_t p = 0; p < cfg_.max_players; ++p) {
@@ -195,10 +195,11 @@ void CommandScheduler::write(ByteWriter& w) const {
 }
 
 bool CommandScheduler::read(ByteReader& r) {
-    if (r.u32() != kSaveVersion || !r.ok()) return false;
+    const uint32_t version = r.u32();
+    if ((version != kSaveVersion && version != 1) || !r.ok()) return false;
     SchedulerConfig cfg;
     cfg.delay = r.u32();
-    cfg.max_players = r.u8();
+    cfg.max_players = version == 1 ? r.u8() : r.u16();
     const uint8_t late = r.u8(), mode = r.u8();
     const uint32_t turn = r.u32(), max_ahead = r.u32();
     cfg.first_tick = r.u64();
@@ -239,7 +240,7 @@ bool CommandScheduler::read(ByteReader& r) {
             const std::span<const uint8_t> bytes = r.raw(len);
             size_t pos = 0;
             if (!r.ok() || decode_command(bytes, pos, c) != DecodeError::None || pos != len) return false;
-            const uint8_t p = c.header.player;
+            const uint16_t p = c.header.player;
             const uint32_t seq = c.header.sequence;
             if (c.header.scheduled_tick != tick || p >= np || !c.payload.def().scheduled || !c.payload.valid() ||
                 seq >= next_seq[p] || seq < low[p] || std::binary_search(above[p].begin(), above[p].end(), seq))

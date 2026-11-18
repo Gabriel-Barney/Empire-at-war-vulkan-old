@@ -21,6 +21,7 @@
 namespace alamo::commands {
 
 inline constexpr uint16_t kFleetGroupSubtype = 0x4647;  // "FG"
+// limit: guard [port] fleet group name bytes (port-only feature)
 inline constexpr size_t kFleetGroupNameMax = 32;         // bytes
 
 enum class FleetGroupOp : uint8_t { Create = 0, Dissolve = 1, RemoveUnits = 2, SetLock = 3, Rename = 4 };

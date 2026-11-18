@@ -747,7 +747,7 @@ public:
         // MagicPlan (galactic): not spawnable -> veto; else one synced float in [0, 1] (0x5324d0).
         const gal::TypeInfo* x = p_.ti(r.type);
         // Not spawnable (AI_GALACTIC_2 §1.4 list; AI_GALACTIC_3 §4.1) [H]: a non-hero with cost < 1, a transport, tech > 5,
-        // a hero the player already has; structures (0x5F / 0x60) are spawnable; flags +0x2A / +0x29 (company / squadron
+        // a hero the player already has (tech > 5: a literal, 0x726238, MCX5_RE_ANSWERS Q1.8 [H]); structures (0x5F / 0x60) are spawnable; flags +0x2A / +0x29 (company / squadron
         // members), 0x375270 ("Super" category) and generic 0x5C / 0x5B types (STRATEGIC_GAPS §1.2, §1.5) [H]. [port] Not
         // modelled: unique / instance counts (+0xF60 / +0xF80).
         if (!x || (!p_.hero(r.type) && x->build_cost < 1) || x->tech_level > 5) return kVeto;

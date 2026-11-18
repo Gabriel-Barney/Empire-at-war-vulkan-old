@@ -52,6 +52,7 @@
 namespace alamo::game {
 
 inline constexpr uint16_t kStoryUiSubtype = 0x5355;  // "SU"
+// limit: guard story UI wire: name bytes (truncated)
 inline constexpr size_t kStoryUiMaxName = 255;
 inline constexpr uint8_t kStoryUiTacticalBit = 0x80;
 commands::EventData story_ui_event(const sim::StoryUiNotification& n);

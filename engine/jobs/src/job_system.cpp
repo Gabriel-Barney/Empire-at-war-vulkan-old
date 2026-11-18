@@ -18,6 +18,7 @@ namespace {
 constexpr int64_t kWaitSpinNs = 5'000;
 constexpr int64_t kWorkerSpinNs = 30'000;
 constexpr uint32_t kPausesPerCheck = 16;
+// limit: guard worker-count config bound (threads, not game data)
 constexpr uint32_t kMaxWorkers = 256;
 constexpr uint64_t kNoFail = ~uint64_t{0};
 constexpr size_t kSites = 256;           // sp1: direct-mapped call-site table

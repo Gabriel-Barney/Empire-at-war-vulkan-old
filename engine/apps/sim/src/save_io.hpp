@@ -22,6 +22,7 @@
 
 namespace alamo::sim::save_io {
 
+// limit: guard save decode: counts, refuses (ok() false)
 constexpr uint32_t kMaxCount = 1u << 24;
 
 class Out {

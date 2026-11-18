@@ -1198,6 +1198,7 @@ int m_give_random_sliceable_tech(Call& c) {
     LuaPlayerWorld* w = players(c);
     const objects::GameObjectTypes* ty = types(c);
     if (!w || !ty || !w->valid(player)) return 0;
+    // limit: retail MCX5_RE_ANSWERS Q3.1 / Q3.2 (player ctor max tech 5, 0x27e04a; data raises it)
     constexpr int32_t kMaxTechLevel = 5;  // without a sim; with one, 0x282190 (GalacticSim::raise_tech_level) uses P +0x88
     const std::string faction = w->faction_name(player);
     for (int attempt = 0; attempt < 2; ++attempt) {

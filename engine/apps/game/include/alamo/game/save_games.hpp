@@ -34,6 +34,7 @@
 namespace alamo::game {
 
 inline constexpr const char* kSaveExtension = ".alsv";
+// limit: guard [port] save file name bytes (cut at a char boundary)
 inline constexpr size_t kMaxSaveName = 64;
 
 std::string default_saves_dir();  // "" when %LOCALAPPDATA% is unset

@@ -367,6 +367,14 @@ the four tags in a comment (`// limit: retail SKIRMISH_SETUP §1`).
 | Lua `Company_Units` 256 views | Dynamic |
 | Squadron resize `kPortSquadronSize` | Removed (D2): retail's `Squadron_Units` lists and prices for base FoC and mods. The wing HUD stays |
 
+**Applied (mcx5, 2026-11-18; retail answers `docs/re/MCX5_RE_ANSWERS.md`).** Players: per-player state sized from the
+session; command ids carry 13 bits (the wire is unchanged below 256); the sim's ids stay `uint8_t` under the guard
+`sim::kMaxPlayers` = 256 [port], which `alamo_mod_check` reports as `limit_hit`. AI maxima and fleet distance: read from
+GameConstants (absent tag: retail's defaults 1 / 1.0). Tech range: the dialog's campaign data (open: mcx4 t19).
+`.ted`: no retail grid bound, so guard 7937 per side; materials past 64 kept for the sim. Fog 512: retail. Company views:
+guard 65536. Story drain rounds: guard 1024 (retail cascades with no cap). Lint: `tools/lint/check_limits.py`.
+Conformance mods: `engine/apps/game/testdata/conformance/limits/`.
+
 ---
 
 ## 9. Scripting layer

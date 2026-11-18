@@ -285,6 +285,37 @@ if(_alamo_sim)
              COMMAND alamo_headless --skirmish-ai skirmish --map _MP_SPACE_GEONOSIS --human Empire --seed 1103945700 --ticks 900 --workers 4 --quiet)
     set_tests_properties(alamo_headless_skirmish_ai_geonosis PROPERTIES TIMEOUT 1200)
     alamo_label_slow(alamo_headless_skirmish_ai_geonosis)
+    # mcx5 t06: the limits conformance mods factions_80 (80 factions / players, the stock ones at 72..79) and levels_10
+    # (GameConstants maxima 10) at G2 (engine/apps/game/testdata/conformance/limits/README.md): space and land skirmish
+    # 3000 ticks, galactic 9000 ticks, one ctest entry per worker count (0 writes the CRC log, 4 compares). The mods are
+    # written at configure time (levels_10's GameConstants comes from extracted/foc_data_text.zip); the runs skip without
+    # ALAMO_FOC_DATA. MSVC / clang: tools/conformance/limit_mods.py run --exe <msvc> --exe2 <clang>.
+    set(_lim_out ${CMAKE_CURRENT_BINARY_DIR}/conformance_limits)
+    if(ALAMO_LINT_PYTHON AND EXISTS ${PROJECT_SOURCE_DIR}/extracted/foc_data_text.zip)
+      execute_process(COMMAND ${ALAMO_LINT_PYTHON} ${PROJECT_SOURCE_DIR}/tools/conformance/limit_mods.py build --out ${_lim_out}
+                      RESULT_VARIABLE _lim_rc OUTPUT_QUIET)
+      if(_lim_rc EQUAL 0)
+        set(_lim_runs
+            "space|--skirmish-ai^skirmish^--map^_MP_SPACE_GEONOSIS^--ai^Empire,Rebel^--fail-on-lua-errors^--ticks^3000"
+            "land|--skirmish-ai^skirmish^--map^_MP_LAND_UTAPAU^--ai^Empire,Rebel^--fail-on-lua-errors^--ticks^3000"
+            "galactic|--economy^--galactic-ai^--story^--scoring^--object-scripts^--ticks^9000")
+        foreach(_lim_mod factions_80 levels_10)
+          set(_lim_dir ${_lim_out}/Mods/Factions80)
+          if(_lim_mod STREQUAL "levels_10")
+            set(_lim_dir ${_lim_out}/Mods/Levels10)
+          endif()
+          foreach(_lim_run IN LISTS _lim_runs)
+            string(REPLACE "|" ";" _lim_kv "${_lim_run}")
+            list(GET _lim_kv 0 _lim_kind)
+            list(GET _lim_kv 1 _lim_args)
+            string(REPLACE "^" ";" _lim_parts "${_lim_args}")
+            alamo_add_worker_count_check(alamo_headless_limits_${_lim_mod}_${_lim_kind}
+                COMMAND alamo_headless MODPATH=${_lim_dir} ${_lim_parts} --quiet
+                WORKERS 4 TIMEOUT 1800 SLOW)
+          endforeach()
+        endforeach()
+      endif()
+    endif()
     # q4hf t02: --trace-out on the skirmish host (headless/tactical_trace.hpp), the tactical Q2TRACE 1 trace the Q4 parity harness
     # reads for combat.damage_taken / combat.first_shot_frame. The synthetic battle with --check-workers against its golden (the
     # trace changes no CRC), then q2trace.py validate and the first-shot / damage records (headless/check_tactical_trace.cmake).

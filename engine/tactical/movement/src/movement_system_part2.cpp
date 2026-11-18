@@ -824,6 +824,7 @@ bool MovementSystem::rejoin_accept(const Unit& u, V2 cand, V2 path_end, V2& q, c
 bool MovementSystem::rejoin_search(const Unit& u, std::span<const V2> base, uint32_t cur, float d,
                                    const std::function<int(const Rejoin&)>& fn, const Unit* forced) const {
     // 0x675ed0: at most 11 accepted goals (0x676020 cmp r12d, 0xa); the generator itself has no count
+    // limit: retail MOVEMENT §1.5.1 (0x675ed0: at most 11 rejoin goals)
     constexpr uint32_t kMaxGoals = 11;
     uint32_t goals = 0;
     int verdict = kRejoinNext;
