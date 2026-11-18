@@ -673,6 +673,9 @@ uint8_t TacticalBattle::hg_build_check(const objects::ObjectStore& st, int32_t p
     const objects::GameObjectTypes& types = catalog_->types();
     if (!production_enabled() || player < 0 || static_cast<size_t>(player) >= galaxy_->players().size()) return 1;
     if (type == objects::kNone || type >= types.size()) return 1;
+    // mcx4 t04 (check 0x497140, first test [H]; SKIRMISH_SETUP §7): the type's Tactical_Production_Queue (+0xa30) must be
+    // Tactical_Units (2) or Tactical_Upgrades (3); the default -1 (and Land / Space) is never built in a battle.
+    if (hg_queue_of(type) < 0) return 1;
     if (std::find(types_used_.begin(), types_used_.end(), static_cast<uint32_t>(type)) == types_used_.end()) return 1;
     // skm1 t02 (0x288b80): named heroes (+0x13 Is_Named_Hero) only with the heroes option bit 0x1, skirmish super weapons
     // (+0x1c Is_Skirmish_Tactical_Super_Weapon) only with bit 0x4 (BattleConfig::skirmish_options, skirmish battles).
@@ -711,6 +714,28 @@ uint8_t TacticalBattle::hg_build_check(const objects::ObjectStore& st, int32_t p
                 break;
             }
         if (!have) return 4;
+    }
+    // mcx4 t04 (check 0x497140, SKIRMISH_SETUP §7 [H]): the lifetime limits. Build_Limit_Lifetime_Per_Player (+0x888) and
+    // Build_Limit_Lifetime_For_All_Allies (+0x88c): 0 refuses; > 0 refuses once the lifetime count (player +0x198, read by
+    // 0x281c70) reaches it - the player's own count, or the sum over the player and its allies. [port] the lifetime count
+    // is the galactic campaign's built count (GalacticSim player `built`) plus this battle's completed builds; 0x281c70's
+    // company / squadron member terms (+0x958, +0x938, +0x978) are not added.
+    auto lifetime = [&](int32_t p) -> int64_t {
+        int64_t n = production_->built_count(p, static_cast<int32_t>(type));
+        if (p >= 0 && static_cast<size_t>(p) < galaxy_->players().size())
+            for (const auto& [bt, k] : galaxy_->players()[static_cast<size_t>(p)].built)
+                if (bt == static_cast<uint32_t>(type)) n += k;
+        return n;
+    };
+    const int32_t life_own = types.get_int(type, "Build_Limit_Lifetime_Per_Player");  // default -1: none
+    if (life_own == 0 || (life_own > 0 && lifetime(player) >= life_own)) return 5;
+    const int32_t life_allies = types.get_int(type, "Build_Limit_Lifetime_For_All_Allies");  // default -1: none
+    if (life_allies == 0) return 5;
+    if (life_allies > 0) {
+        int64_t n = 0;
+        for (uint32_t p = 0; p < bt_players_; ++p)
+            if (static_cast<int32_t>(p) == player || (combat_ && !combat_->is_enemy(player, static_cast<int32_t>(p)))) n += lifetime(static_cast<int32_t>(p));
+        if (n >= life_allies) return 5;
     }
     // Build_Limit_Current_For_All_Allies: live objects of the player and allies plus their queued orders.
     const int32_t limit = types.get_int(type, "Build_Limit_Current_For_All_Allies");  // default -1: none
@@ -765,6 +790,7 @@ std::vector<TacticalBattle::BuildOptionInfo> TacticalBattle::station_build_optio
         const uint8_t c = hg_build_check(st, player, builder, t);
         if (c == 1) continue;  // not buildable here (e.g. outside the battle tables)
         o.block = c != 0 ? c : (static_cast<float>(o.cost) > credits ? uint8_t{3} : uint8_t{0});
+        if (o.block == 0 && hg_queue_full(player, t)) o.block = 1;  // mcx4 t04: QueueFull (build bar item 4)
         out.push_back(o);
     }
     return out;
@@ -805,6 +831,7 @@ commands::RejectReason TacticalBattle::hg_production_command(TacticalMode& mode,
     }
     const auto type = static_cast<objects::TypeIndex>(ev.u("type_index"));
     if (!hg_buildable(st, p, builder, type)) return R::NotAllowed;
+    if (hg_queue_full(p, type)) return R::NotAllowed;  // mcx4 t04: a human's queue holds Max_Build_Queue entries
     const float cost = static_cast<float>(std::max(0, types.get_int(type, "Tactical_Build_Cost_Multiplayer")));  // int field
     if (cost > 0.0f) {
         const float have = credits_get_ ? credits_get_(p) : 0.0f;
@@ -816,7 +843,7 @@ commands::RejectReason TacticalBattle::hg_production_command(TacticalMode& mode,
     // build-time modifiers (list 10) are not applied.
     float seconds = static_cast<float>(types.get_int(type, "Tactical_Build_Time_Seconds"));  // int field
     if (static_cast<size_t>(p) < ai_build_time_mult_.size()) seconds *= ai_build_time_mult_[static_cast<size_t>(p)];
-    const uint32_t id = production_->enqueue(p, builder, static_cast<int32_t>(type), seconds, frame_);
+    const uint32_t id = production_->enqueue(p, builder, static_cast<int32_t>(type), seconds, frame_, static_cast<uint8_t>(hg_queue_of(type)));
     hg_order_cost_.push_back(HgOrderCost{id, p, cost});
     prod_used_ = hg_used_ = true;
     return R::None;
@@ -841,6 +868,17 @@ void TacticalBattle::hg_production(TacticalMode& mode, SimRng& rng) {
         const std::vector<objects::ObjectId> orphans = std::move(hg_orphans_);
         hg_orphans_.clear();
         for (const objects::ObjectId id : orphans) {
+            // mcx4 t04 (REMAINING_GAPS §1.4 callers, kill path 0x391310 [H]; STATION_HANGARS_SOUND §2.9: Kill kills the
+            // contents list): in a skirmish an object with Tactical_Destruction_Decrements_Tech_Level that dies lowers its
+            // owner's tech level by 1 (the owner only, no ally sweep). [M] the orphaned contents of a dead container count
+            // as killed. ledger: consumes GameObjectType.Tactical_Destruction_Decrements_Tech_Level
+            if (cfg_.skirmish) {
+                const objects::ObjectHandle oh = store.find(id);
+                if (store.alive(oh) && catalog_->types().get_bool(store.type(oh), "Tactical_Destruction_Decrements_Tech_Level")) {
+                    const int32_t ow = store.owner(oh);
+                    if (ow >= 0 && static_cast<size_t>(ow) < hg_tech_bonus_.size()) --hg_tech_bonus_[static_cast<size_t>(ow)];
+                }
+            }
             hg_remove_silently(id);
             bt_kill_silently(mode, store.find(id));
         }
@@ -899,7 +937,40 @@ void TacticalBattle::hg_production(TacticalMode& mode, SimRng& rng) {
             std::vector<objects::ObjectId> ordered;
             (void)hg_spawn(mode, o.type, o.player, pos, facing, pos, false, rng, ordered);
         }
+        // mcx4 t04 (build service 0x498170 [H], REMAINING_GAPS §1.4): a finished build of a type with
+        // Tactical_Build_Increments_Tech_Level sets every player allied with the builder's owner (itself included) that
+        // has the same faction to the owner's tech level + 1 (FoC: the skirmish EC_ / RC_ / UC_Level_*_Tech_Upgrade).
+        if (types.get_bool(t, "Tactical_Build_Increments_Tech_Level")) hg_raise_tech(o.player);
     }
+}
+
+int32_t TacticalBattle::hg_queue_of(objects::TypeIndex type) const {
+    const int32_t q = catalog_->types().get_int(type, "Tactical_Production_Queue");
+    return q == 2 || q == 3 ? q - 2 : -1;  // the build manager's queue index (+0 / +0x18)
+}
+
+bool TacticalBattle::hg_queue_full(int32_t player, objects::TypeIndex type) const {
+    // mcx4 t04 (SKIRMISH_SETUP §3 [H], build bar item 4): a human player's queue for the type's Tactical_Production_Queue
+    // takes fewer than GC Max_Build_Queue entries; an AI player is not limited.
+    if (!production_ || player < 0 || static_cast<size_t>(player) >= galaxy_->players().size()) return false;
+    if (!galaxy_->players()[static_cast<size_t>(player)].human) return false;
+    const int32_t q = hg_queue_of(type);
+    if (q < 0) return false;
+    const int32_t cap = galaxy_->rules().constants.max_build_queue;
+    return static_cast<int64_t>(production_->count_queue(player, static_cast<uint8_t>(q))) >= static_cast<int64_t>(cap);
+}
+
+void TacticalBattle::hg_raise_tech(int32_t player) {
+    if (player < 0 || static_cast<size_t>(player) >= hg_tech_bonus_.size() || static_cast<size_t>(player) >= galaxy_->players().size()) return;
+    const int32_t next = hg_tech(player) + 1;
+    const uint32_t faction = galaxy_->players()[static_cast<size_t>(player)].faction;
+    for (size_t p = 0; p < hg_tech_bonus_.size() && p < galaxy_->players().size(); ++p) {
+        const auto pi = static_cast<int32_t>(p);
+        if (pi != player && (!combat_ || combat_->is_enemy(player, pi))) continue;  // 0x2823e0: allied (itself included)
+        if (galaxy_->players()[p].faction != faction) continue;
+        hg_tech_bonus_[p] = next - static_cast<int32_t>(galaxy_->players()[p].tech_level);
+    }
+    prod_used_ = true;
 }
 
 void TacticalBattle::set_garrison_spawn(objects::ObjectId id, bool on) {

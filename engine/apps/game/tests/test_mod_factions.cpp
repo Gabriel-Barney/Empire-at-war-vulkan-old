@@ -80,7 +80,7 @@ std::string make_types() {
     };
     const std::string space_tab = "<Build_Tab_Space_Units>Yes</Build_Tab_Space_Units>";
     unit("SpaceUnit", "H_Cheap", "Hapan", 100, space_tab);
-    unit("SpaceUnit", "H_Big", "Hapan", 900, "<Available_In_Skirmish>Yes</Available_In_Skirmish>");  // both map kinds
+    unit("SpaceUnit", "H_Big", "Hapan", 900, "<Available_In_Skirmish>Yes</Available_In_Skirmish><Can_Be_Only_One>Yes</Can_Be_Only_One>");  // both map kinds
     unit("SpaceUnit", "H_Mid_A", "Hapan", 500, space_tab);
     unit("SpaceUnit", "H_Mid_B", "Hapan, Empire", 500, space_tab);  // same cost: type order
     unit("GroundCompany", "H_Land", "Hapan", 200, "<Build_Tab_Land_Units>Yes</Build_Tab_Land_Units>");
@@ -327,6 +327,15 @@ void test_buy_list_synthetic() {
     CHECK((buy_names(d, "Hapan", true, false, true) == Names{"H_Land"}));
     CHECK((buy_names(d, "Chiss", false, false, true) == Names{"H_Other"}));
     CHECK(game::skirmish_buy_list(d.rules, d.types, galactic::kNoIndex, false).empty());
+    // mcx4 t04 (SKIRMISH_SETUP §2.7 "Buy limits 0xf0920", pre-game branch): cost <= budget; a Can_Be_Only_One type (H_Big)
+    // already bought once is refused, any other type may be bought again.
+    // ledger: verifies GameObjectType.Can_Be_Only_One
+    {
+        const uint32_t big = d.rules.find_type("H_Big"), mid = d.rules.find_type("H_Mid_A");
+        CHECK(game::skirmish_buy_allowed(d.rules, d.types, big, 0, 900) && !game::skirmish_buy_allowed(d.rules, d.types, big, 0, 899));
+        CHECK(!game::skirmish_buy_allowed(d.rules, d.types, big, 1, 100000));
+        CHECK(game::skirmish_buy_allowed(d.rules, d.types, mid, 3, 500));
+    }
     std::error_code ec;
     fs::remove_all(root, ec);
 }

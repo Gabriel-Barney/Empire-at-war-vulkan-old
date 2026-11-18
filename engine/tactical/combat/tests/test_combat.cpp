@@ -115,6 +115,9 @@ int main(int argc, char** argv) {
     test_hero_clash_fire_refused();
     test_hero_clash_foc_data();
     test_area_immune_faction();  // tru1 t04
+    test_fires_forward();         // mcx4 t03
+    test_lost_target_no_rescan(); // mcx4 t03
+    test_blast_dropoff();         // mcx4 t03
     test_base_shield_state();    // tru1 t02
     test_base_shield_straddle();
     test_base_shield_dome();

@@ -261,6 +261,20 @@ void CombatSystem::fire_unit_weapon(Unit& u, uint32_t frame, SimRng& rng) {
     }
     spawn(u, pd, static_cast<uint32_t>(proj), pd.damage * dscale, pd.damage_type, muzzle, aim, tp, thp, range, frame,
           lob ? &sol : nullptr, q);
+    // mcx4 t03 (LOB_SOLVER §5.3): with Fires_Forward the aim 0x54a270 yields the shooter's own orientation as the facing F,
+    // so the shot leaves along the unit's facing (a grenade keeps the solver's pitch and speed on that heading); the aim
+    // point above still sets FireAtPosition and the travel limit. [port] Units have no pitch or roll: the facing is level.
+    // Spline rockets keep their planned path (spawn's rocket branch). Hardpoint fire (Fire_At) never reads the flag.
+    if (ud.fires_forward && !projectiles_.empty() && !projectiles_.back().rocket) {
+        Projectile& np = projectiles_.back();
+        const Vec3 fwd = lob_forward(u.facing, 0.0f);  // the level unit facing (+x when zero)
+        if (np.lob) {
+            np.lob_dir = lob_forward(fwd, sol.angle);
+            np.dir = np.lob_dir;
+        } else {
+            np.dir = fwd;
+        }
+    }
     if (ground) {  // S8 t26: a successful spawn clears the order (TD +0x3c / +0x3d / +0x30..+0x38 := 0)
         u.lob_pending = 0;
         u.lob_charged = 0;
@@ -960,11 +974,15 @@ void CombatSystem::area_damage(const Projectile& p, Vec3 center, ObjectId direct
             if (!live(v)) continue;
             if (v->id == direct && v->hp_count == 0) continue;
             float d = distance_xy(center, v->pos);
-            if (pd.blast_dropoff) {  // cut to the victim's surface [M: segment collision point]
+            // mcx4 t03 (0x4c7f70 [H], TACTICAL_COMBAT §3.5 steps 4-5): only with Projectile_Blast_Area_Dropoff (and R > 0)
+            // is d cut to the victim and the tiered factor applied; without it every victim takes the full blast damage.
+            float factor = 1.0f;
+            if (pd.blast_dropoff) {  // cut to the victim's surface [M: retail's segment collision point / 0 inside]
                 d = d - desc_of(*v).radius;
                 if (d < 0.0f) d = 0.0f;
+                factor = area_falloff(d, R, pd.blast_dropoff_tiers);
             }
-            const float amount = area_falloff(d, R, pd.blast_dropoff_tiers) * pd.blast_area_damage;
+            const float amount = factor * pd.blast_area_damage;
             DamageRequest r;
             r.victim = v->id;
             r.damage_type = p.damage_type;
@@ -2422,6 +2440,10 @@ void CombatSystem::tick(uint32_t frame, const TreeSet& trees, SimRng& rng, const
         if ((pd.homing || cat == PC::Missile) && !jammed) {
             const Unit* t = unit(p.target);
             if (live(t)) homing_target = t;
+            // mcx4 t03 (TACTICAL_COMBAT §3.3 "Lost targets"): a homing shot whose target is gone scans for a new one within
+            // Projectile_Max_Scan_Range, but retail's scan starts its best distance at 0 and so never picks a candidate:
+            // the shot flies on straight whatever the range. The port keeps that by not scanning at all.
+            // ledger: consumes GameObjectType.Projectile_Max_Scan_Range
         }
         bool steer = false;
         Vec3 goal;

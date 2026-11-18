@@ -1405,8 +1405,9 @@ public:
     void set_garrison_spawn(objects::ObjectId id, bool on);
     // The tactical buy bar of `builder` for `player` (the HUD's Build_NN buttons): every type of the builder's faction
     // row in list order with its price, its open orders at this builder and why a Production would be refused now
-    // (block: 0 buyable, 3 Funds, 4 Prerequisite, 5 Limit = ui HudBuildOption::Block; [port] no queue-size or population
-    // check, so 1 QueueFull / 2 PopCap never occur). Empty when the builder is not an own production builder.
+    // (block: 0 buyable, 1 QueueFull (mcx4 t04: a human's queue holds Max_Build_Queue entries), 3 Funds, 4 Prerequisite,
+    // 5 Limit = ui HudBuildOption::Block; [port] no population check, so 2 PopCap never occurs). Empty when the builder is
+    // not an own production builder.
     struct BuildOptionInfo {
         int32_t type = -1;
         int32_t cost = 0;
@@ -2640,6 +2641,11 @@ private:
     void hg_setup(TacticalMode& mode);           // setup(): HangarSystem (after combat / abilities)
     void hg_ability_host(tactical::abilities::AbilityHost& h);  // oi_install(): DEPLOY_SQUAD hooks
     int32_t hg_tech(int32_t player) const;
+    void hg_raise_tech(int32_t player);  // mcx4 t04: Tactical_Build_Increments_Tech_Level (0x498170)
+    // mcx4 t04: the build manager queue of a type (Tactical_Production_Queue - 2: 0 units, 1 upgrades; -1 not buildable
+    // in a battle) and whether `player` (a human) already holds Max_Build_Queue entries in that queue.
+    int32_t hg_queue_of(objects::TypeIndex type) const;
+    bool hg_queue_full(int32_t player, objects::TypeIndex type) const;
     bool hg_engine_unit(const Unit& u) const;    // SimpleSpace engine-loop unit
     bool hg_walk_engine_unit(const Unit& u) const;  // cu8g t01: land Walk-locomotor engine-loop unit
     void hg_adopt(const Unit& u, SimRng& rng);   // after add_unit: holster attach, engine mode enter, add_carrier

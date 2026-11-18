@@ -2088,7 +2088,10 @@ order, not nearest along the segment. The port should sort by segment fraction, 
    be `Collidable_By_Projectile_Living`. The directly hit object is skipped unless it has hardpoints.
 4. d = 2D distance from the blast. With `Dropoff` and R > 0, d is cut to the segment collision point, or set to
    0 when the detonation is inside the victim.
-5. factor = clamp(1 − ⌊d × tiers / R⌋ / (tiers + 1), 0, 1).
+5. factor = 1, except with `Projectile_Blast_Area_Dropoff` (+0xaa) and R > 0: factor = clamp(1 − ⌊d × (tiers / R)⌋ ×
+   (1 / (tiers + 1)), 0, 1), in that operation order, tiers = `Projectile_Blast_Area_Dropoff_Tiers` (+0x488, type ctor
+   0x367250 default 5). Without `Dropoff` every victim in R takes the full blast damage (mcx4 t03, read 2026-11-18;
+   `MCX4_RE_ANSWERS_TACTICAL.md` §1).
 6. delay = d / R × `Max_Secs_For_AE_Delayed_Damage` when d ≥ 1, otherwise 0.
 7. **Applying it:**
    - A victim without hardpoints takes factor × blast damage.

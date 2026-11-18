@@ -117,6 +117,12 @@ struct SkirmishBuyOptions {
 std::vector<uint32_t> skirmish_buy_list(const galactic::GalacticRules& rules, const objects::GameObjectTypes& types, uint32_t faction,
                                         bool land, const SkirmishBuyOptions& options = {});
 
+// mcx4 t04: the Buy button of IDD_SKIRMISH_BUY_UNITS_DIALOG before the game (SKIRMISH_SETUP §2.7 "Buy limits 0xf0920"):
+// type (a type index of `rules`) costs at most `budget`, and a Can_Be_Only_One type is refused when `bought` (its entries
+// in the bought list) is > 0. [port] The in-battle branch (a type the local player already owns) has no port screen.
+bool skirmish_buy_allowed(const galactic::GalacticRules& rules, const objects::GameObjectTypes& types, uint32_t type, uint32_t bought,
+                          int64_t budget);
+
 // [port] (no RE rule) the planet type a skirmish map stands for: the name after "_MP_SPACE_" / "_MP_LAND_" (path and
 // extension dropped, case ignored) when it names a PLANET type, e.g. _MP_LAND_TATOOINE -> "Tatooine"; "" otherwise.
 std::string skirmish_map_planet_type(const galactic::GalacticRules& rules, std::string_view map);

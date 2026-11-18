@@ -185,8 +185,8 @@ struct ProjectileDesc {
     // as name_crc of the trimmed faction name, 0 = unset. Set: the blast visits every player (own, allied, neutral)
     // except those whose faction it names; unset: enemies only.
     uint32_t blast_immune_faction = 0;
-    bool blast_dropoff = false;            // Dropoff
-    int32_t blast_dropoff_tiers = 0;
+    bool blast_dropoff = false;            // Projectile_Blast_Area_Dropoff (+0xaa): the tiered falloff below applies
+    int32_t blast_dropoff_tiers = 5;       // Projectile_Blast_Area_Dropoff_Tiers (+0x488); type ctor 0x367250 default 5
     float damage_delay_secs = 0.0f;        // Projectile_Damage_Delay_Secs
     bool damages_random_hardpoints = false;  // Projectile_Damages_Random_Hard_Points
     // ---- S9 ----
@@ -522,6 +522,9 @@ struct UnitDesc {
     // TURRET unit that cannot aim at this type (beyond its rotate extent) turns its body instead of dropping it.
     bool hold_fire_for_special_ability = false;
     bool limited_turrets_turn = false;
+    // mcx4 t03 (LOB_SOLVER §5.3, aim 0x54a270): Fires_Forward (+0x44) - the unit's own weapon shots leave along the
+    // shooter's facing instead of toward the led, inaccurate aim point (FireAtPosition and the travel limit still use it).
+    bool fires_forward = false;
     float max_dist_walk_while_deployed = 0.0f;    // Max_Dist_Walk_While_Deployed (+0x23b0): > 0 keeps an out-of-range target
     // s78n t26.1 (MOVEMENT §3.2.1 item 6): Shielded_Only_When_Deployed - the shield absorb 0x549ac0 runs only while the unit
     // is deployed (0x39a390: state 0x19, walking deployed included); not while deploying, undeploying or rolling.

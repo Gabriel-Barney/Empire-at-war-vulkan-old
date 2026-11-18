@@ -913,12 +913,16 @@ void test_contents_production() {
     cs2.hash(h2);
     CHECK(h1.digest() == h2.digest());
 
+    // mcx4 t04 (SKIRMISH_SETUP §3 service 0x498170 [H]): the head of each of a player's two queues counts down, whatever
+    // the builder; an order of the same queue at another builder waits.
     TacticalProduction tp(30);
-    const uint32_t a = tp.enqueue(0, 1, 7, 1.0f, 0);  // 30 frames
-    const uint32_t b = tp.enqueue(0, 1, 8, 0.5f, 0);  // 15 frames, after a (same builder)
-    const uint32_t c = tp.enqueue(1, 1, 9, 0.2f, 0);  // 6 frames, player 1's own list
-    const uint32_t d = tp.enqueue(0, 3, 9, 0.1f, 0);  // 3 frames, another builder of player 0: runs in parallel
-    CHECK(a && b && c && d && tp.count_type(0, 7) == 1 && tp.count_type(0, 9) == 1 && tp.queue(0).size() == 3);
+    const uint32_t a = tp.enqueue(0, 1, 7, 1.0f, 0);     // 30 frames, queue 0
+    const uint32_t b = tp.enqueue(0, 1, 8, 0.5f, 0);     // 15 frames, after a
+    const uint32_t c = tp.enqueue(1, 1, 9, 0.2f, 0);     // 6 frames, player 1's own queues
+    const uint32_t d = tp.enqueue(0, 3, 9, 0.1f, 0, 1);  // 3 frames, player 0's queue 1: runs in parallel with a
+    const uint32_t g = tp.enqueue(0, 4, 5, 0.1f, 0, 0);  // 3 frames, another builder but queue 0: after b
+    CHECK(a && b && c && d && g && tp.count_type(0, 7) == 1 && tp.count_type(0, 9) == 1 && tp.queue(0).size() == 4);
+    CHECK(tp.count_queue(0, 0) == 3 && tp.count_queue(0, 1) == 1 && tp.count_queue(1, 0) == 1);
     std::vector<std::pair<uint32_t, uint32_t>> done;  // (order, frame)
     for (uint32_t f = 1; f <= 60; ++f) {
         if (f == 10) CHECK(tp.retarget(0, 1, 2) == 2 && tp.retarget(1, 1, 2) == 0);  // progress kept
@@ -926,13 +930,16 @@ void test_contents_production() {
         for (const BuildOrder& o : tp.completed()) done.emplace_back(o.id, f);
         tp.clear_completed();
     }
-    CHECK(done.size() == 4);
-    if (done.size() == 4) {
+    CHECK(done.size() == 5);
+    if (done.size() == 5) {
         CHECK(done[0].first == d && done[0].second == 3);
         CHECK(done[1].first == c && done[1].second == 6);
         CHECK(done[2].first == a && done[2].second == 30);
         CHECK(done[3].first == b && done[3].second == 45);
+        CHECK(done[4].first == g && done[4].second == 48);
     }
+    // the completed-build counts (lifetime count 0x2821b0)
+    CHECK(tp.built_count(0, 7) == 1 && tp.built_count(0, 9) == 1 && tp.built_count(1, 9) == 1 && tp.built_count(1, 7) == 0);
     const uint32_t e = tp.enqueue(0, 2, 7, 1.0f, 60);
     CHECK(tp.cancel(e) && !tp.cancel(e));
     tp.enqueue(0, 2, 7, 1.0f, 60);
@@ -1536,9 +1543,18 @@ void test_contents_production_loops_save() {
     tp.enqueue(0, 1, 7, 1.0f, 0);
     tp.enqueue(0, 1, 8, 0.5f, 0);
     tp.enqueue(1, 1, 9, 0.2f, 0);
-    tp.enqueue(0, 3, 9, 0.1f, 0);
+    tp.enqueue(0, 3, 9, 0.1f, 0, 1);
     for (uint32_t f = 1; f <= 10; ++f) tp.update(f);
     CHECK(tp.completed().size() == 2);
+    {  // mcx4 t04: a version 1 production (no queue byte, no counts) still loads
+        ByteWriter w1;
+        w1.u32(1).u32(5).u32(1).u32(1);
+        w1.u32(4).i32(0).i32(1).i32(7).u32(30).u32(20).u32(0);  // one order, v1 layout
+        w1.u32(0);
+        TacticalProduction old(30);
+        ByteReader r1(w1.bytes());
+        CHECK(old.read(r1) && old.queue(0).size() == 1 && old.queue(0)[0].queue == 0 && old.built_count(0, 7) == 0);
+    }
     const std::vector<uint8_t> pb = bytes_of(tp);
     ByteReader rp(pb);
     CHECK(tp2.read(rp) && bytes_of(tp2) == pb && tp2.completed().size() == 2 && tp2.count_type(0, 7) == 1);

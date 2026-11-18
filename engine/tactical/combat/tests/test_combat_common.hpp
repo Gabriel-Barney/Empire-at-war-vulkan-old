@@ -1200,6 +1200,9 @@ void test_hero_clash_pairing();
 void test_hero_clash_fire_refused();
 void test_hero_clash_foc_data();
 void test_area_immune_faction();  // tru1 t04 (test_combat_tru1.cpp)
+void test_fires_forward();           // mcx4 t03 (test_combat_mcx4.cpp)
+void test_lost_target_no_rescan();   // mcx4 t03
+void test_blast_dropoff();           // mcx4 t03
 void test_base_shield_state();    // tru1 t02
 void test_base_shield_straddle();
 void test_base_shield_dome();

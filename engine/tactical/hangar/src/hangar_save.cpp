@@ -8,6 +8,8 @@
 // u32 + launch requests; u32 + events.
 // ContentsSystem (kContentsSaveVersion): u32 + lists (container, u32 + objects).
 // TacticalProduction (kProductionSaveVersion): u32 next order id; u32 + players (u32 + orders); u32 + completed orders.
+// An order: u32 id, i32 player, i32 builder, i32 type, u32 total / left frames, u32 issued, u8 queue (version 2).
+// Version 2 then: u32 + players (u32 + (i32 type, u32 completed builds)). Version 1 is still read (queue 0, no counts).
 // EngineLoops (kEngineLoopsSaveVersion): u32 + objects (id, idle, moving, suppressed, holster, drawn, transition start /
 // end, last engaged, version 4: the thrown saber's throw / catch / end frames); u32 + requests (id, loop, start, frame, op,
 // fade). Versions 2 (no saber state) and 3 (the cu8i catch frame) are still read.
@@ -31,14 +33,15 @@ namespace {
 
 constexpr uint32_t kHangarSaveVersion = 2;  // 2: r3g t03 land state (clip end, leaving unit; request land / leaving)
 constexpr uint32_t kContentsSaveVersion = 1;
-constexpr uint32_t kProductionSaveVersion = 1;
+constexpr uint32_t kProductionSaveVersion = 2;  // 2: mcx4 t04 the order's queue index (v1 orders read as queue 0)
 constexpr uint32_t kEngineLoopsSaveVersion = 4;  // 2: cu8g t01 holster state per object, request op + fade; 3: cu8i t01 catch frame; 4: cu8j t03 throw / catch / end
 
 void put_order(ByteWriter& w, const BuildOrder& o) {
     w.u32(o.id).i32(o.player).i32(o.builder).i32(o.type).u32(o.total_frames).u32(o.frames_left).u32(o.issued);
+    w.u8(o.queue);  // version 2
 }
 
-BuildOrder get_order(ByteReader& r) {
+BuildOrder get_order(ByteReader& r, uint32_t version) {
     BuildOrder o;
     o.id = r.u32();
     o.player = r.i32();
@@ -47,6 +50,7 @@ BuildOrder get_order(ByteReader& r) {
     o.total_frames = r.u32();
     o.frames_left = r.u32();
     o.issued = r.u32();
+    if (version >= 2) o.queue = r.u8();
     return o;
 }
 
@@ -216,25 +220,47 @@ void TacticalProduction::write(ByteWriter& w) const {
     }
     w.u32(static_cast<uint32_t>(done_.size()));
     for (const BuildOrder& o : done_) put_order(w, o);
+    w.u32(static_cast<uint32_t>(built_.size()));  // version 2: the completed-build counts
+    for (const auto& l : built_) {
+        w.u32(static_cast<uint32_t>(l.size()));
+        for (const auto& [type, n] : l) w.i32(type).u32(n);
+    }
 }
 
 bool TacticalProduction::read(ByteReader& r) {
-    if (r.u32() != kProductionSaveVersion || !r.ok()) return false;
+    const uint32_t version = r.u32();
+    if (version < 1 || version > kProductionSaveVersion || !r.ok()) return false;
+    const uint32_t order_bytes = version >= 2 ? 29u : 28u;
     const uint32_t next_id = r.u32();
     uint32_t n = 0;
     if (!r.count(n, 4)) return false;
     std::vector<std::vector<BuildOrder>> players(n);
     for (std::vector<BuildOrder>& list : players) {
         uint32_t m = 0;
-        if (!r.count(m, 28)) return false;
+        if (!r.count(m, order_bytes)) return false;
         list.resize(m);
-        for (BuildOrder& o : list) o = get_order(r);
+        for (BuildOrder& o : list) o = get_order(r, version);
         if (!r.ok()) return false;
     }
-    if (!r.count(n, 28)) return false;
+    if (!r.count(n, order_bytes)) return false;
     std::vector<BuildOrder> done(n);
-    for (BuildOrder& o : done) o = get_order(r);
+    for (BuildOrder& o : done) o = get_order(r, version);
+    std::vector<std::vector<std::pair<int32_t, uint32_t>>> built;
+    if (version >= 2) {
+        if (!r.count(n, 4)) return false;
+        built.resize(n);
+        for (auto& l : built) {
+            uint32_t m = 0;
+            if (!r.count(m, 8)) return false;
+            l.resize(m);
+            for (auto& [type, k] : l) {
+                type = r.i32();
+                k = r.u32();
+            }
+        }
+    }
     if (!r.ok() || !r.done()) return false;
+    built_ = std::move(built);
     next_id_ = next_id;
     players_ = std::move(players);
     done_ = std::move(done);

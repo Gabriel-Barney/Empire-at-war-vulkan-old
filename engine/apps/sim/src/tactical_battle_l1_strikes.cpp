@@ -141,6 +141,8 @@ void TacticalBattle::l1_add_strike_projectiles() {
             pd.max_lifetime = types.get_float(t, "Projectile_Max_Lifetime");
             pd.blast_area_damage = types.get_float(t, "Projectile_Blast_Area_Damage");
             pd.blast_area_range = types.get_float(t, "Projectile_Blast_Area_Range");
+            pd.blast_dropoff = types.get_bool(t, "Projectile_Blast_Area_Dropoff");  // mcx4 t03 (TACTICAL_COMBAT 3.5)
+            pd.blast_dropoff_tiers = types.get_int(t, "Projectile_Blast_Area_Dropoff_Tiers");
             pd.blast_max_victims = types.get_int(t, "Projectile_Blast_Area_Max_Victims");
             if (!types.get_string(t, "Projectile_Does_Shield_Damage").empty()) pd.does_shield_damage = types.get_bool(t, "Projectile_Does_Shield_Damage");
             if (!types.get_string(t, "Projectile_Does_Hitpoint_Damage").empty()) pd.does_hitpoint_damage = types.get_bool(t, "Projectile_Does_Hitpoint_Damage");

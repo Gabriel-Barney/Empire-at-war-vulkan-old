@@ -115,6 +115,7 @@ void App::open_buy_units(const SessionSpec& spec) {
     for (const uint32_t t : game::skirmish_buy_list(data_.rules, data_.types, fac, land, bo)) {
         const galactic::TypeInfo& ti = data_.rules.types[t];
         ui::BuyUnitEntry e;
+        e.type_index = t;
         e.type = ti.name;
         e.name = type_label(data_, ui_.text, t);
         e.cost = ti.build_cost;
@@ -136,7 +137,7 @@ void App::handle_screen_actions(const std::vector<ui::ScreenAction>& acts) {
             case K::SellUnit:
                 for (ui::BuyUnitEntry& u : buy_.units)
                     if (u.type == a.map) {
-                        if (a.kind == K::BuyUnit && buy_.credits >= u.cost) {
+                        if (a.kind == K::BuyUnit && game::skirmish_buy_allowed(data_.rules, data_.types, u.type_index, u.owned, buy_.credits)) {
                             buy_.credits -= u.cost;
                             ++u.owned;
                             ++bought_[u.type];
@@ -146,7 +147,7 @@ void App::handle_screen_actions(const std::vector<ui::ScreenAction>& acts) {
                             if (--bought_[u.type] == 0) bought_.erase(u.type);
                         }
                     }
-                for (ui::BuyUnitEntry& u : buy_.units) u.can_buy = buy_.credits >= u.cost;
+                for (ui::BuyUnitEntry& u : buy_.units) u.can_buy = game::skirmish_buy_allowed(data_.rules, data_.types, u.type_index, u.owned, buy_.credits);
                 info_.set_buy_units(buy_);
                 break;
             case K::SellAllUnits:
