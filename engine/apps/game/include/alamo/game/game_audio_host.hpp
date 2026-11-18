@@ -86,6 +86,7 @@ struct GameAudioStats {
     uint64_t gravity_lines = 0;                                                    // mcx4 t13 batch K
     uint64_t strike_lines = 0;                                                     // mcx4 t13 batch M
     uint64_t sighting_lines = 0;                                                   // mcx4 t13 batch N
+    uint64_t land_damage_sfx = 0;                                                  // mcx4 t13 batch O
 };
 
 class GameAudioHost {
@@ -338,6 +339,10 @@ public:
     // tag of player P's faction that announces P's bombardment (`bombard`) or bombing run becoming available: P is the
     // local player -> _Available, the local player friendly to P -> _Ally_Available, hostile -> _Enemy_Available.
     static std::string_view strike_available_tag(bool bombard, bool local, bool friendly);
+    // "GameObjectType.Land_Damage_SFX" (0x3ac290 [H]; stage rule TACTICAL_GAPS §6.3): the damage stage for a health
+    // fraction = the last Land_Damage_Thresholds entry k (list order) with fraction <= t_k, -1 when none. When a hit
+    // changes it, Land_Damage_SFX[k] plays attached to the object unless it is "NULL" [M on the compare].
+    static int32_t land_damage_stage(std::span<const std::string_view> thresholds, float fraction);
     struct ControlLines {
         std::string_view friendly, enemy;
     };
@@ -441,6 +446,7 @@ private:
     std::set<int64_t> sighted_;                               // mcx4 t13 batch N: units seen by the local player (lookup only)
     std::set<int32_t> spotted_types_;                         // types whose Unit_Type_Spotted line played
     bool enemy_spotted_done_ = false;                         // SFXEvent_Enemy_Spotted played this battle
+    std::map<int64_t, int32_t> land_damage_stage_;            // mcx4 t13 batch O: object -> last stage (lookup only)
     // mcx4 t13 batch B: the local player's tactical build orders last tick (order id -> type) and built counts (type ->
     // TacticalProduction::built_count), to tell a completed order from a cancelled one.
     std::map<uint32_t, int32_t> prod_orders_;

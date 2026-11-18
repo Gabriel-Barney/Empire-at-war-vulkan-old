@@ -364,6 +364,18 @@ void test_strike_available_tags() {
     CHECK(H::strike_available_tag(false, false, false) == "SFXEvent_Bombing_Run_Enemy_Available");
 }
 
+// mcx4 t13 batch O (docs/re/MCX4_T13_RE_ANSWERS.md "GameObjectType.Land_Damage_SFX"; both builds): the stage of a health
+// fraction is the last Land_Damage_Thresholds entry it is at or below.
+// ledger: verifies GameObjectType.Land_Damage_SFX
+void test_land_damage_stage() {
+    using H = GameAudioHost;
+    const std::vector<std::string_view> th = {"0.75", " 0.5", "0.25 "};
+    CHECK(H::land_damage_stage(th, 1.0f) == -1 && H::land_damage_stage(th, 0.75f) == 0 && H::land_damage_stage(th, 0.6f) == 0);
+    CHECK(H::land_damage_stage(th, 0.5f) == 1 && H::land_damage_stage(th, 0.1f) == 2);
+    const std::vector<std::string_view> quirk = {"1"};  // thresholds "1": the stage holds at full health (TACTICAL_GAPS §6.3)
+    CHECK(H::land_damage_stage(quirk, 1.0f) == 0 && H::land_damage_stage({}, 0.1f) == -1);
+}
+
 // aud4 b0289 / b0300: garrison entry line and the hero clash win speech (both builds; presentation rules only).
 void test_garrison_and_clash_lines() {
     using H = GameAudioHost;
@@ -975,6 +987,7 @@ int main() {
     test_base_shield_lines();           // mcx4 t13 batch I
     test_unit_room();                   // mcx4 t13 batch J
     test_strike_available_tags();       // mcx4 t13 batch M
+    test_land_damage_stage();           // mcx4 t13 batch O
     test_intro_speech_t07();
     test_aud2();
 #ifdef ALAMO_GAME_HAVE_AUDIO

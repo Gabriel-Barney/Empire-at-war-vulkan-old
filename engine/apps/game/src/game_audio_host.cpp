@@ -9,6 +9,7 @@
 #include "alamo/data/values.hpp"
 #include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/game_object_types.hpp"
+#include "alamo/objects/type_fields.hpp"  // c_atof
 #include "alamo/sim/tactical_battle.hpp"
 #include "alamo/tactical/hangar/contents.hpp"
 #ifdef ALAMO_GAME_HAVE_AUDIO
@@ -155,6 +156,13 @@ std::string_view GameAudioHost::strike_available_tag(bool bombard, bool local, b
     return local ? "SFXEvent_Bombing_Run_Available"  // ledger: consumes Faction.SFXEvent_Bombing_Run_Ally_Available
                  : friendly ? "SFXEvent_Bombing_Run_Ally_Available"
                             : "SFXEvent_Bombing_Run_Enemy_Available";  // ledger: consumes Faction.SFXEvent_Bombing_Run_Enemy_Available
+}
+
+int32_t GameAudioHost::land_damage_stage(std::span<const std::string_view> thresholds, float fraction) {
+    int32_t stage = -1;
+    for (size_t k = 0; k < thresholds.size(); ++k)
+        if (fraction <= static_cast<float>(objects::c_atof(ascii_trim(thresholds[k])))) stage = static_cast<int32_t>(k);
+    return stage;
 }
 
 GameAudioHost::ControlLines GameAudioHost::control_lines(bool friendly_old, bool friendly_new, bool hostile_old, bool hostile_new,
@@ -824,6 +832,28 @@ void GameAudioHost::cue_lines(const sim::TacticalBattle& battle, const objects::
                     ev = nth_field(lf->fields, special_weapon_tag(fired, own), types.get_int(t, "Special_Weapon_Target_Action_Index"));
                 if (!ev.empty() && game_->gui_sfx(ev)) ++stats_.special_weapon_lines;
             }
+    // Land damage stages (MCX4_T13_RE_ANSWERS "GameObjectType.Land_Damage_SFX"): a damaged object whose stage changed this
+    // tick plays the stage's Land_Damage_SFX entry attached to it (3D at its position), any owner. The first hit of an
+    // object compares with the full-health stage.
+    for (const tcb::DamageEvent& d : cs.damage_events()) {
+        const objects::TypeIndex t = type_of(static_cast<int64_t>(d.victim));
+        if (t == objects::kNone) continue;
+        const std::span<const std::string_view> th = types.get_list(t, "Land_Damage_Thresholds");
+        if (th.empty()) continue;
+        const float max_h = cs.max_health(d.victim);
+        if (!(max_h > 0.0f)) continue;
+        const int32_t stage = land_damage_stage(th, std::max(0.0f, cs.health(d.victim)) / max_h);
+        auto [it, fresh] = land_damage_stage_.try_emplace(static_cast<int64_t>(d.victim), land_damage_stage(th, 1.0f));
+        if (it->second == stage) continue;
+        it->second = stage;
+        if (stage < 0) continue;
+        // ledger: consumes GameObjectType.Land_Damage_SFX
+        const std::span<const std::string_view> sfx = types.get_list(t, "Land_Damage_SFX");
+        if (static_cast<size_t>(stage) >= sfx.size()) continue;
+        const std::string_view ev = ascii_trim(sfx[static_cast<size_t>(stage)]);
+        if (ev.empty() || ascii_iequals(ev, "NULL")) continue;
+        if (game_->impact(ev, position_of(static_cast<uint64_t>(d.victim)))) ++stats_.land_damage_sfx;
+    }
     // Sightings (MCX4_T13_RE_ANSWERS "GameObjectType.Play_SFXEvent_On_Sighting", HideWhenFogged 0x53ddc0): the first tick
     // a unit of another player is visible to the local player. A Play_SFXEvent_On_Sighting type not yet announced this
     // battle plays the unit-type line; otherwise an enemy's sighting plays SFXEvent_Enemy_Spotted, once per battle.
@@ -1292,6 +1322,7 @@ void GameAudioHost::battle_reset() {
     sighted_.clear();            // mcx4 t13 batch N
     spotted_types_.clear();
     enemy_spotted_done_ = false;
+    land_damage_stage_.clear();  // mcx4 t13 batch O
     prod_built_.clear();
     intro_decided_ = false;   // aud1 t07: a new battle decides its intro again
     object_events_reset();    // aud1 t05
