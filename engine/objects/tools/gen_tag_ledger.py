@@ -71,6 +71,9 @@ TIER_OVERRIDES = {}  # (class, tag) -> tier, for rows that are distribution-leve
 # answer found no reader, as "docs/re/<FILE>.md <section>". The file must exist and name the tag. Class and tag are
 # spelled as in docs/re/xml_field_tables.md (matched case-insensitively). Keep the list sorted by class, then tag.
 RETAIL_UNUSED = {
+    ("Faction", "Can_Win_By_Destroying_Super_Weapon"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.5 [H]",
+    ("Faction", "Corruption_Tactical_Build_Pad_Time_Multipliers"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.2 [H]",
+    ("Faction", "Credits_Accumulation_Factor"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q7.1 [M]",
     ("Faction", "SFXEvent_Build_Impossible_Location_Blockaded"): "docs/re/P4_SIM_SYSTEMS.md §2.7.3 [M: byte scan]",
     ("Faction", "SFXEvent_HUD_Base_Shield_Penetrated"): "docs/re/TRU1_A_RE_ANSWERS.md Penetration SFX [M: byte scan]",
     ("Faction", "SFXEvent_HUD_Enemy_Base_Shield_Penetrated"): "docs/re/TRU1_A_RE_ANSWERS.md Penetration SFX [M: byte scan]",
@@ -79,11 +82,18 @@ RETAIL_UNUSED = {
     ("GameConstants", "Camera_Stop_Left"): "docs/re/STRATEGIC_GAPS.md §7.1 [H]",
     ("GameConstants", "Camera_Stop_Right"): "docs/re/STRATEGIC_GAPS.md §7.1 [H]",
     ("GameConstants", "Camera_Z_Position"): "docs/re/STRATEGIC_GAPS.md §7.1 [H]",
+    ("GameConstants", "First_Strike_Extra_Damage_Percent"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.4 [H]",
+    ("GameConstants", "First_Strike_Particle"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.4 [H]",
     ("GameConstants", "Fleet_Maintenance_Update_Delay_Seconds"): "docs/re/STRATEGIC_GAPS.md §2.3 [H]",
     ("GameConstants", "Health_Bar_Scale"): "docs/re/STRATEGIC_GAPS.md §7.2 [H]",
+    ("GameConstants", "Income_Redistribution"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.2 [H]",
     ("GameConstants", "Land_Health_Bar_Scale"): "docs/re/STRATEGIC_GAPS.md §7.2 [H]",
+    ("GameConstants", "MaximumSpecialStructuresLand"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.1 [H]",
+    ("GameConstants", "MaximumSpecialStructuresSpace"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.1 [H]",
     ("GameConstants", "Min_Health_Bar_Scale"): "docs/re/STRATEGIC_GAPS.md §7.2 [H]",
+    ("GameConstants", "Progressive_Taxation"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.2 [H]",
     ("GameConstants", "RepushDistance"): "docs/re/MOVEMENT.md §5.4 [H]",
+    ("GameConstants", "Skirmish_Buy_Credits"): "docs/re/MCX4_RE_ANSWERS_GALACTIC.md Q2.3 [H: read only in a pre-game branch single player never reaches]",
     ("GameObjectType", "MinimumPushReturnDistance"): "docs/re/MOVEMENT.md §5.4 [H]",
 }
 
@@ -235,9 +245,12 @@ def literal_classes(classes, text):
     return [c for c in classes if c in named or shared_reader_class(c)]
 
 
-def find_consumers(rows):
+def find_consumers(rows, exact_only=frozenset()):
     """Returns (consumers, verifiers, problems): consumers[(class, tag lower)] = set of files; verifiers likewise from
-    test annotations; problems = annotation errors (unknown row, no code next to it)."""
+    test annotations; problems = annotation errors (unknown row, no code next to it). Rows in `exact_only` (the
+    RETAIL_UNUSED keys) count only literals and annotations, not names guessed from concatenation (built_tag_reads):
+    an RE answer outweighs that heuristic ("Music_Event_" + ... + "_Super_Weapon" is no read of
+    Can_Win_By_Destroying_Super_Weapon)."""
     by_tag = {}
     for cls, tag, _ in rows:
         by_tag.setdefault(tag.lower(), []).append(cls)
@@ -259,7 +272,8 @@ def find_consumers(rows):
                     consumers.setdefault((cls, s.lower()), set()).add(r)
             for tag in built_tag_reads(concat, by_tag):
                 for cls in literal_classes(by_tag[tag], text):
-                    consumers.setdefault((cls, tag), set()).add(r)
+                    if (cls, tag) not in exact_only:
+                        consumers.setdefault((cls, tag), set()).add(r)
         for ln, body in comments:
             for m in ANNOTATION.finditer(body):
                 kind, cls, tag = m.group(1), m.group(2), m.group(3)
@@ -367,7 +381,7 @@ def base_uses():
 
 def build(with_extras=True):
     rows = schema_rows()
-    consumers, verifiers, problems = find_consumers(rows)
+    consumers, verifiers, problems = find_consumers(rows, frozenset(retail_unused_keys()))
     problems += retail_unused_problems(rows, consumers)
     states = compute_states(rows, consumers, verifiers)
     unused = retail_unused_keys()
