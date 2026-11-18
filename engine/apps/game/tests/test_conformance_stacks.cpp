@@ -9,6 +9,7 @@
 
 #include "alamo/game/game_data.hpp"
 #include "alamo/game/mod_check.hpp"
+#include "alamo/game/mod_picker.hpp"
 #include "alamo/vfs/mod_registry.hpp"
 #include "alamo/test/support.hpp"
 
@@ -127,6 +128,49 @@ void test_eaw_only(const std::string& root) {
     CHECK(game::check_mod_data(root, {}, light()).base_eaw_suspect.empty());
 }
 
+// The picker's side (mod_picker.hpp, mcx3 t03 / t06 / t09) on resolved reports, as App::check_mod builds them.
+game::ModCheckReport resolved_report(const std::string& root, const std::string& arg) {
+    const game::ModCheckOptions o = light();
+    vfs::ResolvedStack s = game::resolve_mod_stack(root, {arg}, o);
+    game::ModCheckReport r = game::check_mod_data(root, s.errors.empty() ? s.args : std::vector<std::string>{arg}, o);
+    r.resolved = true;
+    r.stack = std::move(s);
+    return r;
+}
+
+void test_picker(const std::string& root) {
+    alamo::test::section("picker");
+    game::InstalledMod top;
+    top.id = "StackTop";
+    top.arg = "MODPATH=Mods\\StackTop";
+    const game::ModCheckReport t = resolved_report(root, top.arg);
+    CHECK(joined(game::mod_launch_args(top, &t)) == "MODPATH=Mods\\StackTop | MODPATH=Mods\\StackHinted | MODPATH=Mods\\StackParent");
+    const std::vector<std::string> ts = game::mod_report_summary(t);
+    CHECK(has(ts, "Stack: StackTop > StackHinted > Stack Parent"));
+    CHECK(!has(ts, "Launch stacks it on"));  // the stack line replaces the single-parent hint
+    for (const std::string& l : ts) std::printf("  %s\n", l.c_str());
+
+    game::InstalledMod eaw;
+    eaw.id = "EawOnly";
+    eaw.arg = "MODPATH=Mods\\EawOnly";
+    const game::ModCheckReport e = resolved_report(root, eaw.arg);
+    CHECK(game::mod_launch_args(eaw, &e).empty());  // refused: nothing starts
+    const std::vector<std::string> es = game::mod_report_summary(e);
+    CHECK(!es.empty() && es[0] == std::string("Refused (FoC mods only): EawOnly: ") + vfs::kBaseEawRefusal);
+    // Unresolved (alamo_mod_check without --resolve): the load error says it.
+    const game::ModCheckReport e2 = game::check_mod_data(root, {eaw.arg}, light());
+    CHECK(game::mod_launch_args(eaw, &e2).empty());
+    CHECK(has(game::mod_report_summary(e2), "Refused (FoC mods only): Old EaW Mod (EawOnly): "));
+
+    // t09: languages. A modinfo.json without "languages" is English; a mod without modinfo.json says nothing.
+    CHECK(game::language_code("German") == "de" && game::language_code("ENGLISH") == "en" && game::language_code("KLINGON").empty());
+    const game::ModCheckReport sub = resolved_report(root, "MODPATH=Mods\\StackSub");
+    CHECK(game::mod_language_warnings(sub, "ENGLISH").empty());
+    const std::vector<std::string> de = game::mod_language_warnings(sub, "GERMAN");
+    CHECK(de.size() == 2 && has(de, "Stack Sub lists no GERMAN text (modinfo.json languages: en)"));
+    CHECK(game::mod_language_warnings(t, "GERMAN").size() == 1);  // StackTop and StackHinted have no modinfo.json
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -138,5 +182,6 @@ int main(int argc, char** argv) {
     test_stack_dep(root);
     test_stack_cycle(root);
     test_eaw_only(root);
+    test_picker(root);
     return alamo::test::report("alamo_game_conformance_stacks_tests");
 }

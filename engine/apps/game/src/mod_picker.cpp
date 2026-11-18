@@ -7,6 +7,7 @@
 #include <fstream>
 #include <iterator>
 #include <set>
+#include <utility>
 
 #include "alamo/core/ascii.hpp"
 #include "alamo/game/mod_check.hpp"
@@ -195,6 +196,8 @@ std::vector<std::string> relaunch_args(std::span<const std::string> args, std::s
 }
 
 std::vector<std::string> mod_launch_args(const InstalledMod& mod, const ModCheckReport* report) {
+    if (report && (report->base_eaw || (report->resolved && report->stack.base_eaw))) return {};  // D1: refused
+    if (report && report->resolved && report->stack.errors.empty() && !report->stack.args.empty()) return report->stack.args;
     if (report && report->submod.likely && !report->submod.stacked_args.empty()) {
         std::vector<std::string> out;
         for (const std::string& a : report->submod.stacked_args)
@@ -207,6 +210,18 @@ std::vector<std::string> mod_launch_args(const InstalledMod& mod, const ModCheck
 std::vector<std::string> mod_report_summary(const ModCheckReport& r) {
     std::vector<std::string> out;
     const size_t errors = r.error_count(), warnings = r.warning_count();
+    if (r.base_eaw || (r.resolved && r.stack.base_eaw)) {  // D1
+        for (const std::string& e : r.resolved ? r.stack.errors : std::vector<std::string>{r.error})
+            if (e.find(vfs::kBaseEawRefusal) != std::string::npos) out.push_back("Refused (FoC mods only): " + e);
+        return out;
+    }
+    if (r.resolved) {  // mcx3 t06: the stack Launch starts
+        std::string chain;
+        for (const vfs::StackMod& m : r.stack.mods) chain += (chain.empty() ? "" : " > ") + m.mod.name;
+        if (r.stack.mods.size() > 1) out.push_back("Stack: " + chain);
+        for (const std::string& e : r.stack.errors) out.push_back("Stack error: " + e);
+        for (const std::string& w : r.stack.warnings) out.push_back("Stack warning: " + w);
+    }
     if (!r.loaded) {
         out.push_back("Does not load: " + (r.error.empty() ? std::string("a load step failed") : r.error));
     } else {
@@ -216,6 +231,11 @@ std::vector<std::string> mod_report_summary(const ModCheckReport& r) {
     const ModCheckReport::Counts& c = r.counts;
     out.push_back(fmt("%llu campaigns, %llu planets, %llu factions", c.campaigns, c.planets, c.factions));
     out.push_back(fmt("%llu object types, %llu skirmish maps (%llu custom)", c.object_types, c.official_maps + c.custom_maps, c.custom_maps));
+    if (!r.grade.grade.empty() && r.loaded)  // mcx0 report v4: the grade badge
+        out.push_back("Grade " + r.grade.grade +
+                      (r.grade.g3_static ? std::string(", G3 static part ok")
+                                         : fmt(", %llu item(s) keep G3 open", static_cast<unsigned long long>(r.grade.blocking.size()))));
+    if (!r.base_eaw_suspect.empty()) out.push_back("Possibly a base-EaW mod (a guess, not refused): " + r.base_eaw_suspect);
     if (r.no_startable_campaign()) out.push_back("No campaign has planets");
     else if (!r.campaigns_without_planets.empty())
         out.push_back(fmt("%llu campaign(s) without planets", r.campaigns_without_planets.size()));
@@ -235,11 +255,45 @@ std::vector<std::string> mod_report_summary(const ModCheckReport& r) {
         out.push_back("Submod of " + p.id + (p.workshop ? " (workshop)" : " (Mods folder)") +
                       fmt(": it has %llu of %llu missing files", p.provides, h.missing) +
                       (p.mentioned ? ", named in modinfo.json" : ""));
-        out.push_back("Launch stacks it on " + p.arg);
+        if (!r.resolved) out.push_back("Launch stacks it on " + p.arg);
     } else if (h.missing > 0) {
         out.push_back(fmt("Names %llu file(s) no installed mod has", h.missing));
     }
     for (const std::string& e : r.check_errors) out.push_back("Check failed: " + e);
+    return out;
+}
+
+std::string language_code(std::string_view retail_language) {
+    static constexpr std::pair<std::string_view, std::string_view> kCodes[] = {
+        {"ENGLISH", "en"}, {"GERMAN", "de"}, {"FRENCH", "fr"}, {"SPANISH", "es"},
+        {"ITALIAN", "it"}, {"POLISH", "pl"}, {"RUSSIAN", "ru"}};
+    const std::string up = ascii_upper(retail_language);
+    for (const auto& [name, code] : kCodes)
+        if (up == name) return std::string(code);
+    return {};
+}
+
+std::vector<std::string> mod_language_warnings(const ModCheckReport& r, std::string_view retail_language) {
+    std::vector<std::string> out;
+    const std::string code = language_code(retail_language);
+    if (code.empty()) return out;
+    std::vector<const vfs::ModDescriptor*> mods;
+    if (r.resolved)
+        for (const vfs::StackMod& m : r.stack.mods) mods.push_back(&m.mod);
+    else
+        for (const vfs::ModDescriptor& m : r.mods) mods.push_back(&m);
+    for (const vfs::ModDescriptor* m : mods) {
+        if (!m->has_modinfo) continue;
+        std::string listed;
+        bool text = false;
+        for (const vfs::ModLanguage& l : m->languages) {
+            listed += (listed.empty() ? "" : ", ") + l.code;
+            text = text || (l.code == code && (l.support & 1u) != 0);
+        }
+        if (!text)
+            out.push_back(m->name + " lists no " + ascii_upper(retail_language) + " text (modinfo.json languages: " +
+                          (listed.empty() ? std::string("none") : listed) + "); its own strings may show in another language or as keys");
+    }
     return out;
 }
 

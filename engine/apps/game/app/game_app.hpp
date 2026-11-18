@@ -875,6 +875,7 @@ public:
     std::string mod_check_id_, mod_check_next_;      // its row id; the row asked for while it ran
     bool mod_check_queued_ = false;
     std::map<std::string, std::vector<std::string>> mod_launch_;  // checked rows: the arguments that start them
+    std::set<std::string> mod_refused_;  // mcx3 t03: checked rows refused as base-EaW mods (D1): Launch does nothing
     bool start_session(const SessionSpec& spec);
     void session_started(const std::vector<std::string>& diag);  // the UI / presentation reset for a new session_
     void end_session();
