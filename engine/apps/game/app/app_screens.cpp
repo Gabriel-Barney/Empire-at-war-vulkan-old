@@ -277,11 +277,12 @@ void App::show_battle_end(bool dialog) {
     const sim::CampaignBattles* cb = session_ ? session_->battles() : nullptr;
     const sim::CampaignBattles::LastBattleEnd end = cb ? cb->last_battle_end() : sim::CampaignBattles::LastBattleEnd{};
     const int32_t me = local_player();
-    std::string winner;  // the winner's faction name (the lost-battle music names it)
+    std::string winner;  // the music's key: the loser's faction on a win, the winner's on a loss (0x28f250)
     if (end.valid) {
         info.victory = end.winner == me;
-        if (g && end.winner >= 0 && static_cast<size_t>(end.winner) < g->players().size()) {
-            const uint32_t f = g->players()[static_cast<size_t>(end.winner)].faction;
+        const int32_t other = info.victory ? (end.winner == end.attacker ? end.defender : end.attacker) : end.winner;
+        if (g && other >= 0 && static_cast<size_t>(other) < g->players().size()) {
+            const uint32_t f = g->players()[static_cast<size_t>(other)].faction;
             if (f < g->rules().factions.size()) winner = g->rules().factions[f].name;
         }
     }
@@ -349,8 +350,8 @@ void App::show_battle_end(bool dialog) {
     }
     info.can_save_replay = false;  // N1
     if (!dialog) return;  // story t13: a linked battle's skip - the story and score bookkeeping above, no screen, no music
-    // Battle-end win / lose music, mode 16 (STRATEGIC_GAPS §7.4); a lost battle names the winner as the enemy faction.
-    audio_.battle_end(info.victory, info.victory ? std::string_view() : std::string_view(winner));
+    // mcx4 t13: the dialog's music call (modes 9 / 10; no change when the declare already set that mode).
+    audio_.battle_end(info.victory, winner);
     battle_end_open_ = screens_.show_battle_end(info);
 }
 
@@ -401,9 +402,10 @@ void App::show_auto_resolve_end(const galactic::ConflictLogEntry& e) {
     info.can_save_replay = false;
     // b0310 (AUDIO.md §2.3): a lost auto-resolve names the winner's faction, as the tactical battle end does, so the
     // faction's Music_Event_Tactical_Lose_Vs_Faction row is tried first.
+    // mcx4 t13: keyed by the loser on a win, by the winner on a loss (0x28f250).
     std::string winner;
-    if (!info.victory && e.winner >= 0 && static_cast<size_t>(e.winner) < g->players().size()) {
-        const uint32_t f = g->players()[static_cast<size_t>(e.winner)].faction;
+    if (const int32_t other = info.victory ? e.loser : e.winner; other >= 0 && static_cast<size_t>(other) < g->players().size()) {
+        const uint32_t f = g->players()[static_cast<size_t>(other)].faction;
         if (f < g->rules().factions.size()) winner = g->rules().factions[f].name;
     }
     audio_.battle_end(info.victory, winner);

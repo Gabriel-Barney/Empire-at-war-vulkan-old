@@ -576,14 +576,16 @@ void test_music_modes() {
     // ledger: verifies Faction.Music_Event_Tactical_Win
     // ledger: verifies Faction.Music_Event_Tactical_Lose
     // (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.Music_Event_Tactical_Win family": Music_Event_Tactical_Win / _Lose.)
-    // Victory against the Empire: the _Vs_Faction row. aud1 (AUDIO.md §9.2): mode 16 is not excluded from the battle
-    // switch, so combat afterwards switches to battle music.
+    // Victory against the Empire: the local record's _Vs_Faction row keyed by the loser, music mode 9. Mode 9 is not
+    // excluded from the battle switch (AUDIO.md §9.2), so combat afterwards switches to battle music.
     g.battle_end({true, "Empire", false});
-    CHECK(a.current_music() == "Win_Vs_Empire" && a.music_mode() == music_mode::kBattleEnd && a.music_mode() == 16);
+    CHECK(a.current_music() == "Win_Vs_Empire" && a.music_mode() == music_mode::kTacticalWin && a.music_mode() == 9);
     g.combat({true, false});
     CHECK(a.music_mode() == music_mode::kTacticalBattle);
-    g.battle_end({false, "Hutts", false});
-    CHECK(a.current_music() == "Lose");
+    g.battle_end({false, "Hutts", false});  // a loss to the Hutts: no Hutts row, the plain lose music, mode 10
+    CHECK(a.current_music() == "Lose" && a.music_mode() == music_mode::kTacticalLose && a.music_mode() == 10);
+    g.tactical_result_music(false, "Empire");  // the dialog's second call while mode 10 runs: no change
+    CHECK(a.current_music() == "Lose" && a.music_mode() == 10);
     g.battle_summary_screen(true);
     CHECK(a.current_music() == "Summary_Win");
     CHECK(a.music_mode() == music_mode::kBattleEnd);

@@ -260,6 +260,15 @@ void test_control_lines() {
 // ledger: verifies Faction.Space_Forced_Retreat_Due_To_Superweapon
 void test_battle_result_lines() {
     using H = GameAudioHost;
+    // mcx4 t13 (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.Music_Event_Tactical_Win family: Ghidra follow-up"): the declare's
+    // music keys. Args: local, winner, attacker, defender.
+    H::ResultMusic m = H::result_music(0, 0, 0, 1);  // local attacker wins: win music keyed by the defender
+    CHECK(m.play && m.won && m.other == 1);
+    m = H::result_music(0, 1, 0, 1);  // local attacker loses: lose music keyed by the winner
+    CHECK(m.play && !m.won && m.other == 1);
+    m = H::result_music(2, 1, 0, 1);  // an ally / third side: lose music keyed by the winner
+    CHECK(m.play && !m.won && m.other == 1);
+    CHECK(!H::result_music(0, 0, 0, -1).play && !H::result_music(-1, 0, 0, 1).play);  // no loser / no local player
     // Args: local_won, local_hostile, space, enemy_tsw, own_killer, corruption.
     CHECK(H::battle_result_line(true, false, false, false, false, false) == "SFXEvent_HUD_Won_Land_Battle");
     CHECK(H::battle_result_line(true, false, false, true, false, true) == "SFXEvent_HUD_Won_Land_Battle_Enemy_TSW_Present");

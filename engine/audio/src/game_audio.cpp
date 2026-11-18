@@ -204,14 +204,33 @@ void GameAudio::set_super_weapon_present(bool present, bool restart_music) {
     }
 }
 
-void GameAudio::battle_end(const BattleResult& result) {
+void GameAudio::tactical_result_music(bool local_is_winner, std::string_view other_faction) {
     battle_over_ = true;
+    const uint8_t mode = local_is_winner ? music_mode::kTacticalWin : music_mode::kTacticalLose;
+    if (audio_->music_mode() == mode) return;
     const FactionAudio* f = data_->find_faction(faction_);
     if (!f) return;
     // ledger: consumes Faction.Music_Event_Tactical_Win
     // ledger: consumes Faction.Music_Event_Tactical_Lose
-    const std::string base = std::string(result.strategic ? "Music_Event_Strategic_" : "Music_Event_Tactical_") +
-                             (result.won ? "Win" : "Lose");
+    const std::string base = local_is_winner ? "Music_Event_Tactical_Win" : "Music_Event_Tactical_Lose";
+    std::string music;
+    if (!other_faction.empty()) {
+        const std::vector<std::string> vs = f->pair_values(base + "_Vs_Faction", other_faction);
+        if (!vs.empty()) music = vs.front();  // the first matching entry (0x33e540 / 0x33e5a0)
+    }
+    if (music.empty()) music = std::string(f->get(base));
+    if (!music.empty()) audio_->play_music(music, mode);
+}
+
+void GameAudio::battle_end(const BattleResult& result) {
+    if (!result.strategic) {
+        tactical_result_music(result.won, result.enemy_faction);
+        return;
+    }
+    battle_over_ = true;
+    const FactionAudio* f = data_->find_faction(faction_);
+    if (!f) return;
+    const std::string base = std::string("Music_Event_Strategic_") + (result.won ? "Win" : "Lose");
     std::string music;
     if (!result.enemy_faction.empty()) {
         const std::vector<std::string> vs = f->pair_values(base + "_Vs_Faction", result.enemy_faction);

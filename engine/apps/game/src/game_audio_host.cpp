@@ -158,6 +158,16 @@ std::string_view GameAudioHost::strike_available_tag(bool bombard, bool local, b
                             : "SFXEvent_Bombing_Run_Enemy_Available";  // ledger: consumes Faction.SFXEvent_Bombing_Run_Enemy_Available
 }
 
+GameAudioHost::ResultMusic GameAudioHost::result_music(int32_t local, int32_t winner, int32_t attacker, int32_t defender) {
+    ResultMusic m;
+    const int32_t loser = winner == attacker ? defender : attacker;
+    if (local < 0 || winner < 0 || loser < 0) return m;
+    m.play = true;
+    m.won = local == winner;
+    m.other = m.won ? loser : winner;
+    return m;
+}
+
 GameAudioHost::PadLines GameAudioHost::pad_lines(PadLine kind, bool local) {
     PadLines l;
     switch (kind) {
@@ -429,12 +439,9 @@ void GameAudioHost::unit_response(const objects::GameObjectTypes& types, objects
     if (game_->unit_response(object, sounds(types, type), order, position_of(object), group)) ++stats_.responses;
 }
 
-void GameAudioHost::battle_end(bool won, std::string_view enemy_faction) {
+void GameAudioHost::battle_end(bool won, std::string_view other_faction) {
     if (!game_) return;
-    audio::BattleResult r;
-    r.won = won;
-    r.enemy_faction = std::string(enemy_faction);
-    game_->battle_end(r);  // mode 16 (STRATEGIC_GAPS §7.4)
+    game_->tactical_result_music(won, other_faction);  // modes 9 / 10 (MCX4_T13_RE_ANSWERS)
     ++stats_.battle_end_music;
 }
 
@@ -877,6 +884,12 @@ void GameAudioHost::cue_lines(const sim::TacticalBattle& battle, const objects::
     if (battle.victory_declared() && !victory_seen_) {
         victory_seen_ = true;
         const int32_t winner = battle.victory_declared_player();
+        // The music change comes first and ignores the silent flag (types 0x0b..0x16 only).
+        if (battle_result_gate(battle.victory_declared_type(), false)) {
+            const ResultMusic rm = result_music(local_player, winner, battle.request().info.attacker, battle.request().info.defender);
+            if (rm.play && static_cast<size_t>(rm.other) < player_factions_.size())
+                battle_end(rm.won, player_factions_[static_cast<size_t>(rm.other)]);
+        }
         if (local_player >= 0 && winner >= 0 && battle_result_gate(battle.victory_declared_type(), battle.victory_declared_silent())) {
             const bool space = battle.is_space();
             const objects::BehaviorSet set = space ? objects::BehaviorSet::Space : objects::BehaviorSet::Land;

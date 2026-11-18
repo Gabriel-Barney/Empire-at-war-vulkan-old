@@ -127,9 +127,18 @@ public:
                        bool group = false, int32_t owner = -1, uint32_t dest_fields = 0, int32_t hardpoint_kind = -1);
     // Asteroid field (bit 1) first, then nebula (bit 4); "" for neither.
     static std::string_view move_into_field_tag(uint32_t dest_fields);
-    // Battle-end dialog opened: the local faction's win / lose music (Music_Event_Tactical_<Win/Lose>[_Vs_Faction]),
-    // music mode 16 (STRATEGIC_GAPS §7.4).
-    void battle_end(bool won, std::string_view enemy_faction = {});
+    // Tactical win / lose music (GameAudio::tactical_result_music, modes 9 / 10): `won` = the local player is the
+    // winner; `other_faction` = the loser's faction on a win, the winner's on a loss. battle_tick calls it at the victory
+    // declare; the battle-end dialogs call it again (a no-op while the mode is unchanged).
+    void battle_end(bool won, std::string_view other_faction = {});
+    // mcx4 t13 (0x343b90 -> 0x28f250 [H]): the declare's music call. loser = the other of attacker / defender relative
+    // to the winner; play = a local player and a loser exist; won = local is the winner; other = the loser on a win, the
+    // winner otherwise (an ally of the winner gets the lose music).
+    struct ResultMusic {
+        bool play = false, won = false;
+        int32_t other = -1;
+    };
+    static ResultMusic result_music(int32_t local, int32_t winner, int32_t attacker, int32_t defender);
     // GALACTIC_DIALOGS §1.3: the battle prompt opened - the local faction's SFX_Event_Tactical_{Space,Land}_Battle_Pending
     // and the pending-battle music (GameAudio::battle_pending, mode 5); the load screen after Begin does not repeat them.
     // galactic_resume: back to the galactic mode music after an auto-resolve's battle-end screen (the scene stayed Galactic).
