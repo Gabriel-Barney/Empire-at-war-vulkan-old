@@ -3996,10 +3996,11 @@ TacticalAiWorld::TacticalAiWorld(objects::ObjectStore& store, const objects::Gam
     w.world.set_players(w.cfg.lua_players);
     w.pipeline.set_handler([&w](uint64_t, const cmd::Command& c) {
         w.pp_slice.clear();  // OPT2 t10: an order may change what the host answers
-        const cmd::RejectReason r = w.host.execute(c.header.player, c.payload);
+        const auto player = static_cast<uint8_t>(c.header.player);  // submitted as uint8_t ids: lossless
+        const cmd::RejectReason r = w.host.execute(player, c.payload);
         ++w.orders;
         if (r != cmd::RejectReason::None) ++w.rejected;
-        if (w.cfg.log_decisions && !w.in_world_order) w.log_script_order(c.header.player, c.payload, r);
+        if (w.cfg.log_decisions && !w.in_world_order) w.log_script_order(player, c.payload, r);
         return r;
     });
     w.bridge.pipeline = &w.pipeline;

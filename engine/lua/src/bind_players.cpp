@@ -1360,7 +1360,7 @@ int m_invade(Call& c) {
     if (!b->pipeline) return 0;
     commands::EventData e(commands::EventType::Invade);
     e.set("planet", static_cast<uint32_t>(sim->store().id(planet.object))).set_ids("units", std::move(ids));
-    b->pipeline->execute_direct(c.vm->frame, static_cast<uint8_t>(issuer), commands::CommandSource::Script, e);
+    b->pipeline->execute_direct(c.vm->frame, static_cast<uint16_t>(issuer), commands::CommandSource::Script, e);
 #endif
     return 0;
 }

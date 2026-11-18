@@ -225,8 +225,8 @@ void SimHost::write_players(ByteWriter& w) const {
 bool SimHost::read_players(ByteReader& r) {
     if (r.u32() != kChunkVersion) return false;
     if (r.u32() != cfg_.players || !r.ok()) return false;
-    std::array<std::vector<ObjectId>, kMaxPlayers> sel;
-    std::array<std::array<std::vector<ObjectId>, 10>, kMaxPlayers> groups;
+    std::vector<std::vector<ObjectId>> sel(cfg_.players);
+    std::vector<std::array<std::vector<ObjectId>, 10>> groups(cfg_.players);
     for (uint32_t p = 0; p < cfg_.players; ++p)
         if (!read_ids(r, sel[p])) return false;
     const bool used = r.boolean();

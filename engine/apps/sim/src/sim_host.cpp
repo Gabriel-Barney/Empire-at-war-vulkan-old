@@ -34,10 +34,13 @@ SimHost::SimHost(const objects::GameObjectTypes& types, jobs::JobSystem& js, Sim
       cfg_(cfg),
       pf_(jobs::make_parallel_for(js)),
       modes_(types, cfg.players < kMaxPlayers ? cfg.players : kMaxPlayers) {
-    if (cfg_.players > kMaxPlayers) cfg_.players = kMaxPlayers;
+    if (cfg_.players > kMaxPlayers) cfg_.players = kMaxPlayers;  // the guard (game_modes.hpp); start_galactic refuses above it
+    selection_.resize(cfg_.players);
+    controllers_.resize(cfg_.players);
+    groups_.resize(cfg_.players);
     // Q6: every player may submit orders (a mod's campaign can have more than the scheduler's default 8). Only raised, so
     // sessions of up to 8 players keep their recorded scheduler config.
-    if (cfg_.scheduler.max_players < cfg_.players) cfg_.scheduler.max_players = static_cast<uint8_t>(cfg_.players);
+    if (cfg_.scheduler.max_players < cfg_.players) cfg_.scheduler.max_players = static_cast<uint16_t>(cfg_.players);
     cfg_.scheduler.first_tick = 1;  // the first drain is tick 1 (T2 runs after the frame increment)
     random_.seed_free(cfg_.free_seed);
     if (cfg_.object_scripts) {  // q6: game-object Lua scripts (object_scripts.hpp)
@@ -585,8 +588,9 @@ galactic::GalacticSim* SimHost::start_galactic(const galactic::GalacticRules& ru
                                                std::vector<std::string>* diagnostics) {
     if (setup.players.size() > cfg_.players) {
         if (diagnostics)
-            diagnostics->push_back("galactic setup has " + std::to_string(setup.players.size()) + " players, the session " +
-                                   std::to_string(cfg_.players) + " (SimConfig::players, at most " + std::to_string(kMaxPlayers) + ")");
+            diagnostics->push_back("limit_hit: galactic setup has " + std::to_string(setup.players.size()) + " players, the session " +
+                                   std::to_string(cfg_.players) + " (SimConfig::players: size it with session_players; guard " +
+                                   std::to_string(kMaxPlayers) + ", game_modes.hpp)");
         return nullptr;
     }
     auto& mode = static_cast<GalacticMode&>(start_game(ModeKind::Galactic));
@@ -823,11 +827,17 @@ std::vector<ObjectHandle> SimHost::owned_units(uint8_t player, const std::vector
 }
 
 cmd::RejectReason SimHost::handle(uint64_t tick, const cmd::Command& c) {
+    // mcx5 t01: the wire carries 13-bit ids; the sim's are uint8_t (kMaxPlayers guard), so a larger id is refused here.
+    if (c.header.player >= kMaxPlayers) {
+        ++rejected_;
+        return cmd::RejectReason::InvalidPlayer;
+    }
+    const auto player = static_cast<uint8_t>(c.header.player);
     GameMode* top = modes_.top();
     GalacticMode* g = top && !top->tactical() ? static_cast<GalacticMode*>(top) : nullptr;
     // --- P host (owner: game host agent): port-only events (PortExtension 63) the game host consumes itself, in any mode ---
     if (port_hook_ && c.payload.type() == cmd::EventType::PortExtension) {
-        const cmd::RejectReason pr = port_hook_(*this, c.header.player, c.payload);
+        const cmd::RejectReason pr = port_hook_(*this, player, c.payload);
         if (pr != cmd::RejectReason::Unhandled) {
             if (pr == cmd::RejectReason::None) ++applied_;
             else ++rejected_;
@@ -835,11 +845,11 @@ cmd::RejectReason SimHost::handle(uint64_t tick, const cmd::Command& c) {
         }
     }
     // --- end P host ---
-    cmd::RejectReason r = (g && g->sim()) ? g->sim()->handle_command(tick, c) : apply(c.header.player, c.payload);
-    if (r == cmd::RejectReason::Unhandled && g && g->sim() && galactic_cmd_) r = galactic_cmd_(*this, c.header.player, c.payload);  // Int-final
+    cmd::RejectReason r = (g && g->sim()) ? g->sim()->handle_command(tick, c) : apply(player, c.payload);
+    if (r == cmd::RejectReason::Unhandled && g && g->sim() && galactic_cmd_) r = galactic_cmd_(*this, player, c.payload);  // Int-final
     // --- P4 host (owner: game host agent): an original event no system handled (e.g. Withdrawl 49) goes to the port hook ---
     if (r == cmd::RejectReason::Unhandled && port_hook_ && c.payload.type() != cmd::EventType::PortExtension)
-        r = port_hook_(*this, c.header.player, c.payload);
+        r = port_hook_(*this, player, c.payload);
     // --- end P4 host ---
     if (r == cmd::RejectReason::None) ++applied_;
     else ++rejected_;
@@ -847,7 +857,7 @@ cmd::RejectReason SimHost::handle(uint64_t tick, const cmd::Command& c) {
 }
 
 void SimHost::station_replaced(ObjectId old_station, ObjectId new_station) {
-    for (uint32_t p = 0; p < cfg_.players && p < kMaxPlayers; ++p) {
+    for (uint32_t p = 0; p < cfg_.players; ++p) {
         std::vector<ObjectId>& sel = selection_[p];
         if (std::find(sel.begin(), sel.end(), old_station) != sel.end() &&
             std::find(sel.begin(), sel.end(), new_station) == sel.end())

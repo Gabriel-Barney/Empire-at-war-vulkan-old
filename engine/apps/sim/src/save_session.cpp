@@ -18,13 +18,14 @@ constexpr uint32_t kMaxCount = 1u << 20;  // sanity bound for counts read from a
 
 void write_scheduler(ByteWriter& w, const commands::SchedulerConfig& c) {
     // late / mode / turn / max_ahead: the retired lockstep bytes (commands/scheduler.hpp), kept as constants.
-    w.u32(c.delay).u8(c.max_players).u8(commands::kSchedLateByte).u64(c.first_tick).u8(commands::kSchedModeByte);
+    // mcx5 t01 (descriptor version 2): max_players is a u16; version 1 wrote a u8.
+    w.u32(c.delay).u16(c.max_players).u8(commands::kSchedLateByte).u64(c.first_tick).u8(commands::kSchedModeByte);
     w.u32(commands::kSchedTurn).u32(commands::kSchedMaxAhead);
 }
 
-bool read_scheduler(ByteReader& r, commands::SchedulerConfig& c) {
+bool read_scheduler(ByteReader& r, commands::SchedulerConfig& c, uint32_t version) {
     c.delay = r.u32();
-    c.max_players = r.u8();
+    c.max_players = version == 1 ? r.u8() : r.u16();
     const uint8_t late = r.u8();
     c.first_tick = r.u64();
     const uint8_t mode = r.u8();
@@ -100,7 +101,8 @@ void SessionDescriptor::write(ByteWriter& w) const {
 }
 
 bool SessionDescriptor::read(ByteReader& r) {
-    if (r.u32() != kVersion) return false;
+    const uint32_t version = r.u32();
+    if (version != kVersion && version != 1) return false;  // 1: before mcx5 (u8 scheduler max_players)
     SessionDescriptor d;
     d.kind = r.str();
     d.campaign = r.str();
@@ -110,7 +112,7 @@ bool SessionDescriptor::read(ByteReader& r) {
     for (uint32_t i = 0; i < na && r.ok(); ++i) d.data_args.push_back(r.str());
     d.seed = r.u32();
     d.players = r.u32();
-    if (!read_scheduler(r, d.scheduler)) return false;
+    if (!read_scheduler(r, d.scheduler, version)) return false;
     d.story_crc = r.boolean();
     const uint32_t np = r.u32();
     if (!r.ok() || np > kMaxCount) return false;
@@ -241,7 +243,7 @@ bool read_session(const SaveFile& save, SessionDescriptor& out, std::string* err
         return false;
     }
     ByteReader r(c->data);
-    if (c->version != SessionDescriptor::kVersion || !out.read(r)) {
+    if ((c->version != SessionDescriptor::kVersion && c->version != 1) || !out.read(r)) {
         if (err) *err = "session chunk: unknown version or bad data";
         return false;
     }

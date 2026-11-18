@@ -966,7 +966,7 @@ void StorySession::invade_planet_reward(int32_t plot_player, PlanetIndex planet,
             gates_.script_invade = true;  // STY1: the story's own invasion is not refused by its invasion locks
             sync_gates();
             if (lua_->bridge.pipeline)
-                lua_->bridge.pipeline->execute_direct(frame_, static_cast<uint8_t>(issuer), commands::CommandSource::Script, ev);
+                lua_->bridge.pipeline->execute_direct(frame_, static_cast<uint16_t>(issuer), commands::CommandSource::Script, ev);
             else
                 sim_->execute(static_cast<uint8_t>(issuer), ev);
             gates_.script_invade = false;

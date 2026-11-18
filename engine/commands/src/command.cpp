@@ -205,11 +205,27 @@ DecodeError decode_payload(uint16_t type, std::span<const uint8_t> bytes, EventD
     return DecodeError::None;
 }
 
+uint8_t source_byte(CommandSource source, uint16_t player, bool queued) noexcept {
+    const auto high = static_cast<uint32_t>((player >> 8) & 0x1Fu) << kPlayerHighShift;
+    return static_cast<uint8_t>((static_cast<uint32_t>(source) & kSourceMask) | high | (queued ? kCommandQueuedBit : 0u));
+}
+
+bool split_source_byte(uint8_t byte, uint8_t player_low, CommandSource& source, uint16_t& player, bool& queued) noexcept {
+    const uint32_t src = byte & kSourceMask;
+    const uint32_t high = (static_cast<uint32_t>(byte & ~kCommandQueuedBit) >> kPlayerHighShift) & 0x1Fu;
+    const uint32_t id = (high << 8) | player_low;
+    if (src >= kCommandSourceCount || id >= kMaxPlayerSlots) return false;
+    source = static_cast<CommandSource>(src);
+    player = static_cast<uint16_t>(id);
+    queued = (byte & kCommandQueuedBit) != 0;
+    return true;
+}
+
 void encode_command(const Command& c, std::vector<uint8_t>& out) {
     put(out, static_cast<uint16_t>(c.payload.type_id()));
-    put(out, c.header.player);
+    put(out, static_cast<uint8_t>(c.header.player & 0xFFu));
     // [port: Gabriel] bit 7 = queued (0 for every command recorded before queueable actions: same bytes).
-    put(out, static_cast<uint8_t>(static_cast<uint8_t>(c.header.source) | (c.payload.queued() ? kCommandQueuedBit : 0u)));
+    put(out, source_byte(c.header.source, c.header.player, c.payload.queued()));
     put(out, c.header.sequence);
     put(out, c.header.issue_tick);
     put(out, c.header.scheduled_tick);
@@ -230,9 +246,8 @@ DecodeError decode_command(std::span<const uint8_t> in, size_t& pos, Command& ou
     Reader r(in, pos);
     const uint16_t type = r.get<uint16_t>();
     Command c;
-    c.header.player = r.get<uint8_t>();
+    const uint8_t player_low = r.get<uint8_t>();
     const uint8_t src_byte = r.get<uint8_t>();
-    const uint8_t src = static_cast<uint8_t>(src_byte & ~kCommandQueuedBit);  // [port: Gabriel] bit 7 = queued
     c.header.sequence = r.get<uint32_t>();
     c.header.issue_tick = r.get<uint64_t>();
     c.header.scheduled_tick = r.get<uint64_t>();
@@ -240,11 +255,11 @@ DecodeError decode_command(std::span<const uint8_t> in, size_t& pos, Command& ou
     if (!r.ok()) return DecodeError::Truncated;
     if (len > kMaxPayloadBytes) return DecodeError::TooLarge;
     if (r.remaining() < len) return DecodeError::Truncated;
-    if (src >= kCommandSourceCount || c.header.player >= kMaxPlayerSlots) return DecodeError::BadField;
-    c.header.source = static_cast<CommandSource>(src);
+    bool queued = false;
+    if (!split_source_byte(src_byte, player_low, c.header.source, c.header.player, queued)) return DecodeError::BadField;
     const DecodeError e = decode_payload(type, in.subspan(r.pos(), len), c.payload);
     if (e != DecodeError::None) return e;
-    c.payload.set_queued((src_byte & kCommandQueuedBit) != 0);
+    c.payload.set_queued(queued);
     pos = r.pos() + len;
     out = std::move(c);
     return DecodeError::None;
@@ -289,7 +304,7 @@ EventData production(uint16_t type_index, ObjectId location, bool cancel, uint8_
     e.set("type_index", type_index).set("location", location).set("cancel", cancel ? 1u : 0u).set("queue", queue).set("index", index);
     return e;
 }
-EventData tactical_build(ObjectId pad, uint16_t type_index, uint8_t player) {
+EventData tactical_build(ObjectId pad, uint16_t type_index, uint16_t player) {
     EventData e(EventType::TacticalBuild);
     e.set("pad", pad).set("type_index", type_index).set("player", player);
     return e;

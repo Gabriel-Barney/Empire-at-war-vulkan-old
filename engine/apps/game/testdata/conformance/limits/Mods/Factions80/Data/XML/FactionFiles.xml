@@ -1,0 +1,9 @@
+<?xml version="1.0" ?>
+
+<!-- mcx5 t06 conformance mod factions_80: 72 filler factions first, so the stock eight take indices 72..79 (above the
+     old 64-player cap) and every campaign holds 80 players (one per faction, BKC1_RE_ANSWERS Q2). -->
+<Faction_Files>
+	<File>Factions80_Filler.xml</File>
+	<File>Factions.xml</File>
+	<File>Expansion_Factions.xml</File>
+</Faction_Files>
