@@ -84,6 +84,22 @@ std::string_view GameAudioHost::hardpoint_lost_tag(uint8_t kind, bool local_pare
     return last_of_kind ? std::string_view("SFXEvent_Hardpoint_Destroyed") : std::string_view();
 }
 
+std::string_view GameAudioHost::battle_result_line(bool local_won, bool local_hostile, bool space, bool enemy_tsw, bool own_killer,
+                                                   bool corruption) {
+    if (local_won) {
+        if (!space) {
+            if (enemy_tsw) return "SFXEvent_HUD_Won_Land_Battle_Enemy_TSW_Present";
+            return corruption ? "SFXEvent_HUD_Won_Tactical_Corruption_Mission" : "SFXEvent_HUD_Won_Land_Battle";
+        }
+        if (enemy_tsw) return own_killer ? "SFXEvent_HUD_Won_Space_Battle_Enemy_TSW_Present" : "Space_Forced_Retreat_Due_To_Superweapon";
+        return corruption ? "SFXEvent_HUD_Won_Tactical_Corruption_Mission" : "SFXEvent_HUD_Won_Space_Battle";
+    }
+    if (!local_hostile) return {};
+    if (enemy_tsw) return space ? "SFXEvent_HUD_Lost_Space_Battle_Enemy_TSW_Present" : "SFXEvent_HUD_Lost_Land_Battle_Enemy_TSW_Present";
+    if (corruption) return "SFXEvent_HUD_Lost_Tactical_Corruption_Mission";
+    return space ? "SFXEvent_HUD_Lost_Space_Battle" : "SFXEvent_HUD_Lost_Land_Battle";
+}
+
 GameAudioHost::ControlLines GameAudioHost::control_lines(bool friendly_old, bool friendly_new, bool hostile_old, bool hostile_new,
                                                          bool old_neutral, bool new_neutral) {
     ControlLines c;
@@ -657,6 +673,43 @@ void GameAudioHost::cue_lines(const sim::TacticalBattle& battle, const objects::
         }
         prod_orders_ = std::move(now);
     }
+    // Battle won / lost HUD line (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Won_Land_Battle family"): once, on the tick the
+    // victory is declared. The flags walk the players in index order and stop at the first enemy of the local player
+    // owning a TACTICAL_SUPER_WEAPON object, so the own-killer test has only seen lower players by then [H loop, M effect].
+    if (battle.victory_declared() && !victory_seen_) {
+        victory_seen_ = true;
+        const int32_t winner = battle.victory_declared_player();
+        if (local_player >= 0 && winner >= 0 && battle_result_gate(battle.victory_declared_type(), battle.victory_declared_silent())) {
+            const bool space = battle.is_space();
+            const objects::BehaviorSet set = space ? objects::BehaviorSet::Space : objects::BehaviorSet::Land;
+            bool enemy_tsw = false, own_killer = false;
+            const int32_t players = static_cast<int32_t>(player_factions_.size());
+            for (int32_t p = 0; p < players && !enemy_tsw; ++p) {
+                const bool enemy = p != local_player && cs.is_enemy(local_player, p);
+                if (!enemy && p != local_player) continue;
+                for (const objects::ObjectId id : battle.movement().unit_ids()) {  // [port] the battle units
+                    const objects::ObjectHandle h = store.find(id);
+                    if (!store.alive(h) || store.owner(h) != p) continue;
+                    const objects::TypeIndex t = store.type(h);
+                    if (enemy && types.has_behavior(t, set, objects::beh::TacticalSuperWeapon)) {
+                        enemy_tsw = true;
+                        break;
+                    }
+                    if (!enemy && !hidden_.count(static_cast<uint64_t>(id)) && types.get_bool(t, "Is_Super_Weapon_Killer"))
+                        own_killer = true;
+                }
+            }
+            const bool local_won = winner == local_player;
+            const bool hostile = !local_won && cs.is_enemy(local_player, winner);
+            const std::string_view line = battle_result_line(local_won, hostile, space, enemy_tsw, own_killer, corruption_mission_);
+            // ledger: consumes Faction.SFXEvent_HUD_Won_Land_Battle
+            // ledger: consumes Faction.SFXEvent_HUD_Lost_Land_Battle
+            if (!line.empty()) {
+                faction_sfx(line);
+                ++stats_.battle_result_lines;
+            }
+        }
+    }
     // Capture point owner changes (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Tactical_Gain_Friendly_Control family"): the
     // local faction's lists, first entry whose object type is the point's type; 2D. [port] the faction's Is_Neutral is
     // read from its Factions.xml entry.
@@ -1017,6 +1070,7 @@ void GameAudioHost::battle_reset() {
     last_serial_ = 0;
     hardpoint_fire_.clear();  // aud1 t04: hardpoint indices are per battle
     prod_orders_.clear();     // mcx4 t13: per-battle production tracking
+    victory_seen_ = false;    // mcx4 t13 batch D
     prod_built_.clear();
     intro_decided_ = false;   // aud1 t07: a new battle decides its intro again
     object_events_reset();    // aud1 t05

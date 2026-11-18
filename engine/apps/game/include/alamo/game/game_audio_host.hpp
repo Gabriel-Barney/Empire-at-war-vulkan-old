@@ -78,6 +78,7 @@ struct GameAudioStats {
     uint64_t fleet_jumps = 0, campaign_end_music = 0, deactivations = 0;  // aud2 t07 / t08 / t04
     uint64_t health_warnings = 0, hardpoint_lines = 0, hardpoint_explosions = 0;  // mcx4 t13 batch A
     uint64_t control_lines = 0;                                                    // mcx4 t13 batch C
+    uint64_t battle_result_lines = 0;                                              // mcx4 t13 batch D
 };
 
 class GameAudioHost {
@@ -158,6 +159,9 @@ public:
     uint32_t weapon_fired(uint64_t shooter, std::string_view hardpoint_fire, std::string_view shooter_fire, const Vec3& position);
     // aud1 t05: each battle player's Faction name (index = player), read by battle_tick's object_events; set at battle start.
     void set_player_factions(std::vector<std::string> factions) { player_factions_ = std::move(factions); }
+    // mcx4 t13 batch D: the running battle is a tactical corruption mission (0x28ae30; picks the _Tactical_Corruption_
+    // Mission HUD result lines).
+    void set_corruption_mission(bool on) { corruption_mission_ = on; }
     void weather(std::string_view type, float intensity, bool local_affected = true);  // local_affected: no Weatherproof
     void combat(bool local_involved, bool local_base_attacked);
     // --- aud1 t05 (object SFX: abilities, shields, hyperspace; src/game_audio_host_objects.cpp) ---
@@ -289,6 +293,15 @@ public:
     // the old owner, else _Gain_Friendly_Control. Enemy half: _Lose_Enemy_Control when the old owner's faction is not
     // Is_Neutral and the local player is hostile to it; else none when the new owner's faction is neutral; else
     // _Gain_Enemy_Control when hostile to the new owner. `friendly_old` / `hostile_old` false for no owner (-1).
+    // "Faction.SFXEvent_HUD_Won_Land_Battle family" (0x343810 from the victory declare 0x343b90 [H]): the local faction's
+    // HUD line for a declared victory ("" = none). `local_won`: the winner is the local player; `local_hostile`: the
+    // local player is hostile to the winner (an ally of the winner hears nothing). `enemy_tsw`: an enemy of the local
+    // player owns a TACTICAL_SUPER_WEAPON object; `own_killer`: the local player owns a live Is_Super_Weapon_Killer object.
+    // A space win against a TSW without a killer plays Space_Forced_Retreat_Due_To_Superweapon.
+    static std::string_view battle_result_line(bool local_won, bool local_hostile, bool space, bool enemy_tsw, bool own_killer,
+                                               bool corruption);
+    // The 0x343b90 gate: victory types 0xb..0x16 that are not silent.
+    static bool battle_result_gate(uint8_t victory_type, bool silent) { return victory_type >= 0x0b && victory_type <= 0x16 && !silent; }
     struct ControlLines {
         std::string_view friendly, enemy;
     };
@@ -384,6 +397,7 @@ private:
     void cue_lines(const sim::TacticalBattle& battle, const objects::ObjectStore& store, const objects::GameObjectTypes& types,
                    int32_t local_player);
     float health_low_ = 0.33f, health_critical_ = 0.10f;  // GameConstants Health_Low / _Critical_Percent_Threshold
+    bool corruption_mission_ = false, victory_seen_ = false;  // mcx4 t13 batch D: set_corruption_mission; declare latch
     // mcx4 t13 batch B: the local player's tactical build orders last tick (order id -> type) and built counts (type ->
     // TacticalProduction::built_count), to tell a completed order from a cancelled one.
     std::map<uint32_t, int32_t> prod_orders_;

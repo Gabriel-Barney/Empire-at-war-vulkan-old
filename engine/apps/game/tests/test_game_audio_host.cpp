@@ -239,6 +239,40 @@ void test_control_lines() {
     CHECK(c.friendly.empty() && c.enemy.empty());
 }
 
+// mcx4 t13 batch D (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_HUD_Won_Land_Battle family", 0x343810 from the
+// victory declare 0x343b90; both builds): the local faction's HUD line for a declared victory.
+// ledger: verifies Faction.SFXEvent_HUD_Won_Land_Battle
+// ledger: verifies Faction.SFXEvent_HUD_Lost_Land_Battle
+// ledger: verifies Faction.SFXEvent_HUD_Won_Space_Battle
+// ledger: verifies Faction.SFXEvent_HUD_Lost_Space_Battle
+// ledger: verifies Faction.SFXEvent_HUD_Won_Tactical_Corruption_Mission
+// ledger: verifies Faction.SFXEvent_HUD_Lost_Tactical_Corruption_Mission
+// ledger: verifies Faction.SFXEvent_HUD_Won_Land_Battle_Enemy_TSW_Present
+// ledger: verifies Faction.SFXEvent_HUD_Lost_Land_Battle_Enemy_TSW_Present
+// ledger: verifies Faction.SFXEvent_HUD_Won_Space_Battle_Enemy_TSW_Present
+// ledger: verifies Faction.SFXEvent_HUD_Lost_Space_Battle_Enemy_TSW_Present
+// ledger: verifies Faction.Space_Forced_Retreat_Due_To_Superweapon
+void test_battle_result_lines() {
+    using H = GameAudioHost;
+    // Args: local_won, local_hostile, space, enemy_tsw, own_killer, corruption.
+    CHECK(H::battle_result_line(true, false, false, false, false, false) == "SFXEvent_HUD_Won_Land_Battle");
+    CHECK(H::battle_result_line(true, false, false, true, false, true) == "SFXEvent_HUD_Won_Land_Battle_Enemy_TSW_Present");
+    CHECK(H::battle_result_line(true, false, false, false, false, true) == "SFXEvent_HUD_Won_Tactical_Corruption_Mission");
+    CHECK(H::battle_result_line(true, false, true, false, false, false) == "SFXEvent_HUD_Won_Space_Battle");
+    CHECK(H::battle_result_line(true, false, true, true, true, false) == "SFXEvent_HUD_Won_Space_Battle_Enemy_TSW_Present");
+    CHECK(H::battle_result_line(true, false, true, true, false, false) == "Space_Forced_Retreat_Due_To_Superweapon");
+    CHECK(H::battle_result_line(true, false, true, false, false, true) == "SFXEvent_HUD_Won_Tactical_Corruption_Mission");
+    CHECK(H::battle_result_line(false, true, false, false, false, false) == "SFXEvent_HUD_Lost_Land_Battle");
+    CHECK(H::battle_result_line(false, true, true, false, false, false) == "SFXEvent_HUD_Lost_Space_Battle");
+    CHECK(H::battle_result_line(false, true, false, true, false, false) == "SFXEvent_HUD_Lost_Land_Battle_Enemy_TSW_Present");
+    CHECK(H::battle_result_line(false, true, true, true, true, false) == "SFXEvent_HUD_Lost_Space_Battle_Enemy_TSW_Present");
+    CHECK(H::battle_result_line(false, true, true, false, false, true) == "SFXEvent_HUD_Lost_Tactical_Corruption_Mission");
+    CHECK(H::battle_result_line(false, false, false, false, false, false).empty());  // an ally of the winner hears nothing
+    // The declare gate: victory types 0xb..0x16, not silent.
+    CHECK(H::battle_result_gate(0x0b, false) && H::battle_result_gate(0x16, false) && H::battle_result_gate(0x13, false));
+    CHECK(!H::battle_result_gate(0x0a, false) && !H::battle_result_gate(0x17, false) && !H::battle_result_gate(0x10, true));
+}
+
 // aud4 b0289 / b0300: garrison entry line and the hero clash win speech (both builds; presentation rules only).
 void test_garrison_and_clash_lines() {
     using H = GameAudioHost;
@@ -843,6 +877,7 @@ int main() {
     test_garrison_and_clash_lines();
     test_health_and_hardpoint_lines();  // mcx4 t13
     test_control_lines();               // mcx4 t13 batch C
+    test_battle_result_lines();         // mcx4 t13 batch D
     test_intro_speech_t07();
     test_aud2();
 #ifdef ALAMO_GAME_HAVE_AUDIO
