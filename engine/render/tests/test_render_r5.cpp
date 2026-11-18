@@ -2142,6 +2142,36 @@ static void test_blob_shadows() {
         const objects::TypeIndex rock = real.find("Prop_Rock_Cluster_02");
         CHECK(rock != objects::kNone && real[rock].no_distance_fade && !real[scout].no_distance_fade);
     }
+    {  // mcx4 t15 (docs/re/MCX4_PRES_RE_ANSWERS_2.md Q7): the light effect shapes; GameConstants Shield_Flash_Scale /
+       // Shield_Flash_Duration feed a type-1 Color_Flash.
+        // ledger: verifies GameConstants.Shield_Flash_Scale
+        // ledger: verifies GameConstants.Shield_Flash_Duration
+        const float base[3] = {1.0f, 1.0f, 1.0f};
+        float o[3];
+        render::LightPulse p;
+        p.type = 1;
+        p.c1[0] = 1.0f;
+        p.c1[1] = 1.1f;
+        p.c1[2] = 1.25f;
+        p.duration = 0.1f;
+        p.start = 10.0;
+        CHECK(render::light_pulse_rgb(p, 10.0, base, o) && std::fabs(o[2] - 1.25f) < 1e-5f);    // starts at C1
+        CHECK(render::light_pulse_rgb(p, 10.05, base, o) && std::fabs(o[2] - 1.125f) < 1e-4f);  // halfway back
+        CHECK(!render::light_pulse_rgb(p, 10.125, base, o) && o[2] == 1.0f && !render::light_pulse_rgb(p, 9.9, base, o));  // over
+        p.type = 3;  // Smooth_Pulse, N = 2 over 1 s: peaks at 0.25 s and 0.75 s
+        p.duration = 1.0f;
+        p.pulses = 2;
+        p.c1[0] = 3.0f;
+        CHECK(render::light_pulse_rgb(p, 10.25, base, o) && std::fabs(o[0] - 3.0f) < 1e-4f);
+        CHECK(render::light_pulse_rgb(p, 10.5, base, o) && std::fabs(o[0] - 1.0f) < 1e-4f);
+        p.type = 2;  // Linear_Pulse: the triangle peaks at the half period
+        CHECK(render::light_pulse_rgb(p, 10.25, base, o) && std::fabs(o[0] - 3.0f) < 1e-4f);
+        p.type = 4;  // Two_Way_Pulse: the second half of each pulse goes to C2
+        p.c2[0] = 0.0f;
+        CHECK(render::light_pulse_rgb(p, 10.375, base, o) && std::fabs(o[0] - 0.0f) < 1e-4f);
+        p.type = 5;  // Continuous_Smooth_Pulse never ends, starts at B
+        CHECK(render::light_pulse_rgb(p, 10.0, base, o) && std::fabs(o[0] - 1.0f) < 1e-4f && render::light_pulse_rgb(p, 99.0, base, o));
+    }
     {  // mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md): Mouse_Over_Highlight_Scale 1.5 -> a hovered object up to 1.5x brighter
         // ledger: verifies GameConstants.Mouse_Over_Highlight_Scale
         CHECK(render::SimInstanceBuilder::hover_brighten(1.5f, 1.0f) == 1.5f && render::SimInstanceBuilder::hover_brighten(1.5f, 0.0f) == 1.0f);

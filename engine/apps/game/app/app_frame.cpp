@@ -114,6 +114,7 @@ bool App::render_frame() {
         // cu9g t03 bombing-run blob; ui3 t04: the reinforcement drop preview takes the same slot (one pick at a time).
         bview_.set_bombing_blob(screen_ != Screen::Battle ? std::nullopt : bombing_targeting_ ? bombing_blob_ : reinforce_blob_);
         const auto prep0 = Clock::now();
+        bview_.set_pulse_time(now_s_);  // mcx4 t15: light effects run on wall time
         bview_.prepare(gpu_, render_alpha());
         ft_.prepare += static_cast<float>(ms_since(prep0));
         bview_.use_scene(gpu_);

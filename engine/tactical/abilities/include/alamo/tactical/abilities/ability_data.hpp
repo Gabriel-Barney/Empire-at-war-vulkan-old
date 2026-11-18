@@ -78,6 +78,17 @@ struct UnitAbilityRecord {
 
 // One special ability (<Tractor_Beam_Attack_Ability Name="...">, ...). Only the fields of the
 // classes this module implements are interpreted; the rest are ignored.
+// mcx4 t15 (presentation only; MCX4_T15_RE_ANSWERS "Force_Healing_Ability.Owner_Light_Effect_Type family": the base
+// special ability table, every ability; MCX4_PRES_RE_ANSWERS_2 Q7): a model colour pulse. type 0 none, 1 Color_Flash,
+// 2 Linear_Pulse, 3 Smooth_Pulse, 4 Two_Way_Pulse, 5 Continuous_Smooth_Pulse.
+struct LightEffectDesc {
+    uint8_t type = 0;
+    float color[3] = {1.0f, 1.0f, 1.0f}, color2[3] = {1.0f, 1.0f, 1.0f};
+    float duration = 0.0f;
+    int32_t pulses = 1;
+};
+uint8_t light_effect_type_from_name(std::string_view name);  // "" / unknown -> 0; a number is taken as is (0..6)
+
 struct SpecialAbilityDesc {
     std::string name;
     uint32_t name_crc = 0;  // name_crc(name), matched against UnitAbilityRecord::gui_name_crc
@@ -96,6 +107,7 @@ struct SpecialAbilityDesc {
     float damage_per_frame = 0.0f;               // energy weapon
     float duration_secs = 0.0f;                  // Duration_In_Secs (jamming fallback)
     float stealth_transition_time = 0.0f;  // parsed, not read by the sim: render-only fade (ABILITY_VISUALS §1.1)
+    LightEffectDesc owner_light, target_light;  // mcx4 t15: Owner_ / Target_Light_Effect_* (presentation only)
     bool must_be_bought_on_black_market = false;
     // laser defense
     float defense_duration = 0.0f, protection_radius = 0.0f, zap_recharge = 0.0f, dist_travelled = 0.0f;

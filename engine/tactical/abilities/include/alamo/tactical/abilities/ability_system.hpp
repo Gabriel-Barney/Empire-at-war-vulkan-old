@@ -168,6 +168,9 @@ struct AbilityActivation {
     ObjectId id = kNoObject;
     ObjectId target = kNoObject;
     uint32_t serial = 0;  // 1, 2, ... in event order (the host's cursor; restarts with a new system)
+    // mcx4 t15: the AbilityData::specials index of the user's special the unit ability forwarded to (its light
+    // effects); UINT32_MAX when none.
+    uint32_t special = 0xFFFFFFFFu;
 };
 // r3h t01 (ABILITIES_HARDPOINTS §4.15): a clip the ability system starts on an object's model (Play_Animation 0x3a92f0 /
 // ModelClass play 0x265560 calls of the special-ability classes), for the host's animation world. The variant is already

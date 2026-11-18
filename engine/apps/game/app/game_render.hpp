@@ -227,6 +227,12 @@ public:
     void set_heal_selection(std::vector<uint32_t> ids) { heal_sel_ = std::move(ids); }
     // mcx4 t14: the object under the cursor (0 = none), brightened by Mouse_Over_Highlight_Scale. Set before prepare().
     void set_hover(uint32_t id) { hover_ = id; }
+    // mcx4 t15 (MCX4_PRES_RE_ANSWERS_2 Q7): start an object light effect at wall time `now`, unless one is running on
+    // the object (0x48e4d0: a running pulse is not replaced). set_pulse_time sets the clock of the next prepare().
+    void start_light_pulse(uint32_t id, render::LightPulse p, double now);
+    void set_pulse_time(double now) { pulse_now_ = now; }
+    float shield_flash_duration() const { return shield_flash_duration_; }
+    const float* shield_flash_color() const { return shield_flash_color_; }
     // cu9g t03: the bombing-run targeting blob of this frame (HUD_GAPS §9.5; nullopt = none). Set before prepare().
     void set_bombing_blob(const std::optional<render::JamBlob>& blob) { bombing_blob_ = blob; }
     // ui2 t08 (STORY_PRESENTATION_LUA.md 4.1 / 4.2): the story script's Play_Lightning_Effect bolts of this frame (extra beams
@@ -294,6 +300,10 @@ private:
     std::vector<render::SimWorldEffect> world_fx_;  // vis1 t08: decoration effects + the frame's (shield penetration)
     std::vector<uint32_t> heal_sel_;                  // vis1 t08: set_heal_selection
     uint32_t hover_ = 0;                              // mcx4 t14: set_hover
+    std::map<uint64_t, render::LightPulse> pulses_;   // mcx4 t15: running object light effects
+    double pulse_now_ = 0.0;
+    float shield_flash_duration_ = 0.1f;              // GameConstants Shield_Flash_Duration
+    float shield_flash_color_[3] = {1.0f, 1.1f, 1.25f};  // GameConstants Shield_Flash_Scale
     float hover_scale_ = 1.5f;                        // GameConstants Mouse_Over_Highlight_Scale
     std::vector<render::Instance> bg_;
     render::SimInstanceStats istats_;

@@ -415,7 +415,14 @@ void AbilitySystem::event(AbilityEventKind k, uint8_t type, ObjectId id, ObjectI
     if (k == AbilityEventKind::EffectOn) {  // aud1 t10: the presentation copy (never read by the sim)
         if (!activations_.empty() && activations_.front().frame + kVisualKeepFrames < frame)
             std::erase_if(activations_, [frame](const AbilityActivation& v) { return v.frame + kVisualKeepFrames < frame; });
-        activations_.push_back({frame, type, id, target, ++activation_serial_});
+        uint32_t special = 0xFFFFFFFFu;  // mcx4 t15: the special the unit ability forwarded to (light effects)
+        if (const Obj* o = obj(id))
+            for (const SpecialState& sp : o->specials)
+                if (sp.trigger == type) {
+                    special = sp.desc;
+                    break;
+                }
+        activations_.push_back({frame, type, id, target, ++activation_serial_, special});
     }
 }
 

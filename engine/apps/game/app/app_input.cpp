@@ -288,6 +288,36 @@ void App::post_tick() {
                     win_banner_color_ = won ? hud_consts_.win_message_color : hud_consts_.lose_message_color;  // ledger: consumes GameConstants.Lose_Message_Color
                 }
             }
+            {  // mcx4 t15 (MCX4_PRES_RE_ANSWERS_2 Q7): object light effects - the ability's owner / target effect at its
+               // activation (0x48e4d0 / 0x48e880) and the shield hit flash (0x549ac0, a hit the shields absorbed).
+                const auto to_pulse = [](const tactical::abilities::LightEffectDesc& l) {
+                    render::LightPulse p;
+                    p.type = l.type;
+                    std::copy(l.color, l.color + 3, p.c1);
+                    std::copy(l.color2, l.color2 + 3, p.c2);
+                    p.duration = l.duration;
+                    p.pulses = l.pulses;
+                    return p;
+                };
+                const auto& ab = b->abilities();
+                for (const tactical::abilities::AbilityActivation& a : ab.activation_events()) {
+                    if (a.serial <= pulse_activation_seen_) continue;
+                    pulse_activation_seen_ = a.serial;
+                    const tactical::abilities::SpecialAbilityDesc* d = ab.special_desc(a.special);
+                    if (!d) continue;
+                    bview_.start_light_pulse(static_cast<uint32_t>(a.id), to_pulse(d->owner_light), now_s_);
+                    if (a.target != tactical::abilities::kNoObject)
+                        bview_.start_light_pulse(static_cast<uint32_t>(a.target), to_pulse(d->target_light), now_s_);
+                }
+                for (const tactical::combat::DamageEvent& dmg : b->combat().damage_events())
+                    if (dmg.absorbed > 0.0f && dmg.hardpoint != tactical::combat::kHardpointBaseShieldDome) {
+                        render::LightPulse p;
+                        p.type = 1;  // Color_Flash
+                        std::copy(bview_.shield_flash_color(), bview_.shield_flash_color() + 3, p.c1);
+                        p.duration = bview_.shield_flash_duration();
+                        bview_.start_light_pulse(static_cast<uint32_t>(dmg.victim), p, now_s_);
+                    }
+            }
             audio_.battle_tick(*b, st, data_.types, local_player(),
                                [gs](objects::ObjectId id) { return gs->script_hidden(id); });  // q6 t19 §10.3
             {  // aud1 t07 (AUDIO.md §9.7): the tactical intro speech, campaign battles only, not story-linked ones.

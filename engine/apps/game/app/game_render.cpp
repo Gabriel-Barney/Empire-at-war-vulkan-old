@@ -6,6 +6,7 @@
 
 #include "alamo/core/ascii.hpp"
 #include "alamo/core/host_fs.hpp"
+#include "alamo/data/values.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/game/mod_check.hpp"  // modc t36: prebuild_mod_effects
 #include "alamo/render/galactic/galactic_session.hpp"
@@ -382,6 +383,12 @@ bool BattleView::start(GpuCore& gpu, const GameData& data, const GameSession& se
     types_ = &data.types;
     // ledger: consumes GameConstants.Mouse_Over_Highlight_Scale
     hover_scale_ = data.db.constants().get_float("Mouse_Over_Highlight_Scale", 1.5f);
+    pulses_.clear();  // mcx4 t15: shield hit flash (T14 "GameConstants.Shield_Flash_Duration family")
+    shield_flash_duration_ = data.db.constants().get_float("Shield_Flash_Duration", 0.1f);  // ledger: consumes GameConstants.Shield_Flash_Duration
+    if (const auto v = data.db.constants().get("Shield_Flash_Scale")) {  // ledger: consumes GameConstants.Shield_Flash_Scale
+        float c[3];
+        if (data::parse_floats(*v, c, 3) == 3) std::copy(c, c + 3, shield_flash_color_);
+    }
     lob_chargeups_.clear();
     ability_fx_.reset();  // vis1 t06
     local_ = session.local_player();
@@ -602,6 +609,15 @@ bool BattleView::kill_nearest_move_ack(ui::Vec3 p) {
 #endif
 }
 
+void BattleView::start_light_pulse(uint32_t id, render::LightPulse p, double now) {
+    if (p.type == 0 || id == 0) return;
+    const float one[3] = {1.0f, 1.0f, 1.0f};
+    float scratch[3];
+    if (const auto it = pulses_.find(id); it != pulses_.end() && render::light_pulse_rgb(it->second, now, one, scratch)) return;
+    p.start = now;
+    pulses_[id] = p;
+}
+
 void BattleView::stop(GpuCore& gpu) {
     acks_.clear();
     lob_chargeups_.clear();
@@ -785,6 +801,12 @@ void BattleView::prepare(GpuCore& gpu, float alpha) {
         if (blocking_models_) gpu.streamer->finish_pending();
         builder_->set_blob_shadow_detail(space_ ? -1 : shadow_detail_);  // vis1 t02: blob types drop their shadow volume
         builder_->set_hover(hover_ ? static_cast<objects::ObjectId>(hover_) : objects::kNoObjectId, hover_scale_);  // mcx4 t14
+        {  // mcx4 t15: drop the finished light effects, hand the rest to the builder
+            const float one[3] = {1.0f, 1.0f, 1.0f};
+            float scratch[3];
+            std::erase_if(pulses_, [&](const auto& kv) { return !render::light_pulse_rgb(kv.second, pulse_now_, one, scratch); });
+            builder_->set_light_pulses(pulses_.empty() ? nullptr : &pulses_, pulse_now_);
+        }
         builder_->build(frame_, *models_, main, bg_, &istats_);
         stats_.drawn = istats_.drawn;
         stats_.fog_hidden = istats_.fog_hidden;

@@ -45,6 +45,28 @@ void note(std::vector<std::string>* diag, const data::XmlNode& e, std::string ms
 // mcx1 t02 / t03 (MCX1_RE_ANSWERS Q1 / Q2): the ability sub-objects read every direct child (nested elements are not
 // descended into), a repeated tag's last occurrence wins, an empty value changes nothing and TBD is converted like any
 // value (a TBD bool is true, a TBD number 0). Values convert by retail's rules: bool "1" or a first Y / T, atoi, atof.
+}  // namespace
+
+uint8_t light_effect_type_from_name(std::string_view name) {
+    std::string_view s = name;
+    while (!s.empty() && (s.front() == ' ' || s.front() == '\t' || s.front() == '\r' || s.front() == '\n')) s.remove_prefix(1);
+    while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n')) s.remove_suffix(1);
+    if (s.size() == 1 && s[0] >= '0' && s[0] <= '6') return static_cast<uint8_t>(s[0] - '0');
+    static constexpr std::string_view kNames[] = {"None", "Color_Flash", "Linear_Pulse", "Smooth_Pulse", "Two_Way_Pulse",
+                                                  "Continuous_Smooth_Pulse"};
+    for (uint8_t i = 0; i < 6; ++i)
+        if (s.size() == kNames[i].size()) {
+            bool eq = true;
+            for (size_t k = 0; k < s.size() && eq; ++k) {
+                const auto lo = [](char c) { return c >= 'A' && c <= 'Z' ? static_cast<char>(c - 'A' + 'a') : c; };
+                eq = lo(s[k]) == lo(kNames[i][k]);
+            }
+            if (eq) return i;
+        }
+    return 0;
+}
+
+namespace {
 std::string_view last_text(const data::XmlNode& e, std::string_view tag) {
     return data::xml_values::text(e, tag, data::xml_values::kAbility);
 }
@@ -441,6 +463,27 @@ SpecialAbilityDesc parse_special_ability(const data::XmlNode& e, const AbilityRe
     s.duration_secs = f_or(e, "Duration_In_Secs", 0.0f);
     s.force_sight_duration = f_or(e, "Force_Sight_Duration_In_Secs", 0.0f);  // fog follow-up
     s.stealth_transition_time = f_or(e, "Stealth_Transition_Time", 0.0f);
+    {  // mcx4 t15: the owner's and the target's light effect (0x48e4d0 / 0x48e880), every special ability
+        const auto light = [&e](LightEffectDesc& l, std::string_view type_tag, std::string_view color_tag, std::string_view color2_tag,
+                                std::string_view duration_tag, std::string_view pulses_tag) {
+            l.type = light_effect_type_from_name(last_text(e, type_tag));
+            float c[3];
+            if (data::parse_floats(last_text(e, color_tag), c, 3) == 3) std::copy(c, c + 3, l.color);
+            if (data::parse_floats(last_text(e, color2_tag), c, 3) == 3) std::copy(c, c + 3, l.color2);
+            l.duration = f_or(e, duration_tag, 0.0f);
+            l.pulses = i_or(e, pulses_tag, 1);
+        };
+        light(s.owner_light, "Owner_Light_Effect_Type",
+              "Owner_Light_Effect_Color",
+              "Owner_Light_Effect_Color2",
+              "Owner_Light_Effect_Duration",
+              "Owner_Light_Effect_Pulse_Count");
+        light(s.target_light, "Target_Light_Effect_Type",
+              "Target_Light_Effect_Color",
+              "Target_Light_Effect_Color2",
+              "Target_Light_Effect_Duration",
+              "Target_Light_Effect_Pulse_Count");
+    }
     s.must_be_bought_on_black_market = b_or(e, "Must_Be_Bought_On_Black_Market", false);
     s.defense_duration = f_or(e, "Defense_Duration_In_Secs", 0.0f);
     s.protection_radius = f_or(e, "Protection_Radius", 0.0f);
