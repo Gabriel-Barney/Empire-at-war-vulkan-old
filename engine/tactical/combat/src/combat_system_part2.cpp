@@ -1684,7 +1684,7 @@ void CombatSystem::infect(Unit& v, int32_t desc, int32_t player, ObjectId source
     v.infect_left = 0;
     if (v.infect_desc >= 0)
         v.infect_left = trunc_i32(static_cast<float>(cfg_.fps) *
-                                             data_->units[static_cast<size_t>(v.infect_desc)].infection.duration_secs);
+                                  data_->units[static_cast<size_t>(v.infect_desc)].infection.duration_secs);
     if (v.infect_suspend == 0) v.flags |= kUnitInfected;
 }
 
