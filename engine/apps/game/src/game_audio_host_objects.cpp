@@ -81,6 +81,15 @@ std::string_view GameAudioHost::unit_ability_line(const objects::GameObjectTypes
     return {};
 }
 
+std::string_view GameAudioHost::special_line(const objects::GameObjectTypes& types, objects::TypeIndex t, std::string_view element,
+                                             std::string_view field) {
+    if (t >= types.size()) return {};
+    const objects::ObjectTypeDatabase& db = types.raw();
+    for (const objects::FieldIndex f : types.get_sub_objects(t, "Abilities"))
+        if (ascii_iequals(db.tag_name(f), element)) return ascii_trim(child_text(db, f, field));
+    return {};
+}
+
 bool GameAudioHost::plays_target_ability_line(uint8_t a) {
     return a == 19 || (a >= 23 && a <= 26) || a == 28 || a == 35 || a == 36 || a == 42 || a == 39;
 }
@@ -221,6 +230,28 @@ void GameAudioHost::object_events(const sim::TacticalBattle& battle, const objec
     };
     // Abilities: EffectOn = the activation presentation (light, particle, sound), event order (aud1 t10: the kept copy).
     ability_activations(battle.abilities().activation_events(), store, types);
+    // mcx4 t13 (MCX4_T13_RE_ANSWERS "Laser_Defense_Ability.Zap_SFXEvent", "Tactical_Bribe_Ability.SFXEvent_Success
+    // family"): a laser-defense zap, a refused bribe and a paid bribe play the ability's line attached to the user; any owner.
+    for (const tactical::abilities::AbilityEvent& e : battle.abilities().events()) {
+        using K = tactical::abilities::AbilityEventKind;
+        std::string_view element, field;
+        if (e.kind == K::Zap) {
+            element = "Laser_Defense_Ability";
+            field = "Zap_SFXEvent";  // ledger: consumes Laser_Defense_Ability.Zap_SFXEvent
+        } else if (e.kind == K::BribeRefused) {
+            element = "Tactical_Bribe_Ability";
+            field = "SFXEvent_Fail";  // ledger: consumes Tactical_Bribe_Ability.SFXEvent_Fail
+        } else if (e.kind == K::BribeApplied) {
+            element = "Tactical_Bribe_Ability";
+            field = "SFXEvent_Success";  // ledger: consumes Tactical_Bribe_Ability.SFXEvent_Success
+        } else {
+            continue;
+        }
+        const objects::ObjectHandle h = store.find(static_cast<objects::ObjectId>(e.id));
+        if (!store.alive(h)) continue;
+        const std::string_view ev = special_line(types, store.type(h), element, field);
+        if (!ev.empty() && game_->object_sfx(static_cast<uint64_t>(e.id), ev, store.position(h)) != 0) ++stats_.ability_lines;
+    }
     // Hyperspace: the battle's append-only log from our cursor (a shorter log = a new battle or a load). An Arrive of a
     // reinforcement held in hyperspace (LINK_TACTICAL Param9 = 2) is logged only after the script's Resume_Hyperspace_In
     // clears the hold (TacticalBattle::arrival_held; L1_S4_REMAINING §3.4, 0x543570):

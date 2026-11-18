@@ -771,6 +771,9 @@ void test_battle_hookups_aud1() {
 }
 #endif
 
+// ledger: verifies Laser_Defense_Ability.Zap_SFXEvent
+// ledger: verifies Tactical_Bribe_Ability.SFXEvent_Success
+// ledger: verifies Tactical_Bribe_Ability.SFXEvent_Fail
 // ledger: verifies Unit_Ability.SFXEvent_GUI_Unit_Ability_Activated
 // ledger: verifies Unit_Ability.SFXEvent_GUI_Unit_Ability_Deactivated
 // ledger: verifies Unit_Ability.SFXEvent_Target_Ability
@@ -796,6 +799,9 @@ void test_object_sfx_t05() {
     <Abilities SubObjectList="Yes">
       <Stealth_Ability Name="Hide"><SFXEvent_Activate> Unit_Stealth_On </SFXEvent_Activate></Stealth_Ability>
       <Force_Healing_Ability Name="Heal2"><SFXEvent_Activate>Heal_On</SFXEvent_Activate></Force_Healing_Ability>
+      <Laser_Defense_Ability Name="Zapper"><Zap_SFXEvent> Laser_Zap </Zap_SFXEvent></Laser_Defense_Ability>
+      <Tactical_Bribe_Ability Name="Bribe"><SFXEvent_Success>Bribe_Yes</SFXEvent_Success><SFXEvent_Fail>Bribe_No</SFXEvent_Fail>
+      </Tactical_Bribe_Ability>
     </Abilities>
   </SpaceUnit>
   <SpaceUnit Name="Healer">
@@ -829,6 +835,11 @@ void test_object_sfx_t05() {
     CHECK(H::unit_ability_line(types, hero, ta::kSprint, "SFXEvent_Target_Ability") == "Sprint_Target");
     CHECK(H::unit_ability_line(types, healer, ta::kStealth, "SFXEvent_GUI_Unit_Ability_Activated").empty());
     CHECK(H::plays_target_ability_line(19) && H::plays_target_ability_line(39) && !H::plays_target_ability_line(ta::kStealth));
+    // "Laser_Defense_Ability.Zap_SFXEvent" / "Tactical_Bribe_Ability.SFXEvent_Success family": the ability element's field.
+    CHECK(H::special_line(types, hero, "Laser_Defense_Ability", "Zap_SFXEvent") == "Laser_Zap");
+    CHECK(H::special_line(types, hero, "Tactical_Bribe_Ability", "SFXEvent_Success") == "Bribe_Yes");
+    CHECK(H::special_line(types, hero, "Tactical_Bribe_Ability", "SFXEvent_Fail") == "Bribe_No");
+    CHECK(H::special_line(types, healer, "Laser_Defense_Ability", "Zap_SFXEvent").empty());
     // "Faction.SFXEvent_GUI_Toggle_Non_Hero_Ability_On family": own / ally issuer -> the plain line, hostile -> _Enemy_.
     CHECK(H::toggle_line_tag(true, false) == "SFXEvent_GUI_Toggle_Non_Hero_Ability_On");
     CHECK(H::toggle_line_tag(false, false) == "SFXEvent_GUI_Toggle_Non_Hero_Ability_Off");

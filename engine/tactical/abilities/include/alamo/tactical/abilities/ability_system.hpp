@@ -131,6 +131,9 @@ enum class AbilityEventKind : uint8_t {
     // Owner_Attachment_Bone (0x392160) and its LANDING behaviour starts (the rope slide down, Rope Land); the host drops
     // the bone attachment. The trooper stays movement-locked until its landing ends (`value` = that frame).
     TrooperReleased,
+    // mcx4 t13 (presentation; MCX4_T13_RE_ANSWERS "Tactical_Bribe_Ability.SFXEvent_Success family", 0x5b07c0): the bribe
+    // was paid for and the target `target` is converted; `id` the user.
+    BribeApplied,
 };
 
 // StopOrder `value` (cu8j t02, MOVEMENT §4.7.2 / §4.7.5): a plain stop; the stop-and-hold 0x3a9880 (leave every

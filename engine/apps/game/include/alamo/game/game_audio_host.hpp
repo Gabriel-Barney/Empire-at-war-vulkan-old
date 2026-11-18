@@ -245,6 +245,10 @@ public:
     // The instant target / area abilities whose activation 0x3a3e20 plays the record's SFXEvent_Target_Ability
     // (types 19, 23..26, 28, 35, 36, 42 and SELF_DESTRUCT 39).
     static bool plays_target_ability_line(uint8_t ability_type);
+    // mcx4 t13: `field` of the type's first <Abilities> entry whose element is `element` (e.g. Laser_Defense_Ability
+    // Zap_SFXEvent), "" when none.
+    static std::string_view special_line(const objects::GameObjectTypes& types, objects::TypeIndex t, std::string_view element,
+                                         std::string_view field);
     // mcx4 t13 (MCX4_T13_RE_ANSWERS "Faction.SpeechEvent_Super_Weapon_Moving_Range_60_Seconds family", 0x42b560): the
     // highest of 60 / 30 / 15 / 5 s that the TSW's ETA crossed between two services (prev > t >= now), 0 for none; and
     // the local faction's speech tag for a threshold (0 = moved into range), the _Enemy_ form for an enemy TSW.

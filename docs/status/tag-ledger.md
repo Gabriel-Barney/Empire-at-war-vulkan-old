@@ -13,7 +13,7 @@ the field belongs to another class that the port reads, `docs/re/XML_FIELD_TABLE
 `stored` tag that a mod sets is an
 honour gap in `alamo_mod_check` report v4. Work order (§7.2): tier 1 with the most corpus mods, then base FoC uses.
 
-Totals: 2866 rows; unread 125, stored 410, consumed 1938, verified 191, retail-unused 127, out-of-scope 69, misfiled 6.
+Totals: 2866 rows; unread 125, stored 407, consumed 1938, verified 194, retail-unused 127, out-of-scope 69, misfiled 6.
 
 ## Per class
 
@@ -49,7 +49,7 @@ Totals: 2866 rows; unread 125, stored 410, consumed 1938, verified 191, retail-u
 | RadarMapSettings | 14 | 7 | 0 | 7 | 0 | 0 | 0 | 0 |
 | Battlefield_Modifier_Ability | 13 | 0 | 1 | 12 | 0 | 0 | 0 | 0 |
 | Cable_Ability | 12 | 0 | 5 | 6 | 0 | 1 | 0 | 0 |
-| Laser_Defense_Ability | 12 | 0 | 1 | 10 | 0 | 1 | 0 | 0 |
+| Laser_Defense_Ability | 12 | 0 | 0 | 10 | 1 | 1 | 0 | 0 |
 | Move_Action | 12 | 0 | 11 | 1 | 0 | 0 | 0 | 0 |
 | Siphon_Credits_Ability | 12 | 0 | 4 | 7 | 1 | 0 | 0 | 0 |
 | Decal | 11 | 3 | 0 | 8 | 0 | 0 | 0 | 0 |
@@ -66,7 +66,7 @@ Totals: 2866 rows; unread 125, stored 410, consumed 1938, verified 191, retail-u
 | Grenade_Attack_Ability | 8 | 0 | 3 | 5 | 0 | 0 | 0 | 0 |
 | Income_Stream_Mod_Ability | 8 | 0 | 2 | 6 | 0 | 0 | 0 | 0 |
 | SpaceProp | 8 | 0 | 0 | 8 | 0 | 0 | 0 | 0 |
-| Tactical_Bribe_Ability | 8 | 0 | 5 | 3 | 0 | 0 | 0 | 0 |
+| Tactical_Bribe_Ability | 8 | 0 | 3 | 3 | 2 | 0 | 0 | 0 |
 | MusicEvent | 7 | 0 | 0 | 7 | 0 | 0 | 0 | 0 |
 | Slicer_Ability | 7 | 0 | 0 | 7 | 0 | 0 | 0 | 0 |
 | Eat_Attack_Ability | 6 | 0 | 0 | 4 | 0 | 2 | 0 | 0 |
@@ -321,7 +321,6 @@ base-FoC parity gaps as well as mod gaps (`mcx4`).
 | GameObjectType | Not_Really_Selectable | 0x0 | stored | 2 | docs/re/COMMANDS.md |
 | GameObjectType | Radar_Register_As_Foreground_Object | 0x0 | stored | 2 | docs/re/MCX4_T14_RE_ANSWERS.md |
 | Hack_Ability | Team_Member_With_Ability | 0x1d | stored | 2 | docs/re/MCX4_T10_RE_ANSWERS.md |
-| Laser_Defense_Ability | Zap_SFXEvent | 0x1f | stored | 2 | docs/re/MCX4_T13_RE_ANSWERS.md |
 | Personal_Flame_Thrower_Ability | Damage_Delay_In_Secs | 0x8 | stored | 2 | docs/re/MCX4_T10_RE_ANSWERS.md |
 | Personal_Flame_Thrower_Ability | Flame_Emitter_Model_Name | 0x17 | stored | 2 | docs/re/MCX4_T15_RE_ANSWERS.md |
 | Blast_Ability | Charged_Effect | 0x1d | stored | 1 | docs/re/MCX4_T15_RE_ANSWERS.md |
@@ -528,8 +527,6 @@ base-FoC parity gaps as well as mod gaps (`mcx4`).
 | Tactical_Bribe_Ability | Bribed_Effect | 0x1d | stored | 1 | docs/re/MCX4_T15_RE_ANSWERS.md |
 | Tactical_Bribe_Ability | Bribed_Effect_Small | 0x1d | stored | 1 | docs/re/MCX4_T15_RE_ANSWERS.md |
 | Tactical_Bribe_Ability | Effect_Z_Offset | 0x8 | stored | 1 | docs/re/MCX4_T15_RE_ANSWERS.md |
-| Tactical_Bribe_Ability | SFXEvent_Fail | 0x1f | stored | 1 | docs/re/MCX4_T13_RE_ANSWERS.md |
-| Tactical_Bribe_Ability | SFXEvent_Success | 0x1f | stored | 1 | docs/re/MCX4_T13_RE_ANSWERS.md |
 | Tractor_Beam_Attack_Ability | Inaccuracy_Radius | 0x8 | stored | 1 | docs/re/MCX4_T10_RE_ANSWERS.md |
 | Tractor_Beam_Attack_Ability | SFXEvent_Unit_Summoned | 0x1f | stored | 1 | docs/re/MCX4_T13_RE_ANSWERS.md |
 | Tractor_Beam_Attack_Ability | Start_Lightning_Frame_Number | 0x8 | stored | 1 | docs/re/MCX4_T15_RE_ANSWERS.md |
@@ -803,7 +800,7 @@ Per class: `Tag` (state, consumer files; x = retail-unused, o = out-of-scope, f 
 - **Income_Stream_Mod_Ability**: `Income_Multiplier` (c 1), `Income_Additive_Value` (c 1), `Interval_Multiplier` (s), `Stacking_Category` (c 2), `Target_Stream_Source` (c 1), `Affects_All_Allied_Sources` (s), `Reverse_Application_Logic` (c 1), `Affects_All_Allies` (c 1)
 - **Infection_Ability**: `Shoot_Anim` (x), `Spawn_Frame` (c 1), `Spawn_Bone` (c 1), `Damage_Per_Second` (c 1), `Duration_Of_Infection` (c 1), `Projectile_Type` (c 1), `Infection_CategoryMask` (c 1), `Distance_To_Infect` (c 1), `Infection_Particle` (c 1), `Seconds_To_Infect` (c 1)
 - **Item**: `Uncommon_Price_Multiplier` (c 1), `Faction` (c 10), `Tech_Level` (c 3), `Ability_Names` (c 1), `Base_Cost_Credits` (c 1), `Localized_Name` (c 1), `Localized_Description` (c 2), `Used_By_Units` (c 1), `Tutorial_Tech_Level` (c 1), `Tutorial_Base_Cost_Credits` (c 1)
-- **Laser_Defense_Ability**: `Defense_Duration_In_Secs` (c 1), `Laser_Color` (c 1), `Bone_Names` (c 1), `Projectile_Types_Targeted` (c 1), `Protection_Radius` (c 2), `Laser_Beam_Frames` (c 1), `Laser_Beam_Width` (c 1), `Projectile_Dist_Travelled` (c 1), `Lightning_Effect_Name` (x), `Laser_Beam_Texture` (c 1), `Recharge_Time_In_Secs` (c 1), `Zap_SFXEvent` (s)
+- **Laser_Defense_Ability**: `Defense_Duration_In_Secs` (c 1), `Laser_Color` (c 1), `Bone_Names` (c 1), `Projectile_Types_Targeted` (c 1), `Protection_Radius` (c 2), `Laser_Beam_Frames` (c 1), `Laser_Beam_Width` (c 1), `Projectile_Dist_Travelled` (c 1), `Lightning_Effect_Name` (x), `Laser_Beam_Texture` (c 1), `Recharge_Time_In_Secs` (c 1), `Zap_SFXEvent` (v 1)
 - **Leech_Shields_Ability**: `Beam_Color` (c 1), `Beam_Frames` (c 1), `Beam_Width` (c 1), `Beam_Texture` (c 1), `Time_Reduction_Percentage` (c 1), `Shield_Damage_Per_Second` (c 1), `Damage_Multiplier` (c 2), `Beam_Bone_Name` (c 1), `Beam_Texture_Name` (c 1), `Beam_Effect_Name` (c 1), `Leech_Effect` (s)
 - **LightSource**: `Falloff_Start` (u), `Auto_Destruct_Time` (u), `Auto_Destruct_Fade_Time` (u), `Blob_Radius` (u), `Blob_Color` (u), `Blob_Intensity` (u)
 - **LightningEffect**: `Texture_Repeat` (u), `Texture_Scroll` (u), `Width_Max` (c 1), `Width_Min` (c 1), `Displace` (c 1), `Detail` (c 2), `Color_Start` (c 1), `Color_End` (c 1), `Fadeout_Time_Max` (c 1), `Fadeout_Time_Min` (c 1), `Number_Bolts` (c 1), `Bolt_Creation_Interval_Min` (c 1), `Bolt_Creation_Interval_Max` (c 1), `Radius` (c 1), `Cycles_Per_Distance` (c 1), `Rotations_Per_Second` (c 1), `Update_All` (c 1), `Replace_Faded` (u), `texture_name` (c 1)
@@ -834,7 +831,7 @@ Per class: `Tag` (state, consumer files; x = retail-unused, o = out-of-scope, f 
 - **Super_Laser_Ability**: `Fire_Frame` (c 1), `Attack_Anim_Sub_Index` (c 1), `Beam_Texture_Name` (c 1), `Num_Anim_Frames` (c 1), `Line_Width` (c 1), `Line_Color` (c 1), `Face_Target` (c 1), `Turn_Rate` (c 1), `Firing_Cone` (c 1), `Fire_Delay` (c 1), `Fire_Continuation` (c 2)
 - **System_Spy_Ability**: `Duration_In_Secs` (c 2), `See_Base_Levels` (c 1), `See_Credit_Income` (c 1), `See_Credit_Income_Breakdown` (c 1), `See_Num_Fleets` (c 1), `See_Most_Powerful_Ship` (c 1), `See_Fleet_Contents` (c 1), `See_Num_Ground_Companies` (c 1), `See_Ground_Company_Contents` (c 1), `See_Special_Structures` (c 1), `See_Political_Control` (c 1), `See_Political_Control_Breakdown` (c 1), `See_Current_Production` (c 1), `See_Minor_Stealth_Heroes` (c 1), `See_Major_Stealth_Heroes` (c 1), `See_Force_Sensitive_Heroes` (c 1), `See_Super_Weapons` (c 1), `Blob_Color` (c 1), `Blob_Material_Name` (c 1), `Show_Blob_To_Enemies` (c 1), `Bomb_Type` (c 1)
 - **TacticalCamera**: `Pitch_Default` (c 1), `Pitch_Min` (c 1), `Pitch_Max` (c 1), `Pitch_Per_Mouse_Unit` (c 1), `Pitch_Per_Zoom_Unit` (c 1), `Pitch_When_Zoomed_In` (c 1), `Pitch_Zoom_Begin_Fraction` (c 1), `Yaw_Default` (c 1), `Yaw_Min` (c 1), `Yaw_Max` (c 1), `Yaw_Per_Mouse_Unit` (c 1), `Fov_Default` (c 1), `Fov_Min` (c 1), `Fov_Max` (c 1), `Fov_Per_Mouse_Unit` (c 1), `Fov_Smooth_Time` (c 1), `Distance_Default` (c 1), `Distance_Min` (c 1), `Distance_Max` (c 1), `Distance_Per_Mouse_Unit` (c 1), `Distance_Smooth_Time` (c 1), `Use_Splines` (c 1), `Distance_Spline` (c 1), `Pitch_Spline` (c 1), `Spline_Steps` (c 1), `Spline_Smooth_Time` (c 1), `Tactical_Overview_Distance` (c 1), `Tactical_Overview_Pitch` (c 1), `Tactical_Overview_Fov` (c 1), `Tactical_Overview_Clicks` (c 1), `Tactical_Overview_Click_Time` (c 1), `Tactical_Overview_Distance2` (c 1), `Tactical_Overview_Pitch2` (c 1), `Tactical_Overview_Fov2` (c 1), `Location_Follows_Terrain` (c 1), `Location_Height_Up_Smooth_Time` (c 1), `Location_Height_Down_Smooth_Time` (c 1), `Min_Height_Above_Terrain` (c 1), `Near_Clip` (c 1), `Far_Clip` (c 1), `Object_Fade_Begin` (c 1), `Object_Fade_End` (c 1), `Side_Bounds_Buffer` (c 1), `Top_Bounds_Buffer` (c 1), `Bottom_Bounds_Buffer` (c 1), `Diffuse` (u), `Intensity` (u), `Radius` (u)
-- **Tactical_Bribe_Ability**: `Bribed_Effect` (s), `Bribed_Effect_Small` (s), `Effect_Z_Offset` (s), `SFXEvent_Success` (s), `SFXEvent_Fail` (s), `Detonation_Time_In_Secs` (c 1), `Bomb_Type` (c 1), `Number_Of_Bombs` (c 1)
+- **Tactical_Bribe_Ability**: `Bribed_Effect` (s), `Bribed_Effect_Small` (s), `Effect_Z_Offset` (s), `SFXEvent_Success` (v 1), `SFXEvent_Fail` (v 1), `Detonation_Time_In_Secs` (c 1), `Bomb_Type` (c 1), `Number_Of_Bombs` (c 1)
 - **Tractor_Beam_Attack_Ability**: `Target_Speed_Decrease_Percent` (c 1), `Stacking_Category` (c 2), `Target_Damage_Increase_Percent` (c 1), `Activation_Min_Range` (c 1), `Activation_Max_Range` (c 1), `Damage_Amount` (c 2), `Damage_Application_Time_In_Secs` (x), `Start_Lightning_Frame_Number` (s), `Lightning_Effect_Name` (s), `Catch_Dist` (c 1), `Saber_Name` (c 1), `Force_Cloak_Color` (c 1), `Force_Cloak_Transition_In_Secs` (c 1), `Bounty_Percentage_Amount` (c 1), `Duration_In_Secs` (c 2), `Object_Type` (c 1), `Creation_Delay_In_Seconds` (c 1), `SFXEvent_Unit_Summoned` (s), `Duration_In_Seconds` (c 1), `Shield_Drain_Per_Second` (c 1), `Inaccuracy_Radius` (s)
 - **TradeRoute**: `Point_A` (c 1), `Point_B` (c 1), `Political_Control_Gain` (c 1), `Credit_Gain_Factor` (c 1), `HS_Speed_Factor` (c 1), `Vessel_Speed` (u), `Visible_Line_Name` (c 1), `Width` (c 1), `Color_Zoomed_Out` (c 1), `Color_Zoomed_In` (c 1), `Render_Mode` (c 1), `Texture_Name` (c 1), `Spark_Texture_Name` (c 1), `Color` (c 1), `Space_Position_RightBottom` (u), `Space_Position_LeftTop` (u), `Land_Position_RightBottom` (u), `Land_Position_LeftTop` (u)
 - **Unit_Ability**: `Active_By_Default` (c 1), `Effective_Radius` (c 1), `Recharge_Seconds` (c 1), `Expiration_Seconds` (c 1), `Is_Pulsing` (c 1), `Pulse_Frequency_Secs` (c 1), `Target_Types` (c 1), `Max_Number_Of_Pulses` (c 1), `Particle_Effect` (c 1), `GUI_Activated_Ability_Name` (c 3), `Mod_Multiplier` (c 1), `Mod_Flag` (c 1), `Spawned_Object_Type` (c 1), `Max_Num_Spawned_Objects` (c 1), `Area_Effect_Decal_Distance` (c 1), `Bomb_Countdown_Seconds` (c 1), `Projectile_Types_Override` (c 1), `Targeting_Max_Attack_Distance` (c 3), `Owner_Attachment_Bone` (c 1), `Disable_Movement` (c 1), `Armor_Type` (c 3), `SFXEvent_Target_Ability` (v 1), `SFXEvent_GUI_Unit_Ability_Activated` (v 1), `SFXEvent_GUI_Unit_Ability_Deactivated` (v 1), `SFXEvent_Special_Ability_Loop` (s), `Friendly_Ability` (c 1), `Targeting_Fire_Inaccuracy_Fixed_Radius_Override` (c 1), `Target_Position_Z_Offset` (c 1), `Stop_When_Activated` (c 1), `Alternate_Name_Text` (s), `Alternate_Description_Text` (s), `Alternate_Icon_Name` (c 3), `Must_Be_Bought_On_Black_Market` (c 3), `Damage_Percent_When_Activated` (c 1), `Supports_Autofire` (c 1)
