@@ -31,6 +31,7 @@ add_library(alamo_game_core STATIC
   src/mod_check.cpp
   src/asset_audit.cpp
   src/mod_picker.cpp
+  src/mod_conflicts.cpp
   src/benchmark.cpp
   src/benchmark_scenario.cpp
   src/benchmark_save.cpp
@@ -201,10 +202,13 @@ set_tests_properties(alamo_game_conformance_values_tests PROPERTIES TIMEOUT 120)
 
 # mcx3 t07: the conformance mods stack_dep, stack_cycle and eaw_only (testdata/conformance/stacks: declared and hinted
 # parents, a cycle, two total conversions, a base-EaW tag and the base-EaW heuristic); read only (its own fixture folder).
+# ums1 t06: also the launch-argument table across the picker, alamo_play's resolver and the alamo_mod_check exe (its JSON
+# in its own binary-dir folder).
 add_executable(alamo_game_conformance_stacks_tests tests/test_conformance_stacks.cpp)
-target_link_libraries(alamo_game_conformance_stacks_tests PRIVATE alamo_core alamo_game_core alamo_test_support)
+target_link_libraries(alamo_game_conformance_stacks_tests PRIVATE alamo_core alamo_game_core alamo_play_launch alamo_test_support)
 add_test(NAME alamo_game_conformance_stacks_tests
-         COMMAND alamo_game_conformance_stacks_tests ${CMAKE_CURRENT_SOURCE_DIR}/testdata/conformance/stacks)
+         COMMAND alamo_game_conformance_stacks_tests ${CMAKE_CURRENT_SOURCE_DIR}/testdata/conformance/stacks
+                 $<TARGET_FILE:alamo_mod_check> ${CMAKE_CURRENT_BINARY_DIR}/conformance_stacks_tests)
 set_tests_properties(alamo_game_conformance_stacks_tests PROPERTIES TIMEOUT 120)
 
 # mcx7 t02 / t03: the corpus runner (tools/modcorpus) without game data: grade.py's rules, check-stage sweeps of the
@@ -217,8 +221,7 @@ if(ALAMO_GOLDEN_PYTHON)
   set_tests_properties(alamo_modcorpus_tests PROPERTIES TIMEOUT 300)
 endif()
 
-# modc t08: the mod picker's data side (mod_picker.hpp) on the same read-only fixture; its modinfo.json decoding cases write
-# to their own temp folder (%TEMP%\alamo_mod_picker_tests, no other test uses it).
+# modc t08: the mod picker's data side (mod_picker.hpp) on the same read-only fixture (ums1 t03: the rows are catalog rows).
 add_executable(alamo_game_mod_picker_tests tests/test_mod_picker.cpp)
 target_link_libraries(alamo_game_mod_picker_tests PRIVATE alamo_core alamo_game_core alamo_test_support)
 add_test(NAME alamo_game_mod_picker_tests COMMAND alamo_game_mod_picker_tests ${CMAKE_CURRENT_SOURCE_DIR}/testdata/mod_fixture)
@@ -232,7 +235,7 @@ if(WIN32)
   target_include_directories(alamo_play_launch PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/launcher)
   target_link_libraries(alamo_play_launch PUBLIC alamo_engine_flags PRIVATE alamo_vfs)
   add_executable(alamo_play WIN32 launcher/play_main.cpp)
-  target_link_libraries(alamo_play PRIVATE alamo_play_launch alamo_vfs alamo_core shell32 ole32 user32)
+  target_link_libraries(alamo_play PRIVATE alamo_play_launch alamo_game_core alamo_vfs alamo_core shell32 ole32 user32)  # ums1 t04: the stack resolver
   set_target_properties(alamo_play PROPERTIES OUTPUT_NAME Play)
   add_executable(alamo_play_tests tests/test_play_launch.cpp)
   target_link_libraries(alamo_play_tests PRIVATE alamo_play_launch alamo_test_support)
