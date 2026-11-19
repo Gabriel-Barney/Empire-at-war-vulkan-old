@@ -59,7 +59,7 @@ struct AssetAudit {
     std::map<std::string, AssetFamilyCount> by_family;
 };
 
-// Audits the files `v` serves from its mod layers (Vfs::mod_dirs()).
+// Audits the files `v` serves from its mod layers (vfs::Layer::Kind::Mod, and the MEGs a mod owns).
 AssetAudit audit_mod_assets(const vfs::Vfs& v, const AssetAuditOptions& opt = {});
 // A salvage rule (AssetEntry::rule of a salvaged entry) that retail's behaviour backs: a compat_assets probe verdict or
 // a test of retail's own loader (docs/re/MCX2_T02_ASSET_SALVAGE.md 3-4). Any other salvage keeps G3 open as

@@ -5,11 +5,13 @@ add_library(alamo_vfs STATIC
   src/mod_registry.cpp
   src/install_locations.cpp
   src/mod_environment.cpp
+  src/host_path.cpp
   include/alamo/vfs/vfs.hpp
   include/alamo/vfs/steam_workshop.hpp
   include/alamo/vfs/mod_registry.hpp
   include/alamo/vfs/install_locations.hpp
   include/alamo/vfs/mod_environment.hpp
+  include/alamo/vfs/host_path.hpp
 )
 add_library(alamo::vfs ALIAS alamo_vfs)
 target_include_directories(alamo_vfs PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

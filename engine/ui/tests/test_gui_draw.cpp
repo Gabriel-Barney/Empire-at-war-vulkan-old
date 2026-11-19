@@ -280,7 +280,9 @@ void test_real(Gpu& g, const std::string& src_dir) {
     const ui::CampaignMenu menu = ui::build_campaign_menu(db);
 
     // The EmpireAtWar faces come from the game install (StarWarsG.exe embeds them), as the game host does.
-    std::vector<std::string> font_roots = files->mod_dirs();
+    std::vector<std::string> font_roots;
+    for (const alamo::vfs::Layer& l : files->layers())
+        if (l.kind == alamo::vfs::Layer::Kind::Mod) font_roots.push_back(l.host_root);
     font_roots.push_back(root);
     font_roots.push_back(files->eaw_root());
     ui::register_game_fonts(font_roots);

@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/compat_issue.hpp"
 #include "alamo/core/hash.hpp"
 #include "alamo/core/log.hpp"
@@ -244,6 +245,8 @@ bool path_glob_match(std::string_view pattern, std::string_view path) {
 }
 
 // ------------------------------------------------------------------ command line
+
+bool is_mod_arg(std::string_view arg) { return ascii_istarts_with(arg, "MODPATH=") || ascii_istarts_with(arg, "STEAMMOD="); }
 
 bool parse_command_line(std::span<const std::string> args, VfsConfig& cfg) {
     bool ok = true;

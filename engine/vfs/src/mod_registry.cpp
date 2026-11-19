@@ -15,6 +15,7 @@
 #include <utility>
 
 #include "alamo/core/host_fs.hpp"
+#include "alamo/vfs/host_path.hpp"
 #include "alamo/vfs/install_locations.hpp"
 #include "alamo/meg/meg.h"
 
@@ -252,17 +253,19 @@ bool is_digits(const std::string& s) {
     return !s.empty() && std::all_of(s.begin(), s.end(), [](char c) { return c >= '0' && c <= '9'; });
 }
 
-// A folder's identity for comparisons: absolute (a relative path against the current folder), lexically normal ("." /
-// ".." folded), any case, '/' == '\\', no trailing separator. Junctions and subst drives are not resolved.
-std::string norm_path(const std::string& p) {
-    std::error_code ec;
-    fs::path abs = p.empty() ? fs::path() : fs::absolute(path_from_utf8(p), ec);
-    if (ec) abs = path_from_utf8(p);
-    std::string s = lower(path_to_utf8(abs.lexically_normal()));
-    for (char& c : s)
-        if (c == '/') c = '\\';
-    while (s.size() > 1 && s.back() == '\\') s.pop_back();
-    return s;
+// Every run of ASCII digits in `text`, sorted, each once (ModDescriptor::modinfo_numbers).
+std::vector<std::string> digit_runs(std::string_view text) {
+    std::set<std::string> out;
+    for (size_t i = 0; i < text.size();) {
+        if (text[i] < '0' || text[i] > '9') {
+            ++i;
+            continue;
+        }
+        const size_t b = i;
+        while (i < text.size() && text[i] >= '0' && text[i] <= '9') ++i;
+        out.insert(std::string(text.substr(b, i - b)));
+    }
+    return {out.begin(), out.end()};
 }
 
 }  // namespace
@@ -321,6 +324,33 @@ std::optional<ModInfo> parse_modinfo(std::string_view text, std::vector<std::str
     tags(root.get("tags"));  // uploader files that put steamdata's keys at the top level
     if (m.published_id.empty()) m.published_id = str_of(root.get("publishedfileid"));
     return m;
+}
+
+const char* mod_kind_name(ModKind kind) {
+    switch (kind) {
+        case ModKind::Workshop: return "workshop";
+        case ModKind::LocalMods: return "local";
+        case ModKind::Path: break;
+    }
+    return "path";
+}
+
+const char* game_tag_name(GameTag tag) {
+    switch (tag) {
+        case GameTag::Foc: return "FOC";
+        case GameTag::Eaw: return "EAW";
+        case GameTag::Unknown: break;
+    }
+    return "";
+}
+
+std::string StackMod::reason_text() const {
+    switch (reason) {
+        case StackReason::Picked: break;
+        case StackReason::Dependency: return "dependency of " + of;
+        case StackReason::LikelyParent: return "likely parent of " + of;
+    }
+    return "picked";
 }
 
 std::string ModDescriptor::key() const { return variant.empty() ? id : id + ":" + variant; }
@@ -408,6 +438,7 @@ std::vector<ModDescriptor> describe_mod_folder(const std::string& root, ModKind 
     const auto read = [&](const fs::path& p, ModDescriptor& d) {
         std::string text;
         if (!read_text(p, text)) return;
+        if (&d == &base) d.modinfo_numbers = digit_runs(text);  // the main modinfo.json's (variants inherit them)
         std::vector<std::string> w;
         const auto m = parse_modinfo(text, &w);
         for (std::string& s : w) d.warnings.push_back(path_to_utf8(p.filename()) + ": " + s);
@@ -444,10 +475,10 @@ ModDescriptor describe_mounted_mod(const std::string& dir, const std::string& ga
     fs::path leaf = p;
     if (!leaf.has_filename()) leaf = leaf.parent_path();
     const std::string id = path_to_utf8(leaf.filename());
-    const std::string parent = norm_path(path_to_utf8(leaf.parent_path()));
+    const std::string parent = folder_key(path_to_utf8(leaf.parent_path()));
     ModKind kind = ModKind::Path;
     if (is_digits(id) && lower(path_to_utf8(leaf.parent_path().filename())) == "32470") kind = ModKind::Workshop;
-    else if (parent == norm_path(path_to_utf8((path_from_utf8(game) / "Mods").lexically_normal()))) kind = ModKind::LocalMods;
+    else if (parent == folder_key(path_to_utf8((path_from_utf8(game) / "Mods").lexically_normal()))) kind = ModKind::LocalMods;
     std::vector<ModDescriptor> ds = describe_mod_folder(path_to_utf8(leaf), kind, id, hash);
     if (ds.empty()) {
         ModDescriptor d;
@@ -460,25 +491,19 @@ ModDescriptor describe_mounted_mod(const std::string& dir, const std::string& ga
 }
 
 const ModDescriptor* ModCatalog::find_key(std::string_view key) const {
-    const auto norm = [](std::string s) {  // any case, '/' == '\\'
-        s = lower(std::move(s));
-        for (char& c : s)
-            if (c == '/') c = '\\';
-        return s;
-    };
-    const std::string want = norm(std::string(key));
+    const std::string want = path_key(key);  // any case, '/' == '\\'
     for (const ModDescriptor& m : mods)  // the catalog key first: it is unique across kinds
-        if (norm(m.catalog_key()) == want) return &m;
+        if (path_key(m.catalog_key()) == want) return &m;
     for (const ModDescriptor& m : mods)
-        if (norm(m.key()) == want) return &m;
+        if (path_key(m.key()) == want) return &m;
     return nullptr;
 }
 
 const ModDescriptor* ModCatalog::find_root(std::string_view root) const {
-    const std::string want = norm_path(std::string(root));
+    const std::string want = folder_key(root);
     const ModDescriptor* first = nullptr;  // a folder with variant files only: its first variant
     for (const ModDescriptor& m : mods)
-        if (norm_path(m.root) == want) {
+        if (folder_key(m.root) == want) {
             if (m.variant.empty()) return &m;
             if (!first) first = &m;
         }
@@ -554,7 +579,7 @@ ModCatalog scan_mod_catalog(const InstallLocations& where, bool hash) {
     };
     const auto add = [&](const fs::path& folder, ModKind kind, const std::string& id) {
         const std::string root = path_to_utf8(folder);
-        if (!seen_roots.insert(norm_path(root)).second) return;  // listed already (an extra folder inside Mods)
+        if (!seen_roots.insert(folder_key(root)).second) return;  // listed already (an extra folder inside Mods)
         for (ModDescriptor& d : describe_mod_folder(root, kind, id, hash)) r.mods.push_back(std::move(d));
     };
     std::vector<std::pair<std::string, fs::path>> workshop;  // (id, folder)
@@ -582,13 +607,6 @@ ModCatalog scan_mod_catalog(const InstallLocations& where, bool hash) {
         for (const fs::path& sub : folders(dir, false)) add(sub, ModKind::Path, path_to_utf8(sub.filename()));
     }
     return r;
-}
-
-ModCatalog scan_installed_mods(const std::string& game, std::span<const std::string> workshop_libraries, bool hash) {
-    InstallLocations where;
-    where.foc = game;
-    where.steam_libraries.assign(workshop_libraries.begin(), workshop_libraries.end());
-    return scan_mod_catalog(where, hash);
 }
 
 bool mod_provides(const std::string& root, std::string_view path) {
@@ -633,14 +651,10 @@ std::vector<std::string> ModStack::launch_args() const {
     if (base_eaw) return out;  // D1: refused
     std::set<std::string> seen;  // folders: two variants of one folder, or one folder spelled two ways, mount once
     for (size_t i = 0; i < args.size(); ++i) {
-        const std::string folder = i < mods.size() ? norm_path(mods[i].mod.root) : lower(args[i]);
+        const std::string folder = i < mods.size() ? folder_key(mods[i].mod.root) : path_key(args[i]);
         if (seen.insert(folder).second) out.push_back(args[i]);
     }
     return out;
-}
-
-ModStack resolve_stack(const ModCatalog& registry, std::span<const std::string> picked_args, const ParentHint& hint) {
-    return resolve(registry, picked_args, hint);
 }
 
 ModStack resolve(const ModCatalog& registry, std::span<const std::string> picked_args, const ParentHint& hint) {
@@ -650,11 +664,11 @@ ModStack resolve(const ModCatalog& registry, std::span<const std::string> picked
     std::vector<StackMod> found;                    // discovery order
     std::vector<std::vector<size_t>> deps;          // found index -> found indices it depends on
     std::map<std::string, size_t> index_of;         // lower-case key -> found index
-    const auto key_of = [](const ModDescriptor& m) { return lower(m.catalog_key()); };  // unique across kinds
-    const auto add = [&](const ModDescriptor& m, std::string reason) -> size_t {
+    const auto key_of = [](const ModDescriptor& m) { return path_key(m.catalog_key()); };  // unique across kinds
+    const auto add = [&](const ModDescriptor& m, StackReason reason, std::string of) -> size_t {
         const auto it = index_of.find(key_of(m));
         if (it != index_of.end()) return it->second;
-        found.push_back({m, std::move(reason)});
+        found.push_back({m, reason, std::move(of)});
         deps.emplace_back();
         index_of[key_of(m)] = found.size() - 1;
         return found.size() - 1;
@@ -674,7 +688,7 @@ ModStack resolve(const ModCatalog& registry, std::span<const std::string> picked
             r.errors.push_back("not a mod this install has: " + a);
             continue;
         }
-        enqueue(add(*m, "picked"));
+        enqueue(add(*m, StackReason::Picked, {}));
     }
     // Breadth-first over declared dependencies (nearest ancestor first), the hint for a mod that declares none.
     for (size_t q = 0; q < queue.size(); ++q) {
@@ -690,7 +704,7 @@ ModStack resolve(const ModCatalog& registry, std::span<const std::string> picked
                                          (d.name.empty() ? std::string() : " (" + d.name + ")") + " is not installed");
                     continue;
                 }
-                const size_t j = add(*p, "dependency of " + me_key);
+                const size_t j = add(*p, StackReason::Dependency, me_key);
                 if (std::find(deps[i].begin(), deps[i].end(), j) == deps[i].end()) deps[i].push_back(j);
                 const bool recurse = me.layout == DependencyLayout::ResolveRecursive ||
                                      (me.layout == DependencyLayout::ResolveLastItem && k + 1 == me.dependencies.size());
@@ -702,7 +716,7 @@ ModStack resolve(const ModCatalog& registry, std::span<const std::string> picked
                 if (k != i) stack_args.push_back(found[k].mod.arg());
             if (const auto parent = hint(stack_args)) {
                 if (const ModDescriptor* p = registry.find_arg(*parent, scratch)) {
-                    const size_t j = add(*p, "likely parent of " + me_key);
+                    const size_t j = add(*p, StackReason::LikelyParent, me_key);
                     if (j != i && std::find(deps[i].begin(), deps[i].end(), j) == deps[i].end()) deps[i].push_back(j);
                     enqueue(j);
                 }

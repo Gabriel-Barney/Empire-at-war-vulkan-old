@@ -11,6 +11,7 @@
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/host_fs.hpp"
 #include "alamo/core/hash.hpp"
+#include "alamo/vfs/host_path.hpp"
 
 #include <windows.h>
 
@@ -43,20 +44,10 @@ std::string join(std::string_view a, std::string_view b) {
     return out;
 }
 
-// Comparison key: upper case ASCII, '/' -> '\\', no trailing separator.
-std::string key_of(std::string_view p) {
-    std::string k = strip_sep(std::string(p));
-    for (char& c : k) {
-        if (c == '/') c = '\\';
-        else if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
-    }
-    return k;
-}
-
 void add_unique(std::vector<std::string>& out, std::vector<std::string>& keys, std::string p) {
     p = strip_sep(std::move(p));
     if (p.empty()) return;
-    std::string k = key_of(p);
+    std::string k = folder_key(p);  // ums4 t04 / t06: the one folder identity rule
     for (const std::string& e : keys)
         if (e == k) return;
     keys.push_back(std::move(k));
@@ -129,15 +120,6 @@ void add_vdf_libraries(const std::string& vdf_path, std::vector<std::string>& ou
     for (std::string& p : parse_steam_library_folders(text)) add_unique(out, keys, std::move(p));
 }
 
-std::string to_utf8(const std::wstring& w) {
-    if (w.empty()) return {};
-    const int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
-    if (n <= 0) return {};
-    std::string s(static_cast<size_t>(n), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), s.data(), n, nullptr, nullptr);
-    return s;
-}
-
 // A REG_SZ value, read only (RegGetValueW). "" when absent.
 std::string registry_string(HKEY root, const wchar_t* subkey, const wchar_t* value) {
     DWORD bytes = 0;
@@ -145,7 +127,7 @@ std::string registry_string(HKEY root, const wchar_t* subkey, const wchar_t* val
     std::wstring w(bytes / sizeof(wchar_t) + 1, L'\0');
     if (RegGetValueW(root, subkey, value, RRF_RT_REG_SZ, nullptr, w.data(), &bytes) != ERROR_SUCCESS) return {};
     w.resize(wcsnlen(w.c_str(), w.size()));
-    return to_utf8(w);
+    return native_utf8(fs::path(w));
 }
 
 std::string env_utf8(const wchar_t* name) {
@@ -154,7 +136,7 @@ std::string env_utf8(const wchar_t* name) {
     std::wstring w(n, L'\0');
     const DWORD got = GetEnvironmentVariableW(name, w.data(), n);
     w.resize(got < n ? got : 0);
-    return to_utf8(w);
+    return native_utf8(fs::path(w));
 }
 
 struct LookupState {

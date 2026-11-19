@@ -1,8 +1,8 @@
 // Mod catalog (mcx3, docs/MOD_COMPAT_DESIGN.md 5; ums1 t02): one ModDescriptor per installed (folder, variant), built
 // from its folder before anything is mounted, and the stack resolution the launcher, the mod picker and
-// `alamo_mod_check --resolve` use. Every launch surface lists the catalog's rows (ums1, Stage 10): the in-game picker
-// (game::list_installed_mods is an adapter over them), alamo_mod_check --list --json and through it the Command Center.
-// ModRegistry is the catalog's old name, kept as an alias until ums4.
+// `alamo_mod_check --resolve` use. Every launch surface lists the catalog's rows (ums1, Stage 10): the in-game picker,
+// alamo_mod_check --list --json and through it the Command Center. This is the only modinfo.json reader (ums4: the
+// `mod_system_shims` lint in tools/lint keeps it so).
 //
 // Retail stays the authority on what a command line means: MODPATH= / STEAMMOD= entries form one list in command-line
 // order and the earliest wins (docs/MODS.md 3.1). The registry only *builds* such a list before launch (submod first,
@@ -35,6 +35,10 @@ struct InstallLocations;
 enum class ModKind : uint8_t { Workshop, LocalMods, Path };
 enum class GameTag : uint8_t { Unknown, Foc, Eaw };
 enum class DependencyLayout : uint8_t { ResolveRecursive, ResolveLastItem, FullResolved };
+// The JSON spellings (ums4 t04: written once, for every alamo_mod_check writer): "workshop" / "local" / "path";
+// "FOC" / "EAW" / "" (Unknown).
+const char* mod_kind_name(ModKind kind);
+const char* game_tag_name(GameTag tag);
 
 struct ModLanguage {
     std::string code;      // ISO 639-1, lower case ("en", "de")
@@ -78,6 +82,10 @@ struct ModDescriptor {
     GameTag game_tag = GameTag::Unknown;  // from the Steam tags: EAW without FOC = Eaw, FOC = Foc
     uint64_t content_hash = 0;            // mod_content_hash(root)
     std::vector<std::string> warnings;    // modinfo problems
+    // Every digit run of the folder's main modinfo.json text, sorted, each once: the workshop ids a submod names in its
+    // text ("Requires ... 1125571106"), which the load report's submod hint marks as `mentioned` (ums4 t01: read here,
+    // the one modinfo.json reader, instead of by the report).
+    std::vector<std::string> modinfo_numbers;
 
     // "<id>" or "<id>:<variant>": the save header's and the corpus matrix's key (unchanged by ums1).
     std::string key() const;
@@ -118,15 +126,12 @@ struct ModCatalog {
     // STEAMMOD=<id>:<variant>) for the picker to name one variant. nullptr for anything else.
     const ModDescriptor* find_arg(std::string_view arg, std::vector<ModDescriptor>& scratch) const;
 };
-using ModRegistry = ModCatalog;  // the old name (mcx3); removed in ums4
 
 // The catalog of an install: workshop items with a Data folder under each Steam library's content folder (folder name
 // all digits), then the folders of <foc>\Mods with a Data folder, then each of the user's extra mod folders (a folder
 // with a Data folder is one mod, else its sub-folders with one are, by name; kind Path); each mod folder through
 // describe_mod_folder, a folder already listed is skipped. `hash`: compute content hashes.
 ModCatalog scan_mod_catalog(const InstallLocations& where, bool hash = true);
-// The same without extra mod folders (the mcx3 entry point; forwards to scan_mod_catalog until ums4).
-ModCatalog scan_installed_mods(const std::string& game, std::span<const std::string> workshop_libraries, bool hash = true);
 
 // True when `root` replaces `path` (game-relative, e.g. "Data\\XML\\GameObjectFiles.xml"): a loose file, or an entry of
 // a MEG in its Data folder.
@@ -136,9 +141,14 @@ bool mod_provides(const std::string& root, std::string_view path);
 // MODPATH=) of its likely parent from the data (the load report's submod hint), or nullopt. It gets the stack's
 // arguments so far, the mod first.
 using ParentHint = std::function<std::optional<std::string>(const std::vector<std::string>& stack_args)>;
+// Why a mod is in the stack (ums4 t04: an enum; the text is reason_text()).
+enum class StackReason : uint8_t { Picked, Dependency, LikelyParent };
 struct StackMod {
     ModDescriptor mod;
-    std::string reason;  // "picked", "dependency of <catalog key>", "likely parent of <catalog key>" (ums2 t09: messages name mods by catalog_key())
+    StackReason reason = StackReason::Picked;
+    std::string of;  // Dependency / LikelyParent: the catalog key of the mod that needs it (ums2 t09: messages name mods by catalog_key())
+    // "picked", "dependency of <of>", "likely parent of <of>": the report's and the launcher's `reason`.
+    std::string reason_text() const;
 };
 // The resolved stack of the picked mods (ums1 t04: one resolver for every launch surface: the in-game picker's Launch,
 // alamo_play and alamo_mod_check --resolve all start what launch_args() gives).
@@ -154,12 +164,9 @@ struct ModStack {
     // still has an order (discovery order), an unknown argument is left out; the errors are shown beside it.
     std::vector<std::string> launch_args() const;
 };
-using ResolvedStack = ModStack;  // the old name (mcx3); removed in ums4
 // The message the port refuses a base-EaW mod with (D1).
 inline constexpr const char* kBaseEawRefusal = "base-EaW mod: retail runs it with sweaw.exe";
 // `picked_args`: MODPATH= / STEAMMOD= arguments or catalog keys (find_arg), in pick order.
 ModStack resolve(const ModCatalog& catalog, std::span<const std::string> picked_args, const ParentHint& hint = {});
-// The mcx3 name; forwards to resolve until ums4.
-ModStack resolve_stack(const ModCatalog& registry, std::span<const std::string> picked_args, const ParentHint& hint = {});
 
 }  // namespace alamo::vfs

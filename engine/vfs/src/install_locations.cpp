@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "alamo/core/host_fs.hpp"
+#include "alamo/vfs/host_path.hpp"
 #include "alamo/vfs/steam_workshop.hpp"
 
 namespace alamo::vfs {
@@ -30,20 +31,6 @@ std::string trim(std::string_view s) {
     size_t e = s.size();
     while (e > b && space(s[e - 1])) --e;
     return std::string(s.substr(b, e - b));
-}
-
-// The same folder: ASCII case and '/' vs '\\' ignored, no trailing separator (find_steam_libraries' rule).
-bool same_folder(std::string_view a, std::string_view b) {
-    const auto key = [](std::string_view p) {
-        std::string k(p);
-        while (k.size() > 1 && (k.back() == '\\' || k.back() == '/')) k.pop_back();
-        for (char& c : k) {
-            if (c == '/') c = '\\';
-            else if (c >= 'a' && c <= 'z') c = static_cast<char>(c - 'a' + 'A');
-        }
-        return k;
-    };
-    return key(a) == key(b);
 }
 
 // <foc>\..\GameData when it has a Data folder.

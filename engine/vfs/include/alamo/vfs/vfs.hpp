@@ -83,6 +83,9 @@ struct VfsConfig {
 // backslashes are converted for the host. Unknown arguments are ignored. Returns false if a
 // recognised switch had an empty value (the other switches are still applied).
 bool parse_command_line(std::span<const std::string> args, VfsConfig& cfg);
+// A mod argument: MODPATH= or STEAMMOD= (any case). FALLBACKPATH= is not one. The one copy of this test (ums4 t04): the
+// picker, alamo_play and the conflicts check use it.
+bool is_mod_arg(std::string_view arg);
 
 // One layer of the resolution order and where it came from (ums0, docs/MODS.md §3.2 "Layers and provenance"). Every
 // Vfs::Resolution names exactly one layer (Vfs::layer_of); code that asks "did this file come from a mod, and which one"

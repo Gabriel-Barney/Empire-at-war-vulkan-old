@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "alamo/core/host_fs.hpp"
+#include "alamo/vfs/host_path.hpp"
 #include "alamo/vfs/install_locations.hpp"
 #include "alamo/meg/meg.h"
 #include "alamo/vfs/mod_registry.hpp"
@@ -152,9 +153,12 @@ Fixture make_fixture() {
 }
 
 void test_registry(const Fixture& f) {
-    alamo::test::section("scan_installed_mods");
+    alamo::test::section("scan_mod_catalog");
     const std::vector<std::string> libs{u8(f.lib)};
-    const av::ModRegistry r = av::scan_installed_mods(u8(f.game), libs);
+    av::InstallLocations installed;
+    installed.foc = u8(f.game);
+    installed.steam_libraries = libs;
+    const av::ModCatalog r = av::scan_mod_catalog(installed);
     std::vector<std::string> keys;
     for (const auto& m : r.mods) keys.push_back(m.key());
     CHECK(joined(keys) == "100 | 200 | 300 | 400 | 400:subA | 400:subB | 500 | 600:x | AOW | CycA | CycB");
@@ -225,9 +229,12 @@ void test_registry(const Fixture& f) {
 }
 
 void test_resolve(const Fixture& f) {
-    alamo::test::section("resolve_stack");
+    alamo::test::section("resolve");
     const std::vector<std::string> libs{u8(f.lib)};
-    const av::ModRegistry r = av::scan_installed_mods(u8(f.game), libs);
+    av::InstallLocations installed;
+    installed.foc = u8(f.game);
+    installed.steam_libraries = libs;
+    const av::ModCatalog r = av::scan_mod_catalog(installed);
 
     // AOW -> 200 -> 100 from the AOW folder alone, through the data hint (as alamo_mod_check --resolve wires it).
     int asked = 0;
@@ -239,48 +246,48 @@ void test_resolve(const Fixture& f) {
         return std::nullopt;
     };
     const std::vector<std::string> aow{"MODPATH=Mods\\AOW"};
-    const av::ResolvedStack s = av::resolve_stack(r, aow, hint);
+    const av::ModStack s = av::resolve(r, aow, hint);
     CHECK(joined(s.args) == "MODPATH=Mods\\AOW | STEAMMOD=200 | STEAMMOD=100");
     CHECK(s.errors.empty() && !s.base_eaw);
-    CHECK(s.mods.size() == 3 && s.mods[1].reason == "likely parent of Mods\\AOW" && s.mods[2].reason == "likely parent of 200");
+    CHECK(s.mods.size() == 3 && s.mods[1].reason_text() == "likely parent of Mods\\AOW" && s.mods[2].reason_text() == "likely parent of 200");
     CHECK(asked == 3);  // 100 declares nothing either: asked, no answer
     CHECK(s.fingerprint != 0);
     std::printf("  AOW stack: %s\n", joined(s.args).c_str());
     // Same stack, same fingerprint; without the hint only AOW.
-    CHECK(av::resolve_stack(r, aow, hint).fingerprint == s.fingerprint);
-    CHECK(joined(av::resolve_stack(r, aow).args) == "MODPATH=Mods\\AOW");
+    CHECK(av::resolve(r, aow, hint).fingerprint == s.fingerprint);
+    CHECK(joined(av::resolve(r, aow).args) == "MODPATH=Mods\\AOW");
 
     // Declared dependencies: subA -> 100.
     const std::vector<std::string> suba{"400:subA"};
-    const av::ResolvedStack sa = av::resolve_stack(r, suba);
+    const av::ModStack sa = av::resolve(r, suba);
     CHECK(joined(sa.args) == "STEAMMOD=400 | STEAMMOD=100");
-    CHECK(sa.mods.size() == 2 && sa.mods[1].reason == "dependency of 400:subA");
+    CHECK(sa.mods.size() == 2 && sa.mods[1].reason_text() == "dependency of 400:subA");
     // subB -> 500 and a parent that is not installed.
     const std::vector<std::string> subb{"STEAMMOD=400:subB"};
-    const av::ResolvedStack sb = av::resolve_stack(r, subb);
+    const av::ModStack sb = av::resolve(r, subb);
     CHECK(joined(sb.args) == "STEAMMOD=400 | STEAMMOD=500");
     CHECK(has(sb.warnings, "workshop item 999 (Gone) is not installed"));
     CHECK(sb.errors.empty());
 
     // Picked parent before its submod: the submod still goes first (each mod before what it depends on).
     const std::vector<std::string> rev{"STEAMMOD=100", "400:subA"};
-    CHECK(joined(av::resolve_stack(r, rev).args) == "STEAMMOD=400 | STEAMMOD=100");
+    CHECK(joined(av::resolve(r, rev).args) == "STEAMMOD=400 | STEAMMOD=100");
 
     // A cycle is an error naming it.
     const std::vector<std::string> cyc{"MODPATH=Mods\\CycA"};
-    const av::ResolvedStack sc = av::resolve_stack(r, cyc);
+    const av::ModStack sc = av::resolve(r, cyc);
     CHECK(has(sc.errors, "dependency cycle: Mods\\CycA -> Mods\\CycB -> Mods\\CycA"));
     CHECK(sc.mods.size() == 2);
     std::printf("  cycle: %s\n", joined(sc.errors).c_str());
 
     // A base-EaW mod is refused.
     const std::vector<std::string> eaw{"STEAMMOD=300"};
-    const av::ResolvedStack se = av::resolve_stack(r, eaw);
+    const av::ModStack se = av::resolve(r, eaw);
     CHECK(se.base_eaw && has(se.errors, av::kBaseEawRefusal));
 
     // Two total conversions without a dependency between them: a warning naming the one retail runs.
     const std::vector<std::string> two{"STEAMMOD=100", "STEAMMOD=500"};
-    const av::ResolvedStack st = av::resolve_stack(r, two);
+    const av::ModStack st = av::resolve(r, two);
     CHECK(st.errors.empty());
     CHECK(has(st.warnings, "two total conversions in one stack: 100 and 500"));
     // A submod of one of them: no warning between the submod and its parent.
@@ -288,11 +295,11 @@ void test_resolve(const Fixture& f) {
 
     // Unknown argument.
     const std::vector<std::string> bad{"STEAMMOD=31337"};
-    CHECK(has(av::resolve_stack(r, bad).errors, "not a mod this install has: STEAMMOD=31337"));
+    CHECK(has(av::resolve(r, bad).errors, "not a mod this install has: STEAMMOD=31337"));
 
     // In memory: A (FullResolved, deps [B]) and D (ResolveRecursive, deps [B]); B depends on E. B is expanded once,
     // whichever mod reached it first, so E is in the stack.
-    av::ModRegistry m;
+    av::ModCatalog m;
     const auto mod = [&](const char* id, std::vector<const char*> deps, av::DependencyLayout layout) {
         av::ModDescriptor d;
         d.kind = av::ModKind::Workshop;
@@ -306,12 +313,12 @@ void test_resolve(const Fixture& f) {
     mod("2", {"5"}, av::DependencyLayout::ResolveRecursive);
     mod("5", {}, av::DependencyLayout::ResolveRecursive);
     const std::vector<std::string> ad{"STEAMMOD=1", "STEAMMOD=4"};
-    const av::ResolvedStack x = av::resolve_stack(m, ad);
+    const av::ModStack x = av::resolve(m, ad);
     CHECK(joined(x.args) == "STEAMMOD=1 | STEAMMOD=4 | STEAMMOD=2 | STEAMMOD=5");
     std::printf("  expansion: %s\n", joined(x.args).c_str());
     // A parent picked above its submod: reordered, and said.
     const std::vector<std::string> up{"STEAMMOD=2", "STEAMMOD=4"};
-    const av::ResolvedStack u = av::resolve_stack(m, up);
+    const av::ModStack u = av::resolve(m, up);
     CHECK(joined(u.args) == "STEAMMOD=4 | STEAMMOD=2 | STEAMMOD=5");
     CHECK(has(u.warnings, "2 is picked above its submod 4"));
     CHECK(!has(x.warnings, "is picked above"));
@@ -513,12 +520,42 @@ void test_meg() {
 
 }  // namespace
 
+// ums4 t06: a mod folder reached through a junction is one folder (vfs::folder_key follows it): one catalog row, and
+// find_root finds the row by either spelling. Skipped when mklink /J cannot make the junction.
+void test_junction(const Fixture& f) {
+    alamo::test::section("folder identity through a junction");
+    const fs::path target = f.game / "Mods" / "AOW";
+    const fs::path link = f.T / "AowLink";
+    const std::string cmd = "cmd /c mklink /J \"" + link.string() + "\" \"" + target.string() + "\" >nul";
+    if (std::system(cmd.c_str()) != 0 || !fs::is_directory(link)) {
+        std::printf("  SKIP: junction (mklink /J failed)\n");
+        return;
+    }
+    CHECK(av::same_folder(u8(link), u8(target)));
+    CHECK(av::folder_key(u8(link)) == av::folder_key(u8(f.game / "mods" / "aow" / ".")));
+    CHECK(!av::same_folder(u8(link), u8(f.game / "Mods" / "CycA")));
+    CHECK(av::path_key("Mods/AOW/") == "mods\\aow");
+    av::InstallLocations where;
+    where.foc = u8(f.game);
+    where.steam_libraries = {u8(f.lib)};
+    where.mod_folders = {u8(link)};  // the user names the junction as an extra mod folder
+    const av::ModCatalog c = av::scan_mod_catalog(where, false);
+    size_t rows = 0;
+    for (const av::ModDescriptor& m : c.mods) rows += av::same_folder(m.root, u8(target)) ? 1u : 0u;
+    CHECK(rows == 1);  // listed once, as Mods\AOW
+    const av::ModDescriptor* by_link = c.find_root(u8(link));
+    CHECK(by_link && by_link->catalog_key() == "Mods\\AOW");
+    std::error_code ec;
+    fs::remove(link, ec);  // removes the junction itself, never what it points at
+}
+
 int main() {
     test_parse();
     test_meg();
     const Fixture f = make_fixture();
     test_registry(f);
     test_resolve(f);
+    test_junction(f);
     std::error_code ec;
     fs::remove_all(f.T, ec);
     return alamo::test::report("alamo_vfs_registry_tests");

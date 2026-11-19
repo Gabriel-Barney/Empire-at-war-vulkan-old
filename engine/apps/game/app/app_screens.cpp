@@ -112,7 +112,7 @@ void App::open_buy_units(const SessionSpec& spec) {
     bo.heroes = false;  // [port] the staging screen has no heroes option (0x140b154bc bit 0): named heroes stay hidden
     // [port interim rule, Gabriel 2026-11-04: mod-only port rules keep vanilla behaviour] with a mod layer (MODPATH=) only the
     // types some Tactical_Buildable_Objects_Multiplayer list names (drops Thrawn's Revenge's option / cheat / marker rows).
-    bo.multiplayer_list_only = data_.vfs && !data_.vfs->mod_dirs().empty();
+    bo.multiplayer_list_only = data_.vfs && !data_.vfs->layers().empty() && data_.vfs->layers().front().kind == vfs::Layer::Kind::Mod;
     for (const uint32_t t : game::skirmish_buy_list(data_.rules, data_.types, fac, land, bo)) {
         const galactic::TypeInfo& ti = data_.rules.types[t];
         ui::BuyUnitEntry e;

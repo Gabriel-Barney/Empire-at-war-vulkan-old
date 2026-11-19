@@ -392,33 +392,13 @@ void save_cache(const std::string& dir, const Cache& c) {
     }
 }
 
-bool starts_with_ci(const std::string& s, const std::string& prefix) {
-    if (s.size() < prefix.size()) return false;
-    for (size_t i = 0; i < prefix.size(); ++i) {
-        char a = static_cast<char>(std::tolower(static_cast<unsigned char>(s[i])));
-        char b = static_cast<char>(std::tolower(static_cast<unsigned char>(prefix[i])));
-        if (a == '/') a = '\\';
-        if (b == '/') b = '\\';
-        if (a != b) return false;
-    }
-    return true;
-}
-
-// True when `v` serves `path` from a mod: a mod's loose Data tree, or a MEG whose host file lies in a mod folder.
+// True when `v` serves `path` from a mod: a mod's loose Data tree, or a MEG a mod owns (its host file lies in the mod's
+// folder; ums4 t01: read from the layer table, vfs::Layer::mod).
 bool served_by_mod(const vfs::Vfs& v, const std::string& path) {
     const auto r = v.resolve(path);
     if (!r) return false;
-    if (r->layer == vfs::Vfs::Resolution::Mod) return true;
-    if (r->layer != vfs::Vfs::Resolution::Meg) return false;
-    const auto& mounts = v.mounts();
-    if (r->layer_index < 0 || static_cast<size_t>(r->layer_index) >= mounts.size()) return false;
-    const std::string& meg = mounts[static_cast<size_t>(r->layer_index)].path;
-    for (const auto& d : v.mod_dirs()) {
-        std::string dir = d;
-        if (!dir.empty() && dir.back() != '\\' && dir.back() != '/') dir += '\\';
-        if (starts_with_ci(meg, dir)) return true;
-    }
-    return false;
+    const vfs::Layer* l = v.layer_of(*r);
+    return l && l->from_mod();
 }
 
 // A path with a folder whose name starts with '.' (".alg_meta", ".git"): tool metadata, never named by game data.
@@ -525,7 +505,7 @@ int audit_asset_bytes(const std::string& family_in, const std::vector<uint8_t>& 
 AssetAudit audit_mod_assets(const vfs::Vfs& v, const AssetAuditOptions& opt) {
     AssetAudit a;
     a.ran = true;
-    if (v.mod_dirs().empty()) return a;
+    if (v.layers().empty() || v.layers().front().kind != vfs::Layer::Kind::Mod) return a;  // no mod layer (they come first)
 
     // Paths in sorted order, each once (a path matched by two globs keeps the first family).
     std::vector<std::pair<std::string, const char*>> files;

@@ -422,7 +422,7 @@ struct MenuAction {
 const char* menu_action_name(MenuAction::Kind k);
 
 // modc t08: one row of the mod picker (IDD_PORT_MODS_DIALOG). The host lists the base game first (id "") and every
-// installed mod (alamo_game: game::list_installed_mods).
+// installed mod (alamo_game: the rows of vfs::ModCatalog).
 struct ModPickerEntry {
     std::string id;         // what CheckMod / LaunchMod report ("" = the base game, no mod)
     std::u32string label;   // the row text

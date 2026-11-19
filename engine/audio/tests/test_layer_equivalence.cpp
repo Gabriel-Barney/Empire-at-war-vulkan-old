@@ -26,9 +26,18 @@ namespace materials = alamo::materials;
 
 // ---- Reference copies of the pre-ums0 code (dev 2f30b33e), kept only for this comparison ----
 
+// The mod search list the pre-ums0 code read (Vfs::mod_dirs()): the host roots of the mod layers, which come first in
+// search order (ums4 t01: only engine/vfs calls mod_dirs()).
+std::vector<std::string> old_mod_dirs(const vfs::Vfs& v) {
+    std::vector<std::string> out;
+    for (const vfs::Layer& l : v.layers())
+        if (l.kind == vfs::Layer::Kind::Mod) out.push_back(l.host_root);
+    return out;
+}
+
 std::vector<materials::ShaderFileEntry> old_shader_files_from_vfs(const vfs::Vfs& v, bool include_engine) {
     std::vector<materials::ShaderFileEntry> out;
-    const int mods = static_cast<int>(v.mod_dirs().size());
+    const int mods = static_cast<int>(old_mod_dirs(v).size());
     std::vector<const char*> globs = {"DATA\\ART\\SHADERS\\*.FX", "DATA\\ART\\SHADERS\\*.FXO",
                                       "DATA\\ART\\SHADERS\\TERRAIN\\*.FX", "DATA\\ART\\SHADERS\\TERRAIN\\*.FXO"};
     if (include_engine) {
@@ -49,7 +58,7 @@ std::vector<materials::ShaderFileEntry> old_shader_files_from_vfs(const vfs::Vfs
             } else if (r->layer == vfs::Vfs::Resolution::Meg && r->layer_index >= 0 &&
                        static_cast<size_t>(r->layer_index) < v.mounts().size()) {
                 const std::string& host = v.mounts()[static_cast<size_t>(r->layer_index)].path;
-                for (const auto& d : v.mod_dirs())
+                for (const auto& d : old_mod_dirs(v))
                     if (materials::host_path_under(host, d)) e.from_mod = true;
             }
             e.path = std::move(p);
@@ -72,7 +81,7 @@ std::vector<std::string> old_default_sfx_megs(const vfs::Vfs& v, std::string_vie
         out.push_back(s);
     };
     for (const std::string& n : names) {
-        for (const std::string& dir : v.mod_dirs()) add(alamo::path_from_utf8(dir) / "Data" / "Audio" / "SFX" / n);
+        for (const std::string& dir : old_mod_dirs(v)) add(alamo::path_from_utf8(dir) / "Data" / "Audio" / "SFX" / n);
         add(alamo::path_from_utf8(v.foc_root()) / "Data" / "Audio" / "SFX" / n);
         auto res = v.resolve("Data\\Audio\\SFX\\" + n);
         if (res && res->layer == vfs::Vfs::Resolution::Fallback) add(alamo::path_from_utf8(res->location));
@@ -149,10 +158,11 @@ Counts compare(const char* label, const vfs::Vfs& v) {
         } else if (l.kind == vfs::Layer::Kind::Meg) {
             // The deepest mod folder holding it (a nested mod folder owns its own Data tree).
             size_t best = 0;
-            for (size_t i = 0; i < v.mod_dirs().size(); ++i)
-                if (materials::host_path_under(l.host_root, v.mod_dirs()[i]) && v.mod_dirs()[i].size() > best) {
+            const std::vector<std::string> dirs = old_mod_dirs(v);
+            for (size_t i = 0; i < dirs.size(); ++i)
+                if (materials::host_path_under(l.host_root, dirs[i]) && dirs[i].size() > best) {
                     want = static_cast<int>(i);
-                    best = v.mod_dirs()[i].size();
+                    best = dirs[i].size();
                 }
         }
         if (l.mod != want && owner_diff++ < 5)

@@ -150,7 +150,10 @@ bool GameUi::init(GpuCore& gpu, const GameData& data, ui::MenuProviders provider
     // The game's own fonts (EmpireAtWar-Bold ...) live inside StarWarsG.exe: register them as private fonts before the
     // rasterizer is made (mod dirs first, then the FoC root, then EaW's GameData; earlier roots win per name).
     {
-        std::vector<std::string> font_roots = data.vfs ? data.vfs->mod_dirs() : std::vector<std::string>{};
+        std::vector<std::string> font_roots;
+        if (data.vfs)
+            for (const vfs::Layer& l : data.vfs->layers())  // the mod layers come first, in search order
+                if (l.kind == vfs::Layer::Kind::Mod) font_roots.push_back(l.host_root);
         font_roots.push_back(data.root);
         if (data.vfs && !data.vfs->eaw_root().empty()) font_roots.push_back(data.vfs->eaw_root());
         const std::vector<ui::GameFont> fonts_found = ui::register_game_fonts(font_roots);
