@@ -361,3 +361,16 @@ their own copies; mods and the retail load order do not change.
   (D1). A dependency cycle starts the resolved list in its fallback order with the error shown (`alamo_play` asks first);
   before ums1 the picker started only the picked mod there while `--resolve` listed both. Why: retail mounts any command
   line, so refusing a cycle would refuse what retail runs, and the surfaces must agree (`docs/MODS.md` 3.1.2).
+- **Command Center on the port's JSON (ums3, 2026-11-18).** `mods.rs` / `steam.rs` read `alamo_mod_check --list --json`,
+  `conflicts.rs` reads `--conflicts --json`, the profile stack reads `--resolve --json`; the launcher keeps no mod
+  scanner, Steam / registry walk or file-resolution rule of its own. Lane defaults taken: the launcher lists one row per
+  mod folder (a variants-only folder under its folder name, so profiles, which keep folders, are unchanged); a folder
+  without `Data` is no longer listed (the port's catalog needs `Data`); the submod-order warning comes from declared
+  `modinfo.json` dependencies only (the launcher's Workshop-id-in-the-text heuristic is gone); without
+  `alamo_mod_check.exe` next to the game or the launcher nothing is detected and a toast says why.
+- **`unitdb.rs` keeps its own XML and MEG readers (ums3 t04, decided by Gabriel's rule of 2026-11-18: keep them unless
+  the JSON of the ums1 tasks already carries what they read; no new JSON surface).** The Units page indexes every XML
+  definition a profile loads and edits values in place; `--list` carries mod rows, `--conflicts` only the winners of
+  files two mods share, `--resolve` the stack. None carries definitions, field values or the winning copy of every file,
+  so unitdb's readers stay (`conflicts.rs` also uses them for its definition counts). Revisit if the port grows a
+  definitions or per-file JSON.
