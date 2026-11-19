@@ -15,8 +15,8 @@ a separate file in [`roadmap_audit_2026-11-19/`](roadmap_audit_2026-11-19/), to 
 | Dropped as obsolete or duplicate | 3 entries (b0091, b0132, b0410) |
 | Backlog categories | 18 -> 14 (inbox included) |
 | Entries re-filed by the category merge | 93 (open and closed; boxes unchanged) |
-| Backlog entries clustered | 143 into 21 proposed groups; 47 stay in the backlog. **Not written: goal 4 conflicts with the protocol (below)** |
-| New groups | 21 proposed, none in a batch yet |
+| Backlog entries clustered | 143 into 21 groups; 47 stay in the backlog (goal 4, option A chosen by Gabriel) |
+| New groups | 21 (`goal4_backlog_groups.json`) |
 
 **Baseline** (before any change): `roadmap_store.py sync` reported `in sync with origin/main`. `lint` reported 0 errors and 22 warnings:
 18 open tasks without `sev` (sp3, sp4, sp6, sp7, fsr t06, xess t06, ui4 t14), 3 Parity entries without a tier (b0254,
@@ -192,7 +192,7 @@ eight voice-line tasks wait on a playtest that they do not technically need. I r
 Boxes FSR and XESS sit in the side goal "Repeatable benchmark", but they are README goal 5 (upscaling), not benchmark work.
 The batch moves them to st8 Port features (order 2, 3). This changes no stage number.
 
-## Goal 4: backlog into groups (not written; conflict 1)
+## Goal 4: backlog into groups (option A)
 
 The open backlog was clustered by theme and box, at most 8 entries per group, each group with an exit test. The clustering
 works for any of the options below. The full data (titles, boxes, exit tests, presets, entry lists) is in
@@ -231,7 +231,22 @@ works for any of the options below. The full data (titles, boxes, exit tests, pr
 S1 / S2 entries: none in the backlog (lint agrees). Stage 6 / 9 / 10 follow-ups: every entry from a st6 / st9 / st10 group
 is tier 3, which `keep_followups` sends to the backlog anyway, so none moves.
 
-**Options. Pick one and I will generate the batch.**
+**Decision (Gabriel, 2026-11-19): option A.** The batch is `goal4_backlog_groups.json` (166 writes).
+- 143 entries are set `promoted: <group>/tNN`.
+- 21 groups are set with `title`, `tag`, `node`, `status: big`, `preset`, `mod`, `order` (after the last group of their
+  box), `exit`, `why` and `eta`. The eta target is 2026-12-12 (~2 days), or 2026-12-19 (~3 days) for gai4, tai1, ui7,
+  map4 and vis2.
+- Box PROC is set back to `partly` because tst2 opens it again.
+- 1 log line.
+
+The tasks are built the way `backlog promote --new` builds them (`t` text with "(backlog bNNNN, found in X)", `bl`, `sub`,
+`sev`, `tier`, `g`). `write` turns the new groups from `big` to `partly`, since every task is still open. They are not
+"started" (nothing closed and no claim), so the `wip` count does not change. Dry run of all six batches in order on a
+scratch copy: lint 0 errors and 19 warnings. The three no-tier warnings are gone because b0254 / b0260 / b0261 are now
+port1 tasks. `group-status` reports 0 groups to change, and no group or box is left inconsistent with the done rules.
+Open groups go from 44 to 65.
+
+The options as they were proposed:
 - **A, protocol as written (my recommendation).** No pool category. Promote the 143 tier-1/2 entries as 21 new groups in
   the boxes above (`backlog promote <ids> --new <id> --title ... --node ... --exit ...`). Each group gets `eta`, a preset
   and status `big`. The other 47 stay in the categories from goal 2.
@@ -257,9 +272,11 @@ one goal per commit, then run `lint`.
 | `goal3a_box_group_order.json` | 15 | box order in st3 / st9, mapx1 and aud7 order, 1 log line |
 | `goal3b_stage_order.json` | 14 | stage order; **renumbers stages (conflict 3)** |
 | `goal3c_upscaler_boxes.json` | 3 | FSR, XESS -> st8 (optional) |
-| `goal4_clusters_proposal.json` | - | data for goal 4, not a write batch |
+| `goal4_backlog_groups.json` | 166 | option A: 143 entries promoted into 21 new groups, box PROC reopened, 1 log line |
+| `goal4_clusters_proposal.json` | - | the cluster data `goal4_backlog_groups.json` was generated from |
 
-The log documents use the ids `roadmap-audit-2026-11-19-g1` ... `-g3c`.
+The log documents use the ids `roadmap-audit-2026-11-19-g1` ... `-g4`. `goal4_backlog_groups.json` was generated against
+the store as of this audit. If entries are promoted or dropped before it is applied, regenerate it.
 
 ## Open questions (only Gabriel can decide)
 
@@ -275,4 +292,4 @@ The log documents use the ids `roadmap-audit-2026-11-19-g1` ... `-g3c`.
 6. **mcx3 t14:** close it as already settled by DECISIONS 2026-11-18 (b)?
 7. **lua-data's box** is RE, which is done. Leave it, or point it at STORY or AIVIEW?
 8. **bm4 / bo4:** park both, keep both, or park one?
-9. **Goal 4:** option A, B or C?
+9. ~~**Goal 4:** option A, B or C?~~ Settled: option A (Gabriel, 2026-11-19).
