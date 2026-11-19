@@ -278,13 +278,38 @@ one goal per commit, then run `lint`.
 The log documents use the ids `roadmap-audit-2026-11-19-g1` ... `-g4`. `goal4_backlog_groups.json` was generated against
 the store as of this audit. If entries are promoted or dropped before it is applied, regenerate it.
 
+## Phase 2: applied (2026-11-19)
+
+Gabriel approved every batch except 3b, and they were applied in this order. Before applying, a `sync` and a recheck
+confirmed that every batch still matched the store: the 3 drops and 143 promotions were still open entries, no new entry
+was in a merged category, and no new group id existed. Every write is its own store commit, and the store is pushed (`sync`:
+in sync with origin/main).
+
+| Batch | Store commit | Lint after |
+|---|---|---|
+| goal1_scope.json | 5277c24c (4 docs) | 0 errors, 22 warnings |
+| goal2_categories.json | 988202da (95 docs) | 0 errors, 22 warnings |
+| goal3a_box_group_order.json | 204e6cf3 (15 docs) | 0 errors, 22 warnings |
+| goal3c_upscaler_boxes.json | 56101058 (3 docs) | 0 errors, 22 warnings |
+| goal4_backlog_groups.json | 51040ee5 (187 docs: 166 writes + 21 status writes `write` made itself, `big` -> `partly`) | 0 errors, 19 warnings |
+| goal3b_stage_order.json | **not applied** (Gabriel) | - |
+
+**Compared with the proposal.**
+- No difference except the 21 automatic status writes the proposal predicted.
+- Open groups are 65, open backlog entries 44: the 47 that stay, minus the 3 dropped.
+- `group-status` reports 0 groups to change.
+- A check of every group and box finds no done group with an open task, no open group without one, no done box holding an
+  open group, and no open box whose groups are all done.
+- In this repository, the category list in `docs/ROADMAP_PROTOCOL.md` ("Categories") was updated to the 14 categories.
+- Stage numbers are unchanged, because 3b was not applied.
+
 ## Open questions (only Gabriel can decide)
 
 1. **b0315 Splash_E3 music:** should the port get a splash screen, or is this entry dropped as out of scope? If it is out
    of scope, it needs a DECISIONS row.
 2. **Out-of-scope handling:** protocol rule 5 deletes out-of-scope tasks and groups; your constraint keeps them as `oos` /
    `dropped`. Which wins from now on? If yours, rule 5 needs a one-line change.
-3. **Stage order (3b):** apply it, and update the ~85 "Stage N" references, or keep the stage numbers and apply 3a only? If
+3. ~~**Stage order (3b):**~~ Not applied (Gabriel, 2026-11-19); the original question was: apply it, and update the ~85 "Stage N" references, or keep the stage numbers and apply 3a only? If
    applied, should the `OPT -> Q4` / `SIMP -> Q4` arrows be reversed or removed?
 4. **aud3 `after: [aud1]`:** drop it, so the voice lines do not wait on your aud1 playtest?
 5. **qafull:** reword t05 and the exit to the 2026-11-15 rule (defects become tasks of their groups, not new groups or
