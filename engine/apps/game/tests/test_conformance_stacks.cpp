@@ -59,7 +59,7 @@ void test_stack_dep(const std::string& root) {
     const vfs::ResolvedStack s = game::resolve_mod_stack(root, {"MODPATH=Mods\\StackSub"}, o);
     CHECK(joined(s.args) == "MODPATH=Mods\\StackSub | MODPATH=Mods\\StackParent");
     CHECK(s.errors.empty() && s.warnings.empty());
-    CHECK(s.mods.size() == 2 && s.mods[1].reason == "dependency of StackSub" && s.mods[1].mod.version == "2.0");
+    CHECK(s.mods.size() == 2 && s.mods[1].reason == "dependency of Mods\\StackSub" && s.mods[1].mod.version == "2.0");
     std::printf("  declared: %s\n", joined(s.args).c_str());
     const game::ModCheckReport r = game::check_mod_data(root, s.args, o);
     CHECK(r.loaded && r.error_count() == 0);
@@ -71,7 +71,7 @@ void test_stack_dep(const std::string& root) {
     // Undeclared: StackHinted names two files only StackParent has; the submod hint finds it.
     const vfs::ResolvedStack h = game::resolve_mod_stack(root, {"MODPATH=Mods\\StackHinted"}, o);
     CHECK(joined(h.args) == "MODPATH=Mods\\StackHinted | MODPATH=Mods\\StackParent");
-    CHECK(h.mods.size() == 2 && h.mods[1].reason == "likely parent of StackHinted");
+    CHECK(h.mods.size() == 2 && h.mods[1].reason == "likely parent of Mods\\StackHinted");
     std::printf("  hinted: %s\n", joined(h.args).c_str());
     // Alone it loads with the two list entries missing (retail too); stacked, nothing is missing.
     CHECK(game::check_mod_data(root, {"MODPATH=Mods\\StackHinted"}, o).missing_files.size() == 2);
@@ -80,7 +80,7 @@ void test_stack_dep(const std::string& root) {
     // The exit test's shape (AOW patch -> Legacy HD -> TR), nothing declared: from the top folder alone, two hint rounds.
     const vfs::ResolvedStack t = game::resolve_mod_stack(root, {"MODPATH=Mods\\StackTop"}, o);
     CHECK(joined(t.args) == "MODPATH=Mods\\StackTop | MODPATH=Mods\\StackHinted | MODPATH=Mods\\StackParent");
-    CHECK(t.mods.size() == 3 && t.mods[1].reason == "likely parent of StackTop" && t.mods[2].reason == "likely parent of StackHinted");
+    CHECK(t.mods.size() == 3 && t.mods[1].reason == "likely parent of Mods\\StackTop" && t.mods[2].reason == "likely parent of Mods\\StackHinted");
     CHECK(t.errors.empty());
     CHECK(game::check_mod_data(root, t.args, o).missing_files.empty());
     std::printf("  chain: %s\n", joined(t.args).c_str());
@@ -88,7 +88,7 @@ void test_stack_dep(const std::string& root) {
     // Picked in the wrong order: resolution puts the submod first...
     const vfs::ResolvedStack w = game::resolve_mod_stack(root, {"MODPATH=Mods\\StackParent", "MODPATH=Mods\\StackSub"}, o);
     CHECK(joined(w.args) == "MODPATH=Mods\\StackSub | MODPATH=Mods\\StackParent");
-    CHECK(has(w.warnings, "StackParent is picked above its submod StackSub"));
+    CHECK(has(w.warnings, "Mods\\StackParent is picked above its submod Mods\\StackSub"));
     // ...but an explicit command line is mounted as written (earliest wins, MODS.md 3.1).
     const game::ModCheckReport e = game::check_mod_data(root, {"MODPATH=Mods\\StackParent", "MODPATH=Mods\\StackSub"}, o);
     CHECK(e.mods.size() == 2 && e.mods[0].name == "Stack Parent" && e.mods[1].name == "Stack Sub");
@@ -96,13 +96,13 @@ void test_stack_dep(const std::string& root) {
     // Two total conversions without a dependency between them: a warning, not an error.
     const vfs::ResolvedStack c = game::resolve_mod_stack(root, {"MODPATH=Mods\\StackParent", "MODPATH=Mods\\OtherTc"}, o);
     CHECK(c.errors.empty());
-    CHECK(has(c.warnings, "two total conversions in one stack: StackParent and OtherTc"));
+    CHECK(has(c.warnings, "two total conversions in one stack: Mods\\StackParent and Mods\\OtherTc"));
 }
 
 void test_stack_cycle(const std::string& root) {
     alamo::test::section("stack_cycle");
     const vfs::ResolvedStack s = game::resolve_mod_stack(root, {"MODPATH=Mods\\CycleA"}, light());
-    CHECK(has(s.errors, "dependency cycle: CycleA -> CycleB -> CycleA"));
+    CHECK(has(s.errors, "dependency cycle: Mods\\CycleA -> Mods\\CycleB -> Mods\\CycleA"));
     CHECK(s.mods.size() == 2);
     std::printf("  %s\n", joined(s.errors).c_str());
     // In a report the stack's errors are errors.
@@ -169,7 +169,7 @@ void test_picker(const std::string& root) {
     const game::ModCheckReport e = resolved_report(root, eaw.arg);
     CHECK(game::mod_launch_args(eaw, &e).empty());  // refused: nothing starts
     const std::vector<std::string> es = game::mod_report_summary(e);
-    CHECK(!es.empty() && es[0] == std::string("Refused (FoC mods only): EawOnly: ") + vfs::kBaseEawRefusal);
+    CHECK(!es.empty() && es[0] == std::string("Refused (FoC mods only): Mods\\EawOnly: ") + vfs::kBaseEawRefusal);
     // Unresolved (alamo_mod_check without --resolve): the load error says it.
     const game::ModCheckReport e2 = game::check_mod_data(root, {eaw.arg}, light());
     CHECK(game::mod_launch_args(eaw, &e2).empty());
@@ -356,6 +356,8 @@ int main(int argc, char** argv) {
     test_stack_cycle(root);
     test_eaw_only(root);
     test_picker(root);
+    std::error_code ec;
+    fs::create_directories(fs::path(argv[3]), ec);  // the exe's JSON goes there; a fresh build tree has no such folder
     test_launch_surfaces(argv[1], root, argv[2], fs::path(argv[3]));
     return alamo::test::report("alamo_game_conformance_stacks_tests");
 }

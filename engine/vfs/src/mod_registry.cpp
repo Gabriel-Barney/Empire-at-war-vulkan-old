@@ -679,7 +679,7 @@ ModStack resolve(const ModCatalog& registry, std::span<const std::string> picked
     for (size_t q = 0; q < queue.size(); ++q) {
         const size_t i = queue[q];
         const ModDescriptor me = found[i].mod;
-        const std::string me_key = me.key();
+        const std::string me_key = me.catalog_key();
         if (!me.dependencies.empty()) {
             for (size_t k = 0; k < me.dependencies.size(); ++k) {
                 const ModDependency& d = me.dependencies[k];
@@ -719,8 +719,8 @@ ModStack resolve(const ModCatalog& registry, std::span<const std::string> picked
                 if (state[w] == 1) {
                     std::string cyc;
                     auto at = std::find(path.begin(), path.end(), w);
-                    for (; at != path.end(); ++at) cyc += found[*at].mod.key() + " -> ";
-                    cyc += found[w].mod.key();
+                    for (; at != path.end(); ++at) cyc += found[*at].mod.catalog_key() + " -> ";
+                    cyc += found[w].mod.catalog_key();
                     r.errors.push_back("dependency cycle: " + cyc);
                 } else if (state[w] == 0) {
                     dfs(w);
@@ -762,8 +762,8 @@ ModStack resolve(const ModCatalog& registry, std::span<const std::string> picked
             if (iv == index_of.end() || iw == index_of.end()) continue;
             const std::vector<size_t>& dw = deps[iw->second];
             if (std::find(dw.begin(), dw.end(), iv->second) != dw.end())
-                r.warnings.push_back(pv->key() + " is picked above its submod " + pw->key() +
-                                     "; the earlier mod wins, so the stack puts " + pw->key() + " first");
+                r.warnings.push_back(pv->catalog_key() + " is picked above its submod " + pw->catalog_key() +
+                                     "; the earlier mod wins, so the stack puts " + pw->catalog_key() + " first");
         }
     for (StackMod& s : r.mods)
         if (s.mod.content_hash == 0 && s.mod.has_data) s.mod.content_hash = mod_content_hash(s.mod.root);
@@ -771,12 +771,12 @@ ModStack resolve(const ModCatalog& registry, std::span<const std::string> picked
     for (const StackMod& s : r.mods) {
         r.args.push_back(s.mod.arg());
         r.fingerprint = fnv(r.fingerprint, &s.mod.content_hash, sizeof s.mod.content_hash);
-        if (!s.mod.has_data) r.warnings.push_back(s.mod.key() + " has no Data folder: nothing to mount");
+        if (!s.mod.has_data) r.warnings.push_back(s.mod.catalog_key() + " has no Data folder: nothing to mount");
         if (s.mod.game_tag == GameTag::Eaw) {
             r.base_eaw = true;
-            r.errors.push_back(s.mod.key() + ": " + kBaseEawRefusal);
+            r.errors.push_back(s.mod.catalog_key() + ": " + kBaseEawRefusal);
         }
-        for (const std::string& w : s.mod.warnings) r.warnings.push_back(s.mod.key() + ": " + w);
+        for (const std::string& w : s.mod.warnings) r.warnings.push_back(s.mod.catalog_key() + ": " + w);
     }
     // Two total conversions without a dependency between them: retail runs the earlier one's lists.
     {
@@ -803,8 +803,8 @@ ModStack resolve(const ModCatalog& registry, std::span<const std::string> picked
                 const ModDescriptor& a = r.mods[tc[x]].mod;
                 const ModDescriptor& b = r.mods[tc[y]].mod;
                 if (!depends(a, b) && !depends(b, a))
-                    r.warnings.push_back("two total conversions in one stack: " + a.key() + " and " + b.key() +
-                                         " each replace GameObjectFiles.xml and FactionFiles.xml; retail runs " + a.key() +
+                    r.warnings.push_back("two total conversions in one stack: " + a.catalog_key() + " and " + b.catalog_key() +
+                                         " each replace GameObjectFiles.xml and FactionFiles.xml; retail runs " + a.catalog_key() +
                                          "'s lists");
             }
     }

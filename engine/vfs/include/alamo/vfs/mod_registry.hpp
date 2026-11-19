@@ -138,7 +138,7 @@ bool mod_provides(const std::string& root, std::string_view path);
 using ParentHint = std::function<std::optional<std::string>(const std::vector<std::string>& stack_args)>;
 struct StackMod {
     ModDescriptor mod;
-    std::string reason;  // "picked", "dependency of <key>", "likely parent of <key>"
+    std::string reason;  // "picked", "dependency of <catalog key>", "likely parent of <catalog key>" (ums2 t09: messages name mods by catalog_key())
 };
 // The resolved stack of the picked mods (ums1 t04: one resolver for every launch surface: the in-game picker's Launch,
 // alamo_play and alamo_mod_check --resolve all start what launch_args() gives).

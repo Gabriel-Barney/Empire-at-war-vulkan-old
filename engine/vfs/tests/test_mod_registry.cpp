@@ -237,7 +237,7 @@ void test_resolve(const Fixture& f) {
     const av::ResolvedStack s = av::resolve_stack(r, aow, hint);
     CHECK(joined(s.args) == "MODPATH=Mods\\AOW | STEAMMOD=200 | STEAMMOD=100");
     CHECK(s.errors.empty() && !s.base_eaw);
-    CHECK(s.mods.size() == 3 && s.mods[1].reason == "likely parent of AOW" && s.mods[2].reason == "likely parent of 200");
+    CHECK(s.mods.size() == 3 && s.mods[1].reason == "likely parent of Mods\\AOW" && s.mods[2].reason == "likely parent of 200");
     CHECK(asked == 3);  // 100 declares nothing either: asked, no answer
     CHECK(s.fingerprint != 0);
     std::printf("  AOW stack: %s\n", joined(s.args).c_str());
@@ -264,7 +264,7 @@ void test_resolve(const Fixture& f) {
     // A cycle is an error naming it.
     const std::vector<std::string> cyc{"MODPATH=Mods\\CycA"};
     const av::ResolvedStack sc = av::resolve_stack(r, cyc);
-    CHECK(has(sc.errors, "dependency cycle: CycA -> CycB -> CycA"));
+    CHECK(has(sc.errors, "dependency cycle: Mods\\CycA -> Mods\\CycB -> Mods\\CycA"));
     CHECK(sc.mods.size() == 2);
     std::printf("  cycle: %s\n", joined(sc.errors).c_str());
 
