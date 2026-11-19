@@ -157,8 +157,10 @@ mod system refactor").
 - **A MEG belongs to the folder it was opened from.** A MEG that a mod's own `MegaFiles.xml` names, or a mod's `Patch*.meg`,
   is owned by that mod, decided when it is mounted; a base archive a mod's list names (`Data\Config.meg` from FoC) stays
   base-owned.
-- **Ask the layer, not the path.** "Is this file from a mod, and which one" reads `Layer::mod`; no code compares host paths
-  with the mod folders (`shader_files_from_vfs`, ShaderFileEntry `from_mod` / `dir_order`).
+- **Ask the layer, not the path.** "Is this file from a mod, and which one" reads `Layer::mod`, not a comparison of host
+  paths with the mod folders. Moved so far: `shader_files_from_vfs` (ShaderFileEntry `from_mod` / `dir_order`) and the SFX
+  archive list; the load report's MEG issues and the asset audit still test paths until ums2 / ums4 remove the last
+  `mod_dirs()` callers.
 - **One walk for every copy.** `Vfs::resolve_all(path)` returns every copy in resolution order (`[0]` is what `read`
   returns); code that needs the lower copies (the SFX archives, which a mod's copy layers over FoC's: `docs/re/AUDIO.md` §5, aud2 t05) takes them from there instead of building
   `<mod>\Data\...` paths by hand.

@@ -301,22 +301,35 @@ struct Vfs::Impl {
 
     bool find(const std::string& norm, Hit& out) const { return find_nth(norm, 0, out); }
 
-    // Every copy of `norm` in resolution order (the walk of find_nth, without stopping).
-    std::vector<Hit> find_all(const std::string& norm) const {
-        std::vector<Hit> out;
+    // The resolution order, the one walk every lookup uses: visit(hit) for each layer holding `norm` (mods, base, MEGs
+    // newest first, fallbacks; loose layers for Data\ paths only) until visit returns true. True when it stopped.
+    template <class Visit>
+    bool walk(const std::string& norm, Visit&& visit) const {
         const bool data = is_data_path(norm);
         if (data) {
             for (size_t i = 0; i < mods.size(); ++i)
-                if (const std::string* h = mods[i].find(norm)) out.push_back(Hit{Resolution::Mod, static_cast<int>(i), h, nullptr, nullptr});
-            if (const std::string* h = base.find(norm)) out.push_back(Hit{Resolution::Base, 0, h, nullptr, nullptr});
+                if (const std::string* h = mods[i].find(norm))
+                    if (visit(Hit{Resolution::Mod, static_cast<int>(i), h, nullptr, nullptr})) return true;
+            if (const std::string* h = base.find(norm))
+                if (visit(Hit{Resolution::Base, 0, h, nullptr, nullptr})) return true;
         }
         for (size_t i = archives.size(); i-- > 0;)
             if (const meg::Entry* e = archives[i]->lookup(norm))
-                out.push_back(Hit{Resolution::Meg, static_cast<int>(i), nullptr, archives[i].get(), e});
+                if (visit(Hit{Resolution::Meg, static_cast<int>(i), nullptr, archives[i].get(), e})) return true;
         if (data)
             for (size_t i = 0; i < fallbacks.size(); ++i)
                 if (const std::string* h = fallbacks[i].find(norm))
-                    out.push_back(Hit{Resolution::Fallback, static_cast<int>(i), h, nullptr, nullptr});
+                    if (visit(Hit{Resolution::Fallback, static_cast<int>(i), h, nullptr, nullptr})) return true;
+        return false;
+    }
+
+    // Every copy of `norm` in resolution order.
+    std::vector<Hit> find_all(const std::string& norm) const {
+        std::vector<Hit> out;
+        walk(norm, [&out](const Hit& h) {
+            out.push_back(h);
+            return false;
+        });
         return out;
     }
 
@@ -350,30 +363,14 @@ struct Vfs::Impl {
     // The n-th copy of `norm` in resolution order (0 = what find() returns): the same walk, counting the layers that
     // hold the file instead of stopping at the first.
     bool find_nth(const std::string& norm, size_t n, Hit& out) const {
-        const bool data = is_data_path(norm);
-        const auto take = [&](const Hit& h) {
+        return walk(norm, [&](const Hit& h) {
             if (n == 0) {
                 out = h;
                 return true;
             }
             --n;
             return false;
-        };
-        if (data) {
-            for (size_t i = 0; i < mods.size(); ++i)
-                if (const std::string* h = mods[i].find(norm))
-                    if (take(Hit{Resolution::Mod, static_cast<int>(i), h, nullptr, nullptr})) return true;
-            if (const std::string* h = base.find(norm))
-                if (take(Hit{Resolution::Base, 0, h, nullptr, nullptr})) return true;
-        }
-        for (size_t i = archives.size(); i-- > 0;)
-            if (const meg::Entry* e = archives[i]->lookup(norm))
-                if (take(Hit{Resolution::Meg, static_cast<int>(i), nullptr, archives[i].get(), e})) return true;
-        if (data)
-            for (size_t i = 0; i < fallbacks.size(); ++i)
-                if (const std::string* h = fallbacks[i].find(norm))
-                    if (take(Hit{Resolution::Fallback, static_cast<int>(i), h, nullptr, nullptr})) return true;
-        return false;
+        });
     }
 
     // Newest-first over the first `count` mounted archives.
@@ -433,11 +430,10 @@ struct Vfs::Impl {
                     const IssueKind ik = kind == K::Unsorted    ? IssueKind::MegUnsorted
                                          : kind == K::Duplicate ? IssueKind::MegDuplicate
                                                                 : IssueKind::MegNameMismatch;
-                    const uint16_t layer = owner >= 0 ? static_cast<uint16_t>(owner) : alamo::kBaseLayer;
                     issues->add(ik, IssueSeverity::Info, host, host,
                                 std::string(Vfs::MegIssue::kind_name(kind)) + ": " + std::to_string(count) +
                                     " record(s), first " + first,
-                                true, layer);
+                                true, Layer{Layer::Kind::Meg, 0, {}, owner}.issue_layer());
                 }
             };
             if (t.unsorted)
