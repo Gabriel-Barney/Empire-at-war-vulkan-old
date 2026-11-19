@@ -88,12 +88,15 @@ std::vector<std::string> GameSampleSource::default_sfx_megs(const vfs::Vfs& vfs,
     };
     // aud2 t05: a mod's own copy of an SFX archive layers over FoC's instead of replacing it (the original mounts the
     // archive both at the install prefix and through the normal mod-first file open, 0x227b90): every loose copy, mod
-    // search order first, then FoC's. A MEG inside a MEG is not a host file.
+    // search order first, then FoC's. A MEG inside a MEG is not a host file. ums0: the copies come from the VFS's own
+    // resolution order (Vfs::resolve_all), not from paths built from the mod folders.
+    using R = vfs::Vfs::Resolution;
     for (const std::string& n : names) {
-        for (const std::string& dir : vfs.mod_dirs()) add(path_from_utf8(dir) / "Data" / "Audio" / "SFX" / n);
-        add(path_from_utf8(vfs.foc_root()) / "Data" / "Audio" / "SFX" / n);
-        auto res = vfs.resolve("Data\\Audio\\SFX\\" + n);  // a FALLBACKPATH copy when neither has one
-        if (res && res->layer == vfs::Vfs::Resolution::Fallback) add(path_from_utf8(res->location));
+        const std::vector<R> copies = vfs.resolve_all("Data\\Audio\\SFX\\" + n);
+        for (const R& c : copies)
+            if (c.layer == R::Mod || c.layer == R::Base) add(path_from_utf8(c.location));
+        // A FALLBACKPATH copy when no mod, FoC folder or MEG has one.
+        if (!copies.empty() && copies.front().layer == R::Fallback) add(path_from_utf8(copies.front().location));
     }
     if (!vfs.eaw_root().empty()) {
         for (const std::string& n : names) {

@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "alamo/core/compat_issue.hpp"
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/host_fs.hpp"
 #include "alamo/core/hash.hpp"
@@ -40,8 +41,9 @@ void put_u32(std::string& s, uint32_t v) {
     for (int i = 0; i < 4; ++i) s.push_back(static_cast<char>((v >> (8 * i)) & 0xFFu));
 }
 
-// Retail-style MEG V1: filename table (insertion order), records sorted by CRC, contiguous data.
-void write_meg(const fs::path& p, const Files& files) {
+// Retail-style MEG V1: filename table (insertion order), records sorted by CRC, contiguous data. sorted = false stores
+// the records in descending CRC order (a malformed table: meg_unsorted).
+void write_meg(const fs::path& p, const Files& files, bool sorted = true) {
     const uint32_t n = static_cast<uint32_t>(files.size());
     std::string head;
     put_u32(head, n);
@@ -53,7 +55,7 @@ void write_meg(const fs::path& p, const Files& files) {
     struct Rec { uint32_t crc, name_index; };
     std::vector<Rec> recs;
     for (uint32_t i = 0; i < n; ++i) recs.push_back({alamo::meg::name_crc(files[i].first), i});
-    std::sort(recs.begin(), recs.end(), [](const Rec& a, const Rec& b) { return a.crc < b.crc; });
+    std::sort(recs.begin(), recs.end(), [sorted](const Rec& a, const Rec& b) { return sorted ? a.crc < b.crc : a.crc > b.crc; });
     uint32_t offset = static_cast<uint32_t>(head.size()) + 20u * n;
     std::string table, data;
     for (uint32_t i = 0; i < n; ++i) {
@@ -246,6 +248,46 @@ int main() {
         CHECK(!v->read_nth("Data\\XML\\Nothing.xml", 0, b));
     }
 
+    // ums0: layers in resolution order with their provenance; layer_of / resolve_all.
+    {
+        using alamo::vfs::Layer;
+        const auto& L = v->layers();
+        CHECK(L.size() == 2 + 1 + 10 + 3);  // mods A, B; base; 10 MEGs; FB1, FB2, GameData
+        if (L.size() == 16) {
+            CHECK(L[0].kind == Layer::Kind::Mod && L[0].index == 0 && L[0].mod == 0 && fs::equivalent(alamo::path_from_utf8(L[0].host_root), MODA));
+            CHECK(L[1].kind == Layer::Kind::Mod && L[1].index == 1 && L[1].mod == 1 && L[1].issue_layer() == 1);
+            CHECK(L[2].kind == Layer::Kind::Base && L[2].mod == -1 && L[2].issue_layer() == alamo::kBaseLayer);
+            CHECK(L[3].kind == Layer::Kind::Meg && L[3].index == 9 && L[3].host_root == v->mounts()[9].path);  // newest first
+            CHECK(L[12].kind == Layer::Kind::Meg && L[12].index == 0);
+            for (size_t i = 3; i < 13; ++i) CHECK(!L[i].from_mod());
+            CHECK(L[13].kind == Layer::Kind::Fallback && L[13].index == 0 && L[15].index == 2 && L[15].mod == -1);
+        }
+        const auto lay = [&](std::string_view path) -> const Layer* {
+            const auto r = v->resolve(path);
+            return r ? v->layer_of(*r) : nullptr;
+        };
+        if (L.size() == 16) {
+            CHECK(lay("Data\\XML\\P_ModB_Base.xml") == &L[1]);
+            CHECK(lay("Data\\XML\\P_Base_FB.xml") == &L[2]);
+            CHECK(lay("Data\\XML\\Order0.xml") == &L[3]);
+            CHECK(lay("Data\\XML\\FB2Only.xml") == &L[14]);
+            CHECK(lay("Data\\Scripts\\Library\\ProbeE1.lua") == &L[15]);
+        }
+        CHECK(v->layer_of(Vfs::Resolution{Vfs::Resolution::Meg, "", 10}) == nullptr);
+        CHECK(v->layer_of(Vfs::Resolution{Vfs::Resolution::Base, "", 1}) == nullptr);
+        CHECK(v->layer_of(Vfs::Resolution{Vfs::Resolution::Mod, "", -1}) == nullptr);
+        // resolve_all: every copy, the order read_nth reads; [0] is resolve().
+        const auto all = v->resolve_all("data/xml/p_moda_modb.xml");
+        CHECK(all.size() == 2 && all[0].layer == Vfs::Resolution::Mod && all[0].layer_index == 0 && all[1].layer_index == 1);
+        CHECK(!all.empty() && all[0].location == v->origin("Data\\XML\\P_ModA_ModB.xml"));
+        const auto mf = v->resolve_all("Data\\XML\\P_Meg_FB.xml");
+        CHECK(mf.size() == 2 && mf[0].layer == Vfs::Resolution::Meg && mf[1].layer == Vfs::Resolution::Fallback);
+        const auto o0 = v->resolve_all("Data\\XML\\Order0.xml");
+        CHECK(o0.size() == 10);
+        for (size_t i = 0; i < o0.size(); ++i) CHECK(o0[i].layer == Vfs::Resolution::Meg && o0[i].layer_index == static_cast<int>(9 - i));
+        CHECK(v->resolve_all("Data\\XML\\Nope.xml").empty());
+    }
+
     // Case / separator / prefix insensitivity; not found.
     CHECK(read_str(*v, "data/xml/p_moda_modb.XML") == "A");
     CHECK(read_str(*v, ".\\Data\\XML\\P_ModA_ModB.xml") == "A");
@@ -320,6 +362,46 @@ int main() {
             // Mod list order: ModOnly then Config -> Config mounted later.
             CHECK(v2->mounts()[5].path.find("ModOnly.meg") != std::string::npos);
             CHECK(v2->mounts()[7].path.find("MegMod") != std::string::npos);  // FoC Patch slot from the mod
+            // ums0: a MEG opened from the mod's folder belongs to the mod; the base Config.meg it lists does not.
+            const auto lay = [&](std::string_view path) -> const alamo::vfs::Layer* {
+                const auto r = v2->resolve(path);
+                return r ? v2->layer_of(*r) : nullptr;
+            };
+            const alamo::vfs::Layer* mo = lay("Data\\XML\\S2_ModOnly.xml");
+            CHECK(mo && mo->kind == alamo::vfs::Layer::Kind::Meg && mo->index == 5 && mo->mod == 0 && mo->issue_layer() == 0);
+            const alamo::vfs::Layer* mp = lay("Data\\XML\\S2_Patch.xml");
+            CHECK(mp && mp->kind == alamo::vfs::Layer::Kind::Meg && mp->mod == 0);
+            const alamo::vfs::Layer* cf = lay("Data\\XML\\Order4.xml");
+            CHECK(cf && cf->kind == alamo::vfs::Layer::Kind::Meg && cf->mod == -1 && !cf->from_mod());
+            const alamo::vfs::Layer* p64 = lay("Data\\XML\\Order0.xml");
+            CHECK(p64 && p64->mod == -1);
+        }
+    }
+
+    // ================= Scenario 2c (ums0): a malformed MEG in a mod goes to the IssueSink with the mod's layer =================
+    {
+        const fs::path BADMOD = FOC / "Mods" / "BadMegMod";
+        write_file(BADMOD / "Data" / "MegaFiles.xml", megafiles({"Data\\Bad.meg", "Data\\Config.meg"}));
+        write_meg(BADMOD / "Data" / "Bad.meg",
+                  {{"DATA\\XML\\BAD_A.XML", "A"}, {"DATA\\XML\\BAD_B.XML", "B"}, {"DATA\\XML\\BAD_C.XML", "C"}}, false);
+        VfsConfig c2;
+        c2.foc_root = u8(FOC);
+        c2.eaw_root = std::string();
+        c2.mod_search = {{alamo::vfs::ModSearchEntry::Kind::Path, u8(MODA)}, {alamo::vfs::ModSearchEntry::Kind::Path, u8(BADMOD)}};
+        alamo::IssueSink sink;
+        auto v2 = Vfs::create(c2, &err, &sink);
+        CHECK(v2 != nullptr);
+        if (v2) {
+            CHECK(v2->meg_issues().size() == 1);
+            if (!v2->meg_issues().empty()) {
+                const std::string& a = v2->meg_issues()[0].archive;
+                const alamo::CompatIssue* i = sink.find(alamo::IssueKind::MegUnsorted, a, a);
+                CHECK(i && i->layer == 1 && i->retail_equivalent && i->severity == alamo::IssueSeverity::Info);
+            }
+            CHECK(sink.count(alamo::IssueKind::MegUnsorted) == 1);
+            // Without a sink the VFS is the same (the parameter is optional).
+            auto v3 = Vfs::create(c2, &err);
+            CHECK(v3 && v3->meg_issues().size() == v2->meg_issues().size() && v3->layers().size() == v2->layers().size());
         }
     }
 
