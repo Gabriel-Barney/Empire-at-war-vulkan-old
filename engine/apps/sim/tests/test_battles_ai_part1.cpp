@@ -622,6 +622,125 @@ void test_battle_ai_find_team() {
     }
     CHECK(checked);
 }
+
+// ref2 t04 (aitac t03 "Lua spawns adopted"): the AI VMs' bridge comes from make_object_bridge. Spawn_Unit's hook makes an
+// adopted battle unit (combat entry, adoption invariant clean); Lua Take_Damage reaches the combat unit and Despawn removes
+// it from the battle's systems; with the hooks taken away the bindings refuse (battle_lifecycle): no store-only damage,
+// no bare removal.
+void test_battle_ai_lifecycle() {
+    auto d = make_data(false, false, false, false, false, false, true);
+    jobs::JobSystem js(jobs::JobSystemConfig{0});
+    SimConfig cfg;
+    cfg.seed = 2026;
+    cfg.players = 4;
+    SimHost host(d->types, js, cfg);
+    galactic::GalacticSim* gs = host.start_galactic(d->rules, make_setup(*d, true));
+    CHECK(gs != nullptr);
+    if (!gs) return;
+    CampaignBattleOptions opt;
+    opt.conflict.human_choice = galactic::BattleChoice::Fight;
+    opt.battle.max_frames = 600;
+    CampaignBattles battles(host, d->crules, *d->catalog,
+                            [](const std::string& name, terrain::MapData& m) {
+                                if (name != "S10_Land_B") return false;
+                                m = land_map();
+                                return true;
+                            },
+                            opt);
+    CHECK(battles.attach(nullptr));
+    std::vector<objects::ObjectHandle> up;
+    for (objects::ObjectHandle h : gs->planets()[2].surface)
+        if (gs->store().owner(h) == 1) up.push_back(h);
+    CHECK(gs->launch_units(1, 2, up) == commands::RejectReason::None);
+    const std::vector<uint32_t> uf = gs->fleets_at(2, 1);
+    if (!uf.empty()) CHECK(gs->move_fleet(1, uf[0], 1) == commands::RejectReason::None);
+    ai::AiDefinitions defs;
+    ai::EquationSet eqs;
+    TacticalAiSetup ts;
+    ts.defs = &defs;
+    ts.equations = &eqs;
+    ts.files = d->files.get();
+    ts.ai_type = [](int32_t, const galactic::GalacticSim&) { return std::string(); };
+    const objects::TypeIndex trooper = d->types.resolve_name("S10_Trooper");
+    CHECK(trooper != objects::kNone);
+    bool invaded = false, checked = false;
+    for (uint64_t t = 0; t < 2500 && !checked; ++t) {
+        host.tick_once();
+        if (!invaded && host.modes().depth() == 1) {
+            const std::vector<uint32_t> f = gs->fleets_at(1, 1);
+            if (!f.empty() && !gs->fleets()[f[0]].moving) invaded = gs->invade(1, 1, {}) == commands::RejectReason::None;
+        }
+        TacticalBattle* b = battles.battle();
+        TacticalMode* tm = host.tactical();
+        if (!b || !tm || b->frame() < 3) continue;
+        objects::ObjectStore& st = tm->primary();
+        const tc::CombatSystem& cs = b->combat();
+        // Live troopers in the store, and the combat health of those the battle knows.
+        auto troopers = [&] {
+            std::vector<objects::ObjectId> out;
+            for (const objects::ObjectHandle h : st.all_objects())
+                if (st.alive(h) && st.type(h) == trooper) out.push_back(st.id(h));
+            return out;
+        };
+        auto combat_health = [&] {
+            double sum = 0.0;
+            for (const objects::ObjectId id : troopers())
+                if (cs.has_unit(id)) sum += cs.health(id);
+            return sum;
+        };
+        BattleAi ai(*b, *tm, host, ts);
+        lua::ObjectBridge& br = ai.world().object_bridge();
+        CHECK(br.battle_lifecycle && br.spawn_unit && br.spawn_company && br.take_damage && br.destroy_object && br.change_owner);
+        if (!br.spawn_unit || !br.take_damage || !br.destroy_object) break;
+        // Spawn_Unit's hook: an adopted battle unit.
+        objects::SpawnParams sp;
+        sp.type = trooper;
+        sp.owner = 1;
+        sp.position = st.position(st.find(troopers().front()));
+        sp.facing = Vec3{1.0f, 0.0f, 0.0f};
+        const objects::ObjectHandle made = br.spawn_unit(sp);
+        const bool spawned = st.alive(made) && cs.has_unit(st.id(made));
+        CHECK(spawned);
+        CHECK(b->adoption_violations(*tm).empty());
+        lua::LuaHost lh;
+        lh.store = &st;
+        lh.types = &d->types;
+        lua::LuaVm vm(lh);
+        lua::attach_object_bridge(vm, &br);
+        auto run = [&vm](const char* code) {
+            std::string err;
+            const bool ok = vm.run(code, "lifecycle", &err);
+            if (!ok) std::printf("  lifecycle: %s: %s\n", code, err.c_str());
+            return ok;
+        };
+        // Take_Damage through combat; without the hook a refusal (no damage at all).
+        const double h0 = combat_health();
+        CHECK(run("Find_All_Objects_Of_Type('S10_Trooper')[1].Take_Damage(10)"));
+        const double h1 = combat_health();
+        const auto damage_hook = br.take_damage;
+        br.take_damage = nullptr;
+        CHECK(run("Find_All_Objects_Of_Type('S10_Trooper')[1].Take_Damage(10)"));
+        const double h2 = combat_health();
+        br.take_damage = damage_hook;
+        // Despawn: the battle's removal; without the hook a refusal (the object stays).
+        const size_t n0 = troopers().size();
+        CHECK(run("Find_All_Objects_Of_Type('S10_Trooper')[1].Despawn()"));
+        const size_t n1 = troopers().size();
+        const auto destroy_hook = br.destroy_object;
+        br.destroy_object = nullptr;
+        CHECK(run("Find_All_Objects_Of_Type('S10_Trooper')[1].Despawn()"));
+        const size_t n2 = troopers().size();
+        br.destroy_object = destroy_hook;
+        std::printf("  lifecycle: spawned %d, combat health %.1f -> %.1f -> %.1f (refused), troopers %zu -> %zu -> %zu (refused)\n",
+                    spawned ? 1 : 0, h0, h1, h2, n0, n1, n2);
+        CHECK(h1 < h0 && h2 == h1);
+        CHECK(n1 + 1 == n0 && n2 == n1);
+        CHECK(b->adoption_violations(*tm).empty());  // the despawned unit left combat / movement too
+        lua::attach_object_bridge(vm, nullptr);
+        checked = true;
+    }
+    CHECK(checked);
+}
 #endif
 }  // namespace bo3split
 

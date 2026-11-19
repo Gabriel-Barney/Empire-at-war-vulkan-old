@@ -26,6 +26,8 @@ int main(int argc, char** argv) {
     test_battle_ai_land_mode(false, true);
     std::printf("refixf t03: Find_All_Objects_Of_Type('S10_Squad') finds the TEAM containers (representative type hook)\n");
     test_battle_ai_find_team();
+    std::printf("ref2 t04: the AI VMs' ObjectBridge from make_object_bridge (spawn adopted, Take_Damage / Despawn through the battle, refusals)\n");
+    test_battle_ai_lifecycle();
     std::printf("q6 t28: map hint names (.ted 0x482) reach Find_Hint / Get_Hint / Find_All_Objects_With_Hint\n");
     test_battle_map_hints();
     std::printf("q6: an attack ordered on a TEAM container (AI host and human order; nearest member, order ends with the container)\n");

@@ -437,6 +437,12 @@ objects::ObjectHandle TacticalBattle::script_spawn_company(TacticalMode& mode, c
     return out;  // deploy() registered the members with the L1 systems (l1_register)
 }
 
+bool TacticalBattle::script_despawn(TacticalMode& mode, objects::ObjectHandle h) {
+    if (!mode.primary().alive(h)) return false;
+    bt_kill_silently(mode, h);
+    return true;
+}
+
 bool TacticalBattle::script_damage(TacticalMode& mode, objects::ObjectId id, float amount, bool cannot_die) {
     return script_hardpoint_damage(mode, id, amount, cannot_die, {});
 }

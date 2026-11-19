@@ -119,6 +119,7 @@ std::vector<ObjectHandle> contents_of(Call& c, ObjectHandle h) {
 bool destroy_object(Call& c, ObjectHandle h) {
     const ObjectBridge* b = bridge(c);
     if (b && b->destroy_object) return b->destroy_object(h);
+    if (b && b->battle_lifecycle) return false;  // ref2 t04: the battle removes its objects, never the bare store
     return store(c)->destroy(h);
 }
 }  // namespace
@@ -147,6 +148,9 @@ ObjectHandle detail::spawn_attached_effect(Call& c, ObjectHandle parent, TypeInd
     if (layer_z) sp.position.z += ty->get_float(type, "Layer_Z_Adjust");
     sp.facing = st->facing(parent);
     if (object_has_model(c, parent)) sp.attach_parent = parent;
+    // ref2 t04: a battle's VMs create through the battle (TacticalBattle::script_spawn: the mode's trees, the L1 systems)
+    const ObjectBridge* b = bridge(c);
+    if (b && b->battle_lifecycle) return b->spawn_unit ? b->spawn_unit(sp) : ObjectHandle{};
     return st->create(sp);
 }
 
@@ -798,12 +802,16 @@ ObjectHandle spawn(Call& c, TypeIndex type, int32_t owner, Vec3 pos, ObjectHandl
             const ObjectHandle made = b->spawn_unit(p);
             if (made) return made;
         }
+        if (b && b->battle_lifecycle) return ObjectHandle{};  // ref2 t04: the battle refused; no bare store object
         return st->create(p);
     };
     // q6 t12: a host that lays out companies itself (the battle: members as units + TEAM containers) takes the company.
-    if (company && b && b->spawn_company && !sp.container && types(c) && !types(c)->get_type_refs(type, "Company_Units").empty())
-        if (const ObjectHandle made = b->spawn_company(sp)) return made;
+    if (company && b && b->spawn_company && !sp.container && types(c) && !types(c)->get_type_refs(type, "Company_Units").empty()) {
+        const ObjectHandle made = b->spawn_company(sp);
+        if (made || b->battle_lifecycle) return made;  // ref2 t04: a battle's refusal is final
+    }
     const ObjectHandle h = create(sp);
+    if (!h) return h;
     if (company && types(c)) {
         for (const TypeIndex m : types(c)->get_type_refs(type, "Company_Units")) {
             if (m == objects::kNone) continue;
@@ -2188,7 +2196,7 @@ int m_despawn(Call& c) {
     const ObjectHandle self = self_object(c);
     if (st->has_behavior(self, objects::beh::Team)) {
         const std::vector<ObjectHandle> members = team_members(*st, self);
-        for (auto it = members.rbegin(); it != members.rend(); ++it) st->destroy(*it);
+        for (auto it = members.rbegin(); it != members.rend(); ++it) destroy_object(c, *it);  // ref2 t04: the host's removal
         return 0;
     }
     destroy_object(c, self);  // the host's removal when it keeps membership (galactic: GalacticSim)
@@ -2199,8 +2207,9 @@ int m_despawn(Call& c) {
 // tested before the dead wrapper (warning, nothing). Damage kind 0 (OBJECT_SCRIPTS §6.1 step 4), which passes
 // invulnerability (TACTICAL_COMBAT §3.6 step 3), so Make_Invulnerable does not stop it (q6 t12). A TEAM container passes
 // the full amount to each member, first to last, and takes none itself. Without a name, a host damage system
-// (ObjectBridge::take_damage: a tactical battle's combat) takes it when it knows the object; [port] otherwise a direct
-// health change; Cannot_Be_Killed: health stops at min(current, 1); <= 0 destroys. A name is looked up in the global
+// (ObjectBridge::take_damage: a tactical battle's combat) takes it when it knows the object; a battle's bridge
+// (battle_lifecycle, ref2 t04) refuses any other object; [port] other hosts: a direct health change; Cannot_Be_Killed:
+// health stops at min(current, 1); <= 0 destroys. A name is looked up in the global
 // HardPoint type table (ASCII case-insensitive, R1_T01_HARDPOINT_RUN); not there: "unknown hard point" and no damage;
 // else it goes to the host's hardpoint record (ObjectBridge::take_hardpoint_damage; none: no damage - hardpoints are
 // records, not objects). [L] What retail does with a known name the victim does not carry is not read; the host decides.
@@ -2213,6 +2222,7 @@ void damage_one(Call& c, ObjectHandle target, float amount, const std::string* h
         return;
     }
     if (b && b->take_damage && b->take_damage(target, amount, s.cannot_be_killed)) return;
+    if (b && b->battle_lifecycle) return;  // ref2 t04: not a live combat unit of the battle: no damage (no bare store write)
     const float cur = st->health(target);
     float next = cur - amount;
     const objects::GameObjectTypes* ty = types(c);
@@ -2339,7 +2349,7 @@ int m_change_owner(Call& c) {
     const ObjectBridge* b = bridge(c);
     if (b && b->change_owner)
         b->change_owner(self_object(c), p->id);
-    else
+    else if (!(b && b->battle_lifecycle))  // ref2 t04: a battle bridge without the hook refuses
         store(c)->set_owner(self_object(c), p->id);  // no host system caches owners: the store alone
     return 0;
 }

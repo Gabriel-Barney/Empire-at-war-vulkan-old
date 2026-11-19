@@ -19,6 +19,7 @@ void test_neutral_attack_move();
 void test_battle_ai_station_level(bool skirmish);
 void test_battle_ai_land_mode(bool skirmish, bool control_points = false);
 void test_battle_ai_find_team();
+void test_battle_ai_lifecycle();
 void test_battle_map_hints();
 void test_battle_attack_team();
 void test_land_team_targeting();

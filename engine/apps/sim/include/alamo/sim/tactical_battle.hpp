@@ -1050,6 +1050,10 @@ public:
     // tactical member placement is not in docs/re]. Returns the first TEAM container, else the first member (null when the
     // type is not a company or nothing spawned). The types join the tables first (script_add_types).
     objects::ObjectHandle script_spawn_company(TacticalMode& mode, const objects::SpawnParams& p);
+    // ref2 t04: Lua Despawn / Destroy_Contained_Objects of a battle VM (ObjectBridge::destroy_object): the removal step - a
+    // battle unit leaves its systems with no death effects (bt_kill_silently: hangars, abilities / combat, movement, the
+    // unit lists), any other object leaves the mode (TacticalMode::destroy: store and trees). False when `h` is not live.
+    bool script_despawn(TacticalMode& mode, objects::ObjectHandle h);
     // q6 t12: Lua Take_Damage(amount) on a battle combat unit (ObjectBridge::take_damage): CombatSystem::take_damage with
     // damage kind 0 (Debug: passes invulnerability, TACTICAL_COMBAT §3.6 step 3; OBJECT_SCRIPTS §6.1 step 4), no source,
     // at the battle frame; `cannot_die` (the script's Set_Cannot_Be_Killed) sets kUnitCannotDie for that hit. A kill is

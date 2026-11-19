@@ -14,6 +14,7 @@
 #include "alamo/lua/players.hpp"  // a1j t07: TacticalGalacticContext
 #endif
 #include "save_io.hpp"  // N1 stage 2
+#include "alamo/sim/battle_object_bridge.hpp"  // ref2 t04
 #if defined(ALAMO_SIM_HAVE_STORY) || defined(ALAMO_SIM_HAVE_TACTICAL_AI)
 #include "alamo/lua/object_bridge.hpp"  // mcx6: script_bridges
 #endif
@@ -1506,7 +1507,10 @@ void CampaignBattles::story_bridge_begin(SimHost& host, GameMode& mode) {
 #endif
     SimHost* h = &host;
     b.anim_frame = [h] { return h->frame(); };
-    b.change_owner = [this](objects::ObjectHandle o, int32_t owner) { return change_owner(o, owner); };
+    // ref2 t04: the battle lifecycle (Spawn_Unit, companies, Take_Damage, Change_Owner, Despawn) through the battle, for
+    // every session with this bridge (before, the spawn / damage hooks were set with object scripts only, and the story
+    // VMs' Spawn_Unit / Take_Damage / Despawn wrote the bare store).
+    make_object_bridge(*battle_, [h] { return h->tactical(); }, b);
     b.garrison_spawn_changed = [this](objects::ObjectHandle o, bool on) {  // Lua Set_Garrison_Spawn -> hangar spawn flag
         TacticalMode* tm = host_->tactical();
         if (battle_ && tm && tm->primary().alive(o)) battle_->set_garrison_spawn(tm->primary().id(o), on);
@@ -1692,27 +1696,7 @@ void CampaignBattles::story_bridge_begin(SimHost& host, GameMode& mode) {
         return out;
     };
     // --- end S4 ---
-    if (scripts) {  // q6: Spawn_Unit of an object script makes battle units (TacticalBattle::script_spawn)
-        b.spawn_unit = [this, h](const objects::SpawnParams& p) {
-            TacticalMode* tm = h->tactical();
-            return (battle_ && tm) ? battle_->script_spawn(*tm, p) : objects::ObjectHandle{};
-        };
-        // q6 t12: companies come down as battle companies (members + TEAM containers), Take_Damage goes through combat.
-        // [port] Set only with object scripts on (the bridge is shared with the story VMs of this battle), so sessions
-        // without them keep the store-only Take_Damage of the story bindings.
-        b.spawn_company = [this, h](const objects::SpawnParams& p) {
-            TacticalMode* tm = h->tactical();
-            return (battle_ && tm) ? battle_->script_spawn_company(*tm, p) : objects::ObjectHandle{};
-        };
-        b.take_damage = [this, h](objects::ObjectHandle u, float amount, bool cannot_die) {
-            TacticalMode* tm = h->tactical();
-            return battle_ && tm && tm->primary().alive(u) && battle_->script_damage(*tm, tm->primary().id(u), amount, cannot_die);
-        };
-        b.take_hardpoint_damage = [this, h](objects::ObjectHandle u, float amount, bool cannot_die, std::string_view hp) {  // r1b t01
-            TacticalMode* tm = h->tactical();
-            return battle_ && tm && tm->primary().alive(u) &&
-                   battle_->script_hardpoint_damage(*tm, tm->primary().id(u), amount, cannot_die, hp);
-        };
+    if (scripts) {  // q6: the object-script hooks (Spawn_Unit / Take_Damage: make_object_bridge above, every session)
         // q6 (OBJECT_SCRIPTS §10.1-10.3): Make_Invulnerable -> combat's damage-kind gate, Prevent_AI_Usage -> the owner's
         // AI free store, Hide -> the model test. [port] Object-script sessions only, like the hooks above.
         b.invulnerable_changed = [this, h](objects::ObjectHandle u, bool on) {

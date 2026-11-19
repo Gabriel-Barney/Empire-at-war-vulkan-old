@@ -19,6 +19,7 @@
 #include "alamo/jobs/job_system.hpp"
 #include "alamo/lua/object_bridge.hpp"
 #include "alamo/objects/game_object_types.hpp"
+#include "alamo/sim/battle_object_bridge.hpp"  // ref2 t04
 #include "alamo/sim/sim_host.hpp"
 #include "alamo/sim/tactical_battle.hpp"
 #include "alamo/tactical/movement/land_path.hpp"    // mcx6 t06: line_passable (attack position terrain check)
@@ -235,10 +236,12 @@ BattleAi::BattleAi(TacticalBattle& battle, TacticalMode& mode, SimHost& host, co
         return c;
     });
 
-    // OI host (L1/S4 wave 1 integrator ask 2): Change_Owner of the AI VMs goes through the battle (store + TreeSet::set_owner
-    // + the battle systems), as the story VMs' bridge (CampaignBattles::change_owner); before, the binding set the store only.
+    // ref2 t04: the battle lifecycle of the AI VMs (Spawn_Unit, companies, Take_Damage, Change_Owner, Despawn) through the
+    // battle, the same factory as the story VMs' bridge; before, only Change_Owner went through the battle (OI host) and the
+    // rest wrote the bare store. [port] With the AI lane on the VMs' handles are the snapshot store's and their scripts run
+    // off the critical lane, so every lifecycle call is refused there (no shipped AI script makes one).
     TacticalMode* owner_mode = &mode;
-    br.change_owner = [bt, owner_mode](objects::ObjectHandle o, int32_t owner) { return bt->script_change_owner(*owner_mode, o, owner); };
+    make_object_bridge(*bt, [owner_mode] { return owner_mode; }, br, [this] { return !world_->ai_lane(); });
     br.garrison_spawn_changed = [bt, owner_mode](objects::ObjectHandle o, bool on) {  // Lua Set_Garrison_Spawn
         if (owner_mode->primary().alive(o)) bt->set_garrison_spawn(owner_mode->primary().id(o), on);
     };

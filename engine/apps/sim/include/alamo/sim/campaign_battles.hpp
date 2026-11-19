@@ -409,8 +409,8 @@ private:
 #ifdef ALAMO_SIM_HAVE_STORY
     // --- L1/S4 wave 2a story hookup (owner: L1/S4 agent; keep other hooks separate) ---
     // The battle's Lua ObjectBridge for the tactical story VMs (StorySession::begin_battle): abilities = the
-    // battle's AbilitySystem, anim = SimAnimation's world of the pushed mode, change_owner = change_owner()
-    // above. Story notifications fed after each battle tick (deaths, hardpoints); end_battle before the pop.
+    // battle's AbilitySystem, anim = SimAnimation's world of the pushed mode, the lifecycle hooks (spawn,
+    // damage, change_owner, destroy_object) from make_object_bridge (ref2 t04). Story notifications fed after each battle tick (deaths, hardpoints); end_battle before the pop.
     std::unique_ptr<lua::ObjectBridge> story_bridge_;
     void story_begin(SimHost& host, GameMode& mode);
     // modc t32: story_begin's first half, the bridge and its hooks (no story session part). Object-script sessions run it

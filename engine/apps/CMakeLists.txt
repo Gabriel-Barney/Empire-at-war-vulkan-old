@@ -78,6 +78,7 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
       sim/src/tactical_battle_land_engage.cpp  # cmb1 t01 / t03: land formation records, Auto_Engage, scan range (BKR1 Q2 / Q8)
       sim/src/tactical_battle_spawners.cpp   # TRU1 t05 / t07: indigenous spawners, debris (TRU1_C_RE §1 / §3)
       sim/src/fleet_groups.cpp               # [port] fleet groups, phase 1 (docs/DECISIONS.md)
+      sim/src/battle_object_bridge.cpp       # ref2 t04: the battle lifecycle hooks of every battle VM's ObjectBridge
       # Hangars / station upgrade / engine-loop requests (docs/re/STATION_HANGARS_SOUND.md): engine/tactical/hangar.
       sim/src/tactical_battle_hangar.cpp
     )

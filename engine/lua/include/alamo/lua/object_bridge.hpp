@@ -343,6 +343,11 @@ public:
     // mcx8 t12 (§Get_Game_Scoring_Type): a TEAM container's company type (team data +0x58, e.g. Imperial_Stormtrooper_Squad
     // for a Stormtrooper_Team container). Unset or kNone: the binding uses the representative type.
     std::function<objects::TypeIndex(objects::ObjectHandle)> team_company_type;
+    // ref2 t04: set by a tactical battle's bridge factory (sim make_object_bridge, battle_object_bridge.hpp): the battle owns
+    // its objects' lifecycle, so spawn_unit / spawn_company / take_damage / change_owner / destroy_object are the only
+    // way a binding creates, damages, re-owns or removes one. A hook that declines (or is unset) is a refusal: no object,
+    // no damage, no owner change, no removal - never the bare ObjectStore write the bindings fall back to otherwise.
+    bool battle_lifecycle = false;
 
     // ---- L1/S4 wave 2a: tactical systems (see the header comment) ----
     // S9 ability system of the battle (object ids = store ids). Used only in builds where engine/lua links
