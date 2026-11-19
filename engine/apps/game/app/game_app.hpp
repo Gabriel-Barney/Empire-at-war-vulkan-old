@@ -893,6 +893,7 @@ public:
     void check_mod(const std::string& id);
     void poll_mod_check();
     void launch_mod(const std::string& id);
+    const game::InstalledMod* find_mod_row(const std::string& key) const;  // the picker row with that catalog key
     std::string game_root_;                          // the FoC folder the data was loaded from
     std::vector<std::string> workshop_libraries_;    // Steam library folders (vfs::InstallLocations)
     std::vector<game::InstalledMod> installed_mods_;

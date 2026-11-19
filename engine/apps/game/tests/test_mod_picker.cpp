@@ -1,9 +1,10 @@
 // alamo_game_mod_picker_tests (modc t08): the mod picker's data side (mod_picker.hpp) on the read-only fixture of
-// testdata/mod_fixture (its Mods folders and fake Steam library): the installed-mod list, modinfo.json names, the report
+// testdata/mod_fixture (its Mods folders and fake Steam library): the installed-mod list (catalog rows), the report
 // summary, the launch arguments of a mod and of a likely submod (stacked on its parent), and the relaunch command line.
-// modinfo.json decoding also runs on files this test writes to its own temp folder (%TEMP%\alamo_mod_picker_tests).
+// The modinfo.json reader is vfs's (alamo_vfs_registry_tests); the rows are vfs::ModCatalog's (ums1 t03).
 //   alamo_game_mod_picker_tests <testdata/mod_fixture>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
@@ -12,6 +13,9 @@
 #include "alamo/game/mod_check.hpp"
 #include "alamo/game/mod_picker.hpp"
 #include "alamo/test/support.hpp"
+#include "alamo/vfs/install_locations.hpp"
+#include "alamo/vfs/mod_registry.hpp"
+#include "alamo/vfs/steam_workshop.hpp"
 
 namespace game = alamo::game;
 namespace fs = std::filesystem;
@@ -35,27 +39,10 @@ void test_list(const std::string& fixture, const std::string& foc) {
     CHECK(mods[1].id == "FixtureChecks" && !mods[1].workshop && mods[1].arg == "MODPATH=Mods\\FixtureChecks");
     CHECK(mods[2].id == "FixtureMod" && mods[2].name == "FixtureMod");
     CHECK(mods[3].id == "FixtureSub" && mods[3].name == "Fixture Sub");  // modinfo.json "name"
+    // ums1 t03: the rows are the catalog's, keyed by catalog key.
+    CHECK(mods[0].key == "900000001" && mods[1].key == "Mods\\FixtureChecks" && mods[3].variant.empty());
     CHECK(game::list_installed_mods(foc, {}).size() == 3);
     CHECK(game::list_installed_mods(fixture + "/no_such_game", {}).empty());
-}
-
-void test_modinfo() {
-    const fs::path dir = fs::temp_directory_path() / "alamo_mod_picker_tests";
-    std::error_code ec;
-    fs::create_directories(dir, ec);
-    const auto name_of = [&](const std::string& json) {
-        std::ofstream(dir / "modinfo.json", std::ios::binary) << json;
-        return game::modinfo_name(dir.string());
-    };
-    CHECK(name_of("{ \"name\": \"Plain\" }") == "Plain");
-    CHECK(name_of("\xEF\xBB\xBF{\"steamdata\": {\"name\": \"inner\"}, \"name\": \"Outer \\\"Q\\\" \\u00e9\\\\\"}") ==
-          "Outer \"Q\" \xC3\xA9\\");
-    CHECK(name_of("{\"summary\": \"name\", \"x\": [\"name\"], \"name\" : \"Late\"}") == "Late");
-    CHECK(name_of("{\"title\": \"no name key\"}").empty());
-    CHECK(name_of("{\"name\": 5}").empty());
-    CHECK(name_of("not json").empty());
-    fs::remove_all(dir, ec);
-    CHECK(game::modinfo_name((dir / "missing").string()).empty());
 }
 
 void test_args() {
@@ -102,6 +89,38 @@ void test_report(const std::string& fixture, const std::string& foc) {
     CHECK(!bad.loaded && !bs.empty() && bs[0].rfind("Does not load: ", 0) == 0);
 }
 
+// ums1 exit test, real install (ALAMO_FOC_DATA, skipped when unset): the picker's rows are the catalog's rows for every
+// installed mod, a folder with modinfo variants (2083545253: subA / subB, variant files only) included.
+void test_installed_rows() {
+    const char* foc = std::getenv("ALAMO_FOC_DATA");
+    if (!foc || !*foc) {
+        alamo::test::print_skip("installed rows");
+        return;
+    }
+    const alamo::vfs::InstallLocations where = alamo::vfs::default_install_at(foc);
+    const alamo::vfs::ModCatalog catalog = alamo::vfs::scan_mod_catalog(where, false);
+    const std::vector<game::InstalledMod> rows = game::list_installed_mods(catalog);
+    CHECK(rows.size() == catalog.mods.size());
+    size_t variants = 0;
+    for (size_t i = 0; i < rows.size() && i < catalog.mods.size(); ++i) {
+        const alamo::vfs::ModDescriptor& d = catalog.mods[i];
+        CHECK(rows[i].key == d.catalog_key() && rows[i].name == d.name && rows[i].arg == d.arg() && rows[i].path == d.root);
+        variants += d.variant.empty() ? 0u : 1u;
+    }
+    std::printf("  installed: %zu rows (%zu variants) from %zu Steam libraries\n", rows.size(), variants, where.steam_libraries.size());
+    // The two-variant folder, when this machine has it: one row per variant, no row for the folder itself.
+    if (alamo::vfs::find_workshop_item(where.steam_libraries, "2083545253")) {
+        size_t sub = 0, main = 0;
+        for (const game::InstalledMod& r : rows) {
+            if (r.id != "2083545253") continue;
+            sub += (r.key == "2083545253:subA" || r.key == "2083545253:subB") ? 1u : 0u;
+            main += r.variant.empty() ? 1u : 0u;
+            std::printf("    %s  %s  %s\n", r.key.c_str(), r.name.c_str(), r.arg.c_str());
+        }
+        CHECK(sub == 2 && main == 0);
+    }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -111,9 +130,9 @@ int main(int argc, char** argv) {
     }
     const std::string fixture = argv[1], foc = fixture + "/corruption";
     test_list(fixture, foc);
-    test_modinfo();
     test_args();
     test_report(fixture, foc);
+    test_installed_rows();
     std::printf(g_fail ? "alamo_game_mod_picker_tests: %d FAILED\n" : "alamo_game_mod_picker_tests: OK\n", g_fail);
     return g_fail ? 1 : 0;
 }
