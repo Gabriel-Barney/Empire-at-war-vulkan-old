@@ -583,16 +583,18 @@ ModCatalog scan_mod_catalog(const InstallLocations& where, bool hash) {
         std::sort(v.begin(), v.end(), [](const fs::path& a, const fs::path& b) { return path_to_utf8(a.filename()) < path_to_utf8(b.filename()); });
         return v;
     };
-    std::set<std::string> seen_folders;  // folder_key of every listed folder
     const auto add = [&](const fs::path& folder, ModKind kind, const std::string& id) {
         const std::string root = path_to_utf8(folder);
-        const std::string identity = folder_key(root);
         // An extra mod folder already listed (inside Mods, or a junction to a listed folder) is skipped. Workshop items
         // and Mods folders are retail's own argument forms: each keeps its row even when a junction makes two of them
-        // one folder, so a saved MODPATH= / STEAMMOD= keeps naming the row it named.
-        if (kind == ModKind::Path && seen_folders.count(identity)) return;
+        // one folder, so a saved MODPATH= / STEAMMOD= keeps naming the row it named. Only an extra folder opens the
+        // listed folders to compare where they lead (folder_key).
+        if (kind == ModKind::Path) {
+            const std::string identity = folder_key(root);
+            for (const ModDescriptor& m : r.mods)
+                if (folder_key(m.root) == identity) return;
+        }
         if (!seen_roots.insert(lexical_folder_key(root)).second) return;  // the same spelling twice
-        seen_folders.insert(identity);
         for (ModDescriptor& d : describe_mod_folder(root, kind, id, hash)) r.mods.push_back(std::move(d));
     };
     std::vector<std::pair<std::string, fs::path>> workshop;  // (id, folder)
@@ -664,7 +666,7 @@ std::vector<std::string> ModStack::launch_args() const {
     if (base_eaw) return out;  // D1: refused
     std::set<std::string> seen;  // folders: two variants of one folder, or one folder spelled two ways, mount once
     for (size_t i = 0; i < args.size(); ++i) {
-        const std::string folder = i < mods.size() ? folder_key(mods[i].mod.root) : path_key(args[i]);
+        const std::string folder = i < mods.size() ? lexical_folder_key(mods[i].mod.root) : path_key(args[i]);
         if (seen.insert(folder).second) out.push_back(args[i]);
     }
     return out;

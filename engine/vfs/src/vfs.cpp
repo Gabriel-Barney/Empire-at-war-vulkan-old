@@ -246,6 +246,8 @@ bool path_glob_match(std::string_view pattern, std::string_view path) {
 
 // ------------------------------------------------------------------ command line
 
+bool has_mod_layer(const Vfs& v) { return !v.layers().empty() && v.layers().front().kind == Layer::Kind::Mod; }
+
 bool is_mod_arg(std::string_view arg) { return ascii_istarts_with(arg, "MODPATH=") || ascii_istarts_with(arg, "STEAMMOD="); }
 
 bool parse_command_line(std::span<const std::string> args, VfsConfig& cfg) {

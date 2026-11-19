@@ -505,7 +505,7 @@ int audit_asset_bytes(const std::string& family_in, const std::vector<uint8_t>& 
 AssetAudit audit_mod_assets(const vfs::Vfs& v, const AssetAuditOptions& opt) {
     AssetAudit a;
     a.ran = true;
-    if (v.layers().empty() || v.layers().front().kind != vfs::Layer::Kind::Mod) return a;  // no mod layer (they come first)
+    if (!vfs::has_mod_layer(v)) return a;
 
     // Paths in sorted order, each once (a path matched by two globs keeps the first family).
     std::vector<std::pair<std::string, const char*>> files;

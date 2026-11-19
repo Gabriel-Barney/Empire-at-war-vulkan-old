@@ -525,6 +525,10 @@ std::vector<std::string> missing_list_entries(const ModCheckReport& r) {
 // the files alone). Candidates: the catalog of <game> with the options' Steam libraries.
 void check_submod(const GameData& d, ModCheckReport& r, const ModCheckOptions& o) {
     if (d.mods.empty()) return;
+    if (o.catalog) {
+        find_submod_parents(missing_list_entries(r), d.mods, r.args, *o.catalog, r.submod);
+        return;
+    }
     vfs::InstallLocations where;
     where.foc = r.game;
     where.steam_libraries = o.workshop_libraries;
@@ -1321,12 +1325,11 @@ void retail_equivalent_from_checks(ModCheckReport& r) {
 
 // The issue records of report v4 and the static grade (§12.2): an error gives G0, else G1 (G2 and up need runs). The
 // static part of G3 holds when no honour gap, binding gap, missing reward or missing token comes from the mod's files.
-// ums2 t05: a finding from the mod's files carries the layer that serves `file` (compat_issue.hpp: the owning mod's
-// index in the search list, so AotR under AotCW > AotR is layer 1); 0 when the file does not resolve to a mod layer.
-// ums4 t07: the first game file a loader diagnostic names: a "Data\..." path (any case, '/' or '\\'), else a bare
-// "<name>.xml" looked up as Data\XML\<name>. The path ends at a character no game path here has (':', ',', ';', a
-// quote, a bracket, white space). Normalised; "" when the line names none.
-std::string diagnostic_file(std::string_view text, const vfs::Vfs* v) {
+}  // namespace
+
+// ums4 t07 (mod_check.hpp): the path ends at a character no game path here has (':', ',', ';', a quote, a bracket, white
+// space).
+std::string loader_diagnostic_file(std::string_view text, const vfs::Vfs* v) {
     const auto stop = [](char c) {
         return c == ':' || c == ',' || c == ';' || c == '"' || c == '\'' || c == '(' || c == ')' || c == '[' || c == ']' ||
                c == '<' || c == '>' || c == ' ' || c == '\t' || c == '\r' || c == '\n';
@@ -1355,6 +1358,8 @@ std::string diagnostic_file(std::string_view text, const vfs::Vfs* v) {
     return {};
 }
 
+namespace {
+
 // ums4 t07: GameData::diagnostics as CompatIssues, one record per distinct line (subject = the line, detail = its
 // loader step), with the layer of the file the line names (diagnostic_file), else kNoLayer. Warnings, as the text
 // report counts them; added after the grade is set, so they change no grade (as the VFS's findings, ums2 t03).
@@ -1362,7 +1367,7 @@ void loader_issues(const GameData& d, ModCheckReport& r) {
     for (const GameData::LoadStage& s : d.stages)
         for (size_t i = s.first_diag; i < s.first_diag + s.diag_count && i < d.diagnostics.size(); ++i) {
             const std::string& text = d.diagnostics[i];
-            const std::string file = diagnostic_file(text, d.vfs);
+            const std::string file = loader_diagnostic_file(text, d.vfs);
             uint16_t layer = alamo::kNoLayer;
             if (d.vfs && !file.empty())
                 if (const auto res = d.vfs->resolve(file))
@@ -1372,6 +1377,8 @@ void loader_issues(const GameData& d, ModCheckReport& r) {
         }
 }
 
+// ums2 t05: a finding from the mod's files carries the layer that serves `file` (compat_issue.hpp: the owning mod's
+// index in the search list, so AotR under AotCW > AotR is layer 1); 0 when the file does not resolve to a mod layer.
 void compat_issues_and_grade(ModCheckReport& r, const vfs::Vfs* v, const alamo::IssueSink& vfs_issues) {
     using alamo::IssueKind;
     using alamo::IssueSeverity;
@@ -1444,8 +1451,6 @@ void append_list(std::string& s, const std::vector<std::string>& items, size_t f
 }
 
 }  // namespace
-
-std::string loader_diagnostic_file(std::string_view text, const vfs::Vfs* v) { return diagnostic_file(text, v); }
 
 size_t ModCheckReport::error_count() const {
     size_t n = loaded ? 0 : 1;

@@ -49,14 +49,17 @@ std::vector<std::string> mod_launch_args(const vfs::ModDescriptor& mod, const Mo
 
 ModCheckReport check_picked_mod(const std::string& game, const std::string& picked, const ModCheckOptions& options) {
     if (picked.empty()) return check_mod_data(game, {}, options);
-    vfs::ModStack stack = resolve_mod_stack(game, {picked}, options.workshop_libraries);
+    const vfs::ModCatalog catalog = stack_catalog(game, options.workshop_libraries);  // scanned once: the stack and the report
+    vfs::ModStack stack = resolve_mod_stack(catalog, {picked});
     std::vector<std::string> args = stack.launch_args();
     if (args.empty()) {  // refused (D1) or not installed: report the picked mod alone, as its own argument
         for (const vfs::StackMod& m : stack.mods)
             if (m.reason == vfs::StackReason::Picked) args.push_back(m.mod.arg());
         if (args.empty()) args.push_back(picked);
     }
-    ModCheckReport r = check_mod_data(game, args, options);
+    ModCheckOptions o = options;
+    o.catalog = &catalog;
+    ModCheckReport r = check_mod_data(game, args, o);
     r.resolved = true;
     r.stack = std::move(stack);
     return r;

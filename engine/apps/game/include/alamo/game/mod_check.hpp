@@ -83,6 +83,9 @@ struct ModCheckOptions {
     // vfs::default_install_at(game).steam_libraries (install_locations.hpp). Empty: no workshop item is considered (tests).
     // <game>\Mods\* is always searched.
     std::vector<std::string> workshop_libraries;
+    // ums4: the install's catalog when the caller has it (the picker and --resolve scan it once for the resolver and the
+    // report); null: the submod check scans <root> with workshop_libraries itself. Not owned; must outlive the check.
+    const vfs::ModCatalog* catalog = nullptr;
 };
 
 // A file the data names that no VFS layer has. Grouped by path: `references` counts the naming places, `referenced_by`

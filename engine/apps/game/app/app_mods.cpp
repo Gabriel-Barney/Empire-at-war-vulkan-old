@@ -26,9 +26,7 @@ std::vector<std::string> mod_args_of(const std::vector<std::string>& args) {
 }  // namespace
 
 const vfs::ModDescriptor* App::find_mod_row(const std::string& key) const {
-    for (const vfs::ModDescriptor& m : mod_catalog_.mods)
-        if (m.catalog_key() == key) return &m;
-    return nullptr;
+    return key.empty() ? nullptr : mod_catalog_.find_key(key);  // catalog keys first: the row ids are catalog keys
 }
 
 void App::init_mod_picker(ui::MenuProviders& mp) {

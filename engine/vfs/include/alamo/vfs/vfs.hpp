@@ -107,6 +107,10 @@ struct Layer {
     uint16_t issue_layer() const;
 };
 
+class Vfs;
+// True when `v` mounts at least one mod layer (the mod layers come first in Vfs::layers()).
+bool has_mod_layer(const Vfs& v);
+
 class Vfs final : public alamo::FileProvider {
 public:
     struct Resolution {

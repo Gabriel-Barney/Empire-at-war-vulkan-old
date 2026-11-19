@@ -172,8 +172,11 @@ int main(int raw_argc, char** raw_argv) {
     if (opt.submod || resolve) opt.workshop_libraries = alamo::vfs::default_install_at(game).steam_libraries;  // ums1 t01
 
     alamo::vfs::ModStack stack;
+    alamo::vfs::ModCatalog catalog;  // --resolve: scanned once, for the stack and the report's submod check
     if (resolve) {
-        stack = alamo::game::resolve_mod_stack(game, args, opt.workshop_libraries);
+        catalog = alamo::game::stack_catalog(game, opt.workshop_libraries);
+        opt.catalog = &catalog;
+        stack = alamo::game::resolve_mod_stack(catalog, args);
         if (resolve_only || !stack.errors.empty()) {
             alamo::game::ModCheckReport r;
             r.game = game;

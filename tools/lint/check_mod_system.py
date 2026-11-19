@@ -17,8 +17,8 @@ Rules:
              scan_installed_mods, ModRegistry, ResolvedStack (ums4 t01; their replacements: the ModCatalog rows,
              vfs::resolve, scan_mod_catalog, ModCatalog, ModStack).
 Scanned: engine/ (C++: .cpp .hpp .h .inl .cc) and launcher/src (.rs). Comments are ignored. Tests may write fixture
-files, so test code is not scanned: engine/**/tests, engine/**/testdata, and in Rust everything from a `#[cfg(test)]`
-line to the end of its file (the test module sits last, the crate's convention). Exit 1 on a finding, else 0.
+files, so test code is not scanned: engine/**/tests, engine/**/testdata, and in Rust every `#[cfg(test)]` item (the
+attribute through the end of the item's braces, or its ';'). Exit 1 on a finding, else 0.
 """
 import re
 import sys
@@ -79,13 +79,38 @@ def strip_comments(text, rust):
     return ''.join(out)
 
 
+def blank_test_items(code):
+    """Rust code with every #[cfg(test)] item blanked (lines kept): from the attribute to the end of the item it is on
+    (its braced body, or the ';' that ends it first). Strings are not counted as braces' contents: comments are gone
+    already and the test items' strings hold no unbalanced braces in this crate."""
+    out = code
+    start = 0
+    while True:
+        k = out.find('#[cfg(test)]', start)
+        if k < 0:
+            return out
+        brace, semi = out.find('{', k), out.find(';', k)
+        if brace < 0 or (0 <= semi < brace):
+            end = (semi + 1) if semi >= 0 else len(out)
+        else:
+            depth, end = 0, len(out)
+            for i in range(brace, len(out)):
+                if out[i] == '{':
+                    depth += 1
+                elif out[i] == '}':
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+        out = out[:k] + re.sub(r'[^\n]', ' ', out[k:end]) + out[end:]
+        start = end
+
+
 def scan_text(rel, text, rust):
     """Findings (rel, line, rule, text) of one file's code."""
-    if rust:
-        k = text.find('#[cfg(test)]')
-        if k >= 0:
-            text = text[:k]
     code = strip_comments(text, rust)
+    if rust:
+        code = blank_test_items(code)
     found = []
     vfs = rel.startswith('engine/vfs/')
     for no, line in enumerate(code.splitlines(), 1):
@@ -140,6 +165,9 @@ def selftest():
         ('launcher/src/bisect.rs', True, 'let t = std::fs::read_to_string(p.join("modinfo.json"));\n', ['modinfo']),
         ('launcher/src/mods.rs', True, '/// Name from `modinfo.json`.\nfn f() {}\n#[cfg(test)]\nmod tests { write(&r.join("modinfo.json")); }\n', []),
         ('launcher/src/x.rs', True, 'let v = v.mod_dirs();\n', []),  # Rust has no Vfs
+        ('launcher/src/x.rs', True, '#[cfg(test)]\nfn helper() { let a = { 1 }; }\nfn real(p: &Path) { read(p.join("modinfo.json")); }\n',
+         ['modinfo']),  # a test item in the middle hides only itself
+        ('launcher/src/x.rs', True, '#[cfg(test)]\nuse std::fs;\nfn real(p: &Path) { read(p.join("modinfo.json")); }\n', ['modinfo']),
         ('launcher/src/x.rs', True, "let q = '\"'; let p = dir.join(\"modinfo.json\"); // x\n", ['modinfo']),
         ('launcher/src/x.rs', True, "let q = b'\"'; // \"modinfo.json\" in a comment\n", []),
         ('engine/apps/game/src/a.cpp', False, 'auto p = dir / R"(modinfo.json)";\n', ['modinfo']),

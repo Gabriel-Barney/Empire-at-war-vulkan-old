@@ -60,6 +60,10 @@ SubmodHint submod_hint(const std::string& game, const std::vector<std::string>& 
 // Steam libraries: vfs::resolve over the install's catalog, with submod_hint as its parent hint.
 vfs::ModStack resolve_mod_stack(const std::string& game, const std::vector<std::string>& picked,
                                 std::span<const std::string> workshop_libraries);
+// The same over a catalog the caller scanned already (its `game` is the FoC folder).
+vfs::ModStack resolve_mod_stack(const vfs::ModCatalog& catalog, const std::vector<std::string>& picked);
+// The catalog resolve_mod_stack scans: `game` as given, these Steam libraries, no extra mod folders, no content hashes.
+vfs::ModCatalog stack_catalog(const std::string& game, std::span<const std::string> workshop_libraries);
 // resolve_mod_stack(...).launch_args(): the MODPATH= / STEAMMOD= list a launch starts. Empty for a refused base-EaW
 // stack; `stack` (if given) receives the stack.
 std::vector<std::string> launch_args_for(const std::string& game, const std::vector<std::string>& picked,

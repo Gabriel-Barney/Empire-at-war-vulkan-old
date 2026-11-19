@@ -60,25 +60,35 @@ void find_submod_parents(const std::vector<std::string>& missing, std::span<cons
                          const std::vector<std::string>& args, const vfs::ModCatalog& catalog, SubmodHint& h) {
     h.missing = static_cast<uint32_t>(missing.size());
     if (missing.empty()) return;
-    std::set<std::string> mentioned, in_stack;
+    std::set<std::string> mentioned, in_stack;  // in_stack: the mounted folders' spellings
     for (const vfs::ModDescriptor& m : mounted) {
         mentioned.insert(m.modinfo_numbers.begin(), m.modinfo_numbers.end());
-        in_stack.insert(vfs::folder_key(m.root));
+        in_stack.insert(vfs::lexical_folder_key(m.root));
     }
+    // A candidate that provides files is also compared by where it leads (vfs::folder_key: a junction to a mounted folder
+    // is in the stack); only those few open their folders.
+    const auto mounted_folder = [&](const std::string& root) {
+        const std::string key = vfs::folder_key(root);
+        for (const vfs::ModDescriptor& m : mounted)
+            if (vfs::folder_key(m.root) == key) return true;
+        return false;
+    };
     std::vector<ModParentCandidate> cands;
     std::set<std::string> seen;  // one candidate per folder (a folder's variants share it)
     for (const vfs::ModDescriptor& d : catalog.mods) {
         if (d.kind != vfs::ModKind::Workshop && d.kind != vfs::ModKind::LocalMods) continue;
-        const std::string key = vfs::folder_key(d.root);
+        const std::string key = vfs::lexical_folder_key(d.root);
         if (!seen.insert(key).second || in_stack.count(key)) continue;  // already in the stack
+        const uint32_t provides = provided_by(d.root, missing);
+        if (provides == 0 || mounted_folder(d.root)) continue;
         ModParentCandidate c;
         c.id = d.id;
         c.workshop = d.kind == vfs::ModKind::Workshop;
         c.path = vfs::native_utf8(path_from_utf8(d.root).make_preferred());
         c.arg = c.workshop ? "STEAMMOD=" + c.id : "MODPATH=Mods\\" + c.id;
         c.mentioned = c.workshop && mentioned.count(c.id) != 0;
-        c.provides = provided_by(d.root, missing);
-        if (c.provides > 0) cands.push_back(std::move(c));
+        c.provides = provides;
+        cands.push_back(std::move(c));
     }
     std::sort(cands.begin(), cands.end(), [](const ModParentCandidate& a, const ModParentCandidate& b) {
         if (a.provides != b.provides) return a.provides > b.provides;
@@ -110,12 +120,20 @@ SubmodHint submod_hint(const std::string& game, const std::vector<std::string>& 
     return h;
 }
 
-vfs::ModStack resolve_mod_stack(const std::string& game, const std::vector<std::string>& picked,
-                                std::span<const std::string> workshop_libraries) {
+vfs::ModCatalog stack_catalog(const std::string& game, std::span<const std::string> workshop_libraries) {
     vfs::InstallLocations where;  // the FoC folder as given, these libraries, no extra mod folders
     where.foc = game;
     where.steam_libraries.assign(workshop_libraries.begin(), workshop_libraries.end());
-    const vfs::ModCatalog catalog = vfs::scan_mod_catalog(where, false);  // the stack's mods get hashed by resolve
+    return vfs::scan_mod_catalog(where, false);  // the stack's mods get hashed by resolve
+}
+
+vfs::ModStack resolve_mod_stack(const std::string& game, const std::vector<std::string>& picked,
+                                std::span<const std::string> workshop_libraries) {
+    return resolve_mod_stack(stack_catalog(game, workshop_libraries), picked);
+}
+
+vfs::ModStack resolve_mod_stack(const vfs::ModCatalog& catalog, const std::vector<std::string>& picked) {
+    const std::string& game = catalog.game;
     const vfs::ParentHint hint = [&](const std::vector<std::string>& stack_args) -> std::optional<std::string> {
         const SubmodHint h = submod_hint(game, stack_args, catalog);
         if (!h.likely || h.parents.empty()) return std::nullopt;
