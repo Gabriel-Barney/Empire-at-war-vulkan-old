@@ -508,7 +508,10 @@ Since ums2 (2026-11-19, still version 4) those records also hold the VFS's own f
 "Findings carry their layer"); `files.vfs_warnings` keeps the same lines as text for one more version and goes in
 version 5 (ums4). A finding from a mod's files carries the layer of the mod that serves the file (its index in the
 search list); before ums2 every mod finding said layer 0. The VFS's findings are added after the grade is set, so
-they change no `grade` or `blocking` entry (whether one should is for ums5's re-evaluation).
+they change no `grade` or `blocking` entry (whether one should is for ums5's re-evaluation). Checked on the corpus
+(ums2 t04, `--stages check` sweeps of the pre-ums2 dev tip 358089b7 and the ums2 build, 9 setups): every version 4
+list, `grade` and `files` value is unchanged; only `issues` is new (314-397 records a setup; a submod stack puts its
+parent's findings on layer 1, e.g. 2083545253:subA over Thrawn's Revenge).
 
 Installed mods, 2026-11-07 (base FoC at F:): with modc t22 (SM3 translated) the shader issues left are
 `AlamoEngine` `source_shadowed` (an engine effect: TR, its copy 3622043265, FotR) and `_TerrainRenderBump`
