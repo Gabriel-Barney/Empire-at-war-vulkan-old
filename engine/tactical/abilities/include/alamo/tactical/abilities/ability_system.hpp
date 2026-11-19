@@ -56,6 +56,7 @@ struct AbilityConfig {
     float nebula_ability_disable_time = 5.0f;   // GameConstants Nebula_Ability_Disable_Time
     float force_ability_disable_time = 0.0f;    // Force_Ability_Disable_Time
     float ion_storm_shield_disable_time = 5.0f; // Ion_Storm_Shield_Disable_Time
+    int32_t max_remote_bombs_per_player = 20;   // mcx4: Max_Remote_Bombs_Per_Player (GC +0x12138; FoC 20)
     float stealth_detection_time = 0.0f;        // GameConstants +0x12094 (not in vanilla XML) [L]
     float stealth_fire_fade = 0.3f;             // break on firing (0x3a06a0)
     uint64_t corvette_category = 0;             // CategoryMask bit of "Corvette" (tractor x2 rule)
@@ -347,6 +348,14 @@ struct AbilityHost {
     // S8 t10 (LOB_SOLVER §3.5 "Facing at apply"): 0x3a8710 - snap `id`'s yaw to `yaw_deg` at once (no turn rate; roll and
     // pitch 0). Unset: [port] the facing is not changed.
     std::function<void(ObjectId id, float yaw_deg)> snap_yaw;
+    // mcx4 t23 (MCX4_T10_RE_ANSWERS §12a): Redirect_Blaster's Turn_To_Face_Unblockable_Shots - a facing order to the
+    // victim's locomotor (behaviour 1, vf +0x218) toward the level unit vector `dir`. Unset: the order is not given.
+    std::function<void(ObjectId id, Vec3 dir)> face_direction;
+    // mcx4 t23: `id`'s current primary clip type (0x3956a0) in the host's animation world, -1 none / unknown. Unset: -1.
+    std::function<int32_t(ObjectId id)> primary_clip;
+    // mcx4 (MCX4_T10_RE_ANSWERS §15, 0x3a8f90): put `id` at `pos` at once (a buzz-droid cloud's chase step). The ability
+    // system also moves the combat position. Unset: only the combat position moves.
+    std::function<void(ObjectId id, Vec3 pos)> place;
     // s78l t05 (TACTICAL_COMBAT §5.4.1, Tactical_Bribe 0x5b0ec0 / 0x5b07c0): the current battle's planet is corrupted
     // (0x28a890 -> +0xb8 -> +0x2f4 != -1 [M]). Unset: uncorrupted (Bribe_Modifier_On_Uncorrupted_Planets).
     std::function<bool()> battle_planet_corrupted;
@@ -610,6 +619,9 @@ public:
     // BARRAGE, LUCKY_SHOT, ION_CANNON_SHOT (on the team container) and HUNT when active. Not called for the moves
     // abilities issue themselves (MoveOrder events).
     void order_cancel(ObjectId id, uint32_t frame);
+    // mcx4 (MCX4_T10_RE_ANSWERS §13): `id` got a new move order (0x4f6b60, player or AI; not the moves abilities issue
+    // themselves): the effects of its specials with Terminate_Effect_On_Move_Command end at once.
+    void move_ordered(ObjectId id, uint32_t frame);
     // Autofire setter 0x3a78b0 (command 58 / Lua Set_Single_Ability_Autofire, §1.3): writes the slot byte AND the
     // per-object map entry (keyed by the ability name CRC); refused (false) for records without Supports_Autofire
     // unless the owner is an AI player.
@@ -705,7 +717,9 @@ public:
     bool fire_gate(ObjectId shooter, const combat::HardpointDesc* hardpoint, int32_t& projectile, float& damage_scale) override;
     void fire_done(ObjectId shooter, const combat::HardpointDesc* hardpoint, uint32_t frame) override;
     float lucky_shot(ObjectId source, ObjectId victim, int32_t& hardpoint, Vec3 impact, bool has_impact) override;
-    bool damage_listener(ObjectId victim, ObjectId source, int32_t projectile_desc, uint32_t frame, SimRng* rng) override;
+    bool damage_listener(ObjectId victim, ObjectId source, const combat::ListenerShot& shot, uint32_t frame, SimRng* rng) override;
+    // mcx4 (§15): the Inaccuracy_Radius of the Corrupt_Systems ability corrupting `shooter` (lowest user id first).
+    bool corrupt_inaccuracy(ObjectId shooter, float& radius) const override;
     // Set_System_Online (0x384d00) ability side, HARDPOINT_DISABLED.md §9: offline (destroyed or disabled) / online.
     void hardpoint_offline(ObjectId owner, uint32_t index, combat::HardpointKind kind, bool last_of_kind, bool destroyed,
                            uint32_t frame) override;
@@ -855,6 +869,19 @@ private:
         float detect = 0.0f;    // its own detection range (0x3979d0) [port: Trigger_Radius x 2]
         uint32_t arm = 0;
         uint8_t detected = 0, dead = 0;
+    };
+    // mcx4 (MCX4_T10_RE_ANSWERS §15): BuzzDroidsBehavior (vf6 0x6379a0) on a spawned Buzz_Droids Object_Type: its pack
+    // (+0x228), filled by the apply 0x71c430.
+    struct BuzzCloud {
+        uint32_t serial = 0;     // spawn request
+        ObjectId id = kNoObject;
+        uint32_t made = 0;       // frame of the request (unbound past it: dropped)
+        uint32_t end = 0;        // pack +8: active from this frame on
+        float chase = 0.0f;      // +0xc Chase_Radius
+        float radius = 0.0f;     // +0x10 Damage_Radius
+        float own = 0.0f;        // +0x28 Own_Damage_Per_Second
+        float enemy = 0.0f;      // +0x2c Enemy_Damage_Per_Second
+        Vec3 point;              // +0x30 the target position
     };
     struct PlayerEntry {  // Battlefield_Modifier player-list entry (append insert 0x38c850, permanent)
         int32_t player;
@@ -1054,6 +1081,11 @@ private:
     bool class_state(const Obj& o, SpecialClass cls) const;  // a special of that class is applied on the owner
     bool class_has(const Obj& o, SpecialClass cls) const;    // the owner lists a special of that class
     bool locked(const Obj& o) const;  // 0x39ad40: this system's share or the host's (script lock, forced move)
+    // mcx4 (§15): the member that acts for Hack / Repair (Team_Member_With_Ability), else `o` itself.
+    ObjectId acting_member(const Obj& o, const SpecialAbilityDesc& s) const;
+    // mcx4 t23 (0x4cca10): Redirect_Blaster's new shot - at `target` (a redirect), or kNoObject: sent back with `angle`.
+    bool redirect_shot(ObjectId victim, ObjectId target, const combat::ListenerShot& shot, float angle, uint32_t frame,
+                       SimRng& rng);
     void snap_face(Obj& o, ObjectId target);  // S8 t10: 0x20acd0 + 0x3a8710 at a thrown ability's apply (LOB_SOLVER §3.5)
     void lock_pair(Obj& o, uint8_t flag, bool lock, uint32_t frame);  // a 0x3a8e50 lock / unlock pair of one caller
     void lightning_targets(Obj& o, const SpecialAbilityDesc& s, ObjectId primary, std::vector<ObjectId>& out);
@@ -1065,6 +1097,8 @@ private:
     std::vector<SpawnRequest> spawns_;
     uint32_t spawn_serial_ = 1;
     std::vector<Mine> mines_;
+    std::vector<BuzzCloud> buzz_;  // mcx4: live buzz-droid clouds, request order
+    void buzz_update(uint32_t frame);
     std::vector<PlayerEntry> player_entries_;
     std::vector<SourceEntry> source_entries_;
     std::vector<RemoteBomb> remote_bombs_;

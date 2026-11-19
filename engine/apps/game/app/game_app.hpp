@@ -739,6 +739,8 @@ public:
     void announcer_feedback();                   // ui4 t08
     uint64_t announcements_ = 0;                 // ui4 t08: announcer events played
     int32_t prev_pop_used_ = 0;                  // ui4 t11: population used at the last tick (pop-cap announcer)
+    // mcx4 t13: (planet, queue) -> the queue head's start frame and remaining seconds last seen (build countdown speech)
+    std::map<std::pair<uint32_t, uint32_t>, std::pair<int32_t, float>> countdown_speech_seen_;
     double last_approach_s_ = -1e9;              // ui4 t11: wall clock of the last enemy-approach announcement
     uint64_t build_refusals_ = 0;  // ui4 t02: clicks on greyed galactic build pads (negative feedback)
     bool activate_special_here(uint32_t hero_id);

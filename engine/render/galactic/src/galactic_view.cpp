@@ -914,6 +914,10 @@ void GalacticSceneBuilder::build(const GalacticFrame& frame, GalacticModelSource
             else ++st.orbit_fleets;
             continue;
         }
+        if (f.flags & kGalFleetHidden) {  // mcx4 t14 (MCX4_GAL2_RE_ANSWERS Q3): the local client does not see it
+            ++st.hidden_fleets;
+            continue;
+        }
         const std::string name = fleet_model(f);
         const GpuModel* m = owner_model(models, name, f.team_color);
         if (!m) {

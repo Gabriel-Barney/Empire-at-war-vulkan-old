@@ -287,16 +287,27 @@ Vec2f GalacticHud::component_size(uint32_t component, const ComponentPlacement& 
 int32_t GalacticHud::font_of(int32_t component) const {
     if (component < 0 || !fonts_) return -1;
     const CommandBarComponent& c = (*table_)[static_cast<size_t>(component)];
-    return fonts_->font(c.font_name.empty() ? std::string(kFallbackFontFace) : c.font_name,
-                        c.font_point_size > 0 ? c.font_point_size : 7.0f, canvas_.font_height());
+    return fonts_->component_font(c.font_name, c.font_point_size, FontUse::Text, canvas_.font_height());
+}
+
+std::string alternate_font_entry(std::string_view list, int32_t index) {
+    int32_t i = 0;
+    size_t k = 0;
+    while (k < list.size()) {
+        while (k < list.size() && (list[k] == ' ' || list[k] == ',' || list[k] == '\t')) ++k;
+        const size_t start = k;
+        while (k < list.size() && list[k] != ' ' && list[k] != ',' && list[k] != '\t') ++k;
+        if (k > start && i++ == index) return std::string(list.substr(start, k - start));
+    }
+    return {};
 }
 
 void GalacticHud::text_at(int32_t component, std::u32string_view text, Vec2f anchor, uint32_t layer, uint8_t alpha,
-                          const Rgba8* color, bool second_color) {
+                          const Rgba8* color, bool second_color, int32_t font) {
     if (component < 0 || text.empty() || !fonts_) return;
     const CommandBarComponent& c = (*table_)[static_cast<size_t>(component)];
     HudTextStyle st;
-    st.font = font_of(component);
+    st.font = font >= 0 ? font : font_of(component);
     if (st.font < 0) return;
     Rgba8 col = color ? *color : (second_color && c.has_text_color2 ? c.text_color2 : (c.has_text_color ? c.text_color : Rgba8{}));
     st.color = with_alpha(col, alpha);
@@ -490,7 +501,11 @@ void GalacticHud::build_labels(const GalacticHudFrame& f) {
             std::u32string upper = p.name;  // [port: original screenshot] names in capitals
             for (char32_t& ch : upper)
                 if (ch >= U'a' && ch <= U'z') ch = static_cast<char32_t>(ch - U'a' + U'A');
-            text_at(name_, upper, {at.x + o.x, at.y + o.y}, 0, alpha, &p.owner_color);
+            // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q2): the size class's Alternate_Font_Name entry (FoC Medium / Medium /
+            // Bold) at the component's own point size; out of range keeps Font_Name.
+            const std::string alt = alternate_font_entry(c->alternate_font_name, p.label_class);
+            const int32_t lf = alt.empty() || !fonts_ ? -1 : fonts_->component_font(alt, c->font_point_size, FontUse::Button, canvas_.font_height());
+            text_at(name_, upper, {at.x + o.x, at.y + o.y}, 0, alpha, &p.owner_color, false, lf);
         }
         if (!p.fogged) {
             // [port: original screenshot] garrison icon inside the planet (0.8 x radius square).

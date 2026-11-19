@@ -32,6 +32,7 @@
 #include "alamo/tactical/abilities/ability_system.hpp"
 #include "alamo/tactical/combat/combat_system.hpp"
 #include "alamo/tactical/fog/fog_of_war.hpp"  // fog of war constants (owner: fog agent)
+#include "alamo/tactical/movement/constants.hpp"  // mcx4 t11
 
 namespace alamo::data {
 struct GameConstants;
@@ -65,6 +66,10 @@ struct BattleTables {
     std::vector<ProjectileVisuals> projectiles;
     std::vector<std::array<std::string, 2>> fire_bones;  // per hardpoint: Fire_Bone_A / Fire_Bone_B ("" none)
     std::vector<std::string> diagnostics;                // ability XML parse notes
+    // mcx4 tac2 (MCX4_T10_RE_ANSWERS §15 [H]): per abilities.specials entry, Battlefield_Modifier
+    // Disable_Reinforcement_Vulnerability (+0x194, default false): while applied, the covered players' transport unload steps
+    // skip Elevated_Vulnerability (TacticalBattle::reinforcement_vulnerability_disabled).
+    std::vector<uint8_t> special_disable_reinforcement_vulnerability;
 };
 
 class BattleCatalog {
@@ -91,6 +96,18 @@ public:
     // mcx4 t10 (SKIRMISH_SETUP §3, build time 0x496f00 [H]): GC Tactical_Build_Time_Multiplier (FoC 1.0).
     float tactical_build_time_multiplier() const { return tactical_build_time_mult_; }
     bool use_reinforcement_points() const { return use_reinforcement_points_; }  // Use_Reinforcement_Points (GC +0x118a0; land drops)
+    // mcx4 tac2 (MCX4_T10_RE_ANSWERS §16 / §16a [H]): Apply_Elevated_Vulnerability 0x3a8550 - the land pair
+    // Elevated_Vulnerability_Duration / _Factor (GC +0x1177c / +0x11780), the space pair Space_Elevated_Vulnerability_* (GC
+    // +0x11784 / +0x11788). GameConstants ctor 0x2c91c0 defaults: 15 s and -3.0 for both pairs (FoC: land 3 s / -2.0,
+    // space 5 s / -3.0).
+    float elevated_vulnerability_duration(bool space) const { return space ? space_elev_vuln_secs_ : elev_vuln_secs_; }
+    float elevated_vulnerability_factor(bool space) const { return space ? space_elev_vuln_factor_ : elev_vuln_factor_; }
+    // mcx4 tac2 (MCX4_T10_RE_ANSWERS §19, A1_READINGS §35.2 state 4 [H]): GC Skirmish_Reinforcement_Delay_Frames (+0x117e8,
+    // ctor and FoC 90), the base entry of a player's reinforcement-time list (player +0x230).
+    int32_t skirmish_reinforcement_delay_frames() const { return skirmish_reinforce_delay_; }
+    // mcx4 tac2 (MCX4_T10_RE_ANSWERS §16 / §18 [H]): GC Override_Death_Persistence_Duration (+0x11eb8; ctor 0, FoC 30.0),
+    // the persistence the death clone of a dying Infantry-category object gets (0x29f270).
+    float override_death_persistence() const { return override_death_persistence_; }
     float threat_decay_step() const { return threat_decay_step_; }  // AI_SpaceThreatDecayStep (DAMAGE_TRACKING)
     // S10-int constants.
     float engines_disabled_speed_modifier() const { return engines_disabled_speed_; }  // Engines_Disabled_Speed_Modifier
@@ -169,6 +186,22 @@ public:
     // Fog of war GameConstants (Desired{Land,Space}FOWCellSize, {Land,Space}FOWRegrowTime, AIUsesFogOfWar{Land,Space},
     // Tactical_Overrun_Multiple, Minimum_Tactical_Overrun_Time_In_Secs). Owner: fog agent.
     const tactical::fog::FogConstants& fog_constants() const { return fog_constants_; }
+    // mcx4 t11: the movement GameConstants (MovementConstants::from_game_constants; defaults without GameConstants) and
+    // WalkAnimationCutoff (GC +0x1504 = 0x140b16d04, FoC 0.6; MCX4_T11_T12_RE_ANSWERS §S: the WalkLocomotor 0x61f840 plays
+    // WALKMOVE below this x max speed).
+    const tactical::movement::MovementConstants& movement_constants() const { return movement_constants_; }
+    float walk_animation_cutoff() const { return walk_animation_cutoff_; }
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §S / §B4 "Blend times"): the locomotor clip blends (seconds; anim::AnimTunables
+    // fields of the same names). [port] 0 (hard cut) without GameConstants.
+    struct LocomotorBlends {
+        float idle_walk = 0.0f;          // IdleWalkBlendTime (+0x1510)
+        float crouch_idle_walk = 0.0f;   // CrouchIdleWalkBlendTime (+0x1514)
+        float move = 0.0f;               // MoveBlendTime (+0x1518)
+        float team_move = 0.0f;          // TeamMoveBlendTime (+0x1520)
+        float team_crouch_move = 0.0f;   // TeamCrouchMoveBlendTime (+0x1524)
+        float infantry_turn = 0.0f;      // InfantryTurnBlendTime (+0x1528)
+    };
+    const LocomotorBlends& locomotor_blends() const { return locomotor_blends_; }
 
     // Per-battle tables: one UnitDesc per entry of `unit_types` (same order; duplicates allowed), the
     // hardpoints and projectiles they reference. out_unit_index[i] = UnitDesc index of unit_types[i].
@@ -237,15 +270,22 @@ private:
     float tactical_build_time_mult_ = 1.0f;
     float control_point_victory_seconds_ = 30.0f;
     bool use_reinforcement_points_ = true;
+    float elev_vuln_secs_ = 15.0f, elev_vuln_factor_ = -3.0f, space_elev_vuln_secs_ = 15.0f, space_elev_vuln_factor_ = -3.0f;
+    int32_t skirmish_reinforce_delay_ = 90;
+    float override_death_persistence_ = 0.0f;
     float threat_decay_step_ = 0.05f;
     float engines_disabled_speed_ = 0.4f;
     float nebula_ability_disable_ = 5.0f, force_ability_disable_ = 0.0f, ion_storm_shield_disable_ = 5.0f;
+    int32_t max_remote_bombs_ = 20;  // mcx4: GameConstants Max_Remote_Bombs_Per_Player (FoC 20)
     tactical::combat::CombatConfig combat_config_;  // OI tactical
     TransitionConstants transition_;                // battle host
     const FileProvider* files_ = nullptr;           // battle host: model reads
     struct ModelCache;                              // battle host: (type, mode) -> ModelInfo, mutex-guarded
     std::shared_ptr<ModelCache> model_cache_;
     tactical::fog::FogConstants fog_constants_;
+    tactical::movement::MovementConstants movement_constants_;  // mcx4 t11
+    float walk_animation_cutoff_ = 0.6f;
+    LocomotorBlends locomotor_blends_;  // mcx4 t11
 };
 
 }  // namespace alamo::sim

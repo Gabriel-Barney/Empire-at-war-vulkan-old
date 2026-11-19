@@ -245,17 +245,19 @@ Lua `GameObjectWrapper.Play_Animation(name, loop[, index])` (0x57e6c0) calls it 
 | **idle behaviour** | 0x62e570 | idle type | **0 (one-shot)** | 0 if the type is unchanged, else global 0x140b39930 | 1 | runs when the current clip is finished (mode 2), absent, or the crouch state changed. When the idle timer (frame ≥ +8) expired: variant = synced int in [1, count−1] (0 when only one clip) and the next timer = now + synced int in [210, 450] frames (7–15 s); otherwise variant 0. So `_IDLE_00` is the base loop, re-triggered as a one-shot, and `_01+` are fidgets [H] |
 | idle while engaged | 0x62e570 | 6 Attack Idle, index 0 | 0 | 0, or synced float [0.2, 0.75] when coming back from idle | 1 | entered when the current clip is Attack/Attack Idle/attack-like and finished. Combat timer = synced int [0, 30] + 90 frames [H]. **Corrected s78k t02:** the timer is redrawn on **every** service (every frame) while the unit's TARGETING, or its team container's, has a target (TD +8), whatever the clip and even while TARGETING is suspended; it is a countdown decremented once per no-target service. Full flow: TACTICAL_COMBAT §3.1.1, Slot 47, "s78k t02" |
 | **flinch** | 0x62dde0 | 79–82, or 83–86 while attack-like/Attack Idle; chosen by the angle between the facing and the hit direction: < 45° back, 45–135° left/right by sign, > 135° front | 1 | `Max_Flinch_Blend_Seconds` (+0x20e8, default 0.25) | 1 | random variant (synced). Hold `Max_Flinch_Hold_Seconds` (+0x20ec, 0.5), then a cooldown of `Idle_/Attack_Flinch_Interval_Seconds` (+0x20f4 1.0 / +0x20f0 3.0) [H] for the flow, [M] for the direction naming |
-| **walk / move** | 0x61f840 (WalkLocomotor) | 2 Move; 67 when crouched; 61 FIRE_MOVE when object +0x3a1 & 2 is set (burning [M]); 115 Deployed_Walk (speed `Deployed_Walk_Anim_Speed`); 66 WALKMOVE when the type has it and speed is below a threshold (global 0x140b16d04 × max speed) [M] | 1 | global 0x140b16d18 | `Movement_Animation_Speed` (+0x370) × max(current speed / max speed, minimum) | Move↔Walk switch keeps the phase: new frame = old frame × new count / old count. Otherwise the start frame is synced random [0, count−1]. The clip is restarted only when the type changes. The speed is refreshed every tick (0x3a7b70) [H] |
-| turn | 0x620190 | 3 / 4 by sign | 0 | computed | 1 | infantry turn time = angle / rate / 30 (MOVEMENT.md) [M] |
+| **walk / move** | 0x61f840 (WalkLocomotor) | 2 Move; 67 when crouched; 61 FIRE_MOVE when object +0x3a1 & 2 is set (burning [M]); 115 Deployed_Walk (speed `Deployed_Walk_Anim_Speed`); 66 WALKMOVE when the type has it and speed is below a threshold (global 0x140b16d04 × max speed) [M] | 1 | GameConstants `MoveBlendTime` (0x140b16d18 = GC +0x1518, FoC 0.5); 0 for a `Walk_Transition` unit (mcx4 t11) | `Movement_Animation_Speed` (+0x370) × max(current speed / max speed, minimum) | Move↔Walk switch keeps the phase: new frame = old frame × new count / old count. Otherwise the start frame is synced random [0, count−1]. The clip is restarted only when the type changes. The speed is refreshed every tick (0x3a7b70) [H] |
+| turn | 0x620190 | 3 / 4 by sign | 0 | min(turn time, GameConstants `InfantryTurnBlendTime` 0x140b16d28 = GC +0x1528, FoC 0.2) | 1 | turn time = angle / rate / 30 (MOVEMENT.md); details: MCX4_T11_T12_RE_ANSWERS §B4 "Blend times" (mcx4 t11) [H] |
 | deploy / undeploy | 0x61e930 | 25 / 26, random variant | 0 | 0.0333 | `Deployment_Anim_Rate` (+0x1668) | [H] |
 | **attack** | 0x54d090 (WeaponBehavior) | 5, random variant | 0 | 0.4 (0x140a43a8c), or 0.1 when coming from a finished attack/Attack Idle | 1 | played **after** the projectile is created in the same tick. With `Attack_Animation_Is_Overlay` (+0x5c) the clip goes to the overlay slot instead (0x3a8ed0, timed 3.0 [M]). Muzzle sub-objects (per fire bone) are shown and re-hidden after 4 ticks [M] |
 | **death** | 0x58cdb0 (DeathBehavior) | `Specific_Death_Anim_Type` (+0xd98, default **7 Die**), `Specific_Death_Anim_Index` (+0xd9c, default 0xFFFF = synced random) | 0 | 0.5 | 1 | when the clip is missing and `Remove_Upon_Death` (+0x9b) is set, the object is removed at once [H] |
 | corpse removal | 0x58d430 | — | | | | the `Death_Persistence_Duration` (+0x2290, default −1 = forever) countdown starts only when the current clip is no longer the death type **or has finished**, then `Death_Fade_Time` (+0x2294, 0.25). **The length of the death clip is therefore sim-visible** [H] |
 | Lua / cinematic | 0x57e6c0, 0x38de00 | given | given | 0.33 / `Cinematic_Anim_Blend_Seconds` | 1 / `Cinematic_Anim_Speed` | [H]/[M] |
 
-The globals 0x140b39930, 0x140b16d18, 0x140b39900–0x140b39908 and 0x140b3993c are in .bss. No writer was found
+The globals 0x140b39930, 0x140b39900–0x140b39908 and 0x140b3993c are in .bss. No writer was found
 in the decompilation (it is probably a data-driven table). A port should treat them as tunables that default to 0
-(hard cut) until a capture settles them. [L]
+(hard cut) until a capture settles them. [L] Correction (mcx4 t11, MCX4_T11_T12_RE_ANSWERS §S): 0x140b16d18 and
+0x140b16d04 are not unknown: they are the GameConstants fields `MoveBlendTime` and `WalkAnimationCutoff` (GC base
+0x140b15800); the other locomotor blends are GameConstants fields too (§B4 "Blend times" there).
 
 ### A.8 Sim-relevant vs visual
 
@@ -467,8 +469,8 @@ picks, and the lifetime in frames. [H]
 
 ## C. Open items
 
-1. Values of the blend-time globals 0x140b39930 (idle), 0x140b16d18 (move), 0x140b39900–0x140b39908 and
-   0x140b3993c: no writer found. Capture: dump them from a running game. [L]
+1. Values of the blend-time globals 0x140b39930 (idle), 0x140b39900–0x140b39908 and
+   0x140b3993c: no writer found (0x140b16d18 is GameConstants `MoveBlendTime`, mcx4 t11). Capture: dump them from a running game. [L]
 2. Particle track interpolation modes 0/1/2 (B.2) and the exact force order inside 0x166350. [L]/[M]
 3. ~~Writer of 0x140a12648 and of system scalars 0/2~~ answered: the throttle global is statically 1 (throttle on);
    scalars are set through 0x173220 by planet corruption (`Particle_*_Per_Corruption_Level` lerps), weather,

@@ -91,6 +91,11 @@ public:
     SimAnimation(const SimAnimation&) = delete;
     SimAnimation& operator=(const SimAnimation&) = delete;
 
+    // mcx4 t11: the blend times (configuration, not saved or hashed) for every world made from now on and every existing
+    // one. The battle sets the GameConstants blends when it binds the service (TacticalBattle::set_animation).
+    const anim::AnimTunables& tunables() const { return tunables_; }
+    void set_tunables(const anim::AnimTunables& t);
+
     // Installs the T5 hook on `host` (and the "anim" CRC system when `crc`) and the "anim" save chunk. The object must
     // outlive the host's ticks / CRC captures / saves.
     void attach(SimHost& host, bool crc);
@@ -138,13 +143,17 @@ public:
     void death_clone_spawned(const GameMode& mode, ObjectId clone, uint8_t damage_kind = 1, const anim::DeathPlan* plan = nullptr);
     // refixf t04: anim::plan_death for a clone of `type` in `mode` (the type's DeathBehavior fields, the model model_for
     // gives: the same clip data the clone's row plays). Draws on `rng` like the death would. Usable without attach().
-    anim::DeathPlan plan_clone_death(objects::TypeIndex type, objects::ModeKind mode, uint8_t damage_kind, SimRng& rng);
+    // mcx4 tac2 (MCX4_T10_RE_ANSWERS §16 / §18, 0x29f270 [H]): `persistence_override` (null: none) replaces the type's
+    // Death_Persistence_Duration - the battle passes GC Override_Death_Persistence_Duration for an Infantry dying type.
+    anim::DeathPlan plan_clone_death(objects::TypeIndex type, objects::ModeKind mode, uint8_t damage_kind, SimRng& rng,
+                                     const float* persistence_override = nullptr);
     // refix t03: infantry corpse path (S9 §1.6 [L]: the clone goes to a lighter corpse list, not the sim store). Call
     // before the battle destroys `dying`: its row (created when absent) gets `clone_type`'s model without a clip (no
     // draw), then the clone type's death sequence starts with the CorpseInfo of `clone_type`, so the row lives on as a
     // detached corpse drawn with the clone's model. RemoveNow / no model: nothing stays (the row is dropped).
+    // mcx4 tac2: `persistence_override` as plan_clone_death (the corpse path is taken only for Infantry dying types).
     anim::DeathResult corpse_clone(const GameMode& mode, ObjectId dying, objects::TypeIndex clone_type, SimRng& rng,
-                                   uint64_t frame, uint8_t damage_kind);
+                                   uint64_t frame, uint8_t damage_kind, const float* persistence_override = nullptr);
     // Corpses of `mode` (ascending id). `detached` ones have no store object: the renderer draws them from
     // Corpse::info with the row's pose (AnimWorld row of the same id) and Corpse::alpha(frame); `spin_away`
     // ones spin until removal (the spin motion and Spin_Away_On_Death_Explosion are render-side).
@@ -242,7 +251,8 @@ private:
     ModeWorld& mode_world(const GameMode& mode);
     const ModeWorld* find_mode_world(const GameMode& mode) const;
     anim::DeathResult start_death(ModeWorld& mw, const GameMode& mode, ObjectId id, SimRng& rng, uint64_t frame, uint8_t damage_kind = 1,
-                                  objects::TypeIndex type_override = objects::kNone, const anim::DeathPlan* plan = nullptr);
+                                  objects::TypeIndex type_override = objects::kNone, const anim::DeathPlan* plan = nullptr,
+                                  const float* persistence_override = nullptr);
     struct TypeEntry {
         anim::TypeAnimParams params;
         const anim::AnimModel* model = nullptr;

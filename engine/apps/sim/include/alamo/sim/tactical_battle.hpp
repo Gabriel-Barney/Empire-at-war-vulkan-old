@@ -122,7 +122,6 @@ struct BattleConfig {
     // S10-int (cu9 t13: sim PARTICLE objects are always spawned, R4 B.1 layer 1; the `particles` switch is gone)
     uint32_t particle_default_lifetime = 30;  // [port] frames when Particle_Lifetime_Frames is unset / <= 0
     uint32_t dummy_lifetime = 900;            // [port] a Dummy_Barrage_Target is removed after this many frames at most
-    float walk_speed_ratio = 0.5f;            // [port M] WALKMOVE below this x max speed (global 0x140b16d04 unknown)
     float min_move_anim_ratio = 0.1f;         // [port] move-clip speed floor (current / max speed)
     // s78l t03 (TACTICAL_GAPS 6.2): GameConstants Unit_Presence_Relaxation_Time (GC +0x117a8), seconds an IMPOSING_PRESENCE
     // idle record lasts (int(FPS x value) frames). [port] 3.0: the shipped XML does not set it and the default was not read.
@@ -438,6 +437,27 @@ struct LandFormationRecord {
     bool locked = false;  // derived each tick by land_engage_service (0x39ad40 / 0x41fd30: a member order-locked)
 };
 
+// mcx4 tac2 (tactical_battle_skirmish.cpp; MCX4_T09_RE_ANSWERS Q10 [H]): one Income_Stream_Mod_Ability of a type - the
+// target stream's source type (Target_Stream_Source; 0xFFFFFFFF unresolved), Income_Multiplier m, Income_Additive_Value a,
+// Interval_Multiplier im (validator 0x704880: <= 0 -> 1.0), its Stacking_Category, Affects_All_Allied_Sources and
+// Reverse_Application_Logic.
+struct IncomeModDef {
+    uint32_t target_type = 0xFFFFFFFFu;
+    float multiplier = 1.0f, additive = 0.0f, interval = 1.0f;
+    int32_t category = 0;
+    bool all_allied = false, reverse = false;
+};
+// A type's Income_Stream_Ability (value / interval 0 = none; after the validator 0x703d00 and the create 0x703990: split =
+// Split_Income_With_Allies, mode 0 equal / 1 Split_Favors_Owner / 2 Full_Amount_To_Everyone, owner_share =
+// Owner_Income_Percentage) and its Income_Stream_Mod_Abilities (XML order).
+struct IncomeStreamDef {
+    float value = 0.0f, interval = 0.0f;
+    bool split = false;
+    uint8_t mode = 0;
+    float owner_share = 0.0f;
+    std::vector<IncomeModDef> mods;
+};
+
 class TacticalBattle {
 public:
     // `pf` (OPT3 t09): the model loads of the battle tables' build run on it (results do not depend on it).
@@ -454,7 +474,8 @@ public:
     TacticalBattle& operator=(const TacticalBattle&) = delete;
 
     // S10-int: sim-owned animation (SimAnimation::world of the tactical mode). Call before setup; null = none.
-    void set_animation(SimAnimation* anim) { anim_ = anim; }
+    // mcx4 t11: also hands the catalog's GameConstants locomotor blends to the service (SimAnimation::set_tunables).
+    void set_animation(SimAnimation* anim);
     // refixf t04: model / DeathBehavior source of the death-clone plans when no animation service is set (an unattached
     // SimAnimation, e.g. a session cache or a test's injected models; must outlive the battle). Null = the battle makes its
     // own from the catalog's files. With set_animation the service's own models are used (same files, same answer).
@@ -569,6 +590,19 @@ public:
     // order).
     bool landing_hidden(objects::ObjectId landing) const;
     uint32_t landings_in_flight(int32_t player) const;
+    // mcx4 tac2 (MCX4_T10_RE_ANSWERS §15 / §16a [H]): Apply_Elevated_Vulnerability (0x3a8550) on a combat unit - one
+    // appended Defense entry "Elevated_Vulnerability" (category 0, value = the mode's factor, for its duration; source = the
+    // unit). Called for the members of a land landing's team unload steps (unless reinforcement_vulnerability_disabled for
+    // the landing owner), its single-object steps (not gated) and every unit of a space reinforcement drop (0x2bf2d0).
+    void apply_elevated_vulnerability(objects::ObjectId id);
+    // The gate 0x527f00 of the transport unload step: an applied Battlefield_Modifier with Disable_Reinforcement_Vulnerability
+    // covers `player` (its owner, or with Apply_To_All_Allies any player allied with the owner). [port] Read from the applied
+    // specials of the battle's ability objects; a Reverse_Application_Logic source is not counted.
+    bool reinforcement_vulnerability_disabled(int32_t player) const;
+    // mcx4 tac2 (MCX4_T10_RE_ANSWERS §19, A1_READINGS §35.2 state 4, clearance 0x642ef0 [H]): in a skirmish a timed landing
+    // waits hidden at least this many frames after its attach: Skirmish_Reinforcement_Delay_Frames scaled by the player's
+    // Reinforcement_Time_Multiplier list (int(F x (1 + r)), r = the reduced m - 1 entries). 0 outside a skirmish.
+    uint32_t landing_clearance_delay(int32_t player) const;
     // The Dummy_Barrage_Target of a position-targeted ability for `player` (command 57; Lua Activate_Ability with a
     // position through ObjectBridge::spawn_ability_target). Returns its id, kNoObjectId when the type is missing.
     objects::ObjectId spawn_dummy_target(TacticalMode& mode, int32_t player, Vec3 at, SimRng& rng);
@@ -1695,6 +1729,9 @@ public:
     // refix t03 (S9_DEATH_CLONE_SHIELDS.md §1.6 [L]): true when the death clone of a dying_type unit takes the infantry
     // corpse path (no clone object; the dying unit's corpse row plays the clone type) instead of a store object.
     bool death_clone_corpse_path(uint32_t dying_type, int32_t clone_type, int32_t key) const;
+    // mcx4 tac2 (MCX4_T10_RE_ANSWERS §18, 0x29f270 [H]): the dying type's CategoryMask has Infantry - its death clone's
+    // persistence is then GC Override_Death_Persistence_Duration instead of the clone type's own.
+    bool infantry_type(uint32_t type) const;
 
 private:
     template <class Ar, class Self>
@@ -2293,7 +2330,8 @@ private:
 #ifdef ALAMO_SIM_HAVE_ANIM
     mutable std::unique_ptr<SimAnimation> own_clone_models_;  // made on first use when neither anim_ nor clone_models_ is set
 #endif
-    void schedule_death_clone(TacticalMode& mode, objects::ObjectHandle clone, int32_t clone_type, uint8_t kind, SimRng& rng);
+    void schedule_death_clone(TacticalMode& mode, objects::ObjectHandle clone, int32_t clone_type, uint8_t kind, SimRng& rng,
+                              const float* persistence_override = nullptr);
     void remove_death_clones(TacticalMode& mode, bool all);  // due ones (expire_objects), or all (battle end)
     // s78n t20 batch 1 (MOVEMENT §5.4.5 item 2): a land clone of a type with IsDeathCloneObstacle and a UnitCollisionClass
     // is a movement object without a locomotor (the obstacle b of the land collisions); the clones a collision push
@@ -2650,15 +2688,10 @@ private:
     // skai: skirmish map battles (tactical_battle_skirmish.cpp). Per-type Income_Stream data (parsed on first use, by type).
     struct SkIncome {
         bool parsed = false;
-        float value = 0.0f, interval = 0.0f, multiplier = 1.0f, additive = 0.0f;
-        // mcx4 t10 (MCX4_T09_RE_ANSWERS Q10 [H]): recipients (Split_Income_With_Allies) and the share mode (0 equal,
-        // 1 Split_Favors_Owner with owner_share = Owner_Income_Percentage, 2 Full_Amount_To_Everyone).
-        bool split = false;
-        uint8_t mode = 0;
-        float owner_share = 0.0f;
+        IncomeStreamDef def;  // parse_income_stream (mcx4 t10 / tac2, MCX4_T09_RE_ANSWERS Q10 [H])
     };
     std::vector<SkIncome> sk_income_;
-    const SkIncome& sk_income_of(uint32_t type);
+    const IncomeStreamDef& sk_income_of(uint32_t type);
     void sk_income(const TacticalMode& mode);           // tick: the Income_Stream credit trickle
     void bt_team_positions(TacticalMode& mode);                            // tick, after the movement commit
     std::vector<RemovalRecord> bt_removals_;
@@ -2946,5 +2979,27 @@ private:
 std::vector<uint32_t> black_market_blocked_abilities(const tactical::abilities::AbilityData& data,
                                                      const galactic::GalacticSim& galaxy, int32_t player);
 // --- end P4 tactical ---
+
+// --- skirmish income streams (tactical_battle_skirmish.cpp; MCX4_T09_RE_ANSWERS Q10 [H]); IncomeStreamDef: above ---
+IncomeStreamDef parse_income_stream(const objects::GameObjectTypes& types, uint32_t type);
+// One mod entry on a stream (apply 0x703fe0): the mod's category and its m - 1 / a / im - 1 values (0 = no entry).
+struct IncomeModEntry {
+    int32_t category = 0;
+    float multiplier = 0.0f, additive = 0.0f, interval = 0.0f;
+};
+// The fold 0x33fb70 of one of a stream's maps: per stacking category the largest value, the category maxima summed in
+// ascending category order. `pick` 0 multiplier, 1 additive, 2 interval. Entries with value 0 are not in the map.
+float income_fold(std::span<const IncomeModEntry> entries, int pick);
+// Per-frame pay 0x6951a0: ((M + 1) x base + A) / I / FPS, I = max(1.0, (1 + fold(interval)) x base interval) (0x694b30).
+float income_stream_pay(float base_value, float base_interval, std::span<const IncomeModEntry> entries);
+// The share of one recipient (ascending id order of `recipients`) of a stream of `owner` paying `pay` this frame: mode 2
+// the whole pay; mode 1 the owner s = clamp(pay x owner_share, 0, pay), every other (pay - s) / N (N counts the owner);
+// mode 0 pay / N. Shares <= 0 are not paid in mode 1 (returned as 0).
+float income_share(uint8_t mode, float owner_share, int32_t owner, int32_t recipient, size_t recipients, float pay);
+// Apply 0x703fe0 / remove 0x7046e0: a mod of `mod_owner` modifies a stream of `stream_type` owned by `stream_owner` with
+// recipients `recipients` when it targets that source type, the mod owner is one of the recipients, and either
+// Affects_All_Allied_Sources is set or the two owners are the same.
+bool income_mod_applies(const IncomeModDef& mod, uint32_t stream_type, int32_t stream_owner, int32_t mod_owner,
+                        std::span<const int32_t> recipients);
 
 }  // namespace alamo::sim

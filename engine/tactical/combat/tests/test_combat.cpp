@@ -114,6 +114,12 @@ int main(int argc, char** argv) {
     test_hero_clash_pairing();
     test_hero_clash_fire_refused();
     test_hero_clash_foc_data();
+    test_clash_action_parse();  // mcx4 (lane mcx4-tac2)
+    test_clash_action_pick();
+    test_clash_attack_action();
+    test_clash_move_action();
+    test_clash_special_ability_action();
+    test_clash_action_end_and_save();
     test_area_immune_faction();  // tru1 t04
     test_fires_forward();         // mcx4 t03
     test_mode_weapon_delay();     // mcx4 t10
@@ -122,6 +128,8 @@ int main(int argc, char** argv) {
     test_out_of_combat_defense();
     test_projectile_appearance_delay();
     test_out_of_range_mod_values();  // mcx8 t11
+    test_weapon_delay_order();       // mcx4 (lane mcx4-tac2)
+    test_crouch_move_fire_cone();    // mcx4 (lane mcx4-tac2)
     test_lost_target_no_rescan(); // mcx4 t03
     test_blast_dropoff();         // mcx4 t03
     test_bomb_fall();             // mcx4 t18

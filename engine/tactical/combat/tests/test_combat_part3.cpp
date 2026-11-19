@@ -706,7 +706,7 @@ void test_s78n_review_combat() {
     {  // (c) a listener cancels the hit: no damage, but the stamp stands - the next hit at that frame is diminished
         struct CancelHooks final : CombatHooks {
             bool cancel = true;
-            bool damage_listener(ObjectId, ObjectId, int32_t, uint32_t, SimRng*) override { return cancel; }
+            bool damage_listener(ObjectId, ObjectId, const ListenerShot&, uint32_t, SimRng*) override { return cancel; }
         } hk;
         World w;
         UnitDesc u;

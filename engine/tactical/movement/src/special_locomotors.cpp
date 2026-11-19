@@ -540,4 +540,32 @@ bool clearance_hit(V2 from, V2 to, float qx, float qy, const ClearanceEntry& e, 
     return !(r1 <= 0.0 && r2 >= 1.0);
 }
 
+// ---- mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2) ---------------------------------------------------------------------
+float bomber_facing(V2 pos, float heading, V2 ahead, bool ahead_valid) {
+    if (!ahead_valid || ahead == pos) return heading;  // 0x538830 fell back to the object's own position
+    return wrap_deg(heading_deg(ahead - pos));
+}
+
+float bomber_lookahead_step(float lookahead, float acc, float cap) {
+    const float n = lookahead + acc;
+    return cap <= n ? cap : n;  // 0x645370: the cap wins a tie
+}
+
+float bike_lateral_step(float lateral, float want, float lateral_accel, float v, float vmax) {
+    float l = lateral;
+    if (want > l) l += std::min(want - l, lateral_accel);
+    else if (want < l) l -= std::min(l - want, lateral_accel);
+    const float lim = vmax != 0.0f ? v / vmax : 0.0f;  // +0xec / 0x370f00
+    if (l < -lim) return -lim;
+    if (l > lim) return lim;
+    return l;
+}
+
+V2 bike_travel_dir(float yaw_deg, float lateral) {
+    const V2 f = dir_from_deg(yaw_deg);
+    const V2 t = f + perp_left(f) * lateral;
+    const float len = length(t);  // exact normalise (0x776d48)
+    return len > 0.0f ? V2{t.x / len, t.y / len} : t;
+}
+
 }  // namespace alamo::tactical::movement

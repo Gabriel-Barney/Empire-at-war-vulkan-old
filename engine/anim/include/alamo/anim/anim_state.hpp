@@ -58,11 +58,18 @@ inline constexpr float kLuaPlayBlendSeconds = 0.33f; // Lua GameObject.Play_Anim
 enum class SlotMode : uint8_t { OneShot = 0, Loop = 1, Finished = 2 };
 enum Slot : uint8_t { kPrimary = 0, kPrevious = 1, kOverlay = 2, kSlotCount = 3 };
 
-// Unknown .bss blend-time globals (§A.7, doc §C item 1). [port] 0 = hard cut, as the RE doc recommends
-// until a capture settles them (G1 capture paused).
+// Blend-time globals (§A.7, doc §C item 1). [port] 0 = hard cut while the host sets none.
+// - idle_blend_seconds: the .bss global 0x140b39930 (idle behaviour, type change), value unknown.
+// - The rest are GameConstants fields (MCX4_T11_T12_RE_ANSWERS §S / §B4, GC base 0x140b15800); the battle passes the
+//   loaded values (TacticalBattle::set_animation -> SimAnimation::set_locomotor_blends). FoC values in brackets.
 struct AnimTunables {
-    float idle_blend_seconds = 0.0f;  // 0x140b39930 (idle behaviour, type change)
-    float move_blend_seconds = 0.0f;  // 0x140b16d18 (WalkLocomotor)
+    float idle_blend_seconds = 0.0f;              // 0x140b39930 (idle behaviour, type change)
+    float move_blend_seconds = 0.0f;              // MoveBlendTime (+0x1518 = 0x140b16d18; 0.5): WalkLocomotor 0x61f840
+    float idle_walk_blend_seconds = 0.0f;         // IdleWalkBlendTime (+0x1510; 0.5): walker stop 0x61f510, team 0x62c420
+    float crouch_idle_walk_blend_seconds = 0.0f;  // CrouchIdleWalkBlendTime (+0x1514; 0.5): team stop into Idle Crouch
+    float team_move_blend_seconds = 0.0f;         // TeamMoveBlendTime (+0x1520; 0.2): team member idle / turn -> move
+    float team_crouch_move_blend_seconds = 0.0f;  // TeamCrouchMoveBlendTime (+0x1524; 0.5): the same into a crouch clip
+    float infantry_turn_blend_seconds = 0.0f;     // InfantryTurnBlendTime (+0x1528; 0.2): cap of the TURNL / TURNR blend
 };
 
 struct PlayRequest {
@@ -107,6 +114,7 @@ public:
     explicit AnimWorld(AnimTunables tunables = {}) : tunables_(tunables) {}
 
     const AnimTunables& tunables() const { return tunables_; }
+    void set_tunables(const AnimTunables& t) { tunables_ = t; }  // configuration: not hashed, not saved
 
     // ---- membership ----
     // Model created (§A.7 first row). `model` must outlive the world (or the row). `rng`: synced for
@@ -149,6 +157,7 @@ public:
     SlotMode current_mode(ObjectId id) const { return slot(id).mode; }  // 0x395660
     bool crossfading(ObjectId id) const;
     float crossfade_weight(ObjectId id) const;  // 1 when no fade
+    float crossfade_duration(ObjectId id) const;  // the running fade's blend seconds; 0 when no fade
     bool near_end(ObjectId id) const;           // object +0x74 bit 3 is CLEAR once frame >= count - 2.5
     bool locked(ObjectId id) const;
     // Frame count / fps of the current clip (0 when none).

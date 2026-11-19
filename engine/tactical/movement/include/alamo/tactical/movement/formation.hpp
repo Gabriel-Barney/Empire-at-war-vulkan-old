@@ -125,4 +125,36 @@ inline float formation_side_correction(float error, float min_err = 0.1f, float 
     return 0.0f;
 }
 
+// mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2, the group move 0x2a7b80 [H]): Snap_Movement_Orders_To_Center. A land position
+// order (kind 1) scans every object of the game mode (`objects`, the mode's list order: the host passes only the objects
+// whose type has the flag) and takes the nearest one whose 3-D distance to the order point (p, pz) is <= its radius
+// (0x397780; a later object replaces the pick only when strictly nearer). Returns its index, -1 = none (the point stays).
+// mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4, 0x411980 / 0x421cc0 / 0x559350 [H]): the final-facing rotation of a land formation
+// with an ordered facing. With the formation path `path` (>= 2 points) and the order's facing f (degrees; kNoFacing:
+// none): psi = wrap(f - heading(last segment)) (degrees, (-180, 180]); |psi| < FinalFormationFacingMinimumAngle -> no
+// rotation. Else full = psi in radians; R = sqrt(2) x (half_width x 0.5 x 20) (half_width = the layout half-width 0x41a740,
+// cells); L = the path length, v = the formation speed (0x41b2a0); L != 0 and v > 0: budget = ((FinalFormationFacingDelta
+// Coefficient x v) / R) x (L / v) (the turn the formation makes while it walks); budget < |full| -> start = sign(full) x
+// (|full| - budget) (the part applied at once), else 0; rate = ((full - start) / L) x 1.2 (radians per unit of arc).
+// The member slot offsets (depth, lateral) are rotated by r(s) = start + rate x s, never past full (rotation_at).
+struct FinalFacing {
+    float full = 0.0f;   // F +0x24c (radians)
+    float start = 0.0f;  // F +0x248
+    float rate = 0.0f;   // F +0x250
+    bool on() const { return full != 0.0f || start != 0.0f || rate != 0.0f; }
+    float rotation_at(float s) const {
+        const float r = rate * s + start;
+        return rate >= 0.0f ? (r <= full ? r : full) : (full <= r ? r : full);
+    }
+};
+FinalFacing final_formation_facing(std::span<const V2> path, float facing_deg, float half_width, float speed,
+                                   const MovementConstants& k);
+
+struct SnapCenter {
+    V2 pos;
+    float z = 0.0f;
+    float radius = 0.0f;
+};
+int32_t snap_order_center(V2 p, float pz, std::span<const SnapCenter> objects);
+
 }  // namespace alamo::tactical::movement

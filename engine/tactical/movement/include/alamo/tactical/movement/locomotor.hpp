@@ -238,6 +238,11 @@ struct WalkExtras {
     const WalkTransition* wt = nullptr;  // s78n t26 closing review: Walk_Transition clip data (null / !on: none)
     // mcx4 t11 (MOVEMENT §4.4, 0x41dbb0): FormationMinimumSideError (GC +0x14cc) / FormationMaximumSideError (+0x14d0)
     float side_error_min = 0.1f, side_error_max = 30.0f;
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2, BIKE move step 0x63abe0): a bike's sideways speed L (pack +0x1fc, in / out;
+    // null: not a bike) and its LateralAcceleration. At C.7 L steps toward the steering vector's left component
+    // (bike_lateral_step) and the travel direction is bike_travel_dir(yaw, L).
+    float* lateral = nullptr;
+    float lateral_accel = 0.0f;
 };
 
 // s78n t26.4 (MOVEMENT §5.4.1 "How Walk combines" items 1 - 3, 0x61d570): the wanted direction on the top record m - false

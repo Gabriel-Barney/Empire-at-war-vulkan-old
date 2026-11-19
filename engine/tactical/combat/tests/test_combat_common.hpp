@@ -1199,6 +1199,12 @@ void test_hero_clash_end_and_save();
 void test_hero_clash_pairing();
 void test_hero_clash_fire_refused();
 void test_hero_clash_foc_data();
+void test_clash_action_parse();  // mcx4 (lane mcx4-tac2): test_combat_clash_actions.cpp
+void test_clash_action_pick();
+void test_clash_attack_action();
+void test_clash_move_action();
+void test_clash_special_ability_action();
+void test_clash_action_end_and_save();
 void test_area_immune_faction();  // tru1 t04 (test_combat_tru1.cpp)
 void test_fires_forward();           // mcx4 t03 (test_combat_mcx4.cpp)
 void test_mode_weapon_delay();        // mcx4 t10 (test_combat_mcx4.cpp)
@@ -1207,6 +1213,8 @@ void test_depleted_shield_increment();
 void test_out_of_combat_defense();
 void test_projectile_appearance_delay();
 void test_out_of_range_mod_values();     // mcx8 t11
+void test_weapon_delay_order();          // mcx4 (lane mcx4-tac2)
+void test_crouch_move_fire_cone();       // mcx4 (lane mcx4-tac2)
 void test_lost_target_no_rescan();   // mcx4 t03
 void test_blast_dropoff();           // mcx4 t03
 void test_bomb_fall();               // mcx4 t18

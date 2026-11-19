@@ -1,7 +1,10 @@
 // s78n t06 - hero clashes (docs/re/HERO_CLASH.md §1-§6; TACTICAL_COMBAT §5.4.3 item 3). Land mode only.
 //   * HEROCLASH.XML (§1): one entry per <Hero_Clash>, file order, duplicate names kept (the loader 0x4814d0 does not
-//     check them). Action_Driven entries are parsed and never started (§4 [port]: shipped Clash_Range 0.0, so retail never
-//     starts them either).
+//     check them). Action_Driven entries and their Clash_Actions are parsed; they start only with a host that carries
+//     out the action runner's effects (HeroClashHost::action_clashes; shipped Clash_Range 0.0, so retail never starts
+//     them either). The runner (mcx4, MCX4_T10_RE_ANSWERS §11, MCX4_T11_T12_RE_ANSWERS §B3): each object without a
+//     running action picks one by relevance-weighted draw, running actions are serviced every 2 (Attack), 6 (Move) or
+//     3 (Special_Ability) frames, finished ones end; the clash ends when the remaining objects share one owner.
 //   * HeroClashManager (§2, §3): the land mode's manager 0x56ce20, ticked in land tick step 4 (after weather, before the
 //     common object tick). Detection 0x56c790 only when frame % 15 == 0 (no draws), then every running clash's update in
 //     start order. Melee clash 0x6ac780 (start) -> approach (1) -> snap (2) -> fight (3) with one synced float draw per
@@ -46,6 +49,69 @@ inline constexpr uint8_t kExchangeConversation = 4;
 inline constexpr uint32_t kClashFallbackClipFrames = 101;
 inline constexpr float kClashFallbackClipFps = 30.0f;
 
+// ---- action-driven clash data (§4; MCX4_T10_RE_ANSWERS §11 Attack_Action, MCX4_T11_T12_RE_ANSWERS §B3 Move_Action and
+// Special_Ability_Action) ----
+inline constexpr uint8_t kActionAttack = 0;
+inline constexpr uint8_t kActionMove = 1;
+inline constexpr uint8_t kActionSpecialAbility = 2;
+// ActionRelevanceType (0x5e94a0): Constant, Distance_From_Target_Curve, Health_Percentage_Curve,
+// Distance_From_Target_Curve_Times_Health_Percentage_Curve; -1 (unset or unknown) gives relevance 0.
+inline constexpr int32_t kRelevanceConstant = 0;
+inline constexpr int32_t kRelevanceDistance = 1;
+inline constexpr int32_t kRelevanceHealth = 2;
+inline constexpr int32_t kRelevanceDistanceTimesHealth = 3;
+// MoveActionType (0x5ea440): Invalid 0, Move_To_Target 1, Move_Past_Target 2, Dodge_Shot_From_Target 3 (0 and 3 never start).
+inline constexpr int32_t kMoveToTarget = 1;
+inline constexpr int32_t kMovePastTarget = 2;
+inline constexpr int32_t kMoveDodgeShot = 3;
+// The variant a subindex < 0 becomes in the post-parse (slot 12): a random variant.
+inline constexpr int32_t kAnyVariant = 0xFFFF;
+// Frames between two services of a running action (slot 6).
+inline constexpr int32_t kAttackInterval = 2;
+inline constexpr int32_t kMoveInterval = 6;
+inline constexpr int32_t kSpecialAbilityInterval = 3;
+
+// LinearInterpolator (vtable 0x85c0f8, value vf2 0x2c8660; SKIRMISH_SETUP §6): points sorted by x, piecewise linear
+// between them, 0 below the first / above the last point or with fewer than two points.
+struct ClashCurve {
+    std::vector<std::pair<float, float>> points;  // sorted by x at parse (stable)
+    float value(float x) const;
+};
+
+// One <Attack_Action> / <Move_Action> / <Special_Ability_Action> of Clash_Actions (the template the clash clones).
+struct ClashAction {
+    uint8_t kind = kActionAttack;
+    std::string name;
+    std::string object_type, target_type;  // Action_Object / Action_Target (type names; HeroClashHost::type_by_name)
+    int32_t relevance_type = -1;           // Action_Relevance_Type
+    float relevance_constant = 0.0f;       // Action_Relevance_Constant
+    ClashCurve distance_curve;             // Action_Distance_From_Target_Curve (x = actor-target 3-D distance)
+    ClashCurve health_curve;               // Action_Health_Percentage_Curve (x = the actor's health fraction)
+    // Attack_Action (ctor 0x71e840 defaults). Attack_Accuracy_Modifier is parsed by retail and never read (§11).
+    std::string projectile_type;           // Attack_Projectile_Type (the host resolves it)
+    std::string attack_anim;               // Attack_Animation_Type (a ModelAnimType name; empty = none)
+    int32_t attack_subindex = kAnyVariant;  // Attack_Animation_Subindex
+    float attack_speedup = 1.0f;           // Attack_Animation_Speedup
+    std::string firing_bone = "ROOT";      // Attack_Firing_Bone_Name
+    int32_t shots = 1;                     // Attack_Number_Of_Shots
+    std::string sfx;                       // Attack_SFXEvent (audio only)
+    // Move_Action (ctor 0x5e9b50 defaults).
+    int32_t move_type = 0;                 // Move_Type
+    float move_speed = -1.0f;              // Move_Speed (> 0: a speed override)
+    std::string move_anim;                 // Move_Animation_Type
+    int32_t move_subindex = kAnyVariant;   // Move_Animation_Subindex
+    float move_speedup = 1.0f;             // Move_Animation_Speedup
+    bool anim_override = false;            // Move_Animation_Override
+    float min_distance = 0.0f;             // Move_Min_Distance
+    float max_distance = 0.0f;             // Move_Max_Distance
+    bool use_jetpack = false;              // Move_Use_Jetpack
+    bool wait_for_jetpack = false;         // Wait_For_Finish_If_Target_Using_Jetpack
+    // Special_Ability_Action.
+    std::string ability_name;              // Ability_Name
+    float cooldown_secs = 0.0f;            // Ability_Cooldown_Time_In_Secs
+    int32_t cooldown_frames = 0;           // post-parse 0x71f5f0: round_half_away(30 x cooldown)
+};
+
 struct HeroClashEntry {
     std::string name;
     int32_t clash_type = -1;            // Clash_Type
@@ -63,7 +129,8 @@ struct HeroClashEntry {
     // Win / Lose / Draw / Conversation animation type names (First_Hero_*_Anim_Type, Second_Hero_*_Anim_Type).
     std::array<std::string, 4> first_anims, second_anims;
     std::string first_speech, second_speech;  // *_Win_Speech (audio only)
-    uint32_t action_count = 0;                // Clash_Actions children (Action_Driven; never serviced, §4)
+    uint32_t action_count = 0;                // Clash_Actions children (every element)
+    std::vector<ClashAction> actions;         // the Attack / Move / Special_Ability actions among them, file order
 };
 
 struct HeroClashData {
@@ -126,6 +193,50 @@ public:
     virtual bool speech_idle() = 0;
     // Take_Damage (0x3a9e30): victim, kind 1, amount, the winner as a non-projectile source, no hardpoint.
     virtual void damage(ObjectId victim, float amount, ObjectId source) = 0;
+
+    // ---- action-driven clash (§4; MCX4_T10_RE_ANSWERS §11, MCX4_T11_T12_RE_ANSWERS §B3) ----
+    // True when the host carries out the effects below: Action_Driven entries start only then. Default false: such a host
+    // keeps the s78n t06 rule "parse, never start" (shipped data cannot start them anyway, Clash_Range 0.0).
+    virtual bool action_clashes() { return false; }
+    virtual int32_t type_by_name(std::string_view /*name*/) { return -1; }  // Action_Object / Action_Target; -1 unknown
+    virtual float health_fraction(ObjectId /*id*/) { return 1.0f; }       // 0x396df0 [M: current / max health]
+    // On (start 0x6ab200): 0x63f060(obj, 1, 1) - the locomotor stopped and suspended, behaviours 9 (TARGETING), 10, 11,
+    // 7 (IDLE) and 0x20 suspended -, +0x3b4 := 1 on the object and its team container (in_clash() answers true), and a
+    // new coordinator with a Move_To its own position. Off (the release in 0x6ab4d0): 0x63f060(obj, 0, 1), +0x3b4 := 0.
+    virtual void action_hold(ObjectId /*id*/, bool /*on*/) {}
+    // Attack_Action. Play_Animation 0x3a92f0 of the animation type named `anim` (a ModelAnimType name), variant `subindex`
+    // (kAnyVariant: a random one), looped or one-shot, blend seconds, speed; false when the model has no such clip.
+    virtual bool play_clip(ObjectId /*id*/, std::string_view /*anim*/, int32_t /*subindex*/, bool /*loop*/, float /*blend*/,
+                           float /*speed*/) {
+        return false;
+    }
+    virtual void play_default_clip(ObjectId /*id*/, float /*blend*/) {}  // the type's default clip (0x395920), its loop flag
+    // 0 when the current clip is not of the type named `anim` (0x3956a0), 1 while it runs, 2 once it ended (0x395660).
+    virtual int32_t clip_state(ObjectId /*id*/, std::string_view /*anim*/) { return 0; }
+    // WeaponBehaviorClass fire 0x54ade0: shooter, the firing bone (index of `bone` in the model, 0 when absent), target,
+    // the projectile type named `projectile`.
+    virtual void fire_projectile(ObjectId /*shooter*/, std::string_view /*bone*/, ObjectId /*target*/, std::string_view /*projectile*/) {}
+    virtual void flash(ObjectId /*id*/, std::string_view /*bone*/, bool /*on*/) {}  // the "<bone>_FLASH" sub-mesh (visual)
+    virtual void sound(ObjectId /*id*/, std::string_view /*sfx_event*/) {}          // Attack_SFXEvent (audio)
+    // Move_Action.
+    virtual bool busy(ObjectId /*id*/) { return false; }             // 0x39ad40: true refuses the start
+    virtual bool has_locomotor(ObjectId /*id*/) { return true; }     // behaviour 1
+    virtual bool locomotor_suspended(ObjectId /*id*/) { return false; }  // locomotor vf +0x210
+    virtual void suspend_locomotor(ObjectId /*id*/, bool /*on*/) {}  // vf +0x200 / +0x208
+    virtual void jetpack_locomotor(ObjectId /*id*/, bool /*on*/) {}  // 0x3a9910 (on: the jet-pack locomotor; off: back)
+    // A move goal: z put on the ground (0x5e9c30), then the passability test 0x50eeb0 and, for `free_cell`, the free-cell
+    // test 0x538200 when the mode has one. False: that try fails (up to 5 tries).
+    virtual bool move_goal(ObjectId /*id*/, Vec3& /*goal*/, bool /*free_cell*/) { return true; }
+    virtual bool can_move(ObjectId /*id*/) { return true; }  // 0x397260: the actor has a movement coordinator
+    // 0x3a8e20: the move clip := `anim` / subindex / speedup (an earlier override is cleared first, 0x39ad10 / 0x38f8d0).
+    virtual void move_anim_override(ObjectId /*id*/, std::string_view /*anim*/, int32_t /*subindex*/, float /*speedup*/) {}
+    virtual void clear_move_anim_override(ObjectId /*id*/) {}  // 0x38f8d0
+    virtual void speed_override(ObjectId /*id*/, float /*speed*/) {}  // 0x3a8c90 (an earlier override cleared first)
+    virtual void clear_speed_override(ObjectId /*id*/) {}            // 0x38f8b0
+    virtual void order_move(ObjectId /*id*/, Vec3 /*goal*/) {}       // 0x4f8200: a move order of the actor's coordinator
+    virtual void lock_orders(ObjectId /*id*/, bool /*on*/) {}        // 0x3a8e50
+    // Special_Ability_Action: activate the actor's ability named `ability` on `target` (0x37b750); false: not started.
+    virtual bool activate_ability(ObjectId /*id*/, std::string_view /*ability*/, ObjectId /*target*/) { return false; }
 };
 
 class HeroClashManager {
@@ -160,14 +271,45 @@ public:
         bool first_won = false;   // the winner is hero 1 (First_Hero_Type): First_Hero_Win_Speech, else Second_ (audio)
     };
 
+    // A running clone of a ClashAction (slot 4 clone, slot 5 start; MCX4_T10 §11, MCX4_T11_T12 §B3).
+    struct RunningAction {
+        uint32_t action = 0;  // index in the entry's actions
+        ObjectId actor = kNoObject, target = kNoObject;  // kNoObject once removed (the action is then finished)
+        int32_t last_service = 0;  // frame of the last service (0 at the start)
+        int32_t interval = 0;      // slot 6
+        bool finished = false;     // Attack +0x120, Move +0xe7
+        // Attack: the Attack_Animation_Type / subindex were replaced by the fallback clip (type 5 "Attack", any variant).
+        bool fallback_clip = false;
+        int32_t shots_fired = 0;   // +0x124
+        int32_t last_shot = -1;    // +0x12c: frame of the last shot
+        // Move.
+        bool loco_suspended = false;  // +0xe8: the locomotor was suspended at the start
+        bool waiting = false;         // +0xe9: waiting for the target's jet-pack jump to end
+        float last_d2 = 0.0f;         // +0xec: squared distance to the target
+        int32_t restarts = 0;         // +0xf0
+        // Special_Ability: frames left (+0xec).
+        int32_t frames_left = 0;
+    };
+    // ActionDrivenHeroClashClass (vtable 0x8bd978; §4).
+    struct ActionClash {
+        uint32_t entry = 0;
+        std::vector<ObjectId> objects;  // the involved objects (+0x30), detection order
+        ObjectId winner = kNoObject;    // +0x48
+        std::vector<RunningAction> running;  // +0x18, start order
+        uint32_t picks = 0;             // started actions (diagnostics; saved, hashed)
+    };
+
     // The entries and their First / Second hero types resolved by the host (-1 unknown: the entry never starts).
     void set_data(const HeroClashData* data, std::vector<std::pair<int32_t, int32_t>> types);
     const HeroClashData* data() const { return data_; }
-    // The land tick step: detection when frame % 15 == 0, then every clash's update (start order).
+    // The land tick step: detection when frame % 15 == 0, then every clash's update (start order: melee clashes, then
+    // the action-driven ones [port]).
     void update(uint32_t frame, HeroClashHost& host, SimRng& rng);
 
-    bool empty() const { return clashes_.empty(); }
+    bool empty() const { return clashes_.empty() && action_clashes_.empty(); }
     const std::vector<Clash>& clashes() const { return clashes_; }
+    const std::vector<ActionClash>& action_clashes() const { return action_clashes_; }
+    uint32_t action_clashes_ended() const { return action_ended_; }
     // The running clashes' hero pairs, start order (CombatSystem::set_hero_clashes).
     std::vector<std::pair<ObjectId, ObjectId>> pairs() const;
     // True when the running clash list changed since the last call (start / end / load).
@@ -199,10 +341,26 @@ private:
     bool apply_damage(Clash& c, uint32_t frame, HeroClashHost& host);  // false: the clash ended
     void release(const Clash& c, ObjectId hero, HeroClashHost& host) const;
     void end(Clash& c, ObjectId winner, uint32_t frame, HeroClashHost& host, bool by_removal);
+    // Action-driven clash (§4).
+    bool start_action_clash(uint32_t entry, ObjectId a, ObjectId b, HeroClashHost& host);
+    bool update_action_clash(ActionClash& c, int32_t frame, HeroClashHost& host, SimRng& rng);  // false: ended
+    bool object_removed(ActionClash& c, ObjectId id, HeroClashHost& host, SimRng& rng);           // false: ended
+    bool pick_action(ActionClash& c, ObjectId actor, HeroClashHost& host, SimRng& rng);
+    float relevance(const ClashAction& a, ObjectId actor, const std::vector<ObjectId>& objects, HeroClashHost& host,
+                    ObjectId& target) const;
+    bool begin_action(RunningAction& r, const ClashAction& a, HeroClashHost& host, SimRng& rng);
+    void service_action(RunningAction& r, const ClashAction& a, int32_t frame, HeroClashHost& host, SimRng& rng);
+    void end_action(RunningAction& r, const ClashAction& a, HeroClashHost& host, SimRng& rng);
+    void attack_fire(RunningAction& r, const ClashAction& a, int32_t frame, HeroClashHost& host);
+    bool move_begin(RunningAction& r, const ClashAction& a, HeroClashHost& host, SimRng& rng);  // 0x5e9ed0 (type 1)
+    bool move_goal(RunningAction& r, const ClashAction& a, HeroClashHost& host, SimRng& rng, Vec3& goal);
+    bool move_start(RunningAction& r, const ClashAction& a, HeroClashHost& host, Vec3 goal);  // 0x5ea910
 
     const HeroClashData* data_ = nullptr;
     std::vector<std::pair<int32_t, int32_t>> types_;
     std::vector<Clash> clashes_;
+    std::vector<ActionClash> action_clashes_;
+    uint32_t action_ended_ = 0;
     std::vector<EndEvent> ended_;
     uint32_t started_ = 0;
     bool changed_ = false;

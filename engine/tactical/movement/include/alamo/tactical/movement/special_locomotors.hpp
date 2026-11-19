@@ -88,8 +88,12 @@ struct SpecialMotion {
     V2 vel;
     float vel_z = 0.0f;
     uint32_t path_idx = 0;
-    float clock = 0.0f;         // bomber +0x1e8 / timed-path time (frames)
+    float clock = 0.0f;         // bomber / timed-path time (frames) [port: the pass playback time]
     float pass_z = 0.0f;        // bomber pass height
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2 / §B4; save version 36): the LANDBOMBER facing lookahead pack +0x1e8 (frames;
+    // 0 at the pack ctor 0x553f00) and the BIKE sideways speed pack +0x1fc (a fraction of max speed, 0x63abe0).
+    float facing_lookahead = 0.0f;
+    float lateral = 0.0f;
 };
 
 // Type values (raw XML; the system applies the mode multiplier where the getters do).
@@ -104,8 +108,22 @@ struct SpecialParams {
     bool has_pre_turn_anim = false;      // Has_Pre_Turn_Anim (+0x36)
 };
 
-// Land bomber clock (+0x1e8) step per frame: GameConstants 0x140b16c4c (GC +0x144c), value unread [M] -> 1 frame.
+// Land bomber pass clock step per frame [port: the timed path's playback; mcx4 t11 found that pack +0x1e8 and GC +0x144c
+// are the facing lookahead and SpaceLocomotorFacingLookaheadAcc (MCX4_T11_T12_RE_ANSWERS §B2), not this clock].
 inline constexpr float kLandBomberClockStep = 1.0f;
+// mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2, LANDBOMBER 0x645370 / facing getter 0x645a70 [H]): the bomber's yaw after its
+// step. `pos` / `heading` = the path pose at `clock` (the unit's new position and the path's own heading); the reserved
+// position n = int(lookahead) frames ahead (`ahead`, `ahead_valid` = still on the path) replaces the heading by the
+// direction pos -> ahead when it differs from pos; otherwise the heading is kept.
+float bomber_facing(V2 pos, float heading, V2 ahead, bool ahead_valid);
+// The lookahead after the step: min(lookahead + SpaceLocomotorFacingLookaheadAcc, MaxFacingLookAheadFrames).
+float bomber_lookahead_step(float lookahead, float acc, float cap);
+// mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2, BIKE move step 0x63abe0 [H]): the sideways speed L (pack +0x1fc, a fraction of
+// max speed) after one step. want = the collision steering vector's component along the unit's left (-sin yaw, cos yaw);
+// L moves toward it by at most LateralAcceleration, then is clamped to +-(v / vmax). The travel direction is then
+// normalise((cos yaw, sin yaw) + L (-sin yaw, cos yaw)) (bike_travel_dir).
+float bike_lateral_step(float lateral, float want, float lateral_accel, float v, float vmax);
+V2 bike_travel_dir(float yaw_deg, float lateral);
 // Jetpack landing test window (0x140a44334): last waypoint time - now <= 7 frames.
 inline constexpr float kJetpackLandingFrames = 7.0f;
 inline constexpr float kJetpackRelandRadius = 50.0f;  // re-issued move (0x640880, radius 50)
@@ -136,8 +154,9 @@ TurnAnim arrival_turn_band(float err_deg, float stopped_rate, float threshold, i
 // End clip 0x61d810 of the clip `anim` that ended the turn: {3, 12, 13, 21, 22} -> TURNL_END 13, {4, 14, 15, 23, 24} ->
 // TURNR_END 15, else kAnimNone.
 int32_t arrival_turn_end_clip(int32_t anim);
-// The TURNL / TURNR blend cap of a unit without Has_Pre_Turn_Anim (GameConstants global 0x140b16d28, value not read):
-// [port] 0.2 seconds. Blend = min(|e0| / r x 0.03333, cap).
+// The TURNL / TURNR blend cap of a unit without Has_Pre_Turn_Anim: GameConstants InfantryTurnBlendTime (0x140b16d28 = GC
+// +0x1528; MovementConstants::infantry_turn_blend_time, this is its default and FoC value). Blend = min(D / r x 0.03333,
+// cap), D = e0 wrapped into [0, 360) (mcx4 t11, 0x620190 [M]: a right turn counts 360 - |e0|).
 inline constexpr float kArrivalTurnBlendCapPort = 0.2f;
 
 // Jetpack altitude (0x6404e0). `track(i)` = the unit's position i frames ahead (path playback, or position +

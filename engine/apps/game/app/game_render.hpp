@@ -232,6 +232,9 @@ public:
     void start_light_pulse(uint32_t id, render::LightPulse p, double now);
     void set_pulse_time(double now) { pulse_now_ = now; }
     float shield_flash_duration() const { return shield_flash_duration_; }
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q10, 0x392ba0 mode 3): the rapid GUI flash of a click-selected object - the colour
+    // x (1 + GUI_Flash_Level x remaining / GUI_Rapid_Flash_Duration), three times; a new flash replaces a running one.
+    void rapid_flash(uint32_t id, double now);
     const float* shield_flash_color() const { return shield_flash_color_; }
     // cu9g t03: the bombing-run targeting blob of this frame (HUD_GAPS §9.5; nullopt = none). Set before prepare().
     void set_bombing_blob(const std::optional<render::JamBlob>& blob) { bombing_blob_ = blob; }
@@ -303,6 +306,7 @@ private:
     std::map<uint64_t, render::LightPulse> pulses_;   // mcx4 t15: running object light effects
     double pulse_now_ = 0.0;
     float shield_flash_duration_ = 0.1f;              // GameConstants Shield_Flash_Duration
+    float gui_flash_level_ = 3.0f, gui_rapid_flash_duration_ = 0.1f;  // mcx4 t14: GUI_Flash_Level / GUI_Rapid_Flash_Duration
     float shield_flash_color_[3] = {1.0f, 1.1f, 1.25f};  // GameConstants Shield_Flash_Scale
     float hover_scale_ = 1.5f;                        // GameConstants Mouse_Over_Highlight_Scale
     std::vector<render::Instance> bg_;

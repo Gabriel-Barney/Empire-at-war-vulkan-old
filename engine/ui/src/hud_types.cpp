@@ -44,6 +44,8 @@ std::vector<HudTypeInfo> build_hud_type_table(const objects::GameObjectTypes& ty
         };
         h.visible_on_radar = flag("Is_Visible_On_Radar");
         h.visible_on_enemy_radar = flag("Is_Visible_On_Enemy_Radar");
+        h.radar_show_facing = flag("Radar_Show_Facing");  // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q12, default Yes)
+        h.radar_rotate = types.get_bool(t, "Radar_Rotate_Icon");  // ledger: consumes GameObjectType.Radar_Rotate_Icon
         h.visible_on_radar_when_fogged = types.get_bool(t, "Visible_On_Radar_When_Fogged");  // q6 t19 (absent = No)
         const std::span<const std::string_view> cats = types.get_list(t, "CategoryMask");
         // GUI_Bracket_Size -1: class from the category (derive_bracket_classes).

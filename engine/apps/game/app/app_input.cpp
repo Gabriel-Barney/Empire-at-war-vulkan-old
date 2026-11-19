@@ -1,6 +1,7 @@
 // alamo_game App: special systems, sim stepping, command routing, HUD / galactic / battle / menu input (split from game_main.cpp).
 #include "game_app.hpp"
 #include "alamo/data/values.hpp"  // mcx4 t14: data::trim
+#include "alamo/galactic/economy.hpp"  // mcx4 t13: build countdown speech
 #ifdef ALAMO_SIM_HAVE_ANIM
 #include "alamo/sim/sim_anim.hpp"  // aud1 t03
 #endif
@@ -186,28 +187,39 @@ void App::announcer_feedback() {
             audio_.production(data_.types, static_cast<objects::TypeIndex>(e.type), kind);
         }
         // aud2 t07 (BATTLE_TRANSITIONS, departure 0x431c80): Galactic_Fleet_Hyperspace when the local player owns or sees
-        // the departing fleet. [port] "sees": the local player can see fleet presence at the origin planet
-        // (can_see_planet_info FleetPresence) and the fleet is not all stealthed (the announcer's hidden test). Only the
+        // the departing fleet. mcx4 t14 (MCX4_GAL2_RE_ANSWERS Q3): "sees" is the fleet visibility vote 0x433090
+        // (GalacticSim::fleet_visible_to_local). Only the
         // move order's departure plays it: a pass-through hop re-departs without 0x431c80, and GalacticSim emits that
         // departure right after the fleet's FleetArrived(kArrivePassThrough), so the stream order tells them apart.
         const bool pass_through_departure = e.kind == K::FleetDeparted && e.fleet == pass_through_fleet;
         pass_through_fleet = e.kind == K::FleetArrived && e.value == galactic::kArrivePassThrough ? e.fleet : kNoPassThrough;
         if (e.kind == K::FleetDeparted && me >= 0 && !pass_through_departure) {
-            bool sees = false;
-            if (e.player != me && e.planet < g->planets().size() &&
-                g->can_see_planet_info(me, e.planet, galactic::GalacticSim::PlanetInfo::FleetPresence)) {
-                sees = true;
-                if (e.fleet < g->fleets().size()) {
-                    const galactic::FleetState& fl = g->fleets()[e.fleet];
-                    bool all_hidden = !fl.contents.empty();
-                    for (const objects::ObjectHandle m : fl.contents)
-                        if (g->store().alive(m)) all_hidden = all_hidden && g->hidden(m);
-                    sees = !all_hidden;
-                }
-            }
+            const bool sees = e.player != me && g->fleet_visible_to_local(e.fleet);
             audio_.fleet_departure(e.player == me, sees);
         }
     }
+    // mcx4 t13 (MCX4_T09_RE_ANSWERS Q7, production speech 0x401e50): a queue head whose type has Build_Countdown_Timer and
+    // a Build_Speech_Countdowns prefix speaks the countdown (econ::build_countdown_speech) as its remaining time crosses
+    // the minute / ten-second / second steps; every player hears it (no owner test). [port] the subtitle line retail
+    // shows with subtitles on is not drawn; a newly seen head speaks from its next change on.
+    for (uint32_t pi = 0; pi < g->planets().size(); ++pi)
+        for (uint32_t qi = 0; qi < 2; ++qi) {
+            const auto key = std::make_pair(pi, qi);
+            const auto& q = g->planets()[pi].queue[qi];
+            const galactic::TypeInfo* ti = !q.empty() && q.front().type < g->rules().types.size() ? &g->rules().types[q.front().type] : nullptr;
+            if (!ti || !ti->build_countdown_timer || ti->build_speech_countdowns.empty()) {
+                countdown_speech_seen_.erase(key);
+                continue;
+            }
+            const galactic::BuildEntry& e = q.front();
+            const float rem = galactic::econ::timer_remaining_seconds(e.start, e.duration, g->frame());
+            const auto [it, fresh] = countdown_speech_seen_.try_emplace(key, e.start, rem);
+            if (!fresh && it->second.first == e.start) {
+                const std::string ev = galactic::econ::build_countdown_speech(ti->build_speech_countdowns, it->second.second, rem);
+                if (!ev.empty()) audio_.speech(ev);
+            }
+            it->second = {e.start, rem};
+        }
     // ui4 t11 (§2.7.3, player tick 0x287e70): SFXEvent_Strategic_Pop_Cap_Reached when the population used rises above a
     // previous value > 0 and reaches the capacity. Retail never plays SFXEvent_Max_Credits_Limit_Reached or
     // _Build_Impossible_Location_Blockaded (no reader of either field).
@@ -407,6 +419,8 @@ void App::post_tick() {
 
 void App::step_sim() {
     if (!session_ || hold_sim_ || script_hold_ || paused_ || battle_end_open_ || story_summary_open_) return;
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q6): a Pause_Game_While_Playing movie holds the game mode while it plays.
+    if ((full_movie_.playing() && full_movie_.pauses_game()) || (advisor_movie_.playing() && advisor_movie_.pauses_game())) return;
     if (load_intro_frames_ > 0) return;  // QA t11: the load screen reaches the screen before the push's blocking load
     const bool demo = screen_ == Screen::Menu && demo_session();  // OI host: the attract demo behind the main menu
     if ((screen_ == Screen::Menu && !demo) || screen_ == Screen::BattleLoad || screen_ == Screen::Quit) return;
@@ -521,6 +535,10 @@ void App::respond(const commands::EventData& ev) {
 void App::submit(commands::EventData ev, bool voice) {
     if (!session_) return;
     if (voice) respond(ev);  // UiOrder::voice false: the double-click order replays no unit response (spec §1.4)
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q10, click path 0x37250): the selected objects flash (rapid GUI flash). [port] every
+    // local Select order in battle (click, double click, box); retail's box path was not traced.
+    if (ev.type() == commands::EventType::Select && screen_ == Screen::Battle)
+        for (const uint32_t id : ev.ids("ids")) bview_.rapid_flash(id, now_s_);
     const std::string name(ev.def().name);
     std::string detail;  // galactic moves: which fleet / planet / player (the reason alone hid the playtest failure)
     if (ev.type() == commands::EventType::MoveObjectToObject)

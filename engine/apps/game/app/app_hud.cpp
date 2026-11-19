@@ -122,6 +122,13 @@ void App::planet_icons(const galactic::GalacticSim& g, PlanetIndex row, ui::Gala
         }
     }
     if (best_t != objects::kNone) out.garrison_icon = icon(best_t);
+    // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q2): the name label's class from the live ground structures, when the local player
+    // sees the ground base info (0x50b840); else class 0.
+    if (g.can_see_groundbase_info(me, row)) {
+        size_t n = 0;
+        for (const objects::ObjectHandle h : ps.structures) n += st.alive(h) ? 1u : 0u;
+        out.label_class = ui::planet_label_class(n, hud_consts_.medium_planet_structures, hud_consts_.large_planet_structures);
+    }
     // GALAXY_MAP_PRESENTATION §1.3 / §1.4: one button per orbiting fleet - unit count, the representative unit's icon,
     // stealth (every unit galactic-stealthed) / raid (ConflictManager::raid_force) badges, enemy flag; the fleet's own
     // orbit slot comes from the sim (FleetState::slot, playtest 3 t07; -1 = first free; the ui moves enemy fleets to
@@ -871,6 +878,13 @@ void App::build_galactic_hud(ui::GalacticHudFrame& f, std::vector<ui::GalacticPl
             r.hero = static_cast<uint32_t>(st.id(h));
             const objects::TypeIndex t = st.type(h);
             r.text = type_label(data_, ui_.text, t);
+            // mcx4 t14 (MCX4_T09_RE_ANSWERS Q6, 0x3d2020 / 0x3e8890): the activated-ability slot's label names the button
+            // (TEXT_ABILITY_SLOT_SLICE, ...); a kind without a label keeps the unit's name.
+            if (const galactic::ActivatedAbilitySlot slot = gs->activated_ability_slot(h, planet_index(*gs, planet));
+                slot.kind >= 0 && slot.label && slot.label[0] != '\0') {
+                r.text.clear();
+                r.text_key = slot.label;
+            }
             if (t < ui_.hud_types.size()) r.icon = ui_.hud_types[t].icon_name;
             out.push_back(std::move(r));
         }

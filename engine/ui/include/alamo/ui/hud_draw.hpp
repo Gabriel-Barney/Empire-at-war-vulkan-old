@@ -171,6 +171,12 @@ using GuiImageResolver = std::function<GuiImage(std::string_view texture)>;
 // list's (Alpha for ordinary art, Additive for additive art).
 bool add_atlas_quad(HudDrawList& dl, uint32_t layer, HudList list, const TextureAtlas& atlas, std::string_view texture,
                     Vec2f center, Vec2f size, float scale, Rgba8 color, Vec2f fallback_size = {}, float fill = 100.0f);
+// mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q12, radar quad builder 0x26ba90): add_atlas_quad with the quad turned
+// counter-clockwise by `radians` about `center` (canvas +Y up; 0 = unturned) and, with `uv_quarter_cw`, the UVs shifted
+// one corner so the texture shows a quarter turn clockwise inside the quad (its top along the quad's right edge).
+bool add_atlas_quad_turned(HudDrawList& dl, uint32_t layer, HudList list, const TextureAtlas& atlas, std::string_view texture,
+                           Vec2f center, Vec2f size, float scale, Rgba8 color, float radians, bool uv_quarter_cw,
+                           Vec2f fallback_size = {});
 // A movie frame on a HUD / 2D-scene list (STRATEGIC_GAPS §7.3 [H]): colour (1,1,1,1), PrimAlpha (straight alpha) for an
 // alpha movie (Movies.xml Alpha), PrimOpaque otherwise. `min` / `max` canvas corners (+Y up), `page` the texture page.
 void add_movie_quad(HudDrawList& dl, uint32_t layer, Vec2f min, Vec2f max, uint16_t page, bool alpha);

@@ -22,7 +22,11 @@ cmd::RejectReason TacticalBattle::order_move(TacticalMode& mode, uint8_t player,
     std::vector<objects::ObjectId> ids;
     for (const Unit* u : own) ids.push_back(u->id);
     if (abilities_)  // OI abilities: order cancel 0x38f5d0 (BARRAGE / LUCKY / ION / HUNT off on a new order)
-        for (const objects::ObjectId id : ids) abilities_->order_cancel(id, frame_);
+        for (const objects::ObjectId id : ids) {
+            abilities_->order_cancel(id, frame_);
+            // mcx4 (MCX4_T10_RE_ANSWERS §13, move order 0x4f6b60): Terminate_Effect_On_Move_Command specials end now
+            abilities_->move_ordered(id, frame_);
+        }
     drop_locked(ids);  // OI follow-up t03: the group move leaves locked units out (after the cancel, §28.9)
     if (ids.empty()) return R::None;
     if (!queued) {
@@ -423,6 +427,9 @@ cmd::RejectReason TacticalBattle::order_reinforce(TacticalMode& mode, uint8_t pl
                         // §35.2: the company stays inside; landing_service runs the state machine. The reserve leaves the
                         // pool now (deployed), its members spawn step by step.
                         landing.timed = true;
+                        // mcx4 tac2: the attach frame (+0xb8, attach 0x643b00) the skirmish clearance delay counts from,
+                        // held in the timer fields until state 1 sets them (skirmish only: campaign landings are unchanged)
+                        if (cfg_.skirmish) landing.timer_start = frame_;
                         drop_pos_.clear();
                         p.deployed = true;
                         landings_.push_back(std::move(landing));
@@ -447,6 +454,11 @@ cmd::RejectReason TacticalBattle::order_reinforce(TacticalMode& mode, uint8_t pl
                     rec.owner = p.owner;
                     rec.carried_type = p.type;
                     for (size_t k = first; k < units_.size(); ++k) rec.units.push_back(units_[k].id);
+                    // mcx4 tac2 (MCX4_T10_RE_ANSWERS §16a / §15 [H], 0x644330): team members unless the owner's
+                    // Disable_Reinforcement_Vulnerability entry is set, single objects always.
+                    const bool gated = reinforcement_vulnerability_disabled(p.owner);
+                    for (size_t k = first; k < units_.size(); ++k)
+                        if (!gated || units_[k].container == kNoContainer) apply_elevated_vulnerability(units_[k].id);
                     landings_unloaded_.push_back(std::move(rec));
                     landing.state = 3;
                     landing.remove_frame = frame_ + (static_cast<uint32_t>(landing.targets.size()) + 1u) * landing_step_frames(p.owner);
@@ -460,8 +472,12 @@ cmd::RejectReason TacticalBattle::order_reinforce(TacticalMode& mode, uint8_t pl
             std::vector<Vec3> spots;
             if (space_member_spots(mode, p, x, y, spots)) {
                 drop_pos_ = std::move(spots);
+                const size_t first = units_.size();
                 deploy(mode, i, rng);
                 drop_pos_.clear();
+                // mcx4 tac2 (MCX4_T10_RE_ANSWERS §16a [H]): 0x2bf2d0 ends with Apply_Elevated_Vulnerability on the arriving
+                // object, or on each member of its team container; not gated.
+                for (size_t k = first; k < units_.size(); ++k) apply_elevated_vulnerability(units_[k].id);
                 ++stats_.reinforcements;
                 return R::None;
             }
@@ -472,9 +488,12 @@ cmd::RejectReason TacticalBattle::order_reinforce(TacticalMode& mode, uint8_t pl
         const uint32_t save_placed = placed_[p.side];
         anchor_[p.side] = {std::clamp(x, b.min.x, b.max.x), std::clamp(y, b.min.y, b.max.y), 0.0f};
         placed_[p.side] = 0;
+        const size_t first = units_.size();
         deploy(mode, i, rng);
         anchor_[p.side] = save_anchor;
         placed_[p.side] = save_placed;
+        if (space_)  // mcx4 tac2: the space drop 0x2bf2d0 (above) [port: the row-of-6 fallback placement]
+            for (size_t k = first; k < units_.size(); ++k) apply_elevated_vulnerability(units_[k].id);
         ++stats_.reinforcements;
         return R::None;
     }
@@ -892,6 +911,60 @@ uint32_t TacticalBattle::landing_step_frames(int32_t player) const {
     return secs > 0.0f ? static_cast<uint32_t>(30.0f * secs) : 0u;  // 0x4ad3a0: (int)(FPS x seconds)
 }
 
+void TacticalBattle::apply_elevated_vulnerability(objects::ObjectId id) {
+    // 0x3a8550 (MCX4_T10_RE_ANSWERS §16 [H]): the land pair, or the space pair in a space mode (mode vf+0xe0 == 2); an
+    // object with a modifier set gets one appended (0x38c850, not by source) Defense entry named "Elevated_Vulnerability",
+    // category 0, value = factor (FoC land -2.0 / space -3.0: 3x / 4x damage taken, used as 1 - r), for the duration.
+    if (!combat_ || !combat_->has_unit(id)) return;
+    tc::ModifierSet* ms = combat_->unit_modifiers(id);
+    if (!ms) return;
+    static const uint32_t kElevatedCrc = name_crc("Elevated_Vulnerability");
+    const float secs = catalog_->elevated_vulnerability_duration(space_);  // ledger: consumes GameConstants.Elevated_Vulnerability_Duration
+    const float factor = catalog_->elevated_vulnerability_factor(space_);  // ledger: consumes GameConstants.Elevated_Vulnerability_Factor
+    // ledger: consumes GameConstants.Space_Elevated_Vulnerability_Duration
+    // ledger: consumes GameConstants.Space_Elevated_Vulnerability_Factor
+    ms->insert(tc::ModList::Defense, 0, factor, tc::expiry_frame(frame_, secs, 30u), kElevatedCrc, static_cast<int32_t>(id));
+}
+
+bool TacticalBattle::reinforcement_vulnerability_disabled(int32_t player) const {
+    // 0x527f00(player) = not the AND fold of the player's bool map +0x2c8; Battlefield_Modifier apply 0x6f02c0 inserts true
+    // into it for each covered player (0x6f1130: the owner, or every ally with Apply_To_All_Allies) while
+    // Disable_Reinforcement_Vulnerability (+0x194) is set, remove 0x6f13b0 erases it (MCX4_T10_RE_ANSWERS §15 [H]).
+    if (!abilities_ || !tables_ || tables_->special_disable_reinforcement_vulnerability.empty()) return false;
+    const std::vector<uint8_t>& flag = tables_->special_disable_reinforcement_vulnerability;
+    std::vector<objects::ObjectId> ids;
+    abilities_->object_ids(ids);  // ascending id order
+    std::vector<ta::AppliedSpecialView> views;
+    for (const objects::ObjectId id : ids) {
+        abilities_->applied_specials(id, views);
+        for (const ta::AppliedSpecialView& v : views) {
+            // ledger: consumes Battlefield_Modifier_Ability.Disable_Reinforcement_Vulnerability
+            if (v.special >= flag.size() || flag[v.special] == 0) continue;
+            const ta::SpecialAbilityDesc* s = abilities_->special_desc(v.special);
+            if (!s || s->cls != ta::SpecialClass::BattlefieldModifier || s->reverse_logic) continue;
+            // [port] the owner as the combat system holds it (a team container, which is no combat unit, is not counted)
+            const int32_t owner = combat_ && combat_->has_unit(id) ? combat_->owner(id) : -1;
+            if (owner < 0) continue;
+            if (owner == player || (s->apply_to_all_allies && bt_allied(owner, player))) return true;
+        }
+    }
+    return false;
+}
+
+uint32_t TacticalBattle::landing_clearance_delay(int32_t player) const {
+    // 0x642ef0 (A1_READINGS §35.2 state 4, MCX4_T10_RE_ANSWERS §19 [H]): only when 0x28afb0 (a skirmish) and the landing is
+    // not cinematic: D = the Plus fold of the player's int list +0x230 - the base entry Skirmish_Reinforcement_Delay_Frames
+    // (player init 0x526890) plus each Battlefield_Modifier's int(F x m) - F (Reinforcement_Time_Multiplier) - then the
+    // optional clamps +0x240 / +0x244 [port: their writers are not known; not applied].
+    if (!cfg_.skirmish) return 0u;
+    const int32_t f = catalog_->skirmish_reinforcement_delay_frames();  // ledger: consumes GameConstants.Skirmish_Reinforcement_Delay_Frames
+    const float r = abilities_ ? abilities_->player_list(player, tactical::abilities::PlayerList::ReinforcementTime) : 0.0f;
+    // [port] the reduced m - 1 of the float list stands for the per-entry deltas: int(F x (1 + r)) equals F + int(F x m) - F
+    // for one entry.
+    const auto d = static_cast<int32_t>(static_cast<float>(f) * (1.0f + r));
+    return d > 0 ? static_cast<uint32_t>(d) : 0u;
+}
+
 bool TacticalBattle::landing_hidden(objects::ObjectId landing) const {
     for (const Landing& l : landings_)
         if (l.id == landing) return l.state == 4;
@@ -980,6 +1053,9 @@ void TacticalBattle::landing_service(TacticalMode& mode, SimRng& rng) {
         if (!l.timed) continue;
         const Participant& P = parts_[l.participant];
         if (l.state == 4) {
+            // mcx4 tac2 (0x642ef0, MCX4_T10_RE_ANSWERS §19): a skirmish landing waits while now - attach < D, before the
+            // footprint test.
+            if (frame_ - l.timer_start < landing_clearance_delay(P.owner)) continue;
             bool blocked = false;
             const DropBox mine = footprint(l);
             for (size_t o = 0; o < landings_.size() && !blocked; ++o)
@@ -1031,10 +1107,14 @@ void TacticalBattle::landing_service(TacticalMode& mode, SimRng& rng) {
         drop_pos_.clear();
         drop_face_.clear();
         Landing& lr = landings_[li];
+        // mcx4 tac2 (MCX4_T10_RE_ANSWERS §16a / §15 [H], 0x644330): each member of a team step gets Elevated_Vulnerability
+        // unless the landing owner's player has a Disable_Reinforcement_Vulnerability entry; a single-object step always.
+        const bool vuln = !team || !reinforcement_vulnerability_disabled(parts_[lr.participant].owner);
         mv::MoveOrder o;
         for (size_t u = first; u < units_.size(); ++u) {
             lr.units.push_back(units_[u].id);
             if (units_[u].movable) o.units.push_back(units_[u].id);
+            if (vuln) apply_elevated_vulnerability(units_[u].id);
         }
         if (!o.units.empty() && lr.next_offset < lr.targets.size()) {
             o.destination = {lr.targets[lr.next_offset].x, lr.targets[lr.next_offset].y};

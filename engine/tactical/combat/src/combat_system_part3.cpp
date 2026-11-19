@@ -283,6 +283,11 @@ bool CombatSystem::launch_projectile(const ProjectileLaunch& l, uint32_t frame) 
     // [port] travel to the aim point (+ the target's radius): a point shot expires (detonates) there. A shot with
     // no distance at all (aim == from) falls back to the lifetime rule.
     p.max_travel = dist > 0.0f ? dist + radius : 0.0f;
+    if (l.sent_on) {
+        // mcx4 t23 (0x4cca10): pack +0x6c := the type's flight distance; a blocked shot (no target) keeps its drawn heading.
+        p.max_travel = pd.max_flight_distance > 0.0f ? pd.max_flight_distance : 0.0f;
+        if (l.target == kNoObject) p.dir = l.dir;
+    }
     if (lob) {
         // §5.3: pitch theta and speed s from the solve, yaw from the led aim; MaxTravelDistance = Projectile_Max_Flight_
         // Distance (no request override) + the target radius + |Q.z - L.z| [M: 0 without a flight distance -> lifetime].

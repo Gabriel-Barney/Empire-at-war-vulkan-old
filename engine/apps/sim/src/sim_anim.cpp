@@ -56,6 +56,14 @@ anim::Mat34 object_matrix(const float p[3], const float f[3], float s) {
 SimAnimation::SimAnimation(const objects::GameObjectTypes& types, const FileProvider& files, anim::AnimTunables tunables)
     : types_(&types), files_(&files), tunables_(tunables) {}
 
+void SimAnimation::set_tunables(const anim::AnimTunables& t) {
+    tunables_ = t;
+    for (ModeWorld& mw : worlds_) {
+        if (mw.world) mw.world->set_tunables(t);
+        if (mw.secondary) mw.secondary->set_tunables(t);
+    }
+}
+
 void SimAnimation::attach(SimHost& host, bool crc) {
     host.set_object_animation_hook([this](SimHost& h) { service(h); });
     if (crc) host.crc_registry().add("anim", [this, &host](StateHasher& h) { hash(host, h); });
@@ -452,7 +460,8 @@ void SimAnimation::muzzle_flash(const GameMode& mode, ObjectId id, int32_t hardp
 }
 
 anim::DeathResult SimAnimation::start_death(ModeWorld& mw, const GameMode& mode, ObjectId id, SimRng& rng, uint64_t frame, uint8_t damage_kind,
-                                            objects::TypeIndex type_override, const anim::DeathPlan* plan) {
+                                            objects::TypeIndex type_override, const anim::DeathPlan* plan,
+                                            const float* persistence_override) {
     const objects::ObjectStore& store = mode.primary();
     const ObjectHandle h = store.find(id);
     const objects::TypeIndex t = type_override != objects::kNone ? type_override : store.type(h);
@@ -467,8 +476,10 @@ anim::DeathResult SimAnimation::start_death(ModeWorld& mw, const GameMode& mode,
     info.facing[1] = f.y;
     info.facing[2] = f.z;
     const anim::TypeAnimParams& tp = params_for(t, mode.kind());
-    const anim::DeathResult r = plan ? mw.behaviors->begin_death(*mw.world, id, anim::death_params(tp), *plan, info, frame, damage_kind)
-                                     : mw.behaviors->begin_death(*mw.world, id, anim::death_params(tp), info, rng, frame, damage_kind);
+    anim::DeathParams dp = anim::death_params(tp);
+    if (persistence_override) dp.persistence_seconds = *persistence_override;  // mcx4 tac2: 0x29f270 Infantry override
+    const anim::DeathResult r = plan ? mw.behaviors->begin_death(*mw.world, id, dp, *plan, info, frame, damage_kind)
+                                     : mw.behaviors->begin_death(*mw.world, id, dp, info, rng, frame, damage_kind);
     ++stats_.deaths;
     if (r == anim::DeathResult::RemoveNow) {
         ++stats_.removed_at_death;
@@ -495,13 +506,16 @@ void SimAnimation::death_clone_spawned(const GameMode& mode, ObjectId clone, uin
     mode_world(mode).pending_clones.push_back(pc);
 }
 
-anim::DeathPlan SimAnimation::plan_clone_death(objects::TypeIndex type, objects::ModeKind mode, uint8_t damage_kind, SimRng& rng) {
+anim::DeathPlan SimAnimation::plan_clone_death(objects::TypeIndex type, objects::ModeKind mode, uint8_t damage_kind, SimRng& rng,
+                                               const float* persistence_override) {
     const anim::AnimModel* m = model_for(type, mode);
-    return anim::plan_death(m, anim::death_params(params_for(type, mode)), damage_kind, rng);
+    anim::DeathParams dp = anim::death_params(params_for(type, mode));
+    if (persistence_override) dp.persistence_seconds = *persistence_override;  // mcx4 tac2: 0x29f270 Infantry override
+    return anim::plan_death(m, dp, damage_kind, rng);
 }
 
 anim::DeathResult SimAnimation::corpse_clone(const GameMode& mode, ObjectId dying, objects::TypeIndex clone_type, SimRng& rng,
-                                             uint64_t frame, uint8_t damage_kind) {
+                                             uint64_t frame, uint8_t damage_kind, const float* persistence_override) {
     const objects::ObjectStore& store = mode.primary();
     if (!store.exists(store.find(dying))) return anim::DeathResult::NoRow;
     ModeWorld& mw = mode_world(mode);
@@ -519,7 +533,7 @@ anim::DeathResult SimAnimation::corpse_clone(const GameMode& mode, ObjectId dyin
             if (it == mw.event_rows.end() || *it != dying) mw.event_rows.insert(it, dying);
         }
     }
-    const anim::DeathResult r = start_death(mw, mode, dying, rng, frame, damage_kind, clone_type);
+    const anim::DeathResult r = start_death(mw, mode, dying, rng, frame, damage_kind, clone_type, nullptr, persistence_override);
     ++stats_.clone_deaths;
     return r;
 }

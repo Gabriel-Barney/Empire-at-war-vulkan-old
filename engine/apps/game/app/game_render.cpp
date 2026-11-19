@@ -385,6 +385,9 @@ bool BattleView::start(GpuCore& gpu, const GameData& data, const GameSession& se
     hover_scale_ = data.db.constants().get_float("Mouse_Over_Highlight_Scale", 1.5f);
     pulses_.clear();  // mcx4 t15: shield hit flash (T14 "GameConstants.Shield_Flash_Duration family")
     shield_flash_duration_ = data.db.constants().get_float("Shield_Flash_Duration", 0.1f);  // ledger: consumes GameConstants.Shield_Flash_Duration
+    gui_flash_level_ = data.db.constants().get_float("GUI_Flash_Level", 3.0f);  // ledger: consumes GameConstants.GUI_Flash_Level
+    // ledger: consumes GameConstants.GUI_Rapid_Flash_Duration
+    gui_rapid_flash_duration_ = data.db.constants().get_float("GUI_Rapid_Flash_Duration", 0.1f);
     if (const auto v = data.db.constants().get("Shield_Flash_Scale")) {  // ledger: consumes GameConstants.Shield_Flash_Scale
         float c[3];
         if (data::parse_floats(*v, c, 3) == 3) std::copy(c, c + 3, shield_flash_color_);
@@ -614,6 +617,17 @@ void BattleView::start_light_pulse(uint32_t id, render::LightPulse p, double now
     const float one[3] = {1.0f, 1.0f, 1.0f};
     float scratch[3];
     if (const auto it = pulses_.find(id); it != pulses_.end() && render::light_pulse_rgb(it->second, now, one, scratch)) return;
+    p.start = now;
+    pulses_[id] = p;
+}
+
+void BattleView::rapid_flash(uint32_t id, double now) {
+    if (id == 0 || !(gui_rapid_flash_duration_ > 0.0f)) return;
+    render::LightPulse p;
+    p.type = 1;
+    p.c1[0] = p.c1[1] = p.c1[2] = 1.0f + gui_flash_level_;
+    p.duration = gui_rapid_flash_duration_;
+    p.repeats = 3;
     p.start = now;
     pulses_[id] = p;
 }

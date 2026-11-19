@@ -572,9 +572,12 @@ void MovementSystem::arrival_turn_frame(Unit& u, uint32_t frame) const {
                     break;
                 }
                 if (!pre) {  // TURNL / TURNR once, the rate stays S
-                    if (!anim_turn_clip(a) && turn_clip_data(u, kAnimTurnLeft, cd))
+                    if (!anim_turn_clip(a) && turn_clip_data(u, kAnimTurnLeft, cd)) {
+                        // mcx4 t11 (0x620190 [M]): the time takes e0 wrapped into [0, 360); cap InfantryTurnBlendTime
+                        const float d360 = e0 < 0.0f ? e0 + 360.0f : e0;
                         turn_clip_play(u, e0 >= 0.0f ? kAnimTurnLeft : kAnimTurnRight, 1.0f,
-                                       std::min(r > 0.0f ? ae0 / r * 0.03333f : 0.0f, kArrivalTurnBlendCapPort), frame);
+                                       std::min(r > 0.0f ? d360 / r * 0.03333f : 0.0f, cfg_.constants.infantry_turn_blend_time), frame);
+                    }
                     return;
                 }
                 // 0x6204f0: the band from the error after this frame's step; its rate applies from the next frame. s78n t26.2

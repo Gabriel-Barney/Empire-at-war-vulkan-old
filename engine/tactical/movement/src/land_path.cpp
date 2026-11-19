@@ -220,6 +220,18 @@ float LaneShape::offset(float s) const {
     return shift[k] + (e != 0 && e < entry_left.size() ? entry_left[e] : left);
 }
 
+float LaneShape::rotation_at(float s) const {
+    const float r = rot_rate * s + rot_start;  // 0x421cc0: never past F +0x24c
+    return rot_rate >= 0.0f ? (r <= rot_full ? r : rot_full) : (rot_full <= r ? r : rot_full);
+}
+
+float LaneShape::lateral_at(float s) const {
+    const float l0 = offset(s);
+    if (!rotated()) return l0;
+    const float r = rotation_at(s);  // 0x559350: (x, y) -> (c x - s y, s x + c y), x = depth, y = lateral
+    return dmath::sin(r) * depth + dmath::cos(r) * l0;
+}
+
 namespace {
 // One lane point: origin o, unit direction n, the pull-in of 0x413340.
 V2 lane_point(const PassabilityGrid& grid, bool no_grid, V2 o, V2 n, float left, uint32_t mask) {
@@ -268,13 +280,13 @@ std::vector<LanePt> lane_points(const PassabilityGrid& grid, std::span<const V2>
     std::vector<LanePt> out;
     const bool no_grid = grid.width() == 0 || grid.height() == 0;
     const size_t rows = shape.shift.size();
-    const auto row_offset = [&](size_t k) { return shape.offset(static_cast<float>(k) * kCorridorSampleStep); };
+    const auto row_offset = [&](size_t k) { return shape.lateral_at(static_cast<float>(k) * kCorridorSampleStep); };
     float s = 0.0f;
     for (size_t i = 0; i < fpath.size(); ++i) {
         const float s0 = s;
         if (i > 0) s += distance(fpath[i - 1], fpath[i]);
         const V2 n = lane_dir(fpath, i);
-        const LanePt w{lane_point(grid, no_grid, fpath[i], n, shape.offset(s), mask), s, n, fpath[i]};
+        const LanePt w{lane_point(grid, no_grid, fpath[i], n, shape.lateral_at(s), mask), s, n, fpath[i]};
         if (i > 0 && rows > 1 && !no_grid && s > s0 && !line_passable(grid, out.back().p, w.p, mask)) {
             const float l = s - s0;
             const V2 d{(fpath[i].x - fpath[i - 1].x) / l, (fpath[i].y - fpath[i - 1].y) / l};
@@ -318,7 +330,12 @@ V2 lane_end(std::span<const V2> fpath, const LaneShape& shape, float back) {
         if (l > 0.0f) d1 = V2{d.x / l, d.y / l};
     }
     const float total = path_length(fpath);
-    return fpath[n - 1] - d1 * back + perp_left(d1) * shape.offset(total - back);
+    if (!shape.rotated()) return fpath[n - 1] - d1 * back + perp_left(d1) * shape.offset(total - back);
+    // mcx4 t11 (MOVEMENT §4.3.3 item 2, MCX4_T11_T12_RE_ANSWERS §B4): the end shift +0x68 = cos psi D - sin psi L, psi =
+    // the full rotation F +0x24c (D = shape.depth = -back); sideways the rotated lateral at that arc position
+    const float l = shape.offset(total - back);
+    const float along = dmath::cos(shape.rot_full) * shape.depth - dmath::sin(shape.rot_full) * l;
+    return fpath[n - 1] + d1 * along + perp_left(d1) * shape.lateral_at(total - back);
 }
 
 std::vector<V2> member_lane(const PassabilityGrid& grid, std::span<const V2> fpath, const LaneShape& shape, float back,

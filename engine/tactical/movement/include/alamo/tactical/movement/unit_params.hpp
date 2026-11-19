@@ -76,6 +76,11 @@ struct UnitDesc {
     // the land conform's pitch (and z lift) and roll sample spans; 0 = no tilt.
     float overall_length = 0.0f;
     float overall_width = 0.0f;
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2; save version 36): MaxFacingLookAheadFrames (+0x3b8, type ctor 30.0), the cap
+    // of the LANDBOMBER facing lookahead (0x645370 / 0x645a70), and LateralAcceleration (+0x3bc, ctor 0), the BIKE move
+    // step's per-frame change of its sideways speed (0x63abe0). Raw type values.
+    float max_facing_lookahead = 30.0f;
+    float lateral_accel = 0.0f;
     // s78n t20 batch 1 (MOVEMENT §5.4.5 item 2, §5.2 item 7; save version 20): an object without a locomotor (obj +0x333 =
     // -1) in the land layer, and the type's IsDeathCloneObstacle (+0xcf). Such a unit is never Moving, never a collision
     // checker and never walks: it is only ever the obstacle b. The host registers the land death clones of types with

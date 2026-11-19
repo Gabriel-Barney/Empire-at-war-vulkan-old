@@ -16,6 +16,7 @@
 #include "alamo/data/xml.hpp"
 #include "alamo/ui/camera.hpp"
 #include "alamo/ui/hotkeys.hpp"
+#include "alamo/ui/galactic_hud.hpp"
 #include "alamo/ui/hud_buttons.hpp"
 #include "alamo/ui/hud_font.hpp"
 #include "alamo/ui/hud_markers.hpp"
@@ -660,6 +661,50 @@ void test_buttons() {
             "0.125</GUI_Strategic_Countdown_Timers_Screen_X><GUI_Strategic_Countdown_Timers_Screen_Y>0.75</GUI_Strategic_Countdown_Timers_Screen_Y>"
             "<GUI_Strategic_Countdown_Timers_Screen_Spacing>0.0625</GUI_Strategic_Countdown_Timers_Screen_Spacing></GameConstants>"));
         const HudConstants h6 = hud_constants_from(g6.root());
+        {  // mcx4 t14 (docs/re/MCX4_T14_RE_ANSWERS.md font families): Command_Bar_Default_Font_Name / Command_Bar_Default_Font_Size,
+           // Text_Button_Default_Font_Name / Text_Button_Default_Font_Size, Game_Object_Name_Font_Name /
+           // Game_Object_Name_Font_Size, Tool_Tip_Font_Name / Tool_Tip_Font_Size; FoC EmpireAtWar-Medium 7 / Arial 7.
+            // ledger: verifies GameConstants.Command_Bar_Default_Font_Name
+            // ledger: verifies GameConstants.Command_Bar_Default_Font_Size
+            // ledger: verifies GameConstants.Text_Button_Default_Font_Name
+            // ledger: verifies GameConstants.Text_Button_Default_Font_Size
+            // ledger: verifies GameConstants.Game_Object_Name_Font_Name
+            // ledger: verifies GameConstants.Game_Object_Name_Font_Size
+            // ledger: verifies GameConstants.Tool_Tip_Font_Name
+            // ledger: verifies GameConstants.Tool_Tip_Font_Size
+            CHECK2(h0.fonts.text_face == "EmpireAtWar-Medium" && near2(h0.fonts.text_size, 7.0f) && h0.fonts.tooltip_face == "Arial");
+            // ledger: verifies GameConstants.Text_Reveal_Rate
+            CHECK2(near2(h0.text_reveal_rate, 120.0f));  // Text_Reveal_Rate (FoC 120)
+            // mcx4 t14 (docs/re/MCX4_PRES_RE_ANSWERS_3.md Q2): Num_Structures_For_Medium_Planet_Name 3 /
+            // Num_Structures_For_Large_Planet_Name 5 pick the g_planet_name Alternate_Font_Name entry.
+            // ledger: verifies GameConstants.Num_Structures_For_Medium_Planet_Name
+            // ledger: verifies GameConstants.Num_Structures_For_Large_Planet_Name
+            CHECK2(h0.medium_planet_structures == 3 && h0.large_planet_structures == 5);
+            static_assert(planet_label_class(2, 3, 5) == 0 && planet_label_class(3, 3, 5) == 1 && planet_label_class(4, 3, 5) == 1 &&
+                          planet_label_class(5, 3, 5) == 2);
+            CHECK2(alternate_font_entry("EmpireAtWar-Medium, EmpireAtWar-Medium, EmpireAtWar-Bold", 2) == "EmpireAtWar-Bold");
+            CHECK2(alternate_font_entry("A,B", 0) == "A" && alternate_font_entry("A,B", 1) == "B" && alternate_font_entry("A,B", 2).empty());
+            const data::XmlDocument g8 = data::XmlDocument::parse(std::string_view("<GameConstants><Text_Reveal_Rate>60</Text_Reveal_Rate></GameConstants>"));
+            CHECK2(near2(hud_constants_from(g8.root()).text_reveal_rate, 60.0f));
+            const data::XmlDocument g7 = data::XmlDocument::parse(std::string_view(
+                "<GameConstants><Command_Bar_Default_Font_Name>Arial</Command_Bar_Default_Font_Name><Command_Bar_Default_Font_Size>8"
+                "</Command_Bar_Default_Font_Size><Text_Button_Default_Font_Name>EmpireAtWar-Bold</Text_Button_Default_Font_Name>"
+                "<Text_Button_Default_Font_Size>9</Text_Button_Default_Font_Size><Game_Object_Name_Font_Name>EmpireAtWar-light"
+                "</Game_Object_Name_Font_Name><Game_Object_Name_Font_Size>10</Game_Object_Name_Font_Size><Tool_Tip_Font_Name>"
+                "EmpireAtWar-Medium</Tool_Tip_Font_Name><Tool_Tip_Font_Size>11</Tool_Tip_Font_Size></GameConstants>"));
+            const DefaultFonts d7 = hud_constants_from(g7.root()).fonts;
+            CHECK2(d7.text_face == "Arial" && near2(d7.text_size, 8.0f) && d7.button_face == "EmpireAtWar-Bold" &&
+                   near2(d7.button_size, 9.0f) && d7.world_face == "EmpireAtWar-light" && near2(d7.world_size, 10.0f) &&
+                   d7.tooltip_face == "EmpireAtWar-Medium" && near2(d7.tooltip_size, 11.0f));
+            auto dbox = make_box_rasterizer();
+            FontCache dfc(*dbox);
+            dfc.set_defaults(d7);
+            CHECK2(dfc.component_font({}, 0.0f, FontUse::Tooltip, 768) == dfc.font("EmpireAtWar-Medium", 11.0f, 768));
+            CHECK2(dfc.component_font({}, 0.0f, FontUse::Button, 768) == dfc.font("EmpireAtWar-Bold", 9.0f, 768));
+            CHECK2(dfc.component_font({}, 0.0f, FontUse::World, 768) == dfc.font("EmpireAtWar-light", 10.0f, 768));
+            CHECK2(dfc.component_font({}, 12.0f, FontUse::Button, 768) == dfc.font("Arial", 12.0f, 768));  // size only: text face
+            CHECK2(dfc.component_font("EmpireAtWar-Bold", 0.0f, FontUse::Text, 768) == dfc.font("EmpireAtWar-Bold", 8.0f, 768));
+        }
         CHECK2(h6.countdown_font == "Arial" && near2(h6.countdown_font_size, 14.0f) && near2(h6.tactical_countdown_x, 0.25f) &&
                near2(h6.tactical_countdown_y, 0.5f) && near2(h6.strategic_countdown_x, 0.125f) &&
                near2(h6.strategic_countdown_y, 0.75f) && near2(h6.strategic_countdown_spacing, 0.0625f));
@@ -1334,6 +1379,19 @@ void test_tactical_stage2() {
                 CHECK2(scaled);
             }
             hud.build(f2, ru, rt);
+        }
+        {  // mcx4 t14 (docs/re/MCX4_PRES_RE_ANSWERS_3.md Q12): the turned quad and the Radar_Rotate_Icon UV shift
+            // ledger: verifies GameObjectType.Radar_Rotate_Icon
+            const TextureAtlas no_atlas;
+            HudDrawList td;
+            // a 4 x 2 white quad at (10, 10) turned 90 degrees counter-clockwise: top-left (8, 11) -> (9, 8)
+            CHECK2(add_atlas_quad_turned(td, 0, HudList::Alpha, no_atlas, "none", {10, 10}, {}, 1.0f, Rgba8{}, 1.5707963f, false, {4, 2}));
+            CHECK2(add_atlas_quad_turned(td, 0, HudList::Alpha, no_atlas, "none", {10, 10}, {}, 1.0f, Rgba8{}, 0.0f, true, {4, 2}));
+            const auto tq = td.items(0, HudList::Alpha);
+            CHECK2(tq.size() == 2 && tq[0].has_corners && near2(tq[0].corners[0].x, 9.0f) && near2(tq[0].corners[0].y, 8.0f));
+            // Radar_Rotate_Icon alone: the texture's top-left corner sits at the quad's top-right (12, 11)
+            CHECK2(tq.size() == 2 && near2(tq[1].corners[0].x, 12.0f) && near2(tq[1].corners[0].y, 11.0f) &&
+                   near2(tq[1].corners[3].x, 8.0f) && near2(tq[1].corners[3].y, 11.0f));
         }
         {  // mcx4 t14: Radar_Register_As_Foreground_Object puts the blip one layer above the rest
             // ledger: verifies GameObjectType.Radar_Register_As_Foreground_Object

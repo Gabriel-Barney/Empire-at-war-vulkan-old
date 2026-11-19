@@ -1,6 +1,9 @@
 // tactical_battle: part 1 (bo3 t03 split; shared code in tactical_battle_internal.hpp).
 #include "tactical_battle_internal.hpp"
 
+#include "alamo/objects/type_fields.hpp"            // mcx4 t11: find_type_field (snap_move_point)
+#include "alamo/tactical/movement/formation.hpp"    // mcx4 t11: snap_order_center
+
 namespace alamo::sim {
 
 TacticalBattle::~TacticalBattle() = default;
@@ -451,7 +454,8 @@ void TacticalBattle::setup(TacticalMode& mode, terrain::MapData map, SimRng& rng
     // Movement world.
     mv::MovementConfig mc;
     mc.mode = space_ ? mv::MoveMode::Space : mv::MoveMode::Land;
-    movement_ = std::make_unique<mv::MovementSystem>(mc);
+    mc.constants = catalog_->movement_constants();  // mcx4 t11: the movement GameConstants (mods)
+    movement_ =std::make_unique<mv::MovementSystem>(mc);
     // cu8j t01 (MOVEMENT §4.6.2): the movement coordinator update runs at the end of the tick (TacticalBattle::tick), after
     // the object services, as retail's common tick step 10; the movement tick does not run it.
     movement_->set_deferred_composition(true);
@@ -1397,6 +1401,41 @@ int32_t TacticalBattle::first_hardpoint_of_type(objects::ObjectId target, int32_
     return -1;
 }
 
+namespace {
+// mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2, the group move 0x2a7b80 [H]): a land position order snaps to the centre of the
+// nearest object of the mode whose type has Snap_Movement_Orders_To_Center and whose 3-D distance to the order point (z =
+// the ground there [port M]) is within its radius 0x397780 = Scale_Factor x the soft footprint radius 0x373b30
+// (Custom_Soft_Footprint_Radius, else Space_Obstacle_Radius, else the larger model half extent; BKT1_ATTACK_RE §1.3).
+// Every live object of the mode is scanned in the canonical (newest-first) list order, not only the selection.
+void snap_move_point(const objects::ObjectStore& st, const BattleCatalog& cat, const terrain::MapData& map, float& x, float& y) {
+    static const uint32_t kSnapField = objects::find_type_field("Snap_Movement_Orders_To_Center");
+    const objects::GameObjectTypes& types = cat.types();
+    std::vector<mv::SnapCenter> cands;
+    const std::span<const objects::ObjectHandle> all = st.all_objects();
+    for (size_t k = all.size(); k-- > 0;) {
+        const objects::ObjectHandle h = all[k];
+        if (!st.alive(h)) continue;
+        const objects::TypeIndex t = st.type(h);
+        if (t >= types.size() || types.value(t, kSnapField) == nullptr || !types.get_bool(t, "Snap_Movement_Orders_To_Center"))
+            continue;
+        const float sc = types.get_float(t, "Scale_Factor") > 0.0f ? types.get_float(t, "Scale_Factor") : 1.0f;
+        float r = types.get_float(t, "Custom_Soft_Footprint_Radius");
+        if (!(r > 0.0f)) r = types.get_float(t, "Space_Obstacle_Radius");
+        if (!(r > 0.0f)) {
+            float hx = 0.0f, hy = 0.0f, hz = 0.0f;
+            r = cat.model_half_extents(t, hx, hy, hz) ? std::max(hx, hy) : 0.0f;
+        }
+        const Vec3 p = st.position(h);
+        cands.push_back({{p.x, p.y}, p.z, r * sc});
+    }
+    if (cands.empty()) return;
+    const int32_t i = mv::snap_order_center({x, y}, map.terrain.sample_height(x, y), cands);
+    if (i < 0) return;
+    x = cands[static_cast<size_t>(i)].pos.x;
+    y = cands[static_cast<size_t>(i)].pos.y;
+}
+}  // namespace
+
 void TacticalBattle::exec_move(TacticalMode& mode, std::span<const objects::ObjectId> ids, float x, float y, SimRng& rng,
                                float facing_deg, bool attack_move, uint8_t flags, bool switch_locomotor,
                                objects::ObjectId goal_object, bool no_destination_check, bool cohesion_tight) {
@@ -1418,6 +1457,7 @@ void TacticalBattle::exec_move(TacticalMode& mode, std::span<const objects::Obje
     // the host's formation record (fighter_order below) carry it, so the fighter leash reads the same block.
     o.flags = static_cast<uint8_t>(flags | (attack_move ? mv::kMoveFlagAttackMove : 0));
     o.switch_locomotor = switch_locomotor;  // S7 t10: MoveToPosition's 1-bit (MOVEMENT §6.2)
+    if (!space_ && goal_object == objects::kNoObjectId) snap_move_point(mode.primary(), *catalog_, map_, x, y);  // mcx4 t11
     o.destination = {std::clamp(x, bb.min.x, bb.max.x), std::clamp(y, bb.min.y, bb.max.y)};
     if (std::isfinite(facing_deg)) o.facing_deg = facing_deg;
     o.goal_object = goal_object == objects::kNoObjectId ? -1 : goal_object;  // S7 t37 (movement: -1 = none)

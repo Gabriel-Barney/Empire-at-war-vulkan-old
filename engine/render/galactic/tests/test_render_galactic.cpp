@@ -545,10 +545,11 @@ static void test_synthetic(const render::GalacticWorld& w) {
     CHECK(st.planets == 12 && st.background == 1 && st.routes == 17 && st.route_sparks >= 1 && st.route_sparks < st.routes && st.rings >= 6 &&
           st.starbases >= 1 && st.no_model == 0);
     // GALAXY_MAP_PRESENTATION §2.1: only fleets in transit are drawn; orbiting ones are counted, not drawn.
-    CHECK(b.snap && st.fleets + st.orbit_fleets + st.fogged_fleets == b.snap->fleets.size());
+    CHECK(b.snap && st.fleets + st.hidden_fleets + st.orbit_fleets + st.fogged_fleets == b.snap->fleets.size());  // mcx4 t14: + hidden
     if (b.snap) {
         uint32_t transit = 0;
-        for (const auto& f : b.snap->fleets) transit += render::GalacticSceneBuilder::fleet_in_transit(f, b.snap->planets.size()) ? 1u : 0u;
+        for (const auto& f : b.snap->fleets)  // mcx4 t14: a transit fleet the local vote hides is not drawn
+            transit += render::GalacticSceneBuilder::fleet_in_transit(f, b.snap->planets.size()) && !(f.flags & render::kGalFleetHidden) ? 1u : 0u;
         CHECK(st.fleets == transit && st.selection == 0);
     }
     if (b.snap) test_fog(w, *b.snap);
@@ -795,6 +796,14 @@ static void test_fleets_and_selection(const render::GalacticWorld& w) {
         const float sc = types[types.fleet_type()].scale;
         CHECK(near(f2.transform.m[1][1], sc) && near(f2.transform.m[0][1], 0.0f));  // t32: the darts' tips (+Y) along the hop (+Y)
     }
+    {  // mcx4 t14 (MCX4_GAL2_RE_ANSWERS Q3): a transit fleet the local visibility vote hides is not drawn
+        render::GalacticFrame hid = frame;
+        hid.fleets[1].flags |= render::kGalFleetHidden;
+        std::vector<render::Instance> hfg, hbg;
+        render::GalacticViewStats hst;
+        b.build(hid, models, hfg, hbg, &hst);
+        CHECK(hst.fleets == 1 && hst.hidden_fleets == 1 && hst.stealth_fleets == 1);
+    }
     // Selection: planet 100, camera south of it, 45 degrees up.
     render::GalacticSelection sel;
     sel.planet = 100;
@@ -958,6 +967,9 @@ static void test_fleets_and_selection(const render::GalacticWorld& w) {
     render::GalacticSnapshot snap;
     render::build_galactic_snapshot(gs, 0, types, pal, snap);
     CHECK(snap.find_fleet(fid) && !(snap.find_fleet(fid)->flags & render::kGalFleetStealthed));
+    // mcx4 t14: the hidden flag follows GalacticSim::fleet_visible_to_local for every fleet
+    for (const render::GalacticFleetSnap& f : snap.fleets)
+        CHECK(((f.flags & render::kGalFleetHidden) != 0) == !gs.fleet_visible_to_local(f.index));
     std::vector<objects::ObjectHandle> ships;
     for (objects::ObjectHandle h : gs.fleets()[pick].contents)
         if (gs.store().alive(h) && !gs.is_company_transport(h)) ships.push_back(h);
@@ -1172,7 +1184,7 @@ static void test_real_data() {
                 b.snap->planets.size(), drawable, bg, b.snap->routes.size(), b.snap->fleets.size(), b.last.planets, b.last.starbases,
                 b.last.routes, b.last.fleets);
     CHECK(drawable + 2 >= b.snap->planets.size() && core && bg >= 1);
-    CHECK(!b.snap->fleets.empty() && b.last.fleets + b.last.orbit_fleets + b.last.fogged_fleets == b.snap->fleets.size() &&
+    CHECK(!b.snap->fleets.empty() && b.last.fleets + b.last.hidden_fleets + b.last.orbit_fleets + b.last.fogged_fleets == b.snap->fleets.size() &&
           b.last.routes + 2 >= b.snap->routes.size() &&
           b.last.routes >= 8);
     bool fleet_model = false;

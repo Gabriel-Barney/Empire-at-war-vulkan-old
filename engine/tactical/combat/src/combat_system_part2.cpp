@@ -173,6 +173,9 @@ void CombatSystem::fire_unit_weapon(Unit& u, uint32_t frame, SimRng& rng) {
     float dscale = 1.0f;  // OI abilities: Blast state gate (REMAINING_GAPS §5.5; a weapon never fires while it runs)
     if (hooks_ && !hooks_->fire_gate(u.id, nullptr, proj, dscale)) return;
     if (hooks_ && !hooks_->shot_allowed(u.id, tid, thp, proj)) return;
+    // mcx4 (MCX4_T11_T12_RE_ANSWERS §B4, 0x54d090 after the clip gates): in the crouched-move clip with a fire target, no
+    // shot while the target's direction is more than Crouch_Move_Fire_Angle_Cutoff degrees off the unit's facing.
+    if (tp && hooks_ && hooks_->crouch_moving(u.id) && !crouch_fire_cone(u, tp->pos)) return;
     if (proj < 0 || static_cast<size_t>(proj) >= data_->projectiles.size()) return;
     const ProjectileDesc& pd = data_->projectiles[static_cast<size_t>(proj)];
     const float range = fire_range(ud.max_attack_distance, mod_r(u, ModList::FireRange));  // 0x54d090: list 8
@@ -243,6 +246,9 @@ void CombatSystem::fire_unit_weapon(Unit& u, uint32_t frame, SimRng& rng) {
                 break;
             }
         }
+        // mcx4 (MCX4_T10_RE_ANSWERS §15): a corrupted shooter (obj +0x38a, CORRUPT_SYSTEMS pack +0x14) uses the
+        // corrupting ability's Inaccuracy_Radius as its fixed radius, whatever the getter gave.
+        if (float cr = 0.0f; hooks_ && hooks_->corrupt_inaccuracy(u.id, cr)) r = cr;
         if (r > 0.0f) {
             Vec3 o;
             o.x = rng.range_float(-r, r);
@@ -752,6 +758,9 @@ void CombatSystem::process_hit(Projectile& p, Unit& v, float t, uint32_t frame, 
     r.hardpoint = hp;
     r.has_impact = true;
     r.impact = impact;
+    r.has_flight = true;  // mcx4 t23: the damage listeners' view of the shot (Redirect_Blaster)
+    r.shot_dir = p.dir;
+    r.shot_damage = p.damage;
     // S9 t04 (§1.5): a Causes_Infection hit attaches the INFECTION behaviour (or resumes it: counter - 1). [port] Before
     // Take_Damage (the order inside 0x4cb280 was not traced); the shooter's INFECTION-ability test is left to the data
     // (vanilla: only Infection_Projectile, thrown by that ability). refix t02: the behaviour runs with the shooter type's
@@ -1429,8 +1438,15 @@ DamageResult CombatSystem::take_damage_inner(const DamageRequest& r, uint32_t fr
         x = x * damage_multiplier(a1, mod_r(v, ModList::Defense), ai, cover_factor(v));  // trn1 t01: cover
     }
     // 13 damage listeners (style Take_Damage special abilities, e.g. Redirect_Blaster) may cancel.
-    if (hooks_ && hooks_->damage_listener(v.id, r.source, r.source_is_projectile ? r.projectile_desc : -1, frame,
-                                          listener_rng())) {
+    ListenerShot shot;
+    shot.projectile_desc = r.source_is_projectile ? r.projectile_desc : -1;
+    if (r.source_is_projectile && r.has_flight) {  // mcx4 t23
+        shot.flight = true;
+        shot.pos = r.impact;
+        shot.dir = r.shot_dir;
+        shot.damage = r.shot_damage;
+    }
+    if (hooks_ && hooks_->damage_listener(v.id, r.source, shot, frame, listener_rng())) {
         out.cancelled = true;
         out.after_multipliers = 0.0f;
         return out;

@@ -1,6 +1,7 @@
 // MovementSystem: special locomotors (docs/re/REMAINING_GAPS.md §4.2-4.7). See movement_system.hpp and
 // special_locomotors.hpp for the contract.
 #include <algorithm>
+#include <cmath>
 
 #include "alamo/tactical/movement/movement_system.hpp"
 #include "alamo/core/sim_crc.hpp"
@@ -527,8 +528,15 @@ void MovementSystem::step_bomber(Unit& u) {
     s.clock += kLandBomberClockStep * u.speed_factor;
     const SpacePose p = eval_space_path(u.wps, s.clock);
     u.m.pos = p.pos;
-    u.m.yaw = wrap_deg(p.heading);
     u.m.speed = p.speed;
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2, 0x645370 / 0x645a70 [H]): the facing looks int(lookahead) frames ahead along
+    // the pass (the reservation 0x538830; past the pass end: the unit's own position, so the path heading stays), then the
+    // lookahead grows by SpaceLocomotorFacingLookaheadAcc up to MaxFacingLookAheadFrames.
+    const float n = std::floor(s.facing_lookahead);
+    const SpacePose a = eval_space_path(u.wps, s.clock + n);
+    u.m.yaw = bomber_facing(p.pos, wrap_deg(p.heading), a.pos, !a.done);
+    s.facing_lookahead =
+        bomber_lookahead_step(s.facing_lookahead, cfg_.constants.space_locomotor_facing_lookahead_acc, u.d.max_facing_lookahead);
     u.z = s.pass_z;
     if (p.done) {  // killed silently (0x391310 flag 1)
         u.following = false;
@@ -704,6 +712,8 @@ void MovementSystem::hash_special(StateHasher& h) const {
         h.f32(s.clock);
         h.f32(s.pass_z);
         h.f32(u.path_lag);
+        if (s.facing_lookahead != 0.0f) h.f32(s.facing_lookahead);  // mcx4 t11: bombers only (other formats unchanged)
+        if (s.lateral != 0.0f) h.f32(s.lateral);                    // mcx4 t11: a LateralAcceleration bike only
         if (u.d.locomotor == LocomotorKind::Flying) {  // FIGHTER_FLYING §6 (flying units only: other formats unchanged)
             h.f32(s.pitch);
             h.f32(s.vel.x);

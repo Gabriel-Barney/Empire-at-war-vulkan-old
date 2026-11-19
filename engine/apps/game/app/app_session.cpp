@@ -590,6 +590,7 @@ bool App::start_session(const SessionSpec& spec) {
     loaded_save_.clear();
     session_started(diag);
     prev_pop_used_ = 0;
+    countdown_speech_seen_.clear();  // mcx4 t13
     last_approach_s_ = -1e9;
     // ui4 t08 [port]: a new campaign (not a load, a skirmish or the attract demo) plays the faction's
     // SFXEvent_GUI_Start_Campaign once it has started.

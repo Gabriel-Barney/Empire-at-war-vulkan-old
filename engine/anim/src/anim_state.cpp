@@ -472,6 +472,11 @@ float AnimWorld::crossfade_weight(ObjectId id) const {
     return r == kNoRow || !fade_active_[r] ? 1.0f : fade_weight_[r];
 }
 
+float AnimWorld::crossfade_duration(ObjectId id) const {
+    const uint32_t r = row(id);
+    return r == kNoRow || !fade_active_[r] ? 0.0f : fade_duration_[r];
+}
+
 bool AnimWorld::near_end(ObjectId id) const {
     const uint32_t r = row(id);
     return r != kNoRow && near_end_[r] != 0;

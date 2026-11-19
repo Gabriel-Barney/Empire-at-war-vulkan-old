@@ -2292,6 +2292,10 @@ void MovementSystem::tick_land(uint32_t frame, SimRng& rng, const ParallelFor& p
         x.directions = u.d.movement_directions;
         x.side_error_min = cfg_.constants.formation_minimum_side_error;  // mcx4 t11
         x.side_error_max = cfg_.constants.formation_maximum_side_error;
+        if (u.d.locomotor == LocomotorKind::Bike) {  // mcx4 t11 (0x63abe0): the bike's sideways speed (writes only unit i)
+            x.lateral = &units_[i].sm.lateral;
+            x.lateral_accel = u.d.lateral_accel;
+        }
         if (order_rec) {
             x.formation_path = u.in_formation;
             if (u.in_formation) x.jiggle = u.jiggle;  // OI tactical: formation members

@@ -61,8 +61,9 @@ struct HudTypeInfo {
     std::string icon_name;                // Icon_Name (selection panel portrait)
     // Radar (UI.md §1.7 per-type tags): Radar_Icon_Name (atlas texture, "" = the radar_blip dot), Radar_Icon_Size (x y in
     // the radar's logical space, -1..1 across the radar: canvas size = size x radar size / 2 [port]), Is_Visible_On_Radar /
-    // Is_Visible_On_Enemy_Radar (absent = Yes [port]). Radar_Rotate_Icon / Radar_Show_Facing are not applied (HudUnit has
-    // no facing) [port].
+    // Is_Visible_On_Enemy_Radar (absent = Yes [port]). mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q12): Radar_Show_Facing (default
+    // Yes) turns an icon blip with the unit's yaw (radar_show_facing), Radar_Rotate_Icon turns its texture a quarter turn
+    // clockwise inside the quad (radar_rotate).
     std::string radar_icon;
     Vec2f radar_icon_size{0.0f, 0.0f};
     // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameObjectType.Radar_Icon_Scale_Land family", blip builders 0x35b4d0 / 0x35c000):
@@ -72,6 +73,7 @@ struct HudTypeInfo {
     // mcx4 t14 (same answer, registration GameModeClass vf87 0x362580): Radar_Register_As_Foreground_Object - the blip
     // goes on the radar's foreground layer, drawn above the other blips.
     bool radar_foreground = false;
+    bool radar_show_facing = true, radar_rotate = false;  // mcx4 t14: Radar_Show_Facing / Radar_Rotate_Icon
     bool visible_on_radar = true, visible_on_enemy_radar = true;
     // q6 t19 (OBJECT_SCRIPTS §10.3, radar filter 0x35b4d0): Visible_On_Radar_When_Fogged - a Lua-hidden unit keeps its blip.
     bool visible_on_radar_when_fogged = false;
@@ -112,6 +114,7 @@ struct HudUnit {
     Vec3 icon_anchor{};
     float icon_health = 1.0f;
     Rgba8 team_color{255, 255, 255, 255};  // snapshot team colour (radar blips)
+    float yaw_deg = 0.0f;  // mcx4 t14: the facing's angle from world +X, counter-clockwise, degrees (radar icon turn)
     // R5 sensor jamming (ABILITY_VISUALS 3, radar filter 0x35b4d0): Is_Jammed this tick. The radar drops the blip of a unit that is
     // hostile to the local player and jammed; the owner's and allies' radar still shows it.
     bool jammed = false;

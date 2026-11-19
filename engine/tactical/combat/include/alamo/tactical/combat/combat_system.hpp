@@ -665,6 +665,10 @@ struct CombatConfig {
     // projectile's Max_Rate_Of_Turn (0x372560). apply_game_constants reads both; the mode picks one.
     float turn_multiplier_space = 1.0f;
     float turn_multiplier_land = 1.0f;
+    // mcx4 (MCX4_T11_T12_RE_ANSWERS §B4, WeaponBehavior 0x54d090): Crouch_Move_Fire_Angle_Cutoff (GC +0x1534, degrees; FoC
+    // 20 [M: the ctor default was not read]). A unit in the crouched-move clip (CombatHooks::crouch_moving) fires its own
+    // weapon only while |yaw to the target - its facing yaw| <= this.
+    float crouch_move_fire_angle_cutoff = 20.0f;
 };
 
 // OI tactical (TACTICAL_GAPS 3.2 / 3.3): the GameConstants fields combat reads - Health_Low_Percent_Threshold
@@ -721,6 +725,16 @@ enum class CanHit : uint8_t { Yes = 0, NoTarget, OutOfMaxRange, InsideMinRange, 
 // is set count [port: none]). Called from serial host code only.
 using ShieldSidesFn = std::function<bool(Vec3 from, Vec3 to, bool shield_damage)>;
 
+// mcx4 t23 (MCX4_T10_RE_ANSWERS §12 / §12a): the projectile behind a Take_Damage hit, for the damage listeners. `flight`:
+// the shot's impact point, unit flight direction and damage are known (a direct hit); a queued Damage_Delay hit and a
+// non-projectile hit carry none [port].
+struct ListenerShot {
+    int32_t projectile_desc = -1;
+    bool flight = false;
+    Vec3 pos, dir;
+    float damage = 0.0f;
+};
+
 class CombatHooks {
 public:
     virtual ~CombatHooks() = default;
@@ -761,11 +775,20 @@ public:
         return 1.0f;
     }
     // Take_Damage step 13 (style Take_Damage special abilities): true cancels the damage. `rng` is
-    // null outside a tick unless bind_rng() was called; listeners that need draws then do nothing.
-    virtual bool damage_listener(ObjectId /*victim*/, ObjectId /*source*/, int32_t /*projectile_desc*/, uint32_t /*frame*/,
+    // null outside a tick unless bind_rng() was called; listeners that need draws then do nothing. mcx4 t23: `shot` is the
+    // projectile behind the hit (projectile_desc -1: not a projectile hit); a listener may launch_projectile from here
+    // (Redirect_Blaster's redirected / blocked shot): the projectile step works on a copy of the hit projectile.
+    virtual bool damage_listener(ObjectId /*victim*/, ObjectId /*source*/, const ListenerShot& /*shot*/, uint32_t /*frame*/,
                                  SimRng* /*rng*/) {
         return false;
     }
+    // mcx4 (MCX4_T11_T12_RE_ANSWERS §B4): `id`'s current primary clip is the crouched move (clip type 0x43); its own weapon
+    // then fires only inside CombatConfig::crouch_move_fire_angle_cutoff. Serial fire step. Default: never.
+    virtual bool crouch_moving(ObjectId /*id*/) const { return false; }
+    // mcx4 (MCX4_T10_RE_ANSWERS §15, own-weapon inaccuracy 0x549f80): `shooter` is corrupted by a Corrupt_Systems ability
+    // (its CORRUPT_SYSTEMS pack): true with `radius` = that ability's Inaccuracy_Radius, which replaces the fixed
+    // inaccuracy radius of its own weapon (unscaled; the ability override too). Serial fire step. Default: never.
+    virtual bool corrupt_inaccuracy(ObjectId /*shooter*/, float& /*radius*/) const { return false; }
     // Set_System_Online(hp, offline) (0x384d00), after the combat-side offline effects. `destroyed` = the hardpoint
     // was shot down (else disabled by the station-upgrade copy, HARDPOINT_DISABLED.md §3). `last_of_kind` = no
     // functioning hardpoint of the kind remains (Count_Functioning_Hardpoints 0x397c10). Default: nothing.
@@ -996,6 +1019,11 @@ struct DamageRequest {
     bool no_team = false;
     bool has_impact = false;  // impact point known (projectile hits): lucky-shot hull re-route
     Vec3 impact;
+    // mcx4 t23: a direct projectile hit's flight direction (unit) and the shot's own damage, for the damage listeners
+    // (ListenerShot; Redirect_Blaster's arc and re-launch). has_flight false: none (delayed and non-projectile hits).
+    bool has_flight = false;
+    Vec3 shot_dir;
+    float shot_damage = 0.0f;
 };
 
 struct DamageResult {
@@ -1184,6 +1212,11 @@ struct ProjectileLaunch {
     // branch) and `fuse_seconds` >= 0 sets it off wherever it is (in flight, stuck or resting). Without `toss` a
     // category-3 launch with a fuse is still placed; one without a fuse always takes the grenade branch.
     bool toss = false;
+    // mcx4 t23 (MCX4_T10_RE_ANSWERS §12, 0x4cca10): a shot sent on by Redirect_Blaster. Its travel limit is the type's
+    // Projectile_Max_Flight_Distance (0: the lifetime rule), not the aim distance; with no `target` it flies along `dir`
+    // (unit) from `from` (a blocked shot) instead of toward `point`.
+    bool sent_on = false;
+    Vec3 dir{1.0f, 0.0f, 0.0f};
 };
 
 // cu8k t01 (CU8F_T01_T02_T07_RE.md §2.7 items 1-3): Saber_Throw's thrown saber, a category-8 LIGHT_SABER projectile.
@@ -1721,6 +1754,9 @@ public:
     // (land teams and space squadrons; MovementSystem::set_team). Pure function of the current state.
     float team_mod_multiplier(uint32_t team, ModKind kind) const;
     float attack_range(ObjectId id);  // Get_Max_Attack_Range
+    // mcx4 (MCX4_T10_RE_ANSWERS §10): the recharge factor W Fire_At uses for hardpoint `hardpoint` of `id` (the unit's
+    // own weapon when out of range); 1 for an unknown unit. Read-only (tests, diagnostics).
+    float weapon_delay_factor(ObjectId id, uint32_t hardpoint) const;
     void set_health(ObjectId id, float h);
     void set_shield(ObjectId id, float s);
     // mcx4 t10 (MCX4_T10_RE_ANSWERS §6 / §18): the fighter locomotor's per-frame write of the out-of-combat defence entry
@@ -2131,6 +2167,7 @@ private:
     bool deployed_or_deploying(const Unit& u) const;
     bool deploy_transition(const Unit& u) const;
     bool unit_weapon_allowed(const Unit& u) const;
+    bool crouch_fire_cone(const Unit& u, Vec3 target) const;  // mcx4: |target yaw - facing yaw| <= the crouch cutoff
     bool hp_state_allows(const Unit& u, const Hardpoint& h, const Unit* t) const;
     bool opportunity_allowed(const Unit& u, const HardpointDesc& hd, bool idle) const;
     bool opportunity_fire(Unit& u, Hardpoint& h, uint32_t frame, SimRng& rng);

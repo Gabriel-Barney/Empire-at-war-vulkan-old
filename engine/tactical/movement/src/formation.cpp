@@ -1,6 +1,7 @@
 #include "alamo/tactical/movement/formation.hpp"
 
 #include <algorithm>
+#include <cmath>
 
 namespace alamo::tactical::movement {
 
@@ -269,6 +270,47 @@ V2 destination_try_offset(uint32_t k, bool first_unblocked, V2 v, float m) {
     if (r < 4u) return v * (7.0f * static_cast<float>(4u * round + r) * sign);
     static constexpr V2 kAxes[4] = {{1.0f, 0.0f}, {0.0f, 1.0f}, {-1.0f, 0.0f}, {0.0f, -1.0f}};
     return v * (28.0f * static_cast<float>(round) * sign) + kAxes[r - 4u] * m;
+}
+
+FinalFacing final_formation_facing(std::span<const V2> path, float facing_deg, float half_width, float speed,
+                                   const MovementConstants& k) {
+    FinalFacing f;
+    const size_t n = path.size();
+    if (n < 2 || facing_deg == kNoFacing) return f;
+    // 0x20b100: the facing (0x20b6d0-wrapped) minus the last segment's yaw, into [0, 360); then 0x20b6d0 into (-180, 180]
+    float d = wrap_deg(facing_deg) - heading_deg(path[n - 1] - path[n - 2]);
+    if (d >= 360.0f) d -= 360.0f;
+    else if (d < 0.0f) d += 360.0f;
+    const float psi = wrap_deg(d);
+    if (!(std::fabs(psi) >= k.final_formation_facing_minimum_angle)) return f;
+    const float full = psi * 0.017453292f;
+    f.full = full;
+    float r = half_width * 0.5f * 20.0f;
+    r = std::sqrt(r * 2.0f * r);
+    float len = 0.0f;
+    for (size_t i = 1; i < n; ++i) len += distance(path[i - 1], path[i]);
+    if (len != 0.0f && speed > 0.0f) {
+        const float budget = ((k.final_formation_facing_delta_coefficient * speed) / r) * (len / speed);
+        const float a = std::fabs(full);
+        if (budget < a) f.start = full <= 0.0f ? budget - a : a - budget;
+        f.rate = ((f.full - f.start) / len) * 1.2f;
+    }
+    return f;
+}
+
+int32_t snap_order_center(V2 p, float pz, std::span<const SnapCenter> objects) {
+    int32_t best = -1;
+    float best_d = -1.0f;
+    for (size_t i = 0; i < objects.size(); ++i) {
+        const SnapCenter& o = objects[i];
+        const float dx = p.x - o.pos.x, dy = p.y - o.pos.y, dz = pz - o.z;
+        const float d = std::sqrt(dy * dy + dx * dx + dz * dz);
+        if (d <= o.radius && (best_d == -1.0f || d < best_d)) {
+            best = static_cast<int32_t>(i);
+            best_d = d;
+        }
+    }
+    return best;
 }
 
 }  // namespace alamo::tactical::movement

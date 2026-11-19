@@ -1835,8 +1835,9 @@ private:
     // s78p (b0049): each member's lane on the formation path `fpath` (Unit::lane, member_lane) and its goal := the lane's end
     // - not for air, forced or `kept` members (indexed like idx) or a member without a goal
     // bkm1 t06: fz = the stored height of fpath's last point (a slot-leg G; 0 for any other formation path)
+    // mcx4 t11: facing_deg = the order block's facing (kNoFacing: none) - the final-facing rotation (final_formation_facing)
     void set_lanes(const std::vector<uint32_t>& idx, const LandForm& f, std::span<const V2> fpath, const std::vector<uint8_t>& kept,
-                   std::span<const FormationMember> mem, float fz = 0.0f);
+                   std::span<const FormationMember> mem, float fz = 0.0f, float facing_deg = kNoFacing);
     void move_space(const MoveOrder& order, const std::vector<uint32_t>& idx, uint32_t frame,
                     const std::vector<uint32_t>& delays, uint32_t serial);
     void park_space(Unit& u, uint32_t frame);
