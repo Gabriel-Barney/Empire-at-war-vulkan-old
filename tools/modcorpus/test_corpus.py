@@ -33,9 +33,10 @@ import run_corpus  # noqa: E402
 TESTDATA = os.path.join(ROOT, "engine", "apps", "game", "testdata")
 
 STACKS_WANT = {
-    "CycleA": ("G0", "stack: dependency cycle: CycleA -> CycleB -> CycleA", ["CycleA", "CycleB"]),
-    "CycleB": ("G0", "stack: dependency cycle: CycleB -> CycleA -> CycleB", ["CycleB", "CycleA"]),
-    "EawOnly": ("G0", "stack: EawOnly: base-EaW mod: retail runs it with sweaw.exe", ["EawOnly"]),
+    # ums2 t09: resolver messages name mods by catalog key (Mods\<folder>).
+    "CycleA": ("G0", "stack: dependency cycle: Mods\\CycleA -> Mods\\CycleB -> Mods\\CycleA", ["CycleA", "CycleB"]),
+    "CycleB": ("G0", "stack: dependency cycle: Mods\\CycleB -> Mods\\CycleA -> Mods\\CycleB", ["CycleB", "CycleA"]),
+    "EawOnly": ("G0", "stack: Mods\\EawOnly: base-EaW mod: retail runs it with sweaw.exe", ["EawOnly"]),
     "EawGuess": ("G1", None, ["EawGuess"]),
     "OtherTc": ("G1", None, ["OtherTc"]),
     "StackHinted": ("G1", None, ["StackHinted", "StackParent"]),

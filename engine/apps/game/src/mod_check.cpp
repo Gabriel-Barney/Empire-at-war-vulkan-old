@@ -2626,6 +2626,32 @@ std::string format_mod_report_json(const ModCheckReport& r) {
     j.strings("blocking", r.grade.blocking);
     j.strings("check_errors", r.grade.check_errors);
     j.close('}');
+    // ums2 t03: every CompatIssue record in first-add order (the version 4 lists above are views of it, plus the VFS's
+    // findings). layer: the owning mod's index in the search list, "base", or "none".
+    j.key("issues");
+    j.open('[');
+    for (const alamo::CompatIssue& i : r.issues.issues()) {
+        j.open('{');
+        j.key("kind");
+        j.str(alamo::issue_kind_name(i.kind));
+        j.key("severity");
+        j.str(alamo::issue_severity_name(i.severity));
+        j.key("subject");
+        j.str(i.subject);
+        j.key("source");
+        j.str(i.source);
+        j.key("layer");
+        if (i.layer == alamo::kBaseLayer) j.str("base");
+        else if (i.layer == alamo::kNoLayer) j.str("none");
+        else j.num(i.layer);
+        j.key("retail_equivalent");
+        j.boolean(i.retail_equivalent);
+        count(j, "count", i.count);
+        j.key("detail");
+        j.str(i.detail);
+        j.close('}');
+    }
+    j.close(']');
     j.close('}');
     j.out.push_back('\n');
     return std::move(j.out);
