@@ -29,6 +29,7 @@
 #include <utility>
 #include <vector>
 
+#include "alamo/sim/presentation_events.hpp"  // ref2 t02
 #include "alamo/core/sim_rng.hpp"
 #include "alamo/game/battle_fx.hpp"
 #include "alamo/game/game_data.hpp"
@@ -516,6 +517,12 @@ public:
     static std::string_view production_tag(Production kind);
     static std::array<std::string_view, 3> production_tags(Production kind, bool tactical);
     uint32_t production(const objects::GameObjectTypes& types, objects::TypeIndex type, Production kind, bool tactical = false);
+    // ref2 t02 (alamo/sim/presentation_events.hpp): the presentation events of one sim tick, mapped to sounds - one row per
+    // event kind. Tactical production of the local player (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Tactical_Build_
+    // Started family": queue add 0x496a20, complete 0x498170, cancel 0x498820 from the cancel-event executors only):
+    //   ProductionBegin / ProductionCanceled / ProductionCompleted -> production(type, Begin / Cancel / Complete, tactical)
+    // (Build_Music_Completed is galactic only [port: as before]). Other players' events and unknown types: nothing.
+    void on_events(const sim::PresentationEvents& events, const objects::GameObjectTypes& types, int32_t local_player);
     // t07 (BATTLE_TRANSITIONS, departure 0x431c80): a fleet left a planet's orbit. Galactic_Fleet_Hyperspace (2D, GUI
     // preset) when the local player owns the fleet or sees it (`local_sees`: the host's visibility test). Returns the
     // instance id (0 = not heard / refused).
@@ -568,10 +575,6 @@ private:
         uint64_t target = 0;  // the target the loop also runs on (0 none)
     };
     std::map<std::pair<int64_t, uint8_t>, AbilityLoop> ability_loop_;  // mcx4 t13: (user, ability) -> running loop (lookup only)
-    // mcx4 t13 batch B: the local player's tactical build orders last tick (order id -> type) and built counts (type ->
-    // TacticalProduction::built_count), to tell a completed order from a cancelled one.
-    std::map<uint32_t, int32_t> prod_orders_;
-    std::map<int32_t, uint32_t> prod_built_;
     // aud1 t04: Fire_SFXEvent of a CombatData::hardpoints entry (resolved by its HardPoint type name, cached; "" none).
     const std::string& hardpoint_fire_sfx(const objects::GameObjectTypes& types, const tactical::combat::CombatSystem& cs, int32_t hardpoint);
 

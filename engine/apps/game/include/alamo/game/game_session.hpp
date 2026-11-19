@@ -153,6 +153,12 @@ public:
     // GRC 1.3 presentation latch (GalacticSim::consume_reveal_sfx, not hashed): true once after a galactic pre-step
     // revealed a planet on a frame > 0 (the host plays SFXEvent_Planet_Revealed). Finds the galactic mode under a battle.
     bool take_reveal_sfx();
+    // ref2 t02 (alamo/sim/presentation_events.hpp): the presentation events of the tick just run (the battle's tactical
+    // production begin / cancel / complete), for GameAudioHost::on_events. Collected only after
+    // set_presentation_events(true) (alamo_game; tests and replays leave it off). The battle is armed after each tick, so
+    // a battle that starts inside a tick reports from its next tick on. Never hashed, saved or read by the sim.
+    void set_presentation_events(bool on);
+    const sim::PresentationEvents& presentation_events() const { return presentation_; }
     // GRC 1.1: may the local player order a fleet to this planet object (the human hop gate reads the raw revealed byte
     // D +0x2c9)? True for a non-planet id or without a local player (nothing gated).
     bool move_target_revealed(uint32_t planet_id) const;
@@ -341,6 +347,8 @@ private:
 #endif
     std::unique_ptr<sim::SimHost> host_;
     std::unique_ptr<sim::CampaignBattles> battles_;  // after host_: destroyed first (clears its hooks)
+    sim::PresentationEvents presentation_;  // ref2 t02: the last tick's (presentation_events)
+    bool presentation_on_ = false;
     galactic::GalacticSetup setup_;
     terrain::MapData skirmish_map_;
     int32_t local_player_ = 0;
@@ -360,6 +368,7 @@ private:
     void tap_events(bool story_drains);
     void tap_event(const galactic::GalacticSim& gs, const galactic::GalacticEvent& e);
     void after_tick();
+    void collect_presentation();  // ref2 t02
     // OI host: after-T9 hook (rate lock -> pacing + parity) and its state.
     void after_story(sim::SimHost& h);
     std::function<bool()> rate_lock_source_;

@@ -2598,6 +2598,7 @@ void test_tactical_tech_upgrade() {
     uint32_t built_at = 0, killed_at = 0;
     int32_t tech_before = 0, tech_built = 0, tech_killed = 0;
     objects::ObjectId holder = objects::kNoObjectId;
+    PresentationEvents pres;  // ref2 t02
     for (uint64_t t = 0; t < 3000 && !dropped; ++t) {
         host.tick_once();
         TacticalBattle* b = battles.battle();
@@ -2614,15 +2615,23 @@ void test_tactical_tech_upgrade() {
                 ev.set("type_index", type).set("location", static_cast<uint32_t>(station));
                 return host.execute_direct(0, commands::CommandSource::Player, ev);
             };
+            b->set_emit_presentation(true);  // ref2 t02: the presentation events from here on
             CHECK(order(no_queue) == commands::RejectReason::NotAllowed);  // 0x497140: queue -1 is never built
             CHECK(order(base_up) == commands::RejectReason::None);
             CHECK(order(tech_up) == commands::RejectReason::None);
+            {  // ref2 t02: cancel the tech upgrade (the 2nd order at the station) and order it again in the same frame
+                commands::EventData cancel(commands::EventType::Production);
+                cancel.set("location", static_cast<uint32_t>(station)).set("cancel", 1u).set("index", 1u);
+                CHECK(host.execute_direct(0, commands::CommandSource::Player, cancel) == commands::RejectReason::None);
+                CHECK(order(tech_up) == commands::RejectReason::None);
+            }
             CHECK(b->production() && b->production()->queue(0).size() == 2);
             CHECK(b->production()->count_queue(0, 0) == 1 && b->production()->count_queue(0, 1) == 1);
             ordered = true;
             continue;
         }
         if (!ordered) continue;
+        b->drain_presentation(pres);  // ref2 t02
         // The tech upgrade object, wherever it is held (the base upgrade may have replaced the station by then).
         objects::ObjectId obj = objects::kNoObjectId;
         for (const objects::ObjectHandle h : st.owned_by(0))
@@ -2653,6 +2662,21 @@ void test_tactical_tech_upgrade() {
     }
     CHECK(ordered && built && killed && dropped);
     CHECK(built_at >= 2 + 60 && built_at <= 2 + 60 + 3);  // its own queue: not behind the 30-frame base upgrade
+    // ref2 t02: the presentation events of the run, in order: base begin, tech begin, tech cancel, tech begin (frame 2,
+    // the refused order reports nothing), then the two completions (base at about 32, tech at about 62), all player 0.
+    {
+        using PK = PresentationEventKind;
+        std::vector<std::pair<PK, uint32_t>> seen;
+        for (const PresentationEvent& e : pres)
+            if (e.player == 0) seen.emplace_back(e.kind, static_cast<uint32_t>(e.type));
+        const std::vector<std::pair<PK, uint32_t>> want = {{PK::ProductionBegin, base_up},     {PK::ProductionBegin, tech_up},
+                                                           {PK::ProductionCanceled, tech_up},  {PK::ProductionBegin, tech_up},
+                                                           {PK::ProductionCompleted, base_up}, {PK::ProductionCompleted, tech_up}};
+        CHECK(seen == want);
+        CHECK(pres.size() >= 4 && pres[0].frame == 2 && pres[3].frame == 2 && pres.back().frame <= built_at &&
+              pres.back().frame + 1 >= built_at);
+        std::printf("  ref2 t02: %zu presentation events (player 0: %zu)\n", pres.size(), seen.size());
+    }
     CHECK(tech_built == tech_before + 1);
     CHECK(tech_killed == tech_built - 1);
 }

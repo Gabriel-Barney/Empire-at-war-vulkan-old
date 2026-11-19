@@ -996,36 +996,7 @@ void GameAudioHost::cue_lines(const sim::TacticalBattle& battle, const objects::
         // ledger: consumes GameObjectType.SFXEvent_Enemy_Damaged_Health_Critical_Warning
         if (!ev.empty() && game_->gui_sfx(ev)) ++stats_.health_warnings;
     }
-    // Tactical production of the local player (skirmish build queues; MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Tactical_
-    // Build_Started family"): an order new since last tick -> Begin; a gone order -> Complete when the type's built count
-    // rose, else Cancel. Build_Music_Completed (galactic, mode 4) is not played in a battle [port: as before].
-    if (const tactical::hangar::TacticalProduction* prod = battle.production(); prod && local_player >= 0) {
-        std::map<uint32_t, int32_t> now;
-        for (const tactical::hangar::BuildOrder& o : prod->queue(local_player)) now.emplace(o.id, o.type);
-        for (const auto& [id, type] : now)
-            if (prod_orders_.find(id) == prod_orders_.end())
-                production(types, static_cast<objects::TypeIndex>(type), Production::Begin, true);
-        for (const auto& [id, type] : prod_orders_) {
-            if (now.find(id) != now.end()) continue;
-            const uint32_t built = prod->built_count(local_player, type);
-            uint32_t& seen = prod_built_[type];
-            const bool done = built > seen;
-            if (done) ++seen;
-            const objects::TypeIndex t = static_cast<objects::TypeIndex>(type);
-            if (done && t < types.size()) {  // completion: the speech / SFX line only (no build music in a battle)
-                const std::array<std::string_view, 3> tags = production_tags(Production::Complete, true);
-                for (size_t i = 0; i < tags.size(); ++i) {
-                    const std::string_view ev = tags[i].empty() ? std::string_view() : types.get_string(t, tags[i]);
-                    if (ev.empty()) continue;
-                    if (i == 0 ? game_->speech(ev) : game_->gui_sfx(ev)) ++stats_.production_sfx;
-                    break;
-                }
-            } else if (!done) {
-                production(types, t, Production::Cancel, true);
-            }
-        }
-        prod_orders_ = std::move(now);
-    }
+    // Tactical production lines: ref2 t02, on_events (the battle reports begin / cancel / complete as presentation events).
     // Battle won / lost HUD line (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_HUD_Won_Land_Battle family"): once, on the tick the
     // victory is declared. The flags walk the players in index order and stop at the first enemy of the local player
     // owning a TACTICAL_SUPER_WEAPON object, so the own-killer test has only seen lower players by then [H loop, M effect].
@@ -1488,7 +1459,7 @@ uint32_t GameAudioHost::production(const objects::GameObjectTypes& types, object
         if (id) ++stats_.production_sfx;
         break;
     }
-    if (kind == Production::Complete) {
+    if (kind == Production::Complete && !tactical) {  // no build music in a battle [port: as before]
         const std::string_view music = types.get_string(type, "Build_Music_Completed");
         if (!music.empty()) {
             game_->build_complete(music);  // mode 4, the previous music resumes after it
@@ -1600,6 +1571,20 @@ void GameAudioHost::apply_presentation(const std::vector<lua::PresentationEvent>
 
 #endif
 
+// Shared by both builds: production() is a no-op without engine/audio.
+void GameAudioHost::on_events(const sim::PresentationEvents& events, const objects::GameObjectTypes& types, int32_t local_player) {
+    using K = sim::PresentationEventKind;
+    for (const sim::PresentationEvent& e : events) {
+        if (local_player < 0 || e.player != local_player || e.type < 0) continue;
+        const auto t = static_cast<objects::TypeIndex>(e.type);
+        switch (e.kind) {
+            case K::ProductionBegin: production(types, t, Production::Begin, true); break;
+            case K::ProductionCanceled: production(types, t, Production::Cancel, true); break;
+            case K::ProductionCompleted: production(types, t, Production::Complete, true); break;
+        }
+    }
+}
+
 std::array<std::string_view, 3> GameAudioHost::production_tags(Production kind, bool tactical) {
     switch (kind) {
         case Production::Begin:
@@ -1625,7 +1610,6 @@ std::string_view GameAudioHost::production_tag(Production kind) {
 void GameAudioHost::battle_reset() {
     last_serial_ = 0;
     hardpoint_fire_.clear();  // aud1 t04: hardpoint indices are per battle
-    prod_orders_.clear();     // mcx4 t13: per-battle production tracking
     victory_seen_ = false;    // mcx4 t13 batch D
     last_retreater_ = -1;     // mcx4 t13 batch E
     base_shield_state_.clear();  // mcx4 t13 batch I
@@ -1642,7 +1626,6 @@ void GameAudioHost::battle_reset() {
     point_progress_.clear();     // mcx4 t13 batch U
     turret_turn_.clear();        // mcx4 t13
     ability_loop_.clear();       // mcx4 t13 (the battle's objects and their sounds go with it)
-    prod_built_.clear();
     intro_decided_ = false;   // aud1 t07: a new battle decides its intro again
     object_events_reset();    // aud1 t05
     intro_frame_ = 0;

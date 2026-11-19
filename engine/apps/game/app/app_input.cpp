@@ -246,6 +246,7 @@ void App::galactic_message(std::string_view id) {
 
 void App::post_tick() {
     audio_.sim_tick();
+    audio_.on_events(session_->presentation_events(), data_.types, local_player());  // ref2 t02: this tick's events
     if (session_->take_reveal_sfx()) {  // GRC 1.3: a planet was revealed by the galactic pre-step (frame > 0)
         audio_.planet_revealed();  // aud2 t01: Audio.xml's SFXEvent_Planet_Revealed value (FoC GUI_Planet_Mouse_Over)
         ++reveal_sfx_;

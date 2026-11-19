@@ -903,6 +903,7 @@ void GameSession::tap_events(bool story_drains) {
 void GameSession::after_tick() {
     save_cache_.reset();  // N1 / t09: a checked save is stale once the session ticked
     save_checked_ = false;
+    collect_presentation();
     tap_events(false);
     land_skirmish_invade();
     // [port] fleet cohesion: a battle whose setting differs from the preference (a new battle starts loose) gets it
@@ -910,6 +911,24 @@ void GameSession::after_tick() {
         if (const sim::TacticalBattle* b = battle(); b && b->fleet_cohesion(static_cast<uint8_t>(local_player_)) != fleet_cohesion_)
             fleet_cohesion_sent_ = submit(fleet_cohesion_event(fleet_cohesion_)).ok();
     if (banner_sent_ && (!battles_ || !battles_->linked_banner_up())) banner_sent_ = false;  // story t13
+}
+
+// ref2 t02: the battle's presentation events of this tick (drained, so the battle's list never grows); arming the battle
+// here covers a battle started inside this tick and one loaded from a save.
+void GameSession::collect_presentation() {
+    presentation_.clear();
+    if (!presentation_on_ || !battles_) return;
+    if (sim::TacticalBattle* b = battles_->battle()) {
+        b->set_emit_presentation(true);
+        b->drain_presentation(presentation_);
+    }
+}
+
+void GameSession::set_presentation_events(bool on) {
+    presentation_on_ = on;
+    presentation_.clear();
+    if (battles_)
+        if (sim::TacticalBattle* b = battles_->battle()) b->set_emit_presentation(on);
 }
 
 // --- OI host: Lua presentation -> frame pacing and the parity CRC (docs/re/MAIN_LOOP.md §1.5, COMMANDS.md §7.1 step 6) ---
