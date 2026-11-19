@@ -44,9 +44,11 @@
 #include "alamo/ai/ai_lua_runtime.hpp"
 #include "alamo/ai/galactic_ai.hpp"
 #include "alamo/ai/perception_equations.hpp"
+#include "alamo/core/compat_issue.hpp"
 #include "alamo/data/game_database.hpp"
 #include "alamo/galactic/conflicts.hpp"
 #include "alamo/sim/campaign_battles.hpp"
+#include "alamo/vfs/mod_environment.hpp"
 #include "alamo/vfs/vfs.hpp"
 #ifdef ALAMO_SIM_HAVE_TACTICAL_AI
 #include "alamo/sim/battle_ai.hpp"  // N1 stage 2: TacticalAiSetup (--battles fight-all)
@@ -539,8 +541,16 @@ public:
             const std::string eaw = env_text("ALAMO_EAW_DATA");
             if (!eaw.empty()) eaw_root = eaw;
         }
-        files_ = vfs::mount_game(root_, args_, &err, eaw_root);
+        IssueSink issues;  // ums2: the VFS findings (nothing reads them here yet)
+        vfs::ModEnvironmentOptions mopt;
+        mopt.hash = false;  // headless reads no content hash (saves of GameData do)
+        mopt.eaw_root = eaw_root;
+        files_ = vfs::ModEnvironment::open(root_, args_, issues, &err, std::move(mopt));
         if (!files_) return -1;
+        if (files_->refused()) {  // D1: a base-EaW mod in the stack (open() set err to the refusal)
+            err = files_->refusal();
+            return -1;
+        }
         std::vector<std::string> diag;
         if (!db_.load(*files_, {}, &diag) || !raw_.load(*files_, &diag) || !types_.build(raw_, files_.get(), &diag) ||
             !galactic::load_galactic_rules(*files_, db_, types_, rules_, &diag)) {
@@ -550,12 +560,12 @@ public:
         std::vector<std::string> cdiag;
         galactic::load_conflict_rules(*files_, db_, types_, rules_, crules_, &cdiag);
         catalog_ = std::make_unique<sim::BattleCatalog>(types_, files_.get(), &db_.constants(), &cdiag);
-        const auto lister = [this](std::string_view g) { return files_->list(g); };
+        const auto lister = [this](std::string_view g) { return files_->vfs().list(g); };
         if (!ai::load_ai_definitions(*files_, ai::list_ai_data(lister), defs_)) {
             err = "galactic: no AI definitions found";
             return -1;
         }
-        ai::load_equation_files(*files_, files_->list(ai::kPerceptionEquationGlob), eqs_);
+        ai::load_equation_files(*files_, files_->vfs().list(ai::kPerceptionEquationGlob), eqs_);
         plan_files_ = ai::list_plan_files(lister);
         tinfo_ = ai::make_galactic_ai_type_info(types_);
         campaign_ = campaign.empty() ? std::string("Sandbox_Heart_Of_The_Maw_Underworld") : campaign;  // [name-ok: test default campaign]
@@ -648,7 +658,7 @@ public:
 #endif
         sim::load_tactical_systems(*files_, rules_, &db_.constants(), bo);
         // cu8f t03: the random map picker's candidate table (CU8F_T03_T05_RE §1.1), built on the first pick [port].
-        bo.map_candidate_source = sim::map_candidate_source(*files_, [v = files_.get()](std::string_view g, bool mod) {
+        bo.map_candidate_source = sim::map_candidate_source(*files_, [v = &files_->vfs()](std::string_view g, bool mod) {
             return v->list(g, mod ? vfs::Vfs::kLayerMod : vfs::Vfs::kLayerBase | vfs::Vfs::kLayerMeg);
         });
 #ifdef ALAMO_SIM_HAVE_ANIM
@@ -738,7 +748,7 @@ private:
 #endif
     std::string root_, campaign_;
     std::vector<std::string> args_;
-    std::unique_ptr<vfs::Vfs> files_;
+    std::unique_ptr<vfs::ModEnvironment> files_;
     data::GameDatabase db_;
     objects::ObjectTypeDatabase raw_;
     objects::GameObjectTypes types_;

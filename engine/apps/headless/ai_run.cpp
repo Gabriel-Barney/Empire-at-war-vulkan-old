@@ -13,10 +13,12 @@
 #include <map>
 #include <memory>
 #include <span>
+#include <utility>
 
 #if defined(ALAMO_HEADLESS_HAVE_GALACTIC_AI) && defined(ALAMO_SIM_HAVE_BATTLES)
 #include "alamo/ai/ai_context.hpp"
 #include "alamo/core/sim_crc.hpp"
+#include "alamo/core/compat_issue.hpp"
 #include "alamo/ai/ai_definitions.hpp"
 #include "alamo/ai/ai_lua_runtime.hpp"
 #include "alamo/ai/galactic_ai.hpp"
@@ -40,6 +42,7 @@
 #include "alamo/lua/players.hpp"  // q6: the story player world's perception source
 #endif
 #endif
+#include "alamo/vfs/mod_environment.hpp"
 #include "alamo/vfs/vfs.hpp"
 #include "port_trace.hpp"
 #include "tactical_trace.hpp"  // storyb t03: --tactical-trace-out
@@ -139,25 +142,34 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
         if (!eaw.empty()) eaw_root = eaw;
     }
     std::string err;
-    std::unique_ptr<vfs::Vfs> files = vfs::mount_game(root, opt.game_args, &err, eaw_root);
-    if (!files) {
+    IssueSink issues;  // ums2: the VFS findings (nothing reads them here yet)
+    vfs::ModEnvironmentOptions mopt;
+    mopt.hash = false;  // headless reads no content hash (saves of GameData do)
+    mopt.eaw_root = eaw_root;
+    const std::unique_ptr<vfs::ModEnvironment> env = vfs::ModEnvironment::open(root, opt.game_args, issues, &err, std::move(mopt));
+    if (!env) {
         std::fprintf(stderr, "%s\n", err.c_str());
         return 2;
     }
+    if (env->refused()) {  // D1: a base-EaW mod in the stack
+        std::fprintf(stderr, "%s\n", env->refusal().c_str());
+        return 2;
+    }
+    vfs::Vfs* const files = &env->vfs();
     std::vector<std::string> diag;
     data::GameDatabase db;
     objects::ObjectTypeDatabase raw;
     objects::GameObjectTypes types;
     galactic::GalacticRules rules;
     galactic::ConflictRules crules;
-    if (!db.load(*files, {}, &diag) || !raw.load(*files, &diag) || !types.build(raw, files.get(), &diag) ||
+    if (!db.load(*files, {}, &diag) || !raw.load(*files, &diag) || !types.build(raw, files, &diag) ||
         !galactic::load_galactic_rules(*files, db, types, rules, &diag)) {
         std::fprintf(stderr, "galactic-ai: game data incomplete (%zu diagnostics)\n", diag.size());
         return 2;
     }
     std::vector<std::string> cdiag;
     galactic::load_conflict_rules(*files, db, types, rules, crules, &cdiag);
-    const sim::BattleCatalog catalog(types, files.get(), &db.constants(), &cdiag);
+    const sim::BattleCatalog catalog(types, files, &db.constants(), &cdiag);
     // AI data, perception equations, plan scripts.
     ai::AiDefinitions defs;
     const auto lister = [&files](std::string_view g) { return files->list(g); };
@@ -262,7 +274,7 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
         sim::SimHost host(types, js, cfg);
         if (opt.scoring)  // q6 t06
             if (const auto scoring = db.constants().get("Game_Scoring_Script_Name"))
-                host.set_scoring_script(files.get(), std::string(*scoring));
+                host.set_scoring_script(files, std::string(*scoring));
         host.set_scoring_campaign(name);  // q6 t09: Game_Mode_Starting_Event("Galactic", campaign)
         std::vector<std::string> start_diag;
         galactic::GalacticSim* gs = host.start_galactic(rules, setup, &start_diag);
@@ -313,7 +325,7 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
                 apply_switch(sw);
             });
             sim::StoryStart st;
-            st.files = files.get();
+            st.files = files;
             st.plot_sets = sim::campaign_plot_sets(*cdef, *gs);
             std::vector<std::string> sd;
             if (!host.start_story(st, &sd) || !host.story()) {
@@ -362,7 +374,7 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
         bo.battle.skip_human_units = human >= 0;
         sim::load_tactical_systems(*files, rules, &db.constants(), bo);  // Int-final: weather, retreat, strikes data
         // cu8f t03: the random map picker's candidate table (CU8F_T03_T05_RE §1.1), built on the first pick [port].
-        bo.map_candidate_source = sim::map_candidate_source(*files, [v = files.get()](std::string_view g, bool mod) {
+        bo.map_candidate_source = sim::map_candidate_source(*files, [v = files](std::string_view g, bool mod) {
             return v->list(g, mod ? vfs::Vfs::kLayerMod : vfs::Vfs::kLayerBase | vfs::Vfs::kLayerMeg);
         });
 #ifdef ALAMO_SIM_HAVE_AI_TACTICAL
@@ -396,7 +408,7 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
         if (opt.ai_latency >= 0) wcfg.path_latency = static_cast<uint32_t>(opt.ai_latency);  // parity knobs
         wcfg.stagger = opt.ai_stagger == 1;  // a2m r4: galactic default = the original timing (AI_GALACTIC §1.3)
         world_holder = std::make_unique<ai::GalacticAiWorld>(
-            *gs, host.galactic_mode()->primary(), &types, files.get(), host.random(), defs, eqs, tinfo,
+            *gs, host.galactic_mode()->primary(), &types, files, host.random(), defs, eqs, tinfo,
             [&host](uint8_t p, const commands::EventData& ev) { return host.execute_direct(p, commands::CommandSource::AI, ev); },
             wcfg);
         ai::GalacticAiWorld& world = *world_holder;

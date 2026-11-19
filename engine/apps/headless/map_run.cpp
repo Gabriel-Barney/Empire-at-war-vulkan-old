@@ -14,6 +14,7 @@
 #include <memory>
 
 #include "alamo/commands/recording.hpp"
+#include "alamo/core/compat_issue.hpp"
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/host_fs.hpp"
 #include "alamo/data/game_database.hpp"
@@ -25,7 +26,7 @@
 #include "alamo/objects/object_types.hpp"
 #include "alamo/sim/scenario.hpp"
 #include "alamo/terrain/ted.hpp"
-#include "alamo/vfs/vfs.hpp"
+#include "alamo/vfs/mod_environment.hpp"
 
 namespace {
 
@@ -49,6 +50,23 @@ double ms_since(std::chrono::steady_clock::time_point t) {
     return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t).count();
 }
 
+// ums2: the game's files through the one mod environment (mount_game's plan). nullptr after printing the VFS error or
+// the D1 base-EaW refusal to stderr.
+std::unique_ptr<alamo::vfs::ModEnvironment> open_game(const std::string& root, const std::vector<std::string>& args) {
+    alamo::IssueSink issues;  // the VFS findings (nothing reads them here yet)
+    std::string err;
+    auto env = alamo::vfs::ModEnvironment::open(root, args, issues, &err, alamo::vfs::ModEnvironmentOptions{std::nullopt, {}, false});
+    if (!env) {
+        std::fprintf(stderr, "%s\n", err.c_str());
+        return nullptr;
+    }
+    if (env->refused()) {
+        std::fprintf(stderr, "%s\n", env->refusal().c_str());
+        return nullptr;
+    }
+    return env;
+}
+
 }  // namespace
 
 int economy_run(const MapRunOptions& opt, const std::string& data_dir) {
@@ -63,11 +81,8 @@ int economy_run(const MapRunOptions& opt, const std::string& data_dir) {
             std::fprintf(stderr, "--economy needs --game <corruption dir>, --data <dir> or ALAMO_FOC_DATA\n");
             return 2;
         }
-        files = vfs::mount_game(root, opt.game_args, &err);
-        if (!files) {
-            std::fprintf(stderr, "%s\n", err.c_str());
-            return 2;
-        }
+        files = open_game(root, opt.game_args);
+        if (!files) return 2;
     }
     std::vector<std::string> diag;
     data::GameDatabase db;
@@ -152,11 +167,8 @@ int story_run(const MapRunOptions& opt, const std::string& data_dir, const std::
             std::fprintf(stderr, "--story needs --game <corruption dir>, --data <dir> or ALAMO_FOC_DATA\n");
             return 2;
         }
-        files = vfs::mount_game(root, opt.game_args, &err);
-        if (!files) {
-            std::fprintf(stderr, "%s\n", err.c_str());
-            return 2;
-        }
+        files = open_game(root, opt.game_args);
+        if (!files) return 2;
     }
     std::vector<std::string> diag;
     data::GameDatabase db;
@@ -285,11 +297,8 @@ int map_run(const MapRunOptions& opt) {
         return 2;
     }
     std::string err;
-    auto files = vfs::mount_game(root, opt.game_args, &err);
-    if (!files) {
-        std::fprintf(stderr, "%s\n", err.c_str());
-        return 2;
-    }
+    const auto files = open_game(root, opt.game_args);
+    if (!files) return 2;
     auto t0 = std::chrono::steady_clock::now();
     objects::ObjectTypeDatabase db;
     if (!db.load(*files)) {

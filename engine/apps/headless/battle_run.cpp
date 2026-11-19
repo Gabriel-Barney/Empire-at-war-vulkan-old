@@ -9,6 +9,7 @@
 #include <memory>
 
 #ifdef ALAMO_SIM_HAVE_BATTLES
+#include "alamo/core/compat_issue.hpp"
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/host_fs.hpp"
@@ -20,6 +21,7 @@
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/object_types.hpp"
 #include "alamo/sim/campaign_battles.hpp"
+#include "alamo/vfs/mod_environment.hpp"
 #include "alamo/vfs/vfs.hpp"
 #ifdef ALAMO_SIM_HAVE_ANIM
 #include "alamo/sim/sim_anim.hpp"
@@ -73,13 +75,18 @@ int battle_run(const MapRunOptions& opt, const std::string& data_dir, const Batt
             std::fprintf(stderr, "--battles needs --game <corruption dir>, --data <dir> or ALAMO_FOC_DATA\n");
             return 2;
         }
-        std::unique_ptr<vfs::Vfs> v = vfs::mount_game(root, opt.game_args, &err);
-        vfs_files = v.get();
-        files = std::move(v);
-        if (!files) {
+        IssueSink issues;  // ums2: the VFS findings (nothing reads them here yet)
+        std::unique_ptr<vfs::ModEnvironment> env = vfs::ModEnvironment::open(root, opt.game_args, issues, &err, vfs::ModEnvironmentOptions{std::nullopt, {}, false});
+        if (!env) {
             std::fprintf(stderr, "%s\n", err.c_str());
             return 2;
         }
+        if (env->refused()) {  // D1: a base-EaW mod in the stack
+            std::fprintf(stderr, "%s\n", env->refusal().c_str());
+            return 2;
+        }
+        vfs_files = &env->vfs();
+        files = std::move(env);
     }
     std::vector<std::string> diag;
     data::GameDatabase db;

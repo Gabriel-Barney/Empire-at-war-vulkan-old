@@ -141,6 +141,7 @@
 #include "alamo/commands/pipeline.hpp"
 #include "alamo/commands/recording.hpp"
 #include "alamo/core/bytes.hpp"
+#include "alamo/core/compat_issue.hpp"
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/host_fs.hpp"
 #include "alamo/core/hash.hpp"
@@ -165,6 +166,7 @@
 #include "alamo/tactical/services/stream_rng.hpp"  // SP5 --svc-streams
 #endif
 #endif
+#include "alamo/vfs/mod_environment.hpp"
 #include "alamo/vfs/steam_workshop.hpp"
 #include "alamo/vfs/vfs.hpp"
 #include "crc_out.hpp"  // header-only (core): the --crc-checkpoint options parse without the sim too
@@ -1219,13 +1221,18 @@ static int headless_main(int argc, char** argv) {
     std::unique_ptr<alamo::FileProvider> provider;
     if (!opt.game_dir.empty()) {
         std::string err;
-        auto v = alamo::vfs::mount_game(opt.game_dir, opt.game_args, &err);
-        if (!v) {
+        alamo::IssueSink issues;  // ums2: the VFS findings (nothing reads them here yet)
+        auto env = alamo::vfs::ModEnvironment::open(opt.game_dir, opt.game_args, issues, &err, alamo::vfs::ModEnvironmentOptions{std::nullopt, {}, false});
+        if (!env) {
             std::fprintf(stderr, "%s\n", err.c_str());
             return 1;
         }
-        if (!opt.quiet) std::printf("%s\n", v->describe().c_str());
-        provider = std::move(v);
+        if (env->refused()) {  // D1: a base-EaW mod in the stack
+            std::fprintf(stderr, "%s\n", env->refusal().c_str());
+            return 1;
+        }
+        if (!opt.quiet) std::printf("%s\n", env->vfs().describe().c_str());
+        provider = std::move(env);
     } else if (!opt.data_dir.empty()) {
         provider = std::make_unique<alamo::DirectoryProvider>(opt.data_dir);
     } else {

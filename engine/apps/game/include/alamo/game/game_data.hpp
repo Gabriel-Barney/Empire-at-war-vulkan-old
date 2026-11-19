@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "alamo/core/compat_issue.hpp"
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/host_fs.hpp"
 #include "alamo/data/game_database.hpp"
@@ -25,6 +26,7 @@
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/objects/object_types.hpp"
 #include "alamo/sim/battle_catalog.hpp"
+#include "alamo/vfs/mod_environment.hpp"
 #include "alamo/vfs/mod_registry.hpp"
 
 #ifdef ALAMO_GAME_HAVE_GALACTIC_AI
@@ -62,8 +64,10 @@ struct AiData {
 
 struct GameData {
     std::string root;                      // game folder (FoC "corruption") or synthetic data folder
-    std::unique_ptr<FileProvider> files;   // VFS for real data, DirectoryProvider for synthetic data
-    vfs::Vfs* vfs = nullptr;               // = files when it is a VFS (audio archives, map lists), else null
+    std::unique_ptr<FileProvider> files;   // the ModEnvironment for real data, DirectoryProvider for synthetic data
+    vfs::ModEnvironment* env = nullptr;    // ums2: = files for real data (mounted mods, layer owners), else null
+    vfs::Vfs* vfs = nullptr;               // = &env->vfs() for real data (audio archives, map lists), else null
+    alamo::IssueSink vfs_issues;           // ums2: the findings ModEnvironment::open recorded (VFS, with their layer)
     data::GameDatabase db;
     objects::ObjectTypeDatabase raw;
     objects::GameObjectTypes types;
@@ -87,7 +91,7 @@ struct GameData {
     };
     std::vector<LoadStage> stages;
     std::vector<std::string> args;  // N1 / t09: the VFS command line the data was loaded with (save descriptors)
-    // mcx3: one descriptor per mounted mod folder, Vfs::mod_dirs() order (vfs::describe_mounted_mod: name, version,
+    // mcx3: one descriptor per mounted mod folder, Vfs::mod_dirs() order (ModEnvironment::mounted(): name, version,
     // content hash, game tag). Saves store them; nothing in gameplay reads them.
     std::vector<vfs::ModDescriptor> mods;
     // N1 / t09: sim::fingerprint_types of `types`, computed on first use (saves / loads only; one process-wide cache).

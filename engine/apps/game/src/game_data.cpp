@@ -85,18 +85,17 @@ uint32_t neutral_faction(const galactic::GalacticRules& rules) {
 }  // namespace
 
 bool load_game_data(const std::string& root, const std::vector<std::string>& args, GameData& out, std::string* err) {
-    std::unique_ptr<vfs::Vfs> v = vfs::mount_game(root, args, err);  // mounted exactly as alamo_headless does
-    if (!v) return false;
+    // ums2: opened through the process's ModEnvironment (mounted exactly as alamo_headless does).
+    std::unique_ptr<vfs::ModEnvironment> env = vfs::ModEnvironment::open(root, args, out.vfs_issues, err);
+    if (!env) return false;
     out.root = root;
     out.args = args;
-    out.vfs = v.get();
-    out.files = std::move(v);
-    for (const std::string& dir : out.vfs->mod_dirs()) out.mods.push_back(vfs::describe_mounted_mod(dir, root));
-    for (const vfs::ModDescriptor& m : out.mods)
-        if (m.game_tag == vfs::GameTag::Eaw) {  // D1: FoC mods only
-            if (err) *err = m.name + " (" + m.key() + "): " + vfs::kBaseEawRefusal;
-            return false;
-        }
+    out.env = env.get();
+    out.vfs = &env->vfs();
+    out.mods = env->mounted();
+    const bool refused = env->refused();  // D1: FoC mods only; *err names the mod
+    out.files = std::move(env);
+    if (refused) return false;
     if (!load_common(out, err)) return false;
 #ifdef ALAMO_GAME_HAVE_GALACTIC_AI
     stage(out, "AI data", [&](std::vector<std::string>&) {  // as alamo_headless --galactic-ai: definitions, equations,

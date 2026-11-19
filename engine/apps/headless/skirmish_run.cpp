@@ -20,6 +20,7 @@
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/ai/perception_equations.hpp"
 #include "alamo/core/ascii.hpp"
+#include "alamo/core/compat_issue.hpp"
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/host_fs.hpp"
 #include "alamo/data/game_database.hpp"
@@ -38,6 +39,7 @@
 #include "alamo/sim/save_session.hpp"  // N1 stage 2: skirmish_save_*
 #include "alamo/sim/sim_anim.hpp"
 #include "alamo/sim/sim_host.hpp"
+#include "alamo/vfs/mod_environment.hpp"
 #include "alamo/vfs/vfs.hpp"
 #ifdef ALAMO_HEADLESS_HAVE_GALACTIC_AI
 #include "alamo/ai/galactic_ai.hpp"         // a1j t07: make_galactic_ai_type_info
@@ -434,13 +436,18 @@ bool foc_load(Session& s, const MapRunOptions& opt, std::vector<std::string>& di
         return false;
     }
     std::string err;
-    std::unique_ptr<vfs::Vfs> v = vfs::mount_game(root, opt.game_args, &err);
-    if (!v) {
+    IssueSink issues;  // ums2: the VFS findings (nothing reads them here yet)
+    std::unique_ptr<vfs::ModEnvironment> env = vfs::ModEnvironment::open(root, opt.game_args, issues, &err, vfs::ModEnvironmentOptions{std::nullopt, {}, false});
+    if (!env) {
         diag.push_back(err);
         return false;
     }
-    vfs::Vfs* vp = v.get();
-    s.files = std::move(v);
+    if (env->refused()) {  // D1: a base-EaW mod in the stack
+        diag.push_back(env->refusal());
+        return false;
+    }
+    vfs::Vfs* vp = &env->vfs();
+    s.files = std::move(env);
     if (!load_game(s, diag)) return false;
     const auto list = [vp](std::string_view glob) { return vp->list(glob); };
     if (!ai::load_ai_definitions(*s.files, ai::list_ai_data(list), s.defs)) return false;
