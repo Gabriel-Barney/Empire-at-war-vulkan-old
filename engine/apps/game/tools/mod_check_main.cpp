@@ -28,6 +28,7 @@
 //     alamo_mod_check --game "...\corruption" STEAMMOD=1125571106 --json report.json
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -43,6 +44,7 @@
 #include <shellapi.h>
 #endif
 
+#include "alamo/core/host_fs.hpp"
 #include "alamo/game/mod_check.hpp"
 #include "alamo/game/mod_conflicts.hpp"
 #include "alamo/vfs/install_locations.hpp"
@@ -61,15 +63,14 @@ int usage() {
     return 2;
 }
 
-bool write_file(const std::string& path, const std::string& text) {
-    FILE* f = std::fopen(path.c_str(), "wb");
+bool write_file(const std::string& path, const std::string& text) {  // path: UTF-8 (utf8_args)
+    std::ofstream f(alamo::path_from_utf8(path), std::ios::binary);
     if (!f) {
         std::fprintf(stderr, "cannot write %s\n", path.c_str());
         return false;
     }
-    std::fwrite(text.data(), 1, text.size(), f);
-    std::fclose(f);
-    return true;
+    f.write(text.data(), static_cast<std::streamsize>(text.size()));
+    return static_cast<bool>(f);
 }
 
 // The arguments as UTF-8, which every path string of the vfs is: on Windows from the wide command line, so a folder name
