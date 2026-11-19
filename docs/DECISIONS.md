@@ -342,6 +342,21 @@ Gabriel, 2026-11-18, up-front answers for the Stage 9 coordinator run (st9-coord
   Thrawns_Legacy_HD -> 1125571106 clause of the mcx3 exit test, together with the real AOW -> TR stack that resolves on
   this machine (Thrawns_Legacy_HD is not installed here). No rerun with it installed is needed.
 
+## Mod system in one stage (Gabriel, 2026-11-19)
+
+Gabriel approved a cleanup of every open mod-system task (session mod-cleanup-6f1850, after ums5):
+- **One stage:** Stage 9 is renamed **Mod system** and takes Stage 6's mod boxes Q5, Q6 and MODC (lane `st9`); Stage 6 is
+  now **Parity** (box Q4). The follow-up rule is unchanged for every box (`keep_followups` still lists `st6` and `st9`).
+  Stage 10 · Unified mod system refactor stays its own finished stage: folding it in would renumber Stage 11 (REF1) and
+  every "Stage 10" reference, for no change in open work.
+- **One backlog category:** `mod-system` replaces `mods` (same rule, box MODC) and also takes the mod entries filed under
+  `perf` and the AI categories (b0018, b0383, b0385).
+- **Verdicts:** removed modc t33 (duplicate of b0018), q6 t26 (not mod work, now b0515) and b0397 (duplicate of mcx4 t11);
+  q6 t04 merged into mcx8 t02 and Q6 closed on its restated exit; mcx3 t10 (tier 3) moved to the backlog (b0516); b0348
+  (stack overflow on deep mod XML) promoted to mcx2 as S2; b0383 / b0385 stay S3 (no installed mod calls them); b0501 stays
+  S3 until a re-question reads the GUI_Row constructor default. New tasks for the gaps found: mcx8 (the four newly installed
+  mods to G3), mcx3 (restate its exit, the AOW stack is not installed), modc (Gabriel: how MODC closes next to mcx8).
+
 ## Unified mod system refactor (Gabriel, 2026-11-18)
 
 Gabriel, 2026-11-18, on the design "Unified mod system - technical design" (Claude Docs,

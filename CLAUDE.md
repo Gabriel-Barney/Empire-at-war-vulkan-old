@@ -69,9 +69,9 @@ headless multithreaded simulation core first, then a Vulkan 1.3 renderer. Any Cl
    Process or Research), the heading it is listed under inside its group; set it when adding a task by hand (`tag-tasks --apply`
    fills missing ones). `roadmap_store.py lint` shows what is wrong; rules:
    `docs/ROADMAP_PROTOCOL.md`, "Backlog and group exit tests".
-   **Exception: Stage 6 · Parity and mods, Stage 9 · Mod compatibility system and Stage 10 · Unified mod system refactor keep their
-   follow-ups** (Gabriel, 2026-11-12, boxes MODC, Q4, Q5, Q6; Stage 9, boxes MCX1-MCX6, added 2026-11-17; Stage 10, boxes UMS1-UMS2,
-   added 2026-11-18): a follow-up of a group in these stages becomes a new task of the group it came from, not a backlog entry (`backlog add ... --from <group>` adds it there
+   **Exception: Stage 6 · Parity, Stage 9 · Mod system and Stage 10 · Unified mod system refactor keep their
+   follow-ups** (Gabriel, 2026-11-12, box Q4; Stage 9, boxes MCX1-MCX6, added 2026-11-17, and Q5, Q6, MODC, moved there from
+   Stage 6 on 2026-11-19; Stage 10, boxes UMS1-UMS2, added 2026-11-18): a follow-up of a group in these stages becomes a new task of the group it came from, not a backlog entry (`backlog add ... --from <group>` adds it there
    and reopens the group and its box if they are done; no task cap). Such a group closes only when its exit test passes and no task
    is open (finish or `--drop` each one), and its S3 follow-ups stay tasks too. Tier-3 findings still go to the backlog, except in
    Stage 10, where every follow-up, tier 3 included, stays a task (`meta/backlog` `keep_all_followups`). Rules: `docs/ROADMAP_PROTOCOL.md`, "Follow-ups

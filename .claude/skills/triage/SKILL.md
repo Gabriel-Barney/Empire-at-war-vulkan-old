@@ -67,6 +67,6 @@ a brief, ask whether he wants the task text rewritten as one.
 
 ## Stage 6 and Stage 9 groups
 
-Stage 6 · Parity and mods (boxes MODC, Q4, Q5, Q6) and Stage 9 · Mod compatibility system (boxes MCX1-MCX6, since 2026-11-17)
+Stage 6 · Parity (box Q4) and Stage 9 · Mod system (boxes MCX1-MCX6 since 2026-11-17; Q5, Q6, MODC since 2026-11-19)
 keep their follow-ups: `backlog add ... --from <stage-6 or stage-9 group>` makes the finding
 a task of that group instead of a backlog entry (tier 3 still goes to the backlog). Triage there means writing the task as a brief.

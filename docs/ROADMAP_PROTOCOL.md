@@ -197,10 +197,10 @@ leave the group.
   (refused without it), or drops the named ones, sets the group
   `done` (preset and claim cleared, `closed` recorded), sets its box `done` when it was the box's last open group, and adds a
   log line. It replaces the "follow-up group" step. A Stage 6 group is closed differently (next point).
-- **Follow-ups stay in Stage 6 groups** (Gabriel, 2026-11-12, to help development there). Stage 6 · Parity and mods (lane `st6`:
-  boxes MODC, Q4, Q5, Q6 and any box added to it later; `meta/backlog` `keep_followups` lists the stages this applies to) is the
-  exception to the backlog rule. Since 2026-11-17 (Gabriel) Stage 9 · Mod compatibility system (lane `st9`: boxes MCX1-MCX6,
-  groups `mcx0`-`mcx9`) follows the same rule, and since 2026-11-18 (Gabriel) Stage 10 · Unified mod system refactor (lane `st10`:
+- **Follow-ups stay in Stage 6 groups** (Gabriel, 2026-11-12, to help development there). Stage 6 · Parity (lane `st6`:
+  box Q4 and any box added to it later; `meta/backlog` `keep_followups` lists the stages this applies to) is the
+  exception to the backlog rule. Since 2026-11-17 (Gabriel) Stage 9 · Mod system (lane `st9`: boxes MCX1-MCX6,
+  groups `mcx0`-`mcx9`, and since 2026-11-19 the former Stage 6 mod boxes Q5, Q6, MODC) follows the same rule, and since 2026-11-18 (Gabriel) Stage 10 · Unified mod system refactor (lane `st10`:
   boxes UMS1-UMS2, groups `ums0`-`ums5`) too: `keep_followups` is `["st6", "st9", "st10"]`, and everything below says "Stage 6" for
   all three. Stage 10 goes one step further: it is also in `meta/backlog` `keep_all_followups`, so its tier-3 findings and tasks stay
   group tasks as well (`backlog add --from` adds them, `trim-group --move` and `close-group` refuse them like any other open task;
