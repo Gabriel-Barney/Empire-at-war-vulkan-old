@@ -57,6 +57,14 @@ if(TARGET alamo_ai_lua)
                              "ALAMO_AI_TACTICAL_GOLDEN_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/tests/golden\"")
   add_test(NAME alamo_ai_tactical_world_tests COMMAND alamo_ai_tactical_world_tests)
   set_tests_properties(alamo_ai_tactical_world_tests PROPERTIES TIMEOUT 600)
+
+  # REF1 t03: the world's state records and their one field list each (src/tactical_ai_records.hpp, not installed):
+  # round trip, CRC byte order pin, per-field coverage of the save and the CRC.
+  add_executable(alamo_ai_tactical_records_tests tests/test_ai_tactical_records.cpp)
+  target_include_directories(alamo_ai_tactical_records_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+  target_link_libraries(alamo_ai_tactical_records_tests PRIVATE alamo_ai_tactical_world alamo_lua_vm alamo_ai_save_io
+                                                                alamo_test_support)
+  add_test(NAME alamo_ai_tactical_records_tests COMMAND alamo_ai_tactical_records_tests)
 endif()
 
 # A1 t01 settled readings (docs/re/A1_READINGS.md 6, 9, 13-15): nFow rounding, UnitAI data-pack stamps and the first
