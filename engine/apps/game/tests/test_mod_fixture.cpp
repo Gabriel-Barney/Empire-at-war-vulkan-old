@@ -351,7 +351,20 @@ void test_campaign_levels() {
 
 }  // namespace
 
+// ums4 t07: the file a loader diagnostic names (its issue's source, which gives the layer).
+void test_diagnostic_file() {
+    using alamo::game::loader_diagnostic_file;
+    CHECK(loader_diagnostic_file("Data\\XML\\TradeRoutes.xml(1765): duplicate trade route", nullptr) == "DATA\\XML\\TRADEROUTES.XML");
+    CHECK(loader_diagnostic_file("galactic: unable to open data/xml/Foo.xml.", nullptr) == "DATA\\XML\\FOO.XML");
+    CHECK(loader_diagnostic_file("enum file 'Data\\XML\\Enum\\A.xml' not found", nullptr) == "DATA\\XML\\ENUM\\A.XML");
+    CHECK(loader_diagnostic_file("read C:\\Games\\FoC\\Data\\XML\\B.xml failed", nullptr) == "DATA\\XML\\B.XML");
+    CHECK(loader_diagnostic_file("MetaData\\x.xml and nothing else", nullptr).empty());  // "Data" inside a word
+    CHECK(loader_diagnostic_file("story: no galactic campaign running", nullptr).empty());
+    CHECK(loader_diagnostic_file("Units.xml: bad tag", nullptr).empty());  // a bare name needs a Vfs that has it
+}
+
 int main(int argc, char** argv) {
+    test_diagnostic_file();
     if (argc < 2) {
         std::printf("usage: alamo_game_mod_fixture_tests <testdata/mod_fixture>\n");
         return 2;

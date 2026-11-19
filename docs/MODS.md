@@ -129,11 +129,14 @@ reads the same data and starts the same list:
   matrix. The picker's rows are the catalog's rows themselves (ums4 t01: the adapter is gone), so a folder with only variant files
   (2083545253) shows one row per variant and none for the folder. Order: workshop items by numeric id across all
   libraries (the picker's order before ums1), then `Mods\` folders by name, then extra folders. Folders are compared by
-  `vfs::folder_key` (`host_path.hpp`, ums4 t04 / t06: the one rule for the catalog, the launch list, the Steam library
-  list and the submod hint): absolute, normalised, any case, either separator, and for a folder that exists the final
-  path the file system reaches it by, so a junction, a symbolic link or a `subst` drive leads to the folder it points
-  at. A game folder or mod folder spelled two ways, or reached through a junction, is one folder and one catalog row.
-  Two variants of one folder share one argument; the picker marks the
+  the keys of `host_path.hpp` (ums4 t04 / t06: one rule for the catalog, the launch list, the Steam library list and
+  the submod hint): `lexical_folder_key` (absolute, normalised, any case, either separator; no disk access) and
+  `folder_key`, which for a folder that exists also follows a junction, a symbolic link or a `subst` drive to the folder
+  it points at. A lookup (`find_root`) tries the spelling first, then the folder it leads to. An extra mod folder that
+  is a listed folder (inside `Mods`, or a junction to one) is not listed again. A workshop item and a `Mods\` folder
+  keep their rows even when a junction makes them one folder: each is a retail argument form, so a saved
+  `MODPATH=Mods\X` keeps naming the `Mods` row. The Steam library list compares spellings only (a library may be an
+  offline network folder). Two variants of one folder share one argument; the picker marks the
   one whose declared stack is the running command line as active.
 - **Launch list** (`vfs::resolve` / `ModStack::launch_args`): the resolved stack's arguments, each folder once. Empty for
   a refused base-EaW stack (D1). [port] A cycle still launches in its fallback order (discovery order) with the error
@@ -222,7 +225,8 @@ mod system refactor").
   code outside `engine/vfs` calls `Vfs::mod_dirs()`, and only the mod catalog (`mod_registry.cpp`) reads
   `modinfo.json`: `tools/lint/check_mod_system.py` (ctest `alamo_core_mod_system_lint`, and the gate) keeps it so, and
   also refuses the removed names (`list_installed_mods`, `resolve_stack`, `scan_installed_mods`, `ModRegistry`,
-  `ResolvedStack`). The Command Center's mod hunt takes a mod's parents from the catalog's declared dependencies.
+  `ResolvedStack`). The Command Center's mod hunt takes a mod's parents from the catalog's declared dependencies, else
+  from the Workshop ids its `modinfo.json` mentions (the `--list` rows' `modinfo_numbers`, added by ums4).
 - **One walk for every copy.** `Vfs::resolve_all(path)` returns every copy in resolution order (`[0]` is what `read`
   returns); code that needs the lower copies (the SFX archives, which a mod's copy layers over FoC's:
   `docs/re/AUDIO.md` §5, aud2 t05) takes them from there instead of building `<mod>\Data\...` paths by hand.

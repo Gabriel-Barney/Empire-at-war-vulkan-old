@@ -575,6 +575,7 @@ fn perform(app: &mut App, ctx: &egui::Context, act: Act) {
                         workshop_id: info.and_then(|i| i.workshop_id.clone()),
                         in_mods_folder: info.is_some_and(|i| i.source == ModSource::GameFolder),
                         dependencies: info.map(|i| i.dependencies.clone()).unwrap_or_default(),
+                        modinfo_numbers: info.map(|i| i.modinfo_numbers.clone()).unwrap_or_default(),
                     }
                 })
                 .collect();

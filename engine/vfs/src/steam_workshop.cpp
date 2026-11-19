@@ -47,7 +47,7 @@ std::string join(std::string_view a, std::string_view b) {
 void add_unique(std::vector<std::string>& out, std::vector<std::string>& keys, std::string p) {
     p = strip_sep(std::move(p));
     if (p.empty()) return;
-    std::string k = folder_key(p);  // ums4 t04 / t06: the one folder identity rule
+    std::string k = lexical_folder_key(p);  // ums4 t04: the one key rule; no disk access (a library may be offline)
     for (const std::string& e : keys)
         if (e == k) return;
     keys.push_back(std::move(k));

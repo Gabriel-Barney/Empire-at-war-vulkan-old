@@ -29,6 +29,7 @@ SKIP_DIRS = {'tests', 'testdata', 'third_party'}
 MOD_DIRS_CALL = re.compile(r'(?:\.|->)\s*mod_dirs\s*\(\s*\)')
 STRING = re.compile(r'"((?:\\.|[^"\\])*)"')
 CHAR = re.compile(r"'(?:\\.|[^'\\])'")
+RUST_QUOTE_CHAR = re.compile(r"b?'\"'")
 MODINFO_NAME = re.compile(r'^[^\s"]*modinfo\.json$', re.IGNORECASE)
 CATALOG = 'engine/vfs/src/mod_registry.cpp'
 SHIM_NAMES = re.compile(r'\b(list_installed_mods|resolve_stack|scan_installed_mods|ModRegistry|ResolvedStack)\b')
@@ -40,7 +41,18 @@ def strip_comments(text, rust):
     i, n = 0, len(text)
     while i < n:
         c = text[i]
-        if c == '"':
+        if rust and (text.startswith("'\"'", i) or text.startswith("b'\"'", i)):  # the char '"' (not a string)
+            k = 4 if c == 'b' else 3
+            out.append(text[i:i + k])
+            i += k
+        elif not rust and text.startswith('R"', i) and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == '_')):
+            d = text.find('(', i + 2)  # a raw string R"delim( ... )delim": kept whole, as one string literal
+            delim = text[i + 2:d] if d >= 0 else ''
+            j = text.find(')' + delim + '"', d + 1) if d >= 0 else -1
+            j = n if j < 0 else j + len(delim) + 2
+            out.append('"' + text[d + 1:j - len(delim) - 2].replace('"', '') + '"' if d >= 0 else text[i:j])
+            i = j
+        elif c == '"':
             j = i + 1
             while j < n and text[j] != '"':
                 j += 2 if text[j] == '\\' else 1
@@ -82,8 +94,8 @@ def scan_text(rel, text, rust):
         if not rust and SHIM_NAMES.search(STRING.sub('""', line)):
             found.append((rel, no, 'shim', line.strip()))
         if rel != CATALOG:
-            if not rust:  # a char literal such as '"' would open a string
-                line = CHAR.sub("''", line)
+            # A char literal such as '"' would open a string (Rust: only that one; 'a is a lifetime there).
+            line = RUST_QUOTE_CHAR.sub("''", line) if rust else CHAR.sub("''", line)
             for m in STRING.finditer(line):
                 if MODINFO_NAME.match(m.group(1)):
                     found.append((rel, no, 'modinfo', line.strip()))
@@ -128,6 +140,11 @@ def selftest():
         ('launcher/src/bisect.rs', True, 'let t = std::fs::read_to_string(p.join("modinfo.json"));\n', ['modinfo']),
         ('launcher/src/mods.rs', True, '/// Name from `modinfo.json`.\nfn f() {}\n#[cfg(test)]\nmod tests { write(&r.join("modinfo.json")); }\n', []),
         ('launcher/src/x.rs', True, 'let v = v.mod_dirs();\n', []),  # Rust has no Vfs
+        ('launcher/src/x.rs', True, "let q = '\"'; let p = dir.join(\"modinfo.json\"); // x\n", ['modinfo']),
+        ('launcher/src/x.rs', True, "let q = b'\"'; // \"modinfo.json\" in a comment\n", []),
+        ('engine/apps/game/src/a.cpp', False, 'auto p = dir / R"(modinfo.json)";\n', ['modinfo']),
+        ('engine/apps/game/src/a.cpp', False, 'auto j = R"x({"a": "b"})x"; auto p = dir / "modinfo.json";\n', ['modinfo']),
+        ('engine/apps/game/src/a.cpp', False, 'auto j = R"({"text": "see // here"})"; int x = 1;\n', []),
         ('engine/apps/game/src/a.cpp', False, 'auto rows = game::list_installed_mods(c);\n', ['shim']),
         ('engine/vfs/src/a.cpp', False, 'using ModRegistry = ModCatalog;\n', ['shim']),
         ('engine/apps/game/src/a.cpp', False, 'auto s = resolve_mod_stack(g, p, l);  // not resolve_stack\n', []),

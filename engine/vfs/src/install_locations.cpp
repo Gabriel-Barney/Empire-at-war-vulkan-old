@@ -45,7 +45,7 @@ void fill(InstallLocations& out, std::span<const std::string> extra_libraries) {
     out.steam_libraries = find_steam_libraries(out.foc, out.steam_roots);
     for (const std::string& lib : extra_libraries) {
         bool dup = lib.empty();
-        for (const std::string& have : out.steam_libraries) dup = dup || same_folder(have, lib);
+        for (const std::string& have : out.steam_libraries) dup = dup || lexical_folder_key(have) == lexical_folder_key(lib);
         if (!dup) out.steam_libraries.push_back(lib);
     }
 }

@@ -49,6 +49,8 @@ pub struct ModInfo {
     /// The mod's declared dependencies (catalog `dependencies`). A folder with variants takes them from the same
     /// catalog row as the rest of this row: the folder's main mod, else its first variant.
     pub dependencies: Vec<Dependency>,
+    /// Every run of digits in the folder's main `modinfo.json` (catalog `modinfo_numbers`), from the same row.
+    pub modinfo_numbers: Vec<String>,
 }
 
 const IMAGE_EXT: [&str; 7] = ["png", "jpg", "jpeg", "bmp", "webp", "tga", "dds"];
@@ -107,6 +109,7 @@ fn catalog_rows(catalog: &Catalog) -> Vec<ModInfo> {
             has_data: m.has_data,
             own_name,
             dependencies: m.dependencies.clone(),
+            modinfo_numbers: m.modinfo_numbers.clone(),
         });
     }
     out

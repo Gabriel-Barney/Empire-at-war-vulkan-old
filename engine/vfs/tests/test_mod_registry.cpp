@@ -524,6 +524,12 @@ void test_meg() {
 // find_root finds the row by either spelling. Skipped when mklink /J cannot make the junction.
 void test_junction(const Fixture& f) {
     alamo::test::section("folder identity through a junction");
+    // Keys without a junction: a drive root keeps its separator-less form, a missing folder its lexical form, a relative
+    // path is made absolute against the current folder, and the lexical key never follows anything.
+    CHECK(av::folder_key("C:\\") == "c:" && av::lexical_folder_key("C:/") == "c:");
+    CHECK(av::folder_key(u8(f.T / "No" / ".." / "Such")) == av::lexical_folder_key(u8(f.T / "Such")));
+    CHECK(av::folder_key("relative_dir_that_does_not_exist") == av::lexical_folder_key(u8(fs::current_path() / "relative_dir_that_does_not_exist")));
+    CHECK(av::path_key("\\\\Server\\Share\\") == "\\\\server\\share");
     const fs::path target = f.game / "Mods" / "AOW";
     const fs::path link = f.T / "AowLink";
     const std::string cmd = "cmd /c mklink /J \"" + link.string() + "\" \"" + target.string() + "\" >nul";

@@ -13,10 +13,14 @@ namespace alamo::vfs {
 // "Mods/AOW/" and "mods\\aow" give the same key. No file system access.
 std::string path_key(std::string_view path);
 
-// A folder's identity: the path made absolute (against the current folder) and lexically normal ("." / ".." folded),
-// then, when the folder exists, the final path the file system reaches it by (Windows: GetFinalPathNameByHandleW, so a
-// junction, a symbolic link and a subst drive lead to the folder they point at), then path_key. A mod reached two ways
-// (through a junction and directly) is one folder. A folder that does not exist keeps its lexical form.
+// A folder's spelling key: the path made absolute (against the current folder) and lexically normal ("." / ".."
+// folded), then path_key. No disk access beyond the current folder: for lists that may name offline network folders
+// (the Steam libraries) and for the first, cheap pass of a lookup.
+std::string lexical_folder_key(std::string_view path);
+// A folder's identity: lexical_folder_key of the final path the file system reaches it by when the folder exists
+// (Windows: GetFinalPathNameByHandleW, so a junction, a symbolic link and a subst drive lead to the folder they point
+// at). A mod reached two ways (through a junction and directly) is one folder. A folder that does not exist keeps its
+// lexical form. Opens the folder: callers in loops compare lexical keys first.
 std::string folder_key(std::string_view path);
 // folder_key(a) == folder_key(b).
 bool same_folder(std::string_view a, std::string_view b);

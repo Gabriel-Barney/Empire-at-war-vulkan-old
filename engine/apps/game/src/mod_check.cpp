@@ -1333,7 +1333,9 @@ std::string diagnostic_file(std::string_view text, const vfs::Vfs* v) {
     };
     const auto word_start = [&](size_t i) { return i == 0 || stop(text[i - 1]); };
     for (size_t i = 0; i + 5 <= text.size(); ++i) {
-        if (!word_start(i) || !ascii_iequals(text.substr(i, 4), "data") || (text[i + 4] != '\\' && text[i + 4] != '/')) continue;
+        const bool after_sep = i > 0 && (text[i - 1] == '\\' || text[i - 1] == '/');  // the Data folder of a host path
+        if (!(word_start(i) || after_sep) || !ascii_iequals(text.substr(i, 4), "data") || (text[i + 4] != '\\' && text[i + 4] != '/'))
+            continue;
         size_t e = i;
         while (e < text.size() && !stop(text[e])) ++e;
         while (e > i && text[e - 1] == '.') --e;  // a sentence's full stop
@@ -1442,6 +1444,8 @@ void append_list(std::string& s, const std::vector<std::string>& items, size_t f
 }
 
 }  // namespace
+
+std::string loader_diagnostic_file(std::string_view text, const vfs::Vfs* v) { return diagnostic_file(text, v); }
 
 size_t ModCheckReport::error_count() const {
     size_t n = loaded ? 0 : 1;
@@ -2029,6 +2033,7 @@ std::string format_mod_catalog_json(const vfs::ModCatalog& catalog, const vfs::I
             j.close('}');
         }
         j.close(']');
+        j.strings("modinfo_numbers", m.modinfo_numbers);  // ums4: the digit runs of its modinfo.json (submod mentions)
         j.strings("warnings", m.warnings);
         j.close('}');
     }

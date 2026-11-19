@@ -500,14 +500,20 @@ const ModDescriptor* ModCatalog::find_key(std::string_view key) const {
 }
 
 const ModDescriptor* ModCatalog::find_root(std::string_view root) const {
-    const std::string want = folder_key(root);
-    const ModDescriptor* first = nullptr;  // a folder with variant files only: its first variant
-    for (const ModDescriptor& m : mods)
-        if (folder_key(m.root) == want) {
-            if (m.variant.empty()) return &m;
-            if (!first) first = &m;
-        }
-    return first;
+    // The folder as spelled first (no disk access; a row reached under its own spelling keeps its kind, so MODPATH=Mods\X
+    // stays the Mods row when a junction makes it a workshop item too), then the folder a junction or subst drive leads to.
+    const auto find = [&](auto key_of) -> const ModDescriptor* {
+        const std::string want = key_of(root);
+        const ModDescriptor* first = nullptr;  // a folder with variant files only: its first variant
+        for (const ModDescriptor& m : mods)
+            if (key_of(m.root) == want) {
+                if (m.variant.empty()) return &m;
+                if (!first) first = &m;
+            }
+        return first;
+    };
+    if (const ModDescriptor* m = find([](std::string_view p) { return lexical_folder_key(p); })) return m;
+    return find([](std::string_view p) { return folder_key(p); });
 }
 
 const ModDescriptor* ModCatalog::find_workshop(std::string_view id) const {
@@ -577,9 +583,16 @@ ModCatalog scan_mod_catalog(const InstallLocations& where, bool hash) {
         std::sort(v.begin(), v.end(), [](const fs::path& a, const fs::path& b) { return path_to_utf8(a.filename()) < path_to_utf8(b.filename()); });
         return v;
     };
+    std::set<std::string> seen_folders;  // folder_key of every listed folder
     const auto add = [&](const fs::path& folder, ModKind kind, const std::string& id) {
         const std::string root = path_to_utf8(folder);
-        if (!seen_roots.insert(folder_key(root)).second) return;  // listed already (an extra folder inside Mods)
+        const std::string identity = folder_key(root);
+        // An extra mod folder already listed (inside Mods, or a junction to a listed folder) is skipped. Workshop items
+        // and Mods folders are retail's own argument forms: each keeps its row even when a junction makes two of them
+        // one folder, so a saved MODPATH= / STEAMMOD= keeps naming the row it named.
+        if (kind == ModKind::Path && seen_folders.count(identity)) return;
+        if (!seen_roots.insert(lexical_folder_key(root)).second) return;  // the same spelling twice
+        seen_folders.insert(identity);
         for (ModDescriptor& d : describe_mod_folder(root, kind, id, hash)) r.mods.push_back(std::move(d));
     };
     std::vector<std::pair<std::string, fs::path>> workshop;  // (id, folder)
@@ -770,9 +783,15 @@ ModStack resolve(const ModCatalog& registry, std::span<const std::string> picked
     // The command line as picked: a mod listed above a mod that depends on it (design 15, "a submod above its parent").
     for (size_t v = 0; v < picked_args.size(); ++v)
         for (size_t w = v + 1; w < picked_args.size(); ++w) {
-            const ModDescriptor* pv = registry.find_arg(picked_args[v], scratch);
-            const ModDescriptor* pw = registry.find_arg(picked_args[w], scratch);
-            if (!pv || !pw) continue;
+            // Copies: find_arg may describe a folder into `scratch`, which can move what an earlier call returned.
+            const ModDescriptor* fv = registry.find_arg(picked_args[v], scratch);
+            if (!fv) continue;
+            const ModDescriptor dv = *fv;
+            const ModDescriptor* fw = registry.find_arg(picked_args[w], scratch);
+            if (!fw) continue;
+            const ModDescriptor dw_mod = *fw;
+            const ModDescriptor* pv = &dv;
+            const ModDescriptor* pw = &dw_mod;
             const auto iv = index_of.find(key_of(*pv)), iw = index_of.find(key_of(*pw));
             if (iv == index_of.end() || iw == index_of.end()) continue;
             const std::vector<size_t>& dw = deps[iw->second];

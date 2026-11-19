@@ -377,10 +377,11 @@ their own copies; mods and the retail load order do not change.
 - **Shims removed (ums4, 2026-11-19; lane defaults, Gabriel may overturn them).** The stack resolver's parent hint
   comes from the files alone (`game::submod_hint`, `alamo_mod_resolve`), so Play.exe no longer links the data loaders;
   it also hints for a stack whose data does not load (a refused base-EaW stack still gets none). The Command Center's
-  mod hunt takes parents from declared `modinfo.json` dependencies (the catalog JSON) instead of Workshop ids found in
-  the file's text, as the conflicts page already did (ums3). A loader diagnostic's issue layer is the layer of the
-  first game file its text names (`docs/MODS.md` §5.1, version 5). Folder identity follows junctions, symbolic links
-  and `subst` drives (`vfs::folder_key`). `tools/lint/check_mod_system.py` keeps `Vfs::mod_dirs()` inside
+  mod hunt reads no `modinfo.json` itself: parents come from declared dependencies, else from the Workshop ids the
+  file's text mentions, both from the catalog JSON (`--list` rows gained `modinfo_numbers`, an additive field). A
+  loader diagnostic's issue layer is the layer of the first game file its text names (`docs/MODS.md` §5.1, version 5).
+  Folder lookups follow junctions, symbolic links and `subst` drives (`vfs::folder_key`) after the spelling; a workshop
+  item and a `Mods\` folder that a junction makes one folder keep their own rows, so saved arguments keep their meaning. `tools/lint/check_mod_system.py` keeps `Vfs::mod_dirs()` inside
   `engine/vfs` and `modinfo.json` inside the mod catalog. Mods, the retail load order and user configs are unchanged.
 - **`unitdb.rs` keeps its own XML and MEG readers (ums3 t04, decided by Gabriel's rule of 2026-11-18: keep them unless
   the JSON of the ums1 tasks already carries what they read; no new JSON surface).** The Units page indexes every XML

@@ -17,8 +17,9 @@
 //!
 //! Dependencies: a submod without its parent can crash for reasons of its own, so a mod is
 //! never switched on while a mod it depends on is off. They come from the mods' declared
-//! dependencies (catalog `dependencies`) only ([`detect_parents`]); the launcher reads no
-//! `modinfo.json` itself.
+//! dependencies (catalog `dependencies`) first, else from the Workshop ids a mod's
+//! `modinfo.json` mentions (catalog `modinfo_numbers`); see [`detect_parents`]. The launcher
+//! reads no `modinfo.json` itself.
 
 use crate::catalog::Dependency;
 use std::collections::BTreeSet;
@@ -423,6 +424,8 @@ pub struct ModMeta {
     pub in_mods_folder: bool,
     /// The mod's declared dependencies (catalog `dependencies`).
     pub dependencies: Vec<Dependency>,
+    /// Every run of digits in the mod's `modinfo.json` (catalog `modinfo_numbers`).
+    pub modinfo_numbers: Vec<String>,
 }
 
 /// Lower case, '\' as the separator, `.` and `..` worked out, no trailing separator.
@@ -482,10 +485,17 @@ fn names_mod(d: &Dependency, b: &ModMeta, b_id: Option<&str>, foc: Option<&Path>
     }
 }
 
-/// For each mod, the other mods in the list it depends on: mod A depends on listed mod B when one of A's declared
-/// dependencies (catalog `dependencies`) names B (see [`names_mod`]). `foc` is the game folder, for local paths
-/// relative to it. Two mods that name each other tell nothing about which one is the parent, so neither is treated
-/// as one. A mod's Workshop id is its own, else the name of a folder named with digits only (a Workshop download).
+/// For each mod, the other mods in the list it depends on. Mod A depends on listed mod B:
+/// 1. first, when one of A's declared dependencies (catalog `dependencies`) names B (see [`names_mod`]);
+/// 2. else, when none of A's declared dependencies names a listed mod, when A's `modinfo.json` mentions B's Workshop
+///    id (the catalog's `modinfo_numbers`). This catches string-form dependencies such as `["*","1125571106"]`,
+///    which the catalog doesn't keep as declared dependencies. Only whole numbers count: a longer number that
+///    contains the id doesn't.
+///
+/// `foc` is the game folder, for local paths relative to it. A mod is never its own parent. Two mods that name each
+/// other (by either rule) tell nothing about which one is the parent, so neither is treated as one. A mod's Workshop
+/// id is its own, else the name of a folder named with digits only (a Workshop download); the second rule needs at
+/// least 6 digits.
 pub fn detect_parents(mods: &[ModMeta], foc: Option<&Path>) -> Vec<Vec<usize>> {
     let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
     let id = |m: &ModMeta| {
@@ -497,10 +507,17 @@ pub fn detect_parents(mods: &[ModMeta], foc: Option<&Path>) -> Vec<Vec<usize>> {
             .filter(|w| digits(w))
     };
     let ids: Vec<Option<String>> = mods.iter().map(id).collect();
-    let names = |i: usize, j: usize| {
+    let n = mods.len();
+    let declares = |i: usize, j: usize| {
         i != j && mods[i].dependencies.iter().any(|d| names_mod(d, &mods[j], ids[j].as_deref(), foc))
     };
-    (0..mods.len()).map(|i| (0..mods.len()).filter(|&j| names(i, j) && !names(j, i)).collect()).collect()
+    let mentions = |i: usize, j: usize| match &ids[j] {
+        Some(id) => i != j && id.len() >= 6 && ids[i].as_ref() != Some(id) && mods[i].modinfo_numbers.contains(id),
+        None => false,
+    };
+    let declared_any: Vec<bool> = (0..n).map(|i| (0..n).any(|j| declares(i, j))).collect();
+    let names = |i: usize, j: usize| declares(i, j) || (!declared_any[i] && mentions(i, j));
+    (0..n).map(|i| (0..n).filter(|&j| names(i, j) && !names(j, i)).collect()).collect()
 }
 
 #[cfg(test)]
@@ -724,7 +741,58 @@ mod tests {
     }
 
     fn meta(path: &str, id: Option<&str>, in_mods_folder: bool, dependencies: Vec<Dependency>) -> ModMeta {
-        ModMeta { path: PathBuf::from(path), workshop_id: id.map(str::to_owned), in_mods_folder, dependencies }
+        ModMeta { path: PathBuf::from(path), workshop_id: id.map(str::to_owned), in_mods_folder, dependencies, modinfo_numbers: vec![] }
+    }
+
+    /// A Workshop mod with declared dependencies and the numbers its `modinfo.json` mentions.
+    fn ws(id: &str, dependencies: Vec<Dependency>, numbers: &[&str]) -> ModMeta {
+        ModMeta {
+            path: PathBuf::from(format!("C:\\W\\{id}")),
+            workshop_id: Some(id.to_owned()),
+            in_mods_folder: false,
+            dependencies,
+            modinfo_numbers: numbers.iter().map(|s| s.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn without_a_declared_parent_mentioned_workshop_ids_count() {
+        let mods = vec![
+            // 0: the parent; its modinfo.json mentions only its own id.
+            ws("1125571106", vec![], &["1125571106"]),
+            // 1: `"dependencies":["*","1125571106"]`: the catalog keeps no declared dependency, the mention counts.
+            ws("2222222222", vec![], &["1125571106", "2222222222"]),
+            // 2: a longer number that only contains the parent's id.
+            ws("3333333333", vec![], &["911255711060"]),
+            // 3: a short number equal to a short folder id doesn't count either.
+            meta("C:\\W\\12345", None, false, vec![]),
+            ws("4444444444", vec![], &["12345"]),
+        ];
+        assert_eq!(detect_parents(&mods, None), vec![vec![], vec![0], vec![], vec![], vec![]]);
+
+        // Two mods mentioning each other: no telling which is the parent; a third mentioning both has two.
+        let mutual = vec![
+            ws("1000001", vec![], &["1000002"]),
+            ws("1000002", vec![], &["1000001"]),
+            ws("1000003", vec![], &["1000001", "1000002"]),
+        ];
+        assert_eq!(detect_parents(&mutual, None), vec![vec![], vec![], vec![0, 1]]);
+        // A declaration one way and a mention the other way is mutual too.
+        let crossed = vec![ws("1000001", vec![dep(1, "1000002")], &[]), ws("1000002", vec![], &["1000001"])];
+        assert_eq!(detect_parents(&crossed, None), vec![Vec::<usize>::new(), vec![]]);
+    }
+
+    #[test]
+    fn a_declared_parent_wins_over_mentions() {
+        let mods = vec![
+            ws("1000001", vec![], &[]),
+            ws("1000002", vec![], &[]),
+            // Declares 0 and mentions 1 (say, in its description): only 0 is its parent.
+            ws("1000003", vec![dep(1, "1000001")], &["1000001", "1000002"]),
+            // Declares a mod that isn't listed: its mentions count.
+            ws("1000004", vec![dep(1, "1999999")], &["1000002", "1999999"]),
+        ];
+        assert_eq!(detect_parents(&mods, None), vec![vec![], vec![], vec![0], vec![1]]);
     }
 
     #[test]

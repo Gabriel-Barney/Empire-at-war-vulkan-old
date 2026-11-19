@@ -6,8 +6,10 @@
 //   play_launch_args     alamo_play's resolver (play::stack_mod_args gets it)
 //   submod_hint          the likely parent of a stack from its files alone (modc t16): the Data\XML files the mods' own
 //                        list files name that no layer has, and the installed mods outside the stack that have them.
-//                        The load report (mod_check.hpp, `submod`) gives the same answer for the same stack: it runs
-//                        find_submod_parents on its own missing-file list (the same files, read during its check).
+//                        The load report (mod_check.hpp, `submod`) gives the same answer for a stack whose data loads:
+//                        it runs find_submod_parents on its own missing-file list (the same files, read during its
+//                        check). For a stack whose data does not load the report has no `submod`, while this still
+//                        hints (docs/MODS.md 3.1.2).
 // No faction or mod name is known here (docs/MODS.md §1).
 #pragma once
 #include <cstdint>

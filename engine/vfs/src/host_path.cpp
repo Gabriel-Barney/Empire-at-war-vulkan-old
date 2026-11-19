@@ -50,12 +50,25 @@ std::string path_key(std::string_view path) {
     return k;
 }
 
-std::string folder_key(std::string_view path) {
-    if (path.empty()) return {};
+namespace {
+
+fs::path absolute_normal(std::string_view path) {
     std::error_code ec;
     fs::path abs = fs::absolute(path_from_utf8(path), ec);
     if (ec) abs = path_from_utf8(path);
-    abs = abs.lexically_normal();
+    return abs.lexically_normal();
+}
+
+}  // namespace
+
+std::string lexical_folder_key(std::string_view path) {
+    return path.empty() ? std::string() : path_key(native_utf8(absolute_normal(path)));
+}
+
+std::string folder_key(std::string_view path) {
+    if (path.empty()) return {};
+    std::error_code ec;
+    fs::path abs = absolute_normal(path);
 #ifdef _WIN32
     if (fs::is_directory(long_path(abs), ec)) {
         const std::wstring real = final_path(abs);
