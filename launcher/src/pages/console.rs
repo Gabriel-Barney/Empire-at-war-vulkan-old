@@ -3,12 +3,12 @@
 
 use crate::app::{clock, open_in_explorer, reveal_in_explorer, App};
 use crate::bisect::{self, Bisect, Outcome, Test, TestKind, Verdict};
+use crate::mods::{self, ModSource};
 use crate::runner::{self, ConsoleLine, LineKind, Runner};
 use crate::steam::same_path;
 use crate::theme::{self, icon};
 use egui::{pos2, vec2, Align, Color32, CornerRadius, Layout, Rect, RichText, Sense, Stroke, TextStyle, Ui};
 use std::path::PathBuf;
-use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::SystemTime;
 
 struct LogFile {
@@ -25,8 +25,6 @@ struct Hunt {
     profile_name: String,
     mods: Vec<PathBuf>,
     names: Vec<String>,
-    /// Dependencies being read from the mods' `modinfo.json` files on a worker thread.
-    prep: Option<Receiver<Vec<Vec<usize>>>>,
     /// `None` until the user has read the caveats and started.
     machine: Option<Bisect>,
     /// `Runner::runs` of the launch made for the current step.
@@ -86,9 +84,6 @@ pub fn show(app: &mut App, ui: &mut Ui) {
         }
         st.last_pass = pass.max(1);
         st.was_running = running;
-    }
-    if let Some(warning) = poll_hunt(&mut app.console_ui) {
-        app.err(warning);
     }
 
     let mut act: Option<Act> = None;
@@ -274,23 +269,6 @@ fn report_text(app: &App) -> Option<String> {
 
 // ------------------------------------------------------------------ find the crashing mod
 
-/// Picks up the dependency scan when it finishes. Returns a warning to show, if any.
-fn poll_hunt(st: &mut State) -> Option<String> {
-    let hunt = st.hunt.as_mut()?;
-    let rx = hunt.prep.as_ref()?;
-    let (parents, warning) = match rx.try_recv() {
-        Ok(parents) => (parents, None),
-        Err(TryRecvError::Empty) => return None,
-        Err(TryRecvError::Disconnected) => (
-            Vec::new(),
-            Some("The mods' dependencies couldn't be read, so the hunt treats every mod as standing on its own.".to_owned()),
-        ),
-    };
-    hunt.prep = None;
-    hunt.machine = Some(Bisect::new(hunt.mods.clone(), parents));
-    warning
-}
-
 fn quoted(names: &[String], i: usize) -> String {
     format!("\"{}\"", names.get(i).map(String::as_str).unwrap_or("?"))
 }
@@ -358,14 +336,7 @@ fn hunt_card(hunt: &Hunt, runner: &Runner, active_profile: u64, ui: &mut Ui, act
         });
 
         let Some(machine) = &hunt.machine else {
-            if hunt.prep.is_some() {
-                ui.horizontal(|ui| {
-                    ui.add(egui::Spinner::new().size(16.0));
-                    ui.label(theme::muted("Reading which mods depend on which…"));
-                });
-            } else {
-                hunt_intro(hunt, ui, act);
-            }
+            hunt_intro(hunt, ui, act);
             return;
         };
 
@@ -585,26 +556,32 @@ fn perform(app: &mut App, ctx: &egui::Context, act: Act) {
                 profile_name: profile.name.clone(),
                 names: mods.iter().map(|m| app.mod_name(m)).collect(),
                 mods,
-                prep: None,
                 machine: None,
                 launched: None,
                 removed: false,
             });
         }
         Act::StartHunt => {
-            let ids: Vec<Option<String>> = match &app.console_ui.hunt {
-                Some(h) => h.mods.iter().map(|m| app.find_mod(m).and_then(|i| i.workshop_id.clone())).collect(),
-                None => return,
-            };
-            let Some(hunt) = app.console_ui.hunt.as_mut() else { return };
-            // Reading every mod's modinfo.json touches the disk, so it happens off this thread.
-            let (tx, rx) = mpsc::channel();
-            let (mods, ctx) = (hunt.mods.clone(), ctx.clone());
-            std::thread::spawn(move || {
-                let _ = tx.send(bisect::scan_parents(&mods, &ids));
-                ctx.request_repaint();
-            });
-            hunt.prep = Some(rx);
+            // Dependencies are the mods' declared dependencies (catalog `dependencies`), already in memory.
+            let foc = mods::foc_dir(&app.steam, &app.cfg.settings);
+            let Some(hunt) = app.console_ui.hunt.as_ref() else { return };
+            let meta: Vec<bisect::ModMeta> = hunt
+                .mods
+                .iter()
+                .map(|p| {
+                    let info = app.find_mod(p);
+                    bisect::ModMeta {
+                        path: p.clone(),
+                        workshop_id: info.and_then(|i| i.workshop_id.clone()),
+                        in_mods_folder: info.is_some_and(|i| i.source == ModSource::GameFolder),
+                        dependencies: info.map(|i| i.dependencies.clone()).unwrap_or_default(),
+                    }
+                })
+                .collect();
+            let parents = bisect::detect_parents(&meta, foc.as_deref());
+            if let Some(hunt) = app.console_ui.hunt.as_mut() {
+                hunt.machine = Some(Bisect::new(hunt.mods.clone(), parents));
+            }
         }
         Act::StopHunt => app.console_ui.hunt = None,
         Act::LaunchStep => {

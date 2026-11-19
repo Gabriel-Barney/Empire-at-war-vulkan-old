@@ -6,7 +6,7 @@
 //! Facts this relies on (`engine/apps/game/tools/mod_check_main.cpp`, `mod_check.cpp`):
 //! * `alamo_mod_check.exe` sits next to `alamo_game.exe`;
 //! * `--resolve` takes the mod arguments as the picked mods and checks the resolved stack; `--json -`
-//!   prints only the JSON report (`alamo.mod_report` version 4) on stdout;
+//!   prints only the JSON report (`alamo.mod_report` version 5) on stdout;
 //! * the report's `stack` object has `args` (launch order), `mods` (`key`, `arg`, `name`, `reason`),
 //!   `errors`, `warnings`; `grade` has `grade`, `g3_static`, `blocking`; `base_eaw` is the D1 refusal;
 //! * a stack argument is `STEAMMOD=<id>` (a Workshop item) or `MODPATH=<path>` (`Mods\<name>` relative to
@@ -185,7 +185,7 @@ mod tests {
     use super::*;
 
     const REPORT: &str = r#"{
-      "schema": "alamo.mod_report", "version": 4, "result": "ok",
+      "schema": "alamo.mod_report", "version": 5, "result": "ok",
       "base_eaw": false,
       "stack": {
         "resolved": true,

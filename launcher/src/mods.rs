@@ -2,7 +2,7 @@
 //! of its own), plus the launcher's art lookup and its notes about mods.
 
 use crate::config::{self, mod_key, Settings};
-use crate::catalog::{Catalog, Kind as CatalogKind};
+use crate::catalog::{Catalog, Dependency, Kind as CatalogKind};
 use crate::steam::{same_path, SteamInfo};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -46,6 +46,9 @@ pub struct ModInfo {
     pub own_name: bool,
     /// `modinfo.json` gave the mod a summary or description.
     pub own_summary: bool,
+    /// The mod's declared dependencies (catalog `dependencies`). A folder with variants takes them from the same
+    /// catalog row as the rest of this row: the folder's main mod, else its first variant.
+    pub dependencies: Vec<Dependency>,
 }
 
 const IMAGE_EXT: [&str; 7] = ["png", "jpg", "jpeg", "bmp", "webp", "tga", "dds"];
@@ -103,6 +106,7 @@ fn catalog_rows(catalog: &Catalog) -> Vec<ModInfo> {
             splash,
             has_data: m.has_data,
             own_name,
+            dependencies: m.dependencies.clone(),
         });
     }
     out
