@@ -307,10 +307,18 @@ fn layout_from_env(page: Option<&str>, windows: Option<&str>, tabs: Option<&str>
     Some(l)
 }
 
+/// The detection rows and the mods from `alamo_mod_check --list` ([`crate::catalog`]); on failure nothing is
+/// detected and the reason comes back for a toast.
+fn load_catalog(settings: &crate::config::Settings) -> (SteamInfo, Vec<ModInfo>, Option<String>) {
+    match crate::catalog::load_for(settings) {
+        Ok(c) => (steam::from_install(&c.install), mods::from_catalog(&c), None),
+        Err(e) => (SteamInfo::default(), Vec::new(), Some(e)),
+    }
+}
+
 impl App {
     pub fn new(cc: &eframe::CreationContext<'_>, mut cfg: Config, cli: Cli) -> Self {
         theme::install(&cc.egui_ctx);
-        let steam = steam::detect();
         // First run: pick up a game build sitting next to the launcher.
         if cfg.settings.game_exe.is_none() {
             if let Some(p) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("alamo_game.exe"))) {
@@ -319,7 +327,8 @@ impl App {
                 }
             }
         }
-        let mods = mods::scan(&steam, &cfg.settings);
+        // ums3: the install and the mods come from the port's own check (alamo_mod_check --list), not a scan here.
+        let (steam, mods, catalog_error) = load_catalog(&cfg.settings);
 
         // `--profile "Name"` (what the desktop shortcuts use) picks the profile for this run.
         let mut dirty = false;
@@ -401,6 +410,9 @@ impl App {
         if let Some(e) = startup_error {
             app.err(e);
         }
+        if let Some(e) = catalog_error {
+            app.err(e);
+        }
         app
     }
 
@@ -417,9 +429,15 @@ impl App {
         self.toasts.push(Toast { text: text.into(), error: true, until: Instant::now() + Duration::from_secs(9) });
     }
 
+    /// Asks the port's check again for the install and the mods (after a setting changed, or on request).
     pub fn rescan_mods(&mut self) {
-        self.mods = mods::scan(&self.steam, &self.cfg.settings);
+        let (steam, mods, error) = load_catalog(&self.cfg.settings);
+        self.steam = steam;
+        self.mods = mods;
         self.tex.clear();
+        if let Some(e) = error {
+            self.err(e);
+        }
     }
 
     pub fn find_mod(&self, path: &Path) -> Option<&ModInfo> {

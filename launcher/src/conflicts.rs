@@ -985,7 +985,9 @@ mod tests {
     #[test]
     #[ignore = "reads the installed Workshop mods"]
     fn live_workshop_conflicts() {
-        let steam = crate::steam::detect();
+        let steam = crate::catalog::load_for(&crate::config::Settings::default())
+            .map(|c| crate::steam::from_install(&c.install))
+            .unwrap_or_default();
         let Some(dir) = steam.workshop_dir.clone() else {
             println!("no Workshop folder on this PC");
             return;

@@ -206,8 +206,15 @@ pub fn run_check(exe: &Path, args: &[String]) -> Result<String, String> {
 
 /// The catalog of this install: `exe --list` (see [`list_args`]).
 pub fn load(exe: Option<&Path>, foc: Option<&Path>, extra: &[PathBuf]) -> Result<Catalog, String> {
-    let exe = exe.ok_or("alamo_mod_check.exe was not found next to the game or the launcher")?;
+    let exe = exe.ok_or("alamo_mod_check.exe was not found next to the game or the launcher, so no mods are listed")?;
     parse(&run_check(exe, &list_args(foc, extra))?)
+}
+
+/// The catalog for the launcher's settings: the check next to the chosen game, the game folder the user chose (if it
+/// exists) and the user's extra mod folders.
+pub fn load_for(settings: &crate::config::Settings) -> Result<Catalog, String> {
+    let foc = settings.foc_dir_override.clone().filter(|p| p.is_dir());
+    load(mod_check_exe(settings.game_exe.as_deref()).as_deref(), foc.as_deref(), &settings.extra_mod_dirs)
 }
 
 #[cfg(test)]

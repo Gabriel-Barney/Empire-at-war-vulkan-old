@@ -1,4 +1,5 @@
-//! Mod discovery: the game's Mods folder, Steam Workshop, and user-added folders.
+//! The mods the launcher shows: the port's catalog (`alamo_mod_check --list`, [`crate::catalog`]; ums3: no scanner
+//! of its own), plus the launcher's art lookup and its notes about mods.
 
 use crate::config::{self, mod_key, Settings};
 use crate::catalog::{Catalog, Kind as CatalogKind};
@@ -39,7 +40,6 @@ pub struct ModInfo {
     pub workshop_id: Option<String>,
     pub icon: Option<PathBuf>,
     pub splash: Option<PathBuf>,
-    pub has_modinfo: bool,
     pub has_data: bool,
     /// `modinfo.json` gave the mod a name. Without one, a Workshop mod is shown under the
     /// title Steam has for it (see [`apply_workshop_titles`]).
@@ -57,45 +57,6 @@ fn ext_of(p: &Path) -> String {
 /// The FoC `Mods` folder for the detected (or overridden) install.
 pub fn foc_dir(steam: &SteamInfo, settings: &Settings) -> Option<PathBuf> {
     settings.foc_dir_override.clone().filter(|p| p.is_dir()).or_else(|| steam.foc_dir.clone())
-}
-
-pub fn scan(steam: &SteamInfo, settings: &Settings) -> Vec<ModInfo> {
-    let mut roots: Vec<(PathBuf, ModSource)> = Vec::new();
-    if let Some(foc) = foc_dir(steam, settings) {
-        roots.push((foc.join("Mods"), ModSource::GameFolder));
-    }
-    if let Some(ws) = &steam.workshop_dir {
-        roots.push((ws.clone(), ModSource::Workshop));
-    }
-    for d in &settings.extra_mod_dirs {
-        roots.push((d.clone(), ModSource::Extra));
-    }
-
-    let mut out: Vec<ModInfo> = Vec::new();
-    for (root, source) in roots {
-        // An extra folder may itself be a mod rather than a folder of mods.
-        if source == ModSource::Extra && looks_like_mod(&root) {
-            if !out.iter().any(|m| same_path(&m.path, &root)) {
-                out.push(read_mod(&root, source));
-            }
-            continue;
-        }
-        let Ok(rd) = std::fs::read_dir(&root) else { continue };
-        for entry in rd.flatten() {
-            let path = entry.path();
-            if !path.is_dir() || !looks_like_mod(&path) {
-                continue;
-            }
-            if out.iter().any(|m| same_path(&m.path, &path)) {
-                continue;
-            }
-            out.push(read_mod(&path, source));
-        }
-    }
-    // Workshop folders are named after the item's number: use the titles Steam gave us the
-    // last time the launcher was connected.
-    apply_workshop_titles(&mut out, &crate::workshop::load_titles());
-    out
 }
 
 /// The mods of the port's catalog (`alamo_mod_check --list`, [`crate::catalog`]): one row per mod folder, in the
@@ -140,7 +101,6 @@ fn catalog_rows(catalog: &Catalog) -> Vec<ModInfo> {
             workshop_id: m.workshop_id(),
             icon,
             splash,
-            has_modinfo: main && m.has_modinfo,
             has_data: m.has_data,
             own_name,
         });
@@ -161,98 +121,6 @@ pub fn apply_workshop_titles(mods: &mut [ModInfo], titles: &crate::workshop::Tit
         }
     }
     mods.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-}
-
-fn looks_like_mod(dir: &Path) -> bool {
-    dir.join("Data").is_dir() || dir.join("modinfo.json").is_file()
-}
-
-fn read_mod(path: &Path, source: ModSource) -> ModInfo {
-    let folder = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let mut m = ModInfo {
-        path: path.to_path_buf(),
-        name: folder.clone(),
-        folder: folder.clone(),
-        summary: String::new(),
-        version: String::new(),
-        source,
-        workshop_id: (source == ModSource::Workshop && folder.chars().all(|c| c.is_ascii_digit()))
-            .then(|| folder.clone()),
-        icon: None,
-        splash: None,
-        has_modinfo: false,
-        has_data: path.join("Data").is_dir(),
-        own_name: false,
-        own_summary: false,
-    };
-
-    let mut icon_hint: Option<String> = None;
-    if let Ok(text) = std::fs::read_to_string(path.join("modinfo.json")) {
-        // Some mods ship modinfo.json with a UTF-8 BOM.
-        if let Ok(v) = serde_json::from_str::<serde_json::Value>(text.trim_start_matches('\u{feff}')) {
-            m.has_modinfo = true;
-            let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::trim).unwrap_or("").to_owned();
-            let name = s("name");
-            if !name.is_empty() {
-                m.name = name;
-                m.own_name = true;
-            }
-            m.summary = s("summary");
-            if m.summary.is_empty() {
-                m.summary = s("description");
-            }
-            m.own_summary = !m.summary.is_empty();
-            m.version = s("version");
-            let icon = s("icon");
-            if !icon.is_empty() {
-                // Usually "<workshop id>/Icon.ico": only the file name is meaningful here.
-                icon_hint = icon.replace('\\', "/").rsplit('/').next().map(str::to_owned);
-            }
-            if m.workshop_id.is_none() {
-                m.workshop_id = v
-                    .pointer("/steamdata/publishedfileid")
-                    .and_then(|x| x.as_str())
-                    .filter(|x| !x.is_empty())
-                    .map(str::to_owned);
-            }
-        }
-    }
-
-    // Art: look at loose image files in the mod's root.
-    let mut images: Vec<(PathBuf, u64)> = Vec::new();
-    let mut icons: Vec<PathBuf> = Vec::new();
-    if let Ok(rd) = std::fs::read_dir(path) {
-        for e in rd.flatten() {
-            let p = e.path();
-            if !p.is_file() {
-                continue;
-            }
-            let ext = ext_of(&p);
-            if ext == "ico" {
-                icons.push(p);
-            } else if IMAGE_EXT.contains(&ext.as_str()) {
-                let len = e.metadata().map(|m| m.len()).unwrap_or(0);
-                images.push((p, len));
-            }
-        }
-    }
-    let stem = |p: &Path| p.file_stem().map(|s| s.to_string_lossy().to_lowercase()).unwrap_or_default();
-    let find = |words: &[&str]| {
-        images.iter().find(|(p, _)| words.iter().any(|w| stem(p).contains(w))).map(|(p, _)| p.clone())
-    };
-    m.splash = find(&["splash"])
-        .or_else(|| find(&["banner", "header", "cover"]))
-        .or_else(|| find(&["preview", "thumb", "logo"]))
-        .or_else(|| images.iter().max_by_key(|(_, len)| *len).map(|(p, _)| p.clone()));
-    m.icon = icon_hint
-        .and_then(|h| {
-            let p = path.join(h);
-            p.is_file().then_some(p)
-        })
-        .or_else(|| icons.first().cloned())
-        .or_else(|| find(&["icon", "logo"]))
-        .or_else(|| m.splash.clone());
-    m
 }
 
 /// The mod's art from loose image files in its folder: (icon, splash). `icon_hint` is the file name `modinfo.json`
@@ -673,12 +541,12 @@ mod tests {
         assert_eq!((ws.name.as_str(), ws.own_name, ws.source), ("900000201", false, ModSource::Workshop));
         assert_eq!(ws.workshop_id.as_deref(), Some("900000201"));
         assert_eq!(ws.path, PathBuf::from("C:\\Fixture\\steamlib\\steamapps\\workshop\\content\\32470\\900000201"));
-        assert!(!ws.has_modinfo && ws.has_data);
+        assert!(ws.has_data);
         let sub = rows.iter().find(|m| m.folder == "StackSub").unwrap();
         assert_eq!((sub.name.as_str(), sub.own_name, sub.version.as_str(), sub.source), ("Stack Sub", true, "1.1", ModSource::GameFolder));
-        assert!(sub.has_modinfo && sub.workshop_id.is_none() && !sub.own_summary);
+        assert!(sub.workshop_id.is_none() && !sub.own_summary);
         let plain = rows.iter().find(|m| m.folder == "StackTop").unwrap();
-        assert_eq!((plain.name.as_str(), plain.own_name, plain.has_modinfo), ("StackTop", false, false));
+        assert_eq!((plain.name.as_str(), plain.own_name), ("StackTop", false));
         // A folder that is not on disk has no art.
         assert!(plain.icon.is_none() && plain.splash.is_none());
     }

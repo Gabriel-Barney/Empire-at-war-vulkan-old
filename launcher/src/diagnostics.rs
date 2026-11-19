@@ -1013,7 +1013,9 @@ mod tests {
         check_vulkan(&Input { system_dir: system, ..Default::default() }, Some(gpus), &mut out);
         println!("{out:#?}");
 
-        let steam = crate::steam::detect();
+        let steam = crate::catalog::load_for(&crate::config::Settings::default())
+            .map(|c| crate::steam::from_install(&c.install))
+            .unwrap_or_default();
         let acf = steam.workshop_dir.as_deref().and_then(workshop_acf_path);
         println!("record: {acf:?}");
         if let Some(text) = acf.and_then(|p| std::fs::read_to_string(p).ok()) {
