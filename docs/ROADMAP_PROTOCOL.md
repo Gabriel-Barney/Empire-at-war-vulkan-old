@@ -122,7 +122,9 @@ the preset's model and effort, effort capped at the lane agent's `high`, so `xhi
 5. Keep the rule from `CLAUDE.md` that every finished item is struck through, not deleted: set `s` to `done`.
    Out-of-scope work is the exception (Gabriel, 2026-10-30): delete those tasks (`{"tasks":{"t03":{"__delete__":true}}}`)
    and wholly out-of-scope groups and boxes instead of keeping them as `oos` / `out`. Record the decision in the
-   `docs/DECISIONS.md` first; that table, not the roadmap, is the record of what is out of scope.
+   `docs/DECISIONS.md` first; that table, not the roadmap, is the record of what is out of scope. Gabriel reaffirmed this on
+   2026-11-19 (roadmap audit): out-of-scope tasks are removed, never kept as `oos`. A task that was dropped, moved, merged or
+   made moot (`oos` with `why` or `moved`) is not out of scope and stays as the audit trail.
 6. The roadmap is the only status tracker (Gabriel, 2026-11-06): `docs/PHASE2.md` / `PHASE3.md` / `PHASE4.md` no longer carry status boards or flowcharts, and `claude/roadmap.md` / `claude/phase2-status.md` are not updated. Record results where `docs/README.md` says (decisions, measurements, build rules, specs), but track what is open or done only here.
 
 ## Backlog and group exit tests (Gabriel, 2026-11-10)
@@ -181,11 +183,14 @@ leave the group.
   on its group's `mod`; `gab` matches Gabriel-only entries) file a new entry into a more specific category straight away; an entry no
   rule matches stays in `inbox`, and triage moves it (`backlog move`, `backlog retag --apply` re-runs the rules). Categories are
   data too (`backlog cats --add <id> --label ... --parent ... --node <box>`). Since 2026-11-12 every category has a flowchart box
-  (`node`), so an entry also says which stage and box its work belongs to, as Stage 5 · OPT is performance: Parity (`parity-sim`
-  movement and collision → MOVE, `parity-combat` → MOVE, `parity-anim` → ANIM, `parity-rules` other tactical rules → ABIL,
-  `parity-ai` galactic AI → Q2F, `parity-tactical-ai` → AIVIEW, `parity-campaign` galactic rules → Q2F, `parity-story` → STORY),
-  Engine (`lua-data` → RE, `render-ui` → UIART, `mods` → MODC, `perf` → OPT), Process (`tools-harness`, `docs-process` → PROC),
-  Research (`re-research`, `gabriel` → CONFIRM). `backlog cats` lists them with their stage. Every entry carries its own
+  (`node`), so an entry also says which stage and box its work belongs to, as Stage 5 · OPT is performance. Since the 2026-11-19
+  audit (Gabriel; `docs/ROADMAP_AUDIT_2026-11-19.md`) there is one category per box: Parity (`parity-sim` movement and combat →
+  MOVE, `parity-anim` → ANIM, `parity-rules` other tactical rules → ABIL, `parity-ai` galactic rules and AI → Q2F,
+  `parity-tactical-ai` → AIVIEW, `parity-story` → STORY), Engine (`lua-data` → RE, `render-ui` render and UI → UIART, `audio` →
+  AUDIO, `mod-system` → MODC, `perf` → OPT), Process (`tools-harness` tools, docs and workflow → PROC), Research (`re-research` RE
+  questions and Gabriel's runs → CONFIRM). The audit merged `parity-combat`, `parity-campaign`, `docs-process` and `gabriel` into
+  the category of the same box and gave `audio` its own rule. Merge only categories that share a box: a category's box is the box
+  `backlog add` and `backlog move --cat` give an entry. `backlog cats` lists them with their stage. Every entry carries its own
   `node`: `backlog add` sets the category's box (else the `--from` group's), `--node` overrides it, `backlog move --cat` brings the
   new category's box, `backlog move --node` re-files only the box, `backlog list --node <box|stage lane>` filters, `cats --set <id>
   --node <box>` changes a category's box, and `promote --new` without `--node` uses the entries' shared box. Lint flags an entry

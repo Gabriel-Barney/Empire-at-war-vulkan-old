@@ -1,0 +1,3109 @@
+[
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0276",
+  "data": {
+   "s": "promoted",
+   "promoted": "aud8/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0283",
+  "data": {
+   "s": "promoted",
+   "promoted": "aud8/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0284",
+  "data": {
+   "s": "promoted",
+   "promoted": "aud8/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0316",
+  "data": {
+   "s": "promoted",
+   "promoted": "aud8/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0317",
+  "data": {
+   "s": "promoted",
+   "promoted": "aud8/t05"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0438",
+  "data": {
+   "s": "promoted",
+   "promoted": "aud8/t06"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0463",
+  "data": {
+   "s": "promoted",
+   "promoted": "aud8/t07"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0464",
+  "data": {
+   "s": "promoted",
+   "promoted": "aud8/t08"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "aud8",
+  "data": {
+   "title": "AUD8 Audio system rules: music modes, 3D mods, volume restore, inactive window",
+   "tag": "AUD8",
+   "node": "AUDIO",
+   "status": "big",
+   "preset": "high",
+   "mod": "audio, apps/game",
+   "order": 232,
+   "tasks": {
+    "t01": {
+     "t": "RE gap (AUDIO.md 1.6, 8): exact visibility tests behind the 3D mute factor (object flags +0x3a2, +0x2a0) and who sets the SFX manager GUI-only flag +0x94 (port: pause menu) (backlog b0276)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0276",
+     "sub": "Research",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "Mode shutdown does not reset the 3D saturation / rolloff mods to 1.0 (the front end uses the Galactic mods); same with vanilla data, differs for mods that change Audio_Galactic_3D_* (AUDIO.md 1.7) (backlog b0283)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0283",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "Music: mode 14 entries resume the previous music even without resume_previous (audio_system.cpp:1057), and MSS_Internal_Loop streams that report done are not restarted (AUDIO.md 2.1, 2.2) (backlog b0284)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0284",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "RE gap: music modes 9 / 10 (0x28f250) callers are the victory monitor 0x343b90 and battle-end dialog fill 0x88fe0, so they may be win / lose music rather than per-object music; the port only uses 16 (AUDIO.md 2.3) (backlog b0316)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0316",
+     "sub": "Research",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "Lua Play_SFX_Event in galactic mode gets a stale battle position or the origin: object positions are fed only in battles and never cleared (backlog b0317)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0317",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t06": {
+     "t": "Space map terrain is forced to 7 for music and map ambience; AUDIO.md §9.1 suggests 0x364f00 keys map ambience by the raw TED mini 06, so _SPACE_PLANET_DATHOMIR_01 (raw 2, Desert) may get Desert ambience in retail. Check and split terrain_type() if so. Found in aud1 review. (backlog b0438, found in aud1)",
+     "s": "todo",
+     "o": 6,
+     "bl": "b0438",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t07": {
+     "t": "Master_Volume_Restore level after an options preview: GameAudioHost::set_volumes saves the master on every call, including the options dialog's PreviewAudio, so a previewed but not applied master is what Lua Master_Volume_Restore returns to until the next apply / load; retail's saver of the level is not traced (AUDIO.md 4 [M]) (backlog b0463, found in aud2)",
+     "s": "todo",
+     "o": 7,
+     "bl": "b0463",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t08": {
+     "t": "Inactive window: GUI / HUD SFX raised while the application is inactive still start (GameAudio::gui_sfx pumps the instance once) although step 14 does not run; retail likely queues them until reactivation (AUDIO.md 6.1) [guess] (backlog b0464, found in aud2)",
+     "s": "todo",
+     "o": 8,
+     "bl": "b0464",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    }
+   },
+   "exit": "alamo_audio / alamo_game_audio_host tests: music mode 9/10/14 resume rules, 3D saturation / rolloff reset at mode shutdown, Master_Volume_Restore after an options preview, GUI SFX while inactive and galactic Play_SFX_Event positions follow AUDIO.md (each RE gap answered in docs/re first)",
+   "why": "Promoted from the backlog (b0276, b0283, b0284, b0316, b0317, b0438, b0463, b0464) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset high: fixes pinned by docs/re specs.",
+   "eta": {
+    "target": "2026-12-12",
+    "effort": "~2 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0302",
+  "data": {
+   "s": "promoted",
+   "promoted": "aud9/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0303",
+  "data": {
+   "s": "promoted",
+   "promoted": "aud9/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0314",
+  "data": {
+   "s": "promoted",
+   "promoted": "aud9/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0462",
+  "data": {
+   "s": "promoted",
+   "promoted": "aud9/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0487",
+  "data": {
+   "s": "promoted",
+   "promoted": "aud9/t05"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "aud9",
+  "data": {
+   "title": "AUD9 Audio triggers still unwired: HUD shield / pop-cap VO, object loops, capture bonus, cancel lines",
+   "tag": "AUD9",
+   "node": "AUDIO",
+   "status": "big",
+   "preset": "re2ui",
+   "mod": "audio, apps/game",
+   "order": 233,
+   "tasks": {
+    "t01": {
+     "t": "Battle HUD VO with no trigger spec yet: HUD_[Enemy_]Base_Shield_Offline / Online / Penetrated, Base_Shield_Absorb_Damage, HUD_Repairing, HUD_Gravity_Control_Generator_On/Off, Tactical_Pop_Cap_Reached, HUD_Advisor_Message / Urgent / Hint, GUI_[Enemy_]Toggle_Non_Hero_Ability_On/Off: RE when each plays (backlog b0302)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0302",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "Object loops / cues not wired: SFXEvent_Turret_Rotating_Loop (37), SFXEvent_Special_Ability_Loop (12), SFXEvent_Powered_Active_Loop (3), SFX_Stealth_Reveal (ABILITY_VISUALS 1.4), SFXEvent_Damaged_By_Asteroid (L1_S4 3.3), SFXEvent_Move_Into_Nebula / _Asteroid_Field, one-offs (Unit_Summoned, Beacon_Placed, Zap_SFXEvent, tactical Hero_Respawned) (backlog b0303)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0303",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "Planet capture bonus: Audio.xml SFXEvent_Planet_Capture_Bonus_Reward and TEXT_PLANET_CHANGED_HANDS_BONUS are not played / shown when the bonus is paid (campaign.cpp:722; trigger point needs RE) (backlog b0314)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0314",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "Galactic production cancel line on system cancels: aud2 plays SFXEvent_Build_Cancelled for every ProductionCanceled of the local player, including queue wipes on an owner change / special-system removals (campaign.cpp, special_systems.cpp); which retail paths play the cancel line is not traced (AUDIO.md 6.2) [guess] (backlog b0462, found in aud2)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0462",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "Ability toggle sounds: the factions' SFXEvent_GUI_Toggle_Non_Hero_Ability_On / _Off lists (Factions.xml, e.g. DEFEND -> GUI_Toggle_Shields_On) are never played by the port when a toggle ability is switched on / off from the tactical HUD (UI.md 3.6; found in ui5 t06) (backlog b0487, found in ui5)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0487",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    }
+   },
+   "exit": "alamo_game_audio_host_tests start each listed HUD VO line, object loop and the planet capture bonus SFX on its retail trigger (triggers from docs/re)",
+   "why": "Promoted from the backlog (b0302, b0303, b0314, b0462, b0487) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset re2ui: RE then UI work.",
+   "eta": {
+    "target": "2026-12-12",
+    "effort": "~2 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0007",
+  "data": {
+   "s": "promoted",
+   "promoted": "gai4/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0008",
+  "data": {
+   "s": "promoted",
+   "promoted": "gai4/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0010",
+  "data": {
+   "s": "promoted",
+   "promoted": "gai4/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0111",
+  "data": {
+   "s": "promoted",
+   "promoted": "gai4/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0112",
+  "data": {
+   "s": "promoted",
+   "promoted": "gai4/t05"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0119",
+  "data": {
+   "s": "promoted",
+   "promoted": "gai4/t06"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0120",
+  "data": {
+   "s": "promoted",
+   "promoted": "gai4/t07"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0124",
+  "data": {
+   "s": "promoted",
+   "promoted": "gai4/t08"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "gai4",
+  "data": {
+   "title": "GAI4 Underworld galactic AI timing leftovers (a2m)",
+   "tag": "GAI4",
+   "node": "Q2F",
+   "status": "big",
+   "preset": "xhigh",
+   "mod": "ai, galactic",
+   "order": 230,
+   "tasks": {
+    "t01": {
+     "t": "[RE] (a2k t05) Why the Corellia saboteur plan exits at 248 (retail) and the saboteur stops at Naboo (backlog b0007, found in a2m)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0007",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "[port check] (a2k t05) Underworld proposal cadence: retail 103/250/397 vs port 119/195/271 (backlog b0008, found in a2m)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0008",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "[RE] (a2m t07) FindTarget(\"Enemy\",0.1) candidates for the slicer; run 11 with no slice (backlog b0010, found in a2m)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0010",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "a2m: the port's Underworld spends windfalls right after a fiscal cycle (Crusader / vehicle-factory orders; Build_Space_Forces Crusader at Felucia around 2898 in seed 0) while retail has no Underworld space build between 89 and 11059 and holds 1300..2200 credits from 6000 to 9000 with long goal-budget PAYG stalls (r2 / r3 diagnoses) (backlog b0111, found in a2m)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0111",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "a2m: the port's Underworld runs Generate_Magic_Space_Defense at Shola / NalHutta after tick 8400 in 4/12 seeds; retail's Underworld never does before 13501. Re-measure after the remaining t03 fixes (probably downstream) (backlog b0112, found in a2m)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0112",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t06": {
+     "t": "a2m hero records: (1) a new hero is still a record on its creation frame, before its first script service: model that one-frame window or keep it as a [port] gap (docs/PHASE4.md); (2) 0x6c0020 resolves to the unit's first fleet member or first carried object, but the port takes the galactic unit itself ([M] in PHASE4) (backlog b0119, found in a2m)",
+     "s": "todo",
+     "o": 6,
+     "bl": "b0119",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t07": {
+     "t": "a2m: Corrupt_Planet proposals in one pass all show cost 0 against the same free saboteur; retail re-solves at accept (A1_READINGS 28.6) so the second accepted one gets a build. Check the port's accept-time re-solve gives cost 1000 there (backlog b0120, found in a2m)",
+     "s": "todo",
+     "o": 7,
+     "bl": "b0120",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t08": {
+     "t": "a2m: OPT2 t02 galactic path latency is a [port] timing knob never measured for parity, and the path stagger still uses the old session-player count (path_stagger_players); RE does not say whether its K is the whole PlayerList (backlog b0124, found in a2m)",
+     "s": "todo",
+     "o": 8,
+     "bl": "b0124",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    }
+   },
+   "exit": "parity_harness_hotm_galactic_seeds over 12 seeds: Underworld proposal cadence, windfall spending and Generate_Magic_Space_Defense timing inside the retail distribution; RE answers for the saboteur / slicer questions in docs/re",
+   "why": "Promoted from the backlog (b0007, b0008, b0010, b0111, b0112, b0119, b0120, b0124) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset xhigh: open-ended diagnosis over seeds.",
+   "eta": {
+    "target": "2026-12-19",
+    "effort": "~3 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0104",
+  "data": {
+   "s": "promoted",
+   "promoted": "gai5/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0129",
+  "data": {
+   "s": "promoted",
+   "promoted": "gai5/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0159",
+  "data": {
+   "s": "promoted",
+   "promoted": "gai5/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0449",
+  "data": {
+   "s": "promoted",
+   "promoted": "gai5/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0491",
+  "data": {
+   "s": "promoted",
+   "promoted": "gai5/t05"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0493",
+  "data": {
+   "s": "promoted",
+   "promoted": "gai5/t06"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0514",
+  "data": {
+   "s": "promoted",
+   "promoted": "gai5/t07"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "gai5",
+  "data": {
+   "title": "GAI5 Galactic and skirmish AI rule leftovers: hostile-fleet test, difficulty rescale, teams, routes",
+   "tag": "GAI5",
+   "node": "Q2F",
+   "status": "big",
+   "preset": "high",
+   "mod": "ai, galactic, apps/game",
+   "order": 231,
+   "tasks": {
+    "t01": {
+     "t": "a2m review: test coverage gaps after t02: (a) the Setup A in-transit test does not check that the stage key uses FleetState::path.back() rather than the source planet; (b) test_move_to_fleet_object checks one fleet moved, not that it is the first-added member's (hero's) fleet; (c) no save/load round trip for the version-8 TF / status fleet fields (matching CRC), and no version-7 blob that loads with fleet == kNoFleet (backlog b0104, found in a2m)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0104",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "a2m: doc fixes: AI_GALACTIC_2 s2.3 and A2M_R2_RE_A s1.5 describe 0x401ba0 differently (the port follows RE-A s1.5), reconcile them; A2M_R3_RE_A s1.5 calls the vehicle-factory failure a Plan veto, the port shows a Budget-marshaller veto on Infrastructure A (recorded in PHASE4) (backlog b0129, found in a2m)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0129",
+     "sub": "Research",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "bkg2 b0121 side finding (BKG1_RE_ANSWERS 10): retail's hostile-fleet-in-orbit test for the AI reads owner != player plus a fleet flag +0x94 [L]; the port's enemy_fleet_in_orbit tests hostility only. Check the flag and whether allied / neutral fleets count (backlog b0159, found in bkg2)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0159",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "Empire AI land skirmish (foc-land Utapau, --human Underworld --ai Empire, seeds 3 and 9 of 1-10, 36000, dev a8093abb skai-lane2): 1 Lua error each, BOBAFETTFLAMEINFANTRY 'GameObjectWrapper::Move_To -- Target is already dead' (object script orders a move onto a target that died the same frame). Check whether retail's Move_To raises on a dead target (LUA_API) or the port's script timing (target death before the script service) differs; the AI-vs-AI tests need 0 Lua errors. (backlog b0449, found in skai)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0449",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "Set_Difficulty (AI_GALACTIC 1.2, 0x4b0dc0) also rescales hard-point health by new / old Health_Multiplier; the port's live difficulty change (skm2 t01, CombatSystem::set_player_difficulty) rescales hull and shield only, because the port's hard-point maximum (hp_max) has no difficulty factor at spawn either. Check whether retail's hard-point max carries the AI health multiplier, then rescale both (backlog b0491, found in skm2)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0491",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t06": {
+     "t": "Staging screen default teams (gui_menus.cpp fill_skirmish_slots: slot 0 team 1, every other slot team 2) now decide alliances in a team-game skirmish (skm2 t02): opening slots 2.. without touching the team combos gives the human against allied AIs. Retail's default team of slots 2..7 (single-player staging 0xf1230 / 0xfe7c0; SKIRMISH_SETUP 2.8 has only the AI slot: local team XOR 1) is not read: re-question, then set the defaults (backlog b0493, found in skm2)",
+     "s": "todo",
+     "o": 6,
+     "bl": "b0493",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t07": {
+     "t": "Galactic AI IsConnectedTo / Nearby*Total attenuation: routed() (galactic_ai_tokens.cpp) counts the PlanetGraph's free-hop edges (planets within MaximumFleetMovementDistance) as routes, so every token neighbour scores d = 0 and the 1 - d/GC+0x108*A attenuation never applies. AI_GALACTIC_TOKENS §4: d = 0 only for a direct (trade) route (0x3f7b30). Check which edges 0x3f7b30 counts, then use trade routes only if so. Found by mcx5 t02's token test. (backlog b0514)",
+     "s": "todo",
+     "o": 7,
+     "bl": "b0514",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    }
+   },
+   "exit": "alamo_ai / game_session unit tests per rule (hostile fleet in orbit flag, Set_Difficulty hard-point rescale, staging default teams, IsConnectedTo routes) and the a2m test-coverage gaps closed; docs/re reconciled (b0129)",
+   "why": "Promoted from the backlog (b0104, b0129, b0159, b0449, b0491, b0493, b0514) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset high: fixes pinned by docs/re specs.",
+   "eta": {
+    "target": "2026-12-12",
+    "effort": "~2 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0128",
+  "data": {
+   "s": "promoted",
+   "promoted": "gal2/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0440",
+  "data": {
+   "s": "promoted",
+   "promoted": "gal2/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0459",
+  "data": {
+   "s": "promoted",
+   "promoted": "gal2/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0466",
+  "data": {
+   "s": "promoted",
+   "promoted": "gal2/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0467",
+  "data": {
+   "s": "promoted",
+   "promoted": "gal2/t05"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0473",
+  "data": {
+   "s": "promoted",
+   "promoted": "gal2/t06"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0506",
+  "data": {
+   "s": "promoted",
+   "promoted": "gal2/t07"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "gal2",
+  "data": {
+   "title": "GAL2 Galactic rules leftovers: bounty, scoring events, contested space, hero neutralize, buy list",
+   "tag": "GAL2",
+   "node": "Q2F",
+   "status": "big",
+   "preset": "high",
+   "mod": "galactic, apps/sim/campaign",
+   "order": 232,
+   "tasks": {
+    "t01": {
+     "t": "a2m r2 (doc): the call site 0x60da50 -> 0x392600 of the auto-resolve bounty and whether starbases or ground structures destroyed by the roll pay are not traced ([M] in PHASE4 a2m r2) (backlog b0128, found in a2m)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0128",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "STORY_GENERIC hero_neutralized (STORY_TUTORIAL_IV) never raised: the port has no hero-neutralise mechanic (retail 0x616740, bounty-hunter / sabotage kill of a hero, any player); raise it when that mechanic exists. start_hyperspace only covers hyperspace_out (no player hyperspace order in the port) (backlog b0440, found in sty1)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0440",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "Land skirmish start structures (objects::kFlagNoAiOwnerList, skai t15) and the space start station (skai t22): retail also leaves them out of the threat grid's category-mask OR (SKAI_T22_SPACE_AI_RE Part 3); the port still ORs their type category in at registration (threat_grid.cpp register_object category_union_). Effect on Utapau / Geonosis not measured; skai_exit unchanged by it so far. (backlog b0459, found in skai)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0459",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "GameScoring Lua table: the port counts neutralizations in GalacticSim (neutralized_count, save v8) but does not call GameScoring.lua Galactic_Neutralized_Event, so the script's GalacticNeutralizedTable (scoring screens) stays empty (GALAB_ABILITIES_RE 7.6) (backlog b0466, found in galab)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0466",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "Lua Set_Check_Contested_Space (Death Star object flag +0x3a2 bit 0x40) is not bridged: Planet_Destruction always checks contested space (GALAB_ABILITIES_RE 2) (backlog b0467, found in galab)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0467",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t06": {
+     "t": "Skirmish buy-units list (app_screens.cpp open_buy_units) hides named heroes whatever the staging heroes option (SkirmishBuyOptions::heroes = false); skm1 t02 now carries the option in SessionSpec::skirmish_options.heroes (backlog b0473, found in skm1)",
+     "s": "todo",
+     "o": 6,
+     "bl": "b0473",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t07": {
+     "t": "[RE] GameScoring Player_Quit_Event(player) has no source in the port: which retail paths raise it in single player (callers 0x499420 QuitGameEventClass vf4 and 0x4994c0, GAME_SCORING.md §3 [M roles]); the port has no quit-game command executor (storyb t14) (backlog b0506, found in storyb)",
+     "s": "todo",
+     "o": 7,
+     "bl": "b0506",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    }
+   },
+   "exit": "galactic unit tests: auto-resolve bounty call site, GameScoring neutralized / player-quit events, Set_Check_Contested_Space, STORY_GENERIC hero_neutralized, skirmish buy-list heroes option and the start-structure threat-grid mask follow their docs/re specs",
+   "why": "Promoted from the backlog (b0128, b0440, b0459, b0466, b0467, b0473, b0506) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset high: fixes pinned by docs/re specs.",
+   "eta": {
+    "target": "2026-12-12",
+    "effort": "~2 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0169",
+  "data": {
+   "s": "promoted",
+   "promoted": "cmb3/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0196",
+  "data": {
+   "s": "promoted",
+   "promoted": "cmb3/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0199",
+  "data": {
+   "s": "promoted",
+   "promoted": "cmb3/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0439",
+  "data": {
+   "s": "promoted",
+   "promoted": "cmb3/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0451",
+  "data": {
+   "s": "promoted",
+   "promoted": "cmb3/t05"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0452",
+  "data": {
+   "s": "promoted",
+   "promoted": "cmb3/t06"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0454",
+  "data": {
+   "s": "promoted",
+   "promoted": "cmb3/t07"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0511",
+  "data": {
+   "s": "promoted",
+   "promoted": "cmb3/t08"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "cmb3",
+  "data": {
+   "title": "CMB3 Combat rule leftovers: fire trim, slot legs, shield regen, lobbing super weapon, gravity field",
+   "tag": "CMB3",
+   "node": "MOVE",
+   "status": "big",
+   "preset": "high",
+   "mod": "tactical, apps/sim/battle",
+   "order": 224,
+   "tasks": {
+    "t01": {
+     "t": "bkt1 review leftovers (low): (a) attack_stage_goal tests samples against map_extents (whole terrain) but land_attack_order clamps the result to bounds() (playable box): a sample in the strip outside the playable box is clamped onto the edge without a zone / min-range re-check; (b) t05's self test treats a squadmate of a caller unit as self (attack_mover(id) == attack_mover(tu->id), battle_ai.cpp), BKT1_ATTACK_RE 3.1 excludes only the caller and its container; (c) after t03 the check loop's hidden / stealth test uses the centroid lead, land_attack_order's trim gate uses units.front() (FIGHTER_FLYING 4.11 E: members[0]); differs only in mixed formations with Target_Stealth_Units; (d) tier 3: map_extents rescans every terrain height per staging call (cache the box) (backlog b0169, found in bkt1)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0169",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "bkr2 Q6 (b0078, BKR2_RE_ANSWERS Q6 [H]): attack fire-trim gate (tactical_battle.cpp ~2037-2045) is the object hidden test (0x35f470 on the object, force 1), not a point test with force 0; a target both hidden and stealthed: retail tests hidden first, the port stealth first (backlog b0196, found in bkr2)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0196",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "bkr2 Q7 (b0080, BKR2_RE_ANSWERS Q7 [H]): slot leg v and dot test (attack_approach.cpp ~580-600) are 3-D with the literal first and last path segments in retail; the port uses non-zero 2-D segments (same on retail-shaped paths, a small slope effect remains). Also: the PHASE4 t25.2 '[port] lead's mask stands for the formation class' note is stale (the port now matches 0x4779e0 / plan class) and air-led formations' land branch is [L] (probe: two Snowspeeders onto a standing AT-ST 1000 away on open ground) (backlog b0199, found in bkr2)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0199",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "ShotEvent hardpoint / serial are not saved (combat_save.cpp writes shooter, target, target_owner): a projectile in flight at a load can play the parent's SFXEvent_Fire instead of the hardpoint's Fire_SFXEvent on the first post-load host tick. Found in aud1 review. (backlog b0439, found in aud1)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0439",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "FIRE_LOBBING_SUPERWEAPON (47) now passes Can_Activate (TRU1 t01), so a command 40/43 or Lua Activate_Ability for 47 reaches AbilitySystem's generic fallback (Unhandled event + recharge start, no shot); retail's route for 47 outside command 25 is not traced (TRU1_GRAVITY_FIELD 2) (backlog b0451, found in tru1)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0451",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t06": {
+     "t": "Gravity control field range test uses position() of every combat unit, so a garrisoned / transported affected unit still in the ability list can be slowed at its stale position; retail's field query (0x2a8fb0) walks the player's object tree [M: whether carried units are in it] (TRU1_GRAVITY_FIELD 1.5) (backlog b0452, found in tru1)",
+     "s": "todo",
+     "o": 6,
+     "bl": "b0452",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t07": {
+     "t": "SHIELDED regen gate (combat_system_part2.cpp shield_requires_base_power, cites 0x56bb00): TRU1_A RE identifies 0x56bb00 as BaseShield_Evaluate_State, so the SHIELDED Shield_Requires_Base_Power reading has lost its evidence; recheck its reader (inert in shipped data) (backlog b0454, found in tru1)",
+     "s": "todo",
+     "o": 7,
+     "bl": "b0454",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t08": {
+     "t": "r3h follow-up [M]: Redirect_Blaster turning toward a shot from outside its arc, and the moving-unit case the RE marks not handled (ABILITIES_HARDPOINTS §4.15) (backlog b0511, found in r3h)",
+     "s": "todo",
+     "o": 8,
+     "bl": "b0511",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    }
+   },
+   "exit": "alamo_sim / combat unit tests per rule (hidden-object fire trim, 3-D slot legs, SHIELDED regen gate, FIRE_LOBBING_SUPERWEAPON, gravity field range, Redirect_Blaster arc, ShotEvent hardpoint saved) match their RE answers",
+   "why": "Promoted from the backlog (b0169, b0196, b0199, b0439, b0451, b0452, b0454, b0511) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset high: fixes pinned by docs/re specs.",
+   "eta": {
+    "target": "2026-12-12",
+    "effort": "~2 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0450",
+  "data": {
+   "s": "promoted",
+   "promoted": "tru3/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0453",
+  "data": {
+   "s": "promoted",
+   "promoted": "tru3/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0455",
+  "data": {
+   "s": "promoted",
+   "promoted": "tru3/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0456",
+  "data": {
+   "s": "promoted",
+   "promoted": "tru3/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0474",
+  "data": {
+   "s": "promoted",
+   "promoted": "tru3/t05"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0509",
+  "data": {
+   "s": "promoted",
+   "promoted": "tru3/t06"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0510",
+  "data": {
+   "s": "promoted",
+   "promoted": "tru3/t07"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "tru3",
+  "data": {
+   "title": "TRU3 Ability, shield and spawner rule leftovers",
+   "tag": "TRU3",
+   "node": "ABIL",
+   "status": "big",
+   "preset": "high",
+   "mod": "tactical, apps/sim/battle",
+   "order": 236,
+   "tasks": {
+    "t01": {
+     "t": "Gravity control field presentation events (AbilityEventKind GravityFieldPower / GravitySlow) have no consumer: Gravity_Control_Field_Effect (Repulsor_Jammer_Effect) on the first matching bone of each slowed unit, the local player's SFXEvent_HUD_Gravity_Control_Generator_On/Off, story event Interdict_Activated and its radar entry (RADARMAP.XML) (TRU1_GRAVITY_FIELD 1.2-1.4) (backlog b0450, found in tru1)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0450",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "Indigenous_Spawn_Destruction_Reward (GameConstants, 500) is read only by the tactical sandbox objectives builder (0x32bd10: DESTROY_ALL_INDIGENOUS_SPAWNERS story event + credit reward, TRU1_C_RE §1.5); the sandbox objectives are not ported (backlog b0453, found in tru1)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0453",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "Base_Shield_Upgrade entries are keyed by source only (add drops a repeat, remove deletes every entry of the source); retail 0x6f02c0 / 0x6f13b0 key not traced; no shipped object has two such specials (tru1 t02) (backlog b0455, found in tru1)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0455",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "AFFECTED_BY_SHIELD straddle is cleared as soon as the generator is not live (base_shield.cpp); retail keeps it until signal 0x28 (object removal), so between death and removal the unit keeps x Vulnerability / speed factor in retail (TRU1_A A3) [M meaning of 0x28] (backlog b0456, found in tru1)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0456",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "Skirmish Garrison_Upgrade_Ability (0x6fffa0, *_More_Garrisons_L1_Bonus, Additional_Garrison_Units) not modelled: the start-force re-delivery (skm1 t07) delivers the plain start-force list only (RE needed) (backlog b0474, found in skm1)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0474",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t06": {
+     "t": "r3h follow-up: Pad_Sell is not played at a battle start without pre-build (0x42df80): the pad's AnimWorld row does not exist yet at map load. docs/PHASE4.md r3h (backlog b0509, found in r3h)",
+     "s": "todo",
+     "o": 6,
+     "bl": "b0509",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t07": {
+     "t": "r3h follow-up: Cinematic_Anim_Blend_Seconds / Cinematic_Anim_Speed / Cinematic_Anim_Index fields are not read (cinematic clip plays use the defaults). docs/PHASE4.md r3h (backlog b0510, found in r3h)",
+     "s": "todo",
+     "o": 7,
+     "bl": "b0510",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    }
+   },
+   "exit": "alamo_sim tests per rule: Base_Shield_Upgrade keys, AFFECTED_BY_SHIELD straddle until removal, gravity field presentation events, Indigenous_Spawn_Destruction_Reward, Garrison_Upgrade_Ability, Pad_Sell at battle start and Cinematic_Anim_* fields",
+   "why": "Promoted from the backlog (b0450, b0453, b0455, b0456, b0474, b0509, b0510) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset high: fixes pinned by docs/re specs.",
+   "eta": {
+    "target": "2026-12-12",
+    "effort": "~2 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0082",
+  "data": {
+   "s": "promoted",
+   "promoted": "anm2/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0475",
+  "data": {
+   "s": "promoted",
+   "promoted": "anm2/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0476",
+  "data": {
+   "s": "promoted",
+   "promoted": "anm2/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0478",
+  "data": {
+   "s": "promoted",
+   "promoted": "anm2/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0486",
+  "data": {
+   "s": "promoted",
+   "promoted": "anm2/t05"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "anm2",
+  "data": {
+   "title": "ANM2 Deploy and hangar animation leftovers",
+   "tag": "ANM2",
+   "node": "ANIM",
+   "status": "big",
+   "preset": "high",
+   "mod": "anim, apps/sim/battle",
+   "order": 225,
+   "tasks": {
+    "t01": {
+     "t": "Deploy gates not modelled (deploy_system.cpp 153-154, 178-179): Deploy(true)'s obj +0x3a1 & 0x40 gate and Deploy(false)'s slot +0x35b (TACTICAL_BUILD_OBJECTS 0x29, 0x42e3b0 / 0x42e3d0) blocker, [H] in MOVEMENT 3.2. Data-scan that no vanilla Deploys type carries TACTICAL_BUILD_OBJECTS; otherwise model the blocker (backlog b0082, found in s78n)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0082",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "r3g t03 review: the land spawner's Structure Hold clip plays once - the hangar host's clip hook goes through TacticalBattle::play_clip, which always plays variant 0 without looping; retail loops Hold (69) with a random variant. Presentation only (timing reads static clip data). (backlog b0475, found in r3g)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0475",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "r3g t02 review: the timed DEPLOY_TROOPERS machine times Drop Rope / Deploy Troopers / Lift Rope and the trooper's Rope Land on static clip data but never plays them on the animation world, so the walker and troopers show no rope clips (the landing and land-spawner paths do play theirs). Presentation only. (backlog b0476, found in r3g)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0476",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "r3g t03 review: Spawn_Garrison_On_Load units are sent to the fly-out point like the one-by-one launch (hg_land_launch); R3G_ANIM_TIMED_RE.md §3 does not say whether retail's bulk spawn 0x593960 moves them. Check in the binary and drop the move if it does not. (backlog b0478, found in r3g)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0478",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "map1 t03 follow-up: l1_setup (tactical_battle_l1.cpp:73) recreates l1_sw_ after the map load, dropping special-weapon registrations a company member (or a bt_adopt_built map unit) got from deploy's l1_register; in space with a Death Star marker a map company member that is a super weapon would take bt_lead_ before the galactic Death Star. (backlog b0486, found in map1)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0486",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    }
+   },
+   "exit": "sim_anim / alamo_sim tests: deploy gates, DEPLOY_TROOPERS clips played on the animation world, Structure Hold looping, Spawn_Garrison_On_Load fly-out and l1 special-weapon registrations kept after map load",
+   "why": "Promoted from the backlog (b0082, b0475, b0476, b0478, b0486) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset high: fixes pinned by docs/re specs.",
+   "eta": {
+    "target": "2026-12-12",
+    "effort": "~2 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0165",
+  "data": {
+   "s": "promoted",
+   "promoted": "mov3/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0166",
+  "data": {
+   "s": "promoted",
+   "promoted": "mov3/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0174",
+  "data": {
+   "s": "promoted",
+   "promoted": "mov3/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0191",
+  "data": {
+   "s": "promoted",
+   "promoted": "mov3/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0192",
+  "data": {
+   "s": "promoted",
+   "promoted": "mov3/t05"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0202",
+  "data": {
+   "s": "promoted",
+   "promoted": "mov3/t06"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0398",
+  "data": {
+   "s": "promoted",
+   "promoted": "mov3/t07"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0504",
+  "data": {
+   "s": "promoted",
+   "promoted": "mov3/t08"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "mov3",
+  "data": {
+   "title": "MOV3 Movement rule leftovers and movement test gaps",
+   "tag": "MOV3",
+   "node": "MOVE",
+   "status": "big",
+   "preset": "high",
+   "mod": "tactical/movement",
+   "order": 225,
+   "tasks": {
+    "t01": {
+     "t": "bkm1: UseSecondaryFacing's snap of the body yaw to Y2 at the formation block pop 0x4105a0 (MOVEMENT 3.5.3 item 4) is not modelled: the port has no multi-block land formation. Also untraced [L]: a spawned unit's Y2 before / after its final facing (backlog b0165, found in bkm1)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0165",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "bkm1 review test gaps: no save round trip with non-zero LandMotion::end_z / yaw2 / Unit::lane_z or a UseSecondaryFacing unit; test_engagement_recruit covers only K(C) <= E(S) (not K(S) <= E(C), guard K = 0, the solo skip, the scan restart); no scenario for attack_plan's slot-leg z and its fire-trim interpolation; test_shield_class (c) is vacuous (p[0] on a shield cell) (backlog b0166, found in bkm1)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0166",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "bkm2 t07 (b0043) left: the rejoin generator rules (b) ends at the first failed path-length test, the ring resumes per goal, the 11-accepted-goal cap, an A* failure fails the call vs a pre-graph failure moving on) need a test accessor for MovementSystem::rejoin_search's candidate list (private); only rule (a)'s 10-step is covered indirectly (test_terrain_goal_relation +30 shift) (backlog b0174, found in bkm2)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0174",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "bkr2 Q4 (b0064, BKR2_RE_ANSWERS Q4 [H]): svs_pick_mover (movement_system.cpp ~4259): retail has no 'max speed 0 = immobile' rule; 0x686b20 gives such a unit cost 0, so it is picked first (ties to p1) and holds the record in state 1 without moving. Drop `!(walk_max_speed(x) > 0)` from imm (backlog b0191, found in bkr2)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0191",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "bkr2 Q1 (b0056, BKR2_RE_ANSWERS Q1): measurement, not a known difference: split MovementStats::corner_zero into corner 0 vs later corners and corridor-only vs line-test causes, and compare with the RE prediction (mostly corner 0: a standing neighbour on the first arc fails 0x5093c0 at every speed and Min_Speed defaults to 0 for 102 FoC land types; every fraction-0 corner not aligned within R is a stop and turn in place). Retail frequency would need an in-game trace of 0x61e930's branch to state 0xf (backlog b0192, found in bkr2)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0192",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t06": {
+     "t": "bkm3 t02 (b0094 b0054) left: the scene 'a squad container with a forced order and an exhausted push record coasting into impassable ground (the End Move coast reports)' cannot be reached through the public API (a pushed orderless container brakes along its push path and pops with 0 coast frames; an order mid-push ends the push) - needs a test accessor (set the push state or call team_walk). b0065 still has no case: every flag-1 Path Around caller is MvM (backlog b0202, found in bkm3)",
+     "s": "todo",
+     "o": 6,
+     "bl": "b0202",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t07": {
+     "t": "Begin_Turn_Towards_Distance (type +0x3a8; 22 FoC fighters / heroes, 100-900) has no known reader in docs/re or the port; likely shapes fighter turn-in (backlog b0398)",
+     "s": "todo",
+     "o": 7,
+     "bl": "b0398",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t08": {
+     "t": "Terrain height for the 0.5 under-water tests (Terrain::under_water: SurfaceFX surface, Destroy_When_Stunned_Over_Water) uses the port's triangle-linear sample_height; retail 0x135140 is read as a bilinear four-sample blend [M]. On a sloped shore near the threshold the two can disagree; settle 0x135140 and, if bilinear, add a sim-side bilinear sampler (backlog b0504, found in trn1)",
+     "s": "todo",
+     "o": 8,
+     "bl": "b0504",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    }
+   },
+   "exit": "alamo_sim / movement tests: SecondaryFacing snap, svs_pick_mover for speed-0 units, Begin_Turn_Towards_Distance reader, bilinear under-water height, and the bkm1 / bkm2 / bkr2 / bkm3 test scenes listed in the entries",
+   "why": "Promoted from the backlog (b0165, b0166, b0174, b0191, b0192, b0202, b0398, b0504) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset high: fixes pinned by docs/re specs.",
+   "eta": {
+    "target": "2026-12-12",
+    "effort": "~2 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0039",
+  "data": {
+   "s": "promoted",
+   "promoted": "tai1/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0085",
+  "data": {
+   "s": "promoted",
+   "promoted": "tai1/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0086",
+  "data": {
+   "s": "promoted",
+   "promoted": "tai1/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0204",
+  "data": {
+   "s": "promoted",
+   "promoted": "tai1/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0339",
+  "data": {
+   "s": "promoted",
+   "promoted": "tai1/t05"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0461",
+  "data": {
+   "s": "promoted",
+   "promoted": "tai1/t06"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "tai1",
+  "data": {
+   "title": "TAI1 Tactical AI tier-2 leftovers: re-tasking, Guard_Target rate, reachability, space TF methods",
+   "tag": "TAI1",
+   "node": "AIVIEW",
+   "status": "big",
+   "preset": "xhigh",
+   "mod": "ai, apps/sim/battle",
+   "order": 220,
+   "tasks": {
+    "t01": {
+     "t": "Unit idle for a long time after a TerrainCollision no-base stop (MOVEMENT 5.4.7: the order is lost, counted arrived) and the AI never re-tasks it: at close 04f98bfc seed 3 Rebel_Infiltrator 1003 idles 804 frames from 14049 to the end; t26.5 seed 5 Infiltrator 908 607 frames; t24 seed 2 Rebel_Trooper_Team 848 1758 frames (squad container whose arrival coast failed). Check against the retail AI re-task rules and that retail leaves such units idle that long (backlog b0039, found in s78n)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0039",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "Skirmish AI issues about 1000 Guard_Target orders per FoC land seed, each a new composition with a FormationClass ctor draw; check the re-issue rate against retail (backlog b0085, found in s78n)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0085",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "Campaign land seed 6 before the t26.4 fix: the Rebel AI with two T4B tanks and infantry never targeted the Empire's lone AT-AT on a 7216-long Clear_Infantry path and never retreated for ~9000 frames. Check whether retail Land_Retreat / Clear_Vehicles plans end such a stalemate (the outcome test now passes only because the fight goes differently). Also watch campaign seed 4 (ends at 11914 of 14400 since t26.4) (backlog b0086, found in s78n)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0086",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "bkx1 t01: the land goal system's slot 9 skips candidates whose target is unreachable (0x6b8710: target vf+0x38 reach object tested with the goal type's Reachability); the port counts them as evaluations, so a land pass can be longer than retail's. Which object vf+0x38 returns and what vf+0x30 checks is open (BKX1_CADENCE_RE Open); needed only if a tier-2 metric shows the land AI late (backlog b0204, found in bkx1)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0204",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "Space AI task-force methods Enable_Attack_Positioning (20 calls, SPACEMODE DESTROYUNIT / FLANKPLAN) and Release_Reinforcements are m_noop; retail checks the argument (LUA_API error texts) and changes task-force positioning (backlog b0339)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0339",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t06": {
+     "t": "[from skai t15, 2026-11-17] Land skirmish AI never proposes Hold_Position (Should_Hold_Position = 10 * (not campaign) * (AdditionalPopulationCapacity > UnitSpaceAvailable) * Is_Initial_Skirmish_State_Established * (Num_Refineries > 1) with IsLandControlGame 0): retail run 20261116-171531 proposes it from 5902 at 10, then 20 after tech 2, on friendly reinforcement points; port seed 1 (dev 3bbe864b) has none in 36000 ticks. Find which factor is 0 in the port (most likely AdditionalPopulationCapacity of the reinforcement point vs UnitSpaceAvailable). skai_exit passes without it (SKAI_T15_PLAN_RETEST 'IsLandControlGame is 0 in a conquest skirmish'). (backlog b0461, found in skai)",
+     "s": "todo",
+     "o": 6,
+     "bl": "b0461",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    }
+   },
+   "exit": "foc-land / foc-space skirmish AI over 12 seeds: idle-after-stop re-tasking, Guard_Target re-issue rate and Hold_Position proposals inside the retail range; land goal reachability skip and Enable_Attack_Positioning per AI_TACTICAL",
+   "why": "Promoted from the backlog (b0039, b0085, b0086, b0204, b0339, b0461) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset xhigh: open-ended diagnosis over seeds.",
+   "eta": {
+    "target": "2026-12-19",
+    "effort": "~3 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0426",
+  "data": {
+   "s": "promoted",
+   "promoted": "map4/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0427",
+  "data": {
+   "s": "promoted",
+   "promoted": "map4/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0428",
+  "data": {
+   "s": "promoted",
+   "promoted": "map4/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0429",
+  "data": {
+   "s": "promoted",
+   "promoted": "map4/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0430",
+  "data": {
+   "s": "promoted",
+   "promoted": "map4/t05"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0434",
+  "data": {
+   "s": "promoted",
+   "promoted": "map4/t06"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0483",
+  "data": {
+   "s": "promoted",
+   "promoted": "map4/t07"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0484",
+  "data": {
+   "s": "promoted",
+   "promoted": "map4/t08"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "map4",
+  "data": {
+   "title": "MAP4 Map placement and setup data leftovers",
+   "tag": "MAP4",
+   "node": "MAP",
+   "status": "big",
+   "preset": "high",
+   "mod": "terrain, apps/sim/battle",
+   "order": 236,
+   "tasks": {
+    "t01": {
+     "t": "Map units owned by an Is_Neutral faction stay inert (tactical_battle_bt.cpp ~951, [port]): selectable / mobile map units of such owners never become combat units; whether retail makes them fight is unchecked (RE question first) (backlog b0426, found in map1)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0426",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "Branched-map discard skips the behaviour test 0x370320 (tactical_battle_bt.cpp ~856; REMAINING_GAPS.md 3.1 item 4 [M]) (backlog b0427, found in map1)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0427",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "Pre-built pad occupant type saved in campaign maps (+0x18) not decoded by the map reader (SKIRMISH_SETUP.md port status 2.5/2.6 [M, open]); in skirmish the marker swap supplies it (BKG3 Q3.1), so check whether campaign maps carry it; may overlap skm1 (backlog b0428, found in map1)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0428",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "Placements use yaw only (map_spawn.cpp:46, tactical_battle_bt.cpp ~1014, ted_grid.cpp:129 read rotation_deg[2]); mini 05 is a full Euler rotation and terrain::placement_transform already supports it; check whether shipped maps have non-zero pitch / roll (backlog b0429, found in map1)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0429",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "Placement mini 0x2B (model ALT / damage-state index, object +0x300) not applied; only minis 0x0B and 0x29 are read (tactical_battle_bt.cpp ~734-743; SKIRMISH_SETUP.md 2.5) (backlog b0430, found in map1)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0430",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t06": {
+     "t": "Land loader leftovers: objects outside the land playable box are flagged in retail (TERRAIN_WATER_POST.md 1.2, row 0x103, meaning unknown) and world chunk 0x109 is not handled (untraced [L], not seen in sampled maps) (backlog b0434, found in map1)",
+     "s": "todo",
+     "o": 6,
+     "bl": "b0434",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t07": {
+     "t": "map1 t06 follow-up: pass 1 (remembered structure marker) matches any marker kind by .ted object id, including Defending Forces, Attacker Entry and Space Station markers; the id may come from another map used on that planet earlier, and placements without mini 00 read id 0 and collide. Restrict to Orbital / In_Base / Out_Base / specific structure markers or record it as [M] (tactical_battle_bt.cpp pass 1). (backlog b0483, found in map1)",
+     "s": "todo",
+     "o": 7,
+     "bl": "b0483",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t08": {
+     "t": "map1 t04 follow-up: the 0x46E marker name is kept for every placement; retail keeps it only on objects with a MarkerDataPack (MARKER behaviour), and the port has no reader of it yet (Lua or game). Keep it only for MARKER objects when a reader lands. (backlog b0484, found in map1)",
+     "s": "todo",
+     "o": 8,
+     "bl": "b0484",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    }
+   },
+   "exit": "map loader / battle start tests: Is_Neutral map units, pad occupant type, full Euler placements, mini 0x2B damage index, marker-kind match, 0x46E marker names, branched-map behaviour test and land loader leftovers per SKIRMISH_SETUP / TERRAIN_WATER_POST",
+   "why": "Promoted from the backlog (b0426, b0427, b0428, b0429, b0430, b0434, b0483, b0484) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset high: fixes pinned by docs/re specs.",
+   "eta": {
+    "target": "2026-12-19",
+    "effort": "~3 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0431",
+  "data": {
+   "s": "promoted",
+   "promoted": "map5/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0432",
+  "data": {
+   "s": "promoted",
+   "promoted": "map5/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0433",
+  "data": {
+   "s": "promoted",
+   "promoted": "map5/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0435",
+  "data": {
+   "s": "promoted",
+   "promoted": "map5/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0480",
+  "data": {
+   "s": "promoted",
+   "promoted": "map5/t05"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "map5",
+  "data": {
+   "title": "MAP5 Map camera, fog and environment data",
+   "tag": "MAP5",
+   "node": "MAP",
+   "status": "big",
+   "preset": "re2ui",
+   "mod": "render, terrain, apps/game",
+   "order": 237,
+   "tasks": {
+    "t01": {
+     "t": "Battle start camera ignores the map's camera data: game_render.cpp ~464-475 aims at the local units' centroid; land 0x103 minis 00/01/03, the 02/04 range overrides and the 0x10C camera block are unused (TERRAIN_WATER_POST.md 1.2; 0x10C meaning [inferred] in map_scene.cpp) (backlog b0431, found in map1)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0431",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "Map scene-fog block 0x100/2 parsed but never used; which fog source wins (RtsScene +0x78) is open (TERRAIN_WATER_POST.md 5.3 item 2, 7 item 7) (backlog b0432, found in map1)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0432",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "Old map environment format (0x100/0 and /1) not decoded: such maps fall back to default lighting (ted.hpp:115); the real-data test prints the count but checks nothing (backlog b0433, found in map1)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0433",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "Baked terrain not ported: used for the zoomed-out tactical overview and water reflection passes (render/world.hpp:30-31; TERRAIN_WATER_POST.md 2.8) (backlog b0435, found in map1)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0435",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "The game host does not read TacticalBattle::start_camera_focus (map1 t07): a local defender of a space battle should start with the camera on the chosen Space Station marker (REMAINING_GAPS 3.2 step 1); wire it where alamo_game places the battle camera at the start. (backlog b0480, found in map1)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0480",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    }
+   },
+   "exit": "render / game tests: battle start camera from the map's camera data and start_camera_focus, scene-fog block 0x100/2, old environment format 0x100/0-1 decoded, baked terrain for overview and reflection",
+   "why": "Promoted from the backlog (b0431, b0432, b0433, b0435, b0480) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset re2ui: RE then UI work.",
+   "eta": {
+    "target": "2026-12-12",
+    "effort": "~2 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0218",
+  "data": {
+   "s": "promoted",
+   "promoted": "rad1/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0436",
+  "data": {
+   "s": "promoted",
+   "promoted": "rad1/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0437",
+  "data": {
+   "s": "promoted",
+   "promoted": "rad1/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0481",
+  "data": {
+   "s": "promoted",
+   "promoted": "rad1/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0485",
+  "data": {
+   "s": "promoted",
+   "promoted": "rad1/t05"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "rad1",
+  "data": {
+   "title": "RAD1 Radar: icon scale, land passability picture, galactic radar, asteroid fields",
+   "tag": "RAD1",
+   "node": "UIART",
+   "status": "big",
+   "preset": "re2ui",
+   "mod": "ui, apps/game",
+   "order": 235,
+   "tasks": {
+    "t01": {
+     "t": "Radar: Radar_Icon_Scale_Land/Space, Radar_Rotate_Icon and Radar_Show_Facing are not applied (hud_world.hpp ~65); the Lua Add_Radar_Blip visual is a port-made gold ring (tactical_hud.cpp ~625) (backlog b0218, found in ui1)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0218",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "Galactic radar is a port design (galactic_hud.cpp ~1248): planets' bounding box, planets only, no fleets or routes; no RE spec beyond component names in UI.md 1.7 (RE question first) (backlog b0436, found in map1)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0436",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "Space radar draws asteroid fields as a [port] disc stand-in (hud_radar.hpp header comment) (backlog b0437, found in map1)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0437",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "Land radar passability picture (map1 t02): the cell flags are the static .ted 0x10A bits plus Obstacle outside the playable box; retail ORs the footprint bits of the objects on each cell and paints texels outside the tactical camera box opaque black (MAP1_RADAR_TERRAIN_RE per-texel rule). (backlog b0481, found in map1)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0481",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "map1 t02 follow-up (with b0481): the land radar picture tests the playable box per sample point where retail marks whole cells Obstacle, and after the vertical flip the top row samples max_y - h/128 instead of max_y (one texel). hud_radar.cpp radar_terrain_rgba. (backlog b0485, found in map1)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0485",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    }
+   },
+   "exit": "alamo_ui / game tests: Radar_Icon_Scale / Rotate / Show_Facing applied, land radar passability from object footprints with whole-cell Obstacle marks, asteroid fields drawn per spec, galactic radar per an RE answer",
+   "why": "Promoted from the backlog (b0218, b0436, b0437, b0481, b0485) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset re2ui: RE then UI work.",
+   "eta": {
+    "target": "2026-12-12",
+    "effort": "~2 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0217",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui6/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0219",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui6/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0220",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui6/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0221",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui6/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0228",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui6/t05"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0229",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui6/t06"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0230",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui6/t07"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0465",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui6/t08"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "ui6",
+  "data": {
+   "title": "UI6 HUD stand-ins and missing panels from the ui1 review",
+   "tag": "UI6",
+   "node": "UIART",
+   "status": "big",
+   "preset": "re2ui",
+   "mod": "ui, apps/game",
+   "order": 236,
+   "tasks": {
+    "t01": {
+     "t": "Slice dialog uses the black-market shell as a stand-in (hud_panels.hpp ~316 says the resource is not identified, but IDD_SLICE_DIALOG exists in GUIDIALOGS.RC); black market / sabotage / corruption text-slot mapping is a guess (hud_panels.hpp ~31-34) (backlog b0217, found in ui1)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0217",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "Waypoint lines are 2D HUD segments, not the 3D WaypointLineSubClass; the click ping is a port-made 0.6 s ring (hud_markers.hpp ~6-14, 68) (backlog b0219, found in ui1)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0219",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "No load dialog for campaign start and save loads: only the five battle / mission load dialogs exist (load_screen.cpp ~12-16); SessionLoad only shows the WAIT cursor (backlog b0220, found in ui1)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0220",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "Flat stand-ins where shell art should draw: tactical pause banner always flat (tactical_hud.cpp ~992, not i_attack_mode.alo), fallback bottom band (tactical_hud.cpp ~515), galactic battle-pending plate (galactic_hud.cpp ~1342-1356), dialog Scanlines not drawn (gui_dialog.hpp ~34); main-menu MenuBack_overlay skipped during the attract demo (app_frame.cpp ~170) (backlog b0221, found in ui1)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0221",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "Fleet organiser pathfinder pad still inert: the flagship split exists in the sim (conflicts.cpp ~966-975) but the player cannot appoint a pathfinder (UI.md §7.4; galactic_hud.cpp ~785-788); only matters in scripted battles (backlog b0228, found in ui1)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0228",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t06": {
+     "t": "Galactic tooltips: not suppressed while a HUD modal (battle banner) is up (HUD_GAPS §2.1; galactic_hud.cpp ~1523, app_screens.cpp ~691-723); the tooltip is one text block that never uses tooltip_name / tooltip_price / tooltip_icon and has a hard-coded 230 grey (hud_buttons.cpp ~334-366) (backlog b0229, found in ui1)",
+     "s": "todo",
+     "o": 6,
+     "bl": "b0229",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t07": {
+     "t": "Galactic g_special_ability rows: labelled with the unit name instead of the ability, always enabled, at most 8 rows ([port], app_hud.cpp ~580-592, galactic_hud.cpp ~1140); retail behaviour undocumented (backlog b0230, found in ui1)",
+     "s": "todo",
+     "o": 7,
+     "bl": "b0230",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t08": {
+     "t": "Neutralize_Hero panel for a human player: GalacticSim emits NeutralizeDialog and keeps the candidates (neutralize_offer: cost lines, respawn times); alamo_game needs the target panel (target_type_back / i_neutralize_hero) that sends SpecialAbility kind 3 (neutralize_hero_event). Until then a human's bounty hunter / Boba Fett neutralize does nothing (GALAB_ABILITIES_RE 7.5) (backlog b0465, found in galab)",
+     "s": "todo",
+     "o": 8,
+     "bl": "b0465",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    }
+   },
+   "exit": "Each listed stand-in replaced by the retail resource or behaviour (slice dialog, waypoint lines, campaign load dialog, shell art, galactic tooltips, special-ability rows, pathfinder pad, Neutralize_Hero panel) with a unit or smoke test",
+   "why": "Promoted from the backlog (b0217, b0219, b0220, b0221, b0228, b0229, b0230, b0465) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset re2ui: RE then UI work.",
+   "eta": {
+    "target": "2026-12-12",
+    "effort": "~2 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0224",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui7/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0225",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui7/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0231",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui7/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0232",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui7/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0245",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui7/t05"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0472",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui7/t06"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0496",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui7/t07"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0497",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui7/t08"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "ui7",
+  "data": {
+   "title": "UI7 UI questions for the binary and retail shots",
+   "tag": "UI7",
+   "node": "UIART",
+   "status": "big",
+   "preset": "high",
+   "mod": "docs/re",
+   "order": 237,
+   "tasks": {
+    "t01": {
+     "t": "Tactical brackets, health bars and icons: placement, bracket size class, Outlined_Bar and the bracket label are port choices (hud_world.hpp ~11, 57, 149; UI.md §6 open); check against retail shots (backlog b0224, found in ui1)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0224",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "Single-player dialogs with no port version; check which retail actually opens before porting: IDD_NEUTRALIZE_HERO_DIALOG, IDD_REINFORCEMENT_DIALOG, IDD_INVADE_PLANET_DIALOG, IDD_INVASION_AUTO_RESOLVE_DIALOG, IDD_PLANET_QUICK_REFERENCE, IDD_PLANET_MAINTENANCE_DIALOG, IDD_PRODUCTION_MENU_DIALOG, IDD_TUTORIAL_DIALOG, IDD_LOAD_MAP_DIALOG, IDD_MAIN_CAMPAIGN_DIALOG (UI.md §3.2) (backlog b0225, found in ui1)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0225",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "Tactical selection portraits: Shift-click (remove) and Ctrl-click (first unit only) are port guesses, double-click does not centre the camera (tactical_hud.cpp ~273-281); right-click on the radar issues a move order, a [port] invention not in UI.md §1.7 (tactical_hud.cpp ~359) (backlog b0231, found in ui1)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0231",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "Playtest 3 guesses still in place: graphics sliders (shadow detail on/off only, shader detail does not switch techniques, slider mappings [M]; playtest3 t11), galactic fleet-slot rules [M] (t07), battle time formula [M] and a bounty display that moves no credits (playtest t13) (backlog b0232, found in ui1)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0232",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "RE: how the credits roll uses the GameConstants Credits_* entries (Spacing, Margin, Scroll_Rate listed twice, Header / normal colours, font) and what is behind it (menu backdrop, music); ui1 t03 [port] in credits_roll.hpp (backlog b0245, found in ui1)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0245",
+     "sub": "Research",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t06": {
+     "t": "ui2 probe / RE questions: do presentation rewards of another player's plot set show on the local HUD (REWARDS 0 [M]); is the advisor hint flag on by default (skirmish gets no hints now); retail typewriter rate and text / hint placement; Zoom_Camera(1.0) near or far end (backlog b0472, found in ui2)",
+     "s": "todo",
+     "o": 6,
+     "bl": "b0472",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t07": {
+     "t": "ui4 [port]: Droid Log rows are not saved and use the default text colour; retail colour of the Day / separator rows not traced (P4_SIM_SYSTEMS 2.7.2) (backlog b0496, found in ui4)",
+     "s": "todo",
+     "o": 7,
+     "bl": "b0496",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t08": {
+     "t": "ui4 [M]: Holocron summary sort keys for the producing / upgrades columns are readings, not traced (HUD_GAPS 10) (backlog b0497, found in ui4)",
+     "s": "todo",
+     "o": 8,
+     "bl": "b0497",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    }
+   },
+   "exit": "docs/re answers for brackets / health bars, which single-player dialogs retail opens, selection-portrait clicks, playtest-3 guesses, credits roll, ui2 presentation questions, Droid Log colours and Holocron sort keys; each [port] guess then fixed or recorded",
+   "why": "Promoted from the backlog (b0224, b0225, b0231, b0232, b0245, b0472, b0496, b0497) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset high: fixes pinned by docs/re specs.",
+   "eta": {
+    "target": "2026-12-19",
+    "effort": "~3 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0161",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui8/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0470",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui8/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0494",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui8/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0498",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui8/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0499",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui8/t05"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0515",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui8/t06"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "ui8",
+  "data": {
+   "title": "UI8 Galactic map and HUD polish: planet map, invasion line, Holocron, cinematics, Select All",
+   "tag": "UI8",
+   "node": "UIART",
+   "status": "big",
+   "preset": "re2ui",
+   "mod": "ui, apps/game",
+   "order": 238,
+   "tasks": {
+    "t01": {
+     "t": "bkc1 t03 follow-up: with one player per faction (BKC1_RE_ANSWERS Q2), the Holocron statistics (engine/apps/game/app/game_info.cpp ~139-146, players that can control planets) now list Hutts (and Pirates where the campaign does not name them) in every FoC campaign. Check which players retail's Holocron / GC statistics list (planet-controlling factions or only players with planets / the campaign's factions) and match it (backlog b0161, found in bkc1)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0161",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "ui2 leftovers (cosmetic): letterbox bars do not freeze while a modal GUI has focus; FOW render is not hidden in the Lua cinematic; a map that starts in cinematic mode and the saved fade are not restored on load; Scroll_Camera_To inside the Lua cinematic does not shift the camera keys; Rotate_Camera_To ignores dir (0 shipped uses); SCROLL_CAMERA is instant; the story fade quad is drawn over dialogs; Z adjust applied to model-less objects (docs/PHASE4.md ui2 entry) (backlog b0470, found in ui2)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0470",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "ui4 [port]: Land_Invasion_Commencing plays at the land battle prompt; retail plays it at every Land_Invade call (P4_SIM_SYSTEMS 2.7) (backlog b0494, found in ui4)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0494",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "ui4 planet map retail capture (GALACTIC_PLANET_MAP 10): marker y direction, pad sizes / icons, shield circle, pop-up on Text_adv_help, Esc / right-click / backdrop double-click, full-surface drop onto an occupied pad, radar-blip re-open (backlog b0498, found in ui4)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0498",
+     "sub": "Research",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "ui4 [port]: planet map drag shows no pulse on the valid drop pads (4.6), Specific pads keep their blank art, another planet's selection closes the map without the zoom-out, a radar click does not re-open it (1.3, 8) (backlog b0499, found in ui4)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0499",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t06": {
+     "t": "Select All (sim_host.cpp:787-809) leaves build pads, buildings and the own space station out; STORY_ELAPSED T = 0.7 alternates 22 / 23 frames in tests (was q6 t26, not mod work; check retail's Select All set before changing it) (backlog b0515)",
+     "s": "todo",
+     "o": 6,
+     "bl": "b0515",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    }
+   },
+   "exit": "ui4 / ui2 follow-ups behave as their specs say: planet-map retail capture items, drop-pad pulse, Land_Invasion_Commencing on each Land_Invade, Holocron statistics player list, ui2 cosmetic leftovers, Select All set",
+   "why": "Promoted from the backlog (b0161, b0470, b0494, b0498, b0499, b0515) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset re2ui: RE then UI work.",
+   "eta": {
+    "target": "2026-12-12",
+    "effort": "~2 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0442",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui9/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0443",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui9/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0444",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui9/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0445",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui9/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0446",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui9/t05"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0447",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui9/t06"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0448",
+  "data": {
+   "s": "promoted",
+   "promoted": "ui9/t07"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "ui9",
+  "data": {
+   "title": "UI9 Test-build display defects (gchk)",
+   "tag": "UI9",
+   "node": "UIART",
+   "status": "big",
+   "preset": "re2ui",
+   "mod": "ui, apps/game",
+   "order": 239,
+   "tasks": {
+    "t01": {
+     "t": "Saved games tree: the faction row reserves its emblem slot but draws nothing (Load Game from the main menu and the in-game Save / Load dialogs, HotM Underworld saves with faction_icon=i_icon_pirate, 4K 150 %): ListBox item_icons -> GuiManager::quad gets no valid image for the name; check the extension-less icon name and whether the dialog's image set has the galactic faction icons (gchk t02, 2026-11-16 run) (backlog b0442, found in gchk)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0442",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "Display dialog text overlaps / clips: the status line (Display N Hz, presenting with V-sync ..., [exclusive full screen,] capped at N fps) runs under the UI Scale label and field at 4K 150 %, worse at 1080p and in exclusive Fullscreen (unreadable); 'Borderless fulls…' and 'Standard (FIFO' are cut in their fields; at 1080p the Display Mode drop-down shows one row with spin arrows; the main-menu 'Camera and Controls' button text overflows its button at 1080p (gchk t01, 2026-11-16 run) (backlog b0443, found in gchk)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0443",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "Exclusive Fullscreen: after focus loss (alt-tab) the game minimises and the desktop resolution comes back, but restoring it put the game full screen on another monitor (DISPLAY1, LG, x=5760) instead of the primary it started on; switching back to Borderless left it on that monitor until a restart (3-monitor setup, gchk t01, 2026-11-16 run) (backlog b0444, found in gchk)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0444",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "Galactic planet panel text crowding: 'Tech: 3' runs into '36 / 69' and the population icon touches the credits sign at every UI scale (1080 / 1440 / 2160 lines), worse at 300 % (text-only growth); also seen at 21:9 and 32:9 (gchk t01, 2026-11-16 run) (backlog b0445, found in gchk)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0445",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "A button tooltip stays drawn at the screen's top-left corner while a menu dialog is open (hovered pad / pause button tooltip 'Probe Runner', 'Pause/Play the game' left over when Esc opened the menu; galactic, 4K 150 %) (gchk t01, 2026-11-16 run) (backlog b0446, found in gchk)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0446",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t06": {
+     "t": "Fleet header pad (q{n}_fleet, big faction fleet icon i_icon_pirates_big) is not visible in the Felucia organiser panes (HotM Underworld, 4K 150 %), so the fleet rename (double-click on the header) and whole-fleet drag cannot be reached; ship-pad rename works (names t03, 2026-11-16 run) (backlog b0447, found in names)",
+     "s": "todo",
+     "o": 6,
+     "bl": "b0447",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t07": {
+     "t": "Rename while galactic time is paused does nothing visible until a tick runs (the RN command applies on the next tick, so the tooltip and the prompt still show the old / empty name); names are presentation only, so apply or preview at once. The prompt also opens empty instead of with the current name, and its hint line 'Enter: save  Esc: cancel  empty: default name' is wider than the box (names t03, 2026-11-16 run) (backlog b0448, found in names)",
+     "s": "todo",
+     "o": 7,
+     "bl": "b0448",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    }
+   },
+   "exit": "At 1080p and 4K 150 %: saved-games emblem drawn, Display dialog text fits, exclusive full screen restores on its monitor, planet panel text does not overlap, no stale tooltip under a menu, fleet header pad visible and rename shows at once",
+   "why": "Promoted from the backlog (b0442, b0443, b0444, b0445, b0446, b0447, b0448) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset re2ui: RE then UI work.",
+   "eta": {
+    "target": "2026-12-12",
+    "effort": "~2 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0203",
+  "data": {
+   "s": "promoted",
+   "promoted": "vis2/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0207",
+  "data": {
+   "s": "promoted",
+   "promoted": "vis2/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0208",
+  "data": {
+   "s": "promoted",
+   "promoted": "vis2/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0356",
+  "data": {
+   "s": "promoted",
+   "promoted": "vis2/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0362",
+  "data": {
+   "s": "promoted",
+   "promoted": "vis2/t05"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0502",
+  "data": {
+   "s": "promoted",
+   "promoted": "vis2/t06"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0505",
+  "data": {
+   "s": "promoted",
+   "promoted": "vis2/t07"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0508",
+  "data": {
+   "s": "promoted",
+   "promoted": "vis2/t08"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "vis2",
+  "data": {
+   "title": "VIS2 Render rule leftovers: engine glow, particle bump alpha, bombard flash, selection circles, surface type",
+   "tag": "VIS2",
+   "node": "UIART",
+   "status": "big",
+   "preset": "re2ui",
+   "mod": "render",
+   "order": 240,
+   "tasks": {
+    "t01": {
+     "t": "bkx1 t05: the engine glow rule computes the pe / pte tint (online 0.8 v/V + 0.2, timed-disable flicker, 1.0 over 0.1 s at the last frame; render::engine_glow EngineGlow::tint) but sim_view only applies hide / show: the colour RGBA brightness is not set on the particle proxies yet (BKX1_RENDER_RE 1.2 / 1.5) (backlog b0203, found in bkx1)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0203",
+     "sub": "Engine",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "bkx1 review: engine_glow always hides the other group (pe or pte); retail's service only shows G (BKX1_RENDER_RE 1.2 step 3), so after a SPOILER_LOCK toggle (1.3) retail shows both pe and pte while the port shows one [M]. Also the glow groups should walk attached models (Model_To_Attach, 1.1) and the retreat / hyperspace tint and show are not modelled (backlog b0207, found in bkx1)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0207",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "bkx1 review: the engine glow rule is applied to every space non-fighter unit with engines (sim_snapshot apply_battle_state, LocomotorKind::Default covers other space locomotors too); retail runs it in the SimpleSpace locomotor service only. Check which vanilla space units use another locomotor and limit the flag to SimpleSpace; the snapshot flag plumbing and the sim_view mask edit have no test (backlog b0208, found in bkx1)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0208",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "Particle blend mode 11 (PrimParticleBumpAlpha, 21 EaW emitters) drawn as plain alpha, bump texture ignored; particle_gpu.hpp:12 comment still says scene fog is missing though particles.hlsl does it (backlog b0356)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0356",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "Bombardment lighting flashes not implemented: Bombardment_Lighting_Color / Intensity / Seconds_List should queue a flash per shot (L1_S4_REMAINING bombardment step; Underworld data only); also per-object local lights (LightSources.xml) absent, minor as DynamicLighting is No in every preset (backlog b0362)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0362",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t06": {
+     "t": "Land selection circles: exact terrain draping (retail draws BlobStencilMasked's two passes on an alTerrainShadowBlob over the terrain grid; vis1 t03 shears a quad onto the local slope, so circles on bumpy ground can clip or float at the edge) (backlog b0502, found in vis1)",
+     "s": "todo",
+     "o": 6,
+     "bl": "b0502",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t07": {
+     "t": "Render surface type (engine/render/src/surface_fx.cpp terrain_surface_type) counts a point as under water when height < water height; retail 0x5efe50 needs height < water height - 0.5 (TRN1_TERRAIN_GAMEPLAY §2.1). Use terrain::Terrain::surface_type_at (footprint / splash pick on shores) (backlog b0505, found in trn1)",
+     "s": "todo",
+     "o": 7,
+     "bl": "b0505",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t08": {
+     "t": "Base_Shield_Penetration_Particle polish (vis1 t08): the port faces the horizontal part of the dome normal (retail: the normal's angles with pitch + 90, tilt not modelled) and places it at the current tick's contact while the unit is drawn interpolated (can lead it by up to one tick). docs/PHASE4.md vis1 t08 (backlog b0508, found in vis1)",
+     "s": "todo",
+     "o": 8,
+     "bl": "b0508",
+     "sub": "Engine",
+     "tier": "2",
+     "sev": "S3"
+    }
+   },
+   "exit": "render unit tests: engine glow tint and pe / pte groups per BKX1_RENDER_RE, blend mode 11 bump alpha, bombardment lighting flash, draped selection circles, under-water surface test with the 0.5 margin, shield penetration particle facing",
+   "why": "Promoted from the backlog (b0203, b0207, b0208, b0356, b0362, b0502, b0505, b0508) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset re2ui: RE then UI work.",
+   "eta": {
+    "target": "2026-12-19",
+    "effort": "~3 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0083",
+  "data": {
+   "s": "promoted",
+   "promoted": "lua1/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0209",
+  "data": {
+   "s": "promoted",
+   "promoted": "lua1/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0471",
+  "data": {
+   "s": "promoted",
+   "promoted": "lua1/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0489",
+  "data": {
+   "s": "promoted",
+   "promoted": "lua1/t04"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "lua1",
+  "data": {
+   "title": "LUA1 Lua API leftovers in story and AI scripts",
+   "tag": "LUA1",
+   "node": "STORY",
+   "status": "big",
+   "preset": "high",
+   "mod": "lua, apps/sim",
+   "order": 198,
+   "tasks": {
+    "t01": {
+     "t": "TaskForce Move_To(taskforce) uses the first unit's position rather than the TF's own position (vf +0x170); check against LUA_API (backlog b0083, found in s78n)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0083",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "bkx1 review: Lua Point_Camera_At(ai_target) is accepted (is_position takes cls_target) but recorded as an Other argument, so presentation_point finds no point and the camera does not move; also a galactic-mode Point_Camera_At is dropped by the game host (only a battle camera jumps). Record the AITarget's position as a Position argument and decide the galactic case (backlog b0209, found in bkx1)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0209",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "ui2: Play_Lightning_Effect blocks for a 30-frame default; retail is random (1-3 s [M]). Needs a deterministic data-driven length from LightningEffectTypes.xml set the same in alamo_game and alamo_headless (backlog b0471, found in ui2)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0471",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "Load-screen choice: BattleRequest::story_map (SET_TACTICAL_MAP override) is not kept in a galactic save taken between the override and the battle start, so such a battle shows the Battle pair instead of the Mission pair; no shipped XML uses SET_TACTICAL_MAP (backlog b0489, found in ui5)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0489",
+     "sub": "Engine",
+     "tier": "1",
+     "sev": "S3"
+    }
+   },
+   "exit": "alamo_lua / story tests: TaskForce Move_To(taskforce) position, Point_Camera_At(ai_target), data-driven Play_Lightning_Effect length, BattleRequest::story_map kept in a galactic save",
+   "why": "Promoted from the backlog (b0083, b0209, b0471, b0489) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset high: fixes pinned by docs/re specs.",
+   "eta": {
+    "target": "2026-12-12",
+    "effort": "~2 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0137",
+  "data": {
+   "s": "promoted",
+   "promoted": "tst2/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0143",
+  "data": {
+   "s": "promoted",
+   "promoted": "tst2/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0168",
+  "data": {
+   "s": "promoted",
+   "promoted": "tst2/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0188",
+  "data": {
+   "s": "promoted",
+   "promoted": "tst2/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0210",
+  "data": {
+   "s": "promoted",
+   "promoted": "tst2/t05"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0211",
+  "data": {
+   "s": "promoted",
+   "promoted": "tst2/t06"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0441",
+  "data": {
+   "s": "promoted",
+   "promoted": "tst2/t07"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0468",
+  "data": {
+   "s": "promoted",
+   "promoted": "tst2/t08"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "tst2",
+  "data": {
+   "title": "TST2 Test and harness gaps that serve tier-1 / tier-2 groups",
+   "tag": "TST2",
+   "node": "PROC",
+   "status": "big",
+   "preset": "high",
+   "mod": "tools, tests",
+   "order": 220,
+   "tasks": {
+    "t01": {
+     "t": "[test] ParityWorld in engine/ai/tests/test_ai_galactic.cpp passes an empty objects::GameObjectTypes whose raw() dereferences a null raw_, so a synthetic test plan that calls Find_All_Objects_Of_Type crashes the test exe (real runs load the types; a2m t03 used the take_selection_units hook instead) (backlog b0137, found in a2m)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0137",
+     "sub": "Process",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "bkc1 t01 follow-up: headless story Esc injection (alamo_headless --story ... --story-esc-at <frame>: submit the kStoryEscSubtype command when StorySession::esc_goes_to_story() holds) so the UM01 retail run 20261108-234224 (Esc at battle frame ~128, STORY_T04_KESSEL_RUN 1) can be replayed headless; the run without Esc (20261109-053933) needs none (backlog b0143, found in bkc1)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0143",
+     "sub": "Process",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "bkt1 test coverage (review 2026-11-12): covered today - t01 staging by test_land_attack_reach (min range 100: staged >= 130 from T), t02 by test_land_guard (re-plan within 31 frames, same slot), t05 by test_land_guard stage 5-6 (no-lock block kept), t06 by test_combat + test_movement_b5, t07 by the standin_owner predicate. Missing: t01 ring slide at map edge / cliff, search failure keeps T, the crush case, Activation_Min_Range picking M and the Activation_Max_Range engage clause (AbilitySystem::pending_ranges, CombatSystem::inside_min_range_of); t02 the Land_Guard_Range cap on R, the arrived re-check, the 40-unit drop for a hidden target; t03 a locked lead skipped and the all-locked wait; t07 a third-party unit idling on land; t06 with a staged G != C (backlog b0168, found in bkt1)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0168",
+     "sub": "Parity",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "Liveness set has no Walk_Transition unit or Destroyer Droid: add a FoC land skirmish seed or scenario with Empire walkers / Underworld droids to the six-seed liveness measurement (backlog b0047, found in s78n) -- bkm2: ctests alamo_headless_skirmish_ai_foc_land_empire_underworld_seed2 (AT_ST / AT_AA fielded when measured) / _seed4 (Destroyer droids) exist and end, but check only the battle end; left: have the run report the unit types fielded (or the distance walked per type) and check it; seeds 1 3 5-9 hit b0173 (backlog b0188, found in bkm2)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0188",
+     "sub": "Process",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "bkx1 review: test_group_orders and test_prepare_ambush (alamo_ai_tactical_world_tests) run with the earlier [port] goal cadence (TacticalAiConfig::retail_cadence false): under the retail cadence the synthetic battle never reaches Attack_Target(Shield_Generator) and no Empire ambush instance sees its movers arrive before its report. Give both a retail-cadence scenario that reaches them (backlog b0210, found in bkx1)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0210",
+     "sub": "Process",
+     "sev": "S3"
+    },
+    "t06": {
+     "t": "Test scenes missing after s78o: b0054 (a squad container with a forced order and an exhausted push record coasting into impassable ground: the End Move coast now reports), b0072 (an attack whose first path segment is zero, e.g. a lead standing on its cell centre: attack_slots now orders the ring by first_dir), b0065 (only once a non-MvM flag-1 Path Around exists) (backlog b0094, found in s78o) (backlog b0211, found in bkm3)",
+     "s": "todo",
+     "o": 6,
+     "bl": "b0211",
+     "sub": "Parity",
+     "tier": "1",
+     "sev": "S3"
+    },
+    "t07": {
+     "t": "gai3 t07 follow-up: evaluate the five Underworld infrastructure equations (Should_Build_Underworld_Barracks, Should_Underworld_Save_For_Desirable_Structures, Should_Save_For_Corruption, Needs_Groundbase_Upgrade, Should_Underworld_Build_Starbase) in the port on HotM seed 0 (human Empire) at the frames of docs/re/A2M_R3_RE_A.md section 7.2 and compare with retail's uw_infra.tsv (run 20261116-020754); agreement rules out the infrastructure ranking as a cause of the gai3 t03 spending gap (backlog b0441, found in gai3)",
+     "s": "todo",
+     "o": 7,
+     "bl": "b0441",
+     "sub": "Process",
+     "tier": "2",
+     "sev": "S3"
+    },
+    "t08": {
+     "t": "alamo_game_smoke_saveload is not rerunnable: the run leaves [AutoSave].alsv in build-*/smoke_out/saveload_saves, the next run lists it first so smoke_main's campaign group stays collapsed and 'list shows smoke_main' fails (and the game bench tests that depend on it are Not Run). The test should remove its autosave too (seen 2026-11-17 in several trees) (backlog b0468, found in galab)",
+     "s": "todo",
+     "o": 8,
+     "bl": "b0468",
+     "sub": "Process",
+     "sev": "S3"
+    }
+   },
+   "exit": "Each listed test or harness gap closed: bkt1 coverage, s78o test scenes, liveness seeds with walkers / droids, retail-cadence tactical AI tests, ParityWorld object types, headless story Esc injection, Underworld infrastructure equations, rerunnable smoke_saveload",
+   "why": "Promoted from the backlog (b0137, b0143, b0168, b0188, b0210, b0211, b0441, b0468) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset high: fixes pinned by docs/re specs.",
+   "eta": {
+    "target": "2026-12-12",
+    "effort": "~2 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0252",
+  "data": {
+   "s": "promoted",
+   "promoted": "port1/t01"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0253",
+  "data": {
+   "s": "promoted",
+   "promoted": "port1/t02"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0254",
+  "data": {
+   "s": "promoted",
+   "promoted": "port1/t03"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0255",
+  "data": {
+   "s": "promoted",
+   "promoted": "port1/t04"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0256",
+  "data": {
+   "s": "promoted",
+   "promoted": "port1/t05"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0260",
+  "data": {
+   "s": "promoted",
+   "promoted": "port1/t06"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0261",
+  "data": {
+   "s": "promoted",
+   "promoted": "port1/t07"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "items",
+  "doc_id": "port1",
+  "data": {
+   "title": "PORT1 Port feature follow-ups: fleet cohesion, fleet groups phases 2-3, fleet and ship names",
+   "tag": "PORT1",
+   "node": "FLEETG",
+   "status": "big",
+   "preset": "high",
+   "mod": "tactical, ui, apps/game",
+   "order": 2,
+   "tasks": {
+    "t01": {
+     "t": "Fleet and ship names: show a fleet's name on the galaxy map (g_planet_fleet button tooltip or label; GalacticPlanetStack has no name yet) - port feature, docs/DECISIONS.md 'Fleet and ship names' (backlog b0252, found in names)",
+     "s": "todo",
+     "o": 1,
+     "bl": "b0252",
+     "sub": "Engine",
+     "sev": "S3"
+    },
+    "t02": {
+     "t": "Fleet and ship names: show a ship's name in tactical battles (selection panel / tooltip): the tactical object needs the galactic unit's name carried into the battle - port feature (backlog b0253, found in names)",
+     "s": "todo",
+     "o": 2,
+     "bl": "b0253",
+     "sub": "Engine",
+     "sev": "S3"
+    },
+    "t03": {
+     "t": "Fleet cohesion follow-up: a speed factor (ability, damaged engines) on one ship of a tight fleet does not slow the rest; the cap is fixed at the order (backlog b0254)",
+     "s": "todo",
+     "o": 3,
+     "bl": "b0254",
+     "sub": "Parity",
+     "sev": "S3"
+    },
+    "t04": {
+     "t": "Fleet cohesion follow-up: tight ships keep equal speed but do not wait for a slower-turning ship, so a fleet ordered to turn sharply can still lose its shape; add slot-keeping waits (backlog b0255)",
+     "s": "todo",
+     "o": 4,
+     "bl": "b0255",
+     "sub": "Engine",
+     "sev": "S3"
+    },
+    "t05": {
+     "t": "Fleet cohesion follow-up: a clickable HUD button for Loose / Tight (now hotkey O and a text line), and keeping the preference across sessions (now per session) (backlog b0256)",
+     "s": "todo",
+     "o": 5,
+     "bl": "b0256",
+     "sub": "Engine",
+     "sev": "S3"
+    },
+    "t06": {
+     "t": "Fleet groups phase 2: each fleet group as a framed run of portraits in the retail selected-unit bar (header tab with name, number, lock icon; tab click selects the group, portrait click selects that group's units of that type), world outline of locked groups, move-preview ghosts, rename / merge / split from the bar; plus an in-game option for the --fleet-groups switch (backlog b0260, found in fg1)",
+     "s": "todo",
+     "o": 6,
+     "bl": "b0260",
+     "sub": "Parity",
+     "sev": "S3"
+    },
+    "t07": {
+     "t": "Fleet groups phase 3: pre-grouped reinforcements (group in the reinforcement panel, made on spawn), join a group on arrival, auto-group the opening fleet by galactic fleet; open question: carry groups between battles on the galactic fleet (backlog b0261, found in fg1)",
+     "s": "todo",
+     "o": 7,
+     "bl": "b0261",
+     "sub": "Parity",
+     "sev": "S3"
+    }
+   },
+   "exit": "Each follow-up works off by default (focus exceptions, DECISIONS 'Fleet cohesion', 'Fleet groups', 'Fleet and ship names'): cohesion speed factors and slot waits, HUD toggle, group portraits / reinforcements, names on the galaxy map and in battle",
+   "why": "Promoted from the backlog (b0252, b0253, b0254, b0255, b0256, b0260, b0261) in the 2026-11-19 roadmap audit, option A (Gabriel). Preset high: fixes pinned by docs/re specs.",
+   "eta": {
+    "target": "2026-12-12",
+    "effort": "~2 days",
+    "note": "Not started; promoted S3 entries, picked by Gabriel 2026-11-19"
+   },
+   "updated": "2026-11-19",
+   "by": "roadmap-audit-08a8b0"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "nodes",
+  "doc_id": "PROC",
+  "data": {
+   "status": "partly"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "log",
+  "doc_id": "roadmap-audit-2026-11-19-g4",
+  "data": {
+   "at": "2026-11-19T00:00:00+00:00",
+   "by": "roadmap-audit-08a8b0",
+   "text": "Roadmap audit goal 4 (option A): 143 tier-1/2 backlog entries promoted into 21 new groups (aud8, aud9, gai4, gai5, gal2, cmb3, tru3, anm2, mov3, tai1, map4, map5, rad1, ui6, ui7, ui8, ui9, vis2, lua1, tst2, port1); box PROC reopened for tst2"
+  }
+ }
+]

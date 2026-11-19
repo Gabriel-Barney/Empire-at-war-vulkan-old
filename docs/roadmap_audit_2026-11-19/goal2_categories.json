@@ -1,0 +1,870 @@
+[
+ {
+  "op": "update",
+  "collection": "meta",
+  "doc_id": "backlog",
+  "data": {
+   "cats": {
+    "parity-sim": {
+     "label": "Movement and combat",
+     "desc": "Pathing, Path Around, collision records, formations, stop and coast; attack approach, guard, scan range, fire trim, auto-engage, hidden targets, hard points (MOVEMENT, TACTICAL_COMBAT)"
+    },
+    "parity-ai": {
+     "label": "Galactic rules and AI",
+     "desc": "Planet ownership, auto-resolve, victory, galactic travel and setup rules; galactic AI plan choice, budget, production and timing against retail traces"
+    },
+    "tools-harness": {
+     "label": "Tools, docs and workflow",
+     "desc": "Parity harness, probe kits, build and test scripts; docs, the roadmap, agent workflow"
+    },
+    "re-research": {
+     "label": "RE questions and Gabriel's runs",
+     "desc": "Open questions for the binary that no group needs yet (docs/re only); playtests, in-game checks and release merges only Gabriel can do"
+    },
+    "render-ui": {
+     "label": "Render and UI",
+     "desc": "Renderer, shaders, front end, HUD, camera, video (audio has its own category)"
+    },
+    "audio": {
+     "order": 55
+    },
+    "parity-combat": {
+     "__delete__": true
+    },
+    "parity-campaign": {
+     "__delete__": true
+    },
+    "docs-process": {
+     "__delete__": true
+    },
+    "gabriel": {
+     "__delete__": true
+    }
+   },
+   "rules": [
+    {
+     "cat": "re-research",
+     "gab": true
+    },
+    {
+     "cat": "mod-system",
+     "match": "\\bmods?\\b|workshop|thrawn|modc|\\bq6\\b"
+    },
+    {
+     "cat": "perf",
+     "match": "perf|\\bms a sim tick|tick budget|profil|bench|first battle tick|load time"
+    },
+    {
+     "cat": "tools-harness",
+     "match": "harness|probe kit|\\bkit\\b|parity tool|build script|regen_goldens|\\btools/|flaky|ctest"
+    },
+    {
+     "cat": "tools-harness",
+     "match": "roadmap|workflow|readme"
+    },
+    {
+     "cat": "audio",
+     "match": "\\baudio\\b|sfx|\\bmusic\\b|speech|\\bvo\\b|announcer|ambien|voice line"
+    },
+    {
+     "cat": "parity-story",
+     "match": "story (script|mission|campaign)|\\b[ue]m\\d\\d\\b|\\belim\\b"
+    },
+    {
+     "cat": "parity-tactical-ai",
+     "match": "skirmish ai|tactical ai|battle.?ai|land goal|space goal|guard_target|stand-?in|ai_plan_"
+    },
+    {
+     "cat": "parity-ai",
+     "match": "\\bai\\b|slicer|task.?force|plan choice|credits_at|proposal|desire"
+    },
+    {
+     "cat": "parity-anim",
+     "match": "walk_transition|locomot|\\bbike\\b|deploy|animation|secondaryfacing"
+    },
+    {
+     "cat": "parity-sim",
+     "match": "combat|weapon|hard ?point|attack|\\bguard|target|fire|projectile|damage|engage|scan range"
+    },
+    {
+     "cat": "parity-sim",
+     "match": "movement|collision|pathfind|path around|\\bpaths?\\b|formation|coast"
+    },
+    {
+     "cat": "parity-rules",
+     "match": "abilit|garrison|fighter|unit cap|spawn"
+    },
+    {
+     "cat": "render-ui",
+     "match": "render|shader|glow|visual|\\bui\\b|\\bmenu|camera|particle|\\bhud|results screen|holocron"
+    },
+    {
+     "cat": "lua-data",
+     "match": "\\blua\\b|\\bxml\\b|\\.ted\\b|field schema|map hint"
+    },
+    {
+     "cat": "parity-ai",
+     "match": "campaign|story|victory|galactic|planet|auto.?resolve|skirmish|retreat"
+    },
+    {
+     "cat": "re-research",
+     "match": "^\\s*\\[(re|probe)\\b"
+    }
+   ]
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0001",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0002",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0003",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0012",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0013",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0022",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0023",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0024",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0092",
+  "data": {
+   "cat": "tools-harness"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0093",
+  "data": {
+   "cat": "re-research"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0106",
+  "data": {
+   "cat": "tools-harness"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0127",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0128",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0130",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0132",
+  "data": {
+   "cat": "tools-harness"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0133",
+  "data": {
+   "cat": "re-research"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0134",
+  "data": {
+   "cat": "re-research"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0135",
+  "data": {
+   "cat": "re-research"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0136",
+  "data": {
+   "cat": "re-research"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0139",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0140",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0145",
+  "data": {
+   "cat": "re-research"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0150",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0151",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0153",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0157",
+  "data": {
+   "cat": "re-research"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0158",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0167",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0168",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0169",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0177",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0178",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0183",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0184",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0185",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0195",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0196",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0197",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0198",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0199",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0200",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0216",
+  "data": {
+   "cat": "re-research"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0227",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0236",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0241",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0243",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0251",
+  "data": {
+   "cat": "re-research"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0254",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0258",
+  "data": {
+   "cat": "re-research"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0259",
+  "data": {
+   "cat": "re-research"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0320",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0321",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0322",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0323",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0324",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0325",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0326",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0327",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0328",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0329",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0330",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0343",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0352",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0367",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0368",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0370",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0372",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0387",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0418",
+  "data": {
+   "cat": "re-research"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0419",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0420",
+  "data": {
+   "cat": "re-research"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0424",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0426",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0428",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0430",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0439",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0440",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0451",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0452",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0454",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0458",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0459",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0466",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0467",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0469",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0473",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0483",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0490",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0492",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0498",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0499",
+  "data": {
+   "cat": "parity-ai"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0511",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0513",
+  "data": {
+   "cat": "parity-sim"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "log",
+  "doc_id": "roadmap-audit-2026-11-19-g2",
+  "data": {
+   "at": "2026-11-19T00:00:00+00:00",
+   "by": "roadmap-audit-08a8b0",
+   "text": "Roadmap audit goal 2 (categories 18 -> 14): parity-combat -> parity-sim, parity-campaign -> parity-ai, docs-process -> tools-harness, gabriel -> re-research (93 entries re-filed, boxes unchanged); audio gets its own rule"
+  }
+ }
+]

@@ -1,0 +1,30 @@
+[
+ {
+  "op": "update",
+  "collection": "nodes",
+  "doc_id": "FSR",
+  "data": {
+   "lane": "st8",
+   "order": 2
+  }
+ },
+ {
+  "op": "update",
+  "collection": "nodes",
+  "doc_id": "XESS",
+  "data": {
+   "lane": "st8",
+   "order": 3
+  }
+ },
+ {
+  "op": "set",
+  "collection": "log",
+  "doc_id": "roadmap-audit-2026-11-19-g3c",
+  "data": {
+   "at": "2026-11-19T00:00:00+00:00",
+   "by": "roadmap-audit-08a8b0",
+   "text": "Roadmap audit goal 3c: boxes FSR and XESS moved from the benchmark side goal to Port features (README goal 5)"
+  }
+ }
+]

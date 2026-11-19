@@ -1,0 +1,42 @@
+[
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0091",
+  "data": {
+   "s": "dropped",
+   "why": "Fixed: the forced-include alias keeps sccache from replaying another worktree's include paths (docs/DECISIONS.md 'Build speed', 2026-11-13); audit 2026-11-19",
+   "closed": "2026-11-19"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0132",
+  "data": {
+   "s": "dropped",
+   "why": "Obsolete: origin holds no claude/a2m-diag-* branch any more (git ls-remote 2026-11-19; branches bundled 2026-11-13); audit 2026-11-19",
+   "closed": "2026-11-19"
+  }
+ },
+ {
+  "op": "update",
+  "collection": "backlog",
+  "doc_id": "b0410",
+  "data": {
+   "s": "dropped",
+   "why": "Duplicate of b0404 (build_asan.cmd passes -mllvm -asan-stack=0 to the linker too); audit 2026-11-19",
+   "closed": "2026-11-19"
+  }
+ },
+ {
+  "op": "set",
+  "collection": "log",
+  "doc_id": "roadmap-audit-2026-11-19-g1",
+  "data": {
+   "at": "2026-11-19T00:00:00+00:00",
+   "by": "roadmap-audit-08a8b0",
+   "text": "Roadmap audit goal 1 (scope): no group, task or entry out of scope; b0091 (fixed), b0132 (obsolete), b0410 (duplicate of b0404) dropped"
+  }
+ }
+]
