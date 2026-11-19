@@ -115,6 +115,36 @@ tools that build a command line resolve a **stack** first (`engine/vfs/include/a
 Conformance mods: `engine/apps/game/testdata/conformance/stacks` (`stack_dep`, `stack_cycle`, `eaw_only`;
 `alamo_game_conformance_stacks_tests`) and the `meg_unsorted` case of `alamo_vfs_registry_tests`.
 
+### 3.1.2 One catalog and one resolver (ums1, Stage 10)
+
+Every launch surface (the in-game picker, `alamo_play`, `alamo_mod_check`, and through its JSON the Command Center)
+reads the same data and starts the same list:
+
+- **Install locations** (`vfs::InstallLocations`, `install_locations.hpp`): the FoC folder, the EaW `GameData` beside
+  it, the Steam roots and libraries (§3.1), the folders the user named (`game_path.txt`, `ALAMO_FOC_DATA`) and the
+  user's extra mod folders. The game search is Play.cmd's order; `alamo_play`'s `find_game` forwards to it.
+- **Catalog** (`vfs::ModCatalog`, the registry's new name; `ModRegistry` is an alias until ums4): one row per (folder,
+  variant). A row's **catalog key** is unique across kinds: `1125571106`, `2083545253:subA`, `Mods\AOW`, or the host
+  path of an extra folder. `ModDescriptor::key()` (`AOW`, `2083545253:subA`) stays the key of save headers and the corpus
+  matrix. The picker's rows are the catalog's rows (`game::list_installed_mods`), so a folder with only variant files
+  (2083545253) shows one row per variant and none for the folder.
+- **Launch list** (`vfs::resolve` / `ModStack::launch_args`): the resolved stack's arguments, each folder once. Empty for
+  a refused base-EaW stack (D1). [port] A cycle still launches in its fallback order (discovery order) with the error
+  shown beside it, and an argument that names no installed mod is left out with an error: retail would mount either
+  command line, so the port does not refuse more than retail does. The picker's Launch (`game::check_picked_mod`,
+  `mod_launch_args`), `alamo_play` (a dropped folder or mod argument, `game::launch_args_for`; a base-EaW stack gets a
+  message box) and `alamo_mod_check --resolve` (the report's `stack.launch_args`) give the same list;
+  `alamo_game_conformance_stacks_tests` checks the table for `stack_dep`, `stack_cycle`, `eaw_only` and the
+  AOW -> Legacy HD -> TR shape.
+- **JSON for the Command Center.** `alamo_mod_check --list [--mod-dir DIR] [--no-hash] --json FILE|-`: schema
+  `alamo.mod_catalog` v1 (install locations and every row; without `--game` / `ALAMO_FOC_DATA` it searches the Steam
+  libraries). `alamo_mod_check --conflicts <mod args in load order> --json FILE|-`: schema `alamo.mod_conflicts` v1,
+  which mod wins each file two mods share, decided by `Vfs::resolve` (MEG records count only when the game's MEG lookup
+  reaches them; a later mod's loose file beats an earlier mod's MEG record, and the base game's loose file beats any MEG
+  record, §3.2), with the findings `list_ignored`, `submod_order` (from declared `modinfo.json` dependencies),
+  `no_effect` and `no_data`. Field lists: `mod_check.hpp` `format_mod_catalog_json`, `mod_conflicts.hpp`.
+  `--list-mods` (`alamo.mod_list`, the corpus runner's discovery) is unchanged.
+
 ### 3.2 File resolution order
 
 Unchanged from Phase 2 (`docs/PHASE2.md` "Data\ resolution order", `docs/re/SUBSYSTEMS.md` "File lookup priority",
