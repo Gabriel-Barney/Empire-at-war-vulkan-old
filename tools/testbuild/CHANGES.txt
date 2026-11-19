@@ -1,5 +1,5 @@
-Alamo engine test build, 2026-11-18
-====================================
+Alamo engine test build, 2026-11-18b
+=====================================
 
 How to run
 ----------
@@ -43,7 +43,40 @@ Built from: @BUILD@.
 
 What to try
 -----------
-NEW in this build (please check each one in game):
+NEW since the first 2026-11-18 build (please check each one in game):
+- Unit and HUD speech: many more of the original's lines now play: health warnings, hard point
+  lost, production and build pad lines, capture point control, reinforcements (pick, en route,
+  cancelled, ready, contested), retreat, sighting ("enemy spotted"), unit and pop cap, base
+  shield online / offline / absorbing, special weapon ready / firing, bombardment and bombing
+  runs, ability buttons, super weapon approach, battle won / lost, bribes, spin-away deaths and
+  self-destructs, the Death Star build countdown. Attack orders on a hard point get their own
+  response, and the unit that answers an order is picked as in the original.
+- Battle sounds: asteroid hits, land damage stages, laser defense, turret motors, ability
+  loops, the tactical win / lose music at the moment the battle is decided, movie sound cues.
+- Space and land combat: hard point modes and their delays, deployed range, shields (a hit
+  flash; a drained shield stays down as in the original), out-of-combat defence, opportunity
+  fire. Ability light pulses.
+- Galactic: hero companies keep only their survivors after a battle (also after auto-resolve);
+  auto-resolve strength bonus and evade roll; heroes respawn at battle end and with their
+  structure (Respawn_Tied_To_Structure); build countdowns; the AI reserves build slots as in
+  the original.
+- HUD and screens: tactical win / lose banner, game over screen text and picture by faction,
+  planet pop-up weather lines, battle-pending commander icons, the corruption choice menu
+  icons, selected planet colour cycle and hover brightening, radar blips, radar icon facing and
+  size, retreat / build countdown timers, ability tooltip names, hero heads in the battle hero
+  roster, the reinforcement button flashing when a unit is added, the selected-unit flash,
+  skirmish tooltips with the multiplayer encyclopedia text, the objectives dialog's Completed
+  tab (hidden where a campaign says so), default fonts and story text speed from the game's
+  constants.
+- Movies with Pause_Game_While_Playing pause the game while they play.
+- The attract demo camera follows the interesting units; some objects no longer fade out at
+  distance (as in the original).
+- Mods: files are found in the original's order (loose files, then MEG archives in mount
+  order), so mods that override the same file pick the same one as the original; out-of-range
+  numbers in mod data are handled as the original handles them.
+- Saves made with the first 2026-11-18 build may not load (galactic, AI and story save formats
+  changed). Start new games.
+Also new in the first 2026-11-18 build:
 - Squadrons are back to the original sizes and prices (the 12-ship squadrons of the last build
   are gone). The FIGHTERS / BOMBERS wing buttons and F2 / F3 stay.
 - Skirmish setup: more than two players, with teams and a separate AI difficulty per slot; the
@@ -88,6 +121,16 @@ Still worth checking from earlier builds:
   a group so it moves together. No on-screen frames yet.
 - Tactical HUD, galactic conquest screens, key rebinding, dialog controls.
 - Thrawn's Revenge galactic conquest: winning and losing a campaign.
+
+Changes since the first 2026-11-18 build
+----------------------------------------
+- Many more unit, HUD and battle sounds from the original; tactical win / lose music timing.
+- Hard point modes, deployed range, shield behaviour, out-of-combat defence, opportunity fire.
+- Hero company survivors, auto-resolve strength and evade, hero respawn rules, AI build slot
+  reservation.
+- HUD, radar, game over, planet pop-up and corruption menu details from the game's constants.
+- Movie pause, attract camera, distance fade exclusions.
+- Mod file lookup in the original's order; original handling of out-of-range mod numbers.
 
 Changes since the 2026-11-13 build
 ----------------------------------
