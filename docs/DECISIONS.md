@@ -390,3 +390,16 @@ their own copies; mods and the retail load order do not change.
   files two mods share, `--resolve` the stack. None carries definitions, field values or the winning copy of every file,
   so unitdb's readers stay (`conflicts.rs` also uses them for its definition counts). Revisit if the port grows a
   definitions or per-file JSON.
+- **Re-evaluation after the refactor (ums5, Gabriel, 2026-11-19).** Gabriel approved the verdicts on the 38 open
+  mod-system tasks and backlog entries (mcx2-mcx9, modc, q6 t04, `mods` backlog). The refactor changed plumbing and
+  closed no parity task by itself: 2 closed as finished by other lanes (mcx4 t02 / t06), 2 re-scoped (q6 t04 onto the
+  corpus runner, b0512 to the `content_hash` and ascii / FNV leftovers), 33 kept, 0 dropped. He also settled two
+  questions the lanes left:
+  - **Junction-joined folders keep two rows** (confirms the ums4 default above). A workshop item and a `Mods\` folder
+    that a junction makes one folder stay two catalog rows with two arguments. Merging them would force one argument
+    form and make saves and profiles that used the other spelling read as "not loaded now", all to remove a duplicate
+    row on a rare setup.
+  - **VFS findings and loader diagnostics stay informational.** `issues` records of the VFS's findings and of kind
+    `loader_diagnostic` never change `grade`, `blocking`, `result`, `errors` or `warnings` (`docs/MODS.md` §5.1). Why:
+    the before / after corpus sweep showed no grade change, and counting them could block a mod over a warning
+    retail tolerates (an odd MEG table).
