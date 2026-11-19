@@ -341,3 +341,18 @@ Gabriel, 2026-11-18, up-front answers for the Stage 9 coordinator run (st9-coord
 - **(b) Conformance mod `StackTop` counts as coverage** for the three-level AOW_Thrawns_Legacy_Compatibility ->
   Thrawns_Legacy_HD -> 1125571106 clause of the mcx3 exit test, together with the real AOW -> TR stack that resolves on
   this machine (Thrawns_Legacy_HD is not installed here). No rerun with it installed is needed.
+
+## Unified mod system refactor (Gabriel, 2026-11-18)
+
+Gabriel, 2026-11-18, on the design "Unified mod system - technical design" (Claude Docs,
+https://claude.ai/artifact/PLZLDnfeoeQ7JZC9ELWReT): one `vfs::ModEnvironment` owns mod discovery, descriptors, stack
+resolution, the mount plan and layer provenance; the in-game picker, `alamo_play` and the Command Center stop keeping
+their own copies; mods and the retail load order do not change.
+- **Its own stage:** Stage 10 · Unified mod system refactor (lane `st10`): box UMS1 (groups `ums0`-`ums4`, design phases
+  P0-P5) and box UMS2 (`ums5`). **Every other mod-system task is re-evaluated once the refactor is done** (`ums5`: a
+  verdict per open Stage 9 / Stage 6 mod task and mod backlog entry, approved by Gabriel).
+- **Tier 1.** The whole refactor is tier 1, an exception to "Current focus" (tier 1 and tier 2 only), although most of it is
+  internals that would otherwise be tier 3.
+- **No follow-up goes to the backlog.** Stage 10 keeps its follow-ups like Stages 6 and 9, and goes further: tier-3 findings
+  and tasks stay group tasks too (`meta/backlog` `keep_followups` and `keep_all_followups`, enforced by `roadmap_store.py`
+  since 2026-11-18; `docs/ROADMAP_PROTOCOL.md`, "Follow-ups stay in Stage 6 groups").

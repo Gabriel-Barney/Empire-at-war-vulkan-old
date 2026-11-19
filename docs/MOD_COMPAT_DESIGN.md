@@ -742,6 +742,11 @@ keeps its follow-ups like Stage 6 (Gabriel, 2026-11-17): every follow-up of an `
 of that group, not a backlog entry, and the groups have no task cap. Tier-3 findings still go to the backlog while the
 current focus holds.
 
+**Unified mod system refactor** (Gabriel, 2026-11-18): Stage 10 (`ums0`-`ums5`, `DECISIONS.md` "Unified mod system
+refactor") puts the registry, stack resolution, mounting and layer provenance of §5-§6 behind one `vfs::ModEnvironment`
+and moves the Command Center onto `alamo_mod_check` JSON. When it is done, `ums5` re-evaluates every open `mcx` task
+against it, so a task here may be re-scoped or dropped then.
+
 Boxes:
 
 | Box | Label | Groups |

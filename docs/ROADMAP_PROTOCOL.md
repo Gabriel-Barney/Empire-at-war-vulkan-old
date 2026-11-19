@@ -27,7 +27,7 @@ The claude.ai page https://claude.ai/artifact/56dGptBoT3JcDH4rHZ6BjT is retired:
 | Collection | Document id | Fields |
 |---|---|---|
 | `meta` | `page` | `eyebrow`, `title`, `lede`, `build` (last verified build line), `updated` |
-| `meta` | `backlog` | The backlog's settings: `cats` (category id → `label`, `parent`, `order`, `desc`, `node`: the flowchart box its entries belong to), `rules` (ordered category filters), `sevs`, `backlog_sevs` (the severities the backlog takes: `["S3"]` since 2026-11-15, see "S1 and S2 are group tasks"), (severity meanings), the limits `cap`, `wip`, `inbox_days`, and `keep_followups` (the stage ids whose groups keep their follow-ups as tasks: `["st6"]`, Stage 6 · Parity and mods). See "Backlog and group exit tests" |
+| `meta` | `backlog` | The backlog's settings: `cats` (category id → `label`, `parent`, `order`, `desc`, `node`: the flowchart box its entries belong to), `rules` (ordered category filters), `sevs`, `backlog_sevs` (the severities the backlog takes: `["S3"]` since 2026-11-15, see "S1 and S2 are group tasks"), (severity meanings), the limits `cap`, `wip`, `inbox_days`, and `keep_followups` (the stage ids whose groups keep their follow-ups as tasks: `["st6", "st9", "st10"]`) and `keep_all_followups` (those of them that keep tier-3 follow-ups too: `["st10"]`). See "Backlog and group exit tests" |
 | `backlog` | `b0001`… | One finding that is not part of an open group: `t` (text), `cat` (category id), `node` (flowchart box, and so the stage, the work belongs to), `sev` (`S1`/`S2`/`S3`), `kind`, `s` (`open`/`promoted`/`dropped`), `from` (group it was found in), `task`, `ref`, `g` (only Gabriel can do it), `added`, `by`, and when closed `promoted` (`group/task`) or `why` |
 | `lanes` | short id (`st1`…) | One stage of the plan: `title`, `goal` (what the stage is for), `exit` ("done when" condition), `order`. Stages run in `order`, top to bottom in both the plan and the flowchart |
 | `nodes` | box id (`N1`, `MOVE`…) | `label`, `sub`, `lane`, `status`, `shape` (`box`/`pill`), `order`, `to` (map of target box id → `solid` "do before" or `dash` "feeds into") |
@@ -200,7 +200,11 @@ leave the group.
 - **Follow-ups stay in Stage 6 groups** (Gabriel, 2026-11-12, to help development there). Stage 6 · Parity and mods (lane `st6`:
   boxes MODC, Q4, Q5, Q6 and any box added to it later; `meta/backlog` `keep_followups` lists the stages this applies to) is the
   exception to the backlog rule. Since 2026-11-17 (Gabriel) Stage 9 · Mod compatibility system (lane `st9`: boxes MCX1-MCX6,
-  groups `mcx0`-`mcx9`) follows the same rule: `keep_followups` is `["st6", "st9"]`, and everything below says "Stage 6" for both. A follow-up of a Stage 6 group (a finding that does not block its exit test, or a task still open
+  groups `mcx0`-`mcx9`) follows the same rule, and since 2026-11-18 (Gabriel) Stage 10 · Unified mod system refactor (lane `st10`:
+  boxes UMS1-UMS2, groups `ums0`-`ums5`) too: `keep_followups` is `["st6", "st9", "st10"]`, and everything below says "Stage 6" for
+  all three. Stage 10 goes one step further: it is also in `meta/backlog` `keep_all_followups`, so its tier-3 findings and tasks stay
+  group tasks as well (`backlog add --from` adds them, `trim-group --move` and `close-group` refuse them like any other open task;
+  `--drop` or `close-group --force` are the only ways out). A follow-up of a Stage 6 group (a finding that does not block its exit test, or a task still open
   when the test passes) becomes a new task of the group it came from, in that group's box, so the next session on the box finds it
   there:
   - `backlog add "<text>" --by S --from <group> [--sev S1|S2|S3] [--tier 1|2] [--ref PATH] [--g]` does it: it adds the group's next
@@ -212,7 +216,7 @@ leave the group.
     not tier 3 (`--force` sends those to the backlog as elsewhere). `trim-group --move` is refused for them too; `--drop` works.
   - Since 2026-11-15 every group takes its S1 / S2 findings as tasks ("S1 and S2 are group tasks"); what stays special to Stage 6
     is that `--from <group>` adds them to the group they came from even above the cap, and its S3 follow-ups stay tasks too.
-  - Unchanged: a tier-3 finding is still dropped or filed in the backlog as S3 (`--tier 3` keeps it there; current focus), and the
+  - Unchanged outside Stage 10: a tier-3 finding is still dropped or filed in the backlog as S3 (`--tier 3` keeps it there; current focus), and the
     triage still decides whether a finding is worth recording at all. A finding that is not Stage 6 work (for example a movement bug
     a mod test happens to show) can still be filed in its own box's backlog by naming the box: `--node <box>`.
   - The open backlog entries filed from Stage 6 groups before this rule were moved back on 2026-11-12: b0014-b0017 are modc
