@@ -100,22 +100,23 @@ bool make_bench_save(const GameData& data, jobs::JobSystem& js, const BenchNewSa
         return false;
     }
     const bool land = !probe.is_space();
-    SessionSpec spec;
-    spec.kind = SessionKind::Skirmish;
-    spec.skirmish_map = o.map;
-    spec.skirmish.human_faction = o.human;
-    spec.skirmish.ai_faction = o.ai;
+    // ref2 t03: a front-end skirmish through the one builder; the options are alamo_game's (27000-frame battle limit,
+    // kBattleEndHoldFrames) with the benchmark's seed.
+    SessionChoice choice;
+    choice.kind = GameKind::Skirmish;
+    choice.map = o.map;
+    choice.skirmish.human_faction = o.human;
+    choice.skirmish.ai_faction = o.ai;
     if (land) {
-        spec.skirmish.ground_human = repeated(default_skirmish_ground(data, o.human), o.scale);
-        spec.skirmish.ground_ai = repeated(default_skirmish_ground(data, o.ai), o.scale);
+        choice.skirmish.ground_human = repeated(default_skirmish_ground(data, o.human), o.scale);
+        choice.skirmish.ground_ai = repeated(default_skirmish_ground(data, o.ai), o.scale);
     } else {
-        spec.skirmish.units_human = repeated(default_skirmish_fleet(data, o.human), o.scale);
-        spec.skirmish.units_ai = repeated(default_skirmish_fleet(data, o.ai), o.scale);
+        choice.skirmish.units_human = repeated(default_skirmish_fleet(data, o.human), o.scale);
+        choice.skirmish.units_ai = repeated(default_skirmish_fleet(data, o.ai), o.scale);
     }
-    spec.seed = o.seed;
-    spec.battle_max_frames = 27000;      // the game's own limit (15 minutes)
-    spec.battle_end_hold_frames = 150;   // as alamo_game (kBattleEndHoldFrames)
-    GameSession session(data, js, spec);
+    SessionOptions options;
+    options.seed = o.seed;
+    GameSession session(data, js, make_session_spec(choice, options));
     std::vector<std::string> diag;
     if (!session.start(&diag)) {
         std::string why = "the skirmish did not start";

@@ -34,10 +34,6 @@
 
 namespace alamo::game {
 
-const char* difficulty_name(int32_t difficulty) {
-    return difficulty <= 0 ? "Easy_Default" : difficulty >= 2 ? "Hard_Default" : "Normal_Default";
-}
-
 int32_t custom_tech_offset(const galactic::GalacticRules& rules, uint32_t faction) {
     return faction < rules.factions.size() && rules.factions[faction].displayed_tech_level_adjustment != 0 ? -1 : 0;
 }
@@ -1361,41 +1357,45 @@ bool GameSession::spec_from_save(const SaveFile& save, SessionSpec& out, std::st
     sim::SessionDescriptor d;
     std::string e;
     if (!sim::read_session(save, d, &e)) return fail(e.empty() ? std::string("no session descriptor") : e);
-    SessionSpec s;
+    // ref2 t03: the save's choice and run options go through the one builder (make_session_spec, GameKind::Saved).
+    SessionChoice c;
+    c.kind = GameKind::Saved;
     if (d.kind == kCampaignKind) {
-        s.kind = SessionKind::Campaign;
-        s.campaign = d.campaign;
+        c.saved_kind = SessionKind::Campaign;
+        c.campaign = d.campaign;
     } else if (d.kind == kSkirmishKind) {
-        s.kind = SessionKind::Skirmish;
-        s.skirmish_map = d.campaign;
+        c.saved_kind = SessionKind::Skirmish;
+        c.map = d.campaign;
     } else {
         return fail("not an alamo_game save (session kind '" + d.kind + "')");
     }
-    s.seed = d.seed;
     OptionReader o{d, {}};
-    s.faction = std::string(o.text("spec.faction"));
-    s.difficulty = static_cast<int32_t>(std::clamp<int64_t>(o.integer("spec.difficulty"), 0, 2));
-    s.aggressor_period = o.u32("spec.aggressor_period");
-    s.battle_max_frames = o.u32("spec.battle_max_frames");
-    s.battle_end_hold_frames = o.u32("spec.battle_end_hold_frames");
-    s.battle_order_interval = o.u32("spec.battle_order_interval");
-    s.tactical_ai = o.boolean("spec.tactical_ai");
-    s.animation = o.boolean("spec.animation");
-    s.galactic_ai = o.boolean("spec.galactic_ai");
-    s.story = o.boolean("spec.story");
-    s.ask_battle_choice = o.boolean("spec.ask_battle_choice");
-    s.fleet_groups = o.has("spec.fleet_groups") && o.boolean("spec.fleet_groups");  // [port] absent = off
-    s.interventions_off = o.has("spec.interventions_off") && o.boolean("spec.interventions_off");  // mcx8 t07, absent = on
-    if (s.kind == SessionKind::Skirmish) {
-        s.skirmish.human_faction = std::string(o.text("skirmish.human_faction"));
-        s.skirmish.ai_faction = std::string(o.text("skirmish.ai_faction"));
-        s.skirmish.units_human = split_names(o.text("skirmish.units_human"));
-        s.skirmish.units_ai = split_names(o.text("skirmish.units_ai"));
-        s.skirmish.ground_human = split_names(o.text("skirmish.ground_human"));
-        s.skirmish.ground_ai = split_names(o.text("skirmish.ground_ai"));
-        s.skirmish.planet_type = std::string(o.text("skirmish.planet_type"));
-        s.skirmish.land = o.boolean("skirmish.land");
-        s.skirmish.control_points = o.has("skirmish.control_points") && o.boolean("skirmish.control_points");
+    SessionOptions so;
+    so.seed = d.seed;
+    c.faction = std::string(o.text("spec.faction"));
+    c.difficulty = static_cast<int32_t>(std::clamp<int64_t>(o.integer("spec.difficulty"), 0, 2));
+    so.aggressor_period = o.u32("spec.aggressor_period");
+    so.battle_max_frames = o.u32("spec.battle_max_frames");
+    so.battle_end_hold_frames = o.u32("spec.battle_end_hold_frames");
+    so.battle_order_interval = o.u32("spec.battle_order_interval");
+    so.tactical_ai = o.boolean("spec.tactical_ai");
+    so.animation = o.boolean("spec.animation");
+    so.galactic_ai = o.boolean("spec.galactic_ai");
+    so.story = o.boolean("spec.story");
+    so.ask_battle_choice = o.boolean("spec.ask_battle_choice");
+    so.fleet_groups = o.has("spec.fleet_groups") && o.boolean("spec.fleet_groups");  // [port] absent = off
+    c.interventions_off = o.has("spec.interventions_off") && o.boolean("spec.interventions_off");  // mcx8 t07, absent = on
+    if (c.saved_kind == SessionKind::Skirmish) {
+        SkirmishSetup& sk = c.skirmish;
+        sk.human_faction = std::string(o.text("skirmish.human_faction"));
+        sk.ai_faction = std::string(o.text("skirmish.ai_faction"));
+        sk.units_human = split_names(o.text("skirmish.units_human"));
+        sk.units_ai = split_names(o.text("skirmish.units_ai"));
+        sk.ground_human = split_names(o.text("skirmish.ground_human"));
+        sk.ground_ai = split_names(o.text("skirmish.ground_ai"));
+        sk.planet_type = std::string(o.text("skirmish.planet_type"));
+        sk.land = o.boolean("skirmish.land");
+        sk.control_points = o.has("skirmish.control_points") && o.boolean("skirmish.control_points");
         if (o.has("skirmish.extra_slots")) {  // skm2 t02
             const uint32_t n = std::min<uint32_t>(o.u32("skirmish.extra_slots"), 6);
             for (uint32_t k = 0; k < n; ++k) {
@@ -1404,26 +1404,26 @@ bool GameSession::spec_from_save(const SaveFile& save, SessionSpec& out, std::st
                 x.faction = std::string(o.text((key + "faction").c_str()));
                 x.units = split_names(o.text((key + "units").c_str()));
                 x.ground = split_names(o.text((key + "ground").c_str()));
-                s.skirmish.extra_slots.push_back(std::move(x));
+                sk.extra_slots.push_back(std::move(x));
             }
         }
-        if (o.has("skirmish.teams")) s.skirmish.teams = split_ints(o.text("skirmish.teams"));
-        if (o.has("skirmish.difficulties")) s.skirmish.difficulties = split_ints(o.text("skirmish.difficulties"));
-        s.skirmish_hop = !o.has("skirmish.map_battle");  // skm1 t01: an older save is the galactic-hop skirmish
-        if (!s.skirmish_hop) {
-            sim::BattleConfig::SkirmishOptions& so = s.skirmish_options;
-            so.set = true;
-            so.credits = static_cast<int32_t>(o.integer("skirmish.credits"));
-            so.win_condition = static_cast<uint8_t>(std::clamp<int64_t>(o.integer("skirmish.win_condition"), 0, 0xff));
+        if (o.has("skirmish.teams")) sk.teams = split_ints(o.text("skirmish.teams"));
+        if (o.has("skirmish.difficulties")) sk.difficulties = split_ints(o.text("skirmish.difficulties"));
+        c.skirmish_hop = !o.has("skirmish.map_battle");  // skm1 t01: an older save is the galactic-hop skirmish
+        if (!c.skirmish_hop) {
+            sim::BattleConfig::SkirmishOptions& opt = c.skirmish_options;
+            opt.set = true;
+            opt.credits = static_cast<int32_t>(o.integer("skirmish.credits"));
+            opt.win_condition = static_cast<uint8_t>(std::clamp<int64_t>(o.integer("skirmish.win_condition"), 0, 0xff));
             const int64_t f = o.integer("skirmish.option_flags");
-            so.heroes = (f & 1) != 0;
-            so.starting_units = (f & 2) != 0;
-            so.super_weapons = (f & 4) != 0;
-            so.prebuilt_base = (f & 8) != 0;
+            opt.heroes = (f & 1) != 0;
+            opt.starting_units = (f & 2) != 0;
+            opt.super_weapons = (f & 4) != 0;
+            opt.prebuilt_base = (f & 8) != 0;
         }
     }
     if (!o.missing.empty()) return fail("save option " + o.missing + " missing");
-    out = std::move(s);
+    out = make_session_spec(c, so);
     return true;
 }
 

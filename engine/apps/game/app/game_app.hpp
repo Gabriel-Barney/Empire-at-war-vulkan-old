@@ -190,7 +190,6 @@ enum class Screen : uint8_t { Menu, SessionLoad, Galactic, BattleLoad, Battle, Q
 constexpr size_t kGameAudioLogLimit = 4096;
 constexpr uint16_t kVkF11 = 0x7A;  // OPT1 t07: frame-time overlay toggle (not in the default hotkey table)
 constexpr int32_t kLoadIntroMaxFrames = 30;  // QA t11: the most frames the sim waits for the load screen's textures
-constexpr uint32_t kBattleEndHoldFrames = 150;  // [port] Playtest QA D1: 5 s between the victory and the summary (the last break-up plays)
 constexpr uint64_t kLoadIntroMaxTicks = 30;  // sim ticks a Fight answer may take to push its battle
 inline const char* screen_name(Screen s) {
     switch (s) {
@@ -905,6 +904,8 @@ public:
     std::set<std::string> mod_refused_;
     std::string pending_different_data_;  // mcx3 t05: the save the "Load anyway" box is about  // mcx3 t03: checked rows refused as base-EaW mods (D1): Launch does nothing
     bool start_session(const SessionSpec& spec);
+    // ref2 t03: the run options every new session takes (--seed, --battle-max-frames, --fleet-groups, kBattleEndHoldFrames).
+    SessionOptions session_options() const;
     void session_started(const std::vector<std::string>& diag);  // the UI / presentation reset for a new session_
     void end_session();
     // N1 / t09: the Save / Load / Delete requests of the menus.
