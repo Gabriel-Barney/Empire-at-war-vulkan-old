@@ -2566,9 +2566,33 @@ void MovementSystem::tick_land(uint32_t frame, SimRng& rng, const ParallelFor& p
             tevents_.push_back(u.tplay);
         }
     }
-    tick_special(frame, rng);  // §4.3, 4.4, 4.6: serial, ascending id
-    tick_deploy(frame);        // S8 t11: Walk deploy states (serial, ascending id)
-    tick_turrets(frame);       // S8 t24: TURRET service of the Deploys units (serial, ascending id)
+    // REF2 t07: the stages after the walk, in the order of land_tail_stages() (docs/re/MOVEMENT.md §3.3 table)
+    for (const LandStageInfo& stage : land_tail_stages()) {
+        switch (stage.stage) {
+            case LandStage::Special: tick_special(frame, rng); break;  // §4.3, 4.4, 4.6
+            case LandStage::Deploy: tick_deploy(frame); break;         // S8 t11: Walk deploy states
+            case LandStage::Turrets: tick_turrets(frame); break;       // S8 t24: TURRET service of the Deploys units
+            case LandStage::Commit: land_commit(frame, res); break;
+            case LandStage::Crush: crush_pass(res); break;  // OI tactical
+            case LandStage::Despawn:
+                for (ObjectId id : despawned_) remove_unit(id);  // §4.6: bombers at path end (reported, then dropped)
+                break;
+            case LandStage::Count: break;
+        }
+    }
+}
+
+std::span<const MovementSystem::LandStageInfo> MovementSystem::land_tail_stages() {
+    static constexpr LandStageInfo kStages[] = {
+        {LandStage::Special, "special", "tick_special"}, {LandStage::Deploy, "deploy", "tick_deploy"},
+        {LandStage::Turrets, "turrets", "tick_turrets"}, {LandStage::Commit, "commit", "land_commit"},
+        {LandStage::Crush, "crush", "crush_pass"},       {LandStage::Despawn, "despawn", "despawned_"},
+    };
+    static_assert(sizeof(kStages) / sizeof(kStages[0]) == static_cast<size_t>(LandStage::Count));
+    return kStages;
+}
+
+void MovementSystem::land_commit(uint32_t frame, const std::vector<WalkResult>& res) {
     for (size_t i = 0; i < units_.size(); ++i) {
         Unit& u = units_[i];
         if (is_air(u)) {
@@ -2633,8 +2657,6 @@ void MovementSystem::tick_land(uint32_t frame, SimRng& rng, const ParallelFor& p
         }
         update_tree(u);
     }
-    crush_pass(res);  // OI tactical
-    for (ObjectId id : despawned_) remove_unit(id);  // §4.6: bombers at path end (reported, then dropped)
 }
 
 float MovementSystem::conform(Unit& u) const {

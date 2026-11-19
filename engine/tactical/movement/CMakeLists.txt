@@ -49,6 +49,8 @@ endif()
 
 add_executable(alamo_tactical_movement_tests tests/test_movement.cpp)
 target_link_libraries(alamo_tactical_movement_tests PRIVATE alamo_tactical_movement Threads::Threads alamo_test_support)
+# REF2 t07: test_land_tail_stages reads the stage table of docs/re/MOVEMENT.md §3.3.
+target_compile_definitions(alamo_tactical_movement_tests PRIVATE "ALAMO_DOCS_RE_DIR=\"${PROJECT_SOURCE_DIR}/docs/re\"")
 # Real-data tests (ALAMO_FOC_DATA): every shipped land / space map through the VFS.
 if("vfs" IN_LIST ALAMO_ENGINE_MODULES AND "terrain" IN_LIST ALAMO_ENGINE_MODULES)
   target_link_libraries(alamo_tactical_movement_tests PRIVATE alamo_vfs)

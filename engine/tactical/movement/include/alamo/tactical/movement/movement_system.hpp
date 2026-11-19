@@ -741,6 +741,17 @@ public:
 
     // ---- tick
     void tick(uint32_t frame, SimRng& rng, const ParallelFor& pf = serial_for);
+    // REF2 t07: the land tick's stages after the walk, as named stages run in list order (tick_land walks
+    // land_tail_stages(); each pass serial, ascending id). The order is the table in docs/re/MOVEMENT.md §3.3 ("Port land
+    // tick: the stages after the walk"), which alamo_tactical_movement_tests checks against this list: a reorder (anm1
+    // t03, the deploy-at-stop tick) changes both.
+    enum class LandStage : uint8_t { Special, Deploy, Turrets, Commit, Crush, Despawn, Count };
+    struct LandStageInfo {
+        LandStage stage;
+        const char* name;      // the docs/re table's `stage` column
+        const char* function;  // the docs/re table's `port function` column
+    };
+    static std::span<const LandStageInfo> land_tail_stages();
     void commit(objects::ObjectStore& store) const;
     const MovementStats& stats() const { return stats_; }
     // cmb2 t03 (BKR2 Q7 item 6 [H]): the movers whose land attack plan failed (0x41c1a0 returned 0) in the move() calls since
@@ -1570,6 +1581,9 @@ private:
     void configure(Unit& u) const;
     void tick_land(uint32_t frame, SimRng& rng, const ParallelFor& pf);
     void crush_pass(const std::vector<WalkResult>& res);
+    // REF2 t07: the land commit stage - the walk results applied (pushed-path pops, the 0x15 arrival, TerrainCollision
+    // reports, the walk counters), then conform and the tree update; serial, ascending index
+    void land_commit(uint32_t frame, const std::vector<WalkResult>& res);
     bool hostile(int32_t a, int32_t b) const { return hostile_ ? hostile_(a, b) : (a >= 0 && b >= 0 && a != b); }
     // §5.5 victim rule: hostile, and (squashable by a supercrusher and the crusher is one) or squashable.
     // s78n t23 step 0 (t21 review item 7): an object without a locomotor (a death-clone obstacle) neither crushes nor is

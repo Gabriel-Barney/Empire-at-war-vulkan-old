@@ -1727,6 +1727,10 @@ public:
     static const char* save_part_name(SavePart p);  // "battle.state", "battle.movement", ...
     void write_part(SavePart p, ByteWriter& w) const;
     bool read_part(SavePart p, ByteReader& r);
+    // REF2 t01: each data member is SAVED, REBUILT or DERIVED in the save ledger (src/tactical_battle_ledger.hpp; new
+    // member: add it there, tools/lint/check_battle_ledger.py). This self-check runs state_io on a probe: true when it
+    // walks every SAVED(.., state) member and nothing else; else *err names the first difference. For the save tests.
+    bool check_save_ledger(std::string* err) const;
     // q6 t28 integration: "battle.types", read before the module parts. The rebuilt battle has only the setup's types; a
     // game-object script may have added more (script_add_types), and Combat / Abilities check their table sizes. Writes
     // types_used_; the read checks the rebuilt list is its prefix and adds the tail through script_add_types (same append
