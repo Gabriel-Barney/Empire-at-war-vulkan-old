@@ -519,13 +519,16 @@ void test_crc_pin(const Store& s) {
 
 void test_coverage(const Store& s) {
     size_t fields = 0;
-    const bool ok = coverage<Slot>("Slot", sample_slot, s, fields) & coverage<PlanInstance>("PlanInstance", sample_plan, s, fields) &
-                    coverage<TfRec>("TfRec", sample_tf, s, fields) & coverage<StatusRec>("StatusRec", sample_status, s, fields) &
-                    coverage<TacPpRec>("TacPpRec", sample_pp, s, fields) &
-                    coverage<AttackPositioning>("AttackPositioning", sample_attack_pos, s, fields) &
-                    coverage<PendingBonus>("PendingBonus", sample_bonus, s, fields) &
-                    coverage<TacticalPpResult>("TacticalPpResult", sample_pp_result, s, fields) &
-                    coverage<TacticalAiObject>("TacticalAiObject", sample_fact, s, fields);
+    bool ok = true;  // every record walked, so each failure is printed
+    ok = coverage<Slot>("Slot", sample_slot, s, fields) && ok;
+    ok = coverage<PlanInstance>("PlanInstance", sample_plan, s, fields) && ok;
+    ok = coverage<TfRec>("TfRec", sample_tf, s, fields) && ok;
+    ok = coverage<StatusRec>("StatusRec", sample_status, s, fields) && ok;
+    ok = coverage<TacPpRec>("TacPpRec", sample_pp, s, fields) && ok;
+    ok = coverage<AttackPositioning>("AttackPositioning", sample_attack_pos, s, fields) && ok;
+    ok = coverage<PendingBonus>("PendingBonus", sample_bonus, s, fields) && ok;
+    ok = coverage<TacticalPpResult>("TacticalPpResult", sample_pp_result, s, fields) && ok;
+    ok = coverage<TacticalAiObject>("TacticalAiObject", sample_fact, s, fields) && ok;
     CHECK(ok && fields >= 100);
     std::printf("records: %zu fields each change the save (saved) / the CRC (hashed) and round-trip %s\n", fields, ok ? "ok" : "FAILED");
 }
