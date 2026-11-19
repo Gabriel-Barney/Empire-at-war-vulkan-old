@@ -55,6 +55,11 @@ def check_tags(gen):
     ledger, problems = gen.build(with_extras=False)
     errors = [f"annotation: {p}" for p in problems]
     errors += [f"regression: {b}" for b in gen.regressions(committed, ledger, set())]
+    # A cited spec page that no longer exists (renamed or deleted): the sticky pick would keep a dead path.
+    for key, c in sorted(committed.items()):
+        page = c["spec"].split(" ", 1)[0]
+        if page and c["state"] not in gen.SETTLED_UNREAD and not os.path.isfile(os.path.join(ROOT, page)):
+            errors.append(f"{c['class']}.{c['tag']}: spec {page} does not exist (regenerate)")
     # A consumed / verified state comes from the scan, so a committed state that matches the code has a consumer.
     now = {(r["class"], r["tag"].lower()): r for r in ledger}
     stale = []
