@@ -247,6 +247,37 @@ void TacticalBattle::adopt_object(TacticalMode& mode, objects::ObjectHandle h) {
     if (st.alive(h)) l1_register(mode, h, static_cast<int32_t>(st.type(h)));
 }
 
+std::vector<std::string> TacticalBattle::adoption_violations(const TacticalMode& mode) const {
+    std::vector<std::string> out;
+    if (!combat_) return out;
+    const objects::ObjectStore& st = mode.primary();
+    const objects::GameObjectTypes& types = catalog_->types();
+    auto say = [&](objects::ObjectId id, uint32_t t, const char* what) {
+        const auto& names = types.raw().types().name;
+        const std::string name = t < names.size() ? std::string(names[t]) : std::string("?");
+        out.push_back(std::to_string(id) + " " + name + ": " + what);
+    };
+    for (const Unit& u : units_) {
+        if (!u.alive || u.retreated) continue;
+        if (!st.alive(u.h) || st.id(u.h) != u.id) say(u.id, u.type, "battle unit without a live store object");
+        else if (!combat_->has_unit(u.id)) say(u.id, u.type, "battle unit without a combat entry");
+        else if (u.movable && movement_ && !movement_->has_unit(u.id) && garrison_holder_of(u.id) == objects::kNoObjectId)
+            say(u.id, u.type, "movable battle unit without a movement entry");
+    }
+    for (const objects::ObjectHandle h : st.all_objects()) {
+        if (!st.active(h)) continue;  // dead or a death clone
+        const auto t = static_cast<uint32_t>(st.type(h));
+        const bool in_tables = std::find(types_used_.begin(), types_used_.end(), t) != types_used_.end();
+        if (!in_tables && !st.has_behavior(h, objects::beh::Locomotor)) continue;
+        const objects::ObjectId id = st.id(h);
+        const auto ui = std::lower_bound(units_.begin(), units_.end(), id, [](const Unit& a, objects::ObjectId v) { return a.id < v; });
+        if (ui != units_.end() && ui->id == id) continue;
+        if (std::any_of(containers_.begin(), containers_.end(), [id](const Container& c) { return c.id == id; })) continue;
+        say(id, t, "store object not adopted by the battle");
+    }
+    return out;
+}
+
 ta::SpecialWeaponWorld TacticalBattle::l1_world(const TacticalMode& mode) {
     const objects::ObjectStore* st = &mode.primary();
     ta::SpecialWeaponWorld w;

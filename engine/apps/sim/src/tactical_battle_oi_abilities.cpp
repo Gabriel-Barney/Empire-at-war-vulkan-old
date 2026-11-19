@@ -293,7 +293,7 @@ void TacticalBattle::oi_install(TacticalMode& mode, SimRng& rng) {
     abilities_->set_host(std::move(h));
 }
 
-objects::ObjectId TacticalBattle::oi_spawn_unit(TacticalMode& mode, int32_t type, Vec3 pos, Vec3 facing, int32_t owner) {
+objects::ObjectId TacticalBattle::oi_spawn_unit(TacticalMode& mode, int32_t type, Vec3 pos, Vec3 facing, int32_t owner, bool l1_props) {
     const objects::GameObjectTypes& types = catalog_->types();
     if (type < 0 || static_cast<size_t>(type) >= types.size() || !bt_rng_) return objects::kNoObjectId;
     objects::SpawnParams sp;
@@ -304,18 +304,36 @@ objects::ObjectId TacticalBattle::oi_spawn_unit(TacticalMode& mode, int32_t type
     const objects::ObjectHandle h = mode.spawn(sp, 1.0f);
     if (!h) return objects::kNoObjectId;
     const objects::ObjectId id = mode.primary().id(h);
-    const auto ut = static_cast<uint32_t>(type);
-    if (std::find(types_used_.begin(), types_used_.end(), ut) == types_used_.end()) return id;  // a prop (not in the tables)
-    bt_adopt_built(mode, h, owner, 1.0f, bt_rng_);  // combat / ability unit (hardpoint + SAP-init draws)
+    SpawnAdopt how;
+    how.owner = owner;
+    how.pos = pos;
+    how.facing = facing;
+    how.l1_props = l1_props;
+    adopt_spawned(mode, h, how);
+    return id;
+}
+
+bool TacticalBattle::adopt_spawned(TacticalMode& mode, objects::ObjectHandle h, const SpawnAdopt& how) {
+    objects::ObjectStore& st = mode.primary();
+    if (!st.alive(h)) return false;
+    const auto ut = static_cast<uint32_t>(st.type(h));
+    const bool in_tables = std::find(types_used_.begin(), types_used_.end(), ut) != types_used_.end();
+    if (!how.unit || !in_tables || !bt_rng_) {  // attached / contained, or a prop (not in the tables)
+        if (!how.unit || how.l1_props) l1_register(mode, h, static_cast<int32_t>(ut));
+        return false;
+    }
+    const objects::ObjectId id = st.id(h);
+    const objects::GameObjectTypes& types = catalog_->types();
+    bt_adopt_built(mode, h, how.owner, 1.0f, bt_rng_);  // combat / ability unit (hardpoint + SAP-init draws), L1 systems
     Unit* u = unit_by_id(id);
-    if (u && movement_ && mode.movable(h) && types.has_behavior(sp.type, objects::BehaviorSet::Union, objects::beh::Locomotor)) {
+    if (u && movement_ && mode.movable(h) && types.has_behavior(st.type(h), objects::BehaviorSet::Union, objects::beh::Locomotor)) {
         mv::UnitDesc md = mv::unit_desc_from_type(types, ut);
         md.locomotor = mv::locomotor_kind_from_type(types, ut, space_ ? mv::MoveMode::Space : mv::MoveMode::Land);
         md.id = id;
-        md.pos = {pos.x, pos.y};
-        md.z = pos.z;
-        md.yaw_deg = dmath::atan2(facing.y, facing.x) * (180.0f / dmath::kPiF);
-        md.owner = owner;
+        md.pos = {how.pos.x, how.pos.y};
+        md.z = how.pos.z;
+        md.yaw_deg = dmath::atan2(how.facing.y, how.facing.x) * (180.0f / dmath::kPiF);
+        md.owner = how.owner;
         mv_type_extents(md, ut);  // s78n t20
         movement_->add_unit(md);
         u->movable = true;
@@ -330,9 +348,9 @@ objects::ObjectId TacticalBattle::oi_spawn_unit(TacticalMode& mode, int32_t type
         // s78n t23 step 0 (MOVEMENT §5.4.5 item 2, t21 review item 2): a land object without a locomotor whose type is
         // IsDeathCloneObstacle with a UnitCollisionClass (FoC: Proximity_Mine, Infantry class) is a death-clone obstacle in
         // the land layer from its creation until it dies (the death / retreat removal drops it)
-        register_clone_obstacle(mode, h, type);
+        register_clone_obstacle(mode, h, static_cast<int32_t>(ut));
     }
-    return id;
+    return u != nullptr;
 }
 
 void TacticalBattle::script_add_types(std::span<const uint32_t> add) {
@@ -347,17 +365,19 @@ void TacticalBattle::script_add_types(std::span<const uint32_t> add) {
 }
 
 objects::ObjectHandle TacticalBattle::script_spawn(TacticalMode& mode, const objects::SpawnParams& p) {
-    objects::ObjectHandle h{};
     if (p.container || p.attach_parent) {
-        h = mode.spawn(p);
-    } else {
-        const uint32_t t = static_cast<uint32_t>(p.type);
-        script_add_types(std::span<const uint32_t>(&t, 1));  // q6 t12: a real battle unit, not a prop
-        const objects::ObjectId id = oi_spawn_unit(mode, static_cast<int32_t>(p.type), p.position, p.facing, p.owner);
-        if (id != objects::kNoObjectId) h = mode.primary().find(id);
+        const objects::ObjectHandle h = mode.spawn(p);
+        SpawnAdopt how;
+        how.owner = p.owner;
+        how.unit = false;  // contained / attached: the L1 systems only
+        if (h) adopt_spawned(mode, h, how);
+        return h;
     }
-    if (h) adopt_object(mode, h);
-    return h;
+    const uint32_t t = static_cast<uint32_t>(p.type);
+    script_add_types(std::span<const uint32_t>(&t, 1));  // q6 t12: a real battle unit, not a prop
+    // l1_props: a type the tables could not take (no tables) still joins the L1 systems
+    const objects::ObjectId id = oi_spawn_unit(mode, static_cast<int32_t>(p.type), p.position, p.facing, p.owner, true);
+    return id != objects::kNoObjectId ? mode.primary().find(id) : objects::ObjectHandle{};
 }
 
 objects::ObjectHandle TacticalBattle::script_spawn_company(TacticalMode& mode, const objects::SpawnParams& p) {

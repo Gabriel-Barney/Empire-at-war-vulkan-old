@@ -1576,6 +1576,11 @@ public:
     bool stop_for_auto_resolve(int32_t player);
     // --- end P4 sim ---
     std::string summary() const;
+    // ref2 t04 test seam (outside the CRC, const): the adoption invariant. Every live battle unit is a live store object,
+    // a combat unit, and a movement unit when movable (not while inside a garrison); every live store object of a type in the battle tables, or with a
+    // LOCOMOTOR, is a battle unit or a battle container (an object spawned around the adopt step breaks it). One line
+    // per breach ("<id> <type name>: <what>"), ascending store order; empty = clean.
+    std::vector<std::string> adoption_violations(const TacticalMode& mode) const;
 
     const tactical::movement::MovementSystem& movement() const { return *movement_; }
     // S7 t22: the formation record of a squadron container (or a fighter without one); null = no formation.
@@ -2739,7 +2744,21 @@ private:
     // Called after the movement tick (clip ends, before the combat flags are read) and after oi_events (requests).
     void oi_deploy_sync(TacticalMode& mode);
     void oi_deployed_behaviors(TacticalMode& mode, objects::ObjectId id, bool deployed);  // b0173: DeployedBehavior add / remove
-    objects::ObjectId oi_spawn_unit(TacticalMode& mode, int32_t type, Vec3 pos, Vec3 facing, int32_t owner);
+    // ref2 t04: the one adopt step for a single object spawned after setup (ability spawns, Lua Spawn_Unit, hangar
+    // launches). `unit` false (an object with a container or attach parent): the L1 systems only (l1_register). `unit`
+    // true: a type in the battle tables becomes a battle unit (bt_adopt_built: combat, abilities, hangars, S4, L1), a
+    // movable LOCOMOTOR type also a movement unit starting at `pos` / `facing` (a SimpleSpace self-registering ship
+    // holds from birth), any other land type a death-clone obstacle candidate; a type outside the tables joins the L1
+    // systems only with `l1_props`. Returns whether the object became a battle unit.
+    struct SpawnAdopt {
+        int32_t owner = -1;
+        Vec3 pos{}, facing{1.0f, 0.0f, 0.0f};
+        bool unit = true;
+        bool l1_props = false;
+    };
+    bool adopt_spawned(TacticalMode& mode, objects::ObjectHandle h, const SpawnAdopt& how);
+    // TacticalMode::spawn at pos / facing (health fraction 1), then adopt_spawned. kNoObjectId: bad type or no spawn.
+    objects::ObjectId oi_spawn_unit(TacticalMode& mode, int32_t type, Vec3 pos, Vec3 facing, int32_t owner, bool l1_props = false);
     // q6 t12: script-spawned types (and, for a company, its members and TEAM types) join the battle tables mid-battle:
     // appended to types_used_ and built onto the live tables (tables_extend on the kept setup build), then the ability /
     // survivor types they name (oi_add_ability_types). [port] Their hangar descriptors (hg_add_types) are not added.

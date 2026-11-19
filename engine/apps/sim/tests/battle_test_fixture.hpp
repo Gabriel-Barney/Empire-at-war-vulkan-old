@@ -45,6 +45,7 @@
 #include "alamo/tactical/garrison/garrison_types.hpp"  // S4
 #include "alamo/test/support.hpp"
 #include "alamo/test/galactic_dummies.hpp"
+#include "adoption_check.hpp"  // ref2 t04
 #ifdef ALAMO_SIM_HAVE_ANIM
 #include "alamo/sim/sim_anim.hpp"
 #endif
@@ -1183,6 +1184,7 @@ inline Run run_campaign(const Data& d, bool land, bool fight, int32_t workers, u
         const size_t depth_before = host.modes().depth();
         const float cr = gs->credits(1);
         host.tick_once();
+        if (battles.battle() && host.tactical()) check_adoption(*battles.battle(), *host.tactical());  // ref2 t04
         if (battles.battle() && battles.battle()->end_hold_active()) ++out.hold_ticks;
         if (depth_before == 1 && host.modes().depth() == 2 && out.credits_in_battle < 0.0f) {
             out.credits_before = cr;

@@ -77,6 +77,7 @@ struct ClashSession {
 
     ClashSession(const Data& d, uint32_t workers, const CampaignBattleOptions& opt, std::initializer_list<const char*> defenders,
                  std::initializer_list<const char*> invaders, bool launch) {
+        g_adoption_exempt.clear();  // ref2 t04: a new session's ids
         js = std::make_unique<jobs::JobSystem>(jobs::JobSystemConfig{static_cast<int32_t>(workers)});
         SimConfig cfg;
         cfg.seed = 2026;
@@ -107,6 +108,7 @@ struct ClashSession {
     // One tick; the invasion once the fleet is in orbit. The running battle (null between battles).
     TacticalBattle* tick() {
         host->tick_once();
+        if (battles && battles->battle() && host->tactical()) check_adoption(*battles->battle(), *host->tactical());  // ref2 t04
         if (!invaded && gs && host->modes().depth() == 1) {
             const std::vector<uint32_t> f = gs->fleets_at(1, 1);
             if (!f.empty() && !gs->fleets()[f[0]].moving) invaded = gs->invade(1, 1, {}) == commands::RejectReason::None;
@@ -1807,6 +1809,7 @@ inline LandGuardRun run_land_guard(const Data& d) {
             spn.position = Vec3{mx, my, sp.z};
             const objects::ObjectHandle mh = st.create(spn);
             out.marker = st.alive(mh) ? st.id(mh) : objects::kNoObjectId;
+            g_adoption_exempt.push_back(out.marker);  // ref2 t04: never adopted on purpose
             CHECK(out.marker != objects::kNoObjectId && !cs.has_unit(out.marker));
             if (out.marker == objects::kNoObjectId) {
                 stage = 9;
