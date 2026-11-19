@@ -13,6 +13,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 #include "alamo/materials/d3d9_state.hpp"
@@ -190,7 +191,8 @@ struct ShaderFileEntry {
 };
 
 // True when host path `host` lies inside directory `dir` (case-insensitive, '/' == '\'; `dir` == `host`
-// is not inside). Used to attribute MEG mounts to mod directories.
+// is not inside). Before ums0 it attributed MEG mounts to mod directories; shader_files_from_vfs now reads the
+// owning mod from the VFS layer (vfs::Layer::mod).
 bool host_path_under(std::string_view host, std::string_view dir);
 
 // Head of the list (steps 1 and 2), upper-case base names, starting with kDefaultEffectName.
@@ -219,10 +221,14 @@ private:
 // lib.set_shader_files(shader_files_from_vfs(*vfs)). The D.1 preload covers Shaders\ and
 // Shaders\Terrain\ only; include_engine = true also lists Shaders\Engine\ (for audit_effects(): engine
 // effects a mod overrides are loaded by name too).
+// Each entry's place comes from its VFS layer (ums0, vfs::Layer): dir_order from the layer's kind and index, from_mod from
+// the layer's owning mod (a MEG records the mod folder it was opened from when it is mounted).
 template <class VfsT>
 std::vector<ShaderFileEntry> shader_files_from_vfs(const VfsT& vfs, bool include_engine = false) {
+    using LayerT = typename std::remove_cvref_t<decltype(vfs.layers())>::value_type;
     std::vector<ShaderFileEntry> out;
-    const int mods = static_cast<int>(vfs.mod_dirs().size());
+    int mods = 0;  // mod layers come first in layers()
+    for (const LayerT& l : vfs.layers()) mods += l.kind == LayerT::Kind::Mod ? 1 : 0;
     std::vector<const char*> globs = {"DATA\\ART\\SHADERS\\*.FX", "DATA\\ART\\SHADERS\\*.FXO",
                                       "DATA\\ART\\SHADERS\\TERRAIN\\*.FX", "DATA\\ART\\SHADERS\\TERRAIN\\*.FXO"};
     if (include_engine) {
@@ -233,19 +239,14 @@ std::vector<ShaderFileEntry> shader_files_from_vfs(const VfsT& vfs, bool include
         for (auto& p : vfs.list(glob)) {
             auto r = vfs.resolve(p);
             if (!r) continue;
+            const LayerT* layer = vfs.layer_of(*r);
+            if (!layer) continue;
             ShaderFileEntry e;
-            e.loose = r->layer != VfsT::Resolution::Meg;
-            if (r->layer == VfsT::Resolution::Mod) e.dir_order = r->layer_index;
-            else if (r->layer == VfsT::Resolution::Fallback) e.dir_order = mods + 1 + r->layer_index;
+            e.loose = layer->kind != LayerT::Kind::Meg;
+            if (layer->kind == LayerT::Kind::Mod) e.dir_order = layer->index;
+            else if (layer->kind == LayerT::Kind::Fallback) e.dir_order = mods + 1 + layer->index;
             else e.dir_order = mods;
-            if (r->layer == VfsT::Resolution::Mod) {
-                e.from_mod = true;
-            } else if (r->layer == VfsT::Resolution::Meg && r->layer_index >= 0 &&
-                       static_cast<size_t>(r->layer_index) < vfs.mounts().size()) {
-                const std::string& host = vfs.mounts()[static_cast<size_t>(r->layer_index)].path;
-                for (const auto& d : vfs.mod_dirs())
-                    if (host_path_under(host, d)) e.from_mod = true;
-            }
+            e.from_mod = layer->mod >= 0;
             e.path = std::move(p);
             out.push_back(std::move(e));
         }
