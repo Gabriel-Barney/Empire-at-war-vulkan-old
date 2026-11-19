@@ -145,6 +145,28 @@ Consequences for mods (all **main**):
 - **Directory scans are not lookups.** Listings (skirmish maps, AI plan folders, scripts) follow the rules of the spec that
   defines them (`docs/re/UI.md` §9.2: mod-folder maps go to the *custom* map list; `PHASE2.md` note on `Vfs::list(glob, layers)`).
 
+#### Layers and provenance (Stage 10, ums0)
+
+Port rules for code that asks where a file came from; the resolution order above is unchanged (`DECISIONS.md`, "Unified
+mod system refactor").
+
+- **Every resolution names one layer.** `Vfs::layers()` lists the layers in the order above (mods, FoC loose, MEGs
+  newest-mounted first, fallback folders); `Vfs::layer_of(resolution)` gives a file's `vfs::Layer`: its kind, its index
+  within the kind, its host root (a folder, or the `.meg` path) and its **owning mod** (`Layer::mod`, the position in the
+  mod search list, or -1 for the base game).
+- **A MEG belongs to the folder it was opened from.** A MEG that a mod's own `MegaFiles.xml` names, or a mod's `Patch*.meg`,
+  is owned by that mod, decided when it is mounted; a base archive a mod's list names (`Data\Config.meg` from FoC) stays
+  base-owned.
+- **Ask the layer, not the path.** "Is this file from a mod, and which one" reads `Layer::mod`; no code compares host paths
+  with the mod folders (`shader_files_from_vfs`, ShaderFileEntry `from_mod` / `dir_order`).
+- **One walk for every copy.** `Vfs::resolve_all(path)` returns every copy in resolution order (`[0]` is what `read`
+  returns); code that needs the lower copies (the SFX archives, which a mod's copy layers over FoC's: `docs/re/AUDIO.md` §5, aud2 t05) takes them from there instead of building
+  `<mod>\Data\...` paths by hand.
+- **Findings carry their layer.** `Vfs::create` takes an optional `IssueSink`; malformed MEG tables go there as
+  retail-equivalent issues with `Layer::issue_layer()` (the mod's index, or `kBaseLayer`).
+- **Checked equal.** `alamo_audio_layer_equivalence_tests` compares the shader entries and the SFX archive list with the
+  pre-ums0 code on base FoC and the installed reference mods.
+
 ### 3.3 What a save remembers
 
 A save stores the VFS command line it was made with (`SessionDescriptor::data_args`), a fingerprint of the loaded
@@ -511,6 +533,7 @@ Each needs either a data-driven replacement or a `docs/re/` citation showing the
 | Shader issues in `alamo_mod_check` and `alamo.mod_report` | modc t21 |
 | Shader model 3 in shaderxlat | modc t22 |
 | `.fx` source compilation (prebuild / cached) | modc t23 |
+| VFS layers and provenance (`vfs::Layer`, `layer_of`, `resolve_all`); effects and SFX off `mod_dirs()` (§3.2) | ums0 |
 
 ## 9. Second mod (modc t06)
 
