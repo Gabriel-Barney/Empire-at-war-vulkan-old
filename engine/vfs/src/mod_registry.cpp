@@ -15,6 +15,7 @@
 #include <utility>
 
 #include "alamo/core/host_fs.hpp"
+#include "alamo/vfs/install_locations.hpp"
 #include "alamo/meg/meg.h"
 
 namespace alamo::vfs {
@@ -318,6 +319,11 @@ std::optional<ModInfo> parse_modinfo(std::string_view text, std::vector<std::str
 
 std::string ModDescriptor::key() const { return variant.empty() ? id : id + ":" + variant; }
 
+std::string ModDescriptor::catalog_key() const {
+    std::string k = kind == ModKind::Workshop ? id : kind == ModKind::LocalMods ? "Mods\\" + id : root;
+    return variant.empty() ? k : k + ":" + variant;
+}
+
 std::string ModDescriptor::arg() const {
     switch (kind) {
         case ModKind::Workshop: return "STEAMMOD=" + id;
@@ -371,7 +377,11 @@ std::vector<ModDescriptor> describe_mod_folder(const std::string& root, ModKind 
 
     const auto apply = [](ModDescriptor& d, const ModInfo& m) {
         d.has_modinfo = true;
-        if (!m.name.empty()) d.name = m.name;
+        if (!m.name.empty()) {
+            d.name = m.name;
+            d.named = true;
+        }
+        if (!m.published_id.empty()) d.published_id = m.published_id;
         if (!m.version.empty()) d.version = m.version;
         if (!m.summary.empty()) d.summary = m.summary;
         if (!m.icon.empty()) d.icon = m.icon;
@@ -443,13 +453,22 @@ ModDescriptor describe_mounted_mod(const std::string& dir, const std::string& ga
     return std::move(ds.front());
 }
 
-const ModDescriptor* ModRegistry::find_key(std::string_view key) const {
+const ModDescriptor* ModCatalog::find_key(std::string_view key) const {
+    const auto norm = [](std::string s) {  // any case, '/' == '\\'
+        s = lower(std::move(s));
+        for (char& c : s)
+            if (c == '/') c = '\\';
+        return s;
+    };
+    const std::string want = norm(std::string(key));
+    for (const ModDescriptor& m : mods)  // the catalog key first: it is unique across kinds
+        if (norm(m.catalog_key()) == want) return &m;
     for (const ModDescriptor& m : mods)
-        if (lower(m.key()) == lower(std::string(key))) return &m;
+        if (norm(m.key()) == want) return &m;
     return nullptr;
 }
 
-const ModDescriptor* ModRegistry::find_root(std::string_view root) const {
+const ModDescriptor* ModCatalog::find_root(std::string_view root) const {
     const std::string want = norm_path(std::string(root));
     const ModDescriptor* first = nullptr;  // a folder with variant files only: its first variant
     for (const ModDescriptor& m : mods)
@@ -460,7 +479,7 @@ const ModDescriptor* ModRegistry::find_root(std::string_view root) const {
     return first;
 }
 
-const ModDescriptor* ModRegistry::find_workshop(std::string_view id) const {
+const ModDescriptor* ModCatalog::find_workshop(std::string_view id) const {
     const ModDescriptor* first = nullptr;
     for (const ModDescriptor& m : mods)
         if (m.kind == ModKind::Workshop && m.id == id) {
@@ -470,7 +489,7 @@ const ModDescriptor* ModRegistry::find_workshop(std::string_view id) const {
     return first;
 }
 
-const ModDescriptor* ModRegistry::find_dependency(const ModDependency& d) const {
+const ModDescriptor* ModCatalog::find_dependency(const ModDependency& d) const {
     if (d.modtype == 1) {
         return find_workshop(d.identifier);
     }
@@ -487,7 +506,7 @@ const ModDescriptor* ModRegistry::find_dependency(const ModDependency& d) const 
     return nullptr;
 }
 
-const ModDescriptor* ModRegistry::find_arg(std::string_view arg, std::vector<ModDescriptor>& scratch) const {
+const ModDescriptor* ModCatalog::find_arg(std::string_view arg, std::vector<ModDescriptor>& scratch) const {
     const size_t eq = arg.find('=');
     if (eq == std::string_view::npos) return find_key(arg);
     const std::string sw = upper(std::string(arg.substr(0, eq)));
@@ -509,10 +528,10 @@ const ModDescriptor* ModRegistry::find_arg(std::string_view arg, std::vector<Mod
     return &scratch.back();
 }
 
-ModRegistry scan_installed_mods(const std::string& game, std::span<const std::string> workshop_libraries, bool hash) {
-    ModRegistry r;
-    r.game = game;
-    std::set<std::string> seen;
+ModCatalog scan_mod_catalog(const InstallLocations& where, bool hash) {
+    ModCatalog r;
+    r.game = where.foc;
+    std::set<std::string> seen, seen_roots;
     std::error_code ec;
     const auto folders = [&](const fs::path& dir, bool digits) {
         std::vector<fs::path> v;
@@ -527,18 +546,37 @@ ModRegistry scan_installed_mods(const std::string& game, std::span<const std::st
         std::sort(v.begin(), v.end(), [](const fs::path& a, const fs::path& b) { return path_to_utf8(a.filename()) < path_to_utf8(b.filename()); });
         return v;
     };
-    for (const std::string& lib : workshop_libraries) {
+    const auto add = [&](const fs::path& folder, ModKind kind, const std::string& id) {
+        const std::string root = path_to_utf8(folder);
+        if (!seen_roots.insert(norm_path(root)).second) return;  // listed already (an extra folder inside Mods)
+        for (ModDescriptor& d : describe_mod_folder(root, kind, id, hash)) r.mods.push_back(std::move(d));
+    };
+    for (const std::string& lib : where.steam_libraries) {
         const fs::path content = path_from_utf8(lib) / "steamapps" / "workshop" / "content" / "32470";
         for (const fs::path& item : folders(content, true)) {
             const std::string id = path_to_utf8(item.filename());
             if (!seen.insert(id).second) continue;  // the first library holding an id wins (the STEAMMOD= resolver)
-            for (ModDescriptor& d : describe_mod_folder(path_to_utf8(item), ModKind::Workshop, id, hash)) r.mods.push_back(std::move(d));
+            add(item, ModKind::Workshop, id);
         }
     }
-    for (const fs::path& local : folders(path_from_utf8(game) / "Mods", false))
-        for (ModDescriptor& d : describe_mod_folder(path_to_utf8(local), ModKind::LocalMods, path_to_utf8(local.filename()), hash))
-            r.mods.push_back(std::move(d));
+    if (!where.foc.empty())
+        for (const fs::path& local : folders(path_from_utf8(where.foc) / "Mods", false)) add(local, ModKind::LocalMods, path_to_utf8(local.filename()));
+    for (const std::string& extra : where.mod_folders) {
+        const fs::path dir = path_from_utf8(extra);
+        if (fs::is_directory(dir / "Data", ec)) {
+            add(dir, ModKind::Path, path_to_utf8(dir.filename()));
+            continue;
+        }
+        for (const fs::path& sub : folders(dir, false)) add(sub, ModKind::Path, path_to_utf8(sub.filename()));
+    }
     return r;
+}
+
+ModCatalog scan_installed_mods(const std::string& game, std::span<const std::string> workshop_libraries, bool hash) {
+    InstallLocations where;
+    where.foc = game;
+    where.steam_libraries.assign(workshop_libraries.begin(), workshop_libraries.end());
+    return scan_mod_catalog(where, hash);
 }
 
 bool mod_provides(const std::string& root, std::string_view path) {
@@ -578,14 +616,27 @@ bool mod_provides(const std::string& root, std::string_view path) {
     return false;
 }
 
-ResolvedStack resolve_stack(const ModRegistry& registry, std::span<const std::string> picked_args, const ParentHint& hint) {
-    ResolvedStack r;
+std::vector<std::string> ModStack::launch_args() const {
+    std::vector<std::string> out;
+    if (base_eaw) return out;  // D1: refused
+    std::set<std::string> seen;
+    for (const std::string& a : args)
+        if (seen.insert(lower(a)).second) out.push_back(a);
+    return out;
+}
+
+ModStack resolve_stack(const ModCatalog& registry, std::span<const std::string> picked_args, const ParentHint& hint) {
+    return resolve(registry, picked_args, hint);
+}
+
+ModStack resolve(const ModCatalog& registry, std::span<const std::string> picked_args, const ParentHint& hint) {
+    ModStack r;
     std::vector<ModDescriptor> scratch;
     scratch.reserve(picked_args.size() + 8);
     std::vector<StackMod> found;                    // discovery order
     std::vector<std::vector<size_t>> deps;          // found index -> found indices it depends on
     std::map<std::string, size_t> index_of;         // lower-case key -> found index
-    const auto key_of = [](const ModDescriptor& m) { return lower(m.key()); };
+    const auto key_of = [](const ModDescriptor& m) { return lower(m.catalog_key()); };  // unique across kinds
     const auto add = [&](const ModDescriptor& m, std::string reason) -> size_t {
         const auto it = index_of.find(key_of(m));
         if (it != index_of.end()) return it->second;

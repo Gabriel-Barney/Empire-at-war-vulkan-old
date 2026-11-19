@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "alamo/core/host_fs.hpp"
+#include "alamo/vfs/install_locations.hpp"
 #include "alamo/meg/meg.h"
 #include "alamo/vfs/mod_registry.hpp"
 #include "alamo/vfs/vfs.hpp"
@@ -172,6 +173,36 @@ void test_registry(const Fixture& f) {
     data_file(f.T / "Elsewhere", "XML/e.xml");
     const av::ModDescriptor* e = r.find_arg("MODPATH=" + u8(f.T / "Elsewhere"), scratch);
     CHECK(e && e->kind == av::ModKind::Path && e->id == "Elsewhere");
+
+    // ums1 t02: the catalog keys (unique across kinds) name the same rows; names from modinfo say so.
+    std::vector<std::string> ckeys;
+    for (const auto& m : r.mods) ckeys.push_back(m.catalog_key());
+    CHECK(joined(ckeys) == "100 | 200 | 300 | 400 | 400:subA | 400:subB | 500 | 600:x | Mods\\AOW | Mods\\CycA | Mods\\CycB");
+    CHECK(r.find_key("Mods\\AOW") == r.find_key("AOW") && r.find_key("mods/aow") == r.find_key("AOW"));
+    CHECK(r.find_key("400:SUBA") == a && r.find_key("Mods\\Nope") == nullptr);
+    CHECK(big && big->named && hd && !hd->named);
+    CHECK(r.find_key("600:x") && r.find_key("600:x")->name == "Only X" && r.find_key("600:x")->named);
+    // Extra mod folders (a mod, or a folder of mods), after Mods; a folder listed already is skipped.
+    {
+        data_file(f.T / "Extra" / "One", "XML/one.xml");
+        data_file(f.T / "Extra" / "Two", "XML/two.xml");
+        write_file(f.T / "Extra" / "NoData" / "readme.txt", "x");
+        data_file(f.T / "Single", "XML/s.xml");
+        write_file(f.T / "Single" / "modinfo.json", R"({"name": "Single", "steamdata": {"publishedfileid": "424242"}})");
+        av::InstallLocations where;
+        where.foc = u8(f.game);
+        where.steam_libraries = libs;
+        where.mod_folders = {u8(f.T / "Extra"), u8(f.T / "Single"), u8(f.game / "Mods" / "AOW")};
+        const av::ModCatalog c = av::scan_mod_catalog(where, false);
+        CHECK(c.mods.size() == r.mods.size() + 3);
+        if (c.mods.size() == r.mods.size() + 3) {
+            const av::ModDescriptor& one = c.mods[r.mods.size()];
+            CHECK(one.kind == av::ModKind::Path && one.id == "One" && one.catalog_key() == u8(f.T / "Extra" / "One"));
+            CHECK(one.arg() == "MODPATH=" + u8(f.T / "Extra" / "One") && one.content_hash == 0);
+            CHECK(c.mods.back().id == "Single" && c.mods.back().published_id == "424242");
+            CHECK(c.find_key(u8(f.T / "Single")) == &c.mods.back());
+        }
+    }
 
     CHECK(av::mod_provides(u8(f.item("100")), "Data\\XML\\GameObjectFiles.xml"));
     CHECK(av::mod_provides(u8(f.item("100")), "DATA\\xml\\factionfiles.XML"));
