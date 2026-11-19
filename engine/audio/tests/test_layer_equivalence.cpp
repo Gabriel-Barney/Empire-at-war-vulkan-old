@@ -139,7 +139,23 @@ Counts compare(const char* label, const vfs::Vfs& v) {
         CHECK(diff == 0);
         if (std::string_view(lang) == "English") c.sfx = got.size();
     }
-    std::printf("  %s: %zu shader entries (%zu from the mod), %zu SFX archives: equal\n", label, c.shaders, c.shaders_from_mod, c.sfx);
+    // The owning mod of every layer (vfs::Layer::mod) equals the old rule's answer: a mod layer is its own search
+    // position, a MEG belongs to the mod folder it lies in (the pre-ums0 host_path_under test), anything else to the base.
+    size_t owner_diff = 0;
+    for (const vfs::Layer& l : v.layers()) {
+        int want = -1;
+        if (l.kind == vfs::Layer::Kind::Mod) {
+            want = l.index;
+        } else if (l.kind == vfs::Layer::Kind::Meg) {
+            for (size_t i = 0; i < v.mod_dirs().size() && want < 0; ++i)
+                if (materials::host_path_under(l.host_root, v.mod_dirs()[i])) want = static_cast<int>(i);
+        }
+        if (l.mod != want && owner_diff++ < 5)
+            std::printf("  %s: layer %s owned by %d, expected %d\n", label, l.host_root.c_str(), l.mod, want);
+    }
+    CHECK(owner_diff == 0);
+    std::printf("  %s: %zu shader entries (%zu from the mod), %zu SFX archives, %zu layer owners: equal\n", label, c.shaders,
+                c.shaders_from_mod, c.sfx, v.layers().size());
     return c;
 }
 
@@ -203,6 +219,13 @@ int main() {
         }
     }
     std::printf("%zu mod setups compared, %zu shader entries attributed to a mod\n", mods_run, from_mod_total);
-    CHECK(mods_run == 0 || from_mod_total > 0);  // the comparison saw mod-owned entries, not only base ones
+    if (mods_run == 0) {
+        // Base FoC alone proves little: report a skip, not a pass, when no reference mod is installed.
+        alamo::test::report("alamo_audio_layer_equivalence_tests");
+        if (g_fail) return 1;
+        std::printf("SKIP layer equivalence on the reference mods: none installed next to ALAMO_FOC_DATA\n");
+        return alamo::test::kSkipReturnCode;
+    }
+    CHECK(from_mod_total > 0);  // the comparison saw mod-owned entries, not only base ones
     return alamo::test::report("alamo_audio_layer_equivalence_tests");
 }

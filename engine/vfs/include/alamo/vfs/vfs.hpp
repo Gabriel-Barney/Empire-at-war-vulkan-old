@@ -197,6 +197,11 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+// Layer::Kind and Vfs::Resolution::Layer name the same four kinds with the same values.
+static_assert(static_cast<int>(Layer::Kind::Mod) == Vfs::Resolution::Mod && static_cast<int>(Layer::Kind::Base) == Vfs::Resolution::Base &&
+              static_cast<int>(Layer::Kind::Meg) == Vfs::Resolution::Meg &&
+              static_cast<int>(Layer::Kind::Fallback) == Vfs::Resolution::Fallback);
+
 // Tolerant <File>...</File> extractor for MegaFiles.xml (comments skipped, entries trimmed,
 // UTF-8/ASCII or UTF-16LE with BOM). Exposed for tests/diagnostics.
 std::vector<std::string> parse_megafiles_xml(std::span<const uint8_t> bytes);

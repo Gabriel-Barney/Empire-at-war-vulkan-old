@@ -162,8 +162,8 @@ mod system refactor").
   archive list; the load report's MEG issues and the asset audit still test paths until ums2 / ums4 remove the last
   `mod_dirs()` callers.
 - **One walk for every copy.** `Vfs::resolve_all(path)` returns every copy in resolution order (`[0]` is what `read`
-  returns); code that needs the lower copies (the SFX archives, which a mod's copy layers over FoC's: `docs/re/AUDIO.md` §5, aud2 t05) takes them from there instead of building
-  `<mod>\Data\...` paths by hand.
+  returns); code that needs the lower copies (the SFX archives, which a mod's copy layers over FoC's:
+  `docs/re/AUDIO.md` §5, aud2 t05) takes them from there instead of building `<mod>\Data\...` paths by hand.
 - **Findings carry their layer.** `Vfs::create` takes an optional `IssueSink`; malformed MEG tables go there as
   retail-equivalent issues with `Layer::issue_layer()` (the mod's index, or `kBaseLayer`).
 - **Checked equal.** `alamo_audio_layer_equivalence_tests` compares the shader entries and the SFX archive list with the

@@ -146,6 +146,9 @@ struct LooseRoot {
     }
 };
 
+// CompatIssue::layer of a finding in a layer owned by mod `mod` (-1 = the base game): the mod's index, or kBaseLayer.
+uint16_t issue_layer_for(int mod) { return mod >= 0 ? static_cast<uint16_t>(mod) : alamo::kBaseLayer; }
+
 struct Hit {
     Vfs::Resolution::Layer layer = Vfs::Resolution::Base;
     int index = 0;
@@ -433,7 +436,7 @@ struct Vfs::Impl {
                     issues->add(ik, IssueSeverity::Info, host, host,
                                 std::string(Vfs::MegIssue::kind_name(kind)) + ": " + std::to_string(count) +
                                     " record(s), first " + first,
-                                true, Layer{Layer::Kind::Meg, 0, {}, owner}.issue_layer());
+                                true, issue_layer_for(owner));
                 }
             };
             if (t.unsorted)
@@ -629,7 +632,7 @@ const Layer* Vfs::layer_of(const Resolution& r) const {
     return slot < impl_->layers.size() ? &impl_->layers[slot] : nullptr;
 }
 
-uint16_t Layer::issue_layer() const { return mod >= 0 ? static_cast<uint16_t>(mod) : alamo::kBaseLayer; }
+uint16_t Layer::issue_layer() const { return issue_layer_for(mod); }
 
 bool Vfs::read(std::string_view path, std::vector<uint8_t>& out) const {
     out.clear();
