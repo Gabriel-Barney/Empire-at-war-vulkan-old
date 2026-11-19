@@ -115,6 +115,27 @@ std::vector<std::wstring> game_args(const fs::path& game, const fs::path& cache,
     return out;
 }
 
+std::optional<std::vector<std::wstring>> stack_mod_args(const std::vector<std::wstring>& args, const ModStackResolver& resolve) {
+    const auto is_mod = [](const std::wstring& a) {
+        const auto starts = [&](const wchar_t* p) {
+            const std::wstring s(p);
+            return a.size() >= s.size() && iequals(a.substr(0, s.size()), p);
+        };
+        return starts(L"MODPATH=") || starts(L"STEAMMOD=");
+    };
+    std::vector<std::wstring> out;
+    std::vector<std::string> picked;
+    for (const std::wstring& a : args) {
+        if (is_mod(a)) picked.push_back(utf8(fs::path(a)));
+        else out.push_back(a);
+    }
+    if (picked.empty()) return args;
+    const std::optional<std::vector<std::string>> launch = resolve(picked);
+    if (!launch) return std::nullopt;
+    for (const std::string& a : *launch) out.push_back(from_utf8(a).wstring());
+    return out;
+}
+
 std::wstring quote_arg(const std::wstring& arg) {
     if (!arg.empty() && arg.find_first_of(L" \t\n\v\"") == std::wstring::npos) return arg;
     std::wstring out = L"\"";
