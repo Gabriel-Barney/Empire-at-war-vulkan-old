@@ -42,6 +42,7 @@ enum class IssueKind : uint8_t {
     MissingFile,        // a file the data names that no layer has
     XmlExtraRoot,       // an XML file with more than one top-level element
     TextSalvaged,       // a text database read up to a bad record
+    LoaderDiagnostic,   // a data loader's diagnostic line (GameData::diagnostics; ums4 t07), with the layer of the file it names
     Count
 };
 // "unread_tag", "honour_gap", ... (the spelling the JSON report uses); "" for Count.

@@ -12,6 +12,7 @@ constexpr std::array<std::string_view, static_cast<size_t>(IssueKind::Count)> kK
     "unread_tag",         "honour_gap",     "retail_equivalent", "asset_rejected", "asset_salvaged", "binding_unconsumed",
     "reward_missing",     "token_missing",  "limit_hit",         "meg_unsorted",   "meg_name_mismatch", "meg_duplicate",
     "gui_fallback",       "script_runaway", "script_error",      "missing_file",   "xml_extra_root",  "text_salvaged",
+    "loader_diagnostic",
 };
 
 }  // namespace

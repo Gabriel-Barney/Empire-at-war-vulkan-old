@@ -87,6 +87,13 @@ if(ALAMO_LINT_PYTHON)
   add_test(NAME alamo_core_limits_lint_selftest
            COMMAND ${ALAMO_LINT_PYTHON} ${PROJECT_SOURCE_DIR}/tools/lint/check_limits.py --selftest)
   set_tests_properties(alamo_core_limits_lint alamo_core_limits_lint_selftest PROPERTIES TIMEOUT 120)
+  # ums4 t03: no Vfs::mod_dirs() call outside engine/vfs, no modinfo.json reader outside the mod catalog, no removed shim
+  # name (tools/lint/check_mod_system.py, docs/MODS.md 3.2).
+  add_test(NAME alamo_core_mod_system_lint
+           COMMAND ${ALAMO_LINT_PYTHON} ${PROJECT_SOURCE_DIR}/tools/lint/check_mod_system.py --root ${PROJECT_SOURCE_DIR})
+  add_test(NAME alamo_core_mod_system_lint_selftest
+           COMMAND ${ALAMO_LINT_PYTHON} ${PROJECT_SOURCE_DIR}/tools/lint/check_mod_system.py --selftest)
+  set_tests_properties(alamo_core_mod_system_lint alamo_core_mod_system_lint_selftest PROPERTIES TIMEOUT 120)
 else()
   message(STATUS "python not found: alamo_core_mod_names_lint not registered (build_gate.cmd still runs it)")
 endif()
