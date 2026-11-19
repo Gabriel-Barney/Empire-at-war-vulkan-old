@@ -181,7 +181,7 @@ Consequences for mods (all **main**):
 - **Directory scans are not lookups.** Listings (skirmish maps, AI plan folders, scripts) follow the rules of the spec that
   defines them (`docs/re/UI.md` §9.2: mod-folder maps go to the *custom* map list; `PHASE2.md` note on `Vfs::list(glob, layers)`).
 
-#### Layers and provenance (Stage 10, ums0)
+#### Layers and provenance (Stage 10, ums0, ums2)
 
 Port rules for code that asks where a file came from; the resolution order above is unchanged (`DECISIONS.md`, "Unified
 mod system refactor").
@@ -196,14 +196,24 @@ mod system refactor").
   odd setups (a FALLBACKPATH folder inside a mod folder, a mod folder that contains the FoC install): the effect audit
   now counts those archives as base.
 - **Ask the layer, not the path.** "Is this file from a mod, and which one" reads `Layer::mod`, not a comparison of host
-  paths with the mod folders. Moved so far: `shader_files_from_vfs` (ShaderFileEntry `from_mod` / `dir_order`) and the SFX
-  archive list; the load report's MEG issues and the asset audit still test paths until ums2 / ums4 remove the last
-  `mod_dirs()` callers.
+  paths with the mod folders. Moved so far: `shader_files_from_vfs` (ShaderFileEntry `from_mod` / `dir_order`), the SFX
+  archive list, the load report's MEG issues and its issue layers (ums2), `--conflicts` (`Vfs::layer_files`); the asset
+  audit and a few report helpers still read `mod_dirs()` until ums4 removes the last callers outside `engine/vfs`.
 - **One walk for every copy.** `Vfs::resolve_all(path)` returns every copy in resolution order (`[0]` is what `read`
   returns); code that needs the lower copies (the SFX archives, which a mod's copy layers over FoC's:
   `docs/re/AUDIO.md` §5, aud2 t05) takes them from there instead of building `<mod>\Data\...` paths by hand.
-- **Findings carry their layer.** `Vfs::create` takes an optional `IssueSink`; malformed MEG tables go there as
-  retail-equivalent issues with `Layer::issue_layer()` (the mod's index, or `kBaseLayer`).
+- **Findings carry their layer.** `Vfs::create` takes an optional `IssueSink`; every VFS finding goes there with
+  `Layer::issue_layer()` (the owning mod's index in the search list, `kBaseLayer`, or `kNoLayer` for a `STEAMMOD=` that
+  mounts nothing) as well as into `warnings()`: malformed MEG tables (retail-equivalent), a `MegaFiles.xml` entry no
+  layer has (`missing_file`, on the layer of the list that names it), an unreadable or encrypted MEG (`asset_rejected`),
+  a mod or fallback folder without `Data`, a missing EaW install. The load report lists them in `issues` (ums2).
+- **One mod environment per process.** `vfs::ModEnvironment::open(game, args, issues, error)`
+  (`engine/vfs/include/alamo/vfs/mod_environment.hpp`) opens the game's files: the mount plan from the command line
+  (the same `parse_command_line` rule, nothing reordered or added), the `Vfs`, one `ModDescriptor` per mounted mod
+  (`mounted()`, search-list order, so `Layer::mod` indexes it), the D1 base-EaW refusal (`refused()`: the environment
+  stays open so a report can name the mod; a host that runs the game stops), and `owner(layer)` / `owner_of(path)`.
+  `alamo_game`, `alamo_headless`, `alamo_mod_check` and `alamo_session_run` open through it (`game::load_game_data`
+  for the three that load `GameData`); the launch arguments it gets come from the one resolver of §3.1.2.
 - **Checked equal.** `alamo_audio_layer_equivalence_tests` compares the shader entries and the SFX archive list with the
   pre-ums0 code on base FoC and the installed reference mods.
 
@@ -491,6 +501,10 @@ Version 4 (mcx0 t06, 2026-11-17; `docs/MOD_COMPAT_DESIGN.md` §12.1): `honour_ga
 `story`, `ai`, `limits`, `assets` (mcx2 t01) and `grade` are new, after `check_errors`. None of their entries counts as an error or warning,
 so `result`, `errors` and `warnings` are unchanged for the same data. Readers of version 3 keys need no change. The
 findings are also core `alamo::CompatIssue` records (`ModCheckReport::issues`, `engine/core/include/alamo/core/compat_issue.hpp`).
+Since ums2 (2026-11-19, still version 4) those records also hold the VFS's own findings, each with its layer (§3.2
+"Findings carry their layer"); `files.vfs_warnings` keeps the same lines as text for one more version and goes in
+version 5 (ums4). A finding from a mod's files carries the layer of the mod that serves the file (its index in the
+search list); before ums2 every mod finding said layer 0.
 
 Installed mods, 2026-11-07 (base FoC at F:): with modc t22 (SM3 translated) the shader issues left are
 `AlamoEngine` `source_shadowed` (an engine effect: TR, its copy 3622043265, FotR) and `_TerrainRenderBump`
