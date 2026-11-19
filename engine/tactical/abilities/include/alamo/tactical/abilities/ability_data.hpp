@@ -154,6 +154,9 @@ struct SpecialAbilityDesc {
     // Combat_Bonus (TACTICAL_COMBAT §4.3) / Enhance_Defense: per list (ModList index) value, 0 = no entry
     std::array<float, combat::kModListCount> bonus{};
     bool apply_to_all_allies = false;     // Apply_To_All_Allies / Affects_All_Allies
+    // mcx4-tac2: Garrison_Upgrade_Ability Additional_Garrison_Units (+0x180), host type indices in list order (unknown
+    // names dropped [port]).
+    std::vector<int32_t> garrison_units;
     bool reverse_logic = false;           // Reverse_Application_Logic
     // s78n t04 (TACTICAL_COMBAT §5.4.4 item 3a): Combat_Bonus Specific_Faction (+0x1a0, resolved into +0x1c0), as written;
     // "" = unset. AbilitySystem::set_host resolves it through AbilityHost::faction_index (unknown = unset, a warning).
@@ -306,6 +309,13 @@ struct AbilityObjectDesc {
     float max_speed = 0.0f;
     // mcx4 (§5): Is_Force_Sensitive (type +0x15): HUNT prefers force-sensitive objects and goes to their exact position.
     bool force_sensitive = false;
+    // mcx4-tac2 (MCX4_T11_T12_RE_ANSWERS §C4 round 4): the HARASS (0x41) / AVOID_DANGER (0x42) behaviours' search half-size
+    // - Harass_Enemy_Exclusion_Range (+0x204c) / Avoid_Enemy_Exclusion_Range (+0x2050) when the type lists the behaviour,
+    // else 0 (no service: a range of 0 returns at once) - and the type's AI combat power (0x370e60: AI_Combat_Power
+    // +0xdf0), the value the services rank the enemies by.
+    float harass_range = 0.0f;
+    float avoid_range = 0.0f;
+    float ai_combat_power = 0.0f;
 };
 
 struct AbilityData {

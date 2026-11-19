@@ -786,7 +786,15 @@ void MovementSystem::set_lanes(const std::vector<uint32_t>& idx, const LandForm&
         }
         // bkm1 t02 (b0096, MOVEMENT §4.3.3 item 2): the depth behind the front row (retail's front row is depth 0, the
         // port's layout centres its rows)
-        x.lane = member_lane(grid_, fpath, sh, s.back - b0, x.lp.mask, x.m.pos);
+        // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 Round 4 "ShouldSkipLandFormup = false", 0x41c1a0 [H]): with the constant
+        // clear, the member's lane starts at its form-up point (pack +0x120: its slot in the layout box at the formation
+        // path's start - [port M] the front row on wp0, the rows behind it along -fwd0, sideways its lateral at arc 0), and
+        // the plan walks it there first (the lead-in path, plan_land). Set (FoC), the lane starts where the member stands.
+        V2 from = x.m.pos;
+        // ledger: consumes GameConstants.ShouldSkipLandFormup
+        if (!cfg_.constants.should_skip_land_formup && f.members.size() > 1)
+            from = fpath[0] - fwd0 * (s.back - b0) + perp_left(fwd0) * sh.lateral_at(0.0f);
+        x.lane = member_lane(grid_, fpath, sh, s.back - b0, x.lp.mask, from);
         x.lane_d = d;
         x.lane_z = fz;  // [port] the lane's end is G's lateral offset: it keeps G's height
         x.goal = x.lane.back();  // bkm1 t02: its stop point (MOVEMENT §4.3.3; an attack member: around the cut end)

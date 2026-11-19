@@ -662,7 +662,156 @@ static void test_mcx4_buzz_droids() {
     CHECK(std::fabs((w.sys->max_health(50) - w.sys->health(50)) - 16.0f * 0.1f) < 1e-3f);  // 3 / 30 per active frame
 }
 
+// ledger: verifies GameObjectType.Harass_Enemy_Exclusion_Range
+static void test_mcx4_harass() {
+    // MCX4_T11_T12_RE_ANSWERS §C4 round 4 (HARASS 0x58dd10): every 30 frames, while the unit stands, the enemy in the square
+    // of half-size Harass_Enemy_Exclusion_Range whose type has the largest AI combat power is picked, and the unit moves to
+    // e + range(e) x normalise(map centre - e). Harasser at the origin (range 100, Sand_Person_Sniper_A's); enemies: power
+    // 50 at (60, 0), power 80 at (0, 90) with range 300, power 500 at (300, 0) outside the square; a friend of power 1000
+    // beside it. Centre (0, 0): the point is (0, 90) + 300 x (0, -1) = (0, -210). A zero range never moves.
+    auto run = [](float harass_range, size_t& moves, Vec3& point) {
+        OiWorld w;
+        AbilityObjectDesc ha;
+        ha.harass_range = harass_range;  // Harass_Enemy_Exclusion_Range (only with the HARASS behaviour)
+        const uint32_t hd = push(w.cd, w.ad, oi_unit("Sniper", 100.0f), ha);
+        auto enemy = [&](const char* name, float power, float range) {
+            UnitDesc u = oi_unit(name, 100.0f);
+            u.max_attack_distance = range;
+            AbilityObjectDesc a;
+            a.ai_combat_power = power;
+            return push(w.cd, w.ad, u, a);
+        };
+        const uint32_t e50 = enemy("E50", 50.0f, 200.0f), e80 = enemy("E80", 80.0f, 300.0f), e500 = enemy("E500", 500.0f, 400.0f);
+        const uint32_t f1000 = enemy("F1000", 1000.0f, 100.0f);
+        w.make(GameMode::Land);
+        w.add(1, hd, 0, {0, 0, 0});
+        w.add(2, e50, 1, {60, 0, 0});
+        w.add(3, e80, 1, {0, 90, 0});
+        w.add(4, e500, 1, {300, 0, 0});
+        w.add(5, f1000, 0, {10, 10, 0});
+        for (int i = 0; i < 91; ++i) w.tick();  // three services (the first due frame is drawn in [add, add + 29])
+        moves = w.count(AbilityEventKind::MoveOrder, 1);
+        if (const AbilityEvent* m = w.last(AbilityEventKind::MoveOrder, 1)) point = m->point;
+    };
+    size_t moves = 0;
+    Vec3 p{};
+    run(100.0f, moves, p);
+    std::printf("  harass: %zu moves, last (%.1f, %.1f)\n", moves, static_cast<double>(p.x), static_cast<double>(p.y));
+    CHECK(moves >= 2u && moves <= 3u);  // one move per 30-frame service while the unit stands
+    CHECK(std::fabs(p.x) < 1e-3f && std::fabs(p.y + 210.0f) < 1e-3f);
+    run(0.0f, moves, p);
+    CHECK(moves == 0u);
+    CHECK(AbilityObjectDesc{}.harass_range == 0.0f && AbilityObjectDesc{}.avoid_range == 0.0f);
+}
+
+// ledger: verifies GameObjectType.Avoid_Enemy_Exclusion_Range
+static void test_mcx4_avoid_danger() {
+    // §C4 round 4 (AVOID_DANGER 0x58e8e0): the same pick with Avoid_Enemy_Exclusion_Range; g = the formation's destination
+    // (400, 0) from the unit at the origin (v = (1, 0), D = 400); the enemy at (50, -60) is right of u -> g, so p is the
+    // left turn (0, 1); dir = normalise(v + p); point = u + (range(e) - D) x dir = -100 x (0.7071, 0.7071); then the old
+    // destination again (a resume move). Without a formation destination nothing happens.
+    auto run = [](bool goal, std::vector<AbilityEvent>& moves) {
+        OiWorld w;
+        AbilityObjectDesc aa;
+        aa.avoid_range = 500.0f;  // Avoid_Enemy_Exclusion_Range (TIE_Scout's value; no FoC type lists AVOID_DANGER)
+        const uint32_t ad_ = push(w.cd, w.ad, oi_unit("Scout", 100.0f), aa);
+        UnitDesc eu = oi_unit("Enemy", 100.0f);
+        eu.max_attack_distance = 300.0f;
+        AbilityObjectDesc ea;
+        ea.ai_combat_power = 10.0f;
+        const uint32_t ed = push(w.cd, w.ad, eu, ea);
+        w.make(GameMode::Land);
+        AbilityHost h;
+        h.map_rect = [](Vec3& lo, Vec3& hi) {
+            lo = Vec3{-1000.0f, -1000.0f, 0.0f};
+            hi = Vec3{1000.0f, 1000.0f, 0.0f};
+            return true;
+        };
+        if (goal)
+            h.move_goal = [](ObjectId id, Vec3& g) {
+                if (id != 1) return false;
+                g = Vec3{400.0f, 0.0f, 0.0f};
+                return true;
+            };
+        w.ab->set_host(std::move(h));
+        w.add(1, ad_, 0, {0, 0, 0});
+        w.add(2, ed, 1, {50, -60, 0});
+        for (int i = 0; i < 61; ++i) w.tick();
+        moves.clear();
+        for (const AbilityEvent& e : w.log)
+            if (e.kind == AbilityEventKind::MoveOrder && e.id == 1) moves.push_back(e);
+    };
+    std::vector<AbilityEvent> moves;
+    run(true, moves);
+    CHECK(moves.size() >= 2u && moves.size() % 2u == 0u);  // each service: the side step, then the resume
+    if (moves.size() >= 2u) {
+        const float k = -100.0f / std::sqrt(2.0f);
+        std::printf("  avoid: side step (%.2f, %.2f), then (%.1f, %.1f) value %d\n", static_cast<double>(moves[0].point.x),
+                    static_cast<double>(moves[0].point.y), static_cast<double>(moves[1].point.x),
+                    static_cast<double>(moves[1].point.y), moves[1].value);
+        CHECK(std::fabs(moves[0].point.x - k) < 1e-3f && std::fabs(moves[0].point.y - k) < 1e-3f && moves[0].value == 0);
+        CHECK(moves[1].point.x == 400.0f && moves[1].point.y == 0.0f && moves[1].value == kMoveResume);
+    }
+    run(false, moves);
+    CHECK(moves.empty());
+}
+
+// ledger: verifies HardwareConfiguration.Additional_Garrison_Units
+static void test_mcx4_garrison_upgrade() {
+    // XML_FIELD_TABLE_SEGMENTS (Garrison_Upgrade_Ability, vtable 0x8c7f20): the parser reads Additional_Garrison_Units as
+    // a type list; apply 0x6ffc60 (an automatic style at the upgrade object's creation) appends each type to the start-force
+    // list of the owner - or of every player allied with it under Apply_To_All_Allies - and remove 0x6ffe30 (the object's
+    // removal) takes them out again. Can-apply 0x6ffdb0 passes only in a skirmish.
+    const data::XmlDocument doc = data::XmlDocument::parse(
+        "<Garrison_Upgrade_Ability Name=\"RL_More_Garrisons_L1_Bonus\"><Activation_Style>Ground_Automatic</Activation_Style>"
+        "<Apply_To_All_Allies>Yes</Apply_To_All_Allies>"
+        "<Additional_Garrison_Units>Rebel_Tank_Buster_Squad, Rebel_Light_Tank_Brigade, Unknown_Type</Additional_Garrison_Units>"
+        "</Garrison_Upgrade_Ability>",
+        "garrison.xml");
+    AbilityResolvers r;
+    r.object_type = [](std::string_view n) -> int32_t { return n == "Rebel_Tank_Buster_Squad" ? 7 : n == "Rebel_Light_Tank_Brigade" ? 8 : -1; };
+    const SpecialAbilityDesc parsed = parse_special_ability(doc.root(), r, nullptr);
+    CHECK(parsed.cls == SpecialClass::GarrisonUpgrade && parsed.style == ActivationStyle::GroundAutomatic && parsed.apply_to_all_allies);
+    CHECK((parsed.garrison_units == std::vector<int32_t>{7, 8}));
+    using Call = std::pair<int32_t, int32_t>;  // {player, +type / -type}
+    auto run = [&](bool skirmish, bool all_allies, std::vector<Call>& calls) {
+        OiWorld w;
+        SpecialAbilityDesc g = parsed;
+        g.apply_to_all_allies = all_allies;
+        AbilityObjectDesc up;
+        up.specials = {add_special(w.ad, g)};
+        const uint32_t ud = push_container(w.cd, w.ad, up);
+        w.make(GameMode::Land);
+        AbilityConfig acfg;
+        acfg.mode = GameMode::Land;
+        acfg.corvette_category = kCatCorvette;
+        acfg.skirmish = skirmish;
+        w.ab.reset();
+        w.ab = std::make_unique<AbilitySystem>(*w.sys, w.ad, acfg);
+        w.ab->bind_rng(&w.rng);
+        AbilityHost h;
+        h.allied_players = [](int32_t a, int32_t b) { return a == b || (a == 0 && b == 2) || (a == 2 && b == 0); };
+        h.garrison_units = [&calls](int32_t p, int32_t type, bool add) { calls.emplace_back(p, add ? type : -type); };
+        w.ab->set_host(std::move(h));
+        const std::vector<ObjectId> none;
+        CHECK(w.ab->add_container(40, ud, 0, none, w.frame, &w.rng));
+        w.ab->remove(40);
+    };
+    std::vector<Call> calls;
+    run(true, true, calls);
+    CHECK((calls == std::vector<Call>{{0, 7}, {0, 8}, {2, 7}, {2, 8}, {0, -7}, {0, -8}, {2, -7}, {2, -8}}));
+    calls.clear();
+    run(true, false, calls);
+    CHECK((calls == std::vector<Call>{{0, 7}, {0, 8}, {0, -7}, {0, -8}}));
+    calls.clear();
+    run(false, true, calls);  // a campaign battle: never applied
+    CHECK(calls.empty());
+}
+
 void test_mcx4_tac2() {
+    test_mcx4_harass();
+    test_mcx4_avoid_danger();
+    test_mcx4_garrison_upgrade();
     test_mcx4_redirect_blaster_shots();
     test_mcx4_terminate_on_move();
     test_mcx4_flame_damage_delay();

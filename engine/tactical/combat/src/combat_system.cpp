@@ -41,6 +41,7 @@ CombatSystem::CombatSystem(const CombatData& data, CombatConfig config, std::vec
         for (uint32_t b = 0; b < n; ++b) enemy_[static_cast<size_t>(a) * n + b] = a != b ? 1 : 0;
     player_mods_.resize(n);
     sw_hp_enabled_.assign(n, 1);  // player tactical data +0x2f0 init (0x526890)
+    manual_cd_.assign(n, ManualFireCooldown{});  // mcx4: player +0x47c / +0x480, 0 until a manual shot
     for (ModifierSet& s : player_mods_) s.reserve(16);
     // OI tactical: Diminishing_Firepower natural cubic spline (TACTICAL_GAPS 3.3): points sorted by x (stable), second
     // derivatives with y'' = 0 at both ends (tridiagonal solve, float).
@@ -1799,9 +1800,16 @@ void CombatSystem::update_weapons(Unit& u, uint32_t frame, SimRng& rng, bool sus
         }
         // Update_Weapon (0x387400): gates (S8 t08: none in a deploy transition), then the cooldown countdown, then the
         // weapon-state gate 0x384850 against the primary target (a refusal skips Fire_At and opportunity fire), Fire_At.
+        // mcx4 (MCX4_T10_RE_ANSWERS §10 Round 4): the manual target (+0xc0) is released when its object is removed
+        // (signal 0x28, 0x386a90) [port: polled here - a removed unit no longer resolves], before the early returns.
+        if (h.manual_target != kNoObject && !unit(h.manual_target)) h.manual_target = kNoObject;
         if (!cfg_.weapons_enabled || hp_out(h) || transition) continue;
         h.cooldown -= 1;
         if (h.cooldown > 0) continue;
+        if (hd.manual_target) {
+            manual_update_weapon(u, h, frame, rng);
+            continue;
+        }
         const Unit* ht = unit(h.target);  // the primary target (+0x40)
         if (!hp_state_allows(u, h, live(ht) ? ht : nullptr)) continue;
         if (fire_hardpoint(u, h, frame, rng)) continue;
@@ -1815,6 +1823,93 @@ void CombatSystem::update_weapons(Unit& u, uint32_t frame, SimRng& rng, bool sus
         const HardpointDesc& hd = data_->hardpoints[h.desc];
         if (hd.turret && hd.turret_model && !hp_out(h)) turret_slew(u, h);
     }
+}
+
+void CombatSystem::manual_update_weapon(Unit& u, Hardpoint& h, uint32_t frame, SimRng& rng) {
+    // Update_Weapon 0x387400 on a Requires_Manual_Target_Assignment hardpoint (MCX4_T10_RE_ANSWERS §10 Round 4 points 2-3)
+    // [H unless tagged], after the cooldown has run out:
+    // - no manual target (+0xc0): return - no shot at the weapon's target (+0x40) and no opportunity fire;
+    // - the weapon-state gate 0x384850 against the manual target refuses: held, until the frame is more than 300 past the
+    //   assignment (+0xcc); then the target, the player (+0xc8 := -1) and the frame (:= 0) are released (the local
+    //   player's HUD sound is presentation);
+    // - otherwise Fire_At(+0x40) first (the ordinary branch; [M] its TARGETING-lock / formation early returns are not
+    //   modelled, as on the ordinary path), then Fire_At(manual target, no target hardpoint): retail allows both in one
+    //   frame. A manual shot that fires releases the manual target (one assignment, one shot); one that fails (range,
+    //   cone, turret still turning, fog) keeps it with no time limit. Never opportunity fire.
+    if (h.manual_target == kNoObject) return;
+    const Unit* mt = unit(h.manual_target);
+    if (!hp_state_allows(u, h, mt)) {
+        if (frame > h.manual_frame + 300u) {
+            h.manual_target = kNoObject;
+            h.manual_player = -1;
+            h.manual_frame = 0;
+        }
+        return;
+    }
+    if (live(unit(h.target))) fire_hardpoint(u, h, frame, rng);
+    const ObjectId save_t = h.target;
+    const int32_t save_hp = h.target_hp;
+    h.target = h.manual_target;
+    h.target_hp = -1;
+    const bool fired = fire_hardpoint(u, h, frame, rng);
+    h.target = save_t;
+    h.target_hp = save_hp;
+    if (fired) h.manual_target = kNoObject;
+}
+
+bool CombatSystem::manual_target_can_fire(const Unit& u, const Hardpoint& h, const Unit& t) const {
+    // The setter's acceptance tests after its flag / empty-slot checks (0x3822e0; 0x386220 is the same without them)
+    // [H]: the target is an enemy of the owner (0x39a450), Fire_Category_Restrictions does not refuse it (0x540140),
+    // its position passes the hardpoint cone test (0x383ba0) and it is not FOW-hidden for the owner with force 1
+    // (0x35f470); the XY distance from the fire bone (A, or the A-B midpoint) to its position is at most Get_Fire_Range +
+    // its radius and at least Fire_Min_Range_Distance. [port] the bones are the rest-pose bones (local_to_world).
+    const HardpointDesc& hd = data_->hardpoints[h.desc];
+    if (!live(&t) || &t == &u || !is_enemy(u.owner, t.owner)) return false;
+    if (hd.fire_category_restrictions & desc_of(t).category_mask) return false;
+    if (!in_cone(u, h, t.pos)) return false;
+    if (target_hidden(u.owner, t.id, true)) return false;
+    Vec3 bone = local_to_world(u, hd.bone_a);
+    if (hd.has_bone_b) bone = (bone + local_to_world(u, hd.bone_b)) * 0.5f;
+    const float d = distance_xy(bone, t.pos);
+    const float range = fire_range(hd.fire_range, mod_r(u, ModList::FireRange));
+    return d <= range + desc_of(t).radius && hd.fire_min_range <= d;
+}
+
+bool CombatSystem::assign_manual_target(ObjectId id, uint32_t hp, ObjectId target, int32_t player) {
+    // 0x3822e0 (MCX4_T10_RE_ANSWERS §10 Round 4) [H]: refused unless the hardpoint type has
+    // Requires_Manual_Target_Assignment and no manual target is held (one pending target at most), then the acceptance
+    // tests (manual_target_can_fire). Accepted: target (+0xc0), player (+0xc8) and the current frame (+0xcc) stored.
+    // [port] the frame is the last combat tick's (frame_). No cooldown test: nothing in the sim reads the player stamp.
+    const Unit* u = unit(id);
+    const Unit* t = unit(target);
+    if (!u || !t || hp >= u->hp_count) return false;
+    Hardpoint& h = hps_[u->hp_begin + hp];
+    if (!data_->hardpoints[h.desc].manual_target || h.manual_target != kNoObject) return false;
+    if (!manual_target_can_fire(*u, h, *t)) return false;
+    h.manual_target = target;
+    h.manual_player = player;
+    h.manual_frame = frame_;
+    return true;
+}
+
+ObjectId CombatSystem::hardpoint_manual_target(ObjectId id, uint32_t hp) const {
+    const Unit* u = unit(id);
+    return (u && hp < u->hp_count) ? hps_[u->hp_begin + hp].manual_target : kNoObject;
+}
+
+int32_t CombatSystem::hardpoint_manual_player(ObjectId id, uint32_t hp) const {
+    const Unit* u = unit(id);
+    return (u && hp < u->hp_count) ? hps_[u->hp_begin + hp].manual_player : -1;
+}
+
+uint32_t CombatSystem::hardpoint_manual_frame(ObjectId id, uint32_t hp) const {
+    const Unit* u = unit(id);
+    return (u && hp < u->hp_count) ? hps_[u->hp_begin + hp].manual_frame : 0u;
+}
+
+ManualFireCooldown CombatSystem::manual_fire_cooldown(int32_t player) const {
+    if (player < 0 || static_cast<size_t>(player) >= manual_cd_.size()) return {};
+    return manual_cd_[static_cast<size_t>(player)];
 }
 
 bool CombatSystem::deployed_or_deploying(const Unit& u) const {

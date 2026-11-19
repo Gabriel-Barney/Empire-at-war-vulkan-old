@@ -202,8 +202,10 @@ bool CombatSystem::can_attack(ObjectId id) const {
 int32_t CombatSystem::special_weapon_hardpoint(ObjectId station) const {
     const Unit* u = unit(station);
     if (!u) return -1;
+    // mcx4 (MCX4_T10_RE_ANSWERS §10 Round 4 point 1, SCRIPT_GAPS §1.1 step 5): 0x394e60 tests the type's
+    // Requires_Manual_Target_Assignment byte (+0x50), not the hardpoint kind.
     for (uint32_t i = 0; i < u->hp_count; ++i)
-        if (data_->hardpoints[hps_[u->hp_begin + i].desc].kind == HardpointKind::WeaponSpecial) return static_cast<int32_t>(i);
+        if (data_->hardpoints[hps_[u->hp_begin + i].desc].manual_target) return static_cast<int32_t>(i);
     return -1;
 }
 
@@ -223,23 +225,17 @@ bool CombatSystem::special_weapon_can_fire(ObjectId station, ObjectId target) co
     const int32_t i = special_weapon_hardpoint(station);
     const Unit* u = unit(station);
     const Unit* t = unit(target);
-    if (i < 0 || !live(u) || !live(t) || t == u) return false;
-    const Hardpoint& h = hps_[u->hp_begin + static_cast<uint32_t>(i)];
-    const HardpointDesc& hd = data_->hardpoints[h.desc];
-    if (h.destroyed || !is_enemy(u->owner, t->owner) || !desc_of(*t).is_valid_target) return false;
-    if (target_hidden(u->owner, t->id, true)) return false;  // force 1: never at hidden targets (FOG_OF_WAR §5.3)
-    if (!in_cone(*u, h, t->pos)) return false;
-    Vec3 bone = local_to_world(*u, hd.bone_a);
-    if (hd.has_bone_b) bone = (bone + local_to_world(*u, hd.bone_b)) * 0.5f;
-    const float d = distance_xy(bone, t->pos);
-    const float range = fire_range(hd.fire_range, mod_r(*u, ModList::FireRange));
-    return d <= range + desc_of(*t).radius && d >= hd.fire_min_range;
+    // mcx4: 0x386220 = the setter's tests without the flag / empty-slot checks (manual_target_can_fire). It reads neither
+    // the destroyed nor the disabled state (HARDPOINT_DISABLED.md), and has no Is_Valid_Target test.
+    if (i < 0 || !live(u) || !live(t)) return false;
+    return manual_target_can_fire(*u, hps_[u->hp_begin + static_cast<uint32_t>(i)], *t);
 }
 
-bool CombatSystem::special_weapon_fire(ObjectId station, ObjectId target) {
-    if (!special_weapon_can_fire(station, target)) return false;
-    order_attack(station, target, -1);
-    return true;
+bool CombatSystem::special_weapon_fire(ObjectId station, ObjectId target, int32_t player) {
+    // mcx4 (MCX4_T10_RE_ANSWERS §10 Round 4 point 1): the station branches of Lua Fire_Special_Weapon (0x576220) and of
+    // command 25 (0x40a3b0) call the setter 0x3822e0 on the special-weapon hard point with the firing player.
+    const int32_t i = special_weapon_hardpoint(station);
+    return i >= 0 && assign_manual_target(station, static_cast<uint32_t>(i), target, player);
 }
 
 // ---- L1 systems: host-launched projectiles (special weapons, lobbing superweapons, bombardment) ----
@@ -1083,6 +1079,12 @@ void CombatSystem::hash_extended(StateHasher& h) const {
                 h.f32(hp.turret_pitch);
                 h.f32(hp.turret_yaw);
             }
+            if (hp.manual_target != kNoObject || hp.manual_player != -1) {  // mcx4: manual target (absent: format unchanged)
+                h.u8(0x4d);
+                h.i32(hp.manual_target);
+                h.i32(hp.manual_player);
+                h.u32(hp.manual_frame);
+            }
         }
     }
     h.u32(static_cast<uint32_t>(projectiles_.size()));
@@ -1161,6 +1163,16 @@ void CombatSystem::hash_extended(StateHasher& h) const {
     if (any_off) {
         h.u32(0x5357u);  // tag
         for (const uint8_t f : sw_hp_enabled_) h.u8(f);
+    }
+    // mcx4: the players' manual-hardpoint cooldown stamps, only once one is set (format unchanged before).
+    bool any_cd = false;
+    for (const ManualFireCooldown& c : manual_cd_) any_cd = any_cd || c.frame != 0 || c.frames != 0;
+    if (any_cd) {
+        h.u32(0x4d43u);  // tag
+        for (const ManualFireCooldown& c : manual_cd_) {
+            h.u32(c.frame);
+            h.i32(c.frames);
+        }
     }
 }
 

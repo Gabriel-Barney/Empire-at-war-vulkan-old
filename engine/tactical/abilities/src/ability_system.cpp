@@ -158,6 +158,11 @@ bool AbilitySystem::add_unit(const combat::UnitSpawn& s, uint32_t ability_desc, 
     // TRU1 t03: GRAVITY_CONTROL_FIELD first service, one synced Get_Int(0, interval - 1) as every behaviour with an interval
     // >= 2 draws at attach (TACTICAL_GAPS §6.4) [port: drawn here, after the SAP draws].
     if (d.gravity_field) n.gravity_due = frame + static_cast<uint32_t>(rng.range_int(0, 59));
+    // mcx4-tac2: HARASS / AVOID_DANGER (interval 30, MCX4_T11_T12 §C4 round 4) draw their first due frame the same way.
+    // [port] only with a non-zero range (a zero-range service returns at once, so its draw would change nothing but the
+    // draw order), after the gravity draw.
+    if (d.harass_range > 0.0f) n.harass_due = frame + static_cast<uint32_t>(rng.range_int(0, 29));
+    if (d.avoid_range > 0.0f) n.avoid_due = frame + static_cast<uint32_t>(rng.range_int(0, 29));
     update_emitter(n);
     const ObjectId nid = n.id;
     if (Obj* p = obj(nid)) auras_unit_added(*p, frame);
@@ -1462,6 +1467,7 @@ void AbilitySystem::apply_automatic(Obj& o, uint32_t frame) {
             case SpecialClass::EnableAbility:
             case SpecialClass::WeaponSwap:  // OI abilities: Permanent_Weapon_Swap (Ground_Automatic) [port: at unit add]
             case SpecialClass::StarbaseUpgrade:  // Skirmish_Automatic on the built upgrade object (HARDPOINT_DISABLED §3)
+            case SpecialClass::GarrisonUpgrade:  // mcx4-tac2: Ground_ / Space_Automatic on the built upgrade object
             case SpecialClass::ForceHealing: apply(o, sp, o.id, -1, frame); break;
             default: break;
         }
@@ -2474,6 +2480,12 @@ void AbilitySystem::hash(StateHasher& h) const {
             h.u8(o.in_gravity_field);
             h.u32(static_cast<uint32_t>(o.gravity_list.size()));
             for (const ObjectId g : o.gravity_list) h.i32(g);
+        }
+        // mcx4-tac2: HARASS / AVOID_DANGER due frames, only for units that run them (keeps the other digests)
+        if (desc(o).harass_range > 0.0f || desc(o).avoid_range > 0.0f) {
+            h.u32(0x53534148u);  // "HASS"
+            h.u32(o.harass_due);
+            h.u32(o.avoid_due);
         }
         // cu8f t06: the LURE data pack, only once used (keeps lure-less digests)
         if (o.lure_on != 0 || o.lure_pulses != 0 || o.lure_effect != kNoObject) {

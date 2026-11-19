@@ -1864,11 +1864,12 @@ void CampaignBattles::story_fog_begin() {
         TacticalMode* tm = host_->tactical();
         return (battle_ && tm) ? battle_->combat().special_weapon_readiness(tm->primary().id(h)) : -1.0f;
     };
-    story_hooks_.station_fire = [this](objects::ObjectHandle h, objects::ObjectHandle t, int32_t) {
+    // mcx4 (MCX4_T10_RE_ANSWERS §10 Round 4 point 1): the setter 0x3822e0 with the Lua player's id.
+    story_hooks_.station_fire = [this](objects::ObjectHandle h, objects::ObjectHandle t, int32_t player) {
         TacticalMode* tm = host_->tactical();
         if (!battle_ || !tm) return false;
         const objects::ObjectStore& s = tm->primary();
-        return battle_->abilities().combat().special_weapon_fire(s.id(h), s.id(t));
+        return battle_->abilities().combat().special_weapon_fire(s.id(h), s.id(t), player);
     };
 #ifdef ALAMO_LUA_HAVE_FOG
     // L1: FogOfWar.* / Undo_Reveal of the tactical story VMs on the battle's fog (null when BattleConfig::fog is off).

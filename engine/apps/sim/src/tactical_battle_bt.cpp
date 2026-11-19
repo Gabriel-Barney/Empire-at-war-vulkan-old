@@ -6,8 +6,10 @@
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
+#include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include "alamo/core/dmath.hpp"
@@ -1742,10 +1744,27 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng, const Para
         const std::vector<size_t>& marks = side == 0 ? dm : side == 1 ? am : no_marks;
         std::vector<FleetEntry> reg;
         uint32_t group = 0;
+        // mcx4-tac2 (MCX4_T11_T12_RE_ANSWERS §B2, MCX4_T10_RE_ANSWERS §4 / §18): the campaign spawn's contained starts. Space:
+        // the side's flagship is picked first; an attaching unit is queued (not created with the fleet) unless there is
+        // none. Land: a Stay_In_Transport unit is made inside its owner's best Can_Contain_Heroes structure when there is
+        // one, else it is placed as before ([port] retail keeps it in its carrier, which the port does not make).
+        const bool campaign_spawn = !cfg_.skirmish && !skirmish_records;
+        const int64_t flagship = space_ && campaign_spawn ? bt_flagship(side) : -1;
+        std::vector<uint32_t> attach;
         bt_space_escorts(side);  // map1 t07: the start units' escorts join the side's start list (appended)
         for (uint32_t i = 0; i < parts_.size(); ++i)
             if (!parts_[i].reserve && !parts_[i].starbase && !parts_[i].structure && (!parts_[i].built || parts_[i].escort) &&
                 parts_[i].side == side) {
+                if (campaign_spawn && !parts_[i].deployed && !parts_[i].built) {
+                    if (flagship >= 0 && bt_attaches_to_flagship(parts_[i])) {
+                        attach.push_back(i);
+                        continue;
+                    }
+                    if (const objects::ObjectId hs = bt_hero_structure(mode, parts_[i]); hs != objects::kNoObjectId) {
+                        bt_contain_start(mode, i, hs, rng);
+                        continue;
+                    }
+                }
                 const size_t u0 = units_.size(), c0 = containers_.size();
                 // skai t21 (retail Geonosis trace, frame 1 [H, trace]): a space skirmish places its start squadrons the same
                 // way - both Empire TIE squadrons in rings around their spawn marker (one at the marker, 6 at r ~40, the rest
@@ -1793,12 +1812,185 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng, const Para
             }
         if (!placement) continue;
         bt_fleet_placement(mode, rng, reg, marks);
+        // mcx4-tac2 (§B2 steps 2-3): after the fleet placement each queued unit is made at the flagship's position and put
+        // inside it (keeping its galactic link), in queue order.
+        if (!attach.empty()) {
+            objects::ObjectId fs = objects::kNoObjectId;
+            for (const Unit& u : units_)
+                if (static_cast<int64_t>(u.participant) == flagship && u.alive) {
+                    fs = u.id;
+                    break;
+                }
+            for (const uint32_t i : attach) bt_contain_start(mode, i, fs, rng);
+        }
         // §1.9: the attacker's call (arrival flag 1 in space), with In_Game_Cinematics and 0x140b27d5e: the vf82 pass.
         // [port] 0x140b27d5e (the story link's arrival option, P9 != 0) is taken as on in every battle: the Kashyyyk run
         // (no linked battle) held it, so its start value is 1 [M], and the one link that clears it (P9 = 0: the
         // _EXEC_DEMO campaign) cannot be told from that start value by the port's LinkedPresentation.
         if (side == 1 && l1_k_.in_game_cinematics) bt_fleet_arrival(mode, rng, reg);
     }
+}
+
+// ---- mcx4-tac2: contained starts of the campaign spawn 0x2a00b0 -----------------------------------------------------
+// MCX4_T10_RE_ANSWERS §4 / §18 (land) and MCX4_T11_T12_RE_ANSWERS §B2 (space, exit door). Retail creates the unit at the
+// container's position and adds it to the container's contents (0x390740 makes the list on demand, 0x379d30 adds: the
+// garrison-list add). [port] The container is a garrison holder of kind Property with no slots (orders never reach it;
+// contents die with it, as Kill kills a contents list without a garrison behaviour, STATION_HANGARS_SOUND §2.9) and the
+// unit a board-only occupant; the garrison host code then does the rest (no movement, not targetable, no fire, follows
+// the container, Lua Get_Garrisoned_Units). The unit is not adopted (that branch skips the spawn's registration [M]).
+
+objects::ObjectId TacticalBattle::bt_hero_structure(const TacticalMode& mode, const Participant& p) const {
+    // §18: land, the arriving unit's type has Stay_In_Transport_During_Ground_Battle (+0x2d) and no Unique_Ground_Unit
+    // (+0x1b60). §4: the candidates are the battle's objects of the unit's owner whose type has
+    // Can_Contain_Heroes_During_Ground_Battle (+0x7d) and that hold no contents list yet (obj +0xf8 = 0, [port] not a
+    // garrison holder); the pick has the highest max tactical health (0x3727a0), the first on a tie (ascending id).
+    // ledger: consumes GameObjectType.Can_Contain_Heroes_During_Ground_Battle
+    const objects::GameObjectTypes& types = catalog_->types();
+    if (space_ || p.type >= types.size() || !rules_->type(p.type).members.empty()) return objects::kNoObjectId;
+    if (!types.get_bool(p.type, "Stay_In_Transport_During_Ground_Battle")) return objects::kNoObjectId;
+    if (!ascii_trim(types.get_string(p.type, "Unique_Ground_Unit")).empty()) return objects::kNoObjectId;
+    const objects::ObjectStore& st = mode.primary();
+    objects::ObjectId best = objects::kNoObjectId;
+    float best_health = 0.0f;
+    for (const Unit& u : units_) {
+        if (!u.alive || u.retreated || u.type >= types.size() || !st.alive(u.h) || st.owner(u.h) != p.owner) continue;
+        if (!types.get_bool(u.type, "Can_Contain_Heroes_During_Ground_Battle") || garrison_.is_holder(u.id)) continue;
+        const float h = combat_->max_health(u.id);
+        if (best != objects::kNoObjectId && !(h > best_health)) continue;
+        best = u.id;
+        best_health = h;
+    }
+    return best;
+}
+
+bool TacticalBattle::bt_attaches_to_flagship(const Participant& p) const {
+    // §B2 step 1: in space, a unit whose type has Attach_To_Flagship_During_Space_Battle (+0x2c) and names no replacement
+    // (Unique_Space_Unit, +0x1b50). [port] a single-unit participant (retail: a transport's content unit).
+    // ledger: consumes GameObjectType.Attach_To_Flagship_During_Space_Battle
+    const objects::GameObjectTypes& types = catalog_->types();
+    if (!space_ || p.type >= types.size() || !rules_->type(p.type).members.empty()) return false;
+    return types.get_bool(p.type, "Attach_To_Flagship_During_Space_Battle") &&
+           ascii_trim(types.get_string(p.type, "Unique_Space_Unit")).empty();
+}
+
+int64_t TacticalBattle::bt_flagship(uint8_t side) const {
+    // 0x2a00b0 (space): among the side's arriving objects without FLEET / TRANSPORT and not in the Super category
+    // (0x375270), the one with the largest max health + max shield (0x3727a0 + 0x3725f0), strictly above 0; the first on
+    // a tie. [port] type values (Tactical_Health + Shield_Points: the owner and difficulty factors are common to the side),
+    // single-unit start participants only, and not an attaching unit itself (retail: those ride in transports).
+    const objects::GameObjectTypes& types = catalog_->types();
+    int64_t best = -1;
+    float best_value = 0.0f;
+    for (size_t i = 0; i < parts_.size(); ++i) {
+        const Participant& q = parts_[i];
+        if (q.side != side || q.reserve || q.starbase || q.structure || q.built || q.deployed || q.type >= types.size()) continue;
+        if (!rules_->type(q.type).members.empty() || bt_attaches_to_flagship(q)) continue;
+        if ((types.get_mask(q.type, "CategoryMask") & 0x40u) != 0) continue;  // CategoryMask Super [M], as the fleet registration
+        const float v = types.columns().tactical_health[q.type] + types.columns().shield_points[q.type];
+        if (v > best_value) {
+            best_value = v;
+            best = static_cast<int64_t>(i);
+        }
+    }
+    return best;
+}
+
+void TacticalBattle::bt_contain_start(TacticalMode& mode, uint32_t pi, objects::ObjectId holder, SimRng& rng) {
+    objects::ObjectStore& store = mode.primary();
+    const objects::ObjectHandle hh = store.find(holder);
+    Participant& P = parts_[pi];
+    if (!store.alive(hh)) {  // §B2 step 4: no container -> the unit is not created [M]
+        P.deployed = true;
+        return;
+    }
+    P.spots.assign(1, std::make_pair(store.position(hh), store.facing(hh)));  // 0x29f810 at the container's position
+    const size_t u0 = units_.size();
+    deploy_contained_ = true;
+    deploy(mode, pi, rng);
+    deploy_contained_ = false;
+    P.spots.clear();
+    s4_store_ = &store;
+    s4_init();
+    if (!garrison_.is_holder(holder)) {
+        tactical::garrison::HolderDesc hd;
+        hd.kind = tactical::garrison::HolderKind::Property;
+        hd.slots = 0;
+        hd.extent_len = s4_extent_len(mode, hh);
+        garrison_.add_holder(holder, store.owner(hh), hd);
+    }
+    for (size_t k = u0; k < units_.size(); ++k) {
+        const objects::ObjectId id = units_[k].id;
+        if (!garrison_.is_unit(id)) {
+            tactical::garrison::OccupantDesc od;
+            od.value = tactical::garrison::kBoardOnlyValue;
+            garrison_.add_unit(id, store.owner(units_[k].h), od);
+        }
+        (void)s4_board(mode, id, holder);
+    }
+}
+
+Vec3 TacticalBattle::bt_exit_door(const Participant& p, Vec3 pos, Vec3 face, uint32_t passability_mask) const {
+    // §B2 (0x2b3be0, the creation of a carrier's contents): the content goes to the carrier position + Exit_Door_Distance x
+    // (cos, sin)(facing + Exit_Door_Angle_Degrees), handed with that angle - 45 to the free-spot search 0x2a9670. [port] The
+    // carrier is the company's travel type (Company_Transport_Unit, else the type itself) standing at the member's slot;
+    // the offset point is snapped by the port's passable-cell search (the angle-ordered 2500 search is not modelled), and
+    // nothing moves with a zero distance (every FoC Company_Transport_Unit).
+    // ledger: consumes GameObjectType.Exit_Door_Distance
+    // ledger: consumes GameObjectType.Exit_Door_Angle_Degrees
+    const objects::GameObjectTypes& types = catalog_->types();
+    if (p.type >= types.size()) return pos;
+    objects::TypeIndex carrier = static_cast<objects::TypeIndex>(p.type);
+    const std::span<const std::string_view> transports = types.get_list(carrier, "Company_Transport_Unit");
+    if (!transports.empty())
+        if (const objects::TypeIndex x = types.resolve_name(ascii_trim(transports.front())); x != objects::kNone && x < types.size()) carrier = x;
+    const float dist = types.get_float(carrier, "Exit_Door_Distance");
+    if (dist == 0.0f) return pos;
+    // (cos, sin)(yaw + a) = the level facing turned by a
+    float s = 0.0f, c = 1.0f;
+    dmath::sincos(types.get_float(carrier, "Exit_Door_Angle_Degrees") * (dmath::kPiF / 180.0f), s, c);
+    const float len = dmath::sqrt(face.x * face.x + face.y * face.y);
+    const float fx = len > 0.0f ? face.x / len : 1.0f, fy = len > 0.0f ? face.y / len : 0.0f;
+    const float dx = c * fx - s * fy, dy = s * fx + c * fy;
+    return snap_passable(Vec3{pos.x + dx * dist, pos.y + dy * dist, pos.z}, passability_mask, false);
+}
+
+objects::TypeIndex TacticalBattle::bt_conversion_type(uint32_t type) const {
+    // ledger: consumes GameObjectType.Conversion_Ability_Changes_To_Enemy
+    const objects::GameObjectTypes& types = catalog_->types();
+    if (type >= types.size()) return objects::kNone;
+    const std::string_view name = ascii_trim(types.get_string(type, "Conversion_Ability_Changes_To_Enemy"));
+    if (name.empty()) return objects::kNone;
+    const objects::TypeIndex c = types.resolve_name(name);
+    return c == objects::kNone || c >= types.size() || c == static_cast<objects::TypeIndex>(type) ? objects::kNone : c;
+}
+
+uint32_t TacticalBattle::bt_convert_type(TacticalMode& mode, objects::ObjectId target) {
+    // 0x5b07c0 after the owner change: the target's type pointer (+0x298) becomes its conversion type in place (same
+    // object, same id); a team member's team gets the same swap, each member with its own conversion type. [port] A TEAM
+    // container target stands for its members; the container keeps its type. The battle's records follow (Unit::type);
+    // the combat, ability and movement records made at the spawn stay - retail reads the new type's fields from then on,
+    // and FoC's *_Converted_To_Enemy types are variants that differ from their base only in SFXEvent names. [M] the +0x3cc
+    // flag the swap sets on the other members is not modelled.
+    constexpr uint32_t kNoTeam = 0xFFFFFFFFu;  // Unit::container's "none"
+    objects::ObjectStore& store = mode.primary();
+    uint32_t team = kNoTeam;
+    if (const Unit* u = unit_by_id(target)) {
+        team = u->container;
+    } else {
+        for (uint32_t c = 0; c < containers_.size(); ++c)
+            if (containers_[c].id == target) team = c;
+        if (team == kNoTeam) return 0;
+    }
+    uint32_t n = 0;
+    for (Unit& u : units_) {  // ascending id
+        if (team == kNoTeam ? u.id != target : u.container != team) continue;
+        if (!u.alive || u.retreated || !store.alive(u.h)) continue;
+        const objects::TypeIndex c = bt_conversion_type(u.type);
+        if (c == objects::kNone || !store.set_type(u.h, c)) continue;
+        u.type = static_cast<uint32_t>(c);
+        ++n;
+    }
+    return n;
 }
 
 // cu8l t03 (CU8K_T03_T08_T09_RE §1.3): the cull-box half extents. [M] The type's model bounds (Space_Model_Name, else the

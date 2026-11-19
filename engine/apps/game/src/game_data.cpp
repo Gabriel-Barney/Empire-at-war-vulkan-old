@@ -11,6 +11,7 @@
 #include "alamo/core/file_provider.hpp"
 #include "alamo/core/host_fs.hpp"
 #include "alamo/data/xml.hpp"
+#include "alamo/data/xml_values.hpp"
 #include "alamo/sim/save_session.hpp"
 #include "alamo/terrain/chunk.hpp"
 #include "alamo/terrain/ted.hpp"
@@ -258,14 +259,33 @@ bool make_skirmish_galaxy(const GameData& data, const SkirmishSetup& setup, gala
     g.planet_type.assign(planets, planet);
     g.players = {human, ai};
     g.players.insert(g.players.end(), extras.begin(), extras.end());
-    if (neutral.faction != galactic::kNoIndex) g.players.push_back(neutral);
-    // S10 map owners [probe 2026-10-29]: retail skirmish has Neutral and Hostile players besides the slots; map objects
-    // resolve their owner by faction (TacticalBattle::bt_map_owner), natives without a player go to Hostile.
-    galactic::PlayerSetup hostile;
-    hostile.faction = rules.native_owner_faction();  // modc t03: by data (FoC: Hostile)
-    bool hostile_slot = hostile.faction == human.faction || hostile.faction == ai.faction;
-    for (const galactic::PlayerSetup& x : extras) hostile_slot = hostile_slot || hostile.faction == x.faction;
-    if (hostile.faction != galactic::kNoIndex && !hostile_slot) g.players.push_back(hostile);
+    const auto slot_faction = [&](uint32_t f) {
+        bool in = f == human.faction || f == ai.faction;
+        for (const galactic::PlayerSetup& x : extras) in = in || f == x.faction;
+        return in;
+    };
+    // mcx4 t10 (SKIRMISH_SETUP.md §1, MCX5_RE_ANSWERS.md Q4.1 [H], player builder 0x2926c0): after the slots, one player
+    // per faction with Create_Player_In_Multiplayer_Games that is not Is_Playable, in FactionFiles.xml order (FoC: Pirates,
+    // Neutral, Hostile, Sarlacc, Hutts; two slots give Neutral = player 3, as the Geonosis trace). Map objects resolve
+    // their owner by faction (TacticalBattle::bt_map_owner).
+    bool flagged = false;
+    for (uint32_t f = 0; f < rules.factions.size(); ++f) {
+        const galactic::FactionRules& fr = rules.factions[f];
+        if (fr.is_playable || slot_faction(f)) continue;
+        if (!data::xml_values::bool_or(fr.xml_text("Create_Player_In_Multiplayer_Games"), false)) continue;
+        galactic::PlayerSetup p;
+        p.faction = f;
+        g.players.push_back(p);
+        flagged = true;
+    }
+    if (!flagged) {
+        // [port M] data with no flagged faction keeps the S10 map owners [probe 2026-10-29]: the Neutral player and the
+        // native owner (modc t03: by data, FoC Hostile), so map objects and natives still have a player.
+        if (neutral.faction != galactic::kNoIndex) g.players.push_back(neutral);
+        galactic::PlayerSetup hostile;
+        hostile.faction = rules.native_owner_faction();
+        if (hostile.faction != galactic::kNoIndex && !slot_faction(hostile.faction)) g.players.push_back(hostile);
+    }
     auto add = [&](int32_t player, PlanetIndex at, const std::vector<std::string>& names, const std::string& faction, bool ground = false) {
         const std::vector<std::string> list =
             !names.empty() ? names : ground ? default_skirmish_ground(data, faction) : default_skirmish_fleet(data, faction);

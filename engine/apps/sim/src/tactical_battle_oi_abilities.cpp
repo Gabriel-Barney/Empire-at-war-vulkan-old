@@ -289,6 +289,19 @@ void TacticalBattle::oi_install(TacticalMode& mode, SimRng& rng) {
     h.defense_player = [this](int32_t owner) { return bt_owner_neutral(owner) ? req_.info.defender : owner; };
     // TRU1 t03 (TRU1_GRAVITY_FIELD §1.3): the gravity control field skips Is_Neutral players.
     h.neutral_player = [this](int32_t p) { return bt_owner_neutral(p); };
+    // mcx4-tac2 (Garrison_Upgrade_Ability 0x6ffc60 / 0x6ffe30): the player's start-force list (+0x2a8) is the skirmish
+    // slot's re-delivery list (sk_garrisons_). A player without a slot entry gets one with types only (no garrison
+    // objects: its re-delivery never arms, as in retail where the list exists but the garrison list never empties).
+    h.garrison_units = [this](int32_t p, int32_t type, bool add) { sk_garrison_list(p, type, add); };
+    // mcx4-tac2 (AVOID_DANGER 0x58e8e0 step 1): the destination of the unit's formation - [port] the movement goal of its
+    // last order, kept after the arrival; none while it has no order (no coordinator).
+    h.move_goal = [this](tc::ObjectId id, tactical::Vec3& goal) {
+        if (!movement_ || !movement_->has_unit(id)) return false;
+        const mv::UnitView v = movement_->view(id);
+        if (!v.has_goal && !v.arrived) return false;
+        goal = tactical::Vec3{v.goal.x, v.goal.y, v.z};
+        return true;
+    };
     hg_ability_host(h);  // hangars: DEPLOY_SQUAD gate / handler (HangarSystem::deploy_ready / deploy_squad)
     abilities_->set_host(std::move(h));
 }
@@ -533,6 +546,7 @@ void TacticalBattle::oi_events(TacticalMode& mode) {
     for (const ta::AbilityEvent& e : events) {
         switch (e.kind) {
             case ta::AbilityEventKind::RemoveSilently: remove_silently.push_back(e.id); break;
+            case ta::AbilityEventKind::BribeConverted: (void)bt_convert_type(mode, e.target); break;  // mcx4-tac2
             case ta::AbilityEventKind::MoveOrder: {  // 0x2a7b80 moves (HUNT, JET_PACK, CONFUSE, ...): not an order cancel
                 Unit* u = unit_by_id(e.id);
                 if (u && u->alive && !u->retreated && u->movable && bt_rng_) {
@@ -541,6 +555,18 @@ void TacticalBattle::oi_events(TacticalMode& mode) {
                     // Its weapons are suspended meanwhile (kUnitWeaponsSuspended, set before each combat tick).
                     if (e.type == ta::kJetPack && movement_) movement_->use_secondary_locomotor(e.id, true);
                     const objects::ObjectId ids[] = {e.id};
+                    if (e.value == ta::kMoveResume) {
+                        // mcx4-tac2 (AVOID_DANGER step 6): the old destination is appended behind the side step (the
+                        // unit's order queue; it starts when the side step arrives).
+                        QueuedOrder q;
+                        q.kind = QueuedOrder::Kind::Move;
+                        q.player = static_cast<uint8_t>(std::max(0, combat_->owner(e.id)));
+                        q.x = e.point.x;
+                        q.y = e.point.y;
+                        const std::vector<objects::ObjectId> now = enqueue(ids, q);
+                        if (!now.empty()) exec_move(mode, now, q.x, q.y, *bt_rng_, mv::kNoFacing, false);
+                        break;
+                    }
                     exec_move(mode, ids, e.point.x, e.point.y, *bt_rng_, mv::kNoFacing, false);
                 }
                 break;

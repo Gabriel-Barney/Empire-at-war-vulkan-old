@@ -468,6 +468,7 @@ struct LandRun {
     size_t single_count = 0, pack_count = 0;
     bool kept_three = true, refilled = false, refill_delay_ok = false, pack_once = true, pack_refilled = false;
     bool near_hut = true, adopted = false, saved = false;
+    float wander = 0.0f;  // mcx4 t11: the farthest a single T_Hut unit got from its placement (INDIGENOUS_UNIT wander)
     uint32_t kill_frame = 0, refill_frame = 0;
     // variant 3: T_Hut on after SET_SPAWN 0.3 and then 1.0; the other battle rewards through the battle host
     int32_t on_low = -1, on_full = -1;
@@ -532,6 +533,8 @@ LandRun run_land(const Data& d, int32_t workers, int variant = 0) {
     bool invaded = false;
     const uint32_t hut = type_of(d, "T_Hut"), pack_hut = type_of(d, "T_Pack_Hut");
     std::vector<objects::ObjectId> pack_members;
+    std::vector<objects::ObjectId> placed;  // mcx4 t11: the placement is checked once per unit (it wanders afterwards)
+    std::vector<Vec3> placed_at;
     bool pack_killed = false;
     for (uint64_t t = 0; t < 4000; ++t) {
         host.tick_once();
@@ -610,7 +613,16 @@ LandRun run_land(const Data& d, int32_t workers, int variant = 0) {
                     for (const objects::ObjectId id : sp) {
                         const objects::ObjectHandle uh = st.find(id);
                         const Vec3 p = st.position(uh), q = st.position(sh);
-                        if (std::fabs(p.x - q.x) > 91.0f || std::fabs(p.y - q.y) > 91.0f) out.near_hut = false;
+                        // placed within the spawn radius 90; mcx4 t11: then the INDIGENOUS_UNIT wander takes it about
+                        // (MCX4_T11_T12_RE_ANSWERS §B2), so only the first sight of each unit is the placement
+                        if (std::find(placed.begin(), placed.end(), id) == placed.end()) {
+                            placed.push_back(id);
+                            placed_at.push_back(p);
+                            if (std::fabs(p.x - q.x) > 91.0f || std::fabs(p.y - q.y) > 91.0f) out.near_hut = false;
+                        } else {
+                            const Vec3 a = placed_at[static_cast<size_t>(std::find(placed.begin(), placed.end(), id) - placed.begin())];
+                            out.wander = std::max(out.wander, std::sqrt((p.x - a.x) * (p.x - a.x) + (p.y - a.y) * (p.y - a.y)));
+                        }
                         out.adopted = out.adopted || b->combat().has_unit(id);
                     }
                     if (f > 400 && f < 900 && sp.size() != 3 && out.kill_frame == 0) out.kept_three = false;
@@ -656,6 +668,10 @@ void test_land(const Data& d) {
                 a.kill_frame, a.refill_delay_ok, a.pack_count, a.pack_once, a.pack_refilled);
     CHECK(a.fought && a.spawners == 3 && a.decided == 2 && a.active == 1);
     CHECK(a.single_count == 3 && a.kept_three && a.near_hut && a.adopted);
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B2, 0x621d80): T_Hut's Max_Distance_From_Spawner 150 leashes the wander; a step is
+    // at most 400 long, so no unit gets more than 150 + 400 from its placement's home
+    std::printf("  INDIGENOUS_UNIT wander: farthest %.1f from a placement\n", static_cast<double>(a.wander));
+    CHECK(a.wander < 150.0f + 400.0f + 91.0f);
     CHECK(a.kill_frame > 0 && a.refilled && a.refill_delay_ok);
     CHECK(a.pack_count == 3 && a.pack_once && a.pack_refilled);
     CHECK(a.saved);

@@ -114,12 +114,16 @@ void test_turret_slew() {
         }
         CHECK_NEAR(t.yaw(), 0.0, 1.0e-3);
     }
-    {   // [port] Requires_Manual_Target_Assignment: the weapon's target stands in for the manual target (no cone test).
+    {   // mcx4 (MCX4_T10_RE_ANSWERS §10 Round 4): a Requires_Manual_Target_Assignment turret aims at its manual target
+        // only - the weapon's target leaves it in its pose; an assignment turns it.
         TurretWorld t(true, 60.0f, 25.0f, true);
-        t.w.add(2, 1, 1, at_bearing(90.0f, 500.0f));  // outside the 60 extent: aim clamped to 60
+        t.w.add(2, 1, 1, at_bearing(45.0f, 500.0f));
         t.w.sys->order_attack(1, 2);
         for (int k = 0; k < 10; ++k) t.w.tick();
-        CHECK_NEAR(t.yaw(), 60.0, 1.0e-3);
+        CHECK_NEAR(t.yaw(), 0.0, 1.0e-3);
+        CHECK(t.w.sys->assign_manual_target(1, 0, 2, 0));
+        for (int k = 0; k < 10; ++k) t.w.tick();
+        CHECK_NEAR(t.yaw(), 45.0, 1.0e-3);
     }
     {   // Retail quirk (0x381ff0): pose 170 and aim -170 straddle +-180; the plain step (-5) and the wrapped one (+5)
         // cancel, so the turret stays put (extent 360: no clamp).

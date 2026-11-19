@@ -1208,6 +1208,10 @@ void test_clash_action_end_and_save();
 void test_area_immune_faction();  // tru1 t04 (test_combat_tru1.cpp)
 void test_fires_forward();           // mcx4 t03 (test_combat_mcx4.cpp)
 void test_mode_weapon_delay();        // mcx4 t10 (test_combat_mcx4.cpp)
+void test_manual_no_fire_without_target();  // mcx4 (lane mcx4-tac2): manual hardpoint targeting
+void test_manual_assignment();
+void test_manual_fire_and_cooldown();
+void test_manual_target_drop();
 void test_deployed_attack_distance();
 void test_depleted_shield_increment();
 void test_out_of_combat_defense();

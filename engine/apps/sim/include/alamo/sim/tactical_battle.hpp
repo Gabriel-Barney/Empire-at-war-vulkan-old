@@ -1806,6 +1806,7 @@ private:
     Vec3 snap_passable(Vec3 p, uint32_t passability_mask, bool always) const;  // slot_position's box clamp + cell search
     std::vector<Vec3> drop_pos_;  // a1g t04 follow-up: order_reinforce's land layout slots for deploy (transient)
     bool deploy_unload_ = false;  // s78i t02: deploy places a landing object's company (keeps the side facing; transient)
+    bool deploy_contained_ = false;  // mcx4-tac2: deploy makes units that start inside a container (no movement, no adopt; transient)
     std::vector<Vec3> drop_face_;  // s78j t01: per member (deploy's member index), the landing unload facing (transient)
     // a1i t04 (A1_READINGS §35.2): one landing object (TransportDataPack fields in brackets).
     struct Landing {
@@ -2178,6 +2179,10 @@ private:
     void team_attack_set(objects::ObjectId attacker, objects::ObjectId container, objects::ObjectId member, bool goal);
     void team_attack_drop(std::span<const objects::ObjectId> ids);
     void team_attack_service(TacticalMode& mode, SimRng& rng);  // after the combat tick's events
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 Round 4, 0x5d51e0 / 0x5d55f0; movement space_reevaluate.hpp): space only - every
+    // MovementReevaluationFrameCount frames per unit, an attacker out of range of its ordered target (or inside its min
+    // range) gets its attack approach again
+    void space_attack_reevaluate(TacticalMode& mode, SimRng& rng);
     // ---- s78n t20 stage A: land attack blocks (FIGHTER_FLYING §4.11 A / E [H], MOVEMENT §4.3.2 items 6 / 8) ----
     // One record per mover (a steering squad's container, else the unit) that was given an attack on an object: the
     // Attack order (human and AI) and the AI's Attack_Move on an attackable object (bkt1 t05: a non-hostile one too, with
@@ -2659,6 +2664,23 @@ private:
     void bt_map_prepass();                                  // setup: base-level filter + discard rule, map types -> tables
     void bt_map_load(TacticalMode& mode, SimRng& rng);      // setup: spawn the kept placements (spawn-table draws)
     void bt_place_forces(TacticalMode& mode, SimRng& rng, const ParallelFor& pf);  // setup: §3.2 steps 1-7 + the start-force deploys
+    // mcx4-tac2: the campaign spawn 0x2a00b0's contained starts (MCX4_T10_RE_ANSWERS §4 / §18, MCX4_T11_T12_RE_ANSWERS §B2).
+    // bt_hero_structure: for a land start participant whose type has Stay_In_Transport_During_Ground_Battle (no
+    // Unique_Ground_Unit, a single unit), the friendly Can_Contain_Heroes_During_Ground_Battle structure with the highest
+    // max health that holds nothing yet (kNoObjectId: none). bt_flagship: a space side's flagship participant - the start
+    // ship (no team, not Super, not itself attached) whose type has the largest Tactical_Health + Shield_Points (> 0), -1
+    // none. bt_contain_start: deploy participant `pi` inside `holder` (made at its position, then added to its contents).
+    // bt_exit_door: a land start member's slot moved by its carrier's Exit_Door_Distance / _Angle_Degrees.
+    objects::ObjectId bt_hero_structure(const TacticalMode& mode, const Participant& p) const;
+    int64_t bt_flagship(uint8_t side) const;
+    bool bt_attaches_to_flagship(const Participant& p) const;
+    void bt_contain_start(TacticalMode& mode, uint32_t pi, objects::ObjectId holder, SimRng& rng);
+    Vec3 bt_exit_door(const Participant& p, Vec3 pos, Vec3 face, uint32_t passability_mask) const;
+    // mcx4-tac2 (MCX4_T10_RE_ANSWERS §7): `type`'s Conversion_Ability_Changes_To_Enemy type (kNone: none, unknown or the
+    // type itself), and the bribe's in-place change of `target` (a unit: itself, or its whole team when it is a team
+    // member; a TEAM container: its members) to those types. Same object ids; returns the units changed.
+    objects::TypeIndex bt_conversion_type(uint32_t type) const;
+    uint32_t bt_convert_type(TacticalMode& mode, objects::ObjectId target);
     bool bt_owner_valid(int32_t owner) const;
     bool bt_owner_neutral(int32_t owner) const;  // owner's faction Is_Neutral
     // S7 t30 (TACTICAL_COMBAT §2.10): the start value of the relation table entry (row p, column q): 0 friendly, 1 enemy,
@@ -2896,6 +2918,9 @@ private:
     void sk_garrison_setup();                 // setup, after the start forces are placed
     void sk_garrison_tick();                  // tick
     int32_t sk_pending_delivery(int32_t player, bool pop);  // HangarHost::pending_delivery
+    // mcx4-tac2 (Garrison_Upgrade_Ability apply 0x6ffc60 / remove 0x6ffe30): append `type` to `player`'s start-force list
+    // (SkGarrison::types; an entry is made when the player has none), or remove its first entry of `type`.
+    void sk_garrison_list(int32_t player, int32_t type, bool add);
     std::vector<HgUpgradeObject> hg_upgrade_objs_;            // DUMMY_UPGRADE objects created by production (creation order)
     std::vector<std::pair<int32_t, uint32_t>> ga_upgrades_;   // galab: {player, upgrade type} to spawn at setup (not saved)
     bool ga_spawn_ = true;                                    // galab: false for a battle rebuilt by a save load (types only)

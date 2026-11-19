@@ -208,6 +208,7 @@ void test_station_upgrade_copy() {
     wpn.repair_amount_per_frame = 10.0f;
     HardpointDesc sw = wpn;
     sw.kind = HardpointKind::WeaponSpecial;
+    sw.manual_target = true;  // mcx4: the special-weapon hard point is the manual-target one (0x394e60)
     sw.allows_special_weapon_use = true;
     HardpointDesc gen = wpn;
     gen.kind = HardpointKind::ShieldGenerator;
@@ -539,7 +540,7 @@ void test_save_rejects() {
     bad = saved;
     put_u32_at(bad, 0, 99);
     CHECK(rejected(bad));
-    for (const uint32_t v : {17u, 19u}) {  // only the current version (18: r1b t10 hardpoint turret pose) is read (cu6)
+    for (const uint32_t v : {18u, 20u}) {  // only the current version (19: mcx4 manual hardpoint targeting) is read (cu6)
         bad = saved;
         put_u32_at(bad, 0, v);
         CHECK(rejected(bad));
@@ -551,8 +552,9 @@ void test_save_rejects() {
     put_u32_at(bad, 8, 7);  // unit descriptor count
     CHECK(rejected(bad));
     // the first unit's descriptor index out of range: header (version, 6 counts, frame, serial), relations P x P,
-    // special-weapon flags P, the player modifier sets (version, count, 21 bytes per entry), weather row, unit count, id
-    size_t off = 4 + 24 + 8 + 4 + 2;
+    // special-weapon flags P, the manual-fire cooldowns (mcx4: P x 8 bytes), the player modifier sets (version, count,
+    // 21 bytes per entry), weather row, unit count, id
+    size_t off = 4 + 24 + 8 + 4 + 2 + 2 * 8;
     for (int32_t p = 0; p < 2; ++p) off += 8 + 21 * a.w.sys->player_modifiers(p).entries().size();
     off += 40 + 4 + 4;
     bad = saved;
@@ -753,7 +755,7 @@ void test_stickiness_override() {
         std::vector<size_t> at;
         for (size_t i = 0; i + 4 <= img.size(); ++i)
             if (std::memcmp(&img[i], pat, 4) == 0) at.push_back(i);
-        CHECK(at.size() == 1u && img[0] == 18u);
+        CHECK(at.size() == 1u && img[0] == 19u);
         if (at.size() == 1u) {
             img.erase(img.begin() + static_cast<std::ptrdiff_t>(at[0]), img.begin() + static_cast<std::ptrdiff_t>(at[0]) + 4);
             img[0] = 13;

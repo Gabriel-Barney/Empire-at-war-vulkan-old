@@ -115,6 +115,27 @@ struct MovementConstants {
     // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 "Blend times", 0x620190 [H]): InfantryTurnBlendTime (GC +0x1528 = 0x140b16d28,
     // FoC 0.2), the cap of the Walk arrival turn's TURNL / TURNR blend (seconds).
     float infantry_turn_blend_time = 0.2f;
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 "Round 4 ... ShouldSkipLandFormup = false", 0x41c1a0 [H]): ShouldSkipLandFormup
+    // (GC +0x149c, FoC true). Clear, a member of a land formation of 2+ first walks a lead-in path to its form-up point
+    // (its slot in the layout box at the formation path's start), then its lane; no wait for the others, no frame limit.
+    bool should_skip_land_formup = true;
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4, 0x423070 / 0x420a40 / 0x413100 [H read, M meaning]): the space idle drift.
+    // ShouldUseSpaceIdleMovement (GC +0x1551, FoC false) turns it on; IdleMovementFrames (+0x155c, FoC 30) is the idle
+    // wait int(F + synced float(0, F / 2) + 0.5) and, as int(F) (pack +0x2ac, 0x413100), the drift distance;
+    // SpaceIdleMovementSpeed (+0x1554, FoC 0) caps the drift move's speed (flag 0x10 top, 0x41b2a0).
+    bool should_use_space_idle_movement = false;
+    float idle_movement_frames = 30.0f;
+    float space_idle_movement_speed = 0.0f;
+    // mcx4 t11 (FIGHTER_FLYING §6.3.1 item 3, MCX4_T11_T12_RE_ANSWERS §B4, 0x5d8140 [H]): the land tracking ring -
+    // LandObjectTrackingTreeCount (GC +0x1470, FoC 25) slices of LandObjectTrackingInterval (+0x146c, FoC 20) frames. The
+    // port's land timed-path occupancy (the land air units' planner, MovementSystem::air()) takes their product as its
+    // look-ahead window, as space does with the Space pair ([port M]).
+    uint32_t land_object_tracking_tree_count = 25;
+    uint32_t land_object_tracking_interval = 20;
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 and its Round 4 paragraph, 0x5d51e0 / 0x5d55f0 [H gate]): the space
+    // coordinator's attack re-evaluation runs when id % N = frame % N (N = MovementReevaluationFrameCount, GC +0x152c, FoC
+    // 10); the battle host runs it (space_attack_reevaluate, space_reevaluation_due).
+    uint32_t movement_reevaluation_frame_count = 10;
 
     static MovementConstants from_game_constants(const data::GameConstants& gc);
 };

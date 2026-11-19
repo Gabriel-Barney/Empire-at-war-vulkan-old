@@ -140,7 +140,10 @@ Notes on the longer rows:
      [M: between the two bounds; the arguments were not kept by the decompiler], point = position + (point −
      position) × t / d.
   6. A group move there (0x6218f0).
-  Not ported: the port has no INDIGENOUS_UNIT service (TRU1_C_RE §1.4).
+  Port (mcx4 t11): `movement::indigenous_wander_point` (steps 2 - 5) and the per-unit home
+  (`MovementSystem::set_indigenous_home`, written by the spawner); the battle host's step 5 of `sp_tick` runs the
+  service (interval 30, 1 burning) with step 1's moving / target tests and issues the move. [port M] the idle-clip test,
+  0x39b000 and the service's own burning damage are not made; the +0x34 gate is taken as passed.
 
 **Round 3 (lane mcx4-tac2, 2026-11-18, ReVa scripts; method in `MCX4_T10_RE_ANSWERS.md` §1 Round 3).**
 - **`Formation_Priority` (+0x654) [H]: never read, no effect in retail.**

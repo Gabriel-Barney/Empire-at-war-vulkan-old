@@ -99,7 +99,7 @@ std::string make_types() {
 const char* kFactions = R"(<Factions>
  <Faction Name="Empire"><Is_Playable>Yes</Is_Playable><Can_Control_Planets>Yes</Can_Control_Planets><Basic_AI>BasicEmpire</Basic_AI></Faction>
  <Faction Name="Rebel"><Is_Playable>Yes</Is_Playable><Can_Control_Planets>Yes</Can_Control_Planets><Basic_AI> GenericAI </Basic_AI></Faction>
- <Faction Name="Neutral"><Is_Neutral>Yes</Is_Neutral></Faction>
+ <Faction Name="Neutral"><Is_Neutral>Yes</Is_Neutral><Create_Player_In_Multiplayer_Games>Yes</Create_Player_In_Multiplayer_Games></Faction>
  <Faction Name="Chiss"><Is_Playable>Yes</Is_Playable><Can_Control_Planets>Yes</Can_Control_Planets><Basic_AI>ChissAI</Basic_AI>
   <Space_Skirmish_AI_Default_Forces> MF_Cruiser </Space_Skirmish_AI_Default_Forces>
   <Land_Skirmish_AI_Default_Forces>
@@ -108,7 +108,7 @@ const char* kFactions = R"(<Factions>
  <Faction Name="Yevetha"><Is_Playable>Yes</Is_Playable><Can_Control_Planets>Yes</Can_Control_Planets><Basic_AI>YevethaAI</Basic_AI>
   <Space_Skirmish_AI_Default_Forces> Factions_Thing_To_Replace </Space_Skirmish_AI_Default_Forces>
   <Land_Skirmish_AI_Default_Forces> Y_A </Land_Skirmish_AI_Default_Forces></Faction>
- <Faction Name="Pirates"><Can_Control_Planets>Yes</Can_Control_Planets></Faction>
+ <Faction Name="Pirates"><Can_Control_Planets>Yes</Can_Control_Planets><Create_Player_In_Multiplayer_Games>Yes</Create_Player_In_Multiplayer_Games></Faction>
  <Faction Name="Hapan"><Is_Playable>Yes</Is_Playable><Can_Control_Planets>Yes</Can_Control_Planets></Faction>
 </Factions>
 )";
@@ -256,6 +256,15 @@ void test_synthetic() {
     CHECK(game::make_skirmish_galaxy(d, s, g, &err));
     if (!err.empty()) std::printf("space skirmish: %s\n", err.c_str());
     CHECK(forces_of(g, 0, game::kSkirmishHumanPlanet) == 3 && forces_of(g, 1, game::kSkirmishBattlePlanet) == 3);
+    // ledger: verifies Faction.Create_Player_In_Multiplayer_Games
+    // mcx4 t10 (SKIRMISH_SETUP.md §1 [H]): after the two slots, one player per faction with
+    // Create_Player_In_Multiplayer_Games and not Is_Playable, in the factions file's order (Neutral before Pirates);
+    // the playable Hapan and the unflagged Empire / Rebel get none.
+    CHECK(g.players.size() == 4);
+    if (g.players.size() == 4) {
+        CHECK(g.players[2].faction == d.rules.find_faction("Neutral") && !g.players[2].human && !g.players[2].ai);
+        CHECK(g.players[3].faction == d.rules.find_faction("Pirates"));
+    }
     // q6: a bought space fleet without a hyperspace member (Y_Slow) is led by the faction's cheapest hyperspace ship (Y_A),
     // put in front; a bought fleet that can jump is kept as bought.
     {

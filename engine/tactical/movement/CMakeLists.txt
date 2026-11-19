@@ -36,6 +36,7 @@ add_library(alamo_tactical_movement STATIC
   src/land_team.cpp           # s78n t03: land squad containers walk their own path, members steer to slots (MOVEMENT 3.7)
   src/path_around.cpp         # s78n t20: relation code, swept box, ring search, the dynamic pathfinder's graph search (MOVEMENT 1.5.1)
   src/attack_approach.cpp     # s78n t25.1: attack approach geometry: arc slots, rings, slot leg, fire trim (MOVEMENT 4.3.2)
+  src/indigenous_wander.cpp   # mcx4 t11: the INDIGENOUS_UNIT wander point (0x621d80)
 )
 add_library(alamo::tactical_movement ALIAS alamo_tactical_movement)
 target_include_directories(alamo_tactical_movement PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

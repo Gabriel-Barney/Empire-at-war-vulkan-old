@@ -49,7 +49,7 @@ namespace {
 // DEPLOY_TROOPERS machine and the rope landing, r3g t04 the cable hold count; 7: r3h the queued animation plays (a
 // play queued after the host drained the queue - AI / Lua activations, damage listeners, deaths - waits for the next
 // tick). Only the current version is read (cu6).
-constexpr uint32_t kAbilitySaveVersion = 8;  // mcx4: + buzz-droid clouds
+constexpr uint32_t kAbilitySaveVersion = 9;  // mcx4: + buzz-droid clouds (8); mcx4-tac2: HARASS / AVOID_DANGER due frames (9)
 constexpr uint32_t kSpecialWeaponSaveVersion = 1;
 constexpr uint32_t kSpaceFieldSaveVersion = 1;
 
@@ -120,6 +120,7 @@ void AbilitySystem::write(ByteWriter& w) const {
         put_ids(w, o.gravity_list);
         w.u8(o.troop_state).u8(o.troop_deploy).u32(o.troop_end).u8(o.rope_state).u32(o.rope_end).f32(o.rope_z).i32(o.rope_owner);  // v6
         w.u8(o.cable_holds);  // v6
+        w.u32(o.harass_due).u32(o.avoid_due);  // v9 (mcx4-tac2)
     }
 
     w.u32(static_cast<uint32_t>(spawns_.size()));
@@ -307,6 +308,8 @@ bool AbilitySystem::read(ByteReader& r) {
         o.rope_z = r.f32();
         o.rope_owner = r.i32();
         o.cable_holds = r.u8();  // r3g t04
+        o.harass_due = r.u32();  // v9 (mcx4-tac2)
+        o.avoid_due = r.u32();
         if (!r.ok() || o.rope_state > 3) return false;
     }
 
@@ -388,7 +391,7 @@ bool AbilitySystem::read(ByteReader& r) {
         e.frame = r.u32();
         e.point = get_vec3<Vec3>(r);
         e.value = r.i32();
-        if (!r.ok() || kind > static_cast<uint8_t>(AbilityEventKind::TrooperReleased)) return false;
+        if (!r.ok() || kind > static_cast<uint8_t>(AbilityEventKind::BribeConverted)) return false;  // the last kind
         e.kind = static_cast<AbilityEventKind>(kind);
     }
     if (!r.count(n, 31)) return false;

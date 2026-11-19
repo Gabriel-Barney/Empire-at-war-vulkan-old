@@ -103,6 +103,13 @@ MovementConstants MovementConstants::from_game_constants(const data::GameConstan
         gc.get_float("FinalFormationFacingDeltaCoefficient", c.final_formation_facing_delta_coefficient);
     c.rotate_formation_facing_moves = gc.get_bool("Rotate_Formation_Facing_Moves", c.rotate_formation_facing_moves);
     c.infantry_turn_blend_time = gc.get_float("InfantryTurnBlendTime", c.infantry_turn_blend_time);  // mcx4 t11
+    c.should_skip_land_formup = gc.get_bool("ShouldSkipLandFormup", c.should_skip_land_formup);  // mcx4 t11: set_lanes / plan
+    c.should_use_space_idle_movement = gc.get_bool("ShouldUseSpaceIdleMovement", c.should_use_space_idle_movement);
+    c.idle_movement_frames = gc.get_float("IdleMovementFrames", c.idle_movement_frames);  // space_idle_drift
+    c.space_idle_movement_speed = gc.get_float("SpaceIdleMovementSpeed", c.space_idle_movement_speed);
+    c.land_object_tracking_tree_count = get_u32(gc, "LandObjectTrackingTreeCount", c.land_object_tracking_tree_count);
+    c.land_object_tracking_interval = get_u32(gc, "LandObjectTrackingInterval", c.land_object_tracking_interval);
+    c.movement_reevaluation_frame_count = get_u32(gc, "MovementReevaluationFrameCount", c.movement_reevaluation_frame_count);
     return c;
 }
 

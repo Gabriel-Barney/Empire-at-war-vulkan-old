@@ -411,6 +411,8 @@ int32_t BattleCatalog::hardpoint(std::string_view name, BuildState& s) const {
     h.turret_rotate_speed = num("TURRET_ROTATE_SPEED", 0.0f);
     h.turret_elevate_extent = num("TURRET_ELEVATE_EXTENT_DEGREES", h.turret_elevate_extent);
     h.manual_target = flag("REQUIRES_MANUAL_TARGET_ASSIGNMENT", false);
+    // mcx4 (MCX4_T10_RE_ANSWERS §10): the per-player cooldown a manual shot stamps (float seconds, +0x54).
+    h.manual_cooldown_secs = num("MANUAL_HARDPOINT_FIRING_COOLDOWN_SECS", 0.0f);
     h.turret_model = !ascii_trim(tag("MODEL_TO_ATTACH")).empty();
     {
         float rest[3] = {0.0f, 0.0f, 0.0f};
@@ -905,6 +907,14 @@ ta::AbilityObjectDesc BattleCatalog::ability_desc(uint32_t t, BuildState& s) con
     d.special_weapon_valid_targets = ty.get_mask(t, "Special_Weapon_Valid_Targets");
     d.max_speed = ty.get_float(t, "Max_Speed");
     d.force_sensitive = ty.get_bool(t, "Is_Force_Sensitive");
+    // mcx4-tac2 (MCX4_T11_T12_RE_ANSWERS §C4 round 4): the HARASS / AVOID_DANGER search ranges count only when the type
+    // lists the behaviour (Imperial_Elite_Guard's Harass range and TIE_Scout's Avoid range have none: no effect), and the
+    // AI combat power the services rank enemies by.
+    if (ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("HARASS")))
+        d.harass_range = ty.get_float(t, "Harass_Enemy_Exclusion_Range");
+    if (ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("AVOID_DANGER")))
+        d.avoid_range = ty.get_float(t, "Avoid_Enemy_Exclusion_Range");
+    d.ai_combat_power = ty.get_float(t, "AI_Combat_Power");
     // 0x3979d0 [port: the mode's FOW reveal range column; land for land battles is not distinguished here]
     if (ty.get_bool(t, "Target_Stealth_Units")) d.stealth_detection_range = ty.columns().space_fow_reveal_range[t];
     ta::AbilityResolvers r;

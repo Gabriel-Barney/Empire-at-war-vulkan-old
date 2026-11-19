@@ -664,6 +664,273 @@ void test_income_streams() {
     CHECK(income_mod_applies(m, favor_t, 0, 1, split_r) && !income_mod_applies(m, favor_t, 0, 1, solo_r));
 }
 
+// ---- mcx4-tac2: contained starts and the bribe's type change ----
+std::string contain_patch(std::string t) {
+    const size_t end = t.find("</S10>");
+    if (end != std::string::npos)
+        t.insert(end,
+                 " <SpecialStructure Name=\"T_Barracks\"><Victory_Relevant>Yes</Victory_Relevant><Behavior>SELECTABLE, DUMMY_GROUND_STRUCTURE</Behavior>"
+                 "<Tactical_Health>500</Tactical_Health><CategoryMask>Structure</CategoryMask>"
+                 "<Can_Contain_Heroes_During_Ground_Battle>Yes</Can_Contain_Heroes_During_Ground_Battle></SpecialStructure>\n"
+                 " <SpecialStructure Name=\"T_Factory\"><Variant_Of_Existing_Type>T_Barracks</Variant_Of_Existing_Type>"
+                 "<Tactical_Health>800</Tactical_Health></SpecialStructure>\n"
+                 " <SpecialStructure Name=\"T_Wall\"><Variant_Of_Existing_Type>T_Barracks</Variant_Of_Existing_Type>"
+                 "<Tactical_Health>2000</Tactical_Health><Can_Contain_Heroes_During_Ground_Battle>No</Can_Contain_Heroes_During_Ground_Battle></SpecialStructure>\n"
+                 " <GroundInfantry Name=\"T_Stay_Hero\"><Variant_Of_Existing_Type>S10_Trooper</Variant_Of_Existing_Type>"
+                 "<Is_Named_Hero>Yes</Is_Named_Hero><Hyperspace>Yes</Hyperspace><Hyperspace_Speed>1.5</Hyperspace_Speed>"
+                 "<Population_Value>1</Population_Value><Stay_In_Transport_During_Ground_Battle>Yes</Stay_In_Transport_During_Ground_Battle>"
+                 "</GroundInfantry>\n"
+                 " <SpaceUnit Name=\"T_Attach_Hero\"><Variant_Of_Existing_Type>S10_Corvette</Variant_Of_Existing_Type>"
+                 "<Attach_To_Flagship_During_Space_Battle>Yes</Attach_To_Flagship_During_Space_Battle></SpaceUnit>\n");
+    return t;
+}
+
+// Runs a campaign battle on S10_B (player 1 invades / attacks from planet 2) with `extra` forces for the Empire defender at
+// S10_B; `per_tick` runs after every host tick once the battle exists (false stops).
+template <class F>
+void contain_battle(Data& d, bool land, std::initializer_list<const char*> extra, F per_tick) {
+    jobs::JobSystem js(jobs::JobSystemConfig{0});
+    SimConfig cfg;
+    cfg.seed = 2026;
+    cfg.players = 4;
+    SimHost host(d.types, js, cfg);
+    galactic::GalacticSetup setup = make_setup(d, land);
+    for (const char* name : extra) setup.forces.push_back({0, 1, type_of(d, name)});
+    galactic::GalacticSim* gs = host.start_galactic(d.rules, std::move(setup));
+    CHECK(gs != nullptr);
+    if (!gs) return;
+    CampaignBattleOptions opt;
+    opt.conflict.human_choice = galactic::BattleChoice::Fight;
+    opt.battle.max_frames = 600;
+    opt.battle.order_interval = 0;  // no stand-in orders
+    CampaignBattles battles(host, d.crules, *d.catalog,
+                            [land](const std::string& name, terrain::MapData& m) {
+                                if (name != (land ? "S10_Land_B" : "S10_Space_B")) return false;
+                                m = land ? land_map() : space_map();
+                                return true;
+                            },
+                            opt);
+    CHECK(battles.attach(nullptr));
+    if (land) {
+        std::vector<objects::ObjectHandle> up;
+        for (objects::ObjectHandle h : gs->planets()[2].surface)
+            if (gs->store().owner(h) == 1) up.push_back(h);
+        CHECK(gs->launch_units(1, 2, up) == commands::RejectReason::None);
+    }
+    const std::vector<uint32_t> uf = gs->fleets_at(2, 1);
+    if (!uf.empty()) CHECK(gs->move_fleet(1, uf[0], 1) == commands::RejectReason::None);
+    bool invaded = !land, seen = false;
+    for (uint64_t t = 0; t < 6000; ++t) {
+        host.tick_once();
+        if (!invaded && host.modes().depth() == 1) {
+            const std::vector<uint32_t> f = gs->fleets_at(1, 1);
+            if (!f.empty() && !gs->fleets()[f[0]].moving) invaded = gs->invade(1, 1, {}) == commands::RejectReason::None;
+        }
+        TacticalBattle* b = battles.battle();
+        TacticalMode* tm = host.tactical();
+        if (!b || !tm) {
+            if (seen) break;
+            continue;
+        }
+        seen = true;
+        if (!per_tick(*b, *tm)) break;
+    }
+    CHECK(seen);
+}
+
+objects::ObjectId first_of_type(const objects::ObjectStore& st, objects::TypeIndex t) {
+    for (const objects::ObjectHandle h : st.all_objects())
+        if (st.alive(h) && st.type(h) == t) return st.id(h);
+    return objects::kNoObjectId;
+}
+
+// MCX4_T10_RE_ANSWERS §4 / §18 (the campaign spawn 0x2a00b0): a land start unit whose type has
+// Stay_In_Transport_During_Ground_Battle is made inside its owner's Can_Contain_Heroes_During_Ground_Battle structure with
+// the highest max health (T_Factory 800 over T_Barracks 500; T_Wall 2000 lacks the flag): not in movement, not targetable
+// (kUnitGarrisoned), at the structure's position. When that structure dies its contents die (no garrison behaviour).
+// Without such a structure the unit is placed as before.
+// ledger: verifies GameObjectType.Can_Contain_Heroes_During_Ground_Battle
+void test_hero_in_structure() {
+    g_temp_prefix = "alamo_sim_r3g_tests_mcx4_contain";
+    g_types_patch = contain_patch;
+    auto d = make_data(false, false, true);  // s4: the garrison host code
+    g_types_patch = nullptr;
+    const objects::TypeIndex hero_t = d->types.resolve_name("T_Stay_Hero"), factory_t = d->types.resolve_name("T_Factory");
+    CHECK(hero_t != objects::kNone && factory_t != objects::kNone);
+    namespace tc = alamo::tactical::combat;
+    objects::ObjectId hero = objects::kNoObjectId, holder = objects::kNoObjectId;
+    bool inside = false, killed = false, hero_died = false;
+    uint32_t kill_frame = 0;
+    contain_battle(*d, true, {"T_Barracks", "T_Factory", "T_Wall", "T_Stay_Hero"}, [&](TacticalBattle& b, TacticalMode& tm) {
+        const objects::ObjectStore& st = tm.primary();
+        if (b.frame() < 1) return true;
+        if (!killed) {
+            hero = first_of_type(st, hero_t);
+            holder = b.contained_by(hero);
+            const objects::ObjectHandle hh = st.find(holder), uh = st.find(hero);
+            inside = hero != objects::kNoObjectId && holder != objects::kNoObjectId && st.alive(hh) && st.type(hh) == factory_t &&
+                     (b.combat().flags(hero) & tc::kUnitGarrisoned) != 0 && !b.movement().has_unit(hero) &&
+                     st.position(uh).x == st.position(hh).x && st.position(uh).y == st.position(hh).y;
+            if (!inside) return false;
+            killed = b.script_damage(tm, holder, 1.0e9f, false);
+            kill_frame = b.frame();
+            return killed;
+        }
+        hero_died = !b.combat().alive(hero) || !st.alive(st.find(hero));
+        return !hero_died && b.frame() < kill_frame + 10;
+    });
+    std::printf("  hero in structure: hero %d inside %d (holder %d), holder killed %d, hero died %d\n", hero, inside, holder,
+                killed, hero_died);
+    CHECK(inside && killed && hero_died);
+    // No Can_Contain_Heroes structure: placed as before (not contained, in movement).
+    bool outside = false;
+    contain_battle(*d, true, {"T_Wall", "T_Stay_Hero"}, [&](TacticalBattle& b, TacticalMode& tm) {
+        if (b.frame() < 1) return true;
+        const objects::ObjectId h = first_of_type(tm.primary(), hero_t);
+        outside = h != objects::kNoObjectId && b.contained_by(h) == objects::kNoObjectId && b.movement().has_unit(h);
+        return false;
+    });
+    CHECK(outside);
+}
+
+// MCX4_T11_T12_RE_ANSWERS §B2 (0x2a00b0, space): the side's flagship is its arriving ship with the largest max health +
+// shield (S10_Frigate 900 over S10_Corvette 400); a unit whose type has Attach_To_Flagship_During_Space_Battle is not made
+// with the fleet but after its placement, at the flagship's position and inside it.
+// ledger: verifies GameObjectType.Attach_To_Flagship_During_Space_Battle
+void test_attach_to_flagship() {
+    g_temp_prefix = "alamo_sim_r3g_tests_mcx4_flagship";
+    g_types_patch = contain_patch;
+    auto d = make_data(false, false, true);
+    g_types_patch = nullptr;
+    const objects::TypeIndex hero_t = d->types.resolve_name("T_Attach_Hero"), frigate_t = d->types.resolve_name("S10_Frigate");
+    namespace tc = alamo::tactical::combat;
+    bool inside = false, checked = false;
+    objects::ObjectId hero = objects::kNoObjectId, holder = objects::kNoObjectId;
+    contain_battle(*d, false, {"T_Attach_Hero"}, [&](TacticalBattle& b, TacticalMode& tm) {
+        if (b.frame() < 1) return true;
+        const objects::ObjectStore& st = tm.primary();
+        hero = first_of_type(st, hero_t);
+        holder = b.contained_by(hero);
+        const objects::ObjectHandle hh = st.find(holder), uh = st.find(hero);
+        inside = hero != objects::kNoObjectId && st.alive(hh) && st.type(hh) == frigate_t && st.owner(hh) == 0 &&
+                 (b.combat().flags(hero) & tc::kUnitGarrisoned) != 0 && !b.movement().has_unit(hero) &&
+                 st.position(uh).x == st.position(hh).x && st.position(uh).y == st.position(hh).y && hero > holder;
+        checked = true;
+        return false;
+    });
+    std::printf("  attach to flagship: hero %d inside %d (holder %d)\n", hero, inside, holder);
+    CHECK(checked && inside);
+}
+
+// MCX4_T10_RE_ANSWERS §7 (Tactical_Bribe 0x5b07c0): after the owner change the bribed team member's type becomes its
+// Conversion_Ability_Changes_To_Enemy type in place, and so does every member of its team (same object ids); the
+// converted type (a variant, which inherits the tag naming itself) changes no further.
+// ledger: verifies GameObjectType.Conversion_Ability_Changes_To_Enemy
+std::string convert_patch(std::string t) {
+    const std::string at = "<GroundInfantry Name=\"S10_Trooper\">";
+    if (const size_t p = t.find(at); p != std::string::npos)
+        t.insert(p + at.size(), "<Conversion_Ability_Changes_To_Enemy>S10_Trooper_Conv</Conversion_Ability_Changes_To_Enemy>");
+    if (const size_t end = t.find("</S10>"); end != std::string::npos)
+        t.insert(end, " <GroundInfantry Name=\"S10_Trooper_Conv\"><Variant_Of_Existing_Type>S10_Trooper</Variant_Of_Existing_Type></GroundInfantry>\n");
+    return t;
+}
+
+void test_bribe_conversion() {
+    g_temp_prefix = "alamo_sim_r3g_tests_mcx4_convert";
+    g_types_patch = convert_patch;
+    auto d = make_data(false, false, false, false, false, false, false, false, false, false, false, false, false, false, true);
+    g_types_patch = nullptr;
+    const objects::TypeIndex trooper_t = d->types.resolve_name("S10_Trooper"), conv_t = d->types.resolve_name("S10_Trooper_Conv");
+    const objects::TypeIndex slicer_t = d->types.resolve_name("S10_Slicer");
+    CHECK(trooper_t != objects::kNone && conv_t != objects::kNone && slicer_t != objects::kNone);
+    namespace tc = alamo::tactical::combat;
+    jobs::JobSystem js(jobs::JobSystemConfig{0});
+    SimConfig cfg;
+    cfg.seed = 2026;
+    cfg.players = 4;
+    SimHost host(d->types, js, cfg);
+    galactic::GalacticSetup setup = make_setup(*d, true);
+    setup.forces.push_back({0, 1, type_of(*d, "S10_Slicer_Co")});
+    if (!setup.players.empty()) setup.players[0].credits = 5000.0f;
+    galactic::GalacticSim* gs = host.start_galactic(d->rules, setup);
+    CHECK(gs != nullptr);
+    if (!gs) return;
+    CampaignBattleOptions opt;
+    opt.conflict.human_choice = galactic::BattleChoice::Fight;
+    opt.battle.max_frames = 3000;
+    CampaignBattles battles(host, d->crules, *d->catalog,
+                            [](const std::string& name, terrain::MapData& m) {
+                                if (name != "S10_Land_B") return false;
+                                m = land_map();
+                                return true;
+                            },
+                            opt);
+    CHECK(battles.attach(nullptr));
+    std::vector<objects::ObjectHandle> up;
+    for (objects::ObjectHandle h : gs->planets()[2].surface)
+        if (gs->store().owner(h) == 1) up.push_back(h);
+    CHECK(gs->launch_units(1, 2, up) == commands::RejectReason::None);
+    const std::vector<uint32_t> uf = gs->fleets_at(2, 1);
+    if (!uf.empty()) CHECK(gs->move_fleet(1, uf[0], 1) == commands::RejectReason::None);
+    const uint8_t kind = tactical::abilities::ability_type_from_name("TACTICAL_BRIBE");
+    bool invaded = false, ordered = false, converted = false, others_kept = true;
+    uint32_t order_frame = 0;
+    objects::ObjectId victim = objects::kNoObjectId;
+    uint32_t team = 0;
+    std::vector<objects::ObjectId> members, others;
+    for (uint64_t t = 0; t < 6000 && !converted; ++t) {
+        host.tick_once();
+        if (!invaded && host.modes().depth() == 1) {
+            const std::vector<uint32_t> f = gs->fleets_at(1, 1);
+            if (!f.empty() && !gs->fleets()[f[0]].moving) invaded = gs->invade(1, 1, {}) == commands::RejectReason::None;
+        }
+        TacticalBattle* b = battles.battle();
+        TacticalMode* tm = host.tactical();
+        if (!b || !tm || b->frame() < 3) {
+            if (ordered) break;
+            continue;
+        }
+        const objects::ObjectStore& st = tm->primary();
+        const tc::CombatSystem& cs = b->combat();
+        if (!ordered) {
+            objects::ObjectId slicer = objects::kNoObjectId;
+            for (size_t i = 0; i < cs.unit_count(); ++i) {
+                const auto id = cs.unit_id_at(i);
+                const objects::ObjectHandle h = st.find(id);
+                if (!cs.alive(id) || !st.alive(h)) continue;
+                if (slicer == objects::kNoObjectId && st.type(h) == slicer_t) slicer = id;
+                if (team == 0 && cs.owner(id) == 1 && cs.team(id) != 0 && st.type(h) == trooper_t) team = cs.team(id);
+            }
+            for (size_t i = 0; i < cs.unit_count(); ++i) {
+                const auto id = cs.unit_id_at(i);
+                if (!cs.alive(id) || st.type(st.find(id)) != trooper_t) continue;
+                (cs.team(id) == team ? members : others).push_back(id);
+            }
+            CHECK(slicer != objects::kNoObjectId && team != 0 && members.size() >= 2);
+            if (slicer == objects::kNoObjectId || members.size() < 2) break;
+            victim = members.front();
+            const objects::ObjectId users[] = {slicer};
+            ordered = b->abilities().targeted_ability(users, kind, victim, -1, b->frame()) == 1u;
+            order_frame = b->frame();
+            CHECK(ordered);
+            if (!ordered) break;
+            continue;
+        }
+        if (cs.owner(victim) != 0) {
+            if (b->frame() >= order_frame + 200u) break;
+            continue;
+        }
+        converted = true;
+        for (const objects::ObjectId id : members)
+            if (cs.alive(id)) converted = converted && st.alive(st.find(id)) && st.type(st.find(id)) == conv_t;
+        for (const objects::ObjectId id : others)
+            if (cs.alive(id)) others_kept = others_kept && st.type(st.find(id)) == trooper_t;
+    }
+    std::printf("  bribe conversion: victim %d of team %u (%zu members), converted %d, others kept %d\n", victim, team,
+                members.size(), converted, others_kept);
+    CHECK(ordered && converted && others_kept);
+}
+
 }  // namespace
 
 int main() {
@@ -684,6 +951,12 @@ int main() {
     test_death_persistence_override();
     std::printf("mcx4 tac2: income streams\n");
     test_income_streams();
+    std::printf("mcx4 tac2: Stay_In_Transport heroes inside Can_Contain_Heroes structures\n");
+    test_hero_in_structure();
+    std::printf("mcx4 tac2: Attach_To_Flagship_During_Space_Battle\n");
+    test_attach_to_flagship();
+    std::printf("mcx4 tac2: Conversion_Ability_Changes_To_Enemy\n");
+    test_bribe_conversion();
     if (g_fail) {
         std::printf("alamo_sim_r3g_tests: %d failure(s)\n", g_fail);
         return 1;

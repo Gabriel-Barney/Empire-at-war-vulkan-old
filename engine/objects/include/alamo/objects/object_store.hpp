@@ -167,6 +167,10 @@ public:
     // parity CRC (position / facing / health) is unchanged. Systems that cache owners (GalacticSim data
     // packs, tactical TreeSet) are the caller's to update.
     bool set_owner(ObjectHandle h, int32_t owner);
+    // mcx4-tac2 (MCX4_T10_RE_ANSWERS §7, Tactical_Bribe 0x5b07c0): replace a live object's type pointer (+0x298) in place -
+    // same slot, same id, owner and behaviours (nothing is attached or removed). The type is part of hash_state and the
+    // save. False for a dead / stale handle, an unknown type or no change.
+    bool set_type(ObjectHandle h, TypeIndex t);
     // a1h t08 - transport carried type (TransportDataPack +0x48, A1_READINGS §32.2 [H]): the company type a TRANSPORT
     // carries, which is its representative type (0x3973b0) when set. The original sets it in galactic company production
     // (0x4f45c0) and on a land reinforcement's landing object (0x4ee230 from 0x2b5fe0: the galactic parent's

@@ -248,6 +248,12 @@ bool ObjectStore::has_behavior(ObjectHandle h, BehaviorTypeId id) const {
     return exists(h) && id < kBehaviorTypeCount && behavior_index_[h.slot()][id] != 0xFF;
 }
 
+bool ObjectStore::set_type(ObjectHandle h, TypeIndex t) {
+    if (!alive(h) || t == kNone || t >= types_->size() || type_[h.slot()] == t) return false;
+    type_[h.slot()] = t;
+    return true;
+}
+
 bool ObjectStore::set_carried_type(ObjectHandle h, TypeIndex carried) {
     if (!alive(h) || (carried != kNone && carried >= types_->size())) return false;
     if (!has_behavior(h, beh::Transport) && !has_behavior(h, beh::TransportLanding)) return false;

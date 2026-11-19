@@ -149,6 +149,24 @@ void TacticalBattle::sk_garrison_tick() {
     }
 }
 
+void TacticalBattle::sk_garrison_list(int32_t player, int32_t type, bool add) {
+    if (player < 0 || type < 0) return;
+    const auto t = static_cast<uint32_t>(type);
+    auto it = std::find_if(sk_garrisons_.begin(), sk_garrisons_.end(), [player](const SkGarrison& g) { return g.player == player; });
+    if (add) {
+        if (it == sk_garrisons_.end()) {
+            SkGarrison g;
+            g.player = player;
+            sk_garrisons_.push_back(std::move(g));
+            it = sk_garrisons_.end() - 1;
+        }
+        it->types.push_back(t);  // 0x6ffbf0: grown and stored at the end
+        return;
+    }
+    if (it == sk_garrisons_.end()) return;
+    if (const auto k = std::find(it->types.begin(), it->types.end(), t); k != it->types.end()) it->types.erase(k);  // 0x474a0
+}
+
 int32_t TacticalBattle::sk_pending_delivery(int32_t player, bool pop) {
     for (SkGarrison& g : sk_garrisons_) {
         if (g.player != player || g.pending.empty()) continue;

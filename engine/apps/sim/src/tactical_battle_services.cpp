@@ -336,6 +336,8 @@ void TacticalBattle::build_service_graph() {
     // ---- queues, victory --------------------------------------------------------------------------------------------
     // q6: attacks on TEAM containers (re-pick, end), before the queues read the orders
     g.add("team_attack", kAll, kAll, [this] { team_attack_service(*tick_.mode, *tick_.rng); });
+    // mcx4 t11: the space coordinator's attack re-evaluation (0x5d51e0), after the combat tick's target changes
+    g.add("space_reevaluate", kAll, kAll, [this] { space_attack_reevaluate(*tick_.mode, *tick_.rng); });
     // [port: Gabriel] 5b. queueable unit actions: completed orders start the next entry
     g.add("queues", kAll, kAll, [this] { advance_queues(*tick_.mode, *tick_.rng); });
     g.add("swap_back", kAll, kAll, [this] { late_swap_back_signals(); });  // S7 t27: jetpack swap back, signal 0x29

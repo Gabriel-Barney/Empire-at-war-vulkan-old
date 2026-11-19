@@ -34,6 +34,10 @@ float slowdown_for_layer(const MovementConstants& k, uint32_t layer) {
 
 MovementSystem::MovementSystem(MovementConfig cfg) : cfg_(std::move(cfg)) {
     space_.set_window(cfg_.constants.space_object_tracking_tree_count, cfg_.constants.space_object_tracking_interval);
+    // mcx4 t11 (FIGHTER_FLYING §6.3.1 item 3, 0x5d8140 [H]): in land mode the tracking rings hold LandObjectTrackingTreeCount
+    // slices of LandObjectTrackingInterval frames, so the land air units' planner sees the timed tracks that far ahead
+    // ([port M] the window = their product, as in space)
+    air_.set_window(cfg_.constants.land_object_tracking_tree_count, cfg_.constants.land_object_tracking_interval);
 }
 
 void MovementSystem::set_grid(PassabilityGrid grid, const ParallelFor& pf) {
@@ -1515,6 +1519,7 @@ void MovementSystem::move_space(const MoveOrder& order, const std::vector<uint32
                 u.failed = false;
                 u.turning = false;
                 u.facing = order.facing_deg;
+                u.idle_at = 0;  // mcx4 t11: a new order ends a stop's kIdleOff (space_idle_drift)
                 const uint32_t offset = delays[s.member] + n * k.space_pathfind_frame_delay_delta;
                 u.start_frame = pc ? kStartPending : frame + offset;
                 if (pc) {
@@ -1551,6 +1556,8 @@ void MovementSystem::stop(std::span<const ObjectId> ids) {
         u->form_first = -1;
         u->coord_id = 0;
         u->cohesion_speed = kInf;  // [port] fleet cohesion: a stop ends the move's cap
+        // mcx4 t11: Stop drops the formation, so no idle drift until the next order (only with the constant: FoC unchanged)
+        if (cfg_.constants.should_use_space_idle_movement) u->idle_at = kIdleOff;
         u->self_arrive = false;
         u->atk_theta = u->atk_rho = 0.0f;  // s78n t25.2: a stop drops the attack block (halt() keeps it)
         u->atk_form = 0;
@@ -1777,7 +1784,54 @@ void MovementSystem::tick(uint32_t frame, SimRng& rng, const ParallelFor& pf) {
     if (cfg_.mode == MoveMode::Land) tick_land(frame, rng, pf);  // jiggle draws (see header)
     else {
         fform_tick(frame, rng);  // s78f t02: the fighter formations' step (plan, arrival, 0x4192b0, 0x410a60)
+        space_idle_drift(frame, rng);  // mcx4 t11: the formation state 3 idle branch (ShouldUseSpaceIdleMovement)
         tick_space(frame, pf);
+    }
+}
+
+// mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 rows ShouldUseSpaceIdleMovement / IdleMovementFrames [H read, M meaning]): in space
+// with the constant set, an arrived formation whose lead is idle waits int(F + synced float(0, F / 2) + 0.5) frames (F =
+// IdleMovementFrames), then gets a drift move (0x420a40) to lead + facing x 0x413100's distance (the lead's pack +0x2ac =
+// int(F)), kept inside the map less 300, at the flag-0x10 block's speed cap SpaceIdleMovementSpeed (0x41b2a0); on its
+// arrival the wait starts again. FoC clears the constant: no draw, no state. [port M] every non-fighter ship is its own
+// one-block formation (the port keeps no space formation after the arrival); a ship ordered with a facing drifts without
+// one; SpaceIdleMovementSpeed <= 0 (FoC's value) makes no drift (a speed-0 move); the SimpleSpace speed getters' floor
+// (0x59c170 / 0x597dc0 / 0x59e700: SpaceIdleMovementSpeed instead of 0) is that cap only.
+void MovementSystem::space_idle_drift(uint32_t frame, SimRng& rng) {
+    const MovementConstants& k = cfg_.constants;
+    if (!k.should_use_space_idle_movement) return;  // ledger: consumes GameConstants.ShouldUseSpaceIdleMovement
+    const float f = std::max(0.0f, k.idle_movement_frames);  // ledger: consumes GameConstants.IdleMovementFrames
+    for (Unit& u : units_) {  // ascending id
+        if (is_fighter(u) || u.idle_at == kIdleOff || !(u.lp.max_speed > 0.0f)) continue;
+        const bool idle = u.arrived && !u.has_goal && !u.need_path && !u.following && !u.turning && u.pend == 0;
+        if (!idle) {
+            u.idle_at = 0;
+            continue;
+        }
+        if (u.idle_at == 0) {
+            const float wait = f + rng.range_float(0.0f, f * 0.5f) + 0.5f;
+            u.idle_at = frame + std::max(1u, static_cast<uint32_t>(wait));
+            continue;
+        }
+        if (frame < u.idle_at) continue;
+        u.idle_at = 0;
+        if (!(k.space_idle_movement_speed > 0.0f)) continue;
+        V2 p = u.m.pos + dir_from_deg(u.m.yaw) * static_cast<float>(static_cast<int32_t>(f));
+        if (space_.has_box()) {
+            const V2 lo = space_.box_min(), hi = space_.box_max();
+            constexpr float kMargin = 300.0f;
+            p.x = lo.x + kMargin <= hi.x - kMargin ? std::clamp(p.x, lo.x + kMargin, hi.x - kMargin) : 0.5f * (lo.x + hi.x);
+            p.y = lo.y + kMargin <= hi.y - kMargin ? std::clamp(p.y, lo.y + kMargin, hi.y - kMargin) : 0.5f * (lo.y + hi.y);
+        }
+        u.goal = p;
+        u.has_goal = true;
+        u.need_path = true;
+        u.arrived = false;
+        u.failed = false;
+        u.facing = kNoFacing;
+        u.cohesion_speed = std::min(u.lp.max_speed, k.space_idle_movement_speed);  // the plan's speed cap of this move
+        u.start_frame = frame;
+        ++stats_.space_idle_drifts;
     }
 }
 
@@ -1786,6 +1840,20 @@ bool MovementSystem::set_owner(ObjectId id, int32_t owner) {
     if (!u) return false;
     u->d.owner = owner;
     return true;
+}
+
+bool MovementSystem::set_indigenous_home(ObjectId id, const IndigenousHome& h) {
+    Unit* u = unit_ptr(id);
+    if (!u) return false;
+    u->ind = h;
+    // a leash <= 0 takes the map-rectangle branch either way: kept as 0 (the save refuses a negative or non-finite one)
+    if (!(u->ind.leash > 0.0f) || !std::isfinite(u->ind.leash)) u->ind.leash = 0.0f;
+    return true;
+}
+
+IndigenousHome MovementSystem::indigenous_home(ObjectId id) const {
+    const int32_t i = find(id);
+    return i >= 0 ? units_[static_cast<size_t>(i)].ind : IndigenousHome{};
 }
 
 void MovementSystem::crush_pass(const std::vector<WalkResult>& res) {
@@ -1896,7 +1964,17 @@ void MovementSystem::plan_land(uint32_t frame, const ParallelFor& pf) {
                           ? 1
                           : 0;
     }
-    std::vector<LandPath> out(req.size());
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 Round 4, 0x41c1a0 [H]): ShouldSkipLandFormup clear - a lane member of a
+    // formation of 2+ (its lane starts at its form-up point, set_lanes) gets a lead-in path there first: kind 2, from the
+    // pathfinder 0x5a2830 at its position. A failed search leaves it without one (it takes the lane as it is).
+    std::vector<uint8_t> lead_in(req.size(), 0);
+    constexpr float kLeadInMin = 1.0f;  // [port] a member already on its form-up point takes the lane at once
+    if (!cfg_.constants.should_skip_land_formup)
+        for (size_t r = 0; r < req.size(); ++r) {
+            const Unit& u = units_[req[r]];
+            lead_in[r] = use_lane[r] && u.in_formation && distance(u.m.pos, u.lane[0]) > kLeadInMin ? 1 : 0;
+        }
+    std::vector<LandPath> out(req.size());  // (a lead-in member: its lead-in path)
     std::vector<SpacePath> air_out(req.size());  // §4.3-4.6: timed paths of land air units
     MovementConstants air_k = cfg_.constants;     // the planner's land branches (MOVEMENT §2.1)
     air_k.xy_expansion_distance_space = air_k.xy_expansion_distance_land;
@@ -1915,10 +1993,10 @@ void MovementSystem::plan_land(uint32_t frame, const ParallelFor& pf) {
                 plan_space_path(air_, air_k, q, ssc, air_out[r]);
                 continue;
             }
-            if (u.forced || use_lane[r]) continue;  // s78k t01: the straight path is built below; s78p: the lane
+            if (u.forced || (use_lane[r] && !lead_in[r])) continue;  // s78k t01: the straight path is built below; s78p: the lane
             LandPathRequest q;
             q.start = u.m.pos;
-            q.goal = u.goal;
+            q.goal = lead_in[r] ? u.lane[0] : u.goal;  // mcx4 t11: the lead-in to the form-up point
             q.mask = plan_mask(u);  // bkm1 t03 (b0035): 0x414720 - the class without the Shield bit when the goal allows
             // s78n t03 [port]: a squad container plans without clearance (its planner footprint is untraced; its radius is
             // the joint box's, for the formation layout).
@@ -1993,7 +2071,19 @@ void MovementSystem::plan_land(uint32_t frame, const ParallelFor& pf) {
             // s78p (b0049, MOVEMENT §3.5.2 G): the path set of the member's lane - from where it stands now; the corner pass
             // runs on the lane (§3.5.2 D) and the walk-deployed cap's d is the formation path's 3-D length (§3.2.1 item 2)
             u.m.path = std::move(lane);
-            lane_start(u.m.path, u.m.pos);  // where it stands now (it may have walked on since the order)
+            if (lead_in[r] && out[r].ok && out[r].points.size() >= 2) {
+                // mcx4 t11: the lead-in, then the lane from the form-up point on. [port M] one path: retail pushes the
+                // lead-in over the unstarted formation path and starts that on the member's next formation update once
+                // the lead-in is popped (no wait for the other members, no frame limit); the port's member walks on
+                // through its form-up point. A collision record pushed meanwhile sits over both.
+                std::vector<V2> p = std::move(out[r].points);
+                const size_t from = p.back() == u.m.path[0] ? 1u : 0u;
+                p.insert(p.end(), u.m.path.begin() + static_cast<std::ptrdiff_t>(from), u.m.path.end());
+                u.m.path = std::move(p);
+                ++stats_.formup_leadins;
+            } else {
+                lane_start(u.m.path, u.m.pos);  // where it stands now (it may have walked on since the order)
+            }
             u.m.end_z = u.lane_z;  // bkm1 t06: a slot-leg lane keeps G's height on its last point
             u.m.end_at = u.m.path.back();
             u.lane_z = 0.0f;

@@ -200,7 +200,13 @@ static void test_fire_special_weapon(const Db& db) {
     };
     e.hooks.special_weapons_allowed = [&](int32_t) { return allowed; };
     e.hooks.station_readiness = [&](objects::ObjectHandle) { return 1.0f; };
-    e.hooks.station_fire = [&](objects::ObjectHandle, objects::ObjectHandle, int32_t) { return station_ok; };
+    int32_t station_player = -1;  // mcx4: the setter 0x3822e0 gets the Lua player's id
+    objects::ObjectHandle station_target{};
+    e.hooks.station_fire = [&](objects::ObjectHandle, objects::ObjectHandle t, int32_t player) {
+        station_player = player;
+        station_target = t;
+        return station_ok;
+    };
     CHECK(run(vm, "c = Find_First_Object('Ion_Cannon') l = Find_First_Object('Lobber') st = Find_First_Object('Station') "
                   "x = Find_First_Object('Ship') pr = Find_First_Object('Prop') p1 = pr.Get_Owner()") == "" &&
           !gnil(vm, "p1"));
@@ -223,6 +229,7 @@ static void test_fire_special_weapon(const Db& db) {
     CHECK(run(vm, "r = st.Fire_Special_Weapon(x, p1)") == "" && gnil(vm, "r") && last_message_has(vm, "unable to fire at target"));
     station_ok = true;
     CHECK(run(vm, "r = st.Fire_Special_Weapon(x, p1) ssame = (r == st)") == "" && gtrue(vm, "ssame"));
+    CHECK(station_player == 1 && station_target == enemy);
     // Bad arguments: script errors, no unwind.
     CHECK(run(vm, "r = c.Fire_Special_Weapon(x)") == "" && gnil(vm, "r") && last_message_has(vm, "Expected 2"));
     CHECK(run(vm, "r = c.Fire_Special_Weapon(3, p1)") == "" && gnil(vm, "r") && last_message_has(vm, "invalid target"));

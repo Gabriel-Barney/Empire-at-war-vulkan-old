@@ -174,6 +174,7 @@ constexpr ClassName kClasses[] = {
     {"Cancel_Special_Ability", SpecialClass::CancelSpecial},
     {"Cable_Ability", SpecialClass::Cable},
     {"Starbase_Upgrade_Ability", SpecialClass::StarbaseUpgrade},
+    {"Garrison_Upgrade_Ability", SpecialClass::GarrisonUpgrade},
 };
 
 }  // namespace
@@ -248,6 +249,7 @@ int32_t special_service_interval(SpecialClass c, uint32_t fps) {
         case S::CancelSpecial:
         case S::Weatherproof:        // [M: an aura class like Base_Power; not in the §1.4 list]
         case S::RetreatPrevention:   // [M: same]
+        case S::GarrisonUpgrade:     // mcx4-tac2: slot 3 is the base 0x17d070 as for Battlefield_Modifier (no service)
             return 0;
         case S::StarbaseUpgrade:     // STATION_HANGARS_SOUND.md §1.1: interval 2, Skirmish_Automatic, one-shot service
             return 2;

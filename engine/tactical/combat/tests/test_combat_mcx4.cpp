@@ -498,6 +498,208 @@ void test_crouch_move_fire_cone() {
     CHECK_F(CombatConfig{}.crouch_move_fire_angle_cutoff, 20.0f);
 }
 
+namespace {
+// mcx4 (MCX4_T10_RE_ANSWERS §10 Round 4): a station (unit 1, player 0) at the origin facing +x with one manual-target
+// hardpoint (fire cone 90 x 180, range 2000, minimum 100, 1 s recharge, one pulse, Fire_Category_Restrictions Fighter,
+// cooldown 120 s), and a capital (unit 2, player 1) 500 ahead.
+struct ManualWorld {
+    World w;
+    FogHooks fog;
+    explicit ManualWorld(bool manual = true, bool opportunity = false, bool fires_undeployed = true) {
+        ProjectileDesc p;
+        p.max_speed = 50.0f;
+        p.damage = 1.0f;
+        w.data.projectiles.push_back(p);
+        HardpointDesc hd;
+        hd.kind = HardpointKind::WeaponSpecial;
+        hd.health = 100.0f;
+        hd.projectile = 0;
+        hd.min_recharge = hd.max_recharge = 1.0f;
+        hd.pulse_count = 1;
+        hd.fire_range = 2000.0f;
+        hd.fire_min_range = 100.0f;
+        hd.fire_cone_width = 90.0f;
+        hd.fire_cone_height = 180.0f;
+        hd.fire_category_restrictions = kCatFighter;
+        hd.allow_opportunity_fire_when_targeting = true;
+        hd.allow_opportunity_fire_when_idle = true;
+        hd.fire_when_undeployed = fires_undeployed;
+        hd.manual_target = manual;
+        hd.manual_cooldown_secs = 120.0f;
+        w.data.hardpoints.push_back(hd);
+        UnitDesc st;
+        st.tactical_health = 1e6f;
+        st.radius = 50.0f;
+        st.hardpoints = {0};
+        UnitDesc cap;
+        cap.tactical_health = 1e7f;
+        cap.radius = 10.0f;
+        cap.category_mask = kCatCapital;
+        UnitDesc fig = cap;
+        fig.category_mask = kCatFighter;
+        push_unit(w.data, st);   // 0
+        push_unit(w.data, cap);  // 1
+        push_unit(w.data, fig);  // 2
+        CombatConfig cfg;
+        cfg.mode = GameMode::Space;
+        cfg.fps = 30;
+        cfg.inaccuracy_enabled = false;
+        cfg.object_max_health_multiplier = 1.0f;
+        cfg.hardpoint_health_multiplier = 1.0f;
+        w.make(cfg);
+        if (opportunity) {  // World::make turns opportunity fire off; rebuild with it on
+            cfg.opportunity_fire = true;
+            w.sys = std::make_unique<CombatSystem>(w.data, cfg, std::vector<PlayerInfo>{PlayerInfo{}, PlayerInfo{}});
+        }
+        fog.human0 = false;
+        w.sys->set_hooks(&fog);
+        w.add(1, 0, 0, Vec3{0, 0, 0});
+        w.add(2, 1, 1, Vec3{500, 0, 0});
+    }
+    ~ManualWorld() { w.sys->set_hooks(nullptr); }
+    ManualWorld(const ManualWorld&) = delete;
+    ManualWorld& operator=(const ManualWorld&) = delete;
+};
+}  // namespace
+
+// ledger: verifies HardPoint.Manual_Hardpoint_Firing_Cooldown_Secs
+void test_manual_no_fire_without_target() {
+    // Tag Manual_Hardpoint_Firing_Cooldown_Secs: no manual shot, so no player stamp.
+    // Round 4 point 2 (Update_Weapon 0x387400): a Requires_Manual_Target_Assignment hardpoint returns when it holds no
+    // manual target - no shot at the weapon's (ordered) target and no opportunity fire, even with both allowed. The same
+    // hardpoint without the flag fires.
+    for (const bool manual : {true, false}) {
+        ManualWorld m(manual, true);
+        m.w.sys->order_attack(1, 2);
+        for (int i = 0; i < 120; ++i) m.w.tick();
+        if (manual) CHECK(m.w.sys->stats().shots == 0u);
+        else CHECK(m.w.sys->stats().shots > 0u);
+        CHECK(m.w.sys->manual_fire_cooldown(0).frames == 0);
+    }
+}
+
+// ledger: verifies HardPoint.Manual_Hardpoint_Firing_Cooldown_Secs
+void test_manual_assignment() {
+    // Tag Manual_Hardpoint_Firing_Cooldown_Secs: the assignment the cooldown stamp belongs to (no cooldown test in it).
+    // Round 4 point 1 / point 3 (the setter 0x3822e0): accepted only for a manual-flag hardpoint without a held target,
+    // for an enemy that Fire_Category_Restrictions does not refuse, inside the cone, not hidden (force 1), within range +
+    // radius and at least the minimum range; it stores target, player and frame. One pending target at most.
+    ManualWorld m;
+    ManualWorld plain(false);
+    m.w.add(3, 2, 1, Vec3{600, 0, 0});     // fighter: Fire_Category_Restrictions
+    m.w.add(4, 1, 1, Vec3{-500, 0, 0});    // behind: outside the 90-degree cone
+    m.w.add(5, 1, 1, Vec3{2015, 0, 0});    // 2015 > 2000 + 10
+    m.w.add(6, 1, 1, Vec3{2005, 0, 0});    // 2005 <= 2000 + 10: in range
+    m.w.add(7, 1, 1, Vec3{90, 0, 0});      // inside Fire_Min_Range_Distance 100
+    m.w.add(8, 1, 0, Vec3{400, 0, 0});     // own unit
+    m.w.add(9, 1, 1, Vec3{700, 50, 0});    // hidden for the owner (force 1)
+    m.fog.hidden = {9};
+    m.w.tick();
+    CHECK(!plain.w.sys->assign_manual_target(1, 0, 2, 0));  // no flag
+    CHECK(!m.w.sys->assign_manual_target(1, 1, 2, 0));      // no such hardpoint
+    CHECK(!m.w.sys->assign_manual_target(1, 0, 99, 0));     // no such target
+    for (const ObjectId bad : {3, 4, 5, 7, 8, 9}) {
+        CHECK(!m.w.sys->assign_manual_target(1, 0, bad, 0));
+        CHECK(!m.w.sys->special_weapon_can_fire(1, bad));
+    }
+    CHECK(m.w.sys->hardpoint_manual_target(1, 0) == kNoObject && m.w.sys->hardpoint_manual_player(1, 0) == -1);
+    CHECK(m.w.sys->special_weapon_hardpoint(1) == 0 && m.w.sys->special_weapon_can_fire(1, 6));
+    const uint32_t at = m.w.frame - 1;  // the last combat tick
+    CHECK(m.w.sys->assign_manual_target(1, 0, 6, 1));
+    CHECK(m.w.sys->hardpoint_manual_target(1, 0) == 6 && m.w.sys->hardpoint_manual_player(1, 0) == 1);
+    CHECK(m.w.sys->hardpoint_manual_frame(1, 0) == at);
+    CHECK(!m.w.sys->assign_manual_target(1, 0, 2, 0));  // one pending target: refused, nothing replaced
+    CHECK(!m.w.sys->special_weapon_fire(1, 2, 0));
+    CHECK(m.w.sys->hardpoint_manual_target(1, 0) == 6 && m.w.sys->hardpoint_manual_player(1, 0) == 1);
+    CHECK(m.w.sys->ordered_target(1) == kNoObject);  // not an attack order
+    m.fog.hidden.clear();
+    CHECK(m.w.sys->special_weapon_can_fire(1, 9));
+}
+
+// ledger: verifies HardPoint.Manual_Hardpoint_Firing_Cooldown_Secs
+void test_manual_fire_and_cooldown() {
+    // Tag Manual_Hardpoint_Firing_Cooldown_Secs (HardpointDesc::manual_cooldown_secs = 120): the stamp of a manual shot.
+    // Round 4 point 3 / §10 (Fire_At 0x3825b0, 0x285d70): with a manual target the hardpoint fires at it once; the full
+    // recharge stamps the assigning player's cooldown (frame of the shot, int(30 x 120) = 3600 frames) and clears the
+    // player, and the shot releases the manual target. No more shots without a new assignment. Nothing in the sim refuses
+    // a new assignment during the cooldown (only the HUD reads it). Saved and restored.
+    ManualWorld m;
+    for (int i = 0; i < 40; ++i) m.w.tick();  // the drawn first cooldown runs out
+    CHECK(m.w.sys->stats().shots == 0u);
+    CHECK(m.w.sys->special_weapon_fire(1, 2, 1));  // the station path: the setter with the player
+    uint32_t shot_frame = 0;
+    for (int i = 0; i < 10 && shot_frame == 0; ++i) {
+        const uint32_t f = m.w.frame;
+        m.w.tick();
+        if (m.w.sys->stats().shots > 0u) shot_frame = f;
+    }
+    CHECK(shot_frame != 0 && m.w.sys->stats().shots == 1u);
+    CHECK(m.w.sys->hardpoint_manual_target(1, 0) == kNoObject && m.w.sys->hardpoint_manual_player(1, 0) == -1);
+    const ManualFireCooldown c = m.w.sys->manual_fire_cooldown(1);
+    CHECK(c.frame == shot_frame && c.frames == 3600);
+    CHECK(m.w.sys->manual_fire_cooldown(0).frames == 0 && m.w.sys->manual_fire_cooldown(7).frames == 0);
+    for (int i = 0; i < 90; ++i) m.w.tick();
+    CHECK(m.w.sys->stats().shots == 1u);  // one assignment, one shot
+    // Save / load round trip keeps the stamp and a held target.
+    CHECK(m.w.sys->assign_manual_target(1, 0, 2, 1));  // during the cooldown: accepted
+    ByteWriter wa;
+    m.w.sys->write(wa);
+    ManualWorld b;
+    ByteReader r(wa.bytes());
+    CHECK(b.w.sys->read(r));
+    CHECK(b.w.sys->hardpoint_manual_target(1, 0) == 2 && b.w.sys->hardpoint_manual_player(1, 0) == 1);
+    CHECK(b.w.sys->manual_fire_cooldown(1).frame == shot_frame && b.w.sys->manual_fire_cooldown(1).frames == 3600);
+    ByteWriter wb;
+    b.w.sys->write(wb);
+    CHECK(wa.bytes() == wb.bytes());
+    StateHasher ha, hb;
+    m.w.sys->hash_extended(ha);
+    b.w.sys->hash_extended(hb);
+    CHECK(ha.digest() == hb.digest());
+    for (int i = 0; i < 10; ++i) m.w.tick();
+    CHECK(m.w.sys->stats().shots == 2u && m.w.sys->manual_fire_cooldown(1).frame > shot_frame);
+}
+
+// ledger: verifies HardPoint.Manual_Hardpoint_Firing_Cooldown_Secs
+void test_manual_target_drop() {
+    // Tag Manual_Hardpoint_Firing_Cooldown_Secs: a dropped assignment stamps no cooldown.
+    // Round 4 point 3: while the weapon-state gate (0x384850) refuses, the manual target is held until the frame is more
+    // than 300 past the assignment, then target, player and frame are released. While the gate passes but the shot
+    // fails (out of range), it is held with no limit. A removed target is released at once (signal 0x28); the player
+    // stays (only +0xc0 is cleared).
+    {
+        ManualWorld m(true, false, false);  // Fire_When_Undeployed No: the gate refuses
+        m.w.tick();
+        const uint32_t at = m.w.frame - 1;
+        CHECK(m.w.sys->assign_manual_target(1, 0, 2, 1));
+        while (m.w.frame <= at + 300u) m.w.tick();  // last update: frame at + 300 (not > 300 past)
+        CHECK(m.w.sys->hardpoint_manual_target(1, 0) == 2);
+        m.w.tick();  // frame at + 301
+        CHECK(m.w.sys->hardpoint_manual_target(1, 0) == kNoObject && m.w.sys->hardpoint_manual_player(1, 0) == -1 &&
+              m.w.sys->hardpoint_manual_frame(1, 0) == 0u);
+        CHECK(m.w.sys->stats().shots == 0u);
+    }
+    {
+        ManualWorld m;
+        m.w.tick();
+        CHECK(m.w.sys->assign_manual_target(1, 0, 2, 1));
+        m.w.sys->set_position(2, Vec3{5000, 0, 0});  // out of range: the shot fails, the gate passes
+        for (int i = 0; i < 400; ++i) m.w.tick();
+        CHECK(m.w.sys->hardpoint_manual_target(1, 0) == 2 && m.w.sys->stats().shots == 0u);
+        m.w.sys->set_position(2, Vec3{500, 0, 0});  // back in range: it fires
+        for (int i = 0; i < 5; ++i) m.w.tick();
+        CHECK(m.w.sys->hardpoint_manual_target(1, 0) == kNoObject && m.w.sys->stats().shots == 1u);
+    }
+    {
+        ManualWorld m(true, false, false);
+        m.w.tick();
+        CHECK(m.w.sys->assign_manual_target(1, 0, 2, 1));
+        CHECK(m.w.sys->remove_unit(2));
+        m.w.tick();
+        CHECK(m.w.sys->hardpoint_manual_target(1, 0) == kNoObject && m.w.sys->hardpoint_manual_player(1, 0) == 1);
+    }
+}
+
 void test_out_of_range_mod_values() {
     // mcx8 t11 (docs/MOD_COMPAT_DESIGN.md §13.3): mod values whose frame count is out of int32 range convert the x86 way
     // (cvttss2si: INT32_MIN), so the MSVC and clang builds give the same result (both run this test). A mod's 99999999999 s

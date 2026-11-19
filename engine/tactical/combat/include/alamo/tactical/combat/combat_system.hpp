@@ -293,6 +293,9 @@ struct HardpointDesc {
     float turret_elevate_extent = 180.0f;
     float turret_rest_pitch = 0.0f, turret_rest_yaw = 0.0f;
     bool manual_target = false;
+    // mcx4 (MCX4_T10_RE_ANSWERS §10): Manual_Hardpoint_Firing_Cooldown_Secs (+0x54, float). A Fire_At full recharge of a
+    // hardpoint that holds a manual player stamps that player's cooldown (CombatSystem::manual_fire_cooldown).
+    float manual_cooldown_secs = 0.0f;
     bool turret_model = false;
     int32_t projectile = -1;           // Fire_Projectile_Type
     // OI abilities (REMAINING_GAPS §5.5): Blast_Ability_Fire_Projectile_Type (+0x220), fired instead of `projectile` while
@@ -589,6 +592,14 @@ struct SurfaceQueries {
     std::function<uint32_t(float, float)> surface;
     // trn1 t04: a water plane exists and the terrain at (x, y) lies more than 0.5 below it (Terrain::under_water).
     std::function<bool(float, float)> under_water;
+};
+
+// mcx4 (MCX4_T10_RE_ANSWERS §10 Round 4 point 4): a player's manual-hardpoint cooldown stamp (player +0x47c / +0x480):
+// the frame of the manual shot and int(FPS x Manual_Hardpoint_Firing_Cooldown_Secs). Only the HUD reads it (0x2814e0
+// greys the station weapon button while (now - frame) / frames < 1); no sim path refuses an assignment during it.
+struct ManualFireCooldown {
+    uint32_t frame = 0;
+    int32_t frames = 0;
 };
 
 // Host input per player (set at construction; configuration, not saved or hashed).
@@ -1386,19 +1397,34 @@ public:
     bool can_attack(ObjectId id) const;  // has a live weapon
     // ---- fog follow-up: space-station special weapon (SCRIPT_GAPS.md §1.1 step 5; Lua Fire_Special_Weapon on a
     // DUMMY_STAR_BASE through lua::TacticalScriptHooks::station_readiness / station_fire) ----
-    // The special-weapon hard point: the first WEAPON_SPECIAL hardpoint in HardPoints order (0x394e60), -1 none.
+    // The special-weapon hard point (0x394e60): the first hardpoint in HardPoints order whose type has
+    // Requires_Manual_Target_Assignment (type +0x50; mcx4: before, the first WEAPON_SPECIAL one), -1 none.
     int32_t special_weapon_hardpoint(ObjectId station) const;
     // Readiness (0x385c00 [port]: the recharge formula is not reproduced): < 0 no such hard point, 0 destroyed /
     // disabled, 1 when its cooldown has run out, else 1 - cooldown / (Fire_Max_Recharge_Seconds x fps), >= 0.
     float special_weapon_readiness(ObjectId station) const;
-    // Can-fire test (0x386220): live station and target, target an enemy of the station's owner and a valid
-    // target, NOT FOW-hidden for the owner with force 1 (CombatHooks::target_hidden), inside the hard point's fire
-    // cone, 2D distance from its fire bone (A, or the A-B midpoint) <= fire range + target radius and >= the
-    // minimum range. Protection (0x540140) is not modelled [port].
+    // Can-fire test (0x386220): live station and target, target an enemy of the station's owner, not refused by the
+    // hard point's Fire_Category_Restrictions (0x540140), inside its fire cone, NOT FOW-hidden for the owner with force 1
+    // (CombatHooks::target_hidden), 2D distance from its fire bone (A, or the A-B midpoint) <= fire range + target
+    // radius and >= the minimum range (assign_manual_target's tests without the flag and empty-slot checks).
     bool special_weapon_can_fire(ObjectId station, ObjectId target) const;
-    // Target assignment (0x3822e0 [port]): an attack order on `target` (CombatSystem::order_attack). False when
-    // special_weapon_can_fire fails.
-    bool special_weapon_fire(ObjectId station, ObjectId target);
+    // Target assignment: assign_manual_target on the station's special-weapon hard point for `player` (the Lua
+    // Fire_Special_Weapon station branch and command 25's station branch). False when it refuses.
+    bool special_weapon_fire(ObjectId station, ObjectId target, int32_t player);
+    // ---- mcx4: manual hardpoint targeting (MCX4_T10_RE_ANSWERS §10 Round 4) ----
+    // The setter 0x3822e0 (hardpoint, target, player id): refused unless the hardpoint type has
+    // Requires_Manual_Target_Assignment, no manual target is held and the can-fire tests pass (special_weapon_can_fire);
+    // then it stores the target, the player and the current frame. Update_Weapon fires such a hardpoint only at its
+    // manual target (once; the weapon's own target only in the same frame), releases it after a shot, when the target
+    // object is removed, or when the weapon-state gate refuses more than 300 frames after the assignment. A shot's full
+    // recharge stamps the held player's cooldown and clears the player. Saved; hashed in "<p>.ext" once set.
+    bool assign_manual_target(ObjectId id, uint32_t hp, ObjectId target, int32_t player);
+    ObjectId hardpoint_manual_target(ObjectId id, uint32_t hp) const;  // kNoObject: none / unknown
+    int32_t hardpoint_manual_player(ObjectId id, uint32_t hp) const;    // -1: none / unknown
+    uint32_t hardpoint_manual_frame(ObjectId id, uint32_t hp) const;    // the assignment frame, 0 none
+    // The player's manual-hardpoint cooldown stamp ({0, 0} until a manual shot, and for an unknown player). For the HUD
+    // (mcx4-pres: grey the station weapon button); nothing in the sim reads it.
+    ManualFireCooldown manual_fire_cooldown(int32_t player) const;
     // ---- S8 t26 (TACTICAL_COMBAT §3.1.1 "Fire-at-position order") ----
     // Fire_Lobbing_At_Position's combat half (0x4ea3f0: TD +0x30..+0x38 := point, +0x3c := 1; a second order before the
     // shot overwrites the point). The caller checks readiness / base power and restarts the special-weapon pack (the
@@ -1808,6 +1834,11 @@ private:
         // hash_extended for turret hardpoints.
         float turret_pitch = 0.0f, turret_yaw = 0.0f;
         float aim_pitch = 0.0f, aim_yaw = 0.0f;
+        // mcx4: the manual target (+0xc0), the assigning player (+0xc8, -1 none) and the assignment frame (+0xcc).
+        // Saved; hashed in hash_extended once a target or player is held.
+        ObjectId manual_target = kNoObject;
+        int32_t manual_player = -1;
+        uint32_t manual_frame = 0;
     };
     struct Unit {
         ObjectId id = kNoObject;
@@ -2160,6 +2191,8 @@ private:
     // false = no table / ALT outside the table / empty entry.
     bool host_fire_bones(const Unit& host, std::vector<GarrisonFireBone>& out) const;
     bool fire_hardpoint(Unit& u, Hardpoint& h, uint32_t frame, SimRng& rng);
+    void manual_update_weapon(Unit& u, Hardpoint& h, uint32_t frame, SimRng& rng);           // mcx4
+    bool manual_target_can_fire(const Unit& u, const Hardpoint& h, const Unit& t) const;      // mcx4: 0x386220
     void fire_unit_weapon(Unit& u, uint32_t frame, SimRng& rng);
     // S8 t08 (TACTICAL_COMBAT §3.1.1): Is_Deployed_Or_Deploying (0x39a390) and the deploy transition (0x39a400 / 0x39b2a0),
     // both for a Deploys type with a locomotor only; the own-weapon gate 0x54c910 and the hardpoint gate 0x384850 (`t`:
@@ -2248,6 +2281,7 @@ private:
     std::vector<PlayerInfo> players_;
     std::vector<uint8_t> enemy_;  // [a * n + b]
     std::vector<uint8_t> sw_hp_enabled_;  // per player, player tactical data +0x2f0 (starts 1)
+    std::vector<ManualFireCooldown> manual_cd_;  // mcx4: per player, +0x47c / +0x480
     std::vector<ModifierSet> player_mods_;
     std::vector<Unit> units_;  // sorted by id
     std::vector<Hardpoint> hps_;

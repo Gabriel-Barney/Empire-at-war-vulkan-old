@@ -3,6 +3,7 @@
 
 #include "alamo/objects/type_fields.hpp"            // mcx4 t11: find_type_field (snap_move_point)
 #include "alamo/tactical/movement/formation.hpp"    // mcx4 t11: snap_order_center
+#include "alamo/tactical/movement/space_reevaluate.hpp"  // mcx4 t11: space_attack_reevaluate
 
 namespace alamo::sim {
 
@@ -85,6 +86,10 @@ TacticalBattle::TacticalBattle(const BattleCatalog& catalog, const galactic::Gal
         use(static_cast<uint32_t>(dummy));
     }
     l1_add_types(types_used_);  // L1 systems: the mode's special-weapon types (projectiles in the tables)
+    // mcx4-tac2 (MCX4_T10_RE_ANSWERS §7): the types a bribe may change a unit into (Conversion_Ability_Changes_To_Enemy)
+    // join the tables last, so the existing entries keep their indices.
+    for (size_t i = 0, n = types_used_.size(); i < n; ++i)
+        if (const objects::TypeIndex c = bt_conversion_type(types_used_[i]); c != objects::kNone) use(static_cast<uint32_t>(c));
     tables_ = std::make_unique<BattleTables>();  // battle host: model bones
     tables_build_ = catalog.begin_battle(*tables_, space_);
     tables_build_->pf = pf;
@@ -917,6 +922,8 @@ void TacticalBattle::deploy(TacticalMode& mode, uint32_t pi, SimRng& rng, uint32
             }
         } else {
             pos = slot_position(side, space_ ? 0u : movement_->classes().mask(md.movement_class));
+            if (!space_ && !P.reserve && !P.structure && !cfg_.skirmish && !deploy_script_ && !range)
+                pos = bt_exit_door(P, pos, face, movement_->classes().mask(md.movement_class));  // mcx4-tac2: the carrier's exit door
         }
         objects::SpawnParams sp;
         sp.type = t;
@@ -939,7 +946,7 @@ void TacticalBattle::deploy(TacticalMode& mode, uint32_t pi, SimRng& rng, uint32
         u.movable = mode.movable(h) && !P.starbase && !P.structure;
         const auto& ti = galaxy_->rules().types;
         u.power = t < ti.size() ? ti[t].ai_combat_power : 0.0f;
-        if (u.movable) {
+        if (u.movable && !deploy_contained_) {  // mcx4-tac2: a unit made inside a container never joins movement here
             md.id = u.id;
             md.pos = {pos.x, pos.y};
             md.z = pos.z;
@@ -948,7 +955,7 @@ void TacticalBattle::deploy(TacticalMode& mode, uint32_t pi, SimRng& rng, uint32
             mv_type_extents(md, t);  // s78n t20
             movement_->add_unit(md);
         }
-        if (side < kMaxSides && u.movable && !P.reserve && !P.built && !stats_.start_placed[side]) {  // s78n t20 (stats only)
+        if (side < kMaxSides && u.movable && !deploy_contained_ && !P.reserve && !P.built && !stats_.start_placed[side]) {  // s78n t20 (stats only)
             stats_.start_placed[side] = true;
             stats_.first_start[side] = pos;
         }
@@ -1079,7 +1086,7 @@ void TacticalBattle::deploy(TacticalMode& mode, uint32_t pi, SimRng& rng, uint32
     // too - the fleet placement then teleports (the pending composition empties: no draw) and re-adopts every placed
     // object, so only an unplaced ship composes; and the campaign spawn's adopt below finds it in that coordinator (no
     // draw: retail traced no 0x2a1bcd adopt for the Kashyyyk ships).
-    if (space_ && movement_)
+    if (space_ && movement_ && !deploy_contained_)
         for (size_t i = first; i < units_.size(); ++i)
             if (units_[i].container == kNoContainer && units_[i].movable && mv_self_registers(units_[i].type)) {
                 const objects::ObjectId one[] = {units_[i].id};
@@ -1087,7 +1094,7 @@ void TacticalBattle::deploy(TacticalMode& mode, uint32_t pi, SimRng& rng, uint32
             }
     // cu8j t02: the campaign spawn 0x2a00b0 (start forces of a galactic battle) then adopts each member not in a team, one
     // draw each (land vehicles, heroes, ...). Skirmish start forces and reinforcements do not.
-    if (!cfg_.skirmish && !P.reserve && !deploy_script_ && !range)
+    if (!cfg_.skirmish && !P.reserve && !deploy_script_ && !range && !deploy_contained_)  // mcx4-tac2: no adopt inside
         for (size_t i = first; i < units_.size(); ++i)
             if (units_[i].container == kNoContainer) (void)mv_adopt(mode, units_[i].h, rng);
 }
@@ -1563,6 +1570,41 @@ void TacticalBattle::attack_approach(TacticalMode& mode, const Unit& u, Vec3 tp,
         o.destination = {std::clamp(tp.x, bb.min.x, bb.max.x), std::clamp(tp.y, bb.min.y, bb.max.y)};
         o.goal_object = goal;
         movement_->fighter_new_order(o, frame_);
+    }
+}
+
+// mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4 row MovementReevaluationFrameCount and its Round 4 paragraph [H gate and tests]):
+// the space coordinator's vf5 0x5d51e0 runs when its id % N = frame % N (N = MovementReevaluationFrameCount) while it
+// attacks, and 0x5d55f0 re-plans when the lead cannot reach the target from its slot point nor from where it stands, or
+// can but the target is inside its min range; a re-plan is abandoned while the target is fog-hidden for the lead's owner
+// (force 1). [port M] the port keeps no space coordinator: each attack-ordered ship (not a fighter: the fighter
+// formations re-check themselves) is its own one-ship formation, its id stands for the coordinator id, its slot point is
+// its move goal, the re-plan (0x5d4730: a timed move to the attack slot) is the port's attack approach again, with no
+// SpacePathfindFrameDelayDelta stagger, no arrive-together speed scaling and no guard-block (flag 2) rule.
+void TacticalBattle::space_attack_reevaluate(TacticalMode& mode, SimRng& rng) {
+    if (!space_ || !movement_ || !combat_) return;
+    const objects::ObjectStore& st = mode.primary();
+    const uint32_t n = movement_->constants().movement_reevaluation_frame_count;  // ledger: consumes GameConstants.MovementReevaluationFrameCount
+    for (size_t i = 0; i < units_.size(); ++i) {
+        const Unit& u = units_[i];
+        if (!u.alive || u.retreated || !u.movable || !st.alive(u.h)) continue;
+        if (!mv::space_reevaluation_due(static_cast<uint32_t>(u.id), frame_, n)) continue;
+        if (!combat_->has_unit(u.id) || !movement_->has_unit(u.id) || movement_locked(u.id)) continue;
+        const mv::UnitView v = movement_->view(u.id);
+        if (v.locomotor == mv::LocomotorKind::Fighter) continue;
+        const objects::ObjectId t = combat_->ordered_target(u.id);
+        const Unit* tu = t != objects::kNoObjectId ? unit_by_id(t) : nullptr;
+        if (!tu || !tu->alive || !st.alive(tu->h) || fog_object_hidden(st.owner(u.h), t, true)) continue;
+        const Vec3 p = st.position(u.h);
+        const tactical::Vec3 up{p.x, p.y, p.z};
+        const tactical::Vec3 slot = v.has_goal ? tactical::Vec3{v.goal.x, v.goal.y, p.z} : up;
+        const tc::CanHit from_slot = combat_->can_hit_from(u.id, slot, t);
+        if (from_slot == tc::CanHit::NoTarget) continue;  // no weapon range (retail skips members without TARGETING)
+        const tc::CanHit from_pos = combat_->can_hit_from(u.id, up, t);
+        if (!mv::space_attack_replan(from_slot != tc::CanHit::OutOfMaxRange, from_pos != tc::CanHit::OutOfMaxRange,
+                                     combat_->inside_min_range(u.id, t)))
+            continue;
+        attack_approach(mode, units_[i], st.position(tu->h), rng, t, t);
     }
 }
 

@@ -171,6 +171,10 @@ void MovementSystem::hash_units(StateHasher& h) const {
                 bh.f32(w.time);
             }
             bh.boolean(u.turning);
+            if (u.idle_at != 0) {  // mcx4 t11: an armed space idle drift (ShouldUseSpaceIdleMovement only)
+                bh.u8(0x1D);
+                bh.u32(u.idle_at);
+            }
             if (u.aturn != LocoState::None) {  // s78l t02: the arrival turn state, hashed only while a turn runs
                 bh.u8(static_cast<uint8_t>(u.aturn));
                 if (u.aturn_start) bh.u8(0xE9);  // s78n t26.2: a start turn in place

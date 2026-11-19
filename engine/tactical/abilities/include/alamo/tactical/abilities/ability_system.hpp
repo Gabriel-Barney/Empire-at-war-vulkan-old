@@ -135,6 +135,10 @@ enum class AbilityEventKind : uint8_t {
     // mcx4 t13 (presentation; MCX4_T13_RE_ANSWERS "Tactical_Bribe_Ability.SFXEvent_Success family", 0x5b07c0): the bribe
     // was paid for and the target `target` is converted; `id` the user.
     BribeApplied,
+    // mcx4-tac2 (MCX4_T10_RE_ANSWERS §7, 0x5b07c0 after the owner change 0x38e5a0): the bribed `target` changes in place to
+    // its type's Conversion_Ability_Changes_To_Enemy type when that differs from its own; a team member's whole team does
+    // (each member its own conversion type). The host owns the types (store, battle records); `id` the user.
+    BribeConverted,
 };
 
 // StopOrder `value` (cu8j t02, MOVEMENT §4.7.2 / §4.7.5): a plain stop; the stop-and-hold 0x3a9880 (leave every
@@ -146,6 +150,9 @@ inline constexpr int32_t kStopAdopt = 2;
 // cu8l t02 (A1_READINGS §28.9 "Stop"): the coordinator-system stop 0x4261f0 (INTERDICT / MISSILE_SHIELD with
 // Disable_Movement): stop and leave every coordinator, no adopt (so the first lock that follows adopts: one draw).
 inline constexpr int32_t kStopLeave = 3;
+// MoveOrder `value` (mcx4-tac2, AVOID_DANGER 0x58e8e0 step 6): 0 = a move now; kMoveResume = append a move to `point`
+// behind the move just given (the copied first block 0x423c10: the unit resumes its old destination after the side step).
+inline constexpr int32_t kMoveResume = 1;
 
 // vis1 t06 (ABILITY_PARTICLES §2-§4): one target visual a special's class ran (the target half of the activation
 // presentation 0x48e4d0, or the stun apply's Stunned_Effect). Presentation only: never hashed, saved or read by the sim.
@@ -391,6 +398,12 @@ struct AbilityHost {
     // TRU1 t03 (docs/re/TRU1_GRAVITY_FIELD.md §1.3): player `p`'s faction is Is_Neutral (faction +0x108); the gravity
     // control field skips such a player in both branches. Unset: no neutral players.
     std::function<bool(int32_t p)> neutral_player;
+    // mcx4-tac2 (Garrison_Upgrade_Ability apply 0x6ffc60 / remove 0x6ffe30): append `type` to player `p`'s start-force
+    // list (player +0x2a8, the skirmish garrison re-delivery list), or take its first entry of `type` out. Unset: nothing.
+    std::function<void(int32_t p, int32_t type, bool add)> garrison_units;
+    // mcx4-tac2 (AVOID_DANGER 0x58e8e0 step 1): the destination of `id`'s formation (the point of its first move block,
+    // 0x41a580); false when the unit has no coordinator or formation (the service then does nothing). Unset: none.
+    std::function<bool(ObjectId id, Vec3& goal)> move_goal;
 };
 
 // OI abilities: the per-player tactical lists Battlefield_Modifier writes (§2.3.11) besides the reveal range.
@@ -823,6 +836,9 @@ private:
         uint8_t gravity_on = 0;              // generator: powered state of the last service (pack +0x48)
         uint8_t in_gravity_field = 0;        // victim: obj +0x3a1 bit 0x40 (slowed by some generator)
         std::vector<ObjectId> gravity_list;  // generator: the units it slows, in the order they were added (pack +0x30)
+        // ---- mcx4-tac2: HARASS (0x41) / AVOID_DANGER (0x42) next service frames (interval 30) ----
+        uint32_t harass_due = 0;
+        uint32_t avoid_due = 0;
         // ---- r3g t02: the timed DEPLOY_TROOPERS machine (owner) and the trooper's rope landing ----
         uint8_t troop_state = 0;   // owner: 0 idle, 1 wait stopped, 2 wait deployed, 3 Drop Rope, 4 spawn, 5 Deploy
                                    // Troopers, 8 Lift Rope (0x591a90 states; 6 / 7 folded into 5 -> 8 [port])
@@ -988,6 +1004,7 @@ private:
     void auras_unit_added(Obj& n, uint32_t frame);
     void aura_on(Obj& src, SpecialState& sp, uint32_t frame);
     void aura_off(Obj& src, SpecialState& sp, uint32_t frame);
+    void garrison_list(const Obj& src, const SpecialAbilityDesc& s, bool add);  // mcx4-tac2: Garrison_Upgrade_Ability
     void aura_give(const Obj& src, const SpecialAbilityDesc& s, ObjectId target);
     bool aura_target(const Obj& src, uint32_t di, const Obj& t) const;  // di: AbilityData::specials index
     // s78n t04 (§5.4.4 item 3c): Enhance_Defense's apply 0x6fa920 - permanent list-0 entries in the players' sets.
@@ -1013,6 +1030,8 @@ private:
     void h_behavior(Obj& o, uint32_t t, bool on, uint32_t frame);
     void behaviors_service(Obj& o, uint32_t frame);  // HUNT, SELF_DESTRUCT, CONFUSE expiry
     void hunt_decide(Obj& o, uint32_t frame);
+    void harass_service(Obj& o, uint32_t frame);                          // mcx4-tac2: HARASS / AVOID_DANGER
+    const Obj* strongest_enemy(const Obj& o, float range) const;          // mcx4-tac2: their common pick
     // cu8f t06 (CU8F_T04_T06_RE §3.1 / §3.2): LURE activate / deactivate / service / pulse / victim, the live squad count.
     void lure_activate(Obj& o, uint32_t frame);
     void lure_deactivate(Obj& o, uint32_t frame);

@@ -325,6 +325,12 @@ BattleAi::BattleAi(TacticalBattle& battle, TacticalMode& mode, SimHost& host, co
         k.fire_at_object = [bt, md, bid](objects::ObjectHandle w, objects::ObjectHandle t) { return bt->sw_fire_at_object(*md, bid(w), bid(t)); };
         k.fire_lobbing_at = [bt, md, bid](objects::ObjectHandle w, Vec3 p) { return bt->sw_fire_lobbing_at(*md, bid(w), p); };
         k.special_weapons_allowed = [bt](int32_t player) { return bt->special_weapons_allowed(player); };
+        // mcx4 (MCX4_T10_RE_ANSWERS §10 Round 4 point 5): BusyTacticalFreeStore.lua fires the AI's station through
+        // Fire_Special_Weapon (station branch: readiness, then the setter 0x3822e0 with the Lua player's id).
+        k.station_readiness = [bt, bid](objects::ObjectHandle s) { return bt->combat().special_weapon_readiness(bid(s)); };
+        k.station_fire = [bt, bid](objects::ObjectHandle s, objects::ObjectHandle t, int32_t player) {
+            return bt->abilities().combat().special_weapon_fire(bid(s), bid(t), player);
+        };
         k.tsw_state = [bt, bid](objects::ObjectHandle t) { return bt->tsw_state(bid(t)); };
         k.tsw_fire = [bt, bid](objects::ObjectHandle t) { return bt->tsw_fire(bid(t)); };
         k.engines_online = [bt, bid](objects::ObjectHandle u) { return bt->engines_online(bid(u)); };

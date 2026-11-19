@@ -532,6 +532,10 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
         case C::EnableAbility:
             aura_on(o, sp, frame);
             return true;
+        case C::GarrisonUpgrade:  // mcx4-tac2: can-apply 0x6ffdb0 - skirmish only (0x28afb0); the target is the object
+            if (!cfg_.skirmish) return false;
+            aura_on(o, sp, frame);
+            return true;
 
         case C::ForceHealing:  // 2.3.1: apply is a no-op; the update does the work
             sp.applied = 1;
@@ -1616,6 +1620,8 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
                     combat_->set_health(sp.target, combat_->max_health(sp.target));  // [M] the repair effect
                 } else if (Obj* t = obj(sp.target)) {
                     change_owner(*t, o.owner, frame);
+                    // mcx4-tac2 (MCX4_T10_RE_ANSWERS §7): then the in-place type change (the host's)
+                    if (s.cls == C::TacticalBribe) event(AbilityEventKind::BribeConverted, sp.trigger, o.id, sp.target, frame);
                     // cu8l t02 (CU8K_T02_T06_RE §2 row 0x5b0c8a): the bribe holds the bribed object after the owner change
                     // [M: or its team container]
                     if (s.cls == C::TacticalBribe) stop_order(sp.target, frame, kStopHold);
@@ -1885,6 +1891,7 @@ void AbilitySystem::class_remove(Obj& o, SpecialState& sp, uint32_t frame) {
         case C::BasePower:
         case C::Weatherproof:
         case C::RetreatPrevention:
+        case C::GarrisonUpgrade:
         case C::EnableAbility: aura_off(o, sp, frame); return;
         case C::Cable:  // r3g t04: a paralyzed walker is unlocked (0x3a8e50(target, 0)) when no other cable holds it
             if (Obj* t = obj(sp.target); t && sp.phase == kCableParalyzed && t->cable_holds > 0)

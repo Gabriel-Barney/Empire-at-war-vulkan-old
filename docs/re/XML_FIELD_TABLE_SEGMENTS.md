@@ -16,10 +16,19 @@ whose real owner the port does not read stays an honour gap under its listed nam
 | `MousePointer.Ability_Name` | ability field (`Enable_Ability`, hero clash `Special_Ability_Action`) | FoC writes it only inside those elements |
 | `HardwareConfiguration.Type` | ability `Type` (+0x18 of the ability record) | GraphicDetails.xml writes no `Type`; the 1606 FoC uses are ability / sub-object `Type` elements |
 
+`HardwareConfiguration.Additional_Garrison_Units` (+0x180) is `Garrison_Upgrade_Ability`'s field (UpgradeObjects.xml
+`RL_` / `EL_` / `RS_` / `ES_More_Garrisons_L1_Bonus`; GraphicDetails.xml writes none). The tag exists under no other
+class, so the port's ability parser (`ability_data.cpp`) settles the row as consumed under its listed name, with no
+`MISFILED` entry (mcx4-tac2, 2026-11-18). The ability's vtable 0x8c7f20 (read from the exe):
+- slot 29 0x6fffa0 warns when the list is empty;
+- apply (slot 30, 0x6ffc60) appends each type to the start-force list (player +0x2a8) of the owner, or with
+  `Apply_To_All_Allies` of every player allied with it;
+- remove (slot 31, 0x6ffe30) takes one entry of each type out again;
+- can-apply (slot 5, 0x6ffdb0) passes only in a skirmish (0x28afb0). So the types join the skirmish garrison
+  re-delivery (SKIRMISH_SETUP §2.4). Port: `SpecialClass::GarrisonUpgrade`.
+
 Rows of the same kind that stay gaps, because the port reads no real owner yet:
 
-- `HardwareConfiguration.Additional_Garrison_Units` (+0x180): `Garrison_Upgrade_Ability` (UpgradeObjects.xml, e.g.
-  `RL_More_Garrisons_L1_Bonus`). The port does not read it.
 - `Tractor_Beam_Attack_Ability.Lightning_Effect_Name` / `Start_Lightning_Frame_Number`: `Force_Lightning_Ability` fields
   (+0x190, read by 0x6fdc40, ABILITY_PARTICLES.md §9). FoC writes them in the Force_Lightning, Hack and Repair
   abilities, never in Tractor_Beam. The port does not read them.

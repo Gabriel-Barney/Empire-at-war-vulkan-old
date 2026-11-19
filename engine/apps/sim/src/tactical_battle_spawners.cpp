@@ -11,6 +11,7 @@ namespace {
 
 constexpr objects::BehaviorTypeId kSpawnerBehavior = 0x1B;     // SPAWN_INDIGENOUS_UNITS
 constexpr objects::BehaviorTypeId kDebrisBehavior = 0x28;      // DEBRIS
+constexpr objects::BehaviorTypeId kIndigenousBehavior = 0x20;  // INDIGENOUS_UNIT (id shared with EXPLOSION)
 constexpr int32_t kPlacementTries = 10;                        // 0x140a436a0
 constexpr float kPackRadius = 50.0f;                           // pack members around the first member
 constexpr int32_t kSnapRings = 16;                             // [port] nearest passable cell search (cells)
@@ -170,6 +171,38 @@ void TacticalBattle::sp_tick(TacticalMode& mode, SimRng& rng) {
         st.set_behavior_next_service(h, bi, mf + std::max<uint32_t>(1u, st.behavior_interval(h, bi)));
         sp_service(mode, rng, i);
     }
+    // 5. mcx4 t11: INDIGENOUS_UNIT wander services (0x621d80; interval 30, 1 while burning: 0x621840), ascending id. Step 1:
+    //    a battle unit that is not moving and has no target ([port M] the idle-clip test 0x3956a0 and 0x39b000 are not
+    //    made; the burning damage of the service is BURNING's); steps 2 - 5: indigenous_wander_point; then a group move.
+    if (space_ || !movement_ || !combat_) return;
+    float mn[2], mx[2];
+    const bool rect = map_.playable_box(mn, mx);
+    for (const Unit& u : units_) {
+        if (!u.alive || u.retreated || !u.movable || !st.alive(u.h) || !st.has_behavior(u.h, kIndigenousBehavior)) continue;
+        const uint32_t bi = st.behavior_index(u.h, kIndigenousBehavior);
+        if (bi == objects::kNone || !st.behavior_enabled(u.h, bi) || st.behavior_next_service(u.h, bi) > mf) continue;
+        const bool burning = combat_->has_unit(u.id) && combat_->burning(u.id);
+        st.set_behavior_next_service(u.h, bi, mf + (burning ? 1u : 30u));
+        if (!movement_->has_unit(u.id)) continue;
+        const mv::UnitView v = movement_->view(u.id);
+        if (v.has_goal || v.speed > 0.0f || (combat_->has_unit(u.id) && combat_->current_target(u.id) != objects::kNoObjectId)) continue;
+        mv::IndigenousWanderInput in;
+        const Vec3 p = st.position(u.h);
+        in.pos = {p.x, p.y, p.z};
+        in.home = movement_->indigenous_home(u.id);
+        in.burning = burning;
+        in.can_stop = types.get_bool(st.type(u.h), "Can_Indigenous_Unit_Stop");
+        if (rect) {
+            in.cx = 0.5f * (mn[0] + mx[0]);
+            in.cy = 0.5f * (mn[1] + mx[1]);
+            in.hx = 0.5f * (mx[0] - mn[0]);
+            in.hy = 0.5f * (mx[1] - mn[1]);
+        }
+        mv::WanderPoint to;
+        if (!mv::indigenous_wander_point(in, rng, to)) continue;
+        const objects::ObjectId ids[] = {u.id};
+        exec_move(mode, ids, to.x, to.y, rng, mv::kNoFacing, false);
+    }
 }
 
 void TacticalBattle::sp_debris_expire(TacticalMode& mode, SimRng& rng, const DebrisPiece& d) {
@@ -266,6 +299,16 @@ void TacticalBattle::sp_service(TacticalMode& mode, SimRng& rng, size_t index) {
     if (sp_spawners_[index].state != 1 || mf < sp_spawners_[index].next) return;
     const int32_t quantity = types.get_int(t, "Spawned_Indigenous_Units_Quantity");
     const int32_t spawner_owner = st.owner(sh);
+    // mcx4 t11 (TRU1_C_RE §1.3, MCX4_T11_T12_RE_ANSWERS §B2): a placed unit's INDIGENOUS_UNIT pack gets home := the spawner's
+    // position and leash := the spawner type's Max_Distance_From_Spawner ([port] once it is a movement unit: adopted)
+    const auto set_home = [&](objects::ObjectHandle u) {
+        if (!movement_ || !st.alive(u) || !st.has_behavior(u, kIndigenousBehavior)) return;
+        mv::IndigenousHome hm;
+        const Vec3 at = st.position(sh);
+        hm.home = {at.x, at.y, at.z};
+        hm.leash = static_cast<float>(types.get_int(t, "Max_Distance_From_Spawner"));
+        (void)movement_->set_indigenous_home(st.id(u), hm);
+    };
     if (!types.get_bool(t, "Spawn_Indigenous_Units_In_Packs")) {
         const auto have = static_cast<int32_t>(sp_spawners_[index].spawned.size());
         if (quantity <= have) return;  // full: the next spawn frame stays
@@ -277,6 +320,7 @@ void TacticalBattle::sp_service(TacticalMode& mode, SimRng& rng, size_t index) {
             sp_spawners_[index].spawned.push_back(st.id(u));
             // a map unit of a non-Is_Neutral owner is a battle unit (bt_map_load)
             if (!bt_owner_neutral(owner)) (void)bt_adopt_built(mode, u, owner, 1.0f, &rng, true);
+            set_home(u);
         }
     } else {
         if (!sp_spawners_[index].spawned.empty()) return;  // a pack respawns only when it is all gone
@@ -324,6 +368,7 @@ void TacticalBattle::sp_service(TacticalMode& mode, SimRng& rng, size_t index) {
                 if (owner != spawner_owner) st.set_owner(u, owner);
                 sp_spawners_[index].spawned.push_back(st.id(u));
                 if (adopt) (void)bt_adopt_built(mode, u, owner, 1.0f, &rng, true, ci);
+                set_home(u);
             }
         }
     }

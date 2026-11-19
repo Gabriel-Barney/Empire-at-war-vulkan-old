@@ -162,6 +162,10 @@ void parse_class_fields(const data::XmlNode& e, SpecialAbilityDesc& s, const Abi
     set_bonus(L::BuildTime, f_or(e, "Tactical_Build_Time_Bonus_Percentage", 0.0f));
     set_bonus(L::FireRate, f_or(e, "Fire_Rate_Bonus_Percentage", 0.0f));  // [M: the fire-rate field name]
     s.apply_to_all_allies = b_or(e, "Apply_To_All_Allies", false) || b_or(e, "Affects_All_Allies", false);
+    // mcx4-tac2: Garrison_Upgrade_Ability's type list (the validator 0x6fffa0 only warns when it is empty).
+    if (r.object_type)
+        for (const std::string_view t : data::split_list(last_text(e, "Additional_Garrison_Units")))
+            if (const int32_t x = r.object_type(data::trim(t)); x >= 0) s.garrison_units.push_back(x);
     s.reverse_logic = b_or(e, "Reverse_Application_Logic", false);
     s.specific_faction = s_or(e, "Specific_Faction");  // s78n t04: Combat_Bonus +0x1a0 (resolved by AbilitySystem::set_host)
     s.fow_reveal_multiplier = f_or(e, "FOW_Reveal_Range_Multiplier", 1.0f);

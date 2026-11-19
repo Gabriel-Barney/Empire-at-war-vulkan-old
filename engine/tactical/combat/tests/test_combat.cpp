@@ -123,6 +123,10 @@ int main(int argc, char** argv) {
     test_area_immune_faction();  // tru1 t04
     test_fires_forward();         // mcx4 t03
     test_mode_weapon_delay();     // mcx4 t10
+    test_manual_no_fire_without_target();  // mcx4 (lane mcx4-tac2): manual hardpoint targeting
+    test_manual_assignment();
+    test_manual_fire_and_cooldown();
+    test_manual_target_drop();
     test_deployed_attack_distance();
     test_depleted_shield_increment();
     test_out_of_combat_defense();

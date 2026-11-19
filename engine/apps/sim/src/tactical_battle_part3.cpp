@@ -1269,13 +1269,25 @@ cmd::RejectReason TacticalBattle::handle_command(TacticalMode& mode, uint8_t pla
         // ui1 t04 [port] (retail's human UI path is not traced, backlog b0238): the space special-weapon button sends
         // command 25 with a target object for a SPECIAL_WEAPON object or a space station; it fires as Lua
         // Fire_Special_Weapon does (SCRIPT_GAPS §1.1 steps 4 / 5): readiness >= 1, the SpecialWeaponsAllowed gate, begin
-        // targeting + fire at the object (0x491b40 / 0x491cd0), or the station's special-weapon hard point (can-fire test
-        // 0x386220 + assign); then the destroy-after sweep (step 6).
+        // targeting + fire at the object (0x491b40 / 0x491cd0); a station takes the mcx4 station branch below (the
+        // setter 0x3822e0, no readiness test); then the destroy-after sweep (step 6).
         if (ev.u("at_position") == 0 && !(combat_ && combat_->fires_at_position(wid))) {
             const uint32_t tw = ev.u("target");
             const objects::ObjectHandle th = tw == cmd::kNoObject || tw > 0x7FFFFFFFu ? objects::ObjectHandle{} : store.find(static_cast<objects::ObjectId>(tw));
             if (!store.alive(th)) return R::InvalidTarget;
             const objects::ObjectId tid = store.id(th);
+            // mcx4 (MCX4_T10_RE_ANSWERS §10 Round 4 point 1, 0x40a3b0): the station branch is taken for a DUMMY_STAR_BASE
+            // object without LOBBING_SUPERWEAPON, SPECIAL_WEAPON or not: SpecialWeaponsAllowed for the event's player,
+            // then the setter 0x3822e0 on the first Requires_Manual_Target_Assignment hard point with that player. No
+            // readiness test on this branch (the HUD's cursor resolver has one). [port] no such hard point: InvalidUnit.
+            static const objects::BehaviorTypeId kStarBase = objects::behavior_type_id("DUMMY_STAR_BASE");
+            if (kStarBase != objects::kNoBehavior && store.has_behavior(wh, kStarBase)) {
+                if (!special_weapons_allowed(static_cast<int32_t>(player))) return R::NotAllowed;
+                if (!combat_ || combat_->special_weapon_hardpoint(wid) < 0) return R::InvalidUnit;
+                if (!combat_->special_weapon_fire(wid, tid, static_cast<int32_t>(player))) return R::InvalidTarget;
+                destroy_after();
+                return R::None;
+            }
             if ((l1_sw_.kinds(wid) & ta::kSwSpecialWeapon) != 0) {
                 if (l1_sw_.readiness(wid, frame_) < 1.0f) return R::AbilityNotReady;
                 if (!special_weapons_allowed(static_cast<int32_t>(player))) return R::NotAllowed;
@@ -1284,13 +1296,6 @@ cmd::RejectReason TacticalBattle::handle_command(TacticalMode& mode, uint8_t pla
                     if (l1_sw_.targeting(wid)) sw_begin_targeting(wid);  // a second begin clears the flag (0x491b40)
                     return R::InvalidTarget;
                 }
-                destroy_after();
-                return R::None;
-            }
-            if (combat_ && combat_->special_weapon_readiness(wid) >= 0.0f) {
-                if (combat_->special_weapon_readiness(wid) < 1.0f) return R::AbilityNotReady;
-                if (!special_weapons_allowed(static_cast<int32_t>(player))) return R::NotAllowed;
-                if (!combat_->special_weapon_fire(wid, tid)) return R::InvalidTarget;
                 destroy_after();
                 return R::None;
             }

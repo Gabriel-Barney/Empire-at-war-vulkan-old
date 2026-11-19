@@ -18,6 +18,7 @@
 #include "alamo/tactical/movement/locomotor.hpp"
 #include "alamo/tactical/movement/movement_system.hpp"
 #include "alamo/tactical/movement/space_path.hpp"
+#include "alamo/tactical/movement/space_reevaluate.hpp"
 #include "alamo/tactical/movement/special_locomotors.hpp"
 #include "alamo/test/support.hpp"
 
@@ -385,6 +386,299 @@ void test_rotate_formation_facing_moves() {
     CHECK(moved > 1.0f);
 }
 
+// ledger: verifies GameConstants.ShouldSkipLandFormup
+void test_skip_land_formup() {
+    // MCX4_T11_T12_RE_ANSWERS §B4 Round 4 "ShouldSkipLandFormup = false" (0x41c1a0 [H]): with the constant clear, a member of
+    // a land formation of 2+ walks a lead-in path from where it stands to its form-up point (its slot in the layout box at
+    // the formation path's start) and then its formation path; each member goes on once its own lead-in is done (no wait,
+    // no frame limit). FoC sets it: the member joins its lane from where it stands.
+    CHECK(MovementConstants{}.should_skip_land_formup);
+    CHECK(!load("<ShouldSkipLandFormup>No</ShouldSkipLandFormup>").should_skip_land_formup);
+    struct Out {
+        uint32_t leadins = 0, lanes = 0;
+        std::vector<std::vector<V2>> paths;
+        std::vector<V2> starts;
+        bool arrived = true;
+        uint32_t frames = 0;
+    };
+    const auto run = [](bool skip) {
+        MovementConfig cfg;
+        cfg.constants.should_skip_land_formup = skip;
+        MovementSystem sys(cfg);
+        open_land(sys, 100);
+        // one behind the other along the move: the layout puts them side by side, so neither stands on its form-up point
+        CHECK(sys.add_unit(mk_unit(1, cell_center(21, 50), 1.0f, LocomotorKind::Default, "MCX4_F")));
+        CHECK(sys.add_unit(mk_unit(2, cell_center(19, 50), 1.0f, LocomotorKind::Default, "MCX4_F")));
+        SimRng rng(3);
+        sys.tick(0, rng);
+        MoveOrder o;
+        o.units = {1, 2};
+        o.destination = cell_center(70, 50);
+        sys.move(o, rng, 1);
+        Out out;
+        for (ObjectId i = 1; i <= 2; ++i) out.starts.push_back(sys.view(i).pos);
+        uint32_t f = 1;
+        for (; f < 4000; ++f) {
+            sys.tick(f, rng);
+            if (out.paths.empty() && sys.stats().lanes_taken >= 2)
+                for (ObjectId i = 1; i <= 2; ++i) {
+                    const std::span<const V2> p = sys.land_path(i);
+                    out.paths.emplace_back(p.begin(), p.end());
+                }
+            if (!sys.view(1).has_goal && !sys.view(2).has_goal) break;
+        }
+        out.frames = f;
+        for (ObjectId i = 1; i <= 2; ++i) out.arrived = out.arrived && sys.view(i).arrived;
+        out.leadins = sys.stats().formup_leadins;
+        out.lanes = sys.stats().lanes_taken;
+        return out;
+    };
+    const Out foc = run(true), mod = run(false);
+    std::printf("ShouldSkipLandFormup: lead-ins %u (true) / %u (false), lanes %u / %u, arrived in %u / %u frames\n", foc.leadins,
+                mod.leadins, foc.lanes, mod.lanes, foc.frames, mod.frames);
+    CHECK(foc.leadins == 0 && mod.leadins == 2);
+    CHECK(foc.lanes == 2 && mod.lanes == 2);
+    CHECK(foc.arrived && mod.arrived);
+    CHECK(foc.paths.size() == 2 && mod.paths.size() == 2);
+    for (size_t i = 0; i < foc.paths.size() && i < mod.paths.size(); ++i) {
+        // the lead-in starts where the member stands; FoC's lane path starts at its foot on the lane
+        CHECK(!mod.paths[i].empty() && distance(mod.paths[i].front(), mod.starts[i]) < 1.0e-3f);
+        CHECK(foc.paths[i] != mod.paths[i]);
+        CHECK(!foc.paths[i].empty() && !mod.paths[i].empty() && foc.paths[i].back() == mod.paths[i].back());  // the same slot
+    }
+}
+
+MovementConfig space_cfg() {
+    MovementConfig cfg;
+    cfg.mode = MoveMode::Space;
+    return cfg;
+}
+
+UnitDesc frigate(ObjectId id, V2 pos) {
+    UnitDesc d;
+    d.id = id;
+    d.pos = pos;
+    d.max_speed = 3.0f;
+    d.turn_rate = 2.0f;
+    d.radius = 40.0f;
+    d.space_layer = kLayerFrigate;
+    d.space_layer_type = 2;
+    d.type_name = "MCX4_FRIGATE";
+    return d;
+}
+
+// ledger: verifies GameConstants.ShouldUseSpaceIdleMovement
+// ledger: verifies GameConstants.IdleMovementFrames
+void test_space_idle_drift() {
+    // MCX4_T11_T12_RE_ANSWERS §B4 (0x423070 / 0x420a40 / 0x413100 [H read, M meaning]): in space with
+    // ShouldUseSpaceIdleMovement (FoC false), an arrived ship waits int(F + synced float(0, F / 2) + 0.5) frames
+    // (F = IdleMovementFrames, FoC 30), then drifts int(F) ahead along its facing at SpaceIdleMovementSpeed, inside the map
+    // less 300; then it waits again. FoC: nothing (no draw, no move).
+    const MovementConstants d;
+    CHECK(!d.should_use_space_idle_movement && near(d.idle_movement_frames, 30.0f) && d.space_idle_movement_speed == 0.0f);
+    const MovementConstants k = load("<ShouldUseSpaceIdleMovement>Yes</ShouldUseSpaceIdleMovement><IdleMovementFrames>40"
+                                     "</IdleMovementFrames><SpaceIdleMovementSpeed>1.5</SpaceIdleMovementSpeed>");
+    CHECK(k.should_use_space_idle_movement && near(k.idle_movement_frames, 40.0f) && near(k.space_idle_movement_speed, 1.5f));
+    struct Out {
+        uint32_t arrival = 0, first_drift = 0, drifts = 0;
+        V2 at_arrival, drift_goal, drift_from, end;
+        float drift_speed = 0.0f;
+        bool stopped_still = true;
+    };
+    const auto run = [](const MovementConstants& c, V2 dest, float box) {
+        MovementConfig cfg = space_cfg();
+        cfg.constants = c;
+        MovementSystem sys(cfg);
+        sys.space().set_box({-box, -box}, {box, box});
+        CHECK(sys.add_unit(frigate(5, {0.0f, 0.0f})));
+        SimRng rng(11);
+        MoveOrder o;
+        o.units = {5};
+        o.destination = dest;
+        sys.move(o, rng, 0);
+        Out out;
+        for (uint32_t f = 0; f < 3000; ++f) {
+            sys.tick(f, rng);
+            const UnitView v = sys.view(5);
+            if (out.arrival == 0 && v.arrived) {
+                out.arrival = f;
+                out.at_arrival = v.pos;
+            }
+            if (out.arrival != 0 && out.first_drift == 0 && v.has_goal) {
+                out.first_drift = f;
+                out.drift_goal = v.goal;
+                out.drift_from = out.at_arrival;  // the ship stood there until the drift (planned and started this tick)
+            }
+            if (out.first_drift != 0 && v.has_goal) out.drift_speed = std::max(out.drift_speed, v.speed);
+            if (f == 1500) {  // a stop: no drift after it
+                const ObjectId ids[] = {5};
+                sys.stop(ids);
+                out.drifts = sys.stats().space_idle_drifts;
+                out.end = sys.view(5).pos;
+            }
+            if (f > 1500) out.stopped_still = out.stopped_still && sys.view(5).pos == out.end && !sys.view(5).has_goal;
+        }
+        CHECK(sys.stats().space_idle_drifts == out.drifts);
+        return out;
+    };
+    const Out foc = run(d, {600.0f, 0.0f}, 5000.0f);
+    CHECK(foc.arrival != 0 && foc.first_drift == 0 && foc.drifts == 0);
+    const Out mod = run(k, {600.0f, 0.0f}, 5000.0f);
+    std::printf("IdleMovementFrames: arrival %u, first drift %u (wait %u), %u drifts, goal %.2f from the arrival, top speed %.3f\n",
+                mod.arrival, mod.first_drift, mod.first_drift - mod.arrival, mod.drifts,
+                static_cast<double>(distance(mod.drift_goal, mod.drift_from)), static_cast<double>(mod.drift_speed));
+    CHECK(mod.first_drift >= mod.arrival + 41 && mod.first_drift <= mod.arrival + 61);  // int(40 + [0, 20] + 0.5), armed next frame
+    CHECK(std::fabs(distance(mod.drift_goal, mod.drift_from) - 40.0f) < 0.01f);       // int(F) along the facing
+    CHECK(mod.drifts >= 5 && mod.drift_speed > 0.0f && mod.drift_speed <= 1.5f * 1.05f);
+    CHECK(mod.stopped_still);
+    // near the map edge: the drift point stays 300 inside the box (x <= 1000 - 300)
+    const Out edge = run(k, {950.0f, 0.0f}, 1000.0f);
+    CHECK(edge.first_drift != 0 && near(edge.drift_goal.x, 700.0f));
+    // the speed cap 0 (FoC's SpaceIdleMovementSpeed) with the flag: the waits run, no drift moves
+    MovementConstants z = k;
+    z.space_idle_movement_speed = 0.0f;
+    const Out none = run(z, {600.0f, 0.0f}, 5000.0f);
+    CHECK(none.first_drift == 0 && none.drifts == 0);
+}
+
+// ledger: verifies GameConstants.MovementReevaluationFrameCount
+void test_movement_reevaluation() {
+    // MCX4_T11_T12_RE_ANSWERS §B4 Round 4 (0x5d51e0 gate, 0x5d55f0 tests [H]): the coordinator re-evaluates when its id %
+    // N = frame % N (N = MovementReevaluationFrameCount, FoC 10) and frame >= its not-before frame; it re-plans when the
+    // lead is in max range neither from its slot point nor from its position, or is in range and the target is inside
+    // its min range. The battle host runs the pass (TacticalBattle::space_attack_reevaluate).
+    CHECK(MovementConstants{}.movement_reevaluation_frame_count == 10u);
+    const MovementConstants k = load("<MovementReevaluationFrameCount>4</MovementReevaluationFrameCount>");
+    CHECK(k.movement_reevaluation_frame_count == 4u);
+    uint32_t foc = 0, mod = 0;
+    for (uint32_t f = 0; f < 100; ++f) {
+        foc += space_reevaluation_due(13, f, MovementConstants{}.movement_reevaluation_frame_count) ? 1u : 0u;
+        mod += space_reevaluation_due(13, f, k.movement_reevaluation_frame_count) ? 1u : 0u;
+    }
+    CHECK(foc == 10u && mod == 25u);
+    CHECK(space_reevaluation_due(13, 3, 10) && !space_reevaluation_due(13, 4, 10) && space_reevaluation_due(13, 13, 10));
+    CHECK(!space_reevaluation_due(13, 13, 10, 20) && space_reevaluation_due(13, 23, 10, 20));  // the not-before frame
+    CHECK(!space_reevaluation_due(0, 0, 0));                                                  // [port] N = 0: never
+    CHECK(space_attack_replan(false, false, false) && space_attack_replan(false, false, true));
+    CHECK(!space_attack_replan(true, false, false) && !space_attack_replan(false, true, false) && !space_attack_replan(true, true, false));
+    CHECK(space_attack_replan(true, false, true) && space_attack_replan(false, true, true));
+}
+
+// ledger: verifies GameObjectType.Max_Distance_From_Spawner
+void test_indigenous_wander() {
+    // MCX4_T11_T12_RE_ANSWERS §B2 Max_Distance_From_Spawner and its Round 4 paragraph (0x621d80 [H]), TRU1_C_RE §1.3 / §1.4:
+    // the spawner writes home := its position and leash D := its type's Max_Distance_From_Spawner (FoC 150 - 220; 0: no
+    // leash). An idle unit with Can_Indigenous_Unit_Stop stays when float(0, 1) > 0.1; else dx = float(-D, D), dy =
+    // float(-sqrt(D^2 - dx^2), +...), point = home + (dx, dy); without a leash a point of the map rectangle; a step outside
+    // [50, 400] ([60, 150] burning) becomes float(min, max) long along the same direction.
+    IndigenousWanderInput in;
+    in.pos = {1000.0f, 1000.0f, 0.0f};
+    in.home.home = {1000.0f, 1000.0f, 0.0f};
+    in.home.leash = 150.0f;  // Max_Distance_From_Spawner of most FoC spawn houses
+    in.can_stop = false;
+    in.cx = 2000.0f;
+    in.cy = 2000.0f;
+    in.hx = 2000.0f;
+    in.hy = 2000.0f;
+    // the draws, one by one, against a reference stream
+    for (uint32_t seed = 1; seed <= 300; ++seed) {
+        SimRng a(seed), b(seed);
+        WanderPoint p;
+        CHECK(indigenous_wander_point(in, a, p));
+        const float dx = b.range_float(-150.0f, 150.0f);
+        const float s = std::sqrt(150.0f * 150.0f - dx * dx);
+        const float dy = b.range_float(-s, s);
+        float ex = 1000.0f + dx, ey = 1000.0f + dy;
+        const float vx = ex - 1000.0f, vy = ey - 1000.0f;
+        const float dd = std::sqrt(vx * vx + vy * vy);
+        if (dd > 400.0f || dd < 50.0f) {
+            const float t = b.range_float(50.0f, 400.0f);
+            ex = 1000.0f + vx * (t / dd);
+            ey = 1000.0f + vy * (t / dd);
+            CHECK(std::sqrt((p.x - 1000.0f) * (p.x - 1000.0f) + (p.y - 1000.0f) * (p.y - 1000.0f)) >= 50.0f - 1e-3f);
+        } else {
+            CHECK(dd <= 150.0f + 1e-3f);  // inside the leash circle
+        }
+        CHECK(p.x == ex && p.y == ey && p.z == 0.0f);
+        CHECK(a.range_int(0, 1000000) == b.range_int(0, 1000000));  // the same number of draws
+    }
+    // Can_Indigenous_Unit_Stop: stays about 90 % of the services (one draw each)
+    {
+        IndigenousWanderInput c = in;
+        c.can_stop = true;
+        SimRng rng(5);
+        uint32_t moved = 0;
+        WanderPoint p;
+        for (int i = 0; i < 2000; ++i) moved += indigenous_wander_point(c, rng, p) ? 1u : 0u;
+        std::printf("Max_Distance_From_Spawner: Can_Indigenous_Unit_Stop moves %u of 2000 services\n", moved);
+        CHECK(moved > 140 && moved < 260);
+    }
+    // no map rectangle: stays (after the stop draw)
+    {
+        IndigenousWanderInput c = in;
+        c.cx = c.cy = c.hx = c.hy = 0.0f;
+        SimRng rng(5);
+        WanderPoint p;
+        CHECK(!indigenous_wander_point(c, rng, p));
+    }
+    // no leash (D = 0, Desert_Sketto_Spawn / Bird_Spawn): the map rectangle, x then y; and the burning bounds
+    {
+        IndigenousWanderInput c = in;
+        c.home.leash = 0.0f;
+        c.burning = true;
+        c.pos = {100.0f, 100.0f, 0.0f};
+        SimRng a(77), b(77);
+        WanderPoint p;
+        CHECK(indigenous_wander_point(c, a, p));
+        const float x = b.range_float(0.0f, 4000.0f), y = b.range_float(0.0f, 4000.0f);
+        const float vx = x - 100.0f, vy = y - 100.0f, dd = std::sqrt(vx * vx + vy * vy);
+        if (dd > 150.0f || dd < 60.0f) {
+            const float t = b.range_float(60.0f, 150.0f);
+            CHECK(p.x == 100.0f + vx * (t / dd) && p.y == 100.0f + vy * (t / dd));
+        } else {
+            CHECK(p.x == x && p.y == y);
+        }
+    }
+    // the per-unit home in the movement system (set by the host's spawner)
+    MovementSystem sys;
+    open_land(sys, 50);
+    CHECK(sys.add_unit(mk_unit(3, cell_center(10, 10), 1.0f, LocomotorKind::Default)));
+    CHECK(!sys.indigenous_home(3).has_home() && !sys.indigenous_home(99).has_home());
+    IndigenousHome h;
+    h.home = {200.0f, 220.0f, 5.0f};
+    h.leash = 180.0f;
+    CHECK(sys.set_indigenous_home(3, h) && !sys.set_indigenous_home(99, h));
+    CHECK(sys.indigenous_home(3).has_home() && sys.indigenous_home(3).leash == 180.0f && sys.indigenous_home(3).home.y == 220.0f);
+    h.leash = -5.0f;  // a negative leash is the no-leash branch: kept as 0
+    CHECK(sys.set_indigenous_home(3, h) && sys.indigenous_home(3).leash == 0.0f);
+}
+
+// ledger: verifies GameConstants.LandObjectTrackingInterval
+// ledger: verifies GameConstants.LandObjectTrackingTreeCount
+void test_land_tracking_window() {
+    // FIGHTER_FLYING §6.3.1 item 3 / MCX4_T11_T12_RE_ANSWERS §B4 (0x5d8140 [H]): in land mode the tracking rings hold
+    // LandObjectTrackingTreeCount (FoC 25) slices of LandObjectTrackingInterval (FoC 20) frames. [port M] the land air
+    // units' timed-path occupancy sees tracks that far ahead (500 frames in FoC; space keeps 45 x 90).
+    const MovementConstants d;
+    CHECK(d.land_object_tracking_tree_count == 25u && d.land_object_tracking_interval == 20u);
+    const MovementConstants k =
+        load("<LandObjectTrackingInterval>30</LandObjectTrackingInterval><LandObjectTrackingTreeCount>40</LandObjectTrackingTreeCount>");
+    CHECK(k.land_object_tracking_interval == 30u && k.land_object_tracking_tree_count == 40u);
+    const auto seen = [](const MovementConstants& c, float t) {
+        MovementConfig cfg;
+        cfg.constants = c;
+        MovementSystem sys(cfg);
+        SpaceWaypoint a, b;
+        a.pos = b.pos = {0.0f, 0.0f};
+        b.time = 5000.0f;  // a flyer hovering over (0, 0) for 5000 frames
+        sys.air().set_track(7, kLayerCorvette, 10.0f, 0, {a, b});
+        return sys.air().query_point({0.0f, 0.0f}, t, 10.0f, kLayerCorvette, 1, 0) != 0u;
+    };
+    CHECK(seen(d, 400.0f) && seen(k, 400.0f));
+    CHECK(!seen(d, 600.0f) && seen(k, 600.0f));        // 25 x 20 = 500 vs 40 x 30 = 1200
+    CHECK(!seen(k, 1300.0f));
+}
+
 }  // namespace
 
 int main() {
@@ -398,5 +692,10 @@ int main() {
     test_snap_orders_to_center();
     test_final_formation_facing();
     test_rotate_formation_facing_moves();
+    test_skip_land_formup();
+    test_space_idle_drift();
+    test_movement_reevaluation();
+    test_indigenous_wander();
+    test_land_tracking_window();
     return ::alamo::test::report("alamo_tactical_movement_mcx4_tests");
 }

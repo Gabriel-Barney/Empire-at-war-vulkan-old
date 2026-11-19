@@ -142,6 +142,7 @@
 #include "alamo/tactical/movement/constants.hpp"
 #include "alamo/tactical/movement/fighter.hpp"
 #include "alamo/tactical/movement/formation.hpp"
+#include "alamo/tactical/movement/indigenous_wander.hpp"
 #include "alamo/tactical/movement/land_path.hpp"
 #include "alamo/tactical/movement/locomotor.hpp"
 #include "alamo/tactical/movement/passability.hpp"
@@ -372,6 +373,9 @@ struct MovementStats {
     // s78p (b0049): formation paths built for land formations of 2+ (move orders and attack plans), formation paths that
     // failed (the members then plan singly), members given a lane, and plans that took the lane as the path.
     uint32_t formation_paths = 0, formation_path_failures = 0, lanes_set = 0, lanes_taken = 0;
+    // mcx4 t11 (save version 37): lane plans that walked a lead-in to the form-up point first (ShouldSkipLandFormup
+    // clear), and space idle drift moves issued (ShouldUseSpaceIdleMovement set).
+    uint32_t formup_leadins = 0, space_idle_drifts = 0;
 };
 
 // s78n t14 (FIGHTER_FLYING §7.2 Dartboard step 3, 0x241820 / 0x241830): the radical inverse of `index` in `base` (f = 0,
@@ -523,6 +527,12 @@ public:
     // OI tactical (crush, §5.5): owner changes (Change_Owner) and the relation test (player +0x370 table == 1 [M];
     // default: different non-negative players are hostile). The test is called from the serial crush pass only.
     bool set_owner(ObjectId id, int32_t owner);
+    // mcx4 t11 (TRU1_C_RE §1.3, indigenous_wander.hpp): the INDIGENOUS_UNIT pack's home and leash, written by the host when
+    // a SPAWN_INDIGENOUS_UNITS spawner places the unit; read by its wander service (indigenous_wander_point). Saved with
+    // the unit (version 37), not hashed (it acts through the moves). set_*: false when the unit is unknown; the getter
+    // returns "no home" for an unknown unit.
+    bool set_indigenous_home(ObjectId id, const IndigenousHome& h);
+    IndigenousHome indigenous_home(ObjectId id) const;
     using HostileFn = std::function<bool(int32_t a, int32_t b)>;
     void set_hostility(HostileFn fn) { hostile_ = std::move(fn); }
     std::span<const CrushEvent> crush_events() const { return crush_; }  // this tick (land)
@@ -1110,6 +1120,10 @@ private:
         uint32_t start_frame = 0;
         float formation_speed = 3.0e38f;
         float cohesion_speed = 3.0e38f;  // [port] fleet cohesion: the space plan speed cap of this move (saved, version 32)
+        // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4, 0x423070; save version 37): the frame of the next space idle drift move
+        // (0 = not armed). Armed only with ShouldUseSpaceIdleMovement (space_idle_drift); hashed when non-zero.
+        uint32_t idle_at = 0;
+        IndigenousHome ind;  // mcx4 t11 (save version 37): set_indigenous_home
         // mov1 t02 / t05 (BKR1_RE_ANSWERS Q3 [H]; save version 34; [port] not hashed - they act through positions): form_rank = the formation's
         // +0x23c rank written by the destination check 0x439360 (descending goal projection on the order axis, fastest
         // first with flag 0x80; 0 when it did not rank: the overtake's same-coordinator test); form_first = the id of the
@@ -1579,6 +1593,11 @@ private:
                ((v.d.squashable_by_supercrusher && c.d.supercrusher) || v.d.squashable);
     }
     void tick_space(uint32_t frame, const ParallelFor& pf);
+    // mcx4 t11 (MCX4_T11_T12_RE_ANSWERS §B4, formation state 3 0x423070 -> 0x420a40 / 0x413100): the space idle drift of
+    // ShouldUseSpaceIdleMovement (serial, ascending id; nothing without the constant). kIdleOff: stopped, no drift until
+    // the next order.
+    void space_idle_drift(uint32_t frame, SimRng& rng);
+    static constexpr uint32_t kIdleOff = 0xFFFFFFFFu;
     void plan_land(uint32_t frame, const ParallelFor& pf);
     // S7 collision layer (TACTICAL_GAPS §6.7)
     void detect_collisions(uint32_t frame);

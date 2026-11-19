@@ -8,7 +8,8 @@
 //   u32 version
 //   definition counts (checked, not restored): players, unit / hardpoint / projectile / ability descriptors, priority sets
 //   u32 frame_, u32 next_serial_
-//   relations: P x P u8; special-weapon hardpoint flags: P x u8; player ModifierSets (P, player order)
+//   relations: P x P u8; special-weapon hardpoint flags: P x u8; manual-fire cooldowns: P x (u32 frame, i32 frames);
+//   player ModifierSets (P, player order)
 //   10 x f32 weather accuracy
 //   u32 + units (every Unit field, incl. its ModifierSet and the caches: reduced modifier values + the versions they
 //         were taken at, the own Mod_Multiplier products, the per-tick scratch bytes - restored verbatim, so
@@ -48,7 +49,7 @@ using save_io::put_vec3;
 
 namespace {
 
-constexpr uint32_t kCombatSaveVersion = 18;  // 2: refix t02 INFECTION state, refix t03 death clone key; 3: refixf t01 rockets;
+constexpr uint32_t kCombatSaveVersion = 19;  // 2: refix t02 INFECTION state, refix t03 death clone key; 3: refixf t01 rockets;
                                              // 4: refixf t06 attack goal / weapon aim / order lock; 5: refixf t06 scan
                                              // target hardpoint (auto_hp); 6: a1g t03 damage event hull_lost; 7: S8 t04
                                              // grenade flight / sticky state; 8: S8 t06 stuck_offset in the parent's frame
@@ -65,7 +66,9 @@ constexpr uint32_t kCombatSaveVersion = 18;  // 2: refix t02 INFECTION state, re
                                              // Base_Shield_Upgrade list, tru1 t08 hit event ground /
                                              // commanded flags; 17: trn1 t02 SurfaceFX instance
                                              // state + terrain damage timer; 18: r1b t10 hardpoint turret pose
-                                             // and last aim. Only the current version is read (cu6).
+                                             // and last aim; 19: mcx4 hardpoint manual target / player /
+                                             // frame, the players' manual-fire cooldown stamps. Only the
+                                             // current version is read (cu6).
 constexpr uint32_t kWeatherSaveVersion = 1;
 constexpr uint32_t kNoIndex = 0xFFFFFFFFu;
 
@@ -115,6 +118,7 @@ void CombatSystem::write(ByteWriter& w) const {
 
     for (const uint8_t e : enemy_) w.u8(e);
     for (const uint8_t f : sw_hp_enabled_) w.u8(f);
+    for (const ManualFireCooldown& c : manual_cd_) w.u32(c.frame).i32(c.frames);  // mcx4 (version 19)
     for (const ModifierSet& s : player_mods_) s.write(w);
     for (const float m : weather_acc_) w.f32(m);
 
@@ -172,6 +176,7 @@ void CombatSystem::write(ByteWriter& w) const {
         w.u32(h.desc).f32(h.health).i32(h.cooldown).i32(h.pulses).u8(h.destroyed).u8(h.disabled);
         w.i32(h.target).i32(h.target_hp).i32(h.opp_target).i32(h.opp_hp).u32(h.opp_next_scan);
         w.f32(h.turret_pitch).f32(h.turret_yaw).f32(h.aim_pitch).f32(h.aim_yaw);  // r1b t10 (version 18)
+        w.i32(h.manual_target).i32(h.manual_player).u32(h.manual_frame);           // mcx4 (version 19)
     }
 
     w.u32(static_cast<uint32_t>(projectiles_.size()));
@@ -274,6 +279,11 @@ bool CombatSystem::read(ByteReader& r) {
     for (uint8_t& e : enemy) e = r.u8();
     std::vector<uint8_t> sw(np);
     for (uint8_t& f : sw) f = r.u8();
+    std::vector<ManualFireCooldown> mcd(np);  // mcx4 (version 19)
+    for (ManualFireCooldown& c : mcd) {
+        c.frame = r.u32();
+        c.frames = r.i32();
+    }
     if (!r.ok()) return false;
     std::vector<ModifierSet> pmods(np);
     for (ModifierSet& s : pmods)
@@ -405,7 +415,7 @@ bool CombatSystem::read(ByteReader& r) {
         first = false;
     }
 
-    if (!r.count(n, 38)) return false;
+    if (!r.count(n, 66)) return false;
     std::vector<Hardpoint> hps(n);
     for (Hardpoint& h : hps) {
         h.desc = r.u32();
@@ -423,7 +433,10 @@ bool CombatSystem::read(ByteReader& r) {
         h.turret_yaw = r.f32();
         h.aim_pitch = r.f32();
         h.aim_yaw = r.f32();
-        if (!r.ok() || h.desc >= hp_descs) return false;
+        h.manual_target = r.i32();  // mcx4 (version 19)
+        h.manual_player = r.i32();
+        h.manual_frame = r.u32();
+        if (!r.ok() || h.desc >= hp_descs || h.manual_player < -1) return false;
     }
     for (const Unit& u : units) {
         if (static_cast<uint64_t>(u.hp_begin) + u.hp_count > hps.size()) return false;
@@ -649,6 +662,7 @@ bool CombatSystem::read(ByteReader& r) {
     next_serial_ = next_serial;
     enemy_ = std::move(enemy);
     sw_hp_enabled_ = std::move(sw);
+    manual_cd_ = std::move(mcd);
     player_mods_ = std::move(pmods);
     weather_acc_ = wacc;
     units_ = std::move(units);

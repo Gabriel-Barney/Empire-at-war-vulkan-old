@@ -2046,7 +2046,8 @@ void test_fog_filter() {
         CHECK(t.w.sys->auto_target(1) == 2);
         t.w.sys->set_hooks(nullptr);
     }
-    {  // Space-station special weapon: first WEAPON_SPECIAL hard point; force 1 refuses hidden targets for AIs too.
+    {  // Space-station special weapon: the first Requires_Manual_Target_Assignment hard point (mcx4: 0x394e60); force 1
+       // refuses hidden targets for AIs too; the assignment is the manual target (mcx4), not an attack order.
         World w;
         w.data.projectiles.push_back(ProjectileDesc{});
         HardpointDesc laser;
@@ -2054,6 +2055,7 @@ void test_fog_filter() {
         w.data.hardpoints.push_back(laser);
         HardpointDesc sw;
         sw.kind = HardpointKind::WeaponSpecial;
+        sw.manual_target = true;
         sw.fire_range = 1000.0f;
         sw.fire_min_range = 100.0f;
         sw.max_recharge = 10.0f;
@@ -2081,10 +2083,11 @@ void test_fog_filter() {
         CHECK(w.sys->special_weapon_can_fire(1, 2));
         CHECK(!w.sys->special_weapon_can_fire(1, 3) && !w.sys->special_weapon_can_fire(1, 4) && !w.sys->special_weapon_can_fire(1, 5));
         fh.hidden = {2};
-        CHECK(!w.sys->special_weapon_can_fire(1, 2) && !w.sys->special_weapon_fire(1, 2));
-        CHECK(w.sys->ordered_target(1) == kNoObject);
+        CHECK(!w.sys->special_weapon_can_fire(1, 2) && !w.sys->special_weapon_fire(1, 2, 0));
+        CHECK(w.sys->hardpoint_manual_target(1, 1) == kNoObject);
         fh.hidden.clear();
-        CHECK(w.sys->special_weapon_fire(1, 2) && w.sys->ordered_target(1) == 2);
+        CHECK(w.sys->special_weapon_fire(1, 2, 0) && w.sys->hardpoint_manual_target(1, 1) == 2);
+        CHECK(w.sys->ordered_target(1) == kNoObject && w.sys->hardpoint_manual_player(1, 1) == 0);
         const float r = w.sys->special_weapon_readiness(1);
         CHECK(r >= 0.0f && r <= 1.0f);
         w.sys->set_hooks(nullptr);

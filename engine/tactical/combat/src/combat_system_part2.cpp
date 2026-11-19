@@ -116,10 +116,21 @@ bool CombatSystem::fire_hardpoint(Unit& u, Hardpoint& h, uint32_t frame, SimRng&
     const float W = weapon_delay(u, &hd);
     const float F = fire_rate(u);
     h.pulses -= 1;
-    const Recharge r = h.pulses > 0 ? hp_pulse_recharge(hd.pulse_delay, h.pulses, W, F, cfg_.fps)
+    const bool pulse = h.pulses > 0;
+    const Recharge r = pulse ? hp_pulse_recharge(hd.pulse_delay, h.pulses, W, F, cfg_.fps)
                                     : hp_full_recharge(hd.min_recharge, hd.max_recharge, hd.pulse_count, W, F, cfg_.fps, rng);
     h.cooldown = r.frames;
     h.pulses = r.pulses;
+    // mcx4 (MCX4_T10_RE_ANSWERS §10 and Round 4 point 4): on the full-recharge branch, a hardpoint holding a manual player
+    // (+0xc8) stamps that player (0x285d70: frame := now, frames := int(FPS x Manual_Hardpoint_Firing_Cooldown_Secs)
+    // [M: 0x22f9c0's rounding, truncation here]) and releases the player. Any shot of the hardpoint does it (also one at
+    // the weapon's target that comes first in the frame). An unknown player is neither stamped nor released.
+    if (!pulse && h.manual_player >= 0 && static_cast<size_t>(h.manual_player) < manual_cd_.size()) {
+        ManualFireCooldown& c = manual_cd_[static_cast<size_t>(h.manual_player)];
+        c.frame = frame;
+        c.frames = trunc_i32(static_cast<float>(cfg_.fps) * hd.manual_cooldown_secs);
+        h.manual_player = -1;
+    }
     ++stats_.shots;
     shot_events_.push_back({u.id, t.id, t.owner, static_cast<int32_t>(h.desc), next_serial_ - 1u});  // OI fog: REVEAL vf26 flash; aud1 t04
     if (hooks_) hooks_->fire_done(u.id, &hd, frame);  // OI abilities: Blast charged-shot count
@@ -404,16 +415,17 @@ void CombatSystem::turret_slew(const Unit& u, Hardpoint& h) {
     // HP_Update's turret step (TACTICAL_COMBAT §2.9 Q2 "Hardpoint turret slew") [H unless tagged]. Aim (0x383650): the
     // target when its aim point (0x398440: its closest live targetable hardpoint, else its position) passes the turret
     // cone, else the opportunity target (no cone test; retail's +0xa8 candidate before it is not modelled [M]); none: a
-    // manual-target turret holds its last aim (the pose while that is zero), others the rest pose. [port] The port has
-    // no manual target assignment (hp +0xc0), so a manual-target turret takes the weapon's target as that, with no cone
-    // test (vanilla: HP_Underworld_L3_Station_Main_Cannon). A target's position in the turret frame gives yaw (+ 90:
+    // manual-target turret holds its last aim (the pose while that is zero), others the rest pose. A
+    // Requires_Manual_Target_Assignment turret aims at its manual target (hp +0xc0, assign_manual_target) only, with no
+    // cone test (vanilla: HP_Underworld_L3_Station_Main_Cannon). A target's position in the turret frame gives yaw (+ 90:
     // the frame's centre is -y) and pitch, each clamped to its extent when that is in (0, 180), plus the rest angles.
     const HardpointDesc& hd = data_->hardpoints[h.desc];
     float pitch = hd.turret_rest_pitch, yaw = hd.turret_rest_yaw;
     const Unit* t = nullptr;
     const Unit* main = unit(h.target);
     if (hd.manual_target) {
-        if (live(main)) t = main;
+        const Unit* m = unit(h.manual_target);
+        if (live(m)) t = m;
     } else {
         const Unit* opp = unit(h.opp_target);
         if (live(main)) {

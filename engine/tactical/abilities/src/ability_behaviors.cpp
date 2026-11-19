@@ -9,6 +9,7 @@
 // in command / Lua calls).
 #include <algorithm>
 #include <array>
+#include <cmath>
 
 #include "alamo/core/dmath.hpp"
 #include "alamo/tactical/abilities/x86_int.hpp"
@@ -582,6 +583,9 @@ void AbilitySystem::aura_on(Obj& src, SpecialState& sp, uint32_t frame) {
             for (int32_t p = 0; p < np; ++p)
                 if (p == src.owner || (s.apply_to_all_allies && friendly(src.owner, p))) set_special_enabled(p, s.ability_name_crc, true);
             break;
+        case SpecialClass::GarrisonUpgrade:  // mcx4-tac2: 0x6ffc60 - the owner, or every allied player (index order)
+            garrison_list(src, s, true);
+            break;
         default: break;
     }
     event(AbilityEventKind::EffectOn, sp.trigger, src.id, kNoObject, frame);
@@ -622,9 +626,24 @@ void AbilitySystem::aura_off(Obj& src, SpecialState& sp, uint32_t frame) {
             for (int32_t p = 0; p < np; ++p)
                 if (p == src.owner || (s.apply_to_all_allies && friendly(src.owner, p))) set_special_enabled(p, s.ability_name_crc, false);
             break;
+        case SpecialClass::GarrisonUpgrade:  // mcx4-tac2: 0x6ffe30 - the same players, one entry of each type removed
+            garrison_list(src, s, false);
+            break;
         default: break;
     }
     (void)frame;  // remove_special raises Ended
+}
+
+void AbilitySystem::garrison_list(const Obj& src, const SpecialAbilityDesc& s, bool add) {
+    // mcx4-tac2 (Garrison_Upgrade_Ability 0x6ffc60 / 0x6ffe30): without Apply_To_All_Allies only the owner's list; with it
+    // every player allied with the owner (0x2823e0, [port] relation 0 like the other per-player writers, the owner
+    // included), player index order; the types in list order.
+    if (!host_.garrison_units || src.owner < 0) return;
+    const auto np = static_cast<int32_t>(combat_->player_count());
+    for (int32_t p = 0; p < np; ++p) {
+        if (p != src.owner && !(s.apply_to_all_allies && friendly(src.owner, p))) continue;
+        for (const int32_t t : s.garrison_units) host_.garrison_units(p, t, add);
+    }
 }
 
 void AbilitySystem::auras_unit_added(Obj& n, uint32_t /*frame*/) {
@@ -1304,6 +1323,8 @@ void AbilitySystem::behaviors_service(Obj& o, uint32_t frame) {
     lure_service(o, frame);  // cu8f t06: LURE (0x23), interval 1
     if (o.dead) return;
     gravity_service(o, frame);  // TRU1 t03: GRAVITY_CONTROL_FIELD (0x3a), interval 60
+    if (o.combat_unit) harass_service(o, frame);  // mcx4-tac2: HARASS (0x41) / AVOID_DANGER (0x42), interval 30
+    if (o.dead) return;
     // HUNT (0x21): interval 30, or 1 while burning (0x621840).
     if (o.behavior[kHunt] && frame >= o.hunt_due) {
         const bool burning = o.combat_unit && combat_->burning(o.id);
@@ -1408,6 +1429,105 @@ void AbilitySystem::hunt_decide(Obj& o, uint32_t frame) {
         }
     }
     move_order(o.id, dest, frame);
+}
+
+// ================================================================================================
+// mcx4-tac2: HARASS (0x41, HarassBehaviorClass 0x58dd10) and AVOID_DANGER (0x42, AvoidDangerBehaviorClass 0x58e8e0),
+// docs/re/MCX4_T11_T12_RE_ANSWERS.md §C4 "Round 4". Both serviced every 30 frames from a staggered first due frame (the
+// draw is in add_unit); each returns at once while its unit moves. No draws here.
+// ================================================================================================
+
+const AbilitySystem::Obj* AbilitySystem::strongest_enemy(const Obj& o, float range) const {
+    // The grid query (0x2ab640 -> 0x20e780): the enemies of the unit's owner (0x39a450) inside the axis-aligned square of
+    // half-size `range` around the unit; the one whose TYPE has the largest AI combat power (0x370e60). Strict compare:
+    // on a tie the first stays, and a power <= 0 is never picked. [port] the query's list order is ascending id; a
+    // contained (garrisoned / limbo) unit is not in it.
+    const Vec3 u = position(o);
+    const Obj* best = nullptr;
+    float best_power = 0.0f;
+    for (const Obj& t : objs_) {
+        if (t.dead || !t.combat_unit || t.id == o.id || !alive_unit(t.id)) continue;
+        if (t.owner < 0 || !enemy(o.owner, t.owner)) continue;
+        if (combat_->flags(t.id) & combat::kUnitContained) continue;
+        const Vec3 p = position(t);
+        if (std::fabs(p.x - u.x) > range || std::fabs(p.y - u.y) > range) continue;
+        const float power = desc(t).ai_combat_power;
+        if (power > best_power) {
+            best_power = power;
+            best = &t;
+        }
+    }
+    return best;
+}
+
+void AbilitySystem::harass_service(Obj& o, uint32_t frame) {
+    // ledger: consumes GameObjectType.Harass_Enemy_Exclusion_Range
+    // ledger: consumes GameObjectType.Avoid_Enemy_Exclusion_Range
+    const AbilityObjectDesc& d = desc(o);
+    const bool harass = d.harass_range > 0.0f && frame >= o.harass_due;
+    const bool avoid = d.avoid_range > 0.0f && frame >= o.avoid_due;
+    if (!harass && !avoid) return;
+    if (harass) o.harass_due = frame + 30u;
+    if (avoid) o.avoid_due = frame + 30u;
+    if (moving(o)) return;  // 0x39ade0 (a land team member: its container's)
+    Vec3 lo, hi;
+    const bool box = map_rect(lo, hi);  // the mode's playable box (vf +0x208)
+    const Vec3 u = position(o);
+    if (harass) {
+        // 0x58dd10: point = e + range(e) x normalise(c - e) - the edge of the strongest enemy's weapon range on its map-centre
+        // side - with x / y clamped to the box. [port] c takes e's height (a level direction); the threat-grid snap of
+        // the point (0x6552a0 / 0x655070) is not modelled; the move is the unit's own (detached into its own formation).
+        if (const Obj* e = strongest_enemy(o, d.harass_range)) {
+            const Vec3 ep = position(*e);
+            Vec3 c = box ? Vec3{0.5f * (lo.x + hi.x), 0.5f * (lo.y + hi.y), ep.z} : ep;
+            float dx = c.x - ep.x, dy = c.y - ep.y;
+            const float len = dmath::sqrt(dx * dx + dy * dy);
+            if (len > 0.0f) {
+                dx = dx / len;
+                dy = dy / len;
+            } else {
+                dx = dy = 0.0f;
+            }
+            const float r = combat_->attack_range(e->id);
+            Vec3 p{ep.x + dx * r, ep.y + dy * r, ep.z};
+            if (box) {
+                p.x = std::clamp(p.x, lo.x, hi.x);
+                p.y = std::clamp(p.y, lo.y, hi.y);
+            }
+            move_order(o.id, p, frame);
+        }
+    }
+    if (avoid) {
+        // 0x58e8e0: needs the unit's coordinator and formation (host move_goal; none -> nothing). g = the formation's
+        // destination, v = unit(g - u), D = |g - u|; p = v turned 90 degrees away from the enemy (left when the enemy is
+        // right of u -> g); dir = normalise(v + p) (45 degrees); point = u + (range(e) - D) x dir, clamped to the box; a
+        // move there, then the old destination again. [port] 2-D; no threat-grid snap.
+        Vec3 g;
+        const Obj* e = host_.move_goal && host_.move_goal(o.id, g) ? strongest_enemy(o, d.avoid_range) : nullptr;
+        if (e) {
+            const Vec3 ep = position(*e);
+            const float gx = g.x - u.x, gy = g.y - u.y;
+            const float dist = dmath::sqrt(gx * gx + gy * gy);
+            if (dist > 0.0f) {
+                const float vx = gx / dist, vy = gy / dist;
+                const float side = gx * (ep.y - u.y) - gy * (ep.x - u.x);  // > 0: the enemy is left of u -> g
+                const float px = side < 0.0f ? -vy : vy, py = side < 0.0f ? vx : -vx;
+                float dx = vx + px, dy = vy + py;
+                const float len = dmath::sqrt(dx * dx + dy * dy);
+                dx = dx / len;
+                dy = dy / len;
+                const float k = combat_->attack_range(e->id) - dist;
+                Vec3 p{u.x + k * dx, u.y + k * dy, u.z};
+                if (box) {
+                    p.x = std::clamp(p.x, lo.x, hi.x);
+                    p.y = std::clamp(p.y, lo.y, hi.y);
+                }
+                move_order(o.id, p, frame);
+                move_order(o.id, g, frame);
+                events_.back().value = kMoveResume;
+            }
+        }
+    }
 }
 
 void AbilitySystem::confuse(Obj& v, float secs, uint32_t frame) {
