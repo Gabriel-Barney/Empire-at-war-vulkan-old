@@ -1,10 +1,17 @@
 // N1 stage 2 save / load of a running battle (owner: n2-host): tactical_battle.hpp "N1 stage 2 save / load".
 #include <algorithm>
+#include <cstdint>
+#include <map>
+#include <memory>
+#include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 #include "alamo/sim/save_session.hpp"
 #include "alamo/sim/tactical_battle.hpp"
 #include "save_io.hpp"
+#include "tactical_battle_ledger.hpp"
 #include "alamo/tactical/garrison/capture.hpp"
 #include "alamo/tactical/garrison/garrison.hpp"
 
@@ -12,7 +19,7 @@ namespace alamo::sim {
 
 namespace {
 
-constexpr uint32_t kBattleStateVersion = 19;  // 19: cmb2 t03 / t04 AttackBlock::retry / hp; 18: cmb1 t01 land formation records; 17: skm2 t02 skirmish sides 2..7 (anchors, facings, records); 16: r3g t01 landing Land / Takeoff clip timing; 15: skm1 t07 skirmish garrison re-delivery; 14: TRU1 t06 retreat flight, t05 / t07 spawners and debris; 13: [port] fleet cohesion per player; 2: S7 t22 fighter formations; 3: S7 t24 formation follow_next / a1i t04 landing objects (two branches); 4: S7 t37 follow_next dropped (the follow is in the movement layer); 5: both merged (formations + landing objects); 6: story t06 victory monitor (replaces the end-hold fields); 7: q6 attacks on TEAM containers / s78f t02 FighterFormationRecord::pushed dropped (the auto blocks are in the movement save) (two branches); 8: both merged; 9: ccpgt t02 domination timer; 10: cu8k t01 Saber_Throw thrower machines; 11: cu8l t03 start fleet arrivals; 12: s78n t20 land attack blocks (exact: older versions are refused)
+constexpr uint32_t kBattleStateVersion = 20;  // 20: ref2 t01 save ledger (BOMBARD_DELAY reward, map hints, marker names, pad levels); 19: cmb2 t03 / t04 AttackBlock::retry / hp; 18: cmb1 t01 land formation records; 17: skm2 t02 skirmish sides 2..7 (anchors, facings, records); 16: r3g t01 landing Land / Takeoff clip timing; 15: skm1 t07 skirmish garrison re-delivery; 14: TRU1 t06 retreat flight, t05 / t07 spawners and debris; 13: [port] fleet cohesion per player; 2: S7 t22 fighter formations; 3: S7 t24 formation follow_next / a1i t04 landing objects (two branches); 4: S7 t37 follow_next dropped (the follow is in the movement layer); 5: both merged (formations + landing objects); 6: story t06 victory monitor (replaces the end-hold fields); 7: q6 attacks on TEAM containers / s78f t02 FighterFormationRecord::pushed dropped (the auto blocks are in the movement save) (two branches); 8: both merged; 9: ccpgt t02 domination timer; 10: cu8k t01 Saber_Throw thrower machines; 11: cu8l t03 start fleet arrivals; 12: s78n t20 land attack blocks (exact: older versions are refused)
 constexpr uint32_t kBattlePartVersion = 3;  // 3: mcx4 t05 cash points in the Garrison part; 2: s78n t06 running hero clashes in
                                             // the Combat part (1 and 2 still read: none of the later state)
 
@@ -29,6 +36,38 @@ bool get_system(ByteReader& r, T* s) {
     if (!r.ok() || has != (s != nullptr)) return false;
     return !s || get_section(r, [s](ByteReader& sub) { return read_system(*s, sub); });
 }
+
+// REF2 t01: an archive that moves no data and notes the bytes of each field state_io hands it (a record list: the
+// vector object itself), for TacticalBattle::check_save_ledger.
+class LedgerProbe {
+public:
+    static constexpr bool kReading = false;
+    struct Field {
+        uintptr_t at = 0;
+        size_t size = 0;
+    };
+    std::vector<Field> fields;
+
+    template <class... T>
+    LedgerProbe& operator()(const T&... x) {
+        (note(x), ...);
+        return *this;
+    }
+    template <class T, class F>
+    void seq(const std::vector<T>& s, F&&) {
+        note(s);
+    }
+    template <class K, class T, class F>
+    void map(const std::map<K, T>& s, F&&) {
+        note(s);
+    }
+
+private:
+    template <class T>
+    void note(const T& x) {
+        fields.push_back({reinterpret_cast<uintptr_t>(std::addressof(x)), sizeof(T)});
+    }
+};
 
 }  // namespace
 
@@ -156,6 +195,53 @@ void TacticalBattle::state_io(Ar& a, Self& b) {
     a.seq(b.sk_garrisons_, [](auto& x, auto& g) { x(g.player, g.types, g.ids, g.timer, g.pending); });
     // cmb1 t01: the land formation records (state version 18; `locked` is derived each tick)
     a.seq(b.lformations_, [](auto& x, auto& r) { x(r.mover, r.flags, r.goal, r.goal_object, r.pushed, r.next, r.seen); });
+    // ref2 t01 (state version 20): STY1 t06 BOMBARD_DELAY, a story reward on the running battle; the map load's lookups by
+    // object id - q6 t28 hints (Find_Hint), map1 t04 marker names, AI_GALACTIC_TOKENS 9.4 pad base levels - which a
+    // rebuilt battle did not have again (the save-and-continue test's land_records fixture)
+    a(b.bombard_delay_override_);
+    a(b.map_hints_, b.map_marker_names_, b.pad_levels_);
+}
+
+bool TacticalBattle::check_save_ledger(std::string* err) const {
+    struct Saved {
+        const char* name;
+        uintptr_t at;
+        size_t size;
+        bool walked;
+    };
+    std::vector<Saved> saved;
+    // Each ledger name must be a member (a stale entry does not compile); the SAVED(.., state) ones are the ranges
+    // state_io may write.
+    const auto note = [&saved](const char* name, std::string_view how, const void* at, size_t size) {
+        if (how == "state") saved.push_back({name, reinterpret_cast<uintptr_t>(at), size, false});
+    };
+#define ALAMO_LEDGER_SAVED(m, how) note(#m, #how, std::addressof(m), sizeof(m));
+#define ALAMO_LEDGER_OTHER(m, why) static_assert(sizeof(m) > 0, #m);
+    ALAMO_TACTICAL_BATTLE_LEDGER(ALAMO_LEDGER_SAVED, ALAMO_LEDGER_OTHER, ALAMO_LEDGER_OTHER)
+    ALAMO_TACTICAL_BATTLE_LEDGER_ANIM(ALAMO_LEDGER_SAVED, ALAMO_LEDGER_OTHER, ALAMO_LEDGER_OTHER)
+    ALAMO_TACTICAL_BATTLE_LEDGER_AI(ALAMO_LEDGER_SAVED, ALAMO_LEDGER_OTHER, ALAMO_LEDGER_OTHER)
+#undef ALAMO_LEDGER_SAVED
+#undef ALAMO_LEDGER_OTHER
+    LedgerProbe probe;
+    state_io(probe, *this);
+    const uintptr_t self = reinterpret_cast<uintptr_t>(this);
+    for (const LedgerProbe::Field& f : probe.fields) {
+        Saved* in = nullptr;
+        for (Saved& s : saved)
+            if (f.at >= s.at && f.at + f.size <= s.at + s.size) in = &s;
+        if (!in) {
+            if (err) *err = "state_io writes the field at byte " + std::to_string(f.at - self) + " (size " + std::to_string(f.size) +
+                            "), which no SAVED(.., state) member of the ledger holds";
+            return false;
+        }
+        in->walked = true;
+    }
+    for (const Saved& s : saved)
+        if (!s.walked) {
+            if (err) *err = std::string("SAVED(") + s.name + ", state) is not written by state_io";
+            return false;
+        }
+    return true;
 }
 
 void TacticalBattle::write_part(SavePart p, ByteWriter& w) const {
