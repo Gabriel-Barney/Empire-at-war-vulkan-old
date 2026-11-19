@@ -74,7 +74,7 @@ struct ModCheckOptions {
     bool fx_prebuild = true;     // with shaders and a mod mounted: prebuild_mod_effects first (modc t36)
     std::string fx_cache_dir;    // the FxCache the prebuild and the audit use; empty = the default (tests set their own)
     // Steam library folders searched for installed workshop items (submod parents), e.g.
-    // vfs::find_steam_libraries(game, vfs::default_steam_roots()). Empty: no workshop item is considered (tests).
+    // vfs::default_install_at(game).steam_libraries (install_locations.hpp). Empty: no workshop item is considered (tests).
     // <game>\Mods\* is always searched.
     std::vector<std::string> workshop_libraries;
 };

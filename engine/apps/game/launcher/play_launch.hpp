@@ -1,7 +1,8 @@
 // Play.exe (alamo_play): the test build's double-click launcher, the window-free twin of Play.cmd. This half is the
 // part the tests drive (alamo_play_tests); play_main.cpp adds the Windows side (folder dialog, process, message boxes).
 //   find_game      the Forces of Corruption "corruption" folder, in Play.cmd's order (launcher.ps1 Find-Game): the
-//                  saved game_path.txt, ALAMO_FOC_DATA, the Steam libraries, a few fixed install folders
+//                  saved game_path.txt, ALAMO_FOC_DATA, the Steam libraries, a few fixed install folders; the search
+//                  itself is vfs::find_install (ums1 t01, install_locations.hpp), shared with every launch surface
 //   game_args      alamo_game's arguments: --game, --cache-dir, then the user's own (a dropped mod folder becomes
 //                  MODPATH=<folder>, as Play_Mod.cmd does for a dragged folder)
 //   command_line   one CreateProcessW command line (CommandLineToArgvW quoting)
@@ -28,7 +29,8 @@ std::wstring first_line_utf8(std::string_view bytes);
 struct FindInputs {
     std::filesystem::path saved_file;            // game_path.txt next to the exe (may not exist)
     std::wstring env;                            // ALAMO_FOC_DATA (may be empty)
-    std::vector<std::filesystem::path> steam;    // Steam library folders, in search order
+    std::vector<std::filesystem::path> steam_roots;  // Steam client folders (vfs::default_steam_roots()); their libraries first
+    std::vector<std::filesystem::path> steam;    // further Steam library folders, in search order
     std::vector<std::filesystem::path> fixed;    // last resort install folders (GOG)
 };
 

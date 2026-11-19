@@ -6,6 +6,8 @@
 #include <exception>
 #include <system_error>
 
+#include "alamo/vfs/install_locations.hpp"
+
 namespace alamo::play {
 namespace fs = std::filesystem;
 
@@ -30,6 +32,18 @@ std::wstring trim(std::wstring s) {
     return s.substr(b, e - b);
 }
 
+std::string utf8(const fs::path& p) {
+    std::string out;
+    for (const char8_t c : p.u8string()) out.push_back(static_cast<char>(c));
+    return out;
+}
+
+fs::path from_utf8(const std::string& s) {
+    std::u8string u;
+    for (const char c : s) u.push_back(static_cast<char8_t>(c));
+    return fs::path(u);
+}
+
 bool iequals(const std::wstring& a, const wchar_t* b) {
     const std::wstring bb(b);
     if (a.size() != bb.size()) return false;
@@ -40,20 +54,9 @@ bool iequals(const std::wstring& a, const wchar_t* b) {
 
 }  // namespace
 
-bool is_game_dir(const fs::path& dir) {
-    if (dir.empty() || !dir_exists(dir / L"Data")) return false;
-    return path_exists(dir / L"Data" / L"MegaFiles.xml") || path_exists(dir / L"StarWarsG.exe");
-}
+bool is_game_dir(const fs::path& dir) { return vfs::is_foc_dir(utf8(dir)); }
 
-fs::path normalize_game_dir(std::wstring text) {
-    text = trim(std::move(text));
-    while (text.size() > 3 && (text.back() == L'\\' || text.back() == L'/')) text.pop_back();  // keep "C:\"
-    if (text.empty()) return {};
-    const fs::path dir(text);
-    if (is_game_dir(dir)) return dir;
-    if (is_game_dir(dir / L"corruption")) return dir / L"corruption";
-    return {};
-}
+fs::path normalize_game_dir(std::wstring text) { return from_utf8(vfs::normalize_foc_dir(utf8(fs::path(trim(std::move(text)))))); }
 
 std::wstring first_line_utf8(std::string_view bytes) {
     if (bytes.size() >= 3 && static_cast<unsigned char>(bytes[0]) == 0xEF && static_cast<unsigned char>(bytes[1]) == 0xBB &&
@@ -72,6 +75,8 @@ std::wstring first_line_utf8(std::string_view bytes) {
 }
 
 fs::path find_game(const FindInputs& in) {
+    // ums1 t01: one search (vfs::find_install) for every launch surface; this side only reads game_path.txt.
+    vfs::InstallInputs v;
     if (!in.saved_file.empty() && path_exists(in.saved_file)) {
         std::string bytes;
         if (FILE* f = nullptr; _wfopen_s(&f, in.saved_file.c_str(), L"rb") == 0 && f) {
@@ -80,14 +85,13 @@ fs::path find_game(const FindInputs& in) {
             while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) bytes.append(buf, n);
             std::fclose(f);
         }
-        if (fs::path g = normalize_game_dir(first_line_utf8(bytes)); !g.empty()) return g;
+        v.user_folders.push_back(utf8(fs::path(first_line_utf8(bytes))));
     }
-    if (fs::path g = normalize_game_dir(in.env); !g.empty()) return g;
-    for (const fs::path& lib : in.steam)
-        if (fs::path g = normalize_game_dir((lib / L"steamapps" / L"common" / L"Star Wars Empire at War").wstring()); !g.empty()) return g;
-    for (const fs::path& dir : in.fixed)
-        if (is_game_dir(dir)) return dir;
-    return {};
+    v.user_folders.push_back(utf8(fs::path(in.env)));
+    for (const fs::path& r : in.steam_roots) v.steam_roots.push_back(utf8(r));
+    for (const fs::path& lib : in.steam) v.steam_libraries.push_back(utf8(lib));
+    for (const fs::path& dir : in.fixed) v.fixed.push_back(utf8(dir));
+    return from_utf8(vfs::find_install(v).foc);
 }
 
 std::vector<std::wstring> game_args(const fs::path& game, const fs::path& cache, const std::vector<std::wstring>& user) {

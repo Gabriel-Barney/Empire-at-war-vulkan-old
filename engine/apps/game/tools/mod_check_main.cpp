@@ -27,6 +27,7 @@
 #include <vector>
 
 #include "alamo/game/mod_check.hpp"
+#include "alamo/vfs/install_locations.hpp"
 #include "alamo/vfs/steam_workshop.hpp"
 
 namespace {
@@ -87,13 +88,13 @@ int main(int argc, char** argv) {
         if (const char* env = std::getenv("ALAMO_FOC_DATA")) game = env;
     if (game.empty()) return usage();
     if (list_mods) {
-        const auto libraries = alamo::vfs::find_steam_libraries(game, alamo::vfs::default_steam_roots());
+        const auto libraries = alamo::vfs::default_install_at(game).steam_libraries;
         const std::string js = alamo::game::format_mod_list_json(alamo::vfs::scan_installed_mods(game, libraries, true));
         if (json.empty() || json == "-") std::fputs(js.c_str(), stdout);
         else if (!write_file(json, js)) return 1;
         return 0;
     }
-    if (opt.submod || resolve) opt.workshop_libraries = alamo::vfs::find_steam_libraries(game, alamo::vfs::default_steam_roots());
+    if (opt.submod || resolve) opt.workshop_libraries = alamo::vfs::default_install_at(game).steam_libraries;  // ums1 t01
 
     alamo::vfs::ResolvedStack stack;
     if (resolve) {

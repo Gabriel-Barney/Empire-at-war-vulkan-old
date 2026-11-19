@@ -894,7 +894,7 @@ public:
     void poll_mod_check();
     void launch_mod(const std::string& id);
     std::string game_root_;                          // the FoC folder the data was loaded from
-    std::vector<std::string> workshop_libraries_;    // Steam library folders (vfs::find_steam_libraries)
+    std::vector<std::string> workshop_libraries_;    // Steam library folders (vfs::InstallLocations)
     std::vector<game::InstalledMod> installed_mods_;
     std::future<game::ModCheckReport> mod_check_;    // the running check (valid() while one runs)
     std::string mod_check_id_, mod_check_next_;      // its row id; the row asked for while it ran

@@ -125,7 +125,7 @@ int run() {
     play::FindInputs in;
     in.saved_file = here / L"game_path.txt";
     in.env = env(L"ALAMO_FOC_DATA");
-    for (const std::string& lib : vfs::find_steam_libraries("", vfs::default_steam_roots())) in.steam.push_back(from_utf8(lib));
+    for (const std::string& root : vfs::default_steam_roots()) in.steam_roots.push_back(from_utf8(root));
     in.fixed = {L"F:\\SteamLibrary\\steamapps\\common\\Star Wars Empire at War\\corruption",
                 L"C:\\GOG Games\\Star Wars - Empire at War\\corruption",
                 L"C:\\Program Files (x86)\\GOG Galaxy\\Games\\Star Wars - Empire at War\\corruption"};

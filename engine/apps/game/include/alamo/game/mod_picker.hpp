@@ -1,7 +1,7 @@
 // modc t08: the mod picker's data side (alamo_game's IDD_PORT_MODS_DIALOG; docs/MODS.md §5.2). Render-free and
 // UI-free so the tests can drive it:
 //   list_installed_mods   the mods a player can pick: Steam workshop items of the FoC app id in the given Steam library
-//                         folders (vfs::find_steam_libraries order; the first library holding an id wins, as the STEAMMOD=
+//                         folders (vfs::InstallLocations::steam_libraries order; the first library holding an id wins, as the STEAMMOD=
 //                         resolver), then the folders of <game>\Mods. A candidate needs a Data folder (the same rule as
 //                         the load report's submod search). Display name: modinfo.json "name", else the folder name.
 //   mod_report_summary    a few lines of the load report (mod_check.hpp, the alamo.mod_report figures) to show before

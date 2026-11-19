@@ -7,7 +7,7 @@
 #include "game_app.hpp"
 #include "game_display.hpp"
 #include "alamo/core/hash.hpp"  // normalize_name
-#include "alamo/vfs/steam_workshop.hpp"
+#include "alamo/vfs/install_locations.hpp"
 
 namespace alamo_game_app {
 namespace {
@@ -22,7 +22,7 @@ std::vector<std::string> mod_args_of(const std::vector<std::string>& args) {
 }  // namespace
 
 void App::init_mod_picker(ui::MenuProviders& mp) {
-    workshop_libraries_ = vfs::find_steam_libraries(game_root_, vfs::default_steam_roots());
+    workshop_libraries_ = vfs::default_install_at(game_root_).steam_libraries;  // ums1 t01
     installed_mods_ = game::list_installed_mods(game_root_, workshop_libraries_);
     std::printf("mods: %zu installed (%zu Steam libraries)\n", installed_mods_.size(), workshop_libraries_.size());
     // The active row: the first mod argument of this run (a stacked submod comes first), else the base game.
