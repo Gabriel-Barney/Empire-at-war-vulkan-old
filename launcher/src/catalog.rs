@@ -57,6 +57,9 @@ pub struct CatalogMod {
     /// Every run of digits in the folder's main `modinfo.json` text, sorted, each once (variants share the folder's).
     /// Lists written before the field existed have none: empty.
     pub modinfo_numbers: Vec<String>,
+    /// The folder (`root`) of each installed mod one of `dependencies` names, as the port's `find_dependency` resolved
+    /// it, in declaration order; a dependency on a mod that isn't installed adds nothing. Older lists: empty.
+    pub dependency_roots: Vec<PathBuf>,
     pub warnings: Vec<String>,
 }
 
@@ -173,6 +176,7 @@ pub fn parse(json: &str) -> Result<Catalog, String> {
             game_tag: text(m, "game_tag"),
             dependencies,
             modinfo_numbers: strings(m, "modinfo_numbers"),
+            dependency_roots: paths(m, "dependency_roots"),
             warnings: strings(m, "warnings"),
         });
     }
@@ -316,8 +320,8 @@ pub(crate) mod tests {
         assert_eq!(eaw.game_tag, "EAW");
         let top = c.mods.iter().find(|m| m.key == "Mods\\StackTop").unwrap();
         assert!(!top.named && top.name == "StackTop" && top.workshop_id().is_none());
-        // Recorded before `modinfo_numbers` existed: every row parses with none.
-        assert!(c.mods.iter().all(|m| m.modinfo_numbers.is_empty()));
+        // Recorded before `modinfo_numbers` and `dependency_roots` existed: every row parses with none.
+        assert!(c.mods.iter().all(|m| m.modinfo_numbers.is_empty() && m.dependency_roots.is_empty()));
     }
 
     #[test]
@@ -329,6 +333,17 @@ pub(crate) mod tests {
         let m = one(r#"{"key":"Mods\\A","kind":"local","modinfo_numbers":["1125571106","2"]}"#);
         assert_eq!(m.modinfo_numbers, ["1125571106", "2"]);
         assert!(one(r#"{"key":"Mods\\B","kind":"local"}"#).modinfo_numbers.is_empty());
+    }
+
+    #[test]
+    fn dependency_roots_are_read_when_given() {
+        let one = |row: &str| {
+            let json = format!(r#"{{"schema":"alamo.mod_catalog","version":1,"install":{{}},"mods":[{row}]}}"#);
+            parse(&json).unwrap().mods.remove(0)
+        };
+        let m = one(r#"{"key":"Mods\\A","kind":"local","dependency_roots":["C:/Fixture/corruption/Mods/Base","D:\\Extra\\Lib"]}"#);
+        assert_eq!(m.dependency_roots, [PathBuf::from("C:\\Fixture\\corruption\\Mods\\Base"), PathBuf::from("D:\\Extra\\Lib")]);
+        assert!(one(r#"{"key":"Mods\\B","kind":"local"}"#).dependency_roots.is_empty());
     }
 
     #[test]

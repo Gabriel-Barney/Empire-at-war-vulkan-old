@@ -3,7 +3,6 @@
 
 use crate::app::{clock, open_in_explorer, reveal_in_explorer, App};
 use crate::bisect::{self, Bisect, Outcome, Test, TestKind, Verdict};
-use crate::mods::{self, ModSource};
 use crate::runner::{self, ConsoleLine, LineKind, Runner};
 use crate::steam::same_path;
 use crate::theme::{self, icon};
@@ -562,8 +561,7 @@ fn perform(app: &mut App, ctx: &egui::Context, act: Act) {
             });
         }
         Act::StartHunt => {
-            // Dependencies are the mods' declared dependencies (catalog `dependencies`), already in memory.
-            let foc = mods::foc_dir(&app.steam, &app.cfg.settings);
+            // Dependencies come from the catalog rows already in memory (`dependency_roots`, `modinfo_numbers`).
             let Some(hunt) = app.console_ui.hunt.as_ref() else { return };
             let meta: Vec<bisect::ModMeta> = hunt
                 .mods
@@ -573,13 +571,12 @@ fn perform(app: &mut App, ctx: &egui::Context, act: Act) {
                     bisect::ModMeta {
                         path: p.clone(),
                         workshop_id: info.and_then(|i| i.workshop_id.clone()),
-                        in_mods_folder: info.is_some_and(|i| i.source == ModSource::GameFolder),
-                        dependencies: info.map(|i| i.dependencies.clone()).unwrap_or_default(),
+                        dependency_roots: info.map(|i| i.dependency_roots.clone()).unwrap_or_default(),
                         modinfo_numbers: info.map(|i| i.modinfo_numbers.clone()).unwrap_or_default(),
                     }
                 })
                 .collect();
-            let parents = bisect::detect_parents(&meta, foc.as_deref());
+            let parents = bisect::detect_parents(&meta);
             if let Some(hunt) = app.console_ui.hunt.as_mut() {
                 hunt.machine = Some(Bisect::new(hunt.mods.clone(), parents));
             }

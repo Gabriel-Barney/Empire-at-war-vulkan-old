@@ -12,6 +12,7 @@
 
 #include "alamo/game/mod_check.hpp"
 #include "alamo/game/mod_picker.hpp"
+#include "alamo/game/mod_resolve.hpp"
 #include "alamo/test/support.hpp"
 #include "alamo/vfs/install_locations.hpp"
 #include "alamo/vfs/mod_registry.hpp"
@@ -33,10 +34,7 @@ bool has_line(const std::vector<std::string>& lines, const std::string& needle) 
 
 // The picker's rows (ums4 t01: the catalog's rows themselves): `foc` with these Steam libraries, no content hashes.
 std::vector<alamo::vfs::ModDescriptor> picker_rows(const std::string& foc, std::vector<std::string> libs) {
-    alamo::vfs::InstallLocations where;
-    where.foc = foc;
-    where.steam_libraries = std::move(libs);
-    return alamo::vfs::scan_mod_catalog(where, false).mods;
+    return game::stack_catalog(foc, libs).mods;
 }
 
 void test_list(const std::string& fixture, const std::string& foc) {
@@ -128,6 +126,53 @@ void test_installed_rows() {
     }
 }
 
+// ums4 t05: the resolver's hint (from the files alone) agrees with the load report's `submod` for a stack whose data
+// loads; and (t06) a candidate that a junction makes the same folder as a mounted mod is in the stack, not a parent.
+void test_hint_agrees(const std::string& fixture, const std::string& foc) {
+    game::ModCheckOptions opt;
+    opt.workshop_libraries = {fixture + "/steamlib"};
+    const alamo::vfs::ModCatalog catalog = game::stack_catalog(foc, opt.workshop_libraries);
+    const std::vector<std::string> args{"MODPATH=Mods\\FixtureSub"};
+    const game::ModCheckReport r = game::check_mod_data(foc, args, opt);
+    const game::SubmodHint h = game::submod_hint(foc, args, catalog);
+    CHECK(r.loaded && h.likely == r.submod.likely && h.missing == r.submod.missing && h.stacked_args == r.submod.stacked_args);
+    CHECK(h.parents.size() == r.submod.parents.size());
+    for (size_t i = 0; i < h.parents.size() && i < r.submod.parents.size(); ++i)
+        CHECK(h.parents[i].arg == r.submod.parents[i].arg && h.parents[i].provides == r.submod.parents[i].provides &&
+              h.parents[i].mentioned == r.submod.parents[i].mentioned && h.parents[i].path == r.submod.parents[i].path);
+    CHECK(h.likely && !h.parents.empty() && h.parents.front().arg == "MODPATH=Mods\\FixtureMod");
+
+    std::vector<std::string> missing;  // the report's own list: missing Data\XML files the mod's lists name
+    for (const game::MissingFile& f : r.missing_files)
+        if (f.in_mod && f.path.starts_with("DATA\\XML\\")) missing.push_back(f.path);
+    const alamo::vfs::ModDescriptor* sub = catalog.find_key("Mods\\FixtureSub");
+    CHECK(sub != nullptr);
+    if (!sub) return;
+    const fs::path tmp = fs::temp_directory_path() / "alamo_game_mod_picker_junction";
+    std::error_code ec;
+    fs::remove(tmp / "ParentLink", ec);  // a junction left by an aborted run: removed as a link
+    fs::create_directories(tmp, ec);
+    const fs::path link = tmp / "ParentLink";
+    const std::string cmd = "cmd /c mklink /J \"" + link.string() + "\" \"" + (fs::path(foc) / "Mods" / "FixtureMod").string() + "\" >nul";
+    if (std::system(cmd.c_str()) != 0 || !fs::is_directory(link)) {
+        std::printf("  SKIP: junction candidate (mklink /J failed)\n");
+        return;
+    }
+    alamo::vfs::ModDescriptor through = *sub;  // a mounted mod whose folder is FixtureMod, reached through the junction
+    through.root = link.string();
+    game::SubmodHint plain, joined;
+    game::find_submod_parents(missing, std::vector<alamo::vfs::ModDescriptor>{*sub}, args, catalog, plain);
+    game::find_submod_parents(missing, std::vector<alamo::vfs::ModDescriptor>{*sub, through}, args, catalog, joined);
+    const auto names_parent = [](const game::SubmodHint& x) {
+        for (const game::ModParentCandidate& c : x.parents)
+            if (c.arg == "MODPATH=Mods\\FixtureMod") return true;
+        return false;
+    };
+    CHECK(names_parent(plain) && !names_parent(joined));
+    fs::remove(link, ec);  // the junction itself, never what it points at
+    fs::remove(tmp, ec);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -140,6 +185,7 @@ int main(int argc, char** argv) {
     test_args();
     test_report(fixture, foc);
     test_installed_rows();
+    test_hint_agrees(fixture, foc);
     std::printf(g_fail ? "alamo_game_mod_picker_tests: %d FAILED\n" : "alamo_game_mod_picker_tests: OK\n", g_fail);
     return g_fail ? 1 : 0;
 }

@@ -28,12 +28,7 @@ namespace materials = alamo::materials;
 
 // The mod search list the pre-ums0 code read (Vfs::mod_dirs()): the host roots of the mod layers, which come first in
 // search order (ums4 t01: only engine/vfs calls mod_dirs()).
-std::vector<std::string> old_mod_dirs(const vfs::Vfs& v) {
-    std::vector<std::string> out;
-    for (const vfs::Layer& l : v.layers())
-        if (l.kind == vfs::Layer::Kind::Mod) out.push_back(l.host_root);
-    return out;
-}
+std::vector<std::string> old_mod_dirs(const vfs::Vfs& v) { return vfs::mod_layer_roots(v); }
 
 std::vector<materials::ShaderFileEntry> old_shader_files_from_vfs(const vfs::Vfs& v, bool include_engine) {
     std::vector<materials::ShaderFileEntry> out;

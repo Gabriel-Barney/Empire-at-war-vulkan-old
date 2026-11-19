@@ -2,8 +2,8 @@
 // only the VFS and the XML list reader, so alamo_play (Play.exe) links it without alamo_game_core):
 //   resolve_mod_stack    the picked mods' vfs::ModStack: declared dependencies (modinfo.json), then likely parents from the
 //                        files (the submod hint below); the in-game picker, alamo_play and alamo_mod_check --resolve
-//   launch_args_for      its launch list (vfs::ModStack::launch_args)
-//   play_launch_args     alamo_play's resolver (play::stack_mod_args gets it)
+//   play_launch_args     alamo_play's resolver (play::stack_mod_args gets it): the stack's launch list
+//                        (vfs::ModStack::launch_args)
 //   submod_hint          the likely parent of a stack from its files alone (modc t16): the Data\XML files the mods' own
 //                        list files name that no layer has, and the installed mods outside the stack that have them.
 //                        The load report (mod_check.hpp, `submod`) gives the same answer for a stack whose data loads:
@@ -64,13 +64,9 @@ vfs::ModStack resolve_mod_stack(const std::string& game, const std::vector<std::
 vfs::ModStack resolve_mod_stack(const vfs::ModCatalog& catalog, const std::vector<std::string>& picked);
 // The catalog resolve_mod_stack scans: `game` as given, these Steam libraries, no extra mod folders, no content hashes.
 vfs::ModCatalog stack_catalog(const std::string& game, std::span<const std::string> workshop_libraries);
-// resolve_mod_stack(...).launch_args(): the MODPATH= / STEAMMOD= list a launch starts. Empty for a refused base-EaW
-// stack; `stack` (if given) receives the stack.
-std::vector<std::string> launch_args_for(const std::string& game, const std::vector<std::string>& picked,
-                                         std::span<const std::string> workshop_libraries, vfs::ModStack* stack = nullptr);
-// alamo_play's resolver: launch_args_for with `steam_libraries` (when the caller already found them, as play::find_game
-// does; else vfs::default_install_at(game)'s); nullopt when the stack is refused (base-EaW, D1). `stack` receives the
-// stack, so the caller can show its errors.
+// alamo_play's resolver: resolve_mod_stack(...).launch_args() (the MODPATH= / STEAMMOD= list a launch starts) with
+// `steam_libraries` (when the caller already found them, as play::find_game does; else vfs::default_install_at(game)'s);
+// nullopt when the stack is refused (base-EaW, D1). `stack` receives the stack, so the caller can show its errors.
 std::optional<std::vector<std::string>> play_launch_args(const std::string& game, const std::vector<std::string>& picked,
                                                          vfs::ModStack* stack = nullptr,
                                                          const std::vector<std::string>* steam_libraries = nullptr);

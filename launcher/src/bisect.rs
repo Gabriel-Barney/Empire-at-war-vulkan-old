@@ -17,13 +17,13 @@
 //!
 //! Dependencies: a submod without its parent can crash for reasons of its own, so a mod is
 //! never switched on while a mod it depends on is off. They come from the mods' declared
-//! dependencies (catalog `dependencies`) first, else from the Workshop ids a mod's
-//! `modinfo.json` mentions (catalog `modinfo_numbers`); see [`detect_parents`]. The launcher
-//! reads no `modinfo.json` itself.
+//! dependencies as the port resolved them (catalog `dependency_roots`) first, else from the
+//! Workshop ids a mod's `modinfo.json` mentions (catalog `modinfo_numbers`); see
+//! [`detect_parents`]. The launcher reads no `modinfo.json` and resolves no dependency itself.
 
-use crate::catalog::Dependency;
+use crate::steam::same_path;
 use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Outcome {
@@ -420,84 +420,26 @@ pub struct ModMeta {
     /// The mod's folder.
     pub path: PathBuf,
     pub workshop_id: Option<String>,
-    /// The folder sits in the game's `Mods` folder (a local-path dependency may name it by folder name alone).
-    pub in_mods_folder: bool,
-    /// The mod's declared dependencies (catalog `dependencies`).
-    pub dependencies: Vec<Dependency>,
+    /// The folders of the installed mods its declared dependencies name, as the port resolved them (catalog
+    /// `dependency_roots`).
+    pub dependency_roots: Vec<PathBuf>,
     /// Every run of digits in the mod's `modinfo.json` (catalog `modinfo_numbers`).
     pub modinfo_numbers: Vec<String>,
 }
 
-/// Lower case, '\' as the separator, `.` and `..` worked out, no trailing separator.
-fn norm_path(p: &str) -> String {
-    let p = p.replace('/', "\\").to_ascii_lowercase();
-    let unc = p.starts_with("\\\\");
-    let mut parts: Vec<&str> = Vec::new();
-    for part in p.split('\\') {
-        match part {
-            "" | "." => {}
-            ".." => {
-                parts.pop();
-            }
-            _ => parts.push(part),
-        }
-    }
-    let joined = parts.join("\\");
-    if unc {
-        format!("\\\\{joined}")
-    } else {
-        joined
-    }
-}
-
-/// True when `identifier` is a path that doesn't need the game folder: `C:\...`, `\\server\...` or `\...`.
-fn is_absolute(identifier: &str) -> bool {
-    let b = identifier.as_bytes();
-    matches!(b.first(), Some(b'\\' | b'/')) || (b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':')
-}
-
-/// True when declared dependency `d` names mod `b`, the way the port's catalog finds a dependency
-/// (`ModCatalog::find_dependency`):
-/// * a Workshop id (modtype 1) names the mod with that Workshop id;
-/// * a local path (modtype 0) names the mod in that folder: an absolute path, or a path relative to the game folder
-///   (`Mods\X`). Paths compare without case, '/' and '\' alike, with no trailing separator. A mod in the game's
-///   `Mods` folder is also named by its folder name alone (the identifier's last part), which is also all that is
-///   left to compare when the game folder isn't known;
-/// * a virtual dependency (modtype 2) names no folder.
-fn names_mod(d: &Dependency, b: &ModMeta, b_id: Option<&str>, foc: Option<&Path>) -> bool {
-    let ident = d.identifier.trim();
-    if ident.is_empty() {
-        return false;
-    }
-    match d.modtype {
-        1 => b_id == Some(ident),
-        0 => {
-            let want = if is_absolute(ident) {
-                Some(norm_path(ident))
-            } else {
-                foc.map(|f| norm_path(&format!("{}\\{ident}", f.to_string_lossy())))
-            };
-            let folder = |p: &str| p.rsplit('\\').next().unwrap_or_default().to_owned();
-            want.is_some_and(|w| w == norm_path(&b.path.to_string_lossy()))
-                || (b.in_mods_folder && folder(&norm_path(ident)) == folder(&norm_path(&b.path.to_string_lossy())))
-        }
-        _ => false,
-    }
-}
-
 /// For each mod, the other mods in the list it depends on. Mod A depends on listed mod B:
-/// 1. first, when one of A's declared dependencies (catalog `dependencies`) names B (see [`names_mod`]);
-/// 2. else, when none of A's declared dependencies names a listed mod, when A's `modinfo.json` mentions B's Workshop
-///    id (the catalog's `modinfo_numbers`). This catches string-form dependencies such as `["*","1125571106"]`,
-///    which the catalog doesn't keep as declared dependencies. Only whole numbers count: a longer number that
-///    contains the id doesn't.
+/// 1. first, when B's folder is one of the folders A's declared dependencies name (catalog `dependency_roots`; the
+///    port resolves the dependencies, the launcher only compares folders with [`same_path`]);
+/// 2. else, when none of those folders is a listed mod, when A's `modinfo.json` mentions B's Workshop id (the
+///    catalog's `modinfo_numbers`). This catches string-form dependencies such as `["*","1125571106"]`, which the
+///    catalog doesn't keep as declared dependencies. Only whole numbers count: a longer number that contains the id
+///    doesn't.
 ///
-/// `foc` is the game folder, for local paths relative to it. A mod is never its own parent. Two mods that name each
-/// other (by either rule) tell nothing about which one is the parent, so neither is treated as one. A mod's Workshop
-/// id is its own, else the name of a folder named with digits only (a Workshop download); the second rule needs at
-/// least 6 digits.
-pub fn detect_parents(mods: &[ModMeta], foc: Option<&Path>) -> Vec<Vec<usize>> {
-    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+/// A mod is never its own parent. Two mods that name each other (by either rule) tell nothing about which one is the
+/// parent, so neither is treated as one. A mod's Workshop id is its own, else the name of a folder named with digits
+/// only (a Workshop download); it needs at least 6 digits.
+pub fn detect_parents(mods: &[ModMeta]) -> Vec<Vec<usize>> {
+    let digits = |s: &str| s.len() >= 6 && s.bytes().all(|b| b.is_ascii_digit());
     let id = |m: &ModMeta| {
         m.workshop_id
             .as_deref()
@@ -508,11 +450,9 @@ pub fn detect_parents(mods: &[ModMeta], foc: Option<&Path>) -> Vec<Vec<usize>> {
     };
     let ids: Vec<Option<String>> = mods.iter().map(id).collect();
     let n = mods.len();
-    let declares = |i: usize, j: usize| {
-        i != j && mods[i].dependencies.iter().any(|d| names_mod(d, &mods[j], ids[j].as_deref(), foc))
-    };
+    let declares = |i: usize, j: usize| i != j && mods[i].dependency_roots.iter().any(|r| same_path(r, &mods[j].path));
     let mentions = |i: usize, j: usize| match &ids[j] {
-        Some(id) => i != j && id.len() >= 6 && ids[i].as_ref() != Some(id) && mods[i].modinfo_numbers.contains(id),
+        Some(id) => i != j && ids[i].as_ref() != Some(id) && mods[i].modinfo_numbers.contains(id),
         None => false,
     };
     let declared_any: Vec<bool> = (0..n).map(|i| (0..n).any(|j| declares(i, j))).collect();
@@ -736,135 +676,97 @@ mod tests {
         assert!(text.contains("The crash comes from \"Charlie\""), "{text}");
     }
 
-    fn dep(modtype: u64, identifier: &str) -> Dependency {
-        Dependency { modtype, identifier: identifier.to_owned(), name: String::new() }
-    }
-
-    fn meta(path: &str, id: Option<&str>, in_mods_folder: bool, dependencies: Vec<Dependency>) -> ModMeta {
-        ModMeta { path: PathBuf::from(path), workshop_id: id.map(str::to_owned), in_mods_folder, dependencies, modinfo_numbers: vec![] }
-    }
-
-    /// A Workshop mod with declared dependencies and the numbers its `modinfo.json` mentions.
-    fn ws(id: &str, dependencies: Vec<Dependency>, numbers: &[&str]) -> ModMeta {
+    /// A mod in `path` with the folders its declared dependencies resolved to and the numbers its `modinfo.json`
+    /// mentions.
+    fn meta(path: &str, id: Option<&str>, roots: &[&str], numbers: &[&str]) -> ModMeta {
         ModMeta {
-            path: PathBuf::from(format!("C:\\W\\{id}")),
-            workshop_id: Some(id.to_owned()),
-            in_mods_folder: false,
-            dependencies,
+            path: PathBuf::from(path),
+            workshop_id: id.map(str::to_owned),
+            dependency_roots: roots.iter().map(PathBuf::from).collect(),
             modinfo_numbers: numbers.iter().map(|s| s.to_string()).collect(),
         }
+    }
+
+    /// A Workshop mod in `C:\W\<id>`.
+    fn ws(id: &str, roots: &[&str], numbers: &[&str]) -> ModMeta {
+        meta(&format!("C:\\W\\{id}"), Some(id), roots, numbers)
+    }
+
+    #[test]
+    fn dependencies_come_from_the_resolved_dependency_folders() {
+        let mods = vec![
+            // 0: the parent in the game's Mods folder; names only itself.
+            meta("C:\\Games\\FoC\\Mods\\Base", None, &["C:\\Games\\FoC\\Mods\\Base"], &[]),
+            // 1: a submod; the port spelled the folder with '/', other case and a trailing separator.
+            meta("C:\\Games\\FoC\\Mods\\Sub", None, &["c:/games/foc/MODS/base/"], &[]),
+            // 2: an extra folder, and a Workshop mod that depends on it and on the submod.
+            meta("D:\\Extra\\Lib", None, &[], &[]),
+            ws("2222222222", &["D:\\Extra\\Lib", "C:\\Games\\FoC\\Mods\\Sub"], &[]),
+            // 4: a folder that only shares a name with a listed mod is not that mod.
+            meta("C:\\Games\\FoC\\Mods\\Other", None, &["E:\\Elsewhere\\Base", "C:\\Games\\FoC\\Mods"], &[]),
+        ];
+        assert_eq!(detect_parents(&mods), vec![vec![], vec![0], vec![], vec![1, 2], vec![]]);
+
+        // Two mods whose dependencies name each other: no telling which is the parent.
+        let mutual = vec![
+            ws("1000001", &["C:\\W\\1000002"], &[]),
+            ws("1000002", &["C:\\W\\1000001"], &[]),
+            ws("1000003", &["C:\\W\\1000001", "C:\\W\\1000002"], &[]),
+        ];
+        assert_eq!(detect_parents(&mutual), vec![vec![], vec![], vec![0, 1]]);
     }
 
     #[test]
     fn without_a_declared_parent_mentioned_workshop_ids_count() {
         let mods = vec![
             // 0: the parent; its modinfo.json mentions only its own id.
-            ws("1125571106", vec![], &["1125571106"]),
+            ws("1125571106", &[], &["1125571106"]),
             // 1: `"dependencies":["*","1125571106"]`: the catalog keeps no declared dependency, the mention counts.
-            ws("2222222222", vec![], &["1125571106", "2222222222"]),
+            ws("2222222222", &[], &["1125571106", "2222222222"]),
             // 2: a longer number that only contains the parent's id.
-            ws("3333333333", vec![], &["911255711060"]),
+            ws("3333333333", &[], &["911255711060"]),
             // 3: a short number equal to a short folder id doesn't count either.
-            meta("C:\\W\\12345", None, false, vec![]),
-            ws("4444444444", vec![], &["12345"]),
+            meta("C:\\W\\12345", None, &[], &[]),
+            ws("4444444444", &[], &["12345"]),
+            // 5: no id given, but the folder is a Workshop download: its name stands in for the id.
+            meta("C:\\W\\5555555555", None, &[], &[]),
+            meta("D:\\Extra\\Uses5", None, &[], &["5555555555"]),
         ];
-        assert_eq!(detect_parents(&mods, None), vec![vec![], vec![0], vec![], vec![], vec![]]);
+        assert_eq!(detect_parents(&mods), vec![vec![], vec![0], vec![], vec![], vec![], vec![], vec![5]]);
 
         // Two mods mentioning each other: no telling which is the parent; a third mentioning both has two.
-        let mutual = vec![
-            ws("1000001", vec![], &["1000002"]),
-            ws("1000002", vec![], &["1000001"]),
-            ws("1000003", vec![], &["1000001", "1000002"]),
-        ];
-        assert_eq!(detect_parents(&mutual, None), vec![vec![], vec![], vec![0, 1]]);
+        let mutual = vec![ws("1000001", &[], &["1000002"]), ws("1000002", &[], &["1000001"]), ws("1000003", &[], &["1000001", "1000002"])];
+        assert_eq!(detect_parents(&mutual), vec![vec![], vec![], vec![0, 1]]);
         // A declaration one way and a mention the other way is mutual too.
-        let crossed = vec![ws("1000001", vec![dep(1, "1000002")], &[]), ws("1000002", vec![], &["1000001"])];
-        assert_eq!(detect_parents(&crossed, None), vec![Vec::<usize>::new(), vec![]]);
+        let crossed = vec![ws("1000001", &["C:\\W\\1000002"], &[]), ws("1000002", &[], &["1000001"])];
+        assert_eq!(detect_parents(&crossed), vec![Vec::<usize>::new(), vec![]]);
+        // Ids that aren't numbers name nothing.
+        let junk = vec![ws("abc123456", &[], &[]), meta("C:\\W\\b", Some(""), &[], &[]), ws("9999999", &[], &["123456", "abc123456"])];
+        assert_eq!(detect_parents(&junk), vec![Vec::<usize>::new(), vec![], vec![]]);
     }
 
     #[test]
     fn a_declared_parent_wins_over_mentions() {
         let mods = vec![
-            ws("1000001", vec![], &[]),
-            ws("1000002", vec![], &[]),
+            ws("1000001", &[], &[]),
+            ws("1000002", &[], &[]),
             // Declares 0 and mentions 1 (say, in its description): only 0 is its parent.
-            ws("1000003", vec![dep(1, "1000001")], &["1000001", "1000002"]),
-            // Declares a mod that isn't listed: its mentions count.
-            ws("1000004", vec![dep(1, "1999999")], &["1000002", "1999999"]),
+            ws("1000003", &["C:\\W\\1000001"], &["1000001", "1000002"]),
+            // Declares a mod that isn't in the list: its mentions count.
+            ws("1000004", &["C:\\W\\1999999"], &["1000002", "1999999"]),
         ];
-        assert_eq!(detect_parents(&mods, None), vec![vec![], vec![], vec![0], vec![1]]);
-    }
-
-    #[test]
-    fn dependencies_come_from_declared_workshop_ids() {
-        let ws = "C:\\Steam\\steamapps\\workshop\\content\\32470\\";
-        let mods = vec![
-            // 0: the parent. Names only itself.
-            meta(&format!("{ws}1125571106"), Some("1125571106"), false, vec![dep(1, "1125571106")]),
-            // 1: a submod declaring the parent.
-            meta(&format!("{ws}2222222222"), Some("2222222222"), false, vec![dep(2, "*"), dep(1, " 1125571106 ")]),
-            // 2: a longer number that merely contains the parent's id, and a virtual dependency.
-            meta(&format!("{ws}3333333333"), Some("3333333333"), false, vec![dep(1, "911255711060"), dep(2, "1125571106")]),
-            // 3: nothing declared; 4: a local mod without an id that declares the submod.
-            meta("C:\\Games\\FoC\\Mods\\Plain", None, true, vec![]),
-            meta("C:\\Games\\FoC\\Mods\\Patch", None, true, vec![dep(1, "2222222222")]),
-            // 5: no id given, but the folder is a Workshop download: its name stands in for the id.
-            meta(&format!("{ws}4444444444"), None, false, vec![]),
-            meta("D:\\Extra\\Uses4", None, false, vec![dep(1, "4444444444")]),
-        ];
-        assert_eq!(detect_parents(&mods, None), vec![vec![], vec![0], vec![], vec![], vec![1], vec![], vec![5]]);
-
-        // Two mods naming each other: no telling which is the parent.
-        let mutual = vec![
-            meta("C:\\W\\1000001", Some("1000001"), false, vec![dep(1, "1000002")]),
-            meta("C:\\W\\1000002", Some("1000002"), false, vec![dep(1, "1000001")]),
-            meta("C:\\W\\1000003", Some("1000003"), false, vec![dep(1, "1000001"), dep(1, "1000002")]),
-        ];
-        assert_eq!(detect_parents(&mutual, None), vec![vec![], vec![], vec![0, 1]]);
-
-        // Ids that aren't numbers name nothing, and empty identifiers name nothing.
-        let junk = vec![
-            meta("C:\\W\\a", Some("abc123456"), false, vec![]),
-            meta("C:\\W\\b", Some(""), false, vec![]),
-            meta("C:\\W\\c", Some("9999999"), false, vec![dep(1, "abc123456"), dep(1, ""), dep(0, ""), dep(7, "C:\\W\\a")]),
-        ];
-        assert_eq!(detect_parents(&junk, None), vec![Vec::<usize>::new(), vec![], vec![]]);
-    }
-
-    #[test]
-    fn dependencies_come_from_declared_local_paths() {
-        let foc = Path::new("C:\\Games\\FoC");
-        let mods = vec![
-            // 0: the parent in the game's Mods folder.
-            meta("C:\\Games\\FoC\\Mods\\Base", None, true, vec![]),
-            // 1: names it relative to the game folder, with '/' and other case.
-            meta("C:\\Games\\FoC\\Mods\\Sub", None, true, vec![dep(0, "mods/BASE/")]),
-            // 2: an extra folder named by its absolute path, written oddly.
-            meta("D:\\Extra\\Lib", None, false, vec![]),
-            meta("D:\\Extra\\UsesLib", None, false, vec![dep(0, "d:/extra/tools/../LIB\\")]),
-            // 4: a Mods folder named by a path elsewhere: only its folder name matches, as in the port.
-            meta("C:\\Games\\FoC\\Mods\\Other", None, true, vec![dep(0, "E:\\Elsewhere\\Base")]),
-            // 5: a path that names no listed mod.
-            meta("C:\\Games\\FoC\\Mods\\Lost", None, true, vec![dep(0, "Mods\\Missing"), dep(0, "D:\\Extra")]),
-        ];
-        assert_eq!(detect_parents(&mods, Some(foc)), vec![vec![], vec![0], vec![], vec![2], vec![0], vec![]]);
-        // Without the game folder a relative path still finds a Mods folder by its name.
-        assert_eq!(detect_parents(&mods, None), vec![vec![], vec![0], vec![], vec![2], vec![0], vec![]]);
-        // An extra folder is not named by its folder name alone.
-        let extra = vec![meta("D:\\Extra\\Lib", None, false, vec![]), meta("D:\\Extra\\X", None, false, vec![dep(0, "Mods\\Lib")])];
-        assert_eq!(detect_parents(&extra, Some(foc)), vec![Vec::<usize>::new(), vec![]]);
+        assert_eq!(detect_parents(&mods), vec![vec![], vec![], vec![0], vec![1]]);
     }
 
     #[test]
     fn detected_parents_drive_the_hunt() {
         // The submod (1) declares the parent (0): the hunt never runs it without the parent.
         let mods = vec![
-            meta("C:\\W\\1125571106", Some("1125571106"), false, vec![]),
-            meta("C:\\W\\2222222222", Some("2222222222"), false, vec![dep(1, "1125571106")]),
-            meta("C:\\Games\\FoC\\Mods\\Plain", None, true, vec![]),
+            ws("1125571106", &[], &[]),
+            ws("2222222222", &["C:\\W\\1125571106"], &[]),
+            meta("C:\\Games\\FoC\\Mods\\Plain", None, &[], &[]),
         ];
-        let parents = detect_parents(&mods, None);
-        let (b, _) = hunt(3, parents, |on| on.contains(&1));
+        let (b, _) = hunt(3, detect_parents(&mods), |on| on.contains(&1));
         assert_eq!(b.verdict(), Some(&Verdict::Culprit { culprit: 1, with_parents: vec![0] }));
     }
 }

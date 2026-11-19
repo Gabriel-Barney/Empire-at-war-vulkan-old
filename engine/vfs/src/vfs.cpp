@@ -248,6 +248,8 @@ bool path_glob_match(std::string_view pattern, std::string_view path) {
 
 bool has_mod_layer(const Vfs& v) { return !v.layers().empty() && v.layers().front().kind == Layer::Kind::Mod; }
 
+std::vector<std::string> mod_layer_roots(const Vfs& v) { return v.mod_dirs(); }  // the search list as resolved
+
 bool is_mod_arg(std::string_view arg) { return ascii_istarts_with(arg, "MODPATH=") || ascii_istarts_with(arg, "STEAMMOD="); }
 
 bool parse_command_line(std::span<const std::string> args, VfsConfig& cfg) {

@@ -378,7 +378,8 @@ their own copies; mods and the retail load order do not change.
   comes from the files alone (`game::submod_hint`, `alamo_mod_resolve`), so Play.exe no longer links the data loaders;
   it also hints for a stack whose data does not load (a refused base-EaW stack still gets none). The Command Center's
   mod hunt reads no `modinfo.json` itself: parents come from declared dependencies, else from the Workshop ids the
-  file's text mentions, both from the catalog JSON (`--list` rows gained `modinfo_numbers`, an additive field). A
+  file's text mentions, both from the catalog JSON (`--list` rows gained `dependency_roots` and `modinfo_numbers`,
+  additive fields; before ums4 the hunt used only the mentions). A
   loader diagnostic's issue layer is the layer of the first game file its text names (`docs/MODS.md` §5.1, version 5).
   Folder lookups follow junctions, symbolic links and `subst` drives (`vfs::folder_key`) after the spelling; a workshop
   item and a `Mods\` folder that a junction makes one folder keep their own rows, so saved arguments keep their meaning. `tools/lint/check_mod_system.py` keeps `Vfs::mod_dirs()` inside

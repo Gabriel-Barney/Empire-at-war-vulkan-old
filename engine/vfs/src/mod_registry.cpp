@@ -347,8 +347,8 @@ const char* game_tag_name(GameTag tag) {
 std::string StackMod::reason_text() const {
     switch (reason) {
         case StackReason::Picked: break;
-        case StackReason::Dependency: return "dependency of " + of;
-        case StackReason::LikelyParent: return "likely parent of " + of;
+        case StackReason::Dependency: return "dependency of " + needed_by;
+        case StackReason::LikelyParent: return "likely parent of " + needed_by;
     }
     return "picked";
 }
@@ -680,10 +680,10 @@ ModStack resolve(const ModCatalog& registry, std::span<const std::string> picked
     std::vector<std::vector<size_t>> deps;          // found index -> found indices it depends on
     std::map<std::string, size_t> index_of;         // lower-case key -> found index
     const auto key_of = [](const ModDescriptor& m) { return path_key(m.catalog_key()); };  // unique across kinds
-    const auto add = [&](const ModDescriptor& m, StackReason reason, std::string of) -> size_t {
+    const auto add = [&](const ModDescriptor& m, StackReason reason, std::string needed_by) -> size_t {
         const auto it = index_of.find(key_of(m));
         if (it != index_of.end()) return it->second;
-        found.push_back({m, reason, std::move(of)});
+        found.push_back({m, reason, std::move(needed_by)});
         deps.emplace_back();
         index_of[key_of(m)] = found.size() - 1;
         return found.size() - 1;
@@ -786,20 +786,18 @@ ModStack resolve(const ModCatalog& registry, std::span<const std::string> picked
     for (size_t v = 0; v < picked_args.size(); ++v)
         for (size_t w = v + 1; w < picked_args.size(); ++w) {
             // Copies: find_arg may describe a folder into `scratch`, which can move what an earlier call returned.
-            const ModDescriptor* fv = registry.find_arg(picked_args[v], scratch);
-            if (!fv) continue;
-            const ModDescriptor dv = *fv;
-            const ModDescriptor* fw = registry.find_arg(picked_args[w], scratch);
-            if (!fw) continue;
-            const ModDescriptor dw_mod = *fw;
-            const ModDescriptor* pv = &dv;
-            const ModDescriptor* pw = &dw_mod;
-            const auto iv = index_of.find(key_of(*pv)), iw = index_of.find(key_of(*pw));
+            const ModDescriptor* found_upper = registry.find_arg(picked_args[v], scratch);
+            if (!found_upper) continue;
+            const ModDescriptor upper_mod = *found_upper;
+            const ModDescriptor* found_lower = registry.find_arg(picked_args[w], scratch);
+            if (!found_lower) continue;
+            const ModDescriptor lower_mod = *found_lower;
+            const auto iv = index_of.find(key_of(upper_mod)), iw = index_of.find(key_of(lower_mod));
             if (iv == index_of.end() || iw == index_of.end()) continue;
-            const std::vector<size_t>& dw = deps[iw->second];
-            if (std::find(dw.begin(), dw.end(), iv->second) != dw.end())
-                r.warnings.push_back(pv->catalog_key() + " is picked above its submod " + pw->catalog_key() +
-                                     "; the earlier mod wins, so the stack puts " + pw->catalog_key() + " first");
+            const std::vector<size_t>& lower_deps = deps[iw->second];
+            if (std::find(lower_deps.begin(), lower_deps.end(), iv->second) != lower_deps.end())
+                r.warnings.push_back(upper_mod.catalog_key() + " is picked above its submod " + lower_mod.catalog_key() +
+                                     "; the earlier mod wins, so the stack puts " + lower_mod.catalog_key() + " first");
         }
     for (StackMod& s : r.mods)
         if (s.mod.content_hash == 0 && s.mod.has_data) s.mod.content_hash = mod_content_hash(s.mod.root);

@@ -85,7 +85,7 @@ void find_submod_parents(const std::vector<std::string>& missing, std::span<cons
         c.id = d.id;
         c.workshop = d.kind == vfs::ModKind::Workshop;
         c.path = vfs::native_utf8(path_from_utf8(d.root).make_preferred());
-        c.arg = c.workshop ? "STEAMMOD=" + c.id : "MODPATH=Mods\\" + c.id;
+        c.arg = d.arg();  // STEAMMOD=<id> / MODPATH=Mods\<folder>
         c.mentioned = c.workshop && mentioned.count(c.id) != 0;
         c.provides = provides;
         cands.push_back(std::move(c));
@@ -142,19 +142,11 @@ vfs::ModStack resolve_mod_stack(const vfs::ModCatalog& catalog, const std::vecto
     return vfs::resolve(catalog, picked, hint);
 }
 
-std::vector<std::string> launch_args_for(const std::string& game, const std::vector<std::string>& picked,
-                                         std::span<const std::string> workshop_libraries, vfs::ModStack* stack) {
-    vfs::ModStack s = resolve_mod_stack(game, picked, workshop_libraries);
-    std::vector<std::string> out = s.launch_args();
-    if (stack) *stack = std::move(s);
-    return out;
-}
-
 std::optional<std::vector<std::string>> play_launch_args(const std::string& game, const std::vector<std::string>& picked,
                                                          vfs::ModStack* stack, const std::vector<std::string>* steam_libraries) {
     const std::vector<std::string> libraries = steam_libraries ? *steam_libraries : vfs::default_install_at(game).steam_libraries;
-    vfs::ModStack s;
-    std::vector<std::string> launch = launch_args_for(game, picked, libraries, &s);
+    vfs::ModStack s = resolve_mod_stack(game, picked, libraries);
+    std::vector<std::string> launch = s.launch_args();
     const bool refused = s.base_eaw;
     if (stack) *stack = std::move(s);
     if (refused) return std::nullopt;

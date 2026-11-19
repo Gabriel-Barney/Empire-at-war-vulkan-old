@@ -110,6 +110,10 @@ struct Layer {
 class Vfs;
 // True when `v` mounts at least one mod layer (the mod layers come first in Vfs::layers()).
 bool has_mod_layer(const Vfs& v);
+// The host folders of `v`'s mod layers, in search order (earliest wins), spelled as the search list resolved them
+// (Vfs::mod_dirs()): the folder list a report or a font search shows. Which mod serves a file is Vfs::layer_of's
+// answer, not a comparison with these (ums4: code outside engine/vfs calls this, not mod_dirs()).
+std::vector<std::string> mod_layer_roots(const Vfs& v);
 
 class Vfs final : public alamo::FileProvider {
 public:

@@ -48,7 +48,7 @@ std::vector<std::wstring> game_args(const std::filesystem::path& game, const std
                                     const std::vector<std::wstring>& user);
 
 // ums1 t04: resolves the picked mods to the stack every launch surface starts (play_main passes
-// game::launch_args_for, the resolver the in-game picker and alamo_mod_check --resolve use). Gets the mod arguments in
+// game::play_launch_args, the resolver the in-game picker and alamo_mod_check --resolve use). Gets the mod arguments in
 // command-line order (UTF-8); returns the launch list, or nullopt when the stack is refused (a base-EaW mod, D1).
 using ModStackResolver = std::function<std::optional<std::vector<std::string>>(const std::vector<std::string>& picked)>;
 // `args` (game_args' output) with its MODPATH= / STEAMMOD= arguments (any case) replaced by resolve(them), placed

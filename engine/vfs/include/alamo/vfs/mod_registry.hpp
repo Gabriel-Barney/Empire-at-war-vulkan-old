@@ -2,7 +2,7 @@
 // from its folder before anything is mounted, and the stack resolution the launcher, the mod picker and
 // `alamo_mod_check --resolve` use. Every launch surface lists the catalog's rows (ums1, Stage 10): the in-game picker,
 // alamo_mod_check --list --json and through it the Command Center. This is the only modinfo.json reader (ums4: the
-// `mod_system_shims` lint in tools/lint keeps it so).
+// lint tools/lint/check_mod_system.py, ctest alamo_core_mod_system_lint, keeps it so).
 //
 // Retail stays the authority on what a command line means: MODPATH= / STEAMMOD= entries form one list in command-line
 // order and the earliest wins (docs/MODS.md 3.1). The registry only *builds* such a list before launch (submod first,
@@ -146,8 +146,8 @@ enum class StackReason : uint8_t { Picked, Dependency, LikelyParent };
 struct StackMod {
     ModDescriptor mod;
     StackReason reason = StackReason::Picked;
-    std::string of;  // Dependency / LikelyParent: the catalog key of the mod that needs it (ums2 t09: messages name mods by catalog_key())
-    // "picked", "dependency of <of>", "likely parent of <of>": the report's and the launcher's `reason`.
+    std::string needed_by;  // Dependency / LikelyParent: the catalog key of the mod that needs it (ums2 t09: messages name mods by catalog_key())
+    // "picked", "dependency of <needed_by>", "likely parent of <needed_by>": the report's and the launcher's `reason`.
     std::string reason_text() const;
 };
 // The resolved stack of the picked mods (ums1 t04: one resolver for every launch surface: the in-game picker's Launch,

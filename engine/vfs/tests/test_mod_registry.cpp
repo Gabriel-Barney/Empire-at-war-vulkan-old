@@ -518,8 +518,6 @@ void test_meg() {
     fs::remove_all(T, ec);
 }
 
-}  // namespace
-
 // ums4 t06: a mod folder reached through a junction is one folder (vfs::folder_key follows it): one catalog row, and
 // find_root finds the row by either spelling. Skipped when mklink /J cannot make the junction.
 void test_junction(const Fixture& f) {
@@ -553,7 +551,32 @@ void test_junction(const Fixture& f) {
     CHECK(by_link && by_link->catalog_key() == "Mods\\AOW");
     std::error_code ec;
     fs::remove(link, ec);  // removes the junction itself, never what it points at
+
+    // A Mods folder that is a junction to a workshop item keeps its own row (both are retail argument forms, so a saved
+    // MODPATH=Mods\TcLink keeps naming it), and a stack that names both mounts both.
+    const fs::path mods_link = f.game / "Mods" / "TcLink";
+    const std::string cmd2 = "cmd /c mklink /J \"" + mods_link.string() + "\" \"" + f.item("100").string() + "\" >nul";
+    if (std::system(cmd2.c_str()) != 0 || !fs::is_directory(mods_link)) {
+        std::printf("  SKIP: Mods junction (mklink /J failed)\n");
+        return;
+    }
+    av::InstallLocations plain;
+    plain.foc = u8(f.game);
+    plain.steam_libraries = {u8(f.lib)};
+    const av::ModCatalog c2 = av::scan_mod_catalog(plain, false);
+    const av::ModDescriptor* tc = c2.find_key("100");
+    const av::ModDescriptor* tc_link = c2.find_key("Mods\\TcLink");
+    CHECK(tc && tc_link && tc != tc_link && tc_link->kind == av::ModKind::LocalMods);
+    CHECK(av::same_folder(u8(mods_link), u8(f.item("100"))));
+    std::vector<av::ModDescriptor> scratch;
+    const av::ModDescriptor* by_arg = c2.find_arg("MODPATH=Mods\\TcLink", scratch);
+    CHECK(by_arg && by_arg->catalog_key() == "Mods\\TcLink");  // the spelling's row, not the workshop row
+    const std::vector<std::string> both{"STEAMMOD=100", "MODPATH=Mods\\TcLink"};
+    CHECK(joined(av::resolve(c2, both).launch_args()) == "STEAMMOD=100 | MODPATH=Mods\\TcLink");
+    fs::remove(mods_link, ec);
 }
+
+}  // namespace
 
 int main() {
     test_parse();

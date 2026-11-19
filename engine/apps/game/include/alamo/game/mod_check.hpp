@@ -361,8 +361,10 @@ std::string format_mod_list_json(const vfs::ModCatalog& catalog);
 // libraries' FoC workshop content folders that exist), mod_folders []}, mods [{key (catalog key), save_key
 // (ModDescriptor::key), arg, kind "workshop" | "local" | "path", id, variant, root, name, named, summary, version, icon,
 // published_id, has_modinfo, has_data, game_tag, content_hash (16 hex digits, "0000000000000000" when not hashed),
-// languages [{code, support}], layout, dependencies [{modtype, identifier, name}], modinfo_numbers [] (ums4: every digit
-// run of the folder's modinfo.json, ModDescriptor::modinfo_numbers), warnings []}] in catalog order.
+// languages [{code, support}], layout, dependencies [{modtype, identifier, name}], dependency_roots [] (ums4: the root of
+// each installed mod a declared dependency names, ModCatalog::find_dependency, in declaration order; none for a missing
+// one), modinfo_numbers [] (ums4: every digit run of the folder's modinfo.json, ModDescriptor::modinfo_numbers),
+// warnings []}] in catalog order.
 std::string format_mod_catalog_json(const vfs::ModCatalog& catalog, const vfs::InstallLocations& where);
 // Human-readable report (sections in the order of the file comment). verbose: every diagnostic, else the first 20 of each
 // step and campaign / Lua list.

@@ -529,10 +529,7 @@ void check_submod(const GameData& d, ModCheckReport& r, const ModCheckOptions& o
         find_submod_parents(missing_list_entries(r), d.mods, r.args, *o.catalog, r.submod);
         return;
     }
-    vfs::InstallLocations where;
-    where.foc = r.game;
-    where.steam_libraries = o.workshop_libraries;
-    find_submod_parents(missing_list_entries(r), d.mods, r.args, vfs::scan_mod_catalog(where, false), r.submod);
+    find_submod_parents(missing_list_entries(r), d.mods, r.args, stack_catalog(r.game, o.workshop_libraries), r.submod);
 }
 
 // ---- mcx3 t03: base-EaW heuristic (design 5.4) ----
@@ -1361,8 +1358,8 @@ std::string loader_diagnostic_file(std::string_view text, const vfs::Vfs* v) {
 namespace {
 
 // ums4 t07: GameData::diagnostics as CompatIssues, one record per distinct line (subject = the line, detail = its
-// loader step), with the layer of the file the line names (diagnostic_file), else kNoLayer. Warnings, as the text
-// report counts them; added after the grade is set, so they change no grade (as the VFS's findings, ums2 t03).
+// loader step), with the layer of the file the line names (loader_diagnostic_file), else kNoLayer. Warnings, as the
+// text report counts them; added after the grade is set, so they change no grade (as the VFS's findings, ums2 t03).
 void loader_issues(const GameData& d, ModCheckReport& r) {
     for (const GameData::LoadStage& s : d.stages)
         for (size_t i = s.first_diag; i < s.first_diag + s.diag_count && i < d.diagnostics.size(); ++i) {
@@ -1511,8 +1508,7 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
     if (d.vfs) {
         r.vfs_layers = d.vfs->describe();
         r.vfs_warnings = d.vfs->warnings();
-        for (const vfs::Layer& l : d.vfs->layers())  // the mod layers come first, in search order
-            if (l.kind == vfs::Layer::Kind::Mod) r.mod_dirs.push_back(l.host_root);
+        r.mod_dirs = vfs::mod_layer_roots(*d.vfs);
         list_mod_files(*d.vfs, r);
     }
     r.mods = d.mods;
@@ -2038,6 +2034,10 @@ std::string format_mod_catalog_json(const vfs::ModCatalog& catalog, const vfs::I
             j.close('}');
         }
         j.close(']');
+        std::vector<std::string> dependency_roots;  // ums4: the installed folders the declared dependencies name
+        for (const vfs::ModDependency& dep : m.dependencies)
+            if (const vfs::ModDescriptor* p = catalog.find_dependency(dep)) dependency_roots.push_back(p->root);
+        j.strings("dependency_roots", dependency_roots);
         j.strings("modinfo_numbers", m.modinfo_numbers);  // ums4: the digit runs of its modinfo.json (submod mentions)
         j.strings("warnings", m.warnings);
         j.close('}');

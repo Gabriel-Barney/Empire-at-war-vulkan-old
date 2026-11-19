@@ -225,8 +225,10 @@ mod system refactor").
   code outside `engine/vfs` calls `Vfs::mod_dirs()`, and only the mod catalog (`mod_registry.cpp`) reads
   `modinfo.json`: `tools/lint/check_mod_system.py` (ctest `alamo_core_mod_system_lint`, and the gate) keeps it so, and
   also refuses the removed names (`list_installed_mods`, `resolve_stack`, `scan_installed_mods`, `ModRegistry`,
-  `ResolvedStack`). The Command Center's mod hunt takes a mod's parents from the catalog's declared dependencies, else
-  from the Workshop ids its `modinfo.json` mentions (the `--list` rows' `modinfo_numbers`, added by ums4).
+  `ResolvedStack`). The Command Center's mod hunt takes a mod's parents from the folders its declared dependencies
+  resolve to, else from the Workshop ids its `modinfo.json` mentions: two additive fields of the `--list` rows (ums4),
+  `dependency_roots` (the port's `find_dependency`, so the launcher keeps no matching rule of its own) and
+  `modinfo_numbers`.
 - **One walk for every copy.** `Vfs::resolve_all(path)` returns every copy in resolution order (`[0]` is what `read`
   returns); code that needs the lower copies (the SFX archives, which a mod's copy layers over FoC's:
   `docs/re/AUDIO.md` §5, aud2 t05) takes them from there instead of building `<mod>\Data\...` paths by hand.
