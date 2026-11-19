@@ -27,6 +27,7 @@
 #include "alamo/game/mod_conflicts.hpp"  // format_conflicts_json (ums1 t05)
 #include "alamo/game/mod_picker.hpp"  // mod_folders, workshop_content_dir (cu9 t03)
 #include "alamo/vfs/install_locations.hpp"
+#include "alamo/vfs/steam_workshop.hpp"  // kFocSteamAppId
 #include "alamo/vfs/vfs.hpp"
 #include "json_text.hpp"  // the JSON string escaper, shared with benchmark.cpp
 #ifdef ALAMO_GAME_HAVE_MATERIALS
@@ -1992,8 +1993,8 @@ std::string format_mod_catalog_json(const vfs::ModCatalog& catalog, const vfs::I
     j.strings("steam_roots", where.steam_roots);
     j.strings("steam_libraries", where.steam_libraries);
     std::vector<std::string> workshop;
-    for (const std::string& lib : where.steam_libraries) {
-        const fs::path dir = workshop_content_dir(lib);
+    for (const std::string& lib : where.steam_libraries) {  // UTF-8 paths (workshop_content_dir would read them as ANSI)
+        const fs::path dir = path_from_utf8(lib) / "steamapps" / "workshop" / "content" / std::string(vfs::kFocSteamAppId);
         std::error_code ec;
         if (fs::is_directory(dir, ec)) workshop.push_back(path_to_utf8(dir));
     }
