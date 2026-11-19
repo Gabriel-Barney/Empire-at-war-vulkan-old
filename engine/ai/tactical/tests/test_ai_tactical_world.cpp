@@ -1344,6 +1344,7 @@ bool g_hero_frigate = false;  // S7 t26: Syn_Frigate is Is_Named_Hero (test_no_u
 bool g_ai_lane = false;  // sp3: TacticalAiConfig::ai_lane of the SaveSession worlds (test_ai_lane_save)
 bool g_original_timing = false;  // a1k t01: TacticalAiConfig::stagger / pp_streams off (the original's planning timing)
 bool g_plan_retest = false;  // skai t15: TacticalAiConfig::plan_retest (test_plan_retest)
+bool g_log_decisions = true;  // REF1 t04: TacticalAiConfig::log_decisions (test_logging_off)
 bool g_no_starbase = false;  // skm1 t03: MockHost::base_alive false (test_space_reinforce_needs_starbase)
 // bkx1 t01: the tactical goal systems run the retail cadence since b0123; the scenario checks written for the earlier
 // [port] cadence (group orders, Prepare_Ambush: which plan instance reports first) keep it.
@@ -1439,6 +1440,7 @@ RunResult run(int32_t frames, int32_t difficulty0, int variant = 0, std::vector<
     cfg.defender = 0;
     cfg.map = {-4000.0f, -4000.0f, 4000.0f, 4000.0f};
     cfg.plan_retest = g_plan_retest;  // skai t15
+    cfg.log_decisions = g_log_decisions;  // REF1 t04
     if (g_port_cadence) cfg.retail_cadence = false;  // bkx1 t01
     if (g_original_timing) {  // a1k t01: the OPT2 t01 / t10 timing knobs off (test_replan_and_priority_lifetime)
         cfg.stagger = false;
@@ -3490,6 +3492,21 @@ void test_plan_discovery_lua_only() {
     CHECK(lua_only && lc == 0 && got.size() == 2);
 }
 
+// REF1 t04: with TacticalAiConfig::log_decisions off the world keeps no decision log and no stats (their text is built only
+// while the log is on), and plays the same battle: same CRC stream, same executed orders.
+void test_logging_off() {
+    const RunResult on = run(30 * 30, 1);
+    g_log_decisions = false;
+    const RunResult off = run(30 * 30, 1);
+    g_log_decisions = true;
+    CHECK(!on.decisions.empty() && on.stats.size() > 1);
+    CHECK(off.decisions.empty());
+    CHECK(off.stats.size() == 1 && off.stats.count("~ evaluations") == 1);  // the evaluation counter only
+    CHECK(!on.crc.empty() && on.crc == off.crc && on.executed == off.executed);
+    std::printf("logging off: %zu decisions / %zu stats keys with the log on, %zu / %zu off; CRC stream and %zu orders identical\n",
+                on.decisions.size(), on.stats.size(), off.decisions.size(), off.stats.size(), on.executed.size());
+}
+
 int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i)
         if (std::strcmp(argv[i], "--write-golden") == 0) g_write_golden = true;
@@ -3528,6 +3545,7 @@ int main(int argc, char** argv) {
     test_landing_save();
     test_replan_and_priority_lifetime();  // a1k t01
     test_plan_retest();  // skai t15
+    test_logging_off();  // REF1 t04
     test_outside_owner_lists();  // skai t22
     test_attack_move_result();            // q6 t19
     test_attack_positioning();            // mcx6 t06
