@@ -307,7 +307,13 @@ in sync with origin/main).
 
 1. **b0315 Splash_E3 music:** should the port get a splash screen, or is this entry dropped as out of scope? If it is out
    of scope, it needs a DECISIONS row.
-2. **Out-of-scope handling:** protocol rule 5 deletes out-of-scope tasks and groups; your constraint keeps them as `oos` /
+2. **Settled (Gabriel, 2026-11-19): out-of-scope tasks are removed** (protocol rule 5 stands; the "delete nothing"
+   constraint does not apply to them). Applied right away:
+   - Of the store's 58 `oos` tasks, 46 were moved and 11 dropped, merged or moot. Those stay as the audit trail.
+   - mcx8 t06 was the one out of scope by a DECISIONS row ("Corpus graded on installed mods only", which keeps the
+     reopen-on-reinstall note). It was deleted; lint shows 0 errors.
+
+   The original question was: **Out-of-scope handling:** protocol rule 5 deletes out-of-scope tasks and groups; your constraint keeps them as `oos` /
    `dropped`. Which wins from now on? If yours, rule 5 needs a one-line change.
 3. ~~**Stage order (3b):**~~ Not applied (Gabriel, 2026-11-19); the original question was: apply it, and update the ~85 "Stage N" references, or keep the stage numbers and apply 3a only? If
    applied, should the `OPT -> Q4` / `SIMP -> Q4` arrows be reversed or removed?
