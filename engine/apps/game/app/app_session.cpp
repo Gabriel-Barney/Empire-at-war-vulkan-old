@@ -53,11 +53,10 @@ bool App::attract_step(const ui::InputFrame& raw) {
 // its header names the map ([port] scan, attract_rec_map) and the same live demo runs there; no map path -> the entry is
 // skipped with a warning. [port] fallback: the first space skirmish map when the entry does not load as a space map.
 bool App::start_attract_map() {
-    SessionSpec s;
-    s.kind = SessionKind::Skirmish;
-    s.attract = true;
-    s.seed = opt_.seed + static_cast<uint32_t>(attract_.starts());
-    s.battle_max_frames = static_cast<uint32_t>(std::max(attract_.cycle_delay(), 60.0) * 30.0) + 300u;  // the cycle reloads first
+    SessionChoice c;  // ref2 t03: make_session_spec's Attract kind (seed + start count, frames past the cycle, no end hold)
+    c.kind = GameKind::Attract;
+    c.attract_start = attract_.starts();
+    c.attract_cycle_seconds = attract_.cycle_delay();
     // modc t20: no slot factions - the demo's sides are faction indices (GameSession, 0x22f10); empty slots take the data's
     // default_skirmish_faction for the scaffolding galaxy.
     std::vector<std::string> maps;
@@ -76,8 +75,8 @@ bool App::start_attract_map() {
     const std::vector<std::string> space = skirmish_space_maps(data_);
     if (!space.empty() && (maps.empty() || maps.front() != space.front())) maps.push_back(space.front());
     for (const std::string& m : maps) {
-        s.skirmish_map = m;
-        if (start_session(s)) {
+        c.map = m;
+        if (start_session(make_session_spec(c, session_options()))) {
             ++attract_runs_;
             demo_shot_t0_ = -1.0;
             audio_flags();
@@ -576,6 +575,14 @@ std::string App::local_faction() const {
 }
 
 // ------------------------------------------------------------------------------------------------ session flow
+SessionOptions App::session_options() const {
+    SessionOptions o;
+    o.seed = opt_.seed;
+    o.battle_max_frames = opt_.battle_max_frames;
+    o.fleet_groups = opt_.fleet_groups;  // [port] fleet groups (--fleet-groups)
+    return o;
+}
+
 bool App::start_session(const SessionSpec& spec) {
     if (!spec.attract) attract_.stop();  // 0x22bf0: a real game starts (end_session below ends the demo session)
     end_session();
@@ -613,24 +620,17 @@ void App::load_story_campaign(const sim::StoryLoadCampaign& lc) {
         std::printf("story: LOAD_CAMPAIGN %s side %d: unable to find campaign data\n", lc.name.c_str(), lc.side);
         return;
     }
-    SessionSpec s;
+    // ref2 t03: a fresh game of the new campaign keeps the old game's options (run options, advanced game options,
+    // InterventionsEnabled) - make_session_spec's StoryCampaign kind.
     const SessionSpec& old = session_->spec();
-    s.kind = SessionKind::Campaign;
-    s.campaign = c->name;
-    s.faction = c->starting_active_player;
-    s.difficulty = lc.difficulty >= 0 ? lc.difficulty : 1;
-    s.ask_battle_choice = old.ask_battle_choice;
-    s.game_options = old.game_options;
-    s.start_credits = old.start_credits;
-    s.start_tech = old.start_tech;
-    s.max_tech = old.max_tech;
-    s.auto_resolve_option = old.auto_resolve_option;
-    s.random_events = old.random_events;
-    s.interventions_off = old.interventions_off;  // mcx8 t07
-    s.seed = old.seed;
-    s.battle_max_frames = old.battle_max_frames;
-    s.battle_end_hold_frames = old.battle_end_hold_frames;
-    s.fleet_groups = old.fleet_groups;
+    SessionChoice choice;
+    choice.kind = GameKind::StoryCampaign;
+    choice.campaign = c->name;
+    choice.faction = c->starting_active_player;
+    choice.difficulty = lc.difficulty;
+    choice.game_options = campaign_options_of(old);
+    choice.interventions_off = old.interventions_off;  // mcx8 t07
+    const SessionSpec s = make_session_spec(choice, session_options_of(old));
     std::printf("story: LOAD_CAMPAIGN %s side %d -> campaign %s (%s), difficulty %d\n", lc.name.c_str(), lc.side, c->name.c_str(),
                 c->starting_active_player.c_str(), s.difficulty);
     ++story_campaign_loads_;

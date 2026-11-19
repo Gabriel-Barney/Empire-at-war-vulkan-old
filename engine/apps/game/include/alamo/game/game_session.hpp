@@ -53,6 +53,7 @@
 #include "alamo/game/game_data.hpp"
 #include "alamo/game/save_games.hpp"
 #include "alamo/game/script_cinematics.hpp"
+#include "alamo/game/session_spec.hpp"  // ref2 t03: SessionSpec and its builder
 #include "alamo/jobs/job_system.hpp"
 #include "alamo/sim/campaign_battles.hpp"
 #include "alamo/sim/sim_host.hpp"
@@ -61,63 +62,6 @@
 #endif
 
 namespace alamo::game {
-
-enum class SessionKind : uint8_t { Campaign = 0, Skirmish = 1 };
-
-struct SessionSpec {
-    SessionKind kind = SessionKind::Campaign;
-    // Campaign: CampaignDef name and the human faction ("" = Starting_Active_Player), difficulty 0..2.
-    std::string campaign, faction;
-    int32_t difficulty = 1;
-    // Skirmish: space map and the galaxy (factions / fleets).
-    std::string skirmish_map;
-    SkirmishSetup skirmish;
-    std::shared_ptr<const terrain::MapData> skirmish_map_data;  // tests: used instead of loading skirmish_map
-    // skm1 t01: a skirmish starts straight on its map (CampaignBattles::start_map_battle with BattleConfig::skirmish_map,
-    // as alamo_headless --skirmish-ai skirmish and the retail skirmish start, SKIRMISH_SETUP §2): both slots' starting
-    // forces (when skirmish_options.starting_units) are its units, the skirmish map rules apply (Income_Stream, per-slot
-    // victory, team markers, the option credits). [port, tests only] skirmish_hop = the older scaffold kept for the
-    // galactic conflict tests: the human fleet hops to the AI's planet and the battle is that conflict's (battle choice,
-    // auto-resolve, retreat), without the skirmish map rules. The front end never sets it. Saved.
-    bool skirmish_hop = false;
-    // skm1 t02: the skirmish game options (the staging screen's IDD_INTERNET_STAGING_DIALOG_ADVANCED_SKIRMISH_OPTIONS);
-    // set = false: the GameConstants MP_Default_* values (sim::skirmish_option_defaults). Saved (map battle only).
-    sim::BattleConfig::SkirmishOptions skirmish_options;
-    // Sim.
-    uint32_t seed = 1;
-    uint32_t aggressor_period = 600;  // CampaignAggressor for the AI players (0 = off)
-    uint32_t battle_max_frames = 27000;
-    uint32_t battle_end_hold_frames = 0;  // BattleConfig::end_hold_frames (alamo_game sets it; 0 for tests and the attract demo)
-    uint32_t battle_order_interval = 60; // S10 stand-in cadence for AI sides without a tactical AI (human units skipped)
-    bool tactical_ai = true;             // A1 BattleAi for the AI players of human battles (needs AI data)
-    bool animation = true;               // SimAnimation (needs engine/anim)
-    bool galactic_ai = true;             // A2 GalacticAiWorld for the AI players (else / without AI data: CampaignAggressor)
-    bool story = true;                   // S4 StorySession for campaigns with story plots (attached to the galactic AI)
-    // The pending-battle choice of a human conflict (fight / auto-resolve / retreat): false = always Fight (headless,
-    // tests); true = the conflict waits (ConflictManager Vote state) for a battle_choice_event in the command stream.
-    bool ask_battle_choice = false;
-    // OI host: the main-menu attract demo (docs/re/MAIN_LOOP.md §1.5 / AUDIO.md §1.6 "AI-vs-AI attract demo") [port]: a
-    // space skirmish with no human - the skirmish's player 0 is AI controlled too, AI-vs-AI conflicts are fought (both
-    // sides by the tactical AI, else the stand-in cadence) and player 0's fleet hop is a direct setup operation (no
-    // command). local_player() stays 0 (the viewpoint). Space maps only (a land map fails start()). The demo's objects run
-    // their Lua_Scripts (object-script host on, modc t18): a DEMO_CONTROLLER runs Demo_Attract_Controller.lua.
-    bool attract = false;
-    // ui1 t06: the campaign's advanced game options (ui::GameOptionsSetup; game_options false = the campaign's own
-    // Starting_Credits / tech levels). Credits, start and max tech apply to every player the campaign names; the
-    // auto-resolve option (0 always / 1 never / 2 ask / 3 overwhelming odds) is the host's battle prompt rule; game_options
-    // with random events off makes the galactic AI's Game.InterventionsEnabled 0.0 (mcx8 t07). Not saved [port]: a loaded
-    // game asks again.
-    bool game_options = false;
-    int32_t start_credits = 6000, start_tech = 1, max_tech = 5, auto_resolve_option = 2;
-    bool random_events = false;
-    // mcx8 t07: Game.InterventionsEnabled was off in the saved game (save key spec.interventions_off; the options above are
-    // not saved). interventions_enabled() = the galactic AI's Game.InterventionsEnabled.
-    bool interventions_off = false;
-    bool interventions_enabled() const { return !interventions_off && (!game_options || random_events); }
-    // [port] fleet groups (docs/DECISIONS.md "Fleet groups: exception to the current focus"): off = retail. Copied into
-    // CampaignBattleOptions::fleet_groups; the HUD hotkeys send fleet group commands only while it is on.
-    bool fleet_groups = false;
-};
 
 // The human's answer to a pending conflict as a port-only command (PortExtension subtype kBattleChoiceSubtype, one byte
 // = galactic::BattleChoice); GameSession's port hook hands it to ConflictManager::choose at the command phase.
@@ -136,8 +80,6 @@ commands::EventData tactical_auto_resolve_event();
 // 0x28d760) with no command.
 inline constexpr uint16_t kAiDifficultySubtype = 0x4144;  // "AD"
 commands::EventData ai_difficulty_event(int32_t difficulty);
-// Difficulty 0..2 -> DifficultyAdjustments name ([port] Easy_Default / Normal_Default / Hard_Default).
-const char* difficulty_name(int32_t difficulty);
 // mcx4 t19 (MCX5_RE_ANSWERS Q3.1, 0x292590 [H]): the custom game options' start / max tech get -1 for a player whose
 // faction has a non-zero Displayed_Tech_Level_Adjustment, else 0 (also 0 for no faction).
 int32_t custom_tech_offset(const galactic::GalacticRules& rules, uint32_t faction);
