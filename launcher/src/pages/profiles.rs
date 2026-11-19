@@ -122,6 +122,7 @@ fn conflict_input(app: &App) -> conflicts::Input {
             })
             .collect(),
         foc: mods::foc_dir(&app.steam, &app.cfg.settings),
+        exe: crate::catalog::mod_check_exe(app.cfg.settings.game_exe.as_deref()),
     }
 }
 

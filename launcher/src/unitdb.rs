@@ -215,14 +215,6 @@ fn collect_files(elems: &[Elem], out: &mut Vec<String>) {
     }
 }
 
-/// The XML files a list file (`GameObjectFiles.xml` and friends) names, in order, with
-/// backslashes. Paths are relative to `Data\XML`.
-pub fn list_entries(text: &str) -> Vec<String> {
-    let mut out = Vec::new();
-    collect_files(&xml::parse(text), &mut out);
-    out
-}
-
 /// Names of the definitions in one XML data file, in file order, as [`UnitDb::build`]
 /// finds them.
 pub fn definition_names(text: &str) -> Vec<String> {
