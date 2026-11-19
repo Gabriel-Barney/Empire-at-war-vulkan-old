@@ -494,7 +494,8 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
         const auto it = plans.find(script);
         return it == plans.end() ? -1 : it->second.player;
     }
-    // `what`: the decision-log description (a string or a callable, see decide()).
+    // `what`: the decision-log description (a string or a callable, see decide()). A callable runs after the order was
+    // executed (whose signals may already have changed statuses), so it reads only what the order cannot change.
     template <class What>
     cmd::RejectReason order(int32_t player, const cmd::EventData& ev, What&& what) {
         in_world_order = true;

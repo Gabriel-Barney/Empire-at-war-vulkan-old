@@ -323,19 +323,6 @@ void visit(Ar& ar, R& k) {
         ar.absent(k.contrast_entry, -1);
 }
 
-inline void put_pick(ByteWriter& w, const TacticalPpPick& k) {
-    SaveWriter a(w);
-    visit(a, k);
-}
-
-inline bool get_pick(ByteReader& r, TacticalPpPick& k, bool with_entry) {
-    Features f;
-    f.retest = with_entry;
-    SaveReader a(r, nullptr, f);
-    visit(a, k);
-    return r.ok();
-}
-
 // Bit-exact float equality (geometry checks: a reader built from the same data has the same bits).
 inline bool same_bits(float a, float b) { return std::bit_cast<uint32_t>(a) == std::bit_cast<uint32_t>(b); }
 

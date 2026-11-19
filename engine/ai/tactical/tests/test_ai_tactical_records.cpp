@@ -2,6 +2,7 @@
 // (src/tactical_ai_records.hpp), walked by the save writer, the save reader and the CRC hasher:
 //   * round trip: write -> read -> write gives the same bytes and the same CRC for every record;
 //   * CRC pin: each hashed record's CRC bytes are the ones TacticalAiWorld::hash fed before REF1 (the goldens' order);
+//   * save pin: each record's save bytes are the ones TacticalAiWorld::write put before REF1 (existing saves load);
 //   * field coverage: changing any one field changes the save bytes (saved fields) and the CRC (hashed fields), a
 //     hash-only field leaves the record's save bytes alone, and the changed record still round-trips.
 #include <cstdio>
@@ -517,6 +518,129 @@ void test_crc_pin(const Store& s) {
     std::printf("records: CRC bytes of 10 record samples equal the pre-REF1 hash order %s\n", ok ? "ok" : "FAILED");
 }
 
+// ---------------------------------------------------------------- save pin (TacticalAiWorld::write before REF1)
+// The save bytes of each record as the hand-written writer put them: a swap of two same-typed fields in a visit() list
+// passes the round trip but loads existing saves wrongly, so the layout is pinned here (save version 18 / 19).
+
+void put_target_old(ByteWriter& w, const TacticalTarget& t) {
+    w.u8(static_cast<uint8_t>(t.kind)).i32(t.object_id).str(t.name);
+    w.f32(t.position.x).f32(t.position.y).f32(t.position.z);
+    w.f32(t.eval_rect.min_x).f32(t.eval_rect.min_y).f32(t.eval_rect.max_x).f32(t.eval_rect.max_y);
+    w.i32(t.zone).i32(t.cell_x).i32(t.cell_y);
+}
+
+void put_pick_old(ByteWriter& w, const TacticalPpPick& k) {
+    w.i32(k.type).u8(static_cast<uint8_t>(k.source)).i32(k.ref).i32(k.tf).i32(k.team).i32(k.contrast_entry);
+}
+
+void put_handle_old(ByteWriter& w, const objects::ObjectStore& st, objects::ObjectHandle h) {
+    w.u64(h.value).i32(st.exists(h) ? st.id(h) : objects::kNoObjectId);
+}
+
+void put_ints_old(ByteWriter& w, const std::vector<int32_t>& v) {
+    w.u32(static_cast<uint32_t>(v.size()));
+    for (const int32_t x : v) w.i32(x);
+}
+
+void put_pairs_old(ByteWriter& w, const std::vector<std::pair<int32_t, int32_t>>& v) {
+    w.u32(static_cast<uint32_t>(v.size()));
+    for (const auto& [a, b] : v) w.i32(a).i32(b);
+}
+
+void save_slot_old(ByteWriter& w, const Slot& s, const Store&) {
+    put_target_old(w, s.t);
+    w.i32(s.handle).boolean(s.alive);
+}
+
+void save_plan_old(ByteWriter& w, const PlanInstance& p, const Store&) {
+    w.i32(p.player).u32(p.plan).u32(p.goal_type).i32(p.slot).i32(p.target_owner).i32(p.pp);
+    put_ints_old(w, p.tfs);
+    w.boolean(p.result).boolean(p.non_removable).boolean(p.ended).u32(p.live_threads);
+}
+
+void save_tf_old(ByteWriter& w, const TfRec& t, const Store& s) {
+    w.i32(t.plan).i32(t.player).u32(t.def).str(t.name).u8(static_cast<uint8_t>(t.kind));
+    w.u32(static_cast<uint32_t>(t.units.size()));
+    for (const objects::ObjectHandle h : t.units) put_handle_old(w, s.store, h);
+    w.u32(static_cast<uint32_t>(t.pending.size()));
+    for (const TacticalReinforcement& e : t.pending)
+        w.i32(e.key).i32(e.type).f32(e.population).u32(e.units).i32(e.member_type).boolean(e.member_create_team).i32(e.count);
+    put_pairs_old(w, t.reservations);
+    put_pairs_old(w, t.producing);
+    w.str(t.priorities);
+}
+
+void save_status_old(ByteWriter& w, const StatusRec& r, const Store& s) {
+    w.i32(r.plan).i32(r.tf).u8(static_cast<uint8_t>(r.kind)).boolean(r.finished).u8(static_cast<uint8_t>(r.result));
+    w.i64(r.started).i64(r.last_order);
+    put_handle_old(w, s.store, r.unit);
+    w.i32(r.target).f32(r.dest.x).f32(r.dest.y).f32(r.dest.z);
+    w.i64(r.timeout).f32(r.ring).boolean(r.prevent);
+    w.u8(static_cast<uint8_t>(r.direction)).f32(r.min_dist).f32(r.threat).u32(r.plan_frame).boolean(r.lists);
+    put_ints_old(w, r.members);
+    put_ints_old(w, r.moving);
+    put_ints_old(w, r.pending);
+    put_pairs_old(w, r.landings);
+    w.boolean(r.saved_removable).i32(r.target_owner);
+}
+
+void save_pp_old(ByteWriter& w, const TacPpRec& p, const Store&) {
+    w.i32(p.player).u32(p.plan).boolean(p.reserved).u32(static_cast<uint32_t>(p.picks.size()));
+    for (const TacticalPpPick& k : p.picks) put_pick_old(w, k);
+    w.boolean(p.layer_space).boolean(p.layer_ground).boolean(p.contrast_failed);
+}
+
+void save_attack_pos_old(ByteWriter& w, const AttackPositioning& a, const Store&) {
+    w.boolean(a.flag).i32(a.next).boolean(a.moving).f32(a.pos.x).f32(a.pos.y).f32(a.pos.z);
+}
+
+void save_bonus_old(ByteWriter& w, const PendingBonus& b, const Store&) { w.u32(b.goal_type).i32(b.target).f32(b.bonus).i64(b.deadline); }
+
+void save_pp_result_old(ByteWriter& w, const TacticalPpResult& o, const Store&) {
+    w.boolean(o.ok).u32(static_cast<uint32_t>(o.candidates)).str(o.last_veto).u32(static_cast<uint32_t>(o.picks.size()));
+    for (const TacticalPpPick& k : o.picks) put_pick_old(w, k);
+    w.boolean(o.layer_space).boolean(o.layer_ground);
+}
+
+void save_fact_old(ByteWriter& w, const TacticalAiObject& f, const Store& s) {
+    put_handle_old(w, s.store, f.handle);
+    w.i32(f.target.id).boolean(f.target.dead_or_removing).boolean(f.target.rep_has_land_evaluator);
+    w.boolean(f.target.rep_has_space_evaluator).boolean(f.target.own_has_space_evaluator);
+    const UnitAppliesInfo& a = f.applies;
+    w.i32(a.object_id).boolean(a.has_owner).boolean(a.owner_allied).boolean(a.has_locomotor).boolean(a.has_build_objects);
+    w.boolean(a.has_cash_point).f32(a.reinforcement_enabling_radius).boolean(a.last_state_visible_under_fow);
+    w.boolean(a.initial_state_visible_under_fow);
+    for (const bool* b : free_store_flags(f.free_store)) w.boolean(*b);
+    put_ints_old(w, f.team_members);
+    w.boolean(f.moving).i32(f.attack_target).boolean(f.damage_tracking).i32(f.reprojection_stamp);
+    w.boolean(f.valid_target).boolean(f.hero_clash).boolean(f.pad_occupied);
+}
+
+template <class R, class Make, class Old>
+bool save_pinned(const char* name, Make make, Old old, const Store& s) {
+    const R x = make(s);
+    ByteWriter w;
+    old(w, x, s);
+    const bool ok = save_bytes(x, s) == w.bytes();
+    if (!ok) std::printf("  save pin FAILED: %s\n", name);
+    return ok;
+}
+
+void test_save_pin(const Store& s) {
+    bool ok = true;
+    ok = save_pinned<Slot>("Slot", sample_slot, save_slot_old, s) && ok;
+    ok = save_pinned<PlanInstance>("PlanInstance", sample_plan, save_plan_old, s) && ok;
+    ok = save_pinned<TfRec>("TfRec", sample_tf, save_tf_old, s) && ok;
+    ok = save_pinned<StatusRec>("StatusRec", sample_status, save_status_old, s) && ok;
+    ok = save_pinned<TacPpRec>("TacPpRec", sample_pp, save_pp_old, s) && ok;
+    ok = save_pinned<AttackPositioning>("AttackPositioning", sample_attack_pos, save_attack_pos_old, s) && ok;
+    ok = save_pinned<PendingBonus>("PendingBonus", sample_bonus, save_bonus_old, s) && ok;
+    ok = save_pinned<TacticalPpResult>("TacticalPpResult", sample_pp_result, save_pp_result_old, s) && ok;
+    ok = save_pinned<TacticalAiObject>("TacticalAiObject", sample_fact, save_fact_old, s) && ok;
+    CHECK(ok);
+    std::printf("records: save bytes of 9 record samples equal the pre-REF1 writer's layout %s\n", ok ? "ok" : "FAILED");
+}
+
 void test_coverage(const Store& s) {
     size_t fields = 0;
     bool ok = true;  // every record walked, so each failure is printed
@@ -539,6 +663,7 @@ int main() {
     const Store s;
     test_round_trip(s);
     test_crc_pin(s);
+    test_save_pin(s);
     test_coverage(s);
     return ::alamo::test::report("alamo_ai_tactical_records_tests");
 }
