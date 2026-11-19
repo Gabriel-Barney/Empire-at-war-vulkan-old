@@ -356,3 +356,8 @@ their own copies; mods and the retail load order do not change.
 - **No follow-up goes to the backlog.** Stage 10 keeps its follow-ups like Stages 6 and 9, and goes further: tier-3 findings
   and tasks stay group tasks too (`meta/backlog` `keep_followups` and `keep_all_followups`, enforced by `roadmap_store.py`
   since 2026-11-18; `docs/ROADMAP_PROTOCOL.md`, "Follow-ups stay in Stage 6 groups").
+- **[port] One launch list, also for a stack with errors** (lane ums1 default, 2026-11-18; Gabriel may overturn it): the
+  picker, `alamo_play` and `alamo_mod_check --resolve` start `vfs::ModStack::launch_args`. A base-EaW stack starts nothing
+  (D1). A dependency cycle starts the resolved list in its fallback order with the error shown (`alamo_play` asks first);
+  before ums1 the picker started only the picked mod there while `--resolve` listed both. Why: retail mounts any command
+  line, so refusing a cycle would refuse what retail runs, and the surfaces must agree (`docs/MODS.md` 3.1.2).

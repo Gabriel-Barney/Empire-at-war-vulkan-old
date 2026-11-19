@@ -8,6 +8,7 @@
 
 #include "alamo/core/ascii.hpp"
 #include "alamo/game/mod_check.hpp"
+#include "alamo/vfs/install_locations.hpp"
 #include "alamo/vfs/mod_registry.hpp"
 #include "alamo/vfs/steam_workshop.hpp"
 
@@ -109,6 +110,18 @@ std::vector<std::string> launch_args_for(const std::string& game, const std::vec
     std::vector<std::string> out = s.launch_args();
     if (stack) *stack = std::move(s);
     return out;
+}
+
+std::optional<std::vector<std::string>> play_launch_args(const std::string& game, const std::vector<std::string>& picked,
+                                                         vfs::ModStack* stack) {
+    ModCheckOptions o;
+    o.workshop_libraries = vfs::default_install_at(game).steam_libraries;
+    vfs::ModStack s;
+    std::vector<std::string> launch = launch_args_for(game, picked, o, &s);
+    const bool refused = s.base_eaw;
+    if (stack) *stack = std::move(s);
+    if (refused) return std::nullopt;
+    return launch;
 }
 
 std::vector<std::string> mod_report_summary(const ModCheckReport& r) {

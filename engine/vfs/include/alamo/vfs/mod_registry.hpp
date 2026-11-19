@@ -104,7 +104,7 @@ ModDescriptor describe_mounted_mod(const std::string& dir, const std::string& ga
 
 struct ModCatalog {
     std::string game;                  // the FoC folder (Mods\ lives under it)
-    // Workshop items by id (first library wins), then <game>\Mods folders by name, then the user's extra mod folders
+    // Workshop items in numeric id order across all libraries (first library holding an id wins), then <game>\Mods folders by name, then the user's extra mod folders
     // (InstallLocations::mod_folders) in the order given; within a folder its main mod, then its variants by name.
     std::vector<ModDescriptor> mods;
     // A catalog key ("Mods\AOW", "2083545253:subA") or a descriptor key ("<id>" / "<id>:<variant>"), any case.

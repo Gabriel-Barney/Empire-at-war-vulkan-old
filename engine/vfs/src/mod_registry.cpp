@@ -252,8 +252,13 @@ bool is_digits(const std::string& s) {
     return !s.empty() && std::all_of(s.begin(), s.end(), [](char c) { return c >= '0' && c <= '9'; });
 }
 
+// A folder's identity for comparisons: absolute (a relative path against the current folder), lexically normal ("." /
+// ".." folded), any case, '/' == '\\', no trailing separator. Junctions and subst drives are not resolved.
 std::string norm_path(const std::string& p) {
-    std::string s = lower(p);
+    std::error_code ec;
+    fs::path abs = p.empty() ? fs::path() : fs::absolute(path_from_utf8(p), ec);
+    if (ec) abs = path_from_utf8(p);
+    std::string s = lower(path_to_utf8(abs.lexically_normal()));
     for (char& c : s)
         if (c == '/') c = '\\';
     while (s.size() > 1 && s.back() == '\\') s.pop_back();
@@ -551,14 +556,20 @@ ModCatalog scan_mod_catalog(const InstallLocations& where, bool hash) {
         if (!seen_roots.insert(norm_path(root)).second) return;  // listed already (an extra folder inside Mods)
         for (ModDescriptor& d : describe_mod_folder(root, kind, id, hash)) r.mods.push_back(std::move(d));
     };
+    std::vector<std::pair<std::string, fs::path>> workshop;  // (id, folder)
     for (const std::string& lib : where.steam_libraries) {
         const fs::path content = path_from_utf8(lib) / "steamapps" / "workshop" / "content" / "32470";
         for (const fs::path& item : folders(content, true)) {
             const std::string id = path_to_utf8(item.filename());
             if (!seen.insert(id).second) continue;  // the first library holding an id wins (the STEAMMOD= resolver)
-            add(item, ModKind::Workshop, id);
+            workshop.emplace_back(id, item);
         }
     }
+    // Numeric order of the ids across all libraries (the picker's order before ums1).
+    std::sort(workshop.begin(), workshop.end(), [](const auto& a, const auto& b) {
+        return a.first.size() != b.first.size() ? a.first.size() < b.first.size() : a.first < b.first;
+    });
+    for (const auto& [id, item] : workshop) add(item, ModKind::Workshop, id);
     if (!where.foc.empty())
         for (const fs::path& local : folders(path_from_utf8(where.foc) / "Mods", false)) add(local, ModKind::LocalMods, path_to_utf8(local.filename()));
     for (const std::string& extra : where.mod_folders) {
@@ -619,9 +630,11 @@ bool mod_provides(const std::string& root, std::string_view path) {
 std::vector<std::string> ModStack::launch_args() const {
     std::vector<std::string> out;
     if (base_eaw) return out;  // D1: refused
-    std::set<std::string> seen;
-    for (const std::string& a : args)
-        if (seen.insert(lower(a)).second) out.push_back(a);
+    std::set<std::string> seen;  // folders: two variants of one folder, or one folder spelled two ways, mount once
+    for (size_t i = 0; i < args.size(); ++i) {
+        const std::string folder = i < mods.size() ? norm_path(mods[i].mod.root) : lower(args[i]);
+        if (seen.insert(folder).second) out.push_back(args[i]);
+    }
     return out;
 }
 

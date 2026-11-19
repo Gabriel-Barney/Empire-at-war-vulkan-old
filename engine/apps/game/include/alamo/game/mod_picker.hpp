@@ -17,6 +17,7 @@
 // No faction or mod name is known here (docs/MODS.md §1).
 #pragma once
 #include <filesystem>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -75,6 +76,11 @@ ModCheckReport check_picked_mod(const std::string& game, const std::string& pick
 // check_picked_mod and mod_launch_args. Empty for a refused base-EaW stack; `stack` (if given) receives the stack.
 std::vector<std::string> launch_args_for(const std::string& game, const std::vector<std::string>& picked, const ModCheckOptions& options,
                                          vfs::ModStack* stack = nullptr);
+// alamo_play's resolver (play::stack_mod_args gets it): launch_args_for with the install's Steam libraries
+// (vfs::default_install_at(game)); nullopt when the stack is refused (base-EaW, D1). `stack` receives the stack, so the
+// caller can show its errors.
+std::optional<std::vector<std::string>> play_launch_args(const std::string& game, const std::vector<std::string>& picked,
+                                                         vfs::ModStack* stack = nullptr);
 // The picker's report lines (UTF-8, at most about a dozen, the most important first).
 std::vector<std::string> mod_report_summary(const ModCheckReport& report);
 // ISO 639-1 code of one of retail's text languages ("GERMAN" -> "de", ui::retail_language_for_langid's names); "" for

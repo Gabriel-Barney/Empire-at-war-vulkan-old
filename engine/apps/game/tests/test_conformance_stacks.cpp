@@ -19,6 +19,7 @@
 #include "alamo/game/mod_check.hpp"
 #include "alamo/game/mod_conflicts.hpp"
 #include "alamo/game/mod_picker.hpp"
+#include "alamo/vfs/install_locations.hpp"
 #include "alamo/vfs/mod_registry.hpp"
 #include "alamo/test/support.hpp"
 #include "play_launch.hpp"
@@ -215,21 +216,21 @@ std::string run_mod_check(const std::string& exe, const std::string& args, const
 
 void test_launch_surfaces(const std::string& fixture, const std::string& root, const std::string& mod_check_exe, const fs::path& work) {
     alamo::test::section("launch surfaces (ums1 t06)");
-    // No Steam library on either side: the in-process surfaces get none, the exe finds none (ALAMO_STEAM_ROOT names an
-    // empty folder, so default_steam_roots reads nothing else).
-    const fs::path no_steam = work / "no_steam";
-    fs::create_directories(no_steam);
-    _putenv_s("ALAMO_STEAM_ROOT", no_steam.string().c_str());
-    const game::ModCheckOptions o = light();
-    const vfs::ModCatalog catalog = vfs::scan_installed_mods(root, {}, false);
+    // One Steam library on every side, the fixture's (README): ALAMO_STEAM_ROOT makes default_steam_roots read nothing
+    // else, so the exe, alamo_play's resolver and the picker (all through vfs::default_install_at) see the same install.
+    _putenv_s("ALAMO_STEAM_ROOT", (fs::path(fixture) / "steamlib").string().c_str());
+    const vfs::InstallLocations where = vfs::default_install_at(root);
+    CHECK(where.steam_libraries.size() == 1);
+    game::ModCheckOptions o = light();
+    o.workshop_libraries = where.steam_libraries;
+    const vfs::ModCatalog catalog = vfs::scan_mod_catalog(where, false);
     const std::vector<game::InstalledMod> rows = game::list_installed_mods(catalog);
 
     // Picker rows == catalog rows == alamo_mod_check --list rows.
     CHECK(rows.size() == catalog.mods.size());
     for (size_t i = 0; i < rows.size() && i < catalog.mods.size(); ++i) CHECK(rows[i].key == catalog.mods[i].catalog_key());
     const std::string list = run_mod_check(mod_check_exe, "--game \"" + root + "\" --list --no-hash", work / "list.json");
-    const std::optional<std::vector<std::string>> listed = json_strings(list, "mod_folders");  // present: the file is ours
-    CHECK(listed.has_value());
+    CHECK(json_strings(list, "mod_folders").has_value());  // present: the file is ours
     std::vector<std::string> list_keys;
     for (size_t at = list.find("\"key\": \""); at != std::string::npos; at = list.find("\"key\": \"", at + 1)) {
         std::string k;
@@ -239,7 +240,14 @@ void test_launch_surfaces(const std::string& fixture, const std::string& root, c
     std::vector<std::string> row_keys;
     for (const game::InstalledMod& r : rows) row_keys.push_back(r.key);
     CHECK(joined(list_keys) == joined(row_keys));
+    CHECK(joined(row_keys).rfind("900000201:subA | 900000201:subB | Mods\\CycleA", 0) == 0);  // variants: a row each
     std::printf("  rows: %s\n", joined(row_keys).c_str());
+
+    // alamo_play gets the game folder spelled relative to the current folder (the catalog then holds relative roots) and
+    // the dropped folder absolute: a folder is still one folder (spec review c1).
+    std::error_code ec;
+    const fs::path rel_root = fs::relative(fs::path(root), ec);
+    const std::string play_game = ec || rel_root.empty() ? root : rel_root.string();
 
     struct Case {
         const char* name;
@@ -251,7 +259,11 @@ void test_launch_surfaces(const std::string& fixture, const std::string& root, c
         {"stack_dep (hinted)", "Mods\\StackHinted", "MODPATH=Mods\\StackHinted | MODPATH=Mods\\StackParent"},
         {"stack_cycle", "Mods\\CycleA", "MODPATH=Mods\\CycleA | MODPATH=Mods\\CycleB"},
         {"eaw_only", "Mods\\EawOnly", ""},
+        // AOW -> Legacy HD -> TR: the shape (nothing declared, two hint rounds); the real three are not installed here
+        // (docs/MODS.md 10.4).
         {"AOW -> Legacy HD -> TR", "Mods\\StackTop", "MODPATH=Mods\\StackTop | MODPATH=Mods\\StackHinted | MODPATH=Mods\\StackParent"},
+        {"workshop variant subA", "900000201:subA", "STEAMMOD=900000201 | MODPATH=Mods\\StackParent"},
+        {"workshop variant subB", "900000201:subB", "STEAMMOD=900000201 | MODPATH=Mods\\OtherTc"},
     };
     for (const Case& c : cases) {
         const game::InstalledMod* row = nullptr;
@@ -259,24 +271,23 @@ void test_launch_surfaces(const std::string& fixture, const std::string& root, c
             if (r.key == c.key) row = &r;
         CHECK(row != nullptr);
         if (!row) continue;
+        // A variant is named by its key (a dropped folder means its first variant); other rows by their argument.
+        const std::string named = row->variant.empty() ? row->arg : "STEAMMOD=" + row->key;
         // 1. The in-game picker: App::check_mod's report, then Launch's list.
         const game::ModCheckReport report = game::check_picked_mod(root, row->key, o);
         const std::string picker = joined(game::mod_launch_args(*row, &report));
-        // 2. alamo_play: the mod folder dropped onto Play.exe (MODPATH=<absolute folder>), through play_main's resolver.
-        const std::vector<std::wstring> dropped = alamo::play::game_args(fs::path(root), work / "cache", {fs::path(row->path).wstring()});
+        // 2. alamo_play: the folder dropped onto Play.exe (or the variant's argument), through play_main's resolver.
+        const std::wstring user = row->variant.empty() ? fs::path(row->path).wstring() : fs::path(named).wstring();
+        const std::vector<std::wstring> dropped = alamo::play::game_args(fs::path(play_game), work / "cache", {user});
+        const auto stacked = alamo::play::stack_mod_args(
+            dropped, [&](const std::vector<std::string>& picked) { return game::play_launch_args(play_game, picked); });
         std::vector<std::string> play_mods;
-        const auto stacked = alamo::play::stack_mod_args(dropped, [&](const std::vector<std::string>& picked) -> std::optional<std::vector<std::string>> {
-            vfs::ModStack st;
-            std::vector<std::string> launch = game::launch_args_for(root, picked, o, &st);
-            if (st.base_eaw) return std::nullopt;
-            return launch;
-        });
         if (stacked)
             for (const std::wstring& a : *stacked)
                 if (game::is_mod_arg(fs::path(a).string())) play_mods.push_back(fs::path(a).string());
         const std::string play = joined(play_mods);
         // 3. alamo_mod_check --resolve-only (the exe): the stack section's launch list.
-        const std::string js = run_mod_check(mod_check_exe, "--game \"" + root + "\" --resolve-only " + row->arg,
+        const std::string js = run_mod_check(mod_check_exe, "--game \"" + root + "\" --resolve-only " + named,
                                              work / (std::string("resolve_") + std::to_string(&c - cases) + ".json"));
         const std::optional<std::vector<std::string>> resolved = json_strings(js, "launch_args");
         CHECK(resolved.has_value());
@@ -286,6 +297,16 @@ void test_launch_surfaces(const std::string& fixture, const std::string& root, c
         CHECK(play == c.expect);
         CHECK(check == c.expect);
         CHECK(stacked.has_value() == (std::string(c.expect) != ""));  // alamo_play refuses the base-EaW mod
+    }
+    // The full --resolve (a check of the stack, not --resolve-only) mounts the same launch list.
+    {
+        const std::string js = run_mod_check(mod_check_exe,
+                                             "--game \"" + root + "\" --resolve --no-campaigns --no-lua --no-xml-tags --no-shaders --no-assets MODPATH=Mods\\StackSub",
+                                             work / "resolve_full.json");
+        const std::optional<std::vector<std::string>> la = json_strings(js, "launch_args");
+        const std::optional<std::vector<std::string>> dirs = json_strings(js, "mod_dirs");
+        CHECK(la && joined(*la) == "MODPATH=Mods\\StackSub | MODPATH=Mods\\StackParent");
+        CHECK(dirs && dirs->size() == 2);
     }
     // The cycle still launches (an order exists), with its error shown beside it.
     CHECK(has(game::check_picked_mod(root, "Mods\\CycleA", o).stack.errors, "dependency cycle"));
@@ -321,7 +342,6 @@ void test_launch_surfaces(const std::string& fixture, const std::string& root, c
         CHECK(js.find("\"schema\": \"alamo.mod_conflicts\"") != std::string::npos);
     }
     _putenv_s("ALAMO_STEAM_ROOT", "");
-    (void)fixture;
 }
 
 }  // namespace

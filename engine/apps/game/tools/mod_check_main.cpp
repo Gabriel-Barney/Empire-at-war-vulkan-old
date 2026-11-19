@@ -152,7 +152,7 @@ int main(int argc, char** argv) {
             }
             return stack.errors.empty() ? 0 : 1;
         }
-        args = stack.args;
+        args = stack.launch_args();  // ums1 t04: what a launch starts (each folder once)
     }
 
     alamo::game::ModCheckReport report = alamo::game::check_mod_data(game, args, opt);

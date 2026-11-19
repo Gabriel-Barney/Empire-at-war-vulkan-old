@@ -56,6 +56,10 @@ void test_parse() {
                                      &w);
     CHECK(m.has_value());
     if (!m) return;
+    // JSON escapes in a name (the picker's old reader covered these, ums1 t03): \" \\ \uXXXX (a surrogate pair too), a BOM;
+    // a nested "name" (steamdata) is not the mod's.
+    const auto esc = av::parse_modinfo("\xEF\xBB\xBF{\"steamdata\": {\"name\": \"inner\"}, \"name\": \"Outer \\\"Q\\\" \\u00e9\\\\ \\ud83d\\ude00\"}");
+    CHECK(esc && esc->name == "Outer \"Q\" \xC3\xA9\\ \xF0\x9F\x98\x80");
     CHECK(m->name == "Sub \xC3\xA9 A");
     CHECK(m->version == "1.2");
     CHECK(m->has_languages && m->languages.size() == 2);

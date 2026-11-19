@@ -14,6 +14,7 @@
 #include "alamo/data/xml.hpp"
 #include "alamo/data/xml_list.hpp"
 #include "alamo/meg/meg.h"
+#include "alamo/game/mod_picker.hpp"  // is_mod_arg
 #include "alamo/vfs/mod_registry.hpp"
 #include "alamo/vfs/steam_workshop.hpp"
 #include "alamo/vfs/vfs.hpp"
@@ -30,26 +31,6 @@ constexpr std::pair<const char*, const char*> kLists[] = {
     {"TradeRouteFiles.xml", "trade route list"},
     {"CampaignFiles.xml", "campaign list"},
 };
-
-std::string lower_ascii(std::string s) {
-    for (char& c : s)
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-    return s;
-}
-
-// Case-insensitive, '/' == '\\', no trailing separator.
-std::string folder_key(const std::string& p) {
-    std::string k = lower_ascii(p);
-    for (char& c : k)
-        if (c == '/') c = '\\';
-    while (k.size() > 1 && k.back() == '\\') k.pop_back();
-    return k;
-}
-
-bool under(const std::string& path, const std::string& root) {
-    const std::string p = folder_key(path), r = folder_key(root);
-    return p.size() > r.size() && p.compare(0, r.size(), r) == 0 && p[r.size()] == '\\';
-}
 
 // Every loose file of <root>\Data as a normalised game path ("DATA\\XML\\X.XML").
 void loose_files(const std::string& root, std::set<std::string>& out) {
@@ -77,13 +58,12 @@ struct Layered {
 
 std::string display(const Layered& l) { return l.mod.name.empty() ? l.mod.id : l.mod.name; }
 
-// The bytes of mod `m`'s own copy of `path`: the n-th copy in resolution order that the mod's folder holds.
-bool own_copy(const vfs::Vfs& v, const std::string& root, const std::string& path, std::vector<uint8_t>& out) {
-    vfs::Vfs::Resolution where{};
-    for (size_t n = 0; n < 64; ++n) {
-        if (!v.read_nth(path, n, out, &where)) return false;
-        const std::string loc = where.location.substr(0, where.location.find('#'));
-        if (under(loc, root)) return true;
+// The bytes of mod `m`'s own copy of `path`: the copy (resolve_all order) whose layer that mod owns.
+bool own_copy(const vfs::Vfs& v, size_t m, const std::string& path, std::vector<uint8_t>& out) {
+    const std::vector<vfs::Vfs::Resolution> all = v.resolve_all(path);
+    for (size_t n = 0; n < all.size(); ++n) {
+        const vfs::Layer* l = v.layer_of(all[n]);
+        if (l && l->from_mod() && static_cast<size_t>(l->mod) == m) return v.read_nth(path, n, out);
     }
     return false;
 }
@@ -112,9 +92,9 @@ ConflictReport mod_conflicts(const vfs::ModCatalog& catalog, std::span<const std
         r.errors.push_back("the stack does not mount: " + err);
         return r;
     }
-    for (const std::string& a : args) {
+    for (const std::string& a : args) {  // FALLBACKPATH= and other switches are not mods
         std::vector<vfs::ModDescriptor> scratch;
-        if (!catalog.find_arg(a, scratch)) r.errors.push_back("not a mod this install has: " + a);
+        if (is_mod_arg(a) && !catalog.find_arg(a, scratch)) r.errors.push_back("not a mod this install has: " + a);
     }
 
     // The mods as mounted (the VFS's resolved search list), each with its files.
@@ -126,28 +106,23 @@ ConflictReport mod_conflicts(const vfs::ModCatalog& catalog, std::span<const std
         loose_files(dir, l.files);
         mods.push_back(std::move(l));
     }
-    for (const vfs::Vfs::Mount& m : v->mounts())
-        for (Layered& l : mods)
-            if (under(m.path, l.mod.root)) {
-                l.megs.push_back(m.path);
-                std::string e2;
-                const auto a = meg::Archive::open(m.path, meg::Source::Mode::Stream, &e2);
-                if (!a) break;
-                for (const meg::Entry& e : a->entries())
-                    if (a->lookup(e.name)) l.files.insert(normalize_path(e.name));  // the names the game's lookup finds
-                break;
-            }
+    // A mod's MEGs: the MEG layers the VFS says the mod owns (its MegaFiles.xml entries, Patch*.meg); their records the
+    // game's lookup reaches count as the mod's files.
+    for (const vfs::Layer& layer : v->layers()) {
+        if (layer.kind != vfs::Layer::Kind::Meg || !layer.from_mod() || static_cast<size_t>(layer.mod) >= mods.size()) continue;
+        Layered& l = mods[static_cast<size_t>(layer.mod)];
+        l.megs.push_back(layer.host_root);
+        std::string e2;
+        const auto a = meg::Archive::open(layer.host_root, meg::Source::Mode::Stream, &e2);
+        if (!a) continue;
+        for (const meg::Entry& e : a->entries())
+            if (a->lookup(e.name)) l.files.insert(normalize_path(e.name));  // the names the game's lookup finds
+    }
 
-    // Owner of each layer the VFS can answer with: a mod index, or SIZE_MAX for the base game / fallbacks.
+    // Owner of the layer a resolution came from: a mod index, or SIZE_MAX for the base game / fallbacks.
     const auto owner = [&](const vfs::Vfs::Resolution& res) -> size_t {
-        if (res.layer == vfs::Vfs::Resolution::Mod) return static_cast<size_t>(res.layer_index);
-        if (res.layer == vfs::Vfs::Resolution::Meg) {
-            const std::string archive = res.location.substr(0, res.location.find('#'));
-            for (size_t i = 0; i < mods.size(); ++i)
-                for (const std::string& m : mods[i].megs)
-                    if (folder_key(m) == folder_key(archive)) return i;
-        }
-        return SIZE_MAX;
+        const vfs::Layer* l = v->layer_of(res);
+        return l && l->from_mod() ? static_cast<size_t>(l->mod) : SIZE_MAX;
     };
 
     // Every path a mod has: who wins it. Paths in byte order (std::map), mods in load order.
@@ -205,7 +180,7 @@ ConflictReport mod_conflicts(const vfs::ModCatalog& catalog, std::span<const std
         for (const std::string& e : winning) winning_keys.insert(normalize_path(e));
         const std::string a = winner == SIZE_MAX ? std::string("the base game") : display(mods[winner]);
         for (const size_t lower : it->second) {
-            if (lower == winner || !own_copy(*v, mods[lower].mod.root, path, bytes)) continue;
+            if (lower == winner || !own_copy(*v, lower, path, bytes)) continue;
             const std::vector<std::string> ignored = list_entries(bytes, path);
             std::set<std::string> ignored_keys, seen;
             ConflictFinding f;
@@ -242,7 +217,7 @@ ConflictReport mod_conflicts(const vfs::ModCatalog& catalog, std::span<const std
         for (size_t sub = parent + 1; sub < mods.size(); ++sub)
             for (const vfs::ModDependency& d : mods[sub].mod.dependencies) {
                 const vfs::ModDescriptor* p = catalog.find_dependency(d);
-                if (!p || folder_key(p->root) != folder_key(mods[parent].mod.root)) continue;
+                if (!p || p->catalog_key() != mods[parent].mod.catalog_key()) continue;
                 ConflictFinding f;
                 f.kind = "submod_order";
                 f.mods = {sub, parent};

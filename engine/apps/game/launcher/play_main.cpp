@@ -146,25 +146,22 @@ int run() {
     if (game.empty()) return 1;
 
     // ums1 t04: the mods start as the stack the in-game picker and alamo_mod_check --resolve give (one resolver).
-    std::vector<std::string> refusal;
+    vfs::ModStack stack;
     const std::string game_u8 = to_utf8(game);
-    const std::optional<std::vector<std::wstring>> stacked = play::stack_mod_args(
-        play::game_args(game, here / L"cache", own_args()), [&](const std::vector<std::string>& picked) -> std::optional<std::vector<std::string>> {
-            alamo::game::ModCheckOptions o;
-            o.workshop_libraries = vfs::default_install_at(game_u8).steam_libraries;
-            vfs::ModStack stack;
-            std::vector<std::string> launch = alamo::game::launch_args_for(game_u8, picked, o, &stack);
-            if (stack.base_eaw) {
-                refusal = stack.errors;
-                return std::nullopt;
-            }
-            return launch;
-        });
+    const std::optional<std::vector<std::wstring>> stacked =
+        play::stack_mod_args(play::game_args(game, here / L"cache", own_args()),
+                             [&](const std::vector<std::string>& picked) { return alamo::game::play_launch_args(game_u8, picked, &stack); });
     if (!stacked) {
         std::wstring text = L"This mod is not started: the port plays Forces of Corruption mods only.\n";
-        for (const std::string& e : refusal) text += L"\n" + from_utf8(e).wstring();
+        for (const std::string& e : stack.errors) text += L"\n" + from_utf8(e).wstring();
         MessageBoxW(nullptr, text.c_str(), kTitle, MB_OK | MB_ICONWARNING);
         return 1;
+    }
+    if (!stack.errors.empty()) {  // a cycle or a mod that is not installed: the picker shows these beside Launch
+        std::wstring text = L"The mod stack has problems:\n";
+        for (const std::string& e : stack.errors) text += L"\n" + from_utf8(e).wstring();
+        text += L"\n\nStart it anyway?";
+        if (MessageBoxW(nullptr, text.c_str(), kTitle, MB_OKCANCEL | MB_ICONWARNING) != IDOK) return 1;
     }
     const std::vector<std::wstring>& args = *stacked;
     std::wstring line = play::command_line(game_exe, args);

@@ -17,5 +17,9 @@ detects it) and the mods below under `corruption/Mods`, with no game data. Check
 | `EawOnly` | Tagged `EAW` (and not `FOC`): refused before loading, grade G0 (D1) |
 | `EawGuess` | No tags; its object list names none of the files FoC's list has and EaW's lacks (`FocObjects.xml`): loads, with the base-EaW heuristic's warning |
 
+ums1 t06 adds a Steam library, `steamlib` (the launch-surface table sets `ALAMO_STEAM_ROOT` to it): workshop item
+`900000201` has variant files only, `subA` on `Mods\StackParent` and `subB` on `Mods\OtherTc` (2083545253's shape), so
+the table also has `STEAMMOD=` lists and two rows sharing one folder. The other tests here give no Steam library.
+
 The base FoC object list names `BaseObjects.xml` and `FocObjects.xml`; the EaW one (`GameData/Data/XML`) only
 `BaseObjects.xml`. Files are small and edited by hand.

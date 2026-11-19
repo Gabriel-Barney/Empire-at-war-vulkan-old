@@ -127,15 +127,21 @@ reads the same data and starts the same list:
   variant). A row's **catalog key** is unique across kinds: `1125571106`, `2083545253:subA`, `Mods\AOW`, or the host
   path of an extra folder. `ModDescriptor::key()` (`AOW`, `2083545253:subA`) stays the key of save headers and the corpus
   matrix. The picker's rows are the catalog's rows (`game::list_installed_mods`), so a folder with only variant files
-  (2083545253) shows one row per variant and none for the folder.
+  (2083545253) shows one row per variant and none for the folder. Order: workshop items by numeric id across all
+  libraries (the picker's order before ums1), then `Mods\` folders by name, then extra folders. Folders are compared as
+  absolute, normalised paths (any case, either separator), so a game folder or mod folder spelled two ways is one folder
+  (junctions and `subst` drives are not resolved). Two variants of one folder share one argument; the picker marks the
+  one whose declared stack is the running command line as active.
 - **Launch list** (`vfs::resolve` / `ModStack::launch_args`): the resolved stack's arguments, each folder once. Empty for
   a refused base-EaW stack (D1). [port] A cycle still launches in its fallback order (discovery order) with the error
   shown beside it, and an argument that names no installed mod is left out with an error: retail would mount either
   command line, so the port does not refuse more than retail does. The picker's Launch (`game::check_picked_mod`,
-  `mod_launch_args`), `alamo_play` (a dropped folder or mod argument, `game::launch_args_for`; a base-EaW stack gets a
-  message box) and `alamo_mod_check --resolve` (the report's `stack.launch_args`) give the same list;
-  `alamo_game_conformance_stacks_tests` checks the table for `stack_dep`, `stack_cycle`, `eaw_only` and the
-  AOW -> Legacy HD -> TR shape.
+  `mod_launch_args`), `alamo_play` (a dropped folder or mod argument, `game::play_launch_args`; a base-EaW stack gets a
+  message box and does not start, a stack with other errors asks "Start it anyway?") and `alamo_mod_check --resolve`
+  (the report's `stack.launch_args`, which the full `--resolve` check also mounts) give the same list;
+  `alamo_game_conformance_stacks_tests` checks the table for `stack_dep`, `stack_cycle`, `eaw_only`, the
+  AOW -> Legacy HD -> TR shape (the real three are not installed here, §10.4) and a workshop item's two variants
+  (`STEAMMOD=` lists).
 - **JSON for the Command Center.** `alamo_mod_check --list [--mod-dir DIR] [--no-hash] --json FILE|-`: schema
   `alamo.mod_catalog` v1 (install locations and every row; without `--game` / `ALAMO_FOC_DATA` it searches the Steam
   libraries). `alamo_mod_check --conflicts <mod args in load order> --json FILE|-`: schema `alamo.mod_conflicts` v1,

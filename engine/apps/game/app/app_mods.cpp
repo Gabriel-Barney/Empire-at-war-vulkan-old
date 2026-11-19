@@ -31,23 +31,41 @@ const game::InstalledMod* App::find_mod_row(const std::string& key) const {
 }
 
 void App::init_mod_picker(ui::MenuProviders& mp) {
-    workshop_libraries_ = vfs::default_install_at(game_root_).steam_libraries;  // ums1 t01
-    installed_mods_ = game::list_installed_mods(vfs::scan_installed_mods(game_root_, workshop_libraries_, false));
+    const vfs::InstallLocations where = vfs::default_install_at(game_root_);  // ums1 t01
+    workshop_libraries_ = where.steam_libraries;
+    const vfs::ModCatalog catalog = vfs::scan_mod_catalog(where, false);   // ums1 t02 / t03: the rows are the catalog's
+    installed_mods_ = game::list_installed_mods(catalog);
     std::printf("mods: %zu installed (%zu Steam libraries)\n", installed_mods_.size(), workshop_libraries_.size());
-    // The active row: the first mod argument of this run (a stacked submod comes first), else the base game.
+    // The active row: the row of the first mod argument of this run (a stacked submod comes first), else the base game.
+    // Mod arguments compared as folders: '/' == '\\', any case (normalize_name). Variants of one folder share that
+    // argument: the one whose declared stack is this run's mod list is active, else the first.
     const std::vector<std::string> active = mod_args_of(opt_.game_args);
-    // A mod argument's value compared as a folder: '/' == '\\', any case (normalize_name).
-    const std::string active_key = active.empty() ? std::string() : normalize_name(active.front());
-    mp.mods = [this, active_key] {
+    std::string active_row;
+    if (!active.empty()) {
+        std::vector<std::string> run;
+        for (const std::string& a : active) run.push_back(normalize_name(a));
+        bool exact = false;
+        for (const game::InstalledMod& m : installed_mods_) {
+            if (exact || normalize_name(m.arg) != run.front()) continue;
+            if (active_row.empty()) active_row = m.key;
+            std::vector<std::string> stack;
+            for (const std::string& a : vfs::resolve(catalog, std::vector<std::string>{m.key}).launch_args()) stack.push_back(normalize_name(a));
+            if (stack == run) {
+                active_row = m.key;
+                exact = true;
+            }
+        }
+    }
+    const bool base_active = active.empty();
+    mp.mods = [this, active_row, base_active] {
         // Labels: the mod's name and where it is installed; the id (workshop item / folder) only when two mods share a
         // name (several Thrawn's Revenge versions) - the report's "Starts with:" line names it for every row.
         std::map<std::string, size_t> names;
         for (const game::InstalledMod& m : installed_mods_) ++names[m.name];
-        bool active_marked = false;  // two variants share a folder (one argument): the first row is the active one
         std::vector<ui::ModPickerEntry> rows;
         ui::ModPickerEntry base;
         base.label = U"Base game (no mod)";
-        base.active = active_key.empty();
+        base.active = base_active;
         rows.push_back(std::move(base));
         for (const game::InstalledMod& m : installed_mods_) {
             ui::ModPickerEntry e;
@@ -56,8 +74,7 @@ void App::init_mod_picker(ui::MenuProviders& mp) {
             if (m.name != m.id && names[m.name] > 1) label += "  [" + m.key + "]";
             label += m.workshop ? "  (Workshop)" : "  (Mods)";
             e.label = ui::utf8_to_utf32(label);
-            e.active = !active_marked && !active_key.empty() && normalize_name(m.arg) == active_key;
-            active_marked = active_marked || e.active;
+            e.active = !active_row.empty() && m.key == active_row;
             rows.push_back(std::move(e));
         }
         return rows;
