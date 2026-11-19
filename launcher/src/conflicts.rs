@@ -555,6 +555,81 @@ fn submod_warnings(input: &Input, report: &mut Report) {
     }
 }
 
+// ------------------------------------------------------------------ the port's report
+
+/// The check's arguments for a profile's mods in load order: `alamo_mod_check --conflicts` (ums3; the port's VFS
+/// decides who wins each file, MEG records included; docs/MODS.md 3.1.2).
+pub fn conflict_args(foc: &Path, mods: &[PathBuf]) -> Vec<String> {
+    let mut a: Vec<String> = ["--game", &foc.to_string_lossy(), "--conflicts", "--json", "-"].iter().map(|s| s.to_string()).collect();
+    a.extend(mods.iter().map(|m| format!("MODPATH={}", m.to_string_lossy().trim_end_matches(['\\', '/']))));
+    a
+}
+
+/// Reads the JSON `alamo_mod_check --conflicts --json -` prints (`alamo.mod_conflicts`, version 1) into the page's
+/// report. Definition counts are not in it: [`count_definitions`] adds them.
+pub fn parse_conflicts(json: &str) -> Result<Report, String> {
+    use serde_json::Value;
+    let v: Value = serde_json::from_str(json).map_err(|e| format!("the conflict check's report is not JSON: {e}"))?;
+    if v.get("schema").and_then(Value::as_str) != Some("alamo.mod_conflicts") {
+        return Err("not an alamo.mod_conflicts (an alamo_mod_check from before ums1?)".into());
+    }
+    let text = |x: &Value, k: &str| x.get(k).and_then(Value::as_str).unwrap_or_default().to_owned();
+    let count = |x: &Value, k: &str| x.get(k).and_then(Value::as_u64).unwrap_or(0) as usize;
+    let flag = |x: &Value, k: &str| x.get(k).and_then(Value::as_bool).unwrap_or(false);
+    let list = |x: &Value, k: &str| x.get(k).and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut report = Report::default();
+    for m in list(&v, "mods") {
+        report.names.push(text(&m, "name"));
+        report.per_mod.push(ModSummary {
+            exists: flag(&m, "exists"),
+            has_data: flag(&m, "has_data"),
+            files: count(&m, "files"),
+            replaced_files: count(&m, "replaced_files"),
+        });
+    }
+    let n = report.names.len();
+    let index = |x: &Value| x.as_u64().map(|i| i as usize).filter(|i| *i < n);
+    for p in list(&v, "pairs") {
+        let (Some(upper), Some(lower)) = (p.get("winner").and_then(index), p.get("loser").and_then(index)) else { continue };
+        report.pairs.push(PairOverlap {
+            upper,
+            lower,
+            shared_files: list(&p, "files").iter().filter_map(|f| f.as_str().map(str::to_owned)).collect(),
+            xml_files: count(&p, "xml_files"),
+            definitions: 0,
+            lost_definitions: 0,
+        });
+    }
+    for f in list(&v, "findings") {
+        let kind = match text(&f, "kind").as_str() {
+            "list_ignored" => Kind::ListIgnored,
+            "submod_order" => Kind::SubmodOrder,
+            "no_effect" => Kind::NoEffect,
+            "no_data" => Kind::NoData,
+            _ => Kind::Unreadable,
+        };
+        report.warnings.push(Warning {
+            severity: if text(&f, "severity") == "info" { Severity::Info } else { Severity::Warning },
+            kind,
+            text: text(&f, "text"),
+            mods: list(&f, "mods").iter().filter_map(index).collect(),
+            order: flag(&f, "order"),
+        });
+    }
+    for e in list(&v, "errors") {
+        if let Some(e) = e.as_str() {
+            report.warnings.push(Warning {
+                severity: Severity::Warning,
+                kind: Kind::Unreadable,
+                text: format!("The conflict check could not finish: {e}"),
+                mods: Vec::new(),
+                order: false,
+            });
+        }
+    }
+    Ok(report)
+}
+
 // ------------------------------------------------------------------ worker
 
 struct Finished {
@@ -646,6 +721,46 @@ impl Checker {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// `alamo_mod_check --conflicts` on the port's conformance install for the load order Stack Parent, Stack Sub,
+    /// OtherTc, STEAMMOD=900000201 (its first variant), recorded 2026-11-18 with the folder renamed to C:/Fixture.
+    const RECORDED: &str = include_str!("testdata/mod_conflicts.json");
+
+    /// The conflicts page from the recorded report (ums3 t01): who wins, how much of each mod is replaced, the
+    /// warnings in the page's order, warnings before notes.
+    #[test]
+    fn the_conflicts_page_comes_from_the_recorded_report() {
+        let r = parse_conflicts(RECORDED).unwrap();
+        assert_eq!(r.names, ["Stack Parent", "Stack Sub", "OtherTc", "Ws Patch A"]);
+        assert_eq!(r.per_mod.iter().map(|m| (m.files, m.replaced_files)).collect::<Vec<_>>(), [(5, 0), (2, 1), (2, 2), (1, 0)]);
+        assert!(r.per_mod.iter().all(|m| m.exists && m.has_data));
+        assert_eq!(r.pairs.len(), 2);
+        assert_eq!((r.pairs[0].upper, r.pairs[0].lower, r.pairs[0].xml_files), (0, 1, 1));
+        assert_eq!(r.pairs[0].shared_files, ["DATA\\XML\\GAMEOBJECTFILES.XML"]);
+        assert_eq!(r.overrides_of(0).count(), 2);
+        let kinds: Vec<(Kind, Severity)> = r.warnings.iter().map(|w| (w.kind, w.severity)).collect();
+        assert_eq!(
+            kinds,
+            [
+                (Kind::ListIgnored, Severity::Warning),
+                (Kind::SubmodOrder, Severity::Warning),
+                (Kind::SubmodOrder, Severity::Warning),
+                (Kind::NoEffect, Severity::Warning),
+                (Kind::ListIgnored, Severity::Info)
+            ]
+        );
+        assert_eq!(r.warnings[0].mods, [1, 0]);
+        assert!(r.warnings[0].text.contains("SubObjects.xml") && r.warnings[0].order);
+        assert_eq!(r.warnings_for(2).count(), 1);
+        assert_eq!(r.order_warnings().len(), 4);
+        assert!(parse_conflicts("{}").is_err() && parse_conflicts("not json").is_err());
+    }
+
+    #[test]
+    fn the_conflict_check_gets_the_mods_in_load_order() {
+        let a = conflict_args(Path::new("C:\\FoC"), &[PathBuf::from("C:\\m\\Sub\\"), PathBuf::from("C:\\m\\Parent")]);
+        assert_eq!(a, ["--game", "C:\\FoC", "--conflicts", "--json", "-", "MODPATH=C:\\m\\Sub", "MODPATH=C:\\m\\Parent"]);
+    }
 
     static NEXT: AtomicUsize = AtomicUsize::new(0);
 
