@@ -7,13 +7,16 @@
 // 1 / 4 / N threads with golden CRCs, and (ALAMO_FOC_DATA) every shipped land and space map.
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <fstream>
 #include <limits>
+#include <span>
 #include <string>
 #include <thread>
 #include <vector>
@@ -4177,6 +4180,41 @@ static void test_land_obstacle_footprint() {
 }
 #endif
 
+// REF2 t07: the land tick's stages after the walk run in the order docs/re/MOVEMENT.md §3.3 gives ("Port land tick: the
+// stages after the walk", the rows between the land-tail-stages markers); a reorder has to change both.
+void test_land_tail_stages() {
+    std::printf("REF2 t07: the land tick's stages after the walk against docs/re/MOVEMENT.md 3.3\n");
+    const std::span<const MovementSystem::LandStageInfo> stages = MovementSystem::land_tail_stages();
+    CHECK(stages.size() == static_cast<size_t>(MovementSystem::LandStage::Count));
+    for (size_t i = 0; i < stages.size(); ++i) CHECK(static_cast<size_t>(stages[i].stage) < stages.size());
+    std::ifstream f(std::string(ALAMO_DOCS_RE_DIR) + "/MOVEMENT.md", std::ios::binary);
+    CHECK(static_cast<bool>(f));
+    std::vector<std::pair<std::string, std::string>> doc;  // (stage, port function) per table row, in row order
+    bool in = false;
+    for (std::string line; std::getline(f, line);) {
+        if (line.find("<!-- land-tail-stages: begin -->") != std::string::npos) in = true;
+        else if (line.find("<!-- land-tail-stages: end -->") != std::string::npos) in = false;
+        else if (in && line.size() > 2 && line[0] == '|' && std::isdigit(static_cast<unsigned char>(line[2]))) {
+            std::vector<std::string> cells;
+            size_t at = 1;
+            for (size_t bar; (bar = line.find('|', at)) != std::string::npos; at = bar + 1) {
+                std::string c = line.substr(at, bar - at);
+                const size_t b = c.find_first_not_of(" `"), e = c.find_last_not_of(" `");
+                cells.push_back(b == std::string::npos ? std::string() : c.substr(b, e - b + 1));
+            }
+            if (cells.size() >= 3) doc.emplace_back(cells[1], cells[2]);
+        }
+    }
+    CHECK(doc.size() == stages.size());
+    for (size_t i = 0; i < std::min(doc.size(), stages.size()); ++i) {
+        const bool same = doc[i].first == stages[i].name && doc[i].second == stages[i].function;
+        if (!same)
+            std::printf("  row %zu: docs/re says %s (%s), the code runs %s (%s)\n", i + 1, doc[i].first.c_str(), doc[i].second.c_str(),
+                        stages[i].name, stages[i].function);
+        CHECK(same);
+    }
+}
+
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);  // unbuffered: a crash keeps the log
     test_heap();
@@ -4212,6 +4250,7 @@ int main() {
     test_fighter_attack_run();
     test_fighter_dogfight();
     test_fighter_determinism();
+    test_land_tail_stages();  // REF2 t07
 #ifdef ALAMO_MOVEMENT_HAVE_TERRAIN
     test_space_obstacle_footprint();  // S7 t07 / t08
     test_land_obstacle_footprint();   // S8 t02
