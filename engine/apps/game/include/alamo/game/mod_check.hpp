@@ -53,6 +53,10 @@
 #include "alamo/game/game_data.hpp"
 #include "alamo/vfs/vfs.hpp"
 
+namespace alamo::vfs {
+struct InstallLocations;
+}
+
 namespace alamo::game {
 
 struct ModCheckOptions {
@@ -324,7 +328,7 @@ struct ModCheckReport {
     std::vector<vfs::ModDescriptor> mods;
     std::vector<vfs::Vfs::MegIssue> meg_issues;  // mcx3 t04: malformed MEG tables (also in vfs_warnings)
     bool resolved = false;
-    vfs::ResolvedStack stack;
+    vfs::ModStack stack;
     bool base_eaw = false;         // D1: a mounted mod is tagged EAW and not FOC: refused before loading (error, G0)
     // 5.4 heuristic [port], a warning only: "<key>: ..." when a mod's own GameObjectFiles.xml names none of the files
     // FoC's list has and EaW's lacks (both lists read from the install; empty when either is missing).
@@ -361,11 +365,18 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
 // first, and a mod that declares none gets the likely parent of the submod check (check_mod_data on the stack so far
 // with files and submod only, the other checks off). The game itself never resolves: an explicit command line is
 // mounted as written.
-vfs::ResolvedStack resolve_mod_stack(const std::string& root, const std::vector<std::string>& picked, const ModCheckOptions& options);
+vfs::ModStack resolve_mod_stack(const std::string& root, const std::vector<std::string>& picked, const ModCheckOptions& options);
 // mcx7 t01 (alamo_mod_check --list-mods): the installed mods (scan_installed_mods) as JSON, one object per descriptor
 // in registry order: key, arg, kind, id, variant, root, name, version, has_data, game_tag, content_hash (16 hex digits),
 // dependencies [{modtype, identifier}]. Schema "alamo.mod_list", version 1.
 std::string format_mod_list_json(const vfs::ModRegistry& registry);
+// ums1 t05 (alamo_mod_check --list --json): the install and the catalog's rows, everything a launcher shows. Schema
+// "alamo.mod_catalog", version 1: install {foc, eaw, mods_dir, steam_roots [], steam_libraries [], workshop_dirs [] (the
+// libraries' FoC workshop content folders that exist), mod_folders []}, mods [{key (catalog key), save_key
+// (ModDescriptor::key), arg, kind "workshop" | "local" | "path", id, variant, root, name, named, summary, version, icon,
+// published_id, has_modinfo, has_data, game_tag, content_hash (16 hex digits, "0000000000000000" when not hashed),
+// languages [{code, support}], layout, dependencies [{modtype, identifier, name}], warnings []}] in catalog order.
+std::string format_mod_catalog_json(const vfs::ModCatalog& catalog, const vfs::InstallLocations& where);
 // Human-readable report (sections in the order of the file comment). verbose: every diagnostic, else the first 20 of each
 // step and campaign / Lua list.
 std::string format_mod_report(const ModCheckReport& report, bool verbose = false);

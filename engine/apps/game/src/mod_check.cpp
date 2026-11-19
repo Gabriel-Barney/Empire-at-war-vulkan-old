@@ -24,7 +24,9 @@
 #include "alamo/objects/type_fields.hpp"
 #include "alamo/sim/game_modes.hpp"  // sim::kMaxPlayers (mcx5 limit checks)
 #include "alamo/sim/story_rewards.hpp"
+#include "alamo/game/mod_conflicts.hpp"  // format_conflicts_json (ums1 t05)
 #include "alamo/game/mod_picker.hpp"  // mod_folders, workshop_content_dir (cu9 t03)
+#include "alamo/vfs/install_locations.hpp"
 #include "alamo/vfs/vfs.hpp"
 #include "json_text.hpp"  // the JSON string escaper, shared with benchmark.cpp
 #ifdef ALAMO_GAME_HAVE_MATERIALS
@@ -1588,7 +1590,7 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
     return r;
 }
 
-vfs::ResolvedStack resolve_mod_stack(const std::string& root, const std::vector<std::string>& picked, const ModCheckOptions& options) {
+vfs::ModStack resolve_mod_stack(const std::string& root, const std::vector<std::string>& picked, const ModCheckOptions& options) {
     const vfs::ModRegistry registry = vfs::scan_installed_mods(root, options.workshop_libraries, false);  // the stack's mods get hashed
     ModCheckOptions light;
     light.campaigns = light.lua = light.lua_run = light.xml_tags = light.shaders = light.compat = light.assets = false;
@@ -1600,7 +1602,7 @@ vfs::ResolvedStack resolve_mod_stack(const std::string& root, const std::vector<
         if (!r.submod.likely || r.submod.parents.empty()) return std::nullopt;
         return r.submod.parents.front().arg;
     };
-    return vfs::resolve_stack(registry, picked, hint);
+    return vfs::resolve(registry, picked, hint);  // ums1 t04
 }
 
 std::string format_mod_report(const ModCheckReport& r, bool verbose) {
@@ -1973,6 +1975,175 @@ std::string format_mod_list_json(const vfs::ModRegistry& registry) {
     return std::move(j.out);
 }
 
+std::string format_mod_catalog_json(const vfs::ModCatalog& catalog, const vfs::InstallLocations& where) {
+    Json j;
+    j.open('{');
+    j.key("schema");
+    j.str("alamo.mod_catalog");
+    count(j, "version", 1);
+    j.key("install");
+    j.open('{');
+    j.key("foc");
+    j.str(where.foc);
+    j.key("eaw");
+    j.str(where.eaw);
+    j.key("mods_dir");
+    j.str(where.mods_dir());
+    j.strings("steam_roots", where.steam_roots);
+    j.strings("steam_libraries", where.steam_libraries);
+    std::vector<std::string> workshop;
+    for (const std::string& lib : where.steam_libraries) {
+        const fs::path dir = workshop_content_dir(lib);
+        std::error_code ec;
+        if (fs::is_directory(dir, ec)) workshop.push_back(path_to_utf8(dir));
+    }
+    j.strings("workshop_dirs", workshop);
+    j.strings("mod_folders", where.mod_folders);
+    j.close('}');
+    j.key("mods");
+    j.open('[');
+    for (const vfs::ModDescriptor& m : catalog.mods) {
+        j.open('{');
+        j.key("key");
+        j.str(m.catalog_key());
+        j.key("save_key");
+        j.str(m.key());
+        j.key("arg");
+        j.str(m.arg());
+        j.key("kind");
+        j.str(m.kind == vfs::ModKind::Workshop ? "workshop" : m.kind == vfs::ModKind::LocalMods ? "local" : "path");
+        j.key("id");
+        j.str(m.id);
+        j.key("variant");
+        j.str(m.variant);
+        j.key("root");
+        j.str(m.root);
+        j.key("name");
+        j.str(m.name);
+        j.key("named");
+        j.boolean(m.named);
+        j.key("summary");
+        j.str(m.summary);
+        j.key("version");
+        j.str(m.version);
+        j.key("icon");
+        j.str(m.icon);
+        j.key("published_id");
+        j.str(m.published_id);
+        j.key("has_modinfo");
+        j.boolean(m.has_modinfo);
+        j.key("has_data");
+        j.boolean(m.has_data);
+        j.key("game_tag");
+        j.str(m.game_tag == vfs::GameTag::Foc ? "FOC" : m.game_tag == vfs::GameTag::Eaw ? "EAW" : "");
+        char hex[24];
+        std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(m.content_hash));
+        j.key("content_hash");
+        j.str(hex);
+        j.key("languages");
+        j.open('[');
+        for (const vfs::ModLanguage& l : m.languages) {
+            j.open('{');
+            j.key("code");
+            j.str(l.code);
+            count(j, "support", l.support);
+            j.close('}');
+        }
+        j.close(']');
+        j.key("layout");
+        j.str(m.layout == vfs::DependencyLayout::ResolveLastItem ? "ResolveLastItem"
+              : m.layout == vfs::DependencyLayout::FullResolved  ? "FullResolved"
+                                                                 : "ResolveRecursive");
+        j.key("dependencies");
+        j.open('[');
+        for (const vfs::ModDependency& dep : m.dependencies) {
+            j.open('{');
+            count(j, "modtype", dep.modtype);
+            j.key("identifier");
+            j.str(dep.identifier);
+            j.key("name");
+            j.str(dep.name);
+            j.close('}');
+        }
+        j.close(']');
+        j.strings("warnings", m.warnings);
+        j.close('}');
+    }
+    j.close(']');
+    j.close('}');
+    j.out.push_back('\n');
+    return std::move(j.out);
+}
+
+std::string format_conflicts_json(const ConflictReport& r) {
+    Json j;
+    j.open('{');
+    j.key("schema");
+    j.str("alamo.mod_conflicts");
+    count(j, "version", 1);
+    j.key("game");
+    j.str(r.game);
+    j.strings("args", r.args);
+    j.key("mods");
+    j.open('[');
+    for (const ConflictMod& m : r.mods) {
+        j.open('{');
+        j.key("key");
+        j.str(m.key);
+        j.key("name");
+        j.str(m.name);
+        j.key("root");
+        j.str(m.root);
+        j.key("arg");
+        j.str(m.arg);
+        j.key("exists");
+        j.boolean(m.exists);
+        j.key("has_data");
+        j.boolean(m.has_data);
+        count(j, "files", m.files);
+        count(j, "megs", m.megs);
+        count(j, "replaced_files", m.replaced_files);
+        count(j, "base_wins", m.base_wins);
+        j.close('}');
+    }
+    j.close(']');
+    j.key("pairs");
+    j.open('[');
+    for (const ConflictPair& p : r.pairs) {
+        j.open('{');
+        count(j, "winner", p.winner);
+        count(j, "loser", p.loser);
+        count(j, "xml_files", p.xml_files);
+        j.strings("files", p.files);
+        j.close('}');
+    }
+    j.close(']');
+    j.key("findings");
+    j.open('[');
+    for (const ConflictFinding& f : r.findings) {
+        j.open('{');
+        j.key("kind");
+        j.str(f.kind);
+        j.key("severity");
+        j.str(f.warning ? "warning" : "info");
+        j.key("text");
+        j.str(f.text);
+        j.key("mods");
+        j.open('[');
+        for (const size_t i : f.mods) j.num(i);
+        j.close(']');
+        j.key("order");
+        j.boolean(f.order);
+        j.strings("lost", f.lost);
+        j.close('}');
+    }
+    j.close(']');
+    j.strings("errors", r.errors);
+    j.close('}');
+    j.out.push_back('\n');
+    return std::move(j.out);
+}
+
 std::string format_mod_report_json(const ModCheckReport& r) {
     Json j;
     j.open('{');
@@ -2021,6 +2192,8 @@ std::string format_mod_report_json(const ModCheckReport& r) {
     j.key("resolved");
     j.boolean(r.resolved);
     j.strings("args", r.resolved ? r.stack.args : std::vector<std::string>{});
+    // ums1 t04: what a launch starts (vfs::ModStack::launch_args; empty when refused), the picker's and alamo_play's list.
+    j.strings("launch_args", r.resolved ? r.stack.launch_args() : std::vector<std::string>{});
     j.key("mods");
     j.open('[');
     for (const vfs::StackMod& m : r.stack.mods) {
