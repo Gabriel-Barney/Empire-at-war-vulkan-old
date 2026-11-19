@@ -9,6 +9,7 @@
 #include <unordered_map>
 #include <utility>
 
+#include "alamo/core/compat_issue.hpp"
 #include "alamo/core/hash.hpp"
 #include "alamo/core/log.hpp"
 #include "alamo/meg/meg.h"
@@ -287,6 +288,9 @@ struct Vfs::Impl {
     size_t user_fallbacks = 0;         // count of FALLBACKPATH dirs (GameData follows)
     std::vector<std::unique_ptr<meg::Archive>> archives;  // mount order
     std::vector<Mount> mounts;
+    std::vector<int> mount_owner;  // per mount: the mod whose folder it was opened from (Layer::mod), -1 = base game
+    std::vector<Layer> layers;     // resolution order (Vfs::layers), built at the end of create()
+    alamo::IssueSink* issues = nullptr;  // create() only
     std::vector<std::string> warnings;
     std::vector<Vfs::MegIssue> meg_issues;  // mcx3 t04
 
@@ -296,6 +300,52 @@ struct Vfs::Impl {
     }
 
     bool find(const std::string& norm, Hit& out) const { return find_nth(norm, 0, out); }
+
+    // Every copy of `norm` in resolution order (the walk of find_nth, without stopping).
+    std::vector<Hit> find_all(const std::string& norm) const {
+        std::vector<Hit> out;
+        const bool data = is_data_path(norm);
+        if (data) {
+            for (size_t i = 0; i < mods.size(); ++i)
+                if (const std::string* h = mods[i].find(norm)) out.push_back(Hit{Resolution::Mod, static_cast<int>(i), h, nullptr, nullptr});
+            if (const std::string* h = base.find(norm)) out.push_back(Hit{Resolution::Base, 0, h, nullptr, nullptr});
+        }
+        for (size_t i = archives.size(); i-- > 0;)
+            if (const meg::Entry* e = archives[i]->lookup(norm))
+                out.push_back(Hit{Resolution::Meg, static_cast<int>(i), nullptr, archives[i].get(), e});
+        if (data)
+            for (size_t i = 0; i < fallbacks.size(); ++i)
+                if (const std::string* h = fallbacks[i].find(norm))
+                    out.push_back(Hit{Resolution::Fallback, static_cast<int>(i), h, nullptr, nullptr});
+        return out;
+    }
+
+    std::string location_of(const Hit& h) const {
+        return h.archive ? mounts[static_cast<size_t>(h.index)].path + "#" + h.entry->name : *h.host;
+    }
+
+    // Vfs::layers(): mods, base, MEGs newest first, fallbacks (the order find_nth walks).
+    void build_layers() {
+        layers.clear();
+        layers.reserve(mods.size() + 1 + mounts.size() + fallbacks.size());
+        for (size_t i = 0; i < mods.size(); ++i) layers.push_back(Layer{Layer::Kind::Mod, static_cast<int>(i), mods[i].root, static_cast<int>(i)});
+        layers.push_back(Layer{Layer::Kind::Base, 0, base.root, -1});
+        for (size_t i = mounts.size(); i-- > 0;) layers.push_back(Layer{Layer::Kind::Meg, static_cast<int>(i), mounts[i].path, mount_owner[i]});
+        for (size_t i = 0; i < fallbacks.size(); ++i) layers.push_back(Layer{Layer::Kind::Fallback, static_cast<int>(i), fallbacks[i].root, -1});
+    }
+
+    // Index into `layers` of (kind, index); layers.size() when out of range.
+    size_t layer_slot(Resolution::Layer kind, int index) const {
+        if (index < 0) return layers.size();
+        const size_t i = static_cast<size_t>(index);
+        switch (kind) {
+            case Resolution::Mod: return i < mods.size() ? i : layers.size();
+            case Resolution::Base: return i == 0 ? mods.size() : layers.size();
+            case Resolution::Meg: return i < mounts.size() ? mods.size() + 1 + (mounts.size() - 1 - i) : layers.size();
+            case Resolution::Fallback: return i < fallbacks.size() ? mods.size() + 1 + mounts.size() + i : layers.size();
+        }
+        return layers.size();
+    }
 
     // The n-th copy of `norm` in resolution order (0 = what find() returns): the same walk, counting the layers that
     // hold the file instead of stopping at the first.
@@ -338,11 +388,15 @@ struct Vfs::Impl {
     }
 
     // FileClass-style open during FoC mounting: mods -> base -> FALLBACKPATH dirs (GameData is
-    // appended to the fallback list only after the FoC MEGs are mounted).
-    const std::string* find_loose_for_mount(const std::string& norm) const {
+    // appended to the fallback list only after the FoC MEGs are mounted). *owner: the mod whose tree held it, else -1.
+    const std::string* find_loose_for_mount(const std::string& norm, int* owner) const {
+        *owner = -1;
         if (!is_data_path(norm)) return nullptr;
-        for (const auto& m : mods) {
-            if (const std::string* h = m.find(norm)) return h;
+        for (size_t i = 0; i < mods.size(); ++i) {
+            if (const std::string* h = mods[i].find(norm)) {
+                *owner = static_cast<int>(i);
+                return h;
+            }
         }
         if (const std::string* h = base.find(norm)) return h;
         for (size_t i = 0; i < user_fallbacks; ++i) {
@@ -356,7 +410,7 @@ struct Vfs::Impl {
         return !requested.insert(norm).second;
     }
 
-    void mount(const std::string& host, std::string reason) {
+    void mount(const std::string& host, std::string reason, int owner) {
         // Opened through the long ("\\?\", native separators) form so archives under deep roots
         // mount; Mount::path keeps the plain host path for reporting.
         std::string err;
@@ -374,6 +428,17 @@ struct Vfs::Impl {
             const auto add = [&](K kind, uint32_t count, const std::string& first, const std::string& what) {
                 meg_issues.push_back(Vfs::MegIssue{kind, host, count, first});
                 warn(std::string(Vfs::MegIssue::kind_name(kind)) + ": MEG '" + host + "': " + what);
+                // The game reads the table the same way (MODS.md §3.2): retail-equivalent. Index has no issue kind.
+                if (issues && kind != K::Index) {
+                    const IssueKind ik = kind == K::Unsorted    ? IssueKind::MegUnsorted
+                                         : kind == K::Duplicate ? IssueKind::MegDuplicate
+                                                                : IssueKind::MegNameMismatch;
+                    const uint16_t layer = owner >= 0 ? static_cast<uint16_t>(owner) : alamo::kBaseLayer;
+                    issues->add(ik, IssueSeverity::Info, host, host,
+                                std::string(Vfs::MegIssue::kind_name(kind)) + ": " + std::to_string(count) +
+                                    " record(s), first " + first,
+                                true, layer);
+                }
             };
             if (t.unsorted)
                 add(K::Unsorted, t.unreachable, t.first_unreachable,
@@ -395,6 +460,7 @@ struct Vfs::Impl {
         }
         archives.push_back(std::move(a));
         mounts.push_back(Mount{host, std::move(reason)});
+        mount_owner.push_back(owner);
     }
 
     void mount_eaw(const LooseRoot& eaw) {
@@ -405,7 +471,7 @@ struct Vfs::Impl {
                     const std::string norm = normalize_path(f);
                     if (already_mounted(mounted_eaw, norm)) continue;
                     if (const std::string* h = eaw.find(norm)) {
-                        mount(*h, "EaW MegaFiles.xml");
+                        mount(*h, "EaW MegaFiles.xml", -1);
                     } else {
                         warn("EaW MegaFiles.xml entry not found: " + f);
                     }
@@ -418,7 +484,7 @@ struct Vfs::Impl {
             {"DATA\\PATCH.MEG", "EaW Patch"}, {"DATA\\PATCH2.MEG", "EaW patch2"}, {"DATA\\64PATCH.MEG", "EaW 64Patch"}};
         for (const auto& p : kPatches) {
             if (already_mounted(mounted_eaw, p[0])) continue;
-            if (const std::string* h = eaw.find(p[0])) mount(*h, p[1]);
+            if (const std::string* h = eaw.find(p[0])) mount(*h, p[1], -1);
         }
     }
 
@@ -450,8 +516,9 @@ struct Vfs::Impl {
                 if (already_mounted(mounted_foc, norm)) continue;
                 // Normal file open: a mod's copy of the same relative path wins, and the base copy
                 // is then never mounted.
-                if (const std::string* h = find_loose_for_mount(norm)) {
-                    mount(*h, "FoC MegaFiles.xml");
+                int owner = -1;
+                if (const std::string* h = find_loose_for_mount(norm, &owner)) {
+                    mount(*h, "FoC MegaFiles.xml", owner);
                 } else {
                     warn("FoC MegaFiles.xml entry not found: " + f);
                 }
@@ -463,7 +530,8 @@ struct Vfs::Impl {
             {"DATA\\PATCH.MEG", "FoC Patch"}, {"DATA\\PATCH2.MEG", "FoC patch2"}, {"DATA\\64PATCH.MEG", "FoC 64Patch"}};
         for (const auto& p : kPatches) {
             if (already_mounted(mounted_foc, p[0])) continue;
-            if (const std::string* h = find_loose_for_mount(p[0])) mount(*h, p[1]);
+            int owner = -1;
+            if (const std::string* h = find_loose_for_mount(p[0], &owner)) mount(*h, p[1], owner);
         }
     }
 };
@@ -471,8 +539,9 @@ struct Vfs::Impl {
 Vfs::Vfs(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
 Vfs::~Vfs() = default;
 
-std::unique_ptr<Vfs> Vfs::create(const VfsConfig& cfg, std::string* err) {
+std::unique_ptr<Vfs> Vfs::create(const VfsConfig& cfg, std::string* err, alamo::IssueSink* issues) {
     auto impl = std::make_unique<Impl>();
+    impl->issues = issues;
     impl->foc_root = to_host(cfg.foc_root);
     if (cfg.foc_root.empty() || !is_directory_lp(resolve_ci(impl->foc_root))) {
         if (err) *err = "FoC root is not a directory: '" + cfg.foc_root + "'";
@@ -540,16 +609,31 @@ std::unique_ptr<Vfs> Vfs::create(const VfsConfig& cfg, std::string* err) {
         if (!impl->eaw_root.empty()) impl->mount_eaw(impl->fallbacks.back());
         impl->mount_foc();
     }
+    impl->build_layers();
+    impl->issues = nullptr;  // written during create() only
     return std::unique_ptr<Vfs>(new Vfs(std::move(impl)));
 }
 
 std::optional<Vfs::Resolution> Vfs::resolve(std::string_view path) const {
     Hit h;
     if (!impl_->find(normalize_path(path), h)) return std::nullopt;
-    Resolution r{h.layer, {}, h.index};
-    r.location = h.archive ? impl_->mounts[static_cast<size_t>(h.index)].path + "#" + h.entry->name : *h.host;
-    return r;
+    return Resolution{h.layer, impl_->location_of(h), h.index};
 }
+
+std::vector<Vfs::Resolution> Vfs::resolve_all(std::string_view path) const {
+    std::vector<Resolution> out;
+    for (const Hit& h : impl_->find_all(normalize_path(path))) out.push_back(Resolution{h.layer, impl_->location_of(h), h.index});
+    return out;
+}
+
+const std::vector<Layer>& Vfs::layers() const { return impl_->layers; }
+
+const Layer* Vfs::layer_of(const Resolution& r) const {
+    const size_t slot = impl_->layer_slot(r.layer, r.layer_index);
+    return slot < impl_->layers.size() ? &impl_->layers[slot] : nullptr;
+}
+
+uint16_t Layer::issue_layer() const { return mod >= 0 ? static_cast<uint16_t>(mod) : alamo::kBaseLayer; }
 
 bool Vfs::read(std::string_view path, std::vector<uint8_t>& out) const {
     out.clear();
@@ -572,7 +656,7 @@ bool Vfs::read_nth(std::string_view path, size_t n, std::vector<uint8_t>& out, R
     if (where) {
         where->layer = h.layer;
         where->layer_index = h.index;
-        where->location = h.archive ? impl_->mounts[static_cast<size_t>(h.index)].path + "#" + h.entry->name : *h.host;
+        where->location = impl_->location_of(h);
     }
     return true;
 }

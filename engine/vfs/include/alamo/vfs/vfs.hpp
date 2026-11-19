@@ -45,6 +45,9 @@
 namespace alamo::meg {
 class Archive;
 }
+namespace alamo {
+class IssueSink;
+}
 
 namespace alamo::vfs {
 
@@ -81,6 +84,26 @@ struct VfsConfig {
 // recognised switch had an empty value (the other switches are still applied).
 bool parse_command_line(std::span<const std::string> args, VfsConfig& cfg);
 
+// One layer of the resolution order and where it came from (ums0, docs/MODS.md §3.2 "Layers and provenance"). Every
+// Vfs::Resolution names exactly one layer (Vfs::layer_of); code that asks "did this file come from a mod, and which one"
+// reads Layer::mod instead of comparing host paths with the mod folders.
+struct Layer {
+    enum class Kind : uint8_t { Mod, Base, Meg, Fallback };  // = Vfs::Resolution::Layer
+    Kind kind = Kind::Base;
+    // Position within its kind, the same number as Vfs::Resolution::layer_index: Mod = search-list position (earliest 0),
+    // Base = 0, Meg = mount index (0 = first mounted, lowest priority), Fallback = FALLBACKPATH dirs, then GameData last.
+    int index = 0;
+    // Mod / Base / Fallback: the folder as configured (the layer is its Data\ subtree). Meg: the .meg host path.
+    std::string host_root;
+    // The mod that owns the layer: its position in the effective mod search list (Vfs::mod_dirs() order, which is also the
+    // order of the per-mod descriptor lists, e.g. GameData::mods) for a Mod layer and for a MEG opened from a mod's own
+    // folder (a mod MegaFiles.xml entry or Patch*.meg); -1 = the base game (FoC, EaW, FALLBACKPATH dirs, their MEGs).
+    int mod = -1;
+    bool from_mod() const { return mod >= 0; }
+    // CompatIssue::layer for a finding in this layer (compat_issue.hpp): the mod's index, or kBaseLayer.
+    uint16_t issue_layer() const;
+};
+
 class Vfs final : public alamo::FileProvider {
 public:
     struct Resolution {
@@ -98,7 +121,9 @@ public:
 
     // Returns nullptr (and *err) only if foc_root is not a directory. Missing EaW, missing
     // MegaFiles.xml entries and unreadable MEGs are recorded in warnings() and skipped.
-    static std::unique_ptr<Vfs> create(const VfsConfig& cfg, std::string* err = nullptr);
+    // `issues`, when given, also receives the malformed MEG tables of meg_issues() as retail-equivalent CompatIssues with
+    // the archive's layer (Layer::issue_layer); it is only written during create(). Diagnostics only (compat_issue.hpp).
+    static std::unique_ptr<Vfs> create(const VfsConfig& cfg, std::string* err = nullptr, alamo::IssueSink* issues = nullptr);
     ~Vfs() override;
     Vfs(const Vfs&) = delete;
     Vfs& operator=(const Vfs&) = delete;
@@ -113,6 +138,15 @@ public:
     // read fails. `where`, when given, receives the copy's layer and location. For a fallback when a mod's copy of a
     // file fails to load; normal reads never use it.
     bool read_nth(std::string_view path, size_t n, std::vector<uint8_t>& out, Resolution* where = nullptr) const;
+    // Every copy of `path` in resolution order (ums0): [0] is resolve(path), [1] the copy the next layer down holds, ...
+    // (the copies read_nth reads). Empty when no layer has the file.
+    std::vector<Resolution> resolve_all(std::string_view path) const;
+
+    // The layers in resolution order, highest priority first: the mods (search order), the base FoC folder, the MEGs
+    // newest-mounted first, the fallback folders (FALLBACKPATH dirs, then GameData). Loose layers serve Data\ paths only.
+    const std::vector<Layer>& layers() const;
+    // The layer a resolution came from; nullptr when `r` names none (an index out of range).
+    const Layer* layer_of(const Resolution& r) const;
 
     // Union of all logical paths matching `glob` over every layer, each once, normalised
     // (upper-case, '\\'), in retail's find order (mcx3 t13): the mod trees, the base tree (each in byte order), then
