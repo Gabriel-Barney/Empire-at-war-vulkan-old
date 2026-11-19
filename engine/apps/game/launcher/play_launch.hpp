@@ -37,8 +37,10 @@ struct FindInputs {
     std::vector<std::filesystem::path> fixed;    // last resort install folders (GOG)
 };
 
-// The game folder, or empty when none of the inputs names one.
-std::filesystem::path find_game(const FindInputs& in);
+// The game folder, or empty when none of the inputs names one. `steam_libraries` (when given) receives the Steam library
+// folders the search found (UTF-8, vfs::InstallLocations::steam_libraries), so the caller does not walk Steam again
+// (ums2 t07).
+std::filesystem::path find_game(const FindInputs& in, std::vector<std::string>* steam_libraries = nullptr);
 
 // --game <game> --cache-dir <cache>, then `user` in order; an argument that is a folder holding a Data folder (or a
 // Data folder itself) becomes MODPATH=<that folder, absolute>.

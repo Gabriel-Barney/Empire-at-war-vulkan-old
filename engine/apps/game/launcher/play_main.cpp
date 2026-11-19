@@ -141,16 +141,19 @@ int run() {
     in.fixed = {L"F:\\SteamLibrary\\steamapps\\common\\Star Wars Empire at War\\corruption",
                 L"C:\\GOG Games\\Star Wars - Empire at War\\corruption",
                 L"C:\\Program Files (x86)\\GOG Galaxy\\Games\\Star Wars - Empire at War\\corruption"};
-    fs::path game = play::find_game(in);
-    if (game.empty()) game = ask_for_game(in.saved_file);
+    std::vector<std::string> libraries;  // ums2 t07: the search's Steam libraries, reused by the resolver
+    fs::path game = play::find_game(in, &libraries);
+    const bool asked = game.empty();
+    if (asked) game = ask_for_game(in.saved_file);
     if (game.empty()) return 1;
+    const std::vector<std::string>* found_libraries = asked ? nullptr : &libraries;  // a folder the user picked: walk from it
 
     // ums1 t04: the mods start as the stack the in-game picker and alamo_mod_check --resolve give (one resolver).
     vfs::ModStack stack;
     const std::string game_u8 = to_utf8(game);
     const std::optional<std::vector<std::wstring>> stacked =
         play::stack_mod_args(play::game_args(game, here / L"cache", own_args()),
-                             [&](const std::vector<std::string>& picked) { return alamo::game::play_launch_args(game_u8, picked, &stack); });
+                             [&](const std::vector<std::string>& picked) { return alamo::game::play_launch_args(game_u8, picked, &stack, found_libraries); });
     if (!stacked) {
         std::wstring text = L"This mod is not started: the port plays Forces of Corruption mods only.\n";
         for (const std::string& e : stack.errors) text += L"\n" + from_utf8(e).wstring();

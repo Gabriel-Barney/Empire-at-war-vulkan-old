@@ -113,9 +113,9 @@ std::vector<std::string> launch_args_for(const std::string& game, const std::vec
 }
 
 std::optional<std::vector<std::string>> play_launch_args(const std::string& game, const std::vector<std::string>& picked,
-                                                         vfs::ModStack* stack) {
+                                                         vfs::ModStack* stack, const std::vector<std::string>* steam_libraries) {
     ModCheckOptions o;
-    o.workshop_libraries = vfs::default_install_at(game).steam_libraries;
+    o.workshop_libraries = steam_libraries ? *steam_libraries : vfs::default_install_at(game).steam_libraries;
     vfs::ModStack s;
     std::vector<std::string> launch = launch_args_for(game, picked, o, &s);
     const bool refused = s.base_eaw;

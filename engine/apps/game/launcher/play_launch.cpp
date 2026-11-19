@@ -74,7 +74,7 @@ std::wstring first_line_utf8(std::string_view bytes) {
     }
 }
 
-fs::path find_game(const FindInputs& in) {
+fs::path find_game(const FindInputs& in, std::vector<std::string>* steam_libraries) {
     // ums1 t01: one search (vfs::find_install) for every launch surface; this side only reads game_path.txt.
     vfs::InstallInputs v;
     if (!in.saved_file.empty() && path_exists(in.saved_file)) {
@@ -91,7 +91,9 @@ fs::path find_game(const FindInputs& in) {
     for (const fs::path& r : in.steam_roots) v.steam_roots.push_back(utf8(r));
     for (const fs::path& lib : in.steam) v.steam_libraries.push_back(utf8(lib));
     for (const fs::path& dir : in.fixed) v.fixed.push_back(utf8(dir));
-    return from_utf8(vfs::find_install(v).foc);
+    vfs::InstallLocations where = vfs::find_install(v);
+    if (steam_libraries) *steam_libraries = std::move(where.steam_libraries);
+    return from_utf8(where.foc);
 }
 
 std::vector<std::wstring> game_args(const fs::path& game, const fs::path& cache, const std::vector<std::wstring>& user) {
