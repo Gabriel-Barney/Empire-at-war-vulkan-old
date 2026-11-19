@@ -374,6 +374,14 @@ their own copies; mods and the retail load order do not change.
   wins; definition counts still come from unitdb's own reading of the shared XML files, so they can differ from the
   port's winner on a file the port reaches through a MEG. `alamo_mod_check` reads its arguments as UTF-8 from the wide
   command line, and modinfo `description` stands in for a missing `summary`.
+- **Shims removed (ums4, 2026-11-19; lane defaults, Gabriel may overturn them).** The stack resolver's parent hint
+  comes from the files alone (`game::submod_hint`, `alamo_mod_resolve`), so Play.exe no longer links the data loaders;
+  it also hints for a stack whose data does not load (a refused base-EaW stack still gets none). The Command Center's
+  mod hunt takes parents from declared `modinfo.json` dependencies (the catalog JSON) instead of Workshop ids found in
+  the file's text, as the conflicts page already did (ums3). A loader diagnostic's issue layer is the layer of the
+  first game file its text names (`docs/MODS.md` §5.1, version 5). Folder identity follows junctions, symbolic links
+  and `subst` drives (`vfs::folder_key`). `tools/lint/check_mod_system.py` keeps `Vfs::mod_dirs()` inside
+  `engine/vfs` and `modinfo.json` inside the mod catalog. Mods, the retail load order and user configs are unchanged.
 - **`unitdb.rs` keeps its own XML and MEG readers (ums3 t04, decided by Gabriel's rule of 2026-11-18: keep them unless
   the JSON of the ums1 tasks already carries what they read; no new JSON surface).** The Units page indexes every XML
   definition a profile loads and edits values in place; `--list` carries mod rows, `--conflicts` only the winners of

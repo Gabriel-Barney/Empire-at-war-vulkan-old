@@ -96,7 +96,7 @@ tools that build a command line resolve a **stack** first (`engine/vfs/include/a
   missing comma between members (a warning; 2498889654's `sub-modinfo.json` has one), `<variant>-modinfo.json` files
   (one descriptor each, the main file's values as defaults; 2083545253 has only `subA` / `subB`). Missing `languages`
   means English. Nothing in gameplay reads a descriptor (retail never opens `modinfo.json`).
-- **Resolution** (`vfs::resolve_stack`, `alamo_mod_check --resolve`, the launcher, the mod picker): the picked mods,
+- **Resolution** (`vfs::resolve`, `alamo_mod_check --resolve`, the launcher, the mod picker): the picked mods,
   then each one's declared dependencies (breadth-first, the spec's layouts `ResolveRecursive` / `ResolveLastItem` /
   `FullResolved`), and for a mod that declares none the submod hint's likely parent (§5). A cycle is an error naming it;
   a parent that is not installed is a warning; two total conversions (each with its own `GameObjectFiles.xml` and
@@ -123,14 +123,17 @@ reads the same data and starts the same list:
 - **Install locations** (`vfs::InstallLocations`, `install_locations.hpp`): the FoC folder, the EaW `GameData` beside
   it, the Steam roots and libraries (§3.1), the folders the user named (`game_path.txt`, `ALAMO_FOC_DATA`) and the
   user's extra mod folders. The game search is Play.cmd's order; `alamo_play`'s `find_game` forwards to it.
-- **Catalog** (`vfs::ModCatalog`, the registry's new name; `ModRegistry` is an alias until ums4): one row per (folder,
+- **Catalog** (`vfs::ModCatalog`, the registry's new name; the `ModRegistry` alias went in ums4): one row per (folder,
   variant). A row's **catalog key** is unique across kinds: `1125571106`, `2083545253:subA`, `Mods\AOW`, or the host
   path of an extra folder. `ModDescriptor::key()` (`AOW`, `2083545253:subA`) stays the key of save headers and the corpus
-  matrix. The picker's rows are the catalog's rows (`game::list_installed_mods`), so a folder with only variant files
+  matrix. The picker's rows are the catalog's rows themselves (ums4 t01: the adapter is gone), so a folder with only variant files
   (2083545253) shows one row per variant and none for the folder. Order: workshop items by numeric id across all
-  libraries (the picker's order before ums1), then `Mods\` folders by name, then extra folders. Folders are compared as
-  absolute, normalised paths (any case, either separator), so a game folder or mod folder spelled two ways is one folder
-  (junctions and `subst` drives are not resolved). Two variants of one folder share one argument; the picker marks the
+  libraries (the picker's order before ums1), then `Mods\` folders by name, then extra folders. Folders are compared by
+  `vfs::folder_key` (`host_path.hpp`, ums4 t04 / t06: the one rule for the catalog, the launch list, the Steam library
+  list and the submod hint): absolute, normalised, any case, either separator, and for a folder that exists the final
+  path the file system reaches it by, so a junction, a symbolic link or a `subst` drive leads to the folder it points
+  at. A game folder or mod folder spelled two ways, or reached through a junction, is one folder and one catalog row.
+  Two variants of one folder share one argument; the picker marks the
   one whose declared stack is the running command line as active.
 - **Launch list** (`vfs::resolve` / `ModStack::launch_args`): the resolved stack's arguments, each folder once. Empty for
   a refused base-EaW stack (D1). [port] A cycle still launches in its fallback order (discovery order) with the error
@@ -142,6 +145,16 @@ reads the same data and starts the same list:
   `alamo_game_conformance_stacks_tests` checks the table for `stack_dep`, `stack_cycle`, `eaw_only`, the
   AOW -> Legacy HD -> TR shape (the real three are not installed here, §10.4) and a workshop item's two variants
   (`STEAMMOD=` lists).
+- **The resolver library (ums4 t05).** `game::resolve_mod_stack`, `launch_args_for` and `play_launch_args` live in
+  `alamo_mod_resolve` (`mod_resolve.hpp`), which needs only the VFS and the XML list reader, so `alamo_play` (Play.exe)
+  no longer links `alamo_game_core`. The parent hint it asks for a mod without declared dependencies comes from the
+  files alone (`game::submod_hint`: mount the stack, the `Data\XML` entries its own list files name and no layer has,
+  the installed mods that have them); before ums4 it ran the load report (`check_mod_data`, a full data load) for that.
+  The load report's `submod` section gives the same answer from its own missing-file list (`find_submod_parents`), with
+  one difference kept on purpose: the resolver also hints for a stack whose data does not load (only a refused
+  base-EaW stack gets no hint), where the report has no `submod` section. The candidates are the catalog's workshop
+  items and `Mods\` folders (the report searched the folders itself before ums4); `mentioned` reads
+  `ModDescriptor::modinfo_numbers` (the catalog's copy of the digit runs of a mod's `modinfo.json`).
 - **JSON for the Command Center.** `alamo_mod_check --list [--mod-dir DIR] [--no-hash] --json FILE|-`: schema
   `alamo.mod_catalog` v1 (install locations and every row; without `--game` / `ALAMO_FOC_DATA` it searches the Steam
   libraries). `alamo_mod_check --conflicts <mod args in load order> --json FILE|-`: schema `alamo.mod_conflicts` v1,
@@ -203,9 +216,13 @@ mod system refactor").
   odd setups (a FALLBACKPATH folder inside a mod folder, a mod folder that contains the FoC install): the effect audit
   now counts those archives as base.
 - **Ask the layer, not the path.** "Is this file from a mod, and which one" reads `Layer::mod`, not a comparison of host
-  paths with the mod folders. Moved so far: `shader_files_from_vfs` (ShaderFileEntry `from_mod` / `dir_order`), the SFX
-  archive list, the load report's MEG issues and its issue layers (ums2), `--conflicts` (`Vfs::layer_files`); the asset
-  audit and a few report helpers still read `mod_dirs()` until ums4 removes the last callers outside `engine/vfs`.
+  paths with the mod folders. Moved: `shader_files_from_vfs` (ShaderFileEntry `from_mod` / `dir_order`), the SFX
+  archive list, the load report's MEG issues and its issue layers (ums2), `--conflicts` (`Vfs::layer_files`), and in
+  ums4 the asset audit, the report's `files.mod_dirs`, the game's font roots and the skirmish buy list's mod test. No
+  code outside `engine/vfs` calls `Vfs::mod_dirs()`, and only the mod catalog (`mod_registry.cpp`) reads
+  `modinfo.json`: `tools/lint/check_mod_system.py` (ctest `alamo_core_mod_system_lint`, and the gate) keeps it so, and
+  also refuses the removed names (`list_installed_mods`, `resolve_stack`, `scan_installed_mods`, `ModRegistry`,
+  `ResolvedStack`). The Command Center's mod hunt takes a mod's parents from the catalog's declared dependencies.
 - **One walk for every copy.** `Vfs::resolve_all(path)` returns every copy in resolution order (`[0]` is what `read`
   returns); code that needs the lower copies (the SFX archives, which a mod's copy layers over FoC's:
   `docs/re/AUDIO.md` §5, aud2 t05) takes them from there instead of building `<mod>\Data\...` paths by hand.
@@ -461,7 +478,7 @@ mod. The compatibility patch `AOW_Thrawns_Legacy_Compatibility` (no declared dep
 alone to itself, then Thrawn's Revenge 1125571106 (Thrawn's Legacy HD is not installed here, so the chain stops at TR;
 the conformance mod `StackTop` covers the full three-level shape).
 
-### 5.1 The machine-readable summary (`alamo.mod_report`, version 4)
+### 5.1 The machine-readable summary (`alamo.mod_report`, version 5)
 
 One JSON object, UTF-8 (bytes of the data that are not UTF-8 are written as the Latin-1 character of that value), keys in
 the order below, every list complete. A new key may be added in a later version of the same number; a key is never
@@ -469,12 +486,12 @@ removed or changed in meaning without raising `version`. Paths are game-relative
 
 | Key | Type | Meaning |
 |---|---|---|
-| `schema`, `version` | string, number | `"alamo.mod_report"`, `4` |
+| `schema`, `version` | string, number | `"alamo.mod_report"`, `5` |
 | `result` | string | `"ok"` (no errors) or `"errors"` |
 | `errors`, `warnings` | number | as the text report's result line (levels in the table above) |
 | `game`, `args` | string, [string] | the FoC folder and the VFS command line as given |
 | `loaded`, `load_error` | bool, string | whether the data loaded; why not |
-| `files` | object | `mod_dirs` [host path], `vfs_warnings` [string], `added`, `replaced` (mod files with no lower-layer copy / replacing one), `folders` [{`folder` (the first folder below `Data`, `""` for `Data` itself), `added`, `replaced`}] |
+| `files` | object | `mod_dirs` [host path], `added`, `replaced` (mod files with no lower-layer copy / replacing one), `folders` [{`folder` (the first folder below `Data`, `""` for `Data` itself), `added`, `replaced`}] |
 | `loaders` | [object] | per loader step in load order: `name`, `ok`, `ms` (wall clock, varies per run), `diagnostics` [string] |
 | `content` | object | `campaigns`, `planets`, `trade_routes`, `object_types`, `factions`, `ai` (bool: AI data loaded), `ai_plans`, `tactical_space_plans`, `tactical_land_plans`, `official_maps`, `custom_maps`, `skirmish_maps` [{`map`, `kind` (`"land"` / `"space"`), `players`, `in_mod`, `custom`}] (mcx7: the Official tab's rows, then the Custom tab's, in menu order; the corpus runner's map pick) |
 | `campaigns` | object | `checked`, `without_planets` [campaign name] (warnings: menu entries that cannot be started; when it lists every checked campaign, one error), `startable` [campaign name] (mcx7: the checked campaigns with planets, database order), `skipped_rows` (number of skipped rows over all campaigns), `warnings` [one line per message with its campaigns] |
@@ -492,7 +509,7 @@ removed or changed in meaning without raising `version`. Paths are game-relative
 | `limits` | [object] | (v4) `limit`, `value`, `needed`: data that hits a guard or a cited retail limit (filled by `mcx5`; empty until then) |
 | `assets` | object | (v4, mcx2 t01; only with a mod mounted and the data loaded; `--no-assets` leaves it out) every model, particle, animation, texture, map, sound and movie a mod layer serves (loose or in the mod's MEGs; not in `.`-folders), decoded with the runtime decoders: `checked`, `decoded`, `salvaged_count`, `rejected_count`, `retail_equivalent`, `salvaged` [{`path`, `family`, `rule`}], `rejected` [{`path`, `family`, `reason`, `retail_equivalent`}], `by_family` {name: {`checked`, `decoded`, `salvaged`, `rejected`}}. A rejection retail shares (`docs/re/MCX2_T02_ASSET_SALVAGE.md`) never blocks G3; `--strict` counts every salvage as a rejection; `--corpus-cache DIR` caches verdicts by content hash |
 | `grade` | object | (v4) `grade` (`"G0"` errors, `"G1"` loads; G2 and up need runs), `g3_static` (bool: no honour gap, binding gap, missing reward or missing token from the mod's own files; the gaps base FoC content has are the tag ledger's and mcx4's, not the mod's, so they do not count here), `blocking` [`"<issue kind> <subject>"`], `check_errors` [string] (a version 4 check that threw; not counted in `errors`) |
-| `issues` | array | (v4, ums2) every `CompatIssue` record in first-add order: `kind` (`compat_issue.hpp` spelling), `severity`, `subject`, `source`, `layer` (the owning mod's index in the search list, `"base"` or `"none"`), `retail_equivalent`, `count`, `detail`. The v4 lists above are views of it; it also holds the VFS's findings (§3.2) |
+| `issues` | array | (v4, ums2) every `CompatIssue` record in first-add order: `kind` (`compat_issue.hpp` spelling), `severity`, `subject`, `source`, `layer` (the owning mod's index in the search list, `"base"` or `"none"`), `retail_equivalent`, `count`, `detail`. The v4 lists above are views of it; it also holds the VFS's findings (§3.2) and (v5) the loader steps' diagnostics (`loader_diagnostic`) |
 
 `in_mod` is true when the file the finding comes from resolves to a mod folder. The synthetic mods of
 `engine/apps/game/testdata/mod_fixture` (modc t07, t12, t15, t16; README there) are checked through this summary in ctest
@@ -519,6 +536,18 @@ they change no `grade` or `blocking` entry (whether one should is for ums5's re-
 (ums2 t04, `--stages check` sweeps of the pre-ums2 dev tip 358089b7 and the ums2 build, 9 setups): every version 4
 list, `grade` and `files` value is unchanged; only `issues` is new (314-397 records a setup; a submod stack puts its
 parent's findings on layer 1, e.g. 2083545253:subA over Thrawn's Revenge).
+
+Version 5 (ums4 t02 / t07, 2026-11-19): `files.vfs_warnings` is gone; the same findings are `issues` records with their
+layer since ums2 (the text report keeps its "VFS warnings" lines, and `warnings` still counts them). New `issues` records
+of kind `loader_diagnostic`: one per distinct line of a loader step's diagnostics (`loaders[].diagnostics`), `subject`
+the line, `detail` "loader step <name>", `source` the first game file the line names (a `Data\...` path, or a bare
+`<name>.xml` that `Data\XML` has), and `layer` that file's layer: the mod serving it, `"base"`, or `"none"` when the
+line names no file or a file no layer has. Like the VFS's findings they are added after the grade is set and change no
+grade, `result`, `errors` or `warnings` (they were counted as warnings before). A load that stops now has an `issues`
+list too (the VFS's findings and the loader steps that ran). Readers of version 4 keys other than `files.vfs_warnings`
+need no change: the Command Center reads `stack`, `grade` and `base_eaw`, the corpus runner `grade`, `errors`, `stack`.
+Base FoC (2026-11-19): two `loader_diagnostic` records, the duplicate trade routes of `Data\XML\TradeRoutes.xml`, layer
+`"base"`.
 
 Installed mods, 2026-11-07 (base FoC at F:): with modc t22 (SM3 translated) the shader issues left are
 `AlamoEngine` `source_shadowed` (an engine effect: TR, its copy 3622043265, FotR) and `_TerrainRenderBump`
@@ -602,6 +631,9 @@ Each needs either a data-driven replacement or a `docs/re/` citation showing the
 | Shader model 3 in shaderxlat | modc t22 |
 | `.fx` source compilation (prebuild / cached) | modc t23 |
 | VFS layers and provenance (`vfs::Layer`, `layer_of`, `resolve_all`); effects and SFX off `mod_dirs()` (§3.2) | ums0 |
+| One catalog and one resolver (`InstallLocations`, `ModCatalog`, `vfs::resolve`); `--list` / `--conflicts` JSON (§3.1.2) | ums1 |
+| One mod environment per process (`vfs::ModEnvironment`); VFS findings as issues with a layer (§3.2, §5.1) | ums2 |
+| Shims removed: no `mod_dirs()` caller outside `engine/vfs`, one `modinfo.json` reader, `alamo_mod_resolve` for Play.exe, `vfs::folder_key` through junctions and `subst`, report v5 with loader diagnostics as issues, `check_mod_system.py` (§3.1.2, §3.2, §5.1) | ums4 |
 
 ## 9. Second mod (modc t06)
 
