@@ -926,17 +926,7 @@ void BattleAi::capture_lane_view() {
     }
     std::sort(view_.in_flight.begin(), view_.in_flight.end());
     // Weather sight factors by Weather_Category (the categories of the types, resolved once).
-    const objects::GameObjectTypes& types = b_->catalog_->types();
-    if (weather_category_.size() != types.size()) {
-        weather_category_.assign(types.size(), -1);
-        weather_categories_.clear();
-        for (size_t t = 0; t < types.size(); ++t) {
-            const std::string_view c = types.get_string(static_cast<objects::TypeIndex>(t), "Weather_Category");
-            const auto it = std::find(weather_categories_.begin(), weather_categories_.end(), c);
-            weather_category_[t] = static_cast<int32_t>(it - weather_categories_.begin());
-            if (it == weather_categories_.end()) weather_categories_.emplace_back(c);
-        }
-    }
+    resolve_weather_categories();
     view_.weather_sight.assign(weather_categories_.size(), 1.0f);
     if (!b_->space_)
         for (size_t c = 0; c < weather_categories_.size(); ++c) view_.weather_sight[c] = b_->weather().sight_modifier(weather_categories_[c]);
@@ -3340,15 +3330,31 @@ std::vector<ai::tactical::ReinforcementsUnloaded> BattleAi::reinforcements_unloa
     lane_unloaded_.clear();
     return out;
 }
+// The Weather_Category of every type, resolved once per type table: weather_category_[type] indexes weather_categories_.
+void BattleAi::resolve_weather_categories() {
+    const objects::GameObjectTypes& types = b_->catalog_->types();
+    if (weather_category_.size() == types.size()) return;
+    weather_category_.assign(types.size(), -1);
+    weather_categories_.clear();
+    for (size_t t = 0; t < types.size(); ++t) {
+        const std::string_view c = types.get_string(static_cast<objects::TypeIndex>(t), "Weather_Category");
+        const auto it = std::find(weather_categories_.begin(), weather_categories_.end(), c);
+        weather_category_[t] = static_cast<int32_t>(it - weather_categories_.begin());
+        if (it == weather_categories_.end()) weather_categories_.emplace_back(c);
+    }
+}
+
 float BattleAi::sight_weather_factor(int32_t type, int32_t) {
     if (lane_view()) {
         if (type < 0 || static_cast<size_t>(type) >= weather_category_.size()) return 1.0f;
         const int32_t c = weather_category_[static_cast<size_t>(type)];
         return c < 0 ? 1.0f : view_.weather_sight[static_cast<size_t>(c)];
     }
-    const objects::GameObjectTypes& types = b_->catalog_->types();
-    if (b_->space_ || type < 0 || static_cast<size_t>(type) >= types.size()) return 1.0f;
-    return b_->weather().sight_modifier(types.get_string(static_cast<objects::TypeIndex>(type), "Weather_Category"));
+    if (b_->space_ || type < 0) return 1.0f;
+    resolve_weather_categories();  // REF1 t04: the cached category, not a per-call type string lookup
+    if (static_cast<size_t>(type) >= weather_category_.size()) return 1.0f;
+    const int32_t c = weather_category_[static_cast<size_t>(type)];
+    return c < 0 ? 1.0f : b_->weather().sight_modifier(weather_categories_[static_cast<size_t>(c)]);
 }
 
 // [port] The S10 stand-in (TacticalBattle::issue_orders, REF1 t02) for the sides that have no tactical AI, on its own

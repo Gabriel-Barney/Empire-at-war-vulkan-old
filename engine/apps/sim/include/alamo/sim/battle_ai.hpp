@@ -419,6 +419,7 @@ private:
     static bool lane_write_command(const commands::EventData& ev);
     std::vector<int32_t> weather_category_;  // per type: index into weather_categories_ (-1: none)
     std::vector<std::string> weather_categories_;
+    void resolve_weather_categories();  // fills the two above once per type table (REF1 t04)
     void capture_lane_view();
     void set_build_time_multipliers();  // skm1 t04: TacticalBattle::ai_build_time_mult_ after the world's start
     // sp3 slice 4c: TacticalBattle::unit_by_id / team_units / hostile_owner on the view (predict_order on the AI lane).
