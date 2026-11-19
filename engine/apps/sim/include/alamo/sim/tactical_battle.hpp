@@ -1845,7 +1845,10 @@ private:
     std::vector<LandingUnload> landings_unloaded_;    // transient (not saved): see landings_unloaded()
     std::vector<ProductionDone> production_done_;     // q6 t19, transient (not saved): see production_done()
     void reinforce(TacticalMode& mode, SimRng& rng, bool force_empty_sides);
-    void issue_orders(TacticalMode& mode, SimRng& rng);
+    // The S10 stand-in [port] (REF1 t02: the one copy; BattleAi::standin_orders calls it): each movable unit not skipped
+    // attacks its nearest enemy (land: the auto-attack block push; space: a move to 70 % of its range). `skip_owner`
+    // leaves out the owners another orderer drives (BattleAi: the players its tactical AI controls); empty = none.
+    void issue_orders(TacticalMode& mode, SimRng& rng, const std::function<bool(int32_t)>& skip_owner = {});
     void retreat_policy();
     void complete_retreat(TacticalMode& mode, uint8_t side);
     // --- TRU1 t06: space retreat jump-out flight (TRU1_C_RE §2; tactical_battle_retreat.cpp) ---
