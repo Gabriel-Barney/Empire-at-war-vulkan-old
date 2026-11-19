@@ -51,6 +51,7 @@
 #include "alamo/core/compat_issue.hpp"
 #include "alamo/game/asset_audit.hpp"
 #include "alamo/game/game_data.hpp"
+#include "alamo/game/mod_resolve.hpp"  // SubmodHint (ums4 t05)
 #include "alamo/vfs/vfs.hpp"
 
 namespace alamo::vfs {
@@ -136,23 +137,6 @@ struct ModFolderStats {
     std::string folder;      // upper case, e.g. "XML", "SCRIPTS", "ART"
     uint32_t added = 0;      // no lower layer (FoC loose, MEGs, fallbacks) has the path
     uint32_t overrides = 0;  // a lower layer has the path: the mod's file wins
-};
-
-// An installed mod outside the stack that has files the checked mod's own data names but no layer has (modc t16).
-struct ModParentCandidate {
-    std::string id;           // workshop id (the item folder's name) or the <game>\Mods folder name
-    bool workshop = false;    // a Steam workshop item (else a <game>\Mods folder)
-    std::string path;         // host folder
-    std::string arg;          // the argument that stacks it: "STEAMMOD=<id>" or "MODPATH=<host folder>"
-    uint32_t provides = 0;    // how many of SubmodHint::missing it has
-    bool mentioned = false;   // its workshop id appears in the checked mod's modinfo.json
-};
-struct SubmodHint {
-    static constexpr uint32_t kMinProvided = 2;
-    bool likely = false;      // parents.front() has at least kMinProvided and at least half of `missing`
-    uint32_t missing = 0;     // missing files named by the mod's own data (MissingFile::in_mod)
-    std::vector<ModParentCandidate> parents;  // provides > 0: most first, then mentioned, then by id; at most 5
-    std::vector<std::string> stacked_args;    // likely: the check's args followed by parents.front().arg
 };
 
 // A materials::ShaderIssue of the effect audit (modc t21) and what draws the effect.
@@ -323,7 +307,7 @@ struct ModCheckReport {
     ShaderCheck shaders;                         // effect audit issues (warnings)
     SubmodHint submod;                           // empty unless the mod's own data names missing files
     // mcx3 (docs/MOD_COMPAT_DESIGN.md 5): the mounted mods (GameData::mods, mod_dirs order) and, when `args` came from
-    // resolve_mod_stack (alamo_mod_check --resolve), that resolution (resolved = true): its errors count as errors, its
+    // resolve_mod_stack (mod_resolve.hpp; alamo_mod_check --resolve), that resolution (resolved = true): its errors count as errors, its
     // warnings as warnings.
     std::vector<vfs::ModDescriptor> mods;
     bool resolved = false;
@@ -359,16 +343,10 @@ struct ModCheckReport {
 };
 
 ModCheckReport check_mod_data(const std::string& root, const std::vector<std::string>& args, const ModCheckOptions& options = {});
-// mcx3 t02: stack resolution with the data hint (design 5.2) for alamo_mod_check --resolve and the launcher. The
-// registry holds the installed mods (options.workshop_libraries, <root>\Mods); declared modinfo dependencies come
-// first, and a mod that declares none gets the likely parent of the submod check (check_mod_data on the stack so far
-// with files and submod only, the other checks off). The game itself never resolves: an explicit command line is
-// mounted as written.
-vfs::ModStack resolve_mod_stack(const std::string& root, const std::vector<std::string>& picked, const ModCheckOptions& options);
-// mcx7 t01 (alamo_mod_check --list-mods): the installed mods (scan_installed_mods) as JSON, one object per descriptor
+// mcx7 t01 (alamo_mod_check --list-mods): the installed mods (scan_mod_catalog) as JSON, one object per descriptor
 // in registry order: key, arg, kind, id, variant, root, name, version, has_data, game_tag, content_hash (16 hex digits),
 // dependencies [{modtype, identifier}]. Schema "alamo.mod_list", version 1.
-std::string format_mod_list_json(const vfs::ModRegistry& registry);
+std::string format_mod_list_json(const vfs::ModCatalog& catalog);
 // ums1 t05 (alamo_mod_check --list --json): the install and the catalog's rows, everything a launcher shows. Schema
 // "alamo.mod_catalog", version 1: install {foc, eaw, mods_dir, steam_roots [], steam_libraries [], workshop_dirs [] (the
 // libraries' FoC workshop content folders that exist), mod_folders []}, mods [{key (catalog key), save_key

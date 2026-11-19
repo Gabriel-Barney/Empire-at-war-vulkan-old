@@ -16,6 +16,7 @@
 #include "alamo/vfs/install_locations.hpp"
 #include "alamo/vfs/mod_registry.hpp"
 #include "alamo/vfs/steam_workshop.hpp"
+#include "alamo/vfs/vfs.hpp"  // is_mod_arg
 
 namespace game = alamo::game;
 namespace fs = std::filesystem;
@@ -30,24 +31,34 @@ bool has_line(const std::vector<std::string>& lines, const std::string& needle) 
     return false;
 }
 
+// The picker's rows (ums4 t01: the catalog's rows themselves): `foc` with these Steam libraries, no content hashes.
+std::vector<alamo::vfs::ModDescriptor> picker_rows(const std::string& foc, std::vector<std::string> libs) {
+    alamo::vfs::InstallLocations where;
+    where.foc = foc;
+    where.steam_libraries = std::move(libs);
+    return alamo::vfs::scan_mod_catalog(where, false).mods;
+}
+
 void test_list(const std::string& fixture, const std::string& foc) {
+    using alamo::vfs::ModKind;
     const std::vector<std::string> libs = {fixture + "/steamlib", fixture + "/steamlib"};  // a duplicate library: each id once
-    const std::vector<game::InstalledMod> mods = game::list_installed_mods(foc, libs);
+    const std::vector<alamo::vfs::ModDescriptor> mods = picker_rows(foc, libs);
     CHECK(mods.size() == 4);
     if (mods.size() != 4) return;
-    CHECK(mods[0].id == "900000001" && mods[0].workshop && mods[0].name == "900000001" && mods[0].arg == "STEAMMOD=900000001");
-    CHECK(mods[1].id == "FixtureChecks" && !mods[1].workshop && mods[1].arg == "MODPATH=Mods\\FixtureChecks");
+    CHECK(mods[0].id == "900000001" && mods[0].kind == ModKind::Workshop && mods[0].name == "900000001" &&
+          mods[0].arg() == "STEAMMOD=900000001");
+    CHECK(mods[1].id == "FixtureChecks" && mods[1].kind == ModKind::LocalMods && mods[1].arg() == "MODPATH=Mods\\FixtureChecks");
     CHECK(mods[2].id == "FixtureMod" && mods[2].name == "FixtureMod");
     CHECK(mods[3].id == "FixtureSub" && mods[3].name == "Fixture Sub");  // modinfo.json "name"
     // ums1 t03: the rows are the catalog's, keyed by catalog key.
-    CHECK(mods[0].key == "900000001" && mods[1].key == "Mods\\FixtureChecks" && mods[3].variant.empty());
-    CHECK(game::list_installed_mods(foc, {}).size() == 3);
-    CHECK(game::list_installed_mods(fixture + "/no_such_game", {}).empty());
+    CHECK(mods[0].catalog_key() == "900000001" && mods[1].catalog_key() == "Mods\\FixtureChecks" && mods[3].variant.empty());
+    CHECK(picker_rows(foc, {}).size() == 3);
+    CHECK(picker_rows(fixture + "/no_such_game", {}).empty());
 }
 
 void test_args() {
-    CHECK(game::is_mod_arg("MODPATH=Mods\\X") && game::is_mod_arg("modpath=x") && game::is_mod_arg("SteamMod=1"));
-    CHECK(!game::is_mod_arg("FALLBACKPATH=x") && !game::is_mod_arg("--game") && !game::is_mod_arg("MODPATH"));
+    CHECK(alamo::vfs::is_mod_arg("MODPATH=Mods\\X") && alamo::vfs::is_mod_arg("modpath=x") && alamo::vfs::is_mod_arg("SteamMod=1"));
+    CHECK(!alamo::vfs::is_mod_arg("FALLBACKPATH=x") && !alamo::vfs::is_mod_arg("--game") && !alamo::vfs::is_mod_arg("MODPATH"));
     const std::vector<std::string> argv = {"alamo_game.exe", "--game", "C:\\Games\\FoC", "MODPATH=Mods\\Old", "--no-intro",
                                            "steammod=123", "FALLBACKPATH=x"};
     const std::vector<std::string> mod = {"STEAMMOD=456", "STEAMMOD=789"};
@@ -62,10 +73,10 @@ void test_args() {
 }
 
 void test_report(const std::string& fixture, const std::string& foc) {
-    const std::vector<game::InstalledMod> mods = game::list_installed_mods(foc, std::vector<std::string>{fixture + "/steamlib"});
+    const std::vector<alamo::vfs::ModDescriptor> mods = picker_rows(foc, {fixture + "/steamlib"});
     if (mods.size() != 4) return;
     // A plain mod: its own argument; the summary says it loads cleanly.
-    const game::ModCheckReport plain = game::check_mod_data(foc, {mods[2].arg});
+    const game::ModCheckReport plain = game::check_mod_data(foc, {mods[2].arg()});
     CHECK((game::mod_launch_args(mods[2], &plain) == std::vector<std::string>{"MODPATH=Mods\\FixtureMod"}));
     CHECK((game::mod_launch_args(mods[2], nullptr) == std::vector<std::string>{"MODPATH=Mods\\FixtureMod"}));
     const std::vector<std::string> ps = game::mod_report_summary(plain);
@@ -75,7 +86,7 @@ void test_report(const std::string& fixture, const std::string& foc) {
     // A likely submod: launched stacked on its parent (the report's stacked arguments).
     game::ModCheckOptions opt;
     opt.workshop_libraries = {fixture + "/steamlib"};
-    const game::ModCheckReport sub = game::check_mod_data(foc, {mods[3].arg}, opt);
+    const game::ModCheckReport sub = game::check_mod_data(foc, {mods[3].arg()}, opt);
     CHECK((game::mod_launch_args(mods[3], &sub) == std::vector<std::string>{"MODPATH=Mods\\FixtureSub", "MODPATH=Mods\\FixtureMod"}));
     const std::vector<std::string> ss = game::mod_report_summary(sub);
     CHECK(has_line(ss, "Submod of FixtureMod (Mods folder): it has 2 of 2 missing files"));
@@ -99,23 +110,19 @@ void test_installed_rows() {
     }
     const alamo::vfs::InstallLocations where = alamo::vfs::default_install_at(foc);
     const alamo::vfs::ModCatalog catalog = alamo::vfs::scan_mod_catalog(where, false);
-    const std::vector<game::InstalledMod> rows = game::list_installed_mods(catalog);
-    CHECK(rows.size() == catalog.mods.size());
+    const std::vector<alamo::vfs::ModDescriptor>& rows = catalog.mods;  // ums4 t01: the picker's rows are these
     size_t variants = 0;
-    for (size_t i = 0; i < rows.size() && i < catalog.mods.size(); ++i) {
-        const alamo::vfs::ModDescriptor& d = catalog.mods[i];
-        CHECK(rows[i].key == d.catalog_key() && rows[i].name == d.name && rows[i].arg == d.arg() && rows[i].path == d.root);
-        variants += d.variant.empty() ? 0u : 1u;
-    }
+    for (const alamo::vfs::ModDescriptor& d : rows) variants += d.variant.empty() ? 0u : 1u;
     std::printf("  installed: %zu rows (%zu variants) from %zu Steam libraries\n", rows.size(), variants, where.steam_libraries.size());
     // The two-variant folder, when this machine has it: one row per variant, no row for the folder itself.
     if (alamo::vfs::find_workshop_item(where.steam_libraries, "2083545253")) {
         size_t sub = 0, main = 0;
-        for (const game::InstalledMod& r : rows) {
+        for (const alamo::vfs::ModDescriptor& r : rows) {
             if (r.id != "2083545253") continue;
-            sub += (r.key == "2083545253:subA" || r.key == "2083545253:subB") ? 1u : 0u;
+            const std::string key = r.catalog_key();
+            sub += (key == "2083545253:subA" || key == "2083545253:subB") ? 1u : 0u;
             main += r.variant.empty() ? 1u : 0u;
-            std::printf("    %s  %s  %s\n", r.key.c_str(), r.name.c_str(), r.arg.c_str());
+            std::printf("    %s  %s  %s\n", key.c_str(), r.name.c_str(), r.arg().c_str());
         }
         CHECK(sub == 2 && main == 0);
     }

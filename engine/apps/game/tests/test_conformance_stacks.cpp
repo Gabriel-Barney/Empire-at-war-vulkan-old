@@ -19,6 +19,7 @@
 #include "alamo/game/mod_check.hpp"
 #include "alamo/game/mod_conflicts.hpp"
 #include "alamo/game/mod_picker.hpp"
+#include "alamo/game/mod_resolve.hpp"
 #include "alamo/vfs/install_locations.hpp"
 #include "alamo/vfs/mod_registry.hpp"
 #include "alamo/test/support.hpp"
@@ -56,10 +57,10 @@ void test_stack_dep(const std::string& root) {
     alamo::test::section("stack_dep");
     const game::ModCheckOptions o = light();
     // Declared: StackSub -> StackParent (modinfo.json with a comment and trailing commas).
-    const vfs::ResolvedStack s = game::resolve_mod_stack(root, {"MODPATH=Mods\\StackSub"}, o);
+    const vfs::ModStack s = game::resolve_mod_stack(root, {"MODPATH=Mods\\StackSub"}, o.workshop_libraries);
     CHECK(joined(s.args) == "MODPATH=Mods\\StackSub | MODPATH=Mods\\StackParent");
     CHECK(s.errors.empty() && s.warnings.empty());
-    CHECK(s.mods.size() == 2 && s.mods[1].reason == "dependency of Mods\\StackSub" && s.mods[1].mod.version == "2.0");
+    CHECK(s.mods.size() == 2 && s.mods[1].reason_text() == "dependency of Mods\\StackSub" && s.mods[1].mod.version == "2.0");
     std::printf("  declared: %s\n", joined(s.args).c_str());
     const game::ModCheckReport r = game::check_mod_data(root, s.args, o);
     CHECK(r.loaded && r.error_count() == 0);
@@ -69,24 +70,24 @@ void test_stack_dep(const std::string& root) {
     CHECK(r.base_eaw_suspect.empty() && !r.base_eaw);
 
     // Undeclared: StackHinted names two files only StackParent has; the submod hint finds it.
-    const vfs::ResolvedStack h = game::resolve_mod_stack(root, {"MODPATH=Mods\\StackHinted"}, o);
+    const vfs::ModStack h = game::resolve_mod_stack(root, {"MODPATH=Mods\\StackHinted"}, o.workshop_libraries);
     CHECK(joined(h.args) == "MODPATH=Mods\\StackHinted | MODPATH=Mods\\StackParent");
-    CHECK(h.mods.size() == 2 && h.mods[1].reason == "likely parent of Mods\\StackHinted");
+    CHECK(h.mods.size() == 2 && h.mods[1].reason_text() == "likely parent of Mods\\StackHinted");
     std::printf("  hinted: %s\n", joined(h.args).c_str());
     // Alone it loads with the two list entries missing (retail too); stacked, nothing is missing.
     CHECK(game::check_mod_data(root, {"MODPATH=Mods\\StackHinted"}, o).missing_files.size() == 2);
     CHECK(game::check_mod_data(root, h.args, o).missing_files.empty());
 
     // The exit test's shape (AOW patch -> Legacy HD -> TR), nothing declared: from the top folder alone, two hint rounds.
-    const vfs::ResolvedStack t = game::resolve_mod_stack(root, {"MODPATH=Mods\\StackTop"}, o);
+    const vfs::ModStack t = game::resolve_mod_stack(root, {"MODPATH=Mods\\StackTop"}, o.workshop_libraries);
     CHECK(joined(t.args) == "MODPATH=Mods\\StackTop | MODPATH=Mods\\StackHinted | MODPATH=Mods\\StackParent");
-    CHECK(t.mods.size() == 3 && t.mods[1].reason == "likely parent of Mods\\StackTop" && t.mods[2].reason == "likely parent of Mods\\StackHinted");
+    CHECK(t.mods.size() == 3 && t.mods[1].reason_text() == "likely parent of Mods\\StackTop" && t.mods[2].reason_text() == "likely parent of Mods\\StackHinted");
     CHECK(t.errors.empty());
     CHECK(game::check_mod_data(root, t.args, o).missing_files.empty());
     std::printf("  chain: %s\n", joined(t.args).c_str());
 
     // Picked in the wrong order: resolution puts the submod first...
-    const vfs::ResolvedStack w = game::resolve_mod_stack(root, {"MODPATH=Mods\\StackParent", "MODPATH=Mods\\StackSub"}, o);
+    const vfs::ModStack w = game::resolve_mod_stack(root, {"MODPATH=Mods\\StackParent", "MODPATH=Mods\\StackSub"}, o.workshop_libraries);
     CHECK(joined(w.args) == "MODPATH=Mods\\StackSub | MODPATH=Mods\\StackParent");
     CHECK(has(w.warnings, "Mods\\StackParent is picked above its submod Mods\\StackSub"));
     // ...but an explicit command line is mounted as written (earliest wins, MODS.md 3.1).
@@ -94,14 +95,14 @@ void test_stack_dep(const std::string& root) {
     CHECK(e.mods.size() == 2 && e.mods[0].name == "Stack Parent" && e.mods[1].name == "Stack Sub");
 
     // Two total conversions without a dependency between them: a warning, not an error.
-    const vfs::ResolvedStack c = game::resolve_mod_stack(root, {"MODPATH=Mods\\StackParent", "MODPATH=Mods\\OtherTc"}, o);
+    const vfs::ModStack c = game::resolve_mod_stack(root, {"MODPATH=Mods\\StackParent", "MODPATH=Mods\\OtherTc"}, o.workshop_libraries);
     CHECK(c.errors.empty());
     CHECK(has(c.warnings, "two total conversions in one stack: Mods\\StackParent and Mods\\OtherTc"));
 }
 
 void test_stack_cycle(const std::string& root) {
     alamo::test::section("stack_cycle");
-    const vfs::ResolvedStack s = game::resolve_mod_stack(root, {"MODPATH=Mods\\CycleA"}, light());
+    const vfs::ModStack s = game::resolve_mod_stack(root, {"MODPATH=Mods\\CycleA"}, light().workshop_libraries);
     CHECK(has(s.errors, "dependency cycle: Mods\\CycleA -> Mods\\CycleB -> Mods\\CycleA"));
     CHECK(s.mods.size() == 2);
     std::printf("  %s\n", joined(s.errors).c_str());
@@ -127,7 +128,7 @@ void test_eaw_only(const std::string& root) {
     CHECK(has(r.grade.blocking, vfs::kBaseEawRefusal));
     CHECK(r.error_count() >= 1);
     // The stack refuses it too (the picker and the launcher read this).
-    const vfs::ResolvedStack s = game::resolve_mod_stack(root, {"MODPATH=Mods\\EawOnly"}, light());
+    const vfs::ModStack s = game::resolve_mod_stack(root, {"MODPATH=Mods\\EawOnly"}, light().workshop_libraries);
     CHECK(s.base_eaw && has(s.errors, vfs::kBaseEawRefusal));
 
     // No tag, an object list without FoC's own file: loaded, with the heuristic's warning only.
@@ -144,7 +145,7 @@ void test_eaw_only(const std::string& root) {
 // The picker's side (mod_picker.hpp, mcx3 t03 / t06 / t09) on resolved reports, as App::check_mod builds them.
 game::ModCheckReport resolved_report(const std::string& root, const std::string& arg) {
     const game::ModCheckOptions o = light();
-    vfs::ResolvedStack s = game::resolve_mod_stack(root, {arg}, o);
+    vfs::ModStack s = game::resolve_mod_stack(root, {arg}, o.workshop_libraries);
     game::ModCheckReport r = game::check_mod_data(root, s.errors.empty() ? s.args : std::vector<std::string>{arg}, o);
     r.resolved = true;
     r.stack = std::move(s);
@@ -153,25 +154,25 @@ game::ModCheckReport resolved_report(const std::string& root, const std::string&
 
 void test_picker(const std::string& root) {
     alamo::test::section("picker");
-    game::InstalledMod top;
+    vfs::ModDescriptor top;  // a picker row (a catalog row)
+    top.kind = vfs::ModKind::LocalMods;
     top.id = "StackTop";
-    top.arg = "MODPATH=Mods\\StackTop";
-    const game::ModCheckReport t = resolved_report(root, top.arg);
+    const game::ModCheckReport t = resolved_report(root, top.arg());
     CHECK(joined(game::mod_launch_args(top, &t)) == "MODPATH=Mods\\StackTop | MODPATH=Mods\\StackHinted | MODPATH=Mods\\StackParent");
     const std::vector<std::string> ts = game::mod_report_summary(t);
     CHECK(has(ts, "Stack: StackTop > StackHinted > Stack Parent"));
     CHECK(!has(ts, "Launch stacks it on"));  // the stack line replaces the single-parent hint
     for (const std::string& l : ts) std::printf("  %s\n", l.c_str());
 
-    game::InstalledMod eaw;
+    vfs::ModDescriptor eaw;
+    eaw.kind = vfs::ModKind::LocalMods;
     eaw.id = "EawOnly";
-    eaw.arg = "MODPATH=Mods\\EawOnly";
-    const game::ModCheckReport e = resolved_report(root, eaw.arg);
+    const game::ModCheckReport e = resolved_report(root, eaw.arg());
     CHECK(game::mod_launch_args(eaw, &e).empty());  // refused: nothing starts
     const std::vector<std::string> es = game::mod_report_summary(e);
     CHECK(!es.empty() && es[0] == std::string("Refused (FoC mods only): Mods\\EawOnly: ") + vfs::kBaseEawRefusal);
     // Unresolved (alamo_mod_check without --resolve): the load error says it.
-    const game::ModCheckReport e2 = game::check_mod_data(root, {eaw.arg}, light());
+    const game::ModCheckReport e2 = game::check_mod_data(root, {eaw.arg()}, light());
     CHECK(game::mod_launch_args(eaw, &e2).empty());
     CHECK(has(game::mod_report_summary(e2), "Refused (FoC mods only): Old EaW Mod (EawOnly): "));
 
@@ -224,11 +225,9 @@ void test_launch_surfaces(const std::string& fixture, const std::string& root, c
     game::ModCheckOptions o = light();
     o.workshop_libraries = where.steam_libraries;
     const vfs::ModCatalog catalog = vfs::scan_mod_catalog(where, false);
-    const std::vector<game::InstalledMod> rows = game::list_installed_mods(catalog);
+    const std::vector<vfs::ModDescriptor>& rows = catalog.mods;  // ums4 t01: the picker's rows are the catalog's
 
-    // Picker rows == catalog rows == alamo_mod_check --list rows.
-    CHECK(rows.size() == catalog.mods.size());
-    for (size_t i = 0; i < rows.size() && i < catalog.mods.size(); ++i) CHECK(rows[i].key == catalog.mods[i].catalog_key());
+    // Picker rows (catalog rows) == alamo_mod_check --list rows.
     const std::string list = run_mod_check(mod_check_exe, "--game \"" + root + "\" --list --no-hash", work / "list.json");
     CHECK(json_strings(list, "mod_folders").has_value());  // present: the file is ours
     std::vector<std::string> list_keys;
@@ -238,7 +237,7 @@ void test_launch_surfaces(const std::string& fixture, const std::string& root, c
         list_keys.push_back(k);
     }
     std::vector<std::string> row_keys;
-    for (const game::InstalledMod& r : rows) row_keys.push_back(r.key);
+    for (const vfs::ModDescriptor& r : rows) row_keys.push_back(r.catalog_key());
     CHECK(joined(list_keys) == joined(row_keys));
     CHECK(joined(row_keys).rfind("900000201:subA | 900000201:subB | Mods\\CycleA", 0) == 0);  // variants: a row each
     std::printf("  rows: %s\n", joined(row_keys).c_str());
@@ -266,25 +265,25 @@ void test_launch_surfaces(const std::string& fixture, const std::string& root, c
         {"workshop variant subB", "900000201:subB", "STEAMMOD=900000201 | MODPATH=Mods\\OtherTc"},
     };
     for (const Case& c : cases) {
-        const game::InstalledMod* row = nullptr;
-        for (const game::InstalledMod& r : rows)
-            if (r.key == c.key) row = &r;
+        const vfs::ModDescriptor* row = nullptr;
+        for (const vfs::ModDescriptor& r : rows)
+            if (r.catalog_key() == c.key) row = &r;
         CHECK(row != nullptr);
         if (!row) continue;
         // A variant is named by its key (a dropped folder means its first variant); other rows by their argument.
-        const std::string named = row->variant.empty() ? row->arg : "STEAMMOD=" + row->key;
+        const std::string named = row->variant.empty() ? row->arg() : "STEAMMOD=" + row->catalog_key();
         // 1. The in-game picker: App::check_mod's report, then Launch's list.
-        const game::ModCheckReport report = game::check_picked_mod(root, row->key, o);
+        const game::ModCheckReport report = game::check_picked_mod(root, row->catalog_key(), o);
         const std::string picker = joined(game::mod_launch_args(*row, &report));
         // 2. alamo_play: the folder dropped onto Play.exe (or the variant's argument), through play_main's resolver.
-        const std::wstring user = row->variant.empty() ? fs::path(row->path).wstring() : fs::path(named).wstring();
+        const std::wstring user = row->variant.empty() ? fs::path(row->root).wstring() : fs::path(named).wstring();
         const std::vector<std::wstring> dropped = alamo::play::game_args(fs::path(play_game), work / "cache", {user});
         const auto stacked = alamo::play::stack_mod_args(
             dropped, [&](const std::vector<std::string>& picked) { return game::play_launch_args(play_game, picked); });
         std::vector<std::string> play_mods;
         if (stacked)
             for (const std::wstring& a : *stacked)
-                if (game::is_mod_arg(fs::path(a).string())) play_mods.push_back(fs::path(a).string());
+                if (vfs::is_mod_arg(fs::path(a).string())) play_mods.push_back(fs::path(a).string());
         const std::string play = joined(play_mods);
         // 3. alamo_mod_check --resolve-only (the exe): the stack section's launch list.
         const std::string js = run_mod_check(mod_check_exe, "--game \"" + root + "\" --resolve-only " + named,
@@ -321,9 +320,9 @@ void test_launch_surfaces(const std::string& fixture, const std::string& root, c
               joined(w.pairs[0].files) == "DATA\\XML\\GAMEOBJECTFILES.XML" && w.pairs[0].xml_files == 1);
         bool list_found = false, sub = false;
         for (const game::ConflictFinding& f : w.findings) {
-            std::printf("    %s %s: %s\n", f.warning ? "warning" : "info", f.kind.c_str(), f.text.c_str());
-            list_found = list_found || (f.kind == "list_ignored" && f.mods == std::vector<size_t>{1, 0} && !f.lost.empty());
-            sub = sub || (f.kind == "submod_order" && f.mods == std::vector<size_t>{1, 0} && f.order);
+            std::printf("    %s %s: %s\n", f.warning ? "warning" : "info", game::conflict_kind_name(f.kind), f.text.c_str());
+            list_found = list_found || (f.kind == game::ConflictKind::ListIgnored && f.mods == std::vector<size_t>{1, 0} && !f.lost.empty());
+            sub = sub || (f.kind == game::ConflictKind::SubmodOrder && f.mods == std::vector<size_t>{1, 0} && f.order);
         }
         CHECK(list_found && sub);
         // Two total conversions: the second's two files are both won by the first (no effect); its object list names
@@ -331,11 +330,11 @@ void test_launch_surfaces(const std::string& fixture, const std::string& root, c
         const game::ConflictReport t = game::mod_conflicts(catalog, std::vector<std::string>{"MODPATH=Mods\\StackParent", "MODPATH=Mods\\OtherTc"}, {});
         bool no_effect = false, note = false;
         for (const game::ConflictFinding& f : t.findings) {
-            no_effect = no_effect || (f.kind == "no_effect" && f.mods.front() == 1 && f.order);
-            note = note || (f.kind == "list_ignored" && !f.warning && f.lost.empty());
+            no_effect = no_effect || (f.kind == game::ConflictKind::NoEffect && f.mods.front() == 1 && f.order);
+            note = note || (f.kind == game::ConflictKind::ListIgnored && !f.warning && f.lost.empty());
         }
         CHECK(no_effect && note);
-        CHECK(!t.findings.empty() && t.findings.back().kind == "list_ignored");  // notes after warnings
+        CHECK(!t.findings.empty() && t.findings.back().kind == game::ConflictKind::ListIgnored);  // notes after warnings
         // The exe writes the same report.
         const std::string js = run_mod_check(mod_check_exe, "--game \"" + root + "\" --conflicts " + wrong[0] + " " + wrong[1], work / "conflicts.json");
         CHECK(js == game::format_conflicts_json(w));

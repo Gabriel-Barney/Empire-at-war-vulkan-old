@@ -6,7 +6,10 @@
 #include <exception>
 #include <system_error>
 
+#include "alamo/core/host_fs.hpp"
+#include "alamo/vfs/host_path.hpp"
 #include "alamo/vfs/install_locations.hpp"
+#include "alamo/vfs/vfs.hpp"  // is_mod_arg
 
 namespace alamo::play {
 namespace fs = std::filesystem;
@@ -32,18 +35,6 @@ std::wstring trim(std::wstring s) {
     return s.substr(b, e - b);
 }
 
-std::string utf8(const fs::path& p) {
-    std::string out;
-    for (const char8_t c : p.u8string()) out.push_back(static_cast<char>(c));
-    return out;
-}
-
-fs::path from_utf8(const std::string& s) {
-    std::u8string u;
-    for (const char c : s) u.push_back(static_cast<char8_t>(c));
-    return fs::path(u);
-}
-
 bool iequals(const std::wstring& a, const wchar_t* b) {
     const std::wstring bb(b);
     if (a.size() != bb.size()) return false;
@@ -54,9 +45,9 @@ bool iequals(const std::wstring& a, const wchar_t* b) {
 
 }  // namespace
 
-bool is_game_dir(const fs::path& dir) { return vfs::is_foc_dir(utf8(dir)); }
+bool is_game_dir(const fs::path& dir) { return vfs::is_foc_dir(vfs::native_utf8(dir)); }
 
-fs::path normalize_game_dir(std::wstring text) { return from_utf8(vfs::normalize_foc_dir(utf8(fs::path(trim(std::move(text)))))); }
+fs::path normalize_game_dir(std::wstring text) { return path_from_utf8(vfs::normalize_foc_dir(vfs::native_utf8(fs::path(trim(std::move(text)))))); }
 
 std::wstring first_line_utf8(std::string_view bytes) {
     if (bytes.size() >= 3 && static_cast<unsigned char>(bytes[0]) == 0xEF && static_cast<unsigned char>(bytes[1]) == 0xBB &&
@@ -85,15 +76,15 @@ fs::path find_game(const FindInputs& in, std::vector<std::string>* steam_librari
             while ((n = std::fread(buf, 1, sizeof buf, f)) > 0) bytes.append(buf, n);
             std::fclose(f);
         }
-        v.user_folders.push_back(utf8(fs::path(first_line_utf8(bytes))));
+        v.user_folders.push_back(vfs::native_utf8(fs::path(first_line_utf8(bytes))));
     }
-    v.user_folders.push_back(utf8(fs::path(in.env)));
-    for (const fs::path& r : in.steam_roots) v.steam_roots.push_back(utf8(r));
-    for (const fs::path& lib : in.steam) v.steam_libraries.push_back(utf8(lib));
-    for (const fs::path& dir : in.fixed) v.fixed.push_back(utf8(dir));
+    v.user_folders.push_back(vfs::native_utf8(fs::path(in.env)));
+    for (const fs::path& r : in.steam_roots) v.steam_roots.push_back(vfs::native_utf8(r));
+    for (const fs::path& lib : in.steam) v.steam_libraries.push_back(vfs::native_utf8(lib));
+    for (const fs::path& dir : in.fixed) v.fixed.push_back(vfs::native_utf8(dir));
     vfs::InstallLocations where = vfs::find_install(v);
     if (steam_libraries) *steam_libraries = std::move(where.steam_libraries);
-    return from_utf8(where.foc);
+    return path_from_utf8(where.foc);
 }
 
 std::vector<std::wstring> game_args(const fs::path& game, const fs::path& cache, const std::vector<std::wstring>& user) {
@@ -118,23 +109,17 @@ std::vector<std::wstring> game_args(const fs::path& game, const fs::path& cache,
 }
 
 std::optional<std::vector<std::wstring>> stack_mod_args(const std::vector<std::wstring>& args, const ModStackResolver& resolve) {
-    const auto is_mod = [](const std::wstring& a) {
-        const auto starts = [&](const wchar_t* p) {
-            const std::wstring s(p);
-            return a.size() >= s.size() && iequals(a.substr(0, s.size()), p);
-        };
-        return starts(L"MODPATH=") || starts(L"STEAMMOD=");
-    };
     std::vector<std::wstring> out;
     std::vector<std::string> picked;
     for (const std::wstring& a : args) {
-        if (is_mod(a)) picked.push_back(utf8(fs::path(a)));
+        std::string u = vfs::native_utf8(fs::path(a));
+        if (vfs::is_mod_arg(u)) picked.push_back(std::move(u));  // ums4 t04: the one is_mod_arg
         else out.push_back(a);
     }
     if (picked.empty()) return args;
     const std::optional<std::vector<std::string>> launch = resolve(picked);
     if (!launch) return std::nullopt;
-    for (const std::string& a : *launch) out.push_back(from_utf8(a).wstring());
+    for (const std::string& a : *launch) out.push_back(path_from_utf8(a).wstring());
     return out;
 }
 

@@ -14,6 +14,7 @@
 #include <system_error>
 #include <utility>
 
+#include "alamo/core/ascii.hpp"
 #include "alamo/core/hash.hpp"
 #include "alamo/core/host_fs.hpp"
 #include "alamo/data/xml.hpp"
@@ -25,8 +26,8 @@
 #include "alamo/sim/game_modes.hpp"  // sim::kMaxPlayers (mcx5 limit checks)
 #include "alamo/sim/story_rewards.hpp"
 #include "alamo/game/mod_conflicts.hpp"  // format_conflicts_json (ums1 t05)
-#include "alamo/game/mod_picker.hpp"  // mod_folders, workshop_content_dir (cu9 t03)
 #include "alamo/vfs/install_locations.hpp"
+#include "alamo/vfs/mod_registry.hpp"
 #include "alamo/vfs/steam_workshop.hpp"  // kFocSteamAppId
 #include "alamo/vfs/vfs.hpp"
 #include "json_text.hpp"  // the JSON string escaper, shared with benchmark.cpp
@@ -520,85 +521,14 @@ std::vector<std::string> missing_list_entries(const ModCheckReport& r) {
     return out;
 }
 
-bool same_folder(const fs::path& a, const std::string& b) {
-    std::error_code ec;
-    return fs::equivalent(a, fs::path(b), ec) && !ec;
-}
-
-// How many of `paths` the candidate's own files have: a Vfs with the candidate as its only tree (its loose Data, the
-// MEGs its MegaFiles.xml / Patch*.meg name; no EaW, no FoC), so every hit is the candidate's.
-uint32_t provided_by(const fs::path& candidate, const std::vector<std::string>& paths) {
-    vfs::VfsConfig cfg;
-    cfg.foc_root = candidate.string();
-    cfg.eaw_root = std::string();
-    std::string err;
-    const std::unique_ptr<vfs::Vfs> v = vfs::Vfs::create(cfg, &err);
-    if (!v) return 0;
-    uint32_t n = 0;
-    for (const std::string& p : paths) n += v->exists(p) ? 1u : 0u;
-    return n;
-}
-
-// Every digit run of the mod folders' modinfo.json files (workshop ids a submod names, e.g. "Requires ... 1125571106").
-std::set<std::string> modinfo_numbers(const std::vector<std::string>& mod_dirs) {
-    std::set<std::string> out;
-    for (const std::string& dir : mod_dirs) {
-        std::ifstream in(fs::path(dir) / "modinfo.json", std::ios::binary);
-        if (!in) continue;
-        const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        for (size_t i = 0; i < text.size();) {
-            if (text[i] < '0' || text[i] > '9') {
-                ++i;
-                continue;
-            }
-            const size_t b = i;
-            while (i < text.size() && text[i] >= '0' && text[i] <= '9') ++i;
-            out.insert(text.substr(b, i - b));
-        }
-    }
-    return out;
-}
-
-void check_submod(const ModCheckReport& base, const ModCheckOptions& o, SubmodHint& h) {
-    if (base.mod_dirs.empty()) return;
-    const std::vector<std::string> missing = missing_list_entries(base);
-    h.missing = static_cast<uint32_t>(missing.size());
-    if (missing.empty()) return;
-    const std::set<std::string> mentioned = modinfo_numbers(base.mod_dirs);
-    std::vector<ModParentCandidate> cands;
-    const auto consider = [&](const fs::path& dir, bool workshop) {
-        for (const std::string& m : base.mod_dirs)
-            if (same_folder(dir, m)) return;  // already in the stack
-        ModParentCandidate c;
-        c.id = dir.filename().string();
-        c.workshop = workshop;
-        c.path = dir.string();
-        c.arg = workshop ? "STEAMMOD=" + c.id : "MODPATH=Mods\\" + c.id;
-        c.mentioned = workshop && mentioned.count(c.id) != 0;
-        c.provides = provided_by(dir, missing);
-        if (c.provides > 0) cands.push_back(std::move(c));
-    };
-    std::set<std::string> seen_items;  // a workshop id found in an earlier library wins (find_workshop_item order)
-    for (const std::string& lib : o.workshop_libraries)
-        for (const fs::path& item : mod_folders(workshop_content_dir(lib), true))  // mod_picker.hpp (cu9 t03)
-            if (seen_items.insert(item.filename().string()).second) consider(item, true);
-    for (const fs::path& local : mod_folders(fs::path(base.game) / "Mods", false)) consider(local, false);
-    std::sort(cands.begin(), cands.end(), [](const ModParentCandidate& a, const ModParentCandidate& b) {
-        if (a.provides != b.provides) return a.provides > b.provides;
-        if (a.mentioned != b.mentioned) return a.mentioned;
-        if (a.workshop != b.workshop) return a.workshop;
-        return a.id < b.id;
-    });
-    constexpr size_t kListed = 5;
-    if (cands.size() > kListed) cands.resize(kListed);
-    h.parents = std::move(cands);
-    if (h.parents.empty()) return;
-    const ModParentCandidate& top = h.parents.front();
-    h.likely = top.provides >= SubmodHint::kMinProvided && 2 * top.provides >= h.missing;
-    if (h.likely) {
-        h.stacked_args = base.args;
-        h.stacked_args.push_back(top.arg);
-    }
+// The submod hint from this check's own missing-file list (mod_resolve.hpp: the resolver reaches the same answer from
+// the files alone). Candidates: the catalog of <game> with the options' Steam libraries.
+void check_submod(const GameData& d, ModCheckReport& r, const ModCheckOptions& o) {
+    if (d.mods.empty()) return;
+    vfs::InstallLocations where;
+    where.foc = r.game;
+    where.steam_libraries = o.workshop_libraries;
+    find_submod_parents(missing_list_entries(r), d.mods, r.args, vfs::scan_mod_catalog(where, false), r.submod);
 }
 
 // ---- mcx3 t03: base-EaW heuristic (design 5.4) ----
@@ -1393,6 +1323,53 @@ void retail_equivalent_from_checks(ModCheckReport& r) {
 // static part of G3 holds when no honour gap, binding gap, missing reward or missing token comes from the mod's files.
 // ums2 t05: a finding from the mod's files carries the layer that serves `file` (compat_issue.hpp: the owning mod's
 // index in the search list, so AotR under AotCW > AotR is layer 1); 0 when the file does not resolve to a mod layer.
+// ums4 t07: the first game file a loader diagnostic names: a "Data\..." path (any case, '/' or '\\'), else a bare
+// "<name>.xml" looked up as Data\XML\<name>. The path ends at a character no game path here has (':', ',', ';', a
+// quote, a bracket, white space). Normalised; "" when the line names none.
+std::string diagnostic_file(std::string_view text, const vfs::Vfs* v) {
+    const auto stop = [](char c) {
+        return c == ':' || c == ',' || c == ';' || c == '"' || c == '\'' || c == '(' || c == ')' || c == '[' || c == ']' ||
+               c == '<' || c == '>' || c == ' ' || c == '\t' || c == '\r' || c == '\n';
+    };
+    const auto word_start = [&](size_t i) { return i == 0 || stop(text[i - 1]); };
+    for (size_t i = 0; i + 5 <= text.size(); ++i) {
+        if (!word_start(i) || !ascii_iequals(text.substr(i, 4), "data") || (text[i + 4] != '\\' && text[i + 4] != '/')) continue;
+        size_t e = i;
+        while (e < text.size() && !stop(text[e])) ++e;
+        while (e > i && text[e - 1] == '.') --e;  // a sentence's full stop
+        return normalize_name(text.substr(i, e - i));
+    }
+    for (size_t i = 0; i < text.size(); ++i) {  // a bare XML file name: the loaders' lists name Data\XML files
+        if (!word_start(i)) continue;
+        size_t e = i;
+        while (e < text.size() && !stop(text[e])) ++e;
+        const std::string_view w = text.substr(i, e - i);
+        if (w.size() > 4 && ascii_iequals(w.substr(w.size() - 4), ".xml") && w.find_first_of("\\/") == std::string_view::npos) {
+            std::string path = normalize_name("Data\\XML\\" + std::string(w));
+            if (v && v->exists(path)) return path;
+        }
+        i = e;
+    }
+    return {};
+}
+
+// ums4 t07: GameData::diagnostics as CompatIssues, one record per distinct line (subject = the line, detail = its
+// loader step), with the layer of the file the line names (diagnostic_file), else kNoLayer. Warnings, as the text
+// report counts them; added after the grade is set, so they change no grade (as the VFS's findings, ums2 t03).
+void loader_issues(const GameData& d, ModCheckReport& r) {
+    for (const GameData::LoadStage& s : d.stages)
+        for (size_t i = s.first_diag; i < s.first_diag + s.diag_count && i < d.diagnostics.size(); ++i) {
+            const std::string& text = d.diagnostics[i];
+            const std::string file = diagnostic_file(text, d.vfs);
+            uint16_t layer = alamo::kNoLayer;
+            if (d.vfs && !file.empty())
+                if (const auto res = d.vfs->resolve(file))
+                    if (const vfs::Layer* l = d.vfs->layer_of(*res)) layer = l->issue_layer();
+            r.issues.add(alamo::IssueKind::LoaderDiagnostic, alamo::IssueSeverity::Warning, text, file, "loader step " + s.name,
+                         false, layer);
+        }
+}
+
 void compat_issues_and_grade(ModCheckReport& r, const vfs::Vfs* v, const alamo::IssueSink& vfs_issues) {
     using alamo::IssueKind;
     using alamo::IssueSeverity;
@@ -1483,7 +1460,7 @@ size_t ModCheckReport::warning_count() const {
 FxPrebuild prebuild_mod_effects(const GameData& d, const std::string& fx_cache_dir) {
     FxPrebuild out;
 #ifdef ALAMO_GAME_HAVE_MATERIALS
-    if (!d.vfs || !d.files || d.vfs->mod_dirs().empty()) return out;
+    if (!d.vfs || !d.files || d.mods.empty()) return out;
     const materials::FxCache cache(fx_cache_dir.empty() ? materials::FxCache::default_directory() : path_from_utf8(fx_cache_dir));
     const std::vector<materials::ShaderFileEntry> files = materials::shader_files_from_vfs(*d.vfs, true);
     const materials::FxPrebuildRun run = materials::prebuild_effect_sources(*d.files, files, cache, materials::default_fxc_path());
@@ -1525,7 +1502,8 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
     if (d.vfs) {
         r.vfs_layers = d.vfs->describe();
         r.vfs_warnings = d.vfs->warnings();
-        r.mod_dirs = d.vfs->mod_dirs();
+        for (const vfs::Layer& l : d.vfs->layers())  // the mod layers come first, in search order
+            if (l.kind == vfs::Layer::Kind::Mod) r.mod_dirs.push_back(l.host_root);
         list_mod_files(*d.vfs, r);
     }
     r.mods = d.mods;
@@ -1536,6 +1514,10 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
                 r.base_eaw = true;
                 r.grade.blocking.push_back(m.key() + ": " + vfs::kBaseEawRefusal);
             }
+        if (options.compat) {  // ums4 t07: the findings of a load that stopped (VFS, then the loader steps that ran)
+            r.issues.merge(d.vfs_issues);
+            loader_issues(d, r);
+        }
         return r;
     }
     // The checks below read what loaded; a throw in one is reported as that check's error, the others still run.
@@ -1554,7 +1536,7 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
     if (options.shaders && options.fx_prebuild)
         guarded("fx prebuild", [&] { r.shaders.fx_prebuild = prebuild_mod_effects(d, options.fx_cache_dir); });
     if (options.shaders) guarded("shaders", [&] { check_shaders(d, r, options.shader_compile, options.fx_cache_dir); });
-    if (options.files && options.submod) guarded("submod", [&] { check_submod(r, options, r.submod); });
+    if (options.files && options.submod) guarded("submod", [&] { check_submod(d, r, options); });
     if (options.files) guarded("base-EaW heuristic", [&] { check_base_eaw_suspect(d, r); });
     if (options.compat) {  // mcx0 t06: report version 4 (after the checks it reads)
         // A throw here is not a load error (version 4 never changes errors / warnings): grade.check_errors, G3 stays open.
@@ -1577,6 +1559,7 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
             });
         retail_equivalent_from_checks(r);
         compat_issues_and_grade(r, d.vfs, d.vfs_issues);
+        loader_issues(d, r);  // ums4 t07
     } else {  // check_lua collects the binding findings with its scan; version 4 lists stay empty without compat
         r.binding_gaps.clear();
         r.retail_equivalent.clear();
@@ -1585,27 +1568,12 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
     return r;
 }
 
-vfs::ModStack resolve_mod_stack(const std::string& root, const std::vector<std::string>& picked, const ModCheckOptions& options) {
-    const vfs::ModRegistry registry = vfs::scan_installed_mods(root, options.workshop_libraries, false);  // the stack's mods get hashed
-    ModCheckOptions light;
-    light.campaigns = light.lua = light.lua_run = light.xml_tags = light.shaders = light.compat = light.assets = false;
-    light.fx_prebuild = light.shader_compile = false;
-    light.files = light.submod = true;
-    light.workshop_libraries = options.workshop_libraries;
-    const vfs::ParentHint hint = [&](const std::vector<std::string>& stack_args) -> std::optional<std::string> {
-        const ModCheckReport r = check_mod_data(root, stack_args, light);
-        if (!r.submod.likely || r.submod.parents.empty()) return std::nullopt;
-        return r.submod.parents.front().arg;
-    };
-    return vfs::resolve(registry, picked, hint);  // ums1 t04
-}
-
 std::string format_mod_report(const ModCheckReport& r, bool verbose) {
     std::string s;
     if (r.resolved) {  // mcx3 t02
         append(s, "== stack (resolved, launch order; fingerprint %016llx)\n", static_cast<unsigned long long>(r.stack.fingerprint));
         for (const vfs::StackMod& m : r.stack.mods)
-            append(s, "    %-24s %-40s %s%s%s\n", m.mod.arg().c_str(), m.mod.name.c_str(), m.reason.c_str(),
+            append(s, "    %-24s %-40s %s%s%s\n", m.mod.arg().c_str(), m.mod.name.c_str(), m.reason_text().c_str(),
                    m.mod.version.empty() ? "" : ", version ", m.mod.version.c_str());
         for (const std::string& e : r.stack.errors) append(s, "    error: %s\n", e.c_str());
         for (const std::string& w : r.stack.warnings) append(s, "    warning: %s\n", w.c_str());
@@ -1916,7 +1884,7 @@ void count(Json& j, std::string_view k, uint64_t v) {
 
 }  // namespace
 
-std::string format_mod_list_json(const vfs::ModRegistry& registry) {
+std::string format_mod_list_json(const vfs::ModCatalog& registry) {
     Json j;
     j.open('{');
     j.key("schema");
@@ -1933,7 +1901,7 @@ std::string format_mod_list_json(const vfs::ModRegistry& registry) {
         j.key("arg");
         j.str(m.arg());
         j.key("kind");
-        j.str(m.kind == vfs::ModKind::Workshop ? "workshop" : m.kind == vfs::ModKind::LocalMods ? "local" : "path");
+        j.str(vfs::mod_kind_name(m.kind));
         j.key("id");
         j.str(m.id);
         j.key("variant");
@@ -1947,7 +1915,7 @@ std::string format_mod_list_json(const vfs::ModRegistry& registry) {
         j.key("has_data");
         j.boolean(m.has_data);
         j.key("game_tag");
-        j.str(m.game_tag == vfs::GameTag::Foc ? "FOC" : m.game_tag == vfs::GameTag::Eaw ? "EAW" : "");
+        j.str(vfs::game_tag_name(m.game_tag));
         char hex[24];
         std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(m.content_hash));
         j.key("content_hash");
@@ -2006,7 +1974,7 @@ std::string format_mod_catalog_json(const vfs::ModCatalog& catalog, const vfs::I
         j.key("arg");
         j.str(m.arg());
         j.key("kind");
-        j.str(m.kind == vfs::ModKind::Workshop ? "workshop" : m.kind == vfs::ModKind::LocalMods ? "local" : "path");
+        j.str(vfs::mod_kind_name(m.kind));
         j.key("id");
         j.str(m.id);
         j.key("variant");
@@ -2030,7 +1998,7 @@ std::string format_mod_catalog_json(const vfs::ModCatalog& catalog, const vfs::I
         j.key("has_data");
         j.boolean(m.has_data);
         j.key("game_tag");
-        j.str(m.game_tag == vfs::GameTag::Foc ? "FOC" : m.game_tag == vfs::GameTag::Eaw ? "EAW" : "");
+        j.str(vfs::game_tag_name(m.game_tag));
         char hex[24];
         std::snprintf(hex, sizeof hex, "%016llx", static_cast<unsigned long long>(m.content_hash));
         j.key("content_hash");
@@ -2118,7 +2086,7 @@ std::string format_conflicts_json(const ConflictReport& r) {
     for (const ConflictFinding& f : r.findings) {
         j.open('{');
         j.key("kind");
-        j.str(f.kind);
+        j.str(conflict_kind_name(f.kind));
         j.key("severity");
         j.str(f.warning ? "warning" : "info");
         j.key("text");
@@ -2144,7 +2112,7 @@ std::string format_mod_report_json(const ModCheckReport& r) {
     j.open('{');
     j.key("schema");
     j.str("alamo.mod_report");
-    count(j, "version", 4);
+    count(j, "version", 5);  // ums4 t02: files.vfs_warnings gone (the VFS findings are `issues` records)
     j.key("result");
     j.str(r.error_count() ? "errors" : "ok");
     count(j, "errors", r.error_count());
@@ -2170,7 +2138,7 @@ std::string format_mod_report_json(const ModCheckReport& r) {
         j.key("root");
         j.str(m.root);
         j.key("game_tag");
-        j.str(m.game_tag == vfs::GameTag::Eaw ? "EAW" : m.game_tag == vfs::GameTag::Foc ? "FOC" : "");
+        j.str(vfs::game_tag_name(m.game_tag));
         char hash[24];
         std::snprintf(hash, sizeof hash, "%016llx", static_cast<unsigned long long>(m.content_hash));
         j.key("content_hash");
@@ -2200,7 +2168,7 @@ std::string format_mod_report_json(const ModCheckReport& r) {
         j.key("name");
         j.str(m.mod.name);
         j.key("reason");
-        j.str(m.reason);
+        j.str(m.reason_text());
         j.close('}');
     }
     j.close(']');
@@ -2215,7 +2183,6 @@ std::string format_mod_report_json(const ModCheckReport& r) {
     j.key("files");
     j.open('{');
     j.strings("mod_dirs", r.mod_dirs);
-    j.strings("vfs_warnings", r.vfs_warnings);
     uint64_t added = 0, replaced = 0;
     for (const auto& f : r.mod_folders) added += f.added, replaced += f.overrides;
     count(j, "added", added);

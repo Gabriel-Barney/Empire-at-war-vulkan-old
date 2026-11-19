@@ -37,6 +37,7 @@
 #include "alamo/game/hud_feeds.hpp"
 #include "alamo/game/mod_check.hpp"
 #include "alamo/game/mod_picker.hpp"
+#include "alamo/vfs/mod_registry.hpp"  // vfs::ModCatalog: the mod picker's rows
 #include "alamo/game/planet_map.hpp"
 #include "alamo/game/radar_feed.hpp"
 #include "alamo/game/save_games.hpp"
@@ -893,10 +894,10 @@ public:
     void check_mod(const std::string& id);
     void poll_mod_check();
     void launch_mod(const std::string& id);
-    const game::InstalledMod* find_mod_row(const std::string& key) const;  // the picker row with that catalog key
+    const vfs::ModDescriptor* find_mod_row(const std::string& key) const;  // the picker row with that catalog key
     std::string game_root_;                          // the FoC folder the data was loaded from
     std::vector<std::string> workshop_libraries_;    // Steam library folders (vfs::InstallLocations)
-    std::vector<game::InstalledMod> installed_mods_;
+    vfs::ModCatalog mod_catalog_;                    // the picker's rows (ums1 t03, ums4 t01)
     std::future<game::ModCheckReport> mod_check_;    // the running check (valid() while one runs)
     std::string mod_check_id_, mod_check_next_;      // its row id; the row asked for while it ran
     bool mod_check_queued_ = false;

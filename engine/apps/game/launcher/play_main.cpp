@@ -4,7 +4,7 @@
 // alamo_game.exe next to it with --game and --cache-dir <here>\cache, sends its output to alamo_game_log.txt and waits.
 // Only an error shows a window (a message box offering the log). Its own arguments are passed on, so a mod folder
 // dropped onto Play.exe plays that mod (MODPATH=); mods are also picked in the game (main menu, Mods). Mod arguments
-// start as their resolved stack (ums1 t04, game::launch_args_for: the in-game picker's and alamo_mod_check's list).
+// start as their resolved stack (ums1 t04, game::play_launch_args in mod_resolve.hpp: the in-game picker's and alamo_mod_check's list).
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -21,9 +21,10 @@
 #include <string>
 #include <vector>
 
-#include "alamo/game/mod_check.hpp"
-#include "alamo/game/mod_picker.hpp"
+#include "alamo/core/host_fs.hpp"
+#include "alamo/game/mod_resolve.hpp"
 #include "alamo/vfs/install_locations.hpp"
+#include "alamo/vfs/host_path.hpp"
 #include "alamo/vfs/mod_registry.hpp"
 #include "alamo/vfs/steam_workshop.hpp"
 #include "play_launch.hpp"
@@ -46,18 +47,6 @@ std::wstring env(const wchar_t* name) {
     const DWORD n = GetEnvironmentVariableW(name, buf.data(), static_cast<DWORD>(buf.size()));
     buf.resize(n < buf.size() ? n : 0);
     return buf;
-}
-
-fs::path from_utf8(const std::string& s) {
-    std::u8string u8;
-    for (const char c : s) u8.push_back(static_cast<char8_t>(c));
-    return fs::path(u8);
-}
-
-std::string to_utf8(const fs::path& p) {
-    std::string out;
-    for (const char8_t c : p.u8string()) out.push_back(static_cast<char>(c));
-    return out;
 }
 
 std::vector<std::wstring> own_args() {
@@ -137,7 +126,7 @@ int run() {
     play::FindInputs in;
     in.saved_file = here / L"game_path.txt";
     in.env = env(L"ALAMO_FOC_DATA");
-    for (const std::string& root : vfs::default_steam_roots()) in.steam_roots.push_back(from_utf8(root));
+    for (const std::string& root : vfs::default_steam_roots()) in.steam_roots.push_back(alamo::path_from_utf8(root));
     in.fixed = {L"F:\\SteamLibrary\\steamapps\\common\\Star Wars Empire at War\\corruption",
                 L"C:\\GOG Games\\Star Wars - Empire at War\\corruption",
                 L"C:\\Program Files (x86)\\GOG Galaxy\\Games\\Star Wars - Empire at War\\corruption"};
@@ -150,19 +139,19 @@ int run() {
 
     // ums1 t04: the mods start as the stack the in-game picker and alamo_mod_check --resolve give (one resolver).
     vfs::ModStack stack;
-    const std::string game_u8 = to_utf8(game);
+    const std::string game_u8 = vfs::native_utf8(game);
     const std::optional<std::vector<std::wstring>> stacked =
         play::stack_mod_args(play::game_args(game, here / L"cache", own_args()),
                              [&](const std::vector<std::string>& picked) { return alamo::game::play_launch_args(game_u8, picked, &stack, found_libraries); });
     if (!stacked) {
         std::wstring text = L"This mod is not started: the port plays Forces of Corruption mods only.\n";
-        for (const std::string& e : stack.errors) text += L"\n" + from_utf8(e).wstring();
+        for (const std::string& e : stack.errors) text += L"\n" + alamo::path_from_utf8(e).wstring();
         MessageBoxW(nullptr, text.c_str(), kTitle, MB_OK | MB_ICONWARNING);
         return 1;
     }
     if (!stack.errors.empty()) {  // a cycle or a mod that is not installed: the picker shows these beside Launch
         std::wstring text = L"The mod stack has problems:\n";
-        for (const std::string& e : stack.errors) text += L"\n" + from_utf8(e).wstring();
+        for (const std::string& e : stack.errors) text += L"\n" + alamo::path_from_utf8(e).wstring();
         text += L"\n\nStart it anyway?";
         if (MessageBoxW(nullptr, text.c_str(), kTitle, MB_OKCANCEL | MB_ICONWARNING) != IDOK) return 1;
     }

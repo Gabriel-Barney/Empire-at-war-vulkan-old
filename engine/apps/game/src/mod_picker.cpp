@@ -8,31 +8,14 @@
 
 #include "alamo/core/ascii.hpp"
 #include "alamo/game/mod_check.hpp"
+#include "alamo/game/mod_resolve.hpp"
 #include "alamo/vfs/install_locations.hpp"
 #include "alamo/vfs/mod_registry.hpp"
 #include "alamo/vfs/steam_workshop.hpp"
+#include "alamo/vfs/vfs.hpp"  // is_mod_arg
 
 namespace alamo::game {
 namespace fs = std::filesystem;
-
-std::vector<fs::path> mod_folders(const fs::path& dir, bool digits_only) {
-    std::vector<fs::path> out;
-    std::error_code ec;
-    if (!fs::is_directory(dir, ec)) return out;
-    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
-        std::error_code ec2;
-        if (!it->is_directory(ec2)) continue;
-        const std::string name = it->path().filename().string();
-        if (digits_only && (name.empty() || name.find_first_not_of("0123456789") != std::string::npos)) continue;
-        if (fs::is_directory(it->path() / "Data", ec2)) out.push_back(it->path());
-    }
-    std::sort(out.begin(), out.end(), [](const fs::path& a, const fs::path& b) { return a.filename().string() < b.filename().string(); });
-    return out;
-}
-
-fs::path workshop_content_dir(std::string_view library) {
-    return fs::path(library) / "steamapps" / "workshop" / "content" / std::string(vfs::kFocSteamAppId);
-}
 
 namespace {
 
@@ -44,84 +27,39 @@ std::string fmt(const char* f, unsigned long long a, unsigned long long b = 0, u
 
 }  // namespace
 
-InstalledMod installed_mod(const vfs::ModDescriptor& d) {
-    InstalledMod m;
-    m.key = d.catalog_key();
-    m.id = d.id;
-    m.variant = d.variant;
-    m.workshop = d.kind == vfs::ModKind::Workshop;
-    m.path = d.root;
-    m.name = d.name;
-    m.arg = d.arg();
-    return m;
-}
-
-std::vector<InstalledMod> list_installed_mods(const vfs::ModCatalog& catalog) {
-    std::vector<InstalledMod> out;
-    out.reserve(catalog.mods.size());
-    for (const vfs::ModDescriptor& d : catalog.mods) out.push_back(installed_mod(d));
-    return out;
-}
-
-std::vector<InstalledMod> list_installed_mods(const std::string& game, std::span<const std::string> workshop_libraries) {
-    return list_installed_mods(vfs::scan_installed_mods(game, workshop_libraries, false));
-}
-
-bool is_mod_arg(std::string_view arg) { return ascii_istarts_with(arg, "MODPATH=") || ascii_istarts_with(arg, "STEAMMOD="); }
-
 std::vector<std::string> relaunch_args(std::span<const std::string> args, std::span<const std::string> mod_args) {
     std::vector<std::string> out;
     for (const std::string& a : args)
-        if (!is_mod_arg(a)) out.push_back(a);
+        if (!vfs::is_mod_arg(a)) out.push_back(a);
     out.insert(out.end(), mod_args.begin(), mod_args.end());
     return out;
 }
 
-std::vector<std::string> mod_launch_args(const InstalledMod& mod, const ModCheckReport* report) {
+std::vector<std::string> mod_launch_args(const vfs::ModDescriptor& mod, const ModCheckReport* report) {
     if (report && (report->base_eaw || (report->resolved && report->stack.base_eaw))) return {};  // D1: refused
     if (report && report->resolved) return report->stack.launch_args();  // ums1 t04: the one resolver's list
     if (report && report->submod.likely && !report->submod.stacked_args.empty()) {
         std::vector<std::string> out;
         for (const std::string& a : report->submod.stacked_args)
-            if (is_mod_arg(a)) out.push_back(a);
+            if (vfs::is_mod_arg(a)) out.push_back(a);
         if (!out.empty()) return out;
     }
-    return {mod.arg};
+    return {mod.arg()};
 }
 
 ModCheckReport check_picked_mod(const std::string& game, const std::string& picked, const ModCheckOptions& options) {
     if (picked.empty()) return check_mod_data(game, {}, options);
-    vfs::ModStack stack = resolve_mod_stack(game, {picked}, options);
+    vfs::ModStack stack = resolve_mod_stack(game, {picked}, options.workshop_libraries);
     std::vector<std::string> args = stack.launch_args();
     if (args.empty()) {  // refused (D1) or not installed: report the picked mod alone, as its own argument
         for (const vfs::StackMod& m : stack.mods)
-            if (m.reason == "picked") args.push_back(m.mod.arg());
+            if (m.reason == vfs::StackReason::Picked) args.push_back(m.mod.arg());
         if (args.empty()) args.push_back(picked);
     }
     ModCheckReport r = check_mod_data(game, args, options);
     r.resolved = true;
     r.stack = std::move(stack);
     return r;
-}
-
-std::vector<std::string> launch_args_for(const std::string& game, const std::vector<std::string>& picked, const ModCheckOptions& options,
-                                         vfs::ModStack* stack) {
-    vfs::ModStack s = resolve_mod_stack(game, picked, options);
-    std::vector<std::string> out = s.launch_args();
-    if (stack) *stack = std::move(s);
-    return out;
-}
-
-std::optional<std::vector<std::string>> play_launch_args(const std::string& game, const std::vector<std::string>& picked,
-                                                         vfs::ModStack* stack, const std::vector<std::string>* steam_libraries) {
-    ModCheckOptions o;
-    o.workshop_libraries = steam_libraries ? *steam_libraries : vfs::default_install_at(game).steam_libraries;
-    vfs::ModStack s;
-    std::vector<std::string> launch = launch_args_for(game, picked, o, &s);
-    const bool refused = s.base_eaw;
-    if (stack) *stack = std::move(s);
-    if (refused) return std::nullopt;
-    return launch;
 }
 
 std::vector<std::string> mod_report_summary(const ModCheckReport& r) {

@@ -11,6 +11,7 @@
 #include "alamo/core/hash.hpp"  // normalize_name
 #include "alamo/vfs/install_locations.hpp"
 #include "alamo/vfs/mod_registry.hpp"
+#include "alamo/vfs/vfs.hpp"  // is_mod_arg
 
 namespace alamo_game_app {
 namespace {
@@ -18,24 +19,24 @@ namespace {
 std::vector<std::string> mod_args_of(const std::vector<std::string>& args) {
     std::vector<std::string> out;
     for (const std::string& a : args)
-        if (game::is_mod_arg(a)) out.push_back(a);
+        if (vfs::is_mod_arg(a)) out.push_back(a);
     return out;
 }
 
 }  // namespace
 
-const game::InstalledMod* App::find_mod_row(const std::string& key) const {
-    for (const game::InstalledMod& m : installed_mods_)
-        if (m.key == key) return &m;
+const vfs::ModDescriptor* App::find_mod_row(const std::string& key) const {
+    for (const vfs::ModDescriptor& m : mod_catalog_.mods)
+        if (m.catalog_key() == key) return &m;
     return nullptr;
 }
 
 void App::init_mod_picker(ui::MenuProviders& mp) {
     const vfs::InstallLocations where = vfs::default_install_at(game_root_);  // ums1 t01
     workshop_libraries_ = where.steam_libraries;
-    const vfs::ModCatalog catalog = vfs::scan_mod_catalog(where, false);   // ums1 t02 / t03: the rows are the catalog's
-    installed_mods_ = game::list_installed_mods(catalog);
-    std::printf("mods: %zu installed (%zu Steam libraries)\n", installed_mods_.size(), workshop_libraries_.size());
+    mod_catalog_ = vfs::scan_mod_catalog(where, false);  // ums1 t02 / t03, ums4 t01: the rows are the catalog's
+    const vfs::ModCatalog& catalog = mod_catalog_;
+    std::printf("mods: %zu installed (%zu Steam libraries)\n", catalog.mods.size(), workshop_libraries_.size());
     // The active row: the row of the first mod argument of this run (a stacked submod comes first), else the base game.
     // Mod arguments compared as folders: '/' == '\\', any case (normalize_name). Variants of one folder share that
     // argument: the one whose declared stack is this run's mod list is active, else the first.
@@ -45,13 +46,14 @@ void App::init_mod_picker(ui::MenuProviders& mp) {
         std::vector<std::string> run;
         for (const std::string& a : active) run.push_back(normalize_name(a));
         bool exact = false;
-        for (const game::InstalledMod& m : installed_mods_) {
-            if (exact || normalize_name(m.arg) != run.front()) continue;
-            if (active_row.empty()) active_row = m.key;
+        for (const vfs::ModDescriptor& m : catalog.mods) {
+            if (exact || normalize_name(m.arg()) != run.front()) continue;
+            const std::string key = m.catalog_key();
+            if (active_row.empty()) active_row = key;
             std::vector<std::string> stack;
-            for (const std::string& a : vfs::resolve(catalog, std::vector<std::string>{m.key}).launch_args()) stack.push_back(normalize_name(a));
+            for (const std::string& a : vfs::resolve(catalog, std::vector<std::string>{key}).launch_args()) stack.push_back(normalize_name(a));
             if (stack == run) {
-                active_row = m.key;
+                active_row = key;
                 exact = true;
             }
         }
@@ -61,20 +63,20 @@ void App::init_mod_picker(ui::MenuProviders& mp) {
         // Labels: the mod's name and where it is installed; the id (workshop item / folder) only when two mods share a
         // name (several Thrawn's Revenge versions) - the report's "Starts with:" line names it for every row.
         std::map<std::string, size_t> names;
-        for (const game::InstalledMod& m : installed_mods_) ++names[m.name];
+        for (const vfs::ModDescriptor& m : mod_catalog_.mods) ++names[m.name];
         std::vector<ui::ModPickerEntry> rows;
         ui::ModPickerEntry base;
         base.label = U"Base game (no mod)";
         base.active = base_active;
         rows.push_back(std::move(base));
-        for (const game::InstalledMod& m : installed_mods_) {
+        for (const vfs::ModDescriptor& m : mod_catalog_.mods) {
             ui::ModPickerEntry e;
-            e.id = m.key;  // unique: the catalog key (1125571106, 2083545253:subA, Mods\<folder>)
+            e.id = m.catalog_key();  // unique: the catalog key (1125571106, 2083545253:subA, Mods\<folder>)
             std::string label = m.name;
-            if (m.name != m.id && names[m.name] > 1) label += "  [" + m.key + "]";
-            label += m.workshop ? "  (Workshop)" : "  (Mods)";
+            if (m.name != m.id && names[m.name] > 1) label += "  [" + e.id + "]";
+            label += m.kind == vfs::ModKind::Workshop ? "  (Workshop)" : "  (Mods)";
             e.label = ui::utf8_to_utf32(label);
-            e.active = !active_row.empty() && m.key == active_row;
+            e.active = !active_row.empty() && e.id == active_row;
             rows.push_back(std::move(e));
         }
         return rows;
@@ -106,9 +108,9 @@ void App::poll_mod_check() {
     const std::string id = mod_check_id_;
     std::vector<std::string> launch;
     if (!id.empty()) {
-        const game::InstalledMod* row = find_mod_row(id);
+        const vfs::ModDescriptor* row = find_mod_row(id);
         if (row) launch = game::mod_launch_args(*row, &r);
-        if (launch.empty() && !r.base_eaw && !(r.resolved && r.stack.base_eaw)) launch.push_back(row ? row->arg : id);
+        if (launch.empty() && !r.base_eaw && !(r.resolved && r.stack.base_eaw)) launch.push_back(row ? row->arg() : id);
     }
     mod_launch_[id] = launch;
     std::vector<std::u32string> lines;
@@ -136,10 +138,10 @@ void App::launch_mod(const std::string& id) {
         return;
     }
     const auto it = mod_launch_.find(id);
-    const game::InstalledMod* row = find_mod_row(id);
+    const vfs::ModDescriptor* row = find_mod_row(id);
     const std::vector<std::string> mod_args = it != mod_launch_.end() ? it->second
                                               : id.empty()             ? std::vector<std::string>{}
-                                                                       : std::vector<std::string>{row ? row->arg : id};
+                                                                       : std::vector<std::string>{row ? row->arg() : id};
     const std::vector<std::string> args = game::relaunch_args(opt_.argv, mod_args);
     std::string all;
     for (const std::string& a : args) all += " " + a;

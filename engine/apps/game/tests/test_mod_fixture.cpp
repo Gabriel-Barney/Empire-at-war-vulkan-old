@@ -93,7 +93,22 @@ void test_mod(const std::string& foc) {
         // The machine-readable summary.
         const std::string js = alamo::game::format_mod_report_json(r);
         CHECK(contains(js, "\"schema\": \"alamo.mod_report\""));
-        CHECK(contains(js, "\"version\": 4"));
+        CHECK(contains(js, "\"version\": 5"));
+        CHECK(!contains(js, "\"vfs_warnings\""));  // ums4 t02: version 5 drops files.vfs_warnings (the issues hold them)
+        // ums4 t07: every distinct loader diagnostic is a loader_diagnostic issue with its step; a line naming a file
+        // that no layer has (the fixture's missing enum files) carries no layer.
+        size_t loader = 0, unplaced = 0;
+        for (const alamo::CompatIssue& i : r.issues.issues()) {
+            if (i.kind != alamo::IssueKind::LoaderDiagnostic) continue;
+            ++loader;
+            CHECK(i.detail.rfind("loader step ", 0) == 0 && i.severity == alamo::IssueSeverity::Warning);
+            if (contains(i.subject, "not found") && !i.source.empty()) unplaced += i.layer == alamo::kNoLayer ? 1u : 0u;
+        }
+        std::vector<std::string> distinct = r.diagnostics;
+        std::sort(distinct.begin(), distinct.end());
+        distinct.erase(std::unique(distinct.begin(), distinct.end()), distinct.end());
+        CHECK(loader == distinct.size() && loader > 0 && unplaced > 0);
+        CHECK(contains(js, "\"kind\": \"loader_diagnostic\""));
         // mcx0 t06: the version 4 keys are there (FixtureChecks' story and binding findings: test_compat_checks).
         for (const char* k : {"\"honour_gaps\":", "\"retail_equivalent\":", "\"bindings\":", "\"story\":", "\"token_coverage\":",
                               "\"limits\":", "\"grade\":"})

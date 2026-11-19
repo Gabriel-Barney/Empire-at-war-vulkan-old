@@ -13,7 +13,6 @@
 #include "alamo/core/host_fs.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/data/xml_list.hpp"
-#include "alamo/game/mod_picker.hpp"  // is_mod_arg
 #include "alamo/core/compat_issue.hpp"
 #include "alamo/vfs/mod_environment.hpp"
 #include "alamo/vfs/mod_registry.hpp"
@@ -21,6 +20,16 @@
 #include "alamo/vfs/vfs.hpp"
 
 namespace alamo::game {
+
+const char* conflict_kind_name(ConflictKind kind) {
+    switch (kind) {
+        case ConflictKind::ListIgnored: return "list_ignored";
+        case ConflictKind::SubmodOrder: return "submod_order";
+        case ConflictKind::NoEffect: return "no_effect";
+        case ConflictKind::NoData: break;
+    }
+    return "no_data";
+}
 namespace fs = std::filesystem;
 
 namespace {
@@ -80,18 +89,19 @@ ConflictReport mod_conflicts(const vfs::ModCatalog& catalog, std::span<const std
     const vfs::Vfs* const v = &env->vfs();
     for (const std::string& a : args) {  // FALLBACKPATH= and other switches are not mods
         std::vector<vfs::ModDescriptor> scratch;
-        if (is_mod_arg(a) && !catalog.find_arg(a, scratch)) r.errors.push_back("not a mod this install has: " + a);
+        if (vfs::is_mod_arg(a) && !catalog.find_arg(a, scratch)) r.errors.push_back("not a mod this install has: " + a);
     }
 
     // The mods as mounted (the VFS's resolved search list), each with its files: its loose files from the VFS's own index
     // of the mod layer (ums2 t10: no second walk of the folder), then its MEGs below.
     std::vector<Layered> mods;
-    for (size_t i = 0; i < v->mod_dirs().size(); ++i) {
-        const std::string& dir = v->mod_dirs()[i];
+    for (const vfs::Layer& layer : v->layers()) {  // the mod layers come first, in search order
+        if (layer.kind != vfs::Layer::Kind::Mod) break;
+        const std::string& dir = layer.host_root;
         Layered l;
         const vfs::ModDescriptor* d = catalog.find_root(dir);
         l.mod = d ? *d : vfs::describe_mounted_mod(dir, catalog.game, false);
-        for (std::string& p : v->layer_files(v->layers()[i])) {  // layers() starts with the mod layers, search order
+        for (std::string& p : v->layer_files(layer)) {
             l.loose.insert(p);
             l.files.insert(std::move(p));
         }
@@ -174,7 +184,7 @@ ConflictReport mod_conflicts(const vfs::ModCatalog& catalog, std::span<const std
             const std::vector<std::string> ignored = list_entries(bytes, path);
             std::set<std::string> ignored_keys, seen;
             ConflictFinding f;
-            f.kind = "list_ignored";
+            f.kind = ConflictKind::ListIgnored;
             f.mods = {lower};
             if (winner != SIZE_MAX) f.mods.push_back(winner);
             for (const std::string& e : ignored) {
@@ -209,7 +219,7 @@ ConflictReport mod_conflicts(const vfs::ModCatalog& catalog, std::span<const std
                 const vfs::ModDescriptor* p = catalog.find_dependency(d);
                 if (!p || p->catalog_key() != mods[parent].mod.catalog_key()) continue;
                 ConflictFinding f;
-                f.kind = "submod_order";
+                f.kind = ConflictKind::SubmodOrder;
                 f.mods = {sub, parent};
                 f.order = true;
                 f.text = display(mods[sub]) + " is a submod of " + display(mods[parent]) + " (its modinfo.json says so) and should be above it.";
@@ -220,7 +230,7 @@ ConflictReport mod_conflicts(const vfs::ModCatalog& catalog, std::span<const std
         const ConflictMod& c = r.mods[i];
         if (c.files > 0 && c.replaced_files == c.files) {
             ConflictFinding f;
-            f.kind = "no_effect";
+            f.kind = ConflictKind::NoEffect;
             f.mods = {i};
             for (const ConflictPair& p : r.pairs)
                 if (p.loser == i) f.mods.push_back(p.winner);
@@ -232,7 +242,7 @@ ConflictReport mod_conflicts(const vfs::ModCatalog& catalog, std::span<const std
         }
         if (c.exists && !c.has_data) {
             ConflictFinding f;
-            f.kind = "no_data";
+            f.kind = ConflictKind::NoData;
             f.mods = {i};
             f.text = c.name + " has no Data folder, so it changes nothing in the game.";
             r.findings.push_back(std::move(f));
@@ -240,8 +250,7 @@ ConflictReport mod_conflicts(const vfs::ModCatalog& catalog, std::span<const std
     }
     // Warnings before notes; within each, the launcher's ranks (list_ignored, submod_order, no_effect, no_data).
     const auto rank = [](const ConflictFinding& f) {
-        const int k = f.kind == "list_ignored" ? 0 : f.kind == "submod_order" ? 1 : f.kind == "no_effect" ? 2 : 3;
-        return std::pair<int, int>(f.warning ? 0 : 1, k);
+        return std::pair<int, int>(f.warning ? 0 : 1, static_cast<int>(f.kind));
     };
     std::stable_sort(r.findings.begin(), r.findings.end(), [&](const ConflictFinding& x, const ConflictFinding& y) { return rank(x) < rank(y); });
     return r;

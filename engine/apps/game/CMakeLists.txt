@@ -9,6 +9,12 @@ if(NOT TARGET alamo_sim OR NOT TARGET alamo_tactical_movement OR NOT TARGET alam
   return()
 endif()
 
+# ums4 t05: the stack resolver and the submod hint (mod_resolve.hpp): only the VFS and the XML list reader, so alamo_play
+# (Play.exe) links it without alamo_game_core.
+add_library(alamo_mod_resolve STATIC src/mod_resolve.cpp include/alamo/game/mod_resolve.hpp)
+target_include_directories(alamo_mod_resolve PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+target_link_libraries(alamo_mod_resolve PUBLIC alamo_vfs alamo_data alamo_core alamo_engine_flags)
+
 add_library(alamo_game_core STATIC
   src/game_data.cpp
   src/game_session.cpp
@@ -39,6 +45,7 @@ add_library(alamo_game_core STATIC
 )
 target_include_directories(alamo_game_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_link_libraries(alamo_game_core PUBLIC alamo_sim alamo_vfs alamo_data alamo_core alamo_engine_flags)
+target_link_libraries(alamo_game_core PUBLIC alamo_mod_resolve)  # ums4 t05: the picker and alamo_mod_check resolve through it
 target_link_libraries(alamo_game_core PUBLIC alamo_game_rules)  # q6 t03: skirmish rules shared with alamo_headless (rules/)
 if(TARGET alamo_ai_galactic)  # A2 galactic AI for the AI players (needs engine/ai + engine/lua)
   target_link_libraries(alamo_game_core PUBLIC alamo_ai_galactic)
@@ -238,7 +245,7 @@ if(WIN32)
   target_include_directories(alamo_play_launch PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/launcher)
   target_link_libraries(alamo_play_launch PUBLIC alamo_engine_flags PRIVATE alamo_vfs)
   add_executable(alamo_play WIN32 launcher/play_main.cpp)
-  target_link_libraries(alamo_play PRIVATE alamo_play_launch alamo_game_core alamo_vfs alamo_core shell32 ole32 user32)  # ums1 t04: the stack resolver
+  target_link_libraries(alamo_play PRIVATE alamo_play_launch alamo_mod_resolve alamo_vfs alamo_core shell32 ole32 user32)  # ums4 t05: the resolver only
   set_target_properties(alamo_play PROPERTIES OUTPUT_NAME Play)
   add_executable(alamo_play_tests tests/test_play_launch.cpp)
   target_link_libraries(alamo_play_tests PRIVATE alamo_play_launch alamo_test_support)

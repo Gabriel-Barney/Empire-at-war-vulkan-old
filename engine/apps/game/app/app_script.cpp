@@ -1419,7 +1419,7 @@ void App::make_script() {
     s.push_back(step_shot("game_main_menu.png"));
     // mcx7: with a mod mounted the picker's active row is that mod, and its background check (minutes for a large mod)
     // never gives the base game report the steps below wait for; the no-mod smoke (and its golden) covers the picker.
-    const bool no_mod_mounted = std::none_of(opt_.game_args.begin(), opt_.game_args.end(), [](const std::string& a) { return game::is_mod_arg(a); });
+    const bool no_mod_mounted = std::none_of(opt_.game_args.begin(), opt_.game_args.end(), [](const std::string& a) { return vfs::is_mod_arg(a); });
     if (opt_.smoke == "skirmish" && !no_mod_mounted)
         std::printf("script: mod picker steps left out (a mod is mounted: the picker would check it in the background)\n");
     if (opt_.smoke == "skirmish" && no_mod_mounted) {

@@ -46,6 +46,7 @@
 
 #include "alamo/core/host_fs.hpp"
 #include "alamo/game/mod_check.hpp"
+#include "alamo/game/mod_resolve.hpp"
 #include "alamo/game/mod_conflicts.hpp"
 #include "alamo/vfs/install_locations.hpp"
 #include "alamo/vfs/mod_registry.hpp"
@@ -160,8 +161,10 @@ int main(int raw_argc, char** raw_argv) {
     }
     if (game.empty()) return usage();
     if (list_mods) {
-        const auto libraries = alamo::vfs::default_install_at(game).steam_libraries;
-        const std::string js = alamo::game::format_mod_list_json(alamo::vfs::scan_installed_mods(game, libraries, true));
+        alamo::vfs::InstallLocations where;  // the FoC folder as given, the install's Steam libraries, no extra mod folders
+        where.foc = game;
+        where.steam_libraries = alamo::vfs::default_install_at(game).steam_libraries;
+        const std::string js = alamo::game::format_mod_list_json(alamo::vfs::scan_mod_catalog(where, true));
         if (json.empty() || json == "-") std::fputs(js.c_str(), stdout);
         else if (!write_file(json, js)) return 1;
         return 0;
@@ -170,7 +173,7 @@ int main(int raw_argc, char** raw_argv) {
 
     alamo::vfs::ModStack stack;
     if (resolve) {
-        stack = alamo::game::resolve_mod_stack(game, args, opt);
+        stack = alamo::game::resolve_mod_stack(game, args, opt.workshop_libraries);
         if (resolve_only || !stack.errors.empty()) {
             alamo::game::ModCheckReport r;
             r.game = game;

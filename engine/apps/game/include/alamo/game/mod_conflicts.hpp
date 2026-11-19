@@ -46,8 +46,13 @@ struct ConflictPair {
     size_t xml_files = 0;             // how many of them end in .XML
 };
 
+// The finding kinds in the launcher's rank order (ums4 t04: an enum; conflict_kind_name gives the JSON spelling
+// "list_ignored", "submod_order", "no_effect", "no_data").
+enum class ConflictKind : uint8_t { ListIgnored, SubmodOrder, NoEffect, NoData };
+const char* conflict_kind_name(ConflictKind kind);
+
 struct ConflictFinding {
-    std::string kind;       // "list_ignored", "submod_order", "no_effect", "no_data"
+    ConflictKind kind = ConflictKind::ListIgnored;
     bool warning = true;    // false: worth knowing, nothing to fix (info)
     std::string text;
     std::vector<size_t> mods;  // indices into ConflictReport::mods, the mod the finding is about first
