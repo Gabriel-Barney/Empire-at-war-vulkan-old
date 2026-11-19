@@ -28,9 +28,23 @@
 //     alamo_mod_check --game "...\corruption" STEAMMOD=1125571106 --json report.json
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <string>
+#include <utility>
 #include <vector>
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <shellapi.h>
+#endif
+
+#include "alamo/core/host_fs.hpp"
 #include "alamo/game/mod_check.hpp"
 #include "alamo/game/mod_conflicts.hpp"
 #include "alamo/vfs/install_locations.hpp"
@@ -49,27 +63,50 @@ int usage() {
     return 2;
 }
 
-bool write_file(const std::string& path, const std::string& text) {
-    FILE* f = std::fopen(path.c_str(), "wb");
+bool write_file(const std::string& path, const std::string& text) {  // path: UTF-8 (utf8_args)
+    std::ofstream f(alamo::path_from_utf8(path), std::ios::binary);
     if (!f) {
         std::fprintf(stderr, "cannot write %s\n", path.c_str());
         return false;
     }
-    std::fwrite(text.data(), 1, text.size(), f);
-    std::fclose(f);
-    return true;
+    f.write(text.data(), static_cast<std::streamsize>(text.size()));
+    return static_cast<bool>(f);
+}
+
+// The arguments as UTF-8, which every path string of the vfs is: on Windows from the wide command line, so a folder name
+// outside the ANSI code page (a Steam library under a user name in another script) reaches the check whole.
+std::vector<std::string> utf8_args(int argc, char** argv) {
+    std::vector<std::string> out;
+#ifdef _WIN32
+    int wargc = 0;
+    if (LPWSTR* wargv = CommandLineToArgvW(GetCommandLineW(), &wargc)) {
+        for (int i = 0; i < wargc; ++i) {  // as typed: no path conversion (a MODPATH= keeps its backslashes)
+            const int len = WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, nullptr, 0, nullptr, nullptr);
+            std::string s(len > 0 ? static_cast<size_t>(len) : size_t{1}, '\0');
+            if (len > 0) WideCharToMultiByte(CP_UTF8, 0, wargv[i], -1, s.data(), len, nullptr, nullptr);
+            s.resize(s.size() - 1);  // the terminator
+            out.push_back(std::move(s));
+        }
+        LocalFree(wargv);
+        return out;
+    }
+#endif
+    for (int i = 0; i < argc; ++i) out.emplace_back(argv[i]);
+    return out;
 }
 
 }  // namespace
 
-int main(int argc, char** argv) {
+int main(int raw_argc, char** raw_argv) {
+    const std::vector<std::string> argv = utf8_args(raw_argc, raw_argv);
+    const size_t argc = argv.size();
     alamo::vfs::install_steam_workshop_lookup();  // modc t10: STEAMMOD= from the Steam library folders
     std::string game, out, json;
     std::vector<std::string> args;
     bool verbose = false, resolve = false, resolve_only = false, list_mods = false, list = false, conflicts = false, hash = true;
     std::vector<std::string> mod_dirs;
     alamo::game::ModCheckOptions opt;
-    for (int i = 1; i < argc; ++i) {
+    for (size_t i = 1; i < argc; ++i) {
         const std::string a = argv[i];
         if (a == "--game" && i + 1 < argc) game = argv[++i];
         else if (a == "--out" && i + 1 < argc) out = argv[++i];

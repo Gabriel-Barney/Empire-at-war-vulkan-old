@@ -3,6 +3,7 @@
 
 mod app;
 mod bisect;
+mod catalog;
 mod config;
 mod conflicts;
 mod diagnostics;

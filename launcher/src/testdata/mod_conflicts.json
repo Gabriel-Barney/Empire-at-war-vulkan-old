@@ -1,0 +1,140 @@
+{
+  "schema": "alamo.mod_conflicts",
+  "version": 1,
+  "game": "C:/Fixture/corruption",
+  "args": [
+    "MODPATH=Mods\\StackParent",
+    "MODPATH=Mods\\StackSub",
+    "MODPATH=Mods\\OtherTc",
+    "STEAMMOD=900000201"
+  ],
+  "mods": [
+    {
+      "key": "Mods\\StackParent",
+      "name": "Stack Parent",
+      "root": "C:/Fixture/corruption/Mods/StackParent",
+      "arg": "MODPATH=Mods\\StackParent",
+      "exists": true,
+      "has_data": true,
+      "files": 5,
+      "megs": 0,
+      "replaced_files": 0,
+      "base_wins": 0
+    },
+    {
+      "key": "Mods\\StackSub",
+      "name": "Stack Sub",
+      "root": "C:/Fixture/corruption/Mods/StackSub",
+      "arg": "MODPATH=Mods\\StackSub",
+      "exists": true,
+      "has_data": true,
+      "files": 2,
+      "megs": 0,
+      "replaced_files": 1,
+      "base_wins": 0
+    },
+    {
+      "key": "Mods\\OtherTc",
+      "name": "OtherTc",
+      "root": "C:/Fixture/corruption/Mods/OtherTc",
+      "arg": "MODPATH=Mods\\OtherTc",
+      "exists": true,
+      "has_data": true,
+      "files": 2,
+      "megs": 0,
+      "replaced_files": 2,
+      "base_wins": 0
+    },
+    {
+      "key": "900000201:subA",
+      "name": "Ws Patch A",
+      "root": "C:/Fixture/steamlib/steamapps/workshop/content/32470/900000201",
+      "arg": "STEAMMOD=900000201",
+      "exists": true,
+      "has_data": true,
+      "files": 1,
+      "megs": 0,
+      "replaced_files": 0,
+      "base_wins": 0
+    }
+  ],
+  "pairs": [
+    {
+      "winner": 0,
+      "loser": 1,
+      "xml_files": 1,
+      "files": [
+        "DATA\\XML\\GAMEOBJECTFILES.XML"
+      ]
+    },
+    {
+      "winner": 0,
+      "loser": 2,
+      "xml_files": 2,
+      "files": [
+        "DATA\\XML\\FACTIONFILES.XML",
+        "DATA\\XML\\GAMEOBJECTFILES.XML"
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "kind": "list_ignored",
+      "severity": "warning",
+      "text": "Stack Sub's object list is ignored because Stack Parent also has GameObjectFiles.xml. 1 XML file only Stack Sub lists (SubObjects.xml) won't load unless Stack Parent lists them. Stack Sub's list includes everything in Stack Parent's, so Stack Sub looks like it belongs above Stack Parent.",
+      "mods": [
+        1,
+        0
+      ],
+      "order": true,
+      "lost": [
+        "SubObjects.xml"
+      ]
+    },
+    {
+      "kind": "submod_order",
+      "severity": "warning",
+      "text": "Stack Sub is a submod of Stack Parent (its modinfo.json says so) and should be above it.",
+      "mods": [
+        1,
+        0
+      ],
+      "order": true,
+      "lost": []
+    },
+    {
+      "kind": "submod_order",
+      "severity": "warning",
+      "text": "Ws Patch A is a submod of Stack Parent (its modinfo.json says so) and should be above it.",
+      "mods": [
+        3,
+        0
+      ],
+      "order": true,
+      "lost": []
+    },
+    {
+      "kind": "no_effect",
+      "severity": "warning",
+      "text": "OtherTc has no effect in this order: all 2 of its files are also in layers the game reads first. Move it up if it is meant to change them.",
+      "mods": [
+        2,
+        0
+      ],
+      "order": true,
+      "lost": []
+    },
+    {
+      "kind": "list_ignored",
+      "severity": "info",
+      "text": "OtherTc's object list is ignored because Stack Parent also has GameObjectFiles.xml. Stack Parent's list names every file OtherTc's does, so nothing is lost.",
+      "mods": [
+        2,
+        0
+      ],
+      "order": false,
+      "lost": []
+    }
+  ],
+  "errors": []
+}

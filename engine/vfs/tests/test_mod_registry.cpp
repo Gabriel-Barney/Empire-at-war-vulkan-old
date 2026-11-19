@@ -85,6 +85,11 @@ void test_parse() {
     CHECK(av::parse_modinfo("{\"version\": \"1\"}", &w).has_value() && has(w, "no \"name\""));
     const auto num = av::parse_modinfo("{\"name\": \"N\", \"version\": 1.10}");
     CHECK(num.has_value() && num->version == "1.10");  // a number keeps its text
+    // ums3: "description" stands in for a missing "summary" (the Command Center's mods page showed either).
+    const auto desc = av::parse_modinfo("{\"name\": \"D\", \"description\": \"About D\"}");
+    CHECK(desc.has_value() && desc->summary == "About D");
+    const auto both = av::parse_modinfo("{\"name\": \"D\", \"summary\": \"S\", \"description\": \"About D\"}");
+    CHECK(both.has_value() && both->summary == "S");
     CHECK(!av::parse_modinfo("[1, 2]").has_value());
     CHECK(!av::parse_modinfo("{\"name\": \"x").has_value());
     CHECK(!av::parse_modinfo("").has_value());

@@ -1,0 +1,359 @@
+{
+  "schema": "alamo.mod_catalog",
+  "version": 1,
+  "install": {
+    "foc": "C:/Fixture/corruption",
+    "eaw": "C:/Fixture/GameData",
+    "mods_dir": "C:/Fixture/corruption/Mods",
+    "steam_roots": [
+      "C:/Fixture/steamlib"
+    ],
+    "steam_libraries": [
+      "C:/Fixture/steamlib"
+    ],
+    "workshop_dirs": [
+      "C:/Fixture/steamlib/steamapps/workshop/content/32470"
+    ],
+    "mod_folders": []
+  },
+  "mods": [
+    {
+      "key": "900000201:subA",
+      "save_key": "900000201:subA",
+      "arg": "STEAMMOD=900000201",
+      "kind": "workshop",
+      "id": "900000201",
+      "variant": "subA",
+      "root": "C:/Fixture/steamlib/steamapps/workshop/content/32470/900000201",
+      "name": "Ws Patch A",
+      "named": true,
+      "summary": "",
+      "version": "",
+      "icon": "",
+      "published_id": "",
+      "has_modinfo": true,
+      "has_data": true,
+      "game_tag": "",
+      "content_hash": "0000000000000000",
+      "languages": [
+        {
+          "code": "en",
+          "support": 7
+        }
+      ],
+      "layout": "ResolveRecursive",
+      "dependencies": [
+        {
+          "modtype": 0,
+          "identifier": "Mods\\StackParent",
+          "name": ""
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "key": "900000201:subB",
+      "save_key": "900000201:subB",
+      "arg": "STEAMMOD=900000201",
+      "kind": "workshop",
+      "id": "900000201",
+      "variant": "subB",
+      "root": "C:/Fixture/steamlib/steamapps/workshop/content/32470/900000201",
+      "name": "Ws Patch B",
+      "named": true,
+      "summary": "",
+      "version": "",
+      "icon": "",
+      "published_id": "",
+      "has_modinfo": true,
+      "has_data": true,
+      "game_tag": "",
+      "content_hash": "0000000000000000",
+      "languages": [
+        {
+          "code": "en",
+          "support": 7
+        }
+      ],
+      "layout": "ResolveRecursive",
+      "dependencies": [
+        {
+          "modtype": 0,
+          "identifier": "Mods\\OtherTc",
+          "name": ""
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "key": "Mods\\CycleA",
+      "save_key": "CycleA",
+      "arg": "MODPATH=Mods\\CycleA",
+      "kind": "local",
+      "id": "CycleA",
+      "variant": "",
+      "root": "C:/Fixture/corruption/Mods/CycleA",
+      "name": "Cycle A",
+      "named": true,
+      "summary": "",
+      "version": "",
+      "icon": "",
+      "published_id": "",
+      "has_modinfo": true,
+      "has_data": true,
+      "game_tag": "",
+      "content_hash": "0000000000000000",
+      "languages": [
+        {
+          "code": "en",
+          "support": 7
+        }
+      ],
+      "layout": "ResolveRecursive",
+      "dependencies": [
+        {
+          "modtype": 0,
+          "identifier": "Mods\\CycleB",
+          "name": ""
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "key": "Mods\\CycleB",
+      "save_key": "CycleB",
+      "arg": "MODPATH=Mods\\CycleB",
+      "kind": "local",
+      "id": "CycleB",
+      "variant": "",
+      "root": "C:/Fixture/corruption/Mods/CycleB",
+      "name": "Cycle B",
+      "named": true,
+      "summary": "",
+      "version": "",
+      "icon": "",
+      "published_id": "",
+      "has_modinfo": true,
+      "has_data": true,
+      "game_tag": "",
+      "content_hash": "0000000000000000",
+      "languages": [
+        {
+          "code": "en",
+          "support": 7
+        }
+      ],
+      "layout": "ResolveRecursive",
+      "dependencies": [
+        {
+          "modtype": 0,
+          "identifier": "Mods\\CycleA",
+          "name": ""
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "key": "Mods\\EawGuess",
+      "save_key": "EawGuess",
+      "arg": "MODPATH=Mods\\EawGuess",
+      "kind": "local",
+      "id": "EawGuess",
+      "variant": "",
+      "root": "C:/Fixture/corruption/Mods/EawGuess",
+      "name": "EawGuess",
+      "named": false,
+      "summary": "",
+      "version": "",
+      "icon": "",
+      "published_id": "",
+      "has_modinfo": false,
+      "has_data": true,
+      "game_tag": "",
+      "content_hash": "0000000000000000",
+      "languages": [
+        {
+          "code": "en",
+          "support": 7
+        }
+      ],
+      "layout": "ResolveRecursive",
+      "dependencies": [],
+      "warnings": []
+    },
+    {
+      "key": "Mods\\EawOnly",
+      "save_key": "EawOnly",
+      "arg": "MODPATH=Mods\\EawOnly",
+      "kind": "local",
+      "id": "EawOnly",
+      "variant": "",
+      "root": "C:/Fixture/corruption/Mods/EawOnly",
+      "name": "Old EaW Mod",
+      "named": true,
+      "summary": "",
+      "version": "0.9",
+      "icon": "",
+      "published_id": "",
+      "has_modinfo": true,
+      "has_data": true,
+      "game_tag": "EAW",
+      "content_hash": "0000000000000000",
+      "languages": [
+        {
+          "code": "en",
+          "support": 7
+        }
+      ],
+      "layout": "ResolveRecursive",
+      "dependencies": [],
+      "warnings": []
+    },
+    {
+      "key": "Mods\\OtherTc",
+      "save_key": "OtherTc",
+      "arg": "MODPATH=Mods\\OtherTc",
+      "kind": "local",
+      "id": "OtherTc",
+      "variant": "",
+      "root": "C:/Fixture/corruption/Mods/OtherTc",
+      "name": "OtherTc",
+      "named": false,
+      "summary": "",
+      "version": "",
+      "icon": "",
+      "published_id": "",
+      "has_modinfo": false,
+      "has_data": true,
+      "game_tag": "",
+      "content_hash": "0000000000000000",
+      "languages": [
+        {
+          "code": "en",
+          "support": 7
+        }
+      ],
+      "layout": "ResolveRecursive",
+      "dependencies": [],
+      "warnings": []
+    },
+    {
+      "key": "Mods\\StackHinted",
+      "save_key": "StackHinted",
+      "arg": "MODPATH=Mods\\StackHinted",
+      "kind": "local",
+      "id": "StackHinted",
+      "variant": "",
+      "root": "C:/Fixture/corruption/Mods/StackHinted",
+      "name": "StackHinted",
+      "named": false,
+      "summary": "",
+      "version": "",
+      "icon": "",
+      "published_id": "",
+      "has_modinfo": false,
+      "has_data": true,
+      "game_tag": "",
+      "content_hash": "0000000000000000",
+      "languages": [
+        {
+          "code": "en",
+          "support": 7
+        }
+      ],
+      "layout": "ResolveRecursive",
+      "dependencies": [],
+      "warnings": []
+    },
+    {
+      "key": "Mods\\StackParent",
+      "save_key": "StackParent",
+      "arg": "MODPATH=Mods\\StackParent",
+      "kind": "local",
+      "id": "StackParent",
+      "variant": "",
+      "root": "C:/Fixture/corruption/Mods/StackParent",
+      "name": "Stack Parent",
+      "named": true,
+      "summary": "",
+      "version": "2.0",
+      "icon": "",
+      "published_id": "",
+      "has_modinfo": true,
+      "has_data": true,
+      "game_tag": "FOC",
+      "content_hash": "0000000000000000",
+      "languages": [
+        {
+          "code": "en",
+          "support": 7
+        }
+      ],
+      "layout": "ResolveRecursive",
+      "dependencies": [],
+      "warnings": []
+    },
+    {
+      "key": "Mods\\StackSub",
+      "save_key": "StackSub",
+      "arg": "MODPATH=Mods\\StackSub",
+      "kind": "local",
+      "id": "StackSub",
+      "variant": "",
+      "root": "C:/Fixture/corruption/Mods/StackSub",
+      "name": "Stack Sub",
+      "named": true,
+      "summary": "",
+      "version": "1.1",
+      "icon": "",
+      "published_id": "",
+      "has_modinfo": true,
+      "has_data": true,
+      "game_tag": "",
+      "content_hash": "0000000000000000",
+      "languages": [
+        {
+          "code": "en",
+          "support": 7
+        }
+      ],
+      "layout": "ResolveRecursive",
+      "dependencies": [
+        {
+          "modtype": 0,
+          "identifier": "Mods\\StackParent",
+          "name": "Stack Parent"
+        }
+      ],
+      "warnings": []
+    },
+    {
+      "key": "Mods\\StackTop",
+      "save_key": "StackTop",
+      "arg": "MODPATH=Mods\\StackTop",
+      "kind": "local",
+      "id": "StackTop",
+      "variant": "",
+      "root": "C:/Fixture/corruption/Mods/StackTop",
+      "name": "StackTop",
+      "named": false,
+      "summary": "",
+      "version": "",
+      "icon": "",
+      "published_id": "",
+      "has_modinfo": false,
+      "has_data": true,
+      "game_tag": "",
+      "content_hash": "0000000000000000",
+      "languages": [
+        {
+          "code": "en",
+          "support": 7
+        }
+      ],
+      "layout": "ResolveRecursive",
+      "dependencies": [],
+      "warnings": []
+    }
+  ]
+}

@@ -274,6 +274,7 @@ std::optional<ModInfo> parse_modinfo(std::string_view text, std::vector<std::str
     ModInfo m;
     m.name = str_of(root.get("name"));
     m.summary = str_of(root.get("summary"));
+    if (m.summary.empty()) m.summary = str_of(root.get("description"));  // ums3: some modinfo files say "description"
     m.icon = str_of(root.get("icon"));
     m.version = str_of(root.get("version"));
     if (m.name.empty() && warnings) warnings->push_back("modinfo: no \"name\"");

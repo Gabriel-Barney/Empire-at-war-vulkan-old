@@ -122,6 +122,7 @@ fn conflict_input(app: &App) -> conflicts::Input {
             })
             .collect(),
         foc: mods::foc_dir(&app.steam, &app.cfg.settings),
+        exe: app.mod_check.clone(),
     }
 }
 
@@ -1268,7 +1269,7 @@ fn mods_card(app: &mut App, st: &mut State, ui: &mut egui::Ui, report: Option<&R
     let resolving = st.resolver.poll();
     let profile_mods = app.cfg.active().mods.clone();
     let foc = mods::foc_dir(&app.steam, &app.cfg.settings);
-    let game_exe = app.cfg.settings.game_exe.clone();
+    let mod_check = app.mod_check.clone();
     let resolved = st.resolver.result.clone().filter(|_| st.resolver.for_mods == profile_mods);
     let stack_paths: Option<Vec<PathBuf>> = match (&resolved, &foc) {
         (Some(Ok(r)), Some(foc)) if r.errors.is_empty() && !r.base_eaw => {
@@ -1297,7 +1298,7 @@ fn mods_card(app: &mut App, st: &mut State, ui: &mut egui::Ui, report: Option<&R
         ));
         // mcx3 t06: the stack the port resolves from these mods (declared and likely parents, submod first).
         ui.horizontal(|ui| {
-            let can = n > 0 && foc.is_some() && game_exe.is_some() && !resolving;
+            let can = n > 0 && foc.is_some() && mod_check.is_some() && !resolving;
             if ui
                 .add_enabled(can, egui::Button::new("Resolve stack"))
                 .on_hover_text("Ask the port's mod check which parents these mods need and in which order (alamo_mod_check --resolve)")
@@ -1557,8 +1558,8 @@ fn mods_card(app: &mut App, st: &mut State, ui: &mut egui::Ui, report: Option<&R
             false
         }
         Some(Act::Resolve) => {
-            if let (Some(exe), Some(foc)) = (game_exe, foc) {
-                st.resolver.start(crate::stack::mod_check_exe(&exe), foc, mods.clone(), ui.ctx().clone());
+            if let (Some(exe), Some(foc)) = (mod_check, foc) {
+                st.resolver.start(exe, foc, mods.clone(), ui.ctx().clone());
             }
             false
         }

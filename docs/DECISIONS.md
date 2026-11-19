@@ -361,3 +361,22 @@ their own copies; mods and the retail load order do not change.
   (D1). A dependency cycle starts the resolved list in its fallback order with the error shown (`alamo_play` asks first);
   before ums1 the picker started only the picked mod there while `--resolve` listed both. Why: retail mounts any command
   line, so refusing a cycle would refuse what retail runs, and the surfaces must agree (`docs/MODS.md` 3.1.2).
+- **Command Center on the port's JSON (ums3, 2026-11-18).** `mods.rs` / `steam.rs` read `alamo_mod_check --list --json`,
+  `conflicts.rs` reads `--conflicts --json`, the profile stack reads `--resolve --json`; the launcher keeps no mod
+  scanner, Steam / registry walk or file-resolution rule of its own. Lane defaults taken: the launcher lists one row per
+  mod folder (a variants-only folder under its folder name, so profiles, which keep folders, are unchanged); a folder
+  without `Data` is no longer listed (the port's catalog needs `Data`); the submod-order warning comes from declared
+  `modinfo.json` dependencies only (the launcher's Workshop-id-in-the-text heuristic is gone); without
+  `alamo_mod_check.exe` next to the game or the launcher nothing is detected and a toast says why (once per new
+  reason). The conflicts page: warning texts name mods by the launcher's names (the user's name, Steam's title); a
+  profile mod that is not installed is left out of the check (its row says missing; the "couldn't be read" warning
+  for unreadable folders is gone with the launcher's own walk); "replaced by mods above" excludes files the base game
+  wins; definition counts still come from unitdb's own reading of the shared XML files, so they can differ from the
+  port's winner on a file the port reaches through a MEG. `alamo_mod_check` reads its arguments as UTF-8 from the wide
+  command line, and modinfo `description` stands in for a missing `summary`.
+- **`unitdb.rs` keeps its own XML and MEG readers (ums3 t04, decided by Gabriel's rule of 2026-11-18: keep them unless
+  the JSON of the ums1 tasks already carries what they read; no new JSON surface).** The Units page indexes every XML
+  definition a profile loads and edits values in place; `--list` carries mod rows, `--conflicts` only the winners of
+  files two mods share, `--resolve` the stack. None carries definitions, field values or the winning copy of every file,
+  so unitdb's readers stay (`conflicts.rs` also uses them for its definition counts). Revisit if the port grows a
+  definitions or per-file JSON.

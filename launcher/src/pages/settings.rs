@@ -1,7 +1,7 @@
 //! Settings: what was detected, where the game is, extra mod folders, launcher options.
 
 use crate::app::{open_in_explorer, App};
-use crate::steam::{self, same_path};
+use crate::steam::same_path;
 use crate::theme::{self, icon};
 use crate::{config, launch, mods};
 use egui::{vec2, Align, Layout, RichText, Ui};
@@ -150,8 +150,7 @@ fn detection_card(app: &mut App, ui: &mut Ui) {
         detect_row(ui, "Workshop folder", s.workshop_dir.as_deref(), s.workshop_dir.as_ref().is_some_and(|p| p.is_dir()));
     });
     if redetect {
-        app.steam = steam::detect();
-        app.rescan_mods();
+        app.rescan_mods();  // the install and the mods again, from alamo_mod_check --list
         if mods::foc_dir(&app.steam, &app.cfg.settings).is_some() {
             app.ok(format!("Detection finished. {} mods found.", app.mods.len()));
         } else {

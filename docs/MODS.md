@@ -150,6 +150,13 @@ reads the same data and starts the same list:
   record, §3.2), with the findings `list_ignored`, `submod_order` (from declared `modinfo.json` dependencies),
   `no_effect` and `no_data`. Field lists: `mod_check.hpp` `format_mod_catalog_json`, `mod_conflicts.hpp`.
   `--list-mods` (`alamo.mod_list`, the corpus runner's discovery) is unchanged.
+- **The Command Center reads only these (ums3).** `launcher/src/catalog.rs` runs `--list` (the `alamo_mod_check.exe`
+  next to the configured game, else next to the launcher; `--game` when the user chose a folder, `--mod-dir` per extra
+  folder) and feeds the settings page's detection (`steam::from_install`) and the mods page (`mods::from_catalog`, one
+  row per folder); `conflicts.rs` runs `--conflicts` for the active profile and adds only definition counts through
+  `unitdb.rs`, whose own XML / MEG readers stay for the Units page (`docs/DECISIONS.md`, "Unified mod system
+  refactor"). Tests read recorded JSON (`launcher/src/testdata/mod_catalog.json`, `mod_conflicts.json`: the
+  conformance stacks install).
 
 ### 3.2 File resolution order
 
