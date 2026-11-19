@@ -12,6 +12,8 @@ The battle itself checks the state_io side at run time too (TacticalBattle::chec
 field state_io walks lies inside a SAVED member and every SAVED "state" member is walked), from the save-and-continue
 test (alamo_sim_save_continue_tests).
 
+Scope: TacticalBattle's own non-static data members (a record's fields and the module systems' saves are not covered;
+see the ledger header). The parser reads declarations, not C++: --selftest holds the forms it must find.
 Usage: check_battle_ledger.py [--selftest] [--list]
   --list      print the members the parser found with their ledger kind
 Exit: 0 in step, 1 differences, 2 a file is missing. Runs in build_agent.cmd (before the build) and as the ctest entry
@@ -27,8 +29,9 @@ HEADER = os.path.join(ROOT, "engine", "apps", "sim", "include", "alamo", "sim", 
 LEDGER = os.path.join(ROOT, "engine", "apps", "sim", "src", "tactical_battle_ledger.hpp")
 SAVE = os.path.join(ROOT, "engine", "apps", "sim", "src", "tactical_battle_save.cpp")
 
-SKIP_STARTS = ("using ", "friend ", "static ", "template", "typedef ", "enum ", "public:", "private:", "protected:",
-               "struct ", "class ", "union ", "#", "explicit ", "virtual ", "constexpr ", "inline ", "operator")
+# Statements that declare no instance data. `static` data members are shared by every battle, not battle state.
+SKIP_STARTS = ("using ", "friend ", "static ", "static_assert", "template", "typedef ", "#", "explicit ", "virtual ",
+               "constexpr ", "inline ", "operator", "~")
 
 
 def strip_comments(text):
@@ -45,6 +48,9 @@ def strip_comments(text):
             seg = text[i:n if j < 0 else j + 2]
             out.append("\n" * seg.count("\n"))
             i = n if j < 0 else j + 2
+        elif c == "'" and i > 0 and text[i - 1].isdigit():
+            out.append(c)  # a digit separator (1'000), not a char literal
+            i += 1
         elif c == '"' or c == "'":
             if c == '"' and i > 0 and text[i - 1] == "R":  # raw string R"(...)"
                 k = text.find("(", i)
@@ -95,8 +101,12 @@ def top_statements(body):
                 # A brace block that closes a statement-level body (function, nested type) when the statement is not an
                 # initializer: `x_{...}` / `= {...}` keep going to the `;`.
                 head = s[:s.find("{")]
-                if ")" in head or re.match(r"^(struct|class|enum|union)\b", head.strip()):
-                    rest = body[i + 1:].lstrip()
+                rest = body[i + 1:].lstrip()
+                is_type = re.match(r"^(struct|class|enum|union)\b", head.strip())
+                if is_type and not rest.startswith(";"):
+                    i += 1  # `struct {...} x_;`: the declarator follows the body, the statement ends at its `;`
+                    continue
+                if ")" in head or is_type:
                     if rest.startswith(";"):
                         i = body.index(";", i)
                     stmts.append(s)
@@ -131,44 +141,96 @@ def split_top(s, sep=","):
     return parts
 
 
+TYPE_SYNTAX = ("decltype", "alignas", "noexcept", "sizeof", "alignof")
+
+
+def cut_init(p):
+    """A declarator without its initializer: the text before the first top-level `=` (not `==`, `<=`, ...) or `{`."""
+    depth = 0
+    for k, c in enumerate(p):
+        if c in "<([":
+            depth += 1
+        elif c in ">)]":
+            depth -= 1
+        elif depth == 0 and c == "{":
+            return p[:k]
+        elif depth == 0 and c == "=" and (k == 0 or p[k - 1] not in "=<>!") and p[k + 1:k + 2] != "=":
+            return p[:k]
+    return p
+
+
+def is_function(lhs):
+    """True for a function declaration: the first top-level `(` (outside template arguments) follows a name that is not
+    type syntax (decltype, alignas, ...). `int (*fp_)(int)` (a `(` after no name) is a pointer member."""
+    depth, k = 0, 0
+    while k < len(lhs):
+        c = lhs[k]
+        if c == "<":
+            depth += 1
+        elif c == ">":
+            depth -= 1
+        elif c == "(" and depth == 0:
+            m = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*$", lhs[:k])
+            if m and m.group(1) in TYPE_SYNTAX:
+                level, k = 1, k + 1  # skip the group
+                while k < len(lhs) and level:
+                    level += {"(": 1, ")": -1}.get(lhs[k], 0)
+                    k += 1
+                continue
+            if lhs[k + 1:].lstrip()[:1] in ("*", "&"):
+                return False  # `int (*fp_)(int)`: a pointer declarator, not a parameter list
+            return bool(m)
+        k += 1
+    return False
+
+
+def declarator_name(p):
+    p = cut_init(p).strip()
+    m = re.search(r"\(\s*[\*&]+\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)\s*[\(\[]", p)  # (*fp_)(args) / (&r_)[n]
+    if m:
+        return m.group(1)
+    p = re.sub(r"(\[[^\]]*\]\s*)+$", "", p).strip()  # array extents
+    m = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*$", p)
+    return m.group(1) if m and m.group(1) != "operator" else None
+
+
 def data_members(header_text):
-    text = re.sub(r"(?m)^[ 	]*#.*$", "", strip_comments(header_text))  # #ifdef blocks: both sides are members
+    text = re.sub(r"(?m)^[ \t]*#.*$", "", strip_comments(header_text))  # #ifdef blocks: both sides are members
     body = class_body(text, "TacticalBattle")
     if body is None:
         return None
     names = []
     for raw in top_statements(body):
-        s = re.sub(r"^(public|private|protected)\s*:\s*", "", raw)
-        while True:  # several access labels in a row
+        s = raw
+        while True:  # access labels (several in a row)
             t = re.sub(r"^(public|private|protected)\s*:\s*", "", s)
             if t == s:
                 break
             s = t
-        if not s or s.startswith(SKIP_STARTS) or s.startswith(("mutable static", "alignas")) and "static" in s:
+        s = re.sub(r"^mutable\s+", "", s)
+        if not s or s.startswith(SKIP_STARTS):
             continue
-        if re.match(r"^(struct|class|enum|union)\b", s):
-            continue
-        if s.endswith("}") and "(" in s[:s.find("{")]:
+        tm = re.match(r"^(struct|class|union|enum(?:\s+class|\s+struct)?)\b", s)
+        if tm:
+            if "{" in s:  # a nested type; with a declarator after its body (`struct {...} x_;`) also a member
+                s = s[s.rfind("}") + 1:].strip()
+                if not s:
+                    continue
+                s = "T " + s
+            else:  # an elaborated type (`struct lua_State* L_;`) or a forward declaration (`struct X;`)
+                s = s[tm.end():].strip()
+        if s.endswith("}") and is_function(s[:s.find("{")]):
             continue  # inline function definition
-        if s.startswith("mutable "):
-            s = s[len("mutable "):]
-        # Function declarations: a `(` at depth 0 that follows a name (and is not inside an initializer).
-        decl = s
-        # Cut initializers per declarator below; first decide declaration vs function.
-        first = split_top(decl)[0]
-        lhs = re.split(r"\s=\s|\{", first, maxsplit=1)[0]
-        if re.search(r"[A-Za-z0-9_>\]]\s*\(", lhs) and not re.search(r"std::function\s*<|\(\*", lhs):
+        parts = split_top(s)
+        if is_function(cut_init(parts[0])):
             continue
-        parts = split_top(decl)
         for k, p in enumerate(parts):
-            p = re.split(r"\s=\s|=|\{", p, maxsplit=1)[0].strip()
-            p = re.sub(r"\[[^\]]*\]\s*$", "", p).strip()  # array extent
-            m = re.search(r"([A-Za-z_][A-Za-z0-9_]*)\s*$", p)
-            if not m or m.group(1) == "operator":
+            name = declarator_name(p)
+            if not name:
                 continue
-            if k == 0 and not re.search(r"[\s\*&>]", p):
-                continue  # a lone word (a macro use)
-            names.append(m.group(1))
+            if k == 0 and not re.search(r"[\s\*&>)]", cut_init(p).strip()):
+                continue  # a lone word (a forward declaration, a macro use)
+            names.append(name)
     return names
 
 
@@ -325,6 +387,34 @@ void TacticalBattle::write_part(SavePart p, ByteWriter& w) const { put_system(w,
               save.replace("sys_.get()", "nullptr"))
     assert any("SAVED(sys_, part)" in x for x in e) and any("gone_ is not" in x for x in e) and \
         any("a_ is listed twice" in x for x in e), e
+    # declaration forms (review of ref2 t01): every member found, nothing else
+    edge = """
+class TacticalBattle {
+    decltype(x) d_;
+    alignas(16) float b_[4];
+    std::move_only_function<void()> cb_;
+    std::unique_ptr<F, decltype(&free)> p_;
+    int x_=f(3);
+    int (*fp_)(int) = nullptr;
+    struct lua_State* L_;
+    class X* q_;
+    struct { int a; } in_;
+    enum M { A, B } m_ = A;
+    struct Fwd;
+    struct Def { int z_; };
+    static int shared_;
+    int n_ = 1'000;
+    void f(int a);
+    int g() const { return 1; }
+    bool eq_ = (1 == 2), le_ = 1 <= 2;
+    TacticalBattle& operator=(const TacticalBattle&) = delete;
+    ~TacticalBattle();
+    void h(int* a) const;
+};
+"""
+    got = data_members(edge)
+    want = ["d_", "b_", "cb_", "p_", "x_", "fp_", "L_", "q_", "in_", "m_", "n_", "eq_", "le_"]
+    assert got == want, got
     print("check_battle_ledger selftest: ok")
     return 0
 

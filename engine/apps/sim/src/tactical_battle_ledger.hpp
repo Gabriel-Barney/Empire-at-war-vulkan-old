@@ -13,6 +13,10 @@
 //     SAVED(.., state) members (alamo_sim_save_continue_tests calls it on running battles);
 //   - the save-and-continue test (alamo_sim_save_continue_tests): each battle fixture saved, rebuilt and loaded at every
 //     64-tick checkpoint gives the checkpoint CRCs and lookup answers of a run that never stopped.
+// Scope: the members of TacticalBattle itself. The checks see a member, not its fields: a field added to a record
+// (Landing, AttackBlock, ...) or to a struct state_io walks field by field (result_, stats_, rt_, vm_decl_) must be added
+// to state_io by hand, and the module systems' own saves (write_system: movement, combat, abilities, ...) are outside
+// this ledger. Only the save-and-continue test sees those, on the state its fixtures reach.
 // Order: the declaration order in tactical_battle.hpp. Members declared under an #ifdef have their own list below.
 // Included only by tactical_battle_save.cpp.
 #pragma once
@@ -190,14 +194,14 @@
     SAVED(map_marker_names_, state) \
     REBUILT(map_stats_, "made by the map load in setup(), the same on a rebuild") \
     REBUILT(slot_memory_, "set by the host that starts the battle, the same on a rebuild; relinked by CampaignBattles::read") \
-    REBUILT(slot_memory_write_, "set by the host that starts the battle, the same on a rebuild") \
+    REBUILT(slot_memory_write_, "set by the host: on for a new battle, off for a rebuild; read only by setup()") \
     REBUILT(have_focus_, "made by the map load in setup(), the same on a rebuild") \
     REBUILT(focus_, "made by the map load in setup(), the same on a rebuild") \
     REBUILT(focus_player_, "made by the map load in setup(), the same on a rebuild") \
     SAVED(bt_markers_, state) \
     REBUILT(bt_players_, "made by setup() from the battle inputs, the same on a rebuild") \
     REBUILT(pad_records_, "set by the host that starts the battle, the same on a rebuild; relinked by CampaignBattles::read") \
-    REBUILT(pad_restore_, "set by the host that starts the battle, the same on a rebuild") \
+    REBUILT(pad_restore_, "set by the host: on for a new battle, off for a rebuild; read only by setup()") \
     DERIVED(sk_income_, "per-type cache (filled from type data on first use)") \
     SAVED(bt_removals_, state) \
     SAVED(bt_landing_, state) \
@@ -236,7 +240,7 @@
     DERIVED(sk_redelivered_, "records of the last tick for the host (cleared at the next tick start)") \
     SAVED(hg_upgrade_objs_, state) \
     REBUILT(ga_upgrades_, "set by the host that starts the battle, the same on a rebuild (a rebuild keeps the saved objects)") \
-    REBUILT(ga_spawn_, "set by the host that starts the battle, the same on a rebuild") \
+    REBUILT(ga_spawn_, "set by the host: on for a new battle, off for a rebuild; read only by setup()") \
     SAVED(hg_orphans_, state) \
     SAVED(prod_used_, state) \
     SAVED(hangars_, part) \

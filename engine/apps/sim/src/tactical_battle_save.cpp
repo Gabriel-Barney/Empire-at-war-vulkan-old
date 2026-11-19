@@ -41,7 +41,6 @@ bool get_system(ByteReader& r, T* s) {
 // vector object itself), for TacticalBattle::check_save_ledger.
 class LedgerProbe {
 public:
-    static constexpr bool kReading = false;
     struct Field {
         uintptr_t at = 0;
         size_t size = 0;
@@ -230,8 +229,10 @@ bool TacticalBattle::check_save_ledger(std::string* err) const {
         for (Saved& s : saved)
             if (f.at >= s.at && f.at + f.size <= s.at + s.size) in = &s;
         if (!in) {
-            if (err) *err = "state_io writes the field at byte " + std::to_string(f.at - self) + " (size " + std::to_string(f.size) +
-                            "), which no SAVED(.., state) member of the ledger holds";
+            const bool inside = f.at >= self && f.at < self + sizeof(TacticalBattle);
+            if (err)
+                *err = "state_io writes a field (" + (inside ? "byte " + std::to_string(f.at - self) : std::string("outside the battle object")) +
+                       ", size " + std::to_string(f.size) + ") which no SAVED(.., state) member of the ledger holds";
             return false;
         }
         in->walked = true;
