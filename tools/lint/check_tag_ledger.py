@@ -2,9 +2,9 @@
 
 Checks that the generated ledgers match the code, without writing anything:
   tag ledger      engine/objects/generated/tag_ledger.inc (engine/objects/tools/gen_tag_ledger.py)
-                  - every row's state is what the code gives now (a changed consumer count alone is not a failure:
-                    the generator refreshes it whenever the ledger is regenerated);
-                  - no consumed / verified row without a consumer;
+                  - every row's state is what the code gives now (consumed / verified only with a consumer); the
+                    consumer files are not compiled (roadmap ref1 t01: the selftest shows that moving a read between
+                    files leaves tag_ledger.inc unchanged), and the human view's counts refresh on regeneration;
                   - no row moves from consumed / verified to stored / unread (a reader was removed);
                   - every "// ledger: consumes|verifies <Class>.<Tag>" annotation names a row and sits next to code
                     (consumes) or in a test that names the tag (verifies);
@@ -55,18 +55,20 @@ def check_tags(gen):
     ledger, problems = gen.build(with_extras=False)
     errors = [f"annotation: {p}" for p in problems]
     errors += [f"regression: {b}" for b in gen.regressions(committed, ledger, set())]
-    for key, (state, n, _) in sorted(committed.items()):
-        if state in ("consumed", "verified") and n == 0:
-            errors.append(f"{key[0]}.{key[1]}: {state} with no consumer")
+    # A cited spec page that no longer exists (renamed or deleted): the sticky pick would keep a dead path.
+    for key, c in sorted(committed.items()):
+        page = c["spec"].split(" ", 1)[0]
+        if page and c["state"] not in gen.SETTLED_UNREAD and not os.path.isfile(os.path.join(ROOT, page)):
+            errors.append(f"{c['class']}.{c['tag']}: spec {page} does not exist (regenerate)")
+    # A consumed / verified state comes from the scan, so a committed state that matches the code has a consumer.
     now = {(r["class"], r["tag"].lower()): r for r in ledger}
     stale = []
     for key in sorted(set(now) | set(committed)):
         r, c = now.get(key), committed.get(key)
         if r is None or c is None:
             stale.append(f"{key[0]}.{key[1]}: {'no longer a descriptor row' if r is None else 'new row'}")
-        elif r["state"] != c[0]:
-            stale.append(f"{r['class']}.{r['tag']}: ledger {c[0]} ({c[1]} files), code {r['state']} ({r['consumers']} files"
-                         + (f", first {r['consumer']}" if r["consumer"] else "") + ")")
+        elif r["state"] != c["state"]:
+            stale.append(f"{r['class']}.{r['tag']}: ledger {c['state']}, code {r['state']} ({r['consumers']} files)")
     for e in errors:
         print("tag ledger: " + e)
     for s in stale[:40]:
@@ -164,14 +166,12 @@ def gaps(gen, group=None, counts=False):
     if not os.path.isfile(gen.OUT_INC):
         print("tag ledger: tag_ledger.inc is missing")
         return 2
-    row = re.compile(
-        r'\{"([^"]*)", "([^"]*)", 0x[0-9a-f]+, LedgerState::(\w+), \d+, "[^"]*", "([^"]*)", (\d+), (\d+)\}')
     open_rows = []
     with open(gen.OUT_INC, encoding="utf-8") as f:
-        for line in f:
-            m = row.match(line)
-            if m and m.group(3) in ("Unread", "Stored") and int(m.group(5)) > 0 and m.group(6) == "1":
-                open_rows.append((-int(m.group(5)), m.group(1), m.group(2), m.group(3).lower(), m.group(4)))
+        committed = gen.parse_inc(f.read())
+    for r in committed.values():
+        if r["state"] in ("unread", "stored") and r["base_uses"] > 0 and r["tier"] == 1:
+            open_rows.append((-r["base_uses"], r["class"], r["tag"], r["state"], r["spec"]))
     if group is not None:
         if group not in {g for g, _ in GAP_GROUPS}:
             print(f"tag ledger: no gap group '{group}' (groups: {', '.join(g for g, _ in GAP_GROUPS)})")
@@ -217,6 +217,75 @@ def check_bindings(gen):
     return 0
 
 
+def selftest_move_only(gen):
+    """ref1 t01: a commit that only moves a tag read between files, or adds a second reader, leaves tag_ledger.inc
+    unchanged (the scan's consumer files are not compiled); a new docs/re page that sorts first moves no spec. Runs
+    the real scan (find_consumers) on small source trees."""
+    bad = 0
+    rows = [("GameObjectType", "Max_Speed", 0x8), ("GameObjectType", "Mass", 0x8)]
+    key = ("GameObjectType", "max_speed")
+    trees = {
+        "before": [("engine/a/src/a.cpp", 'f(t.get("Max_Speed"));\n'), ("engine/b/src/b.cpp", "int x = 0;\n")],
+        "moved": [("engine/a/src/a.cpp", "int y = 0;\n"), ("engine/b/src/b.cpp", 'g(t.get("Max_Speed"));\n')],
+        "two readers": [("engine/a/src/a.cpp", 'f(t.get("Max_Speed"));\n'),
+                        ("engine/b/src/b.cpp", '// ledger: consumes GameObjectType.Max_Speed\nfloat s = t.speed;\n')],
+        "removed": [("engine/a/src/a.cpp", "int y = 0;\n"), ("engine/b/src/b.cpp", "int x = 0;\n")],
+    }
+    docs = {"MOVEMENT.md": "`Max_Speed` and `Mass`", "A_RE_QUESTIONS.md": "`Max_Speed`"}
+
+    def scan(src, pages, committed=None):
+        cons, ver, probs = gen.find_consumers(rows, sources=src)
+        states = gen.compute_states(rows, cons, ver)
+        ledger = gen.assemble(rows, cons, states, gen.spec_index(pages), {"max_speed": 3}, committed or {})
+        return gen.render_inc(ledger), gen.render_md(ledger), cons, probs
+
+    out = {name: scan(src, docs) for name, src in trees.items()}
+    if any(o[3] for o in out.values()):
+        print("selftest: move-only trees gave annotation problems", [o[3] for o in out.values()])
+        bad += 1
+    seen = {name: sorted(o[2].get(key, ())) for name, o in out.items()}
+    if seen != {"before": ["engine/a/src/a.cpp"], "moved": ["engine/b/src/b.cpp"],
+                "two readers": ["engine/a/src/a.cpp", "engine/b/src/b.cpp"], "removed": []}:
+        print("selftest: move-only scan did not see the reads", seen)
+        bad += 1
+    for name in ("moved", "two readers"):
+        if out[name][0] != out["before"][0]:
+            print(f"selftest: tag_ledger.inc changed when the read was {name}")
+            bad += 1
+    if out["two readers"][1] == out["before"][1]:
+        print("selftest: the human view lost the consumer count")
+        bad += 1
+    if out["removed"][0] == out["before"][0]:
+        print("selftest: tag_ledger.inc did not change when the only read was removed (consumed -> stored)")
+        bad += 1
+    # Sticky spec: the committed page stays while it names the tag; a page that sorts first does not take the row.
+    committed = gen.parse_inc(out["before"][0])
+    if committed.get(key, {}).get("spec") != "docs/re/MOVEMENT.md":
+        print("selftest: spec of the move-only ledger", committed.get(key))
+        bad += 1
+    newer = dict(docs, **{"AAA_NEW.md": "`Max_Speed`"})
+    if scan(trees["before"], newer, committed)[0] != out["before"][0]:
+        print("selftest: a new docs/re page that sorts first rewrote a row's spec")
+        bad += 1
+    if gen.parse_inc(scan(trees["before"], newer)[0])[key]["spec"] != "docs/re/AAA_NEW.md":
+        print("selftest: an unpinned row does not take the first page")
+        bad += 1
+    if (gen.pick_spec(["docs/re/A.md", "docs/re/B.md"], "docs/re/B.md"), gen.pick_spec(["docs/re/A.md"], "docs/re/B.md"),
+            gen.pick_spec([], "docs/re/B.md")) != ("docs/re/B.md", "docs/re/A.md", ""):
+        print("selftest: pick_spec")
+        bad += 1
+    # parse_inc reads both row shapes (the nine-column one written before ref1 t01) and C escapes.
+    old_row = '{"Faction", "Fleet_Icon_Name", 0x17, LedgerState::Stored, 0, "", "docs/re/X.md \\"Q\\"", 4, 1},\n'
+    new_row = '{"Faction", "Fleet_Icon_Name", 0x17, LedgerState::Stored, "docs/re/X.md \\"Q\\"", 4, 1},\n'
+    want = {"class": "Faction", "tag": "Fleet_Icon_Name", "code": 0x17, "state": "stored", "spec": 'docs/re/X.md "Q"',
+            "base_uses": 4, "tier": 1}
+    for text in (old_row, new_row):
+        if gen.parse_inc(text).get(("Faction", "fleet_icon_name")) != want:
+            print("selftest: parse_inc", gen.parse_inc(text))
+            bad += 1
+    return bad
+
+
 def selftest(gen):
     bad = 0
     lits, comments, code = gen.scan_source('x = get("Max_Speed"); // "Mass" in a comment\n/* "Tactical_Health" */ R"(\"Damage\")";\n'
@@ -228,7 +297,7 @@ def selftest(gen):
     if not any("ledger: consumes" in c for _, c in comments) or 4 not in code:
         print("selftest: comments / code lines", comments, sorted(code))
         bad += 1
-    old = {("GameObjectType", "mass"): ("consumed", 1, "engine/x.cpp")}
+    old = {("GameObjectType", "mass"): {"state": "consumed"}}
     reg = gen.regressions(old, [{"class": "GameObjectType", "tag": "Mass", "state": "stored"}], set())
     if len(reg) != 1:
         print("selftest: regression not found", reg)
@@ -236,6 +305,7 @@ def selftest(gen):
     if gen.regressions(old, [{"class": "GameObjectType", "tag": "Mass", "state": "stored"}], {"gameobjecttype.mass"}):
         print("selftest: --allow-regress ignored")
         bad += 1
+    bad += selftest_move_only(gen)
     # RETAIL_UNUSED (mcx4): a listed row nothing reads becomes retail_unused; a read one, an unknown row or a citation
     # that is no docs/re page naming the tag is an error.
     rows = [("GameConstants", "Progressive_Taxation", 0), ("GameConstants", "Income_Redistribution", 0)]

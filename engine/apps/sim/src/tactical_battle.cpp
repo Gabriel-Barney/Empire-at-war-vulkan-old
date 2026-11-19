@@ -1236,10 +1236,12 @@ void TacticalBattle::reinforce(TacticalMode& mode, SimRng& rng, bool force_empty
     }
 }
 
-void TacticalBattle::issue_orders(TacticalMode& mode, SimRng& rng) {
+// REF1 t02 [port]: the one S10 stand-in (BattleAi::standin_orders calls it on its own cadence; docs/PHASE4.md, "REF1 t02").
+void TacticalBattle::issue_orders(TacticalMode& mode, SimRng& rng, const std::function<bool(int32_t)>& skip_owner) {
     const objects::ObjectStore& store = mode.primary();
     for (const Unit& u : units_) {
         if (!u.alive || u.retreated || !u.movable) continue;
+        if (skip_owner && skip_owner(store.owner(u.h))) continue;  // another orderer drives this owner (BattleAi: its AI)
         if (commanded_by_player(store.owner(u.h))) continue;  // integration fixes: human units take commands only
         if (!space_ && !standin_owner(store.owner(u.h))) continue;  // bkt1 t07 (b0084): land third parties idle
         const Vec3 up = store.position(u.h);
@@ -1266,7 +1268,8 @@ void TacticalBattle::issue_orders(TacticalMode& mode, SimRng& rng) {
         // in range: hold, combat fires. s78n t20 stage A [port] (FIGHTER_FLYING §4.11 A, arrived re-check only): an arrived
         // unit that cannot hit its nearest enemy from where it stands approaches again (no land stop here).
         if (dist <= 0.8f * range && !standin_recheck(u, best->id)) continue;
-        if (movement_locked(u.id)) continue;  // OI follow-up t03: a locked unit keeps its order (§28.9)
+        // OI follow-up t03: a locked unit keeps its order (§28.9); land and space alike, and it is no order (REF1 t02)
+        if (movement_locked(u.id)) continue;
         if (!(dist > 0.0f)) continue;  // s78n t20 review: on the enemy's position there is no approach line
         const Vec3 ep = store.position(best->h);
         if (!space_) {  // s78n t25.3 [port] (MOVEMENT §4.3.2 item 2): the auto-attack block push 0x41fd30, one unit
@@ -1283,6 +1286,10 @@ void TacticalBattle::issue_orders(TacticalMode& mode, SimRng& rng) {
         const tactical::Aabb& b = mode.bounds();
         o.destination.x = std::clamp(o.destination.x, b.min.x, b.max.x);
         o.destination.y = std::clamp(o.destination.y, b.min.y, b.max.y);
+        if (dist <= 0.8f * range) {  // s78n t20 (REF1 t02): a re-check approach whose goal is where the unit stands is skipped
+            const float ex = o.destination.x - up.x, ey = o.destination.y - up.y;
+            if (ex * ex + ey * ey < 10.0f * 10.0f) continue;
+        }
         o.skip_destination_check = true;  // s78n t20 fix (MOVEMENT 4.3.1 item 2): an attack approach, as attack_approach
         movement_->move(o, rng, frame_);
         fighter_order(o.units, 0, Vec3{o.destination.x, o.destination.y, 0.0f});  // S7 t22

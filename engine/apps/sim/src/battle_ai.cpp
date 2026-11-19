@@ -3351,54 +3351,11 @@ float BattleAi::sight_weather_factor(int32_t type, int32_t) {
     return b_->weather().sight_modifier(types.get_string(static_cast<objects::TypeIndex>(type), "Weather_Category"));
 }
 
-// [port] The S10 stand-in (attack-move to 70 % of the attack range of the nearest enemy) for the sides that have
-// no tactical AI, on its own cadence.
+// [port] The S10 stand-in (TacticalBattle::issue_orders, REF1 t02) for the sides that have no tactical AI, on its own
+// cadence; the players this AI controls are left out.
 void BattleAi::standin_orders() {
     if (b_->frame_ == 0 || (b_->frame_ - 1) % kStandinInterval != 0) return;
-    const objects::ObjectStore& st = mode_->primary();
-    for (const TacticalBattle::Unit& u : b_->units_) {
-        if (!u.alive || u.retreated || !u.movable || controls(st.owner(u.h))) continue;
-        if (b_->commanded_by_player(st.owner(u.h))) continue;  // integration fixes: human units take commands only
-        if (!b_->space_ && !b_->standin_owner(st.owner(u.h))) continue;  // bkt1 t07 (b0084): land third parties idle
-        const Vec3 up = st.position(u.h);
-        const TacticalBattle::Unit* best = nullptr;
-        float best_d2 = 0.0f;
-        for (const TacticalBattle::Unit& e : b_->units_) {
-            if (!e.alive || e.retreated || e.side == u.side) continue;
-            // skm2 t02: more than two skirmish sides - only an enemy of the unit's owner (allied slots are other sides)
-            if (b_->side_count() > 2 && b_->combat_ && !b_->combat_->is_enemy(st.owner(u.h), st.owner(e.h))) continue;
-            // s78n t25.3 [port]: on land the pick is an enemy of the unit's owner (the auto-attack push 0x41fd30 names what
-            // the targeting scan picked, never a neutral object)
-            if (!b_->space_ && b_->combat_ && !b_->combat_->is_enemy(st.owner(u.h), st.owner(e.h))) continue;
-            const Vec3 ep = st.position(e.h);
-            const float dx = ep.x - up.x, dy = ep.y - up.y, d2 = dx * dx + dy * dy;
-            if (!best || d2 < best_d2) {
-                best = &e;
-                best_d2 = d2;
-            }
-        }
-        if (!best) continue;
-        const float range = std::max(u.range, 100.0f), dist = dmath::sqrt(best_d2);
-        // s78n t20 stage A [port] (FIGHTER_FLYING §4.11 A, arrived re-check only): an arrived unit that cannot hit its
-        // nearest enemy from where it stands approaches again (no land stop here)
-        if (dist <= 0.8f * range && !b_->standin_recheck(u, best->id)) continue;
-        if (!(dist > 0.0f)) continue;  // s78n t20 review: on the enemy's position there is no approach line
-        const Vec3 ep = st.position(best->h);
-        if (!b_->space_) {  // s78n t25.3 [port] (MOVEMENT §4.3.2 item 2): the auto-attack block push 0x41fd30, one unit
-            if (b_->movement_locked(u.id)) continue;
-            const objects::ObjectId one[] = {u.id};
-            (void)b_->land_attack_order(*mode_, one, best->id, ep, 0, false, host_->random().synced());
-            ++b_->stats_.orders;
-            continue;
-        }
-        // s78n t20 interim (space): the approach aims with the unit's own range (no 100 floor)
-        const float k = (dist - 0.7f * (u.range > 0.0f ? u.range : range)) / dist;
-        const Vec3 dest{up.x + (ep.x - up.x) * k, up.y + (ep.y - up.y) * k, 0.0f};
-        if (dist <= 0.8f * range && (dest.x - up.x) * (dest.x - up.x) + (dest.y - up.y) * (dest.y - up.y) < 10.0f * 10.0f) continue;
-        move_unit(u.id, dest.x, dest.y, mv::kThreatOff, 0, objects::kNoObjectId, true);  // s78n t20 fix: an attack approach
-        if (!b_->movement_locked(u.id)) b_->fighter_order(std::span<const objects::ObjectId>(&u.id, 1), 0, dest);  // S7 t22
-        ++b_->stats_.orders;
-    }
+    b_->issue_orders(*mode_, host_->random().synced(), [this](int32_t owner) { return controls(owner); });
 }
 
 }  // namespace alamo::sim

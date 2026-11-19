@@ -32,14 +32,18 @@ engine/objects/src/field_schema_table.inc; class = the row's segment owner), wit
 A literal naming a tag that several classes list (72 of the 2,764 tag names) counts for the object type and sub-object
 classes (the shared typed readers) and for the other classes the file names (literal_classes).
 
-Other columns: code (parser type code), consumers (how many files read it, and the first), spec (the first docs/re
-page that names the tag in backticks), base_uses (how often base FoC's XML in extracted/foc_data_text.zip writes an
-element of that name, any class, outside XML comments), tier (1 for every row until a row says otherwise: TIER_OVERRIDES).
-corpus_uses / corpus_mods are filled by the corpus runner (mcx7), not here.
+Other columns: code (parser type code), consumers (how many files read it), spec (a docs/re page that names the tag
+in backticks, by a sticky rule: the page the committed ledger cites while it still names the tag, else the
+alphabetically first, so a new docs/re page does not rewrite other rows: roadmap ref1 t01), base_uses (how often base
+FoC's XML in extracted/foc_data_text.zip writes an element of that name, any class, outside XML comments), tier (1 for
+every row until a row says otherwise: TIER_OVERRIDES). corpus_uses / corpus_mods are filled by the corpus runner
+(mcx7), not here.
 
 Outputs (both generated, never edited by hand):
-  engine/objects/generated/tag_ledger.inc   rows compiled into alamo_objects (objects/tag_ledger.hpp)
-  docs/status/tag-ledger.md                 the human view
+  engine/objects/generated/tag_ledger.inc   rows compiled into alamo_objects (objects/tag_ledger.hpp): class, tag,
+                                            code, state, spec, base uses, tier. No consumer column (ref1 t01): moving
+                                            a tag read between files leaves it unchanged
+  docs/status/tag-ledger.md                 the human view, with the consumer counts
 
     python engine/objects/tools/gen_tag_ledger.py            write both
     python engine/objects/tools/gen_tag_ledger.py --allow-regress Class.Tag ...
@@ -460,23 +464,27 @@ def literal_classes(classes, text):
     return [c for c in classes if c in named or shared_reader_class(c)]
 
 
-def find_consumers(rows, exact_only=frozenset()):
+def engine_texts():
+    """(path relative to the root, text) of every engine source file, in sorted order."""
+    for path in engine_sources():
+        with open(path, encoding="utf-8", errors="replace") as f:
+            yield rel(path), f.read()
+
+
+def find_consumers(rows, exact_only=frozenset(), sources=None):
     """Returns (consumers, verifiers, problems): consumers[(class, tag lower)] = set of files; verifiers likewise from
     test annotations; problems = annotation errors (unknown row, no code next to it). Rows in `exact_only` (the
     RETAIL_UNUSED keys) count only literals and annotations, not names guessed from concatenation (built_tag_reads):
     an RE answer outweighs that heuristic ("Music_Event_" + ... + "_Super_Weapon" is no read of
-    Can_Win_By_Destroying_Super_Weapon)."""
+    Can_Win_By_Destroying_Super_Weapon). `sources` [(path, text)] replaces the engine tree (the lint selftest)."""
     by_tag = {}
     for cls, tag, _ in rows:
         by_tag.setdefault(tag.lower(), []).append(cls)
     known = {(cls, tag.lower()) for cls, tag, _ in rows}
     consumers, verifiers, problems = {}, {}, []
-    for path in engine_sources():
-        r = rel(path)
+    for r, text in (engine_texts() if sources is None else sources):
         is_test = "/tests/" in r
         excluded = r in EXCLUDED_FILES or any(p in r for p in EXCLUDED_PARTS)
-        with open(path, encoding="utf-8", errors="replace") as f:
-            text = f.read()
         if "ledger:" not in text and excluded:
             continue
         concat = []
@@ -677,19 +685,35 @@ def compute_states(rows, consumers, verifiers, retail_unused=None, out_of_scope=
     return out
 
 
-def spec_index():
+def spec_page(name):
+    """A docs/re file that can be a spec: Markdown, not the descriptor tables, not a question batch (*_RE_QUESTIONS.md
+    names tags without settling them)."""
+    return name.endswith(".md") and name != "xml_field_tables.md" and not name.endswith("_RE_QUESTIONS.md")
+
+
+def spec_index(pages=None):
+    """{tag lower: docs/re pages naming it in backticks, sorted}. `pages` {name: text} replaces docs/re (the selftest)."""
+    if pages is None:
+        pages = {}
+        if os.path.isdir(DOCS_RE):
+            for name in filter(spec_page, os.listdir(DOCS_RE)):
+                with open(os.path.join(DOCS_RE, name), encoding="utf-8", errors="replace") as f:
+                    pages[name] = f.read()
     idx = {}
-    if not os.path.isdir(DOCS_RE):
-        return idx
     tick = re.compile(r"`([A-Za-z][A-Za-z0-9_]*)`")
-    for name in sorted(os.listdir(DOCS_RE)):
-        # Question batches (*_RE_QUESTIONS.md) name tags without settling them: not a spec.
-        if not name.endswith(".md") or name == "xml_field_tables.md" or name.endswith("_RE_QUESTIONS.md"):
-            continue
-        with open(os.path.join(DOCS_RE, name), encoding="utf-8", errors="replace") as f:
-            for m in tick.finditer(f.read()):
-                idx.setdefault(m.group(1).lower(), "docs/re/" + name)
+    for name in sorted(filter(spec_page, pages)):
+        for tag in sorted({m.group(1).lower() for m in tick.finditer(pages[name])}):
+            idx.setdefault(tag, []).append("docs/re/" + name)
     return idx
+
+
+def pick_spec(pages, pinned=""):
+    """A row's spec from the pages naming its tag (sorted): the committed one while it still names the tag, else the
+    first. Sticky, so a new docs/re page that sorts first rewrites no rows (roadmap ref1 t01: the alphabetical pick
+    alone moved rows in 53 of 120 docs/re commits)."""
+    if pinned and pinned in pages:
+        return pinned
+    return pages[0] if pages else ""
 
 
 def base_uses():
@@ -709,27 +733,33 @@ def base_uses():
     return counts
 
 
-def build(with_extras=True):
+def build(with_extras=True, committed=None):
+    """(ledger rows, problems). `committed` (parse_inc of the written ledger) pins each row's spec page (pick_spec)."""
     rows = schema_rows()
     consumers, verifiers, problems = find_consumers(rows, frozenset(retail_unused_keys()) | frozenset(out_of_scope_keys()))
     problems += retail_unused_problems(rows, consumers)
     problems += out_of_scope_problems(rows, consumers)
     problems += misfiled_problems(rows, consumers, settled=frozenset(retail_unused_keys()) | frozenset(out_of_scope_keys()))
     states = compute_states(rows, consumers, verifiers)
-    unused = {**retail_unused_keys(), **out_of_scope_keys(), **misfiled_keys()}
     spec = spec_index() if with_extras else {}
     uses = base_uses() if with_extras else {}
+    return assemble(rows, consumers, states, spec, uses, committed or {}), problems
+
+
+def assemble(rows, consumers, states, spec, uses, committed):
+    """The ledger rows from the scan: consumers {key: files}, states {key: state}, spec {tag lower: pages}
+    (spec_index), uses {tag lower: count}, committed (parse_inc) for the sticky spec."""
+    unused = {**retail_unused_keys(), **out_of_scope_keys(), **misfiled_keys()}
     ledger = []
     for cls, tag, code in rows:
         key = (cls, tag.lower())
-        files = sorted(consumers.get(key, ()))
+        pinned = committed[key]["spec"] if key in committed else ""
         ledger.append({
-            "class": cls, "tag": tag, "code": code, "state": states[key], "consumers": len(files),
-            "consumer": files[0] if files else "",
-            "spec": unused[key] if states[key] in SETTLED_UNREAD else spec.get(tag.lower(), ""),
+            "class": cls, "tag": tag, "code": code, "state": states[key], "consumers": len(consumers.get(key, ())),
+            "spec": unused[key] if states[key] in SETTLED_UNREAD else pick_spec(spec.get(tag.lower(), []), pinned),
             "base_uses": uses.get(tag.lower(), 0), "tier": TIER_OVERRIDES.get(key, 1),
         })
-    return ledger, problems
+    return ledger
 
 
 def c_str(s):
@@ -739,25 +769,39 @@ def c_str(s):
 def render_inc(ledger):
     lines = [
         "// GENERATED by engine/objects/tools/gen_tag_ledger.py from docs/re/xml_field_tables.md and the engine source.",
-        "// Do not edit; tools/lint/check_tag_ledger.py checks it. Row: {class, tag, code, state, consumer files, first",
-        f"// consumer, spec, base FoC uses, tier}}. {len(ledger)} rows.",
+        "// Do not edit; tools/lint/check_tag_ledger.py checks it. Row: {class, tag, code, state, spec, base FoC uses,",
+        f"// tier}}. {len(ledger)} rows. No consumer column: the counts are in docs/status/tag-ledger.md (ref1 t01).",
     ]
     for r in ledger:
-        lines.append("{%s, %s, 0x%x, LedgerState::%s, %d, %s, %s, %d, %d}," % (
-            c_str(r["class"]), c_str(r["tag"]), r["code"], STATE_ENUM[r["state"]], r["consumers"], c_str(r["consumer"]),
-            c_str(r["spec"]), r["base_uses"], r["tier"]))
+        lines.append("{%s, %s, 0x%x, LedgerState::%s, %s, %d, %d}," % (
+            c_str(r["class"]), c_str(r["tag"]), r["code"], STATE_ENUM[r["state"]], c_str(r["spec"]), r["base_uses"],
+            r["tier"]))
     return "\n".join(lines) + "\n"
 
 
+INC_FIELD = re.compile(r'"(?:[^"\\]|\\.)*"|0x[0-9a-f]+|LedgerState::\w+|\d+')
+
+
+def c_unstr(s):
+    return re.sub(r"\\(.)", r"\1", s[1:-1])
+
+
 def parse_inc(text):
-    """{(class, tag lower): (state, consumers, consumer)} of a written tag_ledger.inc."""
-    row = re.compile(r'\{"([^"]*)", "([^"]*)", 0x[0-9a-f]+, LedgerState::(\w+), (\d+), "([^"]*)"')
+    """{(class, tag lower): {"class", "tag", "code", "state", "spec", "base_uses", "tier"}} of a written
+    tag_ledger.inc. Also reads the nine-column rows written before ref1 t01 ({..., state, consumer files, first
+    consumer, spec, base uses, tier})."""
     inv = {v: k for k, v in STATE_ENUM.items()}
     out = {}
     for line in text.splitlines():
-        m = row.match(line)
-        if m:
-            out[(m.group(1), m.group(2).lower())] = (inv.get(m.group(3), m.group(3)), int(m.group(4)), m.group(5))
+        if not line.startswith("{"):
+            continue
+        f = INC_FIELD.findall(line)
+        if len(f) not in (7, 9) or not f[3].startswith("LedgerState::"):
+            continue
+        cls, tag, spec, uses, tier = c_unstr(f[0]), c_unstr(f[1]), c_unstr(f[-3]), int(f[-2]), int(f[-1])
+        state = f[3][len("LedgerState::"):]
+        out[(cls, tag.lower())] = {"class": cls, "tag": tag, "code": int(f[2], 16), "state": inv.get(state, state),
+                                   "spec": spec, "base_uses": uses, "tier": tier}
     return out
 
 
@@ -773,7 +817,10 @@ def render_md(ledger):
         "Generated by `engine/objects/tools/gen_tag_ledger.py` (roadmap mcx0 t02); do not edit. Design:",
         "`docs/MOD_COMPAT_DESIGN.md` §7.2. One row per (class, tag) of retail's descriptor tables",
         "(`docs/re/xml_field_tables.md`; class = segment owner). The compiled copy is",
-        "`engine/objects/generated/tag_ledger.inc`; `tools/lint/check_tag_ledger.py` keeps both in step with the code.",
+        "`engine/objects/generated/tag_ledger.inc` (class, tag, code, state, spec, base uses, tier); the consumer counts",
+        "are only here, so moving a read between files leaves it unchanged. `tools/lint/check_tag_ledger.py` keeps both in",
+        "step with the code. Spec: the `docs/re` page the ledger already cites while that page still names the tag, else",
+        "the alphabetically first page naming it in backticks.",
         "",
         "States: **unread** (the port does not keep it), **stored** (kept, nothing reads it), **consumed** (engine code",
         "reads it), **verified** (consumed, and a test checks its effect), **retail-unused** (retail never reads it",
@@ -867,9 +914,9 @@ def regressions(old, ledger, allowed):
     for r in ledger:
         key = (r["class"], r["tag"].lower())
         prev = old.get(key)
-        if prev and prev[0] in ("consumed", "verified") and r["state"] in ("stored", "unread") + SETTLED_UNREAD:
+        if prev and prev["state"] in ("consumed", "verified") and r["state"] in ("stored", "unread") + SETTLED_UNREAD:
             if f"{r['class']}.{r['tag']}".lower() not in allowed:
-                bad.append(f"{r['class']}.{r['tag']}: {prev[0]} -> {r['state']} (was read in {prev[2]})")
+                bad.append(f"{r['class']}.{r['tag']}: {prev['state']} -> {r['state']} (no engine file reads it now)")
     return bad
 
 
@@ -878,13 +925,16 @@ def main(argv):
     ap.add_argument("--allow-regress", nargs="*", default=[], metavar="CLASS.TAG",
                     help="rows allowed to move from consumed / verified to stored / unread")
     a = ap.parse_args(argv)
-    ledger, problems = build()
-    for p in problems:
-        print("annotation:", p)
+    if not os.path.isfile(FOC_ZIP):
+        print(f"refused: {rel(FOC_ZIP)} is missing, so every base_uses would be written as 0")
+        return 1
     old = {}
     if os.path.isfile(OUT_INC):
         with open(OUT_INC, encoding="utf-8") as f:
             old = parse_inc(f.read())
+    ledger, problems = build(committed=old)
+    for p in problems:
+        print("annotation:", p)
     bad = regressions(old, ledger, {x.lower() for x in a.allow_regress})
     if bad:
         print("refused: these rows lose their consumer (pass --allow-regress Class.Tag if that is intended):")

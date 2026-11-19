@@ -296,8 +296,8 @@ row per (class, tag) in retail's descriptor tables:
 |---|---|
 | `class`, `tag`, `type_code` | From `xml_field_tables.md` |
 | `state` | `unread` (not parsed) → `stored` (parsed, no consumer) → `consumed` (a sim / presentation reader exists) → `verified` (a test checks its effect against a `docs/re` spec or probe) |
-| `consumer` | The function(s) that read it, found by an annotation |
-| `spec` | The `docs/re` section that defines its effect, or `none` |
+| `consumer` | The function(s) that read it, found by an annotation. Human view only (roadmap ref1 t01): the compiled rows carry no consumer column, so moving a read between files leaves `tag_ledger.inc` unchanged |
+| `spec` | The `docs/re` section that defines its effect, or `none`; sticky (the page already cited while it still names the tag) |
 | `base_uses`, `corpus_uses`, `corpus_mods` | How often base FoC and the corpus (§13) use it |
 | `tier` | 1 if a player or modder sees it (formula, rule, visible state); 2 if it is distribution-level |
 
