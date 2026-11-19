@@ -22,11 +22,11 @@ int main() {
             }
         if (!found) ++missing;
         CHECK(find_tag_ledger(r.cls, r.tag) != nullptr);
-        if (r.state == LedgerState::Consumed || r.state == LedgerState::Verified) CHECK(r.consumers > 0 && !r.consumer.empty());
-        if (r.state == LedgerState::Unread || r.state == LedgerState::Stored) CHECK(r.consumers == 0);
-        if (r.state == LedgerState::RetailUnused) CHECK(r.consumers == 0 && r.spec.starts_with("docs/re/"));
-        if (r.state == LedgerState::OutOfScope) CHECK(r.consumers == 0 && r.spec.starts_with("docs/DECISIONS.md"));
-        if (r.state == LedgerState::Misfiled) CHECK(r.consumers == 0 && r.spec.starts_with("docs/re/XML_FIELD_TABLE_SEGMENTS.md"));
+        // Consumer counts are not compiled (ref1 t01); the lint checks them against the code.
+        CHECK(r.spec.empty() || r.spec.starts_with("docs/"));
+        if (r.state == LedgerState::RetailUnused) CHECK(r.spec.starts_with("docs/re/"));
+        if (r.state == LedgerState::OutOfScope) CHECK(r.spec.starts_with("docs/DECISIONS.md"));
+        if (r.state == LedgerState::Misfiled) CHECK(r.spec.starts_with("docs/re/XML_FIELD_TABLE_SEGMENTS.md"));
     }
     CHECK(missing == 0);
     // Case-insensitive lookup; class matters.

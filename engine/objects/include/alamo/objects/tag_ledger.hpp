@@ -30,11 +30,11 @@ struct TagLedgerRow {
     std::string_view tag;       // as written in docs/re/xml_field_tables.md
     uint8_t code = 0;           // parser type code
     LedgerState state = LedgerState::Unread;
-    uint32_t consumers = 0;     // engine source files that read it
-    std::string_view consumer;  // the first of them ("" when none)
-    std::string_view spec;      // the first docs/re page naming the tag ("" when none); RetailUnused: the RE answer;
-                                // OutOfScope: the DECISIONS.md record and reason; Misfiled: the segment page,
-                                // the real owner and its reader
+    // No consumer column (roadmap ref1 t01): which files read a tag is in docs/status/tag-ledger.md, so moving a read
+    // between files does not change this table.
+    std::string_view spec;      // a docs/re page naming the tag ("" when none; sticky: the one already cited while it
+                                // still names the tag); RetailUnused: the RE answer; OutOfScope: the DECISIONS.md
+                                // record and reason; Misfiled: the segment page, the real owner and its reader
     uint32_t base_uses = 0;     // elements of that name in base FoC's XML (any class)
     uint8_t tier = 1;           // parity tier a gap here belongs to
 };
