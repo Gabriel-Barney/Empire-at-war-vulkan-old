@@ -375,13 +375,19 @@ int main() {
             CHECK(cf && cf->kind == alamo::vfs::Layer::Kind::Meg && cf->mod == -1 && !cf->from_mod());
             const alamo::vfs::Layer* p64 = lay("Data\\XML\\Order0.xml");
             CHECK(p64 && p64->mod == -1);
+            // ums2 t08: the files one layer holds (a MEG's reachable records; a loose tree in byte order).
+            if (mo) CHECK(v2->layer_files(*mo) == std::vector<std::string>{"DATA\\XML\\S2_MODONLY.XML"});
+            const std::vector<std::string> modfiles = v2->layer_files(v2->layers()[0]);
+            CHECK(std::is_sorted(modfiles.begin(), modfiles.end()) &&
+                  std::find(modfiles.begin(), modfiles.end(), "DATA\\MODONLY.MEG") != modfiles.end());
+            if (mo) CHECK(v->layer_files(*mo).empty());  // a layer of another Vfs
         }
     }
 
     // ================= Scenario 2c (ums0): a malformed MEG in a mod goes to the IssueSink with the mod's layer =================
     {
         const fs::path BADMOD = FOC / "Mods" / "BadMegMod";
-        write_file(BADMOD / "Data" / "MegaFiles.xml", megafiles({"Data\\Bad.meg", "Data\\Config.meg"}));
+        write_file(BADMOD / "Data" / "MegaFiles.xml", megafiles({"Data\\Bad.meg", "Data\\Config.meg", "Data\\Gone.meg"}));
         write_meg(BADMOD / "Data" / "Bad.meg",
                   {{"DATA\\XML\\BAD_A.XML", "A"}, {"DATA\\XML\\BAD_B.XML", "B"}, {"DATA\\XML\\BAD_C.XML", "C"}}, false);
         VfsConfig c2;
@@ -399,6 +405,10 @@ int main() {
                 CHECK(i && i->layer == 1 && i->retail_equivalent && i->severity == alamo::IssueSeverity::Info);
             }
             CHECK(sink.count(alamo::IssueKind::MegUnsorted) == 1);
+            // ums2 t03: other VFS findings too: a list entry no layer has, on the layer of the mod whose list names it.
+            const alamo::CompatIssue* gone = sink.find(alamo::IssueKind::MissingFile, "DATA\\GONE.MEG", "DATA\\MEGAFILES.XML");
+            CHECK(gone && gone->layer == 1 && !gone->retail_equivalent);
+            CHECK(sink.size() == 2 && v2->warnings().size() == 2);  // every finding is also a warnings() line
             // Without a sink the VFS is the same (the parameter is optional).
             auto v3 = Vfs::create(c2, &err);
             CHECK(v3 && v3->meg_issues().size() == v2->meg_issues().size() && v3->layers().size() == v2->layers().size());

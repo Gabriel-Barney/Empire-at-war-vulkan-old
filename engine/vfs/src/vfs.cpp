@@ -302,6 +302,14 @@ struct Vfs::Impl {
         warnings.push_back(std::move(msg));
     }
 
+    // ums2 t03: a VFS finding is a warnings() line and, when create() was given a sink, a CompatIssue with its layer
+    // (compat_issue.hpp: the owning mod's index, kBaseLayer, or kNoLayer when no layer is concerned).
+    void finding(IssueKind kind, IssueSeverity severity, std::string subject, std::string source, uint16_t layer, std::string msg,
+                 bool retail_equivalent = false) {
+        if (issues) issues->add(kind, severity, std::move(subject), std::move(source), msg, retail_equivalent, layer);
+        warn(std::move(msg));
+    }
+
     bool find(const std::string& norm, Hit& out) const { return find_nth(norm, 0, out); }
 
     // The resolution order, the one walk every lookup uses: visit(hit) for each layer holding `norm` (mods, base, MEGs
@@ -419,25 +427,28 @@ struct Vfs::Impl {
                                      meg::Source::Mode::Auto, &err);
         auto a = src ? meg::Archive::open(std::move(src), &err) : nullptr;
         if (!a) {
-            warn("cannot open MEG '" + host + "' (" + reason + "): " + err);
+            finding(IssueKind::AssetRejected, IssueSeverity::Warning, host, host, issue_layer_for(owner),
+                    "cannot open MEG '" + host + "' (" + reason + "): " + err);
             return;
         }
-        if (a->encrypted()) warn("MEG '" + host + "' is encrypted; its entries are not visible");
+        if (a->encrypted())
+            finding(IssueKind::AssetRejected, IssueSeverity::Warning, host, host, issue_layer_for(owner),
+                    "MEG '" + host + "' is encrypted; its entries are not visible");
         if (const meg::Archive::TableIssues t = a->table_issues(); t.any()) {  // mcx3 t04
             using K = Vfs::MegIssue::Kind;
             const auto add = [&](K kind, uint32_t count, const std::string& first, const std::string& what) {
                 meg_issues.push_back(Vfs::MegIssue{kind, host, count, first});
-                warn(std::string(Vfs::MegIssue::kind_name(kind)) + ": MEG '" + host + "': " + what);
-                // The game reads the table the same way (MODS.md §3.2): retail-equivalent. Index has no issue kind.
-                if (issues && kind != K::Index) {
-                    const IssueKind ik = kind == K::Unsorted    ? IssueKind::MegUnsorted
-                                         : kind == K::Duplicate ? IssueKind::MegDuplicate
-                                                                : IssueKind::MegNameMismatch;
-                    issues->add(ik, IssueSeverity::Info, host, host,
-                                std::string(Vfs::MegIssue::kind_name(kind)) + ": " + std::to_string(count) +
-                                    " record(s), first " + first,
-                                true, issue_layer_for(owner));
+                std::string msg = std::string(Vfs::MegIssue::kind_name(kind)) + ": MEG '" + host + "': " + what;
+                // The game reads the table the same way (MODS.md §3.2): retail-equivalent. Index has no issue kind of its
+                // own: a warnings() line only.
+                if (kind == K::Index) {
+                    warn(std::move(msg));
+                    return;
                 }
+                const IssueKind ik = kind == K::Unsorted    ? IssueKind::MegUnsorted
+                                     : kind == K::Duplicate ? IssueKind::MegDuplicate
+                                                            : IssueKind::MegNameMismatch;
+                finding(ik, IssueSeverity::Info, host, host, issue_layer_for(owner), std::move(msg), true);
             };
             if (t.unsorted)
                 add(K::Unsorted, t.unreachable, t.first_unreachable,
@@ -472,12 +483,14 @@ struct Vfs::Impl {
                     if (const std::string* h = eaw.find(norm)) {
                         mount(*h, "EaW MegaFiles.xml", -1);
                     } else {
-                        warn("EaW MegaFiles.xml entry not found: " + f);
+                        finding(IssueKind::MissingFile, IssueSeverity::Warning, norm, "DATA\\MEGAFILES.XML", alamo::kBaseLayer,
+                                "EaW MegaFiles.xml entry not found: " + f);
                     }
                 }
             }
         } else {
-            warn("EaW Data\\MegaFiles.xml not found under '" + eaw.root + "'");
+            finding(IssueKind::MissingFile, IssueSeverity::Warning, "DATA\\MEGAFILES.XML", {}, alamo::kBaseLayer,
+                    "EaW Data\\MegaFiles.xml not found under '" + eaw.root + "'");
         }
         static const char* const kPatches[][2] = {
             {"DATA\\PATCH.MEG", "EaW Patch"}, {"DATA\\PATCH2.MEG", "EaW patch2"}, {"DATA\\64PATCH.MEG", "EaW 64Patch"}};
@@ -493,9 +506,9 @@ struct Vfs::Impl {
         bool have_xml = false;
         // MegaFiles.xml: mods -> base -> mounted (EaW) MEGs -> FALLBACKPATH dirs.
         const std::string* host = nullptr;
-        for (const auto& m : mods) {
-            if ((host = m.find(xml_norm)) != nullptr) break;
-        }
+        int xml_owner = -1;  // the mod whose MegaFiles.xml is read, -1 = the base game's
+        for (size_t i = 0; i < mods.size() && !host; ++i)
+            if ((host = mods[i].find(xml_norm)) != nullptr) xml_owner = static_cast<int>(i);
         if (!host) host = base.find(xml_norm);
         if (host) {
             have_xml = read_host_file(*host, bytes);
@@ -519,11 +532,12 @@ struct Vfs::Impl {
                 if (const std::string* h = find_loose_for_mount(norm, &owner)) {
                     mount(*h, "FoC MegaFiles.xml", owner);
                 } else {
-                    warn("FoC MegaFiles.xml entry not found: " + f);
+                    finding(IssueKind::MissingFile, IssueSeverity::Warning, norm, "DATA\\MEGAFILES.XML", issue_layer_for(xml_owner),
+                            "FoC MegaFiles.xml entry not found: " + f);
                 }
             }
         } else {
-            warn("FoC Data\\MegaFiles.xml not found");
+            finding(IssueKind::MissingFile, IssueSeverity::Warning, xml_norm, {}, alamo::kBaseLayer, "FoC Data\\MegaFiles.xml not found");
         }
         static const char* const kPatches[][2] = {
             {"DATA\\PATCH.MEG", "FoC Patch"}, {"DATA\\PATCH2.MEG", "FoC patch2"}, {"DATA\\64PATCH.MEG", "FoC 64Patch"}};
@@ -555,12 +569,15 @@ std::unique_ptr<Vfs> Vfs::create(const VfsConfig& cfg, std::string* err, alamo::
             impl->eaw_root = path_to_utf8(gd.lexically_normal());
             log::infof(kLogChannel, "Setting FALLBACK_PATH to %s", impl->eaw_root.c_str());
         } else {
-            impl->warn("EaW install not found (expected <FoC>\\..\\GameData\\sweaw.exe); EaW MEGs and GameData "
+            impl->finding(IssueKind::MissingFile, IssueSeverity::Info, "GameData\\sweaw.exe", {}, alamo::kBaseLayer,
+                          "EaW install not found (expected <FoC>\\..\\GameData\\sweaw.exe); EaW MEGs and GameData "
                        "fallback disabled");
         }
     } else if (!cfg.eaw_root->empty()) {
         impl->eaw_root = to_host(*cfg.eaw_root);
-        if (!is_directory_lp(resolve_ci(impl->eaw_root))) impl->warn("EaW root is not a directory: '" + *cfg.eaw_root + "'");
+        if (!is_directory_lp(resolve_ci(impl->eaw_root)))
+            impl->finding(IssueKind::MissingFile, IssueSeverity::Warning, *cfg.eaw_root, {}, alamo::kBaseLayer,
+                          "EaW root is not a directory: '" + *cfg.eaw_root + "'");
     }
 
     // One ordered mod search list (Q14): mod_search in order (STEAMMOD ids resolved through the
@@ -582,7 +599,8 @@ std::unique_ptr<Vfs> Vfs::create(const VfsConfig& cfg, std::string* err, alamo::
         std::optional<std::string> dir;
         if (steam_resolver) dir = steam_resolver(e.value);
         if (!dir || dir->empty()) {
-            impl->warn("STEAMMOD=" + e.value + (steam_resolver ? ": workshop item not found; nothing mounted"
+            impl->finding(IssueKind::MissingFile, IssueSeverity::Warning, "STEAMMOD=" + e.value, {}, alamo::kNoLayer,
+                          "STEAMMOD=" + e.value + (steam_resolver ? ": workshop item not found; nothing mounted"
                                                                : ": no workshop resolver; nothing mounted"));
             continue;
         }
@@ -592,7 +610,9 @@ std::unique_ptr<Vfs> Vfs::create(const VfsConfig& cfg, std::string* err, alamo::
     impl->mods.resize(impl->mod_dirs.size());
     for (size_t i = 0; i < impl->mod_dirs.size(); ++i) {
         impl->mods[i].build(impl->mod_dirs[i]);
-        if (impl->mods[i].data_dir.empty()) impl->warn("mod path has no Data folder: '" + impl->mod_dirs[i] + "'");
+        if (impl->mods[i].data_dir.empty())
+            impl->finding(IssueKind::MissingFile, IssueSeverity::Warning, impl->mod_dirs[i], {}, issue_layer_for(static_cast<int>(i)),
+                          "mod path has no Data folder: '" + impl->mod_dirs[i] + "'");
     }
     impl->base.build(impl->foc_root);
     impl->user_fallbacks = cfg.fallback_paths.size();
@@ -600,7 +620,8 @@ std::unique_ptr<Vfs> Vfs::create(const VfsConfig& cfg, std::string* err, alamo::
     for (size_t i = 0; i < cfg.fallback_paths.size(); ++i) {
         impl->fallbacks[i].build(cfg.fallback_paths[i]);
         if (impl->fallbacks[i].data_dir.empty())
-            impl->warn("fallback path has no Data folder: '" + cfg.fallback_paths[i] + "'");
+            impl->finding(IssueKind::MissingFile, IssueSeverity::Warning, cfg.fallback_paths[i], {}, alamo::kBaseLayer,
+                          "fallback path has no Data folder: '" + cfg.fallback_paths[i] + "'");
     }
     if (!impl->eaw_root.empty()) impl->fallbacks.back().build(impl->eaw_root);
 
@@ -633,6 +654,30 @@ const Layer* Vfs::layer_of(const Resolution& r) const {
 }
 
 uint16_t Layer::issue_layer() const { return issue_layer_for(mod); }
+
+std::vector<std::string> Vfs::layer_files(const Layer& layer) const {
+    std::vector<std::string> out;
+    const size_t slot = impl_->layer_slot(static_cast<Resolution::Layer>(layer.kind), layer.index);
+    if (slot >= impl_->layers.size() || impl_->layers[slot].host_root != layer.host_root) return out;  // not one of ours
+    const size_t i = static_cast<size_t>(layer.index);
+    const auto loose = [&out](const LooseRoot& lr) {
+        out.reserve(lr.index.size());
+        for (const auto& kv : lr.index) out.push_back(kv.first);
+        std::sort(out.begin(), out.end());  // the index is unordered
+    };
+    switch (layer.kind) {
+        case Layer::Kind::Mod: loose(impl_->mods[i]); break;
+        case Layer::Kind::Base: loose(impl_->base); break;
+        case Layer::Kind::Fallback: loose(impl_->fallbacks[i]); break;
+        case Layer::Kind::Meg: {
+            const meg::Archive& a = *impl_->archives[i];
+            for (const meg::Entry& e : a.entries())
+                if (a.lookup(e.name)) out.push_back(normalize_path(e.name));
+            break;
+        }
+    }
+    return out;
+}
 
 bool Vfs::read(std::string_view path, std::vector<uint8_t>& out) const {
     out.clear();

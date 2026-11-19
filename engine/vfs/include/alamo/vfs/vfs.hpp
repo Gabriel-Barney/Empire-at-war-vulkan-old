@@ -147,6 +147,9 @@ public:
     const std::vector<Layer>& layers() const;
     // The layer a resolution came from; nullptr when `r` names none (an index out of range).
     const Layer* layer_of(const Resolution& r) const;
+    // The logical paths one layer holds (ums2 t08), normalised: a loose layer's Data tree in byte order, a MEG's records in
+    // stored order, only the names the game's lookup reaches (meg::Archive::lookup). Empty for a layer of another Vfs.
+    std::vector<std::string> layer_files(const Layer& layer) const;
 
     // Union of all logical paths matching `glob` over every layer, each once, normalised
     // (upper-case, '\\'), in retail's find order (mcx3 t13): the mod trees, the base tree (each in byte order), then

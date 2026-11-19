@@ -13,7 +13,6 @@
 #include "alamo/core/host_fs.hpp"
 #include "alamo/data/xml.hpp"
 #include "alamo/data/xml_list.hpp"
-#include "alamo/meg/meg.h"
 #include "alamo/game/mod_picker.hpp"  // is_mod_arg
 #include "alamo/vfs/mod_registry.hpp"
 #include "alamo/vfs/steam_workshop.hpp"
@@ -112,11 +111,7 @@ ConflictReport mod_conflicts(const vfs::ModCatalog& catalog, std::span<const std
         if (layer.kind != vfs::Layer::Kind::Meg || !layer.from_mod() || static_cast<size_t>(layer.mod) >= mods.size()) continue;
         Layered& l = mods[static_cast<size_t>(layer.mod)];
         l.megs.push_back(layer.host_root);
-        std::string e2;
-        const auto a = meg::Archive::open(layer.host_root, meg::Source::Mode::Stream, &e2);
-        if (!a) continue;
-        for (const meg::Entry& e : a->entries())
-            if (a->lookup(e.name)) l.files.insert(normalize_path(e.name));  // the names the game's lookup finds
+        for (std::string& p : v->layer_files(layer)) l.files.insert(std::move(p));  // the names the game's lookup finds
     }
 
     // Owner of the layer a resolution came from: a mod index, or SIZE_MAX for the base game / fallbacks.

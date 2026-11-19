@@ -1391,27 +1391,35 @@ void retail_equivalent_from_checks(ModCheckReport& r) {
 
 // The issue records of report v4 and the static grade (§12.2): an error gives G0, else G1 (G2 and up need runs). The
 // static part of G3 holds when no honour gap, binding gap, missing reward or missing token comes from the mod's files.
-void compat_issues_and_grade(ModCheckReport& r) {
+// ums2 t05: a finding from the mod's files carries the layer that serves `file` (compat_issue.hpp: the owning mod's
+// index in the search list, so AotR under AotCW > AotR is layer 1); 0 when the file does not resolve to a mod layer.
+void compat_issues_and_grade(ModCheckReport& r, const vfs::Vfs* v, const alamo::IssueSink& vfs_issues) {
     using alamo::IssueKind;
     using alamo::IssueSeverity;
-    const auto layer = [](bool in_mod) { return in_mod ? uint16_t{0} : alamo::kBaseLayer; };
+    const auto layer = [v](bool in_mod, std::string_view file) -> uint16_t {
+        if (!in_mod) return alamo::kBaseLayer;
+        if (v && !file.empty())
+            if (const auto res = v->resolve(file))
+                if (const vfs::Layer* l = v->layer_of(*res); l && l->from_mod()) return l->issue_layer();
+        return 0;
+    };
     for (const HonourGap& g : r.honour_gaps)
         r.issues.add(IssueKind::HonourGap, IssueSeverity::Info, g.cls + "." + g.tag, g.first_file,
-                     g.state + ", " + std::to_string(g.uses) + " uses", false, layer(g.in_mod));
+                     g.state + ", " + std::to_string(g.uses) + " uses", false, layer(g.in_mod, g.first_file));
     for (const BindingGapCall& b : r.binding_gaps)
-        r.issues.add(IssueKind::BindingUnconsumed, IssueSeverity::Info, b.name, b.first_script, b.effect, false, layer(b.in_mod));
+        r.issues.add(IssueKind::BindingUnconsumed, IssueSeverity::Info, b.name, b.first_script, b.effect, false, layer(b.in_mod, b.first_script));
     for (const StoryUse& u : r.story.rewards_missing)
-        r.issues.add(IssueKind::RewardMissing, IssueSeverity::Info, u.name, u.first_file, u.note, false, layer(u.in_mod));
+        r.issues.add(IssueKind::RewardMissing, IssueSeverity::Info, u.name, u.first_file, u.note, false, layer(u.in_mod, u.first_file));
     for (const LimitHit& l : r.limits)  // mcx5 t05: a guard the data reaches (the session refuses it)
         r.issues.add(IssueKind::LimitHit, IssueSeverity::Error, l.limit, "", "value " + std::to_string(l.value) + ", needed " +
                      std::to_string(l.needed), false, alamo::kNoLayer);
     for (const TokenGap& t : r.token_coverage.missing)
-        r.issues.add(IssueKind::TokenMissing, IssueSeverity::Info, t.token, t.first_file, t.first_equation, false, layer(t.in_mod));
+        r.issues.add(IssueKind::TokenMissing, IssueSeverity::Info, t.token, t.first_file, t.first_equation, false, layer(t.in_mod, t.first_file));
     // mcx6 t08: a main chunk the runaway guard stopped (LuaVmOptions::script_budget; its error says script_runaway).
     for (const std::vector<LuaIssue>* list : {&r.lua_run_errors, &r.lua_session_errors})
         for (const LuaIssue& e : *list)
             if (e.error.find("script_runaway") != std::string::npos)
-                r.issues.add(IssueKind::ScriptRunaway, IssueSeverity::Warning, e.path, e.path, e.error, false, layer(e.in_mod));
+                r.issues.add(IssueKind::ScriptRunaway, IssueSeverity::Warning, e.path, e.path, e.error, false, layer(e.in_mod, e.path));
     std::stable_sort(r.retail_equivalent.begin(), r.retail_equivalent.end(),
                      [](const RetailEquivalentFinding& a, const RetailEquivalentFinding& b) {
                          if (a.kind != b.kind) return a.kind < b.kind;
@@ -1420,31 +1428,17 @@ void compat_issues_and_grade(ModCheckReport& r) {
                      });
     for (const RetailEquivalentFinding& f : r.retail_equivalent)
         r.issues.add(IssueKind::RetailEquivalent, IssueSeverity::Info, f.kind + " " + f.subject, f.first_file, f.detail, true,
-                     layer(f.in_mod));
+                     layer(f.in_mod, f.first_file));
     // mcx2 t01: assets the mod layers serve (asset_audit.hpp). A retail-equivalent rejection never blocks G3.
     for (const AssetEntry& e : r.assets.rejected)
         r.issues.add(IssueKind::AssetRejected, e.retail_equivalent ? IssueSeverity::Info : IssueSeverity::Warning, e.path, e.path,
-                     e.family + ": " + e.rule, e.retail_equivalent, uint16_t{0});
+                     e.family + ": " + e.rule, e.retail_equivalent, layer(true, e.path));
     for (const AssetEntry& e : r.assets.salvaged)
-        r.issues.add(IssueKind::AssetSalvaged, IssueSeverity::Info, e.path, e.path, e.family + ": " + e.rule, false, uint16_t{0});
-    // mcx3 t04: the port reads a malformed MEG as the game does (meg::Archive::lookup): retail-equivalent findings.
-    for (const vfs::Vfs::MegIssue& m : r.meg_issues) {
-        using MK = vfs::Vfs::MegIssue::Kind;
-        if (m.kind == MK::Index) continue;  // no issue kind of its own: a VFS warning only
-        const IssueKind k = m.kind == MK::Unsorted    ? IssueKind::MegUnsorted
-                            : m.kind == MK::Duplicate ? IssueKind::MegDuplicate
-                                                      : IssueKind::MegNameMismatch;
-        const std::string archive = alamo::normalize_name(m.archive);
-        bool in_mod = false;
-        for (const std::string& dir : r.mod_dirs) {
-            std::string d = alamo::normalize_name(dir);
-            if (!d.empty() && d.back() != '\\') d.push_back('\\');  // a folder, not a name prefix (Mods\Foo vs Mods\FooBar)
-            in_mod = in_mod || archive.rfind(d, 0) == 0;
-        }
-        r.issues.add(k, IssueSeverity::Info, m.archive, m.archive,
-                     std::string(vfs::Vfs::MegIssue::kind_name(m.kind)) + ": " + std::to_string(m.count) + " record(s), first " + m.first,
-                     true, layer(in_mod));
-    }
+        r.issues.add(IssueKind::AssetSalvaged, IssueSeverity::Info, e.path, e.path, e.family + ": " + e.rule, false, layer(true, e.path));
+    // ums2 t03 / t05: the VFS's own findings (ModEnvironment::open), each with the layer that holds it: missing list
+    // entries and folders, unreadable MEGs, and the malformed MEG tables the port reads as the game does (mcx3 t04,
+    // retail-equivalent).
+    r.issues.merge(vfs_issues);
     r.grade.grade = r.error_count() ? "G0" : "G1";
     for (const alamo::CompatIssue& i : r.issues.issues())
         if (!i.retail_equivalent && i.layer != alamo::kBaseLayer &&
@@ -1531,7 +1525,6 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
         r.vfs_layers = d.vfs->describe();
         r.vfs_warnings = d.vfs->warnings();
         r.mod_dirs = d.vfs->mod_dirs();
-        r.meg_issues = d.vfs->meg_issues();
         list_mod_files(*d.vfs, r);
     }
     r.mods = d.mods;
@@ -1582,7 +1575,7 @@ ModCheckReport check_mod_data(const std::string& root, const std::vector<std::st
                 r.assets = audit_mod_assets(*d.vfs, ao);
             });
         retail_equivalent_from_checks(r);
-        compat_issues_and_grade(r);
+        compat_issues_and_grade(r, d.vfs, d.vfs_issues);
     } else {  // check_lua collects the binding findings with its scan; version 4 lists stay empty without compat
         r.binding_gaps.clear();
         r.retail_equivalent.clear();
