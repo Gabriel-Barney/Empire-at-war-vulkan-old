@@ -108,7 +108,8 @@ BattleAi::BattleAi(TacticalBattle& battle, TacticalMode& mode, SimHost& host, co
     cfg.k_ai = setup.k_ai == 0 ? 1 : setup.k_ai;
     allow_reinforcement_fraction_ = setup.constants.allow_reinforcement_percentage;  // A2 tactical (§3.2)
     use_reinforcement_points_ = setup.constants.use_reinforcement_points;           // a1g t04 follow-up (land drops)
-    const tactical::Aabb& bb = mode.bounds();
+    // ref2 t05: the threat grid's box is the fog box (AI_TACTICAL_PERCEPTION §4.1): one source, TacticalBattle::map_extents
+    const tactical::Aabb bb = b_->map_extents(mode, TacticalBattle::ExtentsUse::Perception);
     cfg.map = {bb.min.x, bb.min.y, bb.max.x, bb.max.y};
 #ifdef ALAMO_AI_TACTICAL_HAVE_TERRAIN
     if (!b_->space_) zones_ = at::hint_zones_from_map(b_->map_);

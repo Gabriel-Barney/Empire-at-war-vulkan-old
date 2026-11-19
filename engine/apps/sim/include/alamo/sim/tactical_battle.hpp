@@ -2453,9 +2453,13 @@ private:
     // --- fog of war (owner: fog agent; tactical_battle_fog.cpp) ---
     void fog_begin(TacticalMode& mode, uint32_t players);  // setup(): before the start forces deploy
     // FOWF t01: the mode's map extents (vf +0x1f8; FOG_OF_WAR §1.2 [H]): land = the whole terrain [0, 20 W] x [0, 20 H],
-    // space = the playable box. Used by the staging search's map test (bkt1 t01); the fog box and the AI threat grid
-    // still use bounds() (bkt1 t08 moved back: foc-land seed 7 slows from 23121 to 42347 frames with both switched).
-    tactical::Aabb map_extents(const TacticalMode& mode) const;
+    // space = the playable box. `Traced`: that box (the staging search's map test, bkt1 t01). ref2 t05: `Perception` is the
+    // one source of the land fog box (fog_begin) and the BattleAi threat grid, which must use the same box
+    // (AI_TACTICAL_PERCEPTION §4.1); it still answers bounds() (kPerceptionTracedExtents false: bkt1 t08 moved back,
+    // foc-land seed 7 slows from 23121 to 42347 frames with both switched). mapx1 t01 flips the constant (land goldens move).
+    enum class ExtentsUse : uint8_t { Traced, Perception };
+    static constexpr bool kPerceptionTracedExtents = false;
+    tactical::Aabb map_extents(const TacticalMode& mode, ExtentsUse use = ExtentsUse::Traced) const;
     void fog_after_deploy(TacticalMode& mode);              // setup(): dense mask, battle scale
     void fog_decay();                                       // tick(): step 4, before movement
     void fog_service(TacticalMode& mode);                   // tick(): after consume_events
