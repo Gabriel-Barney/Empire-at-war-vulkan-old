@@ -147,8 +147,13 @@ Counts compare(const char* label, const vfs::Vfs& v) {
         if (l.kind == vfs::Layer::Kind::Mod) {
             want = l.index;
         } else if (l.kind == vfs::Layer::Kind::Meg) {
-            for (size_t i = 0; i < v.mod_dirs().size() && want < 0; ++i)
-                if (materials::host_path_under(l.host_root, v.mod_dirs()[i])) want = static_cast<int>(i);
+            // The deepest mod folder holding it (a nested mod folder owns its own Data tree).
+            size_t best = 0;
+            for (size_t i = 0; i < v.mod_dirs().size(); ++i)
+                if (materials::host_path_under(l.host_root, v.mod_dirs()[i]) && v.mod_dirs()[i].size() > best) {
+                    want = static_cast<int>(i);
+                    best = v.mod_dirs()[i].size();
+                }
         }
         if (l.mod != want && owner_diff++ < 5)
             std::printf("  %s: layer %s owned by %d, expected %d\n", label, l.host_root.c_str(), l.mod, want);

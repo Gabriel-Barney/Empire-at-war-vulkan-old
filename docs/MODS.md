@@ -156,7 +156,9 @@ mod system refactor").
   mod search list, or -1 for the base game).
 - **A MEG belongs to the folder it was opened from.** A MEG that a mod's own `MegaFiles.xml` names, or a mod's `Patch*.meg`,
   is owned by that mod, decided when it is mounted; a base archive a mod's list names (`Data\Config.meg` from FoC) stays
-  base-owned.
+  base-owned. Before ums0 a MEG lying anywhere under a mod folder counted as the mod's, so the two rules differ only for
+  odd setups (a FALLBACKPATH folder inside a mod folder, a mod folder that contains the FoC install): the effect audit
+  now counts those archives as base.
 - **Ask the layer, not the path.** "Is this file from a mod, and which one" reads `Layer::mod`, not a comparison of host
   paths with the mod folders. Moved so far: `shader_files_from_vfs` (ShaderFileEntry `from_mod` / `dir_order`) and the SFX
   archive list; the load report's MEG issues and the asset audit still test paths until ums2 / ums4 remove the last
