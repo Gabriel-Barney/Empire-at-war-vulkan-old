@@ -147,6 +147,15 @@ void test_mod(const std::string& foc) {
     bool warned = false;
     for (const auto& w : none.vfs_warnings) warned |= contains(w, "no Data folder");
     CHECK(warned);
+    // ums2 t03: the same finding is a CompatIssue on the mod's layer (search position 0), listed in the JSON's issues,
+    // and it changes no grade.
+    const alamo::CompatIssue* nd = nullptr;
+    for (const alamo::CompatIssue& i : none.issues.issues())
+        if (i.kind == alamo::IssueKind::MissingFile && contains(i.detail, "no Data folder")) nd = &i;
+    CHECK(nd && nd->layer == 0);
+    const std::string njs = alamo::game::format_mod_report_json(none);
+    CHECK(contains(njs, "\"issues\": [") && contains(njs, "\"kind\": \"missing_file\"") && contains(njs, "\"layer\": 0"));
+    CHECK(none.grade.blocking.empty());
 }
 
 const alamo::game::UnknownXmlTag* unknown_tag(const ModCheckReport& r, const std::string& database, const std::string& tag) {

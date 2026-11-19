@@ -108,9 +108,12 @@ int main() {
             }
             // FileProvider: the Vfs's answers.
             CHECK(read_str(*env, "Data\\XML\\Shared.xml") == "SUB");
-            CHECK(read_str(*env, "Data\\XML\\P2.xml") == "P2" || read_str(*env, "Data\\XML\\P2.xml") == "<missing>");  // unsorted MEG
             CHECK(env->exists("Data\\XML\\Base.xml") && !env->exists("Data\\XML\\Nope.xml"));
             CHECK(env->origin("Data\\XML\\Base.xml") == env->vfs().origin("Data\\XML\\Base.xml"));
+            // vfs_of: hosts handed a FileProvider (the renderer's effect order) find the Vfs behind an environment too.
+            const alamo::FileProvider* fp = env.get();
+            CHECK(alamo::vfs::vfs_of(fp) == &env->vfs() && alamo::vfs::vfs_of(&env->vfs()) == &env->vfs());
+            CHECK(alamo::vfs::vfs_of(nullptr) == nullptr);
             // Owners: a mod's loose file, a MEG from the mod's own list, the base Config.meg it names, a base file.
             const auto* s = env->owner_of("Data\\XML\\Shared.xml");
             CHECK(s && s->name == "Sub Mod");

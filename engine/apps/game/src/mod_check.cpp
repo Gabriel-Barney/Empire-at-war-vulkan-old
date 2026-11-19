@@ -1435,10 +1435,6 @@ void compat_issues_and_grade(ModCheckReport& r, const vfs::Vfs* v, const alamo::
                      e.family + ": " + e.rule, e.retail_equivalent, layer(true, e.path));
     for (const AssetEntry& e : r.assets.salvaged)
         r.issues.add(IssueKind::AssetSalvaged, IssueSeverity::Info, e.path, e.path, e.family + ": " + e.rule, false, layer(true, e.path));
-    // ums2 t03 / t05: the VFS's own findings (ModEnvironment::open), each with the layer that holds it: missing list
-    // entries and folders, unreadable MEGs, and the malformed MEG tables the port reads as the game does (mcx3 t04,
-    // retail-equivalent).
-    r.issues.merge(vfs_issues);
     r.grade.grade = r.error_count() ? "G0" : "G1";
     for (const alamo::CompatIssue& i : r.issues.issues())
         if (!i.retail_equivalent && i.layer != alamo::kBaseLayer &&
@@ -1448,6 +1444,11 @@ void compat_issues_and_grade(ModCheckReport& r, const vfs::Vfs* v, const alamo::
     for (const AssetEntry& e : r.assets.salvaged)  // design 12.2: a salvage no retail verdict backs keeps G3 open
         if (!asset_salvage_confirmed(e.rule)) r.grade.blocking.push_back("asset_salvaged " + e.path + " (salvage unconfirmed)");
     r.grade.g3_static = r.grade.grade != "G0" && r.grade.blocking.empty() && r.grade.check_errors.empty();
+    // ums2 t03 / t05: the VFS's own findings (ModEnvironment::open), each with the layer that holds it: missing list
+    // entries and folders, unreadable MEGs, and the malformed MEG tables the port reads as the game does (mcx3 t04,
+    // retail-equivalent). Listed after the grade is set, so they change no grade (the refactor moves findings, it does
+    // not regrade; whether a VFS finding should block G3 is for ums5's re-evaluation).
+    r.issues.merge(vfs_issues);
 }
 
 void append(std::string& s, const char* fmt, auto... args) {

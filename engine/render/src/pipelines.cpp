@@ -16,6 +16,7 @@
 #include "alamo/materials/programs.hpp"
 #include "alamo/render/convert.hpp"
 #include "fx2_reader.hpp"
+#include "alamo/vfs/mod_environment.hpp"
 #include "alamo/vfs/vfs.hpp"
 
 namespace alamo::render {
@@ -43,7 +44,7 @@ EffectCache::EffectCache(const FileProvider* files, materials::LoadOptions optio
     if (!files) return;
     lib_ = std::make_unique<materials::EffectLibrary>(*files, options);
     // D.1 effect creation order from the shader directories (a VFS; other providers: the engine head only).
-    if (const auto* v = dynamic_cast<const vfs::Vfs*>(files)) {
+    if (const vfs::Vfs* v = vfs::vfs_of(files)) {  // a Vfs or a ModEnvironment (ums2: alamo_game hands the latter)
         lib_->set_shader_files(materials::shader_files_from_vfs(*v));
         for (const materials::ShaderFileEntry& f : materials::shader_files_from_vfs(*v, true))
             if (f.from_mod) mod_paths_[materials::shader_path_key(f.path)] = true;

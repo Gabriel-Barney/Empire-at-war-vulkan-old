@@ -136,6 +136,7 @@ uint64_t GameData::types_fingerprint() const {
 bool load_game_data_dir(const std::string& dir, GameData& out, std::string* err) {
     out.root = dir;
     out.vfs = nullptr;
+    out.env = nullptr;
     out.files = std::make_unique<DirectoryProvider>(dir);
     return load_common(out, err);
 }

@@ -4,17 +4,18 @@
 
 #include "alamo/core/ascii.hpp"
 #include "alamo/data/values.hpp"
+#include "alamo/vfs/mod_environment.hpp"
 #include "alamo/vfs/vfs.hpp"
 
 namespace alamo::render {
 
 std::string find_object_model(const FileProvider& files, std::string_view object_type) {
     if (object_type.empty()) return {};
-    const auto* vfs = dynamic_cast<const vfs::Vfs*>(&files);
-    if (!vfs) return {};
+    const vfs::Vfs* v = vfs::vfs_of(&files);  // a Vfs or a ModEnvironment (ums2)
+    if (!v) return {};
     const std::string want = "NAME=\"" + ascii_upper(object_type) + "\"";
     std::vector<uint8_t> bytes;
-    for (const std::string& path : vfs->list("Data\\XML\\*.XML")) {
+    for (const std::string& path : v->list("Data\\XML\\*.XML")) {
         if (!files.read(path, bytes)) continue;
         const std::string text = ascii_upper(std::string_view(reinterpret_cast<const char*>(bytes.data()), bytes.size()));
         const size_t at = text.find(want);

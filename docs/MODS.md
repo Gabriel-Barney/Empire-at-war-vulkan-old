@@ -212,8 +212,10 @@ mod system refactor").
   (the same `parse_command_line` rule, nothing reordered or added), the `Vfs`, one `ModDescriptor` per mounted mod
   (`mounted()`, search-list order, so `Layer::mod` indexes it), the D1 base-EaW refusal (`refused()`: the environment
   stays open so a report can name the mod; a host that runs the game stops), and `owner(layer)` / `owner_of(path)`.
-  `alamo_game`, `alamo_headless`, `alamo_mod_check` and `alamo_session_run` open through it (`game::load_game_data`
-  for the three that load `GameData`); the launch arguments it gets come from the one resolver of §3.1.2.
+  `alamo_game`, `alamo_headless`, `alamo_mod_check` (also `--conflicts`) and `alamo_session_run` open through it
+  (`game::load_game_data` for the three that load `GameData`); the launch arguments it gets come from the one resolver
+  of §3.1.2. Since ums2 `alamo_headless` refuses a base-EaW stack too (it mounted one before): every entry point prints
+  the refusal and exits with its VFS-failure code.
 - **Checked equal.** `alamo_audio_layer_equivalence_tests` compares the shader entries and the SFX archive list with the
   pre-ums0 code on base FoC and the installed reference mods.
 
@@ -505,7 +507,8 @@ findings are also core `alamo::CompatIssue` records (`ModCheckReport::issues`, `
 Since ums2 (2026-11-19, still version 4) those records also hold the VFS's own findings, each with its layer (§3.2
 "Findings carry their layer"); `files.vfs_warnings` keeps the same lines as text for one more version and goes in
 version 5 (ums4). A finding from a mod's files carries the layer of the mod that serves the file (its index in the
-search list); before ums2 every mod finding said layer 0.
+search list); before ums2 every mod finding said layer 0. The VFS's findings are added after the grade is set, so
+they change no `grade` or `blocking` entry (whether one should is for ums5's re-evaluation).
 
 Installed mods, 2026-11-07 (base FoC at F:): with modc t22 (SM3 translated) the shader issues left are
 `AlamoEngine` `source_shadowed` (an engine effect: TR, its copy 3622043265, FotR) and `_TerrainRenderBump`

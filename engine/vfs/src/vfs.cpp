@@ -483,7 +483,8 @@ struct Vfs::Impl {
                     if (const std::string* h = eaw.find(norm)) {
                         mount(*h, "EaW MegaFiles.xml", -1);
                     } else {
-                        finding(IssueKind::MissingFile, IssueSeverity::Warning, norm, "DATA\\MEGAFILES.XML", alamo::kBaseLayer,
+                        // Source names EaW's list, so the record is not folded into FoC's for the same name.
+                        finding(IssueKind::MissingFile, IssueSeverity::Warning, norm, "GAMEDATA\\DATA\\MEGAFILES.XML", alamo::kBaseLayer,
                                 "EaW MegaFiles.xml entry not found: " + f);
                     }
                 }

@@ -14,6 +14,8 @@
 #include "alamo/data/xml.hpp"
 #include "alamo/data/xml_list.hpp"
 #include "alamo/game/mod_picker.hpp"  // is_mod_arg
+#include "alamo/core/compat_issue.hpp"
+#include "alamo/vfs/mod_environment.hpp"
 #include "alamo/vfs/mod_registry.hpp"
 #include "alamo/vfs/steam_workshop.hpp"
 #include "alamo/vfs/vfs.hpp"
@@ -31,27 +33,10 @@ constexpr std::pair<const char*, const char*> kLists[] = {
     {"CampaignFiles.xml", "campaign list"},
 };
 
-// Every loose file of <root>\Data as a normalised game path ("DATA\\XML\\X.XML").
-void loose_files(const std::string& root, std::set<std::string>& out) {
-    const fs::path data = path_from_utf8(root) / "Data";
-    std::error_code ec;
-    if (!fs::is_directory(long_path(data), ec)) return;
-    for (fs::recursive_directory_iterator it(long_path(data), fs::directory_options::follow_directory_symlink, ec), end;
-         !ec && it != end; it.increment(ec)) {
-        if (it.depth() > 48) {  // a link loop
-            it.disable_recursion_pending();
-            continue;
-        }
-        std::error_code ec2;
-        if (!it->is_regular_file(ec2)) continue;
-        const fs::path rel = it->path().lexically_relative(long_path(data));
-        out.insert(normalize_path("Data\\" + path_to_utf8(rel)));
-    }
-}
-
 struct Layered {
     vfs::ModDescriptor mod;
     std::set<std::string> files;  // normalised paths
+    std::set<std::string> loose;  // the subset in the mod's own Data folder
     std::vector<std::string> megs;
 };
 
@@ -81,28 +66,35 @@ ConflictReport mod_conflicts(const vfs::ModCatalog& catalog, std::span<const std
     ConflictReport r;
     r.game = catalog.game;
     r.args.assign(args.begin(), args.end());
-    vfs::VfsConfig cfg;
-    cfg.foc_root = catalog.game;
-    vfs::parse_command_line(args, cfg);
-    cfg.steam_resolver = vfs::make_steam_workshop_resolver(std::vector<std::string>(workshop_libraries.begin(), workshop_libraries.end()));
+    // ums2: opened through ModEnvironment like every other surface (the same mount plan; findings are not reported here).
+    vfs::ModEnvironmentOptions opt;
+    opt.steam_resolver = vfs::make_steam_workshop_resolver(std::vector<std::string>(workshop_libraries.begin(), workshop_libraries.end()));
+    opt.hash = false;
+    alamo::IssueSink issues;
     std::string err;
-    const std::unique_ptr<vfs::Vfs> v = vfs::Vfs::create(cfg, &err);
-    if (!v) {
-        r.errors.push_back("the stack does not mount: " + err);
+    const std::unique_ptr<vfs::ModEnvironment> env = vfs::ModEnvironment::open(catalog.game, args, issues, &err, std::move(opt));
+    if (!env) {
+        r.errors.push_back("the stack does not mount: " + err.substr(err.rfind("VFS: ", 0) == 0 ? 5 : 0));
         return r;
     }
+    const vfs::Vfs* const v = &env->vfs();
     for (const std::string& a : args) {  // FALLBACKPATH= and other switches are not mods
         std::vector<vfs::ModDescriptor> scratch;
         if (is_mod_arg(a) && !catalog.find_arg(a, scratch)) r.errors.push_back("not a mod this install has: " + a);
     }
 
-    // The mods as mounted (the VFS's resolved search list), each with its files.
+    // The mods as mounted (the VFS's resolved search list), each with its files: its loose files from the VFS's own index
+    // of the mod layer (ums2 t10: no second walk of the folder), then its MEGs below.
     std::vector<Layered> mods;
-    for (const std::string& dir : v->mod_dirs()) {
+    for (size_t i = 0; i < v->mod_dirs().size(); ++i) {
+        const std::string& dir = v->mod_dirs()[i];
         Layered l;
         const vfs::ModDescriptor* d = catalog.find_root(dir);
         l.mod = d ? *d : vfs::describe_mounted_mod(dir, catalog.game, false);
-        loose_files(dir, l.files);
+        for (std::string& p : v->layer_files(v->layers()[i])) {  // layers() starts with the mod layers, search order
+            l.loose.insert(p);
+            l.files.insert(std::move(p));
+        }
         mods.push_back(std::move(l));
     }
     // A mod's MEGs: the MEG layers the VFS says the mod owns (its MegaFiles.xml entries, Patch*.meg); their records the
@@ -127,6 +119,9 @@ ConflictReport mod_conflicts(const vfs::ModCatalog& catalog, std::span<const std
     std::map<std::pair<size_t, size_t>, ConflictPair> pairs;
     std::vector<size_t> replaced(mods.size(), 0), base_wins(mods.size(), 0);
     for (const auto& [path, who] : providers) {
+        // ums2 t10: a path one mod alone has as a loose file is that mod's (loose mod layers come first in the resolution
+        // order); only the others need the VFS's lookup.
+        if (who.size() == 1 && mods[who[0]].loose.count(path)) continue;
         const std::optional<vfs::Vfs::Resolution> res = v->resolve(path);
         const size_t winner = res ? owner(*res) : SIZE_MAX;
         for (const size_t i : who) {

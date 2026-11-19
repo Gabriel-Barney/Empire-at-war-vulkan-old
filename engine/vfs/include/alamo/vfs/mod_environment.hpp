@@ -75,4 +75,9 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
+// The Vfs behind a FileProvider: the provider itself when it is a Vfs, a ModEnvironment's vfs(), else nullptr (a
+// DirectoryProvider, a test double). For code that needs Vfs-only calls (listings, layers) from a FileProvider it was
+// handed (the renderer's effect order, model lookup).
+const Vfs* vfs_of(const alamo::FileProvider* files);
+
 }  // namespace alamo::vfs

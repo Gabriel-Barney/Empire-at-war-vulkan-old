@@ -66,6 +66,12 @@ const ModDescriptor* ModEnvironment::owner_of(std::string_view path) const {
     return l ? owner(*l) : nullptr;
 }
 
+const Vfs* vfs_of(const alamo::FileProvider* files) {
+    if (const auto* v = dynamic_cast<const Vfs*>(files)) return v;
+    if (const auto* e = dynamic_cast<const ModEnvironment*>(files)) return &e->vfs();
+    return nullptr;
+}
+
 bool ModEnvironment::refused() const { return !impl_->refusal.empty(); }
 const std::string& ModEnvironment::refusal() const { return impl_->refusal; }
 
