@@ -5,8 +5,11 @@ The plugin (.claude/marketplace/plugins/eaw-clangd) runs `python -I tools/lsp/cl
   `command` field does not allow;
 - the MSVC headers and Windows SDK are project-local too, so clangd needs the INCLUDE / LIB environment that
   toolchain\\msvc\\setup_x64.bat sets (the same call build_clang.cmd makes);
-- the compile database is in a build tree, not the source root: this picks the newest compile_commands.json of this
-  checkout's trees, preferring the clang trees (clang++ GNU driver, the same front end clangd uses).
+- the compile database is in a build tree, not the source root. Since 2026-11-19 each checkout's `.clangd` names it
+  (`build-wt-clang`, relative to that file; `build_agent.cmd clang all configure` writes it in seconds) and this script
+  passes no --compile-commands-dir, which would override `.clangd`. Reason: Claude Code starts this script from the main
+  checkout (CLAUDE_PROJECT_DIR and cwd are the main checkout even in a worktree session), so a tree picked here was the
+  main checkout's, never the worktree's; `.clangd` is found next to each file, so every worktree reads its own tree.
 
 stdin / stdout are passed straight through to clangd (the LSP stream); diagnostics of this script go to stderr.
 `--print` shows what it would run and exits. `--check FILE` runs `clangd --check=FILE` (a one-shot diagnostics run).
@@ -19,8 +22,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 TC = os.path.join(ROOT, 'toolchain')
 CLANGD = os.path.join(TC, 'llvm', 'bin', 'clangd.exe')
 SETUP = os.path.join(TC, 'msvc', 'setup_x64.bat')
-# Preference order when two trees have the same age: clang trees first.
-TREES = ['build-wt-clang', 'build-clang', 'build-wt-msvc', 'build-msvc']
+# The tree `.clangd` names; only used for the hint below.
+CLANGD_TREE = 'build-wt-clang'
 ENV_KEYS = ('INCLUDE', 'LIB', 'LIBPATH', 'PATH', 'VCToolsInstallDir', 'WindowsSdkDir', 'WindowsSDKVersion',
             'UniversalCRTSdkDir', 'UCRTVersion', 'VCINSTALLDIR')
 
@@ -28,18 +31,6 @@ ENV_KEYS = ('INCLUDE', 'LIB', 'LIBPATH', 'PATH', 'VCToolsInstallDir', 'WindowsSd
 def log(msg):
     sys.stderr.write('clangd_launch: %s\n' % msg)
     sys.stderr.flush()
-
-
-def pick_compile_db():
-    """Directory of the newest compile_commands.json among this checkout's build trees, or None."""
-    best = None
-    for rank, name in enumerate(TREES):
-        db = os.path.join(ROOT, name, 'compile_commands.json')
-        if os.path.isfile(db):
-            key = (os.path.getmtime(db), -rank)
-            if best is None or key > best[0]:
-                best = (key, os.path.dirname(db))
-    return best[1] if best else None
 
 
 def msvc_env():
@@ -67,11 +58,10 @@ def build_command(extra):
     # LSP mode: index in the background, log errors only. --check: no index, the default (info) log is its report.
     if not check:
         cmd += ['--background-index', '--log=error']
-    db = pick_compile_db()
-    if db:
-        cmd.append('--compile-commands-dir=%s' % db)
-    else:
-        log('no compile_commands.json in %s yet: build once (build_agent.cmd) for full diagnostics' % ', '.join(TREES))
+    # No --compile-commands-dir: it would override the per-checkout `.clangd` (see the module docstring).
+    db = os.path.join(ROOT, CLANGD_TREE, 'compile_commands.json')
+    if check and not os.path.isfile(db):
+        log('no %s yet: run build_agent.cmd clang all configure in this checkout' % db)
     return cmd + extra
 
 

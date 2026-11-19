@@ -18,6 +18,9 @@ worktree name). Follow the `lane` agent loop (`.claude/agents/lane.md`):
    `cmd /c mklink /J <link> <main checkout folder>`. Otherwise, from the main checkout, run
    `tools\new_worktree.cmd <name> --modules "<modules the tasks touch>"` (branches from `origin/dev`) and continue in the folder it
    prints. A session already on its own app branch keeps it: `tools\land_on_dev.cmd` brings `dev` in when it lands.
+   Then, in the worktree, before opening any C++ file: `build_agent.cmd clang all configure` (about 5 s, no build). It writes
+   `build-wt-clang\compile_commands.json`, which `.clangd` points clangd at; without it the LSP tool misses references and
+   reports false include errors. A C++ file clangd opened before that keeps its fallback flags until the session restarts.
 5. Current focus (Gabriel, 2026-11-10, `docs/DECISIONS.md`): only tier 1 and tier 2 tasks. Skip tier-3 tasks (`tier` field) and say so in the plan.
    Mark each task that needs a retail fact, an unfamiliar technique or an unexplained failure: the first becomes a `docs/re/` lookup
    or a `probe-kit` (Gabriel runs probes), the second a `research` report, the third a `diagnosing-bugs` loop; plan them before the

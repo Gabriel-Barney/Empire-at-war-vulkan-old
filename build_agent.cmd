@@ -10,6 +10,8 @@ rem Tests: no 4th argument = the fast tier (ctest -LE slow, tests without the "s
 rem slow ones included; "all" runs every test (the gate scripts always do); "changed" (2026-11-13) runs the fast-tier tests
 rem of the engine modules changed against origin/dev (tools\lint\changed_tests.py), the inner loop while you work on one
 rem module; "none" builds without running tests. land_on_dev.cmd still needs the whole fast tier on the merged HEAD.
+rem "configure" (2026-11-19) only configures the tree: no lint, build, tests or build record. It writes the
+rem compile_commands.json clangd reads (.clangd points at build-wt-clang): build_agent.cmd clang all configure.
 rem Repeat check (2026-11-13, tools\lint\build_state.py): when the last run in this tree FAILED on exactly the same source,
 rem modules and tests, it prints that run's summary again and exits 3 without building. ALAMO_RERUN=1 builds anyway.
 rem Output: a short summary (tools\lint\build_summary.py); set ALAMO_FULL_LOG=1 to also print the whole log.
@@ -54,6 +56,14 @@ if "!ATESTS!"=="" set FILTER=-LE slow
 if /i "!ATESTS!"=="all" set FILTER=
 if /i "!ATESTS!"=="changed" set FILTER=--tests-from-file "%~dp0!B!\changed_tests.txt"
 if /i "!AMODS!"=="all" (set MODULES=-U ALAMO_ENGINE_MODULES) else set MODULES="-DALAMO_ENGINE_MODULES=!AMODS!"
+rem One configure line for the build and for "configure" (never hand-configure a tree: a manual cmake emptied Release flags).
+set CONFIGURE=cmake -S . -B %B% -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_MAKE_PROGRAM=%TC%\venv\Scripts\ninja.exe" !COMPILER! !MODULES!
+if /i "!ATESTS!"=="configure" (
+  > %LOG% !CONFIGURE! 2>&1
+  if errorlevel 1 (echo build_agent: configure of %B% failed, see %LOG%& exit /b 1)
+  echo build_agent: configured %B%; its compile_commands.json is ready for clangd
+  exit /b 0
+)
 rem Cheap check first (2026-11-12): a string literal an edit split across lines (C2001, the most common compile error)
 rem fails here in a second instead of in a build. Scans the C++ files changed against origin/dev.
 python -I tools\lint\check_string_literals.py --changed
@@ -67,7 +77,7 @@ if errorlevel 3 exit /b 3
 rem Stamp for tools\land_on_dev.cmd: HEAD, clean or not, modules and test filter; becomes %B%\verified.json on a pass.
 python -I tools\lint\verified_build.py begin %B% --modules "!AMODS!" --tests "!ATESTS!"
 > %LOG% (
-  cmake -S . -B %B% -G Ninja -DCMAKE_BUILD_TYPE=Release "-DCMAKE_MAKE_PROGRAM=%TC%\venv\Scripts\ninja.exe" !COMPILER! !MODULES! 2>&1
+  !CONFIGURE! 2>&1
   echo configure exit !ERRORLEVEL!
   cmake --build %B% 2>&1
   echo build exit !ERRORLEVEL!

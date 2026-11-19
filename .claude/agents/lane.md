@@ -163,6 +163,10 @@ findings) join the list above; `spec-review` and `codebase-design`'s design-it-t
   summary and fix. It stops on golden drift, never regenerates goldens, and never polls CI.
 - **Context.** Check `/context` at the start and after each finished task; `/compact` between tasks when it is more than half full
   (keep the group id, claim, exit test, open items and the last build summary; drop logs and diffs). Read build summaries, not logs.
+- **C++ lookups.** Where a C++ symbol is defined, who calls it, what a header declares: the `LSP` tool first
+  (`findReferences` / `incomingCalls` from a `.cpp` use, `documentSymbol`, `workspaceSymbol`), then read only the line range
+  it points at. Grep is for strings, Lua, XML, Python and docs. Needs `build_agent.cmd clang all configure` once per worktree
+  (`/start-group` step 4).
 - **Side questions** go to `/btw` so they stay out of the lane's context; fixed commands (`roadmap_store.py claims`,
   `test_slot.py --status`) run in shell mode (`!`) with no model round trip.
 - **Unattended.** Gabriel is usually away while a lane runs, so a permission card stalls the lane until he is back. Write

@@ -233,9 +233,15 @@ Header-only INTERFACE targets; link them from a test exe, never from an engine l
   `finish-group` reviews the branch diff before landing: the built-in `/code-review high`, plus the `reviewer` agent for sim code.
 - C++ code intelligence: the project-local plugin `eaw-clangd` (marketplace `tools/claude_plugins`, enabled in `.claude/settings.json`)
   gives Claude clangd diagnostics after each edit and an `LSP` navigation tool. It runs `python -I tools/lsp/clangd_launch.py`, which
-  starts `toolchain\llvm\bin\clangd.exe` with the MSVC environment of `toolchain\msvc\setup_x64.bat` and the newest
-  `compile_commands.json` of this checkout's build trees (`build-wt-clang`, `build-clang`, `build-wt-msvc`, `build-msvc`), so build a
-  tree once first. `python -I tools/lsp/clangd_launch.py --check <file>` is a one-shot diagnostics run (its `ExtractFunction` tweak
+  starts `toolchain\llvm\bin\clangd.exe` with the MSVC environment of `toolchain\msvc\setup_x64.bat`. The compile database comes
+  from `.clangd` at the checkout root: `build-wt-clang\compile_commands.json`, relative to that file, so each worktree reads its own
+  tree (2026-11-19). Claude Code starts the launcher from the main checkout even in a worktree session (`CLAUDE_PROJECT_DIR` and its
+  cwd are the main checkout), so the launcher no longer picks a tree itself. `build_agent.cmd clang all configure` writes the database
+  in about 5 s without building (`/start-group` step 4). Run it before clangd opens a C++ file: a file opened earlier keeps
+  fallback flags (false include errors, references missing) until the session restarts. Without it, `findReferences` on
+  `TacticalBattle::issue_orders` found only the declaration; with it, the calls in `battle_ai.cpp` and
+  `tactical_battle_services.cpp` and the definition, once the background index (about 2 minutes, `build-wt-clang\.cache\clangd`) was done.
+  `python -I tools/lsp/clangd_launch.py --check <file>` is a one-shot diagnostics run (its `ExtractFunction` tweak
   "errors" are clangd's refactoring self-test, not compile errors); `--print` shows the command. The plugin loads after the folder is
   trusted; if diagnostics are missing, check the `/plugin` errors list.
 - Read-only allowlist (2026-11-13, from transcript frequencies): PowerShell `Get-Content`, `Get-ChildItem`, `Select-String`,
