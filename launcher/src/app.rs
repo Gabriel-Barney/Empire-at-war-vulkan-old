@@ -215,6 +215,11 @@ type CheckpointResult = Result<Option<saves::Checkpoint>, String>;
 pub struct App {
     pub cfg: Config,
     pub steam: SteamInfo,
+    /// The port's `alamo_mod_check.exe`, found when the catalog was last loaded ([`crate::catalog::mod_check_exe`]):
+    /// the mod list, the conflicts page and the profile stack all run this one.
+    pub mod_check: Option<PathBuf>,
+    /// Why the last catalog load failed (shown once per new reason).
+    pub catalog_error: Option<String>,
     /// The page in the focused pane of the main window. Pages may assign it to navigate
     /// (`app.page = Page::Settings`); [`App::navigate`] does the same thing.
     pub page: Page,
@@ -309,10 +314,11 @@ fn layout_from_env(page: Option<&str>, windows: Option<&str>, tabs: Option<&str>
 
 /// The detection rows and the mods from `alamo_mod_check --list` ([`crate::catalog`]); on failure nothing is
 /// detected and the reason comes back for a toast.
-fn load_catalog(settings: &crate::config::Settings) -> (SteamInfo, Vec<ModInfo>, Option<String>) {
-    match crate::catalog::load_for(settings) {
-        Ok(c) => (steam::from_install(&c.install), mods::from_catalog(&c), None),
-        Err(e) => (SteamInfo::default(), Vec::new(), Some(e)),
+fn load_catalog(settings: &crate::config::Settings) -> (SteamInfo, Vec<ModInfo>, Option<PathBuf>, Option<String>) {
+    let (exe, catalog) = crate::catalog::load_for(settings);
+    match catalog {
+        Ok(c) => (steam::from_install(&c.install), mods::from_catalog(&c), exe, None),
+        Err(e) => (SteamInfo::default(), Vec::new(), exe, Some(e)),
     }
 }
 
@@ -328,7 +334,7 @@ impl App {
             }
         }
         // ums3: the install and the mods come from the port's own check (alamo_mod_check --list), not a scan here.
-        let (steam, mods, catalog_error) = load_catalog(&cfg.settings);
+        let (steam, mods, mod_check, catalog_error) = load_catalog(&cfg.settings);
 
         // `--profile "Name"` (what the desktop shortcuts use) picks the profile for this run.
         let mut dirty = false;
@@ -370,6 +376,8 @@ impl App {
         let mut app = Self {
             cfg,
             steam,
+            mod_check,
+            catalog_error,
             page,
             mods,
             tex: Textures::default(),
@@ -410,7 +418,7 @@ impl App {
         if let Some(e) = startup_error {
             app.err(e);
         }
-        if let Some(e) = catalog_error {
+        if let Some(e) = app.catalog_error.clone() {
             app.err(e);
         }
         app
@@ -431,13 +439,16 @@ impl App {
 
     /// Asks the port's check again for the install and the mods (after a setting changed, or on request).
     pub fn rescan_mods(&mut self) {
-        let (steam, mods, error) = load_catalog(&self.cfg.settings);
+        let (steam, mods, mod_check, error) = load_catalog(&self.cfg.settings);
         self.steam = steam;
+        self.mod_check = mod_check;
         self.mods = mods;
         self.tex.clear();
-        if let Some(e) = error {
-            self.err(e);
+        // A failure says so once, not on every rescan Steam asks for.
+        if error.is_some() && error != self.catalog_error {
+            self.err(error.clone().unwrap_or_default());
         }
+        self.catalog_error = error;
     }
 
     pub fn find_mod(&self, path: &Path) -> Option<&ModInfo> {

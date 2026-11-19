@@ -1014,6 +1014,7 @@ mod tests {
         println!("{out:#?}");
 
         let steam = crate::catalog::load_for(&crate::config::Settings::default())
+            .1
             .map(|c| crate::steam::from_install(&c.install))
             .unwrap_or_default();
         let acf = steam.workshop_dir.as_deref().and_then(workshop_acf_path);

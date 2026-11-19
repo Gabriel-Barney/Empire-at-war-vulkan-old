@@ -13,7 +13,9 @@
 
 use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -83,12 +85,12 @@ pub struct Catalog {
     pub mods: Vec<CatalogMod>,
 }
 
-fn text(v: &Value, key: &str) -> String {
+pub(crate) fn text(v: &Value, key: &str) -> String {
     v.get(key).and_then(Value::as_str).unwrap_or_default().to_owned()
 }
 
 /// The port writes '/' or '\\'; the launcher compares paths with `steam::same_path`, so both are fine. Empty = none.
-fn path(v: &Value, key: &str) -> Option<PathBuf> {
+pub(crate) fn path(v: &Value, key: &str) -> Option<PathBuf> {
     let s = text(v, key);
     (!s.is_empty()).then(|| PathBuf::from(s.replace('/', "\\")))
 }
@@ -100,12 +102,20 @@ fn paths(v: &Value, key: &str) -> Vec<PathBuf> {
         .unwrap_or_default()
 }
 
-fn strings(v: &Value, key: &str) -> Vec<String> {
+pub(crate) fn strings(v: &Value, key: &str) -> Vec<String> {
     v.get(key).and_then(Value::as_array).map(|a| a.iter().filter_map(|s| s.as_str().map(str::to_owned)).collect()).unwrap_or_default()
 }
 
-fn flag(v: &Value, key: &str) -> bool {
+pub(crate) fn flag(v: &Value, key: &str) -> bool {
     v.get(key).and_then(Value::as_bool).unwrap_or(false)
+}
+
+pub(crate) fn count(v: &Value, key: &str) -> usize {
+    v.get(key).and_then(Value::as_u64).unwrap_or(0) as usize
+}
+
+pub(crate) fn list(v: &Value, key: &str) -> Vec<Value> {
+    v.get(key).and_then(Value::as_array).cloned().unwrap_or_default()
 }
 
 /// Reads the JSON `alamo_mod_check --list --json -` prints.
@@ -173,6 +183,18 @@ pub fn mod_check_exe(game_exe: Option<&Path>) -> Option<PathBuf> {
     })
 }
 
+/// A folder as a check argument: no trailing separator, except a drive root ("E:\\" stays, "E:" would mean the drive's
+/// current folder).
+pub fn folder_arg(p: &Path) -> String {
+    let s = p.to_string_lossy();
+    let t = s.trim_end_matches(['\\', '/']);
+    if t.len() == 2 && t.ends_with(':') {
+        format!("{t}\\")
+    } else {
+        t.to_owned()
+    }
+}
+
 /// The check's arguments: the game folder when the user chose one, every extra mod folder, no content hashes.
 pub fn list_args(foc: Option<&Path>, extra: &[PathBuf]) -> Vec<String> {
     let mut a: Vec<String> = Vec::new();
@@ -184,37 +206,75 @@ pub fn list_args(foc: Option<&Path>, extra: &[PathBuf]) -> Vec<String> {
     a.push("--no-hash".into());
     for d in extra {
         a.push("--mod-dir".into());
-        a.push(d.to_string_lossy().trim_end_matches(['\\', '/']).to_owned());
+        a.push(folder_arg(d));
     }
     a.push("--json".into());
     a.push("-".into());
     a
 }
 
-/// Runs `exe` with `args` (no console window) and returns its stdout.
-pub fn run_check(exe: &Path, args: &[String]) -> Result<String, String> {
+/// How long the `--list` check may take before the launcher gives up on it (it reads `modinfo.json` files only).
+pub const LIST_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Runs `exe` with `args` (no console window) and returns its stdout. A check that runs past `timeout` is stopped;
+/// one that prints nothing says why from the last line of its stderr and its exit code.
+pub fn run_check(exe: &Path, args: &[String], timeout: Duration) -> Result<String, String> {
     let mut cmd = Command::new(exe);
-    cmd.args(args);
+    cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
-    let out = cmd.output().map_err(|e| format!("cannot run {}: {e}", exe.display()))?;
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    let mut child = cmd.spawn().map_err(|e| format!("cannot run {}: {e}", exe.display()))?;
+    // Drain both pipes on threads so a full pipe never stalls the check while it is waited on.
+    let drain = |pipe: Option<Box<dyn Read + Send>>| {
+        std::thread::spawn(move || {
+            let mut buf = Vec::new();
+            if let Some(mut p) = pipe {
+                let _ = p.read_to_end(&mut buf);
+            }
+            buf
+        })
+    };
+    let out = drain(child.stdout.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let err = drain(child.stderr.take().map(|p| Box::new(p) as Box<dyn Read + Send>));
+    let start = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(s)) => break s,
+            Ok(None) if start.elapsed() < timeout => std::thread::sleep(Duration::from_millis(20)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("{} did not finish within {} s", exe.display(), timeout.as_secs()));
+            }
+            Err(e) => return Err(format!("{}: {e}", exe.display())),
+        }
+    };
+    let stdout = String::from_utf8_lossy(&out.join().unwrap_or_default()).into_owned();
+    if stdout.trim().is_empty() {
+        let stderr = String::from_utf8_lossy(&err.join().unwrap_or_default()).into_owned();
+        let last = stderr.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("no output").trim().to_owned();
+        return Err(format!("{} gave no report (exit code {}): {last}", exe.display(), status.code().unwrap_or(-1)));
+    }
+    Ok(stdout)
 }
 
 /// The catalog of this install: `exe --list` (see [`list_args`]).
 pub fn load(exe: Option<&Path>, foc: Option<&Path>, extra: &[PathBuf]) -> Result<Catalog, String> {
     let exe = exe.ok_or("alamo_mod_check.exe was not found next to the game or the launcher, so no mods are listed")?;
-    parse(&run_check(exe, &list_args(foc, extra))?)
+    parse(&run_check(exe, &list_args(foc, extra), LIST_TIMEOUT)?)
 }
 
-/// The catalog for the launcher's settings: the check next to the chosen game, the game folder the user chose (if it
-/// exists) and the user's extra mod folders.
-pub fn load_for(settings: &crate::config::Settings) -> Result<Catalog, String> {
+/// The catalog for the launcher's settings: the check next to the chosen game (or the launcher), the game folder the
+/// user chose (if it exists) and the user's extra mod folders. Also returns the check it found, which the conflicts
+/// page and the profile stack run too.
+pub fn load_for(settings: &crate::config::Settings) -> (Option<PathBuf>, Result<Catalog, String>) {
     let foc = settings.foc_dir_override.clone().filter(|p| p.is_dir());
-    load(mod_check_exe(settings.game_exe.as_deref()).as_deref(), foc.as_deref(), &settings.extra_mod_dirs)
+    let exe = mod_check_exe(settings.game_exe.as_deref());
+    let catalog = load(exe.as_deref(), foc.as_deref(), &settings.extra_mod_dirs);
+    (exe, catalog)
 }
 
 #[cfg(test)]
@@ -266,5 +326,7 @@ pub(crate) mod tests {
         let a = list_args(Some(Path::new("D:\\FoC")), &[PathBuf::from("E:\\My Mods\\")]);
         assert_eq!(a, ["--game", "D:\\FoC", "--list", "--no-hash", "--mod-dir", "E:\\My Mods", "--json", "-"]);
         assert_eq!(list_args(None, &[]), ["--list", "--no-hash", "--json", "-"]);
+        assert_eq!(folder_arg(Path::new("E:\\")), "E:\\");
+        assert_eq!(folder_arg(Path::new("E:\\Mods\\")), "E:\\Mods");
     }
 }

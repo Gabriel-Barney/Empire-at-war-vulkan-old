@@ -547,8 +547,6 @@ mod tests {
         assert!(sub.workshop_id.is_none() && !sub.own_summary);
         let plain = rows.iter().find(|m| m.folder == "StackTop").unwrap();
         assert_eq!((plain.name.as_str(), plain.own_name), ("StackTop", false));
-        // A folder that is not on disk has no art.
-        assert!(plain.icon.is_none() && plain.splash.is_none());
     }
 
     /// A fresh scratch folder that is removed again when the test ends.

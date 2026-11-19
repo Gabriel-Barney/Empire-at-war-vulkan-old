@@ -165,6 +165,9 @@ set_tests_properties(alamo_game_battle_fx_tests PROPERTIES TIMEOUT 120)
 # in its own temp folder; with ALAMO_FOC_DATA also the shipped data (no errors).
 add_executable(alamo_mod_check tools/mod_check_main.cpp)
 target_link_libraries(alamo_mod_check PRIVATE alamo_core alamo_game_core)
+if(WIN32)
+  target_link_libraries(alamo_mod_check PRIVATE shell32)  # ums3: CommandLineToArgvW (UTF-8 arguments)
+endif()
 if(COMMAND alamo_shaderxlat_copy_dxc)  # modc t21: the runtime DXC compiles the audited shader passes
   alamo_shaderxlat_copy_dxc(alamo_mod_check)
 endif()
