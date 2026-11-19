@@ -30,6 +30,8 @@
     SAVED(landings_, state) \
     DERIVED(landings_unloaded_, "records of the last tick for the host (cleared at the next tick start)") \
     DERIVED(production_done_, "records of the last tick for the host (cleared at the next tick start)") \
+    DERIVED(presentation_, "ref2 t02: presentation records since the host's last drain (never read by the sim)") \
+    REBUILT(emit_presentation_, "ref2 t02: host switch, armed again by the host after a load (GameSession)") \
     SAVED(rt_, state) \
     SAVED(sp_spawners_, state) \
     SAVED(sp_debris_, state) \
