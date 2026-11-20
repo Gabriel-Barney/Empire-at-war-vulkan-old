@@ -637,7 +637,7 @@ std::string map_objects_text(const objects::GameObjectTypes& types, const terrai
     std::map<std::pair<uint32_t, std::string>, uint32_t> n;
     for (const terrain::ObjectPlacement& pl : map.objects) {
         const objects::TypeIndex t = index.find(pl.type_crc);
-        n[{pl.owner, t == objects::kNone ? std::string("?") : std::string(types.raw().types().name[t])}]++;
+        n[{pl.owner, t == objects::kNone ? std::string("?") : std::string(types.name(t))}]++;
     }
     std::string out = "map objects (owner type count):\n";
     for (const auto& [k, c] : n) out += "  " + std::to_string(k.first) + " " + k.second + " " + std::to_string(c) + "\n";
@@ -665,14 +665,14 @@ std::string battle_state_text(uint64_t tick, sim::SimHost& host, const galactic:
         if (!st.alive(h) || !st.has_behavior(h, kPad) || st.type(h) >= types.size()) continue;
         const objects::ObjectId c = tb.pad_contents(st.id(h));
         const objects::ObjectHandle ch = c != objects::kNoObjectId ? st.find(c) : objects::ObjectHandle{};
-        out += " " + std::to_string(st.id(h)) + ":" + std::string(types.raw().types().name[st.type(h)]) + "/p" + std::to_string(st.owner(h));
-        if (st.alive(ch) && st.type(ch) < types.size()) out += "=" + std::string(types.raw().types().name[st.type(ch)]);
+        out += " " + std::to_string(st.id(h)) + ":" + std::string(types.name(st.type(h))) + "/p" + std::to_string(st.owner(h));
+        if (st.alive(ch) && st.type(ch) < types.size()) out += "=" + std::string(types.name(st.type(ch)));
     }
     out += "\n  units:";
     for (int32_t p = 0; p < 2; ++p) {
         std::map<std::string, uint32_t> n;
         for (const objects::ObjectHandle h : st.owned_by(p))
-            if (st.active(h) && st.type(h) < types.size() && !st.has_behavior(h, kPad)) n[std::string(types.raw().types().name[st.type(h)])]++;
+            if (st.active(h) && st.type(h) < types.size() && !st.has_behavior(h, kPad)) n[std::string(types.name(st.type(h)))]++;
         out += " p" + std::to_string(p) + "{";
         for (const auto& [k, c] : n) out += k + "x" + std::to_string(c) + " ";
         out += "}";
@@ -706,7 +706,7 @@ std::string battle_state_text(uint64_t tick, sim::SimHost& host, const galactic:
             }
             char b2[256];
             std::snprintf(b2, sizeof b2, " %u:%s/p%d hull %.0f/%.0f shield %.0f attackers %u (in range %u, attacking %u) nearest %.0f",
-                          static_cast<unsigned>(id), std::string(types.raw().types().name[st.type(h)]).c_str(), st.owner(h),
+                          static_cast<unsigned>(id), std::string(types.name(st.type(h))).c_str(), st.owner(h),
                           static_cast<double>(c.has_unit(id) ? c.health(id) : -1.0f), static_cast<double>(c.has_unit(id) ? c.max_health(id) : -1.0f),
                           static_cast<double>(c.has_unit(id) ? c.shield(id) : -1.0f), attackers, in_range, firing, static_cast<double>(nearest));
             out += b2;
@@ -994,7 +994,7 @@ int skirmish_ai_run(const MapRunOptions& opt, const std::string& kind, const std
                             if (!bst.exists(vh) || !bst.has_behavior(vh, kLandBaseDmg)) continue;
                             const objects::ObjectHandle sh = bst.find(e.source);
                             const std::string src = bst.exists(sh) && bst.type(sh) < tmode->types().size()
-                                                        ? std::string(tmode->types().raw().types().name[bst.type(sh)])
+                                                        ? std::string(tmode->types().name(bst.type(sh)))
                                                         : std::string("?");
                             auto& acc = base_damage[{e.victim, src + "/k" + std::to_string(e.kind)}];
                             ++acc.first;

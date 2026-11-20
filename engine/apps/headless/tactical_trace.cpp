@@ -97,7 +97,7 @@ void PortTacticalTrace::sample(const alamo::sim::TacticalMode& tm, const alamo::
         }
         const uint32_t t = store.type(o.h) < types.size() ? store.type(o.h) : kNone;
         if (!types_.count(t))
-            types_[t] = t != kNone ? alamo::normalize_name(types.raw().types().name[t]) : std::string("UNKNOWN");
+            types_[t] = t != kNone ? alamo::normalize_name(types.name(t)) : std::string("UNKNOWN");
         const int32_t owner = store.owner(o.h);
         const auto pos = store.position(o.h), face = store.facing(o.h);
         const float pa[3] = {pos.x, pos.y, pos.z}, fa[3] = {face.x, face.y, face.z};
