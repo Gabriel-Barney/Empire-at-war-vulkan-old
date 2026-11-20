@@ -737,12 +737,10 @@ static int print_flag_list(bool json) {
 }
 
 int main(int argc, char** argv) {
-    for (int i = 1; i < argc; ++i)  // ref3 t05: before anything that could print
-        if (std::string_view(argv[i]) == "--list-flags") {
-            bool json = false;
-            for (int k = 1; k < argc; ++k) json = json || std::string_view(argv[k]) == "--json";
-            return print_flag_list(json);
-        }
+    // ref3 t05: `alamo_game --list-flags [--json]`, the first argument only (elsewhere it could be another flag's value),
+    // before anything that could print.
+    if (argc > 1 && std::string_view(argv[1]) == "--list-flags")
+        return print_flag_list(argc > 2 && std::string_view(argv[2]) == "--json");
     {  // [port] crash minidumps (%LOCALAPPDATA%\alamo\crashes; ALAMO_CRASHDUMP=0 turns them off, ALAMO_CRASH_TEST=<kind> checks them)
         alamo::crash::Options crash_opt;
         crash_opt.app_name = "alamo_game";

@@ -111,8 +111,9 @@ pub fn parse_flags(json: &str) -> Result<Vec<GameFlag>, String> {
     Ok(flags)
 }
 
-/// How long `--list-flags` may take (it prints before the game loads anything).
-const FLAGS_TIMEOUT: Duration = Duration::from_secs(15);
+/// How long `--list-flags` may take: it prints before the game loads anything (about 0.1 s), and it runs on the UI
+/// thread once per exe, so a wrong program in the game setting must not hold the window for long.
+const FLAGS_TIMEOUT: Duration = Duration::from_secs(5);
 
 type FlagCache = Option<(PathBuf, Option<SystemTime>, u64, Result<Arc<Vec<GameFlag>>, String>)>;
 static FLAG_CACHE: Mutex<FlagCache> = Mutex::new(None);
