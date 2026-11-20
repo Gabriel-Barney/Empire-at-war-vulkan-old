@@ -357,14 +357,18 @@ bool around_search(const PassabilityGrid& grid, const MovementConstants& k, cons
     const int32_t gcx = world_to_cell(q.goal.x), gcy = world_to_cell(q.goal.y);
     if (!grid.passable_cell(scx, scy, q.mask) || !grid.passable_cell(gcx, gcy, q.mask)) return false;
     const float grow2 = q.grow + q.f;
-    for (const AroundObstacle& o : q.obstacles)
-        if (rect_contains(o.shape, q.goal, grow2)) return false;  // a goal inside an obstacle's rect2: the next candidate
     std::vector<Box> obox(q.obstacles.size());
     for (size_t i = 0; i < q.obstacles.size(); ++i) obox[i] = rect_aabb(rect_grown(q.obstacles[i].shape, grow2));
     const CellBox base = around_window(q.start, q.goal, k.dynamic_avoidance_rectangle_bound, q.giant, gw, gh);
-    std::vector<uint8_t> reach, open;
-    std::vector<int32_t> stack;
-    for (int32_t attempt = 0; attempt < 5; ++attempt) {
+    // mov2 t08 (docs/re/MOV2_T05_TERRAIN_STOPS.md [H]): the window's obstacles (0x677340's tracker) are reported for a
+    // goal that fails before the graph too - the caller's next goals are accepted against them
+    const auto window_obstacles = [&](const CellBox& w) {
+        const Box wb = cell_box_world(w);
+        out.window.clear();
+        for (size_t i = 0; i < q.obstacles.size(); ++i)
+            if (boxes_overlap(obox[i], wb)) out.window.push_back(static_cast<uint32_t>(i));
+    };
+    const auto grown_window = [&](int32_t attempt) {
         CellBox w = base;
         // 0x67cf20: each side grows by one cell while an obstacle overlaps the strip 10 units outside it (at most 20
         // cells per dimension)
@@ -396,6 +400,18 @@ bool around_search(const PassabilityGrid& grid, const MovementConstants& k, cons
         w.y0 = std::max(w.y0 - 3 * attempt, 0);
         w.x1 = std::min(w.x1 + 3 * attempt, gw - 1);
         w.y1 = std::min(w.y1 + 3 * attempt, gh - 1);
+        return w;
+    };
+    for (const AroundObstacle& o : q.obstacles)
+        if (rect_contains(o.shape, q.goal, grow2)) {  // a goal inside an obstacle's rect2: the next candidate
+            window_obstacles(grown_window(0));
+            return false;
+        }
+    std::vector<uint8_t> reach, open;
+    std::vector<int32_t> stack;
+    for (int32_t attempt = 0; attempt < 5; ++attempt) {
+        const CellBox w = grown_window(attempt);
+        window_obstacles(w);
         const int32_t bw = w.x1 - w.x0 + 1, bh = w.y1 - w.y0 + 1;
         if (bw <= 0 || bh <= 0) return false;
         const auto inside = [&](int32_t cx, int32_t cy) { return cx >= w.x0 && cy >= w.y0 && cx <= w.x1 && cy <= w.y1; };

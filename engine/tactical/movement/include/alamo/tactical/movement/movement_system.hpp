@@ -1723,10 +1723,20 @@ private:
         bool on_path = false;
     };
     static constexpr int kRejoinNext = 0, kRejoinTaken = 1, kRejoinFail = -1;
-    // s78o (b0065): `forced` = 0x67d580's object argument (a flag-1 Path Around's obstacle): an obstacle for every goal
+    // mov2 t08 (docs/re/MOV2_T05_TERRAIN_STOPS.md [H]): the goal loop 0x675ed0's tracker - the tracker rectangles (shape
+    // + the request's tracker growth) and unit indices of the window the last failed goal built (0x677340). Unset before
+    // the first goal: 0x679aa0 then queries the layer; set, it queries these instead.
+    struct RejoinTracker {
+        bool set = false;
+        std::vector<FootRect> rects;
+        std::vector<uint32_t> units;
+    };
+    // s78o (b0065): `forced` = 0x67d580's object argument (a flag-1 Path Around's obstacle): an obstacle for every goal.
+    // `trk`: the caller's goal-loop tracker (Path Around), read at each (a) / (b) acceptance; null: the layer every time
     bool rejoin_search(const Unit& u, std::span<const V2> base, uint32_t cur, float d, const std::function<int(const Rejoin&)>& fn,
-                       const Unit* forced = nullptr) const;
-    bool rejoin_accept(const Unit& u, V2 cand, V2 path_end, V2& q, const Unit* forced = nullptr) const;
+                       const Unit* forced = nullptr, const RejoinTracker* trk = nullptr) const;
+    bool rejoin_accept(const Unit& u, V2 cand, V2 path_end, V2& q, const Unit* forced = nullptr,
+                       const RejoinTracker* trk = nullptr) const;
     // mov1 t01 (BKR1_RE_ANSWERS Q1 [H]): 0x505630 - the number of MovingVsMoving records in state 15 (Starved) whose
     // master is u; master_list_partner: o is the slave of one of u's MovingVsMoving records in state 4 (Pass, 0x505e10)
     // or state 15 (0x505630) where u is the master - an obstacle of every Path Around of u (0x67d580's "always" lists)
