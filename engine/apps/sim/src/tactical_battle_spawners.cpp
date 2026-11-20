@@ -12,6 +12,12 @@ namespace {
 
 constexpr objects::BehaviorTypeId kSpawnerBehavior = 0x1B;     // SPAWN_INDIGENOUS_UNITS
 constexpr objects::BehaviorTypeId kDebrisBehavior = 0x28;      // DEBRIS
+constexpr objects::BehaviorTypeId kIndigenousBehavior = 0x20;  // INDIGENOUS_UNIT (tru2 t01)
+// tru2 t01 (MCX4_T11_T12_RE_ANSWERS "Max_Distance_From_Spawner" step 5): the wander step bounds (max, min), .data
+// 0x140a442c8 / cc, and while burning 0x140a442d0 / d4.
+constexpr float kWanderStepMax = 400.0f, kWanderStepMin = 50.0f;
+constexpr float kBurningStepMax = 150.0f, kBurningStepMin = 60.0f;
+constexpr float kWanderStayChance = 0.1f;  // Can_Indigenous_Unit_Stop: a draw above it stays put
 constexpr int32_t kPlacementTries = 10;                        // 0x140a436a0
 constexpr float kPackRadius = 50.0f;                           // pack members around the first member
 constexpr int32_t kSnapRings = 16;                             // [port] nearest passable cell search (cells)
@@ -79,13 +85,16 @@ void TacticalBattle::sp_tick(TacticalMode& mode, SimRng& rng) {
         const objects::ObjectId id = st.id(h);
         if (id <= sp_scanned_) continue;
         top = std::max(top, id);
-        if (st.has_behavior(h, kSpawnerBehavior) || st.has_behavior(h, kDebrisBehavior)) fresh.push_back(h);
+        if (st.has_behavior(h, kSpawnerBehavior) || st.has_behavior(h, kDebrisBehavior) || st.has_behavior(h, kIndigenousBehavior))
+            fresh.push_back(h);
     }
     const bool first_scan = sp_scanned_ == 0;
     sp_scanned_ = top;
     std::sort(fresh.begin(), fresh.end(), [&st](objects::ObjectHandle a, objects::ObjectHandle b) { return st.id(a) < st.id(b); });
     const uint32_t mf = st.mode_frame();
     for (const objects::ObjectHandle h : fresh) {
+        if (st.has_behavior(h, kIndigenousBehavior)) sp_indigenous_.push_back(st.id(h));  // tru2 t01 (ascending id)
+        if (!st.has_behavior(h, kSpawnerBehavior) && !st.has_behavior(h, kDebrisBehavior)) continue;
         sp_used_ = true;
         if (st.has_behavior(h, kSpawnerBehavior)) {
             IndigenousSpawner s;
@@ -119,6 +128,8 @@ void TacticalBattle::sp_tick(TacticalMode& mode, SimRng& rng) {
     std::erase_if(sp_spawners_, [&st](const IndigenousSpawner& s) { return !st.alive(st.find(s.id)); });
     for (IndigenousSpawner& s : sp_spawners_)
         std::erase_if(s.spawned, [&st](objects::ObjectId id) { return !st.alive(st.find(id)); });
+    std::erase_if(sp_indigenous_, [&st](objects::ObjectId id) { return !st.alive(st.find(id)); });  // tru2 t01
+    std::erase_if(sp_homes_, [&st](const IndigenousHome& e) { return !st.alive(st.find(e.id)); });
     // mcx6 SET_PLANET_SPAWN (0x4b71c0 at the battle start, after the map's objects): the battle planet's spawn map, once.
     if (first_scan && !sp_spawners_.empty()) sp_planet_spawn(mode, rng);
     // 3. DEBRIS services (every frame, 0x62ad30): move, turn, expire.
@@ -171,6 +182,116 @@ void TacticalBattle::sp_tick(TacticalMode& mode, SimRng& rng) {
         st.set_behavior_next_service(h, bi, mf + std::max<uint32_t>(1u, st.behavior_interval(h, bi)));
         sp_service(mode, rng, i);
     }
+    // 5. tru2 t01: INDIGENOUS_UNIT services (ascending id).
+    sp_wander(mode, rng);
+}
+
+void TacticalBattle::sp_wander(TacticalMode& mode, SimRng& rng) {
+    // The base service (0x4c2f70) sets the next service from the interval cached at the previous one, then 0x4c3710
+    // re-caches it: 30, or 1 while burning (vf +0x28 0x621840).
+    objects::ObjectStore& st = mode.primary();
+    const uint32_t mf = st.mode_frame();
+    for (size_t i = 0; i < sp_indigenous_.size(); ++i) {  // by index: a burning unit's damage may end it
+        const objects::ObjectHandle h = st.find(sp_indigenous_[i]);
+        if (!st.alive(h)) continue;
+        const uint32_t bi = st.behavior_index(h, kIndigenousBehavior);
+        if (bi == objects::kNone || !st.behavior_enabled(h, bi) || st.behavior_next_service(h, bi) > mf) continue;
+        st.set_behavior_next_service(h, bi, mf + std::max<uint32_t>(1u, st.behavior_interval(h, bi)));
+        const objects::ObjectId id = st.id(h);
+        const bool burning = combat_ && combat_->has_unit(id) && combat_->burning(id);
+        st.set_behavior_interval(h, bi, burning ? 1u : 30u);
+        sp_wander_one(mode, rng, h);
+    }
+}
+
+bool TacticalBattle::sp_idle_clip(objects::ObjectId id) const {
+    // 0x3956a0 -> 0x27b5e0: the current animation type is one of 0, 1, 0x47, 0x4d - 0x52. [port] Without the animation
+    // service (headless, no clip for the object) the unit counts as idle.
+#ifdef ALAMO_SIM_HAVE_ANIM
+    const anim::AnimWorld* w = hooks_ ? hooks_->world() : nullptr;
+    if (!w || !w->contains(id)) return true;
+    const int32_t t = w->current_type(id);
+    return t == 0 || t == 1 || t == 0x47 || (t >= 0x4d && t <= 0x52);
+#else
+    (void)id;
+    return true;
+#endif
+}
+
+void TacticalBattle::sp_wander_one(TacticalMode& mode, SimRng& rng, objects::ObjectHandle h) {
+    // 0x621d80 (MCX4_T11_T12_RE_ANSWERS "Max_Distance_From_Spawner", TRU1_C_RE §1.4).
+    objects::ObjectStore& st = mode.primary();
+    const objects::GameObjectTypes& types = catalog_->types();
+    const objects::ObjectId id = st.id(h);
+    const Unit* u = unit_by_id(id);
+    // [port] only a movable battle unit can take the move; the busy test 0x39b000 (the unit's coordinator) is not modelled.
+    if (!u || !u->alive || u->retreated || !u->movable || !movement_) return;
+    const auto moving = [&] { return movement_->view(id).speed > 0.0f; };
+    const bool has_combat = combat_ && combat_->has_unit(id);
+    bool burning = has_combat && combat_->burning(id);
+    if (burning) {  // Take_Damage(kind 7, Burning_Damage_Per_Second / FPS)
+        tc::DamageRequest r;
+        r.victim = id;
+        r.amount = types.get(st.type(h), objects::tags::Burning_Damage_Per_Second) / 30.0f;
+        r.kind = tc::kKindFire;
+        combat_->take_damage(r, frame_);
+        if (!st.alive(h) || !unit_by_id(id) || !unit_by_id(id)->alive) return;
+        burning = combat_->has_unit(id) && combat_->burning(id);
+    }
+    if (!burning) {
+        if (moving()) return;
+        if (has_combat && combat_->current_target(id) != tc::kNoObject) return;
+        if (!sp_idle_clip(id)) return;
+    } else if (moving()) {
+        return;
+    }
+    // Can_Indigenous_Unit_Stop: one draw; past the first interval (frame > the cached interval) a draw above 0.1 stays.
+    if (types.get(st.type(h), objects::tags::Can_Indigenous_Unit_Stop)) {
+        const float r = rng.range_float(0.0f, 1.0f);
+        const uint32_t bi = st.behavior_index(h, kIndigenousBehavior);
+        if (st.mode_frame() > st.behavior_interval(h, bi) && kWanderStayChance < r) return;
+    }
+    float mn[2], mx[2];
+    if (!map_.playable_box(mn, mx)) return;  // no map rectangle
+    const float cx = (mn[0] + mx[0]) * 0.5f, cy = (mn[1] + mx[1]) * 0.5f;
+    const float hx = (mx[0] - mn[0]) * 0.5f, hy = (mx[1] - mn[1]) * 0.5f;
+    if (cx == 0.0f && cy == 0.0f && hx == 0.0f && hy == 0.0f) return;
+    Vec3 to{};
+    const auto home = std::lower_bound(sp_homes_.begin(), sp_homes_.end(), id,
+                                       [](const IndigenousHome& e, objects::ObjectId k) { return e.id < k; });
+    const bool leashed = home != sp_homes_.end() && home->id == id && home->leash > 0.0f &&
+                         (home->home.x != -1.0f || home->home.y != -1.0f || home->home.z != -1.0f);
+    if (leashed) {  // a point of the disc of radius D around home
+        const float d = home->leash;
+        const float dx = rng.range_float(-d, d);
+        const float s = dmath::sqrt(std::max(0.0f, d * d - dx * dx));  // [port] a rounding below 0 reads as 0
+        const float dy = rng.range_float(-s, s);
+        to = Vec3{home->home.x + dx, home->home.y + dy, home->home.z + 0.0f};
+    } else {  // a point of the map rectangle
+        to.x = rng.range_float(cx - hx, hx + cx);
+        to.y = rng.range_float(cy - hy, hy + cy);
+        to.z = 0.0f;
+    }
+    // The step length, clamped by one more draw between the bounds when it falls outside them.
+    const Vec3 p = st.position(h);
+    const float vx = to.x - p.x, vy = to.y - p.y, vz = to.z - p.z;
+    const float len = dmath::sqrt(vy * vy + vx * vx + vz * vz);
+    const float smax = burning ? kBurningStepMax : kWanderStepMax, smin = burning ? kBurningStepMin : kWanderStepMin;
+    if (smax < len || len < smin) {
+        const float t = rng.range_float(smin, smax);
+        if (!(len > 0.0f)) return;  // [port] no direction (retail divides by 0)
+        const float inv = 1.0f / len;
+        to = Vec3{p.x + t * vx * inv, p.y + t * inv * vy, p.z + t * inv * vz};
+    }
+    // 0x6218f0: the move, on the unit's team container's members when it has one (a pack moves together).
+    std::vector<objects::ObjectId> ids;
+    if (u->container != 0xFFFFFFFFu && u->container < containers_.size() && containers_[u->container].team) {
+        for (const Unit& m : units_)
+            if (m.container == u->container && m.alive && !m.retreated && m.movable) ids.push_back(m.id);
+    } else {
+        ids.push_back(id);
+    }
+    exec_move(mode, ids, to.x, to.y, rng, mv::kNoFacing, false);
 }
 
 void TacticalBattle::sp_debris_expire(TacticalMode& mode, SimRng& rng, const DebrisPiece& d) {
@@ -377,7 +498,20 @@ objects::ObjectHandle TacticalBattle::sp_spawn_one(TacticalMode& mode, SimRng& r
         Vec3 p{c.x + dx * radius, c.y + dy * radius, c.z};
         if (hover > 0.0f) p.z = p.z + hover;
         const int32_t r = sp_place(mode, h, p);
-        if (r == 0) return h;
+        if (r == 0) {
+            // tru2 t01 (§1.3): the unit's INDIGENOUS_UNIT pack gets home := the spawner's position and leash := the spawner
+            // type's Max_Distance_From_Spawner.
+            if (st.has_behavior(h, kIndigenousBehavior)) {
+                IndigenousHome e;
+                e.id = st.id(h);
+                e.home = st.position(spawner);
+                e.leash = static_cast<float>(types.get(t, objects::tags::Max_Distance_From_Spawner));
+                const auto at = std::lower_bound(sp_homes_.begin(), sp_homes_.end(), e.id,
+                                                 [](const IndigenousHome& x, objects::ObjectId k) { return x.id < k; });
+                sp_homes_.insert(at, e);
+            }
+            return h;
+        }
         if (r == 2) break;
     }
     mode.destroy(h);  // no place (0x391310)

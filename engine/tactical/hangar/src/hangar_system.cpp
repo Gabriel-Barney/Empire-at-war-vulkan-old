@@ -305,19 +305,22 @@ void HangarSystem::emit(Carrier& c, int32_t type, int32_t entry, bool pending, u
     const combat::CombatData& cd = combat_->data();
     const combat::UnitDesc& ud = cd.units[combat_->desc_index(c.id)];
     float flyout = 0.0f;
-    Vec3 local;
+    Vec3 local, local_x{1.0f, 0.0f, 0.0f};
     if (bay < ud.hardpoints.size()) {
         const combat::HardpointDesc& hd = cd.hardpoints[ud.hardpoints[bay]];
         flyout = hd.fighter_bay_flyout_distance;
         local = hd.attach_offset;
+        // trl2 t06 (§2.5 "Spawn position"): D runs along the bay bone's X axis - the attachment bone's bind-pose X axis
+        // in the unit frame when the model gave one (refixf t06 attach frame), else the unit's forward axis.
+        if (hd.has_attach_frame) local_x = hd.attach_x;
     }
     Vec3 p0, x;
-    if (!(host_.bay_bone && host_.bay_bone(c.id, bay, p0, x))) {  // [port] attachment offset, carrier facing
+    if (!(host_.bay_bone && host_.bay_bone(c.id, bay, p0, x))) {  // [port] bind pose turned by the carrier's yaw
         const Vec3 pos = combat_->position(c.id);
         float fx = 1.0f, fy = 0.0f;
         unit_xy(combat_->facing(c.id), fx, fy);
         p0 = Vec3{pos.x + (local.x * fx - local.y * fy), pos.y + (local.x * fy + local.y * fx), pos.z + local.z};
-        x = Vec3{fx, fy, 0.0f};
+        x = Vec3{local_x.x * fx - local_x.y * fy, local_x.x * fy + local_x.y * fx, local_x.z};
     }
     q.origin = p0;
     q.flyout = Vec3{p0.x + x.x * flyout, p0.y + x.y * flyout, p0.z + x.z * flyout};

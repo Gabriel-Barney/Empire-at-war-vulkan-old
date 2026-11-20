@@ -37,6 +37,8 @@
     SAVED(sp_spawners_, state) \
     SAVED(sp_debris_, state) \
     SAVED(sp_scanned_, state) \
+    SAVED(sp_indigenous_, state) \
+    SAVED(sp_homes_, state) \
     SAVED(sp_used_, state) \
     DERIVED(adopt_kind_, "per-type cache (filled from type data on first use)") \
     DERIVED(deploy_script_, "scratch inside one call or tick") \

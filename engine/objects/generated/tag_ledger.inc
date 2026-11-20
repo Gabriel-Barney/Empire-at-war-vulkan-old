@@ -662,7 +662,7 @@
 {"GameObjectType", "Burning_Damage_Per_Second", 0x8, LedgerState::Consumed, "docs/re/MCX4_T11_T12_RE_ANSWERS.md", 33, 1},
 {"GameObjectType", "Explosion_Jitter_Factor", 0x8, LedgerState::Consumed, "docs/re/TSW_PLANET_DESTROY.md", 27, 1},
 {"GameObjectType", "Property_Flags", 0x56, LedgerState::Consumed, "docs/re/OBJECT_TYPES.md", 113, 1},
-{"GameObjectType", "Max_Distance_From_Spawner", 0x8, LedgerState::Stored, "docs/re/MCX4_T11_T12_RE_ANSWERS.md", 53, 1},
+{"GameObjectType", "Max_Distance_From_Spawner", 0x8, LedgerState::Consumed, "docs/re/MCX4_T11_T12_RE_ANSWERS.md", 53, 1},
 {"GameObjectType", "Terrain_Texture_Modifier_Material", 0x2, LedgerState::Stored, "docs/re/MCX4_T15_RE_ANSWERS.md", 92, 1},
 {"GameObjectType", "Terrain_Texture_Modifier_Join_Distance", 0x8, LedgerState::Stored, "docs/re/MCX4_T15_RE_ANSWERS.md", 92, 1},
 {"GameObjectType", "Terrain_Texture_Modifier_Square", 0x0, LedgerState::Consumed, "docs/re/OBJECT_TYPES.md", 104, 1},

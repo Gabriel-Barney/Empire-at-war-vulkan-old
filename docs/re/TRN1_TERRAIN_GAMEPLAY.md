@@ -116,4 +116,4 @@ scale, fleeing bonus, SPEED unit-ability product, `Engines_Disabled_Speed_Modifi
 See ABILITIES_HARDPOINTS §4.12 (RE reading 2026-11-15). The water test's "terrain more than 0.5 below the water" is the
 same comparison as §2.1 step 1. The ion-stun detonation 0x4cbbb0 gathers its victims with the projectile's
 `Projectile_Stun_Radius` (+0x1e90) and needs `Projectile_Stun_Duration_Frames` (+0x1e8c) ≠ 0 [H, read 2026-11-17];
-the port's ion stun reads `Projectile_Ion_Stun_Radius` instead (finding filed separately).
+`Projectile_Ion_Stun_Radius` (+0x4d8) only chooses the path (ABILITIES_HARDPOINTS §4.4, read 2026-11-20). The port follows this since tru2 t04.

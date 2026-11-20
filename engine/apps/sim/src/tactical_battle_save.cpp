@@ -19,7 +19,7 @@ namespace alamo::sim {
 
 namespace {
 
-constexpr uint32_t kBattleStateVersion = 21;  // 21: aitac t05 space reinforcement arrivals (ArrivalRec::reinforce); 20: ref2 t01 save ledger (BOMBARD_DELAY reward, map hints, marker names, pad levels); 19: cmb2 t03 / t04 AttackBlock::retry / hp; 18: cmb1 t01 land formation records; 17: skm2 t02 skirmish sides 2..7 (anchors, facings, records); 16: r3g t01 landing Land / Takeoff clip timing; 15: skm1 t07 skirmish garrison re-delivery; 14: TRU1 t06 retreat flight, t05 / t07 spawners and debris; 13: [port] fleet cohesion per player; 2: S7 t22 fighter formations; 3: S7 t24 formation follow_next / a1i t04 landing objects (two branches); 4: S7 t37 follow_next dropped (the follow is in the movement layer); 5: both merged (formations + landing objects); 6: story t06 victory monitor (replaces the end-hold fields); 7: q6 attacks on TEAM containers / s78f t02 FighterFormationRecord::pushed dropped (the auto blocks are in the movement save) (two branches); 8: both merged; 9: ccpgt t02 domination timer; 10: cu8k t01 Saber_Throw thrower machines; 11: cu8l t03 start fleet arrivals; 12: s78n t20 land attack blocks (exact: older versions are refused)
+constexpr uint32_t kBattleStateVersion = 22;  // 22: tru2 t01 INDIGENOUS_UNIT list and spawner homes; 21: aitac t05 space reinforcement arrivals (ArrivalRec::reinforce); 20: ref2 t01 save ledger (BOMBARD_DELAY reward, map hints, marker names, pad levels); 19: cmb2 t03 / t04 AttackBlock::retry / hp; 18: cmb1 t01 land formation records; 17: skm2 t02 skirmish sides 2..7 (anchors, facings, records); 16: r3g t01 landing Land / Takeoff clip timing; 15: skm1 t07 skirmish garrison re-delivery; 14: TRU1 t06 retreat flight, t05 / t07 spawners and debris; 13: [port] fleet cohesion per player; 2: S7 t22 fighter formations; 3: S7 t24 formation follow_next / a1i t04 landing objects (two branches); 4: S7 t37 follow_next dropped (the follow is in the movement layer); 5: both merged (formations + landing objects); 6: story t06 victory monitor (replaces the end-hold fields); 7: q6 attacks on TEAM containers / s78f t02 FighterFormationRecord::pushed dropped (the auto blocks are in the movement save) (two branches); 8: both merged; 9: ccpgt t02 domination timer; 10: cu8k t01 Saber_Throw thrower machines; 11: cu8l t03 start fleet arrivals; 12: s78n t20 land attack blocks (exact: older versions are refused)
 constexpr uint32_t kBattlePartVersion = 3;  // 3: mcx4 t05 cash points in the Garrison part; 2: s78n t06 running hero clashes in
                                             // the Combat part (1 and 2 still read: none of the later state)
 
@@ -190,6 +190,8 @@ void TacticalBattle::state_io(Ar& a, Self& b) {
     a.seq(b.sp_spawners_, [](auto& x, auto& s) { x(s.id, s.state, s.next, s.spawned); });
     a.seq(b.sp_debris_, [](auto& x, auto& d) { x(d.id, d.particle, d.expiry, d.roll, d.pitch, d.yaw); });
     a(b.sp_scanned_, b.sp_used_);
+    a(b.sp_indigenous_);  // tru2 t01
+    a.seq(b.sp_homes_, [](auto& x, auto& e) { x(e.id, e.home, e.leash); });
     // skm1 t07: the skirmish slots' start-force re-delivery (state version 15)
     a.seq(b.sk_garrisons_, [](auto& x, auto& g) { x(g.player, g.types, g.ids, g.timer, g.pending); });
     // cmb1 t01: the land formation records (state version 18; `locked` is derived each tick)

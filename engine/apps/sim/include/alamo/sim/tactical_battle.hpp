@@ -1956,6 +1956,19 @@ private:
     };
     std::vector<IndigenousSpawner> sp_spawners_;  // the global spawner list, attach order ([port] ascending id)
     std::vector<DebrisPiece> sp_debris_;          // ascending id
+    // tru2 t01 (TRU1_C_RE §1.3 / §1.4, MCX4_T11_T12_RE_ANSWERS "Max_Distance_From_Spawner"): the INDIGENOUS_UNIT (0x20)
+    // objects in ascending id and the home / leash a spawner wrote on the ones it made (pack +0x28..+0x34; the others keep
+    // no home: (-1, -1, -1), leash 0, so they wander over the map rectangle).
+    struct IndigenousHome {
+        objects::ObjectId id = objects::kNoObjectId;
+        Vec3 home{-1.0f, -1.0f, -1.0f};
+        float leash = 0.0f;
+    };
+    std::vector<objects::ObjectId> sp_indigenous_;  // ascending id
+    std::vector<IndigenousHome> sp_homes_;          // ascending id
+    void sp_wander(TacticalMode& mode, SimRng& rng);  // the INDIGENOUS_UNIT services due this frame (0x621d80)
+    void sp_wander_one(TacticalMode& mode, SimRng& rng, objects::ObjectHandle h);
+    bool sp_idle_clip(objects::ObjectId id) const;  // the current clip is an idle type (0x27b5e0); no animation: true
     objects::ObjectId sp_scanned_ = 0;            // highest object id already looked at for the two behaviours
     bool sp_used_ = false;
     void sp_add_types();                          // setup: the spawned types of the map's spawners join the tables

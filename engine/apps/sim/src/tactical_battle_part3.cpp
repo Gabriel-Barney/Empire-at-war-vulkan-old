@@ -1583,6 +1583,18 @@ void TacticalBattle::hash(StateHasher& h) const {
             h.f32(d.yaw);
         }
     }
+    if (!sp_indigenous_.empty() || !sp_homes_.empty()) {  // tru2 t01: INDIGENOUS_UNIT objects and their homes
+        h.u32(static_cast<uint32_t>(sp_indigenous_.size()));
+        for (const objects::ObjectId id : sp_indigenous_) h.i32(id);
+        h.u32(static_cast<uint32_t>(sp_homes_.size()));
+        for (const IndigenousHome& e : sp_homes_) {
+            h.i32(e.id);
+            h.f32(e.home.x);
+            h.f32(e.home.y);
+            h.f32(e.home.z);
+            h.f32(e.leash);
+        }
+    }
     if (rt_.state != 0) {  // TRU1 t06: the retreat jump-out flight (absent while none runs)
         h.u8(rt_.state);
         h.i32(rt_.counter);
