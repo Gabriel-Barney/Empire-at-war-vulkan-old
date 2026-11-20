@@ -986,6 +986,103 @@ void test_mov2_formation_path() {
     CHECK(worst < 8.0f);
 }
 
+
+// mov2 t10 (MOVEMENT "Retail measurement of MovingVsMoving head-on pairs", run 20261116-022245): two units of one player
+// ordered at once toward each other's start, 600 apart on open ground - T4B / T4B on one line, T4B / T4B 12 to the side,
+// AT-ST / T4B. Retail: neither stands at speed 0 before its goal or leaves 0x13; one swerves at full speed, the other
+// slows to 0.11 - 0.22 for 27 - 66 frames and runs on. Type values from GROUNDVEHICLES.XML (T4B_Tank: Max_Speed 0.7,
+// OverrideAcceleration / Deceleration 0.05, turn 6, hard extents 20 x 22 x Scale_Factor 0.85, Vehicle; AT_ST_Walker:
+// 1.2, turn 7.5, 8 x 6 x 1.6, Large Vehicle).
+struct HeadOnOut {
+    uint32_t zero[2] = {0, 0};   // frames at speed 0 with a goal, after the unit first moved
+    float vlow[2] = {9.0f, 9.0f};  // lowest speed on the way (after its first full-speed frame, 150+ from its goal)
+    uint32_t below_half[2] = {0, 0};  // frames below 0.5 on the way
+    uint32_t slowed[2] = {0, 0};      // frames below its max speed on the way
+    float side[2] = {0.0f, 0.0f};  // largest distance off its start line
+    bool arrived = false;
+    CollisionState decided = CollisionState::Active;
+};
+HeadOnOut run_head_on(bool atst, float offset) {
+    HeadOnOut o;
+    MovementSystem sys{MovementConfig{}};
+    land_system(sys, 120);
+    const V2 west = cell_center(30, 60), east = west + V2{600.0f, offset};
+    const auto t4b = [](ObjectId id, V2 at) {
+        UnitDesc d = vehicle(id, at, 0, 20.0f * 0.85f, 22.0f * 0.85f, 0.7f);
+        d.accel = d.decel = 0.05f;
+        d.turn_rate = d.alt_turn_rate = 6.0f;
+        d.type_name = "T4B_Tank";
+        return d;
+    };
+    UnitDesc a = t4b(1, west);
+    UnitDesc b = t4b(2, east);
+    if (atst) {
+        b = vehicle(2, east, 0, 8.0f * 1.6f, 6.0f * 1.6f, 1.2f);
+        b.collision_class = kUccLargeVehicle;
+        b.turn_rate = b.alt_turn_rate = 7.5f;
+        b.type_name = "AT_ST_Walker";
+    }
+    b.yaw_deg = 180.0f;
+    CHECK(sys.add_unit(a) && sys.add_unit(b));
+    SimRng rng(1016);
+    MoveOrder ao;
+    ao.units = {1};
+    ao.destination = east;
+    sys.move(ao, rng, 1);
+    MoveOrder bo;
+    bo.units = {2};
+    bo.destination = west;
+    sys.move(bo, rng, 1);
+    bool full[2] = {false, false};
+    const V2 start[2] = {west, east};
+    for (uint32_t f = 1; f < 2000; ++f) {
+        sys.tick(f, rng, serial_for);
+        const CollisionObject* c = mvm_record(sys, 1, 2);
+        if (o.decided == CollisionState::Active && c && c->state != CollisionState::Active) o.decided = c->state;
+        for (int k = 0; k < 2; ++k) {
+            const UnitView v = sys.view(static_cast<ObjectId>(k + 1));
+            o.side[k] = std::max(o.side[k], std::fabs(v.pos.y - start[k].y));
+            if (!v.has_goal) continue;
+            if (v.speed >= v.max_speed) full[k] = true;
+            if (!full[k]) continue;
+            if (v.speed == 0.0f) ++o.zero[k];
+            if (distance(v.pos, start[1 - k]) < 150.0f) continue;  // the goal's brake is not part of the meeting
+            o.vlow[k] = std::min(o.vlow[k], v.speed);
+            if (v.speed < 0.5f) ++o.below_half[k];
+            if (v.speed < v.max_speed) ++o.slowed[k];
+        }
+        if (sys.view(1).arrived && sys.view(2).arrived) {
+            o.arrived = true;
+            break;
+        }
+    }
+    return o;
+}
+
+void test_mov2_head_on_pairs() {
+    ::alamo::test::section("mov2_head_on_pairs");
+    const struct {
+        const char* name;
+        bool atst;
+        float offset;
+    } cases[] = {{"T4B / T4B", false, 0.0f}, {"T4B / T4B offset 12", false, 12.0f}, {"AT-ST / T4B", true, 0.0f}};
+    for (const auto& c : cases) {
+        const HeadOnOut o = run_head_on(c.atst, c.offset);
+        std::printf("mov2 t10 head-on %s: decided %d, zero-speed frames %u / %u, lowest speed %.3f / %.3f, slowed %u / %u "
+                    "frames (below 0.5: %u / %u), off line %.1f / %.1f, both arrived %d\n",
+                    c.name, static_cast<int>(o.decided), o.zero[0], o.zero[1], static_cast<double>(o.vlow[0]),
+                    static_cast<double>(o.vlow[1]), o.slowed[0], o.slowed[1], o.below_half[0], o.below_half[1],
+                    static_cast<double>(o.side[0]), static_cast<double>(o.side[1]), o.arrived ? 1 : 0);
+        // the retail pattern (four trials): no stand at speed 0, one unit swerves at full speed (up to ~40 off its line),
+        // the other slows to 0.11 - 0.22 for 27 - 66 frames; port 2026-11-20: 0.107 - 0.153 for 42 - 66 frames, swerve
+        // 31 - 47
+        const int sw = o.vlow[0] >= o.vlow[1] ? 0 : 1;
+        CHECK(o.arrived && o.zero[0] == 0 && o.zero[1] == 0);
+        CHECK(o.slowed[sw] == 0 && o.side[sw] > 20.0f && o.side[sw] < 50.0f);
+        CHECK(o.vlow[1 - sw] > 0.1f && o.vlow[1 - sw] < 0.25f && o.slowed[1 - sw] >= 20 && o.slowed[1 - sw] <= 70);
+    }
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------- s78n t24 (RE f8afef8d): the role slots
@@ -1191,5 +1288,6 @@ int main() {
     test_mov2_tracker_snapshot();
     test_mov2_recruitment();
     test_mov2_formation_path();
+    test_mov2_head_on_pairs();
     return ::alamo::test::report("alamo_tactical_movement_b3_tests");
 }
