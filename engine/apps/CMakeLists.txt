@@ -384,7 +384,7 @@ if(_alamo_sim)
     set_tests_properties(alamo_headless_skirmish_ai_foc_land alamo_headless_skirmish_ai_foc_land_campaign PROPERTIES TIMEOUT 1200)
     # S10 land outcome, t50: the land skirmish played on (0/1/4/16/N workers identical); skipped (exit 0) without ALAMO_FOC_DATA. What it asserts
     # is structure, not a seed's luck (--expect-skirmish-base): both sides start with their pre-built base (skai t08: the 10 base
-    # structures of each slot), the shipped skirmish AI issues orders, shots are fired, 0 Lua errors. The long runs are the _full tests below.
+    # structures of each slot), the shipped skirmish AI issues orders, shots are fired, 0 Lua errors. The long runs are the outcome sweeps below.
     # OPT3 t08: the worker-count check (alamo_add_worker_count_check, docs/BUILD.md "Worker-count check"): the 0-worker entry writes
     # the CRC log and checks the base (--expect-skirmish-base), _w1 / _w4 / _w16 / _w<N> compare against it.
     alamo_add_worker_count_check(alamo_headless_skirmish_ai_foc_land_outcome
@@ -398,246 +398,21 @@ if(_alamo_sim)
                      --golden ${alamo_headless_skirmish_ai_foc_land_outcome_CRC})
     set_tests_properties(alamo_headless_skirmish_ai_foc_land_outcome_profiled PROPERTIES TIMEOUT 1800
                          FIXTURES_REQUIRED alamo_headless_skirmish_ai_foc_land_outcome_w0)
-    # q6 land end chain (2026-11-04): the AI-vs-AI land skirmish (_MP_LAND_UTAPAU, Empire vs Rebel, default seed) must END with a
-    # winner (--expect-battle-end; a skirmish's limit is --ticks). Before, no winner in 40000 ticks: produced single-hero companies
-    # (Boba_Fett_Team_Land_MP, no team type) never moved, the AI built on uncaptured neutral pads (neutral-owned mineral processors,
-    # no income) and its object Attack_Move blocks never finished on a non-hostile target (A1_READINGS §33.2). Now the Rebel wins
-    # at about frame 17100. a2k merge (2026-11-07): the galaxy build's queue-phase draws (a2k t04) shift the rng stream, and
-    # with it seed 1 no longer ends in 30000 ticks; seeds 2-6 end with a Rebel win at 16678..28363. Pinned to seed 4 (16678);
-    # why seed 1 stalls is an open item on the roadmap (a2k follow-ups). a2l t04: a terrain-blocked infantry standoff, not a
-    # port bug (A1_READINGS §41); on dev 03940b96 seed 1 ends (18496) but seed 2 does not and seed 4 ends at 28675.
-    # s78n t14 part B / t16 (2026-11-10): squad containers collide, flee from crushers, ramp at 0x5ab540 and wait for stragglers
-    # (FIGHTER_FLYING §7.1 / §7.5 / §7.7), which moves every land battle. After the review fixes (squad members are not
-    # passability-tested, every member counts in the straggler cap): seed 1 no end in 30000 ticks, seed 2 Rebel at 15233,
-    # seed 3 Rebel at 15919, seed 4 no end, seed 5 Rebel at 18809, seed 6 no end; no container waits 150 frames or more for
-    # a straggler in any of the six (longest 136). Pinned to seed 2.
-    # s78n t18 (2026-11-10): squads collide by MOVEMENT 5.4.1 / 5.4.2 (Repulsion / Repulse: they walk through Infantry-class
-    # units at full speed, the early-arrival cut at a blocked destination, no shove), brake at their rate, garrison as one.
-    # All six seeds end with a Rebel win: seed 1 at 15272, seed 2 at 11734, seed 3 at 13857, seed 4 at 20203, seed 5 at
-    # 14665, seed 6 at 15810. No container waits 30 frames or more for a straggler in any of them (longest 29). Collision
-    # holds (a record answering speed 0) of 30 frames or more: 3 / 1 / 1 / 3 / 2 / 2 per seed, the longest 86 / 44 / 1581 /
-    # 35 / 34 / 49 frames (seed 3: one squad in Try Again Later for 1581 frames at the battle start, its destination under a
-    # standing friendly squad that could not be pushed). Still pinned to seed 2.
-    # s78n t18 review (2026-11-10): MovementPredictionInterval for every mover type, the stale TEAM entry / coast / pair gate
-    # fixes. Re-measured, seeds 1-6: Rebel wins at 15272 / 11734 / 13857 / 20202 / 14665 / 15810 frames (seed 4: 20202
-    # frames in 20203 ticks; the other five as above). Still pinned to seed 2.
-    # s78n t20 batch A (2026-11-10): the destination check of a move order (MOVEMENT 4.3.1), Path Around as a visibility-graph
-    # detour on top of the path stack (1.5.1), the early-arrival cut's limits (5.4.4), the decision's target / hero-clash /
-    # crusher rules (5.4.5) and StoppedVsStopped as a walked move (5.4.3). Seeds 1-6, 30000 ticks: seed 1 no end, seed 2 no
-    # end, seed 3 Rebel at 15390, seed 4 Rebel at 15719, seed 5 no end, seed 6 Rebel at 17819. No collision hold (a record
-    # answering speed 0) of 1000 frames or more in any seed: holds of 150 frames or more 0 / 0 / 0 / 2 / 0 / 0 per seed, the
-    # longest 52 / 52 / 0 / 301 / 0 / 33 frames (seed 4: the hero Han_Solo held 301 frames in Try Again Later behind a
-    # standing squad on its destination, which a single infantry unit may not push); no straggler wait of 30 frames or more.
-    # The seeds that do not end are not held by a record: in seed 2 (unit dumps at ticks 20000 and 30000) every squad is
-    # walking or has arrived with a target, and the three toggles that change which seeds end (destination check,
-    # single-member shortcut, StoppedVsStopped moves; measured one at a time) each flip a different subset, as seed noise
-    # does - the pre-t20 build itself ends only 2 of the seeds 7-12 (10, 12), this one 3 of them (7, 8, 10; seed 9 also
-    # logs one retail-modelled script error, Move_To on a dead target). StoppedVsStopped records of overlapping squads that both have targets
-    # (nobody moves, rule 5) stay in Try Again Later for up to 960 frames; they hold nobody. Pinned to seed 3.
-    # s78n t20 fix round (2026-11-10): the seeds that did not end were not held by movement. A finished DUMMY_UPGRADE build
-    # (tech / armour upgrade) raised no production-completed signal 0x22 for the AI (SKIRMISH_SETUP 3 "Completion"), so a
-    # land task force with an upgrade on its to-produce list never finished Produce_Force; the plan
-    # Tactical_Multiplayer_Build_Land_Units_Generic (not removable by the goal system) then stayed for the rest of the battle
-    # and its player built no more units (Rebel at the 40000 credit cap with infantry only, no Destroy_Structure force).
-    # The pre-t20 build has the same stuck plan on its own non-ending seeds 7, 8, 9 and 11. With the signal raised
-    # (tactical_battle_hangar.cpp hg_production) and the object-goal moves of the AI out of the destination check
-    # (battle_ai.cpp), seeds 1-6 at 30000 ticks: 1 Rebel at 17952, 2 no end (it ends at 32460 of 60000: from
-    # tick 5000 five Rebel squads of plan CLEARINFANTRY stand around three Stormtroopers on a separate terrain
-    # component and every shot of both sides ends on the ground, which holds the Rebel's early game), 3 Rebel at 29225, 4 Rebel at 15635,
-    # 5 Rebel at 18110, 6 Rebel at 17753. No collision hold of 150 frames or more in any seed (longest 77 / 91 / 31 /
-    # 91 / 46 / 41); no straggler wait. Pinned to seed 4; seeds 1 and 5 (which never ended without the production signal)
-    # are checked too.
-    # s78n t20 fix round 2 (2026-11-10): skirmish start forces at their spawn-point markers (SKIRMISH_SETUP 2.2), the land
-    # attack re-check (FIGHTER_FLYING 4.11 A / E) and F3 - F9. Seeds 1-6 end (Rebel at 15209 / 13742 / 13323 / 13849 / 14507 /
-    # 14500). Seed 4 can log the retail-modelled script error of BOBAFETTFLAMEINFANTRY.LUA's MoveUntilDone (Move_To on a target
-    # that died during PumpEvents; seen at stage A), which --fail-on-lua-errors refuses: pinned to seed 6; seeds 1 and 5 as before.
-    # skai t07 - t11 (2026-11-12): the full pre-built base (10 structures per slot), start companies on the last spawn marker,
-    # paid AI pad builds, Build_Limit_Current_Per_Player, survivor companies. Seeds 1-6, 30000 ticks: Rebel wins at 21439 /
-    # 29833 / 18993 / 21933 / 24310 / 28372. Pinned to seed 3 (the widest margin); seeds 1 and 4 are checked too.
-    # b0421 (2026-11-14): tactical categories resolve in descending budget weight (Commit 0x6c8710), so the Empire's first
-    # commit sends all four squads to two Secure_Contestable plans and it takes its mineral pad. Seeds 1-6, 30000 ticks: Rebel
-    # wins at 28354 (1), 25577 (5), 29480 (6); seeds 2-4 are still fighting. Pinned to seed 5; seeds 1 and 6 are checked too,
-    # all at 36000 ticks so the late ends keep a margin.
-    # b0422 (2026-11-15, Gabriel: land the rule, drop the battle-end requirement): the pre-placed base structures
-    # (DUMMY_GROUND_STRUCTURE) are out of the player force sums and Find_Nearest (skai t12 rule, three retail traces,
-    # B0418_UTAPAU_AI_RUNS s8). Retail's AI does not finish a passive base in 36000 frames, and AI against AI has no retail
-    # counterpart; with the rule seeds 1-6 are all still fighting at 36000 (0 Lua errors). So these runs no longer need an
-    # end: they play the whole 36000 ticks with 0 Lua errors. Renamed from alamo_headless_skirmish_ai_foc_land_end[_seedN].
-    add_test(NAME alamo_headless_skirmish_ai_foc_land_full
-             COMMAND alamo_headless --skirmish-ai foc-land --ticks 36000 --workers 4 --quiet --fail-on-lua-errors --seed 5)
-    set_tests_properties(alamo_headless_skirmish_ai_foc_land_full PROPERTIES TIMEOUT 1800)
-    alamo_label_slow(alamo_headless_skirmish_ai_foc_land_full)
-    foreach(_seed 1 6)
-      add_test(NAME alamo_headless_skirmish_ai_foc_land_full_seed${_seed}
-               COMMAND alamo_headless --skirmish-ai foc-land --ticks 36000 --workers 4 --quiet --fail-on-lua-errors --seed ${_seed})
-      set_tests_properties(alamo_headless_skirmish_ai_foc_land_full_seed${_seed} PROPERTIES TIMEOUT 1800)
-      alamo_label_slow(alamo_headless_skirmish_ai_foc_land_full_seed${_seed})
-    endforeach()
-    # bkm2 t05 (b0047): FoC land skirmish Empire against Underworld (both AI), so the land movement runs with Empire walkers
-    # and Underworld droids. Measured 2026-11-12 (MSVC, 4 workers, 30000 ticks, map _MP_LAND_UTAPAU), seeds 1-9: seed 2 ends
-    # at 22488 (Underworld wins; AT_ST / AT_AA walkers fielded) and seed 4 at 27941 (Underworld wins; Destroyer droids
-    # fielded), both with 0 Lua errors; seeds 5 / 6 / 7 / 9 end but log AI_PLAN_EXPANSIONGENERIC_BUILDMDUITEM's "Parameter 1
-    # is not a valid destination for TaskForce MainForce" (refused by --fail-on-lua-errors), seeds 1 / 3 / 8 do not end and
-    # log it too. No seed fields both walkers and droids. About 4 - 8 minutes each (slow).
-    # b0173 / b0205 (2026-11-14): the plan global `Target` of a region goal is a GameObjectWrapper without an object (no
-    # more "Parameter 1 is not a valid destination"), and a deployed Mobile Defense Unit gains its DeployedBehavior
-    # (TACTICAL_BUILD_OBJECTS), so BuildMDUItem builds on it. Measured again (MSVC, 4 workers), seeds 1-10: none ends by
-    # 30000 ticks; with 70000 ticks seed 4 ends at 49353, seed 8 at 50122, seed 10 at 43021 (Underworld wins, 0 Lua errors;
-    # seed 10 has an MDU with a Sensor Scrambler at the end), seed 5 does not end. Seeds 1 2 3 6 7 9 log BuildMDUItem's
-    # "already has something built on it" (a later plan takes the MDU that already carries an object; retail not checked).
-    # b0416 (2026-11-14): free store Setup A skips a unit whose build pad is occupied, and a DEPLOY stop ends the unit's land
-    # attack block. Seeds 1-10, 70000 ticks: 0 Lua errors in all ten; ends (Underworld wins) at 31670 (5), 25738 (6), 68036
-    # (7), 50122 (8), 43021 (10); seeds 1 2 3 4 9 do not end (seed 9 takes about 13 minutes). Seeds 8 and 10 kept their end
-    # frame through both b0416 changes: pinned to them, 70000 ticks, about 80 s each.
-    # b0417 (2026-11-14): the survivor / ability types of the skirmish production lists join the battle tables (they were
-    # collected before hg_add_types added those lists), so Pirate_Skiff_U's Destruction_Survivors pilot is a real unit, not an
-    # unkillable prop that Boba Fett's plan and the burn plan attacked without end. Seeds 1-10, 70000 ticks: Underworld wins
-    # at 31602 (3), 39172 (4), 34497 (5), 26830 (6), 39208 (7), 28511 (8), 51427 (9), 49002 (10); seeds 1 and 2 are still
-    # fighting at 70000. Seeds 1, 2, 4 and 8 log BOBAFETTFLAMEINFANTRY "Move_To -- Target is already dead" (the script's
-    # MoveUntilDone re-issues Move_To after PumpEvents without TestValid; LUA_API.md Move_To: a dead object is that error),
-    # so the pinned seeds are 3 and 5 (0 Lua errors, about 70 s each).
-    # b0421 (2026-11-14): tactical categories resolve in descending budget weight (Commit 0x6c8710), so the Empire's first
-    # commit takes its mineral pad. Seeds 1-10, 70000 ticks, 0 Lua errors in all: Underworld wins at 47180 (1), 53654 (3),
-    # 39597 (8), 37408 (9), 47406 (10); seeds 2 4 5 6 7 are still fighting. Pinned to seeds 8 and 9.
-    # b0422 (2026-11-15): with the base structures out of the force sums (see alamo_headless_skirmish_ai_foc_land_full above)
-    # seeds 1 / 3 / 8 / 9 are all still fighting at 70000 (0 Lua errors, about 165 s each). No end required any more: the
-    # whole 70000 ticks with 0 Lua errors.
-    # tru1 t02 / t08 (2026-11-16): with base shields and the ground detonation particle the battles take another course;
-    # seeds 1 and 8 then log AI_PLAN_EXPANSIONGENERIC_BUILDMDUITEM "Underworld_Mobile_Defense_Unit is not a valid build
-    # location" (the MDU deploys while it still holds a land attack block, whose 30-frame re-plan gives it a new path and
-    # undeploys it before the plan's Build; skai t19). Seeds 3 and 9: 0 Lua errors. Pinned to 3 and 9.
-    # skai t19 (2026-11-16): DEPLOY now leaves every coordinator before it adopts (SKAI_T19_MDU_DEPLOY_BLOCK §1), so a
-    # deployed MDU is no longer re-planned by its old formation; seeds 1 and 8 run 70000 ticks with 0 Lua errors. Seed 8
-    # is back as the regression check (about 160 s with 4 workers).
-    # skai t15 (2026-11-16): with Game.IsLandControlGame in every land skirmish (Hold_Position goals), seeds 3 and 6 log
-    # BOBAFETTFLAMEINFANTRY "Move_To -- Target is already dead": the shipped MoveUntilDone re-issues fett.Move_To(target)
-    # after PumpEvents (one yield, AI_GALACTIC 1.9) without a TestValid, and retail's Move_To raises that error for a dead
-    # object (LUA_API, Move_To target table), so it is retail's script race, not a port rule. Gabriel (2026-11-16,
-    # DECISIONS.md "Retail Lua errors in the skai exit test"): documented retail errors are allowed; --fail-on-lua-errors
-    # reports them (skirmish_run.cpp kRetailLuaErrors) and fails only on others. Back on seeds 3, 8 and 9.
-    # trn1 (2026-11-17, terrain gameplay: SurfaceFX terrain modifiers, conform z lift, cover): seeds 3 and 4 hit the MDU race
-    # again (AI_PLAN_EXPANSIONGENERIC_BUILDMDUITEM "Underworld_Mobile_Defense_Unit is not a valid build location", a port
-    # bug filed to skai); seeds 1, 8 and 9 run with 0 Lua errors. Seed 3 -> 1.
-    # bkx1 (2026-11-17, tactical AI stagger off + retail goal cadence, b0123): seeds 1 and 2 hit the MDU race (group mdu1);
-    # seeds 3-9 run with no other Lua error. Seed 1 -> 3.
-    # mov1 (2026-11-17, retail land tick order): seeds 5 and 9 now hit the same MDU race (mdu1); seed 9 -> 6 (0 Lua errors).
-    # cmb2 (2026-11-17, land attack approach, merged with mov1): seed 6 hits the MDU race; seeds 1-5 and 7-10 pass (documented
-    # retail errors only). Seed 6 -> 4.
-    # mov1 + cmb1 on dev (2026-11-17): seed 3 hits it too; seeds 4 and 7 have no other Lua error. Seed 3 -> 7.
-    # mov2 t04 (2026-11-17, tracker snapshot before the walk): seed 6 hits it; seeds 3, 4, 7 and 8 do not. Seed 6 -> 3.
-    # cmb2 + mov2 t04 merged (2026-11-17): seed 8 fails; seeds 3, 4 and 7 pass. Seed 8 -> 4.
-    foreach(_seed 3 4 7)
-      add_test(NAME alamo_headless_skirmish_ai_foc_land_empire_underworld_seed${_seed}
-               COMMAND alamo_headless --skirmish-ai foc-land --ai Empire,Underworld --ticks 70000 --workers 4 --quiet
-                       --fail-on-lua-errors --seed ${_seed})
-      set_tests_properties(alamo_headless_skirmish_ai_foc_land_empire_underworld_seed${_seed} PROPERTIES TIMEOUT 1800)
-      alamo_label_slow(alamo_headless_skirmish_ai_foc_land_empire_underworld_seed${_seed})
-    endforeach()
-    # The campaign-rules land invasion (foc-land-campaign; before skai this was foc-land) must END with a winner before the frame
-    # limit. a1g (2026-11-02): after the free-store reservations (§28) and the land Reinforce drop layout (§30.7, TACTICAL_GAPS
-    # §4.2.1) no seed 1-12 ended before the 14400-frame cap. a1h t01: with the M1 WeaponBehavior fix, passive / superseded guard
-    # statuses (A1_READINGS §33) and non-unit REVEAL sources (FOG_OF_WAR §3.2) seeds 5, 7 and 11 end. a1i t01 (2026-11-02):
-    # reserves no longer count (BT §3.1a [H]) and the land AI loads every plan folder (AI_GALACTIC §1.9.1), so SpaceMode\RetreatPlan
-    # serves Land_Retreat: seeds 1-12 all end with the Rebel attacker retreating (seed 1 at 4080; A1_READINGS §34). S7/S8 wave 5
-    # (2026-11-02): main's worker-count run moved to seed 6 (ends by the Rebel retreat), so seeds 6 and 1 are checked here.
-    # a1j t01 / t02 (2026-11-02): with the timed landing unload, the Reinforce in-flight wait and the giant-vehicle push
-    # (A1_READINGS §36) seeds 1-12 still end (Rebel retreats, frames 2241-2991).
-    # a1j t07: 0 Lua errors too (--fail-on-lua-errors; the galactic-context budget call works in the battle, A1_READINGS §38).
-    # One entry per seed, so a change that stalls only some seeds is caught. The worker-count identity of this path is the
-    # foc_land_campaign golden run.
-    # skai t18 (2026-11-16, Gabriel: the running-plan re-test on by default): seeds 2 and 4-12 still end (2755-11566); seeds 1
-    # and 3 run to the 14400-frame cap, a standoff under the shipped rules (the Rebels are not outnumbered 2:1, so
-    # Want_To_Retreat_From_Land stays 0, while the Empire's last unit, an AT-AT, walks a cross-map Clear_Infantry plan).
-    # Seed 1 left out, seed 2 checked instead (DECISIONS.md, "Running-plan re-test on by default").
-    # skai t15 (2026-11-16, task-force members stay reserved free-store entries in land too, SKAI_T22_SPACE_AI_RE Part 5):
-    # seeds 1-5, 7, 8 and 10-12 end (6742-12127, 0 Lua errors); seeds 6 and 9 reach the cap. Seed 6 -> 1.
-    # trn1 (2026-11-17, terrain gameplay: SurfaceFX terrain modifiers on infantry, the conform z lift, cover): seeds 1, 4, 5, 7,
-    # 8, 10-12 end (7672-14056, 0 Lua errors); seeds 2, 3, 6 and 9 reach the cap with the Rebels holding. Seed 2 -> 4.
-    # storyb t16(c) (2026-11-17, the environment's sky dome objects join the battle's store, so ids shift): seeds 1-3 and 5-12
-    # end (8153-13174); seed 4 reaches the cap with the Empire holding. Seed 4 -> 2.
-    # bkx1 (2026-11-17, tactical AI stagger off + retail goal cadence, b0123): seeds 1 and 3-12 end (6689-11629); seed 2
-    # reaches the cap with the Rebels retreated but not all gone. Seed 2 -> 3.
-    # cmb2 (2026-11-17, land attack approach: slot-leg reach, 3-D reference, plan retry, hard points): seeds 1, 2 and 4-12 end
-    # (9145-13701, 0 Lua errors); seed 3 reaches the cap (the Empire's last AT-AT against the Rebels). Seed 3 -> 2. After the
-    # merge with mov1 (retail land tick order): seeds 1-6 and 8-10 end (7686-14269), 7, 11 and 12 reach the cap; seeds 1 and
-    # 2 end close to it (14269 / 14011). Seeds 1, 2 -> 3, 4 (7686 / 10000).
-    # mov1 + cmb1 on dev (2026-11-17): seed 3 reaches the cap (Empire wins by all-retreated at 14400); seeds 2 and 4-8
-    # end (9849-13389). Seed 3 -> 2.
-    # cmb2 + mov2 t04 merged (2026-11-17): seeds 3, 4, 6, 7 and 8 end (7057-13204); 1 ends at 14269, 2 and 5 reach the cap.
-    # Seeds 1, 2 -> 4, 8.
-    # aitac t01-t08 (2026-11-19: tactical build cancel, movement-block signals, space reinforcement arrivals, Explore_Area's
-    # fogged-cell pick): seeds 1-7, 10 and 12 end, 0 Lua errors; 8, 9 and 11 reach the cap. Seed 8 -> 3.
-    foreach(_seed 4 3)
-      add_test(NAME alamo_headless_skirmish_ai_foc_land_campaign_outcome_seed${_seed}
-               COMMAND alamo_headless --skirmish-ai foc-land-campaign --seed ${_seed} --ticks 20000 --workers 0 --quiet --expect-battle-end
-                       --fail-on-lua-errors)
-      set_tests_properties(alamo_headless_skirmish_ai_foc_land_campaign_outcome_seed${_seed} PROPERTIES TIMEOUT 1800)
-    endforeach()
-    # t41: FoC space, an AI defender with a Level 2 station against a far larger fleet must not retreat; skipped (exit 0) without ALAMO_FOC_DATA.
-    # refixf t06/t07 (2026-10-31): the battle must end; seed 3 now kills the station (~frame 10300) and the remaining defenders
-    # then retreat (victory all-retreated), which is the expected end after the station is lost. a1h (2026-11-02): with the
-    # host-side object follow (A1_READINGS §33.4) and non-unit REVEAL sources (FOG_OF_WAR §3.2) together, seed 3 reaches the
-    # cap; seeds 1, 2, 4-7 end. After merging main's S7/S8 work (fighter formation targets, run-time obstacles) on top of
-    # a1h, seeds 2-5, 7, 8 of 1-8 end and 1, 6 reach the cap; seed 3 ends again (station lost, defenders all retreat, frame
-    # 11967), so the test is back on seed 3. a1i t02 (2026-11-02): seeds 1 and 6 are slow sieges, not stalls (the station
-    # launches squadrons without limit; with a 40000-frame cap they end at 16344 / 17340, A1_READINGS §34.5).
-    # S8 t10-t12 (2026-11-02): the test runs seed 2 (all destroyed).
-    # a1j t03 / t04 (2026-11-02): seed 2 still ends (Rebel, all retreated, 8010); seeds 2 and 4-7 of 1-8 end, 1 / 3 / 8 reach the
-    # cap through the space AI's late re-plan at the station (A1_READINGS §37.5; roadmap a1k t01). a1k t01 (2026-11-02,
-    # A1_READINGS §39): seeds 1-8 all end (6852-12496); seed 2 ends at 10107 (Rebel, all retreated).
-    # OPT2 t12 (2026-11-03, a1k t01 on the OPT2 AI timing): seeds 1-8 all end (9480-13985); seed 2 at 10203 (Rebel, all retreated).
-    # cu8f t04a (2026-11-07, per-unit stickiness override, spawn 0.0: docs/re/CU8F_T04_T06_RE.md §1): seeds 1, 3, 4, 5, 7 end
-    # (9120-14073), 2 / 6 / 8 reach the cap; the test moves to seed 1 (Rebel, all retreated, 9120). In-game check: §1.5 probe.
-    # s78n t08f (2026-11-09, range extent from the model's collision bound, TACTICAL_COMBAT §5.4.5): seeds 2-8 end
-    # (10201-13407), 1 reaches the cap; the test moves to seed 8 (Rebel, all destroyed, 10201).
-    # b0319 (2026-11-14): ran with --squadron-size 0 (retail squadrons) while the port resized squadrons to 12; mcx1 t06
-    # (2026-11-17, D2) removed the resize and the flag, so every run has the retail squadrons.
-    # b0421 (2026-11-14, categories resolve in descending budget weight): seeds 1-7 end (Rebel, 9402-13446), seed 8 reaches the
-    # cap; the test moves to seed 6 (Rebel, all destroyed, 9402).
-    # skai t17 (2026-11-16, space skirmish build economy and Resolve re-accepting old candidates): seeds 1, 3-5, 7, 8 end
-    # (Rebel, all destroyed, 8303-13234), seeds 2 and 6 reach the cap; the test moves to seed 8 (8303).
-    # skai t22 / t23 (2026-11-16, space task-force members stay on the free store; opportunity scan fog filter): seeds 3, 5-7
-    # end (Rebel, all destroyed, 8496-9347); 1, 2, 4, 8 reach the cap as slow sieges (213-243 AI orders, 0 Lua errors, 4-7
-    # reinforcements, 56-67 deaths, the Rebel AI attacks to the end); the test moves to seed 7 (8496).
-    add_test(NAME alamo_headless_skirmish_ai_foc_station
-             COMMAND alamo_headless --skirmish-ai foc-station --seed 7 --ticks 20000 --workers 4 --quiet --expect-battle-end)
-    # t48: the default seed reaches QuickReinforce's anti-idle; 0 Lua errors (it may run to the frame limit: half the seeds do, the
-    # station holds). refixf t02 (2026-10-31): back on the default seed. It had stacked the rebel ships on the station's centre
-    # (3300,0,0) - Project_By_Unit_Range nil, Move_To failed (also seed 4): the station is now a space static entry and a task
-    # force's per-unit Lua move orders of one frame are one group move (TacticalBattle::space_obstacles_sync, BattleAi).
-    add_test(NAME alamo_headless_skirmish_ai_foc_station_lua
-             COMMAND alamo_headless --skirmish-ai foc-station --ticks 20000 --workers 4 --quiet)
-    set_tests_properties(alamo_headless_skirmish_ai_foc_station alamo_headless_skirmish_ai_foc_station_lua PROPERTIES TIMEOUT 1800)
-    # S7 t09 (2026-11-01): the FoC space skirmish (as alamo_headless_skirmish_ai_foc) must reach a decisive outcome before the
-    # 14400-frame limit on every seed. It ran to the limit on ~10 of 16 seeds after S7 t03 (2026-10-29); seeds 1-64 end since
-    # refixf t06 (task-force Attack_Move on an object, damage to hardpointed targets). One entry per seed so they run side by side
-    # under ctest -j (each ~10 s: "slow" through the regex below); skipped (exit 0) without ALAMO_FOC_DATA. S7 t23
-    # (2026-11-02): seeds 9-16 end as well (5000-8300 frames) except 13, left out: its end hangs on the Empire's BurnUnits
-    # Attack_Move loop on the neutral / own Skirmish_Merchant_Dock (14400-frame cap before S7 t24, ends after it). S7 t30/t36
-    # (2026-11-02, relation table with neutral = 2, merged S8 t17): seeds 1-16 all end (5355-9915 ticks), so 13 is back.
-    # a1j t03 / t04 (2026-11-02: own-weapon inaccuracy table, land ground test, model-box target extents, A1_READINGS §37):
-    # 14 of 16 end (5724-9163); 6 and 9 are left out: they reach the cap through the space AI's late re-plan after a plan
-    # target dies (ships idle for ~4000 frames, §37.5 / §37.7; roadmap a1k t01). Put them back when that is fixed.
-    # OPT2 t01 / t02 (2026-11-02, staggered AI planning and background land paths): 6 and 9 end (7180 / 5197 frames) and 2 reaches
-    # the cap instead (it ends at 5724 with --no-ai-stagger; the stall is not traced, likely the same a1k t01 re-plan).
-    # a1k t01 (2026-11-02): fixed (Collect_All_Free_Units' category filter / reservation / movement lock, the task force's
-    # priority set reset when a unit leaves it, A1_READINGS §39): seeds 1-16 all end (5982-12149), so 6 and 9 are back.
-    # OPT2 t12 (2026-11-03): seed 2's stall was the same collect rule. On main with OPT2 t10's --no-pp-streams it reaches the cap:
-    # from frame 3719 the Empire's BURNUNITS MainForce (Collect_All_Free_Units() with every category) took 10 units, the reserved
-    # ones and the members of other plans included, and attack-moved on one point from 4906 on, while every other plan failed its
-    # PotentialPlan for want of free units; the Rebels' last frigate was never attacked. With a1k t01 merged on top of OPT2 seeds
-    # 1-16 all end with the defaults (5818-9894) and with --no-pp-streams (6122-11047), so seed 2 is back.
-    # skai t12 (2026-11-12, retail goal cadence in tactical: quota cap from the whole PlayerList, GoalSetExtensionSize 2):
-    # 15 of 16 end; seed 3 is left out: it reaches the 14400-frame limit (winner by the limit, not by the AI). Not traced
-    # (backlog, from skai). Put it back when it ends again.
-    # skai t16 (2026-11-16): on dev bc3391f0 seeds 1-16 all end (Empire, all destroyed, 5209-8161 frames; seed 3 at 7418,
-    # 7149 with --no-plan-retest, so not the t18 re-test alone): a later dev change (b0421 / b0422 goal and force-sum rules or
-    # the gai3 / sty1 batch, not bisected) removed the stall, so seed 3 is back.
-    foreach(_seed RANGE 1 16)
-      add_test(NAME alamo_headless_skirmish_ai_foc_outcome_s${_seed}
-               COMMAND alamo_headless --skirmish-ai foc --seed ${_seed} --ticks 16000 --workers 0 --quiet --expect-battle-end)
-      set_tests_properties(alamo_headless_skirmish_ai_foc_outcome_s${_seed} PROPERTIES TIMEOUT 1200)
-    endforeach()
+    # ref4 t04 (2026-11-19): the AI-vs-AI outcome runs are one slow ctest per scenario over seeds 1..N, judged by the share
+    # of seeds (tools/parity/parity_harness.py outcome; scenarios, thresholds and their reasons in tools/parity/outcomes.json):
+    # the share of seeds that end, their end frames, no Lua error outside retail's documented ones and alamo_headless's own
+    # checks (the station defender, the campaign land goals). A random-driven outcome is parity tier 2 (docs/DECISIONS.md
+    # "Parity tiers", "Outcome tests over seeds"), so one seed's battle moving is not a failure and no seed is pinned here;
+    # determinism is the job of the CRC golden runs above (one fixed seed each). Skips (77) without ALAMO_FOC_DATA.
+    if(ALAMO_PYTHON)
+      foreach(_oc foc_space foc_station foc_land_campaign foc_land_full foc_land_empire_underworld)
+        add_test(NAME alamo_headless_outcome_${_oc}
+                 COMMAND ${ALAMO_PYTHON} -I ${CMAKE_SOURCE_DIR}/tools/parity/parity_harness.py outcome --scenario ${_oc}
+                         --port-exe $<TARGET_FILE:alamo_headless> --jobs 4 --out ${CMAKE_CURRENT_BINARY_DIR}/outcome)
+        set_tests_properties(alamo_headless_outcome_${_oc} PROPERTIES TIMEOUT 2400 SKIP_RETURN_CODE 77 PROCESSORS 4)
+        alamo_label_slow(alamo_headless_outcome_${_oc})
+      endforeach()
+    endif()
   endif()
   # --- end A1 ---
   # --- N1 save / load (owner: n1-host): --save-session / --load / --save-check (headless/save_run.cpp) ---

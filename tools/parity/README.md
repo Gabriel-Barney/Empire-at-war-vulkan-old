@@ -13,7 +13,8 @@ squadrons-of-12 rule and its `--squadron-size` flag were removed; until then the
 
 | file | what |
 |---|---|
-| `parity_harness.py` | `run` (single run, or `--seeds N`: distribution mode), `retail`, `list`, `add-refs`, `selftest` (below) |
+| `parity_harness.py` | `run` (single run, or `--seeds N`: distribution mode), `outcome` (outcome sweeps), `retail`, `list`, `add-refs`, `selftest` (below) |
+| `outcome_sweep.py`, `outcomes.json` | the outcome sweeps' reader and judge, and their scenarios with thresholds and reasons (ref4 t04, below) |
 | `scenarios.json` | the scenarios (reference runs, port command, kit) and every tolerance with its reason |
 | `baseline.json` | per-metric verdicts of the last recorded single run (dev commit inside); the regression check of `parity_harness_<scenario>` |
 | `baseline_seeds.json` | the same for the distribution mode (`--seeds`); the regression check of `parity_harness_<scenario>_seeds` |
@@ -112,6 +113,23 @@ were made with `run_trace.ps1 -Scenario skirmish -NoDrive -LuaProbe` and the men
 `references` in `scenarios.json` (each run's `trace.q2t` must exist under the reference folder unless `--no-check`; a run
 already listed or in `excluded_references` is skipped; the file keeps its layout). Check new runs with `retail`
 (leave-one-out) and re-record both baselines.
+
+## Outcome sweeps (`outcome`, ref4 t04)
+
+```
+toolchain\venv\Scripts\python.exe -I tools\parity\parity_harness.py outcome --list
+toolchain\venv\Scripts\python.exe -I tools\parity\parity_harness.py outcome --scenario foc_station [--seeds N] [--jobs 4] [--reuse-port]
+```
+
+An AI-vs-AI (or AI-vs-idle-human) skirmish run over seeds 1..N and judged by the share of seeds, not by one seed
+(`docs/DECISIONS.md`, "Outcome tests over seeds"). A scenario of `outcomes.json` is the `alamo_headless` arguments without
+`--seed`, the seed count and what must hold: `min_end_share`, `end_frames` (every ended seed inside), `max_lua_seeds`
+(non-retail Lua errors, default 0), `known_lua` (a port bug's error text and the open group that owns it: reported, not
+failed) and, for the skai exit test, `retail` (end rate by Fisher exact test, median end frame against retail's earliest
+end; formerly `tools\probe_mod\q2_traces\analysis\skai_exit.py`). Every seed must also run without a crash and pass
+`alamo_headless`'s own checks. Seed logs and `report.txt` go to `out\outcome\<scenario>\` (`--out`). The first five
+scenarios are the slow ctests `alamo_headless_outcome_<id>` (`engine/apps/CMakeLists.txt`, 4 seeds at a time); the
+`skai_exit_*` ones run by hand. A threshold changes only with a new measurement and its reason in `why`.
 
 ## Reference runs and where they come from
 
