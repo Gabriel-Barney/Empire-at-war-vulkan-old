@@ -124,6 +124,7 @@ void TacticalBattle::oi_install(TacticalMode& mode, SimRng& rng) {
     h.object_hidden = [this](int32_t p, tc::ObjectId id, bool force) { return fog_object_hidden(p, id, force); };
     h.fow_reveal_add = [this](int32_t p, int32_t c, uint64_t s, float m) { fog_add_reveal_multiplier(p, c, s, m); };
     h.fow_reveal_remove = [this](int32_t p, uint64_t s) { fog_remove_reveal_modifier(p, s); };
+    h.garrison_types = [this](int32_t p, const std::vector<int32_t>& types, bool add) { sk_garrison_upgrade(p, types, add); };  // tru3 t05
     // FIGHTER_FLYING Â§6.5: the snowspeeder tow cable circles its target (a team container: every live member).
     h.cable_attack = [this](tc::ObjectId user, tc::ObjectId target, float r_min, float r_max) {
         if (!movement_) return;

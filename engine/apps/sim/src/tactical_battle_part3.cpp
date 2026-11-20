@@ -384,6 +384,7 @@ void TacticalBattle::drive_animation(objects::ObjectStore& store, SimRng& rng, u
         r.start_frame = c->clip->fps / static_cast<float>(anim::kSimTicksPerSecond) * r.speed;
         if (w->play(ps.uc, r, nullptr, gframe) == anim::PlayResult::Played) ++stats_.anim_plays;
     }
+    bt_skirmish_pad_sell(st);  // tru3 t06: a skirmish start without pre-build plays Pad_Sell on the pre-placed pads
     // The default idle type's presence step (0x395920 step 2): among the records whose object still exists the largest
     // value wins; on <= an allied record (0x2823e0) replaces a non-allied best (ascending presence id); the idle = the
     // first Presence_Induced_Animations entry of the unit's type listing the winner's type, else none (the plain idle).

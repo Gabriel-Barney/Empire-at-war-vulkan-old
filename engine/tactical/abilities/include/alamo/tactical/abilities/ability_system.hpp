@@ -287,6 +287,9 @@ struct AbilityHost {
     // Battlefield_Modifier list +0x1f8 (TacticalBattle::fog_add_reveal_multiplier / fog_remove_reveal_modifier).
     std::function<void(int32_t player, int32_t category, uint64_t source, float multiplier)> fow_reveal_add;
     std::function<void(int32_t player, uint64_t source)> fow_reveal_remove;
+    // tru3 t05 (Garrison_Upgrade_Ability apply 0x6ffc60 / remove 0x6ffe30): append `types` (list order) to `player`'s
+    // skirmish garrison list (add), or erase the first occurrence of each (remove). Unset: no effect.
+    std::function<void(int32_t player, const std::vector<int32_t>& types, bool add)> garrison_types;
     // ---- REMAINING_GAPS §5 ----
     // §5.1: the first occupant of `vehicle`'s container list (obj +0xf8 -> list +0x20), kNoObject when empty. Unset:
     // no occupant (EJECT_VEHICLE_THIEF does nothing).

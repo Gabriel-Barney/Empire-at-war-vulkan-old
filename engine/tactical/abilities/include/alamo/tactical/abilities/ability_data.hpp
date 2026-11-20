@@ -165,6 +165,9 @@ struct SpecialAbilityDesc {
     // source to each affected player's base-shield upgrade list (CombatSystem::add_base_shield_upgrade), remove 0x6f13b0
     // deletes it (EL_ / RL_Enhanced_Base_Shield_Upgrade).
     bool base_shield_upgrade = false;
+    // tru3 t05: Garrison_Upgrade_Ability Additional_Garrison_Units (+0x188, count +0x190) as host TypeIndex values, list
+    // order, a repeated name repeated. [port] Unknown names are dropped (retail stores what its type lookup gives).
+    std::vector<int32_t> garrison_types;
     // Enable_Bombing_Runs (+0x191) / Enable_Special_Weapons (+0x192) / Enable_Planetary_Bombardment (+0x193) (cu8f t06,
     // CU8F_T04_T06_RE §3.3 [H]): the apply pushes a `true` entry (keyed by this source) onto each affected player's bool
     // list (AbilitySystem::player_gate), the remove deletes them; Reverse_Application_Logic swaps the two.

@@ -206,6 +206,11 @@ enum class SpecialClass : uint8_t {
     // the station's Next_Level_Base (SpawnPurpose::StationUpgrade) and then for the upgrade object's silent removal
     // (AbilityEventKind::RemoveSilently), whether or not a station was found. One-shot.
     StarbaseUpgrade,
+    // tru3 t05 (SKIRMISH_SETUP §2.4 "Garrison_Upgrade_Ability" [H]): apply 0x6ffc60 / remove 0x6ffe30, skirmish only
+    // (0x6ffdb0). Appends the Additional_Garrison_Units types to the owner's (Apply_To_All_Allies: every allied
+    // player's) skirmish garrison list, the list the start-force re-delivery copies; the remove erases one occurrence of
+    // each. An aura class (no service).
+    GarrisonUpgrade,
 };
 SpecialClass special_class_from_tag(std::string_view element_name);
 const char* special_class_name(SpecialClass c);

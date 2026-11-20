@@ -2824,6 +2824,11 @@ private:
     std::vector<PadRecord>* pad_records_ = nullptr;  // §9.4 galactic persistence (GalacticSim::built_objects of the planet)
     bool pad_restore_ = true;                         // §9.4 recreate at setup (false while a save is loaded)
     void bt_pad_restore(TacticalMode& mode);          // setup: persistent pad children back on their pads
+    // tru3 t06: the pad's map-saved pre-placed (under-construction) type in the port's stand-in reading (an owned slot pad
+    // whose type respects the pre-build option, empty, with an under-construction type in its owner's faction row), else
+    // kNone. Shared by the pre-build and the Pad_Sell a non-pre-built start plays.
+    objects::TypeIndex bt_skirmish_preplaced(const objects::ObjectStore& st, objects::ObjectHandle pad) const;
+    void bt_skirmish_pad_sell(const objects::ObjectStore& st);  // tru3 t06: Pad_Sell at a start without pre-build
     void bt_skirmish_base(TacticalMode& mode);        // t50 / skai t08 setup: the land skirmish's pre-built base (every slot pad
                                                       // whose type respects the pre-build option)
     // t50 setup: skirmish start positions from the slot's map markers (skai t07: on land the last matching marker); s78n t20:
@@ -3062,6 +3067,10 @@ private:
     std::vector<SkGarrison> sk_garrisons_;
     std::vector<int32_t> sk_redelivered_;     // mcx4 t13: this tick's expiries (presentation only, not saved / hashed)
     void sk_garrison_setup();                 // setup, after the start forces are placed
+    // tru3 t05 (Garrison_Upgrade_Ability, AbilityHost::garrison_types): append to / erase the first occurrence from
+    // `player`'s garrison type list. [port] A player without a garrison entry (no start-force member) is skipped: retail's
+    // list exists for every player, but its re-delivery needs a garrison member that dies, so nothing reads it.
+    void sk_garrison_upgrade(int32_t player, const std::vector<int32_t>& types, bool add);
     void sk_garrison_tick();                  // tick
     int32_t sk_pending_delivery(int32_t player, bool pop);  // HangarHost::pending_delivery
     std::vector<HgUpgradeObject> hg_upgrade_objs_;            // DUMMY_UPGRADE objects created by production (creation order)

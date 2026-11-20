@@ -1459,6 +1459,7 @@ void AbilitySystem::apply_automatic(Obj& o, uint32_t frame) {
             case SpecialClass::Weatherproof:
             case SpecialClass::RetreatPrevention:
             case SpecialClass::EnableAbility:
+            case SpecialClass::GarrisonUpgrade:  // tru3 t05: Ground_ / Space_Automatic on the upgrade object
             case SpecialClass::WeaponSwap:  // OI abilities: Permanent_Weapon_Swap (Ground_Automatic) [port: at unit add]
             case SpecialClass::StarbaseUpgrade:  // Skirmish_Automatic on the built upgrade object (HARDPOINT_DISABLED §3)
             case SpecialClass::ForceHealing: apply(o, sp, o.id, -1, frame); break;
