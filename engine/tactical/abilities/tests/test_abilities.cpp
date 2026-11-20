@@ -107,6 +107,7 @@ int main(int argc, char** argv) {
     test_mcx4_redirect_chance_modifiers();  // mcx4 t10
     test_mcx4_opportunity_flags();          // mcx4 t10
     test_mcx4_tac2();                       // mcx4 t23, lane mcx4-tac2
+    test_trl2_quake_gates_and_ramp();       // trl2 t03
     test_battle(golden, write_golden);
     test_allocations();
     test_save_load_battle();  // N1 stage 2

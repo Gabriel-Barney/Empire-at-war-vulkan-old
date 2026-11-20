@@ -57,6 +57,10 @@ struct AbilityConfig {
     float force_ability_disable_time = 0.0f;    // Force_Ability_Disable_Time
     float ion_storm_shield_disable_time = 5.0f; // Ion_Storm_Shield_Disable_Time
     int32_t max_remote_bombs_per_player = 20;   // mcx4: Max_Remote_Bombs_Per_Player (GC +0x12138; FoC 20)
+    // trl2 t03 (TACTICAL_GAPS §2.3.4): the EARTHQUAKE_TARGET / TELEKINESIS_TARGET ramp-in time in seconds, GameConstants
+    // Earthquake_Transition_Time (+0x2d8, FoC 2.0) / Telekinesis_Transition_Time (+0x2c4, FoC 0.75); no damage before it.
+    float earthquake_transition_time = 2.0f;
+    float telekinesis_transition_time = 0.75f;
     float stealth_detection_time = 0.0f;        // GameConstants +0x12094 (not in vanilla XML) [L]
     float stealth_fire_fade = 0.3f;             // break on firing (0x3a06a0)
     uint64_t corvette_category = 0;             // CategoryMask bit of "Corvette" (tractor x2 rule)
@@ -1079,6 +1083,9 @@ private:
     int32_t anim_type_of(std::string_view anim_name) const;
     bool anim_busy(const Obj& o, uint32_t frame) const;  // 0x39a350
     bool class_state(const Obj& o, SpecialClass cls) const;  // a special of that class is applied on the owner
+    // trl2 t03 (TACTICAL_GAPS §2.3.4): `target`'s EARTHQUAKE_TARGET / TELEKINESIS_TARGET state is 1 or 2 - an applied
+    // effect of that class from any user other than `except` holds it (the user's own is removed before it re-applies).
+    bool target_affected(ObjectId target, SpecialClass cls, ObjectId except) const;
     bool class_has(const Obj& o, SpecialClass cls) const;    // the owner lists a special of that class
     bool locked(const Obj& o) const;  // 0x39ad40: this system's share or the host's (script lock, forced move)
     // mcx4 (§15): the member that acts for Hack / Repair (Team_Member_With_Ability), else `o` itself.

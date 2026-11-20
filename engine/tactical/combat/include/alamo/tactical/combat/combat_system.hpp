@@ -201,7 +201,8 @@ struct ProjectileDesc {
     float ion_stun_speed_reduction = 0.0f;  // list 5 entry = -value
     float ion_stun_shot_rate_reduction = 0.0f;  // list 6 entry = -value
     bool ion_stun_stack_duration = false;
-    float ion_stun_radius = 0.0f;           // 0 = direct victim only
+    // Projectile_Ion_Stun_Radius: a path switch only (0 = the hit victim; else the area stun, whose radius is stun_radius)
+    float ion_stun_radius = 0.0f;
     // Energy pool (4.7) [H]
     float energy_per_shot = 0.0f;           // Projectile_Energy_Per_Shot
     bool does_energy_damage = false;        // Projectile_Does_Energy_Damage
@@ -497,6 +498,8 @@ struct UnitDesc {
     int32_t min_survivors = 1, max_survivors = 1;
     float tactical_respawn_secs = 0.0f;           // Tactical_Respawn_Time_In_Secs (+0x21d0)
     bool stunnable = false;                       // has STUNNABLE (0x38)
+    bool earthquake_target = false;               // has EARTHQUAKE_TARGET (0x31): Earthquake_Attack accepts it
+    bool telekinesis_target = false;              // has TELEKINESIS_TARGET (0x30): Force_Telekinesis accepts it
     // Shield_Requires_Base_Power (+0x8c). ref6 t01: false is the synthetic-table default only; the catalog fills the type
     // value (default true, objects::tags::Shield_Requires_Base_Power) here and in base_shield_requires_power below.
     bool shield_requires_base_power = false;

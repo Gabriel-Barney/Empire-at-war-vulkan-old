@@ -422,6 +422,8 @@ void test_ion_stun_water_kill() {
     shot.ion_stun = true;
     shot.ion_stun_radius = 100.0f;
     shot.ion_stun_duration = 5.0f;
+    shot.stun_radius = 100.0f;  // trl2 t04: the area stun's radius and gate
+    shot.stun_frames = 300;
     {
         DetonationWorld d(GameMode::Land, shot, Vec3{142, 30, 0}, true);
         bool found = false;
@@ -442,6 +444,35 @@ void test_ion_stun_water_kill() {
     }
 }
 
+void test_ion_stun_area_gate() {
+    // trl2 t04 (ABILITIES_HARDPOINTS §4.4, 0x4cb070 / 0x4cb280 / 0x4cbbb0): Projectile_Ion_Stun_Radius only switches the
+    // area stun on; its victims are gathered with Projectile_Stun_Radius, and only when Projectile_Stun_Duration_Frames
+    // != 0. Unit 2 sits about 30 from the ground hit.
+    auto stunned = [](float ion_radius, float stun_radius, int32_t stun_frames) {
+        ProjectileDesc shot;
+        shot.max_speed = 10.0f;
+        shot.damage = 10.0f;
+        shot.max_flight_distance = 200.0f;
+        shot.ion_stun = true;
+        shot.ion_stun_duration = 5.0f;
+        shot.ion_stun_radius = ion_radius;
+        shot.stun_radius = stun_radius;
+        shot.stun_frames = stun_frames;
+        DetonationWorld d(GameMode::Land, shot, Vec3{142, 30, 0});
+        bool found = false;
+        (void)d.run(found);
+        CHECK(found);
+        return d.w.sys->ion_stunned(2, d.w.frame);
+    };
+    CHECK(stunned(100.0f, 100.0f, 300));
+    CHECK(stunned(10.0f, 100.0f, 300));   // the gather radius is Projectile_Stun_Radius, not the ion radius
+    CHECK(!stunned(100.0f, 10.0f, 300));
+    CHECK(!stunned(100.0f, 100.0f, 0));   // no Projectile_Stun_Duration_Frames: no area stun
+    CHECK(!stunned(100.0f, 0.0f, 300));   // no Projectile_Stun_Radius
+    CHECK(!stunned(0.0f, 100.0f, 300));   // a ground hit with no ion radius: no area stun (and no hit victim)
+    CHECK(!stunned(-1.0f, 100.0f, 300));  // a ground hit needs the ion radius > 0
+}
+
 void test_ground_detonation_particle() {
     // tru1 t08 (TRU1_A_RE_ANSWERS B1): a land ground / water hit (0x4cb070) reports `ground` - the host spawns
     // Projectile_Ground_Detonation_Particle; every expiry (distance, lifetime, path end, commanded) does not - the
@@ -457,6 +488,8 @@ void test_ground_detonation_particle() {
     shot.ion_stun = true;
     shot.ion_stun_radius = 100.0f;
     shot.ion_stun_duration = 5.0f;
+    shot.stun_radius = 100.0f;  // trl2 t04: the area stun's radius and gate
+    shot.stun_frames = 300;
     {  // land: the ramp at x 140..160 stops it at x 144 -> ground; ion stun yes, weaken no
         DetonationWorld d(GameMode::Land, shot, Vec3{142, 30, 0});
         bool found = false;

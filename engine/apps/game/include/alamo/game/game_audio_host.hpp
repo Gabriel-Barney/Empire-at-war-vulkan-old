@@ -604,6 +604,14 @@ private:
     MusicScene scene_ = MusicScene::None;
     uint32_t last_serial_ = 0;
     bool have_serial_ = false;
+    // trl2 t08 (AUDIO.md §9.5, MCX4_T10_RE_ANSWERS §3): shots held by Projectile_Appearance_Delay_Frames, whose fire sound
+    // waits for the appearance frame (the projectile's spawn_frame); fire order.
+    struct DelayedShot {
+        uint32_t serial = 0, frame = 0;
+        tactical::combat::ObjectId shooter = tactical::combat::kNoObject;
+        int32_t hardpoint = -1;
+    };
+    std::vector<DelayedShot> delayed_shots_;
     int32_t retreating_player_ = -1;  // TacticalBattle::retreating_player() at the last battle_tick
     bool modal_ = false, gui_only_ = false, attract_ = false;  // OI host: flags last applied
     bool app_active_ = true;                                   // aud2 t04: set_app_active

@@ -921,14 +921,18 @@ void CombatSystem::detonation_effects(const Projectile& p, Vec3 center, ObjectId
         for (Unit* v : vs)
             if (v->id != p.target && effect_match(*v, pd.invulnerability_mask, nullptr)) give(v);
     }
-    // Ion stun (0x4cbbb0): direct victim, or victims in radius (enemy trees, XY circle, id order). tru1 t08 (B1): the
-    // expiry paths (0x4c7050, 0x4caea0) do not run it.
+    // Ion stun. tru1 t08 (B1): the expiry paths (0x4c7050, 0x4caea0) do not run it. trl2 t04 (ABILITIES_HARDPOINTS §4.4,
+    // read 2026-11-20): Projectile_Ion_Stun_Radius (+0x4d8) only chooses the path - an object hit (Process_Hit 0x4cb280)
+    // stuns the hit victim when it is exactly 0 and runs the area stun 0x4cbbb0 otherwise; a ground hit (0x4cb070) runs
+    // the area stun when it is > 0. The area stun gathers its victims with Projectile_Stun_Radius (+0x1e90) and does
+    // nothing unless that is > 0 and Projectile_Stun_Duration_Frames (+0x1e8c) != 0 (enemy trees, XY circle, id order).
+    const bool ion_area = path == DetonationPath::Object ? pd.ion_stun_radius != 0.0f : pd.ion_stun_radius > 0.0f;
     if (pd.ion_stun && path != DetonationPath::Expiry) {
-        if (!(pd.ion_stun_radius > 0.0f)) {
-            Unit* v = unit(direct);
+        if (!ion_area) {
+            Unit* v = path == DetonationPath::Object ? unit(direct) : nullptr;
             if (live(v)) ion_stun_unit(*v, p.desc, frame);
-        } else {
-            effect_victims(p.owner, true, center, pd.ion_stun_radius, vs);
+        } else if (pd.stun_radius > 0.0f && pd.stun_frames != 0) {
+            effect_victims(p.owner, true, center, pd.stun_radius, vs);
             // trn1 t04 (ABILITIES_HARDPOINTS §4.12, 0x4cbbb0): the ion stun, then the water test, in the same per-object
             // block (skipped for a locomotor-busy object).
             std::vector<ObjectId> ids;

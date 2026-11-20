@@ -282,6 +282,17 @@ bool AbilitySystem::class_state(const Obj& o, SpecialClass cls) const {
     return false;
 }
 
+bool AbilitySystem::target_affected(ObjectId target, SpecialClass cls, ObjectId except) const {
+    // 0x6331b0 / 0x63efa0: the target behaviour's state is neither 0 (idle) nor 3 (ramping out after a removal). [port] The
+    // state lives on the user's SpecialState, so "affected" is an applied effect of that class aimed at the target.
+    for (const Obj& u : objs_) {
+        if (u.id == except || u.dead) continue;
+        for (const SpecialState& sp : u.specials)
+            if (sp.applied && sp.target == target && data_->specials[sp.desc].cls == cls) return true;
+    }
+    return false;
+}
+
 bool AbilitySystem::anim_busy(const Obj& o, uint32_t frame) const {
     // 0x39a350: OR of the owner's abilities' type-only tests (the mode is ignored). Earthquake / Telekinesis / Lightning /
     // Generic / Eat count in land only; Arc_Sweep by its applied state in any mode. r3h t04: Eat also counts its
@@ -390,11 +401,18 @@ bool AbilitySystem::class_accepts(const Obj& o, const SpecialAbilityDesc& s, Obj
     switch (s.cls) {
         // 0x6eef00 (Arc_Sweep, Concentrate_Fire, Generic_Attack) and the other enemy-target classes: enemy, applicable
         // filter (0x48e290), the pairing rule (s78n t06) [port: the model test is not modelled].
+        // trl2 t03 (TACTICAL_GAPS §2.3.4): Earthquake 0x6f7510 also needs EARTHQUAKE_TARGET (obj +0x363) and a target the
+        // behaviour does not already hold (0x6331b0); Telekinesis 0x6fe400 needs TELEKINESIS_TARGET (obj +0x362) - its
+        // not-already-affected test is in the apply (0x6fe1b0).
+        case C::Earthquake:
+            return foe && combat_->data().units[combat_->desc_index(target)].earthquake_target && target_filter(s, target) &&
+                   paired() && !target_affected(target, C::Earthquake, o.id);
+        case C::Telekinesis:
+            return foe && combat_->data().units[combat_->desc_index(target)].telekinesis_target && target_filter(s, target) &&
+                   paired();
         case C::ArcSweep:
         case C::GenericAttack:
         case C::EatAttack:
-        case C::Earthquake:
-        case C::Telekinesis:
         case C::GrenadeAttack:
         case C::ForceLightning:
         case C::LeechShields:
@@ -599,6 +617,8 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             // §4.14: Earthquake refuses while the owner shows FB_Release (any phase; also the one the removal just
             // started); Telekinesis has no animation gate.
             if (s.cls == C::Earthquake && anim_before(o, frame).type == kAnimFbRelease) return false;
+            // trl2 t03: Telekinesis 0x6fe1b0 refuses a target its TELEKINESIS_TARGET behaviour already holds (0x63efa0)
+            if (s.cls == C::Telekinesis && target_affected(target, C::Telekinesis, o.id)) return false;
             if (moving(o) || !range_ok(o, s, target)) return false;
             if (!chance_roll_lt(s.activation_chance)) return false;  // one synced draw < Activation_Chance
             if (s.cls == C::Earthquake) {  // also ends the owner's own Force_Cloak (stealth breaks, 0.3 s)
@@ -608,7 +628,11 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
             sp.applied = 1;
             sp.target = target;
             sp.value = max_health_and_shield(target) * s.damage_percentage + s.damage_amount;  // D
-            sp.next = frame + static_cast<uint32_t>(std::max(1, frames_of(s.damage_interval, fps)));
+            // trl2 t03 (TACTICAL_GAPS §2.3.4): the target behaviour starts in state 1 (ramp in) at this frame; no damage
+            // timer yet (`radius` holds the next damage time in seconds once state 2 starts, 0 = none).
+            sp.phase = 1;
+            sp.counter = static_cast<int32_t>(frame);
+            sp.radius = 0.0f;
             if (s.cls == C::Telekinesis) start_recharge(o, kForceTelekinesis);
             // §4.14: FB_Attack / FTK_Attack one-shot, then the hold clip loops
             play_anim(o, s.cls == C::Earthquake ? kAnimFbAttack : kAnimFtkAttack, {}, kDrawVariant, false, 1.0f, kAnimHoldLoop, frame,
@@ -1248,13 +1272,29 @@ void AbilitySystem::class_update(Obj& o, SpecialState& sp, uint32_t frame) {
         }
 
         case C::Earthquake:
-        case C::Telekinesis: {  // the target behaviour: Take_Damage(kind 3, D) every interval [port: no ramp state]
+        case C::Telekinesis: {  // the target behaviour (0x633330 / 0x63fa30 service)
             if (!alive_unit(sp.target) || !range_ok(o, s, sp.target)) {
                 remove_special(o, sp, frame);
                 return;
             }
-            if (frame >= sp.next) {
-                sp.next = frame + static_cast<uint32_t>(std::max(1, frames_of(s.damage_interval, fps)));
+            // trl2 t03 (TACTICAL_GAPS §2.3.4): times are float seconds, frame / FPS. State 1 ramps over the GameConstants
+            // transition time; at ramp >= 1 (also a non-number: retail's maxss / comiss take that branch) state 2 starts
+            // with the next damage time := now when D > 0. State 2 deals Take_Damage(kind 3, D) once the next damage time
+            // (non-zero) is <= now and adds Damage_Interval_In_Secs to it. [port] Serviced at this special's update.
+            const float now = static_cast<float>(frame) / static_cast<float>(fps);
+            if (sp.phase == 1) {
+                const float start = static_cast<float>(static_cast<uint32_t>(sp.counter)) / static_cast<float>(fps);
+                const float ramp_time =
+                    s.cls == C::Earthquake ? cfg_.earthquake_transition_time : cfg_.telekinesis_transition_time;
+                const float ramp = (now - start) / ramp_time;
+                if (!(ramp < 1.0f)) {
+                    sp.phase = 2;
+                    if (sp.value > 0.0f) sp.radius = now;
+                }
+                return;
+            }
+            if (sp.radius <= now && sp.radius != 0.0f) {
+                sp.radius = sp.radius + s.damage_interval;
                 DamageRequest r;
                 r.victim = sp.target;
                 r.amount = sp.value;
