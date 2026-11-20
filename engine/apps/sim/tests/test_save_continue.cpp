@@ -1,15 +1,16 @@
 // alamo_sim_save_continue_tests (roadmap ref2 t01, serves map3): save and continue on every battle fixture.
 // Each fixture (battle_test_fixture.hpp sessions: a space battle, a land invasion, a space battle with a retreat, a land
-// battle whose map carries placement records - hints, a company with a hint, a marker name) runs twice from the same
-// start:
+// battle whose map carries placement records - hints, a company with a hint, a marker name, a build pad with a base
+// level on a planet with a ground structure - roadmap map3) runs twice from the same start:
 //   continuous   ticked straight through;
 //   reloaded     at every 64-tick checkpoint (the CRC golden checkpoints, ALAMO_CRC 2) the session is saved, a fresh
 //                session is built like a new game, the save is loaded into it (a battle is rebuilt, then its parts are
 //                read) and the run goes on in the fresh session.
 // The checkpoint CRC records of both runs agree (every registered system, at every checkpoint, including the record
 // the fresh session takes of the loaded state), and so do the answers the battle's Lua finders give after a load:
-// Find_Hint / Get_Hint (TacticalBattle::map_hint, which lua::ObjectBridge::map_hint reads) and the marker names, for
-// every object of the battle. On every running battle the save ledger self-check holds too
+// Find_Hint / Get_Hint (TacticalBattle::map_hint, which lua::ObjectBridge::map_hint reads), the marker names and the
+// pads' base levels, for every object of the battle; no object created after the battle start (after a load included)
+// answers a map hint. On every running battle the save ledger self-check holds too
 // (TacticalBattle::check_save_ledger: state_io walks exactly the SAVED members of tactical_battle_ledger.hpp).
 // Modes:
 //   (none)                        every fixture at 0 workers
@@ -27,7 +28,7 @@ struct Fixture {
     const char* name;
     bool land;
     float retreat_ratio;
-    bool records;  // land map with placement records (hints, a hinted company, a marker name)
+    bool records;  // land map with placement records (hints, a hinted company, a marker name, a levelled pad)
     uint64_t ticks;
 };
 
@@ -69,7 +70,23 @@ terrain::MapData records_map() {
     two.has_marker_name = true;
     two.marker_name = "inf9";
     m.objects.push_back(two);
+    // map3: a build pad with base level 1 (mini 0x0B; the planet's ground structure makes the battle's base level 1)
+    terrain::ObjectPlacement pad = placement("S10_Build_Pad", 600.0f, 700.0f, 0);
+    pad.placement_raw.push_back(terrain::RawMini{0x0B, {1}});
+    m.objects.push_back(pad);
     return m;
+}
+
+// map3: the records fixture's extra types - a ground structure (its galactic copy at S10_B gives the land battle base
+// level 1) and a build pad.
+std::string records_types(std::string t) {
+    const std::string end = "</S10>";
+    const size_t at = t.rfind(end);
+    if (at == std::string::npos) return t;
+    t.insert(at, " <GroundStructure Name=\"S10_Barracks\"><Tactical_Health>500</Tactical_Health><Behavior>DUMMY_GROUND_STRUCTURE</Behavior>"
+                 "</GroundStructure>\n <SpecialStructure Name=\"S10_Build_Pad\"><Behavior>TACTICAL_BUILD_OBJECTS</Behavior>"
+                 "<Tactical_Health>500</Tactical_Health></SpecialStructure>\n");
+    return t;
 }
 
 // One session of a fixture, built as run_campaign builds it. `launch`: the new-game start (the Underworld fleet moves
@@ -91,7 +108,9 @@ struct Session {
         cfg.seed = 2026;
         cfg.players = 4;
         host = std::make_unique<SimHost>(d.types, *js, cfg);
-        gs = host->start_galactic(d.rules, make_setup(d, f.land));
+        galactic::GalacticSetup setup = make_setup(d, f.land);
+        if (f.records) setup.forces.push_back({0, 1, type_of(d, "S10_Barracks")});  // map3: battle base level 1
+        gs = host->start_galactic(d.rules, setup);
         CHECK(gs != nullptr);
         if (!gs) return;
         gs->set_emit_events(true);
@@ -165,7 +184,8 @@ void collect(Session& s, std::vector<Checkpoint>& out) {
 }
 
 // What the battle's Lua finders answer per object: Find_Hint / Get_Hint / Find_All_Objects_With_Hint read
-// TacticalBattle::map_hint through lua::ObjectBridge::map_hint; the marker name is the placement's 0x46E record.
+// TacticalBattle::map_hint through lua::ObjectBridge::map_hint; the marker name is the placement's 0x46E record; the
+// pad level is the map pad's base level (AI_GALACTIC_TOKENS 9.4, the persistence record's level).
 std::vector<std::string> lookup_answers(const TacticalBattle& b, const TacticalMode& tm) {
     std::vector<std::string> out;
     const objects::ObjectStore& st = tm.primary();
@@ -173,8 +193,10 @@ std::vector<std::string> lookup_answers(const TacticalBattle& b, const TacticalM
         if (!st.exists(h)) continue;
         const objects::ObjectId id = st.id(h);
         const std::string_view hint = b.map_hint(id), marker = b.map_marker_name(id);
-        if (hint.empty() && marker.empty()) continue;
-        out.push_back(std::to_string(id) + " hint '" + std::string(hint) + "' marker '" + std::string(marker) + "'");
+        const int32_t level = b.pad_base_level(id);
+        if (hint.empty() && marker.empty() && level == 0) continue;
+        out.push_back(std::to_string(id) + " hint '" + std::string(hint) + "' marker '" + std::string(marker) + "' pad " +
+                      std::to_string(level));
     }
     std::sort(out.begin(), out.end());
     return out;
@@ -298,12 +320,24 @@ std::string test_fixture(const Data& d, const Fixture& f, uint32_t workers) {
     const std::string diff = first_difference(a.checkpoints, b.checkpoints);
     if (!diff.empty()) std::printf("  %s: checkpoint CRCs differ after a load: %s\n", f.name, diff.c_str());
     CHECK(diff.empty());
-    uint32_t compared = 0, hinted = 0;
+    uint32_t compared = 0, hinted = 0, padded = 0;
+    // map3: the map load names every object with a hint, a marker name or a pad level; an object created later (also one
+    // created after a load, which a rebuild-era id table would have named) answers none of them.
+    std::map<std::string, bool> first_ids;
+    if (!a.answers.empty())
+        for (const std::string& line : a.answers.begin()->second) first_ids[line.substr(0, line.find(' '))] = true;
+    for (const auto& [tick, got] : b.answers)
+        for (const std::string& line : got)
+            if (!first_ids.count(line.substr(0, line.find(' ')))) {
+                std::printf("  %s: tick %" PRIu64 ": an object created after the map load answers '%s'\n", f.name, tick, line.c_str());
+                CHECK(false);
+            }
     for (const auto& [tick, want] : a.answers) {
         const auto it = b.answers.find(tick);
         if (it == b.answers.end()) continue;  // no battle at that checkpoint of the reloaded run
         ++compared;
         hinted += want.empty() ? 0u : 1u;
+        for (const std::string& line : want) padded += line.size() > 6 && line.compare(line.size() - 6, 6, " pad 1") == 0 ? 1u : 0u;
         if (it->second != want) {
             std::printf("  %s: lookup answers differ after the load at tick %" PRIu64 " (%zu vs %zu):\n", f.name, tick,
                         want.size(), it->second.size());
@@ -316,6 +350,7 @@ std::string test_fixture(const Data& d, const Fixture& f, uint32_t workers) {
     }
     CHECK(compared == b.battle_reloads);
     if (f.records) CHECK(hinted == compared && compared > 0);  // the records fixture has hints at every checkpoint
+    if (f.records) CHECK(padded == compared);                  // and its pad keeps its base level
     return "# " + std::string(f.name) + "\n" + checkpoints_text(a.checkpoints);
 }
 
@@ -335,8 +370,16 @@ int main(int argc, char** argv) {
     g_temp_prefix = prefix.c_str();
     std::printf("REF2 t01: save and continue at every %" PRIu64 "-tick checkpoint, %u workers\n", kCheckpoint, workers);
     auto d = make_data();
+    // map3: the records fixture's data adds a ground structure and a build pad (its own temp folder)
+    static std::string records_prefix;
+    records_prefix = prefix + "_records";
+    g_temp_prefix = records_prefix.c_str();
+    g_types_patch = records_types;
+    auto dr = make_data();
+    g_types_patch = nullptr;
+    g_temp_prefix = prefix.c_str();
     std::string text;
-    for (const Fixture& f : kFixtures) text += test_fixture(*d, f, workers);
+    for (const Fixture& f : kFixtures) text += test_fixture(f.records ? *dr : *d, f, workers);
     if (!out_path.empty()) {
         std::ofstream o(out_path, std::ios::binary | std::ios::trunc);
         o << text;
@@ -354,6 +397,7 @@ int main(int argc, char** argv) {
     }
     std::error_code ec;
     remove_all_long(d->root, ec);
+    remove_all_long(dr->root, ec);
     if (g_fail) {
         std::printf("%d check(s) FAILED\n", g_fail);
         return 1;

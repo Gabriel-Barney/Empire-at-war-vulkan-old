@@ -1690,6 +1690,9 @@ public:
     // map1 t04 (Q6_T30 3): the map marker name (.ted chunk 0x46E, MarkerDataPack) of an object the map load created; "" when
     // it has none or an empty one. [port] No reader in the port yet.
     std::string_view map_marker_name(objects::ObjectId id) const;
+    // AI_GALACTIC_TOKENS 9.4: a map-placed pad's base level byte (+0x39C, map mini 0x0B) that the galactic persistence
+    // add records; 0 for other objects.
+    int32_t pad_base_level(objects::ObjectId pad) const;
     // map1: what the map load did (MapLoadStats).
     const MapLoadStats& map_load_stats() const { return map_stats_; }
     // map1 t07 (REMAINING_GAPS §3.2 step 1): the local camera focus of the battle start - the chosen Space Station marker when
@@ -2645,9 +2648,9 @@ private:
     // child's position) behind the gate 0x42f160 (set_pad_persistence).
     void pad_persist(const objects::ObjectStore& st, objects::ObjectHandle pad, objects::TypeIndex type, const Vec3& pos, bool add);
     // §9.4: the pad's base level byte (+0x39C, map mini 0x0B) of map-placed pads with a non-zero level, ascending pad id
-    // (bt_map_load; derived from the map, so not saved: a load's setup rebuilds it). Other pads: 0.
+    // (bt_map_load). Saved (state version 20, map3): a loaded battle is rebuilt with rebuild-era ids, so its map load's
+    // table names other objects until the saved one replaces it. Other pads: 0.
     std::vector<std::pair<objects::ObjectId, int32_t>> pad_levels_;
-    int32_t pad_base_level(objects::ObjectId pad) const;
     std::vector<PadState> pads_;  // ascending pad id
     bool pads_used_ = false;
     TacticalMode* pads_mode_ = nullptr;
@@ -2690,8 +2693,9 @@ private:
         bool used = false;
         int32_t map_id = -1;  // map1 t06: the placement's .ted object id (0x4B0 mini 00), the remembered marker id
     };
-    // q6 t28: map hint names by object id (ascending), set by bt_map_load. [port] Not saved: a loaded battle is rebuilt
-    // through the same map load, which hands the map objects the same ids.
+    // q6 t28: map hint names by object id (ascending), set by bt_map_load. Saved with the marker names (state version 20,
+    // map3): a loaded battle is rebuilt after the id counter is restored, so the rebuild's map load hands out other ids
+    // than the original run; the saved tables replace the rebuild's.
     std::vector<std::pair<objects::ObjectId, std::string>> map_hints_;
     std::vector<std::pair<objects::ObjectId, std::string>> map_marker_names_;  // map1 t04: 0x46E names (non-empty), id order
     MapLoadStats map_stats_;
