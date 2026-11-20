@@ -2535,7 +2535,8 @@ size_t skirmish_garrison_upgrade_run(bool despawn) {
             continue;
         }
         // the pool right after the delivery (the stand-in AI may deploy a reserve a few frames later)
-        delivered = std::max(delivered, pooled(*b) - pool0);
+        const auto now = static_cast<std::ptrdiff_t>(pooled(*b)) - static_cast<std::ptrdiff_t>(pool0);
+        if (now > 0) delivered = std::max(delivered, static_cast<size_t>(now));
         if (b->frame() == killed_at + 650) break;
     }
     std::printf("  garrison upgrade%s: %zu squads re-delivered (start force killed at frame %u, last frame %u, upgrade %s)\n",
