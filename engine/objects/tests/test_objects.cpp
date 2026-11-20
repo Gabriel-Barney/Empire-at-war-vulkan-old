@@ -1798,6 +1798,23 @@ static void integration(const std::string& root, const char* label, bool foc) {
 
 // ref6 t01: every typed handle (alamo/objects/type_tags.hpp) names a type field, an unset tag reads the handle's one
 // default through get(t, handle), a set one its XML value, and name(t) is the type's name.
+// What an unset tag reads equals the handle's default (Float / Int / Bool / Text) or the kind's fixed unset value.
+template <class T>
+[[maybe_unused]] static bool unset_reads_default(const GameObjectTypes& ty, TypeIndex t, const TypeTag<T>& k) {
+    return ty.get(t, k) == k.def;
+}
+[[maybe_unused]] static bool unset_reads_default(const GameObjectTypes& ty, TypeIndex t, const VecTag& k) {
+    return ty.get(t, k) == std::array<float, 4>{};
+}
+[[maybe_unused]] static bool unset_reads_default(const GameObjectTypes& ty, TypeIndex t, const ListTag& k) {
+    return ty.get(t, k).empty() && ty.get_type_refs(t, k).empty();
+}
+[[maybe_unused]] static bool unset_reads_default(const GameObjectTypes& ty, TypeIndex t, const RefTag& k) { return ty.get(t, k) == kNone; }
+[[maybe_unused]] static bool unset_reads_default(const GameObjectTypes& ty, TypeIndex t, const MaskTag& k) { return ty.get(t, k) == 0; }
+[[maybe_unused]] static bool unset_reads_default(const GameObjectTypes& ty, TypeIndex t, const SubObjectsTag& k) {
+    return ty.sub_objects(t, k).empty();
+}
+
 static void test_type_tags() {
     const fs::path root = fs::temp_directory_path() / "alamo_objects_type_tags";
     std::error_code ec;
@@ -1818,7 +1835,9 @@ static void test_type_tags() {
     {                                                                   \
         ++n;                                                            \
         CHECK(find_type_field(tags::N.tag) != 0xFFFFFFFFu);             \
-        CHECK(types.get(bare, tags::N) == tags::N.def);                 \
+        if (!unset_reads_default(types, bare, tags::N))                 \
+            std::printf("  tags::%s: an unset tag reads another value\n", #N); \
+        CHECK(unset_reads_default(types, bare, tags::N));               \
     }
     ALAMO_TYPE_TAGS(ALAMO_TEST_TAG)
 #undef ALAMO_TEST_TAG

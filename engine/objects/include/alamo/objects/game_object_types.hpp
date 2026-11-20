@@ -150,7 +150,28 @@ public:
     int32_t get(TypeIndex t, const IntTag& k) const { return get_int(t, k.tag); }
     bool get(TypeIndex t, const BoolTag& k) const { return get_bool(t, k.tag); }
     std::string_view get(TypeIndex t, const TextTag& k) const { return get_string(t, k.tag); }
+    std::array<float, 4> get(TypeIndex t, const VecTag& k) const { return get_vec(t, k.tag); }
+    std::span<const std::string_view> get(TypeIndex t, const ListTag& k) const { return get_list(t, k.tag); }
+    TypeIndex get(TypeIndex t, const RefTag& k) const { return get_type_ref(t, k.tag); }
+    uint64_t get(TypeIndex t, const MaskTag& k) const { return get_mask(t, k.tag); }
     std::span<const FieldIndex> sub_objects(TypeIndex t, const SubObjectsTag& k) const { return get_sub_objects(t, k.tag); }
+    // Whether the type's XML set the tag (an unset tag reads its default).
+    template <class K> requires requires(const K& k) { k.tag; }
+    bool is_set(TypeIndex t, const K& k) const { return value(t, find_type_field(k.tag)) != nullptr; }
+    // Another view of a handle's tag than its kind (the text of a numeric tag, the types a list names, a mask's words):
+    // the same reads as the string forms, with the tag named once.
+    template <class K> requires requires(const K& k) { k.tag; }
+    std::string_view get_string(TypeIndex t, const K& k) const { return get_string(t, k.tag); }
+    template <class K> requires requires(const K& k) { k.tag; }
+    float get_float(TypeIndex t, const K& k) const { return get_float(t, k.tag); }
+    template <class K> requires requires(const K& k) { k.tag; }
+    int32_t get_int(TypeIndex t, const K& k) const { return get_int(t, k.tag); }
+    template <class K> requires requires(const K& k) { k.tag; }
+    bool get_bool(TypeIndex t, const K& k) const { return get_bool(t, k.tag); }
+    template <class K> requires requires(const K& k) { k.tag; }
+    std::span<const std::string_view> get_list(TypeIndex t, const K& k) const { return get_list(t, k.tag); }
+    template <class K> requires requires(const K& k) { k.tag; }
+    std::vector<TypeIndex> get_type_refs(TypeIndex t, const K& k) const { return get_type_refs(t, k.tag); }
     std::string_view name(TypeIndex t) const { return t < size() ? raw().types().name[t] : std::string_view{}; }
     // Scale_Factor, 1 when it is not > 0 (the guard every extent / footprint reader applies).
     float scale_factor(TypeIndex t) const {

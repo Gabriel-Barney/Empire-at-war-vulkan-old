@@ -285,11 +285,11 @@ float fighter_squad_idle(F3 p, F3 lp, F3& d, bool leader, float avoid_speed) {
 // ---------------------------------------------------------------- XML
 FighterParams fighter_params_from_type(const objects::GameObjectTypes& t, uint32_t ti) {
     FighterParams p;
-    const float thrust = t.get_float(ti, "Max_Thrust");
+    const float thrust = t.get(ti, objects::tags::Max_Thrust);
     if (thrust > 0.0f) p.max_thrust = thrust;
-    const float mfd = t.get_float(ti, "Minimum_Follow_Distance");
+    const float mfd = t.get(ti, objects::tags::Minimum_Follow_Distance);
     if (mfd > 0.0f) p.min_follow_distance = mfd;
-    const float range = t.get_float(ti, "Targeting_Max_Attack_Distance");
+    const float range = t.get(ti, objects::tags::Targeting_Max_Attack_Distance);
     if (range > 0.0f) p.attack_range = range;
     p.chase = fighter_chase_ranges_from_type(t, ti);
     return p;
@@ -305,7 +305,7 @@ FighterChaseRanges fighter_chase_ranges_from_type(const objects::GameObjectTypes
 }
 
 float squadron_tolerance_from_type(const objects::GameObjectTypes& t, uint32_t ti) {
-    const float tol = t.get_float(ti, "Squadron_Formation_Error_Tolerance");
+    const float tol = t.get(ti, objects::tags::Squadron_Formation_Error_Tolerance);
     return tol > 0.0f ? tol : 25.0f;
 }
 

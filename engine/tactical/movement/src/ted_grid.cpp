@@ -51,7 +51,7 @@ PassabilityGrid grid_from_map(const terrain::MapData& map) {
 
 uint32_t land_obstacle_footprint_type(const objects::GameObjectTypes& types, uint32_t t) {
     if (t >= types.size()) return t;
-    const objects::TypeIndex proxy = types.get_type_ref(t, "Obstacle_Proxy_Type");
+    const objects::TypeIndex proxy = types.get(t, objects::tags::Obstacle_Proxy_Type);
     return proxy < types.size() ? proxy : t;
 }
 
@@ -68,10 +68,10 @@ bool land_obstacle_footprint(const objects::GameObjectTypes& types, uint32_t t, 
     // S8 t09 (MOVEMENT §1.3): Obstacle_Proxy_Type replaces the type for the sizes, offsets, model box and Fine_Tune byte.
     const uint32_t f = land_obstacle_footprint_type(types, t);
     const bool proxied = f != t;
-    const float w = types.get_float(f, "Obstacle_Width"), hgt = types.get_float(f, "Obstacle_Height");
-    const float xo = types.get_float(f, "Obstacle_X_Offset"), yo = types.get_float(f, "Obstacle_Y_Offset");
+    const float w = types.get(f, objects::tags::Obstacle_Width), hgt = types.get(f, objects::tags::Obstacle_Height);
+    const float xo = types.get(f, objects::tags::Obstacle_X_Offset), yo = types.get(f, objects::tags::Obstacle_Y_Offset);
     const float scale = types.scale_factor(f);
-    const bool fine = types.get_bool(f, "Fine_Tune_Occupied_Passability");
+    const bool fine = types.get(f, objects::tags::Fine_Tune_Occupied_Passability);
     const StampRayModel rm = hooks && hooks->ray_model ? hooks->ray_model(f) : StampRayModel::Unknown;
     // S8 t13 (§1.3 "A type without Land_Model_Name"): fine-tune on, no proxy, no land model -> the stamper returns before
     // its loop and "stamped" stays clear (retried every service; the port's model data is const: never stamped).
@@ -106,7 +106,7 @@ bool land_obstacle_footprint(const objects::GameObjectTypes& types, uint32_t t, 
     out.y_offset = yo != 0.0f ? yo : -ay;
     // The bits come from the object's own type / behaviours, never from the proxy (hosts with live behaviour lists
     // recompute them with land_obstacle_bits).
-    out.bits = land_obstacle_bits(static_cast<uint32_t>(types.get_mask(t, "OverridePassability")), true,
+    out.bits = land_obstacle_bits(static_cast<uint32_t>(types.get(t, objects::tags::OverridePassability)), true,
                                   types.has_behavior(t, objects::BehaviorSet::Union, kWall));
     out.terrain_z = terrain_z;
     // Vertical height = model bbox z x scale; unknown model height: treat as tall (always stamps).
@@ -138,7 +138,7 @@ uint32_t stamp_map_obstacles(PassabilityGrid& grid, const terrain::MapData& map,
 V2 space_obstacle_center(const objects::GameObjectTypes& types, uint32_t t, V2 position, V2 f) {
     // S7 t07: + Space_Obstacle_Offset, x along the facing, y to its left [M: rotation sense].
     if (t >= types.size()) return position;
-    const std::array<float, 4> off = types.get_vec(t, "Space_Obstacle_Offset");
+    const std::array<float, 4> off = types.get(t, objects::tags::Space_Obstacle_Offset);
     return {position.x + off[0] * f.x - off[1] * f.y, position.y + off[0] * f.y + off[1] * f.x};
 }
 
@@ -166,8 +166,8 @@ uint32_t space_from_map(SpaceOccupancy& occ, const terrain::MapData& map, const 
 bool space_obstacle_footprint(const objects::GameObjectTypes& types, uint32_t t, float& radius, uint32_t& bits,
                               const SpaceObstacleHooks* hooks) {
     if (t >= types.size() || !types.has_behavior(t, objects::BehaviorSet::Union, kSpaceObstacle)) return false;
-    float r = types.get_float(t, "Custom_Soft_Footprint_Radius");
-    if (!(r > 0.0f)) r = types.get_float(t, "Space_Obstacle_Radius");
+    float r = types.get(t, objects::tags::Custom_Soft_Footprint_Radius);
+    if (!(r > 0.0f)) r = types.get(t, objects::tags::Space_Obstacle_Radius);
     if (!(r > 0.0f)) {
         // S7 t07 (MOVEMENT §2.2, getter 0x373b50): the larger x / y half extent of the space model's collision bound.
         // [port] no model data: no entry (retail: radius 0 without a model).
@@ -179,7 +179,7 @@ bool space_obstacle_footprint(const objects::GameObjectTypes& types, uint32_t t,
     const float scale = types.scale_factor(t);
     radius = r * scale;
     bits = kSpaceStatic;
-    if (types.get_bool(t, "Is_Impassable_Asteroid")) bits |= kSpaceImpassableAsteroid;
+    if (types.get(t, objects::tags::Is_Impassable_Asteroid)) bits |= kSpaceImpassableAsteroid;
     return true;
 }
 
