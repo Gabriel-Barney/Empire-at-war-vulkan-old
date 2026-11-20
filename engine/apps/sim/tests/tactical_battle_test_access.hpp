@@ -22,6 +22,17 @@ struct TacticalBattleTestAccess {
     static bool squad_joint_box(const TacticalBattle& b, const objects::ObjectStore& st, objects::ObjectId id, float& hx, float& hy) {
         return b.squad_joint_box(st, id, hx, hy);
     }
+    // tst2 t03 (bkt1 coverage): the land attack staging 0x40e260 (attack_stage_goal), a land attack plan
+    // (land_attack_order; returns the AttackPlan as an int) and the map extents the staging's search keeps inside.
+    static Vec3 stage_goal(TacticalBattle& b, const TacticalMode& mode, std::span<const objects::ObjectId> ids, objects::ObjectId target,
+                           Vec3 tp, size_t movers) {
+        return b.attack_stage_goal(mode, ids, target, tp, movers);
+    }
+    static int land_attack_order(TacticalBattle& b, TacticalMode& mode, std::span<const objects::ObjectId> ids, objects::ObjectId target,
+                                 Vec3 tp, uint8_t flags, SimRng& rng, bool guard) {
+        return static_cast<int>(b.land_attack_order(mode, ids, target, tp, flags, false, rng, guard));
+    }
+    static tactical::Aabb map_extents(const TacticalBattle& b, const TacticalMode& mode) { return b.map_extents(mode); }
     // s78n t10: the 8 (x, y) points of object `h`'s fog multisample footprint.
     static void fog_footprint(const TacticalBattle& b, const objects::ObjectStore& st, objects::ObjectHandle h, float* xy16) {
         b.fog_footprint_samples(st, h, xy16);

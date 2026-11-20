@@ -2188,6 +2188,62 @@ inline void test_s78n_min_range() {
     }
 }
 
+// tst2 t03 (bkt1 coverage; BKT1_ATTACK_RE §1.1 step 3 / §1.2 steps 2-3 [H], TACTICAL_COMBAT §5.4.2):
+//   * the pending targeted ability's ranges (AbilitySystem::pending_ranges, read by the engagement range 0x4f6e40 and the
+//     staging 0x40e260): nothing pending -> false; a Tactical_Bribe ordered on a target out of its range is pending and
+//     answers its own Activation_Min_Range 150 / Activation_Max_Range 200 (TD +0x148 the target, +0x150 the CRC); once
+//     the pending ability fired (user moved into range) -> false again;
+//   * the staging gate "M inside its min range of T" (slot 46, CombatSystem::inside_min_range_of(M, T, r)): d <= r + E,
+//     false when r <= 0. T at the origin facing +x with hard extents X 4 / Y 2; M 22 behind it on its facing axis (E = 4):
+//     r 20 -> 22 <= 24 inside; r 17 -> 22 > 21 outside; r 0 -> false (a member with no min range never stages).
+inline void test_bkt1_pending_ranges_and_min_gate() {
+    OiWorld w;
+    SpecialAbilityDesc b = oi_special("Bribe", SpecialClass::TacticalBribe, ActivationStyle::UserInput);
+    b.applicable_categories = 0;
+    b.min_range = 150.0f;
+    b.max_range = 200.0f;
+    const uint32_t bs = add_special(w.ad, b);
+    AbilityObjectDesc a;
+    a.unit_abilities = {oi_gui(kTacticalBribe, 0.0f, 10.0f, "Bribe")};
+    a.specials = {bs};
+    UnitDesc tu = oi_unit("Tyber", 100.0f, 8.0f);
+    tu.max_attack_distance = 90.0f;
+    const uint32_t ad = push(w.cd, w.ad, tu, a);
+    UnitDesc xu = oi_unit("Squad_Stormtrooper", 100.0f, 5.0f, 16);
+    xu.hard_x_extent = 4.0f;
+    xu.hard_y_extent = 2.0f;
+    const uint32_t xd = push(w.cd, w.ad, xu, AbilityObjectDesc{});
+    CombatConfig cfg;
+    cfg.short_range_cutoff = 51.0f;
+    w.make(GameMode::Land, std::vector<PlayerInfo>(3), cfg);
+    w.add(1, ad, 0, Vec3{-500.0f, 0.0f, 0.0f});
+    w.add(2, xd, 1, Vec3{0.0f, 0.0f, 0.0f}, {1, 0, 0});
+    float mn = -1.0f, mx = -1.0f;
+    CHECK(!w.ab->pending_ranges(1, mn, mx) && mn == 0.0f && mx == 0.0f);
+    const ObjectId one[] = {1};
+    CHECK(w.ab->targeted_ability(one, kTacticalBribe, 2, -1, w.frame) == 1);
+    w.tick();  // 500 away: out of Activation_Max_Range, stays pending
+    const bool pending = w.ab->pending_ranges(1, mn, mx);
+    std::printf("bkt1 pending ranges: pending %d min %.1f max %.1f target %d\n", pending ? 1 : 0, static_cast<double>(mn),
+                static_cast<double>(mx), static_cast<int>(w.ab->pending_target(1)));
+    CHECK(pending && mn == 150.0f && mx == 200.0f && w.ab->pending_target(1) == 2);
+    CHECK(!w.ab->pending_ranges(2, mn, mx));  // the target has no pending ability
+    w.move(1, Vec3{-170.0f, 0.0f, 0.0f});     // inside [150, 200]: the pending bribe fires
+    w.tick();
+    CHECK(w.sys->owner(2) == 0 && !w.ab->pending_ranges(1, mn, mx));
+    // the min-range gate (slot 46) on a fresh pair
+    OiWorld g;
+    const uint32_t gd = push(g.cd, g.ad, oi_unit("Tyber", 100.0f, 8.0f), AbilityObjectDesc{});
+    const uint32_t gx = push(g.cd, g.ad, xu, AbilityObjectDesc{});
+    g.make(GameMode::Land, std::vector<PlayerInfo>(3), cfg);
+    g.add(1, gd, 0, Vec3{-22.0f, 0.0f, 0.0f});
+    g.add(2, gx, 1, Vec3{0.0f, 0.0f, 0.0f}, {1, 0, 0});
+    const bool in20 = g.sys->inside_min_range_of(1, 2, 20.0f), in17 = g.sys->inside_min_range_of(1, 2, 17.0f),
+               in0 = g.sys->inside_min_range_of(1, 2, 0.0f);
+    std::printf("bkt1 min-range gate: r 20 %d, r 17 %d, r 0 %d\n", in20 ? 1 : 0, in17 ? 1 : 0, in0 ? 1 : 0);
+    CHECK(in20 && !in17 && !in0);
+}
+
 // s78n t04 (TACTICAL_COMBAT §5.4.4 items 3a - 3c): a Combat_Bonus source does not buff itself (unless its type has
 // Apply_Special_Ability_To_Self_On_Creation); Specific_Faction replaces the ally test by "the target owner's faction is
 // that faction" (an unknown name: unset, with the validate's warning); Enhance_Defense appends one permanent list-0
