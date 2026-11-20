@@ -150,6 +150,7 @@
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/sim_rng.hpp"
 #include "alamo/data/game_database.hpp"
+#include "alamo/game/open_game_data.hpp"  // ref4 t05
 #include "alamo/galactic/all_pairs.hpp"
 #include "alamo/galactic/cadence.hpp"
 #include "alamo/galactic/fleet_path.hpp"
@@ -1220,19 +1221,14 @@ static int headless_main(int argc, char** argv) {
     // Game data through the VFS (real install) or a loose folder (extracted text).
     std::unique_ptr<alamo::FileProvider> provider;
     if (!opt.game_dir.empty()) {
-        std::string err;
         alamo::IssueSink issues;  // ums2: the VFS findings (nothing reads them here yet)
-        auto env = alamo::vfs::ModEnvironment::open(opt.game_dir, opt.game_args, issues, &err, alamo::vfs::ModEnvironmentOptions{std::nullopt, {}, false});
-        if (!env) {
-            std::fprintf(stderr, "%s\n", err.c_str());
+        alamo::game::OpenedGameData data = alamo::game::open_game_data(opt.game_dir, opt.game_args, issues);  // ref4 t05
+        if (!data.ok()) {  // the VFS error or the D1 base-EaW refusal
+            std::fprintf(stderr, "%s\n", data.error.c_str());
             return 1;
         }
-        if (env->refused()) {  // D1: a base-EaW mod in the stack
-            std::fprintf(stderr, "%s\n", env->refusal().c_str());
-            return 1;
-        }
-        if (!opt.quiet) std::printf("%s\n", env->vfs().describe().c_str());
-        provider = std::move(env);
+        if (!opt.quiet) std::printf("%s\n", data.env->vfs().describe().c_str());
+        provider = std::move(data.env);
     } else if (!opt.data_dir.empty()) {
         provider = std::make_unique<alamo::DirectoryProvider>(opt.data_dir);
     } else {

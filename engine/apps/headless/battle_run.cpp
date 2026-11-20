@@ -14,6 +14,7 @@
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/host_fs.hpp"
 #include "alamo/data/game_database.hpp"
+#include "alamo/game/open_game_data.hpp"  // ref4 t05
 #include "alamo/galactic/campaign.hpp"
 #include "alamo/galactic/conflicts.hpp"
 #include "alamo/galactic/galactic_rules.hpp"
@@ -30,22 +31,6 @@
 
 #ifdef ALAMO_SIM_HAVE_BATTLES
 namespace {
-
-std::string env_value(const char* name) {
-#ifdef _MSC_VER
-    char* v = nullptr;
-    size_t len = 0;
-    std::string out;
-    if (_dupenv_s(&v, &len, name) == 0 && v) {
-        out = v;
-        std::free(v);
-    }
-    return out;
-#else
-    const char* v = std::getenv(name);
-    return v ? std::string(v) : std::string();
-#endif
-}
 
 }  // namespace
 
@@ -70,21 +55,17 @@ int battle_run(const MapRunOptions& opt, const std::string& data_dir, const Batt
     if (!data_dir.empty()) {
         files = std::make_unique<DirectoryProvider>(data_dir);
     } else {
-        const std::string root = opt.game_dir.empty() ? env_value("ALAMO_FOC_DATA") : opt.game_dir;
-        if (root.empty()) {
+        IssueSink issues;  // ums2: the VFS findings (nothing reads them here yet)
+        game::OpenedGameData opened = game::open_game_data(opt.game_dir, opt.game_args, issues);  // ref4 t05
+        if (opened.status == game::OpenedGameData::Status::NoData) {
             std::fprintf(stderr, "--battles needs --game <corruption dir>, --data <dir> or ALAMO_FOC_DATA\n");
             return 2;
         }
-        IssueSink issues;  // ums2: the VFS findings (nothing reads them here yet)
-        std::unique_ptr<vfs::ModEnvironment> env = vfs::ModEnvironment::open(root, opt.game_args, issues, &err, vfs::ModEnvironmentOptions{std::nullopt, {}, false});
-        if (!env) {
-            std::fprintf(stderr, "%s\n", err.c_str());
+        if (!opened.ok()) {  // the VFS error or the D1 base-EaW refusal
+            std::fprintf(stderr, "%s\n", opened.error.c_str());
             return 2;
         }
-        if (env->refused()) {  // D1: a base-EaW mod in the stack
-            std::fprintf(stderr, "%s\n", env->refusal().c_str());
-            return 2;
-        }
+        std::unique_ptr<vfs::ModEnvironment> env = std::move(opened.env);
         vfs_files = &env->vfs();
         files = std::move(env);
     }

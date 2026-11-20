@@ -27,44 +27,28 @@
 #include "alamo/sim/scenario.hpp"
 #include "alamo/terrain/ted.hpp"
 #include "alamo/vfs/mod_environment.hpp"
+#include "alamo/game/open_game_data.hpp"  // ref4 t05
 
 namespace {
-
-std::string env_or_empty(const char* name) {
-#ifdef _MSC_VER
-    char* v = nullptr;
-    size_t len = 0;
-    std::string out;
-    if (_dupenv_s(&v, &len, name) == 0 && v) {
-        out = v;
-        std::free(v);
-    }
-    return out;
-#else
-    const char* v = std::getenv(name);
-    return v ? std::string(v) : std::string();
-#endif
-}
 
 double ms_since(std::chrono::steady_clock::time_point t) {
     return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t).count();
 }
 
-// ums2: the game's files through the one mod environment (mount_game's plan). nullptr after printing the VFS error or
-// the D1 base-EaW refusal to stderr.
-std::unique_ptr<alamo::vfs::ModEnvironment> open_game(const std::string& root, const std::vector<std::string>& args) {
+// ums2 / ref4 t05: the game's files through open_game_data (--game, else ALAMO_FOC_DATA). nullptr after printing `usage`
+// (no folder), the VFS error or the D1 base-EaW refusal to stderr.
+std::unique_ptr<alamo::vfs::ModEnvironment> open_game(const std::string& game_dir, const std::vector<std::string>& args, const char* usage) {
     alamo::IssueSink issues;  // the VFS findings (nothing reads them here yet)
-    std::string err;
-    auto env = alamo::vfs::ModEnvironment::open(root, args, issues, &err, alamo::vfs::ModEnvironmentOptions{std::nullopt, {}, false});
-    if (!env) {
-        std::fprintf(stderr, "%s\n", err.c_str());
+    alamo::game::OpenedGameData opened = alamo::game::open_game_data(game_dir, args, issues);
+    if (opened.status == alamo::game::OpenedGameData::Status::NoData) {
+        std::fprintf(stderr, "%s\n", usage);
         return nullptr;
     }
-    if (env->refused()) {
-        std::fprintf(stderr, "%s\n", env->refusal().c_str());
+    if (!opened.ok()) {
+        std::fprintf(stderr, "%s\n", opened.error.c_str());
         return nullptr;
     }
-    return env;
+    return std::move(opened.env);
 }
 
 }  // namespace
@@ -76,12 +60,7 @@ int economy_run(const MapRunOptions& opt, const std::string& data_dir) {
     if (!data_dir.empty()) {
         files = std::make_unique<DirectoryProvider>(data_dir);
     } else {
-        const std::string root = opt.game_dir.empty() ? env_or_empty("ALAMO_FOC_DATA") : opt.game_dir;
-        if (root.empty()) {
-            std::fprintf(stderr, "--economy needs --game <corruption dir>, --data <dir> or ALAMO_FOC_DATA\n");
-            return 2;
-        }
-        files = open_game(root, opt.game_args);
+        files = open_game(opt.game_dir, opt.game_args, "--economy needs --game <corruption dir>, --data <dir> or ALAMO_FOC_DATA");
         if (!files) return 2;
     }
     std::vector<std::string> diag;
@@ -162,12 +141,7 @@ int story_run(const MapRunOptions& opt, const std::string& data_dir, const std::
     if (!data_dir.empty()) {
         files = std::make_unique<DirectoryProvider>(data_dir);
     } else {
-        const std::string root = opt.game_dir.empty() ? env_or_empty("ALAMO_FOC_DATA") : opt.game_dir;
-        if (root.empty()) {
-            std::fprintf(stderr, "--story needs --game <corruption dir>, --data <dir> or ALAMO_FOC_DATA\n");
-            return 2;
-        }
-        files = open_game(root, opt.game_args);
+        files = open_game(opt.game_dir, opt.game_args, "--story needs --game <corruption dir>, --data <dir> or ALAMO_FOC_DATA");
         if (!files) return 2;
     }
     std::vector<std::string> diag;
@@ -291,13 +265,9 @@ int story_run(const MapRunOptions& opt, const std::string& data_dir, const std::
 
 int map_run(const MapRunOptions& opt) {
     using namespace alamo;
-    const std::string root = opt.game_dir.empty() ? env_or_empty("ALAMO_FOC_DATA") : opt.game_dir;
-    if (root.empty()) {
-        std::fprintf(stderr, "--map needs --game <corruption dir> or ALAMO_FOC_DATA\n");
-        return 2;
-    }
+    const std::string root = alamo::game::game_data_root(opt.game_dir);
     std::string err;
-    const auto files = open_game(root, opt.game_args);
+    const auto files = open_game(opt.game_dir, opt.game_args, "--map needs --game <corruption dir> or ALAMO_FOC_DATA");
     if (!files) return 2;
     auto t0 = std::chrono::steady_clock::now();
     objects::ObjectTypeDatabase db;
