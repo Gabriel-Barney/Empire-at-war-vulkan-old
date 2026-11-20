@@ -167,6 +167,12 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
     target_link_libraries(alamo_sim_tru1_tests PRIVATE alamo_sim alamo_vfs alamo_test_support)
     add_test(NAME alamo_sim_tru1_tests COMMAND alamo_sim_tru1_tests)
     set_tests_properties(alamo_sim_tru1_tests PROPERTIES TIMEOUT 600)
+    # trl2 / tru2 (lane trl2-a): land population shares, retreat cancel / end, space retreat heading.
+    add_executable(alamo_sim_trl2_tests sim/tests/test_battle_trl2.cpp)
+    target_link_libraries(alamo_sim_trl2_tests PRIVATE alamo_sim alamo_vfs alamo_test_support)
+    target_compile_definitions(alamo_sim_trl2_tests PRIVATE "ALAMO_SIM_TESTDATA=\"${CMAKE_CURRENT_SOURCE_DIR}/sim/testdata\"")
+    add_test(NAME alamo_sim_trl2_tests COMMAND alamo_sim_trl2_tests)
+    set_tests_properties(alamo_sim_trl2_tests PROPERTIES TIMEOUT 600)
     # r3g t01 / t05 / t06: landing Land / Takeoff clip timing, crush kind and clones, crouch under SPREAD_OUT.
     add_executable(alamo_sim_r3g_tests sim/tests/test_battle_r3g.cpp)
     target_link_libraries(alamo_sim_r3g_tests PRIVATE alamo_sim alamo_vfs alamo_test_support)

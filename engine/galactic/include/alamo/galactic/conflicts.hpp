@@ -69,8 +69,12 @@ struct ConflictTypeInfo {
     uint64_t categories = 0;                  // CategoryMask
     int32_t population = 0;                   // Population_Value
     int32_t space_population_override = -1;   // Space_Override_Population_Value (-1 = not set)
+    int32_t land_population_override = -1;    // Land_Override_Population_Value (-1 = not set; trl2 t02, pop(T, 1) 0x373500)
     bool hero = false;                        // Is_Named_Hero
     bool super_killer = false;                // Is_Super_Weapon_Killer [L field name]
+    // trl2 t07 (BATTLE_TRANSITIONS §2.3 rule 1, bit 0x2c of table 2 [H]): TACTICAL_SUPER_WEAPON in the space behaviours;
+    // such a unit always goes to the space battle's start force.
+    bool super_weapon = false;
     bool prevents_story_autoresolve = false;  // Prevents_Story_Campaign_Autoresolve (MCX4_T09_RE_ANSWERS Q5)
     std::vector<std::pair<uint8_t, float>> strength_bonus;  // Unit_Strength_* pairs of <Abilities> (Q9; ArCombatant)
     // mcx4 t05 (MCX4_RE_ANSWERS_TACTICAL §9 / §13): Respawn_Whole_Team_When_Killed (type +0x16) on a company member: its

@@ -761,7 +761,7 @@
 {"GameObjectType", "Additional_Population_Capacity", 0x6, LedgerState::Consumed, "docs/re/A2GAL_READINGS.md", 94, 1},
 {"GameObjectType", "Minimum_Destruction_Survivor_Count", 0x6, LedgerState::Consumed, "", 1, 1},
 {"GameObjectType", "Maximum_Destruction_Survivor_Count", 0x6, LedgerState::Consumed, "", 1, 1},
-{"GameObjectType", "Population_Value", 0x6, LedgerState::Consumed, "docs/re/A2GAL_READINGS.md", 172, 1},
+{"GameObjectType", "Population_Value", 0x6, LedgerState::Verified, "docs/re/A2GAL_READINGS.md", 172, 1},
 {"GameObjectType", "Space_Override_Population_Value", 0x6, LedgerState::Consumed, "docs/re/AI_GALACTIC_3.md", 6, 1},
 {"GameObjectType", "Land_Override_Population_Value", 0x6, LedgerState::Consumed, "docs/re/AI_GALACTIC_3.md", 1, 1},
 {"GameObjectType", "Is_Branched_Map_Discardable", 0x0, LedgerState::Consumed, "docs/re/OBJECT_TYPES.md", 43, 1},

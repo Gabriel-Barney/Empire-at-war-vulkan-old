@@ -414,7 +414,7 @@ bool TacticalBattle::add_built_reserve(int32_t owner, uint32_t type, objects::Ob
     p.reserve = true;
     p.built = true;  // no galactic counterpart: not in the battle result
     const galactic::ConflictTypeInfo& ti = rules_->type(type);
-    p.pop = static_cast<float>(ti.space_population_override >= 0 ? ti.space_population_override : ti.population);
+    p.pop = participant_pop(ti);  // trl2 t02: pop(T, mode) 0x373500, land / space override
     const auto& types = galaxy_->rules().types;
     p.power = type < types.size() ? types[type].ai_combat_power : 0.0f;
     for (const auto& [mt, n] : ti.members)

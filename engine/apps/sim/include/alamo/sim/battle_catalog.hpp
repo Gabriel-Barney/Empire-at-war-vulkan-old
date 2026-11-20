@@ -96,6 +96,9 @@ public:
     // mcx4 t10 (SKIRMISH_SETUP §3, build time 0x496f00 [H]): GC Tactical_Build_Time_Multiplier (FoC 1.0).
     float tactical_build_time_multiplier() const { return tactical_build_time_mult_; }
     bool use_reinforcement_points() const { return use_reinforcement_points_; }  // Use_Reinforcement_Points (GC +0x118a0; land drops)
+    // trl2 t02 (BKG1_RE_ANSWERS §7.1, 0x2aba70 [H]): GC Allow_Reinforcement_Percentage_Normalized (+0x10CC, FoC 0.0): the
+    // population sum rounds up when its fraction exceeds this.
+    float allow_reinforcement_fraction() const { return allow_reinforcement_fraction_; }
     // mcx4 tac2 (MCX4_T10_RE_ANSWERS §16 / §16a [H]): Apply_Elevated_Vulnerability 0x3a8550 - the land pair
     // Elevated_Vulnerability_Duration / _Factor (GC +0x1177c / +0x11780), the space pair Space_Elevated_Vulnerability_* (GC
     // +0x11784 / +0x11788). GameConstants ctor 0x2c91c0 defaults: 15 s and -3.0 for both pairs (FoC: land 3 s / -2.0,
@@ -279,6 +282,7 @@ private:
     float tactical_build_time_mult_ = 1.0f;
     float control_point_victory_seconds_ = 30.0f;
     bool use_reinforcement_points_ = true;
+    float allow_reinforcement_fraction_ = 0.0f;
     float elev_vuln_secs_ = 15.0f, elev_vuln_factor_ = -3.0f, space_elev_vuln_secs_ = 15.0f, space_elev_vuln_factor_ = -3.0f;
     int32_t skirmish_reinforce_delay_ = 90;
     float override_death_persistence_ = 0.0f;

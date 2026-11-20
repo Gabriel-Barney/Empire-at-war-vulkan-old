@@ -85,6 +85,7 @@ BattleCatalog::BattleCatalog(const objects::GameObjectTypes& types, const FilePr
         garrisoned_range_mult_ = constants->get_float("Garrisoned_Max_Attack_Distance_Multiplier", garrisoned_range_mult_);
         tactical_build_time_mult_ = constants->get_float("Tactical_Build_Time_Multiplier", tactical_build_time_mult_);
         use_reinforcement_points_ = constants->get_bool("Use_Reinforcement_Points", use_reinforcement_points_);  // a1h t06
+        allow_reinforcement_fraction_ = constants->get_float("Allow_Reinforcement_Percentage_Normalized", allow_reinforcement_fraction_);  // trl2 t02
         // mcx4 tac2 (MCX4_T10_RE_ANSWERS §16, §19, §18)
         elev_vuln_secs_ = constants->get_float("Elevated_Vulnerability_Duration", elev_vuln_secs_);
         elev_vuln_factor_ = constants->get_float("Elevated_Vulnerability_Factor", elev_vuln_factor_);

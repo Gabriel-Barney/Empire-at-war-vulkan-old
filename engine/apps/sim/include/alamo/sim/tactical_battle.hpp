@@ -843,6 +843,12 @@ public:
     // Tactical HUD population (ui ask 7, presentation reads): the population of `player`'s live, not retreated deployed
     // participants (the reinforcement cap rule's count) and the space unit cap (Space_Tactical_Unit_Cap); land: -1 (no
     // tactical cap in the S10 battle).
+    // trl2 t02 (BKG1_RE_ANSWERS §7.1, used 0x2aba70 / registration 0x29bcd0 [H]): on land, used is the float32 sum, in
+    // registration (object id) order, of the shares of `player`'s registered live objects: a company member holds
+    // Population_Value / (its company's Company_Units count), a single object its whole Population_Value, a timed landing
+    // object still landing or unloading the whole carried company's (its members out so far count only once the unload
+    // finishes); skirmish start forces are never registered. The sum is (int)sum, plus 1 when its fraction exceeds
+    // Allow_Reinforcement_Percentage_Normalized (FoC 0.0: any fraction rounds up).
     float population_used(int32_t player) const;
     float population_cap(int32_t player) const;
     // World unit icons (ui ask 4, presentation read; QA U7): every live, not retreated, movable unit with the id standing
@@ -1861,6 +1867,12 @@ private:
     };
     void service_damage_tracking();
     void add_participant(objects::ObjectHandle g, int32_t owner, uint8_t side, bool reserve, bool starbase, bool structure);
+    // trl2 t02 (0x373500 pop(T, mode)): the mode's override (Space_ / Land_Override_Population_Value) when >= 0, else
+    // Population_Value.
+    float participant_pop(const galactic::ConflictTypeInfo& ti) const {
+        const int32_t o = space_ ? ti.space_population_override : ti.land_population_override;
+        return static_cast<float>(o >= 0 ? o : ti.population);
+    }
     // a1i t04: `member_first` / `member_count` spawn a member range of an already deployed participant (one landing
     // unload step: one team chunk or one vehicle); the default spawns everything once.
     void deploy(TacticalMode& mode, uint32_t participant, SimRng& rng, uint32_t member_first = 0,

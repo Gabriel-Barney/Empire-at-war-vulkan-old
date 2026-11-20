@@ -265,6 +265,34 @@ void TacticalBattle::fleet_tick(const TacticalMode& mode) {
 // ---- P host (owner: game host agent): human reinforcements (Reinforce, COMMANDS.md id 12) ------------------------------
 
 float TacticalBattle::population_used(int32_t player) const {
+    if (!space_) {
+        // trl2 t02 (BKG1_RE_ANSWERS §7.1 [H]). 0x29bcd0: the company type's object gets the whole pop, a listed member
+        // pop / Company_Units count. Skirmish start forces (0x2a4fc0 -> 0x29e960 with the population flag off) are not
+        // registered; campaign arrivals are (0x2a00b0). A timed landing in flight holds the whole company (0x2b5fe0) and
+        // its unloaded members join only at the unload's finish (0x6438a0).
+        const auto registered = [&](const Participant& P) { return P.owner == player && !(cfg_.skirmish && !P.reserve); };
+        std::vector<std::pair<objects::ObjectId, float>> list;
+        std::vector<objects::ObjectId> held;
+        for (const Landing& l : landings_) {
+            if (!l.timed || l.state == 3 || l.participant >= parts_.size() || !registered(parts_[l.participant])) continue;
+            list.emplace_back(l.id, parts_[l.participant].pop);
+            held.insert(held.end(), l.units.begin(), l.units.end());
+        }
+        for (const Unit& u : units_) {
+            if (!u.alive || u.retreated || u.participant >= parts_.size()) continue;
+            const Participant& P = parts_[u.participant];
+            if (!registered(P) || P.pop == 0.0f) continue;
+            if (std::find(held.begin(), held.end(), u.id) != held.end()) continue;
+            int32_t members = 0;
+            for (const auto& [mt, n] : rules_->type(P.type).members) members += n;
+            list.emplace_back(u.id, members > 0 ? P.pop / static_cast<float>(members) : P.pop);
+        }
+        std::sort(list.begin(), list.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        float sum = 0.0f;
+        for (const auto& e : list) sum += e.second;
+        const float whole = std::floor(sum);
+        return sum - whole > catalog_->allow_reinforcement_fraction() ? whole + 1.0f : whole;
+    }
     float used = 0.0f;
     std::vector<uint8_t> counted(parts_.size(), 0);
     for (const Unit& u : units_)

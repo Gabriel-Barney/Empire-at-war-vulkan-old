@@ -3100,10 +3100,11 @@ float BattleAi::population_cap(int32_t player) {
     return std::min(planet_cap, static_cast<float>(capacity));
 }
 
-// §3.2: Σ population shares of the player's live battle objects [port: per galactic participant, charged once], then
+// §3.2: Σ population shares of the player's live battle objects [port, space: per galactic participant, charged once], then
 // (int)sum + 1 when the fraction exceeds Allow_Reinforcement_Percentage_Normalized (shipped 0.0: any fraction rounds up).
 float BattleAi::population_used(int32_t player) {
     lane_live_read("population_used");
+    if (!b_->space_) return b_->population_used(player);  // trl2 t02: the land list sum (BKG1_RE_ANSWERS §7.1), rounded
     float pop = 0.0f;
     std::vector<uint8_t> counted(b_->parts_.size(), 0);
     for (const TacticalBattle::Unit& u : b_->units_)

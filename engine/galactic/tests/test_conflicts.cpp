@@ -510,6 +510,20 @@ void test_force_split() {
     c.factions[0].space_unit_cap = 3.0f;
     w.cm->split_space_forces(pEmpire, units, f);
     CHECK(f.start.size() == 3 && f.reserve.size() == 6);
+    // trl2 t07 (BATTLE_TRANSITIONS §2.3 rule 1): a TACTICAL_SUPER_WEAPON unit always starts, without using the cap, in the
+    // cap split and in the forced-type / flagship branch.
+    c.types[tDeathStar].super_weapon = true;
+    c.types[tDeathStar].population = 10;
+    units.insert(units.begin(), mk(tDeathStar));
+    w.cm->split_space_forces(pEmpire, units, f);
+    CHECK(f.start.size() == 4 && f.reserve.size() == 6);
+    CHECK(!f.start.empty() && f.start[0] == units[0]);
+    c.factions[0].space_unit_cap = 0.0f;
+    w.cm->split_space_forces(pEmpire, units, f);
+    CHECK(f.start.size() == 1 && f.reserve.size() == 9);
+    w.cm->split_space_forces(pEmpire, units, f, tCorvette, false, {});
+    CHECK(f.start.size() == 2 && f.reserve.size() == 8);
+    CHECK(f.start.size() == 2 && f.start[0] == units[0] && f.start[1] == units[3]);
 }
 
 // ---- 4. conflict flow ---------------------------------------------------------------------------------------------

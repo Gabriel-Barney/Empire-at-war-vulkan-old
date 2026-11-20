@@ -142,8 +142,11 @@ bool load_conflict_rules(const FileProvider& provider, const data::GameDatabase&
         i.population = types.columns().population_value[t];
         if (!types.get_string(t, objects::tags::Space_Override_Population_Value).empty())
             i.space_population_override = types.get(t, objects::tags::Space_Override_Population_Value);
+        if (!types.get_string(t, objects::tags::Land_Override_Population_Value).empty())
+            i.land_population_override = types.get(t, objects::tags::Land_Override_Population_Value);
         i.hero = types.get(t, objects::tags::Is_Named_Hero);
         i.super_killer = types.get(t, objects::tags::Is_Super_Weapon_Killer);
+        i.super_weapon = types.has_behavior(t, objects::BehaviorSet::Space, objects::beh::TacticalSuperWeapon);  // trl2 t07
         i.prevents_story_autoresolve = types.get(t, objects::tags::Prevents_Story_Campaign_Autoresolve);
         i.respawn_whole_team = types.get(t, objects::tags::Respawn_Whole_Team_When_Killed);  // mcx4 t05 (§9 / §13)
         i.company = !types.get(t, objects::tags::Company_Units).empty();
@@ -984,6 +987,10 @@ void ConflictManager::split_space_forces(int32_t player, const std::vector<Objec
     std::vector<uint32_t> plain;
     for (uint32_t i = 0; i < units.size(); ++i) {
         const uint32_t t = static_cast<uint32_t>(store.type(units[i]));
+        if (rules_->type(t).super_weapon) {  // trl2 t07: rule 1 [port: outside the cap split, no cap used]
+            start[i] = 1;
+            continue;
+        }
         if (!rules_->type(t).members.empty()) {
             if (cap >= 1.0f) {
                 start[i] = 1;
@@ -1051,7 +1058,7 @@ void ConflictManager::split_space_forces(int32_t player, const std::vector<Objec
 }
 
 // story t07: 0x2bd500 rules 2 / 3 (BT §2.3). [port] a forced type / flagship with no matching unit falls through to the next
-// rule (rule 1, the always-deployed types, is not modelled, as in the cap split).
+// rule. trl2 t07: rule 1 holds in every branch: a TACTICAL_SUPER_WEAPON unit always goes to the start force.
 void ConflictManager::split_space_forces(int32_t player, const std::vector<ObjectHandle>& units, BattleForces& out, uint32_t forced_type,
                                          bool flagship, const std::vector<ObjectHandle>& leads) const {
     size_t pick = units.size();
@@ -1068,7 +1075,9 @@ void ConflictManager::split_space_forces(int32_t player, const std::vector<Objec
     out.player = player;
     out.start.clear();
     out.reserve.clear();
-    for (size_t i = 0; i < units.size(); ++i) (i == pick ? out.start : out.reserve).push_back(units[i]);
+    for (size_t i = 0; i < units.size(); ++i)
+        (i == pick || rules_->type(static_cast<uint32_t>(sim_->store().type(units[i]))).super_weapon ? out.start : out.reserve)
+            .push_back(units[i]);
 }
 
 // OI galactic: Raid_Force_* test 0x432e20 (TACTICAL_GAPS 4.2), the battle host's reading: required faction, every
