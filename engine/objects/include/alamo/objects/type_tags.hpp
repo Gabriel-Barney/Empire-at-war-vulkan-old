@@ -487,6 +487,7 @@ struct SubObjectsTag {
     X(Bool, Is_Special_Weapon_In_Space, false)                                                                        \
     X(Int, Special_Weapon_Index, 0)                                                                                   \
     X(Ref, Land_Bomber_Type, 0)                                                                                       \
+    X(Ref, Retreat_Self_Destruct_Explosion, 0)                                                                        \
     X(List, Asteroid_Damage_Hit_Particles, 0)                                                                         \
     X(Int, Special_Weapon_Target_Action_Index, 0)                                                                     \
     X(Float, TSW_Start_Distance_From_Target, 0.0f)                                                                    \

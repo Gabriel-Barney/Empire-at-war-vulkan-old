@@ -158,7 +158,7 @@ bool TacticalBattle::rt_flight_tick(TacticalMode& mode) {
             !parts_[u.participant].starbase || !st.alive(u.h))
             continue;
         // ledger: consumes GameObjectType.Retreat_Self_Destruct_Explosion
-        const objects::TypeIndex x = types.get_type_ref(static_cast<objects::TypeIndex>(u.type), "Retreat_Self_Destruct_Explosion");
+        const objects::TypeIndex x = types.get(static_cast<objects::TypeIndex>(u.type), objects::tags::Retreat_Self_Destruct_Explosion);
         if (x != objects::kNone && x < types.size()) spawn_particle(mode, static_cast<int32_t>(x), st.position(u.h), st.owner(u.h));
     }
     return true;
