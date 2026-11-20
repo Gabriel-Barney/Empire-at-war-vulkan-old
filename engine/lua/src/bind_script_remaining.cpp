@@ -55,19 +55,13 @@ constexpr char kAiScriptKey[] = "alamo.ai.script";          // bind_ai.cpp: the 
 
 // ---------------------------------------------------------------- small helpers
 
-int push_nil(Call& c) {
-    lua_pushnil(c.L);
-    return 1;
-}
-int push_bool(Call& c, bool b) {
-    lua_pushboolean(c.L, b ? 1 : 0);
-    return 1;
-}
+using detail::push_nil;  // ref5 t03: vm_internal.hpp
+using detail::push_bool;  // ref5 t03: vm_internal.hpp
 int push_num(Call& c, double d) {
     lua_pushnumber(c.L, d);
     return 1;
 }
-bool is_bool(const Call& c, int i) { return c.has(i) && lua_type(c.L, c.idx(i)) == LUA_TBOOLEAN; }
+using detail::is_bool;  // ref5 t03: vm_internal.hpp
 bool to_bool(const Call& c, int i) { return lua_toboolean(c.L, c.idx(i)) != 0; }
 bool is_table(const Call& c, int i) { return c.has(i) && lua_type(c.L, c.idx(i)) == LUA_TTABLE; }
 
@@ -154,33 +148,8 @@ std::vector<ObjectHandle> tf_units(Call& c, int32_t tf) {
     return out;
 }
 
-// "Something which defines a position": a live game object, a PositionWrapper, an AI target with an object, or a task
-// force (its first live unit [port]). `object` receives the object when there is one.
-bool position_arg(Call& c, int i, Vec3& out, ObjectHandle* object = nullptr) {
-    if (!c.has(i) || lua_type(c.L, c.idx(i)) != LUA_TUSERDATA) return false;
-    const auto* ud = static_cast<const Ud*>(lua_touserdata(c.L, c.idx(i)));
-    if (!ud) return false;
-    ObjectHandle h;
-    if (ud->cls == detail::cls_game_object()) {
-        if (detail::object_alive(*c.vm, *ud)) h = detail::object_handle(*ud);
-    } else if (ud->cls == cls_position()) {
-        out = position_of(*ud);
-        return true;
-    } else if (ud->cls == cls_target()) {
-        AiScriptHost* a = ai(c);
-        if (a) h = a->target_object(ud->id);
-        // mcx8 t01 (AI_TACTICAL §3.2): a region target (an AI hint zone) has no game object but a position, its zone
-        // centre; AotCW's BusyTacticalFreeStore passes such a target to Are_On_Opposite_Sides_Of_Shield.
-        if (a && !(h && store(c)->alive(h)) && a->target_position(ud->id, out)) return true;
-    } else if (is_task_force_class(ud->cls)) {
-        const std::vector<ObjectHandle> units = tf_units(c, ud->id);
-        if (!units.empty()) h = units.front();
-    }
-    if (!h || !store(c)->alive(h)) return false;
-    out = store(c)->position(h);
-    if (object) *object = h;
-    return true;
-}
+using detail::PosArg;  // ref5 t03: vm_internal.hpp
+using detail::position_arg;
 
 using detail::ai_arg;  // any wrapper argument -> AiArg (bind_ai.cpp's rule)
 // An "object or AI target" argument -> its object (null when the AI target has none or the object is dead).
@@ -296,7 +265,7 @@ int g_sfx_manager(Call& c) {
 int g_point_in(Call& c, uint32_t mask, const char* name) {
     if (c.nargs != 1) return c.script_error_stop("%s -- invalid number of parameters. Expected 1, got %d.", name, c.nargs);
     Vec3 p{};
-    if (!position_arg(c, 1, p)) return c.script_error_stop("%s -- could not extract a position from parameter 1.", name);
+    if (position_arg(c, 1, p) != PosArg::Ok) return c.script_error_stop("%s -- could not extract a position from parameter 1.", name);
     return push_bool(c, point_in_field(c, p, mask));
 }
 int g_is_point_in_asteroid_field(Call& c) { return g_point_in(c, kFieldAsteroid, "Is_Point_In_Asteroid_Field"); }
@@ -310,7 +279,7 @@ int g_find_nearest_space_field(Call& c) {
     if (c.nargs != 1 && c.nargs != 2)
         return c.script_error_stop("%s -- invalid number of paraneters. Expected 1 or 21, got %d.", kName, c.nargs);  // [H] text
     Vec3 p{};
-    if (!position_arg(c, 1, p)) return c.script_error_stop("%s -- could not deduce source position from parameter 1", kName);
+    if (position_arg(c, 1, p) != PosArg::Ok) return c.script_error_stop("%s -- could not deduce source position from parameter 1", kName);
     uint32_t mask = kFieldAsteroid | kFieldIonStorm | kFieldNebula;  // default 0x1c (§1.6)
     if (c.nargs == 2) {
         if (!c.is_string(2)) return c.script_error_stop("%s -- invalid type for parameter 2. Expected string.", kName);
@@ -328,8 +297,8 @@ int g_are_on_opposite_sides_of_shield(Call& c) {
     if (c.nargs != 2 && c.nargs != 4)
         return c.script_error_stop("%s -- invalid number of parameters. Expected 2 or 4, got %d.", kName, c.nargs);
     Vec3 a{}, b{};
-    if (!position_arg(c, 1, a)) return c.script_error_stop("%s -- could not extract a position from parameter 1.", kName);
-    if (!position_arg(c, 2, b)) return c.script_error_stop("%s -- could not extract a position from parameter 2.", kName);
+    if (position_arg(c, 1, a) != PosArg::Ok) return c.script_error_stop("%s -- could not extract a position from parameter 1.", kName);
+    if (position_arg(c, 2, b) != PosArg::Ok) return c.script_error_stop("%s -- could not extract a position from parameter 2.", kName);
     int32_t player = -1;
     bool friendly = false;
     if (c.nargs == 4) {
@@ -773,7 +742,7 @@ int m_divert(Call& c) {
         return push_bool(c, false);
     }
     Vec3 p{};
-    if (!position_arg(c, 1, p)) return c.script_error_stop("%s -- invalid type for parameter 1; expected something which defines a position", kName);
+    if (position_arg(c, 1, p) != PosArg::Ok) return c.script_error_stop("%s -- invalid type for parameter 1; expected something which defines a position", kName);
     if (c.nargs == 2 && !c.is_number(2)) return c.script_error_stop("%s -- invalid type for parameter 2; expected number.", kName);
     // [port] the distance limit (move params +0x54) is not modelled by the movement hosts.
     if (!hk->move_to(self, p)) {
@@ -1456,7 +1425,7 @@ int m_tf_bombing_run(Call& c) {
     if (!c.userdata(1, detail::cls_game_object()) && !c.userdata(1, cls_target()))
         return c.script_error_stop("%s -- invalid type for parameter 1. Exepcted game objecdt or AI target", kName);  // [H] text
     Vec3 pos{};
-    if (!position_arg(c, 1, pos)) return c.script_warning("%s -- target is already dead", kName);
+    if (position_arg(c, 1, pos) != PosArg::Ok) return c.script_warning("%s -- target is already dead", kName);
     if (AiTacticalScriptHost* t = ai_tactical(c)) {
         const int32_t s = t->tf_bombing_run(c.self->id, a, AiPoint{});
         if (s != -2) return push_ai_status(c, s);
@@ -1482,7 +1451,7 @@ int m_tf_fire_orbital_bombardment(Call& c) {
     constexpr const char* kName = "LandTaskForceClass::Fire_Orbital_Bombardment";
     if (c.nargs != 1) return c.script_error_stop("%s -- invalid number of parameters. Expected 1, got %d.", kName, c.nargs);
     Vec3 pos{};
-    if (!position_arg(c, 1, pos)) return c.script_error_stop("%s -- could not extract a position from parameter 1.", kName);
+    if (position_arg(c, 1, pos) != PosArg::Ok) return c.script_error_stop("%s -- could not extract a position from parameter 1.", kName);
     if (AiTacticalScriptHost* t = ai_tactical(c)) {
         AiPoint pt;
         pt.present = true;

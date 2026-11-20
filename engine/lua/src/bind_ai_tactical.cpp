@@ -36,14 +36,8 @@ int32_t script_of(lua_State* L) {
 uint32_t cls(const char* name) { return detail::class_id(name); }
 void push_position(lua_State* L, float x, float y, float z) { detail::push_position(L, Vec3{x, y, z}); }
 
-int push_nil(Call& c) {
-    lua_pushnil(c.L);
-    return 1;
-}
-int push_bool(Call& c, bool b) {
-    lua_pushboolean(c.L, b ? 1 : 0);
-    return 1;
-}
+using detail::push_nil;  // ref5 t03: vm_internal.hpp
+using detail::push_bool;  // ref5 t03: vm_internal.hpp
 int push_num(Call& c, double d) {
     lua_pushnumber(c.L, d);
     return 1;
@@ -62,7 +56,7 @@ int push_object(Call& c, objects::ObjectHandle h) {
     return 1;
 }
 
-bool is_bool(const Call& c, int i) { return c.has(i) && lua_type(c.L, c.idx(i)) == LUA_TBOOLEAN; }
+using detail::is_bool;  // ref5 t03: vm_internal.hpp
 
 // Any wrapper argument -> AiArg (detail::ai_arg, bind_ai.cpp's rule) plus PositionWrapper -> AiPoint.
 void arg_of(Call& c, int i, AiArg& a, AiPoint& p) {

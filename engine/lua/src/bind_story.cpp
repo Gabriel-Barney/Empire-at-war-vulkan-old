@@ -36,14 +36,8 @@ uint32_t cls_event() {
     return c;
 }
 
-int push_nil(Call& c) {
-    lua_pushnil(c.L);
-    return 1;
-}
-int push_bool(Call& c, bool b) {
-    lua_pushboolean(c.L, b ? 1 : 0);
-    return 1;
-}
+using detail::push_nil;  // ref5 t03: vm_internal.hpp
+using detail::push_bool;  // ref5 t03: vm_internal.hpp
 
 // q6 t03 (STORY.md §2.4): the story manager's plot table - every player's plot set of the VM's game mode
 // (attach_story_table; nullptr = the VM's own model is the whole table).
@@ -246,26 +240,13 @@ const detail::Ud* planet_arg(Call& c, int i) {
 }
 
 // Position of argument 1 (0x4990b0): a live game object (also followed: `object`), a PositionWrapper, an AI target (its
-// object, else its host position) or a task force (its first live unit [port]).
+// object, else its host position) or a task force (its first live unit [port]): detail::position_arg (ref5 t03). Only a
+// game object argument is followed; an AI target's or task force's object gives its position at the call.
 bool blip_position(Call& c, StoryBlip& out) {
-    if (const detail::Ud* o = c.userdata(1, detail::cls_game_object())) {
-        if (!detail::object_alive(*c.vm, *o)) return false;
-        const Vec3 p = c.vm->host.store->position(detail::object_handle(*o));
-        out.object_id = o->id;
-        out.x = p.x;
-        out.y = p.y;
-        out.z = p.z;
-        return true;
-    }
     Vec3 p{};
-    if (const detail::Ud* w = c.userdata(1, detail::cls_position())) {
-        p = detail::position_of(*w);
-    } else {
-        objects::ObjectHandle h{};
-        if (!detail::ai_wrapper_object(c, 1, h)) return false;
-        if (h) p = c.vm->host.store->position(h);
-        else if (!detail::ai_target_position(c, 1, p)) return false;
-    }
+    objects::ObjectHandle h{};
+    if (detail::position_arg(c, 1, p, &h) != detail::PosArg::Ok) return false;
+    if (const detail::Ud* o = c.userdata(1, detail::cls_game_object())) out.object_id = o->id;
     out.x = p.x;
     out.y = p.y;
     out.z = p.z;
