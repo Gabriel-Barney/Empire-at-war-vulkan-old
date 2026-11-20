@@ -839,6 +839,7 @@ void BattleCatalog::s9_unit_fields(uint32_t t, tc::UnitDesc& u, BuildState& s) c
     // trl2 t03 (TACTICAL_GAPS §2.3.4): Earthquake_Attack / Force_Telekinesis targets need these behaviours
     u.earthquake_target = ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("EARTHQUAKE_TARGET"));
     u.telekinesis_target = ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("TELEKINESIS_TARGET"));
+    u.shield_requires_base_power = ty.get(t, objects::tags::Shield_Requires_Base_Power);
     {  // tru1 t02 (docs/re/TRU1_A_RE_ANSWERS.md A1 / A2): base shields; Shield_Requires_Base_Power defaults to true here
         static const objects::BehaviorTypeId kBaseShield = objects::behavior_type_id("BASE_SHIELD");
         static const objects::BehaviorTypeId kAffected = objects::behavior_type_id("AFFECTED_BY_SHIELD");
@@ -846,7 +847,7 @@ void BattleCatalog::s9_unit_fields(uint32_t t, tc::UnitDesc& u, BuildState& s) c
         u.base_shield = ty.has_behavior(t, objects::BehaviorSet::Union, kBaseShield) && u.base_shield_radius > 0.0f;
         u.base_shield_always_off = ty.get(t, objects::tags::Base_Shield_Always_Off);
         // ref6 t01: the tag's one default is true (kDefaults), so the old "set in XML" test was always true
-        u.base_shield_requires_power = ty.get(t, objects::tags::Shield_Requires_Base_Power);
+        u.base_shield_requires_power = u.shield_requires_base_power;
         u.affected_by_shield = ty.has_behavior(t, objects::BehaviorSet::Union, kAffected);
     }
     // HUD_GAPS §1.4: behaviour DUMMY_STAR_BASE = can repair hard points (the HUD repair cursor; can_repair_hardpoints).

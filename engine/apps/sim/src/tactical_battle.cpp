@@ -1831,7 +1831,7 @@ TacticalBattle::AttackPlan TacticalBattle::land_attack_order(TacticalMode& mode,
     const tactical::Aabb& bb = mode.bounds();
     const Vec3 tcl{std::clamp(tp.x, bb.min.x, bb.max.x), std::clamp(tp.y, bb.min.y, bb.max.y), tp.z};
     const Vec3 g = guard ? tcl : attack_stage_goal(mode, o.units, target, tcl, movers.size());
-    o.destination = {g.x, g.y};
+    o.destination = {g.x, g.y};  // (review: a staged sample passed the zone test 0x50eeb0 for M's class, so a path reaches it)
     o.flags = static_cast<uint8_t>(flags & ~kAttackBlockNoLock);  // bkt1 t05: the host-only bit stays here
     o.goal_object = -1;  // land: the block's object is attack.target
     o.attack.target = target;
@@ -2156,8 +2156,10 @@ void TacticalBattle::attack_block_service(TacticalMode& mode, SimRng& rng) {
         // lead, as land_attack_order's trim gate takes the first unit - while C 3 above reads the lead (0x41a9b0). They
         // differ only in a formation that mixes types with and without Target_Stealth_Units.
         bool hidden0 = hidden, stealthed0 = stealthed;
-        if (checked[g.front()].lead != checked[i].lead)
-            if (const Unit* m0 = unit_by_id(checked[g.front()].lead)) attack_target_unseen(st, *m0, checked[i].tid, hidden0, stealthed0);
+        // (review: the object members[0]'s own block names - a TEAM container target: the member its order names)
+        if (checked[g.front()].lead != checked[i].lead || checked[g.front()].tid != checked[i].tid)
+            if (const Unit* m0 = unit_by_id(checked[g.front()].lead))
+                attack_target_unseen(st, *m0, checked[g.front()].tid, hidden0, stealthed0);
         bool can = true;
         for (const size_t j : g) {
             const tc::CanHit c = attack_can_hit_at(checked[j].lead, checked[j].tid, tp);  // cmb2 t06: a marker by geometry

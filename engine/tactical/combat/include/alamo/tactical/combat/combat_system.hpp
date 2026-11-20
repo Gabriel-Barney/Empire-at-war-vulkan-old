@@ -500,12 +500,14 @@ struct UnitDesc {
     bool stunnable = false;                       // has STUNNABLE (0x38)
     bool earthquake_target = false;               // has EARTHQUAKE_TARGET (0x31): Earthquake_Attack accepts it
     bool telekinesis_target = false;              // has TELEKINESIS_TARGET (0x30): Force_Telekinesis accepts it
+    // Shield_Requires_Base_Power (+0x8c). ref6 t01: false is the synthetic-table default only; the catalog fills the type
+    // value (default true, objects::tags::Shield_Requires_Base_Power) here and in base_shield_requires_power below.
+    bool shield_requires_base_power = false;
     // ---- tru1 t02 (docs/re/TRU1_A_RE_ANSWERS.md A1 - A5): base shields ----
     // BASE_SHIELD (0x39) with Base_Shield_Radius (+0x21f4) > 0: a shield generator; its state machine runs every 15
     // frames (CombatSystem::service_base_shields). Always_Off types never join the shield list. requires_power is
     // Shield_Requires_Base_Power read for this behaviour, which defaults to TRUE (type ctor 0x367100; only the mobile
-    // shield generator sets it to no). cmb3 t07: its only reader is the base shield (SHIELDED regeneration 0x549250 reads
-    // no base power).
+    // shield generator sets it to no) - unlike shield_requires_base_power above, which keeps the SHIELDED reading.
     bool base_shield = false;
     float base_shield_radius = 0.0f;
     bool base_shield_always_off = false;  // Base_Shield_Always_Off (+0xe1)

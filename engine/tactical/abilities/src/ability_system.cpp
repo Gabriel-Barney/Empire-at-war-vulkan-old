@@ -489,6 +489,10 @@ bool AbilitySystem::set_active(Obj& o, uint32_t t, bool on, uint32_t frame, Obje
         if (!can(o, t, false, true, frame)) return false;
         if (active_state(o, t) && t != kBarrage) return false;
     }
+    // cmb3 t05 (b0451, ABILITIES_HARDPOINTS §2.5 [H]): 0x38a350 has no case for FIRE_LOBBING_SUPERWEAPON (47); its default
+    // returns false with nothing done (no handler, no active byte, no recharge, no event). The shot is command 25's alone. A
+    // team container fails too: every forwarded member returns false, which fails the whole call (review).
+    if (t == kFireLobbingSuperweapon) return false;
     // REMAINING_GAPS §5.3 [M]: JET_PACK (on) runs on the team itself with its target point - 0x3a38d0 reads the member's
     // record and moves the whole team; forwarding it to the members without a target would move nobody.
     if (o.is_container && !in.per_unit && !(t == kJetPack && on)) {
@@ -500,9 +504,6 @@ bool AbilitySystem::set_active(Obj& o, uint32_t t, bool on, uint32_t frame, Obje
         }
         if (t != kSpreadOut) return true;
     }
-    // cmb3 t05 (b0451, ABILITIES_HARDPOINTS §2.5 [H]): 0x38a350 has no case for FIRE_LOBBING_SUPERWEAPON (47); its default
-    // returns false with nothing done (no handler, no active byte, no recharge, no event). The shot is command 25's alone.
-    if (t == kFireLobbingSuperweapon) return false;
     handler(o, t, on, frame, target);
     if (in.mode == 1) o.active[t] = on ? 1 : 0;
     update_emitter(o);

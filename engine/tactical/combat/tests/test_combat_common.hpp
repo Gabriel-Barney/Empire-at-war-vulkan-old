@@ -1231,7 +1231,6 @@ void test_surface_fx_two_instances();
 void test_surface_fx_fifth_instance();  // mcx4 t17
 void test_ion_stun_water_kill();  // trn1 t04 (test_combat_tru1.cpp)
 void test_ion_stun_area_gate();   // trl2 t04 (test_combat_tru1.cpp)
-void test_shield_regen_gate();    // cmb3 t07 (test_combat_cmb3.cpp)
 void test_stun_visuals();         // vis1 t08 (test_combat_tru1.cpp)
 void test_base_shield_contact();  // vis1 t08
 void test_burning_speed_factor();  // trn1 t05

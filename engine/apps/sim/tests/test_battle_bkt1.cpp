@@ -466,6 +466,9 @@ void test_trim_gate_hidden(const Data& d) {
             // along an axis, inside the playable box
             const tactical::Aabb& bb = tm->bounds();
             const tactical::fog::FogOfWar* fw = TA::fog(*b);
+            // (review) both spots passable and in one region for the attacker's class, so the plan has a path
+            const mv::MovementSystem& ms = b->movement();
+            const uint32_t mask = ms.mask_of(r);
             Vec3 ep{}, rp{};
             bool spot = false;
             for (float y = bb.min.y + 40.0f; y <= bb.max.y - 40.0f && !spot; y += 40.0f)
@@ -474,12 +477,15 @@ void test_trim_gate_hidden(const Data& d) {
                     for (const std::pair<float, float> dv : {std::pair{700.0f, 0.0f}, {-700.0f, 0.0f}, {0.0f, 700.0f}, {0.0f, -700.0f}}) {
                         const float qx = x + dv.first, qy = y + dv.second;
                         if (qx < bb.min.x + 40.0f || qx > bb.max.x - 40.0f || qy < bb.min.y + 40.0f || qy > bb.max.y - 40.0f) continue;
+                        if (!mv::zone_connected(ms.regions(), mask, {qx, qy}, {x, y})) continue;
                         ep = Vec3{x, y, 0.0f};
                         rp = Vec3{qx, qy, 0.0f};
                         spot = true;
                         break;
                     }
                 }
+            std::printf("  trim gate spots: found %d, target (%.0f, %.0f), attacker (%.0f, %.0f)\n", spot ? 1 : 0,
+                        static_cast<double>(ep.x), static_cast<double>(ep.y), static_cast<double>(rp.x), static_cast<double>(rp.y));
             CHECK(spot);
             if (!spot) break;
             CHECK(b->teleport(*tm, e, ep, st.facing(st.find(e))));

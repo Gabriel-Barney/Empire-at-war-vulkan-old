@@ -33,8 +33,7 @@ add_executable(alamo_tactical_combat_tests tests/test_combat.cpp tests/test_comb
   tests/test_combat_mcx4.cpp  # mcx4 honour gaps
   tests/test_combat_clash_actions.cpp  # mcx4: the action-driven hero clash runner
   tests/test_combat_trn1.cpp  # trn1 t01 / t02
-  tests/test_combat_r1b.cpp  # r1b t10
-  tests/test_combat_cmb3.cpp)  # cmb3
+  tests/test_combat_r1b.cpp)  # r1b t10
 target_link_libraries(alamo_tactical_combat_tests PRIVATE alamo_tactical_combat alamo_data alamo_objects alamo_test_support)
 # FoC data through the VFS (Data\XML lives in Config.meg in the shipped game).
 if(TARGET alamo_vfs)

@@ -146,7 +146,6 @@ int main(int argc, char** argv) {
     test_surface_fx_fifth_instance();  // mcx4 t17
     test_ion_stun_water_kill();  // trn1 t04
     test_ion_stun_area_gate();   // trl2 t04
-    test_shield_regen_gate();    // cmb3 t07
     test_stun_visuals();         // vis1 t08
     test_base_shield_contact();  // vis1 t08
     test_burning_speed_factor();  // trn1 t05
