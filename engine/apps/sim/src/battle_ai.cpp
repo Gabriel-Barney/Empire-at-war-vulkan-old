@@ -720,7 +720,7 @@ void BattleAi::capture_l1() {
         const uint32_t gt = b_->galaxy_->planets()[planet].type;
         if (gt < b_->galaxy_->rules().types.size()) {
             const objects::TypeIndex t = b_->catalog_->types().resolve_name(b_->galaxy_->rules().types[gt].name);
-            v.tsw_planet_ok = t != objects::kNone && b_->catalog_->types().get_bool(t, "Planet_Is_Destroyable_By_TSW");
+            v.tsw_planet_ok = t != objects::kNone && b_->catalog_->types().get(t, objects::tags::Planet_Is_Destroyable_By_TSW);
         }
     }
 }
@@ -1262,20 +1262,20 @@ void BattleAi::ensure_type_facts() {
     for (size_t t = 0; t <= types.size(); ++t) {
         const auto ti = static_cast<objects::TypeIndex>(t);  // == types.size(): the out-of-range entry (field defaults)
         TypeFacts& f = type_facts_[t];
-        f.has_land_evaluator = types.get_bool(ti, "Has_Land_Evaluator");
-        f.has_space_evaluator = types.get_bool(ti, "Has_Space_Evaluator");
-        f.last_state_visible_under_fow = types.get_bool(ti, "Last_State_Visible_Under_FOW");
-        f.initial_state_visible_under_fow = types.get_bool(ti, "Initial_State_Visible_Under_FOW");
-        f.create_team = types.get_bool(ti, "Create_Team");
-        f.is_dummy = types.get_bool(ti, "Is_Dummy");
-        f.stay_in_transport = types.get_bool(ti, "Stay_In_Transport_During_Ground_Battle");
-        f.valid_target = types.get_bool(ti, "Collidable_By_Projectile_Living") && types.get_bool(ti, "Is_Valid_Target");
-        f.base_level = types.get_int(ti, "Base_Level");
-        f.additional_population_capacity = types.get_int(ti, "Additional_Population_Capacity");
-        f.reinforcement_enabling_radius = types.get_float(ti, "Reinforcement_Enabling_Radius");
-        f.reinforcement_prevention_radius = types.get_float(ti, "Reinforcement_Prevention_Radius");
+        f.has_land_evaluator = types.get(ti, objects::tags::Has_Land_Evaluator);
+        f.has_space_evaluator = types.get(ti, objects::tags::Has_Space_Evaluator);
+        f.last_state_visible_under_fow = types.get(ti, objects::tags::Last_State_Visible_Under_FOW);
+        f.initial_state_visible_under_fow = types.get(ti, objects::tags::Initial_State_Visible_Under_FOW);
+        f.create_team = types.get(ti, objects::tags::Create_Team);
+        f.is_dummy = types.get(ti, objects::tags::Is_Dummy);
+        f.stay_in_transport = types.get(ti, objects::tags::Stay_In_Transport_During_Ground_Battle);
+        f.valid_target = types.get(ti, objects::tags::Collidable_By_Projectile_Living) && types.get(ti, objects::tags::Is_Valid_Target);
+        f.base_level = types.get(ti, objects::tags::Base_Level);
+        f.additional_population_capacity = types.get(ti, objects::tags::Additional_Population_Capacity);
+        f.reinforcement_enabling_radius = types.get(ti, objects::tags::Reinforcement_Enabling_Radius);
+        f.reinforcement_prevention_radius = types.get(ti, objects::tags::Reinforcement_Prevention_Radius);
         if (t == types.size()) break;  // the behaviour bits and member flags have no out-of-range form
-        f.influences_capture = types.get_bool(ti, "Influences_Capture_Point");
+        f.influences_capture = types.get(ti, objects::tags::Influences_Capture_Point);
         const auto has = [&](objects::BehaviorTypeId b) { return types.has_behavior(ti, objects::BehaviorSet::Union, b); };
         f.squadron_member = types.squadron_member(ti);
         f.company_member = types.company_member(ti);
@@ -1329,7 +1329,7 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
         // battle host: type flag +0x29 = listed in some type's Squadron_Units (0x377500), sorted for lookup.
         std::vector<uint32_t> squadron_members;
         for (size_t t = 0; t < types.size(); ++t)
-            for (const std::string_view n : types.get_list(static_cast<objects::TypeIndex>(t), "Squadron_Units"))
+            for (const std::string_view n : types.get(static_cast<objects::TypeIndex>(t), objects::tags::Squadron_Units))
                 if (const objects::TypeIndex m = types.resolve_name(n); m != objects::kNone && m < types.size())
                     squadron_members.push_back(static_cast<uint32_t>(m));
         std::sort(squadron_members.begin(), squadron_members.end());
@@ -1338,11 +1338,11 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
         for (size_t t = 0; t < types.size(); ++t) {
             const auto ti = static_cast<objects::TypeIndex>(t);
             at::PerceptionType& pt = w.types[t];
-            pt.name = t < types.raw().types().name.size() ? std::string(types.raw().types().name[t]) : std::string();
-            pt.category = types.get_mask(ti, "CategoryMask");
+            pt.name = t < types.raw().types().name.size() ? std::string(types.name(ti)) : std::string();
+            pt.category = types.get(ti, objects::tags::CategoryMask);
             if (pt.category == 0)
-                for (const std::string_view n : types.get_list(ti, "CategoryMask")) pt.category |= mask(n);
-            pt.combat_power = types.get_float(ti, "AI_Combat_Power");
+                for (const std::string_view n : types.get_list(ti, objects::tags::CategoryMask)) pt.category |= mask(n);
+            pt.combat_power = types.get(ti, objects::tags::AI_Combat_Power);
             // A1_READINGS §29 [H]: in a tactical mode 0x370e60 scales a company / squadron type whose first member has
             // Create_Team by clamp(Max_Squad_Size / member count, 0, 1) (the load-time power is the members' sum).
             {
@@ -1351,48 +1351,48 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
                     while (!v.empty() && (v.back() == ' ' || v.back() == '	')) v.remove_suffix(1);
                     return v;
                 };
-                std::span<const std::string_view> list = types.get_list(ti, "Company_Units");
-                if (list.empty()) list = types.get_list(ti, "Squadron_Units");
+                std::span<const std::string_view> list = types.get(ti, objects::tags::Company_Units);
+                if (list.empty()) list = types.get(ti, objects::tags::Squadron_Units);
                 const objects::TypeIndex first = list.empty() ? objects::kNone : types.resolve_name(trimmed(list.front()));
-                if (first != objects::kNone && first < types.size() && types.get_bool(first, "Create_Team")) {
-                    float r = static_cast<float>(types.get_int(ti, "Max_Squad_Size")) / static_cast<float>(list.size());
+                if (first != objects::kNone && first < types.size() && types.get(first, objects::tags::Create_Team)) {
+                    float r = static_cast<float>(types.get(ti, objects::tags::Max_Squad_Size)) / static_cast<float>(list.size());
                     r = r < 0.0f ? 0.0f : (r > 1.0f ? 1.0f : r);
                     pt.combat_power = pt.combat_power * r;
                 }
             }
-            pt.is_hero = types.get_bool(ti, "Is_Named_Hero");
-            pt.bombing_run_prevention_radius = types.get_float(ti, "Bombing_Run_Prevention_Radius");  // float field (bkc1 t07)
-            pt.community_property = types.get_bool(ti, "Is_Community_Property");
+            pt.is_hero = types.get(ti, objects::tags::Is_Named_Hero);
+            pt.bombing_run_prevention_radius = types.get(ti, objects::tags::Bombing_Run_Prevention_Radius);  // float field (bkc1 t07)
+            pt.community_property = types.get(ti, objects::tags::Is_Community_Property);
             // --- A2 tactical: PotentialPlan inputs (tactical_pp.hpp) ---
-            pt.tech_level = types.get_int(ti, "Tech_Level");
+            pt.tech_level = types.get(ti, objects::tags::Tech_Level);
             pt.population = type_population(static_cast<int32_t>(t));
-            pt.build_cost = static_cast<float>(types.get_int(ti, "Build_Cost_Credits"));  // int field
-            pt.build_time_seconds = types.get_int(ti, "Build_Time_Seconds");  // int field +0x890 (A2g t06: AllowedTime base)
-            for (const std::string_view f : types.get_list(ti, "Affiliation")) pt.affiliation.emplace_back(f);
+            pt.build_cost = static_cast<float>(types.get(ti, objects::tags::Build_Cost_Credits));  // int field
+            pt.build_time_seconds = types.get(ti, objects::tags::Build_Time_Seconds);  // int field +0x890 (A2g t06: AllowedTime base)
+            for (const std::string_view f : types.get(ti, objects::tags::Affiliation)) pt.affiliation.emplace_back(f);
             // flags +0x67 Create_Team / +0x29 squadron member / +0x21 Cinematic_Object_Only, behaviours 0x5C DUMMY_STAR_BASE /
             // 0x5B DUMMY_GROUND_BASE (AI_GALACTIC_3 §6 table) [battle host: replaces the Is_Dummy stand-in]
             static const objects::BehaviorTypeId kStarBase = objects::behavior_type_id("DUMMY_STAR_BASE");
             static const objects::BehaviorTypeId kGroundBase = objects::behavior_type_id("DUMMY_GROUND_BASE");
-            pt.pp_excluded = types.get_bool(ti, "Create_Team") || types.get_bool(ti, "Cinematic_Object_Only") ||
+            pt.pp_excluded = types.get(ti, objects::tags::Create_Team) || types.get(ti, objects::tags::Cinematic_Object_Only) ||
                              std::binary_search(squadron_members.begin(), squadron_members.end(), static_cast<uint32_t>(t)) ||
                              (kStarBase != objects::kNoBehavior && types.has_behavior(ti, objects::BehaviorSet::Union, kStarBase)) ||
                              (kGroundBase != objects::kNoBehavior && types.has_behavior(ti, objects::BehaviorSet::Union, kGroundBase));
             static const objects::BehaviorTypeId kUc = objects::behavior_type_id("TACTICAL_UNDER_CONSTRUCTION");
             pt.under_construction = kUc != objects::kNoBehavior && types.has_behavior(ti, objects::BehaviorSet::Union, kUc);
             if (pt.under_construction) {  // skai t12: the finished type, for TacticalBuiltStructureCount
-                const objects::TypeIndex ft = types.resolve_name(types.get_string(ti, "Tactical_Buildable_Constructed"));
+                const objects::TypeIndex ft = types.resolve_name(types.get(ti, objects::tags::Tactical_Buildable_Constructed));
                 if (ft != objects::kNone && ft < types.size()) pt.constructed_type = static_cast<int32_t>(ft);
             }
             // Pad price 0x3744e0 (_Campaign, else _Multiplayer; [port] skirmish too, no planet
             // factor); other types: the same tags as their tactical price [M] (only TacticalBuild of build plans reads it).
             // Skirmish production of non-UC types (station buy bar): Tactical_Build_Cost_Multiplayer.
             pt.tactical_cost = (!pt.under_construction && b_->cfg_.skirmish)
-                                   ? static_cast<float>(std::max(0, types.get_int(ti, "Tactical_Build_Cost_Multiplayer")))
+                                   ? static_cast<float>(std::max(0, types.get(ti, objects::tags::Tactical_Build_Cost_Multiplayer)))
                                    : b_->build_cost(ti);  // int fields (TacticalBattle::build_cost: _Campaign, else _Multiplayer)
-            pt.generic_hero = types.get_bool(ti, "Is_Generic_Hero");
-            pt.special_weapon = types.get_bool(ti, "Is_Special_Weapon_In_Space") ||
+            pt.generic_hero = types.get(ti, objects::tags::Is_Generic_Hero);
+            pt.special_weapon = types.get(ti, objects::tags::Is_Special_Weapon_In_Space) ||
                                 types.has_behavior(ti, objects::BehaviorSet::Union, kLobbing);
-            pt.has_ai_script = !types.get_string(ti, "Lua_Script").empty();
+            pt.has_ai_script = !types.get(ti, objects::tags::Lua_Script).empty();
             // --- end A2 tactical ---
         }
         w.players.resize(players);
@@ -1915,7 +1915,7 @@ void BattleAi::capture_lane_rest() {
             for (const objects::ObjectHandle h : st.all_objects()) {
                 if (!st.active(h) || !st.has_behavior(h, kBaseShield)) continue;
                 if (b_->combat_->has_unit(st.id(h)) && !b_->combat_->base_shield_active(st.id(h))) continue;
-                const float r = b_->catalog_->types().get_float(st.type(h), "Base_Shield_Radius");
+                const float r = b_->catalog_->types().get(st.type(h), objects::tags::Base_Shield_Radius);
                 if (!(r > 0.0f)) continue;
                 const Vec3 c = st.position(h);
                 view_.shields.push_back({c.x, c.y, c.z, r * r});
@@ -3041,15 +3041,15 @@ std::vector<at::TacticalReinforcement> BattleAi::reinforcement_pool(int32_t play
         const objects::GameObjectTypes& types = mode_->types();
         const auto ti = static_cast<objects::TypeIndex>(p.type);
         if (ti < types.size()) {
-            const auto members = types.get_list(ti, "Company_Units");
+            const auto members = types.get(ti, objects::tags::Company_Units);
             const auto n = static_cast<int32_t>(members.size());
             if (n > 0) {
                 const objects::TypeIndex m = types.resolve_name(members[0]);
                 if (m != objects::kNone && m < types.size()) {
                     r.member_type = static_cast<int32_t>(m);
-                    r.member_create_team = types.get_bool(m, "Create_Team");
+                    r.member_create_team = types.get(m, objects::tags::Create_Team);
                 }
-                const int32_t squad = std::max(1, types.get_int(ti, "Max_Squad_Size"));
+                const int32_t squad = std::max(1, types.get(ti, objects::tags::Max_Squad_Size));
                 r.count = r.member_create_team ? (n + squad - 1) / squad : n;
             }
         }
@@ -3119,9 +3119,9 @@ float BattleAi::type_population(int32_t type) const {  // pop(T, mode) 0x373500
     const objects::GameObjectTypes& types = mode_->types();
     if (type < 0 || static_cast<size_t>(type) >= types.size()) return 0.0f;
     const auto ti = static_cast<objects::TypeIndex>(type);
-    const char* tag = b_->space_ ? "Space_Override_Population_Value" : "Land_Override_Population_Value";
-    if (!types.get_string(ti, tag).empty() && types.get_int(ti, tag) >= 0) return static_cast<float>(types.get_int(ti, tag));
-    return static_cast<float>(types.get_int(ti, "Population_Value"));
+    const objects::IntTag& tag = b_->space_ ? objects::tags::Space_Override_Population_Value : objects::tags::Land_Override_Population_Value;
+    if (!types.get_string(ti, tag).empty() && types.get(ti, tag) >= 0) return static_cast<float>(types.get(ti, tag));
+    return static_cast<float>(types.get(ti, objects::tags::Population_Value));
 }
 
 // Skirmish station production: the player's live objects whose builder list (their faction row of
@@ -3163,8 +3163,8 @@ bool BattleAi::can_build_now(int32_t player, int32_t type) {
     if (!b_->production_enabled() || type < 0) return false;
     const objects::GameObjectTypes& types = b_->catalog_->types();
     const auto t = static_cast<objects::TypeIndex>(type);
-    if (t >= types.size() || types.get_bool(t, "Cinematic_Object_Only")) return false;
-    if (types.get_int(t, "Tactical_Build_Cost_Multiplayer") <= 0) return false;
+    if (t >= types.size() || types.get(t, objects::tags::Cinematic_Object_Only)) return false;
+    if (types.get(t, objects::tags::Tactical_Build_Cost_Multiplayer) <= 0) return false;
     const objects::ObjectStore& st = mode_->primary();
     for (const int32_t id : tactical_builders(player, type))
         if (b_->hg_build_check(st, player, static_cast<objects::ObjectId>(id), t) == 0) return true;
@@ -3249,7 +3249,7 @@ at::PadCheck BattleAi::pad_check(const FactEnv& env, int32_t player, int32_t pad
     if (owner < 0 || !env.allied(player, owner)) return at::PadCheck::NotFriendlyOrVisible;
     if (env.pad_contents(static_cast<objects::ObjectId>(pad)) != objects::kNoObjectId) return at::PadCheck::Blocked;
     const objects::TypeIndex pt = st.type(ph);
-    const double r = pt < types.size() ? static_cast<double>(types.get_float(pt, "Capture_Point_Radius")) : 0.0;
+    const double r = pt < types.size() ? static_cast<double>(types.get(pt, objects::tags::Capture_Point_Radius)) : 0.0;
     const Vec3 pp = st.position(ph);
     for (const CaptureInfluencer& x : influencers) {
         if (x.h == ph) continue;
@@ -3341,7 +3341,7 @@ bool BattleAi::space_drop_ok(int32_t player, int32_t key, const at::Vec3f& p, fl
     const auto ti = static_cast<objects::TypeIndex>(part->type);
     if (ti >= types.size()) return false;
     const mv::UnitDesc ud = mv::unit_desc_from_type(types, ti);
-    auto layer = static_cast<uint32_t>(types.get_mask(ti, "Space_Layer"));
+    auto layer = static_cast<uint32_t>(types.get(ti, objects::tags::Space_Layer));
     if (layer == 0) layer = 4u;
     double sn = 0.0, cs = 1.0;
     dmath::sincos(static_cast<double>(facing_deg) * (dmath::kPi / 180.0), sn, cs);
@@ -3579,7 +3579,7 @@ void BattleAi::resolve_weather_categories() {
     weather_category_.assign(types.size(), -1);
     weather_categories_.clear();
     for (size_t t = 0; t < types.size(); ++t) {
-        const std::string_view c = types.get_string(static_cast<objects::TypeIndex>(t), "Weather_Category");
+        const std::string_view c = types.get(static_cast<objects::TypeIndex>(t), objects::tags::Weather_Category);
         const auto it = std::find(weather_categories_.begin(), weather_categories_.end(), c);
         weather_category_[t] = static_cast<int32_t>(it - weather_categories_.begin());
         if (it == weather_categories_.end()) weather_categories_.emplace_back(c);

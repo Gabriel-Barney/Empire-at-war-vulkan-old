@@ -1582,8 +1582,8 @@ bool TacticalAiWorld::Impl::counted_entry_type(int32_t type) const {
     if (!types || type < 0 || static_cast<size_t>(type) >= types->size()) return true;
     const auto ti = static_cast<objects::TypeIndex>(type);
     constexpr objects::BehaviorTypeId kLobbingSuperweapon = 0x37;
-    return !types->get_bool(ti, "Is_Named_Hero") && !types->get_bool(ti, "Is_Generic_Hero") &&
-           !types->get_bool(ti, "Is_Special_Weapon_In_Space") && !types->has_behavior(ti, objects::BehaviorSet::Land, kLobbingSuperweapon);
+    return !types->get(ti, objects::tags::Is_Named_Hero) && !types->get(ti, objects::tags::Is_Generic_Hero) &&
+           !types->get(ti, objects::tags::Is_Special_Weapon_In_Space) && !types->has_behavior(ti, objects::BehaviorSet::Land, kLobbingSuperweapon);
 }
 
 void TacticalAiWorld::Impl::units_lost(TfRec& t) {

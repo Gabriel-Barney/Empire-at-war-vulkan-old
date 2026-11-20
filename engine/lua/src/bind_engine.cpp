@@ -97,7 +97,7 @@ int m_type_get_name(Call& c) {
     // q6 (OBJECT_SCRIPTS.md §6.1 step 4, OBJECT_TYPES §3.1): the original stores type names upper-cased, so Get_Name
     // returns the upper-case name (TR's GroundCompanyList keys, FotR's PlanetTable keys are upper-case type names).
     // LuaVmOptions::upper_type_names is on for every VM since modc t45.
-    const std::string_view n = types->raw().types().name[c.self->value];
+    const std::string_view n = types->name(static_cast<objects::TypeIndex>(c.self->value));
     if (!c.vm->options.upper_type_names) {
         lua_pushlstring(c.L, n.data(), n.size());
         return 1;

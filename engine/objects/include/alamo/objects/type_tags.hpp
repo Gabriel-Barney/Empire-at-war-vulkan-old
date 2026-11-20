@@ -219,6 +219,7 @@ struct SubObjectsTag {
     X(List, Text_ID, 0)                                                                                               \
     X(List, Planet_Slice_Affinity_Types, 0)                                                                           \
     X(Int, Space_Override_Population_Value, -1)                                                                       \
+    X(Int, Land_Override_Population_Value, -1)                                                                        \
     X(Bool, Respawn_Whole_Team_When_Killed, false)                                                                    \
     X(Text, Space_Tactical_Map, "")                                                                                   \
     X(Text, Land_Tactical_Map, "")                                                                                    \
@@ -502,6 +503,7 @@ struct SubObjectsTag {
     X(Float, Bombing_Run_Prevention_Radius, 0.0f)                                                                     \
     X(Text, Vehicle_Thief_Inside_Clone, "")                                                                           \
     X(List, DeployedBehavior, 0)                                                                                      \
+    X(List, GalacticBehavior, 0)                                                                                      \
     X(Text, Shield_On_Anim, "")                                                                                       \
     X(Text, Shield_Off_Anim, "")                                                                                      \
     X(Bool, Tactically_Built_Child_Object_Persists, true)                                                             \
@@ -552,7 +554,23 @@ struct SubObjectsTag {
     X(List, Reserve_Spawned_Units_Tech_2, 0)                                                                          \
     X(List, Reserve_Spawned_Units_Tech_3, 0)                                                                          \
     X(List, Reserve_Spawned_Units_Tech_4, 0)                                                                          \
-    X(List, Reserve_Spawned_Units_Tech_5, 0)
+    X(List, Reserve_Spawned_Units_Tech_5, 0)                                                                          \
+    /* Lua object / player / story bridge (LUA_API): lua bind_*.cpp, bindings.cpp; apps/sim story_session.cpp, object_scripts.cpp */ \
+    X(Bool, Has_Space_Evaluator, false)                                                                               \
+    X(Float, AI_Combat_Power, 0.0f)                                                                                   \
+    X(List, Potential_Indigenous_Power, 0)                                                                            \
+    X(Text, Enemy_Spawn_Text, "")                                                                                     \
+    X(Bool, Execute_Script_On_Type, false)                                                                            \
+    X(Text, Lua_Script, "")                                                                                           \
+    /* AI facts (AI_GALACTIC, AI_TACTICAL): ai galactic_ai.cpp, galactic_seed.cpp, tactical_ai.cpp; apps/sim battle_ai.cpp */ \
+    X(Mask, Space_Or_Garrison_Category, 0)                                                                            \
+    X(Bool, Planet_Retains_Residual_Influence, true)                                                                  \
+    X(Bool, Is_Stealth_Company, false)                                                                                \
+    X(Bool, Has_Land_Evaluator, false)                                                                                \
+    X(Bool, Last_State_Visible_Under_FOW, false)                                                                      \
+    X(Bool, Initial_State_Visible_Under_FOW, false)                                                                   \
+    X(Bool, Is_Dummy, false)                                                                                          \
+    X(Int, Population_Value, 0)
 // clang-format on
 
 namespace tags {

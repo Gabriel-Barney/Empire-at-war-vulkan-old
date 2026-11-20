@@ -110,7 +110,7 @@ bool valid_type(Call& c, TypeIndex t) {
 std::string_view type_name(Call& c, TypeIndex t) {
     const objects::GameObjectTypes* ty = types(c);
     if (!ty || t >= ty->raw().type_count()) return {};
-    return ty->raw().types().name[t];
+    return ty->name(t);
 }
 std::string object_name(Call& c, ObjectHandle h) { return std::string(type_name(c, store(c)->type(h))); }
 
@@ -213,14 +213,14 @@ std::vector<FieldHit> space_fields(Call& c, uint32_t mask) {
         const TypeIndex t = st->type(h);
         if (t >= ty->size()) continue;
         uint32_t kind = 0;
-        if (ty->get_bool(t, "Is_Asteroid_Field")) kind |= kFieldAsteroid;  // §1.6: Is_Impassable_Asteroid ignored
-        if (ty->get_bool(t, "Is_Ion_Storm")) kind |= kFieldIonStorm;
-        if (ty->get_bool(t, "Is_Nebula")) kind |= kFieldNebula;
+        if (ty->get(t, objects::tags::Is_Asteroid_Field)) kind |= kFieldAsteroid;  // §1.6: Is_Impassable_Asteroid ignored
+        if (ty->get(t, objects::tags::Is_Ion_Storm)) kind |= kFieldIonStorm;
+        if (ty->get(t, objects::tags::Is_Nebula)) kind |= kFieldNebula;
         if ((kind & mask) == 0) continue;
         if (kObstacle != objects::kNoBehavior && !st->has_behavior(h, kObstacle)) continue;
         const Vec3 p = st->position(h);
-        const std::array<float, 4> off = ty->get_vec(t, "Space_Obstacle_Offset");
-        out.push_back({h, {p.x + off[0], p.y + off[1], p.z}, ty->get_float(t, "Space_Obstacle_Radius"), kind});
+        const std::array<float, 4> off = ty->get(t, objects::tags::Space_Obstacle_Offset);
+        out.push_back({h, {p.x + off[0], p.y + off[1], p.z}, ty->get(t, objects::tags::Space_Obstacle_Radius), kind});
     }
     return out;
 }
@@ -363,7 +363,7 @@ int g_find_best_local_threat_center(Call& c) {
         px[i] = p.x;
         py[i] = p.y;
         const TypeIndex ti = st->type(units[i]);
-        if (ty && ti < ty->size()) power[i] = static_cast<double>(ty->get_float(ti, "AI_Combat_Power"));
+        if (ty && ti < ty->size()) power[i] = static_cast<double>(ty->get(ti, objects::tags::AI_Combat_Power));
     }
     const size_t k = std::min<size_t>(10, (count + 3) / 4);
     std::vector<double> cx, cy;
@@ -569,9 +569,9 @@ std::string faction_of(Call& c, int32_t player) {
 bool affiliated(Call& c, TypeIndex t, std::string_view faction) {
     const objects::GameObjectTypes* ty = types(c);
     if (!ty || faction.empty() || !valid_type(c, t)) return false;
-    for (const std::string_view a : ty->get_list(t, "Affiliation"))
+    for (const std::string_view a : ty->get(t, objects::tags::Affiliation))
         if (ascii_iequals(a, faction)) return true;
-    return ascii_iequals(ty->get_string(t, "Affiliation"), faction);
+    return ascii_iequals(ty->get_string(t, objects::tags::Affiliation), faction);
 }
 
 bool has_beh(Call& c, ObjectHandle h, const char* name) {
@@ -602,7 +602,8 @@ bool pad_lists(Call& c, TypeIndex pad_type, std::string_view faction, TypeIndex 
     const objects::GameObjectTypes* ty = types(c);
     if (!ty || !valid_type(c, pad_type)) return false;
     const bool skirmish = detail::parent_store(*c.vm) == nullptr;
-    const char* tag = skirmish ? "Tactical_Buildable_Objects_Multiplayer" : "Tactical_Buildable_Objects_Campaign";
+    const objects::ListTag& tag =
+        skirmish ? objects::tags::Tactical_Buildable_Objects_Multiplayer : objects::tags::Tactical_Buildable_Objects_Campaign;
     const std::string_view name = type_name(c, t);
     bool in_row = false;
     for (const std::string_view tok : ty->get_list(pad_type, tag)) {
@@ -622,14 +623,14 @@ bool pad_rule(Call& c, ObjectHandle pad) {
     if (pad_contents(c, pad)) return false;
     const TypeIndex pt = st->type(pad);
     if (!ty || pt >= ty->size()) return true;
-    const double r = static_cast<double>(ty->get_float(pt, "Capture_Point_Radius"));
+    const double r = static_cast<double>(ty->get(pt, objects::tags::Capture_Point_Radius));
     const Vec3 p = st->position(pad);
     const int32_t owner = st->owner(pad);
     ObjectBridge* b = bridge(c);
     for (const ObjectHandle h : detail::script_objects(*st)) {
         if (!st->alive(h) || h == pad) continue;
         const TypeIndex t = st->type(h);
-        if (t >= ty->size() || !ty->get_bool(t, "Influences_Capture_Point")) continue;
+        if (t >= ty->size() || !ty->get(t, objects::tags::Influences_Capture_Point)) continue;
         const int32_t o = st->owner(h);
         const bool enemy = (b && b->is_enemy) ? b->is_enemy(owner, o) : (o != owner && o >= 0 && owner >= 0);
         if (enemy && dist_sq(p, st->position(h)) <= r * r) return false;
@@ -718,7 +719,7 @@ int m_can_garrison_fire(Call& c) {
     const TypeIndex t = store(c)->type(self_object(c));
     if (!ty || t >= ty->size()) return push_bool(c, false);
     const auto m = ty->enums().get(objects::EnumId::GameObjectProperties).convert("GarrisonCanFire");
-    return push_bool(c, m && *m != 0 && (ty->get_mask(t, "Property_Flags") & static_cast<uint64_t>(*m)) != 0);
+    return push_bool(c, m && *m != 0 && (ty->get(t, objects::tags::Property_Flags) & static_cast<uint64_t>(*m)) != 0);
 }
 
 // ---- diversion (§2.3) ----
@@ -855,7 +856,7 @@ int m_force_test_space_conflict(Call& c) {
 double type_power(Call& c, ObjectHandle u) {
     const objects::GameObjectTypes* ty = types(c);
     const TypeIndex t = store(c)->type(u);
-    return (ty && t < ty->size()) ? static_cast<double>(ty->get_float(t, "AI_Combat_Power")) : 0.0;
+    return (ty && t < ty->size()) ? static_cast<double>(ty->get(t, objects::tags::AI_Combat_Power)) : 0.0;
 }
 double health_fraction(Call& c, ObjectHandle u) {
     const objects::GameObjectTypes* ty = types(c);
@@ -905,7 +906,7 @@ int m_get_affiliated_indigenous_type(Call& c) {
 #endif
     TypeIndex best = objects::kNone;
     int64_t best_power = 0;
-    const std::span<const std::string_view> list = ty->get_list(t, "Potential_Indigenous_Power");
+    const std::span<const std::string_view> list = ty->get(t, objects::tags::Potential_Indigenous_Power);
     for (size_t i = 0; i + 1 < list.size(); i += 2) {
         const TypeIndex u = ty->raw().find(list[i]);
         const int64_t power = std::atoll(std::string(list[i + 1]).c_str());
@@ -931,7 +932,7 @@ std::vector<TypeIndex> projectile_types(Call& c, ObjectHandle u) {
     const objects::GameObjectTypes* ty = types(c);
     const TypeIndex t = store(c)->type(u);
     if (!ty || t >= ty->size()) return out;
-    for (const std::string_view p : ty->get_list(t, "Projectile_Types"))
+    for (const std::string_view p : ty->get(t, objects::tags::Projectile_Types))
         if (valid_type(c, ty->raw().find(p))) out.push_back(ty->raw().find(p));
     return out;
 }
@@ -955,7 +956,7 @@ int m_get_current_projectile_type(Call& c) {
     const objects::GameObjectTypes* ty = types(c);
     const TypeIndex t = store(c)->type(self_object(c));
     if (!ty || t >= ty->size()) return 0;
-    const std::span<const std::string_view> list = ty->get_list(t, "Projectile_Types");
+    const std::span<const std::string_view> list = ty->get(t, objects::tags::Projectile_Types);
     if (list.empty()) return 0;
     const TypeIndex p = ty->raw().find(list.front());
     return valid_type(c, p) ? push_type(c, p) : 0;
@@ -969,7 +970,7 @@ int m_get_energy(Call& c) {
     RemainingScriptHooks* hk = hooks(c);
     const objects::GameObjectTypes* ty = types(c);
     const TypeIndex t = store(c)->type(self);
-    const float cap = (ty && t < ty->size()) ? ty->get_float(t, "Energy_Capacity") : 0.0f;
+    const float cap = (ty && t < ty->size()) ? ty->get(t, objects::tags::Energy_Capacity) : 0.0f;
     if (!(cap > 0.0f)) return push_num(c, 0.0);
     if (hk && hk->energy) {
         const float e = hk->energy(self);
@@ -1130,7 +1131,7 @@ int m_set_targeting_stickiness(Call& c) {
 int m_type_get_bribe_cost(Call& c) {
     const auto t = static_cast<TypeIndex>(c.self->value);
     if (!valid_type(c, t)) return push_num(c, 0.0);
-    const double base = static_cast<double>(types(c)->get_int(t, "Tactical_Bribe_Cost"));
+    const double base = static_cast<double>(types(c)->get(t, objects::tags::Tactical_Bribe_Cost));
     RemainingScriptHooks* hk = hooks(c);
     const int corrupted = (hk && hk->battle_planet_corruption) ? hk->battle_planet_corruption() : -1;
     if (c.nargs == 0 || corrupted < 0) return push_num(c, base);
@@ -1140,7 +1141,7 @@ int m_type_get_bribe_cost(Call& c) {
     const TypeIndex bt = store(c)->type(detail::object_handle(*o));
     if (!valid_type(c, bt)) return push_num(c, base);
     const double f = static_cast<double>(
-        types(c)->get_float(bt, corrupted ? "Bribe_Modifier_On_Corrupted_Planets" : "Bribe_Modifier_On_Uncorrupted_Planets"));
+        types(c)->get(bt, corrupted ? objects::tags::Bribe_Modifier_On_Corrupted_Planets : objects::tags::Bribe_Modifier_On_Uncorrupted_Planets));
     return push_num(c, base * f);
 }
 // Is_Obsolete(player) (§2.8; STRATEGIC_GAPS §5.1 [H]): the type is in the player's LOCKED list (+0x1C8, the list
@@ -1185,11 +1186,11 @@ int m_give_random_sliceable_tech(Call& c) {
         std::vector<float> cumulative;
         float total = 0.0f;
         for (TypeIndex t = 0; t < ty->size(); ++t) {
-            if (!affiliated(c, t, faction) || ty->get_int(t, "Tech_Level") > w->tech_level(player)) continue;
-            if (!ty->get_bool(t, "Build_Initially_Locked") || !ty->get_bool(t, "Build_Can_Be_Unlocked_By_Slicer")) continue;
+            if (!affiliated(c, t, faction) || ty->get(t, objects::tags::Tech_Level) > w->tech_level(player)) continue;
+            if (!ty->get(t, objects::tags::Build_Initially_Locked) || !ty->get(t, objects::tags::Build_Can_Be_Unlocked_By_Slicer)) continue;
             if (w->tech_lock(player, t) == 0) continue;  // already in the unlocked list
             if (const galactic::GalacticSim* gs = w->galactic(); gs && gs->type_unlocked(player, t)) continue;  // OI lua
-            const float cost = ty->get_float(t, "Slice_Cost_Credits");
+            const float cost = ty->get_float(t, objects::tags::Slice_Cost_Credits);
             if (!(cost > 0.0f)) continue;  // w = 1 / cost must be > 0
             total += 1.0f / cost;
             cand.push_back(t);
@@ -1359,7 +1360,7 @@ int m_tf_set_targeting_stickiness(Call& c) {
         if (kUnitAi != objects::kNoBehavior && !store(c)->has_behavior(u, kUnitAi)) continue;
         const TypeIndex t = store(c)->type(u);
         if (only != objects::kNone && t != only) continue;
-        if (mask != ~uint64_t{0} && (!ty || t >= ty->size() || (ty->get_mask(t, "CategoryMask") & mask) == 0)) continue;
+        if (mask != ~uint64_t{0} && (!ty || t >= ty->size() || (ty->get(t, objects::tags::CategoryMask) & mask) == 0)) continue;
         set_stickiness(c, u, seconds);
     }
     return 0;
@@ -1403,7 +1404,7 @@ int m_tf_find_closest_enemy(Call& c) {
         const bool enemy = (b && b->is_enemy) ? b->is_enemy(me, owner) : (owner != me && owner >= 0 && me >= 0);
         if (!enemy) continue;
         const TypeIndex t = st->type(h);
-        if (t >= ty->size() || !ty->get_bool(t, "Is_Valid_Target") || (ty->get_mask(t, "CategoryMask") & mask) == 0) continue;
+        if (t >= ty->size() || !ty->get(t, objects::tags::Is_Valid_Target) || (ty->get(t, objects::tags::CategoryMask) & mask) == 0) continue;
         const double d = dist_sq(centre, st->position(h));
         if (!best || d < best_d) {
             best = h;

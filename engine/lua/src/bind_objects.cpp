@@ -124,10 +124,10 @@ bool detail::object_has_model(Call& c, ObjectHandle h) {
     if (!st || !ty || !st->exists(h)) return false;
     const TypeIndex t = st->type(h);
     if (t >= ty->size() || ty->has_behavior(t, objects::BehaviorSet::Union, objects::beh::Marker)) return false;
-    const char* tag = st->mode() == objects::ModeKind::Space      ? "Space_Model_Name"
-                      : st->mode() == objects::ModeKind::Galactic ? "Galactic_Model_Name"
-                                                                  : "Land_Model_Name";
-    return !ty->get_string(t, tag).empty();
+    const objects::TextTag& tag = st->mode() == objects::ModeKind::Space      ? objects::tags::Space_Model_Name
+                                  : st->mode() == objects::ModeKind::Galactic ? objects::tags::Galactic_Model_Name
+                                                                              : objects::tags::Land_Model_Name;
+    return !ty->get(t, tag).empty();
 }
 
 ObjectHandle detail::spawn_attached_effect(Call& c, ObjectHandle parent, TypeIndex type, int32_t owner, float z_offset, bool layer_z) {
@@ -139,7 +139,7 @@ ObjectHandle detail::spawn_attached_effect(Call& c, ObjectHandle parent, TypeInd
     sp.owner = owner;
     sp.position = st->position(parent);
     sp.position.z += z_offset;
-    if (layer_z) sp.position.z += ty->get_float(type, "Layer_Z_Adjust");
+    if (layer_z) sp.position.z += ty->get(type, objects::tags::Layer_Z_Adjust);
     sp.facing = st->facing(parent);
     if (object_has_model(c, parent)) sp.attach_parent = parent;
     // ref2 t04: a battle's VMs create through the battle (TacticalBattle::script_spawn_effect: the mode's trees, L1 only)
@@ -153,7 +153,7 @@ namespace {
 std::string_view type_name(Call& c, TypeIndex t) {
     const objects::GameObjectTypes* ty = types(c);
     if (!ty || t >= ty->raw().type_count()) return {};
-    return ty->raw().types().name[t];
+    return ty->name(t);
 }
 std::string_view object_type_name(Call& c, ObjectHandle h) { return type_name(c, store(c)->type(h)); }
 
@@ -349,8 +349,8 @@ bool type_filters_pass(const objects::GameObjectTypes& ty, const ObjectFilter& f
     if (f.have_type && rep != f.type) return false;
     if (!f.have_props && !f.have_cat) return true;
     if (rep >= ty.raw().type_count()) return false;
-    if (f.have_props && (f.props & ty.get_mask(rep, "Property_Flags")) == 0) return false;
-    if (f.have_cat && (f.cat & ty.get_mask(rep, "CategoryMask")) == 0) return false;
+    if (f.have_props && (f.props & ty.get(rep, objects::tags::Property_Flags)) == 0) return false;
+    if (f.have_cat && (f.cat & ty.get(rep, objects::tags::CategoryMask)) == 0) return false;
     return true;
 }
 
@@ -390,7 +390,7 @@ std::vector<uint8_t> type_abilities(Call& c, TypeIndex t) {
     if (!ty || t >= ty->raw().type_count()) return out;
     const objects::ObjectTypeDatabase& raw = ty->raw();
     const objects::FieldColumns& fc = raw.fields();
-    for (const objects::FieldIndex sub : ty->get_sub_objects(t, "Unit_Abilities_Data")) {
+    for (const objects::FieldIndex sub : ty->sub_objects(t, objects::tags::Unit_Abilities_Data)) {
         for (objects::FieldIndex f = sub + 1; f < fc.size() && fc.depth[f] > fc.depth[sub]; ++f) {
             if (fc.parent[f] != sub || !ascii_iequals(raw.tag_name(f), "Type")) continue;
             const uint8_t id = ability_id(fc.text[f]);
@@ -417,7 +417,7 @@ bool black_market_ok(Call& c, ObjectHandle h, uint8_t id) {
     if (!ty || t >= ty->raw().type_count()) return true;
     const objects::ObjectTypeDatabase& raw = ty->raw();
     const objects::FieldColumns& fc = raw.fields();
-    for (const objects::FieldIndex sub : ty->get_sub_objects(t, "Unit_Abilities_Data")) {
+    for (const objects::FieldIndex sub : ty->sub_objects(t, objects::tags::Unit_Abilities_Data)) {
         bool match = false, must = false;
         std::string_view name;
         for (objects::FieldIndex f = sub + 1; f < fc.size() && fc.depth[f] > fc.depth[sub]; ++f) {
@@ -806,14 +806,14 @@ ObjectHandle spawn(Call& c, TypeIndex type, int32_t owner, Vec3 pos, ObjectHandl
         return st->create(p);
     };
     // q6 t12: a host that lays out companies itself (the battle: members as units + TEAM containers) takes the company.
-    if (company && b && b->spawn_company && !sp.container && types(c) && !types(c)->get_type_refs(type, "Company_Units").empty()) {
+    if (company && b && b->spawn_company && !sp.container && types(c) && !types(c)->get_type_refs(type, objects::tags::Company_Units).empty()) {
         const ObjectHandle made = b->spawn_company(sp);
         if (made || b->battle_lifecycle) return made;  // ref2 t04: a battle's refusal is final
     }
     const ObjectHandle h = create(sp);
     if (!h) return h;
     if (company && types(c)) {
-        for (const TypeIndex m : types(c)->get_type_refs(type, "Company_Units")) {
+        for (const TypeIndex m : types(c)->get_type_refs(type, objects::tags::Company_Units)) {
             if (m == objects::kNone) continue;
             objects::SpawnParams ms = sp;
             ms.type = m;
@@ -922,7 +922,7 @@ int g_find_all_objects_of_type(Call& c) {
             lua_rawseti(c.L, -2, ++n);
         }
         if (!members) continue;
-        const std::vector<TypeIndex> refs = ty->get_type_refs(st->type(h), "Company_Units");
+        const std::vector<TypeIndex> refs = ty->get_type_refs(st->type(h), objects::tags::Company_Units);
         for (uint32_t i = 0; i < refs.size(); ++i) {
             if (refs[i] == objects::kNone || !type_filters_pass(*ty, f, refs[i])) continue;
             detail::push_member_view(c.L, *c.vm, h, i);
@@ -956,7 +956,7 @@ int find_first(Call& c) {
             return 1;
         }
         if (!members) continue;
-        const std::vector<TypeIndex> refs = ty->get_type_refs(st->type(h), "Company_Units");
+        const std::vector<TypeIndex> refs = ty->get_type_refs(st->type(h), objects::tags::Company_Units);
         for (uint32_t i = 0; i < refs.size(); ++i)
             if (refs[i] == t) {
                 detail::push_member_view(c.L, *c.vm, h, i);
@@ -1064,7 +1064,7 @@ int g_find_nearest(Call& c) {
         if (have_player && (q == player || !is_enemy(c, player, q)) != friendly) continue;
         const TypeIndex rep = representative_type(c, b, h);
         if (rep >= ty->raw().type_count() || !type_filters_pass(*ty, f, rep)) continue;
-        if ((cat & ty->get_mask(rep, "CategoryMask")) == 0) continue;
+        if ((cat & ty->get(rep, objects::tags::CategoryMask)) == 0) continue;
         if (have_player && detail::object_fogged_for(c, player, h, true)) continue;
         const double d = distance_sq(from, st->position(h));
         if (!best || d < best_d || (d == best_d && q < best_owner)) {
@@ -1300,7 +1300,7 @@ int m_is_category(Call& c) {
     const auto m = ty->enums().get(objects::EnumId::GameObjectCategory).convert(c.string(1));
     if (!m) return c.script_error_stop("GameObjectWrapper::Is_Category -- unrecognized category %s.", std::string(c.string(1)).c_str());
     const TypeIndex rep = representative_type(c, bridge(c), self_object(c));
-    return push_bool(c, (ty->get_mask(rep, "CategoryMask") & static_cast<uint64_t>(*m)) != 0);
+    return push_bool(c, (ty->get(rep, objects::tags::CategoryMask) & static_cast<uint64_t>(*m)) != 0);
 }
 
 int m_has_property(Call& c) {
@@ -1311,7 +1311,7 @@ int m_has_property(Call& c) {
     if (!ty) return push_bool(c, false);
     const auto m = ty->enums().get(objects::EnumId::GameObjectProperties).convert(c.string(1));
     if (!m || *m == 0) return push_bool(c, false);
-    return push_bool(c, (ty->get_mask(store(c)->type(self_object(c)), "Property_Flags") & static_cast<uint64_t>(*m)) != 0);
+    return push_bool(c, (ty->get(store(c)->type(self_object(c)), objects::tags::Property_Flags) & static_cast<uint64_t>(*m)) != 0);
 }
 
 // Get_Game_Scoring_Type() (docs/re/MCX8_BINDINGS_OBJECTS.md §Get_Game_Scoring_Type) [H], first hit: a TEAM container's
@@ -2575,8 +2575,10 @@ bool has_behavior_token(Call& c, ObjectHandle h, std::string_view token) {
     const objects::GameObjectTypes* ty = types(c);
     const TypeIndex t = store(c)->type(h);
     if (!ty || t == objects::kNone) return false;
-    for (const std::string_view tag : {"Behavior", "LandBehavior", "SpaceBehavior", "GalacticBehavior", "TacticalBehavior", "DeployedBehavior"})
-        for (const std::string_view tok : ty->get_list(t, tag))
+    // TacticalBehavior, also in this list before ref6 t01, is no type field (no schema row): it always read empty.
+    for (const objects::ListTag* tag : {&objects::tags::Behavior, &objects::tags::LandBehavior, &objects::tags::SpaceBehavior,
+                                        &objects::tags::GalacticBehavior, &objects::tags::DeployedBehavior})
+        for (const std::string_view tok : ty->get(t, *tag))
             if (ascii_iequals(tok, token)) return true;
     return false;
 }
@@ -2695,7 +2697,7 @@ anim::Mat34 default_object_to_world(Call& c, ObjectHandle h) {
     float k = 1.0f;
     const objects::GameObjectTypes* ty = types(c);
     if (ty && st->type(h) < ty->size()) {
-        const float sf = ty->get_float(st->type(h), "Scale_Factor");
+        const float sf = ty->get(st->type(h), objects::tags::Scale_Factor);
         if (sf > 0.0f) k = sf;
     }
     anim::Mat34 m;
@@ -2819,9 +2821,9 @@ int m_type_is_affected_by_missile_shield(Call& c) {
     const objects::GameObjectTypes* ty = types(c);
     const auto t = static_cast<TypeIndex>(c.self->value);
     if (!ty || t >= ty->size()) return push_bool(c, false);
-    const std::string_view cat = ty->get_string(t, "Projectile_Category");
+    const std::string_view cat = ty->get_string(t, objects::tags::Projectile_Category);
     if (!cat.empty()) return push_bool(c, ascii_iequals(cat, "ROCKET") || ascii_iequals(cat, "MPTL_ROCKET"));
-    const int32_t v = ty->get_enum(t, "Projectile_Category");
+    const int32_t v = ty->get(t, objects::tags::Projectile_Category);
     return push_bool(c, v == 4 || v == 6);
 }
 
@@ -2988,7 +2990,7 @@ void prox_hits(Call& c, ObjectHandle self, double range, int32_t player, int32_t
     auto excluded = [&](ObjectHandle h) {
         if (!st->alive(h) || h == self) return true;
         const TypeIndex t = st->type(h);
-        if (ty && t < ty->size() && ty->get_bool(t, "Is_Decoration")) return true;
+        if (ty && t < ty->size() && ty->get(t, objects::tags::Is_Decoration)) return true;
         return st->has_behavior(h, objects::beh::Projectile) || st->has_behavior(h, objects::beh::Particle) ||
                st->has_behavior(h, objects::beh::Team);
     };
@@ -3222,11 +3224,11 @@ int m_type_combat_rating(Call& c) {
     if (!ty) return push_num(c, 0.0);
     float power = ty->columns().ai_combat_power[t];
     if (store(c) && store(c)->mode() != objects::ModeKind::Galactic) {
-        std::vector<TypeIndex> list = ty->get_type_refs(t, "Company_Units");
-        if (list.empty()) list = ty->get_type_refs(t, "Squadron_Units");
+        std::vector<TypeIndex> list = ty->get_type_refs(t, objects::tags::Company_Units);
+        if (list.empty()) list = ty->get_type_refs(t, objects::tags::Squadron_Units);
         const TypeIndex first = list.empty() ? objects::kNone : list.front();
-        if (first != objects::kNone && first < ty->size() && ty->get_bool(first, "Create_Team")) {
-            float r = static_cast<float>(ty->get_int(t, "Max_Squad_Size")) / static_cast<float>(list.size());
+        if (first != objects::kNone && first < ty->size() && ty->get(first, objects::tags::Create_Team)) {
+            float r = static_cast<float>(ty->get(t, objects::tags::Max_Squad_Size)) / static_cast<float>(list.size());
             r = r < 0.0f ? 0.0f : (r > 1.0f ? 1.0f : r);
             power = power * r;
         }
@@ -3255,9 +3257,9 @@ int m_type_tactical_build_cost(Call& c) {
     TypeIndex t = 0;
     const auto* ty = self_types(c, t);
     if (!ty) return push_num(c, 0);
-    const int32_t mp = ty->get_int(t, "Tactical_Build_Cost_Multiplayer");
+    const int32_t mp = ty->get(t, objects::tags::Tactical_Build_Cost_Multiplayer);
     if (!c.vm->host.campaign) return push_num(c, mp);
-    const int32_t cp = ty->get_int(t, "Tactical_Build_Cost_Campaign");
+    const int32_t cp = ty->get(t, objects::tags::Tactical_Build_Cost_Campaign);
     return push_num(c, cp < 1 ? mp : cp);
 }
 // Get_Max_Range() / Get_Min_Range() (docs/re/MCX8_BINDINGS_OBJECTS.md §GameObjectTypeWrapper.Get_Max_Range / Get_Min_Range)
@@ -3279,15 +3281,15 @@ int m_type_is_hero(Call& c) {
     TypeIndex t = 0;
     const auto* ty = self_types(c, t);
     if (!ty) return push_bool(c, false);
-    std::vector<TypeIndex> list = ty->get_type_refs(t, "Company_Units");
-    if (list.empty()) list = ty->get_type_refs(t, "Squadron_Units");
+    std::vector<TypeIndex> list = ty->get_type_refs(t, objects::tags::Company_Units);
+    if (list.empty()) list = ty->get_type_refs(t, objects::tags::Squadron_Units);
     const TypeIndex h = !list.empty() && list.front() != objects::kNone && list.front() < ty->size() ? list.front() : t;
-    return push_bool(c, ty->get_bool(h, "Is_Named_Hero") || ty->get_bool(h, "Is_Special_Weapon_In_Space"));
+    return push_bool(c, ty->get(h, objects::tags::Is_Named_Hero) || ty->get(h, objects::tags::Is_Special_Weapon_In_Space));
 }
 int m_type_base_level(Call& c) {
     TypeIndex t = 0;
     const auto* ty = self_types(c, t);
-    return push_num(c, ty ? ty->get_int(t, "Base_Level") : 0);
+    return push_num(c, ty ? ty->get(t, objects::tags::Base_Level) : 0);
 }
 
 // ---------------------------------------------------------------- L1/S4 wave 1: containment, garrisons
@@ -3305,7 +3307,7 @@ bool garrison_holder(Call& c, ObjectHandle h) {
     const objects::GameObjectTypes* ty = types(c);
     if (!ty) return false;
     const auto m = ty->enums().get(objects::EnumId::GameObjectProperties).convert("CanContainGarrison");
-    return m && *m != 0 && (ty->get_mask(st->type(h), "Property_Flags") & static_cast<uint64_t>(*m)) != 0;
+    return m && *m != 0 && (ty->get(st->type(h), objects::tags::Property_Flags) & static_cast<uint64_t>(*m)) != 0;
 }
 
 // Named hero test (BATTLE_TRANSITIONS.md 1.x: Is_Named_Hero, recursive through fleets / transports): the
@@ -3314,9 +3316,9 @@ bool garrison_holder(Call& c, ObjectHandle h) {
 bool type_is_hero(Call& c, TypeIndex t) {
     const objects::GameObjectTypes* ty = types(c);
     if (!ty || t >= ty->raw().type_count()) return false;
-    if (ty->get_bool(t, "Is_Named_Hero")) return true;
-    for (const TypeIndex m : ty->get_type_refs(t, "Company_Units"))
-        if (m != objects::kNone && m < ty->raw().type_count() && ty->get_bool(m, "Is_Named_Hero")) return true;
+    if (ty->get(t, objects::tags::Is_Named_Hero)) return true;
+    for (const TypeIndex m : ty->get_type_refs(t, objects::tags::Company_Units))
+        if (m != objects::kNone && m < ty->raw().type_count() && ty->get(m, objects::tags::Is_Named_Hero)) return true;
     return false;
 }
 void collect_heroes(Call& c, ObjectHandle h, std::vector<ObjectHandle>& out, uint32_t depth) {
@@ -3398,13 +3400,13 @@ int m_can_garrison(Call& c) {
 #endif
         if (!neutral) return push_bool(c, false);
     }
-    const uint64_t host_mask = ty->get_mask(st->type(target), "Garrison_Category");
-    const uint64_t unit_mask = ty->get_mask(st->type(self), "Garrison_Category");
+    const uint64_t host_mask = ty->get(st->type(target), objects::tags::Garrison_Category);
+    const uint64_t unit_mask = ty->get(st->type(self), objects::tags::Garrison_Category);
     if (host_mask != 0 && unit_mask != 0 && (host_mask & unit_mask) == 0) return push_bool(c, false);
-    int64_t slots = ty->get_int(st->type(target), "Num_Garrison_Slots");
+    int64_t slots = ty->get(st->type(target), objects::tags::Num_Garrison_Slots);
     for (const ObjectHandle o : contents_of(c, target))
-        if (kDummyUpgrade == objects::kNoBehavior || !st->has_behavior(o, kDummyUpgrade)) slots -= ty->get_int(st->type(o), "Garrison_Value");
-    slots -= ty->get_int(representative_type(c, bridge(c), self), "Garrison_Value");
+        if (kDummyUpgrade == objects::kNoBehavior || !st->has_behavior(o, kDummyUpgrade)) slots -= ty->get(st->type(o), objects::tags::Garrison_Value);
+    slots -= ty->get(representative_type(c, bridge(c), self), objects::tags::Garrison_Value);
     return push_bool(c, slots > 0);
 }
 // Eject_Garrison() (docs/re/MCX8_BINDINGS_OBJECTS.md §Eject_Garrison) [H]: no arguments read; on a host with one of the
@@ -3429,7 +3431,7 @@ int m_get_contained_heroes(Call& c) {
     const objects::GameObjectTypes* ty = types(c);
     for (const ObjectHandle m : contents_of(c, self_object(c))) {
         const TypeIndex t = store(c)->type(m);
-        if (ty && t < ty->raw().type_count() && ty->get_bool(t, "Is_Named_Hero")) heroes.push_back(m);
+        if (ty && t < ty->raw().type_count() && ty->get(t, objects::tags::Is_Named_Hero)) heroes.push_back(m);
     }
     return push_object_table(c, heroes);
 }
@@ -3648,7 +3650,7 @@ void detail::task_force_set_targeting_priorities(Call& c, const std::vector<obje
         if (!st->alive(u)) continue;
         if (filtered) {
             const bool by_name = ascii_iequals(object_type_name(c, u), c.string(2));
-            const bool by_cat = mask != 0 && ty && (ty->get_mask(st->type(u), "CategoryMask") & mask) != 0;
+            const bool by_cat = mask != 0 && ty && (ty->get(st->type(u), objects::tags::CategoryMask) & mask) != 0;
             if (!by_name && !by_cat) continue;
         }
         detail::call_object_method(c, u, "Set_Targeting_Priorities", c.idx(1), 1);

@@ -356,8 +356,8 @@ void ObjectScriptHost::load_type_scripts(StoreScripts& ss) {
     const objects::GameObjectTypes& types = ss.mode->types();
     const uint64_t frame = ss.mode->frame();
     for (objects::TypeIndex t = 0; t < types.size(); ++t) {
-        if (!types.get_bool(t, "Execute_Script_On_Type")) continue;
-        const std::string name = trimmed_script_name(types.get_string(t, "Lua_Script"));
+        if (!types.get(t, objects::tags::Execute_Script_On_Type)) continue;
+        const std::string name = trimmed_script_name(types.get(t, objects::tags::Lua_Script));
         if (name.empty()) continue;
         auto ts = std::make_unique<TypeScript>();
         ts->type = t;
@@ -393,7 +393,7 @@ void ObjectScriptHost::attach(StoreScripts& ss, objects::ObjectHandle h) {
         ss.named.resize(types.size(), 0);
     }
     if (!ss.named[t]) {
-        ss.names[t] = trimmed_script_name(types.get_string(t, "Lua_Script"));
+        ss.names[t] = trimmed_script_name(types.get(t, objects::tags::Lua_Script));
         ss.named[t] = 1;
     }
     if (ss.names[t].empty()) return;
@@ -717,7 +717,7 @@ bool ObjectScriptHost::read(ByteReader& r, std::string* err) {
         tr.type = static_cast<objects::TypeIndex>(r.u32());
         tr.slot = r.i32();
         if (!r.ok() || stores_.empty() || tr.type >= stores_.front()->mode->types().size()) return fail("bad type instance record");
-        tr.name = trimmed_script_name(stores_.front()->mode->types().get_string(tr.type, "Lua_Script"));
+        tr.name = trimmed_script_name(stores_.front()->mode->types().get(tr.type, objects::tags::Lua_Script));
         if (tr.slot < 0) {
             if (tr.slot != -1 || !get(tr.own) || tr.own.poolable) return fail("bad unpooled type instance");
             tr.own.holder = -2;

@@ -1128,8 +1128,8 @@ int g_evaluate_type_list(Call& c) {
             if (found[i]) continue;
             switch (e.kind) {
                 case ListEntry::Kind::Type: found[i] = t == e.type ? 1 : 0; break;
-                case ListEntry::Kind::Category: found[i] = (e.mask & types->get_mask(t, "CategoryMask")) != 0 ? 1 : 0; break;
-                case ListEntry::Kind::Properties: found[i] = (e.mask & types->get_mask(t, "Property_Flags")) != 0 ? 1 : 0; break;
+                case ListEntry::Kind::Category: found[i] = (e.mask & types->get(t, objects::tags::CategoryMask)) != 0 ? 1 : 0; break;
+                case ListEntry::Kind::Properties: found[i] = (e.mask & types->get(t, objects::tags::Property_Flags)) != 0 ? 1 : 0; break;
                 case ListEntry::Kind::None: break;
             }
         }
@@ -1246,7 +1246,7 @@ int m_type_is_affiliated_with(Call& c) {
     const objects::GameObjectTypes* ty = c.vm->host.types;
     if (p < 0 || !ty || c.self->value >= ty->raw().type_count()) return push_bool(c, false);
     const std::string faction = w->faction_name(p);
-    for (const std::string_view a : ty->raw().get_list(static_cast<objects::TypeIndex>(c.self->value), "Affiliation"))
+    for (const std::string_view a : ty->raw().get_list(static_cast<objects::TypeIndex>(c.self->value), objects::tags::Affiliation.tag))
         if (ascii_iequals(a, faction)) return push_bool(c, true);
     return push_bool(c, false);
 }
@@ -1394,7 +1394,7 @@ int m_invade(Call& c) {
     if (!sim->is_hostile(planet.owner, fl.owner)) {
         const objects::GameObjectTypes* ty = c.vm->host.types;
         const objects::TypeIndex pt = sim->store().type(planet.object);
-        const std::string pname = (ty && pt < ty->raw().type_count()) ? std::string(ty->raw().types().name[pt]) : std::string();
+        const std::string pname = (ty && pt < ty->raw().type_count()) ? std::string(ty->name(pt)) : std::string();
         warn("fleet owner " + w->faction_name(fl.owner) + " is not an enemy of planet " + pname + " owner " +
              w->faction_name(planet.owner) + ". Cannot initiate invasion.");
         return 0;
@@ -1500,7 +1500,7 @@ int m_get_is_planet_ai_usable(Call& c) {
     if (c.vm->host.store->has_behavior(self, objects::beh::Planet)) return push_bool(c, false);
     const objects::GameObjectTypes* types = c.vm->host.types;
     const objects::TypeIndex t = c.vm->host.store->type(self);
-    const std::string name(types && t < types->raw().type_count() ? types->raw().types().name[t] : std::string_view());
+    const std::string name(types && t < types->raw().type_count() ? types->name(t) : std::string_view());
     return c.script_error_stop("GameObjectWrapper::Get_Is_Planet_AI_Usable -- object %s is not a planet.", name.c_str());
 }
 

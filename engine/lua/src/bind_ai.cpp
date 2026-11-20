@@ -234,7 +234,7 @@ int m_tf_activate_ability(Call& c) {
         if (!detail::galactic_ability_type_arg(c, "GalacticTaskForce::Activate_Ability", filter)) return 0;
         const objects::GameObjectTypes* types = c.vm->host.types;
         const std::string type_name =
-            filter != objects::kNone && types && filter < types->raw().type_count() ? std::string(types->raw().types().name[filter]) : std::string();
+            filter != objects::kNone && types && filter < types->raw().type_count() ? std::string(types->name(filter)) : std::string();
         h->tf_activate_ability(c.self->id, type_name, on, AiArg{});
         return 0;
     }

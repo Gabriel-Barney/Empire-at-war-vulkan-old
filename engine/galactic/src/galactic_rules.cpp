@@ -357,7 +357,7 @@ std::vector<TypeInfo> extract_type_info(const objects::GameObjectTypes& types, c
     std::vector<TypeInfo> out(types.size());
     for (objects::TypeIndex t = 0; t < types.size(); ++t) {
         TypeInfo& i = out[t];
-        i.name = std::string(types.raw().types().name[t]);
+        i.name = std::string(types.name(t));
         i.hyperspace = types.get(t, objects::tags::Hyperspace);
         i.build_cost = types.get(t, objects::tags::Build_Cost_Credits);
         i.build_time_seconds = types.get(t, objects::tags::Build_Time_Seconds);
