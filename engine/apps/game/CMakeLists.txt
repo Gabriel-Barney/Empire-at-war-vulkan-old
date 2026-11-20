@@ -18,6 +18,7 @@ target_link_libraries(alamo_mod_resolve PUBLIC alamo_vfs alamo_data alamo_core a
 add_library(alamo_game_core STATIC
   src/game_data.cpp
   src/game_session.cpp
+  src/session_spec.cpp
   src/battle_orders.cpp
   src/game_audio_host.cpp
   src/game_audio_host_objects.cpp
@@ -112,6 +113,11 @@ add_executable(alamo_game_skirmish_maps_tests tests/test_skirmish_maps.cpp)
 target_link_libraries(alamo_game_skirmish_maps_tests PRIVATE alamo_core alamo_game_core alamo_test_support)
 add_test(NAME alamo_game_skirmish_maps_tests COMMAND alamo_game_skirmish_maps_tests)
 set_tests_properties(alamo_game_skirmish_maps_tests PROPERTIES TIMEOUT 120)
+
+# ref2 t03: the one SessionSpec builder (session_spec.hpp), one check per game kind; data-free.
+add_executable(alamo_game_session_spec_tests tests/test_session_spec.cpp)
+target_link_libraries(alamo_game_session_spec_tests PRIVATE alamo_core alamo_game_core alamo_test_support)
+add_test(NAME alamo_game_session_spec_tests COMMAND alamo_game_session_spec_tests)
 
 # Playtest 2 t13: auto-resolve results screen figures (battle time, bounty, efficiency): pure rules data-free, bounty data
 # on the FoC data (ALAMO_FOC_DATA, skipped without).

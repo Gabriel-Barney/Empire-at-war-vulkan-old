@@ -246,6 +246,7 @@ void App::galactic_message(std::string_view id) {
 
 void App::post_tick() {
     audio_.sim_tick();
+    audio_.on_events(session_->presentation_events(), data_.types, local_player());  // ref2 t02: this tick's events
     if (session_->take_reveal_sfx()) {  // GRC 1.3: a planet was revealed by the galactic pre-step (frame > 0)
         audio_.planet_revealed();  // aud2 t01: Audio.xml's SFXEvent_Planet_Revealed value (FoC GUI_Planet_Mouse_Over)
         ++reveal_sfx_;
@@ -1489,42 +1490,37 @@ void App::handle_menu_actions(const std::vector<ui::MenuAction>& acts) {
             case K::ShowCredits: show_credits(); break;  // ui1 t03
             case K::StartTutorial:  // ui1 t03: a tutorial is a campaign of the tutorial set (CampaignSetInfo), started the same way
             case K::StartCampaign: {
-                SessionSpec s;
-                s.kind = SessionKind::Campaign;
-                s.campaign = a.campaign;
-                s.faction = a.faction;
-                s.ask_battle_choice = true;  // human conflicts: Fight / Auto-resolve / Retreat message box
-                s.difficulty = a.difficulty;
+                SessionChoice c;  // ref2 t03: built by make_session_spec (human conflicts ask Fight / Auto-resolve / Retreat)
+                c.kind = GameKind::Campaign;
+                c.campaign = a.campaign;
+                c.faction = a.faction;
+                c.difficulty = a.difficulty;
                 if (a.game_options.set) {  // ui1 t06: IDD_CAMPAIGN_ADVANCED_OPTIONS_DIALOG accepted
-                    s.game_options = true;
-                    s.start_credits = a.game_options.credits;
-                    s.start_tech = a.game_options.start_tech;
-                    s.max_tech = a.game_options.max_tech;
-                    s.auto_resolve_option = a.game_options.auto_resolve;
-                    s.random_events = a.game_options.random_events;
+                    c.game_options.set = true;
+                    c.game_options.credits = a.game_options.credits;
+                    c.game_options.start_tech = a.game_options.start_tech;
+                    c.game_options.max_tech = a.game_options.max_tech;
+                    c.game_options.auto_resolve = a.game_options.auto_resolve;
+                    c.game_options.random_events = a.game_options.random_events;
                 }
-                s.seed = opt_.seed;
-                s.battle_max_frames = opt_.battle_max_frames;
-                s.battle_end_hold_frames = kBattleEndHoldFrames;
-                s.fleet_groups = opt_.fleet_groups;  // [port] fleet groups (--fleet-groups)
-                if (!start_session(s)) {
+                if (!start_session(make_session_spec(c, session_options()))) {
                     notes_.push_back("campaign " + a.campaign + " did not start");
                     open_main_menu();
                 }
                 break;
             }
             case K::StartSkirmish: {
-                SessionSpec s;
-                s.kind = SessionKind::Skirmish;
-                s.skirmish_map = a.map;
+                SessionChoice c;  // ref2 t03: built by make_session_spec
+                c.kind = GameKind::Skirmish;
+                c.map = a.map;
                 // modc t20: an unnamed slot takes the data's default (game::default_skirmish_faction: Is_Playable factions in
                 // FactionFiles.xml order), not a base-game name.
-                s.skirmish.human_faction = a.factions.size() > 0 ? a.factions[0] : std::string{};
-                s.skirmish.ai_faction = a.factions.size() > 1 ? a.factions[1] : std::string{};
-                if (s.skirmish.human_faction.empty()) s.skirmish.human_faction = game::default_skirmish_faction(data_.rules, false);
-                if (s.skirmish.ai_faction.empty() || ascii_iequals(s.skirmish.ai_faction, s.skirmish.human_faction))  // [port] the AI needs a hostile faction
-                    s.skirmish.ai_faction = game::default_skirmish_faction(data_.rules, true, s.skirmish.human_faction);
-                for (const int32_t c : a.colors) s.skirmish.colors.push_back(static_cast<uint8_t>(std::clamp(c, 0, 8)));
+                c.skirmish.human_faction = a.factions.size() > 0 ? a.factions[0] : std::string{};
+                c.skirmish.ai_faction = a.factions.size() > 1 ? a.factions[1] : std::string{};
+                if (c.skirmish.human_faction.empty()) c.skirmish.human_faction = game::default_skirmish_faction(data_.rules, false);
+                if (c.skirmish.ai_faction.empty() || ascii_iequals(c.skirmish.ai_faction, c.skirmish.human_faction))  // [port] the AI needs a hostile faction
+                    c.skirmish.ai_faction = game::default_skirmish_faction(data_.rules, true, c.skirmish.human_faction);
+                for (const int32_t col : a.colors) c.skirmish.colors.push_back(static_cast<uint8_t>(std::clamp(col, 0, 8)));
                 // modc t47 (SKIRMISH_SETUP §2.8): the local slot's faction and colour open the next staging dialog (kept in
                 // the options profile; retail's profile keeps both when the player changes them).
                 if (!a.factions.empty() && !a.factions[0].empty()) skirmish_profile_.faction = a.factions[0];
@@ -1532,15 +1528,15 @@ void App::handle_menu_actions(const std::vector<ui::MenuAction>& acts) {
                 save_game_options();
                 // skm2 t02: the opened slots 2.. (ui1 t07 staging rows, up to the map's 8 starts) are AI players with their
                 // own faction ("" = the data's default AI faction), team and difficulty.
-                for (size_t k = 2; k < a.factions.size() && k < 8; ++k) s.skirmish.extra_slots.push_back({a.factions[k], {}, {}});
-                for (const int32_t t : a.teams) s.skirmish.teams.push_back(std::max(-1, t - 1));  // IDC_PLAYER_TEAM_n is 1-based
-                for (const int32_t d : a.difficulties) s.skirmish.difficulties.push_back(std::clamp(d, 0, 2));
-                s.skirmish.control_points = a.game_type == ui::kSkirmishGameControl;  // ccpgt t02
+                for (size_t k = 2; k < a.factions.size() && k < 8; ++k) c.skirmish.extra_slots.push_back({a.factions[k], {}, {}});
+                for (const int32_t t : a.teams) c.skirmish.teams.push_back(std::max(-1, t - 1));  // IDC_PLAYER_TEAM_n is 1-based
+                for (const int32_t d : a.difficulties) c.skirmish.difficulties.push_back(std::clamp(d, 0, 2));
+                c.skirmish.control_points = a.game_type == ui::kSkirmishGameControl;  // ccpgt t02
                 // skm1 t06: the AI slot's difficulty (TEXT_EASY / MEDIUM / HARD_AI_PLAYER) drives the AI players' difficulty.
-                s.difficulty = std::clamp(a.difficulty, 0, 2);
+                c.difficulty = a.difficulty;  // clamped by make_session_spec
                 // skm1 t02: the skirmish options dialog (never accepted: GameSession takes the MP_Default_* values).
                 if (a.skirmish_options.set) {
-                    sim::BattleConfig::SkirmishOptions& o = s.skirmish_options;
+                    sim::BattleConfig::SkirmishOptions& o = c.skirmish_options;
                     o.set = true;
                     o.credits = std::max(0, a.skirmish_options.credits);
                     o.win_condition = static_cast<uint8_t>(std::clamp(a.skirmish_options.win_condition, 0, 0xff));
@@ -1549,11 +1545,7 @@ void App::handle_menu_actions(const std::vector<ui::MenuAction>& acts) {
                     o.super_weapons = a.skirmish_options.super_weapons;
                     o.prebuilt_base = a.skirmish_options.prebuilt_base;
                 }
-                s.seed = opt_.seed;
-                s.battle_max_frames = opt_.battle_max_frames;
-                s.battle_end_hold_frames = kBattleEndHoldFrames;
-                s.fleet_groups = opt_.fleet_groups;  // [port] fleet groups (--fleet-groups)
-                open_buy_units(s);  // the skirmish starts from the buy-units screen
+                open_buy_units(make_session_spec(c, session_options()));  // the skirmish starts from the buy-units screen
                 break;
             }
             case K::ApplyCamera:  // [port: Gabriel] FOV settings + queue modifier

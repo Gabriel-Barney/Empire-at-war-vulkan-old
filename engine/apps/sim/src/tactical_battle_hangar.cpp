@@ -822,6 +822,7 @@ commands::RejectReason TacticalBattle::hg_production_command(TacticalMode& mode,
             if (o.builder != builder) continue;
             if (k++ != want) continue;
             const uint32_t id = o.id;
+            present(PresentationEventKind::ProductionCanceled, p, builder, o.type, id);  // ref2 t02 (before cancel drops o)
             production_->cancel(id);
             hg_refund(id, true);
             prod_used_ = hg_used_ = true;
@@ -852,6 +853,7 @@ commands::RejectReason TacticalBattle::hg_production_command(TacticalMode& mode,
         seconds *= galaxy_->tactical_corruption_multiplier(req_.info.planet, p, galactic::GalacticSim::TacticalCorruption::ProductionTime);
     const uint32_t id = production_->enqueue(p, builder, static_cast<int32_t>(type), seconds, frame_, static_cast<uint8_t>(hg_queue_of(type)));
     hg_order_cost_.push_back(HgOrderCost{id, p, cost});
+    present(PresentationEventKind::ProductionBegin, p, builder, static_cast<int32_t>(type), id);  // ref2 t02
     prod_used_ = hg_used_ = true;
     return R::None;
 }
@@ -900,6 +902,7 @@ void TacticalBattle::hg_production(TacticalMode& mode, SimRng& rng) {
         hg_refund(o.id, false);
         const Unit* b = unit_by_id(o.builder);
         if (!b || !b->alive || b->retreated || !store.alive(b->h) || o.type < 0) continue;  // builder gone: dropped
+        present(PresentationEventKind::ProductionCompleted, o.player, o.builder, o.type, o.id);  // ref2 t02
         const auto t = static_cast<objects::TypeIndex>(o.type);
         const Vec3 pos = store.position(b->h), facing = store.facing(b->h);
         if (dummy_upgrade_behavior() != objects::kNoBehavior && types.has_behavior(t, objects::BehaviorSet::Union, dummy_upgrade_behavior())) {

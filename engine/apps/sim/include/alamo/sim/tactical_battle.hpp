@@ -74,6 +74,7 @@
 #include "alamo/sim/battle_catalog.hpp"
 #include "alamo/sim/fleet_groups.hpp"  // [port] fleet groups
 #include "alamo/sim/game_modes.hpp"
+#include "alamo/sim/presentation_events.hpp"  // ref2 t02
 #include "alamo/tactical/abilities/ability_system.hpp"
 #include "alamo/tactical/combat/combat_system.hpp"
 #include "alamo/tactical/movement/fleet_placement.hpp"  // cu8l t03
@@ -1527,6 +1528,13 @@ public:
     const tactical::hangar::TacticalProduction* production() const { return production_.get(); }
     // skai t03: land skirmish too (docs/re/SKIRMISH_SETUP.md §3: one build manager per player in every skirmish).
     bool production_enabled() const { return production_ != nullptr && cfg_.skirmish; }
+    // ref2 t02 (presentation_events.hpp): the presentation events since the last drain. Off until a host turns emission on;
+    // not hashed, not saved, never read by the sim.
+    void set_emit_presentation(bool on) { emit_presentation_ = on; }
+    void drain_presentation(PresentationEvents& out) {
+        out.insert(out.end(), presentation_.begin(), presentation_.end());
+        presentation_.clear();
+    }
     // Lua Set_Garrison_Spawn (obj +0x3CB) for a SPAWN_SQUADRON object: HangarSystem::set_spawn_enabled. Unknown ids are
     // ignored. Not called yet: the Lua object bridge has no hook for the setter (it only stores
     // ScriptObjectState::garrison_spawn).
@@ -1747,6 +1755,10 @@ public:
     static const char* save_part_name(SavePart p);  // "battle.state", "battle.movement", ...
     void write_part(SavePart p, ByteWriter& w) const;
     bool read_part(SavePart p, ByteReader& r);
+    // REF2 t01: each data member is SAVED, REBUILT or DERIVED in the save ledger (src/tactical_battle_ledger.hpp; new
+    // member: add it there, tools/lint/check_battle_ledger.py). This self-check runs state_io on a probe: true when it
+    // walks every SAVED(.., state) member and nothing else; else *err names the first difference. For the save tests.
+    bool check_save_ledger(std::string* err) const;
     // q6 t28 integration: "battle.types", read before the module parts. The rebuilt battle has only the setup's types; a
     // game-object script may have added more (script_add_types), and Combat / Abilities check their table sizes. Writes
     // types_used_; the read checks the rebuilt list is its prefix and adds the tail through script_add_types (same append
@@ -1872,6 +1884,11 @@ private:
                              std::vector<Vec3>& out) const;
     std::vector<LandingUnload> landings_unloaded_;    // transient (not saved): see landings_unloaded()
     std::vector<ProductionDone> production_done_;     // q6 t19, transient (not saved): see production_done()
+    PresentationEvents presentation_;  // ref2 t02: transient, outside the CRC (drain_presentation)
+    bool emit_presentation_ = false;
+    void present(PresentationEventKind kind, int32_t player, objects::ObjectId builder, int32_t type, uint32_t order) {
+        if (emit_presentation_) presentation_.push_back({kind, player, type, builder, order, frame_});
+    }
     void reinforce(TacticalMode& mode, SimRng& rng, bool force_empty_sides);
     // The S10 stand-in [port] (REF1 t02: the one copy; BattleAi::standin_orders calls it): each movable unit not skipped
     // attacks its nearest enemy (land: the auto-attack block push; space: a move to 70 % of its range). `skip_owner`

@@ -185,6 +185,25 @@ if(TARGET alamo_objects AND TARGET alamo_commands AND TARGET alamo_tactical AND 
     set_tests_properties(alamo_sim_map1_tests PROPERTIES TIMEOUT 600)
     add_test(NAME alamo_sim_tests_every_map COMMAND alamo_sim_map1_tests --every-map)
     set_tests_properties(alamo_sim_tests_every_map PROPERTIES TIMEOUT 3600 LABELS slow)
+    # REF2 t01: save and continue on every battle fixture (save / rebuild / load at every 64-tick checkpoint, checkpoint
+    # CRCs and lookup answers against a run that never stopped), one entry per worker count; and the battle save ledger
+    # lint (tools/lint/check_battle_ledger.py; build_agent.cmd runs it too).
+    add_executable(alamo_sim_save_continue_tests sim/tests/test_save_continue.cpp)
+    target_link_libraries(alamo_sim_save_continue_tests PRIVATE alamo_sim alamo_vfs alamo_test_support)
+    target_compile_definitions(alamo_sim_save_continue_tests PRIVATE "ALAMO_SIM_TESTDATA=\"${CMAKE_CURRENT_SOURCE_DIR}/sim/testdata\"")
+    alamo_add_worker_count_check(alamo_sim_save_continue
+        COMMAND alamo_sim_save_continue_tests
+        WORKERS 1 4
+        TIMEOUT 900)
+    find_program(ALAMO_LINT_PYTHON NAMES python PATHS ${PROJECT_SOURCE_DIR}/toolchain/venv/Scripts NO_DEFAULT_PATH)
+    find_program(ALAMO_LINT_PYTHON NAMES python python3)
+    if(ALAMO_LINT_PYTHON)
+      add_test(NAME alamo_sim_battle_ledger_lint
+               COMMAND ${ALAMO_LINT_PYTHON} -I ${PROJECT_SOURCE_DIR}/tools/lint/check_battle_ledger.py)
+      add_test(NAME alamo_sim_battle_ledger_lint_selftest
+               COMMAND ${ALAMO_LINT_PYTHON} -I ${PROJECT_SOURCE_DIR}/tools/lint/check_battle_ledger.py --selftest)
+      set_tests_properties(alamo_sim_battle_ledger_lint alamo_sim_battle_ledger_lint_selftest PROPERTIES TIMEOUT 60)
+    endif()
     # --- end L1 systems ---
   endif()
 

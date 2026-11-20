@@ -71,6 +71,9 @@ if errorlevel 1 (echo build_agent: fix the literal above first; nothing was buil
 rem mcx0 t03: the tag ledger and the Lua binding effect column match the code (tools\lint\check_tag_ledger.py, about a second).
 python -I tools\lint\check_tag_ledger.py
 if errorlevel 1 (echo build_agent: regenerate the ledger named above first; nothing was built.& exit /b 1)
+rem ref2 t01: every TacticalBattle data member is in the battle save ledger (tools\lint\check_battle_ledger.py, instant).
+python -I tools\lint\check_battle_ledger.py
+if errorlevel 1 (echo build_agent: add the member above to engine\apps\sim\src\tactical_battle_ledger.hpp first; nothing was built.& exit /b 1)
 rem Which code this run builds (commit, worktree, source hash) for the build record; refuses an identical failing rerun.
 python -I tools\lint\build_state.py begin %B% --modules "!AMODS!" --tests "!ATESTS!" --refuse-repeat
 if errorlevel 3 exit /b 3

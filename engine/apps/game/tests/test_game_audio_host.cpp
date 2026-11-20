@@ -1208,6 +1208,94 @@ void test_aud2() {
 #endif
 }
 
+// ref2 t02 (alamo/sim/presentation_events.hpp): one tick's presentation events -> GameAudioHost::on_events. The local
+// player's tactical production begin / cancel / complete play the built type's speech or SFXEvent_Tactical_Build_* line
+// (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Tactical_Build_Started family"), no build music in a battle; another
+// player's events, a negative type and no local player play nothing.
+void test_presentation_events_ref2() {
+    using K = sim::PresentationEventKind;
+    MemoryProvider files;
+    files.add("Data\\XML\\GameObjectFiles.xml", "<L><File>Ref2.xml</File></L>");
+    files.add("Data\\XML\\Ref2.xml", R"(<?xml version="1.0"?>
+<SpaceUnits>
+  <SpaceUnit Name="Built_Fighter">
+    <SFXEvent_Tactical_Build_Started> TB_Start </SFXEvent_Tactical_Build_Started>
+    <SFXEvent_Tactical_Build_Cancelled> TB_Cancel </SFXEvent_Tactical_Build_Cancelled>
+    <SFXEvent_Tactical_Build_Complete> TB_Done </SFXEvent_Tactical_Build_Complete>
+    <SFXEvent_Build_Complete> Gal_Done </SFXEvent_Build_Complete>
+    <Build_Music_Completed> Built_Music </Build_Music_Completed>
+  </SpaceUnit>
+  <SpaceUnit Name="Spoken_Upgrade">
+    <SFXEvent_Tactical_Build_Started> TB_Start </SFXEvent_Tactical_Build_Started>
+    <Build_Speech_Underway> Speech_Underway </Build_Speech_Underway>
+  </SpaceUnit>
+</SpaceUnits>
+)");
+    objects::ObjectTypeDatabase raw;
+    CHECK(raw.load(files));
+    objects::GameObjectTypes types;
+    CHECK(types.build(raw));
+    const objects::TypeIndex fighter = types.resolve_name("Built_Fighter"), spoken = types.resolve_name("Spoken_Upgrade");
+    CHECK(fighter != objects::kNone && spoken != objects::kNone);
+    if (fighter == objects::kNone || spoken == objects::kNone) return;
+    const auto ev = [](K kind, int32_t player, objects::TypeIndex type, uint32_t order) {
+        sim::PresentationEvent e;
+        e.kind = kind;
+        e.player = player;
+        e.type = static_cast<int32_t>(type);
+        e.object = 7;
+        e.order = order;
+        return e;
+    };
+    GameAudioHost off;  // never initialised: a no-op
+    off.on_events({ev(K::ProductionBegin, 0, fighter, 1)}, types, 0);
+    CHECK(off.stats().production_sfx == 0);
+#ifdef ALAMO_GAME_HAVE_AUDIO
+    auto tree = std::make_unique<MemoryProvider>();
+    tree->add("Data\\XML\\SFXEventFiles.xml", "<SFXEvent_Files><File>SFXEventsRef2.xml</File></SFXEvent_Files>");
+    tree->add("Data\\XML\\SFXEventsRef2.xml", R"(<?xml version="1.0"?>
+<SFXEvents>
+  <SFXEvent Name="TB_Start"><Is_2D>Yes</Is_2D><Is_3D>No</Is_3D><Samples>S.WAV</Samples></SFXEvent>
+  <SFXEvent Name="TB_Cancel"><Is_2D>Yes</Is_2D><Is_3D>No</Is_3D><Samples>C.WAV</Samples></SFXEvent>
+  <SFXEvent Name="TB_Done"><Is_2D>Yes</Is_2D><Is_3D>No</Is_3D><Samples>D.WAV</Samples></SFXEvent>
+  <SFXEvent Name="Gal_Done"><Is_2D>Yes</Is_2D><Is_3D>No</Is_3D><Samples>G.WAV</Samples></SFXEvent>
+</SFXEvents>
+)");
+    tree->add("Data\\XML\\MusicEvents.xml", R"(<?xml version="1.0"?>
+<MusicEvents><MusicEvent Name="Built_Music"><Files>BM.MP3</Files></MusicEvent></MusicEvents>
+)");
+    tree->add("Data\\XML\\SpeechEvents.xml", R"(<?xml version="1.0"?>
+<SpeechEvents><SpeechEvent Name="Speech_Underway"><Files>SU.WAV</Files></SpeechEvent></SpeechEvents>
+)");
+    tree->add("Data\\XML\\Audio.xml", "<Audio/>");
+    tree->add("Data\\XML\\FactionFiles.xml", "<Faction_Files><File>Factions.xml</File></Faction_Files>");
+    tree->add("Data\\XML\\Factions.xml", "<Factions><Faction Name=\"Rebel\"></Faction></Factions>");
+    GameData data;
+    data.files = std::move(tree);
+    GameAudioHost h;
+    CHECK(h.init(data, AudioBackendKind::Null, 9));
+    if (!h.active()) return;
+    // One tick: the local player (1) queues, cancels and finishes fighters; player 0's order and a bad type are skipped.
+    const sim::PresentationEvents tick = {ev(K::ProductionBegin, 1, fighter, 1), ev(K::ProductionBegin, 0, fighter, 2),
+                                          ev(K::ProductionCanceled, 1, fighter, 1), ev(K::ProductionCompleted, 1, fighter, 3),
+                                          ev(K::ProductionCompleted, 0, fighter, 2), ev(K::ProductionBegin, 1, objects::kNone, 4)};
+    h.on_events(tick, types, 1);
+    CHECK(starts(h, "TB_Start") == 1 && starts(h, "TB_Cancel") == 1 && starts(h, "TB_Done") == 1);
+    CHECK(starts(h, "Gal_Done") == 0);                    // the tactical line, not the galactic one
+    CHECK(h.stats().production_sfx == 3 && h.stats().build_music == 0);  // no build music in a battle
+    CHECK(h.system()->current_music() != "Built_Music");
+    // A set Build_Speech_Underway replaces the SFX line (queued speech).
+    h.on_events({ev(K::ProductionBegin, 1, spoken, 5)}, types, 1);
+    CHECK(starts(h, "TB_Start") == 1 && h.stats().production_sfx == 4);
+    // No local player (attract demo): nothing.
+    h.on_events(tick, types, -1);
+    CHECK(h.stats().production_sfx == 4);
+    // An empty tick: nothing.
+    h.on_events({}, types, 1);
+    CHECK(h.stats().production_sfx == 4);
+#endif
+}
+
 }  // namespace
 
 int main() {
@@ -1233,6 +1321,7 @@ int main() {
     test_retreat_refusal_tag();         // mcx4 t13
     test_intro_speech_t07();
     test_aud2();
+    test_presentation_events_ref2();  // ref2 t02
     test_spin_and_self_destruct();  // mcx4 t13 batch Q
 #ifdef ALAMO_GAME_HAVE_AUDIO
     test_movie_music();

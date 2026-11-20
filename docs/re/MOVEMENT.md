@@ -1579,6 +1579,25 @@ The collision system is serviced by the land mode (§5.2). Its order relative to
 collision driver `0x50a780` (detection `0x508170` at its end), then the movement coordinators `0x426eb0`. So the speed
 fold of frame N reads the record answers left by frame N − 1's driver (§5.4.1 "The stamp in full" item 6).*
 
+**Port land tick: the stages after the walk (REF2 t07, 2026-11-19).** Retail services each object's behaviours in turn
+(above); the port runs each step as one pass over every unit, serial in ascending id, after the parallel walk and the
+serial arrival / start-turn pass. `MovementSystem::land_tail_stages()` runs the stages below in this order, and
+`alamo_tactical_movement_tests` (`test_land_tail_stages`) checks the code's list against this table (the `stage` column,
+row order), so a reorder changes both. The order between the passes is a [port] choice: retail's per-object order of the
+Walk deploy states against the arrival pop is the open anm1 t03 question (§3.5.1 step 6, §3.2.1: whether 0x16 runs in
+the arrival frame); settling it reorders rows here.
+
+<!-- land-tail-stages: begin -->
+| # | stage | port function | what it follows |
+|---|---|---|---|
+| 1 | special | `tick_special` | the special locomotors (REMAINING_GAPS §4.2-4.7) |
+| 2 | deploy | `tick_deploy` | the Walk deploy states 0x16-0x1A (§3.2, §3.2.1) |
+| 3 | turrets | `tick_turrets` | the TURRET service `0x632270` of the Deploys units (§3.2 "Turret recentre around deploy") |
+| 4 | commit | `land_commit` | the walk's end: arrival pop / state 0x15, TerrainCollision report, conform and set position (§3.5 item 4, §3.5.1, §3.6) |
+| 5 | crush | `crush_pass` | crush (§5.5) |
+| 6 | despawn | `despawned_` | bombers dropped at their path end (REMAINING_GAPS §4.6) |
+<!-- land-tail-stages: end -->
+
 ### 3.4 Speed, acceleration and turn rate [H]
 
 **Effective max speed** (`0x371160`, then `0x376990`):
