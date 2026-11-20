@@ -180,7 +180,7 @@ require("SynAICommands")
 ScriptPoolCount = 2
 function Definitions()
   Category = "Syn_Destroy_Unit"
-  TaskForce = { { "MainForce", "Frigate | Corvette = 1,3" } }
+  TaskForce = { { "MainForce", "Frigate | Corvette = 1,5" } }
 end
 function MainForce_Thread()
   MainForce.Set_As_Goal_System_Removable(false)
@@ -324,7 +324,7 @@ require("SynAICommands")
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
-  TaskForce = { { "MainForce", "Frigate | Corvette = 2,3" } }
+  TaskForce = { { "MainForce", "Frigate | Corvette = 2,5" } }
 end
 function MainForce_Thread()
   BlockOnCommand(MainForce.Produce_Force())
@@ -409,7 +409,7 @@ function Report(m) error(m) end
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
-  TaskForce = { { "MainForce", "Frigate | Corvette = 1,3" } }
+  TaskForce = { { "MainForce", "Frigate | Corvette = 1,5" } }
 end
 function MainForce_Thread()
   MainForce.Set_As_Goal_System_Removable(false)
@@ -487,7 +487,7 @@ function Report(m) error(m) end
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
-  TaskForce = { { "MainForce", "Frigate | Corvette = 1,3" } }
+  TaskForce = { { "MainForce", "Frigate | Corvette = 1,5" } }
 end
 function MainForce_Thread()
   MainForce.Set_As_Goal_System_Removable(false)
@@ -527,7 +527,7 @@ function Report(m) error(m) end
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
-  TaskForce = { { "MainForce", "Frigate | Corvette = 2,3" } }
+  TaskForce = { { "MainForce", "Frigate | Corvette = 2,5" } }
 end
 function MainForce_Thread()
   MainForce.Set_As_Goal_System_Removable(false)
@@ -593,7 +593,7 @@ function Report(m) error(m) end
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
-  TaskForce = { { "MainForce", "Frigate | Corvette = 2,3" } }
+  TaskForce = { { "MainForce", "Frigate | Corvette = 2,5" } }
 end
 function MainForce_Thread()
   if Reported then
@@ -613,7 +613,7 @@ function Report(m) error(m) end
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
-  TaskForce = { { "MainForce", "Frigate | Corvette = 2,3" } }
+  TaskForce = { { "MainForce", "Frigate | Corvette = 2,5" } }
 end
 function MainForce_Thread()
   if Reported then
@@ -634,7 +634,7 @@ function Report(m) error(m) end
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
-  TaskForce = { { "MainForce", "Frigate | Corvette = 2,3" } }
+  TaskForce = { { "MainForce", "Frigate | Corvette = 2,5" } }
 end
 function MainForce_Thread()
   if Reported then

@@ -178,15 +178,29 @@ struct TacPp {
         const auto* x = ti(t);
         return x ? in.contrast->ai_weight(static_cast<size_t>(row), x->name, x->category) : 0.0f;
     }
+    // The list's entries: the main list [0, esc_base), the escort list [esc_base, end).
+    size_t list_begin(bool escort) const { return escort ? esc_base : 0; }
+    size_t list_end(bool escort) const { return escort ? entries.size() : std::min(esc_base, entries.size()); }
+    // 0x72ac70 in float (ref5 t05, AI_GALACTIC_TOKENS §9.8 item 4 / §9.8a): total = sum of (float)target over the layer's typed
+    // entries; residual = sum of (rem / target) x (target / total) over those with target > 0 and rem > 0; <= tolerance.
     bool layer_satisfied(bool space, bool escort = false) const {
-        double total = 0.0, residual = 0.0;
-        for (size_t e = 0; e < entries.size(); ++e) {
-            if (entries[e].row < 0 || entries[e].space != space || entries[e].escort != escort) continue;
-            total += entries[e].target;
-            residual += std::max(remaining[e], 0.0);
+        float total = 0.0f;
+        for (size_t e = list_begin(escort); e < list_end(escort); ++e)
+            if (entries[e].row >= 0 && entries[e].space == space) total += static_cast<float>(entries[e].target);
+        float residual = 0.0f;
+        for (size_t e = list_begin(escort); e < list_end(escort) && e < remaining.size(); ++e) {
+            if (entries[e].row < 0 || entries[e].space != space) continue;
+            const auto t = static_cast<float>(entries[e].target), r = static_cast<float>(remaining[e]);
+            if (!(t > 0.0f && r > 0.0f)) continue;
+            residual += (r / t) * (t / total);
         }
-        if (total <= 0.0) return true;
-        return residual / total <= static_cast<double>(tolerance);
+        return residual <= tolerance;
+    }
+    // 0x72b940 "still allowed": an untyped total of the list (row -1) still short on a layer the candidate covers.
+    bool total_open(bool escort, bool covers_space, bool covers_ground) const {
+        for (size_t e = list_begin(escort); e < list_end(escort) && e < remaining.size(); ++e)
+            if (entries[e].row < 0 && (entries[e].space ? covers_space : covers_ground) && remaining[e] > 0.0) return true;
+        return false;
     }
     // 0x6bff00: every active layer of the list passes 0x72ac70.
     bool list_met(bool escort) const {
@@ -438,7 +452,8 @@ public:
         }
         const float fp = static_cast<float>(p_.in.recent_failures) * p_.def.per_failure_contrast_adjust;
         p_.tolerance = 1.0f - (fp + p_.def.min_contrast_scale) / (fp + p_.def.max_contrast_scale);
-        const double scale = static_cast<double>(p_.def.max_contrast_scale + fp) * static_cast<double>(p_.in.contrast_multiplier);
+        // ref5 t05 (AI_GALACTIC_TOKENS §9.8a, 0x5f1d00): both terms widened before the add, as galactic (§9.8 item 3).
+        const double scale = (static_cast<double>(p_.def.max_contrast_scale) + static_cast<double>(fp)) * static_cast<double>(p_.in.contrast_multiplier);
         const bool space_mode = p_.in.mode == TacticalMode::Space;
         // [M] tactical layers: the mode's own layer holds every enemy; the other layer is empty.
         const double total = p_.in.enemy_strength(~uint64_t{0});
@@ -502,31 +517,27 @@ public:
         double v = -1.0;
         r.contrast_entry = -1;
         const double P = p_.power_eff(i);
-        for (const auto& [e, wgt] : r.pairs) {  // tactical: every pair is considered
-            // q6 t19 (AI_GALACTIC_2 §1.4): the main list only for a candidate with a non-escort team, the escort list when
-            // the candidate has an escort team or the main contrast is met.
-            if (p_.escort_entry(static_cast<size_t>(e)) ? !(r.escort || p_.main_met) : (r.escort && !r.non_escort)) continue;
+        // ref5 t05 (AI_GALACTIC_TOKENS §9.8a): 0x72b6a0 counts a pair only with P > 0, w > 0 and R > 0 in every mode (the
+        // tactical flag skips only the tolerance / pop-cap test). The main list needs a non-escort team (rec+0xB0); the escort
+        // list needs an escort team or the main contrast met.
+        for (const auto& [e, wgt] : r.pairs) {
+            if (p_.escort_entry(static_cast<size_t>(e)) ? !(r.escort || p_.main_met) : !r.non_escort) continue;
             const double R = p_.remaining[static_cast<size_t>(e)];
-            const double s = pp_contrast_pair_score(R, wgt, P);  // ref5 t05: 0x72b6a0, shared with tactical
+            if (!(P > 0.0 && wgt > 0.0f && R > 0.0)) continue;
+            const double s = pp_contrast_pair_score(R, wgt, P);
             if (s > v) {
                 v = s;
                 r.contrast_entry = e;
             }
         }
         if (v > 0.0) return static_cast<float>(v * 2.0);  // x2 in tactical modes
-        // Gate: main side [port: the candidate's own layers, kept] with a non-escort team, or (q6 t19) the escort flag
-        // with an escort team.
-        const bool layer_ok = (!r.space || p_.layer_satisfied(true)) && (!r.ground || p_.layer_satisfied(false));
-        const bool main_side = layer_ok && (r.non_escort || !r.escort);
-        if (!main_side && !(p_.escort_met && r.escort)) return kVeto;
+        // The gate: the plan-wide flags with the candidate's teams (0x528 && rec+0xB0, or 0x529 && rec+0xB1), not the
+        // candidate's own layers (§9.8 item 2, §9.8a).
+        if (!((p_.main_met && r.non_escort) || (p_.escort_met && r.escort))) return kVeto;
         if (p_.def.minimum_cost + p_.def.additional_cost > p_.gross) return 0.0f;
-        if (main_side &&
-            ((r.space && !p_.remaining.empty() && p_.remaining[0] > 0.0) || (r.ground && p_.remaining.size() > 1 && p_.remaining[1] > 0.0)))
-            return 0.0f;
-        if (p_.has_escort_list) {  // the escort list's untyped totals (0x140b3a525 set)
-            const size_t b = p_.esc_base;
-            if ((r.space && p_.remaining[b] > 0.0) || (r.ground && p_.remaining.size() > b + 1 && p_.remaining[b + 1] > 0.0)) return 0.0f;
-        }
+        // Untyped totals by their layer: the main list's with 0x528 && rec+0xB0, the escort list's with 0x525 && 0x529 && rec+0xB1.
+        if (p_.main_met && r.non_escort && p_.total_open(false, r.space, r.ground)) return 0.0f;
+        if (p_.has_escort_list && p_.escort_met && r.escort && p_.total_open(true, r.space, r.ground)) return 0.0f;
         if (pp_contrast_still_needed(p_, r, p_.mask_of(r.type))) return 0.0f;  // ref5 t05: shared with galactic
         return kVeto;
     }
