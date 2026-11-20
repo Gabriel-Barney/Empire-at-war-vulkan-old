@@ -103,6 +103,14 @@ std::string_view GameAudioHost::battle_result_line(bool local_won, bool local_ho
     return space ? "SFXEvent_HUD_Lost_Space_Battle" : "SFXEvent_HUD_Lost_Land_Battle";
 }
 
+std::string_view GameAudioHost::retreat_cancel_tag(bool space, bool local_retreats, bool by_player) {
+    // ledger: consumes Faction.Space_Retreat_Cancel_SFXEvent
+    if (space) return "Space_Retreat_Cancel_SFXEvent";
+    // ledger: consumes Faction.Land_Retreat_Cancel_SFXEvent
+    if (local_retreats && by_player) return "Land_Retreat_Cancel_SFXEvent";
+    return {};
+}
+
 std::string_view GameAudioHost::retreat_begin_tag(bool local_retreats, bool local_hostile, bool space) {
     // ledger: consumes Faction.Land_Retreat_Begin_SFXEvent
     // ledger: consumes Faction.Space_Retreat_Begin_SFXEvent
@@ -1211,7 +1219,7 @@ void GameAudioHost::cue_lines(const sim::TacticalBattle& battle, const objects::
     }
     // Retreat begin (MCX4_T13_RE_ANSWERS "Faction.Land_Retreat_Begin_SFXEvent family"): on the tick a retreat countdown
     // starts; 2D. A local retreater first tries its retreating units' SFXEvent_Retreat_Start ([port] the retreater's
-    // battle units in id order stand for the coordinator's list). Cancel / not-allowed lines: no port path yet.
+    // battle units in id order stand for the coordinator's list). Cancel lines: below (trl2 t04).
     if (const int32_t rp = battle.retreating_player(); rp != last_retreater_) {
         last_retreater_ = rp;
         if (rp >= 0 && local_player >= 0) {
@@ -1234,6 +1242,37 @@ void GameAudioHost::cue_lines(const sim::TacticalBattle& battle, const objects::
             if (played) ++stats_.retreat_lines;
         }
     }
+    // trl2 t04: retreat cancel lines (retreat_cancel_tag); 2D. The type line: the first unit of the retreat list whose
+    // type sets SFXEvent_Retreat_Cancel. The space faction line is the retreater's faction's.
+    if (local_player >= 0)
+        for (const sim::TacticalBattle::RetreatCancel& c : battle.retreat_cancels()) {
+            const bool local = c.player == local_player, space = battle.is_space();
+            bool played = false;
+            if (retreat_cancel_type_first(space, local, c.by_player))
+                for (const objects::ObjectId id : c.units) {
+                    const objects::ObjectHandle h = store.find(id);
+                    if (!store.alive(h)) continue;
+                    // ledger: consumes GameObjectType.SFXEvent_Retreat_Cancel
+                    const std::string_view ev = types.get_string(store.type(h), "SFXEvent_Retreat_Cancel");
+                    if (ev.empty()) continue;
+                    played = game_->gui_sfx(ev) != 0;
+                    break;
+                }
+            const std::string_view line = retreat_cancel_tag(space, local, c.by_player);
+            if (!played && !line.empty()) {
+                if (space) {
+                    const audio::FactionAudio* f = c.player >= 0 && static_cast<size_t>(c.player) < player_factions_.size()
+                                                       ? game_data_->find_faction(player_factions_[static_cast<size_t>(c.player)])
+                                                       : nullptr;
+                    const std::string_view ev = f ? f->get(line) : std::string_view();
+                    played = !ev.empty() && game_->gui_sfx(ev) != 0;
+                } else {
+                    faction_sfx(line);
+                    played = true;
+                }
+            }
+            if (played) ++stats_.retreat_lines;
+        }
     // Capture point owner changes (MCX4_T13_RE_ANSWERS "Faction.SFXEvent_Tactical_Gain_Friendly_Control family"): the
     // local faction's lists, first entry whose object type is the point's type; 2D. [port] the faction's Is_Neutral is
     // read from its Factions.xml entry.

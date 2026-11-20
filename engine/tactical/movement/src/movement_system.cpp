@@ -1675,6 +1675,25 @@ bool MovementSystem::set_heading(ObjectId id, float yaw_deg) {
     return true;
 }
 
+bool MovementSystem::turn_in_place(ObjectId id, float yaw_deg, uint32_t frame) {
+    Unit* u = unit_ptr(id);
+    if (!u || cfg_.mode != MoveMode::Space || is_fighter(*u)) return false;
+    const ObjectId one[] = {id};
+    stop(one);
+    const float to = wrap_deg(yaw_deg);
+    if (!(std::fabs(wrap_deg(to - u->m.yaw)) > 0.01f) || !(u->lp.turn_rate > 0.0f)) return true;
+    u->facing = to;
+    u->has_goal = true;
+    u->arrived = false;
+    u->turning = true;
+    u->turn_from = u->m.yaw;
+    u->turn_to = to;
+    u->turn_start = frame + 1;
+    const float frames = std::fabs(wrap_deg(to - u->turn_from)) / u->lp.turn_rate * bo3split::slowdown_for_layer(cfg_.constants, u->d.space_layer);
+    u->turn_frames = static_cast<uint32_t>(std::ceil(frames));
+    return true;
+}
+
 bool MovementSystem::teleport(ObjectId id, V2 pos, float z, float yaw_deg, uint32_t frame) {
     Unit* u = unit_ptr(id);
     if (!u) return false;

@@ -413,6 +413,15 @@ public:
     // when a retreat starts ("" = none): the retreater is local -> _Retreat_Begin_SFXEvent (after the retreating units'
     // own SFXEvent_Retreat_Start, which replaces it); the local player is hostile to the retreater -> _Enemy_Begin_.
     static std::string_view retreat_begin_tag(bool local_retreats, bool local_hostile, bool space);
+    // trl2 t04 (cancel: land 0x534f40, space 0x532ee0 [H]; MCX4_T13_RE_ANSWERS same family, MCX4_PRES_RE_ANSWERS_2 Q4.2):
+    // the faction line for a retreat cancel ("" = none). Land: only the local retreater's own cancel (`by_player`), the
+    // local faction's Land_Retreat_Cancel_SFXEvent. Space: any cancel of any retreater, in the retreater's faction
+    // (Space_Retreat_Cancel_SFXEvent). A local retreater's unit type SFXEvent_Retreat_Cancel replaces the faction line
+    // (retreat_cancel_type_first).
+    static std::string_view retreat_cancel_tag(bool space, bool local_retreats, bool by_player);
+    static bool retreat_cancel_type_first(bool space, bool local_retreats, bool by_player) {
+        return local_retreats && (space || by_player);
+    }
     // "Faction.SFXEvent_HUD_Special_Weapon_Ready family" [H]: each faction tag is a list (one event per XML occurrence),
     // indexed by the weapon type's Special_Weapon_Target_Action_Index. special_weapon_tag gives the faction tag for a
     // ready (or fired) weapon whose owner is local / friendly (`own`) or hostile; nth_field the index-th occurrence of a

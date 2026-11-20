@@ -1583,6 +1583,22 @@ public:
     // 1 not a participant / battle over; 2 the retreat-allowed countdown still runs; 5 a retreat already runs; 6 [port]
     // prevented (retreat_prevented: interdict, Retreat_Prevention, a super weapon in space).
     int32_t retreat_block(int32_t player) const;
+    // trl2 t04 (MCX4_PRES_RE_ANSWERS_2 Q4.2, coordinator slot 15: land 0x534f40, space 0x532ee0 [H]): cancel `player`'s
+    // retreat. A player cancel (`by_player`: the Retreat command with request 0, the second b_retreat click) or the
+    // automatic one (the slot 9 check turning non-zero during the countdown: retreat_prevented). It clears the
+    // retreating side, the countdown and the retreating flag (the light pulses) and, in space, stops each unit the start
+    // turned (locomotor stop). [port] Only in the countdown (coordinator state 1): the space jump-out flight (states 2 / 4)
+    // is not cancelled. False when `player` has no cancellable retreat.
+    bool cancel_retreat(int32_t player, bool by_player);
+    bool retreat_cancellable(int32_t player) const;
+    // trl2 t04: the cancels of the last tick (presentation read for the *_Retreat_Cancel_SFXEvent lines; cleared when
+    // tick() starts, not saved).
+    struct RetreatCancel {
+        int32_t player = -1;
+        bool by_player = false;
+        std::vector<objects::ObjectId> units;  // the retreat list at the cancel (the side's live movers, ascending id)
+    };
+    std::span<const RetreatCancel> retreat_cancels() const { return retreat_cancels_; }
     // mcx4 t13 (presentation read; MCX4_PRES_RE_ANSWERS_2 Q4, 0x340920): retail's refusal code for the HUD line: as
     // retreat_block, with its 6 split into 3 (an interdict entry), 4 (a Retreat_Prevention entry), 1 (the story's
     // DISABLE_RETREAT) and 6 (a super weapon in space).
@@ -1921,6 +1937,7 @@ private:
     void script_member_spots(const TacticalMode& mode, std::span<const uint32_t> members, Vec3 at, float yaw_deg,
                              std::vector<Vec3>& out) const;
     std::vector<LandingUnload> landings_unloaded_;    // transient (not saved): see landings_unloaded()
+    std::vector<RetreatCancel> retreat_cancels_;      // trl2 t04, transient (not saved): see retreat_cancels()
     std::vector<ProductionDone> production_done_;     // q6 t19, transient (not saved): see production_done()
     PresentationEvents presentation_;  // ref2 t02: transient, outside the CRC (drain_presentation)
     bool emit_presentation_ = false;

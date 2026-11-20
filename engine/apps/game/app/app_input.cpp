@@ -582,8 +582,15 @@ void App::route_commands(std::vector<commands::EventData>& cmds, std::span<const
                 story_ui_.generic("drag_land_to_space");  // the drop of a land stack on a fleet pane (0x3cf7d0)
             }
         }
+        // trl2 t04 (MCX4_PRES_RE_ANSWERS_2 Q4.2, 0x30d710 -> 0x3408b0): the local retreater's second click cancels its
+        // retreat (the Retreat command with request 0), no dialog.
+        if (e.type() == commands::EventType::Retreat && screen() == Screen::Battle)
+            if (const sim::TacticalBattle* rb = battle(); rb && rb->retreat_cancellable(local_player())) {
+                submit(commands::ev::retreat(false), ci >= voice.size() || voice[ci] != 0);
+                continue;
+            }
         // mcx4 t13 (MCX4_PRES_RE_ANSWERS_2 Q4): a refused request plays the local faction's refusal line and opens nothing.
-        // [port] the local player's own running retreat: silent (retail's second click cancels; the port has no cancel).
+        // The local player's own running retreat past its countdown (not cancellable any more): silent.
         if (e.type() == commands::EventType::Retreat && screen() == Screen::Battle)
             if (const sim::TacticalBattle* rb = battle(); rb && rb->retreating_player() != local_player())
                 if (const int32_t code = rb->retreat_refusal(local_player()); code != 0) {

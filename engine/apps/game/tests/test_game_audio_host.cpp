@@ -291,6 +291,8 @@ void test_battle_result_lines() {
 // mcx4 t13 batch E (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.Land_Retreat_Begin_SFXEvent family"; both builds).
 // ledger: verifies Faction.Land_Retreat_Begin_SFXEvent
 // ledger: verifies Faction.Space_Retreat_Begin_SFXEvent
+// ledger: verifies Faction.Land_Retreat_Cancel_SFXEvent
+// ledger: verifies Faction.Space_Retreat_Cancel_SFXEvent
 // ledger: verifies Faction.Land_Retreat_Enemy_Begin_SFXEvent
 // ledger: verifies Faction.Space_Retreat_Enemy_Begin_SFXEvent
 void test_retreat_begin_lines() {
@@ -300,6 +302,14 @@ void test_retreat_begin_lines() {
     CHECK(H::retreat_begin_tag(false, true, false) == "Land_Retreat_Enemy_Begin_SFXEvent");
     CHECK(H::retreat_begin_tag(false, true, true) == "Space_Retreat_Enemy_Begin_SFXEvent");
     CHECK(H::retreat_begin_tag(false, false, true).empty());  // an ally of the retreater hears nothing
+    // trl2 t04: cancel lines (land: the local retreater's own cancel only; space: any cancel, retreater's faction).
+    CHECK(H::retreat_cancel_tag(false, true, true) == "Land_Retreat_Cancel_SFXEvent");
+    CHECK(H::retreat_cancel_tag(false, true, false).empty());   // land automatic cancel: silent
+    CHECK(H::retreat_cancel_tag(false, false, true).empty());   // land: an enemy's cancel is not heard
+    CHECK(H::retreat_cancel_tag(true, false, false) == "Space_Retreat_Cancel_SFXEvent");
+    CHECK(H::retreat_cancel_tag(true, true, true) == "Space_Retreat_Cancel_SFXEvent");
+    CHECK(H::retreat_cancel_type_first(true, true, false) && !H::retreat_cancel_type_first(true, false, true));
+    CHECK(H::retreat_cancel_type_first(false, true, true) && !H::retreat_cancel_type_first(false, true, false));
 }
 
 // mcx4 t13 batch G (docs/re/MCX4_T13_RE_ANSWERS.md "Faction.SFXEvent_HUD_Special_Weapon_Ready family"; both builds).

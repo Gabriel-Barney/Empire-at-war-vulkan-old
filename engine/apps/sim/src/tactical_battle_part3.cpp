@@ -1188,7 +1188,9 @@ cmd::RejectReason TacticalBattle::apply_order(TacticalMode& mode, uint8_t player
             return order_reinforce(mode, player, static_cast<objects::ObjectId>(key), ev.f("x"), ev.f("y"), rng);
         }
         case T::Retreat:  // the retreat dialog's confirm (GameScreens): the retreat coordinator (BT 3.4)
-            return ev.u("request") != 0 && request_retreat(static_cast<int32_t>(player)) ? R::None : R::NotAllowed;
+            // trl2 t04 (MCX4_PRES_RE_ANSWERS_2 Q4.2): request 0 = the cancel (RetreatEvent flag -> slot 15, by_player 1).
+            if (ev.u("request") == 0) return cancel_retreat(static_cast<int32_t>(player), true) ? R::None : R::NotAllowed;
+            return request_retreat(static_cast<int32_t>(player)) ? R::None : R::NotAllowed;
         default: return handle_command(mode, player, ev, rng);  // garrisons, sell, build, abilities, special weapons, ...
     }
 }

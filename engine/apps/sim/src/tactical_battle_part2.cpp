@@ -1598,6 +1598,48 @@ bool TacticalBattle::request_retreat(int32_t player) {
     retreat_done_frame_ = frame_ + static_cast<uint32_t>(frames_trunc(secs * 30.0f));
     for (const Unit& u : units_)
         if (u.side == side && u.alive) combat_->set_flag(u.id, tc::kUnitRetreating, true);
+    // tru2 t02 (TRU1_C_RE §2.1, space vf14 0x533080 -> 0x533220 [H]): every unit of the retreat list (vf8: the player's live
+    // movers that are not team members) gets a turn to the reverse of the ATTACKER ENTRY POSITION marker's yaw (locomotor
+    // vf +0x218), so the ships turn away during the countdown. [port] No marker: the attacker side's fallback facing, as
+    // rt_begin_flight; units in units_ order (ascending id).
+    if (space_ && movement_) {
+        Vec3 mpos = anchor_[1], mface = facing_[1];
+        (void)bt_attacker_entry(mpos, mface);
+        if (mface.x != 0.0f || mface.y != 0.0f) {
+            const float heading = yaw_of(Vec3{-mface.x, -mface.y, 0.0f});
+            for (const Unit& u : units_)
+                if (u.side == side && u.alive && !u.retreated && u.movable && u.container == kNoContainer &&
+                    !l1_jumps_.departing(u.id))
+                    (void)movement_->turn_in_place(u.id, heading, frame_);
+        }
+    }
+    return true;
+}
+
+bool TacticalBattle::retreat_cancellable(int32_t player) const {
+    return retreat_side_ >= 0 && !retreat_complete_ && rt_.state == 0 && !finished_ &&
+           side_player(static_cast<uint8_t>(retreat_side_)) == player;
+}
+
+bool TacticalBattle::cancel_retreat(int32_t player, bool by_player) {
+    if (!retreat_cancellable(player)) return false;
+    const auto side = static_cast<uint8_t>(retreat_side_);
+    RetreatCancel rec;
+    rec.player = player;
+    rec.by_player = by_player;
+    std::vector<objects::ObjectId> stop;
+    for (const Unit& u : units_) {
+        if (u.side != side || !u.alive || u.retreated) continue;
+        combat_->set_flag(u.id, tc::kUnitRetreating, false);
+        if (!u.movable) continue;
+        rec.units.push_back(u.id);
+        if (space_) stop.push_back(u.id);
+    }
+    // Space 0x532ee0: each unit of the retreat list gets a locomotor stop (the start's heading turn ends).
+    if (movement_ && !stop.empty()) movement_->stop(stop);
+    retreat_side_ = -1;
+    retreat_done_frame_ = 0;
+    retreat_cancels_.push_back(std::move(rec));
     return true;
 }
 
@@ -1671,10 +1713,15 @@ void TacticalBattle::complete_retreat(TacticalMode& mode, uint8_t side) {
     // Post-retreat (vf11): the retreating units leave the map and are preserved in the galaxy. Playtest QA D1: every other
     // object of the player dies (BT §3.4): in space that is what cannot jump out, the station and other units without a
     // locomotor. They go through this tick's combat phase D like the attrition victims, so they break up and count as losses.
-    // [port] land keeps its old rule (structures stay); units with destroyed engines still count as retreatable.
-    if (space_) {
+    // trl2 t05 (BT §3.4 vf11 [M]): land too - every object of the player that cannot retreat (no locomotor: structures,
+    // turrets, pads' buildings) dies; land keeps its transports (TRANSPORT behaviour) as well. [port] the retreat list is
+    // the side's movers (land team members retreat with their container); units with destroyed engines still count as
+    // retreatable.
+    {
+        const objects::ObjectStore* st = &mode.primary();
         for (const Unit& u : units_) {
             if (u.side != side || !u.alive || u.retreated || u.movable || rt_listed(u.id)) continue;  // TRU1 t06: flown out
+            if (!space_ && st && st->alive(u.h) && st->has_behavior(u.h, objects::beh::Transport)) continue;
             if (std::find(bt_attrition_ids_.begin(), bt_attrition_ids_.end(), u.id) == bt_attrition_ids_.end()) {
                 bt_attrition_ids_.push_back(u.id);
                 bt_used_ = true;

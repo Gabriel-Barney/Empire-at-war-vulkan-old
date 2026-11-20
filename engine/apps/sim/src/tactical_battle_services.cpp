@@ -143,6 +143,7 @@ void TacticalBattle::build_service_graph() {
         story_reinforced_.clear();  // L1/S4 wave 2b story hook: this tick's reserve deployments
         ability_finished_.clear();  // S7 t15 A1: this tick's signal 0x29
         landings_unloaded_.clear();  // a1i t04: signal 0x19 records of the last tick
+        retreat_cancels_.clear();    // trl2 t04: cancel records of the last tick
         production_done_.clear();    // q6 t19: signal 0x22 records of the last tick
         story_garrisoned_.clear();  // S4: this tick's garrison entries / structure captures
         story_captured_.clear();
@@ -184,6 +185,12 @@ void TacticalBattle::build_service_graph() {
         if (retreat_side_ < 0 || retreat_complete_) return;
         const auto side = static_cast<uint8_t>(retreat_side_);
         if (rt_.state == 0) {
+            // trl2 t04 (MCX4_PRES_RE_ANSWERS_2 Q4.2): the coordinator update cancels (by_player 0) when the slot 9 check
+            // turns non-zero during the countdown.
+            if (retreat_prevented(side_player(side))) {
+                (void)cancel_retreat(side_player(side), false);
+                return;
+            }
             if (frame_ < retreat_done_frame_) return;
             bt_retreat_attrition(side, *tick_.rng);  // battle host: vf12 at the countdown end (§4.9)
             // TRU1 t06 (TRU1_C_RE §2.2): space with the retreat cinematic flies the units out first (states 2 / 4)

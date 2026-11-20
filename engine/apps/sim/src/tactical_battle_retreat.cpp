@@ -148,7 +148,20 @@ bool TacticalBattle::rt_flight_tick(TacticalMode& mode) {
     // State 4 (0x533e30): past counter 180 the player's star bases die (complete_retreat kills every object of the player
     // that did not leave, the station included, through this tick's combat phase D). [port] The camera's own end is not
     // modelled: the wait ends there.
-    return c > kBaseKillFrame;
+    if (c <= kBaseKillFrame) return false;
+    // trl2 t05 (TRU1_C_RE §2.4, MCX4_T15_RE_ANSWERS): each star base of the retreating side first spawns its type's
+    // Retreat_Self_Destruct_Explosion at its position (no draw). [port] star base = a starbase participant's live unit.
+    objects::ObjectStore& st = mode.primary();
+    const objects::GameObjectTypes& types = catalog_->types();
+    for (const Unit& u : units_) {
+        if (u.side != static_cast<uint8_t>(retreat_side_) || !u.alive || u.retreated || u.participant >= parts_.size() ||
+            !parts_[u.participant].starbase || !st.alive(u.h))
+            continue;
+        // ledger: consumes GameObjectType.Retreat_Self_Destruct_Explosion
+        const objects::TypeIndex x = types.get_type_ref(static_cast<objects::TypeIndex>(u.type), "Retreat_Self_Destruct_Explosion");
+        if (x != objects::kNone && x < types.size()) spawn_particle(mode, static_cast<int32_t>(x), st.position(u.h), st.owner(u.h));
+    }
+    return true;
 }
 
 }  // namespace alamo::sim

@@ -331,7 +331,7 @@ void App::fill_command_buttons(ui::TacticalHudFrame& hf) const {
     c.present = true;
     c.controls_locked = story_controls_locked();
     const int32_t me = local_player();
-    c.retreat_enabled = b->retreat_block(me) == 0;
+    c.retreat_enabled = b->retreat_block(me) == 0 || b->retreat_cancellable(me);  // trl2 t04: the second click cancels
     const float running = b->retreat_countdown_progress();
     const float allowed = b->retreat_allowed_progress();
     c.retreat_dial = running >= 0.0f ? running : allowed < 1.0f ? allowed : -1.0f;

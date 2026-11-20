@@ -559,6 +559,11 @@ public:
     // the locomotor's only current heading. A moving unit then steers back toward its path at its turn rate. False when
     // the unit is unknown. [port] a fighter's flight state keeps its own yaw.
     bool set_heading(ObjectId id, float yaw_deg);
+    // tru2 t02 (TRU1_C_RE §2.1, locomotor vf +0x218 [H call, M kind]: a turn-in-place path the locomotor runs over later
+    // frames): space, a non-fighter unit drops its order (as stop) and turns in place to `yaw_deg` at its turn rate x the
+    // layer's TurnInPlaceSlowdown, as the arrival turn does (the turn starts at frame + 1; arrived when done). False when
+    // the unit is unknown, the mode is land or the unit is a fighter. No draws.
+    bool turn_in_place(ObjectId id, float yaw_deg, uint32_t frame);
     // S7 t06 / t14 (MOVEMENT §3.1.1, 0x3a9910): swap a Uses_Multiple_Locomotors unit to its secondary locomotor (true)
     // or back to its primary (false); see "multi" in the header comment. Returns false when the unit is unknown, the mode
     // is space, or the type has no Uses_Multiple_Locomotors / no JETPACK Secondary_Locomotor_Name
