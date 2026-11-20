@@ -17,6 +17,12 @@ parsers are tools/parity/trace_parsers.py (ref3 t02; the Q2 kit imports them fro
       The retail runs of a scenario against each other: the run-to-run spread the tolerances must allow.
   parity_harness.py list [--refs DIR]
       Scenarios, their reference runs and whether they are present on this machine.
+  parity_harness.py outcome --scenario ID [--port-exe EXE] [--seeds N] [--jobs J] [--out DIR] [--reuse-port]
+  parity_harness.py outcome --list
+      AI-vs-AI outcome sweep (ref4 t04): one scenario of tools/parity/outcomes.json run over seeds 1..N and judged by
+      the share of seeds that end, their end frames, non-retail Lua errors and, for the skai exit scenarios, retail's
+      end rate (outcome_sweep.py). Writes <out>/<scenario>/report.txt and the seed logs (default out:
+      tools/parity/out/outcome). Exit 0 pass, 1 fail, 2 error, 77 skipped (no ALAMO_FOC_DATA or alamo_headless).
   parity_harness.py selftest
       Small synthetic fixtures (written to a temp folder): metric extraction, tolerance grading, baseline check.
 
@@ -50,6 +56,7 @@ import build_trees  # noqa: E402
 sys.path.insert(0, HERE)
 import trace_parsers as tp  # noqa: E402  (tools/parity/trace_parsers.py: trace / queue / CRC / AI-log parsers)
 import story_battle  # noqa: E402  (tools/parity/story_battle.py: the story battle reader)
+import outcome_sweep  # noqa: E402  (tools/parity/outcome_sweep.py: AI-vs-AI outcome sweeps over seeds, ref4 t04)
 
 SKIP = 77
 FACTIONS = tuple(tp.FACTION_TOKENS)  # Empire, Rebel, Underworld
@@ -1496,6 +1503,10 @@ def selftest():
     check(not loaded, "no probe-kit module loaded: %s" % loaded)
     check(not any(os.path.normcase(os.path.abspath(p)).startswith(kit + os.sep) for p in sys.path if p),
           "no probe-kit folder on sys.path")
+    # ref4 t04: the outcome sweeps (judge, parsers) and the scenario file.
+    outcome_sweep.selftest(check)
+    bad = outcome_sweep.check_scenarios(load_json(os.path.join(HERE, "outcomes.json")))
+    check(not bad, "outcomes.json well formed: %s" % bad)
     # Grading primitives.
     t = {"abs": 2}
     check(grade("travel.hop_ticks[A->B]", [26, 27], 28, t)["status"] == "PASS", "envelope: 28 within 26..27 +-2")
@@ -1654,6 +1665,48 @@ def selftest():
     return 0 if not fails else 1
 
 
+def cmd_outcome(a):
+    import concurrent.futures
+    path = a.outcomes or os.path.join(HERE, "outcomes.json")
+    scens = load_json(path)
+    names = [k for k in scens if not k.startswith("_")]
+    if a.list:
+        for sid in names:
+            print("%-28s %2d seeds  %s" % (sid, scens[sid]["seeds"], " ".join(scens[sid]["args"])))
+        return 0
+    bad = outcome_sweep.check_scenarios(scens)
+    unknown = [sid for sid in (a.scenario or []) if sid not in names]
+    if bad or unknown or not a.scenario:
+        for b in bad + ["unknown scenario %s (known: %s)" % (u, ", ".join(names)) for u in unknown]:
+            print("ERROR " + b)
+        if not a.scenario:
+            print("ERROR outcome needs --scenario (or --list)")
+        return 2
+    data = os.environ.get("ALAMO_FOC_DATA")
+    if not data or not os.path.isdir(data):
+        print("SKIP outcome: ALAMO_FOC_DATA not set or not a folder (the port runs need the game data)")
+        return SKIP
+    exe = a.port_exe or default_port_exe()
+    if not exe or not os.path.isfile(exe):
+        print("SKIP outcome: no alamo_headless.exe (%s)" % exe)
+        return SKIP
+    ok_all = True
+    for sid in a.scenario:
+        scen = scens[sid]
+        seeds = list(range(1, int(a.seeds or scen["seeds"]) + 1))
+        out_dir = os.path.join(a.out or os.path.join(HERE, "out", "outcome"), sid)
+        os.makedirs(out_dir, exist_ok=True)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max(1, int(a.jobs or 4))) as ex:
+            runs = list(ex.map(lambda s: outcome_sweep.run_seed(exe, out_dir, scen, s, a.reuse_port), seeds))
+        ok, lines = outcome_sweep.judge(sid, scen, runs)
+        ok_all = ok_all and ok
+        text = "\n".join(lines) + "\n"
+        with open(os.path.join(out_dir, "report.txt"), "w", encoding="utf-8", newline="\n") as fh:
+            fh.write(text)
+        print(text, end="")
+    return 0 if ok_all else 1
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -1682,6 +1735,15 @@ def main(argv=None):
     ad.add_argument("--no-check", action="store_true", help="do not require the runs' trace.q2t")
     ad.add_argument("--scenarios-file", help="default tools/parity/scenarios.json")
     ad.add_argument("runs", nargs="+")
+    oc = sub.add_parser("outcome", help="AI-vs-AI outcome sweep of an outcomes.json scenario over seeds 1..N")
+    oc.add_argument("--scenario", action="append", help="scenario id of outcomes.json (repeatable)")
+    oc.add_argument("--list", action="store_true", help="list the scenarios")
+    oc.add_argument("--port-exe", help="alamo_headless.exe (default: build-wt-msvc / build-msvc / ... bin)")
+    oc.add_argument("--seeds", type=int, help="seed count (default: the scenario's)")
+    oc.add_argument("--jobs", type=int, help="runs at a time (default 4)")
+    oc.add_argument("--out", help="output folder (default tools/parity/out/outcome)")
+    oc.add_argument("--reuse-port", action="store_true", help="judge the seed logs of an earlier run again")
+    oc.add_argument("--outcomes", help="scenario file (default tools/parity/outcomes.json)")
     sub.add_parser("selftest")
     a = ap.parse_args(argv)
     if a.cmd == "run":
@@ -1692,6 +1754,8 @@ def main(argv=None):
         return cmd_list(a)
     if a.cmd == "add-refs":
         return cmd_add_refs(a)
+    if a.cmd == "outcome":
+        return cmd_outcome(a)
     return selftest()
 
 

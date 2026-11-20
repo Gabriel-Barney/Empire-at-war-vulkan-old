@@ -266,17 +266,31 @@ Rebel retreat at 2755-11566 (12 seeds, 20000 ticks).
 Gabriel, 2026-11-16 (coordinator run, skai t15): after more retail runs, judge skai's exit as a tier-2 distribution (end
 rate and end frames) instead of "the idle-human Utapau run does not end within 36000 frames". Retail does end some of these
 games: Rebel AI vs idle Empire 1 of 4 (27265), Empire AI vs idle Underworld 3 of 5 (23746, 25707, 26522), Underworld AI vs
-idle Empire 0 of 1 (runs listed in `tools/probe_mod/q2_traces/analysis/skai_exit.py`; SKAI_T06_LAND_RUNS §9,
+idle Empire 0 of 1 (runs listed in `tools/parity/outcomes.json`, `skai_exit_*`; SKAI_T06_LAND_RUNS §9,
 SKAI_T15_PLAN_RETEST, B0418_UTAPAU_AI_RUNS).
 
-The check (`skai_exit.py`, seeds 1-10 per AI, 36000 ticks; thresholds chosen by skai-lane2 as the documented default,
+The check (`parity_harness.py outcome --scenario skai_exit_<ai>`, formerly `skai_exit.py` (ref4 t04); seeds 1-10 per AI, 36000 ticks; thresholds chosen by skai-lane2 as the documented default,
 [port]): per AI, (1) **rate**: a two-sided Fisher exact test on port ends / 10 against retail ends / runs passes while
 p >= 0.05; (2) **frames**, only when both sides have ended games: the median end frame of the port's ended games is at least
 retail's earliest end - 3000 frames. The frame test is one-sided because the 36000 cap cuts the late side and a port that ends
 too late ends too rarely, which the rate test sees; what t15 is about is the AI finishing the base too fast. The AI-against-AI
 part of the exit is unchanged (whole run, 0 Lua errors, no end needed). Port on dev dc790516 (re-test on): Rebel 1 of 10
 (33956) pass; Underworld 5 of 10 pass (retail has one run, so this proves little); **Empire 10 of 10, median 18747 < 20746:
-fails**, the open part of skai t15. More retail runs tighten the check: add them to `RETAIL` in the script.
+fails**, the open part of skai t15. More retail runs tighten the check: add them to the scenario's `retail` in `outcomes.json`.
+
+## Outcome tests over seeds (ref4 t04, Gabriel, 2026-11-19)
+
+Second architecture review (ref4, all seven tasks picked by Gabriel): the AI-vs-AI outcome ctests no longer pin a hand-picked
+seed. Each scenario (`tools/parity/outcomes.json`) is one slow ctest, `alamo_headless_outcome_<id>`, that runs seeds 1..N
+through `tools/parity/parity_harness.py outcome` and asserts the share of seeds that end, the end-frame range of the ended
+ones, no Lua error outside retail's documented ones (`kRetailLuaErrors`, entry below) and alamo_headless's own checks; a
+random-driven outcome is tier 2 ("Parity tiers"). Thresholds sit below the measured share and change only with a new
+measurement and its reason in the scenario's `why`, like a golden. Determinism stays with the CRC golden runs, one fixed seed
+each. A known port bug's Lua error may be listed under `known_lua` with its owning open group (the mdu1 MDU race, which had
+moved the pinned Empire-vs-Underworld seed eight times); it is reported, not failed, and the entry goes when the group lands.
+The skai exit test folded into the same command (`skai_exit_*` scenarios, not ctests). Before, 21 re-pin commits in two weeks
+kept ~70 lines of per-seed measurements in `engine/apps/CMakeLists.txt`, and on 262a47b1 the pinned station seed 7 and
+Empire-vs-Underworld seeds 3 and 4 were already red.
 
 ## Retail Lua errors in the skai exit test (Gabriel, 2026-11-16)
 
