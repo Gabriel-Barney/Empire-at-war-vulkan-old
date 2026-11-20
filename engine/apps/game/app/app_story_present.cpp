@@ -45,6 +45,18 @@ void App::story_present_setup() {
     story_present_.set_hooks(std::move(h));
 }
 
+// ref4 t01: the presenter the loaded save carried (GameSession "game" chunk v2), read at this frame's clock. False (presenter
+// reset) when the save has none (v1) or it does not read.
+bool App::story_present_restore() {
+    const std::optional<std::vector<uint8_t>> saved = session_ ? session_->take_loaded_presentation() : std::nullopt;
+    if (!saved) return false;
+    ByteReader r(*saved);
+    if (story_present_.read(r, now_s_) && r.done()) return true;
+    std::printf("saves: the story presentation state did not read; the lasting rewards are fed again\n");
+    story_present_.reset();
+    return false;
+}
+
 // Feed one reward and the clocks; called by story_reward_step for every reward of a local plot set.
 void App::story_present_reward(const lua::StoryFired& f, uint8_t mode) {
     std::vector<std::string> params;

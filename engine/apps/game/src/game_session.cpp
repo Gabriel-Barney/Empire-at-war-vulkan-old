@@ -1094,7 +1094,8 @@ commands::SubmitResult GameSession::submit(commands::EventData ev) {
 // --- N1 / t09: save / load (game_session.hpp file comment) ---
 namespace {
 
-constexpr uint32_t kGameChunkVersion = 1;
+// 2 = ref4 t01: the host's presentation state follows as a section (game_session.hpp, set_presentation_writer); 1 = none.
+constexpr uint32_t kGameChunkVersion = 2;
 
 std::string join_names(const std::vector<std::string>& v) {
     std::string s;
@@ -1266,19 +1267,39 @@ void GameSession::write_game_state(ByteWriter& w) const {
     w.u32(kGameChunkVersion);
     w.boolean(paused_).boolean(pause_pending_).boolean(invaded_).boolean(choice_sent_);
     w.u64(static_cast<uint64_t>(events_seen_));
+    put_section(w, [this](ByteWriter& s) {
+        if (presentation_writer_) presentation_writer_(s);
+        else s.raw(loaded_presentation_);
+    });
 }
 
 bool GameSession::read_game_state(ByteReader& r) {
-    if (r.u32() != kGameChunkVersion) return false;
+    const uint32_t version = r.u32();
+    if (version != 1 && version != kGameChunkVersion) return false;
     const bool paused = r.boolean(), pending = r.boolean(), invaded = r.boolean(), choice = r.boolean();
     const uint64_t seen = r.u64();
+    std::vector<uint8_t> presentation;
+    if (version >= 2 && !get_section(r, [&](ByteReader& s) {
+            const std::span<const uint8_t> b = s.raw(s.remaining());
+            presentation.assign(b.begin(), b.end());
+            return true;
+        }))
+        return false;
     if (!r.ok()) return false;
+    loaded_presentation_ = std::move(presentation);
+    presentation_taken_ = false;
     paused_ = paused;
     pause_pending_ = pending;
     invaded_ = invaded;
     choice_sent_ = choice;
     events_seen_ = static_cast<size_t>(std::min<uint64_t>(seen, 0xFFFFFFFFull));  // tap_events clamps to the stream
     return true;
+}
+
+std::optional<std::vector<uint8_t>> GameSession::take_loaded_presentation() {
+    if (presentation_taken_ || loaded_presentation_.empty()) return std::nullopt;
+    presentation_taken_ = true;
+    return loaded_presentation_;
 }
 
 std::string GameSession::save_blocker() const {

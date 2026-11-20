@@ -65,7 +65,8 @@ struct SessionSpec {
     // Starting_Credits / tech levels). Credits, start and max tech apply to every player the campaign names; the
     // auto-resolve option (0 always / 1 never / 2 ask / 3 overwhelming odds) is the host's battle prompt rule; game_options
     // with random events off makes the galactic AI's Game.InterventionsEnabled 0.0 (mcx8 t07). Not saved [port]: a loaded
-    // game asks again.
+    // game asks again (ref4 t01: the battle prompt reads auto_resolve_option only when game_options is set, which a load
+    // leaves false, so a loaded game falls back to "ask"; whether retail keeps the option across a load is not traced).
     bool game_options = false;
     int32_t start_credits = 6000, start_tech = 1, max_tech = 5, auto_resolve_option = 2;
     bool random_events = false;
