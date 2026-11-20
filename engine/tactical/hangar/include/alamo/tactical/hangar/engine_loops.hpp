@@ -75,6 +75,7 @@
 #include <vector>
 
 #include "alamo/tactical/combat/combat_system.hpp"
+#include "alamo/core/frames.hpp"
 
 namespace alamo {
 class ByteWriter;
@@ -110,7 +111,7 @@ struct HolsterDesc {
 // frames(s) = round-half-away(fps x s) (0x27c9a0 -> 0x22f9c0); negative / NaN -> 0.
 inline uint32_t holster_frames(float seconds, uint32_t fps) {
     const float f = static_cast<float>(fps) * seconds;
-    return f > 0.0f ? static_cast<uint32_t>(std::lround(f)) : 0u;
+    return f > 0.0f ? static_cast<uint32_t>(frames_round(f)) : 0u;
 }
 
 inline constexpr uint32_t kHolsterDecisionInterval = 15;  // the draw / holster decision runs on frame % 15 == 0

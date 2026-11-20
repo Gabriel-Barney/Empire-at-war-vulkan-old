@@ -16,8 +16,11 @@ build writes the two mods under DIR/Mods:
               seconds x 30 is far outside int32 at the sites that turn them into frame counts (the L1 bombing-run and
               bombard services read theirs at the start of every land battle). The port converts them with the x86
               range behaviour of alamo/core/frames.hpp (INT32_MIN), so the MSVC and clang CRC logs must match
-              (run --exe2); a plain float -> integer cast there is undefined and the two compilers differed (the
-              class of the Age of Legends Defense_Duration_In_Secs split, mod golden aol_space).
+              (run --exe2); a plain float -> integer cast there is undefined (the class of the Age of Legends
+              Defense_Duration_In_Secs split, mod golden aol_space). The land_cp run (--runs land_cp: land skirmish
+              with --control-points) reaches the domination countdown, which starts at INT32_MIN here and must wrap
+              (dec_wrap); with a plain decrement, clang won on the first tick and MSVC never (review of ref4 t03).
+              The uint32 bombing-run sites happened to agree on both x64 compilers even before.
 run builds them into DIR, then runs alamo_headless on the FoC install (--game, default ALAMO_FOC_DATA) with
 MODPATH=<mod> for each mod: space skirmish (_MP_SPACE_GEONOSIS, AI Empire vs AI Rebel), land skirmish
 (_MP_LAND_UTAPAU), both --skirmish-ticks, and the galactic campaign (Heart of the Maw, economy, galactic AI, story,
@@ -49,6 +52,10 @@ MODS = {'factions_80': 'Factions80', 'levels_10': 'Levels10', 'huge_delay': 'Hug
 RUN_ARGS = {
     'space': ['--skirmish-ai', 'skirmish', '--map', '_MP_SPACE_GEONOSIS', '--ai', 'Empire,Rebel', '--fail-on-lua-errors'],
     'land': ['--skirmish-ai', 'skirmish', '--map', '_MP_LAND_UTAPAU', '--ai', 'Empire,Rebel', '--fail-on-lua-errors'],
+    # ref4 t03: the Capture Control Points game type, whose domination countdown starts from
+    # Control_Point_Domination_Victory_Time_In_Secs (huge_delay: INT32_MIN, then a wrapping decrement).
+    'land_cp': ['--skirmish-ai', 'skirmish', '--map', '_MP_LAND_UTAPAU', '--ai', 'Empire,Rebel', '--control-points',
+                '--fail-on-lua-errors'],
     'galactic': ['--economy', '--galactic-ai', '--story', '--scoring', '--object-scripts'],
 }
 

@@ -385,7 +385,7 @@ void TacticalBattle::check_victory(TacticalMode& mode) {
     if (vm_declared_ && frame_ > vm_declared_frame_ && vm_countdown_ > 0) --vm_countdown_;
     // ccpgt t02 (§4.2, tactical tick 0x3639d0): the domination timer counts down; at <= 0 it tests 0x15 for the armed player
     // (queued while held, as every test) and disarms. [M] +-1 frame against the capture service's order in the tick.
-    if (vm_cp_armed_ && --vm_cp_timer_ <= 0) {
+    if (vm_cp_armed_ && (vm_cp_timer_ = dec_wrap(vm_cp_timer_)) <= 0) {  // ref4 t03: INT32_MIN wraps, as on x86
         const int32_t p = vm_cp_player_;
         vm_cp_disarm();
         vm_test(kControlPointDomination, p);

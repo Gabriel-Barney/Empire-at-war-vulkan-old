@@ -273,7 +273,7 @@ void TacticalBattle::imposing_presence(objects::ObjectStore& store, const std::v
     const GameMode* gm = hooks_ ? hooks_->anim_mode() : nullptr;
     if (!anim_ || !gm || &gm->primary() != &store) return;
     const float fr = static_cast<float>(anim::kSimTicksPerSecond) * cfg_.presence_relaxation_seconds;
-    const int32_t frames = fr >= 1.0f ? (fr < 1.0e9f ? static_cast<int32_t>(fr) : 1000000000) : 0;
+    const int32_t frames = fr >= 1.0f ? (fr < 1.0e9f ? static_cast<int32_t>(fr) : 1000000000) : 0;  // frame-cast-ok: range-guarded above
     if (frames < 1) return;
     anim::AnimBehaviors& beh = anim_->behaviors(*gm);
     const uint32_t mf = store.mode_frame();

@@ -10,6 +10,7 @@
 #include <cstdlib>
 
 #include "alamo/galactic/campaign.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/ascii.hpp"
 
@@ -189,7 +190,7 @@ std::span<const VisibilityModifier> GalacticSim::visibility_modifiers(PlanetInde
 uint32_t GalacticSim::visibility_expiry_frame(float seconds) const {
     if (seconds < 0.0f) return kVisNever;
     const float frames = static_cast<float>(econ::kFramesPerSecond) * seconds;
-    return static_cast<uint32_t>(frame_) + static_cast<uint32_t>(static_cast<int32_t>(frames + 0.5f));
+    return static_cast<uint32_t>(frame_) + static_cast<uint32_t>(frames_trunc(frames + 0.5f));
 }
 
 bool GalacticSim::add_visibility_modifier(PlanetIndex planet, int32_t player, const VisibilityKey& key, uint32_t value,

@@ -1,4 +1,5 @@
 #include "alamo/tactical/hangar/hangar_system.hpp"
+#include "alamo/core/frames.hpp"
 
 #include <algorithm>
 
@@ -186,7 +187,7 @@ void HangarSystem::squadron_removed(ObjectId object, uint32_t frame) {
         if (matched >= 0) c.entries[static_cast<size_t>(matched)].live -= 1;
         if (full && c.state == 0) {  // truncate first, then add
             const float d = descs_[c.desc].delay_seconds * static_cast<float>(cfg_.fps);
-            c.next = to_frame(static_cast<int64_t>(static_cast<int32_t>(d)) + static_cast<int64_t>(frame));
+            c.next = to_frame(static_cast<int64_t>(frames_trunc(d)) + static_cast<int64_t>(frame));
         }
         events_.push_back(HangarEvent{HangarEventKind::SquadronLost, c.id, object, matched, frame});
         return;
@@ -203,7 +204,7 @@ void HangarSystem::deploy_squad(ObjectId id, uint32_t frame, float recharge_seco
     c->state = 0;
     c->deploy_latch = 1;
     const float d = (recharge_seconds - 1.0f) * static_cast<float>(cfg_.fps);
-    c->next = to_frame(static_cast<int64_t>(frame) + static_cast<int64_t>(static_cast<int32_t>(d)));
+    c->next = to_frame(static_cast<int64_t>(frame) + static_cast<int64_t>(frames_trunc(d)));
 }
 
 // ---- service ----
@@ -346,7 +347,7 @@ void HangarSystem::emit(Carrier& c, int32_t type, int32_t entry, bool pending, u
 void HangarSystem::launch(Carrier& c, uint32_t frame, SimRng& rng) {
     // §2.5 (space, state 0).
     const float df = static_cast<float>(frame) + static_cast<float>(cfg_.fps) * descs_[c.desc].delay_seconds;
-    const uint32_t next = to_frame(static_cast<int64_t>(static_cast<int32_t>(df)));  // float sum, then truncate
+    const uint32_t next = to_frame(static_cast<int64_t>(frames_trunc(df)));  // float sum, then truncate
     if (has_deploy_squad(c) && !combat_->ai_player(c.owner) && !c.deploy_latch) {
         c.state = 4;
         c.next = next;
@@ -428,7 +429,7 @@ void HangarSystem::service(Carrier& c, uint32_t frame, SimRng& rng, bool load, b
 
 uint32_t HangarSystem::delay_frame(const Carrier& c, uint32_t frame) const {
     const float df = static_cast<float>(cfg_.fps) * descs_[c.desc].delay_seconds + static_cast<float>(frame);
-    return to_frame(static_cast<int64_t>(static_cast<int32_t>(df)));  // float sum, then truncate
+    return to_frame(static_cast<int64_t>(frames_trunc(df)));  // float sum, then truncate
 }
 
 int32_t HangarSystem::pick_bone(const Carrier& c, SimRng& rng) const {

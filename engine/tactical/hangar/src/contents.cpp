@@ -1,4 +1,5 @@
 #include "alamo/tactical/hangar/contents.hpp"
+#include "alamo/core/frames.hpp"
 
 #include <algorithm>
 
@@ -104,7 +105,7 @@ uint32_t TacticalProduction::enqueue(int32_t player, ObjectId builder, int32_t t
     o.builder = builder;
     o.type = type;
     const float f = seconds * static_cast<float>(fps_);
-    o.total_frames = f >= 1.0f ? static_cast<uint32_t>(f) : 1u;
+    o.total_frames = f >= 1.0f ? static_cast<uint32_t>(frames_trunc(f)) : 1u;
     o.frames_left = o.total_frames;
     o.issued = frame;
     o.queue = q;

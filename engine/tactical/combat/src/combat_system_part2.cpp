@@ -2125,7 +2125,7 @@ uint32_t CombatSystem::bomb_frame(float seconds, uint32_t armed_frame) const {
     const float f = static_cast<float>(cfg_.fps) * seconds + static_cast<float>(armed_frame) + 0.5f;
     if (!(f > 0.0f)) return 0;
     if (!(f < 4294967040.0f)) return 0xFFFFFFFFu;
-    return static_cast<uint32_t>(static_cast<int64_t>(f));
+    return static_cast<uint32_t>(static_cast<int64_t>(f));  // frame-cast-ok: range-guarded above
 }
 
 void CombatSystem::lob_step(uint32_t i, uint32_t frame, SimRng& rng) {

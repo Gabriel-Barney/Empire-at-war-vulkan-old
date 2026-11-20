@@ -8,11 +8,18 @@ huge or NaN, and MSVC and clang really give different frame counts there (9632d3
 golden on clang). engine/core/include/alamo/core/frames.hpp has one function per rounding form the original uses
 (frames_trunc, frames_round, frames_ceil) with the x86 range behaviour, the same result as the plain cast in range.
 
-Rule: a static_cast to an integer type (int8..int64_t, uint*_t, int, unsigned, long, short, size_t) whose argument
-multiplies by a frames-per-second factor (the literal 30.0 / 30.0f, or a name containing fps, FPS, FramesPerSecond or
-TicksPerSecond) in floating point (a float literal, static_cast<float|double>, std::round / lround / ceil / floor / trunc)
-is a finding, unless that product sits inside frames_trunc / frames_round / frames_ceil / trunc_i32. A line ending in the
-comment `// frame-cast-ok: <reason>` is skipped (an integer product the rule misreads; give the reason).
+Rule: a conversion to an integer - static_cast<T>(...), a C-style (T)(...) or functional T(...) cast with T one of
+int8..int64_t, uint*_t, int, unsigned, long, short, size_t, or a bare std::lround / std::llround(...) - is a finding when
+its argument holds seconds x frames per second, unless that sits inside frames_trunc / frames_round / frames_ceil /
+trunc_i32. "Seconds x FPS" is either
+  a product with a frames-per-second factor (the literal 30.0 / 30.0f / 30.0F, or a name containing fps, FPS,
+  FramesPerSecond or TicksPerSecond) that is floating point: a float literal, static_cast<float|double>,
+  std::round / lround / ceil / floor / trunc, or a factor named like seconds (sec, time, delay, duration, interval,
+  recharge, wait, cooldown); or
+  a float / double / auto local initialised from such a product (float / double: FPS x anything) and named in a
+  conversion within the next 40 lines (the two-step form: `const float d = secs * fps; ... static_cast<int32_t>(d)`).
+A line ending in the comment `// frame-cast-ok: <reason>` is skipped (an integer product the rule misreads; give the
+reason). Not seen: a product with the integer literal 30 (`secs * 30`), which reads the same as integer frame math.
 Scanned: engine/ C++ (.cpp .hpp .h .inl .cc) except engine/core (the helpers' home) and the code outside the sim
 (CLAUDE.md): render, audio, video, ui and engine/apps/game (the windowed game's presentation: story presenter and camera,
 movie playback, session setup); tests, testdata and third_party are skipped. Comments and string literals are ignored.
@@ -25,11 +32,17 @@ from pathlib import Path
 CPP_EXTS = {'.cpp', '.hpp', '.h', '.inl', '.cc'}
 SKIP_DIRS = {'tests', 'testdata', 'third_party'}
 SKIP_PATHS = {('core',), ('render',), ('audio',), ('video',), ('ui',), ('apps', 'game')}
-CAST = re.compile(r'static_cast\s*<\s*(?:std::)?(?:u?int(?:8|16|32|64)_t|unsigned(?:\s+int)?|int|long(?:\s+long)?|short|'
-                  r'size_t)\s*>\s*\(')
-FPS = re.compile(r'(?<![\w.])30\.0*f?(?![\w.])|\b\w*(?:fps|Fps|FPS|FramesPerSecond|TicksPerSecond)\w*\b')
-FLOATY = re.compile(r'(?<![\w.])\d+\.\d*(?:[eE][-+]?\d+)?f?(?![\w.])|static_cast\s*<\s*(?:float|double)\s*>|'
-                    r'\bstd::(?:round|lround|llround|ceil|floor|trunc)\b')
+INT_T = r'(?:std::)?(?:u?int(?:8|16|32|64)_t|unsigned(?:\s+int)?|int|long(?:\s+long)?|short|size_t)'
+CAST = re.compile(r'static_cast\s*<\s*' + INT_T + r'\s*>\s*\(|(?<![\w>)\]])\(\s*' + INT_T + r'\s*\)\s*\(|'
+                  r'(?<![\w:<.>])(?:std::)?u?int(?:8|16|32|64)_t\s*\(|\bstd::l?lround\s*\(')
+FPS_NAME = re.compile(r'\b\w*(?:fps|Fps|FPS|FramesPerSecond|TicksPerSecond)\w*\b')
+FPS = re.compile(r'(?<![\w.])30\.0*[fF]?(?![\w.])|' + FPS_NAME.pattern)
+FLOATY = re.compile(r'(?<![\w.])\d+\.\d*(?:[eE][-+]?\d+)?[fF]?(?![\w.])|static_cast\s*<\s*(?:float|double)\s*>|'
+                    r'\bstd::(?:round|lround|llround|ceil|floor|trunc)\b|'
+                    r'\b\w*(?:sec|Sec|SEC|time|Time|delay|Delay|duration|Duration|interval|Interval|recharge|Recharge|'
+                    r'wait|Wait|cooldown|Cooldown)\w*\b')
+DECL = re.compile(r'\b(?:const\s+)?(float|double|auto)\s+(\w+)\s*=\s*([^;{}]*);')
+REACH = 40
 HELPER = re.compile(r'\b(?:frames_trunc|frames_round|frames_ceil|trunc_i32)\s*\(')
 OK_MARK = '// frame-cast-ok:'
 
@@ -86,21 +99,40 @@ def without_helpers(arg):
         arg = arg[:m.start()] + arg[end:]
 
 
+def is_seconds_product(expr, floating=False):
+    expr = without_helpers(expr)
+    # FPS names (kFramesPerSecond) do not count as "named like seconds" themselves.
+    return '*' in expr and bool(FPS.search(expr)) and (floating or bool(FLOATY.search(FPS_NAME.sub(' ', expr))))
+
+
 def findings_in(text):
-    """[(line, cast text)] of the casts the rule flags in one source text."""
+    """[(line, cast text)] of the conversions the rule flags in one source text."""
     code = strip_code(text)
     lines = text.split('\n')
+    # The two-step form: float / double / auto locals that hold seconds x FPS, by name and declaration line.
+    held = []
+    for d in DECL.finditer(code):
+        init = d.group(3).strip()
+        at = code.count('\n', 0, d.start()) + 1
+        if CAST.match(init) or HELPER.match(init) or OK_MARK in lines[at - 1]:
+            continue  # already an integer (or explained): its uses are not seconds
+        if is_seconds_product(init, floating=d.group(1) != 'auto'):
+            held.append((re.compile(r'\b' + d.group(2) + r'\b'), at))
     out = []
+    flagged_to = -1
     for m in CAST.finditer(code):
+        if m.start() < flagged_to:
+            continue  # inside a conversion already reported
         end = balanced(code, m.end() - 1)
         arg = without_helpers(code[m.end():end - 1])
-        if '*' not in arg or not FPS.search(arg) or not FLOATY.search(arg):
-            continue
         line = code.count('\n', 0, m.start()) + 1
+        if not is_seconds_product(arg) and not any(0 <= line - at <= REACH and rx.search(arg) for rx, at in held):
+            continue
         last = code.count('\n', 0, end) + 1
         if any(OK_MARK in lines[k - 1] for k in range(line, last + 1)):
             continue
         out.append((line, ' '.join(code[m.start():end].split())))
+        flagged_to = end
     return out
 
 
@@ -132,6 +164,16 @@ def selftest():
         'uint64_t e = static_cast<uint64_t>(s * 30.0f);',
         'unsigned f = static_cast<unsigned>(delay * static_cast<float>(cfg_.fps) + 0.5f);',
         'int g = static_cast<int>(std::lround(30.0 * static_cast<double>(t)));',
+        'const float d = descs_[c.desc].delay_seconds * static_cast<float>(cfg_.fps);\nx = static_cast<int32_t>(d);',
+        'const float f = 30.0f * seconds;\nreturn static_cast<int32_t>(std::round(f));',
+        'const float fps_t = 30.0f * cfg_.look_ahead;\nint32_t frames = static_cast<int32_t>(fps_t);',
+        'int h = static_cast<int32_t>(secs * kAiFps);',
+        'uint32_t q = static_cast<uint32_t>(delay * fps_);',
+        'int r = static_cast<int>(30.0F * secs);',
+        'int s = (int)(30.0f * secs);',
+        'auto t = int32_t(30.0f * secs);',
+        'long u = std::lround(30.0f * secs);',
+        'const double w = kFps * seconds;\nreturn std::lround(w);',
     ]
     clean = [
         'uint32_t a = static_cast<uint32_t>(frames_trunc(30.0f * secs));',
@@ -146,6 +188,10 @@ def selftest():
         '// int n = static_cast<int>(30.0f * secs);',
         'const char* o = "static_cast<int>(30.0f * secs)";',
         'int p = static_cast<int>(130.0f * w);',                       # 130, not 30
+        'const float d = secs * 30.0f;\nx = static_cast<int32_t>(frames_trunc(d));',
+        'const float d = secs * 30.0f;' + '\n' * 45 + 'x = static_cast<int32_t>(d);',   # out of reach
+        'int v = static_cast<int32_t>(count * kAiFps);',               # integer frame math
+        'int z = static_cast<int>(n) * 30;',
     ]
     fails = []
     for s in flagged:

@@ -1,4 +1,5 @@
 #include "alamo/tactical/movement/hyperspace.hpp"
+#include "alamo/core/frames.hpp"
 
 #include <algorithm>
 
@@ -129,7 +130,7 @@ void EngineControl::disable(ObjectId id, float seconds, uint32_t frame) {
         e.reenable = 0;
     } else {
         const float f = 30.0f * seconds;  // int(30 t) [H]
-        const uint32_t until = frame + (f > 0.0f ? static_cast<uint32_t>(f) : 0u);
+        const uint32_t until = frame + (f > 0.0f ? static_cast<uint32_t>(frames_trunc(f)) : 0u);
         e.reenable = std::max(e.reenable, until);
     }
     if (was) events_.push_back({EngineEvent::Kind::Off, id, frame});

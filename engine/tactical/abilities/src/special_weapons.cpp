@@ -1,4 +1,5 @@
 #include "alamo/tactical/abilities/special_weapons.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/tactical/abilities/x86_int.hpp"
 
 #include <algorithm>
@@ -36,7 +37,7 @@ const SpecialWeaponSystem::Pack* SpecialWeaponSystem::pack(ObjectId id) const {
 uint32_t SpecialWeaponSystem::recharge_frames(const SpecialWeaponDesc& d) const {
     // int(fps x recharge) (0x4ea3f0 [H]; 0x491770 uses the same getter [M]).
     const float f = static_cast<float>(cfg_.fps) * d.recharge_seconds;
-    return f > 0.0f ? static_cast<uint32_t>(f) : 0u;
+    return f > 0.0f ? static_cast<uint32_t>(frames_trunc(f)) : 0u;
 }
 
 void SpecialWeaponSystem::event(SwEventKind k, const Pack& p, uint32_t frame, int32_t value, ObjectId target, Vec3 point) {
@@ -187,7 +188,7 @@ bool SpecialWeaponSystem::restart(ObjectId id, uint32_t frame, float seconds) {
     const SpecialWeaponDesc& d = descs_[p->desc];
     p->start = frame;
     const float f = static_cast<float>(cfg_.fps) * seconds;
-    p->ready = seconds < 0.0f ? frame + recharge_frames(d) : frame + (f > 0.0f ? static_cast<uint32_t>(f) : 0u);
+    p->ready = seconds < 0.0f ? frame + recharge_frames(d) : frame + (f > 0.0f ? static_cast<uint32_t>(frames_trunc(f)) : 0u);
     p->ready_signalled = p->ready <= frame ? 1 : 0;
     return true;
 }
@@ -375,7 +376,7 @@ void SpecialWeaponSystem::tick(uint32_t frame, SimRng& rng, const SpecialWeaponW
             shots_.push_back(s);
             --p.pulses_left;
             const float f = static_cast<float>(cfg_.fps) * d.pulse_delay_seconds;
-            const uint32_t gap = f > 0.0f ? static_cast<uint32_t>(f) : 0u;
+            const uint32_t gap = f > 0.0f ? static_cast<uint32_t>(frames_trunc(f)) : 0u;
             p.next_pulse = p.next_pulse + gap;  // no delay: the whole volley this frame
         }
         if ((d.kinds & (kSwSpecialWeapon | kSwLobbing)) && !p.ready_signalled && frame >= p.ready) {
