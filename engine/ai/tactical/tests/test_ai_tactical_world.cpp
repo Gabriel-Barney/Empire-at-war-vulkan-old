@@ -3259,9 +3259,6 @@ void test_explore_area() {
     const size_t moves_clear = count_decisions(clear, "explore area to ("), moves_fog = count_decisions(fog, "explore area to (");
     std::printf("explore area: no fog %zu move(s), %s; all fogged %zu move(s)\n", moves_clear, rep.empty() ? "(no report)" : rep.c_str(),
                 moves_fog);
-    for (const std::string& d : fog.decisions)
-        if (d.find("p0 ") != std::string::npos && (d.find("MainForce") != std::string::npos || d.find("explore") != std::string::npos))
-            std::printf("    DBG %s\n", d.c_str());
     CHECK(moves_clear == 0 && rep.find("res=true") != std::string::npos);
     CHECK(moves_fog >= 1);
 }
