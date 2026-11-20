@@ -352,6 +352,14 @@ public:
     // under Root::Self, target / force paths under Root::Target).
     static bool path_registered(Root root, std::string_view path);
     static std::vector<std::pair<Root, std::string>> registered_paths();
+    // ref6 t03 (tests): the fogged leaves of the token spec table - the Target-relative path ("ENEMYFORCE.SPACETOTAL"), the
+    // cache key its leaf stores under and the fog mask M - and whether the leaf cache holds an entry of (leaf, inst, self).
+    struct FoggedLeaf {
+        std::string path, key;
+        uint32_t mask = 0;
+    };
+    static std::vector<FoggedLeaf> fogged_leaves();
+    bool cache_holds(std::string_view leaf, int32_t inst, int32_t self) const;
     // Tests only: runs the handler chain for `path` (no parameters) and says whether some branch took it, whatever the
     // value. It evaluates the token, so it may fill the leaf cache: never call it on a resolver a session uses.
     bool dispatches(const EvalContext& ctx, Root root, std::string_view path) const;

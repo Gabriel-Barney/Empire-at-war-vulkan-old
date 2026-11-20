@@ -15,62 +15,47 @@ namespace alamo::ai::tactical {
 namespace {
 
 // ---------------------------------------------------------------------------------- leaves
-enum class Leaf : uint16_t {
-    None = 0,
-    // sub-evaluator tokens
-    Location, Owner, Hints, Type,
-    // unit (TacticalObject / TacticalUnit / LandUnit / SpaceShip)
-    Health, Shield, Energy, ForceUnnormalized, Force, ForceNBTP, ForceNBTD, HasTakenDamage, IsBuildPad, HasBuiltObject,
-    NearbyOpenBuildPadCount, ContainsHero, DistanceToNearestFriendly, DistanceToNearestEnemy, IsContestable,
-    GarrisonSlotsAvailable, AdditionalPopulationCapacity, IsCashPoint, CashPointValue, IsInsideEnemyShield,
-    IsInsideFriendlyShield, IsValidBombingTarget, HardPointHealth, AreEnginesOnline,
-    // location
-    FriendlyForceUnnormalized, EnemyForceUnnormalized, FriendlyForce, EnemyForce, FriendlyForceNBTD, EnemyForceNBTD,
-    FriendlyUnitConcentrationUnnormalized, EnemyUnitConcentrationUnnormalized, FriendlyUnitConcentration,
-    EnemyUnitConcentration, FriendlyUnitConcentrationNBTD, EnemyUnitConcentrationNBTD, FriendlyUnitsBitfield,
-    EnemyUnitsBitfield, TimeLastSeenUnnormalized, TimeLastSeen, IsFriendlyStartLocation, IsEnemyStartLocation,
-    // player
-    LandedForceUnnormalized, IsDefender, CanRetreat, IsRetreating, BaseLevel, OpenBuildPadCount,
-    TacticalBuiltStructureCount, ReinforcementsUnnormalized, UnitSpaceAvailable, IsBombingRunAvailable,
-    IsOrbitalBombardmentAvailable, HasUnit, IsFaction, IsDifficulty, CreditsUnnormalized, TechLevel, BudgetAllocation,
-    StoryTrigger, ActiveGoals,
-    // game
-    Age, IsCampaignGame, IsLandControlGame, IsSetupPhase, ForceVisibility, Timeline, InterventionsEnabled,
-    TimeSinceStoryPopup, ActiveStoryGoalCount, IsStoryCampaign,
-    // type / hints
-    IsType, HintValue,
-};
+// ref6 t03: one list makes the Leaf enum and the token names (N: a leaf the evaluators register by that name; I: an internal
+// leaf with no name entry - Type is matched by name in leaf_of, HintValue is the hint-set value). Order = the enum's.
+#define ALAMO_TACTICAL_LEAVES(N, I)                                                                                         \
+    /* sub-evaluator tokens */                                                                                              \
+    N(Location) N(Owner) N(Hints) I(Type)                                                                                   \
+    /* unit (TacticalObject / TacticalUnit / LandUnit / SpaceShip) */                                                       \
+    N(Health) N(Shield) N(Energy) N(ForceUnnormalized) N(Force) N(ForceNBTP) N(ForceNBTD) N(HasTakenDamage) N(IsBuildPad)  \
+    N(HasBuiltObject) N(NearbyOpenBuildPadCount) N(ContainsHero) N(DistanceToNearestFriendly) N(DistanceToNearestEnemy)     \
+    N(IsContestable) N(GarrisonSlotsAvailable) N(AdditionalPopulationCapacity) N(IsCashPoint) N(CashPointValue)            \
+    N(IsInsideEnemyShield) N(IsInsideFriendlyShield) N(IsValidBombingTarget) N(HardPointHealth) N(AreEnginesOnline)        \
+    /* location */                                                                                                          \
+    N(FriendlyForceUnnormalized) N(EnemyForceUnnormalized) N(FriendlyForce) N(EnemyForce) N(FriendlyForceNBTD)              \
+    N(EnemyForceNBTD) N(FriendlyUnitConcentrationUnnormalized) N(EnemyUnitConcentrationUnnormalized)                         \
+    N(FriendlyUnitConcentration) N(EnemyUnitConcentration) N(FriendlyUnitConcentrationNBTD) N(EnemyUnitConcentrationNBTD)  \
+    N(FriendlyUnitsBitfield) N(EnemyUnitsBitfield) N(TimeLastSeenUnnormalized) N(TimeLastSeen) N(IsFriendlyStartLocation)  \
+    N(IsEnemyStartLocation)                                                                                                 \
+    /* player */                                                                                                            \
+    N(LandedForceUnnormalized) N(IsDefender) N(CanRetreat) N(IsRetreating) N(BaseLevel) N(OpenBuildPadCount)                \
+    N(TacticalBuiltStructureCount) N(ReinforcementsUnnormalized) N(UnitSpaceAvailable) N(IsBombingRunAvailable)            \
+    N(IsOrbitalBombardmentAvailable) N(HasUnit) N(IsFaction) N(IsDifficulty) N(CreditsUnnormalized) N(TechLevel)            \
+    N(BudgetAllocation) N(StoryTrigger) N(ActiveGoals)                                                                      \
+    /* game */                                                                                                              \
+    N(Age) N(IsCampaignGame) N(IsLandControlGame) N(IsSetupPhase) N(ForceVisibility) N(Timeline) N(InterventionsEnabled)   \
+    N(TimeSinceStoryPopup) N(ActiveStoryGoalCount) N(IsStoryCampaign)                                                       \
+    /* type / hints */                                                                                                      \
+    N(IsType) I(HintValue)
+
+#define ALAMO_LEAF_ENUM(x) x,
+enum class Leaf : uint16_t { None = 0, ALAMO_TACTICAL_LEAVES(ALAMO_LEAF_ENUM, ALAMO_LEAF_ENUM) };
+#undef ALAMO_LEAF_ENUM
 
 struct LeafName {
     std::string_view name;
     Leaf leaf;
 };
-#define ALAMO_LEAF(x) {#x, Leaf::x}
-constexpr LeafName kLeafNames[] = {
-    ALAMO_LEAF(Location), ALAMO_LEAF(Owner), ALAMO_LEAF(Hints),
-    ALAMO_LEAF(Health), ALAMO_LEAF(Shield), ALAMO_LEAF(Energy), ALAMO_LEAF(ForceUnnormalized), ALAMO_LEAF(Force),
-    ALAMO_LEAF(ForceNBTP), ALAMO_LEAF(ForceNBTD), ALAMO_LEAF(HasTakenDamage), ALAMO_LEAF(IsBuildPad),
-    ALAMO_LEAF(HasBuiltObject), ALAMO_LEAF(NearbyOpenBuildPadCount), ALAMO_LEAF(ContainsHero),
-    ALAMO_LEAF(DistanceToNearestFriendly), ALAMO_LEAF(DistanceToNearestEnemy), ALAMO_LEAF(IsContestable),
-    ALAMO_LEAF(GarrisonSlotsAvailable), ALAMO_LEAF(AdditionalPopulationCapacity), ALAMO_LEAF(IsCashPoint),
-    ALAMO_LEAF(CashPointValue), ALAMO_LEAF(IsInsideEnemyShield), ALAMO_LEAF(IsInsideFriendlyShield),
-    ALAMO_LEAF(IsValidBombingTarget), ALAMO_LEAF(HardPointHealth), ALAMO_LEAF(AreEnginesOnline),
-    ALAMO_LEAF(FriendlyForceUnnormalized), ALAMO_LEAF(EnemyForceUnnormalized), ALAMO_LEAF(FriendlyForce),
-    ALAMO_LEAF(EnemyForce), ALAMO_LEAF(FriendlyForceNBTD), ALAMO_LEAF(EnemyForceNBTD),
-    ALAMO_LEAF(FriendlyUnitConcentrationUnnormalized), ALAMO_LEAF(EnemyUnitConcentrationUnnormalized),
-    ALAMO_LEAF(FriendlyUnitConcentration), ALAMO_LEAF(EnemyUnitConcentration), ALAMO_LEAF(FriendlyUnitConcentrationNBTD),
-    ALAMO_LEAF(EnemyUnitConcentrationNBTD), ALAMO_LEAF(FriendlyUnitsBitfield), ALAMO_LEAF(EnemyUnitsBitfield),
-    ALAMO_LEAF(TimeLastSeenUnnormalized), ALAMO_LEAF(TimeLastSeen), ALAMO_LEAF(IsFriendlyStartLocation),
-    ALAMO_LEAF(IsEnemyStartLocation), ALAMO_LEAF(LandedForceUnnormalized), ALAMO_LEAF(IsDefender), ALAMO_LEAF(CanRetreat),
-    ALAMO_LEAF(IsRetreating), ALAMO_LEAF(BaseLevel), ALAMO_LEAF(OpenBuildPadCount), ALAMO_LEAF(TacticalBuiltStructureCount),
-    ALAMO_LEAF(ReinforcementsUnnormalized), ALAMO_LEAF(UnitSpaceAvailable), ALAMO_LEAF(IsBombingRunAvailable),
-    ALAMO_LEAF(IsOrbitalBombardmentAvailable), ALAMO_LEAF(HasUnit), ALAMO_LEAF(IsFaction), ALAMO_LEAF(IsDifficulty),
-    ALAMO_LEAF(CreditsUnnormalized), ALAMO_LEAF(TechLevel), ALAMO_LEAF(BudgetAllocation), ALAMO_LEAF(StoryTrigger),
-    ALAMO_LEAF(ActiveGoals), ALAMO_LEAF(Age), ALAMO_LEAF(IsCampaignGame), ALAMO_LEAF(IsLandControlGame),
-    ALAMO_LEAF(IsSetupPhase), ALAMO_LEAF(ForceVisibility), ALAMO_LEAF(Timeline), ALAMO_LEAF(InterventionsEnabled),
-    ALAMO_LEAF(TimeSinceStoryPopup), ALAMO_LEAF(ActiveStoryGoalCount), ALAMO_LEAF(IsStoryCampaign), ALAMO_LEAF(IsType),
-};
-#undef ALAMO_LEAF
+#define ALAMO_LEAF_NAME(x) {#x, Leaf::x},
+#define ALAMO_LEAF_NONE(x)
+constexpr LeafName kLeafNames[] = {ALAMO_TACTICAL_LEAVES(ALAMO_LEAF_NAME, ALAMO_LEAF_NONE)};
+#undef ALAMO_LEAF_NAME
+#undef ALAMO_LEAF_NONE
+#undef ALAMO_TACTICAL_LEAVES
 
 const std::vector<Leaf>& registry_leaves() {
     static const std::vector<Leaf> table = [] {

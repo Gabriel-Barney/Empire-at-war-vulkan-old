@@ -2200,6 +2200,36 @@ void test_token_registry() {
     CHECK(GalacticSimTokenResolver::path_registered(Root::Self, "HOMEPLANET.TYPE.TOKEN"));
     CHECK(!GalacticSimTokenResolver::path_registered(Root::Game, "FORCEVISIBILITY"));
     std::printf("  token registry: %zu registered, %zu candidates, %u handled\n", reg.size(), cand.size(), taken);
+    // ref6 t03: every fogged leaf of the token spec table, evaluated on a fresh resolver, holds its cache entry under the key
+    // the signal 0xE recompute looks up (a handler caching under another key would leave the recompute nothing to refresh,
+    // silently), and a force leaf of one layer fills no fogged key of the other layer (a space / ground key swap).
+    eqs.add("Fog_HasStructure", "Variable_Target.HasStructure {Parameter_Type = \"NoSuchType\"}");  // needs a Parameter_Type
+    eqs.link();
+    const std::vector<GalacticSimTokenResolver::FoggedLeaf> fogged = GalacticSimTokenResolver::fogged_leaves();
+    CHECK(fogged.size() == 33);  // 5 planet leaves, 14 force leaves on each side
+    const auto force_layer = [](const GalacticSimTokenResolver::FoggedLeaf& l) {  // 1 ground, 2 space, 0 a planet leaf
+        if (l.path.compare(0, 11, "ENEMYFORCE.") != 0 && l.path.compare(0, 14, "FRIENDLYFORCE.") != 0) return 0;
+        return l.mask == 0x80u ? 1 : 2;
+    };
+    size_t keyed = 0, crossed = 0;
+    for (const GalacticSimTokenResolver::FoggedLeaf& l : fogged) {
+        CHECK(GalacticSimTokenResolver::path_registered(Root::Target, l.path) && l.mask != 0);
+        GalacticSimTokenResolver fresh(sim, ti, nullptr, {});
+        fresh.refresh(sim.frame() + 100);
+        CHECK(!fresh.cache_holds(l.key, 7, c.self));
+        if (l.path == "HASSTRUCTURE") CHECK(evaluate(eqs, eqs.find("Fog_HasStructure"), c, fresh).ok);
+        else CHECK(fresh.dispatches(c, Root::Target, l.path));
+        const bool held = fresh.cache_holds(l.key, 7, c.self);
+        if (!held) std::printf("  fogged leaf %s: no cache entry under %s\n", l.path.c_str(), l.key.c_str());
+        keyed += held ? 1u : 0u;
+        for (const GalacticSimTokenResolver::FoggedLeaf& q : fogged)
+            if (force_layer(l) != 0 && force_layer(q) != 0 && force_layer(q) != force_layer(l) && fresh.cache_holds(q.key, 7, c.self)) {
+                std::printf("  fogged leaf %s filled %s of the other layer\n", l.path.c_str(), q.key.c_str());
+                ++crossed;
+            }
+    }
+    CHECK(keyed == fogged.size() && crossed == 0);
+    std::printf("  token specs: %zu fogged leaves, each cached under its recompute key\n", fogged.size());
 }
 
 // galab t06 (GALAB_ABILITIES_RE §8): Variable_Self.HomePlanet.* resolves through the player's campaign Home_Location planet
