@@ -216,8 +216,8 @@ struct GoalSystemConfig {
     // bkg3 (BKG3_RE_ANSWERS Q4, 0x721a50 / 0x6b83c0) [H], set by the galactic AI: 'the goal is already active' (slot 9, and
     // Resolve's kept-or-active test) holds when a goal on the same target has a type whose like-set (GoalTypeDef::like_set)
     // contains the candidate's type, not only for the exact (type, target); the greedy lastOld rule accepts the goal first
-    // and needs the same target. Retail uses the same lookup in land and space; [port] off there until the tactical lanes
-    // re-record their goldens (exact (type, target) test, lastOld stop before the accept).
+    // and needs the same target. Retail uses the same lookup in land and space: the tactical AI sets it too (aitac t04).
+    // Off: the exact (type, target) test, lastOld stop before the accept.
     bool like_sets = false;
     // skai t17 (AI_GALACTIC §1.6 steps 3-6, BKG3_RE_ANSWERS Q4: 0x6c8970 / 0x721a50) [H]: an old candidate (a replaceable
     // incumbent with eff < best) is neither in this Resolve's kept set nor active, so the greedy and weighted phases may
@@ -248,6 +248,7 @@ public:
     int32_t countdown() const { return countdown_; }
     uint32_t evaluations_last_pass() const { return evals_last_; }
     uint32_t passes() const { return passes_; }
+    const GoalSystemConfig& config() const { return cfg_; }  // aitac t04
     bool accept_pending() const { return pending_ready_ >= 0; }  // OPT2 t10: batched-accept solves in flight
     int64_t accept_ready_frame() const { return pending_ready_; }
     uint32_t commits() const { return commits_; }

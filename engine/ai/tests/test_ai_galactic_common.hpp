@@ -72,6 +72,7 @@ void test_cadence();
 void test_goal_pass_cadence();
 void test_goal_quota_players();  // bkx1 t01
 void test_goal_target_walk_order();
+void test_goal_like_sets();  // aitac t04
 void test_desire_and_hysteresis();
 void test_goal_reservations();
 void test_goal_batched_accept();

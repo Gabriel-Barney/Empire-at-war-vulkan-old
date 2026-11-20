@@ -230,6 +230,85 @@ void test_goal_target_walk_order() {
     if (hooks.seen.size() >= 4) CHECK((std::vector<int32_t>(hooks.seen.begin(), hooks.seen.begin() + 4) == std::vector<int32_t>{4, 3, 1, 0}));
 }
 
+// aitac t04 (BKG3_RE_ANSWERS Q4 [H], slot 9 + 0x721a50): with like-sets on, a candidate whose target already has an
+// active goal of a like type is skipped (not evaluated); off, only the exact (type, target) is. Goal_A (always accepted)
+// becomes active on target 7; Goal_B (never accepted, like Goal_A) is evaluated in later passes only with like-sets off.
+// The galactic AI and both tactical modes set GoalSystemConfig::like_sets.
+void test_goal_like_sets() {
+    struct LikeHooks final : GoalModeHooks {
+        uint32_t b_evals = 0;
+        bool counting = false;
+        uint32_t target_count() override { return 1; }
+        int32_t target_at(uint32_t) override { return 7; }
+        bool applies(int32_t, uint32_t) override { return true; }
+        bool blocked(uint32_t, int32_t) override { return false; }
+        bool evaluate(const std::string& f, int32_t, double& out) override {
+            if (f == "B" && counting) ++b_evals;
+            out = f == "A" ? 10.0 : 5.0;
+            return true;
+        }
+        bool accept(Goal& g) override { return g.type == 0; }
+        bool plan_activatable(Goal&) override { return true; }
+        bool plan_invalid(const Goal&) override { return false; }
+        bool replaceable(const Goal&) override { return true; }
+        void refresh_plan(Goal&) override {}
+        void suspend_reservations(Goal&) override {}
+        bool uses_budget() override { return false; }
+        bool can_fund(const Goal&) override { return true; }
+        float category_credits(int32_t) override { return 1.0f; }
+        void budget_add(Goal&) override {}
+        void budget_release(Goal&) override {}
+        void budget_weights() override {}
+        std::vector<int32_t> category_order() override { return {0, 1}; }
+        void queue_production(Goal&) override {}
+        void instantiate(Goal&) override {}
+        void end_plan(Goal&, bool) override {}
+        void drop_potential_plan(Goal&) override {}
+        float elapsed_eta(const Goal&) override { return 0.0f; }
+        int32_t quota_players() override { return 1; }
+    };
+    const auto run = [](bool like_sets) {
+        AiDefinitions defs;
+        GoalTypeDef a, b;
+        a.name = "Goal_A";
+        a.application = app::Enemy;
+        a.category = 0;
+        a.like_set = {0, 1};  // Goal_B lists Goal_A: each is in the other's set (ai_definitions.cpp link)
+        b.name = "Goal_B";
+        b.application = app::Enemy;
+        b.category = 1;
+        b.is_like = {0};
+        b.like_set = {0, 1};
+        defs.goals = {a, b};
+        const std::vector<GoalSource> sources{{0, "A"}, {1, "B"}};
+        LikeHooks hooks;
+        LearningSystem learning;
+        SimRng rng(5);
+        GoalSystem gs;
+        GoalSystemConfig cfg;
+        cfg.like_sets = like_sets;
+        gs.init(defs, sources, &hooks, &learning, nullptr, &rng, cfg);
+        int64_t f = 1;
+        const auto active = [&gs] {
+            size_t n = 0;
+            for (const std::vector<Goal>& c : gs.active()) n += c.size();
+            return n;
+        };
+        for (; f <= 600 && active() == 0; ++f) gs.service(f);
+        CHECK(active() == 1 && gs.config().like_sets == like_sets);
+        const uint32_t first = gs.passes();  // the pass in progress at the commit may already hold Goal_B's candidate
+        for (; f <= 1200 && gs.passes() < first + 1; ++f) gs.service(f);
+        hooks.counting = true;
+        const uint32_t passes = gs.passes();
+        for (; f <= 1800 && gs.passes() < passes + 3; ++f) gs.service(f);
+        CHECK(gs.passes() >= passes + 3);
+        return hooks.b_evals;
+    };
+    const uint32_t on = run(true), off = run(false);
+    std::printf("goal like-sets: Goal_B evaluations after Goal_A went active: like-sets on %u, off %u\n", on, off);
+    CHECK(on == 0 && off >= 3);
+}
+
 void test_desire_and_hysteresis() {
     Goal g;
     g.desire = 10.0f;

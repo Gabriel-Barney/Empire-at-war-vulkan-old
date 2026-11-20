@@ -468,7 +468,7 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
     }
     // a1h t02 (A1_READINGS §33.3): a newer task-force order collects every TF unit and raises signal 0xb on it, so each
     // older movement / attack / guard status of that TF loses all its units and finishes (Result nil); it never acts
-    // again. [port] unit-level Lua orders, abilities and garrison orders on a TF member do not supersede yet.
+    // again. Unit-level orders on a TF member take only that unit out (aitac t05, movement_block_signal).
     void supersede(int32_t tf) {
         for (auto& [id, s] : statuses)
             if (s.tf == tf && !s.finished && (s.kind == StatusKind::Move || s.kind == StatusKind::Guard || s.kind == StatusKind::AttackTarget)) {
@@ -570,6 +570,11 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
     void order_signal(int32_t oid);
     // S7 t26: the ability blocks waiting on `oid` (or its team `team_id`) lose that unit (any of 0x29 / 0xb / 0x10).
     void ability_block_signal(int32_t oid, int32_t team_id);
+    // aitac t05: the movement / guard blocks listening on `oid` (A1_READINGS §33.2 signal 0xb rows, §33.3).
+    void movement_block_signal(int32_t oid, int32_t team_id);
+    static bool listed(const StatusRec& s, int32_t id) {
+        return s.members.empty() || std::find(s.members.begin(), s.members.end(), id) != s.members.end();
+    }
     int32_t tf_member_of(int32_t object_id) const;  // the task force holding the object or its team container, -1 none
     bool ambush_point(const StatusRec& s, int32_t player, Vec3f& out, bool* no_walk = nullptr) const;
     void ambush_plan(StatusRec& s, bool first);
@@ -2727,6 +2732,7 @@ bool TacticalAiWorld::Impl::step_status(StatusRec& s) {
             if (s.target >= 0) return step_object_block(s, *t);
             if (now <= s.started) return false;
             for (const ObjectHandle u : t->units) {
+                if (!listed(s, id_of(u))) continue;  // aitac t05: taken out by signal 0xb (or joined after the order)
                 const TacticalAiObject* f = fact(id_of(u));
                 if (f && f->moving) return false;
             }
@@ -2748,7 +2754,8 @@ bool TacticalAiWorld::Impl::step_status(StatusRec& s) {
             // a1h t02 (A1_READINGS §33.2): passive, Result = the BlockingStatus default (nil). An object guard finishes when
             // the object dies or the TF is empty, and stays open after arrival (the battle host's movement follows the
             // object, §33.4); a position guard finishes when every unit has arrived. A newer order of the TF finishes it
-            // too (supersede). [port] the object's new-order (0xb) and owner-change (0x1a) signals are not modelled.
+            // too (supersede). aitac t05 (§33.2): the object's new order (0xb, movement_block_signal) or its turning hostile
+            // to the TF's owner (0x1a, the guard mode bit 0x02; an owner change seen by polling) ends it too.
             auto end = [&s] {
                 s.finished = true;
                 s.result = lua::AiStatusResult::Nil;
@@ -2757,8 +2764,17 @@ bool TacticalAiWorld::Impl::step_status(StatusRec& s) {
             if (!t) return end();
             prune_tf(*t);
             if (t->units.empty() || (s.target >= 0 && !store.alive(store.find(s.target)))) return end();
-            if (s.target >= 0 || now <= s.started) return false;
+            if (s.target >= 0) {
+                const int32_t owner = store.owner(store.find(s.target));
+                if (owner != s.target_owner) {
+                    s.target_owner = owner;
+                    if (owner >= 0 && owner != t->player && w.rel(t->player, owner) == 1) return end();
+                }
+                return false;
+            }
+            if (now <= s.started) return false;
             for (const ObjectHandle u : t->units) {
+                if (!listed(s, id_of(u))) continue;  // aitac t05: taken out by signal 0xb (or joined after the order)
                 const TacticalAiObject* f = fact(id_of(u));
                 if (f && f->moving) return false;
             }
@@ -2892,11 +2908,12 @@ int32_t TacticalAiWorld::Impl::issue_move(TfRec& t, AiTacticalOrder kind, const 
     statuses[id].target = target_object;
     if (const ObjectHandle th = target_object >= 0 ? store.find(target_object) : ObjectHandle{}; store.alive(th))
         statuses[id].target_owner = store.owner(th);  // q6: the 0x1a owner-change stand-in compares against this
-    if (target_object >= 0) {
+    {
         // q6 t19 (§33.2.2): all-units list = the TF units at the order; pending = the moved units, without those whose
-        // attack order the host refused (they stay in the all-units list).
+        // attack order the host refused (they stay in the all-units list). aitac t05: a position move / guard keeps the
+        // lists too (signal 0xb of a unit takes it out, §33.2).
         StatusRec& s = statuses[id];
-        const std::vector<int32_t> refused = host.attack_order_refused();
+        const std::vector<int32_t> refused = target_object >= 0 ? host.attack_order_refused() : std::vector<int32_t>{};
         for (const ObjectHandle u : t.units) s.members.push_back(id_of(u));
         for (const uint32_t m : ids)
             if (std::find(refused.begin(), refused.end(), static_cast<int32_t>(m)) == refused.end())
@@ -3182,6 +3199,38 @@ void TacticalAiWorld::Impl::order_signal(int32_t oid) {
     const int32_t team_id = team ? id_of(team) : -1;
     if (team_id >= 0 && team_id != oid) bridge.order_replaced(team_id);
     ability_block_signal(oid, team_id);
+    if (!cfg.ai_lane) movement_block_signal(oid, team_id);  // [port] the AI lane applies its orders after the update
+}
+
+// aitac t05 (A1_READINGS §33.2, handler 0x73ce80; §33.3) - signal 0xb ("a new order replaces this unit's order") on the
+// objects a task force's movement / guard block listens to:
+//   * the block's object (the guarded or attacked object) got a new order: the block finishes, Result nil;
+//   * one of its units got an order that is not a task-force order of this AI (a unit-level Lua order, an ability,
+//     Turn_To_Face, a garrison enter / exit, a human or story order): the unit leaves the all-units and pending lists, and
+//     the block finishes (Result nil) once its all-units list is empty. A task-force order of this AI finishes every older
+//     block of the task force itself (supersede), so its own 0xb are not counted twice.
+void TacticalAiWorld::Impl::movement_block_signal(int32_t oid, int32_t team_id) {
+    const auto gone = [oid, team_id](int32_t m) { return m == oid || (team_id >= 0 && m == team_id); };
+    for (auto& [id, s] : statuses) {
+        if (s.finished || s.tf < 0 || (s.kind != StatusKind::Move && s.kind != StatusKind::Guard)) continue;
+        const TfRec* t = tf_rec(s.tf);
+        if (s.target >= 0 && s.target == oid) {
+            if (t) block_end_log(s, *t, "target given a new order");
+            s.finished = true;
+            s.result = lua::AiStatusResult::Nil;
+            continue;
+        }
+        if (in_world_order || s.members.empty()) continue;
+        const size_t before = s.members.size();
+        std::erase_if(s.members, gone);
+        if (s.members.size() == before) continue;
+        std::erase_if(s.pending, gone);
+        if (s.members.empty()) {
+            if (t && s.target >= 0) block_end_log(s, *t, "every unit given another order");
+            s.finished = true;
+            s.result = lua::AiStatusResult::Nil;
+        }
+    }
 }
 
 // S7 t15 A1: the host's signal 0x29 list (its order). Each id feeds the scripts' object bridge (blocking
@@ -4105,6 +4154,10 @@ bool TacticalAiWorld::start(std::vector<std::string>* diagnostics) {
         // bkx1 t01 (b0123, BKX1_CADENCE_RE §1 / §3 [H]): the battle goal systems run the galactic cadence (Service 0x6cacd0,
         // Init 0x6ca1f0): the first quota seeded from sources x max(1, targets), each slice ends at the quota.
         gcfg.retail_cadence = w.cfg.retail_cadence;
+        // aitac t04 (BKG3_RE_ANSWERS Q4 [H]): the Is_Like like-set lookup 0x721a50 serves land (slot 9 0x6b8710) and space
+        // (0x6b8900) as galactic: a candidate is already active when a goal on its target has a like type, and Resolve's
+        // kept-or-active test and the lastOld rule use it too.
+        gcfg.like_sets = true;
         p.ctx.goals.init(w.defs, std::move(sources), &p, &p.ctx.learning, &p.ctx.templates, &w.rng.synced(), gcfg);
         p.ctx.attach(&p, [&w, &p](const std::string& eq, double& out) { return w.evaluate(p.player, eq, -1, out); });
         if (w.cfg.stagger) {  // OPT2 t01: a fixed planning phase from the player's AI ordinal (players in index order)

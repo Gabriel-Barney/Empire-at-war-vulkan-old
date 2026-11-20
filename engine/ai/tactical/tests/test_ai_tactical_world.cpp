@@ -3190,7 +3190,10 @@ void test_story_world() {
     size_t plans_before = 0, plans_at_drain = 0;
     int32_t drained_at = -1;
     run(30 * 60, 1, 0, nullptr, false, [&](int32_t f, MockHost&, TacticalAiWorld& world) {
-        if (f == 1) world.attach_story_world(&story);
+        if (f == 1) {
+            world.attach_story_world(&story);
+            CHECK(world.context(0) && world.context(0)->goals.config().like_sets);  // aitac t04: Is_Like in the battle goals
+        }
         if (f == 600) {
             story.set_ai_suspended(true);
             orders_suspended = world.orders_issued();
@@ -3358,6 +3361,40 @@ void test_attack_move_result() {
                 rep_line.empty() ? "(no report)" : rep_line.c_str());
     CHECK(target >= 0 && ended >= 1);
     CHECK(rep_line.find("res=nil") != std::string::npos && rep_line.find("valid=false") != std::string::npos);
+}
+
+// aitac t05 (A1_READINGS §33.2 signal 0xb rows): a task force's Attack_Move block on an enemy unit ends (Result nil) when
+// the target is given a new order (signal 0xb of the object), the target still alive; and a block whose units all get other
+// orders (0xb of each unit, not a task-force order of this AI) ends too.
+void test_block_new_order_signals() {
+    g_land = true;
+    for (const bool units : {false, true}) {
+        int32_t target = -1, signal_frame = -1;
+        const RunResult r = run(30 * 60, 1, 10, nullptr, false, [&](int32_t f, MockHost& host, TacticalAiWorld& world) {
+            if (signal_frame >= 0) return;
+            for (const TacticalAiDecision& d : world.decision_log()) {
+                const size_t at = d.text.find(" attack-move ");
+                const size_t obj = d.text.find(" obj ", at == std::string::npos ? 0 : at);
+                if (at == std::string::npos || obj == std::string::npos || d.text.find("tf MainForce") == std::string::npos) continue;
+                if (f < d.frame + 30) return;
+                target = std::atoi(d.text.c_str() + obj + 5);
+                if (!units) {
+                    world.order_replaced(target);
+                } else {
+                    for (const MockUnit& u : host.units_)
+                        if (u.owner == d.player) world.order_replaced(u.id);
+                }
+                signal_frame = f;
+                return;
+            }
+        });
+        const char* why = units ? "ended: every unit given another order" : "ended: target given a new order";
+        const size_t ended = count_decisions(r, why);
+        std::printf("block 0xb (%s): target %d signalled at %d, %zu block(s) %s\n", units ? "units" : "target", target, signal_frame,
+                    ended, why);
+        CHECK(target >= 0 && signal_frame > 0 && ended >= 1);
+    }
+    g_land = false;
 }
 
 // skai t15 (SKAI_T15_PLAN_RETEST §1): TacticalAiConfig::plan_retest runs the running-plan contrast re-test at every commit
@@ -3576,6 +3613,7 @@ int main(int argc, char** argv) {
     test_prepare_ambush_land();  // S7 t33
     test_ability_order_replaced();  // S7 t26
     test_story_world();             // aitac t01
+    test_block_new_order_signals();  // aitac t05
     test_no_units_remaining_heroes();  // S7 t26
     test_ability_finished();
     test_save_load(6, 30 * 4, 30 * 40);  // an ambush block in flight (member / moving lists, plan frame)

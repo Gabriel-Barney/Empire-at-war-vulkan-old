@@ -10,6 +10,7 @@ int main(int argc, char** argv) {
     test_goal_pass_cadence();  // a2m r2
     test_goal_quota_players();  // bkx1 t01
     test_goal_target_walk_order();  // gai3 t06
+    test_goal_like_sets();          // aitac t04
     test_desire_and_hysteresis();
     test_goal_reservations();
     test_queue_slot_lifetime();
