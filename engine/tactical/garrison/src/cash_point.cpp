@@ -22,10 +22,10 @@ bool cash_point_desc_from_type(const objects::GameObjectTypes& types, uint32_t t
         !types.has_behavior(t, objects::BehaviorSet::Union, kCash))
         return false;
     CashPointDesc d;
-    if (!types.get_string(t, "Cash_Point_Credits_Per_Second").empty()) d.credits_per_second = types.get_float(t, "Cash_Point_Credits_Per_Second");
-    if (!types.get_string(t, "Cash_Point_Radius").empty()) d.radius = types.get_float(t, "Cash_Point_Radius");
-    if (!types.get_string(t, "Cash_Point_Transition_Time_Seconds").empty())
-        d.transition_seconds = types.get_float(t, "Cash_Point_Transition_Time_Seconds");
+    if (!types.get_string(t, objects::tags::Cash_Point_Credits_Per_Second).empty()) d.credits_per_second = types.get(t, objects::tags::Cash_Point_Credits_Per_Second);
+    if (!types.get_string(t, objects::tags::Cash_Point_Radius).empty()) d.radius = types.get(t, objects::tags::Cash_Point_Radius);
+    if (!types.get_string(t, objects::tags::Cash_Point_Transition_Time_Seconds).empty())
+        d.transition_seconds = types.get(t, objects::tags::Cash_Point_Transition_Time_Seconds);
     out = d;
     return true;
 }

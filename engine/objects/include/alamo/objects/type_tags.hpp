@@ -224,7 +224,25 @@ struct SubObjectsTag {
     X(Text, Space_Tactical_Map, "")                                                                                   \
     X(Text, Land_Tactical_Map, "")                                                                                    \
     X(Float, Override_Bounty_SP, 0.0f)                                                                                \
-    X(Float, Override_Bounty_MP, 0.0f)
+    X(Float, Override_Bounty_MP, 0.0f)                                                                                \
+    /* garrison and cash / capture points (GARRISON): tactical/garrison garrison_types.cpp, cash_point.cpp; movement special_locomotors.cpp */ \
+    X(Mask, Property_Flags, 0)                                                                                        \
+    X(Mask, Garrison_Category, 0)                                                                                     \
+    X(Int, Num_Garrison_Slots, 0)                                                                                     \
+    X(Float, Garrison_Enter_Dist, 0.0f)                                                                               \
+    X(Float, Garrison_Exit_Dist, 0.0f)                                                                                \
+    X(Float, Garrison_Radius, 0.0f)                                                                                   \
+    X(Int, Garrison_Value, 0)                                                                                         \
+    X(Float, Capture_Point_Radius, 0.0f)                                                                              \
+    X(Float, Capture_Point_Transition_Time_Seconds, 0.0f)                                                             \
+    X(Bool, Ownership_Sticks, false)                                                                                  \
+    X(Bool, Influences_Capture_Point, true)                                                                           \
+    X(Float, Cash_Point_Credits_Per_Second, 0.0f)                                                                     \
+    X(Float, Cash_Point_Radius, 0.0f)                                                                                 \
+    X(Float, Cash_Point_Transition_Time_Seconds, 0.0f)                                                                \
+    X(List, Behavior, 0)                                                                                              \
+    X(List, LandBehavior, 0)                                                                                          \
+    X(List, SpaceBehavior, 0)
 // clang-format on
 
 namespace tags {

@@ -27,9 +27,9 @@ LocomotorKind locomotor_kind_from_token(std::string_view t) {
 }
 
 LocomotorKind locomotor_kind_from_type(const objects::GameObjectTypes& types, uint32_t ti, MoveMode mode) {
-    for (const std::string_view tag : {mode == MoveMode::Land ? std::string_view("LandBehavior") : std::string_view("SpaceBehavior"),
-                                       std::string_view("Behavior")}) {
-        for (std::string_view t : types.get_list(ti, tag))
+    for (const objects::ListTag* k : {mode == MoveMode::Land ? &objects::tags::LandBehavior : &objects::tags::SpaceBehavior,
+                                      &objects::tags::Behavior}) {
+        for (std::string_view t : types.get(ti, *k))
             if (is_locomotor_token(t)) return locomotor_kind_from_token(t);
     }
     return LocomotorKind::Default;
