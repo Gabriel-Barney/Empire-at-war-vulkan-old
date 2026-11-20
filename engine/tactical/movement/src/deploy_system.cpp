@@ -56,7 +56,11 @@ void MovementSystem::tick_turrets(uint32_t frame) {
         // weapon holds fire, kUnitDeployTransition), so the forced recentre of the deploy pass is not undone here.
         const bool transition = u.deploy == LocoState::WalkDeploying || u.deploy == LocoState::WalkUndeploying;
         float ax = 0.0f, ay = 0.0f, az = 0.0f;
-        if (!transition && turret_aim_ && turret_aim_(u.d.id, ax, ay, az)) {
+        tactical::Vec3 aim{};
+        if (!transition && eng_->turret_aim(u.d.id, aim)) {
+            ax = aim.x;
+            ay = aim.y;
+            az = aim.z;
             // [inferred] target angles relative to the body: yaw toward the point (atan2 convention of the unit yaw),
             // elevation the geometric one with up negative (LOB_SOLVER §3.6 sign).
             const float dx = ax - u.m.pos.x, dy = ay - u.m.pos.y, dz = az - u.z;

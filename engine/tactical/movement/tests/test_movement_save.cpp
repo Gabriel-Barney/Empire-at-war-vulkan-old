@@ -26,6 +26,7 @@
 #include <utility>
 #include <vector>
 
+#include "alamo/test/engagement_fns.hpp"
 #include "alamo/core/bytes.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/core/sim_rng.hpp"
@@ -1170,7 +1171,7 @@ void build_t18_states(World& w) {
     const V2 lane = cell_center(14, 35);
     // s78n t26 review round 2 (MOVEMENT §4.3 "Correction, s78n t19" [H]): rows rank by attack range (shortest in front), no longer by max speed: the slower 251 keeps the front
     // row with the shorter range (80 against 100), so 250 walks behind it
-    w.sys.set_attack_range_query([](ObjectId id) { return id == 251 ? 80.0f : 100.0f; });
+    alamo::test::engagement_of(w.sys).attack_range_fn = ([](ObjectId id) { return id == 251 ? 80.0f : 100.0f; });
     vehicle(250, lane - V2{40.0f, 0.0f}, 10.0f, 6.0f, 1.0f, 12.0f, 1);
     vehicle(251, lane, 10.0f, 6.0f, 0.8f, 12.0f, 1);
     vehicle(252, lane + V2{80.0f, 0.0f}, 30.0f, 20.0f, 0.02f, 40.0f, 2);
@@ -1390,7 +1391,7 @@ void build_t25_attack(World& w) {
     t.hard_x = t.hard_y = 5.0f;
     t.owner = 2;
     CHECK(w.sys.add_unit(t));
-    w.sys.set_fire_test([c](ObjectId, V2 p, ObjectId, bool, V2, float) { return distance(p, c) <= 255.0f; });
+    alamo::test::set_fire_test<V2>(alamo::test::engagement_of(w.sys), [c](ObjectId, V2 p, ObjectId, bool, V2, float) { return distance(p, c) <= 255.0f; });
 }
 
 void t25_attack_before(World& w, uint32_t f) {

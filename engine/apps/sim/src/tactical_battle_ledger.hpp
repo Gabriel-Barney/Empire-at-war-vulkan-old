@@ -79,6 +79,7 @@
     SAVED(combat_, part) \
     SAVED(abilities_, part) \
     REBUILT(hooks_, "made by setup() from the battle inputs, the same on a rebuild") \
+    REBUILT(engagement_, "ref6 t02: the battle's EngagementQueries; setup() sets its mode pointer") \
     REBUILT(anim_, "set by the host that starts the battle, the same on a rebuild") \
     REBUILT(dummy_type_, "made by setup() from the battle inputs, the same on a rebuild") \
     SAVED(parts_, state) \

@@ -2164,7 +2164,7 @@ private:
     void fighter_chase_candidate(const FighterChaseFacts& f, objects::ObjectId cand, objects::ObjectId tk, Vec3 at,
                                  FighterChaseInputs& ci) const;
     uint32_t fighter_chase_type(const Unit& leader, bool squad) const;  // the squadron type, else the fighter's
-    // S8 t17 (FIGHTER_FLYING §4.10 A): 0x4160a0(F, u, c, &Rr) for combat's scan (CombatSystem::set_scan_range_query);
+    // S8 t17 (FIGHTER_FLYING §4.10 A): 0x4160a0(F, u, c, &Rr) for combat's scan (EngagementQueries::scan_range, ref6 t02);
     // read-only (combat's parallel gather phase). c = kNoObjectId: the scan cube test.
     uint8_t fighter_scan_range(const objects::ObjectStore& store, objects::ObjectId member, objects::ObjectId candidate, float range,
                                float& rr) const;
@@ -2426,6 +2426,29 @@ private:
     std::unique_ptr<tactical::combat::CombatSystem> combat_;
     std::unique_ptr<tactical::abilities::AbilitySystem> abilities_;
     std::unique_ptr<BattleHooks> hooks_;  // installed over the ability system's hooks; destroyed first
+    // ref6 t02: the battle's one EngagementQueries (tactical_battle_engagement.cpp): hostility, attack ranges, the movement's
+    // fire test, the turret aim point, the movement lock, combat's scan-range query and the land shield-sides test, handed
+    // to movement (MovementSystem::set_engagement) and combat (CombatSystem::set_engagement) at setup. `mode` = the battle's
+    // mode (the scan-range query reads its store). Lives as long as the battle (not copyable, not movable).
+    struct Engagement final : tactical::EngagementQueries {
+        explicit Engagement(TacticalBattle& b) : b_(b) {}
+        bool hostile(int32_t a, int32_t b) const override;
+        float attack_range(int32_t id) const override;
+        float min_attack_distance(int32_t id) const override;
+        bool has_fire_test() const override;
+        bool can_fire_from(int32_t mover, float px, float py, int32_t target, bool los_only, float gx, float gy, float gz) const override;
+        bool turret_aim(int32_t id, tactical::Vec3& at) const override;
+        bool movement_locked(int32_t key) const override;
+        bool has_scan_range() const override { return true; }
+        uint8_t scan_range(int32_t unit, int32_t candidate, float range, float& rr) const override;
+        bool has_shield_sides() const override;
+        bool opposite_shield_sides(tactical::Vec3 from, tactical::Vec3 to, bool shield_damage) const override;
+        const TacticalMode* mode = nullptr;
+
+    private:
+        TacticalBattle& b_;
+    };
+    Engagement engagement_{*this};
     SimAnimation* anim_ = nullptr;
     int32_t dummy_type_ = -1;           // Dummy_Barrage_Target
     std::vector<Participant> parts_;
@@ -2981,7 +3004,7 @@ private:
     void arrival_service(TacticalMode& mode, SimRng& rng);  // tick: after the L1 motion services, before step 10
     void space_reinforce_arrivals(size_t first, uint32_t participant);  // aitac t05: units_[first..] start the arrival
     void space_reinforce_arrived(uint32_t participant);                 // aitac t05: the 0x19 record when none is left
-    bool arrival_locked(objects::ObjectId key) const;        // MovementSystem::set_locked_fn
+    bool arrival_locked(objects::ObjectId key) const;        // EngagementQueries::movement_locked (ref6 t02)
     uint32_t state_io_version_ = 0;  // the battle state version state_io reads (0: the current one)
     void saber_throw_service(TacticalMode& mode);
     bool anim_engaged_clip(objects::ObjectId id) const;  // tactical_battle.cpp: current clip ATTACK (5) / SPINMOVE (0x68)
