@@ -301,6 +301,11 @@ if(_alamo_sim)
                      -DREADER=${CMAKE_SOURCE_DIR}/tools/parity/story_battle.py
                      -P ${CMAKE_CURRENT_SOURCE_DIR}/headless/check_story_esc.cmake)
     set_tests_properties(alamo_headless_story_esc PROPERTIES TIMEOUT 600)
+    # tst2 t07 (b0441): --eval-equations, the five Underworld infrastructure equations on HotM seed 0 (human Empire) equal
+    # retail's frame-0 row of docs/re/A2M_R3_RE_A.md §7.2 (headless/check_uw_infra.cmake). One tick.
+    add_test(NAME alamo_headless_eval_uw_infra
+             COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:alamo_headless> -P ${CMAKE_CURRENT_SOURCE_DIR}/headless/check_uw_infra.cmake)
+    set_tests_properties(alamo_headless_eval_uw_infra PROPERTIES TIMEOUT 300)
   endif()
   # --- end A2 ---
   # --- A1 stage 2 (owner: A1 agent): --skirmish-ai synthetic|foc (headless/skirmish_run.cpp). Goldens: regenerate

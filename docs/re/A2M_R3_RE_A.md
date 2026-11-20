@@ -340,7 +340,8 @@ alamo_headless --economy --galactic-ai --campaign Sandbox_Heart_Of_The_Maw_Empir
 ```
 
 `--eval-equations` also takes `NAME=EXPRESSION` entries (separated by `;`), which is how the token inputs below were read.
-Context as Lua `EvaluatePerception`: Self = the Underworld (player 6), Target = Location = the planet, Human = the Empire.
+Context: Self = the Underworld (player 6), Target = Location = the planet, Human = the Empire; Enemy unbound (no function of
+the five closures reads Variable_Enemy).
 Port values (dev `1d7a7d74` + tst2), at frames 1, 30, 690, 720, 780, 960, 990, 1770, 1800, 2970, 3000, 4200, 5700, 10800, 11700
 and 12000:
 

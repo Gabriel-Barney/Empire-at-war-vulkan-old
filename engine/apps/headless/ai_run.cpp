@@ -592,8 +592,10 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
         }
         const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
         // tst2 t07 (--eval-equations, ai_run.hpp): the named perception equations for the --eval-player faction on each planet
-        // it owns, evaluated once after the last tick (as the Lua EvaluatePerception: Self = that player, Target = Location =
-        // the planet, Human = the --human player). The leaf cache this may fill is never read again: the run is over.
+        // it owns, evaluated once after the last tick. Context: Self = that player, Target = Location = the planet, Human = the
+        // --human player, game seed 0 as the galactic AI's own evaluations ('#'); Enemy is not bound (the AI binds a goal's
+        // opponent, Lua its lowest-id enemy), so a Variable_Enemy path prints FAIL. The leaf cache this may fill is never read
+        // again: the run is over.
         if (print && !aopt.eval_equations.empty()) {
             int32_t self = -1;
             for (size_t p = 0; p < setup.players.size() && self < 0; ++p) {
@@ -610,13 +612,21 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
                 const std::string item(ai::ai_trim(std::string_view(aopt.eval_equations).substr(a, b - a)));
                 a = b + 1;
                 if (item.empty()) continue;
+                // NAME=EXPRESSION only when NAME is a plain identifier and the '=' is not part of '=='.
                 const size_t eq = item.find('=');
-                if (eq == std::string::npos || item.find_first_of("=<>!", eq + 1) == eq + 1 || eq == 0) {
+                const std::string inline_name(eq == std::string::npos ? std::string() : std::string(ai::ai_trim(std::string_view(item).substr(0, eq))));
+                const bool ident = !inline_name.empty() && std::all_of(inline_name.begin(), inline_name.end(), [](char ch) {
+                    return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_';
+                });
+                if (!ident || (eq + 1 < item.size() && item[eq + 1] == '=')) {
                     names.push_back(item);
                     continue;
                 }
+                if (eqs.find(inline_name) != ai::kUnresolved) {  // add() keeps the first definition: the shipped one would win
+                    std::printf("galactic-ai: eval: %s is a shipped equation; give the inline one another name\n", inline_name.c_str());
+                    continue;
+                }
                 if (!own) own.emplace(eqs);
-                const std::string inline_name(ai::ai_trim(std::string_view(item).substr(0, eq)));
                 ai::LoadReport rep;
                 if (own->add(inline_name, ai::ai_trim(std::string_view(item).substr(eq + 1)), &rep) == ai::kUnresolved)
                     for (const std::string& m : rep.messages) std::printf("galactic-ai: eval: %s: %s\n", inline_name.c_str(), m.c_str());
@@ -639,7 +649,6 @@ int ai_campaign_run(const MapRunOptions& opt, const AiRunOptions& aopt) {
                     c.self = self;
                     c.target = c.location = static_cast<int32_t>(pl);
                     c.human = human;
-                    c.game_seed = static_cast<uint32_t>(cfg.seed);
                     const ai::EvalResult r = ai::evaluate(set, e, c, world.resolver());
                     char v[64];
                     std::snprintf(v, sizeof v, "%.6g", r.value);
