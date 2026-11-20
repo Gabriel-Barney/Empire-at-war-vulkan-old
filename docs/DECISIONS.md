@@ -350,8 +350,11 @@ waits on Gabriel. It stays generated, read-only, one copy, no sign-in, opening f
 - **Page load.** The first screen carries only gates, ranking, today and a slim group index, under 1 MB (was 4.7 MB). Group
   detail, build history and the backlog are split into `detail/<id>.js`-style files that set `window.__RD__[...]` and are
   loaded on demand by inserting a `<script>` tag, because browsers block `fetch()` from `file://`. The shell is rewritten
-  from scratch, keeping only the flowchart code; the dormant claude.ai write and edit code goes. Layout is picked from 2-3
-  prototypes first.
+  from scratch, keeping only the flowchart code; the dormant claude.ai write and edit code goes. Layout (picked from three
+  prototypes on live data, local branch `claude/prototype-roadmap-page`): a cockpit first screen (gate cards across the top,
+  ranking left, today / started groups / waiting-on-you right, timeline, burn-down, parity and conflict matrices below);
+  clicking a gate opens its drill-down (dependency graph with the critical path, its blocking tasks, the ranking within it).
+  Rejected: a gate-rail page and a single-column "today" feed.
 - **Milestone gates.** Four gates, each defined by a gate group; a gate's members are the gate group's `after` chain
   (followed through), not a hand-kept list: **M1 FoC parity** (`q4`, its exit test), **M2 Playable + Full QA**
   (`qafull`, its exit test; replaces the "Playable single player" exclude-list milestone), **M3 Mod system** (`mcx9` and
