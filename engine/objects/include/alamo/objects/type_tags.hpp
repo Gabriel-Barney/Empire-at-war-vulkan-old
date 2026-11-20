@@ -242,7 +242,31 @@ struct SubObjectsTag {
     X(Float, Cash_Point_Transition_Time_Seconds, 0.0f)                                                                \
     X(List, Behavior, 0)                                                                                              \
     X(List, LandBehavior, 0)                                                                                          \
-    X(List, SpaceBehavior, 0)
+    X(List, SpaceBehavior, 0)                                                                                         \
+    /* model and animation parameters (ANIMATION): anim type_params.cpp */                                            \
+    X(Text, Galactic_Model_Name, "")                                                                                  \
+    X(Text, Land_Model_Name, "")                                                                                      \
+    X(Text, Land_Model_Anim_Override_Name, "")                                                                        \
+    X(Text, Space_Model_Name, "")                                                                                     \
+    X(Text, Space_Model_Anim_Override_Name, "")                                                                       \
+    X(Bool, Loop_Idle_Anim_00, false)                                                                                 \
+    X(Float, Idle_Anim_00_Rate_Mod, 0.0f)                                                                             \
+    X(Bool, Attack_Animation_Is_Overlay, false)                                                                       \
+    X(Text, Specific_Death_Anim_Type, "")                                                                             \
+    X(Text, Specific_Death_Anim_Index, "")                                                                            \
+    X(Bool, Remove_Upon_Death, false)                                                                                 \
+    X(Bool, Spin_Away_On_Death, false)                                                                                \
+    X(Text, Spin_Away_On_Death_Explosion, "")                                                                         \
+    X(Bool, Allow_Idle_When_Moving, false)                                                                            \
+    X(Float, Death_Persistence_Duration, 0.0f)                                                                        \
+    X(Float, Death_Fade_Time, 0.0f)                                                                                   \
+    X(Float, Max_Flinch_Blend_Seconds, 0.0f)                                                                          \
+    X(Float, Max_Flinch_Hold_Seconds, 0.0f)                                                                           \
+    X(Float, Idle_Flinch_Interval_Seconds, 0.0f)                                                                      \
+    X(Float, Attack_Flinch_Interval_Seconds, 0.0f)                                                                    \
+    X(Float, Spin_Away_On_Death_Chance, 0.0f)                                                                         \
+    X(Float, Spin_Away_On_Death_Time, 0.0f)                                                                           \
+    X(Float, Deployed_Walk_Anim_Speed, 0.0f)
 // clang-format on
 
 namespace tags {

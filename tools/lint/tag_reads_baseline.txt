@@ -1,8 +1,7 @@
 # String tag reads per sim file (tools/lint/check_tag_reads.py, ref6 t01). Only goes down; target 0.
-# total 535
+# total 518
 engine/ai/src/galactic_ai.cpp 17
 engine/ai/src/galactic_seed.cpp 1
-engine/anim/src/type_params.cpp 17
 engine/apps/headless/skirmish_run.cpp 6
 engine/apps/headless/tactical_trace.cpp 1
 engine/apps/sim/src/battle_ai.cpp 48
