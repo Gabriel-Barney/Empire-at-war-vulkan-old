@@ -1838,6 +1838,22 @@ static uint32_t run_land(MovementSystem& sys, uint32_t first, uint32_t max_frame
             s0 = sys.stats();
         }
         sys.tick(f, rng, pf);
+        if (std::getenv("MOV2_TRACE")) {  // DBGTMP
+            static const int32_t lo = std::atoi(std::getenv("MOV2_TRACE"));
+            if (static_cast<int32_t>(f) >= lo && static_cast<int32_t>(f) < lo + 400) {
+                for (const ObjectId id : {13, 14, 22}) {
+                    const UnitView v = sys.view(id);
+                    std::printf("T%u u%d pos %.1f %.1f spd %.3f yaw %.1f goal %d push %d\n", f, id, static_cast<double>(v.pos.x),
+                                static_cast<double>(v.pos.y), static_cast<double>(v.speed), static_cast<double>(v.yaw), v.has_goal ? 1 : 0,
+                                v.pushed ? 1 : 0);
+                }
+                for (const CollisionObject& c : sys.collisions().list())
+                    if (c.a == 13 || c.a == 14 || c.a == 22 || c.b == 13 || c.b == 14 || c.b == 22)
+                        std::printf("T%u rec seq %u kind %d a %d b %d st %d m %d va %.3f vb %.3f na %d nb %d redec %u\n", f, c.seq,
+                                    static_cast<int>(c.kind), c.a, c.b, static_cast<int>(c.state), static_cast<int>(c.master),
+                                    static_cast<double>(c.speed_a), static_cast<double>(c.speed_b), c.now_a ? 1 : 0, c.now_b ? 1 : 0, c.redecide);
+            }
+        }
         if (stops) terrain_stops_after(sys, *stops, f, s0);
         bool any = false;
         for (ObjectId id : sys.unit_ids()) {
@@ -4228,6 +4244,12 @@ void test_land_tail_stages() {
 
 int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);  // unbuffered: a crash keeps the log
+#ifdef MOVEMENT_REAL_DATA
+    if (std::getenv("MOV2_ONLY")) {  // DBGTMP
+        test_real_data();
+        return g_fail ? 1 : 0;
+    }
+#endif
     test_heap();
     test_classes();
     test_grid();
