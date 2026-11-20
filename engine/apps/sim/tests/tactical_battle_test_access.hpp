@@ -32,12 +32,7 @@ struct TacticalBattleTestAccess {
                                  Vec3 tp, uint8_t flags, SimRng& rng, bool guard) {
         return static_cast<int>(b.land_attack_order(mode, ids, target, tp, flags, false, rng, guard));
     }
-    static tactical::Aabb map_extents(const TacticalBattle& b, const TacticalMode& mode) { return b.map_extents(mode); }
-    // trl2 t05: adopt a spawned object as a built battle unit of `owner` (bt_adopt_built, full health); 0xFFFFFFFF = refused.
-    static uint32_t adopt_built(TacticalBattle& b, TacticalMode& mode, objects::ObjectHandle h, int32_t owner, SimRng& rng) {
-        return b.bt_adopt_built(mode, h, owner, 1.0f, &rng);
-    }
-    // s78n t10: the 8 (x, y) points of object `h`'s fog multisample footprint.
+    static tactical::Aabb map_extents(const TacticalBattle& b, const TacticalMode& mode) { return b.map_extents(mode); }    // s78n t10: the 8 (x, y) points of object `h`'s fog multisample footprint.
     static void fog_footprint(const TacticalBattle& b, const objects::ObjectStore& st, objects::ObjectHandle h, float* xy16) {
         b.fog_footprint_samples(st, h, xy16);
     }

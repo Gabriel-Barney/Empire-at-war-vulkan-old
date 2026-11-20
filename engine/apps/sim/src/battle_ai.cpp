@@ -126,7 +126,9 @@ BattleAi::BattleAi(TacticalBattle& battle, TacticalMode& mode, SimHost& host, co
     cfg.pp_latency = setup.pp_latency;
     cfg.ai_lane = setup.ai_lane;  // sp3
     cfg.k_ai = setup.k_ai == 0 ? 1 : setup.k_ai;
-    allow_reinforcement_fraction_ = setup.constants.allow_reinforcement_percentage;  // A2 tactical (§3.2)
+    // A2 tactical (§3.2). trl2 t02: one source with the battle's land count (TacticalBattle::population_used reads the
+    // catalog's GameConstants value).
+    allow_reinforcement_fraction_ = b_->catalog_ ? b_->catalog_->allow_reinforcement_fraction() : setup.constants.allow_reinforcement_percentage;
     use_reinforcement_points_ = setup.constants.use_reinforcement_points;           // a1g t04 follow-up (land drops)
     // ref2 t05: the threat grid's box is the fog box (AI_TACTICAL_PERCEPTION §4.1): one source, TacticalBattle::map_extents
     const tactical::Aabb bb = b_->map_extents(mode, TacticalBattle::ExtentsUse::Perception);

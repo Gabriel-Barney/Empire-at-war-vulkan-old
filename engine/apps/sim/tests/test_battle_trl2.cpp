@@ -260,6 +260,55 @@ void test_retreat_cancel() {
     CHECK(cancel_ok && record_ok && record_units == movers.size() && frozen && rerequest && auto_ok);
 }
 
+// ---- trl2 t05: space ----
+// S10_Star_Base_1 names T_SD_Boom (a PARTICLE) as its Retreat_Self_Destruct_Explosion.
+std::string self_destruct_patch(std::string t) {
+    const std::string at = "<StarBase Name=\"S10_Star_Base_1\">";
+    if (const size_t p = t.find(at); p != std::string::npos)
+        t.insert(p + at.size(), "<Retreat_Self_Destruct_Explosion>T_SD_Boom</Retreat_Self_Destruct_Explosion>");
+    const size_t end = t.find("</S10>");
+    if (end != std::string::npos) t.insert(end, " <SpaceProp Name=\"T_SD_Boom\"><Behavior>PARTICLE</Behavior></SpaceProp>\n");
+    return t;
+}
+
+// TRU1_C_RE §2.4: past cinematic counter 180 the retreating player's star base spawns its Retreat_Self_Destruct_Explosion
+// (owned by that player) and dies.
+// ledger: verifies GameObjectType.Retreat_Self_Destruct_Explosion
+void test_starbase_self_destruct() {
+    g_temp_prefix = "alamo_sim_trl2_tests_self_destruct";
+    g_types_patch = self_destruct_patch;
+    auto d = make_data();
+    g_types_patch = nullptr;
+    const uint32_t boom_t = type_of(*d, "T_SD_Boom"), base_t = type_of(*d, "S10_Star_Base_1");
+    bool requested = false, flight = false, boom = false, boom_owner_ok = false, base_died = false;
+    objects::ObjectId base = objects::kNoObjectId;
+    space_battle(
+        *d, 3000,
+        [&](TacticalBattle& b, TacticalMode& tm, SimHost&) {
+            objects::ObjectStore& st = tm.primary();
+            if (!requested) {
+                if (b.retreat_block(0) != 0) return true;
+                for (const objects::ObjectHandle h : st.owned_by(0))
+                    if (st.alive(h) && static_cast<uint32_t>(st.type(h)) == base_t) base = st.id(h);
+                requested = b.request_retreat(0);
+                return requested;
+            }
+            flight = flight || b.retreat_flight_state() != 0;
+            for (const objects::ObjectHandle h : st.all_objects())
+                if (st.exists(h) && static_cast<uint32_t>(st.type(h)) == boom_t) {
+                    boom = true;
+                    boom_owner_ok = st.owner(h) == 0;
+                }
+            const objects::ObjectHandle bh = st.find(base);
+            base_died = base_died || !st.alive(bh) || st.dying(bh);
+            return !(boom && base_died);
+        },
+        1.0f);
+    std::printf("  trl2 t05 space: requested %d, flight %d, explosion %d (owner 0: %d), star base died %d\n", requested, flight, boom,
+                boom_owner_ok, base_died);
+    CHECK(requested && flight && boom && boom_owner_ok && base_died);
+}
+
 // ---- trl2 t05 ----
 // The landing data plus T_Bunker, a structure (no locomotor).
 std::string bunker_patch(std::string t) {
@@ -443,6 +492,7 @@ int main() {
     test_retreat_cancel();
     std::printf("trl2 t05: land retreat end\n");
     test_land_retreat_end();
+    test_starbase_self_destruct();
     if (g_fail) {
         std::printf("alamo_sim_trl2_tests: %d failure(s)\n", g_fail);
         return 1;

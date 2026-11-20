@@ -1722,6 +1722,12 @@ void TacticalBattle::complete_retreat(TacticalMode& mode, uint8_t side) {
         for (const Unit& u : units_) {
             if (u.side != side || !u.alive || u.retreated || u.movable || rt_listed(u.id)) continue;  // TRU1 t06: flown out
             if (!space_ && st && st->alive(u.h) && st->has_behavior(u.h, objects::beh::Transport)) continue;
+            // [port] until TRL2_A_RE_ANSWERS Q3 settles land vf11: markers (MARKER, REINFORCEMENT_POINT 0x49) and units
+            // garrisoned inside another object are kept, not destroyed.
+            constexpr objects::BehaviorTypeId kReinforcementPoint = 0x49;
+            if (!space_ && st && st->alive(u.h) &&
+                (st->has_behavior(u.h, objects::beh::Marker) || st->has_behavior(u.h, kReinforcementPoint) || garrison_.garrisoned(u.id)))
+                continue;
             if (std::find(bt_attrition_ids_.begin(), bt_attrition_ids_.end(), u.id) == bt_attrition_ids_.end()) {
                 bt_attrition_ids_.push_back(u.id);
                 bt_used_ = true;

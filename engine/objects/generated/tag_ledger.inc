@@ -753,7 +753,7 @@
 {"GameObjectType", "Display_Contained_Hero_Grab_Bars", 0x0, LedgerState::Consumed, "docs/re/OBJECT_TYPES.md", 3, 1},
 {"GameObjectType", "Requires_Base_Power", 0x0, LedgerState::Consumed, "docs/re/ABILITIES_HARDPOINTS.md", 2, 1},
 {"GameObjectType", "Shield_Requires_Base_Power", 0x0, LedgerState::Consumed, "docs/re/OBJECT_TYPES.md", 1, 1},
-{"GameObjectType", "Retreat_Self_Destruct_Explosion", 0x1d, LedgerState::Consumed, "docs/re/MCX4_T15_RE_ANSWERS.md", 16, 1},
+{"GameObjectType", "Retreat_Self_Destruct_Explosion", 0x1d, LedgerState::Verified, "docs/re/MCX4_T15_RE_ANSWERS.md", 16, 1},
 {"GameObjectType", "Strafe_Distance", 0x8, LedgerState::Consumed, "docs/re/FIGHTER_FLYING.md", 16, 1},
 {"GameObjectType", "Should_Attacker_Hold_Fire_For_Special_Ability", 0x0, LedgerState::Consumed, "docs/re/TACTICAL_COMBAT.md", 1, 1},
 {"GameObjectType", "Beacon_Lifetime_In_Secs", 0x8, LedgerState::Stored, "docs/re/MCX4_T14_RE_ANSWERS.md", 1, 1},
