@@ -82,9 +82,10 @@ void AbilitySystem::gravity_apply(Obj& g, uint32_t frame) {
         for (Obj& v : objs_) {
             if (v.owner != p || v.dead || !v.combat_unit || v.id == g.id) continue;
             // cmb3 t06 (b0452, TRU1_GRAVITY_FIELD §1.5 [H]): the query skips an object inside a container (obj +0x3a7, set by
-            // enter-container 0x37ade0 for garrisons and transports alike), in both branches: a carried unit is neither
-            // slowed nor released while carried (one slowed before keeps the slow)
-            if (!desc(v).affected_by_gravity_field || (combat_->flags(v.id) & combat::kUnitGarrisoned) != 0) continue;
+            // enter-container 0x37ade0 for garrisons and transports alike, and by Lua Set_In_Limbo), in both branches: a
+            // carried unit is neither slowed nor released while carried (one slowed before keeps the slow). The port's
+            // +0x3a7 reading is kUnitContained (garrisoned or limbo).
+            if (!desc(v).affected_by_gravity_field || (combat_->flags(v.id) & combat::kUnitContained) != 0) continue;
             if (hostile ? v.in_gravity_field != 0 : v.in_gravity_field == 0) continue;
             if (!in_range(v)) continue;
             if (!combat_->modifiers_of(v.id)) continue;

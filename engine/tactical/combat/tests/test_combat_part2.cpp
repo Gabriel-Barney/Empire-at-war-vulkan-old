@@ -469,7 +469,7 @@ void test_save_load() {
     // Fire_SFXEvent lookup on the first post-load tick)
     {
         const auto ea = a.w.sys->shot_events(), eb = b.w.sys->shot_events();
-        CHECK(ea.size() == eb.size());
+        CHECK(!ea.empty() && ea.size() == eb.size());
         for (size_t i = 0; i < ea.size() && i < eb.size(); ++i)
             CHECK(ea[i].shooter == eb[i].shooter && ea[i].hardpoint == eb[i].hardpoint && ea[i].serial == eb[i].serial);
     }

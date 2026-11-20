@@ -440,12 +440,12 @@ void test_trim_gate_hidden(const Data& d) {
     opt.battle.max_frames = 2000;
     opt.battle.skip_human_units = true;
     opt.battle.order_interval = 0;  // no stand-in orders
-    ClashSession s(d, 0, opt, {"S10_Ranger_Co"}, {"S10_Lurker_Co"}, true);
+    ClashSession s(d, 0, opt, {"S10_Ranger_Co"}, {"S10_Lurker_Co", "S10_Ranger_Co"}, true);
     if (!s.gs) return;
-    objects::ObjectId r = objects::kNoObjectId, e = objects::kNoObjectId;
+    objects::ObjectId r = objects::kNoObjectId, e = objects::kNoObjectId, pe = objects::kNoObjectId;
     int stage = 0;
     uint32_t stage_frame = 0, trims0 = 0;
-    bool hidden_seen = false, untrimmed = false, revealed = false, trimmed = false;
+    bool hidden_seen = false, untrimmed = false, revealed = false, trimmed = false, plain_seen = false, plain_trimmed = false;
     const auto pos = [](TacticalMode& tm, objects::ObjectId id) { return tm.primary().position(tm.primary().find(id)); };
     for (uint64_t tk = 0; tk < 2000 && stage < 9; ++tk) {
         TacticalBattle* b = s.tick();
@@ -458,7 +458,10 @@ void test_trim_gate_hidden(const Data& d) {
         if (stage == 0) {
             r = unit_of(*b, st, d, "S10_Ranger", 0);
             e = unit_of(*b, st, d, "S10_Lurker", 1);
-            if ((r == objects::kNoObjectId || e == objects::kNoObjectId) && b->frame() < 600) continue;
+            pe = unit_of(*b, st, d, "S10_Ranger", 1);  // a plain vehicle: the object test never hides it
+            if ((r == objects::kNoObjectId || e == objects::kNoObjectId || pe == objects::kNoObjectId) && b->frame() < 600) continue;
+            CHECK(pe != objects::kNoObjectId);
+            if (pe == objects::kNoObjectId) break;
             CHECK(r != objects::kNoObjectId && e != objects::kNoObjectId && b->fog() != nullptr);
             if (r == objects::kNoObjectId || e == objects::kNoObjectId || !b->fog()) break;
             invulnerable_all(*b);
@@ -489,6 +492,7 @@ void test_trim_gate_hidden(const Data& d) {
             CHECK(spot);
             if (!spot) break;
             CHECK(b->teleport(*tm, e, ep, st.facing(st.find(e))));
+            CHECK(b->teleport(*tm, pe, Vec3{ep.x, ep.y + 20.0f, 0.0f}, st.facing(st.find(pe))));
             CHECK(b->teleport(*tm, r, rp, st.facing(st.find(r))));
             stage = 1;
             stage_frame = b->frame();
@@ -514,6 +518,15 @@ void test_trim_gate_hidden(const Data& d) {
             trims0 = b->movement().stats().attack_trims;
             (void)TA::land_attack_order(*b, *tm, ids, e, pos(*tm, e), 0, rng, false);
             untrimmed = b->movement().stats().attack_trims == trims0 && b->movement().view(r).has_goal;
+            // the plain vehicle on the same fogged spot: a point test would leave it untrimmed too; the object test does
+            // not hide it, so the plan is trimmed
+            bool ph = true, ps = true;
+            TA::target_unseen(*b, st, r, pe, ph, ps);
+            const Vec3 pp = pos(*tm, pe);
+            plain_seen = !ph && !ps && TA::fog(*b)->point_fogged(0, pp.x, pp.y, true);
+            trims0 = b->movement().stats().attack_trims;
+            (void)TA::land_attack_order(*b, *tm, ids, pe, pos(*tm, pe), 0, rng, false);
+            plain_trimmed = b->movement().stats().attack_trims == trims0 + 1;
             TA::fog(*b)->reveal_all(0);
             stage = 2;
             stage_frame = b->frame();
@@ -531,7 +544,10 @@ void test_trim_gate_hidden(const Data& d) {
     }
     std::printf("  fire trim gate: hidden %d -> untrimmed %d; revealed %d -> trimmed %d\n", hidden_seen ? 1 : 0, untrimmed ? 1 : 0,
                 revealed ? 1 : 0, trimmed ? 1 : 0);
+    std::printf("  fire trim gate: plain vehicle on a fogged point: not hidden %d -> trimmed %d\n", plain_seen ? 1 : 0,
+                plain_trimmed ? 1 : 0);
     CHECK(hidden_seen && untrimmed && revealed && trimmed);
+    CHECK(plain_seen && plain_trimmed);
 }
 
 // ---- t03: the attack formation lead skips locked members ----------------------------------------------------------

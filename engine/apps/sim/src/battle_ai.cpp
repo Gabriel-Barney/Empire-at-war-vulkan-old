@@ -2863,6 +2863,7 @@ cmd::RejectReason BattleAi::execute_order(uint8_t player, const cmd::EventData& 
                     // (b0169): the caller is the order's object (payload word 0); a squadmate of the caller, or a member of a
                     // calling squad container, is neither, so it gets the block. tu is a battle unit, never a container, so
                     // the caller's container (+0x2b0) cannot be it.
+                    // A task force's further units (after byte 24) are not callers: BKT1 §3.1 is the object's own Move_Internal.
                     // (review) A squadmate or own-member target is in group.units: the block's item-6 stop (0x40edd0, every
                     // member can fire from where it stands) ends it at once, so the formation does not chase its own member.
                     const bool self = tu->id == static_cast<objects::ObjectId>(le32(b, 0));

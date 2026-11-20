@@ -2106,9 +2106,8 @@ void TacticalBattle::attack_block_service(TacticalMode& mode, SimRng& rng) {
             pushed = pushed || vj.pushed;
         }
         const Unit* lead = unit_by_id(checked[i].lead);
-        // s78n t26 review round 3 (FIGHTER_FLYING §4.11 E [H]): c (0x40edd0) is false when the object is hidden for
-        // members[0]'s owner or stealthed and members[0]'s type lacks Target_Stealth_Units ([port] the target unit the
-        // lead's order names, tid: a TEAM container through that member)
+        // The fog / stealth terms for the lead (0x41a9b0), read by C 3 below; c and the re-path test take members[0]'s
+        // (cmb3 t01 (c), below). tid: the target unit the lead's order names (a TEAM container through that member).
         bool hidden = false, stealthed = false;
         attack_target_unseen(st, *lead, checked[i].tid, hidden, stealthed);
         // cmb1 t06 (BKR2 Q6 [H], review): stealthed (and not hidden) -> the last-observed point is the formation lead's

@@ -489,7 +489,7 @@ bool AbilitySystem::set_active(Obj& o, uint32_t t, bool on, uint32_t frame, Obje
         if (!can(o, t, false, true, frame)) return false;
         if (active_state(o, t) && t != kBarrage) return false;
     }
-    // cmb3 t05 (b0451, ABILITIES_HARDPOINTS §2.5 [H]): 0x38a350 has no case for FIRE_LOBBING_SUPERWEAPON (47); its default
+    // cmb3 t05 (b0451, TRU1_GRAVITY_FIELD §2, ABILITIES_HARDPOINTS §2.5 [H]): 0x38a350 has no case for FIRE_LOBBING_SUPERWEAPON (47); its default
     // returns false with nothing done (no handler, no active byte, no recharge, no event). The shot is command 25's alone. A
     // team container fails too: every forwarded member returns false, which fails the whole call (review).
     if (t == kFireLobbingSuperweapon) return false;

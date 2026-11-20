@@ -104,7 +104,7 @@ its slow and its list entry while carried (a non-enemy owner change does not rel
 - The slow is one list-5 entry in the victim's own ModifierSet with source (generator id, generator type-name CRC),
   category 0; `TacticalBattle` already multiplies land speed by 1 + list 5.
 - [port] The query uses the unit centre only (the bounding-box overlap is not modelled); a carried unit (§1.5, the
-  combat flag `kUnitGarrisoned`, which the battle sets for garrisoned units and for a vehicle thief inside its vehicle)
+  combat flag `kUnitContained`: garrisoned, a vehicle thief inside its vehicle, or Lua `Set_In_Limbo`)
   is skipped in both branches (cmb3 t06; before it the never-set type flag `garrison_style` stood there, so a carried unit
   was slowed at its stale position).
 - `Is_Neutral` players are skipped in both branches (the host's `neutral_player` hook: an owner whose faction
@@ -145,6 +145,8 @@ queues command 25 is not traced].
 0x38a350 has no case for 0x2f: after its common gates (Has_Ability, Can_Activate when turning on, not already active,
 the team-container forwarding) the switch's default returns false, so a command 43 (mode on or off) does nothing: no
 handler, no active byte, no recharge, no event. Lua `Activate_Ability` (0x570a50) lists 47 in neither argument family
-and stops the script with "unsupported unit ability" before any command. So 47 fires only through command 25.
-Port: `AbilitySystem::set_active` returns false for 47 after the same gates (before t05 it reached the generic
+and stops the script with "unsupported unit ability" before any command. A command 40 (`TacticalSpecialAbility`) forwards
+to the special ability named by the record's `GUI_Activated_Ability_Name`; neither shipped 47 record (SPECIALSTRUCTURES,
+GROUNDBUILDABLESSKIRMISH) has one, so it finds nothing to run. So 47 fires only through command 25.
+Port: `AbilitySystem::set_active` returns false for 47 after the Has_Ability / Can_Activate / already-active gates and before the container forwarding (same result: a forwarded member would fail) (before t05 it reached the generic
 fallback: an Unhandled event and a recharge start); the Lua binding already refused it.
