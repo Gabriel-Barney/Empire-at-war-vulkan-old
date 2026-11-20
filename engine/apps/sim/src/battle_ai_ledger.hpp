@@ -13,6 +13,8 @@
 // clang-format off
 #define ALAMO_BATTLE_AI_LEDGER(SAVED, REBUILT, DERIVED, CHECKED) \
     DERIVED(type_facts_, "per-type cache (filled from type data on first use)") \
+    DERIVED(exp_facts_, "EXP-t07") DERIVED(exp_pool_, "EXP-t07") DERIVED(exp_can_, "EXP-t07") DERIVED(exp_cap_, "EXP-t07") \
+    DERIVED(exp_used_, "EXP-t07") DERIVED(exp_damage_, "EXP-t07") \
     REBUILT(allow_reinforcement_fraction_, "A2 tactical: from GameConstants at start()") \
     REBUILT(use_reinforcement_points_, "a1g t04: from GameConstants at start()") \
     SAVED(follows_, hashed) \

@@ -449,6 +449,13 @@ private:
         float box_min[2] = {0.0f, 0.0f}, box_max[2] = {0.0f, 0.0f};
     };
     LaneView view_;
+    // [EXP-t07]
+    bool exp_facts_ = false;
+    std::vector<std::vector<ai::tactical::TacticalReinforcement>> exp_pool_;
+    std::vector<uint8_t> exp_can_;
+    std::vector<float> exp_cap_, exp_used_;
+    ai::tactical::DamageTrackingStore exp_damage_;
+    void exp_capture_facts();
     // ref5 t06: lane code reads only view_. lane_thinking_ is set while think() (and, lane on, the start scripts) run; every
     // live battle read of a host answer goes through lane_live_read, which counts it (ai_lane_live_reads; alamo_headless
     // fails a lane run that had one) and asserts in debug builds. Scratch, never read by sim code.

@@ -917,6 +917,10 @@ void BattleAi::update() {
         StateHasher h;
         world_->hash(h);
         lane_job_.digest = h.digest();
+    } else if (std::getenv("ALAMO_EXP_T07")) {  // [EXP-t07]
+        exp_capture_facts();
+        world_->update(static_cast<int64_t>(host_->frame()), b_->frame_);
+        exp_facts_ = false;
     } else {
         world_->update(static_cast<int64_t>(host_->frame()), b_->frame_);
     }
@@ -2388,7 +2392,30 @@ cmd::RejectReason BattleAi::execute(uint8_t player, const cmd::EventData& ev) {
         }
         return p;
     }
-    return execute_live(player, ev);
+    const cmd::RejectReason rr = execute_live(player, ev);
+    if (exp_facts_ && !std::getenv("ALAMO_EXP_T07_NOREFRESH")) exp_capture_facts();  // [EXP-t07]
+    return rr;
+}
+
+// [EXP-t07] ref5 t07 experiment: the lane-off AI frame reads the per-player host facts from a capture refreshed after each
+// AI write (not committed).
+void BattleAi::exp_capture_facts() {
+    static int dbg = 0;  // [DEBUG-t07]
+    if (dbg++ % 500 == 0) std::fprintf(stderr, "[DEBUG-t07] capture %d frame %u\n", dbg, b_->frame_);
+    exp_facts_ = false;
+    const auto players = static_cast<int32_t>(host_->players());
+    exp_pool_.assign(static_cast<size_t>(players), {});
+    exp_can_.assign(static_cast<size_t>(players), 0);
+    exp_cap_.assign(static_cast<size_t>(players), 0.0f);
+    exp_used_.assign(static_cast<size_t>(players), 0.0f);
+    for (int32_t p = 0; p < players; ++p) {
+        exp_pool_[static_cast<size_t>(p)] = reinforcement_pool(p);
+        exp_can_[static_cast<size_t>(p)] = can_reinforce(p) ? 1 : 0;
+        exp_cap_[static_cast<size_t>(p)] = population_cap(p);
+        exp_used_[static_cast<size_t>(p)] = population_used(p);
+    }
+    exp_damage_ = b_->damage_tracking_;
+    exp_facts_ = true;
 }
 
 cmd::RejectReason BattleAi::execute_live(uint8_t player, const cmd::EventData& ev) {
@@ -3017,6 +3044,7 @@ cmd::RejectReason BattleAi::execute_order(uint8_t player, const cmd::EventData& 
 }
 
 std::vector<at::TacticalReinforcement> BattleAi::reinforcement_pool(int32_t player) {
+    if (exp_facts_) return exp_pool_[static_cast<size_t>(player)];  // [EXP-t07]
     if (lane_view()) return player >= 0 && static_cast<size_t>(player) < view_.pool.size() ? view_.pool[static_cast<size_t>(player)]
                                                                                            : std::vector<at::TacticalReinforcement>{};
     std::vector<at::TacticalReinforcement> out;
@@ -3050,6 +3078,7 @@ std::vector<at::TacticalReinforcement> BattleAi::reinforcement_pool(int32_t play
 }
 
 bool BattleAi::can_reinforce(int32_t player) {
+    if (exp_facts_) return exp_can_[static_cast<size_t>(player)] != 0;  // [EXP-t07]
     if (lane_view()) return player >= 0 && static_cast<size_t>(player) < view_.can_reinforce.size() && view_.can_reinforce[static_cast<size_t>(player)];
     if (b_->finished_) return false;
     const int32_t side = player == b_->req_.info.defender ? 0 : player == b_->req_.info.attacker ? 1 : -1;
@@ -3062,6 +3091,7 @@ bool BattleAi::can_reinforce(int32_t player) {
 // (the reinforcement points it holds). t50: a land skirmish is min(capacity, Land_Skirmish_Unit_Cap_By_Player_Count at the player
 // count), the capacity counting the player's and its allies' objects (§3.3 / §3.3 "plus, in skirmish, those of allied players"). ---
 float BattleAi::population_cap(int32_t player) {
+    if (exp_facts_) return exp_cap_[static_cast<size_t>(player)];  // [EXP-t07]
     if (lane_view()) return player >= 0 && static_cast<size_t>(player) < view_.pop_cap.size() ? view_.pop_cap[static_cast<size_t>(player)] : -1.0f;
     ensure_type_facts();
     const auto& ps = b_->galaxy_->players();
@@ -3093,6 +3123,7 @@ float BattleAi::population_cap(int32_t player) {
 // §3.2: Σ population shares of the player's live battle objects [port: per galactic participant, charged once], then
 // (int)sum + 1 when the fraction exceeds Allow_Reinforcement_Percentage_Normalized (shipped 0.0: any fraction rounds up).
 float BattleAi::population_used(int32_t player) {
+    if (exp_facts_) return exp_used_[static_cast<size_t>(player)];  // [EXP-t07]
     if (lane_view()) return player >= 0 && static_cast<size_t>(player) < view_.pop_used.size() ? view_.pop_used[static_cast<size_t>(player)] : 0.0f;
     float pop = 0.0f;
     std::vector<uint8_t> counted(b_->parts_.size(), 0);
@@ -3191,7 +3222,7 @@ bool BattleAi::can_build_now(int32_t player, int32_t type) {
 }
 // --- end A2 tactical ---
 
-const at::DamageTrackingStore* BattleAi::damage_tracking() { return lane_view() ? &view_.damage : &b_->damage_tracking_; }
+const at::DamageTrackingStore* BattleAi::damage_tracking() { if (exp_facts_) return &exp_damage_; return lane_view() ? &view_.damage : &b_->damage_tracking_; }
 const galactic::ContrastTable* BattleAi::contrast() { return &b_->rules_->contrast; }
 
 // --- A2 tactical: build pads (L1_S4_REMAINING §3.6; TacticalBattle pads, tactical_battle_pads.cpp) ---------------
@@ -3579,6 +3610,7 @@ void BattleAi::unit_released(int32_t player, int32_t object_id, ai::tactical::Ta
     if (lane_view()) return queue_host_release(kHostUnitReleased, player, object_id, static_cast<uint8_t>(path));
     lane_live_read("unit_released");
     unit_released_live(player, object_id, path);
+    if (exp_facts_) exp_capture_facts();  // [EXP-t07]
 }
 
 void BattleAi::unit_left_task_force(int32_t object_id) {
@@ -3589,6 +3621,7 @@ void BattleAi::unit_left_task_force(int32_t object_id) {
     }
     lane_live_read("unit_left_task_force");
     unit_left_task_force_live(object_id);
+    if (exp_facts_) exp_capture_facts();  // [EXP-t07]
 }
 
 void BattleAi::unit_released_live(int32_t player, int32_t object_id, ai::tactical::TacticalAiHost::UnitRelease path) {
