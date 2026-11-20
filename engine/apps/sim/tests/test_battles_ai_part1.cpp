@@ -752,6 +752,28 @@ void test_battle_ai_lifecycle() {
         CHECK(n1 + 1 == n0 && n2 == n1);
         CHECK(b->adoption_violations(*tm).empty());  // the despawned unit left combat / movement too
         lua::attach_object_bridge(vm, nullptr);
+        // ref2 t06: the AI orders that used to fall out of BattleAi::execute_order as Unhandled reach the battle's order
+        // interface (TacticalBattle::apply_order): Turn_To_Face, the Garrison family, Sell; Cancel_Hyperspace is a refusal.
+        uint32_t mine = commands::kNoObject;  // a trooper of the AI player 1
+        for (const objects::ObjectId id : troopers())
+            if (mine == commands::kNoObject && st.owner(st.find(id)) == 1) mine = static_cast<uint32_t>(id);
+        CHECK(mine != commands::kNoObject);
+        using R = commands::RejectReason;
+        commands::EventData facing(commands::EventType::Facing);
+        facing.set_f("angle", 90.0f).set_ids("units", {mine});
+        commands::EventData garrison(commands::EventType::Garrison);
+        garrison.set("unit", mine).set("garrison", commands::kNoObject);
+        commands::EventData sell(commands::EventType::TacticalSell);
+        sell.set("object", mine);
+        std::vector<uint8_t> data(lua::kLuaOrderPayloadBytes, 0);
+        for (size_t k = 0; k < 4; ++k) data[k] = static_cast<uint8_t>(mine >> (8 * k));
+        for (size_t k = 4; k < 8; ++k) data[k] = 0xFF;  // no target
+        const commands::EventData cancel = commands::ev::port_extension(
+            static_cast<uint16_t>(lua::kLuaOrderSubtype + static_cast<uint16_t>(lua::LuaOrder::CancelHyperspace)), data);
+        const R rf = ai.execute(1, facing), rg = ai.execute(1, garrison), rs = ai.execute(1, sell), rc = ai.execute(1, cancel);
+        std::printf("  orders: Facing %d, Garrison %d, TacticalSell %d, Cancel_Hyperspace %d (Unhandled %d)\n", static_cast<int>(rf),
+                    static_cast<int>(rg), static_cast<int>(rs), static_cast<int>(rc), static_cast<int>(R::Unhandled));
+        CHECK(rf != R::Unhandled && rg != R::Unhandled && rs != R::Unhandled && rc == R::NotAllowed);
         checked = true;
     }
     CHECK(checked);

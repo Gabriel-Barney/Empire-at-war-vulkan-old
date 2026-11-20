@@ -492,6 +492,15 @@ public:
     // 57 TacticalSpecialAbilityWithDummyTarget (spawns a Dummy_Barrage_Target), 58 SetAbilityAutofire on the
     // issuing player's objects (missing / foreign ids skipped). Other events: Unhandled.
     commands::RejectReason handle_command(TacticalMode& mode, uint8_t player, const commands::EventData& ev, SimRng& rng);
+    // ref2 t06: the one validate-and-apply order entry of the battle, for every issuer (the human order hook through
+    // apps/game route_battle_order, the tactical AI's orders BattleAi::execute_order does not shape itself). Unit orders go
+    // through the player order API below (MoveToPosition / MoveToPositionFacing / MoveToRay / MoveToRayFacing ->
+    // fleet_order_move + order_move, Facing -> order_facing, MoveToObject / Escort -> order_move_to_object, Attack ->
+    // order_attack, StopMovement -> order_stop, Reinforce -> order_reinforce, Retreat -> request_retreat); `selection` is the
+    // issuer's selection for the events that act on it (empty for the AI). Every other event goes to handle_command
+    // (garrisons, sell, build, abilities, special weapons, setup phase); Unhandled only when no battle system takes it.
+    commands::RejectReason apply_order(TacticalMode& mode, uint8_t player, const commands::EventData& ev,
+                                       std::span<const objects::ObjectId> selection, SimRng& rng);
     // S10-int Change_Owner of a battle object (Lua ObjectBridge::change_owner on tactical hosts): store owner,
     // TreeSet::set_owner, ability / combat owner, the unit's side. False when not a live battle object.
     bool change_owner(TacticalMode& mode, objects::ObjectHandle h, int32_t owner);

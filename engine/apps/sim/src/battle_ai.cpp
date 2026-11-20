@@ -2183,14 +2183,18 @@ bool BattleAi::lane_batched(const cmd::EventData& ev) {
         case T::SetUnitAbilityMode:
         case T::TacticalSpecialAbility:
         case T::TacticalSpecialAbilityWithDummyTarget:
-        case T::SetAbilityAutofire: return true;
+        case T::SetAbilityAutofire:
+        case T::Facing:  // ref2 t06: the types execute_order now passes to TacticalBattle::apply_order
+        case T::Garrison:
+        case T::MoveToGarrison:
+        case T::TacticalSell: return true;
         case T::PortExtension: {
             const uint32_t sub = ev.u("subtype");
             if (sub < lua::kLuaOrderSubtype || sub > lua::kLuaOrderSubtype + 0xFFu || ev.bytes_view("data").size() < lua::kLuaOrderPayloadBytes)
                 return false;
             const auto order = static_cast<lua::LuaOrder>(sub - lua::kLuaOrderSubtype);
             return order == lua::LuaOrder::MoveTo || order == lua::LuaOrder::AttackMove || order == lua::LuaOrder::Guard ||
-                   order == lua::LuaOrder::Stop;
+                   order == lua::LuaOrder::Stop || order == lua::LuaOrder::HyperspaceAway || order == lua::LuaOrder::CancelHyperspace;
         }
         default: return false;
     }
@@ -2248,7 +2252,8 @@ cmd::RejectReason BattleAi::predict_order(uint8_t player, const cmd::EventData& 
             for (size_t off = lua::kLuaOrderPayloadBytes; off + 4 <= b.size(); off += 4)
                 for (const objects::ObjectId mid : view_team_units(player, le32(b, off))) ids.push_back(mid);
             if (ids.empty()) return R::InvalidUnit;
-            if (order == lua::LuaOrder::Stop) return R::None;
+            if (order == lua::LuaOrder::Stop || order == lua::LuaOrder::HyperspaceAway) return R::None;  // ref2 t06
+            if (order == lua::LuaOrder::CancelHyperspace) return R::NotAllowed;  // ref2 t06: the documented refusal
             bool any = false;
             for (const objects::ObjectId id : ids) any = any || movable(id);
             if (!any) return R::InvalidUnit;
@@ -2295,6 +2300,18 @@ cmd::RejectReason BattleAi::predict_order(uint8_t player, const cmd::EventData& 
             }
             return R::InvalidUnit;
         }
+        // ref2 t06: the types apply_order takes for the AI - an owned unit in the view (the apply reports a differing answer)
+        case T::Facing:
+        case T::Garrison:
+        case T::TacticalSell: {
+            std::vector<uint32_t> wire = ev.type() == T::Facing ? ev.ids("units") : std::vector<uint32_t>{ev.u(ev.type() == T::Garrison ? "unit" : "object")};
+            for (const uint32_t w : wire) {
+                const objects::ObjectHandle h = w <= 0x7FFFFFFFu ? st.find(static_cast<objects::ObjectId>(w)) : objects::ObjectHandle{};
+                if (st.alive(h) && st.owner(h) == static_cast<int32_t>(player)) return R::None;
+            }
+            return R::InvalidUnit;
+        }
+        case T::MoveToGarrison: return R::None;
         default: return R::Unhandled;
     }
 }
@@ -2542,6 +2559,17 @@ cmd::RejectReason BattleAi::execute_order(uint8_t player, const cmd::EventData& 
                 b_->fighter_order_clear(ids);  // S7 t22: Stop leaves the formation [M]
                 return R::None;
             }
+            if (order == lua::LuaOrder::HyperspaceAway) {
+                // ref2 t06: Hyperspace_Away of a VM without the hyperspace hook (with it the binding calls
+                // TacticalScriptHooks::hyperspace_out_link itself): the battle's departure for each unit, delay 0, keep =
+                // the order's argument. Refused when no unit can jump (land, no locomotor, already leaving).
+                bool any = false;
+                for (const objects::ObjectId id : ids) any = b_->hyperspace_out(id, 0, le32(b, 20) != 0) || any;
+                return any ? R::None : R::NotAllowed;
+            }
+            // ref2 t06 [port] documented refusal: the battle's hyperspace departures have no cancel (Cancel_Hyperspace's
+            // locomotor / reinforcement side is not modelled, bind_objects.cpp m_cancel_hyperspace).
+            if (order == lua::LuaOrder::CancelHyperspace) return R::NotAllowed;
             if (order != lua::LuaOrder::MoveTo && order != lua::LuaOrder::AttackMove && order != lua::LuaOrder::Guard) return R::Unhandled;
             mv::MoveOrder group;
             for (const objects::ObjectId id : ids)
@@ -2737,11 +2765,10 @@ cmd::RejectReason BattleAi::execute_order(uint8_t player, const cmd::EventData& 
                                       host_->random().synced(), true);
             // --- end A2 tactical ---
         }
-        case T::SetUnitAbilityMode:
-        case T::TacticalSpecialAbility:
-        case T::TacticalSpecialAbilityWithDummyTarget:
-        case T::SetAbilityAutofire: return b_->handle_command(*mode_, player, ev, host_->random().synced());
-        default: return R::Unhandled;
+        // ref2 t06: every other event goes through the battle's validate-and-apply entry, as a human's would (Turn_To_Face
+        // -> order_facing, the Garrison family -> s4_command, Sell -> tactical_sell, the ability events -> handle_command);
+        // no AI order is dropped as Unhandled for want of a branch here. The AI issues no selection-based event.
+        default: return b_->apply_order(*mode_, player, ev, {}, host_->random().synced());
     }
 }
 

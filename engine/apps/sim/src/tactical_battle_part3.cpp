@@ -1214,6 +1214,88 @@ std::vector<objects::ObjectId> TacticalBattle::owned_ids(const TacticalMode& mod
 
 // [port: Gabriel] queueable unit actions: a queued ability command appends one Ability entry per eligible user
 // (idle users with an empty queue run it at once, as one command); a plain one clears its users' queues first.
+// ref2 t06: the battle's one validate-and-apply order entry (tactical_battle.hpp apply_order). The unit orders are the
+// player's order API (formerly the switch of apps/game route_battle_order); everything else is handle_command's.
+cmd::RejectReason TacticalBattle::apply_order(TacticalMode& mode, uint8_t player, const cmd::EventData& ev,
+                                              std::span<const objects::ObjectId> selection, SimRng& rng) {
+    using R = cmd::RejectReason;
+    using T = cmd::EventType;
+    const auto finite = [](float f) { return f - f == 0.0f; };
+    // Wire ids -> object ids (kNoObject / out-of-range ids dropped); the order_* functions filter ownership.
+    const auto ids_of = [](const std::vector<uint32_t>& wire) {
+        std::vector<objects::ObjectId> out;
+        out.reserve(wire.size());
+        for (const uint32_t w : wire)
+            if (w != cmd::kNoObject && w <= 0x7FFFFFFFu) out.push_back(static_cast<objects::ObjectId>(w));
+        return out;
+    };
+    const auto target_id = [](uint32_t w) {
+        return (w == cmd::kNoObject || w > 0x7FFFFFFFu) ? objects::kNoObjectId : static_cast<objects::ObjectId>(w);
+    };
+    const std::vector<objects::ObjectId> sel(selection.begin(), selection.end());
+    // P1_DOUBLE_CLICK_MOVE.md §3.2: the move events' 8-bit flags go unchanged into MoveOrder::flags; attack-move (orders
+    // kept) = flag 0x01. Units: the event's list when it has one (MoveToPositionFacing / Facing), else the selection.
+    const auto move = [&](const std::vector<objects::ObjectId>& list, float x, float y, float facing, bool switch_locomotor) {
+        if (!finite(x) || !finite(y)) return R::InvalidPosition;
+        const uint8_t flags = static_cast<uint8_t>(ev.u("flags") & 0xFFu);
+        const bool attack_move = (flags & mv::kMoveFlagAttackMove) != 0;
+        const float face = finite(facing) ? facing : mv::kNoFacing;
+        // [port] fleet groups: the selected members of locked groups move as blocks to their slots; the rest move as usual.
+        std::vector<objects::ObjectId> rest;
+        uint32_t blocks = 0;
+        fleet_order_move(mode, player, list, x, y, rng, face, attack_move, ev.queued(), flags, rest, blocks);
+        fleet_interrupt(rest);
+        if (blocks > 0 && rest.empty()) return R::None;
+        R r = order_move(mode, player, rest, x, y, rng, face, attack_move, ev.queued(), flags, switch_locomotor);
+        if (blocks > 0 && r == R::InvalidUnit) r = R::None;  // the locked groups moved; the rest had nothing to order
+        return r;
+    };
+    const auto units_or_selection = [&] { return ev.ids("units").empty() ? sel : ids_of(ev.ids("units")); };
+    // MoveToRay / MoveToRayFacing: a = camera ray origin, b = that ray's intersection with the move plane (space: z = 0,
+    // done by the UI, spec §2.2); the destination is b as sent (its quantised z is not re-intersected).
+    switch (ev.type()) {
+        case T::MoveToPosition:  // S7 t10: the 1-bit swaps Uses_Multiple_Locomotors units first (MOVEMENT §6.2)
+            return move(sel, ev.f("x"), ev.f("y"), mv::kNoFacing, ev.u("switch_locomotor") != 0);
+        case T::MoveToPositionFacing:  // id 47: point + final facing (angle in degrees), units list (empty: the selection)
+            return move(units_or_selection(), ev.f("x"), ev.f("y"), ev.f("angle"), false);
+        case T::MoveToRay:  // id 14
+            return move(sel, ev.f("bx"), ev.f("by"), mv::kNoFacing, false);
+        case T::MoveToRayFacing:  // id 19: the anchor's ray + plane point, final facing
+            return move(sel, ev.f("bx"), ev.f("by"), ev.f("angle"), false);
+        case T::Facing:  // id 20: rotate only (a land drag that started on a selected unit; Lua Turn_To_Face)
+            return order_facing(mode, player, units_or_selection(), ev.f("angle"), rng);
+        case T::MoveToObject:
+        case T::Escort: {
+            const std::vector<objects::ObjectId> list =
+                (ev.type() == T::MoveToObject && !ev.ids("movers").empty()) ? ids_of(ev.ids("movers")) : sel;
+            fleet_interrupt(list);  // [port] fleet groups: another order ends the block move
+            return order_move_to_object(mode, player, list, target_id(ev.u("target")), rng, false, ev.queued());
+        }
+        case T::Attack: {
+            const std::vector<objects::ObjectId> list = ev.ids("attackers").empty() ? sel : ids_of(ev.ids("attackers"));
+            // Attack ref2 = 1 + HardPointType (COMMANDS.md 2): the target's first targetable hard point of that type.
+            const objects::ObjectId target = target_id(ev.u("target"));
+            const uint32_t ref2 = ev.u("ref2");
+            const int32_t hp = ref2 > 0 ? first_hardpoint_of_type(target, static_cast<int32_t>(ref2) - 1) : -1;
+            // flag0 ("double", movement byte +0x5d) and flag1 (Ctrl: the approach move's flags = 0x01) have no consumer in
+            // movement / combat yet [port]: not carried.
+            fleet_interrupt(list);  // [port] fleet groups
+            return order_attack(mode, player, list, target, rng, hp, ev.queued());
+        }
+        case T::StopMovement:
+            fleet_interrupt(sel);  // [port] fleet groups
+            return order_stop(mode, player, sel);
+        case T::Reinforce: {  // the reinforcement pad + drop point (TacticalHud BeginReinforcement -> reinforce_event)
+            const uint32_t key = ev.u("unit");
+            if (key == cmd::kNoObject || key > 0x7FFFFFFFu) return R::InvalidUnit;
+            return order_reinforce(mode, player, static_cast<objects::ObjectId>(key), ev.f("x"), ev.f("y"), rng);
+        }
+        case T::Retreat:  // the retreat dialog's confirm (GameScreens): the retreat coordinator (BT 3.4)
+            return ev.u("request") != 0 && request_retreat(static_cast<int32_t>(player)) ? R::None : R::NotAllowed;
+        default: return handle_command(mode, player, ev, rng);  // garrisons, sell, build, abilities, special weapons, ...
+    }
+}
+
 cmd::RejectReason TacticalBattle::handle_command(TacticalMode& mode, uint8_t player, const cmd::EventData& ev, SimRng& rng) {
     using R = cmd::RejectReason;
     using T = cmd::EventType;
