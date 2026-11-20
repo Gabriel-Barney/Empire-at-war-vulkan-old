@@ -342,7 +342,13 @@ Gabriel, 2026-11-18, up-front answers for the Stage 9 coordinator run (st9-coord
   Thrawns_Legacy_HD -> 1125571106 clause of the mcx3 exit test, together with the real AOW -> TR stack that resolves on
   this machine (Thrawns_Legacy_HD is not installed here). No rerun with it installed is needed.
 
-## Roadmap page redesign: gates, ranking, forecast (Gabriel, 2026-11-19)
+## Roadmap page redesign: gates, ranking, forecast (Gabriel, 2026-11-19) — DEPRECATED
+
+**Deprecated (Gabriel, 2026-11-19, same day).** This design is not being built. Its groups rp1-rp5 (box PROC, "PA
+Production audit and safety net"; 26 tasks, none started) were removed from the roadmap. The current page, its "Most
+important" panel, the milestones and the rules in `ROADMAP_PROTOCOL.md` stay as they are; nothing below is binding. The
+prototype branch `claude/prototype-roadmap-page` (local only) is not to be merged. The text is kept as a record of what
+was considered.
 
 Gabriel approved the design for the interactive roadmap page (`roadmap-store/`; session roadmap-interactive-redesign,
 grill round 1). The page answers four questions: what blocks each milestone, what to work on next, when it lands, what

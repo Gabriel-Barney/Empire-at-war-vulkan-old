@@ -11,6 +11,9 @@ markers (layout, script, `PRESETS`), then run `python roadmap-store/roadmap_stor
 read-only copy of the data, and `roadmap-store/ROADMAP.md` is the text form; both are regenerated on every write, and a diff in them is never a
 change to review.
 
+The 2026-11-19 interactive page redesign (gates, ranking, forecast; groups rp1-rp5) is deprecated and was removed from the roadmap
+(`DECISIONS.md`, "Roadmap page redesign", marked deprecated): this page and the rules below stay current.
+
 To update, write a JSON list of `{"op", "collection", "doc_id", "data"}` to a scratch file, then run:
 
 ```bash
