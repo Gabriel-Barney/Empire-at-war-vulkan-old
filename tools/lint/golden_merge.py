@@ -164,6 +164,8 @@ def slow_tests_for(tests, files, root):
         p = norm(os.path.join(str(root), f))
         keys.add(p)
         keys.add(os.path.splitext(p)[0])
+        if '/benchmark/' in p:  # a scenario's .crc / .alsv / .acmd: its checks name the .abench
+            keys.add(os.path.splitext(p)[0] + '.abench')
     out = []
     for t in tests:
         labels = []
@@ -189,23 +191,31 @@ def cmd_slow(cwd, base, head, tree, dry) -> int:
         print('golden_merge slow: the branch changes no golden; no slow golden check to run')
         return 0
     tdir = Path(cwd) / tree
+    script = Path(cwd) / 'build_agent.cmd'
+    if not dry:
+        # configure and build the warm tree first: it may be missing (the land check also accepts a build-msvc stamp) or
+        # configured before this branch added a slow golden test
+        print('golden_merge slow: building the merged HEAD in the warm tree (no tests) to list its slow golden checks', flush=True)
+        b = subprocess.run(f'cmd.exe /d /s /c ""{script}" msvc wt all none"', cwd=cwd)
+        if b.returncode != 0:
+            print('golden_merge slow: the warm tree build failed (above)')
+            return 1
     import shutil
     ctest = shutil.which('ctest') or str(ROOT / 'toolchain' / 'venv' / 'Scripts' / 'ctest.exe')
     r = subprocess.run([ctest, '--test-dir', str(tdir), '--show-only=json-v1'], cwd=cwd, capture_output=True, text=True)
     if r.returncode != 0:
-        print(f'golden_merge slow: ctest --show-only failed in {tdir}: {(r.stderr or r.stdout).strip()}')
+        print(f'golden_merge slow: no test list in {tdir} ({(r.stderr or r.stdout).strip()}); build it: build_agent.cmd msvc wt all')
         return 1
     import json
     names = slow_tests_for(json.loads(r.stdout).get('tests', []), files, cwd)
     if not names:
         print(f'golden_merge slow: {len(files)} golden file(s) changed, none checked by a slow test')
         return 0
-    regex = '|'.join(names)  # no ^ / $: build_agent.cmd runs with delayed expansion (test names are plain words)
+    regex = '^(' + '|'.join(names) + ')$'  # anchored: a name must not pull in its _w* / _land* siblings
     print(f'golden_merge slow: the branch changed {len(files)} golden file(s); slow checks: {" ".join(names)}', flush=True)
     if dry:
         print(regex)
         return 0
-    script = Path(cwd) / 'build_agent.cmd'
     p = subprocess.run(f'cmd.exe /d /s /c ""{script}" msvc wt all "{regex}""', cwd=cwd)
     return 0 if p.returncode == 0 else 1
 
@@ -257,6 +267,10 @@ def selftest() -> int:
                                  'engine/apps/headless/testdata/land_golden.crc'], root)
     check(got == ['headless_slow', 'smoke_golden'], f'slow tests {got}')
     check(slow_tests_for(tests, ['engine/apps/sim/src/x.cpp'], root) == [], 'no golden, no slow test')
+    bd = (root / 'tests/benchmark').as_posix()
+    bench = [{'name': 'bench_land', 'command': ['alamo_headless.exe', '--bench', f'{bd}/land_battle.abench'],
+              'properties': [{'name': 'LABELS', 'value': ['slow']}]}]
+    check(slow_tests_for(bench, ['tests/benchmark/land_battle.crc'], root) == ['bench_land'], 'bench stem')
     check(bool(GOLDEN_DIRS.search('engine/apps/game/testdata/game_smoke_land.rec')) and
           bool(GOLDEN_DIRS.search('tests/goldens/mods/tr_space.crc')) and not GOLDEN_DIRS.search('engine/apps/sim/src/a.cpp'),
           'golden dirs')
