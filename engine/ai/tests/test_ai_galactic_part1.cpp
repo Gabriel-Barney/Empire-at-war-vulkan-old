@@ -232,18 +232,26 @@ void test_goal_target_walk_order() {
 
 // aitac t04 (BKG3_RE_ANSWERS Q4 [H], slot 9 + 0x721a50): with like-sets on, a candidate whose target already has an
 // active goal of a like type is skipped (not evaluated); off, only the exact (type, target) is. Goal_A (always accepted)
-// becomes active on target 7; Goal_B (never accepted, like Goal_A) is evaluated in later passes only with like-sets off.
+// becomes active on target 7; Goal_B (never accepted, like Goal_A) is evaluated while Goal_A is active only with like-sets
+// off (the mock's Goal_A leaves the active set in some passes, where Goal_B is evaluated either way).
 // The galactic AI and both tactical modes set GoalSystemConfig::like_sets.
 void test_goal_like_sets() {
     struct LikeHooks final : GoalModeHooks {
-        uint32_t b_evals = 0;
+        uint32_t b_evals = 0;  // Goal_B evaluations made while Goal_A is active on the target
         bool counting = false;
+        const GoalSystem* gs = nullptr;
+        bool a_active() const {
+            for (const std::vector<Goal>& c : gs->active())
+                for (const Goal& g : c)
+                    if (g.type == 0 && g.target == 7) return true;
+            return false;
+        }
         uint32_t target_count() override { return 1; }
         int32_t target_at(uint32_t) override { return 7; }
         bool applies(int32_t, uint32_t) override { return true; }
         bool blocked(uint32_t, int32_t) override { return false; }
         bool evaluate(const std::string& f, int32_t, double& out) override {
-            if (f == "B" && counting) ++b_evals;
+            if (f == "B" && counting && a_active()) ++b_evals;
             out = f == "A" ? 10.0 : 5.0;
             return true;
         }
@@ -285,6 +293,7 @@ void test_goal_like_sets() {
         LearningSystem learning;
         SimRng rng(5);
         GoalSystem gs;
+        hooks.gs = &gs;
         GoalSystemConfig cfg;
         cfg.like_sets = like_sets;
         gs.init(defs, sources, &hooks, &learning, nullptr, &rng, cfg);
@@ -296,17 +305,15 @@ void test_goal_like_sets() {
         };
         for (; f <= 600 && active() == 0; ++f) gs.service(f);
         CHECK(active() == 1 && gs.config().like_sets == like_sets);
-        const uint32_t first = gs.passes();  // the pass in progress at the commit may already hold Goal_B's candidate
-        for (; f <= 1200 && gs.passes() < first + 1; ++f) gs.service(f);
         hooks.counting = true;
         const uint32_t passes = gs.passes();
-        for (; f <= 1800 && gs.passes() < passes + 3; ++f) gs.service(f);
-        CHECK(gs.passes() >= passes + 3);
+        for (; f <= 3000 && gs.passes() < passes + 6; ++f) gs.service(f);
+        CHECK(gs.passes() >= passes + 6);
         return hooks.b_evals;
     };
     const uint32_t on = run(true), off = run(false);
-    std::printf("goal like-sets: Goal_B evaluations after Goal_A went active: like-sets on %u, off %u\n", on, off);
-    CHECK(on == 0 && off >= 3);
+    std::printf("goal like-sets: Goal_B evaluations while Goal_A is active: like-sets on %u, off %u\n", on, off);
+    CHECK(on == 0 && off >= 1);
 }
 
 void test_desire_and_hysteresis() {

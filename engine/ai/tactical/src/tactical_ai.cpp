@@ -2768,7 +2768,7 @@ bool TacticalAiWorld::Impl::step_status(StatusRec& s) {
                 const int32_t owner = store.owner(store.find(s.target));
                 if (owner != s.target_owner) {
                     s.target_owner = owner;
-                    if (owner >= 0 && owner != t->player && w.rel(t->player, owner) == 1) return end();
+                    if (cfg.mode == TacticalMode::Land && owner >= 0 && owner != t->player && w.rel(t->player, owner) == 1) return end();
                 }
                 return false;
             }
@@ -2911,7 +2911,8 @@ int32_t TacticalAiWorld::Impl::issue_move(TfRec& t, AiTacticalOrder kind, const 
     {
         // q6 t19 (§33.2.2): all-units list = the TF units at the order; pending = the moved units, without those whose
         // attack order the host refused (they stay in the all-units list). aitac t05: a position move / guard keeps the
-        // lists too (signal 0xb of a unit takes it out, §33.2).
+        // lists too on land (signal 0xb of a unit takes it out, §33.2; space: aitac RE Q6).
+        if (target_object < 0 && cfg.mode != TacticalMode::Land) return id;
         StatusRec& s = statuses[id];
         const std::vector<int32_t> refused = target_object >= 0 ? host.attack_order_refused() : std::vector<int32_t>{};
         for (const ObjectHandle u : t.units) s.members.push_back(id_of(u));
@@ -3199,7 +3200,9 @@ void TacticalAiWorld::Impl::order_signal(int32_t oid) {
     const int32_t team_id = team ? id_of(team) : -1;
     if (team_id >= 0 && team_id != oid) bridge.order_replaced(team_id);
     ability_block_signal(oid, team_id);
-    if (!cfg.ai_lane) movement_block_signal(oid, team_id);  // [port] the AI lane applies its orders after the update
+    // [port] land only (the handler read is the land block's, 0x73ce80; the space block's is aitac RE Q6), and not with the
+    // AI lane (it applies its orders after the update).
+    if (!cfg.ai_lane && cfg.mode == TacticalMode::Land) movement_block_signal(oid, team_id);
 }
 
 // aitac t05 (A1_READINGS §33.2, handler 0x73ce80; §33.3) - signal 0xb ("a new order replaces this unit's order") on the

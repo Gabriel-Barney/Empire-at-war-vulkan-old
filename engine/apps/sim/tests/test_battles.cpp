@@ -2395,6 +2395,54 @@ void test_land_upgrade_production_done() {
 // Empire slot's start force (one S10_Squad) is its garrison list; once every member is dead, after the faction's
 // Garrison_Reinforcement_Delay_Seconds (none in the fixture: 20 s) the start-force list is added to its reinforcement pool
 // once (not again: re-delivered units are not garrison objects). Before the delay nothing is added.
+// aitac t08 (b0160): a skirmish map battle's slot players are the stand-in's sides in land and space - slot 2 besides the
+// defender 0 / attacker 1 pair; a player without a slot is a third party (idles).
+void test_standin_slots() {
+    for (const bool space : {false, true}) {
+        auto d = make_data();
+        jobs::JobSystem js(jobs::JobSystemConfig{0});
+        SimConfig cfg;
+        cfg.seed = 2026;
+        cfg.players = 4;
+        SimHost host(d->types, js, cfg);
+        galactic::GalacticSim* gs = host.start_galactic(d->rules, make_setup(*d, !space));
+        CHECK(gs != nullptr);
+        if (!gs) return;
+        CampaignBattleOptions opt;
+        opt.battle.max_frames = 0;
+        opt.battle.skirmish = true;
+        opt.battle.skirmish_map = true;
+        opt.battle.skirmish_slots = {{0, 0}, {1, 1}, {2, 2}};
+        CampaignBattles battles(host, d->crules, *d->catalog,
+                                [](const std::string& name, terrain::MapData& m) {
+                                    if (name == "S10_Space_B") m = space_map();
+                                    else if (name == "S10_Land_B") m = land_map();
+                                    else return false;
+                                    return true;
+                                },
+                                opt);
+        CHECK(battles.attach(nullptr));
+        galactic::BattleRequest r;
+        r.info.kind = space ? galactic::ConflictKind::Space : galactic::ConflictKind::Land;
+        r.info.planet = 1;
+        r.info.defender = 0;
+        r.info.attacker = 1;
+        r.info.map = r.map = space ? "S10_Space_B" : "S10_Land_B";
+        CHECK(battles.start_map_battle(std::move(r)));
+        bool checked = false;
+        for (uint64_t t = 0; t < 60 && !checked; ++t) {
+            host.tick_once();
+            const TacticalBattle* b = battles.battle();
+            if (!b || !host.tactical() || b->frame() < 1) continue;
+            CHECK(b->skirmish_map() && b->skirmish_slot_of(2) == 2);
+            CHECK(b->standin_owner(0) && b->standin_owner(1) && b->standin_owner(2) && !b->standin_owner(3));
+            checked = true;
+        }
+        std::printf("  stand-in sides (%s skirmish, 3 slots): %s\n", space ? "space" : "land", checked ? "checked" : "no battle");
+        CHECK(checked);
+    }
+}
+
 void test_skirmish_redelivery() {
     auto d = make_data(false, false, false, false, true);
     jobs::JobSystem js(jobs::JobSystemConfig{0});
@@ -3495,6 +3543,7 @@ int main(int argc, char** argv) {
     std::printf("mcx4 t04: tactical production queues and the skirmish tech upgrade\n");
     test_tactical_tech_upgrade();
     test_skirmish_redelivery();      // skm1 t07
+    test_standin_slots();            // aitac t08
     test_land_upgrade_production_done();  // s78n t20 step 5
     std::printf("cu8g t05: Battlefield_Modifier gates at the battle (skirmish vs campaign, empty list, apply / remove / reverse)\n");
     test_battlefield_modifier_gates();

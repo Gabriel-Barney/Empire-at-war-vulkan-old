@@ -789,8 +789,8 @@ public:
     // bkt1 t07 (b0084) [port]: the stand-in orders (issue_orders, BattleAi::standin_orders: an attack on the nearest enemy
     // anywhere on the map, for the sides without a tactical AI - in vanilla the headless 'human' participant) drive only
     // the battle's attacker and defender. A third party (a story / hostile / native owner, Participant::third or a Lua
-    // spawn) has no AI in retail either: its units idle and fire at what their own targeting acquires in range. Land only
-    // for now: a space skirmish puts its extra slot players outside attacker / defender (backlog entry from bkt1).
+    // spawn) has no AI in retail either: its units idle and fire at what their own targeting acquires in range. aitac t08:
+    // land and space; a skirmish map battle's slot players (slots 2.. too) count as sides.
     bool standin_owner(int32_t player) const;
     // OI follow-up t03 (A1_READINGS §28.9): movement locked (0x39ad40) = the abilities' share of the obj +0x3a8 counter,
     // or a share a Lua bridge reports (Lock_Current_Orders, a running Divert). The lock never changes speed: a group move

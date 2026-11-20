@@ -1243,7 +1243,7 @@ void TacticalBattle::issue_orders(TacticalMode& mode, SimRng& rng, const std::fu
         if (!u.alive || u.retreated || !u.movable) continue;
         if (skip_owner && skip_owner(store.owner(u.h))) continue;  // another orderer drives this owner (BattleAi: its AI)
         if (commanded_by_player(store.owner(u.h))) continue;  // integration fixes: human units take commands only
-        if (!space_ && !standin_owner(store.owner(u.h))) continue;  // bkt1 t07 (b0084): land third parties idle
+        if (!standin_owner(store.owner(u.h))) continue;  // bkt1 t07 (b0084) / aitac t08: third parties idle, land and space
         const Vec3 up = store.position(u.h);
         const Unit* best = nullptr;
         float best_d2 = 0.0f;
@@ -1392,7 +1392,9 @@ void TacticalBattle::drop_locked(std::vector<objects::ObjectId>& ids) const {
 
 bool TacticalBattle::standin_owner(int32_t player) const {
     if (req_.info.attacker < 0 && req_.info.defender < 0) return player >= 0;  // a battle built without sides: everyone
-    return player >= 0 && (player == req_.info.attacker || player == req_.info.defender);
+    // aitac t08: a skirmish map battle's slot players are sides too (slots 2.. besides the defender 0 / attacker 1 pair;
+    // each AI slot has its own tactical AI, skm2 t02, so this reaches only a slot without one).
+    return player >= 0 && (player == req_.info.attacker || player == req_.info.defender || (skirmish_map() && skirmish_slot_of(player) >= 0));
 }
 
 bool TacticalBattle::commanded_by_player(int32_t player) const {

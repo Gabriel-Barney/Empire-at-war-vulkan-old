@@ -52,3 +52,15 @@ on and read / inferred kept apart. Lane `sim-queue` implements from those specs.
   unit is targetable / counted before it arrives), and which code raises signal 0x19 at the end (the frame relative to the
   spawn). Is this the same arrival the start fleet uses (cu8l t03, `docs/re/CU8K_T03_T08_T09_RE.md` §1.9 / §4)?
 - Spec: `docs/re/AI_TACTICAL.md` §7.4.
+
+## Q6 (aitac t05) The space movement block's signal handler
+
+- Port today: aitac t05 applies A1_READINGS §33.2's signal table (handler 0x73ce80, the land movement block status) on
+  land only: signal 0xb of the block's object finishes the block, 0xb of a unit takes it out of the all-units / pending
+  lists, 0x1a turning the guarded object hostile finishes a guard (`tactical_ai.cpp`, `movement_block_signal`). Space keeps
+  the earlier rules (an object block ends on the target's death / owner change by polling, `step_object_block`).
+- Anchors: SpaceMovementBlockStatus (its Result 0x6af930, `docs/re/A1_READINGS.md` §33.2.2 / `tactical_ai.cpp`
+  step_object_block comment), the space collectors 0x739200 / 0x73a650 (§33.3).
+- Asked: the space movement block status's signal handler - which signals it subscribes on the object and on the units
+  (0xb, 0x10, 0x1a, 10), and what each does (finish, remove the unit, the hostile tests), compared with the land table.
+- Spec: `docs/re/A1_READINGS.md` §33.2 (a space row or subsection).
