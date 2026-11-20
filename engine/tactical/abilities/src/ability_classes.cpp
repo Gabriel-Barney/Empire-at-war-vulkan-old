@@ -406,7 +406,7 @@ bool AbilitySystem::class_accepts(const Obj& o, const SpecialAbilityDesc& s, Obj
         // not-already-affected test is in the apply (0x6fe1b0).
         case C::Earthquake:
             return foe && combat_->data().units[combat_->desc_index(target)].earthquake_target && target_filter(s, target) &&
-                   paired() && !target_affected(target, C::Earthquake, o.id);
+                   paired() && !target_affected(target, C::Earthquake, kNoObject);  // the user's own effect counts too
         case C::Telekinesis:
             return foe && combat_->data().units[combat_->desc_index(target)].telekinesis_target && target_filter(s, target) &&
                    paired();

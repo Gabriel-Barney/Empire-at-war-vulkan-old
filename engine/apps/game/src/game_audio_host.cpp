@@ -847,31 +847,23 @@ void GameAudioHost::battle_tick(const sim::TacticalBattle& battle, const objects
                     hp = e.hardpoint;
                     break;
                 }
-            if (v.spawn_frame > now) delayed_shots_.push_back({v.serial, v.spawn_frame, v.shooter, hp});
-            else weapon_fired(static_cast<uint64_t>(v.shooter), hardpoint_fire_sfx(types, cs, hp), sounds(types, store.type(sh)).fire, v3(v.pos));
+            const std::string& hp_fire = hardpoint_fire_sfx(types, cs, hp);
+            const std::string_view own_fire = sounds(types, store.type(sh)).fire;
+            if (!delayed_shots_.offer({v.serial, v.spawn_frame, v.shooter, hp, hp_fire, std::string(own_fire)}, now))
+                weapon_fired(static_cast<uint64_t>(v.shooter), hp_fire, own_fire, v3(v.pos));
         }
         combat = combat || v.owner == local_player;
     }
     last_serial_ = max_serial;
     have_serial_ = true;
-    if (!delayed_shots_.empty()) {
-        size_t keep = 0;
-        for (const DelayedShot& d : delayed_shots_) {
-            if (d.frame > now) {
-                delayed_shots_[keep++] = d;
-                continue;
-            }
-            const objects::ObjectHandle sh = handle_of(d.shooter);
-            if (!store.exists(sh)) continue;
-            for (size_t i = 0; i < cs.projectile_count(); ++i) {
-                const tactical::combat::ProjectileView v = cs.projectile(i);
-                if (v.serial != d.serial) continue;
-                if (v.alive) weapon_fired(static_cast<uint64_t>(d.shooter), hardpoint_fire_sfx(types, cs, d.hardpoint), sounds(types, store.type(sh)).fire, v3(v.pos));
-                break;
-            }
+    delayed_shots_.take_due(now, [&](const DelayedFireSounds::Shot& d) {
+        for (size_t i = 0; i < cs.projectile_count(); ++i) {
+            const tactical::combat::ProjectileView v = cs.projectile(i);
+            if (v.serial != d.serial) continue;
+            if (v.alive) weapon_fired(static_cast<uint64_t>(d.shooter), d.hardpoint_fire, d.shooter_fire, v3(v.pos));
+            break;
         }
-        delayed_shots_.resize(keep);
-    }
+    });
     tsw_audio(tsw_cues(battle.special_weapon_events(), store), types);  // refix t06
     cue_lines(battle, store, types, local_player);                         // mcx4 t13 batch A
     object_events(battle, store, types, player_factions_);  // aud1 t05: abilities, hyperspace, shields (AUDIO.md §9.6)

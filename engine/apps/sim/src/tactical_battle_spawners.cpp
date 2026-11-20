@@ -223,7 +223,7 @@ void TacticalBattle::sp_wander_one(TacticalMode& mode, SimRng& rng, objects::Obj
     objects::ObjectStore& st = mode.primary();
     const objects::GameObjectTypes& types = catalog_->types();
     const objects::ObjectId id = st.id(h);
-    const Unit* u = unit_by_id(id);
+    const Unit* u = unit_by_id(id);  // fetched again after the burn damage below
     // [port] only a movable battle unit can take the move; the busy test 0x39b000 (the unit's coordinator) is not modelled.
     if (!u || !u->alive || u->retreated || !u->movable || !movement_) return;
     const auto moving = [&] { return movement_->view(id).speed > 0.0f; };
@@ -232,11 +232,12 @@ void TacticalBattle::sp_wander_one(TacticalMode& mode, SimRng& rng, objects::Obj
     if (burning) {  // Take_Damage(kind 7, Burning_Damage_Per_Second / FPS)
         tc::DamageRequest r;
         r.victim = id;
-        r.amount = types.get(st.type(h), objects::tags::Burning_Damage_Per_Second) / 30.0f;
+        r.amount = types.get(st.type(h), objects::tags::Burning_Damage_Per_Second) / static_cast<float>(combat_->config().fps);
         r.kind = tc::kKindFire;
         combat_->take_damage(r, frame_);
-        if (!st.alive(h) || !unit_by_id(id) || !unit_by_id(id)->alive) return;
-        burning = combat_->has_unit(id) && combat_->burning(id);
+        u = unit_by_id(id);
+        if (!st.alive(h) || !u || !u->alive || !combat_->has_unit(id) || combat_->health(id) <= 0.0f) return;  // the burn killed it
+        burning = combat_->burning(id);
     }
     if (!burning) {
         if (moving()) return;

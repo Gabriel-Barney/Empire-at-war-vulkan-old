@@ -475,7 +475,9 @@ Damage_Percentage +0x188, Damage_Interval_In_Secs +0x18c) [H]
     +0x362 ≠ −1; else a "rejected as a target" warning), not dead (+0x3a0 & 0x40), type +0x41, enemy, filter, pairing,
     model, and its apply 0x6fe1b0 tests "already affected" after the remove-previous step.
   - Port (trl2 t03): the state lives on the user's effect (an applied effect of the class aimed at the target is
-    "affected"; the user's own effect does not count, it is removed first); the target-behaviour service runs at the
+    "affected"; Earthquake's accepts counts the user's own effect too - a repeat order on the target it already quakes is
+    refused and the quake goes on - while Telekinesis's apply test runs after the own effect was removed); the
+    target-behaviour service runs at the
     special's update (every FPS / 10 frames) [port].
 
 **2.3.5 Grenade_Attack** (Activation_Min/Max +0x1a0/+0x1a4, Requires_Direct_Player_Command +0x1a8,

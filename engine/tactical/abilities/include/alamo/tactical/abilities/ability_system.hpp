@@ -1084,7 +1084,8 @@ private:
     bool anim_busy(const Obj& o, uint32_t frame) const;  // 0x39a350
     bool class_state(const Obj& o, SpecialClass cls) const;  // a special of that class is applied on the owner
     // trl2 t03 (TACTICAL_GAPS §2.3.4): `target`'s EARTHQUAKE_TARGET / TELEKINESIS_TARGET state is 1 or 2 - an applied
-    // effect of that class from any user other than `except` holds it (the user's own is removed before it re-applies).
+    // effect of that class from any user other than `except` holds it (Earthquake's accepts: kNoObject; Telekinesis's
+    // apply: the user, whose own effect was removed just before).
     bool target_affected(ObjectId target, SpecialClass cls, ObjectId except) const;
     bool class_has(const Obj& o, SpecialClass cls) const;    // the owner lists a special of that class
     bool locked(const Obj& o) const;  // 0x39ad40: this system's share or the host's (script lock, forced move)
