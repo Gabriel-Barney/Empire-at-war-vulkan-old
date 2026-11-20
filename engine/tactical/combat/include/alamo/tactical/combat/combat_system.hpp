@@ -251,6 +251,8 @@ struct ProjectileDesc {
     float rocket_curve_offset = 0.0f;              // Projectile_Rocket_Curve_Offset
     bool target_point_on_terrain = false;          // Projectile_Target_Point_On_Terrain (type +0x7f)
     bool explode_when_reached_target_radius = false;  // Explode_When_Reached_Target_Radius (type +0x7e)
+
+    bool operator==(const ProjectileDesc&) const = default;  // ref5 t01: every field (catalog vs strike builder test)
 };
 
 struct InaccuracyEntry {
