@@ -175,12 +175,17 @@ end
 )";
 // Destroy a unit: free-store units + pool reinforcements, the goal equation re-checked with the AI target, then
 // Attack_Target(Target, "Random") (space: one Get_Int(0, 13) draw).
+// ref5 t05: under the retail contrast rules (AI_GALACTIC_TOKENS 9.8a) a typed row that is met no longer scores, so after
+// the first frigate the picks follow the free store / pool scores and a 3-unit team of this synthetic world can miss the
+// untyped enemy total (default tolerance 0.27). The plans whose tests need SYNDESTROY to run with a given force
+// (kPlanGroupAttack, kPlanAmbush, kPlanAbility) set MinContrastScale = 0.5 (tolerance 2/3); kPlanAbility also names its
+// frigate and corvette teams, which its test needs (frigates fail SPRINT, corvettes activate it). Fixture data, not retail.
 const char* kPlanDestroy = R"(
 require("SynAICommands")
 ScriptPoolCount = 2
 function Definitions()
   Category = "Syn_Destroy_Unit"
-  TaskForce = { { "MainForce", "Frigate | Corvette = 1,5" } }
+  TaskForce = { { "MainForce", "Frigate | Corvette = 1,3" } }
 end
 function MainForce_Thread()
   MainForce.Set_As_Goal_System_Removable(false)
@@ -324,7 +329,8 @@ require("SynAICommands")
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
-  TaskForce = { { "MainForce", "Frigate | Corvette = 2,5" } }
+  MinContrastScale = 0.5  -- ref5 t05: fixture tolerance 2/3 (see kPlanDestroy)
+  TaskForce = { { "MainForce", "Frigate | Corvette = 2,3" } }
 end
 function MainForce_Thread()
   BlockOnCommand(MainForce.Produce_Force())
@@ -409,7 +415,7 @@ function Report(m) error(m) end
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
-  TaskForce = { { "MainForce", "Frigate | Corvette = 1,5" } }
+  TaskForce = { { "MainForce", "Frigate | Corvette = 1,3" } }
 end
 function MainForce_Thread()
   MainForce.Set_As_Goal_System_Removable(false)
@@ -487,7 +493,8 @@ function Report(m) error(m) end
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
-  TaskForce = { { "MainForce", "Frigate | Corvette = 1,5" } }
+  MinContrastScale = 0.5  -- ref5 t05: fixture tolerance 2/3 (see kPlanDestroy)
+  TaskForce = { { "MainForce", "Frigate | Corvette = 1,3" } }
 end
 function MainForce_Thread()
   MainForce.Set_As_Goal_System_Removable(false)
@@ -527,7 +534,8 @@ function Report(m) error(m) end
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
-  TaskForce = { { "MainForce", "Frigate | Corvette = 2,5" } }
+  MinContrastScale = 0.5  -- ref5 t05: fixture tolerance 2/3 (see kPlanDestroy)
+  TaskForce = { { "MainForce", "Frigate = 1,1", "Corvette = 1,2" } }
 end
 function MainForce_Thread()
   MainForce.Set_As_Goal_System_Removable(false)
@@ -593,7 +601,7 @@ function Report(m) error(m) end
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
-  TaskForce = { { "MainForce", "Frigate | Corvette = 2,5" } }
+  TaskForce = { { "MainForce", "Frigate | Corvette = 2,3" } }
 end
 function MainForce_Thread()
   if Reported then
@@ -613,7 +621,7 @@ function Report(m) error(m) end
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
-  TaskForce = { { "MainForce", "Frigate | Corvette = 2,5" } }
+  TaskForce = { { "MainForce", "Frigate | Corvette = 2,3" } }
 end
 function MainForce_Thread()
   if Reported then
@@ -634,7 +642,7 @@ function Report(m) error(m) end
 ScriptPoolCount = 1
 function Definitions()
   Category = "Syn_Destroy_Unit"
-  TaskForce = { { "MainForce", "Frigate | Corvette = 2,5" } }
+  TaskForce = { { "MainForce", "Frigate | Corvette = 2,3" } }
 end
 function MainForce_Thread()
   if Reported then
