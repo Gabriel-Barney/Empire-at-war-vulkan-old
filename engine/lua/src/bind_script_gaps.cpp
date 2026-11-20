@@ -41,14 +41,8 @@ constexpr objects::BehaviorTypeId kBehSpecialWeapon = 0x2F, kBehLobbing = 0x37, 
 
 // ---------------------------------------------------------------- small helpers
 
-int push_nil(Call& c) {
-    lua_pushnil(c.L);
-    return 1;
-}
-int push_bool(Call& c, bool b) {
-    lua_pushboolean(c.L, b ? 1 : 0);
-    return 1;
-}
+using detail::push_nil;  // ref5 t03: vm_internal.hpp
+using detail::push_bool;  // ref5 t03: vm_internal.hpp
 
 // Errors and warnings: Call::script_error_stop / Call::script_warning (the original's helpers: logged, no unwind; the
 // binding returns nothing).
@@ -589,21 +583,13 @@ int land_task_force_fire_special_weapon(Call& c, const char* kName, const std::v
     // 0x370320(type, 0x37, 1): the Land behaviour set only (a type with it in <Behavior> alone is refused).
     const bool lobbing = t != objects::kNone && t < ty->size() && ty->has_behavior(t, objects::BehaviorSet::Land, kBehLobbing);
     if (!lobbing) return c.script_error_stop("%s -- %s is not a land special weapon!", kName, name.c_str());
-    Vec3 point;
-    if (const Ud* a = c.userdata(2, cls_target())) {
-        AiScriptHost* ai = c.vm->owner ? ai_host(*c.vm->owner) : nullptr;
-        const ObjectHandle h = ai && ai->target_valid(a->id) ? ai->target_object(a->id) : ObjectHandle{};
-        if (h && st->alive(h)) {
-            point = st->position(h);  // [M] the unit target's position getter (vf +0x68): the object's position
-        } else if (!(ai && ai->target_valid(a->id) && ai->target_position(a->id, point))) {
-            return c.script_warning("%s -- target is already dead.  Aborting.", kName);
-        }
-    } else if (const Ud* o = c.userdata(2, detail::cls_game_object())) {
-        if (!detail::object_alive(*c.vm, *o)) return c.script_warning("%s -- target is already dead.  Aborting.", kName);
-        point = st->position(detail::object_handle(*o));
-    } else {
+    // An AI target ([M] the unit target's position getter, vf +0x68: its object's position, else the host's target
+    // position) or a game object; ref5 t03: converted by detail::position_arg, the argument's class tested here first.
+    if (!c.userdata(2, cls_target()) && !c.userdata(2, detail::cls_game_object()))
         return c.script_error_stop("%s -- Invalid type for parameter 1.  Expected game object or target location", kName);
-    }
+    Vec3 point;
+    if (detail::position_arg(c, 2, point) != detail::PosArg::Ok)
+        return c.script_warning("%s -- target is already dead.  Aborting.", kName);
     const ObjectBridge* b = bridge(c);
     for (const ObjectHandle u : units) {
         if (!st->alive(u) || !st->has_behavior(u, kBehLobbing) || readiness(hk, u) < 1.0f) continue;

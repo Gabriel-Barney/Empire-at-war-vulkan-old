@@ -3,6 +3,7 @@
 // available" answers and the documented data fallbacks), GlobalValue (process store, tables, userdata refused, save /
 // load), LuaScriptWrapper across two VMs, the task-force delegation to the object bindings, the family table (no
 // duplicates) and the coverage (no unbound row left).
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -25,6 +26,7 @@
 #include "alamo/lua/object_bridge.hpp"
 #include "alamo/lua/script_gaps.hpp"
 #include "alamo/lua/script_remaining.hpp"
+#include "alamo/lua/story_model.hpp"
 #if ALAMO_LUA_PLAYERS
 #include "alamo/lua/players.hpp"
 #endif
@@ -719,6 +721,43 @@ static uint32_t payload_u32(const commands::EventData& e, size_t at) {
 }
 #endif
 
+// ref5 t03: one position rule (detail::position_arg) in every binding family: a region AI target (6, a position with no
+// object) and a task force (3, its first live unit) are positions for the object family (Get_Distance), the script
+// helpers (Is_Point_In_Nebula, Are_On_Opposite_Sides_Of_Shield) and the story family (Add_Radar_Blip; no object
+// followed); an empty task force is not a position. The FogOfWar family: test_lua_fog.cpp.
+static void test_position_families(const Db& db) {
+    Env e(db, objects::ModeKind::Land);
+    LuaVm& vm = *e.vm;
+    FakeAi ai;
+    attach_ai_host(vm, &ai, 1);
+    StoryModel story;
+    attach_story(vm, &story);
+    const ObjectHandle ship = make(e.store, db.t("Ship"), 0, {0, 0, 0});
+    const ObjectHandle t1 = make(e.store, db.t("Trooper"), 0, {3, 4, 0});
+    ai.units = {t1};
+    set_task_force_global(vm, "TF", 3, AiTaskForceKind::Land);
+    set_ai_target_global(vm, "Region", 6);  // (7, 8, 9)
+    e.global("Ship", ship);
+    CHECK(run(vm, "d = Ship.Get_Distance(Region) dt = Ship.Get_Distance(TF)") == "" && !vm.exit_requested());
+    CHECK(std::abs(gnum(vm, "d") - std::sqrt(194.0)) < 1e-4 && std::abs(gnum(vm, "dt") - 5.0) < 1e-4);
+    CHECK(run(vm, "n = Is_Point_In_Nebula(Region) s = Are_On_Opposite_Sides_Of_Shield(Region, TF)") == "" && !vm.exit_requested());
+    CHECK(!gnil(vm, "n") && !gnil(vm, "s"));
+    CHECK(run(vm, "Add_Radar_Blip(Region, 'r') Add_Radar_Blip(TF, 't')") == "" && !vm.exit_requested());
+    CHECK(story.blips().size() == 2);
+    if (story.blips().size() == 2) {
+        const StoryBlip& r = story.blips()[0];
+        const StoryBlip& t = story.blips()[1];
+        CHECK(r.name == "r" && r.object_id == -1 && r.x == 7.0f && r.y == 8.0f && r.z == 9.0f);
+        CHECK(t.name == "t" && t.object_id == -1 && t.x == 3.0f && t.y == 4.0f);
+    }
+    ai.units.clear();
+    CHECK(run(vm, "Add_Radar_Blip(TF, 'x')") == "" && vm.exit_requested() && story.blips().size() == 2 &&
+          last_message_has(vm, "could not deduce a position from parameter 1"));
+    reset_script_threads(vm);
+    attach_story(vm, nullptr);
+    attach_ai_host(vm, nullptr, -1);
+}
+
 static void test_unit_order_targets(const Db& db) {
     Env e(db, objects::ModeKind::Land);
     LuaVm& vm = *e.vm;
@@ -1115,6 +1154,7 @@ int main() {
         test_player_methods(db);
         test_task_forces(db);
         test_unit_order_targets(db);  // q6 t03
+        test_position_families(db);  // ref5 t03
 #if ALAMO_LUA_PLAYERS
         test_tactical_perception(db);
 #endif

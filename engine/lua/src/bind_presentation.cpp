@@ -32,7 +32,7 @@ namespace {
 PresentationLog& log_of(Call& c) { return detail::presentation_of(c.L); }
 uint32_t frame_of(const Call& c) { return c.vm->frame; }
 
-bool is_bool(const Call& c, int i) { return c.has(i) && lua_type(c.L, c.idx(i)) == LUA_TBOOLEAN; }
+using detail::is_bool;  // ref5 t03: vm_internal.hpp
 bool boolean(const Call& c, int i) { return lua_toboolean(c.L, c.idx(i)) != 0; }
 
 const detail::Ud* engine_ud(const Call& c, int i) {

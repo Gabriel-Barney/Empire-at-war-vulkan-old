@@ -396,14 +396,8 @@ using detail::Ud;
 
 namespace {
 
-int push_nil(Call& c) {
-    lua_pushnil(c.L);
-    return 1;
-}
-int push_bool(Call& c, bool b) {
-    lua_pushboolean(c.L, b ? 1 : 0);
-    return 1;
-}
+using detail::push_nil;  // ref5 t03: vm_internal.hpp
+using detail::push_bool;  // ref5 t03: vm_internal.hpp
 int push_num(Call& c, double d) {
     lua_pushnumber(c.L, d);
     return 1;
@@ -413,7 +407,7 @@ int push_str(Call& c, std::string_view s) {
     return 1;
 }
 
-bool is_bool(const Call& c, int i) { return c.has(i) && lua_type(c.L, c.idx(i)) == LUA_TBOOLEAN; }
+using detail::is_bool;  // ref5 t03: vm_internal.hpp
 bool to_bool(const Call& c, int i) { return lua_toboolean(c.L, c.idx(i)) != 0; }
 bool is_table(const Call& c, int i) { return c.has(i) && lua_type(c.L, c.idx(i)) == LUA_TTABLE; }
 

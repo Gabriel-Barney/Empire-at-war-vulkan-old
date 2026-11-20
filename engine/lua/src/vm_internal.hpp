@@ -462,5 +462,27 @@ AiArg ai_arg(Call& c, int i);
 void push_position(lua_State* L, Vec3 p);
 Vec3 position_of(const Ud& u);
 
+// ref5 t03: the small result helpers every binding family shares (were copied into each bind_*.cpp).
+inline int push_nil(Call& c) {
+    lua_pushnil(c.L);
+    return 1;
+}
+inline int push_bool(Call& c, bool b) {
+    lua_pushboolean(c.L, b ? 1 : 0);
+    return 1;
+}
+inline bool is_bool(const Call& c, int i) { return c.has(i) && lua_type(c.L, c.idx(i)) == LUA_TBOOLEAN; }
+
+// ref5 t03: "something which defines a position" (LUA_API.md), one rule for every binding family (bind_objects.cpp):
+//   GameObjectWrapper        alive: its position (`object` = it); dead: Dead;
+//   PositionWrapper          its value;
+//   AITargetLocationWrapper  its live object's position (`object` = it), else the AI host's target position (a region or
+//                            marker target, mcx8 t01), else Dead (no AI host, an invalid target);
+//   task force               its first live unit (`object` = it) [port], else Dead;
+//   anything else            NotPosition.
+// A family that accepts fewer kinds tests the argument's class itself before converting it.
+enum class PosArg : uint8_t { Ok, Dead, NotPosition };
+PosArg position_arg(Call& c, int i, Vec3& out, objects::ObjectHandle* object = nullptr);
+
 }  // namespace detail
 }  // namespace alamo::lua

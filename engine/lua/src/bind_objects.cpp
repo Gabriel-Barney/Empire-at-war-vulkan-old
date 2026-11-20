@@ -60,14 +60,8 @@ constexpr char kBridgeKey[] = "alamo.objects.bridge";
 
 // ---------------------------------------------------------------- small helpers
 
-int push_nil(Call& c) {
-    lua_pushnil(c.L);
-    return 1;
-}
-int push_bool(Call& c, bool b) {
-    lua_pushboolean(c.L, b ? 1 : 0);
-    return 1;
-}
+using detail::push_nil;  // ref5 t03: vm_internal.hpp
+using detail::push_bool;  // ref5 t03: vm_internal.hpp
 int push_num(Call& c, double d) {
     lua_pushnumber(c.L, d);
     return 1;
@@ -77,7 +71,7 @@ int push_str(Call& c, std::string_view s) {
     return 1;
 }
 
-bool is_bool(const Call& c, int i) { return c.has(i) && lua_type(c.L, c.idx(i)) == LUA_TBOOLEAN; }
+using detail::is_bool;  // ref5 t03: vm_internal.hpp
 bool to_bool(const Call& c, int i) { return lua_toboolean(c.L, c.idx(i)) != 0; }
 
 using detail::cls_position;
@@ -207,9 +201,10 @@ namespace {
 using detail::position_of;
 using detail::push_position;
 
-enum class PosArg : uint8_t { Ok, Dead, NotPosition };
-// "Something which defines a position": a live GameObjectWrapper or a PositionWrapper.
-PosArg position_arg(Call& c, int i, Vec3& out, ObjectHandle* object = nullptr) {
+}  // namespace
+
+// ref5 t03: "something which defines a position", the one rule of every binding family (vm_internal.hpp).
+detail::PosArg detail::position_arg(Call& c, int i, Vec3& out, ObjectHandle* object) {
     if (const Ud* o = c.userdata(i, detail::cls_game_object())) {
         if (!detail::object_alive(*c.vm, *o)) return PosArg::Dead;
         out = store(c)->position(detail::object_handle(*o));
@@ -231,6 +226,11 @@ PosArg position_arg(Call& c, int i, Vec3& out, ObjectHandle* object = nullptr) {
     }
     return PosArg::NotPosition;
 }
+
+namespace {
+
+using detail::PosArg;
+using detail::position_arg;
 
 double distance(Vec3 a, Vec3 b) {
     const double dx = static_cast<double>(a.x) - static_cast<double>(b.x);
