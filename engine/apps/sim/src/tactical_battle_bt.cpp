@@ -840,7 +840,8 @@ uint32_t TacticalBattle::bt_ground_special_weapons(TacticalMode& mode) {
         if (t >= types.size() || !types.get(t, objects::tags::Is_Special_Weapon_In_Space)) continue;
         if (kOrbital != objects::kNoBehavior && types.has_behavior(t, objects::BehaviorSet::Union, kOrbital)) continue;
         const int32_t idx = types.get(t, objects::tags::Special_Weapon_Index);
-        constexpr int32_t kWeaponSlots = 3;  // 0x35c520: three special-weapon slots per player
+        // limit: retail TRL2_A_RE_ANSWERS Q1.2 (0x35c520, three special-weapon slots per player [H])
+        constexpr int32_t kWeaponSlots = 3;
         if (idx >= 0 && idx < kWeaponSlots) {
             if (std::find(indexes.begin(), indexes.end(), idx) != indexes.end()) continue;
             indexes.push_back(idx);
