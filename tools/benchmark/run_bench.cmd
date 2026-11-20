@@ -13,7 +13,7 @@ if "%SC%"=="" set "SC=space_battle"
 if /i not "%SC:~-7%"==".abench" set "SC=tests\benchmark\%SC%.abench"
 for %%F in ("%SC%") do set "NAME=%%~nF"
 set "EXE="
-for /f "delims=" %%e in ('""%CD%\toolchain\venv\Scripts\python.exe" -I "%CD%\tools\lint\build_trees.py" exe alamo_headless.exe --main-first"') do set "EXE=%%e"
+for /f "delims=" %%e in ('""%CD%\toolchain\venv\Scripts\python.exe" -I "%CD%\tools\lint\build_trees.py" exe alamo_headless.exe --main-first --msvc"') do set "EXE=%%e"
 if not defined EXE (echo run_bench: no alamo_headless.exe; build first ^(build_msvc.cmd^)& exit /b 2)
 if not exist logs mkdir logs
 set "REST="

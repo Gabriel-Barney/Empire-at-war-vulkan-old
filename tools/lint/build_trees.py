@@ -18,14 +18,15 @@ Scripts:  for /f "delims=" %%t in ('python -I tools\\lint\\build_trees.py name a
   python -I tools/lint/build_trees.py name agent [tree] <msvc|clang>   print an agent tree name
   python -I tools/lint/build_trees.py name main <msvc|clang|asan|cov|fuzz>
   python -I tools/lint/build_trees.py name module <module>
-  python -I tools/lint/build_trees.py exe <exe name> [--main-first] [--root DIR]
+  python -I tools/lint/build_trees.py exe <exe name> [--main-first] [--msvc] [--root DIR]
                                          print the exe's path (relative to --root, default the repo), exit 1 if none
   python -I tools/lint/build_trees.py bin [--main-first] [--exe NAME]    print the bin folder holding NAME
   python -I tools/lint/build_trees.py check                             lint: no tree name spelled outside this module
   python -I tools/lint/build_trees.py --selftest
 
 Exe lookup order: the worktree's agent trees first (build-wt-msvc, then build-msvc, build-wt-clang, build-clang);
---main-first puts the main MSVC tree first (benchmarks run in the main checkout, where build-msvc is the full build).
+--main-first puts the main MSVC tree first (benchmarks run in the main checkout, where build-msvc is the full build);
+--msvc leaves the clang trees out (benchmark baselines, the mod corpus and the probe kits use MSVC exes).
 
 `check` scans tools/**/*.py, tools/**/*.cmd and the root *.cmd scripts for a tree name written as a string (Python) or
 on a non-`rem` line (.cmd), outside this file. Docstrings and comments may still name trees; code asks this module.
@@ -79,23 +80,26 @@ def is_tree_name(name: str) -> bool:
     return name.lower().startswith(PREFIX)
 
 
-def exe_order(main_first: bool = False) -> tuple[str, ...]:
-    return MAIN_FIRST_ORDER if main_first else EXE_ORDER
+def exe_order(main_first: bool = False, msvc_only: bool = False) -> tuple[str, ...]:
+    order = MAIN_FIRST_ORDER if main_first else EXE_ORDER
+    return tuple(t for t in order if t.endswith('-msvc')) if msvc_only else order
 
 
-def find_tree(root: str | None = None, main_first: bool = False, exe: str | None = None) -> str | None:
-    """The first tree (absolute path) under root whose bin/ holds exe (any bin/ when exe is None)."""
+def find_tree(root: str | None = None, main_first: bool = False, exe: str | None = None,
+              msvc_only: bool = False) -> str | None:
+    """The first tree (absolute path) under root whose bin/ holds exe (any bin/ when exe is None). msvc_only: never a
+    clang tree (benchmarks compare with MSVC baselines; the corpus and probes run the shipped compiler's exes)."""
     root = root or REPO
-    for t in exe_order(main_first):
+    for t in exe_order(main_first, msvc_only):
         b = os.path.join(root, t, 'bin')
         if os.path.isfile(os.path.join(b, exe)) if exe else os.path.isdir(b):
             return os.path.join(root, t)
     return None
 
 
-def find_exe(exe: str, root: str | None = None, main_first: bool = False) -> str | None:
+def find_exe(exe: str, root: str | None = None, main_first: bool = False, msvc_only: bool = False) -> str | None:
     """The first <root>/<tree>/bin/<exe> that exists, in exe_order(); None when no tree has it."""
-    t = find_tree(root, main_first, exe)
+    t = find_tree(root, main_first, exe, msvc_only)
     return os.path.join(t, 'bin', exe) if t else None
 
 
@@ -114,7 +118,13 @@ def py_findings(text: str) -> list[int]:
         toks = list(tokenize.generate_tokens(io.StringIO(text).readline))
     except (tokenize.TokenError, SyntaxError):
         return out
+    fstring_middle = getattr(tokenize, 'FSTRING_MIDDLE', None)   # Python 3.12+: f-string text is its own token
     for t in toks:
+        if fstring_middle is not None and t.type == fstring_middle:
+            if PY_LITERAL_RE.match(t.string) or re.match(r'(?i)^build-(?:wt-)?(?:msvc|clang|asan|cov|fuzz)(?:[\\/]|$)',
+                                                         t.string):
+                out.append(t.start[0])
+            continue
         if t.type != tokenize.STRING:
             continue
         body = re.sub(r'^[rRbBuUfF]*', '', t.string)
@@ -200,14 +210,18 @@ def selftest() -> int:
                     'X = "build-time"\n# build-msvc in a comment\n')
         with open(os.path.join(td, 'ok.cmd'), 'w') as f:
             f.write('@echo off\nrem Dir build-msvc\\\n:: build-clang\nset B=%T%\n')
-        expect(check(td) == 0, 'clean files pass')
+        from contextlib import redirect_stdout
+        with redirect_stdout(io.StringIO()):
+            expect(check(td) == 0, 'clean files pass')
+        expect(find_exe('a.exe', td, msvc_only=True).endswith(os.path.join('build-wt-msvc', 'bin', 'a.exe')), 'msvc only')
         with open(os.path.join(td, 'tools', 'x', 'bad.py'), 'w') as f:
             f.write('A = "x"\nT = ("build-wt-msvc", "build-msvc")\nP = r"build-msvc\\bin\\a.exe"\n')
+        if getattr(tokenize, 'FSTRING_MIDDLE', None) is not None:
+            expect(py_findings('E = "x"\nP = f"build-msvc/bin/{E}"\n') == [2], 'f-string finding')
         with open(os.path.join(td, 'bad.cmd'), 'w') as f:
             f.write('@echo off\ncmake --build build-clang\nset B=build-!ATREE!-!ACOMP!\n')
         expect(py_findings(open(os.path.join(td, 'tools', 'x', 'bad.py')).read()) == [2, 2, 3], 'py findings')
         expect(cmd_findings(open(os.path.join(td, 'bad.cmd')).read()) == [2, 3], 'cmd findings')
-        from contextlib import redirect_stdout
         with redirect_stdout(io.StringIO()):
             expect(check(td) == 1, 'spelled names fail')
     for b in bad:
@@ -233,7 +247,8 @@ def main(argv: list[str]) -> int:
     if argv[:1] in (['exe'], ['bin']):
         rest = argv[1:]
         main_first = '--main-first' in rest
-        rest = [a for a in rest if a != '--main-first']
+        msvc_only = '--msvc' in rest
+        rest = [a for a in rest if a not in ('--main-first', '--msvc')]
         root = None
         if '--root' in rest:
             i = rest.index('--root')
@@ -247,7 +262,7 @@ def main(argv: list[str]) -> int:
             exe = rest[0]
         elif '--exe' in rest:
             exe = rest[rest.index('--exe') + 1]
-        t = find_tree(root, main_first, exe)
+        t = find_tree(root, main_first, exe, msvc_only)
         if not t:
             return 1
         out = os.path.join(t, 'bin', exe) if argv[0] == 'exe' else os.path.join(t, 'bin')

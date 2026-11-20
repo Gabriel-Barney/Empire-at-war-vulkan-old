@@ -600,7 +600,7 @@ def parse_args(argv=None):
     if "check" not in a.stages:
         ap.error("--stages must include check")
     if a.build_dir is None:
-        a.build_dir = os.path.basename(build_trees.find_tree(ROOT) or build_trees.WARM_TREE)
+        a.build_dir = os.path.basename(build_trees.find_tree(ROOT, msvc_only=True) or build_trees.WARM_TREE)
     if a.game:
         a.game = os.path.abspath(a.game)
     if a.steam_root:

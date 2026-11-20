@@ -29,7 +29,8 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from run_suite import ROOT, cpu_busy_pct, scenes  # noqa: E402
-from run_suite import build_trees  # noqa: E402
+sys.path.insert(0, os.path.join(ROOT, 'tools', 'lint'))
+import build_trees  # noqa: E402
 
 
 def zone_rows(results: dict, scene: str, counts: list[int], patterns: list[str]) -> list[list[str]]:

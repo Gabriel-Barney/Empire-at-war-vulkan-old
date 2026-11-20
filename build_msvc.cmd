@@ -3,7 +3,9 @@ rem Build all C++ tools with the project-local MSVC toolchain. Logs go to logs\.
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 rem Tree name from tools\lint\build_trees.py (ref3 t03), the one place that names build trees.
+set "BT="
 for /f "delims=" %%t in ('""%~dp0toolchain\venv\Scripts\python.exe" -I "%~dp0tools\lint\build_trees.py" name main msvc"') do set "BT=%%t"
+if not defined BT (echo %~nx0: no tree name from tools\lint\build_trees.py& exit /b 2)
 if not exist logs mkdir logs
 if not exist toolchain\msvc\setup_x64.bat (
   echo Toolchain missing: run toolchain\2_setup.cmd first.> logs\msvc_configure.txt

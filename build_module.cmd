@@ -16,7 +16,9 @@ set SLOWFILTER=-LE slow
 if /i "%ALAMO_TESTS%"=="all" set SLOWFILTER=
 set LOG=logs\module_%~1.txt
 rem Tree name from tools\lint\build_trees.py (ref3 t03), the one place that names build trees.
+set "BT="
 for /f "delims=" %%t in ('""%~dp0toolchain\venv\Scripts\python.exe" -I "%~dp0tools\lint\build_trees.py" name module %~1"') do set "BT=%%t"
+if not defined BT (echo %~nx0: no tree name from tools\lint\build_trees.py& exit /b 2)
 call toolchain\msvc\setup_x64.bat >nul
 call "%~dp0tools\test_env.cmd"
 call "%~dp0tools\cache_env.cmd"

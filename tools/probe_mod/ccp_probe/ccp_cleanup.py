@@ -28,7 +28,12 @@ from probe_run import running  # noqa: E402
 DEFAULT_GAME = probe_cleanup.DEFAULT_GAME
 MOD_NAME = 'CcpProbe'
 MARKER = 'CCP_PROBE_MARKER.txt'
-from payload import PROFILE_DONE as DONE, restore_profile  # noqa: E402,F401  (common/payload.py)
+from payload import PROFILE_DONE as DONE  # noqa: E402,F401  (common/payload.py)
+import payload  # noqa: E402
+
+
+def restore_profile(run_dir, dry_run=False):
+    return payload.restore_profile(run_dir, dry_run, again='run cleanup_ccp.cmd again')
 
 
 def cleanup(game, log=None, dry_run=False):

@@ -9,7 +9,9 @@ rem instrumented tests run slower; a test that fails here and passes in build-wt
 setlocal EnableDelayedExpansion
 cd /d "%~dp0"
 rem Tree name from tools\lint\build_trees.py (ref3 t03), the one place that names build trees.
+set "BT="
 for /f "delims=" %%t in ('""%~dp0toolchain\venv\Scripts\python.exe" -I "%~dp0tools\lint\build_trees.py" name main cov"') do set "BT=%%t"
+if not defined BT (echo %~nx0: no tree name from tools\lint\build_trees.py& exit /b 2)
 if not exist logs mkdir logs
 set TC=%~dp0toolchain
 set MODULES=core;vfs;data;jobs;galactic;objects;anim;commands;tactical;lua;ai

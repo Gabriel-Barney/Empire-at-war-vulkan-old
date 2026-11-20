@@ -12,7 +12,9 @@ if not exist logs mkdir logs
 set TC=%CD%\toolchain
 set PD=python -I tools\visual\png_diff.py
 set SCALE=320
+set "BT="
 for /f "delims=" %%t in ('""%CD%\toolchain\venv\Scripts\python.exe" -I "%CD%\tools\lint\build_trees.py" name main msvc"') do set "BT=%%t"
+if not defined BT (echo %~nx0: no tree name from tools\lint\build_trees.py& exit /b 2)
 rem Shots whose content depends on wall-clock timing (differ between two runs of the same build): not compared. The save /
 rem load smoke's shots list saves with their wall-clock save time. The video options shots list this PC's display modes
 rem (resolution / refresh rate rows), which change with the monitor setup.

@@ -36,7 +36,7 @@ def _src(text, node):
 def _is_exe_expr(text, node, names):
     """True when node evaluates to a StarWarsG.exe path (as far as a static look can tell)."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
-        return bool(re.match(r'(?i)^"?[^"]*starwarsg\.exe"?(\s|$)', node.value))
+        return bool(re.match(r'(?i)^("[^"]*starwarsg\.exe"|[^"\s]*starwarsg\.exe)(\s|$)', node.value))
     if isinstance(node, ast.Name):
         return node.id in names
     if isinstance(node, ast.Call):
@@ -66,10 +66,13 @@ def py_findings(text):
     except SyntaxError:
         return []
     names = set()
-    for _ in range(2):   # names bound to the exe path (twice, so `b = a` after `a = <exe>` is seen)
+    for _ in range(3):   # names bound to the exe path, or to a command list whose program is it (`cmd = [exe, ...]`)
         for n in ast.walk(tree):
-            if isinstance(n, ast.Assign) and _is_exe_expr(text, n.value, names):
-                names.update(t.id for t in n.targets if isinstance(t, ast.Name))
+            if isinstance(n, ast.Assign):
+                v = n.value
+                prog = _program(v) if isinstance(v, (ast.List, ast.Tuple, ast.BinOp)) else v
+                if prog is not None and _is_exe_expr(text, prog, names):
+                    names.update(t.id for t in n.targets if isinstance(t, ast.Name))
     out = []
     for n in ast.walk(tree):
         if not isinstance(n, ast.Call):
@@ -78,13 +81,21 @@ def py_findings(text):
         fname = f.attr if isinstance(f, ast.Attribute) else f.id if isinstance(f, ast.Name) else ''
         if fname not in PY_STARTERS:
             continue
-        args = list(n.args)
+        args = list(n.args) + [k.value for k in n.keywords if k.arg in ('args', 'cmd', 'command', 'filepath')]
         if fname.startswith('CreateProcess'):
             hit = any(EXE_RE.search(_src(text, a)) or any(isinstance(x, ast.Name) and x.id in names
                                                           for x in ast.walk(a)) for a in args[:2])
         else:
-            prog = _program(args[0]) if args else None
+            first = args[0] if args else None
+            prog = _program(first) if first is not None else None
             hit = prog is not None and _is_exe_expr(text, prog, names)
+            # `cmd /c start "" StarWarsG.exe` as a list, or a shell string naming the exe
+            if not hit and first is not None:
+                if isinstance(first, (ast.List, ast.Tuple)):
+                    hit = any(_is_exe_expr(text, e, names) for e in first.elts)
+                elif isinstance(first, ast.Constant) and isinstance(first.value, str):
+                    hit = bool(re.search(r'(?i)(^|\s|")[^\s"]*starwarsg\.exe', first.value)) and \
+                        not re.search(r'(?i)imagename|tasklist|taskkill', first.value)
         if hit:
             out.append(n.lineno)
     return out
@@ -97,7 +108,8 @@ def cmd_findings(text):
         low = s.lower()
         if not s or low.startswith('rem ') or low == 'rem' or s.startswith('::') or low.startswith('echo'):
             continue
-        if re.match(r'(?i)^(start\s+("[^"]*"\s+)?(/\w+\s+)*)?"?[^"\s]*starwarsg\.exe"?(\s|$)', s):
+        if re.match(r'(?i)^(start\s+("[^"]*"\s+)?(/\w+(\s+"[^"]*"|\s+[^"\s/]+)?\s+)*)?("[^"]*starwarsg\.exe"|[^"\s]*starwarsg\.exe)(\s|$)',
+                    s):
             out.append(i)
     return out
 
@@ -116,12 +128,24 @@ def ps1_findings(text):
             continue
         if s.startswith('#'):
             continue
-        m = re.search(r'(?i)(Start-Process\s+(-FilePath\s+)?|^&\s*)(\S+)', s)
-        if not m:
-            continue
-        target = m.group(3).strip('"\'()')
-        if EXE_RE.search(target) or (target.startswith('$') and target[1:].lower() in names):
-            out.append(i)
+        targets = []
+        sp = re.search(r'(?i)Start-Process\b(.*)', s)
+        if sp:
+            rest = sp.group(1)
+            fp = re.search(r'(?i)-FilePath\s+(\S+)', rest)
+            first = re.match(r'\s+([^\s-]\S*)', rest)   # positional FilePath
+            targets += [x.group(1) for x in (fp, first) if x]
+        amp = re.match(r'&\s*(\S+)', s)
+        if amp:
+            targets.append(amp.group(1))
+        dp = re.search(r'(?i)\[(System\.)?Diagnostics\.Process\]::Start\(\s*(\S+?)[\s,)]', s)
+        if dp:
+            targets.append(dp.group(2))
+        for target in targets:
+            target = target.strip('"\'()')
+            if EXE_RE.search(target) or (target.startswith('$') and target[1:].lower() in names):
+                out.append(i)
+                break
     return out
 
 
@@ -169,12 +193,19 @@ def selftest():
               "subprocess.Popen(r'C:\\g\\StarWarsG.exe WINDOWED')\nos.startfile(exe)\n"
               "k.CreateProcessW(None, '\"%s\" x' % exe, None)\n")
     expect(py_findings(bad_py) == [3, 4, 5, 6], 'Python launches: %s' % py_findings(bad_py))
+    bad_py2 = ("import os, subprocess\nexe = foc.game_exe(g)\ncmd = [exe, 'WINDOWED']\nsubprocess.Popen(cmd)\n"
+               "subprocess.Popen(args=[exe])\nsubprocess.run(['cmd', '/c', 'start', '', 'StarWarsG.exe'])\n"
+               "subprocess.run('start \"\" StarWarsG.exe', shell=True)\n")
+    expect(py_findings(bad_py2) == [4, 5, 6, 7], 'more Python launches: %s' % py_findings(bad_py2))
     good_cmd = ('@echo off\nrem start "" StarWarsG.exe\necho Starting StarWarsG.exe\n'
                 'tasklist /FI "IMAGENAME eq StarWarsG.exe" | find /I "StarWarsG.exe"\n'
                 '"%PY%" -I "%~dp0..\\common\\launch_foc.py" MODPATH=Mods\\X\n')
     expect(cmd_findings(good_cmd) == [], 'clean cmd passes: %s' % cmd_findings(good_cmd))
     bad_cmd = '@echo off\nstart "" StarWarsG.exe WINDOWED\n"F:\\g\\corruption\\StarWarsG.exe" MODPATH=x\n'
     expect(cmd_findings(bad_cmd) == [2, 3], 'cmd launches: %s' % cmd_findings(bad_cmd))
+    bad_cmd2 = ('"F:\\Steam Library\\Star Wars Empire at War\\corruption\\StarWarsG.exe" MODPATH=Mods\\X\n'
+                'start "" "F:\\Star Wars\\corruption\\StarWarsG.exe"\nstart "" /D "C:\\a b" StarWarsG.exe\n')
+    expect(cmd_findings(bad_cmd2) == [1, 2, 3], 'cmd launches with spaces: %s' % cmd_findings(bad_cmd2))
     good_ps = ("$exe = Join-Path $root 'corruption\\StarWarsG.exe'\n$sha = (Get-FileHash $exe).Hash\n"
                "$r = Start-Process -FilePath $reader -PassThru\n& $Q2Python -I $launchFoc x\n"
                "# Start-Process $exe\n")
@@ -182,6 +213,9 @@ def selftest():
     bad_ps = ("$exe = Join-Path $root 'corruption\\StarWarsG.exe'\n$g = Start-Process -FilePath $exe -PassThru\n"
               "& $exe WINDOWED\nStart-Process 'C:\\g\\StarWarsG.exe'\n")
     expect(ps1_findings(bad_ps) == [2, 3, 4], 'ps1 launches: %s' % ps1_findings(bad_ps))
+    bad_ps2 = ("$exe = Join-Path $root 'corruption\\StarWarsG.exe'\nStart-Process -WorkingDirectory $d -FilePath $exe\n"
+               "[Diagnostics.Process]::Start($exe)\n")
+    expect(ps1_findings(bad_ps2) == [2, 3], 'more ps1 launches: %s' % ps1_findings(bad_ps2))
     with tempfile.TemporaryDirectory() as td:
         for rel, body in (('tools/probe_mod/common/launch_foc.py', bad_py), ('tools/probe_mod/k/run.py', good_py)):
             os.makedirs(os.path.dirname(os.path.join(td, rel)), exist_ok=True)

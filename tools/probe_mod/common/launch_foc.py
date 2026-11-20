@@ -30,6 +30,7 @@ import argparse
 import ctypes
 import ctypes.wintypes as W
 import os
+import subprocess
 import sys
 
 STEAM_LIBRARY = r'F:\SteamLibrary'   # q2common.ps1 $Q2DefaultGameRoot is the same install
@@ -150,7 +151,7 @@ def start(game, args=(), windowed=True, env=None):
     exe = game_exe(game)
     if not os.path.isfile(exe):
         raise LaunchError('%s not found' % exe)
-    cmd = '"%s" %s' % (exe, ' '.join(game_args(args, windowed)))
+    cmd = '"%s" %s' % (exe, subprocess.list2cmdline(game_args(args, windowed)))
     k, pi = _create(cmd, corruption_dir(game), env)
     _detach_at_create(k, pi)
     return Game(k, pi, cmd)
@@ -226,7 +227,7 @@ def main():
     if not root:
         print('game not found (pass --game-root <folder containing corruption\\StarWarsG.exe>)')
         return 2
-    cmd = '"%s" %s' % (game_exe(root), ' '.join(game_args(extra, not a.no_windowed)))
+    cmd = '"%s" %s' % (game_exe(root), subprocess.list2cmdline(game_args(extra, not a.no_windowed)))
     try:
         k, pi = _create(cmd, corruption_dir(root), None)
     except LaunchError as e:
