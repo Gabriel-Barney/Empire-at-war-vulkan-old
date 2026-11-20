@@ -35,7 +35,14 @@
    {"text": "Underworld_Mobile_Defense_Unit is not a valid build location", "group": "mdu1",
     "why": "AI_PLAN_EXPANSIONGENERIC_BUILDMDUITEM's MDU race, a port bug; the pinned-seed test moved off it eight times in two days (trn1 .. cmb2 + mov2 t04). Drop this entry when mdu1 lands."}
   ],
-  "why": "bkm2 t05 (b0047): land movement with Empire walkers and Underworld droids, the whole 70000 ticks with no Lua error outside retail's and the mdu1 race; no end needed (b0422). Measured 0/10 end; the MDU race in seeds 2-5, 9, 10, no other non-retail error. About 190-280 s a seed."
+  "fielded": [
+   {"label": "Empire walkers", "types": ["AT_ST_Walker", "AT_AA_Walker", "AT_AT_Walker", "SPMAT_Walker"], "min_seeds": 8,
+    "min_walked": 1000,
+    "why": "tst2 t04 (b0188): the Walk_Transition units the scenario exists for. Measured 2026-11-20 (tst2, clang, workers 0): 10/10 seeds field them, 17000-140000 walked in all; 8 of 10 must"},
+   {"label": "Destroyer droids", "types": ["Destroyer_Droid", "Destroyer_Droid_Attack"], "min_seeds": 3, "min_walked": 1000,
+    "why": "tst2 t04 (b0188): the Underworld droids the scenario exists for (the old pinned seed 4 test fielded them). Measured 2026-11-20: 6/10 seeds (1, 2, 3, 5, 8, 9), 29000-352000 walked; 3 of 10 must"}
+  ],
+  "why": "bkm2 t05 (b0047): land movement with Empire walkers and Underworld droids, the whole 70000 ticks with no Lua error outside retail's and the mdu1 race; no end needed (b0422). Measured 0/10 end; the MDU race in seeds 2-5, 9, 10, no other non-retail error. About 190-280 s a seed. tst2 t04: --report-fielded and the fielded checks make sure the walkers and droids are fielded and walk (re-measured 2026-11-20: 1/10 end, MDU race in seeds 4, 6, 9, 10)."
  },
  "skai_exit_rebel": {
   "args": ["--skirmish-ai", "foc-land", "--map", "_MP_LAND_UTAPAU", "--human", "Empire", "--ai", "Rebel", "--ticks", "36000",

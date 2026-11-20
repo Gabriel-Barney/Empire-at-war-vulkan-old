@@ -88,6 +88,8 @@
 //       its Space_ / Land_Skirmish_AI_Default_Forces (else the cheapest buildable units, [port]).
 //       A1 stage 2: AI-vs-AI space skirmish fought by the tactical AI in an S10 battle (skirmish_run.hpp); foc-land: a land skirmish (t50), foc-land-campaign: the campaign-rules land invasion.
 //       [--fail-on-lua-errors]: fail on any tactical AI Lua error (foc-station always does; a1j t07).
+//       [--report-fielded] (tst2 t04): per slot and unit type, the units fielded and the distance they walked ("  fielded"
+//       lines, read by tools/parity outcome sweeps' "fielded" checks).
 //       [--control-points]: foc-land / skirmish on a land map (ccpgt t02): the Capture Control Points game type, each slot's win
 //       condition 0x15 CONTROL_POINT_DOMINATION (SKIRMISH_SETUP §4.2) instead of 0x13.
 //       Prints and writes the fired-event log (frame, plot set:sequence, plot, event, type, params,

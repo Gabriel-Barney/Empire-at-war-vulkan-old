@@ -433,6 +433,8 @@ if(_alamo_sim)
     # checks (the station defender, the campaign land goals). A random-driven outcome is parity tier 2 (docs/DECISIONS.md
     # "Parity tiers", "Outcome tests over seeds"), so one seed's battle moving is not a failure and no seed is pinned here;
     # determinism is the job of the CRC golden runs above (one fixed seed each). Skips (77) without ALAMO_FOC_DATA.
+    # tst2 t04 (b0188): foc_land_empire_underworld also checks, with --report-fielded, that Empire walkers and Destroyer droids
+    # are fielded and walk in enough seeds (the pinned seed2 / seed4 tests of bkm2 checked only the end).
     if(ALAMO_PYTHON)
       foreach(_oc foc_space foc_station foc_land_campaign foc_land_full foc_land_empire_underworld)
         add_test(NAME alamo_headless_outcome_${_oc}
