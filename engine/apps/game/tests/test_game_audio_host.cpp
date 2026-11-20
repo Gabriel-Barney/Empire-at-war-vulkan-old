@@ -160,9 +160,9 @@ void test_missing_credits_event() {
 // the shot; its sound is handed out on the frame it appears (or at the first battle tick after it), in fire order.
 void test_delayed_fire_sounds() {
     DelayedFireSounds q;
-    CHECK(!q.offer({1, 100, 7, -1}, 100));  // appears this frame: plays now
-    CHECK(q.offer({2, 104, 7, 3}, 100));    // 4-frame delay
-    CHECK(q.offer({3, 102, 8, -1}, 100));
+    CHECK(!q.offer({1, 100, 7, -1, "", ""}, 100));  // appears this frame: plays now
+    CHECK(q.offer({2, 104, 7, 3, "", ""}, 100));    // 4-frame delay
+    CHECK(q.offer({3, 102, 8, -1, "", ""}, 100));
     std::vector<uint32_t> got;
     auto take = [&](uint32_t now) { q.take_due(now, [&](const DelayedFireSounds::Shot& s) { got.push_back(s.serial); }); };
     take(101);
@@ -173,7 +173,7 @@ void test_delayed_fire_sounds() {
     CHECK(got.size() == 2 && got[1] == 2 && q.size() == 0);
     take(111);
     CHECK(got.size() == 2);
-    q.offer({4, 200, 9, -1}, 150);
+    q.offer({4, 200, 9, -1, "", ""}, 150);
     q.clear();  // battle_reset
     CHECK(q.size() == 0);
 }
