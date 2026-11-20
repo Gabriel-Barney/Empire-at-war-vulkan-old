@@ -2418,20 +2418,14 @@ private:
     // OPT3 t09: constructor / setup's table build (q6 t12: kept for script_add_types). Never null after the constructor.
     std::unique_ptr<BattleCatalog::BattleBuild> tables_build_;
     void tables_extend();  // tables_ / descs_ := the build of types_used_ (only the appended types are built)
-    std::unique_ptr<tactical::movement::MovementSystem> movement_;
-    std::vector<tactical::movement::ClearanceInfo> clr_types_;  // §6.3.1: per type (derived from type / model data)
-    std::vector<uint8_t> clr_known_;                            // clr_types_[t] computed
-    std::vector<tactical::movement::AvoidObstacle> avoid_members_;  // SPACE_AVOIDANCE: this tick's members (derived)
-    std::vector<int8_t> avoid_type_;  // per type: -1 unknown, 0 not a member, 1 member, 2 member with SHIELDED
-    std::unique_ptr<tactical::combat::CombatSystem> combat_;
-    std::unique_ptr<tactical::abilities::AbilitySystem> abilities_;
-    std::unique_ptr<BattleHooks> hooks_;  // installed over the ability system's hooks; destroyed first
     // ref6 t02: the battle's one EngagementQueries (tactical_battle_engagement.cpp): hostility, attack ranges, the movement's
     // fire test, the turret aim point, the movement lock, combat's scan-range query and the land shield-sides test, handed
     // to movement (MovementSystem::set_engagement) and combat (CombatSystem::set_engagement) at setup. `mode` = the battle's
-    // mode (the scan-range query reads its store). Lives as long as the battle (not copyable, not movable).
+    // mode (the scan-range query reads its store). Declared before movement_ / combat_, so it outlives both.
     struct Engagement final : tactical::EngagementQueries {
         explicit Engagement(TacticalBattle& b) : b_(b) {}
+        Engagement(const Engagement&) = delete;
+        Engagement& operator=(const Engagement&) = delete;
         bool hostile(int32_t a, int32_t b) const override;
         float attack_range(int32_t id) const override;
         float min_attack_distance(int32_t id) const override;
@@ -2449,6 +2443,14 @@ private:
         TacticalBattle& b_;
     };
     Engagement engagement_{*this};
+    std::unique_ptr<tactical::movement::MovementSystem> movement_;
+    std::vector<tactical::movement::ClearanceInfo> clr_types_;  // §6.3.1: per type (derived from type / model data)
+    std::vector<uint8_t> clr_known_;                            // clr_types_[t] computed
+    std::vector<tactical::movement::AvoidObstacle> avoid_members_;  // SPACE_AVOIDANCE: this tick's members (derived)
+    std::vector<int8_t> avoid_type_;  // per type: -1 unknown, 0 not a member, 1 member, 2 member with SHIELDED
+    std::unique_ptr<tactical::combat::CombatSystem> combat_;
+    std::unique_ptr<tactical::abilities::AbilitySystem> abilities_;
+    std::unique_ptr<BattleHooks> hooks_;  // installed over the ability system's hooks; destroyed first
     SimAnimation* anim_ = nullptr;
     int32_t dummy_type_ = -1;           // Dummy_Barrage_Target
     std::vector<Participant> parts_;

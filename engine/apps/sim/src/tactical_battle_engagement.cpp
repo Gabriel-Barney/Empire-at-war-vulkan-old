@@ -24,7 +24,7 @@ float TacticalBattle::Engagement::min_attack_distance(int32_t id) const {
     return unit != objects::kNoObjectId && b_.combat_->has_unit(unit) ? b_.combat_->min_attack_distance(unit) : 0.0f;
 }
 
-bool TacticalBattle::Engagement::has_fire_test() const { return !b_.space_; }
+bool TacticalBattle::Engagement::has_fire_test() const { return !b_.space_ && b_.combat_; }  // land, once combat exists
 
 // s78n t25.3 (MOVEMENT §4.3.2 items 6 / 7, 0x40edd0 / 0x410e90; TACTICAL_COMBAT §2.8 B 4): can the mover hit the target
 // from p: slots 43 / 46 and the line of fire from p at the ground height (CombatSystem::can_hit_from; a squad container

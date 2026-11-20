@@ -38,8 +38,8 @@ public:
     virtual bool movement_locked(int32_t /*key*/) const { return false; }
 
     // ---- combat asks ----
-    // Get_Scan_Range 0x566f50 / 0x4160a0(F, u, c, &Rr) for a kUnitScanQuery unit (FIGHTER_FLYING §4.10 A, BKR1 Q8); c = -1:
-    // the scan cube test. Only called when has_scan_range(); read-only (combat's parallel gather).
+    // Get_Scan_Range 0x566f50 / 0x4160a0(F, u, c, &Rr) for a kUnitScanQuery unit (FIGHTER_FLYING §4.10 A, BKR1 Q8); candidate =
+    // combat's kNoObject: the scan cube test. Only called when has_scan_range(); read-only (combat's parallel gather).
     virtual bool has_scan_range() const { return false; }
     virtual uint8_t scan_range(int32_t /*unit*/, int32_t /*candidate*/, float /*range*/, float& rr) const {
         rr = 0.0f;
