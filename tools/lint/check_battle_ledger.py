@@ -380,6 +380,9 @@ TABLE = [
     Entry("StorySession", ENG + "apps/sim/include/alamo/sim/story_session.hpp",
           ENG + "apps/sim/src/story_session_ledger.hpp", [ENG + "apps/sim/src"],
           save=[r"write\w*"], read=[r"read\w*"], hash_fns=[r"hash\w*", "register_crc"]),
+    Entry("StoryModel", ENG + "lua/include/alamo/lua/story_model.hpp",
+          ENG + "lua/src/story_model_ledger.hpp", [ENG + "lua/src/story_model.cpp"],
+          save=["write"], read=["read"], hash_fns=[r"hash\w*", "register_crc"]),
 ]
 
 
