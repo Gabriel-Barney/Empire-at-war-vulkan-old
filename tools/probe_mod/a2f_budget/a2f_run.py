@@ -42,7 +42,6 @@ PROBE_MOD = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
 from probe_run import say, running, set_state, scan_once  # noqa: E402
-sys.path.insert(0, os.path.join(PROBE_MOD, 'a1_tactical'))
 sys.path.insert(0, os.path.join(PROBE_MOD, 'q2_traces'))
 import a2f_cleanup  # noqa: E402
 import a2f_report  # noqa: E402
@@ -50,7 +49,8 @@ import a2f_watch  # noqa: E402
 import build_a2f_mod  # noqa: E402
 
 MODPATH = 'MODPATH=Mods\\' + build_a2f_mod.MOD_NAME
-WINDOWED = ['WINDOWED', 'SCREENWIDTH=1920', 'SCREENHEIGHT=1080']
+import launch_foc as foc  # noqa: E402  (common/launch_foc.py: the one place a kit starts StarWarsG.exe)
+WINDOWED = foc.WINDOWED
 NEEDLE = b'A2FB' + b'1|'
 RECORD_RE = re.compile(rb'A2FB1\|[SFPDQU]\|[^|]*\|\d+\|[A-Z0-9]+\|[ -~]{0,330}?\|END')
 
@@ -165,8 +165,8 @@ def main():
         say(text)
         return 0 if res['records'] else 10
     import a1mem  # noqa: E402 - Windows-only ctypes
-    corr = os.path.join(a.game, 'corruption')
-    exe = os.path.join(corr, 'StarWarsG.exe')
+    corr = foc.corruption_dir(a.game)
+    exe = foc.game_exe(a.game)
     if not os.path.isfile(exe):
         say('StarWarsG.exe not found under', corr)
         say('A2F_RUN_DONE exit=20')
@@ -213,7 +213,7 @@ def main():
             % build_a2f_mod.MOD_NAME + (STEPS_SAB_LONG if a.sab_long else STEPS_UW if a.uw_infra else STEPS_SAB if a.saboteur else STEPS_EMPIRE if a.human_empire else STEPS) + '=' * 110)
         t0 = time.time()
         if not a.no_launch:
-            subprocess.Popen([exe] + (WINDOWED if a.windowed else []) + [MODPATH], cwd=corr)
+            foc.start(a.game, [MODPATH], windowed=a.windowed)
             say('Game launched: StarWarsG.exe %s%s' % ('WINDOWED ... ' if a.windowed else '', MODPATH))
         else:
             say('Start the game yourself: StarWarsG.exe %s (in %s)' % (MODPATH, corr))

@@ -24,7 +24,7 @@ import time
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 PM = os.path.dirname(HERE)
-for sub in ('', 'common', 'a1_tactical', 'q2_traces', 's78n_t14_squads'):
+for sub in ('', 'common', 'q2_traces', 's78n_t14_squads'):
     sys.path.insert(0, os.path.join(PM, sub) if sub else HERE)
 sys.path.insert(0, HERE)
 from probe_run import say, running, set_state, scan_once  # noqa: E402
@@ -35,7 +35,8 @@ import mov2_t07_track  # noqa: E402
 
 NEEDLE = b'M7Q|'
 RECORD_RE = re.compile(rb'M7Q\|[A-Z0-9_]+\|[ -~]{0,500}?\|END')
-WINDOWED = ['WINDOWED', 'SCREENWIDTH=1920', 'SCREENHEIGHT=1080']
+import launch_foc as foc  # noqa: E402  (common/launch_foc.py: the one place a kit starts StarWarsG.exe)
+WINDOWED = foc.WINDOWED
 MODPATH = ['MODPATH=Mods\\' + bm.MOD_NAME]
 DONE = 'MOV2_T07_RUN_DONE'
 
@@ -59,10 +60,15 @@ def steps(cfg):
 
 
 def launch(game, args):
-    cmd = [sys.executable, '-I', os.path.join(PM, 'common', 'launch_foc.py'), '--game-root', game, '--no-windowed'] + args
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    say((r.stdout + r.stderr).strip())
-    return r.returncode
+    """Start the game through common/launch_foc.py (a game started plainly from a Claude shell exits at once). 0 = started."""
+    try:
+        g = foc.start(game, args, windowed=False)
+    except foc.LaunchError as e:
+        say(str(e))
+        return 1
+    say('pid %d' % g.pid)
+    say('cmd %s' % g.cmd)
+    return 0
 
 
 def main():

@@ -75,7 +75,7 @@ Each case:
 
 **Output channel.** Retail `_CustomScriptMessage` / `_MessagePopup` show nothing (S10, Q2 and A1 runs). So the Lua
 keeps every record as a string `A1HR|<kind>|n=<k>|...|END` in its global table `A1H_REC`. `a1h_run.py` finds those
-strings with a read-only scan of the game's private memory every 5 s (`a1_tactical/a1mem.py`; it never writes the
+strings with a read-only scan of the game's private memory every 5 s (`common/a1mem.py`; it never writes the
 game's memory). The `Game_Message` lines on screen show the same verdicts.
 
 ## Reading the result

@@ -36,7 +36,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PM = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(PM, 'common'))
-sys.path.insert(0, os.path.join(PM, 'a1_tactical'))
 sys.path.insert(0, os.path.join(PM, 'q2_traces'))
 sys.path.insert(0, os.path.join(PM, 'q6_t33_elim_end'))
 from probe_run import say, running, set_state, scan_once  # noqa: E402
@@ -44,7 +43,8 @@ import build_compat_assets_mod as bm  # noqa: E402
 import compat_assets_cleanup  # noqa: E402
 import compat_assets_analyse  # noqa: E402
 
-WINDOWED = ['WINDOWED', 'SCREENWIDTH=1920', 'SCREENHEIGHT=1080']
+import launch_foc as foc  # noqa: E402  (common/launch_foc.py: the one place a kit starts StarWarsG.exe)
+WINDOWED = foc.WINDOWED
 MODPATH = ['MODPATH=Mods\\' + bm.MOD_NAME]
 NEEDLE = b'CAQ|'
 RECORD_RE = re.compile(rb'CAQ\|[A-Z0-9_]+\|[ -~]{0,520}?\|END')
@@ -133,8 +133,8 @@ def main():
                                                  os.path.join(d, 'report.json'), cfgp if os.path.exists(cfgp) else None)
         say(text)
         return 0 if res['records'] else 10
-    corr = os.path.join(a.game, 'corruption')
-    exe = os.path.join(corr, 'StarWarsG.exe')
+    corr = foc.corruption_dir(a.game)
+    exe = foc.game_exe(a.game)
     out_root = os.path.join(HERE, 'out')
     run_dir = os.path.join(out_root, datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
     cmdline = ' '.join(['StarWarsG.exe'] + (WINDOWED if a.windowed or a.no_launch else []) + MODPATH)
@@ -185,7 +185,7 @@ def main():
         say('\n' + '=' * 110 + steps(cfg) + '=' * 110)
         t0 = time.time()
         if not a.no_launch:
-            subprocess.Popen([exe] + (WINDOWED if a.windowed else []) + MODPATH, cwd=corr)
+            foc.start(a.game, MODPATH, windowed=a.windowed)
             say('Game launched: ' + cmdline)
         else:
             say('Start the game yourself, in %s:\n  %s' % (corr, cmdline))

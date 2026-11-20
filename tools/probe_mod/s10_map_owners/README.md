@@ -2,7 +2,7 @@
 
 > **Historical (2026-11-07, cu18 t10).** S10 is done: the probe ran on 2026-10-29 and its findings are in
 > `docs/re/REMAINING_GAPS.md` §3.3. The runner, `reader\` and `build_reader.cmd` are kept as they were and are not
-> maintained; a new memory probe should use `a1_tactical/a1mem.py`. Still used by other kits: `build_mod.py` and
+> maintained; a new memory probe should use `common/a1mem.py`. Still used by other kits: `build_mod.py` and
 > `expected_objects.json` (the S10 campaign vehicle of `a1_tactical`) and `s10_story.lua`
 > (`engine/apps/sim/tests/test_battles.cpp`). The `.ted` / install reader moved to `common/ted_owners.py`.
 

@@ -32,7 +32,7 @@ import time
 
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, '..', '..', 'a1_tactical'))
+sys.path.insert(0, os.path.join(HERE, '..', '..', 'common'))
 
 P_CREDITS = 0x70
 P_TECH = 0x84

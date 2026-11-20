@@ -44,7 +44,7 @@ game can show (the owner the engine really gives at frame 0) is read by the run 
   shoots contesting units) on every relevant point, all invulnerable. The troopers capture through the capture service
   (10 s), which is what arms the timer (`Change_Owner` would not, §4.2). It then logs owner changes (`OWN`, `ALL`) and a
   heartbeat at 3-frame resolution. Records are Lua strings `CCP1|...|END` found by a heap scan.
-- **Memory reader (`ccp_reader.py`, read-only, `../a1_tactical/a1mem.py`)**: per poll (every 2 ms, several per frame,
+- **Memory reader (`ccp_reader.py`, read-only, `../common/a1mem.py`)**: per poll (every 2 ms, several per frame,
   each poll framed by two reads of the mode frame) the owner (`+0x58`) of every point object, the mode's domination
   state (`+0x2b0` armed, `+0x2b4` timer, `+0x2b8` player) and the victory monitor (`mode +0x28`; validated by its
   back-pointer `+0x00 == mode`; `+0x20` declared, `+0x24` countdown, `+0x28` declared type / player). One `ST` line per

@@ -3,7 +3,7 @@
 
   tswp_reader.py --out LOG [--wait-process-sec 900] [--scan-sec 2] [--poll-sec 0.002] [--allow-unknown-exe]
 
-Two channels (a1_tactical/a1mem.py: ReadProcessMemory only, never writes, never injects):
+Two channels (common/a1mem.py: ReadProcessMemory only, never writes, never injects):
   * Lua records. Retail FoC shows no _MessagePopup boxes (2026-10-31 run), so the probe Lua (GameScoring hook and
     galactic story) keeps every event as a Lua string "TSWP1|<KIND>|<seq>|<text>|END"; a second thread scans the game's
     committed private memory for them every --scan-sec seconds.
@@ -28,7 +28,7 @@ import time
 
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'a1_tactical'))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
 import a1mem  # noqa: E402
 
 NEEDLE = b'TSWP1|'

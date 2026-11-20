@@ -10,7 +10,7 @@ Why: retail _CustomScriptMessage writes no file (docs/re/LUA_SCRIPT_OUTPUT.md), 
 Lua string "Q2L1|<src>|<sid>|<seq>|<KIND>|<text>|END" (src G = galactic plot, T = GameScoring, P = AI plan hooks;
 sid = the script instance).
 This reader scans the game's committed private memory for them every --scan-sec seconds with
-tools/probe_mod/a1_tactical/a1mem.py: OpenProcess + ReadProcessMemory only, never writes, injects or suspends.
+tools/probe_mod/common/a1mem.py: OpenProcess + ReadProcessMemory only, never writes, injects or suspends.
 It ends when the game exits (the Q2 trace reader closes the game at the end of the trace).
 
 Files written into the run dir:
@@ -34,7 +34,7 @@ import time
 
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'a1_tactical'))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
 
 NEEDLE = b'Q2L1|'
 # a1mem.Proc.scan returns 400 bytes per hit: the scripts cap the text at 320 characters

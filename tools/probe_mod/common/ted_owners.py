@@ -28,7 +28,8 @@ ROOT = os.path.normpath(os.path.join(HERE, '..', '..', '..'))
 sys.path.insert(0, os.path.join(ROOT, 'tools', 'meg'))
 from megtool import MegArchive  # noqa: E402
 
-DEFAULT_GAME = r'F:\SteamLibrary\steamapps\common\Star Wars Empire at War'
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from launch_foc import DEFAULT_GAME  # noqa: E402,F401  (common/launch_foc.py)
 FACTION_ORDER = ['Rebel', 'Empire', 'Pirates', 'Neutral', 'Hostile', 'Sarlacc', 'Underworld', 'Hutts']
 
 

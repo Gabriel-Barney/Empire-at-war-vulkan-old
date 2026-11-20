@@ -28,6 +28,7 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
 sys.path.insert(0, os.path.dirname(HERE))
+from launch_foc import DEFAULT_GAME  # noqa: E402  (common/launch_foc.py)
 
 MARKER = 'TSWP_PROBE_MARKER.txt'
 MOD_NAME = 'TswPlanetProbe'
@@ -228,8 +229,7 @@ def subst(text, rate=0.0):
     return text
 
 
-def crlf(text):
-    return text.replace('\r\n', '\n').replace('\n', '\r\n').encode('latin-1')
+from payload import crlf  # noqa: E402,F401  (common/payload.py)
 
 
 def write(path, data):
@@ -311,7 +311,7 @@ def check(rate):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument('--game', default=r'F:\SteamLibrary\steamapps\common\Star Wars Empire at War')
+    ap.add_argument('--game', default=DEFAULT_GAME)
     ap.add_argument('--out', help='mod folder (default <game>\\corruption\\Mods\\%s)' % MOD_NAME)
     ap.add_argument('--rate', type=float, default=0.0, help='GameScoring ServiceRate in seconds (default 0: every service)')
     ap.add_argument('--check', action='store_true', help='offline self-check only')

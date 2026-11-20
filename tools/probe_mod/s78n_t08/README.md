@@ -107,7 +107,7 @@ allied and the report says so (B0 then reads "allied by Make_Ally, not the menu"
 `BusyTacticalFreeStore.lua` and adds the cue strings to `MasterTextFile_English.dat`. Only the Rebel AI's free
 store arms the probe, and only when `Find_Player("Empire").Is_Human()` (so the main-menu background battle is
 skipped), after `Base_Definitions`, from its service calls (ServiceRate 0.05 s while it runs). Records are Lua
-strings `S8N|KIND|...|END`, found by a read-only heap scan (`..\a1_tactical\a1mem.py`).
+strings `S8N|KIND|...|END`, found by a read-only heap scan (`..\common\a1mem.py`).
 
 (A) per trial (probe `tv`, records `p=tv`): a fresh invulnerable Star_Destroyer U (human, ability autofire off)
 and an invulnerable, unarmed, AI-locked Nebulon-B X are spawned (retail's `Spawn_Unit` may put them hundreds of

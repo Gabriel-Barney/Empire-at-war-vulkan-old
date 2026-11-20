@@ -40,7 +40,7 @@ Each trial's troopers are despawned before the next one. Every free-store servic
 the human's credits, Tyber's `Is_Ability_Ready` / `Is_Ability_Active`, Tyber's position, and the owner of every
 member and container, and records each change as it happens (`CR`, `RDY`, `ACTV`, `OWN`, `CONV`), plus `P` snapshots
 (positions, distances, per-team owner counts). Records are Lua strings `S8M|...|END` read by a read-only heap scan
-(`../a1_tactical/a1mem.py`). All frames are mode frames, good to one poll (±3 frames).
+(`../common/a1mem.py`). All frames are mode frames, good to one poll (±3 frames).
 
 Teams are found after a 1.5 s settle: new AI `Squad_Stormtrooper` within 200 of the spawn point (fallback: any new AI
 object there with a parent), grouped by `Get_Parent_Object`. Object ids come from `Get_Object_ID` (`Get_ID` is a

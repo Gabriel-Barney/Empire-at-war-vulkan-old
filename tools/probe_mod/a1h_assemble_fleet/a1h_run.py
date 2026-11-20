@@ -13,7 +13,7 @@ mod, scan the game's memory for the story script's records while it runs, write 
   --report-only      rebuild report.txt from an earlier run's records.log (no game, no install)
 
 Records: the story Lua keeps strings "A1HR|<kind>|n=<k>|...|END" alive in its global A1H_REC table; this script finds
-them with a read-only scan of the game's committed private memory every --scan-sec seconds (a1_tactical/a1mem.py;
+them with a read-only scan of the game's committed private memory every --scan-sec seconds (common/a1mem.py;
 retail _CustomScriptMessage / _MessagePopup show nothing). It never writes the game's memory.
 Output: tools\\probe_mod\\a1h_assemble_fleet\\out\\<yyyymmdd-hhmmss>\\ with records.log, report.txt, run.json,
 run_status.txt (state=installing / waiting_for_game_start / game_running / collecting / done), cleanup.log;
@@ -35,12 +35,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
 from probe_run import say, running, set_state, scan_once  # noqa: E402
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'a1_tactical'))
 import a1h_cleanup  # noqa: E402
 import build_a1h_mod  # noqa: E402
 
 MODPATH = 'MODPATH=Mods\\' + build_a1h_mod.MOD_NAME
-WINDOWED = ['WINDOWED', 'SCREENWIDTH=1920', 'SCREENHEIGHT=1080']
+import launch_foc as foc  # noqa: E402  (common/launch_foc.py: the one place a kit starts StarWarsG.exe)
+WINDOWED = foc.WINDOWED
 NEEDLE = b'A1HR|'
 RECORD_RE = re.compile(rb'A1HR\|([A-Z_]+)\|n=(\d+)\|([ -~]{0,360}?)\|END')
 
@@ -109,8 +109,8 @@ def main():
         say(open(os.path.join(os.path.dirname(os.path.abspath(a.report_only)), 'report.txt')).read())
         return 0 if len(v) == len(build_a1h_mod.CASES) else 10
     import a1mem  # noqa: E402 - Windows-only ctypes; not needed for --report-only
-    corr = os.path.join(a.game, 'corruption')
-    exe = os.path.join(corr, 'StarWarsG.exe')
+    corr = foc.corruption_dir(a.game)
+    exe = foc.game_exe(a.game)
     if not os.path.isfile(exe):
         say('StarWarsG.exe not found under', corr)
         say('A1H_RUN_DONE exit=20')
@@ -138,7 +138,7 @@ def main():
             % build_a1h_mod.MOD_NAME + STEPS + '=' * 110)
         t0 = time.time()
         if not a.no_launch:
-            subprocess.Popen([exe] + (WINDOWED if a.windowed else []) + [MODPATH], cwd=corr)
+            foc.start(a.game, [MODPATH], windowed=a.windowed)
             say('Game launched: StarWarsG.exe %s%s' % ('WINDOWED ... ' if a.windowed else '', MODPATH))
         else:
             say('Start the game yourself: StarWarsG.exe %s (in %s)' % (MODPATH, corr))

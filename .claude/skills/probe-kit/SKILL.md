@@ -34,7 +34,7 @@ from the kit's run script (`docs/PROBES.md`, "RE and retail-tracing tools"):
 |---|---|
 | `README.md` | the question, predictions with numbers, how to run (exact menu steps: mode, map, factions, slots), how long it takes, how to read the result, cleanup |
 | `run_<kit>.cmd` | entry point; calls `toolchain\venv\Scripts\python.exe -I <kit>_run.py %*` and passes on the usual flags (`--non-interactive`, `--no-launch`, `--windowed`, `--dry-run`, `--no-profile`, `--game DIR`, `--report-only RECORDS.log`) |
-| `<kit>_run.py` | backs up the player profile, builds the mod into the install, waits for the game, scans memory for probe records, writes `out\<run>\report.txt`, cleans up, restores the profile; uses `tools/probe_mod/common/probe_run.py` and `launch_foc.py` instead of copying helpers |
+| `<kit>_run.py` | backs up the player profile, builds the mod into the install, waits for the game, scans memory for probe records, writes `out\<run>\report.txt`, cleans up, restores the profile; uses `tools/probe_mod/common/` instead of copying helpers: `probe_run.py`, `launch_foc.py` (`foc.start(a.game, MODPATH, windowed=a.windowed)`; a launch anywhere else fails `tools/lint/check_probe_launch.py`), `payload.py` (`crlf`, Lua helpers, `restore_profile`), `a1mem.py` |
 | `build_<kit>_mod.py` | builds `Mods\<Name>Probe` from the user's own install (never ship retail files in git) |
 | `<kit>_probe.lua` | the probe script: writes greppable ASCII records into memory; compiled with `common/lua50.py` (Lua 5.0, no math lib in free-store Lua) |
 | `<kit>_analyse.py` | turns the records into PASS / FAIL lines against the README's predictions |

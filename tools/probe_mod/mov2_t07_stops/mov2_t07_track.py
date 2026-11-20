@@ -2,7 +2,7 @@
 """mov2_t07_track.py - frame-exact, read-only tracker of the probe's objects in a running retail FoC (Steam x64 1.121).
 
 The probe Lua names the object ids of each trial in a TRACK record (k, role:id;...). The runner passes the records it
-finds to Tracker.feed(); the tracker looks each id up once in the current mode's object store (../a1_tactical/a1mem.py
+finds to Tracker.feed(); the tracker looks each id up once in the current mode's object store (../common/a1mem.py
 Game.objects) and then, every time the global logic frame (RVA 0xB0A320) changes, writes one line per tracked object:
 
   T|gf=<global frame>|mf=<mode frame>|k=<trial>|r=<role>|id=<id>|x=|y=|z=|fx=|fy=|fz=|st=<locomotor state>|v=<speed>

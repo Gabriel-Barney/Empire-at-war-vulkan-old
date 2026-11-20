@@ -35,7 +35,7 @@ stop the calling script. The probes therefore call every binding inside `pcall`.
 
 - No retail Lua function writes a file or a log. Every probe output channel has to be outside Lua:
   - process memory: the probe keeps its lines as Lua strings in a table, and a read-only reader finds them by
-    scanning the game's committed private memory (`tools/probe_mod/a1_tactical/a1mem.py` `Proc.scan`; proven in the
+    scanning the game's committed private memory (`tools/probe_mod/common/a1mem.py` `Proc.scan`; proven in the
     A1 run of 2026-10-31, 175 records). Lua 5.0 strings are stored contiguously, so the ASCII text is found as is;
   - `Game_Message` on screen, with fixed text IDs only.
 - **Load proof without a reader:** `_CustomScriptMessage` deletes the named file on its first call for that name.

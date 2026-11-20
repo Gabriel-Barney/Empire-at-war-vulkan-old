@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """q6t33_gates.py - read-only poller of the retail galactic end-screen gates (FoC Steam x64 1.121), for the q6 t33 kit.
 
-Every few milliseconds it reads, with ReadProcessMemory only (../a1_tactical/a1mem.py; never writes, never suspends):
+Every few milliseconds it reads, with ReadProcessMemory only (../common/a1mem.py; never writes, never suspends):
   gframe   u32  global logic frame (RVA 0xB0A320, MAIN_LOOP.md)
   mt / mf  current mode type (0 galactic) and its frame (game mode manager RVA 0xB153E0 +0x1C, cur mode +0x38 -> +0x10)
   top      the pointer the main loop's end-screen check reads (RVA 0xB15418 = mode manager +0x38, the current mode);

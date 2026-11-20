@@ -14,7 +14,7 @@ up (always, also after an error or Ctrl+C).
   --report-only      rebuild report.txt from an earlier run's records.log
 
 Records: the probe Lua keeps strings "R1P|<KIND>|...|END" alive in a global table; this script finds them with a
-read-only scan of the game's committed private memory every --scan-sec seconds (../a1_tactical/a1mem.py). It never
+read-only scan of the game's committed private memory every --scan-sec seconds (../common/a1mem.py). It never
 writes the game's memory.
 Output: tools\\probe_mod\\r1_hardpoint\\out\\<yyyymmdd-hhmmss>\\ with records.log, report.txt, report.json,
 config.json, run.json, run_status.txt (state=installing / waiting_for_game_start / game_running / collecting / done),
@@ -36,12 +36,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
 from probe_run import say, running, set_state, scan_once  # noqa: E402
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'a1_tactical'))
 import build_r1_mod  # noqa: E402
 import r1_cleanup  # noqa: E402
 import r1_parse  # noqa: E402
 
-WINDOWED = ['WINDOWED', 'SCREENWIDTH=1920', 'SCREENHEIGHT=1080']
+import launch_foc as foc  # noqa: E402  (common/launch_foc.py: the one place a kit starts StarWarsG.exe)
+WINDOWED = foc.WINDOWED
 MODPATH = ['MODPATH=Mods\\' + build_r1_mod.MOD_NAME]
 NEEDLE = b'R1P|'
 RECORD_RE = re.compile(rb'R1P\|[A-Z0-9_]+\|[ -~]{0,800}?\|END')
@@ -119,8 +119,8 @@ def main():
         say(text)
         say('R1_RUN_DONE exit=%d' % (0 if recs else 10))
         return 0 if recs else 10
-    corr = os.path.join(a.game, 'corruption')
-    exe = os.path.join(corr, 'StarWarsG.exe')
+    corr = foc.corruption_dir(a.game)
+    exe = foc.game_exe(a.game)
     out_root = os.path.join(HERE, 'out')
     run_dir = os.path.join(out_root, datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
     steps = {'short': STEPS_SHORT, 'tail': STEPS_TAIL}.get(a.profile, STEPS_FULL)
@@ -163,7 +163,7 @@ def main():
         say('\n' + '=' * 110 + steps.format(minimap=cfg['minimap']) + '=' * 110)
         t0 = time.time()
         if not a.no_launch:
-            subprocess.Popen([exe] + (WINDOWED if a.windowed else []) + MODPATH, cwd=corr)
+            foc.start(a.game, MODPATH, windowed=a.windowed)
             say('Game launched: ' + cmdline)
         else:
             say('Start the game yourself, in %s:\n  %s' % (corr, cmdline))

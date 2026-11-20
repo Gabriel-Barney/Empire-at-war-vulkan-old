@@ -38,7 +38,8 @@ from build_probe import dat_read, dat_bytes  # noqa: E402
 MOD_NAME = 'Q6T15Probe'
 TR_MOD_NAME = 'Q6T15ProbeTR'
 MARKER = 'Q6T15_PROBE_MARKER.txt'
-DEFAULT_TR = r'F:\SteamLibrary\steamapps\workshop\content\32470\1125571106'
+import launch_foc  # noqa: E402  (common/launch_foc.py)
+DEFAULT_TR = os.path.join(launch_foc.WORKSHOP, '1125571106')
 
 # Object scripts the probe copies with the record hook: name -> ServiceRate it gets (None = shipped rate, 1 for all).
 OBJ_SCRIPTS = {
@@ -204,8 +205,7 @@ class Source:
         return self.gf.read(name)
 
 
-def crlf(text):
-    return text.replace('\r\n', '\n').replace('\n', '\r\n').encode('latin-1')
+from payload import crlf  # noqa: E402,F401  (common/payload.py)
 
 
 def write(path, data):

@@ -5,7 +5,7 @@
                 [--scan-sec 5] [--poll-sec 0.002] [--allow-unknown-exe]
   ccp_reader.py --selftest            offline checks against a fake memory image
 
-Process access, exe check, object walk and heap scan come from tools/probe_mod/a1_tactical/a1mem.py (imported, not
+Process access, exe check, object walk and heap scan come from tools/probe_mod/common/a1mem.py (imported, not
 copied): OpenProcess(VM_READ | QUERY_INFORMATION | SYNCHRONIZE) + ReadProcessMemory only; the game is never written.
 
 For every land mode (GMM current mode, a1mem layout) it records:
@@ -44,7 +44,7 @@ import time
 
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
-A1 = os.path.join(os.path.dirname(HERE), 'a1_tactical')
+A1 = os.path.join(os.path.dirname(HERE), 'common')
 sys.path.insert(0, HERE)
 sys.path.insert(0, A1)
 import a1mem  # noqa: E402

@@ -33,14 +33,14 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'a1_tactical'))
 from probe_run import say, running, set_state  # noqa: E402
 import build_cu9h_mod  # noqa: E402
 import cu9h_cleanup  # noqa: E402
 import cu9h_mem as M  # noqa: E402
 import cu9h_report  # noqa: E402
 
-WINDOWED = ['WINDOWED', 'SCREENWIDTH=1920', 'SCREENHEIGHT=1080']
+import launch_foc as foc  # noqa: E402  (common/launch_foc.py: the one place a kit starts StarWarsG.exe)
+WINDOWED = foc.WINDOWED
 MODPATH = ['MODPATH=Mods\\' + build_cu9h_mod.MOD_NAME]
 CHANGE_KEYS = ('phase', 'mt', 'stack', 'mode', 'hud_mode', 'flag', 'blob', 'blob_col', 'local_id', 'mgr_en',
                'rec_count', 'recs_enabled', 'rec_en', 'rec_av', 'rec_inp', 'rec_ready', 'rec_int', 'rec_last',
@@ -154,8 +154,8 @@ def main():
         text, n = cu9h_report.report(a.report_only)
         say(text)
         return 0 if n else 10
-    corr = os.path.join(a.game, 'corruption')
-    exe = os.path.join(corr, 'StarWarsG.exe')
+    corr = foc.corruption_dir(a.game)
+    exe = foc.game_exe(a.game)
     out_root = os.path.join(HERE, 'out')
     run_dir = os.path.join(out_root, datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
     cmdline = ' '.join(['StarWarsG.exe'] + (WINDOWED if a.windowed else []) + MODPATH)
@@ -203,7 +203,7 @@ def main():
             input('Press Enter to launch the game ...')
         t0 = time.time()
         if not a.no_launch:
-            subprocess.Popen([exe] + (WINDOWED if a.windowed else []) + MODPATH, cwd=corr)
+            foc.start(a.game, MODPATH, windowed=a.windowed)
             say('Game launched: ' + cmdline)
         else:
             say('Start the game yourself, in %s:\n  %s\n  (or: Start-Process explorer.exe "%s")' % (corr, cmdline, launch))

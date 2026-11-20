@@ -12,7 +12,9 @@ import os
 import shutil
 import time
 
-DEFAULT_GAME = r'F:\SteamLibrary\steamapps\common\Star Wars Empire at War'
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from launch_foc import DEFAULT_GAME  # noqa: E402,F401  (common/launch_foc.py)
 
 
 def cleanup(game, mod_names, marker, log=None, dry_run=False):

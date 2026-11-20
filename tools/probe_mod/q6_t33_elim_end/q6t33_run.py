@@ -39,7 +39,6 @@ PM = os.path.dirname(HERE)
 ROOT = os.path.dirname(os.path.dirname(PM))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(PM, 'common'))
-sys.path.insert(0, os.path.join(PM, 'a1_tactical'))
 from probe_run import say, running, set_state, scan_once  # noqa: E402
 import probe_cleanup  # noqa: E402
 import build_q6t33_mod  # noqa: E402
@@ -48,7 +47,8 @@ import q6t33_parse  # noqa: E402
 
 NEEDLE = b'Q6T|'
 RECORD_RE = re.compile(rb'Q6T\|[A-Z0-9_]+\|[ -~]{0,380}?\|END')
-WINDOWED = ['WINDOWED', 'SCREENWIDTH=1920', 'SCREENHEIGHT=1080']
+import launch_foc as foc  # noqa: E402  (common/launch_foc.py: the one place a kit starts StarWarsG.exe)
+WINDOWED = foc.WINDOWED
 
 
 def cleanup(game, log=None, dry_run=False):
@@ -257,11 +257,15 @@ class Shooter:
 
 # ---------------------------------------------------------------------------------------------- run
 def launch(game, args):
-    """common/launch_foc.py: a game started from a Claude shell otherwise exits at once (see its docstring)."""
-    cmd = [sys.executable, '-I', os.path.join(PM, 'common', 'launch_foc.py'), '--game-root', game, '--no-windowed'] + args
-    r = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-    say((r.stdout + r.stderr).strip())
-    return r.returncode
+    """Start the game through common/launch_foc.py (a game started plainly from a Claude shell exits at once). 0 = started."""
+    try:
+        g = foc.start(game, args, windowed=False)
+    except foc.LaunchError as e:
+        say(str(e))
+        return 1
+    say('pid %d' % g.pid)
+    say('cmd %s' % g.cmd)
+    return 0
 
 
 def main():

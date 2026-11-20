@@ -18,7 +18,7 @@ The probe does not play the game for you. The shipped `BusyTacticalFreeStore.lua
 In it, only the **Rebel AI** player's free store spawns the units and runs the fixed scenarios, one after the other.
 On land it also gives **you** an Underworld Saboteur for item 2, which needs the GUI.
 
-A read-only memory reader (`s7s8_reader.py`, built on `../a1_tactical/a1mem.py`) records every new object near the
+A read-only memory reader (`s7s8_reader.py`, built on `../common/a1mem.py`) records every new object near the
 test sites. For each object it records owner, flags, health, position and primary animation slot. Projectiles are
 included, because they are in the object ID map (OBJECT_RUNTIME §1.1). For units it also records four inferred
 fields:

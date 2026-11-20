@@ -27,32 +27,11 @@ from probe_run import running  # noqa: E402
 DEFAULT_GAME = probe_cleanup.DEFAULT_GAME
 MOD_NAME = 'CompatAssetsProbe'
 MARKER = 'CAP_PROBE_MARKER.txt'
-DONE = 'profile_restore_done.txt'
+from payload import PROFILE_DONE as DONE, restore_profile  # noqa: E402,F401  (common/payload.py)
 
 
 def cleanup(game, log=None, dry_run=False):
     return probe_cleanup.cleanup(game, (MOD_NAME,), MARKER, log, dry_run)
-
-
-def restore_profile(run_dir, dry_run=False):
-    """Returns (ok, message)."""
-    if not run_dir or not os.path.isdir(run_dir):
-        return True, 'no run folder: no profile to restore'
-    if not os.path.exists(os.path.join(run_dir, 'profile_backup', 'profile.json')):
-        return True, 'run %s has no profile snapshot' % run_dir
-    if os.path.exists(os.path.join(run_dir, DONE)):
-        return True, 'profile of %s was already restored (%s)' % (run_dir, DONE)
-    if running('StarWarsG.exe'):
-        return False, 'StarWarsG.exe is running: close it and run this again'
-    import q2_profile
-    if dry_run:
-        snap = q2_profile._load(run_dir)
-        return True, 'would restore; differences now: %s' % (q2_profile.diff(snap) or 'none')
-    rc = q2_profile.restore(run_dir)
-    if rc == 0:
-        with open(os.path.join(run_dir, DONE), 'w') as f:
-            f.write('profile restored and verified ' + time.strftime('%Y-%m-%d %H:%M:%S') + '\n')
-    return rc == 0, 'profile restore %s' % ('verified' if rc == 0 else 'NOT VERIFIED, see profile_restore.json')
 
 
 def main():

@@ -232,7 +232,11 @@ try {
         Write-Q2 "lua reader started (pid $($luaProc.Id))"
     }
     if (-not $NoLaunch) {
-        $game = Start-Process -FilePath $exe -WorkingDirectory (Split-Path -Parent $exe) -ArgumentList ($gameArgs -join ' ') -PassThru
+        # common\launch_foc.py (ref3 t01: the one place a probe kit starts StarWarsG.exe); prints 'pid <n>' once detached
+        $launchOut = & $Q2Python -I (Join-Path (Split-Path -Parent $Q2Kit) 'common\launch_foc.py') --no-windowed --game-root $root @gameArgs
+        $pidLine = @($launchOut | Where-Object { $_ -match '^pid \d+$' })[0]
+        if (-not $pidLine) { Fail 20 "launch_foc.py did not start the game: $($launchOut -join ' ')" }
+        $game = Get-Process -Id ([int]($pidLine -replace '^pid ', ''))
         $manifest.game_pid = $game.Id
         $manifest.game_start_utc = $game.StartTime.ToUniversalTime().ToString('o')
         Write-Q2Json $manifestPath $manifest

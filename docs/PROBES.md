@@ -43,7 +43,7 @@ roadmap (`roadmap-store/`). Probes need the original game; Claude runs every kit
 | `s7s8_probes/` | S7/S8: lob solver, deploy windows, ability blocks, squadrons, escorts | `re/TACTICAL_COMBAT.md`, `re/LOB_SOLVER.md`, `re/MOVEMENT.md` |
 | `tsw_planet_destroy/` | L1 systems t04: planet destroy (TSW) frame offsets and story events | `re/TSW_PLANET_DESTROY.md` |
 
-Other kit-like tooling: `tools/probe_mod/common/` (helpers every kit runner shares: `probe_run.py`, `launch_foc.py`, `probe_cleanup.py`, Lua 5.0 compiler `lua50.py`), `tools/shaders/` (shader tools, see its README), `tools/re/` (field tables, locality, Ghidra helpers;
+Other kit-like tooling: `tools/probe_mod/common/` (helpers every kit runner shares: `probe_run.py`, `launch_foc.py` (game root, `WINDOWED`, `start()`: the only place a kit starts `StarWarsG.exe`, checked by `tools/lint/check_probe_launch.py`, ref3 t01), `payload.py` (`crlf`, `lua_quote` / `lua_path`, `run_lua_chunks`, `run_harness`, `restore_profile`), `a1mem.py` (read-only process-memory reader), `probe_cleanup.py`, Lua 5.0 compiler `lua50.py`), `tools/shaders/` (shader tools, see its README), `tools/re/` (field tables, locality, Ghidra helpers;
 `docs/re/ghidra/README.md`), `tools/visual/` (screenshot diffs, see [`BUILD.md`](BUILD.md)).
 
 ## RE and retail-tracing tools (`toolchain\re`, 2026-11-15)

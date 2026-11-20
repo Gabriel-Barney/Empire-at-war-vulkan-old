@@ -51,7 +51,6 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'a1_tactical'))
 from probe_run import say, running, set_state, scan_once  # noqa: E402
 import build_cu8h_mod  # noqa: E402
 import cu8h_cleanup  # noqa: E402
@@ -62,7 +61,8 @@ STOP_FILE = os.path.join(HERE, 'out', 'stop')
 STATUS_FILE = os.path.join(HERE, 'out', 'trace_status.txt')
 DEFAULT_EXE = os.path.join(build_cu8h_mod.DEFAULT_GAME, 'corruption', 'StarWarsG.exe')
 
-WINDOWED = ['WINDOWED', 'SCREENWIDTH=1920', 'SCREENHEIGHT=1080']
+import launch_foc as foc  # noqa: E402  (common/launch_foc.py: the one place a kit starts StarWarsG.exe)
+WINDOWED = foc.WINDOWED
 MODPATH = ['MODPATH=Mods\\' + build_cu8h_mod.MOD_NAME]
 NEEDLE = b'C8G|'
 RECORD_RE = re.compile(rb'C8G\|[A-Z0-9_]+\|[ -~]{0,480}?\|END')
@@ -658,8 +658,8 @@ def main():
         return 0 if n else 10
     if not a.session:
         ap.error('--session is required')
-    corr = os.path.join(a.game, 'corruption')
-    exe = os.path.join(corr, 'StarWarsG.exe')
+    corr = foc.corruption_dir(a.game)
+    exe = foc.game_exe(a.game)
     out_root = os.path.join(HERE, 'out')
     run_dir = os.path.join(out_root, datetime.datetime.now().strftime('%Y%m%d-%H%M%S') + '-' + a.session)
     cmdline = ' '.join(['StarWarsG.exe'] + (WINDOWED if a.windowed else []) + MODPATH)
@@ -702,7 +702,7 @@ def main():
         say('\n' + '=' * 110 + STEPS[a.session] + '=' * 110)
         t0 = time.time()
         if not a.no_launch:
-            subprocess.Popen([exe] + (WINDOWED if a.windowed else []) + MODPATH, cwd=corr)
+            foc.start(a.game, MODPATH, windowed=a.windowed)
             say('Game launched: ' + cmdline)
         else:
             say('Start the game yourself, in %s:\n  %s' % (corr, cmdline))

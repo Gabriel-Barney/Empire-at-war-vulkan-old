@@ -154,7 +154,7 @@ Exit codes:
 All records are Lua strings `Q6P|<KIND>|p=<probe>|sid=<Lua state>|n=<seq>|f=<frame>|...|END`, kept in a global table
 of the probe Lua. `f` = round(`GetCurrentTime()` × 30), the mode frame. Retail `_CustomScriptMessage` and
 `_MessagePopup` show nothing (S10 / Q2 / A1 runs). So `q6_run.py` finds the strings with a read-only scan of the
-game's private memory every 4 s (`../a1_tactical/a1mem.py`). The `Game_Message` lines on screen are only for you.
+game's private memory every 4 s (`../common/a1mem.py`). The `Game_Message` lines on screen are only for you.
 Every probe uses only standard FoC Lua that the port implements too:
 - the game commands `GetCurrentTime`, `Find_Player`, `FindPlanet`, `Change_Owner`, `Find_All_Objects_Of_Type`,
   `Spawn_Unit`, `Create_Generic_Object`, `Create_Position`, `Game_Message`, `Create_Thread` and `Sleep`;

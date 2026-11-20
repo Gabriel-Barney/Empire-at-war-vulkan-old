@@ -26,10 +26,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'q2_traces'))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
 import probe_cleanup  # noqa: E402
-DEFAULT_GAME = r'F:\SteamLibrary\steamapps\common\Star Wars Empire at War'
+from launch_foc import DEFAULT_GAME  # noqa: E402,F401  (common/launch_foc.py)
 MOD_NAME = 'A2fBudgetProbe'
 MARKER = 'A2FB_PROBE_MARKER.txt'
-DONE = 'profile_restore_done.txt'
+from payload import PROFILE_DONE as DONE, restore_profile  # noqa: E402,F401  (common/payload.py)
 
 
 def cleanup(game, log=None, dry_run=False):
@@ -39,27 +39,6 @@ def cleanup(game, log=None, dry_run=False):
 def game_running():
     r = subprocess.run(['tasklist', '/FI', 'IMAGENAME eq StarWarsG.exe', '/NH'], capture_output=True, text=True)
     return 'starwarsg.exe' in r.stdout.lower()
-
-
-def restore_profile(run_dir, dry_run=False):
-    """Returns (ok, message)."""
-    if not run_dir or not os.path.isdir(run_dir):
-        return True, 'no run folder: no profile to restore'
-    if not os.path.exists(os.path.join(run_dir, 'profile_backup', 'profile.json')):
-        return True, 'run %s has no profile snapshot' % run_dir
-    if os.path.exists(os.path.join(run_dir, DONE)):
-        return True, 'profile of %s was already restored (%s)' % (run_dir, DONE)
-    if game_running():
-        return False, 'StarWarsG.exe is running: close it and run this again'
-    import q2_profile
-    if dry_run:
-        snap = q2_profile._load(run_dir)
-        return True, 'would restore; differences now: %s' % (q2_profile.diff(snap) or 'none')
-    rc = q2_profile.restore(run_dir)
-    if rc == 0:
-        with open(os.path.join(run_dir, DONE), 'w') as f:      # q2_profile writes no file when nothing changed
-            f.write('profile restored and verified ' + time.strftime('%Y-%m-%d %H:%M:%S') + chr(10))
-    return rc == 0, 'profile restore %s' % ('verified' if rc == 0 else 'NOT VERIFIED, see profile_restore.json')
 
 
 def main():

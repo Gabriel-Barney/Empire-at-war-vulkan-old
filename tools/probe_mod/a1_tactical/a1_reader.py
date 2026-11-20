@@ -38,6 +38,7 @@ import time
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
 import a1mem  # noqa: E402
 from a1mem import Log, kv, wait_for_game  # noqa: E402
 

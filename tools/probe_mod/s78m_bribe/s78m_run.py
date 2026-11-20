@@ -17,7 +17,7 @@ Ctrl+C).
   --report-only       rebuild report.txt from an earlier run's records.log (no game, no install)
 
 Records: the probe Lua keeps strings "S8M|<KIND>|...|END" alive in a global table; this script finds them with a
-read-only scan of the game's committed private memory every --scan-sec seconds (../a1_tactical/a1mem.py). It never
+read-only scan of the game's committed private memory every --scan-sec seconds (../common/a1mem.py). It never
 writes the game's memory.
 Output: tools\\probe_mod\\s78m_bribe\\out\\<yyyymmdd-hhmmss>\\ with records.log, report.txt, report.json, config.json,
 run.json, run_status.txt (state=installing / waiting_for_game_start / game_running / collecting / done),
@@ -39,13 +39,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
 from probe_run import say, running, set_state, scan_once  # noqa: E402
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'a1_tactical'))
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'q2_traces'))
 import build_s78m_mod  # noqa: E402
 import s78m_cleanup  # noqa: E402
 import s78m_parse  # noqa: E402
 
-WINDOWED = ['WINDOWED', 'SCREENWIDTH=1920', 'SCREENHEIGHT=1080']
+import launch_foc as foc  # noqa: E402  (common/launch_foc.py: the one place a kit starts StarWarsG.exe)
+WINDOWED = foc.WINDOWED
 MODPATH = ['MODPATH=Mods\\' + build_s78m_mod.MOD_NAME]
 NEEDLE = b'S8M|'
 RECORD_RE = re.compile(rb'S8M\|[A-Z0-9_]+\|[ -~]{0,520}?\|END')
@@ -83,8 +83,8 @@ def main():
         text, res = s78m_parse.report(a.report_only, os.path.join(d, 'report.txt'), os.path.join(d, 'report.json'))
         say(text)
         return 0 if res['records'] else 10
-    corr = os.path.join(a.game, 'corruption')
-    exe = os.path.join(corr, 'StarWarsG.exe')
+    corr = foc.corruption_dir(a.game)
+    exe = foc.game_exe(a.game)
     out_root = os.path.join(HERE, 'out')
     run_dir = os.path.join(out_root, datetime.datetime.now().strftime('%Y%m%d-%H%M%S'))
     cmdline = ' '.join(['StarWarsG.exe'] + (WINDOWED if a.windowed or a.no_launch else []) + MODPATH)
@@ -134,7 +134,7 @@ def main():
         say('\n' + '=' * 110 + STEPS + '=' * 110)
         t0 = time.time()
         if not a.no_launch:
-            subprocess.Popen([exe] + (WINDOWED if a.windowed else []) + MODPATH, cwd=corr)
+            foc.start(a.game, MODPATH, windowed=a.windowed)
             say('Game launched: ' + cmdline)
         else:
             say('Start the game yourself, in %s:\n  %s' % (corr, cmdline))

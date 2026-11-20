@@ -23,7 +23,9 @@ import struct
 import sys
 
 sys.dont_write_bytecode = True
-DEFAULT_EXE = r'F:\SteamLibrary\steamapps\common\Star Wars Empire at War\corruption\StarWarsG.exe'
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'common'))
+import launch_foc  # noqa: E402  (common/launch_foc.py)
+DEFAULT_EXE = launch_foc.game_exe(launch_foc.DEFAULT_GAME)
 
 PRIMITIVES = {0x1ffb40: 'int', 0x1ffbb0: 'float', 0x532480: 'float_b', 0x5324d0: 'float01', 0x1ffdb0: 'percent'}
 # (phase, function starts any of which on the stack gives the phase) - first match wins

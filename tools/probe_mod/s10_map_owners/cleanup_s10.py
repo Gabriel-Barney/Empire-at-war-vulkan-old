@@ -17,7 +17,8 @@ import time
 
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_GAME = r'F:\SteamLibrary\steamapps\common\Star Wars Empire at War'
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'common'))
+from launch_foc import DEFAULT_GAME  # noqa: E402,F401  (common/launch_foc.py)
 MARKER = 'S10_PROBE_MARKER.txt'
 LOG_NAME = 's10mapowners'
 

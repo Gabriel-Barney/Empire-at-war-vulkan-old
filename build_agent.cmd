@@ -74,6 +74,9 @@ if errorlevel 1 (echo build_agent: fix the literal above first; nothing was buil
 rem ref3 t03: build-tree names are spelled only in tools\lint\build_trees.py (instant).
 python -I tools\lint\build_trees.py check
 if errorlevel 1 (echo build_agent: ask tools\lint\build_trees.py for the tree names above; nothing was built.& exit /b 1)
+rem ref3 t01: probe kits start StarWarsG.exe only through tools\probe_mod\common\launch_foc.py (instant).
+python -I tools\lint\check_probe_launch.py
+if errorlevel 1 (echo build_agent: start the game through common\launch_foc.py in the kit above; nothing was built.& exit /b 1)
 rem mcx0 t03: the tag ledger and the Lua binding effect column match the code (tools\lint\check_tag_ledger.py, about a second).
 python -I tools\lint\check_tag_ledger.py
 if errorlevel 1 (echo build_agent: regenerate the ledger named above first; nothing was built.& exit /b 1)

@@ -33,7 +33,8 @@ import oi_cleanup  # noqa: E402
 import oi_parse  # noqa: E402
 
 MODPATH = 'MODPATH=Mods\\' + build_oi_mod.MOD_NAME
-WINDOWED = ['WINDOWED', 'SCREENWIDTH=1920', 'SCREENHEIGHT=1080']
+import launch_foc as foc  # noqa: E402  (common/launch_foc.py: the one place a kit starts StarWarsG.exe)
+WINDOWED = foc.WINDOWED
 SKIRMISH_NAME = {'_MP_LAND_DAGOBAH': 'DAGOBAH'}
 
 
@@ -65,8 +66,8 @@ def main():
     ap.add_argument('--scan-sec', type=float, default=5.0)
     ap.add_argument('--source-game', help=argparse.SUPPRESS)  # offline test: read shipped files here, install in --game
     a = ap.parse_args()
-    corr = os.path.join(a.game, 'corruption')
-    exe = os.path.join(corr, 'StarWarsG.exe')
+    corr = foc.corruption_dir(a.game)
+    exe = foc.game_exe(a.game)
     if not os.path.isfile(exe):
         say('StarWarsG.exe not found under', corr)
         say('OI_RUN_DONE exit=20')
@@ -109,7 +110,7 @@ def main():
         else:
             if not a.no_launch:
                 # Windowed: an exclusive-fullscreen game minimises on the first focus change.
-                subprocess.Popen([exe] + WINDOWED + [MODPATH], cwd=corr)
+                foc.start(a.game, [MODPATH])
                 say('Game launched: StarWarsG.exe %s %s' % (' '.join(WINDOWED), MODPATH))
             set_state(run_dir, state='waiting_for_game_start', run_dir=run_dir)
             while not running('StarWarsG.exe'):

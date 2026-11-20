@@ -12,7 +12,7 @@ covers Naboo corruption at 617). The findings go in `docs/re/BKG1_RE_ANSWERS.md`
 
 | File | What |
 |---|---|
-| `goalpass_dbg.py` | The debugger (Windows debug API via ctypes; imports the Win32 pieces and the `Tracer` base of `../cu8h_probes/cu8h_dbg.py`, and `../a1_tactical/a1mem.py` for the exe identity). Hardware **execute** breakpoints (DR7 R/W 00, LEN 00) in every thread, new threads too: Dr0 RVA 0x6cb511 targeted evaluation, Dr1 0x6cb2ae global evaluation, Dr2 0x6cad26 Commit, Dr3 0x698de0 Weighted_Random_Pick entry (gai3 t05: the FindTarget candidate list, `PICK` lines). Sets the Resume Flag on every hit. Never writes game memory |
+| `goalpass_dbg.py` | The debugger (Windows debug API via ctypes; imports the Win32 pieces and the `Tracer` base of `../cu8h_probes/cu8h_dbg.py`, and `../common/a1mem.py` for the exe identity). Hardware **execute** breakpoints (DR7 R/W 00, LEN 00) in every thread, new threads too: Dr0 RVA 0x6cb511 targeted evaluation, Dr1 0x6cb2ae global evaluation, Dr2 0x6cad26 Commit, Dr3 0x698de0 Weighted_Random_Pick entry (gai3 t05: the FindTarget candidate list, `PICK` lines). Sets the Resume Flag on every hit. Never writes game memory |
 | `goalpass_parse.py` | `trace.log` → `report.txt`, `passes.tsv`, `evals.tsv`, `picks.tsv` (run by `goalpass_dbg.py --out-dir` at the end; can be rerun by hand) |
 | `run_goalpass.cmd` | Starts the debugger waiting for `StarWarsG.exe`, writes `out\<yyyymmdd-hhmmss>-goalpass\` and `out\latest.txt`, parses at the end |
 | `cleanup_goalpass.cmd` | Removes nothing from the game (no mod). Stops a leftover debugger through `out\stop` (it clears its breakpoints and detaches; the game keeps running) |

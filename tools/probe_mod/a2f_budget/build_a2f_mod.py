@@ -54,7 +54,7 @@ import a2fb_spec  # noqa: E402
 
 MOD_NAME = 'A2fBudgetProbe'
 MARKER = 'A2FB_PROBE_MARKER.txt'
-DEFAULT_GAME = r'F:\SteamLibrary\steamapps\common\Star Wars Empire at War'
+from launch_foc import DEFAULT_GAME  # noqa: E402,F401  (common/launch_foc.py)
 MASTERTEXT = 'DATA\\TEXT\\MASTERTEXTFILE_ENGLISH.DAT'
 FREESTORE = 'DATA\\SCRIPTS\\FREESTORE\\GALACTICFREESTORE.LUA'
 SCORING = 'DATA\\SCRIPTS\\MISCELLANEOUS\\GAMESCORING.LUA'
@@ -160,8 +160,7 @@ def canary_built(ch, percept=True, saboteur=False):
     return True
 
 
-def crlf(text):
-    return text.replace('\r\n', '\n').replace('\n', '\r\n').encode('latin-1')
+from payload import crlf  # noqa: E402,F401  (common/payload.py)
 
 
 def write(path, data):

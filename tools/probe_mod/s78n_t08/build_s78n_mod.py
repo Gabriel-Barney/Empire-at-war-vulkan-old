@@ -148,8 +148,7 @@ class Source:
         return data, src
 
 
-def crlf(text):
-    return text.replace('\r\n', '\n').replace('\n', '\r\n').encode('latin-1')
+from payload import crlf  # noqa: E402,F401  (common/payload.py)
 
 
 def write(path, data):

@@ -51,7 +51,7 @@ sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)       # -I drops the script folder from sys.path
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'cu8h_probes'))
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'a1_tactical'))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
 import cu8h_dbg as D  # noqa: E402  (Win32 pieces: k32, Ctx, Log, kv, constants, Tracer base)
 import a1mem  # noqa: E402  (find_pids, exe identity, FACTIONS)
 

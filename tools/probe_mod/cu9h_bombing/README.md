@@ -164,7 +164,7 @@ Other files in `out\<run>\`:
   - `GameConstants.xml` is the shipped file with `Max_` and `Min_Bombing_Run_Interval_Seconds` set to 60.
   - `MasterTextFile_English.dat` is the shipped file plus the probe strings.
   - Before writing anything, the builder checks that the target's land map resolves in the install.
-- **Reader** (`cu9h_run.py`, `cu9h_mem.py`, through `../a1_tactical/a1mem.py`): it only reads memory. The layout is
+- **Reader** (`cu9h_run.py`, `cu9h_mem.py`, through `../common/a1mem.py`): it only reads memory. The layout is
   in `cu9h_mem.py`'s docstring:
   - the HUD object at RVA 0xb27f60;
   - the land mode's +0x38 bombing-run manager and its records;

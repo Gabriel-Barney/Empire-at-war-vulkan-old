@@ -77,8 +77,7 @@ def config(game, map_name, human, spawn=True, invulnerable=True, session='?', sc
     return cfg
 
 
-def lua_str(s):
-    return '"%s"' % str(s).replace('\\', '\\\\').replace('"', '\\"')
+from payload import lua_quote as lua_str  # noqa: E402  (common/payload.py)
 
 
 def lua_config(cfg):

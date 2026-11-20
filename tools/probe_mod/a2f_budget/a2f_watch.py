@@ -19,7 +19,7 @@ logic frame, so a flag that is set for even one frame is seen.  Output lines (JS
   {"ev": "flag", ...}    the reset flag changed (from, to) - the setter's moment, with the mode frame
   {"ev": "chain", ...}   the chain could not be followed (what failed), once per reason
 Every line carries wall (seconds since start), mf (mode frame) and gf (global logic frame).  The raw 0x90 bytes of the
-budget block are in "raw" (hex) for offline decoding.  Mode frame values come from a1_tactical/a1mem.py (MAIN_LOOP.md
+budget block are in "raw" (hex) for offline decoding.  Mode frame values come from common/a1mem.py (MAIN_LOOP.md
 statics).
 """
 import json

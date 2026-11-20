@@ -29,7 +29,9 @@ import sys
 
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_EXE = r'F:\SteamLibrary\steamapps\common\Star Wars Empire at War\corruption\StarWarsG.exe'
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'common'))
+import launch_foc  # noqa: E402  (common/launch_foc.py)
+DEFAULT_EXE = launch_foc.game_exe(launch_foc.DEFAULT_GAME)
 
 
 def remove(path):

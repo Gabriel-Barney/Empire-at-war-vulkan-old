@@ -157,7 +157,7 @@ The builder reads these values from the game XML (see `--dry-run`). The fallback
   - Events are recorded as CSTART, CSTOP (3 still polls) and LEGTO (timeout, 1200 frames).
   - Each squad holds still for 120 frames after the stop, then the next leg is ordered.
 - **Records.** Records are strings `S8Q|KIND|...|END`. The probe keeps them in a global table. The runner finds them
-  with a read-only scan of the game's memory every 4 s (`../a1_tactical/a1mem.py`); it never writes the game's
+  with a read-only scan of the game's memory every 4 s (`../common/a1mem.py`); it never writes the game's
   memory. When the run is finished the probe records DONE.
 
 ## What the report prints

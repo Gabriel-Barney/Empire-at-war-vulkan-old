@@ -15,7 +15,7 @@ Ctrl+C).
   --report-only      rebuild report.txt from an earlier run's records.log (no game, no install)
 
 Records: the probe Lua keeps strings "Q6P|<KIND>|p=<probe>|...|END" alive in global tables; this script finds them with
-a read-only scan of the game's committed private memory every --scan-sec seconds (../a1_tactical/a1mem.py; retail
+a read-only scan of the game's committed private memory every --scan-sec seconds (../common/a1mem.py; retail
 _CustomScriptMessage / _MessagePopup show nothing). It never writes the game's memory.
 Output: tools\\probe_mod\\q6_t15_probes\\out\\<yyyymmdd-hhmmss>-<session>\\ with records.log, report.txt, run.json,
 run_status.txt (state=installing / waiting_for_game_start / game_running / collecting / done), cleanup.log;
@@ -37,12 +37,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
 from probe_run import say, running, set_state, scan_once  # noqa: E402
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'a1_tactical'))
 import build_q6_mod  # noqa: E402
 import q6_cleanup  # noqa: E402
 import q6_parse  # noqa: E402
 
-WINDOWED = ['WINDOWED', 'SCREENWIDTH=1920', 'SCREENHEIGHT=1080']
+import launch_foc as foc  # noqa: E402  (common/launch_foc.py: the one place a kit starts StarWarsG.exe)
+WINDOWED = foc.WINDOWED
 NEEDLE = b'Q6P|'
 RECORD_RE = re.compile(rb'Q6P\|[A-Z0-9_]+\|[ -~]{0,380}?\|END')
 
@@ -111,8 +111,8 @@ def main():
         say(text)
         return 0 if recs else 10
     import a1mem  # noqa: E402 - Windows-only ctypes; not needed for --report-only
-    corr = os.path.join(a.game, 'corruption')
-    exe = os.path.join(corr, 'StarWarsG.exe')
+    corr = foc.corruption_dir(a.game)
+    exe = foc.game_exe(a.game)
     if not os.path.isfile(exe):
         say('StarWarsG.exe not found under', corr)
         say('Q6_RUN_DONE exit=20')
@@ -147,7 +147,7 @@ def main():
         cmdline = ' '.join(['StarWarsG.exe'] + (WINDOWED if a.windowed else []) + mods)
         t0 = time.time()
         if not a.no_launch:
-            subprocess.Popen([exe] + (WINDOWED if a.windowed else []) + mods, cwd=corr)
+            foc.start(a.game, mods, windowed=a.windowed)
             say('Game launched: ' + cmdline)
         else:
             say('Start the game yourself, in %s:\n  %s' % (corr, cmdline))

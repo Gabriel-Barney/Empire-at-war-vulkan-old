@@ -119,7 +119,7 @@ to the `Collision_Mesh` names (record `MODE`). The visual stages then still kill
 
 The hook records polls. Each poll holds `Get_Hull`, `Get_Shield` and the object counts of the 5 breakoff props, the
 death clone and the explosion. It polls every 3 frames for 90 frames after a kill and every 30 frames otherwise. The
-records are `R1P|...|END` strings that `r1_run.py` finds with a read-only heap scan (`../a1_tactical/a1mem.py`).
+records are `R1P|...|END` strings that `r1_run.py` finds with a read-only heap scan (`../common/a1mem.py`).
 
 ## Run (Claude drives with computer use; Gabriel's go-ahead, CLAUDE.md rule 7)
 

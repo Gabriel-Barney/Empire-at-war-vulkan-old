@@ -35,6 +35,9 @@ import time
 import traceback
 import zlib
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'common'))
+import launch_foc as foc  # noqa: E402  (the one place a probe kit starts StarWarsG.exe)
+
 KIT = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.abspath(os.path.join(KIT, "..", "..", ".."))
 CAP = os.path.join(ROOT, "toolchain", "capture")
@@ -44,7 +47,7 @@ TOOLS = {
     "apitrace": os.path.join(CAP, "apitrace-14.0", "bin", "apitrace.exe"),
     "d3dretrace": os.path.join(CAP, "apitrace-14.0", "bin", "d3dretrace.exe"),
 }
-DEFAULT_GAME = r"F:\SteamLibrary\steamapps\common\Star Wars Empire at War"
+DEFAULT_GAME = foc.DEFAULT_GAME
 PATCH_JSON = "eaw_unified_component_regression_v2_install.json"
 # Files the game itself rewrites on every launch; allowed to differ after a run.
 GAME_WRITTEN = re.compile(r"^(_.*\.txt|.*\.log|temp\.rec|LogFile\.txt)$", re.I)
@@ -405,7 +408,7 @@ class Kit:
                     os.remove(os.path.join(self.control, n))
             env = dict(os.environ)
             env.update(env_set)
-            game_proc = subprocess.Popen([exe] + gargs, cwd=corr, env=env)
+            game_proc = foc.start(game, gargs, windowed=False, env=env)  # common/launch_foc.py
             self.step("game started (pid %d)" % game_proc.pid)
             self.status["launch"]["started"] = now()
             save_json(self.status, os.path.join(run_dir, "status.json"))

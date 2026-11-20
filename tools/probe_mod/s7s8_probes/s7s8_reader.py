@@ -5,7 +5,7 @@
                  [--scan-sec 5] [--poll-sec 0.004] [--allow-unknown-exe] [--pid N --test-base 0xADDR]
   s7s8_reader.py --selftest          offline checks (record regex, model-pointer search, extra-field decoding)
 
-Process access, exe check and heap scan come from tools/probe_mod/a1_tactical/a1mem.py (imported, not copied):
+Process access, exe check and heap scan come from tools/probe_mod/common/a1mem.py (imported, not copied):
 OpenProcess(VM_READ | QUERY_INFORMATION | SYNCHRONIZE) + ReadProcessMemory only; the game is never written.
 
 For every land and space mode it records, polling every --poll-sec (several polls per 30 Hz frame):
@@ -43,7 +43,7 @@ import time
 
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
-A1 = os.path.join(os.path.dirname(HERE), 'a1_tactical')
+A1 = os.path.join(os.path.dirname(HERE), 'common')
 sys.path.insert(0, HERE)
 sys.path.insert(0, A1)
 import a1mem  # noqa: E402

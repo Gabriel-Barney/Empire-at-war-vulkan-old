@@ -29,6 +29,7 @@ ROOT = os.path.dirname(HERE)
 REPO = os.path.abspath(os.path.join(ROOT, '..', '..', '..'))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(os.path.dirname(ROOT), 'common'))
+import payload  # noqa: E402  (common/payload.py)
 import lua50  # noqa: E402
 import a1_parse  # noqa: E402
 import build_a1_mod  # noqa: E402
@@ -101,18 +102,11 @@ def lua_schedule(model, frames):
 
 
 def run_lua(script, mode, model, frames, tag):
-    path = os.path.join(OUT, 'harness_%s.lua' % tag)
-    with open(path, 'w') as f:
-        f.write(STUBS)
-        f.write('A1T_SCRIPT = [[%s]]\nA1T_MODE = "%s"\n' % (script, mode))
-        f.write(lua_schedule(model, frames))
-        f.write(DRIVER)
-    r = subprocess.run([LUA, path], capture_output=True, text=True)
-    with open(os.path.join(OUT, 'lua_%s.txt' % tag), 'w') as f:
-        f.write(r.stdout + r.stderr)
-    recs = [line for line in r.stdout.splitlines() if line.startswith('A1P1|')]
-    calls = [line for line in r.stdout.splitlines() if line.startswith('CALLS')]
-    return r.returncode, recs, calls, r.stdout + r.stderr
+    rc, out, text = payload.run_harness(
+        LUA, os.path.join(OUT, 'harness_%s.lua' % tag),
+        [STUBS, 'A1T_SCRIPT = [[%s]]\nA1T_MODE = "%s"\n' % (script, mode), lua_schedule(model, frames), DRIVER],
+        log=os.path.join(OUT, 'lua_%s.txt' % tag))
+    return rc, payload.lines_with(out, 'A1P1|'), payload.lines_with(out, 'CALLS'), text
 
 
 def check(cond, what, fails):

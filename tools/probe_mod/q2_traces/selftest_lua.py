@@ -31,7 +31,6 @@ REPO = os.path.abspath(os.path.join(HERE, '..', '..', '..'))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
 from lua50 import find_lua  # noqa: E402
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'a1_tactical'))
 import q2lua_reader  # noqa: E402
 
 MOD = os.path.join(HERE, 'mod', 'Q2Trace', 'Data', 'Scripts')
@@ -591,8 +590,7 @@ def check(cond, what):
         FAILS.append(what)
 
 
-def lua_str(s):
-    return '"' + s.replace('\\', '\\\\').replace('"', '\\"') + '"'
+from payload import lua_quote as lua_str  # noqa: E402  (common/payload.py)
 
 
 def run_harness(lua, name, script_path, body):

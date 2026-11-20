@@ -32,7 +32,8 @@ from probe_run import say, running  # noqa: E402
 import build_modc_mod  # noqa: E402
 import modc_cleanup  # noqa: E402
 
-WINDOWED = ['WINDOWED', 'SCREENWIDTH=1920', 'SCREENHEIGHT=1080']
+import launch_foc as foc  # noqa: E402  (common/launch_foc.py: the one place a kit starts StarWarsG.exe)
+WINDOWED = foc.WINDOWED
 STEPS = r'''
 In the game (English text):
   1. Single Player -> Galactic Conquest. Look at the campaign list: are "MODC PROBE 3: DIGIT ROOT" and
@@ -95,8 +96,8 @@ def main():
     ap.add_argument('--empty-listed', choices=('yes', 'no', 'unknown'))
     ap.add_argument('--wait-start-sec', type=float, default=900)
     a = ap.parse_args()
-    corr = os.path.join(a.game, 'corruption')
-    exe = os.path.join(corr, 'StarWarsG.exe')
+    corr = foc.corruption_dir(a.game)
+    exe = foc.game_exe(a.game)
     if not os.path.isfile(exe):
         say('StarWarsG.exe not found under', corr)
         say('MODC_RUN_DONE exit=20')
@@ -122,7 +123,7 @@ def main():
         say('\n' + '=' * 110 + STEPS + '=' * 110)
         t0 = time.time()
         if not a.no_launch:
-            subprocess.Popen([exe] + args, cwd=corr)
+            foc.start(a.game, args, windowed=False)
             say('Game launched: ' + info['cmdline'])
         else:
             say('Start the game yourself, in %s:\n  %s' % (corr, info['cmdline']))

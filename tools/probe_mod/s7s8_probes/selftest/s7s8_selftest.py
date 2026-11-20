@@ -37,6 +37,7 @@ ROOT = os.path.dirname(HERE)
 REPO = os.path.abspath(os.path.join(ROOT, '..', '..', '..'))
 sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.join(os.path.dirname(ROOT), 'common'))
+import payload  # noqa: E402  (common/payload.py)
 import lua50  # noqa: E402
 import build_s7s8_mod  # noqa: E402
 import s7s8_parse  # noqa: E402
@@ -253,18 +254,12 @@ def check(cond, what, fails):
 
 
 def run_lua(script, faction, mode, frames, tag):
-    path = os.path.join(OUT, 'harness_%s.lua' % tag)
-    with open(path, 'w') as f:
-        f.write(STUBS)
-        f.write('H_SCRIPT = [[%s]]\nH_FACTION = "%s"\nH_MODE = "%s"\nH_FRAMES = %d\n' % (script, faction, mode, frames))
-        f.write(DRIVER)
-    r = subprocess.run([LUA, path], capture_output=True, text=True)
-    text = r.stdout + r.stderr
-    with open(os.path.join(OUT, 'lua_%s.txt' % tag), 'w') as f:
-        f.write(text)
-    recs = [line for line in r.stdout.splitlines() if line.startswith('S78P1|')]
-    state = next((line for line in r.stdout.splitlines() if line.startswith('STATE')), '')
-    return r.returncode, recs, state, text
+    rc, out, text = payload.run_harness(
+        LUA, os.path.join(OUT, 'harness_%s.lua' % tag),
+        [STUBS, 'H_SCRIPT = [[%s]]\nH_FACTION = "%s"\nH_MODE = "%s"\nH_FRAMES = %d\n' % (script, faction, mode, frames),
+         DRIVER],
+        log=os.path.join(OUT, 'lua_%s.txt' % tag))
+    return rc, payload.lines_with(out, 'S78P1|'), payload.first_line_with(out, 'STATE'), text
 
 
 def kind(r):

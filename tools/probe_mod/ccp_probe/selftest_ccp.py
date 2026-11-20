@@ -27,6 +27,7 @@ PROBE_MOD = os.path.dirname(HERE)
 ROOT = os.path.normpath(os.path.join(PROBE_MOD, '..', '..'))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(PROBE_MOD, 'common'))
+import payload  # noqa: E402  (common/payload.py)
 import lua50  # noqa: E402
 import build_ccp_mod  # noqa: E402
 import ccp_cleanup  # noqa: E402
@@ -136,22 +137,16 @@ def check(c, what, fails):
 
 def run_lua(lua, work, tag, cfg, ai_fac='REBEL', empire_human=True, frames=1200, two=False):
     names = list(cfg['relevant']) + list(cfg['fixed']) + [s['type'] for s in cfg['squads'] + cfg['ai_squads']]
-    path = os.path.join(work, 'harness_%s.lua' % tag)
-    with open(path, 'w', encoding='ascii', newline='\n') as f:
-        f.write(STUBS)
-        f.write('H_MODE = "Land"\nH_AI_FAC = "%s"\nH_EMPIRE_HUMAN = %s\nH_FRAMES = %d\nH_TWO = %s\n' % (
-            ai_fac, 'true' if empire_human else 'false', frames, 'true' if two else 'false'))
-        f.write('H_TYPE_NAMES = { %s }\n' % ', '.join('"%s"' % n for n in names))
-        f.write(build_ccp_mod.lua_config(cfg) + '\n')
-        f.write(open(build_ccp_mod.HOOK, encoding='ascii').read())
-        f.write(DRIVER)
-    r = subprocess.run([lua, path], capture_output=True, text=True)
-    text = r.stdout + r.stderr
-    with open(os.path.join(work, 'lua_%s.txt' % tag), 'w') as f:
-        f.write(text)
-    recs = [ln for ln in r.stdout.splitlines() if ln.startswith('CCP1|')]
-    state = next((ln for ln in r.stdout.splitlines() if ln.startswith('H_STATE')), '')
-    return r.returncode, recs, state, text
+    parts = [STUBS,
+             'H_MODE = "Land"\nH_AI_FAC = "%s"\nH_EMPIRE_HUMAN = %s\nH_FRAMES = %d\nH_TWO = %s\n' % (
+                 ai_fac, 'true' if empire_human else 'false', frames, 'true' if two else 'false'),
+             'H_TYPE_NAMES = { %s }\n' % ', '.join('"%s"' % n for n in names),
+             build_ccp_mod.lua_config(cfg) + '\n',
+             open(build_ccp_mod.HOOK, encoding='ascii').read(),
+             DRIVER]
+    rc, out, text = payload.run_harness(lua, os.path.join(work, 'harness_%s.lua' % tag), parts,
+                                        log=os.path.join(work, 'lua_%s.txt' % tag), encoding='ascii', newline='\n')
+    return rc, payload.lines_with(out, 'CCP1|'), payload.first_line_with(out, 'H_STATE'), text
 
 
 def kinds(recs):

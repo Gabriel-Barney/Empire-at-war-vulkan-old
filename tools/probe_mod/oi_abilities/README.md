@@ -13,7 +13,7 @@ In-game probe for two `[port]` guesses in `docs/re/ABILITIES_HARDPOINTS.md`:
 
 The probe does not play a game for you. One AI player's free-store script, the shipped
 `BusyTacticalFreeStore.lua` with this hook appended, spawns the units and runs seven fixed scenarios.
-A read-only memory reader (`oi_reader.py`, built on `../a1_tactical/a1mem.py`) records each spawned object's
+A read-only memory reader (`oi_reader.py`, built on `../common/a1mem.py`) records each spawned object's
 health, flags, owner, position and primary animation slot on every frame it can see.
 `oi_parse.py` turns the recording into `report.txt`.
 

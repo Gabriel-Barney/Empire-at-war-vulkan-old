@@ -22,7 +22,9 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'cu8h_probes'))
 import cu9h_mem as M  # noqa: E402
 
-DEFAULT_EXE = r'F:\SteamLibrary\steamapps\common\Star Wars Empire at War\corruption\StarWarsG.exe'
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'common'))
+import launch_foc  # noqa: E402  (common/launch_foc.py)
+DEFAULT_EXE = launch_foc.game_exe(launch_foc.DEFAULT_GAME)
 KNOWN = {0x2ee40: 'world_mouse_move(0x2ee40)', 0x3035c0: 'hud_reset(0x3035c0)', 0x30c3b0: 'hud_frame(0x30c3b0)',
          0x312570: 'land_hud_update(0x312570)', 0x2e7950: 'targeting_toggle(0x2e7950)',
          0x346a80: 'b_special_weapon_click(0x346a80)', 0x2f6c30: 'hud_mouse(0x2f6c30)', 0x63f00: 'hotkey(0x63f00)',

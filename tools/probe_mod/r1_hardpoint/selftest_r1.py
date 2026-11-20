@@ -195,8 +195,7 @@ ANSWERS = {
 }
 
 
-def lua_str(s):
-    return '"%s"' % s.replace('\\', '\\\\').replace('"', '\\"')
+from payload import lua_quote as lua_str  # noqa: E402  (common/payload.py)
 
 
 def run_variant(lua, work, cfg, lookup, human=True, mode='Space', stop=False):

@@ -40,7 +40,7 @@ from array import array
 sys.dont_write_bytecode = True
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'a1_tactical'))
+sys.path.insert(0, os.path.join(os.path.dirname(HERE), 'common'))
 import a1mem  # noqa: E402  (read-only process access + documented layout, validated by the A1 run 2026-10-31)
 from a1mem import Log, wait_for_game  # noqa: E402
 

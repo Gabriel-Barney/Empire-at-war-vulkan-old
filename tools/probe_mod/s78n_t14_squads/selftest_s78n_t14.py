@@ -447,16 +447,10 @@ OUT:close()
 '''
 
 
-def run_lua(lua, workdir, name, chunks):
-    path = os.path.join(workdir, name + '.lua')
-    with open(path, 'w', newline='\n') as f:
-        f.write('\n'.join(chunks))
-    r = subprocess.run([lua, path], capture_output=True, text=True, cwd=workdir)
-    return r.returncode, (r.stdout + r.stderr).strip()
+from payload import run_lua_chunks as run_lua  # noqa: E402  (common/payload.py)
 
 
-def lua_str(p):
-    return p.replace('\\', '/')
+from payload import lua_path as lua_str  # noqa: E402  (common/payload.py)
 
 
 def check_xml_patch(cfg, out):
