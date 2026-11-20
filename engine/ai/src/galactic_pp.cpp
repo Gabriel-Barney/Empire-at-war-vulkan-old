@@ -4,6 +4,7 @@
 // [H] rules are the doc's; [M] / [port] mark the data the port does not have (see the A2 open items).
 #include "galactic_ai_impl.hpp"
 
+#include "alamo/ai/pp_marshallers.hpp"  // ref5 t05
 #include "alamo/galactic/auto_resolve.hpp"
 
 namespace alamo::ai {
@@ -132,6 +133,27 @@ struct GalPp {
     const TeamDef& team_def(const PpSlot& s) const { return def.task_forces[s.tf].teams[s.team]; }
     bool slot_percent(const PpSlot& s) const { return team_def(s).percent; }
     int32_t slot_max(const PpSlot& s) const { return team_def(s).max; }
+
+    // ---- ref5 t05: the hooks of the shared marshallers (pp_marshallers.hpp) ----
+    void pp_begin_slots() {}
+    void pp_init_slot(PpSlot& s, uint32_t tf, uint32_t) {
+        const TaskForceDef& d = def.task_forces[tf];
+        s.hero_attach = !d.deny_hero_attach;
+        s.special = !d.deny_special_weapon_attach;
+        s.stage = tf < stages.size() ? stages[tf] : tplanet();
+    }
+    template <class F>
+    void pp_team_candidates(size_t si, F&& add);  // 0x729550, below (needs w)
+    int32_t pp_draw_start_team(int32_t teams) { return w.rng.synced().range_int(0, teams - 1); }
+    float pp_percent_money() const { return pct_money; }
+    float pp_cost(uint32_t t) const { return w.cost_none(t); }
+    uint64_t pp_mask(uint32_t t) const { return w.mask_of(t); }
+    float pp_power(uint32_t t) const { return w.power_of(t); }
+    int32_t pp_tech_level(uint32_t t) const {
+        const gal::TypeInfo* x = ti(t);
+        return x ? x->tech_level : 0;
+    }
+    bool pp_tech_veto(const PpRec& r, int32_t tech) const { return r.free_unit < 0 && tech > player_tech(); }  // galactic only
 
     uint32_t ensure_rec(uint32_t type) {
         const auto it = rec_of_type.find(type);
@@ -507,143 +529,31 @@ private:
     GalPp& p_;
 };
 
-class TechTreeM final : public PpMarshaller {
-public:
-    explicit TechTreeM(GalPp& p) : p_(p) {}
-    float score(uint32_t i) override {  // 0x729190 [H]
-        const PpRec& r = p_.recs[i];
-        const gal::TypeInfo* x = p_.ti(r.type);
-        const int32_t tech = x ? x->tech_level : 0;
-        if (r.free_unit < 0 && tech > p_.player_tech()) return kVeto;
-        return static_cast<float>(tech) / 5.0f * 2.0f;
+// 0x729550 (Setup B of the Plan marshaller) [H]: each type of the slot's team expansion; the generic orbital structure is
+// replaced by the planet-specific variant 0x3f8fd0 on the goal's target planet.
+template <class F>
+void GalPp::pp_team_candidates(size_t si, F&& add) {
+    const PpSlot& s = slots[si];
+    for (uint32_t t : w.team_type_list(plan, s.tf, s.team)) {
+        // Behaviour 0x5C DUMMY_STAR_BASE (STRATEGIC_GAPS §1.2) = the StarBase kind here [M]; a 0x5B
+        // DUMMY_GROUND_BASE variant (0x3f8c40) is not modelled [port: no team names one].
+        const bool generic = is_orbital_structure(t);
+        if (generic) {
+            // Replaced by the planet-specific variant 0x3f8fd0 on the goal's target planet (IgnoreTarget plans
+            // too); every generic entry maps to the same type and dedupes through ensure_rec (A2M_R3_RE_A §1.2)
+            // [H]. No replacement -> the generic expansion itself stays a candidate (A2M_R3_RE_A §1.3) and
+            // Production Setup C vetoes it when 0x2804d0 refuses it (wrong faction: step 2; level: step 20).
+            const uint32_t rep = has_target() ? w.next_starbase_type(tplanet()) : gal::kNoIndex;
+            if (rep != gal::kNoIndex) t = rep;
+        }
+        if (!(affiliated(t) || generic || free_store_holds(t))) continue;
+        add(t);
     }
+}
 
-private:
-    GalPp& p_;
-};
+using TechTreeM = TechTreeMarshaller<GalPp>;  // ref5 t05: 0x729190, shared with tactical
+using PlanM = PlanMarshaller<GalPp>;          // ref5 t05: 0x72a3b0 .. 0x72a060, shared with tactical
 
-class PlanM final : public PpMarshaller {
-public:
-    explicit PlanM(GalPp& p) : p_(p) {}
-    bool permanent_veto() const override { return true; }
-    void setup_a() override {  // 0x72a3b0 [H]
-        p_.slots.clear();
-        for (uint32_t tf = 0; tf < p_.def.task_forces.size(); ++tf) {
-            const TaskForceDef& d = p_.def.task_forces[tf];
-            p_.any_hero_attach = p_.any_hero_attach || !d.deny_hero_attach;
-            p_.any_special = p_.any_special || !d.deny_special_weapon_attach;
-            p_.any_escort = p_.any_escort || d.escort;
-            for (uint32_t team = 0; team < d.teams.size(); ++team) {
-                PpSlot s;
-                s.tf = tf;
-                s.team = team;
-                s.hero_attach = !d.deny_hero_attach;
-                s.special = !d.deny_special_weapon_attach;
-                s.stage = tf < p_.stages.size() ? p_.stages[tf] : p_.tplanet();
-                p_.slots.push_back(std::move(s));
-            }
-        }
-        for (PpRec& r : p_.recs) r.teams.clear();
-    }
-    void setup_b() override {  // 0x729550 [H]
-        for (size_t si = 0; si < p_.slots.size(); ++si) {
-            const PpSlot& s = p_.slots[si];
-            for (uint32_t t : p_.w.team_type_list(p_.plan, s.tf, s.team)) {
-                // Behaviour 0x5C DUMMY_STAR_BASE (STRATEGIC_GAPS §1.2) = the StarBase kind here [M]; a 0x5B
-                // DUMMY_GROUND_BASE variant (0x3f8c40) is not modelled [port: no team names one].
-                const bool generic = p_.is_orbital_structure(t);
-                if (generic) {
-                    // Replaced by the planet-specific variant 0x3f8fd0 on the goal's target planet (IgnoreTarget plans
-                    // too); every generic entry maps to the same type and dedupes through ensure_rec (A2M_R3_RE_A §1.2)
-                    // [H]. No replacement -> the generic expansion itself stays a candidate (A2M_R3_RE_A §1.3) and
-                    // Production Setup C vetoes it when 0x2804d0 refuses it (wrong faction: step 2; level: step 20).
-                    const uint32_t rep = p_.has_target() ? p_.w.next_starbase_type(p_.tplanet()) : gal::kNoIndex;
-                    if (rep != gal::kNoIndex) t = rep;
-                }
-                if (!(p_.affiliated(t) || generic || p_.free_store_holds(t))) continue;
-                PpRec& r = p_.recs[p_.ensure_rec(t)];
-                if (std::find(r.teams.begin(), r.teams.end(), static_cast<int32_t>(si)) == r.teams.end())
-                    r.teams.push_back(static_cast<int32_t>(si));
-            }
-        }
-    }
-    void setup_c() override {  // 0x729cc0 [H]: synced int draw per candidate with >= 2 teams (rejection sampling)
-        for (PpRec& r : p_.recs)
-            r.start_team = r.teams.empty() ? -1 : p_.w.rng.synced().range_int(0, static_cast<int32_t>(r.teams.size()) - 1);
-    }
-    float score(uint32_t i) override {  // 0x72a170 [H]
-        PpRec& r = p_.recs[i];
-        r.team_slot = -1;
-        const auto n = static_cast<int32_t>(r.teams.size());
-        for (int32_t k = 0; k < n; ++k) {
-            const int32_t s = r.teams[static_cast<size_t>((r.start_team + k) % n)];
-            const PpSlot& slot = p_.slots[static_cast<size_t>(s)];
-            if (p_.slot_percent(slot) || static_cast<int32_t>(slot.assigned.size()) < p_.slot_max(slot)) {
-                r.team_slot = s;
-                break;
-            }
-        }
-        for (const int32_t s : r.teams) {
-            const PpSlot& slot = p_.slots[static_cast<size_t>(s)];
-            const TeamDef& td = p_.team_def(slot);
-            if (!td.percent) {
-                if (static_cast<int32_t>(slot.assigned.size()) < td.max)
-                    return 1.0f - static_cast<float>(slot.assigned.size()) / static_cast<float>(td.max);
-            } else {
-                if (!p_.def.ignore_target) return 1.0f;
-                if (td.percent_value / 100.0f * p_.pct_money > p_.w.cost_none(r.type) + slot.cost_sum) return 1.0f;
-            }
-        }
-        if (p_.any_hero_attach && r.is_hero) return 0.0f;
-        return kVeto;
-    }
-    bool place(uint32_t sel, uint32_t rec, bool respect_met) {
-        const PpRec& r = p_.recs[rec];
-        const auto n = static_cast<int32_t>(r.teams.size());
-        for (int32_t k = 0; k < n; ++k) {
-            const int32_t s = r.teams[static_cast<size_t>((std::max(r.start_team, 0) + k) % n)];
-            PpSlot& slot = p_.slots[static_cast<size_t>(s)];
-            // First pass (§9.10): skip a non-escort slot when 0x528 && !0x529, an escort slot when 0x529 && !0x528; in
-            // galactic (0x529 = 1) escort slots wait while the main contrast is unmet, non-escort slots never wait.
-            const bool escort = p_.tf_def(slot.tf).escort;
-            if (respect_met && galactic_place_skip(p_.main_met, p_.escort_met, escort)) continue;
-            if (!(p_.slot_percent(slot) || static_cast<int32_t>(slot.assigned.size()) < p_.slot_max(slot))) continue;
-            slot.assigned.push_back(sel);
-            slot.cost_sum += p_.w.cost_none(r.type);
-            slot.mask |= p_.w.mask_of(r.type);
-            for (PpSlot& o : p_.slots)
-                if (o.tf == slot.tf) {
-                    ++o.tf_count;
-                    o.tf_force += p_.w.power_of(r.type);
-                }
-            p_.sel_slot[sel] = s;
-            return true;
-        }
-        return false;
-    }
-    void commit(uint32_t i) override {  // 0x72a720 -> 0x729830 [H]
-        const auto sel = static_cast<uint32_t>(p_.sel_rec.size() - 1);
-        p_.selected_mask |= p_.w.mask_of(p_.recs[i].type);
-        if (!place(sel, i, true)) place(sel, i, false);
-    }
-    void finalize(bool& success) override {  // 0x72a060 [H]
-        bool required_tf = false;
-        for (const TaskForceDef& d : p_.def.task_forces) required_tf = required_tf || d.required;
-        if (p_.sel_rec.empty() && !required_tf) success = false;
-        for (const PpSlot& s : p_.slots) {
-            const TeamDef& td = p_.team_def(s);
-            const TaskForceDef& d = p_.tf_def(s.tf);
-            if (!td.percent && static_cast<int32_t>(s.assigned.size()) < td.min) success = false;
-            if (s.tf_force < d.minimum_total_force) success = false;
-            if (s.tf_count < d.minimum_total_size) success = false;
-        }
-        for (const uint64_t m : p_.required_masks())
-            if ((m & p_.selected_mask) == 0) success = false;
-    }
-
-private:
-    GalPp& p_;
-};
 
 class ProductionM final : public PpMarshaller {
 public:
@@ -980,9 +890,7 @@ public:
             const double R = p_.remaining[ei];
             if (!(P > 0.0 && wgt > 0.0f && R > 0.0)) continue;
             if (!(free || (p_.entries[ei].target * static_cast<double>(p_.tolerance) < R && p_.pop_allows(r.type)))) continue;
-            const double wp = static_cast<double>(wgt) * P;
-            const double d = std::max(R - wp, 0.0), m = std::max(R, wp);
-            const double s = m > 0.0 ? (1.0 - (d / m) * (d / m)) * static_cast<double>(wgt) : 0.0;
+            const double s = pp_contrast_pair_score(R, wgt, P);  // ref5 t05: 0x72b6a0, shared with tactical
             if (s > v) {
                 v = s;
                 r.contrast_entry = e;
@@ -996,16 +904,7 @@ public:
         // An untyped total of a layer this candidate covers is still short (§9.8 item 1): the totals by their layer byte.
         // Only through the main list (0x528 && rec+0xB0, §9.10); the escort-list check needs 0x525 (never in galactic).
         if (p_.main_met && r.non_escort && galactic_contrast_total_open(p_.entries, p_.remaining, r.space, r.ground)) return 0.0f;
-        for (const uint64_t m : p_.required_masks())
-            if ((m & p_.selected_mask) == 0 && (m & p_.w.mask_of(r.type)) != 0) return 0.0f;
-        for (const int32_t s : r.teams) {
-            const PpSlot& slot = p_.slots[static_cast<size_t>(s)];
-            const TeamDef& td = p_.team_def(slot);
-            const TaskForceDef& d = p_.tf_def(slot.tf);
-            if ((!td.percent && static_cast<int32_t>(slot.assigned.size()) < td.min) || slot.tf_force < d.minimum_total_force ||
-                slot.tf_count < d.minimum_total_size)
-                return 0.0f;
-        }
+        if (pp_contrast_still_needed(p_, r, p_.w.mask_of(r.type))) return 0.0f;  // ref5 t05: shared with tactical
         return kVeto;  // what normally ends the solve
     }
     void commit(uint32_t) override {  // 0x72bf80 -> 0x6c4b20 [H]
