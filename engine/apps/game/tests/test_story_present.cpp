@@ -572,6 +572,19 @@ void handler_test() {
     CHECK(s.component_flashing("b_zoom", 10.1) && !s.component_flashing("b_build", 10.1));
     CHECK(!s.component_flashing("b_zoom", 10.6) && s.component_flashing("b_build", 10.6));
     CHECK(s.component_flashing("b_zoom", 11.1) && !s.component_flashing("b_zoom", 12.1) && !s.component_flashing("b_build", 12.1));
+    {  // a zero time holds nothing: the flash runs as without DUAL_FLASH
+        game::StoryPresenter z = make();
+        z.on_reward("DUAL_FLASH", P{}, 0.0, 0);
+        z.on_reward("FLASH_GUI", P{"b_zoom"}, 0.0, 0);
+        CHECK(z.component_flashing("b_zoom", 0.1));
+        ByteWriter zw;  // a v1 blob (no DUAL_FLASH tail: bool, f64, f64, u32 count) still reads
+        z.write(zw, 0.0);
+        std::vector<uint8_t> v1(zw.bytes().begin(), zw.bytes().end() - 21);
+        v1[0] = 1;
+        game::StoryPresenter zr = make();
+        ByteReader zrr(v1);
+        CHECK(zr.read(zrr, 0.0) && zrr.done() && zr.component_flashing("b_zoom", 0.1));
+    }
     s.on_reward("FLASH_GUI", P{"b_next"}, 20.0, 0);  // the pair disarmed it: a flash at once
     CHECK(s.component_flashing("b_next", 20.0));
     s.on_reward("DUAL_FLASH", P{"2", "0.5"}, 30.0, 0);

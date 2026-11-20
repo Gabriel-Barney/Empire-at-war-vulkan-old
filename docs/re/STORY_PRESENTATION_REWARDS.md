@@ -227,7 +227,7 @@ tactical HUD alike (it wraps the two flash rewards). [M for the alternation timi
 
 Port (ref5 t02): StoryPresenter holds the flash part of the next two FLASH_GUI / FLASH_PLANET_GUI rewards (their arrows are
 added at once [M]); the second starts the pair: the first, then the second, each for `rate` seconds, alternating until `time`
-seconds have passed, then the reward is disarmed [M]. A zero rate flashes the first for the whole time [port]. HIDE_TUTORIAL_CURSOR
+seconds have passed, then the reward is disarmed [M]. A zero rate flashes the first for the whole time, a zero time disarms it and the flash runs as usual [port]; FLASH_PLANET_GUI regions that do not flash (PLANET, AFFILIATION, CREDITS, COINS) are not held [M]. HIDE_TUTORIAL_CURSOR
 drops the held flashes and disarms. The state is saved with the presenter (v2). No shipped story uses the reward.
 
 ## 3. GUI flash and pointer rewards, and the "flash id"

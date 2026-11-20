@@ -163,6 +163,7 @@ void StoryPresenter::push_camera(StoryCameraCommand::Kind kind, const std::vecto
 // DUAL_FLASH (§2.5): while armed, FLASH_GUI / FLASH_PLANET_GUI flashes are held; the second one held starts the pair, the
 // two alternating at `rate` seconds for `time` seconds [M: the alternation's phase and end]. The pair disarms it [M].
 void StoryPresenter::flash_or_hold(bool planet, std::string target, double now, double seconds) {
+    if (dual_.armed && !(dual_.time > 0.0)) dual_ = {};  // [port] no time to alternate in: the flashes run as without it
     if (!dual_.armed) {
         if (planet) object_flashes_.push_back({std::move(target), now, now + seconds});
         else flashes_.push_back({std::move(target), now, now + seconds});
