@@ -2859,10 +2859,11 @@ cmd::RejectReason BattleAi::execute_order(uint8_t player, const cmd::EventData& 
                     // the land attack move on the object itself - kind 3 with flag 0x01, the exact goal, slots, staging and
                     // the fire trim as for an enemy, no lock (the attack block below, kAttackBlockNoLock)
                     point_goal = !b_->space_ && (le32(b, 20) & at::kTfAttackMoveIssueAttack) != 0;
-                    // (not on the caller itself or its container: BKT1_ATTACK_RE §3.1, those stay a move to the point)
-                    bool self = false;
-                    for (const objects::ObjectId id : group.units)
-                        self = self || id == tu->id || b_->attack_mover(id) == tu->id || b_->attack_mover(id) == b_->attack_mover(tu->id);
+                    // (not on the caller itself or its container: BKT1_ATTACK_RE §3.1, those stay a move to the point). cmb3 t01 (b)
+                    // (b0169): the caller is the order's object (payload word 0); a squadmate of the caller, or a member of a
+                    // calling squad container, is neither, so it gets the block. tu is a battle unit, never a container, so
+                    // the caller's container (+0x2b0) cannot be it.
+                    const bool self = tu->id == static_cast<objects::ObjectId>(le32(b, 0));
                     nonhostile_block = !b_->space_ && !point_goal && !self;
                     if (self) point_goal = !b_->space_;
                 } else if (order == lua::LuaOrder::AttackMove && attackable) {

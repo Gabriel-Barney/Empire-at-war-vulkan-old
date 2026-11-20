@@ -500,6 +500,9 @@ bool AbilitySystem::set_active(Obj& o, uint32_t t, bool on, uint32_t frame, Obje
         }
         if (t != kSpreadOut) return true;
     }
+    // cmb3 t05 (b0451, ABILITIES_HARDPOINTS §2.5 [H]): 0x38a350 has no case for FIRE_LOBBING_SUPERWEAPON (47); its default
+    // returns false with nothing done (no handler, no active byte, no recharge, no event). The shot is command 25's alone.
+    if (t == kFireLobbingSuperweapon) return false;
     handler(o, t, on, frame, target);
     if (in.mode == 1) o.active[t] = on ? 1 : 0;
     update_emitter(o);
@@ -2184,12 +2187,14 @@ bool AbilitySystem::damage_listener(ObjectId victim, ObjectId source, const comb
             // Max_Projectile_Redirection_Angle_In_Degrees spread. Either way the original shot is consumed.
             // r3h t06: a redirect or block plays Idle_Blockblaster (0x1e), 0xFFFF, one-shot, blend 0.1, speed 2 when the
             // primary clip is idle-like or a finished Idle_Blockblaster (the host tests that). A victim whose current clip
-            // is Move (2) ends the listener "not handled" after the shot was sent on: the damage lands too.
+            // is Move (2) ends the listener "not handled" after the shot was sent on. cmb3 t08 (SAP_On_Take_Damage 0x37d160 ->
+            // 0x37b580 [H]): the dispatcher then tries the victim's next Take_Damage ability; when none handles the hit, the
+            // damage lands too.
             const bool moving_clip = host_.primary_clip && host_.primary_clip(victim) == 2;
             if (rng->range_float(0.0f, 1.0f) < pd.redirect_chance_modifier * s.redirect_chance &&
                 (!shot.flight || redirect_shot(victim, source, shot, 0.0f, frame, *rng))) {
                 event(AbilityEventKind::Redirected, 0, victim, source, frame);
-                if (moving_clip) return false;
+                if (moving_clip) continue;  // cmb3 t08 (0x37b580 [H]): "not handled" - the next listener, then the damage
                 queue_play(victim, kAnimIdleBlockBlaster, kDrawVariant, false, 0.1f, 2.0f, frame, true);
                 return true;
             }
@@ -2197,7 +2202,7 @@ bool AbilitySystem::damage_listener(ObjectId victim, ObjectId source, const comb
             if (rng->range_float(0.0f, 1.0f) < pd.block_chance_modifier * s.block_chance &&
                 (!shot.flight || redirect_shot(victim, kNoObject, shot, s.max_redirect_angle_deg, frame, *rng))) {
                 event(AbilityEventKind::Blocked, 0, victim, source, frame);
-                if (moving_clip) return false;
+                if (moving_clip) continue;  // cmb3 t08
                 queue_play(victim, kAnimIdleBlockBlaster, kDrawVariant, false, 0.1f, 2.0f, frame, true);
                 return true;
             }

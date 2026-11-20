@@ -108,6 +108,9 @@ int main(int argc, char** argv) {
     test_mcx4_opportunity_flags();          // mcx4 t10
     test_mcx4_tac2();                       // mcx4 t23, lane mcx4-tac2
     test_trl2_quake_gates_and_ramp();       // trl2 t03
+    test_cmb3_lobbing_mode_is_inert();      // cmb3 t05
+    test_cmb3_gravity_field_carried_units();  // cmb3 t06
+    test_cmb3_redirect_moving_next_listener();  // cmb3 t08
     test_battle(golden, write_golden);
     test_allocations();
     test_save_load_battle();  // N1 stage 2

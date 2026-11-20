@@ -465,6 +465,14 @@ void test_save_load() {
     CHECK(load_battle(b, saved, rng_w.bytes(), a.w.frame));
     CHECK(combat_bytes(*b.w.sys) == saved);  // write -> read -> write: identical bytes
     CHECK(combat_digest(*a.w.sys, a.w.rng) == combat_digest(*b.w.sys, b.w.rng));
+    // cmb3 t04 (b0439): the last tick's shot events keep their firing hardpoint and projectile serial (the host's
+    // Fire_SFXEvent lookup on the first post-load tick)
+    {
+        const auto ea = a.w.sys->shot_events(), eb = b.w.sys->shot_events();
+        CHECK(ea.size() == eb.size());
+        for (size_t i = 0; i < ea.size() && i < eb.size(); ++i)
+            CHECK(ea[i].shooter == eb[i].shooter && ea[i].hardpoint == eb[i].hardpoint && ea[i].serial == eb[i].serial);
+    }
     CHECK(a.registry.capture(a.w.frame).combined == b.registry.capture(b.w.frame).combined);
     CHECK(a.w.sys->modifier(11, ModList::FireRate) == b.w.sys->modifier(11, ModList::FireRate));
 
@@ -540,7 +548,7 @@ void test_save_rejects() {
     bad = saved;
     put_u32_at(bad, 0, 99);
     CHECK(rejected(bad));
-    for (const uint32_t v : {18u, 20u}) {  // only the current version (19: tru3 t03 Base_Shield_Upgrade key) is read (cu6)
+    for (const uint32_t v : {19u, 21u}) {  // only the current version (20: cmb3 t04 shot event hardpoint / serial) is read (cu6)
         bad = saved;
         put_u32_at(bad, 0, v);
         CHECK(rejected(bad));
@@ -754,7 +762,7 @@ void test_stickiness_override() {
         std::vector<size_t> at;
         for (size_t i = 0; i + 4 <= img.size(); ++i)
             if (std::memcmp(&img[i], pat, 4) == 0) at.push_back(i);
-        CHECK(at.size() == 1u && img[0] == 19u);
+        CHECK(at.size() == 1u && img[0] == 20u);
         if (at.size() == 1u) {
             img.erase(img.begin() + static_cast<std::ptrdiff_t>(at[0]), img.begin() + static_cast<std::ptrdiff_t>(at[0]) + 4);
             img[0] = 13;

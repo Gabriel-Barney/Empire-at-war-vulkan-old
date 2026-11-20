@@ -2173,6 +2173,12 @@ shield-bypassing. The full numbering is not read (§8).
   `SHIELD_REGEN_INTERVAL` is unit-ability kind 3, and 3.0 is `ShieldRechargeIntervalInSecs`.
 - **Amount** (0x549250) = `Shield_Refresh_Rate` × `SHIELD_REGEN` (kind 2) × (live SHIELD_GENERATOR hardpoints /
   total SHIELD_GENERATOR hardpoints).
+- **Gates of 0x549250 [H]** (cmb3 t07, 2026-11-20, read from `re_reference/`): it does nothing without the type, the
+  combat data (obj +0xf0), or while the regen-blocked byte (CD +0x131) is 1, or while the object has
+  `ION_STUN_EFFECT` (behaviour 0x45) and that behaviour runs (its disable counter +0x3c is 0: the effect is created
+  disabled at attach 0x62b8d0, enabled by the stun's apply 0x62b920 and disabled again by its service when the stun
+  ends). **No base-power test**: `Shield_Requires_Base_Power` (+0x8c) is read only by the base shield's
+  `Evaluate_State` 0x56bb00 (TRU1_A_RE_ANSWERS). The cadence (0x5494b0) keeps running through the gates.
 - **Clamps — verified in disassembly [H]** (0x140549360–0x14054938a):
   1. new = clamp(current + amount, 0, maximum shield).
   2. While the depleted lockout is active, new = min(new, `Depleted_Shield_Regen_Cap`) (GameConstants

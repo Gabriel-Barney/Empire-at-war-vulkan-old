@@ -61,6 +61,8 @@ std::string bkt1_types(std::string t) {
     std::string add;
     add += land_unit("S10_Ranger", 100.0f, 250.0f, "WALK_LOCOMOTOR", "<Is_Squashable>Yes</Is_Squashable>");
     add += land_unit("S10_Far", 100.0f, 2000.0f, "WALK_LOCOMOTOR", "");
+    // cmb3 t02: a target the fog's object test can hide (HIDE_WHEN_FOGGED; a plain vehicle is never hidden)
+    add += land_unit("S10_Lurker", 0.0f, 250.0f, "WALK_LOCOMOTOR, HIDE_WHEN_FOGGED", "");
     add += land_unit("S10_Crusher", 100.0f, 250.0f, "WALK_LOCOMOTOR, SQUASH", "<Is_Squashable_By_Supercrusher>Yes</Is_Squashable_By_Supercrusher>");
     // hard half extents 5 x 2 (soft radius 3): the engage-clause target, so min(hx, hy) = 2 is told apart from the others
     add += land_unit("S10_Super", 100.0f, 250.0f, "WALK_LOCOMOTOR, SQUASH", "<Is_Supercrusher>Yes</Is_Supercrusher>", 5, 2);
@@ -424,6 +426,82 @@ void test_staging(const Data& d) {
     }
     std::printf("  staging cases run: %zu of %zu\n", ci, cases.size());
     CHECK(ready && ci == cases.size());
+}
+
+// ---- cmb3 t02: the fire trim's gate is the object hidden test ------------------------------------------------------
+
+// cmb3 t02 (b0196, BKR2 Q6 [H]): 0x410e90's gate is FOW_Object_Hidden(members[0]'s owner, T, force 1) and the stealth test.
+// An attack plan of one S10_Ranger (range 250) on an enemy S10_Lurker (HIDE_WHEN_FOGGED) 900 away, fog on: while
+// the target object is hidden for player 0 the plan is not trimmed (the formation walks to the target's point); revealed,
+// the same plan is trimmed.
+void test_trim_gate_hidden(const Data& d) {
+    CampaignBattleOptions opt;
+    opt.conflict.human_choice = galactic::BattleChoice::Fight;
+    opt.battle.max_frames = 2000;
+    opt.battle.skip_human_units = true;
+    opt.battle.order_interval = 0;  // no stand-in orders
+    ClashSession s(d, 0, opt, {"S10_Ranger_Co"}, {"S10_Lurker_Co"}, true);
+    if (!s.gs) return;
+    objects::ObjectId r = objects::kNoObjectId, e = objects::kNoObjectId;
+    int stage = 0;
+    uint32_t stage_frame = 0, trims0 = 0;
+    bool hidden_seen = false, untrimmed = false, revealed = false, trimmed = false;
+    const auto pos = [](TacticalMode& tm, objects::ObjectId id) { return tm.primary().position(tm.primary().find(id)); };
+    for (uint64_t tk = 0; tk < 2000 && stage < 9; ++tk) {
+        TacticalBattle* b = s.tick();
+        TacticalMode* tm = s.host->tactical();
+        if (!b || !tm || b->frame() < 3) {
+            if (stage > 0) break;
+            continue;
+        }
+        objects::ObjectStore& st = tm->primary();
+        if (stage == 0) {
+            r = unit_of(*b, st, d, "S10_Ranger", 0);
+            e = unit_of(*b, st, d, "S10_Lurker", 1);
+            if ((r == objects::kNoObjectId || e == objects::kNoObjectId) && b->frame() < 600) continue;
+            CHECK(r != objects::kNoObjectId && e != objects::kNoObjectId && b->fog() != nullptr);
+            if (r == objects::kNoObjectId || e == objects::kNoObjectId || !b->fog()) break;
+            invulnerable_all(*b);
+            // as test_guard_hidden_drop: the target stays where it landed (away from what player 0 sees), the attacker
+            // is put 900 from it along x, on the side with room
+            const tactical::Aabb& bb = tm->bounds();
+            const Vec3 ep = pos(*tm, e);
+            const float rx = ep.x - 900.0f >= bb.min.x + 60.0f ? ep.x - 900.0f : ep.x + 900.0f;
+            CHECK(b->teleport(*tm, r, Vec3{rx, ep.y, 0.0f}, st.facing(st.find(r))));
+            // as test_guard_hidden_drop: reveal, then undo it, so the target is hidden for player 0 from here on
+            TA::fog(*b)->reveal_all(0);
+            TA::fog(*b)->undo_reveal_all(0);
+            stage = 1;
+            stage_frame = b->frame();
+            continue;
+        }
+        const objects::ObjectId ids[] = {r};
+        SimRng& rng = s.host->random().synced();
+        if (stage == 1 && b->frame() >= stage_frame + 2) {
+            bool h = false, sl = false;
+            TA::target_unseen(*b, st, r, e, h, sl);
+            hidden_seen = h && !sl;
+            trims0 = b->movement().stats().attack_trims;
+            (void)TA::land_attack_order(*b, *tm, ids, e, pos(*tm, e), 0, rng, false);
+            untrimmed = b->movement().stats().attack_trims == trims0 && b->movement().view(r).has_goal;
+            TA::fog(*b)->reveal_all(0);
+            stage = 2;
+            stage_frame = b->frame();
+            continue;
+        }
+        if (stage == 2 && b->frame() >= stage_frame + 2) {
+            bool h = true, sl = true;
+            TA::target_unseen(*b, st, r, e, h, sl);
+            revealed = !h && !sl;
+            trims0 = b->movement().stats().attack_trims;
+            (void)TA::land_attack_order(*b, *tm, ids, e, pos(*tm, e), 0, rng, false);
+            trimmed = b->movement().stats().attack_trims == trims0 + 1;
+            stage = 9;
+        }
+    }
+    std::printf("  fire trim gate: hidden %d -> untrimmed %d; revealed %d -> trimmed %d\n", hidden_seen ? 1 : 0, untrimmed ? 1 : 0,
+                revealed ? 1 : 0, trimmed ? 1 : 0);
+    CHECK(hidden_seen && untrimmed && revealed && trimmed);
 }
 
 // ---- t03: the attack formation lead skips locked members ----------------------------------------------------------
@@ -900,6 +978,8 @@ int main() {
     auto d = squad_data_patched("_bkt1", bkt1_types);
     std::printf("bkt1 t01: attack staging 0x40e260 / 0x440f90 and the engagement range's pending-ability clause\n");
     test_staging(*d);
+    std::printf("cmb3 t02: the fire trim's gate is the object hidden test\n");
+    test_trim_gate_hidden(*d);
     std::printf("bkt1 t03: the attack formation lead skips movement-locked members; all locked waits\n");
     test_locked_lead(*d);
 #ifdef ALAMO_SIM_HAVE_TACTICAL_AI

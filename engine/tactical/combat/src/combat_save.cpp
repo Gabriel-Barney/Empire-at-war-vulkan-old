@@ -48,7 +48,7 @@ using save_io::put_vec3;
 
 namespace {
 
-constexpr uint32_t kCombatSaveVersion = 19;  // 2: refix t02 INFECTION state, refix t03 death clone key; 3: refixf t01 rockets;
+constexpr uint32_t kCombatSaveVersion = 20;  // 2: refix t02 INFECTION state, refix t03 death clone key; 3: refixf t01 rockets;
                                              // 4: refixf t06 attack goal / weapon aim / order lock; 5: refixf t06 scan
                                              // target hardpoint (auto_hp); 6: a1g t03 damage event hull_lost; 7: S8 t04
                                              // grenade flight / sticky state; 8: S8 t06 stuck_offset in the parent's frame
@@ -66,7 +66,8 @@ constexpr uint32_t kCombatSaveVersion = 19;  // 2: refix t02 INFECTION state, re
                                              // commanded flags; 17: trn1 t02 SurfaceFX instance
                                              // state + terrain damage timer; 18: r1b t10 hardpoint turret pose
                                              // and last aim; 19: tru3 t03 Base_Shield_Upgrade entry
-                                             // key adds the ability CRC. Only the current version is read (cu6).
+                                             // key adds the ability CRC; 20: cmb3 t04 shot event hardpoint +
+                                             // projectile serial. Only the current version is read (cu6).
 constexpr uint32_t kWeatherSaveVersion = 1;
 constexpr uint32_t kNoIndex = 0xFFFFFFFFu;
 
@@ -244,7 +245,8 @@ void CombatSystem::write(ByteWriter& w) const {
         w.boolean(e.ground).boolean(e.commanded);  // tru1 t08 (v16)
     }
     w.u32(static_cast<uint32_t>(shot_events_.size()));
-    for (const ShotEvent& e : shot_events_) w.i32(e.shooter).i32(e.target).i32(e.target_owner);
+    for (const ShotEvent& e : shot_events_)  // cmb3 t04 (v20): the hardpoint and serial the host's Fire_SFXEvent lookup reads
+        w.i32(e.shooter).i32(e.target).i32(e.target_owner).i32(e.hardpoint).u32(e.serial);
     w.u32(static_cast<uint32_t>(survivor_events_.size()));
     for (const SurvivorEvent& e : survivor_events_) {
         w.i32(e.dead).i32(e.type).i32(e.owner);
@@ -619,12 +621,15 @@ bool CombatSystem::read(ByteReader& r) {
         e.commanded = r.boolean();
         if (!r.ok() || e.projectile_desc >= proj_descs) return false;
     }
-    if (!r.count(n, 12)) return false;
+    if (!r.count(n, 20)) return false;
     std::vector<ShotEvent> shot_events(n);
     for (ShotEvent& e : shot_events) {
         e.shooter = r.i32();
         e.target = r.i32();
         e.target_owner = r.i32();
+        e.hardpoint = r.i32();  // cmb3 t04 (v20)
+        e.serial = r.u32();
+        if (!r.ok() || e.hardpoint < -1 || (e.hardpoint >= 0 && static_cast<uint32_t>(e.hardpoint) >= hp_descs)) return false;
     }
     if (!r.count(n, 41)) return false;
     std::vector<SurvivorEvent> survivors(n);
