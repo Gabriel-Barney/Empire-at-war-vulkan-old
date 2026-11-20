@@ -3124,7 +3124,7 @@ gal::AllPairsInput GalacticAiWorld::Impl::path_input(int32_t player) {
             const gal::PlanetState& ps = planets[i];
             if (!ps.is_planet || !store.alive(ps.object)) continue;
             const objects::TypeIndex t = store.type(ps.object);
-            if (t < types->size()) planet_zoff[i] = types->get_float(t, "Layer_Z_Adjust");
+            if (t < types->size()) planet_zoff[i] = types->get(t, objects::tags::Layer_Z_Adjust);
         }
     }
     gal::AllPairsInput in = perc.all_pairs_input(player);
@@ -3210,24 +3210,24 @@ std::vector<GalacticAiTypeInfo> make_galactic_ai_type_info(const objects::GameOb
     for (size_t t = 0; t < out.size(); ++t) {
         const auto ti = static_cast<objects::TypeIndex>(t);
         GalacticAiTypeInfo& o = out[t];
-        for (const std::string_view c : types.get_list(ti, "CategoryMask")) o.categories.push_back(ai_upper_copy(c));
-        o.hero = types.get_bool(ti, "Is_Named_Hero");
+        for (const std::string_view c : types.get_list(ti, objects::tags::CategoryMask)) o.categories.push_back(ai_upper_copy(c));
+        o.hero = types.get(ti, objects::tags::Is_Named_Hero);
         o.transport = o.has_category("Transport");
-        o.death_clone = types.get_bool(ti, "IsDeathClone");
+        o.death_clone = types.get(ti, objects::tags::IsDeathClone);
         // A2 galactic (AI_GALACTIC_3 Â§2, Â§3, Â§6, Â§8)
-        o.create_team = types.get_bool(ti, "Create_Team");
-        o.cinematic_only = types.get_bool(ti, "Cinematic_Object_Only");
+        o.create_team = types.get(ti, objects::tags::Create_Team);
+        o.cinematic_only = types.get(ti, objects::tags::Cinematic_Object_Only);
         o.transport_behavior = types.behavior_count(ti, "TRANSPORT") > 0;
-        o.generic_hero = types.get_bool(ti, "Is_Generic_Hero");
-        o.special_weapon_space = types.get_bool(ti, "Is_Special_Weapon_In_Space");
+        o.generic_hero = types.get(ti, objects::tags::Is_Generic_Hero);
+        o.special_weapon_space = types.get(ti, objects::tags::Is_Special_Weapon_In_Space);
         o.lobbing_superweapon = types.has_behavior(ti, objects::BehaviorSet::Land, objects::BehaviorTypeId{0x37});
-        o.garrison_mask = types.get_mask(ti, "Garrison_Category");  // +0x1658 (A2I_TOKENS_RE §2.1)
-        if (o.garrison_mask == 0) o.garrison_mask = types.get_mask(ti, "Space_Or_Garrison_Category");
-        o.lua_script = std::string(ai_trim(types.get_string(ti, "Lua_Script")));
-        o.script_on_type = types.get_bool(ti, "Execute_Script_On_Type");
-        o.retains_residual_influence = types.get_bool(ti, "Planet_Retains_Residual_Influence");  // P4 ai (default true)
-        for (const char* tag : {"Company_Units", "Squadron_Units"}) {
-            const std::vector<objects::TypeIndex> m = types.get_type_refs(ti, tag);
+        o.garrison_mask = types.get(ti, objects::tags::Garrison_Category);  // +0x1658 (A2I_TOKENS_RE §2.1)
+        if (o.garrison_mask == 0) o.garrison_mask = types.get(ti, objects::tags::Space_Or_Garrison_Category);
+        o.lua_script = std::string(ai_trim(types.get(ti, objects::tags::Lua_Script)));
+        o.script_on_type = types.get(ti, objects::tags::Execute_Script_On_Type);
+        o.retains_residual_influence = types.get(ti, objects::tags::Planet_Retains_Residual_Influence);  // P4 ai (default true)
+        for (const objects::ListTag* tag : {&objects::tags::Company_Units, &objects::tags::Squadron_Units}) {
+            const std::vector<objects::TypeIndex> m = types.get_type_refs(ti, *tag);
             if (!m.empty() && m.front() != objects::kNone) {
                 o.representative = static_cast<uint32_t>(m.front());
                 break;
@@ -3237,25 +3237,25 @@ std::vector<GalacticAiTypeInfo> make_galactic_ai_type_info(const objects::GameOb
         o.dummy_base = types.behavior_count(ti, "DUMMY_STAR_BASE") > 0 || types.behavior_count(ti, "DUMMY_GROUND_BASE") > 0;
         o.super_category = o.has_category("Super");
         o.unit_ai = types.behavior_count(ti, "UNIT_AI") > 0;
-        o.stealth_company = types.get_bool(ti, "Is_Stealth_Company");
-        const std::vector<objects::TypeIndex> cu = types.get_type_refs(ti, "Company_Units");
+        o.stealth_company = types.get(ti, objects::tags::Is_Stealth_Company);
+        const std::vector<objects::TypeIndex> cu = types.get_type_refs(ti, objects::tags::Company_Units);
         if (!cu.empty() && cu.front() != objects::kNone) {
             o.company_first = static_cast<uint32_t>(cu.front());
-            o.company_first_create_team = types.get_bool(cu.front(), "Create_Team");
+            o.company_first_create_team = types.get(cu.front(), objects::tags::Create_Team);
         }
     }
     // Flags +0x2A / +0x29 (0x377500): set on every Company_Units / Squadron_Units member of any type.
     for (size_t t = 0; t < out.size(); ++t) {
         const auto ti = static_cast<objects::TypeIndex>(t);
-        for (const objects::TypeIndex m : types.get_type_refs(ti, "Company_Units"))
+        for (const objects::TypeIndex m : types.get_type_refs(ti, objects::tags::Company_Units))
             if (m != objects::kNone && static_cast<size_t>(m) < out.size()) out[static_cast<size_t>(m)].company_member = true;
-        for (const objects::TypeIndex m : types.get_type_refs(ti, "Squadron_Units"))
+        for (const objects::TypeIndex m : types.get_type_refs(ti, objects::tags::Squadron_Units))
             if (m != objects::kNone && static_cast<size_t>(m) < out.size()) out[static_cast<size_t>(m)].squadron_member = true;
     }
     // Starting_Spawned_Units_Tech_0..5: (type, count) lists, repeated tags appended (the hangar / tactical reading).
     // mcx8 t07: Potential_Indigenous_Power has the same converter (code 0x46, OBJECT_TYPES §3): (type, power) entries.
-    const auto type_count_list = [&types, &out](objects::TypeIndex ti, const std::string& tag, std::vector<SpawnMember>& dst) {
-        const std::span<const std::string_view> toks = types.get_list(ti, tag);
+    const auto type_count_list = [&types, &out](objects::TypeIndex ti, const objects::ListTag& tag, std::vector<SpawnMember>& dst) {
+        const std::span<const std::string_view> toks = types.get(ti, tag);
         for (size_t i = 0; i < toks.size(); ++i) {
             std::string_view name = ai_trim(toks[i]);
             int32_t count = 0;
@@ -3276,8 +3276,8 @@ std::vector<GalacticAiTypeInfo> make_galactic_ai_type_info(const objects::GameOb
     for (size_t t = 0; t < out.size(); ++t) {
         const auto ti = static_cast<objects::TypeIndex>(t);
         for (size_t n = 0; n < kSpawnTechSlots; ++n)
-            type_count_list(ti, "Starting_Spawned_Units_Tech_" + std::to_string(n), out[t].spawn_tech[n]);
-        type_count_list(ti, "Potential_Indigenous_Power", out[t].indigenous_power);
+            type_count_list(ti, *objects::tags::kStartingSpawnedUnitsTech[n], out[t].spawn_tech[n]);
+        type_count_list(ti, objects::tags::Potential_Indigenous_Power, out[t].indigenous_power);
     }
     fill_category_masks(out, &types.enums().get(objects::EnumId::GameObjectCategory));  // q6 t03: the loaded enum
     return out;

@@ -4,7 +4,8 @@ Object-type tags are read through the typed handles of engine/objects (alamo/obj
 tag, GameObjectTypes::get(t, tags::X), name(t), sub_objects(t, tags::X)). A string read - types.get_float(t, "Tag"),
 find_type_field("Tag"), raw().types().name[t] - outside engine/objects gives 0 on a typo and lets each reader carry its
 own default, so this lint counts them per file in sim code and refuses any file whose count grows past
-tools/lint/tag_reads_baseline.txt (a ratchet: the baseline only goes down, to 0, one tag family per commit).
+tools/lint/tag_reads_baseline.txt. Since 2026-11-20 the baseline is empty: every sim file reads 0, so any string read
+fails (a hard rule). Read a new tag through a new ALAMO_TYPE_TAGS row; the objects test checks its default.
 
 Sim code here: engine/{core,vfs,data,jobs,galactic,anim,commands,tactical,lua,ai} and engine/apps/{sim,headless};
 tests, tools and benchmarks are not counted; engine/objects owns the strings.

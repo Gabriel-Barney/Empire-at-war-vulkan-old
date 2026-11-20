@@ -61,7 +61,7 @@ ForceType force_type_of(const objects::GameObjectTypes& types, objects::TypeInde
         case galactic::UnitKind::StarBase:
             f.starbase = true;
             f.layer = UnitLayer::Space;
-            f.base_level = types.get_int(t, "Base_Level");
+            f.base_level = types.get(t, objects::tags::Base_Level);
             break;
         case galactic::UnitKind::GroundStructure:
             f.structure = true;

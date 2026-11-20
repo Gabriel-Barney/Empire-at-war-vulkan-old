@@ -219,6 +219,7 @@ struct SubObjectsTag {
     X(List, Text_ID, 0)                                                                                               \
     X(List, Planet_Slice_Affinity_Types, 0)                                                                           \
     X(Int, Space_Override_Population_Value, -1)                                                                       \
+    X(Int, Land_Override_Population_Value, -1)                                                                        \
     X(Bool, Respawn_Whole_Team_When_Killed, false)                                                                    \
     X(Text, Space_Tactical_Map, "")                                                                                   \
     X(Text, Land_Tactical_Map, "")                                                                                    \
@@ -560,7 +561,17 @@ struct SubObjectsTag {
     X(List, Potential_Indigenous_Power, 0)                                                                            \
     X(Text, Enemy_Spawn_Text, "")                                                                                     \
     X(Bool, Execute_Script_On_Type, false)                                                                            \
-    X(Text, Lua_Script, "")
+    X(Text, Lua_Script, "")                                                                                           \
+    /* AI facts (AI_GALACTIC, AI_TACTICAL): ai galactic_ai.cpp, galactic_seed.cpp, tactical_ai.cpp; apps/sim battle_ai.cpp */ \
+    X(Bool, IsDeathClone, false)                                                                                      \
+    X(Mask, Space_Or_Garrison_Category, 0)                                                                            \
+    X(Bool, Planet_Retains_Residual_Influence, true)                                                                  \
+    X(Bool, Is_Stealth_Company, false)                                                                                \
+    X(Bool, Has_Land_Evaluator, false)                                                                                \
+    X(Bool, Last_State_Visible_Under_FOW, false)                                                                      \
+    X(Bool, Initial_State_Visible_Under_FOW, false)                                                                   \
+    X(Bool, Is_Dummy, false)                                                                                          \
+    X(Int, Population_Value, 0)
 // clang-format on
 
 namespace tags {
@@ -576,6 +587,13 @@ namespace tags {
 #define ALAMO_TYPE_TAG_DECL(kind, name, def) ALAMO_TYPE_TAG_DECL_##kind(name, def)
 ALAMO_TYPE_TAGS(ALAMO_TYPE_TAG_DECL)
 #undef ALAMO_TYPE_TAG_DECL
+// Starting / Reserve_Spawned_Units_Tech_0..5, indexed by tech slot (hangar spawners, galactic AI spawn facts).
+inline constexpr const ListTag* kStartingSpawnedUnitsTech[] = {
+    &Starting_Spawned_Units_Tech_0, &Starting_Spawned_Units_Tech_1, &Starting_Spawned_Units_Tech_2,
+    &Starting_Spawned_Units_Tech_3, &Starting_Spawned_Units_Tech_4, &Starting_Spawned_Units_Tech_5};
+inline constexpr const ListTag* kReserveSpawnedUnitsTech[] = {
+    &Reserve_Spawned_Units_Tech_0, &Reserve_Spawned_Units_Tech_1, &Reserve_Spawned_Units_Tech_2,
+    &Reserve_Spawned_Units_Tech_3, &Reserve_Spawned_Units_Tech_4, &Reserve_Spawned_Units_Tech_5};
 }  // namespace tags
 
 }  // namespace alamo::objects

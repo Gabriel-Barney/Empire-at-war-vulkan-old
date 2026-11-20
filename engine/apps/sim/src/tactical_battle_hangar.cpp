@@ -65,14 +65,8 @@ bool hg_same(std::string_view a, std::string_view b) {
 }
 constexpr const objects::ListTag& kBuildList = objects::tags::Tactical_Buildable_Objects_Multiplayer;
 // Starting / Reserve_Spawned_Units_Tech_0..5, one handle per tech slot.
-constexpr const objects::ListTag* kStartingTech[] = {
-    &objects::tags::Starting_Spawned_Units_Tech_0, &objects::tags::Starting_Spawned_Units_Tech_1,
-    &objects::tags::Starting_Spawned_Units_Tech_2, &objects::tags::Starting_Spawned_Units_Tech_3,
-    &objects::tags::Starting_Spawned_Units_Tech_4, &objects::tags::Starting_Spawned_Units_Tech_5};
-constexpr const objects::ListTag* kReserveTech[] = {
-    &objects::tags::Reserve_Spawned_Units_Tech_0, &objects::tags::Reserve_Spawned_Units_Tech_1,
-    &objects::tags::Reserve_Spawned_Units_Tech_2, &objects::tags::Reserve_Spawned_Units_Tech_3,
-    &objects::tags::Reserve_Spawned_Units_Tech_4, &objects::tags::Reserve_Spawned_Units_Tech_5};
+constexpr const auto& kStartingTech = objects::tags::kStartingSpawnedUnitsTech;
+constexpr const auto& kReserveTech = objects::tags::kReserveSpawnedUnitsTech;
 static_assert(std::size(kStartingTech) == th::kTechSlots && std::size(kReserveTech) == th::kTechSlots);
 }  // namespace
 
