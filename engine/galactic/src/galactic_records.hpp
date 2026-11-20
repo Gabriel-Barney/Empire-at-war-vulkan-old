@@ -15,6 +15,7 @@
 // counts: the semantic checks stay in GalacticSim::read / ConflictManager::read after the visit.
 // Included by galactic_save.cpp, campaign.cpp and conflicts.cpp only (not installed).
 #pragma once
+#include <concepts>
 #include <cstdint>
 #include <string>
 #include <type_traits>
@@ -289,7 +290,8 @@ public:
     }
     void fleet_refs(const std::vector<uint32_t>& v) {
         h_.u32(static_cast<uint32_t>(v.size()));
-        for (const uint32_t f : v) h_.i32(id_of((*fleets_)[f].object));
+        for (const uint32_t f : v)  // read() checks the indices; a bad one hashes as no object
+            h_.i32(fleets_ && f < fleets_->size() ? id_of((*fleets_)[f].object) : objects::kNoObjectId);
     }
     void hash_f32(float v) { h_.f32(v); }
     void hash_tag(uint8_t t) { h_.u8(t); }
