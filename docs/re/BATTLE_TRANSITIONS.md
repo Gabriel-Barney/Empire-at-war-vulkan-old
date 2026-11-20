@@ -798,6 +798,10 @@ it sets the auto-resolve retreat instead) and AI task forces (0x5fdd50).
 - **Post-retreat** (vf11): retreated objects and objects inside a retreated flagship are preserved;
   every other object of the retreating player is destroyed; land preserves transports. The victory
   monitor then sees type 0xc (all capable enemy units retreated).
+  Corrected 2026-11-20 (TRL2_A_RE_ANSWERS.md Q3, land vf8 0x534d90 / vf11 0x535900 [H]): land keeps TRANSPORT objects
+  always, and keeps its listed units (a locomotor, or `Stay_In_Transport_During_Ground_Battle`) **only while the
+  retreating player or an ally holds an object with `Reinforcement_Enabling_Radius` > 0**; everything else of the
+  player dies with the normal death, the listed units too when no reinforcement point is held.
 - Damage taken while retreating is scaled by `Space/Land_Retreat_Units_Damaged_Mod_Factor`
   (TACTICAL_COMBAT.md); pursuers use `..._Pursue_Max_Speed_Mod_Factor` (MOVEMENT.md).
 - `Space/Land_Retreat_Attrition_Factor` (vanilla 0.0, "per unit probability of destruction during a

@@ -325,7 +325,7 @@ Steps:
    - When in-base markers run out, In_Base falls over to out-base, and vice versa.
    - **Pass 1** reuses the marker whose object id equals +0x3b0. **Pass 0** takes the next unused marker of the group in list order.
    - On placement: +0x3ac := slot index; +0x3b0 := marker id (the battle-to-battle persistence of pad and structure positions); spawn the structure's own type at the marker for the **record defender**; +0x54 := its galactic id (0x3fffff for the temporary additional structures).
-   - **Space, pass 0, no slot, type `Is_Special_Weapon_In_Space`:** spawn for the planet owner at the first behaviour-99 object [M: DUMMY_TACTICAL_SUPER_WEAPON_TARGET / `Death_Star_Position`].
+   - **Space, pass 0, no slot, type `Is_Special_Weapon_In_Space`:** spawn for the planet owner at the first behaviour-99 object [M: DUMMY_TACTICAL_SUPER_WEAPON_TARGET / `Death_Star_Position`]. Corrected 2026-11-20 (TRL2_A_RE_ANSWERS.md Q1 [H]): behaviour 99 (0x63) is DUMMY_SPECIAL_WEAPON_SOURCE (FoC: the planet backdrop props), the origin when none; the weapon is registered (0x35c520, one per player and `Special_Weapon_Index`).
    - **Unplaced structures** take any remaining free in-base, then out-base markers. With none left they are **not spawned**.
 5. **Planet-specific upgrades:** for every player, each type in that player's per-planet list (0x281620 / 0x281760; the corruption `*_Planet_Specific_Tactical_Upgrade` [M]) that is affiliated and has behaviour 0x65 in the mode is spawned at the origin for that player.
 6. **Defender units:**
