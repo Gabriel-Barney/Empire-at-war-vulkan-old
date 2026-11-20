@@ -27,6 +27,7 @@
     SAVED(stale_, unhashed) \
     SAVED(lane_batch_, hashed) \
     DERIVED(view_, "sp3 t02: captured again at the next AI slot (read() invalidates it)") \
+    DERIVED(lane_thinking_, "ref5 t06: scratch, set only while think() runs") \
     DERIVED(lane_abilities_, "sp3 slice 4b: set at each capture, cleared by a load") \
     REBUILT(live_remaining_, "live hook sets, installed again by start()") \
     REBUILT(live_tactical_, "live hook sets, installed again by start()") \

@@ -564,6 +564,9 @@ public:
     // sp3 t02: the store the world reads - the snapshot store with the lane on (as of the last publish()), else the battle's.
     const objects::ObjectStore& view_store() const;
     uint32_t k_ai() const;   // sp3: TacticalAiConfig::k_ai (a load keeps the saved value)
+    // ref5 t06: the space TF.Reinforce occupancy sweep (TacticalAiConstants::space_reinforcement_collision_check_distance),
+    // which a host's lane Reinforce apply passes to space_drop_ok.
+    float space_reinforcement_sweep() const;
     uint64_t orders_rejected() const;
     // Results left on the AI pipeline's event bus: 0 after every update().
     size_t pending_order_results() const;

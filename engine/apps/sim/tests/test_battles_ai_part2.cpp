@@ -707,6 +707,42 @@ void test_battle_ai_land_drop(const Data& d) {
         }
         std::printf("  land drop: %zu / %zu spots fogged-valid / valid, %zu refused only by fog (fog %s), %zu next to enemy units\n",
                     fog_ok.size(), clear_ok.size(), newly, fog ? "on" : "off", next_to_enemy);
+        {  // ref5 t06: the AI lane's answers come from the capture and never read the battle
+            TacticalAiSetup tl = ts;
+            tl.ai_lane = true;
+            BattleAi al(*b, *tm, host, tl);
+            const uint64_t reads_before = ai_lane_live_reads();
+            size_t lane_ok = 0, lines = 0, blocked = 0;
+            al.run_as_lane([&] {
+                // Drops: tests 1-2 on the capture (passability, fog, box), 3-4 at the apply - every live-valid spot is lane-valid.
+                for (int32_t cy = 4; cy < 60; cy += 4)
+                    for (int32_t cx = kStrip + 6; cx < 58; cx += 4) {
+                        const mv::V2 c = mv::cell_center(cx, cy);
+                        const bool ok = al.land_drop_ok(1, key, {c.x, c.y, 0.0f});
+                        lane_ok += ok ? 1u : 0u;
+                        if (std::any_of(clear_ok.begin(), clear_ok.end(), [&c](const ai::tactical::Vec3f& e) { return e.x == c.x && e.y == c.y; }))
+                            CHECK(ok);
+                    }
+                CHECK(!al.land_drop_ok(1, key, {strip.x, strip.y, 0.0f}));
+                if (!clear_ok.empty()) CHECK(!al.land_drop_ok(1, key + 1000, clear_ok[0]));
+                // The attack-position line test: the same answer as the live grid, across the obstacle strip and not.
+                for (const objects::ObjectHandle h : tm->primary().owned_by(0)) {
+                    if (!tm->primary().active(h) || !tm->movable(h)) continue;
+                    const auto id = static_cast<int32_t>(tm->primary().id(h));
+                    const Vec3 q = tm->primary().position(h);
+                    for (const mv::V2 to : {mv::cell_center(1, 31), mv::cell_center(40, 40), mv::cell_center(kStrip + 1, 10)}) {
+                        const bool lane = al.attack_position_line_clear(id, {q.x, q.y, 0.0f}, {to.x, to.y, 0.0f});
+                        CHECK(lane == ai.attack_position_line_clear(id, {q.x, q.y, 0.0f}, {to.x, to.y, 0.0f}));
+                        ++lines;
+                        blocked += lane ? 0u : 1u;
+                    }
+                }
+            });
+            CHECK(ai_lane_live_reads() == reads_before);
+            CHECK(lane_ok >= clear_ok.size() && lines > 0 && blocked > 0);
+            std::printf("  ref5 t06 lane: %zu lane-valid drop spots (live %zu), %zu line tests (%zu blocked), live reads %llu\n", lane_ok,
+                        clear_ok.size(), lines, blocked, static_cast<unsigned long long>(ai_lane_live_reads() - reads_before));
+        }
         // s78i t02 (TACTICAL_COMBAT §3.1.1 "other spawns"): the reinforcement facing of a side = its entry-facing record
         // (+X when unset or for a player without a side); test_landing_drop checks a landing object against it.
         const Vec3 df = b->player_drop_facing(1);
