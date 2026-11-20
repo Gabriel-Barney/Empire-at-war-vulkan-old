@@ -1970,6 +1970,11 @@ private:
     void rt_move(TacticalMode& mode, objects::ObjectId id, float step);
     bool rt_listed(objects::ObjectId id) const;
     bool bt_attacker_entry(Vec3& pos, Vec3& facing) const;  // first Attacker Entry Position marker (map order)
+    // trl2 t01 (TRL2_A_RE_ANSWERS Q1, 0x2a1eb0 step 4 pass 0 [H]): campaign space battle - each live ground structure of the
+    // battle planet whose type sets Is_Special_Weapon_In_Space (and is no orbital structure) puts its own type into the
+    // battle for the planet owner at the first DUMMY_SPECIAL_WEAPON_SOURCE object, registered with the L1 systems; one per
+    // (owner, Special_Weapon_Index). Returns the number spawned.
+    uint32_t bt_ground_special_weapons(TacticalMode& mode);
     // --- TRU1 t05 / t07: SPAWN_INDIGENOUS_UNITS and DEBRIS (TRU1_C_RE §1 / §3; tactical_battle_spawners.cpp) ---
     struct IndigenousSpawner {
         objects::ObjectId id = objects::kNoObjectId;

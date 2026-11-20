@@ -1713,21 +1713,31 @@ void TacticalBattle::complete_retreat(TacticalMode& mode, uint8_t side) {
     // Post-retreat (vf11): the retreating units leave the map and are preserved in the galaxy. Playtest QA D1: every other
     // object of the player dies (BT §3.4): in space that is what cannot jump out, the station and other units without a
     // locomotor. They go through this tick's combat phase D like the attrition victims, so they break up and count as losses.
-    // trl2 t05 (BT §3.4 vf11 [M]): land too - every object of the player that cannot retreat (no locomotor: structures,
-    // turrets, pads' buildings) dies; land keeps its transports (TRANSPORT behaviour) as well. [port] the retreat list is
-    // the side's movers (land team members retreat with their container); units with destroyed engines still count as
-    // retreatable.
+    // trl2 t05 (TRL2_A_RE_ANSWERS Q3, land vf8 0x534d90 / vf11 0x535900 [H]): on land a TRANSPORT object is always kept;
+    // the listed units (a locomotor: the side's movers, team members and garrisoned units included) are kept only while
+    // the retreating player or an ally holds an object with Reinforcement_Enabling_Radius > 0, else they die too;
+    // everything else of the player (structures, turrets, pads, captured points, markers) dies with the normal death.
+    // [port] The list is the side's movers at the completion (retail: at the start; units made during the countdown are
+    // not listed there); units with destroyed engines still count as retreatable.
     {
         const objects::ObjectStore* st = &mode.primary();
+        bool rp_held = space_;
+        if (!space_) {
+            const int32_t r = side_player(side);
+            const objects::GameObjectTypes& types = catalog_->types();
+            for (const objects::ObjectHandle h : st->all_objects()) {
+                if (rp_held) break;
+                if (!st->alive(h) || st->dying(h) || st->type(h) >= types.size()) continue;
+                if (!(types.get(st->type(h), objects::tags::Reinforcement_Enabling_Radius) > 0.0f)) continue;
+                const int32_t o = st->owner(h);
+                rp_held = o == r || (o >= 0 && owner_side(o) == side && !combat_->is_enemy(r, o));
+            }
+        }
         for (const Unit& u : units_) {
-            if (u.side != side || !u.alive || u.retreated || u.movable || rt_listed(u.id)) continue;  // TRU1 t06: flown out
-            if (!space_ && st && st->alive(u.h) && st->has_behavior(u.h, objects::beh::Transport)) continue;
-            // [port] until TRL2_A_RE_ANSWERS Q3 settles land vf11: markers (MARKER, REINFORCEMENT_POINT 0x49) and units
-            // garrisoned inside another object are kept, not destroyed.
-            constexpr objects::BehaviorTypeId kReinforcementPoint = 0x49;
-            if (!space_ && st && st->alive(u.h) &&
-                (st->has_behavior(u.h, objects::beh::Marker) || st->has_behavior(u.h, kReinforcementPoint) || garrison_.garrisoned(u.id)))
-                continue;
+            if (u.side != side || !u.alive || u.retreated || rt_listed(u.id)) continue;  // TRU1 t06: flown out
+            if (!space_ && st->alive(u.h) && st->has_behavior(u.h, objects::beh::Transport)) continue;
+            const bool listed = u.movable || (!space_ && garrison_.garrisoned(u.id));
+            if (listed && rp_held) continue;
             if (std::find(bt_attrition_ids_.begin(), bt_attrition_ids_.end(), u.id) == bt_attrition_ids_.end()) {
                 bt_attrition_ids_.push_back(u.id);
                 bt_used_ = true;

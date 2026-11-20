@@ -87,13 +87,16 @@ bool drop_reserve(TacticalBattle& b, TacticalMode& tm, SimHost& host) {
 // A space battle on S10_B (player 1's fleet attacks player 0's frigate, corvette and star base). `per_tick(b, tm, host)`
 // runs after every host tick once the battle exists; it returns false to stop. Stand-in orders off.
 template <class F>
-void space_battle(Data& d, uint32_t max_frames, F per_tick, float retreat_countdown) {
+void space_battle(Data& d, uint32_t max_frames, F per_tick, float retreat_countdown,
+                  const std::vector<galactic::StartingForce>& extra = {}, const char* backdrop = nullptr) {
     jobs::JobSystem js(jobs::JobSystemConfig{0});
     SimConfig cfg;
     cfg.seed = 2026;
     cfg.players = 4;
     SimHost host(d.types, js, cfg);
-    galactic::GalacticSim* gs = host.start_galactic(d.rules, make_setup(d, false));
+    galactic::GalacticSetup setup = make_setup(d, false);
+    setup.forces.insert(setup.forces.end(), extra.begin(), extra.end());
+    galactic::GalacticSim* gs = host.start_galactic(d.rules, std::move(setup));
     CHECK(gs != nullptr);
     if (!gs) return;
     galactic::ConflictRules crules = d.crules;
@@ -104,9 +107,17 @@ void space_battle(Data& d, uint32_t max_frames, F per_tick, float retreat_countd
     opt.battle.order_interval = 0;
     opt.battle.fog = false;
     CampaignBattles battles(host, crules, *d.catalog,
-                            [](const std::string& name, terrain::MapData& m) {
+                            [backdrop](const std::string& name, terrain::MapData& m) {
                                 if (name != "S10_Space_B") return false;
                                 m = space_map();
+                                if (backdrop) {  // a DUMMY_SPECIAL_WEAPON_SOURCE prop (neutral)
+                                    terrain::ObjectPlacement bd;
+                                    bd.type_crc = name_crc(backdrop);
+                                    bd.owner = 2;
+                                    bd.position[0] = -1500.0f;
+                                    bd.position[1] = 2500.0f;
+                                    m.objects.push_back(bd);
+                                }
                                 // yaw 0: facing (0, -1, 0) (map placement convention) -> the retreat heading (0, 1, 0), 90 degrees
                                 terrain::ObjectPlacement mk;
                                 mk.type_crc = name_crc("Attacker Entry Position");
@@ -260,6 +271,58 @@ void test_retreat_cancel() {
     CHECK(cancel_ok && record_ok && record_units == movers.size() && frozen && rerequest && auto_ok);
 }
 
+// ---- trl2 t01 ----
+// T_Ion: a ground structure with Is_Special_Weapon_In_Space (SPECIAL_WEAPON in space, index 0); T_Other: one without;
+// T_Backdrop: a DUMMY_SPECIAL_WEAPON_SOURCE prop.
+std::string ion_patch(std::string t) {
+    const size_t end = t.find("</S10>");
+    if (end != std::string::npos)
+        t.insert(end, " <GroundStructure Name=\"T_Ion\"><Tactical_Health>500</Tactical_Health><Is_Special_Weapon_In_Space>Yes</Is_Special_Weapon_In_Space>"
+                      "<Special_Weapon_Index>0</Special_Weapon_Index><SpaceBehavior>SPECIAL_WEAPON</SpaceBehavior>"
+                      "<Space_Victory_Relevant>No</Space_Victory_Relevant></GroundStructure>\n"
+                      " <GroundStructure Name=\"T_Other\"><Tactical_Health>500</Tactical_Health></GroundStructure>\n"
+                      " <SpaceProp Name=\"T_Backdrop\"><SpaceBehavior>DUMMY_SPECIAL_WEAPON_SOURCE</SpaceBehavior></SpaceProp>\n");
+    return t;
+}
+
+// TRL2_A_RE_ANSWERS Q1: in a campaign space battle the planet owner (player 0) gets one T_Ion object (two cannons of the
+// same Special_Weapon_Index register once) at the backdrop prop, registered as a special weapon; T_Other gives nothing.
+// ledger: verifies GameObjectType.Is_Special_Weapon_In_Space
+void test_ground_special_weapon() {
+    g_temp_prefix = "alamo_sim_trl2_tests_ion";
+    g_types_patch = ion_patch;
+    auto d = make_data();
+    g_types_patch = nullptr;
+    const uint32_t ion = type_of(*d, "T_Ion"), other = type_of(*d, "T_Other"), bd = type_of(*d, "T_Backdrop");
+    int ions = 0, others = 0;
+    bool owner_ok = true, at_backdrop = true, registered = false, seen = false;
+    space_battle(
+        *d, 300,
+        [&](TacticalBattle& b, TacticalMode& tm, SimHost&) {
+            if (b.frame() != 1) return b.frame() < 1;
+            seen = true;
+            const objects::ObjectStore& st = tm.primary();
+            Vec3 src{};
+            for (const objects::ObjectHandle h : st.all_objects())
+                if (st.alive(h) && static_cast<uint32_t>(st.type(h)) == bd) src = st.position(h);
+            for (const objects::ObjectHandle h : st.all_objects()) {
+                if (!st.alive(h)) continue;
+                const uint32_t t = static_cast<uint32_t>(st.type(h));
+                if (t == other) ++others;
+                if (t != ion) continue;
+                ++ions;
+                owner_ok = owner_ok && st.owner(h) == 0;
+                at_backdrop = at_backdrop && st.position(h).x == src.x && st.position(h).y == src.y;
+                registered = registered || b.special_weapons().has(st.id(h));
+            }
+            return false;
+        },
+        10.0f, {{0, 1, ion}, {0, 1, ion}, {0, 1, other}}, "T_Backdrop");
+    std::printf("  trl2 t01: %d special weapon object(s) (owner 0: %d, at the source: %d, registered: %d), %d other structure(s)\n",
+                ions, owner_ok, at_backdrop, registered, others);
+    CHECK(seen && ions == 1 && owner_ok && at_backdrop && registered && others == 0);
+}
+
 // ---- trl2 t05: space ----
 // S10_Star_Base_1 names T_SD_Boom (a PARTICLE) as its Retreat_Self_Destruct_Explosion.
 std::string self_destruct_patch(std::string t) {
@@ -310,32 +373,33 @@ void test_starbase_self_destruct() {
 }
 
 // ---- trl2 t05 ----
-// The landing data plus T_Bunker, a structure (no locomotor).
+// The landing data plus T_Bunker, a structure (no locomotor), and T_RP, a structure with Reinforcement_Enabling_Radius.
 std::string bunker_patch(std::string t) {
     const size_t end = t.find("</S10>");
     if (end != std::string::npos)
         t.insert(end, " <GroundStructure Name=\"T_Bunker\"><Tactical_Health>500</Tactical_Health><CategoryMask>Structure</CategoryMask>"
-                      "<Victory_Relevant>No</Victory_Relevant></GroundStructure>\n");
+                      "<Victory_Relevant>No</Victory_Relevant></GroundStructure>\n"
+                      " <GroundStructure Name=\"T_RP\"><Tactical_Health>500</Tactical_Health><CategoryMask>Structure</CategoryMask>"
+                      "<Victory_Relevant>No</Victory_Relevant><Reinforcement_Enabling_Radius>250.0</Reinforcement_Enabling_Radius>"
+                      "</GroundStructure>\n");
     return t;
 }
 
-void test_land_retreat_end() {
-    g_temp_prefix = "alamo_sim_trl2_tests_retreat_end";
-    g_types_patch = bunker_patch;
-    g_constants_extra = " <Land_Retreat_Allowed_Countdown_Seconds>1.0</Land_Retreat_Allowed_Countdown_Seconds>\n";
-    auto d = make_data(false, false, false, false, false, false, false, false, false, false, false, true);
-    g_types_patch = nullptr;
-    g_constants_extra = nullptr;
-    const uint32_t bunker_t = type_of(*d, "T_Bunker"), lander_t = type_of(*d, "S10_Lander"), trooper_t = type_of(*d, "S10_Trooper");
+struct RetreatEndRun {
     bool adopted = false, requested = false, completed = false;
-    int lander_left = 0, troopers_left = 0;
-    uint32_t last_frame = 0;
-    int32_t last_block = -1;
+    int lander_left = 0, troopers_left = 0, bunker_dead = 0, lander_dead = 0, troopers_dead = 0;
+};
+
+// Player 1 (the attacker) gets a bunker and a transport (and with `rp` a reinforcement point), then retreats.
+RetreatEndRun run_retreat_end(Data& d, bool rp) {
+    RetreatEndRun out;
+    const uint32_t bunker_t = type_of(d, "T_Bunker"), lander_t = type_of(d, "S10_Lander"), trooper_t = type_of(d, "S10_Trooper"),
+                   rp_t = type_of(d, "T_RP");
     std::vector<TacticalBattle::RemovalRecord> removals;
     land_battle(
-        *d, 4000,
+        d, 4000,
         [&](TacticalBattle& b, TacticalMode& tm, SimHost&) {
-            if (b.frame() == 1) {  // the attacker's (player 1) bunker and transport, as script spawns (real battle units)
+            if (b.frame() == 1) {  // script spawns (real battle units)
                 namespace mv = alamo::tactical::movement;
                 objects::ObjectStore& st = tm.primary();
                 const auto spawn = [&](uint32_t type, int32_t cx) {
@@ -348,35 +412,50 @@ void test_land_retreat_end() {
                     const objects::ObjectHandle h = b.script_spawn(tm, sp);
                     return st.alive(h) && b.combat().has_unit(st.id(h));
                 };
-                adopted = spawn(bunker_t, 50) && spawn(lander_t, 54);
+                out.adopted = spawn(bunker_t, 50) && spawn(lander_t, 54) && (!rp || spawn(rp_t, 46));
             }
-            if (!requested && adopted && b.retreat_block(1) == 0) requested = b.request_retreat(1);
-            if (requested && !completed && b.retreating_player() < 0) {  // the retreat completed this tick
-                completed = true;
+            if (!out.requested && out.adopted && b.retreat_block(1) == 0) out.requested = b.request_retreat(1);
+            if (out.requested && !out.completed && b.retreating_player() < 0) {  // the retreat completed this tick
+                out.completed = true;
                 objects::ObjectStore& st = tm.primary();
                 for (const objects::ObjectHandle h : st.owned_by(1)) {
                     if (!st.alive(h) || st.dying(h)) continue;
-                    if (static_cast<uint32_t>(st.type(h)) == lander_t) ++lander_left;
-                    if (static_cast<uint32_t>(st.type(h)) == trooper_t) ++troopers_left;
+                    if (static_cast<uint32_t>(st.type(h)) == lander_t) ++out.lander_left;
+                    if (static_cast<uint32_t>(st.type(h)) == trooper_t) ++out.troopers_left;
                 }
             }
-            last_frame = b.frame();
-            last_block = b.retreat_block(1);
             removals.assign(b.removals().begin(), b.removals().end());
             return true;
         },
         false, nullptr);
-    int bunker_dead = 0, lander_dead = 0, troopers_dead = 0;
     for (const TacticalBattle::RemovalRecord& r : removals) {
         if (r.owner != 1 || r.survived) continue;
-        if (r.object_type == bunker_t) ++bunker_dead;
-        if (r.object_type == lander_t) ++lander_dead;
-        if (r.object_type == trooper_t) ++troopers_dead;
+        if (r.object_type == bunker_t) ++out.bunker_dead;
+        if (r.object_type == lander_t) ++out.lander_dead;
+        if (r.object_type == trooper_t) ++out.troopers_dead;
     }
-    std::printf("  trl2 t05: last frame %u, retreat block %d\n", last_frame, last_block);
-    std::printf("  trl2 t05: adopted %d, requested %d; bunker died %d, lander left %d / died %d, troopers left %d / died %d\n", adopted,
-                requested, bunker_dead, lander_left, lander_dead, troopers_left, troopers_dead);
-    CHECK(adopted && requested && completed && bunker_dead == 1 && lander_left == 1 && lander_dead == 0 && troopers_left > 0);
+    return out;
+}
+
+// TRL2_A_RE_ANSWERS Q3 (land vf11 0x535900): the bunker always dies, the transport is always kept; the troopers (listed:
+// a locomotor) are kept only while player 1 holds a Reinforcement_Enabling_Radius object, else they die too.
+// ledger: verifies GameObjectType.Reinforcement_Enabling_Radius
+void test_land_retreat_end() {
+    g_temp_prefix = "alamo_sim_trl2_tests_retreat_end";
+    g_types_patch = bunker_patch;
+    g_constants_extra = " <Land_Retreat_Allowed_Countdown_Seconds>1.0</Land_Retreat_Allowed_Countdown_Seconds>\n";
+    auto d = make_data(false, false, false, false, false, false, false, false, false, false, false, true);
+    g_types_patch = nullptr;
+    g_constants_extra = nullptr;
+    for (const bool rp : {true, false}) {
+        const RetreatEndRun r = run_retreat_end(*d, rp);
+        std::printf("  trl2 t05 (reinforcement point %d): adopted %d, requested %d, completed %d; bunker died %d, lander left %d / "
+                    "died %d, troopers left %d / died %d\n",
+                    rp, r.adopted, r.requested, r.completed, r.bunker_dead, r.lander_left, r.lander_dead, r.troopers_left, r.troopers_dead);
+        CHECK(r.adopted && r.requested && r.completed && r.bunker_dead == 1 && r.lander_left == 1 && r.lander_dead == 0);
+        if (rp) CHECK(r.troopers_left > 0 && r.troopers_dead == 0);
+        else CHECK(r.troopers_left == 0 && r.troopers_dead > 0);
+    }
 }
 
 // ---- trl2 t02 ----
@@ -486,6 +565,8 @@ int main() {
     std::setvbuf(stdout, nullptr, _IONBF, 0);
     std::printf("trl2 t02: land population shares\n");
     test_land_population();
+    std::printf("trl2 t01: ground special weapon in space\n");
+    test_ground_special_weapon();
     std::printf("tru2 t02: space retreat heading\n");
     test_retreat_heading();
     std::printf("trl2 t04: retreat cancel\n");

@@ -806,6 +806,57 @@ std::vector<std::pair<bool, Vec3>> TacticalBattle::bt_start_markers() const {
     return out;
 }
 
+uint32_t TacticalBattle::bt_ground_special_weapons(TacticalMode& mode) {
+    // Retail creates every qualifying structure's weapon and the registration 0x35c520 silently removes a second one of the
+    // same (player, Special_Weapon_Index), adding 1 to the first one's record counter (+0x20, effect not read [L]). [port]
+    // The duplicate is not created (no object id used) and no counter is kept. The weapon has no galactic link, no
+    // population share and no battle participant (not victory relevant, never a valid target); [port] it is not killed
+    // at its owner's space retreat end (retail vf11 0x5335f0 kills it; the battle ends then anyway).
+    if (!space_ || cfg_.skirmish || !galaxy_ || !catalog_) return 0;
+    const uint32_t pi = req_.info.planet;
+    if (pi >= galaxy_->planets().size()) return 0;
+    const int32_t owner = galaxy_->planets()[pi].owner;
+    if (owner < 0) return 0;
+    const objects::ObjectStore& gs = galaxy_->store();
+    const objects::GameObjectTypes& types = catalog_->types();
+    static const objects::BehaviorTypeId kOrbital = objects::behavior_type_id("DUMMY_ORBITAL_STRUCTURE");
+    static const objects::BehaviorTypeId kSource = objects::behavior_type_id("DUMMY_SPECIAL_WEAPON_SOURCE");
+    // Position: the first DUMMY_SPECIAL_WEAPON_SOURCE object of the mode (store order), else the origin.
+    Vec3 pos{0.0f, 0.0f, 0.0f}, face{1.0f, 0.0f, 0.0f};
+    {
+        const objects::ObjectStore& st = mode.primary();
+        for (const objects::ObjectHandle h : st.all_objects())
+            if (st.alive(h) && kSource != objects::kNoBehavior && st.has_behavior(h, kSource)) {
+                pos = st.position(h);
+                face = st.facing(h);
+                break;
+            }
+    }
+    std::vector<int32_t> indexes;  // Special_Weapon_Index values already placed for the owner
+    uint32_t n = 0;
+    for (const objects::ObjectHandle g : galaxy_->planets()[pi].structures) {
+        if (!gs.alive(g)) continue;
+        const objects::TypeIndex t = gs.type(g);
+        if (t >= types.size() || !types.get(t, objects::tags::Is_Special_Weapon_In_Space)) continue;
+        if (kOrbital != objects::kNoBehavior && types.has_behavior(t, objects::BehaviorSet::Union, kOrbital)) continue;
+        const int32_t idx = types.get(t, objects::tags::Special_Weapon_Index);
+        if (idx >= 0 && idx < 3) {
+            if (std::find(indexes.begin(), indexes.end(), idx) != indexes.end()) continue;
+            indexes.push_back(idx);
+        }
+        objects::SpawnParams sp;
+        sp.type = t;
+        sp.owner = owner;
+        sp.position = pos;
+        sp.facing = face;
+        if (script_spawn_effect(mode, sp)) {
+            ++n;
+            bt_used_ = true;
+        }
+    }
+    return n;
+}
+
 bool TacticalBattle::bt_attacker_entry(Vec3& pos, Vec3& facing) const {
     for (const MapMarker& m : bt_markers_)
         if (m.kind == kMkAttack) {
@@ -1670,6 +1721,7 @@ void TacticalBattle::bt_place_forces(TacticalMode& mode, SimRng& rng, const Para
             if (parts_[i].unplaced) parts_[i].deployed = true;  // not spawned: never deployed later either
             else deploy(mode, i, rng);
         }
+    bt_ground_special_weapons(mode);  // trl2 t01: step 4 pass 0's space special-weapon branch
     land_obstacles_sync(mode, pf);  // S8 t02: the starbase / structures stamp on attach, before the start forces are placed
     // 6 / 7. Facing slots and anchors: the first Defending Forces marker (position, facing); the attacker's entry marker =
     //    the farthest from the first non-attacker DUMMY_GROUND_STRUCTURE with a non-zero Reinforcement_Prevention_Radius
