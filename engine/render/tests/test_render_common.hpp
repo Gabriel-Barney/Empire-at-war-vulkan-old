@@ -171,7 +171,7 @@ inline bool render_settled(Gpu& g, render::Renderer& r, Offscreen& o, const rend
         drawn = render_frame(g, r, o, vm, inst, resident, &st, mode, ro, timing, sky, clear);
         if (!drawn || (st.post_pending == 0 && st.translation_pending == 0 && st.pending_pipeline == 0)) break;
         r.wait_translations();
-        r.pipelines().wait_idle();
+        r.wait_pipelines();
     }
     return drawn;
 }

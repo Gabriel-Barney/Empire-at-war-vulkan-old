@@ -246,7 +246,7 @@ void TaaPass::shutdown() {
 
 bool TaaPass::ensure_pipelines(VkFormat scene_format) {
     if (resolve_ && sharpen_ && depth_ && sharpen_format_ == scene_format) return true;
-    // A colour format change (Renderer::set_color_format) happens with the GPU idle, so the old pipelines are unused.
+    // A colour format change (RendererCore::set_color_format) happens with the GPU idle, so the old pipelines are unused.
     destroy_pipelines();
     const std::vector<uint32_t> vs = rhi::spirv_from_bytes({g_taa_vs, sizeof(g_taa_vs)});
     const std::vector<uint32_t> ps_r = rhi::spirv_from_bytes({g_taa_ps_resolve, sizeof(g_taa_ps_resolve)});
@@ -750,7 +750,7 @@ bool TaaPass::fsr_inputs(rhi::Frame& frame, VkCommandBuffer cmd, rhi::RenderTarg
 
 // ------------------------------------------------------------------------------------------- Renderer hooks
 
-ViewMatrices Renderer::taa_begin(const ViewMatrices& view, const RecordOptions& opts, uint32_t fsr_phases) {
+ViewMatrices RendererCore::taa_begin(const ViewMatrices& view, const RecordOptions& opts, uint32_t fsr_phases) {
     if (!opts.taa && fsr_phases == 0) {
         if (taa_) taa_->reset();  // the history is stale once a frame went without it (mode switch)
         return view;
@@ -769,7 +769,7 @@ ViewMatrices Renderer::taa_begin(const ViewMatrices& view, const RecordOptions& 
 
 // [port] FSR (fsr.hpp) / XeSS (xess.hpp): true when this frame is drawn at `render` and upscaled by opts.upscaler;
 // false leaves `render` = `display`.
-bool Renderer::fsr_begin(VkExtent2D display, const RecordOptions& opts, VkExtent2D& render) {
+bool RendererCore::fsr_begin(VkExtent2D display, const RecordOptions& opts, VkExtent2D& render) {
     render = display;
     if (display.width == 0 || display.height == 0) return false;
     if (opts.upscaler == Upscaler::Xess) {  // XeSS's own input size for the preset (xessGetOptimalInputResolution)
@@ -783,7 +783,7 @@ bool Renderer::fsr_begin(VkExtent2D display, const RecordOptions& opts, VkExtent
     return true;
 }
 
-bool Renderer::xess_supported() {
+bool RendererCore::xess_supported() {
     if (!xess_) {
         xess_ = std::make_unique<XessPass>();
         xess_->init(*ctx_, *alloc_);  // logs why when it cannot
@@ -791,7 +791,7 @@ bool Renderer::xess_supported() {
     return xess_->available();
 }
 
-bool Renderer::fsr_supported() {
+bool RendererCore::fsr_supported() {
     if (!fsr_) {
         fsr_ = std::make_unique<FsrPass>();
         fsr_->init(*ctx_, *alloc_);  // logs why when it cannot
@@ -799,18 +799,18 @@ bool Renderer::fsr_supported() {
     return fsr_->available();
 }
 
-std::string Renderer::upscaler_status(Upscaler u) const {
+std::string RendererCore::upscaler_status(Upscaler u) const {
     if (u == Upscaler::Xess) return xess_ ? xess_->status() : std::string("XeSS not loaded yet");
     return fsr_ ? fsr_->status() : std::string("FSR not loaded yet");
 }
 
-void Renderer::reset_taa_history() {
+void RendererCore::reset_taa_history() {
     if (taa_) taa_->reset();
 }
 
-bool Renderer::discard_taa_frame() { return taa_ && taa_->discard(); }
+bool RendererCore::discard_taa_frame() { return taa_ && taa_->discard(); }
 
-void Renderer::keep_taa_frame() {
+void RendererCore::keep_taa_frame() {
     if (taa_) taa_->keep();
 }
 

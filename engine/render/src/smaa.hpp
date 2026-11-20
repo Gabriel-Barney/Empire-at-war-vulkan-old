@@ -1,6 +1,6 @@
 // alamo_render - SMAA 1x on the GPU [port] (internal; RecordOptions::smaa). The original has no post-process
 // anti-aliasing. Subpixel Morphological Anti-Aliasing (Jimenez et al., third_party/smaa, MIT licence) at one fixed
-// quality (the reference HIGH preset), run by Renderer::render() at the end of the post chain - after the TAA resolve
+// quality (the reference HIGH preset), run by RendererCore::render() at the end of the post chain - after the TAA resolve
 // when both are on - and before the copy out:
 //   1. the scene colour is copied into a scratch target of the same size and format (SceneTexture);
 //   2. luma edge detection of the copy -> edges (RG8);

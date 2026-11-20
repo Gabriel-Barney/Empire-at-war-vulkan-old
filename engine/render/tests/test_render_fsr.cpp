@@ -268,7 +268,7 @@ void land_map(Gpu& g, const std::string& src_dir, const char* root) {
                        ws.water_pending == 0;
                 if (!done) {
                     rr.wait_translations();
-                    rr.pipelines().wait_idle();
+                    rr.wait_pipelines();
                 }
             }
             CHECK(done);

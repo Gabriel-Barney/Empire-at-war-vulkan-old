@@ -233,7 +233,7 @@ void LaserGeometry::build(std::span<const Laser> lasers, const ViewMatrices& vie
 // ------------------------------------------------------------------------------------------ renderer side
 namespace alamo::render {
 
-bool Renderer::init_lasers(const TextureSource& textures) {
+bool RendererCore::init_lasers(const TextureSource& textures) {
     if (!ctx_ || !desc_.effects) return false;
     shutdown_lasers();
     laser_fx_ = desc_.effects->get("PrimAdditive");
@@ -274,11 +274,11 @@ bool Renderer::init_lasers(const TextureSource& textures) {
     return true;
 }
 
-bool Renderer::lasers_ready() const {
+bool RendererCore::lasers_ready() const {
     return lasers_init_ && laser_tex_[0].resident && laser_tex_[1].resident;
 }
 
-void Renderer::shutdown_lasers() {
+void RendererCore::shutdown_lasers() {
     for (GpuTexture& t : laser_tex_) {
         if (t.image) release_texture(t.resident ? t.slot : 0u, &t.image);
         t = GpuTexture{};
@@ -294,7 +294,7 @@ void Renderer::shutdown_lasers() {
     lasers_init_ = false;
 }
 
-void Renderer::draw_lasers(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, DrawStats& st) {
+void RendererCore::draw_lasers(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, DrawStats& st) {
     laser_geo_.build(lasers_, view, laser_k_);
     if (laser_geo_.beams + laser_geo_.kites == 0) return;
     for (GpuTexture& t : laser_tex_)  // resident once the upload landed: bindless slot for the FF stage

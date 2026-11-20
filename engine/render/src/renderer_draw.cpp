@@ -32,7 +32,7 @@ using namespace detail;
 
 // ------------------------------------------------------------------------------ frame constants
 
-const SceneLightConstants& Renderer::scene_lights() {
+const SceneLightConstants& RendererCore::scene_lights() {
     SlcCache& c = slc_cache_;
     const Lighting& l = lighting_;
     const bool same = c.valid && std::memcmp(&c.sun, &l.sun, sizeof c.sun) == 0 &&
@@ -52,7 +52,7 @@ const SceneLightConstants& Renderer::scene_lights() {
     return c.slc;
 }
 
-void Renderer::frame_constants(const ViewMatrices& v, uint32_t extras, materials::FrameCB& cb) {
+void RendererCore::frame_constants(const ViewMatrices& v, uint32_t extras, materials::FrameCB& cb) {
     fill_frame_cb(v, time_, cb);
     fill_frame_lights(lighting_, cb);
     const SceneLightConstants& slc = scene_lights();
@@ -84,11 +84,11 @@ bool sh_contract_ok(const materials::FrameCB& cb, const SceneLightConstants& slc
 }
 }  // namespace
 
-bool Renderer::frame_cb_sh_ok(const materials::FrameCB& cb, const Lighting& lighting) {
+bool RendererCore::frame_cb_sh_ok(const materials::FrameCB& cb, const Lighting& lighting) {
     return sh_contract_ok(cb, scene_light_constants(lighting));
 }
 
-bool Renderer::upload_frame_cb(rhi::Frame& frame, const materials::FrameCB& cb, rhi::BufferRange& out) {
+bool RendererCore::upload_frame_cb(rhi::Frame& frame, const materials::FrameCB& cb, rhi::BufferRange& out) {
     if (!sh_contract_ok(cb, scene_lights()) && fcb_violations_.fetch_add(1) == 0)
         log::errorf("render", "FrameCB uploaded with zero SH under a lit scene (SH lighting contract)");
     const rhi::UniformAlloc a = frame.alloc_uniform(sizeof cb);
@@ -156,13 +156,13 @@ void for_range(jobs::JobSystem* js, bool parallel, uint32_t count, uint32_t grai
 
 }  // namespace detail
 
-Renderer::Built& Renderer::built(BuiltSlot slot) {
+RendererCore::Built& RendererCore::built(BuiltSlot slot) {
     std::unique_ptr<Built>& b = built_[slot];
     if (!b) b = std::make_unique<Built>();
     return *b;
 }
 
-bool Renderer::xt_prepare(XTemplate& t, rhi::Frame& frame, uint32_t thread, const EngineFrame& f, const float (&pixel_offset)[4],
+bool RendererCore::xt_prepare(XTemplate& t, rhi::Frame& frame, uint32_t thread, const EngineFrame& f, const float (&pixel_offset)[4],
                           bool fog) {
     t.ok = false;
     t.set0 = t.set1 = VK_NULL_HANDLE;
@@ -262,7 +262,7 @@ namespace {
 // Items i and j (j = i + 1) form one instanced draw: everything but their DrawData (and, translated, their per-draw
 // register images) equal, not in a back-to-front bucket (SPACE_AND_OPEN.md D.1: only the sorted buckets keep strict
 // per-object order by depth; merging there is not done even though the order would be kept).
-bool same_draw(const Renderer::Built::Item& a, const Renderer::Built::Item& b, const std::vector<Renderer::Built::Group>& groups) {
+bool same_draw(const RendererCore::Built::Item& a, const RendererCore::Built::Item& b, const std::vector<RendererCore::Built::Group>& groups) {
     if (a.pipeline != b.pipeline || a.bucket != b.bucket || a.pass != b.pass || a.fading != b.fading) return false;
     if (a.bucket == PhaseBucket::Transparent || a.bucket == PhaseBucket::Heat) return false;
     // Q3: translated items of the instanced form share one call when they use the same program and register-image
@@ -275,7 +275,7 @@ bool same_draw(const Renderer::Built::Item& a, const Renderer::Built::Item& b, c
 }
 }  // namespace
 
-bool Renderer::build(rhi::Frame& frame, const ViewMatrices& view, std::span<const Instance> instances, DrawMode mode,
+bool RendererCore::build(rhi::Frame& frame, const ViewMatrices& view, std::span<const Instance> instances, DrawMode mode,
                      const RecordOptions& opts, Built& out, DrawStats& st, bool main_list) {
     using Group = Built::Group;
     using Item = Built::Item;
@@ -1100,7 +1100,7 @@ bool Renderer::build(rhi::Frame& frame, const ViewMatrices& view, std::span<cons
     return true;
 }
 
-void Renderer::record_range(VkCommandBuffer cmd, const Built& b, size_t begin, size_t end, uint32_t width, uint32_t height,
+void RendererCore::record_range(VkCommandBuffer cmd, const Built& b, size_t begin, size_t end, uint32_t width, uint32_t height,
                             bool set_viewport) const {
     const rhi::DeviceFns& fn = ctx_->vkd();
     if (set_viewport) {
@@ -1192,9 +1192,9 @@ void Renderer::record_range(VkCommandBuffer cmd, const Built& b, size_t begin, s
 }
 
 namespace detail {
-void count_items(const Renderer::Built& bl, size_t b, size_t e, DrawStats& st) {
+void count_items(const RendererCore::Built& bl, size_t b, size_t e, DrawStats& st) {
     for (size_t i = b; i < e; ++i) {
-        const Renderer::Built::Item& it = bl.items[i];
+        const RendererCore::Built::Item& it = bl.items[i];
         const GpuSubmesh& g = *bl.groups[it.group].g;
         ++st.draws;
         st.triangles += g.index_count / 3;
@@ -1216,19 +1216,19 @@ void count_items(const Renderer::Built& bl, size_t b, size_t e, DrawStats& st) {
     }
 }
 // First item index whose bucket is >= b (items are sorted by bucket).
-size_t bucket_begin(const std::vector<Renderer::Built::Item>& items, PhaseBucket b) {
+size_t bucket_begin(const std::vector<RendererCore::Built::Item>& items, PhaseBucket b) {
     size_t i = 0;
     while (i < items.size() && items[i].bucket < b) ++i;
     return i;
 }
 }  // namespace detail
 
-bool Renderer::draw(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, std::span<const Instance> instances,
+bool RendererCore::draw(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, std::span<const Instance> instances,
                     DrawMode mode, DrawStats* stats) {
     return draw(frame, cmd, view, instances, mode, RecordOptions{}, stats);
 }
 
-bool Renderer::draw(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, std::span<const Instance> instances,
+bool RendererCore::draw(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, std::span<const Instance> instances,
                     DrawMode mode, const RecordOptions& opts, DrawStats* stats) {
     // Inline single pass into the caller's attachments: no stencil, no heat target, so the Shadow and
     // Heat buckets are skipped (render() draws them).

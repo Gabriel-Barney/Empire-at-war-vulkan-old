@@ -41,23 +41,23 @@ uint64_t xlat_key_of(const materials::ResolvedPass& pass, bool instanced) {
 }
 }  // namespace detail
 
-const materials::TranslatedProgram* Renderer::find_translated(uint32_t vs_id, uint32_t ps_id) const {
+const materials::TranslatedProgram* RendererCore::find_translated(uint32_t vs_id, uint32_t ps_id) const {
     std::lock_guard<std::mutex> lock(xlat_mutex_);
     auto it = xlat_.find(xlat_key(vs_id, ps_id));
     return it != xlat_.end() && it->second->state.load() == 1 ? it->second->tp.get() : nullptr;
 }
 
-const materials::TranslatedProgram* Renderer::translated_program(const std::shared_ptr<const materials::MaterialEffect>& effect,
+const materials::TranslatedProgram* RendererCore::translated_program(const std::shared_ptr<const materials::MaterialEffect>& effect,
                                                                  const materials::ResolvedPass& pass) {
     return translated_program_impl(effect, pass, false);
 }
 
-const materials::TranslatedProgram* Renderer::translated_mesh_program(const std::shared_ptr<const materials::MaterialEffect>& effect,
+const materials::TranslatedProgram* RendererCore::translated_mesh_program(const std::shared_ptr<const materials::MaterialEffect>& effect,
                                                                       const materials::ResolvedPass& pass) {
     return translated_program_impl(effect, pass, true);
 }
 
-const materials::TranslatedProgram* Renderer::translated_program_impl(const std::shared_ptr<const materials::MaterialEffect>& effect,
+const materials::TranslatedProgram* RendererCore::translated_program_impl(const std::shared_ptr<const materials::MaterialEffect>& effect,
                                                                       const materials::ResolvedPass& pass, bool instanced) {
     if (!dxc_ok_ || pass.program_status != materials::ProgramStatus::Translated) return nullptr;
     // Q3 instanced form: its own program ids (the options key differs), registered next to the default form's so
@@ -108,11 +108,11 @@ const materials::TranslatedProgram* Renderer::translated_program_impl(const std:
     return e->state.load() == 1 ? e->tp.get() : nullptr;
 }
 
-void Renderer::wait_translations() {
+void RendererCore::wait_translations() {
     if (desc_.js && xlat_counter_) desc_.js->wait(*xlat_counter_);
 }
 
-Renderer::TranslationStats Renderer::translation_stats() const {
+RendererCore::TranslationStats RendererCore::translation_stats() const {
     TranslationStats s;
     std::lock_guard<std::mutex> lock(xlat_mutex_);
     for (const auto& [k, e] : xlat_) {
@@ -129,7 +129,7 @@ Renderer::TranslationStats Renderer::translation_stats() const {
     return s;
 }
 
-std::vector<materials::ShaderIssue> Renderer::shader_issues() const {
+std::vector<materials::ShaderIssue> RendererCore::shader_issues() const {
     std::vector<materials::ShaderIssue> out;
     if (desc_.effects) out = desc_.effects->issues();
     std::vector<materials::ShaderIssue> failed;
@@ -155,7 +155,7 @@ std::vector<materials::ShaderIssue> Renderer::shader_issues() const {
     return out;
 }
 
-materials::PsoKey Renderer::translated_key(const GpuSubmesh& g, const GpuPass& p, const materials::TranslatedProgram& tp,
+materials::PsoKey RendererCore::translated_key(const GpuSubmesh& g, const GpuPass& p, const materials::TranslatedProgram& tp,
                                            int variant) const {
     materials::PsoKey k = tp.key(p.pass->pso[variant ? 1 : 0]);
     k.render_pass = render_pass_;
@@ -163,7 +163,7 @@ materials::PsoKey Renderer::translated_key(const GpuSubmesh& g, const GpuPass& p
     return k;
 }
 
-void Renderer::translated_pixel_offset(uint32_t width, uint32_t height, float (&out)[4]) {
+void RendererCore::translated_pixel_offset(uint32_t width, uint32_t height, float (&out)[4]) {
     // D3D9 rasterises with pixel centres at integer coordinates, Vulkan at +0.5: shifting the clip
     // position by +1/W (x) and -1/H (y; NDC y is up and the viewport flips it) moves the geometry half
     // a pixel right / down on screen, which reproduces D3D9's coverage and interpolation.
@@ -392,14 +392,14 @@ void translated_draw_params(const Instance& inst, const GpuSubmesh& g, const Vie
     e.palette = pal;
 }
 
-// ---- Register images per (material, pass) (Renderer::XTemplate).
+// ---- Register images per (material, pass) (RendererCore::XTemplate).
 constexpr size_t kMaxPatchFloats = 1024;
 
 // Which bindings / steps of the pass's fill read per-draw parameters. The patched image equals the full fill
 // when (a) the per-draw bindings overlap no other binding (else: full fill per draw) and (b) the preshader
 // and the bump-env registers, written after the CTAB bindings, are re-run when they read per-draw inputs or
 // cover a per-draw binding.
-void xt_analyse(Renderer::XTemplate& t, const fx::Effect& fxe, const materials::ResolvedPass& rp) {
+void xt_analyse(RendererCore::XTemplate& t, const fx::Effect& fxe, const materials::ResolvedPass& rp) {
     t.analysed = true;
     t.full = false;
     t.src.resize(fxe.parameters.size());
@@ -503,7 +503,7 @@ void mask_frame(const EngineFrame& f, uint64_t mask, EngineFrame& out) {
 
 // The frame part of a template: every binding filled from the frame inputs and the material (per-draw values
 // neutral: identity-free zero matrices, no team colour), exactly the full fill's sequence.
-void xt_fill_slot(const Renderer::XTemplate& t, Renderer::XTemplate::Slot& s, const EngineFrame& masked, const fx::Effect& fxe,
+void xt_fill_slot(const RendererCore::XTemplate& t, RendererCore::XTemplate::Slot& s, const EngineFrame& masked, const fx::Effect& fxe,
                   const materials::ResolvedPass& rp, const materials::ParamStore* store, bool int_bool) {
     s.frame = masked;  // every field the per-material part reads (frame_mask)
     EngineParams e;
@@ -529,7 +529,7 @@ void xt_fill_slot(const Renderer::XTemplate& t, Renderer::XTemplate::Slot& s, co
 
 // Images of one draw from the template slot: copy + per-draw bindings (+ preshader / bump env re-run), or the
 // full fill when the split does not apply. Null outputs are skipped.
-void xt_images(const Renderer::XTemplate& t, const Renderer::XTemplate::Slot& s, const fx::Effect& fxe,
+void xt_images(const RendererCore::XTemplate& t, const RendererCore::XTemplate::Slot& s, const fx::Effect& fxe,
                const materials::ResolvedPass& rp, const materials::ParamLookup& lookup, materials::VSConstants* vs,
                materials::PSConstants* ps, materials::IntBoolConstants* vib, materials::IntBoolConstants* pib) {
     if (vs) {
@@ -568,7 +568,7 @@ void xt_images(const Renderer::XTemplate& t, const Renderer::XTemplate::Slot& s,
 
 }  // namespace detail
 
-void Renderer::engine_frame(const ViewMatrices& v, const SceneLightConstants& slc, EngineFrame& f) const {
+void RendererCore::engine_frame(const ViewMatrices& v, const SceneLightConstants& slc, EngineFrame& f) const {
     f = EngineFrame{};
     to_d3dx(v.view, f.view);
     to_d3dx(v.proj, f.proj);
@@ -607,14 +607,14 @@ void Renderer::engine_frame(const ViewMatrices& v, const SceneLightConstants& sl
     std::copy(slc.sph_fill.begin(), slc.sph_fill.end(), f.sph_fill);
 }
 
-bool Renderer::translated_constants(const Instance& inst, const GpuSubmesh& g, const GpuPass& p, const ViewMatrices& view,
+bool RendererCore::translated_constants(const Instance& inst, const GpuSubmesh& g, const GpuPass& p, const ViewMatrices& view,
                                     materials::VSConstants& vs, materials::PSConstants& ps, materials::IntBoolConstants* vs_ib,
                                     materials::IntBoolConstants* ps_ib) const {
     const SceneLightConstants slc = scene_light_constants(lighting_);
     return translated_constants_slc(inst, g, p, view, slc, vs, ps, vs_ib, ps_ib);
 }
 
-bool Renderer::translated_constants_slc(const Instance& inst, const GpuSubmesh& g, const GpuPass& p, const ViewMatrices& view,
+bool RendererCore::translated_constants_slc(const Instance& inst, const GpuSubmesh& g, const GpuPass& p, const ViewMatrices& view,
                                         const SceneLightConstants& slc, materials::VSConstants& vs, materials::PSConstants& ps,
                                         materials::IntBoolConstants* vs_ib, materials::IntBoolConstants* ps_ib) const {
     if (!g.effect || !g.effect->effect || !p.pass || !p.pass->vs_plan || !p.pass->ps_plan || !inst.model || !inst.model->asset)
@@ -637,7 +637,7 @@ bool Renderer::translated_constants_slc(const Instance& inst, const GpuSubmesh& 
     return true;
 }
 
-bool Renderer::translated_constants_cached(const Instance& inst, const GpuSubmesh& g, const GpuPass& p, const ViewMatrices& view,
+bool RendererCore::translated_constants_cached(const Instance& inst, const GpuSubmesh& g, const GpuPass& p, const ViewMatrices& view,
                                            materials::VSConstants& vs, materials::PSConstants& ps, materials::IntBoolConstants* vs_ib,
                                            materials::IntBoolConstants* ps_ib) {
     if (!g.effect || !g.effect->effect || !p.pass || !p.pass->vs_plan || !p.pass->ps_plan || !inst.model || !inst.model->asset)

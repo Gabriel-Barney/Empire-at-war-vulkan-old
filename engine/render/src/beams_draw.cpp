@@ -15,7 +15,7 @@
 
 namespace alamo::render {
 
-struct Renderer::BeamRenderState {
+struct RendererCore::BeamRenderState {
     TextureSource source;
     LightningLibrary lightning;
     BeamAnimator anim;
@@ -28,7 +28,7 @@ struct Renderer::BeamRenderState {
     VkDeviceSize vb_size[4] = {};
 };
 
-bool Renderer::init_beams(const TextureSource& textures, const LightningLibrary* lightning) {
+bool RendererCore::init_beams(const TextureSource& textures, const LightningLibrary* lightning) {
     if (!ctx_ || !desc_.effects) return false;
     shutdown_beams();
     auto st = std::make_shared<BeamRenderState>();
@@ -58,16 +58,16 @@ bool Renderer::init_beams(const TextureSource& textures, const LightningLibrary*
     return true;
 }
 
-void Renderer::release_beams() { shutdown_beams(); }
+void RendererCore::release_beams() { shutdown_beams(); }
 
-bool Renderer::beams_ready() const { return beams_ && beams_->pass && beams_->tpl; }
+bool RendererCore::beams_ready() const { return beams_ && beams_->pass && beams_->tpl; }
 
-const BeamGeometry& Renderer::last_beam_geometry() const {
+const BeamGeometry& RendererCore::last_beam_geometry() const {
     static const BeamGeometry kEmpty;
     return beams_ ? beams_->geo : kEmpty;
 }
 
-void Renderer::set_beams(std::span<const BeamInstance> beams, uint64_t tick) {
+void RendererCore::set_beams(std::span<const BeamInstance> beams, uint64_t tick) {
     if (!beams_) {
         beams_active_ = false;
         return;
@@ -76,7 +76,7 @@ void Renderer::set_beams(std::span<const BeamInstance> beams, uint64_t tick) {
     beams_active_ = !beams_->anim.draws().empty();
 }
 
-void Renderer::shutdown_beams() {
+void RendererCore::shutdown_beams() {
     if (beams_) {
         for (auto& [name, t] : beams_->tex)
             if (t.image) release_texture(t.resident ? t.slot : 0u, &t.image);
@@ -86,7 +86,7 @@ void Renderer::shutdown_beams() {
     beams_active_ = false;
 }
 
-void Renderer::draw_beams(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, DrawStats& st) {
+void RendererCore::draw_beams(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, DrawStats& st) {
     if (!beams_ || !beams_->pass) return;
     BeamRenderState& bs = *beams_;
     bs.geo.build(bs.anim.draws(), view);

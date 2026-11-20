@@ -1220,7 +1220,7 @@ static void test_gpu_alt(Gpu& g, render::Renderer& r) {
                 CHECK(render_frame(g, r, o, vm, std::span<const render::Instance>(&in, 1), &model, st, render::DrawMode::Unlit, ro));
                 if (model.resident() && st.draws > 0 && st.pending_pipeline == 0 && st.translation_pending == 0) break;
                 r.wait_translations();
-                r.pipelines().wait_idle();
+                r.wait_pipelines();
             }
             const std::vector<uint8_t> px = o.pixels();
             left[alt] = region_luma(px, o.w, 0, 0, o.w / 2, o.h);
@@ -1375,7 +1375,7 @@ static void test_gpu_real(Gpu& g, const std::string& out_dir) {
                    ws.terrain_pending == 0 && ws.water_pending == 0 && ws.decorations.pending == 0 && ws.decorations.fow_draws > 0;
             if (!done && scene.ready()) {
                 rr.wait_translations();
-                rr.pipelines().wait_idle();
+                rr.wait_pipelines();
             }
         }
         CHECK(done);
@@ -1519,7 +1519,7 @@ static void test_gpu_real_stage2(Gpu& g, const std::string& out_dir) {
                    (space ? ws.decorations.space_fow_draws > 0 : ws.decorations.fow_draws > 0) && (!up || tank.resident());
             if (!done && scene.ready()) {
                 rr.wait_translations();
-                rr.pipelines().wait_idle();
+                rr.wait_pipelines();
             }
         }
         CHECK(done);
