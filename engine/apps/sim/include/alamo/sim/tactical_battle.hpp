@@ -2122,8 +2122,48 @@ private:
     // The push (§4.9 step 2): the squadron's unlocked auto target -> a new auto attack block when it is not the formation
     // goal already and the chase test (fighter_chase_test) passes. Returns the newest live, hostile pushed block.
     objects::ObjectId fighter_push(const Unit& leader, objects::ObjectId key, const objects::ObjectStore& store);
-    objects::ObjectId fighter_goal_key(objects::ObjectId id);  // a squadron member -> its container, else id
-    bool fighter_goal_live(objects::ObjectId key, const objects::ObjectStore& store);
+    objects::ObjectId fighter_goal_key(objects::ObjectId id) const;  // a squadron member -> its container, else id
+    bool fighter_goal_live(objects::ObjectId key, const objects::ObjectStore& store) const;
+    const tactical::movement::FighterSquad* fighter_squad_c(objects::ObjectId id) const;  // read-only squadron lookup (parallel scans)
+    // ---- ref5 t08: one chase-input builder (FIGHTER_FLYING §4.10 A, 0x4160a0) for land formations and fighters ----
+    // ChaseOrder: the formation facts the test reads, gathered by the land adapter (land_chase) or the fighter adapter
+    // (fighter_chase_order); chase_inputs turns them into FighterChaseInputs (ranges from the per-type cache); the caller adds
+    // the candidate facts, and chase_answer runs the test and gives Rr. Land / space differences are the adapters' values:
+    // `moving` (land: the mover has a goal; space: has a goal and has not arrived, the documented port difference), the
+    // order goal (space only, `order_goal_live`), unit and goal positions (land: the mover's 2D view; space: the leader's
+    // store position and the order block's goal).
+    struct ChaseOrder {
+        uint8_t first_flags = 0;    // the first block's flags (Rr, the attack-move branch)
+        uint8_t flags = 0;          // the order block's flags (guard)
+        bool moving = false;
+        bool live_push = false;     // a live pushed auto block is the last block
+        bool goal_object = false;   // the order block names an object
+        bool order_goal_live = false;  // space: the combat order goal is live
+        objects::ObjectId guarded_mover = kNoObjectId;  // the guard block's object as a movement unit (its moving test)
+        Vec3 unit, goal;            // u's position; the slot goal (following a live goal object)
+        uint32_t range_type = 0xFFFFFFFFu;  // the chase ranges' type
+        float attack_range = 0.0f;
+    };
+    FighterChaseInputs chase_inputs(const ChaseOrder& o) const;
+    static uint8_t chase_answer(const FighterChaseInputs& ci, float& rr);
+    // Guard_Chase_Range, Idle_Chase_Range, Attack_Move_Response_Range, Autonomous_Move_Extension_Vs_Attacker of type `ty`:
+    // the cache when filled, else read from the type data (same values; the parallel scans never write). fill: serial.
+    std::array<float, 4> chase_ranges(uint32_t ty) const;
+    void chase_ranges_fill(uint32_t ty);
+    // The fighter adapter (fighter_scan_range and fighter_push): record `r` of squadron leader `leader` (members: the
+    // squadron, else the leader). Also gives the facts the candidate test reads.
+    struct FighterChaseFacts {
+        ChaseOrder order;
+        const Unit* guarded = nullptr;
+        std::span<const objects::ObjectId> members;
+        objects::ObjectId order_goal = kNoObjectId, goal_key = kNoObjectId, last_push = kNoObjectId;
+    };
+    FighterChaseFacts fighter_chase_order(const FighterFormationRecord& r, const Unit& leader, std::span<const objects::ObjectId> members,
+                                          const objects::ObjectStore& store, float attack_range) const;
+    // The candidate facts for target `cand` (its goal key `tk`, position `at`): candidate_is_goal and candidate_attacker.
+    void fighter_chase_candidate(const FighterChaseFacts& f, objects::ObjectId cand, objects::ObjectId tk, Vec3 at,
+                                 FighterChaseInputs& ci) const;
+    uint32_t fighter_chase_type(const Unit& leader, bool squad) const;  // the squadron type, else the fighter's
     // S8 t17 (FIGHTER_FLYING §4.10 A): 0x4160a0(F, u, c, &Rr) for combat's scan (CombatSystem::set_scan_range_query);
     // read-only (combat's parallel gather phase). c = kNoObjectId: the scan cube test.
     uint8_t fighter_scan_range(const objects::ObjectStore& store, objects::ObjectId member, objects::ObjectId candidate, float range,
