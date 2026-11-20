@@ -1,5 +1,6 @@
 // s78n t06 - hero clashes: HEROCLASH.XML and the land mode's HeroClashManager (docs/re/HERO_CLASH.md §1-§6).
 #include "alamo/tactical/combat/hero_clash.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/core/x86_int.hpp"
 
 #include <algorithm>
@@ -160,7 +161,7 @@ bool parse_action(data::XmlNode n, ClashAction& a) {
             a.ability_name = std::string(n.child_text("Ability_Name"));
             a.cooldown_secs = number(n.child_text("Ability_Cooldown_Time_In_Secs"), 0.0f);
             // Post-parse 0x71f5f0: frames = round half away from zero (30 fps x seconds).
-            a.cooldown_frames = static_cast<int32_t>(std::round(30.0f * a.cooldown_secs));
+            a.cooldown_frames = frames_round(30.0f * a.cooldown_secs);
             break;
     }
     return true;

@@ -1,4 +1,5 @@
 #include "alamo/ai/ai_learning.hpp"
+#include "alamo/core/frames.hpp"
 
 #include "alamo/ai/ai_types.hpp"
 #include "alamo/core/sim_crc.hpp"
@@ -7,7 +8,7 @@ namespace alamo::ai {
 
 int64_t LearningSystem::expiry_of(float duration, int64_t now) {
     if (duration < 0.0f) return -1;
-    return now + static_cast<int32_t>(static_cast<float>(kAiFps) * duration);
+    return now + frames_trunc(static_cast<float>(kAiFps) * duration);
 }
 
 void LearningSystem::record_goal_outcome(uint32_t goal_type, int32_t target, uint32_t plan, bool success,

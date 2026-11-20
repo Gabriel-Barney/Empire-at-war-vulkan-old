@@ -10,6 +10,7 @@
 #include <string_view>
 
 #include "alamo/galactic/campaign.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/core/ascii.hpp"
 #include "alamo/objects/behaviors.hpp"
 #include "alamo/objects/game_object_types.hpp"
@@ -130,7 +131,7 @@ void TacticalBattle::sk_garrison_tick() {
                     if (const std::string_view v = fs[ps[static_cast<size_t>(g.player)].faction].xml_text("Garrison_Reinforcement_Delay_Seconds");
                         !v.empty())
                         delay = std::max(0.0f, to_f(v));
-                g.timer = static_cast<int32_t>(frame_) + static_cast<int32_t>(delay * 30.0f);
+                g.timer = static_cast<int32_t>(frame_) + frames_trunc(delay * 30.0f);
             }
         }
         if (g.timer >= 0 && static_cast<int32_t>(frame_) >= g.timer) {

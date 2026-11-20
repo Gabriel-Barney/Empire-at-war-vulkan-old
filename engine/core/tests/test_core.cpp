@@ -17,6 +17,7 @@
 #include "alamo/core/parallel.hpp"
 #include "alamo/test/support.hpp"
 #include "alamo/core/x86_int.hpp"
+#include "alamo/core/frames.hpp"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -157,8 +158,48 @@ void test_x86_int() {
     CHECK(alamo::add_wrap(INT32_MAX, 1) == INT32_MIN);
 }
 
+// ref4 t03: data-driven seconds -> frames, one function per rounding form, with the x86 range behaviour on both compilers
+// (negative, NaN, 2^32 and in-range values; float and double). In range each is the plain cast of its rounding.
+void test_frames() {
+    using alamo::frames_ceil;
+    using alamo::frames_round;
+    using alamo::frames_trunc;
+    static_assert(frames_trunc(30.0f * 2.5f) == 75 && frames_trunc(30.0 * 0.1) == 3);
+    volatile float zero = 0.0f, secs = 0.25f, big = 99999999999.0f, two32 = 4294967296.0f, neg = -2.5f, negbig = -3.0e10f;
+    const float q = zero;
+    volatile float nanv = q / q;
+    // In range: the plain truncation / rounding / ceiling (0.25 s = 7.5 frames).
+    CHECK(frames_trunc(30.0f * secs) == 7 && frames_round(30.0f * secs) == 8 && frames_ceil(30.0f * secs) == 8);
+    CHECK(frames_trunc(30.0f * secs + 0.5f) == 8);  // the original's (int)(x + 0.5)
+    CHECK(frames_trunc(30.0f * 2.0f) == 60 && frames_round(60.0f) == 60 && frames_ceil(60.0f) == 60);
+    CHECK(frames_trunc(zero) == 0 && frames_round(zero) == 0 && frames_ceil(zero) == 0);
+    // Negative: toward zero / half away from zero / up, still in range.
+    CHECK(frames_trunc(neg) == -2 && frames_round(neg) == -3 && frames_ceil(neg) == -2);
+    CHECK(static_cast<uint32_t>(frames_trunc(neg)) == 0xfffffffeu);  // what an unsigned frame field holds
+    // NaN, 2^32, a huge mod value and a huge negative one: integer indefinite (INT32_MIN) for every form.
+    for (const float v : {static_cast<float>(nanv), static_cast<float>(two32), big * 30.0f, static_cast<float>(negbig)}) {
+        CHECK(frames_trunc(v) == INT32_MIN);
+        CHECK(frames_round(v) == INT32_MIN);
+        CHECK(frames_ceil(v) == INT32_MIN);
+    }
+    CHECK(frames_round(2147483520.0f) == 2147483520 && frames_ceil(2147483520.0f) == 2147483520);
+    volatile double dsecs = 0.1, dbig = 1.0e12, dtwo32 = 4294967296.0, dneg = -0.5;
+    const double dq = static_cast<double>(zero);
+    volatile double dnan = dq / dq;
+    CHECK(frames_trunc(30.0 * dsecs) == 3 && frames_round(30.0 * 1.25) == 38 && frames_ceil(30.0 * dsecs) == 3);  // 30 x 0.1 is 3.0 in double
+    CHECK(frames_trunc(30.0 * 0.11) == 3 && frames_ceil(30.0 * 0.11) == 4);
+    CHECK(frames_round(dneg) == -1 && frames_ceil(dneg) == 0 && frames_trunc(dneg) == 0);
+    for (const double v : {static_cast<double>(dnan), static_cast<double>(dtwo32), static_cast<double>(dbig), -static_cast<double>(dbig)}) {
+        CHECK(frames_trunc(v) == INT32_MIN);
+        CHECK(frames_round(v) == INT32_MIN);
+        CHECK(frames_ceil(v) == INT32_MIN);
+    }
+    CHECK(frames_ceil(2147483647.5) == INT32_MIN && frames_trunc(2147483647.5) == INT32_MAX);  // ceil leaves the range
+}
+
 int main() {
     test_x86_int();
+    test_frames();
     // CRC-32/IEEE check value.
     CHECK(alamo::crc32("123456789", 9) == 0xCBF43926u);
     CHECK(alamo::name_crc("data/xml/planets.xml") == alamo::name_crc("DATA\\XML\\PLANETS.XML"));

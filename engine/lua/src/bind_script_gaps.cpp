@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "alamo/core/dmath.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/core/ascii.hpp"
 #include "alamo/core/sim_crc.hpp"
 #include "alamo/lua/ai_bridge.hpp"
@@ -711,7 +712,7 @@ void CinematicTransports::service(uint32_t frame, const std::function<uint32_t(O
         const float played = static_cast<float>(l.anim_offset) + static_cast<float>(frame - l.anim_start) * l.anim_speed;
         return played / static_cast<float>(n);
     };
-    auto idle_frames = [](float seconds) { return seconds > 0.0f ? static_cast<uint32_t>(seconds * 30.0f) : 0u; };
+    auto idle_frames = [](float seconds) { return seconds > 0.0f ? static_cast<uint32_t>(frames_trunc(seconds * 30.0f)) : 0u; };
     std::vector<ObjectId> gone;
     for (CinematicLanding& l : list_) {
         if (!l.initialised) {  // 0x644040

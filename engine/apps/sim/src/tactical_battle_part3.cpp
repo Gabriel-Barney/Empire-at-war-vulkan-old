@@ -1,5 +1,6 @@
 // tactical_battle: part 3 (bo3 t03 split; shared code in tactical_battle_internal.hpp).
 #include "tactical_battle_internal.hpp"
+#include "alamo/core/frames.hpp"
 
 namespace alamo::sim {
 // S8 t17 (FIGHTER_FLYING §4.10 A, TACTICAL_COMBAT §2.2): Get_Scan_Range 0x566f50 / the per-candidate acceptance of the
@@ -955,7 +956,7 @@ void TacticalBattle::schedule_death_clone(TacticalMode& mode, objects::ObjectHan
     const auto seconds = [&types, t](const char* field, float def) {
         return types.get_string(t, field).empty() ? def : types.get_float(t, field);
     };
-    const auto frames = [](float s) { return s > 0.0f ? static_cast<uint64_t>(s * 30.0f) : uint64_t{0}; };
+    const auto frames = [](float s) { return s > 0.0f ? uint64_t{static_cast<uint32_t>(frames_trunc(s * 30.0f))} : uint64_t{0}; };
     const bool remove_now = types.get_bool(t, "Remove_Upon_Death");
     const float persist = persistence_override ? *persistence_override : seconds("Death_Persistence_Duration", -1.0f);
     const bool forever = !remove_now && persist < 0.0f;

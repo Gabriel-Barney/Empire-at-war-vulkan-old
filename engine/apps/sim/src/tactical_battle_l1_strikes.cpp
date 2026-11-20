@@ -8,6 +8,7 @@
 #include <string>
 
 #include "alamo/core/dmath.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/core/ascii.hpp"
 #include "alamo/data/game_database.hpp"
 #include "alamo/data/xml.hpp"
@@ -189,7 +190,7 @@ void TacticalBattle::l1_strikes_setup(TacticalMode& mode) {
             r.enabled = true;
             r.available = true;
             r.bomber_type = static_cast<int32_t>(bt);
-            r.interval = static_cast<uint32_t>(static_cast<float>(fps) * l1_k_.max_bombing_run_interval);
+            r.interval = static_cast<uint32_t>(frames_trunc(static_cast<float>(fps) * l1_k_.max_bombing_run_interval));
             r.ready = frame_ + r.interval;
             r.last_start = 0xFFFFFFFFu;
             l1_runs_.push_back(r);
@@ -228,7 +229,7 @@ void TacticalBattle::l1_strikes_setup(TacticalMode& mode) {
             r.faction = faction;
             r.enabled = true;
             r.timer_only = false;
-            r.interval = static_cast<uint32_t>(static_cast<float>(fps) * l1_k_.min_bombard_interval);
+            r.interval = static_cast<uint32_t>(frames_trunc(static_cast<float>(fps) * l1_k_.min_bombard_interval));
             r.ready = frame_ + r.interval;
             r.start = frame_;
             l1_bombard_.push_back(r);
@@ -248,12 +249,12 @@ void TacticalBattle::l1_strikes_setup(TacticalMode& mode) {
         const float n = static_cast<float>(std::max(bombers, 3));
         const float red = (n / 3.0f - 1.0f) * static_cast<float>(l1_k_.bombing_run_reduction_per_squadron) / 100.0f;  // [M] percent
         const float fct = std::max(0.0f, 0.0f + 1.0f - red);
-        const uint32_t base = static_cast<uint32_t>(static_cast<float>(fps) * l1_k_.max_bombing_run_interval);
+        const uint32_t base = static_cast<uint32_t>(frames_trunc(static_cast<float>(fps) * l1_k_.max_bombing_run_interval));
         L1BombingRun r;
         r.player = player;
         r.enabled = true;
         r.bomber_type = bomber_type;
-        r.interval = std::max(static_cast<uint32_t>(static_cast<float>(fps) * l1_k_.min_bombing_run_interval),
+        r.interval = std::max(static_cast<uint32_t>(frames_trunc(static_cast<float>(fps) * l1_k_.min_bombing_run_interval)),
                               static_cast<uint32_t>(static_cast<float>(base) * fct));
         r.ready = frame_ + r.interval;
         r.last_start = frame_;
@@ -421,11 +422,11 @@ bool TacticalBattle::start_bombardment(TacticalMode& mode, int32_t player, Vec3 
         r.start = frame_;
         r.shot = r.salvo = 0;
         r.target = target;
-        const uint32_t init = static_cast<uint32_t>(30.0f * f.initial_delay);
+        const uint32_t init = static_cast<uint32_t>(frames_trunc(30.0f * f.initial_delay));
         // BOMBARD_DELAY (STY1 t06, §4.3): a story override above 0 replaces the faction's initial delay. [port] the extra time
         // over the faction value is not applied to the first particle.
-        const uint32_t d = bombard_delay_override_ > 0.0f ? static_cast<uint32_t>(30.0f * bombard_delay_override_) : init;
-        r.next_shot = frame_ + static_cast<uint32_t>(30.0f * f.shot_delay) + d;
+        const uint32_t d = bombard_delay_override_ > 0.0f ? static_cast<uint32_t>(frames_trunc(30.0f * bombard_delay_override_)) : init;
+        r.next_shot = frame_ + static_cast<uint32_t>(frames_trunc(30.0f * f.shot_delay)) + d;
         const int32_t count = static_cast<int32_t>(l1_k_.bombardment_distribution.size());
         r.cursor = static_cast<uint32_t>(rng.range_int(0, std::max(0, count - 1)));  // drawn even without scatter [H]
         if (!f.bombard_particles.empty() && l1_mode_) {  // extra == 0: particle[0] now
@@ -546,11 +547,11 @@ void TacticalBattle::l1_strikes(TacticalMode& mode, SimRng& rng) {
         // Advance: next shot / next salvo (particle) / finish.
         if (r.shot + 1 < f.shots_per_salvo) {
             ++r.shot;
-            r.next_shot += static_cast<uint32_t>(30.0f * f.shot_delay);
+            r.next_shot += static_cast<uint32_t>(frames_trunc(30.0f * f.shot_delay));
         } else if (r.salvo + 1 < f.salvos) {
             r.shot = 0;
             ++r.salvo;
-            r.next_shot += static_cast<uint32_t>(30.0f * f.salvo_delay);
+            r.next_shot += static_cast<uint32_t>(frames_trunc(30.0f * f.salvo_delay));
             if (!f.bombard_particles.empty()) {
                 const size_t k = std::min<size_t>(static_cast<size_t>(r.salvo), f.bombard_particles.size() - 1);
                 const objects::TypeIndex pt = catalog_->types().resolve_name(f.bombard_particles[k]);
@@ -595,7 +596,7 @@ void TacticalBattle::l1_strikes(TacticalMode& mode, SimRng& rng) {
                     l.from = tv3(bm.pos);
                     l.point = tv3(m);
                     combat_->launch_projectile(l, frame_);
-                    bm.next_fire = frame_ + std::max(1u, static_cast<uint32_t>(30.0f * bm.recharge));
+                    bm.next_fire = frame_ + std::max(1u, static_cast<uint32_t>(frames_trunc(30.0f * bm.recharge)));
                 }
             }
             if ((bm.exit.x - bm.pos.x) * bm.dir.x + (bm.exit.y - bm.pos.y) * bm.dir.y <= 0.0f) {  // past the exit

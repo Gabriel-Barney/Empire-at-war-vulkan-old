@@ -4,6 +4,7 @@
 // Produced objects are claimed on the producing planet; failures dispatch Production_Failed; there is no
 // time-out. [port] / [M] mark the stand-ins (listed in docs/PHASE4.md A2 open items).
 #include "galactic_ai_impl.hpp"
+#include "alamo/core/frames.hpp"
 
 namespace alamo::ai {
 
@@ -455,8 +456,8 @@ void GalacticAiWorld::Impl::market_planet(PlanetIndex p) {
                 // counts as expired once its length has passed].
                 const bool expired =
                     b.claimed >= 0 &&
-                    now - b.claimed >= static_cast<int64_t>(static_cast<float>(kAiFps) *
-                                         std::clamp(sim.rules().constants.ai_build_task_reservation_seconds, 0.0f, 1.0e9f));
+                    now - b.claimed >= frames_trunc(static_cast<float>(kAiFps) *  // [port] clamp keeps x 30 inside int32
+                                                    std::clamp(sim.rules().constants.ai_build_task_reservation_seconds, 0.0f, 7.0e7f));
                 if (!expired && delivery_reachable(owner, b, p) && ft >= queue_time && buildable_here(b)) {  // 0x6955a0
                     queue_time += queue_term(b, ft);
                     continue;

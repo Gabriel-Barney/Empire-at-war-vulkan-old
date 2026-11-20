@@ -6,6 +6,7 @@
 #include <utility>
 
 #include "alamo/objects/behaviors.hpp"
+#include "alamo/core/frames.hpp"
 #include "alamo/objects/game_object_types.hpp"
 #include "alamo/sim/l1_loaders.hpp"
 #include "alamo/sim/tactical_battle.hpp"
@@ -130,7 +131,7 @@ void TacticalBattle::vm_cp_capture(objects::ObjectId point, int32_t new_owner) {
     }
     // Arm: round-half-away(FPS x Control_Point_Domination_Victory_Time_In_Secs) frames, 900 in FoC.
     vm_cp_armed_ = true;
-    vm_cp_timer_ = static_cast<int32_t>(std::lround(30.0 * static_cast<double>(catalog_->control_point_victory_seconds())));
+    vm_cp_timer_ = frames_round(30.0 * static_cast<double>(catalog_->control_point_victory_seconds()));
     vm_cp_player_ = new_owner;
 }
 
