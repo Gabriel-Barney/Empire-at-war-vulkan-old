@@ -989,8 +989,11 @@ void test_scene_staged_trim() {
     CHECK(sys.add_unit(attacker(10, kO)));
     CHECK(sys.add_unit(attacker(900, kO + V2{1000.0f, 0.0f}, 5.0f)));
     const V2 c = kO + V2{1000.0f, 0.0f}, g = kO + V2{850.0f, 0.0f};
+    // only the trim's tests count: they are taken along the path (x >= 600 here); the item-6 test "every member can fire
+    // from where it stands" (0x40edd0) is taken at the start point and aims at the object itself
     uint32_t asked = 0, at_g = 0, at_c = 0, at_cz = 0;
     alamo::test::set_fire_test<V2>(alamo::test::engagement_of(sys), [&](ObjectId, V2 p, ObjectId, bool, V2 end, float z) {
+        if (p.x - kO.x < 600.0f) return distance(p, c) <= 255.0f;
         ++asked;
         if (close2(end, g, 0.01f)) ++at_g;
         if (close2(end, c, 0.01f)) ++at_c;
