@@ -365,6 +365,9 @@ TABLE = [
     Entry("MovementSystem", ENG + "tactical/movement/include/alamo/tactical/movement/movement_system.hpp",
           ENG + "tactical/movement/src/movement_ledger.hpp", [ENG + "tactical/movement/src"],
           save=["write"], read=["read"], hash_fns=[r"hash_\w+", "register_crc"]),
+    Entry("CombatSystem", ENG + "tactical/combat/include/alamo/tactical/combat/combat_system.hpp",
+          ENG + "tactical/combat/src/combat_ledger.hpp", [ENG + "tactical/combat/src"],
+          save=["write"], read=["read"], hash_fns=[r"hash_\w+", r"register_\w*crc"]),
 ]
 
 
