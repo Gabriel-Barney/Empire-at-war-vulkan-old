@@ -8,8 +8,10 @@
 #include <iterator>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "alamo/lua/bindings.hpp"
+#include "alamo/lua/object_bridge.hpp"
 #include "alamo/test/support.hpp"
 
 using namespace alamo::lua;
@@ -53,5 +55,35 @@ int main() {
     CHECK(recorded >= 60);
     std::printf("bindings: %zu recorded, %zu with an effect gap\n", recorded, gaps);
     CHECK(std::string_view(to_string(BindingEffect::NoopRetail)) == "noop-retail");
+
+    // ref5 t04: the hook ledger. Every hook a row names is in the hook table; Get_Name reads ship_name; a set with the hook
+    // wired no longer lists it (the host test, alamo_sim_battle_story_tests, feeds the real bridges).
+    size_t with_hooks = 0;
+    const auto known = [](std::string_view q) {
+        for (const BridgeHookInfo& h : bridge_hook_table())
+            if (q == std::string(h.bridge) + "." + h.name) return true;
+        return false;
+    };
+    for (const BindingInfo& b : binding_table()) {
+        std::string_view rest(b.hooks);
+        with_hooks += rest.empty() ? 0u : 1u;
+        while (!rest.empty()) {
+            const size_t sp = rest.find(' ');
+            CHECK(known(rest.substr(0, sp)));
+            rest = sp == std::string_view::npos ? std::string_view() : rest.substr(sp + 1);
+        }
+    }
+    CHECK(with_hooks > 30 && bridge_hook_table().size() > 80);
+    const auto lists_get_name = [](const std::vector<std::string>& v) {
+        return std::find(v.begin(), v.end(), "GameObjectWrapper.Get_Name reads ObjectBridge.ship_name") != v.end();
+    };
+    ObjectBridge bridge;
+    BridgeHookSets sets;
+    sets.objects.push_back(&bridge);
+    CHECK(lists_get_name(unwired_full_binding_hooks(sets)) && !bridge_hook_wired(sets, "ObjectBridge.ship_name"));
+    bridge.ship_name = [](alamo::objects::ObjectHandle) { return std::string_view("\"Avenger\""); };
+    CHECK(!lists_get_name(unwired_full_binding_hooks(sets)) && bridge_hook_wired(sets, "ObjectBridge.ship_name"));
+    CHECK(!bridge_hook_wired(sets, "ObjectBridge.no_such_hook"));
+    std::printf("bindings: %zu read bridge hooks\n", with_hooks);
     return ::alamo::test::report("alamo_lua_binding_effects_tests");
 }

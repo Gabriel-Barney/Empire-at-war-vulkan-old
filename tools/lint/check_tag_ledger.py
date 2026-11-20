@@ -211,6 +211,11 @@ def check_bindings(gen):
             print("binding ledger: stale:\n  " + d)
         print("binding ledger: regenerate with: python engine/lua/tools/gen_bindings.py")
         return 1
+    if hasattr(gen, "render_hooks"):  # ref5 t04: the hook list of the three hook structs
+        with open(gen.HOOKS_OUT, encoding="utf-8") as f:
+            if f.read() != gen.render_hooks():
+                print("binding ledger: engine/lua/src/bridge_hooks.inc is stale: regenerate with: python engine/lua/tools/gen_bindings.py")
+                return 1
     if problems:
         return 1
     print("binding ledger: in step with the code")

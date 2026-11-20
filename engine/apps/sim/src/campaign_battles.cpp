@@ -135,6 +135,18 @@ std::vector<const lua::ObjectBridge*> CampaignBattles::script_bridges() const {
     return out;
 }
 
+lua::BridgeHookSets CampaignBattles::script_hook_sets() const {
+    lua::BridgeHookSets out;
+    for (const lua::ObjectBridge* b : script_bridges()) out.objects.push_back(b);
+#ifdef ALAMO_SIM_HAVE_STORY
+    if (battle_) {
+        out.remaining.push_back(&story_remaining_);
+        out.tactical.push_back(&story_hooks_);
+    }
+#endif
+    return out;
+}
+
 std::span<const std::string> CampaignBattles::hidden_sub_objects(objects::ObjectId id) const {
 #if defined(ALAMO_SIM_HAVE_STORY) || defined(ALAMO_SIM_HAVE_TACTICAL_AI)
     for (const lua::ObjectBridge* b : script_bridges())
@@ -1675,6 +1687,14 @@ void CampaignBattles::story_bridge_begin(SimHost& host, GameMode& mode) {
         };
         story_hooks_.resume_hyperspace_in = [this] { resume_hyperspace_in(); };  // story t12
         lua::RemainingScriptHooks& rb = story_remaining_;
+        // ref5 t04 (Get_Bribe_Cost, §2.8): the battle planet of the parent galactic mode, corrupted or not; -1 without one
+        // (a skirmish, no galactic mode).
+        rb.battle_planet_corruption = [this, h]() {
+            auto* gm = h->galactic_mode();
+            const PlanetIndex p = pending_req_.info.planet;
+            if (!gm || !gm->sim() || p == kInvalidPlanet || p >= gm->sim()->planets().size()) return -1;
+            return gm->sim()->corrupted(p) ? 1 : 0;
+        };
         rb.object_in_field = [this, bid](objects::ObjectHandle o, uint32_t kind) { return battle_ ? battle_->object_in_field(bid(o), kind) : -1; };
         rb.bombing_run_available = [this](int32_t p) { return battle_ && battle_->bombing_run_available(p); };
         rb.bombardment_available = [this](int32_t p) { return battle_ && battle_->bombardment_available(p); };

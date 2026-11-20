@@ -20,6 +20,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace alamo::lua {
 
@@ -39,6 +40,9 @@ struct BindingInfo {
     uint32_t calls;    // call sites in the RE corpora (vanilla FoC + TR 3.3), for prioritising
     BindingEffect effect = BindingEffect::Full;
     const char* consumer = "";  // see BindingEffect
+    // ref5 t04: the bridge hooks the binding reads, "Struct.hook" space separated (Struct = ObjectBridge,
+    // RemainingScriptHooks or TacticalScriptHooks), found from the code by gen_bindings.py; "" = none.
+    const char* hooks = "";
 };
 // A binding whose call may not get retail's effect in alamo_game: Recorded with no consumer, NoopGap or Partial (the load
 // report's bindings.unconsumed, issue kind binding_unconsumed).
@@ -46,6 +50,28 @@ bool binding_effect_gap(const BindingInfo& b);
 
 // The generated table: globals sorted by name, then methods sorted by (class, name).
 std::span<const BindingInfo> binding_table();
+
+// ref5 t04: every hook of the three hook structs between the bindings and the sim (generated: src/bridge_hooks.inc), with
+// an is-set test; `hooks` points at a struct of type `bridge`.
+class ObjectBridge;
+struct RemainingScriptHooks;
+struct TacticalScriptHooks;
+struct BridgeHookInfo {
+    const char* bridge;  // "ObjectBridge" / "RemainingScriptHooks" / "TacticalScriptHooks"
+    const char* name;    // the member
+    bool (*is_set)(const void* hooks);
+};
+std::span<const BridgeHookInfo> bridge_hook_table();
+// The hook sets one or more hosts built (the story, AI and object-script VMs' bridges).
+struct BridgeHookSets {
+    std::vector<const ObjectBridge*> objects;
+    std::vector<const RemainingScriptHooks*> remaining;
+    std::vector<const TacticalScriptHooks*> tactical;
+};
+// True when some set of the hook's struct has it ("ObjectBridge.ship_name"); false for an unknown hook.
+bool bridge_hook_wired(const BridgeHookSets& sets, std::string_view qualified);
+// The Full bindings that read a hook no given set wires, one "Class.Name reads Struct.hook" line per pair (table order).
+std::vector<std::string> unwired_full_binding_hooks(const BridgeHookSets& sets);
 
 // Host-set value globals (see above).
 bool is_host_value_global(std::string_view name);

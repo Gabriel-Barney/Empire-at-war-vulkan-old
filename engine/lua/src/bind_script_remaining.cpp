@@ -903,6 +903,7 @@ double power_weight(Call& c, ObjectHandle u, ObjectHandle other) {
     return 1.0;  // [port] no power-versus table
 }
 // Get_AI_Power_Vs_Unit(target) (§2.12 [M]): P_s x H_s x M_s - P_t x H_t x M_t.
+// binding-effect: GameObjectWrapper.Get_AI_Power_Vs_Unit partial no host sets RemainingScriptHooks::ai_power_vs: the power-versus weight M is 1 [port] (ref5 t04)
 int m_get_ai_power_vs_unit(Call& c) {
     if (c.nargs != 1) return c.script_error_stop("Get_AI_Power_Vs_Unit -- invalid number of parameters. Expected 1, got %d.", c.nargs);
     const AiArg other = ai_arg(c, 1);

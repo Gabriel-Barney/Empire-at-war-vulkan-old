@@ -117,6 +117,9 @@ Change: return the object's ship name when the port has one (a typed name from t
 and last character removed when longer than 2), else ""; a dead wrapper also returns "". Scripts that want the type
 name call `Get_Type().Get_Name()` (the vanilla scripts do).
 
+Port status (ref5 t04): the binding is written as above and reads ObjectBridge::ship_name; no host sets that hook yet, so
+it returns "" for every object. The questions that settle the name source are in `REF5_T04_RE_QUESTIONS.md`.
+
 ## GameObjectWrapper.Is_Category (0x57b7e0) [H]
 
 - Dead wrapper: returns nothing.
