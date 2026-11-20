@@ -25,9 +25,10 @@ BASELINE = os.path.join(HERE, 'tag_reads_baseline.txt')
 SIM_DIRS = ['engine/' + d for d in ('core', 'vfs', 'data', 'jobs', 'galactic', 'anim', 'commands', 'tactical', 'lua', 'ai')] + \
     ['engine/apps/sim', 'engine/apps/headless']
 SKIP_PARTS = ('/tests/', '/tools/', '/bench/', '/benchmark/', '/third_party/', '/testdata/')
-READ = re.compile(r'\.get_(?:bool|int|float|string|vec|list|sub_objects|type_ref|type_refs|enum|mask)\s*\(\s*[^;"]*?,\s*"[A-Za-z_][A-Za-z0-9_]*"'
+READ = re.compile(r'(?:\.|->)get_(?:bool|int|float|string|vec|list|sub_objects|type_ref|type_refs|enum|mask)\s*\(\s*[^;"]*?,\s*'
+                  r'(?:[^;",()]*\?\s*)?"[A-Za-z_][A-Za-z0-9_]*"'  # also the first name of `cond ? "A" : "B"`
                   r'|\bfind_type_field\s*\(\s*"'
-                  r'|\.raw\(\)\s*\.types\(\)\s*\.name\s*\[')
+                  r'|(?:\.|->)raw\(\)\s*(?:\.|->)types\(\)\s*\.name\s*\[')
 
 
 def strip_comments(text):
@@ -96,8 +97,9 @@ def selftest():
     t = 'x = types.get_float(t, "Max_Speed"); // types.get_int(t, "Gone")\n' \
         'y = ty.get_bool(\n  ti, "Is_Hero");\nz = types.get(t, tags::Guard_Chase_Range);\n' \
         'w = types.raw().types().name[t]; f = find_type_field("Ranged_Target_Z_Adjust"); s = get_string(t, name);\n'
-    if count(t) != 4:
-        fails.append(f'count {count(t)} != 4')
+    t += 'p->get_list(ti, "Target_Bones"); q.get_string(t, space ? "Space_Model_Name" : "Land_Model_Name");\n'
+    if count(t) != 6:
+        fails.append(f'count {count(t)} != 6')
     bad, lower = check({'a.cpp': 3, 'b.cpp': 1}, {'a.cpp': 3, 'c.cpp': 2})
     if len(bad) != 1 or 'b.cpp' not in bad[0] or len(lower) != 1:
         fails.append(f'check {bad} {lower}')

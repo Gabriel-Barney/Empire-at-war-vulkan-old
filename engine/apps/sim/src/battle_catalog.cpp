@@ -268,11 +268,11 @@ BattleTables::ProjectileVisuals BattleCatalog::projectile_visuals(uint32_t t) co
     const objects::GameObjectTypes& ty = *types_;
     BattleTables::ProjectileVisuals v;
     if (t >= ty.size()) return v;
-    v.detonation = type_or_none(ty.get_string(t, "Projectile_Object_Detonation_Particle"));
-    v.armor_reduced = type_or_none(ty.get_string(t, "Projectile_Object_Armor_Reduced_Detonation_Particle"));
-    v.absorbed = type_or_none(ty.get_string(t, "Projectile_Absorbed_By_Shields_Particle"));
-    v.lifetime = type_or_none(ty.get_string(t, "Projectile_Lifetime_Detonation_Particle"));
-    v.ground = type_or_none(ty.get_string(t, "Projectile_Ground_Detonation_Particle"));  // tru1 t08
+    v.detonation = type_or_none(ty.get(t, objects::tags::Projectile_Object_Detonation_Particle));
+    v.armor_reduced = type_or_none(ty.get(t, objects::tags::Projectile_Object_Armor_Reduced_Detonation_Particle));
+    v.absorbed = type_or_none(ty.get(t, objects::tags::Projectile_Absorbed_By_Shields_Particle));
+    v.lifetime = type_or_none(ty.get(t, objects::tags::Projectile_Lifetime_Detonation_Particle));
+    v.ground = type_or_none(ty.get(t, objects::tags::Projectile_Ground_Detonation_Particle));  // tru1 t08
     return v;
 }
 
@@ -282,50 +282,50 @@ tc::ProjectileDesc BattleCatalog::projectile_desc(uint32_t t, bool full) const {
     if (t >= ty.size()) return p;
     p.name = std::string(ty.name(t));
     p.max_speed = ty.columns().max_speed[t];
-    p.damage = ty.get_float(t, "Projectile_Damage");
-    p.damage_type = damage_.damage_index(ascii_trim(ty.get_string(t, "Damage_Type")));
-    const int32_t cat = ty.get_int(t, "Projectile_Category");
+    p.damage = ty.get(t, objects::tags::Projectile_Damage);
+    p.damage_type = damage_.damage_index(ascii_trim(ty.get(t, objects::tags::Damage_Type)));
+    const int32_t cat = ty.get(t, objects::tags::Projectile_Category);
     p.homing = cat == 1;
-    p.max_rate_of_turn = ty.get_float(t, "Max_Rate_Of_Turn");  // S9 t05: missile-shield / homing turn limit
-    p.causes_infection = ty.get_bool(t, "Causes_Infection");    // S9 t04: INFECTION behaviour on hit
+    p.max_rate_of_turn = ty.get(t, objects::tags::Max_Rate_Of_Turn);  // S9 t05: missile-shield / homing turn limit
+    p.causes_infection = ty.get(t, objects::tags::Causes_Infection);    // S9 t04: INFECTION behaviour on hit
     p.lobbed = cat == 3;
     // --- S8 t04 (LOB_SOLVER.md §1.1): grenade gravity / lob mod - an XML value (0 included) replaces the constructor
     // defaults 1.05 / 5.02 (ProjectileDesc); Can_Lob_Slower (0.8 speed steps), Sticks_On_Collision ---
-    if (!ty.get_string(t, "Projectile_Grenade_Gravity").empty()) p.grenade_gravity = ty.get_float(t, "Projectile_Grenade_Gravity");
-    if (!ty.get_string(t, "Projectile_Grenade_Gravity_Lob_Mod").empty())
-        p.lob_mod = ty.get_float(t, "Projectile_Grenade_Gravity_Lob_Mod");
-    p.can_lob_slower = ty.get_bool(t, "Projectile_Grenade_Can_Lob_Slower");
-    p.sticks_on_collision = ty.get_bool(t, "Projectile_Grenade_Sticks_On_Collision");
-    p.friendly_damage_amount = ty.get_float(t, "Friendly_Damage_Amount");  // S8 t06 (+0x23ec): own-player sweep, remote bombs
+    if (!ty.get_string(t, objects::tags::Projectile_Grenade_Gravity).empty()) p.grenade_gravity = ty.get(t, objects::tags::Projectile_Grenade_Gravity);
+    if (!ty.get_string(t, objects::tags::Projectile_Grenade_Gravity_Lob_Mod).empty())
+        p.lob_mod = ty.get(t, objects::tags::Projectile_Grenade_Gravity_Lob_Mod);
+    p.can_lob_slower = ty.get(t, objects::tags::Projectile_Grenade_Can_Lob_Slower);
+    p.sticks_on_collision = ty.get(t, objects::tags::Projectile_Grenade_Sticks_On_Collision);
+    p.friendly_damage_amount = ty.get(t, objects::tags::Friendly_Damage_Amount);  // S8 t06 (+0x23ec): own-player sweep, remote bombs
     // --- end S8 t04 ---
-    if (!ty.get_string(t, "Projectile_Does_Shield_Damage").empty()) p.does_shield_damage = ty.get_bool(t, "Projectile_Does_Shield_Damage");
-    if (!ty.get_string(t, "Projectile_Does_Hitpoint_Damage").empty())
-        p.does_hitpoint_damage = ty.get_bool(t, "Projectile_Does_Hitpoint_Damage");
-    p.max_flight_distance = ty.get_float(t, "Projectile_Max_Flight_Distance");
-    p.max_lifetime = ty.get_float(t, "Projectile_Max_Lifetime");
-    p.blast_area_damage = ty.get_float(t, "Projectile_Blast_Area_Damage");
-    p.blast_area_range = ty.get_float(t, "Projectile_Blast_Area_Range");
-    p.blast_dropoff = ty.get_bool(t, "Projectile_Blast_Area_Dropoff");  // mcx4 t03 (TACTICAL_COMBAT §3.5)
-    p.blast_dropoff_tiers = ty.get_int(t, "Projectile_Blast_Area_Dropoff_Tiers");
-    p.bomb_fall_accel = ty.get_float(t, "Projectile_Bomb_Fall_Accel_Rate");  // mcx4 t18 (MCX4_RE_ANSWERS_TACTICAL §12)
+    if (!ty.get_string(t, objects::tags::Projectile_Does_Shield_Damage).empty()) p.does_shield_damage = ty.get(t, objects::tags::Projectile_Does_Shield_Damage);
+    if (!ty.get_string(t, objects::tags::Projectile_Does_Hitpoint_Damage).empty())
+        p.does_hitpoint_damage = ty.get(t, objects::tags::Projectile_Does_Hitpoint_Damage);
+    p.max_flight_distance = ty.get(t, objects::tags::Projectile_Max_Flight_Distance);
+    p.max_lifetime = ty.get(t, objects::tags::Projectile_Max_Lifetime);
+    p.blast_area_damage = ty.get(t, objects::tags::Projectile_Blast_Area_Damage);
+    p.blast_area_range = ty.get(t, objects::tags::Projectile_Blast_Area_Range);
+    p.blast_dropoff = ty.get(t, objects::tags::Projectile_Blast_Area_Dropoff);  // mcx4 t03 (TACTICAL_COMBAT §3.5)
+    p.blast_dropoff_tiers = ty.get(t, objects::tags::Projectile_Blast_Area_Dropoff_Tiers);
+    p.bomb_fall_accel = ty.get(t, objects::tags::Projectile_Bomb_Fall_Accel_Rate);  // mcx4 t18 (MCX4_RE_ANSWERS_TACTICAL §12)
     // ref5 t01 (TACTICAL_COMBAT §3.5 area damage step 8): the blast stops at this many victims, for every projectile
     // (unit weapons, hard points, death projectiles, land strikes); 0 = no cap. Converter 0x6 (int): "1.0" reads 1.
-    p.blast_max_victims = ty.get_int(t, "Projectile_Blast_Area_Max_Victims");
+    p.blast_max_victims = ty.get(t, objects::tags::Projectile_Blast_Area_Max_Victims);
     // mcx4 t10 (TACTICAL_COMBAT §3.8; type ctor 0x367250 sets both to 1.0 [H]): the Redirect_Blaster roll factors
-    if (!ty.get_string(t, "Projectile_Redirect_Chance_Modifier").empty()) p.redirect_chance_modifier = ty.get_float(t, "Projectile_Redirect_Chance_Modifier");
-    if (!ty.get_string(t, "Projectile_Block_Chance_Modifier").empty()) p.block_chance_modifier = ty.get_float(t, "Projectile_Block_Chance_Modifier");
-    if (const std::string_view f = ascii_trim(ty.get_string(t, "Projectile_Blast_Area_Immune_Faction")); !f.empty())
+    if (!ty.get_string(t, objects::tags::Projectile_Redirect_Chance_Modifier).empty()) p.redirect_chance_modifier = ty.get(t, objects::tags::Projectile_Redirect_Chance_Modifier);
+    if (!ty.get_string(t, objects::tags::Projectile_Block_Chance_Modifier).empty()) p.block_chance_modifier = ty.get(t, objects::tags::Projectile_Block_Chance_Modifier);
+    if (const std::string_view f = ascii_trim(ty.get(t, objects::tags::Projectile_Blast_Area_Immune_Faction)); !f.empty())
         p.blast_immune_faction = name_crc(f);  // tru1 t04
-    p.damages_random_hardpoints = ty.get_bool(t, "Projectile_Damages_Random_Hard_Points");
+    p.damages_random_hardpoints = ty.get(t, objects::tags::Projectile_Damages_Random_Hard_Points);
     if (!(p.max_speed > 0.0f)) p.max_speed = 20.0f;  // [port] a projectile type without Max_Speed still flies
     if (full) {
         // S10-int: S9 projectile fields (ABILITIES_HARDPOINTS 4.3, 4.4, 4.7; TACTICAL_COMBAT 3.5).
         if (cat >= 0 && cat <= 9) p.category = static_cast<tc::ProjectileCategory>(cat);
         // refixf t01: ROCKET / MPTL_ROCKET spline flight (S9_DEATH_CLONE_SHIELDS.md §2.4). The distances use converter 0x8
         // (float; type +0x1fec / +0x1ff0 / +0x1ff4), 0 when absent; the two flags are type +0x7f / +0x7e.
-        p.rocket_straight_distance = ty.get_float(t, "Projectile_Rocket_Straight_Distance");
-        p.rocket_curve_distance = ty.get_float(t, "Projectile_Rocket_Curve_Distance");
-        p.rocket_curve_offset = ty.get_float(t, "Projectile_Rocket_Curve_Offset");
+        p.rocket_straight_distance = ty.get(t, objects::tags::Projectile_Rocket_Straight_Distance);
+        p.rocket_curve_distance = ty.get(t, objects::tags::Projectile_Rocket_Curve_Distance);
+        p.rocket_curve_offset = ty.get(t, objects::tags::Projectile_Rocket_Curve_Offset);
         // cu8k t01 (CU8F_T01_T02_T07_RE §2.7 item 3): the type ctor 0x367250 defaults CD = 50 and CO = 30; the thrown
         // saber (LIGHT_SABER, no curve fields in vanilla) plans its path with them. [port] applied to category 8 only and
         // when the read value is 0 (an explicit 0 is not told apart): every vanilla ROCKET / MPTL_ROCKET sets both fields.
@@ -333,56 +333,56 @@ tc::ProjectileDesc BattleCatalog::projectile_desc(uint32_t t, bool full) const {
             if (p.rocket_curve_distance == 0.0f) p.rocket_curve_distance = 50.0f;
             if (p.rocket_curve_offset == 0.0f) p.rocket_curve_offset = 30.0f;
         }
-        p.target_point_on_terrain = ty.get_bool(t, "Projectile_Target_Point_On_Terrain");
-        p.explode_when_reached_target_radius = ty.get_bool(t, "Explode_When_Reached_Target_Radius");
-        p.damage_delay_secs = ty.get_float(t, "Projectile_Damage_Delay_Secs");
-        p.ion_stun = ty.get_bool(t, "Projectile_Ion_Stun_On_Detonation");
-        p.ion_stun_duration = ty.get_float(t, "Projectile_Ion_Stun_Duration");
-        p.ion_stun_speed_reduction = ty.get_float(t, "Projectile_Ion_Stun_Speed_Reduction_Percent");
-        p.ion_stun_shot_rate_reduction = ty.get_float(t, "Projectile_Ion_Stun_Shot_Rate_Reduction_Percent");
-        p.energy_per_shot = ty.get_float(t, "Projectile_Energy_Per_Shot");
-        p.does_energy_damage = ty.get_bool(t, "Projectile_Does_Energy_Damage");
-        p.disables_engines_when_drained = ty.get_bool(t, "Projectile_Disables_Engines_When_Power_Drained");  // cu8f t02
-        p.disable_engines_duration = ty.get_float(t, "Projectile_Disable_Engines_Duration");
+        p.target_point_on_terrain = ty.get(t, objects::tags::Projectile_Target_Point_On_Terrain);
+        p.explode_when_reached_target_radius = ty.get(t, objects::tags::Explode_When_Reached_Target_Radius);
+        p.damage_delay_secs = ty.get(t, objects::tags::Projectile_Damage_Delay_Secs);
+        p.ion_stun = ty.get(t, objects::tags::Projectile_Ion_Stun_On_Detonation);
+        p.ion_stun_duration = ty.get(t, objects::tags::Projectile_Ion_Stun_Duration);
+        p.ion_stun_speed_reduction = ty.get(t, objects::tags::Projectile_Ion_Stun_Speed_Reduction_Percent);
+        p.ion_stun_shot_rate_reduction = ty.get(t, objects::tags::Projectile_Ion_Stun_Shot_Rate_Reduction_Percent);
+        p.energy_per_shot = ty.get(t, objects::tags::Projectile_Energy_Per_Shot);
+        p.does_energy_damage = ty.get(t, objects::tags::Projectile_Does_Energy_Damage);
+        p.disables_engines_when_drained = ty.get(t, objects::tags::Projectile_Disables_Engines_When_Power_Drained);  // cu8f t02
+        p.disable_engines_duration = ty.get(t, objects::tags::Projectile_Disable_Engines_Duration);
         // --- OI abilities: detonation effects 0x4cb070 (TACTICAL_GAPS §1.10) ---
-        p.ion_stun_stack_duration = ty.get_bool(t, "Projectile_Ion_Stun_Stack_Duration");
-        p.ion_stun_radius = ty.get_float(t, "Projectile_Ion_Stun_Radius");
-        p.stun = ty.get_bool(t, "Projectile_Stun_On_Detonation");
-        p.stun_frames = ty.get_int(t, "Projectile_Stun_Duration_Frames");
-        p.stun_radius = ty.get_float(t, "Projectile_Stun_Radius");
-        p.stun_mask = ty.get_mask(t, "Projectile_Stun_Victims_Category_Mask");
-        for (std::string_view n : ty.get_list(t, "Projectile_Stun_Victims_Unit_Types")) p.stun_types.push_back(type_or_none(n));
-        p.distract = ty.get_bool(t, "Projectile_Distract_On_Detonation");
-        p.distract_radius = ty.get_float(t, "Projectile_Distract_Radius");
-        p.distract_mask = ty.get_mask(t, "Projectile_Distract_Victims_Category_Mask");
-        p.heal = ty.get_bool(t, "Projectile_Instant_Heal_On_Detonation");
-        p.heal_radius = ty.get_float(t, "Projectile_Instant_Heal_Radius");
-        p.heal_mask = ty.get_mask(t, "Projectile_Instant_Heal_Targets_Category_Mask");
-        p.heal_amount = ty.get_int(t, "Projectile_Instant_Heal_Health_Increase");
-        p.convert = ty.get_bool(t, "Projectile_Convert_Enemy_On_Detonation");
-        p.convert_radius = ty.get_float(t, "Projectile_Convert_Enemy_Radius");
-        p.convert_mask = ty.get_mask(t, "Projectile_Convert_Enemy_Targets_Category_Mask");
-        p.invulnerability = ty.get_bool(t, "Projectile_Cause_Invulnerability_On_Detonation");
-        p.invulnerability_frames = ty.get_int(t, "Projectile_Cause_Invulnerability_Duration_Frames");
-        p.invulnerability_radius = ty.get_float(t, "Projectile_Cause_Invulnerability_Radius");
-        p.invulnerability_max_targets = ty.get_int(t, "Projectile_Cause_Invulnerability_Max_Targets");
-        p.invulnerability_mask = ty.get_mask(t, "Projectile_Cause_Invulnerability_Targets_Category_Mask");
-        p.weaken = ty.get_bool(t, "Projectile_Weaken_Enemy_On_Detonation");
-        p.weaken_seconds = ty.get_float(t, "Projectile_Weaken_Enemy_Duration_Seconds");
-        p.weaken_radius = ty.get_float(t, "Projectile_Weaken_Enemy_Radius");
-        p.weaken_take_increase = ty.get_float(t, "Projectile_Weaken_Enemy_Take_Damage_Increase_Percent");
-        p.weaken_cause_reduction = ty.get_float(t, "Projectile_Weaken_Enemy_Cause_Damage_Reduction_Percent");
-        p.weaken_mask = ty.get_mask(t, "Projectile_Weaken_Enemy_Targets_Category_Mask");
+        p.ion_stun_stack_duration = ty.get(t, objects::tags::Projectile_Ion_Stun_Stack_Duration);
+        p.ion_stun_radius = ty.get(t, objects::tags::Projectile_Ion_Stun_Radius);
+        p.stun = ty.get(t, objects::tags::Projectile_Stun_On_Detonation);
+        p.stun_frames = ty.get(t, objects::tags::Projectile_Stun_Duration_Frames);
+        p.stun_radius = ty.get(t, objects::tags::Projectile_Stun_Radius);
+        p.stun_mask = ty.get(t, objects::tags::Projectile_Stun_Victims_Category_Mask);
+        for (std::string_view n : ty.get(t, objects::tags::Projectile_Stun_Victims_Unit_Types)) p.stun_types.push_back(type_or_none(n));
+        p.distract = ty.get(t, objects::tags::Projectile_Distract_On_Detonation);
+        p.distract_radius = ty.get(t, objects::tags::Projectile_Distract_Radius);
+        p.distract_mask = ty.get(t, objects::tags::Projectile_Distract_Victims_Category_Mask);
+        p.heal = ty.get(t, objects::tags::Projectile_Instant_Heal_On_Detonation);
+        p.heal_radius = ty.get(t, objects::tags::Projectile_Instant_Heal_Radius);
+        p.heal_mask = ty.get(t, objects::tags::Projectile_Instant_Heal_Targets_Category_Mask);
+        p.heal_amount = ty.get(t, objects::tags::Projectile_Instant_Heal_Health_Increase);
+        p.convert = ty.get(t, objects::tags::Projectile_Convert_Enemy_On_Detonation);
+        p.convert_radius = ty.get(t, objects::tags::Projectile_Convert_Enemy_Radius);
+        p.convert_mask = ty.get(t, objects::tags::Projectile_Convert_Enemy_Targets_Category_Mask);
+        p.invulnerability = ty.get(t, objects::tags::Projectile_Cause_Invulnerability_On_Detonation);
+        p.invulnerability_frames = ty.get(t, objects::tags::Projectile_Cause_Invulnerability_Duration_Frames);
+        p.invulnerability_radius = ty.get(t, objects::tags::Projectile_Cause_Invulnerability_Radius);
+        p.invulnerability_max_targets = ty.get(t, objects::tags::Projectile_Cause_Invulnerability_Max_Targets);
+        p.invulnerability_mask = ty.get(t, objects::tags::Projectile_Cause_Invulnerability_Targets_Category_Mask);
+        p.weaken = ty.get(t, objects::tags::Projectile_Weaken_Enemy_On_Detonation);
+        p.weaken_seconds = ty.get(t, objects::tags::Projectile_Weaken_Enemy_Duration_Seconds);
+        p.weaken_radius = ty.get(t, objects::tags::Projectile_Weaken_Enemy_Radius);
+        p.weaken_take_increase = ty.get(t, objects::tags::Projectile_Weaken_Enemy_Take_Damage_Increase_Percent);
+        p.weaken_cause_reduction = ty.get(t, objects::tags::Projectile_Weaken_Enemy_Cause_Damage_Reduction_Percent);
+        p.weaken_mask = ty.get(t, objects::tags::Projectile_Weaken_Enemy_Targets_Category_Mask);
         {  // Projectile_Combat_Mod: field code 0x52 (TACTICAL_GAPS §6.5) - ModList index + 1, unknown token = none
             static constexpr const char* kMods[] = {"DEFENSE", "DAMAGE", "HEALTH", "SHIELD", "ENERGY", "SPEED",
                                                    "FIRE_RATE", "FOW_REVEAL_RANGE", "FIRE_RANGE", "ABILITY_RECHARGE_TIME",
                                                    "TACTICAL_BUILD_TIME"};
-            const std::string_view m = ascii_trim(ty.get_string(t, "Projectile_Combat_Mod"));
+            const std::string_view m = ascii_trim(ty.get(t, objects::tags::Projectile_Combat_Mod));
             for (size_t k = 0; k < std::size(kMods) && !m.empty(); ++k)
                 if (ascii_iequals(m, kMods[k])) p.combat_mod = static_cast<uint8_t>(k + 1);
-            p.combat_mod_seconds = ty.get_float(t, "Projectile_Combat_Mod_Duration");
-            p.combat_mod_value = ty.get_float(t, "Projectile_Combat_Mod_Value");
-            p.combat_mod_mask = ty.get_mask(t, "Projectile_Combat_Mod_Category_Mask");
+            p.combat_mod_seconds = ty.get(t, objects::tags::Projectile_Combat_Mod_Duration);
+            p.combat_mod_value = ty.get(t, objects::tags::Projectile_Combat_Mod_Value);
+            p.combat_mod_mask = ty.get(t, objects::tags::Projectile_Combat_Mod_Category_Mask);
         }
         // --- end OI abilities ---
     }
@@ -549,20 +549,20 @@ tc::UnitDesc BattleCatalog::unit_desc(uint32_t t, BuildState& s) const {
     u.object_type = static_cast<int32_t>(t);
     u.tactical_health = ty.columns().tactical_health[t];
     u.shield_points = ty.columns().shield_points[t];
-    u.shield_refresh_rate = ty.get_float(t, "Shield_Refresh_Rate");
-    u.armor_type = damage_.armor_index(ascii_trim(ty.get_string(t, "Armor_Type")));
-    u.shield_armor_type = damage_.armor_index(ascii_trim(ty.get_string(t, "Shield_Armor_Type")));
+    u.shield_refresh_rate = ty.get(t, objects::tags::Shield_Refresh_Rate);
+    u.armor_type = damage_.armor_index(ascii_trim(ty.get(t, objects::tags::Armor_Type)));
+    u.shield_armor_type = damage_.armor_index(ascii_trim(ty.get(t, objects::tags::Shield_Armor_Type)));
     u.radius = tactical::movement::unit_desc_from_type(ty, t).radius;
     u.max_attack_distance = ty.columns().targeting_max_attack_distance[t];
     // mcx4 t10 (MCX4_T10_RE_ANSWERS §8 [H]): Deployed_Max_Attack_Distance_Multiplier (ctor 1.0 when the tag is absent).
-    if (!ty.get_string(t, "Deployed_Max_Attack_Distance_Multiplier").empty())
-        u.deployed_max_attack_distance_multiplier = ty.get_float(t, "Deployed_Max_Attack_Distance_Multiplier");
+    if (!ty.get_string(t, objects::tags::Deployed_Max_Attack_Distance_Multiplier).empty())
+        u.deployed_max_attack_distance_multiplier = ty.get(t, objects::tags::Deployed_Max_Attack_Distance_Multiplier);
     // mcx4 t10 (MCX4_T10_RE_ANSWERS §2 [H], Take_Damage 0x3a9e30 at 0x3aa1db): Immune_To_Damage (+0xa3, default false).
-    u.immune_to_damage = ty.get_bool(t, "Immune_To_Damage");
+    u.immune_to_damage = ty.get(t, objects::tags::Immune_To_Damage);
     // mcx4 t10 (MCX4_T10_RE_ANSWERS §6 / §18): the fighter states' defence entry (TacticalBattle::combat_sync).
-    u.out_of_combat_defense_adjustment = ty.get_float(t, "Out_Of_Combat_Defense_Adjustment");
+    u.out_of_combat_defense_adjustment = ty.get(t, objects::tags::Out_Of_Combat_Defense_Adjustment);
     // --- OI tactical: targeting slots 44 / 45 (TACTICAL_GAPS 3.1) ---
-    u.min_attack_distance = ty.get_float(t, "Targeting_Min_Attack_Distance");
+    u.min_attack_distance = ty.get(t, objects::tags::Targeting_Min_Attack_Distance);
     {
         const float sc = ty.scale_factor(t);
         u.hard_x_extent = ty.get(t, objects::tags::Custom_Hard_XExtent) * sc;
@@ -578,7 +578,7 @@ tc::UnitDesc BattleCatalog::unit_desc(uint32_t t, BuildState& s) const {
         // data) leaves -1: the radius stands in (CombatSystem::footprint_extents).
         if (s.model_mode >= 0) {
             const bool space = s.model_mode == 1;
-            if (ascii_trim(ty.get_string(t, space ? "Space_Model_Name" : "Land_Model_Name")).empty()) {
+            if (ascii_trim(ty.get(t, space ? objects::tags::Space_Model_Name : objects::tags::Land_Model_Name)).empty()) {
                 u.model_x_extent = u.model_y_extent = 0.0f;
             } else if (const tactical::movement::AvoidModel* am = avoid_model(t, space)) {
                 u.model_x_extent = std::fabs(am->bound_h.y) * sc;
@@ -587,28 +587,28 @@ tc::UnitDesc BattleCatalog::unit_desc(uint32_t t, BuildState& s) const {
         }
     }
     // --- end OI tactical ---
-    u.fire_inaccuracy_fixed_radius = ty.get_float(t, "Targeting_Fire_Inaccuracy_Fixed_Radius");
+    u.fire_inaccuracy_fixed_radius = ty.get(t, objects::tags::Targeting_Fire_Inaccuracy_Fixed_Radius);
     {  // A1j t03 (TACTICAL_COMBAT §3.1.2): Targeting_Fire_Inaccuracy `<category>, <distance>` pairs (code 0x3d, XML order)
         const objects::EnumConverter& cat = ty.enums().get(objects::EnumId::GameObjectCategory);
-        const std::span<const std::string_view> fi = ty.get_list(t, "Targeting_Fire_Inaccuracy");
+        const std::span<const std::string_view> fi = ty.get(t, objects::tags::Targeting_Fire_Inaccuracy);
         for (size_t i = 0; i + 1 < fi.size(); i += 2)
             if (const auto m = cat.lookup(ascii_trim(fi[i])))
                 u.fire_inaccuracy.push_back({static_cast<uint64_t>(*m), static_cast<float>(objects::c_atof(ascii_trim(fi[i + 1])))});
     }
-    const std::string_view set = ascii_trim(ty.get_string(t, "Targeting_Priority_Set"));
+    const std::string_view set = ascii_trim(ty.get(t, objects::tags::Targeting_Priority_Set));
     for (size_t i = 0; i < priority_sets_.size() && !set.empty(); ++i)
         if (ascii_iequals(priority_sets_[i].name, set)) {
             u.priority_set = static_cast<int32_t>(i);
             break;
         }
-    u.stickiness_threshold = ty.get_float(t, "Targeting_Stickiness_Time_Threshold");
+    u.stickiness_threshold = ty.get(t, objects::tags::Targeting_Stickiness_Time_Threshold);
     // refixf t06 (TACTICAL_COMBAT §2.9): type +0xa8, default TRUE (flag-block initialiser 0x367100): the hull <->
     // hardpoint 0.2 coupling and death with the last destroyable hardpoint.
-    u.destroy_when_all_hardpoints_destroyed = ty.get_bool(t, "Should_Be_Destroyed_When_All_Hardpoints_Destroyed");
-    u.category_mask = ty.get_mask(t, "CategoryMask");
-    u.property_flags = ty.get_mask(t, "Property_Flags");
-    u.attack_category_restrictions = ty.get_mask(t, "Attack_Category_Restrictions");
-    u.space_layer = static_cast<uint32_t>(ty.get_mask(t, "Space_Layer"));
+    u.destroy_when_all_hardpoints_destroyed = ty.get(t, objects::tags::Should_Be_Destroyed_When_All_Hardpoints_Destroyed);
+    u.category_mask = ty.get(t, objects::tags::CategoryMask);
+    u.property_flags = ty.get(t, objects::tags::Property_Flags);
+    u.attack_category_restrictions = ty.get(t, objects::tags::Attack_Category_Restrictions);
+    u.space_layer = static_cast<uint32_t>(ty.get(t, objects::tags::Space_Layer));
     for (uint32_t hid : ty.hardpoints(t)) {
         if (hid >= ty.hardpoint_names().size()) continue;
         int32_t h = hardpoint(ty.hardpoint_names()[hid], s);
@@ -622,7 +622,7 @@ tc::UnitDesc BattleCatalog::unit_desc(uint32_t t, BuildState& s) const {
     // Fire_Weapon_When_* / Fire_When_* flags). Projectile_Types without WEAPON is never fired (abilities / Lua read it).
     // a1h t01: M1_Repulsor_Tank (WEAPON + HP_2M_Tank_00, which excludes Air / Vehicle / Structure) fires its
     // Proj_M1_Laser_Cannon at vehicles through this weapon.
-    const auto projs = ty.get_list(t, "Projectile_Types");
+    const auto projs = ty.get(t, objects::tags::Projectile_Types);
     const bool weapon_behavior =
         s.model_mode < 0 ? ty.has_behavior(t, objects::BehaviorSet::Union, objects::beh::Weapon)
                          : ty.has_behavior(t, objects::BehaviorSet::Generic, objects::beh::Weapon) ||
@@ -636,19 +636,19 @@ tc::UnitDesc BattleCatalog::unit_desc(uint32_t t, BuildState& s) const {
     // only for one with the WEAPON behaviour - 0x568e60 and the slot 47 / TURRET deploy rules read the type field itself
     // (the Abstract_Mobile_Defense_Unit's Fire_Weapon_When_Undeployed No was lost: it has no weapon).
     {
-        auto yes = [&](const char* tag) { return ty.get_string(t, tag).empty() || ty.get_bool(t, tag); };
-        u.fire_weapon_when_deployed = yes("Fire_Weapon_When_Deployed");
-        u.fire_weapon_when_undeployed = yes("Fire_Weapon_When_Undeployed");
-        u.fire_weapon_when_rocket_attack = yes("Fire_Weapon_When_In_Rocket_Attack_Mode");
-        u.fire_weapon_when_normal_attack = yes("Fire_Weapon_When_In_Normal_Attack_Mode");
+        auto yes = [&](const objects::BoolTag& tag) { return ty.get_string(t, tag).empty() || ty.get(t, tag); };
+        u.fire_weapon_when_deployed = yes(objects::tags::Fire_Weapon_When_Deployed);
+        u.fire_weapon_when_undeployed = yes(objects::tags::Fire_Weapon_When_Undeployed);
+        u.fire_weapon_when_rocket_attack = yes(objects::tags::Fire_Weapon_When_In_Rocket_Attack_Mode);
+        u.fire_weapon_when_normal_attack = yes(objects::tags::Fire_Weapon_When_In_Normal_Attack_Mode);
     }
     if (weapon_behavior && !projs.empty()) {
         const objects::TypeIndex pt = ty.resolve_name(ascii_trim(projs.front()));
         if (pt != objects::kNone) {
             u.weapon_projectile = projectile(static_cast<uint32_t>(pt), s);
-            u.weapon_recharge = ty.get_float(t, "Projectile_Fire_Recharge_Seconds");
-            u.weapon_pulse_count = std::max(1, ty.get_int(t, "Projectile_Fire_Pulse_Count"));
-            u.weapon_pulse_delay = ty.get_float(t, "Projectile_Fire_Pulse_Delay_Seconds");
+            u.weapon_recharge = ty.get(t, objects::tags::Projectile_Fire_Recharge_Seconds);
+            u.weapon_pulse_count = std::max(1, ty.get(t, objects::tags::Projectile_Fire_Pulse_Count));
+            u.weapon_pulse_delay = ty.get(t, objects::tags::Projectile_Fire_Pulse_Delay_Seconds);
         }
         // OI host: the whole Projectile_Types list (list order, unresolved names skipped) for the weapon index of
         // SWAP_WEAPONS / Permanent_Weapon_Swap (type +0xc48; combat UnitDesc::weapon_projectiles).
@@ -665,7 +665,7 @@ tc::UnitDesc BattleCatalog::unit_desc(uint32_t t, BuildState& s) const {
     u.land_obstacle = ty.has_behavior(t, objects::BehaviorSet::Union, objects::beh::LandObstacle);
     // S8 t10 / t11 (TACTICAL_COMBAT §3.1.1 "Gate details" steps 6-7, §3.4): Can_Fighter_Fire_When_Idle (type +0x8a, default
     // false), LOBBING_SUPERWEAPON (own weapon only by a fire-at-position order), TRANSPORT_LANDING (no own-player sweep hit).
-    u.can_fighter_fire_when_idle = ty.get_bool(t, "Can_Fighter_Fire_When_Idle");
+    u.can_fighter_fire_when_idle = ty.get(t, objects::tags::Can_Fighter_Fire_When_Idle);
     static const objects::BehaviorTypeId kLobbing = objects::behavior_type_id("LOBBING_SUPERWEAPON");
     u.lobbing_superweapon = kLobbing != objects::kNoBehavior && ty.has_behavior(t, objects::BehaviorSet::Union, kLobbing);
     // S8 t26 / t27 (TACTICAL_COMBAT §3.1.1 "Fire-at-position order", "Bone list"): TURRET (the lobbing charge-up aims it),
@@ -673,19 +673,19 @@ tc::UnitDesc BattleCatalog::unit_desc(uint32_t t, BuildState& s) const {
     // type's model for the battle mode (battle host with model data only).
     static const objects::BehaviorTypeId kTurret = objects::behavior_type_id("TURRET");
     u.turret = kTurret != objects::kNoBehavior && ty.has_behavior(t, objects::BehaviorSet::Union, kTurret);
-    if (u.lobbing_superweapon && !ty.get_string(t, "Lobbing_Superweapon_Chargeup_Frames").empty())
-        u.lobbing_chargeup_frames = static_cast<uint32_t>(std::max(0, ty.get_int(t, "Lobbing_Superweapon_Chargeup_Frames")));
+    if (u.lobbing_superweapon && !ty.get_string(t, objects::tags::Lobbing_Superweapon_Chargeup_Frames).empty())
+        u.lobbing_chargeup_frames = static_cast<uint32_t>(std::max(0, ty.get(t, objects::tags::Lobbing_Superweapon_Chargeup_Frames)));
     // s78f t04 (LOB_SOLVER §3.6 "Charge-up aim"): the lobbing TURRET's slew speed, undeployed extents, XY-only flag and
     // rest angle (absent extents keep the UnitDesc defaults [M: the type ctor's]).
     if (u.lobbing_superweapon && u.turret) {
-        const auto tagged = [&](const char* tag) { return !ty.get_string(t, tag).empty(); };
-        u.turret_rotate_speed = ty.get_float(t, "Turret_Rotate_Speed");
-        if (tagged("Turret_Rotate_Extent_Degrees")) u.turret_extent = ty.get_float(t, "Turret_Rotate_Extent_Degrees");
-        if (tagged("Turret_Elevate_Extent_Degrees")) u.turret_elevate_extent = ty.get_float(t, "Turret_Elevate_Extent_Degrees");
-        if (tagged("Deployed_Turret_Elevate_Extent_Degrees"))  // mcx4 t10 (MCX4_T10_RE_ANSWERS §8, ctor 180)
-            u.deployed_turret_elevate_extent = ty.get_float(t, "Deployed_Turret_Elevate_Extent_Degrees");
-        u.turret_xy_only = ty.get_bool(t, "Turret_XY_Only");
-        const std::array<float, 4> r = ty.get_vec(t, "Turret_Rest_Angle");
+        const auto tagged = [&](const auto& tag) { return !ty.get_string(t, tag).empty(); };
+        u.turret_rotate_speed = ty.get(t, objects::tags::Turret_Rotate_Speed);
+        if (tagged(objects::tags::Turret_Rotate_Extent_Degrees)) u.turret_extent = ty.get(t, objects::tags::Turret_Rotate_Extent_Degrees);
+        if (tagged(objects::tags::Turret_Elevate_Extent_Degrees)) u.turret_elevate_extent = ty.get(t, objects::tags::Turret_Elevate_Extent_Degrees);
+        if (tagged(objects::tags::Deployed_Turret_Elevate_Extent_Degrees))  // mcx4 t10 (MCX4_T10_RE_ANSWERS §8, ctor 180)
+            u.deployed_turret_elevate_extent = ty.get(t, objects::tags::Deployed_Turret_Elevate_Extent_Degrees);
+        u.turret_xy_only = ty.get(t, objects::tags::Turret_XY_Only);
+        const std::array<float, 4> r = ty.get(t, objects::tags::Turret_Rest_Angle);
         u.turret_rest_pitch = r[1];
         u.turret_rest_yaw = r[2];
     }
@@ -693,11 +693,11 @@ tc::UnitDesc BattleCatalog::unit_desc(uint32_t t, BuildState& s) const {
     u.transport_landing = ty.has_behavior(t, objects::BehaviorSet::Union, objects::beh::TransportLanding);
     // S8 t10 (LOB_SOLVER §5.1): Num_Garrison_Guns and the gun-bone table (battle host with model data only); the model ALT
     // comes from Land_Damage_Thresholds / _Alternates (TACTICAL_GAPS §6.3).
-    u.num_garrison_guns = ty.get_int(t, "Num_Garrison_Guns");
+    u.num_garrison_guns = ty.get(t, objects::tags::Num_Garrison_Guns);
     if (u.num_garrison_guns != 0 && s.model_mode >= 0) (void)garrison_bones(t, s.model_mode == 1, u.num_garrison_guns, u.garrison_bones);
     {
-        const auto th = ty.get_list(t, "Land_Damage_Thresholds");
-        const auto al = ty.get_list(t, "Land_Damage_Alternates");
+        const auto th = ty.get(t, objects::tags::Land_Damage_Thresholds);
+        const auto al = ty.get(t, objects::tags::Land_Damage_Alternates);
         for (size_t k = 0; k < th.size() && k < al.size(); ++k)
             u.damage_alternates.emplace_back(static_cast<float>(objects::c_atof(ascii_trim(th[k]))),
                                              static_cast<int32_t>(objects::c_atof(ascii_trim(al[k]))));
@@ -712,15 +712,15 @@ tc::UnitDesc BattleCatalog::unit_desc(uint32_t t, BuildState& s) const {
         const auto beh = [&](objects::BehaviorTypeId b) {
             return b != objects::kNoBehavior && ty.has_behavior(t, objects::BehaviorSet::Union, b);
         };
-        u.target_test_type = ((ty.get_bool(t, "Collidable_By_Projectile_Living") && ty.get_bool(t, "Is_Valid_Target")) ||
+        u.target_test_type = ((ty.get(t, objects::tags::Collidable_By_Projectile_Living) && ty.get(t, objects::tags::Is_Valid_Target)) ||
                               ty.company_member(t)) &&
                              (!beh(kSpecialWeapon) || beh(kDummyStarBase));
     }
     // trn1 t01 / t02 / t05 (docs/re/TRN1_TERRAIN_GAMEPLAY.md): cover factor, SURFACE_FX instances, burning speed.
-    if (!ty.get_string(t, "Surface_Type_Cover_Damage_Shield").empty())
-        u.cover_damage_shield = ty.get_float(t, "Surface_Type_Cover_Damage_Shield");
-    if (!ty.get_string(t, "On_Fire_Speed_Modifier").empty()) u.on_fire_speed = ty.get_float(t, "On_Fire_Speed_Modifier");
-    u.destroy_when_stunned_over_water = ty.get_bool(t, "Destroy_When_Stunned_Over_Water");  // t04
+    if (!ty.get_string(t, objects::tags::Surface_Type_Cover_Damage_Shield).empty())
+        u.cover_damage_shield = ty.get(t, objects::tags::Surface_Type_Cover_Damage_Shield);
+    if (!ty.get_string(t, objects::tags::On_Fire_Speed_Modifier).empty()) u.on_fire_speed = ty.get(t, objects::tags::On_Fire_Speed_Modifier);
+    u.destroy_when_stunned_over_water = ty.get(t, objects::tags::Destroy_When_Stunned_Over_Water);  // t04
     {
         static const objects::BehaviorTypeId kSurfaceFxBeh = objects::behavior_type_id("SURFACE_FX");
         const objects::BehaviorSet mode_set = s.model_mode < 0    ? objects::BehaviorSet::Union
@@ -729,7 +729,7 @@ tc::UnitDesc BattleCatalog::unit_desc(uint32_t t, BuildState& s) const {
         const bool has = kSurfaceFxBeh != objects::kNoBehavior &&
                          (ty.has_behavior(t, mode_set, kSurfaceFxBeh) || ty.has_behavior(t, objects::BehaviorSet::Generic, kSurfaceFxBeh));
         if (has)
-            for (const std::string_view item : ty.get_list(t, "SurfaceFX_Name")) {
+            for (const std::string_view item : ty.get(t, objects::tags::SurfaceFX_Name)) {
                 size_t at = 0;
                 while (at <= item.size()) {  // "A, B" in one item: split (mcx4 t17: every entry, no cap)
                     const size_t comma = item.find(',', at);
@@ -749,39 +749,39 @@ void BattleCatalog::s9_unit_fields(uint32_t t, tc::UnitDesc& u, BuildState& s) c
     // S10-int: S9 unit fields (ABILITIES_HARDPOINTS 1.3, 4.3, 4.7-4.10) + the visual object lists (R4).
     const objects::GameObjectTypes& ty = *types_;
     BattleTables::UnitVisuals vis;
-    for (std::string_view n : ty.get_list(t, "Damage_Hit_Particles")) vis.hit.push_back(type_or_none(n));
-    for (std::string_view n : ty.get_list(t, "Shield_Hit_Particles")) vis.shield_hit.push_back(type_or_none(n));
-    for (std::string_view n : ty.get_list(t, "Death_Explosions")) vis.death_explosions.push_back(type_or_none(n));
-    vis.smoke = std::string(ascii_trim(ty.get_string(t, "Damaged_Smoke_Asset_Name")));
+    for (std::string_view n : ty.get(t, objects::tags::Damage_Hit_Particles)) vis.hit.push_back(type_or_none(n));
+    for (std::string_view n : ty.get(t, objects::tags::Shield_Hit_Particles)) vis.shield_hit.push_back(type_or_none(n));
+    for (std::string_view n : ty.get(t, objects::tags::Death_Explosions)) vis.death_explosions.push_back(type_or_none(n));
+    vis.smoke = std::string(ascii_trim(ty.get(t, objects::tags::Damaged_Smoke_Asset_Name)));
     u.hit_particle_count = clamp_count(vis.hit.size());
     u.shield_hit_particle_count = clamp_count(vis.shield_hit.size());
     u.damaged_smoke = !vis.smoke.empty();
-    u.target_stealth_units = ty.get_bool(t, "Target_Stealth_Units");
+    u.target_stealth_units = ty.get(t, objects::tags::Target_Stealth_Units);
     // s78g t06 (TACTICAL_COMBAT §3.6 step 2): the Take_Damage team rules (vanilla: Droid_R2D2 / Droid_C3P0 share, Luke_XWing
     // / TIE_Prototype redirect). Never read before, so the rules had not run in any battle.
-    u.redirect_damage_to_teammates = ty.get_bool(t, "Redirect_Damage_To_Teammates");
-    u.share_damage_with_teammates = ty.get_bool(t, "Share_Damage_With_Teammates");
-    u.combustible = ty.get_bool(t, "Is_Combustible");
-    u.burning_damage_per_second = ty.get_float(t, "Burning_Damage_Per_Second");
-    u.energy_capacity = ty.get_float(t, "Energy_Capacity");
-    u.energy_refresh_rate = ty.get_float(t, "Energy_Refresh_Rate");
-    u.requires_base_power = ty.get_bool(t, "Requires_Base_Power");
-    u.passive_missile_shield_radius = ty.get_float(t, "Passive_Missile_Shield_Radius");
+    u.redirect_damage_to_teammates = ty.get(t, objects::tags::Redirect_Damage_To_Teammates);
+    u.share_damage_with_teammates = ty.get(t, objects::tags::Share_Damage_With_Teammates);
+    u.combustible = ty.get(t, objects::tags::Is_Combustible);
+    u.burning_damage_per_second = ty.get(t, objects::tags::Burning_Damage_Per_Second);
+    u.energy_capacity = ty.get(t, objects::tags::Energy_Capacity);
+    u.energy_refresh_rate = ty.get(t, objects::tags::Energy_Refresh_Rate);
+    u.requires_base_power = ty.get(t, objects::tags::Requires_Base_Power);
+    u.passive_missile_shield_radius = ty.get(t, objects::tags::Passive_Missile_Shield_Radius);
     // S8 t04 (LOB_SOLVER §1.1): type +0x4dc, constructor default 6.0 when the tag is absent (ref6 t01: the handle's
     // default, kDefaults).
     u.ranged_target_z_adjust = ty.get(t, objects::tags::Ranged_Target_Z_Adjust);
-    u.converted_die_time = ty.get_float(t, "Converted_To_Enemy_Die_Time_Seconds");
+    u.converted_die_time = ty.get(t, objects::tags::Converted_To_Enemy_Die_Time_Seconds);
     // s78n t05 (TACTICAL_COMBAT §3.5, 0x395c10 steps 3-5): the convert victim test's type half.
     u.proximity_mine = ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("PROXIMITY_MINE"));
-    u.friendly_damage_amount = ty.get_float(t, "Friendly_Damage_Amount");
-    u.named_hero = ty.get_bool(t, "Is_Named_Hero");
+    u.friendly_damage_amount = ty.get(t, objects::tags::Friendly_Damage_Amount);
+    u.named_hero = ty.get(t, objects::tags::Is_Named_Hero);
     u.has_locomotor = ty.has_behavior(t, objects::BehaviorSet::Union, objects::beh::Locomotor);
     // cu8g t05 (obj +0x2a0, the infection spread candidate test): a model is named for the battle's mode.
     if (s.model_mode >= 0)
-        u.has_model = !ascii_trim(ty.get_string(t, s.model_mode == 1 ? "Space_Model_Name" : "Land_Model_Name")).empty();
+        u.has_model = !ascii_trim(ty.get(t, s.model_mode == 1 ? objects::tags::Space_Model_Name : objects::tags::Land_Model_Name)).empty();
     // Death_Clone: (key name, type) pairs (S9_DEATH_CLONE_SHIELDS.md §1.4): the static tDamageType enum first, else
     // 0x18 + the name's index in GameConstants Damage_Types (e.g. Damage_Disruptor_Hand). S9 t04.
-    const auto clones = ty.get_list(t, "Death_Clone");
+    const auto clones = ty.get(t, objects::tags::Death_Clone);
     const objects::EnumConverter& kinds = ty.enums().get(objects::EnumId::DamageType);
     for (size_t i = 0; i + 1 < clones.size(); i += 2) {
         const std::string_view kn = ascii_trim(clones[i]);
@@ -796,48 +796,48 @@ void BattleCatalog::s9_unit_fields(uint32_t t, tc::UnitDesc& u, BuildState& s) c
         if (key < 0) continue;
         u.death_clones.push_back({key, ct});
     }
-    u.deploys = ty.get_bool(t, "Deploys");
+    u.deploys = ty.get(t, objects::tags::Deploys);
     // s78f t03 (TACTICAL_COMBAT §3.1.1 "Targeting states, slots 47 / 48"): the facing test's turn rate and the land
     // service's deploy / move flags.
-    u.turn_rate = ty.get_float(t, "Max_Rate_Of_Turn");
-    u.auto_deploys = ty.get_bool(t, "Auto_Deploys");
-    u.must_face_target_when_deployed = ty.get_bool(t, "Must_Face_Target_To_Attack_When_Deployed");
-    u.stationary_when_attacking = ty.get_bool(t, "Is_Stationary_When_Attacking");
-    u.max_dist_walk_while_deployed = ty.get_float(t, "Max_Dist_Walk_While_Deployed");
-    u.shielded_only_when_deployed = ty.get_bool(t, "Shielded_Only_When_Deployed");  // s78n t26.1
+    u.turn_rate = ty.get(t, objects::tags::Max_Rate_Of_Turn);
+    u.auto_deploys = ty.get(t, objects::tags::Auto_Deploys);
+    u.must_face_target_when_deployed = ty.get(t, objects::tags::Must_Face_Target_To_Attack_When_Deployed);
+    u.stationary_when_attacking = ty.get(t, objects::tags::Is_Stationary_When_Attacking);
+    u.max_dist_walk_while_deployed = ty.get(t, objects::tags::Max_Dist_Walk_While_Deployed);
+    u.shielded_only_when_deployed = ty.get(t, objects::tags::Shielded_Only_When_Deployed);  // s78n t26.1
     // s78f t08: the target-type flags of the hold-fire rule and the TURRET cannot-aim branch.
-    u.hold_fire_for_special_ability = ty.get_bool(t, "Should_Attacker_Hold_Fire_For_Special_Ability");
-    u.limited_turrets_turn = ty.get_bool(t, "Should_Cause_Limited_Turrets_To_Turn");
-    u.fires_forward = ty.get_bool(t, "Fires_Forward");  // mcx4 t03 (LOB_SOLVER §5.3)
-    for (std::string_view n : ty.get_list(t, "Death_Projectiles")) {
+    u.hold_fire_for_special_ability = ty.get(t, objects::tags::Should_Attacker_Hold_Fire_For_Special_Ability);
+    u.limited_turrets_turn = ty.get(t, objects::tags::Should_Cause_Limited_Turrets_To_Turn);
+    u.fires_forward = ty.get(t, objects::tags::Fires_Forward);  // mcx4 t03 (LOB_SOLVER §5.3)
+    for (std::string_view n : ty.get(t, objects::tags::Death_Projectiles)) {
         const int32_t pt = type_or_none(n);
         if (pt >= 0) u.death_projectiles.push_back(projectile(static_cast<uint32_t>(pt), s));
     }
     // --- OI abilities (TACTICAL_GAPS §1.9, §1.10, §7.3) ---
-    u.spin_away_on_death = ty.get_bool(t, "Spin_Away_On_Death");
-    u.spin_away_chance = ty.get_float(t, "Spin_Away_On_Death_Chance");
+    u.spin_away_on_death = ty.get(t, objects::tags::Spin_Away_On_Death);
+    u.spin_away_chance = ty.get(t, objects::tags::Spin_Away_On_Death_Chance);
     {  // Destruction_Survivors: (type, weight) pairs, stored with cumulative weights (binary search 0x378b70)
-        const auto list = ty.get_list(t, "Destruction_Survivors");
+        const auto list = ty.get(t, objects::tags::Destruction_Survivors);
         float cum = 0.0f;
         for (size_t i = 0; i + 1 < list.size(); i += 2) {
             const int32_t st = type_or_none(list[i]);
             cum = cum + static_cast<float>(objects::c_atof(ascii_trim(list[i + 1])));
             if (st >= 0) u.destruction_survivors.emplace_back(st, cum);
         }
-        if (!ascii_trim(ty.get_string(t, "Minimum_Destruction_Survivor_Count")).empty())
-            u.min_survivors = ty.get_int(t, "Minimum_Destruction_Survivor_Count");
-        if (!ascii_trim(ty.get_string(t, "Maximum_Destruction_Survivor_Count")).empty())
-            u.max_survivors = ty.get_int(t, "Maximum_Destruction_Survivor_Count");
+        if (!ascii_trim(ty.get_string(t, objects::tags::Minimum_Destruction_Survivor_Count)).empty())
+            u.min_survivors = ty.get(t, objects::tags::Minimum_Destruction_Survivor_Count);
+        if (!ascii_trim(ty.get_string(t, objects::tags::Maximum_Destruction_Survivor_Count)).empty())
+            u.max_survivors = ty.get(t, objects::tags::Maximum_Destruction_Survivor_Count);
     }
-    u.tactical_respawn_secs = ty.get_float(t, "Tactical_Respawn_Time_In_Secs");
+    u.tactical_respawn_secs = ty.get(t, objects::tags::Tactical_Respawn_Time_In_Secs);
     u.stunnable = ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("STUNNABLE"));
     u.shield_requires_base_power = ty.get(t, objects::tags::Shield_Requires_Base_Power);
     {  // tru1 t02 (docs/re/TRU1_A_RE_ANSWERS.md A1 / A2): base shields; Shield_Requires_Base_Power defaults to true here
         static const objects::BehaviorTypeId kBaseShield = objects::behavior_type_id("BASE_SHIELD");
         static const objects::BehaviorTypeId kAffected = objects::behavior_type_id("AFFECTED_BY_SHIELD");
-        u.base_shield_radius = ty.get_float(t, "Base_Shield_Radius");
+        u.base_shield_radius = ty.get(t, objects::tags::Base_Shield_Radius);
         u.base_shield = ty.has_behavior(t, objects::BehaviorSet::Union, kBaseShield) && u.base_shield_radius > 0.0f;
-        u.base_shield_always_off = ty.get_bool(t, "Base_Shield_Always_Off");
+        u.base_shield_always_off = ty.get(t, objects::tags::Base_Shield_Always_Off);
         // ref6 t01: the tag's one default is true (kDefaults), so the old "set in XML" test was always true
         u.base_shield_requires_power = u.shield_requires_base_power;
         u.affected_by_shield = ty.has_behavior(t, objects::BehaviorSet::Union, kAffected);
@@ -891,40 +891,40 @@ ta::AbilityObjectDesc BattleCatalog::ability_desc(uint32_t t, BuildState& s) con
     d.name = std::string(ty.name(t));
     d.name_crc = name_crc(d.name);
     d.object_type = static_cast<int32_t>(t);
-    d.category_mask = ty.get_mask(t, "CategoryMask");
+    d.category_mask = ty.get(t, objects::tags::CategoryMask);
     d.countdown = ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("ABILITY_COUNTDOWN"));
     d.team_container = ty.has_behavior(t, objects::BehaviorSet::Union, objects::beh::Team);
-    d.hero = ty.get_bool(t, "Is_Named_Hero") || ty.get_bool(t, "Is_Generic_Hero");
-    d.passive_missile_shield_radius = ty.get_float(t, "Passive_Missile_Shield_Radius");
+    d.hero = ty.get(t, objects::tags::Is_Named_Hero) || ty.get(t, objects::tags::Is_Generic_Hero);
+    d.passive_missile_shield_radius = ty.get(t, objects::tags::Passive_Missile_Shield_Radius);
     // s78l t05 (TACTICAL_COMBAT §5.4.1): Tactical_Bribe acceptance / cost. [port] every desc (a TEAM container too) reads
     // its own type: the FoC containers carry their own Tactical_Bribe_Cost (Stormtrooper_Team 25, its member 10), and
     // the container type does not name a member type here.
-    d.named_hero = ty.get_bool(t, "Is_Named_Hero");
-    d.tactical_bribe_cost = ty.get_int(t, "Tactical_Bribe_Cost");  // 0 when the tag is missing
-    const auto float_or = [&ty, t](std::string_view tag, float def) { return ty.get_string(t, tag).empty() ? def : ty.get_float(t, tag); };
-    d.bribe_modifier_corrupted = float_or("Bribe_Modifier_On_Corrupted_Planets", 1.0f);
-    d.bribe_modifier_uncorrupted = float_or("Bribe_Modifier_On_Uncorrupted_Planets", 1.0f);
-    d.friendly_damage_amount = ty.get_float(t, "Friendly_Damage_Amount");
+    d.named_hero = ty.get(t, objects::tags::Is_Named_Hero);
+    d.tactical_bribe_cost = ty.get(t, objects::tags::Tactical_Bribe_Cost);  // 0 when the tag is missing
+    const auto float_or = [&ty, t](const objects::FloatTag& tag, float def) { return ty.get_string(t, tag).empty() ? def : ty.get(t, tag); };
+    d.bribe_modifier_corrupted = float_or(objects::tags::Bribe_Modifier_On_Corrupted_Planets, 1.0f);
+    d.bribe_modifier_uncorrupted = float_or(objects::tags::Bribe_Modifier_On_Uncorrupted_Planets, 1.0f);
+    d.friendly_damage_amount = ty.get(t, objects::tags::Friendly_Damage_Amount);
     d.proximity_mine = ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("PROXIMITY_MINE"));
     // cu8f t06 (CU8F_T04_T06_RE §3.4): the Face_Target Super_Laser turns through TACTICAL_SUPER_WEAPON
     d.tactical_super_weapon = ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("TACTICAL_SUPER_WEAPON"));
     // s78m t05 (TACTICAL_COMBAT §5.4.3 item 4): the Combat_Bonus accept refuses the source type's unique units
-    d.unique_ground_type = type_or_none(ty.get_string(t, "Unique_Ground_Unit"));
-    d.unique_space_type = type_or_none(ty.get_string(t, "Unique_Space_Unit"));
+    d.unique_ground_type = type_or_none(ty.get(t, objects::tags::Unique_Ground_Unit));
+    d.unique_space_type = type_or_none(ty.get(t, objects::tags::Unique_Space_Unit));
     // s78n t04 (TACTICAL_COMBAT §5.4.4 item 3b): a Combat_Bonus source buffs itself only with this type flag
-    d.apply_self_on_creation = ty.get_bool(t, "Apply_Special_Ability_To_Self_On_Creation");
+    d.apply_self_on_creation = ty.get(t, objects::tags::Apply_Special_Ability_To_Self_On_Creation);
     // TRU1 t03 (docs/re/TRU1_GRAVITY_FIELD.md): GRAVITY_CONTROL_FIELD generator values (missing tags read 0) and the flag
     d.gravity_field = ty.has_behavior(t, objects::BehaviorSet::Union, objects::behavior_type_id("GRAVITY_CONTROL_FIELD"));
-    d.gravity_field_range = ty.get_float(t, "Gravity_Control_Field_Range");
-    d.gravity_field_slow_fraction = ty.get_float(t, "Gravity_Control_Field_Slow_Fraction");
-    d.gravity_field_effect = std::string(ascii_trim(ty.get_string(t, "Gravity_Control_Field_Effect")));
-    d.affected_by_gravity_field = ty.get_bool(t, "Is_Affected_By_Gravity_Control_Field");
+    d.gravity_field_range = ty.get(t, objects::tags::Gravity_Control_Field_Range);
+    d.gravity_field_slow_fraction = ty.get(t, objects::tags::Gravity_Control_Field_Slow_Fraction);
+    d.gravity_field_effect = std::string(ascii_trim(ty.get(t, objects::tags::Gravity_Control_Field_Effect)));
+    d.affected_by_gravity_field = ty.get(t, objects::tags::Is_Affected_By_Gravity_Control_Field);
     // mcx4 (MCX4_T10_RE_ANSWERS §15 / §5): buzz-droid cloud filter and speed, HUNT's force-sensitive rule
-    d.special_weapon_valid_targets = ty.get_mask(t, "Special_Weapon_Valid_Targets");
-    d.max_speed = ty.get_float(t, "Max_Speed");
-    d.force_sensitive = ty.get_bool(t, "Is_Force_Sensitive");
+    d.special_weapon_valid_targets = ty.get(t, objects::tags::Special_Weapon_Valid_Targets);
+    d.max_speed = ty.get(t, objects::tags::Max_Speed);
+    d.force_sensitive = ty.get(t, objects::tags::Is_Force_Sensitive);
     // 0x3979d0 [port: the mode's FOW reveal range column; land for land battles is not distinguished here]
-    if (ty.get_bool(t, "Target_Stealth_Units")) d.stealth_detection_range = ty.columns().space_fow_reveal_range[t];
+    if (ty.get(t, objects::tags::Target_Stealth_Units)) d.stealth_detection_range = ty.columns().space_fow_reveal_range[t];
     ta::AbilityResolvers r;
     const objects::GameObjectTypes* types = types_;
     r.category = [types](std::string_view name) -> uint64_t {
@@ -945,7 +945,7 @@ ta::AbilityObjectDesc BattleCatalog::ability_desc(uint32_t t, BuildState& s) con
     };
     r.type_max_flight_distance = [types](std::string_view name) -> float {  // cu8j t03: Saber_Name's max travel base
         const objects::TypeIndex x = types->resolve_name(ascii_trim(name));
-        return x == objects::kNone ? -1.0f : types->get_float(x, "Projectile_Max_Flight_Distance");
+        return x == objects::kNone ? -1.0f : types->get(x, objects::tags::Projectile_Max_Flight_Distance);
     };
     r.armor = [this](std::string_view name) -> uint16_t { return damage_.armor_index(ascii_trim(name)); };
     // OI abilities: melee Damage_Type and the projectile test for Spawned_Object_Type (instant effects).
@@ -956,13 +956,13 @@ ta::AbilityObjectDesc BattleCatalog::ability_desc(uint32_t t, BuildState& s) con
     };
     std::vector<std::string>* diag = s.full ? &s.full->diagnostics : nullptr;
     // Sub-object lists through the type loader (variants inherit / replace them, OBJECT_TYPES 3.3).
-    for (objects::FieldIndex f : ty.get_sub_objects(t, "Unit_Abilities_Data")) {
+    for (objects::FieldIndex f : ty.sub_objects(t, objects::tags::Unit_Abilities_Data)) {
         data::XmlNode e;
         if (!field_node(f, e) || !ascii_iequals(e.name(), "Unit_Ability")) continue;
         ta::UnitAbilityRecord rec;
         if (ta::parse_unit_ability(e, rec, r, diag)) d.unit_abilities.push_back(std::move(rec));
     }
-    for (objects::FieldIndex f : ty.get_sub_objects(t, "Abilities")) {
+    for (objects::FieldIndex f : ty.sub_objects(t, objects::tags::Abilities)) {
         data::XmlNode e;
         if (!field_node(f, e)) continue;
         d.specials.push_back(static_cast<uint32_t>(s.full->abilities.specials.size()));
@@ -1140,18 +1140,18 @@ std::unique_ptr<BattleCatalog::ModelInfo> info_from_asset(const assets::ModelAss
 // OPT3 t09: the model file an entry reads ("" none: the entry is null). avoid_model reads the mode's field; model_info
 // the first named field of its order (a missing file: no model data).
 std::string BattleCatalog::avoid_path(uint32_t type, bool space) const {
-    const std::string_view name = ascii_trim(types_->get_string(type, space ? "Space_Model_Name" : "Land_Model_Name"));
+    const std::string_view name = ascii_trim(types_->get(type, space ? objects::tags::Space_Model_Name : objects::tags::Land_Model_Name));
     return name.empty() ? std::string() : assets::model_path(name);
 }
 
 std::string BattleCatalog::info_path(uint32_t type, bool space, bool fallback) const {
-    std::vector<const char*> order = {space ? "Space_Model_Name" : "Land_Model_Name"};
+    std::vector<const objects::TextTag*> order = {space ? &objects::tags::Space_Model_Name : &objects::tags::Land_Model_Name};
     if (fallback) {
-        order.push_back(space ? "Land_Model_Name" : "Space_Model_Name");
-        order.push_back("Galactic_Model_Name");
+        order.push_back(space ? &objects::tags::Land_Model_Name : &objects::tags::Space_Model_Name);
+        order.push_back(&objects::tags::Galactic_Model_Name);
     }
-    for (const char* tag : order) {
-        const std::string_view name = ascii_trim(types_->get_string(type, tag));
+    for (const objects::TextTag* tag : order) {
+        const std::string_view name = ascii_trim(types_->get(type, *tag));
         if (!name.empty()) return assets::model_path(name);
     }
     return {};
@@ -1292,7 +1292,7 @@ bool BattleCatalog::muzzle_bones(uint32_t type, bool space, std::vector<tactical
     out.clear();
     const ModelInfo* m = model_info(type, space, false);
     if (!m) return false;
-    std::string base = ascii_upper(ascii_trim(types_->get_string(type, "Muzzle_Bone_Name")));
+    std::string base = ascii_upper(ascii_trim(types_->get(type, objects::tags::Muzzle_Bone_Name)));
     if (base.empty()) base = "MUZZLEA";  // type +0x580 default
     float scale = types_->columns().scale_factor[type];
     if (!(scale > 0.0f)) scale = 1.0f;
@@ -1310,7 +1310,7 @@ bool BattleCatalog::muzzle_bones(uint32_t type, bool space, std::vector<tactical
 
 bool BattleCatalog::target_bones(uint32_t type, bool space, std::vector<tactical::Vec3>& out) const {
     out.clear();
-    const auto names = types_->get_list(type, "Target_Bones");
+    const auto names = types_->get(type, objects::tags::Target_Bones);
     if (names.empty()) return true;
     const ModelInfo* m = model_info(type, space, false);
     if (!m) return false;
@@ -1330,7 +1330,7 @@ bool BattleCatalog::target_bones(uint32_t type, bool space, std::vector<tactical
 
 bool BattleCatalog::entry_bones(uint32_t type, bool space, std::vector<tactical::Vec3>& out) const {
     out.clear();
-    const auto names = types_->get_list(type, "Garrison_Bone_Names");
+    const auto names = types_->get(type, objects::tags::Garrison_Bone_Names);
     if (names.empty()) return true;
     const ModelInfo* m = model_info(type, space, false);
     if (!m) return false;
