@@ -267,7 +267,8 @@ struct TacticalAiConfig {
     // host computes it (BattleAi); -1 = count the perception players.
     int32_t quota_players = -1;
     // bkx1 t01 (BKX1_CADENCE_RE §1 / §3 [H]): the battle goal systems run the galactic cadence (GoalSystemConfig::
-    // retail_cadence: seeded first quota, slice ends at the quota). false = the earlier [port] cadence (tests written for it).
+    // retail_cadence: seeded first quota, slice ends at the quota). false = the earlier [port] cadence (no host or
+    // tactical test sets it since tst2 t05; GoalSystemConfig's own tests cover both).
     bool retail_cadence = true;
     // OPT2 t03: fan-out for the goal candidates' perception values (ai_goals.hpp batched values); any value gives
     // identical results.

@@ -48,6 +48,7 @@ int main(int argc, char** argv) {
     test_land_units_owner_rule();
     test_no_units_remaining_counted_entries();
     test_ended_production_cancel();  // a2m r2
+    test_find_all_objects_empty_types();  // tst2 t01
     test_structure_eta_queue_wait();  // a2m r2
     test_production_disabled_and_delivery();
     test_ground_structure_slots();
