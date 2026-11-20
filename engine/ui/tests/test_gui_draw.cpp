@@ -124,7 +124,7 @@ std::vector<uint8_t> render_frame(Gpu& g, render::Renderer& rr, uint32_t w, uint
         g.ring.wait_idle();
         if (!settled || settled() || k == 63) break;
         rr.wait_translations();
-        rr.pipelines().wait_idle();
+        rr.wait_pipelines();
     }
     g.alloc.invalidate(o.readback.alloc);
     const auto* px = static_cast<const uint8_t*>(o.readback.mapped());
@@ -919,7 +919,7 @@ void test_real(Gpu& g, const std::string& src_dir) {
                 g.ring.wait_idle();
                 if ((ss.draws > 0 && ss.pending_pipeline == 0 && ss.translation_pending == 0) || k == 63) break;
                 rr.wait_translations();
-                rr.pipelines().wait_idle();
+                rr.wait_pipelines();
             }
             g.alloc.invalidate(o.readback.alloc);
             const auto* p = static_cast<const uint8_t*>(o.readback.mapped());

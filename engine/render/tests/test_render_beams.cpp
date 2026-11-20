@@ -31,6 +31,7 @@
 #include "alamo/vfs/vfs.hpp"
 #include "alamo/test/support.hpp"
 #include "alamo/render/test/gpu.hpp"
+#include "renderer_core.hpp"  // REF3 t07: RendererCore inspection points (src/, target alamo_render_internal)
 
 using namespace alamo;
 
@@ -859,7 +860,7 @@ static void test_beams_gpu(Gpu& g, const std::string& src_dir) {
         if (files->read("Data\\XML\\LightningEffectTypes.xml", xml)) CHECK(lightning.load(xml));
     }
     CHECK(lightning.find("Tractor_Beam") && lightning.find("Piet_Energy_Weapon") && lightning.find("Leech_Shields"));
-    CHECK(rr.init_beams(tex, &lightning) && rr.beams_ready());
+    CHECK(rr.init_beams(tex, &lightning) && render::renderer_core(rr).beams_ready());
     Offscreen o;
     CHECK(o.create(g, 960, 540));
     render::OrbitCamera cam;
@@ -884,11 +885,11 @@ static void test_beams_gpu(Gpu& g, const std::string& src_dir) {
         rr.set_beams(beams, tick);  // the tractor / energy weapon animate over the loop; the zap lives 2 ticks
         CHECK(render_frame(g, rr, o, v, st, clear));
         done = k > 2 && st.beam_pending == 0 && st.beam_ribbons >= 3;
-        rr.pipelines().wait_idle();
+        rr.wait_pipelines();
         if (k > 2) ++tick;
     }
     std::printf("beams gpu: %u ribbons, %u dots, %u bolts, %u pending; %zu vertices, %zu batches\n", st.beam_ribbons, st.beam_dots, st.beam_bolts,
-                st.beam_pending, rr.last_beam_geometry().vertices.size(), rr.last_beam_geometry().batches.size());
+                st.beam_pending, render::renderer_core(rr).last_beam_geometry().vertices.size(), render::renderer_core(rr).last_beam_geometry().batches.size());
     CHECK(st.beam_ribbons >= 3 && st.beam_pending == 0 && st.beam_dots >= 14);
     const std::vector<uint8_t> px = o.pixels();
     CHECK(render::write_png_rgba(src_dir + "/logs/render_beams.png", o.w, o.h, [&] {

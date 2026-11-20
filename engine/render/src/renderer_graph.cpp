@@ -44,7 +44,7 @@ VkExtent2D render_scale_extent(VkExtent2D out, float scale) {
     return {side(out.width), side(out.height)};
 }
 
-bool Renderer::ensure_targets(VkExtent2D ext) {
+bool RendererCore::ensure_targets(VkExtent2D ext) {
     if (tg_.ready && tg_.scene.extent().width == ext.width && tg_.scene.extent().height == ext.height) return true;
     if (tg_.ready) ctx_->wait_idle();  // old images may still be in use by frames in flight
     const rhi::Format color = rhi::from_vk(desc_.color_format);
@@ -82,7 +82,7 @@ bool Renderer::ensure_targets(VkExtent2D ext) {
     return true;
 }
 
-const materials::MaterialEffect* Renderer::post_effect(int which) {
+const materials::MaterialEffect* RendererCore::post_effect(int which) {
     static const char* const kNames[5] = {"StencilDarken", "StencilDarkenToAlpha", "StencilDarkenFinalBlur", "SceneBloom",
                                           "SceneHeat"};
     // The original's technique selection rejects techniques whose VENDOR_FILTER_n equals the adapter vendor: on AMD
@@ -112,7 +112,7 @@ ViewMatrices prim_camera(uint32_t width, uint32_t height) {
 // effect + engine semantics (RESOLUTION_CONSTANTS = bound target) + PostSpec values, combined samplers
 // bound by texture parameter name or semantic, the D3D9 half-pixel push offset. Called inside rendering
 // with the target's Y-flipped viewport. False (nothing drawn) while the program / pipeline is compiling.
-bool Renderer::translated_state(const PostSpec& s, XConstCache* cache, GeoState& out) {
+bool RendererCore::translated_state(const PostSpec& s, XConstCache* cache, GeoState& out) {
     if (!s.fx || !s.pass || !s.fx->effect || !s.pass->vs_plan || !s.pass->ps_plan) return false;
     const bool geometry = s.vb != VK_NULL_HANDLE;
     XConstCache local;
@@ -178,7 +178,7 @@ bool Renderer::translated_state(const PostSpec& s, XConstCache* cache, GeoState&
     return true;
 }
 
-void Renderer::translated_fill(const PostSpec& s, XConstCache& cc, bool cached, bool ib) {
+void RendererCore::translated_fill(const PostSpec& s, XConstCache& cc, bool cached, bool ib) {
     const bool geometry = s.vb != VK_NULL_HANDLE;
     const fx::Effect& fxe = *s.fx->effect;
     const bool preshader = s.pass->vs_plan->preshader || s.pass->ps_plan->preshader;
@@ -240,7 +240,7 @@ void Renderer::translated_fill(const PostSpec& s, XConstCache& cc, bool cached, 
     patch(*s.pass->ps_plan, cc.ps.c);
 }
 
-uint32_t Renderer::translated_textures(const PostSpec& s, const GeoState& g, rhi::TextureBinding* tb) const {
+uint32_t RendererCore::translated_textures(const PostSpec& s, const GeoState& g, rhi::TextureBinding* tb) const {
     uint32_t ntb = 0;
     for (const shaderxlat::SamplerDesc& sd : g.tp->ps.iface.samplers) {
         if (sd.slot >= rhi::kTextureSlots || sd.slot >= 16) continue;
@@ -264,7 +264,7 @@ uint32_t Renderer::translated_textures(const PostSpec& s, const GeoState& g, rhi
     return ntb;
 }
 
-void Renderer::bind_geometry_state(VkCommandBuffer cmd, const PostSpec& s, const GeoState& g, VkBuffer vb, VkBuffer ib) {
+void RendererCore::bind_geometry_state(VkCommandBuffer cmd, const PostSpec& s, const GeoState& g, VkBuffer vb, VkBuffer ib) {
     const rhi::DeviceFns& fn = ctx_->vkd();
     fn.vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, g.pipe);
     cmd_set_dynamic_state(fn, cmd, s.pass->dynamic, rhi::from_vk(ds_format_));
@@ -284,7 +284,7 @@ void Renderer::bind_geometry_state(VkCommandBuffer cmd, const PostSpec& s, const
 // Q3: the entry of an uncached post_translated() call. Digest = every input of translated_state / translated_fill: the
 // spec's pass, flags, target size, values, the engine frame of its camera and the scene fog; equal digests give equal
 // images, so a hit skips the fill. 32 entries, least recently used replaced (allocates only up to the high water).
-Renderer::XConstCache& Renderer::post_cache_entry(const PostSpec& s, bool& hit) {
+XConstCache& RendererCore::post_cache_entry(const PostSpec& s, bool& hit) {
     const bool geometry = s.vb != VK_NULL_HANDLE;
     ViewMatrices v = geometry && s.view ? *s.view : (s.prim ? prim_camera(s.width, s.height) : ViewMatrices{});
     v.width = s.width;
@@ -335,7 +335,7 @@ Renderer::XConstCache& Renderer::post_cache_entry(const PostSpec& s, bool& hit) 
     return victim->cc;
 }
 
-bool Renderer::post_translated(rhi::Frame& frame, VkCommandBuffer cmd, const PostSpec& s, XConstCache* cache) {
+bool RendererCore::post_translated(rhi::Frame& frame, VkCommandBuffer cmd, const PostSpec& s, XConstCache* cache) {
     bool hit = false;
     XConstCache* use = cache ? cache : &post_cache_entry(s, hit);
     GeoState g;
@@ -404,7 +404,7 @@ bool Renderer::post_translated(rhi::Frame& frame, VkCommandBuffer cmd, const Pos
 // StencilDarken / StencilDarkenToAlpha (fixed function): 6 pre-lit prim vertices with the shadow colour
 // (alpha 0) under the orthographic 2D camera (identity view, -1..1, near 0.1, far 2), TERRAIN_WATER_POST
 // 4.2 / 4.3. The FF ubershader reads its own FrameCB / DrawData / FfDrawData set.
-bool Renderer::post_darken(rhi::Frame& frame, VkCommandBuffer cmd, const materials::MaterialEffect& fx, uint32_t width,
+bool RendererCore::post_darken(rhi::Frame& frame, VkCommandBuffer cmd, const materials::MaterialEffect& fx, uint32_t width,
                            uint32_t height, bool reset_alpha) {
     const materials::ResolvedPass* pass = nullptr;
     for (const auto& p : fx.passes)
@@ -599,7 +599,7 @@ using detail::begin_target;
 using detail::copy_of;
 using detail::resolve_into;
 
-bool Renderer::build_sky(rhi::Frame& frame, const ViewMatrices& view, std::span<const Instance> sky, DrawMode mode,
+bool RendererCore::build_sky(rhi::Frame& frame, const ViewMatrices& view, std::span<const Instance> sky, DrawMode mode,
                          const RecordOptions& opts, Built& out, std::vector<Instance>& storage, DrawStats& st) {
     // Background objects: the main camera with near 10 / far 100000 (SPACE_AND_OPEN.md D.7 2: same position,
     // rotation and FOV; no re-centring). Land skydomes are camera-relative (translation = eye).
@@ -640,7 +640,7 @@ bool Renderer::build_sky(rhi::Frame& frame, const ViewMatrices& view, std::span<
     return ok;
 }
 
-bool Renderer::render(rhi::Frame& frame, VkCommandBuffer primary, const PassTarget& target, const ViewMatrices& view_in,
+bool RendererCore::render(rhi::Frame& frame, VkCommandBuffer primary, const PassTarget& target, const ViewMatrices& view_in,
                       std::span<const Instance> instances, DrawMode mode, const RecordOptions& opts, DrawStats* stats,
                       DrawTiming* timing, std::span<const Instance> sky) {
     using clock = std::chrono::steady_clock;
@@ -678,7 +678,7 @@ bool Renderer::render(rhi::Frame& frame, VkCommandBuffer primary, const PassTarg
     }
     render_pass_ = rp_world_ = rp_main_;
     struct RpRestore {  // every exit: the world class back to single-sample, the main class for builds outside render()
-        Renderer* r;
+        RendererCore* r;
         ~RpRestore() {
             r->rp_world_ = r->rp_scene_;
             r->render_pass_ = r->rp_main_;

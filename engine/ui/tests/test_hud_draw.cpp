@@ -489,7 +489,7 @@ void test_gpu_real(Gpu& g, const std::string& src_dir, bool strict) {
                                  ss.pending_pipeline == 0 && ss.translation_pending == 0 && ss.draws > 0 && box.resident();
             if (settled || k == 63) break;
             rr.wait_translations();
-            rr.pipelines().wait_idle();
+            rr.wait_pipelines();
         }
         g.alloc.invalidate(o.readback.alloc);
         const auto* px = static_cast<const uint8_t*>(o.readback.mapped());
@@ -687,7 +687,7 @@ void test_gpu_galactic_faceplate(Gpu& g, const std::string& src_dir) {
             const bool settled = ss.pending_pipeline == 0 && ss.translation_pending == 0 && ss.draws > 0 && drawer.resident();
             if (settled || k == 63) break;
             rr.wait_translations();
-            rr.pipelines().wait_idle();
+            rr.wait_pipelines();
         }
         g.alloc.invalidate(o.readback.alloc);
         const auto* px = static_cast<const uint8_t*>(o.readback.mapped());

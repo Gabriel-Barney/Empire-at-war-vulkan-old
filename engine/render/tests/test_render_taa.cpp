@@ -313,7 +313,7 @@ void land_map(Gpu& g, const std::string& src_dir, const char* root) {
                        ws.water_pending == 0;
                 if (!done) {
                     rr.wait_translations();
-                    rr.pipelines().wait_idle();
+                    rr.wait_pipelines();
                 }
             }
             CHECK(done);
@@ -425,7 +425,7 @@ void land_map(Gpu& g, const std::string& src_dir, const char* root) {
                         settled = k > 1 && st.pending_pipeline == 0 && st.translation_pending == 0 && st.post_pending == 0;
                         if (!settled) {
                             rr.wait_translations();
-                            rr.pipelines().wait_idle();
+                            rr.wait_pipelines();
                         }
                     }
                     CHECK(settled && st.msaa == n);

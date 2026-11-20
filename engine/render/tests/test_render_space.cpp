@@ -29,6 +29,7 @@
 #include "alamo/vfs/vfs.hpp"
 #include "alamo/test/support.hpp"
 #include "alamo/render/test/gpu.hpp"
+#include "renderer_core.hpp"  // REF3 t07: RendererCore inspection points (src/, target alamo_render_internal)
 
 using namespace alamo;
 
@@ -79,7 +80,7 @@ static bool settle(Gpu& g, render::Renderer& r, Offscreen& o, const render::View
         if (!render_frame(g, r, o, vm, inst, st, ro, sky, clear)) return false;
         if (k > 1 && st.pending_pipeline == 0 && st.translation_pending == 0 && st.post_pending == 0) return true;
         r.wait_translations();
-        r.pipelines().wait_idle();
+        r.wait_pipelines();
     }
     return false;
 }
@@ -178,8 +179,8 @@ static void check_nebula_vs(render::Renderer& rr, const render::Instance& in, co
     CHECK(vsi.init(vsp, gp.pass->vs_options, &perr));
     materials::VSConstants vsc;
     materials::PSConstants psc;
-    CHECK(rr.translated_constants(in, *gs, gp, vm, vsc, psc));
-    const materials::TranslatedProgram* tp = rr.translated_mesh_program(gs->effect, *gp.pass);
+    CHECK(render::renderer_core(rr).translated_constants(in, *gs, gp, vm, vsc, psc));
+    const materials::TranslatedProgram* tp = render::renderer_core(rr).translated_mesh_program(gs->effect, *gp.pass);
     CHECK(tp != nullptr);
     if (!tp) return;
     shaderxlat::ConstantState csv;
@@ -495,10 +496,10 @@ static void test_lasers_gpu(Gpu& g, const std::string& src_dir) {
     for (int k = 0; k < 200; ++k) {
         CHECK(render_frame(g, rr, o, v, {}, st, ro, {}, clear));
         if (k > 1 && st.laser_pending == 0 && st.laser_beams + st.laser_kites == lasers.size()) break;
-        rr.pipelines().wait_idle();
+        rr.wait_pipelines();
     }
     std::printf("lasers gpu: %u beams + %u kites drawn, %u pending; %zu beam / %zu kite vertices\n", st.laser_beams, st.laser_kites,
-                st.laser_pending, rr.last_laser_geometry().beam_vertices.size(), rr.last_laser_geometry().kite_vertices.size());
+                st.laser_pending, render::renderer_core(rr).last_laser_geometry().beam_vertices.size(), render::renderer_core(rr).last_laser_geometry().kite_vertices.size());
     CHECK(st.laser_beams == 9 && st.laser_kites == 6 && st.laser_pending == 0);
     const std::vector<uint8_t> after = o.pixels();
     write_png(src_dir + "/logs/render_lasers_after.png", o.w, o.h, after);
@@ -575,7 +576,7 @@ static void test_lasers_gpu(Gpu& g, const std::string& src_dir) {
         CHECK(render_frame(g, rr, o, v, inst, st, ro, {}, clear));
         if (k > 1 && st.pending_pipeline == 0 && st.translation_pending == 0) break;
         rr.wait_translations();
-        rr.pipelines().wait_idle();
+        rr.wait_pipelines();
     }
     write_png(src_dir + "/logs/render_lasers_before.png", o.w, o.h, o.pixels());
     std::printf("lasers gpu: before (stretched ALOs): %zu instances, %u draws\n", inst.size(), st.draws);

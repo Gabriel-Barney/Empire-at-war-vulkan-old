@@ -163,7 +163,7 @@ bool GammaPass::record(rhi::Frame& frame, VkCommandBuffer cmd, VkImage color, Vk
 
 // ------------------------------------------------------------------------------------------- Renderer hook
 
-bool Renderer::apply_gamma(rhi::Frame& frame, VkCommandBuffer cmd, VkImage color, VkImageView view, VkFormat format, VkExtent2D extent,
+bool RendererCore::apply_gamma(rhi::Frame& frame, VkCommandBuffer cmd, VkImage color, VkImageView view, VkFormat format, VkExtent2D extent,
                            rhi::ImageState state, rhi::ImageState after, float gamma) {
     if (!(gamma >= 0.25f && gamma <= 4.0f) || std::fabs(gamma - 1.0f) < 1e-3f) return true;  // identity: nothing to do
     if (!ctx_) return false;

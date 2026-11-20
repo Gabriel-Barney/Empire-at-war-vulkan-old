@@ -41,6 +41,7 @@
 #include "alamo/vfs/vfs.hpp"
 #include "alamo/test/support.hpp"
 #include "alamo/render/test/gpu.hpp"
+#include "renderer_core.hpp"  // REF3 t07: RendererCore inspection points (src/, target alamo_render_internal)
 #include "ff_reference.hpp"
 #include "gltf.hpp"
 #include "png_decode.hpp"
@@ -442,7 +443,7 @@ FfResult run_ff_effect(Gpu& g, render::EffectCache& effects, const RefEffect& re
                 CHECK(tpl->build(*gp.pass->ff, *gs.effect->effect, st.lookup(), re.vertex_color));
                 if (std::getenv("ALAMO_REF_VERBOSE") && variant == 0 && si == 0) {
                     const materials::FfDrawData fd = tpl->evaluate(in);
-                    const materials::PsoKey dk = r.draw_key(gs, gp, in.light_scale.w);
+                    const materials::PsoKey dk = render::renderer_core(r).draw_key(gs, gp, in.light_scale.w);
                     const materials::ShaderBlob* vsb = render::shader_blob_by_id(dk.vs_id);
                     std::printf("  %s: vs %s layout %s sources %u %u %u %u params %.2f %.2f %.2f %.2f\n", re.name.c_str(),
                                 vsb ? vsb->name : "?", materials::vertex_layout_name(dk.vertex_layout), fd.sources.x,

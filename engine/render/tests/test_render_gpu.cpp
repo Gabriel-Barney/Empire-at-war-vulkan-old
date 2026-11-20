@@ -1,5 +1,6 @@
 // test_render: tests split from test_render.cpp (PAF t08).
 #include "test_render_common.hpp"
+#include "renderer_core.hpp"  // REF3 t07: RendererCore inspection points (src/, target alamo_render_internal)
 #include "alamo/core/host_fs.hpp"
 
 namespace test_render_t {
@@ -152,17 +153,17 @@ int run_gpu(const std::string& src_dir) {
 
         // ---- [port] anisotropy changed at runtime: the engine samplers are rewritten by the next render() (an idle
         // wait, no validation error for the bound set); screen-aligned quads look the same; back to off.
-        CHECK(g.renderer.anisotropy() == 0);
+        CHECK(render::renderer_core(g.renderer).anisotropy() == 0);
         const uint32_t dev_cap = g.ctx.caps().sampler_anisotropy ? static_cast<uint32_t>(g.ctx.caps().max_anisotropy) : 1u;
         g.renderer.set_anisotropy(16);
-        CHECK(g.renderer.anisotropy() == 0);  // latched by the next draw()/render()
+        CHECK(render::renderer_core(g.renderer).anisotropy() == 0);  // latched by the next draw()/render()
         CHECK(render_frame(g, g.renderer, o, vm, {&inst, 1}, &gm));
-        CHECK(g.renderer.anisotropy() == render::anisotropy_level(16, dev_cap));
+        CHECK(render::renderer_core(g.renderer).anisotropy() == render::anisotropy_level(16, dev_cap));
         expect("posed near quad (16x anisotropy)", 80, 16, 255, 0, 255);
         expect("quad red texel (16x anisotropy)", 60, 48, 255, 0, 0);
         g.renderer.set_anisotropy(0);
         CHECK(render_frame(g, g.renderer, o, vm, {&inst, 1}, &gm));
-        CHECK(g.renderer.anisotropy() == 0);
+        CHECK(render::renderer_core(g.renderer).anisotropy() == 0);
         expect("quad red texel (anisotropy off again)", 60, 48, 255, 0, 0);
 
         g.ring.wait_idle();
@@ -290,7 +291,7 @@ int run_gpu(const std::string& src_dir) {
             // First frame: pipelines are requested and drawn unlit meanwhile (never a stall).
             CHECK(render_frame(g, r, o, vm, {&inst, 1}, &gm, &st));
             const bool first_pending = st.pending_pipeline > 0;
-            r.pipelines().wait_idle();
+            r.wait_pipelines();
             out.first_ready_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
             auto sun = [&](float y) {
                 render::Lighting l = render::Lighting::space_default();
@@ -310,7 +311,7 @@ int run_gpu(const std::string& src_dir) {
             CHECK(back[0] > 5);                   // SH fill (ambient) still lights the back-lit face
             CHECK(rgb_close(o.px(80, 64), 0, 0, 64));  // alpha 0 < 128 -> discard -> clear colour
             CHECK(front[2] > 64);                 // alpha 255 kept (sun towards the face)
-            out.ps = r.pipelines().stats();
+            out.ps = r.pipeline_stats();
             g.ring.wait_idle();
             o.destroy(g);
             r.destroy_model(gm);
@@ -348,7 +349,7 @@ int run_gpu(const std::string& src_dir) {
             CHECK(r.upload_model(lit_model(), lit_textures, gm, &js));
             for (const auto& t : gm.buffer_tickets) CHECK(g.up.wait(t));
             for (const auto& t : gm.textures) CHECK(g.up.wait(t.ticket));
-            r.pipelines().wait_idle();
+            r.wait_pipelines();
             Offscreen o;
             CHECK(o.create(g, 64, 64));
             render::OrbitCamera cam;
@@ -381,14 +382,14 @@ int run_gpu(const std::string& src_dir) {
             CHECK(submit({&inst, 1}, &gm));
             CHECK(submit({&inst, 1}, &gm));
             r.destroy_model(gm);  // both frames may still be reading the buffers
-            const size_t pending = r.buffers_pending();
+            const size_t pending = render::renderer_core(r).buffers_pending();
             CHECK(submit({}, nullptr));  // collect_released() after begin_frame: only retired buffers go
             CHECK(submit({}, nullptr));
             g.ring.wait_idle();
             r.collect_released();
             std::printf("destroy_model in flight: %zu buffers deferred, %zu left after the frames retired\n", pending,
-                        r.buffers_pending());
-            CHECK(r.buffers_pending() == 0);
+                        render::renderer_core(r).buffers_pending());
+            CHECK(render::renderer_core(r).buffers_pending() == 0);
             o.destroy(g);
             r.shutdown();
         }
@@ -431,8 +432,8 @@ int run_gpu(const std::string& src_dir) {
                 for (const auto& t : gm.buffer_tickets) CHECK(g.up.wait(t));
                 for (const auto& t : gm.textures) CHECK(g.up.wait(t.ticket));
                 r.prepare_pipelines(gm);
-                r.pipelines().wait_idle();
-                out = r.pipelines().stats();
+                r.wait_pipelines();
+                out = r.pipeline_stats();
                 r.destroy_model(gm);
                 r.shutdown();  // saves keys + VkPipelineCache into the long directory
             };
@@ -486,7 +487,7 @@ int run_gpu(const std::string& src_dir) {
                 for (const auto& t : m->textures) CHECK(g.up.wait(t.ticket));
             }
             r.prepare_pipelines(lit);
-            r.pipelines().wait_idle();
+            r.wait_pipelines();
             Offscreen o;
             CHECK(o.create(g, 128, 128));
             render::OrbitCamera cam;
@@ -576,7 +577,7 @@ int run_gpu(const std::string& src_dir) {
                 for (const auto& t : nfm.buffer_tickets) CHECK(g.up.wait(t));
                 for (const auto& t : nfm.textures) CHECK(g.up.wait(t.ticket));
                 r.prepare_pipelines(nfm);
-                r.pipelines().wait_idle();
+                r.wait_pipelines();
                 render::Instance ni;
                 ni.model = &nfm;
                 r.set_lighting(fl);  // fog on, 0..10, red
@@ -702,7 +703,7 @@ int run_gpu(const std::string& src_dir) {
                 for (const auto& t : m->textures) CHECK(g.up.wait(t.ticket));
             }
             r.prepare_pipelines(lit);
-            r.pipelines().wait_idle();
+            r.wait_pipelines();
             Offscreen o;
             CHECK(o.create(g, 256, 256));
             std::vector<render::Instance> inst(200);
@@ -741,11 +742,11 @@ int run_gpu(const std::string& src_dir) {
                 CHECK(st.draws > 400 && st.pending_pipeline == 0 && st.lit_draws > 0);
                 if (k == 0) {
                     ref = img;
-                    ref_list = r.last_draw_list();
+                    ref_list = render::renderer_core(r).last_draw_list();
                     CHECK(tm.chunks == 0);
                 } else {
                     CHECK(tm.chunks > 1);
-                    CHECK(r.last_draw_list() == ref_list);
+                    CHECK(render::renderer_core(r).last_draw_list() == ref_list);
                     size_t diff = 0;
                     for (size_t i = 0; i < img.size(); ++i) diff += img[i] != ref[i];
                     if (diff) std::printf("  %zu bytes differ from single-threaded output\n", diff);
@@ -762,7 +763,7 @@ int run_gpu(const std::string& src_dir) {
                 const uint8_t* px = static_cast<const uint8_t*>(o.readback.mapped());
                 size_t diff = 0;
                 for (size_t i = 0; i < ref.size(); ++i) diff += px[i] != ref[i];
-                CHECK(r.last_draw_list() == ref_list);
+                CHECK(render::renderer_core(r).last_draw_list() == ref_list);
                 CHECK(render_frame(g, r, o, vm, inst, nullptr, &on, render::DrawMode::Lit, {}));
                 std::printf("mt: instancing: %u draws -> %u calls (%u instanced); off: %u calls, %zu bytes differ\n", on.draws,
                             on.draw_calls, on.instanced_calls, off.draw_calls, diff);
@@ -908,7 +909,7 @@ int run_gpu(const std::string& src_dir) {
                 // Lit captures need every program and pipeline (tests may block; the app never does).
                 rr.wait_translations();
                 rr.prepare_pipelines(*gm);
-                rr.pipelines().wait_idle();
+                rr.wait_pipelines();
                 const double psos_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
                 const assets::ModelAsset& ma = *gm->asset;
                 uint32_t fallbacks = 0, lit = 0;
@@ -986,7 +987,7 @@ int run_gpu(const std::string& src_dir) {
                 blocking.destroy_all();  // never drawn: nothing in flight reads it
             }
             if (gm) {
-                const auto ps = rr.pipelines().stats();
+                const auto ps = rr.pipeline_stats();
                 std::printf("thrawn: %u pipelines (%u failed, %.1f ms summed creation, %u reloaded from the cache dir)\n",
                             ps.keys, ps.failed, ps.create_ms, ps.reloaded);
                 CHECK(gm->damage_meshes_hidden == 8);
@@ -1002,7 +1003,7 @@ int run_gpu(const std::string& src_dir) {
                     subs = 0;
                     for (const render::GpuSubmesh& s : m.submeshes) subs += no_standin(s) ? 1u : 0u;
                     uint32_t n = 0;
-                    for (const render::DrawListEntry& e : rr.last_draw_list()) {
+                    for (const render::DrawListEntry& e : render::renderer_core(rr).last_draw_list()) {
                         if (e.pass >= 0 || e.instance != 0) continue;
                         for (const render::GpuSubmesh& s : m.submeshes)
                             if (s.submesh == e.submesh && no_standin(s)) ++n;
@@ -1093,7 +1094,7 @@ int run_gpu(const std::string& src_dir) {
                                       fm, nullptr, &uerr));
                 r2.prepare_pipelines(fm);
                 r2.wait_translations();
-                r2.pipelines().wait_idle();
+                r2.wait_pipelines();
                 const render::GpuSubmesh* line = nullptr;
                 for (const render::GpuSubmesh& s : fm.submeshes)
                     if (s.mesh < ma->meshes.size() && render::effect_key(ma->meshes[s.mesh].name) == "LINE01") line = &s;
@@ -1107,7 +1108,7 @@ int run_gpu(const std::string& src_dir) {
                     render::DrawStats st;
                     CHECK(render_settled(g, r2, o, render::make_view(cam, 512, 512), {&fi, 1}, &fm, st));
                     bool drawn_lit = false;
-                    for (const render::DrawListEntry& e : r2.last_draw_list())
+                    for (const render::DrawListEntry& e : render::renderer_core(r2).last_draw_list())
                         drawn_lit = drawn_lit || (e.instance == 0 && e.submesh == line->submesh && e.pass >= 0);
                     const render::EffectCache::Stats es = fx.stats();
                     const assets::Submesh& as = ma->submeshes[line->submesh];
@@ -1185,10 +1186,10 @@ int run_gpu(const std::string& src_dir) {
                     CHECK(st.translated_draws > 0);
                     if (t == 1) {
                         ref = img;
-                        ref_list = rr.last_draw_list();
+                        ref_list = render::renderer_core(rr).last_draw_list();
                     } else {
                         CHECK(tm.chunks > 1);
-                        CHECK(rr.last_draw_list() == ref_list);
+                        CHECK(render::renderer_core(rr).last_draw_list() == ref_list);
                         size_t diff = 0;
                         for (size_t i = 0; i < img.size(); ++i) diff += img[i] != ref[i];
                         std::printf("fleet 200: %zu bytes differ between 1 and %u record threads\n", diff, t);
@@ -1208,7 +1209,7 @@ int run_gpu(const std::string& src_dir) {
                     const uint8_t* px = static_cast<const uint8_t*>(o.readback.mapped());
                     size_t diff = 0;
                     for (size_t i = 0; i < ref.size(); ++i) diff += px[i] != ref[i];
-                    CHECK(rr.last_draw_list() == ref_list);
+                    CHECK(render::renderer_core(rr).last_draw_list() == ref_list);
                     render::DrawStats si;
                     ro.instancing = true;
                     CHECK(render_settled(g, rr, o, vm, inst, nullptr, si, render::DrawMode::Lit, ro));
@@ -1245,8 +1246,8 @@ int run_gpu(const std::string& src_dir) {
                                 materials::VSConstants va, vb;
                                 materials::PSConstants pa, pb;
                                 materials::IntBoolConstants ia, ib, ja, jb;
-                                const bool fa = rr.translated_constants(in, gs, gp, vm, va, pa, &ia, &ja);
-                                const bool fb = rr.translated_constants_cached(in, gs, gp, vm, vb, pb, &ib, &jb);
+                                const bool fa = render::renderer_core(rr).translated_constants(in, gs, gp, vm, va, pa, &ia, &ja);
+                                const bool fb = render::renderer_core(rr).translated_constants_cached(in, gs, gp, vm, vb, pb, &ib, &jb);
                                 ++checked;
                                 if (!fa || !fb || std::memcmp(&va, &vb, sizeof va) || std::memcmp(&pa, &pb, sizeof pa) ||
                                     std::memcmp(&ia, &ib, sizeof ia) || std::memcmp(&ja, &jb, sizeof ja))
@@ -1319,8 +1320,8 @@ int run_gpu(const std::string& src_dir) {
                 }
                 CHECK(!gb.submeshes.empty() && gb.submeshes[0].layout == materials::VertexLayout::NU2C);
                 if (gb.submeshes.size() == 3) {
-                    const materials::PsoKey sk = rr.draw_key_variant(gb.submeshes[2], gb.submeshes[2].passes[0], 0);
-                    const materials::PsoKey ck = rr.draw_key_variant(gb.submeshes[0], gb.submeshes[0].passes[0], 0);
+                    const materials::PsoKey sk = render::renderer_core(rr).draw_key_variant(gb.submeshes[2], gb.submeshes[2].passes[0], 0);
+                    const materials::PsoKey ck = render::renderer_core(rr).draw_key_variant(gb.submeshes[0], gb.submeshes[0].passes[0], 0);
                     const materials::ShaderBlob* svs = render::shader_blob_by_id(sk.vs_id);
                     const materials::ShaderBlob* cvs = render::shader_blob_by_id(ck.vs_id);
                     std::printf("ff: RSkin mesh on MeshAlpha draws with %s, NU2C mesh on PrimAlpha with %s\n", svs ? svs->name : "?",
@@ -1353,7 +1354,7 @@ int run_gpu(const std::string& src_dir) {
                     rr.make_resident(gb);
                     rr.prepare_pipelines(ga);
                     rr.prepare_pipelines(gb);
-                    rr.pipelines().wait_idle();
+                    rr.wait_pipelines();
                 }
                 CHECK(render_frame(g, rr, o, vm, inst, nullptr, &st));
                 CHECK(st.pending_pipeline == 0 && st.unlit_draws == 0 && st.ff_draws == 5);
@@ -1454,7 +1455,7 @@ int run_gpu(const std::string& src_dir) {
                         CHECK(render_frame(g, rr, o, vm, {&xi, 1}, &gx, &st));
                         rr.wait_translations();
                         rr.prepare_pipelines(gx);
-                        rr.pipelines().wait_idle();
+                        rr.wait_pipelines();
                     }
                     CHECK(render_frame(g, rr, o, vm, {&xi, 1}, &gx, &st));
                     std::printf("xlat: %s pass %s: %u translated draws (%u unlit, %u pending)\n", kXlatEffect, xpass->name.c_str(),
@@ -1462,7 +1463,7 @@ int run_gpu(const std::string& src_dir) {
                     CHECK(st.translated_draws == 2 && st.unlit_draws == 0);
                     // Q3: the mesh path draws with the instanced form (storage-buffer register images); the CPU reference
                     // below checks its pixels.
-                    const materials::TranslatedProgram* tp = rr.translated_mesh_program(gx.submeshes[0].effect, *xpass);
+                    const materials::TranslatedProgram* tp = render::renderer_core(rr).translated_mesh_program(gx.submeshes[0].effect, *xpass);
                     CHECK(tp != nullptr && tp->vs.iface.instanced && tp->ps.iface.instanced);
                     // (c) half-pixel sign: edge at D3D9 x = 100.25 / y = 100.25 -> first covered column / row 101.
                     const bool c100 = rgb_close(o.px(100, 200), 0, 0, 64, 1), c101 = !rgb_close(o.px(101, 200), 0, 0, 64, 1);
@@ -1480,7 +1481,7 @@ int run_gpu(const std::string& src_dir) {
                         CHECK(vsi.init(vsp, xpass->vs_options, &perr) && psi.init(psp, xpass->ps_options, &perr));
                         materials::VSConstants vsc;
                         materials::PSConstants psc;
-                        CHECK(rr.translated_constants(xi, gx.submeshes[0], gx.submeshes[0].passes[0], vm, vsc, psc));
+                        CHECK(render::renderer_core(rr).translated_constants(xi, gx.submeshes[0], gx.submeshes[0].passes[0], vm, vsc, psc));
                         {  // Q3: template + per-draw patch == full fill (other transform, LIGHT_SCALE, team colour too)
                             render::Instance x2 = xi;
                             x2.transform.m[0][3] = 3.0f;
@@ -1492,8 +1493,8 @@ int run_gpu(const std::string& src_dir) {
                             for (const render::Instance* xp : {&xi, &x2}) {
                                 materials::VSConstants a, b;
                                 materials::PSConstants pa, pb;
-                                CHECK(rr.translated_constants(*xp, gx.submeshes[0], gx.submeshes[0].passes[0], vm, a, pa));
-                                CHECK(rr.translated_constants_cached(*xp, gx.submeshes[0], gx.submeshes[0].passes[0], vm, b, pb));
+                                CHECK(render::renderer_core(rr).translated_constants(*xp, gx.submeshes[0], gx.submeshes[0].passes[0], vm, a, pa));
+                                CHECK(render::renderer_core(rr).translated_constants_cached(*xp, gx.submeshes[0], gx.submeshes[0].passes[0], vm, b, pb));
                                 same = same && std::memcmp(&a, &b, sizeof a) == 0 && std::memcmp(&pa, &pb, sizeof pa) == 0;
                             }
                             std::printf("xlat: cached register images + per-draw patch %s the full fill\n", same ? "equal" : "DIFFER FROM");
@@ -1503,7 +1504,7 @@ int run_gpu(const std::string& src_dir) {
                         for (size_t k = 0; k < 256; ++k) csv.c[k] = {vsc.c[k].x, vsc.c[k].y, vsc.c[k].z, vsc.c[k].w};
                         for (size_t k = 0; k < 32; ++k) csp.c[k] = {psc.c[k].x, psc.c[k].y, psc.c[k].z, psc.c[k].w};
                         shaderxlat::TranslatedPush push = xpass->translated_push;
-                        render::Renderer::translated_pixel_offset(512, 512, push.pixel_offset);
+                        render::RendererCore::translated_pixel_offset(512, 512, push.pixel_offset);
                         struct ConstTex : shaderxlat::TextureSource {
                             shaderxlat::F4 c;
                             shaderxlat::F4 sample(uint32_t, shaderxlat::TextureDim d, const shaderxlat::F4&) const override {
@@ -1788,7 +1789,7 @@ int run_gpu(const std::string& src_dir) {
                     CHECK(render_frame(g, rr, o, v, in, &sg, &st, render::DrawMode::Lit, ro));
                     rr.wait_translations();
                     rr.prepare_pipelines(sg);
-                    rr.pipelines().wait_idle();
+                    rr.wait_pipelines();
                 }
             };
             const render::Lighting kuat_light = rr.lighting();
@@ -2267,7 +2268,7 @@ int run_gpu(const std::string& src_dir) {
                             st.translation_pending == 0 && st.post_pending == 0)
                             return true;
                         rr.wait_translations();
-                        rr.pipelines().wait_idle();
+                        rr.wait_pipelines();
                     }
                     return false;
                 };
@@ -2702,7 +2703,7 @@ int run_gpu(const std::string& src_dir) {
                                ws.terrain_pending == 0 && ws.water_pending == 0;
                         if (!done) {
                             rr.wait_translations();
-                            rr.pipelines().wait_idle();
+                            rr.wait_pipelines();
                         }
                     }
                     CHECK(done);
@@ -2892,7 +2893,7 @@ int run_gpu(const std::string& src_dir) {
                         uint32_t groups_seen = 0, inversions = 0;
                         const render::GpuSubmesh* prev = nullptr;
                         const auto insts = scene.instances();
-                        for (const render::DrawListEntry& e : rr.last_draw_list()) {
+                        for (const render::DrawListEntry& e : render::renderer_core(rr).last_draw_list()) {
                             if (e.pass < 0 || e.instance >= insts.size()) continue;
                             const render::GpuSubmesh* gs = nullptr;
                             for (const render::GpuSubmesh& s : insts[e.instance].model->submeshes)
@@ -3044,7 +3045,7 @@ int run_gpu(const std::string& src_dir) {
                                    (!ds.fow || !scene.space() || ws.decorations.space_fow_draws > 0);
                             if (!done && scene.ready()) {
                                 rr.wait_translations();
-                                rr.pipelines().wait_idle();
+                                rr.wait_pipelines();
                             }
                         }
                         CHECK(done);
@@ -3125,7 +3126,7 @@ int run_gpu(const std::string& src_dir) {
                                                        std::span<const render::Instance>(bi, 1), clear));
                                     if (k > 1 && pst.pending_pipeline == 0 && pst.translation_pending == 0 && pst.post_pending == 0) break;
                                     rr.wait_translations();
-                                    rr.pipelines().wait_idle();
+                                    rr.wait_pipelines();
                                 }
                                 CHECK(pst.post_pending == 0);
                                 const uint8_t* pv = static_cast<const uint8_t*>(o2.readback.mapped());
@@ -3202,7 +3203,7 @@ int run_gpu(const std::string& src_dir) {
                                                        scene.sky(), clear));
                                     if (k > 1 && pst.pending_pipeline == 0 && pst.translation_pending == 0 && pst.post_pending == 0) break;
                                     rr.wait_translations();
-                                    rr.pipelines().wait_idle();
+                                    rr.wait_pipelines();
                                 }
                                 CHECK(pst.post_pending == 0);
                                 const uint8_t* pv = static_cast<const uint8_t*>(o2.readback.mapped());
@@ -3305,7 +3306,7 @@ int run_gpu(const std::string& src_dir) {
                                                    std::span<const render::Instance>(&bi, 1), black));
                                 if (k > 2 && st.pending_pipeline == 0 && st.translation_pending == 0 && st.post_pending == 0) break;
                                 rr.wait_translations();
-                                rr.pipelines().wait_idle();
+                                rr.wait_pipelines();
                             }
                             CHECK(st.post_pending == 0);
                             const uint8_t* p = static_cast<const uint8_t*>(o2.readback.mapped());
@@ -3372,7 +3373,7 @@ int run_gpu(const std::string& src_dir) {
                                                    render::DrawMode::Lit, ro, nullptr, {}, black));
                                 if (k > 2 && st.pending_pipeline == 0 && st.translation_pending == 0 && st.post_pending == 0) break;
                                 rr.wait_translations();
-                                rr.pipelines().wait_idle();
+                                rr.wait_pipelines();
                             }
                             CHECK(st.post_pending == 0);
                             const uint8_t* p = static_cast<const uint8_t*>(o2.readback.mapped());
@@ -3480,8 +3481,8 @@ int run_gpu(const std::string& src_dir) {
             streamer.destroy_all();
             // SH lighting contract over every FrameCB of the real-data frames (main, shadow bucket, decorations,
             // prim geometry, stencil darken; land, space and background passes).
-            std::printf("SH contract: %u FrameCBs with zero SH under a lit scene\n", rr.frame_cb_violations());
-            CHECK(rr.frame_cb_violations() == 0);
+            std::printf("SH contract: %u FrameCBs with zero SH under a lit scene\n", render::renderer_core(rr).frame_cb_violations());
+            CHECK(render::renderer_core(rr).frame_cb_violations() == 0);
             rr.shutdown();
         }
     } else if (!root || !*root) {

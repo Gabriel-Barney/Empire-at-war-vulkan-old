@@ -127,7 +127,7 @@ bool WorldRenderer::upload_buffer(rhi::Buffer& b, std::span<const uint8_t> bytes
     return true;
 }
 
-bool WorldRenderer::init(Renderer& r, const terrain::TerrainMesh& mesh, const terrain::WaterSurface* water,
+bool WorldRenderer::init(Renderer& renderer, const terrain::TerrainMesh& mesh, const terrain::WaterSurface* water,
                          const terrain::CloudParams& clouds, const TextureSource& textures, const WorldOptions& options,
                          std::string* error, const WorldDecorations* decorations) {
     shutdown();
@@ -135,11 +135,12 @@ bool WorldRenderer::init(Renderer& r, const terrain::TerrainMesh& mesh, const te
         if (error) *error = why;
         return false;
     };
+    RendererCore& r = renderer_core(renderer);
     r_ = &r;
     textures_src_ = textures;
     options_ = options;
-    caches_ = std::make_unique<Renderer::XConstCache[]>(terrain::kMaterialSlots);
-    water_cache_ = std::make_unique<Renderer::XConstCache>();
+    caches_ = std::make_unique<XConstCache[]>(terrain::kMaterialSlots);
+    water_cache_ = std::make_unique<XConstCache>();
     cloud_scale_ = clouds.scale;
     cloud_vel_[0] = clouds.velocity[0];
     cloud_vel_[1] = clouds.velocity[1];
@@ -272,7 +273,7 @@ bool WorldRenderer::init(Renderer& r, const terrain::TerrainMesh& mesh, const te
 // Targets in the scene formats, so the scene pipelines draw into them.
 bool WorldRenderer::create_targets() {
     if (!r_) return false;
-    Renderer& r = *r_;
+    RendererCore& r = *r_;
     reflection_.reset();
     refraction_.reset();
     sky_rt_.shutdown();
@@ -514,7 +515,7 @@ void WorldRenderer::shutdown() {
 // ------------------------------------------------------------------------------- renderer side
 
 // Copies one draw's register images into a persistent constant region (layout of kRegionBytes).
-void WorldRenderer::copy_region(uint8_t* dst, const Renderer::XConstCache& cc, bool int_bool) {
+void WorldRenderer::copy_region(uint8_t* dst, const XConstCache& cc, bool int_bool) {
     std::memcpy(dst, &cc.vs, sizeof cc.vs);
     std::memcpy(dst + 4096, &cc.ps, sizeof cc.ps);
     if (int_bool) {
@@ -523,7 +524,7 @@ void WorldRenderer::copy_region(uint8_t* dst, const Renderer::XConstCache& cc, b
     }
 }
 
-void Renderer::world_draw_terrain(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, uint32_t width,
+void RendererCore::world_draw_terrain(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, uint32_t width,
                                   uint32_t height, bool mirrored, bool count) {
     WorldRenderer& w = *world_;
     if (!w.resident_ || !w.terrain_pass_ || !w.options_.terrain || !w.caches_ || !w.terrain_vb_ || !w.terrain_ib_) return;
@@ -668,7 +669,7 @@ void Renderer::world_draw_terrain(rhi::Frame& frame, VkCommandBuffer cmd, const 
     }
 }
 
-void Renderer::world_draw_water(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, uint32_t width, uint32_t height) {
+void RendererCore::world_draw_water(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, uint32_t width, uint32_t height) {
     WorldRenderer& w = *world_;
     if (!w.resident_ || !w.water_on_ || !w.water_cache_ || !w.water_vb_ || !w.water_ib_) return;
     const terrain::WaterConstants wc = terrain::water_constants(w.water_, w.water_time_);
@@ -778,7 +779,7 @@ void Renderer::world_draw_water(rhi::Frame& frame, VkCommandBuffer cmd, const Vi
     w.stats_.water_triangles = tris;
 }
 
-void Renderer::reset_world_constants() {
+void RendererCore::reset_world_constants() {
     cloud_view_ = VK_NULL_HANDLE;
     cloud_slot_ = materials::kNoTexture;
     cloud_u_ = cloud_v_ = materials::float4{0, 0, 0, 0};
@@ -787,7 +788,7 @@ void Renderer::reset_world_constants() {
     fow_slot_ = materials::kNoTexture;
 }
 
-void Renderer::world_frame_constants() {
+void RendererCore::world_frame_constants() {
     WorldRenderer& w = *world_;
     w.upload_fow_pending();  // a finished FOW upload replaces the previous texture
     WorldRenderer::cloud_matrices(w.cloud_scale_, w.cloud_off_[0], w.cloud_off_[1], cloud_u_, cloud_v_);
@@ -803,7 +804,7 @@ void Renderer::world_frame_constants() {
     fow_slot_ = fow ? w.fow_slot_ : materials::kNoTexture;
 }
 
-bool Renderer::world_prepass(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, std::span<const Instance> instances,
+bool RendererCore::world_prepass(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, std::span<const Instance> instances,
                              std::span<const Instance> sky, DrawMode mode, const RecordOptions& opts) {
     (void)sky;
     WorldRenderer& w = *world_;
