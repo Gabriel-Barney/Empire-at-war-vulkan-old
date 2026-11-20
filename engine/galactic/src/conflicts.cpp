@@ -137,20 +137,20 @@ bool load_conflict_rules(const FileProvider& provider, const data::GameDatabase&
     const BountyTable bounty_table = load_bounty_table(g, types);  // a2m r2
     for (objects::TypeIndex t = 0; t < types.size(); ++t) {
         ConflictTypeInfo& i = out.types[t];
-        i.categories = types.get_mask(t, "CategoryMask");
+        i.categories = types.get(t, objects::tags::CategoryMask);
         i.bounty = static_cast<int32_t>(type_bounty(bounty_table, types, t));
         i.population = types.columns().population_value[t];
-        if (!types.get_string(t, "Space_Override_Population_Value").empty())
-            i.space_population_override = types.get_int(t, "Space_Override_Population_Value");
-        i.hero = types.get_bool(t, "Is_Named_Hero");
-        i.super_killer = types.get_bool(t, "Is_Super_Weapon_Killer");
-        i.prevents_story_autoresolve = types.get_bool(t, "Prevents_Story_Campaign_Autoresolve");
-        i.respawn_whole_team = types.get_bool(t, "Respawn_Whole_Team_When_Killed");  // mcx4 t05 (§9 / §13)
-        i.company = !types.get_list(t, "Company_Units").empty();
+        if (!types.get_string(t, objects::tags::Space_Override_Population_Value).empty())
+            i.space_population_override = types.get(t, objects::tags::Space_Override_Population_Value);
+        i.hero = types.get(t, objects::tags::Is_Named_Hero);
+        i.super_killer = types.get(t, objects::tags::Is_Super_Weapon_Killer);
+        i.prevents_story_autoresolve = types.get(t, objects::tags::Prevents_Story_Campaign_Autoresolve);
+        i.respawn_whole_team = types.get(t, objects::tags::Respawn_Whole_Team_When_Killed);  // mcx4 t05 (§9 / §13)
+        i.company = !types.get(t, objects::tags::Company_Units).empty();
         // MCX4_T09_RE_ANSWERS Q9 (0x374010 over the type's <Abilities>): an ability with a non-zero
         // Unit_Strength_Category mask and a non-zero Unit_Strength_Factor gives one (bit, factor) pair per set low bit.
         // Shipped data sets no factor, so every pair list is empty in base FoC.
-        for (const objects::FieldIndex f : types.get_sub_objects(t, "Abilities")) {
+        for (const objects::FieldIndex f : types.sub_objects(t, objects::tags::Abilities)) {
             const objects::ObjectTypeDatabase& raw = types.raw();
             const objects::FieldColumns& fc = raw.fields();
             uint64_t m = 0;
@@ -178,8 +178,8 @@ bool load_conflict_rules(const FileProvider& provider, const data::GameDatabase&
             for (uint8_t k = 0; k < 32; ++k)
                 if ((m >> k) & 1u) i.strength_bonus.emplace_back(k, factor);
         }
-        for (const char* tag : {"Squadron_Units", "Company_Units"})
-            for (std::string_view m : types.get_list(t, tag)) {
+        for (const objects::ListTag* k : {&objects::tags::Squadron_Units, &objects::tags::Company_Units})
+            for (std::string_view m : types.get(t, *k)) {
                 const objects::TypeIndex mt = types.resolve_name(trimmed(m));
                 if (mt == objects::kNone) continue;
                 bool found = false;
@@ -190,9 +190,9 @@ bool load_conflict_rules(const FileProvider& provider, const data::GameDatabase&
                     }
                 if (!found) i.members.emplace_back(static_cast<uint32_t>(mt), 1);
             }
-        i.space_map = trimmed(types.get_string(t, "Space_Tactical_Map"));
-        i.land_map = trimmed(types.get_string(t, "Land_Tactical_Map"));
-        const std::string terrain = trimmed(types.get_string(t, "Terrain"));
+        i.space_map = trimmed(types.get(t, objects::tags::Space_Tactical_Map));
+        i.land_map = trimmed(types.get(t, objects::tags::Land_Tactical_Map));
+        const std::string terrain = trimmed(types.get(t, objects::tags::Terrain));
         i.terrain = terrain.empty() ? -1 : terrain_index(terrain);
         if (t < galactic.types.size() && galactic.types[t].kind == UnitKind::StarBase) {
             std::string name = galactic.types[t].name;

@@ -420,14 +420,18 @@ void parse_production_targets(const objects::GameObjectTypes& types, objects::Fi
     }
 }
 
-std::vector<std::string_view> list_or_split(const objects::GameObjectTypes& types, objects::TypeIndex t, std::string_view tag) {
+// The tag's words; a tag the type data keeps as one string is split here. Takes a handle, or the name of a corruption
+// slot's tag (Corruption_<slot>_..., built per slot).
+template <class Tag>
+std::vector<std::string_view> list_or_split(const objects::GameObjectTypes& types, objects::TypeIndex t, const Tag& tag) {
     const std::span<const std::string_view> l = types.get_list(t, tag);
     std::vector<std::string_view> out(l.begin(), l.end());
     if (out.empty()) out = objects::split_type_list(types.get_string(t, tag));
     return out;
 }
 
-std::vector<uint32_t> type_list(const objects::GameObjectTypes& types, objects::TypeIndex t, std::string_view tag) {
+template <class Tag>
+std::vector<uint32_t> type_list(const objects::GameObjectTypes& types, objects::TypeIndex t, const Tag& tag) {
     std::vector<uint32_t> out;
     for (std::string_view n : list_or_split(types, t, tag)) {
         const objects::TypeIndex r = types.resolve_name(ascii_trim(n));
@@ -545,7 +549,7 @@ void load_special_rules(const FileProvider& provider, const data::GameDatabase& 
     std::map<objects::FieldIndex, uint32_t> parsed, parsed_production, parsed_bounty, parsed_galab;  // lookup only
     for (objects::TypeIndex t = 0; t < n; ++t) {
         TypeSpecial& ts = s.types[t];
-        for (objects::FieldIndex f : types.get_sub_objects(t, "Abilities")) {
+        for (objects::FieldIndex f : types.sub_objects(t, objects::tags::Abilities)) {
             // OI galactic (STRATEGIC_GAPS 1.4 / 2.2): the galactic stealth / detection / planet destruction entries.
             const std::string_view tag = raw.tag_name(f);
             {  // mcx4 t09: every entry's Name (Q6)
@@ -619,34 +623,34 @@ void load_special_rules(const FileProvider& provider, const data::GameDatabase& 
             ts.abilities.push_back(it->second);
             ts.trigger_order.push_back(it->second);
         }
-        for (objects::TypeIndex m : types.get_type_refs(t, "Company_Units"))
+        for (objects::TypeIndex m : types.get_type_refs(t, objects::tags::Company_Units))
             if (m != objects::kNone) ts.members.push_back(m);
-        ts.sabotage_cost = types.get_int(t, "Sabotage_Cost_Credits");
-        ts.tutorial_sabotage_cost = types.get_int(t, "Tutorial_Sabotage_Cost_Credits");
-        ts.planet_vigilance = objects::parse_type_bool(types.get_string(t, "Planet_Vigilance")) || types.get_bool(t, "Planet_Vigilance");
-        ts.mining_colony = types.get_bool(t, "Planet_Is_Mining_Colony");
-        ts.slice_difficulty = to_f(types.get_string(t, "Planet_Slice_Difficulty_Rating"));  // REMAINING_GAPS 1.1
-        ts.tech_availability = to_f(types.get_string(t, "Planet_Tech_Availability_Rating"));
-        ts.slice_affinity = type_list(types, t, "Planet_Slice_Affinity_Types");
-        ts.slice_cost = to_f(types.get_string(t, "Slice_Cost_Credits"));
-        ts.black_market_modifier = to_f(types.get_string(t, "Planet_Black_Market_Modifier"));
-        ts.destroy_when_prereq = types.get_bool(t, "Destroy_When_Used_As_Corruption_Prereq");
-        ts.generic_hero = types.get_bool(t, "Is_Generic_Hero");
-        ts.named_hero = types.get_bool(t, "Is_Named_Hero");
-        ts.corruption_removal_cost = types.get_float(t, "Planet_Corruption_Removal_Base_Cost");  // galab §1 (T +0x804)
-        ts.prevents_minor_siphons = types.get_bool(t, "Prevents_Minor_Credit_Siphons");         // galab §3 (T +0x63)
-        ts.neutralization_cost = types.get_float(t, "Neutralization_Cost");                     // galab §7 (T +0x1FBC)
-        ts.neutralizable_by_minor = types.get_bool(t, "Can_Be_Neutralized_By_Minor_Heroes");   // T +0x7B
-        ts.neutralizable_by_major = types.get_bool(t, "Can_Be_Neutralized_By_Major_Heroes");   // T +0x7C
+        ts.sabotage_cost = types.get(t, objects::tags::Sabotage_Cost_Credits);
+        ts.tutorial_sabotage_cost = types.get(t, objects::tags::Tutorial_Sabotage_Cost_Credits);
+        ts.planet_vigilance = objects::parse_type_bool(types.get_string(t, objects::tags::Planet_Vigilance)) || types.get(t, objects::tags::Planet_Vigilance);
+        ts.mining_colony = types.get(t, objects::tags::Planet_Is_Mining_Colony);
+        ts.slice_difficulty = to_f(types.get(t, objects::tags::Planet_Slice_Difficulty_Rating));  // REMAINING_GAPS 1.1
+        ts.tech_availability = to_f(types.get(t, objects::tags::Planet_Tech_Availability_Rating));
+        ts.slice_affinity = type_list(types, t, objects::tags::Planet_Slice_Affinity_Types);
+        ts.slice_cost = to_f(types.get(t, objects::tags::Slice_Cost_Credits));
+        ts.black_market_modifier = to_f(types.get(t, objects::tags::Planet_Black_Market_Modifier));
+        ts.destroy_when_prereq = types.get(t, objects::tags::Destroy_When_Used_As_Corruption_Prereq);
+        ts.generic_hero = types.get(t, objects::tags::Is_Generic_Hero);
+        ts.named_hero = types.get(t, objects::tags::Is_Named_Hero);
+        ts.corruption_removal_cost = types.get(t, objects::tags::Planet_Corruption_Removal_Base_Cost);  // galab §1 (T +0x804)
+        ts.prevents_minor_siphons = types.get(t, objects::tags::Prevents_Minor_Credit_Siphons);         // galab §3 (T +0x63)
+        ts.neutralization_cost = types.get(t, objects::tags::Neutralization_Cost);                     // galab §7 (T +0x1FBC)
+        ts.neutralizable_by_minor = types.get(t, objects::tags::Can_Be_Neutralized_By_Minor_Heroes);   // T +0x7B
+        ts.neutralizable_by_major = types.get(t, objects::tags::Can_Be_Neutralized_By_Major_Heroes);   // T +0x7C
         {
-            const std::string_view prev = ascii_trim(types.get_string(t, "Prev_Level_Base"));
+            const std::string_view prev = ascii_trim(types.get(t, objects::tags::Prev_Level_Base));
             if (!prev.empty()) {
                 const objects::TypeIndex r = types.resolve_name(prev);
                 if (r != objects::kNone) ts.prev_level_base = r;
             }
         }
         {
-            const std::vector<std::string_view> text = list_or_split(types, t, "Text_ID");
+            const std::vector<std::string_view> text = list_or_split(types, t, objects::tags::Text_ID);
             if (!text.empty()) ts.text_crc = special_name_crc(text.front());
         }
         if (t < out.types.size() && out.types[t].kind == UnitKind::Planet)
@@ -661,12 +665,12 @@ void load_special_rules(const FileProvider& provider, const data::GameDatabase& 
                     const float f = types.get_float(t, p + "Credit_Cost");
                     c.credit_cost_rounded = f > 0.0f ? static_cast<int32_t>(f + 0.5f) : types.get_int(t, p + "Credit_Cost");
                 }
-                c.required_unit_types = type_list(types, t, p + "Required_Unit_Type");
+                c.required_unit_types = type_list(types, t, p + objects::tags::Required_Unit_Type);
                 c.required_unit_count = types.get_int(t, p + "Required_Unit_Count");
                 if (!ascii_trim(types.get_string(t, p + "Required_Mission_Type")).empty())
                     c.required_mission = static_cast<int8_t>(types.get_enum(t, p + "Required_Mission_Type"));
                 c.required_mission_count = types.get_int(t, p + "Required_Mission_Count");
-                c.required_planets = type_list(types, t, p + "Required_Planets");
+                c.required_planets = type_list(types, t, p + objects::tags::Required_Planets);
                 if (const std::string_view u = ascii_trim(types.get_string(t, p + "Success_Unlock_Unit_Type")); !u.empty())
                     if (const objects::TypeIndex r = types.resolve_name(u); r != objects::kNone) c.success_unlock = r;
                 c.success_credit_bonus = types.get_float(t, p + "Success_Credit_Bonus");

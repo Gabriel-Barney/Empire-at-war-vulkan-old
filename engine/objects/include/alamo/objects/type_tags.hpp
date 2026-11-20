@@ -139,7 +139,92 @@ struct SubObjectsTag {
     X(Float, SecondaryTurnAngle, 0.0f)                                                                                \
     X(Float, MinSecondaryTurnROTCoefficient, 0.0f)                                                                    \
     X(Float, MaxSecondaryTurnROTCoefficient, 0.0f)                                                                    \
-    X(Float, SecondaryTurnLookaheadDistance, 0.0f)
+    X(Float, SecondaryTurnLookaheadDistance, 0.0f)                                                                    \
+    /* galactic rules (GALACTIC, STRATEGIC_GAPS): galactic_rules.cpp, special_rules.cpp, conflicts.cpp, bounty.cpp */ \
+    X(List, Company_Transport_Unit, 0)                                                                                \
+    X(List, Company_Units, 0)                                                                                         \
+    X(Bool, Cinematic_Object_Only, false)                                                                             \
+    X(Bool, Always_Spawn_In_Orbit, false)                                                                             \
+    X(Bool, Is_Super_Weapon_Killer, false)                                                                            \
+    X(Bool, Is_Named_Hero, false)                                                                                     \
+    X(Bool, Is_Generic_Hero, false)                                                                                   \
+    X(Bool, Build_Requires_Initial_Placement, false)                                                                  \
+    X(List, Required_Special_Structures, 0)                                                                           \
+    X(List, Required_Orbiting_Units, 0)                                                                               \
+    X(List, Required_Planets, 0)                                                                                      \
+    X(Bool, Hyperspace, false)                                                                                        \
+    X(Int, Build_Cost_Credits, 0)                                                                                     \
+    X(Int, Build_Time_Seconds, 0)                                                                                     \
+    X(Int, Tech_Level, 0)                                                                                             \
+    X(Int, Required_Ground_Base_Level, 0)                                                                             \
+    X(Int, Required_Star_Base_Level, 0)                                                                               \
+    X(Int, Base_Level, 0)                                                                                             \
+    X(Text, Next_Level_Base, "")                                                                                      \
+    X(Int, Build_Advances_Tech_Level, 0)                                                                              \
+    X(Int, Squadron_Capacity, 0)                                                                                      \
+    X(Float, Hyperspace_Speed, 0.0f)                                                                                  \
+    X(Float, Galactic_Influence_Range, 0.0f)                                                                          \
+    X(Float, Piracy_Value_Credits, 0.0f)                                                                              \
+    X(Float, Maintenance_Cost, 0.0f)                                                                                  \
+    X(Bool, Prevents_Story_Campaign_Autoresolve, false)                                                               \
+    X(Float, Hyperspace_Fleet_Reveal_Range, 0.0f)                                                                     \
+    X(Ref, Respawn_Tied_To_Structure, 0)                                                                              \
+    X(Bool, Build_Countdown_Timer, false)                                                                             \
+    X(Text, Build_Speech_Countdowns, "")                                                                              \
+    X(Bool, Build_Time_Reduced_By_Multiple_Factories, false)                                                          \
+    X(Bool, Build_Initially_Locked, false)                                                                            \
+    X(Bool, Build_Can_Be_Unlocked_By_Slicer, false)                                                                   \
+    X(List, Affiliation, 0)                                                                                           \
+    X(Int, Planet_Credit_Value, 0)                                                                                    \
+    X(Int, Planet_Destroyed_Credit_Value, 0)                                                                          \
+    X(Int, Planet_Capture_Bonus_Reward, 0)                                                                            \
+    X(Bool, Planet_Black_Market_Influences, false)                                                                    \
+    X(Bool, Planet_Starbase_Stealth, false)                                                                           \
+    X(Bool, Planet_Groundbase_Stealth, false)                                                                         \
+    X(Bool, Planet_Surface_Accessible, true)                                                                          \
+    X(Text, The_Force, "")                                                                                            \
+    X(Float, Force_Strength, 0.0f)                                                                                    \
+    X(Int, Political_Control, 0)                                                                                      \
+    X(Text, Political_Faction, "")                                                                                    \
+    X(List, Planet_Max_Political_Control_For_Faction, 0)                                                              \
+    X(Int, Additional_Population_Capacity, 0)                                                                         \
+    X(Text, Terrain, "")                                                                                              \
+    X(Mask, Planet_Restricted_Unit_Categories, 0)                                                                     \
+    X(List, Planet_Restricted_Unit_Types, 0)                                                                          \
+    X(List, Squadron_Units, 0)                                                                                        \
+    X(Int, Cheap_Bribe_Cost, 0)                                                                                       \
+    X(Int, Expensive_Bribe_Cost, 0)                                                                                   \
+    X(Int, Build_Max_Instances_Per_Planet, -1)                                                                        \
+    X(Int, Build_Limit_Lifetime_Per_Player, -1)                                                                       \
+    X(Int, Build_Limit_Current_Per_Player, -1)                                                                        \
+    X(Int, Max_Space_Base, 0)                                                                                         \
+    X(Int, Special_Structures_Land, 0)                                                                                \
+    X(Int, Special_Structures_Space, 0)                                                                               \
+    X(Sub, Abilities, 0)                                                                                              \
+    X(Int, Sabotage_Cost_Credits, 0)                                                                                  \
+    X(Int, Tutorial_Sabotage_Cost_Credits, 0)                                                                         \
+    X(Bool, Planet_Vigilance, false)                                                                                  \
+    X(Bool, Planet_Is_Mining_Colony, false)                                                                           \
+    X(Text, Planet_Slice_Difficulty_Rating, "")                                                                       \
+    X(Text, Planet_Tech_Availability_Rating, "")                                                                      \
+    X(Text, Slice_Cost_Credits, "")                                                                                   \
+    X(Text, Planet_Black_Market_Modifier, "")                                                                         \
+    X(Bool, Destroy_When_Used_As_Corruption_Prereq, true)                                                             \
+    X(Float, Planet_Corruption_Removal_Base_Cost, 0.0f)                                                               \
+    X(Bool, Prevents_Minor_Credit_Siphons, false)                                                                     \
+    X(Float, Neutralization_Cost, 0.0f)                                                                               \
+    X(Bool, Can_Be_Neutralized_By_Minor_Heroes, false)                                                                \
+    X(Bool, Can_Be_Neutralized_By_Major_Heroes, false)                                                                \
+    X(Text, Prev_Level_Base, "")                                                                                      \
+    X(List, Text_ID, 0)                                                                                               \
+    X(List, Planet_Slice_Affinity_Types, 0)                                                                           \
+    X(List, Required_Unit_Type, 0)                                                                                    \
+    X(Int, Space_Override_Population_Value, -1)                                                                       \
+    X(Bool, Respawn_Whole_Team_When_Killed, false)                                                                    \
+    X(Text, Space_Tactical_Map, "")                                                                                   \
+    X(Text, Land_Tactical_Map, "")                                                                                    \
+    X(Float, Override_Bounty_SP, 0.0f)                                                                                \
+    X(Float, Override_Bounty_MP, 0.0f)
 // clang-format on
 
 namespace tags {

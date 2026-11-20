@@ -44,12 +44,8 @@ std::unique_ptr<data::XmlDocument> read_xml(const FileProvider& provider, const 
     return doc;
 }
 
-bool has_field(const objects::GameObjectTypes& types, objects::TypeIndex t, std::string_view tag) {
-    return types.value(t, objects::find_type_field(tag)) != nullptr;
-}
-
-int32_t int_or(const objects::GameObjectTypes& types, objects::TypeIndex t, std::string_view tag, int32_t fallback) {
-    return has_field(types, t, tag) ? types.get_int(t, tag) : fallback;
+int32_t int_or(const objects::GameObjectTypes& types, objects::TypeIndex t, const objects::IntTag& k, int32_t fallback) {
+    return types.is_set(t, k) ? types.get(t, k) : fallback;
 }
 
 uint32_t resolve_or_none(const objects::GameObjectTypes& types, std::string_view name) {
@@ -62,23 +58,23 @@ void extract_oi_fields(const objects::GameObjectTypes& types, objects::TypeIndex
     i.data_rules = true;
     i.dummy = galactic_dummy(types, static_cast<uint32_t>(t));  // mcx1 t05: generic Behavior, retail order (Q7.2)
     i.transport_behavior = types.has_behavior(t, objects::BehaviorSet::Union, objects::beh::Transport);
-    for (objects::TypeIndex r : types.get_type_refs(t, "Company_Transport_Unit")) {
+    for (objects::TypeIndex r : types.get_type_refs(t, objects::tags::Company_Transport_Unit)) {
         if (r != objects::kNone) i.company_transport = r;
         break;  // the first entry is used (0x400f30)
     }
-    for (objects::TypeIndex m : types.get_type_refs(t, "Company_Units"))
+    for (objects::TypeIndex m : types.get_type_refs(t, objects::tags::Company_Units))
         if (m != objects::kNone) i.company_units.push_back(m);
-    i.cinematic_only = types.get_bool(t, "Cinematic_Object_Only");
-    i.always_spawn_in_orbit = types.get_bool(t, "Always_Spawn_In_Orbit");
-    i.super_weapon_killer = types.get_bool(t, "Is_Super_Weapon_Killer");
-    i.named_hero = types.get_bool(t, "Is_Named_Hero");
-    i.generic_hero = types.get_bool(t, "Is_Generic_Hero");
-    i.requires_initial_placement = types.get_bool(t, "Build_Requires_Initial_Placement");
-    i.cheap_bribe_cost = int_or(types, t, "Cheap_Bribe_Cost", 1);          // mcx4 t05 (Q5.1): ctor default 1
-    i.expensive_bribe_cost = int_or(types, t, "Expensive_Bribe_Cost", 1);
+    i.cinematic_only = types.get(t, objects::tags::Cinematic_Object_Only);
+    i.always_spawn_in_orbit = types.get(t, objects::tags::Always_Spawn_In_Orbit);
+    i.super_weapon_killer = types.get(t, objects::tags::Is_Super_Weapon_Killer);
+    i.named_hero = types.get(t, objects::tags::Is_Named_Hero);
+    i.generic_hero = types.get(t, objects::tags::Is_Generic_Hero);
+    i.requires_initial_placement = types.get(t, objects::tags::Build_Requires_Initial_Placement);
+    i.cheap_bribe_cost = int_or(types, t, objects::tags::Cheap_Bribe_Cost, 1);          // mcx4 t05 (Q5.1): ctor default 1
+    i.expensive_bribe_cost = int_or(types, t, objects::tags::Expensive_Bribe_Cost, 1);
     // Required_Special_Structures: the parser keeps '|' as a token (0x53 OR markers): `A | B, C` = (A or B) and C.
     bool join = false;
-    for (std::string_view tok : types.get_list(t, "Required_Special_Structures")) {
+    for (std::string_view tok : types.get(t, objects::tags::Required_Special_Structures)) {
         tok = ascii_trim(tok);
         if (tok.empty()) continue;
         if (tok == "|") {
@@ -90,22 +86,22 @@ void extract_oi_fields(const objects::GameObjectTypes& types, objects::TypeIndex
         else i.required_special_groups.push_back({r});
         join = false;
     }
-    for (objects::TypeIndex r : types.get_type_refs(t, "Required_Orbiting_Units"))
+    for (objects::TypeIndex r : types.get_type_refs(t, objects::tags::Required_Orbiting_Units))
         if (r != objects::kNone) i.required_orbiting_units.push_back(r);
     {
-        const std::span<const std::string_view> lst = types.get_list(t, "Required_Planets");
+        const std::span<const std::string_view> lst = types.get(t, objects::tags::Required_Planets);
         std::vector<std::string_view> names(lst.begin(), lst.end());
-        if (names.empty()) names = objects::split_type_list(types.get_string(t, "Required_Planets"));
+        if (names.empty()) names = objects::split_type_list(types.get_string(t, objects::tags::Required_Planets));
         for (std::string_view n : names)
             if (!ascii_trim(n).empty()) i.required_planets.push_back(resolve_or_none(types, n));
     }
     // Defaults when a tag is absent: -1 = unlimited [L: the type constructor values were not read].
-    i.max_instances_per_planet = int_or(types, t, "Build_Max_Instances_Per_Planet", -1);
-    i.limit_lifetime = int_or(types, t, "Build_Limit_Lifetime_Per_Player", -1);
-    i.limit_current = int_or(types, t, "Build_Limit_Current_Per_Player", -1);
-    i.max_space_base = int_or(types, t, "Max_Space_Base", i.max_space_base);
-    i.ground_structure_slots = int_or(types, t, "Special_Structures_Land", -1);
-    i.orbital_structure_slots = int_or(types, t, "Special_Structures_Space", -1);
+    i.max_instances_per_planet = int_or(types, t, objects::tags::Build_Max_Instances_Per_Planet, -1);
+    i.limit_lifetime = int_or(types, t, objects::tags::Build_Limit_Lifetime_Per_Player, -1);
+    i.limit_current = int_or(types, t, objects::tags::Build_Limit_Current_Per_Player, -1);
+    i.max_space_base = int_or(types, t, objects::tags::Max_Space_Base, i.max_space_base);
+    i.ground_structure_slots = int_or(types, t, objects::tags::Special_Structures_Land, -1);
+    i.orbital_structure_slots = int_or(types, t, objects::tags::Special_Structures_Space, -1);
 }
 
 }  // namespace
@@ -362,62 +358,62 @@ std::vector<TypeInfo> extract_type_info(const objects::GameObjectTypes& types, c
     for (objects::TypeIndex t = 0; t < types.size(); ++t) {
         TypeInfo& i = out[t];
         i.name = std::string(types.raw().types().name[t]);
-        i.hyperspace = types.get_bool(t, "Hyperspace");
-        i.build_cost = types.get_int(t, "Build_Cost_Credits");
-        i.build_time_seconds = types.get_int(t, "Build_Time_Seconds");
-        i.tech_level = types.get_int(t, "Tech_Level");
-        i.required_ground_base = types.get_int(t, "Required_Ground_Base_Level");
-        i.required_star_base = types.get_int(t, "Required_Star_Base_Level");
-        i.base_level = types.get_int(t, "Base_Level");
-        i.next_level_base = resolve_or_none(types, types.get_string(t, "Next_Level_Base"));  // 0x3f8fd0 (A2M_R3_RE_A §1.2)
-        i.advances_tech = types.get_int(t, "Build_Advances_Tech_Level");
-        i.squadron_capacity = types.get_int(t, "Squadron_Capacity");
-        i.hyperspace_speed = types.get_float(t, "Hyperspace_Speed");
-        i.influence_range = types.get_float(t, "Galactic_Influence_Range");
-        i.piracy_value = types.get_float(t, "Piracy_Value_Credits");
-        i.maintenance_cost = types.get_float(t, "Maintenance_Cost");
+        i.hyperspace = types.get(t, objects::tags::Hyperspace);
+        i.build_cost = types.get(t, objects::tags::Build_Cost_Credits);
+        i.build_time_seconds = types.get(t, objects::tags::Build_Time_Seconds);
+        i.tech_level = types.get(t, objects::tags::Tech_Level);
+        i.required_ground_base = types.get(t, objects::tags::Required_Ground_Base_Level);
+        i.required_star_base = types.get(t, objects::tags::Required_Star_Base_Level);
+        i.base_level = types.get(t, objects::tags::Base_Level);
+        i.next_level_base = resolve_or_none(types, types.get(t, objects::tags::Next_Level_Base));  // 0x3f8fd0 (A2M_R3_RE_A §1.2)
+        i.advances_tech = types.get(t, objects::tags::Build_Advances_Tech_Level);
+        i.squadron_capacity = types.get(t, objects::tags::Squadron_Capacity);
+        i.hyperspace_speed = types.get(t, objects::tags::Hyperspace_Speed);
+        i.influence_range = types.get(t, objects::tags::Galactic_Influence_Range);
+        i.piracy_value = types.get(t, objects::tags::Piracy_Value_Credits);
+        i.maintenance_cost = types.get(t, objects::tags::Maintenance_Cost);
         i.ai_combat_power = types.columns().ai_combat_power[t];
-        i.prevents_story_autoresolve = types.get_bool(t, "Prevents_Story_Campaign_Autoresolve");  // mcx4 t20
-        i.fleet_reveal_range = types.get_float(t, "Hyperspace_Fleet_Reveal_Range");  // mcx4 t09 (Q3)
-        if (const objects::TypeIndex st = types.get_type_ref(t, "Respawn_Tied_To_Structure"); st != objects::kNone)
+        i.prevents_story_autoresolve = types.get(t, objects::tags::Prevents_Story_Campaign_Autoresolve);  // mcx4 t20
+        i.fleet_reveal_range = types.get(t, objects::tags::Hyperspace_Fleet_Reveal_Range);  // mcx4 t09 (Q3)
+        if (const objects::TypeIndex st = types.get(t, objects::tags::Respawn_Tied_To_Structure); st != objects::kNone)
             i.respawn_tied_to_structure = static_cast<uint32_t>(st);  // mcx4 t05 (T10 §8)
-        i.build_countdown_timer = types.get_bool(t, "Build_Countdown_Timer");  // mcx4 t09 (Q7)
-        i.build_speech_countdowns = std::string(ascii_trim(types.get_string(t, "Build_Speech_Countdowns")));
-        i.reduced_by_factories = types.get_bool(t, "Build_Time_Reduced_By_Multiple_Factories");
-        i.build_initially_locked = types.get_bool(t, "Build_Initially_Locked");
-        i.sliceable = types.get_bool(t, "Build_Can_Be_Unlocked_By_Slicer");
-        for (objects::TypeIndex r : types.get_type_refs(t, "Required_Special_Structures"))
+        i.build_countdown_timer = types.get(t, objects::tags::Build_Countdown_Timer);  // mcx4 t09 (Q7)
+        i.build_speech_countdowns = std::string(ascii_trim(types.get(t, objects::tags::Build_Speech_Countdowns)));
+        i.reduced_by_factories = types.get(t, objects::tags::Build_Time_Reduced_By_Multiple_Factories);
+        i.build_initially_locked = types.get(t, objects::tags::Build_Initially_Locked);
+        i.sliceable = types.get(t, objects::tags::Build_Can_Be_Unlocked_By_Slicer);
+        for (objects::TypeIndex r : types.get_type_refs(t, objects::tags::Required_Special_Structures))
             if (r != objects::kNone) i.required_special_structures.push_back(r);
-        const std::span<const std::string_view> aff_list = types.get_list(t, "Affiliation");
+        const std::span<const std::string_view> aff_list = types.get(t, objects::tags::Affiliation);
         std::vector<std::string_view> aff(aff_list.begin(), aff_list.end());
-        if (aff.empty()) aff = objects::split_type_list(types.get_string(t, "Affiliation"));
+        if (aff.empty()) aff = objects::split_type_list(types.get_string(t, objects::tags::Affiliation));
         for (std::string_view a : aff)
             for (size_t f = 0; f < factions.size(); ++f)
                 if (ascii_iequals(factions[f].name, a)) {
                     i.affiliation.push_back(static_cast<uint32_t>(f));
                     break;
                 }
-        i.credit_value = types.get_int(t, "Planet_Credit_Value");
-        i.destroyed_credit_value = types.get_int(t, "Planet_Destroyed_Credit_Value");
-        i.capture_bonus = types.get_int(t, "Planet_Capture_Bonus_Reward");
-        i.black_market_influences = types.get_bool(t, "Planet_Black_Market_Influences");
-        i.starbase_stealth = types.get_bool(t, "Planet_Starbase_Stealth");
-        i.groundbase_stealth = types.get_bool(t, "Planet_Groundbase_Stealth");
+        i.credit_value = types.get(t, objects::tags::Planet_Credit_Value);
+        i.destroyed_credit_value = types.get(t, objects::tags::Planet_Destroyed_Credit_Value);
+        i.capture_bonus = types.get(t, objects::tags::Planet_Capture_Bonus_Reward);
+        i.black_market_influences = types.get(t, objects::tags::Planet_Black_Market_Influences);
+        i.starbase_stealth = types.get(t, objects::tags::Planet_Starbase_Stealth);
+        i.groundbase_stealth = types.get(t, objects::tags::Planet_Groundbase_Stealth);
         i.surface_accessible =
-            types.value(t, objects::find_type_field("Planet_Surface_Accessible")) == nullptr
+            !types.is_set(t, objects::tags::Planet_Surface_Accessible)
                 ? true  // ASSUMPTION: an unset Planet_Surface_Accessible means accessible
-                : types.get_bool(t, "Planet_Surface_Accessible");
-        i.the_force = parse_force_side(types.get_string(t, "The_Force"));
-        i.force_strength = types.get_float(t, "Force_Strength");
-        i.political_control = types.get_int(t, "Political_Control");  // bkg2 b0125
-        if (const std::string_view pf = ascii_trim(types.get_string(t, "Political_Faction")); !pf.empty())
+                : types.get(t, objects::tags::Planet_Surface_Accessible);
+        i.the_force = parse_force_side(types.get(t, objects::tags::The_Force));
+        i.force_strength = types.get(t, objects::tags::Force_Strength);
+        i.political_control = types.get(t, objects::tags::Political_Control);  // bkg2 b0125
+        if (const std::string_view pf = ascii_trim(types.get(t, objects::tags::Political_Faction)); !pf.empty())
             for (size_t f = 0; f < factions.size(); ++f)
                 if (ascii_iequals(factions[f].name, pf)) {
                     i.political_faction = static_cast<uint32_t>(f);
                     break;
                 }
         {  // list code 0x3c: one (<faction name>, <int>) pair per occurrence, appended
-            const std::span<const std::string_view> mx = types.get_list(t, "Planet_Max_Political_Control_For_Faction");
+            const std::span<const std::string_view> mx = types.get(t, objects::tags::Planet_Max_Political_Control_For_Faction);
             for (size_t k = 0; k + 1 < mx.size(); k += 2)
                 for (size_t f = 0; f < factions.size(); ++f)
                     if (ascii_iequals(factions[f].name, ascii_trim(mx[k]))) {
@@ -430,22 +426,22 @@ std::vector<TypeInfo> extract_type_info(const objects::GameObjectTypes& types, c
         }
         // A2 galactic (AI_GALACTIC_3 §3, §6).
         i.population = types.columns().population_value[t];
-        i.population_capacity = types.get_int(t, "Additional_Population_Capacity");
-        i.categories = types.get_mask(t, "CategoryMask");
+        i.population_capacity = types.get(t, objects::tags::Additional_Population_Capacity);
+        i.categories = types.get(t, objects::tags::CategoryMask);
         if (const auto sup = types.enums().get(objects::EnumId::GameObjectCategory).lookup("Super"))
             i.super = (i.categories & static_cast<uint64_t>(*sup)) != 0;  // mcx4 t09 (Q3, 0x375270)
-        i.movement_class = types.get_enum(t, "MovementClass");
-        for (std::string_view m : types.get_list(t, "Company_Units")) {  // a company: its first member's class
+        i.movement_class = types.get(t, objects::tags::MovementClass);
+        for (std::string_view m : types.get(t, objects::tags::Company_Units)) {  // a company: its first member's class
             const objects::TypeIndex mt = types.resolve_name(ascii_trim(m));
-            if (mt != objects::kNone) i.movement_class = types.get_enum(mt, "MovementClass");
+            if (mt != objects::kNone) i.movement_class = types.get(mt, objects::tags::MovementClass);
             break;
         }
         {
-            const std::string terrain(types.get_string(t, "Terrain"));
+            const std::string terrain(types.get(t, objects::tags::Terrain));
             i.terrain = terrain_id(ascii_trim(terrain));
         }
-        i.restricted_categories = types.get_mask(t, "Planet_Restricted_Unit_Categories");
-        for (objects::TypeIndex r : types.get_type_refs(t, "Planet_Restricted_Unit_Types"))
+        i.restricted_categories = types.get(t, objects::tags::Planet_Restricted_Unit_Categories);
+        for (objects::TypeIndex r : types.get_type_refs(t, objects::tags::Planet_Restricted_Unit_Types))
             if (r != objects::kNone) i.restricted_types.push_back(r);
         extract_oi_fields(types, t, i);  // OI galactic (STRATEGIC_GAPS 1.2 / 1.3 / 1.7)
         i.kind = galactic_unit_kind(i.dummy, has_planet_behavior(types, static_cast<uint32_t>(t)));  // mcx1 t05 (D4)
@@ -454,7 +450,7 @@ std::vector<TypeInfo> extract_type_info(const objects::GameObjectTypes& types, c
     for (objects::TypeIndex t = 0; t < types.size(); ++t) {
         for (uint32_t m : out[t].company_units)
             if (m < out.size()) out[m].company_member = true;
-        for (objects::TypeIndex m : types.get_type_refs(t, "Squadron_Units"))
+        for (objects::TypeIndex m : types.get_type_refs(t, objects::tags::Squadron_Units))
             if (m != objects::kNone && m < out.size()) out[m].squadron_member = true;
     }
     return out;

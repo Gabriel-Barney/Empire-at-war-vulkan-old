@@ -49,10 +49,9 @@ int64_t type_bounty(const BountyTable& table, const objects::GameObjectTypes& ty
     if (t >= types.size()) return 0;
     // Override_Bounty_SP / _MP are float fields (parser kind 0x8, A2M_R2_RE_B section 2.2), read through the typed view
     // (bkc1 t07 fixed get_int / get_float for float-parsed fields). Absent = negative = category default.
-    const std::string_view tag = skirmish ? "Override_Bounty_MP" : "Override_Bounty_SP";
-    const objects::FieldId f = objects::find_type_field(tag);
-    const bool has_override = types.value(t, f) != nullptr;
-    return bounty_of(table, has_override, has_override ? types.get_float(t, tag) : -1.0f, types.get_mask(t, "CategoryMask"));
+    const objects::FloatTag& k = skirmish ? objects::tags::Override_Bounty_MP : objects::tags::Override_Bounty_SP;
+    const bool has_override = types.is_set(t, k);
+    return bounty_of(table, has_override, has_override ? types.get(t, k) : -1.0f, types.get(t, objects::tags::CategoryMask));
 }
 
 }  // namespace alamo::galactic

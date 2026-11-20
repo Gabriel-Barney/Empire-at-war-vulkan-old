@@ -1,5 +1,5 @@
 # String tag reads per sim file (tools/lint/check_tag_reads.py, ref6 t01). Only goes down; target 0.
-# total 647
+# total 555
 engine/ai/src/galactic_ai.cpp 17
 engine/ai/src/galactic_seed.cpp 1
 engine/anim/src/type_params.cpp 17
@@ -27,10 +27,7 @@ engine/apps/sim/src/tactical_battle_retreat.cpp 3
 engine/apps/sim/src/tactical_battle_skirmish.cpp 1
 engine/apps/sim/src/tactical_battle_spawners.cpp 17
 engine/apps/sim/src/tactical_battle_victory.cpp 2
-engine/galactic/src/bounty.cpp 1
-engine/galactic/src/conflicts.cpp 12
-engine/galactic/src/galactic_rules.cpp 60
-engine/galactic/src/special_rules.cpp 20
+engine/galactic/src/galactic_rules.cpp 1
 engine/lua/src/bind_objects.cpp 2
 engine/lua/src/bind_players.cpp 1
 engine/tactical/garrison/src/cash_point.cpp 6
