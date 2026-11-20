@@ -2003,6 +2003,39 @@ void test_land_obstacle_and_weapon_index() {
         CHECK(t.w.sys->set_weapon_index(2, 1) && t.w.sys->current_weapon_projectile(2) == -1 && t.w.sys->weapon_set_count(2) == 0);
         CHECK(!t.w.sys->set_weapon_index(1, -1) && !t.w.sys->set_weapon_index(99, 0));
     }
+    {  // aitac t06 (AI_TACTICAL §8.1, 0x580c50): Should_Switch_Weapons - the current entry's Projectile_Damage against every
+       // other entry's max(Projectile_Damage, Projectile_Blast_Area_Damage), the target's armour (factor 1 here); strict
+        TargetWorld t;
+        ProjectileDesc weak, strong;
+        weak.damage = 10.0f;
+        strong.damage = 30.0f;
+        const auto wi = static_cast<int32_t>(t.w.data.projectiles.size());
+        t.w.data.projectiles.push_back(weak);
+        t.w.data.projectiles.push_back(strong);
+        UnitDesc a = t.w.data.units[t.attacker];
+        a.weapon_projectiles = {wi, wi + 1};
+        const uint32_t ad = push_unit(t.w.data, a);
+        t.w.make();
+        t.w.add(1, ad, 0, Vec3{0, 0, 0});
+        t.w.add(2, t.attacker, 1, Vec3{100, 0, 0});
+        CHECK(t.w.sys->should_switch_weapons(2, kNoObject) == 0);  // fewer than two entries: false before the arguments
+        CHECK(t.w.sys->should_switch_weapons(1, kNoObject) == 2);
+        CHECK(t.w.sys->should_switch_weapons(1, 2) == 1);          // firing 10, another does 30
+        CHECK(t.w.sys->set_weapon_index(1, 1) && t.w.sys->should_switch_weapons(1, 2) == 0);  // firing 30
+        CHECK(t.w.sys->set_weapon_index(1, 5) && t.w.sys->should_switch_weapons(1, 2) == -1);  // index outside: no value
+        TargetWorld u;  // the same unit with blast damage on the weak entry: an alternative scores its blast damage
+        u.w.data.projectiles.push_back(weak);
+        u.w.data.projectiles.back().blast_area_damage = 50.0f;
+        u.w.data.projectiles.push_back(strong);
+        UnitDesc b2 = u.w.data.units[u.attacker];
+        b2.weapon_projectiles = {wi, wi + 1};
+        const uint32_t bd = push_unit(u.w.data, b2);
+        u.w.make();
+        u.w.add(1, bd, 0, Vec3{0, 0, 0});
+        u.w.add(2, u.attacker, 1, Vec3{100, 0, 0});
+        CHECK(u.w.sys->set_weapon_index(1, 1) && u.w.sys->should_switch_weapons(1, 2) == 1);  // 30 < max(10, 50)
+        CHECK(u.w.sys->set_weapon_index(1, 0) && u.w.sys->should_switch_weapons(1, 2) == 1);  // current scores 10 only (not 50)
+    }
 }
 }  // namespace bo3split
 

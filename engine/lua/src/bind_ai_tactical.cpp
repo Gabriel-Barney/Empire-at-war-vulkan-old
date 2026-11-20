@@ -8,6 +8,8 @@
 #include <vector>
 
 #include "alamo/lua/ai_tactical_bridge.hpp"
+#include "alamo/lua/object_bridge.hpp"
+#include "alamo/lua/script_remaining.hpp"
 #include "alamo/core/ascii.hpp"
 #include "vm_internal.hpp"
 
@@ -352,10 +354,37 @@ int m_is_good_against(Call& c) {
     return push_bool(c, h && h->is_good_against(detail::object_handle(*c.self), a.object) == 1);
 }
 
-// unit.Should_Switch_Weapons(target): body not traced (AI_TACTICAL.md open item 6) -> false [port].
+// aitac t06 (AI_TACTICAL §8.1, 0x580c50): unit.Should_Switch_Weapons(target) - would another entry of my Projectile_Types
+// do more damage to the target's current defence layer than the one I fire now (the battle's
+// RemainingScriptHooks::should_switch_weapons; [port] false without the hook). Order: no object -> nothing; fewer than two
+// entries -> false before any argument test; the argument count and type errors; a dead target or an AI target with no
+// object -> error; then the score.
 int m_should_switch_weapons(Call& c) {
-    if (!detail::object_alive(*c.vm, *c.self)) return c.script_error_stop("GameObjectWrapper::Should_Switch_Weapons -- this object is dead!");
-    return push_bool(c, false);
+    constexpr const char* kName = "GameObjectWrapper::Should_Switch_Weapons";
+    if (!detail::object_alive(*c.vm, *c.self)) return 0;  // step 1: no object behind the wrapper -> no value
+    const objects::ObjectHandle self = detail::object_handle(*c.self);
+    ObjectBridge* b = c.vm->owner ? attached_object_bridge(*c.vm->owner) : nullptr;
+    RemainingScriptHooks* hk = b ? b->remaining : nullptr;
+    if (!hk || !hk->should_switch_weapons) return push_bool(c, false);
+    if (hk->should_switch_weapons(self, objects::ObjectHandle{}) == 0) return push_bool(c, false);  // steps 2-3
+    if (c.nargs != 1) return c.script_error_stop("%s -- invalid number of parameters.  Expected 1, got %d.", kName, c.nargs);
+    AiArg a;
+    AiPoint p;
+    arg_of(c, 1, a, p);
+    objects::ObjectHandle target = a.object;
+    if (!a.present || (!a.object && a.target < 0))
+        return c.script_error_stop("%s -- invalid type for parameter 1.  Expected object or ai target.", kName);
+    if (!a.object) {
+        AiScriptHost* h = c.vm && c.vm->owner ? ai_host(*c.vm->owner) : nullptr;
+        target = h ? h->target_object(a.target) : objects::ObjectHandle{};
+        if (!target)
+            return c.script_error_stop("%s -- ai target %d does not represent a game object (requried for this function).", kName, a.target);
+    }
+    const objects::ObjectStore* st = c.vm->host.store;
+    if (!st || !st->alive(target)) return c.script_error_stop("%s -- target is already dead.", kName);
+    const int32_t r = hk->should_switch_weapons(self, target);
+    if (r < 0) return 0;  // the current index is outside the list: no value
+    return push_bool(c, r == 1);
 }
 
 constexpr BindingKind G = BindingKind::Global;

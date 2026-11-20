@@ -1685,6 +1685,11 @@ public:
     int32_t weapon_index(ObjectId id) const;
     size_t weapon_set_count(ObjectId id) const;            // UnitDesc::weapon_projectiles size
     int32_t current_weapon_projectile(ObjectId id) const;  // Lua Get_Current_Projectile_Type: list entry, -1 outside
+    // aitac t06 (AI_TACTICAL §8.1, 0x580c50 steps 3 / 7-10): Lua Should_Switch_Weapons of unit `self` against `target`
+    // (both combat units; TEAM containers are resolved by the host). 0 false, 1 true, -1 no value (the current index is
+    // outside the list). With `target` kNoObject: 0 when self has fewer than two Projectile_Types entries (the answer
+    // before any argument test), else 2.
+    int32_t should_switch_weapons(ObjectId self, ObjectId target) const;
     int32_t priority_set_index(std::string_view name) const;  // case-insensitive, -1 unknown
     // Land stun (0x647290, TACTICAL_GAPS §1.10): weapons disabled, targeting / locomotor suspended, STUNNABLE end
     // frame := now + frames (assignment, not extended). Only STUNNABLE units; false otherwise. The release at the end

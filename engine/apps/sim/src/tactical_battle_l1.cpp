@@ -975,6 +975,26 @@ std::vector<objects::TypeIndex> TacticalBattle::projectile_types(objects::Object
     return out;
 }
 
+int32_t TacticalBattle::should_switch_weapons(objects::ObjectId self, objects::ObjectId target) const {
+    if (!combat_) return 0;
+    // a TEAM container answers for its first live member; an empty team: kNoObjectId (-> 0)
+    const auto member = [this](objects::ObjectId id) {
+        for (size_t c = 0; c < containers_.size(); ++c)
+            if (containers_[c].id == id) {
+                for (const Unit& u : units_)
+                    if (u.container == c && u.alive && !u.retreated) return u.id;
+                return objects::kNoObjectId;
+            }
+        return id;
+    };
+    const objects::ObjectId s = member(self);
+    if (s == objects::kNoObjectId) return 0;
+    if (target == objects::kNoObjectId) return combat_->should_switch_weapons(s, tactical::combat::kNoObject);
+    const objects::ObjectId t = member(target);
+    if (t == objects::kNoObjectId) return 0;
+    return combat_->should_switch_weapons(s, t);
+}
+
 objects::TypeIndex TacticalBattle::current_projectile(objects::ObjectId id) const {
     if (!l1_mode_) return objects::kNone;
     const objects::ObjectStore& st = l1_mode_->primary();

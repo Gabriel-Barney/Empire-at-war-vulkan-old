@@ -756,6 +756,38 @@ int32_t CombatSystem::current_weapon_projectile(ObjectId id) const {
     return ud.weapon_projectiles[static_cast<size_t>(u->weapon_index)];
 }
 
+int32_t CombatSystem::should_switch_weapons(ObjectId self, ObjectId target) const {
+    const Unit* u = unit(self);
+    if (!u) return 0;
+    const UnitDesc& ud = desc_of(*u);
+    if (ud.weapon_projectiles.size() < 2) return 0;  // step 3: fewer than two entries -> false
+    if (target == kNoObject) return 2;
+    const Unit* t = unit(target);
+    if (!t) return 0;
+    const UnitDesc& td = desc_of(*t);
+    // step 7: the target's current defence layer
+    const bool shields = shield_fraction(target) > 0.0f;
+    const uint16_t armor = shields ? td.shield_armor_type : td.armor_type;
+    const auto counts = [shields](const ProjectileDesc& p) { return shields ? p.does_shield_damage : p.does_hitpoint_damage; };
+    // step 8: the current entry, Projectile_Damage only
+    if (u->weapon_index < 0 || static_cast<size_t>(u->weapon_index) >= ud.weapon_projectiles.size()) return -1;
+    const auto cur_at = static_cast<size_t>(u->weapon_index);
+    float cur = 0.0f;
+    if (const int32_t pi = ud.weapon_projectiles[cur_at]; pi >= 0) {
+        const ProjectileDesc& p = data_->projectiles[static_cast<size_t>(pi)];
+        if (counts(p)) cur = p.damage * data_->damage.factor(p.damage_type, armor);
+    }
+    // step 9: every other entry, the larger of direct and blast-area damage; a strictly better one -> true
+    for (size_t j = 0; j < ud.weapon_projectiles.size(); ++j) {
+        const int32_t pi = ud.weapon_projectiles[j];
+        if (j == cur_at || pi < 0) continue;
+        const ProjectileDesc& p = data_->projectiles[static_cast<size_t>(pi)];
+        if (!counts(p)) continue;
+        if (cur < std::max(p.damage, p.blast_area_damage) * data_->damage.factor(p.damage_type, armor)) return 1;
+    }
+    return 0;  // step 10
+}
+
 int32_t CombatSystem::priority_set_index(std::string_view name) const {
     for (size_t i = 0; i < data_->priority_sets.size(); ++i)
         if (iequals(data_->priority_sets[i].name, name)) return static_cast<int32_t>(i);

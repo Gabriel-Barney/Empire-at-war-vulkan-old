@@ -2192,6 +2192,9 @@ void CampaignBattles::l1_hooks(SimHost& host) {
     r.time_till_dead = [this, id_of](objects::ObjectHandle u) { return battle_ ? battle_->time_till_dead(id_of(u)) : -1.0; };
     r.final_blow_player = [this, id_of](objects::ObjectHandle o) { return battle_ ? battle_->final_blow_player(id_of(o)) : -1; };
     r.current_projectile = [this, id_of](objects::ObjectHandle u) { return battle_ ? battle_->current_projectile(id_of(u)) : objects::kNone; };
+    r.should_switch_weapons = [this, id_of](objects::ObjectHandle u, objects::ObjectHandle t) {  // aitac t06
+        return battle_ ? battle_->should_switch_weapons(id_of(u), t ? id_of(t) : objects::kNoObjectId) : int32_t{0};
+    };
     r.orbital_bombardment = [this, h](int32_t player, Vec3 p) {
         TacticalMode* tm = h->tactical();
         return battle_ && tm && battle_->start_bombardment(*tm, player, p, h->random().synced());

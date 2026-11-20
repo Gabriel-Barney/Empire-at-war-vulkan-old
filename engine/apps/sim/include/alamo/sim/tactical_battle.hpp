@@ -1206,6 +1206,11 @@ public:
     // list (S8 t12). TEAM containers answer for their first live member (none for an empty team).
     std::vector<objects::TypeIndex> projectile_types(objects::ObjectId id) const;
     objects::TypeIndex current_projectile(objects::ObjectId id) const;
+    // aitac t06 (AI_TACTICAL §8.1): Lua Should_Switch_Weapons (lua::RemainingScriptHooks::should_switch_weapons): `self`
+    // and `target` (kNoObjectId: the before-the-arguments answer) as CombatSystem::should_switch_weapons, each TEAM
+    // container replaced by its first live member (an empty team: 0). [port] The current index is the member's (retail
+    // reads the container's obj +0x324; open [M] whether they differ).
+    int32_t should_switch_weapons(objects::ObjectId self, objects::ObjectId target) const;
     // Are_On_Opposite_Sides_Of_Shield (§1.2): an active BASE_SHIELD with Base_Shield_Radius > 0 that holds exactly one
     // of the points strictly inside (3-D); with `player` >= 0 only shields whose friendliness to it equals `friendly`.
     // tru1 t02: "active" = combat's BASE_SHIELD state is on; a caller passing `shield_damage` false (a shot that does no
@@ -2911,10 +2916,16 @@ private:
         uint32_t container = 0xFFFFFFFFu;  // containers_ index of a container record
         int32_t timer = 0;
         bool composes = false;
+        // aitac t05 (AI_TACTICAL §7.4.1): a space reinforcement's arrival (0x2bf2d0 -> vf82(1): state 4 from timer 0, no
+        // draw); at its end the participant's units are reported as one LandingUnload (the AI's signal 0x19). -1: the start
+        // fleet's arrival (cu8l t03).
+        int32_t reinforce = -1;  // participants_ index
     };
     static constexpr int32_t kArrivalState5 = -2, kArrivalState4 = -1;
     std::vector<ArrivalRec> arrivals_;  // saved (battle state version 11)
     void arrival_service(TacticalMode& mode, SimRng& rng);  // tick: after the L1 motion services, before step 10
+    void space_reinforce_arrivals(size_t first, uint32_t participant);  // aitac t05: units_[first..] start the arrival
+    void space_reinforce_arrived(uint32_t participant);                 // aitac t05: the 0x19 record when none is left
     bool arrival_locked(objects::ObjectId key) const;        // MovementSystem::set_locked_fn
     uint32_t state_io_version_ = 0;  // the battle state version state_io reads (0: the current one)
     void saber_throw_service(TacticalMode& mode);

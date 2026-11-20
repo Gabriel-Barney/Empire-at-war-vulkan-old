@@ -1988,13 +1988,17 @@ void TacticalBattle::arrival_service(TacticalMode& mode, SimRng& rng) {
     std::vector<ArrivalRec> keep;
     keep.reserve(arrivals_.size());
     std::vector<objects::ObjectId> one;
+    std::vector<uint32_t> finished;  // aitac t05: reinforcement participants whose unit finished its arrival this tick
     for (ArrivalRec& r : arrivals_) {
         if (r.container != 0xFFFFFFFFu) {
             keep.push_back(r);
             continue;
         }
         const Unit* u = unit_by_id(r.id);
-        if (!u || !u->alive || u->retreated || !st.alive(u->h)) continue;
+        if (!u || !u->alive || u->retreated || !st.alive(u->h)) {
+            if (r.reinforce >= 0) finished.push_back(static_cast<uint32_t>(r.reinforce));
+            continue;
+        }
         if (r.timer == kArrivalState5) {
             r.timer = kArrivalState4;
         } else if (r.timer == kArrivalState4) {
@@ -2004,6 +2008,7 @@ void TacticalBattle::arrival_service(TacticalMode& mode, SimRng& rng) {
                 one.assign(1, r.id);
                 if (movement_->hold_from_birth(one)) ++stats_.fleet_arrival_ends;
             }
+            if (r.reinforce >= 0) finished.push_back(static_cast<uint32_t>(r.reinforce));
             continue;
         }
         // aud1 t05 (AUDIO.md §9.6): the arrival sound at state 4's timer 35 (presentation log, no sim reader).
@@ -2013,6 +2018,7 @@ void TacticalBattle::arrival_service(TacticalMode& mode, SimRng& rng) {
     }
     arrivals_.swap(keep);
     keep.clear();
+    for (const uint32_t p : finished) space_reinforce_arrived(p);
     for (const ArrivalRec& r : arrivals_) {
         if (r.container == 0xFFFFFFFFu) {
             keep.push_back(r);
@@ -2034,6 +2040,45 @@ void TacticalBattle::arrival_service(TacticalMode& mode, SimRng& rng) {
         if (any && movement_ && !live.empty() && movement_->hold_from_birth(live)) ++stats_.fleet_arrival_ends;  // 0x630390: lock -1, new coordinator
     }
     arrivals_.swap(keep);
+}
+
+// aitac t05 (AI_TACTICAL §7.4.1 [H]): a space reinforcement (0x2bf2d0) calls the new unit's locomotor vf82(1): the
+// hyperspace arrival from state 4 with the timer at 0 (no draw, unlike the start fleet's vf82(0)); the ship leaves its
+// coordinator (movement-locked) until the finish at the 150th update gives it a new one holding its position, and the
+// finish raises signal 0x19 for the AI's reinforce block (a squadron: from its container after the last fighter).
+// [port] The arrival's hidden / INVULNERABLE window (to timer 35) is not modelled; the 0x19 record names every unit of
+// the participant once none of its arrivals is left (LandingUnload with no landing object).
+void TacticalBattle::space_reinforce_arrivals(size_t first, uint32_t participant) {
+    bool any = false;
+    for (size_t k = first; k < units_.size(); ++k) {
+        const Unit& u = units_[k];
+        const std::string_view loco = mv_locomotor_token(u.type);
+        const bool ship = ascii_iequals(loco, "SIMPLE_SPACE_LOCOMOTOR");
+        if (!ship && !ascii_iequals(loco, "FIGHTER_LOCOMOTOR")) continue;
+        if (ship && movement_ && u.movable) (void)movement_->stop_and_leave(u.id);
+        ArrivalRec r;
+        r.id = u.id;
+        r.timer = 0;
+        r.composes = ship && u.container == 0xFFFFFFFFu;
+        r.reinforce = static_cast<int32_t>(participant);
+        arrivals_.push_back(r);
+        any = true;
+    }
+    if (!any) space_reinforce_arrived(participant);  // nothing arrives through the state machine: the record at once
+}
+
+void TacticalBattle::space_reinforce_arrived(uint32_t participant) {
+    for (const ArrivalRec& r : arrivals_)
+        if (r.reinforce == static_cast<int32_t>(participant)) return;
+    if (participant >= parts_.size()) return;
+    const Participant& p = parts_[participant];
+    LandingUnload rec;
+    rec.galactic_id = p.galactic_id;
+    rec.owner = p.owner;
+    rec.carried_type = p.type;
+    for (const Unit& u : units_)
+        if (u.participant == participant && u.alive && !u.retreated) rec.units.push_back(u.id);
+    landings_unloaded_.push_back(std::move(rec));
 }
 
 // ---- build pads: attachment bone, kill list, persistence (REMAINING_GAPS §6.5) --------------------------------------

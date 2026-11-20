@@ -296,6 +296,9 @@ BattleAi::BattleAi(TacticalBattle& battle, TacticalMode& mode, SimHost& host, co
         r.final_blow_player = [bt, bid](objects::ObjectHandle o) { return bt->final_blow_player(bid(o)); };
         r.projectile_types = [bt, bid](objects::ObjectHandle u) { return bt->projectile_types(bid(u)); };
         r.current_projectile = [bt, bid](objects::ObjectHandle u) { return bt->current_projectile(bid(u)); };
+        r.should_switch_weapons = [bt, bid](objects::ObjectHandle u, objects::ObjectHandle t) {  // aitac t06
+            return bt->should_switch_weapons(bid(u), t ? bid(t) : objects::kNoObjectId);
+        };
         r.energy = [bt, bid](objects::ObjectHandle u) {
             const objects::ObjectId id = bid(u);
             return bt->combat().has_unit(id) ? bt->combat().energy(id) : -1.0f;
@@ -461,6 +464,10 @@ void BattleAi::wrap_lane_hooks() {
         if (!lane_view()) return f(u);
         const LaneView::L1Obj* o = view_l1(vid(u));
         return o ? o->cur_proj : objects::kNone;
+    };
+    // aitac t06 [port]: with the AI lane the answer is false (the combat state it reads is not in the lane view)
+    r.should_switch_weapons = [this, f = r.should_switch_weapons](objects::ObjectHandle u, objects::ObjectHandle t) {
+        return lane_view() ? int32_t{0} : f(u, t);
     };
     r.energy = [this, vid, f = r.energy](objects::ObjectHandle u) {
         if (!lane_view()) return f(u);
@@ -1497,6 +1504,18 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
             if (cx >= map->terrain.width || cy >= map->terrain.height) return true;
             if (!map->passability_present) return false;
             return (map->passability_at(cx, cy) & (terrain::kPassSteep | terrain::kPassWater)) != 0u;
+        };
+    }
+    if (!b_->space_ && !w.point_explore_blocked) {  // aitac t07: Explore_Area's cell test (0x26)
+        const terrain::MapData* map = &b_->map_;
+        w.point_explore_blocked = [map](float x, float y) {
+            const float fx = (x + 10.0f) / 20.0f, fy = (y + 10.0f) / 20.0f;
+            if (!(fx > -1.0f) || !(fy > -1.0f) || !(fx < 65536.0f) || !(fy < 65536.0f)) return true;
+            const auto cx = static_cast<uint32_t>(static_cast<int32_t>(fx));
+            const auto cy = static_cast<uint32_t>(static_cast<int32_t>(fy));
+            if (cx >= map->terrain.width || cy >= map->terrain.height) return true;
+            if (!map->passability_present) return false;
+            return (map->passability_at(cx, cy) & (terrain::kPassSteep | terrain::kPassObstacle | terrain::kPassWater)) != 0u;
         };
     }
     // A1_READINGS §30.3: game type in {1..4} = skirmish / MP. [port] no MP; the port's skirmish battles are game type 3.
@@ -3337,6 +3356,11 @@ bool BattleAi::landing_in_flight(int32_t player, int32_t key) const {
     for (const TacticalBattle::Landing& l : b_->landings_) {
         const TacticalBattle::Participant& p = b_->parts_[l.participant];
         if (l.timed && l.state != 3 && p.owner == player && p.galactic_id == key) return true;
+    }
+    for (const TacticalBattle::ArrivalRec& r : b_->arrivals_) {  // aitac t05: a space reinforcement still arriving
+        if (r.reinforce < 0 || static_cast<size_t>(r.reinforce) >= b_->parts_.size()) continue;
+        const TacticalBattle::Participant& p = b_->parts_[static_cast<size_t>(r.reinforce)];
+        if (p.owner == player && p.galactic_id == key) return true;
     }
     return false;
 }

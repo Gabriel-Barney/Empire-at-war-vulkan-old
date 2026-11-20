@@ -47,7 +47,9 @@ struct TfRec {
 
 // Ambush: S7 t21 SpaceAmbushBlockStatus (AI_TACTICAL §7.3.1); Ability: S7 t15 A1 AbilityBlockStatus of the task-force
 // Activate_Ability (MOVEMENT §3.1.1 step 6). Reinforce: a1j t01 land ReinforceBlockStatus with landings in flight.
-enum class StatusKind : uint8_t { Done, Failed, ProduceForce, Move, AttackTarget, Guard, SpaceReinforce, Ambush, Ability, Reinforce };
+// Explore: aitac t07 ExploreAreaBlockStatus (L1_S4_REMAINING §2.3.1): `members` = the unit list (+0x40), `target` = the AI
+// target slot (+0x48), `plan_frame` = the start frame (+0x54), `lists` = pick again (+0x50); `unit` the one-unit form.
+enum class StatusKind : uint8_t { Done, Failed, ProduceForce, Move, AttackTarget, Guard, SpaceReinforce, Ambush, Ability, Reinforce, Explore };
 
 struct StatusRec {
     int32_t id = -1;
@@ -214,7 +216,7 @@ template <class Ar, Of<StatusRec> R>
 void visit(Ar& ar, R& s) {
     ar.field(s.plan, In::Save);
     ar.field(s.tf, In::Save);
-    ar.enumeration(s.kind, StatusKind::Reinforce, In::Save);
+    ar.enumeration(s.kind, StatusKind::Explore, In::Save);  // Explore: aitac t07
     ar.field(s.finished);
     ar.enumeration(s.result, lua::AiStatusResult::False);
     ar.field(s.started, In::Save);

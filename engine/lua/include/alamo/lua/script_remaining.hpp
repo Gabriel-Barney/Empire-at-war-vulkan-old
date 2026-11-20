@@ -122,6 +122,9 @@ struct RemainingScriptHooks {
     std::function<std::vector<objects::TypeIndex>(objects::ObjectHandle unit)> projectile_types;
     // Current projectile type (kNone = unknown -> the first of the list above).
     std::function<objects::TypeIndex(objects::ObjectHandle unit)> current_projectile;
+    // aitac t06 (AI_TACTICAL §8.1): Should_Switch_Weapons(target): 0 false, 1 true, -1 no value; a null `target` asks the
+    // before-the-arguments test (0: fewer than two Projectile_Types entries -> false; 2: go on). Unset: false [port].
+    std::function<int32_t(objects::ObjectHandle unit, objects::ObjectHandle target)> should_switch_weapons;
     // Get_Energy (§2.12: tactical only, a fraction 0..1): energy (absolute pool) divided by Energy_Capacity; < 0 = no
     // pool / unknown. Unset: 1 for a type with Energy_Capacity > 0, else 0 [port].
     std::function<float(objects::ObjectHandle unit)> energy;

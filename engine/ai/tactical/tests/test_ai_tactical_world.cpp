@@ -606,6 +606,26 @@ function MainForce_Thread()
   Report(string.format("AMRESULT player=%d res=%s valid=%s", PlayerObject.Get_ID(), tostring(res), tostring(TestValid(Target))))
 end
 )";
+// aitac t07 (L1_S4_REMAINING §2.3.1, variant 12): the task force explores its target's area.
+const char* kPlanExplore = R"(
+require("SynAICommands")
+function Report(m) error(m) end
+ScriptPoolCount = 1
+function Definitions()
+  Category = "Syn_Destroy_Unit"
+  TaskForce = { { "MainForce", "Frigate | Corvette = 2,3" } }
+end
+function MainForce_Thread()
+  if Reported then
+    while true do Sleep(10) end
+  end
+  BlockOnCommand(MainForce.Produce_Force())
+  if not TestValid(Target) then ScriptExit() end
+  local res = BlockOnCommand(MainForce.Explore_Area(Target), 10)
+  Reported = true
+  Report(string.format("EXRESULT player=%d res=%s", PlayerObject.Get_ID(), tostring(res)))
+end
+)";
 // mcx6 t06 (LUA_API.md "Task force: Enable_Attack_Positioning", variant 11, land): the land task force sets the UnitAI
 // attack-positioning flag on its members, then attack-moves on the target; Release_Reinforcements on the accepted plan.
 const char* kPlanAttackPos = R"(
@@ -684,6 +704,7 @@ struct MockUnit {
 // have the land evaluator) and, variant 6, a Move_To(Target, 5000) before the ambushes (test_prepare_ambush_land).
 bool g_station_outside_grid = false;  // skai t22: the stations carry PerceptionObject::no_owner_list
 bool g_land = false;
+bool g_explore_fog = false;  // aitac t07: the mock fogs every point (test_explore_area)
 // a1j t01: land landings in the mock (g_land runs): 0 off (Reinforce spawns at once), 1 a Reinforce unloads its unit
 // kLandingDelay frames later with a signal 0x19 record, 2 the landing dies before its unit is out (a record without units).
 int g_landing = 0;
@@ -853,6 +874,7 @@ public:
 
     // ---- TacticalAiHost ----
     void fill(PerceptionWorld& w, std::vector<TacticalAiObject>& f) override {
+        if (g_explore_fog && !w.point_fogged) w.point_fogged = [](int32_t, float, float) { return true; };  // aitac t07
         if (w.types.empty()) {
             w.mode = g_land ? TacticalMode::Land : TacticalMode::Space;
             w.map = {-4000.0f, -4000.0f, 4000.0f, 4000.0f};
@@ -1384,6 +1406,7 @@ RunResult run(int32_t frames, int32_t difficulty0, int variant = 0, std::vector<
     if (variant == 7) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", kPlanAbility);
     if (variant == 10) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", kPlanAttackResult);  // q6 t19
     if (variant == 11) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", kPlanAttackPos);     // mcx6 t06
+    if (variant == 12) files.add("Data\\Scripts\\AI\\SpaceMode\\SynDestroy.lua", kPlanExplore);       // aitac t07
     if (variant == 8) files.add("Data\\Scripts\\AI\\LandMode\\SynLandOnly.lua", kPlanLanding);  // replaces kPlanLandOnly
     if (variant == 9) {  // a1k t01
         files.add("Data\\Scripts\\AI\\SpaceMode\\SynSweep.lua", kPlanCollect);
@@ -3222,6 +3245,27 @@ void test_story_world() {
     CHECK(plans_before > 0 && plans_at_drain < plans_before);
 }
 
+// aitac t07 (L1_S4_REMAINING §2.3.1): Explore_Area picks a fogged threat cell of the target's area (a unit target: the square
+// of half-side its max attack range; every cell never seen, so the first in scan order) and moves the task force there; with
+// nothing fogged no cell qualifies and the block finishes at once with true, no move.
+void test_explore_area() {
+    const RunResult clear = run(30 * 40, 1, 12);
+    g_explore_fog = true;
+    const RunResult fog = run(30 * 40, 1, 12);
+    g_explore_fog = false;
+    std::string rep;
+    for (const std::string& e : clear.errors)
+        if (rep.empty() && e.find("EXRESULT player=") != std::string::npos) rep = e;
+    const size_t moves_clear = count_decisions(clear, "explore area to ("), moves_fog = count_decisions(fog, "explore area to (");
+    std::printf("explore area: no fog %zu move(s), %s; all fogged %zu move(s)\n", moves_clear, rep.empty() ? "(no report)" : rep.c_str(),
+                moves_fog);
+    for (const std::string& d : fog.decisions)
+        if (d.find("p0 ") != std::string::npos && (d.find("MainForce") != std::string::npos || d.find("explore") != std::string::npos))
+            std::printf("    DBG %s\n", d.c_str());
+    CHECK(moves_clear == 0 && rep.find("res=true") != std::string::npos);
+    CHECK(moves_fog >= 1);
+}
+
 // S7 t27 (AI_TACTICAL §7.3.3 item 5): the land Prepare_Ambush step = Land_FOW_Reveal_Range x weather sight factor (not a
 // terrain factor), else the max attack range; <= 0 -> no walk.
 // S7 t26 (AI_TACTICAL §7.3.3 item 4): No_Units_Remaining fires when every remaining entry is a hero / special weapon.
@@ -3614,6 +3658,7 @@ int main(int argc, char** argv) {
     test_ability_order_replaced();  // S7 t26
     test_story_world();             // aitac t01
     test_block_new_order_signals();  // aitac t05
+    test_explore_area();             // aitac t07
     test_no_units_remaining_heroes();  // S7 t26
     test_ability_finished();
     test_save_load(6, 30 * 4, 30 * 40);  // an ambush block in flight (member / moving lists, plan frame)

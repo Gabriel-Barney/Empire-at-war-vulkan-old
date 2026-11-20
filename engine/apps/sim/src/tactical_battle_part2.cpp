@@ -478,6 +478,7 @@ cmd::RejectReason TacticalBattle::order_reinforce(TacticalMode& mode, uint8_t pl
                 // mcx4 tac2 (MCX4_T10_RE_ANSWERS §16a [H]): 0x2bf2d0 ends with Apply_Elevated_Vulnerability on the arriving
                 // object, or on each member of its team container; not gated.
                 for (size_t k = first; k < units_.size(); ++k) apply_elevated_vulnerability(units_[k].id);
+                space_reinforce_arrivals(first, i);  // aitac t05
                 ++stats_.reinforcements;
                 return R::None;
             }
@@ -492,8 +493,10 @@ cmd::RejectReason TacticalBattle::order_reinforce(TacticalMode& mode, uint8_t pl
         deploy(mode, i, rng);
         anchor_[p.side] = save_anchor;
         placed_[p.side] = save_placed;
-        if (space_)  // mcx4 tac2: the space drop 0x2bf2d0 (above) [port: the row-of-6 fallback placement]
+        if (space_) {  // mcx4 tac2: the space drop 0x2bf2d0 (above) [port: the row-of-6 fallback placement]
             for (size_t k = first; k < units_.size(); ++k) apply_elevated_vulnerability(units_[k].id);
+            space_reinforce_arrivals(first, i);  // aitac t05
+        }
         ++stats_.reinforcements;
         return R::None;
     }
