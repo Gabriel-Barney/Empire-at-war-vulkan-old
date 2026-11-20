@@ -840,7 +840,8 @@ uint32_t TacticalBattle::bt_ground_special_weapons(TacticalMode& mode) {
         if (t >= types.size() || !types.get(t, objects::tags::Is_Special_Weapon_In_Space)) continue;
         if (kOrbital != objects::kNoBehavior && types.has_behavior(t, objects::BehaviorSet::Union, kOrbital)) continue;
         const int32_t idx = types.get(t, objects::tags::Special_Weapon_Index);
-        if (idx >= 0 && idx < 3) {
+        constexpr int32_t kWeaponSlots = 3;  // 0x35c520: three special-weapon slots per player
+        if (idx >= 0 && idx < kWeaponSlots) {
             if (std::find(indexes.begin(), indexes.end(), idx) != indexes.end()) continue;
             indexes.push_back(idx);
         }
@@ -865,6 +866,18 @@ bool TacticalBattle::bt_attacker_entry(Vec3& pos, Vec3& facing) const {
             return true;
         }
     return false;
+}
+
+bool TacticalBattle::bt_retreat_marker_facing(Vec3& facing) const {
+    // 0x533220 (TRL2_A_RE_ANSWERS Q4.1 [H]): the first ATTACKER ENTRY POSITION marker, else the last marker the query examined.
+    if (bt_markers_.empty()) return false;
+    facing = bt_markers_.back().facing;
+    for (const MapMarker& m : bt_markers_)
+        if (m.kind == kMkAttack) {
+            facing = m.facing;
+            break;
+        }
+    return true;
 }
 
 bool TacticalBattle::bt_owner_valid(int32_t owner) const {

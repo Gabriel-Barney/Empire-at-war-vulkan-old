@@ -1591,8 +1591,8 @@ public:
     // is not cancelled. False when `player` has no cancellable retreat.
     bool cancel_retreat(int32_t player, bool by_player);
     bool retreat_cancellable(int32_t player) const;
-    // trl2 t04: the cancels of the last tick (presentation read for the *_Retreat_Cancel_SFXEvent lines; cleared when
-    // tick() starts, not saved).
+    // trl2 t04: the cancels of the last tick and of the commands before it (presentation read for the
+    // *_Retreat_Cancel_SFXEvent lines; dropped at the next tick's start once a tick reported them, not saved).
     struct RetreatCancel {
         int32_t player = -1;
         bool by_player = false;
@@ -1938,6 +1938,7 @@ private:
                              std::vector<Vec3>& out) const;
     std::vector<LandingUnload> landings_unloaded_;    // transient (not saved): see landings_unloaded()
     std::vector<RetreatCancel> retreat_cancels_;      // trl2 t04, transient (not saved): see retreat_cancels()
+    size_t retreat_cancels_mark_ = 0;                 // trl2 t04: how many of them the last tick reported
     std::vector<ProductionDone> production_done_;     // q6 t19, transient (not saved): see production_done()
     PresentationEvents presentation_;  // ref2 t02: transient, outside the CRC (drain_presentation)
     bool emit_presentation_ = false;
@@ -1970,6 +1971,12 @@ private:
     void rt_move(TacticalMode& mode, objects::ObjectId id, float step);
     bool rt_listed(objects::ObjectId id) const;
     bool bt_attacker_entry(Vec3& pos, Vec3& facing) const;  // first Attacker Entry Position marker (map order)
+    // trl2 t04 / tru2 t02: a unit of the space retreat list (vf8): a live mover of `side` that is no team member (and not
+    // departing through Hyperspace_Away).
+    bool retreat_listed(const Unit& u, uint8_t side) const;
+    // tru2 t02: the space retreat start marker (0x533220): the first Attacker Entry Position marker, else the last marker in
+    // map order; false without markers.
+    bool bt_retreat_marker_facing(Vec3& facing) const;
     // trl2 t01 (TRL2_A_RE_ANSWERS Q1, 0x2a1eb0 step 4 pass 0 [H]): campaign space battle - each live ground structure of the
     // battle planet whose type sets Is_Special_Weapon_In_Space (and is no orbital structure) puts its own type into the
     // battle for the planet owner at the first DUMMY_SPECIAL_WEAPON_SOURCE object, registered with the L1 systems; one per

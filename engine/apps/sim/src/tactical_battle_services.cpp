@@ -143,7 +143,10 @@ void TacticalBattle::build_service_graph() {
         story_reinforced_.clear();  // L1/S4 wave 2b story hook: this tick's reserve deployments
         ability_finished_.clear();  // S7 t15 A1: this tick's signal 0x29
         landings_unloaded_.clear();  // a1i t04: signal 0x19 records of the last tick
-        retreat_cancels_.clear();    // trl2 t04: cancel records of the last tick
+        // trl2 t04: the cancel records the last tick reported; a player cancel from this tick's commands (before the tick)
+        // stays for the host's read after it.
+        retreat_cancels_.erase(retreat_cancels_.begin(), retreat_cancels_.begin() + static_cast<std::ptrdiff_t>(retreat_cancels_mark_));
+        retreat_cancels_mark_ = 0;
         production_done_.clear();    // q6 t19: signal 0x22 records of the last tick
         story_garrisoned_.clear();  // S4: this tick's garrison entries / structure captures
         story_captured_.clear();
@@ -388,6 +391,7 @@ void TacticalBattle::tick(TacticalMode& mode, SimRng& rng, const ParallelFor& pf
     ability_toggles_mark_ = ability_toggles_.size();
     strike_starts_mark_ = strike_starts_.size();
     summon_spawns_mark_ = summon_spawns_.size();
+    retreat_cancels_mark_ = retreat_cancels_.size();
 }
 
 }  // namespace alamo::sim

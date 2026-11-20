@@ -1598,22 +1598,24 @@ bool TacticalBattle::request_retreat(int32_t player) {
     retreat_done_frame_ = frame_ + static_cast<uint32_t>(frames_trunc(secs * 30.0f));
     for (const Unit& u : units_)
         if (u.side == side && u.alive) combat_->set_flag(u.id, tc::kUnitRetreating, true);
-    // tru2 t02 (TRU1_C_RE §2.1, space vf14 0x533080 -> 0x533220 [H]): every unit of the retreat list (vf8: the player's live
-    // movers that are not team members) gets a turn to the reverse of the ATTACKER ENTRY POSITION marker's yaw (locomotor
-    // vf +0x218), so the ships turn away during the countdown. [port] No marker: the attacker side's fallback facing, as
-    // rt_begin_flight; units in units_ order (ascending id).
-    if (space_ && movement_) {
-        Vec3 mpos = anchor_[1], mface = facing_[1];
-        (void)bt_attacker_entry(mpos, mface);
+    // tru2 t02 (TRU1_C_RE §2.1, TRL2_A_RE_ANSWERS Q4; space vf14 0x533080 -> 0x533220 [H]): every unit of the retreat list
+    // (vf8: the player's live movers that are not team members) gets a turn in place to the reverse of the ATTACKER ENTRY
+    // POSITION marker's yaw (locomotor vf +0x218), so the ships turn away during the countdown. The marker query walks the
+    // map markers in order: the first of that name, else the last one examined (retail quirk); no marker: no turn.
+    // [port] Fighters are not turned (retail: only a fighter in locomotor state 0x1f stores the heading).
+    Vec3 mface{};
+    if (space_ && movement_ && bt_retreat_marker_facing(mface)) {
         if (mface.x != 0.0f || mface.y != 0.0f) {
             const float heading = yaw_of(Vec3{-mface.x, -mface.y, 0.0f});
             for (const Unit& u : units_)
-                if (u.side == side && u.alive && !u.retreated && u.movable && u.container == kNoContainer &&
-                    !l1_jumps_.departing(u.id))
-                    (void)movement_->turn_in_place(u.id, heading, frame_);
+                if (retreat_listed(u, static_cast<uint8_t>(side))) (void)movement_->turn_in_place(u.id, heading, frame_);
         }
     }
     return true;
+}
+
+bool TacticalBattle::retreat_listed(const Unit& u, uint8_t side) const {
+    return u.side == side && u.alive && !u.retreated && u.movable && u.container == kNoContainer && !l1_jumps_.departing(u.id);
 }
 
 bool TacticalBattle::retreat_cancellable(int32_t player) const {
@@ -1631,7 +1633,7 @@ bool TacticalBattle::cancel_retreat(int32_t player, bool by_player) {
     for (const Unit& u : units_) {
         if (u.side != side || !u.alive || u.retreated) continue;
         combat_->set_flag(u.id, tc::kUnitRetreating, false);
-        if (!u.movable) continue;
+        if (!retreat_listed(u, side)) continue;  // the retreat list (vf8): what the start turned
         rec.units.push_back(u.id);
         if (space_) stop.push_back(u.id);
     }

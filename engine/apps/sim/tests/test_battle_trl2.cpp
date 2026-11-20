@@ -225,7 +225,7 @@ void test_retreat_cancel() {
     std::vector<float> yaw_at_cancel;
     int phase = 0;
     uint32_t mark = 0;
-    bool cancel_ok = false, record_ok = false, frozen = true, rerequest = false, auto_ok = false;
+    bool cancel_ok = false, record_ok = false, record_kept = false, frozen = true, rerequest = false, auto_ok = false;
     size_t record_units = 0;
     space_battle(
         *d, 3000,
@@ -251,6 +251,10 @@ void test_retreat_cancel() {
                 return true;
             }
             if (phase == 2) {
+                if (b.frame() == mark + 1) {  // a cancel between ticks is still reported after the next tick (audio host read)
+                    const auto kept = b.retreat_cancels();
+                    record_kept = kept.size() == 1 && kept[0].by_player;
+                }
                 for (size_t i = 0; i < movers.size(); ++i) {
                     const tactical::movement::UnitView v = b.movement().view(movers[i]);
                     if (v.yaw != yaw_at_cancel[i] || v.has_goal) frozen = false;
@@ -268,7 +272,7 @@ void test_retreat_cancel() {
         60.0f);
     std::printf("  trl2 t04: cancel %d, record %d (%zu units), ships stopped %d, new request %d, automatic cancel %d\n", cancel_ok,
                 record_ok, record_units, frozen, rerequest, auto_ok);
-    CHECK(cancel_ok && record_ok && record_units == movers.size() && frozen && rerequest && auto_ok);
+    CHECK(cancel_ok && record_ok && record_kept && record_units == movers.size() && frozen && rerequest && auto_ok);
 }
 
 // ---- trl2 t01 ----
@@ -544,6 +548,8 @@ void test_land_population() {
                 static_cast<double>(c.defender), static_cast<double>(c.before), static_cast<double>(c.in_flight),
                 static_cast<double>(c.landed), static_cast<double>(c.two_dead), static_cast<double>(c.all_dead));
     CHECK(c.dropped);
+    // Campaign start forces count (TRL2_A_RE_ANSWERS Q2, 0x2a00b0): the defender's start squad (pop 2) is in its list.
+    CHECK(c.defender == 2.0f);
     // The landing holds the whole company (2) while it unloads; the troopers out so far add nothing yet.
     CHECK(c.in_flight == c.before + 2.0f);
     CHECK(c.landed == c.before + 2.0f);

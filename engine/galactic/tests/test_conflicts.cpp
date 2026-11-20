@@ -522,7 +522,7 @@ void test_force_split() {
     w.cm->split_space_forces(pEmpire, units, f);
     CHECK(f.start.size() == 1 && f.reserve.size() == 9);
     w.cm->split_space_forces(pEmpire, units, f, tCorvette, false, {});
-    CHECK(f.start.size() == 2 && f.reserve.size() == 8);
+    CHECK(f.reserve.size() == 8);
     CHECK(f.start.size() == 2 && f.start[0] == units[0] && f.start[1] == units[3]);
 }
 

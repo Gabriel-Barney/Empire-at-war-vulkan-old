@@ -32,7 +32,8 @@ struct TacticalBattleTestAccess {
                                  Vec3 tp, uint8_t flags, SimRng& rng, bool guard) {
         return static_cast<int>(b.land_attack_order(mode, ids, target, tp, flags, false, rng, guard));
     }
-    static tactical::Aabb map_extents(const TacticalBattle& b, const TacticalMode& mode) { return b.map_extents(mode); }    // s78n t10: the 8 (x, y) points of object `h`'s fog multisample footprint.
+    static tactical::Aabb map_extents(const TacticalBattle& b, const TacticalMode& mode) { return b.map_extents(mode); }
+    // s78n t10: the 8 (x, y) points of object `h`'s fog multisample footprint.
     static void fog_footprint(const TacticalBattle& b, const objects::ObjectStore& st, objects::ObjectHandle h, float* xy16) {
         b.fog_footprint_samples(st, h, xy16);
     }

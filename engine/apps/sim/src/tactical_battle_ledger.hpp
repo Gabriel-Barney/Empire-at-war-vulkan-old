@@ -107,6 +107,7 @@
     DERIVED(ability_toggles_, "records of the last tick for the host (cleared at the next tick start)") \
     DERIVED(strike_starts_, "records of the last tick for the host (cleared at the next tick start)") \
     DERIVED(strike_starts_mark_, "how much of an event list the last tick reported (reset with the list)") \
+    DERIVED(retreat_cancels_mark_, "trl2 t04: how much of the cancel records the last tick reported") \
     DERIVED(summon_spawns_, "records of the last tick for the host (cleared at the next tick start)") \
     DERIVED(summon_spawns_mark_, "how much of an event list the last tick reported (reset with the list)") \
     DERIVED(ability_toggles_mark_, "how much of an event list the last tick reported (reset with the list)") \
