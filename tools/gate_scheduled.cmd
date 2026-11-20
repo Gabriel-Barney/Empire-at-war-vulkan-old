@@ -6,8 +6,8 @@ rem edits, so dev's tip went ungated for days. Now it gates origin/dev in its ow
 rem .claude\worktrees\gate-dev (detached, junctions to Data, extracted, toolchain and roadmap-store; made on the first run,
 rem kept by clean_worktrees because it is locked), and never touches the main checkout's files or branch.
 rem Usage: gate_scheduled.cmd [any checkout of the repo]   (default: the checkout this file is in)
-rem tools\install_gate_task.cmd copies this file to %LOCALAPPDATA%\AlamoGate\ and registers that copy with the main
-rem checkout as the argument, so the running script is never a file a checkout or merge changes under it.
+rem tools\install_gate_task.cmd copies this file to <main checkout>\logs\gate_task\ and registers a launcher that calls
+rem it with the main checkout, so the running script is never a file a checkout or merge changes under it.
 rem Exit code = the gate's (0 = all pass, 0 warnings); 3 = skipped (origin/dev already passed at this commit); 4 = setup failed.
 setlocal EnableDelayedExpansion
 set "ROOT=%~1"

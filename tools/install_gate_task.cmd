@@ -1,12 +1,14 @@
 @echo off
 rem Registers (or replaces) a per-user nightly Task Scheduler entry that gates origin/dev (tools\gate_scheduled.cmd).
 rem No admin needed; it runs while you are logged on. Usage: tools\install_gate_task.cmd [HH:MM] [--no-register]
-rem (default 03:00). It copies gate_scheduled.cmd to %LOCALAPPDATA%\AlamoGate\ (so a checkout or merge never changes the
-rem script while it runs) and writes gate_task.cmd next to it: a launcher with the main checkout of this repository baked
-rem in, which logs each run to gate_last_run.txt there (start line first, then everything the gate prints, then the exit
-rem code). The task runs that launcher with no arguments, the form the task had while it worked: the 2026-11-12
-rem registration ("gate_scheduled.cmd" "<main checkout>") exited 1 within a second every night without starting the script
-rem (ref6 t07). Run it from any checkout; rerun it after gate_scheduled.cmd changes. --no-register writes the files only.
+rem (default 03:00). It copies gate_scheduled.cmd to <main checkout>\logs\gate_task\ (so a checkout or merge never changes
+rem the script while it runs; logs\ is gitignored) and writes gate_task.cmd next to it: a launcher with the main checkout
+rem baked in, which logs each run to gate_last_run.txt there (start line first, then everything the gate prints, then the
+rem exit code). Never put these files under %LOCALAPPDATA% or %APPDATA%: a command run from the Claude desktop app (an
+rem MSIX package) has its AppData writes redirected to AppData\Local\Packages\Claude_*\LocalCache\..., which Task
+rem Scheduler does not see, so the task found no script and exited 1 within a second every night from 2026-11-12 (ref6
+rem t07, confirmed 2026-11-20). Run it from any checkout; rerun it after gate_scheduled.cmd changes. --no-register writes
+rem the files only.
 rem ALAMO_GATE_DEST overrides the folder (for testing). Remove the task with: schtasks /Delete /TN AlamoGateNightly /F
 setlocal
 rem SHIFT below also moves %0, so the script's folder is kept first.
@@ -23,7 +25,7 @@ set "GCD="
 for /f "delims=" %%G in ('git -C "%HERE%.." rev-parse --path-format^=absolute --git-common-dir') do set "GCD=%%G"
 if not defined GCD (echo install_gate_task: not inside a checkout of the repository.& exit /b 2)
 for %%I in ("%GCD%\..") do set "MAIN=%%~fI"
-set "DEST=%LOCALAPPDATA%\AlamoGate"
+set "DEST=%MAIN%\logs\gate_task"
 if defined ALAMO_GATE_DEST set "DEST=%ALAMO_GATE_DEST%"
 if not exist "%DEST%" mkdir "%DEST%"
 copy /y "%HERE%gate_scheduled.cmd" "%DEST%\gate_scheduled.cmd" >nul
