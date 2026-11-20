@@ -342,6 +342,55 @@ Gabriel, 2026-11-18, up-front answers for the Stage 9 coordinator run (st9-coord
   Thrawns_Legacy_HD -> 1125571106 clause of the mcx3 exit test, together with the real AOW -> TR stack that resolves on
   this machine (Thrawns_Legacy_HD is not installed here). No rerun with it installed is needed.
 
+## Roadmap page redesign: gates, ranking, forecast (Gabriel, 2026-11-19)
+
+Gabriel approved the design for the interactive roadmap page (`roadmap-store/`; session roadmap-interactive-redesign,
+grill round 1). The page answers four questions: what blocks each milestone, what to work on next, when it lands, what
+waits on Gabriel. It stays generated, read-only, one copy, no sign-in, opening from disk.
+- **Page load.** The first screen carries only gates, ranking, today and a slim group index, under 1 MB (was 4.7 MB). Group
+  detail, build history and the backlog are split into `detail/<id>.js`-style files that set `window.__RD__[...]` and are
+  loaded on demand by inserting a `<script>` tag, because browsers block `fetch()` from `file://`. The shell is rewritten
+  from scratch, keeping only the flowchart code; the dormant claude.ai write and edit code goes. Layout is picked from 2-3
+  prototypes first.
+- **Milestone gates.** Four gates, each defined by a gate group; a gate's members are the gate group's `after` chain
+  (followed through), not a hand-kept list: **M1 FoC parity** (`q4`, its exit test), **M2 Playable + Full QA**
+  (`qafull`, its exit test; replaces the "Playable single player" exclude-list milestone), **M3 Mod system** (`mcx9` and
+  `modc`, Stage 9's exit), **M4 Unified mod refactor** (Stage 10's exit). SP, Benchmark and "Everything" are no longer
+  milestones; SP and BM show as parked side goals (tier 3). Light: green when the gate group is closed with
+  `closed.passed` evidence; amber when no blocking task is left but the evidence has not run since the last landing; red
+  while blocking tasks are open. Next to it: blocking tasks left (S1 / S2 split) and when the evidence last ran.
+- **Ranking** (one function, also used by `batch`): gate +30 on a gate's critical path, +15 elsewhere in a gate's chain,
+  the nearest gate counting double; tasks S1 10, S2 4, times 1.5 tier 1 and 1.0 tier 2, tier 3 and S3 count 0, a crash,
+  hang or save-corruption task 20 at any tier; +12 per open group waiting on it; +6 when started; -1 per open task over 4.
+  Each part is shown. Claimed by another session or clashing with a running lane's `touches` filters a group out of "Ready
+  now" without lowering its score; a group still waiting on an `after` group is not ranked. Replaces the 2026-11-15 "Most
+  important" score. S3 stays out of the main views.
+- **Started-groups limit.** `wip` stays 8 with the existing "started" definition. While over it, "Ready now" and `batch`
+  offer only groups already started: no new starts until the count is under the limit. `park` takes started groups too
+  (claim released, `parked.branch` names any WIP branch, `why` and a re-check date required); Claude prepares the list
+  and Gabriel picks which to park (20 started on 2026-11-19).
+- **Forecast.** Tasks get `done_at` (stamped on write; back-filled from `journal.jsonl`, which starts 2026-10-30). Rate:
+  weekly closes of gate-blocking (S1 / S2) tasks minus newly added blocking tasks (net burn), over a trailing 4-week window,
+  project-wide (per-box weekly counts are too noisy; the burn-down still splits by box). Range: 10th-90th percentile of a
+  1000-run bootstrap over those weeks with a fixed seed, so a render is stable. Net burn at or below zero shows "no
+  convergence", not a date. `eta.target` becomes the hand-set target, flagged overdue when past or earlier than the
+  forecast's 10th percentile.
+- **`after` / `touches` back-fill.** An agent fills every open group: `touches` from `mod` plus the files of `origin/dev`
+  commits naming the group; `after` from solid box arrows, `eta.note` / `why` text and gate chains, `after: []` meaning
+  "checked, none". Gabriel reviews only the list of new `after` edges. Lint warns for one week, then errors on an open group
+  without both fields.
+- **Engine data in the store.** The store renders without the engine repository, so engine facts are copied in:
+  `roadmap_store.py parity-import tools/parity/baseline.json` (run by the harness after a run) writes `meta/parity` for the
+  parity matrix; `land_on_dev.cmd` writes a `log` entry with `kind: landing`, commit and groups, and past landings are
+  back-filled once from `origin/dev` first-parent history.
+- **Decisions queue.** A `decisions` collection holds open questions: `q`, a required `default`, `from` (group / task),
+  `asked`, `status`, and once answered `answer` and `ref` (the DECISIONS.md heading); run-group step 3a and grill rounds
+  write to it. A second, derived list shows actions only Gabriel can do (`g: true` tasks, `gab` groups, probe runs he must
+  start), which have no default.
+- **Evidence links.** A done task carries `ev: [{kind: commit|parity|build|golden, ref}]`; `land_on_dev` stamps the commit
+  on tasks it closes and `close-group --passed` gains `--ev`. Required from now on only (lint warning for tasks closed after
+  the start date); the ~1400 earlier tasks are not back-filled.
+
 ## Mod system in one stage (Gabriel, 2026-11-19)
 
 Gabriel approved a cleanup of every open mod-system task (session mod-cleanup-6f1850, after ums5):
