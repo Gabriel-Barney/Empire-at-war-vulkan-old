@@ -696,6 +696,7 @@ void test_battle_ai_lifecycle() {
         BattleAi ai(*b, *tm, host, ts);
         lua::ObjectBridge& br = ai.world().object_bridge();
         CHECK(br.battle_lifecycle && br.spawn_unit && br.spawn_company && br.take_damage && br.destroy_object && br.change_owner);
+        CHECK(br.tactical && br.tactical->face_immediate && br.tactical->spawn);  // aitac t03: Face_Immediate, cinematic transport
         if (!br.spawn_unit || !br.take_damage || !br.destroy_object) break;
         // Spawn_Unit's hook: an adopted battle unit.
         objects::SpawnParams sp;

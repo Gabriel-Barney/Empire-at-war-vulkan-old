@@ -2798,10 +2798,12 @@ void GalacticAiWorld::update_player(int32_t player, int64_t now, bool galactic_o
             const gal::ConflictManager* cm = w.conflicts ? w.conflicts : dynamic_cast<const gal::ConflictManager*>(w.sim.conflict_hooks());
             if (cm) w.res.observe_conflicts(*cm, static_cast<int32_t>(now));
         }
-        // Story requests and Suspend_AI from the story session's world (and the AI's own).
+        // Story requests and Suspend_AI from the story session's world (and the AI's own). aitac t01: while a battle is
+        // on top the story's requests belong to the tactical context of the current mode (TacticalAiWorld::
+        // attach_story_world drains them), so they are left in the story world.
         bool suspended = w.world.ai_suspended();
         if (lua::LuaPlayerWorld* sw = w.story_world) {
-            w.drain_world_requests(*sw, -1, -1);
+            if (galactic_on_top) w.drain_world_requests(*sw, -1, -1);
             suspended = suspended || sw->ai_suspended();
         }
         w.gate.suspend(suspended);

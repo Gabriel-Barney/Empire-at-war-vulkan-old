@@ -3181,6 +3181,44 @@ void test_ability_order_replaced() {
     CHECK(count_decisions(r, "p0 event Unit_Ability_Finished (tf MainForce)") == 0);
 }
 
+// aitac t01 (SIM_PARALLEL_DESIGN 11.5): the story session's world reaches the tactical AI - its Suspend_AI pauses the AI
+// (no order while suspended), its Purge_Goals ends the player's running plans and its GiveDesireBonus requests are taken
+// (the story world's queues are drained; one for a player without a tactical AI is dropped).
+void test_story_world() {
+    lua::LuaPlayerWorld story;  // outlives the AI world (run() ends the battle before it returns)
+    uint64_t orders_suspended = 0, orders_resumed = 0;
+    size_t plans_before = 0, plans_at_drain = 0;
+    int32_t drained_at = -1;
+    run(30 * 60, 1, 0, nullptr, false, [&](int32_t f, MockHost&, TacticalAiWorld& world) {
+        if (f == 1) world.attach_story_world(&story);
+        if (f == 600) {
+            story.set_ai_suspended(true);
+            orders_suspended = world.orders_issued();
+        }
+        if (f == 1200) {
+            orders_resumed = world.orders_issued();
+            story.set_ai_suspended(false);
+            plans_before = world.running_plans();
+            story.purge_goal_requests.push_back(0);
+            lua::DesireBonusRequest r;
+            r.player = 7;  // no tactical AI
+            r.goal = "Syn_Goal";
+            r.bonus = 1.0;
+            story.desire_bonuses.push_back(r);
+        }
+        if (f > 1200 && drained_at < 0 && story.purge_goal_requests.empty() && story.desire_bonuses.empty()) {
+            drained_at = f;
+            plans_at_drain = world.running_plans();
+        }
+    });
+    std::printf("story world: orders %llu at the suspend, %llu at the resume; plans %zu before the purge, %zu after (frame %d)\n",
+                static_cast<unsigned long long>(orders_suspended), static_cast<unsigned long long>(orders_resumed), plans_before,
+                plans_at_drain, drained_at);
+    CHECK(orders_suspended > 0 && orders_resumed == orders_suspended);
+    CHECK(drained_at > 1200 && drained_at <= 1230);
+    CHECK(plans_before > 0 && plans_at_drain < plans_before);
+}
+
 // S7 t27 (AI_TACTICAL §7.3.3 item 5): the land Prepare_Ambush step = Land_FOW_Reveal_Range x weather sight factor (not a
 // terrain factor), else the max attack range; <= 0 -> no walk.
 // S7 t26 (AI_TACTICAL §7.3.3 item 4): No_Units_Remaining fires when every remaining entry is a hero / special weapon.
@@ -3537,6 +3575,7 @@ int main(int argc, char** argv) {
     test_land_ambush_step();     // S7 t27
     test_prepare_ambush_land();  // S7 t33
     test_ability_order_replaced();  // S7 t26
+    test_story_world();             // aitac t01
     test_no_units_remaining_heroes();  // S7 t26
     test_ability_finished();
     test_save_load(6, 30 * 4, 30 * 40);  // an ambush block in flight (member / moving lists, plan frame)

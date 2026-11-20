@@ -192,6 +192,7 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
 
     // Lua
     lua::LuaPlayerWorld world;
+    lua::LuaPlayerWorld* story_world = nullptr;  // aitac t01: the story session's world (attach_story_world)
     lua::ObjectBridge bridge;
     cmd::CommandPipeline pipeline;
     PlanLibrary library;
@@ -553,6 +554,7 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
     void end_plan(int32_t id, bool by_goal_system);
     void service_plans(int32_t player);
     void drain_world_requests(int32_t player, int32_t plan);
+    void drain_requests(lua::LuaPlayerWorld& from, int32_t plan);  // aitac t01
     void tf_event(const TfRec& tf, std::string_view event, const std::vector<lua::AiEventArg>& args, bool always_queue = false,
                   bool coalesce = false);
     // S7 t20 (AI_TACTICAL §7.3.2): a member left the task force (died / removed / owner changed / released) or a production
@@ -1476,7 +1478,7 @@ void TacticalAiWorld::Impl::refresh(bool fill) {
     ALAMO_PROFILE_STEP(steps, "tac.perc.dying");
     w.frame = mode_frame;
     w.index();
-    gate.suspend(world.ai_suspended());
+    gate.suspend(world.ai_suspended() || (story_world && story_world->ai_suspended()));  // aitac t01: story Suspend_AI
     ALAMO_PROFILE_STEP(steps, "tac.perc.index");
     // Object signals by snapshot comparison (header comment).
     std::vector<std::pair<int32_t, int32_t>> cur;
@@ -2594,7 +2596,18 @@ void TacticalAiWorld::Impl::unit_damaged_events(const std::vector<UnitDamagedSig
 }
 
 void TacticalAiWorld::Impl::drain_world_requests(int32_t player, int32_t plan) {
-    for (const lua::DesireBonusRequest& r : world.desire_bonuses) {
+    // aitac t01: the story session's requests first (the story ran before this AI service in the tick), then the AI's own.
+    if (story_world) drain_requests(*story_world, -1);
+    drain_requests(world, plan);
+    world.budget_flushes.clear();     // no tactical budget (§4.1)
+    world.tactical_releases.clear();  // [port] Release_Credits_For_Tactical: the S10 host's credit transfer has no release yet
+    (void)player;
+}
+
+// One world's GiveDesireBonus / Purge_Goals requests. `plan`: the plan whose script made them (kept by Purge_Goals), -1
+// none (a story script or the free store).
+void TacticalAiWorld::Impl::drain_requests(lua::LuaPlayerWorld& from, int32_t plan) {
+    for (const lua::DesireBonusRequest& r : from.desire_bonuses) {
         PlayerAi* t = player_ai(r.player);
         const uint32_t g = defs.find_goal(r.goal);
         if (!t || g == kAiNone) continue;
@@ -2609,13 +2622,10 @@ void TacticalAiWorld::Impl::drain_world_requests(int32_t player, int32_t plan) {
         b.deadline = now + static_cast<int32_t>(static_cast<float>(kAiFps) * static_cast<float>(r.duration < 0.0 ? 0.0 : r.duration));
         t->bonuses.push_back(b);
     }
-    world.desire_bonuses.clear();
-    for (const int32_t p : world.purge_goal_requests)
+    from.desire_bonuses.clear();
+    for (const int32_t p : from.purge_goal_requests)
         if (PlayerAi* t = player_ai(p)) t->ctx.goals.purge(plan);
-    world.purge_goal_requests.clear();
-    world.budget_flushes.clear();     // no tactical budget (§4.1)
-    world.tactical_releases.clear();  // [port] Release_Credits_For_Tactical: the S10 host's credit transfer has no release yet
-    (void)player;
+    from.purge_goal_requests.clear();
 }
 
 void TacticalAiWorld::Impl::service_plans(int32_t player) {
@@ -4019,6 +4029,7 @@ std::vector<TacticalAiWorld::GlobalWrite> TacticalAiWorld::take_lane_global_writ
     return out;
 }
 lua::LuaPlayerWorld& TacticalAiWorld::player_world() { return impl_->world; }
+void TacticalAiWorld::attach_story_world(lua::LuaPlayerWorld* world) { impl_->story_world = impl_->cfg.ai_lane ? nullptr : world; }
 
 bool TacticalAiWorld::load_plans(std::vector<std::string>* diagnostics) {
     Impl& w = *impl_;

@@ -477,6 +477,14 @@ public:
     lua::ObjectBridge& object_bridge();
     const lua::ObjectBridge& object_bridge() const;
     lua::LuaPlayerWorld& player_world();
+    // aitac t01 (SIM_PARALLEL_DESIGN 11.5; AI_GALACTIC 1.2 / 1.5, MCX8_BINDINGS_PLAYERS_STORY GiveDesireBonus): the story
+    // session's LuaPlayerWorld (StorySession::player_world()). Each AI frame its Suspend_AI switch pauses this AI too (the
+    // one TheAI master byte), and its GiveDesireBonus / Purge_Goals requests for a player with a tactical AI go to that
+    // player's tactical context (the context of the current mode); requests for other players are dropped, as retail
+    // finds no context for them. The galactic AI leaves the story world alone while a battle is on top
+    // (GalacticAiWorld::update_player). [port] Not attached with the AI lane on (the story VMs write the world on the
+    // critical lane). Null detaches; the world must outlive this object or be detached first.
+    void attach_story_world(lua::LuaPlayerWorld* world);
     // Int-final: the session-wide GlobalValue table (L1_S4_REMAINING §1.5) for GlobalValue.Get / Set of every AI VM;
     // null (default) = the world's own map (hashed in its CRC section). Hosted battles attach SimHost::global_values().
     void set_global_values(lua::GlobalValueStore* store);

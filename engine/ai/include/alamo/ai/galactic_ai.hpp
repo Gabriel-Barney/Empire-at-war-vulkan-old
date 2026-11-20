@@ -155,7 +155,8 @@ public:
     // now on. False without an AI for the player or when it already has that difficulty. Sim thread, between updates.
     bool set_difficulty(int32_t player, int32_t difficulty);
     // Story requests: the story session's LuaPlayerWorld (StorySession::player_world()) is drained every frame
-    // like the AI's own: GiveDesireBonus, Purge_Goals, Budget.Flush_Category and Suspend_AI reach the galactic AI.
+    // like the AI's own: GiveDesireBonus, Purge_Goals, Budget.Flush_Category and Suspend_AI reach the galactic AI (the
+    // requests only while galactic mode is on top: aitac t01, TacticalAiWorld::attach_story_world).
     // Null detaches. The world must outlive this object (or be detached first).
     void attach_story_world(lua::LuaPlayerWorld* world);
     // storyb t10 (docs/re/STORYB_T10_TRIGGER_AI.md): the story's plot table and a model for the plan scripts. Every plan VM

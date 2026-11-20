@@ -1499,6 +1499,13 @@ std::vector<uint64_t> run_path_world(unsigned threads, int32_t frames, lua::LuaP
         const std::vector<PlanetIndex> fw = world.path(p, 7, 0);
         CHECK(fw.size() >= 2 && fw.front() == 7 && fw.back() == 0);
     }
+    if (story) {  // aitac t01: a story request waits in the story world while a battle is on top (the tactical AI takes it)
+        story->purge_goal_requests.push_back(5);  // no such player: nothing to purge, only drained
+        for (int32_t p = 0; p < static_cast<int32_t>(sim.players().size()); ++p) world.update_player(p, frames + 1, false, false);
+        CHECK(story->purge_goal_requests.size() == 1);
+        for (int32_t p = 0; p < static_cast<int32_t>(sim.players().size()); ++p) world.update_player(p, frames + 2, true, false);
+        CHECK(story->purge_goal_requests.empty());
+    }
     return crc;
 }
 

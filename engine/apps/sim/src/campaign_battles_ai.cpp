@@ -16,6 +16,10 @@ void CampaignBattles::ai_begin(SimHost& host, GameMode& mode) {
         ai_.reset();
     }
     for (std::string& d : diag) log_.push_back("tactical AI: " + d);
+#ifdef ALAMO_SIM_HAVE_STORY
+    // aitac t01: the story's Suspend_AI / GiveDesireBonus / Purge_Goals reach the tactical AI of the running battle.
+    if (ai_ && host.story()) ai_->world().attach_story_world(host.story()->player_world());
+#endif
 }
 
 void CampaignBattles::ai_update() {
