@@ -35,8 +35,9 @@ float dist2(Vec3 a, Vec3 b) {
     return std::sqrt(dx * dx + dy * dy);
 }
 
-// A standalone (no TEAM) armed land unit: weapon range `maxr`, min range `minr`, hard half extents 3, plus `extra` tags.
-std::string land_unit(const char* name, float minr, float maxr, const char* land_behavior, const char* extra) {
+// A standalone (no TEAM) armed land unit: weapon range `maxr`, min range `minr`, hard half extents hx x hy (default 3 x 3),
+// plus `extra` tags.
+std::string land_unit(const char* name, float minr, float maxr, const char* land_behavior, const char* extra, int hx = 3, int hy = 3) {
     const std::string min_tag =
         minr > 0.0f ? "<Targeting_Min_Attack_Distance>" + std::to_string(static_cast<int>(minr)) + "</Targeting_Min_Attack_Distance>" : "";
     char buf[2048];
@@ -47,10 +48,10 @@ std::string land_unit(const char* name, float minr, float maxr, const char* land
                   "<Projectile_Types>S10_Blaster_Proj</Projectile_Types><Projectile_Fire_Recharge_Seconds>1.0</Projectile_Fire_Recharge_Seconds>"
                   "<Projectile_Fire_Pulse_Count>1</Projectile_Fire_Pulse_Count><Behavior>SELECTABLE, WEAPON</Behavior>"
                   "<Collidable_By_Projectile_Living>Yes</Collidable_By_Projectile_Living><LandBehavior>%s</LandBehavior>"
-                  "<Custom_Soft_Footprint_Radius>3</Custom_Soft_Footprint_Radius><Custom_Hard_XExtent>3</Custom_Hard_XExtent>"
-                  "<Custom_Hard_YExtent>3</Custom_Hard_YExtent><Tactical_Bribe_Cost>40</Tactical_Bribe_Cost>%s</GroundVehicle>\n"
+                  "<Custom_Soft_Footprint_Radius>3</Custom_Soft_Footprint_Radius><Custom_Hard_XExtent>%d</Custom_Hard_XExtent>"
+                  "<Custom_Hard_YExtent>%d</Custom_Hard_YExtent><Tactical_Bribe_Cost>40</Tactical_Bribe_Cost>%s</GroundVehicle>\n"
                   " <GroundCompany Name=\"%s_Co\"><Company_Units>%s</Company_Units><Population_Value>1</Population_Value></GroundCompany>\n",
-                  name, static_cast<double>(maxr), min_tag.c_str(), land_behavior, extra, name, name);
+                  name, static_cast<double>(maxr), min_tag.c_str(), land_behavior, hx, hy, extra, name, name);
     return buf;
 }
 
@@ -61,7 +62,8 @@ std::string bkt1_types(std::string t) {
     add += land_unit("S10_Ranger", 100.0f, 250.0f, "WALK_LOCOMOTOR", "<Is_Squashable>Yes</Is_Squashable>");
     add += land_unit("S10_Far", 100.0f, 2000.0f, "WALK_LOCOMOTOR", "");
     add += land_unit("S10_Crusher", 100.0f, 250.0f, "WALK_LOCOMOTOR, SQUASH", "<Is_Squashable_By_Supercrusher>Yes</Is_Squashable_By_Supercrusher>");
-    add += land_unit("S10_Super", 100.0f, 250.0f, "WALK_LOCOMOTOR, SQUASH", "<Is_Supercrusher>Yes</Is_Supercrusher>");
+    // hard half extents 5 x 2 (soft radius 3): the engage-clause target, so min(hx, hy) = 2 is told apart from the others
+    add += land_unit("S10_Super", 100.0f, 250.0f, "WALK_LOCOMOTOR, SQUASH", "<Is_Supercrusher>Yes</Is_Supercrusher>", 5, 2);
     add += land_unit("S10_Briber", 0.0f, 250.0f, "WALK_LOCOMOTOR",
                      "<Unit_Abilities_Data SubObjectList=\"Yes\"><Unit_Ability><Type>TACTICAL_BRIBE</Type><Recharge_Seconds>1</Recharge_Seconds>"
                      "<GUI_Activated_Ability_Name>S10_Bkt1_Bribe</GUI_Activated_Ability_Name></Unit_Ability></Unit_Abilities_Data>"
@@ -149,7 +151,7 @@ void test_staging(const Data& d) {
     if (!s.gs) return;
     objects::ObjectId r[3] = {}, far = 0, cru = 0, sup = 0, bri = 0, e = 0, ec = 0, es = 0;
     tactical::Aabb box{};
-    Vec3 mid{};
+    Vec3 mid{}, S{};  // S: the engage-clause target spot (set with the cases)
     std::vector<StagingCase> cases;
     size_t ci = 0;
     bool placed = false, ready = false;
@@ -165,7 +167,7 @@ void test_staging(const Data& d) {
     // the spec's d for min m and base range a: m + 0.2 (a - m); the largest ring step: min(1.5 r, 10), r = sqrt(3^2 + 3^2)
     const float step_max = std::min(1.5f * std::sqrt(18.0f), 10.0f);
     // engage clause: the arc slot radius of a plain and a pending-ability plan (attack and guard), read off the plan
-    float rho_plain = -1.0f, rho_gplain = -1.0f, rho_pend = -1.0f, rho_gpend = -1.0f, t_min_half = 0.0f;
+    float rho_plain = -1.0f, rho_gplain = -1.0f, rho_pend = -1.0f, rho_gpend = -1.0f;
     for (uint64_t tk = 0; tk < 4000 && !(ready && ci >= cases.size()); ++tk) {
         TacticalBattle* b = s.tick();
         TacticalMode* tm = s.host->tactical();
@@ -212,7 +214,11 @@ void test_staging(const Data& d) {
             // (A) the ring slide at the map edge: T 20 inside M on the +x axis, M 40 inside the playable box's east edge
             // (on passable ground; the map extents end 20 beyond it). The first ring is R0 = 100 - 20 = 80 and its theta 0
             // spot (on the T -> M ray) is off the map; spots >= d = 130 from T inside the map exist only well around M:
-            // the search slides counter-clockwise (+y here).
+            // the search slides counter-clockwise (+y here). The edge column beyond the playable box (x 1240-1260) is
+            // impassable on this map, so here the reachability test (§1.2.1 test 3) rejects the first spots that are far
+            // enough, and the map-box test (test 2) only the theta 0 one; the oracle spec_stand_off takes both answers
+            // (the extents, the zone query) from the port, so it checks the ring order, radii, sample count and distance
+            // test, not the map box or the zone rule themselves.
             cases.push_back({"ring slide at the map edge",
                              [&](TacticalBattle& bt, TacticalMode& m) {
                                  const float ex = std::min(box.max.x, m.bounds().max.x) - 40.0f;
@@ -270,8 +276,14 @@ void test_staging(const Data& d) {
                              [&](TacticalBattle& bt, TacticalMode& m) {
                                  const objects::ObjectId ids[] = {far};
                                  const Vec3 tp = pos(m, e), g = stage(bt, m, ids, e, 1);
-                                 std::printf("    search failure: G - T (%.3f, %.3f)\n", static_cast<double>(g.x - tp.x),
-                                             static_cast<double>(g.y - tp.y));
+                                 // the gate passes (so G = T comes from the failed search, not from step 3) and the spec's rings
+                                 // find nothing either
+                                 const bool gate = bt.combat().inside_min_range_of(far, e, 100.0f);
+                                 const Vec3 want = spec_stand_off(bt, far, pos(m, far), tp, 100.0f, 480.0f, box);
+                                 std::printf("    search failure: gate %d, G - T (%.3f, %.3f), spec finds no spot %d\n", gate ? 1 : 0,
+                                             static_cast<double>(g.x - tp.x), static_cast<double>(g.y - tp.y),
+                                             want.x == tp.x && want.y == tp.y ? 1 : 0);
+                                 CHECK(gate && want.x == tp.x && want.y == tp.y);
                                  CHECK(g.x == tp.x && g.y == tp.y && g.z == tp.z);
                              }});
             // (C) the crush case: the gate passes (60 < 100 + E); one member with SQUASH and T Is_Squashable -> G = T
@@ -289,9 +301,8 @@ void test_staging(const Data& d) {
                                  const Vec3 g1 = stage(bt, m, c1, e, 1);      // crusher vs Is_Squashable: T
                                  const Vec3 g2 = stage(bt, m, c1, e, 2);      // two members: staged
                                  const Vec3 g3 = stage(bt, m, s1, ec, 1);     // supercrusher vs Is_Squashable_By_Supercrusher: T
-                                 const Vec3 g4 = stage(bt, m, c1, ec, 1);     // crusher (not super) vs a supercrusher-only T: staged
                                  const Vec3 g5 = stage(bt, m, r1, e, 1);      // no SQUASH: staged
-                                 put(bt, m, cru, Vec3{tcp.x - 60.0f, tcp.y, 0.0f});  // (g4 needs the crusher inside its range of ec)
+                                 put(bt, m, cru, Vec3{tcp.x - 60.0f, tcp.y, 0.0f});  // case C': the crusher inside its range of ec
                                  const auto at = [](Vec3 g, Vec3 t) { return g.x == t.x && g.y == t.y; };
                                  std::printf("    crush: squashable %d, two members %d, supercrusher %d; staged: two members %d, no SQUASH %d "
                                              "(%.1f from T)\n",
@@ -300,7 +311,6 @@ void test_staging(const Data& d) {
                                  CHECK(at(g1, tp) && !at(g2, tp) && dist3(g2, tp) >= 130.0f - 1e-3f);
                                  CHECK(at(g3, tcp));
                                  CHECK(!at(g5, tp) && dist3(g5, tp) >= 130.0f - 1e-3f);
-                                 (void)g4;
                              }});
             // (C') a crusher that is not a supercrusher against a T that is only Is_Squashable_By_Supercrusher: staged
             cases.push_back({"crush case, supercrusher-only target",
@@ -311,32 +321,30 @@ void test_staging(const Data& d) {
                                  std::printf("    crusher vs supercrusher-only target: G %.1f from T\n", static_cast<double>(dist3(g4, tcp)));
                                  CHECK(!(g4.x == tcp.x && g4.y == tcp.y) && dist3(g4, tcp) >= 130.0f - 1e-3f);
                              }});
-            // (E) the Activation_Max_Range engage clause: the briber 600 from T (out of its range 250: slotted). Plain
-            // (nothing pending yet): engage = 250 + min(hx, hy) of T (attack), min(that, Land_Guard_Range 150) (guard).
-            // With the pending bribe (max 200, case D orders it): engage = min(250, 200) = 200 for both - no extent, no
-            // guard cap. The arc slot radius is R minus the formation's half depth, so the two plans of each kind differ by
-            // exactly the engagement ranges' difference.
+            // (E) the Activation_Max_Range engage clause, on the enemy S10_Super (hard half extents 5 x 2) at S with the
+            // briber 600 east of it (out of its range 250: slotted). Plain (nothing pending yet): engage = 250 + min(5, 2) =
+            // 252 (attack), min(252, Land_Guard_Range 150) = 150 (guard). With the bribe pending (max 200; case D orders it
+            // on ANOTHER target, e: §1.1 step 3 has no check that the pending target is B's object): engage = min(250, 200) =
+            // 200 for both - no extent, no guard cap. The arc slot radius is R minus the formation's half depth, so the two
+            // plans of each kind differ by exactly the engagement ranges' difference: 52 (attack), -50 (guard).
+            S = Vec3{mid.x - 300.0f, mid.y - 450.0f, 0.0f};
             cases.push_back({"engage clause, plain plans",
                              [&](TacticalBattle& bt, TacticalMode& m) {
-                                 put(bt, m, e, Vec3{mid.x, mid.y + 400.0f, 0.0f});
-                                 put(bt, m, bri, Vec3{mid.x + 600.0f, mid.y + 400.0f, 0.0f});
+                                 put(bt, m, es, S);
+                                 put(bt, m, bri, Vec3{S.x + 600.0f, S.y, 0.0f});
                              },
                              [&](TacticalBattle& bt, TacticalMode& m) {
                                  float mn = 0.0f, mx = 0.0f;
                                  const bool pend = TA::abilities(bt).pending_ranges(bri, mn, mx);
                                  SimRng& rng = s.host->random().synced();
                                  const objects::ObjectId ids[] = {bri};
-                                 const Vec3 tp = pos(m, e);
-                                 const mv::V2 th = bt.movement().collision_half(e);
-                                 t_min_half = std::min(th.x, th.y);
-                                 (void)TA::land_attack_order(bt, m, ids, e, tp, 0, rng, false);
+                                 const Vec3 tp = pos(m, es);
+                                 (void)TA::land_attack_order(bt, m, ids, es, tp, 0, rng, false);
                                  rho_plain = bt.movement().view(bri).atk_rho;
-                                 (void)TA::land_attack_order(bt, m, ids, e, tp, mv::kMoveFlagGuardMove, rng, true);
+                                 (void)TA::land_attack_order(bt, m, ids, es, tp, mv::kMoveFlagGuardMove, rng, true);
                                  rho_gplain = bt.movement().view(bri).atk_rho;
-                                 std::printf("    engage clause: nothing pending %d; plain attack rho %.4f, guard rho %.4f (T half extents "
-                                             "min %.2f)\n",
-                                             !pend ? 1 : 0, static_cast<double>(rho_plain), static_cast<double>(rho_gplain),
-                                             static_cast<double>(t_min_half));
+                                 std::printf("    engage clause: nothing pending %d; plain attack rho %.4f, guard rho %.4f\n", !pend ? 1 : 0,
+                                             static_cast<double>(rho_plain), static_cast<double>(rho_gplain));
                                  CHECK(!pend);
                              }});
             // (D) Activation_Min_Range picks M: a ranger (min 100) and the briber (no weapon min range), both 120 from T.
@@ -370,22 +378,26 @@ void test_staging(const Data& d) {
                                  CHECK(over >= -1e-3f && over <= step_max + 1e-3f && ax * bx + ay * by > 0.0f);
                                  const Vec3 want = spec_stand_off(bt, bri, bp, tp, 150.0f, 170.0f, box);  // rings around the briber
                                  CHECK(std::fabs(g1.x - want.x) <= 1e-3f && std::fabs(g1.y - want.y) <= 1e-3f);
-                                 // the briber goes back out of range at once (the ability's attack order would walk it in)
-                                 put(bt, m, bri, Vec3{tp.x + 600.0f, tp.y, 0.0f});
+                                 // the briber goes back to its engage-clause spot at once, out of the bribe's range of e (the
+                                 // ability's attack order would walk it in)
+                                 put(bt, m, bri, Vec3{S.x + 600.0f, S.y, 0.0f});
+                                 put(bt, m, es, S);
                              }});
             cases.push_back({"engage clause, pending plans",
                              [&](TacticalBattle&, TacticalMode&) {},  // placed by case D's check
                              [&](TacticalBattle& bt, TacticalMode& m) {
                                  float mn = 0.0f, mx = 0.0f;
                                  const bool pend = TA::abilities(bt).pending_ranges(bri, mn, mx);
+                                 const bool on_e = TA::abilities(bt).pending_target(bri) == e;
                                  SimRng& rng = s.host->random().synced();
                                  const objects::ObjectId ids[] = {bri};
-                                 const Vec3 tp = pos(m, e);
-                                 (void)TA::land_attack_order(bt, m, ids, e, tp, 0, rng, false);
+                                 const Vec3 tp = pos(m, es);
+                                 (void)TA::land_attack_order(bt, m, ids, es, tp, 0, rng, false);
                                  rho_pend = bt.movement().view(bri).atk_rho;
-                                 (void)TA::land_attack_order(bt, m, ids, e, tp, mv::kMoveFlagGuardMove, rng, true);
+                                 (void)TA::land_attack_order(bt, m, ids, es, tp, mv::kMoveFlagGuardMove, rng, true);
                                  rho_gpend = bt.movement().view(bri).atk_rho;
-                                 const float want = 250.0f + t_min_half - 200.0f, gwant = 150.0f - 200.0f;
+                                 CHECK(on_e);  // pending on e, the plans on es
+                                 const float want = 252.0f - 200.0f, gwant = 150.0f - 200.0f;
                                  std::printf("    engage clause: pending %d (max %.0f): attack rho %.4f, guard rho %.4f; plain - pending: "
                                              "attack %.4f (spec %.4f), guard %.4f (spec %.4f)\n",
                                              pend ? 1 : 0, static_cast<double>(mx), static_cast<double>(rho_pend),
@@ -712,7 +724,7 @@ void test_guard_hidden_drop() {
         objects::ObjectStore& st = tm->primary();
         const mv::MovementSystem& ms = b->movement();
         if (bai) bai->follow_service();
-        const auto centroid = [&] {
+        const auto centroid = [&] {  // L = the movers' centroid: one mover here, the guard squad's container
             mv::V2 c = ms.view(sq[0]).pos;
             return Vec3{c.x, c.y, 0.0f};
         };
@@ -773,7 +785,7 @@ void test_guard_hidden_drop() {
                 ordered ? 1 : 0, arrived ? 1 : 0, static_cast<double>(stand_d), hidden_plan ? 1 : 0, dropped ? 1 : 0,
                 static_cast<double>(drop_d), no_block ? 1 : 0);
     CHECK(ordered && arrived && stand_d >= 40.0f);
-    CHECK(hidden_plan && dropped && drop_d < 40.0f + 10.0f && no_block);
+    CHECK(hidden_plan && dropped && drop_d < 40.0f && no_block);
 }
 #endif  // ALAMO_SIM_HAVE_TACTICAL_AI
 

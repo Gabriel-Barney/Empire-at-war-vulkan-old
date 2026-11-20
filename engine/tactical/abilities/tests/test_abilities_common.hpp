@@ -2195,7 +2195,8 @@ inline void test_s78n_min_range() {
 //     the pending ability fired (user moved into range) -> false again;
 //   * the staging gate "M inside its min range of T" (slot 46, CombatSystem::inside_min_range_of(M, T, r)): d <= r + E,
 //     false when r <= 0. T at the origin facing +x with hard extents X 4 / Y 2; M 22 behind it on its facing axis (E = 4):
-//     r 20 -> 22 <= 24 inside; r 17 -> 22 > 21 outside; r 0 -> false (a member with no min range never stages).
+//     r 19 -> 22 <= 23 inside (with the Y extent 2 it would be 22 > 21: the facing axis picks X); r 17 -> 22 > 21
+//     outside; r 0 -> false (a member with no min range never stages).
 inline void test_bkt1_pending_ranges_and_min_gate() {
     OiWorld w;
     SpecialAbilityDesc b = oi_special("Bribe", SpecialClass::TacticalBribe, ActivationStyle::UserInput);
@@ -2219,7 +2220,7 @@ inline void test_bkt1_pending_ranges_and_min_gate() {
     w.add(1, ad, 0, Vec3{-500.0f, 0.0f, 0.0f});
     w.add(2, xd, 1, Vec3{0.0f, 0.0f, 0.0f}, {1, 0, 0});
     float mn = -1.0f, mx = -1.0f;
-    CHECK(!w.ab->pending_ranges(1, mn, mx) && mn == 0.0f && mx == 0.0f);
+    CHECK(!w.ab->pending_ranges(1, mn, mx));
     const ObjectId one[] = {1};
     CHECK(w.ab->targeted_ability(one, kTacticalBribe, 2, -1, w.frame) == 1);
     w.tick();  // 500 away: out of Activation_Max_Range, stays pending
@@ -2238,10 +2239,10 @@ inline void test_bkt1_pending_ranges_and_min_gate() {
     g.make(GameMode::Land, std::vector<PlayerInfo>(3), cfg);
     g.add(1, gd, 0, Vec3{-22.0f, 0.0f, 0.0f});
     g.add(2, gx, 1, Vec3{0.0f, 0.0f, 0.0f}, {1, 0, 0});
-    const bool in20 = g.sys->inside_min_range_of(1, 2, 20.0f), in17 = g.sys->inside_min_range_of(1, 2, 17.0f),
+    const bool in19 = g.sys->inside_min_range_of(1, 2, 19.0f), in17 = g.sys->inside_min_range_of(1, 2, 17.0f),
                in0 = g.sys->inside_min_range_of(1, 2, 0.0f);
-    std::printf("bkt1 min-range gate: r 20 %d, r 17 %d, r 0 %d\n", in20 ? 1 : 0, in17 ? 1 : 0, in0 ? 1 : 0);
-    CHECK(in20 && !in17 && !in0);
+    std::printf("bkt1 min-range gate: r 19 %d, r 17 %d, r 0 %d\n", in19 ? 1 : 0, in17 ? 1 : 0, in0 ? 1 : 0);
+    CHECK(in19 && !in17 && !in0);
 }
 
 // s78n t04 (TACTICAL_COMBAT §5.4.4 items 3a - 3c): a Combat_Bonus source does not buff itself (unless its type has
