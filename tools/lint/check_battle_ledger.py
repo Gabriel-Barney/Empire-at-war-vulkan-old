@@ -371,6 +371,9 @@ TABLE = [
     Entry("AbilitySystem", ENG + "tactical/abilities/include/alamo/tactical/abilities/ability_system.hpp",
           ENG + "tactical/abilities/src/ability_ledger.hpp", [ENG + "tactical/abilities/src"],
           save=["write"], read=["read"], hash_fns=[r"hash\w*", "register_crc"]),
+    Entry("GalacticSim", ENG + "galactic/include/alamo/galactic/campaign.hpp",
+          ENG + "galactic/src/galactic_ledger.hpp", [ENG + "galactic/src"],
+          save=["write"], read=["read"], hash_fns=[r"hash_\w+", "register_crc"]),
 ]
 
 
