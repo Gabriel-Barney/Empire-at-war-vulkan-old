@@ -377,6 +377,9 @@ TABLE = [
     Entry("ConflictManager", ENG + "galactic/include/alamo/galactic/conflicts.hpp",
           ENG + "galactic/src/conflicts_ledger.hpp", [ENG + "galactic/src"],
           save=["write"], read=["read"], hash_fns=[r"hash\w*", "register_crc"]),
+    Entry("StorySession", ENG + "apps/sim/include/alamo/sim/story_session.hpp",
+          ENG + "apps/sim/src/story_session_ledger.hpp", [ENG + "apps/sim/src"],
+          save=[r"write\w*"], read=[r"read\w*"], hash_fns=[r"hash\w*", "register_crc"]),
 ]
 
 
