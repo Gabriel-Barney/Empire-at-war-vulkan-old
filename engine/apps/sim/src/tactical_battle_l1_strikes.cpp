@@ -123,9 +123,9 @@ std::vector<TacticalBattle::L1Faction> load_l1_factions(const galactic::Galactic
     return out;
 }
 
-// [port] the Bombardment_Projectile types are not unit weapons, so the battle tables do not hold them: a minimal
-// ProjectileDesc (speed, damage, damage type, blast area, lifetime / flight distance, shield / hitpoint flags,
-// category) is appended per type at setup.
+// The Bombardment_Projectile types are not unit weapons, so the unit build does not reach them: each is added at setup
+// through the catalog's one projectile builder (ref5 t01: BattleCatalog::extend_projectile, the same ProjectileDesc and
+// visuals as a unit-fired projectile of that type; a type a unit already fires keeps its entry).
 void TacticalBattle::l1_add_strike_projectiles() {
     if (space_) return;
     const objects::GameObjectTypes& types = catalog_->types();
@@ -133,25 +133,8 @@ void TacticalBattle::l1_add_strike_projectiles() {
         for (const std::string& name : f.bombard_projectiles) {
             const objects::TypeIndex t = types.resolve_name(name);
             if (t == objects::kNone || l1_projectile_of_type(static_cast<int32_t>(t)) >= 0) continue;
-            tc::ProjectileDesc pd;
-            pd.name = std::string(types.raw().types().name[t]);
-            pd.max_speed = types.columns().max_speed[t];
-            pd.damage = types.get_float(t, "Projectile_Damage");
-            pd.damage_type = catalog_->damage().damage_index(types.get_string(t, "Damage_Type"));
-            pd.max_flight_distance = types.get_float(t, "Projectile_Max_Flight_Distance");
-            pd.max_lifetime = types.get_float(t, "Projectile_Max_Lifetime");
-            pd.blast_area_damage = types.get_float(t, "Projectile_Blast_Area_Damage");
-            pd.blast_area_range = types.get_float(t, "Projectile_Blast_Area_Range");
-            pd.blast_dropoff = types.get_bool(t, "Projectile_Blast_Area_Dropoff");  // mcx4 t03 (TACTICAL_COMBAT 3.5)
-            pd.blast_dropoff_tiers = types.get_int(t, "Projectile_Blast_Area_Dropoff_Tiers");
-            pd.bomb_fall_accel = types.get_float(t, "Projectile_Bomb_Fall_Accel_Rate");  // mcx4 t18 (MCX4_RE_ANSWERS_TACTICAL §12)
-            pd.blast_max_victims = types.get_int(t, "Projectile_Blast_Area_Max_Victims");
-            if (!types.get_string(t, "Projectile_Does_Shield_Damage").empty()) pd.does_shield_damage = types.get_bool(t, "Projectile_Does_Shield_Damage");
-            if (!types.get_string(t, "Projectile_Does_Hitpoint_Damage").empty()) pd.does_hitpoint_damage = types.get_bool(t, "Projectile_Does_Hitpoint_Damage");
-            const int32_t cat = tc::projectile_category_index(types.get_string(t, "Projectile_Category"));
-            pd.category = static_cast<tc::ProjectileCategory>(cat < 0 ? 0 : cat);
-            tables_->combat.projectiles.push_back(pd);
-            l1_extra_projectiles_.emplace_back(static_cast<int32_t>(t), static_cast<int32_t>(tables_->combat.projectiles.size() - 1));
+            const int32_t idx = catalog_->extend_projectile(*tables_build_, static_cast<uint32_t>(t));
+            if (idx >= 0) l1_extra_projectiles_.emplace_back(static_cast<int32_t>(t), idx);
         }
 }
 

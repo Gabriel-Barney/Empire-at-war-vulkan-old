@@ -28,7 +28,7 @@
 {BindingKind::Global, "LuaEndCinematicCamera", "End_Cinematic_Camera", 153, BindingEffect::Recorded, "engine/apps/game/app/app_session.cpp", ""},
 {BindingKind::Global, "LuaEndCinematicMode", "End_Cinematic_Mode", 0, BindingEffect::Recorded, "engine/apps/game/app/app_session.cpp", ""},
 {BindingKind::Global, "EvaluatePerceptionClass", "EvaluatePerception", 147, BindingEffect::Full, "", ""},
-{BindingKind::Global, "EvaluateTypeListClass", "EvaluateTypeList", 2, BindingEffect::Partial, "[inferred] bind_players.cpp:1082", ""},
+{BindingKind::Global, "EvaluateTypeListClass", "EvaluateTypeList", 2, BindingEffect::Partial, "[inferred] bind_players.cpp:1076", ""},
 {BindingKind::Global, "EvaluateGalacticContextClass", "Evaluate_In_Galactic_Context", 14, BindingEffect::Full, "", ""},
 {BindingKind::Global, "LuaFadeOff", "Fade_Off", 0, BindingEffect::Recorded, "engine/apps/game/app/app_story_camera.cpp", ""},
 {BindingKind::Global, "LuaFadeOn", "Fade_On", 5, BindingEffect::Recorded, "engine/apps/game/app/app_story_camera.cpp", ""},

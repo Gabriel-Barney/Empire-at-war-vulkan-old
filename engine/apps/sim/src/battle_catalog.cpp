@@ -254,8 +254,32 @@ int32_t BattleCatalog::projectile(uint32_t t, BuildState& s) const {
     if (t >= types_->size()) return -1;
     const auto it = s.proj_index.find(t);
     if (it != s.proj_index.end()) return it->second;
+    tc::ProjectileDesc p = projectile_desc(t, s.full != nullptr);
+    if (s.full) s.full->projectiles.push_back(projectile_visuals(t));
+    const int32_t idx = static_cast<int32_t>(s.d->projectiles.size());
+    s.d->projectiles.push_back(std::move(p));
+    s.proj_index[t] = idx;
+    return idx;
+}
+
+int32_t BattleCatalog::extend_projectile(BattleBuild& b, uint32_t t) const { return projectile(t, b.state); }
+
+BattleTables::ProjectileVisuals BattleCatalog::projectile_visuals(uint32_t t) const {
+    const objects::GameObjectTypes& ty = *types_;
+    BattleTables::ProjectileVisuals v;
+    if (t >= ty.size()) return v;
+    v.detonation = type_or_none(ty.get_string(t, "Projectile_Object_Detonation_Particle"));
+    v.armor_reduced = type_or_none(ty.get_string(t, "Projectile_Object_Armor_Reduced_Detonation_Particle"));
+    v.absorbed = type_or_none(ty.get_string(t, "Projectile_Absorbed_By_Shields_Particle"));
+    v.lifetime = type_or_none(ty.get_string(t, "Projectile_Lifetime_Detonation_Particle"));
+    v.ground = type_or_none(ty.get_string(t, "Projectile_Ground_Detonation_Particle"));  // tru1 t08
+    return v;
+}
+
+tc::ProjectileDesc BattleCatalog::projectile_desc(uint32_t t, bool full) const {
     const objects::GameObjectTypes& ty = *types_;
     tc::ProjectileDesc p;
+    if (t >= ty.size()) return p;
     p.name = std::string(ty.raw().types().name[t]);
     p.max_speed = ty.columns().max_speed[t];
     p.damage = ty.get_float(t, "Projectile_Damage");
@@ -284,6 +308,9 @@ int32_t BattleCatalog::projectile(uint32_t t, BuildState& s) const {
     p.blast_dropoff = ty.get_bool(t, "Projectile_Blast_Area_Dropoff");  // mcx4 t03 (TACTICAL_COMBAT §3.5)
     p.blast_dropoff_tiers = ty.get_int(t, "Projectile_Blast_Area_Dropoff_Tiers");
     p.bomb_fall_accel = ty.get_float(t, "Projectile_Bomb_Fall_Accel_Rate");  // mcx4 t18 (MCX4_RE_ANSWERS_TACTICAL §12)
+    // ref5 t01 (TACTICAL_COMBAT §3.5 area damage step 8): the blast stops at this many victims, for every projectile
+    // (unit weapons, hard points, death projectiles, land strikes); 0 = no cap. Converter 0x6 (int): "1.0" reads 1.
+    p.blast_max_victims = ty.get_int(t, "Projectile_Blast_Area_Max_Victims");
     // mcx4 t10 (TACTICAL_COMBAT §3.8; type ctor 0x367250 sets both to 1.0 [H]): the Redirect_Blaster roll factors
     if (!ty.get_string(t, "Projectile_Redirect_Chance_Modifier").empty()) p.redirect_chance_modifier = ty.get_float(t, "Projectile_Redirect_Chance_Modifier");
     if (!ty.get_string(t, "Projectile_Block_Chance_Modifier").empty()) p.block_chance_modifier = ty.get_float(t, "Projectile_Block_Chance_Modifier");
@@ -291,7 +318,7 @@ int32_t BattleCatalog::projectile(uint32_t t, BuildState& s) const {
         p.blast_immune_faction = name_crc(f);  // tru1 t04
     p.damages_random_hardpoints = ty.get_bool(t, "Projectile_Damages_Random_Hard_Points");
     if (!(p.max_speed > 0.0f)) p.max_speed = 20.0f;  // [port] a projectile type without Max_Speed still flies
-    if (s.full) {
+    if (full) {
         // S10-int: S9 projectile fields (ABILITIES_HARDPOINTS 4.3, 4.4, 4.7; TACTICAL_COMBAT 3.5).
         if (cat >= 0 && cat <= 9) p.category = static_cast<tc::ProjectileCategory>(cat);
         // refixf t01: ROCKET / MPTL_ROCKET spline flight (S9_DEATH_CLONE_SHIELDS.md §2.4). The distances use converter 0x8
@@ -358,18 +385,8 @@ int32_t BattleCatalog::projectile(uint32_t t, BuildState& s) const {
             p.combat_mod_mask = ty.get_mask(t, "Projectile_Combat_Mod_Category_Mask");
         }
         // --- end OI abilities ---
-        BattleTables::ProjectileVisuals v;
-        v.detonation = type_or_none(ty.get_string(t, "Projectile_Object_Detonation_Particle"));
-        v.armor_reduced = type_or_none(ty.get_string(t, "Projectile_Object_Armor_Reduced_Detonation_Particle"));
-        v.absorbed = type_or_none(ty.get_string(t, "Projectile_Absorbed_By_Shields_Particle"));
-        v.lifetime = type_or_none(ty.get_string(t, "Projectile_Lifetime_Detonation_Particle"));
-        v.ground = type_or_none(ty.get_string(t, "Projectile_Ground_Detonation_Particle"));  // tru1 t08
-        s.full->projectiles.push_back(v);
     }
-    const int32_t idx = static_cast<int32_t>(s.d->projectiles.size());
-    s.d->projectiles.push_back(std::move(p));
-    s.proj_index[t] = idx;
-    return idx;
+    return p;
 }
 
 int32_t BattleCatalog::hardpoint(std::string_view name, BuildState& s) const {

@@ -8,6 +8,14 @@ write, the documented manual fix is "take dev's, then regenerate". land_on_dev.c
   regen     after land_on_dev built the merged HEAD (build_agent.cmd msvc wt all none): runs regen_goldens for the listed
             goldens only, puts back any other golden it rewrote (the land check's fast tier then shows that drift as a
             failure, for a person to look at) and commits the listed ones. Exit 1 when regen_goldens failed.
+  slow [BASE [HEAD]] [--dry-run]
+            ref6 t06, after land_on_dev's fast-tier check: the slow-labelled ctest entries of the warm MSVC tree whose
+            command names a golden the branch changed against BASE (default origin/dev; any file under a testdata/,
+            goldens/ or benchmark/ folder, matched as the path or its stem) run through build_agent.cmd (fast tier only
+            otherwise: a game smoke golden or a slow headless golden the branch moved is checked before it lands). Exit 1
+            when one fails. It also prints a line when the nightly dev gate (tools\\gate_scheduled.cmd: every test on the
+            tip of origin/dev, slow goldens included - the daily dev-tip record) has not written logs\\gate_history.txt in
+            26 hours. --dry-run prints the ctest regex instead of running it.
 Goldens it handles: engine/apps/headless/testdata/*.crc, engine/apps/game/testdata/game_smoke_*.crc / .rec and
 tests/benchmark/* (scenario files). Goldens a test exe owns (--regen / --write-golden) stay manual.
 Selftest: golden_merge.py --selftest
@@ -137,6 +145,96 @@ def cmd_regen(cwd, tree) -> int:
     return 0
 
 
+GOLDEN_DIRS = re.compile(r'(^|/)(testdata|goldens|benchmark)/')
+
+
+def changed_goldens(cwd, base, head):
+    """Golden-like files the branch changed against `base`: anything under a testdata/, goldens/ or benchmark/ folder."""
+    _, out, _ = git(cwd, 'diff', '--name-only', f'{base}...{head}')
+    return [f for f in out.splitlines() if f and GOLDEN_DIRS.search(f.replace('\\', '/'))]
+
+
+def slow_tests_for(tests, files, root):
+    """Names of the slow-labelled ctest entries (ctest --show-only=json-v1 'tests') whose command names one of `files`
+    (repo-relative): the file's path, or its path without the extension (the smoke golden checks pass a stem)."""
+    def norm(p):
+        return os.path.normcase(os.path.abspath(p)).replace('\\', '/')
+    keys = set()
+    for f in files:
+        p = norm(os.path.join(str(root), f))
+        keys.add(p)
+        keys.add(os.path.splitext(p)[0])
+        if '/benchmark/' in p:  # a scenario's .crc / .alsv / .acmd: its checks name the .abench
+            keys.add(os.path.splitext(p)[0] + '.abench')
+    out = []
+    for t in tests:
+        labels = []
+        for pr in t.get('properties', []):
+            if pr.get('name') == 'LABELS':
+                labels = pr.get('value') or []
+        if 'slow' not in labels:
+            continue
+        hit = False
+        for a in t.get('command') or []:
+            for part in re.split(r'[=;]', a):
+                if part and ('/' in part or '\\' in part) and norm(part) in keys:
+                    hit = True
+        if hit:
+            out.append(t['name'])
+    return sorted(set(out))
+
+
+def cmd_slow(cwd, base, head, tree, dry) -> int:
+    """ref6 t06: run the slow golden checks of the goldens the branch changed (the landing check's fast tier skips them)."""
+    files = changed_goldens(cwd, base, head)
+    if not files:
+        print('golden_merge slow: the branch changes no golden; no slow golden check to run')
+        return 0
+    tdir = Path(cwd) / tree
+    script = Path(cwd) / 'build_agent.cmd'
+    if not dry:
+        # configure and build the warm tree first: it may be missing (the land check also accepts a build-msvc stamp) or
+        # configured before this branch added a slow golden test
+        print('golden_merge slow: building the merged HEAD in the warm tree (no tests) to list its slow golden checks', flush=True)
+        b = subprocess.run(f'cmd.exe /d /s /c ""{script}" msvc wt all none"', cwd=cwd)
+        if b.returncode != 0:
+            print('golden_merge slow: the warm tree build failed (above)')
+            return 1
+    import shutil
+    ctest = shutil.which('ctest') or str(ROOT / 'toolchain' / 'venv' / 'Scripts' / 'ctest.exe')
+    r = subprocess.run([ctest, '--test-dir', str(tdir), '--show-only=json-v1'], cwd=cwd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f'golden_merge slow: no test list in {tdir} ({(r.stderr or r.stdout).strip()}); build it: build_agent.cmd msvc wt all')
+        return 1
+    import json
+    names = slow_tests_for(json.loads(r.stdout).get('tests', []), files, cwd)
+    if not names:
+        print(f'golden_merge slow: {len(files)} golden file(s) changed, none checked by a slow test')
+        return 0
+    regex = '^(' + '|'.join(names) + ')$'  # anchored: a name must not pull in its _w* / _land* siblings
+    print(f'golden_merge slow: the branch changed {len(files)} golden file(s); slow checks: {" ".join(names)}', flush=True)
+    if dry:
+        print(regex)
+        return 0
+    p = subprocess.run(f'cmd.exe /d /s /c ""{script}" msvc wt all "{regex}""', cwd=cwd)
+    return 0 if p.returncode == 0 else 1
+
+
+def gate_age_note(main_root):
+    """The nightly dev gate (tools\\gate_scheduled.cmd: build_gate.cmd on origin/dev, every test, slow goldens included) is
+    the daily dev-tip record; a line when its history has no run in the last 26 hours."""
+    import time
+    hist = Path(main_root) / 'logs' / 'gate_history.txt'
+    if not hist.is_file():
+        return 'golden_merge: no nightly dev gate history (logs\\gate_history.txt): slow goldens on dev are unchecked; ' \
+               'tools\\install_gate_task.cmd registers it'
+    age_h = (time.time() - hist.stat().st_mtime) / 3600.0
+    if age_h > 26.0:
+        return (f'golden_merge: the nightly dev gate (all tests, slow goldens included) last wrote its history '
+                f'{age_h / 24.0:.1f} days ago: slow goldens on dev may be stale (schtasks /Query /TN AlamoGateNightly)')
+    return ''
+
+
 def selftest() -> int:
     bad = []
 
@@ -152,6 +250,30 @@ def selftest() -> int:
     runs = regen_runs(['engine/apps/headless/testdata/a.b.crc', 'engine/apps/game/testdata/game_smoke_land.crc'])
     check(runs == [['--only', 'headless', '--match', r'^(a\.b\.crc)$', '--no-bench'], ['--only', 'game']], f'runs {runs}')
     check(regen_runs(['tests/benchmark/x.crc']) == [['--only', 'bench']], 'bench-only run')
+    # ref6 t06: slow checks of changed goldens (a --golden path, a -DGOLDEN= stem, fast tests and other goldens left out)
+    root = ROOT
+    gd = (root / 'engine/apps/game/testdata').as_posix()
+    hd = (root / 'engine/apps/headless/testdata').as_posix()
+    tests = [
+        {'name': 'smoke_golden', 'command': ['cmake', f'-DGOLDEN={gd}/game_smoke_land', '-P', 'x.cmake'],
+         'properties': [{'name': 'LABELS', 'value': ['slow']}]},
+        {'name': 'smoke_other', 'command': ['cmake', f'-DGOLDEN={gd}/game_smoke_campaign'],
+         'properties': [{'name': 'LABELS', 'value': ['slow']}]},
+        {'name': 'headless_slow', 'command': ['alamo_headless.exe', '--golden', f'{hd}/land_golden.crc'],
+         'properties': [{'name': 'LABELS', 'value': ['slow']}]},
+        {'name': 'headless_fast', 'command': ['alamo_headless.exe', '--golden', f'{hd}/land_golden.crc'], 'properties': []},
+    ]
+    got = slow_tests_for(tests, ['engine/apps/game/testdata/game_smoke_land.crc',
+                                 'engine/apps/headless/testdata/land_golden.crc'], root)
+    check(got == ['headless_slow', 'smoke_golden'], f'slow tests {got}')
+    check(slow_tests_for(tests, ['engine/apps/sim/src/x.cpp'], root) == [], 'no golden, no slow test')
+    bd = (root / 'tests/benchmark').as_posix()
+    bench = [{'name': 'bench_land', 'command': ['alamo_headless.exe', '--bench', f'{bd}/land_battle.abench'],
+              'properties': [{'name': 'LABELS', 'value': ['slow']}]}]
+    check(slow_tests_for(bench, ['tests/benchmark/land_battle.crc'], root) == ['bench_land'], 'bench stem')
+    check(bool(GOLDEN_DIRS.search('engine/apps/game/testdata/game_smoke_land.rec')) and
+          bool(GOLDEN_DIRS.search('tests/goldens/mods/tr_space.crc')) and not GOLDEN_DIRS.search('engine/apps/sim/src/a.cpp'),
+          'golden dirs')
     with tempfile.TemporaryDirectory() as td:
         repo = Path(td)
 
@@ -203,6 +325,18 @@ def main(argv) -> int:
         return cmd_resolve(cwd)
     if argv[:1] == ['regen']:
         return cmd_regen(cwd, argv[1] if len(argv) > 1 else build_trees.WARM_TREE)
+    if argv[:1] == ['slow']:
+        rest = argv[1:]
+        dry = '--dry-run' in rest
+        rest = [a for a in rest if a != '--dry-run']
+        base = rest[0] if len(rest) > 0 else 'origin/dev'
+        head = rest[1] if len(rest) > 1 else 'HEAD'
+        rc = cmd_slow(cwd, base, head, build_trees.WARM_TREE, dry)
+        _, gcd, _ = git(cwd, 'rev-parse', '--path-format=absolute', '--git-common-dir')
+        note = gate_age_note(Path(gcd).parent) if gcd else ''
+        if note:
+            print(note)
+        return rc
     print(__doc__)
     return 2
 

@@ -66,29 +66,10 @@ bool object_arg(Call& c, int i, ObjectHandle& out) {
     return true;
 }
 
-// A position-convertible argument: game object, PositionWrapper (bind_objects.cpp layout: x / y float bits in
-// Ud::value, z in Ud::id), AI target with an object.
-bool position_arg(Call& c, int i, Vec3& out) {
-    objects::ObjectStore* st = c.vm->host.store;
-    ObjectHandle h;
-    if (object_arg(c, i, h)) {
-        out = st->position(h);
-        return true;
-    }
-    if (const Ud* p = c.userdata(i, cls_position())) {
-        out = detail::position_of(*p);
-        return true;
-    }
-    if (const Ud* t = c.userdata(i, cls_target())) {
-        AiScriptHost* ai = c.vm->owner ? ai_host(*c.vm->owner) : nullptr;
-        const ObjectHandle th = ai ? ai->target_object(t->id) : ObjectHandle{};
-        if (st && th && st->alive(th)) {
-            out = st->position(th);
-            return true;
-        }
-    }
-    return false;
-}
+// ref5 t03: position arguments convert through detail::position_arg (vm_internal.hpp): a region AI target or a task
+// force is a position here too, as in every family.
+using detail::PosArg;
+using detail::position_arg;
 
 void push_cells(Call& c, FogScriptHooks& hk, fw::FogCells cells) {
     Ud u;
@@ -119,7 +100,7 @@ int m_reveal(Call& c) {
     if (!c.is_number(3)) return c.script_error_stop("%s -- Expected number as 3rd parameter.", kName);
     if (c.has(4) && !c.is_number(4)) return c.script_error_stop("%s -- Expected number as 4th parameter.", kName);
     Vec3 p{};
-    if (!position_arg(c, 2, p)) return c.script_error_stop("%s -- Undable to get a valid position", kName);
+    if (position_arg(c, 2, p) != PosArg::Ok) return c.script_error_stop("%s -- Undable to get a valid position", kName);
     const auto radius = static_cast<float>(c.number(3));
     const float dense = c.has(4) ? static_cast<float>(c.number(4)) : radius;
     push_cells(c, *hk, hk->fog->lua_reveal_position(player->id, p.x, p.y, radius, dense));

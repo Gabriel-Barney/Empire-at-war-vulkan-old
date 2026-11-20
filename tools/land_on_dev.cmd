@@ -12,10 +12,12 @@ rem      2026-11-13); any other conflict stops here for you to resolve
 rem   4. refuses generated or oversized new files (tools\lint\check_tracked.py)
 rem   5. refuses a merged HEAD that has no passing MSVC build of every module with the fast tier (tools\lint\verified_build.py;
 rem      runs build_agent.cmd msvc wt all itself when there is none; docs / *.md / .claude-only changes need none), then
+rem      runs the slow golden checks of the goldens the branch changed (tools\lint\golden_merge.py slow, ref6 t06), then
 rem      pushes HEAD to origin dev as a plain fast-forward (never --force; a rejected push means dev moved: rerun)
 rem   6. deletes this branch on origin when it is not dev
-rem Run the build / tests the change needs (docs/BUILD.md) BEFORE this; dev must stay green. Step 5 covers only the
-rem MSVC fast tier: clang, ASan and slow tests are still yours to run when the change needs them.
+rem Run the build / tests the change needs (docs/BUILD.md) BEFORE this; dev must stay green. Step 5 covers the MSVC fast
+rem tier and the slow checks of changed goldens: clang, ASan and other slow tests are still yours to run when the change
+rem needs them (a code change that moves a slow golden without touching it is caught by the nightly dev gate).
 rem The local branch and its worktree are left alone (git cannot delete a checked-out branch); the app or
 rem "git branch -d <name>" from another checkout removes them once the work is on dev.
 setlocal
@@ -113,6 +115,18 @@ if errorlevel 1 (
     echo Fix it here, commit, then rerun this script. If the failure is already on origin/dev, say so to Gabriel and fix dev first.
     exit /b 1
   )
+)
+
+rem ref6 t06: the fast tier skips the slow goldens, so the slow ctest entries that check a golden this branch changed run
+rem here (tools\lint\golden_merge.py slow, through build_agent.cmd). It also prints a line when the nightly dev gate
+rem (tools\gate_scheduled.cmd, every test on origin/dev's tip: the daily slow-golden record) has not run for a day.
+cd /d "%~dp0.."
+"%PY%" -I "%~dp0lint\golden_merge.py" slow origin/dev HEAD
+if errorlevel 1 (
+  echo.
+  echo land_on_dev: a slow golden check of a golden this branch changed failed, see above. Nothing was pushed.
+  echo Regenerate it ^(tools\regen_goldens.cmd^) only when the move is intended and attributed, commit, then rerun this script.
+  exit /b 1
 )
 
 git push origin HEAD:refs/heads/dev

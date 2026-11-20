@@ -222,6 +222,15 @@ public:
     struct BattleBuild;
     std::unique_ptr<BattleBuild> begin_battle(BattleTables& out, bool space) const;
     void extend_battle(BattleBuild& b, const std::vector<uint32_t>& unit_types, std::vector<uint32_t>& out_unit_index) const;
+    // ref5 t01: projectile type `t` in the build's tables (the battle's land strikes: Bombardment_Projectile types are not
+    // unit weapons): its CombatData index, appending projectile_desc(t) and its visuals the first time (a type a unit
+    // already fires keeps its entry). -1 for an out-of-range type.
+    int32_t extend_projectile(BattleBuild& b, uint32_t t) const;
+    // ref5 t01: the one ProjectileDesc builder for projectile type `t` (every caller: unit weapons, hard points, death
+    // projectiles, land strikes). `full`: the battle tables' fields (S9 category, rockets, detonation effects); false is
+    // the plain build() view. Default desc for an out-of-range type.
+    tactical::combat::ProjectileDesc projectile_desc(uint32_t t, bool full = true) const;
+    BattleTables::ProjectileVisuals projectile_visuals(uint32_t t) const;
 
 private:
     using Tags = std::vector<std::pair<std::string, std::string>>;  // (upper-cased tag, trimmed text)

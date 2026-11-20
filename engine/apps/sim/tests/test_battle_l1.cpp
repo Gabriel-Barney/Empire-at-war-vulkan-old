@@ -578,6 +578,8 @@ struct LandRun {
     bool bombard_started = false, bombard_hit = false, bombard_reset = false;
     bool run_started = false, bombers_flew = false, run_done = false, refused_unavailable = false;
     bool bombard_fed = false, run_fed = false;  // mcx4 t13: the strike_starts presentation feed
+    // ref5 t01: the strike projectile in the battle tables equals the catalog's one builder, visuals stay index-aligned.
+    bool strike_desc_found = false, strike_desc_same = false, strike_visuals_aligned = false;
     // cu9 t17: the HUD cooldown query (bombing_run_frames_until_available, 0x4950f0) when the run starts / ends.
     uint32_t run_wait_at_start = 1, run_wait_after = 0;
     // cu9g t02: the dial fraction (bombing_run_cooldown_fraction, 0x495250) and command 28 outcomes.
@@ -665,6 +667,16 @@ LandRun run_land(const Data& d, int32_t workers, bool via_command = false) {
             CHECK(followers > 0);
             out.weather_on = b->weather().active();
             phase0 = b->weather().phase_index();
+            {
+                const auto& projs = b->combat().data().projectiles;
+                const uint32_t bt = type_of(d, "L1_Bombard_Proj");
+                for (const tactical::combat::ProjectileDesc& pd : projs)
+                    if (pd.name == "L1_Bombard_Proj") {
+                        out.strike_desc_found = true;
+                        out.strike_desc_same = pd == d.catalog->projectile_desc(bt);
+                    }
+                out.strike_visuals_aligned = b->tables().projectiles.size() == projs.size();
+            }
             for (const objects::ObjectHandle h : st.owned_by(0))
                 if (st.alive(h) && b->combat().has_unit(st.id(h))) {
                     victim = st.id(h);
@@ -798,6 +810,9 @@ void test_land(const Data& d) {
     CHECK(a.refused_unavailable && a.bombard_started && a.bombard_hit && a.bombard_reset);
     CHECK(a.run_started && a.bombers_flew && a.run_done);
     CHECK(a.bombard_fed && a.run_fed);  // mcx4 t13: strike_starts names the bombardment and the run's first bomber
+    std::printf("  strike projectile: found %d same as catalog %d visuals aligned %d\n", a.strike_desc_found, a.strike_desc_same,
+                a.strike_visuals_aligned);
+    CHECK(a.strike_desc_found && a.strike_desc_same && a.strike_visuals_aligned);  // ref5 t01
     // Available = no wait; a finished run waits its interval again (ready := end frame + interval).
     std::printf("  bombing run wait: %u at start, %u after the run\n", a.run_wait_at_start, a.run_wait_after);
     CHECK(a.run_wait_at_start == 0 && a.run_wait_after > 0);
@@ -2410,6 +2425,50 @@ void test_gravity_field() {
     CHECK(std::fabs(r.slowed_factor - 0.1f) < 1e-4f && r.plain_factor == 1.0f);
 }
 
+// ref5 t01 (TACTICAL_COMBAT §3.5 area damage step 8): Projectile_Blast_Area_Max_Victims caps a unit-fired blast as it caps
+// a land strike's. The catalog's one builder reads it for a unit weapon (it read only in the strike copy before, so a
+// unit's blast was never capped), and a strike added through extend_projectile gets the same ProjectileDesc as the unit's.
+const char* kCapTypes = R"(
+ <Projectile Name="L1_Cap_Proj"><Max_Speed>30</Max_Speed><Projectile_Damage>5</Projectile_Damage>
+  <Projectile_Blast_Area_Damage>50</Projectile_Blast_Area_Damage><Projectile_Blast_Area_Range>300</Projectile_Blast_Area_Range>
+  <Projectile_Blast_Area_Max_Victims>2</Projectile_Blast_Area_Max_Victims><Projectile_Category>GRENADE</Projectile_Category>
+  <Max_Rate_Of_Turn>4.5</Max_Rate_Of_Turn></Projectile>
+ <Projectile Name="L1_Slow_Proj"><Projectile_Damage>5</Projectile_Damage></Projectile>
+ <GroundInfantry Name="L1_Cap_Trooper"><Variant_Of_Existing_Type>S10_Trooper</Variant_Of_Existing_Type>
+  <Behavior>SELECTABLE, WEAPON</Behavior><Projectile_Types>L1_Cap_Proj</Projectile_Types></GroundInfantry>
+)";
+
+void test_blast_cap() {
+    const auto d = make_data("alamo_sim_l1_blastcap", kCapTypes);
+    const uint32_t cap = type_of(*d, "L1_Cap_Proj"), slow = type_of(*d, "L1_Slow_Proj"), tr = type_of(*d, "L1_Cap_Trooper");
+    std::vector<uint32_t> idx;
+    const BattleTables bt = d->catalog->build_battle({tr}, idx, false);
+    const tactical::combat::UnitDesc& u = bt.combat.units[idx[0]];
+    CHECK(u.weapon_projectile >= 0);
+    if (u.weapon_projectile < 0) return;
+    const tactical::combat::ProjectileDesc& w = bt.combat.projectiles[static_cast<size_t>(u.weapon_projectile)];
+    std::printf("  ref5 t01 blast cap: unit weapon max victims %d category %d lobbed %d turn %.2f\n", w.blast_max_victims,
+                static_cast<int>(w.category), w.lobbed ? 1 : 0, static_cast<double>(w.max_rate_of_turn));
+    CHECK(w.blast_max_victims == 2 && w.lobbed && w.category == tactical::combat::ProjectileCategory::Grenade);
+    CHECK(w == d->catalog->projectile_desc(cap));
+    // Strike path: a fresh build appends the type with the same desc and its visuals; a type a unit already fires keeps
+    // its entry.
+    BattleTables a;
+    const auto ba = d->catalog->begin_battle(a, false);
+    const int32_t ia = d->catalog->extend_projectile(*ba, cap);
+    CHECK(ia == 0 && a.combat.projectiles.size() == 1 && a.projectiles.size() == 1 && a.combat.projectiles[0] == w);
+    const int32_t is = d->catalog->extend_projectile(*ba, slow);
+    // (a type without Max_Speed reads the type default 0.25, kDefaults, the same through either path)
+    CHECK(is == 1 && a.combat.projectiles[1] == d->catalog->projectile_desc(slow) && a.combat.projectiles[1].max_speed > 0.0f &&
+          a.projectiles.size() == 2);
+    BattleTables b;
+    const auto bb = d->catalog->begin_battle(b, false);
+    std::vector<uint32_t> idx2;
+    d->catalog->extend_battle(*bb, {tr}, idx2);
+    const size_t n = b.combat.projectiles.size();
+    CHECK(d->catalog->extend_projectile(*bb, cap) == b.combat.units[idx2[0]].weapon_projectile && b.combat.projectiles.size() == n);
+}
+
 // s78n t26 closing review (MOVEMENT §3.4 "Units with Walk_Transition" [H]): the shipped AT_ST_Walker sets Walk_Transition
 // and no OverrideAcceleration / OverrideDeceleration; S = Scale_Factor 1.6 x Movement_Animation_Speed 0.8117. With a
 // 16-frame MOVESTART (synthetic clip data) its first moving frame is a = V^2 / (16 S) = 0.168646 (V = 1.2 x 1.56), not V.
@@ -2644,6 +2703,7 @@ int main(int argc, char** argv) {
     test_script_control(*d);  // STY1 t01
     test_sw_fire();   // s78f t05: command 25
     test_gravity_field();  // TRU1 t03
+    test_blast_cap();      // ref5 t01
     test_foc();
     if (g_fail) {
         std::printf("alamo_sim_l1_tests: %d failure(s)\n", g_fail);
