@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdio>
 #include <map>
+#include <span>
 
 #include "alamo/ai/pp_marshallers.hpp"  // ref5 t05
 #include "alamo/core/sim_rng.hpp"
@@ -18,12 +19,9 @@ namespace {
 
 constexpr float kVeto = kAiBigFloat;
 
-struct ContrastEntry {
-    int32_t row = -1;   // contrast-table row; -1 = the untyped layer total
-    bool space = false; // layer
-    double target = 0.0;
-    bool escort = false;  // q6 t19: entry of the escort list (AI_TACTICAL §7.7.1, flag 1)
-};
+// A contrast list entry (ref5 t05: the galactic shape, so both modes share the 0x72ac70 / 0x72b940 arithmetic in
+// pp_marshallers.hpp). Which list an entry is in follows from its index (esc_base).
+using ContrastEntry = PpContrastEntry;
 
 struct PpRec {  // rec[i]
     int32_t type = -1;
@@ -178,29 +176,23 @@ struct TacPp {
         const auto* x = ti(t);
         return x ? in.contrast->ai_weight(static_cast<size_t>(row), x->name, x->category) : 0.0f;
     }
-    // The list's entries: the main list [0, esc_base), the escort list [esc_base, end).
+    // The list's entries: the main list [0, esc_base), the escort list [esc_base, end), and their remaining values.
     size_t list_begin(bool escort) const { return escort ? esc_base : 0; }
     size_t list_end(bool escort) const { return escort ? entries.size() : std::min(esc_base, entries.size()); }
-    // 0x72ac70 in float (ref5 t05, AI_GALACTIC_TOKENS §9.8 item 4 / §9.8a): total = sum of (float)target over the layer's typed
-    // entries; residual = sum of (rem / target) x (target / total) over those with target > 0 and rem > 0; <= tolerance.
+    std::span<const ContrastEntry> list(bool escort) const {
+        return std::span<const ContrastEntry>(entries).subspan(list_begin(escort), list_end(escort) - list_begin(escort));
+    }
+    std::span<const double> list_remaining(bool escort) const {
+        const size_t b = std::min(list_begin(escort), remaining.size()), e = std::min(list_end(escort), remaining.size());
+        return std::span<const double>(remaining).subspan(b, e - b);
+    }
+    // 0x72ac70 in float (ref5 t05, AI_GALACTIC_TOKENS §9.8 item 4 / §9.8a), shared with galactic.
     bool layer_satisfied(bool space, bool escort = false) const {
-        float total = 0.0f;
-        for (size_t e = list_begin(escort); e < list_end(escort); ++e)
-            if (entries[e].row >= 0 && entries[e].space == space) total += static_cast<float>(entries[e].target);
-        float residual = 0.0f;
-        for (size_t e = list_begin(escort); e < list_end(escort) && e < remaining.size(); ++e) {
-            if (entries[e].row < 0 || entries[e].space != space) continue;
-            const auto t = static_cast<float>(entries[e].target), r = static_cast<float>(remaining[e]);
-            if (!(t > 0.0f && r > 0.0f)) continue;
-            residual += (r / t) * (t / total);
-        }
-        return residual <= tolerance;
+        return pp_contrast_layer_satisfied(list(escort), list_remaining(escort), space, tolerance);
     }
     // 0x72b940 "still allowed": an untyped total of the list (row -1) still short on a layer the candidate covers.
     bool total_open(bool escort, bool covers_space, bool covers_ground) const {
-        for (size_t e = list_begin(escort); e < list_end(escort) && e < remaining.size(); ++e)
-            if (entries[e].row < 0 && (entries[e].space ? covers_space : covers_ground) && remaining[e] > 0.0) return true;
-        return false;
+        return pp_contrast_total_open(list(escort), list_remaining(escort), covers_space, covers_ground);
     }
     // 0x6bff00: every active layer of the list passes 0x72ac70.
     bool list_met(bool escort) const {
@@ -453,7 +445,7 @@ public:
         const float fp = static_cast<float>(p_.in.recent_failures) * p_.def.per_failure_contrast_adjust;
         p_.tolerance = 1.0f - (fp + p_.def.min_contrast_scale) / (fp + p_.def.max_contrast_scale);
         // ref5 t05 (AI_GALACTIC_TOKENS §9.8a, 0x5f1d00): both terms widened before the add, as galactic (§9.8 item 3).
-        const double scale = (static_cast<double>(p_.def.max_contrast_scale) + static_cast<double>(fp)) * static_cast<double>(p_.in.contrast_multiplier);
+        const double scale = pp_contrast_scale(p_.def.max_contrast_scale, fp, p_.in.contrast_multiplier);
         const bool space_mode = p_.in.mode == TacticalMode::Space;
         // [M] tactical layers: the mode's own layer holds every enemy; the other layer is empty.
         const double total = p_.in.enemy_strength(~uint64_t{0});
@@ -477,13 +469,13 @@ public:
             p_.has_escort_list = true;
             const double et = es(~uint64_t{0});
             const double es_space = space_mode ? et : 0.0, es_ground = space_mode ? 0.0 : et;
-            p_.entries.push_back({-1, true, es_space, true});
-            p_.entries.push_back({-1, false, es_ground, true});
+            p_.entries.push_back({-1, true, es_space});
+            p_.entries.push_back({-1, false, es_ground});
             for (const bool space : {true, false})
                 for (size_t j = 0; j < rows; ++j) {
                     const double t = space ? es_space : es_ground;
                     const double v = t > 0.0 ? es(p_.in.contrast->rows[j].enemy_mask) * scale : 0.0;
-                    p_.entries.push_back({static_cast<int32_t>(j), space, v, true});
+                    p_.entries.push_back({static_cast<int32_t>(j), space, v});
                 }
         }
         p_.remaining.resize(p_.entries.size());
@@ -784,8 +776,8 @@ bool retest_tactical_pp(const TacticalPpInput& in, const std::vector<PpRetestPic
                 if (!(space ? pp.layer_active_space : pp.layer_active_ground)) continue;
                 const size_t e = base + (space ? 0 : 1);
                 double total = 0.0, residual = 0.0;
-                for (size_t r = 0; r < pp.entries.size(); ++r) {
-                    if (pp.entries[r].row < 0 || pp.entries[r].space != space || pp.entries[r].escort != escort) continue;
+                for (size_t r = pp.list_begin(escort); r < pp.list_end(escort); ++r) {
+                    if (pp.entries[r].row < 0 || pp.entries[r].space != space) continue;
                     total += pp.entries[r].target;
                     residual += std::max(pp.remaining[r], 0.0);
                 }

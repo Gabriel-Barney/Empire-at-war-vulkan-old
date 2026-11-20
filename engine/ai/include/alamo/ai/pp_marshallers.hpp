@@ -10,6 +10,7 @@
 #pragma once
 #include <algorithm>
 #include <cstdint>
+#include <span>
 #include <vector>
 
 #include "alamo/ai/ai_plans.hpp"
@@ -159,6 +160,49 @@ inline double pp_contrast_pair_score(double remaining, float weight, double powe
     const double wp = static_cast<double>(weight) * power;
     const double d = std::max(remaining - wp, 0.0), m = std::max(remaining, wp);
     return m > 0.0 ? (1.0 - (d / m) * (d / m)) * static_cast<double>(weight) : 0.0;
+}
+
+// One entry of a Contrast requirement list (0x5f1990 galactic, 0x5f1d00 tactical): `row` = the EnemyContrastTypes row, -1
+// for a layer total; `space` = layer byte 0 (space) / false = layer byte 1 (ground); `target` = the required strength.
+struct PpContrastEntry {
+    int32_t row = -1;
+    bool space = false;
+    double target = 0.0;
+};
+
+// The contrast arithmetic of every mode (AI_GALACTIC_TOKENS §9.8, §9.8a: none of it tests the mode) [H]:
+// - the typed-row scale: ((double)MaxContrastScale + (double)(float)(f x PerFailureContrastAdjust)) x (double)multiplier
+//   (`failure_adjust` = the float product f x PFCA).
+inline double pp_contrast_scale(float max_contrast_scale, float failure_adjust, float multiplier) {
+    return (static_cast<double>(max_contrast_scale) + static_cast<double>(failure_adjust)) * static_cast<double>(multiplier);
+}
+// - 0x72ac70 satisfied test, in float, over one list: total = sum of (float)target over the layer's typed entries (row >= 0)
+//   in list order; residual = sum of (rem / target) x (target / total) over those with target > 0 and rem > 0;
+//   satisfied <=> residual <= tolerance.
+inline bool pp_contrast_layer_satisfied(std::span<const PpContrastEntry> entries, std::span<const double> remaining, bool space,
+                                        float tolerance) {
+    float total = 0.0f;
+    for (const PpContrastEntry& e : entries)
+        if (e.row >= 0 && e.space == space) total += static_cast<float>(e.target);
+    float residual = 0.0f;
+    for (size_t i = 0; i < entries.size() && i < remaining.size(); ++i) {
+        const PpContrastEntry& e = entries[i];
+        if (e.row < 0 || e.space != space) continue;
+        const auto t = static_cast<float>(e.target), r = static_cast<float>(remaining[i]);
+        if (!(t > 0.0f && r > 0.0f)) continue;
+        residual += (r / t) * (t / total);
+    }
+    return residual <= tolerance;
+}
+// - 0x72b940 "still allowed" after v <= 0: an untyped total (row -1) of the list still has remaining > 0 and the candidate
+//   covers that entry's layer (layer byte 1 ground -> rec+0x90, byte 0 space -> rec+0x91). Found by layer byte, not position.
+inline bool pp_contrast_total_open(std::span<const PpContrastEntry> entries, std::span<const double> remaining, bool covers_space,
+                                   bool covers_ground) {
+    for (size_t i = 0; i < entries.size() && i < remaining.size(); ++i) {
+        const PpContrastEntry& e = entries[i];
+        if (e.row < 0 && (e.space ? covers_space : covers_ground) && remaining[i] > 0.0) return true;
+    }
+    return false;
 }
 
 // The minimum checks 0x72b940 runs after v <= 0, once the gate passed (both modes): every task-force slot of the

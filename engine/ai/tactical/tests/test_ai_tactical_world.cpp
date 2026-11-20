@@ -1963,6 +1963,38 @@ void test_potential_plan() {
         CHECK(solve(true, r) && r.picks.size() == 1);
         CHECK(!solve(false, r) && r.last_veto == "Contrast");
     }
+    // 9. ref5 t05 slice 2 (AI_GALACTIC_TOKENS §9.8a): a pair counts only with P > 0, w > 0 and R > 0, and after v <= 0 the
+    //    plan-wide gate lets a candidate in only while an untyped total of its layer is still open. Frigates (1000 x
+    //    weight 1.5) against a corvette row of 400 and an untyped enemy total of 2000: frigate 1 meets the row (scores),
+    //    frigate 2 is allowed by the open total (1000 left), frigate 3 is vetoed (row met, total met) although the team
+    //    takes 3. The old rules scored the met row at full weight and took all three.
+    {
+        PpFixture f;
+        f.plan({{"MainForce", "Syn_Frigate = 1,3"}});
+        galactic::ContrastTable ct;
+        galactic::ContrastRow row;
+        row.enemy = "Corvette";
+        row.enemy_mask = f.mask("Corvette");
+        row.friendly.push_back({"Frigate", f.mask("Frigate"), 1.5f});
+        ct.rows.push_back(row);
+        const uint64_t corvettes = f.mask("Corvette");
+        TacticalPpInput in = f.input(TacticalMode::Space);
+        in.has_target = true;
+        in.target_object = 900;
+        in.target_position = {0.0f, 0.0f, 0.0f};
+        in.contrast = &ct;
+        in.enemy_strength = [corvettes](uint64_t m) { return m == corvettes ? 400.0 : 2000.0; };
+        in.free_units = {{11, 0, {100.0f, 0.0f, 0.0f}, 1.0f, false},
+                         {12, 0, {200.0f, 0.0f, 0.0f}, 1.0f, false},
+                         {13, 0, {300.0f, 0.0f, 0.0f}, 1.0f, false}};
+        TacticalPpResult r;
+        const bool solved = solve_tactical_pp(in, r);
+        std::printf("  retail contrast rules: solved %d, %zu picks (row met by 1, total by 2)\n", solved, r.picks.size());
+        CHECK(solved && r.picks.size() == 2);
+        // The untyped total is what lets frigate 2 in: with the total at the row's strength only frigate 1 is taken.
+        in.enemy_strength = [](uint64_t) { return 400.0; };
+        CHECK(solve_tactical_pp(in, r) && r.picks.size() == 1);
+    }
     // 6. Team expansion: category masks over types (mask overlap), names, exclusions.
     {
         PpFixture f;
