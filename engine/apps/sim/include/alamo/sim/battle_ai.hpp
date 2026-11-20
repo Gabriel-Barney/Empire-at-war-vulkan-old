@@ -149,9 +149,9 @@ public:
     // the view (what think() sees). Lane on only (TacticalAiSetup::ai_lane); otherwise `f` runs live.
     void run_as_lane(const std::function<void()>& f) {
         if (world_->ai_lane()) capture_lane_view();
-        lane_thinking_ = world_->ai_lane();
+        set_thinking(world_->ai_lane());
         f();
-        lane_thinking_ = false;
+        set_thinking(false);
     }
     ai::tactical::TacticalAiWorld& world() { return *world_; }
     const ai::tactical::TacticalAiWorld& world() const { return *world_; }
@@ -175,35 +175,18 @@ private:
 public:
     // ---- TacticalAiHost ----
     void fill(ai::tactical::PerceptionWorld& w, std::vector<ai::tactical::TacticalAiObject>& objects) override;
+    // The battle's signal lists of the tick just run (FrameEvents; ref5 t07: one call for the six lists).
+    //   opportunity: hard points whose opportunity target changed to a new live target since the previous call (ascending
+    //     unit id, then hard-point index [port: no in-tick order]); owner = the unit's team container when it has one.
+    //   attack_states: s78f t08, CombatSystem::attack_state_events. damaged: skai t15, signal 0x18 (unit_damaged_signals).
+    //   ability_finished: S7 t15 A1, TacticalBattle::ability_finished_events (signal 0x29, in order).
+    //   unloaded: a1j t01, TacticalBattle::landings_unloaded() (owner, galactic id, units), then the lane applies' records.
+    //   produced: q6 t19, TacticalBattle::production_done (land builds that went to the reinforcement pool).
+    void frame_events(uint32_t kinds, ai::tactical::FrameEvents& out) override;
     commands::RejectReason execute(uint8_t player, const commands::EventData& ev) override;
-    std::vector<ai::tactical::TacticalReinforcement> reinforcement_pool(int32_t player) override;
-    bool can_reinforce(int32_t player) override;
-    float population_cap(int32_t player) override;
-    float population_used(int32_t player) override;
-    const ai::tactical::DamageTrackingStore* damage_tracking() override;
-    const galactic::ContrastTable* contrast() override;
-    // --- A2 tactical: build pads (L1_S4_REMAINING §3.6 on TacticalBattle's pads) ---
-    std::vector<ai::tactical::TacticalPad> build_pads(int32_t player) override;
-
-    ai::tactical::PadCheck build_pad_check(int32_t player, int32_t pad, int32_t type) override;
-    bool can_build_now(int32_t player, int32_t type) override;
-    std::vector<int32_t> tactical_builders(int32_t player, int32_t type) override;  // skirmish station production
-    int32_t replaced_builder(int32_t id) override;  // skai t17: the station that replaced `id` (upgrade chain)
-    // --- end A2 tactical ---
-    // --- battle host follow-up ---
-    // Hard points whose opportunity target changed to a new live target since the previous call (ascending unit id, then
-    // hard-point index [port: no in-tick order]); owner = the unit's team container when it has one.
-    std::vector<ai::tactical::OpportunityTargetEvent> opportunity_targets() override;
-    // s78f t08: CombatSystem::attack_state_events of the tick just run (the AI updates after the battle tick).
-    std::vector<ai::tactical::AttackStateSignal> attack_state_signals() override;
-    std::vector<ai::tactical::UnitDamagedSignal> unit_damaged_signals() override;  // skai t15: signal 0x18
-    // S7 t15 A1: TacticalBattle::ability_finished_events of the tick just run (signal 0x29, in order).
-    std::vector<int32_t> ability_finished() override;
-    // S7 t21: TacticalBattle::movement_locked (0x39ad40) for the ambush member list.
-    bool movement_locked(int32_t object_id) override;
-    // S7 t27: the L1 weather system's Sight_Range_Modifier for the type's Weather_Category (every owner weather-affected
-    // [port], as the fog's land sight range).
-    float sight_weather_factor(int32_t type, int32_t object_id) override;
+    // ref5 t07: the rules of every fact family are this class's private answers below (wire_facts); with the AI lane on,
+    // think() reads the capture (capture_lane_view) instead.
+    ai::tactical::BattleFacts& facts() override { return facts_; }
     // HIJACK_UNIT (AI_GALACTIC_3 §4.3): GalacticSim::magic_spawn at the battle planet, a surface unit launched into the
     // orbit fleet (FAILED when that fails, e.g. blockaded), TacticalBattle::add_reserve; returns the new pool entry.
     // Refused before spawning when the type is not in the battle tables. [port] the galactic AI free store is not touched.
@@ -219,6 +202,34 @@ public:
     // set in the combat model). cu8f t04a (CU8F_T04_T06_RE §1.1): and its stickiness threshold, then each TEAM member's,
     // := the type's Targeting_Stickiness_Time_Threshold (CombatSystem::reset_stickiness).
     void unit_left_task_force(int32_t object_id) override;
+    // a1g t04 follow-up - land TF.Reinforce drop validity: TacticalBattle::land_drop_valid (a1h t06: moved to the host so the
+    // Reinforce command re-runs it) with this battle's mode. AI drops pass human = false (movers ignored, landing
+    // transports block).
+    bool land_drop_valid(int32_t player, int32_t key, const ai::tactical::Vec3f& p, bool human);
+    // --- end battle host ---
+
+private:
+    // ---- ref5 t07: the fact rules (BattleFacts, read from the battle; wired by wire_facts) ----
+    ai::tactical::BattleFacts facts_;
+    void wire_facts();
+    // lane_thinking_ and the facts' snapshot mode together (the view only while it is valid)
+    void set_thinking(bool on) {
+        lane_thinking_ = on;
+        facts_.set_snapshot(on && view_.valid);
+    }
+    std::vector<ai::tactical::TacticalReinforcement> reinforcement_pool(int32_t player);
+    bool can_reinforce(int32_t player);
+    float population_cap(int32_t player);
+    float population_used(int32_t player);
+    // --- A2 tactical: build pads (L1_S4_REMAINING §3.6 on TacticalBattle's pads) ---
+    bool can_build_now(int32_t player, int32_t type);
+    std::vector<int32_t> tactical_builders(int32_t player, int32_t type);  // skirmish station production
+    // --- end A2 tactical ---
+    // S7 t21: TacticalBattle::movement_locked (0x39ad40) for the ambush member list.
+    bool movement_locked(int32_t object_id);
+    // S7 t27: the L1 weather system's Sight_Range_Modifier for the type's Weather_Category (every owner weather-affected
+    // [port], as the fog's land sight range).
+    float sight_weather_factor(int32_t type, int32_t object_id);
     // refixf t06 - space TF.Reinforce ring search (AI_TACTICAL §7.4, TACTICAL_GAPS §4.2). Entry facing = the player's side
     // deploy facing (TacticalBattle facing_ [port: stands in for the mode +0x288 record]); playable box = the mode bounds.
     // Prevention = live objects with Reinforcement_Prevention_Radius whose owner is not allied (not the player, and an
@@ -226,32 +237,21 @@ public:
     // space occupancy sweep (SpaceOccupancy::query_segment, statics included [M]) of the pool entry's type footprint
     // (movement radius) from p - sweep x (cos, sin)(facing) to p over frames [now, now + 115] on its Space_Layer (raw
     // mask, 0 -> 4) | 8 [M: the moving query stands in for the swept box; state-4 reservations are not tolerated].
-    bool space_drop_frame(int32_t player, ai::tactical::SpaceDropFrame& out) override;
-    bool space_prevention_hit(int32_t player, const ai::tactical::Vec3f& p) override;
-    // skm1 t03 (AI_TACTICAL §7.4): skirmish battles (BattleConfig::skirmish) only - a live DUMMY_STAR_BASE owned by the player
-    // or an ally (bt_allied); other battles always true.
-    bool space_reinforce_base_alive(int32_t player) override;
-    bool space_drop_ok(int32_t player, int32_t key, const ai::tactical::Vec3f& p, float facing_deg, float sweep) override;
-    // a1g t04 follow-up - land TF.Reinforce drop validity: TacticalBattle::land_drop_valid (a1h t06: moved to the host so the
-    // Reinforce command re-runs it) with this battle's mode. AI drops pass human = false (movers ignored, landing
-    // transports block).
-    // ref5 t06: with the lane on, view_land_drop_ok (the rest runs at the apply).
-    bool land_drop_ok(int32_t player, int32_t key, const ai::tactical::Vec3f& p) override;
-    // q6 t19 (A1_READINGS §33.2.2): the units the last executed task-force Attack_Move on an object dropped because
-    // CombatSystem::order_attack_issue refused them (cleared at every execute).
-    std::vector<int32_t> attack_order_refused() override { return attack_refused_; }
-    // q6 t19: TacticalBattle::production_done of the tick just run (land builds that went to the reinforcement pool).
-    std::vector<ai::tactical::TacticalAiHost::ProductionCompleted> production_completed() override;
-    bool land_drop_valid(int32_t player, int32_t key, const ai::tactical::Vec3f& p, bool human);
+    bool space_drop_frame(int32_t player, ai::tactical::SpaceDropFrame& out);
+    bool space_drop_ok(int32_t player, int32_t key, const ai::tactical::Vec3f& p, float facing_deg, float sweep);
     // a1j t01 - land TF.Reinforce with BattleConfig::landing_unload_timed (A1_READINGS §36): reinforce_in_flight = the
-    // player's timed landing object of pool entry `key` (participant galactic id) has not finished its unload;
-    // reinforcements_unloaded = TacticalBattle::landings_unloaded() of the tick just run (owner, galactic id, units).
-    bool reinforce_in_flight(int32_t player, int32_t key) override;
-    std::vector<ai::tactical::ReinforcementsUnloaded> reinforcements_unloaded() override;
+    // player's timed landing object of pool entry `key` (participant galactic id) has not finished its unload.
+    bool reinforce_in_flight(int32_t player, int32_t key);
     // mcx6 t06 (LUA_API.md "Attack position 0x4f5390", 0x4f48a0 [M]): the land passability grid's static line test
     // (0x5a4c10, line_passable) for the movement class of `object_id` (a TEAM container: its first live member's).
-    bool attack_position_line_clear(int32_t object_id, const ai::tactical::Vec3f& a, const ai::tactical::Vec3f& b) override;
-    // --- end battle host ---
+    bool attack_position_line_clear(int32_t object_id, const ai::tactical::Vec3f& a, const ai::tactical::Vec3f& b);
+    // The signal lists (frame_events)
+    std::vector<ai::tactical::OpportunityTargetEvent> opportunity_targets();
+    std::vector<ai::tactical::AttackStateSignal> attack_state_signals();
+    std::vector<ai::tactical::UnitDamagedSignal> unit_damaged_signals();  // skai t15: signal 0x18
+    std::vector<int32_t> ability_finished();
+    std::vector<ai::tactical::ReinforcementsUnloaded> reinforcements_unloaded();
+    std::vector<ai::tactical::ProductionCompleted> production_completed();
 
 private:
     // sp3 t01 (PERF_AUDIT S6): the type facts fill() and the per-object scans (population_cap, space_prevention_hit) read for
@@ -286,11 +286,20 @@ private:
         Vec3 position;
     };
     bool influences_capture(objects::TypeIndex t) const;
-    // sp3 t02: the pad checks read the battle, or (lane view) the snapshot store and the captured pad state / relations
-    struct PadEnv;
+    // sp3 t02 / ref5 t07: what the store-reading fact rules read - the battle, or (lane view) the snapshot store and the
+    // captured pad states, relations and live units. One rule each, over either.
+    struct FactEnv;
+    FactEnv live_env() const;
+    FactEnv view_env() const;
     std::vector<CaptureInfluencer> capture_influencers(const objects::ObjectStore& st) const;
-    ai::tactical::PadCheck pad_check(const PadEnv& env, int32_t player, int32_t pad, const std::vector<CaptureInfluencer>& influencers) const;
-    std::vector<ai::tactical::TacticalPad> build_pads_in(const PadEnv& env, int32_t player) const;
+    ai::tactical::PadCheck pad_check(const FactEnv& env, int32_t player, int32_t pad, const std::vector<CaptureInfluencer>& influencers) const;
+    std::vector<ai::tactical::TacticalPad> build_pads_in(const FactEnv& env, int32_t player) const;
+    // Build / Build_All's three refusals (AI_TACTICAL §7.5), the pads `player` can build on, a space drop point inside a
+    // non-allied prevention radius, a live allied star base (skirmish), the station that replaced builder `id`.
+    ai::tactical::PadCheck build_pad_check_in(const FactEnv& env, int32_t player, int32_t pad) const;
+    bool prevention_hit_in(const FactEnv& env, int32_t player, const ai::tactical::Vec3f& p) const;
+    bool base_alive_in(const FactEnv& env, int32_t player) const;
+    int32_t replaced_builder_in(const FactEnv& env, int32_t id) const;
     float allow_reinforcement_fraction_ = 0.0f;  // A2 tactical: Allow_Reinforcement_Percentage_Normalized
     bool use_reinforcement_points_ = true;       // a1g t04 follow-up: Use_Reinforcement_Points (GC +0x118a0)
     void standin_orders();
@@ -339,15 +348,13 @@ private:
     // order; hashed and saved with the lane on.
     std::vector<commands::Command> lane_batch_;
     // sp3 t02: the TacticalAiHost answers think() reads, captured on the critical lane at each AI slot (capture_lane_view,
-    // before TacticalAiWorld::publish) with the lane on; the overrides answer from it while `valid` (a load clears it: the
-    // relink's fill reads the battle). Per player: index = player id.
+    // before TacticalAiWorld::publish) with the lane on; the facts' snapshot functions and the lane hooks read it while
+    // `valid` (a load clears it: the relink's fill reads the battle). Per player: index = player id.
+    // ref5 t07: the per-player answers (pool, can_reinforce, population, drop frame), the movement locks, the timed landings
+    // and the skirmish production are BattleFacts tables now (facts_, captured from the same rules).
     struct LaneView {
         bool valid = false;
-        std::vector<std::vector<ai::tactical::TacticalReinforcement>> pool;
-        std::vector<uint8_t> can_reinforce;
-        std::vector<float> pop_cap, pop_used;
-        std::vector<ai::tactical::SpaceDropFrame> drop_frame;
-        std::vector<uint8_t> drop_frame_ok;
+        int32_t players = 0;         // host players
         std::vector<uint8_t> enemy;  // players x players: CombatSystem::is_enemy
         uint32_t frame = 0;                    // the battle frame
         int32_t allied_n = 0;                  // galactic players
@@ -359,8 +366,6 @@ private:
             uint32_t cooldown_end = 0;
         };
         std::vector<Pad> pads;  // TacticalBattle::pads_ (ascending pad id)
-        std::vector<int32_t> locked;                         // movement_locked object ids, ascending
-        std::vector<std::pair<int32_t, int32_t>> in_flight;  // reinforce_in_flight (owner, key), ascending
         std::vector<float> weather_sight;                    // per weather_categories_ index
         ai::tactical::DamageTrackingStore damage;
         // sp3 slice 4c: what predict_order reads - the battle units (TacticalBattle::units_, ascending id), the containers
@@ -385,25 +390,8 @@ private:
         std::vector<Team> teams;
         std::vector<uint8_t> retreat_ok;
         bool production = false;
-        // slice 4e (part 2): the L1 hooks' answers - per battle unit and container (ascending id), the strike / weapon
-        // state per player, a copy of the special weapons (reads, and the dry runs of begin_targeting / tsw_fire), the TSW
-        // planet gate.
-        struct L1Obj {
-            objects::ObjectId id = objects::kNoObjectId;
-            double rate = 0.0, ttd = 1e18;
-            objects::TypeIndex cur_proj = objects::kNone;
-            int32_t engines = -1;
-            float energy = -1.0f;
-            uint8_t clash = 0, clash_locked = 0;
-            int8_t field[4] = {-1, -1, -1, -1};  // object_in_field for kinds 1, 2, 4, 8
-            uint32_t pt_first = 0, pt_count = 0;  // projectile_types in proj_types
-        };
-        std::vector<L1Obj> l1;
-        std::vector<objects::TypeIndex> proj_types;
-        std::vector<std::pair<objects::ObjectId, int32_t>> final_blow;
-        std::vector<uint8_t> sw_allowed, bomb_avail, bombard_avail, bomb_finished;
-        std::vector<float> bomb_result;
-        std::vector<int32_t> retreat_inc;
+        // slice 4e (part 2): a copy of the special weapons (reads, and the dry runs of begin_targeting / tsw_fire), the TSW
+        // planet gate. ref5 t07: the per-object and per-player L1 answers are fact tables (l1_, ...).
         std::optional<tactical::abilities::SpecialWeaponSystem> sw;
         bool tsw_planet_ok = false;
         // slice 4e (part 3): fog_object_hidden(force = 1) of every object for the AI players (ascending id; bit k for the
@@ -430,13 +418,6 @@ private:
         std::vector<ai::tactical::PerceptionHardPoint> hps;
         // The station upgrade records (old, new), battle order (replaced_builder).
         std::vector<std::pair<objects::ObjectId, objects::ObjectId>> upgrades;
-        // Skirmish production (tactical_builders / can_build_now) per AI player and candidate type, ascending (player, type).
-        struct Build {
-            int32_t player = -1, type = -1;
-            uint8_t can = 0;
-            std::vector<int32_t> builders;
-        };
-        std::vector<Build> builds;
         // The reserve entries the drop tests look up (not deployed), parts_ order, with what the snapshot tests read.
         struct Reserve {
             objects::ObjectId key = objects::kNoObjectId;
@@ -478,7 +459,23 @@ private:
     uint32_t lane_refused_spawns_ = 0;  // [diagnostic] Spawn_Unit from an AI VM with the lane on (refused)
     void wrap_lane_hooks();
     void capture_l1();
-    const LaneView::L1Obj* view_l1(objects::ObjectId id) const;
+    // ref5 t07: the L1 hook reads of the AI VMs as fact tables (lane on only): one rule each, the battle's answer, read live
+    // on the critical lane and from the capture inside lane code. L1Fact: one battle unit or container's answers.
+    struct L1Fact {
+        double rate = 0.0, ttd = 1e18;
+        objects::TypeIndex cur_proj = objects::kNone;
+        int32_t engines = -1;
+        float energy = -1.0f;
+        uint8_t clash = 0, clash_locked = 0;
+        int8_t field[4] = {-1, -1, -1, -1};  // object_in_field for kinds 1, 2, 4, 8
+        std::vector<objects::TypeIndex> proj;  // projectile_types
+    };
+    L1Fact l1_fact(objects::ObjectId id) const;
+    ai::tactical::FactTable<objects::ObjectId, L1Fact> l1_;
+    ai::tactical::FactTable<objects::ObjectId, int32_t> final_blow_{-1};
+    ai::tactical::FactTable<int32_t, uint8_t> sw_allowed_, bomb_avail_, bombard_avail_, bomb_finished_;
+    ai::tactical::FactTable<int32_t, float> bomb_result_{0.0f};
+    ai::tactical::FactTable<int32_t, int32_t> retreat_inc_{0};
     void apply_host_write(const lua::LaneWrite& w);
     // slice 4e (part 3): the AI's GlobalValue.Set writes as batch commands (PortExtension kLaneGlobalSubtype)
     void queue_global_writes();
@@ -521,7 +518,6 @@ private:
     // The rejections of execute_order that depend on the order and the battle state alone, without side effects.
     commands::RejectReason predict_order(uint8_t player, const commands::EventData& ev);
     commands::RejectReason execute_live(uint8_t player, const commands::EventData& ev);  // execute_order + signals + count
-    std::vector<int32_t> attack_refused_;  // q6 t19: attack_order_refused() of the last execute (not saved: read at once)
     std::map<std::string, std::pair<uint32_t, uint32_t>> executed_;  // event name -> (applied, rejected) [diagnostic]
     std::vector<std::pair<uint64_t, int32_t>> opp_prev_;  // battle host: (unit id << 8 | hp, target), ascending key
     // UnitAI data-pack re-projection stamps (A1_READINGS §14) of the listed UNIT_AI objects, drawn once per object

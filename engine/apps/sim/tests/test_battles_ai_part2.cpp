@@ -650,7 +650,7 @@ void test_battle_ai_land_drop(const Data& d) {
             for (int32_t cy = 4; cy < 60; cy += 4)
                 for (int32_t cx = kStrip + 6; cx < 58; cx += 4) {
                     const mv::V2 c = mv::cell_center(cx, cy);
-                    if (ai.land_drop_ok(1, key, {c.x, c.y, 0.0f})) ok.push_back({c.x, c.y, 0.0f});
+                    if (ai.facts().land_drop_ok(1, key, {c.x, c.y, 0.0f})) ok.push_back({c.x, c.y, 0.0f});
                 }
         };
         std::vector<ai::tactical::Vec3f> fog_ok, clear_ok;
@@ -668,9 +668,9 @@ void test_battle_ai_land_drop(const Data& d) {
             clear_ok = fog_ok;
         }
         CHECK(!clear_ok.empty());
-        for (const auto& q : fog_ok) CHECK(ai.land_drop_ok(1, key, q));  // fog cleared: still valid (and same answer twice)
+        for (const auto& q : fog_ok) CHECK(ai.facts().land_drop_ok(1, key, q));  // fog cleared: still valid (and same answer twice)
         const mv::V2 strip = mv::cell_center(2, 31);
-        CHECK(!ai.land_drop_ok(1, key, {strip.x, strip.y, 0.0f}));  // impassable slots
+        CHECK(!ai.facts().land_drop_ok(1, key, {strip.x, strip.y, 0.0f}));  // impassable slots
         // a1h t06 (§4.2.2 item 5): the Reinforce command re-runs the test and refuses the whole drop (no clamp, no move).
         CHECK(b->order_reinforce(*tm, 1, reserves[0].galactic_id, strip.x, strip.y, host.random().synced()) ==
               commands::RejectReason::InvalidPosition);
@@ -684,7 +684,7 @@ void test_battle_ai_land_drop(const Data& d) {
             if (!at0.ok || !tm->primary().active(h) || !tm->movable(h) || next_to_enemy >= 3) continue;
             const Vec3 q = tm->primary().position(h);
             const ai::tactical::Vec3f c{q.x - at0.slots[0].x, q.y - at0.slots[0].y, 0.0f};
-            if (!ai.land_drop_ok(1, key, c)) continue;  // refused for another reason (passability, radius, a structure)
+            if (!ai.facts().land_drop_ok(1, key, c)) continue;  // refused for another reason (passability, radius, a structure)
             CHECK(!ai.land_drop_valid(1, key, c, true));
             ++next_to_enemy;
         }
@@ -695,15 +695,15 @@ void test_battle_ai_land_drop(const Data& d) {
             BattleAi ae(*b, *tm, host, te);
             size_t enabled = 0;
             for (const auto& q : clear_ok) {
-                const bool ok = ae.land_drop_ok(1, key, q);
+                const bool ok = ae.facts().land_drop_ok(1, key, q);
                 enabled += ok ? 1u : 0u;
-                if (ok) CHECK(ai.land_drop_ok(1, key, q));  // the radii only remove spots
+                if (ok) CHECK(ai.facts().land_drop_ok(1, key, q));  // the radii only remove spots
             }
             std::printf("  land drop: %zu of %zu spots inside the enabling radii\n", enabled, clear_ok.size());
         }
         if (!clear_ok.empty()) {
-            CHECK(!ai.land_drop_ok(1, key + 1000, clear_ok[0]));  // unknown entry
-            CHECK(!ai.land_drop_ok(0, key, clear_ok[0]));         // another player's entry
+            CHECK(!ai.facts().land_drop_ok(1, key + 1000, clear_ok[0]));  // unknown entry
+            CHECK(!ai.facts().land_drop_ok(0, key, clear_ok[0]));         // another player's entry
         }
         std::printf("  land drop: %zu / %zu spots fogged-valid / valid, %zu refused only by fog (fog %s), %zu next to enemy units\n",
                     fog_ok.size(), clear_ok.size(), newly, fog ? "on" : "off", next_to_enemy);
@@ -718,27 +718,75 @@ void test_battle_ai_land_drop(const Data& d) {
                 for (int32_t cy = 4; cy < 60; cy += 4)
                     for (int32_t cx = kStrip + 6; cx < 58; cx += 4) {
                         const mv::V2 c = mv::cell_center(cx, cy);
-                        const bool ok = al.land_drop_ok(1, key, {c.x, c.y, 0.0f});
+                        const bool ok = al.facts().land_drop_ok(1, key, {c.x, c.y, 0.0f});
                         lane_ok += ok ? 1u : 0u;
                         if (std::any_of(clear_ok.begin(), clear_ok.end(), [&c](const ai::tactical::Vec3f& e) { return e.x == c.x && e.y == c.y; }))
                             CHECK(ok);
                     }
-                CHECK(!al.land_drop_ok(1, key, {strip.x, strip.y, 0.0f}));
-                if (!clear_ok.empty()) CHECK(!al.land_drop_ok(1, key + 1000, clear_ok[0]));
+                CHECK(!al.facts().land_drop_ok(1, key, {strip.x, strip.y, 0.0f}));
+                if (!clear_ok.empty()) CHECK(!al.facts().land_drop_ok(1, key + 1000, clear_ok[0]));
                 // The attack-position line test: the same answer as the live grid, across the obstacle strip and not.
                 for (const objects::ObjectHandle h : tm->primary().owned_by(0)) {
                     if (!tm->primary().active(h) || !tm->movable(h)) continue;
                     const auto id = static_cast<int32_t>(tm->primary().id(h));
                     const Vec3 q = tm->primary().position(h);
                     for (const mv::V2 to : {mv::cell_center(1, 31), mv::cell_center(40, 40), mv::cell_center(kStrip + 1, 10)}) {
-                        const bool lane = al.attack_position_line_clear(id, {q.x, q.y, 0.0f}, {to.x, to.y, 0.0f});
-                        CHECK(lane == ai.attack_position_line_clear(id, {q.x, q.y, 0.0f}, {to.x, to.y, 0.0f}));
+                        const bool lane = al.facts().attack_position_line_clear(id, {q.x, q.y, 0.0f}, {to.x, to.y, 0.0f});
+                        CHECK(lane == ai.facts().attack_position_line_clear(id, {q.x, q.y, 0.0f}, {to.x, to.y, 0.0f}));
                         ++lines;
                         blocked += lane ? 0u : 1u;
                     }
                 }
             });
             CHECK(ai_lane_live_reads() == reads_before);
+            // ref5 t07: right after the capture (the battle unchanged), every family with a full snapshot answer gives the
+            // live rule's answer (the drop tests are partial on the capture by design and checked above).
+            {
+                ai::tactical::BattleFacts& bf = al.facts();
+                size_t compared = 0, mismatches = 0;
+                const auto same = [&](bool eq) {
+                    ++compared;
+                    mismatches += eq ? 0u : 1u;
+                };
+                const auto read = [&](bool snapshot, int32_t p, std::vector<double>& out) {
+                    bf.set_snapshot(snapshot);
+                    out.clear();
+                    for (const ai::tactical::TacticalReinforcement& r : bf.reinforcement_pool(p)) {
+                        out.push_back(r.key);
+                        out.push_back(r.type);
+                        out.push_back(r.population);
+                    }
+                    out.push_back(bf.can_reinforce(p) ? 1.0 : 0.0);
+                    out.push_back(bf.population_cap(p));
+                    out.push_back(bf.population_used(p));
+                    ai::tactical::SpaceDropFrame f;
+                    out.push_back(bf.space_drop_frame(p, f) ? 1.0 : 0.0);
+                    out.push_back(f.entry_facing_deg);
+                    out.push_back(bf.space_reinforce_base_alive(p) ? 1.0 : 0.0);
+                    for (const ai::tactical::TacticalPad& pad : bf.build_pads(p)) {
+                        out.push_back(pad.id);
+                        out.push_back(static_cast<double>(bf.build_pad_check(p, pad.id, -1)));
+                    }
+                    for (const objects::ObjectHandle h : tm->primary().owned_by(p)) {
+                        if (!tm->primary().active(h)) continue;
+                        const auto id = static_cast<int32_t>(tm->primary().id(h));
+                        out.push_back(bf.movement_locked(id) ? 1.0 : 0.0);
+                        out.push_back(bf.replaced_builder(id));
+                        out.push_back(bf.sight_weather_factor(static_cast<int32_t>(tm->primary().type(h)), id));
+                        const Vec3 q = tm->primary().position(h);
+                        out.push_back(bf.space_prevention_hit(p, {q.x, q.y, 0.0f}) ? 1.0 : 0.0);
+                    }
+                    bf.set_snapshot(false);
+                };
+                std::vector<double> snap, live;
+                for (int32_t p = 0; p < 4; ++p) {
+                    read(true, p, snap);
+                    read(false, p, live);
+                    same(snap == live);
+                }
+                CHECK(compared == 4 && mismatches == 0);
+                std::printf("  ref5 t07 facts: snapshot = live for %zu players (%zu mismatches)\n", compared, mismatches);
+            }
             CHECK(lane_ok >= clear_ok.size() && lines > 0 && blocked > 0);
             std::printf("  ref5 t06 lane: %zu lane-valid drop spots (live %zu), %zu line tests (%zu blocked), live reads %llu\n", lane_ok,
                         clear_ok.size(), lines, blocked, static_cast<unsigned long long>(ai_lane_live_reads() - reads_before));

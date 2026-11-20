@@ -37,8 +37,12 @@
 //     or dead target) is dropped from the move, and when no unit is left the order is rejected (InvalidTarget). An
 //     object's own Lua Attack_Move (arg 0) has path B only.
 //     refixf t06 - space TF.Reinforce (AI_TACTICAL §7.4): the drop point is searched in rings around the target, one
-//     attempt per Lua poll of the block status (BlockOnCommand -> status IsFinished), one unit per poll; the host answers
-//     space_drop_frame / space_prevention_hit / space_drop_ok (below) and executes the Reinforce event at the point found.
+//     attempt per Lua poll of the block status (BlockOnCommand -> status IsFinished), one unit per poll; the host's facts
+//     answer space_drop_frame / space_prevention_hit / space_drop_ok (battle_facts.hpp) and the host executes the Reinforce
+//     event at the point found.
+//   * ref5 t07: everything else the AI reads from the battle comes from TacticalAiHost::facts() (battle_facts.hpp): live
+//     reads ask the host's rule at the moment of the read (the AI's own orders change the battle inside a frame); with the
+//     AI lane on, think() reads what the host captured at publish.
 //   * Everything runs on the sim thread; the only RNG is the session's synced stream (§10 order).
 //
 // TARGET IDENTITY [port]: each AI player's target list is kept as append-only SLOTS with tombstones; the live
@@ -73,6 +77,7 @@
 #include "alamo/ai/ai_definitions.hpp"
 #include "alamo/ai/ai_plans.hpp"
 #include "alamo/ai/tactical/applies.hpp"
+#include "alamo/ai/tactical/battle_facts.hpp"  // ref5 t07
 #include "alamo/ai/tactical/damage_tracking.hpp"
 #include "alamo/ai/tactical/free_store.hpp"
 #include "alamo/ai/tactical/perception_world.hpp"
@@ -148,121 +153,33 @@ struct TacticalAiObject {
     float formation_target_extent = 0.0f;
 };
 
-// One entry of a player's reinforcement pool (campaign: units in orbit = the battle's reserves; skirmish: the
-// tactical reinforcement pool).
-struct TacticalReinforcement {
-    int32_t key = -1;          // pool key (the Reinforce event's "unit" field)
-    int32_t type = -1;         // PerceptionWorld type index
-    float population = 0.0f;   // population cost (0x373500)
-    uint32_t units = 1;        // objects it spawns (team members)
-    // --- A2 tactical: the Reinforcement marshaller's entry facts (AI_GALACTIC_3 §1.3) ---
-    int32_t member_type = -1;          // first Company_Units member type (-1: the type has no Company_Units)
-    bool member_create_team = false;   // that member type has Create_Team
-    int32_t count = 1;                 // count(E): selections the entry serves
-    // --- end A2 tactical ---
-};
-
-enum class PadCheck : uint8_t { Ok = 0, NotFriendlyOrVisible = 1, Blocked = 2, RebuildCooldown = 3 };
-
 // refixf t06: payload arg bit of a task-force AttackMove LuaOrder: issue Order_Attack per unit (HOST CONTRACT above).
 inline constexpr uint32_t kTfAttackMoveIssueAttack = 1u;
-
-// refixf t06 (AI_TACTICAL §7.4 space): what the space reinforcement ring search needs from the mode.
-struct SpaceDropFrame {
-    float entry_facing_deg = 0.0f;  // the player's reinforcement entry facing (mode +0x288 record, field +8), degrees
-    bool has_box = false;           // the playable box (mode vf 0x208): ring points are clamped into it
-    float min_x = 0.0f, min_y = 0.0f, max_x = 0.0f, max_y = 0.0f;
-};
-
-// A hard point acquired an opportunity target (STRATEGIC_GAPS §5.3: signal 0x21 OpportunityTargetAcquiredDataClass, sent
-// to the hard point's owner, or to the team object for a team member). Object ids; hardpoint_type = HardPointType value.
-struct OpportunityTargetEvent {
-    int32_t owner = -1;           // the hard point's owner object
-    int32_t target = -1;          // the acquired target object
-    int32_t hardpoint_type = -1;  // HardPointType of the hard point (5..10 for weapons)
-};
-
-// s78f t08 - signal 0x1E (TACTICAL_COMBAT §3.1.1 "s78f t08 answers" 4): a unit's targeting state entered 4 (attacking)
-// for the first time. `unit` = the object the signal is raised on (a team member's: its container), `target` = its
-// formation attack target, else its current target. Object ids.
-struct AttackStateSignal {
-    int32_t unit = -1;
-    int32_t target = -1;
-};
-
-// skai t15 - signal 0x18 (SKAI_T15_UNIT_DAMAGED §1): one applied damage instance, raised by Take_Damage 0x3a9e30 through
-// the UNIT_AI behaviour 0x4f59d0. `unit` = the UNIT_AI holder (the victim, else its container: a squad's TEAM container),
-// `attacker` = the shooter (a TEAM member replaced by its container), `deliberate` = the attacker's current attack
-// target (formation target first) was `unit`. Object ids, in the battle's damage order.
-struct UnitDamagedSignal {
-    int32_t unit = -1;
-    int32_t attacker = -1;
-    bool deliberate = false;
-};
-
-// a1j t01 - signal 0x19 "reinforcements unloaded" (ReinforcementsUnloadedDataClass, A1_READINGS §32.1 / §36): a land
-// landing object finished its unload (0x6438a0) or was removed while unloading (detach vf15 0x6442d0). `key` = the
-// Reinforce event's unit field (the pool entry); `units` = the unloaded object ids in spawn order.
-struct ReinforcementsUnloaded {
-    int32_t player = -1;
-    int32_t key = -1;
-    std::vector<int32_t> units;
-};
-
-// --- A2 tactical: a build pad the player can build on (the TacticalBuild marshaller's pool, AI_TACTICAL §5.1
-// side table 0x4d29a0): visible, empty, friendly or neutral [M], and the UC_ types its pad type lists for the
-// player's faction (Tactical_Buildable_Objects_Multiplayer in skirmish, _Campaign otherwise). ---
-struct TacticalPad {
-    int32_t id = -1;
-    Vec3f position;
-    std::vector<int32_t> accepts;  // PerceptionWorld type indices
-};
-// --- end A2 tactical ---
 
 class TacticalAiHost {
 public:
     virtual ~TacticalAiHost() = default;
     // The snapshot of this AI frame (objects in GOM order) + the per-object facts (same order).
     virtual void fill(PerceptionWorld& world, std::vector<TacticalAiObject>& objects) = 0;
-    // Direct execution of one AI order (the AI pipeline's handler).
+    // The signals the battle raised since the last AI frame (FrameEvents), for the lists in `kinds` (FrameEvents::Kind
+    // bits; the others are left as they are). Each list is taken once per AI frame: the lane-off world takes each one right
+    // before it handles it (a task-force event handler may give orders in between), the AI lane all of them at publish().
+    // Default: none.
+    virtual void frame_events(uint32_t kinds, FrameEvents& out) {
+        if (kinds & FrameEvents::kOpportunity) out.opportunity.clear();
+        if (kinds & FrameEvents::kAttackStates) out.attack_states.clear();
+        if (kinds & FrameEvents::kDamaged) out.damaged.clear();
+        if (kinds & FrameEvents::kAbilityFinished) out.ability_finished.clear();
+        if (kinds & FrameEvents::kUnloaded) out.unloaded.clear();
+        if (kinds & FrameEvents::kProduced) out.produced.clear();
+    }
+    // Direct execution of one AI order (the AI pipeline's handler). The host sets facts().order_refused for it.
     virtual commands::RejectReason execute(uint8_t player, const commands::EventData& ev) = 0;
-    virtual std::vector<TacticalReinforcement> reinforcement_pool(int32_t player) = 0;
-    virtual bool can_reinforce(int32_t player) = 0;   // 0x2b03e0
-    virtual float population_cap(int32_t player) = 0;  // < 0: no cap
-    virtual float population_used(int32_t player) = 0;
-    virtual const DamageTrackingStore* damage_tracking() = 0;
-    virtual const galactic::ContrastTable* contrast() = 0;
-    // Build (§7.5): the three refusal checks for (pad, type) of `player`; type = PerceptionWorld type index.
-    virtual PadCheck build_pad_check(int32_t /*player*/, int32_t /*pad*/, int32_t /*type*/) { return PadCheck::NotFriendlyOrVisible; }
-    // A2 tactical: the pads `player` can build on now (ascending id) with their buildable types (TacticalBuild
-    // marshaller). Default: none (battles without build pads).
-    virtual std::vector<TacticalPad> build_pads(int32_t /*player*/) { return {}; }
-    // A2 tactical: TacticalBuild for types without TACTICAL_UNDER_CONSTRUCTION - a builder of the player can build
-    // `type` now (0x288b80 + 0x497140). Default false (no tactical production in the host: campaign battles never buy
-    // units through the AI, AI_GALACTIC_3 §1.11).
-    virtual bool can_build_now(int32_t /*player*/, int32_t /*type*/) { return false; }
-    // A2 tactical: the free store's builder list (free store +0x120, AI_GALACTIC_3 §1.8 / §1.11 [M]) for `type`: ids of
-    // the live objects of `player` whose type lists `type` (PerceptionWorld index) for the owner's faction
-    // (Tactical_Buildable_Objects_Multiplayer). Order = the order Produce_Force tries them [port: ascending object id].
-    // A skirmish build plan's Produce_Force issues Production {type_index, location = builder} to each in turn until the
-    // host accepts one. Default: none (no tactical production in the host).
-    virtual std::vector<int32_t> tactical_builders(int32_t /*player*/, int32_t /*type*/) { return {}; }
-    // skai t17 (STATION_HANGARS_SOUND §1.2 steps 7-8, 0x497460): a station upgrade retargets the build queue entries of the
-    // old station S to its successor S', so a build the AI started at S goes on at S'. The live object that replaced
-    // builder `id` (following repeated upgrades), -1 when none. Default: none.
-    virtual int32_t replaced_builder(int32_t /*id*/) { return -1; }
-    // Opportunity-fire acquisitions since the last AI frame, in the order they happened (STRATEGIC_GAPS §5.3). A task
-    // force holding the owner (or its team container) raises plan event 17 Hardpoint_Opportunity_Target_Acquired
-    // (unit, target) when it subscribed that HardPointType. Default: none (the combat side does not report them).
-    virtual std::vector<OpportunityTargetEvent> opportunity_targets() { return {}; }
-    // s78f t08: the signal 0x1E raises since the last AI frame, in the order they happened. A task force holding the unit
-    // (TaskForceClass::Add_Force 0x5f9a90 subscribes every unit it takes; handler 0x5fe5d0 case 0x1E) raises plan event 12
-    // Target_In_Range (unit, target) when the target is live. Default: none.
-    virtual std::vector<AttackStateSignal> attack_state_signals() { return {}; }
-    // skai t15: the signal 0x18 raises since the last AI frame, in damage order. A land / space task force holding the
-    // unit (Add_Force 0x6e9240 / 0x6e4e30 subscribe) queues plan event 14 Unit_Damaged (unit, attacker, deliberate), at
-    // most one waiting per task force (0x5fd250). Free-store units never get it. Default: none.
-    virtual std::vector<UnitDamagedSignal> unit_damaged_signals() { return {}; }
+    // ref5 t07: everything else the AI reads from the battle (battle_facts.hpp: one rule per fact family, read live, or
+    // from the capture while the AI lane thinks). Owned by the host; outlives the world.
+    virtual BattleFacts& facts() = 0;
+
+    // ---- the AI's writes beyond orders ----
     // MagicPlan HIJACK_UNIT, tactical with a parent galactic mode (AI_GALACTIC_3 §4.3 steps 1-5): spawn `type`
     // (PerceptionWorld type index) for `player` at the battle planet in the galactic store (steal = MagicPlanStealing or a
     // named hero: the player's first galactic object of the type elsewhere is killed silently; pending respawns of the
@@ -291,64 +208,7 @@ public:
     // (SetClassPriorities) lasts only while the unit is a member. Unconditional (no movement-lock test). Called during
     // the AI update, before unit_released. Default: nothing.
     virtual void unit_left_task_force(int32_t /*object_id*/) {}
-    // refixf t06 - space TF.Reinforce ring search (AI_TACTICAL §7.4). space_drop_frame: the player's entry facing and the
-    // playable box (false: facing 0, no box). space_prevention_hit (0x4d8d10): `p` lies inside the
-    // Reinforcement_Prevention_Radius (2-D, strict) of a live object whose owner is not allied with `player`.
-    // space_drop_ok (SpaceMode vf80 0x4d6fd0, force 0): `p` is inside the playable box, not fogged for `player` (force 1),
-    // outside every non-allied prevention radius, and the occupancy sweep of pool entry `key`'s type from
-    // p - sweep x (cos, sin)(facing) to p over frames [now, now + 115] on its Space_Layer (default 4) and layer 8 is
-    // clear. Defaults: no frame, no prevention, every point valid (hosts without the hooks drop at the target).
-    virtual bool space_drop_frame(int32_t /*player*/, SpaceDropFrame& /*out*/) { return false; }
-    virtual bool space_prevention_hit(int32_t /*player*/, const Vec3f& /*p*/) { return false; }
-    // skm1 t03 (AI_TACTICAL §7.4, 0x6e8620): in a skirmish a space TF.Reinforce needs a live DUMMY_STAR_BASE owned by
-    // `player` or an ally; false = refused ("AI players cannot reinforce after their starbase has been destroyed", nil).
-    // Campaign battles always pass. Default: allowed.
-    virtual bool space_reinforce_base_alive(int32_t /*player*/) { return true; }
-    virtual bool space_drop_ok(int32_t /*player*/, int32_t /*key*/, const Vec3f& /*p*/, float /*facing_deg*/, float /*sweep*/) {
-        return true;
-    }
-    // S7 t15 A1 - "unit ability finished" (object signal 0x29: every ability end, ABILITIES_HARDPOINTS §2.6, and the
-    // jetpack's swap back to the primary locomotor, MOVEMENT §3.1.1 step 6): the object ids that raised it since the last
-    // AI frame, in the order they happened (an id may repeat). The AI feeds its scripts' object bridge (blocking
-    // GameObjectWrapper.Activate_Ability), finishes the task-force AbilityBlockStatus counts and raises plan event 19
-    // <TF>_Unit_Ability_Finished(tf, unit) for task-force members that are not dying. Default: none.
-    virtual std::vector<int32_t> ability_finished() { return {}; }
-    // S7 t21 - the unit's movement lock (0x39ad40: ability share, script lock, suspended locomotor; A1_READINGS §28.9):
-    // a locked member does not join a SpaceAmbushBlockStatus (AI_TACTICAL §7.3.1). Default: never locked.
-    virtual bool movement_locked(int32_t /*object_id*/) { return false; }
-    // S7 t27 - the land sight factor 0x3722a0 of land Prepare_Ambush (AI_TACTICAL §7.3.3 item 5): the weather
-    // Sight_Range_Modifier for the Weather_Category of `type` (the target's company type), for the object `object_id`
-    // (its owner decides the weather exemption); 1.0 without strong weather / no entry. Default: 1.0 (no weather).
-    virtual float sight_weather_factor(int32_t /*type*/, int32_t /*object_id*/) { return 1.0f; }
-    // a1g t04 follow-up - land TF.Reinforce drop validity (LandMode vf80 0x3b5f60 -> 0x3b6170, TACTICAL_GAPS
-    // §4.2.1, A1_READINGS §30.7): can pool entry `key` of `player` land at spot `p` (the company layout's centre)? The host
-    // refuses unless every formation slot is passable for its member, not fogged for `player`, clear of blocking footprints
-    // and inside the reinforcement radii (enabling / prevention). A refused spot sends the unit to the next ring spot. Default:
-    // every spot valid (hosts without the hook).
-    virtual bool land_drop_ok(int32_t /*player*/, int32_t /*key*/, const Vec3f& /*p*/) { return true; }
-    // a1j t01 - land TF.Reinforce with a timed landing (ReinforceBlockStatus, A1_READINGS §36). reinforce_in_flight: the
-    // Reinforce of pool entry `key` just executed for `player` put the company in a landing object that has not finished
-    // its unload (the units come later, by reinforcements_unloaded). reinforcements_unloaded: the signal 0x19 records of
-    // the tick just run, in the order they were sent. Defaults: never in flight, none (the units exist at the order).
-    virtual bool reinforce_in_flight(int32_t /*player*/, int32_t /*key*/) { return false; }
-    virtual std::vector<ReinforcementsUnloaded> reinforcements_unloaded() { return {}; }
-    // q6 t19 (A1_READINGS §33.2.2): the object ids the order just executed dropped from its move because their attack
-    // order (path A, kTfAttackMoveIssueAttack) was refused, in the order tried. Such a unit stays in the block's
-    // all-units list but is neither moved nor pending. Default: none (every unit moved).
-    virtual std::vector<int32_t> attack_order_refused() { return {}; }
-    // q6 t19 (SKIRMISH_SETUP §3 / §3.1, AI_GALACTIC_3 §1.11): land tactical builds completed in the tick just run, in
-    // completion order (signal 0x22): the type went to the player's reinforcement pool (no object appears), so the build
-    // task of the first task force (id order) producing that type ends its entry. Default: none (hosts whose builds
-    // spawn objects; those are claimed when they appear).
-    struct ProductionCompleted {
-        int32_t player = -1;
-        int32_t type = -1;  // PerceptionWorld type index
-    };
-    virtual std::vector<ProductionCompleted> production_completed() { return {}; }
-    // mcx6 t06 (LUA_API.md "Attack position 0x4f5390", terrain check 0x4f48a0 [M]): the land terrain line test 0x5a4c10 for
-    // the movement class of `object_id` (a TEAM container: its first member's) from `a` to `b`, 2-D. Default: always clear
-    // (no pull-back).
-    virtual bool attack_position_line_clear(int32_t /*object_id*/, const Vec3f& /*a*/, const Vec3f& /*b*/) { return true; }
+    using ProductionCompleted = ::alamo::ai::tactical::ProductionCompleted;
 };
 
 // OPT2 t10: frames from a proposal slice to the apply of its PotentialPlan solves (TacticalAiConfig::pp_latency).
