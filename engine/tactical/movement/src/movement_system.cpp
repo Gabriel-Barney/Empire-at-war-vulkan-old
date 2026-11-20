@@ -847,7 +847,13 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
     // bkm3 t01 (b0076, MOVEMENT §4.2 step 2 "Destination"): an attack order's point P (the target's goal point C, 0x583150)
     // is validated per seed as well - its result is used only for position goals, but a failure still ends the pass: this
     // formation and every later one get no move. Not for a re-plan (no composition pass) or a queued order.
-    const bool validate_only = attack && !replan && !(order.flags & kMoveFlagSkipValidation) && !queued;
+    // mov2 t06 (MOVEMENT §4.2 step 2, MOV2_RE_QUESTIONS Q3 [H]): a move to an object (skip_destination_check, not an
+    // attack) is validated the same way - only block flag 0x20 skips 0x50f480 - against the order point ([port] the host's
+    // object point stands for 0x583150's choice: the stored point when fogged, the seed's position for an unseen stealthed
+    // target, the hard point, the targeted team member, the object's position); its result is not used, a failure ends
+    // the pass.
+    const bool object_goal = order.skip_destination_check && !attack;
+    const bool validate_only = (attack || object_goal) && !replan && !(order.flags & kMoveFlagSkipValidation) && !queued;
     bool zone_failed = false;
     std::vector<uint32_t> no_move;  // indices into idx: the units of the formations the failed validation left out
     if (replan) {
@@ -904,7 +910,7 @@ void MovementSystem::move_land(const MoveOrder& order, const std::vector<uint32_
                 const Unit& seed = units_[idx[f[0]]];
                 if (!is_air(seed) && grid_.passable_world(seed.m.pos, seed.lp.mask)) {
                     V2 v;
-                    const V2 p = validate_only ? order.attack.c : order.destination;
+                    const V2 p = attack ? order.attack.c : order.destination;
                     if (!zone_validate(regions_, p, seed.m.pos, seed.lp.mask, v)) {
                         zone_failed = true;
                     } else if (position_order && !(v == order.destination)) {

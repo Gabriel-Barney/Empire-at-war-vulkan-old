@@ -505,6 +505,44 @@ void test_attack_validation_failure() {
     CHECK(b.failed && !b.has_goal && moved2 < 1.0f);  // the pen's formation comes first: the open unit gets no move either
 }
 
+
+// mov2 t06 (MOVEMENT §4.2 step 2, MOV2_RE_QUESTIONS Q3 [H]): a move to an object (skip_destination_check, no attack block)
+// is zone-validated per seed like a position order; a failure ends the composition pass. The pen unit (sealed, more than
+// 30 cells from the object at (52, 52)) fails its validation; with kMoveFlagSkipValidation (block flag 0x20) nothing is
+// validated and both get a move. Before mov2 t06 an object move skipped the validation.
+void test_object_goal_validation() {
+    ::alamo::test::section("mov2_object_goal_validation");
+    const auto run = [](uint32_t flags, UnitView& a, UnitView& b) {
+        MovementSystem sys{MovementConfig{}};
+        land_system(sys, 60);
+        for (int32_t k = 3; k <= 9; ++k) {
+            sys.grid().set_base(k, 3, kPassImpassable);
+            sys.grid().set_base(k, 9, kPassImpassable);
+            sys.grid().set_base(3, k, kPassImpassable);
+            sys.grid().set_base(9, k, kPassImpassable);
+        }
+        CHECK(sys.add_unit(vehicle(1, cell_center(6, 6))));
+        CHECK(sys.add_unit(vehicle(2, cell_center(40, 10))));
+        SimRng rng(11);
+        MoveOrder o;
+        o.units = {1, 2};
+        o.destination = cell_center(52, 52);
+        o.skip_destination_check = true;
+        o.flags = flags;
+        sys.move(o, rng, 1);
+        for (uint32_t f = 1; f < 40; ++f) sys.tick(f, rng);
+        a = sys.view(1);
+        b = sys.view(2);
+    };
+    UnitView a, b;
+    run(0, a, b);
+    std::printf("mov2 t06 object move validation: pen unit failed %d has_goal %d; open unit failed %d has_goal %d\n",
+                a.failed ? 1 : 0, a.has_goal ? 1 : 0, b.failed ? 1 : 0, b.has_goal ? 1 : 0);
+    CHECK(a.failed && !a.has_goal);
+    run(kMoveFlagSkipValidation, a, b);
+    CHECK(!b.failed && b.has_goal);  // flag 0x20: no validation, the open unit moves
+}
+
 }  // namespace
 
 int main() {
@@ -518,5 +556,6 @@ int main() {
     test_stored_z_rest();         // bkm1 t06 (b0051)
     test_secondary_facing();      // bkm1 t08 (b0050)
     test_attack_validation_failure();  // bkm3 t01 (b0076)
+    test_object_goal_validation();  // mov2 t06
     return ::alamo::test::report("alamo_tactical_movement_bkm_tests");
 }

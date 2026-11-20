@@ -227,7 +227,9 @@ struct MoveOrder {
     // s78n t20 (MOVEMENT §4.3.1 item 2): the order has an object goal (block kind 3), which retail sends to the attack-arc
     // slot test 0x438c10 instead of the destination check 0x439360. [port] the arc test is not modelled: the host sets
     // this for its attack approaches (and for the garrison approach until its retail form is ported), and the land
-    // destination check and the single-member shortcut are skipped.
+    // destination check and the single-member shortcut are skipped. mov2 t06 (MOVEMENT §4.2 step 2 [H]): the composition
+    // pass still zone-validates the destination per seed (0x50f480, unless kMoveFlagSkipValidation); a failure ends the
+    // pass, the validated point is not used.
     bool skip_destination_check = false;
     // s78n t25.2 (MOVEMENT §4.3.2): the land attack block. With attack.target >= 0 (land) the order is an object goal:
     // no destination check and no single-member shortcut (as skip_destination_check), the attack slots 0x438c10 at a new
