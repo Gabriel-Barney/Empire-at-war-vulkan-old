@@ -494,3 +494,28 @@ How P5 is built; status and open items are on the roadmap (group `sp5`), checks 
   `BattleAi::lane_live_read`, which counts a read made from lane code (debug builds assert); `alamo_headless` exits 3
   when the count is not 0, so every `--ai-lane` test checks it (`alamo_headless_skirmish_ai_foc_ai_lane` /
   `_foc_land_ai_lane` worker-count checks, the two lane save checks). `think()` still runs inline (t03).
+- One facts object for both lanes (ref5 t07, 2026-11-20; `engine/ai/tactical/include/alamo/ai/tactical/battle_facts.hpp`):
+  `TacticalAiHost` keeps only `fill`, `frame_events` (the six signal lists in one call), `execute`, `facts()` and the three
+  host writes (HIJACK, the two releases); the 26 per-feature query virtuals are fact families of `BattleFacts`, each with ONE
+  rule the host writes from the battle (`BattleAi::wire_facts`). Two read modes: **live** (lane off, and the critical
+  lane) asks the rule at the moment of the read; **snapshot** (set while `think()` and the lane start scripts run) answers
+  from the capture. A `FactTable` family (per player: pool, can-reinforce, population cap / used, space drop frame; per
+  object: movement locks, timed landings in flight; per (player, type): skirmish builders and `can_build_now`) captures its
+  own rule over the host's key list at `capture_lane_view`, so both lanes run the same rule; a `FactQuery` family (pads, pad
+  check, prevention, star base, replaced builder, the two drop tests, the attack-position line test, weather sight) takes
+  positions or id pairs and has a second `snapshot` function over the capture (`BattleAi::FactEnv`: the snapshot store and
+  the captured tables; the drop tests stay partial there, as in ref5 t06). Why live with the lane off and not a frame
+  snapshot: the AI's own orders change the battle inside a frame (a Reinforce deploys a pool entry and fills population,
+  a Lua ability locks a unit), and goldens do not see a stale answer (an experiment answering five families from a frame
+  capture left every golden identical, refresh or not); `test_facts_same_frame` (alamo_ai_tactical_world_tests, variant 13)
+  polls a space Reinforce twice in one Lua run with room for one corvette and fails a per-frame capture. `version()` counts
+  captures and the host's reported writes, for a reader that keeps an answer. Golden-neutral: every golden and the four
+  `--skirmish-ai foc / foc-land` full CRC logs (lane on and off, worker count 0) are byte-identical to the commit before.
+  The AI VMs' L1 hook reads (`wrap_lane_hooks`, installed only with the lane on) use the same `FactTable` form inside
+  `BattleAi`: per object (`l1_`: damage rate, time till dead, projectiles, energy, hero clash, engines, space fields; one
+  rule `l1_fact`, captured over the battle units and containers on the job system as before), final blows, and per player
+  the strike / special-weapon availability, bombing result and retreat increment. Still two-path by design: the hook
+  **writes** (queued as lane writes with an answer predicted from the capture, applied at the due tick; lane off they act
+  at once and answer with their real result, so the two cannot be one path without moving the lane-off timing), the special
+  weapon copy (`view_.sw`, whose dry runs change it), `object_hidden` (fog bits), `nearest_field` / `build_pad_contents`
+  (handles of the snapshot store) and the constructor's object-bridge hooks (move goals, script locks).

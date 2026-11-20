@@ -411,6 +411,7 @@ BattleAi::BattleAi(TacticalBattle& battle, TacticalMode& mode, SimHost& host, co
         br.spawn_ability_target = [bt, md, hs](Vec3 p, int32_t owner) { return bt->spawn_dummy_target(*md, owner, p, hs->random().synced()); };
     }
     if (world_->ai_lane()) wrap_lane_hooks();  // sp3 slice 4e (part 2)
+    wire_facts();  // ref5 t07
 }
 
 // ---- sp3 slice 4e (part 2): the AI VMs' L1 hooks on the AI lane -----------------------------------------------------
@@ -452,68 +453,34 @@ void BattleAi::wrap_lane_hooks() {
         const objects::ObjectHandle h = vs.find(id);
         return vs.exists(h) ? vs.owner(h) : -1;
     };
-    auto per_player = [](const auto& v, int32_t p, auto none) { return p >= 0 && static_cast<size_t>(p) < v.size() ? v[static_cast<size_t>(p)] : none; };
-    // ---- reads ----
-    r.rate_of_damage = [this, vid, f = r.rate_of_damage](objects::ObjectHandle u) {
-        if (!lane_view()) return f(u);
-        const LaneView::L1Obj* o = view_l1(vid(u));
-        return o ? o->rate : 0.0;
-    };
-    r.time_till_dead = [this, vid, f = r.time_till_dead](objects::ObjectHandle u) {
-        if (!lane_view()) return f(u);
-        const LaneView::L1Obj* o = view_l1(vid(u));
-        return o ? o->ttd : 1e18;
-    };
-    r.final_blow_player = [this, vid, f = r.final_blow_player](objects::ObjectHandle o) {
-        if (!lane_view()) return f(o);
-        const objects::ObjectId id = vid(o);
-        const auto& v = view_.final_blow;
-        const auto it = std::lower_bound(v.begin(), v.end(), id, [](const std::pair<objects::ObjectId, int32_t>& a, objects::ObjectId x) { return a.first < x; });
-        return it != v.end() && it->first == id ? it->second : -1;
-    };
-    r.projectile_types = [this, vid, f = r.projectile_types](objects::ObjectHandle u) {
-        if (!lane_view()) return f(u);
-        std::vector<objects::TypeIndex> out;
-        if (const LaneView::L1Obj* o = view_l1(vid(u)))
-            out.assign(view_.proj_types.begin() + o->pt_first, view_.proj_types.begin() + o->pt_first + o->pt_count);
-        return out;
-    };
-    r.current_projectile = [this, vid, f = r.current_projectile](objects::ObjectHandle u) {
-        if (!lane_view()) return f(u);
-        const LaneView::L1Obj* o = view_l1(vid(u));
-        return o ? o->cur_proj : objects::kNone;
-    };
+    // ---- reads (ref5 t07: the fact tables l1_ ... answer live or from the capture, by lane_view()) ----
+    {
+        const TacticalBattle* bt = b_;
+        l1_.set_rule([this](const objects::ObjectId& id) { return l1_fact(id); });
+        final_blow_.set_rule([bt](const objects::ObjectId& id) { return bt->final_blow_player(id); });
+        sw_allowed_.set_rule([bt](const int32_t& p) { return static_cast<uint8_t>(bt->special_weapons_allowed(p) ? 1 : 0); });
+        bomb_avail_.set_rule([bt](const int32_t& p) { return static_cast<uint8_t>(bt->bombing_run_available(p) ? 1 : 0); });
+        bombard_avail_.set_rule([bt](const int32_t& p) { return static_cast<uint8_t>(bt->bombardment_available(p) ? 1 : 0); });
+        bomb_finished_.set_rule([bt](const int32_t& p) { return static_cast<uint8_t>(bt->bombing_run_finished(p) ? 1 : 0); });
+        bomb_result_.set_rule([bt](const int32_t& p) { return bt->bombing_run_result(p); });
+        retreat_inc_.set_rule([bt](const int32_t& p) { return bt->retreat_increment_frames(p); });
+    }
+    r.rate_of_damage = [this, vid](objects::ObjectHandle u) { return l1_.get(lane_view(), vid(u)).rate; };
+    r.time_till_dead = [this, vid](objects::ObjectHandle u) { return l1_.get(lane_view(), vid(u)).ttd; };
+    r.final_blow_player = [this, vid](objects::ObjectHandle o) { return final_blow_.get(lane_view(), vid(o)); };
+    r.projectile_types = [this, vid](objects::ObjectHandle u) { return l1_.get(lane_view(), vid(u)).proj; };
+    r.current_projectile = [this, vid](objects::ObjectHandle u) { return l1_.get(lane_view(), vid(u)).cur_proj; };
     // aitac t06 [port]: with the AI lane the answer is false (the combat state it reads is not in the lane view)
     r.should_switch_weapons = [this, f = r.should_switch_weapons](objects::ObjectHandle u, objects::ObjectHandle t) {
         return lane_view() ? int32_t{0} : f(u, t);
     };
-    r.energy = [this, vid, f = r.energy](objects::ObjectHandle u) {
-        if (!lane_view()) return f(u);
-        const LaneView::L1Obj* o = view_l1(vid(u));
-        return o ? o->energy : -1.0f;
-    };
-    r.in_hero_clash = [this, vid, f = r.in_hero_clash](objects::ObjectHandle u) {
-        if (!lane_view()) return f(u);
-        const LaneView::L1Obj* o = view_l1(vid(u));
-        return o && o->clash;
-    };
-    r.hero_clash_locked = [this, vid, f = r.hero_clash_locked](objects::ObjectHandle u) {
-        if (!lane_view()) return f(u);
-        const LaneView::L1Obj* o = view_l1(vid(u));
-        return o && o->clash_locked;
-    };
-    r.bombing_run_available = [this, per_player, f = r.bombing_run_available](int32_t p) {
-        return lane_view() ? per_player(view_.bomb_avail, p, uint8_t{0}) != 0 : f(p);
-    };
-    r.bombardment_available = [this, per_player, f = r.bombardment_available](int32_t p) {
-        return lane_view() ? per_player(view_.bombard_avail, p, uint8_t{0}) != 0 : f(p);
-    };
-    r.bombing_run_finished = [this, per_player, f = r.bombing_run_finished](int32_t p) {
-        return lane_view() ? per_player(view_.bomb_finished, p, uint8_t{0}) != 0 : f(p);
-    };
-    r.bombing_run_result = [this, per_player, f = r.bombing_run_result](int32_t p) {
-        return lane_view() ? per_player(view_.bomb_result, p, 0.0f) : f(p);
-    };
+    r.energy = [this, vid](objects::ObjectHandle u) { return l1_.get(lane_view(), vid(u)).energy; };
+    r.in_hero_clash = [this, vid](objects::ObjectHandle u) { return l1_.get(lane_view(), vid(u)).clash != 0; };
+    r.hero_clash_locked = [this, vid](objects::ObjectHandle u) { return l1_.get(lane_view(), vid(u)).clash_locked != 0; };
+    r.bombing_run_available = [this](int32_t p) { return bomb_avail_.get(lane_view(), p) != 0; };
+    r.bombardment_available = [this](int32_t p) { return bombard_avail_.get(lane_view(), p) != 0; };
+    r.bombing_run_finished = [this](int32_t p) { return bomb_finished_.get(lane_view(), p) != 0; };
+    r.bombing_run_result = [this](int32_t p) { return bomb_result_.get(lane_view(), p); };
     // point_in_field / nearest_field read the space fields, fixed at map setup; nearest_field's handle: the snapshot's
     r.nearest_field = [this, f = r.nearest_field](Vec3 p, uint32_t mask) {
         if (!lane_view()) return f(p, mask);
@@ -521,10 +488,9 @@ void BattleAi::wrap_lane_hooks() {
         return id == objects::kNoObjectId ? objects::ObjectHandle{} : world_->view_store().find(id);
     };
     r.object_in_field = [this, vid, f = r.object_in_field](objects::ObjectHandle o, uint32_t kind) {
-        if (!lane_view()) return f(o, kind);
-        const LaneView::L1Obj* x = view_l1(vid(o));
+        if (!lane_view()) return f(o, kind);  // the battle's answer for every kind (l1_ holds the space fields only)
         const int i = kind == 1u ? 0 : kind == 2u ? 1 : kind == 4u ? 2 : kind == 8u ? 3 : -1;
-        return x && i >= 0 ? static_cast<int32_t>(x->field[i]) : -1;
+        return i >= 0 ? static_cast<int32_t>(l1_.get(true, vid(o)).field[i]) : -1;
     };
     r.build_pad_contents = [this, vid, f = r.build_pad_contents](objects::ObjectHandle pad) {
         if (!lane_view()) return f(pad);
@@ -537,17 +503,9 @@ void BattleAi::wrap_lane_hooks() {
         return lane_view() && view_.sw ? view_.sw->readiness(vid(w), view_.frame) : f(w);
     };
     k.tsw_state = [this, vid, f = k.tsw_state](objects::ObjectHandle t) { return lane_view() && view_.sw ? view_.sw->tsw_state(vid(t)) : f(t); };
-    k.special_weapons_allowed = [this, per_player, f = k.special_weapons_allowed](int32_t p) {
-        return lane_view() ? per_player(view_.sw_allowed, p, uint8_t{0}) != 0 : f(p);
-    };
-    k.engines_online = [this, vid, f = k.engines_online](objects::ObjectHandle u) {
-        if (!lane_view()) return f(u);
-        const LaneView::L1Obj* o = view_l1(vid(u));
-        return o ? o->engines : -1;
-    };
-    k.retreat_increment_frames = [this, per_player, f = k.retreat_increment_frames](int32_t p) {
-        return lane_view() ? per_player(view_.retreat_inc, p, 0) : f(p);
-    };
+    k.special_weapons_allowed = [this](int32_t p) { return sw_allowed_.get(lane_view(), p) != 0; };
+    k.engines_online = [this, vid](objects::ObjectHandle u) { return l1_.get(lane_view(), vid(u)).engines; };
+    k.retreat_increment_frames = [this](int32_t p) { return retreat_inc_.get(lane_view(), p); };
     // ---- writes: queued (host ops), the same-call answer predicted from the view ----
     r.move_to = [this, vid, queue, owner_of, f = r.move_to](objects::ObjectHandle u, Vec3 p) {
         if (!lane_view()) return f(u, p);
@@ -568,15 +526,15 @@ void BattleAi::wrap_lane_hooks() {
         if (!lane_view()) return f(pad, lock);
         queue(kHostLockPad, owner_of(vid(pad)), {vid(pad)}, {}, -1, lock);
     };
-    r.orbital_bombardment = [this, queue, per_player, f = r.orbital_bombardment](int32_t player, Vec3 p) {
+    r.orbital_bombardment = [this, queue, f = r.orbital_bombardment](int32_t player, Vec3 p) {
         if (!lane_view()) return f(player, p);
         queue(kHostBombard, player, {}, p);
-        return per_player(view_.bombard_avail, player, uint8_t{0}) != 0;
+        return bombard_avail_.get(true, player) != 0;
     };
-    r.bombing_run = [this, queue, per_player, f = r.bombing_run](int32_t player, Vec3 p) {
+    r.bombing_run = [this, queue, f = r.bombing_run](int32_t player, Vec3 p) {
         if (!lane_view()) return f(player, p);
         queue(kHostBombingRun, player, {}, p);
-        return per_player(view_.bomb_avail, player, uint8_t{0}) != 0;
+        return bomb_avail_.get(true, player) != 0;
     };
     r.set_bombing_run_disabled = [this, queue, f = r.set_bombing_run_disabled](int32_t p, bool on) {
         if (!lane_view()) return f(p, on);
@@ -598,9 +556,8 @@ void BattleAi::wrap_lane_hooks() {
     r.release_hero_clash_lock = [this, vid, queue, owner_of, f = r.release_hero_clash_lock](objects::ObjectHandle u) {
         if (!lane_view()) return f(u);
         const objects::ObjectId id = vid(u);
-        const LaneView::L1Obj* o = view_l1(id);
         queue(kHostReleaseClash, owner_of(id), {id});
-        return o && o->clash_locked;
+        return l1_.get(true, id).clash_locked != 0;
     };
     k.begin_targeting = [this, vid, queue, owner_of, f = k.begin_targeting](objects::ObjectHandle w) {
         if (!lane_view() || !view_.sw) return f(w);
@@ -681,9 +638,21 @@ void BattleAi::wrap_lane_hooks() {
     };
 }
 
-const BattleAi::LaneView::L1Obj* BattleAi::view_l1(objects::ObjectId id) const {
-    const auto it = std::lower_bound(view_.l1.begin(), view_.l1.end(), id, [](const LaneView::L1Obj& o, objects::ObjectId v) { return o.id < v; });
-    return it != view_.l1.end() && it->id == id ? &*it : nullptr;
+// ref5 t07: the l1_ rule - one battle unit or container's L1 answers (const battle reads: the capture runs it in parallel).
+BattleAi::L1Fact BattleAi::l1_fact(objects::ObjectId id) const {
+    const TacticalBattle* bt = b_;
+    L1Fact o;
+    o.rate = bt->rate_of_damage(id);
+    o.ttd = bt->time_till_dead(id);
+    o.cur_proj = bt->current_projectile(id);
+    o.engines = bt->engines_online(id);
+    o.energy = bt->combat().has_unit(id) ? bt->combat().energy(id) : -1.0f;
+    o.clash = bt->combat().has_unit(id) && (bt->combat().flags(id) & tactical::combat::kUnitHeroClash) != 0 ? 1 : 0;
+    o.clash_locked = bt->hero_clash_locked(id) ? 1 : 0;
+    if (bt->space_)
+        for (int k = 0; k < 4; ++k) o.field[k] = static_cast<int8_t>(bt->object_in_field(id, 1u << k));
+    o.proj = bt->projectile_types(id);
+    return o;
 }
 
 void BattleAi::capture_l1() {
@@ -694,53 +663,25 @@ void BattleAi::capture_l1() {
     for (const TacticalBattle::Container& c : b_->containers_) ids.push_back(c.id);
     std::sort(ids.begin(), ids.end());
     ids.erase(std::unique(ids.begin(), ids.end()), ids.end());
-    const bool fields = b_->space_;
-    // slice 4f: per object in parallel (const battle reads, per-index outputs), flattened in id order
-    const auto n = static_cast<uint32_t>(ids.size());
-    v.l1.assign(n, {});
-    std::vector<std::vector<objects::TypeIndex>> pts(n);
-    const TacticalBattle* bt = b_;
-    host_->parallel_for()(n, 16, [&](uint32_t begin, uint32_t end) {
-        for (uint32_t i = begin; i < end; ++i) {
-            const objects::ObjectId id = ids[i];
-            LaneView::L1Obj& o = v.l1[i];
-            o.id = id;
-            o.rate = bt->rate_of_damage(id);
-            o.ttd = bt->time_till_dead(id);
-            o.cur_proj = bt->current_projectile(id);
-            o.engines = bt->engines_online(id);
-            o.energy = bt->combat().has_unit(id) ? bt->combat().energy(id) : -1.0f;
-            o.clash = bt->combat().has_unit(id) && (bt->combat().flags(id) & tactical::combat::kUnitHeroClash) != 0 ? 1 : 0;
-            o.clash_locked = bt->hero_clash_locked(id) ? 1 : 0;
-            if (fields)
-                for (int k = 0; k < 4; ++k) o.field[k] = static_cast<int8_t>(bt->object_in_field(id, 1u << k));
-            pts[i] = bt->projectile_types(id);
-        }
-    });
-    v.proj_types.clear();
-    for (uint32_t i = 0; i < n; ++i) {
-        v.l1[i].pt_first = static_cast<uint32_t>(v.proj_types.size());
-        v.l1[i].pt_count = static_cast<uint32_t>(pts[i].size());
-        v.proj_types.insert(v.proj_types.end(), pts[i].begin(), pts[i].end());
+    // slice 4f: the l1_ rule per object in parallel (const battle reads, per-index outputs); ref5 t07: as fact tables
+    l1_.capture(std::move(ids), host_->parallel_for(), 16);
+    {
+        std::vector<objects::ObjectId> blows;
+        for (const auto& [id, player] : b_->l1_final_blow_) blows.push_back(id);
+        final_blow_.capture(std::move(blows));
     }
-    v.final_blow = b_->l1_final_blow_;
-    const auto np = static_cast<size_t>(host_->players());
-    v.sw_allowed.assign(np, 0);
-    v.bomb_avail.assign(np, 0);
-    v.bombard_avail.assign(np, 0);
-    v.bomb_finished.assign(np, 0);
-    v.bomb_result.assign(np, 0.0f);
-    v.retreat_inc.assign(np, 0);
-    for (size_t p = 0; p < np; ++p) {
-        const auto pi = static_cast<int32_t>(p);
-        v.sw_allowed[p] = b_->special_weapons_allowed(pi) ? 1 : 0;
-        v.bomb_avail[p] = b_->bombing_run_available(pi) ? 1 : 0;
-        v.bombard_avail[p] = b_->bombardment_available(pi) ? 1 : 0;
-        v.bomb_finished[p] = b_->bombing_run_finished(pi) ? 1 : 0;
-        v.bomb_result[p] = b_->bombing_run_result(pi);
-        v.retreat_inc[p] = b_->retreat_increment_frames(pi);
+    {
+        std::vector<int32_t> all(static_cast<size_t>(host_->players()));
+        for (size_t p = 0; p < all.size(); ++p) all[p] = static_cast<int32_t>(p);
+        sw_allowed_.capture(all);
+        bomb_avail_.capture(all);
+        bombard_avail_.capture(all);
+        bomb_finished_.capture(all);
+        bomb_result_.capture(all);
+        retreat_inc_.capture(all);
     }
     v.sw = b_->l1_sw_;
+    const TacticalBattle* bt = b_;
     ALAMO_PROFILE_SCOPE("tac.cap.fog");  // wall clock only
     // slice 4e (part 3): the AI players' fogged test of every object (force 1)
     v.fog_players.clear();
@@ -873,9 +814,9 @@ bool BattleAi::start(std::vector<std::string>* diag) {
     // sp3 slice 4c: the start scripts (critical lane, before the first AI slot) read a view captured now, and what they
     // queue is collected at once (no job is pending yet: the first update would otherwise drop it).
     capture_lane_view();
-    lane_thinking_ = true;  // ref5 t06: the start scripts read only the view
+    set_thinking(true);  // ref5 t06: the start scripts read only the view
     const bool ok = world_->start(diag);
-    lane_thinking_ = false;
+    set_thinking(false);
     set_build_time_multipliers();
     queue_global_writes();  // slice 4e (part 3)
     for (cmd::Command& c : lane_job_.batch) lane_batch_.push_back(std::move(c));
@@ -909,9 +850,9 @@ void BattleAi::update() {
         lane_job_.pending = true;
         lane_job_.frame = host_->frame();
         lane_job_.batch.clear();
-        lane_thinking_ = true;  // ref5 t06: from here to the end of think() no host answer reads the battle
+        set_thinking(true);  // ref5 t06: from here to the end of think() no host answer reads the battle
         world_->think();  // inline: the AI lane's job (t03: on the AI thread)
-        lane_thinking_ = false;
+        set_thinking(false);
         lane_job_.locks = world_->object_bridge().script_lock_facts();  // slice 4e: published at collect
         queue_global_writes();
         StateHasher h;
@@ -931,12 +872,7 @@ void BattleAi::capture_lane_view() {
     ensure_type_facts();
     const auto players = static_cast<int32_t>(host_->players());
     const auto np = static_cast<size_t>(players);
-    view_.pool.assign(np, {});
-    view_.can_reinforce.assign(np, 0);
-    view_.pop_cap.assign(np, -1.0f);
-    view_.pop_used.assign(np, 0.0f);
-    view_.drop_frame.assign(np, {});
-    view_.drop_frame_ok.assign(np, 0);
+    view_.players = players;
     view_.enemy.assign(np * np, 0);
     // Pads (build_pads / build_pad_check run on the AI lane from these and the snapshot store): pad states, relations of
     // the galactic players, their factions, the live battle units.
@@ -959,30 +895,38 @@ void BattleAi::capture_lane_view() {
         if (u.alive && !u.retreated) view_.live_units.push_back(u.id);
     std::sort(view_.live_units.begin(), view_.live_units.end());
     ALAMO_PROFILE_STEP(steps, "tac.cap.pads_scan");
+    // ref5 t07: the per-player fact tables, from their rules (every host player)
+    {
+        std::vector<int32_t> all(np);
+        for (int32_t p = 0; p < players; ++p) all[static_cast<size_t>(p)] = p;
+        facts_.pool.capture(all);
+        facts_.reinforce_ok.capture(all);
+        facts_.pop_cap.capture(all);
+        facts_.pop_used.capture(all);
+        facts_.drop_frame.capture(all);
+    }
     for (int32_t p = 0; p < players; ++p) {
         const auto pi = static_cast<size_t>(p);
-        view_.pool[pi] = reinforcement_pool(p);
-        view_.can_reinforce[pi] = can_reinforce(p) ? 1 : 0;
-        view_.pop_cap[pi] = population_cap(p);
-        view_.pop_used[pi] = population_used(p);
-        view_.drop_frame_ok[pi] = space_drop_frame(p, view_.drop_frame[pi]) ? 1 : 0;
         for (int32_t q = 0; q < players; ++q) view_.enemy[pi * np + static_cast<size_t>(q)] = b_->combat_->is_enemy(p, q) ? 1 : 0;
     }
     ALAMO_PROFILE_STEP(steps, "tac.cap.players");
-    view_.locked.clear();
-    for (const TacticalBattle::Unit& u : b_->units_)
-        if (u.alive && !u.retreated && b_->movement_locked(u.id)) view_.locked.push_back(u.id);
-    for (const TacticalBattle::Container& c : b_->containers_)
-        if (!c.removed && b_->movement_locked(c.id)) view_.locked.push_back(c.id);
-    std::sort(view_.locked.begin(), view_.locked.end());
-    view_.locked.erase(std::unique(view_.locked.begin(), view_.locked.end()), view_.locked.end());
-    ALAMO_PROFILE_STEP(steps, "tac.cap.locked");
-    view_.in_flight.clear();
-    for (const TacticalBattle::Landing& l : b_->landings_) {
-        const TacticalBattle::Participant& p = b_->parts_[l.participant];
-        if (l.timed && l.state != 3) view_.in_flight.emplace_back(p.owner, static_cast<int32_t>(p.galactic_id));
+    {  // movement locks: the live battle units and containers (an object not listed reads unlocked)
+        std::vector<int32_t> ids;
+        for (const TacticalBattle::Unit& u : b_->units_)
+            if (u.alive && !u.retreated) ids.push_back(u.id);
+        for (const TacticalBattle::Container& c : b_->containers_)
+            if (!c.removed) ids.push_back(c.id);
+        facts_.locked.capture(std::move(ids));
     }
-    std::sort(view_.in_flight.begin(), view_.in_flight.end());
+    ALAMO_PROFILE_STEP(steps, "tac.cap.locked");
+    {  // timed landings still unloading (owner, key); the AI lane waits for every drop's record anyway
+        std::vector<std::pair<int32_t, int32_t>> keys;
+        for (const TacticalBattle::Landing& l : b_->landings_) {
+            const TacticalBattle::Participant& p = b_->parts_[l.participant];
+            if (l.timed && l.state != 3) keys.emplace_back(p.owner, static_cast<int32_t>(p.galactic_id));
+        }
+        facts_.in_flight.capture(std::move(keys));
+    }
     // Weather sight factors by Weather_Category (the categories of the types, resolved once).
     resolve_weather_categories();
     view_.weather_sight.assign(weather_categories_.size(), 1.0f);
@@ -990,6 +934,7 @@ void BattleAi::capture_lane_view() {
         for (size_t c = 0; c < weather_categories_.size(); ++c) view_.weather_sight[c] = b_->weather().sight_modifier(weather_categories_[c]);
     ALAMO_PROFILE_STEP(steps, "tac.cap.weather");
     view_.damage = b_->damage_tracking_;
+    facts_.damage_copy = &view_.damage;  // ref5 t07
     ALAMO_PROFILE_STEP(steps, "tac.cap.damage");
     {
         const objects::ObjectStore& st = mode_->primary();
@@ -1035,6 +980,7 @@ void BattleAi::capture_lane_view() {
     capture_lane_rest();
     ALAMO_PROFILE_STEP(steps, "tac.cap.rest");
     view_.valid = true;
+    facts_.captured();  // ref5 t07
 }
 
 // sp3 slice 4b: one record per object of the ability system or the combat system (ascending id, merged), the answers of
@@ -1877,7 +1823,6 @@ void BattleAi::fill(at::PerceptionWorld& w, std::vector<at::TacticalAiObject>& o
 // without a movement entry: clear.
 bool BattleAi::attack_position_line_clear(int32_t object_id, const at::Vec3f& a, const at::Vec3f& b) {
     if (b_->space_) return true;
-    if (lane_view()) return view_line_clear(object_id, a, b);  // ref5 t06
     lane_live_read("attack_position_line_clear");
     auto mover = static_cast<objects::ObjectId>(object_id);
     if (!b_->movement_->has_unit(mover)) {
@@ -1892,6 +1837,71 @@ bool BattleAi::attack_position_line_clear(int32_t object_id, const at::Vec3f& a,
     }
     return mv::line_passable(b_->movement_->grid(), mv::V2{a.x, a.y}, mv::V2{b.x, b.y}, b_->movement_->mask_of(mover));
 }
+
+// What the store-reading fact rules read: the battle (env.view false), or the lane view (the snapshot store, the captured
+// pad states, relations, live units and station upgrades) on the AI lane.
+struct BattleAi::FactEnv {
+    const BattleAi& ai;
+    const objects::ObjectStore& st;
+    bool view;
+    bool allied(int32_t p, int32_t q) const {
+        if (!view) return ai.b_->bt_allied(p, q);
+        const int32_t n = ai.view_.allied_n;  // as TacticalBattle::bt_relation: unknown players are only allied with themselves
+        if (p < 0 || q < 0 || p >= n || q >= n) return p == q;
+        return ai.view_.allied[static_cast<size_t>(p * n + q)] != 0;
+    }
+    bool enemy(int32_t a, int32_t b) const {  // CombatSystem::is_enemy
+        if (!view) return ai.b_->combat_->is_enemy(a, b);
+        const int32_t n = ai.view_.players;
+        return a >= 0 && b >= 0 && a < n && b < n && ai.view_.enemy[static_cast<size_t>(a * n + b)] != 0;
+    }
+    const LaneView::Pad* view_pad(objects::ObjectId pad) const {
+        const auto& v = ai.view_.pads;
+        const auto it = std::lower_bound(v.begin(), v.end(), pad, [](const LaneView::Pad& p, objects::ObjectId id) { return p.pad < id; });
+        return it != v.end() && it->pad == pad ? &*it : nullptr;
+    }
+    objects::ObjectId pad_contents(objects::ObjectId pad) const {  // TacticalBattle::pad_contents
+        if (!view) return ai.b_->pad_contents(pad);
+        const LaneView::Pad* p = view_pad(pad);
+        return p ? p->contents : objects::kNoObjectId;
+    }
+    bool in_cooldown(objects::ObjectId pad) const {  // the pad's rebuild cooldown runs past the battle frame
+        if (!view) {
+            const TacticalBattle::PadState* s = ai.b_->pad_state(pad);
+            return s && s->cooldown_end > ai.b_->frame_;
+        }
+        const LaneView::Pad* p = view_pad(pad);
+        return p && p->cooldown_end > ai.view_.frame;
+    }
+    bool rule_blocker(objects::ObjectHandle h, int32_t pad_owner) const {
+        if (!view) return ai.b_->pad_rule_blocker(st, h, pad_owner);
+        // as TacticalBattle::pad_rule_blocker (tactical_battle_pads.cpp), on the lane view
+        static const objects::BehaviorTypeId kBaseShield = objects::behavior_type_id("BASE_SHIELD");
+        static const objects::BehaviorTypeId kGroundStructure = objects::behavior_type_id("DUMMY_GROUND_STRUCTURE");
+        if (!std::binary_search(ai.view_.live_units.begin(), ai.view_.live_units.end(), st.id(h))) return false;
+        if (kBaseShield != objects::kNoBehavior && st.has_behavior(h, kBaseShield)) return false;
+        if (kGroundStructure != objects::kNoBehavior && st.has_behavior(h, kGroundStructure)) return false;
+        return !allied(pad_owner, st.owner(h));
+    }
+    std::string faction(int32_t player) const {
+        if (view) return player >= 0 && static_cast<size_t>(player) < ai.view_.faction.size() ? ai.view_.faction[static_cast<size_t>(player)] : std::string();
+        const auto& ps = ai.b_->galaxy_->players();
+        if (player >= 0 && static_cast<size_t>(player) < ps.size() && ps[static_cast<size_t>(player)].faction < ai.b_->galaxy_->rules().factions.size())
+            return ai.b_->galaxy_->rules().factions[ps[static_cast<size_t>(player)].faction].name;
+        return {};
+    }
+    template <class F>
+    void each_upgrade(F&& f) const {  // the station upgrade records (old, new), battle order
+        if (view) {
+            for (const auto& [from, to] : ai.view_.upgrades) f(from, to);
+            return;
+        }
+        for (const TacticalBattle::StationUpgrade& u : ai.b_->station_upgrades()) f(u.old_station, u.new_station);
+    }
+};
+
+BattleAi::FactEnv BattleAi::live_env() const { return FactEnv{*this, mode_->primary(), false}; }
+BattleAi::FactEnv BattleAi::view_env() const { return FactEnv{*this, world_->view_store(), true}; }
 
 // ---- ref5 t06: the AI lane's remaining host answers, from the capture ----------------------------------------------
 
@@ -1947,27 +1957,26 @@ void BattleAi::capture_lane_rest() {
     // Station upgrades (battle order).
     view_.upgrades.clear();
     for (const TacticalBattle::StationUpgrade& u : b_->station_upgrades()) view_.upgrades.emplace_back(u.old_station, u.new_station);
-    // Skirmish production: every type hg_build_check can accept (in types_used_, a tactical queue), per AI player.
-    view_.builds.clear();
-    if (b_->production_enabled()) {
-        const objects::GameObjectTypes& types = b_->catalog_->types();
-        std::vector<int32_t> cand;
-        for (const uint32_t t : b_->types_used_)
-            if (t < types.size() && b_->hg_queue_of(static_cast<objects::TypeIndex>(t)) >= 0) cand.push_back(static_cast<int32_t>(t));
-        std::sort(cand.begin(), cand.end());
-        cand.erase(std::unique(cand.begin(), cand.end()), cand.end());
-        for (int32_t p = 0; p < static_cast<int32_t>(host_->players()); ++p) {
-            if (!controls(p)) continue;
-            for (const int32_t t : cand) {
-                LaneView::Build e;
-                e.player = p;
-                e.type = t;
-                e.builders = tactical_builders(p, t);
-                if (e.builders.empty()) continue;  // nothing to answer: no builder lists it
-                e.can = can_build_now(p, t) ? 1 : 0;
-                view_.builds.push_back(std::move(e));
-            }
+    // Skirmish production: every type hg_build_check can accept (in types_used_, a tactical queue), per AI player
+    // (ref5 t07: the builders and can_build fact tables; can_build only where some builder lists the type).
+    {
+        std::vector<std::pair<int32_t, int32_t>> keys;
+        if (b_->production_enabled()) {
+            const objects::GameObjectTypes& types = b_->catalog_->types();
+            std::vector<int32_t> cand;
+            for (const uint32_t t : b_->types_used_)
+                if (t < types.size() && b_->hg_queue_of(static_cast<objects::TypeIndex>(t)) >= 0) cand.push_back(static_cast<int32_t>(t));
+            std::sort(cand.begin(), cand.end());
+            cand.erase(std::unique(cand.begin(), cand.end()), cand.end());
+            for (int32_t p = 0; p < static_cast<int32_t>(host_->players()); ++p)
+                if (controls(p))
+                    for (const int32_t t : cand) keys.emplace_back(p, t);
         }
+        facts_.builders.capture(keys);
+        std::vector<std::pair<int32_t, int32_t>> listed;
+        for (const auto& k : keys)
+            if (!facts_.builders.get(true, k).empty()) listed.push_back(k);
+        facts_.can_build.capture(std::move(listed));
     }
     // Reserve entries (the drop tests) and the playable box.
     view_.reserve.clear();
@@ -2044,7 +2053,7 @@ bool BattleAi::view_land_drop_ok(int32_t player, int32_t key, const at::Vec3f& p
 bool BattleAi::view_space_drop_ok(int32_t player, int32_t key, const at::Vec3f& p) {
     const tactical::Aabb& bb = mode_->bounds();
     if (!(p.x >= bb.min.x && p.x <= bb.max.x && p.y >= bb.min.y && p.y <= bb.max.y)) return false;
-    if (space_prevention_hit(player, p)) return false;  // the view's (lane branch)
+    if (prevention_hit_in(view_env(), player, p)) return false;  // the view's
     return view_reserve(player, key) != nullptr;
 }
 
@@ -2371,7 +2380,8 @@ void BattleAi::order_signals(uint8_t player, const cmd::EventData& ev) {
 }
 
 cmd::RejectReason BattleAi::execute(uint8_t player, const cmd::EventData& ev) {
-    attack_refused_.clear();
+    facts_.order_refused.clear();
+    facts_.wrote();  // ref5 t07
     if (world_ && world_->ai_lane()) {  // sp3 t04: queued for the batch due N + k_ai
         // sp3 slice 4c: an event execute_order does not act on is not run from the AI side either
         if (!lane_batched(ev)) return cmd::RejectReason::Unhandled;
@@ -2503,12 +2513,13 @@ cmd::RejectReason BattleAi::predict_order(uint8_t player, const cmd::EventData& 
         // sp3 slice 4c: the rest of the batched types, from the view (the apply reports a differing answer)
         case T::Reinforce: {  // slice 4d: in the pool, room (can_reinforce, land population), a finite point
             const auto key = static_cast<int32_t>(ev.u("unit"));
-            const size_t pi = player;
-            if (pi >= view_.pool.size() || !view_.can_reinforce[pi]) return R::NotAllowed;
-            const auto& pool = view_.pool[pi];
+            const int32_t pi = player;  // ref5 t07: the facts' capture (a player it did not list: no reinforcing)
+            if (!facts_.can_reinforce(pi)) return R::NotAllowed;
+            const std::vector<at::TacticalReinforcement> pool = facts_.reinforcement_pool(pi);
             const auto it = std::find_if(pool.begin(), pool.end(), [key](const at::TacticalReinforcement& e) { return e.key == key; });
             if (it == pool.end()) return R::NotAllowed;
-            if (!b_->space_ && view_.pop_cap[pi] >= 0.0f && view_.pop_used[pi] + it->population > view_.pop_cap[pi]) return R::QueueFull;
+            const float cap = facts_.population_cap(pi);
+            if (!b_->space_ && cap >= 0.0f && facts_.population_used(pi) + it->population > cap) return R::QueueFull;
             return std::isfinite(ev.f("x")) && std::isfinite(ev.f("y")) ? R::None : R::InvalidPosition;
         }
         case T::Retreat:
@@ -2522,8 +2533,8 @@ cmd::RejectReason BattleAi::predict_order(uint8_t player, const cmd::EventData& 
             const uint32_t pw = ev.u("pad");
             if (pw == cmd::kNoObject || pw > 0x7FFFFFFFu) return R::InvalidTarget;
             // the pad checks the AI's build_pad_check runs (relation, contents, rebuild cooldown); cost and type are not
-            const at::PadCheck c = build_pad_check(static_cast<int32_t>(player), static_cast<int32_t>(pw),
-                                                                                static_cast<int32_t>(ev.u("type_index")));
+            const at::PadCheck c = facts_.build_pad_check(static_cast<int32_t>(player), static_cast<int32_t>(pw),
+                                                          static_cast<int32_t>(ev.u("type_index")));
             return c == at::PadCheck::Ok ? R::None : R::NotAllowed;
         }
         case T::SetUnitAbilityMode:
@@ -2608,7 +2619,7 @@ void BattleAi::apply_lane_batch(uint64_t frame) {
             count_executed(c.payload, cmd::RejectReason::None);
             continue;
         }
-        attack_refused_.clear();
+        facts_.order_refused.clear();
         const bool reinforce = c.payload.type() == cmd::EventType::Reinforce;
         const auto player = static_cast<int32_t>(c.header.player);
         const size_t before = reinforce ? mode_->primary().owned_by(player).size() : 0;
@@ -2862,7 +2873,7 @@ cmd::RejectReason BattleAi::execute_order(uint8_t player, const cmd::EventData& 
                         std::vector<objects::ObjectId> kept;
                         for (const objects::ObjectId id : group.units)
                             if (!b_->combat_->has_unit(id) || b_->combat_->order_attack_issue(id, tu->id, -1)) kept.push_back(id);
-                            else attack_refused_.push_back(static_cast<int32_t>(id));  // q6 t19: not moved, not pending
+                            else facts_.order_refused.push_back(static_cast<int32_t>(id));  // q6 t19: not moved, not pending
                         for (const objects::ObjectId id : ids)  // members that do not move still get the order
                             if (std::find(group.units.begin(), group.units.end(), id) == group.units.end() && b_->combat_->has_unit(id))
                                 b_->combat_->order_attack_issue(id, tu->id, -1);
@@ -3017,8 +3028,7 @@ cmd::RejectReason BattleAi::execute_order(uint8_t player, const cmd::EventData& 
 }
 
 std::vector<at::TacticalReinforcement> BattleAi::reinforcement_pool(int32_t player) {
-    if (lane_view()) return player >= 0 && static_cast<size_t>(player) < view_.pool.size() ? view_.pool[static_cast<size_t>(player)]
-                                                                                           : std::vector<at::TacticalReinforcement>{};
+    lane_live_read("reinforcement_pool");
     std::vector<at::TacticalReinforcement> out;
     for (const TacticalBattle::Participant& p : b_->parts_) {
         if (p.owner != player || !p.reserve || p.deployed) continue;
@@ -3050,7 +3060,7 @@ std::vector<at::TacticalReinforcement> BattleAi::reinforcement_pool(int32_t play
 }
 
 bool BattleAi::can_reinforce(int32_t player) {
-    if (lane_view()) return player >= 0 && static_cast<size_t>(player) < view_.can_reinforce.size() && view_.can_reinforce[static_cast<size_t>(player)];
+    lane_live_read("can_reinforce");
     if (b_->finished_) return false;
     const int32_t side = player == b_->req_.info.defender ? 0 : player == b_->req_.info.attacker ? 1 : -1;
     return side >= 0 && b_->retreat_side_ != side;
@@ -3062,7 +3072,7 @@ bool BattleAi::can_reinforce(int32_t player) {
 // (the reinforcement points it holds). t50: a land skirmish is min(capacity, Land_Skirmish_Unit_Cap_By_Player_Count at the player
 // count), the capacity counting the player's and its allies' objects (§3.3 / §3.3 "plus, in skirmish, those of allied players"). ---
 float BattleAi::population_cap(int32_t player) {
-    if (lane_view()) return player >= 0 && static_cast<size_t>(player) < view_.pop_cap.size() ? view_.pop_cap[static_cast<size_t>(player)] : -1.0f;
+    lane_live_read("population_cap");
     ensure_type_facts();
     const auto& ps = b_->galaxy_->players();
     const uint32_t f = player >= 0 && static_cast<size_t>(player) < ps.size() ? ps[static_cast<size_t>(player)].faction : galactic::kNoIndex;
@@ -3093,7 +3103,7 @@ float BattleAi::population_cap(int32_t player) {
 // §3.2: Σ population shares of the player's live battle objects [port: per galactic participant, charged once], then
 // (int)sum + 1 when the fraction exceeds Allow_Reinforcement_Percentage_Normalized (shipped 0.0: any fraction rounds up).
 float BattleAi::population_used(int32_t player) {
-    if (lane_view()) return player >= 0 && static_cast<size_t>(player) < view_.pop_used.size() ? view_.pop_used[static_cast<size_t>(player)] : 0.0f;
+    lane_live_read("population_used");
     float pop = 0.0f;
     std::vector<uint8_t> counted(b_->parts_.size(), 0);
     for (const TacticalBattle::Unit& u : b_->units_)
@@ -3119,45 +3129,20 @@ float BattleAi::type_population(int32_t type) const {  // pop(T, mode) 0x373500
 // skai t17 (STATION_HANGARS_SOUND §1.2 steps 7-8): the build queue of an upgraded station goes on at its successor; follow
 // the battle's upgrade records (battle order) from `id` to the last station, -1 when `id` was never upgraded or the last
 // one is gone.
-int32_t BattleAi::replaced_builder(int32_t id) {
+int32_t BattleAi::replaced_builder_in(const FactEnv& env, int32_t id) const {
     int32_t cur = id;
     bool moved = false;
-    if (lane_view()) {  // ref5 t06: the captured records, the snapshot store
-        for (const auto& [from, to] : view_.upgrades)
-            if (static_cast<int32_t>(from) == cur) {
-                cur = static_cast<int32_t>(to);
-                moved = true;
-            }
-        const objects::ObjectStore& vs = world_->view_store();
-        return moved && vs.alive(vs.find(static_cast<objects::ObjectId>(cur))) ? cur : -1;
-    }
-    lane_live_read("replaced_builder");
-    for (const TacticalBattle::StationUpgrade& u : b_->station_upgrades())
-        if (static_cast<int32_t>(u.old_station) == cur) {
-            cur = static_cast<int32_t>(u.new_station);
+    env.each_upgrade([&](objects::ObjectId from, objects::ObjectId to) {
+        if (static_cast<int32_t>(from) == cur) {
+            cur = static_cast<int32_t>(to);
             moved = true;
         }
-    if (!moved) return -1;
-    return mode_->primary().alive(mode_->primary().find(static_cast<objects::ObjectId>(cur))) ? cur : -1;
-}
-
-namespace {
-// ref5 t06: LaneView::builds (ascending (player, type)) entry, or null.
-template <class V>
-const typename V::value_type* find_build(const V& v, int32_t player, int32_t type) {
-    const auto it = std::lower_bound(v.begin(), v.end(), std::make_pair(player, type), [](const auto& e, const std::pair<int32_t, int32_t>& k) {
-        return std::make_pair(e.player, e.type) < k;
     });
-    return it != v.end() && it->player == player && it->type == type ? &*it : nullptr;
+    return moved && env.st.alive(env.st.find(static_cast<objects::ObjectId>(cur))) ? cur : -1;
 }
-}  // namespace
 
 std::vector<int32_t> BattleAi::tactical_builders(int32_t player, int32_t type) {
     std::vector<int32_t> out;
-    if (lane_view()) {  // ref5 t06: the capture's answers (none listed: no builder)
-        if (const auto* e = find_build(view_.builds, player, type)) out = e->builders;
-        return out;
-    }
     lane_live_read("tactical_builders");
     if (!b_->production_enabled() || type < 0) return out;
     const objects::ObjectStore& st = mode_->primary();
@@ -3174,10 +3159,6 @@ std::vector<int32_t> BattleAi::tactical_builders(int32_t player, int32_t type) {
 // Production checks now (list / faction row, prerequisites, Build_Limit_Current_For_All_Allies). Credits are the
 // PotentialPlan's own check.
 bool BattleAi::can_build_now(int32_t player, int32_t type) {
-    if (lane_view()) {  // ref5 t06
-        const auto* e = find_build(view_.builds, player, type);
-        return e && e->can != 0;
-    }
     lane_live_read("can_build_now");
     if (!b_->production_enabled() || type < 0) return false;
     const objects::GameObjectTypes& types = b_->catalog_->types();
@@ -3191,8 +3172,6 @@ bool BattleAi::can_build_now(int32_t player, int32_t type) {
 }
 // --- end A2 tactical ---
 
-const at::DamageTrackingStore* BattleAi::damage_tracking() { return lane_view() ? &view_.damage : &b_->damage_tracking_; }
-const galactic::ContrastTable* BattleAi::contrast() { return &b_->rules_->contrast; }
 
 // --- A2 tactical: build pads (L1_S4_REMAINING §3.6; TacticalBattle pads, tactical_battle_pads.cpp) ---------------
 
@@ -3204,65 +3183,12 @@ bool pad_name_equal(std::string_view a, std::string_view b) {
 }
 }  // namespace
 
-// What the pad checks read: the battle (env.view false: TacticalBattle as before), or the lane view (the snapshot store, the
-// captured pad states, relations and live units) on the AI lane.
-struct BattleAi::PadEnv {
-    const BattleAi& ai;
-    const objects::ObjectStore& st;
-    bool view;
-    bool allied(int32_t p, int32_t q) const {
-        if (!view) return ai.b_->bt_allied(p, q);
-        const int32_t n = ai.view_.allied_n;  // as TacticalBattle::bt_relation: unknown players are only allied with themselves
-        if (p < 0 || q < 0 || p >= n || q >= n) return p == q;
-        return ai.view_.allied[static_cast<size_t>(p * n + q)] != 0;
-    }
-    const LaneView::Pad* view_pad(objects::ObjectId pad) const {
-        const auto& v = ai.view_.pads;
-        const auto it = std::lower_bound(v.begin(), v.end(), pad, [](const LaneView::Pad& p, objects::ObjectId id) { return p.pad < id; });
-        return it != v.end() && it->pad == pad ? &*it : nullptr;
-    }
-    objects::ObjectId pad_contents(objects::ObjectId pad) const {  // TacticalBattle::pad_contents
-        if (!view) return ai.b_->pad_contents(pad);
-        const LaneView::Pad* p = view_pad(pad);
-        return p ? p->contents : objects::kNoObjectId;
-    }
-    bool in_cooldown(objects::ObjectId pad) const {  // the pad's rebuild cooldown runs past the battle frame
-        if (!view) {
-            const TacticalBattle::PadState* s = ai.b_->pad_state(pad);
-            return s && s->cooldown_end > ai.b_->frame_;
-        }
-        const LaneView::Pad* p = view_pad(pad);
-        return p && p->cooldown_end > ai.view_.frame;
-    }
-    bool rule_blocker(objects::ObjectHandle h, int32_t pad_owner) const {
-        if (!view) return ai.b_->pad_rule_blocker(st, h, pad_owner);
-        // as TacticalBattle::pad_rule_blocker (tactical_battle_pads.cpp), on the lane view
-        static const objects::BehaviorTypeId kBaseShield = objects::behavior_type_id("BASE_SHIELD");
-        static const objects::BehaviorTypeId kGroundStructure = objects::behavior_type_id("DUMMY_GROUND_STRUCTURE");
-        if (!std::binary_search(ai.view_.live_units.begin(), ai.view_.live_units.end(), st.id(h))) return false;
-        if (kBaseShield != objects::kNoBehavior && st.has_behavior(h, kBaseShield)) return false;
-        if (kGroundStructure != objects::kNoBehavior && st.has_behavior(h, kGroundStructure)) return false;
-        return !allied(pad_owner, st.owner(h));
-    }
-    std::string faction(int32_t player) const {
-        if (view) return player >= 0 && static_cast<size_t>(player) < ai.view_.faction.size() ? ai.view_.faction[static_cast<size_t>(player)] : std::string();
-        const auto& ps = ai.b_->galaxy_->players();
-        if (player >= 0 && static_cast<size_t>(player) < ps.size() && ps[static_cast<size_t>(player)].faction < ai.b_->galaxy_->rules().factions.size())
-            return ai.b_->galaxy_->rules().factions[ps[static_cast<size_t>(player)].faction].name;
-        return {};
-    }
-};
 
 // The pads `player` can build on: live TACTICAL_BUILD_OBJECTS objects owned by the player or an ally (0x39a2c0, relation
 // 0: never a Neutral-owned pad, q6 t19), empty, unblocked, cooldown over, ascending id [M: the free store's pad table +0xE8
 // order, a hash map in the original - AI_TACTICAL §7.5.1 asks a defined order]; accepts = the UC types of the pad type's Tactical_Buildable_Objects_Campaign
 // row for the player's faction (S10 battles are campaign battles, as pad_build).
-std::vector<at::TacticalPad> BattleAi::build_pads(int32_t player) {
-    ensure_type_facts();
-    return build_pads_in(lane_view() ? PadEnv{*this, world_->view_store(), true} : PadEnv{*this, mode_->primary(), false}, player);
-}
-
-std::vector<at::TacticalPad> BattleAi::build_pads_in(const PadEnv& env, int32_t player) const {
+std::vector<at::TacticalPad> BattleAi::build_pads_in(const FactEnv& env, int32_t player) const {
     std::vector<at::TacticalPad> out;
     const objects::ObjectStore& st = env.st;
     const std::vector<CaptureInfluencer> influencers = capture_influencers(st);  // OPT2 t10: once for every pad
@@ -3296,9 +3222,7 @@ std::vector<at::TacticalPad> BattleAi::build_pads_in(const PadEnv& env, int32_t 
 // Build / Build_All's three refusals (AI_TACTICAL §7.5): not friendly (0x39a2c0: relation 0 to the pad owner; no
 // visibility test, corrected q6 t19), game rules (0x42e400: empty and no live non-allied Influences_Capture_Point object
 // without BASE_SHIELD / DUMMY_GROUND_STRUCTURE within the pad type's Capture_Point_Radius, 3-D), rebuild cooldown (0x42daf0).
-at::PadCheck BattleAi::build_pad_check(int32_t player, int32_t pad, int32_t) {
-    ensure_type_facts();
-    const PadEnv env = lane_view() ? PadEnv{*this, world_->view_store(), true} : PadEnv{*this, mode_->primary(), false};
+at::PadCheck BattleAi::build_pad_check_in(const FactEnv& env, int32_t player, int32_t pad) const {
     return pad_check(env, player, pad, capture_influencers(env.st));
 }
 
@@ -3313,7 +3237,7 @@ std::vector<BattleAi::CaptureInfluencer> BattleAi::capture_influencers(const obj
     return out;
 }
 
-at::PadCheck BattleAi::pad_check(const PadEnv& env, int32_t player, int32_t pad, const std::vector<CaptureInfluencer>& influencers) const {
+at::PadCheck BattleAi::pad_check(const FactEnv& env, int32_t player, int32_t pad, const std::vector<CaptureInfluencer>& influencers) const {
     const objects::ObjectStore& st = env.st;
     const objects::GameObjectTypes& types = mode_->types();
     const objects::ObjectHandle ph = pad >= 0 ? st.find(static_cast<objects::ObjectId>(pad)) : objects::ObjectHandle{};
@@ -3347,11 +3271,7 @@ at::PadCheck BattleAi::pad_check(const PadEnv& env, int32_t player, int32_t pad,
 
 // ---- refixf t06: space TF.Reinforce ring search (header) ----
 bool BattleAi::space_drop_frame(int32_t player, at::SpaceDropFrame& out) {
-    if (lane_view()) {
-        if (player < 0 || static_cast<size_t>(player) >= view_.drop_frame.size()) return false;
-        out = view_.drop_frame[static_cast<size_t>(player)];
-        return view_.drop_frame_ok[static_cast<size_t>(player)] != 0;
-    }
+    lane_live_read("space_drop_frame");
     uint8_t side = 0;
     for (const TacticalBattle::Participant& p : b_->parts_)
         if (p.owner == player) {
@@ -3369,15 +3289,9 @@ bool BattleAi::space_drop_frame(int32_t player, at::SpaceDropFrame& out) {
     return true;
 }
 
-bool BattleAi::space_prevention_hit(int32_t player, const at::Vec3f& p) {
-    ensure_type_facts();
+bool BattleAi::prevention_hit_in(const FactEnv& env, int32_t player, const at::Vec3f& p) const {
     // sp3 t02: with the lane view, the snapshot store and the captured relations (think() never reads the battle)
-    const objects::ObjectStore& st = lane_view() ? world_->view_store() : mode_->primary();
-    const auto players = static_cast<int32_t>(view_.pop_cap.size());
-    const auto enemy = [&](int32_t a, int32_t b) {
-        if (!lane_view()) return b_->combat_->is_enemy(a, b);
-        return a >= 0 && b >= 0 && a < players && b < players && view_.enemy[static_cast<size_t>(a * players + b)] != 0;
-    };
+    const objects::ObjectStore& st = env.st;
     const objects::GameObjectTypes& types = mode_->types();
     for (const objects::ObjectHandle h : st.all_objects()) {  // GOM list +0x2f0 stand-in: GOM order
         if (!st.active(h)) continue;
@@ -3386,7 +3300,7 @@ bool BattleAi::space_prevention_hit(int32_t player, const at::Vec3f& p) {
         const float r = type_facts(t).reinforcement_prevention_radius;
         if (!(r > 0.0f)) continue;
         const int32_t o = st.owner(h);
-        if (o >= 0 && (o == player || !enemy(player, o))) continue;  // allied (0x39a230)
+        if (o >= 0 && (o == player || !env.enemy(player, o))) continue;  // allied (0x39a230)
         const Vec3 q = st.position(h);
         const float dx = p.x - q.x, dy = p.y - q.y;
         if (dx * dx + dy * dy < r * r) return true;
@@ -3394,16 +3308,11 @@ bool BattleAi::space_prevention_hit(int32_t player, const at::Vec3f& p) {
     return false;
 }
 
-bool BattleAi::space_reinforce_base_alive(int32_t player) {
+bool BattleAi::base_alive_in(const FactEnv& env, int32_t player) const {
     if (!b_->cfg_.skirmish) return true;  // 0x28afb0: the rule is the skirmish's
     // sp3 t02: with the lane view, the snapshot store and the captured alliance table (think() never reads the battle)
-    const objects::ObjectStore& st = lane_view() ? world_->view_store() : mode_->primary();
-    const auto allied = [&](int32_t o) {
-        if (o == player) return true;
-        if (!lane_view()) return b_->bt_allied(player, o);
-        const int32_t n = view_.allied_n;
-        return player >= 0 && o >= 0 && player < n && o < n && view_.allied[static_cast<size_t>(player * n + o)] != 0;
-    };
+    const objects::ObjectStore& st = env.st;
+    const auto allied = [&](int32_t o) { return o == player || env.allied(player, o); };
     static const objects::BehaviorTypeId kStarBase = objects::behavior_type_id("DUMMY_STAR_BASE");
     if (kStarBase == objects::kNoBehavior) return true;
     for (const objects::ObjectHandle h : st.all_objects()) {
@@ -3415,11 +3324,11 @@ bool BattleAi::space_reinforce_base_alive(int32_t player) {
 }
 
 bool BattleAi::space_drop_ok(int32_t player, int32_t key, const at::Vec3f& p, float facing_deg, float sweep) {
-    if (lane_view()) return view_space_drop_ok(player, key, p);  // ref5 t06
     lane_live_read("space_drop_ok");
+    ensure_type_facts();  // the prevention test reads the type facts (a lane apply may come before any fill after a load)
     const tactical::Aabb& bb = mode_->bounds();
     if (!(p.x >= bb.min.x && p.x <= bb.max.x && p.y >= bb.min.y && p.y <= bb.max.y)) return false;
-    if (space_prevention_hit(player, p)) return false;
+    if (prevention_hit_in(live_env(), player, p)) return false;
     if (!b_->fog_reinforce_point_ok(player, p.x, p.y)) return false;  // fogged for the player (force 1)
     const TacticalBattle::Participant* part = nullptr;
     for (const TacticalBattle::Participant& q : b_->parts_)
@@ -3443,12 +3352,6 @@ bool BattleAi::space_drop_ok(int32_t player, int32_t key, const at::Vec3f& p, fl
 }
 
 // ---- a1g t04 follow-up: land TF.Reinforce drop validity (header; TACTICAL_GAPS §4.2.1) ----
-bool BattleAi::land_drop_ok(int32_t player, int32_t key, const at::Vec3f& p) {
-    if (lane_view()) return view_land_drop_ok(player, key, p);  // ref5 t06
-    lane_live_read("land_drop_ok");
-    return land_drop_valid(player, key, p, false);
-}
-
 bool BattleAi::land_drop_valid(int32_t player, int32_t key, const at::Vec3f& p, bool human) {
     return b_->land_drop_valid(*mode_, player, static_cast<objects::ObjectId>(key), p.x, p.y, human, use_reinforcement_points_);  // a1h t06
 }
@@ -3553,6 +3456,7 @@ at::TacticalReinforcement BattleAi::hijack_unit(int32_t player, int32_t type, bo
     // critical lane HIJACK_UNIT fails (Production_Failed) instead.
     if (lane_view()) return fail;
     lane_live_read("hijack_unit");
+    facts_.wrote();  // ref5 t07
     GalacticMode* gm = host_->galactic_mode();
     if (b_->finished_ || !gm || !gm->sim() || type < 0 || !b_->can_add_reserve(static_cast<uint32_t>(type))) return fail;
     galactic::GalacticSim& gs = *gm->sim();
@@ -3578,6 +3482,7 @@ at::TacticalReinforcement BattleAi::hijack_unit(int32_t player, int32_t type, bo
 void BattleAi::unit_released(int32_t player, int32_t object_id, ai::tactical::TacticalAiHost::UnitRelease path) {
     if (lane_view()) return queue_host_release(kHostUnitReleased, player, object_id, static_cast<uint8_t>(path));
     lane_live_read("unit_released");
+    facts_.wrote();  // ref5 t07
     unit_released_live(player, object_id, path);
 }
 
@@ -3588,6 +3493,7 @@ void BattleAi::unit_left_task_force(int32_t object_id) {
         return queue_host_release(kHostUnitLeftTaskForce, vs.exists(h) ? vs.owner(h) : -1, object_id, 0);
     }
     lane_live_read("unit_left_task_force");
+    facts_.wrote();  // ref5 t07
     unit_left_task_force_live(object_id);
 }
 
@@ -3625,12 +3531,12 @@ std::vector<int32_t> BattleAi::ability_finished() {
 }
 
 bool BattleAi::movement_locked(int32_t object_id) {
-    if (lane_view()) return std::binary_search(view_.locked.begin(), view_.locked.end(), object_id);
+    lane_live_read("movement_locked");
     return object_id >= 0 && b_->movement_locked(object_id);
 }
 
 bool BattleAi::reinforce_in_flight(int32_t player, int32_t key) {
-    if (lane_view()) return std::binary_search(view_.in_flight.begin(), view_.in_flight.end(), std::make_pair(player, key));
+    lane_live_read("reinforce_in_flight");
     return landing_in_flight(player, key);
 }
 
@@ -3681,16 +3587,88 @@ void BattleAi::resolve_weather_categories() {
 }
 
 float BattleAi::sight_weather_factor(int32_t type, int32_t) {
-    if (lane_view()) {
-        if (type < 0 || static_cast<size_t>(type) >= weather_category_.size()) return 1.0f;
-        const int32_t c = weather_category_[static_cast<size_t>(type)];
-        return c < 0 ? 1.0f : view_.weather_sight[static_cast<size_t>(c)];
-    }
+    lane_live_read("sight_weather_factor");
     if (b_->space_ || type < 0) return 1.0f;
     resolve_weather_categories();  // REF1 t04: the cached category, not a per-call type string lookup
     if (static_cast<size_t>(type) >= weather_category_.size()) return 1.0f;
     const int32_t c = weather_category_[static_cast<size_t>(type)];
     return c < 0 ? 1.0f : b_->weather().sight_modifier(weather_categories_[static_cast<size_t>(c)]);
+}
+
+// ref5 t07: the six signal lists in one call (the world takes each right before it handles it, or all at publish).
+void BattleAi::frame_events(uint32_t kinds, at::FrameEvents& out) {
+    if (kinds & at::FrameEvents::kOpportunity) out.opportunity = opportunity_targets();
+    if (kinds & at::FrameEvents::kAttackStates) out.attack_states = attack_state_signals();
+    if (kinds & at::FrameEvents::kDamaged) out.damaged = unit_damaged_signals();
+    if (kinds & at::FrameEvents::kAbilityFinished) out.ability_finished = ability_finished();
+    if (kinds & at::FrameEvents::kUnloaded) out.unloaded = reinforcements_unloaded();
+    if (kinds & at::FrameEvents::kProduced) out.produced = production_completed();
+}
+
+// ref5 t07: one rule per fact family, read from the battle. A FactTable family's lane answer is the same rule's answer at
+// the capture; a FactQuery family's lane answer reads the capture (FactEnv view, or the view_* tests: partial for the drop
+// tests, whose rest runs at the apply, lane_drop_valid).
+void BattleAi::wire_facts() {
+    using Key2 = std::pair<int32_t, int32_t>;
+    at::BattleFacts& f = facts_;
+    f.pool.set_rule([this](const int32_t& p) { return reinforcement_pool(p); });
+    f.reinforce_ok.set_rule([this](const int32_t& p) { return can_reinforce(p); });
+    f.pop_cap.set_rule([this](const int32_t& p) { return population_cap(p); });
+    f.pop_used.set_rule([this](const int32_t& p) { return population_used(p); });
+    f.drop_frame.set_rule([this](const int32_t& p) -> std::optional<at::SpaceDropFrame> {
+        at::SpaceDropFrame d;
+        if (!space_drop_frame(p, d)) return std::nullopt;
+        return d;
+    });
+    f.locked.set_rule([this](const int32_t& id) { return movement_locked(id); });
+    f.in_flight.set_rule([this](const Key2& k) { return reinforce_in_flight(k.first, k.second); });
+    f.builders.set_rule([this](const Key2& k) { return tactical_builders(k.first, k.second); });
+    f.can_build.set_rule([this](const Key2& k) { return can_build_now(k.first, k.second); });
+    f.pads.live = [this](int32_t p) {
+        ensure_type_facts();
+        lane_live_read("build_pads");
+        return build_pads_in(live_env(), p);
+    };
+    f.pads.snapshot = [this](int32_t p) { return build_pads_in(view_env(), p); };
+    f.pad_check.live = [this](int32_t p, int32_t pad, int32_t) {
+        ensure_type_facts();
+        lane_live_read("build_pad_check");
+        return build_pad_check_in(live_env(), p, pad);
+    };
+    f.pad_check.snapshot = [this](int32_t p, int32_t pad, int32_t) { return build_pad_check_in(view_env(), p, pad); };
+    f.prevention.live = [this](int32_t p, at::Vec3f pt) {
+        ensure_type_facts();
+        lane_live_read("space_prevention_hit");
+        return prevention_hit_in(live_env(), p, pt);
+    };
+    f.prevention.snapshot = [this](int32_t p, at::Vec3f pt) { return prevention_hit_in(view_env(), p, pt); };
+    f.base_alive.live = [this](int32_t p) {
+        lane_live_read("space_reinforce_base_alive");
+        return base_alive_in(live_env(), p);
+    };
+    f.base_alive.snapshot = [this](int32_t p) { return base_alive_in(view_env(), p); };
+    f.replaced.live = [this](int32_t id) {
+        lane_live_read("replaced_builder");
+        return replaced_builder_in(live_env(), id);
+    };
+    f.replaced.snapshot = [this](int32_t id) { return replaced_builder_in(view_env(), id); };
+    f.space_drop.live = [this](int32_t p, int32_t key, at::Vec3f pt, float facing, float sweep) { return space_drop_ok(p, key, pt, facing, sweep); };
+    f.space_drop.snapshot = [this](int32_t p, int32_t key, at::Vec3f pt, float, float) { return view_space_drop_ok(p, key, pt); };
+    f.land_drop.live = [this](int32_t p, int32_t key, at::Vec3f pt) {
+        lane_live_read("land_drop_ok");
+        return land_drop_valid(p, key, pt, false);
+    };
+    f.land_drop.snapshot = [this](int32_t p, int32_t key, at::Vec3f pt) { return view_land_drop_ok(p, key, pt); };
+    f.line_clear.live = [this](int32_t id, at::Vec3f a, at::Vec3f b) { return attack_position_line_clear(id, a, b); };
+    f.line_clear.snapshot = [this](int32_t id, at::Vec3f a, at::Vec3f b) { return b_->space_ || view_line_clear(id, a, b); };
+    f.weather.live = [this](int32_t type, int32_t id) { return sight_weather_factor(type, id); };
+    f.weather.snapshot = [this](int32_t type, int32_t) {  // the categories were resolved at the capture
+        if (type < 0 || static_cast<size_t>(type) >= weather_category_.size()) return 1.0f;
+        const int32_t c = weather_category_[static_cast<size_t>(type)];
+        return c < 0 ? 1.0f : view_.weather_sight[static_cast<size_t>(c)];
+    };
+    f.damage_live = &b_->damage_tracking_;
+    f.contrast_table = &b_->rules_->contrast;
 }
 
 // [port] The S10 stand-in (TacticalBattle::issue_orders, REF1 t02) for the sides that have no tactical AI, on its own

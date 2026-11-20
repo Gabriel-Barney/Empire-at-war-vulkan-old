@@ -175,14 +175,9 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
     PerceptionWorld w;
     std::vector<TacticalAiObject> facts;
     // sp3 t02: the host event lists publish() captured for think()
-    struct LaneInputs {
-        std::vector<OpportunityTargetEvent> opportunity;
-        std::vector<AttackStateSignal> attack_states;
-        std::vector<UnitDamagedSignal> damaged;  // skai t15: signal 0x18
-        std::vector<int32_t> ability_finished;
-        std::vector<ReinforcementsUnloaded> unloaded;
-        std::vector<TacticalAiHost::ProductionCompleted> produced;
-    } lane_in;
+    FrameEvents lane_in;
+    // ref5 t07: what the AI reads from the battle (TacticalAiHost::facts(); live, or the lane's capture during think())
+    const BattleFacts& battle() const { return host.facts(); }
     std::vector<std::pair<int32_t, int32_t>> prev;  // (id, owner) of the last snapshot, ascending id
     // q6 (OBJECT_SCRIPTS §10.1): ids a script took out of the AI before this world perceived them (ascending); their
     // first admission (the add path of refresh) is skipped once.
@@ -891,7 +886,7 @@ struct TacticalAiWorld::Impl final : lua::AiScriptHost, lua::AiTacticalScriptHos
         return true;
     }
     int is_good_against(ObjectHandle unit, ObjectHandle other) override {
-        const galactic::ContrastTable* ct = host.contrast();
+        const galactic::ContrastTable* ct = battle().contrast();
         const PerceptionObject* a = store.alive(unit) ? object(id_of(unit)) : nullptr;
         const PerceptionObject* b = store.alive(other) ? object(id_of(other)) : nullptr;
         if (!ct || !a || !b) return -1;
@@ -1674,7 +1669,7 @@ bool TacticalAiWorld::Impl::tf_collect_free_units(int32_t tf, uint64_t category_
     for (const int32_t id : ids) {
         const ObjectHandle h = store.find(id);
         const PerceptionObject* o = object(id);
-        if (!unit_ok(h, t->player) || !o || tf_owns(h) || host.movement_locked(id)) continue;
+        if (!unit_ok(h, t->player) || !o || tf_owns(h) || battle().movement_locked(id)) continue;
         const int32_t ty = o->rep_type >= 0 ? o->rep_type : o->type;
         const uint64_t cat = ty >= 0 && static_cast<size_t>(ty) < w.types.size() ? w.types[static_cast<size_t>(ty)].category : 0;
         if ((cat & category_mask) == 0) continue;
@@ -1698,7 +1693,7 @@ void TacticalAiWorld::Impl::claim_force(TfRec& t) {
     uint32_t missing = 0;
     std::vector<lua::AiEventArg> failed;  // HIJACK failures (Production_Failed type names)
     if (ppit != pps.end()) {
-        const std::vector<TacticalReinforcement> pool = host.reinforcement_pool(t.player);
+        const std::vector<TacticalReinforcement> pool = battle().reinforcement_pool(t.player);
         // skai t17 (SKAI_T17_SPACE_BUILD_RE §2.1 / §2.4, 0x6c0100 -> 0x5fe240 [H]): the TF's wanted list, and so its build
         // tasks and Production orders, go team by team in the TaskForce definition's order, commit order within a team
         // (the picks are in commit order). Unplaced picks (team -1) last.
@@ -1770,7 +1765,7 @@ void TacticalAiWorld::Impl::claim_force(TfRec& t) {
                             break;
                         }
                         int32_t builder = -1;
-                        for (const int32_t b : host.tactical_builders(t.player, k.type)) {
+                        for (const int32_t b : battle().tactical_builders(t.player, k.type)) {
                             cmd::EventData ev(cmd::EventType::Production);
                             ev.set("type_index", static_cast<uint32_t>(k.type)).set("location", static_cast<uint32_t>(b));
                             if (order(t.player, ev, [&] { return "produce " + type_name(k.type) + " at " + std::to_string(b) + " (tf " + t.name + ")"; }) ==
@@ -1929,11 +1924,11 @@ void TacticalAiWorld::Impl::pp_input(PlayerAi& p, uint32_t plan, const Goal& g, 
     PpSliceHost& sh = pp_slice;
     const bool shared = first_solve && sh.player == p.player;
     if (shared && !sh.pool_ok) {
-        sh.pool = host.reinforcement_pool(p.player);
+        sh.pool = battle().reinforcement_pool(p.player);
         sh.pool_ok = true;
     }
     std::vector<TacticalReinforcement> own_pool;
-    if (!shared) own_pool = host.reinforcement_pool(p.player);
+    if (!shared) own_pool = battle().reinforcement_pool(p.player);
     std::set<int32_t> held;
     for (const auto& [id, t] : tfs)
         if (t.player == p.player)
@@ -1954,11 +1949,11 @@ void TacticalAiWorld::Impl::pp_input(PlayerAi& p, uint32_t plan, const Goal& g, 
     for (const auto& [id, t] : tfs)
         for (const auto& rv : t.reservations) pads_held.insert(rv.first);
     if (shared && !sh.pads_ok) {
-        sh.pads = host.build_pads(p.player);
+        sh.pads = battle().build_pads(p.player);
         sh.pads_ok = true;
     }
     std::vector<TacticalPad> own_pads;
-    if (!shared) own_pads = host.build_pads(p.player);
+    if (!shared) own_pads = battle().build_pads(p.player);
     for (const TacticalPad& pd : shared ? sh.pads : own_pads) {
         PpPad x;
         x.id = pd.id;
@@ -1968,16 +1963,16 @@ void TacticalAiWorld::Impl::pp_input(PlayerAi& p, uint32_t plan, const Goal& g, 
         in.pads.push_back(std::move(x));
     }
     if (shared && !sh.pop_ok) {
-        sh.pop_cap = host.population_cap(p.player);
-        sh.pop_used = host.population_used(p.player);
+        sh.pop_cap = battle().population_cap(p.player);
+        sh.pop_used = battle().population_used(p.player);
         sh.pop_ok = true;
     }
-    in.pop_cap = shared ? sh.pop_cap : host.population_cap(p.player);
-    in.pop_used = shared ? sh.pop_used : host.population_used(p.player);
+    in.pop_cap = shared ? sh.pop_cap : battle().population_cap(p.player);
+    in.pop_used = shared ? sh.pop_used : battle().population_used(p.player);
     in.campaign = cfg.campaign;
     in.health_threshold = cfg.constants.health_low_percent_threshold;
     const int32_t builder = p.player;
-    in.contrast = host.contrast();
+    in.contrast = battle().contrast();
     in.contrast_multiplier = p.contrast_mult;
     in.recent_failures = in.has_target ? p.ctx.learning.recent_plan_failures(plan, g.target, now) : 0;
     const int32_t self = p.player;
@@ -1990,7 +1985,7 @@ void TacticalAiWorld::Impl::pp_input(PlayerAi& p, uint32_t plan, const Goal& g, 
     for (const TaskForceDef& d : in.def->task_forces) escort_tf = escort_tf || d.escort;
     const int32_t excl = in.target_object;
     if (!snapshot) {
-        in.can_build_now = [this, builder](int32_t type) { return host.can_build_now(builder, type); };
+        in.can_build_now = [this, builder](int32_t type) { return battle().can_build_now(builder, type); };
         in.enemy_strength = [this, self, at, zone](uint64_t mask) { return enemy_strength_at(self, at, zone, mask); };
         if (escort_tf)
             in.escort_strength = [this, self, at, zone, excl](uint64_t mask) { return enemy_strength_at(self, at, zone, mask, excl); };
@@ -2009,10 +2004,10 @@ void TacticalAiWorld::Impl::pp_input(PlayerAi& p, uint32_t plan, const Goal& g, 
                         std::vector<int8_t>& c = pp_slice.can_build;
                         if (c.size() < w.types.size()) c.resize(w.types.size(), int8_t{-1});
                         int8_t& v = c[static_cast<size_t>(ty)];
-                        if (v < 0) v = static_cast<int8_t>(host.can_build_now(builder, ty) ? 1 : 0);
+                        if (v < 0) v = static_cast<int8_t>(battle().can_build_now(builder, ty) ? 1 : 0);
                         yes = v == 1;
                     } else {
-                        yes = host.can_build_now(builder, ty);
+                        yes = battle().can_build_now(builder, ty);
                     }
                     if (yes) ok.push_back(ty);
                 }
@@ -2345,9 +2340,9 @@ void TacticalAiWorld::Impl::attack_position(const PerceptionObject& o, const Tac
     const Vec3f tp = f.formation_target_point;
     pos = attack_position_square(g, w, o.owner, tp, std::min(f.formation_target_extent, 0.5f * o.max_attack_range)).centre;
     if (cfg.mode != TacticalMode::Land) return;
-    for (int i = 0; i < kAttackPositionMaxSteps && !host.attack_position_line_clear(o.id, pos, tp); ++i)
+    for (int i = 0; i < kAttackPositionMaxSteps && !battle().attack_position_line_clear(o.id, pos, tp); ++i)
         if (!step_toward(pos, tp, kAttackPositionPullStep)) break;
-    for (int i = 0; i < kAttackPositionMaxSteps && !host.attack_position_line_clear(o.id, o.position, pos); ++i)
+    for (int i = 0; i < kAttackPositionMaxSteps && !battle().attack_position_line_clear(o.id, o.position, pos); ++i)
         if (!step_toward(pos, o.position, kAttackPositionPullStep)) break;
     pos.z = 0.0f;
 }
@@ -2716,7 +2711,7 @@ bool TacticalAiWorld::Impl::step_status(StatusRec& s) {
                 // retargets the queue, STATION_HANGARS_SOUND §1.2 steps 7-8).
                 for (auto& e : t->producing)
                     if (!store.alive(store.find(e.second)))
-                        if (const int32_t r = host.replaced_builder(e.second); r >= 0) e.second = r;
+                        if (const int32_t r = battle().replaced_builder(e.second); r >= 0) e.second = r;
                 std::vector<int32_t> cancelled;
                 for (const auto& e : t->producing)
                     if (!store.alive(store.find(e.second))) cancelled.push_back(e.first);
@@ -2959,7 +2954,7 @@ int32_t TacticalAiWorld::Impl::issue_move(TfRec& t, AiTacticalOrder kind, const 
         // attack order the host refused (they stay in the all-units list). aitac t05: a position move / guard keeps the
         // lists too (signal 0xb of a unit takes it out: land 0x73ce80 §33.2, space 0x739890 §33.2.3).
         StatusRec& s = statuses[id];
-        const std::vector<int32_t> refused = target_object >= 0 ? host.attack_order_refused() : std::vector<int32_t>{};
+        const std::vector<int32_t> refused = target_object >= 0 ? battle().attack_order_refused() : std::vector<int32_t>{};
         for (const ObjectHandle u : t.units) s.members.push_back(id_of(u));
         for (const uint32_t m : ids)
             if (std::find(refused.begin(), refused.end(), static_cast<int32_t>(m)) == refused.end())
@@ -2986,7 +2981,7 @@ int32_t TacticalAiWorld::Impl::explore_status(int32_t plan, int32_t tf, ObjectHa
     s.target = target;
     s.plan_frame = static_cast<uint32_t>(w.frame);
     for (const ObjectHandle u : units) {
-        if (!store.alive(u) || !movable(u) || host.movement_locked(id_of(u))) continue;
+        if (!store.alive(u) || !movable(u) || battle().movement_locked(id_of(u))) continue;
         if (!cfg.ai_lane) movement_block_signal(id_of(u), -1);  // 0x220ed0 on each listed unit (older statuses drop it)
         statuses[id].members.push_back(id_of(u));
     }
@@ -3153,7 +3148,7 @@ bool TacticalAiWorld::Impl::ambush_point(const StatusRec& s, int32_t player, Vec
     }
     if (land) {
         const PerceptionObject* o = object(s.target);
-        const float weather = ty != objects::kNone ? host.sight_weather_factor(static_cast<int32_t>(ty), s.target) : 1.0f;
+        const float weather = ty != objects::kNone ? battle().sight_weather_factor(static_cast<int32_t>(ty), s.target) : 1.0f;
         step = land_ambush_step(step, weather, o ? o->max_attack_range : 0.0f);
     } else if (step <= 0.0f) {
         step = cfg.constants.space_region_size;
@@ -3205,7 +3200,7 @@ void TacticalAiWorld::Impl::ambush_plan(StatusRec& s, bool first) {
         s.lists = true;
         s.members.clear();
         for (const ObjectHandle u : t->units)
-            if (unit_ok(u, t->player) && !store.dying(u) && movable(u) && !host.movement_locked(id_of(u))) s.members.push_back(id_of(u));
+            if (unit_ok(u, t->player) && !store.dying(u) && movable(u) && !battle().movement_locked(id_of(u))) s.members.push_back(id_of(u));
     }
     s.moving.clear();
     std::vector<uint32_t> ids;
@@ -3593,7 +3588,7 @@ int32_t TacticalAiWorld::Impl::tf_reinforce(int32_t tf, const lua::AiArg& target
         // DUMMY_STAR_BASE, else the call is refused with nil (-3: "Rule Change: ..." message, no status).
         Vec3f p;
         if (!arg_position(target, point, p)) return -1;
-        if (!host.space_reinforce_base_alive(t->player)) {
+        if (!battle().space_reinforce_base_alive(t->player)) {
             decide(t->player, [&] { return "tf " + t->name + " Reinforce refused: no allied starbase (skirmish)"; });
             return -3;
         }
@@ -3602,15 +3597,15 @@ int32_t TacticalAiWorld::Impl::tf_reinforce(int32_t tf, const lua::AiArg& target
         StatusRec& s = statuses[id];
         s.dest = p;
         s.timeout = max_wait >= 0.0 ? now + frames_trunc(static_cast<double>(kFramesPerSecond) * max_wait) : -1;
-        s.prevent = host.space_prevention_hit(t->player, p);
+        s.prevent = battle().space_prevention_hit(t->player, p);
         s.ring = s.prevent ? 1000.0f : 0.0f;
         return id;
     }
     // S10 AI land reinforcement: "can reinforce" 0x2b03e0 = the battle allows it (host) and room for one unit
     // (AI_GALACTIC_3 §3.3: (int)(1.0 + 0.5) <= cap - used); otherwise an immediately-failing ReinforceBlockStatus.
-    const float cap = host.population_cap(t->player);
-    const float remaining = cap - std::max(host.population_used(t->player), 0.0f);
-    if (!host.can_reinforce(t->player) || (cap >= 0.0f && remaining < 1.0f)) return new_status(t->plan, tf, StatusKind::Failed);
+    const float cap = battle().population_cap(t->player);
+    const float remaining = cap - std::max(battle().population_used(t->player), 0.0f);
+    if (!battle().can_reinforce(t->player) || (cap >= 0.0f && remaining < 1.0f)) return new_status(t->plan, tf, StatusKind::Failed);
     Vec3f p;
     if (!arg_position(target, point, p)) return -1;
     // a1g t04 - land TF.Reinforce placement (0x6eaf60, AI_TACTICAL §7.4, A1_READINGS §25.3 / §30.7 [H]). The destination
@@ -3659,7 +3654,7 @@ int32_t TacticalAiWorld::Impl::tf_reinforce(int32_t tf, const lua::AiArg& target
     // ONCE; each drop the host accepts takes its population off that one reading (§30.7 step 4), so the loop never
     // issues a drop the host's per-order cap rule refuses. A pending entry is null when it has no type or left the
     // host's pool (it can never land: dropped from the TF, like the space poll).
-    const std::vector<TacticalReinforcement> pool = host.reinforcement_pool(t->player);
+    const std::vector<TacticalReinforcement> pool = battle().reinforcement_pool(t->player);
     auto is_null = [&pool](const TacticalReinforcement& r) {
         return r.type < 0 || std::none_of(pool.begin(), pool.end(), [&r](const TacticalReinforcement& e) { return e.key == r.key; });
     };
@@ -3667,7 +3662,7 @@ int32_t TacticalAiWorld::Impl::tf_reinforce(int32_t tf, const lua::AiArg& target
     std::vector<std::pair<int32_t, int32_t>> in_flight;  // a1j t01: (key, type) of the timed landings this call issued
     auto land = [&](const TacticalReinforcement& r, const Vec3f& spot) {
         // a1g t04 follow-up: the mode's drop validity (TacticalAiHost::land_drop_ok); a refused spot is not ordered.
-        if (!host.land_drop_ok(t->player, r.key, spot)) {
+        if (!battle().land_drop_ok(t->player, r.key, spot)) {
             stat("Reinforce: land spot refused");
             return false;
         }
@@ -3684,7 +3679,7 @@ int32_t TacticalAiWorld::Impl::tf_reinforce(int32_t tf, const lua::AiArg& target
         // status listens for its signal 0x19 (in-flight count + 1) and the units join the TF then (0x6a1440).
         // sp3 slice 4d: with the AI lane every accepted drop waits so - the order is applied k_ai ticks later and the host
         // reports its units (or none, when the apply refused it) as an unload record.
-        if (cfg.ai_lane || host.reinforce_in_flight(t->player, r.key)) {
+        if (cfg.ai_lane || battle().reinforce_in_flight(t->player, r.key)) {
             in_flight.emplace_back(r.key, r.type);
             return true;
         }
@@ -3795,18 +3790,18 @@ void TacticalAiWorld::Impl::space_reinforce_poll(StatusRec& s) {
     if (!t) return done(false);
     if (!t->pending.empty()) {
         const TacticalReinforcement r = t->pending.back();
-        const std::vector<TacticalReinforcement> pool = host.reinforcement_pool(t->player);
+        const std::vector<TacticalReinforcement> pool = battle().reinforcement_pool(t->player);
         const bool in_pool = std::any_of(pool.begin(), pool.end(), [&r](const TacticalReinforcement& e) { return e.key == r.key; });
         if (r.type < 0 || !in_pool) {
             t->pending.pop_back();  // step 1: no type -> pop it, stop for this call
             stat("Reinforce (space): pending entry dropped");
         } else {
-            const float cap = host.population_cap(t->player);
-            const bool room = host.can_reinforce(t->player) &&
-                              (cap < 0.0f || r.population <= cap - std::max(host.population_used(t->player), 0.0f));
+            const float cap = battle().population_cap(t->player);
+            const bool room = battle().can_reinforce(t->player) &&
+                              (cap < 0.0f || r.population <= cap - std::max(battle().population_used(t->player), 0.0f));
             if (room) {
                 SpaceDropFrame f;
-                if (!host.space_drop_frame(t->player, f)) f = SpaceDropFrame{};
+                if (!battle().space_drop_frame(t->player, f)) f = SpaceDropFrame{};
                 double sn = 0.0, cs = 1.0;
                 dmath::sincos(static_cast<double>(f.entry_facing_deg) * (dmath::kPi / 180.0), sn, cs);
                 float ux = static_cast<float>(-cs), uy = static_cast<float>(-sn);
@@ -3821,7 +3816,7 @@ void TacticalAiWorld::Impl::space_reinforce_poll(StatusRec& s) {
                         p.x = std::clamp(p.x, f.min_x, f.max_x);
                         p.y = std::clamp(p.y, f.min_y, f.max_y);
                     }
-                    if (host.space_drop_ok(t->player, r.key, p, f.entry_facing_deg, cfg.constants.space_reinforcement_collision_check_distance)) {
+                    if (battle().space_drop_ok(t->player, r.key, p, f.entry_facing_deg, cfg.constants.space_reinforcement_collision_check_distance)) {
                         const size_t before = store.owned_by(t->player).size();
                         cmd::EventData ev(cmd::EventType::Reinforce);
                         ev.set("unit", static_cast<uint32_t>(r.key)).set_f("x", p.x).set_f("y", p.y).set_f("z", p.z);
@@ -3832,7 +3827,7 @@ void TacticalAiWorld::Impl::space_reinforce_poll(StatusRec& s) {
                             // sp3 slice 4d: with the AI lane the units join at their unload record (applied k_ai later);
                             // aitac t05 (AI_TACTICAL §7.4.1): so do units still in their hyperspace arrival (signal 0x19,
                             // in-flight count +0x78)
-                            if (cfg.ai_lane || host.reinforce_in_flight(t->player, r.key)) {
+                            if (cfg.ai_lane || battle().reinforce_in_flight(t->player, r.key)) {
                                 s.landings.emplace_back(r.key, r.type);
                             } else {
                                 const auto owned = store.owned_by(t->player);
@@ -3864,7 +3859,7 @@ int32_t TacticalAiWorld::Impl::tf_build_all(int32_t tf) {
     uint32_t issued = 0;
     for (const auto& [pad, type] : t->reservations) {
         // The three refusals (§7.5), each logged.
-        const PadCheck c = host.build_pad_check(t->player, pad, type);
+        const PadCheck c = battle().build_pad_check(t->player, pad, type);
         if (c != PadCheck::Ok) {
             static const char* why[] = {"", "pad is no longer friendly / visible", "pad may be occupied or enemies may be too close",
                                         "rebuild cooldown active"};
@@ -3974,7 +3969,7 @@ int32_t TacticalAiWorld::Impl::find_target(int32_t script, const lua::AiFindTarg
 }
 
 ObjectHandle TacticalAiWorld::Impl::find_deadly_enemy(int32_t, const lua::AiArg& source, double radius, int32_t player) {
-    const DamageTrackingStore* dt = host.damage_tracking();
+    const DamageTrackingStore* dt = battle().damage_tracking();
     if (!dt) return {};
     const TeamMembersFn members = [this](int32_t id, std::vector<int32_t>& out) {
         if (const TacticalAiObject* f = fact(id)) out.insert(out.end(), f->team_members.begin(), f->team_members.end());
@@ -4351,12 +4346,7 @@ void TacticalAiWorld::publish(int64_t now, uint32_t mode_frame) {
         if (w.snap_store) *w.snap_store = *w.live_store;
         w.refresh_gv_view();  // slice 4e (part 3)
         w.host.fill(w.w, w.facts);
-        w.lane_in.opportunity = w.host.opportunity_targets();
-        w.lane_in.attack_states = w.host.attack_state_signals();
-        w.lane_in.damaged = w.host.unit_damaged_signals();
-        w.lane_in.ability_finished = w.host.ability_finished();
-        w.lane_in.unloaded = w.host.reinforcements_unloaded();
-        w.lane_in.produced = w.host.production_completed();
+        w.host.frame_events(FrameEvents::kAll, w.lane_in);
     }
 }
 
@@ -4382,13 +4372,20 @@ void run_update(TacticalAiWorld::Impl& w, bool lane) {
         ALAMO_PROFILE_SCOPE("tac.ai.perception");  // OPT2 t08: snapshot, threat grid, signals
         w.refresh(!lane);
         profile::Steps steps;  // sp0: the signal passes after refresh()
-        // sp3 t02: with the lane on, the lists publish() captured (same calls, same order)
-        w.opportunity_events(lane ? w.lane_in.opportunity : w.host.opportunity_targets());  // STRATEGIC_GAPS §5.3
-        w.target_in_range_events(lane ? w.lane_in.attack_states : w.host.attack_state_signals());  // s78f t08: signal 0x1E
-        w.unit_damaged_events(lane ? w.lane_in.damaged : w.host.unit_damaged_signals());          // skai t15: signal 0x18
-        w.ability_signals(lane ? w.lane_in.ability_finished : w.host.ability_finished());       // S7 t15 A1: signal 0x29
-        w.reinforcements_unloaded(lane ? w.lane_in.unloaded : w.host.reinforcements_unloaded());  // a1j t01: signal 0x19
-        w.production_completed(lane ? w.lane_in.produced : w.host.production_completed());        // q6 t19: signal 0x22
+        // sp3 t02: with the lane on, the lists publish() captured (same order); lane off, each list is taken right before
+        // it is handled (a task-force event handler may give orders in between)
+        FrameEvents now_events;
+        const auto take = [&](uint32_t kind) -> const FrameEvents& {
+            if (lane) return w.lane_in;
+            w.host.frame_events(kind, now_events);
+            return now_events;
+        };
+        w.opportunity_events(take(FrameEvents::kOpportunity).opportunity);            // STRATEGIC_GAPS §5.3
+        w.target_in_range_events(take(FrameEvents::kAttackStates).attack_states);     // s78f t08: signal 0x1E
+        w.unit_damaged_events(take(FrameEvents::kDamaged).damaged);                   // skai t15: signal 0x18
+        w.ability_signals(take(FrameEvents::kAbilityFinished).ability_finished);      // S7 t15 A1: signal 0x29
+        w.reinforcements_unloaded(take(FrameEvents::kUnloaded).unloaded);             // a1j t01: signal 0x19
+        w.production_completed(take(FrameEvents::kProduced).produced);                // q6 t19: signal 0x22
         w.status_signals();                                  // S7 t21 / S7 t15 A1: ambush / ability status signals
         ALAMO_PROFILE_STEP(steps, "tac.perc.signals");
     }

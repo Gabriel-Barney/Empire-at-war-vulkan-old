@@ -12,6 +12,7 @@
 
 // clang-format off
 #define ALAMO_BATTLE_AI_LEDGER(SAVED, REBUILT, DERIVED, CHECKED) \
+    REBUILT(facts_, "ref5 t07: rules wired by the constructor; tables captured again at the next AI slot; order_refused read at once") \
     DERIVED(type_facts_, "per-type cache (filled from type data on first use)") \
     REBUILT(allow_reinforcement_fraction_, "A2 tactical: from GameConstants at start()") \
     REBUILT(use_reinforcement_points_, "a1g t04: from GameConstants at start()") \
@@ -32,6 +33,14 @@
     REBUILT(live_remaining_, "live hook sets, installed again by start()") \
     REBUILT(live_tactical_, "live hook sets, installed again by start()") \
     DERIVED(lane_refused_spawns_, "diagnostic counter") \
+    DERIVED(l1_, "ref5 t07: L1 hook fact table, captured again at the next AI slot") \
+    DERIVED(final_blow_, "ref5 t07: L1 hook fact table, captured again at the next AI slot") \
+    DERIVED(sw_allowed_, "ref5 t07: L1 hook fact table, captured again at the next AI slot") \
+    DERIVED(bomb_avail_, "ref5 t07: L1 hook fact table, captured again at the next AI slot") \
+    DERIVED(bombard_avail_, "ref5 t07: L1 hook fact table, captured again at the next AI slot") \
+    DERIVED(bomb_finished_, "ref5 t07: L1 hook fact table, captured again at the next AI slot") \
+    DERIVED(bomb_result_, "ref5 t07: L1 hook fact table, captured again at the next AI slot") \
+    DERIVED(retreat_inc_, "ref5 t07: L1 hook fact table, captured again at the next AI slot") \
     DERIVED(lane_unloaded_, "sp3 slice 4d: consumed within the tick of its apply (never pending at a save)") \
     REBUILT(weather_category_, "per type, from the type data at start()") \
     REBUILT(weather_categories_, "from the type data at start()") \
@@ -40,7 +49,6 @@
     SAVED(lane_digest_, hashed) \
     SAVED(lane_seq_, hashed) \
     DERIVED(lane_mismatch_, "diagnostic counter") \
-    DERIVED(attack_refused_, "q6 t19: the last execute's refusals, read at once") \
     SAVED(executed_, unhashed) \
     SAVED(opp_prev_, hashed) \
     SAVED(unit_ai_stamps_, hashed) \
