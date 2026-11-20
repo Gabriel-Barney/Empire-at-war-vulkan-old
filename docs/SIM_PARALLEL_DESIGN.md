@@ -479,3 +479,18 @@ How P5 is built; status and open items are on the roadmap (group `sp5`), checks 
   capture, and `in_active_base_shield` runs `l1_base_shield_covers` on the snapshot store. Critical-lane budget on
   `land_battle` (publish + every capture): ~0.45 ms p50 (capture 0.28, publish 0.17; was 0.69 serial); zones
   `tac.cap.l1`, `tac.cap.fog`, `tac.cap.fog_grids`.
+- The rest of the lane boundary (ref5 t06, 2026-11-20): every `TacticalAiHost` answer and perception hook that `think()`
+  asked the live battle for now answers from the capture: the attack-position line test (a copy of the land passability
+  grid, taken again only when its version moved, and each battle unit's movement mask), `in_active_base_shield` (the
+  BASE_SHIELDs combat has on, as `l1_base_shield_covers`; before, every live shield counted), the perception's hard
+  points, `replaced_builder` (the station upgrade records), the skirmish builders and `can_build_now` (per AI player
+  every type `hg_build_check` can accept). `unit_released` / `unit_left_task_force` are batch commands (PortExtension
+  0x4148) applied at the due tick. The two drop searches answer from the capture what it holds (land: slots in the
+  playable box, passable on the grid copy, not fogged; space: box, prevention, reserve) and the Reinforce's apply runs
+  the full test (`land_drop_valid` / `space_drop_ok`, refused = InvalidPosition, the AI then gets an empty unload
+  record). HIJACK_UNIT fails with the lane on (it writes the parent galaxy). **Tier 2, lane only** (the drop and hijack
+  forms). `lane_view()` is true only inside lane code (`think()` and the lane start scripts), so the critical lane
+  (fill at publish, the batch apply) reads the battle. The live path of every host answer without a lane branch calls
+  `BattleAi::lane_live_read`, which counts a read made from lane code (debug builds assert); `alamo_headless` exits 3
+  when the count is not 0, so every `--ai-lane` test checks it (`alamo_headless_skirmish_ai_foc_ai_lane` /
+  `_foc_land_ai_lane` worker-count checks, the two lane save checks). `think()` still runs inline (t03).

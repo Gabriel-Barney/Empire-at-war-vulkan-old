@@ -6,7 +6,9 @@ checked in; rerun after lua_api.json changes or after a binding's effect changes
 
     toolchain\\venv\\Scripts\\python.exe -I engine\\lua\\tools\\gen_bindings.py
 
-Row: { kind, owner class (methods) / impl class (globals), name, call sites in the RE corpora, effect, consumer }.
+Row: { kind, owner class (methods) / impl class (globals), name, call sites in the RE corpora, effect, consumer, hooks }.
+hooks (ref5 t04): the bridge hooks ("Struct.hook", space separated) the binding reads, found from the code (binding_hook_reads);
+src/bridge_hooks.inc lists every hook of the three hook structs with an is-set test.
 Globals without a recovered class get the class whose methods they expose (GameRandom ->
 LuaGameRandom, ...) or "" (a plain function / host-set value).
 
@@ -196,6 +198,185 @@ def inferred_sites():
     return out, unresolved, claimed
 
 
+# ---- ref5 t04: the bridge hooks each binding reads ----------------------------------------------------------------------
+# The three hook structs between the bindings and the sim (nullable std::function members). A binding row names the hooks
+# its implementing function, or a lua/src function it calls (BINDING_HOOK_DEPTH levels down), reads as `->hook` / `.hook`;
+# hook names are unique across the structs. bridge_hooks.inc lists every hook with a "is it set" test, which the host test
+# (alamo_sim_battle_story_tests) uses against the real story, AI and object-script bridges.
+INCLUDE = ROOT / "engine" / "lua" / "include" / "alamo" / "lua"
+HOOKS_OUT = ROOT / "engine" / "lua" / "src" / "bridge_hooks.inc"
+HOOK_STRUCTS = (("ObjectBridge", "object_bridge.hpp", "class ObjectBridge {"),
+                ("RemainingScriptHooks", "script_remaining.hpp", "struct RemainingScriptHooks {"),
+                ("TacticalScriptHooks", "script_gaps.hpp", "struct TacticalScriptHooks {"))
+BINDING_HOOK_DEPTH = 1
+FUNC_HEAD = re.compile(r"^(?:static\s+|inline\s+)?[A-Za-z_][\w:<>,\s\*&]*?\b([A-Za-z_]\w*)\s*\([^;]*$")
+
+
+def _strip(text):
+    text = re.sub(r"//[^\n]*", "", text)
+    return re.sub(r'"(?:\\.|[^"\\])*"', '""', text)
+
+
+def bridge_hooks():
+    """[(struct, hook, optional)] in declaration order; raises on a name declared twice. A member whose comment block (the
+    lines since the previous declaration, or its own line) says "hook-optional: <why>" has a retail-correct path without
+    the hook (a speed-up, an AI-lane-only write, a fallback the binding's own effect states): binding rows leave it out. A
+    name that is also a std::function member of another engine/lua header (FogScriptHooks.lane_write, ...) is ambiguous by
+    name and is not attributed to a binding either."""
+    out, seen = [], {}
+    for struct, header, opener in HOOK_STRUCTS:
+        text = (INCLUDE / header).read_text(encoding="utf-8")
+        i = text.index(opener) + len(opener)
+        depth, j = 1, i
+        while depth:
+            depth += {"{": 1, "}": -1}.get(text[j], 0)
+            j += 1
+        raw = text[i:j - 1]
+        body = re.sub(r"//[^\n]*", lambda m: " " * len(m.group(0)), raw)  # same offsets, comments blanked
+        last = 0
+        for m in re.finditer(r"std::function<", body):
+            k, depth = m.end(), 1
+            while depth:
+                depth += {"<": 1, ">": -1}.get(body[k], 0)
+                k += 1
+            name = re.match(r"\s*([A-Za-z_]\w*)\s*;", body[k:])
+            if not name:
+                continue
+            end = k + name.end()
+            start = max(body.rfind(";", 0, m.start()), body.rfind("{", 0, m.start()), body.rfind("}", 0, m.start()), last)
+            line_end = raw.find("\n", end)
+            optional = "hook-optional:" in raw[start:line_end if line_end >= 0 else len(raw)]
+            last = end
+            if name.group(1) in seen:
+                raise SystemExit(f"hook {name.group(1)} declared in {seen[name.group(1)]} and {struct}")
+            seen[name.group(1)] = struct
+            out.append((struct, name.group(1), optional))
+    return out
+
+
+def ambiguous_hook_names():
+    """Hook names that are also std::function members declared outside the three hook structs (any engine/lua header)."""
+    counts = {}
+    for path in sorted(INCLUDE.glob("*.hpp")):
+        text = re.sub(r"//[^\n]*", "", path.read_text(encoding="utf-8"))
+        for m in re.finditer(r"std::function<", text):
+            k, depth = m.end(), 1
+            while depth and k < len(text):
+                depth += {"<": 1, ">": -1}.get(text[k], 0)
+                k += 1
+            name = re.match(r"\s*([A-Za-z_]\w*)\s*;", text[k:])
+            if name:
+                counts[name.group(1)] = counts.get(name.group(1), 0) + 1
+    return {n for n, c in counts.items() if c > 1}
+
+
+def lua_functions():
+    """{(file name, function name): body text} of the top-level functions in engine/lua/src (comments and strings blanked)."""
+    funcs = {}
+    for path in sorted(LUA_SRC.glob("*.cpp")):
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            m = FUNC_HEAD.match(line)
+            if m and not line.startswith((" ", "\t", "}", "#", "/")) and m.group(1) not in ("if", "for", "while", "switch", "return"):
+                j = i
+                while j < len(lines) and "{" not in lines[j] and not lines[j].rstrip().endswith(";"):
+                    j += 1
+                if j < len(lines) and "{" in lines[j] and not lines[j].rstrip().endswith(";"):
+                    end = j
+                    if not (lines[j].count("{") == lines[j].count("}") and lines[j].rstrip().endswith("}")):
+                        while end + 1 < len(lines) and lines[end].rstrip() != "}":
+                            end += 1
+                    key = (path.name, m.group(1))
+                    funcs[key] = funcs.get(key, "") + _strip("\n".join(lines[i:end + 1]))
+                    i = end + 1
+                    continue
+            i += 1
+    return funcs
+
+
+def binding_hook_reads():
+    """{binding key ("Name" / "Class.Name"): sorted ["Struct.hook"]}: the hooks each registered binding reads."""
+    ambiguous = ambiguous_hook_names()
+    hooks = {h: s for s, h, optional in bridge_hooks() if not optional and h not in ambiguous}
+    funcs = lua_functions()
+    access = re.compile(r"(?:->|\.)\s*([A-Za-z_]\w*)\b")
+    called = re.compile(r"\b([A-Za-z_]\w*)\s*\(")
+    files_of = {}
+    for f, name in funcs:
+        files_of.setdefault(name, []).append(f)
+
+    def resolve(f, name):
+        """A call from file `f`: that file's own definition (an anonymous-namespace helper), else every other file's."""
+        if (f, name) in funcs:
+            return [(f, name)]
+        return [(g, name) for g in files_of.get(name, [])]
+
+    direct, calls = {}, {}
+    for (f, name), body in funcs.items():
+        direct[(f, name)] = {m.group(1) for m in access.finditer(body) if m.group(1) in hooks}
+        calls[(f, name)] = {k for m in called.finditer(body) if m.group(1) != name for k in resolve(f, m.group(1))}
+
+    def reads(fn):
+        seen, frontier, out = {fn}, [fn], set(direct.get(fn, ()))
+        for _ in range(BINDING_HOOK_DEPTH):
+            nxt = []
+            for f in frontier:
+                for g in sorted(calls.get(f, ())):
+                    if g not in seen:
+                        seen.add(g)
+                        nxt.append(g)
+                        out |= direct.get(g, set())
+            frontier = nxt
+        return out
+
+    out = {}
+    for path in sorted(LUA_SRC.glob("*.cpp")):
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        text = "\n".join(lines)
+        consts = dict(CLASS_CONST.findall(text))
+        macro_spans, macro_classes = [], {}
+        for i, line in enumerate(lines):
+            m = MACRO_DEF.search(line)
+            if not m:
+                continue
+            end = i
+            while end + 1 < len(lines) and lines[end].rstrip().endswith("\\"):
+                end += 1
+            macro_spans.append((i, end, m.group(1)))
+            macro_classes[m.group(1)] = re.findall(re.escape(m.group(1)) + r'\("([^"]+)"\)', text)
+        for i, line in enumerate(lines):
+            for m in REG_ENTRY.finditer(line):
+                kind, lit, const, name, fn = m.groups()
+                if kind == "G":
+                    classes = [None]
+                elif lit is not None:
+                    classes = [lit]
+                elif const in consts:
+                    classes = [consts[const]]
+                else:
+                    span = next((s for s in macro_spans if s[0] <= i <= s[1]), None)
+                    classes = macro_classes.get(span[2], []) if span else []
+                hs = set()
+                for k in resolve(path.name, fn):
+                    hs |= reads(k)
+                if not hs:
+                    continue
+                for cls in classes:
+                    key = name if cls is None else f"{cls}.{name}"
+                    out.setdefault(key, set()).update(f"{hooks[h]}.{h}" for h in hs)
+    return {k: sorted(v) for k, v in out.items()}
+
+
+def render_hooks():
+    lines = ["// GENERATED by engine/lua/tools/gen_bindings.py from the hook structs (object_bridge.hpp, script_remaining.hpp,",
+             "// script_gaps.hpp) - do not edit. Row: struct, hook, is-set test (the argument points at that struct)."]
+    for struct, hook, _ in bridge_hooks():
+        lines.append(f"{{{c_str(struct)}, {c_str(hook)}, [](const void* p) {{ return static_cast<bool>(static_cast<const {struct}*>(p)->{hook}); }}}},")
+    return "\n".join(lines) + "\n"
+
+
 def render():
     """(binding_table.inc text, annotation problems), computed from lua_api.json and the code."""
     rows, n_globals, n_methods = table_rows()
@@ -203,10 +384,11 @@ def render():
     consumers = op_consumers()
     notes, problems = annotations()
     inferred, inferred_by_name, claimed = inferred_sites()
+    hook_reads = binding_hook_reads()
     keys = set()
     lines = [
         "// GENERATED by engine/lua/tools/gen_bindings.py from docs/re/lua_api.json and the engine source - do not edit.",
-        f"// {n_globals} globals + {n_methods} methods. Row: kind, class, name, RE call sites, effect, consumer.",
+        f"// {n_globals} globals + {n_methods} methods. Row: kind, class, name, RE call sites, effect, consumer, hooks read.",
     ]
     for kind, cls, name, calls in rows:
         key = name if kind == "Global" else f"{cls}.{name}"
@@ -231,8 +413,9 @@ def render():
                     consumer = "invisible: " + note[1]
             else:
                 consumer = note[1]
+        hooks = " ".join(hook_reads.get(key, []))
         lines.append(f"{{BindingKind::{kind}, {c_str(cls)}, {c_str(name)}, {calls}, BindingEffect::{EFFECTS[effect]}, "
-                     f"{c_str(consumer)}}},")
+                     f"{c_str(consumer)}, {c_str(hooks)}}},")
     for key, (_, _, where) in sorted(notes.items()):
         if key not in keys:
             problems.append(f"{where}: binding-effect names {key}, which is not in the binding table")
@@ -246,7 +429,8 @@ def main() -> int:
     if problems:
         return 1
     OUT.write_text(text, encoding="utf-8", newline="\n")
-    print(f"wrote {OUT}")
+    HOOKS_OUT.write_text(render_hooks(), encoding="utf-8", newline="\n")
+    print(f"wrote {OUT} and {HOOKS_OUT}")
     return 0
 
 

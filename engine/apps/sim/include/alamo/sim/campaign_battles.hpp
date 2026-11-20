@@ -52,6 +52,7 @@
 #include "alamo/sim/battle_ai.hpp"  // A1 stage 2 tactical AI hookup
 #endif
 
+#include "alamo/lua/bindings.hpp"  // ref5 t04: lua::BridgeHookSets
 namespace alamo::lua {
 class ObjectBridge;
 }  // namespace alamo::lua
@@ -160,6 +161,10 @@ public:
     // (its plan / free-store VMs) [port: the first bridge with an entry; a mesh hidden by both is listed once].
     // Presentation only; empty without a battle, a bridge or a hidden mesh.
     std::span<const std::string> hidden_sub_objects(objects::ObjectId id) const;
+    // ref5 t04: the hook sets the running battle's script VMs see (the story / object-script bridge and its two hook structs,
+    // the tactical AI's object bridge), for the binding ledger's host test (lua::unwired_full_binding_hooks). Empty without
+    // a battle.
+    lua::BridgeHookSets script_hook_sets() const;
     // STY1 t06 / mcx6: the battle rewards of the story (StorySession::set_tactical_reward_hook calls it; public for tests):
     // CHANGE_OWNER / DESTROY_OBJECT / BOMBARD_DELAY of the tactical plot set and FORCE_RETREAT / SET_HEALTH / SET_SPAWN /
     // DISABLE_SPECIAL_STRUCTURE of any plot set, on the running battle, Reward_Param1..N as text (the story session checked

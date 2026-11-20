@@ -1,6 +1,9 @@
 // alamo_game_story_present_tests (data-free): StoryPresenter (story_present.hpp), the host side of the story presentation
 // rewards (docs/re/STORY_PRESENTATION_REWARDS.md). One block per spec section.
 #include <cstdint>
+#include <cstdio>
+#include <set>
+#include <string_view>
 #include <string>
 #include <utility>
 #include <vector>
@@ -9,6 +12,8 @@
 
 #include "alamo/data/xml.hpp"
 #include "alamo/game/story_present.hpp"
+#include "alamo/game/story_ui.hpp"
+#include "alamo/sim/story_rewards.hpp"
 #include "alamo/test/support.hpp"
 
 using namespace alamo;
@@ -535,6 +540,81 @@ void save_test() {
     CHECK(!game::StoryPresenter::is_lasting_reward("SCREEN_TEXT") && game::StoryPresenter::is_lasting_reward("disable_retreat"));
 }
 
+// ref5 t02: every Ui row of the sim's story reward table has a handler in the presenter or the media table; every name either
+// registers is a row of the table; DUAL_FLASH pairs the next two flashes, FLASH_UNIT takes an arrow slot, SFX is a media cue.
+void handler_test() {
+    alamo::test::section("ref5 t02: Ui rows have a registered handler");
+    size_t ui = 0;
+    for (const sim::StoryRewardRow& row : sim::story_reward_table()) {
+        if (row.owner != sim::StoryRewardOwner::Ui) continue;
+        ++ui;
+        const bool ok = game::StoryPresenter::has_reward_handler(row.name) || game::story_reward_media_handles(row.name);
+        if (!ok) std::printf("    Ui row without a handler: %.*s\n", static_cast<int>(row.name.size()), row.name.data());
+        CHECK(ok);
+    }
+    CHECK(ui > 50);
+    std::set<std::string_view> seen;
+    for (const std::string_view n : game::StoryPresenter::reward_names()) {
+        CHECK(sim::find_story_reward(n) != nullptr && seen.insert(n).second);
+    }
+    seen.clear();
+    for (const std::string_view n : game::story_reward_media_names()) {
+        const sim::StoryRewardRow* row = sim::find_story_reward(n);
+        CHECK(row && row->owner == sim::StoryRewardOwner::Ui && seen.insert(n).second);
+    }
+
+    alamo::test::section("ref5 t02: DUAL_FLASH alternates the next two flashes (2.5)");
+    game::StoryPresenter s = make();
+    CHECK(s.on_reward("DUAL_FLASH", P{"2", "0.5"}, 10.0, 0));
+    s.on_reward("FLASH_GUI", P{"b_zoom"}, 10.0, 0);
+    CHECK(!s.component_flashing("b_zoom", 10.0) && s.arrows().size() == 1);  // held, the arrow is not
+    s.on_reward("FLASH_GUI", P{"b_build"}, 10.0, 0);
+    CHECK(s.component_flashing("b_zoom", 10.1) && !s.component_flashing("b_build", 10.1));
+    CHECK(!s.component_flashing("b_zoom", 10.6) && s.component_flashing("b_build", 10.6));
+    CHECK(s.component_flashing("b_zoom", 11.1) && !s.component_flashing("b_zoom", 12.1) && !s.component_flashing("b_build", 12.1));
+    {  // a zero time holds nothing: the flash runs as without DUAL_FLASH
+        game::StoryPresenter z = make();
+        z.on_reward("DUAL_FLASH", P{}, 0.0, 0);
+        z.on_reward("FLASH_GUI", P{"b_zoom"}, 0.0, 0);
+        CHECK(z.component_flashing("b_zoom", 0.1));
+        ByteWriter zw;  // a v1 blob (no DUAL_FLASH tail: bool, f64, f64, u32 count) still reads
+        z.write(zw, 0.0);
+        std::vector<uint8_t> v1(zw.bytes().begin(), zw.bytes().end() - 21);
+        v1[0] = 1;
+        game::StoryPresenter zr = make();
+        ByteReader zrr(v1);
+        CHECK(zr.read(zrr, 0.0) && zrr.done() && zr.component_flashing("b_zoom", 0.1));
+    }
+    s.on_reward("FLASH_GUI", P{"b_next"}, 20.0, 0);  // the pair disarmed it: a flash at once
+    CHECK(s.component_flashing("b_next", 20.0));
+    s.on_reward("DUAL_FLASH", P{"2", "0.5"}, 30.0, 0);
+    s.on_reward("FLASH_GUI", P{"b_a"}, 30.0, 0);
+    s.on_reward("HIDE_TUTORIAL_CURSOR", P{"none"}, 30.0, 0);  // clears the held flash and disarms
+    s.on_reward("FLASH_GUI", P{"b_b"}, 30.0, 0);
+    CHECK(!s.component_flashing("b_a", 30.1) && s.component_flashing("b_b", 30.1));
+    s.on_reward("DUAL_FLASH", P{"1", "0.25"}, 40.0, 0);  // a saved held flash stays held
+    s.on_reward("FLASH_PLANET_GUI", P{"Kuat", "FLASH_TROOPS"}, 40.0, 0);
+    ByteWriter w;
+    s.write(w, 40.0);
+    game::StoryPresenter r = make();
+    ByteReader rd(w.bytes());
+    CHECK(r.read(rd, 40.0) && rd.done());
+    r.on_reward("FLASH_PLANET_GUI", P{"Ilum", "FLASH_TROOPS"}, 40.0, 0);
+    size_t kuat = 0, ilum = 0;
+    for (const game::StoryObjectFlash& f : r.object_flashes()) (f.type_name == "Kuat" ? kuat : ilum) += f.start >= 40.0 ? 1u : 0u;
+    CHECK(kuat == 2 && ilum == 2);  // 1 s at 0.25 s: four steps, two each
+
+    alamo::test::section("ref5 t02: FLASH_UNIT arrow slot (2.4), SFX cue (§1.22)");
+    game::StoryPresenter u = make();
+    CHECK(u.on_reward("FLASH_UNIT", P{"production", "Rebel_Infantry_Squad"}, 0.0, 2));
+    CHECK(u.arrows().size() == 1 && u.arrows()[0].kind == game::StoryArrow::Kind::Unit && u.arrows()[0].region == "PRODUCTION");
+    u.on_reward("FLASH_UNIT", P{"NO_REGION", "Rebel_Infantry_Squad"}, 0.0, 2);  // unknown region: nothing
+    CHECK(u.arrows().size() == 1 && u.on_reward("FLASH_TERRAIN", P{"3"}, 0.0, 2));
+    std::vector<game::StoryMediaCue> cues;
+    game::story_reward_media("SFX", P{"Unit_Select_SFX"}, cues);
+    CHECK(cues.size() == 1 && cues[0].kind == game::StoryMediaCue::Kind::Sfx && cues[0].name == "Unit_Select_SFX");
+}
+
 }  // namespace
 
 int main() {
@@ -546,5 +626,6 @@ int main() {
     advisor_test();
     hint_queue_test();
     save_test();  // ref4 t01
+    handler_test();  // ref5 t02
     return alamo::test::report("alamo_game_story_present_tests");
 }

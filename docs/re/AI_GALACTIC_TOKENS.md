@@ -1031,6 +1031,38 @@ Read again: 0x6c5de0 (requirement), 0x5f1990 (list), 0x72ac70 / 0x6bff00 (satisf
   item 3-4 rounding alone and the §9.5 budget alone: no change); `fail Contrast` proposals 166 -> 80. With
   `--human Empire`: 225 / 72 / 30 / 0 -> 586 / 403 / 85 / 0, `fail Contrast` 12 -> 2.
 
+### 9.8a The same contrast rules in tactical modes (ref5 t05, 2026-11-20) [H unless tagged]
+
+Read from the decompiled output (`re_reference/`, 0x72b940, 0x72b6a0, 0x6c5de0, 0x5f1d00) for roadmap ref5 t05: do the
+rules of §9.8 and q2f t09 also hold when a land or space PotentialPlan is solved? Yes; none of them tests the mode.
+- **Pair filter 0x72b6a0.** No pair counts when P = power(T) x health ≤ 0. A pair counts only when w > 0 **and** R > 0.
+  Both tests come before the mode flag. The mode flag (argument 10) is "PP mode ≠ galactic (PP+0x198 ≠ 0) or the
+  candidate has a free unit". When it is set, only the tolerance / pop-cap test is skipped. So in tactical modes a pair
+  needs P > 0, w > 0 and R > 0, and nothing else.
+- **Which lists 0x72b940 scores.** The main list is scored only when rec+0xB0 (a non-escort team) is set. The escort list
+  is scored when 0x140b3a525 (an escort list exists) is set and either rec+0xB1 or 0x140b3a528 is set. The score is the
+  better of the two. Contained units (+0x60, 0x72b3e0) are added only when PP+0x198 = 0 (galactic).
+- **The gate after v ≤ 0.** The gate is `(0x140b3a528 && rec+0xB0) || (0x140b3a529 && rec+0xB1)`, the plan-wide
+  flags (§9.8 item 2). The "still allowed" checks run in this order:
+  1. MinimumCost + AdditionalCost ≤ gross.
+  2. The main list's untyped totals (key 0, remaining > 0), each found by its layer byte (byte ≠ 0 → rec+0x90, else
+     rec+0x91). This check runs only with 0x528 && rec+0xB0.
+  3. The escort list's untyped totals, the same way. This check runs only with 0x525 && 0x529 && rec+0xB1.
+  4. RequiredCategories.
+  5. The team minimums.
+
+  None of the checks depends on the mode.
+- **Tolerance and scale.** 0x6c5de0 computes the tolerance T in float for every mode. Tactical builds its lists with
+  0x5f1d00 (main, and escort when a TF is an EscortForce), not 0x5f1990. Its typed-row scale is
+  `((double)Max + (double)(float)(f x PFCA)) x (double)multiplier`. The multiplier is the difficulty entry's tactical
+  contrast factor (+0x3c, then +0x38, one per mode) [M which offset belongs to which mode]. The rounding is the same
+  as galactic §9.8 item 3.
+- **Satisfied test.** 0x6bff00 / 0x72ac70 is the same float test as §9.8 item 4. It is called with T (0x140b3a544)
+  in both modes.
+- Not read here: the tactical ×2 on a positive v. The decompile drops the return value; AI_GALACTIC_2 §1.4 keeps it.
+
+Port status: `engine/ai/tactical/src/tactical_pp.cpp` ContrastM (ref5 t05 slice 2).
+
 ## 9c. Galactic AI follow-up (q6 roadmap t18, 2026-11-04)
 
 Four questions from Q6 t18: the leaf cache read by 0x5f2430 (§9.9), the escort "satisfied" flag 0x140b3a529

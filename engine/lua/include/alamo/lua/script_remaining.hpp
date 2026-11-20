@@ -134,14 +134,17 @@ struct RemainingScriptHooks {
     // The final-blow player id (obj +0x330, §2.4); -1 = none -> the neutral player. Unset: -1.
     std::function<int32_t(objects::ObjectHandle object)> final_blow_player;
     // The AI power-versus weight of `unit`'s type against `other`'s categories (§2.12 M_s; the WeightedTypeList table);
-    // < 0 unknown -> 1 [port].
+    // < 0 unknown -> 1 [port]. hook-optional: no host sets it yet; GameObjectWrapper.Get_AI_Power_Vs_Unit is Partial for it
+    // (binding-effect in bind_script_remaining.cpp), the task-force form asks the AI host first.
     std::function<double(objects::ObjectHandle unit, objects::ObjectHandle other)> ai_power_vs;
     // ---- galactic ----
     // (cu8 t08: Force_Test_Space_Conflict needs no hook: it runs the arrival test on the players family's GalacticSim
     // and its conflict hooks.)
     // Give_Random_Sliceable_Tech(player) -> the chosen type (kNone = none). Unset: §2.9 on the players world.
+    // hook-optional: the binding's own §2.9 path on the players world is the rule.
     std::function<objects::TypeIndex(int32_t player)> give_random_sliceable_tech;
     // GameObjectTypeWrapper.Is_Obsolete(player). Unset: the player's obsolete list (players.hpp LuaPlayerState).
+    // hook-optional: the binding reads the galactic sim's locked list itself (STRATEGIC_GAPS §5.1).
     std::function<bool(objects::TypeIndex type, int32_t player)> type_obsolete;
     // Get_Bribe_Cost (§2.8): the battle planet of the parent galactic mode: -1 none (the base cost), 0 uncorrupted,
     // 1 corrupted. Unset: -1.

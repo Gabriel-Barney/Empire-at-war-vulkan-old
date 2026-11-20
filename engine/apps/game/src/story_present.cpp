@@ -144,151 +144,267 @@ void StoryPresenter::add_arrow(StoryArrow a) {
     arrows_.push_back(std::move(a));
 }
 
+// ref5 t02: the presentation rewards, one handler per Reward_Type name (the Ui rows of the sim's story reward table that
+// this class draws or obeys; the media rewards are story_reward_media's). The game's coverage test fails for a Ui row that
+// neither registers.
+namespace {
+using RC = StoryPresenter::RewardCall;
+bool flag_at(const RC& c, size_t n, bool def) { return param(c.p, n).empty() ? def : to_int(param(c.p, n)) != 0; }
+}  // namespace
+
+void StoryPresenter::push_camera(StoryCameraCommand::Kind kind, const std::vector<std::string>& p) {
+    StoryCameraCommand c;
+    c.kind = kind;
+    c.type = std::string(param(p, 1));
+    if (!param(p, 2).empty()) parse_xyz(param(p, 2), c.ox, c.oy, c.oz);
+    camera_.push_back(std::move(c));
+}
+
+// DUAL_FLASH (§2.5): while armed, FLASH_GUI / FLASH_PLANET_GUI flashes are held; the second one held starts the pair, the
+// two alternating at `rate` seconds for `time` seconds [M: the alternation's phase and end]. The pair disarms it [M].
+void StoryPresenter::flash_or_hold(bool planet, std::string target, double now, double seconds) {
+    if (dual_.armed && !(dual_.time > 0.0)) dual_ = {};  // [port] no time to alternate in: the flashes run as without it
+    if (!dual_.armed) {
+        if (planet) object_flashes_.push_back({std::move(target), now, now + seconds});
+        else flashes_.push_back({std::move(target), now, now + seconds});
+        return;
+    }
+    dual_.held.push_back({planet, std::move(target)});
+    if (dual_.held.size() < 2) return;
+    const double rate = dual_.rate > 0.0 ? dual_.rate : dual_.time;
+    // limit: [port] at most 256 alternation steps (a zero or tiny rate would otherwise queue without bound)
+    for (size_t k = 0; k < 256 && rate > 0.0 && static_cast<double>(k) * rate < dual_.time; ++k) {
+        const DualHeld& h = dual_.held[k % 2];
+        const double a = now + static_cast<double>(k) * rate, b = std::min(a + rate, now + dual_.time);
+        if (h.planet) object_flashes_.push_back({h.target, a, b});
+        else flashes_.push_back({h.target, a, b});
+    }
+    dual_ = {};
+}
+
 bool StoryPresenter::on_reward(std::string_view type, const std::vector<std::string>& p, double now, uint8_t mode) {
     const std::string ty = ascii_upper(type);
-    auto flag = [&](size_t n, bool def) { return param(p, n).empty() ? def : to_int(param(p, n)) != 0; };
-    auto cam = [&](StoryCameraCommand::Kind k) {
-        StoryCameraCommand c;
-        c.kind = k;
-        c.type = std::string(param(p, 1));
-        if (!param(p, 2).empty()) parse_xyz(param(p, 2), c.ox, c.oy, c.oz);
-        camera_.push_back(std::move(c));
+    const RewardCall c{ty, p, now, mode};
+    for (const RewardHandler& h : reward_handlers())
+        if (h.name == ty) {
+            h.fn(*this, c);
+            ++handled_;
+            return true;
+        }
+    return false;
+}
+
+bool StoryPresenter::has_reward_handler(std::string_view name) {
+    for (const RewardHandler& h : reward_handlers())
+        if (h.name == name) return true;
+    return false;
+}
+
+std::vector<std::string_view> StoryPresenter::reward_names() {
+    std::vector<std::string_view> out;
+    for (const RewardHandler& h : reward_handlers()) out.push_back(h.name);
+    return out;
+}
+
+// FLASH_FLEET_WITH_UNIT / FLASH_SPECIAL_ABILITY / FLASH_PRODUCTION_CHOICE: P1 target, P2 flash id; an arrow slot.
+void StoryPresenter::add_flash_arrow(StoryArrow::Kind kind, const RewardCall& c) {
+    if (param(c.p, 1).empty()) return;
+    StoryArrow a;
+    a.kind = kind;
+    a.target = std::string(param(c.p, 1));
+    a.label = std::string(param(c.p, 2));
+    add_arrow(std::move(a));
+}
+
+std::span<const StoryPresenter::RewardHandler> StoryPresenter::reward_handlers() {
+    using K = StoryCameraCommand::Kind;
+    using P = StoryPresenter;
+    static constexpr RewardHandler kHandlers[] = {
+        {"SCREEN_TEXT", [](P& s, const RC& c) { s.add_text(c.type, c.p, c.now); }},
+        // The text part; the speech and the head are story_reward_media's.
+        {"MULTIMEDIA", [](P& s, const RC& c) { s.add_text(c.type, c.p, c.now); }},
+        {"FLASH_GUI",
+         [](P& s, const RC& c) {
+             const std::string_view comp = param(c.p, 1);
+             if (comp.empty()) return;
+             s.flash_or_hold(false, std::string(comp), c.now, kFlashSeconds * kFlashCount);
+             StoryArrow a;
+             a.kind = StoryArrow::Kind::Component;
+             a.target = std::string(comp);
+             a.label = std::string(param(c.p, 2));
+             s.add_arrow(std::move(a));
+         }},
+        {"FLASH_PLANET_GUI",
+         [](P& s, const RC& c) {
+             if (param(c.p, 1).empty()) return;
+             StoryArrow a;
+             a.kind = StoryArrow::Kind::Planet;
+             a.target = std::string(param(c.p, 1));
+             a.region = upper(param(c.p, 2));
+             a.sub = to_int(param(c.p, 3));
+             a.label = std::string(param(c.p, 4));
+             a.has_pointer = !param(c.p, 5).empty();
+             // 3.4: every region but PLANET flashes its planet-panel entry (the port has no such panel: the planet itself
+             // flashes [port]); AFFILIATION / CREDITS / COINS are no-ops; PLANET is the arrow alone.
+             std::string_view r = a.region;  // the shipped scripts spell the regions FLASH_TROOPS, FLASH_PLANET ...
+             if (r.starts_with("FLASH_")) r.remove_prefix(6);
+             if (r != "PLANET" && r != "AFFILIATION" && r != "CREDITS" && r != "COINS")
+                 s.flash_or_hold(true, a.target, c.now, kFlashSeconds * kFlashCount);
+             s.add_arrow(std::move(a));
+         }},
+        {"FLASH_FLEET_WITH_UNIT", [](P& s, const RC& c) { s.add_flash_arrow(StoryArrow::Kind::Fleet, c); }},
+        {"FLASH_SPECIAL_ABILITY", [](P& s, const RC& c) { s.add_flash_arrow(StoryArrow::Kind::Ability, c); }},
+        {"FLASH_PRODUCTION_CHOICE", [](P& s, const RC& c) { s.add_flash_arrow(StoryArrow::Kind::Production, c); }},
+        {"FLASH_ADVANCED_MAP_OBJECT",
+         [](P& s, const RC& c) {
+             if (!param(c.p, 1).empty())  // §3.8: flashed six times, no arrow
+                 s.map_flashes_.push_back({std::string(param(c.p, 1)), c.now, c.now + kFlashSeconds * 6});
+         }},
+        {"FLASH_PLANET",
+         [](P& s, const RC& c) {
+             if (!param(c.p, 1).empty())  // GUI_Flash_Duration x 3
+                 s.object_flashes_.push_back({std::string(param(c.p, 1)), c.now, c.now + s.config_.flash_duration * 3});
+         }},
+        {"FLASH_OBJECT",
+         [](P& s, const RC& c) {
+             if (!param(c.p, 1).empty())
+                 s.object_flashes_.push_back({std::string(param(c.p, 1)), c.now, c.now + s.config_.flash_duration * 3});
+         }},
+        // §2.4: P1 region (ORGANIZE / PRODUCTION / SELECTION; another name: retail logs "Can't find region", nothing), P2 unit
+        // type: the command-bar button holding that type flashes with an arrow (an arrow slot of kind Unit). [port] the host
+        // does not find the button yet: the slot is taken, nothing is drawn.
+        {"FLASH_UNIT",
+         [](P& s, const RC& c) {
+             const std::string region = upper(param(c.p, 1));
+             if (param(c.p, 2).empty() || (region != "ORGANIZE" && region != "PRODUCTION" && region != "SELECTION")) return;
+             StoryArrow a;
+             a.kind = StoryArrow::Kind::Unit;
+             a.target = std::string(param(c.p, 2));
+             a.region = region;
+             s.add_arrow(std::move(a));
+         }},
+        // §2.3: P1 seconds; the 2D pointer and the 3D arrow at the fired event's own position. [port] the fired reward log
+        // (lua::StoryFired) does not carry that position, so nothing is placed.
+        {"FLASH_TERRAIN", [](P&, const RC&) {}},
+        // §2.5: P1 time, P2 rate: arms the pairing of the next two FLASH_GUI / FLASH_PLANET_GUI flashes (flash_or_hold).
+        {"DUAL_FLASH",
+         [](P& s, const RC& c) {
+             s.dual_ = {};
+             s.dual_.armed = true;
+             s.dual_.time = to_float(param(c.p, 1));
+             s.dual_.rate = to_float(param(c.p, 2));
+         }},
+        {"FORCE_CLICK_GUI",
+         [](P& s, const RC& c) {
+             if (!param(c.p, 1).empty()) s.forced_clicks_.push_back(std::string(param(c.p, 1)));
+         }},
+        {"HIDE_TUTORIAL_CURSOR",
+         [](P& s, const RC& c) {
+             const std::string_view label = param(c.p, 1);
+             const auto it = std::find_if(s.arrows_.begin(), s.arrows_.end(), [&](const StoryArrow& a) { return a.label == label; });
+             if (it != s.arrows_.end()) s.arrows_.erase(it);
+             s.dual_ = {};  // §2.5: the held DUAL_FLASH flashes go too
+         }},
+        {"HIDE_CURSOR_ON_CLICK", [](P& s, const RC& c) { s.hide_cursor_on_click_ = to_int(param(c.p, 1)) != 0; }},  // §3.11: no reader
+        {"HIGHLIGHT_OBJECT",
+         [](P& s, const RC& c) {
+             const std::string_view obj = param(c.p, 1);
+             if (obj.empty() || param(c.p, 2).empty()) return;
+             const bool on = to_int(param(c.p, 2)) != 0;
+             const int32_t pid = param(c.p, 3).empty() ? -1 : to_int(param(c.p, 3));
+             auto same = [&](const StoryHighlight& h) { return h.object == 0 && ascii_iequals(h.type_name, obj); };
+             std::erase_if(s.highlights_, same);
+             if (on) s.highlights_.push_back({std::string(obj), 0, false, 0.0f});
+             if (on && pid != -1) {
+                 std::erase_if(s.pointers_, [&](const StoryPointer& q) { return q.id == pid; });
+                 StoryPointer q;
+                 q.id = pid;
+                 q.object_type = std::string(obj);
+                 s.pointers_.push_back(std::move(q));
+             } else if (!on && pid != -1) {
+                 std::erase_if(s.pointers_, [&](const StoryPointer& q) { return q.id == pid; });
+             }
+         }},
+        {"TUTORIAL_DIALOG",
+         [](P& s, const RC& c) {
+             if (param(c.p, 1).empty()) return;
+             s.cinematic_mode_ = false;  // 4: a cinematic mode in force ends first
+             s.dialogs_.push_back({std::string(param(c.p, 1)), to_int(param(c.p, 2)) != 0});
+         }},
+        {"LOCK_CONTROLS",
+         [](P& s, const RC& c) {
+             if (!param(c.p, 1).empty()) s.controls_locked_ = to_int(param(c.p, 1)) != 0;
+         }},
+        {"SCROLL_LOCK", [](P& s, const RC& c) { s.scroll_locked_ = to_int(param(c.p, 1)) != 0; }},
+        {"LOCK_PLANET_SELECTION", [](P& s, const RC& c) { s.planet_selection_locked_ = to_int(param(c.p, 1)) != 0; }},
+        {"ENABLE_OBJECTIVE_DISPLAY", [](P& s, const RC& c) { s.objective_event_ = s.objectives_shown_ = flag_at(c, 1, true); }},
+        {"SHOW_COMMAND_BAR",
+         [](P& s, const RC& c) {
+             // 5.6: galactic = a plain show / hide; space and land = the hide counter (nested hides need matching shows)
+             if (c.mode == 0) s.command_bar_hide_ = flag_at(c, 1, false) ? 0 : 1;
+             else if (flag_at(c, 1, false)) s.command_bar_hide_ = std::max(0, s.command_bar_hide_ - 1);
+             else ++s.command_bar_hide_;
+         }},
+        {"START_CINEMATIC_MODE", [](P& s, const RC&) { s.cinematic_mode_ = true; }},
+        {"STOP_CINEMATIC_MODE", [](P& s, const RC&) { s.cinematic_mode_ = false; }},
+        {"DISABLE_MOVIES", [](P& s, const RC& c) { s.movies_disabled_ = to_int(param(c.p, 1)) != 0; }},
+        {"DISABLE_RETREAT",
+         [](P& s, const RC& c) {
+             if (param(c.p, 1).empty() || param(c.p, 2).empty()) return;
+             if (to_int(param(c.p, 2)) != 0) s.retreat_off_.insert(upper(param(c.p, 1)));
+             else s.retreat_off_.erase(upper(param(c.p, 1)));
+         }},
+        {"HIDE_AUTORESOLVE", [](P& s, const RC&) { s.hide_autoresolve_ = true; }},  // §5.3: no reader in retail
+        {"USE_RETRY_DIALOG", [](P& s, const RC&) { s.retry_dialog_ = true; }},
+        {"ACTIVATE_RETRY_DIALOG", [](P& s, const RC&) { s.retry_requested_ = true; }},
+        {"ENABLE_GALACTIC_CORRUPTION_HOLOGRAM",
+         [](P& s, const RC& c) {
+             if (param(c.p, 1).empty()) return;
+             if (flag_at(c, 2, true)) s.hologram_.insert(upper(param(c.p, 1)));
+             else s.hologram_.erase(upper(param(c.p, 1)));
+         }},
+        {"SHOW_SMUGGLE_SLOT", [](P& s, const RC& c) { s.force_slot(c, "SMUGGLE", true); }},
+        {"HIDE_SMUGGLE_SLOT", [](P& s, const RC& c) { s.force_slot(c, "SMUGGLE", false); }},
+        {"SHOW_RAID_SLOT", [](P& s, const RC& c) { s.force_slot(c, "RAID", true); }},
+        {"HIDE_RAID_SLOT", [](P& s, const RC& c) { s.force_slot(c, "RAID", false); }},
+        {"SHOW_STEAL_SLOT", [](P& s, const RC& c) { s.force_slot(c, "STEAL", true); }},
+        {"HIDE_STEAL_SLOT", [](P& s, const RC& c) { s.force_slot(c, "STEAL", false); }},
+        {"SHOW_SPECIAL_SLOT",
+         [](P& s, const RC& c) {
+             if (param(c.p, 1).empty() || param(c.p, 2).empty()) return;
+             std::string slot = upper(param(c.p, 2));
+             if (slot.size() > 5 && slot.compare(slot.size() - 5, 5, "_SLOT") == 0) slot.resize(slot.size() - 5);
+             const std::string key = upper(param(c.p, 1)) + "|" + slot;
+             if (param(c.p, 3).empty() || to_int(param(c.p, 3)) != 0) s.slots_.insert(key);
+             else s.slots_.erase(key);
+         }},
+        {"SELECT_PLANET", [](P& s, const RC& c) { s.push_camera(K::SelectPlanet, c.p); }},
+        {"ZOOM_IN", [](P& s, const RC& c) { s.push_camera(K::ZoomIn, c.p); }},
+        {"ZOOM_OUT", [](P& s, const RC& c) { s.push_camera(K::ZoomOut, c.p); }},
+        {"POSITION_CAMERA", [](P& s, const RC& c) { s.push_camera(K::Position, c.p); }},
+        {"SCROLL_CAMERA", [](P& s, const RC& c) { s.push_camera(K::Scroll, c.p); }},
+        {"PAUSE_GAME", [](P& s, const RC& c) { s.push_camera(K::PauseGame, c.p); }},
+        {"PAUSE_GALACTIC", [](P& s, const RC& c) { s.push_camera(K::PauseGalactic, c.p); }},
+        {"UNPAUSE_GALACTIC", [](P& s, const RC& c) { s.push_camera(K::UnpauseGalactic, c.p); }},
+        {"PAUSE_GALACTIC_GAME",
+         [](P& s, const RC& c) {
+             if (!param(c.p, 1).empty() && to_int(param(c.p, 1)) == 0) s.push_camera(K::UnpauseGalactic, c.p);
+             else s.push_camera(K::PauseGalactic, c.p);
+         }},
+        {"SET_ADVISOR",
+         [](P& s, const RC& c) {
+             if (!param(c.p, 1).empty() && c.mode < 3) s.advisor_[c.mode] = to_int(param(c.p, 1)) != 0;
+         }},
     };
-    bool ok = true;
-    if (ty == "SCREEN_TEXT") add_text(ty, p, now);
-    else if (ty == "MULTIMEDIA") add_text(ty, p, now);  // the text part; the speech and the head are story_reward_media's
-    else if (ty == "FLASH_GUI") {
-        const std::string_view c = param(p, 1);
-        if (!c.empty()) {
-            flashes_.push_back({std::string(c), now, now + kFlashSeconds * kFlashCount});
-            StoryArrow a;
-            a.kind = StoryArrow::Kind::Component;
-            a.target = std::string(c);
-            a.label = std::string(param(p, 2));
-            add_arrow(std::move(a));
-        }
-    } else if (ty == "FLASH_PLANET_GUI") {
-        if (!param(p, 1).empty()) {
-            StoryArrow a;
-            a.kind = StoryArrow::Kind::Planet;
-            a.target = std::string(param(p, 1));
-            a.region = upper(param(p, 2));
-            a.sub = to_int(param(p, 3));
-            a.label = std::string(param(p, 4));
-            a.has_pointer = !param(p, 5).empty();
-            // 3.4: every region but PLANET flashes its planet-panel entry (the port has no such panel: the planet itself flashes
-            // [port]); AFFILIATION / CREDITS / COINS are no-ops; PLANET is the arrow alone.
-            std::string_view r = a.region;  // the shipped scripts spell the regions FLASH_TROOPS, FLASH_PLANET ...
-            if (r.starts_with("FLASH_")) r.remove_prefix(6);
-            if (r != "PLANET" && r != "AFFILIATION" && r != "CREDITS" && r != "COINS")
-                object_flashes_.push_back({a.target, now, now + kFlashSeconds * kFlashCount});
-            add_arrow(std::move(a));
-        }
-    } else if (ty == "FLASH_FLEET_WITH_UNIT" || ty == "FLASH_SPECIAL_ABILITY" || ty == "FLASH_PRODUCTION_CHOICE") {
-        if (!param(p, 1).empty()) {
-            StoryArrow a;
-            a.kind = ty == "FLASH_FLEET_WITH_UNIT" ? StoryArrow::Kind::Fleet
-                     : ty == "FLASH_SPECIAL_ABILITY" ? StoryArrow::Kind::Ability
-                                                     : StoryArrow::Kind::Production;
-            a.target = std::string(param(p, 1));
-            a.label = std::string(param(p, 2));
-            add_arrow(std::move(a));
-        }
-    } else if (ty == "FLASH_ADVANCED_MAP_OBJECT") {
-        if (!param(p, 1).empty()) {  // §3.8: flashed six times, no arrow
-            map_flashes_.push_back({std::string(param(p, 1)), now, now + kFlashSeconds * 6});
-        }
-    } else if (ty == "FLASH_PLANET" || ty == "FLASH_OBJECT") {
-        if (!param(p, 1).empty()) object_flashes_.push_back({std::string(param(p, 1)), now, now + config_.flash_duration * 3});  // GUI_Flash_Duration
-    } else if (ty == "FORCE_CLICK_GUI") {
-        if (!param(p, 1).empty()) forced_clicks_.push_back(std::string(param(p, 1)));
-    } else if (ty == "HIDE_TUTORIAL_CURSOR") {
-        const std::string_view label = param(p, 1);
-        const auto it = std::find_if(arrows_.begin(), arrows_.end(), [&](const StoryArrow& a) { return a.label == label; });
-        if (it != arrows_.end()) arrows_.erase(it);
-    } else if (ty == "HIDE_CURSOR_ON_CLICK") {
-        hide_cursor_on_click_ = to_int(param(p, 1)) != 0;  // §3.11: no reader in retail
-    } else if (ty == "HIGHLIGHT_OBJECT") {
-        const std::string_view obj = param(p, 1);
-        if (!obj.empty() && !param(p, 2).empty()) {
-            const bool on = to_int(param(p, 2)) != 0;
-            const int32_t pid = param(p, 3).empty() ? -1 : to_int(param(p, 3));
-            auto same = [&](const StoryHighlight& h) { return h.object == 0 && ascii_iequals(h.type_name, obj); };
-            std::erase_if(highlights_, same);
-            if (on) highlights_.push_back({std::string(obj), 0, false, 0.0f});
-            if (on && pid != -1) {
-                std::erase_if(pointers_, [&](const StoryPointer& q) { return q.id == pid; });
-                StoryPointer q;
-                q.id = pid;
-                q.object_type = std::string(obj);
-                pointers_.push_back(std::move(q));
-            } else if (!on && pid != -1) {
-                std::erase_if(pointers_, [&](const StoryPointer& q) { return q.id == pid; });
-            }
-        }
-    } else if (ty == "TUTORIAL_DIALOG") {
-        if (!param(p, 1).empty()) {
-            cinematic_mode_ = false;  // 4: a cinematic mode in force ends first
-            dialogs_.push_back({std::string(param(p, 1)), to_int(param(p, 2)) != 0});
-        }
-    } else if (ty == "LOCK_CONTROLS") {
-        if (!param(p, 1).empty()) controls_locked_ = to_int(param(p, 1)) != 0;
-    } else if (ty == "SCROLL_LOCK") scroll_locked_ = to_int(param(p, 1)) != 0;
-    else if (ty == "LOCK_PLANET_SELECTION") planet_selection_locked_ = to_int(param(p, 1)) != 0;
-    else if (ty == "ENABLE_OBJECTIVE_DISPLAY") objective_event_ = objectives_shown_ = flag(1, true);
-    else if (ty == "SHOW_COMMAND_BAR") {
-        // 5.6: galactic = a plain show / hide; space and land = the hide counter (nested hides need matching shows)
-        if (mode == 0) command_bar_hide_ = flag(1, false) ? 0 : 1;
-        else if (flag(1, false)) command_bar_hide_ = std::max(0, command_bar_hide_ - 1);
-        else ++command_bar_hide_;
-    } else if (ty == "START_CINEMATIC_MODE") cinematic_mode_ = true;
-    else if (ty == "STOP_CINEMATIC_MODE") cinematic_mode_ = false;
-    else if (ty == "DISABLE_MOVIES") movies_disabled_ = to_int(param(p, 1)) != 0;
-    else if (ty == "DISABLE_RETREAT") {
-        if (!param(p, 1).empty() && !param(p, 2).empty()) {
-            if (to_int(param(p, 2)) != 0) retreat_off_.insert(upper(param(p, 1)));
-            else retreat_off_.erase(upper(param(p, 1)));
-        }
-    } else if (ty == "HIDE_AUTORESOLVE") hide_autoresolve_ = true;  // §5.3: no reader in retail
-    else if (ty == "USE_RETRY_DIALOG") retry_dialog_ = true;
-    else if (ty == "ACTIVATE_RETRY_DIALOG") retry_requested_ = true;
-    else if (ty == "ENABLE_GALACTIC_CORRUPTION_HOLOGRAM") {
-        if (!param(p, 1).empty()) {
-            if (flag(2, true)) hologram_.insert(upper(param(p, 1)));
-            else hologram_.erase(upper(param(p, 1)));
-        }
-    } else if (ty == "SHOW_SMUGGLE_SLOT" || ty == "HIDE_SMUGGLE_SLOT" || ty == "SHOW_RAID_SLOT" || ty == "HIDE_RAID_SLOT" ||
-               ty == "SHOW_STEAL_SLOT" || ty == "HIDE_STEAL_SLOT") {
-        const std::string slot = ty.find("SMUGGLE") != std::string::npos ? "SMUGGLE" : ty.find("RAID") != std::string::npos ? "RAID" : "STEAL";
-        if (!param(p, 1).empty()) {
-            const std::string key = upper(param(p, 1)) + "|" + slot;
-            if (ty.rfind("SHOW", 0) == 0) slots_.insert(key);
-            else slots_.erase(key);
-        }
-    } else if (ty == "SHOW_SPECIAL_SLOT") {
-        if (!param(p, 1).empty() && !param(p, 2).empty()) {
-            std::string slot = upper(param(p, 2));
-            if (slot.size() > 5 && slot.compare(slot.size() - 5, 5, "_SLOT") == 0) slot.resize(slot.size() - 5);
-            const std::string key = upper(param(p, 1)) + "|" + slot;
-            if (param(p, 3).empty() || to_int(param(p, 3)) != 0) slots_.insert(key);
-            else slots_.erase(key);
-        }
-    } else if (ty == "SELECT_PLANET") cam(StoryCameraCommand::Kind::SelectPlanet);
-    else if (ty == "ZOOM_IN") cam(StoryCameraCommand::Kind::ZoomIn);
-    else if (ty == "ZOOM_OUT") cam(StoryCameraCommand::Kind::ZoomOut);
-    else if (ty == "POSITION_CAMERA") cam(StoryCameraCommand::Kind::Position);
-    else if (ty == "SCROLL_CAMERA") cam(StoryCameraCommand::Kind::Scroll);
-    else if (ty == "PAUSE_GAME") cam(StoryCameraCommand::Kind::PauseGame);
-    else if (ty == "PAUSE_GALACTIC") cam(StoryCameraCommand::Kind::PauseGalactic);
-    else if (ty == "UNPAUSE_GALACTIC") cam(StoryCameraCommand::Kind::UnpauseGalactic);
-    else if (ty == "PAUSE_GALACTIC_GAME") {
-        if (!param(p, 1).empty() && to_int(param(p, 1)) == 0) cam(StoryCameraCommand::Kind::UnpauseGalactic);
-        else cam(StoryCameraCommand::Kind::PauseGalactic);
-    } else if (ty == "SET_ADVISOR") {
-        if (!param(p, 1).empty() && mode < 3) advisor_[mode] = to_int(param(p, 1)) != 0;
-    } else ok = false;
-    if (ok) ++handled_;
-    return ok;
+    return kHandlers;
+}
+
+// SHOW_ / HIDE_ SMUGGLE / RAID / STEAL _SLOT (§5.7): P1 planet; the slot is forced visible there (show) or not (hide).
+void StoryPresenter::force_slot(const RewardCall& c, std::string_view slot, bool show) {
+    if (param(c.p, 1).empty()) return;
+    const std::string key = upper(param(c.p, 1)) + "|" + std::string(slot);
+    if (show) slots_.insert(key);
+    else slots_.erase(key);
 }
 
 void StoryPresenter::remove_all_text() { lines_.clear(); }
@@ -391,7 +507,7 @@ const std::vector<StoryTextLine>& StoryPresenter::lines(double now) const {
 
 bool StoryPresenter::component_flashing(std::string_view component, double now) const {
     for (const StoryComponentFlash& f : flashes_)
-        if (f.component == component && now < f.until) return true;
+        if (f.component == component && now >= f.start && now < f.until) return true;  // ref5 t02: a held DUAL_FLASH step starts later
     return false;
 }
 
@@ -408,7 +524,7 @@ std::vector<std::string> StoryPresenter::take_forced_clicks() { return std::exch
 // ---- ref4 t01: save / read ----
 namespace {
 
-constexpr uint32_t kPresenterSaveVersion = 1;
+constexpr uint32_t kPresenterSaveVersion = 2;  // 2 (ref5 t02): + the DUAL_FLASH state at the end; 1 still reads
 
 void put_u32s(ByteWriter& w, std::u32string_view s) {
     w.u32(static_cast<uint32_t>(s.size()));
@@ -512,10 +628,13 @@ void StoryPresenter::write(ByteWriter& w, double now) const {
     put_set(w, hologram_);
     put_set(w, slots_);
     w.u64(handled_);
+    w.boolean(dual_.armed).f64(dual_.time).f64(dual_.rate);  // v2
+    put_list(w, dual_.held, [&](const DualHeld& d) { w.boolean(d.planet).str(d.target); });
 }
 
 bool StoryPresenter::read(ByteReader& r, double now) {
-    if (r.u32() != kPresenterSaveVersion || !r.ok()) return false;
+    const uint32_t version = r.u32();
+    if (version < 1 || version > kPresenterSaveVersion || !r.ok()) return false;
     StoryPresenter t;
     bool ok = get_list(r, t.lines_, 30, [&] {
         StoryTextLine l;
@@ -531,7 +650,7 @@ bool StoryPresenter::read(ByteReader& r, double now) {
     });
     ok = ok && get_list(r, t.arrows_, 19, [&] {
         StoryArrow a;
-        a.kind = get_enum(r, StoryArrow::Kind::MapObject);
+        a.kind = get_enum(r, StoryArrow::Kind::Unit);
         a.target = r.str();
         a.region = r.str();
         a.sub = r.i32();
@@ -627,6 +746,18 @@ bool StoryPresenter::read(ByteReader& r, double now) {
     }
     if (!get_set(r, t.retreat_off_) || !get_set(r, t.hologram_) || !get_set(r, t.slots_)) return false;
     t.handled_ = r.u64();
+    if (version >= 2) {
+        t.dual_.armed = r.boolean();
+        t.dual_.time = r.f64();
+        t.dual_.rate = r.f64();
+        if (!get_list(r, t.dual_.held, 5, [&] {
+                DualHeld d;
+                d.planet = r.boolean();
+                d.target = r.str();
+                return d;
+            }))
+            return false;
+    }
     if (!r.ok()) return false;
     t.hooks_ = std::move(hooks_);
     t.colors_ = colors_;

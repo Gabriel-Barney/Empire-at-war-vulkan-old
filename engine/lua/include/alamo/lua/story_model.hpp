@@ -353,6 +353,10 @@ public:
     size_t deliver_script_triggers(uint32_t plot, LuaVm& vm, std::string* err = nullptr);
 
     // ---- host reward hook ----
+    // ref5 t02: the Reward_Type names the model applies itself (exact, upper case), in registration order; the sim's coverage
+    // test checks them against its story reward table's Model rows.
+    static bool has_reward_handler(std::string_view name);
+    static std::vector<std::string_view> reward_names();
     // Called at Fire step 5 for rewards the model does not apply itself (CREDITS, SET_TECH_LEVEL,
     // LINK_TACTICAL, ...), before the dependants of the firing event are checked.
     std::function<void(uint32_t plot, uint32_t event, const std::string& type, const std::vector<StoryParam>& params)>
@@ -491,6 +495,28 @@ private:
     bool same_side(int32_t owner) const;  // FILTER "friendly": same faction (faction_of) / player
     bool tick_timer(StoryEventState& st, double threshold);
     void apply_reward(uint32_t p, uint32_t e);
+    // ref5 t02: the rewards the model applies itself, one handler per Reward_Type name (story_model.cpp reward_handlers()).
+    using RewardFn = void (StoryModel::*)(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    struct RewardHandler {
+        std::string_view name;
+        RewardFn fn;
+    };
+    static std::span<const RewardHandler> reward_handlers();
+    void reward_set_flag(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_increment_flag(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_add_objective(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_objective_state(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_update_objective(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_remove_objective(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_remove_all_objectives(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_trigger_event(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_reset_event(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_reset_branch(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_disable_branch(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_disable_story_event(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_story_element(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_remove_story_goal(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
+    void reward_story_goal_completed(uint32_t p, uint32_t e, const std::string& type, const std::vector<StoryParam>& rp);
     void call_script(uint32_t p, const std::string& name);
     void build_plot_order();
     StoryObjective* find_objective(std::string_view text);

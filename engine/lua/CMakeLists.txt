@@ -217,6 +217,7 @@ add_library(alamo_lua STATIC
   src/lua_vm.cpp
   src/gc_schedule.cpp
   src/bindings.cpp
+  src/bridge_hooks.cpp  # ref5 t04: the hook table (generated bridge_hooks.inc) and the wiring check
   src/bind_engine.cpp
   src/bind_registry.cpp
   src/bind_objects.cpp

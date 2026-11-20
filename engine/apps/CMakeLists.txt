@@ -507,6 +507,11 @@ if(_alamo_sim)
     alamo_add_worker_count_check(alamo_headless_skirmish_ai_foc_land_ai_lane
         COMMAND alamo_headless --skirmish-ai foc-land --ticks 3000 --quiet --ai-lane
         TIMEOUT 1800 SLOW)
+    # ref5 t06: the space battle too (skirmish production, the space drop search); alamo_headless exits 3 when AI lane code
+    # read the live battle (BattleAi::lane_live_read), so every --ai-lane test also checks that.
+    alamo_add_worker_count_check(alamo_headless_skirmish_ai_foc_ai_lane
+        COMMAND alamo_headless --skirmish-ai foc --ticks 3000 --quiet --ai-lane
+        TIMEOUT 1800 SLOW)
     if(TARGET alamo_anim)
       # A battle with the animation on (anim worlds of the galaxy and the battle mode).
       add_test(NAME alamo_headless_save_skirmish_anim

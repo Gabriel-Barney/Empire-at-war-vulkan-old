@@ -644,7 +644,8 @@ Read with REA (mcx6, 2026-11-17).
   - 0x2d5010 looks the event up by name (0x2d4750); unknown: "WARNING: Unable to find SFX event data for event name
     '%s'" and nothing plays.
 - No player test and no mode test (the local machine plays it, as SPEECH does). No sim state, no save, no draw.
-- **Implemented (mcx6):** ledger owner Ui: the game host plays the event from the fired reward (presentation).
+- **Implemented (mcx6):** ledger owner Ui: the game host plays the event from the fired reward (presentation). ref5 t02: the
+  media table (story_reward_media) turns it into an Sfx cue, which alamo_game plays as a 2-D UI sound (GameAudioHost::ui).
 
 
 ## 2. Tutorial rewards

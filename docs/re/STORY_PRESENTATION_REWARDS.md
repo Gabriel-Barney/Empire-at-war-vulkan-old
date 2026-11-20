@@ -201,6 +201,9 @@ P1 = duration (atof). Position = the event's own position vector (event +0x40). 
 with the 3D-arrow flag set, which also places the 3D arrow model (HUD +0x2278 object) at the world position. Works in
 tactical modes; no player test.
 
+Port (ref5 t02): StoryPresenter registers the reward but places nothing: the fired reward log (`lua::StoryFired`) does not
+carry the event's position [port]. No shipped story uses the reward.
+
 ### 2.4 FLASH_UNIT (0x32, RVA 0x2f5a50) [H]
 
 P1 = region name (enum REGION_NONE 0 / ORGANIZE 1 / PRODUCTION 2 / SELECTION 3; unknown name logs "Can't find
@@ -211,6 +214,9 @@ flashes it with an arrow (slot mechanism of 3.2):
 - SELECTION: s_select icons starting at id 0x109.
 Works in tactical modes (command bar); local HUD only.
 
+Port (ref5 t02): StoryPresenter takes an arrow slot of kind Unit (region and type kept; an unknown region does nothing); the
+host does not look the button up yet, so no arrow is drawn [port]. No shipped story uses the reward.
+
 ### 2.5 DUAL_FLASH (0x34) [H]
 
 P1 = time, P2 = rate (atof). Sets story manager +0x1d0 := 1 (armed), +0x1c8 := 0 (queued count), +0x1d8 := time,
@@ -218,6 +224,11 @@ P1 = time, P2 = rate (atof). Sets story manager +0x1d0 := 1 (armed), +0x1c8 := 0
 are stored in the manager's two entries (RVA 0x446180); when the second arrives, RVA 0x447000 alternates the two flashes
 at the given rate for the given time. HIDE_TUTORIAL_CURSOR clears the queue (+0x1c8 := 0, +0x1d0 := 0). Galactic and
 tactical HUD alike (it wraps the two flash rewards). [M for the alternation timing details]
+
+Port (ref5 t02): StoryPresenter holds the flash part of the next two FLASH_GUI / FLASH_PLANET_GUI rewards (their arrows are
+added at once [M]); the second starts the pair: the first, then the second, each for `rate` seconds, alternating until `time`
+seconds have passed, then the reward is disarmed [M]. A zero rate flashes the first for the whole time, a zero time disarms it and the flash runs as usual [port]; FLASH_PLANET_GUI regions that do not flash (PLANET, AFFILIATION, CREDITS, COINS) are not held [M]. HIDE_TUTORIAL_CURSOR
+drops the held flashes and disarms. The state is saved with the presenter (v2). No shipped story uses the reward.
 
 ## 3. GUI flash and pointer rewards, and the "flash id"
 
