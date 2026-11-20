@@ -114,6 +114,11 @@ Notes on the longer rows:
      / stop order (0x3abf80, one third of max speed).
   3. If the distance to the destination then exceeds BTTD, 0x623fe0 turns it toward the destination [M: so BTTD is the
      distance beyond which the unit turns toward its goal while slowing].
+  4. *mov3 t07 RE (2026-11-20, MOV2_RE_QUESTIONS Q5) [H]:* item 1 applies only when the destination's z is below
+     `Layer_Z_Adjust`, and the two tests run in turn (< BTTD, then > 2 × BTTD on the possibly reset z). Items 2-3 run
+     only when the target is more than 70° off the nose (`0x623450`); 0x623fe0 is a banked turn (bank ±`Bank_Turn_Angle`
+     by one synced LCG step, throttle 0.15) and 0x3abf80 is an attitude step at turn rate / 3, not a speed order. An
+     image-wide scan of SSE accesses at +0x3a8 finds no other type reader.
 - **`Snap_Movement_Orders_To_Center`.** For a position move order (order kind 1) in land mode, it scans **every object in
   the game mode's object list** (mode +0x48, count +0x68), not only the selection. It takes the nearest object whose type
   has the flag and whose distance to the order point is ≤ 0x397780(object) [M: the object's selection / footprint

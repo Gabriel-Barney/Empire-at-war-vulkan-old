@@ -877,8 +877,9 @@ Probe notes: `Spawn_Unit` moves a land unit off water cells (the MALs landed 80�
   Confuse, Earthquake and other immobilisations were not looked at; none of them is among the readers found.
 - **Over water [H for the comparison, M for the helper meanings].** Needs the scene's water type (+0x204,
   TERRAIN_WATER_POST: 0 none) ≠ 0 and **terrain height < water height − 0.5** (literal 0.5). Terrain height =
-  0x135140 at the object's X, Y: bilinear interpolation of the height grid (inferred from the grid indexing and
-  the four-sample blend). Water height = 0x136660 at the object's position: the scene's water plane height
+  0x135140 at the object's X, Y: bilinear interpolation of the height grid (*read, mov3 t08, 2026-11-20 [H]*: y
+  first on the two columns, then x; corner indices clamped on their own, so clamp to edge; not triangle-linear;
+  MOVEMENT §3.6, MOV2_RE_QUESTIONS Q6). Water height = 0x136660 at the object's position: the scene's water plane height
   (+0x200) by default; if the position lies inside a scene entry of kind 2 (entry +0x1a8 = 2, vertical ray test
   0x155d90) it is instead terrain height + that entry's +0x100 [M: read, but what a kind-2 entry is was not
   identified; inferred to be a local water patch]. The object's own Z is not used.

@@ -907,6 +907,13 @@ The box is the mode's box (vf +0x208): `.ted` `0x103` corners, ±6000 typical in
 - |v| is clamped to max speed, lateral velocity is damped toward forward (0.01, or 0.005 when aligned), and then v × `Mass` (+0x398) acts as a per-frame drag factor.
 - Z steps toward `Layer_Z_Adjust` (+0xdfc) by at most the vertical step getter (+0x3a0).
 - Arrival is within max(extent, 10) of (target XY, Layer_Z_Adjust).
+- *mov3 t07 RE (2026-11-20; MOV2_RE_QUESTIONS Q5) [H read]:* the fly step `0x622b80` is the **only reader of
+  `Begin_Turn_Towards_Distance`** (type +0x3a8, float; image-wide scan of SSE accesses at +0x3a8). Target more than
+  70° off the nose in yaw or pitch (`0x623450`) with `Bank_Turn_Angle` (+0x39c) and the roll rate set: 3-D distance
+  > BTTD → banked turn toward it (`0x623fe0`), else no turn-in this frame. Otherwise, when the target's z is below
+  `Layer_Z_Adjust`: |dz| < BTTD, then |dz| > 2·BTTD, each set the target z to `Layer_Z_Adjust`. No FoC type lists
+  STARSHIP_LOCOMOTOR (the 33 type entries that set the tag are `FIGHTER_LOCOMOTOR` / `FLYING_LOCOMOTOR`, which never
+  read +0x3a8), so **the field has no effect in FoC**.
 
 **Fighters** (vf6 `0x5cb830`) [M]:
 - States 0x1B Moving, 0x1C Idle, 0x1D Idle_Combat, 0x1E Directed_Combat, 0x1F Dead_Stop.
@@ -2073,6 +2080,17 @@ exact only for z = 0 paths and otherwise an approximation that is short on slope
     The T4B has no Movement_Directions_Count (1), so a 90 / 180 degree re-order is **not** aligned by this function -
     its 5 / 6 turns at speed are still unexplained (roadmap mov2 t09, a ReVa question: who else sets P +0x6d or keeps
     a T4B out of the 0x14 coast).
+  - **Correction (mov2 t09 RE, 2026-11-20, ReVa; `0x410170`, `0x371310`, `0x20b6d0`; MOV2_RE_QUESTIONS Q1) [H]:** the
+    sentence above is wrong. δ is wrapped to (−180°, 180°] and the test is |δ| ≤ R **or |δ| ≤ CE**, CE = type +0x16b4
+    when > 0, else GameConstants `CloseEnoughAngleForMoveStart` = **180** in FoC. So for every type that sets no
+    `Close_Enough_Angle_For_Move_Start` (the T4B included) any re-order angle is aligned once waypoint 0's speed
+    fraction is > 0 and the path has ≥ 2 points: `0x41c1a0` marks the new top path started in the same plan call,
+    and the unit keeps 0x13 and turns on the move. Only `AT_AT_Walker` / `Veers_AT_AT_Walker` (30) and
+    `SPMAT_Walker` (45) can fail on the angle. State gate: 0xf-0x16 and 0x21-0x23 test the angle, 0x24 is aligned,
+    other states are not. The plan destroys the old stack first (`0x554480`), and the push `0x554310` copies the new
+    record (`0x5c45d0`, +0x6d included) from the path it is given, so no old record or started byte is re-used. The one
+    straight-on brake fits a waypoint-0 fraction of 0 from the corner pass (D: at j = 0 only a passing corridor test
+    accepts the probe, and v falls to vmin = 0 or to 0) [M: fractions not recorded in the run].
 
 So with f_min = 0 (most units) each corner is slowed separately to v and never forced to 0 (a fraction of 0 comes
 only from failed probes); with f_min > 0 sharp corners on short legs are merged, and a corner slower than f_min ×
@@ -2192,6 +2210,12 @@ than one block, set the body yaw to Y2. Nothing else (start test, travel, collis
 ### 3.6 Terrain conform and commit (vf95 `0x42d6a0` → `0x42bb40`) [H]
 
 - z = terrain height at (x, y). If the movement mask contains Water, z = max(terrain, water plane): hover units ride the water.
+- *Terrain height `0x135140` / `0x135350` (mov3 t08 RE, 2026-11-20; MOV2_RE_QUESTIONS Q6) [H]:* **bilinear**, not
+  triangle-linear. i = floor(x·inv), j = floor(y·inv) (inv = heightmap +0xa0, the reciprocal of the spacing +0x9c);
+  tx, ty = the offsets from (i, j)·spacing × inv, taken before clamping; each of the four corner indices clamped on
+  its own to the grid (so outside it the result is the edge height); height = the vertex record's int16 × +0xa4.
+  Blend: along y on columns i and i + 1 first, then along x. `0x135350` returns the same height plus a normal blended
+  the same way. World (x, y) is used directly (vertex (i, j) at (i, j) × spacing).
 - If `Overall_Length` (+0x1a20) × scale > 0:
   - sample the ground at ±L/2 along the yaw, shortened by a passability ray (`0x5a4c10`);
   - pitch = atan of the height difference;
@@ -2275,6 +2299,17 @@ Both are 0xb8 bytes and are created per order by `0x426010`, appended in creatio
 1. **Seed.** The remaining member nearest the bucket centroid (`0x4f7060`); ties keep the earlier one in the vector.
 2. **Destination.** The clamped order point P (`0x583150`: the block's goal point, for an object goal the object's position, clamped to the playable box), **validated against the seed's zone** by `0x50f480`(P, the seed's position, the seed type's OccupationStyle, its MovementClass, 30) unless flag 0x20 is set. The rule is §4.3.1 item 7: P is kept when its cell is in the same zone as the seed's cell; otherwise it becomes the centre of the nearest-to-the-seed cell of the seed's zone on the first ring around P that has one. *(Corrected s78n t20: this said "validated as a passable cell"; the test is zone equality, not passability, and the result is used only for position goals.)* Locomotors that answer vf +0x240 use the position finder at `0x1409cf220` instead.
    - Validation fails (no such cell within 29 rings): the composition pass **returns at once**. Formations already made in this pass stay; this seed and every member not yet placed get no formation for this order, and the destination check of §4.3.1 is not run [H for the return, M for the effect].
+     *mov2 t06 RE (2026-11-20; `0x43c1b0`, `0x43e5b0`, `0x583680`; MOV2_RE_QUESTIONS Q3) [H unless tagged]:* the
+     effect is [H]: `0x43c1b0` frees its bucket vector and returns 0 (`0x14043d20f` → `0x14043d281`), skipping the
+     rest of this bucket and every later bucket; the caller `0x43e5b0` ignores the return value and builds one
+     formation per descriptor already made [M: what the unplaced units then do]. The same early return (value 1)
+     happens for a seed with no type, no locomotor or max speed 0. **Object goals are validated too** (only flag
+     0x20 skips it; no player or Lua move sets 0x20), and a failure ends the pass for them as for positions. Their P
+     is `0x583150` with the **seed** as viewer: the block's stored point when the object is fogged for the seed's
+     owner and that point is set; the seed's own position when the object is stealthed and the seed's type lacks
+     `Target_Stealth_Units`; else the hard point's position when the block names one; else (land, team-container
+     object) the member the seed's TARGETING picks (`0x566aa0`); else the object's position; clamped to the playable
+     box and z to ±5000.
    - Use: for a **position goal (block kind 1) without flag 0x20** whose validated point V differs from P, the formation's block is a fresh kind-1 block at V carrying only the order's flags word (+0x48); the order's final facing is not carried over (block +0x5c = 0) [H]. In every other case (V = P, an object goal, flag 0x20) the block is a copy of the order: for an object goal the validated point is thrown away.
 3. **Stagger** (`PathFrameDelay`, synced random), see §1.6.
 4. **Recruitment.** Only when the seed's `FormationGrouping` (+0x16a4) is not Solo. A candidate from the same bucket joins when all of these hold:
@@ -3133,7 +3168,8 @@ one unit swerved aside (up to ~40 units off the line) at full speed, the other s
 speed of 0.11 to 0.22 (below 0.5 for 13 to 40 frames) and then ran on at full speed; closest approach 31 to 40 units
 (centre to centre). (Each "a" unit came to rest ~50 short of its goal at the strip's far end in all four trials, also
 after the pair had passed: a goal-point effect of that spot, not a hold.) The port's s78n t25.4 seeds held a T4B at
-speed 0 for 166 / 232 frames (58 at most after the close-range fix) (roadmap mov2).
+speed 0 for 166 / 232 frames (58 at most after the close-range fix) (roadmap mov2). Explained by the binary (mov2
+t10 RE, 2026-11-20): §5.4.6, "Head-on vehicle pairs in retail".
 
 **There is no rigid-body physics.** Collision means detecting a future conflict along the planned paths and resolving it by behaviour.
 
@@ -3425,6 +3461,20 @@ along b).
    - Time is counted in whole frames (each dt truncated). Result: contact at elapsed + trunc(dt·s) < trunc(fps × T)
      (45 frames; 90 for a crusher pair). With both approximations empty of motion at the very start the result is
      the rectangle **overlap** `0x20d690` of the two footprints.
+   - *Correction (mov2 t11 RE, 2026-11-20; disassembly `0x140442898`, `0x140442c38`, `0x1404431ac`, `0x14044322f`)
+     [H]:* the step length is converted once, n = the low 32 bits of a 64-bit truncation of dt; the contact frame is
+     elapsed + trunc(float(n) × s) (n as unsigned), and a step without contact adds n to elapsed (unsigned compare
+     with the horizon). **A step whose dt is +inf counts as 0 frames**: the 64-bit conversion overflows to
+     0x8000000000000000, whose low half is 0. dt is +inf when the side that must move has an assumed speed of 0 (it
+     faces away and stands) while it still has approximation left after the other side's approximation has ended.
+     So a standing, facing-away unit's whole remaining approximation is swept, at no time cost, against the other's
+     end point: any touch there is "contact". When **both** assumed speeds are 0 (both face away, both stand), the
+     first step advances p1 by its segment and p0 by inf × 0 = NaN, which the advance `0x54ff50` refuses without
+     writing p0's end point; that end point keeps its reset value (0, 0, 0), so p0 is swept toward the world origin
+     [H read; M how often it matters]. A standing unit's radius is its side half extent (its motion vector is 0, so
+     the blend weight is 0). Overlapping start circles give contact at t = 0 (or at the exit time when the relative
+     motion leaves the overlap inside the step), so two overlapping footprints with one unit facing the other report
+     contact every frame (MOV2_RE_QUESTIONS Q4).
 4. **Slave-speed touch** (`0x67f130`, §5.4.2): gap(rect x, rect y) = 0.
 5. **Destination tests** (`0x684710`, `0x685e10`, §5.4.1): rectangle overlap of the mover's rectangle placed at the
    tested point against each stopped unit's rectangle; `0x685e10` uses half extents (hx + 5, hy) turned along the
@@ -4364,6 +4414,29 @@ driver (at once for a mode-0 result, under quota for a set-up, §5.4.1 "The stam
   state 1 / 4, deciding at once inside the stamped service (no free fold), keeping the held answer while the
   record is in state 0, or not stamping a re-push of the same detour. Retail re-stamps on **every** push onto H,
   including a re-decided record's fresh detour onto its D.
+- **A static ring whose links are not all hold lines (mov2 t11 RE, 2026-11-20; MOV2_RE_QUESTIONS Q4) [H per step, M
+  for the long-run outcome].** The walking stamp above needs every link to be a detour push. A cycle closed by other
+  links has **no breaker in retail**. Example (port trace, TM05_IMPERIAL_POLICY): A = state 1 with M held on its line;
+  B = state 1 with M **before** its line, answered the slave speed `0x67f590` → `0x67f130` against a standing S;
+  C = state 6 with touching footprints (S answered vmin, flag S). With `Min_Speed` 0, `0x67f130` against a standing
+  unit is vmax·k with k = clamp((gap / closing − v / dec) / 45), which stays > 0 while the gap is > 0, so B's M creeps
+  geometrically and never touches; C's predictor (the standing, facing-away M is projected standing, the facing S at
+  max speed; overlapping start circles → contact) says contact every frame; state 6 is never stamped; starvation
+  (`0x681d30`) runs only from states 2 and 14; validity holds; the speed fold and the Walk controller have no floor
+  and no stuck counter; detection skips paired units. So retail holds too, for ever. Breakers that would exist: a
+  type `Min_Speed` > 0 (at gap 0 with y not moving away `0x67f130` answers vmin, not 0, so the creeper drives on); a
+  re-run of the state-6 record that turns into Pass (step 4's overtake test, when the slaved unit is behind the other
+  along its facing); a relation 2 from p0's cap (p0 held elsewhere) that turns it into state 1.
+- **Head-on vehicle pairs in retail (mov2 t10 RE, 2026-11-20; MOV2_RE_QUESTIONS Q2; the measurement is §5.1)
+  [H per rule, M that it holds for every speed].** Decided as state 1 (relation 4); S (the lower class; T4B / T4B:
+  by the member-0 ids) detours at its full speed (`0x5c69f0`); M runs on the slave speed `0x67f130` (S closing:
+  vmax·τ / 45 for types without `Min_Speed`, no floor) and is held at 0 only at or past a **pending** hold line.
+  That line is the tagged corner of S's detour minus (hx_M + hx_S) along a_M, and the corner belongs to M's swept box
+  (stretched by L = clamp((d − r_S − r_M) / closing, 0, 45 frames) × M's max speed, §1.5.1 item 3), so it lies about
+  L ahead of M; S passes the corner first, after which the line is no longer pending (`0x680510`) and M is never
+  held. This is the measured "one swerves at full speed, the other slows to 0.11 - 0.22 and runs on" (the low is
+  vmax·τ / 45 with τ of a few frames while S swerves at the detour's clearance). A cap never moves the Walk state off
+  0x13 (§3.5.2 B.6).
 
 **State 2 service: the chooser re-run reads the record's own stale answer (s78n t23 RE 2, 2026-11-10;
 `0x6814f0` case 2 `0x681554`…`0x681658`, case 6 `0x6818cc`…`0x6819e9`, `0x67f7b0`, `0x679750`, `0x509ea0`,
