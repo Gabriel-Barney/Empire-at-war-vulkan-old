@@ -2452,13 +2452,15 @@ void test_blast_cap() {
     CHECK(w.blast_max_victims == 2 && w.lobbed && w.category == tactical::combat::ProjectileCategory::Grenade);
     CHECK(w == d->catalog->projectile_desc(cap));
     // Strike path: a fresh build appends the type with the same desc and its visuals; a type a unit already fires keeps
-    // its entry; a type without Max_Speed gets the 20 fallback through either path.
+    // its entry.
     BattleTables a;
     const auto ba = d->catalog->begin_battle(a, false);
     const int32_t ia = d->catalog->extend_projectile(*ba, cap);
     CHECK(ia == 0 && a.combat.projectiles.size() == 1 && a.projectiles.size() == 1 && a.combat.projectiles[0] == w);
     const int32_t is = d->catalog->extend_projectile(*ba, slow);
-    CHECK(is == 1 && a.combat.projectiles[1].max_speed == 20.0f && a.projectiles.size() == 2);
+    // (a type without Max_Speed reads the type default 0.25, kDefaults, the same through either path)
+    CHECK(is == 1 && a.combat.projectiles[1] == d->catalog->projectile_desc(slow) && a.combat.projectiles[1].max_speed > 0.0f &&
+          a.projectiles.size() == 2);
     BattleTables b;
     const auto bb = d->catalog->begin_battle(b, false);
     std::vector<uint32_t> idx2;
