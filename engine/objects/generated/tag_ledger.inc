@@ -2601,7 +2601,7 @@
 {"HardwareConfiguration", "FillRateMpsPS14", 0xa, LedgerState::OutOfScope, "docs/DECISIONS.md \"Out-of-scope tag-ledger rows\": hardware detection", 3, 1},
 {"HardwareConfiguration", "FillRateMpsPS20", 0xa, LedgerState::OutOfScope, "docs/DECISIONS.md \"Out-of-scope tag-ledger rows\": hardware detection", 3, 1},
 {"HardwareConfiguration", "VertexRateMvsVS11", 0xa, LedgerState::OutOfScope, "docs/DECISIONS.md \"Out-of-scope tag-ledger rows\": hardware detection", 3, 1},
-{"HardwareConfiguration", "Additional_Garrison_Units", 0x1e, LedgerState::Unread, "docs/re/BATTLE_TRANSITIONS.md", 4, 1},
+{"HardwareConfiguration", "Additional_Garrison_Units", 0x1e, LedgerState::Consumed, "docs/re/BATTLE_TRANSITIONS.md", 4, 1},
 {"HardwareConfiguration", "Apply_To_All_Allies", 0x0, LedgerState::Misfiled, "docs/re/XML_FIELD_TABLE_SEGMENTS.md: really Garrison_Upgrade_Ability and other abilities (read in engine/tactical/abilities/src/ability_data.cpp)", 46, 1},
 {"HardwareConfiguration", "Type", 0x49, LedgerState::Misfiled, "docs/re/XML_FIELD_TABLE_SEGMENTS.md: really the ability Type (read in engine/tactical/abilities/src/ability_data.cpp)", 1606, 1},
 {"Unit_Ability", "Active_By_Default", 0x0, LedgerState::Consumed, "docs/re/ABILITIES_HARDPOINTS.md", 2, 1},

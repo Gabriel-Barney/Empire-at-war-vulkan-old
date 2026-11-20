@@ -2250,6 +2250,44 @@ float TacticalBattle::skirmish_land_unit_cap(int32_t player) const {
     return rules_->faction(galaxy_->players()[static_cast<size_t>(player)].faction).unit_cap_for_players(static_cast<float>(count));
 }
 
+objects::TypeIndex TacticalBattle::bt_skirmish_preplaced(const objects::ObjectStore& st, objects::ObjectHandle ph) const {
+    const objects::GameObjectTypes& types = catalog_->types();
+    if (!st.active(ph) || !st.has_behavior(ph, pad_behavior()) ||
+        !types.get(st.type(ph), objects::tags::Respects_Skirmish_Pre_Build_Bases_Option))
+        return objects::kNone;
+    const int32_t owner = st.owner(ph);
+    if (owner < 0 || skirmish_slot_of(owner) < 0) return objects::kNone;  // skm2 t02: every slot
+    if (pad_contents(st.id(ph)) != objects::kNoObjectId) return objects::kNone;
+    const uint32_t f = galaxy_->players()[static_cast<size_t>(owner)].faction;
+    if (f >= galaxy_->rules().factions.size()) return objects::kNone;
+    const std::string& faction = galaxy_->rules().factions[f].name;
+    objects::TypeIndex uc = objects::kNone;
+    bool in_row = false;
+    for (const std::string_view tok : types.get(st.type(ph), pad_list_tag())) {
+        const objects::TypeIndex x = types.raw().find(tok);
+        if (x == objects::kNone || x >= types.size()) {
+            in_row = iequal_trim(tok, faction);
+            continue;
+        }
+        if (in_row && uc == objects::kNone && types.has_behavior(x, objects::BehaviorSet::Union, uc_behavior())) uc = x;
+    }
+    return uc;
+}
+
+void TacticalBattle::bt_skirmish_pad_sell(const objects::ObjectStore& st) {
+    // tru3 t06 (SKIRMISH_SETUP 2.6, ABILITIES_HARDPOINTS §4.15 "Build pads" [H]): pad vf13 0x42df80 in a skirmish whose
+    // pre-built-bases option (flag 0x8) is off plays Pad_Sell (0x75; 0xFFFF, one-shot, blend 0, speed 1) on each empty pad
+    // that holds a pre-placed type, instead of building it. [port] The pads' AnimWorld rows exist from the first tick
+    // (not at map load), so the battle plays it in the first tick's animation service (r3h [port] (5): index 0). The pads
+    // are found again here (stateless: a save loaded before the first tick plays it as the unbroken run does).
+    if (frame_ != 1 || !skirmish_land() || !cfg_.skirmish_options.set || cfg_.skirmish_options.prebuilt_base) return;
+    if (pad_behavior() == objects::kNoBehavior || uc_behavior() == objects::kNoBehavior) return;
+    for (const objects::ObjectHandle ph : st.all_objects())
+        if (bt_skirmish_preplaced(st, ph) != objects::kNone) {
+            play_battle_clip(st.id(ph), 0x75, false, 1.0f, 0.0f);
+        }
+}
+
 void TacticalBattle::bt_skirmish_base(TacticalMode& mode) {
     // SKIRMISH_SETUP 2.6 [H]: pad vf13 0x42df80 creates the pad's map-saved pre-placed type (data pack +0x18) for the pad owner at
     // the build bone with the pad orientation (an under-construction type -> its Tactical_Buildable_Constructed), in skirmish only
@@ -2265,28 +2303,14 @@ void TacticalBattle::bt_skirmish_base(TacticalMode& mode) {
     objects::ObjectStore& st = mode.primary();
     std::vector<objects::ObjectHandle> pads;
     // skm1 t02: the option flag 0x8 off (BattleConfig::skirmish_options) - no pad pre-builds (every skirmish pad respects it or
-    // is skipped here).
+    // is skipped here); tru3 t06: those pads play Pad_Sell instead (bt_skirmish_pad_sell, at the first tick).
     const bool prebuild = !cfg_.skirmish_options.set || cfg_.skirmish_options.prebuilt_base;
     for (const objects::ObjectHandle h : st.all_objects())
         if (prebuild && st.active(h) && st.has_behavior(h, pad_behavior()) && types.get(st.type(h), objects::tags::Respects_Skirmish_Pre_Build_Bases_Option))
             pads.push_back(h);
     for (const objects::ObjectHandle ph : pads) {
         const int32_t owner = st.owner(ph);
-        if (owner < 0 || skirmish_slot_of(owner) < 0) continue;  // skm2 t02: every slot
-        if (pad_contents(st.id(ph)) != objects::kNoObjectId) continue;
-        const uint32_t f = galaxy_->players()[static_cast<size_t>(owner)].faction;
-        if (f >= galaxy_->rules().factions.size()) continue;
-        const std::string& faction = galaxy_->rules().factions[f].name;
-        objects::TypeIndex uc = objects::kNone;
-        bool in_row = false;
-        for (const std::string_view tok : types.get(st.type(ph), pad_list_tag())) {
-            const objects::TypeIndex x = types.raw().find(tok);
-            if (x == objects::kNone || x >= types.size()) {
-                in_row = iequal_trim(tok, faction);
-                continue;
-            }
-            if (in_row && uc == objects::kNone && types.has_behavior(x, objects::BehaviorSet::Union, uc_behavior())) uc = x;
-        }
+        const objects::TypeIndex uc = bt_skirmish_preplaced(st, ph);
         if (uc == objects::kNone) continue;
         const objects::TypeIndex ft = types.resolve_name(types.get(uc, objects::tags::Tactical_Buildable_Constructed));
         if (ft == objects::kNone || ft >= types.size() ||

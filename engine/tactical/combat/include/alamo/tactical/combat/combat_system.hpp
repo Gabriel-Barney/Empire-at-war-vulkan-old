@@ -1555,11 +1555,13 @@ public:
     void remove_base_power(int32_t player, ObjectId source);  // every entry of `source` for the player
     bool has_base_power(int32_t player) const;
     // ---- tru1 t02: base shields (docs/re/TRU1_A_RE_ANSWERS.md) ----
-    // Base_Shield_Upgrade (A1 step 6): per player a list of entries keyed by the source (Battlefield_Modifier_Ability
-    // with Base_Shield_Upgrade); "upgraded" = the list is non-empty. An upgraded active shield stops every hostile
-    // projectile, not only Projectile_Does_Shield_Damage ones (A5).
-    void add_base_shield_upgrade(int32_t player, ObjectId source);
-    void remove_base_shield_upgrade(int32_t player, ObjectId source);
+    // Base_Shield_Upgrade (A1 step 6): per player a list of entries keyed by the source object and the ability's name
+    // CRC (Battlefield_Modifier_Ability with Base_Shield_Upgrade); "upgraded" = the list is non-empty. tru3 t03 (A1 step 6,
+    // apply 0x6f02c0 / remove 0x6f13b0 [H]): the add appends without a duplicate test, the remove deletes every entry
+    // with that key. An upgraded active shield stops every hostile projectile, not only Projectile_Does_Shield_Damage
+    // ones (A5).
+    void add_base_shield_upgrade(int32_t player, ObjectId source, uint32_t ability_crc = 0);
+    void remove_base_shield_upgrade(int32_t player, ObjectId source, uint32_t ability_crc = 0);
     bool base_shield_upgraded(int32_t player) const;  // the player's list is non-empty
     // A base-shield generator whose shield is on (state 1). False for other objects.
     bool base_shield_active(ObjectId id) const;
@@ -2301,7 +2303,12 @@ private:
     // ---- OI abilities ----
     std::vector<SurvivorEvent> survivor_events_;
     std::vector<std::pair<int32_t, ObjectId>> base_power_;  // (player, source), insertion order
-    std::vector<std::pair<int32_t, ObjectId>> shield_upgrade_;  // tru1 t02: (player, source), insertion order
+    struct ShieldUpgrade {  // tru1 t02 / tru3 t03: one Base_Shield_Upgrade entry
+        int32_t player;
+        ObjectId source;
+        uint32_t crc;  // the ability's name CRC (the key's second half)
+    };
+    std::vector<ShieldUpgrade> shield_upgrade_;  // insertion order
     std::vector<uint32_t> bshields_;  // tru1 t02: the shield list (live, not Always_Off), unit order; rebuilt each tick
     std::vector<BaseShieldSetState> bshield_sets_;  // r3h t06: this tick's Set_State calls (base_shield_set_states)
     std::vector<Repairer> repairs_;
@@ -2314,6 +2321,7 @@ private:
     void service_repairs(Unit& u, uint32_t frame);
     // ---- tru1 t02: base shields (base_shield.cpp) ----
     void service_base_shields(uint32_t frame);
+    void clear_removed_base_shields();  // tru3 t04: after flush() removed units (signal 0x28)
     // trn1 (surface_fx.cpp): the cover term of Get_Damage_Multiplier and the SURFACE_FX service.
     float cover_factor(const Unit& victim) const;
     void service_surface_fx(uint32_t frame);

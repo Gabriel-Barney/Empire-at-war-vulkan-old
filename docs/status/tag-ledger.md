@@ -16,7 +16,7 @@ the field belongs to another class that the port reads, `docs/re/XML_FIELD_TABLE
 `stored` tag that a mod sets is an
 honour gap in `alamo_mod_check` report v4. Work order (§7.2): tier 1 with the most corpus mods, then base FoC uses.
 
-Totals: 2866 rows; unread 96, stored 263, consumed 1964, verified 321, retail-unused 146, out-of-scope 70, misfiled 6.
+Totals: 2866 rows; unread 95, stored 263, consumed 1965, verified 321, retail-unused 146, out-of-scope 70, misfiled 6.
 
 ## Per class
 
@@ -46,7 +46,7 @@ Totals: 2866 rows; unread 96, stored 263, consumed 1964, verified 321, retail-un
 | Movie | 17 | 2 | 0 | 13 | 2 | 0 | 0 | 0 |
 | Difficulty_Adjustment | 15 | 1 | 0 | 13 | 1 | 0 | 0 | 0 |
 | GraphicDetailLevel | 15 | 0 | 0 | 1 | 0 | 0 | 14 | 0 |
-| HardwareConfiguration | 15 | 1 | 0 | 0 | 0 | 0 | 12 | 2 |
+| HardwareConfiguration | 15 | 0 | 0 | 1 | 0 | 0 | 12 | 2 |
 | Attack_Action | 14 | 0 | 0 | 5 | 8 | 1 | 0 | 0 |
 | Destroy_Unit | 14 | 0 | 0 | 14 | 0 | 0 | 0 | 0 |
 | RadarMapSettings | 14 | 7 | 0 | 7 | 0 | 0 | 0 | 0 |
@@ -195,7 +195,6 @@ base-FoC parity gaps as well as mod gaps (`mcx4`).
 | GameObjectType | Reinforcement_Region_Blob_Name | 0x17 | stored | 4 | docs/re/MCX4_T15_RE_ANSWERS.md |
 | GameObjectType | Shield_Normal_Color | 0x11 | stored | 4 | docs/re/TRU1_A_RE_ANSWERS.md |
 | GameObjectType | Tread_Scroll_Rate | 0x8 | stored | 4 | docs/re/MCX4_T15_RE_ANSWERS.md |
-| HardwareConfiguration | Additional_Garrison_Units | 0x1e | unread | 4 | docs/re/BATTLE_TRANSITIONS.md |
 | Faction | Alternate_Icon_Prefix | 0x17 | unread | 3 | docs/re/MCX4_T14_RE_ANSWERS.md |
 | Faction | Bombardment_Blob_Size | 0x8 | unread | 3 | docs/re/HUD_GAPS.md |
 | Faction | Bombardment_Shadow_Blob_Material_Name | 0x17 | unread | 3 | docs/re/MCX4_T15_RE_ANSWERS.md |
@@ -646,7 +645,7 @@ Per class: `Tag` (state, consumer files; x = retail-unused, o = out-of-scope, f 
 - **Grenade_Attack_Ability**: `Requires_Direct_Player_Command` (c 1), `Grenade_Type` (c 1), `Grenade_Toss_Anim` (c 1), `Grenade_Spawn_Frame` (c 1), `Grenade_Spawn_Bone` (s), `Grenade_Explode_Timer_In_Secs` (c 1), `Destroy_Starbase` (s), `Destroy_Land_Base` (s)
 - **Hack_Ability**: `Lightning_Source_Bone_Name` (s), `Lightning_Target_Bone_Name` (s), `Lightning_Max_Targets` (c 1), `Lightning_Targets_Radius` (c 1), `Team_Member_With_Ability` (v 2)
 - **HardPoint**: `Is_Targetable` (c 1), `Is_Destroyable` (c 2), `Health` (c 2), `Model_To_Attach` (c 2), `Attachment_Bone` (c 2), `Collision_Mesh` (c 1), `Damage_Decal` (c 1), `Damage_Particles` (c 1), `Engine_Particles` (c 1), `Tooltip_Text` (x), `Fire_Bone_A` (c 1), `Fire_Bone_B` (c 1), `Randomize_Between_Fire_Bones` (c 1), `Fire_Cone_Width` (c 1), `Fire_Cone_Height` (c 1), `Fire_Projectile_Type` (c 1), `Fire_Min_Recharge_Seconds` (c 1), `Fire_Max_Recharge_Seconds` (c 1), `Fire_Pulse_Count` (c 1), `Fire_Pulse_Delay_Seconds` (c 1), `Fire_Range_Distance` (c 1), `Fire_SFXEvent` (c 1), `Fire_Inaccuracy_Distance` (c 1), `Fire_Category_Restrictions` (c 1), `Fire_When_Deployed` (c 1), `Fire_When_Undeployed` (c 1), `Fire_When_In_Rocket_Attack_Mode` (c 1), `Fire_When_In_Normal_Attack_Mode` (c 1), `Death_Explosion_Particles` (c 1), `Death_Explosion_SFXEvent` (c 1), `Death_Breakoff_Prop` (c 1), `Defend_Mode_Weapon_Delay_Multiplier` (v 1), `Turbo_Mode_Weapon_Delay_Multiplier` (u), `Fire_Min_Range_Distance` (c 2), `Allow_Opportunity_Fire_When_Idle` (v 1), `Allow_Opportunity_Fire_When_Targeting` (v 1), `Fighter_Bay_Flyout_Distance` (c 1), `Special_Ability_Name` (c 2), `Repair_Cost_Per_Frame` (c 1), `Repair_Amount_Per_Frame` (c 1), `Projectile_Damage` (c 1), `Damage_Type` (c 2), `Projectile_Appearance_Delay_Frames` (v 1), `Power_To_Weapons_Mode_Weapon_Delay_Multiplier` (v 1), `Full_Salvo_Weapon_Delay_Multiplier` (v 1), `Fire_When_In_Defend_Mode` (u), `Fire_When_In_Turbo_Mode` (u), `Fire_When_In_Power_To_Weapons_Mode` (v 1), `Engine_Death_Hide_Engine_Particles` (c 1), `Is_Turret` (c 1), `Turret_Rest_Angle` (c 1), `Turret_Rotation_Offset` (c 1), `Turret_Rotate_Speed` (c 1), `Turret_Rotate_Extent_Degrees` (c 1), `Turret_Elevate_Extent_Degrees` (c 1), `Turret_Bone_Name` (u), `Barrel_Bone_Name` (u), `Requires_Manual_Target_Assignment` (c 1), `Manual_Hardpoint_Firing_Cooldown_Secs` (u), `Allows_Special_Weapon_Use` (c 1), `Blast_Ability_Fire_Projectile_Type` (c 1), `Text_ID` (c 2)
-- **HardwareConfiguration**: `DefaultGraphicDetailLevel` (o), `GraphicDetailSettingName` (o), `CPUSpeed` (o), `TextureMemory` (o), `PixelShaderVersionHEX` (o), `VertexShaderVersionHEX` (o), `VendorIDHEX` (o), `DeviceIDListHEX` (o), `FillRateMpsPS13` (o), `FillRateMpsPS14` (o), `FillRateMpsPS20` (o), `VertexRateMvsVS11` (o), `Additional_Garrison_Units` (u), `Apply_To_All_Allies` (f), `Type` (f)
+- **HardwareConfiguration**: `DefaultGraphicDetailLevel` (o), `GraphicDetailSettingName` (o), `CPUSpeed` (o), `TextureMemory` (o), `PixelShaderVersionHEX` (o), `VertexShaderVersionHEX` (o), `VendorIDHEX` (o), `DeviceIDListHEX` (o), `FillRateMpsPS13` (o), `FillRateMpsPS14` (o), `FillRateMpsPS20` (o), `VertexRateMvsVS11` (o), `Additional_Garrison_Units` (c 1), `Apply_To_All_Allies` (f), `Type` (f)
 - **HeroUnit**: `Holster_Weapon_Bone_Name` (c 1), `Holster_Drawn_Bone_Translation` (s), `Holster_Holstered_Bone_Translation` (s), `Holster_Transition_Time_In_Secs` (c 1), `Holster_Minimum_Drawn_Time_In_Secs` (c 1), `Holster_Disable_Engine_Loops` (c 1)
 - **Hero_Clash**: `Clash_Type` (c 1), `Clash_Range` (c 1), `Involved_Hero_Types` (c 1), `Play_Conversation_Events` (c 1), `Combat_Distance` (c 1), `Damage_Amount` (c 2), `Damage_Percentage` (c 2), `First_Hero_Damage_Multiplier` (c 1), `Second_Hero_Damage_Multiplier` (c 1), `First_Hero_Win_Exchange_Chance` (c 1), `Second_Hero_Win_Exchange_Chance` (c 1), `First_Hero_Type` (c 1), `First_Hero_Win_Anim_Type` (c 1), `First_Hero_Lose_Anim_Type` (c 1), `First_Hero_Draw_Anim_Type` (c 1), `First_Hero_Conversation_Anim_Type` (c 1), `Second_Hero_Type` (c 1), `Second_Hero_Win_Anim_Type` (c 1), `Second_Hero_Lose_Anim_Type` (c 1), `Second_Hero_Draw_Anim_Type` (c 1), `Second_Hero_Conversation_Anim_Type` (c 1), `First_Hero_Win_Speech` (c 1), `Second_Hero_Win_Speech` (c 1), `Clash_Actions` (c 1)
 - **Income_Stream_Ability**: `Base_Income_Value` (c 1), `Base_Interval_In_Secs` (c 1), `Owner_Income_Percentage` (v 1), `Split_Income_With_Allies` (c 1), `Split_Favors_Owner` (v 1), `Full_Amount_To_Everyone` (v 1)

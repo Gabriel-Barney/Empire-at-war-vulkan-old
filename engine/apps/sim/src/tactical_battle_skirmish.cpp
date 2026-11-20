@@ -114,6 +114,24 @@ void TacticalBattle::sk_garrison_setup() {
     }
 }
 
+void TacticalBattle::sk_garrison_upgrade(int32_t player, const std::vector<int32_t>& types, bool add) {
+    // tru3 t05 (SKIRMISH_SETUP §2.4 [H]): apply 0x6ffc60 appends each Additional_Garrison_Units type to player +0x2a8, the
+    // list the re-delivery 0x287e70 copies into its pending list; remove 0x6ffe30 erases one occurrence of each type
+    // (the first, 0x474a0), a start-force entry of the same type included.
+    for (SkGarrison& g : sk_garrisons_) {
+        if (g.player != player) continue;
+        for (const int32_t t : types) {
+            if (t < 0) continue;
+            const auto ut = static_cast<uint32_t>(t);
+            if (add) {
+                g.types.push_back(ut);
+            } else if (const auto it = std::find(g.types.begin(), g.types.end(), ut); it != g.types.end()) {
+                g.types.erase(it);
+            }
+        }
+    }
+}
+
 void TacticalBattle::sk_garrison_tick() {
     for (SkGarrison& g : sk_garrisons_) {
         if (!g.ids.empty() && g.timer < 0 && g.pending.empty()) {

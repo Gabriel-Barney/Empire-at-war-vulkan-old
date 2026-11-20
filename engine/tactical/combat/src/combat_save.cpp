@@ -48,7 +48,7 @@ using save_io::put_vec3;
 
 namespace {
 
-constexpr uint32_t kCombatSaveVersion = 18;  // 2: refix t02 INFECTION state, refix t03 death clone key; 3: refixf t01 rockets;
+constexpr uint32_t kCombatSaveVersion = 19;  // 2: refix t02 INFECTION state, refix t03 death clone key; 3: refixf t01 rockets;
                                              // 4: refixf t06 attack goal / weapon aim / order lock; 5: refixf t06 scan
                                              // target hardpoint (auto_hp); 6: a1g t03 damage event hull_lost; 7: S8 t04
                                              // grenade flight / sticky state; 8: S8 t06 stuck_offset in the parent's frame
@@ -65,7 +65,8 @@ constexpr uint32_t kCombatSaveVersion = 18;  // 2: refix t02 INFECTION state, re
                                              // Base_Shield_Upgrade list, tru1 t08 hit event ground /
                                              // commanded flags; 17: trn1 t02 SurfaceFX instance
                                              // state + terrain damage timer; 18: r1b t10 hardpoint turret pose
-                                             // and last aim. Only the current version is read (cu6).
+                                             // and last aim; 19: tru3 t03 Base_Shield_Upgrade entry
+                                             // key adds the ability CRC. Only the current version is read (cu6).
 constexpr uint32_t kWeatherSaveVersion = 1;
 constexpr uint32_t kNoIndex = 0xFFFFFFFFu;
 
@@ -212,7 +213,7 @@ void CombatSystem::write(ByteWriter& w) const {
     w.u32(static_cast<uint32_t>(base_power_.size()));
     for (const auto& [pl, src] : base_power_) w.i32(pl).i32(src);
     w.u32(static_cast<uint32_t>(shield_upgrade_.size()));  // tru1 t02 (v16)
-    for (const auto& [pl, src] : shield_upgrade_) w.i32(pl).i32(src);
+    for (const ShieldUpgrade& e : shield_upgrade_) w.i32(e.player).i32(e.source).u32(e.crc);  // tru3 t03 (v19): + crc
     w.u32(static_cast<uint32_t>(repairs_.size()));
     for (const Repairer& rp : repairs_) w.i32(rp.unit).u32(rp.hp).i32(rp.player);
     w.u32(static_cast<uint32_t>(team_heads_.size()));
@@ -526,11 +527,12 @@ bool CombatSystem::read(ByteReader& r) {
         pl = r.i32();
         src = r.i32();
     }
-    if (!r.count(n, 8)) return false;  // tru1 t02 (v16)
-    std::vector<std::pair<int32_t, ObjectId>> shield_upgrade(n);
-    for (auto& [pl, src] : shield_upgrade) {
-        pl = r.i32();
-        src = r.i32();
+    if (!r.count(n, 12)) return false;  // tru1 t02 (v16), tru3 t03 (v19)
+    std::vector<ShieldUpgrade> shield_upgrade(n);
+    for (ShieldUpgrade& e : shield_upgrade) {
+        e.player = r.i32();
+        e.source = r.i32();
+        e.crc = r.u32();
     }
     if (!r.count(n, 12)) return false;
     std::vector<Repairer> repairs(n);

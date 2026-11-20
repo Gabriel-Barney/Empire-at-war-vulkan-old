@@ -384,6 +384,7 @@ void TacticalBattle::drive_animation(objects::ObjectStore& store, SimRng& rng, u
         r.start_frame = c->clip->fps / static_cast<float>(anim::kSimTicksPerSecond) * r.speed;
         if (w->play(ps.uc, r, nullptr, gframe) == anim::PlayResult::Played) ++stats_.anim_plays;
     }
+    bt_skirmish_pad_sell(st);  // tru3 t06: a skirmish start without pre-build plays Pad_Sell on the pre-placed pads
     // The default idle type's presence step (0x395920 step 2): among the records whose object still exists the largest
     // value wins; on <= an allied record (0x2823e0) replaces a non-allied best (ascending presence id); the idle = the
     // first Presence_Induced_Animations entry of the unit's type listing the winner's type, else none (the plain idle).
@@ -1604,12 +1605,16 @@ void TacticalBattle::hash(StateHasher& h) const {
         h.u32(static_cast<uint32_t>(rt_.list.size()));
         for (const objects::ObjectId id : rt_.list) h.i32(static_cast<int32_t>(id));
     }
-    for (const SkGarrison& g : sk_garrisons_)  // skm1 t07: a slot's re-delivery once armed (absent before)
+    for (const SkGarrison& g : sk_garrisons_) {  // skm1 t07: a slot's re-delivery once armed (absent before)
         if (g.ids.empty()) {
             h.i32(g.player);
             h.i32(g.timer);
             h.u32(static_cast<uint32_t>(g.pending.size()));
         }
+        // tru3 t05 review: the type list a Garrison_Upgrade_Ability changes during play (re-delivered later)
+        h.u32(static_cast<uint32_t>(g.types.size()));
+        for (const uint32_t t : g.types) h.u32(t);
+    }
     if (vm_cp_armed_) {  // ccpgt t02: the domination timer (absent while not armed)
         h.i32(vm_cp_timer_);
         h.i32(vm_cp_player_);

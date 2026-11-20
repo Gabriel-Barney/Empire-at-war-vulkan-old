@@ -25,23 +25,24 @@ constexpr float kDomeHeight = 0.3f;           // A5: top of the dome about 0.3 R
 
 }  // namespace
 
-void CombatSystem::add_base_shield_upgrade(int32_t player, ObjectId source) {
-    for (const auto& [pl, src] : shield_upgrade_)
-        if (pl == player && src == source) return;
-    shield_upgrade_.emplace_back(player, source);
+void CombatSystem::add_base_shield_upgrade(int32_t player, ObjectId source, uint32_t ability_crc) {
+    // tru3 t03 (A1 step 6, apply 0x6f02c0 [H]): a list node per call, keyed by (source object, ability name CRC); no
+    // duplicate test.
+    shield_upgrade_.push_back(ShieldUpgrade{player, source, ability_crc});
 }
 
-void CombatSystem::remove_base_shield_upgrade(int32_t player, ObjectId source) {
+void CombatSystem::remove_base_shield_upgrade(int32_t player, ObjectId source, uint32_t ability_crc) {
+    // remove 0x6f13b0 -> 0x3a5920 [H]: every entry whose key matches (same source and same ability).
     shield_upgrade_.erase(std::remove_if(shield_upgrade_.begin(), shield_upgrade_.end(),
-                                         [&](const std::pair<int32_t, ObjectId>& e) {
-                                             return e.first == player && e.second == source;
+                                         [&](const ShieldUpgrade& e) {
+                                             return e.player == player && e.source == source && e.crc == ability_crc;
                                          }),
                           shield_upgrade_.end());
 }
 
 bool CombatSystem::base_shield_upgraded(int32_t player) const {
-    for (const auto& e : shield_upgrade_)
-        if (e.first == player) return true;
+    for (const ShieldUpgrade& e : shield_upgrade_)
+        if (e.player == player) return true;
     return false;
 }
 
@@ -196,10 +197,15 @@ void CombatSystem::service_base_shields(uint32_t frame) {
     }
     // AFFECTED_BY_SHIELD service 0x502f70, every frame, per unit [H]. Hostile shields only; an inactive one clears the
     // stored shield; a straddled active one is stored (enter / stay) and ends the walk; leaving the stored one clears it.
+    // tru3 t04 (TRU1_A A3 edge case [H]): a dying generator leaves the shield list at once (Die 0x39bdb0 -> 0x5031a0),
+    // but the stored id is cleared only by a leave path or by the generator's signal 0x28, raised when Remove_Object
+    // 0x2a6a00 unlinks it at the store flush (OBJECT_RUNTIME §2.2) - here clear_removed_base_shield at flush(). So while
+    // other hostile shields remain (all active and not straddled, or only friendly ones) a dead, not yet removed
+    // generator keeps x Vulnerability / x speed on the unit.
     for (Unit& u : units_) {
         if (!desc_of(u).affected_by_shield) continue;
         ObjectId stored = u.bshield_in;
-        if (stored != kNoObject && !live(unit(stored))) stored = kNoObject;  // signal 0x28 / 0x502e30
+        if (stored != kNoObject && !unit(stored)) stored = kNoObject;  // 0x502e30: the stored id no longer resolves
         if (!(u.flags & kUnitDead)) {
             if (bshields_.empty()) stored = kNoObject;
             for (const uint32_t idx : bshields_) {
@@ -224,6 +230,15 @@ void CombatSystem::service_base_shields(uint32_t frame) {
         } else {
             u.flags &= ~kUnitInBaseShield;
         }
+    }
+}
+
+void CombatSystem::clear_removed_base_shields() {
+    // tru3 t04: signal 0x28 of a removed generator (handler 0x5026e0 -> leave 0x502ce0) for every unit storing it.
+    for (Unit& u : units_) {
+        if (u.bshield_in == kNoObject || find(u.bshield_in) >= 0) continue;
+        u.bshield_in = kNoObject;
+        u.flags &= ~kUnitInBaseShield;
     }
 }
 

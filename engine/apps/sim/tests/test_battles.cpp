@@ -2444,6 +2444,111 @@ void test_standin_slots() {
     }
 }
 
+// tru3 t05 (SKIRMISH_SETUP §2.4 Garrison_Upgrade_Ability [H]): an Empire upgrade object with a Ground_Automatic
+// Garrison_Upgrade_Ability (Additional_Garrison_Units S10_Squad, S10_Squad) appends both types to the Empire slot's
+// garrison list while it exists, so the re-delivery after the start force's death adds 1 + 2 squads; despawned before the
+// death, it erased them again (one start-force squad delivered).
+std::string garrison_upgrade_patch(std::string t) {
+    const size_t end = t.find("</S10>");
+    if (end != std::string::npos)
+        t.insert(end, " <UpgradeObject Name=\"S10_Garrison_Upgrade\"><Behavior>DUMMY_UPGRADE</Behavior><Affiliation>Empire</Affiliation>"
+                      "<Abilities SubObjectList=\"Yes\"><Garrison_Upgrade_Ability Name=\"S10_More_Garrisons_Bonus\">"
+                      "<Activation_Style>Ground_Automatic</Activation_Style><Apply_To_All_Allies>Yes</Apply_To_All_Allies>"
+                      "<Additional_Garrison_Units>S10_Squad, S10_Squad</Additional_Garrison_Units>"
+                      "</Garrison_Upgrade_Ability></Abilities></UpgradeObject>\n");
+    return t;
+}
+
+size_t skirmish_garrison_upgrade_run(bool despawn) {
+    g_types_patch = garrison_upgrade_patch;
+    auto d = make_data(false, false, false, false, true);
+    g_types_patch = nullptr;
+    jobs::JobSystem js(jobs::JobSystemConfig{0});
+    SimConfig cfg;
+    cfg.seed = 2026;
+    cfg.players = 4;
+    SimHost host(d->types, js, cfg);
+    galactic::GalacticSim* gs = host.start_galactic(d->rules, make_setup(*d, true));
+    CHECK(gs != nullptr);
+    if (!gs) return 0;
+    CampaignBattleOptions opt;
+    opt.battle.max_frames = 0;
+    opt.battle.skirmish = true;
+    opt.battle.skirmish_map = true;
+    CampaignBattles battles(host, d->crules, *d->catalog,
+                            [](const std::string& name, terrain::MapData& m) {
+                                if (name != "S10_Land_B") return false;
+                                m = land_map();
+                                return true;
+                            },
+                            opt);
+    CHECK(battles.attach(nullptr));
+    galactic::BattleRequest r;
+    r.info.kind = galactic::ConflictKind::Land;
+    r.info.planet = 1;
+    r.info.defender = 0;
+    r.info.attacker = 1;
+    r.info.map = r.map = "S10_Land_B";
+    for (int32_t p = 0; p < 2; ++p) {
+        galactic::BattleForces f;
+        f.player = p;
+        for (const objects::ObjectHandle h : gs->planets()[static_cast<size_t>(p == 0 ? 1 : 2)].surface)
+            if (gs->store().alive(h) && gs->store().owner(h) == p) f.start.push_back(h);
+        r.forces.push_back(std::move(f));
+    }
+    CHECK(battles.start_map_battle(std::move(r)));
+    const uint32_t squad = type_of(*d, "S10_Squad");
+    const uint32_t upgrade = type_of(*d, "S10_Garrison_Upgrade");
+    auto pooled = [&](const TacticalBattle& b) {
+        size_t n = 0;
+        for (const TacticalBattle::Reserve& v : b.reserves(0)) n += v.type == squad ? 1u : 0u;
+        return n;
+    };
+    uint32_t killed_at = 0;
+    size_t pool0 = 0, delivered = 0;
+    objects::ObjectHandle up{};
+    uint32_t last = 0;
+    for (uint64_t t = 0; t < 2000; ++t) {
+        host.tick_once();
+        TacticalBattle* b = battles.battle();
+        TacticalMode* tm = host.tactical();
+        if (!b || !tm || b->frame() < 3) continue;
+        last = b->frame();
+        if (b->frame() == 3) {
+            objects::SpawnParams sp;
+            sp.type = static_cast<objects::TypeIndex>(upgrade);
+            sp.owner = 0;
+            up = b->script_spawn(*tm, sp);
+            CHECK(tm->primary().alive(up));
+            continue;
+        }
+        if (despawn && b->frame() == 5) CHECK(b->script_despawn(*tm, up));
+        if (b->frame() < 8) continue;
+        if (killed_at == 0) {
+            pool0 = pooled(*b);
+            std::vector<objects::ObjectId> mine;
+            for (const objects::ObjectHandle h : tm->primary().owned_by(0))
+                if (tm->primary().alive(h) && h != up && b->combat().has_unit(tm->primary().id(h))) mine.push_back(tm->primary().id(h));
+            for (const objects::ObjectId id : mine) (void)b->script_damage(*tm, id, 1.0e9f, false);
+            killed_at = b->frame();
+            CHECK(!mine.empty());
+            continue;
+        }
+        // the pool right after the delivery (the stand-in AI may deploy a reserve a few frames later)
+        const auto now = static_cast<std::ptrdiff_t>(pooled(*b)) - static_cast<std::ptrdiff_t>(pool0);
+        if (now > 0) delivered = std::max(delivered, static_cast<size_t>(now));
+        if (b->frame() == killed_at + 650) break;
+    }
+    std::printf("  garrison upgrade%s: %zu squads re-delivered (start force killed at frame %u, last frame %u, upgrade %s)\n",
+                despawn ? " (despawned)" : "", delivered, killed_at, last, up ? "spawned" : "none");
+    return delivered;
+}
+
+void test_skirmish_garrison_upgrade() {
+    CHECK(skirmish_garrison_upgrade_run(false) == 3u);
+    CHECK(skirmish_garrison_upgrade_run(true) == 1u);
+}
+
 void test_skirmish_redelivery() {
     auto d = make_data(false, false, false, false, true);
     jobs::JobSystem js(jobs::JobSystemConfig{0});
@@ -3544,6 +3649,7 @@ int main(int argc, char** argv) {
     std::printf("mcx4 t04: tactical production queues and the skirmish tech upgrade\n");
     test_tactical_tech_upgrade();
     test_skirmish_redelivery();      // skm1 t07
+    test_skirmish_garrison_upgrade();  // tru3 t05
     test_standin_slots();            // aitac t08
     test_land_upgrade_production_done();  // s78n t20 step 5
     std::printf("cu8g t05: Battlefield_Modifier gates at the battle (skirmish vs campaign, empty list, apply / remove / reverse)\n");

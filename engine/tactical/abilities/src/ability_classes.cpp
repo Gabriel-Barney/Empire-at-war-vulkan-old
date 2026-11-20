@@ -549,6 +549,7 @@ bool AbilitySystem::class_apply(Obj& o, SpecialState& sp, ObjectId target, int32
         case C::Weatherproof:
         case C::RetreatPrevention:
         case C::EnableAbility:
+        case C::GarrisonUpgrade:  // tru3 t05
             aura_on(o, sp, frame);
             return true;
 
@@ -1925,6 +1926,7 @@ void AbilitySystem::class_remove(Obj& o, SpecialState& sp, uint32_t frame) {
         case C::BasePower:
         case C::Weatherproof:
         case C::RetreatPrevention:
+        case C::GarrisonUpgrade:  // tru3 t05
         case C::EnableAbility: aura_off(o, sp, frame); return;
         case C::Cable:  // r3g t04: a paralyzed walker is unlocked (0x3a8e50(target, 0)) when no other cable holds it
             if (Obj* t = obj(sp.target); t && sp.phase == kCableParalyzed && t->cable_holds > 0)
