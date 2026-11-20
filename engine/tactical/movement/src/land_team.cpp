@@ -867,7 +867,7 @@ WalkResult MovementSystem::team_walk(Unit& u, uint32_t frame) const {
         x.slot_walk = true;
         x.slot = u.mslot.shape();
         x.end_shift = u.mslot.end_shift;
-    } else if (top_push && u.slot_on && u.push_path.size() >= 2 && u.push_path.back() == u.slot_g) {
+    } else if (top_push && u.slot_on && u.push_path.size() >= 2) {
         x.end_shift = u.mslot.end_shift;
     }
     if (order_rec && u.formation_speed < 3.0e38f) x.formation = u.formation_speed;

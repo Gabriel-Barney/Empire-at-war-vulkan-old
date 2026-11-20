@@ -1878,9 +1878,10 @@ private:
     // mcx4 t11: facing_deg = the order block's facing (kNoFacing: none) - the final-facing rotation (final_formation_facing)
     void set_lanes(const std::vector<uint32_t>& idx, const LandForm& f, std::span<const V2> fpath, const std::vector<uint8_t>& kept,
                    std::span<const FormationMember> mem, float fz = 0.0f, float facing_deg = kNoFacing);
-    // mov2 t01: u's order path (the top record m.path) is the formation path's copy its plan took (slot_on, and the path
-    // still ends on W's last point: a later path set or cut ends elsewhere)
-    static bool slot_walk(const Unit& u) { return u.slot_on && u.m.path.size() >= 2 && u.m.path.back() == u.slot_g; }
+    // mov2 t01: u's order path (the top record m.path) is the formation path's copy its plan took (slot_on: every other
+    // plan path set clears it). An early-arrival cut (0x54e780) shortens that record and keeps it, so its slot shape and
+    // end shift stay (review: a path-end test dropped them after a cut and stacked the members on the cut end).
+    static bool slot_walk(const Unit& u) { return u.slot_on && u.m.path.size() >= 2; }
     void move_space(const MoveOrder& order, const std::vector<uint32_t>& idx, uint32_t frame,
                     const std::vector<uint32_t>& delays, uint32_t serial);
     void park_space(Unit& u, uint32_t frame);
