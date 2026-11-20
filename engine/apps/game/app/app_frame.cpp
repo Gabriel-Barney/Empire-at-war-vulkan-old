@@ -16,8 +16,8 @@ void App::resize_ui() {
 }
 
 bool App::present_settled() const {
-    if (screen_ == Screen::Galactic) return gview_.settled() && draw_stats_.pending_pipeline == 0 && draw_stats_.translation_pending == 0;
-    if (screen_ == Screen::Battle || screen_ == Screen::BattleLoad || (screen_ == Screen::Menu && demo_session() && bview_.active()))
+    if (screen() == Screen::Galactic) return gview_.settled() && draw_stats_.pending_pipeline == 0 && draw_stats_.translation_pending == 0;
+    if (screen() == Screen::Battle || screen() == Screen::BattleLoad || (screen() == Screen::Menu && demo_session() && bview_.active()))
         return bview_.settled(draw_stats_);
     return true;
 }
@@ -58,8 +58,8 @@ bool App::render_frame() {
     // World.
     bool ok = true;
     draw_stats_ = {};
-    const bool galactic = screen_ == Screen::Galactic && gview_.attached();
-    const bool battle_view = (screen_ == Screen::Battle || screen_ == Screen::BattleLoad || (screen_ == Screen::Menu && demo_session())) && bview_.active();
+    const bool galactic = screen() == Screen::Galactic && gview_.attached();
+    const bool battle_view = (screen() == Screen::Battle || screen() == Screen::BattleLoad || (screen() == Screen::Menu && demo_session())) && bview_.active();
     const int world_view = galactic ? 1 : battle_view ? 2 : 0;
     if (world_view != world_view_) gpu_.renderer.reset_taa_history();
     world_view_ = world_view;
@@ -104,7 +104,7 @@ bool App::render_frame() {
                                   nullptr, gview_.background);
     } else if (battle_view) {
         // story t13: no selection circles while a linked battle's P11 input block holds (UI.md §1.3, flag 0x140a28c91).
-        if (screen_ == Screen::Battle && !cinematic_hides_hud() && !linked_ui_.input_blocked()) {
+        if (screen() == Screen::Battle && !cinematic_hides_hud() && !linked_ui_.input_blocked()) {
             bview_.set_selection_blobs(ui_.tactical_hud.selection_blobs());  // last HUD build's circles (one frame behind)
             bview_.set_heal_selection(synced_selection());                   // vis1 t08: Force_Healing range blobs
         } else {
@@ -112,7 +112,7 @@ bool App::render_frame() {
             bview_.set_heal_selection({});
         }
         // cu9g t03 bombing-run blob; ui3 t04: the reinforcement drop preview takes the same slot (one pick at a time).
-        bview_.set_bombing_blob(screen_ != Screen::Battle ? std::nullopt : bombing_targeting_ ? bombing_blob_ : reinforce_blob_);
+        bview_.set_bombing_blob(screen() != Screen::Battle ? std::nullopt : bombing_targeting_ ? bombing_blob_ : reinforce_blob_);
         const auto prep0 = Clock::now();
         bview_.set_pulse_time(now_s_);  // mcx4 t15: light effects run on wall time
         bview_.prepare(gpu_, render_alpha());
@@ -164,7 +164,7 @@ bool App::render_frame() {
             shells = &ui_.galactic_shells;
             layout = &ui_.galactic_hud.layout();
         }
-    } else if (screen_ == Screen::Battle && battle_view && !cinematic_hides_hud()) {  // refixf t05: no HUD during the cinematic
+    } else if (screen() == Screen::Battle && battle_view && !cinematic_hides_hud()) {  // refixf t05: no HUD during the cinematic
         build_tactical_hud();
         hud_list = ui_.tactical_hud.draw_list();
         canvas = &ui_.tactical_hud.canvas();
@@ -176,7 +176,7 @@ bool App::render_frame() {
     }
     // ui2 t06 (STORY_PRESENTATION_REWARDS.md 5.6): SHOW_COMMAND_BAR 0 hides the command bar and the HUD built on it (a hide
     // counter: nested hides need matching shows); the story overlay, dialogs and cursor stay.
-    if (story_present_.command_bar_hidden() && (galactic || (screen_ == Screen::Battle && battle_view))) {
+    if (story_present_.command_bar_hidden() && (galactic || (screen() == Screen::Battle && battle_view))) {
         hud_list = ui::HudDrawList{};
         drawer = nullptr;
         shells = nullptr;
@@ -184,12 +184,12 @@ bool App::render_frame() {
     }
     // HUD advisor loop: the galactic and battle HUDs draw it in Movie_galactic / Movie_tactical (FIXPASS_GALACTIC §4.2);
     // elsewhere 200 x 200 px, top-left [port].
-    if (screen_ != Screen::Battle && !galactic && advisor_loop_shown()) {
+    if (screen() != Screen::Battle && !galactic && advisor_loop_shown()) {
         // STRATEGIC_GAPS §7.3: PrimAlpha (straight alpha) for a Movies.xml Alpha movie, PrimOpaque otherwise.
         ui::add_movie_quad(dialogs, 0, canvas->pixel_to_canvas(16.0f, 216.0f), canvas->pixel_to_canvas(216.0f, 16.0f), kAdvisorPage,
                            advisor_movie_.alpha());
     }
-    if (full_movie_.has_frame() && (screen_ == Screen::Movie || full_movie_.playing())) {  // full-screen movie (2D scene layer 0)
+    if (full_movie_.has_frame() && (screen() == Screen::Movie || full_movie_.playing())) {  // full-screen movie (2D scene layer 0)
         ui::HudQuad q;
         q.min = canvas->pixel_to_canvas(0.0f, static_cast<float>(h));
         q.max = canvas->pixel_to_canvas(static_cast<float>(w), 0.0f);
@@ -207,7 +207,7 @@ bool App::render_frame() {
     // Panels (hero roster, black market, sabotage, corruption, hack) on top of the HUD list; their shells draw at the
     // HUD's ShellModels step.
     std::vector<ui::HudDrawList> panel_lists;
-    const bool battle_hud = screen_ == Screen::Battle && battle_view && !cinematic_hides_hud();
+    const bool battle_hud = screen() == Screen::Battle && battle_view && !cinematic_hides_hud();
     if (galactic || battle_hud) build_panels(panel_lists);
     for (const ui::HudDrawList& pl : panel_lists) merge_lists(hud_list, pl);
     if ((galactic || battle_hud) && !bench_active()) build_encyclopedia(hud_list, *canvas);  // BM2a: no tooltips
@@ -220,7 +220,7 @@ bool App::render_frame() {
     // 86 % transparent) stays over the demo for as long as the menu shows: one quad stretched to the window, straight
     // alpha, under the dialogs, without the backdrop's black fill.
     std::string backdrop;
-    if (battle_view && screen_ == Screen::Menu) {
+    if (battle_view && screen() == Screen::Menu) {
         backdrop = ui_.gui.backdrop();
         ui_.gui.set_backdrop({});
         if (const ui::GuiImage img = ui_.gui.image(backdrop); img.valid) {
@@ -382,7 +382,7 @@ bool App::render_frame() {
         std::vector<uint8_t> rgba(px, px + static_cast<size_t>(w) * h * 4);
         for (size_t i = 3; i < rgba.size(); i += 4) rgba[i] = 255;
         const bool wrote = render::write_png_rgba(shot_path_, w, h, rgba);
-        std::printf("%s %s (%s: %u draws, %u instances)\n", wrote ? "wrote" : "FAILED", shot_path_.c_str(), screen_name(screen_), draw_stats_.draws,
+        std::printf("%s %s (%s: %u draws, %u instances)\n", wrote ? "wrote" : "FAILED", shot_path_.c_str(), screen_name(screen()), draw_stats_.draws,
                     draw_stats_.instances);
         if (!wrote) smoke_ok_ = false;
         shot_path_.clear();
@@ -434,16 +434,16 @@ void App::frame() {
                 story_dialog_frames_ = 0;
             }
             if (s.run(*this, raw)) {
-                std::printf("script: %s done (frame %" PRIu64 ", %s, tick %" PRIu64 ")\n", s.name.c_str(), frames_, screen_name(screen_),
+                std::printf("script: %s done (frame %" PRIu64 ", %s, tick %" PRIu64 ")\n", s.name.c_str(), frames_, screen_name(screen()),
                             session_ ? session_->host().frame() : 0);
                 ++script_step_;
                 step_frames_ = 0;
             } else if (++step_frames_ > s.timeout_frames) {
-                std::fprintf(stderr, "script: step '%s' timed out (%s); dialogs:", s.name.c_str(), screen_name(screen_));
+                std::fprintf(stderr, "script: step '%s' timed out (%s); dialogs:", s.name.c_str(), screen_name(screen()));
                 for (const std::string& n : ui_.gui.open_names()) std::fprintf(stderr, " %s", n.c_str());
                 std::fprintf(stderr, "\n");
                 script_failed_ = true;
-                screen_ = Screen::Quit;
+                flow_.on(ScreenEvent::Quit);
                 return;
             }
         }
@@ -465,7 +465,7 @@ void App::frame() {
     // [port: Gabriel] The fleet / ship rename prompt takes the keyboard while open (typed text, Backspace, Enter, Esc): no
     // key reaches the camera, the hotkeys, the dialogs or the pause menu. It closes when the galactic screen does.
     if (rename_.active()) {
-        if (screen_ != Screen::Galactic || !session_ || ui_.gui.has_focus()) {
+        if (screen() != Screen::Galactic || !session_ || ui_.gui.has_focus()) {
             rename_.close();
         } else {
             const ui::RenamePrompt::Result r =
@@ -484,7 +484,7 @@ void App::frame() {
     hooks.dialog_hit = [this](int32_t x, int32_t y) { return ui_.gui.hit(x, y); };
     hooks.dialog_focus = [this] { return ui_.gui.has_focus(); };
     // A running targeted-ability pick (not under a dialog or the pause menu) takes the presses before dialogs and the HUD.
-    hooks.targeting_active = [this] { return screen_ == Screen::Battle && targeting_.active() && !paused_ && !ui_.gui.has_focus(); };
+    hooks.targeting_active = [this] { return screen() == Screen::Battle && targeting_.active() && !paused_ && !ui_.gui.has_focus(); };
     // HUD hit test: open panels first, then the galactic / tactical HUD (hud_panels.hpp host wiring).
     auto panel_hit = [this](int32_t x, int32_t y) {
         for (ui::HudPanel* p : panels())
@@ -492,17 +492,17 @@ void App::frame() {
                 if (const int32_t c = p->hit_test(x, y); c >= 0) return c;
         return -1;
     };
-    if (screen_ == Screen::Galactic)
+    if (screen() == Screen::Galactic)
         hooks.hud_hit = [this, panel_hit](int32_t x, int32_t y) {
             const int32_t c = panel_hit(x, y);
             return c >= 0 ? c : ui_.galactic_hud.hit_test(x, y);
         };
-    if (screen_ == Screen::Galactic)  // right presses on the planet fleet / land-forces buttons reach the planet picking
+    if (screen() == Screen::Galactic)  // right presses on the planet fleet / land-forces buttons reach the planet picking
         hooks.hud_takes = [this, panel_hit](int32_t c, ui::Button b) {
             if (panel_hit(input_.mouse_x(), input_.mouse_y()) >= 0) return true;  // an open panel's component
             return ui_.galactic_hud.takes_button(c, b);
         };
-    else if (screen_ == Screen::Battle)
+    else if (screen() == Screen::Battle)
         hooks.hud_hit = [this, panel_hit](int32_t x, int32_t y) {
             const int32_t c = panel_hit(x, y);
             return c >= 0 ? c : ui_.tactical_hud.hit_test(x, y);
@@ -533,14 +533,13 @@ void App::frame() {
         std::vector<ui::LoadScreenEvent> lev;
         ui_.load.update(gui_events_, lev);
         for (const ui::LoadScreenEvent& e : lev)
-            if (e.kind == ui::LoadScreenEvent::Kind::Begin && screen_ == Screen::BattleLoad) {
-                screen_ = Screen::Battle;
+            if (e.kind == ui::LoadScreenEvent::Kind::Begin && flow_.on(ScreenEvent::LoadScreenDone)) {
                 audio_.music(MusicScene::Battle, local_faction(), bview_.space(), battle_terrain());
             }
     }
     // ui2 t09 (REWARDS 5.1): the LOCK_CONTROLS reward swallows all HUD and world input (buttons, wheel, keys, hover) while the
     // galactic map or a battle is up. Dialogs keep working, and Esc stays so the player is never shut out of the pause menu [port].
-    if (story_present_.controls_locked() && (screen_ == Screen::Galactic || screen_ == Screen::Battle) && !ui_.gui.has_focus()) {
+    if (story_present_.controls_locked() && (screen() == Screen::Galactic || screen() == Screen::Battle) && !ui_.gui.has_focus()) {
         const bool esc_pressed = routed_.world.keys_pressed.test(ui::vk::kEscape), esc_down = routed_.world.keys_down.test(ui::vk::kEscape);
         routed_.hud.clear();
         routed_.hover_component = -1;
@@ -552,18 +551,18 @@ void App::frame() {
         routed_.world.keys_pressed.set(ui::vk::kEscape, esc_pressed);
     }
     input_.update(routed_.world);
-    if (screen_ == Screen::Movie) movie_step();
+    if (screen() == Screen::Movie) movie_step();
     // bkc1 t01 (BKC1_RE_ANSWERS Q1 step 2): an in-game full-screen Bink takes the key first: Esc or Space stops it
     // unless the movie is Cannot_Skip, and neither the pause menu nor Story_Handle_Esc sees that Esc.
-    const bool movie_key = session_ && !paused_ && screen_ != Screen::Movie && full_movie_.playing() &&
+    const bool movie_key = session_ && !paused_ && screen() != Screen::Movie && full_movie_.playing() &&
                            (input_.key_pressed(ui::vk::kEscape) || input_.key_pressed(ui::vk::kSpace));
     if (movie_key && !full_movie_.cannot_skip()) {
         story_ui_.movie_done(full_movie_.name());  // as a movie that ends by itself (STORY_MOVIE_DONE)
         full_movie_.stop(audio_);
     }
-    if (!movie_key && session_ && !paused_ && (screen_ == Screen::Galactic || screen_ == Screen::Battle) && routed_.keys_to_world &&
+    if (!movie_key && session_ && !paused_ && (screen() == Screen::Galactic || screen() == Screen::Battle) && routed_.keys_to_world &&
         input_.key_pressed(ui::vk::kEscape) && script_.empty() &&
-        !(screen_ == Screen::Battle && (targeting_.active() || reinforce_unit_ != 0 || bombing_targeting_ || beacon_pick_))) {
+        !(screen() == Screen::Battle && (targeting_.active() || reinforce_unit_ != 0 || bombing_targeting_ || beacon_pick_))) {
         // bkc1 t01 (BKC1_RE_ANSWERS Q1): with the story's cinematic camera on, Esc goes to the plots' Story_Handle_Esc
         // and consumes the key (no pause menu); otherwise it opens the pause menu.
         if (!session_->story_esc()) {
@@ -573,16 +572,16 @@ void App::frame() {
     }
     // MAIN_LOOP.md §1.5: the pause menu and the full-screen dialogs it opens (options and their pages, save / load, quit
     // confirm) set the tactical pause in single player - no ticks while any of them is open, whatever opened it.
-    if (session_ && !demo_session() && (screen_ == Screen::Galactic || screen_ == Screen::Battle) && menu_dialog_open()) paused_ = true;
+    if (session_ && !demo_session() && (screen() == Screen::Galactic || screen() == Screen::Battle) && menu_dialog_open()) paused_ = true;
     if (paused_ && !menu_dialog_open()) paused_ = false;
     if (paused_ || ui_.gui.has_focus()) targeting_.cancel();  // a pick does not outlive the pause menu / a dialog
     if (session_ && !paused_) {
-        if (screen_ == Screen::Galactic) galactic_input();
-        else if (screen_ == Screen::Battle) battle_input();
+        if (screen() == Screen::Galactic) galactic_input();
+        else if (screen() == Screen::Battle) battle_input();
     }
     // The space reinforcement grid only while a drop point is being picked (battle_input does not run while paused or
     // outside the battle screen, so the flag is kept here too).
-    if (bview_.active()) bview_.set_space_reinforcement_overlay(screen_ == Screen::Battle && bview_.space() && reinforce_unit_ != 0);
+    if (bview_.active()) bview_.set_space_reinforcement_overlay(screen() == Screen::Battle && bview_.space() && reinforce_unit_ != 0);
     // 3. Sim, then the story's presentation ops (movies, audio) of the ticks just run; Lua movies advance.
     if (battle_view_pending_ && load_intro_frames_ == 0) start_battle_view();  // QA t11: the load screen is already up
     story_script_mode_check();  // ui2: before the sim and the Lua ops of this frame (a new mode's first calls must survive)
@@ -592,7 +591,7 @@ void App::frame() {
         ft_.sim = static_cast<float>(ms_since(sim0));
     }
     cinematic_step();  // refixf t05: shot clock from the tactical frame, timer end, letterbox slide
-    if (screen_ == Screen::Menu && demo_session()) {  // OI host: the attract demo's camera; a finished demo battle restarts
+    if (screen() == Screen::Menu && demo_session()) {  // OI host: the attract demo's camera; a finished demo battle restarts
         if (session_->skirmish_over() && !start_attract_map()) stop_attract();
         else demo_camera();
     }
@@ -600,9 +599,9 @@ void App::frame() {
     linked_ui_step();  // story t13: after this frame's Lua ops
     story_reward_step();  // L1/S4 wave 1: START_MOVIE / MULTIMEDIA reward media
     story_script_frame();  // ui2: the script's bars / camera moves / camera rewards, mode-change reset
-    if (screen_ == Screen::Galactic && session_) galactic_screens();
+    if (screen() == Screen::Galactic && session_) galactic_screens();
     if (bench_active()) bench_autopilot();  // BM2a: battle prompts, load screens, battle-end and story dialogs, movies
-    if (screen_ != Screen::Movie) {
+    if (screen() != Screen::Movie) {
         if (full_movie_.playing() && !full_movie_.update(dt_, gpu_.hud, kMoviePage)) {
             story_ui_.movie_done(full_movie_.name());  // L1/S4 wave 1: STORY_MOVIE_DONE (an in-game full-screen movie ended)
             full_movie_.stop(audio_);
@@ -615,7 +614,7 @@ void App::frame() {
     }
     story_ui_step();  // L1/S4 wave 1: this frame's UI notifications for the story
     // 4. Render, 5. audio (listener from the camera).
-    if (screen_ == Screen::Quit) return;
+    if (screen() == Screen::Quit) return;
     // BM2a: a PNG of every Nth counted frame (named by its index; an unsettled frame is drawn again under the same name).
     if (bench_measuring() && opt_.bench.png_every && shot_path_.empty()) {
         const uint64_t idx = bench_fixed() ? bench_.clock.frames() : static_cast<uint64_t>(bench_.frame_ms.size());
@@ -631,16 +630,16 @@ void App::frame() {
     if (!rendered) {
         std::fprintf(stderr, "render failed\n");
         smoke_ok_ = false;
-        screen_ = Screen::Quit;
+        flow_.on(ScreenEvent::Quit);
         return;
     }
     end_load_intro_frame();
     if (bench_active()) bench_frame_end();
     const bool cinematic = presentation_cinematic() || cine_.shot.active();  // OI host: Lua / TSW cinematic camera -> listener rules
-    if (screen_ == Screen::Galactic) {
+    if (screen() == Screen::Galactic) {
         const ui::CameraParams cp = gview_.camera_params(targets_.width, targets_.height);
         audio_.set_listener({cp.eye.x, cp.eye.y, cp.eye.z}, {cp.target.x, cp.target.y, cp.target.z}, cinematic);
-    } else if ((screen_ == Screen::Battle || (screen_ == Screen::Menu && demo_session())) && bview_.active()) {
+    } else if ((screen() == Screen::Battle || (screen() == Screen::Menu && demo_session())) && bview_.active()) {
         ui::CameraParams cp = bview_.camera_params(targets_.width, targets_.height);
         cinematic_camera(cp);
         audio_.set_listener({cp.eye.x, cp.eye.y, cp.eye.z}, {cp.target.x, cp.target.y, cp.target.z}, cinematic);
@@ -662,7 +661,7 @@ void App::frame() {
     ++frames_;
     if (frames_ % 60 == 0 && !opt_.hidden) {
         char title[256];
-        std::snprintf(title, sizeof title, "Alamo - %s - tick %" PRIu64 ", %u draws", screen_name(screen_), session_ ? session_->host().frame() : 0,
+        std::snprintf(title, sizeof title, "Alamo - %s - tick %" PRIu64 ", %u draws", screen_name(screen()), session_ ? session_->host().frame() : 0,
                       draw_stats_.draws);
         win_.set_title(title);
     }

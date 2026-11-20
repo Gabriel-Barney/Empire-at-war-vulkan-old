@@ -209,7 +209,7 @@ void App::handle_screen_actions(const std::vector<ui::ScreenAction>& acts) {
                 battle_end_auto_ = false;
                 if (session_ && session_->spec().kind == SessionKind::Skirmish) {
                     skirmish_ended_ = true;
-                    screen_ = Screen::Menu;
+                    flow_.on(ScreenEvent::MainMenu);
                     if (opt_.smoke.empty()) session_.reset();  // smoke runs keep it for the CRC check
                     open_main_menu();
                 }
@@ -218,7 +218,7 @@ void App::handle_screen_actions(const std::vector<ui::ScreenAction>& acts) {
                 if (a.tag == "tutorial_quit") {
                     if (a.button == 0) {
                         end_session();
-                        screen_ = Screen::Menu;
+                        flow_.on(ScreenEvent::MainMenu);
                         open_main_menu();
                     }
                 } else if (a.tag == "load_different_data") {  // mcx3 t05: Load anyway (button 0) / Cancel
@@ -235,13 +235,13 @@ void App::handle_screen_actions(const std::vector<ui::ScreenAction>& acts) {
                         if (!start_session(spec)) open_main_menu();
                     } else {
                         end_session();
-                        screen_ = Screen::Menu;
+                        flow_.on(ScreenEvent::MainMenu);
                         open_main_menu();
                     }
                 }
                 break;
             case K::CampaignScoreClosed:  // the campaign is over: back to the main menu (smoke runs keep the session)
-                screen_ = Screen::Menu;
+                flow_.on(ScreenEvent::MainMenu);
                 if (opt_.smoke.empty()) end_session();
                 ui_.front.set_in_game(false);
                 open_main_menu();
@@ -1015,7 +1015,7 @@ void App::build_encyclopedia(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
     const uint32_t w = targets_.width, h = targets_.height;
     uint32_t stack_fleet = 0;  // ui1 t03: a fleet under the cursor (map fleet in transit or a planet's fleet button)
     bool stack_land = false;
-    if (screen_ == Screen::Galactic && gview_.attached() && !ui_.gui.hit(mx, my)) {  // HUD_GAPS §6: not under a dialog
+    if (screen() == Screen::Galactic && gview_.attached() && !ui_.gui.hit(mx, my)) {  // HUD_GAPS §6: not under a dialog
         const ui::View v = ui::make_view(gview_.camera_params(w, h), w, h);
         const std::vector<ui::PickSphere> items = gview_.pick_items();
         stack_fleet = ui_.galactic_hud.stack_under(static_cast<float>(mx), static_cast<float>(my), stack_land);
@@ -1026,7 +1026,7 @@ void App::build_encyclopedia(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
             for (const render::GalacticPlanetSnap& p : gview_.frame().planets)
                 if (static_cast<uint32_t>(p.id) == object) type = p.type;
         }
-    } else if (screen_ == Screen::Battle && bview_.active()) {
+    } else if (screen() == Screen::Battle && bview_.active()) {
         // HUD_GAPS §2.2: the hover pick of build_tactical_hud (the world pick, refixf t08; reticle owner kept).
         for (const ui::HudUnit& u : hud_units_)
             if (u.id == hover_ship_ && hover_ship_ != 0 && u.type < data_.types.size()) {
@@ -1073,7 +1073,7 @@ void App::build_encyclopedia(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
             }
     // ui4 t07 (HUD_GAPS §2.2): a hovered build pad or queue hologram shows its type's pop-up (keyed kEncyTypeKey | type: it
     // has no object), an organiser / land-forces unit pad its unit's.
-    if (component < 0 && screen_ == Screen::Galactic && routed_.hover_component >= 0) {
+    if (component < 0 && screen() == Screen::Galactic && routed_.hover_component >= 0) {
         constexpr uint32_t kEncyTypeKey = 0xE0000000u;  // [port] above every object id the sim hands out
         ui::GalacticHud::PadSubject ps;
         if (ui_.galactic_hud.pad_subject(routed_.hover_component, ps)) {
@@ -1112,16 +1112,16 @@ void App::build_encyclopedia(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
     for (const auto& [id, t] : ency_types_)
         if (id == shown) shown_type = t;
     if (shown_type == objects::kNone) return;
-    const bool skirmish_battle = screen_ == Screen::Battle && session_ && session_->spec().kind == SessionKind::Skirmish;  // mcx4 t14
+    const bool skirmish_battle = screen() == Screen::Battle && session_ && session_->spec().kind == SessionKind::Skirmish;  // mcx4 t14
     ui::EncyclopediaEntry e = encyclopedia_entry(data_, ui_.text, ui_.hud_types, shown_type, skirmish_battle);
     // GRC 2 / REMAINING_GAPS §6.3: a planet's income row only with the local player's CreditIncome visibility.
-    if (screen_ == Screen::Galactic)
+    if (screen() == Screen::Galactic)
         if (const galactic::GalacticSim* g = galaxy())
             if (const PlanetIndex pi = planet_index(*g, shown); pi != kInvalidPlanet &&
                 !g->can_see_planet_info(local_player(), pi, galactic::GalacticSim::PlanetInfo::CreditIncome))
                 std::erase_if(e.rows, [](const ui::EncyclopediaRow& r) { return r.left == U"Income"; });
     // HUD_GAPS §2.2: anchored at the hint bone of the HUD on screen (not the cursor).
-    const ui::HudLayout& layout = screen_ == Screen::Battle ? ui_.tactical_hud.layout() : ui_.galactic_hud.layout();
+    const ui::HudLayout& layout = screen() == Screen::Battle ? ui_.tactical_hud.layout() : ui_.galactic_hud.layout();
     if (ency_.build(dl, canvas, e, layout, ui_.faction_alt()).x > 0.0f) ++ency_shown_;
 }
 
@@ -1207,12 +1207,12 @@ void App::update_cursor(ui::HudDrawList& dl) {
     set_os_cursor_hidden(cursor_ok_ && !opt_.hidden);
     if (!cursor_ok_) return;
     ui::CursorContext c;
-    c.movie = screen_ == Screen::Movie;
-    c.busy = screen_ == Screen::SessionLoad;
+    c.movie = screen() == Screen::Movie;
+    c.busy = screen() == Screen::SessionLoad;
     c.over_ui = routed_.hover_component >= 0 || ui_.gui.hit(input_.mouse_x(), input_.mouse_y());
-    c.drag_selecting = input_.button(ui::Button::Left).dragging && screen_ == Screen::Battle;
+    c.drag_selecting = input_.button(ui::Button::Left).dragging && screen() == Screen::Battle;
     c.selection = !orders_.selection().empty();
-    if (screen_ == Screen::Galactic) {
+    if (screen() == Screen::Galactic) {
         c.scrolling = gview_.camera().dragging();  // ui1 t01: POINTER_MAP_SCROLLING_MODE while the map is dragged
         const ui::GalacticDrag& d = ui_.galactic_hud.drag();
         c.fleet_drag = d.active;
@@ -1222,7 +1222,7 @@ void App::update_cursor(ui::HudDrawList& dl) {
         if (d.over_planet >= 0 && static_cast<size_t>(d.over_planet) < hud_planet_ids_.size() && session_ &&
             !session_->move_target_revealed(hud_planet_ids_[static_cast<size_t>(d.over_planet)]))
             c.drop_valid = false;  // GRC 1.1: an unrevealed planet is no drop target
-    } else if (screen_ == Screen::Battle) {
+    } else if (screen() == Screen::Battle) {
         c.rotating = bview_.camera().drag() == ui::TacticalCameraController::Drag::Rotate;
         c.scrolling = bview_.camera().drag() == ui::TacticalCameraController::Drag::Pan;
         // ui1 t01: the hovered object decides the plain cursor (ATTACK / out of range / CANT_ATTACK, SELECT, GARRISON_IN,
@@ -1284,7 +1284,7 @@ void App::build_panels(std::vector<ui::HudDrawList>& lists) {
     // Hero roster (battle): the local player's named heroes on the map, and the types with Show_Hero_Head (mcx4 t14).
     std::vector<ui::HeroEntry> heroes;
     hero_types_.clear();
-    if (screen_ == Screen::Battle && bview_.active())
+    if (screen() == Screen::Battle && bview_.active())
         for (const render::SnapshotObject& o : bview_.frame().objects)
             if (o.owner == local_player() && o.type < data_.types.size() && heroes.size() < 11 &&
                 game::shows_hero_head(data_.types.get_bool(o.type, "Is_Named_Hero"),
@@ -1307,7 +1307,7 @@ void App::build_panels(std::vector<ui::HudDrawList>& lists) {
             }
     // HUD_GAPS §3.2: the galactic roster (good set) every frame - the local player's named heroes on the map, then the
     // ones being built / awaiting respawn, max 11.
-    if (screen_ == Screen::Galactic)
+    if (screen() == Screen::Galactic)
         if (const galactic::GalacticSim* gs = galaxy()) {
             const std::vector<uint32_t> sel = orders_.selection();
             galactic_heroes_ = galactic_hero_entries(
@@ -1325,10 +1325,10 @@ void App::build_panels(std::vector<ui::HudDrawList>& lists) {
     frame_of(hf, !heroes.empty());
     // FIXPASS_GALACTIC §2.1: the good bar is the local player's own (self / allied heroes), whatever the faction.
     hf.good = true;
-    hf.tactical = screen_ == Screen::Battle;
+    hf.tactical = screen() == Screen::Battle;
     hf.heroes = heroes;
     hero_panel_.build(hf);
-    const bool galactic = screen_ == Screen::Galactic;
+    const bool galactic = screen() == Screen::Galactic;
     // P4 host: the open special dialog (GameSession::special_dialog, else the smoke's preview) feeds its panel from the
     // GalacticSim getters (game_info.cpp special_panel).
     const uint32_t kind = panel_kind();

@@ -110,7 +110,7 @@ bool App::story_hides_hud() const {
 // One Lua presentation event (lua_presentation); the camera and screen ops only.
 void App::story_script_event(const lua::PresentationEvent& e) {
     using Op = lua::PresentationOp;
-    const bool tactical = screen_ == Screen::Battle && bview_.active();
+    const bool tactical = screen() == Screen::Battle && bview_.active();
     const uint32_t frame = story_frame();
     const ScriptCamera::Resolver r = [this](int32_t id, ObjectFrame& f) { return story_object_frame(id, f); };
     switch (e.op) {
@@ -230,9 +230,9 @@ void App::story_script_event(const lua::PresentationEvent& e) {
 // A fade or bars left on at the end of a mode do not carry into the next (galactic <-> battle, battle -> battle). Called before the
 // frame's sim step and Lua presentation, so what the new mode's first ticks set is not wiped.
 void App::story_script_mode_check() {
-    if (screen_ != story_fx_screen_ || battles_seen_ != story_fx_battle_) {
+    if (screen() != story_fx_screen_ || battles_seen_ != story_fx_battle_) {
         if (story_fx_screen_ == Screen::Battle) story_present_.unlock_controls();  // the battle ended: its lock ends with it
-        story_fx_screen_ = screen_;
+        story_fx_screen_ = screen();
         story_fx_battle_ = battles_seen_;
         story_fade_.clear();
         story_box_.clear();
@@ -246,7 +246,7 @@ void App::story_script_mode_check() {
 
 void App::story_script_frame() {
     story_box_.update(now_s_);
-    if (screen_ == Screen::Battle && bview_.active()) {
+    if (screen() == Screen::Battle && bview_.active()) {
         ui::TacticalCameraController& cam = bview_.camera();
         if (story_moves_.scroll) {
             const ui::Vec3 look = cam.look_at();
@@ -274,7 +274,7 @@ void App::story_script_frame() {
         }
     }
     story_camera_commands();
-    if (screen_ == Screen::Battle && bview_.active()) {  // ui2 t08: the script's lightning bolts and fog switches go to the scene
+    if (screen() == Screen::Battle && bview_.active()) {  // ui2 t08: the script's lightning bolts and fog switches go to the scene
         const uint32_t now = story_frame();
         std::erase_if(story_lightning_, [now](const StoryLightning& l) { return now >= l.to; });
         std::vector<render::BeamInstance> beams;
@@ -302,7 +302,7 @@ void App::story_script_frame() {
 void App::story_camera_commands() {
     for (const StoryCameraCommand& c : story_present_.take_camera_commands()) {
         using K = StoryCameraCommand::Kind;
-        const bool gal = screen_ == Screen::Galactic;
+        const bool gal = screen() == Screen::Galactic;
         ui::Vec3 p;
         // 5.13: ZOOM_IN / ZOOM_OUT act only when the story's TUTORIAL_ZOOM gate (DISABLE_EVENT / ENABLE_EVENT, kind 4) permits.
         bool zoom_gate = true;
@@ -316,7 +316,7 @@ void App::story_camera_commands() {
                 if (!c.type.empty() && story_type_position(c.type, p)) {
                     const ui::Vec3 at{p.x + c.ox, p.y + c.oy, p.z + c.oz};
                     if (gal) gview_.camera().set_look_at({at.x, at.y, 0.0f});
-                    else if (screen_ == Screen::Battle && bview_.active()) bview_.camera().jump_to({at.x, at.y, bview_.camera().look_at().z});
+                    else if (screen() == Screen::Battle && bview_.active()) bview_.camera().jump_to({at.x, at.y, bview_.camera().look_at().z});
                 }
                 break;
             case K::ZoomIn:

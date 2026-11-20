@@ -10,7 +10,7 @@
 namespace alamo_game_app {
 
 uint32_t App::panel_kind() const {
-    if (screen_ != Screen::Galactic || !session_) return 0;
+    if (screen() != Screen::Galactic || !session_) return 0;
     if (const SpecialDialog* d = session_->special_dialog()) return d->kind;
     return panel_preview_;
 }
@@ -424,8 +424,8 @@ void App::step_sim() {
     // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q6): a Pause_Game_While_Playing movie holds the game mode while it plays.
     if ((full_movie_.playing() && full_movie_.pauses_game()) || (advisor_movie_.playing() && advisor_movie_.pauses_game())) return;
     if (load_intro_frames_ > 0) return;  // QA t11: the load screen reaches the screen before the push's blocking load
-    const bool demo = screen_ == Screen::Menu && demo_session();  // OI host: the attract demo behind the main menu
-    if ((screen_ == Screen::Menu && !demo) || screen_ == Screen::BattleLoad || screen_ == Screen::Quit) return;
+    const bool demo = screen() == Screen::Menu && demo_session();  // OI host: the attract demo behind the main menu
+    if ((screen() == Screen::Menu && !demo) || screen() == Screen::BattleLoad || screen() == Screen::Quit) return;
     const bool smoke = !opt_.smoke.empty();
     if (demo && attract_.idle_paused()) return;  // the attract idle pause (rendering continues)
     if (demo && !bview_.active()) {  // its hidden skirmish galaxy runs fast until the battle is pushed
@@ -433,8 +433,8 @@ void App::step_sim() {
             if (session_->tick()) post_tick();
         return;
     }
-    if (screen_ == Screen::SessionLoad) {  // skirmish: run the hidden galaxy fast until the battle is pushed
-        for (int i = 0; i < 200 && session_ && screen_ == Screen::SessionLoad; ++i)
+    if (screen() == Screen::SessionLoad) {  // skirmish: run the hidden galaxy fast until the battle is pushed
+        for (int i = 0; i < 200 && session_ && screen() == Screen::SessionLoad; ++i)
             if (session_->tick()) post_tick();
         return;
     }
@@ -443,9 +443,9 @@ void App::step_sim() {
         return;
     }
     if (smoke) {
-        const int n = screen_ == Screen::Galactic ? 16 : 4;
-        const Screen at = screen_;  // a battle start / end ends the frame's ticks (the presentation catches up)
-        for (int i = 0; i < n && session_ && screen_ == at; ++i)
+        const int n = screen() == Screen::Galactic ? 16 : 4;
+        const Screen at = screen();  // a battle start / end ends the frame's ticks (the presentation catches up)
+        for (int i = 0; i < n && session_ && screen() == at; ++i)
             if (session_->tick()) post_tick();
         return;
     }
@@ -539,7 +539,7 @@ void App::submit(commands::EventData ev, bool voice) {
     if (voice) respond(ev);  // UiOrder::voice false: the double-click order replays no unit response (spec §1.4)
     // mcx4 t14 (MCX4_PRES_RE_ANSWERS_3 Q10, click path 0x37250): the selected objects flash (rapid GUI flash). [port] every
     // local Select order in battle (click, double click, box); retail's box path was not traced.
-    if (ev.type() == commands::EventType::Select && screen_ == Screen::Battle)
+    if (ev.type() == commands::EventType::Select && screen() == Screen::Battle)
         for (const uint32_t id : ev.ids("ids")) bview_.rapid_flash(id, now_s_);
     const std::string name(ev.def().name);
     std::string detail;  // galactic moves: which fleet / planet / player (the reason alone hid the playtest failure)
@@ -567,15 +567,15 @@ void App::route_commands(std::vector<commands::EventData>& cmds, std::span<const
         }
         // GRC 1.1: no fleet orders to a planet whose raw revealed byte is clear (the human hop gate would refuse them):
         // click, drag-to-move and the HUD fleet drag all end here.
-        if (screen_ == Screen::Galactic && session_ &&
+        if (screen() == Screen::Galactic && session_ &&
             (e.type() == commands::EventType::MoveToObject || e.type() == commands::EventType::MoveObjectToObject) &&
             !session_->move_target_revealed(e.u("target"))) {
             ++hidden_moves_dropped_;
             continue;
         }
         // STY1 t03 (STY1_GENERIC_AUTOSAVE.md §1.2): the local player's HUD retreat press / fleet merge / land-to-space drop
-        if (e.type() == commands::EventType::Retreat && screen_ == Screen::Battle) story_ui_.generic("retreat_clicked");
-        if (screen_ == Screen::Galactic && e.type() == commands::EventType::FleetManagement) {
+        if (e.type() == commands::EventType::Retreat && screen() == Screen::Battle) story_ui_.generic("retreat_clicked");
+        if (screen() == Screen::Galactic && e.type() == commands::EventType::FleetManagement) {
             if (e.u("op") == commands::kFleetMerge) story_ui_.generic("merge_fleets");
             else if (e.u("op") == commands::kFleetLaunch) {
                 story_ui_.generic("land_to_space");
@@ -584,13 +584,13 @@ void App::route_commands(std::vector<commands::EventData>& cmds, std::span<const
         }
         // mcx4 t13 (MCX4_PRES_RE_ANSWERS_2 Q4): a refused request plays the local faction's refusal line and opens nothing.
         // [port] the local player's own running retreat: silent (retail's second click cancels; the port has no cancel).
-        if (e.type() == commands::EventType::Retreat && screen_ == Screen::Battle)
+        if (e.type() == commands::EventType::Retreat && screen() == Screen::Battle)
             if (const sim::TacticalBattle* rb = battle(); rb && rb->retreating_player() != local_player())
                 if (const int32_t code = rb->retreat_refusal(local_player()); code != 0) {
                     audio_.faction_sfx(GameAudioHost::retreat_refusal_tag(!rb->is_space(), code));
                     continue;
                 }
-        if (e.type() == commands::EventType::Retreat && screen_ == Screen::Battle && !ui_.gui.find(ui::dlg::kRetreat)) {
+        if (e.type() == commands::EventType::Retreat && screen() == Screen::Battle && !ui_.gui.find(ui::dlg::kRetreat)) {
             screens_.show_retreat_confirm();
             continue;
         }
@@ -644,7 +644,7 @@ void App::handle_hud_actions(const std::vector<ui::HudAction>& acts) {
             case ui::HudAction::Kind::RadarCameraJump:
                 // ui4 t07 (HUD_GAPS §10.1): the galactic radar jumps the galaxy camera (instant, no planet selection); ignored
                 // under the story's SCROLL_LOCK.
-                if (screen_ == Screen::Galactic) {
+                if (screen() == Screen::Galactic) {
                     if (!story_present_.scroll_locked() && !story_present_.controls_locked()) gview_.camera().set_look_at({a.x, a.y, 0.0f});
                 } else {
                     bview_.camera().set_look_at({a.x, a.y, 0.0f});
@@ -683,18 +683,18 @@ void App::handle_hud_actions(const std::vector<ui::HudAction>& acts) {
                 beacon_pick_ = false;
                 break;
             case ui::HudAction::Kind::BeginAbilityTargeting:  // the target is the next world click (TargetingController)
-                if (screen_ == Screen::Battle && targeting_.begin(a)) {
+                if (screen() == Screen::Battle && targeting_.begin(a)) {
                     reinforce_unit_ = 0;
                     bombing_end(false);
                     beacon_pick_ = false;
                 }
                 break;
             case ui::HudAction::Kind::TacticalBuy:  // Build_NN: Production {type_index, location = builder}
-                if (screen_ == Screen::Battle && a.unit != 0 && a.value >= 0)
+                if (screen() == Screen::Battle && a.unit != 0 && a.value >= 0)
                     submit(commands::ev::production(static_cast<uint16_t>(a.value), a.unit));
                 break;
             case ui::HudAction::Kind::TacticalCancel:  // tqueueNN: Production {type_index, location, cancel, queue, index}
-                if (screen_ == Screen::Battle && a.value >= 0 && a.ids.size() >= 2)
+                if (screen() == Screen::Battle && a.value >= 0 && a.ids.size() >= 2)
                     submit(commands::ev::production(static_cast<uint16_t>(a.value), a.unit, true,
                                                     static_cast<uint8_t>(a.ids[0]), static_cast<uint8_t>(a.ids[1])));
                 break;
@@ -709,10 +709,10 @@ void App::handle_hud_actions(const std::vector<ui::HudAction>& acts) {
                 if (a.value >= 0) select_wing(static_cast<size_t>(a.value), a.shift, a.ctrl);
                 break;
             case ui::HudAction::Kind::HeroSelect:  // FIXPASS_GALACTIC §2.3 tactical single click: replace the selection
-                if (a.unit && screen_ == Screen::Battle) submit(commands::ev::select({a.unit}));
+                if (a.unit && screen() == Screen::Battle) submit(commands::ev::select({a.unit}));
                 break;
             case ui::HudAction::Kind::HeroSelectGroup: {  // §2.3 tactical double click: the container, else every own object
-                if (screen_ != Screen::Battle || !bview_.active() || a.unit == 0) break;  // of the hero's type; then centre
+                if (screen() != Screen::Battle || !bview_.active() || a.unit == 0) break;  // of the hero's type; then centre
                 std::vector<uint32_t> ids = a.ids;
                 const render::SnapshotObject* hero = nullptr;
                 for (const render::SnapshotObject& o : bview_.frame().objects)
@@ -730,7 +730,7 @@ void App::handle_hud_actions(const std::vector<ui::HudAction>& acts) {
             case ui::HudAction::Kind::HeroFocusPlanet:  // §2.2 galactic single click: centre on the hero's planet, select it
             case ui::HudAction::Kind::HeroZoomPlanet: {  // §2.2 double click: zoom in (state 0 / 2) / out (1 / 3)
                 const galactic::GalacticSim* g = galaxy();
-                if (!g || screen_ != Screen::Galactic || a.ids.empty() || story_controls_locked()) break;
+                if (!g || screen() != Screen::Galactic || a.ids.empty() || story_controls_locked()) break;
                 const PlanetIndex pi = planet_index(*g, a.ids.front());
                 if (pi == kInvalidPlanet) break;
                 if (a.kind == ui::HudAction::Kind::HeroFocusPlanet) {
@@ -775,7 +775,7 @@ void App::handle_hud_actions(const std::vector<ui::HudAction>& acts) {
                 if (tactical_button(a)) break;  // ui3 t01 / t03: c_button00 / 02 / 04, b_reinforcement, beacon, movie mode, droid
                 // P1_DOUBLE_CLICK_MOVE.md §2.1: the attack-move / waypoint / guard order buttons (c_button01 / 03 / 05) arm the
                 // one-shot move toggles of the next move order.
-                if (screen_ == Screen::Battle && (ascii_iequals(a.name, "c_button01") || ascii_iequals(a.name, "c_button03") || ascii_iequals(a.name, "c_button05"))) {
+                if (screen() == Screen::Battle && (ascii_iequals(a.name, "c_button01") || ascii_iequals(a.name, "c_button03") || ascii_iequals(a.name, "c_button05"))) {
                     orders_.arm_move_toggle(ascii_iequals(a.name, "c_button01")   ? ui::MoveToggle::AttackMove
                                             : ascii_iequals(a.name, "c_button03") ? ui::MoveToggle::Waypoint
                                                                            : ui::MoveToggle::GuardMove);
@@ -783,12 +783,12 @@ void App::handle_hud_actions(const std::vector<ui::HudAction>& acts) {
                 }
                 // cu9g t03 (HUD_GAPS §9.4): the land b_special_weapon = the bombing-run button (0x346a80 -> 0x2e7950); a disabled
                 // button never reaches here (HudButtons swallows the click). Space: below (ui1 t04).
-                if (screen_ == Screen::Battle && !bview_.space() && ascii_iequals(a.name, "b_special_weapon") && a.button == ui::Button::Left) {
+                if (screen() == Screen::Battle && !bview_.space() && ascii_iequals(a.name, "b_special_weapon") && a.button == ui::Button::Left) {
                     bombing_toggle();
                     break;
                 }
                 // ui1 t04 (HUD_GAPS §9.4: 0x346a80 in HUD mode 2 fires the space superweapon): aim the local special weapon.
-                if (screen_ == Screen::Battle && bview_.space() && ascii_iequals(a.name, "b_special_weapon") && a.button == ui::Button::Left) {
+                if (screen() == Screen::Battle && bview_.space() && ascii_iequals(a.name, "b_special_weapon") && a.button == ui::Button::Left) {
                     space_weapon_toggle();
                     break;
                 }
@@ -1563,10 +1563,10 @@ void App::handle_menu_actions(const std::vector<ui::MenuAction>& acts) {
             case K::QuitToMainMenu:
                 paused_ = false;
                 end_session();
-                screen_ = Screen::Menu;
+                flow_.on(ScreenEvent::MainMenu);
                 open_main_menu();
                 break;
-            case K::ExitGame: screen_ = Screen::Quit; break;
+            case K::ExitGame: flow_.on(ScreenEvent::Quit); break;
             case K::CheckMod: check_mod(a.mod); break;    // modc t08
             case K::LaunchMod: launch_mod(a.mod); break;
             case K::PreviewAudio: audio_.set_volumes(a.audio.master, a.audio.sfx, a.audio.speech, a.audio.music); break;

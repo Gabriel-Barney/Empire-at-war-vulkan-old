@@ -84,10 +84,10 @@ void App::story_advisor_frame() {
     if (!session_ || bench_active() || demo_session()) return;
     uint8_t mode = 255;
     uint32_t tick = 0;
-    if (const sim::TacticalBattle* b = battle(); b && screen_ == Screen::Battle) {
+    if (const sim::TacticalBattle* b = battle(); b && screen() == Screen::Battle) {
         mode = bview_.space() ? 1 : 2;
         tick = static_cast<uint32_t>(b->frame());
-    } else if (galaxy() && screen_ == Screen::Galactic) {
+    } else if (galaxy() && screen() == Screen::Galactic) {
         mode = 0;
         // 6.4: the galactic mode starts once per campaign (a return from a battle does not restart its hint clock); its tick
         // counts the render time spent on the map [port].
@@ -147,7 +147,7 @@ void App::story_present_frame() {
                            : snd == StoryHint::Sound::Hint ? "SFXEvent_HUD_Advisor_Hint"
                                                            : "SFXEvent_HUD_Advisor_Message");
         // ui4 t11 (P4_SIM_SYSTEMS §2.7.2): a line shown in galactic mode goes to the Droid Log as three rows.
-        if (sh && screen_ == Screen::Galactic)
+        if (sh && screen() == Screen::Galactic)
             if (const galactic::GalacticSim* g = galaxy()) {
                 const std::u16string* day = ui_.text.find("TEXT_LOG_CYCLE_01");
                 const std::u16string* sep = ui_.text.find("TEXT_HELP_SEPERATOR");
@@ -303,8 +303,8 @@ bool App::story_project(const ui::HudCanvas& canvas, float x, float y, float z, 
     const uint32_t w = targets_.width, h = targets_.height;
     if (w == 0 || h == 0) return false;
     ui::View v;
-    if (screen_ == Screen::Galactic && gview_.attached()) v = ui::make_view(gview_.camera_params(w, h), w, h);
-    else if (screen_ == Screen::Battle && bview_.active()) v = ui::make_view(bview_.camera_params(w, h), w, h);
+    if (screen() == Screen::Galactic && gview_.attached()) v = ui::make_view(gview_.camera_params(w, h), w, h);
+    else if (screen() == Screen::Battle && bview_.active()) v = ui::make_view(bview_.camera_params(w, h), w, h);
     else return false;
     float sx = 0.0f, sy = 0.0f;
     if (!ui::project(v, {x, y, z}, sx, sy)) return false;
@@ -318,7 +318,7 @@ bool App::story_project(const ui::HudCanvas& canvas, float x, float y, float z, 
 bool App::story_type_position(std::string_view type, ui::Vec3& out) const {
     const uint32_t t = data_.rules.find_type(type);
     if (t == galactic::kNoIndex) return false;
-    if (screen_ == Screen::Galactic) {
+    if (screen() == Screen::Galactic) {
         const galactic::GalacticSim* g = galaxy();
         if (!g) return false;
         for (const galactic::PlanetState& p : g->planets())
@@ -328,7 +328,7 @@ bool App::story_type_position(std::string_view type, ui::Vec3& out) const {
             }
         return false;
     }
-    if (screen_ == Screen::Battle && bview_.active())
+    if (screen() == Screen::Battle && bview_.active())
         for (const render::SnapshotObject& o : bview_.frame().objects)
             if (o.type == t) {
                 out = {o.position.x, o.position.y, o.position.z};
@@ -339,7 +339,7 @@ bool App::story_type_position(std::string_view type, ui::Vec3& out) const {
 
 bool App::story_container_position(std::string_view type, ui::Vec3& out) const {
     const uint32_t t = data_.rules.find_type(type);
-    const galactic::GalacticSim* g = screen_ == Screen::Galactic ? galaxy() : nullptr;
+    const galactic::GalacticSim* g = screen() == Screen::Galactic ? galaxy() : nullptr;
     if (t == galactic::kNoIndex || !g) return false;
     for (const galactic::FleetState& f : g->fleets()) {
         if (!f.alive) continue;
@@ -359,7 +359,7 @@ bool App::story_container_position(std::string_view type, ui::Vec3& out) const {
 }
 
 bool App::story_object_position(int32_t object, ui::Vec3& out) const {
-    if (screen_ == Screen::Galactic) {
+    if (screen() == Screen::Galactic) {
         const galactic::GalacticSim* g = galaxy();
         if (!g) return false;
         const PlanetIndex row = planet_index(*g, static_cast<uint32_t>(object));
@@ -368,7 +368,7 @@ bool App::story_object_position(int32_t object, ui::Vec3& out) const {
         out = {p.x, p.y, p.z};
         return true;
     }
-    if (screen_ == Screen::Battle && bview_.active())
+    if (screen() == Screen::Battle && bview_.active())
         for (const render::SnapshotObject& o : bview_.frame().objects)
             if (static_cast<int32_t>(o.id) == object) {
                 out = {o.position.x, o.position.y, o.position.z};
@@ -381,8 +381,8 @@ bool App::story_object_position(int32_t object, ui::Vec3& out) const {
 // component without a flash texture still reads [port].
 void App::story_component_flash(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
     (void)canvas;
-    const bool gal = screen_ == Screen::Galactic;
-    if (!gal && screen_ != Screen::Battle) return;
+    const bool gal = screen() == Screen::Galactic;
+    if (!gal && screen() != Screen::Battle) return;
     ui::HudButtons& buttons = gal ? ui_.galactic_hud.buttons() : ui_.tactical_hud.buttons();
     const ui::HudLayout& layout = gal ? ui_.galactic_hud.layout() : ui_.tactical_hud.layout();
     std::set<int32_t> active;
@@ -406,9 +406,9 @@ void App::story_component_flash(ui::HudDrawList& dl, const ui::HudCanvas& canvas
 }
 
 void App::build_story_pointers(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
-    if (screen_ != Screen::Galactic && screen_ != Screen::Battle) return;
+    if (screen() != Screen::Galactic && screen() != Screen::Battle) return;
     story_component_flash(dl, canvas);
-    const bool gal = screen_ == Screen::Galactic;
+    const bool gal = screen() == Screen::Galactic;
     const ui::HudLayout& layout = gal ? ui_.galactic_hud.layout() : ui_.tactical_hud.layout();
     const ui::HudButtons& buttons = gal ? ui_.galactic_hud.buttons() : ui_.tactical_hud.buttons();
     // Arrow slots (§3.2): one arrow per slot at its target.
@@ -509,7 +509,7 @@ void App::build_story_pointers(ui::HudDrawList& dl, const ui::HudCanvas& canvas)
 // mcx4 t14 (MCX4_T14_RE_ANSWERS "GameConstants.Win_Lose_Message_Font", 0x365150): the banner text centred horizontally,
 // its top at 0.4 of the screen height, in Win_Lose_Message_Font at Win_Lose_Message_Font_Size.
 void App::build_win_banner(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
-    if (screen_ != Screen::Battle || win_banner_.empty() || !ui_.fonts) return;
+    if (screen() != Screen::Battle || win_banner_.empty() || !ui_.fonts) return;
     // ledger: consumes GameConstants.Win_Lose_Message_Font
     // ledger: consumes GameConstants.Win_Lose_Message_Font_Size
     const int32_t font = ui_.fonts->font(hud_consts_.win_lose_font, hud_consts_.win_lose_font_size, canvas.font_height());
@@ -529,7 +529,7 @@ void App::build_win_banner(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
 // retreats (every player sees it), in the retreating faction's label and colour. Galactic: every planet's queue-head
 // build with Build_Countdown_Timer (no owner filter), ground queue first, Spacing apart.
 void App::build_countdown_column(ui::HudDrawList& dl, const ui::HudCanvas& canvas) {
-    if (!ui_.fonts || (screen_ != Screen::Battle && screen_ != Screen::Galactic)) return;
+    if (!ui_.fonts || (screen() != Screen::Battle && screen() != Screen::Galactic)) return;
     const galactic::GalacticSim* g = galaxy();
     if (!g) return;
     const std::string_view fname = hud_consts_.countdown_font.empty() ? std::string_view("Arial") : std::string_view(hud_consts_.countdown_font);
@@ -545,7 +545,7 @@ void App::build_countdown_column(ui::HudDrawList& dl, const ui::HudCanvas& canva
                            canvas.width, st);
     };
     const auto ascii32 = [](const std::string& s) { return std::u32string(s.begin(), s.end()); };
-    if (screen_ == Screen::Battle) {
+    if (screen() == Screen::Battle) {
         const sim::TacticalBattle* b = battle();
         if (!b || cine_.shot.active()) return;
         const int32_t rp = b->retreating_player();
@@ -595,11 +595,11 @@ void App::build_story_overlay(ui::HudDrawList& dl, const ui::HudCanvas& canvas) 
 // FORCE_CLICK_GUI (§3.4): the presenter's queued component names become a click on the component, ahead of the HUD's own
 // input handling (appended to the routed pointer events).
 void App::story_forced_clicks() {
-    if (screen_ != Screen::Galactic && screen_ != Screen::Battle) {
+    if (screen() != Screen::Galactic && screen() != Screen::Battle) {
         (void)story_present_.take_forced_clicks();
         return;
     }
-    const bool gal = screen_ == Screen::Galactic;
+    const bool gal = screen() == Screen::Galactic;
     const ui::HudLayout& layout = gal ? ui_.galactic_hud.layout() : ui_.tactical_hud.layout();
     for (const std::string& name : story_present_.take_forced_clicks()) {
         const int32_t idx = ui_.components.find(name);

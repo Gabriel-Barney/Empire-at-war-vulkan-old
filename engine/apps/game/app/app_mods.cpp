@@ -150,7 +150,7 @@ void App::launch_mod(const std::string& id) {
         ui_.front.set_mod_report(id, {ui::utf8_to_utf32("Launch failed: " + err)});
         return;
     }
-    screen_ = Screen::Quit;
+    flow_.on(ScreenEvent::Quit);
 }
 
 }  // namespace alamo_game_app

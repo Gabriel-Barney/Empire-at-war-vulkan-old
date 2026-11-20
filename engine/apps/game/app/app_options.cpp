@@ -170,7 +170,7 @@ void App::space_weapon_toggle() {
 // runs and the main menu comes back when it ends or is clicked away. CreditsText_<LANGUAGE>.DAT of the loaded text
 // language, else ENGLISH.
 void App::show_credits() {
-    if (screen_ != Screen::Menu || !data_.files) return;
+    if (screen() != Screen::Menu || !data_.files) return;
     std::vector<uint8_t> bytes;
     const std::string lang = ui_.text.language.empty() ? std::string("ENGLISH") : ui_.text.language;
     if (!data_.files->read(ui::credits_path(lang), bytes) && !data_.files->read(ui::credits_path("ENGLISH"), bytes)) {
