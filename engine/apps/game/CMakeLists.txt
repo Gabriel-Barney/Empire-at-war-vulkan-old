@@ -210,6 +210,15 @@ add_test(NAME alamo_game_asset_audit_tests COMMAND alamo_game_asset_audit_tests)
 # modc t07: the synthetic mod of testdata/mod_fixture (a new faction, unit, planet, campaign and a Lua override) through
 # the real MODPATH= route, no game data; read only (no fixture path shared with any other test). The second entry runs the
 # exe itself and checks its JSON summary (docs/MODS.md section 5.1).
+# ref4 t06: every shared GameConstants tag read once (GameConstants::shared); a temp mod over the fixture reaches each user.
+add_executable(alamo_game_shared_constants_tests tests/test_shared_constants.cpp)
+target_link_libraries(alamo_game_shared_constants_tests PRIVATE alamo_core alamo_game_core alamo_test_support)
+if(TARGET alamo_ai_tactical)
+  target_link_libraries(alamo_game_shared_constants_tests PRIVATE alamo_ai_tactical)
+  target_compile_definitions(alamo_game_shared_constants_tests PRIVATE ALAMO_TEST_HAVE_AI_TACTICAL=1)
+endif()
+add_test(NAME alamo_game_shared_constants_tests COMMAND alamo_game_shared_constants_tests ${CMAKE_CURRENT_SOURCE_DIR}/testdata/mod_fixture)
+set_tests_properties(alamo_game_shared_constants_tests PROPERTIES TIMEOUT 120)
 # ref4 t05: open_game_data on the synthetic mod fixture (accepted, refused, no data, VFS error).
 add_executable(alamo_game_open_tests tests/test_open_game_data.cpp)
 target_link_libraries(alamo_game_open_tests PRIVATE alamo_game_open alamo_test_support)

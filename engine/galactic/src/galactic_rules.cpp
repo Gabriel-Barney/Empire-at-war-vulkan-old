@@ -215,7 +215,7 @@ EconomyConstants load_economy_constants(const data::GameDatabase& db) {
     c.indigenous_spawn_destruction_reward = g.get_int("Indigenous_Spawn_Destruction_Reward", 0);  // mcx4 t09 (Q5)
     c.ai_build_task_reservation_seconds =
         g.get_float("AI_BuildTaskReservationSeconds", c.ai_build_task_reservation_seconds);  // mcx4 t05 (C1)
-    c.health_low_percent_threshold = g.get_float("Health_Low_Percent_Threshold", c.health_low_percent_threshold);  // a2l t03
+    c.health_low_percent_threshold = g.shared.health_low_percent_threshold.value_or(c.health_low_percent_threshold);  // a2l t03; ref4 t06 (shared)
     {  // a2m t05: Low_ / Medium_ / High_Threat_Reachability_Tolerance (A2M_T04_RE_ANSWERS Q3)
         static constexpr const char* kTol[3] = {"Low_Threat_Reachability_Tolerance", "Medium_Threat_Reachability_Tolerance",
                                                 "High_Threat_Reachability_Tolerance"};
@@ -229,7 +229,7 @@ EconomyConstants load_economy_constants(const data::GameDatabase& db) {
         g.get_float("MaxInfluenceTransitionAlignmentPenalty", c.influence_alignment_penalty);
     c.ai_uses_galactic_pop_cap = g.get_bool("AI_Uses_Galactic_Pop_Cap", c.ai_uses_galactic_pop_cap);  // A2 galactic
     // OI galactic (STRATEGIC_GAPS 2.1): the galactic mode's speed multiplier M.
-    c.fleet_speed_multiplier = g.get_float("Object_Max_Speed_Multiplier_Galactic", c.fleet_speed_multiplier);
+    c.fleet_speed_multiplier = g.shared.object_max_speed_multiplier_galactic.value_or(c.fleet_speed_multiplier);  // ref4 t06: GameConstants::shared
     c.planet_reveal_delay_seconds = g.get_float("Planet_Reveal_Delay_Time", c.planet_reveal_delay_seconds);  // GRC 1.3
     const auto float_list = [&g](const char* tag, std::vector<float>& out) {  // GRC 4.5
         if (auto t = g.get(tag)) {

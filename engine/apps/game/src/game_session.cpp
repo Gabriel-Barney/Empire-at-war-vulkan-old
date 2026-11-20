@@ -223,7 +223,7 @@ bool GameSession::start(std::vector<std::string>* diag, const commands::CommandR
         // mcx8 t07 Game.InterventionsEnabled (AI_GALACTIC_TOKENS §4): the advanced game options set the "options changed"
         // settings flag; with random events off the token is 0.0 and Disable_Interventions_Template turns interventions off.
         gcfg.interventions_enabled = spec_.interventions_enabled();
-        gcfg.ai_uses_fog_galactic = d.db.constants().get_bool("AIUsesFogOfWarGalactic", gcfg.ai_uses_fog_galactic);  // shipped False
+        gcfg.ai_uses_fog_galactic = d.db.constants().shared.ai_uses_fog_of_war_galactic.value_or(gcfg.ai_uses_fog_galactic);  // ref4 t06: GameConstants::shared (shipped False)
         const uint32_t diff = d.rules.find_difficulty(difficulty_name(spec_.difficulty));
         // q6 t08: the type from the data (resolve_ai_type): campaigns read the campaign's AI_Player_Control pairs, a
         // skirmish gives only its AI slot (ps.ai) the faction's Basic_AI (SKIRMISH_SETUP §2.1). modc t17: base FoC too.

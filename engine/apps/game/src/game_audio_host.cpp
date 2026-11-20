@@ -282,7 +282,7 @@ bool GameAudioHost::init(const GameData& data, AudioBackendKind kind, uint32_t s
     game_data_ = std::make_unique<audio::GameAudioData>();
     game_data_->load(*data.files);
     // mcx4 t13: the health warning thresholds (MCX4_T13_RE_ANSWERS "GameObjectType.SFXEvent_Health_Low_Warning family").
-    health_low_ = data.db.constants().get_float("Health_Low_Percent_Threshold", health_low_);
+    health_low_ = data.db.constants().shared.health_low_percent_threshold.value_or(health_low_);  // ref4 t06: GameConstants::shared
     health_critical_ = data.db.constants().get_float("Health_Critical_Percent_Threshold", health_critical_);
     audio::GameSampleConfig sc;
     if (data.vfs) sc.sfx_megs = audio::GameSampleSource::default_sfx_megs(*data.vfs, sc.language);

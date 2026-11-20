@@ -69,12 +69,38 @@ struct LoadedXmlFile {
     std::unique_ptr<XmlDocument> doc;
 };
 
+// ref4 t06: the GameConstants tags that several modules read, each read here once, so a mod's value reaches every user
+// and no user spells the tag itself. A field is empty when the file has no such tag (or there is no file); a user then keeps
+// its own default, as before (the defaults still differ, e.g. Health_Low_Percent_Threshold 0.33 for the AI and the audio
+// host, 0 for combat; FoC sets every tag, so unifying them moves no FoC golden but does move the synthetic ones: an
+// attributed change of its own). Test: alamo_game_shared_constants_tests.
+struct SharedGameConstants {
+    // Galactic and tactical AI (free-store eligibility), combat (low-health rule), alamo_game's health warning sounds.
+    std::optional<float> health_low_percent_threshold;  // Health_Low_Percent_Threshold (+0x11b38; FoC 0.33)
+    // Skirmish start credits: sim skirmish options, alamo_game's option dialogs and skirmish galaxy, alamo_headless --skirmish-ai.
+    std::optional<int32_t> mp_default_credits;  // MP_Default_Credits (FoC 6000; a negative value reads as 0)
+    std::optional<float> object_max_speed_multiplier_galactic;  // Object_Max_Speed_Multiplier_Galactic (FoC 5.0): fleet speed
+    std::optional<float> object_max_speed_multiplier_space;     // Object_Max_Speed_Multiplier_Space (FoC 1.2): movement, combat
+    std::optional<float> object_max_speed_multiplier_land;      // Object_Max_Speed_Multiplier_Land (FoC 1.56): movement, combat
+    std::optional<float> infantry_turn_blend_time;  // InfantryTurnBlendTime (+0x1528; FoC 0.2): movement, locomotor blends
+    // Raid force limits: galactic conflicts and the battle host's transition constants.
+    std::optional<int32_t> raid_force_max_limited_objects;  // Raid_Force_Max_Limited_Objects (FoC 2)
+    std::optional<int32_t> raid_force_max_heros;            // Raid_Force_Max_Heros (FoC 1)
+    // Fog cell sizes and the AI's fog use: tactical AI constants, the battle's fog constants, the galactic AI.
+    std::optional<float> desired_land_fow_cell_size;   // DesiredLandFOWCellSize (FoC 15)
+    std::optional<float> desired_space_fow_cell_size;  // DesiredSpaceFOWCellSize (FoC 100)
+    std::optional<bool> ai_uses_fog_of_war_galactic;   // AIUsesFogOfWarGalactic (FoC False)
+    std::optional<bool> ai_uses_fog_of_war_space;      // AIUsesFogOfWarSpace (FoC False)
+    std::optional<bool> ai_uses_fog_of_war_land;       // AIUsesFogOfWarLand (FoC False)
+};
+
 // Generic tag -> text table for <GameConstants>. Lookups are case-insensitive. For a tag that
 // appears more than once the LAST occurrence is returned (the parser assigns each occurrence).
 struct GameConstants {
     XmlNode element;  // the <GameConstants> root (null if the file was missing)
     std::vector<std::pair<std::string_view, std::string_view>> fields;  // document order, trimmed text
     float max_fleet_move_distance = 100.0f;  // <MaximumFleetMovementDistance>; 1.0 when the file has no tag (0x2c91c0), 100 without a file
+    SharedGameConstants shared;  // ref4 t06
 
     std::optional<std::string_view> get(std::string_view tag) const;
     float get_float(std::string_view tag, float fallback) const;

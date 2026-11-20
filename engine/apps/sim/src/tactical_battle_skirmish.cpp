@@ -30,7 +30,7 @@ float to_f(std::string_view v) { return static_cast<float>(std::atof(std::string
 BattleConfig::SkirmishOptions skirmish_option_defaults(const data::GameConstants& gc) {
     BattleConfig::SkirmishOptions o;
     o.set = true;
-    o.credits = std::max(0, gc.get_int("MP_Default_Credits", o.credits));
+    o.credits = gc.shared.mp_default_credits.value_or(o.credits);  // ref4 t06: GameConstants::shared
     o.heroes = gc.get_bool("MP_Default_Allow_Heroes", o.heroes);
     o.starting_units = gc.get_bool("MP_Default_Free_Starting_Units", o.starting_units);
     o.super_weapons = gc.get_bool("MP_Default_Allow_SuperWeapons", o.super_weapons);

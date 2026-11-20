@@ -250,6 +250,31 @@ void GameDatabase::load_constants(const FileProvider& provider, bool& ok) {
     // mcx5 t02 (MCX5_RE_ANSWERS Q1.9, 0x2c91c0 [H]): a file without the tag keeps the GameConstants default 1.0.
     if (const auto v = c.get("MaximumFleetMovementDistance")) c.max_fleet_move_distance = xml_values::to_float(*v);
     else c.max_fleet_move_distance = 1.0f;
+    // ref4 t06: the tags several modules read, once (game_database.hpp, SharedGameConstants).
+    SharedGameConstants& s = c.shared;
+    const auto f = [&c](std::string_view tag, std::optional<float>& out) {
+        if (const auto v = c.get(tag)) out = xml_values::to_float(*v);
+    };
+    const auto i = [&c](std::string_view tag, std::optional<int32_t>& out) {
+        if (const auto v = c.get(tag)) out = xml_values::to_int(*v);
+    };
+    const auto b = [&c](std::string_view tag, std::optional<bool>& out) {
+        if (const auto v = c.get(tag)) out = xml_values::to_bool(*v);
+    };
+    f("Health_Low_Percent_Threshold", s.health_low_percent_threshold);
+    i("MP_Default_Credits", s.mp_default_credits);
+    if (s.mp_default_credits) s.mp_default_credits = std::max(0, *s.mp_default_credits);
+    f("Object_Max_Speed_Multiplier_Galactic", s.object_max_speed_multiplier_galactic);
+    f("Object_Max_Speed_Multiplier_Space", s.object_max_speed_multiplier_space);
+    f("Object_Max_Speed_Multiplier_Land", s.object_max_speed_multiplier_land);
+    f("InfantryTurnBlendTime", s.infantry_turn_blend_time);
+    i("Raid_Force_Max_Limited_Objects", s.raid_force_max_limited_objects);
+    i("Raid_Force_Max_Heros", s.raid_force_max_heros);
+    f("DesiredLandFOWCellSize", s.desired_land_fow_cell_size);
+    f("DesiredSpaceFOWCellSize", s.desired_space_fow_cell_size);
+    b("AIUsesFogOfWarGalactic", s.ai_uses_fog_of_war_galactic);
+    b("AIUsesFogOfWarSpace", s.ai_uses_fog_of_war_space);
+    b("AIUsesFogOfWarLand", s.ai_uses_fog_of_war_land);
 }
 
 void GameDatabase::load_game_objects(const FileProvider& provider, bool& ok) {
