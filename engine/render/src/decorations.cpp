@@ -103,13 +103,13 @@ void align_to(std::vector<uint8_t>& v, size_t a) {
 // ----------------------------------------------------------------------------------------- setup
 
 bool WorldRenderer::init_decorations(const terrain::TerrainMesh& mesh, const WorldDecorations& d, std::string* error) {
-    Renderer& r = *r_;
+    RendererCore& r = *r_;
     auto fail = [&](const std::string& why) {
         if (error) *error = why;
         return false;
     };
-    deco_cache_ = std::make_unique<Renderer::XConstCache>();
-    fow_cache_ = std::make_unique<Renderer::XConstCache>();
+    deco_cache_ = std::make_unique<XConstCache>();
+    fow_cache_ = std::make_unique<XConstCache>();
     deco_time_ = 0.0f;
     if (r.desc_.effects) {
         for (uint32_t m = 0; m < terrain::kRenderModeCount; ++m) {
@@ -472,7 +472,7 @@ bool WorldRenderer::build_dynamic(const rhi::Frame& frame, std::vector<DecoDraw>
 
 // ----------------------------------------------------------------------------------- renderer side
 
-uint32_t Renderer::ff_geometry_draws(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, std::span<const FfGeoDraw> draws,
+uint32_t RendererCore::ff_geometry_draws(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, std::span<const FfGeoDraw> draws,
                                      uint32_t* pipeline_binds) {
     if (draws.empty()) return 0;
     const size_t n = draws.size();
@@ -576,7 +576,7 @@ uint32_t Renderer::ff_geometry_draws(rhi::Frame& frame, VkCommandBuffer cmd, con
     return drawn;
 }
 
-void Renderer::world_draw_decorations(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, uint32_t width,
+void RendererCore::world_draw_decorations(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, uint32_t width,
                                       uint32_t height) {
     WorldRenderer& w = *world_;
     if (w.options_.space) return;  // space: only the FOW plane (background pass)
@@ -715,7 +715,7 @@ void Renderer::world_draw_decorations(rhi::Frame& frame, VkCommandBuffer cmd, co
         if (!box_outside(dv.view_proj, w.patches_[pi].bounds) && w.fow_patch_[pi].second > 0) vis.push_back(pi);
     if (vis.empty()) return;
     GeoState g;
-    Renderer::XConstCache& cc = *w.fow_cache_;
+    XConstCache& cc = *w.fow_cache_;
     cc.generation = ++w.draw_generation_;
     const WorldRenderer::ConstRegion reg = translated_state(ps, nullptr, g) ? w.const_region(frame, g.int_bool) : WorldRenderer::ConstRegion{};
     const VkDescriptorSet tex = reg.ptr ? frame.descriptors(0).allocate(std_layouts_.textures()) : VK_NULL_HANDLE;
@@ -742,7 +742,7 @@ void Renderer::world_draw_decorations(rhi::Frame& frame, VkCommandBuffer cmd, co
     }
 }
 
-void Renderer::world_draw_water_tracks(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, uint32_t width,
+void RendererCore::world_draw_water_tracks(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, uint32_t width,
                                        uint32_t height) {
     (void)width;
     (void)height;
@@ -784,7 +784,7 @@ void Renderer::world_draw_water_tracks(rhi::Frame& frame, VkCommandBuffer cmd, c
     ds.pending += static_cast<uint32_t>(ff.size()) - n;
 }
 
-void Renderer::world_draw_space_fow(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, uint32_t width, uint32_t height) {
+void RendererCore::world_draw_space_fow(rhi::Frame& frame, VkCommandBuffer cmd, const ViewMatrices& view, uint32_t width, uint32_t height) {
     (void)width;
     (void)height;
     WorldRenderer& w = *world_;

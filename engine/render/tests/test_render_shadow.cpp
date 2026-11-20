@@ -149,7 +149,7 @@ void land_map(Gpu& g, const std::string& src_dir, const char* root) {
                        ws.water_pending == 0;
                 if (!done) {
                     rr.wait_translations();
-                    rr.pipelines().wait_idle();
+                    rr.wait_pipelines();
                 }
             }
             CHECK(done);
@@ -164,7 +164,7 @@ void land_map(Gpu& g, const std::string& src_dir, const char* root) {
                     CHECK(frame(g, rr, o, vm, scene.instances(), r2, st, clear, scene.sky()));
                     if (st.post_pending == 0 && st.pending_pipeline == 0 && st.translation_pending == 0) break;
                     rr.wait_translations();
-                    rr.pipelines().wait_idle();
+                    rr.wait_pipelines();
                 }
                 CHECK(st.post_pending == 0);
                 volumes[mode] = st.shadow_volumes;
@@ -229,7 +229,7 @@ void land_map(Gpu& g, const std::string& src_dir, const char* root) {
                     CHECK(frame(g, rr, o, vm, scene.instances(), mo, st, clear, scene.sky()));
                     if (k > 1 && st.post_pending == 0 && st.pending_pipeline == 0 && st.translation_pending == 0) break;
                     rr.wait_translations();
-                    rr.pipelines().wait_idle();
+                    rr.wait_pipelines();
                 }
                 CHECK(st.msaa == 4 && st.post_pending == 0 && st.darkened && st.soft_shadows);
                 CHECK(wst.water_patches == 0 || (wst.reflection && wst.refraction));

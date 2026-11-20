@@ -38,7 +38,7 @@ struct TaaMover {
     VkIndexType index_type = VK_INDEX_TYPE_UINT16;
     uint32_t index_count = 0;
     bool skinned = false;     // rigid-skin vertex layout (palette index in NORMAL.w)
-    bool translated = false;  // translated draw: carries the half-pixel clip offset (Renderer::translated_pixel_offset)
+    bool translated = false;  // translated draw: carries the half-pixel clip offset (RendererCore::translated_pixel_offset)
     uint32_t draw_index = 0;  // the build's item index: its DrawData and bone slice
     float prev_clip[4][4]{};  // register rows: world position of this frame -> previous frame's clip, instance motion applied
 };

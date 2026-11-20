@@ -63,6 +63,7 @@
 #include "alamo/render/renderer.hpp"
 #include "alamo/render/objects.hpp"
 #include "alamo/render/ted.hpp"
+#include "renderer_core.hpp"  // REF3 t07: RendererCore inspection points (src/, target alamo_render_internal)
 #include "alamo/rhi/rhi.hpp"
 #include "alamo/vfs/vfs.hpp"
 #include "app_common.hpp"  // engine/render/app (CU4 t03)
@@ -257,7 +258,7 @@ int run_sweep(const Options& opt, vfs::Vfs& files, bool strict) {
         rd.shader_cache_dir = shader_cache_of(opt);
         const auto ti0 = Clock::now();
         if (!alloc.init(ctx) || !up.init(ctx, alloc) || !renderer.init(ctx, alloc, up, rd)) return 1;
-        render::PipelineManager& pm = renderer.pipelines();
+        render::PipelineManager& pm = render::renderer_core(renderer).pipelines();
         pm.wait_idle();  // pre-creation of the keys reloaded from disk
         const double preload_ms = std::chrono::duration<double, std::milli>(Clock::now() - ti0).count();
         const render::PipelineManager::Stats s0 = pm.stats();
@@ -429,7 +430,7 @@ int run_sweep(const Options& opt, vfs::Vfs& files, bool strict) {
         std::printf("\n");
         const auto tx0 = Clock::now();
         for (const Result& r : res)
-            for (const auto& x : r.xpasses) (void)renderer.translated_program(x.eff, *x.pass);
+            for (const auto& x : r.xpasses) (void)render::renderer_core(renderer).translated_program(x.eff, *x.pass);
         renderer.wait_translations();
         const double xms = std::chrono::duration<double, std::milli>(Clock::now() - tx0).count();
         const render::Renderer::TranslationStats xs = renderer.translation_stats();
@@ -439,7 +440,7 @@ int run_sweep(const Options& opt, vfs::Vfs& files, bool strict) {
         if (xs.failed) rc = 1;
         for (const Result& r : res)
             for (const auto& x : r.xpasses) {
-                const materials::TranslatedProgram* tp = renderer.translated_program(x.eff, *x.pass);
+                const materials::TranslatedProgram* tp = render::renderer_core(renderer).translated_program(x.eff, *x.pass);
                 if (!tp) continue;
                 for (int v = 0; v < 2; ++v) {
                     if (v == 1 && !x.pass->fade_dynamic && !x.pass->fade_expr) continue;
@@ -752,7 +753,7 @@ int main(int argc, char** argv) {
                 renderer.set_lighting(scene_lighting(opt, files.get(), env_ok));
                 if (!env_ok) exit_code = 1;
                 std::printf("track B: runtime DXC %s\n", renderer.dxc_status().c_str());
-                const auto ps = renderer.pipelines().stats();
+                const auto ps = renderer.pipeline_stats();
                 std::printf("pipeline cache %s: %u keys reloaded, VkPipelineCache %s%s\n",
                             alamo::path_to_utf8(rd.pipeline_cache_dir).c_str(), ps.reloaded, ps.cache_loaded ? "loaded" : "empty",
                             ps.invalidated ? " (invalidated)" : "");
@@ -1323,7 +1324,7 @@ int main(int argc, char** argv) {
         std::printf("window: %ld loop iterations, %ld while minimised, %ld swapchain recreates, final %ux%u\n", iterations,
                     minimized_iterations, recreates, sc.extent().width, sc.extent().height);
         if (!opt.clear) {
-            const auto ps = renderer.pipelines().stats();
+            const auto ps = renderer.pipeline_stats();
             std::printf("pipelines: %u keys (%u ready, %u failed, %u pending), %.1f ms summed creation; VkPipelineCache %u hits, "
                         "%u misses, %u without feedback; bindless %u live, %u pending, high water %u\n",
                         ps.keys, ps.ready, ps.failed, ps.pending, ps.create_ms, ps.cache_hits, ps.cache_misses, ps.feedback_unknown,

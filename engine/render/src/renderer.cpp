@@ -266,16 +266,16 @@ assets::Sphere GpuModel::drawn_sphere() const {
 
 // ------------------------------------------------------------------------------------------ init
 
-Renderer::Renderer() = default;
-Renderer::~Renderer() { shutdown(); }
+RendererCore::RendererCore() = default;
+RendererCore::~RendererCore() { shutdown(); }
 
-uint32_t Renderer::aniso_cap() const {
+uint32_t RendererCore::aniso_cap() const {
     return ctx_ && ctx_->caps().sampler_anisotropy ? static_cast<uint32_t>(ctx_->caps().max_anisotropy) : 1u;
 }
 
-uint32_t Renderer::anisotropy() const { return ctx_ ? (aniso_ & 0xFFu) : anisotropy_level(aniso_request_, 16); }
+uint32_t RendererCore::anisotropy() const { return ctx_ ? (aniso_ & 0xFFu) : anisotropy_level(aniso_request_, 16); }
 
-bool Renderer::write_engine_samplers(uint32_t level) {
+bool RendererCore::write_engine_samplers(uint32_t level) {
     // Described as materials keys and converted; the linear pair is the engine quality sampler (8x, PORTING.md
     // 3.3), raised by the anisotropy setting like any material key ([port]).
     materials::SamplerKey wrap_linear;
@@ -299,7 +299,7 @@ bool Renderer::write_engine_samplers(uint32_t level) {
 // [port] Start of draw()/render(): latch the requested anisotropy for this frame's recording threads. The bindless
 // sampler binding is not update-after-bind, so the engine samplers are rewritten only by the first call of a new
 // frame (nothing of it has bound the set yet) and after the frames in flight finished (one idle wait per change).
-void Renderer::latch_anisotropy(const rhi::Frame& frame) {
+void RendererCore::latch_anisotropy(const rhi::Frame& frame) {
     aniso_ = anisotropy_level(aniso_request_, aniso_cap()) | (mip_skip_request_ << 8);
     const bool new_frame = frame.number() != aniso_frame_;
     aniso_frame_ = frame.number();
@@ -315,7 +315,7 @@ void Renderer::latch_anisotropy(const rhi::Frame& frame) {
     if (write_engine_samplers(aniso_)) aniso_engine_ = aniso_;
 }
 
-bool Renderer::init(rhi::Context& ctx, rhi::Allocator& alloc, rhi::Uploader& up, const RendererDesc& desc) {
+bool RendererCore::init(rhi::Context& ctx, rhi::Allocator& alloc, rhi::Uploader& up, const RendererDesc& desc) {
     shutdown();
     ctx_ = &ctx;
     alloc_ = &alloc;
@@ -435,7 +435,7 @@ bool Renderer::init(rhi::Context& ctx, rhi::Allocator& alloc, rhi::Uploader& up,
     return create_unlit_pipelines();
 }
 
-void Renderer::shutdown() {
+void RendererCore::shutdown() {
     if (!ctx_) return;
     wait_translations();
     bc_.reset();  // memo: pipeline / program handles of this device
@@ -513,7 +513,7 @@ void Renderer::shutdown() {
     ctx_ = nullptr;
 }
 
-bool Renderer::set_color_format(VkFormat format) {
+bool RendererCore::set_color_format(VkFormat format) {
     if (format == desc_.color_format) return true;
     destroy_unlit_pipelines();
     desc_.color_format = format;
@@ -539,7 +539,7 @@ bool Renderer::set_color_format(VkFormat format) {
     return create_unlit_pipelines();
 }
 
-void Renderer::destroy_unlit_pipelines() {
+void RendererCore::destroy_unlit_pipelines() {
     for (auto* set : {&unlit_, &unlit_int_, &unlit_ms_})
         for (auto& row : *set)
             for (VkPipeline& p : row) {
@@ -548,7 +548,7 @@ void Renderer::destroy_unlit_pipelines() {
             }
 }
 
-bool Renderer::create_unlit_pipelines() {
+bool RendererCore::create_unlit_pipelines() {
     const std::vector<uint32_t> vs[2] = {rhi::spirv_from_bytes({g_unlit_vs, sizeof(g_unlit_vs)}),
                                          rhi::spirv_from_bytes({g_unlit_vs_skin, sizeof(g_unlit_vs_skin)})};
     const std::vector<uint32_t> ps = rhi::spirv_from_bytes({g_unlit_ps, sizeof(g_unlit_ps)});
@@ -602,7 +602,7 @@ bool Renderer::create_unlit_pipelines() {
     return true;
 }
 
-uint32_t Renderer::msaa_samples(uint32_t requested) const {
+uint32_t RendererCore::msaa_samples(uint32_t requested) const {
     if (!ctx_ || ds_format_ == VK_FORMAT_UNDEFINED) return 1;  // no frame-graph depth-stencil: nothing to multisample
     const VkSampleCountFlags ok = ctx_->caps().framebuffer_samples;
     for (const uint32_t s : {8u, 4u, 2u})  // VkSampleCountFlagBits values are the counts
@@ -610,7 +610,7 @@ uint32_t Renderer::msaa_samples(uint32_t requested) const {
     return 1;
 }
 
-bool Renderer::set_msaa(uint32_t samples) {
+bool RendererCore::set_msaa(uint32_t samples) {
     if (samples == msaa_) return true;
     ctx_->wait_idle();  // the old scene_ms target and unlit_ms_ pipelines may be used by frames in flight
     tg_.scene_ms.shutdown();
@@ -634,7 +634,7 @@ bool Renderer::set_msaa(uint32_t samples) {
 
 // ---------------------------------------------------------------------------------------- upload
 
-bool Renderer::upload_texture(GpuTexture& t, const assets::TextureAsset& src) {
+bool RendererCore::upload_texture(GpuTexture& t, const assets::TextureAsset& src) {
     const assets::TextureAsset* tex = &src;
     assets::TextureAsset fallback;
     auto usable = [&](const assets::TextureAsset& a) {
@@ -677,7 +677,7 @@ bool Renderer::upload_texture(GpuTexture& t, const assets::TextureAsset& src) {
     return static_cast<bool>(t.ticket);
 }
 
-uint8_t Renderer::cloud_texture_slots(const materials::ResolvedPass& p, const int (&tex)[4]) {
+uint8_t RendererCore::cloud_texture_slots(const materials::ResolvedPass& p, const int (&tex)[4]) {
     uint8_t mask = 0;
     for (const materials::SamplerBinding& sb : p.samplers)
         if (sb.slot < 4 && tex[sb.slot] < 0 && alamo::iequals(sb.texture_semantic, "CLOUD_TEXTURE"))
@@ -685,7 +685,7 @@ uint8_t Renderer::cloud_texture_slots(const materials::ResolvedPass& p, const in
     return mask;
 }
 
-void Renderer::setup_lit(const assets::ModelAsset& model, const assets::Submesh& sm, GpuSubmesh& g,
+void RendererCore::setup_lit(const assets::ModelAsset& model, const assets::Submesh& sm, GpuSubmesh& g,
                          const std::function<int(const std::string&, assets::TextureRole)>& add_texture) {
     (void)model;
     g.lit = LitStatus::NoEffect;
@@ -782,7 +782,7 @@ void Renderer::setup_lit(const assets::ModelAsset& model, const assets::Submesh&
     }
 }
 
-bool Renderer::upload_model(std::shared_ptr<const assets::ModelAsset> model, const TextureSource& textures, GpuModel& out,
+bool RendererCore::upload_model(std::shared_ptr<const assets::ModelAsset> model, const TextureSource& textures, GpuModel& out,
                             jobs::JobSystem* js, std::string* error) {
     out = GpuModel{};
     {
@@ -896,7 +896,7 @@ bool Renderer::upload_model(std::shared_ptr<const assets::ModelAsset> model, con
     return ok;
 }
 
-bool Renderer::make_resident(GpuModel& m) {
+bool RendererCore::make_resident(GpuModel& m) {
     if (!m.buffers_ready) {
         bool all = true;
         for (const rhi::UploadTicket& t : m.buffer_tickets) all = all && t && up_->ready(t);
@@ -911,7 +911,7 @@ bool Renderer::make_resident(GpuModel& m) {
     return m.resident();
 }
 
-bool Renderer::finish_uploads(const GpuModel& m) {
+bool RendererCore::finish_uploads(const GpuModel& m) {
     if (!up_) return false;
     rhi::UploadTicket last;  // one timeline: finishing the highest value completes and acquires every lower one
     for (const rhi::UploadTicket& t : m.buffer_tickets)
@@ -921,7 +921,7 @@ bool Renderer::finish_uploads(const GpuModel& m) {
     return !last || up_->ready(last) || up_->finish(last);
 }
 
-uint32_t Renderer::allocate_texture_slot(VkImageView view, const char* what) {
+uint32_t RendererCore::allocate_texture_slot(VkImageView view, const char* what) {
     const uint32_t slot = table_.allocate(view);
     if (slot == rhi::kInvalidBindlessSlot) {
         log::warnf("render", "bindless texture table full (%u slots, %u pending); %s draws white", hot_.texture_capacity(),
@@ -931,7 +931,7 @@ uint32_t Renderer::allocate_texture_slot(VkImageView view, const char* what) {
     return slot;
 }
 
-void Renderer::release_texture(uint32_t slot, rhi::Image* image) {
+void RendererCore::release_texture(uint32_t slot, rhi::Image* image) {
     // retire_value() (current + 1) is safe from any thread (destroy_model may run off the begin_frame thread).
     const uint64_t retire = ring_ ? ring_->retire_value() : 0;
     if (slot != 0) table_.release(slot, retire);
@@ -947,7 +947,7 @@ void Renderer::release_texture(uint32_t slot, rhi::Image* image) {
     *image = rhi::Image{};
 }
 
-uint32_t Renderer::collect_released() {
+uint32_t RendererCore::collect_released() {
     const uint64_t done = ring_ ? ring_->completed_value() : UINT64_MAX;
     const uint32_t n = table_.collect(done);  // slots rewritten to white before their images go
     std::lock_guard<std::mutex> lock(deferred_mutex_);
@@ -966,12 +966,12 @@ uint32_t Renderer::collect_released() {
     return n;
 }
 
-size_t Renderer::buffers_pending() {
+size_t RendererCore::buffers_pending() {
     std::lock_guard<std::mutex> lock(deferred_mutex_);
     return deferred_buffers_.size();
 }
 
-void Renderer::release_buffer(rhi::Buffer& b) {
+void RendererCore::release_buffer(rhi::Buffer& b) {
     if (!b) return;
     up_->forget(b.handle);
     // Frames up to retire_value() may still read it (same rule as release_texture's images).
@@ -985,7 +985,7 @@ void Renderer::release_buffer(rhi::Buffer& b) {
     b = rhi::Buffer{};
 }
 
-void Renderer::destroy_model(GpuModel& m) {
+void RendererCore::destroy_model(GpuModel& m) {
     for (GpuSubmesh& g : m.submeshes) {
         release_buffer(g.vertices);
         release_buffer(g.indices);
@@ -995,7 +995,7 @@ void Renderer::destroy_model(GpuModel& m) {
     m = GpuModel{};
 }
 
-materials::PsoKey Renderer::draw_key_variant(const GpuSubmesh& g, const GpuPass& p, int variant) const {
+materials::PsoKey RendererCore::draw_key_variant(const GpuSubmesh& g, const GpuPass& p, int variant) const {
     materials::PsoKey k = p.pass->pso[variant ? 1 : 0];
     k.render_pass = render_pass_;
     k.vertex_layout = g.layout;  // same attribute table as the effect's layout family (checked in setup_lit)
@@ -1007,15 +1007,15 @@ materials::PsoKey Renderer::draw_key_variant(const GpuSubmesh& g, const GpuPass&
     return k;
 }
 
-materials::PsoKey Renderer::draw_key(const GpuSubmesh& g, const GpuPass& p, float w) const {
+materials::PsoKey RendererCore::draw_key(const GpuSubmesh& g, const GpuPass& p, float w) const {
     return draw_key_variant(g, p, (p.pass->fade_dynamic && w < 1.0f) ? 1 : 0);
 }
 
-int Renderer::pass_variant(const GpuPass& p, const materials::ExprInputs& in) {
+int RendererCore::pass_variant(const GpuPass& p, const materials::ExprInputs& in) {
     return &p.pass->select_exact(in) == &p.pass->pso[1] ? 1 : 0;
 }
 
-void Renderer::prepare_pipelines(const GpuModel& m, float w) {
+void RendererCore::prepare_pipelines(const GpuModel& m, float w) {
     for (const GpuSubmesh& g : m.submeshes)
         if (g.lit == LitStatus::Lit)
             for (const GpuPass& p : g.passes) {

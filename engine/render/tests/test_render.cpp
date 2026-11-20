@@ -1,5 +1,6 @@
 // test_render: main and the tests that stayed (see test_render_common.hpp; the others are in test_render_*.cpp).
 #include "test_render_common.hpp"
+#include "renderer_core.hpp"  // REF3 t07: RendererCore inspection points (src/, target alamo_render_internal)
 #include "alamo/core/host_fs.hpp"
 #include "alamo/render/weather_fx.hpp"
 
@@ -515,7 +516,7 @@ void test_lighting() {
     CHECK(near_eq(cb.light0_specular.x, l.sun.specular.x * 2.0f * l.sun.intensity));
     // SH lighting contract: a FrameCB without SH under a lit scene fails the check; the renderer's single FrameCB
     // builder (every extras combination) carries SH; an unlit scene (all zero) passes either way.
-    CHECK(!render::Renderer::frame_cb_sh_ok(cb, l));
+    CHECK(!render::RendererCore::frame_cb_sh_ok(cb, l));
     {
         render::Renderer r0;  // frame_constants() needs no device
         r0.set_lighting(l);
@@ -523,16 +524,16 @@ void test_lighting() {
         const render::ViewMatrices v = render::make_view(oc, 64, 64);
         for (uint32_t extras : {0u, 1u, 3u, 4u, 7u}) {
             materials::FrameCB fc{};
-            r0.frame_constants(v, extras, fc);
-            CHECK(render::Renderer::frame_cb_sh_ok(fc, l));
+            render::renderer_core(r0).frame_constants(v, extras, fc);
+            CHECK(render::RendererCore::frame_cb_sh_ok(fc, l));
             CHECK(std::memcmp(fc.sph_all, s.sph_all.data(), sizeof fc.sph_all) == 0 &&
                   std::memcmp(fc.sph_fill, s.sph_fill.data(), sizeof fc.sph_fill) == 0);
         }
         render::Lighting dark = l;
         dark.sun.intensity = dark.fill[0].intensity = dark.fill[1].intensity = 0.0f;
         dark.ambient = {0, 0, 0};
-        CHECK(render::Renderer::frame_cb_sh_ok(materials::FrameCB{}, dark));
-        CHECK(r0.frame_cb_violations() == 0);
+        CHECK(render::RendererCore::frame_cb_sh_ok(materials::FrameCB{}, dark));
+        CHECK(render::renderer_core(r0).frame_cb_violations() == 0);
     }
 }
 
@@ -906,10 +907,10 @@ void test_cloud_slots() {
     fow.texture_semantic = "FOW_TEXTURE";
     p.samplers = {base, cloud, fow};
     const int none[4] = {0, -1, -1, -1}, bound[4] = {0, 3, -1, -1};
-    CHECK(render::Renderer::cloud_texture_slots(p, none) == 0x2);
-    CHECK(render::Renderer::cloud_texture_slots(p, bound) == 0);  // a material texture in the slot wins
+    CHECK(render::RendererCore::cloud_texture_slots(p, none) == 0x2);
+    CHECK(render::RendererCore::cloud_texture_slots(p, bound) == 0);  // a material texture in the slot wins
     p.samplers[1].texture_semantic = "cloud_texture";             // semantics compare case-insensitively
-    CHECK(render::Renderer::cloud_texture_slots(p, none) == 0x2);
+    CHECK(render::RendererCore::cloud_texture_slots(p, none) == 0x2);
 }
 
 // cu8f t05 (CU8F_T03_T05_RE §2.1 / §2.2): the particle scene wind. Land = speed x (cos w, sin w, 0) of the start

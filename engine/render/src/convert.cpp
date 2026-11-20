@@ -106,7 +106,7 @@ uint32_t anisotropy_level(uint32_t level, uint32_t device_cap) {
 }
 
 rhi::SamplerKey to_rhi_sampler(const materials::SamplerKey& k, uint32_t max_anisotropy_cap, uint32_t anisotropy_override) {
-    // [port] bits 8..15 of the override: Texture detail = top mip levels skipped (Renderer::set_texture_reduction).
+    // [port] bits 8..15 of the override: Texture detail = top mip levels skipped (RendererCore::set_texture_reduction).
     const uint32_t mip_skip = (anisotropy_override >> 8) & 0xFFu;
     anisotropy_override &= 0xFFu;
     rhi::SamplerKey r;

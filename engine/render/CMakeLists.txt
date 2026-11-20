@@ -88,6 +88,7 @@ add_library(alamo_render STATIC
   src/map_scene.cpp
   src/pipelines.cpp
   src/renderer.cpp
+  src/renderer_api.cpp
   src/renderer_xlat.cpp
   src/renderer_draw.cpp
   src/renderer_graph.cpp
@@ -99,6 +100,11 @@ add_library(alamo_render STATIC
   ${_render_ssao_headers}
 )
 add_library(alamo::render ALIAS alamo_render)
+# REF3 t07: the renderer's private headers (src/renderer_core.hpp and friends) for engine/render's own tests and the
+# alamo_render tool app; every other module uses the public alamo/render headers only.
+add_library(alamo_render_internal INTERFACE)
+target_include_directories(alamo_render_internal INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_link_libraries(alamo_render_internal INTERFACE alamo_render)
 add_dependencies(alamo_render alamo_render_shaders alamo_render_ssao_shaders)
 target_include_directories(alamo_render PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include PRIVATE ${_render_gen_dir})
 target_link_libraries(alamo_render PUBLIC alamo_assets alamo_materials alamo_shaderxlat alamo_rhi alamo_jobs alamo_vfs alamo_terrain alamo_data)
@@ -289,7 +295,7 @@ add_executable(alamo_render_app app/main.cpp)
 set_target_properties(alamo_render_app PROPERTIES OUTPUT_NAME alamo_render)
 # alamo_core first: tools/formats defines its own inline alamo::ByteReader that clashes with core's out-of-line one
 # when MSVC pulls formats' COMDATs first (LNK2005; same workaround as alamo_headless).
-target_link_libraries(alamo_render_app PRIVATE alamo_core alamo_render)
+target_link_libraries(alamo_render_app PRIVATE alamo_core alamo_render alamo_render_internal)
 target_compile_definitions(alamo_render_app PRIVATE "ALAMO_RENDER_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\"")
 # app/app_common.hpp: helpers shared by main.cpp and the sim / galactic / particles sub-mains (CU4 t03).
 target_include_directories(alamo_render_app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/app)
@@ -313,7 +319,7 @@ target_include_directories(alamo_render_test_support INTERFACE ${CMAKE_CURRENT_S
 target_link_libraries(alamo_render_test_support INTERFACE alamo_test_support)
 
 add_executable(alamo_render_tests tests/test_render.cpp tests/test_render_gpu.cpp)
-target_link_libraries(alamo_render_tests PRIVATE alamo_render alamo_render_test_support)
+target_link_libraries(alamo_render_tests PRIVATE alamo_render alamo_render_internal alamo_render_test_support)
 target_compile_definitions(alamo_render_tests PRIVATE "ALAMO_RENDER_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\"")
 # CPU checks always; GPU checks skip cleanly without a Vulkan 1.3 device. The test sets
 # VK_LAYER_PATH (toolchain\vvl\bin) itself and then requires validation with 0 messages.
@@ -323,7 +329,7 @@ set_tests_properties(alamo_render_tests PROPERTIES TIMEOUT 600)
 
 # Space background scene order on real data (planets vs nebula domes, SPACE_AND_OPEN.md D.7 3); PNGs to logs\.
 add_executable(alamo_render_space_tests tests/test_render_space.cpp)
-target_link_libraries(alamo_render_space_tests PRIVATE alamo_render alamo_render_test_support)
+target_link_libraries(alamo_render_space_tests PRIVATE alamo_render alamo_render_internal alamo_render_test_support)
 target_compile_definitions(alamo_render_space_tests PRIVATE "ALAMO_RENDER_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\"")
 alamo_shaderxlat_copy_dxc(alamo_render_space_tests)
 add_test(NAME alamo_render_space_tests COMMAND alamo_render_space_tests)
@@ -386,7 +392,7 @@ function(alamo_render_add_sim_targets)
   # Phase 4 R5 t04 ability beams (beams.hpp / sim_beams.hpp): ribbon / dot / lightning geometry, animation, snapshot records
   # from a real battle's abilities; GPU draw with Engine\PrimAdditive when ALAMO_FOC_DATA is set (validation required).
   add_executable(alamo_render_beams_tests ${_dir}/tests/test_render_beams.cpp)
-  target_link_libraries(alamo_render_beams_tests PRIVATE alamo_core alamo_render_sim alamo_vfs alamo_engine_flags alamo_render_test_support)
+  target_link_libraries(alamo_render_beams_tests PRIVATE alamo_core alamo_render_sim alamo_vfs alamo_engine_flags alamo_render_internal alamo_render_test_support)
   target_compile_definitions(alamo_render_beams_tests PRIVATE "ALAMO_RENDER_SOURCE_DIR=\"${PROJECT_SOURCE_DIR}\"")
   alamo_shaderxlat_copy_dxc(alamo_render_beams_tests)
   add_test(NAME alamo_render_beams_tests COMMAND alamo_render_beams_tests)
